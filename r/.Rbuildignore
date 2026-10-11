@@ -1,0 +1,4 @@
+^LICENSE\.md$
+^\.DS_Store$
+^.*\.Rproj$
+^\.Rproj\.user$

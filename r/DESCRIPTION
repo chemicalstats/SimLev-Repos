@@ -1,0 +1,26 @@
+Package: SimLev
+Type: Package
+Title: Simulation and Backtesting with German Investment Taxation
+Version: 0.1.0
+Authors@R: person("ChemicalStats", "von der Mauerstrasse",
+                  role = c("aut", "cre", "cph"),
+                  email = "chemicalstatsy@protonmail.com")
+Description: A fast/slow-path backtesting engine for leveraged and unleveraged ETF and
+    multi-asset strategies. Supports calendar- and event-based rebalancing,
+    dollar-cost averaging, asset splits, and a detailed model of German
+    investment taxation including Vorabpauschale, Teilfreistellung and the
+    loss-offset rules of sections 20 and 23 of the EStG. Performance-critical
+    market updates are implemented in C++ via 'Rcpp'.
+License: GPL-3
+Encoding: UTF-8
+Depends: R (>= 4.0)
+Imports: Rcpp, stats, graphics, grDevices
+LinkingTo: Rcpp
+Suggests: testthat (>= 3.0.0), knitr, rmarkdown, plotly, TTR
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+RoxygenNote: 7.3.1
+NeedsCompilation: yes
+Packaged: 2026-09-30 06:30:00 UTC; root
+Author: ChemicalStats von der Mauerstrasse [aut, cre, cph]
+Maintainer: ChemicalStats von der Mauerstrasse <chemicalstatsy@protonmail.com>

@@ -1,0 +1,208 @@
+---
+title: "Getting Started with SimLev"
+output: rmarkdown::html_vignette
+vignette: >
+ %\VignetteIndexEntry{Getting Started with SimLev}
+ %\VignetteEngine{knitr::rmarkdown}
+ %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+## Introduction
+SimLev is an R package for simulating portfolio investment strategies. This vignette will guide you through the basic usage of the package.
+
+## Installation
+
+```{r eval=FALSE}
+# From GitHub
+devtools::install_github("chemicalstats/SimLev", subdir = "r")
+```
+
+## Basic Usage
+
+### Step 1: Prepare Market Data
+
+SimLev requires a data.frame with at least a `date` column and price columns for each asset:
+
+```{r}
+library(SimLev)
+
+# Create sample market data
+set.seed(123)
+n_days <- 365 * 5 # 5 years
+
+data <- data.frame(
+  date = seq.Date(as.Date("2018-01-01"), by = "day", length.out = n_days),
+  SPY = 250 * cumprod(1 + rnorm(n_days, 0.0004, 0.012)),
+  BND = 80 * cumprod(1 + rnorm(n_days, 0.0001, 0.004))
+)
+
+head(data)
+```
+
+### Step 2: Define Your Strategy
+
+A strategy is a named list where each element defines an asset:
+
+```{r}
+strategy <- list(
+  SPY = list(
+    asset_class = "etf",       # ETF, ETN, ETC, or certificate
+    action_type = "bnh",       # Buy-and-Hold
+    asset_share = 0.60,        # 60% target weight
+    asset_spread = 0.10,       # 0.10% bid-ask spread
+    asset_bonus = 30,        # 30% partial exemption (German ETF rule)
+    signal_buy = NULL,
+    signal_sell = NULL
+  ),
+  BND = list(
+    asset_class = "etf",
+    action_type = "bnh",
+    asset_share = 0.40,        # 40% target weight
+    asset_spread = 0.05,
+    asset_bonus = 30,
+    signal_buy = NULL,
+    signal_sell = NULL
+  )
+)
+```
+
+### Step 3: Run the Simulation
+
+```{r}
+result <- simulation(
+  data = data,
+  strategy = strategy,
+  start_value = 10000
+)
+
+print(result)
+```
+
+### Step 4: Visualize Results
+
+```{r}
+plot(result)
+```
+
+## Adding Dollar-Cost Averaging
+
+DCA allows you to invest a fixed amount at regular intervals:
+
+```{r}
+result_dca <- simulation(
+  data = data,
+  strategy = strategy,
+  start_value = 10000,
+  dca_mode = TRUE,
+  dca_value = 500,        # $500 per month
+  dca_span = 1,           # Every 1 month
+  dca_unit = "month",
+  dca_days = 1,           # On the 1st of each month
+  dca_anchor = "start"
+)
+
+print(result_dca)
+```
+
+## Adding Rebalancing
+
+Periodic rebalancing keeps your portfolio aligned with target weights:
+
+```{r}
+result_rebal <- simulation(
+  data = data,
+  strategy = strategy,
+  start_value = 10000,
+  balance_mode = TRUE,
+  balance_span = 1,       # Every quarter
+  balance_unit = "quarter",
+  balance_days = 1,
+  balance_thresh = 0.05   # Only if >5% deviation
+)
+
+print(result_rebal)
+```
+
+## Tax Calculation
+
+For German investors, SimLev supports realistic tax modeling:
+
+```{r}
+result_tax <- simulation(
+  data = data,
+  strategy = strategy,
+  start_value = 10000,
+  tax_mode = "person",    # Personal taxation
+  tax_rate = 26.375,     # 25% + 5.5% Soli
+  liquidate = TRUE        # Sell all at end (to see tax impact)
+)
+
+print(result_tax)
+```
+
+## Complete Example
+
+Here's a complete example combining all features:
+
+```{r}
+result_full <- simulation(
+  data = data,
+  strategy = strategy,
+  start_value = 10000,
+  # DCA
+  dca_mode = TRUE,
+  dca_value = 500,
+  dca_span = 1,
+  dca_unit = "month",
+  dca_days = 1,
+  balance_dca = TRUE,    # Invest in underweight assets
+  # Rebalancing
+  balance_mode = TRUE,
+  balance_span = 1,
+  balance_unit = "year",
+  balance_days = 1,
+  # Taxes
+  tax_mode = "person",
+  tax_rate = 26.375,
+  # End
+  liquidate = TRUE
+)
+
+summary(result_full)
+```
+
+## Comparing Strategies
+
+```{r}
+# Calculate final values
+final_values <- c(
+  "Lump Sum" = tail(result$worth, 1),
+  "With DCA" = tail(result_dca$worth, 1),
+  "With Rebalancing" = tail(result_rebal$worth, 1),
+  "With Tax" = tail(result_tax$worth, 1),
+  "Full Strategy" = tail(result_full$worth, 1)
+)
+
+barplot(
+  final_values,
+  main = "Final Portfolio Values",
+  ylab = "Value ($)",
+  col = "steelblue",
+  las = 2
+)
+```
+
+## Next Steps
+
+- See `vignette("tax-calculation")` for detailed tax modeling
+- See `vignette("advanced-config")` for signal strategies and splits
+- See `?simulation` for all available parameters

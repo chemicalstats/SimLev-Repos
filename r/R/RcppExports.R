@@ -53,6 +53,10 @@
     .Call(`_SimLev_estimate_trans_mat`, regimes, K, alpha)
 }
 
+.dcc_filter <- function(Z, a, b, Qbar, keep) {
+    .Call(`_SimLev_dcc_filter`, Z, a, b, Qbar, keep)
+}
+
 #' FIFO-gewichteter Einstandspreis (Rcpp-Port von calculate_fifo_price)
 calculate_fifo_price_rcpp <- function(buys, units, front_index) {
     .Call(`_SimLev_calculate_fifo_price_rcpp`, buys, units, front_index)

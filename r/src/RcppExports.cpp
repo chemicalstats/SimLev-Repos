@@ -227,6 +227,21 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// dcc_filter
+List dcc_filter(NumericMatrix Z, double a, double b, NumericMatrix Qbar, bool keep);
+RcppExport SEXP _SimLev_dcc_filter(SEXP ZSEXP, SEXP aSEXP, SEXP bSEXP, SEXP QbarSEXP, SEXP keepSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type Z(ZSEXP);
+    Rcpp::traits::input_parameter< double >::type a(aSEXP);
+    Rcpp::traits::input_parameter< double >::type b(bSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type Qbar(QbarSEXP);
+    Rcpp::traits::input_parameter< bool >::type keep(keepSEXP);
+    rcpp_result_gen = Rcpp::wrap(dcc_filter(Z, a, b, Qbar, keep));
+    return rcpp_result_gen;
+END_RCPP
+}
 // calculate_fifo_price_rcpp
 double calculate_fifo_price_rcpp(List buys, double units, int front_index);
 RcppExport SEXP _SimLev_calculate_fifo_price_rcpp(SEXP buysSEXP, SEXP unitsSEXP, SEXP front_indexSEXP) {
@@ -487,6 +502,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_SimLev_rolling_vol", (DL_FUNC) &_SimLev_rolling_vol, 2},
     {"_SimLev_assign_regimes", (DL_FUNC) &_SimLev_assign_regimes, 2},
     {"_SimLev_estimate_trans_mat", (DL_FUNC) &_SimLev_estimate_trans_mat, 3},
+    {"_SimLev_dcc_filter", (DL_FUNC) &_SimLev_dcc_filter, 5},
     {"_SimLev_calculate_fifo_price_rcpp", (DL_FUNC) &_SimLev_calculate_fifo_price_rcpp, 3},
     {"_SimLev_calculate_fifo_vp_rcpp", (DL_FUNC) &_SimLev_calculate_fifo_vp_rcpp, 3},
     {"_SimLev_calculate_private_sale_tax_rcpp", (DL_FUNC) &_SimLev_calculate_private_sale_tax_rcpp, 5},

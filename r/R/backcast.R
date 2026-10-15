@@ -715,7 +715,7 @@ summary.SimLevBackcastFit <- function(object, ...) {
 plot.SimLevBackcastFit <- function(x, ...) {
   dev <- x$diagnostics$deviation
   old <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(old))
-  graphics::par(mfrow = c(if (is.null(x$grid)) 1 else 2, 1), mar = c(4, 4.5, 2.5, 1))
+  graphics::par(mfrow = c(if (is.null(x$grid)) 1 else 2, 1), mar = c(4, 4.6, 2.5, 1), mgp = c(2.9, 0.7, 0), las = 1)
   plot(dev$date, dev$deviation * 100, type = "l", col = "#2C6E9B", lwd = 1,
        xlab = "Datum", ylab = "1 - Sim/Produkt (%)", main = "Pfadabweichung im Fit-Fenster", ...)
   graphics::abline(h = 0, col = "grey50", lty = 2)
@@ -730,10 +730,13 @@ plot.SimLevBackcastFit <- function(x, ...) {
 #' @rdname SimLevBackcast-methods
 #' @export
 plot.SimLevBackcast <- function(x, log = TRUE, ...) {
-  y <- if (log) "y" else ""
+  old <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(old))
+  graphics::par(mar = c(4, 4.6, 2.5, 1), mgp = c(2.9, 0.7, 0), las = 1)
   ok <- is.finite(x$value)
-  plot(x$date[ok], x$value[ok], type = "n", log = y, xlab = "Datum",
-       ylab = if (log) "Wert (log)" else "Wert", main = "Backcast und Produkt", ...)
+  plot(x$date[ok], x$value[ok], type = "n", log = if (log) "y" else "", xlab = "Datum",
+       ylab = if (log) "Wert (log. Skala)" else "Wert", main = "Backcast und Produkt", yaxt = "n", ...)
+  at <- graphics::axTicks(2)
+  graphics::axis(2, at = at, labels = formatC(at, format = "fg", big.mark = ".", decimal.mark = ","))
   bc <- x$source == "backcast" & ok
   graphics::lines(x$date[ok], x$model[ok], col = "grey65", lwd = 1)
   graphics::lines(x$date[bc], x$value[bc], col = "#B5562B", lwd = 1.2)

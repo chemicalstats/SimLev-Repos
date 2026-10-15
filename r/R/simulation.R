@@ -1826,6 +1826,7 @@ simulation <- function(
     balance_skip = FALSE,
     balance_dca = FALSE,
     balance_thresh = NULL,
+    balance_thresh_type = c("absolute", "relative"),
     # =========================================
     # STEUERN (mit I3: Günstigerprüfung)
     # =========================================
@@ -1899,6 +1900,9 @@ simulation <- function(
   if (!is.null(marginal_tax_rate)) marginal_tax_rate <- marginal_tax_rate / 100
   soli_rate_income_tax <- soli_rate_income_tax / 100
   if (!is.null(balance_thresh)) balance_thresh <- balance_thresh / 100  # Prozent
+  # Toleranzband: "absolute" = Prozentpunkte des Gewichts (Standard, wie bisher),
+  # "relative" = Prozent des Zielgewichts (z. B. 25 -> Ziel 40 % darf 30-50 % sein)
+  balance_thresh_type <- match.arg(balance_thresh_type)
   # base_rate: KEINE Division hier — calculate_flat_rate teilt an der Verbrauchsstelle /100
   
   # DCA-Parameter
@@ -2608,7 +2612,11 @@ simulation <- function(
       } else if(is.null(balance_thresh)){
         event_rebalance <- TRUE
       } else {
-        deviations <- abs(active_targets - actual_weights)
+        deviations <- if (balance_thresh_type == "relative") {
+          abs(actual_weights / active_targets - 1)
+        } else {
+          abs(active_targets - actual_weights)
+        }
         max_deviation <- max(deviations, na.rm = TRUE)
         event_rebalance <- (max_deviation > balance_thresh)
 

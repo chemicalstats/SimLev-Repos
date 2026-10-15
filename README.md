@@ -60,6 +60,10 @@ Textausgabe stimmen exakt überein.
   - [Backcast von Produkten](#backcast-von-produkten)
   - [Bootstrap-Studien](#bootstrap-studien)
   - [Entnahmephase](#entnahmephase)
+  - [Vertiefte Analyse und Sensitivitäten](#vertiefte-analyse-und-sensitivitäten)
+  - [Parametersuche und Überanpassung](#parametersuche-und-überanpassung)
+  - [Daten und Portfolios aufbereiten](#daten-und-portfolios-aufbereiten)
+  - [Abhängigkeiten, Tail-Risiko und Drittvariablen](#abhängigkeiten-tail-risiko-und-drittvariablen)
 - [Ergebnisse auswerten](#ergebnisse-auswerten)
 - [Unterschiede zwischen den Sprachen](#unterschiede-zwischen-den-sprachen)
 - [Bitgleichheit zum R-Paket](#bitgleichheit-zum-r-paket)
@@ -84,6 +88,10 @@ Textausgabe stimmen exakt überein.
 | **Backcast** *(nur R)* | Rückrechnung von ETF/ETP-Historien aus Basisindex, TER-Reihe, Hebel und Tagesgeld; Fit der Abweichung mit Out-of-Sample-Test |
 | **Bootstrap** *(nur R)* | 14 Verfahren (Block, stationär, Regime, EVT, (GJR-)GARCH, MS-GARCH …), Hebelprodukte, Strategie-Studien über Hunderttausende Pfade |
 | **Entnahmephase** *(nur R)* | 14 Entnahmeregeln (4-%-Regel, Vanguard, Guyton-Klinger …) auf Kohorten, Bootstrap-Pfaden oder gespeicherten Simulationsergebnissen, mit vereinfachter deutscher Steuer |
+| **Analyse** *(nur R)* | `deep_analysis()`: Alpha, Beta, Capture, Tracking Error, Information Ratio, M², VaR/CVaR, MWRR, Rendite- und Monatstabellen, Drawdown-Tabelle, rollierende Kennzahlen; Sensitivitäten für Rebalancing, Lump Sum vs. DCA und Hebel |
+| **Parametersuche** *(nur R)* | Raster, Zufallssuche und Latin Hypercube über Strategie-, Signal- und Simulationsparameter; Plateau-Auswahl, Probability of Backtest Overfitting, Deflated Sharpe Ratio, Walk-Forward, Prüfung der besten Punkte auf Bootstrap-Pfaden |
+| **Datenaufbereitung** *(nur R)* | Quellen zusammenführen, Prüfbericht (Lücken, Spikes, Splits), Makroreihen mit Veröffentlichungsverzug, Währung, Total Return, reale Werte, Verkettung, Portfolio-Vorlagen |
+| **Abhängigkeiten** *(nur R)* | Rang- und Tail-Abhängigkeit, Copulas (Gauß, t, Clayton, Gumbel, Frank), DCC, Korrelation je Regime von Inflation, Zinsen oder Spreads mit Block-Bootstrap, Quantilsregression, CoVaR |
 | **Geschwindigkeit** | 30 Jahre Tagesdaten mit drei Assets, Sparplan, Rebalancing und Steuern in 0,02 s (Julia) bis 0,23 s (R) |
 
 ## Installation
@@ -669,6 +677,10 @@ simulation(data, strategy, balance_mode = TRUE, balance_span = 1, balance_unit =
 simulation(data, strategy, balance_mode = TRUE, balance_span = 1, balance_unit = "year",
            balance_thresh = 5)
 
+# relatives Band (nur R): Ziel 40 % darf zwischen 30 % und 50 % liegen
+simulation(data, strategy, balance_mode = TRUE, balance_span = 1, balance_unit = "month",
+           balance_thresh = 25, balance_thresh_type = "relative")
+
 # ereignisbasiert; data$sigma_ewma enthält eine selbst berechnete Volatilitätsschätzung
 data <- compute_rebal_trigger(data, type = "vol_band", threshold = 20, vol_col = "sigma_ewma")
 simulation(data, strategy, event_col = "rebal_trigger",
@@ -901,6 +913,128 @@ Ziel-Erfolgsquote. Die Besteuerung im schnellen Kern ist vereinfacht: ein
 thesaurierender Fondsbestand mit Teilfreistellung, Verlusttopf,
 Sparer-Pauschbetrag und Vorabpauschale.
 
+### Vertiefte Analyse und Sensitivitäten
+
+`deep_analysis()` wertet gespeicherte Ergebnisse von `simulation()` (einzeln
+oder als benannte Liste) oder beliebige Kursreihen nachträglich aus, im
+Umfang von Portfolio-Backtestern wie testfol.io. Grundlage ist der
+zeitgewichtete Wertindex, Sparpläne verzerren die Renditen also nicht.
+
+``` r
+da <- deep_analysis(list(Aktien = res_a, Mischung = res_b), benchmark = "Aktien", risk_free = 2)
+da                    # Kennzahlen und Benchmark-Block
+summary(da)           # zusätzlich Jahresrenditen und größte Drawdowns
+plot(da)              # Wachstum, Drawdowns, rollierende CAGR, Jahresrenditen
+plot(da, "monthly")   # Monatsrenditen als Heatmap
+```
+
+| Bereich | Kennzahlen |
+|---|---|
+| Rendite | Gesamtrendite, CAGR (TWR), MWRR (interner Zinsfuß), beste/schlechteste Tage, Monate, Jahre, positive Monate |
+| Risiko | Volatilität, Sharpe, Sortino, Calmar, max./mittlerer Drawdown, Ulcer Index, UPI, längster Drawdown, Recovery Factor, VaR und CVaR (Tag und Monat, 1/5/10 %) |
+| Benchmark | Alpha, Beta, Korrelation (gesamt, auf, ab), R², Up-/Down-Capture, Capture Spread, aktive Rendite, Tracking Error, Information Ratio, M², Treynor |
+| Tabellen | Jahres- und Monatsrenditen, Saisonalität, größte Drawdowns mit Dauer und Erholung, rollierende CAGR, Volatilität, Sharpe, Drawdown und Beta, Korrelationsmatrizen |
+
+Für Parameterstudien rufen `sensitivity_grid()` (beliebige
+`simulation()`-Argumente im Raster), `rebalancing_sensitivity()` (Frequenz,
+Versatz, absolute oder relative Bänder), `lumpsum_vs_dca()` (Einmalanlage
+gegen gestreckten Einstieg über rollierende Starts, mit Gewinnquote, MLSA und
+MLSD) und `leverage_sensitivity()` (Kennzahlen über den Hebel, optimaler
+Hebel) die Engine wiederholt auf, wahlweise parallel. `leveraged_series()`
+erzeugt eine täglich zurückgesetzte Hebelreihe aus einem Index (Hebel, TER,
+Zins, Spread).
+
+### Parametersuche und Überanpassung
+
+`param_search()` wertet eine Strategie über einen Parameterraum aus: volles
+Raster, Zufallssuche oder Latin Hypercube. Die Strategie beschreibt eine
+`builder`-Funktion, die aus einem Parametersatz dieselbe Spezifikation
+liefert wie ein Element von `bootstrap_study()`. Signal-Bausteine
+(`signal_sma()`, `signal_ema()`, `signal_crossover()`, `signal_momentum()`,
+`signal_drawdown()`, `signal_volatility()`, `signal_combine()`) erzeugen
+Kauf- und Verkaufsspalten mit Parametern und optionaler Hysterese.
+
+``` r
+st <- create_strategy(LETF = asset_config("etf", "signal", signal_buy = "buy", signal_sell = "sell"))
+ps <- param_search(data,
+  builder = function(p) list(strategy = st, signal = function(df) signal_sma(df$INDEX, p$n, p$band)),
+  space = param_space(n = param_range(50, 400, n = 8, integer = TRUE, log = TRUE), band = c(0, 1, 2, 3)),
+  burn_in = 400, objective = "sharpe", cores = 4)
+summary(ps)           # beste Punkte und bestes Plateau
+plot(ps)              # Heatmap der Zielgröße
+pbo(ps)               # Probability of Backtest Overfitting (CSCV)
+deflated_sharpe(ps)   # Sharpe Ratio nach Mehrfachtest-Korrektur
+walk_forward(ps, train = 5, test = 1)
+param_bootstrap(ps, hist, cfg, top = 5, method = "stationary", n = 500)
+```
+
+Eine einzelne Spitze im Raster ist oft Zufall. `plateau()` bewertet jeden
+Punkt mit seinen Nachbarn; `pbo()` misst über alle Aufteilungen der Historie
+in zwei Hälften, wie oft der In-Sample-beste Punkt Out-of-Sample unter dem
+Median landet (Bailey, Borwein, López de Prado & Zhu 2017);
+`deflated_sharpe()` vergleicht die beste Sharpe Ratio mit dem Maximum, das
+man aus gleich vielen wertlosen Versuchen erwarten würde, mit einer
+effektiven Versuchsanzahl aus der mittleren Korrelation der Punkte (Bailey &
+López de Prado 2014); `walk_forward()` wählt in rollierenden
+Trainingsfenstern und verkettet die folgenden Testfenster.
+
+### Daten und Portfolios aufbereiten
+
+``` r
+dat <- align_series(us = msci_usd, fx = eurusd, fund = etf_kurse)    # Kalendertage, LOCF
+check_series(dat)                                                    # Lücken, Spikes, Splits, stehende Kurse
+dat <- convert_currency(dat, "us", "fx")                             # USD-Index in EUR
+dat <- align_macro(dat, hvpi, "inflation", lag = 45, transform = "yoy")   # erst ab Veröffentlichung
+dat <- align_macro(dat, zinskurve, "spread", lag = 1)
+lang <- splice_series(fund = etf_kurse, backcast = bc_df, proxy = msci_usd)
+portfolio_template("permanent", map = c(stocks = "world", long_bonds = "bund_lang",
+                                        cash = "geldmarkt", gold = "gold_eur"))
+```
+
+`align_series()` legt Quellen mit unterschiedlichen Börsenkalendern auf
+einen gemeinsamen Kalender, `check_series()` meldet Auffälligkeiten,
+`align_macro()` ordnet Monats- oder Quartalswerte erst ab dem Tag ihrer
+Veröffentlichung zu (sonst stecken Zukunftsinformationen in Signalen und
+bedingten Analysen), `total_return_index()` und `deflate()` rechnen Kurs- in
+Total-Return- bzw. reale Reihen um, `splice_series()` verkettet Reihen
+renditebasiert mit Vorrang der ersten, `strategy_from_weights()` und
+`portfolio_template()` bauen Strategien aus Gewichten bzw. bekannten
+Allokationen (60/40, Permanent, All Weather, Golden Butterfly, Three Fund,
+HFEA, Aktien/Gold).
+
+### Abhängigkeiten, Tail-Risiko und Drittvariablen
+
+`dependence_analysis()` untersucht die Abhängigkeit zwischen Anlagen über die
+Korrelation hinaus und fragt mit `conditions`, wie sie vom Zustand einer
+Drittvariable abhängt, die der Nutzer übergibt, etwa Inflation, Leitzins oder
+Zinsspread. Der Zustand geht verzögert ein: Die Rendite einer Woche gehört
+zum Zustand, der am Ende der Vorwoche bekannt war.
+
+``` r
+dep <- dependence_analysis(dat, c("aktien", "anleihen", "gold"),
+                           conditions = c("inflation", "spread"),
+                           breaks = list(inflation = c(-Inf, 2, 4, Inf)), B = 999)
+dep                  # Korrelationen, Tail-Koeffizienten, beste Copula, DCC, Regime-Vergleich
+plot(dep, "conditional", pair = "aktien ~ anleihen", condition = "inflation")
+tail_regression(dat, "aktien", c("inflation", "spread"))   # Quantile der Rendite
+covar_analysis(dat, system = "portfolio", assets = c("aktien", "anleihen"), state = "spread")
+validate_dependence(bootstrap(hist, cfg, "stationary", n = 200), hist)
+stress <- regime_subset(hist, "inflation >= 4", min_run = 60)   # Stress-Bootstrap
+```
+
+| Baustein | Inhalt |
+|---|---|
+| `tail_dependence()` | empirische Koeffizienten λ unten/oben je Quantil, Exceedance-Korrelationen (Longin & Solnik 2001) |
+| `fit_copula()` | Gauß, t, Clayton, Gumbel, Frank, rotierte Varianten für negative Abhängigkeit; Pseudo-ML, AIC, implizite Tail-Abhängigkeit |
+| `dcc_fit()` | DCC(1,1) nach Engle (2002), Filter in C++ |
+| bedingte Analyse | Kennzahlen je Regime, Differenz oberstes minus unterstes Regime mit stationärem Block-Bootstrap (Intervall, p-Wert) |
+| `quantile_reg()`, `tail_regression()` | lineare Quantilsregression (MM-Algorithmus), Effekt der Drittvariablen je Quantil mit Block-Bootstrap-Fehlern |
+| `covar_analysis()` | CoVaR und ΔCoVaR nach Adrian & Brunnermeier (2016), optional zeitvariabel über Zustandsvariablen |
+| `validate_dependence()` | erhalten Bootstrap-Pfade Korrelation und Tail-Abhängigkeit der Historie? |
+| `regime_subset()` | Zeilen eines Regimes als Grundlage für Stress-Bootstraps |
+
+Alle Verfahren sind ohne Zusatzpakete umgesetzt.
+
 ## Ergebnisse auswerten
 
 `simulation()` liefert ein `SimLevResult`. Seine Bestandteile heißen in
@@ -1027,7 +1161,10 @@ Eingaben:
 
 - **Backcast, Bootstrap und Entnahmephase** (`backcast_fit()`,
   `bootstrap()`, `bootstrap_study()`, `withdrawal_simulation()` u. a.) gibt
-  es bisher nur im R-Paket.
+  es bisher nur im R-Paket, ebenso `deep_analysis()`, die
+  Sensitivitätsfunktionen, relative Rebalancing-Bänder
+  (`balance_thresh_type = "relative"`), Parametersuche mit
+  Überanpassungs-Prüfung, Datenaufbereitung und Abhängigkeitsanalyse.
 
 Aus dem R-Paket übernommene Eigenheiten:
 

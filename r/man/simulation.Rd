@@ -38,6 +38,7 @@ simulation(
   balance_skip   = FALSE,
   balance_dca    = FALSE,
   balance_thresh = NULL,
+  balance_thresh_type = c("absolute", "relative"),
   tax_mode       = c("none", "person", "funds"),
   tax_rate       = 26.375,
   marginal_tax_rate          = NULL,
@@ -200,6 +201,13 @@ simulation(
   }
   \item{split_thresh}{
     Numerisch oder \code{NULL}. Preisschwelle für Split-Erkennung.
+  }
+  \item{balance_thresh_type}{
+    \code{"absolute"} (Standard): \code{balance_thresh} sind Prozentpunkte
+    des Gewichts (5 = Ziel 40 \% darf 35--45 \% sein). \code{"relative"}:
+    Prozent des Zielgewichts (25 = Ziel 40 \% darf 30--50 \% sein), wie die
+    relativen Bänder bei testfol.io. Geprüft wird an den Kalenderterminen
+    des Rebalancings.
   }
   \item{funds_fee}{
     Numerisch. Jährliche Fondskostenquote (TER-äquivalent) \strong{in Prozent}

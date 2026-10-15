@@ -37,7 +37,7 @@ Ob alles bereit ist, prüft `pkgbuild::check_build_tools()`.
 remotes::install_github("chemicalstats/SimLev-Repos", subdir = "r")
 
 # oder aus einem lokalen Quellarchiv
-install.packages("SimLev_0.1.0.tar.gz", repos = NULL, type = "source")
+install.packages("SimLev_0.2.0.tar.gz", repos = NULL, type = "source")
 ```
 
 **Optionale Pakete:**
@@ -88,8 +88,11 @@ plot(result)
   für Schritt
 - [`R/rebal_trigger_cookbook.R`](R/rebal_trigger_cookbook.R) – kommentierte
   Vorlagen für eigene Trigger-Regeln
+- `?backcast_fit`, `?bootstrap_study`, `?withdrawal_simulation` – Backcast
+  von Produkten, Bootstrap-Studien und Entnahmephase
 - [`inst/examples/`](inst/examples/) – ausführliche Beispielsammlungen zu
-  Strategie-Objekten und Dashboards
+  Strategie-Objekten, Dashboards sowie Backcast, Bootstrap und Entnahmen
+  ([`backcast_bootstrap_withdrawal_examples.md`](inst/examples/backcast_bootstrap_withdrawal_examples.md))
 
 ## Tests
 
@@ -112,8 +115,12 @@ R/
   rebal_trigger_cookbook.R   Vorlagen für eigene Trigger
   plot_dashboard.R           statisches Dashboard (Base-Grafik)
   plot_interactive.R         interaktives HTML-Dashboard
+  backcast.R                 backcast_fit(), backcast()
+  bootstrap.R                bootstrap_config(), bootstrap(), bootstrap_study(), block_length()
+  withdrawal.R               withdrawal_rule(), withdrawal_simulation() & Co.
   RcppExports.R, utils.R
-src/                         C++-Kerne (FIFO, Steuern, Markt-Updates)
+src/                         C++-Kerne (FIFO, Steuern, Markt-Updates,
+                             Bootstrap-Verfahren, Entnahmeregeln)
 man/                         Hilfeseiten
 tests/testthat/              Test-Suite
 vignettes/                   Einführung

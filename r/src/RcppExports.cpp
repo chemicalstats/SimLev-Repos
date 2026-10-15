@@ -10,6 +10,223 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// boot_idx_iid
+IntegerVector boot_idx_iid(int n_src, int n_out);
+RcppExport SEXP _SimLev_boot_idx_iid(SEXP n_srcSEXP, SEXP n_outSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type n_src(n_srcSEXP);
+    Rcpp::traits::input_parameter< int >::type n_out(n_outSEXP);
+    rcpp_result_gen = Rcpp::wrap(boot_idx_iid(n_src, n_out));
+    return rcpp_result_gen;
+END_RCPP
+}
+// boot_idx_block
+IntegerVector boot_idx_block(int n_src, int n_out, int block_length, bool circular);
+RcppExport SEXP _SimLev_boot_idx_block(SEXP n_srcSEXP, SEXP n_outSEXP, SEXP block_lengthSEXP, SEXP circularSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type n_src(n_srcSEXP);
+    Rcpp::traits::input_parameter< int >::type n_out(n_outSEXP);
+    Rcpp::traits::input_parameter< int >::type block_length(block_lengthSEXP);
+    Rcpp::traits::input_parameter< bool >::type circular(circularSEXP);
+    rcpp_result_gen = Rcpp::wrap(boot_idx_block(n_src, n_out, block_length, circular));
+    return rcpp_result_gen;
+END_RCPP
+}
+// boot_idx_stationary
+IntegerVector boot_idx_stationary(int n_src, int n_out, double L);
+RcppExport SEXP _SimLev_boot_idx_stationary(SEXP n_srcSEXP, SEXP n_outSEXP, SEXP LSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type n_src(n_srcSEXP);
+    Rcpp::traits::input_parameter< int >::type n_out(n_outSEXP);
+    Rcpp::traits::input_parameter< double >::type L(LSEXP);
+    rcpp_result_gen = Rcpp::wrap(boot_idx_stationary(n_src, n_out, L));
+    return rcpp_result_gen;
+END_RCPP
+}
+// boot_idx_regime
+IntegerVector boot_idx_regime(IntegerVector regimes, NumericMatrix trans, int n_out);
+RcppExport SEXP _SimLev_boot_idx_regime(SEXP regimesSEXP, SEXP transSEXP, SEXP n_outSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerVector >::type regimes(regimesSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type trans(transSEXP);
+    Rcpp::traits::input_parameter< int >::type n_out(n_outSEXP);
+    rcpp_result_gen = Rcpp::wrap(boot_idx_regime(regimes, trans, n_out));
+    return rcpp_result_gen;
+END_RCPP
+}
+// boot_idx_tails
+IntegerVector boot_idx_tails(int n_out, double p_l, double p_r, IntegerVector bulk_idx, IntegerVector left_idx, IntegerVector right_idx);
+RcppExport SEXP _SimLev_boot_idx_tails(SEXP n_outSEXP, SEXP p_lSEXP, SEXP p_rSEXP, SEXP bulk_idxSEXP, SEXP left_idxSEXP, SEXP right_idxSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type n_out(n_outSEXP);
+    Rcpp::traits::input_parameter< double >::type p_l(p_lSEXP);
+    Rcpp::traits::input_parameter< double >::type p_r(p_rSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type bulk_idx(bulk_idxSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type left_idx(left_idxSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type right_idx(right_idxSEXP);
+    rcpp_result_gen = Rcpp::wrap(boot_idx_tails(n_out, p_l, p_r, bulk_idx, left_idx, right_idx));
+    return rcpp_result_gen;
+END_RCPP
+}
+// boot_wild
+NumericMatrix boot_wild(NumericMatrix returns, int type);
+RcppExport SEXP _SimLev_boot_wild(SEXP returnsSEXP, SEXP typeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type returns(returnsSEXP);
+    Rcpp::traits::input_parameter< int >::type type(typeSEXP);
+    rcpp_result_gen = Rcpp::wrap(boot_wild(returns, type));
+    return rcpp_result_gen;
+END_RCPP
+}
+// boot_reset
+NumericMatrix boot_reset(NumericMatrix returns, double p_break);
+RcppExport SEXP _SimLev_boot_reset(SEXP returnsSEXP, SEXP p_breakSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type returns(returnsSEXP);
+    Rcpp::traits::input_parameter< double >::type p_break(p_breakSEXP);
+    rcpp_result_gen = Rcpp::wrap(boot_reset(returns, p_break));
+    return rcpp_result_gen;
+END_RCPP
+}
+// boot_evt
+List boot_evt(NumericMatrix returns, int base, int n_out, double p_l, double thresh_l, double scale_l, double shape_l, IntegerVector pool_l, double p_r, double thresh_r, double scale_r, double shape_r, IntegerVector pool_r, IntegerVector bulk_idx);
+RcppExport SEXP _SimLev_boot_evt(SEXP returnsSEXP, SEXP baseSEXP, SEXP n_outSEXP, SEXP p_lSEXP, SEXP thresh_lSEXP, SEXP scale_lSEXP, SEXP shape_lSEXP, SEXP pool_lSEXP, SEXP p_rSEXP, SEXP thresh_rSEXP, SEXP scale_rSEXP, SEXP shape_rSEXP, SEXP pool_rSEXP, SEXP bulk_idxSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type returns(returnsSEXP);
+    Rcpp::traits::input_parameter< int >::type base(baseSEXP);
+    Rcpp::traits::input_parameter< int >::type n_out(n_outSEXP);
+    Rcpp::traits::input_parameter< double >::type p_l(p_lSEXP);
+    Rcpp::traits::input_parameter< double >::type thresh_l(thresh_lSEXP);
+    Rcpp::traits::input_parameter< double >::type scale_l(scale_lSEXP);
+    Rcpp::traits::input_parameter< double >::type shape_l(shape_lSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type pool_l(pool_lSEXP);
+    Rcpp::traits::input_parameter< double >::type p_r(p_rSEXP);
+    Rcpp::traits::input_parameter< double >::type thresh_r(thresh_rSEXP);
+    Rcpp::traits::input_parameter< double >::type scale_r(scale_rSEXP);
+    Rcpp::traits::input_parameter< double >::type shape_r(shape_rSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type pool_r(pool_rSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type bulk_idx(bulk_idxSEXP);
+    rcpp_result_gen = Rcpp::wrap(boot_evt(returns, base, n_out, p_l, thresh_l, scale_l, shape_l, pool_l, p_r, thresh_r, scale_r, shape_r, pool_r, bulk_idx));
+    return rcpp_result_gen;
+END_RCPP
+}
+// boot_garch
+List boot_garch(int n_out, int base, int k, double mu, double omega, double alpha, double beta, double gamma, double s2_init, NumericVector z_base, IntegerVector valid, IntegerVector cross_cols, NumericVector cmu, NumericVector com, NumericVector cal, NumericVector cbe, LogicalVector cratio, NumericVector cs2, NumericMatrix z_cross);
+RcppExport SEXP _SimLev_boot_garch(SEXP n_outSEXP, SEXP baseSEXP, SEXP kSEXP, SEXP muSEXP, SEXP omegaSEXP, SEXP alphaSEXP, SEXP betaSEXP, SEXP gammaSEXP, SEXP s2_initSEXP, SEXP z_baseSEXP, SEXP validSEXP, SEXP cross_colsSEXP, SEXP cmuSEXP, SEXP comSEXP, SEXP calSEXP, SEXP cbeSEXP, SEXP cratioSEXP, SEXP cs2SEXP, SEXP z_crossSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type n_out(n_outSEXP);
+    Rcpp::traits::input_parameter< int >::type base(baseSEXP);
+    Rcpp::traits::input_parameter< int >::type k(kSEXP);
+    Rcpp::traits::input_parameter< double >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< double >::type omega(omegaSEXP);
+    Rcpp::traits::input_parameter< double >::type alpha(alphaSEXP);
+    Rcpp::traits::input_parameter< double >::type beta(betaSEXP);
+    Rcpp::traits::input_parameter< double >::type gamma(gammaSEXP);
+    Rcpp::traits::input_parameter< double >::type s2_init(s2_initSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type z_base(z_baseSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type valid(validSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type cross_cols(cross_colsSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type cmu(cmuSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type com(comSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type cal(calSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type cbe(cbeSEXP);
+    Rcpp::traits::input_parameter< LogicalVector >::type cratio(cratioSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type cs2(cs2SEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type z_cross(z_crossSEXP);
+    rcpp_result_gen = Rcpp::wrap(boot_garch(n_out, base, k, mu, omega, alpha, beta, gamma, s2_init, z_base, valid, cross_cols, cmu, com, cal, cbe, cratio, cs2, z_cross));
+    return rcpp_result_gen;
+END_RCPP
+}
+// boot_ms_garch
+List boot_ms_garch(int n_out, int base, int k, int K, NumericVector mu, NumericVector omega, NumericVector alpha, NumericVector beta, NumericVector gamma, NumericVector phi, NumericVector lambda, NumericMatrix trans, NumericMatrix delta, NumericVector unc_var, NumericVector stat_prob, List pools, NumericVector z_base, IntegerVector cross_cols, NumericVector cmu, NumericVector com, NumericVector cal, NumericVector cbe, LogicalVector cratio, NumericVector cs2, NumericMatrix z_cross);
+RcppExport SEXP _SimLev_boot_ms_garch(SEXP n_outSEXP, SEXP baseSEXP, SEXP kSEXP, SEXP KSEXP, SEXP muSEXP, SEXP omegaSEXP, SEXP alphaSEXP, SEXP betaSEXP, SEXP gammaSEXP, SEXP phiSEXP, SEXP lambdaSEXP, SEXP transSEXP, SEXP deltaSEXP, SEXP unc_varSEXP, SEXP stat_probSEXP, SEXP poolsSEXP, SEXP z_baseSEXP, SEXP cross_colsSEXP, SEXP cmuSEXP, SEXP comSEXP, SEXP calSEXP, SEXP cbeSEXP, SEXP cratioSEXP, SEXP cs2SEXP, SEXP z_crossSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type n_out(n_outSEXP);
+    Rcpp::traits::input_parameter< int >::type base(baseSEXP);
+    Rcpp::traits::input_parameter< int >::type k(kSEXP);
+    Rcpp::traits::input_parameter< int >::type K(KSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type mu(muSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type omega(omegaSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type alpha(alphaSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type beta(betaSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type gamma(gammaSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type phi(phiSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type lambda(lambdaSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type trans(transSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type delta(deltaSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type unc_var(unc_varSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type stat_prob(stat_probSEXP);
+    Rcpp::traits::input_parameter< List >::type pools(poolsSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type z_base(z_baseSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type cross_cols(cross_colsSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type cmu(cmuSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type com(comSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type cal(calSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type cbe(cbeSEXP);
+    Rcpp::traits::input_parameter< LogicalVector >::type cratio(cratioSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type cs2(cs2SEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type z_cross(z_crossSEXP);
+    rcpp_result_gen = Rcpp::wrap(boot_ms_garch(n_out, base, k, K, mu, omega, alpha, beta, gamma, phi, lambda, trans, delta, unc_var, stat_prob, pools, z_base, cross_cols, cmu, com, cal, cbe, cratio, cs2, z_cross));
+    return rcpp_result_gen;
+END_RCPP
+}
+// rolling_vol
+NumericVector rolling_vol(NumericVector x, int window);
+RcppExport SEXP _SimLev_rolling_vol(SEXP xSEXP, SEXP windowSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    Rcpp::traits::input_parameter< int >::type window(windowSEXP);
+    rcpp_result_gen = Rcpp::wrap(rolling_vol(x, window));
+    return rcpp_result_gen;
+END_RCPP
+}
+// assign_regimes
+IntegerVector assign_regimes(NumericVector vol, NumericVector thresh);
+RcppExport SEXP _SimLev_assign_regimes(SEXP volSEXP, SEXP threshSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type vol(volSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type thresh(threshSEXP);
+    rcpp_result_gen = Rcpp::wrap(assign_regimes(vol, thresh));
+    return rcpp_result_gen;
+END_RCPP
+}
+// estimate_trans_mat
+NumericMatrix estimate_trans_mat(IntegerVector regimes, int K, double alpha);
+RcppExport SEXP _SimLev_estimate_trans_mat(SEXP regimesSEXP, SEXP KSEXP, SEXP alphaSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< IntegerVector >::type regimes(regimesSEXP);
+    Rcpp::traits::input_parameter< int >::type K(KSEXP);
+    Rcpp::traits::input_parameter< double >::type alpha(alphaSEXP);
+    rcpp_result_gen = Rcpp::wrap(estimate_trans_mat(regimes, K, alpha));
+    return rcpp_result_gen;
+END_RCPP
+}
 // calculate_fifo_price_rcpp
 double calculate_fifo_price_rcpp(List buys, double units, int front_index);
 RcppExport SEXP _SimLev_calculate_fifo_price_rcpp(SEXP buysSEXP, SEXP unitsSEXP, SEXP front_indexSEXP) {
@@ -226,8 +443,50 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// wd_simulate
+List wd_simulate(NumericMatrix R, NumericMatrix INF, NumericMatrix CAPE, NumericMatrix BASE, int ppy, int rule, NumericVector rp, bool start_timing, double start_value, NumericVector income_real, bool tax_on, double tax_rate, double tfs, double spb_annual, bool vp_on, double cost, double basis_ratio, double loss0, bool keep);
+RcppExport SEXP _SimLev_wd_simulate(SEXP RSEXP, SEXP INFSEXP, SEXP CAPESEXP, SEXP BASESEXP, SEXP ppySEXP, SEXP ruleSEXP, SEXP rpSEXP, SEXP start_timingSEXP, SEXP start_valueSEXP, SEXP income_realSEXP, SEXP tax_onSEXP, SEXP tax_rateSEXP, SEXP tfsSEXP, SEXP spb_annualSEXP, SEXP vp_onSEXP, SEXP costSEXP, SEXP basis_ratioSEXP, SEXP loss0SEXP, SEXP keepSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type R(RSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type INF(INFSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type CAPE(CAPESEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type BASE(BASESEXP);
+    Rcpp::traits::input_parameter< int >::type ppy(ppySEXP);
+    Rcpp::traits::input_parameter< int >::type rule(ruleSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type rp(rpSEXP);
+    Rcpp::traits::input_parameter< bool >::type start_timing(start_timingSEXP);
+    Rcpp::traits::input_parameter< double >::type start_value(start_valueSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type income_real(income_realSEXP);
+    Rcpp::traits::input_parameter< bool >::type tax_on(tax_onSEXP);
+    Rcpp::traits::input_parameter< double >::type tax_rate(tax_rateSEXP);
+    Rcpp::traits::input_parameter< double >::type tfs(tfsSEXP);
+    Rcpp::traits::input_parameter< double >::type spb_annual(spb_annualSEXP);
+    Rcpp::traits::input_parameter< bool >::type vp_on(vp_onSEXP);
+    Rcpp::traits::input_parameter< double >::type cost(costSEXP);
+    Rcpp::traits::input_parameter< double >::type basis_ratio(basis_ratioSEXP);
+    Rcpp::traits::input_parameter< double >::type loss0(loss0SEXP);
+    Rcpp::traits::input_parameter< bool >::type keep(keepSEXP);
+    rcpp_result_gen = Rcpp::wrap(wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real, tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_SimLev_boot_idx_iid", (DL_FUNC) &_SimLev_boot_idx_iid, 2},
+    {"_SimLev_boot_idx_block", (DL_FUNC) &_SimLev_boot_idx_block, 4},
+    {"_SimLev_boot_idx_stationary", (DL_FUNC) &_SimLev_boot_idx_stationary, 3},
+    {"_SimLev_boot_idx_regime", (DL_FUNC) &_SimLev_boot_idx_regime, 3},
+    {"_SimLev_boot_idx_tails", (DL_FUNC) &_SimLev_boot_idx_tails, 6},
+    {"_SimLev_boot_wild", (DL_FUNC) &_SimLev_boot_wild, 2},
+    {"_SimLev_boot_reset", (DL_FUNC) &_SimLev_boot_reset, 2},
+    {"_SimLev_boot_evt", (DL_FUNC) &_SimLev_boot_evt, 14},
+    {"_SimLev_boot_garch", (DL_FUNC) &_SimLev_boot_garch, 19},
+    {"_SimLev_boot_ms_garch", (DL_FUNC) &_SimLev_boot_ms_garch, 25},
+    {"_SimLev_rolling_vol", (DL_FUNC) &_SimLev_rolling_vol, 2},
+    {"_SimLev_assign_regimes", (DL_FUNC) &_SimLev_assign_regimes, 2},
+    {"_SimLev_estimate_trans_mat", (DL_FUNC) &_SimLev_estimate_trans_mat, 3},
     {"_SimLev_calculate_fifo_price_rcpp", (DL_FUNC) &_SimLev_calculate_fifo_price_rcpp, 3},
     {"_SimLev_calculate_fifo_vp_rcpp", (DL_FUNC) &_SimLev_calculate_fifo_vp_rcpp, 3},
     {"_SimLev_calculate_private_sale_tax_rcpp", (DL_FUNC) &_SimLev_calculate_private_sale_tax_rcpp, 5},
@@ -243,6 +502,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_SimLev_p20_tax_rcpp", (DL_FUNC) &_SimLev_p20_tax_rcpp, 5},
     {"_SimLev_vp_tax_rcpp", (DL_FUNC) &_SimLev_vp_tax_rcpp, 5},
     {"_SimLev_sell_count_rcpp", (DL_FUNC) &_SimLev_sell_count_rcpp, 10},
+    {"_SimLev_wd_simulate", (DL_FUNC) &_SimLev_wd_simulate, 19},
     {NULL, NULL, 0}
 };
 

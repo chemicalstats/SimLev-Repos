@@ -14,26 +14,74 @@ quantile_reg(
 )
 }
 \arguments{
-\item{y}{Zielvariable.}
+\item{y}{Numerischer Vektor, Zielvariable (beliebige Einheit).}
 
-\item{X}{Regressoren (Matrix oder data.frame, ohne Konstante).}
+\item{X}{Regressoren als numerischer Vektor, Matrix oder data.frame (ohne
+Konstante). \code{NULL} (Standard) = nur Konstante, d. h. das
+empirische \eqn{\tau}-Quantil von \code{y}. Zeilen mit nicht endlichen
+Werten in \code{y} oder \code{X} werden entfernt. Erwartet werden
+\code{length(y)} Zeilen, nur numerische Spalten (Faktoren vorher in
+Indikatorspalten umwandeln) und linear unabhaengige Regressoren
+einschliesslich der Konstante; sonst bricht die Funktion mit Fehler ab.}
 
-\item{tau}{Quantil in (0, 1).}
+\item{tau}{Quantil als Anteil, echt zwischen 0 und 1 (Standard 0.5 =
+Median-Regression).}
 
-\item{intercept}{Konstante aufnehmen.}
+\item{intercept}{Logisch: Konstante aufnehmen (Standard \code{TRUE}).}
 
-\item{tol, maxit}{Konvergenzsteuerung.}
+\item{tol}{Konvergenzschwelle der MM-Stufen: Eine Stufe endet, wenn sich
+kein Koeffizient um mehr als \code{tol * (1 + max|beta|)} aendert (in
+den ersten drei Stufen wird hoechstens 1e-7 verlangt). Standard 1e-10.}
+
+\item{maxit}{Hoechstzahl der Iterationen je MM-Stufe (ganze Zahl,
+Standard 2000).}
 }
 \value{
-Benannter Koeffizientenvektor.
+Benannter numerischer Koeffizientenvektor in der Einheit von
+\code{y} je Einheit des Regressors: \code{"(Intercept)"} (falls
+\code{intercept = TRUE}) und je Spalte von \code{X} deren Name (sonst
+\code{x1}, \code{x2}, ...).
 }
 \description{
-Minimiert \eqn{\sum_i \rho_\tau(y_i - x_i'\beta)} mit dem MM-Algorithmus
-von Hunter & Lange (2000): iterativ gewichtete kleinste Quadrate mit
+Schaetzt die Koeffizienten des bedingten \eqn{\tau}-Quantils von \code{y}
+(Koenker & Bassett 1978), d. h. minimiert
+\eqn{\sum_i \rho_\tau(y_i - x_i'\beta)} mit
+\eqn{\rho_\tau(r) = r(\tau - 1\{r < 0\})}. Geliefert wird die exakte
+Loesung dieses linearen Programms mit Optimalitaetsnachweis (Ausnahme:
+entartete Faelle, siehe unten), berechnet in zwei Schritten (Kern in
+C++):
+\enumerate{
+\item MM-Algorithmus von Hunter & Lange (2000), ausgehend von der
+KQ-Loesung: iterativ gewichtete kleinste Quadrate mit
 \deqn{\beta \leftarrow (X'WX)^{-1}(X'Wy + (\tau - 1/2) X'1),\quad
       W = \mathrm{diag}(1 / (2(\epsilon + |r_i|)))}
-und schrittweise kleinerem \eqn{\epsilon}. Fuer die Analysen hier genau
-genug (Abweichung zur exakten LP-Loesung typischerweise < 1e-6 relativ).
+in vier Stufen mit \eqn{\epsilon} = sd(y) mal 1e-2, 1e-4, 1e-6, 1e-8.
+\item Ecken-Politur: Aus den p Beobachtungen mit den kleinsten Residuen
+der Naeherung (linear unabhaengig gewaehlt) wird die Ecke des linearen
+Programms berechnet, die diese Beobachtungen exakt interpoliert, und
+ueber die Subgradientenbedingung auf Optimalitaet geprueft (an
+entarteten Ecken wie unten per linearem Programm). Ist der
+Nachweis erbracht (nach jeder Stufe und alle 25 Iterationen
+geprueft), ist diese Ecke das Ergebnis.
+}
+Gelingt der Nachweis bis zur letzten Stufe nicht (z. B. bei \eqn{\tau}
+nahe 0 oder 1, wenn die Naeherung noch weit von der Ecke entfernt ist),
+folgen von dieser Ecke aus Austauschschritten wie im Simplex-Verfahren von
+Barrodale & Roberts (1974): Solange eine Kante der Ecke abwaerts fuehrt,
+wird entlang der steilsten bis zum Minimum gegangen; die Zielfunktion
+faellt dabei streng. Ohne Abstiegskante wird die Optimalitaet exakt
+nachgewiesen; an entarteten Ecken (weitere Residuen exakt 0, z. B. bei
+diskreten Regressoren, gerundeten Werten oder doppelten Beobachtungen)
+ueber die Bedingung, dass 0 im Teildifferential liegt: Es muss
+\eqn{\lambda_j \in [\tau - 1, \tau]} fuer die Beobachtungen mit
+Residuum 0 geben mit \eqn{\sum_j \lambda_j x_j = -\sum_{r_i \neq 0}
+\psi_\tau(r_i) x_i}; geprueft als lineares Zulaessigkeitsproblem (Phase 1
+des Simplex-Verfahrens mit beschraenkten Variablen, gleiche Zeilen
+\eqn{x_j} zusammengefasst). Scheitert der Nachweis, erscheint eine
+Warnung, und geliefert wird die gefundene Ecke, sofern ihr Zielwert nicht
+groesser ist als der der MM-Naeherung, sonst die MM-Naeherung. Ist die Loesung nicht eindeutig (z. B. ohne Regressoren,
+wenn n * tau ganzzahlig ist), wird eine der optimalen Loesungen
+geliefert.
 }
 \examples{
 set.seed(1); x <- rnorm(500); y <- 1 + 2 * x + rnorm(500) * (1 + abs(x))
@@ -41,6 +89,11 @@ quantile_reg(y, x, 0.9)
 }
 \references{
 Koenker, R. & Bassett, G. (1978), Econometrica 46(1);
-  Hunter, D. R. & Lange, K. (2000), Journal of Computational and Graphical
-  Statistics 9(1).
+Hunter, D. R. & Lange, K. (2000), Journal of Computational and Graphical
+Statistics 9(1); Barrodale, I. & Roberts, F. D. K. (1974), Communications
+of the ACM 17(6).
+}
+\seealso{
+\code{\link[=tail_regression]{tail_regression()}} und \code{\link[=covar_analysis]{covar_analysis()}} nutzen
+\code{quantile_reg()} fuer Renditen.
 }

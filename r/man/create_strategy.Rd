@@ -39,12 +39,16 @@ as_list(x, ...)
 \arguments{
   \item{...}{
     Für \code{create_strategy}: benannte \code{\link{asset_config}}-Objekte
-    (z. B. \code{SPY = asset_config(...)}).
+    (z. B. \code{SPY = asset_config(...)}); einfache Listen werden über
+    \code{asset_config} umgewandelt und geprüft. Jeder Name darf nur einmal
+    vorkommen (sonst Fehler).
     Für \code{update_asset}: benannte Felder, die im Asset aktualisiert werden.
+    Für \code{as_list}, \code{print}, \code{summary}: ignoriert.
   }
   \item{assets}{
     Benannte Liste von \code{asset_config}-Objekten oder \code{NULL}. Alternative
-    zu \code{...} für programmatische Nutzung. Standard: \code{NULL}.
+    zu \code{...} für programmatische Nutzung (nicht beides zugleich).
+    Standard: \code{NULL}.
   }
   \item{strategy}{Ein \code{"strategy"}-Objekt.}
   \item{data}{
@@ -63,7 +67,7 @@ as_list(x, ...)
 \value{
   \item{\code{create_strategy}}{Objekt der Klasse \code{"strategy"}.}
   \item{\code{validate_strategy}}{
-    \code{TRUE} (unsichtbar) wenn valide; sonst Fehler mit Beschreibung.
+    \code{TRUE} wenn valide; sonst Fehler mit Beschreibung.
   }
   \item{\code{add_asset}, \code{update_asset}, \code{remove_asset}}{
     Aktualisiertes \code{"strategy"}-Objekt.
@@ -74,17 +78,36 @@ as_list(x, ...)
   \item{\code{as_list}}{
     Unklassifizierte benannte Liste (für Legacy-Schnittstellen).
   }
+  \item{\code{print}, \code{summary}}{
+    Ausgabe auf der Konsole; \code{x} bzw. \code{object} unsichtbar.
+  }
 }
 \details{
-  \code{create_strategy} normiert die Zielgewichte nicht — das geschieht
-  intern in \code{\link{simulation}}. Gewichte müssen positiv sein; ihre
-  Summe kann von 1 abweichen.
+  \code{create_strategy} normiert die Zielgewichte nicht, und auch
+  \code{\link{simulation}} normiert sie nicht: Die \code{asset_share}-Werte
+  (Anteile, je größer 0 und höchstens 1) müssen sich für die Simulation
+  auf 1 summieren, sonst bricht \code{simulation} mit Fehler ab.
+  \code{summary} weist auf eine abweichende Summe hin.
 
-  \code{validate_strategy} prüft ohne \code{data}: Pflichtfelder, gültige
-  Wertebereiche. Mit \code{data}: zusätzlich Spalten- und Signal-Existenz.
+  \code{validate_strategy} prüft ohne \code{data}, ob \code{strategy} die
+  Klasse \code{"strategy"} hat und jedes Element ein
+  \code{asset_config}-Objekt ist (Wertebereiche prüft bereits
+  \code{asset_config}). Mit \code{data}: zusätzlich, ob jede Asset-Spalte und
+  bei \code{action_type = "signal"} die Signalspalten vorhanden sind.
 
-  \code{update_asset} akzeptiert beliebige Felder als \code{name = wert}-Paare.
-  Nicht angegebene Felder bleiben unverändert.
+  \code{update_asset} akzeptiert Felder als \code{name = wert}-Paare; nur
+  Felder, die das Asset bereits hat, werden übernommen (unbekannte mit
+  Warnung ignoriert). Das Asset wird danach mit \code{asset_config} neu
+  geprüft; nicht angegebene Felder bleiben unverändert. Ändert sich
+  \code{asset_class} oder \code{deliverable} und wird \code{tax_regime}
+  nicht mit angegeben, wird ein bisher automatisch abgeleitetes
+  \code{tax_regime} neu abgeleitet (z. B. \code{"certificate"} ->
+  \code{"etf"}: \code{"investment_fund"}); ein abweichend gesetztes
+  (explizites) \code{tax_regime} bleibt erhalten.
+
+  \code{migrate_strategy} setzt die veralteten Klassen
+  \code{"etn_deliverable"}/\code{"etn_standard"} in \code{"etn"} mit
+  \code{deliverable = TRUE}/\code{FALSE} um.
 
   \code{as_list} entfernt das \code{"strategy"}-Klassenattribut und gibt eine
   einfache Liste zurück — nützlich für Systeme, die keine S3-Objekte erwarten.

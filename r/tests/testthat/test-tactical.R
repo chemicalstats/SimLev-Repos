@@ -39,6 +39,21 @@ test_that("signal_state, momentum_score and weight builders", {
   ex <- attr(tv, "exposure"); expect_true(all(ex >= 0 & ex <= 1))
   expect_equal(tv$A + tv$CASH, rep(1, nrow(d)))
   expect_error(target_volatility(d, c(A = 1), safe = "CASH", max_exposure = 2), "Kredit")
+  cv <- conditional_volatility(d, c(A = 1), safe = "CASH", base = 0.8, min_history = 1)
+  st <- attr(cv, "state"); ex <- attr(cv, "exposure")
+  expect_equal(cv$A + cv$CASH, rep(1, nrow(d)))
+  expect_true(all(ex[st == 0L] == 0.8)); expect_true(all(ex[st == 1L] <= 0.8)); expect_true(all(ex[st == -1L] >= 0.8 & ex[st == -1L] <= 1))
+  expect_true(all(st[seq_len(365)] == 0L))                                   # vor min_history
+  d2 <- d; cut <- 365 * 3; d2$A[(cut + 1):nrow(d)] <- d2$A[(cut + 1):nrow(d)] * 1.5^(seq_len(nrow(d) - cut) %% 2)
+  cv2 <- conditional_volatility(d2, c(A = 1), safe = "CASH", base = 0.8, min_history = 1)
+  expect_identical(cv$A[seq_len(cut)], cv2$A[seq_len(cut)])                  # kein Blick in die Zukunft
+  fx <- conditional_volatility(d, c(A = 1), safe = "CASH", base = 0.7, min_history = 1,
+                               scaling = "fixed", high_exposure = 0.3, low_exposure = 0.9)
+  expect_true(all(round(fx$A, 10) %in% c(0.3, 0.7, 0.9)))
+  expect_message(conditional_volatility(d, c(A = 1), safe = "CASH", min_history = 1), "hochskaliert")
+  expect_silent(conditional_volatility(d, c(A = 1), safe = "CASH", lower = NULL, min_history = 1))
+  expect_error(conditional_volatility(d, c(A = 1), safe = "CASH", max_exposure = 1.5), "Kredit")
+  expect_output(print(cv), "Volatilit\u00e4tsphasen")
   expect_output(print(ro), "Zielgewichte")
   pdf(NULL); on.exit(dev.off(), add = TRUE); expect_silent(plot(bl))
 })

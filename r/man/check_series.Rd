@@ -7,25 +7,70 @@
 check_series(data, columns = NULL, jump = 20, stale = 10, revert = 0.8)
 }
 \arguments{
-\item{data}{data.frame mit Spalte \code{date} und Kursspalten.}
+\item{data}{data.frame mit Spalte \code{date} (Date oder
+\code{"JJJJ-MM-TT"}) und Kursspalten.}
 
-\item{columns}{Zu pruefende Spalten (Standard: alle numerischen).}
+\item{columns}{Zeichenvektor der zu pruefenden Spalten (Standard
+\code{NULL} = alle numerischen Spalten ausser \code{date}).}
 
-\item{jump}{Sprungschwelle in Prozent (Tagesveraenderung).}
+\item{jump}{Sprungschwelle in Prozent (20 = 20 \%): Veraenderung zum
+vorigen vorhandenen Wert, ab der ein Sprung gemeldet wird.}
 
-\item{stale}{Mindestlaenge (Zeilen) einer Folge unveraenderter Werte, die
-gemeldet wird (bei Kalendertagsdaten sind 2-4 Tage normal).}
+\item{stale}{Mindestlaenge in Zeilen einer Folge unveraenderter Werte, die
+als stehender Kurs gemeldet wird (bei Kalendertagsdaten sind 2-4 Zeilen
+ueber Wochenenden und Feiertage normal).}
 
-\item{revert}{Anteil des Ruecklaufs am Folgetag, ab dem ein Sprung als
-Spike gilt.}
+\item{revert}{Ruecklauf am Folgetag als Anteil des Sprungs (0.8 = 80 \%,
+gemessen in Log-Renditen), ab dem ein Sprung als Spike gilt.}
 }
 \value{
-Objekt der Klasse \code{SimLevDataCheck} mit \code{summary}
-  (je Spalte) und \code{issues} (je Fund: Spalte, Datum, Art, Wert).
+Objekt der Klasse \code{SimLevDataCheck}, eine Liste mit
+\describe{
+\item{summary}{data.frame je Spalte: \code{column}, \code{start},
+\code{end} (erstes/letztes Datum mit Wert), \code{n} (Werte),
+\code{missing} (NA innerhalb der Laufzeit), \code{jumps} (alle
+Spruenge ueber \code{jump}, einschliesslich Spikes und Splits),
+\code{spikes}, \code{splits}, \code{stale_max} (laengste Folge
+gleicher Werte in Zeilen), \code{nonpositive} (Anzahl Werte <= 0).}
+\item{issues}{data.frame je Fund: \code{column}, \code{date},
+\code{type} (Art des Funds), \code{value} (Kurs) und \code{info}
+(bei Spruengen die Veraenderung in Prozent, bei Kalenderluecken die
+Tage, bei stehenden Kursen die Zeilen).}
+\item{settings}{benannter Vektor \code{jump}, \code{stale},
+\code{revert}.}
+}
+\code{print()} zeigt die Zusammenfassung und die ersten
+\code{max_issues} (Standard 25) Funde.
 }
 \description{
-Erstellt einen Pruefbericht fuer Kursreihen: Laufzeit, fehlende Werte,
-Datumsprobleme, Spruenge, wahrscheinliche Splits (Sprung nahe einem
-ganzzahligen Verhaeltnis ohne Ruecklauf), Spikes (Sprung mit sofortigem
-Ruecklauf, typischer Datenfehler), nicht positive Werte und stehende Kurse.
+Erstellt einen Pruefbericht fuer eigene Kursreihen, bevor sie in
+\code{\link[=simulation]{simulation()}} oder die Analysefunktionen gehen. Erwartet wird ein
+data.frame mit Spalte \code{date} und Kursspalten (Niveaus, keine Renditen),
+z. B. aus \code{\link[=align_series]{align_series()}}. Gemeldet werden: fehlende oder nicht lesbare
+Daten (z. B. Leerzeile am Dateiende), doppelte oder unsortierte
+Daten, Kalenderluecken ueber 5 Tage, fehlende Werte innerhalb der
+Laufzeit, Spruenge, wahrscheinliche Splits (Sprung nahe einem
+ganzzahligen Verhaeltnis 2:1 bis 10:1 bzw. 1:2 bis 1:10, ohne Ruecklauf),
+Spikes (Sprung mit sofortigem Ruecklauf, typischer Datenfehler), Werte
+<= 0 und stehende Kurse. Die Funktion aendert die Daten nicht.
+}
+\details{
+Spruenge werden zwischen aufeinanderfolgenden vorhandenen Werten (NA
+uebersprungen) gemessen, also je Zeile, nicht je Kalendertag, und nur
+zwischen zwei positiven Werten; Werte <= 0 (z. B. eine Zinsreihe mit
+negativen Saetzen) erscheinen nur als "Wert <= 0".
+}
+\examples{
+set.seed(1); n <- 400
+d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = n),
+                A = 100 * cumprod(1 + rnorm(n, 3e-4, 0.01)))
+d$A[100] <- d$A[100] * 1.5            # Ausreisser mit Ruecklauf (Spike)
+d$A[300:n] <- d$A[300:n] / 2          # Split 2:1
+d$A[200:215] <- d$A[200]              # stehender Kurs
+chk <- check_series(d)
+chk
+chk$summary
+}
+\seealso{
+\code{\link[=align_series]{align_series()}}, \code{\link[=splice_series]{splice_series()}}
 }

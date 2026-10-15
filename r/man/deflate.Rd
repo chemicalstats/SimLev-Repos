@@ -7,20 +7,50 @@
 deflate(data, columns, cpi, base_date = NULL, suffix = "_real")
 }
 \arguments{
-\item{data}{data.frame mit Spalte \code{date}.}
+\item{data}{data.frame mit Spalte \code{date} und den Spalten aus
+\code{columns}.}
 
-\item{columns}{Spalten, die deflationiert werden.}
+\item{columns}{Zeichenvektor der Spalten, die deflationiert werden.}
 
-\item{cpi}{Preisindex-Niveau: Spaltenname oder \code{data.frame(date, value)}
-(z. B. mit [align_macro()] und Veroeffentlichungsverzug vorbereitet).}
+\item{cpi}{Preisindex-Niveau: Spaltenname in \code{data} (NA per LOCF
+gefuellt; z. B. mit \code{\link[=align_macro]{align_macro()}} und Veroeffentlichungsverzug
+vorbereitet), \code{data.frame(date, value)} (Stufenfunktion: Wert gilt
+ab seinem Datum), benannter Vektor mit Datumsnamen oder Vektor der
+Laenge \code{nrow(data)}. Vor dem ersten bekannten Wert wird nicht
+zurueckgefuellt: Die realen Werte dieser Zeilen sind NA (mit Hinweis).}
 
-\item{base_date}{Bezugsdatum (Standard: erstes Datum), an dem real = nominal.}
+\item{base_date}{Bezugsdatum, an dem real = nominal (Date oder
+\code{"JJJJ-MM-TT"}; verwendet wird die Zeile mit dem naechstgelegenen
+Datum; dort muss der Preisindex bekannt sein). Standard \code{NULL} =
+erste Zeile mit bekanntem Preisindex.}
 
-\item{suffix}{Endung fuer neue Spalten (Standard \code{"_real"}).}
+\item{suffix}{Endung fuer die neuen Spalten (Standard \code{"_real"}).}
 }
 \value{
-\code{data} mit realen Spalten.
+\code{data} mit zusaetzlichen realen Spalten
+\code{paste0(columns, suffix)}.
 }
 \description{
-Reale Werte ueber einen Preisindex
+Rechnet nominale Kurs- oder Wertspalten in reale Werte (Kaufkraft des
+Bezugsdatums) um: \eqn{real_t = nominal_t \cdot cpi_b / cpi_t} mit der
+Bezugszeile \eqn{b}.
+Erwartet wird ein data.frame mit Spalte \code{date} und einem Preisindex als
+Niveau (z. B. Verbraucherpreisindex), keine Inflationsrate. Die realen
+Spalten kommen als neue Spalten hinzu und koennen wie Kursspalten in
+\code{\link[=simulation]{simulation()}} oder \code{\link[=deep_analysis]{deep_analysis()}} verwendet werden; fuer die reale
+Auswertung fertiger Ergebnisse hat \code{\link[=deep_analysis]{deep_analysis()}} ein eigenes
+Argument \code{inflation}.
+}
+\examples{
+cpi <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "month", length.out = 36),
+                  value = 100 * 1.003^(0:35))
+d <- data.frame(date = seq.Date(as.Date("2021-01-01"), by = "day", length.out = 400),
+                depot = 10000 * 1.0002^(0:399))
+# CPI mit einem Monat Veroeffentlichungsverzug auf den Tageskalender legen
+d <- align_macro(d, cpi, "cpi", lag = 1, lag_unit = "month")
+d <- deflate(d, "depot", cpi = "cpi")
+tail(d, 3)
+}
+\seealso{
+\code{\link[=align_macro]{align_macro()}}, \code{\link[=convert_currency]{convert_currency()}}, \code{\link[=deep_analysis]{deep_analysis()}}
 }

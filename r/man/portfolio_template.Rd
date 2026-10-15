@@ -10,16 +10,22 @@ portfolio_template(name, map = NULL, ...)
 portfolio_templates()
 }
 \arguments{
-\item{name}{Vorlage (siehe oben); \code{portfolio_templates()} listet alle.}
+\item{name}{Name der Vorlage als Zeichenkette (siehe Tabelle);
+\code{portfolio_templates()} listet alle.}
 
-\item{map}{Benannter Vektor Rolle -> Spaltenname (fehlende Rollen behalten
-ihren Namen).}
+\item{map}{Benannter Zeichenvektor Rolle -> Spaltenname im Datensatz,
+z. B. \code{c(stocks = "msci_world")}. Standard \code{NULL}; Rollen ohne
+Eintrag behalten ihren Namen und muessen dann als Spalte vorliegen.
+Unbekannte Rollen und mehrere Rollen auf derselben Spalte sind ein
+Fehler.}
 
-\item{...}{Weitere Argumente fuer [strategy_from_weights()].}
+\item{...}{Weitere Argumente fuer \code{\link[=strategy_from_weights]{strategy_from_weights()}} bzw.
+\code{\link[=asset_config]{asset_config()}} (z. B. \code{asset_spread}, \code{asset_bonus}).}
 }
 \value{
-\code{portfolio_template}: Strategie; \code{portfolio_templates}:
-  data.frame (Vorlage, Rolle, Gewicht).
+\code{portfolio_template()}: Objekt der Klasse \code{strategy}
+fuer \code{\link[=simulation]{simulation()}}; \code{portfolio_templates()}: data.frame mit
+\code{template}, \code{role} und \code{weight} (Anteil, 0.6 = 60 \%).
 }
 \description{
 Bekannte statische Allokationen mit Rollen-Namen (z. B. \code{stocks},
@@ -29,16 +35,22 @@ Vergleich, keine Empfehlungen.
 }
 \details{
 \tabular{ll}{
-  \code{60_40} \tab Aktien 60, Anleihen 40 \cr
-  \code{permanent} \tab Permanent Portfolio (H. Browne): je 25 Aktien, lange Anleihen, Geldmarkt, Gold \cr
-  \code{all_weather} \tab vereinfachtes All Weather: 30/40/15/7.5/7.5 \cr
-  \code{golden_butterfly} \tab je 20 Aktien, Small Value, lange und kurze Anleihen, Gold \cr
-  \code{three_fund} \tab Aktien Heimat 48, international 32, Anleihen 20 \cr
-  \code{hfea} \tab 55 3x-Aktien, 45 3x-lange Anleihen \cr
-  \code{stocks_gold} \tab Aktien 80, Gold 20
+\code{60_40} \tab Aktien 60, Anleihen 40 \cr
+\code{permanent} \tab Permanent Portfolio (H. Browne): je 25 Aktien, lange Anleihen, Geldmarkt, Gold \cr
+\code{all_weather} \tab vereinfachtes All Weather: 30/40/15/7.5/7.5 \cr
+\code{golden_butterfly} \tab je 20 Aktien, Small Value, lange und kurze Anleihen, Gold \cr
+\code{three_fund} \tab Aktien Heimat 48, international 32, Anleihen 20 \cr
+\code{hfea} \tab 55 3x-Aktien, 45 3x-lange Anleihen \cr
+\code{stocks_gold} \tab Aktien 80, Gold 20
 }
+
+Gewichte in der Tabelle in Prozent; in der Strategie als Anteile.
 }
 \examples{
 portfolio_template("permanent", map = c(stocks = "msci_world", long_bonds = "bund_10y",
                                         cash = "geldmarkt", gold = "gold_eur"))
+head(portfolio_templates())
+}
+\seealso{
+\code{\link[=strategy_from_weights]{strategy_from_weights()}}, \code{\link[=simulation]{simulation()}}
 }

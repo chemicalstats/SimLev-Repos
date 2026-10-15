@@ -16,31 +16,78 @@ lumpsum_vs_dca(
 )
 }
 \arguments{
-\item{data, strategy}{Wie in [simulation()].}
+\item{data, strategy}{Wie in \code{\link[=simulation]{simulation()}}: data.frame mit Spalte
+\code{date} und Kursspalten (Niveaus) bzw. Strategie aus
+\code{\link[=create_strategy]{create_strategy()}}.}
 
-\item{amount}{Anlagebetrag.}
+\item{amount}{Anlagebetrag in Waehrungseinheiten (Standard 10000); bei DCA
+in \code{months} Raten von \code{amount / months} aufgeteilt.}
 
-\item{months}{Anzahl Monatsraten des gestreckten Einstiegs.}
+\item{months}{Anzahl Monatsraten des gestreckten Einstiegs (Standard 12).}
 
-\item{horizon}{Vergleichshorizont in Jahren ab Start.}
+\item{horizon}{Vergleichshorizont in Jahren ab Start (Standard 10).}
 
-\item{step}{Abstand der Starttermine in Monaten.}
+\item{step}{Jeder wievielte moegliche Starttermin verwendet wird (Standard
+1 = jeder Monat; 12 = jaehrlich).}
 
-\item{sim_args}{Gemeinsame Argumente fuer alle Laeufe.}
+\item{sim_args}{Benannte Liste weiterer Argumente fuer \code{\link[=simulation]{simulation()}}
+(z. B. \code{tax_mode}); \code{start_value}, \code{dca_mode},
+\code{dca_value}, \code{dca_span}, \code{dca_unit} und \code{dca_skip}
+setzt die Funktion selbst (in \code{sim_args} ein Fehler).}
 
-\item{cores}{Prozesse (Fork auf Unix, PSOCK auf Windows).}
+\item{cores}{Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).}
 }
 \value{
-\code{SimLevLumpSum}: data.frame je Start (start, lump_sum, dca,
-  advantage = Lump Sum / DCA - 1) und Zusammenfassung mit Gewinnquote der
-  Einmalanlage, mittlerem Vorsprung bei Gewinn (MLSA) und mittlerem
-  Rueckstand bei Verlust (MLSD).
+data.frame der Klasse \code{SimLevLumpSum} mit einer Zeile je
+Start: \code{start} (Datum), \code{lump_sum} und \code{dca}
+(Endvermoegen nach \code{horizon} Jahren in Waehrungseinheiten),
+\code{advantage} (Lump Sum / DCA - 1, als Anteil) und \code{exact}
+(logisch: DCA-Depot exakt ueber Stueckzahlen fortgeschrieben, siehe
+oben). Attribut
+\code{summary}: \code{win_rate} (Anteil der Starttermine mit Vorsprung
+der Einmalanlage), \code{mean_advantage}, \code{median_advantage},
+\code{mlsa} (mittlerer Vorsprung bei Gewinn) und \code{mlsd} (mittlerer
+Rueckstand bei Verlust), alle als Anteil; Attribut \code{settings}.
 }
 \description{
 Vergleicht fuer rollierende Starttermine (jeweils am Monatsersten) die
 sofortige Anlage eines Betrags mit einem Einstieg in \code{months} gleichen
 Monatsraten. Verglichen wird das Vermoegen nach \code{horizon} Jahren.
-Nach der Einstiegsphase wird das DCA-Depot mit der Wertentwicklung der
-Einmalanlage fortgeschrieben (exakt ohne Steuern; mit
-\code{tax_mode = "person"} eine Naeherung).
+}
+\details{
+Die Einmalanlage wird ueber den ganzen Horizont mit \code{\link[=simulation]{simulation()}}
+gerechnet, der gestreckte Einstieg ueber die \code{months} Monate der
+Einstiegsphase (Sparplan). Danach wird das DCA-Depot fortgeschrieben:
+\describe{
+\item{exakt}{Handelt die Strategie nach der Einstiegsphase nicht mehr
+(in der Einmalanlage bleibt die Stueckzahl jedes Assets bis zum
+Horizont gleich, z. B. Buy-and-Hold ohne Rebalancing, ohne Steuern),
+haelt auch das DCA-Depot seine Stueckzahlen: Endwert = Summe der
+Stueckzahlen am Ende der Einstiegsphase x Kurs am Horizont plus Cash.
+Jedes Asset behaelt so seine eigenen Gewichte.}
+\item{Naeherung}{Sonst (Rebalancing, Signale, Steuern mit
+Vorabpauschale oder Kosten, die Stueck verkaufen) waechst das DCA-Depot
+mit dem zeitgewichteten Index der Einmalanlage (\code{\link[=result_index]{result_index()}}),
+als haette es ab dem Ende der Einstiegsphase deren Gewichte; mit
+\code{tax_mode = "person"} erscheint dazu eine Warnung.}
+}
+Welche Variante verwendet wurde, steht je Start in der Spalte
+\code{exact}.
+
+Als Starttermine dienen nur Monatserste, die als Zeile in \code{data}
+vorkommen (bei Handelstagsdaten entfallen Monate, deren Erster kein
+Handelstag ist), und nur solche, nach denen noch \code{horizon} Jahre
+Daten folgen.
+}
+\examples{
+set.seed(1); n <- 6 * 365
+d <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = n))
+d$ETF <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
+ld <- lumpsum_vs_dca(d, create_strategy(ETF = asset_config("etf", "bnh")),
+  amount = 12000, months = 12, horizon = 3, step = 6)
+ld
+attr(ld, "summary")
+}
+\seealso{
+\code{\link[=simulation]{simulation()}}, \code{\link[=sensitivity_grid]{sensitivity_grid()}}
 }

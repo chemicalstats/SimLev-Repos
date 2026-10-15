@@ -31,60 +31,118 @@ dependence_analysis(
 )
 }
 \arguments{
-\item{data}{data.frame mit \code{date}, Kursspalten und Zustandsspalten
-(z. B. mit [align_series()] und [align_macro()] vorbereitet).}
+\item{data}{data.frame mit Spalte \code{date} (Klasse Date oder in Date
+umwandelbar), Kursspalten (Kursniveaus, keine Renditen) und
+Zustandsspalten (z. B. mit \code{\link[=align_series]{align_series()}} und \code{\link[=align_macro]{align_macro()}}
+vorbereitet).}
 
-\item{assets}{Kursspalten (mindestens zwei).}
+\item{assets}{Zeichenvektor der Kursspalten (mindestens zwei).}
 
-\item{conditions}{Zustandsspalten (Drittvariablen); gehen verzoegert ein.}
+\item{conditions}{Zeichenvektor der Zustandsspalten (Drittvariablen, in
+ihrer eigenen Einheit); gehen um eine Periode verzoegert ein.
+\code{NULL} (Standard) = keine bedingte Analyse.}
 
-\item{frequency}{\code{"week"} (Standard; vermeidet Effekte
-unterschiedlicher Handelszeiten), \code{"day"} oder \code{"month"}.}
+\item{frequency}{Renditefrequenz: \code{"week"} (Standard; ISO-Woche,
+vermeidet Effekte unterschiedlicher Handelszeiten), \code{"day"} oder
+\code{"month"}.}
 
-\item{quantiles}{Quantile fuer die Tail-Kennzahlen.}
+\item{quantiles}{Numerischer Vektor von Tail-Wahrscheinlichkeiten als
+Anteil (Standard \code{c(0.05, 0.10)}) fuer die Tail-Kennzahlen ueber
+die ganze Stichprobe (siehe \code{\link[=tail_dependence]{tail_dependence()}}).}
 
-\item{breaks}{Optional benannte Liste von Grenzen je Zustandsvariable,
-z. B. \code{list(inflation = c(-Inf, 2, 4, Inf))}; sonst
-\code{n_regimes} Quantilsgruppen.}
+\item{breaks}{Optional benannte Liste von Grenzen je Zustandsvariable in
+deren Einheit, z. B. \code{list(inflation = c(-Inf, 2, 4, Inf))};
+Intervalle links geschlossen, rechts offen. \code{NULL} (Standard) bzw.
+fehlender Eintrag = \code{n_regimes} gleich besetzte Quantilsgruppen.}
 
-\item{n_regimes}{Anzahl Regime ohne \code{breaks} (Standard 3: niedrig,
-mittel, hoch).}
+\item{n_regimes}{Anzahl Regime ohne \code{breaks} (ganze Zahl, Standard 3:
+niedrig, mittel, hoch). Fallen Quantilsgrenzen zusammen oder bliebe eine
+Quantilsgruppe leer (diskrete Zustaende wie 1/2 aus \code{\link[=regime_states]{regime_states()}}),
+entstehen weniger Regime. Leere Regime aus vorgegebenen \code{breaks}
+erscheinen mit \code{n = 0} und \code{NA}-Kennzahlen.}
 
-\item{window}{Fenster der rollierenden Korrelation in Perioden (Standard:
-ein Jahr).}
+\item{window}{Fenster der rollierenden Pearson-Korrelation in Perioden der
+gewaehlten Frequenz. \code{NULL} (Standard) = Anzahl Perioden je Jahr
+(aus den Daten ermittelt, mindestens 10).}
 
-\item{dcc}{DCC(1,1) schaetzen.}
+\item{dcc}{Logisch: DCC(1,1) mit \code{\link[=dcc_fit]{dcc_fit()}} schaetzen (nur bei
+mindestens 100 Perioden; Fehler werden als Meldung ausgegeben).}
 
-\item{copulas}{Copula-Fits je Paar.}
+\item{copulas}{Logisch: Copula-Fits mit \code{\link[=fit_copula]{fit_copula()}} je Paar (und je
+Regime ab 40 Perioden).}
 
-\item{B}{Bootstrap-Wiederholungen fuer die Regime-Vergleiche (0 = aus).}
+\item{B}{Anzahl Bootstrap-Wiederholungen fuer die Regime-Vergleiche
+(ganze Zahl, Standard 499; 0 = aus).}
 
-\item{block}{Mittlere Blocklaenge (Standard: Politis-White auf dem Produkt
-der standardisierten Renditen).}
+\item{block}{Mittlere Blocklaenge des stationaeren Bootstraps in Perioden.
+\code{NULL} (Standard) = Politis-White-Schaetzung auf dem Produkt der
+standardisierten Renditen (Maximum ueber die Paare, begrenzt auf 2 bis
+n / 10).}
 
-\item{tail_q}{Quantil fuer die Tail-Kennzahlen je Regime.}
+\item{tail_q}{Tail-Wahrscheinlichkeit als Anteil (Standard 0.10) fuer die
+Tail-Kennzahlen je Regime.}
 
-\item{seed}{Startwert (globaler Zufallszustand bleibt unveraendert).}
+\item{seed}{Startwert fuer den Bootstrap. Mit Startwert ist das Ergebnis reproduzierbar und der
+Zufallszustand der Sitzung bleibt unveraendert; mit \code{NULL} wird der
+Zufallsstrom der Sitzung normal weitergezogen.}
 
-\item{x}{\code{SimLevDependence}.}
+\item{x}{Objekt der Klasse \code{SimLevDependence}.}
 
-\item{type}{\code{"overview"}, \code{"rolling"}, \code{"tail"},
-\code{"conditional"} oder \code{"scatter"}.}
+\item{type}{Grafik: \code{"overview"} (Standard; die vier folgenden in
+einem 2 x 2-Raster), \code{"rolling"} (rollierende und DCC-Korrelation),
+\code{"tail"} (\eqn{\hat\lambda(q)} ueber q mit Copula-Werten),
+\code{"conditional"} (Pearson-Korrelation je Regime mit Intervall und
+unterem Tail-Koeffizienten) oder \code{"scatter"}
+(Pseudo-Beobachtungen, Tail-Bereiche bei \code{tail_q} markiert).}
 
-\item{pair}{Paar (Nummer oder Name).}
+\item{pair}{Paar als Nummer (Zeile in \code{x$pairs}, Standard 1) oder
+Name wie \code{"stocks ~ bonds"}.}
 
-\item{condition}{Zustandsvariable (Nummer oder Name).}
+\item{condition}{Zustandsvariable als Nummer (Standard 1) oder Name.}
 
 \item{...}{ungenutzt.}
 }
 \value{
-Objekt der Klasse \code{SimLevDependence} mit \code{returns},
-  \code{correlation} (Liste der Matrizen), \code{pairs} (Kennzahlen je Paar),
-  \code{tail} (empirische Tail-Kennzahlen je Paar und Quantil),
-  \code{copulas} (alle Fits je Paar), \code{rolling}, \code{dcc},
-  \code{conditional} (je Zustandsvariable: Kennzahlen je Paar und Regime)
-  und \code{differences} (oberstes minus unterstes Regime mit
-  Bootstrap-Intervall und p-Wert). Methoden \code{print} und \code{plot}.
+Objekt der Klasse \code{SimLevDependence}, eine Liste mit
+\describe{
+\item{returns}{data.frame mit \code{date} (Periodenende), den
+Log-Renditen der Anlagen (Anteile je Periode) und den verzoegerten
+Zustandsvariablen.}
+\item{correlation}{Liste der Matrizen \code{pearson},
+\code{spearman}, \code{kendall}.}
+\item{pairs}{data.frame je Paar: \code{pair}, \code{pearson},
+\code{spearman}, \code{kendall}, je Wert von \code{quantiles}
+\code{lambda_lower_}q und \code{lambda_upper_}q (z. B.
+\code{lambda_lower_0.05}); mit
+\code{copulas = TRUE} zusaetzlich \code{copula} (beste Familie nach
+AIC), \code{copula_lambda_lower}, \code{copula_lambda_upper},
+\code{t_rho}, \code{t_nu} (Parameter der t-Copula).}
+\item{tail}{Ergebnis von \code{\link[=tail_dependence]{tail_dependence()}} je Paar (Spalte
+\code{pair}) und Quantil.}
+\item{copulas}{Benannte Liste der \code{\link[=fit_copula]{fit_copula()}}-Tabellen je Paar oder
+\code{NULL}.}
+\item{rolling}{data.frame mit \code{date} und der rollierenden
+Korrelation je Paar (\code{NULL}, wenn die Historie nicht laenger als
+\code{window} ist).}
+\item{dcc}{Ergebnis von \code{\link[=dcc_fit]{dcc_fit()}} oder \code{NULL}.}
+\item{conditional}{Liste je Zustandsvariable: data.frame je Paar und
+Regime mit \code{n}, \code{vol_1}, \code{vol_2} (annualisierte
+Volatilitaet der Log-Renditen als Anteil), \code{pearson},
+\code{spearman}, \code{kendall}, \code{lambda_lower},
+\code{lambda_upper}, \code{exceed_lower} (bei \code{tail_q}),
+\code{t_rho}, \code{t_nu}, \code{copula},
+\code{copula_lambda_lower} und mit Bootstrap \code{pearson_lo},
+\code{pearson_hi} (90-\%-Intervall).}
+\item{regimes}{Liste je Zustandsvariable: \code{regime}, \code{n},
+\code{mean_state} (mittlerer Zustand im Regime).}
+\item{differences}{data.frame (oder \code{NULL}): oberstes minus
+unterstes Regime je Paar und Zustandsvariable, \code{diff_pearson},
+\code{diff_spearman} mit 95-\%-Bootstrap-Intervall
+(\code{lo_}, \code{hi_}) und zweiseitigem p-Wert (\code{p_}).}
+}
+sowie \code{assets}, \code{conditions}, \code{frequency}, \code{ppy}
+(Perioden je Jahr, aus den Daten), \code{window}, \code{block},
+\code{B}, \code{tail_q}. Methoden \code{print} und \code{plot}.
 }
 \description{
 Untersucht die Abhaengigkeit zwischen Anlagen (Kursreihen) ueber die reine
@@ -97,6 +155,19 @@ niedriger Inflation oder bei steigenden gegenueber fallenden Zinsen.
 Unterschiede zwischen Regimen werden mit einem stationaeren
 Block-Bootstrap abgesichert (Standardtests unterschaetzen bei
 autokorrelierten Reihen die Unsicherheit).
+}
+\details{
+Renditen: Die Zeilen werden nach \code{date} sortiert (mit Hinweis, falls
+noetig; fehlende oder doppelte Daten sind ein Fehler, ebenso Kurse <= 0
+oder nicht endliche Kurse). Die Kurse werden je Anlage mit dem letzten Wert fortgeschrieben
+(fuehrende Luecken bleiben leer), auf die letzte vorhandene Zeile jeder
+Periode reduziert (\code{"week"}: ISO-Woche, \code{"month"}:
+Kalendermonat, \code{"day"}: jede Zeile) und in Log-Renditen
+\eqn{\log(P_t / P_{t-1})} (Anteile, keine Prozent) umgerechnet. Zeilen mit
+fehlenden Renditen entfallen; bei \code{"day"} auch Zeilen, in denen alle
+Anlagen die Rendite 0 haben (z. B. Feiertage). Zustandsvariablen werden
+ebenfalls fortgeschrieben und gehen mit ihrem Wert am Ende der Vorperiode
+ein.
 }
 \examples{
 \donttest{
@@ -111,4 +182,8 @@ d$inflation <- infl
 da <- dependence_analysis(d, c("stocks", "bonds"), conditions = "inflation", B = 99, seed = 1)
 da
 }
+}
+\seealso{
+\code{\link[=align_series]{align_series()}}, \code{\link[=align_macro]{align_macro()}} zur Vorbereitung;
+\code{\link[=tail_regression]{tail_regression()}}, \code{\link[=covar_analysis]{covar_analysis()}}, \code{\link[=regime_subset]{regime_subset()}}.
 }

@@ -7,22 +7,41 @@
 probabilistic_sharpe(r, benchmark = 0, ppy = 52)
 }
 \arguments{
-\item{r}{Periodenrenditen.}
+\item{r}{Numerischer Vektor einfacher Periodenrenditen als Anteil
+(0.01 = 1 \%); nicht endliche Werte werden entfernt. Ein risikoloser
+Zins wird nicht abgezogen.}
 
-\item{benchmark}{Vergleichs-Sharpe-Ratio, annualisiert.}
+\item{benchmark}{Vergleichs-Sharpe-Ratio \eqn{SR^*} p. a. (Standard 0);
+intern durch \eqn{\sqrt{ppy}} geteilt.}
 
-\item{ppy}{Perioden je Jahr (fuer die Umrechnung von \code{benchmark}).}
+\item{ppy}{Perioden je Jahr der Renditen in \code{r} (Standard 52 =
+Wochenrenditen; z. B. 252 fuer Handelstage, 12 fuer Monate). Wird nicht
+geschaetzt und dient nur der Umrechnung von \code{benchmark}.}
 }
 \value{
-Wahrscheinlichkeit.
+Eine Zahl: Wahrscheinlichkeit als Anteil (0 bis 1).
 }
 \description{
 Wahrscheinlichkeit, dass die wahre Sharpe Ratio ueber \code{benchmark}
 liegt, unter Beruecksichtigung von Stichprobenlaenge, Schiefe und Woelbung:
 \deqn{PSR = \Phi\left(\frac{(\widehat{SR} - SR^*)\sqrt{T-1}}
       {\sqrt{1 - \gamma_3 \widehat{SR} + \frac{\gamma_4 - 1}{4}\widehat{SR}^2}}\right)}
+Dabei sind \eqn{\widehat{SR}} (Mittelwert / Standardabweichung) und
+\eqn{SR^*} Sharpe Ratios je Periode, \eqn{T} die Anzahl Renditen,
+\eqn{\gamma_3} die Schiefe und \eqn{\gamma_4} die Woelbung (nicht
+Exzess). Eingabe ist ein Renditevektor; fuer ein Ergebnis von
+\code{\link[=simulation]{simulation()}} z. B. \code{v <- result_index(res)$value; r <- v[-1] / v[-length(v)] - 1}.
+}
+\examples{
+set.seed(1)
+r <- rnorm(520, 0.002, 0.02)                    # 10 Jahre Wochenrenditen
+probabilistic_sharpe(r, benchmark = 0, ppy = 52)  # P(wahre SR > 0)
+probabilistic_sharpe(r, benchmark = 1, ppy = 52)  # P(wahre SR > 1 p. a.)
 }
 \references{
 Bailey, D. H. & Lopez de Prado, M. (2012). The Sharpe ratio
-  efficient frontier. Journal of Risk 15(2), 3-44.
+efficient frontier. Journal of Risk 15(2), 3-44.
+}
+\seealso{
+\code{\link[=deflated_sharpe]{deflated_sharpe()}}, \code{\link[=min_track_record]{min_track_record()}}, \code{\link[=sharpe_test]{sharpe_test()}}
 }

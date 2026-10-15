@@ -13,39 +13,103 @@ withdrawal_cohorts(
   step = c("month", "year"),
   wrap = FALSE,
   cape = NULL,
-  base_rate = NULL
+  base_rate = NULL,
+  inflation_type = c("level", "rate_pa")
 )
 }
 \arguments{
-\item{data}{data.frame mit \code{date} und Kursspalte(n) oder ein
-\code{SimLevResult} (dann wird dessen zeitgewichteter Wertindex
-[result_index()] verwendet und \code{price} ignoriert).}
+\item{data}{data.frame mit Spalte \code{date} (Klasse Date oder
+umwandelbar) und der Kursspalte \code{price} (ggf. auch Spalten fuer
+\code{inflation}, \code{cape}, \code{base_rate}), oder ein
+\code{SimLevResult}: dann wird dessen zeitgewichteter Wertindex
+\code{\link[=result_index]{result_index()}} verwendet, \code{price} ignoriert, und nur \code{NULL}
+oder ein Prozentsatz fuer \code{inflation} ist erlaubt (keine
+\code{cape}- oder \code{base_rate}-Spalten).}
 
-\item{price}{Name der Kursspalte des Portfolios (Total Return, nach Kosten),
-z. B. eine Backcast-Reihe.}
+\item{price}{Name der Kursspalte des Portfolios (Total-Return-Niveau, nach
+Kosten), z. B. eine Backcast-Reihe. Standard \code{"value"}.}
 
-\item{inflation}{\code{NULL} (keine Inflation), Prozent p. a. (Skalar) oder
-Name einer Preisindex-Spalte (CPI-Niveau, z. B. HVPI).}
+\item{inflation}{\code{NULL} (Standard; keine Inflation), Zahl = konstante
+Inflation in Prozent p. a. (2 = 2 \% p. a., tagesgenau ueber 365.25 Tage
+je Jahr umgerechnet) oder Zeichenkette = Name einer Preisindex-Spalte
+(CPI-Niveau, z. B. HVPI) bzw. einer Ratenspalte (siehe
+\code{inflation_type}).}
 
-\item{years}{Laenge jeder Kohorte in Jahren.}
+\item{years}{Laenge jeder Kohorte in Jahren (Standard 30; intern
+12 x \code{years} Monate). Muss ganze Perioden der \code{frequency}
+ergeben (bei \code{"year"} ganze Jahre, bei \code{"quarter"} z. B. auch
+2.5).}
 
-\item{frequency}{Periodenlaenge der Simulation: "year", "quarter", "month".}
+\item{frequency}{Periodenlaenge der Entnahme-Simulation: \code{"year"}
+(Standard), \code{"quarter"} oder \code{"month"}.}
 
-\item{step}{Abstand der Kohortenstarts: "month" oder "year".}
+\item{step}{Abstand der Kohortenstarts: \code{"month"} (Standard; jede
+Kohorte beginnt einen Monat spaeter) oder \code{"year"} (alle 12 Monate).}
 
-\item{wrap}{Kohorten ueber das Datenende hinaus durch Fortsetzung am
-Datenanfang verlaengern (wie FI Calc, Option "loop").}
+\item{wrap}{Logisch (Standard \code{FALSE}). \code{TRUE}: Kohorten ueber das
+Datenende hinaus durch Fortsetzung am Datenanfang verlaengern (wie FI Calc,
+Option "loop"), so dass jeder Startzeitpunkt gemaess \code{step} eine
+Kohorte ergibt;
+\code{FALSE}: nur Kohorten, die vollstaendig in den Daten liegen.}
 
-\item{cape}{Optional Spalte mit CAPE-Werten (fuer die CAPE-Regel).}
+\item{cape}{Optional Name einer Spalte mit CAPE-Werten (fuer die Regel
+\code{"cape"} in \code{\link[=withdrawal_rule]{withdrawal_rule()}}); verwendet wird der Wert zu Beginn
+jeder Periode.}
 
-\item{base_rate}{Optional Spalte mit dem Basiszins (Prozent) fuer die
-Vorabpauschale; sonst gilt der Wert aus [withdrawal_simulation()].}
+\item{base_rate}{Optional Name einer Spalte mit dem Basiszins in Prozent
+(2.5 = 2,5 \%) fuer die Vorabpauschale (Wert zu Beginn jeder Periode);
+sonst gilt \code{base_rate} aus \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}.}
+
+\item{inflation_type}{Behandlung einer Spalte in \code{inflation}:
+\code{"level"} (Reihe ist ein Preisindex-Niveau; Inflation = Verhaeltnis
+der Monatsendwerte) oder \code{"rate_pa"} (Reihe ist eine Inflationsrate
+in Prozent pro Jahr, 2 = 2 \% p. a., nicht je Datenperiode, kein Anteil;
+je Zeile ueber die Kalendertage seit der Vorzeile aufgezinst,
+\eqn{\prod (1 + r/100)^{Tage/365.25}}). Stammt \code{data} aus
+\code{\link[=bootstrap_data]{bootstrap_data()}} und ist die Spalte in \code{\link[=bootstrap_config]{bootstrap_config()}}
+ausdruecklich als \code{aux_type = "rate"} gekennzeichnet (Attribut
+\code{aux_type} des data.frames), ergibt sich \code{"rate_pa"} daraus;
+\code{inflation_type} kann dann entfallen und muss, wenn angegeben, dazu
+passen (sonst Fehler). Ohne Attribut gilt \code{inflation_type}
+(Standard \code{"level"}, bisheriges Verhalten). Das Attribut geht bei
+Umformungen wie \code{transform()}, \code{merge()}, \code{cbind()} oder
+Speichern als CSV verloren; dann \code{inflation_type = "rate_pa"}
+angeben. Bei Zahl oder \code{NULL} in \code{inflation} ohne Wirkung.}
 }
 \value{
-Objekt der Klasse \code{withdrawal_paths} (Matrizen Periode x Kohorte).
+Objekt der Klasse \code{withdrawal_paths} (Liste) mit
+\code{returns} (Matrix Perioden x Kohorten der Brutto-Periodenrenditen),
+\code{inflation} (gleiche Form, Brutto-Inflation je Periode; ohne
+Inflation 1), \code{cape} und \code{base_rate} (Matrizen der Werte zu
+Periodenbeginn oder \code{NULL}), \code{frequency}, \code{start_dates}
+(Datum des Monatsendwerts, ab dem jede Kohorte laeuft), \code{historical =
+  TRUE}, \code{wrap} und \code{source} (Name der Kursspalte).
 }
 \description{
 Erzeugt rollierende Start-Kohorten (wie Bengen 1994 und die Trinity-Studie)
 aus einer historischen Kursreihe: Fuer jeden Startmonat bzw. jedes Startjahr
-entsteht ein Pfad ueber \code{years} Jahre.
+entsteht ein Pfad ueber \code{years} Jahre. Eingabe ist ein data.frame mit
+Spalte \code{date} und einer Kursspalte (Niveau, keine Renditen) oder ein
+gespeichertes Ergebnis von \code{\link[=simulation]{simulation()}}. Die Reihe wird auf Monatsenden
+verdichtet (letzter Wert je Kalendermonat, fehlende Werte fortgeschrieben);
+die Monatsrenditen werden zur gewaehlten \code{frequency} aufmultipliziert.
+Die Daten muessen jeden Kalendermonat zwischen erstem und letztem Datum
+enthalten (Tages-, Wochen- oder Monatsdaten); sonst, etwa bei
+Jahresdaten, bricht die Funktion ab.
+Das Ergebnis geht direkt an \code{\link[=withdrawal_simulation]{withdrawal_simulation()}},
+\code{\link[=withdrawal_max_rate]{withdrawal_max_rate()}} oder \code{\link[=perfect_withdrawal_rate]{perfect_withdrawal_rate()}}.
+}
+\examples{
+set.seed(1)
+d <- data.frame(date = seq.Date(as.Date("1990-01-01"), as.Date("2019-12-31"), by = "month"))
+d$depot <- 100 * cumprod(exp(rnorm(nrow(d), 0.005, 0.04)))
+coh <- withdrawal_cohorts(d, price = "depot", inflation = 2, years = 20, step = "year")
+dim(coh$returns)          # 20 Jahre x 10 Kohorten
+head(coh$start_dates)
+ws <- withdrawal_simulation(coh, withdrawal_rule("constant", rate = 4))
+summary(ws)$success_rate
+}
+\seealso{
+\code{\link[=withdrawal_simulation]{withdrawal_simulation()}}, \code{\link[=withdrawal_max_rate]{withdrawal_max_rate()}},
+\code{\link[=result_index]{result_index()}}, \code{\link[=withdrawal_paths]{withdrawal_paths()}}
 }

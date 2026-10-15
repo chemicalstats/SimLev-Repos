@@ -28,22 +28,54 @@
 \method{plot}{SimLevBootstrapStudy}(x, metric = "cagr", ...)
 }
 \arguments{
-\item{x}{Ein \code{bootstrap_config}-, \code{bootstrap_result}-, \code{SimLevBootstrapStudy}- oder Zusammenfassungsobjekt.}
+\item{x}{Ein \code{bootstrap_config}-, \code{bootstrap_result}-,
+\code{SimLevBootstrapStudy}- oder \code{summary.SimLevBootstrapStudy}-Objekt.}
 
-\item{...}{Weitere Argumente.}
+\item{...}{Bei \code{plot()} an \code{plot()} weitergereicht, sonst ohne
+Wirkung.}
 
 \item{object}{Ein \code{SimLevBootstrapStudy}-Objekt.}
 
-\item{metrics}{Kennzahlen fuer die Zusammenfassung.}
+\item{metrics}{Zeichenvektor der Kennzahlen (Spalten von
+\code{object$results}) fuer die Zusammenfassung; nicht vorhandene werden
+uebergangen. Standard: "cagr", "ttwror", "max_drawdown", "sharpe",
+"ulcer_index", "final_value".}
 
-\item{probs}{Quantile.}
+\item{probs}{Quantil-Wahrscheinlichkeiten als Anteil (Standard 0.05, 0.25,
+0.5, 0.75, 0.95); Spaltennamen q05, q25, ...}
 
-\item{metric}{Kennzahl fuer die Dichtegrafik.}
+\item{metric}{Name der Kennzahl (Spalte von \code{x$results}) fuer die
+Dichtegrafik (Standard "cagr").}
 }
 \value{
-Das Objekt (unsichtbar) bzw. eine Zusammenfassung.
+\code{print()} und \code{plot()}: das Objekt (unsichtbar).
+\code{summary()}: Objekt der Klasse \code{summary.SimLevBootstrapStudy}
+mit \code{distribution} (data.frame: strategy, metric, mean und
+Quantilspalten), \code{paired} (data.frame: strategy, metric,
+\code{p_better} = gewichteter Anteil der Pfade, auf denen die Strategie
+besser als der Benchmark ist (groesserer Wert; bei \code{max_drawdown},
+\code{avg_drawdown}, \code{dd_q50}, \code{dd_q90},
+\code{longest_drawdown} und \code{ulcer_index} kleinerer Wert), \code{se}, \code{diff_q05}, \code{diff_median}, \code{diff_q95}
+der Differenz Strategie minus Benchmark; \code{NULL} ohne Benchmark),
+\code{n_paths}, \code{method}, \code{benchmark} und \code{path_length}.
+Kennzahlen behalten die Einheit aus \code{metrics} (bei
+\code{\link[=study_metrics]{study_metrics()}} z. B. CAGR als Anteil; die Ausgabe zeigt Prozent).
+Mit Sparplan ist \code{cagr} geldgewichtet (XIRR); die Ausgabe
+kennzeichnet das in der Ueberschrift der Kennzahl.
 }
 \description{
-Ausgabe-, Zusammenfassungs- und Grafikmethoden.
+Ausgabe-, Zusammenfassungs- und Grafikmethoden fuer Objekte aus
+\code{\link[=bootstrap_config]{bootstrap_config()}}, \code{\link[=bootstrap]{bootstrap()}} und \code{\link[=bootstrap_study]{bootstrap_study()}}.
+\code{summary()} einer Studie liefert je Strategie und Kennzahl den
+gewichteten Mittelwert und gewichtete Quantile; mit \code{benchmark} in
+der Studie zusaetzlich einen gepaarten Vergleich auf denselben Pfaden.
+Die gewichteten Quantile (auch in \code{summary()} und den Faechern von
+\code{plot()} eines Ergebnisses von \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}) sind die gewichtete Version von Typ 7
+nach Hyndman & Fan (1996) in der Form von Akinshin (2023) mit der
+Kish-Stichprobengroesse \eqn{(\sum w)^2 / \sum w^2}: bei gleichen Gewichten
+(ohne ESS) genau \code{\link[stats:quantile]{stats::quantile()}} mit \code{type = 7}, sonst eine
+stetig von den Gewichten abhaengende Interpolation benachbarter Werte.
+\code{print()} einer Studie gibt eine Kurzinfo und die Zusammenfassung aus.
+\code{plot()} zeichnet (ungewichtete) Dichten einer Kennzahl je Strategie.
 }
 \keyword{internal}

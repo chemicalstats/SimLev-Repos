@@ -1,0 +1,32 @@
+# Einkommensteuertarif (§ 32a Abs. 1 EStG) und Solidaritaetszuschlag (§§ 3, 4 SolZG)
+# Geltung: ab VZ 2026
+# Veranlagung: Einzelveranlagung (Grundtarif), kein Splitting
+# Quelle: Gesetzestext § 32a Abs. 1 EStG und § 3 Abs. 3, § 4 SolZG 1995, jeweils in der Fassung ab VZ 2026
+#
+# Austausch: Fuer einen anderen Tarif diese Datei kopieren, die Zahlen aendern und den Pfad als
+# simulation(..., tax_tariff = "<Datei>") bzw. read_tax_tariff("<Datei>") angeben. Die Datei gilt fuer
+# alle Simulationsjahre (aktuelle Rechtslage, auf alle Jahre projiziert).
+#
+# Format: Basis-R lesbar mit read.csv(datei, comment.char = "#"); KOMMA als Trennzeichen (kein Semikolon),
+# PUNKT als Dezimalzeichen (0.42, nicht 0,42), Zeilen mit # sind Kommentare. Spalten und Einheiten:
+#   art     "zone" = Tarifzone der Einkommensteuer, "soli" = Solidaritaetszuschlag (genau eine Zeile)
+#   ab      zone: EUR. Zone gilt ab x >= ab (x = zu versteuerndes Einkommen, auf volle Euro abgerundet);
+#                 die erste Zone beginnt bei 0, die Zonen stehen aufsteigend
+#           soli: EUR. Freigrenze in EUR Einkommensteuer (Soli nur, wenn die ESt sie uebersteigt)
+#   bezug   zone: EUR. Bezugswert fuer u = (x - bezug) / teiler           (soli: leer)
+#   teiler  zone: EUR (> 0). Teiler fuer u; u selbst ist dimensionslos   (soli: leer)
+#   a, b    zone: Koeffizienten in Steuer = (a * u + b) * u + c. Progressionszonen (teiler = 10000, u
+#                 dimensionslos): a, b in EUR (z. B. 914.51, 1400). Lineare Zonen (a = 0, bezug = 0,
+#                 teiler = 1, also u = x): b ist der Grenzsteuersatz als ANTEIL, 0.42 fuer 42 % (NICHT 42).
+#           soli: PROZENT. a = Zuschlagsatz in Prozent der ESt (5.5 fuer 5,5 %), b = Milderungssatz
+#                 in Prozent des Betrags, um den die ESt die Freigrenze uebersteigt (11.9 fuer 11,9 %)
+#   c       zone: EUR. Konstante der Formel (bei linearen Zonen der Abzugsbetrag, negativ)  (soli: leer)
+# Ergebnis der Zonenformel in EUR, danach auf volle Euro abgerundet. read_tax_tariff() prueft u. a.,
+# dass der Grenzsteuersatz jeder Zone zwischen 0 und 1 liegt und die Steuer das Einkommen nicht uebersteigt.
+art,ab,bezug,teiler,a,b,c
+zone,0,0,1,0,0,0
+zone,12349,12348,10000,914.51,1400,0
+zone,17800,17799,10000,173.10,2397,1034.87
+zone,69879,0,1,0,0.42,-11135.63
+zone,277826,0,1,0,0.45,-19470.38
+soli,20350,,,5.5,11.9,

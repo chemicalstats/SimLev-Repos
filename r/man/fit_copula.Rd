@@ -7,23 +7,44 @@
 fit_copula(x, y, families = NULL)
 }
 \arguments{
-\item{x, y}{Numerische Vektoren gleicher Laenge (Renditen; nur die Raenge
-zaehlen).}
+\item{x, y}{Numerische Vektoren gleicher Laenge (z. B. Renditen; nur die
+Raenge zaehlen). Paare mit nicht endlichen Werten werden entfernt;
+mindestens 20 Paare noetig.}
 
-\item{families}{Familien (Standard: passend zum Vorzeichen von Kendalls Tau).}
+\item{families}{Zeichenvektor der Familien: \code{"gaussian"}, \code{"t"},
+\code{"clayton"}, \code{"gumbel"}, \code{"frank"}, jeweils optional mit
+Rotation \code{"_90"}, \code{"_180"} oder \code{"_270"} (z. B.
+\code{"clayton_180"}). \code{NULL} (Standard) = Auswahl nach dem
+Vorzeichen von Kendalls Tau: bei Tau >= 0 \code{gaussian}, \code{t},
+\code{clayton}, \code{gumbel}, \code{frank}, \code{clayton_180},
+\code{gumbel_180}; sonst \code{gaussian}, \code{t}, \code{frank},
+\code{clayton_90}, \code{clayton_270}, \code{gumbel_90},
+\code{gumbel_270}. Rotationen gibt es nur fuer \code{clayton} und
+\code{gumbel} (Gauss-, t- und Frank-Copula sind radialsymmetrisch);
+andere Namen sind ein Fehler, ebenso eine konstante Reihe.}
 }
 \value{
-data.frame je Familie: \code{family}, \code{par1}, \code{par2},
-  \code{loglik}, \code{aic}, \code{bic}, \code{lambda_lower},
-  \code{lambda_upper} (implizite Tail-Abhaengigkeit), sortiert nach AIC.
+data.frame mit einer Zeile je Familie, aufsteigend nach AIC
+sortiert (erste Zeile = beste Familie): \code{family}, \code{par1}
+(Korrelation bei Gauss/t, sonst \eqn{\theta}), \code{par2}
+(Freiheitsgrade der t-Copula, hoechstens 500; sonst \code{NA}),
+\code{loglik}, \code{aic}, \code{bic}, \code{lambda_lower},
+\code{lambda_upper} (implizite Tail-Koeffizienten der Copula, Anteile
+0 bis 1; fuer die um 90/270 Grad rotierten Familien 0). Attribute
+\code{tau} (Kendalls Tau) und \code{n} (Anzahl Paare).
 }
 \description{
-Pseudo-Maximum-Likelihood auf Raengen (Genest, Ghoudi & Rivest 1995) fuer
-Gauss-, t-, Clayton-, Gumbel- und Frank-Copula. Clayton und Gumbel erfassen
-asymmetrische Tails: Clayton die gemeinsamen Abstuerze (unterer Tail),
-Gumbel gemeinsame Anstiege; die um 180 Grad rotierten Varianten jeweils
-umgekehrt. Bei negativer Abhaengigkeit (z. B. Aktien und Anleihen in
-Deflationsphasen) werden die um 90/270 Grad rotierten Varianten verwendet.
+Passt mehrere bivariate Copula-Familien an zwei Reihen (z. B.
+Periodenrenditen zweier Anlagen) an und vergleicht sie per AIC.
+Pseudo-Maximum-Likelihood auf Raengen (Genest, Ghoudi & Rivest 1995):
+Die Reihen werden in Pseudo-Beobachtungen Rang / (n + 1) umgerechnet, die
+Raender gehen also nicht ein. Familien: Gauss-, t-, Clayton-, Gumbel- und
+Frank-Copula. Clayton und Gumbel erfassen asymmetrische Tails: Clayton die
+gemeinsamen Abstuerze (unterer Tail), Gumbel gemeinsame Anstiege; die um
+180 Grad rotierten Varianten jeweils umgekehrt. Bei negativer Abhaengigkeit
+(z. B. Aktien und Anleihen in Deflationsphasen) werden die um 90/270 Grad
+rotierten Varianten verwendet. Kendalls Tau wird intern in O(n log n)
+berechnet (gleiches Ergebnis wie \code{stats::cor(method = "kendall")}).
 }
 \examples{
 set.seed(1); z <- matrix(rnorm(2000), ncol = 2) \%*\% chol(matrix(c(1, .6, .6, 1), 2))
@@ -32,5 +53,10 @@ fit_copula(x, y)[, c("family", "par1", "par2", "aic", "lambda_lower")]
 }
 \references{
 Genest, C., Ghoudi, K. & Rivest, L.-P. (1995), Biometrika
-  82(3); Joe, H. (2014), Dependence Modeling with Copulas.
+82(3); Joe, H. (2014), Dependence Modeling with Copulas.
+}
+\seealso{
+\code{\link[=tail_dependence]{tail_dependence()}} fuer die empirischen Tail-Koeffizienten,
+\code{\link[=dependence_analysis]{dependence_analysis()}} (Copula-Fits fuer alle Paare),
+\code{\link[=copula_scenarios]{copula_scenarios()}}.
 }

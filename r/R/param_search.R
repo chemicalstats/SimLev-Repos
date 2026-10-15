@@ -18,18 +18,39 @@
 
 #' Suchraum fuer param_search()
 #'
-#' @param ... Benannte Dimensionen. Jede ist entweder ein Vektor diskreter
-#'   Werte (numerisch, Zeichen, logisch) oder ein Bereich aus
-#'   \code{param_range()}.
-#' @param lower,upper Bereichsgrenzen.
+#' \code{param_space()} beschreibt den Suchraum fuer [param_search()]: je
+#' Parameter eine benannte Dimension mit diskreten Werten oder einem
+#' stetigen Bereich aus \code{param_range()}. Bei \code{method = "grid"}
+#' werden alle Kombinationen der Rasterwerte ausgewertet; bei
+#' \code{"random"} und \code{"lhs"} werden diskrete Werte gleichverteilt
+#' ausgewaehlt und Bereiche stetig zwischen \code{lower} und \code{upper}
+#' gezogen (\code{n} und \code{step} spielen dann keine Rolle).
+#'
+#' @param ... Benannte Dimensionen (alle Namen Pflicht; sie werden zu den
+#'   Namen der Liste \code{p} im \code{builder}, ohne \code{builder} zu
+#'   Argumentnamen von [simulation()]). Jede ist entweder ein nicht leerer
+#'   atomarer Vektor diskreter Werte (numerisch, Zeichen, logisch) oder ein
+#'   Bereich aus \code{param_range()}. Bei \code{print()} ungenutzt.
+#' @param lower,upper Bereichsgrenzen (Zahlen in der Einheit des Parameters,
+#'   \code{lower <= upper}; bei \code{log = TRUE} \code{lower > 0}).
 #' @param n Anzahl Rasterpunkte des Bereichs bei \code{method = "grid"}
-#'   (alternativ \code{step}).
-#' @param step Schrittweite fuer das Raster.
-#' @param integer Werte auf ganze Zahlen runden.
-#' @param log Logarithmisch skalieren (Raster und Ziehung), z. B. fuer
+#'   (ganze Zahl >= 1, Standard 5); wird ignoriert, wenn \code{step}
+#'   angegeben ist.
+#' @param step Schrittweite des Rasters in der Einheit des Parameters
+#'   (\code{seq(lower, upper, by = step)}, > 0); hat Vorrang vor \code{n} und
+#'   \code{log} (\code{log} gilt dann nur fuer Zufallsziehungen).
+#'   \code{NULL} (Standard) = \code{n} Punkte.
+#' @param integer Logisch (Standard \code{FALSE}): Raster- und Zufallswerte
+#'   auf ganze Zahlen runden; doppelte Rasterwerte entfallen.
+#' @param log Logisch (Standard \code{FALSE}): Raster gleichabstaendig auf
+#'   der Log-Skala und Ziehung log-gleichverteilt, z. B. fuer
 #'   Fensterlaengen.
-#' @return \code{param_space}: Objekt der Klasse \code{SimLevParamSpace};
-#'   \code{param_range}: Objekt der Klasse \code{SimLevParamRange}.
+#' @param x Objekt der Klasse \code{SimLevParamSpace} (fuer \code{print()}).
+#' @return \code{param_space}: Objekt der Klasse \code{SimLevParamSpace}
+#'   (benannte Liste der Dimensionen); \code{param_range}: Objekt der Klasse
+#'   \code{SimLevParamRange} (Liste mit \code{lower}, \code{upper}, \code{n},
+#'   \code{step}, \code{integer}, \code{log}).
+#' @seealso [param_search()], [plateau()]
 #' @examples
 #' sp <- param_space(n = param_range(50, 400, n = 8, integer = TRUE, log = TRUE),
 #'                   band = c(0, 1, 2), w = param_range(0.3, 0.9, step = 0.1))
@@ -37,7 +58,7 @@
 #' @export
 param_space <- function(...) {
   d <- list(...)
-  if (!length(d) || is.null(names(d)) || any(names(d) == "")) stop("param_space: alle Dimensionen muessen benannt sein.")
+  if (!length(d) || is.null(names(d)) || any(names(d) == "")) stop("param_space: alle Dimensionen m\u00fcssen benannt sein.")
   for (k in names(d)) if (!inherits(d[[k]], "SimLevParamRange") && (!is.atomic(d[[k]]) || !length(d[[k]])))
     stop(sprintf("param_space: Dimension '%s' muss ein Vektor oder param_range() sein.", k))
   structure(d, class = "SimLevParamSpace")
@@ -48,10 +69,15 @@ param_space <- function(...) {
 param_range <- function(lower, upper, n = 5, step = NULL, integer = FALSE, log = FALSE) {
   if (!is.numeric(lower) || !is.numeric(upper) || upper < lower) stop("param_range: lower <= upper erforderlich.")
   if (log && lower <= 0) stop("param_range: log = TRUE erfordert lower > 0.")
+  if (is.null(step) && (!is.numeric(n) || length(n) != 1 || !is.finite(n) || n < 1 || n != round(n)))
+    stop(sprintf("param_range: n (Anzahl Rasterpunkte) muss eine ganze Zahl >= 1 sein (erhalten: %s).", paste(format(n), collapse = ", ")))
+  if (!is.null(step) && (!is.numeric(step) || length(step) != 1 || !is.finite(step) || step <= 0))
+    stop(sprintf("param_range: step muss eine Zahl > 0 sein (erhalten: %s).", paste(format(step), collapse = ", ")))
   structure(list(lower = lower, upper = upper, n = as.integer(n), step = step, integer = integer, log = log),
             class = "SimLevParamRange")
 }
 
+#' @rdname param_space
 #' @export
 print.SimLevParamSpace <- function(x, ...) {
   cat("SimLev-Parameterraum\n")
@@ -68,6 +94,7 @@ print.SimLevParamSpace <- function(x, ...) {
 
 #' Rasterwerte einer Dimension
 #' @keywords internal
+#' @noRd
 .ps_levels <- function(d) {
   if (!inherits(d, "SimLevParamRange")) return(d)
   v <- if (!is.null(d$step)) seq(d$lower, d$upper, by = d$step)
@@ -79,6 +106,7 @@ print.SimLevParamSpace <- function(x, ...) {
 
 #' Werte einer Dimension aus gleichverteilten u in (0, 1) abbilden
 #' @keywords internal
+#' @noRd
 .ps_map <- function(d, u) {
   if (!inherits(d, "SimLevParamRange")) return(d[pmin(length(d), floor(u * length(d)) + 1L)])
   v <- if (d$log) exp(log(d$lower) + u * (log(d$upper) - log(d$lower))) else d$lower + u * (d$upper - d$lower)
@@ -88,6 +116,7 @@ print.SimLevParamSpace <- function(x, ...) {
 
 #' Versuchsplan erzeugen
 #' @keywords internal
+#' @noRd
 .ps_design <- function(space, method, n, constraint) {
   ok_rows <- function(D) {
     if (is.null(constraint)) return(rep(TRUE, nrow(D)))
@@ -110,13 +139,14 @@ print.SimLevParamSpace <- function(x, ...) {
     }
     D <- utils::head(D, n)
   }
-  if (!nrow(D)) stop("param_search: kein zulaessiger Punkt im Suchraum (constraint pruefen).")
+  if (!nrow(D)) stop("param_search: kein zul\u00e4ssiger Punkt im Suchraum (constraint pr\u00fcfen).")
   rownames(D) <- NULL
   D
 }
 
 #' Eine Strategie-Spezifikation auf einem data.frame auswerten
 #' @keywords internal
+#' @noRd
 .run_spec <- function(df, sp, sim_args, burn_in) {
   if (!is.null(sp$signal)) {
     sg <- sp$signal(df)
@@ -132,6 +162,7 @@ print.SimLevParamSpace <- function(x, ...) {
 
 #' Builder-Ergebnis in eine Spezifikation umwandeln
 #' @keywords internal
+#' @noRd
 .as_spec <- function(s) if (is.list(s) && !is.null(s$strategy) && !inherits(s, "strategy")) s else list(strategy = s)
 
 #' Parametersuche ueber Strategie- und Simulationsparameter
@@ -142,40 +173,86 @@ print.SimLevParamSpace <- function(x, ...) {
 #' Ueberanpassungs-Pruefungen [pbo()], [deflated_sharpe()] und
 #' [walk_forward()] auf.
 #'
-#' @param data Datensatz wie in [simulation()] (inklusive Vorlauf fuer
-#'   Signale, siehe \code{burn_in}).
+#' Je Punkt wird die Spezifikation in dieser Reihenfolge angewandt:
+#' \code{signal(df)} auf dem vollen Datensatz, dann \code{data(df)}, dann
+#' \code{map}, dann das Verwerfen der ersten \code{burn_in} Zeilen und
+#' schliesslich [simulation()] mit \code{sim_args}, ueberschrieben durch
+#' \code{args}. Fehler einzelner Punkte brechen die Suche nicht ab, sondern
+#' stehen in \code{results$error}. Das Ergebnis laesst sich auch mit
+#' [reality_check()] und [sharpe_haircut()] weiterverarbeiten.
+#'
+#' @param data data.frame wie in [simulation()] (Spalte \code{date} und
+#'   Kursspalten als Niveaus), inklusive Vorlauf fuer Signale (siehe
+#'   \code{burn_in}).
 #' @param builder Funktion \code{function(p)}, die aus einer benannten Liste
 #'   \code{p} (ein Punkt des Raums) entweder eine Strategie oder eine Liste
 #'   \code{list(strategy, signal, args, map, data)} liefert:
-#'   \code{signal} wie in [bootstrap_study()] (z. B. mit [signal_sma()]),
-#'   \code{args} ueberschreibt \code{sim_args}, \code{data} ist optional eine
+#'   \code{signal} wie in [bootstrap_study()] (Funktion \code{df ->}
+#'   data.frame oder Liste von Spalten, z. B. mit [signal_sma()]),
+#'   \code{args} (Liste) ueberschreibt \code{sim_args}, \code{map} (benannter
+#'   Zeichenvektor) legt Spalten-Aliase an, \code{data} ist optional eine
 #'   Funktion \code{df -> df} (z. B. eine Hebelreihe mit [leveraged_series()]
-#'   anlegen). Ohne \code{builder} werden die Parameter als Argumente von
-#'   [simulation()] fuer \code{strategy} verwendet.
-#' @param space Suchraum aus [param_space()] (oder benannte Liste).
-#' @param strategy Feste Strategie, wenn \code{builder} fehlt.
-#' @param method \code{"grid"} (volles Raster), \code{"random"} (Zufallssuche)
-#'   oder \code{"lhs"} (Latin Hypercube; gleichmaessige Abdeckung bei vielen
-#'   Dimensionen).
-#' @param n Anzahl Punkte bei \code{"random"} und \code{"lhs"}.
-#' @param constraint Optional \code{function(p) TRUE/FALSE} (z. B. Gewichte
-#'   summieren sich hoechstens zu 1).
-#' @param sim_args Gemeinsame Argumente fuer [simulation()].
-#' @param burn_in Zeilen am Anfang, die nach der Signalberechnung verworfen
-#'   werden (Signal-Vorlauf).
-#' @param metrics Kennzahlen-Funktion (Standard [study_metrics()]).
-#' @param objective Zielgroesse (Spalte aus \code{metrics}) fuer Ranking,
-#'   Plateau und Ueberanpassungs-Pruefungen.
-#' @param maximize Zielgroesse maximieren (\code{FALSE} z. B. fuer
-#'   \code{max_drawdown}).
-#' @param cores Prozesse.
-#' @param seed Startwert fuer \code{"random"}/\code{"lhs"}.
-#' @param keep_returns Taegliche Renditen speichern (fuer pbo/DSR/Walk-Forward).
-#' @return Objekt der Klasse \code{SimLevParamSearch}: \code{results}
-#'   (Parameter, Kennzahlen, Fehler), \code{returns} (Matrix Tage x Punkte),
-#'   \code{dates} und Metadaten. Methoden \code{print}, \code{summary},
-#'   \code{plot}; Weiterverarbeitung mit [plateau()], [pbo()],
-#'   [deflated_sharpe()], [walk_forward()], [param_bootstrap()].
+#'   anlegen). \code{NULL} (Standard) = ohne \code{builder}: die Parameter
+#'   werden als Argumente von [simulation()] fuer \code{strategy} verwendet.
+#' @param space Suchraum aus [param_space()] (oder benannte Liste, die an
+#'   [param_space()] weitergegeben wird).
+#' @param strategy Feste Strategie (z. B. aus [create_strategy()]), wenn
+#'   \code{builder} fehlt; sonst ungenutzt.
+#' @param method \code{"grid"} (Standard, volles Raster), \code{"random"}
+#'   (Zufallssuche) oder \code{"lhs"} (Latin Hypercube; gleichmaessige
+#'   Abdeckung bei vielen Dimensionen).
+#' @param n Anzahl Punkte bei \code{"random"} und \code{"lhs"} (ganze Zahl,
+#'   Standard 50); bei \code{"grid"} ignoriert. Doppelte Punkte werden
+#'   entfernt und in hoechstens 20 Runden nachgezogen; es koennen weniger
+#'   Punkte entstehen.
+#' @param constraint Optional \code{function(p)}, die \code{TRUE} fuer
+#'   zulaessige Punkte liefert (z. B. Gewichte summieren sich hoechstens zu
+#'   1); Punkte ohne \code{TRUE} entfallen. \code{NULL} (Standard) = alle
+#'   Punkte.
+#' @param sim_args Benannte Liste gemeinsamer Argumente fuer [simulation()]
+#'   (Standard: keine).
+#' @param burn_in Anzahl Zeilen am Anfang von \code{data} (bei Tagesdaten:
+#'   Tage), die nach der Signalberechnung verworfen werden (Signal-Vorlauf;
+#'   ganze Zahl, Standard 0).
+#' @param metrics Funktion \code{SimLevResult ->} benannter numerischer
+#'   Vektor (Standard [study_metrics()]: u. a. \code{cagr},
+#'   \code{max_drawdown} als Anteil, \code{sharpe}; \code{cagr} ist mit
+#'   Sparplan geldgewichtet, XIRR).
+#' @param objective Name der Zielgroesse (Element von \code{metrics}, Standard
+#'   \code{"sharpe"}) fuer Ranking, Plateau und [param_bootstrap()].
+#' @param maximize Logisch: Zielgroesse maximieren (Standard \code{TRUE};
+#'   \code{FALSE} z. B. fuer \code{max_drawdown}).
+#' @param cores Anzahl paralleler Prozesse (ganze Zahl, Standard 1); unter
+#'   Unix per Fork (\code{parallel::mclapply}), unter Windows per
+#'   PSOCK-Cluster.
+#' @param seed Startwert (ganze Zahl) fuer den Versuchsplan bei
+#'   \code{"random"}/\code{"lhs"}; der Zufallszustand der Sitzung wird danach
+#'   wiederhergestellt. \code{NULL} (Standard) = aktueller Zufallszustand,
+#'   der dabei normal weiterlaeuft (wiederholte Aufrufe ziehen andere Punkte).
+#' @param keep_returns Logisch (Standard \code{TRUE}): taegliche Renditen je
+#'   Punkt speichern (noetig fuer [pbo()], [deflated_sharpe()],
+#'   [walk_forward()], [reality_check()], [sharpe_haircut()]).
+#' @return Objekt der Klasse \code{SimLevParamSearch}, eine Liste mit
+#'   \describe{
+#'     \item{\code{results}}{data.frame je Punkt: \code{id}, eine Spalte je
+#'       Parameter, die Kennzahlen aus \code{metrics} (\code{NA} bei Fehler)
+#'       und \code{error} (Fehlermeldung oder \code{NA}).}
+#'     \item{\code{returns}}{Matrix Tage x Punkte der taeglichen
+#'       zeitgewichteten Renditen als Anteil (aus [result_index()]); Zeilen =
+#'       Tage nach \code{burn_in} ohne den ersten, Spalten \code{p1},
+#'       \code{p2}, ... (Nummer = \code{id}); \code{NA} fuer fehlgeschlagene
+#'       Punkte. \code{NULL} bei \code{keep_returns = FALSE}.}
+#'     \item{\code{dates}}{Datum je Zeile von \code{returns} (Kalender des
+#'       ersten erfolgreichen Punkts).}
+#'     \item{\code{space}, \code{params}, \code{method}, \code{objective},
+#'       \code{maximize}, \code{builder}, \code{sim_args},
+#'       \code{burn_in}}{Einstellungen (\code{params} = Parameternamen).}
+#'     \item{\code{metrics}}{Namen der Kennzahlen.}
+#'     \item{\code{elapsed}}{Laufzeit in Sekunden.}
+#'   }
+#'   Methoden \code{print}, \code{summary}, \code{plot}; Weiterverarbeitung
+#'   mit [plateau()], [pbo()], [deflated_sharpe()], [walk_forward()],
+#'   [param_bootstrap()].
 #' @examples
 #' \donttest{
 #' set.seed(1)
@@ -185,6 +262,9 @@ print.SimLevParamSpace <- function(x, ...) {
 #' ps <- param_search(d, function(p) list(strategy = st, signal = function(df) signal_sma(df$A, p$n, p$band)),
 #'                    param_space(n = c(50, 100, 200), band = c(0, 2)), burn_in = 250)
 #' summary(ps)
+#' ps$results[, c("id", "n", "band", "cagr", "sharpe", "error")]
+#' dim(ps$returns)    # Tage x Punkte
+#' plot(ps)           # Heatmap der Zielgroesse ueber n und band
 #' }
 #' @seealso [plateau()], [pbo()], [deflated_sharpe()], [walk_forward()], [sensitivity_grid()]
 #' @export
@@ -199,8 +279,7 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
     if (is.null(strategy)) stop("param_search: 'builder' oder 'strategy' angeben.")
     builder <- function(p) list(strategy = strategy, args = p)
   }
-  if (!is.null(seed)) design <- .with_rng_restore({ set.seed(seed); .ps_design(space, method, n, constraint) })
-  else design <- .ps_design(space, method, n, constraint)
+  design <- .with_rng_restore(.ps_design(space, method, n, constraint), seed = seed)
   t0 <- Sys.time()
   run <- function(i) {
     p <- as.list(design[i, , drop = FALSE])
@@ -242,6 +321,7 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
 
 #' Nachbarschaften im Parameterraum
 #' @keywords internal
+#' @noRd
 .ps_neighbours <- function(x, radius = 1L, k = 5L) {
   P <- x$results[, x$params, drop = FALSE]
   if (x$method == "grid") {
@@ -263,19 +343,49 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
 #' Rasterstufen unterscheiden; bei Zufallssuche/LHS die \code{k} naechsten
 #' Punkte im rangskalierten Raum.
 #'
-#' @param x \code{SimLevParamSearch}.
-#' @param metric Kennzahl (Standard: Zielgroesse der Suche).
-#' @param radius Rasterstufen (nur \code{method = "grid"}).
-#' @param k Nachbarn inklusive Punkt selbst (Zufallssuche/LHS).
-#' @return data.frame mit \code{id}, \code{value}, \code{plateau_mean},
-#'   \code{plateau_min} (bzw. \code{max} bei Minimierung als
-#'   ungunstigster Nachbar) und \code{neighbours}.
+#' Rasterstufen sind die Positionen in den Rasterwerten jeder Dimension des
+#' Suchraums. Im rangskalierten Raum wird jede Dimension ueber ihre Raenge
+#' auf 0 bis 1 abgebildet (nicht numerische Parameter ueber ihre
+#' Faktorcodes) und der euklidische Abstand verwendet. Der Punkt selbst
+#' gehoert immer zu seiner Nachbarschaft.
+#'
+#' @param x \code{SimLevParamSearch} aus [param_search()] (gespeicherte
+#'   Renditen sind nicht noetig).
+#' @param metric Name einer Kennzahlspalte von \code{x$results} (Standard:
+#'   Zielgroesse der Suche, \code{x$objective}).
+#' @param radius Maximaler Abstand in Rasterstufen je Dimension (ganze Zahl,
+#'   Standard 1); nur \code{method = "grid"}.
+#' @param k Anzahl Nachbarn inklusive Punkt selbst (ganze Zahl, Standard 5);
+#'   nur \code{method = "random"} und \code{"lhs"}.
+#' @return data.frame je Punkt mit \code{id}, \code{value} (Kennzahl des
+#'   Punkts), \code{plateau_mean} (Mittel der Kennzahl ueber die
+#'   Nachbarschaft, fehlende Werte ignoriert), \code{plateau_min}
+#'   (unguenstigster Wert der Nachbarschaft: bei der Zielgroesse je nach
+#'   \code{x$maximize} das Minimum bzw. Maximum; bei anderen Kennzahlen das
+#'   Maximum fuer \code{max_drawdown}, \code{avg_drawdown}, \code{dd_q50},
+#'   \code{dd_q90}, \code{ulcer_index} und \code{longest_drawdown}
+#'   (kleiner = besser), sonst das Minimum) und \code{neighbours} (Anzahl Punkte der Nachbarschaft). Die
+#'   Einheit entspricht der Kennzahl.
+#' @seealso [param_search()], [walk_forward()] (\code{select = "plateau"}),
+#'   [param_bootstrap()] (\code{by = "plateau"})
+#' @examples
+#' set.seed(1)
+#' d <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = 3000))
+#' d$A <- 100 * cumprod(1 + rnorm(3000, 3e-4, 0.011))
+#' st <- create_strategy(A = asset_config("etf", "signal", signal_buy = "buy", signal_sell = "sell"))
+#' ps <- param_search(d, function(p) list(strategy = st, signal = function(df) signal_sma(df$A, p$n, p$band)),
+#'                    param_space(n = c(50, 100, 200), band = c(0, 2)), burn_in = 250)
+#' pl <- plateau(ps)
+#' cbind(ps$results[, c("n", "band")], pl[, -1])
+#' plateau(ps, metric = "cagr")
 #' @export
 plateau <- function(x, metric = x$objective, radius = 1L, k = 5L) {
   if (!inherits(x, "SimLevParamSearch")) stop("x muss ein SimLevParamSearch sein.")
   tab <- x$results; v <- tab[[metric]]
   nb <- .ps_neighbours(x, radius, k)
-  worst <- if (isTRUE(x$maximize) || metric != x$objective) min else max
+  # unguenstigster Wert: Zielgroesse nach x$maximize, sonst kleiner = besser bei Drawdown-Kennzahlen
+  lower_better <- if (metric == x$objective) !isTRUE(x$maximize) else metric %in% .lower_better
+  worst <- if (lower_better) max else min
   data.frame(id = tab$id, value = v,
              plateau_mean = vapply(nb, function(j) mean(v[j], na.rm = TRUE), 0),
              plateau_min = vapply(nb, function(j) suppressWarnings(worst(v[j], na.rm = TRUE)), 0),
@@ -283,9 +393,18 @@ plateau <- function(x, metric = x$objective, radius = 1L, k = 5L) {
 }
 
 #' @rdname param_search
-#' @param object,x \code{SimLevParamSearch}.
-#' @param top Anzahl gezeigter Punkte.
-#' @param ... ungenutzt bzw. an \code{plot} weitergereicht.
+#' @param object,x Objekt der Klasse \code{SimLevParamSearch}.
+#' @param top Anzahl der in \code{summary()} bzw. \code{print()} gezeigten
+#'   besten Punkte nach der Zielgroesse (ganze Zahl, Standard 10).
+#'   \code{summary()} liefert ein Objekt der Klasse
+#'   \code{summary.SimLevParamSearch} mit \code{top} (Tabelle mit Spalte
+#'   \code{plateau} = \code{plateau_mean} aus [plateau()]), \code{best},
+#'   \code{best_plateau} (Zeilen von \code{results}), \code{n},
+#'   \code{n_failed}, \code{objective}, \code{method}, \code{params} und
+#'   \code{elapsed}.
+#' @param ... Bei \code{summary()} ungenutzt; bei \code{print()} an
+#'   \code{summary()} weitergereicht (z. B. \code{top}); bei \code{plot()}
+#'   an [graphics::plot()] bzw. [graphics::image()].
 #' @export
 summary.SimLevParamSearch <- function(object, top = 10L, ...) {
   tab <- object$results; obj <- object$objective
@@ -302,11 +421,13 @@ summary.SimLevParamSearch <- function(object, top = 10L, ...) {
 #' @export
 print.summary.SimLevParamSearch <- function(x, ...) {
   cat(sprintf("SimLev-Parametersuche (%s): %d Punkte, %d fehlgeschlagen, %.1f s\n", x$method, x$n, x$n_failed, x$elapsed))
-  cat(sprintf("Zielgroesse: %s\n\n", x$objective))
+  cat(sprintf("Zielgr\u00f6\u00dfe: %s\n\n", x$objective))
   y <- x$top
   for (k in intersect(c("cagr", "max_drawdown"), names(y))) y[[k]] <- sprintf("%.2f %%", 100 * y[[k]])
   for (k in setdiff(names(y), c("id", x$params, "cagr", "max_drawdown"))) if (is.numeric(y[[k]])) y[[k]] <- sprintf("%.3f", y[[k]])
   print(y, row.names = FALSE)
+  if ("cagr" %in% names(y) || identical(x$objective, "cagr"))
+    cat("cagr: mit Sparplan geldgewichtet (XIRR), sonst CAGR des Depotwerts\n")
   fmtp <- function(r) paste(sprintf("%s = %s", x$params, vapply(x$params, function(p) format(r[[p]]), "")), collapse = ", ")
   cat(sprintf("\nBester Punkt:   #%d (%s), %s = %.3f\n", x$best$id, fmtp(x$best), x$objective, x$best[[x$objective]]))
   cat(sprintf("Bestes Plateau: #%d (%s), %s = %.3f, Nachbarschaft = %.3f\n", x$best_plateau$id, fmtp(x$best_plateau),
@@ -314,14 +435,21 @@ print.summary.SimLevParamSearch <- function(x, ...) {
   invisible(x)
 }
 
+#' @rdname param_search
 #' @export
 print.SimLevParamSearch <- function(x, ...) { print(summary(x, ...)); invisible(x) }
 
 #' @rdname param_search
-#' @param metric Kennzahl fuer die Grafik.
-#' @param params Ein oder zwei Parameter fuer die Achsen (Standard: die ersten
-#'   beiden); weitere Dimensionen werden mit \code{fun} zusammengefasst.
-#' @param fun Zusammenfassung ueber die uebrigen Dimensionen (Standard \code{max}).
+#' @param metric Name der Kennzahl (Spalte von \code{results}) fuer die
+#'   Grafik (Standard: Zielgroesse). Beim Raster werden die Zellen
+#'   beschriftet, \code{cagr}, \code{ttwror}, \code{max_drawdown} und
+#'   \code{avg_drawdown} in Prozent.
+#' @param params Ein oder zwei Parameternamen fuer die Achsen (Standard: die
+#'   ersten beiden); weitere Dimensionen werden mit \code{fun}
+#'   zusammengefasst. Ein Parameter: Linie; zwei: Heatmap (Raster) bzw.
+#'   farbiges Streudiagramm (\code{"random"}, \code{"lhs"}).
+#' @param fun Funktion zur Zusammenfassung ueber die uebrigen Dimensionen
+#'   (Standard \code{max}; bei Minimierung z. B. \code{min}).
 #' @export
 plot.SimLevParamSearch <- function(x, metric = x$objective, params = utils::head(x$params, 2), fun = max, ...) {
   tab <- x$results

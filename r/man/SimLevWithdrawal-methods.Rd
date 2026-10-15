@@ -7,6 +7,7 @@
 \alias{print.summary.SimLevWithdrawal}
 \alias{print.SimLevWithdrawal}
 \alias{plot.SimLevWithdrawal}
+\alias{print.SimLevHorizon}
 \title{Methoden fuer Entnahme-Objekte}
 \usage{
 \method{print}{withdrawal_rule}(x, ...)
@@ -18,20 +19,50 @@
 \method{print}{SimLevWithdrawal}(x, ...)
 
 \method{plot}{SimLevWithdrawal}(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95), ...)
+
+\method{print}{SimLevHorizon}(x, ...)
 }
 \arguments{
-\item{x}{Ein \code{withdrawal_rule}-, \code{SimLevWithdrawal}- oder Zusammenfassungsobjekt.}
+\item{x}{Ein \code{withdrawal_rule}-, \code{SimLevHorizon}-,
+\code{SimLevWithdrawal}- oder \code{summary.SimLevWithdrawal}-Objekt.}
 
-\item{...}{Weitere Argumente.}
+\item{...}{Bei \code{plot()} weitere Argumente fuer \code{\link[graphics:plot.default]{graphics::plot()}};
+bei \code{print.SimLevWithdrawal()} an \code{summary()} weitergereicht;
+sonst ohne Wirkung.}
 
 \item{object}{Ein \code{SimLevWithdrawal}-Objekt.}
 
-\item{probs}{Quantile bzw. Quantilsbaender.}
+\item{probs}{Wahrscheinlichkeiten als Anteile (Standard
+\code{c(0.05, 0.25, 0.5, 0.75, 0.95)}): bei \code{summary()} die
+ausgewiesenen Quantile, bei \code{plot()} die Quantile der Faecher
+(Baender zwischen symmetrischen Quantilen, mittleres Quantil als Linie).}
 }
 \value{
-Das Objekt (unsichtbar) bzw. eine Zusammenfassung.
+\code{print()} und \code{plot()}: das Objekt (unsichtbar).
+\code{summary()}: Objekt der Klasse \code{summary.SimLevWithdrawal}
+(Liste) mit u. a. \code{success_rate} und \code{preserve_rate} (Anteile),
+\code{swr} (Prozent), Quantilvektoren (\code{terminal_real},
+\code{first_withdrawal}, \code{mean_spending}, \code{min_spending},
+\code{spending_drawdown} (Anteil), \code{ce_spending}, \code{taxes},
+\code{pwr} (Prozent), \code{depletion} (Jahre, nur gescheiterte Pfade))
+und \code{spending_by_year} (Konsumquantile in Jahr 1, 10, 20, 30; je
+Jahr nur ueber Pfade, deren Horizont dieses Jahr einschliesst, und nur
+fuer volle Planjahre, sonst \code{NA}).
 }
 \description{
-Ausgabe-, Zusammenfassungs- und Grafikmethoden.
+Ausgabe-, Zusammenfassungs- und Grafikmethoden fuer Entnahmeregeln
+(\code{\link[=withdrawal_rule]{withdrawal_rule()}}), Laufzeitmodelle (\code{\link[=horizon_model]{horizon_model()}}) und Ergebnisse
+von \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}.
+}
+\details{
+\code{print()} einer Regel zeigt Typ und die von ihr genutzten Parameter; \code{print()}
+eines \code{SimLevHorizon} fasst 20000 gezogene Laufzeiten zusammen (Mittel,
+Median, 90-\%-Quantil, Bereich). \code{summary()} eines Ergebnisses
+berechnet (mit den Pfadgewichten gewichtet) Erfolgsquote, Anteil mit realem
+Kapitalerhalt, Quantile von Endvermoegen, Konsum, Konsumrueckgang, Steuern
+und PWR sowie die SWR (historisch: minimale PWR, sonst 5-\%-Quantil der
+PWR); \code{print()} eines Ergebnisses gibt diese Zusammenfassung aus.
+\code{plot()} zeichnet Faecher des realen Vermoegens (falls gespeichert)
+und des realen Jahreskonsums in Tausend (Startkaufkraft).
 }
 \keyword{internal}

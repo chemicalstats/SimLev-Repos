@@ -7,14 +7,31 @@
 signal_state(signal, initial = FALSE)
 }
 \arguments{
-\item{signal}{\code{list(buy, sell)} (z. B. aus [signal_sma()]).}
+\item{signal}{\code{list(buy, sell)} mit logischen Vektoren gleicher
+Laenge (z. B. aus \code{\link[=signal_sma]{signal_sma()}}); NA vorher durch \code{FALSE}
+ersetzen (die Signal-Bausteine liefern keine NA).}
 
-\item{initial}{Zustand vor dem ersten Signal.}
+\item{initial}{Logischer Zustand vor dem ersten Signal (Standard
+\code{FALSE} = nicht investiert).}
 }
 \value{
-Logischer Vektor.
+Logischer Vektor gleicher Laenge (\code{TRUE} = investiert).
 }
 \description{
 \code{TRUE} ab einem Kaufsignal bis zum naechsten Verkaufssignal (wie die
-Ein-/Ausstiegslogik von \code{simulation()}).
+Ein-/Ausstiegslogik von \code{simulation()}). Zeilen, in denen beide
+Signale \code{FALSE} sind (z. B. innerhalb eines Hysterese-Bands) oder
+beide \code{TRUE}, aendern den Zustand nicht. So lassen sich Signale als
+"investiert ja/nein" auswerten oder als Bedingung in \code{\link[=tactical_rules]{tactical_rules()}}
+verwenden (dort geschieht die Umwandlung automatisch).
+}
+\examples{
+x <- c(100, 102, 105, 103, 99, 97, 100, 104)
+signal_state(list(buy = x > 101, sell = x < 98))
+set.seed(1)
+p <- 100 * cumprod(1 + rnorm(1000, 2e-4, 0.01))
+table(signal_state(signal_sma(p, 200, band = 2)))
+}
+\seealso{
+\link{signals}, \code{\link[=tactical_rules]{tactical_rules()}}
 }

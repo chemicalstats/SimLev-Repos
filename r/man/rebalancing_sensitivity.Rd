@@ -20,35 +20,69 @@ rebalancing_sensitivity(
 )
 }
 \arguments{
-\item{data, strategy}{Wie in [simulation()].}
+\item{data, strategy}{Wie in \code{\link[=simulation]{simulation()}}: data.frame mit Spalte
+\code{date} und Kursspalten (Niveaus) bzw. Strategie aus
+\code{\link[=create_strategy]{create_strategy()}}.}
 
-\item{frequencies}{Benannte Liste von \code{c(unit, span)}; Standard:
-monatlich, zweimonatlich, quartalsweise, viermonatlich, halbjaehrlich,
-jaehrlich.}
+\item{frequencies}{Benannte Liste von \code{c(unit, span)} mit
+\code{unit} "month", "quarter" oder "year" und \code{span} = Anzahl
+Einheiten zwischen den Terminen (\code{balance_unit} und
+\code{balance_span} in \code{\link[=simulation]{simulation()}}). Standard: monatlich,
+zweimonatlich, quartalsweise, viermonatlich, halbjaehrlich, jaehrlich
+(Namen monthly, bimonthly, quarterly, four_monthly, semiannual, yearly).}
 
-\item{offsets}{Kalendertage vor dem Periodenende (0 = letzter Tag).
-\code{NULL} rebalanciert am Periodenanfang.}
+\item{offsets}{Numerischer Vektor: Kalendertage vor dem Ende des Monats,
+Dreimonatsblocks bzw. Jahres, in dem der Termin liegt (0 = letzter Tag;
+\code{balance_anchor = "end"}, \code{balance_days = offset + 1}).
+\code{NULL} (Standard) rebalanciert am Periodenanfang.}
 
-\item{bands}{Toleranzbaender in Prozent (\code{NA} = immer rebalancieren).}
+\item{bands}{Toleranzbaender in Prozent (5 = 5 Prozent); \code{NA} (Standard) =
+an jedem Termin rebalancieren. Mehrere Werte, auch gemischt mit \code{NA},
+sind moeglich.}
 
-\item{band_type}{"absolute" (Prozentpunkte) oder "relative" (Prozent des
-Zielgewichts), siehe \code{balance_thresh_type} in [simulation()].}
+\item{band_type}{"absolute" (Standard; Prozentpunkte Abweichung vom
+Zielgewicht) oder "relative" (Prozent des Zielgewichts), siehe
+\code{balance_thresh_type} in \code{\link[=simulation]{simulation()}}.}
 
-\item{include_none}{Zusaetzlich einen Lauf ohne Rebalancing.}
+\item{include_none}{Logisch (Standard \code{TRUE}): zusaetzlich einen Lauf
+ohne Rebalancing (Zeile \code{frequency = "none"}).}
 
-\item{sim_args}{Gemeinsame Argumente fuer alle Laeufe.}
+\item{sim_args}{Benannte Liste gemeinsamer Argumente fuer alle Laeufe
+(Standard \code{list()}); Werte aus \code{grid} haben Vorrang.}
 
-\item{metrics}{Funktion \code{SimLevResult -> benannter Vektor}
-(Standard [study_metrics()]).}
+\item{metrics}{Funktion \code{SimLevResult -> benannter numerischer Vektor}
+(Standard \code{\link[=study_metrics]{study_metrics()}}).}
 
-\item{cores}{Prozesse (Fork auf Unix, PSOCK auf Windows).}
+\item{cores}{Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).}
 }
 \value{
-data.frame mit frequency, offset, band, band_type und Kennzahlen.
+data.frame der Klasse \code{SimLevSensitivity} mit den Spalten
+\code{frequency}, \code{offset}, \code{band}, \code{band_type} und den
+Kennzahlen aus \code{metrics}; fehlgeschlagene Laeufe fehlen. Attribut
+\code{kind = "rebalancing"}. Ausgabe und Grafik ueber \code{print()} und
+\code{plot()}. Mit Sparplan (\code{sim_args}) ist \code{cagr}
+geldgewichtet (XIRR); \code{print()} weist darauf hin.
 }
 \description{
 Vergleicht Rebalancing-Frequenzen, Versatz vor dem Periodenende und
 Toleranzbaender (absolut oder relativ) fuer eine Strategie, wie die
-Rebalancing-Sensitivity von testfol.io. Baender werden an den
-Kalenderterminen der jeweiligen Frequenz geprueft.
+Rebalancing-Sensitivity von testfol.io. Jede Kombination aus
+\code{frequencies}, \code{offsets} und \code{bands} wird mit \code{\link[=simulation]{simulation()}}
+(\code{balance_mode = TRUE}) gerechnet. Baender werden an den
+Kalenderterminen der jeweiligen Frequenz geprueft. Termine, die nicht als
+Zeile in \code{data} vorkommen (bei Handelstagsdaten z. B. Wochenenden),
+entfallen.
+}
+\examples{
+set.seed(1)
+d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = 1500))
+d$A <- 100 * cumprod(1 + rnorm(1500, 3e-4, 0.01)); d$B <- 100 * cumprod(1 + rnorm(1500, 1e-4, 0.004))
+st <- create_strategy(A = asset_config("etf", "bnh", 0.6), B = asset_config("etf", "bnh", 0.4))
+rebalancing_sensitivity(d, st,
+  frequencies = list(monthly = c("month", 1), yearly = c("year", 1)), bands = c(NA, 5))
+rebalancing_sensitivity(d, st, frequencies = list(quarterly = c("quarter", 1)),
+  offsets = c(0, 5), include_none = FALSE)
+}
+\seealso{
+\code{\link[=sensitivity_grid]{sensitivity_grid()}}, \code{\link[=simulation]{simulation()}}
 }

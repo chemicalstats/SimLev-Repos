@@ -11,9 +11,19 @@ Argumenten von `simulation()` und den exakten Ergebnissen aus R
 | `cases/` | 68 | Python, Julia | 38 gezielte Fälle für jeden Steuer- und Sonderpfad (`f01`–`f38`) und 30 Zufallsfälle (`r…`) |
 | `extra/` | 37 | Julia | Stressfälle: 30 Jahre, Totalverlust-Hebel, mehrere Signal-Assets, konstante Preise, Kalender-Randfälle, Extremwerte, Fehlerpfade (`x…`, `y…`) |
 
-`extra/x24_dup_dates.json.gz` ist eine bewusste Abweichung: R rechnet mit
-doppelten Datumswerten stillschweigend weiter, Julia bricht mit einer
-Fehlermeldung ab.
+Stand R 0.5.0 (aktuelle Fassung): Alle 105 Fälle sind nach den
+Engine-Korrekturen, steuerrechtlichen Anpassungen und der Übersetzung der
+Ausgaben ins Deutsche neu erzeugt (Begründung in `r/NEWS.md`), zuletzt 101
+davon wegen der deutschen Druckausgabe, 19 davon zusätzlich mit geänderten
+Zahlen (keine Doppelorders am ersten Tag). Python und Julia entsprechen
+noch dem früheren Stand des R-Pakets vor den Korrekturen (Commit 54b5b4f,
+damals ebenfalls als 0.5.0 bezeichnet); Python trifft keinen der 68 Fälle
+in `cases/` vollständig, nur in `f18` und `f19` sind alle Zahlenfelder noch
+bitgleich. Die neuen
+R-Ergebnisfelder `tax_report$open_tax_debt` und `tax_report$tariff_years`
+gehören bewusst nicht zum Golden-Format.
+`extra/x24_dup_dates.json.gz` erwartet jetzt auch in R einen Fehler
+(doppelte Datumswerte), wie bisher schon in Julia.
 
 ## Neue Fälle erzeugen
 
@@ -38,4 +48,5 @@ julia --project=julia julia/tools/compare_golden.jl /tmp/golden
 
 Wer die Rechenlogik des R-Pakets ändert, erzeugt die Fälle in `cases/` und
 `extra/` neu und zieht beide Ports nach, bis alle Fälle wieder bitgleich
-sind. Die CI prüft bei jeder Änderung in diesem Ordner Python und Julia.
+sind. Prüfen Sie nach jeder Änderung in diesem Ordner Python und Julia mit
+den Werkzeugen oben bzw. den Testsuiten.

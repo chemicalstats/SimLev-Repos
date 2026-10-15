@@ -143,7 +143,7 @@ test_that("align_series, check_series and align_macro", {
   ck <- check_series(data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = n), A = p))
   expect_equal(ck$summary$splits, 1L); expect_equal(ck$summary$spikes, 1L); expect_equal(ck$summary$stale_max, 16L)
   expect_equal(ck$summary$jumps, 2L)
-  expect_output(print(ck), "Datenpruefung")
+  expect_output(print(ck), "Datenpr\u00fcfung")
   cpi <- data.frame(date = seq.Date(as.Date("2019-01-01"), by = "month", length.out = 36), value = 100 * 1.003^(0:35))
   d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 120))
   y <- align_macro(d, cpi, "infl", lag = 45, transform = "yoy")$infl

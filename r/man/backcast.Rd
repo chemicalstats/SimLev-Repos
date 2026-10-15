@@ -15,42 +15,73 @@ backcast(
 )
 }
 \arguments{
-\item{fit}{Ein \code{SimLevBackcastFit}-Objekt. Alternativ \code{NULL}, dann
-werden \code{data}, \code{product}, \code{index} und die Modellangaben
-ueber \code{...} uebergeben und \code{params} direkt verwendet.}
+\item{fit}{Ein \code{SimLevBackcastFit}-Objekt aus \code{\link[=backcast_fit]{backcast_fit()}}.
+Alternativ \code{NULL} (Standard), dann werden \code{data},
+\code{product}, \code{index} und die Modellangaben ueber \code{...}
+uebergeben und \code{params} direkt verwendet (nur Strukturmodell).}
 
-\item{data}{Optional anderer Datensatz (z. B. laengere Indexhistorie) mit
-denselben Spaltennamen; Standard: Datensatz des Fits.}
+\item{data}{Bei \code{fit}: optional anderer Datensatz (z. B. laengere
+Indexhistorie) mit denselben Spaltennamen; \code{NULL} (Standard) =
+Datensatz des Fits. Bei \code{fit = NULL} Pflicht (Format wie in
+\code{\link[=backcast_fit]{backcast_fit()}}).}
 
-\item{params}{Optional Parameterliste (drag, spread, beta) ohne Fit.}
+\item{params}{Optional Liste mit \code{drag}, \code{spread} (Prozent p. a.)
+und/oder \code{beta} (Faktor). Ueberschreibt einzelne Parameter des Fits;
+ohne Fit gelten fuer fehlende Eintraege drag = 0, spread = 0, beta = 1.}
 
-\item{splice}{\code{"inception"} (Standard: echte Renditen ab Auflegung),
-\code{"none"} (reine Modellreihe) oder ein Datum, ab dem echte Renditen
-verwendet werden.}
+\item{splice}{\code{"inception"} (Standard: echte Renditen ab dem ersten
+Produktkurs), \code{"none"} (reine Modellreihe) oder ein Datum: echte
+Renditen ab dem ersten Produktkurs an oder nach diesem Datum (Fehler,
+wenn danach kein Produktkurs vorliegt).}
 
-\item{fill}{Fuellmethode fuer Produktluecken nach der Auflegung:
+\item{fill}{Fuellmethode fuer Produktluecken nach der Verkettung:
 "locf" (Standard, wie die Engine), "linear", "stine" (imputeTS) oder "model"
 (Lueckentage mit Modellrenditen, Endpunkte aus echten Kursen; erhaelt die
 echten Kurse an allen Beobachtungstagen).}
 
-\item{rebase}{\code{NULL} (Produkteinheiten, echte Kurse bleiben erhalten)
-oder Startwert, z. B. 100.}
+\item{rebase}{\code{NULL} (Standard; Produkteinheiten, echte Kurse bleiben
+erhalten) oder Startwert der Reihe am ersten Indextag, z. B. 100
+(\code{value} und \code{model} werden skaliert, \code{product} nicht).}
 
-\item{...}{Bei \code{fit = NULL}: Argumente wie in [backcast_fit()]
-(product, index, ter, leverage, rate, fx, model = "structural", ...).}
+\item{...}{Bei \code{fit = NULL}: Argumente wie in \code{\link[=backcast_fit]{backcast_fit()}}
+(\code{product}, \code{index} als Pflicht; \code{ter} (Standard 0),
+\code{leverage} (1), \code{rate} (\code{NULL} = 0), \code{fx},
+\code{rate_lag}, \code{ter_basis}, \code{rate_basis}, \code{accrual},
+\code{index_fill}, \code{lag}; \code{model} nur "structural").}
 }
 \value{
-data.frame mit \code{date}, \code{value} (verkettete Reihe),
-  \code{return}, \code{model} (reine Modellreihe auf gleichem Niveau),
-  \code{product} (Rohdaten) und \code{source} ("backcast", "product",
-  "filled"). Attribut \code{"fit"} enthaelt das Fit-Objekt.
+data.frame der Klasse \code{c("SimLevBackcast", "data.frame")} mit
+einer Zeile je Zeile von \code{data}: \code{date}, \code{value}
+(verkettete Reihe; \code{NA} vor dem ersten Indexwert), \code{return}
+(einfache Rendite von \code{value} als Anteil), \code{model} (reine
+Modellreihe auf gleichem Niveau), \code{product} (Rohdaten) und
+\code{source} ("backcast", "product" oder "filled"). Attribute
+\code{"fit"} (Fit-Objekt oder \code{NULL}), \code{"params"} (verwendete
+Parameter) und \code{"splice_date"} (Verkettungsdatum oder \code{NA}).
 }
 \description{
-Rechnet ein Produkt mit den Parametern aus [backcast_fit()] (oder fest
+Rechnet ein Produkt mit den Parametern aus \code{\link[=backcast_fit]{backcast_fit()}} (oder fest
 vorgegebenen Parametern) ueber die gesamte Indexhistorie und verkettet die
 Simulation renditebasiert (Chain-Linking) mit der echten Produktreihe ab
-Auflegung. Es entsteht kein Sprung am Verkettungstag.
+Auflegung. Es entsteht kein Sprung am Verkettungstag; ab dem
+Verkettungstag stimmt \code{value} (ohne \code{rebase}) an allen
+Beobachtungstagen mit den echten Kursen ueberein. Das Ergebnis kann z. B.
+nach Umbenennen von \code{value} als Kursspalte fuer \code{\link[=simulation]{simulation()}}
+dienen.
+}
+\examples{
+# Ohne Fit: Hebelprodukt mit bekannten Kosten zurueckrechnen
+set.seed(1); n <- 1000
+d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
+d$idx <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
+d$etf <- leveraged_series(d, "idx", leverage = 2, rate = 2, expense = 0.6)
+d$etf[1:600] <- NA                       # Produkt erst ab Tag 601
+bc <- backcast(data = d, product = "etf", index = "idx", leverage = 2,
+               rate = 2, ter = 0.6, rebase = 100)
+bc[599:602, ]
+table(bc$source)
+attr(bc, "splice_date")
 }
 \seealso{
-[backcast_fit()]
+\code{\link[=backcast_fit]{backcast_fit()}}, \code{\link[=leveraged_series]{leveraged_series()}}, \code{\link[=simulation]{simulation()}}
 }

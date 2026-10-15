@@ -19,8 +19,8 @@
 //   2 percent         W = rate * P
 //   3 vanguard        Vanguard Dynamic Spending: rate * P, real begrenzt auf
 //                     [-floor, +ceiling] ggue. Vorjahr (Standard -2,5 % / +5 %)
-//   4 guyton_klinger  Guyton & Klinger (2006): Withdrawal-, Capital-Preservation-
-//                     und Prosperity-Rule
+//   4 guyton_klinger  Guyton & Klinger (2006): Entnahme- (Withdrawal), Kapitalerhalt- (Capital-Preservation)
+//                     und Wohlstandsregel (Prosperity Rule)
 //   5 floor_ceiling   Bengen (2001): rate * P in [W1_real*(1-floor), W1_real*(1+ceiling)]
 //   6 clyatt          Clyatt 95 %: max(rate * P, 0.95 * W_vorjahr)
 //   7 ratchet         Kitces: konstant real, +raise wenn P_real > thr * P1_real,
@@ -40,8 +40,9 @@
 using namespace Rcpp;
 
 // Parameter-Slots (siehe R: .wd_param_vector)
+// Restjahre kommen aus der Zahl der Planjahre (years_rem), nicht aus der Regel.
 enum { P_RATE = 0, P_CEIL, P_FLOOR, P_CUT, P_RAISE, P_CPR_YEARS, P_INFL_CAP, P_SMOOTH,
-       P_EXP_RET, P_HORIZON, P_CAPE_A, P_CAPE_B, P_RATCH_THR, P_RATCH_GAP, P_EXTRA,
+       P_EXP_RET, P_CAPE_A, P_CAPE_B, P_RATCH_THR, P_RATCH_GAP, P_EXTRA,
        P_MIN_REAL, P_MAX_REAL, P_AGE, P_MAX_AGE, P_FV, P_FLOOR95, P_SKIP_NEG, P_MAX_RATE,
        P_N };
 // Zustands-Slots
@@ -133,7 +134,8 @@ static double rule_amount(int rule, const double* rp, double* st, double P, doub
 
 // ---------------------------------------------------------------------------
 // Vereinfachte Steuer (ein Fondsbestand, Durchschnittskosten = FIFO bei einer
-// Einmalanlage): Verkaufsbetrag G so, dass netto X uebrig bleibt.
+// Einmalanlage): Verkaufsbetrag G so, dass netto X uebrig bleibt. Mit den Lots
+// einer Ansparphase (FifoLots, unten) wird stattdessen nach FIFO verkauft.
 // ---------------------------------------------------------------------------
 struct TaxState { double loss, spb; };
 
@@ -159,40 +161,239 @@ static double gross_for_net(double X, double V, double basis, double tfs, double
   return (X - A * rate) / (keep - a * rate);
 }
 
+// ---------------------------------------------------------------------------
+// FIFO-Bestand aus den offenen Lots der Ansparphase (simulation()$open_lots).
+// Einheit = Depotanteil mit Wert 1 EUR zu Beginn (wie n im Kern); Lot j hat
+// n0[j] Einheiten, Anschaffungskosten bu[j] und anzurechnende Vorabpauschale
+// vpu[j] je Einheit. Gruppen = Assets (je Gruppe FIFO-Reihenfolge) plus ggf.
+// eine Cash-Gruppe (Basis = Betrag). Alle Gruppen haben in der Entnahmephase
+// dieselbe Rendite; Verkaeufe nehmen jeder Gruppe ihren Wertanteil w[g]
+// (konstant), innerhalb der Gruppe nach FIFO. Neue Vorabpauschalen sind je
+// Einheit fuer alle Lots gleich (alle ganzjaehrig gehalten) und stehen in
+// vp_acc. Zustand je Pfad: FIFO-Zeiger und Rest des vordersten Lots je Gruppe.
+// ---------------------------------------------------------------------------
+struct FifoLots {
+  int ng = 0;
+  std::vector<double> n0, bu, vpu, w;
+  std::vector<int> gs, ge;              // Gruppenbereiche [gs, ge)
+  std::vector<int> ptr; std::vector<double> nf;
+  double vp_acc = 0.0;
+  void reset() {
+    for (int g = 0; g < ng; g++) { ptr[g] = gs[g]; nf[g] = n0[gs[g]]; }
+    vp_acc = 0.0;
+  }
+  // Verkauf fuer Netto-Ziel X bei Anteilswert u: Gewinn je Lot (Erloes x (1 - cost) minus
+  // Anschaffungskosten minus VP-Anrechnung) wird ueber alle verkauften Lots summiert und wie im
+  // Durchschnittsmodell versteuert (Teilfreistellung, Topf, Pauschbetrag, Satz).
+  // Rueckgabe: Brutto-Verkauf G; gain = Summe der Gewinne; all = Bestand aufgebraucht.
+  double sell(double X, double u, double keep, double tfs, double rate, const TaxState& ts,
+              double& gain, bool& all) {
+    const double A = ts.loss + ts.spb, c1 = 1.0 - tfs;
+    double Gd = 0.0, C = 0.0; all = false;
+    while (true) {
+      double L = std::numeric_limits<double>::infinity(), s = 0.0; bool any = false, done = false;
+      for (int g = 0; g < ng; g++) {
+        if (w[g] == 0.0) continue;
+        if (ptr[g] >= ge[g]) { done = true; break; }
+        const int j = ptr[g];
+        const double val = nf[g] * u, len = val / w[g];
+        if (len < L) L = len;
+        s += w[g] * (keep - (bu[j] + vpu[j] + vp_acc) * nf[g] / val);
+        any = true;
+      }
+      if (done || !any || !std::isfinite(L)) {                         // Bestand aufgebraucht: Reste mitverkaufen
+        all = true;
+        for (int g = 0; g < ng; g++) {
+          for (int j = ptr[g]; j < ge[g]; j++) {
+            const double nn = (j == ptr[g]) ? nf[g] : n0[j];
+            C += keep * nn * u - (bu[j] + vpu[j] + vp_acc) * nn; Gd += nn * u;
+          }
+          ptr[g] = ge[g]; nf[g] = 0.0;
+        }
+        break;
+      }
+      // Netto nach t weiteren Euro Brutto: keep (Gd + t) - rate max(0, c1 (C + s t) - A); monoton steigend
+      const double T0 = c1 * C - A, k = c1 * s;
+      auto net = [&](double t) { double tx = T0 + k * t; return keep * (Gd + t) - (tx > 0 ? rate * tx : 0.0); };
+      double t = L;
+      if (net(L) >= X) {
+        double tk = (k != 0.0) ? -T0 / k : -1.0;
+        double cuts[3] = {0.0, (tk > 0.0 && tk < L) ? tk : L, L};
+        t = L;
+        for (int q = 0; q < 2; q++) {
+          double a = cuts[q], b = cuts[q + 1];
+          if (b <= a && q > 0) continue;
+          bool taxed = T0 + k * 0.5 * (a + b) > 0.0;
+          double r = taxed ? (X - keep * Gd + rate * T0) / (keep - rate * k) : (X - keep * Gd) / keep;
+          if (r <= b * (1.0 + 1e-12) + 1e-12) { t = std::min(std::max(r, a), b); break; }
+        }
+      }
+      // t Euro Brutto verkaufen: je Gruppe w[g] t, aus dem vordersten Lot
+      for (int g = 0; g < ng; g++) {
+        if (w[g] == 0.0) continue;
+        const int j = ptr[g];
+        const double val = nf[g] * u, part = w[g] * t;
+        const double cost_u = bu[j] + vpu[j] + vp_acc;
+        if (std::fabs(part) >= std::fabs(val) * (1.0 - 1e-12)) {       // Lot ganz verkauft
+          C += keep * val - cost_u * nf[g];
+          ptr[g]++; nf[g] = ptr[g] < ge[g] ? n0[ptr[g]] : 0.0;
+        } else {
+          const double du = part / u;
+          C += keep * part - cost_u * du;
+          nf[g] -= du;
+        }
+      }
+      Gd += t;
+      if (t < L) break;
+    }
+    gain = C;
+    return Gd;
+  }
+};
+
 //' Schneller Entnahme-Kern
 //' @keywords internal
+//' @noRd
 // [[Rcpp::export(name = ".wd_simulate")]]
 List wd_simulate(NumericMatrix R, NumericMatrix INF, NumericMatrix CAPE, NumericMatrix BASE,
                  int ppy, int rule, NumericVector rp, bool start_timing,
                  double start_value, NumericVector income_real,
                  bool tax_on, double tax_rate, double tfs, double spb_annual, bool vp_on,
-                 double cost, double basis_ratio, double loss0, bool keep) {
+                 double cost, double basis_ratio, double loss0, bool keep,
+                 NumericVector lot_n = NumericVector::create(), NumericVector lot_basis = NumericVector::create(),
+                 NumericVector lot_vp = NumericVector::create(), IntegerVector lot_group = IntegerVector::create(),
+                 double spb_first = -1.0, bool horizon_end = false) {
   const int np = R.nrow(), paths = R.ncol();
-  const int ny = (np + ppy - 1) / ppy;
+  // FIFO-Lots (nur mit Steuern; ohne Lots unveraendert das Durchschnittsmodell mit basis_ratio)
+  const int nlot = lot_n.size();
+  if (lot_basis.size() != nlot || lot_vp.size() != nlot || lot_group.size() != nlot)
+    stop("Lot-Vektoren haben verschiedene L\u00e4ngen");
+  const bool use_lots = tax_on && nlot > 0;
+  FifoLots FL;
+  if (use_lots) {
+    double tot = 0.0;
+    for (int j = 0; j < nlot; j++) {
+      if (!(lot_n[j] > 0.0 || lot_n[j] < 0.0) || !std::isfinite(lot_basis[j]) || !std::isfinite(lot_vp[j]))
+        stop("Lot %d: Einheiten m\u00fcssen ungleich 0 und alle Werte endlich sein", j + 1);
+      if (j > 0 && lot_group[j] < lot_group[j - 1]) stop("Lots m\u00fcssen nach Gruppe sortiert sein");
+      tot += lot_n[j];
+    }
+    if (!(tot > 0.0)) stop("Summe der Lot-Einheiten muss positiv sein");
+    for (int j = 0; j < nlot; j++) {
+      if (j == 0 || lot_group[j] != lot_group[j - 1]) { FL.gs.push_back(j); FL.ge.push_back(j); FL.w.push_back(0.0); }
+      FL.ge.back() = j + 1; FL.w.back() += lot_n[j] / tot;
+      FL.n0.push_back(lot_n[j]); FL.bu.push_back(lot_basis[j] / lot_n[j]); FL.vpu.push_back(lot_vp[j] / lot_n[j]);
+    }
+    FL.ng = (int) FL.gs.size(); FL.ptr.assign(FL.ng, 0); FL.nf.assign(FL.ng, 0.0);
+  }
+  // Bereichspruefung: alle Matrizen werden mit (Periode, Pfad) gelesen
+  if (ppy < 1) stop("ppy muss >= 1 sein");
+  if (rp.size() < P_N) stop("Parametervektor zu kurz (%d statt %d)", (int) rp.size(), (int) P_N);
+  if (INF.nrow() != np || INF.ncol() != paths)
+    stop("Inflationsmatrix %d x %d passt nicht zu den Renditen %d x %d", INF.nrow(), INF.ncol(), np, paths);
   const bool has_cape = CAPE.ncol() > 0;
+  if (has_cape && (CAPE.nrow() < np || CAPE.ncol() != paths))
+    stop("CAPE-Matrix %d x %d passt nicht zu den Renditen %d x %d", CAPE.nrow(), CAPE.ncol(), np, paths);
+  if (tax_on && vp_on && (BASE.nrow() < np || BASE.ncol() != paths))
+    stop("Basiszins-Matrix %d x %d passt nicht zu den Renditen %d x %d", BASE.nrow(), BASE.ncol(), np, paths);
+  if (np > 0 && income_real.size() < 1) stop("income_real darf nicht leer sein");
+  const int ny = (np + ppy - 1) / ppy;
   NumericMatrix wealth(keep ? ny + 1 : 0, keep ? paths : 0);    // real, Jahresanfang
   NumericMatrix spend(ny, paths);                                 // real, Konsum je Planjahr
   NumericMatrix planned(ny, paths);                               // real, geplante Entnahme
   NumericVector terminal(paths), terminal_nom(paths), taxes(paths), depl(paths), fail(paths);
+  // horizon_end: je Jahresende Endvermoegen und Steuern, als ende der Pfad dort (mit Abrechnung der offenen
+  // Vorabpauschale wie am Pfadende); Zeile y + 1 = nach Planjahr y, Zeile 1 = Start
+  NumericMatrix wealth_end(horizon_end ? ny + 1 : 0, horizon_end ? paths : 0), taxes_end(horizon_end ? ny + 1 : 0, horizon_end ? paths : 0);
   NumericVector st(S_N);
 
   for (int k = 0; k < paths; k++) {
     std::fill(st.begin(), st.end(), 0.0);
     double u = 1.0, n = start_value, basis = start_value * basis_ratio, cpi = 1.0, cpi_dec = 1.0;
-    double yr_ret = 1.0, W = 0.0, vp_due = 0.0, u0 = 1.0, tax_sum = 0.0;
+    double yr_ret = 1.0, W = 0.0, vp_due = 0.0, vp_pending = 0.0, u0 = 1.0, tax_sum = 0.0;
     TaxState ts{loss0, spb_annual};
+    if (use_lots) FL.reset();
     bool failed = false; double depl_p = NA_REAL;
+    // Verkauf fuer Netto-Ziel target (FIFO-Lots oder Durchschnittskosten); setzt G, tax, all, mindert n
+    auto sale = [&](double target, double V, double& G, double& tax, bool& all) {
+      all = false;
+      if (use_lots) {                                             // FIFO ueber die Lots der Ansparphase
+        double gain = 0.0;
+        G = FL.sell(target, u, 1.0 - cost, tfs, tax_rate, ts, gain, all);
+        if (all) G = V;
+        tax = tax_on_gain(gain, tfs, tax_rate, ts);
+      } else {                                                    // Durchschnittskosten (eine Basis)
+        G = gross_for_net(target, V, basis, tfs, tax_rate, cost, ts, tax_on);
+        if (G >= V) { G = V; all = true; }
+        double bpart = basis * G / V;
+        tax = tax_on ? tax_on_gain(G * (1.0 - cost) - bpart, tfs, tax_rate, ts) : 0.0;
+        basis -= bpart;
+      }
+      n -= G / u; if (all) { n = 0.0; basis = 0.0; }
+    };
+    // Abrechnung der offenen Vorabpauschale am Pfadende (wie simulation() bei Datenende am 31.12., A7-11):
+    // 1. VP-Steuer vorab mit den Toepfen des Folgejahres vor dem Verkauf (neuer Pauschbetrag, Verlusttopf am
+    //    Jahresende) bestimmen und per Zwangsverkauf noch im ablaufenden Jahr (dessen Toepfe) zahlen;
+    // 2. endgueltige VP-Steuer mit dem Verlusttopf nach diesem Verkauf; Differenz wie .pay_vp(prepaid):
+    //    Nachzahlung per Verkauf im Folgejahr (dessen Toepfe nach der VP) bzw. Erstattung ins Depot.
+    // Gibt die Steuern (nominal) zurueck; ts steht danach auf den Toepfen des Folgejahres.
+    auto settle_end = [&](void) -> double {
+      double add = 0.0;
+      if (vp_pending > 0) {
+        TaxState t0{ts.loss, spb_annual};
+        double vtax0 = tax_on_gain(vp_pending, tfs, tax_rate, t0);   // Vorauszahlung (Kopie der Toepfe)
+        double V = n * u;
+        bool paid_all = true;
+        if (vtax0 > 0 && V > 0) {
+          double G, tax; bool all;
+          sale(vtax0, V, G, tax, all);
+          double net = G * (1.0 - cost) - tax;
+          add = tax + std::min(net, vtax0);                       // nicht beglichene VP nicht zaehlen
+          paid_all = net >= vtax0 * (1.0 - 1e-12);
+        }
+        TaxState tn{ts.loss, spb_annual};                         // Folgejahr: Verlusttopf nach dem Verkauf
+        double vtax1 = tax_on_gain(vp_pending, tfs, tax_rate, tn);
+        vp_pending = 0.0;
+        double diff = vtax1 - vtax0;
+        if (paid_all && vtax0 > 0 && diff != 0.0) {
+          ts = tn;                                                // Toepfe des Folgejahres nach der VP
+          if (diff > 0) {
+            V = n * u;
+            if (V > 0) {
+              double G, tax; bool all;
+              sale(diff, V, G, tax, all);
+              double net = G * (1.0 - cost) - tax;
+              add += tax + std::min(net, diff);
+            }
+          } else {                                                // Erstattung als Geld ins Depot (Basis = Betrag)
+            if (u > 0) { n += -diff / u; basis += -diff; }
+            add += diff;
+          }
+        }
+      }
+      return add;
+    };
+    double V_ys = 0.0; bool plan_all = false;
+    if (horizon_end) { wealth_end(0, k) = start_value; taxes_end(0, k) = 0.0; }
     for (int p = 0; p < np; p++) {
       int y = p / ppy, ypos = p % ppy;
       double V = n * u;
       if (ypos == 0) {
         if (keep) wealth(y, k) = V / cpi;
-        ts.spb = spb_annual;                                     // neues Steuerjahr
+        ts.spb = (y == 0 && spb_first >= 0.0) ? spb_first : spb_annual;   // neues Steuerjahr (Jahr 1: ggf. Rest)
+        // § 18 Abs. 3 InvStG: Vorabpauschale des Vorjahres gilt am ersten Werktag als zugeflossen,
+        // Steuer mit Verlusttopf und Pauschbetrag dieses Jahres (wie simulation())
+        if (vp_pending > 0) { vp_due += tax_on_gain(vp_pending, tfs, tax_rate, ts); vp_pending = 0.0; }
         double infl_prev = (y == 0) ? 1.0 : cpi / cpi_dec;
         double cp = has_cape ? CAPE(p, k) : 0.0;
         W = rule_amount(rule, rp.begin(), st.begin(), V, infl_prev, cpi, yr_ret - 1.0, cp, (double)(ny - y));
         planned(y, k) = W / cpi;
         cpi_dec = cpi; yr_ret = 1.0; u0 = u;
+        // Verzehrregeln (one_over_n, vpw, abw, hebeler) leeren das Depot planmaessig: im Jahr, fuer das sie das
+        // ganze Depot vorsehen, bzw. im letzten Planjahr, sofern der Plan das Depot (vor Steuern) nicht uebersteigt
+        V_ys = V;
+        plan_all = (rule == 9 || rule == 10 || rule == 11 || rule == 14) && V_ys > 0 && W <= V_ys * (1.0 + 1e-9) &&
+                   (W >= V_ys * (1.0 - 1e-12) || y == ny - 1);
       }
       double inc = income_real[std::min(y, (int) income_real.size() - 1)] * cpi / ppy;
       double need = std::max(0.0, W / ppy - inc);
@@ -202,20 +403,18 @@ List wd_simulate(NumericMatrix R, NumericMatrix INF, NumericMatrix CAPE, Numeric
         double paid_vp = 0.0, paid = 0.0;
         V = n * u;
         if (target > 0 && V > 0) {
-          double G = gross_for_net(target, V, basis, tfs, tax_rate, cost, ts, tax_on);
-          bool all = false;
-          if (G >= V) { G = V; all = true; }
-          double bpart = basis * G / V;
-          double tax = tax_on ? tax_on_gain(G * (1.0 - cost) - bpart, tfs, tax_rate, ts) : 0.0;
+          double G, tax; bool all;
+          sale(target, V, G, tax, all);
           double net = G * (1.0 - cost) - tax;
           tax_sum += (tax + vp_due) / cpi;
-          basis -= bpart; n -= G / u; if (all) { n = 0.0; basis = 0.0; }
           paid_vp = std::min(net, vp_due); paid = net - paid_vp;
           tax_sum -= (vp_due - paid_vp) / cpi;                    // nicht beglichene VP nicht zaehlen
         }
         vp_due = 0.0;
         spend(y, k) += (paid + inc) / cpi;
-        if (paid < need - 1e-8 * std::max(1.0, need)) {
+        // Fehlschlag: geplante Entnahme nicht voll bezahlt, ausser eine Verzehrregel leert das Depot planmaessig
+        // und es ist vollstaendig verkauft (Steuern und Kosten aus dem Erloes bezahlt)
+        if (paid < need - 1e-8 * std::max(1.0, need) && !(plan_all && n <= 0.0)) {
           if (!failed) { failed = true; depl_p = p + 1; }
         }
       };
@@ -225,23 +424,39 @@ List wd_simulate(NumericMatrix R, NumericMatrix INF, NumericMatrix CAPE, Numeric
       cpi *= INF(p, k);
       yr_ret *= R(p, k);
       if (!start_timing) withdraw();
-      // Jahresende: Vorabpauschale (§ 18 InvStG), faellig zu Beginn des Folgejahres
+      // Jahresende: Vorabpauschale (§ 18 InvStG) festsetzen; Steuer zu Beginn des Folgejahres
       if (ypos == ppy - 1 && tax_on && vp_on && n > 0) {
         double br = std::max(0.0, BASE(p, k)) / 100.0;
         double vp_ps = std::max(0.0, std::min(u0 * 0.7 * br, u - u0));
         double vp = n * vp_ps;
         if (vp > 0) {
-          vp_due += tax_on_gain(vp, tfs, tax_rate, ts);
+          vp_pending += vp;
           basis += vp;                                          // § 19 InvStG: Anrechnung beim Verkauf
+          if (use_lots) FL.vp_acc += vp_ps;                     // je Einheit fuer alle Lots gleich
         }
       }
+      // Horizont nach Planjahr y (nicht am Pfadende, das folgt unten): Abrechnung probehalber, Zustand zuruecksetzen
+      if (horizon_end && ypos == ppy - 1 && p < np - 1) {
+        const double n_s = n, b_s = basis, vpp_s = vp_pending; const TaxState ts_s = ts;
+        std::vector<int> ptr_s; std::vector<double> nf_s; const double acc_s = use_lots ? FL.vp_acc : 0.0;
+        if (use_lots) { ptr_s = FL.ptr; nf_s = FL.nf; }
+        double add = settle_end();
+        wealth_end(y + 1, k) = n * u / cpi; taxes_end(y + 1, k) = tax_sum + add / cpi;
+        n = n_s; basis = b_s; vp_pending = vpp_s; ts = ts_s;
+        if (use_lots) { FL.ptr = ptr_s; FL.nf = nf_s; FL.vp_acc = acc_s; }
+      }
     }
+    // Pfadende: Vorabpauschale des letzten Planjahres (Steuer mit den Toepfen des Folgejahres, Zwangsverkauf im
+    // ablaufenden Jahr wie simulation() am letzten Tag); die Steuer dieses Verkaufs zaehlt mit, das Endvermoegen sinkt
+    tax_sum += settle_end() / cpi;
     double Vend = n * u;
     if (keep) wealth(ny, k) = Vend / cpi;
+    if (horizon_end) { wealth_end(ny, k) = Vend / cpi; taxes_end(ny, k) = tax_sum; }
     terminal[k] = Vend / cpi; terminal_nom[k] = Vend; taxes[k] = tax_sum;
     fail[k] = failed ? 1.0 : 0.0; depl[k] = depl_p;
   }
   return List::create(Named("wealth") = wealth, Named("spending") = spend, Named("planned") = planned,
                       Named("terminal_real") = terminal, Named("terminal_nominal") = terminal_nom,
-                      Named("taxes_real") = taxes, Named("failed") = fail, Named("depletion_period") = depl);
+                      Named("taxes_real") = taxes, Named("failed") = fail, Named("depletion_period") = depl,
+                      Named("wealth_end") = wealth_end, Named("taxes_end") = taxes_end);
 }

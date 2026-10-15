@@ -19,45 +19,81 @@ tactical_rotation(
 )
 }
 \arguments{
-\item{data}{data.frame mit \code{date} und Kursspalten.}
+\item{data}{data.frame mit Spalte \code{date} (Klasse Date) und
+Kursspalten (Niveaus) aller Anlagen aus \code{assets}, \code{safe} und
+\code{canary}.}
 
-\item{assets}{Risikoanlagen fuer die Rotation.}
+\item{assets}{Zeichenvektor der Risikoanlagen fuer die Rotation.}
 
-\item{top}{Anzahl gehaltener Anlagen.}
+\item{top}{Anzahl gehaltener Anlagen (Standard 1; 1 bis Anzahl
+\code{assets}).}
 
-\item{safe}{Sichere Anlage(n); bei mehreren wird die mit dem besten Score
-gewaehlt.}
+\item{safe}{Zeichenvektor der sicheren Anlage(n); bei mehreren wird die
+mit dem besten Score gewaehlt. Pflicht, wenn \code{absolute = TRUE}
+(Standard) oder \code{canary} gesetzt ist (sonst Fehler).}
 
-\item{absolute}{Absoluten Momentum-Filter anwenden.}
+\item{absolute}{Logisch: absoluten Momentum-Filter anwenden (Standard
+\code{TRUE}; Score < 0 => sichere Anlage).}
 
-\item{canary}{Optional Canary-Anlagen.}
+\item{canary}{Optional Zeichenvektor der Canary-Anlagen (Standard
+\code{NULL} = kein Canary-Schutz).}
 
-\item{breadth}{Schutzschwelle B (Standard: Anzahl Canary-Anlagen).}
+\item{breadth}{Schutzschwelle \eqn{B} als Anzahl Anlagen (mindestens 1;
+Standard \code{NULL} = Anzahl Canary-Anlagen).}
 
-\item{lookbacks, type}{Siehe [momentum_score()].}
+\item{lookbacks, type}{Siehe \code{\link[=momentum_score]{momentum_score()}} (Rueckblicke in Monaten;
+\code{"average"} oder \code{"13612w"}).}
 
-\item{every}{Entscheidungsrhythmus (\code{"month"}, \code{"week"},
-\code{"quarter"}).}
+\item{every}{Entscheidungsrhythmus: \code{"month"} (Standard),
+\code{"week"} (ISO-Woche) oder \code{"quarter"}.}
 
-\item{weighting}{\code{"equal"} oder \code{"inverse_vol"} (63 Zeilen).}
+\item{weighting}{Gewichtung der gewaehlten Anlagen: \code{"equal"}
+(Standard) oder \code{"inverse_vol"} (umgekehrt proportional zur
+Wurzel der mittleren quadrierten Log-Renditen der letzten 63 Zeilen).}
 }
 \value{
-\code{SimLevWeights} mit Attribut \code{scores}.
+\code{SimLevWeights} (data.frame mit \code{date} und
+Zielgewichten je Anlage aus \code{assets} und \code{safe}, Anteile) mit
+Attributen \code{scores} (Matrix der Momentum-Scores aller Anlagen je
+Zeile) und \code{decision_rows} (Zeilennummern der
+Entscheidungstermine).
 }
 \description{
 An jedem Entscheidungstermin (Periodenende) werden die Anlagen nach ihrem
 Momentum-Score sortiert und die besten \code{top} gehalten.
 \itemize{
-  \item \strong{Absolutes Momentum} (\code{absolute = TRUE}, Dual Momentum
-    nach Antonacci): Ein gewaehlter Platz mit negativem Score geht an die
-    beste sichere Anlage aus \code{safe}.
-  \item \strong{Canary/Breite} (\code{canary}, Keller & Keuning): Bei
-    \eqn{b} Canary-Anlagen mit negativem Score geht der Anteil
-    \eqn{\min(1, b / B)} an die sichere Anlage (\eqn{B} = \code{breadth}).
+\item \strong{Absolutes Momentum} (\code{absolute = TRUE}, Dual Momentum
+nach Antonacci): Ein gewaehlter Platz mit negativem Score geht an die
+beste sichere Anlage aus \code{safe}.
+\item \strong{Canary/Breite} (\code{canary}, Keller & Keuning): Bei
+\eqn{b} Canary-Anlagen mit negativem Score geht der Anteil
+\eqn{\min(1, b / B)} an die sichere Anlage (\eqn{B} = \code{breadth}).
 }
+}
+\details{
+Entscheidungstermine sind die letzten vorhandenen Zeilen jeder Periode
+von \code{every}, ab dem ersten Termin, an dem mindestens \code{top}
+Anlagen einen Score haben. Das Zielgewicht gilt ab dem Termin bis zum
+naechsten; davor liegt alles in \code{safe[1]} (ohne \code{safe} in
+\code{assets[1]}). \code{every} legt nur den Entscheidungsrhythmus fest;
+gehandelt wird in \code{\link[=tactical_simulation]{tactical_simulation()}} (Verzoegerung \code{lag},
+Pflegerhythmus \code{rebalance}).
+}
+\examples{
+set.seed(1); n <- 4 * 365
+d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
+d$aktien <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
+d$anleihen <- 100 * cumprod(1 + rnorm(n, 1e-4, 0.003))
+d$geld <- 100 * cumprod(rep(1 + 0.01 / 365, n))
+w <- tactical_rotation(d, assets = c("aktien", "anleihen"), safe = "geld")
+w
+head(attr(w, "scores")[attr(w, "decision_rows"), ], 3)
 }
 \references{
 Antonacci, G. (2014), Dual Momentum Investing; Keller, W. J. &
-  Keuning, J. W. (2018), Breadth Momentum and the Canary Universe: Defensive
-  Asset Allocation (DAA), SSRN 3212862.
+Keuning, J. W. (2018), Breadth Momentum and the Canary Universe: Defensive
+Asset Allocation (DAA), SSRN 3212862.
+}
+\seealso{
+\code{\link[=momentum_score]{momentum_score()}}, \code{\link[=tactical_simulation]{tactical_simulation()}}, \code{\link[=blend_weights]{blend_weights()}}
 }

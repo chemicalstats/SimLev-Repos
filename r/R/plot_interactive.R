@@ -1,41 +1,50 @@
-#' Interaktives Dashboard für SimLev-Ergebnisse (Hover-Tooltips)
+#' Interaktives Dashboard fuer SimLev-Ergebnisse (Hover-Tooltips)
 #'
-#' Erzeugt ein interaktives Dashboard: Beim Überfahren der Grafiken mit der
-#' Maus erscheinen Datum und Werte aller Serien (Crosshair über alle Panels,
+#' Erzeugt ein interaktives Dashboard: Beim Ueberfahren der Grafiken mit der
+#' Maus erscheinen Datum und Werte aller Serien (Crosshair ueber alle Panels,
 #' Serien lassen sich per Klick auf die Legende ein-/ausblenden).
 #'
-#' Standardmäßig (\code{engine = "auto"}) wird \pkg{plotly} verwendet, sofern
-#' es installiert ist; andernfalls schreibt SimLev ein vollständig
-#' \strong{eigenständiges HTML-Dashboard ohne jede Abhängigkeit}
+#' Standardmaessig (\code{engine = "auto"}) wird \pkg{plotly} verwendet, sofern
+#' es installiert ist; andernfalls schreibt SimLev ein vollstaendig
+#' \strong{eigenstaendiges HTML-Dashboard ohne jede Abhaengigkeit}
 #' (Inline-SVG + JavaScript), das offline in jedem Browser funktioniert.
 #'
 #' @param x Ein \code{SimLevResult}-Objekt aus \code{\link{simulation}}.
-#' @param file Zieldatei (\code{.html}). \code{NULL} = temporäre Datei.
-#' @param panels Character-Vektor: \code{"performance"} (Depotwert je Asset,
-#'   Gesamt und kumulierte Einzahlungen), \code{"drawdown"},
-#'   \code{"weights"} (Ist-Gewichte in Prozent).
-#' @param max_points Ganzzahl. Punkte pro Serie werden für die Darstellung
-#'   gleichmäßig auf höchstens diesen Wert ausgedünnt (Render-Performance);
-#'   Standard 6000 zeigt 45 Jahre flüssig.
-#' @param open Logisch. Datei nach dem Schreiben im Browser öffnen?
+#' @param file Zieldatei (\code{.html}). \code{NULL} = temporaere Datei.
+#' @param panels Zeichenvektor (ein oder mehrere Werte): \code{"performance"}
+#'   (Depotwert je Asset, Gesamt und Summe der Einzahlungen einschliesslich Startwert in EUR,
+#'   brutto vor Kaufkosten wie \code{x$invested}),
+#'   \code{"drawdown"} (\code{x$drawdowns} in Prozent; mit Sparplan zeitgewichtet),
+#'   \code{"weights"} (Ist-Gewichte in Prozent). Die Kopfzeile zeigt CAGR, Sharpe und
+#'   Max. Drawdown aus dem Ergebnis; mit Sparplan als "CAGR (geldgewichtet)" und
+#'   "Max. Drawdown (zeitgewichtet)" beschriftet.
+#'   Standard: alle drei.
+#' @param max_points Ganzzahl. Punkte pro Serie werden fuer die Darstellung
+#'   gleichmaessig auf hoechstens diesen Wert ausgeduennt (Render-Performance);
+#'   Standard 6000 zeigt 45 Jahre fluessig.
+#' @param open Logisch. Datei nach dem Schreiben im Browser oeffnen?
 #'   Standard: \code{interactive()}.
 #' @param engine \code{"auto"} (Standard), \code{"plotly"} oder
-#'   \code{"html"} (eingebauter abhängigkeitsfreier Writer).
+#'   \code{"html"} (eingebauter abhaengigkeitsfreier Writer). Mit plotly wird
+#'   keine Datei geschrieben; \code{file} und \code{open} wirken dann nicht.
+#' @param ... Derzeit ungenutzt.
 #'
-#' @return Unsichtbar der Pfad zur erzeugten HTML-Datei (bzw. das
-#'   plotly-Objekt bei \code{engine = "plotly"}).
+#' @return Beim HTML-Writer unsichtbar der Pfad zur erzeugten HTML-Datei; bei
+#'   plotly (auch ueber \code{engine = "auto"}) sichtbar das plotly-Objekt.
 #'
 #' @examples
 #' \dontrun{
 #' r <- simulation(data, strategy, start_value = 10000)
-#' plot_interactive(r)                          # Browser öffnet Dashboard
+#' plot_interactive(r)                          # Browser oeffnet Dashboard
 #' plot_interactive(r, file = "backtest.html", panels = c("performance", "drawdown"))
 #' }
 #' @export
+#' @noRd
 plot_interactive <- function(x, ...) UseMethod("plot_interactive")
 
 #' @rdname plot_interactive
 #' @export
+#' @noRd
 plot_interactive.SimLevResult <- function(x, file = NULL,
                                           panels = c("performance", "drawdown", "weights"),
                                           max_points = 6000,
@@ -78,8 +87,8 @@ plot_interactive.SimLevResult <- function(x, file = NULL,
   assets <- names(x$report)
   totals <- lapply(x$report, function(a) a$total[keep])
   tot_sum <- Reduce(`+`, totals)
-  flows <- Reduce(`+`, lapply(x$report, function(a) a$flows))
-  invested <- cumsum(flows)[keep]
+  fi <- .dashboard_returns(x)                 # Sparplan-Kennung, Einzahlungssumme (Start + Sparraten)
+  invested <- fi$invested[keep]
 
   dd <- if (!is.null(x$drawdowns)) x$drawdowns[keep] else {
     w <- x$worth; -(cummax(w) - w) / cummax(w) * 0 + (w / cummax(w) - 1)
@@ -94,7 +103,9 @@ plot_interactive.SimLevResult <- function(x, file = NULL,
     totals   = totals,
     weights  = lapply(totals, function(t) ifelse(tot_sum > 0, 100 * t / tot_sum, 0)),
     drawdown = 100 * dd,
-    stats    = x$statistics
+    stats    = x$statistics,
+    cagr     = x$cagr,
+    external_flows = fi$external_flows
   )
 }
 
@@ -113,7 +124,7 @@ plot_interactive.SimLevResult <- function(x, file = NULL,
     for (a in d$assets) p <- plotly::add_lines(p, y = d$totals[[a]], name = a)
     p <- plotly::add_lines(p, y = d$worth, name = "Gesamt",
                            line = list(width = 3))
-    p <- plotly::add_lines(p, y = d$invested, name = "Einzahlungen",
+    p <- plotly::add_lines(p, y = d$invested, name = "Einzahlungen (inkl. Start, brutto)",
                            line = list(dash = "dot"))
     plots <- c(plots, list(plotly::layout(p, yaxis = list(title = "EUR"))))
   }
@@ -133,7 +144,7 @@ plot_interactive.SimLevResult <- function(x, file = NULL,
                   titleY = TRUE)
 }
 
-# ── eingebauter HTML-Writer: selbst-contained, SVG + Vanilla-JS ───────────────
+# ── eingebauter HTML-Writer: eigenstaendig, SVG + reines JavaScript ───────────
 .build_dashboard_html <- function(d, panels) {
   pal <- c("#2C7FB8", "#D95F02", "#1B9E77", "#7570B3", "#E7298A",
            "#66A61E", "#E6AB02", "#A6761D")
@@ -143,7 +154,7 @@ plot_interactive.SimLevResult <- function(x, file = NULL,
       name = d$assets[i], col = pal[(i - 1) %% length(pal) + 1],
       vals = d$totals[[i]], width = 1.4)),
     list(list(name = "Gesamt", col = "#111111", vals = d$worth, width = 2.4)),
-    list(list(name = "Einzahlungen", col = "#888888", vals = d$invested,
+    list(list(name = "Einzahlungen (inkl. Start, brutto)", col = "#888888", vals = d$invested,
               width = 1.4, dash = TRUE)))
 
   series_w <- lapply(seq_along(d$assets), function(i) list(
@@ -165,12 +176,12 @@ plot_interactive.SimLevResult <- function(x, file = NULL,
   divs <- c()
   if ("performance" %in% panels) {
     divs <- c(divs, '<div class="panel" id="performance"></div>')
-    calls <- c(calls, js_panel("performance", "Portfolio Performance",
+    calls <- c(calls, js_panel("performance", "Wertentwicklung des Depots",
                                series_perf, " EUR"))
   }
   if ("drawdown" %in% panels) {
     divs <- c(divs, '<div class="panel" id="drawdown"></div>')
-    calls <- c(calls, js_panel("drawdown", "Drawdown",
+    calls <- c(calls, js_panel("drawdown", if (isTRUE(d$external_flows)) "Drawdown (zeitgewichtet)" else "Drawdown",
       list(list(name = "Drawdown", col = "#C0392B", vals = d$drawdown,
                 width = 1.6)), " %", fill_first = TRUE))
   }
@@ -179,9 +190,11 @@ plot_interactive.SimLevResult <- function(x, file = NULL,
     calls <- c(calls, js_panel("weights", "Asset-Gewichte", series_w, " %"))
   }
 
+  # Mit Sparplan: CAGR geldgewichtet (XIRR), Drawdown zeitgewichtet (wie x$statistics)
   stat_line <- if (!is.null(d$stats)) sprintf(
-    "CAGR %.2f%% &middot; Sharpe %.2f &middot; Max. Drawdown %.1f%%",
-    100 * (d$stats$cagr %||% NA), d$stats$sharpe_ratio %||% NA,
+    if (isTRUE(d$external_flows)) "CAGR (geldgewichtet) %.2f%% &middot; Sharpe %.2f &middot; Max. Drawdown (zeitgewichtet) %.1f%%"
+    else "CAGR %.2f%% &middot; Sharpe %.2f &middot; Max. Drawdown %.1f%%",
+    100 * (d$cagr %||% NA), d$stats$sharpe %||% NA,   # R1-20: CAGR steht in x$cagr, Sharpe in statistics$sharpe
     100 * (d$stats$max_drawdown %||% NA)) else ""
 
   paste0('<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">

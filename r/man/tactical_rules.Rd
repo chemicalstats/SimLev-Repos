@@ -7,16 +7,27 @@
 tactical_rules(data, rules, default)
 }
 \arguments{
-\item{data}{data.frame mit \code{date} (und den in Bedingungen verwendeten
-Spalten).}
+\item{data}{data.frame mit Spalte \code{date} (und den in Bedingungen
+verwendeten Spalten, z. B. aus \code{\link[=align_macro]{align_macro()}}).}
 
-\item{rules}{Liste von \code{list(when = ..., weights = c(A = 0.6, B = 0.4))}.}
+\item{rules}{Liste von Regeln \code{list(when = ..., weights = c(A = 0.6,
+  B = 0.4))}, in Prioritaetsreihenfolge. \code{when}: logischer Vektor
+der Laenge \code{nrow(data)}, Zeichenkette mit einem R-Ausdruck
+(ausgewertet in \code{data}, dann in der aufrufenden Umgebung) oder
+\code{list(buy, sell)} (wird mit \code{\link[=signal_state]{signal_state()}} in einen Zustand
+uebersetzt); NA gilt als \code{FALSE}. \code{weights}: benannter
+Vektor Kursspalte -> Gewicht als Anteil.}
 
-\item{default}{Zielportfolio, wenn keine Regel zutrifft.}
+\item{default}{Benannter Gewichtsvektor (Anteile) fuer Zeilen, in denen
+keine Regel zutrifft.}
 }
 \value{
-\code{SimLevWeights} mit Attribut \code{regime} (Nummer der aktiven
-  Regel, 0 = default).
+\code{SimLevWeights}: data.frame mit \code{date} und je Anlage
+einer Spalte Zielgewicht (Anteil, Zeilensumme 1), mit Attributen
+\code{regime} (Nummer der aktiven Regel je Zeile, 0 = \code{default})
+und \code{source}. \code{print()} zeigt Mittel, Minimum, Maximum und
+letztes Gewicht in Prozent sowie die Zahl der Wechsel, \code{plot()}
+die Gewichte als gestapelte Flaechen.
 }
 \description{
 Geordnete Bedingungen waehlen je Tag ein Zielportfolio; die erste
@@ -25,10 +36,23 @@ logische Vektoren, Ausdruecke als Zeichenkette (ausgewertet in
 \code{data}, z. B. \code{"inflation > 3"}) oder Signale aus den
 Signal-Bausteinen (\code{list(buy, sell)}, als Zustand mit Hysterese).
 }
+\details{
+Entschieden wird in jeder Zeile (kein Rhythmus); das Zielgewicht gilt als
+nach Schluss des Tages bekannt. Gehandelt wird erst in
+\code{\link[=tactical_simulation]{tactical_simulation()}}, dort mit Verzoegerung \code{lag} und optionalem
+Pflegerhythmus \code{rebalance}. Gewichte werden je Zeile auf die Summe 1
+normiert (negative Werte als 0); Anlagen, die nur in anderen Regeln
+vorkommen, erhalten 0.
+}
 \examples{
+set.seed(1)
 d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 500))
 d$A <- 100 * cumprod(1 + rnorm(500, 3e-4, 0.01)); d$B <- 100 * cumprod(1 + rnorm(500, 1e-4, 0.003))
 w <- tactical_rules(d, list(list(when = signal_sma(d$A, 200), weights = c(A = 1))),
                     default = c(B = 1))
 table(attr(w, "regime"))
+}
+\seealso{
+\code{\link[=tactical_simulation]{tactical_simulation()}}, \link{signals}, \code{\link[=align_macro]{align_macro()}},
+\code{\link[=blend_weights]{blend_weights()}}
 }

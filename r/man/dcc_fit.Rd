@@ -7,20 +7,48 @@
 dcc_fit(R)
 }
 \arguments{
-\item{R}{Renditematrix (Zeilen = Zeit, Spalten = Reihen, mindestens zwei).}
+\item{R}{Numerische Renditematrix oder data.frame (Zeilen = Zeit, Spalten
+= Reihen; mindestens zwei Spalten und 100 Zeilen, keine fehlenden
+Werte). Die Einheit ist frei (z. B. Log-Renditen als Anteil); die
+Korrelationen haengen nicht davon ab. Spaltennamen werden uebernommen
+(sonst \code{V1}, \code{V2}, ...). Konstante oder (nahezu) perfekt
+korrelierte Reihen (singulaere Korrelationsmatrix der standardisierten
+Residuen, kleinster Eigenwert unter 1e-8) sind ein Fehler.}
 }
 \value{
-Liste mit \code{a}, \code{b}, \code{loglik}, \code{correlation}
-  (Matrix Zeit x Paare), \code{pairs}, \code{garch} (Parameter je Reihe),
-  \code{z} (standardisierte Residuen).
+Liste mit \code{a}, \code{b} (DCC-Parameter), \code{loglik}
+(Korrelationsteil der Quasi-Log-Likelihood), \code{correlation} (Matrix
+Zeit x Paare der bedingten Korrelationen \eqn{R_t}; Spaltennamen wie
+\code{pairs}), \code{pairs} (Paarnamen \code{"A ~ B"}), \code{garch}
+(data.frame je Reihe: \code{series}, \code{alpha}, \code{beta},
+\code{method} = Schaetzweg der GARCH-Stufe), \code{z} (Matrix der
+standardisierten Residuen) und \code{Qbar}.
 }
 \description{
-Zweistufige Schaetzung: univariate GARCH(1,1) je Reihe (wie im Bootstrap:
-rugarch falls installiert, sonst optim), danach die Korrelationsdynamik
+Schaetzt zeitvariable Korrelationen zwischen mehreren Renditereihen.
+Zweistufige Schaetzung: univariate GARCH(1,1) mit Konstante je Reihe (wie
+im Bootstrap: rugarch falls installiert, sonst optim, notfalls
+Momentschaetzer), danach die Korrelationsdynamik der standardisierten
+Residuen \eqn{z_t}
 \deqn{Q_t = (1 - a - b)\bar Q + a z_{t-1} z_{t-1}' + b Q_{t-1}}
-per Quasi-Maximum-Likelihood (Filter in C++).
+mit \eqn{Q_1 = \bar Q} (Stichproben-Korrelation der \eqn{z_t}) und
+\eqn{a, b > 0}, \eqn{a + b < 0.999}, per Quasi-Maximum-Likelihood
+(Nelder-Mead; Filter in C++). Die bedingte Korrelation ist
+\eqn{R_t = \mathrm{diag}(Q_t)^{-1/2} Q_t \mathrm{diag}(Q_t)^{-1/2}}.
+}
+\examples{
+set.seed(1); n <- 500
+R <- cbind(a = rnorm(n, 0, 0.01), b = rnorm(n, 0, 0.01))
+R[, "b"] <- 0.5 * R[, "a"] + sqrt(0.75) * R[, "b"]
+fit <- dcc_fit(R)
+c(a = fit$a, b = fit$b)
+tail(fit$correlation, 3)
 }
 \references{
 Engle, R. (2002), Journal of Business & Economic Statistics
-  20(3), 339-350.
+20(3), 339-350.
+}
+\seealso{
+\code{\link[=dependence_analysis]{dependence_analysis()}} (ruft \code{dcc_fit()} fuer alle Anlagen
+auf), \code{\link[=fit_copula]{fit_copula()}}, \code{\link[=tail_dependence]{tail_dependence()}}.
 }

@@ -295,6 +295,153 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
+// proj_box_simplex_r
+NumericVector proj_box_simplex_r(NumericVector v, NumericVector lo, NumericVector hi);
+RcppExport SEXP _SimLev_proj_box_simplex_r(SEXP vSEXP, SEXP loSEXP, SEXP hiSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type v(vSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type lo(loSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type hi(hiSEXP);
+    rcpp_result_gen = Rcpp::wrap(proj_box_simplex_r(v, lo, hi));
+    return rcpp_result_gen;
+END_RCPP
+}
+// qp_box_simplex
+NumericVector qp_box_simplex(NumericMatrix Q, NumericVector cvec, NumericVector lo, NumericVector hi, NumericVector w0, double L, int maxit, double tol);
+RcppExport SEXP _SimLev_qp_box_simplex(SEXP QSEXP, SEXP cvecSEXP, SEXP loSEXP, SEXP hiSEXP, SEXP w0SEXP, SEXP LSEXP, SEXP maxitSEXP, SEXP tolSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type Q(QSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type cvec(cvecSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type lo(loSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type hi(hiSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type w0(w0SEXP);
+    Rcpp::traits::input_parameter< double >::type L(LSEXP);
+    Rcpp::traits::input_parameter< int >::type maxit(maxitSEXP);
+    Rcpp::traits::input_parameter< double >::type tol(tolSEXP);
+    rcpp_result_gen = Rcpp::wrap(qp_box_simplex(Q, cvec, lo, hi, w0, L, maxit, tol));
+    return rcpp_result_gen;
+END_RCPP
+}
+// min_cvar_core
+NumericVector min_cvar_core(NumericMatrix R, double alpha, NumericVector lo, NumericVector hi, NumericVector w0, double zeta0, NumericVector scales, int maxit);
+RcppExport SEXP _SimLev_min_cvar_core(SEXP RSEXP, SEXP alphaSEXP, SEXP loSEXP, SEXP hiSEXP, SEXP w0SEXP, SEXP zeta0SEXP, SEXP scalesSEXP, SEXP maxitSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type R(RSEXP);
+    Rcpp::traits::input_parameter< double >::type alpha(alphaSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type lo(loSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type hi(hiSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type w0(w0SEXP);
+    Rcpp::traits::input_parameter< double >::type zeta0(zeta0SEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type scales(scalesSEXP);
+    Rcpp::traits::input_parameter< int >::type maxit(maxitSEXP);
+    rcpp_result_gen = Rcpp::wrap(min_cvar_core(R, alpha, lo, hi, w0, zeta0, scales, maxit));
+    return rcpp_result_gen;
+END_RCPP
+}
+// min_cdar_core
+NumericVector min_cdar_core(NumericMatrix R, double alpha, NumericVector lo, NumericVector hi, int iters);
+RcppExport SEXP _SimLev_min_cdar_core(SEXP RSEXP, SEXP alphaSEXP, SEXP loSEXP, SEXP hiSEXP, SEXP itersSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type R(RSEXP);
+    Rcpp::traits::input_parameter< double >::type alpha(alphaSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type lo(loSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type hi(hiSEXP);
+    Rcpp::traits::input_parameter< int >::type iters(itersSEXP);
+    rcpp_result_gen = Rcpp::wrap(min_cdar_core(R, alpha, lo, hi, iters));
+    return rcpp_result_gen;
+END_RCPP
+}
+// quantile_reg_core
+NumericVector quantile_reg_core(NumericVector y, NumericMatrix X, double tau, NumericVector beta0, double sc, double tol, int maxit);
+RcppExport SEXP _SimLev_quantile_reg_core(SEXP ySEXP, SEXP XSEXP, SEXP tauSEXP, SEXP beta0SEXP, SEXP scSEXP, SEXP tolSEXP, SEXP maxitSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type y(ySEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type X(XSEXP);
+    Rcpp::traits::input_parameter< double >::type tau(tauSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type beta0(beta0SEXP);
+    Rcpp::traits::input_parameter< double >::type sc(scSEXP);
+    Rcpp::traits::input_parameter< double >::type tol(tolSEXP);
+    Rcpp::traits::input_parameter< int >::type maxit(maxitSEXP);
+    rcpp_result_gen = Rcpp::wrap(quantile_reg_core(y, X, tau, beta0, sc, tol, maxit));
+    return rcpp_result_gen;
+END_RCPP
+}
+// hmm_forward_backward
+List hmm_forward_backward(NumericMatrix B, NumericMatrix A, NumericVector p0);
+RcppExport SEXP _SimLev_hmm_forward_backward(SEXP BSEXP, SEXP ASEXP, SEXP p0SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericMatrix >::type B(BSEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type A(ASEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type p0(p0SEXP);
+    rcpp_result_gen = Rcpp::wrap(hmm_forward_backward(B, A, p0));
+    return rcpp_result_gen;
+END_RCPP
+}
+// garch_filter
+NumericVector garch_filter(NumericVector ep, double om, double al, double be, double ga, double v0);
+RcppExport SEXP _SimLev_garch_filter(SEXP epSEXP, SEXP omSEXP, SEXP alSEXP, SEXP beSEXP, SEXP gaSEXP, SEXP v0SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type ep(epSEXP);
+    Rcpp::traits::input_parameter< double >::type om(omSEXP);
+    Rcpp::traits::input_parameter< double >::type al(alSEXP);
+    Rcpp::traits::input_parameter< double >::type be(beSEXP);
+    Rcpp::traits::input_parameter< double >::type ga(gaSEXP);
+    Rcpp::traits::input_parameter< double >::type v0(v0SEXP);
+    rcpp_result_gen = Rcpp::wrap(garch_filter(ep, om, al, be, ga, v0));
+    return rcpp_result_gen;
+END_RCPP
+}
+// roll_mean_core
+NumericVector roll_mean_core(NumericVector x, int n);
+RcppExport SEXP _SimLev_roll_mean_core(SEXP xSEXP, SEXP nSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    Rcpp::traits::input_parameter< int >::type n(nSEXP);
+    rcpp_result_gen = Rcpp::wrap(roll_mean_core(x, n));
+    return rcpp_result_gen;
+END_RCPP
+}
+// kendall_tau_core
+double kendall_tau_core(NumericVector x, NumericVector y);
+RcppExport SEXP _SimLev_kendall_tau_core(SEXP xSEXP, SEXP ySEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type y(ySEXP);
+    rcpp_result_gen = Rcpp::wrap(kendall_tau_core(x, y));
+    return rcpp_result_gen;
+END_RCPP
+}
+// roll_cov_core
+NumericVector roll_cov_core(NumericVector x, NumericVector y, int n);
+RcppExport SEXP _SimLev_roll_cov_core(SEXP xSEXP, SEXP ySEXP, SEXP nSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< NumericVector >::type x(xSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type y(ySEXP);
+    Rcpp::traits::input_parameter< int >::type n(nSEXP);
+    rcpp_result_gen = Rcpp::wrap(roll_cov_core(x, y, n));
+    return rcpp_result_gen;
+END_RCPP
+}
 // dca_flows_allocation
 void dca_flows_allocation(List input, String name, double flows, int index);
 RcppExport SEXP _SimLev_dca_flows_allocation(SEXP inputSEXP, SEXP nameSEXP, SEXP flowsSEXP, SEXP indexSEXP) {
@@ -459,8 +606,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // wd_simulate
-List wd_simulate(NumericMatrix R, NumericMatrix INF, NumericMatrix CAPE, NumericMatrix BASE, int ppy, int rule, NumericVector rp, bool start_timing, double start_value, NumericVector income_real, bool tax_on, double tax_rate, double tfs, double spb_annual, bool vp_on, double cost, double basis_ratio, double loss0, bool keep);
-RcppExport SEXP _SimLev_wd_simulate(SEXP RSEXP, SEXP INFSEXP, SEXP CAPESEXP, SEXP BASESEXP, SEXP ppySEXP, SEXP ruleSEXP, SEXP rpSEXP, SEXP start_timingSEXP, SEXP start_valueSEXP, SEXP income_realSEXP, SEXP tax_onSEXP, SEXP tax_rateSEXP, SEXP tfsSEXP, SEXP spb_annualSEXP, SEXP vp_onSEXP, SEXP costSEXP, SEXP basis_ratioSEXP, SEXP loss0SEXP, SEXP keepSEXP) {
+List wd_simulate(NumericMatrix R, NumericMatrix INF, NumericMatrix CAPE, NumericMatrix BASE, int ppy, int rule, NumericVector rp, bool start_timing, double start_value, NumericVector income_real, bool tax_on, double tax_rate, double tfs, double spb_annual, bool vp_on, double cost, double basis_ratio, double loss0, bool keep, NumericVector lot_n, NumericVector lot_basis, NumericVector lot_vp, IntegerVector lot_group, double spb_first, bool horizon_end);
+RcppExport SEXP _SimLev_wd_simulate(SEXP RSEXP, SEXP INFSEXP, SEXP CAPESEXP, SEXP BASESEXP, SEXP ppySEXP, SEXP ruleSEXP, SEXP rpSEXP, SEXP start_timingSEXP, SEXP start_valueSEXP, SEXP income_realSEXP, SEXP tax_onSEXP, SEXP tax_rateSEXP, SEXP tfsSEXP, SEXP spb_annualSEXP, SEXP vp_onSEXP, SEXP costSEXP, SEXP basis_ratioSEXP, SEXP loss0SEXP, SEXP keepSEXP, SEXP lot_nSEXP, SEXP lot_basisSEXP, SEXP lot_vpSEXP, SEXP lot_groupSEXP, SEXP spb_firstSEXP, SEXP horizon_endSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -483,7 +630,13 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type basis_ratio(basis_ratioSEXP);
     Rcpp::traits::input_parameter< double >::type loss0(loss0SEXP);
     Rcpp::traits::input_parameter< bool >::type keep(keepSEXP);
-    rcpp_result_gen = Rcpp::wrap(wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real, tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep));
+    Rcpp::traits::input_parameter< NumericVector >::type lot_n(lot_nSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type lot_basis(lot_basisSEXP);
+    Rcpp::traits::input_parameter< NumericVector >::type lot_vp(lot_vpSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type lot_group(lot_groupSEXP);
+    Rcpp::traits::input_parameter< double >::type spb_first(spb_firstSEXP);
+    Rcpp::traits::input_parameter< bool >::type horizon_end(horizon_endSEXP);
+    rcpp_result_gen = Rcpp::wrap(wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real, tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep, lot_n, lot_basis, lot_vp, lot_group, spb_first, horizon_end));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -507,6 +660,16 @@ static const R_CallMethodDef CallEntries[] = {
     {"_SimLev_calculate_fifo_vp_rcpp", (DL_FUNC) &_SimLev_calculate_fifo_vp_rcpp, 3},
     {"_SimLev_calculate_private_sale_tax_rcpp", (DL_FUNC) &_SimLev_calculate_private_sale_tax_rcpp, 5},
     {"_SimLev_fifo_consume_rcpp", (DL_FUNC) &_SimLev_fifo_consume_rcpp, 3},
+    {"_SimLev_proj_box_simplex_r", (DL_FUNC) &_SimLev_proj_box_simplex_r, 3},
+    {"_SimLev_qp_box_simplex", (DL_FUNC) &_SimLev_qp_box_simplex, 8},
+    {"_SimLev_min_cvar_core", (DL_FUNC) &_SimLev_min_cvar_core, 8},
+    {"_SimLev_min_cdar_core", (DL_FUNC) &_SimLev_min_cdar_core, 5},
+    {"_SimLev_quantile_reg_core", (DL_FUNC) &_SimLev_quantile_reg_core, 7},
+    {"_SimLev_hmm_forward_backward", (DL_FUNC) &_SimLev_hmm_forward_backward, 3},
+    {"_SimLev_garch_filter", (DL_FUNC) &_SimLev_garch_filter, 6},
+    {"_SimLev_roll_mean_core", (DL_FUNC) &_SimLev_roll_mean_core, 2},
+    {"_SimLev_kendall_tau_core", (DL_FUNC) &_SimLev_kendall_tau_core, 2},
+    {"_SimLev_roll_cov_core", (DL_FUNC) &_SimLev_roll_cov_core, 3},
     {"_SimLev_dca_flows_allocation", (DL_FUNC) &_SimLev_dca_flows_allocation, 4},
     {"_SimLev_calculate_buy_report", (DL_FUNC) &_SimLev_calculate_buy_report, 6},
     {"_SimLev_calculate_sell_report", (DL_FUNC) &_SimLev_calculate_sell_report, 7},
@@ -518,7 +681,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_SimLev_p20_tax_rcpp", (DL_FUNC) &_SimLev_p20_tax_rcpp, 5},
     {"_SimLev_vp_tax_rcpp", (DL_FUNC) &_SimLev_vp_tax_rcpp, 5},
     {"_SimLev_sell_count_rcpp", (DL_FUNC) &_SimLev_sell_count_rcpp, 10},
-    {"_SimLev_wd_simulate", (DL_FUNC) &_SimLev_wd_simulate, 19},
+    {"_SimLev_wd_simulate", (DL_FUNC) &_SimLev_wd_simulate, 25},
     {NULL, NULL, 0}
 };
 

@@ -7,19 +7,31 @@
 result_index(x, base = 100)
 }
 \arguments{
-\item{x}{\code{SimLevResult}.}
+\item{x}{Objekt der Klasse \code{SimLevResult} (Ergebnis von
+\code{\link[=simulation]{simulation()}}).}
 
-\item{base}{Startwert des Index.}
+\item{base}{Startwert des Index (Zahl, Standard 100).}
 }
 \value{
-data.frame mit \code{date}, \code{value} (Index), \code{worth}
-  (Depotwert) und \code{flows} (Ein-/Auszahlungen je Tag).
+data.frame mit einer Zeile je Simulationstag und den Spalten
+\code{date} (Date), \code{value} (Index, beginnt bei \code{base}),
+\code{worth} (Depotwert) und \code{flows} (Summe der Ein-/Auszahlungen
+je Tag, Geldbetrag).
 }
 \description{
 Bildet aus einem \code{SimLevResult} den um Ein- und Auszahlungen bereinigten
-Wertindex (Basis der TTWROR): \eqn{I_t = I_{t-1} (W_t - F_t) / W_{t-1}}.
-Damit laesst sich jedes gespeicherte Ergebnis von [simulation()] als
-Renditequelle fuer [withdrawal_simulation()] verwenden.
+Wertindex (Basis der TTWROR). Damit laesst sich jedes gespeicherte
+Ergebnis von \code{\link[=simulation]{simulation()}} als Renditequelle fuer
+\code{\link[=withdrawal_simulation]{withdrawal_simulation()}} verwenden. Verwendet wird der von
+\code{\link[=simulation]{simulation()}} gespeicherte Index \code{twr_index}: an Tagen ohne
+Zahlung \eqn{I_t = I_{t-1} W_t / W_{t-1}}; an Tagen mit Zahlung wird der
+Vortagesbestand zum Schlusskurs vor der Zahlung bewertet (siehe
+\code{\link[=simulation]{simulation()}}, Abschnitt Kennzahlen), sodass die Zahlung die Rendite
+nicht verzerrt. \eqn{W_t} ist der Depotwert. Fuer aeltere Ergebnisse
+ohne \code{twr_index} gilt \eqn{I_t = I_{t-1} (W_t - F_t) / W_{t-1}}
+mit \eqn{F_t} = Summe der Ein- und Auszahlungen aller Assets am Tag
+\eqn{t}; nicht endliche Tagesfaktoren (z. B. bei Depotwert 0) werden
+dabei als 1 gesetzt.
 }
 \examples{
 d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 400),
@@ -27,4 +39,8 @@ d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 
 res <- simulation(d, create_strategy(ETF = asset_config("etf", "bnh")),
                   dca_mode = TRUE, dca_value = 100, dca_span = 1)
 head(result_index(res))
+}
+\seealso{
+\code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}}, \code{\link[=withdrawal_paths]{withdrawal_paths()}},
+\code{\link[=withdrawal_simulation]{withdrawal_simulation()}}
 }

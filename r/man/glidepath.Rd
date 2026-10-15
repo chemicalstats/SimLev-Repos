@@ -14,24 +14,41 @@ glidepath(
 )
 }
 \arguments{
-\item{data}{data.frame mit \code{date} oder Datumsvektor.}
+\item{data}{data.frame mit Spalte \code{date} (z. B. der Datensatz fuer
+\code{\link[=simulation]{simulation()}}) oder Datumsvektor.}
 
-\item{from, to}{Benannte Gewichtsvektoren am Anfang und Ende.}
+\item{from, to}{Benannte Gewichtsvektoren (Anteile) am Anfang und Ende;
+Anlagen, die nur in einem vorkommen, erhalten im anderen 0. Je Zeile auf
+Summe 1 normiert.}
 
-\item{start, end}{Beginn und Ende des Uebergangs (Standard: erstes und
-letztes Datum).}
+\item{start, end}{Beginn und Ende des Uebergangs (Date oder
+\code{"JJJJ-MM-TT"}; Standard \code{NULL} = erstes bzw. letztes Datum).}
 
-\item{every}{Anpassungsrhythmus der Stufen (\code{"year"}, \code{"quarter"},
-\code{"month"}).}
+\item{every}{Rhythmus der Stufen: \code{"year"} (Standard),
+\code{"quarter"} oder \code{"month"}.}
 }
 \value{
-\code{SimLevWeights}.
+\code{SimLevWeights} (data.frame mit \code{date} und
+Zielgewichten je Anlage, Anteile).
 }
 \description{
-Glidepath zwischen zwei Allokationen
+Erzeugt Zielgewichte, die sich stufenweise linear von \code{from} nach
+\code{to} bewegen, z. B. von aktienlastig zu anleihenlastig bis zum
+Rentenbeginn. Eine Stufe beginnt in der ersten Zeile und an der letzten
+vorhandenen Zeile jeder Periode von \code{every}; ihr Gewicht ist
+\eqn{(1 - p) \cdot from + p \cdot to} mit dem Zeitanteil \eqn{p} des
+Datums zwischen \code{start} (0) und \code{end} (1), begrenzt auf 0 bis 1.
+Vor \code{start} gilt \code{from}, nach \code{end} gilt \code{to}; bei
+\code{start = end} wechselt die erste Stufe an oder nach diesem Datum
+direkt auf \code{to}, \code{end} vor \code{start} ist ein Fehler. Das
+Ergebnis geht in \code{\link[=tactical_simulation]{tactical_simulation()}} oder als Kern in
+\code{\link[=blend_weights]{blend_weights()}}.
 }
 \examples{
 gp <- glidepath(seq.Date(as.Date("2025-01-01"), as.Date("2045-12-31"), by = "day"),
                 from = c(aktien = 0.9, anleihen = 0.1), to = c(aktien = 0.4, anleihen = 0.6))
 gp[c(1, 3653, 7670), ]
+}
+\seealso{
+\code{\link[=blend_weights]{blend_weights()}}, \code{\link[=tactical_simulation]{tactical_simulation()}}
 }

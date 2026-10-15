@@ -7,17 +7,52 @@
 bootstrap_data(result, i = 1L, dates = NULL, start_date = "2000-01-01")
 }
 \arguments{
-\item{result}{\code{bootstrap_result} oder eine einzelne Pfadmatrix.}
+\item{result}{\code{bootstrap_result} aus \code{\link[=bootstrap]{bootstrap()}} oder eine einzelne
+Pfadmatrix (z. B. \code{result$paths[[i]]}).}
 
-\item{i}{Pfadnummer.}
+\item{i}{Pfadnummer (Standard 1); nur bei \code{bootstrap_result} verwendet.}
 
-\item{dates}{Datumsvektor passender Laenge; sonst Kalendertage ab \code{start_date}.}
+\item{dates}{Datumsvektor mit genau so vielen Elementen wie der Pfad Zeilen
+hat (\code{path_length + 1}), z. B. ein Handelstagskalender;
+\code{NULL} (Standard) = aufeinanderfolgende Kalendertage ab
+\code{start_date}.}
 
-\item{start_date}{Startdatum (Standard 2000-01-01).}
+\item{start_date}{Startdatum fuer \code{dates = NULL} (Zeichenkette oder
+Date, Standard "2000-01-01").}
 }
 \value{
-data.frame mit \code{date} und allen Pfadspalten.
+data.frame mit Spalte \code{date} (Klasse Date) und allen
+Pfadspalten (Kursniveaus mit Startwert 100; Zusatzreihen mit
+\code{aux_type = "rate"} (Prozent p. a.) und ohne Angabe als
+Originalwerte der gezogenen Zeilen, mit \code{"level"} als kumuliertes
+Niveau, z. B. ein durchgehender CPI ohne Spruenge an Blockgrenzen; siehe
+\code{\link[=bootstrap_config]{bootstrap_config()}}). Bei einem \code{bootstrap_result}, dessen
+Konfiguration Reihen ausdruecklich als \code{aux_type = "rate"}
+kennzeichnet, traegt der data.frame das Attribut \code{aux_type} mit
+diesen Reihen (z. B. \code{c(infl = "rate")}); \code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}}
+behandelt sie als Inflationsrate in Prozent p. a. Ohne solche Angabe
+entfaellt das Attribut (Ergebnis wie bisher). Umformungen wie
+\code{transform()}, \code{merge()}, \code{cbind()} oder CSV-Export
+entfernen das Attribut; dann in \code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}}
+\code{inflation_type = "rate_pa"} angeben.
 }
 \description{
-Bootstrap-Pfad als data.frame fuer simulation()
+Wandelt einen Pfad aus \code{\link[=bootstrap]{bootstrap()}} in einen data.frame mit Datumsspalte
+um, der direkt an \code{\link[=simulation]{simulation()}} uebergeben werden kann. Die Spaltennamen
+sind die Pfadnamen aus \code{\link[=bootstrap_config]{bootstrap_config()}} (Indizes, Hebelprodukte,
+Zusatzreihen); die Strategie muss Assets mit diesen Namen verwenden.
+}
+\examples{
+set.seed(1)
+d <- data.frame(r = 1 + rnorm(800, 3e-4, 0.01))
+cfg <- bootstrap_config(c(idx = "r"), letfs = list(list(base = "idx", leverage = 2)))
+b <- bootstrap(d, cfg, "stationary", n = 2, params = list(L = 20),
+  path_length = 400, seed = 1, progress = FALSE)
+x <- bootstrap_data(b, i = 2, start_date = "2030-01-01")
+head(x, 3)
+res <- simulation(x, create_strategy(idx_l2 = asset_config("etf", "bnh")))
+res$cagr
+}
+\seealso{
+\code{\link[=bootstrap]{bootstrap()}}, \code{\link[=simulation]{simulation()}}, \code{\link[=bootstrap_study]{bootstrap_study()}}
 }

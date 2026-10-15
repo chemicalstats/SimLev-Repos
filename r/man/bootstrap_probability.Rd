@@ -7,20 +7,58 @@
 bootstrap_probability(study, ..., thresholds = NULL)
 }
 \arguments{
-\item{study}{\code{SimLevBootstrapStudy}.}
+\item{study}{Objekt der Klasse \code{SimLevBootstrapStudy} aus
+\code{\link[=bootstrap_study]{bootstrap_study()}}.}
 
 \item{...}{Benannte oder unbenannte Bedingungen in Kennzahlnamen, z. B.
-\code{ttwror >= 0.13}, \code{joint = ttwror >= 0.13 & max_drawdown <= 0.95}.}
+\code{ttwror >= 0.13}, \code{joint = ttwror >= 0.13 & max_drawdown <= 0.95}.
+Unbenannte Bedingungen werden nach ihrem Ausdruck benannt.}
 
-\item{thresholds}{Optional Liste je Strategie mit Bedingungen als
-Ausdrucksliste (fuer strategiespezifische Schwellen).}
+\item{thresholds}{Optional (Standard \code{NULL}) benannte Liste je
+Strategiename mit einer benannten Liste von Ausdruecken (\code{quote()}),
+z. B. \code{list(sma = list(ziel = quote(cagr >= 0.08)))}. Fuer eine hier
+genannte Strategie ersetzen diese Bedingungen die Bedingungen aus
+\code{...} (strategiespezifische Schwellen).}
 }
 \value{
-data.frame: Strategie x Bedingung, mit Monte-Carlo-Standardfehler.
+data.frame mit einer Zeile je Strategie und Bedingung:
+\code{strategy}, \code{condition} (Name), \code{probability}
+(gewichtete Wahrscheinlichkeit als Anteil), \code{se}
+(Monte-Carlo-Standardfehler \eqn{\sqrt{p(1-p)/n_{eff}}} mit effektiver
+Pfadzahl \eqn{n_{eff} = (\sum w)^2 / \sum w^2}) und \code{n} (Anzahl
+ausgewerteter Pfade).
 }
 \description{
-Wertet beliebige logische Bedingungen je Strategie aus (ESS-gewichtet), z. B.
+Wertet beliebige logische Bedingungen je Strategie ueber alle Pfade einer
+\code{\link[=bootstrap_study]{bootstrap_study()}} aus (mit den Pfadgewichten, also ESS-gewichtet), z. B.
 die gemeinsame Wahrscheinlichkeit, eine Mindestrendite zu erreichen und
 einen maximalen Drawdown nicht zu ueberschreiten (wie \code{calc_metrics} in
 '06 Bootstraps').
+}
+\details{
+Die Bedingungen werden zeilenweise in \code{study$results} ausgewertet;
+verwendbar sind dort alle Spalten, also die Kennzahlen aus \code{metrics}
+(bei \code{\link[=study_metrics]{study_metrics()}} z. B. \code{cagr}, \code{ttwror},
+\code{max_drawdown} als Anteil) sowie \code{path}, \code{weight},
+\code{combo} und \code{tries}. Zeilen mit \code{NA}-Ergebnis zaehlen nicht.
+Freie Variablen in den Bedingungen (z. B. eine Schwelle \code{thr}) werden
+in der Umgebung des Aufrufs gesucht (auch lokale Variablen einer
+aufrufenden Funktion), Spalten von \code{study$results} haben Vorrang.
+}
+\examples{
+set.seed(1); n <- 3 * 365
+d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
+d$aktien <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
+cfg <- bootstrap_config(c(akt = "aktien"), input = "prices",
+  letfs = list(list(base = "akt", leverage = 2, finance = 2)))
+st <- bootstrap_study(d, cfg, "stationary", n = 5, params = list(L = 30),
+  path_length = 500, seed = 1, progress = FALSE,
+  strategies = list(etf = create_strategy(akt = asset_config("etf", "bnh")),
+                    letf = create_strategy(akt_l2 = asset_config("etf", "bnh"))))
+bootstrap_probability(st, cagr > 0, joint = cagr > 0.05 & max_drawdown <= 0.3)
+bootstrap_probability(st, cagr > 0,
+  thresholds = list(letf = list(ziel = quote(cagr > 0.10))))
+}
+\seealso{
+\code{\link[=bootstrap_study]{bootstrap_study()}}, \code{\link[=study_metrics]{study_metrics()}}
 }

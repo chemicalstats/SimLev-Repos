@@ -3,38 +3,63 @@
 \name{param_space}
 \alias{param_space}
 \alias{param_range}
+\alias{print.SimLevParamSpace}
 \title{Suchraum fuer param_search()}
 \usage{
 param_space(...)
 
 param_range(lower, upper, n = 5, step = NULL, integer = FALSE, log = FALSE)
+
+\method{print}{SimLevParamSpace}(x, ...)
 }
 \arguments{
-\item{...}{Benannte Dimensionen. Jede ist entweder ein Vektor diskreter
-Werte (numerisch, Zeichen, logisch) oder ein Bereich aus
-\code{param_range()}.}
+\item{...}{Benannte Dimensionen (alle Namen Pflicht; sie werden zu den
+Namen der Liste \code{p} im \code{builder}, ohne \code{builder} zu
+Argumentnamen von \code{\link[=simulation]{simulation()}}). Jede ist entweder ein nicht leerer
+atomarer Vektor diskreter Werte (numerisch, Zeichen, logisch) oder ein
+Bereich aus \code{param_range()}. Bei \code{print()} ungenutzt.}
 
-\item{lower, upper}{Bereichsgrenzen.}
+\item{lower, upper}{Bereichsgrenzen (Zahlen in der Einheit des Parameters,
+\code{lower <= upper}; bei \code{log = TRUE} \code{lower > 0}).}
 
 \item{n}{Anzahl Rasterpunkte des Bereichs bei \code{method = "grid"}
-(alternativ \code{step}).}
+(ganze Zahl >= 1, Standard 5); wird ignoriert, wenn \code{step}
+angegeben ist.}
 
-\item{step}{Schrittweite fuer das Raster.}
+\item{step}{Schrittweite des Rasters in der Einheit des Parameters
+(\code{seq(lower, upper, by = step)}, > 0); hat Vorrang vor \code{n} und
+\code{log} (\code{log} gilt dann nur fuer Zufallsziehungen).
+\code{NULL} (Standard) = \code{n} Punkte.}
 
-\item{integer}{Werte auf ganze Zahlen runden.}
+\item{integer}{Logisch (Standard \code{FALSE}): Raster- und Zufallswerte
+auf ganze Zahlen runden; doppelte Rasterwerte entfallen.}
 
-\item{log}{Logarithmisch skalieren (Raster und Ziehung), z. B. fuer
+\item{log}{Logisch (Standard \code{FALSE}): Raster gleichabstaendig auf
+der Log-Skala und Ziehung log-gleichverteilt, z. B. fuer
 Fensterlaengen.}
+
+\item{x}{Objekt der Klasse \code{SimLevParamSpace} (fuer \code{print()}).}
 }
 \value{
-\code{param_space}: Objekt der Klasse \code{SimLevParamSpace};
-  \code{param_range}: Objekt der Klasse \code{SimLevParamRange}.
+\code{param_space}: Objekt der Klasse \code{SimLevParamSpace}
+(benannte Liste der Dimensionen); \code{param_range}: Objekt der Klasse
+\code{SimLevParamRange} (Liste mit \code{lower}, \code{upper}, \code{n},
+\code{step}, \code{integer}, \code{log}).
 }
 \description{
-Suchraum fuer param_search()
+\code{param_space()} beschreibt den Suchraum fuer \code{\link[=param_search]{param_search()}}: je
+Parameter eine benannte Dimension mit diskreten Werten oder einem
+stetigen Bereich aus \code{param_range()}. Bei \code{method = "grid"}
+werden alle Kombinationen der Rasterwerte ausgewertet; bei
+\code{"random"} und \code{"lhs"} werden diskrete Werte gleichverteilt
+ausgewaehlt und Bereiche stetig zwischen \code{lower} und \code{upper}
+gezogen (\code{n} und \code{step} spielen dann keine Rolle).
 }
 \examples{
 sp <- param_space(n = param_range(50, 400, n = 8, integer = TRUE, log = TRUE),
                   band = c(0, 1, 2), w = param_range(0.3, 0.9, step = 0.1))
 sp
+}
+\seealso{
+\code{\link[=param_search]{param_search()}}, \code{\link[=plateau]{plateau()}}
 }

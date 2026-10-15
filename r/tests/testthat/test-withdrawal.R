@@ -161,8 +161,11 @@ test_that("a saved simulation() result drives the withdrawal phase", {
   # Startvermoegen und Kostenbasis aus der Ansparphase
   acc <- simulation(d[1:3650, ], create_strategy(ETF = asset_config("etf", "bnh", asset_spread = 0)),
                     start_value = 1e4, dca_mode = TRUE, dca_value = 500, dca_span = 1)
-  w3 <- withdrawal_simulation(res, withdrawal_rule("percent", rate = 4), years = 25, inflation = 2,
-                              start_value = acc, tax_mode = "person")
+  # Ansparphase ohne tax_mode = "person": keine offenen Lots, daher Naeherung mit Warnung
+  expect_warning(withdrawal_simulation(res, withdrawal_rule("percent", rate = 4), years = 25, inflation = 2,
+                                       start_value = acc, tax_mode = "person"), "cost_basis: N\u00e4herung")
+  w3 <- suppressWarnings(withdrawal_simulation(res, withdrawal_rule("percent", rate = 4), years = 25, inflation = 2,
+                                               start_value = acc, tax_mode = "person"))
   expect_equal(w3$start_value, tail(acc$worth, 1))
   expect_true(all(w3$paths$taxes > 0))
 })

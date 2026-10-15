@@ -11,7 +11,11 @@
 ---
 
 Dies ist das R-Paket **SimLev**, die Referenzimplementierung. Die
-Python- und die Julia-Fassung im selben Repository rechnen bitgleich zu ihm.
+Python- und die Julia-Fassung im selben Repository rechnen bitgleich zu
+einem früheren Stand dieses Pakets (Commit 54b5b4f, vor den Korrekturen,
+damals ebenfalls als 0.5.0 bezeichnet), nicht zur aktuellen Fassung; die
+Korrekturen, steuerrechtlichen Anpassungen und deutschen Ausgaben sind dort
+noch nicht nachgezogen (siehe [`NEWS.md`](NEWS.md)).
 
 **Die vollständige Dokumentation mit Schnellstart, Grundkonzepten und
 Beispielen für alle drei Sprachen steht in der
@@ -37,7 +41,7 @@ Ob alles bereit ist, prüft `pkgbuild::check_build_tools()`.
 remotes::install_github("chemicalstats/SimLev-Repos", subdir = "r")
 
 # oder aus einem lokalen Quellarchiv
-install.packages("SimLev_0.2.0.tar.gz", repos = NULL, type = "source")
+install.packages("SimLev_0.5.0.tar.gz", repos = NULL, type = "source")
 ```
 
 **Optionale Pakete:**
@@ -73,21 +77,27 @@ result <- simulation(data, strategy,
                      tax_mode = "person", tax_rate = 26.375,
                      liquidate = TRUE, risk_free = 2)
 
-print(result)   # CAGR +5.93 %, Endwert 17.772,63 EUR
+print(result)   # CAGR +5.93 %, Endwert 17.765,20 EUR
 plot(result)
 ```
 
 ## Weiterführende Dokumentation im Paket
 
+- `?SimLev` – Arbeitsweise (eigene Daten einlesen oder erzeugen,
+  simulieren, fertige Simulationen weiterverarbeiten) und Glossar der
+  Einheiten und Argumentnamen
+- [`NEWS.md`](NEWS.md) – Änderungen je Version
 - `?simulation` – alle Argumente der Hauptfunktion im Detail, inklusive
   Terminverschiebung, signalbewusstem Rebalancing und Event-Rebalancing
 - `?asset_config`, `?create_strategy` – Assets und Strategien
+- `?read_tax_tariff` – Einkommensteuertarif (§ 32a EStG, Soli) aus einer
+  austauschbaren Datei für `simulation(..., taxable_income =)`
 - `?compute_rebal_trigger` – ereignisbasierte Trigger
 - `?plot.SimLevResult`, `?plot_interactive` – Visualisierung und Export
 - `vignette("getting-started", package = "SimLev")` – Einführung Schritt
   für Schritt
-- [`R/rebal_trigger_cookbook.R`](R/rebal_trigger_cookbook.R) – kommentierte
-  Vorlagen für eigene Trigger-Regeln
+- [`inst/examples/rebal_trigger_cookbook.R`](inst/examples/rebal_trigger_cookbook.R) –
+  kommentierte Vorlagen für eigene Trigger-Regeln
 - `?backcast_fit`, `?bootstrap_study`, `?withdrawal_simulation` – Backcast
   von Produkten, Bootstrap-Studien und Entnahmephase
 - `?deep_analysis`, `?rebalancing_sensitivity`, `?lumpsum_vs_dca` –
@@ -99,12 +109,16 @@ plot(result)
 - `?dependence_analysis`, `?fit_copula`, `?tail_regression`,
   `?covar_analysis` – Abhängigkeiten, Tail-Risiko und Drittvariablen
 - `?tactical_simulation`, `?tactical_rules`, `?tactical_rotation`,
-  `?target_volatility` – taktische Allokation
+  `?target_volatility`, `?conditional_volatility` – taktische Allokation
 - `?portfolio_optimize`, `?efficient_frontier`, `?risk_contributions` –
   Optimierung und Risikozerlegung
 - `?bond_index_from_yields`, `?money_market_index` – synthetische Reihen
-- [`inst/tutorial/`](inst/tutorial/) – Tutorial (R Markdown, als PDF
-  ausgeliefert)
+- `?entropy_pooling`, `?copula_scenarios`, `?crisis_replay` – Szenarien
+- `?pooled_bootstrap`, `?horizon_model`, `?goal_optimize` – Planung
+- `?sharpe_test`, `?reality_check`, `?signal_analysis`, `?regime_hmm` –
+  Prüfungen und Regime
+- [`inst/tutorial/`](inst/tutorial/) – Tutorial (R Markdown, Ausgabe als
+  HTML)
 - [`inst/examples/`](inst/examples/) – ausführliche Beispielsammlungen zu
   Strategie-Objekten, Dashboards sowie Backcast, Bootstrap und Entnahmen
   ([`backcast_bootstrap_withdrawal_examples.md`](inst/examples/backcast_bootstrap_withdrawal_examples.md))
@@ -125,9 +139,10 @@ die Python- und Julia-Fassung entsprechend nachziehen.
 ```
 R/
   simulation.R               simulation(), Ablaufsteuerung
+  tax_tariff.R               read_tax_tariff(): Einkommensteuertarif aus
+                             inst/extdata/steuertarif.csv
   asset_config.R, strategy.R asset_config(), create_strategy() & Co.
   compute_rebal_trigger.R    ereignisbasierte Trigger
-  rebal_trigger_cookbook.R   Vorlagen für eigene Trigger
   plot_dashboard.R           statisches Dashboard (Base-Grafik)
   plot_interactive.R         interaktives HTML-Dashboard
   backcast.R                 backcast_fit(), backcast()
@@ -145,11 +160,19 @@ R/
   dependence.R               dependence_analysis(), fit_copula(), dcc_fit(),
                              quantile_reg(), tail_regression(), covar_analysis()
   tactical.R                 tactical_rules(), tactical_rotation(),
-                             target_volatility(), glidepath(), tactical_simulation()
+                             target_volatility(), conditional_volatility(),
+                             glidepath(), tactical_simulation()
   optimize.R                 portfolio_optimize(), efficient_frontier(),
                              rolling_optimization(), risk_contributions()
   bonds.R                    bond_index_from_yields(), money_market_index(),
                              currency_hedged_index()
+  scenarios.R                entropy_pooling(), copula_scenarios(),
+                             scenario_risk(), crisis_replay()
+  planning.R                 set_expected_return(), pooled_bootstrap(),
+                             portfolio_returns(), goal_optimize()
+  analysis_tests.R           signal_analysis(), sharpe_test(), reality_check(),
+                             min_track_record(), return_heatmap()
+  regimes.R                  regime_hmm(), regime_states()
   RcppExports.R, utils.R
 src/                         C++-Kerne (FIFO, Steuern, Markt-Updates,
                              Bootstrap-Verfahren, Entnahmeregeln, DCC)

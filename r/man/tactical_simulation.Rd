@@ -16,35 +16,55 @@ tactical_simulation(
 )
 }
 \arguments{
-\item{data}{data.frame mit \code{date} und Kursspalten aller Anlagen der
-Gewichte (z. B. mit [align_series()] vorbereitet).}
+\item{data}{data.frame mit Spalte \code{date} (Klasse Date) und
+Kursspalten (Niveaus) aller Anlagen der Gewichte (z. B. mit
+\code{\link[=align_series]{align_series()}} vorbereitet). Fehlende Kalendertage fuellt
+\code{\link[=simulation]{simulation()}} selbst.}
 
-\item{weights}{\code{SimLevWeights} (aus [tactical_rules()],
-[tactical_rotation()], [target_volatility()], [glidepath()],
-[blend_weights()] oder [rolling_optimization()]).}
+\item{weights}{\code{SimLevWeights} (aus \code{\link[=tactical_rules]{tactical_rules()}},
+\code{\link[=tactical_rotation]{tactical_rotation()}}, \code{\link[=target_volatility]{target_volatility()}}, \code{\link[=conditional_volatility]{conditional_volatility()}}, \code{\link[=glidepath]{glidepath()}},
+\code{\link[=blend_weights]{blend_weights()}} oder \code{\link[=rolling_optimization]{rolling_optimization()}}). Daten von
+\code{data}, die in \code{weights} fehlen, uebernehmen das letzte
+bekannte Zielgewicht.}
 
-\item{rebalance}{\code{"switch"}, \code{"month"}, \code{"quarter"} oder
-\code{"year"}.}
+\item{rebalance}{Pflegerhythmus: \code{"switch"} (Standard; nur bei
+Wechseln), \code{"month"}, \code{"quarter"} oder \code{"year"}.}
 
-\item{tolerance}{Toleranzband in Prozent (\code{NULL} = immer handeln).}
+\item{tolerance}{Toleranzband in Prozent (5 = 5 \%; Standard \code{NULL} =
+an jedem Termin handeln).}
 
-\item{tolerance_type}{\code{"absolute"} oder \code{"relative"}.}
+\item{tolerance_type}{Messung der Abweichung fuer \code{tolerance}:
+\code{"absolute"} (Standard; Prozentpunkte des Gewichts: bei 5 und
+Ziel 40 \% wird gehandelt, wenn eine Anlage unter 35 \% oder ueber 45 \%
+liegt) oder \code{"relative"} (Prozent des Zielgewichts).}
 
-\item{lag}{Verzoegerung in Zeilen.}
+\item{lag}{Verzoegerung in Zeilen von \code{data} (ganze Zahl >= 0,
+Standard 1); mit Attribut \code{filled} in Zeilen mit echten Kursen.}
 
-\item{asset_args}{Liste von Argumenten fuer [asset_config()] (benannte
-Vektoren je Anlage moeglich), z. B.
-\code{list(asset_spread = 0.1, asset_bonus = c(aktien = 30))}.}
+\item{asset_args}{Liste von Argumenten fuer \code{\link[=asset_config]{asset_config()}} (ueber
+\code{\link[=strategy_from_weights]{strategy_from_weights()}}), z. B.
+\code{list(asset_spread = 0.1, asset_bonus = c(aktien = 30, geld = 0))}.
+Ein unbenannter einzelner Wert gilt fuer alle Anlagen; benannte Vektoren
+werden je Anlage zugeordnet (auch mit einem Element, siehe
+\code{\link[=strategy_from_weights]{strategy_from_weights()}}).}
 
-\item{...}{Weitere Argumente fuer [simulation()].}
+\item{...}{Weitere Argumente fuer \code{\link[=simulation]{simulation()}} (z. B. Steuern,
+\code{start_value}, \code{dca_mode}). Nicht erlaubt, weil hier
+gesteuert: \code{event_col}, \code{event_mode}, \code{event_weight},
+\code{balance_mode}, \code{balance_thresh}.}
 }
 \value{
-\code{SimLevResult} mit zusaetzlichem Element \code{tactical}
-  (gehandelte Zielgewichte, Ereignistage, Zahl der Wechsel).
+\code{SimLevResult} wie von \code{\link[=simulation]{simulation()}} mit zusaetzlichem
+Element \code{tactical}, einer Liste mit \code{weights} (gehandelte,
+um \code{lag} verschobene Zielgewichte als \code{SimLevWeights}),
+\code{events} (Daten der Umschichtungstermine aus Wechseln, Pflege und
+Sparplan, vor Anwendung von \code{tolerance}), \code{switches} (Zahl der
+Zielwechsel), \code{lag} und \code{rebalance}. Das Ergebnis laesst sich
+mit \code{\link[=deep_analysis]{deep_analysis()}} oder \code{\link[=result_index]{result_index()}} weiterverarbeiten.
 }
 \description{
 Uebersetzt eine Zielgewichtsreihe in Ereignis-Rebalancing von
-[simulation()]: An Wechselterminen (Zielgewicht aendert sich) und an
+\code{\link[=simulation]{simulation()}}: An Wechselterminen (Zielgewicht aendert sich) und an
 optionalen Pflegeterminen wird auf die Zielgewichte umgeschichtet, mit
 Steuern, Spreads und allen weiteren Einstellungen der Engine. Die Engine
 selbst bleibt unveraendert (\code{event_col}, \code{event_mode =
@@ -52,21 +72,55 @@ selbst bleibt unveraendert (\code{event_col}, \code{event_mode =
 }
 \details{
 \itemize{
-  \item \code{lag}: Ein Zielgewicht, das nach Schluss von Tag t bekannt
-    ist, wird nach \code{lag} Zeilen gehandelt (Standard 1 = naechster
-    Handelstag; 0 = am selben Schlusskurs, wie bei vielen Online-Backtestern).
-  \item \code{rebalance}: \code{"switch"} (nur bei Wechseln) oder ein
-    Rhythmus (\code{"month"}, \code{"quarter"}, \code{"year"}), zu dem
-    zusaetzlich auf die aktuellen Zielgewichte zurueckgefuehrt wird.
-  \item \code{tolerance}: Toleranzband (wie \code{balance_thresh}); an
-    Terminen innerhalb des Bands wird nicht gehandelt.
-  \item Umschichtungen nutzen die Rebalancing-Logik der Engine, die mit den
-    Ist-Gewichten des letzten Bewertungsstands (Vortag) rechnet; nach einem
-    Wechsel koennen daher Reste in der Groessenordnung der Tagesbewegung
-    (meist unter einem Prozent) in der verlassenen Anlage bleiben. Ein Pflegerhythmus (\code{rebalance =
+\item \code{every} vs. \code{rebalance}: Das Argument \code{every} der
+Gewichts-Erzeuger (\code{\link[=tactical_rotation]{tactical_rotation()}}, \code{\link[=target_volatility]{target_volatility()}},
+\code{\link[=glidepath]{glidepath()}} usw.) bestimmt, wann sich das Zielgewicht aendern kann.
+\code{rebalance} hier bestimmt, wann zusaetzlich ohne Zielwechsel auf
+die aktuellen Zielgewichte zurueckgefuehrt wird. Gehandelt wird an
+jedem Wechsel (nach \code{lag}) und an den Pflegeterminen.
+\item \code{lag}: Ein Zielgewicht, das nach Schluss von Tag t bekannt
+ist, wird nach \code{lag} Zeilen von \code{data} gehandelt (Standard
+1 = naechste Zeile, bei Kalendertagsdaten also der naechste
+Kalendertag; 0 = am selben Schlusskurs, wie bei vielen
+Online-Backtestern). Traegt \code{data} das Attribut \code{filled}
+aus \code{\link[=align_series]{align_series()}}, zaehlen nur Zeilen, in denen alle Anlagen der
+Gewichte echte (nicht gefuellte) Kurse haben: Ein Signal vom Freitag
+wird mit \code{lag = 1} am Montag gehandelt, nicht am Samstag zum
+Freitagskurs. Das Attribut wird an \code{\link[=simulation]{simulation()}} weitergereicht.
+\item \code{rebalance}: \code{"switch"} (Standard; nur bei Wechseln)
+oder ein Rhythmus (\code{"month"}, \code{"quarter"}, \code{"year"};
+jeweils letzte vorhandene Zeile der Periode), zu dem zusaetzlich auf
+die aktuellen Zielgewichte zurueckgefuehrt wird.
+\item \code{tolerance}: Toleranzband in Prozent (wird als
+\code{balance_thresh} an \code{\link[=simulation]{simulation()}} uebergeben); an Terminen, an
+denen keine Anlage staerker als das Band vom Ziel abweicht, wird nicht
+gehandelt. Gilt auch fuer Wechseltermine.
+\item Umschichtungen nutzen die Rebalancing-Logik der Engine, die mit den
+Ist-Gewichten des letzten Bewertungsstands (Vortag) rechnet; nach einem
+Wechsel koennen daher Reste in der Groessenordnung der Tagesbewegung
+(meist unter einem Prozent) in der verlassenen Anlage bleiben. Ein Pflegerhythmus (\code{rebalance =
     "month"}) gleicht sie aus.
-  \item Sparplaene (\code{dca_mode}) zahlen nach den Startgewichten ein; der
-    Sparplantag wird zum Rebalancing-Termin, so dass die Rate sofort auf die
-    aktuellen Zielgewichte verteilt wird.
+\item Sparplaene (\code{dca_mode}) zahlen nach den Startgewichten ein; der
+Sparplantag wird zum Rebalancing-Termin, so dass die Rate sofort auf die
+aktuellen Zielgewichte verteilt wird.
 }
+}
+\examples{
+set.seed(1); n <- 4 * 365
+d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
+d$aktien <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
+d$geld <- 100 * cumprod(rep(1 + 0.01 / 365, n))
+w <- tactical_rules(d, list(list(when = signal_sma(d$aktien, 200, band = 1),
+                                 weights = c(aktien = 1))), default = c(geld = 1))
+res <- tactical_simulation(d, w, rebalance = "switch", lag = 1,
+                           asset_args = list(asset_bonus = c(aktien = 30, geld = 0)))
+res$tactical$switches
+# Zielvolatilitaet, vierteljaehrliche Pflege mit 5-Prozentpunkte-Band
+res2 <- tactical_simulation(d, target_volatility(d, c(aktien = 1), safe = "geld", target = 10),
+                            rebalance = "quarter", tolerance = 5)
+deep_analysis(list(Regel = res, Zielvola = res2))$metrics[c("cagr", "max_drawdown"), ]
+}
+\seealso{
+\code{\link[=simulation]{simulation()}}, \code{\link[=deep_analysis]{deep_analysis()}}, \code{\link[=tactical_rules]{tactical_rules()}},
+\code{\link[=tactical_rotation]{tactical_rotation()}}
 }

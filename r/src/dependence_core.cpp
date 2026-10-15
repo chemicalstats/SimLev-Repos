@@ -7,7 +7,9 @@
 // Zweite Stufe der Quasi-Likelihood (Korrelationsteil):
 //   -l = 0.5 * sum_t ( log|R_t| + z_t' R_t^{-1} z_t - z_t' z_t )
 // z sind die mit univariaten GARCH-Modellen standardisierten Residuen.
-// Fehlende Werte sind nicht erlaubt (in R vorher entfernen).
+// Fehlende Werte sind nicht erlaubt (in R vorher entfernen). Ist R_t nicht
+// positiv definit, bricht der Filter ab: nll = 1e10, ok = false, die
+// Korrelationen ab dieser Zeile sind NA.
 
 #include <Rcpp.h>
 #include <vector>
@@ -40,6 +42,7 @@ List dcc_filter(NumericMatrix Z, double a, double b, NumericMatrix Qbar, bool ke
   std::vector<double> Q(k * k), R(k * k), L(k * k), y(k);
   for (int i = 0; i < k; ++i) for (int j = 0; j < k; ++j) Q[i * k + j] = Qbar(i, j);
   NumericMatrix out(keep ? n : 0, keep ? np : 0);
+  if (keep) std::fill(out.begin(), out.end(), NA_REAL);  // nicht berechnete Zeilen bleiben NA
   double nll = 0.0;
   bool ok = true;
   for (int t = 0; t < n; ++t) {
@@ -66,5 +69,5 @@ List dcc_filter(NumericMatrix Z, double a, double b, NumericMatrix Qbar, bool ke
     }
   }
   if (!ok) nll = 1e10;
-  return List::create(_["nll"] = nll, _["R"] = out);
+  return List::create(_["nll"] = nll, _["R"] = out, _["ok"] = ok);
 }

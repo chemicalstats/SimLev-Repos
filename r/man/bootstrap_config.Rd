@@ -10,6 +10,7 @@ bootstrap_config(
   letfs = list(),
   regime_index = NULL,
   aux = NULL,
+  aux_type = NULL,
   cross = c("ratio", "joint"),
   input = c("returns", "prices")
 )
@@ -19,70 +20,162 @@ create_config(
   letfs = list(),
   regime_index = NULL,
   aux = NULL,
+  aux_type = NULL,
   cross = c("ratio", "joint"),
   input = c("returns", "prices")
 )
 }
 \arguments{
-\item{indices}{Benannter Vektor oder benannte Liste: Pfadname -> Spaltenname,
-z. B. \code{c(us = "us_index_l1_return", eu = "eu_index_l1_return")}.}
+\item{indices}{Benannter Zeichenvektor oder benannte Liste: Pfadname ->
+Spaltenname in \code{data}, z. B.
+\code{c(us = "us_index_l1_return", eu = "eu_index_l1_return")}. Die
+Pfadnamen werden zu Spaltennamen der erzeugten Pfade.}
 
-\item{letfs}{Liste von Hebelprodukten. Jedes Element ist eine Liste mit
+\item{letfs}{Liste von Hebelprodukten (Standard: keine). Jedes Element ist
+eine Liste mit
 \describe{
-  \item{base}{Name des Basisindex (aus \code{indices}), Pflicht}
-  \item{leverage}{Hebel L (Standard 2; negativ fuer Short)}
-  \item{finance}{Finanzierungszins in Prozent p. a. (Skalar) oder Name
-    einer Zusatzreihe aus \code{aux} (Standard 3.5)}
-  \item{expense}{TER in Prozent p. a. (Standard 0.5)}
-  \item{spread}{Spread auf den finanzierten bzw. leerverkauften Anteil in
-    Prozent p. a. (Standard 0)}
-  \item{days}{Kalendertage je Zeile: Skalar (Standard 1) oder Name einer
-    Zusatzreihe (z. B. Datumsabstand bei Handelstagsdaten)}
-  \item{rate_basis, ter_basis}{Tagesbasis (Standard 360 bzw. 365)}
-  \item{name}{Spaltenname im Pfad (Standard z. B. "eu_l2", "us_inv1")}
+\item{base}{Name des Basisindex (Pfadname aus \code{indices}), Pflicht.}
+\item{leverage}{Hebel L als Zahl ungleich 0 (Standard 2; negativ fuer
+Short-Produkte).}
+\item{finance}{Finanzierungszins in Prozent p. a. (3.5 = 3,5 Prozent) als
+Skalar oder Name einer Zusatzreihe aus \code{aux}, deren Werte
+ebenfalls in Prozent p. a. vorliegen (Standard 3.5).}
+\item{expense}{TER in Prozent p. a. (Standard 0.5; muss >= 0 sein).}
+\item{spread}{Spread auf den finanzierten bzw. leerverkauften Anteil
+\eqn{m(L)} in Prozent p. a. (Standard 0).}
+\item{days}{Kalendertage je Zeile: Skalar (Standard 1, passend fuer
+Kalendertagsdaten) oder Name einer Zusatzreihe (z. B. Datumsabstand
+bei Handelstagsdaten).}
+\item{rate_basis, ter_basis}{Tagesbasis fuer Zins und Spread bzw. TER
+(Standard 360 bzw. 365).}
+\item{name}{Spaltenname im Pfad (Standard \code{<base>_l<L>}, z. B.
+"eu_l2", bei negativem Hebel \code{<base>_inv<|L|>}, z. B. "us_inv1").}
 }
 Tagesrendite (MSCI Daily Leveraged/Short, plus Fondskosten):
 \deqn{r = 1 + L (R - 1) + (1 - L) i \cdot d / 360 - TER \cdot d / 365
-      - s \cdot m(L) \cdot d / 360}
-mit \eqn{m(L) = \max(L-1,0) + \max(-L,0)}. Fuer L = 2 und konstantem
-Zins entspricht das dem Original (Finanzierung auf L - 1); fuer Short-
-Produkte wird - anders als im Original - der Zinsertrag auf Kapital und
-Leerverkaufserloes gutgeschrieben (MSCI-Methodik: \eqn{-R + 2i}).}
+        - s \cdot m(L) \cdot d / 360}
+mit Brutto-Indexrendite \eqn{R}, Tagen je Zeile \eqn{d}, \eqn{i},
+\eqn{TER} und \eqn{s} als Anteil (Prozentangabe / 100) und
+\eqn{m(L) = \max(L-1,0) + \max(-L,0)}; 360 und 365 stehen fuer
+\code{rate_basis} und \code{ter_basis}. Faellt \eqn{r} auf 0 oder
+darunter, bleibt das Produkt ab diesem Tag bei 0 (Totalverlust). Fuer
+L = 2 und konstantem Zins entspricht das dem Original (Finanzierung auf
+L - 1); fuer Short-Produkte wird - anders als im Original - der
+Zinsertrag auf Kapital und Leerverkaufserloes gutgeschrieben
+(MSCI-Methodik: \eqn{-R + 2i}).}
 
-\item{regime_index}{Name des Referenzindex fuer Regime-/GARCH-Verfahren
-(Standard: erster Index).}
+\item{regime_index}{Pfadname des Referenzindex fuer die Verfahren
+"regime", "evt", "tails" und die GARCH-Familie (Standard \code{NULL} =
+erster Index).}
 
-\item{aux}{Optional benannter Vektor Zusatzreihen: Pfadname -> Spaltenname,
-z. B. \code{c(rate = "eu_rate", cpi = "eu_cpi")}. Werte werden nicht
-simuliert, sondern aus der jeweils gezogenen historischen Zeile uebernommen.}
+\item{aux}{Optional (Standard \code{NULL} = keine) benannter Zeichenvektor
+Zusatzreihen: Pfadname -> Spaltenname, z. B.
+\code{c(rate = "eu_rate", cpi = "eu_cpi")}. Zusatzreihen werden nicht
+simuliert, sondern aus denselben historischen Zeilen gezogen wie die
+Renditen; wie sie in den Pfad und in die Weiterverarbeitung eingehen,
+legt \code{aux_type} fest.}
 
-\item{cross}{Kopplung der Nicht-Referenzreihen bei EVT/GARCH-Verfahren:
-\code{"ratio"} (Standard, wie Original: Reihe = Referenz x Verhaeltnis,
-z. B. EUR-Index = USD-Index x Wechselkurs) oder \code{"joint"} (eigene
-GARCH-Dynamik je Reihe, Kopplung nur ueber das gemeinsame Residuendatum).}
+\item{aux_type}{Optional (Standard \code{NULL} = keine Angabe) benannter
+Zeichenvektor: Art je Zusatzreihe, Name aus \code{aux} -> \code{"level"}
+oder \code{"rate"}. Ein leerer Vektor (\code{character(0)}) gilt wie
+\code{NULL}. Nicht genannte Reihen stehen wie \code{"rate"} mit ihren
+Originalwerten im Pfad, behalten aber in der Weiterverarbeitung das
+bisherige Verhalten (siehe unten).
+\describe{
+\item{"level"}{Niveau, z. B. ein Preisindex (CPI). Die Reihe wird in
+Zeilenverhaeltnisse zerlegt (Wert je Zeile / Wert der Vorzeile); der
+Pfad enthaelt das Niveau, das sich durch Kumulieren der Verhaeltnisse
+der gezogenen Zeilen ergibt. Startwert (Pfadzeile 1) ist der Wert der
+ersten verwendeten Historienzeile, bei \code{input = "prices"} der
+Wert der Zeile davor (Startzeile der Kurse). So entstehen keine
+Spruenge an Blockgrenzen. Bei \code{input = "returns"} hat die erste
+Historienzeile mangels Vorzeile das Verhaeltnis 1. Die Werte muessen
+positiv und endlich sein.}
+\item{"rate"}{Rate in Prozent pro Jahr (2 = 2 \% p. a.; nicht je
+Datenperiode, kein Anteil wie 0.02), z. B. ein Zins oder eine
+Inflationsrate: Werte der gezogenen Zeilen unveraendert (keine
+Normierung auf 100; Pfadzeile 1 wiederholt den Wert der ersten
+gezogenen Zeile). Als Inflation wird die Rate je Pfadzeile ueber die
+Kalendertage seit der Vorzeile aufgezinst,
+\eqn{\prod (1 + r/100)^{Tage/365.25}}; eine konstante Rate 2 ergibt
+damit je Jahr \eqn{1.02^{Tage/365.25}} (1,02 bei 365,25 Tagen), bei
+Kalender- wie Handelstagsdaten.}
+}
+Eine ausdrueckliche Angabe gilt einheitlich in allen Funktionen, die die
+Reihe weiterverarbeiten: \code{keep_aux} in \code{\link[=bootstrap_study]{bootstrap_study()}},
+\code{inflation} in \code{\link[=withdrawal_paths]{withdrawal_paths()}} und \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}
+(\code{"level"} = Preisindex, \code{"rate"} = Inflationsrate in Prozent
+p. a.; \code{inflation_type} muss nicht erneut angegeben werden) und
+\code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}} mit einer Tabelle aus \code{\link[=bootstrap_data]{bootstrap_data()}}.
+Widersprechende Angaben dort (z. B. \code{inflation_type = "level"} bei
+\code{"rate"}) sind ein Fehler. Ohne Angabe gilt das bisherige
+Verhalten: Originalwerte im Pfad; als Inflation (\code{keep_aux},
+\code{\link[=withdrawal_paths]{withdrawal_paths()}} mit \code{inflation_type = "level"}) dient die
+Niveau-Variante (Attribut \code{aux_level}, siehe \code{\link[=bootstrap]{bootstrap()}}), also
+die kumulierten Zeilenverhaeltnisse, als waere die Reihe ein Preisindex;
+eine Rate in Prozent p. a. muss dann mit \code{inflation_type =
+  "rate_pa"} in \code{\link[=withdrawal_paths]{withdrawal_paths()}} angegeben werden. Der
+Finanzierungszins von Hebelprodukten (\code{finance}) ist ebenfalls in
+Prozent p. a. (einfache Verzinsung je Zeile ueber \code{rate_basis}) und
+darf nicht \code{"level"} sein; ebenso die Tage je Zeile (\code{days},
+Werte unveraendert verwendet, am besten ohne Angabe).}
 
-\item{input}{\code{"returns"} (Brutto-Renditen > 0, wie im Original) oder
-\code{"prices"} (Kursniveaus; Renditen werden intern gebildet).}
+\item{cross}{Kopplung der Nicht-Referenzindizes bei den Verfahren
+"garch", "gjr_garch", "ms_garch", "ms_ar_garch_m" und "tvtp_ms_garch":
+\code{"ratio"} (Standard, wie Original: GARCH(1,1) auf das Verhaeltnis zur
+Referenz, z. B. EUR-Index = USD-Index x Wechselkurs) oder \code{"joint"}
+(eigene GARCH(1,1)-Dynamik je Reihe, Kopplung nur ueber das gemeinsame
+Residuendatum). Bei den uebrigen Verfahren ohne Wirkung.}
+
+\item{input}{\code{"returns"} (Standard; Brutto-Renditen > 0 je Zeile, wie
+im Original) oder \code{"prices"} (Kursniveaus; Renditen werden intern als
+Verhaeltnis aufeinanderfolgender Zeilen gebildet, die erste Zeile entfaellt).}
 }
 \value{
-Objekt der Klasse \code{bootstrap_config}.
+Objekt der Klasse \code{bootstrap_config} (Liste mit
+\code{indices}, \code{letfs} (mit allen Standardwerten ergaenzt),
+\code{regime_index}, \code{aux}, \code{aux_type} (Art je Zusatzreihe,
+vollstaendig), \code{aux_type_set} (Namen der ausdruecklich angegebenen
+Arten), \code{cross}, \code{input}, \code{n_indices}, \code{n_letfs},
+\code{n_aux}, \code{index_names}, \code{letf_names}, \code{aux_names}).
 }
 \description{
-Beschreibt, welche Reihen gebootstrappt werden, welche Hebelprodukte daraus
-abgeleitet werden und welche Zusatzreihen (Zinsen, Inflation, ...) jeweils
-aus derselben historischen Zeile mitgezogen werden.
+Beschreibt, welche Spalten eines Datensatzes gebootstrappt werden, welche
+Hebelprodukte (LETFs) daraus je Pfad abgeleitet werden und welche
+Zusatzreihen (Zinsen, Inflation, Kalendertage, ...) jeweils aus derselben
+historischen Zeile mitgezogen werden. Das Ergebnis ist die Eingabe
+\code{config} von \code{\link[=bootstrap]{bootstrap()}} und \code{\link[=bootstrap_study]{bootstrap_study()}}.
 }
 \details{
-\code{create_config()} ist ein Alias fuer Skripte, die die
-  urspruengliche Hilfsfunktion aus '00 Bootstraps' verwenden.
+Eingabedaten (\code{data} in \code{\link[=bootstrap]{bootstrap()}}): ein data.frame oder eine
+Matrix mit einer Zeile je Beobachtung (z. B. Kalendertage oder Handelstage)
+und den hier genannten Spalten. Mit \code{input = "returns"} enthalten die
+Index-Spalten Brutto-Renditen je Zeile (z. B. 1.002 fuer +0,2 Prozent), mit
+\code{input = "prices"} Kursniveaus. Eine Datumsspalte wird nicht benoetigt
+und nicht ausgewertet; Zeilen mit fehlenden Werten in den verwendeten
+Spalten werden entfernt.
+
+\code{create_config()} ist ein Alias von \code{bootstrap_config()}
+mit identischen Argumenten und identischem Ergebnis, fuer Skripte, die die
+urspruengliche Hilfsfunktion aus '00 Bootstraps' verwenden.
 }
 \examples{
+# Spalten mit Brutto-Tagesrenditen (us_ret, eu_ret) und einem Zins in
+# Prozent p. a. (eu_rate):
 cfg <- bootstrap_config(
   indices = c(us = "us_ret", eu = "eu_ret"), regime_index = "us",
   letfs = list(list(base = "eu", leverage = 2, finance = "rate", expense = 0.5)),
   aux = c(rate = "eu_rate"))
 cfg
+# Kursniveaus als Eingabe, Short-Produkt mit festem Zins:
+cfg2 <- create_config(c(akt = "aktien"), input = "prices",
+  letfs = list(list(base = "akt", leverage = -1, finance = 2, expense = 0.6)))
+cfg2$letf_names
+# Preisindex als Niveau (Pfad enthaelt den kumulierten CPI), Zins als Rate:
+cfg3 <- bootstrap_config(c(us = "us_ret"), aux = c(cpi = "us_cpi", zins = "us_rate"),
+  aux_type = c(cpi = "level", zins = "rate"))
+cfg3$aux_type
 }
 \seealso{
-[bootstrap()], [bootstrap_study()]
+\code{\link[=bootstrap]{bootstrap()}}, \code{\link[=bootstrap_study]{bootstrap_study()}}, \code{\link[=block_length]{block_length()}}
 }

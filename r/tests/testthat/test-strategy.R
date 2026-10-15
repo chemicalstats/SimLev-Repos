@@ -34,14 +34,14 @@ test_that("create_strategy converts plain lists", {
 
 
 test_that("create_strategy rejects empty input", {
-  expect_error(create_strategy(), "At least one asset")
+  expect_error(create_strategy(), "mindestens eine Asset-Konfiguration")
 })
 
 
 test_that("create_strategy rejects unnamed assets", {
   expect_error(
     create_strategy(asset_config()),
-    "must be named"
+    "alle Assets m\u00fcssen benannt sein"
   )
 })
 
@@ -65,7 +65,7 @@ test_that("validate_strategy checks data columns", {
   
   expect_error(
     validate_strategy(strat, bad_data),
-    "not found"
+    "Kursspalte\\(n\\) 'ETF' fehlen in data"
   )
 })
 
@@ -95,7 +95,7 @@ test_that("validate_strategy checks signal columns", {
   
   expect_error(
     validate_strategy(strat, bad_data),
-    "Signal column"
+    "signal_buy-Spalte 'buy_signal' fehlt in data"
   )
 })
 
@@ -130,7 +130,7 @@ test_that("remove_asset warns on empty strategy", {
   
   expect_warning(
     remove_asset(strat, "ETF"),
-    "empty"
+    "keine Assets mehr"
   )
 })
 
@@ -151,7 +151,7 @@ test_that("update_asset rejects unknown asset", {
   
   expect_error(
     update_asset(strat, "Unknown", asset_share = 0.5),
-    "not found"
+    "Asset 'Unknown' ist nicht in der Strategie"
   )
 })
 
@@ -181,8 +181,8 @@ test_that("print.strategy works", {
     Gold = asset_config(asset_class = "etc")
   )
   
-  expect_output(print(strat), "Investment Strategy")
-  expect_output(print(strat), "2 assets")
+  expect_output(print(strat), "Anlagestrategie")
+  expect_output(print(strat), "2 Assets")
 })
 
 
@@ -192,5 +192,5 @@ test_that("summary.strategy shows allocation", {
     Gold = asset_config(asset_share = 0.3, asset_class = "etc")
   )
   
-  expect_output(summary(strat), "Total allocation: 100")
+  expect_output(summary(strat), "Gesamtgewicht: 100")
 })

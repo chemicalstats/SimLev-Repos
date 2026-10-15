@@ -40,6 +40,7 @@ static inline int draw_int(int n) {            // gleichverteilt in {0, ..., n-1
 // IID-Bootstrap (Efron 1979): Zeilen gleichverteilt mit Zuruecklegen.
 // [[Rcpp::export(name = ".boot_idx_iid")]]
 IntegerVector boot_idx_iid(int n_src, int n_out) {
+  if (n_src < 1) stop("Keine Quellzeilen");
   IntegerVector idx(n_out);
   for (int i = 0; i < n_out; i++) idx[i] = draw_int(n_src) + 1;
   return idx;
@@ -51,8 +52,9 @@ IntegerVector boot_idx_iid(int n_src, int n_out) {
 //                   0..n-1 mit Umlauf; jede Beobachtung gleich wahrscheinlich.
 // [[Rcpp::export(name = ".boot_idx_block")]]
 IntegerVector boot_idx_block(int n_src, int n_out, int block_length, bool circular) {
+  if (n_src < 1) stop("Keine Quellzeilen");
   if (block_length <= 0) stop("block_length muss positiv sein");
-  if (block_length > n_src) block_length = n_src;
+  if (block_length > n_src) stop("block_length (%d) ist gr\u00f6\u00dfer als die Historie (%d Zeilen)", block_length, n_src);
   IntegerVector idx(n_out);
   int i = 0;
   int n_start = circular ? n_src : (n_src - block_length + 1);
@@ -69,7 +71,8 @@ IntegerVector boot_idx_block(int n_src, int n_out, int block_length, bool circul
 // mit Erwartungswert L, zirkulaerer Umlauf.
 // [[Rcpp::export(name = ".boot_idx_stationary")]]
 IntegerVector boot_idx_stationary(int n_src, int n_out, double L) {
-  if (L < 1.0) stop("L muss >= 1 sein");
+  if (n_src < 1) stop("Keine Quellzeilen");
+  if (!(L >= 1.0)) stop("L muss >= 1 sein");
   IntegerVector idx(n_out);
   double p = 1.0 / L;
   int i = 0;
@@ -127,7 +130,7 @@ IntegerVector boot_idx_regime(IntegerVector regimes, NumericMatrix trans, int n_
   return idx;
 }
 
-// Empirischer Tail-Bootstrap: Mischung aus linkem Tail, Bulk und rechtem Tail
+// Empirischer Tail-Bootstrap: Mischung aus linkem Rand (Tail), Kernbereich (Bulk) und rechtem Rand
 // mit den Wahrscheinlichkeiten p_l, 1 - p_l - p_r, p_r.
 // [[Rcpp::export(name = ".boot_idx_tails")]]
 IntegerVector boot_idx_tails(int n_out, double p_l, double p_r,
@@ -153,6 +156,7 @@ IntegerVector boot_idx_tails(int n_out, double p_l, double p_r,
 // type: 0 = Rademacher, 1 = Mammen, 2 = Standardnormal.
 // [[Rcpp::export(name = ".boot_wild")]]
 NumericMatrix boot_wild(NumericMatrix returns, int type) {
+  if (type < 0 || type > 2) stop("wild_type muss 0, 1 oder 2 sein (erhalten: %d)", type);
   int n = returns.nrow(), k = returns.ncol();
   NumericMatrix out(n, k);
   std::vector<double> mu(k, 0.0);
@@ -173,7 +177,7 @@ NumericMatrix boot_wild(NumericMatrix returns, int type) {
 // Wahrscheinlichkeit p_break umgeschaltet und dann um 1 gespiegelt (2 - R).
 // [[Rcpp::export(name = ".boot_reset")]]
 NumericMatrix boot_reset(NumericMatrix returns, double p_break) {
-  if (p_break < 0.0 || p_break > 1.0) stop("p_break muss in [0, 1] liegen");
+  if (!(p_break >= 0.0 && p_break <= 1.0)) stop("p_break muss in [0, 1] liegen");
   int n = returns.nrow(), k = returns.ncol();
   NumericMatrix out(n, k);
   bool flipped = false;
@@ -191,7 +195,7 @@ static inline double rgpd(double scale, double shape) {
   return scale * (std::pow(u, -shape) - 1.0) / shape;
 }
 
-// EVT-Bootstrap (semiparametrisch): Bulk = empirische Zeilen, Tails der
+// EVT-Bootstrap (semiparametrisch): Kernbereich (Bulk) = empirische Zeilen, Raender (Tails) der
 // Basisreihe aus der Generalisierten Pareto-Verteilung. Die uebrigen Reihen
 // werden im Tail ueber das historische Verhaeltnis R_c / R_base einer
 // gezogenen Tail-Zeile gekoppelt (verallgemeinert den FX-Pool des Originals).
@@ -268,7 +272,7 @@ List boot_garch(int n_out, int base, int k,
                 NumericVector cs2, NumericMatrix z_cross) {
   if (omega <= 0) stop("omega muss > 0 sein");
   int nv = valid.size();
-  if (nv == 0) stop("Keine gueltigen Residuen");
+  if (nv == 0) stop("Keine g\u00fcltigen Residuen");
   NumericMatrix out(n_out, k);
   IntegerVector idx(n_out);
   CrossState cs = init_cross(cross_cols, cmu, com, cal, cbe, cratio, cs2);

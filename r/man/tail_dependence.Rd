@@ -7,24 +7,43 @@
 tail_dependence(x, y, q = c(0.01, 0.025, 0.05, 0.1, 0.2))
 }
 \arguments{
-\item{x, y}{Numerische Vektoren.}
+\item{x, y}{Numerische Vektoren gleicher Laenge (z. B. Periodenrenditen).
+Paare mit nicht endlichen Werten werden entfernt.}
 
-\item{q}{Quantile.}
+\item{q}{Numerischer Vektor von Tail-Wahrscheinlichkeiten als Anteil
+echt zwischen 0 und 1 (0.05 = die unteren bzw. oberen 5 \% der
+Beobachtungen).}
 }
 \value{
-data.frame je \code{q}: \code{lower}, \code{upper},
-  \code{exceed_lower}, \code{exceed_upper}, \code{n_lower}, \code{n_upper}.
+data.frame mit einer Zeile je Wert von \code{q}: \code{q},
+\code{lower}, \code{upper} (\eqn{\hat\lambda_L(q)},
+\eqn{\hat\lambda_U(q)}), \code{exceed_lower}, \code{exceed_upper}
+(Exceedance-Korrelationen; \code{NA} bei weniger als 8 gemeinsamen
+Ueberschreitungen oder Streuung 0), \code{n_lower}, \code{n_upper}
+(Anzahl der Paare, die gemeinsam im unteren bzw. oberen Tail liegen).
 }
 \description{
+Misst fuer zwei Reihen (z. B. Periodenrenditen), wie oft extreme Werte
+gemeinsam auftreten, ohne ein Copula-Modell anzunehmen:
 \deqn{\hat\lambda_L(q) = \frac{\#\{u_i \le q, v_i \le q\}}{n q}, \quad
       \hat\lambda_U(q) = \frac{\#\{u_i > 1 - q, v_i > 1 - q\}}{n q}}
-auf Pseudo-Beobachtungen. Unter Unabhaengigkeit ist
-\eqn{\hat\lambda(q) \approx q}, bei Gauss-Abhaengigkeit faellt es fuer
-\eqn{q \to 0} gegen 0, bei echter Tail-Abhaengigkeit bleibt es positiv.
-Die Exceedance-Korrelation (Longin & Solnik 2001) ist die Korrelation der
-Beobachtungen, in denen beide Reihen unter (bzw. ueber) ihrem q-Quantil
+auf Pseudo-Beobachtungen \eqn{u_i, v_i} (Rang / (n + 1)). Unter
+Unabhaengigkeit ist \eqn{\hat\lambda(q) \approx q}, bei
+Gauss-Abhaengigkeit faellt es fuer \eqn{q \to 0} gegen 0, bei echter
+Tail-Abhaengigkeit bleibt es positiv.
+Die Exceedance-Korrelation (Longin & Solnik 2001) ist die
+Pearson-Korrelation der Beobachtungen, in denen beide Reihen hoechstens auf
+ihrem empirischen q-Quantil (bzw. mindestens auf ihrem (1 - q)-Quantil)
 liegen.
+}
+\examples{
+set.seed(1); z <- rnorm(2000); x <- z + rnorm(2000); y <- z + rnorm(2000)
+tail_dependence(x, y, q = c(0.05, 0.10))
 }
 \references{
 Longin, F. & Solnik, B. (2001), Journal of Finance 56(2).
+}
+\seealso{
+\code{\link[=fit_copula]{fit_copula()}} (implizite Tail-Koeffizienten),
+\code{\link[=dependence_analysis]{dependence_analysis()}}, \code{\link[=validate_dependence]{validate_dependence()}}.
 }

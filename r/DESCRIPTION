@@ -1,7 +1,7 @@
 Package: SimLev
 Type: Package
 Title: Simulation and Backtesting with German Investment Taxation
-Version: 0.4.0
+Version: 0.5.0
 Authors@R: person("ChemicalStats", "von der Mauerstrasse",
                   role = c("aut", "cre", "cph"),
                   email = "chemicalstatsy@protonmail.com")
@@ -22,7 +22,14 @@ Description: A fast/slow-path backtesting engine for leveraged and unleveraged E
     canary protection, volatility targeting, glide paths), portfolio
     optimisation (minimum variance, maximum Sharpe, risk parity, hierarchical
     risk parity, minimum CVaR, resampling), risk decomposition and synthetic
-    bond, money market and currency-hedged series complete the toolkit. Performance-critical
+    bond, money market and currency-hedged series complete the toolkit.
+    Version 0.5 adds order fees, church tax and annual realisation of gains
+    up to the tax allowance to the engine, scenario analysis (entropy
+    pooling, copula stress scenarios, crisis replay), drawdown optimisation,
+    robust covariance estimators, combinatorial purged cross-validation,
+    multiple-testing haircuts, Sharpe ratio and reality-check tests, signal
+    analysis, hidden Markov regimes, multi-country bootstraps, user-defined
+    retirement horizons and goal-based dynamic programming. Performance-critical
     parts are implemented in C++ via 'Rcpp'.
 License: GPL-3
 Encoding: UTF-8
@@ -34,7 +41,7 @@ Suggests: testthat (>= 3.0.0), knitr, rmarkdown, plotly, TTR, imputeTS, rugarch,
 VignetteBuilder: knitr
 Config/testthat/edition: 3
 RoxygenNote: 7.3.1
+Roxygen: list(markdown = TRUE)
 NeedsCompilation: yes
-Packaged: 2026-09-30 06:30:00 UTC; root
 Author: ChemicalStats von der Mauerstrasse [aut, cre, cph]
 Maintainer: ChemicalStats von der Mauerstrasse <chemicalstatsy@protonmail.com>

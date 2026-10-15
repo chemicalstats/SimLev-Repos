@@ -34,89 +34,162 @@ backcast_fit(
 )
 }
 \arguments{
-\item{data}{data.frame mit Spalte \code{date} sowie den Spalten fuer Produkt
-und Basisindex. Typisch ein Kalendertagsraster (wie in den Projekt-Skripten)
-oder Handelstage; Luecken im Produkt (Feiertage, Boersenschluss) sind erlaubt.}
+\item{data}{data.frame mit Spalte \code{date} (Date oder umwandelbar,
+streng aufsteigend, ohne Duplikate) sowie den Spalten fuer Produkt und
+Basisindex. Typisch ein Kalendertagsraster (wie in den Projekt-Skripten)
+oder Handelstage; Luecken im Produkt (Feiertage, Boersenschluss) sind
+erlaubt.}
 
-\item{product}{Spaltenname der Produkt-Kursreihe (NAV oder Boersenkurs).}
+\item{product}{Spaltenname der Produkt-Kursreihe (NAV oder Boersenkurs;
+Niveaus, \code{NA} vor der Auflegung; Werte <= 0 gelten als fehlend).}
 
-\item{index}{Spaltenname der Basisindex-Reihe (Niveau, nicht Rendite).}
+\item{index}{Spaltenname der Basisindex-Reihe (Niveau > 0, nicht Rendite;
+Luecken werden nach \code{index_fill} gefuellt).}
 
-\item{ter}{Laufende Kosten in Prozent p. a.: Skalar, Spaltenname,
+\item{ter}{Laufende Kosten in Prozent p. a. (0.5 = 0,5 Prozent; Standard 0):
+Skalar, Vektor der Laenge \code{nrow(data)}, Spaltenname,
 data.frame(date, ter) (Stufenfunktion, gueltig ab Datum) oder benannter
-Vektor, z. B. \code{c("2010-02-24" = 0.35, "2023-10-10" = 0.50)}.}
+Vektor mit Datumsnamen, z. B.
+\code{c("2010-02-24" = 0.35, "2023-10-10" = 0.50)}.}
 
-\item{leverage}{Hebel L des Produkts relativ zum Index (2, -1, -2, ...).
-Ist der Index bereits ein Hebelindex (z. B. MSCI USA Leveraged 2x Daily),
-ist \code{leverage = 1} zu setzen.}
+\item{leverage}{Hebel L des Produkts relativ zum Index als Zahl ungleich 0
+(Standard 1; z. B. 2, -1, -2). Ist der Index bereits ein Hebelindex
+(z. B. MSCI USA Leveraged 2x Daily), ist \code{leverage = 1} zu setzen.}
 
 \item{rate}{Finanzierungszins in Prozent p. a. (Tagesgeld, z. B. ESTR,
-EONIA, SOFR, EFFR): Skalar, Spaltenname, data.frame oder benannter Vektor.
-Nur relevant fuer \code{leverage != 1}.}
+EONIA, SOFR, EFFR) in denselben Formen wie \code{ter}; \code{NULL}
+(Standard) = 0. Wirkt nur fuer \code{leverage != 1} (Faktor 1 - L).}
 
-\item{fx}{Optional: Umrechnungsfaktor Indexwaehrung -> Produktwaehrung
-(Spaltenname oder Vektor). Der Index wird mit \code{fx} multipliziert.}
+\item{fx}{Optional (Standard \code{NULL} = keine Umrechnung):
+Umrechnungsfaktor Indexwaehrung -> Produktwaehrung in denselben Formen wie
+\code{ter} (z. B. Spaltenname). Der Index wird mit \code{fx} multipliziert.}
 
 \item{model}{\code{"structural"} (Standard, Hebel-/Kostenmodell oben),
 \code{"linear"} (Regression Produktrendite ~ Indexrendite, Stambaugh-
 Backfill) oder \code{"spline"} (Glaettungsspline, Ersatz fuer das GAM aus
-'01 Base Indices'). Die Regressionsmodelle eignen sich fuer Proxy-
-Rueckrechnungen (z. B. MSCI USA aus S&P 500).}
+'01 Base Indices'). Die Regressionsmodelle werden auf Renditen direkt
+aufeinanderfolgender Produktbeobachtungen geschaetzt und eignen sich fuer
+Proxy-Rueckrechnungen (z. B. MSCI USA aus S&P 500).}
 
-\item{fit}{Zu schaetzende Parameter: Teilmenge von \code{"drag"}
-(Restabweichung p. a.), \code{"spread"} (Spread auf den finanzierten
-Anteil, nur fuer L != 1) und \code{"beta"} (effektiver Hebel-Multiplikator).
+\item{fit}{Zeichenvektor der zu schaetzenden Parameter (Standard
+\code{"drag"}): Teilmenge von \code{"drag"} (Restabweichung in Prozent
+p. a.), \code{"spread"} (Spread auf den finanzierten Anteil in Prozent
+p. a., nur fuer L != 1, sonst mit Warnung ignoriert) und \code{"beta"}
+(effektiver Hebel-Multiplikator, Faktor; nur Strukturmodell).
 \code{character(0)} schaetzt nichts (reine Kostenrechnung).}
 
 \item{fixed}{Benannte Liste fester Parameterwerte, z. B.
-\code{list(spread = 0.4)}; Standard: drag = 0, spread = 0, beta = 1.}
+\code{list(spread = 0.4)}; nicht genannte Parameter: drag = 0,
+spread = 0 (Prozent p. a.), beta = 1. Die Werte dienen auch als
+Startwerte der Optimierung.}
 
-\item{objective}{\code{"level"} (kumulierte Pfadabweichung, wie im Skript
-'02 Funds Data'; bestimmt die Tracking Difference), \code{"return"}
-(Renditeabweichungen ueber \code{horizon} Beobachtungen; Tracking Error)
-oder \code{"hybrid"} (gewichtete Kombination).}
+\item{objective}{\code{"level"} (Standard; kumulierte Pfadabweichung der
+Log-Niveaus, wie im Skript '02 Funds Data'; bestimmt die Tracking
+Difference), \code{"return"} (Log-Renditeabweichungen ueber
+\code{horizon} Beobachtungen; Tracking Error) oder \code{"hybrid"}
+(gewichtete Kombination beider RMS-Fehler).}
 
-\item{loss}{Fehlermass: "rmse", "mse", "mae", "median" oder "max".}
+\item{loss}{Fehlermass fuer "level" und "return": "rmse" (Standard),
+"mse", "mae", "median" (Median der Betraege) oder "max". Bei "hybrid"
+ohne Wirkung (immer RMS).}
 
-\item{horizon}{Renditehorizont in Produktbeobachtungen fuer "return"/"hybrid".
-Werte > 1 (z. B. 5) daempfen asynchrone Schlusskurse (Xetra vs. US-Index).}
+\item{horizon}{Renditehorizont in Produktbeobachtungen fuer "return"/"hybrid"
+(ganze Zahl >= 1, Standard 1). Werte > 1 (z. B. 5) daempfen asynchrone
+Schlusskurse (Xetra vs. US-Index).}
 
-\item{hybrid_weight}{Gewicht des Renditeterms bei "hybrid" (0..1).}
+\item{hybrid_weight}{Gewicht des Renditeterms bei "hybrid" als Anteil
+(0..1, Standard 0.5); der Niveauterm erhaelt 1 - \code{hybrid_weight}.}
 
 \item{lag}{Verzoegerung des Index gegenueber dem Produkt in Zeilen
-(ganzzahlig) oder \code{"auto"} (Kreuzkorrelation ueber -2..2).}
+(ganzzahlig, Standard 0; bei k > 0 wird die Produktrendite in Zeile t mit
+der Indexrendite aus Zeile t - k modelliert) oder \code{"auto"} (Lag aus
+-2..2 mit der hoechsten Korrelation, bei negativem Hebel der niedrigsten).}
 
-\item{rate_lag}{Verzoegerung des Zinssatzes in Zeilen (0 = Satz des Tages t).}
+\item{rate_lag}{Verzoegerung des Zinssatzes in Zeilen (Standard 0 = Satz
+des Tages t; k > 0 = Satz aus Zeile t - k).}
 
-\item{start, end}{Optionales Fit-Fenster (Datum).}
+\item{start, end}{Optionales Fit-Fenster (Datum oder Zeichenkette
+"JJJJ-MM-TT"); \code{NULL} (Standard) = gesamte Ueberlappung. Mindestens
+20 gemeinsame Beobachtungen.}
 
-\item{method}{\code{"optimize"} (Brent/L-BFGS-B, Standard) oder \code{"grid"}
-(Gittersuche fuer genau einen Parameter, wie im Skript).}
+\item{method}{\code{"optimize"} (Standard; ein Parameter mit
+\code{stats::optimize()} (Brent), mehrere mit L-BFGS-B innerhalb von
+\code{bounds}) oder \code{"grid"} (Gittersuche fuer genau einen Parameter,
+wie im Skript).}
 
-\item{grid}{Gitter in Prozent p. a. fuer \code{method = "grid"}.}
+\item{grid}{Gitterwerte fuer \code{method = "grid"} in der Einheit des
+Parameters (drag, spread: Prozent p. a.; beta: Faktor); Standard
+\code{seq(-3, 3, by = 0.005)}.}
 
-\item{bounds}{Benannte Liste von Suchintervallen je Parameter.}
+\item{bounds}{Benannte Liste von Suchintervallen \code{c(unten, oben)} je
+Parameter fuer \code{method = "optimize"}, in der Einheit des Parameters;
+Standard \code{list(drag = c(-10, 10), spread = c(-5, 10),
+  beta = c(0.5, 1.5)}. Eine eigene Liste ergaenzt die Standardliste:
+Nicht genannte Parameter behalten ihr Standardintervall (je Eintrag
+\code{c(unten, oben)} mit unten < oben).}
 
-\item{ter_basis, rate_basis}{Tagesbasis fuer TER (365) und Zins (360, Act/360).}
+\item{ter_basis, rate_basis}{Tagesbasis fuer TER (Standard 365) und fuer
+Zins und Spread (Standard 360, Act/360).}
 
-\item{accrual}{\code{"linear"} (TER * T / 365, Fondsbuchhaltung) oder
-\code{"geometric"} ((1 + TER)^(T/365) - 1, wie in den Skripten).}
+\item{accrual}{Abgrenzung der TER: \code{"linear"} (Standard,
+TER * T / 365, Fondsbuchhaltung) oder \code{"geometric"}
+((1 + TER)^(T/365) - 1, wie in den Skripten).}
 
-\item{index_fill}{Fuellmethode fuer Indexluecken ("locf", "linear", "stine").}
+\item{index_fill}{Fuellmethode fuer Indexluecken: "locf" (Standard),
+"linear" oder "stine" (Stineman, benoetigt imputeTS, sonst linear).
+Fuehrende Luecken bleiben \code{NA}.}
 
-\item{validate}{Logisch: Out-of-Sample-Pruefung (Fit auf der juengeren
-Haelfte, Test auf der aelteren, also in Backcast-Richtung).}
+\item{validate}{Logisch (Standard \code{TRUE}): Out-of-Sample-Pruefung
+(Fit auf der juengeren Haelfte der Produktbeobachtungen, Test auf der
+aelteren, also in Backcast-Richtung); erst ab 80 Beobachtungen.}
 }
 \value{
-Objekt der Klasse \code{SimLevBackcastFit} mit Parametern,
-  Diagnostik (Tracking Error/Difference in Prozent, Korrelation, R²,
-  Pfadabweichungen), Gittermetriken und Out-of-Sample-Ergebnis.
+Objekt der Klasse \code{SimLevBackcastFit}, eine Liste mit u. a.
+\describe{
+\item{params}{Liste \code{drag}, \code{spread} (Prozent p. a.) und
+\code{beta} (Faktor).}
+\item{fitted, model, objective, loss, loss_value, method, horizon, lag}{Fit-Einstellungen,
+Wert der Zielfunktion und verwendeter Lag (Zeilen).}
+\item{diagnostics, diagnostics_unfitted}{Kennzahlen Simulation vs.
+Produkt mit bzw. ohne gefittete Parameter: \code{n_obs},
+\code{years}, \code{start}, \code{end}, \code{tracking_error}
+(Prozent p. a.), \code{tracking_difference} (Prozentpunkte p. a.),
+\code{cagr_sim}, \code{cagr_product}, \code{final_deviation},
+\code{max_abs_deviation} (jeweils Prozent), \code{rmse_level}
+(RMSE der Log-Niveaus x 100), \code{correlation}, \code{r_squared}
+und \code{deviation} (data.frame date, deviation = 1 - Sim/Produkt
+als Anteil).}
+\item{grid, grid_metrics}{Bei \code{method = "grid"}: data.frame
+(value, loss) und bestes Gitterelement je Fehlermetrik, sonst \code{NULL}.}
+\item{validation}{Out-of-Sample-Ergebnis (Zeitraeume \code{train},
+\code{test}, Parameter \code{par}, Testkennzahlen in Prozent) oder
+\code{NULL}.}
+\item{regression}{Regressionsfit (nur "linear"/"spline").}
+\item{inception, window}{Erstes Produktdatum und Fit-Fenster.}
+\item{drag_per_day}{Drag in Prozent je Kalendertag.}
+\item{call_args}{Daten und Modellangaben fuer \code{\link[=backcast]{backcast()}}.}
+}
 }
 \description{
-Passt das Rueckrechnungsmodell eines ETF/ETP auf dem Zeitraum an, in dem
-sowohl das Produkt als auch sein Basisindex vorliegen. Die freien Parameter
-werden so gewaehlt, dass die Abweichung zwischen simuliertem und echtem
-Produkt minimal wird (taeglich, kumuliert oder beides).
+Passt das Rueckrechnungsmodell eines ETF/ETP (auch gehebelt oder invers)
+auf dem Zeitraum an, in dem sowohl das Produkt als auch sein Basisindex
+vorliegen. Die freien Parameter werden so gewaehlt, dass die Abweichung
+zwischen simuliertem und echtem Produkt minimal wird (taeglich, kumuliert
+oder beides). Eingabe ist ein data.frame mit Datum, Produktkursen (vor der
+Auflegung \code{NA}) und Indexniveaus; das Ergebnis wird mit \code{\link[=backcast]{backcast()}}
+in eine verlaengerte Kursreihe umgerechnet.
+}
+\details{
+Strukturmodell (\code{model = "structural"}) je Zeile t mit
+Kalendertagen \eqn{T_t} seit der Vorzeile und Indexrendite \eqn{x_t}:
+\deqn{r_t = \beta L x_t + (1 - L)\, i_t T_t / B_r - TER_t T_t / B_T
+      - s\, m(L) T_t / B_r - drag\, T_t / 365}
+mit \eqn{m(L) = \max(L-1, 0) + \max(-L, 0)}, \eqn{B_r} =
+\code{rate_basis}, \eqn{B_T} = \code{ter_basis}; \eqn{i}, \eqn{TER},
+\eqn{s} und \eqn{drag} gehen als Prozent p. a. / 100 ein. Bei den
+Regressionsmodellen ersetzt die geschaetzte Regression die ersten drei
+Terme (\code{ter} und \code{rate} gehen dann nicht ein); \code{spread} und
+\code{drag} werden zusaetzlich abgezogen.
 }
 \examples{
 set.seed(1)
@@ -132,10 +205,11 @@ df <- data.frame(date = d, etf = etf, idx = idx, rate = rate)
 fit <- backcast_fit(df, product = "etf", index = "idx", ter = 0.5,
                     leverage = 2, rate = "rate")
 fit
+fit$params$drag                            # ca. 0.1 (Prozent p. a.)
 bc <- backcast(fit)
 head(bc)
 
 }
 \seealso{
-[backcast()], [simulation()]
+\code{\link[=backcast]{backcast()}}, \code{\link[=leveraged_series]{leveraged_series()}}, \code{\link[=simulation]{simulation()}}
 }

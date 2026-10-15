@@ -1,11 +1,18 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // tax_core_RCpp.cpp — Rcpp-Ports der Steuer-Kerne (Vollmigration Rechen-Engine)
 // 1:1-Semantik zu den R-Originalen:
-//   calculate_flat_rate (VP je Lot: Zwoelftelung T-1, Growth-Cap, M4),
+//   calculate_flat_rate (VP je Lot nach § 18 Abs. 1-2 InvStG: Jahresanfangskurs als
+//   Bezug, Deckel = Wertzuwachs im Jahr, Zwoelftelung nach dem Deckel, M4),
 //   calculate_paragraph_20_tax (TFS -> Verlusttopf -> SPB -> Tracker),
 //   calculate_vorabpauschale_tax (R-2: Verlusttopf vor SPB),
-//   calculate_sell_count (kum. FIFO + Bisektion + Integer-Rounding).
-// totals-Listen werden IN PLACE mutiert (etabliertes by-reference-Muster).
+//   calculate_sell_count (kum. FIFO + Bisektion + Rundung auf ganze Stueck; Steuerschaetzung
+//   mit § 19-Anrechnung der Lot-VP, Verlusttopf + freiem Sparer-Pauschbetrag, R3a-04).
+// totals-Listen werden direkt (IN PLACE) veraendert (bewaehrtes Muster per Referenz).
+// p20_tax_rcpp/vp_tax_rcpp erhalten sim_mem$totals (Zugriff ueber Namen, nur vorhandene Felder;
+// R legt alle Felder in .sim_build_state an) und aendern die Zahlen in dieser Liste: Jedes
+// R-Objekt, das dieselbe totals-Liste teilt, sieht die Aenderung. Probelaeufe auf einer Kopie
+// brauchen daher eine tiefe Kopie (unserialize(serialize(...))), keine einfache Zuweisung.
+// sim_mem selbst (Position der Felder) wird hier nicht verwendet.
 // ═══════════════════════════════════════════════════════════════════════════
 #include <Rcpp.h>
 using namespace Rcpp;
@@ -33,6 +40,7 @@ static inline void civil_from_days2(long z, int& y, int& m, int& d) {
 
 //' Vorabpauschale je Lot (Port des Kerns von calculate_flat_rate)
 //' base_rate bereits dezimal (>0), Datums-Args als Tage seit Epoch.
+//' @noRd
 // [[Rcpp::export]]
 List flat_rate_rcpp(List buys, int front_index, double base_rate,
                     double year_start_price, double market_price,
@@ -51,7 +59,7 @@ List flat_rate_rcpp(List buys, int front_index, double base_rate,
 
   for (int i = front_index; i <= n; ++i) {
     SEXP bs = buys[i - 1];
-    if (lot_is_null2(bs)) break;                 // Sentinel wie R (first_null)
+    if (lot_is_null2(bs)) break;                 // Endmarke wie in R (first_null)
     List b(bs);
     double rem = as<double>(b["remaining"]);
     if (rem <= 0) continue;                      // nur aktive Lots
@@ -59,19 +67,20 @@ List flat_rate_rcpp(List buys, int front_index, double base_rate,
     int buy_days = static_cast<int>(as<double>(b["date"]));
     double vp = 0.0;
     if (buy_days <= eoy_days) {
-      double months_factor, reference_value;
-      if (buy_days < soy_days) {                 // ganzjaehrig gehalten
-        months_factor   = 1.0;
-        reference_value = rem * year_start_price;
-      } else {                                   // T-1: Zwoelftelung
+      // § 18 Abs. 1-2 InvStG: Basisertrag und Deckel (Wertzuwachs im Kalenderjahr)
+      // beziehen sich fuer jedes Lot auf den Ruecknahmepreis zu Jahresbeginn;
+      // bei Erwerb im laufenden Jahr mindert sich die VP danach um je ein
+      // Zwoelftel fuer jeden vollen Monat vor dem Erwerbsmonat (Abs. 2).
+      double months_factor = 1.0;                // vor dem Jahr erworben
+      if (buy_days >= soy_days) {                // Erwerb im laufenden Jahr
         int y, m, d; civil_from_days2(buy_days, y, m, d);
-        months_factor   = (12.0 - (m - 1)) / 12.0;
-        reference_value = rem * as<double>(b["price"]);
+        months_factor = (12.0 - (m - 1)) / 12.0;
       }
-      double base_worth   = reference_value * base_rate * 0.7 * months_factor;
+      double reference_value = rem * year_start_price;
+      double base_worth   = reference_value * base_rate * 0.7;
       double market_worth = rem * market_price;
       double growth       = std::max(0.0, market_worth - reference_value);
-      vp = std::max(0.0, std::min(base_worth, growth));
+      vp = std::max(0.0, std::min(base_worth, growth)) * months_factor;
     }
     idx.push_back(i);
     vps.push_back(vp);
@@ -86,6 +95,7 @@ List flat_rate_rcpp(List buys, int front_index, double base_rate,
 }
 
 //' § 20-Steuerkern (Port von calculate_paragraph_20_tax); mutiert totals in place
+//' @noRd
 // [[Rcpp::export]]
 List p20_tax_rcpp(double trade_gain, double bonus, List totals,
                   double tax_rate, bool use_spb) {
@@ -121,6 +131,7 @@ List p20_tax_rcpp(double trade_gain, double bonus, List totals,
 }
 
 //' VP-Steuerkern (Port von calculate_vorabpauschale_tax, R-2); mutiert totals
+//' @noRd
 // [[Rcpp::export]]
 List vp_tax_rcpp(double flat_rate, double bonus, List totals,
                  double tax_rate, bool use_spb) {
@@ -151,7 +162,7 @@ List vp_tax_rcpp(double flat_rate, double bonus, List totals,
                       Named("taxable_amount") = taxable_flat_rate);
 }
 
-// ── interner FIFO-Fast-Preis auf kumulierten Vektoren (wie R) ──
+// ── interner schneller FIFO-Preis auf kumulierten Vektoren (wie R) ──
 static inline double fifo_fast(double units, const std::vector<double>& cu,
                                const std::vector<double>& cc,
                                const std::vector<double>& prices) {
@@ -171,6 +182,7 @@ static inline double fifo_fast(double units, const std::vector<double>& cu,
 
 //' Verkaufsstueckzahl fuer Ziel-Nettoerloes (Port von calculate_sell_count)
 //' regime: 0=none, 1=investment_fund, 2=capital_gains, 3=private_sale
+//' @noRd
 // [[Rcpp::export]]
 List sell_count_rcpp(List buys, int front_index, double target,
                      double trade_price, double total_shares, bool fractions,
@@ -179,9 +191,11 @@ List sell_count_rcpp(List buys, int front_index, double target,
   const int n = buys.size();
   if (front_index > n) return zero;
 
-  std::vector<double> units, prices;
+  std::vector<double> units, prices, vpu;
   units.reserve(n - front_index + 1);
   prices.reserve(n - front_index + 1);
+  vpu.reserve(n - front_index + 1);
+  bool any_vp = false;
   for (int i = front_index; i <= n; ++i) {
     SEXP bs = buys[i - 1];
     if (lot_is_null2(bs)) break;                 // Abbruch bei NULL-Lots
@@ -190,18 +204,36 @@ List sell_count_rcpp(List buys, int front_index, double target,
     if (rem > 0) {
       units.push_back(rem);
       prices.push_back(as<double>(b["price"]));
+      // § 19 InvStG: bereits versteuerte Vorabpauschale je Stueck (F9: Basis = remaining)
+      double lot_vp = b.containsElementNamed("vp") ? as<double>(b["vp"]) : 0.0;
+      double v = (regime == 1 && lot_vp > 0) ? lot_vp / rem : 0.0;
+      if (v > 0) any_vp = true;
+      vpu.push_back(v);
     }
   }
   if (units.empty()) return zero;
 
   const int nl = static_cast<int>(units.size());
-  std::vector<double> cu(nl), cc(nl);
-  long double su = 0.0L, sc = 0.0L;         // wie R cumsum(): long-double-Akkumulator
+  std::vector<double> cu(nl), cc(nl), cv(nl);
+  long double su = 0.0L, sc = 0.0L, sv = 0.0L;   // wie R cumsum(): long-double-Akkumulator
   for (int i = 0; i < nl; ++i) {
     su += units[i];              cu[i] = static_cast<double>(su);
     sc += units[i] * prices[i];  cc[i] = static_cast<double>(sc);
+    sv += units[i] * vpu[i];     cv[i] = static_cast<double>(sv);
   }
+  // VP-Anrechnung der ersten 'sell' Stueck (FIFO), wie calculate_fifo_vp_rcpp
+  auto fifo_vp = [&](double sell) -> double {
+    if (!any_vp || sell <= 0) return 0.0;
+    if (sell >= cu[nl - 1]) return cv[nl - 1];
+    int lot = 0;
+    while (lot < nl && cu[lot] < sell) ++lot;
+    if (lot >= nl) lot = nl - 1;
+    double prev_u = lot > 0 ? cu[lot - 1] : 0.0, prev_v = lot > 0 ? cv[lot - 1] : 0.0;
+    return prev_v + (sell - prev_u) * vpu[lot];
+  };
 
+  // R3a-04: loss_pool = freier Verlusttopf + freier Sparer-Pauschbetrag (Aufrufer), damit die
+  // geschaetzte Steuer der tatsaechlichen entspricht (kein Ueberverkauf mit Rueckkauf)
   auto objective = [&](double sell) -> double {
     if (sell <= 0) return -target;
     if (sell > total_shares) sell = total_shares;
@@ -209,7 +241,7 @@ List sell_count_rcpp(List buys, int front_index, double target,
     double gain = (trade_price - fp) * sell;
     double tax = 0.0;
     if (regime == 1) {                                    // investment_fund
-      double adj = gain * (1.0 - bonus);
+      double adj = (gain - fifo_vp(sell)) * (1.0 - bonus);  // § 19 InvStG vor Teilfreistellung
       tax = std::max(adj - loss_pool, 0.0) * tax_rate;
     } else if (regime == 2) {                             // capital_gains
       tax = std::max(gain - loss_pool, 0.0) * tax_rate;
@@ -234,7 +266,7 @@ List sell_count_rcpp(List buys, int front_index, double target,
   } else if (std::fabs(f_upper) < tol) {
     sell = upper;
   } else {
-    // Bisektion (exakt wie calculate_bisection_search, max 30)
+    // Bisektion (Intervallhalbierung mit Abbruch bei |f| < tol oder Intervall < tol, max 30)
     sell = (lower + upper) * 0.5;
     for (int it = 0; it < 30; ++it) {
       double mid = (lower + upper) * 0.5;
@@ -246,6 +278,8 @@ List sell_count_rcpp(List buys, int front_index, double target,
     }
   }
 
+  // Ganze Stuecke: naechstliegende Stueckzahl (Umschichtung). Zwangsverkaeufe fuer Zahlungen
+  // (Steuer, Kosten) rufen mit fractions = TRUE auf und runden in R auf (R3a-03).
   if (!fractions) {
     double tl = std::floor(sell), tu = std::ceil(sell);
     if (tl < 1) tl = 1;

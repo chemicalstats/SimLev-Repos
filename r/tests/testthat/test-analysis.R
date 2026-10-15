@@ -32,7 +32,7 @@ test_that("deep_analysis reproduces engine metrics and core identities", {
   expect_true(all(da$drawdowns$A$depth <= 0))
   expect_equal(-min(da$drawdowns$A$depth), unname(da$metrics["max_drawdown", "A"]), tolerance = 1e-10)
   expect_false(is.null(da$rolling$Mix))
-  expect_output(print(da), "Deep Analysis")
+  expect_output(print(da), "SimLev Detailanalyse")
   pdf(NULL); on.exit(dev.off(), add = TRUE)
   for (t in c("overview", "growth", "drawdown", "rolling", "annual", "monthly")) expect_silent(plot(da, t))
 })

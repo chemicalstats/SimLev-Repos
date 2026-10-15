@@ -3,6 +3,7 @@
 \name{param_search}
 \alias{param_search}
 \alias{summary.SimLevParamSearch}
+\alias{print.SimLevParamSearch}
 \alias{plot.SimLevParamSearch}
 \title{Parametersuche ueber Strategie- und Simulationsparameter}
 \usage{
@@ -26,6 +27,8 @@ param_search(
 
 \method{summary}{SimLevParamSearch}(object, top = 10L, ...)
 
+\method{print}{SimLevParamSearch}(x, ...)
+
 \method{plot}{SimLevParamSearch}(
   x,
   metric = x$objective,
@@ -35,76 +38,138 @@ param_search(
 )
 }
 \arguments{
-\item{data}{Datensatz wie in [simulation()] (inklusive Vorlauf fuer
-Signale, siehe \code{burn_in}).}
+\item{data}{data.frame wie in \code{\link[=simulation]{simulation()}} (Spalte \code{date} und
+Kursspalten als Niveaus), inklusive Vorlauf fuer Signale (siehe
+\code{burn_in}).}
 
 \item{builder}{Funktion \code{function(p)}, die aus einer benannten Liste
 \code{p} (ein Punkt des Raums) entweder eine Strategie oder eine Liste
 \code{list(strategy, signal, args, map, data)} liefert:
-\code{signal} wie in [bootstrap_study()] (z. B. mit [signal_sma()]),
-\code{args} ueberschreibt \code{sim_args}, \code{data} ist optional eine
-Funktion \code{df -> df} (z. B. eine Hebelreihe mit [leveraged_series()]
-anlegen). Ohne \code{builder} werden die Parameter als Argumente von
-[simulation()] fuer \code{strategy} verwendet.}
+\code{signal} wie in \code{\link[=bootstrap_study]{bootstrap_study()}} (Funktion \code{df ->}
+data.frame oder Liste von Spalten, z. B. mit \code{\link[=signal_sma]{signal_sma()}}),
+\code{args} (Liste) ueberschreibt \code{sim_args}, \code{map} (benannter
+Zeichenvektor) legt Spalten-Aliase an, \code{data} ist optional eine
+Funktion \code{df -> df} (z. B. eine Hebelreihe mit \code{\link[=leveraged_series]{leveraged_series()}}
+anlegen). \code{NULL} (Standard) = ohne \code{builder}: die Parameter
+werden als Argumente von \code{\link[=simulation]{simulation()}} fuer \code{strategy} verwendet.}
 
-\item{space}{Suchraum aus [param_space()] (oder benannte Liste).}
+\item{space}{Suchraum aus \code{\link[=param_space]{param_space()}} (oder benannte Liste, die an
+\code{\link[=param_space]{param_space()}} weitergegeben wird).}
 
-\item{strategy}{Feste Strategie, wenn \code{builder} fehlt.}
+\item{strategy}{Feste Strategie (z. B. aus \code{\link[=create_strategy]{create_strategy()}}), wenn
+\code{builder} fehlt; sonst ungenutzt.}
 
-\item{method}{\code{"grid"} (volles Raster), \code{"random"} (Zufallssuche)
-oder \code{"lhs"} (Latin Hypercube; gleichmaessige Abdeckung bei vielen
-Dimensionen).}
+\item{method}{\code{"grid"} (Standard, volles Raster), \code{"random"}
+(Zufallssuche) oder \code{"lhs"} (Latin Hypercube; gleichmaessige
+Abdeckung bei vielen Dimensionen).}
 
-\item{n}{Anzahl Punkte bei \code{"random"} und \code{"lhs"}.}
+\item{n}{Anzahl Punkte bei \code{"random"} und \code{"lhs"} (ganze Zahl,
+Standard 50); bei \code{"grid"} ignoriert. Doppelte Punkte werden
+entfernt und in hoechstens 20 Runden nachgezogen; es koennen weniger
+Punkte entstehen.}
 
-\item{constraint}{Optional \code{function(p) TRUE/FALSE} (z. B. Gewichte
-summieren sich hoechstens zu 1).}
+\item{constraint}{Optional \code{function(p)}, die \code{TRUE} fuer
+zulaessige Punkte liefert (z. B. Gewichte summieren sich hoechstens zu
+1); Punkte ohne \code{TRUE} entfallen. \code{NULL} (Standard) = alle
+Punkte.}
 
-\item{sim_args}{Gemeinsame Argumente fuer [simulation()].}
+\item{sim_args}{Benannte Liste gemeinsamer Argumente fuer \code{\link[=simulation]{simulation()}}
+(Standard: keine).}
 
-\item{burn_in}{Zeilen am Anfang, die nach der Signalberechnung verworfen
-werden (Signal-Vorlauf).}
+\item{burn_in}{Anzahl Zeilen am Anfang von \code{data} (bei Tagesdaten:
+Tage), die nach der Signalberechnung verworfen werden (Signal-Vorlauf;
+ganze Zahl, Standard 0).}
 
-\item{metrics}{Kennzahlen-Funktion (Standard [study_metrics()]).}
+\item{metrics}{Funktion \code{SimLevResult ->} benannter numerischer
+Vektor (Standard \code{\link[=study_metrics]{study_metrics()}}: u. a. \code{cagr},
+\code{max_drawdown} als Anteil, \code{sharpe}; \code{cagr} ist mit
+Sparplan geldgewichtet, XIRR).}
 
-\item{objective}{Zielgroesse (Spalte aus \code{metrics}) fuer Ranking,
-Plateau und Ueberanpassungs-Pruefungen.}
+\item{objective}{Name der Zielgroesse (Element von \code{metrics}, Standard
+\code{"sharpe"}) fuer Ranking, Plateau und \code{\link[=param_bootstrap]{param_bootstrap()}}.}
 
-\item{maximize}{Zielgroesse maximieren (\code{FALSE} z. B. fuer
-\code{max_drawdown}).}
+\item{maximize}{Logisch: Zielgroesse maximieren (Standard \code{TRUE};
+\code{FALSE} z. B. fuer \code{max_drawdown}).}
 
-\item{cores}{Prozesse.}
+\item{cores}{Anzahl paralleler Prozesse (ganze Zahl, Standard 1); unter
+Unix per Fork (\code{parallel::mclapply}), unter Windows per
+PSOCK-Cluster.}
 
-\item{seed}{Startwert fuer \code{"random"}/\code{"lhs"}.}
+\item{seed}{Startwert (ganze Zahl) fuer den Versuchsplan bei
+\code{"random"}/\code{"lhs"}; der Zufallszustand der Sitzung wird danach
+wiederhergestellt. \code{NULL} (Standard) = aktueller Zufallszustand,
+der dabei normal weiterlaeuft (wiederholte Aufrufe ziehen andere Punkte).}
 
-\item{keep_returns}{Taegliche Renditen speichern (fuer pbo/DSR/Walk-Forward).}
+\item{keep_returns}{Logisch (Standard \code{TRUE}): taegliche Renditen je
+Punkt speichern (noetig fuer \code{\link[=pbo]{pbo()}}, \code{\link[=deflated_sharpe]{deflated_sharpe()}},
+\code{\link[=walk_forward]{walk_forward()}}, \code{\link[=reality_check]{reality_check()}}, \code{\link[=sharpe_haircut]{sharpe_haircut()}}).}
 
-\item{object, x}{\code{SimLevParamSearch}.}
+\item{object, x}{Objekt der Klasse \code{SimLevParamSearch}.}
 
-\item{top}{Anzahl gezeigter Punkte.}
+\item{top}{Anzahl der in \code{summary()} bzw. \code{print()} gezeigten
+besten Punkte nach der Zielgroesse (ganze Zahl, Standard 10).
+\code{summary()} liefert ein Objekt der Klasse
+\code{summary.SimLevParamSearch} mit \code{top} (Tabelle mit Spalte
+\code{plateau} = \code{plateau_mean} aus \code{\link[=plateau]{plateau()}}), \code{best},
+\code{best_plateau} (Zeilen von \code{results}), \code{n},
+\code{n_failed}, \code{objective}, \code{method}, \code{params} und
+\code{elapsed}.}
 
-\item{...}{ungenutzt bzw. an \code{plot} weitergereicht.}
+\item{...}{Bei \code{summary()} ungenutzt; bei \code{print()} an
+\code{summary()} weitergereicht (z. B. \code{top}); bei \code{plot()}
+an \code{\link[graphics:plot.default]{graphics::plot()}} bzw. \code{\link[graphics:image]{graphics::image()}}.}
 
-\item{metric}{Kennzahl fuer die Grafik.}
+\item{metric}{Name der Kennzahl (Spalte von \code{results}) fuer die
+Grafik (Standard: Zielgroesse). Beim Raster werden die Zellen
+beschriftet, \code{cagr}, \code{ttwror}, \code{max_drawdown} und
+\code{avg_drawdown} in Prozent.}
 
-\item{params}{Ein oder zwei Parameter fuer die Achsen (Standard: die ersten
-beiden); weitere Dimensionen werden mit \code{fun} zusammengefasst.}
+\item{params}{Ein oder zwei Parameternamen fuer die Achsen (Standard: die
+ersten beiden); weitere Dimensionen werden mit \code{fun}
+zusammengefasst. Ein Parameter: Linie; zwei: Heatmap (Raster) bzw.
+farbiges Streudiagramm (\code{"random"}, \code{"lhs"}).}
 
-\item{fun}{Zusammenfassung ueber die uebrigen Dimensionen (Standard \code{max}).}
+\item{fun}{Funktion zur Zusammenfassung ueber die uebrigen Dimensionen
+(Standard \code{max}; bei Minimierung z. B. \code{min}).}
 }
 \value{
-Objekt der Klasse \code{SimLevParamSearch}: \code{results}
-  (Parameter, Kennzahlen, Fehler), \code{returns} (Matrix Tage x Punkte),
-  \code{dates} und Metadaten. Methoden \code{print}, \code{summary},
-  \code{plot}; Weiterverarbeitung mit [plateau()], [pbo()],
-  [deflated_sharpe()], [walk_forward()], [param_bootstrap()].
+Objekt der Klasse \code{SimLevParamSearch}, eine Liste mit
+\describe{
+\item{\code{results}}{data.frame je Punkt: \code{id}, eine Spalte je
+Parameter, die Kennzahlen aus \code{metrics} (\code{NA} bei Fehler)
+und \code{error} (Fehlermeldung oder \code{NA}).}
+\item{\code{returns}}{Matrix Tage x Punkte der taeglichen
+zeitgewichteten Renditen als Anteil (aus \code{\link[=result_index]{result_index()}}); Zeilen =
+Tage nach \code{burn_in} ohne den ersten, Spalten \code{p1},
+\code{p2}, ... (Nummer = \code{id}); \code{NA} fuer fehlgeschlagene
+Punkte. \code{NULL} bei \code{keep_returns = FALSE}.}
+\item{\code{dates}}{Datum je Zeile von \code{returns} (Kalender des
+ersten erfolgreichen Punkts).}
+\item{\code{space}, \code{params}, \code{method}, \code{objective},
+\code{maximize}, \code{builder}, \code{sim_args},
+\code{burn_in}}{Einstellungen (\code{params} = Parameternamen).}
+\item{\code{metrics}}{Namen der Kennzahlen.}
+\item{\code{elapsed}}{Laufzeit in Sekunden.}
+}
+Methoden \code{print}, \code{summary}, \code{plot}; Weiterverarbeitung
+mit \code{\link[=plateau]{plateau()}}, \code{\link[=pbo]{pbo()}}, \code{\link[=deflated_sharpe]{deflated_sharpe()}}, \code{\link[=walk_forward]{walk_forward()}},
+\code{\link[=param_bootstrap]{param_bootstrap()}}.
 }
 \description{
 Wertet eine Strategie fuer jeden Punkt eines Parameterraums mit
-[simulation()] aus. Neben den Kennzahlen werden die taeglichen
+\code{\link[=simulation]{simulation()}} aus. Neben den Kennzahlen werden die taeglichen
 zeitgewichteten Renditen jedes Punkts gespeichert; darauf bauen die
-Ueberanpassungs-Pruefungen [pbo()], [deflated_sharpe()] und
-[walk_forward()] auf.
+Ueberanpassungs-Pruefungen \code{\link[=pbo]{pbo()}}, \code{\link[=deflated_sharpe]{deflated_sharpe()}} und
+\code{\link[=walk_forward]{walk_forward()}} auf.
+}
+\details{
+Je Punkt wird die Spezifikation in dieser Reihenfolge angewandt:
+\code{signal(df)} auf dem vollen Datensatz, dann \code{data(df)}, dann
+\code{map}, dann das Verwerfen der ersten \code{burn_in} Zeilen und
+schliesslich \code{\link[=simulation]{simulation()}} mit \code{sim_args}, ueberschrieben durch
+\code{args}. Fehler einzelner Punkte brechen die Suche nicht ab, sondern
+stehen in \code{results$error}. Das Ergebnis laesst sich auch mit
+\code{\link[=reality_check]{reality_check()}} und \code{\link[=sharpe_haircut]{sharpe_haircut()}} weiterverarbeiten.
 }
 \examples{
 \donttest{
@@ -115,8 +180,11 @@ st <- create_strategy(A = asset_config("etf", "signal", signal_buy = "buy", sign
 ps <- param_search(d, function(p) list(strategy = st, signal = function(df) signal_sma(df$A, p$n, p$band)),
                    param_space(n = c(50, 100, 200), band = c(0, 2)), burn_in = 250)
 summary(ps)
+ps$results[, c("id", "n", "band", "cagr", "sharpe", "error")]
+dim(ps$returns)    # Tage x Punkte
+plot(ps)           # Heatmap der Zielgroesse ueber n und band
 }
 }
 \seealso{
-[plateau()], [pbo()], [deflated_sharpe()], [walk_forward()], [sensitivity_grid()]
+\code{\link[=plateau]{plateau()}}, \code{\link[=pbo]{pbo()}}, \code{\link[=deflated_sharpe]{deflated_sharpe()}}, \code{\link[=walk_forward]{walk_forward()}}, \code{\link[=sensitivity_grid]{sensitivity_grid()}}
 }

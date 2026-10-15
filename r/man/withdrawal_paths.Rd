@@ -17,35 +17,127 @@ withdrawal_paths(
 )
 }
 \arguments{
-\item{x}{\code{bootstrap_result} aus [bootstrap()], eine Liste von
-\code{SimLevResult} (je Element ein Pfad, z. B. gespeicherte
-simulation()-Laeufe auf Bootstrap-Pfaden) oder eine
-\code{SimLevBootstrapStudy}, die mit \code{keep_returns} gerechnet wurde.}
+\item{x}{\code{SimLevBootstrapStudy}, Liste von \code{SimLevResult} oder
+\code{bootstrap_result} (siehe oben).}
 
-\item{column}{Bei \code{bootstrap_result}: Kursspalte im Pfad (Index,
-Hebelprodukt).}
+\item{column}{Nur bei \code{bootstrap_result} (dort Pflicht): Name der
+Kursspalte im Pfad (Index oder Hebelprodukt).}
 
-\item{strategy}{Bei \code{SimLevBootstrapStudy}: Strategiename (Standard:
-erste Strategie).}
+\item{strategy}{Nur bei \code{SimLevBootstrapStudy}: Strategiename.
+\code{NULL} (Standard) = erste gespeicherte Strategie.}
 
-\item{inflation}{\code{NULL}, Prozent p. a. oder Name einer Zusatzreihe
-(\code{aux} bei \code{bootstrap_result}, \code{keep_aux} bei Studien) mit
-CPI-Niveau bzw. Inflationsrate. Mit \code{inflation_type} "level"
-(Niveau) oder "rate_pa" (Prozent p. a., je Zeile anteilig).}
+\item{inflation}{\code{NULL} (Standard; keine Inflation, Faktor 1), Zahl =
+konstante Inflation in Prozent p. a. (2 = 2 \% p. a., ueber die
+Kalendertage der Perioden umgerechnet) oder Zeichenkette = Name einer
+Zusatzreihe: bei \code{bootstrap_result} eine Spalte der Pfade (aus
+\code{aux} in \code{\link[=bootstrap_config]{bootstrap_config()}}; Behandlung nach \code{aux_type} bzw.
+\code{inflation_type}), bei Studien eine mit \code{keep_aux}
+gespeicherte Reihe (deren gespeicherte Periodenfaktoren werden direkt
+als Brutto-Inflation verwendet; nicht endliche Faktoren oder Werte <= 0
+sind ein Fehler). Eine Reihe mit \code{aux_type = "rate"} gilt dabei
+immer als Inflationsrate in Prozent pro Jahr (2 = 2 \% p. a.; nicht je
+Datenperiode, kein Anteil), je Pfadzeile ueber die Kalendertage
+aufgezinst, \eqn{\prod (1 + r/100)^{Tage/365.25}}. Bei Ergebnislisten
+nur \code{NULL} oder eine Zahl.}
 
-\item{inflation_type}{Interpretation einer Inflations-Zusatzreihe.}
+\item{inflation_type}{Behandlung einer Zusatzreihe in \code{inflation}:
+\code{"level"} (Reihe ist ein Preisindex-Niveau; Inflation = Verhaeltnis
+des kumulierten Niveaus an den Periodenenden, d. h. die historischen
+Zeilenverhaeltnisse der gezogenen Zeilen) oder \code{"rate_pa"} (Reihe
+ist eine Inflationsrate in Prozent pro Jahr, 2 = 2 \% p. a., nicht je
+Datenperiode, kein Anteil; je Pfadzeile ueber die Kalendertage
+aufgezinst, \eqn{\prod (1 + r/100)^{Tage/365.25}}). Ist die Art der
+Reihe in \code{\link[=bootstrap_config]{bootstrap_config()}} mit \code{aux_type} ausdruecklich
+angegeben, ergibt sich die Behandlung daraus (\code{"level"} bzw.
+\code{"rate"} -> \code{"rate_pa"}); \code{inflation_type} kann dann
+entfallen und muss, wenn angegeben, dazu passen (sonst Fehler). Ohne
+Angabe in \code{aux_type} gilt das bisherige Verhalten: bei
+\code{bootstrap_result} entscheidet \code{inflation_type} (Standard
+\code{"level"}; verwendet wird die Niveau-Variante im Pfad, Attribut
+\code{aux_level} aus \code{\link[=bootstrap]{bootstrap()}}); bei Studien werden die mit
+\code{keep_aux} gespeicherten Faktoren (Niveau-Variante) unveraendert
+verwendet, ein ausdrueckliches \code{inflation_type = "rate_pa"} ist dort
+ein Fehler (die Rate laesst sich aus den gespeicherten Faktoren nicht
+gewinnen; \code{aux_type = c(<Name> = "rate")} angeben und die Studie
+neu rechnen).}
 
-\item{frequency}{"year", "quarter" oder "month" (bei Studien die
-gespeicherte Frequenz).}
+\item{frequency}{Periodenlaenge: \code{"year"} (Standard), \code{"quarter"}
+oder \code{"month"}. Bei Studien gilt stattdessen die gespeicherte
+Frequenz.}
 
-\item{dates, start_date}{Kalender der Bootstrap-Pfade (siehe [bootstrap_data()]).}
+\item{dates, start_date}{Nur bei \code{bootstrap_result}: Kalender der
+Pfadzeilen. \code{dates} = Date-Vektor (oder in Date umwandelbar) mit
+genau einem Datum je Pfadzeile, streng aufsteigend;
+\code{NULL} (Standard) = taegliche Kalenderdaten ab \code{start_date}
+(Standard \code{"2000-01-01"}), d. h. jede Pfadzeile zaehlt als ein
+Kalendertag. Fuer Pfade aus Handelstagen passende \code{dates} angeben
+(siehe \code{\link[=bootstrap_data]{bootstrap_data()}}).}
 
-\item{cape}{Optional aux-Spalte mit CAPE-Werten.}
+\item{cape}{Nur bei \code{bootstrap_result}: optional Name einer
+Pfadspalte mit CAPE-Werten (Wert zu Periodenbeginn) fuer die Regel
+\code{"cape"}.}
 }
 \value{
-\code{withdrawal_paths}.
+Objekt der Klasse \code{withdrawal_paths} (Liste) mit
+\code{returns} (Matrix Perioden x Pfade der Brutto-Periodenrenditen),
+\code{inflation} (gleiche Form, Brutto-Inflation je Periode),
+\code{cape} (Matrix oder \code{NULL}), \code{base_rate = NULL},
+\code{frequency}, \code{start_dates = NULL}, \code{historical = FALSE},
+\code{weights} (Pfadgewichte oder \code{NULL}) und \code{source}
+(Spaltenname, \code{"study:"} mit angehaengtem Strategienamen oder
+\code{"results"}).
 }
 \description{
-Wandelt simulierte Pfade in die Periodenmatrizen von [withdrawal_simulation()]
-um. Perioden beginnen am Startdatum der Pfade (Jahrestage).
+Wandelt fertige Simulationen in die Periodenmatrizen von
+\code{\link[=withdrawal_simulation]{withdrawal_simulation()}} um, damit sich eine Entnahmephase auf bereits
+gerechnete Pfade setzen laesst. Perioden beginnen am Startdatum der Pfade
+und enden an den Jahrestagen (bzw. Quartals- oder Monatstagen) danach,
+je vom Startdatum gezaehlt und auf das Monatsende begrenzt (Start 31.01.:
+29.02., 31.03., 30.04. ...); eine unvollstaendige letzte Periode entfaellt.
+}
+\details{
+Akzeptierte Eingaben \code{x}:
+\describe{
+\item{\code{SimLevBootstrapStudy}}{Ergebnis von \code{\link[=bootstrap_study]{bootstrap_study()}}, das
+mit \code{keep_returns = "year"}, \code{"quarter"} oder \code{"month"}
+gerechnet wurde. Verwendet die gespeicherten zeitgewichteten
+Periodenrenditen der Strategie \code{strategy} und deren Frequenz
+(\code{frequency} wird ignoriert); Pfade mit fehlenden Werten entfallen;
+die Pfadgewichte der Studie werden uebernommen.}
+\item{Liste von \code{SimLevResult}}{z. B. gespeicherte Laeufe von
+\code{\link[=simulation]{simulation()}} auf Bootstrap-Pfaden; je Element ein Pfad ueber dessen
+zeitgewichteten Wertindex (\code{\link[=result_index]{result_index()}}). Alle Ergebnisse muessen
+gleich viele Tage haben; der Kalender des ersten Ergebnisses gilt.}
+\item{\code{bootstrap_result}}{Ergebnis von \code{\link[=bootstrap]{bootstrap()}}; \code{column}
+waehlt die Kursspalte der Pfade, die Pfadgewichte werden uebernommen.}
+}
+Ein einzelnes \code{SimLevResult} wird hier nicht angenommen (dafuer
+\code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}}). Bereits fertige \code{withdrawal_paths} (aus
+\code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}} oder \code{\link[=pooled_bootstrap]{pooled_bootstrap()}}) und Renditematrizen
+werden direkt an \code{\link[=withdrawal_simulation]{withdrawal_simulation()}} uebergeben;
+\code{withdrawal_simulation()} ruft diese Funktion fuer Studien und
+Ergebnislisten auch selbst auf.
+}
+\examples{
+set.seed(2)
+d <- data.frame(us = 1 + rnorm(1500, 3e-4, 0.01), infl = 2)
+cfg <- bootstrap_config(c(us = "us"), aux = c(infl = "infl"))
+b <- bootstrap(d, cfg, "stationary", n = 20, params = list(L = 50),
+               path_length = 3653, seed = 1, progress = FALSE)
+wp <- withdrawal_paths(b, column = "us", inflation = "infl", inflation_type = "rate_pa")
+dim(wp$returns)           # 10 Jahre x 20 Pfade
+range(wp$inflation)       # etwa 1.02 = 2 \% p. a.
+# Art der Reihen in der Konfiguration angeben: CPI als Niveau, Zins als Rate
+d$cpi <- 100 * 1.02^((1:1500) / 365.25); d$zins <- 3
+cfg2 <- bootstrap_config(c(us = "us"), aux = c(cpi = "cpi", zins = "zins"),
+  aux_type = c(cpi = "level", zins = "rate"))
+b2 <- bootstrap(d, cfg2, "stationary", n = 20, params = list(L = 50),
+                path_length = 3653, seed = 1, progress = FALSE)
+range(withdrawal_paths(b2, column = "us", inflation = "cpi")$inflation)   # ohne inflation_type
+ws <- withdrawal_simulation(wp, withdrawal_rule("percent", rate = 4))
+head(ws$paths[, 1:4])
+}
+\seealso{
+\code{\link[=withdrawal_simulation]{withdrawal_simulation()}}, \code{\link[=bootstrap]{bootstrap()}}, \code{\link[=bootstrap_study]{bootstrap_study()}},
+\code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}}
 }

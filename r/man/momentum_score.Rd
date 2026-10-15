@@ -12,20 +12,47 @@ momentum_score(
 )
 }
 \arguments{
-\item{data}{data.frame mit \code{date} und Kursspalten.}
+\item{data}{data.frame mit Spalte \code{date} (Klasse Date) und
+Kursspalten (Niveaus).}
 
-\item{assets}{Kursspalten.}
+\item{assets}{Zeichenvektor der Kursspalten.}
 
-\item{lookbacks}{Rueckblicke in Monaten.}
+\item{lookbacks}{Rueckblicke in Kalendermonaten (Standard
+\code{c(1, 3, 6, 12)}); bei \code{type = "13612w"} ignoriert.}
 
-\item{type}{\code{"average"} (Mittel der Renditen) oder \code{"13612w"}.}
+\item{type}{\code{"average"} (Standard; ungewichtetes Mittel der
+Renditen) oder \code{"13612w"} (gewichtet, Rueckblicke fest 1, 3, 6, 12).}
 }
 \value{
-Matrix Zeilen x Anlagen (NA, solange die Historie zu kurz ist).
+Numerische Matrix Zeilen von \code{data} x \code{assets} mit dem
+Score als Anteil (NA, solange die Historie fuer den laengsten
+Rueckblick zu kurz ist).
 }
 \description{
 Mittlere Rendite ueber mehrere Rueckblicke (Monate, kalenderbasiert) je
 Anlage, z. B. der "13612"-Score (1, 3, 6, 12 Monate). Mit
 \code{type = "13612w"} gewichtet wie bei Keller & Keuning:
 \eqn{(12 r_1 + 4 r_3 + 2 r_6 + r_{12}) / 4}.
+}
+\details{
+Die Rendite \eqn{r_m} je Zeile ist der aktuelle Kurs geteilt durch den
+Kurs der letzten Zeile mit Datum am oder vor dem Tag \eqn{m} Monate
+zuvor, minus 1 (als Anteil, 0.05 = 5 \%). Hat der Zielmonat weniger Tage,
+gilt sein letzter Tag (31.03. minus 1 Monat = 28.02. bzw. 29.02.; im
+frueheren Stand (Commit 54b5b4f) lief der Rueckblick wie bei \code{\link[=seq.Date]{seq.Date()}} in den Folgemonat
+ueber, z. B. auf den 02.03.). Luecken in den Kursen werden
+per LOCF gefuellt; Handels- und Kalendertagsdaten funktionieren
+gleichermassen. Grundlage fuer \code{\link[=tactical_rotation]{tactical_rotation()}}.
+}
+\examples{
+set.seed(1); n <- 2 * 365
+d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = n),
+                aktien = 100 * cumprod(1 + rnorm(n, 3e-4, 0.01)),
+                anleihen = 100 * cumprod(1 + rnorm(n, 1e-4, 0.003)))
+ms <- momentum_score(d, c("aktien", "anleihen"))
+tail(ms, 3)
+tail(momentum_score(d, c("aktien", "anleihen"), type = "13612w"), 3)
+}
+\seealso{
+\code{\link[=tactical_rotation]{tactical_rotation()}}, \code{\link[=signal_momentum]{signal_momentum()}}
 }

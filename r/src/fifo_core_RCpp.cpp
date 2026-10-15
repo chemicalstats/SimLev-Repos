@@ -1,11 +1,15 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// fifo_core_RCpp.cpp — Rcpp-Ports der Sell-Pfad-Hotspots (aktive Strategien)
+// fifo_core_RCpp.cpp — Rcpp-Ports der rechenintensiven Stellen im Verkaufspfad (aktive Strategien)
 // 1:1-Semantik zu den R-Originalen in simulation.R:
 //   calculate_fifo_price, calculate_fifo_vorabpauschale,
 //   calculate_private_sale_tax (§ 23 EStG inkl. kalendergenauer Jahresfrist
-//   mit 29.02.-Sonderfall), FIFO-Verbrauchsloop aus perform_trade_sell
+//   mit 29.02.-Sonderfall, § 188 Abs. 3 BGB), FIFO-Verbrauchsschleife aus perform_trade_sell
 //   (inkl. proportionaler VP-Reduktion, F9) sowie update_fifo_front.
-// Alle Loops brechen/skippen NULL-Lots exakt wie die R-Vorlagen.
+// Alle Schleifen brechen bei NULL-Lots ab bzw. ueberspringen sie genau wie die R-Vorlagen.
+// sim_mem (fifo_consume_rcpp): oberste Ebene ueber die Position, input[3] = trades
+// (0-basiert; Feldfolge wie in simulation_core.cpp beschrieben, festgelegt in .SIM_MEM_LAYOUT,
+// geprueft von .sim_check_layout()). Die Lots (remaining, vp) und fifo_front werden an Ort und
+// Stelle geaendert; die uebrigen Funktionen lesen nur.
 // ═══════════════════════════════════════════════════════════════════════════
 #include <Rcpp.h>
 using namespace Rcpp;
@@ -17,7 +21,7 @@ static inline double lot_num(const List& b, const char* fld) {
   return as<double>(b[fld]);
 }
 
-// ── zivile Kalender-Helfer (Howard Hinnant, exakt fuer proleptischen Gregorian)
+// ── Kalender-Hilfsfunktionen (Howard Hinnant, exakt fuer den proleptischen gregorianischen Kalender)
 static inline long days_from_civil(int y, int m, int d) {
   y -= m <= 2;
   const int era = (y >= 0 ? y : y - 399) / 400;
@@ -43,6 +47,7 @@ static inline bool is_leap(int y) {
 }
 
 //' FIFO-gewichteter Einstandspreis (Rcpp-Port von calculate_fifo_price)
+//' @noRd
 // [[Rcpp::export]]
 double calculate_fifo_price_rcpp(List buys, double units, int front_index) {
   double units_trade = units;
@@ -66,6 +71,7 @@ double calculate_fifo_price_rcpp(List buys, double units, int front_index) {
 }
 
 //' Anteilige Vorabpauschale fuer FIFO-Verkauf (Port von calculate_fifo_vorabpauschale)
+//' @noRd
 // [[Rcpp::export]]
 double calculate_fifo_vp_rcpp(List buys, double units, int front_index) {
   double units_trade = units;
@@ -93,6 +99,7 @@ double calculate_fifo_vp_rcpp(List buys, double units, int front_index) {
 
 //' § 23 EStG lot-weise (Port von calculate_private_sale_tax)
 //' current_date als Integer (Tage seit 1970-01-01)
+//' @noRd
 // [[Rcpp::export]]
 List calculate_private_sale_tax_rcpp(List buys, int front_index,
                                      double trade_count, double sell_price,
@@ -112,12 +119,14 @@ List calculate_private_sale_tax_rcpp(List buys, int front_index,
       int buy_days = static_cast<int>(as<double>(b["date"]));   // Date -> Tage
       double buy_price = lot_num(b, "price");
 
-      // T-3: "mehr als ein Jahr" kalendergenau; 29.02. -> 01.03. des Folgejahres
+      // T-3: "mehr als ein Jahr" kalendergenau (§§ 187 Abs. 1, 188 Abs. 2 BGB:
+      // Fristende am gleichnamigen Tag des Folgejahres); Kauf am 29.02.: der Tag
+      // fehlt im Folgejahr, Fristende 28.02. (§ 188 Abs. 3 BGB), ab 01.03. frei
       int y, m, d;
       civil_from_days(buy_days, y, m, d);
       long one_year_later;
       if (m == 2 && d == 29 && !is_leap(y + 1)) {
-        one_year_later = days_from_civil(y + 1, 3, 1);
+        one_year_later = days_from_civil(y + 1, 2, 28);
       } else {
         one_year_later = days_from_civil(y + 1, m, d);
       }
@@ -144,9 +153,10 @@ List calculate_private_sale_tax_rcpp(List buys, int front_index,
 
 //' FIFO-Verbrauch nach Verkauf (Port des Loops aus perform_trade_sell)
 //' Mutiert remaining + vp in place; setzt fifo_front fort (update_fifo_front).
+//' @noRd
 // [[Rcpp::export]]
 void fifo_consume_rcpp(List input, std::string name, double trade_count) {
-  List trades = input[3];
+  List trades = input[3];   // Position 3 = trades (.SIM_MEM_LAYOUT); Aenderungen in place
   List trades_name = as<List>(trades[name]);
   List buys = as<List>(trades_name["buys"]);
   const int buy_count = as<int>(trades_name["buy_count"]);

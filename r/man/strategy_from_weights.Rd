@@ -7,19 +7,41 @@
 strategy_from_weights(weights, ...)
 }
 \arguments{
-\item{weights}{Benannter Vektor Spaltenname -> Gewicht (Anteile, z. B.
-\code{c(world = 0.6, bonds = 0.4)}).}
+\item{weights}{Benannter numerischer Vektor Spaltenname -> Gewicht als
+Anteil (0.6 = 60 \%), z. B. \code{c(world = 0.6, bonds = 0.4)}. Alle
+Gewichte muessen positiv sein (Assets mit Gewicht 0 weglassen), die
+Namen eindeutig, und die Summe muss 1 sein (wie in \code{\link[=simulation]{simulation()}};
+sonst Fehler schon hier).}
 
-\item{...}{Weitere Argumente fuer [asset_config()], fuer alle Assets
-gleich (z. B. \code{asset_class}, \code{asset_spread}, \code{asset_bonus});
-Vektoren mit Namen werden je Asset zugeordnet.}
+\item{...}{Weitere Argumente fuer \code{\link[=asset_config]{asset_config()}} (z. B.
+\code{asset_class}, \code{asset_spread} in Prozent, \code{asset_bonus}
+in Prozent). Ein unbenannter einzelner Wert gilt fuer alle Assets;
+benannte Vektoren werden je Asset zugeordnet, auch mit einem einzigen
+Element wie \code{asset_bonus = c(aktien = 30)} (fehlende Assets
+behalten den Standardwert, Namen ohne passendes Asset werden
+ignoriert). Nur ein einzelner benannter Wert, dessen Name kein Asset
+ist, gilt fuer alle Assets.}
 }
 \value{
-Strategie (\code{create_strategy()}).
+Objekt der Klasse \code{strategy} (wie \code{\link[=create_strategy]{create_strategy()}}).
 }
 \description{
-Strategie aus Gewichten
+Baut aus einem benannten Gewichtsvektor eine statische Strategie fuer
+\code{\link[=simulation]{simulation()}}, ohne jedes Asset einzeln mit \code{\link[=asset_config]{asset_config()}} anlegen zu
+muessen. Die Namen muessen den Kursspalten des Datensatzes entsprechen
+(z. B. aus \code{\link[=align_series]{align_series()}}). Jedes Asset erhaelt
+\code{asset_share = Gewicht}; alle weiteren Einstellungen kommen aus
+\code{...} oder den Standardwerten von \code{\link[=asset_config]{asset_config()}} (ETF, Buy and
+Hold).
 }
 \examples{
 strategy_from_weights(c(world = 0.6, bonds = 0.4), asset_spread = c(world = 0.1, bonds = 0.05))
+st <- strategy_from_weights(c(aktien = 0.7, gold = 0.3),
+                            asset_class = c(aktien = "etf", gold = "etc"),
+                            asset_bonus = c(aktien = 30, gold = 0))
+sapply(st, `[[`, "asset_class")
+}
+\seealso{
+\code{\link[=portfolio_template]{portfolio_template()}}, \code{\link[=create_strategy]{create_strategy()}}, \code{\link[=simulation]{simulation()}},
+\code{\link[=tactical_simulation]{tactical_simulation()}}
 }

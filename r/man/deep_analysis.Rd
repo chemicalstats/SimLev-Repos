@@ -10,42 +10,137 @@ deep_analysis(
   risk_free = 0,
   rolling_years = 3,
   var_levels = c(0.01, 0.05, 0.1),
-  top_drawdowns = 10
+  top_drawdowns = 10,
+  inflation = NULL
 )
 }
 \arguments{
 \item{x}{Ein \code{SimLevResult}, ein \code{data.frame(date, value)} oder
-eine benannte Liste davon (z. B. mehrere gespeicherte Laeufe).}
+eine (benannte) Liste davon, z. B. mehrere gespeicherte Laeufe (siehe
+Details).}
 
-\item{benchmark}{\code{NULL}, ein Name aus \code{x}, ein
-\code{SimLevResult} oder ein \code{data.frame(date, value)}.}
+\item{benchmark}{Benchmark fuer die Benchmark-Kennzahlen: \code{NULL}
+(Standard; keine), ein Name aus \code{x} (Zeichenkette) oder ein
+eigenes \code{SimLevResult} bzw. \code{data.frame(date, value)}; dieses
+wird unter dem Namen \code{"Benchmark"} als weitere Reihe aufgenommen.
+Verglichen wird auf den gemeinsamen Daten (mindestens 3 gemeinsame
+Renditen). Enthaelt \code{x} schon eine Reihe \code{"Benchmark"}, ist
+ein eigenes Objekt hier ein Fehler.}
 
-\item{risk_free}{Risikoloser Zins in Prozent p. a.: Skalar oder
-\code{data.frame(date, rate)} (Stufenfunktion).}
+\item{risk_free}{Risikoloser Zins in Prozent p. a. (1 = 1 \%): Skalar
+(Standard 0), \code{data.frame(date, rate)} oder benannter Vektor mit
+Datumsnamen (jeweils Stufenfunktion: Wert gilt ab seinem Datum).
+Je ausgewerteter Rendite gilt der Zins ueber den Kalenderabstand zur
+vorigen ausgewerteten Zeile, \eqn{(1 + Zins/100)^{Tage/365.25} - 1}
+(Handels- und Kalendertagsdaten ergeben so dieselbe Ueberschussrendite;
+im frueheren Stand (Commit 54b5b4f) je Zeile Zins / 100 / 365.25, bei Handelstagen also
+nur rund 69 \% des Zinses). Mit \code{inflation} wird auch der Zins
+deflationiert (real). \code{upi}, rollierende Sharpe und M² verwenden
+den daraus aufgezinsten Zins p. a.}
 
-\item{rolling_years}{Fensterlaenge der rollierenden Kennzahlen in Jahren.}
+\item{rolling_years}{Fensterlaenge der rollierenden Kennzahlen in Jahren
+(auf ganze Monate gerundet, mindestens 2 Monate; Standard 3).}
 
-\item{var_levels}{Wahrscheinlichkeiten fuer VaR und CVaR.}
+\item{var_levels}{Wahrscheinlichkeiten fuer VaR und CVaR als Anteile
+(Standard \code{c(0.01, 0.05, 0.10)}); historisch aus Tages- und
+Monatsrenditen.}
 
-\item{top_drawdowns}{Anzahl Eintraege der Drawdown-Tabelle.}
+\item{top_drawdowns}{Anzahl Eintraege der Drawdown-Tabelle je Reihe
+(Standard 10, nach Tiefe sortiert).}
+
+\item{inflation}{Optional: Inflation in Prozent p. a. (Skalar, 2 = 2 \%)
+oder ein Preisindex-Niveau als \code{data.frame(date, value)} bzw.
+benannter Vektor mit Datumsnamen (z. B. mit \code{\link[=align_macro]{align_macro()}}
+vorbereitet). Dann werden alle Kennzahlen real (in Kaufkraft des
+Startdatums) berechnet, auch die MWRR und der risikolose Zins. Ein
+Preisindex muss am Start jeder Reihe bekannt sein. Standard
+\code{NULL} = nominal.}
 }
 \value{
-Objekt der Klasse \code{SimLevAnalysis} mit \code{metrics}
-  (Kennzahl x Reihe), \code{benchmark_metrics}, \code{annual},
-  \code{monthly} (je Reihe Jahr x Monat), \code{seasonality},
-  \code{drawdowns}, \code{rolling}, \code{correlation} (taeglich und
-  monatlich) und den Wertreihen. Ausgabe mit \code{print}, \code{summary}
-  und \code{plot} (\code{type} = "overview", "growth", "drawdown",
-  "rolling", "annual", "monthly").
+Objekt der Klasse \code{SimLevAnalysis}, eine Liste mit
+\describe{
+\item{metrics}{Matrix Kennzahl x Reihe. Renditen, Volatilitaet,
+Drawdowns, VaR/CVaR (\code{var_daily_5}, \code{cvar_monthly_5} usw.)
+als Anteile (0.07 = 7 \%), Drawdowns positiv; \code{years} in
+Jahren, \code{longest_drawdown_days} in Kalendertagen;
+\code{taxes} in Waehrungseinheiten und \code{trades_per_year} nur bei
+\code{SimLevResult}, sonst NA (ebenso \code{mwrr}).}
+\item{benchmark_metrics}{Matrix Kennzahl x Reihe (ohne Benchmark):
+\code{alpha}, \code{beta}, \code{correlation}, \code{r_squared},
+\code{correlation_up}, \code{correlation_down}, \code{up_capture},
+\code{down_capture}, \code{capture_spread}, \code{active_return},
+\code{tracking_error}, \code{information_ratio}, \code{m2},
+\code{treynor}; \code{NULL} ohne Benchmark.}
+\item{benchmark}{Name der Benchmark-Reihe oder \code{NULL}.}
+\item{annual}{Matrix Jahr x Reihe der Jahresrenditen (Anteile); Zeilen
+= alle Jahre aller Reihen, NA, wo eine Reihe kein Jahr hat.}
+\item{monthly}{Liste je Reihe: Matrix Jahr x Monat (\code{Jan} bis
+\code{Dec}) plus Spalte \code{Year} (Anteile).}
+\item{seasonality}{Matrix Monat x Reihe: mittlere Monatsrendite.}
+\item{drawdowns}{Liste je Reihe: data.frame mit \code{start},
+\code{trough}, \code{end} (NA, solange nicht erholt), \code{depth}
+(negativer Anteil), \code{days_to_trough}, \code{days_to_recover},
+\code{days_total} (Kalendertage).}
+\item{rolling}{Liste je Reihe: data.frame (Monatsende) mit
+\code{cagr}, \code{volatility}, \code{sharpe}, \code{max_drawdown},
+\code{beta}, \code{excess_cagr} ueber \code{rolling_years}
+(\code{sharpe} = (CAGR - risikoloser Zins im Fenster p. a.) /
+Volatilitaet); \code{NULL}, wenn die Reihe zu kurz ist.}
+\item{rolling_years, risk_free, var_levels}{die Eingaben.}
+\item{correlation}{Liste \code{daily} und \code{monthly}:
+Korrelationsmatrizen der Renditen auf gemeinsamen Daten (bei
+mindestens zwei Reihen und mehr als 30 gemeinsamen Tagen, sonst
+\code{NULL}).}
+\item{series}{Liste je Reihe: \code{data.frame(date, value)} der
+ausgewerteten (ggf. realen) Wertreihe.}
+\item{real}{\code{TRUE}, wenn \code{inflation} gesetzt war.}
+}
+Ausgabe mit \code{print()}, \code{summary()} und \code{plot()}, siehe
+\link{SimLevAnalysis-methods}.
 }
 \description{
-Wertet ein oder mehrere gespeicherte Ergebnisse von [simulation()] (oder
+Wertet ein oder mehrere gespeicherte Ergebnisse von \code{\link[=simulation]{simulation()}} (oder
 Kursreihen) aus, im Umfang gaengiger Portfolio-Backtester wie testfol.io.
-Grundlage ist der zeitgewichtete Wertindex ([result_index()]); Sparplaene
-und Entnahmen verzerren die Renditen daher nicht. Per LOCF aufgefuellte
-Tage werden aus allen renditebasierten Kennzahlen ausgeschlossen.
+Bei \code{SimLevResult} ist Grundlage der zeitgewichtete Wertindex
+(\code{\link[=result_index]{result_index()}}); Sparplaene und Entnahmen verzerren die Renditen daher
+nicht. Tage, die \code{\link[=simulation]{simulation()}} per LOCF aufgefuellt hat, werden aus den
+Tagesrenditen fuer Volatilitaet, Sharpe, VaR usw. ausgeschlossen.
 }
 \details{
+Akzeptierte Eingaben (je Reihe):
+\itemize{
+\item ein \code{SimLevResult} aus \code{\link[=simulation]{simulation()}}, \code{\link[=tactical_simulation]{tactical_simulation()}}
+usw.; nur hier gibt es MWRR, Steuern und Transaktionen (aeltere
+Ergebnisse ohne Element \code{filled} gelten als ungefuellt);
+\item ein \code{data.frame} mit Spalte \code{date} (Date, POSIXct mit
+dem Kalendertag in seiner Zeitzone oder \code{"JJJJ-MM-TT"}) und einer
+Wertspalte (positive Niveaus, keine Renditen): \code{value}, sonst die
+erste numerische Spalte ausser \code{date} (bei mehreren mit Hinweis
+auf die gewaehlte); weitere Spalten werden ignoriert. Zahlen als Text
+oder Faktor (etwa mit Dezimalkomma eingelesen) sind ein Fehler. Die
+Zeilen werden nach Datum sortiert, bei doppeltem Datum gilt der letzte
+Wert (mit Hinweis). Fuehrende und nachlaufende NA werden abgeschnitten,
+innere NA per LOCF gefuellt und wie gefuellte Tage behandelt. Traegt
+der data.frame das Attribut \code{filled} aus \code{\link[=align_series]{align_series()}} (Spalte
+der Wertspalte bzw. einzige Spalte), werden diese Tage aus den
+Tagesrenditen ausgeschlossen. Handelstagsdaten ohne Wochenenden sind
+zulaessig; z. B. eine eigene Kursreihe, ein Ergebnis von
+\code{\link[=splice_series]{splice_series()}} oder \code{\link[=result_index]{result_index()}};
+\item eine Liste solcher Objekte (auch gemischt); Namen werden zu
+Spaltennamen; ist die Liste nicht vollstaendig benannt, heissen alle
+Reihen \code{S1}, \code{S2}, ... Ein einzelnes Objekt heisst
+\code{Strategie}.
+}
+Numerische Vektoren werden nicht akzeptiert (vorher als
+\code{data.frame(date, value)} aufbereiten).
+
+Die Annualisierung (\code{ppy}) wird je Reihe aus den Daten ermittelt:
+Anzahl nicht aufgefuellter Tagesrenditen je Jahr (rund 365 bei
+Kalendertagen, rund 252 bei Handelstagen). Tagesrenditen laufen von
+einem echten (nicht gefuellten) Wert zum naechsten. Monats- und Jahreswerte sind
+die letzten vorhandenen Werte je Kalendermonat bzw. -jahr; das erste
+Jahr und der erste Monat koennen daher unvollstaendig sein.
+
 Kennzahlen je Reihe: Gesamtrendite, CAGR, geldgewichtete Rendite (MWRR,
 interner Zinsfuss der Ein- und Auszahlungen), Volatilitaet, Sharpe,
 Sortino, Calmar, maximaler und mittlerer Drawdown, Ulcer Index, UPI,
@@ -70,7 +165,13 @@ b <- simulation(d, create_strategy(A = asset_config("etf", "bnh", 0.6), B = asse
                 balance_mode = TRUE, balance_span = 1, balance_unit = "year")
 da <- deep_analysis(list(Aktien = a, Mischung = b), benchmark = "Aktien", risk_free = 1)
 da
+# Eigene Kursreihe als Benchmark (data.frame mit date und Wertspalte), real mit 2 \% Inflation
+da2 <- deep_analysis(a, benchmark = d[, c("date", "B")], inflation = 2)
+da2$benchmark_metrics[c("beta", "tracking_error"), ]
+head(da2$drawdowns$Strategie, 3)
+plot(da, type = "annual")
 }
 \seealso{
-[result_index()], [simulation()], [sensitivity_grid()]
+\code{\link[=result_index]{result_index()}}, \code{\link[=simulation]{simulation()}}, \code{\link[=tactical_simulation]{tactical_simulation()}},
+\code{\link[=align_series]{align_series()}} fuer eigene Kursreihen
 }

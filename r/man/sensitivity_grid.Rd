@@ -15,30 +15,42 @@ sensitivity_grid(
 )
 }
 \arguments{
-\item{data, strategy}{Wie in [simulation()].}
+\item{data, strategy}{Wie in \code{\link[=simulation]{simulation()}}: data.frame mit Spalte
+\code{date} und Kursspalten (Niveaus) bzw. Strategie aus
+\code{\link[=create_strategy]{create_strategy()}}.}
 
-\item{grid}{Benannte Liste von Argumentwerten, z. B.
+\item{grid}{Benannte Liste von Argumentwerten fuer \code{\link[=simulation]{simulation()}}; alle
+Kombinationen werden gerechnet, z. B.
 \code{list(balance_unit = c("month", "year"), balance_thresh = c(5, 10))}.
 Alternativ ein data.frame mit einer Zeile je Lauf. Listen-Spalten
 (z. B. \code{split_thresh}) sind erlaubt. \code{NA} laesst das Argument
-weg (Standardwert von [simulation()]).}
+weg (Standardwert von \code{\link[=simulation]{simulation()}} bzw. Wert aus \code{sim_args}).}
 
-\item{sim_args}{Gemeinsame Argumente fuer alle Laeufe.}
+\item{sim_args}{Benannte Liste gemeinsamer Argumente fuer alle Laeufe
+(Standard \code{list()}); Werte aus \code{grid} haben Vorrang.}
 
-\item{metrics}{Funktion \code{SimLevResult -> benannter Vektor}
-(Standard [study_metrics()]).}
+\item{metrics}{Funktion \code{SimLevResult -> benannter numerischer Vektor}
+(Standard \code{\link[=study_metrics]{study_metrics()}}).}
 
-\item{cores}{Prozesse (Fork auf Unix, PSOCK auf Windows).}
+\item{cores}{Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).}
 
-\item{keep_results}{Ergebnisse der Laeufe zusaetzlich zurueckgeben.}
+\item{keep_results}{Logisch (Standard \code{FALSE}): Ergebnisse der Laeufe
+zusaetzlich als Attribut \code{results} zurueckgeben.}
 }
 \value{
-data.frame: Rasterspalten plus Kennzahlen (Attribut \code{results}
-  bei \code{keep_results = TRUE}).
+data.frame: Rasterspalten (Listen-Spalten als Text "a/b"), die
+Kennzahlen aus \code{metrics} (bei \code{\link[=study_metrics]{study_metrics()}} z. B. \code{cagr}
+als Anteil; mit Sparplan geldgewichtet, XIRR) und, falls ein Lauf
+fehlschlug, eine Spalte \code{error} (Fehlermeldung, Kennzahlen dann \code{NA}); schlagen alle Laeufe fehl,
+ein Fehler mit den Meldungen der Laeufe. Bei
+\code{keep_results = TRUE} Attribut \code{results} (Liste der
+\code{SimLevResult}).
 }
 \description{
-Ruft [simulation()] fuer jede Kombination von \code{grid} auf und sammelt
-die Kennzahlen. Grundlage der speziellen Studien in diesem Abschnitt.
+Ruft \code{\link[=simulation]{simulation()}} fuer jede Kombination von \code{grid} auf denselben
+Daten und derselben Strategie auf und sammelt die Kennzahlen in einem
+data.frame (eine Zeile je Lauf). Grundlage der speziellen Studien in
+diesem Abschnitt (\code{\link[=rebalancing_sensitivity]{rebalancing_sensitivity()}}, \code{\link[=leverage_sensitivity]{leverage_sensitivity()}}).
 }
 \examples{
 set.seed(1)
@@ -47,4 +59,8 @@ d$A <- 100 * cumprod(1 + rnorm(1500, 3e-4, 0.01)); d$B <- 100 * cumprod(1 + rnor
 st <- create_strategy(A = asset_config("etf", "bnh", 0.6), B = asset_config("etf", "bnh", 0.4))
 sensitivity_grid(d, st, list(balance_unit = c("month", "year")),
                  sim_args = list(balance_mode = TRUE, balance_span = 1))[, c("balance_unit", "cagr", "trades")]
+}
+\seealso{
+\code{\link[=rebalancing_sensitivity]{rebalancing_sensitivity()}}, \code{\link[=leverage_sensitivity]{leverage_sensitivity()}},
+\code{\link[=study_metrics]{study_metrics()}}, \code{\link[=simulation]{simulation()}}
 }

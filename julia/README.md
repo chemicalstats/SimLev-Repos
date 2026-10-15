@@ -12,9 +12,14 @@
 
 Dieses Paket ist die Julia-Fassung des R-Pakets SimLev. Es läuft
 **eigenständig ohne R** und braucht **keine externen Julia-Pakete**, nur die
-Standardbibliothek. Die Engine rechnet **bitgleich** zur R-Version, geprüft
-an 2.337 Szenarien, und ist dabei 10- bis 35-mal so schnell wie das
-R-Paket.
+Standardbibliothek. Die Engine rechnet **bitgleich** zu einem früheren
+Stand des R-Pakets, dem Stand vor den Korrekturen (Commit 54b5b4f, damals
+ebenfalls als 0.5.0 bezeichnet), geprüft an 2.337 Szenarien. Zur aktuellen
+R-Fassung 0.5.0 ist sie **nicht** bitgleich: Deren Engine-Korrekturen,
+steuerrechtliche Anpassungen und deutsche Ausgaben sind noch nicht
+nachgezogen; alle 105 Golden-Fälle wurden mit der aktuellen R-Fassung neu
+erzeugt, siehe Haupt-README. Die Julia-Fassung ist 10- bis 35-mal so schnell
+wie das R-Paket.
 
 **Die vollständige Dokumentation mit Grundkonzepten, Steuerlogik und
 Beispielen für alle drei Sprachen steht in der
@@ -122,6 +127,8 @@ exakt nach:
   C-Bibliothek). Kalender, `round()`, `format()`, `sprintf()` und Modulo
   verhalten sich wie in R.
 - Die **C++-Kerne** des R-Pakets sind Zeile für Zeile übertragen.
+
+Stand 54b5b4f (früherer Stand des R-Pakets):
 
 | Satz | Szenarien | Ergebnis |
 |---|---|---|

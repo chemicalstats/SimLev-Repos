@@ -1,7 +1,7 @@
 Package: SimLev
 Type: Package
 Title: Simulation and Backtesting with German Investment Taxation
-Version: 0.3.0
+Version: 0.4.0
 Authors@R: person("ChemicalStats", "von der Mauerstrasse",
                   role = c("aut", "cre", "cph"),
                   email = "chemicalstatsy@protonmail.com")
@@ -17,7 +17,12 @@ Description: A fast/slow-path backtesting engine for leveraged and unleveraged E
     backtest overfitting, deflated Sharpe ratio, walk-forward selection), data
     and portfolio preparation, and dependence analysis (copulas, tail
     dependence, DCC, quantile regression, CoVaR) conditional on user-supplied
-    state variables such as inflation or interest rate spreads. Performance-critical
+    state variables such as inflation or interest rate spreads. Tactical
+    allocation (rule-based switching, momentum rotation, dual momentum,
+    canary protection, volatility targeting, glide paths), portfolio
+    optimisation (minimum variance, maximum Sharpe, risk parity, hierarchical
+    risk parity, minimum CVaR, resampling), risk decomposition and synthetic
+    bond, money market and currency-hedged series complete the toolkit. Performance-critical
     parts are implemented in C++ via 'Rcpp'.
 License: GPL-3
 Encoding: UTF-8

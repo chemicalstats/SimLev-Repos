@@ -56,6 +56,10 @@ Textausgabe stimmen exakt überein.
   - [Rebalancing](#rebalancing)
   - [Besteuerung](#besteuerung)
   - [Splits bei gehebelten Produkten](#splits-bei-gehebelten-produkten)
+- [Erweiterungen im R-Paket](#erweiterungen-im-r-paket)
+  - [Backcast von Produkten](#backcast-von-produkten)
+  - [Bootstrap-Studien](#bootstrap-studien)
+  - [Entnahmephase](#entnahmephase)
 - [Ergebnisse auswerten](#ergebnisse-auswerten)
 - [Unterschiede zwischen den Sprachen](#unterschiede-zwischen-den-sprachen)
 - [Bitgleichheit zum R-Paket](#bitgleichheit-zum-r-paket)
@@ -77,6 +81,9 @@ Textausgabe stimmen exakt überein.
 | **Steuern** | InvStG-Fondsbesteuerung, Abgeltungsteuer nach § 20 EStG, private Veräußerungsgeschäfte nach § 23 EStG |
 | **Kennzahlen** | CAGR, TTWROR, Volatilität, Sharpe, Sortino, Calmar, Omega, Ulcer Index, Drawdown-Dauer u. v. m. |
 | **Visualisierung** | Statisches Dashboard (R: Base-Grafik, Python: matplotlib, Julia: SVG) und interaktives, offline lauffähiges HTML-Dashboard |
+| **Backcast** *(nur R)* | Rückrechnung von ETF/ETP-Historien aus Basisindex, TER-Reihe, Hebel und Tagesgeld; Fit der Abweichung mit Out-of-Sample-Test |
+| **Bootstrap** *(nur R)* | 14 Verfahren (Block, stationär, Regime, EVT, (GJR-)GARCH, MS-GARCH …), Hebelprodukte, Strategie-Studien über Hunderttausende Pfade |
+| **Entnahmephase** *(nur R)* | 14 Entnahmeregeln (4-%-Regel, Vanguard, Guyton-Klinger …) auf Kohorten, Bootstrap-Pfaden oder gespeicherten Simulationsergebnissen, mit vereinfachter deutscher Steuer |
 | **Geschwindigkeit** | 30 Jahre Tagesdaten mit drei Assets, Sparplan, Rebalancing und Steuern in 0,02 s (Julia) bis 0,23 s (R) |
 
 ## Installation
@@ -103,7 +110,7 @@ remotes::install_github("chemicalstats/SimLev-Repos", subdir = "r")
 Aus einem lokalen Quellarchiv:
 
 ``` r
-install.packages("SimLev_0.1.0.tar.gz", repos = NULL, type = "source")
+install.packages("SimLev_0.2.0.tar.gz", repos = NULL, type = "source")
 ```
 
 Optionale Pakete: `plotly` (interaktives Dashboard über plotly; ohne plotly
@@ -790,6 +797,110 @@ Sie dafür die Kursreihe *ohne* Split-Bereinigung. Für die Besteuerung
 Split-Verhältnis angepasst, Kaufdaten und damit Haltedauern bleiben
 erhalten.
 
+## Erweiterungen im R-Paket
+
+Die folgenden Funktionen gibt es bisher nur im R-Paket. Sie rechnen um die
+Engine herum und verändern `simulation()` nicht; die Golden-Master-Fälle
+bleiben bitgleich. Ausführliche Beispiele, die die Projektskripte
+nachbilden, stehen in
+[`r/inst/examples/backcast_bootstrap_withdrawal_examples.md`](r/inst/examples/backcast_bootstrap_withdrawal_examples.md).
+
+### Backcast von Produkten
+
+`backcast_fit()` passt ein Rückrechnungsmodell auf dem Zeitraum an, in dem
+Produkt und Basisindex beide vorliegen; `backcast()` verlängert das Produkt
+damit in die Vergangenheit und verkettet renditebasiert mit den echten
+Kursen. Das Strukturmodell folgt der Methodik der MSCI Daily Leveraged/Short
+Indizes plus Fondskosten:
+
+```
+r_t = beta·L·x_t + (1 − L)·Zins_t·T/360 − TER_t·T/365 − Spread·m(L)·T/360 − Drag·T/365
+```
+
+Gefittet werden wahlweise `drag` (Restabweichung p. a.), `spread` und
+`beta`. Das Ziel ist die kumulierte Pfadabweichung (`"level"`), die tägliche
+bzw. mehrtägige Renditeabweichung (`"return"`) oder beides (`"hybrid"`).
+Die TER kann sich zu Stichtagen ändern, der Zins ist eine Datenspalte.
+Ausgegeben werden Tracking Error, Tracking Difference, Korrelation und ein
+Out-of-Sample-Test in Backcast-Richtung.
+
+``` r
+fit <- backcast_fit(data, product = "etf", index = "index_nr_eur",
+                    ter = c("2010-02-24" = 0.35, "2023-10-10" = 0.50),
+                    leverage = 2, rate = "estr")
+bc  <- backcast(fit)          # date, value, return, model, product, source
+```
+
+### Bootstrap-Studien
+
+`bootstrap_config()` beschreibt Indizes, daraus abgeleitete Hebelprodukte
+und Zusatzreihen (Zins, Inflation), die aus derselben historischen Zeile
+mitgezogen werden. `bootstrap()` erzeugt Pfade; `bootstrap_study()` erzeugt
+Pfade, berechnet Signale, simuliert alle Strategien mit `simulation()` auf
+denselben Pfaden und behält nur die Kennzahlen. Das läuft parallel und lässt
+sich nach einem Abbruch fortsetzen; jeder Pfad hat einen eigenen
+Zufallsstrom und ist unabhängig von der Kernzahl reproduzierbar.
+`summary()` zeigt Verteilungen und den gepaarten Vergleich mit einem
+Benchmark, `bootstrap_probability()` beliebige (gemeinsame)
+Wahrscheinlichkeiten.
+
+``` r
+cfg <- bootstrap_config(c(us = "us_ret", eu = "eu_ret"), regime_index = "us",
+                        aux = c(rate = "eu_rate"),
+                        letfs = list(list(base = "eu", leverage = 2, finance = "rate", expense = 0.5)))
+study <- bootstrap_study(hist, cfg, "stationary", n = 10000, params = list(L = 250),
+                         strategies = list(bnh = strategy_bnh, sma = list(strategy = strategy_sma, signal = sma_signal)),
+                         benchmark = "bnh", burn_in = 730, cores = 8, seed = 42,
+                         keep_returns = "year")
+summary(study)
+```
+
+Verfahren: `raw`, `block`, `circular`, `stationary`, `wild`, `regime`, `evt`,
+`tails`, `reset`, `garch`, `gjr_garch`, `ms_garch`, `ms_ar_garch_m`,
+`tvtp_ms_garch` (die MS-Verfahren benötigen das Paket `MSGARCH`), optional
+mit ESS-gewichteter Gittersuche über Hyperparameter. `block_length()`
+schätzt Blocklängen nach Politis & White (2004).
+
+### Entnahmephase
+
+Die Entnahmephase ist bewusst von `simulation()` getrennt. Sie rechnet auf
+Periodenrenditen aus historischen Kohorten (`withdrawal_cohorts()`),
+Bootstrap-Pfaden (`withdrawal_paths()`), einer Bootstrap-Studie mit
+`keep_returns` oder einem **gespeicherten Ergebnis von `simulation()`**:
+
+``` r
+res <- simulation(data, strategy, start_value = 1e5)
+saveRDS(res, "lauf.rds")
+
+wd <- withdrawal_simulation(readRDS("lauf.rds"),
+                            withdrawal_rule("guyton_klinger", rate = 5),
+                            years = 30, inflation = 2, start_value = 1e6,
+                            tax_mode = "person")
+wd                       # Erfolgsquote, SWR/PWR, Konsum- und Vermögensquantile
+plot(wd)
+```
+
+| Regel | Beschreibung |
+|---|---|
+| `constant` | 4-%-Regel (Bengen, Trinity): Anfangsrate, danach inflationsangepasst |
+| `percent` | Fester Prozentsatz des aktuellen Depots |
+| `vanguard` | Vanguard Dynamic Spending: Rate × Depot, real begrenzt auf +5 % / −2,5 % |
+| `guyton_klinger` | Guyton-Klinger-Regeln: Inflationsstopp nach Verlustjahr, Kürzung/Erhöhung um 10 % an ±20-%-Leitplanken |
+| `floor_ceiling` | Bengen 2001: Rate × Depot im Korridor −15 % / +20 % um die reale Erstentnahme |
+| `clyatt` | 95-%-Regel: höchstens 5 % weniger als im Vorjahr |
+| `ratchet` | Kitces: +10 %, wenn das reale Depot 150 % des Starts übersteigt |
+| `endowment` | Yale/Tobin: Glättung zwischen Vorjahresentnahme und Rate × Depot |
+| `one_over_n`, `vpw`, `abw` | Restlaufzeit-, Variable-Percentage- und Annuitäten-Entnahme |
+| `cape` | Rate = a + b / CAPE |
+| `sensible`, `hebeler` | Sensible Withdrawals, Hebeler Autopilot II |
+
+Kennzahlen sind Erfolgs- und Kapitalerhaltquote, Perfect Withdrawal Rate
+und sichere Entnahmerate, Konsumquantile, Sicherheitsäquivalent (CRRA) und
+Steuern. `withdrawal_max_rate()` sucht die höchste Anfangsrate für eine
+Ziel-Erfolgsquote. Die Besteuerung im schnellen Kern ist vereinfacht: ein
+thesaurierender Fondsbestand mit Teilfreistellung, Verlusttopf,
+Sparer-Pauschbetrag und Vorabpauschale.
+
 ## Ergebnisse auswerten
 
 `simulation()` liefert ein `SimLevResult`. Seine Bestandteile heißen in
@@ -913,6 +1024,10 @@ Eingaben:
 - Das **statische Dashboard** zeichnet jede Sprache mit eigenen Mitteln
   (R: Base-Grafik, Python: matplotlib, Julia: SVG). Panels, Beschriftungen
   und Kennzahlen entsprechen dem R-Paket.
+
+- **Backcast, Bootstrap und Entnahmephase** (`backcast_fit()`,
+  `bootstrap()`, `bootstrap_study()`, `withdrawal_simulation()` u. a.) gibt
+  es bisher nur im R-Paket.
 
 Aus dem R-Paket übernommene Eigenheiten:
 

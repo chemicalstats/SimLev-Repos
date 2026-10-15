@@ -90,6 +90,16 @@ plot(result)
   Vorlagen für eigene Trigger-Regeln
 - `?backcast_fit`, `?bootstrap_study`, `?withdrawal_simulation` – Backcast
   von Produkten, Bootstrap-Studien und Entnahmephase
+- `?deep_analysis`, `?rebalancing_sensitivity`, `?lumpsum_vs_dca` –
+  vertiefte Auswertung und Parameterstudien
+- `?param_search`, `?pbo`, `?deflated_sharpe`, `?walk_forward`, `?signals` –
+  Parametersuche mit Prüfung auf Überanpassung
+- `?align_series`, `?check_series`, `?align_macro`, `?portfolio_template` –
+  Daten- und Portfolio-Aufbereitung
+- `?dependence_analysis`, `?fit_copula`, `?tail_regression`,
+  `?covar_analysis` – Abhängigkeiten, Tail-Risiko und Drittvariablen
+- [`inst/tutorial/`](inst/tutorial/) – Tutorial (R Markdown, als PDF
+  ausgeliefert)
 - [`inst/examples/`](inst/examples/) – ausführliche Beispielsammlungen zu
   Strategie-Objekten, Dashboards sowie Backcast, Bootstrap und Entnahmen
   ([`backcast_bootstrap_withdrawal_examples.md`](inst/examples/backcast_bootstrap_withdrawal_examples.md))
@@ -118,9 +128,20 @@ R/
   backcast.R                 backcast_fit(), backcast()
   bootstrap.R                bootstrap_config(), bootstrap(), bootstrap_study(), block_length()
   withdrawal.R               withdrawal_rule(), withdrawal_simulation() & Co.
+  deep_analysis.R            deep_analysis(): vertiefte Auswertung
+  sensitivity.R              sensitivity_grid(), rebalancing_sensitivity(),
+                             lumpsum_vs_dca(), leverage_sensitivity()
+  signals.R                  signal_sma() & Co.: parametrisierbare Signale
+  param_search.R             param_space(), param_search(), plateau()
+  overfitting.R              pbo(), deflated_sharpe(), walk_forward(),
+                             param_bootstrap()
+  data_prep.R                align_series(), check_series(), align_macro(),
+                             splice_series(), portfolio_template() & Co.
+  dependence.R               dependence_analysis(), fit_copula(), dcc_fit(),
+                             quantile_reg(), tail_regression(), covar_analysis()
   RcppExports.R, utils.R
 src/                         C++-Kerne (FIFO, Steuern, Markt-Updates,
-                             Bootstrap-Verfahren, Entnahmeregeln)
+                             Bootstrap-Verfahren, Entnahmeregeln, DCC)
 man/                         Hilfeseiten
 tests/testthat/              Test-Suite
 vignettes/                   Einführung

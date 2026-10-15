@@ -694,16 +694,18 @@ print.SimLevWithdrawal <- function(x, ...) { print(summary(x, ...)); invisible(x
 #' @export
 plot.SimLevWithdrawal <- function(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95), ...) {
   old <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(old))
-  graphics::par(mfrow = c(1, if (is.null(x$wealth)) 1 else 2), mar = c(4, 4.5, 2.5, 1))
-  fan <- function(M, main, ylab, xs) {
-    Q <- apply(M, 1, function(r) .wquantile(r, x$weights, probs))
-    plot(range(xs), range(Q, finite = TRUE), type = "n", xlab = "Jahr", ylab = ylab, main = main, ...)
+  graphics::par(mfrow = c(1, if (is.null(x$wealth)) 1 else 2), mar = c(4, 4.6, 2.5, 1),
+                mgp = c(2.9, 0.7, 0), las = 1)
+  fan <- function(M, main, xs) {
+    Q <- apply(M, 1, function(r) .wquantile(r, x$weights, probs)) / 1000
+    plot(range(xs), range(Q, finite = TRUE), type = "n", xlab = "Jahr",
+         ylab = "Tsd. (Startkaufkraft)", main = main, ...)
     k <- length(probs)
     cols <- grDevices::adjustcolor("#2C6E9B", alpha.f = 0.18)
     for (i in seq_len(floor(k / 2))) graphics::polygon(c(xs, rev(xs)), c(Q[i, ], rev(Q[k + 1 - i, ])), col = cols, border = NA)
     graphics::lines(xs, Q[ceiling(k / 2), ], col = "#2C6E9B", lwd = 2)
   }
-  if (!is.null(x$wealth)) fan(x$wealth, "Reales Vermoegen", "Startkaufkraft", 0:(nrow(x$wealth) - 1))
-  fan(x$spending, "Realer Konsum je Jahr", "Startkaufkraft", seq_len(nrow(x$spending)))
+  if (!is.null(x$wealth)) fan(x$wealth, "Reales Vermoegen", 0:(nrow(x$wealth) - 1))
+  fan(x$spending, "Realer Konsum je Jahr", seq_len(nrow(x$spending)))
   invisible(x)
 }

@@ -1,7 +1,7 @@
 Package: SimLev
 Type: Package
 Title: Simulation and Backtesting with German Investment Taxation
-Version: 0.2.0
+Version: 0.3.0
 Authors@R: person("ChemicalStats", "von der Mauerstrasse",
                   role = c("aut", "cre", "cph"),
                   email = "chemicalstatsy@protonmail.com")
@@ -12,7 +12,12 @@ Description: A fast/slow-path backtesting engine for leveraged and unleveraged E
     loss-offset rules of sections 20 and 23 of the EStG. Further tools
     backcast product histories from base indices, costs and financing rates,
     run bootstrap studies of strategies over simulated index and leveraged
-    product paths, and simulate retirement withdrawal rules. Performance-critical
+    product paths, and simulate retirement withdrawal rules. Research tools
+    cover parameter searches with overfitting diagnostics (probability of
+    backtest overfitting, deflated Sharpe ratio, walk-forward selection), data
+    and portfolio preparation, and dependence analysis (copulas, tail
+    dependence, DCC, quantile regression, CoVaR) conditional on user-supplied
+    state variables such as inflation or interest rate spreads. Performance-critical
     parts are implemented in C++ via 'Rcpp'.
 License: GPL-3
 Encoding: UTF-8

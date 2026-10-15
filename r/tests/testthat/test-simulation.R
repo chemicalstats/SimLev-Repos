@@ -227,36 +227,6 @@ test_that("liquidation sells all positions", {
 # HELPER FUNCTION TESTS
 # ==============================================================================
 
-test_that("calculate_bisection_search finds root", {
-  f <- function(x) x^2 - 2
-  
-  result <- calculate_bisection_search(
-    f = f,
-    lower = 0,
-    upper = 2,
-    f_lower = f(0),
-    f_upper = f(2),
-    tol = 1e-6
-  )
-  
-  expect_equal(result, sqrt(2), tolerance = 1e-5)
-})
-
-test_that("calculate_bisection_search handles same-sign bounds", {
-  f <- function(x) x^2 + 1  # No real root
-  
-  result <- calculate_bisection_search(
-    f = f,
-    lower = 0,
-    upper = 2,
-    f_lower = f(0),
-    f_upper = f(2)
-  )
-  
- # Should return one of the bounds
-  expect_true(result %in% c(0, 2))
-})
-
 test_that("calculate_skewness returns numeric", {
   x <- rnorm(100)
   result <- calculate_skewness(x)
@@ -365,7 +335,7 @@ create_rf_data <- function(seed = 77) {
   data.frame(
     date = wd,
     ETF  = 100 * cumprod(1 + rnorm(length(wd), 3e-4, 0.011)),
-    sofr = seq(0.01, 0.04, length.out = length(wd))
+    sofr = seq(1, 4, length.out = length(wd))   # R9-06: Prozent (wie SOFR 5.31), nicht Anteil
   )
 }
 
@@ -787,10 +757,10 @@ test_that("VP is offset against the loss pot before SPB (bank practice)", {
     o <- capture.output(r <- simulation(dl, s, start_value = 10000, tax_mode = "person",
            tax_rate = 25, base_rate_flex = TRUE, base_rate_data = "base_rate",
            use_sparer_pauschbetrag = FALSE, details = TRUE))
-    vp_a <- sum(as.numeric(sub(".*of ([0-9.]+) EUR.*", "\\1",
-             grep("Paying Vorabpauschale", o, value = TRUE))))
-    vp_b <- sum(as.numeric(sub(".*remaining ([0-9.]+) EUR.*", "\\1",
-             grep("pay remaining", o, value = TRUE))))
+    vp_a <- sum(as.numeric(sub(".*Zahlung Vorabpauschale ([0-9.]+) EUR.*", "\\1",
+             grep("Zahlung Vorabpauschale", o, value = TRUE))))
+    vp_b <- sum(as.numeric(sub(".*Rest von ([0-9.]+) EUR.*", "\\1",
+             grep("Anteile verkauft f\u00fcr den Rest von", o, value = TRUE))))
     list(r = r, vp_paid = vp_a + vp_b)
   }
   a <- run(with_loss = FALSE)   # Referenz: VP faellig

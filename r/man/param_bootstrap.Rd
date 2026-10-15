@@ -17,34 +17,76 @@ param_bootstrap(
 )
 }
 \arguments{
-\item{x}{\code{SimLevParamSearch}.}
+\item{x}{\code{SimLevParamSearch} aus \code{\link[=param_search]{param_search()}} (verwendet werden
+\code{results}, \code{builder}, \code{sim_args} und \code{burn_in};
+gespeicherte Renditen sind nicht noetig).}
 
-\item{data, config}{Historie und Konfiguration fuer [bootstrap_study()].}
+\item{data}{Historie fuer die Pfaderzeugung: data.frame oder Matrix mit
+den Spalten aus \code{config}, Format wie bei \code{\link[=bootstrap]{bootstrap()}}.}
 
-\item{ids}{Punkte (ueberschreibt \code{top}).}
+\item{config}{Konfiguration aus \code{\link[=bootstrap_config]{bootstrap_config()}}.}
 
-\item{top}{Anzahl bester Punkte.}
+\item{ids}{Ganzzahliger Vektor von \code{id}-Werten aus \code{x$results};
+\code{NULL} (Standard) = die \code{top} besten Punkte nach \code{by}.}
 
-\item{by}{\code{"objective"} oder \code{"plateau"}.}
+\item{top}{Anzahl bester Punkte (ganze Zahl, Standard 5); nur ohne
+\code{ids}.}
 
-\item{map}{Spalten-Aliase, die jeder Spezifikation hinzugefuegt werden,
-z. B. \code{c(letf = "eu_l2")}, wenn die Strategie in der Suche auf die
-Spalte \code{letf} zugreift und im Pfad das Hebelprodukt \code{eu_l2}
-heisst.}
+\item{by}{Rangfolge fuer \code{top}: \code{"objective"} (Standard,
+Zielgroesse der Suche) oder \code{"plateau"} (\code{plateau_mean} aus
+\code{\link[=plateau]{plateau()}}); Richtung nach \code{x$maximize}, Punkte mit \code{NA}
+entfallen.}
 
-\item{include}{Weitere Strategien (benannte Liste), z. B. ein Buy-and-Hold.}
+\item{map}{Benannter Zeichenvektor von Spalten-Aliasen, die jeder
+Spezifikation hinzugefuegt werden, z. B. \code{c(letf = "eu_l2")}, wenn
+die Strategie in der Suche auf die Spalte \code{letf} zugreift und im
+Pfad das Hebelprodukt \code{eu_l2} heisst. \code{NULL} (Standard) =
+keine.}
 
-\item{...}{Weitere Argumente fuer [bootstrap_study()] (\code{method},
-\code{n}, \code{params}, \code{seed}, \code{cores}, ...).}
+\item{include}{Weitere Strategien als benannte Liste im Format von
+\code{strategies} in \code{\link[=bootstrap_study]{bootstrap_study()}}, z. B. ein Buy-and-Hold
+(Standard: keine).}
+
+\item{...}{Weitere Argumente fuer \code{\link[=bootstrap_study]{bootstrap_study()}}, z. B.
+\code{method}, \code{n} (Anzahl Pfade), \code{params}, \code{seed},
+\code{cores}, \code{progress}, \code{sim_args}, \code{burn_in}.}
 }
 \value{
-\code{SimLevBootstrapStudy}; Strategienamen \code{p<id>}.
+Objekt der Klasse \code{SimLevBootstrapStudy} (siehe
+\code{\link[=bootstrap_study]{bootstrap_study()}}); die Strategien heissen \code{p<id>} (plus die
+Namen aus \code{include}). Attribut \code{param_ids}: benannter Vektor
+Strategiename -> \code{id}.
 }
 \description{
 Baut fuer die \code{top} besten Punkte (nach Zielgroesse oder Plateau) die
 Strategie-Spezifikationen mit dem \code{builder} der Suche und wertet sie
-gemeinsam mit [bootstrap_study()] auf denselben Pfaden aus. Der
+gemeinsam mit \code{\link[=bootstrap_study]{bootstrap_study()}} auf denselben Pfaden aus. Der
 \code{builder} muss mit den Spaltennamen der Pfade arbeiten (Indizes,
 Hebelprodukte, Zusatzreihen aus \code{config}); abweichende Namen lassen
 sich ueber \code{map} in der Spezifikation abbilden.
+}
+\details{
+Die Signalfunktion der Spezifikation wird je Pfad neu berechnet; ein
+\code{data}-Element der Spezifikation (Funktion \code{df -> df}, siehe
+\code{\link[=param_search]{param_search()}}) wertet \code{\link[=bootstrap_study]{bootstrap_study()}} nicht aus. \code{sim_args}
+und \code{burn_in} werden aus der Suche uebernommen, lassen sich aber
+ueber \code{...} ueberschreiben.
+}
+\examples{
+set.seed(2); n <- 1500
+h <- data.frame(us = 1 + rnorm(n, 3e-4, 0.01))     # Historie: Brutto-Tagesrenditen
+cfg <- bootstrap_config(c(us = "us"))
+d <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = n + 1),
+                us = 100 * cumprod(c(1, h$us)))
+st <- create_strategy(us = asset_config("etf", "signal", signal_buy = "buy", signal_sell = "sell"))
+ps <- param_search(d, function(p) list(strategy = st, signal = function(df) signal_sma(df$us, p$n)),
+                   param_space(n = c(20, 50, 100)), burn_in = 100)
+bs <- param_bootstrap(ps, h, cfg, top = 2, method = "stationary", n = 3,
+                      params = list(L = 50), seed = 1, progress = FALSE)
+attr(bs, "param_ids")
+bs$results[, c("strategy", "path", "cagr", "max_drawdown")]
+}
+\seealso{
+\code{\link[=param_search]{param_search()}}, \code{\link[=bootstrap_study]{bootstrap_study()}}, \code{\link[=bootstrap_probability]{bootstrap_probability()}},
+\code{\link[=walk_forward]{walk_forward()}}
 }

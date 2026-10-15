@@ -13,22 +13,44 @@ convert_currency(
 )
 }
 \arguments{
-\item{data}{data.frame mit Spalte \code{date}.}
+\item{data}{data.frame mit Spalte \code{date} und den Kursspalten.}
 
-\item{columns}{Umzurechnende Spalten.}
+\item{columns}{Zeichenvektor der umzurechnenden Spalten.}
 
-\item{fx}{Wechselkurs: Spaltenname, \code{data.frame(date, value)}
-(Stufenfunktion, LOCF) oder Skalar.}
+\item{fx}{Wechselkurs als Niveau: Spaltenname in \code{data} (NA per
+LOCF gefuellt), \code{data.frame(date, value)} (Stufenfunktion: Wert gilt
+ab seinem Datum bis zum naechsten; vor dem ersten Datum gilt der erste
+Wert), benannter Vektor mit Datumsnamen, Vektor der Laenge
+\code{nrow(data)} oder Skalar (fester Kurs). Alle Werte muessen positiv
+sein.}
 
-\item{method}{\code{"divide"} (Kurs als Fremdwaehrung je Zielwaehrung, z. B.
-USD-Index mit EURUSD = USD je EUR in EUR umrechnen) oder
-\code{"multiply"}.}
+\item{method}{\code{"divide"} (Standard; Wechselkurs als Fremdwaehrung je
+Zielwaehrung, z. B. USD-Index mit EURUSD = USD je EUR in EUR umrechnen)
+oder \code{"multiply"} (Wechselkurs als Zielwaehrung je Fremdwaehrung).}
 
-\item{suffix}{Optional Endung fuer neue Spalten (Standard: ueberschreiben).}
+\item{suffix}{Endung fuer neue Spalten (z. B. \code{"_eur"}); Standard
+\code{NULL} = die Spalten in \code{columns} werden ueberschrieben.}
 }
 \value{
-\code{data} mit umgerechneten Spalten.
+\code{data} mit umgerechneten (bzw. zusaetzlichen) Spalten.
 }
 \description{
-Waehrung umrechnen
+Rechnet Kursspalten eines data.frames tageweise mit einem Wechselkurs in
+eine andere Waehrung um, z. B. einen US-Index in USD nach EUR, bevor er in
+\code{\link[=simulation]{simulation()}} geht. Erwartet wird ein data.frame mit Spalte \code{date} und
+Kursniveaus (z. B. aus \code{\link[=align_series]{align_series()}}). Je Zeile wird der Kurs durch
+den Wechselkurs geteilt (\code{"divide"}) oder mit ihm multipliziert
+(\code{"multiply"}); eine Kurssicherung wird nicht abgebildet.
+}
+\examples{
+d <- data.frame(date = seq.Date(as.Date("2024-01-01"), by = "day", length.out = 5),
+                sp500_usd = c(4700, 4710, 4690, 4720, 4730),
+                eurusd = c(1.10, 1.11, 1.10, 1.09, 1.10))
+convert_currency(d, "sp500_usd", fx = "eurusd", suffix = "_eur")
+# Wechselkurs als Stufenfunktion (gilt ab dem jeweiligen Datum)
+fx <- data.frame(date = as.Date(c("2024-01-01", "2024-01-03")), value = c(1.10, 1.05))
+convert_currency(d, "sp500_usd", fx = fx)
+}
+\seealso{
+\code{\link[=align_series]{align_series()}}, \code{\link[=deflate]{deflate()}}
 }

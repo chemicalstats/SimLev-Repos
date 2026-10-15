@@ -1,53 +1,61 @@
-#' Create Investment Strategy
+#' Anlagestrategie erstellen
 #'
-#' Creates a strategy object from one or more asset configurations.
-#' A strategy defines which assets to include in a portfolio simulation
-#' and their respective configurations.
+#' Erstellt ein Strategie-Objekt aus einer oder mehreren Asset-Konfigurationen.
+#' Eine Strategie legt fest, welche Assets in eine Portfolio-Simulation eingehen
+#' und wie sie jeweils konfiguriert sind. Einfache Listen werden mit
+#' asset_config() umgewandelt und dabei geprueft. Die Gewichte werden nicht
+#' normiert; simulation() verlangt eine Summe der asset_share von 1.
 #'
-#' @param ... Named asset_config objects. Names become asset identifiers
-#'   and must match column names in the data.
-#' @param assets Optional named list of asset configurations as an
-#'   alternative to ... arguments.
+#' @param ... Benannte asset_config-Objekte (oder Listen von asset_config-Argumenten).
+#'   Die Namen werden zu Asset-Bezeichnern und muessen Spaltennamen der Daten entsprechen.
+#' @param assets Optional: benannte Liste von Asset-Konfigurationen als
+#'   Alternative zu den ...-Argumenten (nicht beides zugleich).
 #'
-#' @return An object of class "strategy" containing validated asset configs.
+#' @return Objekt der Klasse "strategy" mit validierten Asset-Konfigurationen.
 #'
 #' @examples
 #' strategy <- create_strategy(
-#'   MSCI_World = asset_config(asset_class = "etf", asset_bonus = 0.30),
-#'   Gold = asset_config(asset_class = "etc", deliverable = TRUE)
+#'   MSCI_World = asset_config(asset_class = "etf", asset_share = 0.8, asset_bonus = 30),
+#'   Gold = asset_config(asset_class = "etc", asset_share = 0.2, deliverable = TRUE)
 #' )
 #'
 #' @seealso [asset_config()], [validate_strategy()], [simulation()]
 #' @export
+#' @noRd
 create_strategy <- function(..., assets = NULL) {
   dots <- list(...)
   
   if (!is.null(assets) && length(dots) > 0) {
-    stop("Provide either ... arguments or 'assets', not both")
+    stop("create_strategy: Assets entweder \u00fcber ... oder \u00fcber assets angeben, nicht beides.")
   }
   
   if (!is.null(assets)) {
     if (!is.list(assets) || is.null(names(assets))) {
-      stop("'assets' must be a named list")
+      stop(sprintf("create_strategy: assets muss eine benannte Liste sein (Name = Kursspalte in data), nicht %s.",
+                   if (is.list(assets)) "eine unbenannte Liste" else class(assets)[1]))
     }
     dots <- assets
   }
   
   if (length(dots) == 0) {
-    stop("At least one asset configuration is required")
+    stop("create_strategy: mindestens eine Asset-Konfiguration angeben, z. B. create_strategy(ETF = asset_config(\"etf\")).")
   }
   
   if (is.null(names(dots)) || any(names(dots) == "")) {
-    stop("All assets must be named")
+    stop("create_strategy: alle Assets m\u00fcssen benannt sein (Name = Kursspalte in data), z. B. create_strategy(ETF = asset_config(\"etf\")).")
+  }
+  if (anyDuplicated(names(dots))) {   # R1-22
+    stop(sprintf("create_strategy: Asset-Name '%s' kommt mehrfach vor; jeder Name darf nur einmal vorkommen.",
+                 names(dots)[anyDuplicated(names(dots))]))
   }
   
-  # Convert plain lists to asset_config
+  # Einfache Listen in asset_config umwandeln
   for (name in names(dots)) {
     if (!inherits(dots[[name]], "asset_config")) {
       if (is.list(dots[[name]])) {
         dots[[name]] <- do.call(asset_config, dots[[name]])
       } else {
-        stop(sprintf("Asset '%s' must be an asset_config object or list", name))
+        stop(sprintf("create_strategy: Asset '%s' muss ein asset_config()-Objekt oder eine Liste sein, nicht %s.", name, class(dots[[name]])[1]))
       }
     }
   }
@@ -57,16 +65,17 @@ create_strategy <- function(..., assets = NULL) {
 }
 
 
-#' Validate Strategy Against Data
+#' Strategie gegen Daten pruefen
 #'
-#' Checks that all assets in the strategy have corresponding columns in the data
-#' and that signal columns exist if required.
+#' Prueft, ob das Objekt eine Strategie aus asset_config-Objekten ist und
+#' (falls data angegeben) ob alle Assets eine passende Spalte in den Daten haben
+#' und die benoetigten Signalspalten existieren.
 #'
-#' @param strategy A strategy object
-#' @param data Data frame to validate against. Must have a 'date' column
-#'   and columns for each asset.
+#' @param strategy Ein strategy-Objekt
+#' @param data data.frame zum Abgleich oder NULL (dann nur Pruefung der Objektstruktur).
+#'   Muss je Asset eine Spalte enthalten.
 #'
-#' @return TRUE if valid, otherwise throws an error.
+#' @return TRUE, wenn gueltig; sonst Abbruch mit Fehler.
 #'
 #' @examples
 #' \dontrun{
@@ -74,14 +83,15 @@ create_strategy <- function(..., assets = NULL) {
 #' }
 #'
 #' @export
+#' @noRd
 validate_strategy <- function(strategy, data = NULL) {
   if (!inherits(strategy, "strategy")) {
-    stop("Object is not a strategy")
+    stop(sprintf("validate_strategy: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht %s.", class(strategy)[1]))
   }
   
   for (i in seq_along(strategy)) {
     if (!inherits(strategy[[i]], "asset_config")) {
-      stop(sprintf("Asset '%s' is not an asset_config object", names(strategy)[i]))
+      stop(sprintf("validate_strategy: Asset '%s' ist kein asset_config()-Objekt (Klasse %s).", names(strategy)[i], class(strategy[[i]])[1]))
     }
   }
   
@@ -91,19 +101,19 @@ validate_strategy <- function(strategy, data = NULL) {
     
     missing_assets <- setdiff(asset_names, data_cols)
     if (length(missing_assets) > 0) {
-      stop(sprintf("Assets not found in data: %s", 
-                   paste(missing_assets, collapse = ", ")))
+      stop(sprintf("validate_strategy: Kursspalte(n) %s fehlen in data (je Asset eine Spalte gleichen Namens; vorhanden: %s).",
+                   paste0("'", missing_assets, "'", collapse = ", "), paste(data_cols, collapse = ", ")))
     }
     
     for (name in asset_names) {
       asset <- strategy[[name]]
       if (asset$action_type == "signal") {
         if (!asset$signal_buy %in% data_cols) {
-          stop(sprintf("Signal column '%s' not found (asset '%s')",
+          stop(sprintf("validate_strategy: signal_buy-Spalte '%s' fehlt in data (Asset '%s').",
                        asset$signal_buy, name))
         }
         if (!asset$signal_sell %in% data_cols) {
-          stop(sprintf("Signal column '%s' not found (asset '%s')",
+          stop(sprintf("validate_strategy: signal_sell-Spalte '%s' fehlt in data (Asset '%s').",
                        asset$signal_sell, name))
         }
       }
@@ -114,20 +124,21 @@ validate_strategy <- function(strategy, data = NULL) {
 }
 
 
-#' Add Asset to Strategy
+#' Asset zur Strategie hinzufuegen
 #'
-#' @param strategy A strategy object
-#' @param name Character. Name for the new asset
-#' @param asset An asset_config object
+#' @param strategy Ein strategy-Objekt
+#' @param name Zeichenkette. Name des neuen Assets
+#' @param asset Ein asset_config-Objekt
 #'
-#' @return Updated strategy object
+#' @return Aktualisiertes strategy-Objekt
 #' @export
+#' @noRd
 add_asset <- function(strategy, name, asset) {
   if (!inherits(strategy, "strategy")) {
-    stop("First argument must be a strategy object")
+    stop(sprintf("add_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht %s.", class(strategy)[1]))
   }
   if (!inherits(asset, "asset_config")) {
-    stop("asset must be an asset_config object")
+    stop(sprintf("add_asset: asset muss ein asset_config()-Objekt sein, nicht %s.", class(asset)[1]))
   }
   
   strategy[[name]] <- asset
@@ -135,74 +146,90 @@ add_asset <- function(strategy, name, asset) {
 }
 
 
-#' Update Asset in Strategy
+#' Asset in der Strategie aendern
 #'
-#' @param strategy A strategy object
-#' @param name Character. Name of the asset to update
-#' @param ... Parameters to update (e.g., asset_share = 0.5)
+#' @param strategy Ein strategy-Objekt
+#' @param name Zeichenkette. Name des zu aendernden Assets
+#' @param ... Zu aendernde Felder (z. B. asset_share = 0.5); unbekannte Felder werden
+#'   mit Warnung ignoriert. Das Asset wird danach mit asset_config() neu geprueft.
+#'   Aendert sich asset_class oder deliverable und wird tax_regime nicht mit
+#'   angegeben, wird ein bisher automatisch abgeleitetes tax_regime neu abgeleitet;
+#'   ein abweichend gesetztes (explizites) tax_regime bleibt erhalten.
 #'
-#' @return Updated strategy object
+#' @return Aktualisiertes strategy-Objekt
 #' @export
+#' @noRd
 update_asset <- function(strategy, name, ...) {
   if (!inherits(strategy, "strategy")) {
-    stop("First argument must be a strategy object")
+    stop(sprintf("update_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht %s.", class(strategy)[1]))
   }
   
   if (!name %in% names(strategy)) {
-    stop(sprintf("Asset '%s' not found in strategy", name))
+    stop(sprintf("update_asset: Asset '%s' ist nicht in der Strategie (vorhanden: %s).", name, paste(names(strategy), collapse = ", ")))
   }
   
   updates <- list(...)
   asset <- strategy[[name]]
   
-  for (param in names(updates)) {
-    if (!param %in% names(asset)) {
-      warning(sprintf("Unknown parameter '%s' ignored", param))
-      next
-    }
-    asset[[param]] <- updates[[param]]
+  # R1-25: Wurde tax_regime bisher automatisch abgeleitet, wird es nach einer
+  # Aenderung von asset_class/deliverable neu abgeleitet (explizite Werte bleiben)
+  if (any(c("asset_class", "deliverable") %in% names(updates)) && !"tax_regime" %in% names(updates)) {
+    derived <- tryCatch(suppressWarnings(do.call(asset_config, modifyList(unclass(asset), list(tax_regime = NULL), keep.null = TRUE)))$tax_regime,
+                        error = function(e) NULL)
+    if (identical(derived, asset$tax_regime)) asset["tax_regime"] <- list(NULL)
   }
   
-  strategy[[name]] <- do.call(asset_config, asset)
+  for (param in names(updates)) {
+    if (!param %in% names(asset)) {
+      warning(sprintf("update_asset: unbekannter Parameter '%s' wird ignoriert (m\u00f6glich: %s).", param, paste(names(asset), collapse = ", ")))
+      next
+    }
+    asset[param] <- list(updates[[param]])
+  }
+  
+  strategy[[name]] <- do.call(asset_config, unclass(asset))
   return(strategy)
 }
 
 
-#' Remove Asset from Strategy
+#' Asset aus der Strategie entfernen
 #'
-#' @param strategy A strategy object
-#' @param name Character. Name of the asset to remove
+#' @param strategy Ein strategy-Objekt
+#' @param name Zeichenkette. Name des zu entfernenden Assets
 #'
-#' @return Updated strategy object
+#' @return Aktualisiertes strategy-Objekt (Warnung, wenn es danach leer ist)
 #' @export
+#' @noRd
 remove_asset <- function(strategy, name) {
   if (!inherits(strategy, "strategy")) {
-    stop("First argument must be a strategy object")
+    stop(sprintf("remove_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht %s.", class(strategy)[1]))
   }
   
   if (!name %in% names(strategy)) {
-    stop(sprintf("Asset '%s' not found in strategy", name))
+    stop(sprintf("remove_asset: Asset '%s' ist nicht in der Strategie (vorhanden: %s).", name, paste(names(strategy), collapse = ", ")))
   }
   
   strategy[[name]] <- NULL
   
   if (length(strategy) == 0) {
-    warning("Strategy is now empty")
+    warning(sprintf("remove_asset: Nach dem Entfernen von '%s' enth\u00e4lt die Strategie keine Assets mehr.", name))
   }
   
   return(strategy)
 }
 
 
-#' Migrate Old Strategy Format
+#' Altes Strategieformat umwandeln
 #'
-#' Converts strategies using deprecated asset_class values to the new format.
+#' Wandelt Strategien mit veralteten asset_class-Werten ("etn_deliverable",
+#' "etn_standard") in das neue Format um ("etn" mit deliverable = TRUE/FALSE).
 #'
-#' @param old_strategy A list with old-format asset configurations
-#' @param verbose Logical. Print migration details. Default: TRUE
+#' @param old_strategy Liste mit Asset-Konfigurationen im alten Format
+#' @param verbose Logisch. Meldungen zur Umwandlung ausgeben. Standard: TRUE
 #'
-#' @return A strategy object with updated format
+#' @return strategy-Objekt im aktuellen Format
 #' @export
+#' @noRd
 migrate_strategy <- function(old_strategy, verbose = TRUE) {
   new_strategy <- list()
   
@@ -211,13 +238,13 @@ migrate_strategy <- function(old_strategy, verbose = TRUE) {
     
     if (asset$asset_class == "etn_deliverable") {
       if (verbose) {
-        message(sprintf("Migrating %s: etn_deliverable -> etn + deliverable=TRUE", name))
+        message(sprintf("migrate_strategy: %s: etn_deliverable -> etn mit deliverable = TRUE", name))
       }
       asset$asset_class <- "etn"
       asset$deliverable <- TRUE
     } else if (asset$asset_class == "etn_standard") {
       if (verbose) {
-        message(sprintf("Migrating %s: etn_standard -> etn + deliverable=FALSE", name))
+        message(sprintf("migrate_strategy: %s: etn_standard -> etn mit deliverable = FALSE", name))
       }
       asset$asset_class <- "etn"
       asset$deliverable <- FALSE
@@ -231,18 +258,20 @@ migrate_strategy <- function(old_strategy, verbose = TRUE) {
 }
 
 
-#' Print Strategy
-#' @param x A strategy object
-#' @param ... Additional arguments (ignored)
+#' Strategie ausgeben
+#' @param x Ein strategy-Objekt
+#' @param ... Weitere Argumente (ignoriert)
+#' @return x, unsichtbar
 #' @export
+#' @noRd
 print.strategy <- function(x, ...) {
-  cat(sprintf("Investment Strategy (%d assets)\n", length(x)))
+  cat(sprintf("Anlagestrategie (%d %s)\n", length(x), if (length(x) == 1L) "Asset" else "Assets"))
   cat("================================\n\n")
   
   for (name in names(x)) {
     asset <- x[[name]]
     cat(sprintf("%s:\n", name))
-    cat(sprintf("  Class: %s | Share: %.0f%% | Tax: %s\n",
+    cat(sprintf("  Klasse: %s | Anteil: %.0f%% | Steuer: %s\n",
                 asset$asset_class, asset$asset_share * 100, asset$tax_regime))
   }
   
@@ -250,38 +279,41 @@ print.strategy <- function(x, ...) {
 }
 
 
-#' Summary of Strategy
-#' @param object A strategy object
-#' @param ... Additional arguments (ignored)
+#' Zusammenfassung einer Strategie
+#' @param object Ein strategy-Objekt
+#' @param ... Weitere Argumente (ignoriert)
+#' @return object, unsichtbar
 #' @export
+#' @noRd
 summary.strategy <- function(object, ...) {
-  cat(sprintf("Strategy Summary: %d assets\n\n", length(object)))
+  cat(sprintf("Strategie-\u00dcbersicht: %d %s\n\n", length(object), if (length(object) == 1L) "Asset" else "Assets"))
   
   total_share <- sum(sapply(object, function(a) a$asset_share))
-  cat(sprintf("Total allocation: %.1f%%\n", total_share * 100))
+  cat(sprintf("Gesamtgewicht: %.1f%%\n", total_share * 100))
   
   if (abs(total_share - 1) > 0.001) {
-    cat("  (Note: Does not sum to 100%)\n")
+    cat("  (Hinweis: Summe ist nicht 100%)\n")
   }
   
-  cat("\nBy Tax Regime:\n")
+  cat("\nNach Steuerregime:\n")
   regimes <- sapply(object, function(a) a$tax_regime)
   for (regime in unique(regimes)) {
     n <- sum(regimes == regime)
-    cat(sprintf("  %s: %d asset(s)\n", regime, n))
+    cat(sprintf("  %s: %d %s\n", regime, n, if (n == 1L) "Asset" else "Assets"))
   }
   
   invisible(object)
 }
 
 
-#' Convert a strategy object to a plain list
+#' Strategie-Objekt in eine einfache Liste umwandeln
 #'
-#' @param x A \code{strategy} object (or other object).
-#' @param ... Ignored.
-#' @return A plain (unclassed) named list suitable for the legacy
-#'   \code{simulation()} list interface.
+#' @param x Ein \code{strategy}-Objekt (oder anderes Objekt).
+#' @param ... Ignoriert.
+#' @return Einfache benannte Liste ohne Klasse, geeignet fuer die alte
+#'   Listen-Schnittstelle von \code{simulation()}.
 #' @export
+#' @noRd
 as_list <- function(x, ...) UseMethod("as_list")
 
 #' @export

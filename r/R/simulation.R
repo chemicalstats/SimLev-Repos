@@ -1,203 +1,243 @@
-#' =============================================================================
-#' SimLev - Portfolio Simulation Package
-#' =============================================================================
-#' 
-#' @author ChemicalStats von der Mauerstrasse
-#' @version 2.3.0
-#' @license GPL-3
-#' 
-#' @description
-#' Simulates portfolio performance with German tax rules including:
-#' - Abgeltungsteuer (flat tax on capital gains, § 20 EStG)
-#' - Vorabpauschale (advance lump sum tax for funds, § 18 InvStG)
-#' - Teilfreistellung (partial tax exemption for ETFs, § 20 InvStG)
-#' - § 23 EStG (private sale taxation for ETN deliverable)
-#' - Sparerpauschbetrag (tax-free allowance, § 20 Abs. 9 EStG)
-#' - Günstigerprüfung (§ 32d Abs. 6 EStG) - optional
-#' 
-#' @section Tax Regimes:
-#' The package supports three distinct tax regimes:
-#' 
-#' \describe{
-#'   \item{investment_fund}{
-#'     ETFs and investment funds under InvStG.
-#'     - Teilfreistellung: 30% for equity funds, 15% for mixed funds
-#'     - Vorabpauschale: Annual prepayment tax based on base rate
-#'     - FIFO-based cost tracking
-#'   }
-#'   \item{capital_gains}{
-#'     Standard capital gains taxation under § 20 EStG.
-#'     - No Teilfreistellung
-#'     - No Vorabpauschale
-#'     - FIFO-based cost tracking
-#'     - Used for: ETN standard, certificates
-#'   }
-#'   \item{private_sale}{
-#'     Private sale taxation under § 23 EStG.
-#'     - Holding period: Tax-free after 1 year
-#'     - Freigrenze: EUR 1,000 annual exemption (since 2024)
-#'     - Personal income tax rate applies (not flat tax)
-#'     - Separate loss pool (only offsettable with § 23 gains)
-#'     - Used for: ETN deliverable (physical delivery)
-#'   }
-#' }
-#' 
-#' @section Günstigerprüfung (I3):
-#' If \code{use_guenstigerpruefung = TRUE} and \code{marginal_tax_rate < 0.25},
-#' the personal tax rate is applied instead of the flat 25% Abgeltungsteuer.
-#' This benefits taxpayers in lower tax brackets.
-#' 
-#' Formula: \code{effective_rate = marginal_tax_rate * (1 + soli_rate_income_tax)} (if Soli enabled)
-#' 
-#' @section Vorabpauschale Calculation (M1, M3, M4):
-#' The advance lump sum tax is calculated as:
-#' \deqn{VP = min(Basisertrag, Wertzuwachs)}
-#' where:
-#' \itemize{
-#'   \item Basisertrag = Referenzwert × Basiszins × 0.70 × (Haltedauer / 365)
-#'   \item Wertzuwachs = max(0, Jahresendwert - Referenzwert)
-#' }
-#' 
-#' Special handling:
-#' \itemize{
-#'   \item M1: Negative base rates result in VP = 0 (not negative)
-#'   \item M3: VP cannot be offset against losses (uses separate function)
-#'   \item M4: Only lots held at year-end are considered
-#' }
-#' 
-#' @section § 23 EStG Loss Handling (M2):
-#' Losses from private sales (< 1 year holding) are tracked separately:
-#' \itemize{
-#'   \item Losses are NOT offset immediately at each sale
-#'   \item Year-end reconciliation in \code{handle_year_change()}
-#'   \item Loss carryforward only usable against future § 23 gains
-#'   \item Annual gains below EUR 1,000 (Freigrenze) are tax-free
-#'   \item If exceeded, ENTIRE gain is taxable (not just excess)
-#' }
-#' 
-#' @changelog
-#' 2.1.0 (2025-02-05):
-#'   - I3: Added Günstigerprüfung (§ 32d Abs. 6 EStG) support
-#'   - M1: Fixed negative base rate handling for Vorabpauschale
-#'   - M2: Corrected § 23 loss offset timing (year-end, not per-sale)
-#'   - M3: Separate calculate_vorabpauschale_tax() without loss offset
-#'   - M4: Vorabpauschale only for lots held at year-end
-#'   - Added effective_tax_rate throughout for Günstigerprüfung
-#'   - Added comprehensive documentation
-#' 
-#' 2.0.0 (2025-01-26):
-#'   - Added ETN/certificate support (tax_regime parameter)
-#'   - Added Sparerpauschbetrag integration
-#'   - Added separate loss pools for § 20 and § 23 EStG
-#'   - Added marginal_tax_rate for personal income tax
-#' 
-#' 1.x.x (previous):
-#'   - Initial release with ETF support
-#' =============================================================================
+# =============================================================================
+# SimLev - Paket zur Portfolio-Simulation
+# =============================================================================
+#
+# @author ChemicalStats von der Mauerstrasse
+# @version 2.3.0
+# @license GPL-3
+#
+# @description
+# Simuliert die Wertentwicklung eines Portfolios nach deutschen Steuerregeln, u. a.:
+# - Abgeltungsteuer (pauschale Steuer auf Kapitalertraege, § 20 EStG)
+# - Vorabpauschale (jaehrliche Vorabbesteuerung von Fonds, § 18 InvStG)
+# - Teilfreistellung (teilweise Steuerfreiheit von Fondsertraegen, § 20 InvStG)
+# - § 23 EStG (private Veraeusserungsgeschaefte, lieferbare ETN/ETC)
+# - Sparer-Pauschbetrag (Freibetrag, § 20 Abs. 9 EStG)
+# - Guenstigerpruefung (§ 32d Abs. 6 EStG) - optional
+#
+# @section Steuerregime:
+# Das Paket unterscheidet drei Steuerregime:
+#
+# \describe{
+#   \item{investment_fund}{
+#     ETFs und Investmentfonds nach InvStG.
+#     - Teilfreistellung: 30 % bei Aktienfonds, 15 % bei Mischfonds
+#       (je Asset als \code{asset_bonus} in Prozent, z. B. 30)
+#     - Vorabpauschale: jaehrliche Vorabbesteuerung auf Basis des Basiszinses
+#     - Einstandskosten nach FIFO
+#   }
+#   \item{capital_gains}{
+#     Normale Besteuerung von Kapitalertraegen nach § 20 EStG.
+#     - Keine Teilfreistellung
+#     - Keine Vorabpauschale
+#     - Einstandskosten nach FIFO
+#     - Verwendet fuer: ETN (nicht lieferbar), Zertifikate
+#   }
+#   \item{private_sale}{
+#     Private Veraeusserungsgeschaefte nach § 23 EStG.
+#     - Haltefrist: steuerfrei nach mehr als 1 Jahr
+#     - Freigrenze: 1.000 EUR je Jahr (seit 2024)
+#     - Es gilt der persoenliche Einkommensteuersatz (nicht die Abgeltungsteuer)
+#     - Eigener Verlusttopf (nur mit § 23-Gewinnen verrechenbar)
+#     - Verwendet fuer: lieferbare ETN/ETC (physische Lieferung)
+#   }
+# }
+#
+# @section Guenstigerpruefung (I3):
+# Bei \code{use_guenstigerpruefung = TRUE} wird statt der Abgeltungsteuer (\code{tax_rate},
+# Standard 26,375 %, mit Kirchensteuer nach § 32d Abs. 1) der persoenliche Steuersatz angewandt,
+# wenn die Belastung einschliesslich Zuschlagsteuern niedriger ist (§ 32d Abs. 6 Satz 1 EStG).
+#
+# Formel (intern, Saetze nach Division durch 100 als Anteil):
+# \code{personal = marginal_tax_rate * (soli_factor + church_tax / 100)} mit soli_factor =
+# 1 + soli_rate_income_tax bei \code{include_soli_on_income_tax = TRUE}, sonst 1;
+# \code{effective_rate = personal}, wenn \code{personal < tax_rate}, sonst \code{tax_rate}.
+#
+# @section Tarifweg (taxable_income, tax_tariff):
+# Mit \code{taxable_income} (zvE je Kalenderjahr ohne die Ertraege der Simulation) rechnet die Engine
+# mit dem Einkommensteuertarif aus einer Datei (read_tax_tariff(), § 32a Abs. 1 EStG, Soli §§ 3, 4
+# SolZG; mitgeliefert ab VZ 2026, Einzelveranlagung). § 23: ESt-Zuwachs T(zvE + G23) - T(zvE),
+# Soli-Zuwachs exakt, KiSt church_tax Prozent des ESt-Zuwachses. Guenstigerpruefung: unterjaehrig
+# Abgeltungsteuer, im Jahresabschluss Vergleich der Gesamtbelastung mit und ohne Tarif fuer K,
+# Abrechnung (Nachzahlung/Erstattung) am Abrechnungstag. Kirchensteuer als Sonderausgabe im
+# Zahlungsjahr (§ 10 Abs. 1 Nr. 4, Abs. 4b Satz 2/3, § 11 EStG): Saldo des KiSt-Bescheids des Vorjahres
+# (Zahlung abziehbar, Erstattung verrechnet bzw. hinzugerechnet), bei guenstigerer Tarifbesteuerung
+# auch die im Jahr auf K einbehaltene KiSt. Hilfsfunktionen: .tariff_base(), .tariff_full(),
+# .tariff_diff(), .tariff_close(), .tariff_book().
+#
+# @section Berechnung der Vorabpauschale (M1, M3, M4, T-1):
+# Die Vorabpauschale wird je am 31.12. gehaltenem Lot berechnet als (§ 18 Abs. 1-2 InvStG):
+# \deqn{VP = max(0, min(Basisertrag, Wertzuwachs)) x Monatsfaktor}
+# mit:
+# \itemize{
+#   \item Basisertrag = Bestand x Kurs zu Jahresbeginn x Basiszins x 0,7
+#   \item Wertzuwachs = Bestand x (Kurs am 31.12. - Kurs zu Jahresbeginn)
+# }
+# Bezug ist fuer jedes Lot der erste im Jahr festgesetzte Kurs (erster nicht aufgefuellter Tag; auch bei Kauf im laufenden
+# Jahr; der Kaufkurs spielt keine Rolle). Monatsfaktor = 1 bei Erwerb vor dem
+# Jahr, sonst (13 - Kaufmonat) / 12 (Zwoelftelung nach dem Deckel, T-1).
+# Basiszins vom ersten Handelstag des Jahres (§ 18 Abs. 4). Zufluss und Steuer
+# am ersten Handelstag des Folgejahres mit dessen Toepfen (§ 18 Abs. 3).
+#
+# Besonderheiten:
+# \itemize{
+#   \item M1: Ein negativer Basiszins ergibt VP = 0 (nicht negativ).
+#   \item M3: Eigene Funktion calculate_vorabpauschale_tax(). Die VP wird mit dem
+#     allgemeinen § 20-Verlusttopf verrechnet (vor dem Sparer-Pauschbetrag, R-2),
+#     erzeugt aber selbst keinen Verlust.
+#   \item M4: Nur Lots, die zum Jahresende noch gehalten werden, zaehlen.
+# }
+#
+# @section Verlustbehandlung nach § 23 EStG (M2):
+# Verluste aus privaten Veraeusserungsgeschaeften (Haltedauer bis 1 Jahr) werden
+# getrennt gefuehrt:
+# \itemize{
+#   \item Verluste werden NICHT sofort bei jedem Verkauf verrechnet
+#   \item Jahresabrechnung in \code{handle_year_change()}
+#   \item Verlustvortrag nur mit kuenftigen § 23-Gewinnen verrechenbar
+#   \item Jahressaldo unter 1.000 EUR (Freigrenze) ist steuerfrei, der Vortrag bleibt
+#   \item Ab Erreichen ist der GESAMTE Saldo abzueglich Verlustvortrag steuerpflichtig
+#     (nicht nur der Mehrbetrag; BFH IX R 27/04)
+# }
+#
+# @changelog
+# 2.1.0 (2025-02-05):
+#   - I3: Guenstigerpruefung (§ 32d Abs. 6 EStG) ergaenzt
+#   - M1: Behandlung negativer Basiszinsen bei der Vorabpauschale korrigiert
+#   - M2: Zeitpunkt der § 23-Verlustverrechnung korrigiert (Jahresende, nicht je Verkauf)
+#   - M3: Eigene Funktion calculate_vorabpauschale_tax() ohne Verlustverrechnung
+#     (inzwischen geaendert: Verrechnung mit dem § 20-Verlusttopf, R-2)
+#   - M4: Vorabpauschale nur fuer Lots, die zum Jahresende gehalten werden
+#   - effective_tax_rate fuer die Guenstigerpruefung durchgaengig ergaenzt
+#   - Ausfuehrliche Dokumentation ergaenzt
+#
+# 2.0.0 (2025-01-26):
+#   - Unterstuetzung fuer ETN/Zertifikate ergaenzt (Parameter tax_regime)
+#   - Sparer-Pauschbetrag eingebunden
+#   - Getrennte Verlusttoepfe fuer § 20 und § 23 EStG
+#   - marginal_tax_rate fuer den persoenlichen Einkommensteuersatz ergaenzt
+#
+# 1.x.x (frueher):
+#   - Erste Version mit ETF-Unterstuetzung
+# =============================================================================
 
-#' @title Portfolio Simulation
+#' @title Portfolio-Simulation
 #'
 #' @description
-#' Performs a comprehensive portfolio simulation with support for multiple
-#' trading strategies, Dollar-Cost Averaging (DCA), rebalancing, and German
-#' tax calculation including Günstigerprüfung.
+#' Fuehrt eine Portfolio-Simulation (Backtest) mit mehreren Handelsstrategien,
+#' Sparplaenen (DCA), Rebalancing und deutscher Steuerberechnung einschliesslich
+#' Guenstigerpruefung durch. Massgebliche Beschreibung aller Argumente:
+#' Hilfeseite \code{?simulation} (man/simulation.Rd).
 #'
-#' @param data A data.frame containing market data with columns:
+#' @param data data.frame mit taeglichen Marktdaten und den Spalten:
 #'   \describe{
-#'     \item{date}{Date column (Date or character in "YYYY-MM-DD" format)}
-#'     \item{[asset_names]}{Price columns for each asset in the strategy}
-#'     \item{[signal_columns]}{Optional buy/sell signal columns (logical)}
-#'     \item{[base_rate_column]}{Optional: Dynamic base rate if base_rate_flex = TRUE}
+#'     \item{date}{Datum (Klasse Date); fehlende Kalendertage werden per LOCF aufgefuellt}
+#'     \item{[Asset-Namen]}{Kursspalte (Niveaus, keine Renditen) je Asset der Strategie}
+#'     \item{[Signalspalten]}{Optional: logische Kauf-/Verkaufssignale}
+#'     \item{[Basiszins-Spalte]}{Optional: Basiszins in Prozent, wenn base_rate_flex = TRUE}
 #'   }
 #'
-#' @param strategy A named list of asset configurations. Each asset should have:
+#' @param strategy Benannte Liste von Asset-Konfigurationen (idealerweise aus
+#'   create_strategy()/asset_config()). Je Asset:
 #'   \describe{
-#'     \item{asset_class}{Character: "etf", "etn", "etc", "etn_deliverable", "certificate"}
-#'     \item{action_type}{Character: "bnh" (Buy-and-Hold) or "signal" (Signal-based)}
-#'     \item{asset_share}{Numeric: Target weight (0-1), will be normalized}
-#'     \item{asset_spread}{Numeric: Bid-ask spread as decimal (e.g., 0.001 for 0.1%)}
-#'     \item{asset_bonus}{Numeric: Partial exemption rate (0.30 for equity ETFs, 0.15 for mixed, 0 for others)}
-#'     \item{asset_start}{Date: When asset becomes tradeable (optional)}
-#'     \item{tax_regime}{Character: "investment_fund", "capital_gains", or "private_sale" (optional, auto-detected from asset_class)}
-#'     \item{signal_buy}{Character: Column name for buy signals (required if action_type = "signal")}
-#'     \item{signal_sell}{Character: Column name for sell signals (required if action_type = "signal")}
+#'     \item{asset_class}{Zeichenkette: "etf", "etn", "etc", "certificate" (veraltet: "etn_standard", "etn_deliverable")}
+#'     \item{action_type}{Zeichenkette: "bnh" (Buy-and-Hold) oder "signal" (signalgesteuert)}
+#'     \item{asset_share}{Zahl: Zielgewicht als Anteil (0-1); die Summe ueber alle Assets muss 1 ergeben (keine Normierung, sonst Fehler)}
+#'     \item{asset_spread}{Zahl: voller Bid-Ask-Spread in Prozent (z. B. 0.1 = 0,1 \%); je Seite wird der halbe Spread angewandt}
+#'     \item{asset_bonus}{Zahl: Teilfreistellung in Prozent (30 bei Aktien-ETFs, 15 bei Mischfonds, 0 sonst)}
+#'     \item{asset_start}{Date: Ab wann das Asset handelbar ist (optional); am Starttag wird
+#'       immer auf die Zielgewichte umgeschichtet, auch ohne balance_mode}
+#'     \item{tax_regime}{Zeichenkette: "investment_fund", "capital_gains" oder "private_sale" (optional, sonst aus asset_class und deliverable abgeleitet)}
+#'     \item{signal_buy}{Zeichenkette: Spaltenname der Kaufsignale (Pflicht bei action_type = "signal")}
+#'     \item{signal_sell}{Zeichenkette: Spaltenname der Verkaufssignale (Pflicht bei action_type = "signal")}
 #'   }
 #'
-#' @param start_value Numeric. Initial portfolio value in EUR. Default: 10000.
+#' @param start_value Zahl. Anfangskapital in EUR. Standard: 10000.
 #'
-#' @param tax_mode Character. Tax calculation mode:
+#' @param tax_mode Zeichenkette. Besteuerungsmodus:
 #'   \describe{
-#'     \item{"none"}{No tax calculation}
-#'     \item{"person"}{German personal tax (Abgeltungsteuer/§ 23) with FIFO tracking}
-#'     \item{"funds"}{Fund-level taxation simulation}
+#'     \item{"none"}{Keine Steuerberechnung (Standard)}
+#'     \item{"person"}{Persoenliche Besteuerung (Abgeltungsteuer/§ 23) mit FIFO-Buchfuehrung}
+#'     \item{"funds"}{Fondsmodell: jaehrliche Kosten (funds_fee, bonus_fee); Steuer auf den Gesamtgewinn bei Liquidation}
 #'   }
 #'
-#' @param tax_rate Numeric. Capital gains tax rate including Soli.
-#'   Default: 0.26375 (25% + 5.5% Solidaritätszuschlag).
-#'   Automatically adjusted if \code{use_guenstigerpruefung = TRUE}.
+#' @param tax_rate Zahl. Kapitalertragsteuersatz einschliesslich Soli in Prozent.
+#'   Standard: 26.375 (25 \% + 5,5 \% Solidaritaetszuschlag = 26,375 \%).
+#'   Zulaessig 0 bis 100. Wird bei \code{church_tax > 0} ueberschrieben; bei
+#'   \code{use_guenstigerpruefung = TRUE} ggf. durch den persoenlichen Satz ersetzt.
 #'
-#' @param marginal_tax_rate Numeric or NULL. Personal marginal income tax rate (0.14-0.45).
-#'   Required for:
+#' @param marginal_tax_rate Zahl oder NULL. Persoenlicher Grenzsteuersatz in Prozent
+#'   (z. B. 42 = 42 \%; zulaessig 0 bis 50). Benoetigt fuer:
 #'   \itemize{
-#'     \item § 23 EStG (private_sale) taxation
-#'     \item Günstigerprüfung (if use_guenstigerpruefung = TRUE)
+#'     \item Besteuerung nach § 23 EStG (private_sale)
+#'     \item Guenstigerpruefung (bei use_guenstigerpruefung = TRUE)
 #'   }
-#'   Example values: 0.14 (minimum), 0.24 (common), 0.42 (high income), 0.45 (top rate)
+#'   Beispielwerte: 14 (Eingangssatz), 24 (haeufig), 42 (Spitzensatz), 45 (Reichensteuer).
+#'   NULL: bei steuerpflichtigen § 23-Gewinnen werden 42 \% mit Warnung angesetzt.
 #'
-#' @param use_guenstigerpruefung Logical. Apply Günstigerprüfung (§ 32d Abs. 6 EStG)?
-#'   If TRUE and marginal_tax_rate < 0.25, the personal tax rate is used instead
-#'   of the flat 25% Abgeltungsteuer. Default: FALSE.
+#' @param use_guenstigerpruefung Logisch. Guenstigerpruefung (§ 32d Abs. 6 EStG) anwenden?
+#'   Bei TRUE wird statt der Abgeltungsteuer der persoenliche Steuersatz verwendet, wenn die
+#'   Belastung einschliesslich Zuschlagsteuern niedriger ist: marginal_tax_rate x (1 + Soli-Satz
+#'   + Kirchensteuersatz) < effektiver Abgeltungsteuersatz (§ 32d Abs. 6 Satz 1 EStG; keine
+#'   starre 25-\%-Schwelle). Standard: FALSE.
 #'
-#' @param sparer_pauschbetrag Numeric. Annual tax-free allowance for capital gains.
-#'   Default: 1000 (single person since 2023). Use 2000 for married filing jointly.
+#' @param sparer_pauschbetrag Zahl. Jaehrlicher Sparer-Pauschbetrag in EUR.
+#'   Standard: 1000 (Einzelperson seit 2023). Bei Zusammenveranlagung 2000.
 #'
-#' @param use_sparer_pauschbetrag Logical. Apply Sparerpauschbetrag? Default: TRUE.
+#' @param use_sparer_pauschbetrag Logisch. Sparer-Pauschbetrag anwenden? Standard: TRUE.
 #'
-#' @param private_sale_threshold Numeric. Annual Freigrenze for § 23 EStG.
-#'   Default: 1000 (since 2024). Gains below this threshold are tax-free.
-#'   NOTE: This is a Freigrenze (not Freibetrag) - if exceeded, ENTIRE gain is taxable.
+#' @param private_sale_threshold Zahl. Jaehrliche Freigrenze nach § 23 EStG in EUR
+#'   (fuer alle Jahre gleich). Standard: 1000 (seit 2024). Ein Jahressaldo unter dieser
+#'   Grenze ist steuerfrei (Verlustvortrag unveraendert).
+#'   HINWEIS: Freigrenze (kein Freibetrag) - ab Erreichen (genau 1000 eingeschlossen) ist
+#'   der GESAMTE Saldo abzueglich Verlustvortrag steuerpflichtig.
 #'
-#' @param include_soli_on_income_tax Logical. Include Solidaritätszuschlag on
-#'   personal income tax calculations (§ 23 EStG, Günstigerprüfung)?
-#'   Default: FALSE. Since 2021, the Soli exemption threshold means most taxpayers
-#'   do NOT pay Soli on income tax. Set TRUE for high-income scenarios.
+#' @param include_soli_on_income_tax Logisch. Solidaritaetszuschlag auf die
+#'   Einkommensteuer (§ 23 EStG, Guenstigerpruefung) erheben?
+#'   Standard: FALSE. Seit 2021 zahlen wegen der Soli-Freigrenze die meisten
+#'   Steuerpflichtigen keinen Soli auf die Einkommensteuer. TRUE fuer hohe Einkommen.
 #'
-#' @param soli_rate_income_tax Numeric. Solidaritätszuschlag rate as decimal
-#'   (default: 0.055 = 5.5%). Only applied when include_soli_on_income_tax = TRUE.
-#'   Note: The Abgeltungsteuer rate (tax_rate = 0.26375) already includes Soli.
+#' @param soli_rate_income_tax Zahl. Soli-Satz in Prozent
+#'   (Standard: 5.5 = 5,5 \%). Nur wirksam bei include_soli_on_income_tax = TRUE.
+#'   Hinweis: Der Abgeltungsteuersatz (tax_rate = 26.375) enthaelt den Soli bereits.
 #'
-#' @param base_rate Numeric or NULL. Fixed annual base rate for Vorabpauschale.
-#'   Example: 2.29 for 2.29% (2024 value). Use NULL if base_rate_flex = TRUE.
+#' @param base_rate Zahl oder NULL. Fester jaehrlicher Basiszins fuer die
+#'   Vorabpauschale in Prozent, z. B. 2.29 fuer 2,29 \% (Wert 2024).
+#'   NULL = 0 (keine Vorabpauschale), sofern nicht base_rate_flex = TRUE.
 #'
-#' @param base_rate_flex Logical. Use dynamic base rate from data column? Default: FALSE.
+#' @param base_rate_flex Logisch. Zeitvariablen Basiszins aus einer Datenspalte verwenden? Standard: FALSE.
 #'
-#' @param base_rate_data Character. Column name in data containing base rates (in percent).
-#'   Required if base_rate_flex = TRUE.
+#' @param base_rate_data Zeichenkette. Name der Spalte in data mit dem Basiszins (in Prozent;
+#'   NA wird zu 0). Massgeblich ist je Jahr der Wert vom ersten Handelstag (§ 18 Abs. 4 InvStG).
+#'   Pflicht bei base_rate_flex = TRUE. Standard: NULL.
 #'
-#' @return A list containing:
+#' @return Objekt der Klasse "SimLevResult" (Liste), u. a. mit:
 #'   \describe{
-#'     \item{worth}{Numeric vector of daily portfolio values}
-#'     \item{cagr}{Compound Annual Growth Rate}
-#'     \item{ttwror}{Time-Weighted Rate of Return}
-#'     \item{drawdowns}{Vector of drawdown percentages}
-#'     \item{statistics}{List of portfolio statistics (mean, sd, skewness, kurtosis, etc.)}
-#'     \item{buys}{Named vector of average annual buy transactions per asset}
-#'     \item{sells}{Named vector of average annual sell transactions per asset}
-#'     \item{report}{Detailed daily report per asset}
-#'     \item{tax_report}{Tax summary including:
+#'     \item{worth}{Zahlenvektor der taeglichen Portfoliowerte in EUR}
+#'     \item{cagr}{Jaehrliche Wachstumsrate (CAGR) als Anteil (0.05 = 5 \%)}
+#'     \item{ttwror}{Annualisierte zeitgewichtete Rendite (TTWROR) als Anteil}
+#'     \item{drawdowns}{Vektor der taeglichen Drawdowns als positiver Anteil (0.2 = 20 \% unter Hoechststand)}
+#'     \item{statistics}{Liste von Kennzahlen (mean, sd, Sharpe, Sortino, Schiefe, Kurtosis usw.)}
+#'     \item{buys}{Benannter Vektor: mittlere Anzahl Kaeufe je Jahr und Asset}
+#'     \item{sells}{Benannter Vektor: mittlere Anzahl Verkaeufe je Jahr und Asset}
+#'     \item{report}{Taeglicher Bericht je Asset}
+#'     \item{tax_report}{Steuerzusammenfassung (Betraege in EUR) mit:
 #'       \itemize{
-#'         \item total_taxes_paid: Total taxes paid during simulation
-#'         \item loss_carryforward_capital: Remaining § 20 EStG loss carryforward
-#'         \item loss_carryforward_private: Remaining § 23 EStG loss carryforward
-#'         \item sparer_pauschbetrag_used: Total Sparerpauschbetrag utilized
-#'         \item sparer_pauschbetrag_tax_saved: Estimated tax savings from SPB
+#'         \item total_taxes_paid: insgesamt gezahlte Steuern
+#'         \item loss_carryforward_capital: verbleibender Verlustvortrag nach § 20 EStG
+#'         \item loss_carryforward_private: verbleibender Verlustvortrag nach § 23 EStG
+#'         \item sparer_pauschbetrag_annual: jaehrlicher Sparer-Pauschbetrag
+#'         \item sparer_pauschbetrag_used: insgesamt genutzter Sparer-Pauschbetrag
+#'         \item sparer_pauschbetrag_tax_saved: geschaetzte Steuerersparnis durch den Sparer-Pauschbetrag
 #'       }
 #'     }
 #'   }
+#'   Vollstaendige Liste der Komponenten: siehe den zweiten roxygen-Block vor
+#'   \code{simulation()} und man/simulation.Rd.
 #'
 #' @examples
 #' \dontrun{
-#' # Basic ETF simulation with German tax rules
+#' # Einfache ETF-Simulation mit deutschen Steuerregeln
 #' result <- simulation(
 #'   data = market_data,
 #'   strategy = list(
@@ -205,33 +245,33 @@
 #'       asset_class = "etf",
 #'       action_type = "bnh",
 #'       asset_share = 0.7,
-#'       asset_spread = 0.001,
-#'       asset_bonus = 0.30  # 30% Teilfreistellung for equity ETF
+#'       asset_spread = 0.1,
+#'       asset_bonus = 30   # 30 Prozent Teilfreistellung fuer Aktien-ETF
 #'     ),
 #'     Bonds = list(
 #'       asset_class = "etf",
 #'       action_type = "bnh",
 #'       asset_share = 0.3,
-#'       asset_spread = 0.001,
-#'       asset_bonus = 0.0   # No Teilfreistellung for bond ETF
+#'       asset_spread = 0.1,
+#'       asset_bonus = 0    # Keine Teilfreistellung fuer Renten-ETF
 #'     )
 #'   ),
 #'   start_value = 50000,
 #'   tax_mode = "person",
-#'   sparer_pauschbetrag = 2000,  # Married filing jointly
-#'   base_rate = 2.29            # 2024 base rate
+#'   sparer_pauschbetrag = 2000,  # Zusammenveranlagung
+#'   base_rate = 2.29             # Basiszins 2024 in Prozent
 #' )
-#' 
-#' # With Günstigerprüfung for low-income investor
+#'
+#' # Mit Guenstigerpruefung fuer Anleger mit niedrigem Einkommen
 #' result <- simulation(
 #'   data = market_data,
 #'   strategy = my_strategy,
 #'   tax_mode = "person",
-#'   marginal_tax_rate = 0.20,       # 20% personal rate
-#'   use_guenstigerpruefung = TRUE   # Will use personal rate if lower than 25%
+#'   marginal_tax_rate = 20,         # persoenlicher Satz 20 Prozent
+#'   use_guenstigerpruefung = TRUE   # persoenlicher Satz, wenn die Belastung niedriger ist
 #' )
-#' 
-#' # With ETN deliverable (§ 23 EStG)
+#'
+#' # Mit lieferbarem ETN (§ 23 EStG)
 #' result <- simulation(
 #'   data = market_data,
 #'   strategy = list(
@@ -239,62 +279,38 @@
 #'       asset_class = "etn_deliverable",
 #'       action_type = "bnh",
 #'       asset_share = 1.0,
-#'       asset_spread = 0.002,
+#'       asset_spread = 0.2,
 #'       asset_bonus = 0
 #'     )
 #'   ),
 #'   tax_mode = "person",
-#'   marginal_tax_rate = 0.35,     # Required for § 23
+#'   marginal_tax_rate = 35,       # fuer § 23 benoetigt (Prozent)
 #'   private_sale_threshold = 1000
 #' )
 #' }
 #'
 #' @seealso
 #' \itemize{
-#'   \item \code{\link{calculate_paragraph_20_tax}} for § 20 EStG calculation
-#'   \item \code{\link{calculate_vorabpauschale_tax}} for Vorabpauschale calculation
-#'   \item \code{\link{calculate_private_sale_tax}} for § 23 EStG calculation
-#'   \item \code{\link{handle_year_change}} for annual tax reconciliation
+#'   \item \code{\link{asset_config}}, \code{\link{create_strategy}} zum Aufbau der Strategie
+#'   \item \code{\link{compute_rebal_trigger}} fuer ereignisbasiertes Rebalancing
+#'   \item \code{\link{deep_analysis}}, \code{\link{withdrawal_paths}} zur Weiterverarbeitung des Ergebnisses
+#'   \item Interne Steuerfunktionen: calculate_paragraph_20_tax(), calculate_vorabpauschale_tax(),
+#'     calculate_private_sale_tax(), handle_year_change()
 #' }
 #'
-#' @export
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# HELPER FUNCTIONS AND MAIN SIMULATION
+# HILFSFUNKTIONEN UND HAUPTSIMULATION
 # ═══════════════════════════════════════════════════════════════════════════════
-# Asset configuration and strategy functions are in separate files:
+# Funktionen fuer Asset-Konfiguration und Strategie stehen in eigenen Dateien:
 # - asset_config.R
 # - strategy.R
 # ═══════════════════════════════════════════════════════════════════════════════
 
-#' Get Tax Regime with Fallback for Legacy Assets
-#' @keywords internal
-get_tax_regime <- function(input, name) {
-  tax_regime <- input[["assets"]][[name]][["tax_regime"]]
-  
-  if (is.null(tax_regime)) {
-    asset_class <- input[["assets"]][[name]][["class"]]
-    deliverable <- input[["assets"]][[name]][["deliverable"]] %||% FALSE
-    
-    tax_regime <- switch(asset_class,
-      "etf" = "investment_fund",
-      "etn" = if (isTRUE(deliverable)) "private_sale" else "capital_gains",
-      "etc" = if (isTRUE(deliverable)) "private_sale" else "capital_gains",
-      "certificate" = "capital_gains",
-      # Backward compatibility
-      "etn_standard" = "capital_gains",
-      "etn_deliverable" = "private_sale",
-      "capital_gains"  # Default
-    )
-  }
-  
-  return(tax_regime)
-}
-
-  
 #' Berechnet § 20 EStG Kapitalertragsteuer
 #' @keywords internal
+#' @noRd
 calculate_paragraph_20_tax <- function(trade_gain, bonus, totals, tax_rate, use_spb) {
   # RCpp-Port (tax_core_RCpp.cpp); totals wird IN PLACE mutiert
   res <- p20_tax_rcpp(trade_gain, bonus, totals, tax_rate, use_spb)
@@ -302,22 +318,23 @@ calculate_paragraph_20_tax <- function(trade_gain, bonus, totals, tax_rate, use_
 }
 
 
-#' Berechnet die Steuer auf Vorabpauschale (M3)
-#' 
-#' Im Gegensatz zu calculate_paragraph_20_tax() wird hier KEINE Verlustverrechnung
-#' durchgeführt, da die Vorabpauschale ein fiktiver Ertrag ist.
-#' 
-#' Die Vorabpauschale mindert später beim Verkauf die Steuerlast (§ 19 InvStG),
-#' aber sie kann nicht mit realisierten Verlusten verrechnet werden.
+#' Berechnet die Steuer auf die Vorabpauschale (M3, R-2)
 #'
-#' @param flat_rate Numeric. Brutto-Vorabpauschale vor Teilfreistellung
-#' @param bonus Numeric. Teilfreistellung (z.B. 0.30 für Aktien-ETFs)
-#' @param totals List. Die totals-Struktur aus sim_mem[["totals"]]
-#' @param tax_rate Numeric. Effektiver Steuersatz (nach Günstigerprüfung)
-#' @param use_spb Logical. Sparerpauschbetrag anwenden?
+#' Die Vorabpauschale ist ein fiktiver Ertrag. Sie wird nach der Teilfreistellung
+#' mit dem allgemeinen § 20-Verlusttopf verrechnet (vor dem Sparer-Pauschbetrag,
+#' R-2), erzeugt aber selbst keinen Verlust; die Steuer ist nie negativ.
 #'
-#' @return List mit tax, totals, spb_used, taxable_amount
+#' Die Vorabpauschale mindert spaeter beim Verkauf die Steuerlast (§ 19 InvStG).
+#'
+#' @param flat_rate Zahl. Brutto-Vorabpauschale in EUR vor Teilfreistellung
+#' @param bonus Zahl. Teilfreistellung als Anteil (intern, z. B. 0.30 fuer Aktien-ETFs)
+#' @param totals Liste. Die totals-Struktur aus sim_mem[["totals"]] (wird direkt veraendert)
+#' @param tax_rate Zahl. Effektiver Steuersatz als Anteil (nach Guenstigerpruefung)
+#' @param use_spb Logisch. Sparer-Pauschbetrag anwenden?
+#'
+#' @return Liste mit tax, totals, spb_used, taxable_amount
 #' @keywords internal
+#' @noRd
 calculate_vorabpauschale_tax <- function(flat_rate, bonus, totals, tax_rate, use_spb) {
   # RCpp-Port (tax_core_RCpp.cpp, R-2: Verlusttopf vor SPB); totals in place
   res <- vp_tax_rcpp(flat_rate, bonus, totals, tax_rate, use_spb)
@@ -361,7 +378,10 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
           } else {
             month_end <- as.Date(paste0(yr, "-", sprintf("%02d", mon + 1L), "-01")) - 1L
           }
-          month_end - (days - 1)
+          # R1-24: Tage, die es im Monat nicht gibt (z. B. 31 vom Ende im Februar), entfallen
+          d_end <- month_end - (days - 1)
+          d_end[d_end < m] <- NA
+          d_end
         }
       })))
     }
@@ -432,15 +452,17 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
 
 
 #--------> Hilfsfunktion zur Erstellung der Split-Flags:
-#' Berechnet Split-Flags für alle Assets (vektorisiert)
+#' Berechnet Split-Flags fuer alle Assets (vektorisiert)
 #'
-#' @param input sim_mem Struktur
-#' @param base Numeric. Basis-Preis für Split-Ratio Berechnung (default: 100)
-#' @param mode Logical. Split-Modus aktiv?
-#' @param dates Date-Vektor. Simulationsdaten
+#' @param input sim_mem-Struktur
+#' @param base Zahl. Zielkurs nach dem Split, Basis des Split-Verhaeltnisses (Aufruf mit 100)
+#' @param mode Logisch. Split-Modus aktiv?
+#' @param dates Date-Vektor. Simulationstage
+#' @param split_thresh Zahlenvektor c(untere, obere) Kursschwelle oder NULL (NULL = keine Splits)
 #'
-#' @return Logical-Vektor: TRUE wenn an diesem Tag ein Split stattfindet
+#' @return Logischer Vektor: TRUE, wenn an diesem Tag mindestens ein Asset splittet
 #' @keywords internal
+#' @noRd
 calculate_split_flags <- function(input, base, mode, dates, split_thresh = NULL) {
   if (!mode || is.null(split_thresh)) {
     return(rep(FALSE, length(dates)))
@@ -448,7 +470,6 @@ calculate_split_flags <- function(input, base, mode, dates, split_thresh = NULL)
   
   n_days <- length(dates)
   n_assets <- length(input[["market"]])
-  asset_names <- names(input[["market"]])
   
   # Preis-Matrix erstellen
   split_price <- matrix(
@@ -491,25 +512,35 @@ calculate_split_flags <- function(input, base, mode, dates, split_thresh = NULL)
 }
 
 #--------> Hilfsfunktion zur Evaluation von Kaufsignalen:
-  #' Evaluate Buy Signal for Asset
-#' 
-#' @param input sim_mem structure
-#' @param name Character. Asset name
-#' @param index Integer. Current time index
-#' 
-#' @return Logical. TRUE if buy signal is active, FALSE otherwise
-#' 
+  #' Kaufsignal eines Assets auswerten
+#'
+#' @param input sim_mem-Struktur
+#' @param name Zeichenkette. Asset-Name
+#' @param index Ganzzahl. Aktueller Zeitindex
+#'
+#' @return Logisch. TRUE, wenn ein Kaufsignal vorliegt, sonst FALSE
+#'
 #' @details
-#' Returns TRUE if:
-#' - action_type = "signal" AND signal_buy column is TRUE AND money > 0 AND count = 0
-#' - action_type = "bnh" AND money > 0
+#' Liefert TRUE, wenn:
+#' - action_type = "signal" UND Kaufsignal-Spalte TRUE UND money > 0 UND count = 0 (Einstieg)
+#' - action_type = "signal" UND count > 0 UND money > 0 UND kein Verkaufssignal (A7-09: neues Geld
+#'   einer offenen Position sofort anlegen)
+#' - action_type = "bnh" UND money > 0
 #' 
 #' @keywords internal
+#' @noRd
 calculate_buy_signal <- function(input, name, index){
   signal_buy <- FALSE
 
   if(input[["assets"]][[name]][["style"]] == "signal" && input[["market"]][[name]][["signal_buy"]][index] && input[["status"]][[name]][["money"]] > 0 && input[["status"]][[name]][["count"]] == 0){
       signal_buy <- TRUE
+  }
+
+  # A7-09: Ein Signal-Asset mit offener Position legt neues Geld (Sparraten, Restcash, Umverteilungen)
+  # sofort an wie Buy-and-Hold; das Signal steuert nur Ein- und Ausstieg (nicht am Tag eines Verkaufssignals)
+  if(input[["assets"]][[name]][["style"]] == "signal" && input[["status"]][[name]][["count"]] > 0 &&
+     input[["status"]][[name]][["money"]] > 0 && !isTRUE(input[["market"]][[name]][["signal_sell"]][index])){
+    signal_buy <- TRUE
   }
 
   if(input[["assets"]][[name]][["style"]] == "bnh" && input[["status"]][[name]][["money"]] > 0){
@@ -542,7 +573,7 @@ calculate_fifo_price <- function(trades, units, front_index = 1){
 
 
 #--------> Hilfsfunktion zur Berechnung der anrechenbaren Vorabpauschale (§ 19 InvStG):
-#' Berechnet die anteilige Vorabpauschale für verkaufte Anteile
+#' Berechnet die anteilige Vorabpauschale fuer verkaufte Anteile
 #'
 #' @param trades Liste der Kauf-Transaktionen
 #' @param units Anzahl zu verkaufender Anteile
@@ -550,6 +581,7 @@ calculate_fifo_price <- function(trades, units, front_index = 1){
 #'
 #' @return Anteilige Vorabpauschale in EUR
 #' @keywords internal
+#' @noRd
 calculate_fifo_vorabpauschale <- function(trades, units, front_index = 1) {
   # RCpp-Port (fifo_core_RCpp.cpp)
   calculate_fifo_vp_rcpp(trades, units, as.integer(front_index))
@@ -564,39 +596,242 @@ calculate_private_sale_tax <- function(input, name, trade_count, sell_price, cur
     trade_count, sell_price, as.integer(current_date))
 }
   
+#' Argument fuer Fehlermeldungen darstellen (NULL, Text in Anfuehrungszeichen, Zahlen)
+#' @keywords internal
+#' @noRd
+.show_arg_s <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = "")
+
+#--------> Tarifweg (simulation(taxable_income =)): Hilfsfunktionen zur Jahresrechnung
+#' taxable_income pruefen: eine Zahl (alle Jahre), nach Jahr benannter Vektor oder data.frame (Jahr, Betrag)
+#' @param x Eingabe taxable_income
+#' @param years Ganzzahlen. Kalenderjahre der Simulation (jedes muss vorkommen)
+#' @return Liste all (Zahl fuer alle Jahre oder NULL) und by_year (benannter Vektor oder NULL)
+#' @keywords internal
+#' @noRd
+.check_taxable_income <- function(x, years) {
+  form <- "eine Zahl (zvE in EUR f\u00fcr alle Jahre), ein nach Kalenderjahren benannter Zahlenvektor (z. B. c(\"2024\" = 50000, \"2025\" = 52000)) oder ein data.frame mit den Spalten year und taxable_income"
+  if (is.data.frame(x)) {
+    nm <- tolower(names(x))
+    yc <- match(c("year", "jahr"), nm); yc <- yc[!is.na(yc)][1]
+    vc <- match(c("taxable_income", "betrag", "amount", "zve"), nm); vc <- vc[!is.na(vc)][1]
+    if (is.na(yc) || is.na(vc)) {
+      if (ncol(x) != 2L) stop(sprintf("simulation: taxable_income als data.frame braucht die Spalten year und taxable_income (oder genau zwei Spalten Jahr, Betrag); vorhanden: %s.",
+                                      paste(names(x), collapse = ", ")), call. = FALSE)
+      yc <- 1L; vc <- 2L
+    }
+    if (!is.numeric(x[[vc]])) stop(sprintf("simulation: taxable_income: Spalte '%s' (Betrag) muss numerisch sein.", names(x)[vc]), call. = FALSE)
+    x <- stats::setNames(as.numeric(x[[vc]]), as.character(x[[yc]]))
+  }
+  if (!is.numeric(x) || !length(x) || is.matrix(x))
+    stop(sprintf("simulation: taxable_income muss %s sein, nicht %s.", form, paste(utils::head(format(x), 3), collapse = ", ")), call. = FALSE)
+  if (any(!is.finite(x))) {
+    i <- which(!is.finite(x))[1]
+    stop(sprintf("simulation: taxable_income enth\u00e4lt einen ung\u00fcltigen Wert (%s%s); erwartet werden endliche Betr\u00e4ge in EUR.",
+                 format(x[i]), if (!is.null(names(x))) sprintf(" f\u00fcr %s", names(x)[i]) else ""), call. = FALSE)
+  }
+  if (length(x) == 1L && is.null(names(x))) return(list(all = unname(as.numeric(x)), by_year = NULL))
+  if (is.null(names(x)) || any(is.na(names(x)) | names(x) == ""))
+    stop(sprintf("simulation: taxable_income mit %d Werten muss nach Kalenderjahren benannt sein; erwartet wird %s.", length(x), form), call. = FALSE)
+  yy <- suppressWarnings(as.integer(trimws(names(x))))
+  if (anyNA(yy) || any(as.character(yy) != trimws(names(x))))
+    stop(sprintf("simulation: taxable_income: Name '%s' ist kein Kalenderjahr (erwartet z. B. \"2024\").",
+                 names(x)[which(is.na(yy) | as.character(yy) != trimws(names(x)))[1]]), call. = FALSE)
+  if (anyDuplicated(yy)) stop(sprintf("simulation: taxable_income: Jahr %d kommt mehrfach vor.", yy[anyDuplicated(yy)]), call. = FALSE)
+  miss <- setdiff(years, yy)
+  if (length(miss))
+    stop(sprintf("simulation: taxable_income fehlt f\u00fcr %s %s (angegeben: %s); je Kalenderjahr der Simulation (%d bis %d) wird ein Betrag ben\u00f6tigt.",
+                 if (length(miss) == 1L) "Simulationsjahr" else "Simulationsjahre", paste(miss, collapse = ", "),
+                 paste(sort(yy), collapse = ", "), min(years), max(years)), call. = FALSE)
+  list(all = NULL, by_year = stats::setNames(unname(as.numeric(x)), as.character(yy)))
+}
+
+#' zvE eines Jahres und Saldo des Kirchensteuer-Bescheids aus dem Vorjahr (Zahlung > 0, Erstattung < 0)
+#' @param env Umgebung der Tarifrechnung (simulation()): tariff, zve_all bzw. zve (benannt nach
+#'   Jahr), ks (KiSt-Saldo je Zahlungsjahr, benannt), church_k, kapest_rate, use_gp, rows, refund_due
+#' @param year Ganzzahl. Kalenderjahr
+#' @return Liste zve (vorgegeben, NA ohne Angabe) und ks_prev (im Jahr gezahlte (> 0) bzw. erstattete
+#'   (< 0) Kirchensteuer aus dem Bescheid des Vorjahres)
+#' @keywords internal
+#' @noRd
+.tariff_base <- function(env, year) {
+  zv <- if (!is.null(env$zve_all)) env$zve_all else unname(env$zve[as.character(year)])
+  ks <- unname(env$ks[as.character(year)]); if (!length(ks) || is.na(ks)) ks <- 0
+  list(zve = zv, ks_prev = ks)
+}
+
+#' Tarifliche Belastung F(x) = T(x) + S(T(x)) + KiSt (church_k x T(x), nicht gerundet)
+#' @keywords internal
+#' @noRd
+.tariff_full <- function(env, x) {
+  e <- .tariff_income_tax(env$tariff, x); so <- .tariff_soli(env$tariff, e); ki <- env$church_k * e
+  list(est = e, soli = so, kist = ki, total = e + so + ki)
+}
+
+#' Unterschied der tariflichen Belastung F(x1) - F(x0) je Bestandteil (ESt, Soli, KiSt, Summe)
+#' @keywords internal
+#' @noRd
+.tariff_diff <- function(env, x1, x0) {
+  if (is.na(x1) || is.na(x0)) return(list(est = 0, soli = 0, kist = 0, total = 0))
+  a <- .tariff_full(env, x1); b <- .tariff_full(env, x0)
+  list(est = a$est - b$est, soli = a$soli - b$soli, kist = a$kist - b$kist, total = a$total - b$total)
+}
+
+#' Jahresabschluss im Tarifweg: Veranlagung des Jahres (§ 23, Guenstigerpruefung, Kirchensteuer als
+#' Sonderausgabe nach dem Zahlungsjahr), Jahreszeile
+#'
+#' Belastung durch die Simulation gegenueber der Basis F(zvE) (zvE ohne die Simulation):
+#' ohne Guenstigerpruefung X0 = F(zvE - ks_prev + G23) - F(zvE) + Abgeltung(K);
+#' mit Guenstigerpruefung X1 = F(zvE - ks_prev - KiSt_abg(K) + G23 + K) - F(zvE).
+#' ks_prev = Saldo des KiSt-Bescheids des Vorjahres, im Jahr gezahlt (> 0, Sonderausgabe) bzw. erstattet
+#' (< 0, Verrechnung bzw. Hinzurechnung, § 10 Abs. 4b Satz 2/3 EStG); KiSt_abg(K) = als Zuschlag zur
+#' Abgeltungsteuer auf K einbehaltene KiSt, im Jahr gezahlt und nur bei tariflicher Besteuerung von K
+#' abziehbar (§ 10 Abs. 1 Nr. 4, § 11 EStG). Guenstiger, wenn X1 < X0. Abrechnung am Abrechnungstag
+#' des Folgejahres: Saldo D = X - Abgeltung(K) (D > 0 Nachzahlung, D < 0 Erstattung); der KiSt-Saldo
+#' dieses Bescheids (tarifliche KiSt-Aenderung minus angerechnete KiSt_abg) ist Zahlung bzw. Erstattung
+#' des Folgejahres (env$ks).
+#' @param g23 Zahl. Steuerpflichtiger § 23-Gewinn des Jahres (nach Freigrenze und Verlustvortrag)
+#' @param k_base Zahl. Kapitaleinkuenfte K nach § 20 (Bemessungsgrundlage der Abgeltungsteuer per Saldo)
+#' @param abg_rate Zahl. Abgeltungsteuersatz inkl. Soli/KiSt als Anteil
+#' @return Saldo D in EUR (> 0 Nachzahlung, < 0 Erstattung); NA ohne zvE fuer das Jahr (keine Veranlagung)
+#' @keywords internal
+#' @noRd
+.tariff_close <- function(env, year, g23, k_base, abg_rate, details = FALSE) {
+  b <- .tariff_base(env, year)
+  if (is.na(b$zve)) return(NA_real_)
+  k <- max(0, k_base); abg <- k * abg_rate
+  kabg <- k * env$kapest_rate * env$church_k            # KiSt-Anteil der einbehaltenen Abgeltungsteuer auf K
+  gp_on <- isTRUE(env$use_gp) && k > 0
+  B0 <- b$zve - b$ks_prev                               # Sonderausgaben-Saldo aus dem Vorjahresbescheid
+  B1 <- B0 - kabg                                       # mit Guenstigerpruefung: einbehaltene KiSt auf K abziehbar
+  X0 <- .tariff_diff(env, B0 + g23, b$zve)$total + abg
+  X1 <- if (gp_on) .tariff_diff(env, B1 + g23 + k, b$zve)$total else NA_real_
+  fav <- gp_on && X1 < X0
+  Bx <- if (fav) B1 else B0
+  ded <- .tariff_diff(env, Bx, b$zve)                   # Wirkung des Sonderausgaben-Saldos auf das uebrige Einkommen
+  p23 <- .tariff_diff(env, Bx + g23, Bx)
+  tk <- if (isTRUE(env$use_gp)) .tariff_diff(env, B1 + g23 + k, B1 + g23) else list(est = NA_real_, soli = NA_real_, kist = NA_real_, total = NA_real_)
+  tot <- .tariff_diff(env, Bx + g23 + if (fav) k else 0, b$zve)
+  D <- (if (fav) X1 else X0) - abg
+  ks <- tot$kist - if (fav) kabg else 0                 # KiSt-Bescheid: > 0 Nachzahlung, < 0 Erstattung im Folgejahr
+  env$ks[as.character(year + 1L)] <- ks
+  paid <- max(0, b$ks_prev) + if (fav) kabg else 0; refunded <- max(0, -b$ks_prev)
+  env$rows[[length(env$rows) + 1L]] <- data.frame(
+    year = as.integer(year), taxable_income = b$zve,
+    church_tax_paid_deductible = paid, church_tax_refunded = refunded, church_tax_net_deduction = paid - refunded,
+    taxable_income_net = Bx, deduction_effect = ded$total,
+    gain_p23 = g23, income_tax_p23 = p23$est, soli_p23 = p23$soli, church_tax_p23 = p23$kist, tax_p23 = p23$total,
+    capital_income = k, abgeltung_burden = abg, church_tax_withheld_k = kabg,
+    tariff_income_tax_k = tk$est, tariff_soli_k = tk$soli, tariff_church_tax_k = tk$kist, tariff_burden = tk$total,
+    burden_without_gp = X0, burden_with_gp = X1, guenstiger = fav,
+    settlement = D, refund = max(0, -D), church_tax_settlement_next_year = ks)
+  if (details) {
+    cat(sprintf("  Tarif %d: zvE %.2f EUR - KiSt-Sonderausgaben %.2f EUR (gezahlt %.2f, erstattet %.2f) = %.2f EUR (Wirkung %.2f EUR)\n",
+                year, b$zve, paid - refunded, paid, refunded, Bx, ded$total))
+    if (g23 > 0) cat(sprintf("    \u00a7 23: Gewinn %.2f EUR -> Steuerlast ESt %.2f + Soli %.2f + KiSt %.2f = %.2f EUR\n",
+                             g23, p23$est, p23$soli, p23$kist, p23$total))
+    if (isTRUE(env$use_gp)) cat(sprintf("    G\u00fcnstigerpr\u00fcfung: K %.2f EUR, Abgeltungsteuer %.2f EUR (KiSt %.2f), Tarif auf K %.2f EUR (ESt %.2f + Soli %.2f + KiSt %.2f); Belastung ohne %.2f / mit %s EUR -> %s\n",
+                           k, abg, kabg, tk$total, tk$est, tk$soli, tk$kist, X0, if (is.na(X1)) "-" else sprintf("%.2f", X1),
+                           if (fav) "Tarif" else "Abgeltungsteuer bleibt"))
+    cat(sprintf("    Abrechnung: %s %.2f EUR; KiSt-Bescheid %+.2f EUR (Sonderausgabe %d)\n",
+                if (D >= 0) "Nachzahlung" else "Erstattung", abs(D), ks, year + 1L))
+  }
+  D
+}
+
+#' Steuerzahlung aus dem Jahresabschluss vormerken (totals$p23_due, Zahlung am Abrechnungstag):
+#' Aufteilung auf die Assets nach ihrem steuerpflichtigen § 23-Jahressaldo, sonst gleichmaessig
+#' @keywords internal
+#' @noRd
+.book_tax_due <- function(input, tax_due) {
+  by <- input[["totals"]][["private_sale_net_ytd_by"]]
+  by <- if (length(by)) pmax(by[is.finite(by)], 0) else numeric(0)   # pmax(x, 0) behaelt die Namen
+  if (!length(by) || sum(by) <= 0) by <- stats::setNames(rep(1, length(input[["status"]])), names(input[["status"]]))
+  due <- tax_due * by / sum(by)
+  old <- input[["totals"]][["p23_due"]]
+  if (length(old)) { nm_all <- union(names(old), names(due)); s <- stats::setNames(numeric(length(nm_all)), nm_all)
+    s[names(old)] <- old; s[names(due)] <- s[names(due)] + due; due <- s }
+  input[["totals"]][["p23_due"]] <- due
+  input
+}
+
+#' Saldo der Tarif-Veranlagung buchen: total_taxes, Nachzahlung (p23_due) bzw. Erstattung (env$refund_due);
+#' Fliesskommarest |total_taxes| < 1e-9 nach einer Erstattung wird 0 (R5-05)
+#' @keywords internal
+#' @noRd
+.tariff_book <- function(input, env, D) {
+  if (is.na(D) || D == 0) return(input)
+  input[["totals"]][["total_taxes"]] <- input[["totals"]][["total_taxes"]] + D
+  if (D > 0) {
+    # R9-02: Angaben fuer die details-Ausgabe der Zahlung (.settle_p23): Jahr, Bestandteile, Aufteilung
+    rw <- env$rows[[length(env$rows)]]
+    by <- input[["totals"]][["private_sale_net_ytd_by"]]
+    by <- if (length(by)) pmax(by[is.finite(by)], 0) else numeric(0)
+    env$due_info <- c(env$due_info, list(list(year = rw$year, D = D, p23 = rw$tax_p23, ded = rw$deduction_effect,
+                                              by_p23 = length(by) > 0 && sum(by) > 0)))
+    input <- .book_tax_due(input, D)
+  } else {
+    env$refund_due <- env$refund_due - D
+    if (abs(input[["totals"]][["total_taxes"]]) < 1e-9) input[["totals"]][["total_taxes"]] <- 0
+  }
+  input
+}
+
 #--------> Hilfsfunktion zur Prüfung und Verarbeitung des Jahreswechsels:
-#' Prüft und verarbeitet den Jahreswechsel für § 23 EStG und Sparerpauschbetrag
+#' Prueft und verarbeitet den Jahreswechsel fuer § 23 EStG und Sparer-Pauschbetrag
 #'
-#' Diese Funktion wird am Anfang jedes Simulationstages aufgerufen und prüft,
-#' ob ein Jahreswechsel stattgefunden hat. Falls ja, werden folgende Aktionen
-#' durchgeführt:
-#' 
-#' 1. § 23 EStG Freigrenze prüfen und ggf. Steuer berechnen
-#' 2. Verluste unter der Freigrenze ins nächste Jahr vortragen
-#' 3. Sparerpauschbetrag für das neue Jahr zurücksetzen
+#' Diese Funktion wird bei tax_mode = "person" an jedem Tag mit Jahreswechsel und
+#' einmal nach dem letzten Simulationstag aufgerufen. Bei einem Jahreswechsel
+#' werden folgende Schritte ausgefuehrt:
 #'
-#' @param input Liste. Die sim_mem Struktur mit allen Simulationsdaten
+#' 1. § 23 EStG: Freigrenze pruefen und ggf. Steuer berechnen
+#' 2. § 23-Nettoverluste ins naechste Jahr vortragen
+#' 3. § 20 EStG: Erstattung aus unterjaehriger Verlustverrechnung (T-2), danach
+#'    Freigabe des genutzten Sparer-Pauschbetrags durch verbleibende Verluste
+#' 4. Sparer-Pauschbetrag und Jahres-Tracker fuer das neue Jahr zuruecksetzen
+#'
+#' @param input Liste. Die sim_mem-Struktur mit allen Simulationsdaten
 #' @param current_date Date. Das aktuelle Datum der Simulation
-#' @param marginal_tax_rate Numeric oder NULL. Persönlicher Grenzsteuersatz (0.14-0.45)
-#' @param private_sale_threshold Numeric. Freigrenze für § 23 EStG (default: 1000)
-#' @param sparer_pauschbetrag Numeric. Jährlicher Sparerpauschbetrag (default: 1000)
-#' @param use_sparer_pauschbetrag Logical. Soll der SPB angewendet werden?
-#' @param details Logical. Sollen Details ausgegeben werden?
+#' @param marginal_tax_rate Zahl oder NULL. Persoenlicher Grenzsteuersatz als Anteil
+#'   (intern bereits durch 100 geteilt, z. B. 0.42); NULL = 0.42 mit Warnung
+#' @param private_sale_threshold Zahl. Freigrenze nach § 23 EStG in EUR (Standard im Aufrufer: 1000)
+#' @param sparer_pauschbetrag Zahl. Jaehrlicher Sparer-Pauschbetrag in EUR (Standard im Aufrufer: 1000)
+#' @param use_sparer_pauschbetrag Logisch. Soll der Sparer-Pauschbetrag angewendet werden?
+#' @param soli_factor_income Zahl. Faktor auf die Einkommensteuer: 1 + Soli-Satz (als Anteil) oder 1
+#' @param effective_tax_rate Zahl oder NULL. Effektiver Steuersatz als Anteil fuer die § 20-Erstattung
+#' @param details Logisch. Sollen Details ausgegeben werden?
+#' @param church_factor Zahl. Kirchensteuersatz als Anteil der Einkommensteuer (church_tax / 100, sonst 0)
+#' @param tariff_env Umgebung oder NULL. Tarifrechnung (simulation(taxable_income =)): Tarif, zvE je
+#'   Jahr, Kirchensteuer-Sonderausgaben, Jahreszeilen und faellige Erstattung (siehe .tariff_close());
+#'   NULL = bisheriger Weg mit marginal_tax_rate
 #'
-#' @return Liste. Die aktualisierte sim_mem Struktur
+#' @return Liste. Die aktualisierte sim_mem-Struktur. Eine § 23-Steuer wird in total_taxes gebucht
+#'   und als totals$p23_due (je Asset) zur Zahlung aus dem Depot vorgemerkt (simulation(): am
+#'   Abrechnungstag der Vorabpauschale, d. h. erster Handelstag des Folgejahres, sonst letzter Tag).
 #'
 #' @details
-#' § 23 EStG Freigrenze:
-#' - Wenn Jahresgewinn > Freigrenze: GESAMTER Gewinn wird besteuert (nicht nur Überschuss!)
-#' - Wenn Jahresgewinn <= Freigrenze: Steuerfrei
-#' - Wenn Jahresverlust: Vortrag ins nächste Jahr (nur mit anderen § 23 Gewinnen verrechenbar)
+#' Freigrenze nach § 23 Abs. 3 EStG auf den Jahressaldo s (Gewinne - Verluste des Jahres):
+#' - s >= Freigrenze: steuerpflichtig s - min(s, Verlustvortrag), Vortrag entsprechend
+#'   mindern (auch wenn der Rest unter der Freigrenze liegt; BFH IX R 27/04)
+#' - 0 <= s < Freigrenze: steuerfrei, Verlustvortrag unveraendert
+#' - s < 0: Vortrag ins naechste Jahr (nur mit anderen § 23-Gewinnen verrechenbar)
+#'
+#' Sparer-Pauschbetrag (§ 20 Abs. 9 Satz 4, § 43a Abs. 3 EStG): Ein Verlust erstattet
+#' zuerst die Steuer auf versteuerte Ertraege des Jahres, der Rest gibt genutzten
+#' Pauschbetrag frei, erst danach bleibt er im Verlusttopf. Genutzt bleibt damit
+#' min(Pauschbetrag, max(0, Jahressaldo nach Verlustverrechnung)).
+#'
+#' Invariante je Jahr (Verlusttopf vor Pauschbetrag wie bei Banken; Ertraege E einschliesslich
+#' Vorabpauschale des Zuflussjahres, Verluste L des Jahres, Vortrag V zu Jahresbeginn):
+#' genutzter Vortrag = min(V, max(0, E - L)), genutzter Pauschbetrag = min(Pauschbetrag, Rest),
+#' versteuert = max(0, E - L - genutzter Vortrag - genutzter Pauschbetrag).
 #'
 #' @keywords internal
+#' @noRd
 handle_year_change <- function(input, current_date, marginal_tax_rate, 
                                private_sale_threshold, sparer_pauschbetrag,
                                use_sparer_pauschbetrag, soli_factor_income = 1.0,
                                effective_tax_rate = NULL,
-                               details) {
+                               details, church_factor = 0, tariff_env = NULL) {
   
   current_year <- as.integer(format(current_date, "%Y"))
   stored_year <- input[["totals"]][["current_year"]]
@@ -609,9 +844,9 @@ handle_year_change <- function(input, current_date, marginal_tax_rate,
   # === JAHRESWECHSEL ERKANNT ===
   
   if (details) {
-    cat(sprintf("\n══════════════════════════════════════════════════════════════\n"))
+    cat(sprintf("\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n"))
     cat(sprintf("  JAHRESWECHSEL: %d -> %d\n", stored_year, current_year))
-    cat(sprintf("══════════════════════════════════════════════════════════════\n"))
+    cat(sprintf("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n"))
   }
   
   # ------------------------------------------------------------------
@@ -622,70 +857,80 @@ handle_year_change <- function(input, current_date, marginal_tax_rate,
   ytd_losses <- input[["totals"]][["private_sale_losses_ytd"]]
   
   # ══════════════════════════════════════════════════════════════════════
-  # M2 KORREKTUR: Verlustvortrag JETZT anwenden (am Jahresende)
+  # § 23 Abs. 3 Satz 5, 7-8 EStG: Freigrenze auf den Jahressaldo, Verlustvortrag
+  # nur, wenn die Freigrenze erreicht ist (BFH IX R 27/04)
   # ══════════════════════════════════════════════════════════════════════
-  
-  # Schritt 1: Verluste des aktuellen Jahres mit Gewinnen verrechnen
+  # s < 0: Vortrag; 0 <= s < Freigrenze: steuerfrei, Vortrag unveraendert;
+  # s >= Freigrenze: steuerpflichtig s - min(s, Vortrag) (auch wenn das Ergebnis
+  # danach unter der Freigrenze liegt), Vortrag entsprechend mindern.
+  net_saldo <- ytd_gains - ytd_losses
   internal_offset <- min(ytd_gains, ytd_losses)
-  net_ytd_gains <- ytd_gains - internal_offset
-  net_ytd_losses <- ytd_losses - internal_offset
-  
-  # Schritt 2: Verlustvortrag aus Vorjahren mit verbleibendem Gewinn verrechnen
+  net_ytd_losses <- max(0, -net_saldo)
   carryforward_offset <- 0
-  if (net_ytd_gains > 0 && input[["totals"]][["loss_private_sales"]] > 0) {
-    carryforward_offset <- min(net_ytd_gains, input[["totals"]][["loss_private_sales"]])
+  net_gain <- 0
+  if (net_saldo >= private_sale_threshold && net_saldo > 0) {
+    carryforward_offset <- min(net_saldo, input[["totals"]][["loss_private_sales"]])
     input[["totals"]][["loss_private_sales"]] <- input[["totals"]][["loss_private_sales"]] - carryforward_offset
-    net_ytd_gains <- net_ytd_gains - carryforward_offset
-    
+    net_gain <- net_saldo - carryforward_offset
     if (details && carryforward_offset > 0) {
-      cat(sprintf("  § 23 EStG: Verlustvortrag verwendet: %.2f EUR\n", carryforward_offset))
+      cat(sprintf("  \u00a7 23 EStG: Verlustvortrag verwendet: %.2f EUR\n", carryforward_offset))
       cat(sprintf("             Verbleibender Vortrag: %.2f EUR\n", 
                   input[["totals"]][["loss_private_sales"]]))
     }
   }
   
-  # Netto-Ergebnis nach allen Verrechnungen
-  net_gain <- net_ytd_gains  # Kann nur >= 0 sein nach obiger Logik
-  
   # ══════════════════════════════════════════════════════════════════════
   
   if (details) {
-    cat(sprintf("  § 23 EStG Jahresübersicht %d:\n", stored_year))
+    cat(sprintf("  \u00a7 23 EStG Jahres\u00fcbersicht %d:\n", stored_year))
     cat(sprintf("    Bruttogewinne (< 1 Jahr):    %10.2f EUR\n", ytd_gains))
     cat(sprintf("    Bruttoverluste (< 1 Jahr):   %10.2f EUR\n", ytd_losses))
     cat(sprintf("    Interne Verrechnung:         %10.2f EUR\n", internal_offset))
     cat(sprintf("    Verlustvortrag-Verrechnung:  %10.2f EUR\n", carryforward_offset))
-    cat(sprintf("    ─────────────────────────────────────────\n"))
-    cat(sprintf("    Netto-Ergebnis:              %10.2f EUR\n", net_gain - net_ytd_losses))
+    cat(sprintf("    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"))
+    cat(sprintf("    Netto-Ergebnis:              %10.2f EUR\n", net_saldo - carryforward_offset))
   }
   
-  if (net_gain > private_sale_threshold) {
+  if (net_gain > 0) {
     # ------------------------------------------------------------------
-    # FALL A: Freigrenze ÜBERSCHRITTEN -> Gesamter Gewinn steuerpflichtig
+    # FALL A: Freigrenze ERREICHT -> Gewinn (nach Verlustvortrag) steuerpflichtig
     # ------------------------------------------------------------------
     
+    if (is.null(tariff_env)) {   # Tarifweg: Veranlagung des ganzen Jahres unten (2c, .tariff_close)
     if (is.null(marginal_tax_rate)) {
       warning(
-        "§ 23 EStG: Gewinne (", format(round(net_gain, 2), big.mark = ","), 
-        " EUR) über Freigrenze (", format(private_sale_threshold, big.mark = ","), 
-        " EUR), aber 'marginal_tax_rate' nicht gesetzt.\n",
-        "Verwende 42% (Spitzensteuersatz).",
+        sprintf("simulation: Paragraf 23 EStG: Gewinne (%.2f EUR) erreichen die Freigrenze (%.2f EUR), ",
+                net_saldo, private_sale_threshold),   # R9-03: Betraege wie im Engine-Druck (%.2f)
+        "aber 'marginal_tax_rate' ist nicht gesetzt.\n",
+        "Verwendet wird 42 % (Spitzensteuersatz); marginal_tax_rate in Prozent angeben (z. B. 42).",
         call. = FALSE
       )
       marginal_tax_rate <- 0.42
     }
     
-    # Steuerberechnung
-    tax_due <- net_gain * marginal_tax_rate * soli_factor_income
+    # Steuerberechnung: ESt x (1 + Soli-Satz + Kirchensteuersatz); KiSt = church_tax Prozent der ESt
+    # (ohne Sonderausgabenabzug der KiSt bei der ESt)
+    tax_due <- net_gain * marginal_tax_rate * (soli_factor_income + church_factor)
     input[["totals"]][["total_taxes"]] <- input[["totals"]][["total_taxes"]] + tax_due
-    
+    # R3a-02: Zahlung aus dem Depot am Abrechnungstag (erster Handelstag des Folgejahres wie die VP,
+    # sonst 1.1. bzw. letzter Tag); Aufteilung auf die Assets nach ihrem steuerpflichtigen Jahressaldo
+    input <- .book_tax_due(input, tax_due)
+    }
+
     if (details) {
-      cat(sprintf("\n  ⚠ FREIGRENZE ÜBERSCHRITTEN!\n"))
-      cat(sprintf("    Netto-Gewinn %.2f EUR > Freigrenze %.2f EUR\n", 
-                  net_gain, private_sale_threshold))
-      cat(sprintf("    → GESAMTER Gewinn steuerpflichtig (Freigrenze, kein Freibetrag!)\n"))
-      cat(sprintf("    → Steuersatz: %.1f%%%s\n", marginal_tax_rate * 100, if (soli_factor_income > 1) sprintf(" + %.1f%%%% Soli", (soli_factor_income - 1) * 100) else ""))
-      cat(sprintf("    → Steuerlast: %.2f EUR\n", tax_due))
+      cat(sprintf("\n  \u26a0 FREIGRENZE ERREICHT!\n"))
+      cat(sprintf("    Jahressaldo %.2f EUR >= Freigrenze %.2f EUR\n",
+                  net_saldo, private_sale_threshold))
+      cat(sprintf("    \u2192 GESAMTER Gewinn nach Verlustvortrag steuerpflichtig: %.2f EUR (Freigrenze, kein Freibetrag!)\n", net_gain))
+      if (!is.null(tariff_env)) {
+        # Tarifweg: die Steuer (ESt + Soli + KiSt des Paragraf-23-Zuwachses) steht erst in der Veranlagung
+        # des Jahres fest (2c, .tariff_close: Sonderausgaben, Guenstigerpruefung) und wird dort ausgegeben
+        cat("    \u2192 Steuer nach dem Einkommensteuertarif (ESt + Soli + KiSt des \u00a7 23-Zuwachses): siehe Jahresveranlagung unten (Zeile \u00a7 23)\n")
+      } else {
+      cat(sprintf("    \u2192 Steuersatz: %.1f%%%s%s\n", marginal_tax_rate * 100, if (soli_factor_income > 1) sprintf(" + %.1f%%%% Soli", (soli_factor_income - 1) * 100) else "",
+                  if (church_factor > 0) sprintf(" + %.1f%% KiSt", church_factor * 100) else ""))
+      cat(sprintf("    \u2192 Steuerlast: %.2f EUR\n", tax_due))
+      }
     }
     
   } else if (net_ytd_losses > 0) {
@@ -697,24 +942,24 @@ handle_year_change <- function(input, current_date, marginal_tax_rate,
       input[["totals"]][["loss_private_sales"]] + net_ytd_losses
     
     if (details) {
-      cat(sprintf("\n  Nettoverlust %.2f EUR → Vortrag ins nächste Jahr\n", net_ytd_losses))
+      cat(sprintf("\n  Nettoverlust %.2f EUR \u2192 Vortrag ins n\u00e4chste Jahr\n", net_ytd_losses))
       cat(sprintf("  Gesamter Verlustvortrag: %.2f EUR\n", 
                   input[["totals"]][["loss_private_sales"]]))
     }
     
-  } else if (net_gain > 0) {
+  } else if (net_saldo > 0 && net_saldo < private_sale_threshold) {
     # ------------------------------------------------------------------
-    # FALL C: Gewinn UNTER der Freigrenze -> Steuerfrei
+    # FALL C: Gewinn UNTER der Freigrenze -> Steuerfrei, Vortrag unveraendert
     # ------------------------------------------------------------------
     
     if (details) {
-      cat(sprintf("\n  ✓ Netto-Gewinn %.2f EUR ≤ Freigrenze %.2f EUR → STEUERFREI\n", 
-                  net_gain, private_sale_threshold))
+      cat(sprintf("\n  \u2713 Jahressaldo %.2f EUR < Freigrenze %.2f EUR \u2192 STEUERFREI (Verlustvortrag unver\u00e4ndert)\n", 
+                  net_saldo, private_sale_threshold))
     }
     
   } else {
     if (details) {
-      cat(sprintf("\n  Keine steuerpflichtigen § 23 Vorgänge in %d\n", stored_year))
+      cat(sprintf("\n  Keine steuerpflichtigen \u00a7 23 Vorg\u00e4nge in %d\n", stored_year))
     }
   }
   
@@ -742,10 +987,23 @@ handle_year_change <- function(input, current_date, marginal_tax_rate,
   cgt_loss_added <- input[["totals"]][["cgt_loss_added_ytd"]] %||% 0
   cgt_loss_used  <- input[["totals"]][["cgt_loss_used_ytd"]]  %||% 0
   cgt_base_taxed <- input[["totals"]][["cgt_base_taxed_ytd"]] %||% 0
-  unused_loss <- max(0, cgt_loss_added - cgt_loss_used)
+  # Verlustvortrag aus dem Vorjahr (Topf zu Jahresbeginn): Seine Nutzung bleibt bestehen,
+  # soweit der Jahressaldo reicht: genutzter Vortrag = min(Vortrag, max(0, Ertraege - Verluste)).
+  # Nur die darueber hinausgehende Topfnutzung entfaellt auf Verluste des Jahres; vorher
+  # minderte auch die Vortragsnutzung die Erstattung (Vortrag 1000, Gewinn 3000, Verlust 500:
+  # Erstattung 0 statt Steuer auf 500). Ertraege des Jahres (auch VP) = Topf + SPB + versteuert.
+  carry_start <- input[["totals"]][["cgt_pool_start_ytd"]] %||% 0
+  carry_used <- 0
+  if (carry_start > 0) {
+    spb_used_ytd <- if (use_sparer_pauschbetrag) max(0, input[["totals"]][["sparer_pauschbetrag_annual"]] -
+                                                        input[["totals"]][["sparer_pauschbetrag_remaining"]]) else 0
+    carry_used <- min(carry_start, max(0, cgt_loss_used + spb_used_ytd + cgt_base_taxed - cgt_loss_added))
+  }
+  unused_loss <- max(0, cgt_loss_added - (cgt_loss_used - carry_used))
   unused_loss <- min(unused_loss, input[["totals"]][["loss_capital_gains"]])
   refund_base <- min(unused_loss, cgt_base_taxed)
-  if (refund_base > 0 && !is.null(effective_tax_rate) && effective_tax_rate > 0) {
+  refund_done <- refund_base > 0 && !is.null(effective_tax_rate) && effective_tax_rate > 0
+  if (refund_done) {
     refund <- refund_base * effective_tax_rate
     asset_names <- names(input[["status"]])
     w <- vapply(asset_names, function(nm) input[["status"]][[nm]][["actual"]] %||% 0, numeric(1))
@@ -756,9 +1014,45 @@ handle_year_change <- function(input, current_date, marginal_tax_rate,
     input[["totals"]][["total_taxes"]] <- input[["totals"]][["total_taxes"]] - refund
     input[["totals"]][["loss_capital_gains"]] <- input[["totals"]][["loss_capital_gains"]] - refund_base
     if (details) {
-      cat(sprintf("  § 20 EStG: Unterjaehrige Verlustverrechnung -> Erstattung %.2f EUR in den Geldbestand\n", refund))
+      cat(sprintf("  \u00a7 20 EStG: Unterj\u00e4hrige Verlustverrechnung -> Erstattung %.2f EUR in den Geldbestand\n", refund))
     }
   }
+  # § 20 Abs. 9 Satz 4, § 43a Abs. 3 EStG: Ein Verlust, der nach Erstattung der versteuerten
+  # Ertraege des Jahres verbleibt, gibt den genutzten Sparer-Pauschbetrag frei, erst der Rest
+  # geht in den Verlusttopf. Invariante: genutzter Pauschbetrag = min(Pauschbetrag,
+  # max(0, Jahressaldo nach Verlustverrechnung)); Jahressaldo = versteuert + Pauschbetrag - Topf.
+  if (use_sparer_pauschbetrag) {
+    spb_used_year <- max(0, input[["totals"]][["sparer_pauschbetrag_annual"]] -
+                            input[["totals"]][["sparer_pauschbetrag_remaining"]])
+    taxed_left <- cgt_base_taxed - if (refund_done) refund_base else 0
+    release <- max(0, min(spb_used_year, input[["totals"]][["loss_capital_gains"]] - taxed_left))
+    if (release > 0) {
+      input[["totals"]][["loss_capital_gains"]] <- input[["totals"]][["loss_capital_gains"]] - release
+      input[["totals"]][["sparer_pauschbetrag_remaining"]] <- input[["totals"]][["sparer_pauschbetrag_remaining"]] + release
+      input[["totals"]][["sparer_pauschbetrag_used_total"]] <- input[["totals"]][["sparer_pauschbetrag_used_total"]] - release
+      if (details) {
+        cat(sprintf("  \u00a7 20 EStG: Verlust gibt Sparer-Pauschbetrag frei: %.2f EUR (genutzt %d: %.2f EUR, Verlusttopf %.2f EUR)\n",
+                    release, stored_year, spb_used_year - release, input[["totals"]][["loss_capital_gains"]]))
+      }
+    }
+  }
+
+  # ------------------------------------------------------------------
+  # 2c. Tarifweg (taxable_income): Jahreszeile, Guenstigerpruefung (§ 32d Abs. 6 EStG)
+  # ------------------------------------------------------------------
+  # K = per Saldo mit Abgeltungsteuer belastete Bemessungsgrundlage des Jahres (nach TFS, VP,
+  # Verlustverrechnung, Sparer-Pauschbetrag, Erstattung T-2); die Erstattung wird in
+  # tariff_env$refund_due vorgemerkt und am Abrechnungstag dem Cash gutgeschrieben
+  any_refund <- refund_done
+  if (!is.null(tariff_env)) {
+    k_base <- max(0, cgt_base_taxed - if (refund_done) refund_base else 0)
+    D <- .tariff_close(tariff_env, stored_year, net_gain, k_base, effective_tax_rate %||% 0, details)
+    input <- .tariff_book(input, tariff_env, D)
+    if (isTRUE(D < 0)) any_refund <- TRUE
+  }
+  # R5-05: Fliesskommarest des Steuer-Saldos nach Erstattungen (T-2, Guenstigerpruefung), z. B. 8.5e-14
+  # bei vollstaendiger Erstattung: |Saldo| < 1e-9 EUR wird 0
+  if (any_refund && abs(input[["totals"]][["total_taxes"]]) < 1e-9) input[["totals"]][["total_taxes"]] <- 0
 
   # ------------------------------------------------------------------
   # 3. Reset für neues Jahr
@@ -766,9 +1060,12 @@ handle_year_change <- function(input, current_date, marginal_tax_rate,
   
   input[["totals"]][["private_sale_gains_ytd"]] <- 0
   input[["totals"]][["private_sale_losses_ytd"]] <- 0
+  if (length(input[["totals"]][["private_sale_net_ytd_by"]]))
+    input[["totals"]][["private_sale_net_ytd_by"]][] <- 0
   input[["totals"]][["cgt_base_taxed_ytd"]] <- 0
   input[["totals"]][["cgt_loss_added_ytd"]] <- 0
   input[["totals"]][["cgt_loss_used_ytd"]] <- 0
+  input[["totals"]][["cgt_pool_start_ytd"]] <- input[["totals"]][["loss_capital_gains"]]
   
   if (use_sparer_pauschbetrag) {
     input[["totals"]][["sparer_pauschbetrag_remaining"]] <- sparer_pauschbetrag
@@ -777,8 +1074,8 @@ handle_year_change <- function(input, current_date, marginal_tax_rate,
   input[["totals"]][["current_year"]] <- current_year
   
   if (details) {
-    cat(sprintf("\n  Tracker zurückgesetzt für Jahr %d\n", current_year))
-    cat(sprintf("══════════════════════════════════════════════════════════════\n\n"))
+    cat(sprintf("\n  Tracker zur\u00fcckgesetzt f\u00fcr Jahr %d\n", current_year))
+    cat(sprintf("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n\n"))
   }
   
   return(input)
@@ -805,42 +1102,26 @@ update_fifo_front <- function(trades, front_index){
   return(front_index)
 }
 
-#--------> Hilfsfunktion zur Berechnung von Bisection-Searches:
-calculate_bisection_search <- function(f, lower, upper, f_lower, f_upper, tol = 1e-6, max_iter = 30){
-  if (abs(f_lower) < tol) return(lower)
-  if (abs(f_upper) < tol) return(upper)
-  if (f_lower * f_upper > 0) {
-    return(if (abs(f_lower) < abs(f_upper)) lower else upper)
-  }
-
-  for (i in seq_len(max_iter)){
-    mid <- (lower + upper) * 0.5
-    f_mid <- f(mid)
-
-    if(abs(f_mid) < tol || (upper - lower) < tol){
-      return(mid)
-    }
-
-    if(f_mid * f_lower < 0){
-      upper <- mid
-      f_upper <- f_mid
-    } else {
-      lower <- mid
-      f_lower <- f_mid
-    }
-  }
-
-  return((lower + upper) * 0.5)
-}
-
 #--------> Hilfsfunktion zur Berechnung der Vorabpauschale:
 #' Berechnet die Vorabpauschale nach § 18 InvStG
-#' 
+#'
 #' @details
+#' Der Basiszins steht in Prozent in market$base_rates und wird hier durch 100 geteilt.
+#' Massgeblich ist der Wert vom ersten Handelstag des Bewertungsjahres (§ 18 Abs. 4
+#' InvStG; bei zeitvariabler Basiszins-Spalte relevant), nicht der vom 31.12.
 #' Bei negativem Basiszins ist die Vorabpauschale = 0.
-#' Der Basiszins wird vom BMF jährlich veröffentlicht und kann negativ sein
-#' (wie z.B. 2021: -0.45%, 2022: -0.05%).
-calculate_flat_rate <- function(input, name, index, dates, tax_regime = NULL) {
+#' Der Basiszins wird vom BMF jaehrlich veroeffentlicht und kann negativ sein
+#' (z. B. 2021: -0,45 %, 2022: -0,05 %).
+#'
+#' Je am 31.12. gehaltenem Lot (§ 18 Abs. 1-2 InvStG, keine Ausschuettungen im Modell):
+#' VP = Bestand x max(0, min(P_Anfang x 0,7 x Basiszins, P_Ende - P_Anfang)) x f mit
+#' P_Anfang = erster im Jahr festgesetzter Kurs (erster nicht aufgefuellter Tag des Jahres bzw. der
+#' Simulation, § 18 Abs. 1 Satz 3 InvStG; A7-01), P_Ende = Kurs am 31.12.,
+#' f = 1 bei Erwerb vor dem Jahr, sonst (13 - Erwerbsmonat) / 12.
+#'
+#' @param filled Logischer Vektor (wie dates) oder NULL: TRUE = aufgefuellter Tag (kein Handelstag)
+#' @noRd
+calculate_flat_rate <- function(input, name, index, dates, tax_regime = NULL, filled = NULL) {
   # P6: tax_regime wird vom Aufrufer übergeben (Lookup-Vektor)
   # Vorabpauschale nur für investment_fund
   if (is.null(tax_regime)) tax_regime <- input[["assets"]][[name]][["tax_regime"]]
@@ -852,7 +1133,6 @@ calculate_flat_rate <- function(input, name, index, dates, tax_regime = NULL) {
     return(empty_result)
   }
   
-  bonus <- input[["assets"]][[name]][["bonus"]]
   date_index <- dates[index]
   
   # P5: format()-Guard entfernt – Aufrufer garantiert 31.12. via flag_taxes
@@ -860,15 +1140,23 @@ calculate_flat_rate <- function(input, name, index, dates, tax_regime = NULL) {
   start_of_year <- as.Date(paste0(format(date_index, "%Y"), "-01-01"))
   end_of_year <- as.Date(paste0(format(date_index, "%Y"), "-12-31"))
   
-  # Schaltjahr-Berechnung
-  year_num <- as.numeric(format(date_index, "%Y"))
-  is_leap <- (year_num %% 4 == 0 & (year_num %% 100 != 0 | year_num %% 400 == 0))
-  days_in_year <- if (is_leap) 366 else 365
-  
   # ══════════════════════════════════════════════════════════════════════
   # M1 KORREKTUR: Basiszins auf mindestens 0 begrenzen
   # ══════════════════════════════════════════════════════════════════════
-  raw_base_rate <- input[["market"]][[name]][["base_rates"]][index] / 100
+  # P2: Arithmetischer Index statt which()-Scan (O(1) statt O(n))
+  year_start_index <- max(1L, as.integer(start_of_year - dates[1]) + 1L)
+
+  # § 18 Abs. 4 InvStG: Basiszins vom ersten Handelstag des Bewertungsjahres
+  rate_index <- year_start_index
+  if (!is.null(filled)) {
+    while (rate_index < index && isTRUE(filled[rate_index])) rate_index <- rate_index + 1L
+    if (isTRUE(filled[rate_index])) rate_index <- year_start_index   # kein Handelstag im Jahr
+  }
+  # A7-01: Bezugskurs = erster im Kalenderjahr festgesetzter Ruecknahmepreis (§ 18 Abs. 1 Satz 3 InvStG),
+  # d. h. Kurs des ersten nicht aufgefuellten Tages des Jahres (bisher: aufgefuellter 1.1. = Vorjahresschluss);
+  # gilt fuer Basisertrag und Deckel. Mit echtem Kurs am 1.1. unveraendert
+  year_start_price <- input[["market"]][[name]][["asset_price"]][rate_index]
+  raw_base_rate <- input[["market"]][[name]][["base_rates"]][rate_index] / 100
   base_rate <- max(0, raw_base_rate)
   
   if (base_rate <= 0) {
@@ -877,10 +1165,6 @@ calculate_flat_rate <- function(input, name, index, dates, tax_regime = NULL) {
   # ══════════════════════════════════════════════════════════════════════
   
   market_price <- input[["market"]][[name]][["asset_price"]][index]
-  
-  # P2: Arithmetischer Index statt which()-Scan (O(1) statt O(n))
-  year_start_index <- max(1L, as.integer(start_of_year - dates[1]) + 1L)
-  year_start_price <- input[["market"]][[name]][["asset_price"]][year_start_index]
   
   # ══════════════════════════════════════════════════════════════════════
   # M4: Nur Lots die am Jahresende noch gehalten werden
@@ -899,56 +1183,75 @@ calculate_flat_rate <- function(input, name, index, dates, tax_regime = NULL) {
 
 #--------> Hilfsfunktion zur Berechnung der Fongsgebühren:
 calculate_fund_fees <- function(input, index, dates, assets, funds_fee, bonus_fee, details){
+  # Abrechnungszeitraum: 1.1. des laufenden Jahres (bzw. Simulationsbeginn) bis heute
   event_date <- as.Date(paste0(format(dates[index], "%Y"), "-01-01"))
   dates_index <- which(dates >= event_date & dates <= dates[index])
+  zero <- setNames(numeric(length(assets)), assets)
 
   if(length(dates_index) == 0){
-    return(c(total_fees = 0, total_value = input[["totals"]][["total_value"]]))
+    return(list(total_fees = 0, total_value = input[["totals"]][["total_value"]], asset_fees = zero))
   }
 
-  asset_totals <- sapply(assets, function(x) input[["report"]][[x]][["total"]][dates_index], simplify = "array")
+  asset_totals <- matrix(sapply(assets, function(x) input[["report"]][[x]][["total"]][dates_index]),
+                         nrow = length(dates_index), dimnames = list(NULL, assets))
 
-  daily_rate <- (funds_fee / 100 + 1)^(1 / length(dates_index)) - 1
-  basic_value <- sum(asset_totals * daily_rate, na.rm = TRUE)
+  # Tagessatz linear bezogen auf die Kalendertage des JAHRES (nicht des Zeitraums):
+  # ein volles Jahr kostet genau funds_fee Prozent, ein Rumpfjahr (Start/Ende
+  # unterjaehrig) traegt nur anteilige Kosten
+  yr <- as.integer(format(dates[index], "%Y"))
+  days_in_year <- if (yr %% 4 == 0 && (yr %% 100 != 0 || yr %% 400 == 0)) 366 else 365
+  daily_rate <- funds_fee / 100 / days_in_year
+  basic_fees <- colSums(asset_totals * daily_rate, na.rm = TRUE)
+  basic_value <- sum(basic_fees)
 
-  total_value <- input[["totals"]][["total_value"]]
-  market_value <- sum(sapply(input[["status"]], function(x) x[["total"]]), na.rm = TRUE)
+  # Hoechststand (High-Watermark) um Einzahlungen im Zeitraum erhoehen (R1-03):
+  # Sparraten sind kein Wertzuwachs
+  flows_period <- sum(vapply(assets, function(x) sum(input[["report"]][[x]][["flows"]][dates_index]), numeric(1)))
+  total_value <- input[["totals"]][["total_value"]] + flows_period
+  status_totals <- vapply(assets, function(x) input[["status"]][[x]][["total"]], numeric(1))
+  market_value <- sum(status_totals, na.rm = TRUE)
 
-  if(market_value > total_value){
-    bonus_value <- (market_value - total_value) * (bonus_fee / 100)
-    total_value <- market_value
-  } else {
-    bonus_value <- 0
-  }
+  above_mark <- market_value > total_value
+  bonus_value <- if (above_mark) (market_value - total_value) * (bonus_fee / 100) else 0
 
+  # Verteilung: Grundkosten je Asset nach dessen abgegrenztem Wert, Performancegebuehr nach Ist-Gewicht
+  asset_fees <- basic_fees + if (market_value > 0) bonus_value * status_totals / market_value else 0
   total_fees <- basic_value + bonus_value
 
+  # Hoechststand als Wert NACH Abzug der Gebuehren (die Marke sinkt nie)
+  if (above_mark) total_value <- max(total_value, market_value - total_fees)
+
   if(details){
-    cat(sprintf("Funds Event:\tPaying funds fees of %.2f EUR on %s\n\t\t=> Basis fee: %.2f EUR; Bonus fee: %.2f EUR\n", total_fees, dates[index], basic_value, bonus_value))
+    cat(sprintf("Fondskosten:\tFondsgeb\u00fchren %.2f EUR am %s\n\t\t=> Grundgeb\u00fchr: %.2f EUR; Performancegeb\u00fchr: %.2f EUR\n", total_fees, dates[index], basic_value, bonus_value))
   }
 
-  return(c(total_fees = total_fees, total_value = total_value))
+  return(list(total_fees = total_fees, total_value = total_value, asset_fees = asset_fees))
 }
 
 
 #--------> Hilfsfunktion zur Berechnung zu verkaufender Anteile:
-#' Berechnet die optimale Anzahl zu verkaufender Anteile (optimiert)
+#' Berechnet die Anzahl zu verkaufender Anteile fuer einen Ziel-Nettoerloes
 #'
-#' Verwendet vorberechnete kumulative FIFO-Daten und Bisection-Search
-#' für schnelle Konvergenz.
+#' Verwendet vorberechnete kumulative FIFO-Daten und eine Bisektionssuche
+#' fuer schnelle Konvergenz.
 #'
-#' @param input Liste. Die sim_mem Struktur
-#' @param name Character. Asset-Name
-#' @param target Numeric. Ziel-Nettowert nach Steuern
-#' @param index Integer. Aktueller Zeitindex
-#' @param spread Numeric. Bid-Ask-Spread in Prozent
-#' @param fractions Logical. Bruchteile erlaubt?
-#' @param tax_mode Character. Steuermodus
-#' @param tax_rate Numeric. Steuersatz
-#' @param marginal_tax_rate Numeric. Persönlicher Grenzsteuersatz (für § 23)
+#' @param input Liste. Die sim_mem-Struktur
+#' @param name Zeichenkette. Asset-Name
+#' @param target Zahl. Ziel-Nettoerloes nach Steuern in EUR
+#' @param index Ganzzahl. Aktueller Zeitindex
+#' @param spread Zahl. Voller Bid-Ask-Spread als Anteil (intern bereits durch 100 geteilt, z. B. 0.001 = 0,1 %)
+#' @param fractions Logisch. Bruchteile erlaubt?
+#' @param tax_mode Zeichenkette. Steuermodus
+#' @param tax_rate Zahl. Steuersatz als Anteil (Aufrufer: effektiver Satz nach Guenstigerpruefung)
+#' @param marginal_tax_rate Zahl. Persoenlicher Grenzsteuersatz als Anteil (fuer § 23)
+#' @param tax_regime Zeichenkette oder NULL. Steuerregime des Assets (NULL = aus sim_mem)
 #'
+#' @details Die geschaetzte Steuer folgt dem Verkauf (calculate_paragraph_20_tax): Gewinn nach
+#'   § 19-Anrechnung der Lot-VP, Teilfreistellung, freier Verlusttopf, freier Sparer-Pauschbetrag.
+#'   § 23-Gewinne werden erst am Jahresende besteuert (Schaetzung 0).
 #' @return Liste mit sell_count und fifo_price
 #' @keywords internal
+#' @noRd
 calculate_sell_count <- function(input, name, target, index, spread, fractions, 
                                             tax_mode, tax_rate, marginal_tax_rate = NULL,
                                             tax_regime = NULL) {
@@ -978,7 +1281,10 @@ calculate_sell_count <- function(input, name, target, index, spread, fractions,
   if (is.null(tax_regime)) tax_regime <- input[["assets"]][[name]][["tax_regime"]]
   tax_regime <- if (tax_mode == "person") tax_regime else "none"
   bonus <- if (tax_regime == "investment_fund") input[["assets"]][[name]][["bonus"]] else 0
-  loss_pool <- input[["totals"]][["loss_capital_gains"]]
+  # R3a-04: wie calculate_paragraph_20_tax erst Verlusttopf, dann freier Sparer-Pauschbetrag
+  # (ohne Pauschbetrag ist der Rest 0); die § 19-Anrechnung der Lot-VP rechnet sell_count_rcpp
+  loss_pool <- input[["totals"]][["loss_capital_gains"]] +
+    max(0, input[["totals"]][["sparer_pauschbetrag_remaining"]] %||% 0)
   regime_code <- switch(tax_regime, none = 0L, investment_fund = 1L,
                         capital_gains = 2L, private_sale = 3L, 0L)
   res <- sell_count_rcpp(trades, as.integer(front_index), target, trade_price,
@@ -987,6 +1293,51 @@ calculate_sell_count <- function(input, name, target, index, spread, fractions,
   return(res)
 }
 
+
+#--------> Hilfsfunktion: geldgewichtete Jahresrendite (interner Zinsfuss, XIRR):
+#' Interner Zinsfuss p. a. aus datierten Einzahlungen und Endwert
+#'
+#' Loest \eqn{\sum_j a_j (1 + r)^{T - t_j} = V} (Einzahlungen \eqn{a_j} zu den Zeitpunkten
+#' \eqn{t_j} in Jahren ab Start, Kalendertage / 365.25 wie die CAGR, Endwert \eqn{V} bei \eqn{T}).
+#' Nur mit dem Startwert bei \eqn{t = 0} ist die Loesung \eqn{(V / a_1)^{1/T} - 1}, die CAGR.
+#' Brent-Verfahren (stats::uniroot) in \eqn{u = T \log(1 + r)}; die Klammer wird auf einem Raster
+#' \eqn{u \in [-200, 200]} gesucht (erste Vorzeichenwende; bei reinen Einzahlungen ist die
+#' Funktion monoton und die Nullstelle eindeutig). Liegt die Nullstelle unter -200
+#' (Beinahe-Totalverlust), wird die untere Grenze verdoppelt, bis ein Vorzeichenwechsel
+#' vorliegt oder \eqn{\exp(u e)} fuer alle Restlaufzeitanteile \eqn{e > 0} unterlaeuft.
+#' @param t Zahlenvektor. Zeitpunkte der Einzahlungen in Jahren ab Start (0 = Startwert)
+#' @param amount Zahlenvektor. Einzahlungen in EUR (positiv)
+#' @param end_value Zahl. Endwert in EUR
+#' @param horizon Zahl. Laufzeit T in Jahren
+#' @return Rendite p. a. als Anteil; -1 bei Endwert 0, NA ohne Loesung
+#' @keywords internal
+#' @noRd
+.xirr_rate <- function(t, amount, end_value, horizon) {
+  keep <- is.finite(amount) & amount != 0
+  t <- t[keep]; amount <- amount[keep]
+  if (!length(amount) || !isTRUE(horizon > 0) || !is.finite(end_value)) return(NA_real_)
+  if (end_value == 0 && all(amount >= 0)) return(-1)
+  e <- (horizon - t) / horizon                     # Restlaufzeit als Anteil an T (0..1)
+  g <- function(u) sum(amount * exp(u * e)) - end_value
+  grid <- seq(-200, 200, by = 5)
+  gv <- vapply(grid, g, numeric(1))
+  k <- which(gv[-1] * gv[-length(gv)] <= 0)[1]
+  if (!is.na(k)) {
+    br <- grid[k + 0:1]; fb <- gv[k + 0:1]
+  } else {
+    # R3B-01: Beinahe-Totalverlust: Nullstelle unter u = -200; untere Grenze verdoppeln, bis
+    # g das Vorzeichen wechselt oder exp(u * e) fuer alle e > 0 unterlaeuft (dann keine Nullstelle)
+    if (!(gv[1] > 0) || !any(e > 0)) return(NA_real_)
+    lo_lim <- -800 / min(e[e > 0])
+    hi <- grid[1]; ghi <- gv[1]; lo <- hi; glo <- ghi
+    while (glo > 0 && lo > lo_lim) { hi <- lo; ghi <- glo; lo <- max(2 * lo, lo_lim); glo <- g(lo) }
+    if (glo > 0) return(NA_real_)
+    br <- c(lo, hi); fb <- c(glo, ghi)
+  }
+  u <- stats::uniroot(g, br, f.lower = fb[1], f.upper = fb[2],
+                      tol = 1e-14, maxiter = 1000)$root
+  expm1(u / horizon)
+}
 
 #--------> Hilfsfunktion zur Berechnung von Partial Moments:
 calculate_partials <- function(returns, exp = 1, type = c("lower", "higher")){
@@ -1051,31 +1402,33 @@ calculate_kurtosis <- function(x, na.rm = TRUE, excess = TRUE){
 #--------> Hilfsfunktion für Forward Asset-Splits:
 #' Forward Asset Split (Aktiensplit)
 #'
-#' Führt einen Forward-Split durch, bei dem die Anzahl der Anteile erhöht
+#' Fuehrt einen Forward-Split durch, bei dem die Anzahl der Anteile erhoeht
 #' und der Preis pro Anteil entsprechend reduziert wird.
 #'
 #' @param input Liste. Die sim_mem Struktur
-#' @param name Character. Name des Assets
-#' @param ratio Numeric. Split-Verhältnis (z.B. 4 für 1:4 Split)
-#' @param index Integer. Aktueller Zeitindex
-#' @param fractions Logical. Sind Bruchteile von Anteilen erlaubt?
+#' @param name Zeichenkette. Name des Assets
+#' @param ratio Zahl. Split-Verhaeltnis (z.B. 4 fuer 1:4 Split)
+#' @param index Ganzzahl. Aktueller Zeitindex
+#' @param fractions Logisch. Ohne Wirkung (Bruchteile verkauft simulation() nach dem Split).
 #'
 #' @return Liste. Die aktualisierte sim_mem Struktur
 #'
 #' @details
 #' Bei einem 1:4 Split wird:
-#' - Anzahl Anteile × 4
-#' - Preis pro Anteil ÷ 4
+#' - Anzahl Anteile x 4
+#' - Preis pro Anteil / 4
 #' - Gesamtwert bleibt gleich
 #'
-#' Wenn fractions = FALSE und durch den Split Bruchteile entstehen,
-#' werden diese als Cash gutgeschrieben.
+#' Bestand und Lots werden exakt umgerechnet. Bei fractions = FALSE verkauft
+#' simulation() entstehende Bruchteile anschliessend zum Kurs des Split-Tages
+#' (Spitzenausgleich, steuerlich ein Verkauf).
 #'
 #' @examples
 #' # 1:4 Split von Asset "AAPL"
 #' sim_mem <- forward_asset_split(sim_mem, "AAPL", ratio = 4, index = 100, fractions = TRUE)
 #'
 #' @keywords internal
+#' @noRd
 forward_asset_split <- function(input, name, ratio, index, fractions) {
   
 
@@ -1094,14 +1447,8 @@ forward_asset_split <- function(input, name, ratio, index, fractions) {
   split_price <- current_price / ratio
   split_worth <- current_worth  # Gesamtwert ändert sich nicht!
   
-  # Bruchteile behandeln wenn fractions = FALSE
-  if (!fractions && split_count %% 1 != 0) {
-    split_fract <- split_count %% 1
-    split_count <- floor(split_count)
-    # Bruchteile werden als Cash gutgeschrieben
-    fractional_value <- split_fract * split_price
-    input[["status"]][[name]][["money"]] <- input[["status"]][[name]][["money"]] + fractional_value
-  }
+  # R1-05: Bestand und Lots werden exakt umgerechnet; Bruchteile (fractions = FALSE)
+  # verkauft simulation() danach als Spitzenausgleich zum Kurs des Split-Tages.
   
   # FIFO-Lots aktualisieren (nur populierte Lots, nicht vorallokierte)
   n_lots <- input[["trades"]][[name]][["buy_count"]]
@@ -1115,16 +1462,6 @@ forward_asset_split <- function(input, name, ratio, index, fractions) {
       new_buy_price <- buy[["price"]] / ratio
       new_remaining <- buy[["remaining"]] * ratio
       new_original <- (buy[["original"]] %||% buy[["remaining"]]) * ratio
-      
-      # Bruchteile in Lots behandeln
-      if (!fractions && new_original_count %% 1 != 0) {
-        fract <- new_original_count %% 1
-        new_original_count <- floor(new_original_count)
-        new_remaining <- floor(new_remaining)
-        new_original <- floor(new_original)
-        fractional_value <- fract * new_buy_price
-        input[["status"]][[name]][["money"]] <<- input[["status"]][[name]][["money"]] + fractional_value
-      }
       
       buy[["count"]] <- new_original_count
       buy[["price"]] <- new_buy_price
@@ -1146,31 +1483,29 @@ forward_asset_split <- function(input, name, ratio, index, fractions) {
   input[["status"]][[name]][["price"]] <- split_price
   input[["status"]][[name]][["worth"]] <- split_worth
   
-  # Preishistorie anpassen (alle Preise ab dem Split-Datum)
-  # Damit historische Berechnungen konsistent bleiben
-  price_vector <- input[["market"]][[name]][["asset_price"]]
-  n_prices <- length(price_vector)
-  if (index <= n_prices) {
-    input[["market"]][[name]][["asset_price"]][index:n_prices] <- price_vector[index:n_prices] / ratio
-  }
+  # Preishistorie anpassen: ALLE Preise (auch vor dem Split), damit z. B. der
+  # Jahresanfangskurs der Vorabpauschale in neuen Einheiten vorliegt (R1-06)
+  input[["market"]][[name]][["asset_price"]] <- input[["market"]][[name]][["asset_price"]] / ratio
   
   return(input)
 }
 
   
   
-#' @title Apply Bid-Ask Spread
+#' @title Bid-Ask-Spread anwenden
 #'
 #' @description
-#' Adjusts a price for the bid-ask spread based on trade direction.
+#' Passt einen Kurs je nach Handelsrichtung um den halben Bid-Ask-Spread an
+#' (Kauf: Briefkurs, Verkauf: Geldkurs).
 #'
-#' @param price Numeric. The mid-price.
-#' @param spread Numeric. Half-spread as a decimal (e.g., 0.001 for 0.1%).
-#' @param direction Character. "buy" or "sell".
+#' @param price Zahl. Mittelkurs.
+#' @param spread Zahl. Voller Bid-Ask-Spread als Anteil (z. B. 0.001 fuer 0,1 %); je Seite wird die Haelfte angewandt.
+#' @param direction Zeichenkette. "buy" oder "sell".
 #'
-#' @return Numeric. The adjusted price.
+#' @return Zahl. Der angepasste Kurs.
 #'
 #' @keywords internal
+#' @noRd
 apply_spread <- function(price, spread, direction = c("buy", "sell")) {
   direction <- match.arg(direction)
   
@@ -1192,31 +1527,33 @@ apply_spread <- function(price, spread, direction = c("buy", "sell")) {
 #--------> Hilfsfunktion für Reversen Asset-Splits:
 #' Reverse Asset Split (Aktienzusammenlegung)
 #'
-#' Führt einen Reverse-Split durch, bei dem die Anzahl der Anteile reduziert
-#' und der Preis pro Anteil entsprechend erhöht wird.
+#' Fuehrt einen Reverse-Split durch, bei dem die Anzahl der Anteile reduziert
+#' und der Preis pro Anteil entsprechend erhoeht wird.
 #'
 #' @param input Liste. Die sim_mem Struktur
-#' @param name Character. Name des Assets
-#' @param ratio Numeric. Split-Verhältnis (z.B. 10 für 10:1 Reverse-Split)
-#' @param index Integer. Aktueller Zeitindex
-#' @param fractions Logical. Sind Bruchteile von Anteilen erlaubt?
+#' @param name Zeichenkette. Name des Assets
+#' @param ratio Zahl. Split-Verhaeltnis (z.B. 10 fuer 10:1 Reverse-Split)
+#' @param index Ganzzahl. Aktueller Zeitindex
+#' @param fractions Logisch. Ohne Wirkung (Bruchteile verkauft simulation() nach dem Split).
 #'
 #' @return Liste. Die aktualisierte sim_mem Struktur
 #'
 #' @details
 #' Bei einem 10:1 Reverse-Split wird:
-#' - Anzahl Anteile ÷ 10
-#' - Preis pro Anteil × 10
+#' - Anzahl Anteile / 10
+#' - Preis pro Anteil x 10
 #' - Gesamtwert bleibt gleich
 #'
-#' Wenn fractions = FALSE und durch den Split Bruchteile entstehen,
-#' werden diese als Cash gutgeschrieben (Spitzenausgleich).
+#' Bestand und Lots werden exakt umgerechnet. Bei fractions = FALSE verkauft
+#' simulation() entstehende Bruchteile anschliessend zum Kurs des Split-Tages
+#' (Spitzenausgleich, steuerlich ein Verkauf).
 #'
 #' @examples
 #' # 10:1 Reverse-Split von Asset "XYZ"
 #' sim_mem <- reverse_asset_split(sim_mem, "XYZ", ratio = 10, index = 100, fractions = FALSE)
 #'
 #' @keywords internal
+#' @noRd
 reverse_asset_split <- function(input, name, ratio, index, fractions) {
   
   # Aktuelle Werte auslesen
@@ -1229,14 +1566,7 @@ reverse_asset_split <- function(input, name, ratio, index, fractions) {
   split_price <- current_price * ratio
   split_worth <- current_worth  # Gesamtwert ändert sich nicht!
   
-  # Bruchteile behandeln wenn fractions = FALSE
-  if (!fractions && split_count %% 1 != 0) {
-    split_fract <- split_count %% 1
-    split_count <- floor(split_count)
-    # Bruchteile werden als Cash gutgeschrieben (Spitzenausgleich)
-    fractional_value <- split_fract * split_price
-    input[["status"]][[name]][["money"]] <- input[["status"]][[name]][["money"]] + fractional_value
-  }
+  # R1-05: exakte Umrechnung; Bruchteile verkauft simulation() danach (Spitzenausgleich)
   
   # FIFO-Lots aktualisieren
   # FIFO-Lots aktualisieren (nur populierte Lots, nicht vorallokierte)
@@ -1251,15 +1581,6 @@ reverse_asset_split <- function(input, name, ratio, index, fractions) {
       new_buy_price <- buy[["price"]] * ratio
       new_remaining <- buy[["remaining"]] / ratio
       new_original <- (buy[["original"]] %||% buy[["remaining"]]) / ratio
-      
-      if (!fractions && new_original_count %% 1 != 0) {
-        fract <- new_original_count %% 1
-        new_original_count <- floor(new_original_count)
-        new_remaining <- floor(new_remaining)
-        new_original <- floor(new_original)
-        fractional_value <- fract * new_buy_price
-        input[["status"]][[name]][["money"]] <<- input[["status"]][[name]][["money"]] + fractional_value
-      }
       
       buy[["count"]] <- new_original_count
       buy[["price"]] <- new_buy_price
@@ -1281,36 +1602,32 @@ reverse_asset_split <- function(input, name, ratio, index, fractions) {
   input[["status"]][[name]][["price"]] <- split_price
   input[["status"]][[name]][["worth"]] <- split_worth
   
-  # Preishistorie anpassen
-  price_vector <- input[["market"]][[name]][["asset_price"]]
-  n_prices <- length(price_vector)
-  if (index <= n_prices) {
-    input[["market"]][[name]][["asset_price"]][index:n_prices] <- price_vector[index:n_prices] * ratio
-  }
+  # Preishistorie anpassen (alle Preise, vgl. forward_asset_split, R1-06)
+  input[["market"]][[name]][["asset_price"]] <- input[["market"]][[name]][["asset_price"]] * ratio
   
   return(input)
 }
 
 
 #--------> Hilfsfunktion zur Verwaltung von Asset-Splits:
-#' Führt einen Asset-Split durch
+#' Fuehrt einen Asset-Split durch
 #'
-#' Wrapper-Funktion, die je nach Typ einen Forward- oder Reverse-Split durchführt.
+#' Wrapper-Funktion, die je nach Typ einen Forward- oder Reverse-Split durchfuehrt.
 #'
 #' @param input Liste. Die sim_mem Struktur
-#' @param name Character. Name des Assets
-#' @param ratio Numeric. Split-Verhältnis
-#' @param index Integer. Aktueller Zeitindex
-#' @param type Character. "forward" oder "reverse"
-#' @param fractions Logical. Sind Bruchteile von Anteilen erlaubt?
-#' @param details Logical. Sollen Details ausgegeben werden?
-#' @param current_date Date. Aktuelles Datum (für Ausgabe)
+#' @param name Zeichenkette. Name des Assets
+#' @param ratio Zahl. Split-Verhaeltnis
+#' @param index Ganzzahl. Aktueller Zeitindex
+#' @param type Zeichenkette. "forward" oder "reverse"
+#' @param fractions Logisch. Sind Bruchteile von Anteilen erlaubt?
+#' @param details Logisch. Sollen Details ausgegeben werden?
+#' @param current_date Date. Aktuelles Datum (fuer Ausgabe)
 #'
 #' @return Liste. Die aktualisierte sim_mem Struktur
 #'
 #' @details
 #' Forward-Split (z.B. 1:4): Mehr Anteile, niedrigerer Preis
-#' Reverse-Split (z.B. 10:1): Weniger Anteile, höherer Preis
+#' Reverse-Split (z.B. 10:1): Weniger Anteile, hoeherer Preis
 #'
 #' @examples
 #' # Forward-Split 1:4
@@ -1325,7 +1642,8 @@ reverse_asset_split <- function(input, name, ratio, index, fractions) {
 #'   current_date = as.Date("2024-01-15")
 #' )
 #'
-#' @export
+#' @keywords internal
+#' @noRd
 perform_asset_split <- function(input, name, ratio, index, type,
                                  fractions = TRUE,
                                  details = FALSE,
@@ -1334,11 +1652,11 @@ perform_asset_split <- function(input, name, ratio, index, type,
   # Validierung
 
   if (!type %in% c("forward", "reverse")) {
-    stop("'type' must be either 'forward' or 'reverse'")
+    stop(sprintf("perform_asset_split: type muss \"forward\" oder \"reverse\" sein, nicht %s.", paste(deparse(type), collapse = "")))
   }
   
   if (ratio <= 0) {
-    stop("'ratio' must be positive")
+    stop(sprintf("perform_asset_split: ratio muss > 0 sein (Split-Verh\u00e4ltnis), nicht %s.", format(ratio)))
   }
   
   # Split durchführen
@@ -1368,15 +1686,15 @@ perform_asset_split <- function(input, name, ratio, index, type,
       paste(format(ratio, digits = 5), ": 1")
     }
     
-    action_word <- if (type == "forward") "Splitting" else "Reverse splitting"
+    action_word <- if (type == "forward") "Split" else "Reverse-Split"
     
     date_str <- if (!is.null(current_date)) {
       format(current_date, "%Y-%m-%d")
     } else {
-      "(date not provided)"
+      "(ohne Datum)"
     }
     
-    cat(sprintf("Split Event:\t%s %s via %s on %s\n",
+    cat(sprintf("Split-Ereignis:\t%s %s im Verh\u00e4ltnis %s am %s\n",
                 action_word, name, split_description, date_str))
   }
   
@@ -1386,11 +1704,12 @@ perform_asset_split <- function(input, name, ratio, index, type,
 #--------> Hilfsfunktion zur Realisierung von Käufen:
 #' P7: Kernlogik (Report-Update + Lot-Erstellung) in C++ perform_trade_buy_cpp.
 #' R-Wrapper berechnet trade_count (Spread, Fractions-Logik) und gibt Details aus.
+#' @noRd
 perform_trade_buy <- function(input, count = NULL, name, index, reason = "", spread, fractions, details, current_date = NULL){
 
   market_price <- input[["market"]][[name]][["asset_price"]][index]
   if (is.na(market_price) || market_price <= 0) {
-    warning(sprintf("Invalid market price (%.4f) for %s on %s - skipping trade",
+    warning(sprintf("perform_trade_buy: ung\u00fcltiger Kurs (%.4f) f\u00fcr %s am %s; der Kauf wird \u00fcbersprungen.",
                     market_price, name, input[["market"]][[name]][["asset_day"]][index]))
     return(input)
   }
@@ -1407,7 +1726,26 @@ perform_trade_buy <- function(input, count = NULL, name, index, reason = "", spr
     count
   }
 
+  fee <- .fee_env$current
+  if (!is.null(fee)) {
+    money <- input[["status"]][[name]][["money"]]
+    if (is.null(count) || trade_count * trade_price + .fee_amount(fee, trade_count * trade_price) > money + 1e-9) {
+      vol <- .fee_volume(fee, money)
+      trade_count <- if (fractions) vol / trade_price else floor(vol / trade_price)
+    }
+    if (trade_count <= 0) return(input)
+    fee_paid <- .fee_amount(fee, trade_count * trade_price)
+    trade_price <- trade_price + fee_paid / trade_count      # Gebuehr = Anschaffungsnebenkosten
+    .fee_env$paid <- .fee_env$paid + fee_paid
+  }
+
   if (trade_count <= 0) return(input)
+
+  # A7-05: Lot-Liste bei Bedarf vergroessern (vorallokiert mit nrow(data) Plaetzen; mehr Kaeufe als
+  # Datentage, z. B. taeglicher Sparplan plus Gewinnrealisierung, fuehrten sonst zum Absturz in C++)
+  n_alloc <- length(input[["trades"]][[name]][["buys"]])
+  if (input[["trades"]][[name]][["buy_count"]] >= n_alloc)
+    input[["trades"]][[name]][["buys"]] <- c(input[["trades"]][[name]][["buys"]], vector("list", max(16L, n_alloc)))
 
   # C++ by-reference: Report-Update + Status-Update + Lot-Erstellung
   perform_trade_buy_cpp(input = input, name = name, index = index,
@@ -1415,7 +1753,7 @@ perform_trade_buy <- function(input, count = NULL, name, index, reason = "", spr
                         market_price = market_price)
 
   if(details){
-    cat(sprintf("%s\tBuying %.2fx %s at %.2f EUR per share on %s\n", reason, trade_count, name, trade_price, input[["market"]][[name]][["asset_day"]][index]))
+    cat(sprintf("%s\tKauf %.2fx %s zu %.2f EUR je Anteil am %s\n", reason, trade_count, name, trade_price, input[["market"]][[name]][["asset_day"]][index]))
   }
 
   return(input)
@@ -1446,7 +1784,7 @@ trade_count <- if (is.null(count)) {
   available
 } else {
   if (count > available) {
-    warning(sprintf("Requested sell count (%.4f) exceeds available (%.4f) for %s. Selling all.",
+    warning(sprintf("perform_trade_sell: angeforderte Verkaufsmenge %.4f \u00fcbersteigt den Bestand %.4f von %s; verkauft wird der gesamte Bestand.",
                     count, available, name))
   }
   min(count, available)
@@ -1455,6 +1793,13 @@ trade_count <- if (is.null(count)) {
 if (trade_count <= 0) {
   return(input)
 }
+  fee <- .fee_env$current
+  if (!is.null(fee)) {
+    fee_paid <- .fee_amount(fee, trade_count * trade_price)
+    if (trade_count * trade_price - fee_paid <= 0) return(input)
+    trade_price <- trade_price - fee_paid / trade_count      # Gebuehr = Veraeusserungskosten
+    .fee_env$paid <- .fee_env$paid + fee_paid
+  }
   
   fifo_price <- if (is.null(price) && tax_mode == "person") {
     calculate_fifo_price(
@@ -1507,7 +1852,7 @@ if (trade_count <= 0) {
       
       if (details) {
         if (vorabpauschale_paid > 0) {
-          cat(sprintf("\t\t=> Vorabpauschale-Anrechnung (§ 19 InvStG): %.2f EUR\n",
+          cat(sprintf("\t\t=> Vorabpauschale-Anrechnung (\u00a7 19 InvStG): %.2f EUR\n",
                       vorabpauschale_paid))
         }
         if (result$spb_used > 0) {
@@ -1557,11 +1902,11 @@ if (trade_count <= 0) {
       
       if (details) {
         if (lot_result$exempt_gain > 0) {
-          cat(sprintf("\t\t=> Tax-exempt gain (held > 1 year): %.2f EUR\n", 
+          cat(sprintf("\t\t=> Steuerfreier Gewinn (Haltedauer > 1 Jahr): %.2f EUR\n", 
                       lot_result$exempt_gain))
         }
         if (lot_result$exempt_loss > 0) {
-          cat(sprintf("\t\t=> Non-deductible loss (held > 1 year): %.2f EUR\n", 
+          cat(sprintf("\t\t=> Nicht verrechenbarer Verlust (Haltedauer > 1 Jahr): %.2f EUR\n", 
                       lot_result$exempt_loss))
         }
       }
@@ -1570,6 +1915,13 @@ if (trade_count <= 0) {
       # M2 KORREKTUR: NUR YTD-Tracking, KEINE Verlustverrechnung hier!
       # ══════════════════════════════════════════════════════════════════
       
+      # R3a-02: steuerpflichtiger Saldo je Asset (Aufteilung der § 23-Steuerzahlung am Jahresende)
+      net_by <- lot_result$taxable_gain - lot_result$taxable_loss
+      if (net_by != 0) {
+        by <- input[["totals"]][["private_sale_net_ytd_by"]]
+        input[["totals"]][["private_sale_net_ytd_by"]][name] <- (if (name %in% names(by)) by[[name]] else 0) + net_by
+      }
+
       # Steuerpflichtige Gewinne (< 1 Jahr Haltedauer)
       if (lot_result$taxable_gain > 0) {
         # KEINE Verrechnung mit loss_private_sales hier!
@@ -1578,7 +1930,7 @@ if (trade_count <= 0) {
           input[["totals"]][["private_sale_gains_ytd"]] + lot_result$taxable_gain
         
         if (details) {
-          cat(sprintf("\t\t=> Taxable gain (held < 1 year): %.2f EUR (YTD total: %.2f EUR)\n",
+          cat(sprintf("\t\t=> Steuerpflichtiger Gewinn (Haltedauer < 1 Jahr): %.2f EUR (seit Jahresbeginn: %.2f EUR)\n",
                       lot_result$taxable_gain, 
                       input[["totals"]][["private_sale_gains_ytd"]]))
         }
@@ -1590,7 +1942,7 @@ if (trade_count <= 0) {
           input[["totals"]][["private_sale_losses_ytd"]] + lot_result$taxable_loss
         
         if (details) {
-          cat(sprintf("\t\t=> Deductible loss (held < 1 year): %.2f EUR (YTD total: %.2f EUR)\n", 
+          cat(sprintf("\t\t=> Verrechenbarer Verlust (Haltedauer < 1 Jahr): %.2f EUR (seit Jahresbeginn: %.2f EUR)\n", 
                       lot_result$taxable_loss,
                       input[["totals"]][["private_sale_losses_ytd"]]))
         }
@@ -1620,12 +1972,12 @@ if (trade_count <= 0) {
 
   # Details ausgeben
   if (details) {
-    cat(sprintf("%s\tSelling %.2fx %s at %.2f EUR per share on %s\n",
+    cat(sprintf("%s\tVerkauf %.2fx %s zu %.2f EUR je Anteil am %s\n",
                 reason, trade_count, name, trade_price, current_date))
     # KORREKTUR: Prüfen ob tax_regime != "none" UND != "private_sale"
     if (tax_mode == "person" && !tax_regime %in% c("none", "private_sale")) {
-      cat(sprintf("\t\t=> Trade %s: %.2f EUR; Tax: %.2f EUR\n",
-                  ifelse(trade_gain < 0, "loss", "gain"), trade_gain, capital_gains_tax))
+      cat(sprintf("\t\t=> %s: %.2f EUR; Steuer: %.2f EUR\n",
+                  ifelse(trade_gain < 0, "Verlust", "Gewinn"), trade_gain, capital_gains_tax))
     }
   }
   
@@ -1678,98 +2030,244 @@ if (trade_count <= 0) {
 # ============================================================
 # HAUPT-SIMULATION
 # ============================================================
-#' @param start_value Numeric. Initial portfolio value in currency units.
-#'   Default: 10000.
+#--------> Ordergebuehren (Paket-Umgebung; NULL = keine Gebuehr, Engine unveraendert)
+.fee_env <- new.env(parent = emptyenv())
+
+#' Gebuehrenangabe normalisieren
+#' @keywords internal
+#' @noRd
+.fee_spec <- function(x) {
+  if (is.null(x)) return(NULL)
+  if (is.numeric(x) && length(x) == 1L) x <- list(fixed = x)
+  if (!is.list(x)) stop("order_fee/dca_fee: Zahl (EUR je Order) oder list(fixed, percent, min, max).")
+  unk <- setdiff(names(x), c("fixed", "percent", "min", "max"))
+  if (length(x) && (is.null(names(x)) || any(names(x) == "") || length(unk)))   # R1-23: Tippfehler nicht still ignorieren
+    stop(sprintf("order_fee/dca_fee: unbekannte oder unbenannte Felder (%s); erlaubt sind fixed, percent, min, max.",
+                 paste(if (length(unk)) unk else "ohne Namen", collapse = ", ")))
+  s <- list(fixed = x$fixed %||% 0, percent = (x$percent %||% 0) / 100, min = x$min %||% 0, max = x$max %||% Inf)
+  if (s$fixed < 0 || s$percent < 0 || s$min < 0 || s$max < s$min) stop("Geb\u00fchren m\u00fcssen nicht negativ sein (min <= max).")
+  if (s$fixed == 0 && s$percent == 0 && s$min == 0) return(NULL)
+  s
+}
+
+#' Gebuehr fuer ein Ordervolumen
+#' @keywords internal
+#' @noRd
+.fee_amount <- function(f, volume) min(max(f$fixed + f$percent * volume, f$min), f$max)
+
+#' Groesstes Ordervolumen, dessen Kosten samt Gebuehr in 'money' passen
+#' @keywords internal
+#' @noRd
+.fee_volume <- function(f, money) {
+  v <- (money - f$fixed) / (1 + f$percent)
+  fee <- f$fixed + f$percent * v
+  if (fee < f$min) v <- money - f$min else if (fee > f$max) v <- money - f$max
+  max(0, v)
+}
+
+#' Freibetrag ausschoepfen: Gewinne bis zum Rest von Sparer-Pauschbetrag (und
+#' Verlusttopf) realisieren und den Erloes sofort wieder anlegen
+#' @keywords internal
+#' @noRd
+perform_gain_harvest <- function(input, name, index, tax_regime, spread, fractions, use_loss_pot, use_spb,
+                                 tax_mode, tax_rate, effective_tax_rate, marginal_tax_rate,
+                                 private_sale_threshold, details) {
+  if (!tax_regime %in% c("investment_fund", "capital_gains")) return(input)
+  total <- input[["status"]][[name]][["count"]]
+  if (total <= 0) return(input)
+  room <- (if (use_spb) input[["totals"]][["sparer_pauschbetrag_remaining"]] else 0) +
+          (if (use_loss_pot) input[["totals"]][["loss_capital_gains"]] else 0)
+  if (room <= 0.01) return(input)
+  market_price <- input[["market"]][[name]][["asset_price"]][index]
+  if (is.na(market_price) || market_price <= 0) return(input)
+  sell_price <- apply_spread(market_price, spread, "sell")
+  trades <- input[["trades"]][[name]][["buys"]]; front <- input[["trades"]][[name]][["fifo_front"]]
+  bonus <- if (tax_regime == "investment_fund") input[["assets"]][[name]][["bonus"]] else 0
+  fee <- .fee_env$current
+  taxable <- function(n, with_fee = TRUE) {
+    if (n <= 0) return(0)
+    px <- sell_price; if (with_fee && !is.null(fee)) px <- px - .fee_amount(fee, n * sell_price) / n
+    g <- (px - calculate_fifo_price(trades, n, front)) * n
+    if (tax_regime == "investment_fund") g <- g - calculate_fifo_vorabpauschale(trades, n, front)
+    (1 - bonus) * g
+  }
+  first_lot <- min(total, max(1e-9, total * 1e-6))
+  if (taxable(first_lot, FALSE) <= 0) return(input)   # vorderste Lots im Verlust: nichts zu holen
+  n <- if (taxable(total) <= room) total else {
+    lo <- 0; hi <- total
+    for (i in 1:60) { mid <- (lo + hi) / 2; if (taxable(mid) > room) hi <- mid else lo <- mid; if (hi - lo < total * 1e-10) break }
+    lo
+  }
+  if (!fractions) n <- floor(n)
+  if (n <= 0 || taxable(n) <= 0) return(input)
+  if (details) cat(sprintf("Freibetrag:\tRealisierung von Gewinnen %.2f EUR mit %.4fx %s (freier Sparer-Pauschbetrag/Verlusttopf %.2f EUR)\n",
+                           taxable(n), n, name, room))
+  input <- perform_trade_sell(input = input, count = n, name = name, index = index, tax_mode = tax_mode,
+                              tax_rate = tax_rate, effective_tax_rate = effective_tax_rate,
+                              marginal_tax_rate = marginal_tax_rate, private_sale_threshold = private_sale_threshold,
+                              use_sparer_pauschbetrag = use_spb, tax_regime = tax_regime,
+                              reason = "Freibetrag:", spread = spread, details = details)
+  input <- perform_trade_buy(input = input, name = name, index = index, reason = "Freibetrag:", spread = spread,
+                             fractions = fractions, details = details)
+  input
+}
+
+#' @param start_value Zahl. Anfangskapital in EUR.
+#'   Standard: 10000.
 #'
-#' @param spread Numeric. Default spread for all assets if not specified
-#'   per-asset. Default: NULL (use per-asset spreads).
+#' @param spread Zahl oder NULL. Wird nicht ausgewertet (Warnung, wenn nicht NULL);
+#'   massgeblich ist der Spread je Asset (asset_spread). Standard: NULL.
 #'
-#' @param details Logical. Print detailed transaction log during simulation.
-#'   Default: FALSE.
+#' @param details Logisch. Ausfuehrliches Transaktions- und Steuerprotokoll auf der
+#'   Konsole ausgeben. Standard: FALSE.
 #'
-#' @param liquidate Logical. Sell all positions on the last day.
-#'   Default: FALSE.
+#' @param liquidate Logisch. Alle Positionen am letzten Tag verkaufen (inkl. Steuer).
+#'   Standard: FALSE.
 #'
-#' @section DCA Parameters:
-#' @param dca_mode Logical. Enable Dollar-Cost Averaging. Default: FALSE.
-#' @param dca_value Numeric. Amount to invest per DCA event.
-#' @param dca_span Integer. Number of periods between DCA events.
-#' @param dca_days Integer. Day of month/quarter/year for DCA (1-31).
-#' @param dca_unit Character. Period unit: "month", "quarter", or "year".
-#' @param dca_anchor Character. Count from "start" or "end" of period.
-#' @param dca_start Date. First DCA date (optional).
-#' @param dca_skip Logical. Skip DCA on the first simulation day.
-#' @param balance_dca Logical. Invest DCA only in underweight assets.
+#' @section DCA-Parameter:
+#' @param dca_mode Logisch. Sparplan (Dollar-Cost Averaging) aktivieren. Standard: FALSE.
+#' @param dca_value Zahl. Betrag je Sparplan-Termin in EUR; Pflicht bei dca_mode = TRUE (einzelne endliche Zahl > 0).
+#' @param dca_span Ganzzahl. Anzahl Perioden (dca_unit) zwischen zwei Terminen; Pflicht bei dca_mode = TRUE (einzelne ganze Zahl >= 1).
+#' @param dca_days Ganzzahl(en) oder NULL. Tag(e) innerhalb der Periode: bei "month" Tag des Monats,
+#'   bei "quarter" Tag im ersten Monat des Quartals, bei "year" Tag im Januar (jeweils 1-31);
+#'   mit dca_anchor = "end" vom Periodenende rueckwaerts gezaehlt (1 = letzter Tag).
+#'   NULL = erster Tag der Periode. Doppelte Tage ergeben nur einen Termin (Warnung).
+#' @param dca_unit Zeichenkette. Periodeneinheit: "month" (Standard), "quarter" oder "year".
+#' @param dca_anchor Zeichenkette. dca_days ab "start" (Standard) oder "end" der Periode zaehlen.
+#' @param dca_start Date oder NULL. Bezugsdatum: der Terminplan beginnt am Monatsersten
+#'   (bei "year": am 1. Januar) dieses Datums. NULL = erster Tag der Daten.
+#' @param dca_skip Logisch. Sparplan-Termin am ersten Simulationstag auslassen. Standard: FALSE.
+#' @param balance_dca Logisch. FALSE (Standard): Rate fix nach Strategie-Gewichten verteilen.
+#'   TRUE: Rate fuellt zuerst die Wert-Defizite untergewichteter Assets, ein Rest geht nach Strategie-Gewichten.
 #'
-#' @section Rebalancing Parameters:
-#' @param balance_mode Logical. Enable periodic rebalancing. Default: FALSE.
-#' @param balance_span Integer. Number of periods between rebalancing.
-#' @param balance_days Integer. Day of month/quarter/year for rebalancing.
-#' @param balance_unit Character. Period unit: "month", "quarter", or "year".
-#' @param balance_anchor Character. Count from "start" or "end" of period.
-#' @param balance_start Date. First rebalancing date (optional).
-#' @param balance_skip Logical. Skip rebalancing on the first simulation day.
-#' @param balance_thresh Numeric. Threshold for triggering rebalancing (e.g., 0.05
-#'   means rebalance only if any asset deviates by more than 5% from target).
+#' @section Rebalancing-Parameter:
+#' @param balance_mode Logisch. Periodisches Rebalancing aktivieren. Standard: FALSE.
+#' @param balance_span Ganzzahl oder NULL. Anzahl Perioden zwischen zwei Rebalancing-Terminen (NULL = 1).
+#' @param balance_days Ganzzahl(en) oder NULL. Tag(e) innerhalb der Periode, wie dca_days.
+#' @param balance_unit Zeichenkette. Periodeneinheit: "month" (Standard), "quarter" oder "year".
+#' @param balance_anchor Zeichenkette. balance_days ab "start" (Standard) oder "end" der Periode zaehlen.
+#' @param balance_start Date oder NULL. Bezugsdatum des Terminplans, wie dca_start.
+#' @param balance_skip Logisch. Rebalancing am ersten Simulationstag auslassen. Standard: FALSE.
+#' @param balance_thresh Zahl oder NULL. Toleranzband in Prozent: Rebalanciert wird nur, wenn
+#'   ein Asset um mehr als diesen Wert vom Ziel abweicht (z. B. 5 = 5 Prozentpunkte bei
+#'   balance_thresh_type = "absolute"). NULL = an jedem Termin rebalancieren.
+#' @param balance_thresh_type Zeichenkette. "absolute" (Standard): balance_thresh in
+#'   Prozentpunkten des Gewichts; "relative": in Prozent des Zielgewichts.
 #'
-#' @section Tax Parameters:
-#' @param tax_mode Character. Tax calculation mode:
+#' @section Steuer-Parameter:
+#' @param tax_mode Zeichenkette. Besteuerungsmodus:
 #'   \describe{
-#'     \item{"none"}{No tax calculation}
-#'     \item{"person"}{German personal tax (Abgeltungsteuer) with FIFO tracking}
-#'     \item{"funds"}{Fund-level taxation (Fondsbesteuerung)}
+#'     \item{"none"}{Keine Steuerberechnung (Standard)}
+#'     \item{"person"}{Persoenliche Besteuerung (Abgeltungsteuer, § 23 EStG) mit FIFO-Buchfuehrung}
+#'     \item{"funds"}{Fondsmodell (Fondsbesteuerung): Kosten funds_fee/bonus_fee, bei Liquidation
+#'       Steuer auf den Gesamtgewinn (Endwert - Startkapital - Einzahlungen)}
 #'   }
-#' @param tax_rate Numeric. Tax rate (default: 0.26375 = 25% + 5.5% Soli).
-#' @param base_rate Numeric. Base interest rate for Vorabpauschale calculation.
-#' @param base_rate_flex Logical. Use time-varying base rate from data.
-#' @param base_rate_data Character. Column name for base rate data.
-#' @param funds_fee Numeric. Annual fund fee in percent (for tax_mode = "funds").
-#' @param bonus_fee Numeric. Performance fee in percent (for tax_mode = "funds").
+#' @param tax_rate Zahl. Steuersatz in Prozent (Standard: 26.375 = 25 % + 5,5 % Soli).
+#' @param base_rate Zahl oder NULL. Basiszins fuer die Vorabpauschale in Prozent (2.29 = 2,29 %).
+#' @param base_rate_flex Logisch. Zeitvariablen Basiszins aus den Daten verwenden.
+#' @param base_rate_data Zeichenkette. Spaltenname des Basiszinses (in Prozent).
+#' @param funds_fee Zahl. Jaehrliche Fondskosten in Prozent p. a. (nur bei tax_mode = "funds");
+#'   linearer Tagessatz funds_fee / 100 / Kalendertage des Jahres (ein volles Jahr kostet genau
+#'   funds_fee Prozent); belastet am 31.12. und anteilig am letzten Tag (bei Liquidation auf
+#'   einem aufgefuellten letzten Tag: am Liquidationstag vor der Steuer), fehlendes Cash per
+#'   Teilverkauf ohne Ordergebuehr und Spread. Zulaessig 0 bis 100 (sonst Fehler).
+#' @param bonus_fee Zahl. Performancegebuehr in Prozent des Wertzuwachses ueber dem Hoechststand
+#'   (um Einzahlungen erhoeht, nach Belastung als Wert nach Abzug der Gebuehren gefuehrt;
+#'   nur bei tax_mode = "funds"). Zulaessig 0 bis 100 (sonst Fehler).
 #'
-#' @section Other Parameters:
-#' @param risk_free Numeric or character. Annualized risk-free rate as a
-#'   decimal (e.g. 0.03 = 3 percent p.a.), consistent with the rest of the
-#'   package. Either a single number OR the name of a column in \code{data}
-#'   holding a per-day annualized rate (e.g. SOFR). Each day the rate is
-#'   converted to its daily equivalent and subtracted from that day's return;
-#'   Sharpe and Sortino are computed on the resulting excess returns. LOCF-
-#'   filled days are excluded consistently. Default: 0.
-#' @param fractions Logical. Allow fractional shares. Default: TRUE.
-#' @param split_mode Logical. Enable automatic split handling. Default: FALSE
-#' @param split_thresh Numeric vector of length 2: c(lower, upper) price
-#'   thresholds for triggering reverse/forward splits.
+#' @section Weitere Parameter:
+#' @param risk_free Zahl oder Zeichenkette. Annualisierte risikolose Rendite in
+#'   Prozent (z. B. 3 = 3 % p. a.), wie im uebrigen Paket. Entweder eine einzelne
+#'   Zahl ODER der Name einer Spalte in \code{data} mit einer taeglichen
+#'   annualisierten Rate in Prozent (z. B. SOFR). Jede Tagesrate wird in ihr
+#'   Tagesaequivalent umgerechnet und von der Tagesrendite abgezogen; Sharpe und
+#'   Sortino werden auf den Ueberschussrenditen berechnet. Per LOCF aufgefuellte
+#'   Tage werden durchgaengig ausgeschlossen. Standard: 0 (NULL wie 0).
+#' @param fractions Logisch. Bruchteile von Anteilen erlauben. Standard: TRUE.
+#' @param split_mode Logisch. Automatische Splits aktivieren. Standard: FALSE
+#' @param split_thresh Zahlenvektor der Laenge 2: c(untere, obere) Kursschwelle in
+#'   Preiseinheiten der Kursreihe. Ueber der oberen Schwelle folgt ein Split, unter der
+#'   unteren eine Zusammenlegung, jeweils auf einen Kurs von 100. Erwartet wird
+#'   untere < 100 < obere; sonst Warnung (taegliche Splits).
 #'
-#' @param marginal_tax_rate Numeric. Personal marginal income tax rate for 
-#'   § 23 EStG taxation. Required when using deliverable ETN/ETC assets.
-#'   Common values: 0.14 (minimum), 0.42 (top rate),
-#'   0.45 (wealth tax). Default: NULL (will use 0.42 with warning if needed).
-#'   Note: Soli is controlled via include_soli_on_income_tax / soli_rate_income_tax.
+#' @param marginal_tax_rate Zahl oder NULL. Persoenlicher Grenzsteuersatz in Prozent fuer
+#'   die Besteuerung nach § 23 EStG und die Guenstigerpruefung (zulaessig 0 bis 50).
+#'   Benoetigt bei lieferbaren ETN/ETC. Uebliche Werte: 14 (Eingangssatz), 42 (Spitzensatz),
+#'   45 (Reichensteuer). Standard: NULL (bei Bedarf werden 42 % mit Warnung angesetzt).
+#'   Hinweis: Der Soli wird ueber include_soli_on_income_tax / soli_rate_income_tax gesteuert.
 #'
-#' @param private_sale_threshold Numeric. Annual tax-free threshold (Freigrenze) 
-#'   for § 23 EStG gains. If total private sale gains EXCEED this amount, the 
-#'   ENTIRE gain becomes taxable. Default: 1000 (since 2024, was 600 before).
+#' @param private_sale_threshold Zahl. Jaehrliche Freigrenze nach § 23 EStG in EUR
+#'   (aktuelle Rechtslage fuer alle Jahre). ERREICHT der Jahressaldo der privaten
+#'   Veraeusserungen diesen Betrag, ist der GESAMTE Saldo abzueglich Verlustvortrag
+#'   steuerpflichtig; darunter steuerfrei, der Vortrag bleibt dann unveraendert.
+#'   Standard: 1000 (seit 2024, vorher 600).
 #'
-#' @param sparer_pauschbetrag Numeric. Annual tax-free allowance (Freibetrag) 
-#'   for § 20 EStG capital gains. Unlike Freigrenze, only the amount ABOVE this 
-#'   is taxed. Default: 1000 (single), use 2000 for married filing jointly.
+#' @param sparer_pauschbetrag Zahl. Jaehrlicher Freibetrag (Sparer-Pauschbetrag) in EUR
+#'   fuer Kapitalertraege nach § 20 EStG. Anders als bei der Freigrenze wird nur der
+#'   Betrag DARUEBER besteuert. Standard: 1000 (Einzelperson), 2000 bei Zusammenveranlagung.
 #'
-#' @param use_sparer_pauschbetrag Logical. Whether to apply the Sparerpauschbetrag.
-#'   Set FALSE to simulate without tax allowance (e.g., for comparison).
-#'   Default: TRUE.
-#' @return An object of class "SimLevResult" containing:
-#'   \describe
-#'     \item{worth}{Numeric vector of daily portfolio values}
-#'     \item{cagr}{Compound Annual Growth Rate}
-#'     \item{ttwror}{Time-Weighted Rate of Return (annualized)}
-#'     \item{drawdowns}{Numeric vector of daily drawdowns}
-#'     \item{statistics}{List with mean, sd, cv, skewness, kurtosis, lpm, hpm}
-#'     \item{buys}{Named vector of buy transactions per year per asset}
-#'     \item{sells}{Named vector of sell transactions per year per asset}
-#'     \item{report}{List of per-asset report data frames}
+#' @param use_sparer_pauschbetrag Logisch. Sparer-Pauschbetrag anwenden?
+#'   FALSE simuliert ohne Freibetrag (z. B. zum Vergleich).
+#'   Standard: TRUE.
+#'
+#' @param taxable_income NULL, Zahl, nach Jahr benannter Zahlenvektor oder data.frame (year,
+#'   taxable_income). Zu versteuerndes Einkommen in EUR je Kalenderjahr OHNE die Kapitalertraege und
+#'   § 23-Gewinne dieser Simulation (eine Zahl gilt fuer alle Jahre; fehlt ein Simulationsjahr: Fehler).
+#'   Mit Angabe (nur tax_mode = "person") gilt der Einkommensteuertarif aus tax_tariff: § 23-Steuer =
+#'   T(zvE + G23) - T(zvE) plus Soli-Zuwachs S(T(zvE + G23)) - S(T(zvE)) plus KiSt (church_tax Prozent
+#'   des ESt-Zuwachses); Guenstigerpruefung (use_guenstigerpruefung = TRUE) im Jahresabschluss mit
+#'   Abrechnung; Kirchensteuer der Simulation als Sonderausgabe im Zahlungsjahr (Erstattungen verrechnet bzw.
+#'   hinzugerechnet; bei guenstigerer Tarifbesteuerung auch die auf K einbehaltene KiSt).
+#'   marginal_tax_rate, include_soli_on_income_tax und soli_rate_income_tax wirken dann nicht (Warnung,
+#'   wenn angegeben). NULL (Standard): bisheriger Weg mit marginal_tax_rate.
+#' @param tax_tariff NULL (mitgelieferte Datei extdata/steuertarif.csv, ab VZ 2026), Dateipfad oder
+#'   Objekt aus \code{\link{read_tax_tariff}()}. Nur mit taxable_income wirksam (sonst Warnung).
+#' @return Objekt der Klasse "SimLevResult" (Liste) mit:
+#'   \describe{
+#'     \item{dates}{Date-Vektor der Simulationstage (Kalendertage)}
+#'     \item{filled}{Logischer Vektor: TRUE = per LOCF aufgefuellter Tag}
+#'     \item{worth}{Zahlenvektor der taeglichen Portfoliowerte (Depotwert inkl. Einzahlungen) in EUR}
+#'     \item{twr_index}{Zeitgewichteter Wertindex (Start = 1) aus den um Einzahlungen bereinigten
+#'       Tagesrenditen, wie fuer ttwror. An Tagen ohne Zahlung r = (W_t - W_{t-1}) / W_{t-1}.
+#'       An Tagen mit Zahlung F (zum Schlusskurs angelegt) wird zum Zeitpunkt der Zahlung bewertet:
+#'       V_pre = Vortagesbestand zum heutigen Schlusskurs plus Vortages-Cash,
+#'       1 + r = (V_pre / W_{t-1}) * W_t / (V_pre + F). Ohne Kosten ist r die Kursrendite;
+#'       Kaufkosten der Einzahlung belasten das Kapital nach der Zahlung}
+#'     \item{invested}{start_value plus kumulierte Einzahlungen (Sparplan, auch am Starttag) je Tag
+#'       in EUR, brutto vor Kaufkosten}
+#'     \item{external_flows}{Logisch. TRUE, wenn nach dem Starttag Einzahlungen (Sparplan) erfolgten}
+#'     \item{cagr}{Jaehrliche Wachstumsrate (CAGR) als Anteil; mit Einzahlungen die geldgewichtete
+#'       Jahresrendite (interner Zinsfuss/XIRR aus Startbetrag start_value plus Rate am Starttag
+#'       (brutto), datierten Einzahlungen und Endwert, Kalendertage / 365.25; NA mit Warnung, wenn
+#'       es keine Loesung gibt). Ohne Einzahlungen nach dem Starttag:
+#'       (Endwert / Depotwert am Starttag)^(1 / Jahre) - 1.}
+#'     \item{ttwror}{Zeitgewichtete Rendite (TTWROR, annualisiert) als Anteil}
+#'     \item{drawdowns}{Zahlenvektor der taeglichen Drawdowns als positiver Anteil; mit Einzahlungen
+#'       auf twr_index statt auf dem Depotwert (ebenso max_drawdown, average_drawdown, ulcer_index,
+#'       longest_drawdown, avg_recovery_time)}
+#'     \item{statistics}{Liste mit mean, sd, cv, risk_free (Prozent), skewness, kurtosis, lpm, hpm,
+#'       sharpe, sortino, calmar, omega, gain_to_pain, serenity, martin_ratio, max_drawdown,
+#'       average_drawdown, ulcer_index, longest_drawdown, avg_recovery_time. Mit Einzahlungen
+#'       beruhen die Renditekennzahlen auf den bereinigten Tagesrenditen, und calmar, serenity und
+#'       martin_ratio verwenden ttwror statt cagr, damit Zaehler und Nenner zeitgewichtet sind.}
+#'     \item{buys}{Benannter Vektor: mittlere Anzahl Kaeufe je Jahr und Asset}
+#'     \item{sells}{Benannter Vektor: mittlere Anzahl Verkaeufe je Jahr und Asset}
+#'     \item{report}{Liste je Asset mit den Tagesvektoren worth, money, flows, total, share}
+#'     \item{tax_report}{Steuerzusammenfassung (siehe man/simulation.Rd)}
+#'     \item{fees_paid}{Nur mit order_fee/dca_fee: Summe der Ordergebuehren in EUR}
+#'     \item{harvest_days}{Nur mit harvest_mode = TRUE: Termine der Gewinnrealisierung}
+#'     \item{undefined_metrics}{data.frame(metric, reason, detail): je NA-Kennzahl (cagr, ttwror,
+#'       statistics) Ursache als Code (negative_end_value, no_irr_solution, too_short,
+#'       zero_start_value, nonpositive_twr_index, zero_volatility, zero_mean_return,
+#'       no_negative_returns, no_drawdown, no_recovery, not_finite) und deutscher Klartext; 0 Zeilen,
+#'       wenn alles definiert ist}
+#'     \item{open_lots}{Nur tax_mode = "person": je Asset list(lots = data.frame(date, units, price, vp),
+#'       regime, asset_bonus, cash, asset_spread (Prozent), order_fee (wie uebergeben oder NULL)) der am
+#'       letzten Tag gehaltenen Lots (siehe man/simulation.Rd)}
 #'   }
 #'
 #' @examples
-#' # Simple Buy-and-Hold simulation
+#' # Einfache Buy-and-Hold-Simulation
 #' data <- data.frame(
 #'   date = seq.Date(as.Date("2020-01-01"), as.Date("2022-12-31"), by = "day"),
 #'   ETF = 100 * exp(cumsum(rnorm(1096, 0.0003, 0.015)))
@@ -1794,11 +2292,17 @@ if (trade_count <= 0) {
 #' print(result$cagr)
 #'
 #' @seealso
-#' \code{\link{create_sequences}} for generating date sequences,
-#' \code{\link{print.SimLevResult}} for printing results,
-#' \code{\link{plot.SimLevResult}} for plotting results
+#' \code{\link{create_strategy}} und \code{\link{asset_config}} zum Aufbau der Strategie,
+#' \code{\link{print.SimLevResult}} zur Ausgabe der Ergebnisse,
+#' \code{\link{plot.SimLevResult}} zur grafischen Darstellung,
+#' \code{\link{deep_analysis}} zur weiteren Auswertung
 #'
 #' @export
+#' @useDynLib SimLev, .registration = TRUE
+#' @importFrom Rcpp evalCpp
+#' @import stats graphics grDevices
+#' @importFrom utils head tail modifyList
+#' @noRd
 
 simulation <- function(
     data,
@@ -1848,1523 +2352,184 @@ simulation <- function(
     bonus_fee = 5,
     # Sonstiges
     fractions = TRUE,
-    risk_free = 0,                # A-4: Risk-Free-Jahresrate (dezimal) ODER Spaltenname in data
+    risk_free = 0,                # A-4: Risk-Free-Jahresrate in Prozent (3 = 3 %) ODER Spaltenname in data
     split_mode = FALSE,
     split_thresh = NULL,
     # === Ereignisbasiertes Rebalancing (vorberechnete Trigger-Spalte) ===
     event_col = NULL,                       # Name der TRUE/FALSE-Spalte in 'data'; NULL => rein datumsgetrieben
     event_mode = c("additional", "replace"), # 'additional' = zusaetzlich (OR) zum Kalender; 'replace' = ersetzt ihn
-    event_weight = NULL                     # benannter Vektor Asset->Spaltenname mit Ziel-Gewicht je Event-Tag (optional)
+    event_weight = NULL,                    # benannter Vektor Asset->Spaltenname mit Ziel-Gewicht je Event-Tag (optional)
+    # === Deutsche Praxis (alle Standardwerte = bisheriges Verhalten) ===
+    church_tax = 0,                         # Kirchensteuersatz in Prozent (8 oder 9); passt tax_rate an
+    order_fee = NULL,                       # Ordergebuehr: Zahl (fix, EUR) oder list(fixed, percent, min, max)
+    dca_fee = NULL,                         # Gebuehr fuer Kaeufe an Sparplantagen (Standard: order_fee)
+    harvest_mode = FALSE,                   # jaehrlich Gewinne bis zum Freibetrag realisieren und wieder kaufen
+    harvest_day = "12-15",                  # Termin (MM-TT, naechster Handelstag)
+    harvest_loss_pot = TRUE,                # Verlusttopf zusaetzlich zum Freibetrag nutzen
+    # === Einkommensteuertarif (Datei) statt marginal_tax_rate ===
+    taxable_income = NULL,                  # zvE je Kalenderjahr OHNE die Ertraege dieser Simulation (EUR)
+    tax_tariff = NULL                       # NULL = mitgelieferte Tarifdatei, Dateipfad oder read_tax_tariff()-Objekt
 ) {
-    # === PARAMETER-VALIDIERUNG ===
-  tax_mode <- match.arg(tax_mode)
-  
-  # Pflichtparameter
-  if (missing(data) || !is.data.frame(data)) {
-    stop("'data' must be a data.frame")
-  }
-  if (missing(strategy) || length(strategy) == 0) {
-    stop("'strategy' must be a non-empty list")
-  }
-  
-  # start_value
-  if (is.null(start_value) || is.na(start_value)) {
-    start_value <- 10000
-    message("Note: Using default start_value = 10000")
-  }
-  if (!is.numeric(start_value) || start_value <= 0) {
-    stop("'start_value' must be a positive number")
-  }
-  
-  # tax_rate
-  if (!is.numeric(tax_rate) || tax_rate < 0 || tax_rate > 100) {
-    stop("'tax_rate' must be between 0 and 100 percent (e.g., 26.375 for 26.375%)")
-  }
-  
-  # marginal_tax_rate (wenn private_sale vorhanden)
-  has_private_sale <- any(sapply(strategy, function(a) {
-    isTRUE(a$tax_regime == "private_sale") || 
-    isTRUE(a$asset_class == "etn_deliverable") ||
-    (isTRUE(a$asset_class %in% c("etn", "etc")) && isTRUE(a$deliverable))
-  }))
-  if (has_private_sale && is.null(marginal_tax_rate)) {
-    warning("'marginal_tax_rate' not set but private_sale assets present. ",
-            "§ 23 EStG gains may not be taxed correctly.")
-  }
-  if (!is.null(marginal_tax_rate) && (marginal_tax_rate < 0 || marginal_tax_rate > 50)) {
-    stop("'marginal_tax_rate' must be between 0 and 50 percent (e.g., 42 for 42%)")
-  }
-
-  # PROZENT-KONVENTION: prozentuale Nutzerangaben -> intern dezimal (/100)
-  tax_rate <- tax_rate / 100
-  if (!is.null(marginal_tax_rate)) marginal_tax_rate <- marginal_tax_rate / 100
-  soli_rate_income_tax <- soli_rate_income_tax / 100
-  if (!is.null(balance_thresh)) balance_thresh <- balance_thresh / 100  # Prozent
-  # Toleranzband: "absolute" = Prozentpunkte des Gewichts (Standard, wie bisher),
-  # "relative" = Prozent des Zielgewichts (z. B. 25 -> Ziel 40 % darf 30-50 % sein)
-  balance_thresh_type <- match.arg(balance_thresh_type)
-  # base_rate: KEINE Division hier — calculate_flat_rate teilt an der Verbrauchsstelle /100
-  
-  # DCA-Parameter
-  if (dca_mode) {
-    if (is.null(dca_value) || dca_value <= 0) {
-      stop("'dca_value' must be positive when dca_mode = TRUE")
-    }
-    if (is.null(dca_span) || dca_span < 1) {
-      stop("'dca_span' must be >= 1 when dca_mode = TRUE")
-    }
-  }
-
-  # Gewichtssumme validieren
-  total_weight <- sum(sapply(strategy, function(a) a$asset_share), na.rm = TRUE)
-  if (abs(total_weight - 1.0) > 1e-6) {
-    stop(sprintf(
-      "Asset-Gewichte (asset_share) summieren sich auf %.4f, müssen aber exakt 1.0 ergeben.\n  Aktuelle Gewichte: %s",
-      total_weight,
-      paste(sprintf("%s=%.3f", names(strategy), sapply(strategy, function(a) a$asset_share)), collapse = ", ")
-    ))
-  }
-
-  # ══════════════════════════════════════════════════════════════════════════
-  # I3: GÜNSTIGERPRÜFUNG - Effektiven Steuersatz berechnen
-  # ══════════════════════════════════════════════════════════════════════════
-  # 
-  # Die Günstigerprüfung (§ 32d Abs. 6 EStG) erlaubt es Steuerpflichtigen mit
-  # niedrigem Einkommen, ihre Kapitalerträge zum persönlichen Steuersatz zu
-  # versteuern statt zur Abgeltungsteuer (25%).
-  #
-  # Voraussetzung: Der persönliche Grenzsteuersatz muss UNTER 25% liegen.
-  # 
-  # Berechnung des effektiven Steuersatzes:
-  # - Bei Günstigerprüfung: marginal_tax_rate * (1 + Soli-Faktor)
-  # - Ohne Günstigerprüfung: 0.26375 (25% + 5.5% Soli)
-  # ══════════════════════════════════════════════════════════════════════════
-
-  effective_tax_rate <- tax_rate  # Default: 26.375%
-
-  if (use_guenstigerpruefung) {
-    if (is.null(marginal_tax_rate)) {
-      warning(
-        "Günstigerprüfung aktiviert, aber 'marginal_tax_rate' nicht gesetzt.\n",
-        "Verwende Standard-Abgeltungsteuer (", round(tax_rate * 100, 2), "%).\n",
-        "Setze 'marginal_tax_rate' für korrekte Günstigerprüfung.",
-        call. = FALSE
-      )
-    } else if (marginal_tax_rate < 0.25) {
-      # Günstigerprüfung greift: Persönlicher Steuersatz ist niedriger
-      soli_factor <- if (include_soli_on_income_tax) (1 + soli_rate_income_tax) else 1.0
-      effective_tax_rate <- marginal_tax_rate * soli_factor
-      
-      if (details) {
-        cat(sprintf(
-          "═══ Günstigerprüfung aktiv ═══\n  Persönlicher Steuersatz: %.2f%%\n  Effektiver Steuersatz: %.2f%% (statt %.2f%% Abgeltungsteuer)\n  Ersparnis: %.2f Prozentpunkte\n\n",
-          marginal_tax_rate * 100, effective_tax_rate * 100, tax_rate * 100,
-          (tax_rate - effective_tax_rate) * 100
-        ))
-      }
-    } else {
-      # Persönlicher Steuersatz >= 25%, Abgeltungsteuer bleibt günstiger
-      if (details) {
-        cat(sprintf(
-          "═══ Günstigerprüfung geprüft ═══\n  Persönlicher Steuersatz: %.2f%%\n  Abgeltungsteuer: %.2f%% → bleibt günstiger\n\n",
-          marginal_tax_rate * 100, tax_rate * 100
-        ))
-      }
-    }
-  }
-  # ══════════════════════════════════════════════════════════════════════════
-
-  # F4: Soli-Faktor für ESt-Berechnungen (§ 23, Günstigerprüfung)
-  soli_factor_income <- if (include_soli_on_income_tax) (1 + soli_rate_income_tax) else 1.0
-
-  #----------------------------> Vorbereitung und Strukturierung von Datenobjekten:
-  start_date <- head(data[, "date"], 1)
-  stopp_date <- tail(data[, "date"], 1)
-  
-  # P-3: Lueckenhafte Handelstag-Daten automatisch auf Kalenderraster auffuellen
-  # (LOCF fuer numerische Spalten; logische Signal-Spalten -> FALSE).
-  expected_days <- as.numeric(difftime(stopp_date, start_date, units = "days")) + 1
-  if (nrow(data) != expected_days) {
-    message(sprintf(
-      "Hinweis: %d Zeilen, erwartet %d Kalendertage. Fehlende Tage werden aufgefuellt (LOCF; Signale = FALSE).",
-      nrow(data), expected_days))
-    .locf_fill <- function(v) {
-      non_na <- which(!is.na(v))
-      if (length(non_na) == 0L) return(v)
-      idx <- integer(length(v)); idx[non_na] <- non_na
-      idx <- cummax(idx)
-      idx[idx == 0L] <- non_na[1]          # fuehrende NAs rueckwaerts fuellen
-      v[idx]
-    }
-    all_dates <- seq.Date(as.Date(start_date), as.Date(stopp_date), by = "day")
-    data$.filled <- FALSE
-    data <- merge(data.frame(date = all_dates), data, by = "date", all.x = TRUE)
-    data$.filled[is.na(data$.filled)] <- TRUE   # A-2: aufgefuellte Tage markieren
-    num_cols <- setdiff(names(data)[vapply(data, is.numeric, logical(1))], "date")
-    for (cc in num_cols) data[[cc]] <- .locf_fill(data[[cc]])
-    lgl_cols <- names(data)[vapply(data, is.logical, logical(1))]
-    for (cc in lgl_cols) data[[cc]][is.na(data[[cc]])] <- FALSE
-  }
-
-  #--------> Initialisierung der Speicher-Objekte:
-  sim_mem <- list(
-    assets = setNames(vector("list", length = length(strategy)), names(strategy)),
-    status = setNames(vector("list", length = length(strategy)), names(strategy)),
-    market = setNames(vector("list", length = length(strategy)), names(strategy)),
-    trades = setNames(vector("list", length = length(strategy)), names(strategy)),
-    report = setNames(vector("list", length = length(strategy)), names(strategy)),
-    # === NEU: Erweiterte Totals-Struktur ===
-    totals = list(
-      total_value = start_value,
-      total_taxes = 0,
-      # § 20 EStG Verlusttopf (ETF, ETN standard, Zertifikate)
-      loss_capital_gains = 0,
-      # § 23 EStG Verlusttopf (ETN deliverable < 1 Jahr, Verlustvortrag)
-      loss_private_sales = 0,
-      # § 23 Jahres-Tracker
-      private_sale_gains_ytd = 0,
-      private_sale_losses_ytd = 0,
-      # Sparerpauschbetrag
-      sparer_pauschbetrag_annual = sparer_pauschbetrag,
-      sparer_pauschbetrag_remaining = if (use_sparer_pauschbetrag) sparer_pauschbetrag else 0,
-      sparer_pauschbetrag_used_total = 0,
-      # Jahr-Tracking
-      current_year = as.integer(format(start_date, "%Y")),
-      # T-2: § 20 unterjaehrige Verlustverrechnungs-Tracker
-      cgt_base_taxed_ytd = 0,
-      cgt_loss_added_ytd = 0,
-      cgt_loss_used_ytd = 0
-    )
-    # === Ende neu ===
-  )
-
-  for(name in names(strategy)){
-    #---> Initialisierung des Assets-Objekts:
-    sim_mem[["assets"]][[name]] <- list(
-      class = strategy[[name]][["asset_class"]],
-      style = strategy[[name]][["action_type"]],
-      start = as.Date(strategy[[name]][["asset_start"]] %||% start_date),
-      tax_regime = strategy[[name]][["tax_regime"]] %||% switch(strategy[[name]][["asset_class"]],
-        "etf" = "investment_fund",
-        "etn" = if (isTRUE(strategy[[name]][["deliverable"]])) "private_sale" else "capital_gains",
-        "etc" = if (isTRUE(strategy[[name]][["deliverable"]])) "private_sale" else "capital_gains",
-        "certificate" = "capital_gains",
-        "etn_standard" = "capital_gains",
-        "etn_deliverable" = "private_sale",
-        "capital_gains"),
-      bonus = (strategy[[name]][["asset_bonus"]] %||% 0) / 100,   # PROZENT-KONVENTION
-      deliverable = strategy[[name]][["deliverable"]] %||% FALSE
-    )
-
-    # P-2: Signal-Spalten validieren (nur fuer action_type = "signal")
-    if (identical(strategy[[name]][["action_type"]], "signal")) {
-      sb <- strategy[[name]][["signal_buy"]]
-      ss <- strategy[[name]][["signal_sell"]]
-      if (is.null(sb) || !sb %in% names(data))
-        stop(sprintf("simulation: signal_buy-Spalte '%s' fehlt im Datensatz (Asset '%s').", sb %||% "NULL", name))
-      if (is.null(ss) || !ss %in% names(data))
-        stop(sprintf("simulation: signal_sell-Spalte '%s' fehlt im Datensatz (Asset '%s').", ss %||% "NULL", name))
-    }
-
-    #---> Initialisierung des Status-Objekts: (Das war mal ein Vektor!!!!)
-    sim_mem[["status"]][[name]] <- list(
-      count = 0,
-      price = 0,
-      worth = 0,
-      money = strategy[[name]][["asset_share"]] * start_value,
-      total = strategy[[name]][["asset_share"]] * start_value,
-      target = strategy[[name]][["asset_share"]],
-      actual = strategy[[name]][["asset_share"]],
-      differ = 0
-    )
-
-    #---> Initialisierung des Market-Objekts:
-    sim_mem[["market"]][[name]] <- list(
-      asset_day = seq.Date(
-        from = as.Date(start_date),
-        to = as.Date(stopp_date),
-        by = "days"),
-      base_rates = if (base_rate_flex) {
-  if (is.null(base_rate_data) || !base_rate_data %in% names(data)) {
-    stop("base_rate_data column '", base_rate_data, "' not found in data")
-  }
-  br <- data[[base_rate_data]]
-  br[is.na(br)] <- 0  # NA durch 0 ersetzen
-  br
-} else {
-  # BUG-1 FIX: Vektor statt Skalar, damit Index-Zugriff in calculate_flat_rate() funktioniert
-  rep(base_rate %||% 0, nrow(data))
-},
-      asset_price = data[[name]],
-      signal_buy = if (is.null(strategy[[name]][["signal_buy"]])) rep(FALSE, nrow(data)) else data[[strategy[[name]][["signal_buy"]]]],
-      signal_sell = if (is.null(strategy[[name]][["signal_sell"]])) rep(FALSE, nrow(data)) else data[[strategy[[name]][["signal_sell"]]]],
-      spread_rate = (strategy[[name]][["asset_spread"]] %||% 0) / 100   # PROZENT-KONVENTION
-    )
-
-    #---> Initialisierung des Trade-Objekts:
-    max_trades <- nrow(data)
-    sim_mem[["trades"]][[name]] <- list(
-      buys = vector("list", max_trades),
-      buy_count = 0,
-      sells = vector("list", max_trades),
-      sell_count = 0,
-      taxes = vector("list", max_trades),
-      tax_count = 0,
-      fees = vector("list", max_trades),
-      fee_count = 0,
-      fifo_front = 1
-    )
-
-    #---> Initialisierung des Report-Objekts:
-    sim_mem[["report"]][[name]] <- list(
-      worth = c(sim_mem[["status"]][[name]][["worth"]], numeric(nrow(data)-1)),
-      money = c(sim_mem[["status"]][[name]][["money"]], numeric(nrow(data)-1)),
-      flows = numeric(nrow(data)),
-      total = c(sim_mem[["status"]][[name]][["total"]], numeric(nrow(data)-1)),
-      share = numeric(nrow(data))  # Wird durch calculate_total_report am Tag 1 korrekt gesetzt
-    )
-  }
-
-  #--------> Initialisierung der Flag-Objekte:
-  flag_date <- seq.Date(from = as.Date(start_date), to = as.Date(stopp_date), by = "days")
-  # A-2: Markierung aufgefuellter (LOCF) Tage, aligned zu flag_date
-  flag_filled <- if (".filled" %in% names(data)) {
-    .f <- as.logical(data[[".filled"]]); .f[is.na(.f)] <- TRUE; .f
-  } else rep(FALSE, length(flag_date))
-  data[[".filled"]] <- NULL
-  flag_assets <- names(strategy)
-  flag_liquidate <- liquidate & (flag_date == stopp_date)
-  flag_rebalance <- calculate_dates_flags(mode = balance_mode, span = balance_span, unit = balance_unit, days = balance_days, dates = flag_date, anchor = balance_anchor, start_date = balance_start, skip_start = balance_skip, liquidate = liquidate)
-  flag_dca <- calculate_dates_flags(mode = dca_mode, span = dca_span, unit = dca_unit, days = dca_days, dates = flag_date, value = dca_value, anchor = dca_anchor, start_date = dca_start, skip_start = dca_skip, liquidate = liquidate)
-  flag_taxes <- (format(flag_date, "%m-%d") == "12-31")
-  # === NEU: Ereignisbasiertes Rebalancing-Flag aus vorberechneter Spalte ===
-  # Default (event_col = NULL): Verhalten unveraendert datumsgetrieben.
-  # Da flag_rebalance in flag_definite -> flag_slow_path einfliesst, werden
-  # Event-Tage automatisch zu Slow-Path-Tagen (volle Event-Verarbeitung).
-  event_mode <- match.arg(event_mode)
-  flag_event <- rep(FALSE, length(flag_date))
-  if (!is.null(event_col)) {
-    if (is.null(data[[event_col]]))
-      stop(sprintf("simulation: event_col '%s' nicht im Datensatz gefunden.", event_col))
-    flag_event <- as.logical(data[[event_col]])
-    flag_event[is.na(flag_event)] <- FALSE
-    # gleiche Schutzregeln wie der Kalender-Trigger: kein Rebalancing am
-    # Einstiegstag und (bei liquidate) nicht am Liquidationstag.
-    guard <- (flag_date != flag_date[1]) & (!liquidate | flag_date != stopp_date)
-    flag_event <- flag_event & guard
-    if (event_mode == "additional") {
-      flag_rebalance <- flag_rebalance | flag_event   # zusaetzlich (OR)
-    } else {
-      flag_rebalance <- flag_event                    # anstelle
-    }
-  }
-
-  flag_trade <- !flag_rebalance & (flag_date != stopp_date) & !flag_filled
-  flag_split <- calculate_split_flags(input = sim_mem, base = 100, mode = split_mode, dates = flag_date, split_thresh = split_thresh)
-
-  # V-1b: Verschiebe-Helfer (naechster Handelstag; am Monatsende vorziehen)
-  .shift_off_filled <- function(flags, filled, dates){
-    hit <- which(flags & filled)
-    if(!length(hit)) return(flags)
-    n <- length(flags); mon <- format(dates, "%Y-%m")
-    for(i in hit){
-      j <- i + 1L
-      while(j <= n && filled[j]) j <- j + 1L
-      if(j > n || mon[j] != mon[i]){          # Monatsende: vorziehen
-        j <- i - 1L
-        while(j >= 1L && filled[j]) j <- j - 1L
-      }
-      flags[i] <- FALSE
-      if(j >= 1L && j <= n) flags[j] <- TRUE
-    }
-    flags
-  }
-  if(any(flag_filled)){
-    flag_rebalance <- .shift_off_filled(flag_rebalance, flag_filled, flag_date)
-    flag_dca       <- .shift_off_filled(flag_dca,       flag_filled, flag_date)
-    flag_split     <- .shift_off_filled(flag_split,     flag_filled, flag_date)
-    flag_liquidate <- .shift_off_filled(flag_liquidate, flag_filled, flag_date)
-    flag_trade     <- !flag_rebalance & (flag_date != stopp_date) & !flag_filled   # neu ableiten
-  }
-
-  #--------> Initialisierung der Startgewichte bei Non-Tradeble Assets:
-  initial_assets <- flag_assets[sapply(flag_assets, function(name){
-    trade_start <- sim_mem[["assets"]][[name]][["start"]] 
-    (trade_start %||% flag_date[1]) <= flag_date[1]
-  })]
-
-  initial_weights_sum <- sum(sapply(initial_assets, function(name) sim_mem[["status"]][[name]][["actual"]]))
-
-  for(name in flag_assets){
-    if(name %in% initial_assets){
-      normalized_weight <- sim_mem[["status"]][[name]][["actual"]] / initial_weights_sum
-      sim_mem[["status"]][[name]][["actual"]] <- normalized_weight
-      sim_mem[["status"]][[name]][["money"]]  <- start_value * normalized_weight
-      sim_mem[["status"]][[name]][["total"]]  <- start_value * normalized_weight
-    } else {
-      sim_mem[["status"]][[name]][["differ"]] <- 0
-      sim_mem[["status"]][[name]][["money"]]  <- 0
-      sim_mem[["status"]][[name]][["total"]]  <- 0
-    }
-  }
-
-  asset_starts <- as.Date(vapply(flag_assets, function(name) as.numeric(sim_mem[["assets"]][[name]][["start"]] %||% flag_date[1]), numeric(1)), origin = "1970-01-01")
-  if(any(flag_filled)){
-    asset_starts <- as.Date(vapply(asset_starts, function(d){
-      i <- match(d, flag_date)
-      if(is.na(i) || !flag_filled[i]) return(as.numeric(d))
-      n <- length(flag_date); mon <- format(flag_date, "%Y-%m")
-      j <- i + 1L
-      while(j <= n && flag_filled[j]) j <- j + 1L
-      if(j > n || mon[j] != mon[i]){
-        j <- i - 1L
-        while(j >= 1L && flag_filled[j]) j <- j - 1L
-      }
-      as.numeric(flag_date[max(min(j, n), 1L)])
-    }, numeric(1)), origin = "1970-01-01")
-  }
-  flag_active <- flag_date %in% asset_starts
-
-  # P1: Statt 1826 identische Kopien vorallokieren, Startindizes speichern
-  # und active_assets im Slow-Path inline berechnen
-  asset_start_indices <- match(asset_starts, flag_date)
-  asset_start_indices[is.na(asset_start_indices)] <- 1L
-
-
-
-
-
-
-  # 1. Definitive Events (kalenderbasiert, unabhängig von Strategie)
-  flag_definite <- flag_active | flag_split | flag_dca | flag_rebalance | flag_taxes | flag_liquidate
-
-  # 2. Strategie-Typen identifizieren
-  strategy_types <- sapply(flag_assets, function(name) sim_mem[["assets"]][[name]][["style"]])
-  has_bnh <- any(strategy_types == "bnh")
-  has_signal <- any(strategy_types == "signal")
-
-  # P6: Tax-Regime einmal pro Asset vorberechnen (statisch, ändert sich nie)
-  tax_regimes <- sapply(flag_assets, function(name) sim_mem[["assets"]][[name]][["tax_regime"]])
-  # O-2: Spread-Raten einmalig vorberechnen (statt wiederholter Lookups)
-  spread_rates <- sapply(flag_assets, function(name) sim_mem[["market"]][[name]][["spread_rate"]])
-
-  # § 18 Abs. 3 InvStG: begleicht eine festgesetzte Vorabpauschale (Fall A: Cash,
-  # Fall B: Zwangsverkauf) zu den Kursen von flag_date[time] und verbucht den Entry.
-  .pay_vp <- function(sim_mem, name, tax_debt, time, meta) {
-    tax_regime <- tax_regimes[[name]]
-    if (sim_mem[["status"]][[name]][["money"]] >= tax_debt) {
-      sim_mem[["status"]][[name]][["money"]] <- sim_mem[["status"]][[name]][["money"]] - tax_debt
-      sim_mem[["totals"]][["total_taxes"]] <- sim_mem[["totals"]][["total_taxes"]] + tax_debt
-      if (details) {
-        cat(sprintf("Tax Event:\tPaying Vorabpauschale of %.2f EUR for %s from cash on %s\n",
-                    tax_debt, name, flag_date[time]))
-      }
-    } else {
-      remaining_tax <- tax_debt
-      if (sim_mem[["status"]][[name]][["money"]] > 0) {
-        cash_used <- sim_mem[["status"]][[name]][["money"]]
-        remaining_tax <- tax_debt - cash_used
-        sim_mem[["status"]][[name]][["money"]] <- 0
-        if (details) {
-          cat(sprintf("Tax Event:\tUsing %.2f EUR cash for partial Vorabpauschale payment on %s\n",
-                      cash_used, flag_date[time]))
-        }
-      }
-      if (remaining_tax > 0) {
-        sell_result <- calculate_sell_count(
-          input = sim_mem, name = name, target = remaining_tax, index = time,
-          spread = spread_rates[[name]], fractions = fractions,
-          tax_mode = tax_mode, tax_rate = tax_rate,
-          marginal_tax_rate = marginal_tax_rate, tax_regime = tax_regime)
-        sim_mem <- perform_trade_sell(
-          input = sim_mem, count = sell_result[["sell_count"]],
-          price = sell_result[["fifo_price"]], name = name, index = time,
-          tax_mode = tax_mode, tax_rate = tax_rate,
-          effective_tax_rate = effective_tax_rate,
-          marginal_tax_rate = marginal_tax_rate,
-          private_sale_threshold = private_sale_threshold,
-          use_sparer_pauschbetrag = use_sparer_pauschbetrag,
-          tax_regime = tax_regime, reason = "Tax Event:",
-          spread = spread_rates[[name]], details = details)
-        sim_mem[["status"]][[name]][["money"]] <- sim_mem[["status"]][[name]][["money"]] - remaining_tax
-        if (details) {
-          cat(sprintf("\t\t=> Sold shares to pay remaining %.2f EUR Vorabpauschale\n", remaining_tax))
-        }
-      }
-      sim_mem[["totals"]][["total_taxes"]] <- sim_mem[["totals"]][["total_taxes"]] + tax_debt
-      if (sim_mem[["status"]][[name]][["money"]] < 0) sim_mem[["status"]][[name]][["money"]] <- 0
-    }
-    trades_entry <- list(
-      event_date = flag_date[time],
-      assessment_date = meta[["assessment_date"]],
-      event_type = "Vorabpauschale",
-      flat_rate_gross = meta[["flat_rate"]],
-      bonus_applied = meta[["bonus"]],
-      flat_rate_taxable = meta[["flat_rate"]] * (1 - meta[["bonus"]]),
-      spb_used = meta[["spb_used"]],
-      taxes_paid = tax_debt
-    )
-    sim_mem[["trades"]][[name]][["tax_count"]] <- sim_mem[["trades"]][[name]][["tax_count"]] + 1
-    sim_mem[["trades"]][[name]][["taxes"]][[sim_mem[["trades"]][[name]][["tax_count"]]]] <- trades_entry
-    sim_mem
-  }
-
-  # 3. Signale aus Daten extrahieren (statisch, vorberechnet)
-  flag_signal <- rep(FALSE, length(flag_date))
-
-  if(has_signal){
-    for(name in flag_assets){
-      if(sim_mem[["assets"]][[name]][["style"]] == "signal"){
-        # Asset-spezifische Signale
-        buy_signal <- sim_mem[["market"]][[name]][["signal_buy"]]
-        sell_signal <- sim_mem[["market"]][[name]][["signal_sell"]]
-      
-        # Kombinieren (TRUE wenn eines der Signale TRUE)
-        flag_signal <- flag_signal | buy_signal | sell_signal
-      }
-    }
-  }
-
-  # 4. BnH-Potenzial (nur Tag 1, danach übernimmt DCA)
-  #    Bei BnH OHNE DCA: Nur Tag 1 ist relevant (danach immer investiert)
-  #    Bei BnH MIT DCA: Tag 1 + DCA-Tage (in flag_definite bereits enthalten)
-  flag_bnh_potential <- rep(FALSE, length(flag_date))
-
-  if(has_bnh){
-    flag_bnh_potential[1] <- TRUE
-  # Weitere Tage nicht nötig! DCA-Tage sind bereits in flag_definite
-  }
-
-  # 5. Kombiniertes Slow-Path Flag
-  flag_slow_path <- flag_definite | flag_signal | flag_bnh_potential
-  
-
-  # ═══════════════════════════════════════════════════════════════════════════════
-  # 7. PERFORMANCE-OPTIMIERUNG: Vorberechnung der Individual-Processing-Tage
-  # ═══════════════════════════════════════════════════════════════════════════════
-  # Statt jeden Tag einzeln zu durchlaufen, identifizieren wir Tage die 
-  # individuelle Verarbeitung brauchen (Slow-Path, Jahreswechsel).
-  # Zusammenhängende Blöcke dazwischen werden per batch_market_update() in C++
-  # vektorisiert verarbeitet (~10-50x schneller als einzelne R-Aufrufe).
-  
-  # Jahreswechsel-Flag vorberechnen (statt format() auf jedem Tag)
-  flag_year_change <- rep(FALSE, length(flag_date))
-  flag_vp_settle   <- rep(FALSE, length(flag_date))   # erster Handelstag je neuen Jahres
-  if (tax_mode == "person") {
-    date_years <- as.integer(format(flag_date, "%Y"))
-    flag_year_change <- c(FALSE, diff(date_years) > 0L)
-    for (ys in which(flag_year_change)) {
-      j <- ys
-      while (j <= length(flag_date) && flag_filled[j]) j <- j + 1L
-      if (j <= length(flag_date)) flag_vp_settle[j] <- TRUE
-    }
-  }
-  
-  # Kombiniertes Flag: Alle Tage die individuelle Verarbeitung brauchen
-  flag_slow_path  <- flag_slow_path | flag_vp_settle   # Faelligkeitstage voll verarbeiten (kein Fast-Path-next)
-  flag_individual <- flag_slow_path | flag_year_change
-  individual_days <- which(flag_individual)
-  n_total_days <- nrow(data)
-  
-  # ═══════════════════════════════════════════════════════════════════════════════
-  # BLOCK-BASIERTE HAUPTSCHLEIFE
-  # ═══════════════════════════════════════════════════════════════════════════════
-  
-  prev_end <- 0L
-  active_assets <- character(0)   # O-3: nur an Aktivierungstagen neu berechnet
-  
-  for (sd_pos in seq_along(individual_days)) {
-    time <- individual_days[sd_pos]
-    
-    # ─────────────────────────────────────────────────────────────────────────
-    # BATCH: Zusammenhängende Fast-Path-Tage vor diesem Individual-Tag
-    # → Ein einzelner C++ Aufruf statt hunderte R-Iterationen
-    # ─────────────────────────────────────────────────────────────────────────
-    if (time > prev_end + 1L) {
-      batch_market_update(sim_mem, flag_assets, prev_end + 1L, time - 1L)
-    }
-    
-    # ─────────────────────────────────────────────────────────────────────────
-    # INDIVIDUAL-TAG: Jahreswechsel, dann ggf. Slow-Path
-    # ─────────────────────────────────────────────────────────────────────────
-    
-    # === Jahreswechsel prüfen (nur an Tagen wo das Jahr wechselt) ===
-    if (flag_year_change[time]) {
-      sim_mem <- handle_year_change(
-        input = sim_mem,
-        current_date = flag_date[time],
-        marginal_tax_rate = marginal_tax_rate,
-        private_sale_threshold = private_sale_threshold,
-        sparer_pauschbetrag = sparer_pauschbetrag,
-        use_sparer_pauschbetrag = use_sparer_pauschbetrag,
-        soli_factor_income = soli_factor_income,
-        effective_tax_rate = effective_tax_rate,
-        details = details
-      )
-    }
-    
-    # === Wenn kein Slow-Path → nur Market-Update (C++) ===
-    if (!flag_slow_path[time]) {
-      perform_market_update(sim_mem, flag_assets, time)
-      prev_end <- time
-      next
-    }
-    
-    # ─────────────────────────────────────────────────────────────────────────
-    # SLOW-PATH: Volle Event-Verarbeitung
-    # ─────────────────────────────────────────────────────────────────────────
-    if (flag_active[time] || length(active_assets) == 0L) {
-      active_assets <- flag_assets[asset_start_indices <= time]   # O-3: Cache-Update
-    }
-    flag_fast_report <- TRUE
-
-    #--------> Implementierung von Asset-Aktivierung:
-    if(flag_active[time]){
-      for(name in setdiff(flag_assets, active_assets)){
-        sim_mem[["market"]][[name]][["signal_buy"]][time] <- FALSE
-        sim_mem[["market"]][[name]][["signal_sell"]][time] <- FALSE
-      }
-
-      if(balance_mode){
-        current_weights_sum <- sum(sapply(active_assets, function(name) sim_mem[["status"]][[name]][["actual"]]))
-
-        for(name in active_assets){sim_mem[["status"]][[name]][["differ"]] <- sim_mem[["status"]][[name]][["actual"]] / current_weights_sum}
-
-        if(details){
-          new_assets <- flag_assets[asset_starts == flag_date[time]]
-          if(length(new_assets)) cat(sprintf("Market Event:\tActive trading of %s now enabled.\n", paste(new_assets, collapse = ", ")))
-        }
-
-        flag_rebalance[time] <- TRUE
-      }
-
-      calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
-      flag_fast_report <- FALSE
-    }
-
-    #--------> Implementierung von Splits und Reverse Splits:
-    if(flag_split[time]){
-      for(name in active_assets){
-        if(sim_mem[["status"]][[name]][["count"]] > 0){
-          split_price <- sim_mem[["market"]][[name]][["asset_price"]][time]
-
-          if(split_price > split_thresh[[2]]){
-            sim_mem <- perform_asset_split(input = sim_mem, name = name, ratio = split_price / 100,
-                                           type = "forward", index = time,                                        
-   fractions = fractions,
-   details = details,
-  current_date = flag_date[time]
-            )
-          }
-
-          if(split_price < split_thresh[[1]]){
-            sim_mem <- perform_asset_split(input = sim_mem, name = name, ratio = 100 / split_price,
-                                           type = "reverse", index = time,                                        
-   fractions = fractions,
-   details = details,
-  current_date = flag_date[time]
-            )
-          }
-        }
-      }
-
-      calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
-      flag_fast_report <- FALSE
-    }
-
-    #--------> Implementierung von Dollar-Cost-Averaging:
-    if(flag_dca[time]){
-      # R-1: DCA-Verteilung nach STRATEGIE-Gewichten (asset_share), renormiert
-      # ueber die derzeit aktiven Assets (inkl. Cash-Reserven signalbedingt
-      # wartender (aktivierter!) Signal-Assets — Gleichbehandlung nach Zielgewicht). Ohne balance_dca:
-      # fixer Split (70:30 bleibt 70:30, egal wie das Depot driftet).
-      strat_w <- sapply(active_assets, function(name) strategy[[name]][["asset_share"]])
-      strat_w <- strat_w / sum(strat_w, na.rm = TRUE)
-
-      if(balance_dca && length(active_assets) > 1){
-        # R-1 (balance_dca): Rate schliesst zuerst die WERT-Defizite zu den
-        # Strategie-Zielen (Rebalancing-Wirkung); ein etwaiger Rest wird nach
-        # Strategie-Gewichten verteilt.
-        totals_now <- sapply(active_assets, function(name) sim_mem[["status"]][[name]][["total"]])
-        desired    <- strat_w * (sum(totals_now, na.rm = TRUE) + dca_value)
-        deficit    <- pmax(0, desired - totals_now)
-        alloc <- if (sum(deficit) > dca_value) {
-          dca_value * deficit / sum(deficit)
-        } else {
-          deficit + (dca_value - sum(deficit)) * strat_w
-        }
-        alloc <- setNames(as.numeric(alloc), active_assets)
-        for(name in active_assets){
-          dca_flows_allocation(input = sim_mem, name = name, flows = alloc[[name]], index = time)
-        }
-      } else {
-        for(name in active_assets){
-          dca_flows_allocation(input = sim_mem, name = name, flows = strat_w[[name]] * dca_value, index = time)
-        }
-      }
-      if(details){
-        flow_values <- sapply(active_assets, function(name) sim_mem[["report"]][[name]][["flows"]][time])
-        placeholder <- paste(sprintf("%s %%.2f EUR", names(flow_values)), collapse = "; ")
-        format_text <- sprintf("Transferring:\tDepositing %%.2f EUR to brokerage account on %%s\n\t\t=> %s\n", placeholder)
-        cat(do.call(sprintf, c(list(format_text, dca_value), list(flag_date[time]), as.list(flow_values))))
-      }
-
-      calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
-      flag_fast_report <- FALSE
-    }
-
-    #--------> Implementierung von Trading-Aktionen:
-    if(flag_trade[time]){
-      trade_event <- FALSE
-
-      for(name in active_assets){   # P-1/O-1: nur aktive Assets handeln
-        flag_buy <- calculate_buy_signal(input = sim_mem, name = name, index = time)
-        flag_sell <- calculate_sell_signal(input = sim_mem, name = name, index = time)
-
-        if(flag_buy){
-          sim_mem <- perform_trade_buy(input = sim_mem, name = name, index = time, reason = "Trade Event:", spread = spread_rates[[name]], fractions = fractions, details = details)
-          trade_event <- TRUE
-        }
-
-        if(flag_sell){
-          sim_mem <- perform_trade_sell(input = sim_mem, name = name, index = time, tax_mode = tax_mode, tax_rate = tax_rate,
-            effective_tax_rate = effective_tax_rate,
-            marginal_tax_rate = marginal_tax_rate,
-            private_sale_threshold = private_sale_threshold,
-            use_sparer_pauschbetrag = use_sparer_pauschbetrag,
-            tax_regime = tax_regimes[[name]],
-            reason = "Trade Event:", spread = spread_rates[[name]], details = details)
-          trade_event <- TRUE
-        }
-      }
-
-      if(trade_event){
-        calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
-        flag_fast_report <- FALSE
-      }
-    }
-
-    #--------> Implementierung von Rebalancing-Aktionen:
-    if(flag_rebalance[time]){
-      active_targets <- sapply(active_assets, function(name){sim_mem[["status"]][[name]][["actual"]]})
-      active_targets <- active_targets / sum(active_targets, na.rm = TRUE)
-
-      # === NEU: ereignisgetriebene Ziel-Gewichte ueberschreiben (nur an Event-Tagen) ===
-      # Greift nur, wenn event_weight gesetzt ist UND dieser Tag ein Event-Tag ist.
-      # Veraendert ausschliesslich das lokale Ziel-Gewicht dieses Rebalancing-Laufs,
-      # nicht die status-Buchhaltung. Die Band-/Gewichts-Logik bleibt im Datensatz.
-      if (!is.null(event_weight) && isTRUE(flag_event[time])) {
-        ow <- sapply(active_assets, function(nm){
-          col <- event_weight[[nm]]
-          if (is.null(col)) NA_real_ else as.numeric(data[[col]][time])
-        })
-        if (all(is.finite(ow)) && sum(ow) > 0) {
-          active_targets <- ow / sum(ow)
-          names(active_targets) <- active_assets
-        }
-      }
-
-      # V-2/Fix 3: Signal-Gate (Cash-Reserve-Design, siehe Notiz im Patcher)
-      signal_cash_only <- character(0)
-      for(name in active_assets){
-        if(sim_mem[["assets"]][[name]][["style"]] == "signal"){
-          .has_pos  <- sim_mem[["status"]][[name]][["count"]] > 0
-          .sig_buy  <- isTRUE(sim_mem[["market"]][[name]][["signal_buy"]][time])
-          .sig_sell <- isTRUE(sim_mem[["market"]][[name]][["signal_sell"]][time])
-          if(.has_pos && .sig_sell){
-            sim_mem <- perform_trade_sell(input = sim_mem, name = name, index = time,
-              tax_mode = tax_mode, tax_rate = tax_rate,
-              effective_tax_rate = effective_tax_rate,
-              marginal_tax_rate = marginal_tax_rate,
-              private_sale_threshold = private_sale_threshold,
-              use_sparer_pauschbetrag = use_sparer_pauschbetrag,
-              tax_regime = tax_regimes[[name]],
-              reason = "Rebalancing/Signal-Exit:",
-              spread = spread_rates[[name]], details = details)
-            signal_cash_only <- c(signal_cash_only, name)
-          } else if(!.has_pos && .sig_buy){
-            # Signal-Entry aus der eigenen Cash-Reserve; danach normale Teilnahme
-            sim_mem <- perform_trade_buy(input = sim_mem, name = name, index = time,
-              reason = "Rebalancing/Signal-Entry:",
-              spread = spread_rates[[name]], fractions = fractions, details = details)
-          } else if(!.has_pos && !.sig_buy){
-            signal_cash_only <- c(signal_cash_only, name)
-          }
-        }
-      }
-
-      # Gleichbehandlung: Ist-Gewichte total-basiert (worth+money) fuer ALLE
-      actual_weights <- sapply(active_assets, function(name){sim_mem[["status"]][[name]][["differ"]]})
-
-      new_asset <- any(asset_starts == flag_date[time])
-      force_rebalance <- new_asset
-
-      if(force_rebalance && details){
-        new_assets <- flag_assets[asset_starts == flag_date[time]]
-        cat(sprintf("Rebalancing:\tForcing rebalance on %s due to new asset activation: %s\n",
-            flag_date[time], paste(new_assets, collapse = ", ")))
-      }
-
-      event_rebalance <- FALSE
-
-      if(force_rebalance){
-        event_rebalance <- TRUE
-      } else if(is.null(balance_thresh)){
-        event_rebalance <- TRUE
-      } else {
-        deviations <- if (balance_thresh_type == "relative") {
-          abs(actual_weights / active_targets - 1)
-        } else {
-          abs(active_targets - actual_weights)
-        }
-        max_deviation <- max(deviations, na.rm = TRUE)
-        event_rebalance <- (max_deviation > balance_thresh)
-
-        if(details){
-          if(event_rebalance){
-            cat(sprintf("Rebalancing:\tExecuting rebalancing on %s (max deviation: %.2f%% > threshold: %.2f%%)\n",
-                flag_date[time], max_deviation * 100, balance_thresh * 100))
-
-            for(i in seq_along(active_assets)){
-              name <- active_assets[i]
-              dev <- deviations[i]
-              
-              if(dev > balance_thresh){
-                cat(sprintf("\t\t=> %s: target=%.1f%%, actual=%.1f%%, deviation=%.2f%%\n",
-                    name, active_targets[i]*100, actual_weights[i]*100, dev*100))
-              }
-            }
-          } else {
-            cat(sprintf("Rebalancing:\tSkipping rebalancing on %s (max deviation: %.2f%% < threshold: %.2f%%)\n",
-                flag_date[time], max_deviation * 100, balance_thresh * 100))
-            }
-          }
-        }
-
-        if(event_rebalance){
-          differ_weights <- active_targets - actual_weights
-          total_strategy <- sum(sapply(sim_mem[["status"]][active_assets], function(x) x[["total"]]), na.rm = TRUE)
-
-          transfer_pool <- 0
-          transfer_value <- abs(differ_weights * total_strategy)
-
-          # ════════════════════════════════════════════════════════════════
-          # BUG-4/5 FIX: Rebalancing ohne Signal-Abhängigkeit,
-          # korrekte Richtung: differ < 0 = übergewichtet → verkaufen,
-          #                    differ > 0 = untergewichtet → kaufen
-          # ════════════════════════════════════════════════════════════════
-          
-          # PHASE 1: Übergewichtete Assets verkaufen → Pool aufbauen
-          for(name in names(differ_weights[differ_weights < 0])){
-            if(sim_mem[["status"]][[name]][["count"]] > 0){
-              sell_result <- calculate_sell_count(
-                input = sim_mem, name = name, target = transfer_value[name], 
-                index = time, spread = spread_rates[[name]], 
-                fractions = fractions, tax_mode = tax_mode, tax_rate = tax_rate,
-                marginal_tax_rate = marginal_tax_rate,
-                tax_regime = tax_regimes[[name]])
-              
-              sim_mem <- perform_trade_sell(
-                input = sim_mem, name = name, 
-                count = sell_result[["sell_count"]], 
-                price = sell_result[["fifo_price"]], 
-                index = time, tax_mode = tax_mode, tax_rate = tax_rate,
-                effective_tax_rate = effective_tax_rate,
-                marginal_tax_rate = marginal_tax_rate,
-                private_sale_threshold = private_sale_threshold,
-                use_sparer_pauschbetrag = use_sparer_pauschbetrag,
-                tax_regime = tax_regimes[[name]],
-                reason = "Rebalancing:", 
-                spread = spread_rates[[name]], details = details)
-            }
-            
-            # Cash aus diesem Asset in den Transfer-Pool
-            available_cash <- min(sim_mem[["status"]][[name]][["money"]], transfer_value[name])
-            transfer_pool <- transfer_pool + available_cash
-            sim_mem[["status"]][[name]][["money"]] <- sim_mem[["status"]][[name]][["money"]] - available_cash
-            
-            if(details){
-              cat(sprintf("\t\tDepositing %.2f EUR from %s to rebalancing pool\n", 
-                          available_cash, name))
-            }
-          }
-          
-          # PHASE 2: Untergewichtete Assets kaufen → Pool verbrauchen
-          for(name in names(differ_weights[differ_weights > 0])){
-            allocation <- min(transfer_value[name], transfer_pool)
-            if(allocation > 0){
-              sim_mem[["status"]][[name]][["money"]] <- sim_mem[["status"]][[name]][["money"]] + allocation
-              transfer_pool <- transfer_pool - allocation
-              
-              if(details){
-                cat(sprintf("Rebalancing:\tWithdrawing %.2f EUR from pool to %s\n", 
-                            allocation, name))
-              }
-              
-              if (name %in% signal_cash_only) {
-                # Fix 3: signalbedingt wartendes Signal-Asset — Zielgewicht als CASH-Reserve
-                # auffuellen, KEIN Aktienkauf (Pool wurde damit um den Betrag
-                # des inaktiven Assets reduziert).
-                if(details){
-                  cat(sprintf("\t\t=> %s haelt %.2f EUR als Cash-Reserve (Signal inaktiv)\n",
-                              name, sim_mem[["status"]][[name]][["money"]]))
-                }
-              } else {
-                sim_mem <- perform_trade_buy(
-                  input = sim_mem, name = name, index = time,
-                  reason = "Rebalancing:",
-                  spread = spread_rates[[name]],
-                  fractions = fractions, details = details)
-              }
-            }
-          }
-
-          # Restliches Cash im Pool proportional verteilen
-          if(transfer_pool > 0.01){
-            if(details){
-              cat(sprintf("\t\tRedistributing remaining %.2f EUR from rebalancing pool\n", transfer_pool))
-            }
-
-            for(name in active_assets){
-              redistribution <- active_targets[[name]] * transfer_pool
-              sim_mem[["status"]][[name]][["money"]] <- sim_mem[["status"]][[name]][["money"]] + redistribution
-
-              if(details){
-                cat(sprintf("\t\t=> Transferring %.2f EUR to %s\n", redistribution, name))
-              }
-            }
-          }
-        }
-
-      # Fix 5: Restcash (DCA-Zufluss, Redistribution) noch am Rebalance-Tag
-      # reinvestieren — ausser den Cash-Reserven signalbedingt wartender Signal-Assets.
-      for (name in active_assets) {
-        if (!(name %in% signal_cash_only) &&
-            sim_mem[["status"]][[name]][["money"]] > 0.005 &&
-            (sim_mem[["assets"]][[name]][["style"]] != "signal" ||
-             sim_mem[["status"]][[name]][["count"]] > 0)) {
-          sim_mem <- perform_trade_buy(input = sim_mem, name = name, index = time,
-            reason = "Rebalancing:", spread = spread_rates[[name]],
-            fractions = fractions, details = details)
-        }
-      }
-
-      calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
-      flag_fast_report <- FALSE
-    }
-
-    #--------> Implementierung von Steuer- und Gebührenkalkulation:
-    # § 18 Abs. 3 InvStG: Faelligkeit der Vorabpauschale des Vorjahres
-    if (tax_mode == "person" && flag_vp_settle[time]) {
-      pend <- sim_mem[["totals"]][["vp_pending"]]
-      vp_paid_any <- !is.null(pend) && length(pend) > 0
-      if (vp_paid_any) {
-        for (p in pend) {
-          sim_mem <- .pay_vp(sim_mem, p[["name"]], p[["tax_debt"]], time,
-                             list(flat_rate = p[["flat_rate"]],
-                                  bonus = p[["bonus"]],
-                                  spb_used = p[["spb_used"]],
-                                  assessment_date = p[["assessment_date"]]))
-        }
-        sim_mem[["totals"]][["vp_pending"]] <- NULL
-      }
-      if (vp_paid_any) {
-        calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
-        flag_fast_report <- FALSE
-      }
-    }
-
-    if (flag_taxes[time]) {
-      
-      # ================================================================
-      # TEIL 1: Vorabpauschale für natürliche Personen (tax_mode = "person")
-      # ================================================================
-      if (tax_mode == "person" && !(liquidate && flag_liquidate[time])) {
-        for (name in flag_assets) {
-          
-          # Vorabpauschale nur für ETFs (investment_fund) mit Bestand > 0
-          tax_regime <- tax_regimes[[name]]
-          
-          if (tax_regime == "investment_fund" && sim_mem[["status"]][[name]][["count"]] > 0) {
-            
-            # Vorabpauschale berechnen (reine Lesefunktion, keine Seiteneffekte)
-            vp_result <- calculate_flat_rate(
-              input = sim_mem, 
-              name = name, 
-              index = time, 
-              dates = flag_date,
-              tax_regime = tax_regime
-            )
-            flat_rate <- vp_result$total_vp
-            
-            # VP pro Lot in sim_mem speichern (direkt by-reference, kein Copy-on-Modify)
-            # Dies ist der Fix für den kritischen VP-Bug: Die Schreiboperation erfolgt
-            # im Aufrufer auf sim_mem, nicht in calculate_flat_rate auf einer lokalen Kopie.
-            for (vp_k in seq_along(vp_result$lot_indices)) {
-              vp_i <- vp_result$lot_indices[vp_k]
-              current_vp <- sim_mem[["trades"]][[name]][["buys"]][[vp_i]][["vp"]] %||% 0
-              sim_mem[["trades"]][[name]][["buys"]][[vp_i]][["vp"]] <- current_vp + vp_result$lot_vps[vp_k]
-            }
-            
-            if (flat_rate > 0) {
-              
-              # Bereits gezahlte Vorabpauschalen dieses Jahr ermitteln
-              prior_flat_rates <- 0
-              n_tax_entries <- sim_mem[["trades"]][[name]][["tax_count"]]
-              if (n_tax_entries > 0) {
-                current_year_str <- format(flag_date[time], "%Y")
-                prior_flat_rates <- sum(vapply(
-                  sim_mem[["trades"]][[name]][["taxes"]][1:n_tax_entries],
-                  function(x) {
-                    if (!is.null(x) && identical(format((x[["assessment_date"]] %||% x[["event_date"]]), "%Y"), current_year_str)) {
-                      x[["taxes_paid"]]
-                    } else {
-                      0
-                    }
-                  }, numeric(1)), na.rm = TRUE)
-              }
-              
-              bonus <- sim_mem[["assets"]][[name]][["bonus"]]
-              
-              result <- calculate_vorabpauschale_tax(
-                flat_rate = flat_rate,
-                bonus = bonus,
-                totals = sim_mem[["totals"]],
-                tax_rate = effective_tax_rate,
-                use_spb = use_sparer_pauschbetrag
-              )
-              
-              sim_mem[["totals"]] <- result$totals
-              tax_debt <- max(result$tax - prior_flat_rates, 0)
-              
-              if (details && result$spb_used > 0) {
-                cat(sprintf("Tax Event:\tVorabpauschale %s: %.2f EUR (nach TFS: %.2f EUR, SPB: %.2f EUR)\n",
-                            name, flat_rate, flat_rate * (1 - bonus), result$spb_used))
-              }
-              
-              if (tax_debt > 0) {
-                vp_meta <- list(flat_rate = flat_rate, bonus = bonus,
-                                spb_used = result$spb_used,
-                                assessment_date = flag_date[time])
-                # § 18 Abs. 3 InvStG: Zufluss am ersten Werktag des Folgejahres.
-                # Festsetzung hier (31.12., letzter realer Jahreskurs via LOCF);
-                # Zahlung/Zwangsverkauf am ersten Handelstag des neuen Jahres.
-                has_future_settle <- time < length(flag_date) &&
-                  any(flag_vp_settle[(time + 1):length(flag_date)])
-                if (has_future_settle) {
-                  # Ablage in totals (status wird vom C++-Market-Update mit festem
-                  # Feldsatz neu aufgebaut und wuerde ad-hoc-Felder verwerfen)
-                  pend <- sim_mem[["totals"]][["vp_pending"]]
-                  if (is.null(pend)) pend <- list()
-                  pend[[length(pend) + 1L]] <- c(vp_meta, list(name = name, tax_debt = tax_debt))
-                  sim_mem[["totals"]][["vp_pending"]] <- pend
-                  if (details) {
-                    cat(sprintf("Tax Event:\tVorabpauschale %s: %.2f EUR festgesetzt am %s (faellig am ersten Handelstag des Folgejahres)\n",
-                                name, tax_debt, flag_date[time]))
-                  }
-                } else {
-                  if (details) {
-                    cat(sprintf("Tax Event:	Vorabpauschale %s: %.2f EUR festgesetzt am %s (sofort faellig: kein weiterer Handelstag)
-",
-                                name, tax_debt, flag_date[time]))
-                  }
-                  sim_mem <- .pay_vp(sim_mem, name, tax_debt, time, vp_meta)
-                }
-              }
-            }
-          }
-        }
-      }
-      
-      # ================================================================
-      # TEIL 2: Fondsbesteuerung (tax_mode = "funds")
-      # ================================================================
-      if (tax_mode == "funds") {
-        result_fees <- calculate_fund_fees(
-          input = sim_mem, 
-          index = time, 
-          dates = flag_date, 
-          assets = flag_assets, 
-          funds_fee = funds_fee, 
-          bonus_fee = bonus_fee, 
-          details = details
-        )
-        sim_mem[["totals"]][["total_value"]] <- result_fees[["total_value"]]
-        
-        annual_fees <- result_fees[["total_fees"]]
-        asset_share <- annual_fees * sapply(sim_mem[["status"]], function(x) x[["actual"]])
-        asset_money <- sapply(sim_mem[["status"]], function(x) x[["money"]])
-        
-        for (name in flag_assets) {
-          if (asset_money[[name]] > asset_share[[name]]) {
-            if (sim_mem[["status"]][[name]][["money"]] < asset_share[[name]]) {
-              asset_share[[name]] <- max(0, sim_mem[["status"]][[name]][["money"]])
-            }
-            
-            sim_mem[["status"]][[name]][["money"]] <- sim_mem[["status"]][[name]][["money"]] - asset_share[[name]]
-            
-            if (details) {
-              cat(sprintf("\t\t=> Deducting %.2f EUR from %s's cash reserve for fees\n", 
-                          asset_share[[name]], name))
-            }
-          }
-        }
-      }
-      
-      calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
-      flag_fast_report <- FALSE
-    }
-
-    #--------> Implementierung von Liquidierung:
-    if(flag_liquidate[time]){
-      for(name in flag_assets){
-        if(sim_mem[["status"]][[name]][["count"]] > 0){
-          tax_type <- ifelse(tax_mode == "person", "person", "none")
-          sim_mem <- perform_trade_sell(input = sim_mem, name = name, index = time, 
-            tax_mode = tax_type, tax_rate = tax_rate, 
-            effective_tax_rate = effective_tax_rate,
-            marginal_tax_rate = marginal_tax_rate,
-            private_sale_threshold = private_sale_threshold,
-            use_sparer_pauschbetrag = use_sparer_pauschbetrag,
-            tax_regime = tax_regimes[[name]],
-            reason = "Liquidating:", spread = spread_rates[[name]], details = details)
-        }
-      }
-      
-      if(format(flag_date[time], "%m-%d") != "12-31" && tax_mode == "funds"){
-        result_fees <- calculate_fund_fees(input = sim_mem, index = time, dates = flag_date, assets = flag_assets, funds_fee = funds_fee, bonus_fee = bonus_fee, details = details)
-        sim_mem[["totals"]][["total_value"]] <- result_fees[["total_value"]]
-        
-        annual_fees <- result_fees[["total_fees"]]
-        asset_share <- annual_fees * sapply(sim_mem[["status"]], function(x) x[["differ"]])
-        asset_money <- sapply(sim_mem[["status"]], function(x) x[["money"]])
-        
-        for(name in flag_assets){
-          sim_mem <- perform_trade_sell(input = sim_mem, name = name, index = time, tax_mode = tax_mode, tax_rate = tax_rate, effective_tax_rate = effective_tax_rate, 
-          marginal_tax_rate = marginal_tax_rate,
-  private_sale_threshold = private_sale_threshold,
-  use_sparer_pauschbetrag = use_sparer_pauschbetrag,
-  tax_regime = tax_regimes[[name]],
-          spread = spread_rates[[name]], details = details)
-          
-          if(sim_mem[["status"]][[name]][["money"]] < asset_share[[name]]){
-            asset_share[[name]] <- max(0, sim_mem[["status"]][[name]][["money"]])
-          }
-
-          sim_mem[["status"]][[name]][["money"]] <- sim_mem[["status"]][[name]][["money"]] - asset_share[[name]]
-        }
-        
-        tax_weights <- sapply(sim_mem[["status"]], function(x) x[["differ"]])
-        final_value <- sum(sapply(sim_mem[["status"]], function(x) x[["total"]]), na.rm = TRUE)
-        total_gains <- final_value - start_value
-        
-        if(total_gains > 0){
-          total_taxes <- total_gains * tax_rate
-          
-          for(name in flag_assets){
-            tax_per_asset <- total_taxes * tax_weights[[name]]
-            
-            if(sim_mem[["status"]][[name]][["money"]] < tax_per_asset){
-              tax_per_asset <- max(0, sim_mem[["status"]][[name]][["money"]])
-            }
-            
-            sim_mem[["status"]][[name]][["money"]] <- sim_mem[["status"]][[name]][["money"]] - tax_per_asset
-          }
-          
-          if(details){
-            cat(sprintf("Liquidating:\tPaying taxes of %.2f EUR on %.2f EUR total gain on %s\n", total_taxes, total_gains, flag_date[time]))
-          }
-        }
-        
-        for(name in flag_assets){
-          trades_entry <- list(
-            event_date = flag_date[time],
-            event_type = "Fees",
-            fees_paid = annual_fees
-          )
-
-          sim_mem[["trades"]][[name]][["fee_count"]] <- sim_mem[["trades"]][[name]][["fee_count"]] + 1
-          sim_mem[["trades"]][[name]][["fees"]][[sim_mem[["trades"]][[name]][["fee_count"]]]] <- trades_entry
-        }
-      }
-
-      calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
-      flag_fast_report <- FALSE
-    }
-
-    # Fallback: Wenn kein Slow-Path-Event den Report aktualisiert hat
-    if(flag_fast_report){
-      perform_market_update(sim_mem, flag_assets, time)
-    }
-
-    prev_end <- time
-  }
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # TRAILING BATCH: Fast-Path-Tage nach dem letzten Individual-Tag
-  # ─────────────────────────────────────────────────────────────────────────
-  if (prev_end < n_total_days) {
-    batch_market_update(sim_mem, flag_assets, prev_end + 1L, n_total_days)
-  }
-
-  # === NEU: Finales Jahr abschließen ===
-  if (tax_mode == "person") {
-    sim_mem <- handle_year_change(
-      input = sim_mem,
-      current_date = as.Date(paste0(as.integer(format(stopp_date, "%Y")) + 1, "-01-01")),
-      marginal_tax_rate = marginal_tax_rate,
-      private_sale_threshold = private_sale_threshold,
-      sparer_pauschbetrag = sparer_pauschbetrag,
-      use_sparer_pauschbetrag = use_sparer_pauschbetrag,
-      soli_factor_income = soli_factor_income,
-      effective_tax_rate = effective_tax_rate,
-      details = details
-    )
-  }
-  # === Ende neu ===
-
-  #--------> Bereinigung der Zentralstruktur:
-  for(name in flag_assets){
-    # #15 FIX: Sichere Subsetting bei count=0 (1:0 → c(1,0) in R)
-    n_buys  <- sim_mem[["trades"]][[name]][["buy_count"]]
-    n_sells <- sim_mem[["trades"]][[name]][["sell_count"]]
-    n_taxes <- sim_mem[["trades"]][[name]][["tax_count"]]
-    n_fees  <- sim_mem[["trades"]][[name]][["fee_count"]]
-    
-    sim_mem[["trades"]][[name]][["buys"]]  <- if (n_buys  > 0) sim_mem[["trades"]][[name]][["buys"]][1:n_buys]   else list()
-    sim_mem[["trades"]][[name]][["sells"]] <- if (n_sells > 0) sim_mem[["trades"]][[name]][["sells"]][1:n_sells] else list()
-    sim_mem[["trades"]][[name]][["taxes"]] <- if (n_taxes > 0) sim_mem[["trades"]][[name]][["taxes"]][1:n_taxes] else list()
-    sim_mem[["trades"]][[name]][["fees"]]  <- if (n_fees  > 0) sim_mem[["trades"]][[name]][["fees"]][1:n_fees]   else list()
-    
-    sim_mem[["trades"]][[name]][["buy_count"]] <- NULL
-    sim_mem[["trades"]][[name]][["sell_count"]] <- NULL
-    sim_mem[["trades"]][[name]][["tax_count"]] <- NULL
-    sim_mem[["trades"]][[name]][["fee_count"]] <- NULL
-    sim_mem[["trades"]][[name]][["fifo_front"]] <- NULL
-  }
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # ERGEBNIS-BERECHNUNG
-  # ═══════════════════════════════════════════════════════════════════════════
-
-  #--------> Portfolio-Zeitreihen aggregieren:
-  # #16 FIX: total_worth nur einmal berechnen, für TTWROR wiederverwenden
-  .col_sum <- function(field) {
-    m <- sapply(sim_mem[["report"]], function(x) x[[field]])
-    if (is.null(dim(m))) m <- matrix(m, nrow = length(flag_date))
-    rowSums(m, na.rm = TRUE)
-  }
-  total_worth <- .col_sum("total")
-  total_flows <- .col_sum("flows")
-  start_worth <- total_worth[1]
-  stopp_worth <- total_worth[length(flag_date)]
-  n_days_sim  <- length(total_worth)
-
-  #--------> CAGR:
-  ann_factor <- as.numeric(difftime(stopp_date, start_date, units = "days")) / 365.25
-  cagr <- if (start_worth > 0 && ann_factor > 0) {
-    (stopp_worth / start_worth)^(1 / ann_factor) - 1
-  } else {
-    NA_real_
-  }
-
-  #--------> Drawdowns (mit NaN-Schutz):
-  # #17 FIX: Division durch 0 abfangen
-  running_max <- cummax(total_worth)
-  drawdowns <- ifelse(running_max > 0, (running_max - total_worth) / running_max, 0)
-  max_drawdown <- max(drawdowns, na.rm = TRUE)
-  if (!is.finite(max_drawdown)) max_drawdown <- 0   # Einzeltag/leer: robust
-
-  #--------> TTWROR:
-  # #18 FIX: Division durch 0 abfangen
-  n <- n_days_sim
-  if (n >= 2) {
-    period_change <- c(NA_real_, total_worth[2:n] - total_worth[1:(n-1)] - total_flows[2:n])
-    prev_total <- c(NA_real_, total_worth[1:(n-1)])
-    period_return <- ifelse(!is.na(prev_total) & prev_total > 0, period_change / prev_total, 0)
-    period_return[1] <- NA_real_
-  } else {
-    period_return <- NA_real_       # Einzeltag (n=1): keine Periodenrendite berechenbar
-  }
-  ttwror <- if (ann_factor > 0) {
-    prod(1 + period_return, na.rm = TRUE)^(1 / ann_factor) - 1
-  } else {
-    NA_real_
-  }
-
-  #--------> Portfolio-Returns:
-  # Einfache tägliche Returns (für Abwärtskompatibilität und Vergleichbarkeit)
-  portfolio_returns <- diff(total_worth) / head(total_worth, -1)
-  portfolio_returns[!is.finite(portfolio_returns)] <- 0
-
-  # TTWROR-adjustierte Returns (Cashflow-bereinigt, für Risiko-Metriken)
-  # Bei DCA/Rebalancing isolieren diese die Anlageperformance von Timing-Effekten
-  ttwror_returns <- period_return[-1]  # Erstes Element ist NA
-  ttwror_returns[!is.finite(ttwror_returns)] <- 0
-
-  # Basis für Risiko-Metriken: TTWROR-Returns wenn Cashflows vorhanden, sonst simple
-  has_flows <- any(total_flows != 0, na.rm = TRUE)
-  risk_returns <- if (has_flows) ttwror_returns else portfolio_returns
-
-  # A-2: aufgefuellte (LOCF) Tage ausschliessen. Eine Tagesrendite gehoert zu
-  # ihrem END-Tag (Tag i+1); flag_filled ist tagesweise (Laenge n).
-  returns_filled_mask <- if (exists("flag_filled") && length(flag_filled) == length(risk_returns) + 1L) flag_filled[-1] else logical(length(risk_returns))
-  if (length(returns_filled_mask) == length(risk_returns) && any(returns_filled_mask)) {
-    risk_returns <- risk_returns[!returns_filled_mask]
-  }
-  # Annualisierungsfrequenz aus den tatsaechlich genutzten Beobachtungen
-  ann_periods <- if (ann_factor > 0 && length(risk_returns) > 0) length(risk_returns) / ann_factor else 365.25
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # PERFORMANCE- UND RISIKO-METRIKEN
-  # ═══════════════════════════════════════════════════════════════════════════
-
-  # --- Basis-Statistiken ---
-  daily_mean <- mean(risk_returns, na.rm = TRUE)
-  daily_sd   <- sd(risk_returns, na.rm = TRUE)
-  if (!is.finite(daily_mean)) daily_mean <- 0   # Einzeltag/leer: robust
-  if (!is.finite(daily_sd))   daily_sd   <- 0
-  daily_cv   <- if (daily_mean != 0) abs(daily_sd / daily_mean) else NA_real_
-
-  # --- Downside-Metriken ---
-  downside_returns <- risk_returns[risk_returns < 0]
-  downside_sd <- if (length(downside_returns) > 0) {
-    sqrt(mean(downside_returns^2, na.rm = TRUE))
-  } else {
-    0
-  }
-
-  # A-2: Annualisierung mit der tatsaechlichen Beobachtungsfrequenz (ohne LOCF-Tage)
-  days_per_year <- ann_periods
-
-  # A-4: Risk-Free als annualisierte Dezimalrate (Jahresrate je Tag).
-  # Option A: je Tag tagesaequivalent abziehen -> Sharpe/Sortino auf Ueberschuss.
-  if (is.null(risk_free)) risk_free <- 0          # NULL explizit wie 0 behandeln
-  rf_series_full <- if (is.character(risk_free)) {
-    if (!risk_free %in% names(data)) stop(sprintf("risk_free: Spalte '%s' fehlt im Datensatz.", risk_free))
-    as.numeric(data[[risk_free]])
-  } else rep(as.numeric(risk_free), n_days_sim)
-  rf_series_full[!is.finite(rf_series_full)] <- 0
-  rf_series_full <- rf_series_full / 100   # PROZENT-KONVENTION: Prozent -> dezimal
-  rf_returns <- if (length(rf_series_full) >= 2) rf_series_full[-1] else numeric(0)
-  if (length(returns_filled_mask) == length(rf_returns) && any(returns_filled_mask)) {
-    rf_returns <- rf_returns[!returns_filled_mask]      # gleiche LOCF-Ausschlussmaske
-  }
-  if (length(rf_returns) != length(risk_returns)) {     # Sicherheitsnetz
-    rf_returns <- rep(if (length(rf_returns)) mean(rf_returns) else 0, length(risk_returns))
-  }
-  rf_daily       <- (1 + rf_returns)^(1 / days_per_year) - 1   # tagesaequivalent
-  excess_returns <- risk_returns - rf_daily
-  rf_effective   <- if (length(rf_returns)) mean(rf_returns) * 100 else 0   # Ausweis in Prozent (Nutzereinheit)
-
-  mean_excess <- mean(excess_returns, na.rm = TRUE)
-  sd_excess   <- sd(excess_returns, na.rm = TRUE)
-  if (!is.finite(mean_excess)) mean_excess <- 0
-  if (!is.finite(sd_excess))   sd_excess   <- 0
-  downside_excess    <- excess_returns[excess_returns < 0]
-  downside_sd_excess <- if (length(downside_excess) > 0) sqrt(mean(downside_excess^2, na.rm = TRUE)) else 0
-
-  # --- Sharpe Ratio (annualisiert, auf Ueberschussrenditen) ---
-  sharpe <- if (sd_excess > 0) {
-    (mean_excess * days_per_year) / (sd_excess * sqrt(days_per_year))
-  } else {
-    NA_real_
-  }
-
-  # --- Sortino Ratio (annualisiert, auf Ueberschussrenditen) ---
-  sortino <- if (downside_sd_excess > 0) {
-    (mean_excess * days_per_year) / (downside_sd_excess * sqrt(days_per_year))
-  } else {
-    NA_real_
-  }
-
-  # --- Calmar Ratio ---
-  calmar <- if (max_drawdown > 0 && !is.na(cagr)) {
-    cagr / max_drawdown
-  } else {
-    NA_real_
-  }
-
-  # --- Ulcer Index ---
-  ulcer_index <- sqrt(mean(drawdowns^2, na.rm = TRUE))
-  if (!is.finite(ulcer_index)) ulcer_index <- 0   # Einzeltag/leer: robust
-
-  # --- Martin Ratio (= Ulcer Performance Index) ---
-  martin_ratio <- if (ulcer_index > 0 && !is.na(cagr)) {
-    cagr / ulcer_index
-  } else {
-    NA_real_
-  }
-
-  # --- Serenity Ratio ---
-  serenity <- if (ulcer_index > 0 && max_drawdown > 0 && !is.na(cagr)) {
-    cagr / (ulcer_index * max_drawdown)
-  } else {
-    NA_real_
-  }
-
-  # --- Omega Ratio (Threshold = 0) ---
-  gains <- sum(risk_returns[risk_returns > 0], na.rm = TRUE)
-  losses <- abs(sum(risk_returns[risk_returns < 0], na.rm = TRUE))
-  omega <- if (losses > 0) (gains / losses) else NA_real_
-
-  # --- Gain-to-Pain Ratio ---
-  gain_to_pain <- if (losses > 0) {
-    sum(risk_returns, na.rm = TRUE) / losses
-  } else {
-    NA_real_
-  }
-
-  # --- Average Drawdown ---
-  dd_active <- drawdowns[drawdowns > 0]
-  average_drawdown <- if (length(dd_active) > 0) mean(dd_active) else 0
-
-  # --- Longest Drawdown Duration (Tage) ---
-  longest_dd <- 0L
-  current_dd <- 0L
-  for (i in seq_along(total_worth)) {
-    if (total_worth[i] < running_max[i]) {
-      current_dd <- current_dd + 1L
-      if (current_dd > longest_dd) longest_dd <- current_dd
-    } else {
-      current_dd <- 0L
-    }
-  }
-
-  # --- Average Recovery Time (Tage) ---
-  recovery_times <- integer(0)
-  in_dd <- FALSE
-  dd_start <- 0L
-  for (i in seq_along(total_worth)) {
-    if (total_worth[i] < running_max[i]) {
-      if (!in_dd) { dd_start <- i; in_dd <- TRUE }
-    } else {
-      if (in_dd) {
-        recovery_times <- c(recovery_times, i - dd_start)
-        in_dd <- FALSE
-      }
-    }
-  }
-  avg_recovery_time <- if (length(recovery_times) > 0) mean(recovery_times) else NA_real_
-
-  # --- Zusammenfassung ---
-  statistics <- list(
-    # Basis
-    mean     = daily_mean,
-    sd       = daily_sd,
-    cv       = daily_cv,
-    risk_free = rf_effective,
-    skewness = calculate_skewness(risk_returns, na.rm = TRUE),
-    kurtosis = calculate_kurtosis(risk_returns, na.rm = TRUE),
-    lpm      = calculate_partials(risk_returns, type = "lower"),
-    hpm      = calculate_partials(risk_returns, type = "higher"),
-    # Performance-Ratios
-    sharpe        = sharpe,
-    sortino       = sortino,
-    calmar        = calmar,
-    omega         = omega,
-    gain_to_pain  = gain_to_pain,
-    serenity      = serenity,
-    martin_ratio  = martin_ratio,
-    # Drawdown-Metriken
-    max_drawdown      = max_drawdown,
-    average_drawdown  = average_drawdown,
-    ulcer_index       = ulcer_index,
-    longest_drawdown  = longest_dd,
-    avg_recovery_time = avg_recovery_time
-  )
-
-  #--------> Berechnung der Handelsaktionen:
-  buys <- sapply(flag_assets, function(x) length(sim_mem[["trades"]][[x]][["buys"]]) / ann_factor)
-  sells <- sapply(flag_assets, function(x) length(sim_mem[["trades"]][[x]][["sells"]]) / ann_factor)
-
-  results <- list(
-    dates = flag_date,                 # ABGLEICH: von plot_dashboard.R (x$dates) benoetigt
-    filled = flag_filled,              # A-2: TRUE = LOCF-Tag (aus Risikometriken ausgeschlossen)
-    worth = total_worth,
-    cagr = cagr,
-    ttwror = ttwror,
-    drawdowns = drawdowns,
-    statistics = statistics,
-    buys = buys,
-    sells = sells,
-    report = sim_mem[["report"]],
-    # Steuer-Report
-    tax_report = list(
-      total_taxes_paid = sim_mem[["totals"]][["total_taxes"]],
-      loss_carryforward_capital = sim_mem[["totals"]][["loss_capital_gains"]],
-      loss_carryforward_private = sim_mem[["totals"]][["loss_private_sales"]],
-      sparer_pauschbetrag_annual = sim_mem[["totals"]][["sparer_pauschbetrag_annual"]],
-      sparer_pauschbetrag_used = sim_mem[["totals"]][["sparer_pauschbetrag_used_total"]],
-      # #21 FIX: effective_tax_rate statt tax_rate
-      sparer_pauschbetrag_tax_saved = sim_mem[["totals"]][["sparer_pauschbetrag_used_total"]] * effective_tax_rate
-    )
-  )
-
-  class(results) <- "SimLevResult"
-  return(results)
+  # Ablauf in Phasen (interne Funktionen, Uebersicht in sim_validate.R). Fehler und Warnungen, die
+  # direkt in einer Phase entstehen, tragen wie bisher den Aufruf von simulation() (.sim_restore_call).
+  sim_call <- sys.call()
+  given <- c(tax_rate = !missing(tax_rate), marginal_tax_rate = !missing(marginal_tax_rate),
+             include_soli_on_income_tax = !missing(include_soli_on_income_tax),
+             soli_rate_income_tax = !missing(soli_rate_income_tax), funds_fee = !missing(funds_fee),
+             bonus_fee = !missing(bonus_fee), event_mode = !missing(event_mode))
+  withCallingHandlers({
+    # 1. Eingabepruefung, Steuer- und Gebuehreneinstellungen
+    cfg <- .sim_check_inputs(
+      data = data, strategy = strategy, start_value = start_value, spread = spread, details = details,
+      dca_mode = dca_mode, dca_value = dca_value, dca_span = dca_span, dca_days = dca_days,
+      balance_mode = balance_mode, balance_days = balance_days, balance_thresh = balance_thresh,
+      balance_thresh_type = balance_thresh_type, tax_mode = tax_mode, tax_rate = tax_rate,
+      marginal_tax_rate = marginal_tax_rate, use_guenstigerpruefung = use_guenstigerpruefung,
+      private_sale_threshold = private_sale_threshold, sparer_pauschbetrag = sparer_pauschbetrag,
+      use_sparer_pauschbetrag = use_sparer_pauschbetrag, include_soli_on_income_tax = include_soli_on_income_tax,
+      soli_rate_income_tax = soli_rate_income_tax, base_rate = base_rate, funds_fee = funds_fee,
+      bonus_fee = bonus_fee, fractions = fractions, risk_free = risk_free, split_mode = split_mode,
+      split_thresh = split_thresh, event_col = event_col, church_tax = church_tax, order_fee = order_fee,
+      dca_fee = dca_fee, harvest_mode = harvest_mode, harvest_day = harvest_day,
+      taxable_income = taxable_income, tax_tariff = tax_tariff, given = given)
+    # Ordergebuehren laufen ueber .fee_env an perform_trade_buy/sell; beim Verlassen zuruecksetzen
+    if (cfg$fees_on) on.exit({ .fee_env$current <- NULL }, add = TRUE)
+
+    # 2. Daten, Zentralstruktur sim_mem, Termine und Flags
+    prep <- .sim_prepare_data(cfg$data, cfg$pre_filled, base_rate_flex, base_rate_data)
+    sim_mem <- .sim_build_state(prep$data, cfg$strategy, cfg$start_value, prep$start_date, prep$stopp_date,
+                                cfg$sparer_pauschbetrag, cfg$use_sparer_pauschbetrag, cfg$base_rate,
+                                base_rate_flex, base_rate_data)
+    .sim_check_layout(sim_mem)   # C7-11: vor dem ersten C++-Aufruf
+    cal <- .sim_build_calendar(
+      data = prep$data, sim_mem = sim_mem, strategy = cfg$strategy, start_date = prep$start_date,
+      stopp_date = prep$stopp_date, liquidate = liquidate, dca_mode = cfg$dca_mode, dca_span = dca_span,
+      dca_unit = dca_unit, dca_days = cfg$dca_days, dca_value = cfg$dca_value, dca_anchor = dca_anchor,
+      dca_start = dca_start, dca_skip = dca_skip, balance_mode = cfg$balance_mode, balance_span = balance_span,
+      balance_unit = balance_unit, balance_days = cfg$balance_days, balance_anchor = balance_anchor,
+      balance_start = balance_start, balance_skip = balance_skip, event_col = cfg$event_col,
+      event_mode = event_mode, event_weight = event_weight, split_mode = cfg$split_mode,
+      split_thresh = split_thresh)
+    data <- cal$data
+    fl <- cal$flags
+    if (!is.null(cfg$event_col)) event_weight <- cal$event_weight
+    init <- .sim_init_weights(sim_mem, fl$flag_assets, fl$flag_date, cfg$start_value)
+    sim_mem <- init$sim_mem
+    fl$initial_assets <- init$initial_assets
+    fl <- .sim_build_schedule(sim_mem, fl, data, prep$stopp_date, cfg$tax_mode, cfg$harvest_mode, harvest_day)
+
+    # 3.-5. Helfer, Tagesschleife, Abschluss des letzten Jahres
+    act <- .sim_make_actions(cfg, fl, details)
+    sim_mem <- .sim_run_days(sim_mem, fl, cfg, act, data, cfg$strategy, liquidate, event_weight, split_thresh,
+                             funds_fee, bonus_fee, balance_dca, harvest_loss_pot, details)
+    sim_mem <- .sim_close_years(sim_mem, fl, cfg, act, prep$stopp_date, details)
+
+    # 6. Auswertung und Ergebnisobjekt
+    sim_mem <- .sim_compact_trades(sim_mem, fl$flag_assets)
+    ret <- .sim_returns(sim_mem, fl$flag_date, fl$flag_assets, fl$flag_filled, prep$start_date,
+                        prep$stopp_date, cfg$start_value, act$tax_unpaid())
+    risk <- .sim_risk_stats(ret, cfg$risk_free, data)
+    undef <- .sim_undefined_metrics(ret, risk, sim_mem, fl$flag_assets)
+    .sim_result(sim_mem, fl, cfg, ret, risk, undef)
+  },
+  warning = function(w) .sim_restore_call(w, sim_call),
+  error = function(e) .sim_restore_call(e, sim_call))
 }
 
 
 
-#' Print SimLev Results
+#' Anzahl Tage mit Singular/Plural (R9-03): "1 Tag", "n Tage"
+#' @keywords internal
+#' @noRd
+.n_tage <- function(n) {
+  s <- if (is.character(n)) n else sprintf("%d", as.integer(n))   # Text: bereits formatiert (z. B. "%.0f")
+  if (identical(s, "1")) "1 Tag" else paste(s, "Tage")
+}
+
+#' Text fuer eine nicht definierte Kennzahl (B): "nicht definiert (<Ursache>)" aus undefined_metrics
+#' @keywords internal
+#' @noRd
+.undef_text <- function(x, metric) {
+  um <- x$undefined_metrics
+  d <- if (is.data.frame(um) && metric %in% um$metric) um$detail[match(metric, um$metric)] else NA_character_
+  if (is.na(d)) "nicht definiert" else sprintf("nicht definiert (%s)", d)
+}
+
+#' SimLev-Ergebnisse ausgeben
 #'
-#' @param x A SimLevResult object
-#' @param ... Additional arguments (ignored)
+#' Gibt Performance-, Risiko-, Kennzahlen- und Verteilungswerte sowie (falls
+#' Steuern gezahlt wurden) eine Steuerzusammenfassung auf der Konsole aus.
 #'
-#' @return Invisible x
+#' @param x Ein Objekt der Klasse SimLevResult
+#' @param ... Weitere Argumente (ignoriert)
+#'
+#' @return x, unsichtbar
 #' @export
+#' @noRd
 print.SimLevResult <- function(x, ...) {
   s <- x$statistics
   cat("\n")
-  cat("══════════════════════════════════════════════════════════════\n")
-  cat("                    SimLev Simulation Results                  \n")
-  cat("══════════════════════════════════════════════════════════════\n\n")
+  cat("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n")
+  cat("                 SimLev Simulationsergebnisse                 \n")
+  cat("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n\n")
   
-  cat("  Performance\n")
-  cat("  ─────────────────────\n")
-  cat(sprintf("  CAGR:             %+.2f%%\n", x$cagr * 100))
-  cat(sprintf("  TTWROR:           %+.2f%%\n", x$ttwror * 100))
-  cat(sprintf("  Final Value:      %.2f EUR\n", tail(x$worth, 1)))
+  cat("  Wertentwicklung\n")
+  cat("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+  ext <- isTRUE(x$external_flows)   # Sparplan: CAGR geldgewichtet, Drawdowns zeitgewichtet
+  # B: nicht definierte Kennzahl mit Ursache statt "NA"
+  pct <- function(v, metric, suffix = "") if (is.na(v)) .undef_text(x, metric) else sprintf("%+.2f%%%s", v * 100, suffix)
+  if (ext) {
+    cat(sprintf("  CAGR:             %s\n", pct(x$cagr, "cagr", " (geldgewichtet, XIRR)")))
+    cat(sprintf("  TTWROR:           %s\n", pct(x$ttwror, "ttwror", " (zeitgewichtet)")))
+  } else {
+    cat(sprintf("  CAGR:             %s\n", pct(x$cagr, "cagr")))
+    cat(sprintf("  TTWROR:           %s\n", pct(x$ttwror, "ttwror")))
+  }
+  cat(sprintf("  Endwert:          %.2f EUR\n", tail(x$worth, 1)))
+  if (ext) cat(sprintf("  Eingezahlt:       %.2f EUR (Start + Sparraten)\n", tail(x$invested, 1)))
   cat("\n")
 
-  cat("  Risk\n")
-  cat("  ─────────────────────\n")
-  cat(sprintf("  Max Drawdown:     %.2f%%\n", s$max_drawdown * 100))
-  cat(sprintf("  Avg Drawdown:     %.2f%%\n", s$average_drawdown * 100))
+  cat(if (ext) "  Risiko (zeitgewichtet, ohne Einzahlungseffekte)\n" else "  Risiko\n")
+  cat("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+  cat(sprintf("  Max. Drawdown:    %.2f%%\n", s$max_drawdown * 100))
+  cat(sprintf("  Mittl. Drawdown:  %.2f%%\n", s$average_drawdown * 100))
   cat(sprintf("  Ulcer Index:      %.4f\n", s$ulcer_index))
-  cat(sprintf("  Longest DD:       %d Tage\n", s$longest_drawdown))
-  cat(sprintf("  Avg Recovery:     %s Tage\n", 
-              if (is.na(s$avg_recovery_time)) "–" else sprintf("%.0f", s$avg_recovery_time)))
+  cat(sprintf("  L\u00e4ngster DD:      %s\n", .n_tage(s$longest_drawdown)))
+  cat(sprintf("  Mittl. Erholung:  %s\n",   # R9-03: ohne Wert nur "\u2013"
+              if (is.na(s$avg_recovery_time)) "\u2013" else .n_tage(sprintf("%.0f", s$avg_recovery_time))))
   cat("\n")
 
-  cat("  Ratios\n")
-  cat("  ─────────────────────\n")
-  fmt_ratio <- function(val) if (is.na(val)) "–" else sprintf("%+.3f", val)
+  cat("  Kennzahlen\n")
+  cat("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+  fmt_ratio <- function(val) if (is.na(val)) "\u2013" else sprintf("%+.3f", val)
   cat(sprintf("  Sharpe:           %s\n", fmt_ratio(s$sharpe)))
   cat(sprintf("  Sortino:          %s\n", fmt_ratio(s$sortino)))
   cat(sprintf("  Calmar:           %s\n", fmt_ratio(s$calmar)))
   cat(sprintf("  Omega:            %s\n", fmt_ratio(s$omega)))
   cat(sprintf("  Gain/Pain:        %s\n", fmt_ratio(s$gain_to_pain)))
   cat(sprintf("  Serenity:         %s\n", fmt_ratio(s$serenity)))
-  cat(sprintf("  Martin Ratio:              %s\n", fmt_ratio(s$martin_ratio)))
+  cat(sprintf("  Martin Ratio:     %s\n", fmt_ratio(s$martin_ratio)))
+  if (ext) cat("  (Calmar, Serenity, Martin mit TTWROR)\n")
   cat("\n")
 
-  cat("  Distribution\n")
-  cat("  ─────────────────────\n")
-  cat(sprintf("  Daily Mean:       %+.4f%%\n", s$mean * 100))
-  cat(sprintf("  Daily Std Dev:    %.4f%%\n", s$sd * 100))
-  cat(sprintf("  Skewness:         %.3f\n", s$skewness))
-  cat(sprintf("  Kurtosis:         %.3f\n", s$kurtosis))
+  cat("  Verteilung\n")
+  cat("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+  cat(sprintf("  Mittel je Tag:    %+.4f%%\n", s$mean * 100))
+  cat(sprintf("  Std.-Abw. je Tag: %.4f%%\n", s$sd * 100))
+  num3 <- function(v, metric) if (is.na(v)) .undef_text(x, metric) else sprintf("%.3f", v)
+  cat(sprintf("  Schiefe:          %s\n", num3(s$skewness, "skewness")))
+  cat(sprintf("  W\u00f6lbung:          %s\n", num3(s$kurtosis, "kurtosis")))
   cat("\n")
   
   if (!is.null(x$tax_report) && x$tax_report$total_taxes_paid > 0) {
     cat("  Steuern\n")
-    cat("  ─────────────────────\n")
+    cat("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
     cat(sprintf("  Gezahlte Steuern: %.2f EUR\n", x$tax_report$total_taxes_paid))
-    cat(sprintf("  Verlustvortrag:   %.2f EUR (§ 20) / %.2f EUR (§ 23)\n", 
+    cat(sprintf("  Verlustvortrag:   %.2f EUR (\u00a7 20) / %.2f EUR (\u00a7 23)\n", 
                 x$tax_report$loss_carryforward_capital,
                 x$tax_report$loss_carryforward_private))
+    if (isTRUE(x$tax_report$open_tax_debt > 0))
+      cat(sprintf("  Steuerschuld:     %.2f EUR (offen, nicht gedeckt)\n", x$tax_report$open_tax_debt))
     
     if (x$tax_report$sparer_pauschbetrag_annual > 0) {
       cat(sprintf("  SPB genutzt:      %.2f EUR (Ersparnis: %.2f EUR)\n",
@@ -3374,29 +2539,50 @@ print.SimLevResult <- function(x, ...) {
     cat("\n")
   }
 
-  cat("══════════════════════════════════════════════════════════════\n")
+  cat("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n")
   
   invisible(x)
 }
 
 
-#' Summary of SimLev Results
+#' Zusammenfassung von SimLev-Ergebnissen
 #'
-#' @param object A SimLevResult object
-#' @param ... Additional arguments (ignored)
+#' @param object Ein Objekt der Klasse SimLevResult
+#' @param ... Weitere Argumente (ignoriert)
 #'
-#' @return A list with summary statistics (invisibly)
+#' @return Liste der Klasse summary.SimLevResult mit Kennzahlen (sichtbar; die Ausgabe uebernimmt
+#'   print.summary.SimLevResult, C7-06); Renditen und
+#'   Drawdowns als Anteil, invested in EUR:
+#'   \describe{
+#'     \item{total_return_twr}{zeitgewichtete Gesamtrendite: mit Einzahlungen (Sparplan) letzter Wert
+#'       von twr_index minus 1, sonst Endwert / Depotwert am Starttag - 1}
+#'     \item{return_on_invested}{Gewinn je eingezahltem EUR: (Endwert - Eingezahlt) / Eingezahlt mit
+#'       Eingezahlt = letzter Wert von invested (Startwert plus Einzahlungen, brutto)}
+#'     \item{total_return}{gleichwertiger Alias fuer total_return_twr (aeltere Skripte)}
+#'     \item{cagr, ttwror}{wie im Ergebnis (mit Einzahlungen cagr geldgewichtet); NA mit Ursache
+#'       in undefined_metrics}
+#'   }
+#'   Die Ausgabe zeigt mit Einzahlungen beide Gesamtrenditen; nicht definierte Kennzahlen als
+#'   "nicht definiert (Ursache)".
 #' @export
+#' @noRd
 summary.SimLevResult <- function(object, ...) {
   n_days <- length(object$worth)
   s <- object$statistics
+  ext <- isTRUE(object$external_flows)   # Sparplan: Gesamtrendite zeitgewichtet, CAGR geldgewichtet
   
   summary_list <- list(
     n_days = n_days,
     n_years = round(n_days / 365.25, 2),
-    start_value = object$worth[1],
+    start_value = object$worth[1],         # Depotwert am Starttag (nach Kaufkosten, mit Rate des Starttags)
+    # R9-04: Startkapital (Argument start_value) = eingezahlt am Starttag ohne die Sparrate des Starttags
+    start_capital = if (!is.null(object$invested))
+      object$invested[1] - sum(vapply(object$report, function(r) r[["flows"]][1], numeric(1)), na.rm = TRUE) else NA_real_,
     end_value = tail(object$worth, 1),
-    total_return = (tail(object$worth, 1) / object$worth[1]) - 1,
+    total_return_twr = if (ext) tail(object$twr_index, 1) / object$twr_index[1] - 1 else (tail(object$worth, 1) / object$worth[1]) - 1,
+    return_on_invested = NA_real_,
+    total_return = NA_real_,             # Alias fuer total_return_twr (unten gesetzt)
+    invested = if (!is.null(object$invested)) tail(object$invested, 1) else object$worth[1],
     cagr = object$cagr,
     ttwror = object$ttwror,
     # Alle Metriken direkt aus statistics übernehmen (nicht neu berechnen)
@@ -3413,51 +2599,83 @@ summary.SimLevResult <- function(object, ...) {
     longest_drawdown = s$longest_drawdown,
     avg_recovery_time = s$avg_recovery_time,
     statistics = s,
-    tax_report = object$tax_report
+    tax_report = object$tax_report,
+    undefined_metrics = object$undefined_metrics,
+    external_flows = ext
   )
+  summary_list$total_return <- summary_list$total_return_twr
+  summary_list$return_on_invested <- (summary_list$end_value - summary_list$invested) / summary_list$invested
   
   class(summary_list) <- "summary.SimLevResult"
-  
+  # C7-06: summary() druckt nicht mehr selbst; die Ausgabe uebernimmt print.summary.SimLevResult
+  # (Konsole: summary(x) zeigt die Zusammenfassung wie bisher, s <- summary(x) bleibt still)
+  summary_list
+}
+
+#' Zusammenfassung von SimLev-Ergebnissen ausgeben
+#'
+#' @param x Ein Objekt der Klasse summary.SimLevResult (aus summary())
+#' @param ... Weitere Argumente (ignoriert)
+#' @return x, unsichtbar
+#' @export
+#' @noRd
+print.summary.SimLevResult <- function(x, ...) {
+  summary_list <- x; object <- x; s <- x$statistics; n_days <- x$n_days
+  ext <- isTRUE(x$external_flows)
   # Eigene kompakte Ausgabe
   cat("\n")
-  cat("══════════════════════════════════════════════════════════════\n")
-  cat("                    SimLev Summary                             \n")
-  cat("══════════════════════════════════════════════════════════════\n\n")
+  cat("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n")
+  cat("                    SimLev Zusammenfassung                    \n")
+  cat("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n\n")
   
-  cat(sprintf("  Zeitraum:         %d Tage (%.1f Jahre)\n", n_days, summary_list$n_years))
-  cat(sprintf("  Start:            %.2f EUR\n", summary_list$start_value))
+  cat(sprintf("  Zeitraum:         %s (%.1f Jahre)\n", .n_tage(n_days), summary_list$n_years))
+  # R9-04: Startkapital (start_value) und Depotwert am Starttag (nach Kaufkosten, ggf. mit Sparrate) getrennt
+  if (!is.null(summary_list$start_capital) && !is.na(summary_list$start_capital))
+    cat(sprintf("  Startkapital:     %.2f EUR\n", summary_list$start_capital))
+  cat(sprintf("  Depotwert Starttag: %.2f EUR\n", summary_list$start_value))
   cat(sprintf("  Ende:             %.2f EUR\n", summary_list$end_value))
-  cat(sprintf("  Gesamtrendite:    %+.2f%%\n", summary_list$total_return * 100))
-  cat(sprintf("  CAGR:             %+.2f%%\n", summary_list$cagr * 100))
-  cat(sprintf("  TTWROR:           %+.2f%%\n", summary_list$ttwror * 100))
+  pct <- function(v, metric, suffix = "") if (is.na(v)) .undef_text(object, metric) else sprintf("%+.2f%%%s", v * 100, suffix)
+  if (ext) {
+    cat(sprintf("  Eingezahlt:       %.2f EUR (Start + Sparraten)\n", summary_list$invested))
+    cat(sprintf("  Gesamtrendite (zeitgewichtet): %+.2f %%\n", summary_list$total_return_twr * 100))
+    cat(sprintf("  Gewinn je eingezahltem EUR:    %+.2f %% (Endwert %.2f EUR / Eingezahlt %.2f EUR - 1)\n",
+                summary_list$return_on_invested * 100, summary_list$end_value, summary_list$invested))
+    cat(sprintf("  CAGR:             %s\n", pct(summary_list$cagr, "cagr", " (geldgewichtet, XIRR)")))
+    cat(sprintf("  TTWROR:           %s\n", pct(summary_list$ttwror, "ttwror", " (zeitgewichtet)")))
+  } else {
+    cat(sprintf("  Gesamtrendite:    %+.2f%%\n", summary_list$total_return * 100))
+    cat(sprintf("  CAGR:             %s\n", pct(summary_list$cagr, "cagr")))
+    cat(sprintf("  TTWROR:           %s\n", pct(summary_list$ttwror, "ttwror")))
+  }
   cat("\n")
   
   fmt <- function(val, pct = FALSE) {
-    if (is.na(val)) return("–")
+    if (is.na(val)) return("\u2013")
     if (pct) sprintf("%.2f%%", val * 100) else sprintf("%.3f", val)
   }
   
   metrics <- data.frame(
     Metrik = c("Sharpe", "Sortino", "Calmar", "Omega", "Gain/Pain", 
-               "Serenity", "Martin", "Max DD", "Avg DD", "Ulcer", 
-               "Longest DD", "Avg Recovery"),
+               "Serenity", "Martin", "Max. DD", "Mittl. DD", "Ulcer", 
+               "L\u00e4ngster DD", "Mittl. Erholung"),
     Wert = c(
       fmt(s$sharpe), fmt(s$sortino), fmt(s$calmar), fmt(s$omega),
       fmt(s$gain_to_pain), fmt(s$serenity), fmt(s$martin_ratio),
       fmt(s$max_drawdown, TRUE), fmt(s$average_drawdown, TRUE), fmt(s$ulcer_index),
       sprintf("%d d", s$longest_drawdown),
-      if (is.na(s$avg_recovery_time)) "–" else sprintf("%.0f d", s$avg_recovery_time)
+      if (is.na(s$avg_recovery_time)) "\u2013" else sprintf("%.0f d", s$avg_recovery_time)
     ),
     stringsAsFactors = FALSE
   )
   
   for (i in seq_len(nrow(metrics))) {
-    cat(sprintf("  %-16s %s\n", metrics$Metrik[i], metrics$Wert[i]))
+    cat(sprintf("  %s %s\n", format(metrics$Metrik[i], width = 16), metrics$Wert[i]))   # Breite in Zeichen (Umlaute)
   }
+  if (ext) cat("  (Drawdowns zeitgewichtet; Calmar, Serenity, Martin mit TTWROR)\n")
+
+  cat("\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n")
   
-  cat("\n══════════════════════════════════════════════════════════════\n")
-  
-  invisible(summary_list)
+  invisible(x)
 }
 
 

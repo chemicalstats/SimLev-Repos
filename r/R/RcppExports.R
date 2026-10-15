@@ -58,155 +58,204 @@
 }
 
 #' FIFO-gewichteter Einstandspreis (Rcpp-Port von calculate_fifo_price)
+#' @noRd
 calculate_fifo_price_rcpp <- function(buys, units, front_index) {
     .Call(`_SimLev_calculate_fifo_price_rcpp`, buys, units, front_index)
 }
 
 #' Anteilige Vorabpauschale fuer FIFO-Verkauf (Port von calculate_fifo_vorabpauschale)
+#' @noRd
 calculate_fifo_vp_rcpp <- function(buys, units, front_index) {
     .Call(`_SimLev_calculate_fifo_vp_rcpp`, buys, units, front_index)
 }
 
 #' § 23 EStG lot-weise (Port von calculate_private_sale_tax)
 #' current_date als Integer (Tage seit 1970-01-01)
+#' @noRd
 calculate_private_sale_tax_rcpp <- function(buys, front_index, trade_count, sell_price, current_date) {
     .Call(`_SimLev_calculate_private_sale_tax_rcpp`, buys, front_index, trade_count, sell_price, current_date)
 }
 
 #' FIFO-Verbrauch nach Verkauf (Port des Loops aus perform_trade_sell)
 #' Mutiert remaining + vp in place; setzt fifo_front fort (update_fifo_front).
+#' @noRd
 fifo_consume_rcpp <- function(input, name, trade_count) {
     invisible(.Call(`_SimLev_fifo_consume_rcpp`, input, name, trade_count))
 }
 
-#' Allocate DCA Flows to an Asset
+.proj_box_simplex <- function(v, lo, hi) {
+    .Call(`_SimLev_proj_box_simplex_r`, v, lo, hi)
+}
+
+.qp_box_simplex <- function(Q, cvec, lo, hi, w0, L, maxit, tol) {
+    .Call(`_SimLev_qp_box_simplex`, Q, cvec, lo, hi, w0, L, maxit, tol)
+}
+
+.min_cvar_core <- function(R, alpha, lo, hi, w0, zeta0, scales, maxit) {
+    .Call(`_SimLev_min_cvar_core`, R, alpha, lo, hi, w0, zeta0, scales, maxit)
+}
+
+.min_cdar_core <- function(R, alpha, lo, hi, iters) {
+    .Call(`_SimLev_min_cdar_core`, R, alpha, lo, hi, iters)
+}
+
+.quantile_reg_core <- function(y, X, tau, beta0, sc, tol, maxit) {
+    .Call(`_SimLev_quantile_reg_core`, y, X, tau, beta0, sc, tol, maxit)
+}
+
+.hmm_forward_backward <- function(B, A, p0) {
+    .Call(`_SimLev_hmm_forward_backward`, B, A, p0)
+}
+
+.garch_filter <- function(ep, om, al, be, ga, v0) {
+    .Call(`_SimLev_garch_filter`, ep, om, al, be, ga, v0)
+}
+
+.roll_mean_core <- function(x, n) {
+    .Call(`_SimLev_roll_mean_core`, x, n)
+}
+
+.kendall_tau_core <- function(x, y) {
+    .Call(`_SimLev_kendall_tau_core`, x, y)
+}
+
+.roll_cov_core <- function(x, y, n) {
+    .Call(`_SimLev_roll_cov_core`, x, y, n)
+}
+
+#' DCA-Zufluss einem Asset zuordnen
 #'
-#' Updates the simulation state with DCA cash flow.
+#' Bucht die Sparplan-Einzahlung in den Simulationszustand (flows, money, total).
 #'
-#' @param input Simulation state list
-#' @param name Asset name
-#' @param flows Amount to add
-#' @param index Day index (1-based)
-#' @export
+#' @param input Liste des Simulationszustands (sim_mem)
+#' @param name Asset-Name
+#' @param flows Einzuzahlender Betrag in EUR
+#' @param index Tagesindex (1-basiert)
+#' @noRd
 dca_flows_allocation <- function(input, name, flows, index) {
     invisible(.Call(`_SimLev_dca_flows_allocation`, input, name, flows, index))
 }
 
-#' Update Report After Buy Transaction
+#' Report nach einem Kauf aktualisieren
 #'
-#' @param input Simulation state list
-#' @param name Asset name
-#' @param index Day index (1-based)
-#' @param trade_count Number of shares bought
-#' @param trade_price Price paid per share
-#' @param market_price Current market price
-#' @export
+#' @param input Liste des Simulationszustands (sim_mem)
+#' @param name Asset-Name
+#' @param index Tagesindex (1-basiert)
+#' @param trade_count Anzahl gekaufter Anteile
+#' @param trade_price Gezahlter Preis je Anteil
+#' @param market_price Aktueller Marktkurs
+#' @noRd
 calculate_buy_report <- function(input, name, index, trade_count, trade_price, market_price) {
     invisible(.Call(`_SimLev_calculate_buy_report`, input, name, index, trade_count, trade_price, market_price))
 }
 
-#' Update Report After Sell Transaction
+#' Report nach einem Verkauf aktualisieren
 #'
-#' @param input Simulation state list
-#' @param name Asset name
-#' @param index Day index (1-based)
-#' @param trade_count Number of shares sold
-#' @param trade_price Price received per share
-#' @param market_price Current market price
-#' @param capital_gains_tax Tax paid on gains
-#' @export
+#' @param input Liste des Simulationszustands (sim_mem)
+#' @param name Asset-Name
+#' @param index Tagesindex (1-basiert)
+#' @param trade_count Anzahl verkaufter Anteile
+#' @param trade_price Erhaltener Preis je Anteil
+#' @param market_price Aktueller Marktkurs
+#' @param capital_gains_tax Gezahlte Steuer auf den Gewinn
+#' @noRd
 calculate_sell_report <- function(input, name, index, trade_count, trade_price, market_price, capital_gains_tax) {
     invisible(.Call(`_SimLev_calculate_sell_report`, input, name, index, trade_count, trade_price, market_price, capital_gains_tax))
 }
 
-#' Calculate Total Report for All Assets
+#' Gesamtreport fuer alle Assets berechnen
 #'
-#' Updates status and report for all assets at a given day.
-#' Recalculates portfolio weights (stored in status "differ" field)
-#' based on current market values.
+#' Aktualisiert Status und Report aller Assets an einem Tag.
+#' Berechnet die Portfolio-Gewichte neu (gespeichert im Status-Feld "differ")
+#' auf Basis der aktuellen Marktwerte.
 #'
-#' @param input Simulation state list
-#' @param assets Character vector of asset names
-#' @param index Day index (1-based)
-#' @export
+#' @param input Liste des Simulationszustands (sim_mem)
+#' @param assets Zeichenvektor der Asset-Namen
+#' @param index Tagesindex (1-basiert)
+#' @noRd
 calculate_total_report <- function(input, assets, index) {
     invisible(.Call(`_SimLev_calculate_total_report`, input, assets, index))
 }
 
-#' Perform Trade Buy (C++ Core)
+#' Kauf ausfuehren (C++-Kern)
 #'
-#' Executes the core buy logic: calls calculate_buy_report (report + status update),
-#' creates a FIFO lot entry, and increments buy_count. All by-reference.
+#' Fuehrt die Kern-Kauflogik aus: ruft calculate_buy_report auf (Report- und Status-Update),
+#' legt einen FIFO-Lot-Eintrag an und erhoeht buy_count. Alles per Referenz.
 #'
-#' The R wrapper handles: trade_count calculation (spread, fractions), details output.
+#' Der R-Wrapper uebernimmt: Berechnung von trade_count (Spread, Bruchteile), Detailausgabe.
 #'
-#' @param input Simulation state list (modified in place)
-#' @param name Asset name
-#' @param index Day index (1-based)
-#' @param trade_count Number of units to buy
-#' @param trade_price Price per unit (after spread)
-#' @param market_price Raw market price (before spread)
-#' @export
+#' @param input Liste des Simulationszustands (wird direkt veraendert)
+#' @param name Asset-Name
+#' @param index Tagesindex (1-basiert)
+#' @param trade_count Anzahl zu kaufender Anteile
+#' @param trade_price Preis je Anteil (nach Spread)
+#' @param market_price Marktkurs (vor Spread)
+#' @noRd
 perform_trade_buy_cpp <- function(input, name, index, trade_count, trade_price, market_price) {
     invisible(.Call(`_SimLev_perform_trade_buy_cpp`, input, name, index, trade_count, trade_price, market_price))
 }
 
-#' Single-Day Market Update (Fast Path)
+#' Markt-Update fuer einen einzelnen Tag (Fast Path)
 #'
-#' Updates prices, worth, total, and portfolio weights for all assets
-#' on a single day. Replaces the R-level perform_market_update.
+#' Aktualisiert Kurse, worth, total und Portfolio-Gewichte aller Assets
+#' an einem Tag. Ersetzt das fruehere perform_market_update in R.
 #'
-#' @param input Simulation state list (modified in place)
-#' @param assets Character vector of asset names
-#' @param index Day index (1-based)
-#' @export
+#' @param input Liste des Simulationszustands (wird direkt veraendert)
+#' @param assets Zeichenvektor der Asset-Namen
+#' @param index Tagesindex (1-basiert)
+#' @noRd
 perform_market_update <- function(input, assets, index) {
     invisible(.Call(`_SimLev_perform_market_update`, input, assets, index))
 }
 
-#' Batch Market Update for Contiguous Fast-Path Days
+#' Gebuendeltes Markt-Update fuer zusammenhaengende Fast-Path-Tage
 #'
-#' Vectorized update for a range of days where no trades, DCA, rebalancing,
-#' year-change, or staking events occur. During these days, count and money
-#' are constant per asset, so worth and total are simple price-scaled vectors.
+#' Vektorisiertes Update fuer einen Tagesbereich ohne Trades, DCA, Rebalancing,
+#' Jahreswechsel oder "Staking"-Ereignisse. An diesen Tagen sind count und money
+#' je Asset konstant; worth und total sind daher einfach mit dem Kurs skalierte Vektoren.
 #'
-#' This replaces hundreds of individual perform_market_update() calls with
-#' a single tight C++ loop over the price vectors.
+#' Das ersetzt Hunderte einzelner Aufrufe von perform_market_update() durch
+#' eine einzige kompakte C++-Schleife ueber die Kursvektoren.
 #'
-#' @param input Simulation state list (modified in place)
-#' @param assets Character vector of asset names
-#' @param start_idx First day index (1-based, inclusive)
-#' @param end_idx Last day index (1-based, inclusive)
-#' @export
+#' @param input Liste des Simulationszustands (wird direkt veraendert)
+#' @param assets Zeichenvektor der Asset-Namen
+#' @param start_idx Erster Tagesindex (1-basiert, einschliesslich)
+#' @param end_idx Letzter Tagesindex (1-basiert, einschliesslich)
+#' @noRd
 batch_market_update <- function(input, assets, start_idx, end_idx) {
     invisible(.Call(`_SimLev_batch_market_update`, input, assets, start_idx, end_idx))
 }
 
 #' Vorabpauschale je Lot (Port des Kerns von calculate_flat_rate)
 #' base_rate bereits dezimal (>0), Datums-Args als Tage seit Epoch.
+#' @noRd
 flat_rate_rcpp <- function(buys, front_index, base_rate, year_start_price, market_price, soy_days, eoy_days) {
     .Call(`_SimLev_flat_rate_rcpp`, buys, front_index, base_rate, year_start_price, market_price, soy_days, eoy_days)
 }
 
 #' § 20-Steuerkern (Port von calculate_paragraph_20_tax); mutiert totals in place
+#' @noRd
 p20_tax_rcpp <- function(trade_gain, bonus, totals, tax_rate, use_spb) {
     .Call(`_SimLev_p20_tax_rcpp`, trade_gain, bonus, totals, tax_rate, use_spb)
 }
 
 #' VP-Steuerkern (Port von calculate_vorabpauschale_tax, R-2); mutiert totals
+#' @noRd
 vp_tax_rcpp <- function(flat_rate, bonus, totals, tax_rate, use_spb) {
     .Call(`_SimLev_vp_tax_rcpp`, flat_rate, bonus, totals, tax_rate, use_spb)
 }
 
 #' Verkaufsstueckzahl fuer Ziel-Nettoerloes (Port von calculate_sell_count)
 #' regime: 0=none, 1=investment_fund, 2=capital_gains, 3=private_sale
+#' @noRd
 sell_count_rcpp <- function(buys, front_index, target, trade_price, total_shares, fractions, regime, bonus, loss_pool, tax_rate) {
     .Call(`_SimLev_sell_count_rcpp`, buys, front_index, target, trade_price, total_shares, fractions, regime, bonus, loss_pool, tax_rate)
 }
 
 #' Schneller Entnahme-Kern
 #' @keywords internal
-.wd_simulate <- function(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real, tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep) {
-    .Call(`_SimLev_wd_simulate`, R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real, tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep)
+#' @noRd
+.wd_simulate <- function(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real, tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep, lot_n = as.numeric( c()), lot_basis = as.numeric( c()), lot_vp = as.numeric( c()), lot_group = as.integer( c()), spb_first = -1.0, horizon_end = FALSE) {
+    .Call(`_SimLev_wd_simulate`, R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real, tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep, lot_n, lot_basis, lot_vp, lot_group, spb_first, horizon_end)
 }
 

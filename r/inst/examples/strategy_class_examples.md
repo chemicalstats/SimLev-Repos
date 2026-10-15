@@ -77,37 +77,36 @@ strategy <- create_strategy(
 strategy <- create_strategy(
   SPY = asset_config(
     asset_class = "etf",
-    action_type = "FALSCH",  # ❌ Error: must be 'bnh' or 'signal'
+    action_type = "FALSCH",  # ❌ Error: 'arg' should be one of "bnh", "signal"
     asset_share = 0.6
   )
 )
 
-# Fehlende Pflichtfelder werden erkannt:
+# Ohne weitere Angaben gelten die Standardwerte von asset_config():
 strategy <- create_strategy(
   SPY = asset_config(
     asset_class = "etf"
-    # ❌ Error: action_type is required
-    # ❌ Error: asset_share is required
-    # etc.
+    # kein Fehler: action_type = "bnh", asset_share = 1,
+    # asset_spread = 0.1, asset_bonus = 0
   )
 )
 
-# Ungültige Werte werden erkannt:
+# Ungültige Werte werden erkannt (die erste Verletzung bricht ab):
 strategy <- create_strategy(
   SPY = asset_config(
     asset_class = "etf",
     action_type = "bnh",
-    asset_share = -0.5,      # ❌ Error: must be positive
+    asset_share = -0.5,      # ❌ Fehler: asset_config: asset_share muss ein Anteil groesser 0 und hoechstens 1 sein (z. B. 0.6 fuer 60 %), nicht -0.5.
     asset_spread = 0.1,
-    asset_bonus = 150        # ❌ Error: must be between 0 and 100
+    asset_bonus = 150        # ❌ Fehler: asset_config: asset_bonus muss zwischen 0 und 100 liegen (Teilfreistellung in Prozent, z. B. 30 fuer 30 %), nicht 150.
   )
 )
 ```
 
-### ✅ Intelligente Warnungen
+### Signalspalten bei Buy-and-Hold
 
 ```r
-# Warnung bei unnötigen Parametern:
+# Signalspalten bei action_type = "bnh":
 strategy <- create_strategy(
   SPY = asset_config(
     asset_class = "etf",
@@ -115,12 +114,12 @@ strategy <- create_strategy(
     asset_share = 1.0,
     asset_spread = 0.1,
     asset_bonus = 30,
-    signal_buy = "buy",      # ⚠️  Warning: ignored for 'bnh'
-    signal_sell = "sell"     # ⚠️  Warning: ignored for 'bnh'
+    signal_buy = "buy",
+    signal_sell = "sell"
   )
 )
-# Warning: signal_buy and signal_sell are ignored for action_type = 'bnh'
-# (Parameter werden automatisch auf NULL gesetzt)
+# Keine Warnung: signal_buy/signal_sell werden gespeichert, aber nur bei
+# action_type = "signal" ausgewertet (simulation() und validate_strategy()).
 ```
 
 ### ✅ Validierung gegen Daten
@@ -130,13 +129,28 @@ strategy <- create_strategy(
 validate_strategy(strategy, data = data)
 
 # Fehler wenn Asset fehlt:
-# Error: Assets not found in data: AAPL
+# Fehler: validate_strategy: Kursspalte(n) 'AAPL' fehlen in data (je Asset eine Spalte gleichen Namens; vorhanden: ...).
 
 # Fehler wenn Signal-Spalten fehlen:
-# Error: Signal column 'spy_buy' not found in data (required by asset 'SPY')
+# Fehler: validate_strategy: signal_buy-Spalte 'spy_buy' fehlt in data (Asset 'SPY').
 ```
 
 ## Hilfsfunktionen
+
+Die folgenden Schritte bauen nacheinander auf der Multi-Asset-Strategie aus
+Abschnitt 2 auf (SPY 0,60, BND 0,40). Weil `strategy` in den Abschnitten
+dazwischen überschrieben wurde, wird sie hier neu angelegt; sonst bricht
+`remove_asset(strategy, "BND")` unten mit „Asset 'BND' ist nicht in der
+Strategie“ ab.
+
+```r
+strategy <- create_strategy(
+  SPY = asset_config(asset_class = "etf", action_type = "bnh",
+                     asset_share = 0.60, asset_spread = 0.10, asset_bonus = 30),
+  BND = asset_config(asset_class = "etf", action_type = "bnh",
+                     asset_share = 0.40, asset_spread = 0.05, asset_bonus = 0)
+)
+```
 
 ### Asset hinzufügen
 
@@ -156,20 +170,29 @@ strategy <- add_asset(
 
 ### Asset aktualisieren
 
+Die Gewichte (`asset_share`) aller Assets müssen zusammen 1 ergeben, sonst
+bricht `simulation()` mit einer Fehlermeldung ab. Nach dem Hinzufügen von
+QQQ (0,20) liegt die Summe bei 1,20; deshalb wird SPY hier auf 0,40
+gesenkt (SPY 0,40 + BND 0,40 + QQQ 0,20 = 1).
+
 ```r
 # Einzelne Parameter ändern
 strategy <- update_asset(
   strategy,
   name = "SPY",
-  asset_share = 0.70,
+  asset_share = 0.40,
   asset_spread = 0.15
 )
 ```
 
 ### Asset entfernen
 
+Nach dem Entfernen von BND fehlen dessen 0,40; SPY übernimmt sie, damit die
+Summe wieder 1 ist (SPY 0,80 + QQQ 0,20).
+
 ```r
 strategy <- remove_asset(strategy, "BND")
+strategy <- update_asset(strategy, name = "SPY", asset_share = 0.80)
 ```
 
 ## Ausgabe
@@ -180,32 +203,15 @@ strategy <- remove_asset(strategy, "BND")
 print(strategy)
 ```
 
-Ausgabe:
+Ausgabe (Multi-Asset-Strategie aus Abschnitt 2):
 ```
-═══════════════════════════════════════════════════════════
-                    SimLev Strategy                         
-═══════════════════════════════════════════════════════════
+Anlagestrategie (2 Assets)
+================================
 
-  Number of Assets: 2
-  Asset Names: SPY, BND
-
-  SPY
-  ──────────────────────────────────────────────────────
-    Class:           etf
-    Action:          bnh
-    Target Weight:   60.0% (normalized: 60.0%)
-    Spread:          0.10%
-    Tax Exemption:   30%
-
-  BND
-  ──────────────────────────────────────────────────────
-    Class:           etf
-    Action:          bnh
-    Target Weight:   40.0% (normalized: 40.0%)
-    Spread:          0.05%
-    Tax Exemption:   0%
-
-═══════════════════════════════════════════════════════════
+SPY:
+  Klasse: etf | Anteil: 60% | Steuer: investment_fund
+BND:
+  Klasse: etf | Anteil: 40% | Steuer: investment_fund
 ```
 
 ### summary()
@@ -216,21 +222,18 @@ summary(strategy)
 
 Ausgabe:
 ```
-Strategy Summary
-════════════════
+Strategie-Übersicht: 2 Assets
 
-Total Assets:        2
-  - Buy-and-Hold:    2
-  - Signal-based:    0
+Gesamtgewicht: 100.0%
 
-Total Weight:        1.00 (will be normalized to 1.0)
-Average Spread:      0.08%
-Average Tax Exempt:  15.0%
+Nach Steuerregime:
+  investment_fund: 2 Assets
 ```
 
 ## Backward Compatibility
 
-Falls die alte `simulation()` Funktion noch Listen erwartet:
+`simulation()` akzeptiert Strategie-Objekte und einfache Listen. Eine
+Strategie lässt sich bei Bedarf in eine Liste umwandeln:
 
 ```r
 # Konvertiere zu alter Liste
@@ -277,7 +280,7 @@ validate_strategy(strategy, data = data)
 print(strategy)
 summary(strategy)
 
-# 5. Simulation (wenn Funktion implementiert ist)
+# 5. Simulation
 result <- simulation(
   data = data,
   strategy = strategy,  # Kann direkt verwendet werden

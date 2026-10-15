@@ -10,34 +10,84 @@ efficient_frontier(
   n = 40L,
   lower = 0,
   upper = 1,
-  cov = c("sample", "ledoit_wolf"),
+  cov = c("sample", "ledoit_wolf", "ewma", "denoise", "gerber"),
   risk_free = 0,
   frequency = c("week", "day", "month")
 )
 }
 \arguments{
-\item{x}{data.frame mit \code{date} und Kursspalten oder Renditematrix.}
+\item{x}{data.frame mit Spalte \code{date} (Date) und Kursspalten
+(Kursniveaus, keine Renditen) oder numerische Matrix bzw. data.frame
+ohne \code{date} mit einfachen Periodenrenditen als Anteil (Zeilen =
+Perioden, Spalten = Anlagen; ohne Spaltennamen \code{A1}, \code{A2},
+...).}
 
-\item{assets}{Spalten (Standard: alle numerischen).}
+\item{assets}{Zeichenvektor der zu verwendenden Spalten. \code{NULL}
+(Standard) = alle numerischen Spalten ausser \code{date} bzw. alle
+Spalten der Matrix.}
 
-\item{n}{Anzahl Punkte.}
+\item{n}{Anzahl der Risikoaversionen (ganze Zahl, Standard 40). Punkte mit
+(auf 6 Stellen) gleicher Rendite und Volatilitaet werden nur einmal
+behalten; das Ergebnis kann daher weniger Zeilen haben.}
 
-\item{lower, upper}{Grenzen je Anlage (Skalar oder benannter Vektor, Anteile).}
+\item{lower, upper}{Unter- und Obergrenzen der Gewichte als Anteil (0.6 =
+60 \%): Skalar fuer alle Anlagen, benannter Vektor (nicht genannte
+Anlagen erhalten 0 bzw. 1; unbekannte Namen sind ein Fehler) oder
+unbenannter Vektor mit genau einem Wert je Anlage (in der Reihenfolge
+der Spalten; andere Laengen sind ein Fehler). Standard 0 und 1. Keine
+NA; \code{lower} >= 0 (Long-only). Erforderlich ist
+sum(lower) <= 1 <= sum(upper) und lower <= upper. \code{Inf} in
+\code{upper} bedeutet keine Obergrenze und wird als 1 gefuehrt (auch in
+\code{bounds}); andere Obergrenzen > 1 wirken ebenfalls wie 1, erzeugen
+aber eine Warnung (vermutlich Prozent statt Anteil, z. B. 26 statt
+0.26).}
 
-\item{cov}{\code{"sample"} oder \code{"ledoit_wolf"} (Schrumpfung, Ledoit &
-Wolf 2004).}
+\item{cov}{Kovarianzschaetzer: \code{"sample"} (Standard, Stichprobe),
+\code{"ledoit_wolf"} (Schrumpfung auf skalierte Einheitsmatrix, Ledoit &
+Wolf 2004), \code{"ewma"} (exponentiell gewichtet, Halbwertszeit ein
+Viertel der Stichprobe, 5 bis 52 Perioden), \code{"denoise"}
+(Marchenko-Pastur-Rauschfilter, Laloux et al. 1999) oder
+\code{"gerber"} (Gerber-Statistik, Gerber et al. 2022).}
 
-\item{risk_free}{Prozent p. a. (fuer \code{max_sharpe}).}
+\item{risk_free}{Risikoloser Zins in Prozent p. a. (Standard 0) fuer
+\code{max_sharpe} und die ausgewiesene Sharpe Ratio.}
 
-\item{frequency}{\code{"week"} (Standard), \code{"day"}, \code{"month"}.}
+\item{frequency}{Renditefrequenz: \code{"week"} (Standard), \code{"day"}
+oder \code{"month"}. Bei Kursdaten Aggregation (ISO-Woche,
+Kalendermonat); bei einer Renditematrix nur die Perioden je Jahr (52,
+252, 12).}
 }
 \value{
-Objekt der Klasse \code{SimLevFrontier}: \code{frontier}
-  (Rendite, Volatilitaet, Sharpe, Gewichte je Punkt) und \code{assets}
-  (Einzelanlagen).
+Objekt der Klasse \code{SimLevFrontier} mit \code{frontier}
+(data.frame je Punkt: \code{expected_return}, \code{volatility} als
+Anteil p. a., \code{sharpe} mit \code{risk_free} (\code{NA} bei
+Volatilitaet 0), dann je Anlage eine
+Gewichtsspalte), \code{assets} (data.frame der Einzelanlagen:
+\code{asset}, \code{expected_return}, \code{volatility}, Anteil p. a.),
+\code{risk_free} und \code{frequency}. Methoden \code{print} und
+\code{plot}.
 }
 \description{
-Berechnet Mean-Variance-effiziente Portfolios unter denselben Grenzen wie
-[portfolio_optimize()] (Sweep ueber die Risikoaversion) und markiert das
-Portfolio mit der hoechsten Sharpe Ratio und das Minimum-Varianz-Portfolio.
+Berechnet Mean-Variance-effiziente Long-only-Portfolios unter denselben
+Grenzen wie \code{\link[=portfolio_optimize]{portfolio_optimize()}}: Fuer \code{n} Risikoaversionen
+\eqn{\gamma} von 1e4 bis 0.02 (logarithmisch gestuft) wird
+\eqn{\max \mu'w - \frac{\gamma}{2} w'\Sigma w} geloest, mit
+historischen Mitteln und Kovarianz (annualisiert). Eingabe und
+Renditeberechnung wie bei \code{\link[=portfolio_optimize]{portfolio_optimize()}} (Kurs-data.frame mit
+\code{date} oder Matrix einfacher Periodenrenditen als Anteil); die Grenzen
+werden ebenso geprueft (unerfuellbare Grenzen sind ein Fehler).
+\code{print} zeigt den Punkt mit der kleinsten Volatilitaet
+("Minimum-Varianz") und den mit der hoechsten Sharpe Ratio, \code{plot}
+zeichnet die Grenze mit den Einzelanlagen und markiert den Punkt mit der
+hoechsten Sharpe Ratio.
+}
+\examples{
+set.seed(1); R <- matrix(rnorm(520 * 3, c(0.002, 0.001, 0.0005), c(0.03, 0.02, 0.01)), 520, byrow = TRUE)
+colnames(R) <- c("aktien", "reits", "anleihen")
+ef <- efficient_frontier(R, n = 20, upper = 0.7)
+ef
+head(ef$frontier, 3)
+}
+\seealso{
+\code{\link[=portfolio_optimize]{portfolio_optimize()}}, \code{\link[=risk_contributions]{risk_contributions()}}.
 }

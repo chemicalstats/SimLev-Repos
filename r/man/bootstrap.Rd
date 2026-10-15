@@ -20,59 +20,161 @@ bootstrap(
 )
 }
 \arguments{
-\item{data}{data.frame oder Matrix mit den Spalten aus \code{config}.}
+\item{data}{data.frame oder Matrix mit den in \code{config} genannten
+Spalten (Index-Spalten als Brutto-Renditen je Zeile oder, bei
+\code{input = "prices"}, als Kursniveaus; Zusatzreihen beliebig). Jede
+Zeile ist ein Simulationsschritt ("Tag"); eine Datumsspalte wird nicht
+ausgewertet.}
 
-\item{config}{Objekt aus [bootstrap_config()].}
+\item{config}{Objekt aus \code{\link[=bootstrap_config]{bootstrap_config()}}.}
 
-\item{method}{Verfahren:
+\item{method}{Verfahren (Standard in \code{bootstrap()}: \code{"raw"}, in
+\code{\link[=bootstrap_study]{bootstrap_study()}}: \code{"stationary"}). In Klammern die Eintraege von
+\code{params}, die das Verfahren verwendet:
 \describe{
-  \item{"raw"}{IID-Zeilen-Bootstrap (Efron 1979); zerstoert Zeitabhaengigkeit (Nullmodell)}
-  \item{"block"}{Moving Block Bootstrap (Kuensch 1989), Parameter \code{block_length}}
-  \item{"circular"}{Circular Block Bootstrap (Politis & Romano 1992), \code{block_length}}
-  \item{"stationary"}{Stationaerer Bootstrap (Politis & Romano 1994), erwartete Blocklaenge \code{L}}
-  \item{"wild"}{Wild Bootstrap, \code{wild_type} 0 = Rademacher, 1 = Mammen, 2 = normal}
-  \item{"regime"}{Volatilitaetsregime-Markov-Bootstrap, \code{n_regimes}, \code{vol_window}}
-  \item{"evt"}{GPD-Tails plus empirischer Bulk, \code{tail_prob}, \code{both_tails}}
-  \item{"tails"}{Empirische Tail-Schichtung, \code{tail_prob}}
-  \item{"reset"}{Chronologie mit zufaellig gespiegelten Segmenten, \code{p_break}}
-  \item{"garch", "gjr_garch"}{(GJR-)GARCH(1,1) mit Filtered Historical Simulation}
-  \item{"ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"}{Markov-Switching-GARCH-Familie (Paket MSGARCH)}
+\item{"raw"}{IID-Zeilen-Bootstrap (Efron 1979); zerstoert Zeitabhaengigkeit (Nullmodell). Keine Parameter.}
+\item{"block"}{Moving Block Bootstrap (Kuensch 1989) (\code{block_length})}
+\item{"circular"}{Circular Block Bootstrap (Politis & Romano 1992) (\code{block_length})}
+\item{"stationary"}{Stationaerer Bootstrap (Politis & Romano 1994), geometrisch verteilte Bloecke (\code{L})}
+\item{"wild"}{Wild Bootstrap mit gemeinsamem Gewicht je Zeile fuer alle Reihen (\code{wild_type}); erhaelt die Chronologie}
+\item{"regime"}{Volatilitaetsregime-Markov-Bootstrap: Regime aus Quantilen der rollierenden Volatilitaet des Referenzindex (\code{n_regimes}, \code{vol_window})}
+\item{"evt"}{GPD-Tails des Referenzindex plus empirischer Bulk (\code{tail_prob}, \code{both_tails}); uebrige Indizes ueber das historische Verhaeltnis zum Referenzindex gekoppelt}
+\item{"tails"}{Empirische Tail-Schichtung des Referenzindex (\code{tail_prob})}
+\item{"reset"}{Chronologie mit zufaellig gespiegelten Segmenten (\code{p_break}); erhaelt die Chronologie}
+\item{"garch", "gjr_garch"}{(GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung ueber \code{cross} in \code{\link[=bootstrap_config]{bootstrap_config()}})}
+\item{"ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"}{Markov-Switching-GARCH-Familie; benoetigt das Paket MSGARCH (\code{ms_n_regimes}/\code{ms_garch_model}, \code{ms_ar_n_regimes}/\code{ms_ar_garch_model} bzw. \code{tvtp_n_regimes}/\code{tvtp_garch_model})}
 }
-\code{L} bzw. \code{block_length} duerfen \code{"auto"} sein ([block_length()]).}
+Bei "wild" und "reset" muss \code{path_length} der Laenge der Historie
+entsprechen.}
 
-\item{n}{Anzahl Pfade (bei ESS: Gesamtbudget).}
+\item{n}{Anzahl Pfade (Standard 1000); bei \code{ess = TRUE} das
+Gesamtbudget, das auf die Parameterkombinationen verteilt wird.
+Pfade, die nach \code{max_tries} Versuchen ungueltig bleiben, fehlen im
+Ergebnis.}
 
-\item{params}{Liste von Verfahrensparametern.}
+\item{params}{Benannte Liste von Verfahrensparametern; nicht angegebene
+Eintraege erhalten den Standardwert (Standard \code{list()} = alle
+Standardwerte). Je Verfahren werden nur die oben genannten Eintraege
+verwendet:
+\describe{
+\item{L}{Erwartete Blocklaenge in Zeilen fuer "stationary" (Zahl >= 1,
+Standard 20) oder \code{"auto"} (\code{\link[=block_length]{block_length()}}, Spalte
+\code{stationary}).}
+\item{block_length}{Feste Blocklaenge in Zeilen fuer "block" und
+"circular" (ganze Zahl, Standard 20; bei "block" hoechstens Zeilen der
+Historie minus 1, bei "circular" hoechstens Zeilen der Historie) oder
+\code{"auto"} (\code{\link[=block_length]{block_length()}}, Spalte \code{circular}).}
+\item{wild_type}{Gewichte beim Wild Bootstrap: 0 = Rademacher
+(Standard), 1 = Mammen, 2 = Standardnormal; andere Werte sind ein
+Fehler.}
+\item{n_regimes}{Anzahl Volatilitaetsregime fuer "regime" (Standard 2).}
+\item{vol_window}{Fensterlaenge der rollierenden Volatilitaet in Zeilen
+fuer "regime" (Standard 20).}
+\item{tail_prob}{Tail-Wahrscheinlichkeit je Seite als Anteil fuer "evt"
+und "tails" (Standard 0.05 = 5 Prozent).}
+\item{both_tails}{Logisch, nur "evt": auch den rechten Tail mit einer
+GPD modellieren (Standard \code{TRUE}).}
+\item{p_break}{Wahrscheinlichkeit je Zeile als Anteil (0 bis 1), dass
+bei "reset" ein neues Segment beginnt (Standard 0.02).}
+\item{ms_n_regimes, ms_ar_n_regimes, tvtp_n_regimes}{Anzahl Regime fuer
+"ms_garch", "ms_ar_garch_m" bzw. "tvtp_ms_garch" (Standard je 2).}
+\item{ms_garch_model, ms_ar_garch_model, tvtp_garch_model}{Varianzmodell
+je Regime, an MSGARCH weitergereicht (Standard je "gjrGARCH").}
+}
+Der Eintrag \code{garch_order} (Standard \code{c(1, 1)}) ist vorhanden,
+aendert aber nichts: die GARCH-Verfahren schaetzen immer GARCH(1,1).}
 
-\item{ess, ess_grid}{ESS-gewichtete Gittersuche ueber Hyperparameter (wie
-im Original): Das Budget wird invers zur effektiven Stichprobengroesse
-verteilt, die Pfade erhalten Gewichte (Mittel 1).}
+\item{ess}{Logisch (Standard \code{FALSE}): ESS-gewichtete Gittersuche
+ueber Hyperparameter (wie im Original). Das Budget \code{n} wird invers
+zur effektiven Stichprobengroesse (ESS) je Kombination verteilt; die
+Pfade erhalten Gewichte (Mittel 1), mit denen \code{\link[=bootstrap_probability]{bootstrap_probability()}}
+und \code{summary()} rechnen. Fuer "raw", "garch" und "gjr_garch" gibt es
+kein Standardgitter (dann normaler Bootstrap).}
 
-\item{progress}{Fortschritt melden.}
+\item{ess_grid}{Benannte Liste von Wertevektoren je Hyperparameter (z. B.
+\code{list(L = c(20, 50, 100))}); \code{NULL} (Standard) = Standardgitter
+des Verfahrens (z. B. \code{L} bzw. \code{block_length} 5, 10, 20, 30,
+50, 75, 100 Zeilen, begrenzt auf die halbe Historienlaenge). Nur bei
+\code{ess = TRUE} verwendet.}
 
-\item{path_length}{Pfadlaenge in Zeilen (Standard: Laenge der Historie). Damit
-lassen sich z. B. 50-jaehrige Pfade aus 30 Jahren Historie erzeugen.}
+\item{progress}{Logisch: Fortschritts- und Abschlussmeldung per
+\code{message()} ausgeben (Standard \code{TRUE}).}
 
-\item{seed}{Startwert; jeder Pfad erhaelt einen eigenen L'Ecuyer-Strom, so
-dass Pfad i unabhaengig von \code{cores} und identisch zu
-[bootstrap_study()] mit gleichem Seed ist. Der globale Zufallszustand
-bleibt unveraendert.}
+\item{path_length}{Pfadlaenge in Zeilen (simulierte Schritte, ganze Zahl,
+mindestens 1); \code{NULL} (Standard) = Anzahl verwendbarer Zeilen der Historie. Damit lassen sich
+z. B. 50-jaehrige Pfade aus 30 Jahren Historie erzeugen. Jeder Pfad hat
+\code{path_length + 1} Zeilen (Startzeile plus Schritte).}
 
-\item{cores}{Anzahl Prozesse.}
+\item{seed}{Ganzzahliger Startwert; \code{NULL} (Standard) = zufaellig
+gezogen (im Ergebnis unter \code{seed} gespeichert). Jeder Pfad erhaelt
+einen eigenen L'Ecuyer-Strom, so dass Pfad i unabhaengig von
+\code{cores} ist und \code{\link[=bootstrap]{bootstrap()}} und \code{\link[=bootstrap_study]{bootstrap_study()}} mit gleichem
+Seed (und gleichen Daten, Verfahren, \code{params}, \code{ess} und
+\code{path_length}) dieselben Pfade erzeugen.
+Mit angegebenem Seed bleibt der globale Zufallszustand unveraendert;
+mit \code{seed = NULL} wird der Seed aus dem globalen Zufallsstrom
+gezogen, wiederholte Aufrufe liefern daher verschiedene Pfade.}
 
-\item{max_tries}{Wiederholungen je Pfad bei ungueltigem Pfad (Index <= 0).}
+\item{cores}{Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK-Cluster auf
+Windows).}
+
+\item{max_tries}{Versuche je Pfad (Standard 10), falls ein Pfad ungueltig
+ist (Indexrendite <= 0 oder nicht endlich). Ein Totalverlust eines
+Hebelprodukts macht den Pfad nicht ungueltig.}
 }
 \value{
-Objekt der Klasse \code{bootstrap_result} mit \code{paths} (Liste
-  von Matrizen: Zeile 1 = Startwert 100, danach je Simulationstag; Spalten
-  Indizes, Hebelprodukte, Zusatzreihen), \code{weights}, \code{param_values},
-  \code{ess_design}, \code{stats}.
+Objekt der Klasse \code{bootstrap_result}, eine Liste mit
+\describe{
+\item{paths}{Liste von Matrizen, eine je gueltigem Pfad, mit
+\code{path_length + 1} Zeilen: Zeile 1 = Startwert 100 fuer Indizes
+und Hebelprodukte, danach je Simulationsschritt. Spalten: Indizes,
+Hebelprodukte, Zusatzreihen in dieser Reihenfolge. Keine Datumsspalte.
+Zusatzreihen mit \code{aux_type = "rate"} (Prozent p. a.) und ohne
+Angabe in \code{aux_type} enthalten die
+Originalwerte der gezogenen Zeilen, solche mit \code{"level"} das
+kumulierte Niveau (Startwert = erste verwendete Historienzeile bzw.
+Startzeile der Kurse, danach die historischen Zeilenverhaeltnisse der
+gezogenen Zeilen kumuliert; keine Spruenge an Blockgrenzen). Bei
+Zusatzreihen traegt jede Matrix zusaetzlich das Attribut
+\code{aux_level}: diese Niveau-Variante fuer alle Zusatzreihen (fuer
+\code{"level"}-Reihen identisch mit der Pfadspalte). Ihr Startwert
+(Zeile 1) ist die erste Historienzeile (bzw. Startzeile der Kurse) und
+damit fuer alle Pfade gleich; frueher war es der Wert der
+Historienzeile vor dem ersten gezogenen Schritt (je Pfad verschieden).
+Die Zeilenverhaeltnisse sind unveraendert die historischen
+Verhaeltnisse der gezogenen Zeilen, koennen aber durch die andere
+Startskalierung um 1 ulp von frueheren Laeufen abweichen (beabsichtigt;
+betrifft z. B. \code{\link[=withdrawal_paths]{withdrawal_paths()}} mit \code{inflation_type = "level"}
+und \code{keep_aux}). Es dient als Inflation fuer Reihen ohne Angabe
+in \code{aux_type} (\code{\link[=withdrawal_paths]{withdrawal_paths()}} mit \code{inflation_type =
+      "level"}, \code{keep_aux} in \code{\link[=bootstrap_study]{bootstrap_study()}}); fuer Reihen mit
+\code{aux_type = "rate"} wird es dort nicht verwendet.}
+\item{weights}{Pfadgewichte (Mittel 1; ohne ESS alle 1).}
+\item{method, config, seed}{Verfahren, Konfiguration und verwendeter Seed.}
+\item{params}{Vollstaendige Parameterliste (bei ESS: der ersten Kombination).}
+\item{ess, ess_design}{Logisch, ob ESS verwendet wurde, und das ESS-Design
+(data.frame je Kombination mit Parametern, \code{ess_per_boot},
+\code{n_sims}, \code{weight} u. a.) bzw. \code{NULL}.}
+\item{param_values}{Bei ESS: Parameterliste je Pfad, sonst \code{NULL}.}
+\item{knockout_rate}{Anteil der ungueltigen Versuche an allen
+Versuchen in Prozent (\code{100 * stats$knockout_rate}).}
+\item{stats}{Liste mit \code{attempts} (Versuche gesamt),
+\code{success} (gueltige Pfade), \code{null} (Versuche ohne gueltigen
+Pfad) und \code{knockout_rate} (\code{null / attempts}, als Anteil).}
+}
 }
 \description{
 Erzeugt \code{n} simulierte Preis-Pfade fuer alle Indizes der Konfiguration,
-leitet daraus die Hebelprodukte ab und zieht Zusatzreihen mit.
+leitet daraus die Hebelprodukte ab und zieht Zusatzreihen mit. Eingabe ist
+ein Datensatz mit historischen Renditen oder Kursen (Format siehe
+\code{\link[=bootstrap_config]{bootstrap_config()}}); Ergebnis sind Pfadmatrizen im Speicher. Einen
+einzelnen Pfad macht \code{\link[=bootstrap_data]{bootstrap_data()}} zum data.frame fuer \code{\link[=simulation]{simulation()}};
+\code{\link[=withdrawal_paths]{withdrawal_paths()}} wandelt alle Pfade in Periodenrenditen fuer
+\code{\link[=withdrawal_simulation]{withdrawal_simulation()}} um. Fuer Strategievergleiche ueber viele Pfade
+ohne Speicherung der Pfade dient \code{\link[=bootstrap_study]{bootstrap_study()}}.
 }
 \examples{
+# Brutto-Tagesrenditen zweier Indizes und ein Zins in Prozent p. a.
 set.seed(2)
 d <- data.frame(us = 1 + rnorm(1500, 3e-4, 0.01))
 d$eu <- d$us * (1 + rnorm(1500, 0, 0.004))
@@ -80,8 +182,32 @@ d$rate <- 2
 cfg <- bootstrap_config(c(us = "us", eu = "eu"), aux = c(rate = "rate"),
   letfs = list(list(base = "eu", leverage = 2, finance = "rate")))
 b <- bootstrap(d, cfg, "stationary", n = 5, params = list(L = 50), seed = 1)
+b
 dim(b$paths[[1]])
+head(b$paths[[1]], 3)
+
+# Kursniveaus, feste Blocklaenge, kuerzere Pfade; Pfad 1 in simulation()
+set.seed(1); n <- 3 * 365
+p <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
+p$aktien <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
+cfg2 <- bootstrap_config(c(akt = "aktien"), input = "prices",
+  letfs = list(list(base = "akt", leverage = 2, finance = 3, expense = 0.6)))
+b2 <- bootstrap(p, cfg2, "block", n = 3, params = list(block_length = 30),
+  path_length = 500, seed = 7, progress = FALSE)
+x <- bootstrap_data(b2, 1, start_date = "2030-01-01")
+res <- simulation(x, create_strategy(akt_l2 = asset_config("etf", "bnh", asset_bonus = 30)))
+res$cagr
+
+# CPI als Niveau, Zins als Rate: der Pfad enthaelt den kumulierten CPI
+set.seed(3)
+h <- data.frame(us = 100 * cumprod(1 + rnorm(1501, 3e-4, 0.01)),
+                cpi = 100 * 1.02^((0:1500) / 365), zins = 2)
+cfg3 <- bootstrap_config(c(us = "us"), aux = c(cpi = "cpi", zins = "zins"), input = "prices",
+  aux_type = c(cpi = "level", zins = "rate"))
+b3 <- bootstrap(h, cfg3, "stationary", n = 2, params = list(L = 50), seed = 1, progress = FALSE)
+range(diff(log(b3$paths[[1]][, "cpi"])) * 365)   # stets log(1.02): keine Spruenge
 }
 \seealso{
-[bootstrap_study()], [bootstrap_config()], [block_length()]
+\code{\link[=bootstrap_config]{bootstrap_config()}}, \code{\link[=bootstrap_data]{bootstrap_data()}}, \code{\link[=bootstrap_study]{bootstrap_study()}},
+\code{\link[=withdrawal_paths]{withdrawal_paths()}}
 }

@@ -31,12 +31,12 @@ plot(result)
 ```
 
 **Ausgabe:** 6-Panel Dashboard mit:
-- Portfolio Performance
-- Drawdown Analysis
-- Returns Distribution
-- Rolling Returns
-- Monthly Returns Heatmap
-- Performance Statistics
+- Wertentwicklung des Depots
+- Drawdown-Analyse
+- Verteilung der Tagesrenditen
+- Rollierende Renditen (annualisiert)
+- Monatsrenditen (Heatmap)
+- Kennzahlen
 
 ---
 
@@ -131,12 +131,15 @@ export_dashboard(result, "compact.pdf", style = "compact")
 ### Als HTML speichern (interaktiv)
 
 ```r
-# Erfordert plotly package
-# install.packages("plotly")
-
-export_html_dashboard(result, "portfolio.html")
-# Erstellt interaktive Charts mit Zoom, Pan, Hover, etc.
+# Eigenständige HTML-Datei (ohne plotly abhängigkeitsfrei, offline lauffähig)
+plot_interactive(result, file = "portfolio.html")
 ```
+
+`export_html_dashboard()` ist im R-Paket nur ein Platzhalter: Ohne plotly
+bricht es mit einem Fehler ab, mit plotly gibt es nur eine Meldung aus und
+schreibt keine Datei. Für ein interaktives Dashboard `plot_interactive()`
+verwenden. Dessen Kopfzeile zeigt CAGR, Sharpe und Max. Drawdown, mit
+Sparplan als „CAGR (geldgewichtet)“ und „Max. Drawdown (zeitgewichtet)“.
 
 ---
 
@@ -198,6 +201,11 @@ result_dca <- simulation(
 plot(result_bnh, compare = result_dca)
 ```
 
+Mit Sparplan ist die CAGR geldgewichtet (XIRR), Drawdowns werden
+zeitgewichtet gemessen. Das Vergleichspanel beschriftet die Kennzahlen dann
+als „CAGR (MWR)“ und „Max. DD (TWR)“. Für einen fairen Vergleich der
+Strategien eignet sich die TTWROR.
+
 ---
 
 ### Beispiel 3: Monatliche Analyse
@@ -230,6 +238,8 @@ plot(result,
 - Shaded area unter der Kurve
 - Finale Portfolio-Wert Annotation
 - Vergleichslinie bei Compare-Modus
+- Mit Sparplan: Summe der Einzahlungen (Startwert + Sparraten) als
+  gepunktete Treppenlinie („Einzahlungen“)
 - Currency-formatierte Y-Achse
 - Grid für bessere Lesbarkeit
 
@@ -247,6 +257,9 @@ plot(result,
 - Maximum Drawdown Linie
 - Prozentuale Y-Achse
 - Farbkodierung (rot = negativ)
+- Mit Sparplan auf dem zeitgewichteten Wertindex gemessen (Titel
+  „Drawdown-Analyse (zeitgewichtet)“), Einzahlungen täuschen also keine
+  Erholung vor
 
 **Interpretation:**
 - Tiefe Täler = Große Verlustphasen
@@ -282,9 +295,10 @@ plot(result,
 ### 4. Rolling Returns
 
 **Features:**
-- 30-Tage annualisierte Returns
+- 30-Tage annualisierte Returns (bei kurzen Reihen ein Zehntel der Tage)
 - Farbkodierung (grün = positiv, rot = negativ)
-- CAGR-Referenzlinie
+- CAGR-Referenzlinie (mit Sparplan TTWROR, passend zu den zeitgewichteten
+  Renditen)
 - Null-Linie
 
 **Interpretation:**
@@ -320,24 +334,26 @@ plot(result,
 
 **Kategorien:**
 
-**Performance Metrics:**
-- CAGR: Compound Annual Growth Rate
+**Rendite:**
+- CAGR: Compound Annual Growth Rate (mit Sparplan „CAGR (geldgew.)“, XIRR)
 - TTWROR: True Time-Weighted Rate of Return
-- Total Return: Gesamtrendite
+- Gesamtrendite (mit Sparplan „Gesamtrendite (TWR)“, zeitgewichtet)
 
-**Risk Metrics:**
-- Max Drawdown: Größter Verlust von Peak
-- Daily Volatility: Tägliche Schwankung
-- Annual Volatility: Annualisierte Volatilität
+**Risiko:**
+- Max. Drawdown: Größter Verlust von Peak (mit Sparplan „Max. Drawdown (TWR)“)
+- Volatilität je Tag: Tägliche Schwankung
+- Volatilität p. a.: Annualisierte Volatilität
 
-**Return Profile:**
-- Sharpe Ratio: Risk-adjusted Return
-- Skewness: Schiefe der Verteilung
-- Kurtosis: "Dicke" der Verteilungsenden
+**Renditeprofil:**
+- Sharpe Ratio: Risk-adjusted Return, identisch mit
+  `result$statistics$sharpe`
+- Schiefe: Schiefe der Verteilung
+- Wölbung (Kurtosis): "Dicke" der Verteilungsenden
 
-**Portfolio Info:**
-- Start/End Value: Anfangs-/Endwert
-- Duration: Simulationsdauer
+**Depot:**
+- Startwert/Endwert: Anfangs-/Endwert
+- Eingezahlt: Summe der Einzahlungen (nur mit Sparplan)
+- Dauer: Simulationsdauer in Tagen
 
 ---
 
@@ -451,16 +467,23 @@ for (i in seq_along(results)) {
 - **Research:** Alle panels (full)
 
 ### 3. Farben
-- **Hell:** Bessere Lesbarkeit bei Projektion
-- **Dunkel:** Besser für Druck
+- **Heller Hintergrund** (Standard `background = "#FFFFFF"`): für Druck
+  und PDF; dunkle Flächen verbrauchen Tinte und geben im Druck schlecht
+  wieder
+- **Dunkler Hintergrund:** allenfalls für Bildschirm und Projektion; dann
+  `background`, `grid` und die Linienfarben über `colors` aufeinander
+  abstimmen
 - **Brand Colors:** Bei offiziellen Dokumenten
 - **Default:** Für schnelle Analyse
 
 ### 4. Export-Formate
-- **PDF:** Beste Qualität, für Archivierung
-- **PNG:** Für Webseiten/Emails
-- **HTML:** Für interaktive Präsentationen
-- **SVG:** Für weitere Bearbeitung
+- **PDF:** `export_dashboard(result, "datei.pdf")` (schreibt immer PDF,
+  auch bei anderer Dateiendung); beste Qualität, für Archivierung
+- **HTML:** `plot_interactive(result, file = "datei.html")`, interaktiv
+- **PNG/SVG:** keine eigene Exportfunktion; mit einem Grafikgerät von R
+  selbst schreiben, z. B.
+  `png("dashboard.png", width = 1600, height = 1000, res = 110); plot(result); dev.off()`
+  bzw. `svg("dashboard.svg", width = 14, height = 10); plot(result); dev.off()`
 
 ---
 
@@ -498,8 +521,8 @@ export_dashboard(result, "large.pdf", width = 20, height = 14)
 
 ## Zukünftige Erweiterungen
 
-Mögliche Ergänzungen:
-- Interactive plotly version
+Mögliche Ergänzungen (ein interaktives HTML-Dashboard gibt es bereits mit
+`plot_interactive()`):
 - Shiny app integration
 - Custom metric definitions
 - Benchmark comparison

@@ -15,28 +15,65 @@ rolling_optimization(
 )
 }
 \arguments{
-\item{x}{data.frame mit \code{date} und Kursspalten oder Renditematrix.}
+\item{x}{data.frame mit Spalte \code{date} (Date) und Kursspalten
+(Kursniveaus, keine Renditen), z. B. aus \code{\link[=align_series]{align_series()}}. Eine
+Renditematrix ist hier nicht moeglich.}
 
-\item{assets}{Spalten (Standard: alle numerischen).}
+\item{assets}{Zeichenvektor der Kursspalten (Pflicht).}
 
-\item{method}{Verfahren (siehe oben).}
+\item{method}{Verfahren wie in \code{\link[=portfolio_optimize]{portfolio_optimize()}} (Zeichenkette,
+Standard \code{"min_variance"}).}
 
-\item{window}{Fensterlaenge in Jahren.}
+\item{window}{Fensterlaenge in Jahren (Standard 3).}
 
-\item{every}{Entscheidungsrhythmus (\code{"month"}, \code{"quarter"},
-\code{"year"}).}
+\item{every}{Entscheidungsrhythmus: \code{"month"} (Standard),
+\code{"quarter"} oder \code{"year"}.}
 
-\item{frequency}{\code{"week"} (Standard), \code{"day"}, \code{"month"}.}
+\item{frequency}{Renditefrequenz innerhalb des Fensters: \code{"week"}
+(Standard, ISO-Woche), \code{"day"} oder \code{"month"}.}
 
-\item{...}{Weitere Argumente fuer [portfolio_optimize()] (\code{lower},
-\code{upper}, \code{cov}, \code{mu}, \code{budget}, ...).}
+\item{...}{Weitere Argumente fuer \code{\link[=portfolio_optimize]{portfolio_optimize()}} (\code{lower},
+\code{upper}, \code{cov}, \code{mu}, \code{risk_free}, \code{budget},
+\code{alpha}, \code{resample}, ...).}
 }
 \value{
-\code{SimLevWeights}; vor dem ersten vollen Fenster gleich gewichtet.
+Objekt der Klasse \code{SimLevWeights} (data.frame mit
+\code{date} und einer Gewichtsspalte je Anlage, Anteile mit
+Zeilensumme 1, eine Zeile je Zeile von \code{x}); vor dem ersten
+Entscheidungstermin gleich gewichtet. Attribute \code{source}
+(\code{"rolling <method>"}), \code{decision_rows} (Zeilennummern der
+Entscheidungstermine) und \code{failed_dates} (Date-Vektor der Termine
+mit fehlgeschlagener Optimierung, dort Gleichgewichtung; leer, wenn
+keine).
 }
 \description{
 Optimiert an jedem Entscheidungstermin auf den Renditen des
 zurueckliegenden Fensters und haelt die Gewichte bis zum naechsten Termin.
-Das Ergebnis ist eine Zielgewichtsreihe fuer [tactical_simulation()]; jede
-Entscheidung nutzt nur Daten, die zum Zeitpunkt vorlagen.
+Das Ergebnis ist eine Zielgewichtsreihe fuer \code{\link[=tactical_simulation]{tactical_simulation()}}; jede
+Entscheidung nutzt nur Daten bis einschliesslich des Entscheidungstags
+(gehandelt wird in \code{\link[=tactical_simulation]{tactical_simulation()}} mit dessen \code{lag}).
+}
+\details{
+Entscheidungstermine sind die letzten Zeilen jedes Monats, Quartals bzw.
+Jahres, deren Datum mindestens \code{window} Jahre (\code{window * 365.25}
+Tage, gerundet) nach dem ersten Datum liegt. Das Fenster umfasst die
+Zeilen mit Datum im Zeitraum (Termin - \code{window * 365.25} Tage,
+Termin]. Argumentfehler (unbekanntes \code{method}, unbekannte
+Argumente in \code{...}, unerfuellbare Grenzen) brechen sofort ab.
+Schlaegt eine Optimierung an einem Termin fehl (z. B. zu wenige Perioden
+im Fenster), gilt dort Gleichgewichtung; die Funktion warnt mit der Anzahl
+und der ersten Fehlermeldung. Die Zeilen von \code{x} werden nach
+\code{date} sortiert (mit Hinweis, falls noetig).
+}
+\examples{
+set.seed(1); n <- 5 * 365
+d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
+d$aktien <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
+d$anleihen <- 100 * cumprod(1 + rnorm(n, 1e-4, 0.003))
+w <- rolling_optimization(d, c("aktien", "anleihen"), window = 2, every = "quarter")
+w
+}
+\seealso{
+\code{\link[=portfolio_optimize]{portfolio_optimize()}}, \code{\link[=tactical_simulation]{tactical_simulation()}},
+\code{\link[=blend_weights]{blend_weights()}}, \code{\link[=cpcv_portfolio]{cpcv_portfolio()}}.
 }

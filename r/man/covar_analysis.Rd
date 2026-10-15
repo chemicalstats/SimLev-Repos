@@ -14,22 +14,37 @@ covar_analysis(
 )
 }
 \arguments{
-\item{data}{data.frame mit \code{date} und Kursspalten.}
+\item{data}{data.frame mit Spalte \code{date} (Date), Kursspalten
+(Kursniveaus, keine Renditen) und gegebenenfalls Zustandsspalten.}
 
-\item{system}{Kursspalte des Systems bzw. Portfolios.}
+\item{system}{Name der Kursspalte des Systems bzw. Portfolios
+(Zeichenkette).}
 
-\item{assets}{Kursspalten der einzelnen Anlagen.}
+\item{assets}{Zeichenvektor der Kursspalten der einzelnen Anlagen.}
 
-\item{state}{Optionale Zustandsspalten.}
+\item{state}{Optionaler Zeichenvektor der Zustandsspalten (in ihrer
+eigenen Einheit). \code{NULL} (Standard) = zeitkonstante Quantile.}
 
-\item{q}{Quantil (Standard 0.05).}
+\item{q}{Quantil als Anteil (Standard 0.05 = 5-\%-Quantil).}
 
-\item{frequency}{\code{"week"}, \code{"day"} oder \code{"month"}.}
+\item{frequency}{Renditefrequenz: \code{"week"} (Standard, ISO-Woche),
+\code{"day"} oder \code{"month"}.}
 }
 \value{
-Objekt der Klasse \code{SimLevCoVaR}: \code{summary} je Anlage
-  (beta, VaR, CoVaR, Delta-CoVaR in Prozent je Periode, Mittel ueber die
-  Zeit) und \code{series} (Zeitreihen je Anlage).
+Objekt der Klasse \code{SimLevCoVaR} mit
+\describe{
+\item{summary}{data.frame je Anlage: \code{asset}, \code{beta}
+(Steigung der Systemrendite auf die Anlagerendite im q-Quantil,
+ohne Einheit), \code{var}, \code{covar}, \code{delta_covar} (Mittel
+ueber die Zeit) und \code{delta_covar_min} (kleinster Wert), alle
+ausser \code{beta} in Prozent je Periode (Renditen mit Vorzeichen,
+Verluste negativ).}
+\item{series}{data.frame mit \code{date}, \code{asset}, \code{var},
+\code{covar}, \code{delta_covar} je Periode und Anlage (Prozent je
+Periode).}
+}
+sowie \code{system}, \code{state}, \code{q}, \code{frequency} und
+\code{n} (Anzahl Perioden). Methoden \code{print} und \code{plot}.
 }
 \description{
 Nach Adrian & Brunnermeier (2016): Wie weit verschiebt sich das
@@ -39,8 +54,30 @@ Median? Mit \code{state} (Drittvariablen, verzoegert) werden VaR und CoVaR
 zeitvariabel:
 \deqn{X^{sys}_t = \alpha + \beta X^i_t + \gamma' M_{t-1} + \varepsilon \quad (\text{Quantil } q)}
 \deqn{\Delta CoVaR_t = \beta\,(VaR^i_t(q) - VaR^i_t(0.5))}
+Dabei ist \eqn{VaR^i_t(p)} das per \code{\link[=quantile_reg]{quantile_reg()}} geschaetzte
+(bei \code{state = NULL} konstante) p-Quantil der Rendite der Anlage, also
+eine Rendite mit Vorzeichen (Verluste negativ), und
+\eqn{CoVaR_t = \alpha + \beta VaR^i_t(q) + \gamma' M_{t-1}}.
+Renditen sind Log-Renditen der Periode in Prozent,
+\eqn{100 \log(P_t / P_{t-1})}, aufbereitet wie in
+\code{\link[=dependence_analysis]{dependence_analysis()}} (Fortschreiben fehlender Kurse, letzte Zeile je
+ISO-Woche bzw. Monat); Zustandsvariablen gehen mit dem Wert am Ende der
+Vorperiode ein. Perioden mit fehlenden Werten entfallen.
+}
+\examples{
+set.seed(1); n <- 3 * 365
+d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
+e <- rnorm(n)
+d$aktien <- 100 * cumprod(1 + 0.01 * e)
+d$anleihen <- 100 * cumprod(1 + 0.004 * (0.3 * e + rnorm(n)))
+d$portfolio <- 0.6 * d$aktien + 0.4 * d$anleihen
+covar_analysis(d, "portfolio", c("aktien", "anleihen"), q = 0.05)
 }
 \references{
 Adrian, T. & Brunnermeier, M. K. (2016), American Economic
-  Review 106(7), 1705-1741.
+Review 106(7), 1705-1741.
+}
+\seealso{
+\code{\link[=quantile_reg]{quantile_reg()}}, \code{\link[=tail_regression]{tail_regression()}}, \code{\link[=dependence_analysis]{dependence_analysis()}},
+\code{\link[=risk_contributions]{risk_contributions()}}.
 }

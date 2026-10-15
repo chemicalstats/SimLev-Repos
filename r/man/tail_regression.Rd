@@ -16,32 +16,71 @@ tail_regression(
 )
 }
 \arguments{
-\item{data}{data.frame mit \code{date}, Kurs- und Zustandsspalten.}
+\item{data}{data.frame mit Spalte \code{date} (Date), Kursspalte
+(Kursniveaus, keine Renditen) und Zustandsspalten.}
 
-\item{asset}{Kursspalte.}
+\item{asset}{Name der Kursspalte (Zeichenkette).}
 
-\item{drivers}{Zustandsspalten (Drittvariablen).}
+\item{drivers}{Zeichenvektor der Zustandsspalten (Drittvariablen).}
 
-\item{quantiles}{Quantile.}
+\item{quantiles}{Numerischer Vektor der Quantile als Anteil (Standard
+\code{c(0.05, 0.25, 0.5, 0.75, 0.95)}).}
 
-\item{frequency}{\code{"week"}, \code{"day"} oder \code{"month"}.}
+\item{frequency}{Renditefrequenz: \code{"week"} (Standard, ISO-Woche),
+\code{"day"} oder \code{"month"}.}
 
-\item{B}{Bootstrap-Wiederholungen (0 = keine Standardfehler).}
+\item{B}{Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 199; 0 =
+keine Standardfehler und Intervalle).}
 
-\item{block}{Mittlere Blocklaenge (Standard: Politis-White).}
+\item{block}{Mittlere Blocklaenge des stationaeren Bootstraps in Perioden.
+\code{NULL} (Standard) = Politis-White-Schaetzung auf den absoluten
+Abweichungen der Rendite vom Mittel (begrenzt auf 2 bis n / 10).}
 
-\item{seed}{Startwert.}
+\item{seed}{Startwert fuer den Bootstrap. Mit Startwert ist das Ergebnis reproduzierbar und der
+Zufallszustand der Sitzung bleibt unveraendert; mit \code{NULL} wird der
+Zufallsstrom der Sitzung normal weitergezogen.}
 }
 \value{
-Objekt der Klasse \code{SimLevTailRegression}: \code{coefficients}
-  (Quantil, Term, Schaetzung, SE, 90%-Intervall), \code{ols} und Daten.
-  Renditen in Prozent je Periode.
+Objekt der Klasse \code{SimLevTailRegression} mit
+\code{coefficients} (data.frame: \code{quantile}, \code{term},
+\code{estimate}, \code{se} (Bootstrap-Standardabweichung),
+\code{lower}, \code{upper} (90-\%-Bootstrap-Intervall, 5- und
+95-\%-Quantil); Koeffizienten in Prozentpunkten Log-Rendite je Periode
+bzw. je Einheit des Treibers), \code{ols} (OLS-Koeffizienten, gleiche
+Einheit), \code{data} (aufbereitete Perioden: \code{date}, Log-Rendite
+als Anteil, verzoegerte Treiber) sowie \code{asset}, \code{drivers},
+\code{quantiles}, \code{n} (Anzahl Perioden), \code{frequency},
+\code{B}, \code{B_failed} (Anzahl Bootstrap-Stichproben, die nicht
+schaetzbar waren, z. B. weil ein Treiber in der Stichprobe konstant ist;
+sie fehlen in Standardfehlern und Intervallen, mit Warnung),
+\code{block}. Methoden \code{print} und \code{plot}.
 }
 \description{
 Schaetzt fuer mehrere Quantile, wie sich die Verteilung der Periodenrendite
-einer Anlage mit dem (verzoegerten) Zustand von Drittvariablen verschiebt.
-Ein negativer Koeffizient der Inflation im 5-%-Quantil heisst z. B.: Bei
-hoeherer Inflation fallen die schlechten Perioden schlechter aus, auch wenn
-sich der Median kaum bewegt. Standardfehler per stationaerem
-Block-Bootstrap.
+einer Anlage mit dem (verzoegerten) Zustand von Drittvariablen verschiebt
+(lineare Quantilsregression mit \code{\link[=quantile_reg]{quantile_reg()}}, zum Vergleich OLS fuer
+den Mittelwert). Ein negativer Koeffizient der Inflation im 5-\%-Quantil
+heisst z. B.: Bei hoeherer Inflation fallen die schlechten Perioden
+schlechter aus, auch wenn sich der Median kaum bewegt. Standardfehler per
+stationaerem Block-Bootstrap der Perioden.
+}
+\details{
+Zielgroesse ist die Log-Rendite der Periode in Prozent,
+\eqn{100 \log(P_t / P_{t-1})}; die Kurse werden wie in
+\code{\link[=dependence_analysis]{dependence_analysis()}} aufbereitet (Fortschreiben fehlender Werte,
+letzte Zeile je ISO-Woche bzw. Monat). Die Treiber gehen mit ihrem Wert am
+Ende der Vorperiode in ihrer eigenen Einheit ein.
+}
+\examples{
+set.seed(1); n <- 3 * 365
+d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
+d$inflation <- 2 + cumsum(rnorm(n, 0, 0.05))
+d$aktien <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
+tr <- tail_regression(d, "aktien", "inflation", quantiles = c(0.05, 0.5, 0.95),
+                      B = 49, seed = 1)
+tr
+}
+\seealso{
+\code{\link[=align_macro]{align_macro()}} zur Vorbereitung der Treiber,
+\code{\link[=dependence_analysis]{dependence_analysis()}}, \code{\link[=covar_analysis]{covar_analysis()}}, \code{\link[=quantile_reg]{quantile_reg()}}.
 }

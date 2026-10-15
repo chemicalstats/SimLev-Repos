@@ -1,8 +1,12 @@
-#' Null-coalescing operator
+#' Operator fuer NULL-Ersatzwerte
 #'
-#' Returns \code{a} unless it is \code{NULL}, in which case \code{b} is returned.
-#' Provided for compatibility with R < 4.4 (where \code{\%||\%} is not in base).
-#' @param a,b values; \code{a} is returned unless \code{NULL}.
-#' @return \code{a} if not \code{NULL}, otherwise \code{b}.
+#' Gibt \code{a} zurueck, ausser es ist \code{NULL}; dann wird \code{b} zurueckgegeben.
+#' Bereitgestellt fuer die Kompatibilitaet mit R < 4.4 (dort ist \code{%||%} nicht in base).
+#' @param a,b Werte; \code{a} wird zurueckgegeben, sofern es nicht \code{NULL} ist.
+#' @return \code{a}, wenn nicht \code{NULL}, sonst \code{b}.
 #' @keywords internal
+#' @noRd
 `%||%` <- function(a, b) if (is.null(a)) b else a
+
+# Deutsche Monatsabkuerzungen fuer Grafikachsen (month.abb ist englisch)
+.monate_kurz <- c("Jan", "Feb", "M\u00e4r", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez")

@@ -33,61 +33,124 @@ signal_volatility(x, n = 20, threshold = 25, band = 0, ppy = 365.25, lag = 0)
 signal_combine(..., op = c("and", "or"))
 }
 \arguments{
-\item{x}{Numerische Kursreihe (z. B. \code{df$eu}).}
+\item{x}{Numerischer Vektor mit Kursniveaus (z. B. \code{df$eu}).}
 
-\item{n, fast, slow}{Fensterlaengen in Zeilen.}
+\item{n}{Fensterlaenge in Zeilen (Standard: 200 bei \code{signal_sma}
+und \code{signal_ema}, 250 bei \code{signal_momentum}, 20 bei
+\code{signal_volatility}).}
 
-\item{band}{Hysterese-Band in Prozent.}
+\item{band}{Hysterese-Band (Standard 0 = keins): bei Durchschnitten in
+Prozent des Durchschnitts (1 = 1 \%), bei \code{signal_momentum} und
+\code{signal_volatility} in Prozentpunkten um \code{threshold}.}
 
-\item{lag}{Verzoegerung in Zeilen (z. B. 1, um am Folgetag zu handeln).}
+\item{lag}{Verzoegerung der Signale in Zeilen (Standard 0; z. B. 1, um
+erst in der Folgezeile zu handeln). Die ersten \code{lag} Zeilen sind
+\code{FALSE}.}
 
-\item{type}{\code{"sma"} oder \code{"ema"}.}
+\item{fast, slow}{Fensterlaengen in Zeilen fuer den schnellen und den
+langsamen Durchschnitt (Standard 50 und 200; \code{fast < slow}).}
 
-\item{threshold}{Schwelle in Prozent.}
+\item{type}{Art der Durchschnitte bei \code{signal_crossover}:
+\code{"sma"} (Standard) oder \code{"ema"}.}
 
-\item{sell_dd, buy_dd}{Drawdown-Schwellen in Prozent (positiv).}
+\item{threshold}{Schwelle in Prozent: bei \code{signal_momentum} fuer die
+Rendite ueber \code{n} Zeilen (Standard 0), bei
+\code{signal_volatility} fuer die Volatilitaet in Prozent p. a.
+(Standard 25).}
 
-\item{window}{Rollierendes Fenster fuer das Hoch (\code{NULL} = laufendes Hoch).}
+\item{sell_dd, buy_dd}{Abstand zum Hoch in Prozent (positiv, 20 = 20 \%
+unter dem Hoch); \code{buy_dd} darf nicht groesser als \code{sell_dd}
+sein (Standard 20 und 10).}
 
-\item{ppy}{Zeilen je Jahr fuer die Annualisierung (365.25 bei Kalendertagen).}
+\item{window}{Fenster in Zeilen fuer das rollierende Hoch (Standard
+\code{NULL} = laufendes Hoch seit Beginn).}
 
-\item{...}{Bei \code{signal_combine}: Signal-Listen.}
+\item{ppy}{Zeilen je Jahr fuer die Annualisierung der Volatilitaet
+(Standard 365.25 fuer Kalendertagsdaten; bei Handelstagsdaten z. B.
+252). Wird nicht aus den Daten ermittelt.}
 
-\item{op}{\code{"and"} oder \code{"or"}.}
+\item{...}{Bei \code{signal_combine}: Signal-Listen \code{list(buy, sell)}
+gleicher Laenge (sonst Fehler).}
+
+\item{op}{Verknuepfung bei \code{signal_combine}: \code{"and"} (Standard)
+oder \code{"or"}.}
 }
 \value{
-\code{list(buy, sell)} mit logischen Vektoren.
+\code{list(buy, sell)} mit logischen Vektoren der Laenge von
+\code{x} (NA als \code{FALSE}).
 }
 \description{
 Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das
-[bootstrap_study()] und [param_search()] fuer \code{signal = function(df) ...}
-erwarten. Alle Schwellen in Prozent.
+\code{\link[=bootstrap_study]{bootstrap_study()}} und \code{\link[=param_search]{param_search()}} fuer \code{signal = function(df) ...}
+erwarten: Die Elemente \code{buy} und \code{sell} werden dort als
+gleichnamige Spalten an den Datensatz angehaengt. Fuer \code{\link[=simulation]{simulation()}}
+haengt man sie selbst an und nennt sie in \code{\link[=asset_config]{asset_config()}}
+(\code{action_type = "signal"}, \code{signal_buy}, \code{signal_sell});
+fuer \code{\link[=tactical_rules]{tactical_rules()}} lassen sie sich direkt als Bedingung verwenden.
 }
 \details{
+Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B.
+eine Spalte aus \code{\link[=align_series]{align_series()}}. Alle Fenster (\code{n}, \code{fast},
+\code{slow}, \code{window}, \code{lag}) zaehlen in Zeilen der Daten,
+bei Kalendertagsdaten (Wochenenden per LOCF) also in Kalendertagen, bei
+Handelstagsdaten in Handelstagen. Solange ein Fenster noch nicht gefuellt
+ist, sind beide Signale \code{FALSE} (ausser bei \code{signal_drawdown},
+das anfangs das Hoch der bisherigen Zeilen verwendet). \code{x} sollte
+keine NA enthalten: Bei Durchschnitten liefern Fenster mit NA kein
+Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei
+\code{signal_drawdown} nur die Zeile mit NA (das Hoch wird ohne sie
+fortgefuehrt).
+
+\code{band} wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind
+beide Signale \code{FALSE}, der Zustand in \code{\link[=simulation]{simulation()}} bzw.
+\code{\link[=signal_state]{signal_state()}} bleibt dann unveraendert. Bei Durchschnitten
+(\code{signal_sma}, \code{signal_ema}, \code{signal_crossover}) ist
+\code{band} relativ zum Durchschnitt in Prozent, bei
+\code{signal_momentum} und \code{signal_volatility} ein Abstand in
+Prozentpunkten zu \code{threshold}.
+
 \describe{
-  \item{signal_sma}{Kurs ueber/unter dem gleitenden Durchschnitt (n Zeilen),
-    optional mit Band: Kauf ab \code{SMA * (1 + band/100)}, Verkauf unter
-    \code{SMA * (1 - band/100)}, dazwischen bleibt der Zustand.}
-  \item{signal_ema}{Wie \code{signal_sma} mit exponentiellem Durchschnitt.}
-  \item{signal_crossover}{Schneller ueber langsamem Durchschnitt.}
-  \item{signal_momentum}{Rendite ueber n Zeilen ueber/unter \code{threshold}.}
-  \item{signal_drawdown}{Verkauf ab \code{sell_dd} Prozent unter dem
-    (rollierenden) Hoch, Wiedereinstieg, sobald der Abstand unter
-    \code{buy_dd} Prozent faellt.}
-  \item{signal_volatility}{Realisierte Volatilitaet (annualisiert, Prozent)
-    ueber n Zeilen: Kauf unter \code{threshold}, Verkauf darueber
-    (optional mit Band).}
-  \item{signal_combine}{Verknuepft Signale: \code{"and"} kauft nur, wenn alle
-    kaufen, und verkauft, sobald eines verkauft; \code{"or"} umgekehrt.}
+\item{signal_sma}{Kurs ueber/unter dem einfachen gleitenden Durchschnitt
+der letzten \code{n} Zeilen (einschliesslich der aktuellen): Kauf ab
+\code{SMA * (1 + band/100)}, Verkauf unter \code{SMA * (1 - band/100)},
+dazwischen bleibt der Zustand.}
+\item{signal_ema}{Wie \code{signal_sma} mit exponentiellem Durchschnitt
+(Glaettung \eqn{2 / (n + 1)}, Start mit dem einfachen Mittel der ersten
+\code{n} Werte).}
+\item{signal_crossover}{Schneller ueber langsamem Durchschnitt: Kauf,
+wenn der schnelle mindestens das \code{(1 + band/100)}-fache des
+langsamen erreicht, Verkauf unter dem \code{(1 - band/100)}-fachen.}
+\item{signal_momentum}{Rendite ueber \code{n} Zeilen in Prozent: Kauf ab
+\code{threshold + band}, Verkauf unter \code{threshold - band}.}
+\item{signal_drawdown}{Verkauf ab \code{sell_dd} Prozent unter dem
+(rollierenden) Hoch, Kauf (Wiedereinstieg), solange der Abstand unter
+\code{buy_dd} Prozent liegt; dazwischen bleibt der Zustand.}
+\item{signal_volatility}{Realisierte Volatilitaet der Log-Renditen ueber
+\code{n} Zeilen, annualisiert mit \code{ppy}, in Prozent p. a.: Kauf bis
+\code{threshold - band}, Verkauf ueber \code{threshold + band}.}
+\item{signal_combine}{Verknuepft Signale: \code{"and"} kauft nur, wenn alle
+kaufen, und verkauft, sobald eines verkauft; \code{"or"} kauft, sobald
+eines kauft, und verkauft nur, wenn alle verkaufen.}
 }
 }
 \examples{
+set.seed(1)
 x <- 100 * cumprod(1 + rnorm(1000, 2e-4, 0.01))
 s <- signal_sma(x, 200, band = 1)
 table(s$buy)
 both <- signal_combine(signal_sma(x, 200), signal_volatility(x, 20, threshold = 25))
+# Direkt in simulation(): Signale als Spalten anhaengen
+d <- data.frame(date = seq.Date(as.Date("2018-01-01"), by = "day", length.out = 1000), A = x)
+s <- signal_sma(d$A, 200, band = 1, lag = 1)
+d$buy <- s$buy; d$sell <- s$sell
+res <- simulation(d, create_strategy(A = asset_config("etf", "signal",
+                    signal_buy = "buy", signal_sell = "sell")))
 # In einer Strategie-Spezifikation:
 spec <- list(strategy = create_strategy(A = asset_config("etf", "signal",
                signal_buy = "buy", signal_sell = "sell")),
              signal = function(df) signal_sma(df$A, 200))
+}
+\seealso{
+\code{\link[=signal_state]{signal_state()}}, \code{\link[=tactical_rules]{tactical_rules()}}, \code{\link[=signal_analysis]{signal_analysis()}},
+\code{\link[=param_search]{param_search()}}
 }

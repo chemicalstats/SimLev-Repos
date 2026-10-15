@@ -19,7 +19,6 @@ withdrawal_rule(
   stock_share = 60,
   age = 65,
   max_age = 100,
-  horizon = NULL,
   fv = 0,
   cape_a = 1.75,
   cape_b = 0.5,
@@ -33,74 +32,156 @@ withdrawal_rule(
 )
 }
 \arguments{
-\item{type}{Regel:
+\item{type}{Regel (Zeichenkette, Standard \code{"constant"}):
 \describe{
-  \item{"constant"}{Bengen (1994) / Trinity-Studie: \eqn{W_1 = rate \cdot P_1}, danach jaehrlich um die Inflation erhoeht.}
-  \item{"percent"}{Fester Prozentsatz des aktuellen Depots.}
-  \item{"vanguard"}{Vanguard Dynamic Spending: \eqn{rate \cdot P}, Veraenderung zum Vorjahr real begrenzt auf +\code{ceiling} / -\code{floor} (Standard 5 / 2,5).}
-  \item{"guyton_klinger"}{Guyton & Klinger (2006): kein Inflationsausgleich nach Verlustjahr, wenn die aktuelle Rate ueber der Anfangsrate liegt; Kuerzung um \code{cut} bei Rate > (1 + \code{ceiling}) x Anfangsrate (nicht in den letzten \code{cpr_years} Jahren); Erhoehung um \code{raise} bei Rate < (1 - \code{floor}) x Anfangsrate. Standard 20/20/10/10, 15 Jahre.}
-  \item{"floor_ceiling"}{Bengen (2001): \eqn{rate \cdot P}, begrenzt auf [1 - floor, 1 + ceiling] x reale Erstentnahme (Standard 15 / 20).}
-  \item{"clyatt"}{Clyatt: \eqn{\max(rate \cdot P, 0.95 \cdot W_{t-1})}, nominal.}
-  \item{"ratchet"}{Kitces: konstant real, +\code{raise} (10) wenn das reale Depot \code{ratchet_threshold} (1,5) x Startdepot uebersteigt, hoechstens alle \code{ratchet_gap} (3) Jahre.}
-  \item{"endowment"}{Yale/Tobin: \eqn{\lambda W_{t-1}(1+\pi) + (1-\lambda) rate \cdot P}, \code{smoothing} = 70.}
-  \item{"one_over_n"}{\eqn{P / (N - t + 1)}; leert das Depot planmaessig.}
-  \item{"vpw"}{Bogleheads VPW: \eqn{P \cdot PMT(r, max\_age - Alter)}, r = \code{exp_return} (Standard: 5 x Aktienquote + 1,9 x Rest).}
-  \item{"abw"}{Amortisation: reale Annuitaet ueber die Restlaufzeit mit Zielvermoegen \code{fv}.}
-  \item{"cape"}{\eqn{(a + b / CAPE) \cdot P}, Standard a = 1,75, b = 0,5 (ERN); CAPE-Reihe noetig.}
-  \item{"sensible"}{Basis \code{rate} x Startdepot real plus \code{extra} (10) des realen Vorjahresgewinns.}
-  \item{"hebeler"}{Autopilot II: 75 \% Vorjahresentnahme (inflationiert) + 25 \% Annuitaet.}
+\item{"constant"}{Bengen (1994) / Trinity-Studie: \eqn{W_1 = rate \cdot P_1}, danach \eqn{W_{t-1}(1+\pi)} (real konstant).}
+\item{"percent"}{Fester Prozentsatz des aktuellen Depots: \eqn{rate \cdot P}.}
+\item{"vanguard"}{Vanguard Dynamic Spending: \eqn{rate \cdot P}, die Veraenderung gegenueber \eqn{W_{t-1}(1+\pi)} (also real) begrenzt auf +\code{ceiling} Prozent / -\code{floor} Prozent (Standard 5 / 2,5).}
+\item{"guyton_klinger"}{Guyton & Klinger (2006): Erstentnahme \eqn{rate \cdot P_1}, Anfangsrate \eqn{WR_0 = W_1 / P_1}. Danach \eqn{W_{t-1}} mit Inflationsausgleich (hoechstens \code{inflation_cap} Prozent). Withdrawal-Rule (\code{skip_inflation}): kein Inflationsausgleich, wenn die nominale Depotrendite des Vorjahres negativ war und die inflationierte Entnahme eine Rate ueber \eqn{WR_0} ergaebe. Capital-Preservation-Rule: Kuerzung um \code{cut} Prozent, wenn die aktuelle Rate \eqn{W / P} ueber \eqn{WR_0 (1 + ceiling/100)} liegt und noch mehr als \code{cpr_years} Restjahre bleiben. Prosperity-Rule: sonst Erhoehung um \code{raise} Prozent, wenn die Rate unter \eqn{WR_0 (1 - floor/100)} liegt. Standard 20 / 20 / 10 / 10, 15 Jahre.}
+\item{"floor_ceiling"}{Bengen (2001): \eqn{rate \cdot P}, begrenzt auf das (1 - \code{floor}/100)- bis (1 + \code{ceiling}/100)-fache der realen Erstentnahme in heutigen Preisen (Standard 15 / 20).}
+\item{"clyatt"}{Clyatt: \eqn{\max(rate \cdot P, floor95/100 \cdot W_{t-1})}, nominal (ohne Inflationsausgleich).}
+\item{"ratchet"}{Kitces: real konstant wie \code{"constant"}; Erhoehung um \code{raise} Prozent (10), wenn das reale Depot das \code{ratchet_threshold}-fache (1,5) des realen Startdepots uebersteigt, hoechstens alle \code{ratchet_gap} (3) Jahre (fruehestens im Jahr 1 + \code{ratchet_gap}).}
+\item{"endowment"}{Yale/Tobin: \eqn{\lambda W_{t-1}(1+\pi) + (1-\lambda) rate \cdot P} mit \eqn{\lambda} = \code{smoothing}/100 (Standard 70).}
+\item{"one_over_n"}{\eqn{P} / Restjahre; leert das Depot planmaessig bis zum Ende der Simulation.}
+\item{"vpw"}{Bogleheads VPW: \eqn{P \cdot PMT(r, n)} mit \eqn{n} = \code{max_age} - Alter im Planjahr (\code{age} im ersten Jahr) und r = \code{exp_return}/100, hoechstens \code{max_rate} Prozent des Depots; bei \eqn{n \le 1} das ganze Depot.}
+\item{"abw"}{Amortisation: reale vorschuessige Annuitaet \eqn{(P_{real} - fv / (1+r)^n) \cdot PMT(r, n)} ueber n = Restjahre mit r = \code{exp_return}/100 und Zielvermoegen \code{fv}; nicht negativ.}
+\item{"cape"}{\eqn{(cape_a/100 + cape_b / CAPE) \cdot P} mit dem CAPE zu Beginn des Planjahres (CAPE <= 0: nur \code{cape_a}). Standard \code{cape_a} = 1,75, \code{cape_b} = 0,5 (ERN); CAPE-Reihe noetig (Argument \code{cape} in \code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}} bzw. \code{\link[=withdrawal_paths]{withdrawal_paths()}}).}
+\item{"sensible"}{Erstes Jahr \eqn{rate \cdot P_1}; danach diese Erstentnahme real (inflationiert) plus \code{extra} Prozent (10) des realen Depotzuwachses seit der Vorjahresentnahme (nur Zuwaechse).}
+\item{"hebeler"}{Autopilot II: \eqn{\lambda W_{t-1}(1+\pi) + (1-\lambda) PMT(r, n) \cdot P} mit \eqn{\lambda} = \code{smoothing}/100 (Standard 75), r = \code{exp_return}/100, n = Restjahre; im ersten Jahr nur die Annuitaet.}
 }}
 
-\item{rate}{Entnahmerate in Prozent (Anfangs- bzw. Zielrate).}
+\item{rate}{Entnahmerate in Prozent (4 = 4 \% des Depots; Standard 4;
+zulaessig 0 bis 100): Anfangsrate (\code{constant}, \code{guyton_klinger},
+\code{ratchet}, \code{sensible}) bzw. laufende Rate auf das aktuelle Depot
+(\code{percent}, \code{vanguard}, \code{floor_ceiling}, \code{clyatt},
+\code{endowment}). Von \code{one_over_n}, \code{vpw}, \code{abw},
+\code{cape} und \code{hebeler} nicht genutzt. Werte zwischen 0 und 0,2
+loesen bei \code{constant}, \code{percent}, \code{vanguard} und
+\code{guyton_klinger} eine Warnung aus (vermutlich Anteil statt Prozent).}
 
-\item{ceiling, floor}{Obere/untere Schranke in Prozent (Bedeutung je Regel).}
+\item{ceiling, floor}{Obere bzw. untere Schranke in Prozent (>= 0), Bedeutung
+je Regel: \code{vanguard} = maximale reale Erhoehung / Senkung gegenueber
+dem Vorjahr (Standard 5 / 2,5); \code{guyton_klinger} = Abstand der
+Leitplanken von der Anfangsrate (20 / 20); \code{floor_ceiling} = Korridor
+um die reale Erstentnahme (20 / 15). \code{NULL} = diese
+Regel-Standards; andere Regeln ignorieren die Werte (gespeichert als 0).}
 
-\item{cut, raise}{Kuerzung/Erhoehung in Prozent (Guyton-Klinger, Ratchet).}
+\item{cut, raise}{Kuerzung bzw. Erhoehung der Entnahme in Prozent (>= 0,
+Standard 10 / 10): \code{cut} fuer \code{guyton_klinger}, \code{raise} fuer
+\code{guyton_klinger} und \code{ratchet}.}
 
-\item{cpr_years}{Guyton-Klinger: Capital-Preservation-Rule endet so viele
-Jahre vor Planende.}
+\item{cpr_years}{Guyton-Klinger: Anzahl Jahre (Standard 15). Die
+Capital-Preservation-Rule greift nur, solange mehr als \code{cpr_years}
+Restjahre (einschliesslich des aktuellen) bleiben.}
 
-\item{inflation_cap}{Guyton-Klinger: maximale Inflationsanpassung in
-Prozent (Standard \code{Inf}, wie in der Fassung von 2006).}
+\item{inflation_cap}{Guyton-Klinger: maximaler Inflationsausgleich je Jahr
+in Prozent (Standard \code{Inf} = unbegrenzt, wie in der Fassung von 2006).}
 
-\item{skip_inflation}{Guyton-Klinger: Withdrawal-Rule aktiv.}
+\item{skip_inflation}{Logisch, Guyton-Klinger: Withdrawal-Rule aktiv
+(Standard \code{TRUE}; siehe \code{type}).}
 
-\item{smoothing}{Glaettungsgewicht in Prozent (Endowment 70, Hebeler 75).}
+\item{smoothing}{Glaettungsgewicht der Vorjahresentnahme in Prozent
+(0 bis 100) fuer \code{endowment} und \code{hebeler}. \code{NULL} = 75 bei
+\code{hebeler}, sonst 70.}
 
-\item{exp_return}{Erwartete reale Rendite in Prozent (VPW, ABW, Hebeler).}
+\item{exp_return}{Erwartete reale Rendite in Prozent p. a. fuer
+\code{vpw}, \code{abw} und \code{hebeler}. \code{NULL} =
+5 x \code{stock_share}/100 + 1,9 x (1 - \code{stock_share}/100), beim
+Standard \code{stock_share = 60} also 3,76.}
 
-\item{stock_share}{Aktienquote in Prozent fuer den VPW-Standard von
-\code{exp_return}.}
+\item{stock_share}{Aktienquote in Prozent (60 = 60 \%, Standard 60); nur
+fuer den Standardwert von \code{exp_return} verwendet.}
 
-\item{age, max_age}{Alter bei Rentenbeginn und Planungsalter (VPW).}
+\item{age, max_age}{Alter bei Rentenbeginn und Planungsalter in Jahren
+(Standard 65 / 100), nur \code{vpw}.}
 
-\item{horizon}{Planungshorizont in Jahren (1/N, ABW, Hebeler, Guyton-Klinger);
-Standard: Laenge der Simulation.}
+\item{fv}{\code{abw}: reales Zielvermoegen am Ende als Geldbetrag in
+Kaufkraft des Startzeitpunkts (Standard 0 = Depot aufbrauchen).}
 
-\item{fv}{Reales Zielvermoegen am Ende (ABW).}
+\item{cape_a, cape_b}{CAPE-Regel: Konstante in Prozent (Standard 1.75 =
+1,75 \%) und Faktor auf 1 / CAPE als Anteil (Standard 0.5; bei CAPE 25
+also 0.5 / 25 = 0.02 = 2 \%).}
 
-\item{cape_a, cape_b}{CAPE-Regel: Konstante (Prozent) und Multiplikator.}
+\item{ratchet_threshold}{\code{ratchet}: Faktor auf das reale Startdepot
+(Standard 1.5 = 150 \%), ab dem erhoeht wird.}
 
-\item{ratchet_threshold, ratchet_gap}{Ratchet-Parameter.}
+\item{ratchet_gap}{\code{ratchet}: Mindestabstand zwischen Erhoehungen in
+Jahren (Standard 3).}
 
-\item{extra}{Sensible Withdrawals: Anteil des realen Gewinns in Prozent.}
+\item{extra}{\code{sensible}: Anteil des realen Depotzuwachses in Prozent
+(Standard 10).}
 
-\item{floor95}{Clyatt: Mindestanteil der Vorjahresentnahme in Prozent.}
+\item{floor95}{\code{clyatt}: Mindestanteil der Vorjahresentnahme in
+Prozent (Standard 95).}
 
-\item{min_real, max_real}{Absolute Unter-/Obergrenze der Jahresentnahme in
-Kaufkraft des Startzeitpunkts (fuer alle Regeln).}
+\item{min_real, max_real}{Absolute Unter- bzw. Obergrenze der Jahresentnahme
+als Geldbetrag in Kaufkraft des Startzeitpunkts, fuer alle Regeln
+(Standard 0 und \code{Inf} = keine Grenze).}
 
-\item{max_rate}{VPW: Hoechstsatz in Prozent (Standard 100).}
+\item{max_rate}{\code{vpw}: Hoechstsatz in Prozent des Depots (Standard 100).}
 }
 \value{
-Objekt der Klasse \code{withdrawal_rule}.
+Objekt der Klasse \code{withdrawal_rule} (Liste) mit
+\code{type} und allen Parametern in Prozent-Konvention, wobei
+\code{ceiling}, \code{floor}, \code{smoothing} und \code{exp_return}
+bereits mit den Standardwerten gefuellt sind (\code{stock_share} wird
+nicht gespeichert). Ausgabe mit \code{print()}.
 }
 \description{
-Erzeugt eine validierte Entnahmeregel fuer [withdrawal_simulation()].
-Die Jahresentnahme wird zu Beginn
+Erzeugt eine validierte Entnahmeregel fuer \code{\link[=withdrawal_simulation]{withdrawal_simulation()}} und
+\code{\link[=withdrawal_max_rate]{withdrawal_max_rate()}}. Die Jahresentnahme wird zu Beginn
 jedes Planjahres festgelegt (Guyton & Klinger 2006; Suarez et al. 2015) und
-bei unterjaehrigen Perioden gleichmaessig ausgezahlt. Alle Betraege sind
-Netto-Konsum; Steuern werden zusaetzlich aus dem Depot verkauft.
+bei unterjaehrigen Perioden gleichmaessig ausgezahlt (Jahresbetrag / Perioden
+je Jahr). Alle Betraege sind Netto-Konsum; Steuern werden zusaetzlich aus dem
+Depot verkauft. Alle Raten und Schranken werden in Prozent angegeben
+(\code{rate = 4} bedeutet 4 \% des Depots); welche Argumente eine Regel
+nutzt, zeigt die Tabelle unter Details. Jedes Argument muss eine einzelne
+Zahl ohne \code{NA} im zulaessigen Bereich sein (Prozentsaetze wie
+\code{floor}, \code{cut}, \code{smoothing}, \code{floor95},
+\code{extra}, \code{max_rate} 0 bis 100, \code{ceiling}, \code{raise},
+\code{inflation_cap} >= 0, \code{min_real <= max_real}, bei \code{vpw}
+\code{age < max_age} und \code{max_rate > 0}); sonst bricht die Funktion
+mit einer Meldung ab. Schranken zwischen 0 und 0,2 loesen eine Warnung aus
+(vermutlich Anteil statt Prozent).
+}
+\details{
+Bezeichnungen: \eqn{P} = nominaler Depotwert zu Beginn des Planjahres vor
+der Entnahme, \eqn{P_1} = Startdepot, \eqn{W_{t-1}} = nominale Entnahme des
+Vorjahres, \eqn{\pi} = Inflation des Vorjahres, Restjahre = verbleibende
+Planjahre der Simulation einschliesslich des aktuellen Jahres,
+\eqn{PMT(r, n)} = vorschuessige Annuitaet je Geldeinheit Kapital
+(\eqn{r / ((1 - (1+r)^{-n})(1+r))}, bei \eqn{n \le 1} gleich 1).
+Nach jeder Regel werden \code{min_real} und \code{max_real} angewendet.
+
+Genutzte Argumente je Regel (Standardwerte von \code{ceiling},
+\code{floor} und \code{smoothing} in Klammern; \code{min_real} und
+\code{max_real} gelten fuer alle Regeln):\tabular{ll}{
+   Regel \tab genutzte Argumente \cr
+   \code{constant} \tab \code{rate} \cr
+   \code{percent} \tab \code{rate} \cr
+   \code{vanguard} \tab \code{rate}, \code{ceiling} (5), \code{floor} (2.5) \cr
+   \code{guyton_klinger} \tab \code{rate}, \code{ceiling} (20), \code{floor} (20), \code{cut}, \code{raise}, \code{cpr_years}, \code{inflation_cap}, \code{skip_inflation} \cr
+   \code{floor_ceiling} \tab \code{rate}, \code{ceiling} (20), \code{floor} (15) \cr
+   \code{clyatt} \tab \code{rate}, \code{floor95} \cr
+   \code{ratchet} \tab \code{rate}, \code{raise}, \code{ratchet_threshold}, \code{ratchet_gap} \cr
+   \code{endowment} \tab \code{rate}, \code{smoothing} (70) \cr
+   \code{one_over_n} \tab keine (nur Restjahre) \cr
+   \code{vpw} \tab \code{exp_return} bzw. \code{stock_share}, \code{age}, \code{max_age}, \code{max_rate} \cr
+   \code{abw} \tab \code{exp_return} bzw. \code{stock_share}, \code{fv} (Restjahre) \cr
+   \code{cape} \tab \code{cape_a}, \code{cape_b}; CAPE-Reihe in den Pfaden noetig \cr
+   \code{sensible} \tab \code{rate}, \code{extra} \cr
+   \code{hebeler} \tab \code{exp_return} bzw. \code{stock_share}, \code{smoothing} (75) (Restjahre) \cr
+}
+
+
+Die Restjahre (\code{one_over_n}, \code{abw}, \code{hebeler} und die
+Capital-Preservation-Rule von \code{guyton_klinger}) sind kein Argument der
+Regel: Sie ergeben sich in \code{\link[=withdrawal_simulation]{withdrawal_simulation()}} aus der Zahl der
+Planjahre (Pfadlaenge bzw. \code{years}). Eine zufaellige Laufzeit je Pfad
+(\code{horizon} in \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}, Objekt aus \code{\link[=horizon_model]{horizon_model()}})
+aendert nur die Auswertung (Erfolg, Konsum und Endvermoegen bis zum
+Horizont); die Regel rechnet weiter mit den Restjahren der vollen
+Pfadlaenge.
 }
 \examples{
 withdrawal_rule("constant", rate = 4)
@@ -109,8 +190,11 @@ withdrawal_rule("vanguard", rate = 5, ceiling = 5, floor = 2.5)
 }
 \references{
 Bengen (1994, 2001); Cooley, Hubbard & Walz (1998);
-  Guyton & Klinger (2006), Journal of Financial Planning 19(3);
-  Vanguard (2021), Sustainable spending rates in turbulent markets;
-  Bogleheads Wiki, Variable percentage withdrawal; Kitces (2015);
-  Suarez, Suarez & Walz (2015), Financial Services Review 24.
+Guyton & Klinger (2006), Journal of Financial Planning 19(3);
+Vanguard (2021), Sustainable spending rates in turbulent markets;
+Bogleheads Wiki, Variable percentage withdrawal; Kitces (2015);
+Suarez, Suarez & Walz (2015), Financial Services Review 24.
+}
+\seealso{
+\code{\link[=withdrawal_simulation]{withdrawal_simulation()}}, \code{\link[=withdrawal_max_rate]{withdrawal_max_rate()}}, \code{\link[=horizon_model]{horizon_model()}}
 }

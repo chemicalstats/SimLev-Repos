@@ -1,10 +1,26 @@
 // src/simulation_core.cpp
-// Core C++ functions for SimLev package
+// C++-Kernfunktionen des Pakets SimLev
 //
 // Version: 2.2.1
 //
-// WICHTIG: Alle Zugriffe auf status/report/market verwenden Named Access,
+// WICHTIG: Alle Zugriffe auf status/report/market erfolgen ueber Namen,
 // um Indizierungsfehler zu vermeiden.
+//
+// Ausnahme oberste Ebene von sim_mem (C7-11): Sie wird ueber die POSITION gelesen und
+// geschrieben (0-basiert): input[0] assets, input[1] status, input[2] market,
+// input[3] trades, input[4] report, input[5] totals. Die Reihenfolge legt R zentral in
+// .SIM_MEM_LAYOUT (R/sim_prepare.R) fest; simulation() prueft sie mit .sim_check_layout()
+// vor dem ersten Aufruf einer C++-Funktion. Wer die Feldfolge in R aendert, muss alle
+// input[k] hier und in fifo_core_RCpp.cpp anpassen.
+//
+// In-place-Semantik: Rcpp::List ist ein Verweis auf das R-Objekt, keine Kopie. Die
+// Funktionen aendern sim_mem an Ort und Stelle (vorhandene Listenelemente und
+// Zahlenvektoren werden ueberschrieben, Unterlisten per status[name] = ... bzw.
+// input[k] = ... zurueckgeschrieben). Die void-Funktionen geben nichts zurueck: Der
+// Aufrufer in R arbeitet mit demselben Objekt weiter und weist es nicht neu zu. Jedes
+// R-Objekt, das dieselben Unterlisten bzw. Vektoren teilt (z. B. nach x <- sim_mem ohne
+// Aenderung in R), sieht die Aenderung mit; unabhaengig ist nur eine tiefe Kopie
+// (unserialize(serialize(sim_mem, NULL)), Probelauf im Jahresabschluss).
 //
 // Status-Felder (R-Namen):
 //   count, price, worth, money, total, target, actual, differ
@@ -32,7 +48,7 @@
 using namespace Rcpp;
 
 // ===========================================================================
-// HELPER FUNCTIONS
+// HILFSFUNKTIONEN
 // ===========================================================================
 
 bool leap_year(int year) {
@@ -48,18 +64,18 @@ int days_in_month(int year, int month) {
 }
 
 // ===========================================================================
-// EXPORTED FUNCTIONS
+// EXPORTIERTE FUNKTIONEN
 // ===========================================================================
 
-//' Allocate DCA Flows to an Asset
+//' DCA-Zufluss einem Asset zuordnen
 //'
-//' Updates the simulation state with DCA cash flow.
+//' Bucht die Sparplan-Einzahlung in den Simulationszustand (flows, money, total).
 //'
-//' @param input Simulation state list
-//' @param name Asset name
-//' @param flows Amount to add
-//' @param index Day index (1-based)
-//' @export
+//' @param input Liste des Simulationszustands (sim_mem)
+//' @param name Asset-Name
+//' @param flows Einzuzahlender Betrag in EUR
+//' @param index Tagesindex (1-basiert)
+//' @noRd
 // [[Rcpp::export]]
 void dca_flows_allocation(List input, String name, double flows, int index) {
   List status = input[1];
@@ -68,12 +84,12 @@ void dca_flows_allocation(List input, String name, double flows, int index) {
   List status_name = as<List>(status[name]);
   List report_name = as<List>(report[name]);
   
-  // Update flows in report
+  // flows im Report aktualisieren
   NumericVector report_flows = as<NumericVector>(report_name["flows"]);
   report_flows[index - 1] = flows;
   report_name["flows"] = report_flows;
   
-  // Update money
+  // money (Cash) aktualisieren
   double money = as<double>(status_name["money"]);
   money += flows;
   status_name["money"] = money;
@@ -82,7 +98,7 @@ void dca_flows_allocation(List input, String name, double flows, int index) {
   report_money[index - 1] = money;
   report_name["money"] = report_money;
   
-  // Update total
+  // total aktualisieren
   double worth = as<double>(status_name["worth"]);
   double total = money + worth;
   status_name["total"] = total;
@@ -91,7 +107,7 @@ void dca_flows_allocation(List input, String name, double flows, int index) {
   report_total[index - 1] = total;
   report_name["total"] = report_total;
   
-  // Write back
+  // Zurueckschreiben
   report[name] = report_name;
   status[name] = status_name;
   input[4] = report;
@@ -99,15 +115,15 @@ void dca_flows_allocation(List input, String name, double flows, int index) {
 }
 
 
-//' Update Report After Buy Transaction
+//' Report nach einem Kauf aktualisieren
 //'
-//' @param input Simulation state list
-//' @param name Asset name
-//' @param index Day index (1-based)
-//' @param trade_count Number of shares bought
-//' @param trade_price Price paid per share
-//' @param market_price Current market price
-//' @export
+//' @param input Liste des Simulationszustands (sim_mem)
+//' @param name Asset-Name
+//' @param index Tagesindex (1-basiert)
+//' @param trade_count Anzahl gekaufter Anteile
+//' @param trade_price Gezahlter Preis je Anteil
+//' @param market_price Aktueller Marktkurs
+//' @noRd
 // [[Rcpp::export]]
 void calculate_buy_report(List input, String name, int index, 
                           double trade_count, double trade_price, 
@@ -154,16 +170,16 @@ void calculate_buy_report(List input, String name, int index,
 }
 
 
-//' Update Report After Sell Transaction
+//' Report nach einem Verkauf aktualisieren
 //'
-//' @param input Simulation state list
-//' @param name Asset name
-//' @param index Day index (1-based)
-//' @param trade_count Number of shares sold
-//' @param trade_price Price received per share
-//' @param market_price Current market price
-//' @param capital_gains_tax Tax paid on gains
-//' @export
+//' @param input Liste des Simulationszustands (sim_mem)
+//' @param name Asset-Name
+//' @param index Tagesindex (1-basiert)
+//' @param trade_count Anzahl verkaufter Anteile
+//' @param trade_price Erhaltener Preis je Anteil
+//' @param market_price Aktueller Marktkurs
+//' @param capital_gains_tax Gezahlte Steuer auf den Gewinn
+//' @noRd
 // [[Rcpp::export]]
 void calculate_sell_report(List input, String name, int index,
                            double trade_count, double trade_price,
@@ -210,23 +226,23 @@ void calculate_sell_report(List input, String name, int index,
 }
 
 
-//' Calculate Total Report for All Assets
+//' Gesamtreport fuer alle Assets berechnen
 //'
-//' Updates status and report for all assets at a given day.
-//' Recalculates portfolio weights (stored in status "differ" field)
-//' based on current market values.
+//' Aktualisiert Status und Report aller Assets an einem Tag.
+//' Berechnet die Portfolio-Gewichte neu (gespeichert im Status-Feld "differ")
+//' auf Basis der aktuellen Marktwerte.
 //'
-//' @param input Simulation state list
-//' @param assets Character vector of asset names
-//' @param index Day index (1-based)
-//' @export
+//' @param input Liste des Simulationszustands (sim_mem)
+//' @param assets Zeichenvektor der Asset-Namen
+//' @param index Tagesindex (1-basiert)
+//' @noRd
 // [[Rcpp::export]]
 void calculate_total_report(List input, CharacterVector assets, int index) {
   List status = input[1];
   List market = input[2];
   List report = input[4];
   
-  // First pass: update prices and calculate totals
+  // Erster Durchlauf: Kurse aktualisieren und Summen berechnen
   for (int i = 0; i < assets.size(); i++) {
     String name = assets[i];
     
@@ -261,7 +277,7 @@ void calculate_total_report(List input, CharacterVector assets, int index) {
     report[name] = report_name;
   }
   
-  // Calculate total portfolio worth
+  // Gesamtwert des Portfolios berechnen
   double total_worth = 0.0;
   for (int i = 0; i < assets.size(); i++) {
     String name = assets[i];
@@ -269,7 +285,7 @@ void calculate_total_report(List input, CharacterVector assets, int index) {
     total_worth += as<double>(status_name["total"]);
   }
   
-  // Second pass: calculate and store portfolio weights
+  // Zweiter Durchlauf: Portfolio-Gewichte berechnen und speichern
   //
   // Feldkonvention (historisch bedingt):
   //   status["actual"] = normalisiertes Zielgewicht (wird hier NICHT ueberschrieben)
@@ -302,26 +318,26 @@ void calculate_total_report(List input, CharacterVector assets, int index) {
 }
 
 
-//' Perform Trade Buy (C++ Core)
+//' Kauf ausfuehren (C++-Kern)
 //'
-//' Executes the core buy logic: calls calculate_buy_report (report + status update),
-//' creates a FIFO lot entry, and increments buy_count. All by-reference.
+//' Fuehrt die Kern-Kauflogik aus: ruft calculate_buy_report auf (Report- und Status-Update),
+//' legt einen FIFO-Lot-Eintrag an und erhoeht buy_count. Alles per Referenz.
 //'
-//' The R wrapper handles: trade_count calculation (spread, fractions), details output.
+//' Der R-Wrapper uebernimmt: Berechnung von trade_count (Spread, Bruchteile), Detailausgabe.
 //'
-//' @param input Simulation state list (modified in place)
-//' @param name Asset name
-//' @param index Day index (1-based)
-//' @param trade_count Number of units to buy
-//' @param trade_price Price per unit (after spread)
-//' @param market_price Raw market price (before spread)
-//' @export
+//' @param input Liste des Simulationszustands (wird direkt veraendert)
+//' @param name Asset-Name
+//' @param index Tagesindex (1-basiert)
+//' @param trade_count Anzahl zu kaufender Anteile
+//' @param trade_price Preis je Anteil (nach Spread)
+//' @param market_price Marktkurs (vor Spread)
+//' @noRd
 // [[Rcpp::export]]
 void perform_trade_buy_cpp(List input, String name, int index,
                            double trade_count, double trade_price,
                            double market_price) {
   
-  // 1. Report + Status Update (via existing C++ function)
+  // 1. Report- und Status-Update (ueber vorhandene C++-Funktion)
   calculate_buy_report(input, name, index, trade_count, trade_price, market_price);
   
   // 2. FIFO-Lot erstellen
@@ -334,7 +350,7 @@ void perform_trade_buy_cpp(List input, String name, int index,
   DateVector asset_days = as<DateVector>(market_name["asset_day"]);
   Date event_date = asset_days[index - 1];
   
-  // Lot-Felder: Named Access, konsistent mit R-Code
+  // Lot-Felder: Zugriff ueber Namen, konsistent mit dem R-Code
   // buy[["date"]], buy[["type"]], buy[["count"]], buy[["price"]],
   // buy[["remaining"]], buy[["original"]], (buy[["vp"]] wird später am 31.12. ergänzt)
   List lot = List::create(
@@ -359,15 +375,15 @@ void perform_trade_buy_cpp(List input, String name, int index,
 }
 
 
-//' Single-Day Market Update (Fast Path)
+//' Markt-Update fuer einen einzelnen Tag (Fast Path)
 //'
-//' Updates prices, worth, total, and portfolio weights for all assets
-//' on a single day. Replaces the R-level perform_market_update.
+//' Aktualisiert Kurse, worth, total und Portfolio-Gewichte aller Assets
+//' an einem Tag. Ersetzt das fruehere perform_market_update in R.
 //'
-//' @param input Simulation state list (modified in place)
-//' @param assets Character vector of asset names
-//' @param index Day index (1-based)
-//' @export
+//' @param input Liste des Simulationszustands (wird direkt veraendert)
+//' @param assets Zeichenvektor der Asset-Namen
+//' @param index Tagesindex (1-basiert)
+//' @noRd
 // [[Rcpp::export]]
 void perform_market_update(List input, CharacterVector assets, int index) {
   List status = input[1];
@@ -430,20 +446,20 @@ void perform_market_update(List input, CharacterVector assets, int index) {
 }
 
 
-//' Batch Market Update for Contiguous Fast-Path Days
+//' Gebuendeltes Markt-Update fuer zusammenhaengende Fast-Path-Tage
 //'
-//' Vectorized update for a range of days where no trades, DCA, rebalancing,
-//' year-change, or staking events occur. During these days, count and money
-//' are constant per asset, so worth and total are simple price-scaled vectors.
+//' Vektorisiertes Update fuer einen Tagesbereich ohne Trades, DCA, Rebalancing,
+//' Jahreswechsel oder "Staking"-Ereignisse. An diesen Tagen sind count und money
+//' je Asset konstant; worth und total sind daher einfach mit dem Kurs skalierte Vektoren.
 //'
-//' This replaces hundreds of individual perform_market_update() calls with
-//' a single tight C++ loop over the price vectors.
+//' Das ersetzt Hunderte einzelner Aufrufe von perform_market_update() durch
+//' eine einzige kompakte C++-Schleife ueber die Kursvektoren.
 //'
-//' @param input Simulation state list (modified in place)
-//' @param assets Character vector of asset names
-//' @param start_idx First day index (1-based, inclusive)
-//' @param end_idx Last day index (1-based, inclusive)
-//' @export
+//' @param input Liste des Simulationszustands (wird direkt veraendert)
+//' @param assets Zeichenvektor der Asset-Namen
+//' @param start_idx Erster Tagesindex (1-basiert, einschliesslich)
+//' @param end_idx Letzter Tagesindex (1-basiert, einschliesslich)
+//' @noRd
 // [[Rcpp::export]]
 void batch_market_update(List input, CharacterVector assets, 
                          int start_idx, int end_idx) {

@@ -15,26 +15,43 @@ currency_hedged_index(
 )
 }
 \arguments{
-\item{data}{data.frame mit \code{date}.}
+\item{data}{data.frame mit Spalte \code{date}.}
 
-\item{local}{Kursreihe in Lokalwaehrung (Spaltenname oder Vektor).}
+\item{local}{Kursreihe in Lokalwaehrung (Niveau): Spaltenname in
+\code{data} oder numerischer Vektor der Laenge \code{nrow(data)};
+Luecken werden mit dem letzten Wert gefuellt.}
 
-\item{domestic_rate, foreign_rate}{Zinsen in Prozent p. a.}
+\item{domestic_rate, foreign_rate}{Zinsen der Heimat- bzw. Fremdwaehrung in
+Prozent p. a. (Spaltenname, Vektor, Skalar, \code{data.frame(date, value)}
+oder benannter Vektor mit Datumsnamen).}
 
-\item{cost}{Sicherungskosten in Prozent p. a.}
+\item{cost}{Sicherungskosten in Prozent p. a. (Standard 0; Tagesbasis 365).}
 
-\item{basis}{Tagesbasis der Zinsen.}
+\item{basis}{Tagesbasis der Zinsdifferenz (Standard 360).}
 
-\item{start}{Startwert (Standard: erster Wert der lokalen Reihe).}
+\item{start}{Startwert; \code{NULL} (Standard) = erster Wert der lokalen
+Reihe.}
 }
 \value{
-Numerischer Indexvektor.
+Numerischer Indexvektor (Niveau, Laenge \code{nrow(data)}).
 }
 \description{
 Naeherung einer rollierend per Devisentermingeschaeft gesicherten Anlage:
 Die Rendite in Lokalwaehrung plus die Zinsdifferenz zwischen Heimat- und
 Fremdwaehrung (gedeckte Zinsparitaet), abzueglich Sicherungskosten:
 \deqn{r^{h}_t = r^{lokal}_t + \frac{i^{heim}_{t-1} - i^{fremd}_{t-1}}{100}\cdot\frac{\Delta t}{B} - \frac{k}{100}\cdot\frac{\Delta t}{365}}
+mit Zinsen des Vortags und Kalendertagen \eqn{\Delta t} seit der Vorzeile.
 Effekte aus der Absicherung nur des Anfangswerts einer Rollperiode
 (Restrisiko auf Kursgewinne) sind nicht enthalten.
+}
+\examples{
+set.seed(1)
+d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 730))
+d$sp500 <- 100 * cumprod(1 + rnorm(730, 3e-4, 0.01))
+# EUR-Anleger: Heimatzins 3, US-Zins 5, Kosten 0.1 (Prozent p. a.)
+h <- currency_hedged_index(d, "sp500", domestic_rate = 3, foreign_rate = 5, cost = 0.1)
+c(ungesichert = tail(d$sp500, 1), gesichert = tail(h, 1))
+}
+\seealso{
+\code{\link[=money_market_index]{money_market_index()}}, \code{\link[=convert_currency]{convert_currency()}}, \code{\link[=simulation]{simulation()}}
 }

@@ -31,20 +31,33 @@
 \arguments{
 \item{x, object}{Ein \code{SimLevAnalysis}-Objekt.}
 
-\item{...}{Weitere Argumente.}
+\item{...}{Nicht verwendet.}
 
-\item{type}{Grafik: "overview" (2x2), "growth", "drawdown", "rolling",
-"annual" oder "monthly" (Heatmap der ersten Reihe bzw. \code{series}).}
+\item{type}{Grafik: \code{"overview"} (Standard; 2x2 aus Wachstum,
+Drawdown, rollierend und Jahresrenditen), \code{"growth"},
+\code{"drawdown"}, \code{"rolling"}, \code{"annual"} oder
+\code{"monthly"} (Heatmap der Monatsrenditen von \code{series}).}
 
-\item{series}{Reihe fuer die Monats-Heatmap.}
+\item{series}{Reihe fuer die Monats-Heatmap: Nummer oder Name (Standard
+1 = erste Reihe).}
 
-\item{metric}{Kennzahl der rollierenden Grafik ("cagr", "volatility",
-"sharpe", "max_drawdown", "beta", "excess_cagr").}
+\item{metric}{Kennzahl der rollierenden Grafik: \code{"cagr"} (Standard),
+\code{"volatility"}, \code{"sharpe"}, \code{"max_drawdown"},
+\code{"beta"} oder \code{"excess_cagr"} (\code{beta} und
+\code{excess_cagr} nur mit Benchmark).}
 }
 \value{
-Das Objekt (unsichtbar) bzw. bei \code{summary} eine Liste der Tabellen.
+\code{print()} und \code{plot()}: das Objekt (unsichtbar);
+\code{summary()}: unsichtbar eine Liste mit \code{metrics},
+\code{benchmark}, \code{annual} und \code{drawdowns}.
 }
 \description{
-Methoden fuer SimLevAnalysis
+Ausgabe eines Ergebnisses von \code{\link[=deep_analysis]{deep_analysis()}}. \code{print()} zeigt die
+wichtigsten Kennzahlen je Reihe (Renditen in Prozent) und, falls
+vorhanden, die Benchmark-Kennzahlen. \code{summary()} druckt zusaetzlich
+die Jahresrenditen in Prozent und je Reihe die fuenf groessten
+Drawdowns. \code{plot()} zeichnet Wertentwicklung (logarithmisch, Start =
+1), Drawdowns, rollierende Kennzahlen, Jahresrenditen oder eine
+Monats-Heatmap.
 }
 \keyword{internal}

@@ -7,21 +7,55 @@
 splice_series(..., dates = NULL)
 }
 \arguments{
-\item{...}{Benannte Reihen in Prioritaetsreihenfolge: Spalten eines
-gemeinsamen data.frames (als Vektoren, dann \code{dates} angeben) oder
-\code{data.frame(date, value)} (werden mit [align_series()] auf
-Kalendertage gelegt).}
+\item{...}{Mindestens zwei benannte Reihen in Prioritaetsreihenfolge,
+entweder alle als numerische Vektoren gleicher Laenge (z. B. Spalten
+eines gemeinsamen data.frames; dann \code{dates} angeben) oder alle als
+\code{data.frame(date, value)} (sie werden mit \code{\link[=align_series]{align_series()}} und
+\code{range = "all"} auf Kalendertage gelegt und per LOCF gefuellt).
+Bei data.frames gelten Folgen von mehr als 4 Kalendertagen (laenger als
+ein langes Wochenende), an denen die erste Reihe nur gefuellt ist,
+waehrend eine andere Reihe echte Kurse hat, als Luecken der ersten Reihe
+und werden mit den Renditen der naechsten Reihe verkettet. Kuerzere
+Folgen (Wochenenden und Feiertage einer Handelstagsreihe, auch wenn die
+naechste Reihe Kalendertagswerte hat) und Tage ohne echte Kurse aller
+Reihen behalten den letzten Wert der ersten Reihe (LOCF); deren
+Bewegung in der naechsten Reihe geht am folgenden Handelstag der ersten
+Reihe ein.}
 
-\item{dates}{Datum, wenn Vektoren uebergeben werden.}
+\item{dates}{Datumsvektor, wenn Vektoren uebergeben werden (sonst
+ignoriert).}
 }
 \value{
-data.frame(date, value, source); \code{source} nennt die Reihe,
-  deren Rendite vom Vortag auf diesen Tag verwendet wurde.
+data.frame mit \code{date}, \code{value} (verkettete Reihe) und
+\code{source}: Name der Reihe, deren Wert (erste Reihe) bzw. Rendite vom
+Vortag auf diesen Tag verwendet wurde (NA, wo keine Rendite vorliegt,
+z. B. in der ersten Zeile).
 }
 \description{
 Verbindet mehrere Reihen renditebasiert zu einer langen Historie. Die erste
 Reihe hat Vorrang: Wo sie vorliegt, wird sie unveraendert uebernommen. Davor
 (und in ihren Luecken) werden die Tagesrenditen der naechsten verfuegbaren
 Reihe verkettet, usw. Typisch: Fonds, dann zurueckgerechneter Fonds aus
-[backcast()], dann ein Proxy-Index.
+\code{\link[=backcast]{backcast()}}, dann ein Proxy-Index.
+}
+\details{
+Alle Reihen muessen Niveaus (Kurse, Indexstaende) sein, keine Renditen;
+das Niveau der Kette richtet sich nach der ersten Reihe. Vor dem Start
+der ersten Reihe wird rueckwaerts verkettet, solange Renditen vorliegen.
+Das Ergebnis laesst sich als Kursspalte in \code{\link[=simulation]{simulation()}} oder als
+\code{data.frame(date, value)} in \code{\link[=deep_analysis]{deep_analysis()}} verwenden.
+}
+\examples{
+set.seed(1)
+proxy <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = 1500))
+proxy$value <- 100 * cumprod(1 + rnorm(1500, 3e-4, 0.01))
+fonds <- proxy[proxy$date >= as.Date("2012-01-01"), ]
+fonds$value <- 0.5 * fonds$value      # anderes Kursniveau
+lang <- splice_series(fonds = fonds, proxy = proxy)
+head(lang, 3)
+table(lang$source)
+}
+\seealso{
+\code{\link[=align_series]{align_series()}}, \code{\link[=backcast]{backcast()}}, \code{\link[=total_return_index]{total_return_index()}},
+\code{\link[=check_series]{check_series()}}
 }

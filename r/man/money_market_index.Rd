@@ -7,22 +7,40 @@
 money_market_index(data, rate, spread = 0, basis = 360, start = 100)
 }
 \arguments{
-\item{data}{data.frame mit \code{date}.}
+\item{data}{data.frame mit Spalte \code{date} (eine Zeile je Indextag).}
 
-\item{rate}{Zins in Prozent p. a. (Spaltenname, Vektor, Skalar oder
-\code{data.frame(date, value)}).}
+\item{rate}{Zins in Prozent p. a. (3 = 3 Prozent): Spaltenname, Vektor der Laenge
+\code{nrow(data)}, Skalar, \code{data.frame(date, value)} (Stufenfunktion
+ab Datum) oder benannter Vektor mit Datumsnamen.}
 
-\item{spread}{Abschlag in Prozent p. a.}
+\item{spread}{Abschlag in Prozent p. a. (Standard 0), auf derselben
+Tagesbasis wie der Zins.}
 
-\item{basis}{Tagesbasis (360 oder 365).}
+\item{basis}{Tagesbasis (Standard 360; ueblich 360 oder 365).}
 
-\item{start}{Startwert.}
+\item{start}{Startwert des Index in der ersten Zeile (Standard 100).}
 }
 \value{
-Numerischer Indexvektor.
+Numerischer Indexvektor (Niveau, Laenge \code{nrow(data)}).
 }
 \description{
+Bildet einen Geldmarkt- bzw. Tagesgeld-Index (Niveau) aus einem Zinssatz,
+z. B. ESTR oder EFFR, als Kursspalte fuer \code{\link[=simulation]{simulation()}}:
 \deqn{I_t = I_{t-1}\left(1 + \frac{i_{t-1} - s}{100}\cdot\frac{\Delta t}{B}\right)}
-mit Zins \eqn{i} des Vortags, Abschlag \eqn{s} (z. B. Fondskosten) und
-Tagesbasis \eqn{B} (Act/360).
+mit Zins \eqn{i} des Vortags, Abschlag \eqn{s} (z. B. Fondskosten),
+Kalendertagen \eqn{\Delta t} seit der Vorzeile und Tagesbasis \eqn{B}
+(Act/360).
+}
+\examples{
+d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 730))
+d$estr <- 3
+mm <- money_market_index(d, "estr", spread = 0.1)
+tail(mm, 1)
+# Zinsstufen: 0 Prozent bis Ende 2020, danach 2 Prozent
+mm2 <- money_market_index(d, c("2020-01-01" = 0, "2021-01-01" = 2))
+mm2[c(366, 368, 730)]
+}
+\seealso{
+\code{\link[=bond_index_from_yields]{bond_index_from_yields()}}, \code{\link[=currency_hedged_index]{currency_hedged_index()}},
+\code{\link[=leveraged_series]{leveraged_series()}}
 }

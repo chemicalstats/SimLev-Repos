@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/chemicalstats/SimLev/main/docs/figures/logo.png" alt="SimLev-Logo" width="220" />
+  <img src="https://raw.githubusercontent.com/chemicalstats/SimLev-Repos/main/docs/figures/logo.png" alt="SimLev-Logo" width="220" />
 </p>
 
 <h1 align="center">SimLev für Python</h1>
@@ -12,13 +12,19 @@
 
 Dieses Paket ist die Python-Fassung des R-Pakets SimLev. Es läuft
 **eigenständig ohne R**, benötigt nur `numpy` und `pandas` und rechnet
-**bitgleich** zur R-Version: Jeder Tageswert, jede Kennzahl, jeder
-Steuerbetrag und auch die Textausgabe stimmen mit dem R-Paket exakt
-überein.
+**bitgleich** zu einem früheren Stand des R-Pakets, dem Stand vor den
+Korrekturen (Commit 54b5b4f, damals ebenfalls als 0.5.0 bezeichnet): Jeder
+Tageswert, jede Kennzahl, jeder Steuerbetrag und auch die Textausgabe
+stimmen mit diesem Stand exakt überein. Zur aktuellen R-Fassung 0.5.0 ist
+die Python-Fassung **nicht** bitgleich: Deren Engine-Korrekturen,
+steuerrechtliche Anpassungen und deutsche Ausgaben sind hier noch nicht
+nachgezogen; alle 68 Golden-Fälle weichen deshalb ab (2 davon nur in der
+Druckausgabe), die
+zugehörigen Bitgleichheits-Tests schlagen fehl (siehe Haupt-README, Abschnitt „Bitgleichheit“).
 
 **Die vollständige Dokumentation mit Grundkonzepten, Steuerlogik und
 Beispielen für alle drei Sprachen steht in der
-[Haupt-README](https://github.com/chemicalstats/SimLev#readme).** Hier
+[Haupt-README](https://github.com/chemicalstats/SimLev-Repos#readme).** Hier
 finden Sie nur, was speziell die Python-Fassung betrifft.
 
 ## Installation
@@ -119,7 +125,8 @@ macOS auf Apple Silicon) rechnet auch R anders; dort können die letzten
 Bits abweichen, und die Tests prüfen mit einer Toleranz von 1e-9.
 
 Geprüft wurden 658 Szenarien (38 gezielte Fälle für jeden Steuer- und
-Sonderpfad und 620 zufällige Parameterkombinationen), alle bitgleich.
+Sonderpfad und 620 zufällige Parameterkombinationen), alle bitgleich (Stand
+54b5b4f).
 
 ## Tests
 

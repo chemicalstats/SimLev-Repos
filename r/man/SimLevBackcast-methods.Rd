@@ -22,16 +22,28 @@
 \arguments{
 \item{x}{Ein \code{SimLevBackcastFit}- bzw. \code{SimLevBackcast}-Objekt.}
 
-\item{...}{Weitere Argumente (an \code{plot} bzw. \code{print} weitergereicht).}
+\item{...}{Weitere Argumente: bei \code{plot()} an \code{plot()} der ersten
+Grafik weitergereicht, bei \code{print()} eines \code{SimLevBackcast} an
+\code{print()} der ersten Zeilen; sonst ohne Wirkung.}
 
 \item{object}{Ein \code{SimLevBackcastFit}-Objekt.}
 
-\item{log}{Logarithmische y-Achse.}
+\item{log}{Logisch: logarithmische y-Achse (Standard \code{TRUE}; nur
+\code{plot()} eines \code{SimLevBackcast}).}
 }
 \value{
-Das Objekt (unsichtbar) bzw. eine Zusammenfassung.
+\code{print()} und \code{plot()}: das Objekt (unsichtbar).
+\code{summary()} eines Fits druckt den Fit und gibt unsichtbar eine Liste
+mit \code{params}, \code{diagnostics} (ohne \code{deviation}) und
+\code{validation} zurueck.
 }
 \description{
-Ausgabe-, Zusammenfassungs- und Grafikmethoden.
+Ausgabe-, Zusammenfassungs- und Grafikmethoden fuer Ergebnisse von
+\code{\link[=backcast_fit]{backcast_fit()}} (\code{SimLevBackcastFit}) und \code{\link[=backcast]{backcast()}}
+(\code{SimLevBackcast}). \code{print()} eines Fits zeigt Parameter und
+Abweichungskennzahlen ohne und mit Fit (in Prozent);
+\code{plot()} eines Fits zeigt die Pfadabweichung im Fit-Fenster (und bei
+Gittersuche die Verlustkurve), \code{plot()} eines Backcasts die
+verkettete Reihe, die durchgehende Modellreihe und das Verkettungsdatum.
 }
 \keyword{internal}

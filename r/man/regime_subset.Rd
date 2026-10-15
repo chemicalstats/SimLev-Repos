@@ -7,27 +7,42 @@
 regime_subset(data, condition, min_run = 1L)
 }
 \arguments{
-\item{data}{data.frame (Zeilen = Tage, Renditen als Brutto-Renditen).}
+\item{data}{data.frame, eine Zeile je Beobachtung (fuer \code{\link[=bootstrap]{bootstrap()}}
+typischerweise Tage mit Brutto-Renditen wie 1.002 und Zusatzreihen).
+Eine Spalte \code{date} ist optional.}
 
-\item{condition}{Logischer Vektor (NA = FALSE) oder Ausdruck als Zeichenkette,
-der in \code{data} ausgewertet wird, z. B. \code{"inflation >= 4"}.}
+\item{condition}{Logischer Vektor der Laenge \code{nrow(data)} (NA =
+FALSE) oder Ausdruck als Zeichenkette, der in \code{data} ausgewertet
+wird, z. B. \code{"inflation >= 4"}.}
 
-\item{min_run}{Mindestlaenge einer Episode in Zeilen.}
+\item{min_run}{Mindestlaenge einer Episode in Zeilen (ganze Zahl,
+Standard 1); kuerzere zusammenhaengende Abschnitte werden verworfen.}
 }
 \value{
-Teilmenge von \code{data} mit Attribut \code{episodes}
-  (Start, Ende, Laenge).
+Teilmenge von \code{data} (Zeilen der behaltenen Episoden in
+urspruenglicher Reihenfolge) mit Attribut \code{episodes}: data.frame
+mit \code{start}, \code{end} (Zeilennummern in \code{data}),
+\code{length} (Zeilen) und, falls \code{data} eine Spalte \code{date}
+hat, \code{start_date}, \code{end_date}. Fehler, wenn keine Episode
+die Bedingung erfuellt.
 }
 \description{
 Waehlt die Zeilen aus, in denen \code{condition} gilt (z. B. hohe
 Inflation), und verwirft zu kurze Episoden. Mit Rendite-Eingabe
 (\code{bootstrap_config(input = "returns")}) laesst sich das Ergebnis direkt
-an [bootstrap()] oder [bootstrap_study()] uebergeben: Die Pfade bestehen
+an \code{\link[=bootstrap]{bootstrap()}} oder \code{\link[=bootstrap_study]{bootstrap_study()}} uebergeben: Die Pfade bestehen
 dann nur aus Bloecken dieses Regimes (inklusive der mitgezogenen
-Zusatzreihen wie Zinsen). Bloecke koennen an Episodengrenzen ueberlappen.
+Zusatzreihen wie Zinsen). Die Episoden werden ohne Trennung
+aneinandergehaengt; Bootstrap-Bloecke koennen daher ueber
+Episodengrenzen hinwegreichen.
 }
 \examples{
+set.seed(1)
 d <- data.frame(r = 1 + rnorm(100, 0, 0.01), infl = c(rep(1, 40), rep(5, 30), rep(1, 30)))
 s <- regime_subset(d, "infl >= 4", min_run = 10)
 attr(s, "episodes")
+}
+\seealso{
+\code{\link[=bootstrap]{bootstrap()}}, \code{\link[=bootstrap_study]{bootstrap_study()}}, \code{\link[=bootstrap_config]{bootstrap_config()}},
+\code{\link[=dependence_analysis]{dependence_analysis()}} (Regime nach Zustandsvariablen).
 }

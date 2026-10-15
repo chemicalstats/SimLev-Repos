@@ -115,7 +115,7 @@ study <- bootstrap_study(
   msci_data, cfg, method = "stationary", n = 100000,
   params = list(L = 250), strategies = strategies,
   start_date = "1975-01-01", burn_in = 731,     # wie keep_dates ab 1977
-  sim_args = list(start_value = 1000, tax_mode = "none", funds_fee = 1, bonus_fee = 5),
+  sim_args = list(start_value = 1000, tax_mode = "none"),
   benchmark = "bh_ls", cores = parallel::detectCores() - 2,
   chunk_size = 250, chunk_dir = "./03 Results Data/08 Strategy Bootstrap Analysis/Chunks",
   seed = 42, keep_returns = "year"              # fuer die Entnahmephase
@@ -127,6 +127,17 @@ bootstrap_probability(study,
   maxdd  = max_drawdown <= 0.9451193,
   joint  = ttwror >= 0.1313580 & max_drawdown <= 0.9451193)
 ```
+
+Hinweise zu den Kennzahlen: Für die Strategie mit Sparplan (`bh_dca`) ist
+`cagr` die geldgewichtete Rendite (XIRR) und `max_drawdown` wird
+auf dem zeitgewichteten Wertindex gemessen; `summary()` beschriftet die
+CAGR entsprechend. Für den Vergleich von Strategien mit und ohne Sparplan
+eignet sich `ttwror`. Das ursprüngliche Projektskript übergab zusätzlich
+`funds_fee = 1, bonus_fee = 5`. Diese Argumente wirken nur mit
+`tax_mode = "funds"`; mit `tax_mode = "none"` blieben sie ohne Wirkung, und
+`simulation()` warnt. Sie sind deshalb oben weggelassen; das
+Ergebnis ist dasselbe. Für eine Studie mit Fondskosten
+`tax_mode = "funds", funds_fee = 1, bonus_fee = 5` angeben.
 
 Die Pfade werden nach der Auswertung verworfen. Der Speicherbedarf hängt daher
 nicht von `n` ab, anders als bei der Zwischenspeicherung von 100.000 Pfaden im
@@ -189,9 +200,29 @@ plot(wd)
 
 ### 3.2 Anspar- und Entnahmephase verbinden
 
-Wird `start_value` als Ansparergebnis übergeben, gelten dessen Endwert als
-Startvermögen und (Startkapital + Einzahlungen) / Endwert als
-Anschaffungskostenquote für die Besteuerung.
+Wird `start_value` als Ansparergebnis übergeben, gilt dessen Endwert als
+Startvermögen (ein Endwert ≤ 0 ist ein Fehler). Ohne Angabe von
+`cost_basis` gilt:
+
+- Wurde die Ansparphase mit `tax_mode = "person"` gerechnet (Element
+  `open_lots`) und rechnet die Entnahmephase ebenfalls mit
+  `tax_mode = "person"`, übernimmt sie die offenen Lots und verkauft je
+  Asset die ältesten zuerst (FIFO, wie die Engine). Nicht ausdrücklich
+  angegebene `asset_bonus`, `loss_carryforward` (allgemeiner Verlusttopf),
+  `sale_cost` (halber Spread) und der im ersten Planjahr schon verbrauchte
+  Sparer-Pauschbetrag werden aus dem Ergebnis übernommen, ohne gehaltene
+  Fonds auch `vorabpauschale = FALSE`. Ein Hinweis nennt die Werte, das
+  Ergebnis führt sie unter `adopted`.
+- Hält das Ergebnis am letzten Tag nur noch Cash (z. B. mit
+  `liquidate = TRUE`), gilt 100 %; alle Gewinne sind schon versteuert.
+- Sonst die Näherung (Startkapital brutto + Einzahlungen) / Endwert mit
+  Durchschnittskosten, bei `tax_mode = "person"` in der Entnahmephase mit
+  Warnung. Sie behandelt bereits versteuerte Gewinne wie stille Reserven.
+
+Kirchensteuer und Einkommensteuertarif der Ansparphase übernimmt die
+Entnahmephase nicht (fester Satz `tax_rate`; weitere Grenzen in
+`?withdrawal_simulation`). Im Beispiel unten ist die Ansparphase ohne
+`tax_mode = "person"` gerechnet, es gilt also die Näherung (mit Warnung).
 
 ```r
 anspar <- simulation(eu_data, strat, start_value = 1e4, dca_mode = TRUE,
@@ -213,7 +244,11 @@ c(bh = summary(wd_bh)$success_rate, sma = summary(wd_sma)$success_rate)
 
 Mit `keep_aux = "cpi"` in `bootstrap_study()` (bei einer CPI-Zusatzreihe in
 `aux`) wird die Inflation pfadweise mitgebootstrappt:
-`withdrawal_simulation(study, ..., inflation = "cpi")`.
+`withdrawal_simulation(study, ..., inflation = "cpi")`. Am besten
+kennzeichnet `aux_type` in `bootstrap_config()` die Art der Reihe, z. B.
+`aux = c(rate = "eu_rate", cpi = "eu_cpi"), aux_type = c(cpi = "level")`
+für einen Preisindex (ohne Angabe gilt eine `keep_aux`-Reihe weiter als
+Niveau); eine Inflationsrate in Prozent p. a. wäre `aux_type = c(cpi = "rate")`.
 
 ### 3.4 Sichere Entnahmerate und Regelvergleich
 

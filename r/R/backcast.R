@@ -41,6 +41,7 @@
 #' @param default Wert fuer NULL.
 #' @return numerischer Vektor der Laenge nrow(data).
 #' @keywords internal
+#' @noRd
 .resolve_series <- function(x, data, what, default = 0) {
   n <- nrow(data)
   if (is.null(x)) return(rep(default, n))
@@ -48,7 +49,7 @@
     if (ncol(x) < 2) stop(sprintf("%s: data.frame braucht die Spalten date und Wert.", what))
     dcol <- if ("date" %in% names(x)) "date" else names(x)[1]
     vcol <- setdiff(names(x), dcol)[1]
-    return(.step_series(as.Date(x[[dcol]]), as.numeric(x[[vcol]]), data$date))
+    return(.step_series(.to_date(x[[dcol]], sprintf("%s: Datum", what)), as.numeric(x[[vcol]]), .to_date(data$date, what)))
   }
   if (is.character(x) && length(x) == 1L) {
     if (!x %in% names(data)) stop(sprintf("%s: Spalte '%s' fehlt im Datensatz.", what, x))
@@ -58,15 +59,16 @@
   }
   if (is.numeric(x) && !is.null(names(x)) && length(x) >= 1L &&
       all(!is.na(suppressWarnings(as.Date(names(x), optional = TRUE))))) {
-    return(.step_series(as.Date(names(x)), as.numeric(x), data$date))
+    return(.step_series(as.Date(names(x)), as.numeric(x), .to_date(data$date, what)))
   }
   if (is.numeric(x) && length(x) == 1L) return(rep(as.numeric(x), n))
   if (is.numeric(x) && length(x) == n) return(as.numeric(x))
-  stop(sprintf("%s: nicht interpretierbare Angabe (Skalar, Vektor der Laenge %d, Spaltenname, data.frame(date, Wert) oder benannter Vektor mit Datumsnamen).", what, n))
+  stop(sprintf("%s: nicht interpretierbare Angabe (Skalar, Vektor der L\u00e4nge %d, Spaltenname, data.frame(date, Wert) oder benannter Vektor mit Datumsnamen).", what, n))
 }
 
 #' Stufenfunktion: Wert gilt ab Datum (vor dem ersten Datum: erster Wert)
 #' @keywords internal
+#' @noRd
 .step_series <- function(from, value, dates) {
   o <- order(from); from <- from[o]; value <- value[o]
   k <- findInterval(as.numeric(dates), as.numeric(from))
@@ -81,6 +83,7 @@
 #'   imputeTS; sonst Rueckfall auf "linear" mit Hinweis).
 #' @param keep_leading Fuehrende NAs beibehalten (TRUE) oder rueckwaerts fuellen.
 #' @keywords internal
+#' @noRd
 .fill_na <- function(v, method = c("locf", "linear", "stine", "none"), keep_leading = FALSE) {
   method <- match.arg(method)
   ok <- which(!is.na(v))
@@ -113,6 +116,7 @@
 
 #' Verlustfunktionen fuer den Fit
 #' @keywords internal
+#' @noRd
 .bc_loss <- function(e, loss) {
   e <- e[is.finite(e)]
   if (!length(e)) return(Inf)
@@ -131,6 +135,7 @@
 #' (x / (x + 1e-8) ~ 1) und waren daher konstant. Hier beziehen sich die
 #' Fehler auf das Verhaeltnis Simulation/Produkt (relative Abweichung).
 #' @keywords internal
+#' @noRd
 .bc_metric_table <- function(err_mat, grid) {
   metrics <- list(
     median_absolute_error  = function(x) stats::median(abs(x), na.rm = TRUE),
@@ -145,11 +150,13 @@
 
 #' Ueberlappung, Komponenten und Hilfsgroessen vorbereiten
 #' @keywords internal
+#' @noRd
 .bc_prepare <- function(data, product, index, ter, leverage, rate, fx, rate_lag,
                         ter_basis, rate_basis, accrual, index_fill, lag) {
   if (!is.data.frame(data)) stop("'data' muss ein data.frame sein.")
   if (!"date" %in% names(data)) stop("'data' braucht eine Spalte 'date'.")
-  data$date <- as.Date(data$date)
+  data$date <- .to_date(data$date, "'data$date'")
+  if (anyNA(data$date)) stop("'data$date' enth\u00e4lt fehlende Daten.")
   if (is.unsorted(data$date) || anyDuplicated(data$date))
     stop("'data$date' muss streng aufsteigend und ohne Duplikate sein.")
   for (col in c(product, index)) if (!col %in% names(data))
@@ -160,7 +167,7 @@
   idx <- as.numeric(data[[index]])
   if (!is.null(fx)) idx <- idx * .resolve_series(fx, data, "fx")
   if (anyNA(idx)) idx <- .fill_na(idx, index_fill, keep_leading = TRUE)
-  if (any(idx <= 0, na.rm = TRUE)) stop("Indexwerte muessen positiv sein.")
+  if (any(idx <= 0, na.rm = TRUE)) stop("Indexwerte m\u00fcssen positiv sein.")
   prod <- as.numeric(data[[product]])
   prod[!is.na(prod) & prod <= 0] <- NA_real_
 
@@ -184,6 +191,7 @@
 
 #' Vektor um k Zeilen verschieben (k > 0: Verzoegerung)
 #' @keywords internal
+#' @noRd
 .shift <- function(v, k) {
   n <- length(v)
   if (k == 0L) return(v)
@@ -192,6 +200,7 @@
 
 #' Modellrenditen fuer einen Parametersatz
 #' @keywords internal
+#' @noRd
 .bc_model_returns <- function(prep, par, model, reg = NULL) {
   base <- if (model == "structural") {
     par[["beta"]] * prep$leverage * prep$x + prep$fin - prep$ter_cost
@@ -207,6 +216,7 @@
 
 #' Abweichungsvektor(en) im Fit-Fenster
 #' @keywords internal
+#' @noRd
 .bc_errors <- function(r, win, obs, objective, horizon) {
   rr <- r[win]; rr[1] <- 0
   if (any(!is.finite(rr))) rr[!is.finite(rr)] <- 0
@@ -223,6 +233,7 @@
 
 #' Zielfunktion
 #' @keywords internal
+#' @noRd
 .bc_objective <- function(r, win, obs, objective, horizon, loss, hybrid_weight) {
   e <- .bc_errors(r, win, obs, objective, horizon)
   if (objective != "hybrid") return(.bc_loss(e, loss))
@@ -232,6 +243,7 @@
 
 #' Kennzahlen Simulation vs. Produkt
 #' @keywords internal
+#' @noRd
 .bc_diagnostics <- function(r, win, obs, dates) {
   rr <- r[win]; rr[1] <- 0; rr[!is.finite(rr)] <- 0
   ls <- cumsum(log1p(pmax(rr, -0.999999)))
@@ -248,9 +260,9 @@
     n_obs = m, years = yrs, start = d_obs[1], end = d_obs[m],
     tracking_error = stats::sd(diffs) * sqrt(per_year) * 100,       # % p. a.
     tracking_difference = if (yrs > 0) (exp(so[m] / yrs) - exp(po[m] / yrs)) * 100 else NA_real_,
-    cagr_sim = if (yrs > 0) (exp(so[m] / yrs) - 1) * 100 else NA_real_,
-    cagr_product = if (yrs > 0) (exp(po[m] / yrs) - 1) * 100 else NA_real_,
-    final_deviation = (exp(so[m] - po[m]) - 1) * 100,
+    cagr_sim = if (yrs > 0) expm1(so[m] / yrs) * 100 else NA_real_,
+    cagr_product = if (yrs > 0) expm1(po[m] / yrs) * 100 else NA_real_,
+    final_deviation = expm1(so[m] - po[m]) * 100,
     max_abs_deviation = max(abs(rel)) * 100,
     rmse_level = sqrt(mean((so - po)^2)) * 100,
     correlation = if (length(diffs) > 2) stats::cor(ret_s, ret_p) else NA_real_,
@@ -266,64 +278,136 @@
 
 #' Backcast-Modell an ein Produkt anpassen
 #'
-#' Passt das Rueckrechnungsmodell eines ETF/ETP auf dem Zeitraum an, in dem
-#' sowohl das Produkt als auch sein Basisindex vorliegen. Die freien Parameter
-#' werden so gewaehlt, dass die Abweichung zwischen simuliertem und echtem
-#' Produkt minimal wird (taeglich, kumuliert oder beides).
+#' Passt das Rueckrechnungsmodell eines ETF/ETP (auch gehebelt oder invers)
+#' auf dem Zeitraum an, in dem sowohl das Produkt als auch sein Basisindex
+#' vorliegen. Die freien Parameter werden so gewaehlt, dass die Abweichung
+#' zwischen simuliertem und echtem Produkt minimal wird (taeglich, kumuliert
+#' oder beides). Eingabe ist ein data.frame mit Datum, Produktkursen (vor der
+#' Auflegung \code{NA}) und Indexniveaus; das Ergebnis wird mit [backcast()]
+#' in eine verlaengerte Kursreihe umgerechnet.
 #'
-#' @param data data.frame mit Spalte \code{date} sowie den Spalten fuer Produkt
-#'   und Basisindex. Typisch ein Kalendertagsraster (wie in den Projekt-Skripten)
-#'   oder Handelstage; Luecken im Produkt (Feiertage, Boersenschluss) sind erlaubt.
-#' @param product Spaltenname der Produkt-Kursreihe (NAV oder Boersenkurs).
-#' @param index Spaltenname der Basisindex-Reihe (Niveau, nicht Rendite).
-#' @param ter Laufende Kosten in Prozent p. a.: Skalar, Spaltenname,
+#' Strukturmodell (\code{model = "structural"}) je Zeile t mit
+#' Kalendertagen \eqn{T_t} seit der Vorzeile und Indexrendite \eqn{x_t}:
+#' \deqn{r_t = \beta L x_t + (1 - L)\, i_t T_t / B_r - TER_t T_t / B_T
+#'       - s\, m(L) T_t / B_r - drag\, T_t / 365}
+#' mit \eqn{m(L) = \max(L-1, 0) + \max(-L, 0)}, \eqn{B_r} =
+#' \code{rate_basis}, \eqn{B_T} = \code{ter_basis}; \eqn{i}, \eqn{TER},
+#' \eqn{s} und \eqn{drag} gehen als Prozent p. a. / 100 ein. Bei den
+#' Regressionsmodellen ersetzt die geschaetzte Regression die ersten drei
+#' Terme (\code{ter} und \code{rate} gehen dann nicht ein); \code{spread} und
+#' \code{drag} werden zusaetzlich abgezogen.
+#'
+#' @param data data.frame mit Spalte \code{date} (Date oder umwandelbar,
+#'   streng aufsteigend, ohne Duplikate) sowie den Spalten fuer Produkt und
+#'   Basisindex. Typisch ein Kalendertagsraster (wie in den Projekt-Skripten)
+#'   oder Handelstage; Luecken im Produkt (Feiertage, Boersenschluss) sind
+#'   erlaubt.
+#' @param product Spaltenname der Produkt-Kursreihe (NAV oder Boersenkurs;
+#'   Niveaus, \code{NA} vor der Auflegung; Werte <= 0 gelten als fehlend).
+#' @param index Spaltenname der Basisindex-Reihe (Niveau > 0, nicht Rendite;
+#'   Luecken werden nach \code{index_fill} gefuellt).
+#' @param ter Laufende Kosten in Prozent p. a. (0.5 = 0,5 Prozent; Standard 0):
+#'   Skalar, Vektor der Laenge \code{nrow(data)}, Spaltenname,
 #'   data.frame(date, ter) (Stufenfunktion, gueltig ab Datum) oder benannter
-#'   Vektor, z. B. \code{c("2010-02-24" = 0.35, "2023-10-10" = 0.50)}.
-#' @param leverage Hebel L des Produkts relativ zum Index (2, -1, -2, ...).
-#'   Ist der Index bereits ein Hebelindex (z. B. MSCI USA Leveraged 2x Daily),
-#'   ist \code{leverage = 1} zu setzen.
+#'   Vektor mit Datumsnamen, z. B.
+#'   \code{c("2010-02-24" = 0.35, "2023-10-10" = 0.50)}.
+#' @param leverage Hebel L des Produkts relativ zum Index als Zahl ungleich 0
+#'   (Standard 1; z. B. 2, -1, -2). Ist der Index bereits ein Hebelindex
+#'   (z. B. MSCI USA Leveraged 2x Daily), ist \code{leverage = 1} zu setzen.
 #' @param rate Finanzierungszins in Prozent p. a. (Tagesgeld, z. B. ESTR,
-#'   EONIA, SOFR, EFFR): Skalar, Spaltenname, data.frame oder benannter Vektor.
-#'   Nur relevant fuer \code{leverage != 1}.
-#' @param fx Optional: Umrechnungsfaktor Indexwaehrung -> Produktwaehrung
-#'   (Spaltenname oder Vektor). Der Index wird mit \code{fx} multipliziert.
+#'   EONIA, SOFR, EFFR) in denselben Formen wie \code{ter}; \code{NULL}
+#'   (Standard) = 0. Wirkt nur fuer \code{leverage != 1} (Faktor 1 - L).
+#' @param fx Optional (Standard \code{NULL} = keine Umrechnung):
+#'   Umrechnungsfaktor Indexwaehrung -> Produktwaehrung in denselben Formen wie
+#'   \code{ter} (z. B. Spaltenname). Der Index wird mit \code{fx} multipliziert.
 #' @param model \code{"structural"} (Standard, Hebel-/Kostenmodell oben),
 #'   \code{"linear"} (Regression Produktrendite ~ Indexrendite, Stambaugh-
 #'   Backfill) oder \code{"spline"} (Glaettungsspline, Ersatz fuer das GAM aus
-#'   '01 Base Indices'). Die Regressionsmodelle eignen sich fuer Proxy-
-#'   Rueckrechnungen (z. B. MSCI USA aus S&P 500).
-#' @param fit Zu schaetzende Parameter: Teilmenge von \code{"drag"}
-#'   (Restabweichung p. a.), \code{"spread"} (Spread auf den finanzierten
-#'   Anteil, nur fuer L != 1) und \code{"beta"} (effektiver Hebel-Multiplikator).
+#'   '01 Base Indices'). Die Regressionsmodelle werden auf Renditen direkt
+#'   aufeinanderfolgender Produktbeobachtungen geschaetzt und eignen sich fuer
+#'   Proxy-Rueckrechnungen (z. B. MSCI USA aus S&P 500).
+#' @param fit Zeichenvektor der zu schaetzenden Parameter (Standard
+#'   \code{"drag"}): Teilmenge von \code{"drag"} (Restabweichung in Prozent
+#'   p. a.), \code{"spread"} (Spread auf den finanzierten Anteil in Prozent
+#'   p. a., nur fuer L != 1, sonst mit Warnung ignoriert) und \code{"beta"}
+#'   (effektiver Hebel-Multiplikator, Faktor; nur Strukturmodell).
 #'   \code{character(0)} schaetzt nichts (reine Kostenrechnung).
 #' @param fixed Benannte Liste fester Parameterwerte, z. B.
-#'   \code{list(spread = 0.4)}; Standard: drag = 0, spread = 0, beta = 1.
-#' @param objective \code{"level"} (kumulierte Pfadabweichung, wie im Skript
-#'   '02 Funds Data'; bestimmt die Tracking Difference), \code{"return"}
-#'   (Renditeabweichungen ueber \code{horizon} Beobachtungen; Tracking Error)
-#'   oder \code{"hybrid"} (gewichtete Kombination).
-#' @param loss Fehlermass: "rmse", "mse", "mae", "median" oder "max".
-#' @param horizon Renditehorizont in Produktbeobachtungen fuer "return"/"hybrid".
-#'   Werte > 1 (z. B. 5) daempfen asynchrone Schlusskurse (Xetra vs. US-Index).
-#' @param hybrid_weight Gewicht des Renditeterms bei "hybrid" (0..1).
+#'   \code{list(spread = 0.4)}; nicht genannte Parameter: drag = 0,
+#'   spread = 0 (Prozent p. a.), beta = 1. Die Werte dienen auch als
+#'   Startwerte der Optimierung.
+#' @param objective \code{"level"} (Standard; kumulierte Pfadabweichung der
+#'   Log-Niveaus, wie im Skript '02 Funds Data'; bestimmt die Tracking
+#'   Difference), \code{"return"} (Log-Renditeabweichungen ueber
+#'   \code{horizon} Beobachtungen; Tracking Error) oder \code{"hybrid"}
+#'   (gewichtete Kombination beider RMS-Fehler).
+#' @param loss Fehlermass fuer "level" und "return": "rmse" (Standard),
+#'   "mse", "mae", "median" (Median der Betraege) oder "max". Bei "hybrid"
+#'   ohne Wirkung (immer RMS).
+#' @param horizon Renditehorizont in Produktbeobachtungen fuer "return"/"hybrid"
+#'   (ganze Zahl >= 1, Standard 1). Werte > 1 (z. B. 5) daempfen asynchrone
+#'   Schlusskurse (Xetra vs. US-Index).
+#' @param hybrid_weight Gewicht des Renditeterms bei "hybrid" als Anteil
+#'   (0..1, Standard 0.5); der Niveauterm erhaelt 1 - \code{hybrid_weight}.
 #' @param lag Verzoegerung des Index gegenueber dem Produkt in Zeilen
-#'   (ganzzahlig) oder \code{"auto"} (Kreuzkorrelation ueber -2..2).
-#' @param rate_lag Verzoegerung des Zinssatzes in Zeilen (0 = Satz des Tages t).
-#' @param start,end Optionales Fit-Fenster (Datum).
-#' @param method \code{"optimize"} (Brent/L-BFGS-B, Standard) oder \code{"grid"}
-#'   (Gittersuche fuer genau einen Parameter, wie im Skript).
-#' @param grid Gitter in Prozent p. a. fuer \code{method = "grid"}.
-#' @param bounds Benannte Liste von Suchintervallen je Parameter.
-#' @param ter_basis,rate_basis Tagesbasis fuer TER (365) und Zins (360, Act/360).
-#' @param accrual \code{"linear"} (TER * T / 365, Fondsbuchhaltung) oder
-#'   \code{"geometric"} ((1 + TER)^(T/365) - 1, wie in den Skripten).
-#' @param index_fill Fuellmethode fuer Indexluecken ("locf", "linear", "stine").
-#' @param validate Logisch: Out-of-Sample-Pruefung (Fit auf der juengeren
-#'   Haelfte, Test auf der aelteren, also in Backcast-Richtung).
+#'   (ganzzahlig, Standard 0; bei k > 0 wird die Produktrendite in Zeile t mit
+#'   der Indexrendite aus Zeile t - k modelliert) oder \code{"auto"} (Lag aus
+#'   -2..2 mit der hoechsten Korrelation, bei negativem Hebel der niedrigsten).
+#' @param rate_lag Verzoegerung des Zinssatzes in Zeilen (Standard 0 = Satz
+#'   des Tages t; k > 0 = Satz aus Zeile t - k).
+#' @param start,end Optionales Fit-Fenster (Datum oder Zeichenkette
+#'   "JJJJ-MM-TT"); \code{NULL} (Standard) = gesamte Ueberlappung. Mindestens
+#'   20 gemeinsame Beobachtungen.
+#' @param method \code{"optimize"} (Standard; ein Parameter mit
+#'   \code{stats::optimize()} (Brent), mehrere mit L-BFGS-B innerhalb von
+#'   \code{bounds}) oder \code{"grid"} (Gittersuche fuer genau einen Parameter,
+#'   wie im Skript).
+#' @param grid Gitterwerte fuer \code{method = "grid"} in der Einheit des
+#'   Parameters (drag, spread: Prozent p. a.; beta: Faktor); Standard
+#'   \code{seq(-3, 3, by = 0.005)}.
+#' @param bounds Benannte Liste von Suchintervallen \code{c(unten, oben)} je
+#'   Parameter fuer \code{method = "optimize"}, in der Einheit des Parameters;
+#'   Standard \code{list(drag = c(-10, 10), spread = c(-5, 10),
+#'   beta = c(0.5, 1.5)}. Eine eigene Liste ergaenzt die Standardliste:
+#'   Nicht genannte Parameter behalten ihr Standardintervall (je Eintrag
+#'   \code{c(unten, oben)} mit unten < oben).
+#' @param ter_basis,rate_basis Tagesbasis fuer TER (Standard 365) und fuer
+#'   Zins und Spread (Standard 360, Act/360).
+#' @param accrual Abgrenzung der TER: \code{"linear"} (Standard,
+#'   TER * T / 365, Fondsbuchhaltung) oder \code{"geometric"}
+#'   ((1 + TER)^(T/365) - 1, wie in den Skripten).
+#' @param index_fill Fuellmethode fuer Indexluecken: "locf" (Standard),
+#'   "linear" oder "stine" (Stineman, benoetigt imputeTS, sonst linear).
+#'   Fuehrende Luecken bleiben \code{NA}.
+#' @param validate Logisch (Standard \code{TRUE}): Out-of-Sample-Pruefung
+#'   (Fit auf der juengeren Haelfte der Produktbeobachtungen, Test auf der
+#'   aelteren, also in Backcast-Richtung); erst ab 80 Beobachtungen.
 #'
-#' @return Objekt der Klasse \code{SimLevBackcastFit} mit Parametern,
-#'   Diagnostik (Tracking Error/Difference in Prozent, Korrelation, R²,
-#'   Pfadabweichungen), Gittermetriken und Out-of-Sample-Ergebnis.
+#' @return Objekt der Klasse \code{SimLevBackcastFit}, eine Liste mit u. a.
+#'   \describe{
+#'     \item{params}{Liste \code{drag}, \code{spread} (Prozent p. a.) und
+#'       \code{beta} (Faktor).}
+#'     \item{fitted, model, objective, loss, loss_value, method, horizon, lag}{Fit-Einstellungen,
+#'       Wert der Zielfunktion und verwendeter Lag (Zeilen).}
+#'     \item{diagnostics, diagnostics_unfitted}{Kennzahlen Simulation vs.
+#'       Produkt mit bzw. ohne gefittete Parameter: \code{n_obs},
+#'       \code{years}, \code{start}, \code{end}, \code{tracking_error}
+#'       (Prozent p. a.), \code{tracking_difference} (Prozentpunkte p. a.),
+#'       \code{cagr_sim}, \code{cagr_product}, \code{final_deviation},
+#'       \code{max_abs_deviation} (jeweils Prozent), \code{rmse_level}
+#'       (RMSE der Log-Niveaus x 100), \code{correlation}, \code{r_squared}
+#'       und \code{deviation} (data.frame date, deviation = 1 - Sim/Produkt
+#'       als Anteil).}
+#'     \item{grid, grid_metrics}{Bei \code{method = "grid"}: data.frame
+#'       (value, loss) und bestes Gitterelement je Fehlermetrik, sonst \code{NULL}.}
+#'     \item{validation}{Out-of-Sample-Ergebnis (Zeitraeume \code{train},
+#'       \code{test}, Parameter \code{par}, Testkennzahlen in Prozent) oder
+#'       \code{NULL}.}
+#'     \item{regression}{Regressionsfit (nur "linear"/"spline").}
+#'     \item{inception, window}{Erstes Produktdatum und Fit-Fenster.}
+#'     \item{drag_per_day}{Drag in Prozent je Kalendertag.}
+#'     \item{call_args}{Daten und Modellangaben fuer [backcast()].}
+#'   }
 #'
 #' @examples
 #' set.seed(1)
@@ -339,10 +423,11 @@
 #' fit <- backcast_fit(df, product = "etf", index = "idx", ter = 0.5,
 #'                     leverage = 2, rate = "rate")
 #' fit
+#' fit$params$drag                            # ca. 0.1 (Prozent p. a.)
 #' bc <- backcast(fit)
 #' head(bc)
 #'
-#' @seealso [backcast()], [simulation()]
+#' @seealso [backcast()], [leveraged_series()], [simulation()]
 #' @export
 backcast_fit <- function(data, product, index,
                          ter = 0, leverage = 1, rate = NULL, fx = NULL,
@@ -369,8 +454,15 @@ backcast_fit <- function(data, product, index,
   fit <- unique(as.character(fit))
   if (length(fit) && !all(fit %in% c("drag", "spread", "beta")))
     stop("'fit' darf nur 'drag', 'spread' und 'beta' enthalten.")
+  # Eigene Suchintervalle ergaenzen die Standardliste (fehlende Parameter behalten ihr Intervall)
+  if (!is.list(bounds) || (length(bounds) && (is.null(names(bounds)) || !all(names(bounds) %in% c("drag", "spread", "beta")))))
+    stop("'bounds' muss eine benannte Liste mit Eintr\u00e4gen drag, spread und/oder beta sein, z. B. list(drag = c(-5, 5)).")
+  bounds <- utils::modifyList(list(drag = c(-10, 10), spread = c(-5, 10), beta = c(0.5, 1.5)), bounds)
+  for (k in names(bounds)) { b <- bounds[[k]]
+    if (!is.numeric(b) || length(b) != 2L || anyNA(b) || b[1] >= b[2])
+      stop(sprintf("bounds$%s muss c(unten, oben) mit unten < oben sein (ist: %s).", k, paste(format(b), collapse = ", "))) }
   if (model != "structural" && "beta" %in% fit) {
-    warning("'beta' wird bei Regressionsmodellen ueber die Regression geschaetzt und hier ignoriert.")
+    warning("'beta' wird bei Regressionsmodellen \u00fcber die Regression gesch\u00e4tzt und hier ignoriert.")
     fit <- setdiff(fit, "beta")
   }
   if (leverage == 1 && "spread" %in% fit) {
@@ -417,7 +509,7 @@ backcast_fit <- function(data, product, index,
     y <- prep$prod[o] / prep$prod[o - 1L] - 1            # nur direkt aufeinanderfolgende Zeilen
     xx <- prep$x[o]
     ok <- is.finite(y) & is.finite(xx) & !is.na(prep$prod[o - 1L])
-    if (sum(ok) < 20) stop("Zu wenige aufeinanderfolgende Beobachtungen fuer das Regressionsmodell.")
+    if (sum(ok) < 20) stop("Zu wenige aufeinanderfolgende Beobachtungen f\u00fcr das Regressionsmodell.")
     if (model == "linear") list(coef = stats::coef(stats::lm.fit(cbind(1, xx[ok]), y[ok])))
     else list(fit = stats::smooth.spline(xx[ok], y[ok], cv = FALSE))
   }
@@ -433,7 +525,7 @@ backcast_fit <- function(data, product, index,
   run_fit <- function(rows, ob, rg) {
     if (!length(fit)) return(list(par = par0, value = obj_fun(numeric(0), rows, ob, rg), grid = NULL))
     if (method == "grid") {
-      if (length(fit) != 1L) stop("method = 'grid' unterstuetzt genau einen Parameter in 'fit'.")
+      if (length(fit) != 1L) stop("method = 'grid' unterst\u00fctzt genau einen Parameter in 'fit'.")
       vals <- vapply(grid, function(g) obj_fun(g, rows, ob, rg), numeric(1))
       best <- grid[which.min(vals)]
       # Fehlermatrix fuer die Metriktabelle (relative Abweichung 1 - sim/real)
@@ -508,31 +600,61 @@ backcast_fit <- function(data, product, index,
 #' Rechnet ein Produkt mit den Parametern aus [backcast_fit()] (oder fest
 #' vorgegebenen Parametern) ueber die gesamte Indexhistorie und verkettet die
 #' Simulation renditebasiert (Chain-Linking) mit der echten Produktreihe ab
-#' Auflegung. Es entsteht kein Sprung am Verkettungstag.
+#' Auflegung. Es entsteht kein Sprung am Verkettungstag; ab dem
+#' Verkettungstag stimmt \code{value} (ohne \code{rebase}) an allen
+#' Beobachtungstagen mit den echten Kursen ueberein. Das Ergebnis kann z. B.
+#' nach Umbenennen von \code{value} als Kursspalte fuer [simulation()]
+#' dienen.
 #'
-#' @param fit Ein \code{SimLevBackcastFit}-Objekt. Alternativ \code{NULL}, dann
-#'   werden \code{data}, \code{product}, \code{index} und die Modellangaben
-#'   ueber \code{...} uebergeben und \code{params} direkt verwendet.
-#' @param data Optional anderer Datensatz (z. B. laengere Indexhistorie) mit
-#'   denselben Spaltennamen; Standard: Datensatz des Fits.
-#' @param params Optional Parameterliste (drag, spread, beta) ohne Fit.
-#' @param splice \code{"inception"} (Standard: echte Renditen ab Auflegung),
-#'   \code{"none"} (reine Modellreihe) oder ein Datum, ab dem echte Renditen
-#'   verwendet werden.
-#' @param fill Fuellmethode fuer Produktluecken nach der Auflegung:
+#' @param fit Ein \code{SimLevBackcastFit}-Objekt aus [backcast_fit()].
+#'   Alternativ \code{NULL} (Standard), dann werden \code{data},
+#'   \code{product}, \code{index} und die Modellangaben ueber \code{...}
+#'   uebergeben und \code{params} direkt verwendet (nur Strukturmodell).
+#' @param data Bei \code{fit}: optional anderer Datensatz (z. B. laengere
+#'   Indexhistorie) mit denselben Spaltennamen; \code{NULL} (Standard) =
+#'   Datensatz des Fits. Bei \code{fit = NULL} Pflicht (Format wie in
+#'   [backcast_fit()]).
+#' @param params Optional Liste mit \code{drag}, \code{spread} (Prozent p. a.)
+#'   und/oder \code{beta} (Faktor). Ueberschreibt einzelne Parameter des Fits;
+#'   ohne Fit gelten fuer fehlende Eintraege drag = 0, spread = 0, beta = 1.
+#' @param splice \code{"inception"} (Standard: echte Renditen ab dem ersten
+#'   Produktkurs), \code{"none"} (reine Modellreihe) oder ein Datum: echte
+#'   Renditen ab dem ersten Produktkurs an oder nach diesem Datum (Fehler,
+#'   wenn danach kein Produktkurs vorliegt).
+#' @param fill Fuellmethode fuer Produktluecken nach der Verkettung:
 #'   "locf" (Standard, wie die Engine), "linear", "stine" (imputeTS) oder "model"
 #'   (Lueckentage mit Modellrenditen, Endpunkte aus echten Kursen; erhaelt die
 #'   echten Kurse an allen Beobachtungstagen).
-#' @param rebase \code{NULL} (Produkteinheiten, echte Kurse bleiben erhalten)
-#'   oder Startwert, z. B. 100.
+#' @param rebase \code{NULL} (Standard; Produkteinheiten, echte Kurse bleiben
+#'   erhalten) oder Startwert der Reihe am ersten Indextag, z. B. 100
+#'   (\code{value} und \code{model} werden skaliert, \code{product} nicht).
 #' @param ... Bei \code{fit = NULL}: Argumente wie in [backcast_fit()]
-#'   (product, index, ter, leverage, rate, fx, model = "structural", ...).
+#'   (\code{product}, \code{index} als Pflicht; \code{ter} (Standard 0),
+#'   \code{leverage} (1), \code{rate} (\code{NULL} = 0), \code{fx},
+#'   \code{rate_lag}, \code{ter_basis}, \code{rate_basis}, \code{accrual},
+#'   \code{index_fill}, \code{lag}; \code{model} nur "structural").
 #'
-#' @return data.frame mit \code{date}, \code{value} (verkettete Reihe),
-#'   \code{return}, \code{model} (reine Modellreihe auf gleichem Niveau),
-#'   \code{product} (Rohdaten) und \code{source} ("backcast", "product",
-#'   "filled"). Attribut \code{"fit"} enthaelt das Fit-Objekt.
-#' @seealso [backcast_fit()]
+#' @return data.frame der Klasse \code{c("SimLevBackcast", "data.frame")} mit
+#'   einer Zeile je Zeile von \code{data}: \code{date}, \code{value}
+#'   (verkettete Reihe; \code{NA} vor dem ersten Indexwert), \code{return}
+#'   (einfache Rendite von \code{value} als Anteil), \code{model} (reine
+#'   Modellreihe auf gleichem Niveau), \code{product} (Rohdaten) und
+#'   \code{source} ("backcast", "product" oder "filled"). Attribute
+#'   \code{"fit"} (Fit-Objekt oder \code{NULL}), \code{"params"} (verwendete
+#'   Parameter) und \code{"splice_date"} (Verkettungsdatum oder \code{NA}).
+#' @examples
+#' # Ohne Fit: Hebelprodukt mit bekannten Kosten zurueckrechnen
+#' set.seed(1); n <- 1000
+#' d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
+#' d$idx <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
+#' d$etf <- leveraged_series(d, "idx", leverage = 2, rate = 2, expense = 0.6)
+#' d$etf[1:600] <- NA                       # Produkt erst ab Tag 601
+#' bc <- backcast(data = d, product = "etf", index = "idx", leverage = 2,
+#'                rate = 2, ter = 0.6, rebase = 100)
+#' bc[599:602, ]
+#' table(bc$source)
+#' attr(bc, "splice_date")
+#' @seealso [backcast_fit()], [leveraged_series()], [simulation()]
 #' @export
 backcast <- function(fit = NULL, data = NULL, params = NULL,
                      splice = "inception",
@@ -545,10 +667,10 @@ backcast <- function(fit = NULL, data = NULL, params = NULL,
     a <- utils::modifyList(list(ter = 0, leverage = 1, rate = NULL, fx = NULL, rate_lag = 0L,
                                 ter_basis = 365, rate_basis = 360, accrual = "linear",
                                 index_fill = "locf"), dots)
-    if (is.null(a$product) || is.null(a$index)) stop("'product' und 'index' muessen angegeben werden.")
+    if (is.null(a$product) || is.null(a$index)) stop("'product' und 'index' m\u00fcssen angegeben werden.")
     a$data <- data
     model <- dots$model %||% "structural"
-    if (model != "structural") stop("Ohne Fit ist nur model = 'structural' moeglich.")
+    if (model != "structural") stop("Ohne Fit ist nur model = 'structural' m\u00f6glich.")
     reg <- NULL
     par <- utils::modifyList(list(drag = 0, spread = 0, beta = 1), params %||% list())
     lag <- as.integer(dots$lag %||% 0L)
@@ -575,9 +697,11 @@ backcast <- function(fit = NULL, data = NULL, params = NULL,
   } else if (identical(splice, "inception")) {
     k0 <- obs[1]
   } else {
-    sd0 <- as.Date(splice)
-    k0 <- obs[obs >= which.max(prep$dates >= sd0)][1]
-    if (is.na(k0)) stop("Kein Produktkurs ab dem Verkettungsdatum vorhanden.")
+    sd0 <- .to_date(splice, "splice")
+    if (length(sd0) != 1L || is.na(sd0)) stop("splice: \"inception\", \"none\" oder ein Datum ('JJJJ-MM-TT').")
+    k0 <- obs[prep$dates[obs] >= sd0][1]
+    if (is.na(k0)) stop(sprintf("Kein Produktkurs ab dem Verkettungsdatum %s vorhanden (letzter Produktkurs am %s).",
+                                format(sd0), format(prep$dates[max(obs)])))
   }
 
   # Produktrenditen ab Verkettung (mit Lueckenbehandlung)
@@ -646,13 +770,25 @@ backcast <- function(fit = NULL, data = NULL, params = NULL,
 
 #' Methoden fuer Backcast-Objekte
 #'
-#' Ausgabe-, Zusammenfassungs- und Grafikmethoden.
+#' Ausgabe-, Zusammenfassungs- und Grafikmethoden fuer Ergebnisse von
+#' [backcast_fit()] (\code{SimLevBackcastFit}) und [backcast()]
+#' (\code{SimLevBackcast}). \code{print()} eines Fits zeigt Parameter und
+#' Abweichungskennzahlen ohne und mit Fit (in Prozent);
+#' \code{plot()} eines Fits zeigt die Pfadabweichung im Fit-Fenster (und bei
+#' Gittersuche die Verlustkurve), \code{plot()} eines Backcasts die
+#' verkettete Reihe, die durchgehende Modellreihe und das Verkettungsdatum.
 #'
 #' @param x Ein \code{SimLevBackcastFit}- bzw. \code{SimLevBackcast}-Objekt.
 #' @param object Ein \code{SimLevBackcastFit}-Objekt.
-#' @param log Logarithmische y-Achse.
-#' @param ... Weitere Argumente (an \code{plot} bzw. \code{print} weitergereicht).
-#' @return Das Objekt (unsichtbar) bzw. eine Zusammenfassung.
+#' @param log Logisch: logarithmische y-Achse (Standard \code{TRUE}; nur
+#'   \code{plot()} eines \code{SimLevBackcast}).
+#' @param ... Weitere Argumente: bei \code{plot()} an \code{plot()} der ersten
+#'   Grafik weitergereicht, bei \code{print()} eines \code{SimLevBackcast} an
+#'   \code{print()} der ersten Zeilen; sonst ohne Wirkung.
+#' @return \code{print()} und \code{plot()}: das Objekt (unsichtbar).
+#'   \code{summary()} eines Fits druckt den Fit und gibt unsichtbar eine Liste
+#'   mit \code{params}, \code{diagnostics} (ohne \code{deviation}) und
+#'   \code{validation} zurueck.
 #' @name SimLevBackcast-methods
 #' @keywords internal
 NULL
@@ -688,7 +824,7 @@ print.SimLevBackcastFit <- function(x, ...) {
   cat(sprintf("  %-34s %10.4f  %10.4f\n", "Korrelation Tagesrenditen", d0$correlation, d$correlation))
   if (!is.null(x$validation)) {
     v <- x$validation
-    cat("\n  Out-of-Sample (Fit juengere, Test aeltere Haelfte)\n  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+    cat("\n  Out-of-Sample (Fit j\u00fcngere, Test \u00e4ltere H\u00e4lfte)\n  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
     cat(sprintf("  Test-Zeitraum:    %s bis %s\n", format(v$test[1]), format(v$test[2])))
     cat(sprintf("  RMSE Log-Niveau:  %.4f %% (ohne Fit: %.4f %%)\n", v$test_rmse_level, v$naive_rmse_level))
     cat(sprintf("  Tracking Diff.:   %+.4f %% p. a. (ohne Fit: %+.4f %%)\n",
@@ -736,7 +872,7 @@ plot.SimLevBackcast <- function(x, log = TRUE, ...) {
   plot(x$date[ok], x$value[ok], type = "n", log = if (log) "y" else "", xlab = "Datum",
        ylab = if (log) "Wert (log. Skala)" else "Wert", main = "Backcast und Produkt", yaxt = "n", ...)
   at <- graphics::axTicks(2)
-  graphics::axis(2, at = at, labels = formatC(at, format = "fg", big.mark = ".", decimal.mark = ","))
+  graphics::axis(2, at = at, labels = formatC(at, format = "fg", big.mark = " "))   # R9-07: Dezimalpunkt, Leerzeichen als Tausendertrenner
   bc <- x$source == "backcast" & ok
   graphics::lines(x$date[ok], x$model[ok], col = "grey65", lwd = 1)
   graphics::lines(x$date[bc], x$value[bc], col = "#B5562B", lwd = 1.2)

@@ -18,35 +18,58 @@ leverage_sensitivity(
 )
 }
 \arguments{
-\item{data}{data.frame mit \code{date} und der Indexspalte.}
+\item{data}{data.frame mit Spalte \code{date} und der Indexspalte.}
 
-\item{index}{Spaltenname des Index (Niveau).}
+\item{index}{Spaltenname des Index (Niveau, nicht Rendite; Luecken werden
+mit dem letzten Wert gefuellt).}
 
-\item{leverages}{Zu pruefende Hebel.}
+\item{leverages}{Numerischer Vektor der zu pruefenden Hebel (Standard
+\code{seq(0.5, 4, by = 0.25)}).}
 
-\item{rate}{Finanzierungszins in Prozent p. a. (Skalar oder Spaltenname).}
+\item{rate}{Finanzierungszins in Prozent p. a. (Standard 0): Skalar,
+Spaltenname, Vektor der Laenge \code{nrow(data)},
+\code{data.frame(date, value)} oder benannter Vektor mit Datumsnamen.}
 
-\item{expense}{TER in Prozent p. a.}
+\item{expense}{TER in Prozent p. a. (Standard 0).}
 
-\item{spread}{Spread auf den finanzierten Anteil in Prozent p. a.}
+\item{spread}{Spread auf den finanzierten bzw. leerverkauften Anteil
+\eqn{m(L)} in Prozent p. a. (Standard 0).}
 
-\item{strategy}{Optional Strategie mit dem Asset \code{"LEV"}; Standard
-Buy-and-Hold-ETF mit 30 \% Teilfreistellung.}
+\item{strategy}{Optional Strategie mit dem Asset \code{"LEV"}; \code{NULL}
+(Standard) = Buy-and-Hold-ETF mit 30 Prozent Teilfreistellung
+(\code{asset_config("etf", "bnh", asset_bonus = 30)}).}
 
-\item{sim_args}{Gemeinsame Argumente fuer alle Laeufe.}
+\item{sim_args}{Benannte Liste gemeinsamer Argumente fuer alle Laeufe
+(Standard \code{list()}); Werte aus \code{grid} haben Vorrang.}
 
-\item{metrics}{Funktion \code{SimLevResult -> benannter Vektor}
-(Standard [study_metrics()]).}
+\item{metrics}{Funktion \code{SimLevResult -> benannter numerischer Vektor}
+(Standard \code{\link[=study_metrics]{study_metrics()}}).}
 
-\item{cores}{Prozesse (Fork auf Unix, PSOCK auf Windows).}
+\item{cores}{Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).}
 }
 \value{
-\code{SimLevSensitivity}-data.frame mit leverage und Kennzahlen;
-  Attribut \code{optimal} (Hebel mit maximaler CAGR und Sharpe).
+data.frame der Klasse \code{SimLevSensitivity} mit \code{leverage}
+und den Kennzahlen aus \code{metrics} (fehlgeschlagene Laeufe fehlen);
+Attribut \code{optimal} (benannter Vektor \code{cagr}, \code{sharpe}:
+Hebel mit maximaler CAGR bzw. Sharpe Ratio) und \code{kind = "leverage"}.
+Mit Sparplan (\code{sim_args}) ist \code{cagr} geldgewichtet (XIRR).
+Ausgabe und Grafik ueber \code{print()} und \code{plot()}.
 }
 \description{
-Erzeugt fuer jeden Hebel eine Reihe mit [leveraged_series()], simuliert
+Erzeugt fuer jeden Hebel eine Reihe mit \code{\link[=leveraged_series]{leveraged_series()}}, simuliert
 sie als Buy-and-Hold (oder mit einer eigenen Strategie fuer das Asset
 \code{"LEV"}) und bestimmt den Hebel mit der hoechsten CAGR bzw. Sharpe
-Ratio, wie die LETF-Analyse von testfol.io.
+Ratio, wie die LETF-Analyse von testfol.io. An \code{\link[=simulation]{simulation()}} wird ein
+data.frame mit den Spalten \code{date} und \code{LEV} uebergeben.
+}
+\examples{
+set.seed(1)
+x <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = 1500))
+x$idx <- 100 * cumprod(1 + rnorm(1500, 3e-4, 0.01))
+lv <- leverage_sensitivity(x, "idx", leverages = c(1, 1.5, 2, 3), rate = 2, expense = 0.5)
+lv
+attr(lv, "optimal")
+}
+\seealso{
+\code{\link[=leveraged_series]{leveraged_series()}}, \code{\link[=sensitivity_grid]{sensitivity_grid()}}, \code{\link[=simulation]{simulation()}}
 }

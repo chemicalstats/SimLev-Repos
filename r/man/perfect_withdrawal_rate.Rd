@@ -7,13 +7,21 @@
 perfect_withdrawal_rate(real_returns, legacy = 0)
 }
 \arguments{
-\item{real_returns}{Matrix (Jahre x Pfade) realer Brutto-Jahresrenditen
-(z. B. 1.05) oder \code{withdrawal_paths}.}
+\item{real_returns}{Numerische Matrix (Jahre x Pfade) realer
+Brutto-Jahresrenditen (z. B. 1.05 = +5 \% real; ein Vektor gilt als ein
+Pfad) oder ein \code{withdrawal_paths}-Objekt: dann werden
+\code{returns / inflation} je Periode zu Jahren aufmultipliziert (ein
+unvollstaendiges letztes Jahr entfaellt).}
 
-\item{legacy}{Zielvermoegen als Anteil des Startvermoegens (K_E / K_S).}
+\item{legacy}{Reales Zielvermoegen am Ende als Anteil des Startvermoegens
+(\eqn{K_E / K_S}; 0 = aufbrauchen (Standard), 0.5 = 50 \% erhalten; >= 0).
+Renditen muessen Brutto-Renditen sein (1.05, nicht 0.05); eine Matrix
+mit Median unter 0.5, negativen oder nicht endlichen Werten ist ein
+Fehler.}
 }
 \value{
-Vektor der PWR je Pfad in Prozent.
+Numerischer Vektor der PWR je Pfad in Prozent des Startvermoegens
+(4 = 4 \% je Jahr).
 }
 \description{
 Exakte konstante reale Entnahmerate, die ein Depot bei gegebener Renditefolge
@@ -21,4 +29,18 @@ genau aufbraucht bzw. das Zielvermoegen hinterlaesst (Suarez, Suarez & Walz
 2015; Entnahme jeweils zu Jahresbeginn):
 \deqn{PWR = (R_n - K_E/K_S) \cdot S_n, \quad R_n = \prod (1+r_i), \quad
       S_n = 1 / \sum_{i=1}^{n} \prod_{j=i}^{n} (1 + r_j)}
+}
+\details{
+Die PWR haengt nur von der realen Renditefolge ab (keine Steuern,
+Verkaufskosten oder weiteren Einkommen).
+}
+\examples{
+set.seed(1)
+R <- matrix(exp(rnorm(30 * 5, 0.03, 0.12)), 30)   # 30 Jahre, 5 Pfade, real
+perfect_withdrawal_rate(R)
+perfect_withdrawal_rate(R, legacy = 0.5)
+}
+\seealso{
+\code{\link[=withdrawal_simulation]{withdrawal_simulation()}} (Spalte \code{pwr} in \code{paths}),
+\code{\link[=withdrawal_max_rate]{withdrawal_max_rate()}}, \code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}}
 }

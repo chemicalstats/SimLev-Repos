@@ -26,6 +26,15 @@
       OR-Verknüpfung mehrerer Sub-Trigger-Specs aus \code{triggers}.
     }
   }
+  Der Referenzwert (gehaltener Hebel bzw. Volatilität) ist der erste nicht
+  fehlende Wert (in der Regel der erste Tag; bei führenden \code{NA}, etwa in
+  der Anlaufphase einer EWMA-Volatilität, der erste Tag mit Wert; bis dahin
+  wird nicht ausgelöst) und wird nur an Tagen fortgeschrieben, an denen dieser Trigger
+  auslöst (nicht an kalendarischen Rebalancing-Tagen in
+  \code{\link{simulation}}). Ausgelöst wird bei einer Abweichung
+  \emph{größer} als die Schwelle; \code{NA}-Werte lösen nicht aus. Bei
+  \code{"rel_leverage"} und \code{"vol_band"} wird nicht ausgelöst, solange
+  der Referenzwert 0 ist.
 }
 \usage{
 compute_rebal_trigger(
@@ -40,12 +49,14 @@ compute_rebal_trigger(
 }
 \arguments{
   \item{df}{
-    \code{data.frame} mit täglichen Feldern. Muss die relevanten Spalten
-    (\code{lev_col} bzw. \code{vol_col}) enthalten.
+    \code{data.frame} mit täglichen Feldern (mindestens eine Zeile). Muss die
+    relevanten numerischen Spalten (\code{lev_col} bzw. \code{vol_col})
+    enthalten, sonst Fehler.
   }
   \item{type}{
     Character. Trigger-Typ: \code{"abs_leverage"}, \code{"rel_leverage"},
-    \code{"vol_band"} oder \code{"combined"}.
+    \code{"vol_band"} oder \code{"combined"}. Kein Standardwert; andere
+    Werte führen zu einem Fehler.
   }
   \item{threshold}{
     Numerisch. Auslöseschwelle \strong{in Prozent} (Paket-Konvention).
@@ -65,8 +76,10 @@ compute_rebal_trigger(
   }
   \item{triggers}{
     Liste von Sub-Trigger-Specs (nur bei \code{type = "combined"}).
-    Jeder Eintrag ist eine Liste mit \code{type} und ggf. \code{threshold},
-    \code{lev_col}, \code{vol_col}. Die Trigger werden OR-verknüpft.
+    Jeder Eintrag ist eine Liste mit \code{type} und ggf. \code{threshold}
+    (in Prozent, fehlt er: \code{10}), \code{lev_col}, \code{vol_col}.
+    Jeder Sub-Trigger führt seinen eigenen Referenzwert; die Ergebnisse
+    werden OR-verknüpft. Standard: \code{NULL}.
   }
   \item{out_col}{
     Character. Name der zu erzeugenden logischen Spalte in \code{df}.

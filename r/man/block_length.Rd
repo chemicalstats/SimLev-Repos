@@ -7,13 +7,21 @@
 block_length(x, transform = c("none", "abs", "squared"))
 }
 \arguments{
-\item{x}{Numerischer Vektor oder Matrix (Spalten = Reihen), z. B. Renditen.}
+\item{x}{Numerischer Vektor oder Matrix (Spalten = Reihen), z. B.
+(Log-)Renditen je Zeile. Nicht-endliche Werte werden je Spalte entfernt.}
 
-\item{transform}{\code{"none"}, \code{"abs"} (|x - mean|) oder \code{"squared"}.}
+\item{transform}{Transformation vor der Schaetzung: \code{"none"}
+(Standard, Reihe selbst), \code{"abs"} (\eqn{|x - \bar x|}) oder
+\code{"squared"} (\eqn{(x - \bar x)^2}).}
 }
 \value{
-Matrix mit Spalten \code{stationary} und \code{circular} (eine Zeile
-  je Reihe).
+Matrix mit Spalten \code{stationary} (erwartete Blocklaenge fuer den
+stationaeren Bootstrap, Parameter \code{L}) und \code{circular} (feste
+Blocklaenge fuer den zirkulaeren Block-Bootstrap, Parameter
+\code{block_length}), eine Zeile je Reihe (Zeilennamen = Spaltennamen von
+\code{x} bzw. V1, V2, ...). Einheit: Zeilen (Beobachtungen) von \code{x};
+Werte sind nicht gerundet, mindestens 1 und hoechstens
+\eqn{\lceil\min(3\sqrt{n}, n/3)\rceil}; bei weniger als 20 Beobachtungen 1.
 }
 \description{
 Schaetzt die optimale (erwartete) Blocklaenge fuer den stationaeren und den
@@ -29,12 +37,20 @@ Trendfolge-Signalen ist daher \code{transform = "abs"} (Volatilitaets-
 Clustering) und eine Sensitivitaetsanalyse ueber mehrere Blocklaengen zu
 empfehlen; die Blocklaenge sollte die Signal-Lookback-Laenge nicht weit
 unterschreiten.
+
+Mit \code{params = list(L = "auto")} bzw. \code{list(block_length = "auto")}
+verwenden \code{\link[=bootstrap]{bootstrap()}} und \code{\link[=bootstrap_study]{bootstrap_study()}} diese Schaetzung (Maximum
+ueber alle Indizes, jeweils fuer Log-Renditen und deren Betraege).
 }
 \examples{
 set.seed(1); x <- arima.sim(list(ar = 0.5), 2000)
 block_length(x)
+block_length(x, transform = "abs")
 }
 \references{
 Politis, D.N. & White, H. (2004), Econometric Reviews 23(1);
-  Patton, A., Politis, D.N. & White, H. (2009), Econometric Reviews 28(4).
+Patton, A., Politis, D.N. & White, H. (2009), Econometric Reviews 28(4).
+}
+\seealso{
+\code{\link[=bootstrap]{bootstrap()}}, \code{\link[=bootstrap_study]{bootstrap_study()}}
 }

@@ -14,24 +14,50 @@ total_return_index(
 )
 }
 \arguments{
-\item{price}{Kursreihe (numerisch).}
+\item{price}{Kursreihe als numerischer Vektor (Niveaus); NA werden per
+LOCF gefuellt.}
 
-\item{dividends}{Ausschuettung je Anteil (gleiche Laenge, 0/NA an Tagen ohne).}
+\item{dividends}{Ausschuettung je Anteil in Waehrungseinheiten am Ex-Tag
+(numerischer Vektor gleicher Laenge, 0 oder NA an Tagen ohne
+Ausschuettung). Standard \code{NULL} = keine.}
 
-\item{yield}{Dividendenrendite in Prozent p. a. (Skalar oder Vektor), als
-Alternative zu \code{dividends}.}
+\item{yield}{Dividendenrendite in Prozent p. a. (2 = 2 \%; Skalar oder
+Vektor gleicher Laenge), anteilig je Zeile aufgezinst. Standard
+\code{NULL} = keine.}
 
-\item{withholding}{Quellensteuer in Prozent (z. B. 15).}
+\item{withholding}{Quellensteuer in Prozent (15 = 15 \%), mindert
+\code{dividends} und \code{yield}. Standard 0.}
 
-\item{dates}{Datum (fuer \eqn{\Delta t}; Standard: 1 Tag je Zeile).}
+\item{dates}{Datumsvektor gleicher Laenge fuer \eqn{\Delta t},
+aufsteigend sortiert wie \code{price} (sonst Fehler); Standard
+\code{NULL} = 1 Tag je Zeile (nur fuer \code{yield} von Bedeutung).}
 
-\item{start}{Startwert (Standard: erster Kurs).}
+\item{start}{Startwert des Index (Standard \code{NULL} = erster Kurs).}
 }
 \value{
-numerischer Indexvektor.
+Numerischer Indexvektor gleicher Laenge wie \code{price}.
 }
 \description{
 \deqn{r_t = \frac{P_t + D_t (1 - w)}{P_{t-1}} - 1 + \frac{y_t}{100}(1-w)\frac{\Delta t}{365.25}}
 mit Ausschuettung je Anteil \eqn{D_t} am Ex-Tag, Quellensteuer \eqn{w} und
 alternativ laufend aufgezinster Dividendenrendite \eqn{y_t} (Prozent p. a.).
+\eqn{\Delta t} ist der Abstand zur Vorzeile in Kalendertagen.
+}
+\details{
+Wandelt einen Kursindex (Preisindex ohne Ausschuettungen) in einen
+Total-Return-Index um (Ausschuettungen nach Quellensteuer reinvestiert).
+Arbeitet auf Vektoren; das Ergebnis kann direkt als neue Kursspalte in
+den data.frame fuer \code{\link[=simulation]{simulation()}} geschrieben werden. Werden \code{dividends} und
+\code{yield} zugleich angegeben, wirken beide.
+}
+\examples{
+p <- c(100, 101, 99, 100, 102, 103)
+div <- c(0, 0, 0, 2, 0, 0)              # 2 je Anteil am Ex-Tag (Zeile 4)
+total_return_index(p, dividends = div, withholding = 15)
+# Laufende Dividendenrendite 2 \% p. a. mit Kalenderdaten
+dts <- seq.Date(as.Date("2024-01-01"), by = "day", length.out = 6)
+total_return_index(p, yield = 2, dates = dts)
+}
+\seealso{
+\code{\link[=splice_series]{splice_series()}}, \code{\link[=convert_currency]{convert_currency()}}, \code{\link[=align_series]{align_series()}}
 }

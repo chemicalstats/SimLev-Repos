@@ -15,24 +15,50 @@ withdrawal_max_rate(
 )
 }
 \arguments{
-\item{x}{\code{withdrawal_paths} oder Renditematrix.}
+\item{x}{Renditequelle wie in \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}:
+\code{withdrawal_paths} (z. B. aus \code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}},
+\code{\link[=withdrawal_paths]{withdrawal_paths()}}, \code{\link[=pooled_bootstrap]{pooled_bootstrap()}}), Renditematrix,
+\code{SimLevResult}, Liste von \code{SimLevResult} oder
+\code{SimLevBootstrapStudy}.}
 
-\item{rule}{\code{withdrawal_rule}; \code{rate} wird variiert.}
+\item{rule}{Objekt aus \code{\link[=withdrawal_rule]{withdrawal_rule()}}; dessen \code{rate} wird
+variiert (Standard: \code{withdrawal_rule("constant")}). Nur fuer
+Regeln, die \code{rate} nutzen; bei \code{one_over_n}, \code{vpw},
+\code{abw}, \code{cape} und \code{hebeler} bricht die Funktion ab.}
 
-\item{success}{Ziel-Erfolgsquote (0..1), z. B. 0.95; 1 = historische SWR.}
+\item{success}{Ziel-Erfolgsquote als Anteil (0.95 = 95 \% der Pfade,
+Standard); 1 = historische SWR. Zulaessig 0 < success <= 1 (95 statt
+0.95 ist ein Fehler).}
 
-\item{lower, upper}{Suchintervall in Prozent.}
+\item{lower, upper}{Suchintervall fuer \code{rate} in Prozent (Standard 0.5
+und 20).}
 
-\item{tol}{Genauigkeit in Prozentpunkten.}
+\item{tol}{Genauigkeit in Prozentpunkten (Standard 0.005; > 0). Es muss
+0 <= lower < upper <= 100 gelten.}
 
-\item{...}{weitere Argumente fuer [withdrawal_simulation()].}
+\item{...}{weitere Argumente fuer \code{\link[=withdrawal_simulation]{withdrawal_simulation()}} (z. B.
+\code{inflation}, \code{tax_mode}, \code{horizon}).}
 }
 \value{
-Rate in Prozent (Attribut \code{"success"}: erreichte Quote).
+Rate in Prozent (Zahl; 4 = 4 \%) mit Attribut \code{"success"}
+(erreichte Erfolgsquote als Anteil). \code{NA}, wenn schon \code{lower}
+die Zielquote verfehlt; \code{upper}, wenn selbst \code{upper} sie
+erreicht.
 }
 \description{
 Bestimmt per Bisektion die hoechste Entnahmerate (\code{rate} der Regel),
-bei der der Anteil erfolgreicher Pfade mindestens \code{success} betraegt.
-Fuer die konstante Regel ohne Steuern entspricht das dem Quantil der
-Perfect Withdrawal Rate (historisch: Minimum ueber alle Kohorten = SWR).
+bei der der (mit den Pfadgewichten gewichtete) Anteil erfolgreicher Pfade
+mindestens \code{success} betraegt. Fuer die konstante Regel ohne Steuern
+und Einkommen entspricht das dem Quantil der Perfect Withdrawal Rate
+(historisch: Minimum ueber alle Kohorten = SWR). Jeder Suchschritt ruft
+\code{\link[=withdrawal_simulation]{withdrawal_simulation()}} mit \code{keep_paths = FALSE} auf.
+}
+\examples{
+set.seed(1)
+R <- matrix(exp(rnorm(30 * 200, 0.05, 0.15)), 30)    # 30 Jahre, 200 Pfade
+withdrawal_max_rate(R, withdrawal_rule("constant"), success = 0.9, inflation = 2)
+}
+\seealso{
+\code{\link[=withdrawal_simulation]{withdrawal_simulation()}}, \code{\link[=perfect_withdrawal_rate]{perfect_withdrawal_rate()}},
+\code{\link[=withdrawal_rule]{withdrawal_rule()}}
 }

@@ -8,10 +8,10 @@ portfolio_optimize(
   x,
   assets = NULL,
   method = c("min_variance", "max_sharpe", "mean_variance", "max_diversification",
-    "risk_parity", "hrp", "min_cvar", "inverse_vol", "equal"),
+    "risk_parity", "hrp", "min_cvar", "min_cdar", "inverse_vol", "equal"),
   lower = 0,
   upper = 1,
-  cov = c("sample", "ledoit_wolf"),
+  cov = c("sample", "ledoit_wolf", "ewma", "denoise", "gerber"),
   mu = NULL,
   risk_free = 0,
   risk_aversion = 4,
@@ -24,56 +24,140 @@ portfolio_optimize(
 )
 }
 \arguments{
-\item{x}{data.frame mit \code{date} und Kursspalten oder Renditematrix.}
+\item{x}{data.frame mit Spalte \code{date} (Date) und Kursspalten
+(Kursniveaus, keine Renditen) oder numerische Matrix bzw. data.frame
+ohne \code{date} mit einfachen Periodenrenditen als Anteil (Zeilen =
+Perioden, Spalten = Anlagen; ohne Spaltennamen \code{A1}, \code{A2},
+...).}
 
-\item{assets}{Spalten (Standard: alle numerischen).}
+\item{assets}{Zeichenvektor der zu verwendenden Spalten. \code{NULL}
+(Standard) = alle numerischen Spalten ausser \code{date} bzw. alle
+Spalten der Matrix.}
 
-\item{method}{Verfahren (siehe oben).}
+\item{method}{Verfahren (siehe Tabelle oben): \code{"min_variance"}
+(Standard), \code{"max_sharpe"}, \code{"mean_variance"},
+\code{"max_diversification"}, \code{"risk_parity"}, \code{"hrp"},
+\code{"min_cvar"}, \code{"min_cdar"}, \code{"inverse_vol"} oder
+\code{"equal"}. \code{risk_parity}, \code{hrp}, \code{inverse_vol} und
+\code{equal} ignorieren \code{lower}/\code{upper} (mit Warnung, wenn
+andere als die Standardgrenzen angegeben sind). \code{risk_parity},
+\code{hrp} und \code{inverse_vol} brechen bei Anlagen ohne Schwankung
+(Volatilitaet 0, z. B. Geldmarkt mit festem Zins) mit Fehler ab.}
 
-\item{lower, upper}{Grenzen je Anlage (Skalar oder benannter Vektor, Anteile).}
+\item{lower, upper}{Unter- und Obergrenzen der Gewichte als Anteil (0.6 =
+60 \%): Skalar fuer alle Anlagen, benannter Vektor (nicht genannte
+Anlagen erhalten 0 bzw. 1; unbekannte Namen sind ein Fehler) oder
+unbenannter Vektor mit genau einem Wert je Anlage (in der Reihenfolge
+der Spalten; andere Laengen sind ein Fehler). Standard 0 und 1. Keine
+NA; \code{lower} >= 0 (Long-only). Erforderlich ist
+sum(lower) <= 1 <= sum(upper) und lower <= upper. \code{Inf} in
+\code{upper} bedeutet keine Obergrenze und wird als 1 gefuehrt (auch in
+\code{bounds}); andere Obergrenzen > 1 wirken ebenfalls wie 1, erzeugen
+aber eine Warnung (vermutlich Prozent statt Anteil, z. B. 26 statt
+0.26).}
 
-\item{cov}{\code{"sample"} oder \code{"ledoit_wolf"} (Schrumpfung, Ledoit &
-Wolf 2004).}
+\item{cov}{Kovarianzschaetzer: \code{"sample"} (Standard, Stichprobe),
+\code{"ledoit_wolf"} (Schrumpfung auf skalierte Einheitsmatrix, Ledoit &
+Wolf 2004), \code{"ewma"} (exponentiell gewichtet, Halbwertszeit ein
+Viertel der Stichprobe, 5 bis 52 Perioden), \code{"denoise"}
+(Marchenko-Pastur-Rauschfilter, Laloux et al. 1999) oder
+\code{"gerber"} (Gerber-Statistik, Gerber et al. 2022).}
 
-\item{mu}{Optional erwartete Renditen in Prozent p. a. (benannter Vektor);
-sonst historische Mittel.}
+\item{mu}{Optional erwartete Renditen in Prozent p. a. (5 = 5 \%), endlich,
+ohne NA: benannter Vektor (unbekannte Namen sind ein Fehler), unbenannter
+Vektor mit genau einem Wert je Anlage (in der Reihenfolge der Spalten)
+oder Skalar (fuer alle Anlagen gleich); nur fuer \code{max_sharpe} und
+\code{mean_variance} verwendet (fehlt dort eine Anlage im benannten
+Vektor, bricht die Funktion mit ihrem Namen ab). \code{NULL} (Standard) =
+historisches arithmetisches Mittel, annualisiert.}
 
-\item{risk_free}{Prozent p. a. (fuer \code{max_sharpe}).}
+\item{risk_free}{Risikoloser Zins in Prozent p. a. (Standard 0) fuer
+\code{max_sharpe} und die ausgewiesene Sharpe Ratio.}
 
-\item{risk_aversion}{Fuer \code{mean_variance}.}
+\item{risk_aversion}{Risikoaversion \eqn{\gamma} fuer
+\code{mean_variance} (Standard 4), bezogen auf Rendite und Varianz als
+Anteil p. a.}
 
-\item{budget}{Risikobudgets fuer \code{risk_parity} (benannter Vektor).}
+\item{budget}{Risikobudgets fuer \code{risk_parity}: Skalar (gleiche
+Budgets), benannter Vektor (nicht genannte Anlagen 0) oder unbenannter
+Vektor mit einem Wert je Anlage (Spaltenreihenfolge); Werte >= 0, wird
+auf Summe 1 normiert. \code{NULL} (Standard) = gleiche Risikobeitraege.}
 
-\item{alpha}{CVaR-Niveau (Standard 0.05).}
+\item{alpha}{Tail-Wahrscheinlichkeit als Anteil fuer CVaR und CDaR
+(Standard 0.05 = schlechteste 5 \% der Perioden bzw. Drawdowns), im
+Bereich (0, 0.5]; nicht das Konfidenzniveau (0.95) und nicht in Prozent
+(5) - beides ist ein Fehler. Wirkt auf \code{min_cvar},
+\code{min_cdar} und die ausgewiesenen Kennzahlen.}
 
-\item{frequency}{\code{"week"} (Standard), \code{"day"}, \code{"month"}.}
+\item{frequency}{Renditefrequenz: \code{"week"} (Standard), \code{"day"}
+oder \code{"month"}. Bei Kursdaten Aggregation (ISO-Woche,
+Kalendermonat); bei einer Renditematrix nur die Perioden je Jahr (52,
+252, 12).}
 
-\item{resample}{Anzahl Bootstrap-Stichproben (0 = aus).}
+\item{resample}{Anzahl Block-Bootstrap-Stichproben fuer das
+Michaud-Resampling (ganze Zahl, Standard 0 = aus); die Gewichte sind
+dann das Mittel der Einzeloptimierungen.}
 
-\item{block}{Mittlere Blocklaenge fuer das Resampling (Perioden).}
+\item{block}{Mittlere Blocklaenge des stationaeren Bootstraps fuer das
+Resampling in Perioden. \code{NULL} (Standard) = \eqn{T^{1/3}} gerundet,
+mindestens 2 (T = Anzahl Perioden).}
 
-\item{seed}{Startwert.}
+\item{seed}{Startwert fuer das Resampling. Mit Startwert ist das Ergebnis reproduzierbar und der
+Zufallszustand der Sitzung bleibt unveraendert; mit \code{NULL} wird der
+Zufallsstrom der Sitzung normal weitergezogen.}
 }
 \value{
-Objekt der Klasse \code{SimLevOptimization}: \code{weights},
-  \code{stats} (erwartete Rendite, Volatilitaet, Sharpe, CVaR,
-  Diversifikationsverhaeltnis, effektive Anzahl), \code{risk}
-  (Risikobeitraege), Eingaben.
+Objekt der Klasse \code{SimLevOptimization}, eine Liste mit
+\describe{
+\item{weights}{Benannter Gewichtsvektor (Anteile, Summe 1).}
+\item{stats}{Benannter Vektor: \code{expected_return} (historisches
+Mittel, annualisiert, Anteil p. a.; auch wenn \code{mu} angegeben
+ist), \code{volatility} (Anteil p. a.), \code{sharpe} (bei
+Volatilitaet 0 wie auch \code{diversification_ratio},
+\code{effective_n_risk} und \code{risk_share} \code{NA}, mit Warnung),
+\code{cvar} (historischer CVaR je Periode, Verlust positiv, Anteil),
+\code{cdar} (CDaR der kumulierten, nicht aufgezinsten Rendite,
+Anteil), \code{diversification_ratio}, \code{effective_n}
+(\eqn{1 / \sum w^2}), \code{effective_n_risk} (dasselbe fuer die
+Risikoanteile).}
+\item{risk}{data.frame je Anlage: \code{asset}, \code{weight},
+\code{volatility_contribution} (Anteil p. a., Summe =
+Volatilitaet), \code{risk_share} (Anteil an der Volatilitaet).}
+}
+sowie \code{alpha}, \code{method}, \code{bounds} (Matrix der Grenzen),
+\code{resampled} (Gewichte je Stichprobe oder \code{NULL}),
+\code{cov_type}, \code{frequency}, \code{n_obs} (Anzahl Perioden).
+Methoden \code{print} und \code{plot}.
 }
 \description{
 Bestimmt Gewichte fuer ein Long-only-Portfolio (Summe 1) mit optionalen
-Grenzen je Anlage.
+Grenzen je Anlage aus historischen Periodenrenditen. Eingabe ist entweder
+ein data.frame mit Kursen oder eine fertige Renditematrix; Ergebnis sind
+Gewichte, Kennzahlen und Risikobeitraege.
 }
 \details{
+Renditen: Bei einem data.frame mit Spalte \code{date} werden die Kurse
+wie in \code{\link[=dependence_analysis]{dependence_analysis()}} aufbereitet (Fortschreiben fehlender Werte,
+letzte Zeile je ISO-Woche bzw. Kalendermonat, bei \code{"day"} jede Zeile
+ausser Tagen, an denen sich keine Anlage bewegt) und in einfache Renditen
+\eqn{P_t / P_{t-1} - 1} (Anteile) umgerechnet; die Perioden je Jahr
+werden aus den Daten ermittelt. Jede andere Eingabe wird als Matrix
+einfacher Periodenrenditen als Anteil (0.01 = 1 \%) behandelt; Zeilen mit
+fehlenden Werten entfallen, unendliche Renditen (\code{Inf}) sind ein
+Fehler (mit Spalte und Zeile), die Perioden je Jahr sind dann fest 252
+(\code{"day"}), 52 (\code{"week"}) bzw. 12 (\code{"month"}). Erwartete
+Renditen und Kovarianz werden mit diesen Perioden je Jahr annualisiert.
+
 \tabular{ll}{
-  \code{min_variance} \tab minimale Varianz \cr
-  \code{mean_variance} \tab \eqn{\max \mu'w - \frac{\gamma}{2} w'\Sigma w} mit Risikoaversion \code{risk_aversion} \cr
-  \code{max_sharpe} \tab maximale Sharpe Ratio (Suche entlang der Effizienzgrenze) \cr
-  \code{max_diversification} \tab maximales Diversifikationsverhaeltnis \eqn{w'\sigma / \sqrt{w'\Sigma w}} (Choueifaty & Coignard 2008) \cr
-  \code{risk_parity} \tab gleiche (oder vorgegebene, \code{budget}) Risikobeitraege (Spinu 2013) \cr
-  \code{hrp} \tab Hierarchical Risk Parity (Lopez de Prado 2016) \cr
-  \code{min_cvar} \tab minimaler historischer CVaR (Rockafellar & Uryasev 2000, geglaettet) \cr
-  \code{inverse_vol}, \code{equal} \tab einfache Heuristiken
+\code{min_variance} \tab minimale Varianz \cr
+\code{mean_variance} \tab \eqn{\max \mu'w - \frac{\gamma}{2} w'\Sigma w} mit Risikoaversion \code{risk_aversion} \cr
+\code{max_sharpe} \tab maximale Sharpe Ratio (Suche entlang der Effizienzgrenze) \cr
+\code{max_diversification} \tab maximales Diversifikationsverhaeltnis \eqn{w'\sigma / \sqrt{w'\Sigma w}} (Choueifaty & Coignard 2008) \cr
+\code{risk_parity} \tab gleiche (oder vorgegebene, \code{budget}) Risikobeitraege (Spinu 2013) \cr
+\code{hrp} \tab Hierarchical Risk Parity (Lopez de Prado 2016) \cr
+\code{min_cvar} \tab minimaler historischer CVaR (Rockafellar & Uryasev 2000, geglaettet) \cr
+\code{min_cdar} \tab minimaler Conditional Drawdown at Risk (Chekhlov, Uryasev & Zabarankin 2005) \cr
+\code{inverse_vol}, \code{equal} \tab einfache Heuristiken
 }
 
 Erwartete Renditen aus der Historie sind sehr unsicher; Verfahren, die sie
@@ -90,7 +174,12 @@ portfolio_optimize(R, method = "min_variance", upper = 0.6)
 }
 \references{
 Ledoit, O. & Wolf, M. (2004), Journal of Multivariate Analysis
-  88(2); Spinu, F. (2013), SSRN 2297383; Lopez de Prado, M. (2016), Journal
-  of Portfolio Management 42(4); Rockafellar, R. T. & Uryasev, S. (2000),
-  Journal of Risk 2(3); Michaud, R. (1998), Efficient Asset Management.
+88(2); Spinu, F. (2013), SSRN 2297383; Lopez de Prado, M. (2016), Journal
+of Portfolio Management 42(4); Rockafellar, R. T. & Uryasev, S. (2000),
+Journal of Risk 2(3); Michaud, R. (1998), Efficient Asset Management.
+}
+\seealso{
+\code{\link[=efficient_frontier]{efficient_frontier()}}, \code{\link[=risk_contributions]{risk_contributions()}},
+\code{\link[=rolling_optimization]{rolling_optimization()}} (Zielgewichte fuer \code{\link[=tactical_simulation]{tactical_simulation()}}),
+\code{\link[=cpcv_portfolio]{cpcv_portfolio()}}.
 }

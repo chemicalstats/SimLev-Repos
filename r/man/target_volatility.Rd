@@ -16,27 +16,41 @@ target_volatility(
 )
 }
 \arguments{
-\item{data}{data.frame mit \code{date} und Kursspalten.}
+\item{data}{data.frame mit Spalte \code{date} (Klasse Date) und
+Kursspalten (Niveaus) der Risikoanlagen und der sicheren Anlage.}
 
-\item{weights}{\code{SimLevWeights} (Risikoportfolio) oder benannter
-Gewichtsvektor.}
+\item{weights}{Gewichte des Risikoportfolios: \code{SimLevWeights} (z. B.
+aus \code{\link[=tactical_rotation]{tactical_rotation()}}) oder benannter Gewichtsvektor (Anteile,
+statisch). Eine darin enthaltene sichere Anlage zaehlt nicht zum
+Risikoteil.}
 
-\item{safe}{Sichere Anlage (Spalte).}
+\item{safe}{Name der Kursspalte der sicheren Anlage (Zeichenkette).}
 
-\item{target}{Zielvolatilitaet in Prozent p. a.}
+\item{target}{Zielvolatilitaet in Prozent p. a. (10 = 10 \%; Standard 10).
+Werte unter 1 ergeben eine Warnung (vermutlich als Anteil angegeben).}
 
-\item{window}{Fenster in Handelstagen.}
+\item{window}{Fensterlaenge der Volatilitaetsschaetzung in Zeilen mit
+Kursbewegung (Standard 63).}
 
-\item{max_exposure}{Hoechster Risikoanteil (1 = ohne Hebel).}
+\item{max_exposure}{Hoechster Risikoanteil als Anteil (Standard 1 = ohne
+Hebel; Werte > 1 sind nicht erlaubt, da die Engine keinen Kredit
+kennt).}
 
-\item{every}{Anpassungsrhythmus.}
+\item{every}{Anpassungsrhythmus des Risikoanteils: \code{"month"}
+(Standard), \code{"week"}, \code{"day"} oder \code{"quarter"}.}
 
-\item{ppy}{Tage mit Kursbewegung je Jahr fuer die Annualisierung
-(Standard: aus den Daten geschaetzt, z. B. rund 252 bei Boersentagen,
-365 bei einem Index, der auch am Wochenende notiert).}
+\item{ppy}{Tage mit Kursbewegung je Jahr fuer die Annualisierung.
+Standard \code{NULL} = aus den Daten ermittelt (Zahl der Tage mit
+Bewegung geteilt durch die Laenge des Zeitraums in Jahren, z. B. rund
+252 bei Boersentagen, 365 bei
+einem Index, der auch am Wochenende notiert).}
 }
 \value{
-\code{SimLevWeights} mit Attribut \code{exposure}.
+\code{SimLevWeights} (data.frame mit \code{date} und
+Zielgewichten der Risikoanlagen und von \code{safe}, Anteile) mit
+Attributen \code{exposure} (Risikoanteil je Zeile, Anteil) und
+\code{volatility} (geschaetzte Volatilitaet des Risikoportfolios je
+Zeile, Anteil p. a., 0.15 = 15 \%).
 }
 \description{
 Skaliert den Risikoteil einer Gewichtsreihe so, dass die geschaetzte
@@ -46,7 +60,31 @@ Risikoanlagen mit den aktuellen Gewichten ueber \code{window} Zeilen mit
 Kursbewegung geschaetzt (Tage ohne Bewegung, etwa Wochenenden, zaehlen
 nicht).
 }
+\details{
+Der Risikoanteil (Exposure) ist \code{min(max_exposure, (target / 100) /
+vol)} mit der geschaetzten Volatilitaet \code{vol} als Anteil p. a.; er
+wird an den Terminen von \code{every} (letzte vorhandene Zeile je
+Periode) neu gesetzt und bis zum naechsten Termin gehalten. Vor dem
+ersten Termin mit vollem Fenster ist der Risikoanteil 0 (alles in
+\code{safe}); anders als bei \code{\link[=conditional_volatility]{conditional_volatility()}}, wo vorher der
+Grundanteil \code{base} gilt (hier gibt es keinen Grundanteil). \code{every} legt nur den Anpassungsrhythmus der
+Zielgewichte fest; gehandelt wird in \code{\link[=tactical_simulation]{tactical_simulation()}}.
+}
+\examples{
+set.seed(1); n <- 4 * 365
+d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
+d$aktien <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
+d$anleihen <- 100 * cumprod(1 + rnorm(n, 1e-4, 0.003))
+d$geld <- 100 * cumprod(rep(1 + 0.01 / 365, n))
+tv <- target_volatility(d, c(aktien = 0.8, anleihen = 0.2), safe = "geld", target = 8)
+tv
+summary(attr(tv, "exposure"))
+}
 \references{
 Moreira, A. & Muir, T. (2017), Volatility-Managed Portfolios,
-  Journal of Finance 72(4).
+Journal of Finance 72(4).
+}
+\seealso{
+\code{\link[=conditional_volatility]{conditional_volatility()}}, \code{\link[=tactical_simulation]{tactical_simulation()}},
+\code{\link[=blend_weights]{blend_weights()}}
 }

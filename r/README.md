@@ -98,6 +98,11 @@ plot(result)
   Daten- und Portfolio-Aufbereitung
 - `?dependence_analysis`, `?fit_copula`, `?tail_regression`,
   `?covar_analysis` – Abhängigkeiten, Tail-Risiko und Drittvariablen
+- `?tactical_simulation`, `?tactical_rules`, `?tactical_rotation`,
+  `?target_volatility` – taktische Allokation
+- `?portfolio_optimize`, `?efficient_frontier`, `?risk_contributions` –
+  Optimierung und Risikozerlegung
+- `?bond_index_from_yields`, `?money_market_index` – synthetische Reihen
 - [`inst/tutorial/`](inst/tutorial/) – Tutorial (R Markdown, als PDF
   ausgeliefert)
 - [`inst/examples/`](inst/examples/) – ausführliche Beispielsammlungen zu
@@ -139,6 +144,12 @@ R/
                              splice_series(), portfolio_template() & Co.
   dependence.R               dependence_analysis(), fit_copula(), dcc_fit(),
                              quantile_reg(), tail_regression(), covar_analysis()
+  tactical.R                 tactical_rules(), tactical_rotation(),
+                             target_volatility(), glidepath(), tactical_simulation()
+  optimize.R                 portfolio_optimize(), efficient_frontier(),
+                             rolling_optimization(), risk_contributions()
+  bonds.R                    bond_index_from_yields(), money_market_index(),
+                             currency_hedged_index()
   RcppExports.R, utils.R
 src/                         C++-Kerne (FIFO, Steuern, Markt-Updates,
                              Bootstrap-Verfahren, Entnahmeregeln, DCC)

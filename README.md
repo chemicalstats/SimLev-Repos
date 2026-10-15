@@ -64,6 +64,9 @@ Textausgabe stimmen exakt überein.
   - [Parametersuche und Überanpassung](#parametersuche-und-überanpassung)
   - [Daten und Portfolios aufbereiten](#daten-und-portfolios-aufbereiten)
   - [Abhängigkeiten, Tail-Risiko und Drittvariablen](#abhängigkeiten-tail-risiko-und-drittvariablen)
+  - [Taktische Allokation](#taktische-allokation)
+  - [Optimierung und Risikozerlegung](#optimierung-und-risikozerlegung)
+  - [Anleihen, Geldmarkt und Währungssicherung](#anleihen-geldmarkt-und-währungssicherung)
 - [Ergebnisse auswerten](#ergebnisse-auswerten)
 - [Unterschiede zwischen den Sprachen](#unterschiede-zwischen-den-sprachen)
 - [Bitgleichheit zum R-Paket](#bitgleichheit-zum-r-paket)
@@ -92,6 +95,9 @@ Textausgabe stimmen exakt überein.
 | **Parametersuche** *(nur R)* | Raster, Zufallssuche und Latin Hypercube über Strategie-, Signal- und Simulationsparameter; Plateau-Auswahl, Probability of Backtest Overfitting, Deflated Sharpe Ratio, Walk-Forward, Prüfung der besten Punkte auf Bootstrap-Pfaden |
 | **Datenaufbereitung** *(nur R)* | Quellen zusammenführen, Prüfbericht (Lücken, Spikes, Splits), Makroreihen mit Veröffentlichungsverzug, Währung, Total Return, reale Werte, Verkettung, Portfolio-Vorlagen |
 | **Abhängigkeiten** *(nur R)* | Rang- und Tail-Abhängigkeit, Copulas (Gauß, t, Clayton, Gumbel, Frank), DCC, Korrelation je Regime von Inflation, Zinsen oder Spreads mit Block-Bootstrap, Quantilsregression, CoVaR |
+| **Taktische Allokation** *(nur R)* | Regeln mit Rückfall-Portfolio, Momentum-Rotation, Dual Momentum, Canary-Schutz, Zielvolatilität, Glidepath, Kern-Satellit; Ausführung mit Steuern und Kosten über die Engine |
+| **Optimierung** *(nur R)* | Minimum-Varianz, maximale Sharpe Ratio, maximale Diversifikation, Risikoparität mit Budgets, HRP, minimaler CVaR; Grenzen, Ledoit-Wolf, Resampling, Effizienzgrenze, rollierende Optimierung, Risikobeiträge |
+| **Synthetische Reihen** *(nur R)* | Anleihe-Index aus Renditen (konstante Laufzeit), Geldmarkt-Index aus Tagesgeld, währungsgesicherte Reihen |
 | **Geschwindigkeit** | 30 Jahre Tagesdaten mit drei Assets, Sparplan, Rebalancing und Steuern in 0,02 s (Julia) bis 0,23 s (R) |
 
 ## Installation
@@ -1035,6 +1041,71 @@ stress <- regime_subset(hist, "inflation >= 4", min_run = 60)   # Stress-Bootstr
 
 Alle Verfahren sind ohne Zusatzpakete umgesetzt.
 
+### Taktische Allokation
+
+Taktische Strategien wechseln zwischen Zielportfolios. Gewichts-Erzeuger
+liefern dafür eine Reihe von Zielgewichten (`SimLevWeights`), die
+`tactical_simulation()` mit der normalen Engine ausführt, also mit Steuern,
+Spreads, Sparplänen und Toleranzbändern. Intern nutzt sie das
+Ereignis-Rebalancing von `simulation()` (`event_col`, `event_weight`); die
+Engine selbst bleibt unverändert.
+
+``` r
+# Regeln: erste zutreffende gewinnt, sonst Rückfall
+w1 <- tactical_rules(dat, list(
+  list(when = signal_sma(dat$aktien, 200, band = 2), weights = c(aktien = 1)),
+  list(when = "inflation < 3", weights = c(anleihen = 1))), default = c(geldmarkt = 1))
+# Momentum-Rotation mit absolutem Filter und Canary-Schutz
+w2 <- tactical_rotation(dat, c("usa", "europa", "em"), top = 2, safe = c("anleihen", "geldmarkt"),
+                        canary = c("em", "anleihen"), type = "13612w")
+# Zielvolatilität, Glidepath und Kern-Satellit
+w3 <- target_volatility(dat, c(aktien = 0.7, anleihen = 0.3), safe = "geldmarkt", target = 10)
+w4 <- glidepath(dat, from = c(aktien = 0.9, anleihen = 0.1), to = c(aktien = 0.4, anleihen = 0.6))
+w5 <- blend_weights(kern = w4, satellit = w2, shares = c(0.8, 0.2))
+res <- tactical_simulation(dat, w5, rebalance = "month", tolerance = 5, lag = 1,
+                           asset_args = list(asset_bonus = c(usa = 30, europa = 30, em = 30)),
+                           tax_mode = "person", dca_mode = TRUE, dca_value = 500, dca_span = 1)
+```
+
+`lag = 1` handelt ein Signal vom Schlusskurs eines Tages am nächsten Tag;
+`lag = 0` entspricht der Konvention vieler Online-Backtester.
+
+### Optimierung und Risikozerlegung
+
+``` r
+portfolio_optimize(dat, c("aktien", "anleihen", "gold"), method = "risk_parity")
+portfolio_optimize(dat, assets, method = "max_sharpe", upper = 0.6, cov = "ledoit_wolf", resample = 200)
+plot(efficient_frontier(dat, assets))
+risk_contributions(dat, c(aktien = 0.6, anleihen = 0.3, gold = 0.1), measure = "cvar")
+w <- rolling_optimization(dat, assets, "min_variance", window = 3, every = "quarter")
+tactical_simulation(dat, w, rebalance = "quarter")      # Optimierung ausserhalb der Stichprobe
+```
+
+Verfahren: Minimum-Varianz, Mean-Variance, maximale Sharpe Ratio, maximale
+Diversifikation (Choueifaty & Coignard 2008), Risikoparität mit
+Risikobudgets (Spinu 2013), Hierarchical Risk Parity (López de Prado 2016),
+minimaler CVaR (Rockafellar & Uryasev 2000), inverse Volatilität und
+Gleichgewichtung; Grenzen je Anlage, Ledoit-Wolf-Schrumpfung und
+Michaud-Resampling über Block-Bootstrap-Stichproben. Die Löser sind ohne
+Zusatzpakete geschrieben (projizierter Gradient mit Beschleunigung,
+gedämpftes Newton-Verfahren) und gegen geschlossene Lösungen getestet.
+`risk_contributions()` zerlegt Volatilität oder CVaR additiv auf die
+Anlagen.
+
+### Anleihen, Geldmarkt und Währungssicherung
+
+``` r
+dat$bund10 <- bond_index_from_yields(dat, "rendite_10j", maturity = 10, coupon_frequency = 1)
+dat$geldmarkt <- money_market_index(dat, "ester", spread = 0.1)
+dat$sp500_eur_h <- currency_hedged_index(dat, "sp500_usd", domestic_rate = "ester", foreign_rate = "sofr")
+```
+
+`bond_index_from_yields()` bildet einen Total-Return-Index konstanter
+Laufzeit aus einer Renditereihe (Kupon plus Neubewertung, wahlweise über
+Duration und Konvexität; Swinkels 2019). `money_market_index()` verzinst
+Act/360, `currency_hedged_index()` addiert die Zinsdifferenz einer
+rollierenden Devisentermin-Absicherung.
+
 ## Ergebnisse auswerten
 
 `simulation()` liefert ein `SimLevResult`. Seine Bestandteile heißen in
@@ -1164,7 +1235,8 @@ Eingaben:
   es bisher nur im R-Paket, ebenso `deep_analysis()`, die
   Sensitivitätsfunktionen, relative Rebalancing-Bänder
   (`balance_thresh_type = "relative"`), Parametersuche mit
-  Überanpassungs-Prüfung, Datenaufbereitung und Abhängigkeitsanalyse.
+  Überanpassungs-Prüfung, Datenaufbereitung, Abhängigkeitsanalyse,
+  taktische Allokation, Optimierung und synthetische Anleihereihen.
 
 Aus dem R-Paket übernommene Eigenheiten:
 

@@ -142,3 +142,30 @@ S3method(print, SimLevTailRegression)
 S3method(plot, SimLevTailRegression)
 S3method(print, SimLevCoVaR)
 S3method(plot, SimLevCoVaR)
+
+# Taktische Allokation
+export(signal_state)
+export(momentum_score)
+export(tactical_rules)
+export(tactical_rotation)
+export(target_volatility)
+export(glidepath)
+export(blend_weights)
+export(tactical_simulation)
+S3method(print, SimLevWeights)
+S3method(plot, SimLevWeights)
+
+# Optimierung und Risiko
+export(portfolio_optimize)
+export(efficient_frontier)
+export(rolling_optimization)
+export(risk_contributions)
+S3method(print, SimLevOptimization)
+S3method(plot, SimLevOptimization)
+S3method(print, SimLevFrontier)
+S3method(plot, SimLevFrontier)
+
+# Anleihen und Geldmarkt
+export(bond_index_from_yields)
+export(money_market_index)
+export(currency_hedged_index)

@@ -1,9 +1,10 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Simulationszustand und Rechenkerne
 #
-# Ports von simulation_core.cpp, fifo_core_RCpp.cpp und tax_core_RCpp.cpp. Die
-# Rechenreihenfolge ist 1:1 übernommen (IEEE-754-Doubles; long double nur
-# dort, wo auch der C++-Code ihn nutzt).
+# Ports von simulation_core.cpp, fifo_core_RCpp.cpp und tax_core_RCpp.cpp
+# (SimLev 0.5.0). Die Rechenreihenfolge ist 1:1 übernommen (IEEE-754-Doubles;
+# long double nur dort, wo auch der C++-Code ihn nutzt). Assets werden über
+# ihren Index (Reihenfolge der Strategie) angesprochen.
 # ─────────────────────────────────────────────────────────────────────────────
 
 "Ein Kauf-Lot (FIFO)."
@@ -28,10 +29,11 @@ struct SellEntry
     holding_exempt::Float64
 end
 
-"Eine Vorabpauschalen-Buchung."
+"Eine Steuerbuchung (Vorabpauschale oder § 23-Steuer)."
 struct TaxEntry
     event_date::Int
-    assessment_date::Int
+    assessment_date::Int          # nur Vorabpauschale (sonst 0)
+    event_type::String            # "Vorabpauschale" bzw. "Private sale tax"
     flat_rate_gross::Float64
     bonus_applied::Float64
     flat_rate_taxable::Float64
@@ -56,15 +58,13 @@ mutable struct Status
     differ::Float64      # historisch: aktuelles PORTFOLIOgewicht
 end
 
+"Signalspalte: Werte als Double (NA = fehlend); `logical` = Spalte war logisch."
 mutable struct Signal
-    kind::Symbol         # :logical, :numeric, :none
+    logical::Bool
     v::Vector{Float64}
 end
 
-@inline sig_truthy(s::Signal, i::Int) = (x = s.v[i]; !isnan(x) && x != 0)
-@inline sig_is_true(s::Signal, i::Int) = s.kind == :logical && s.v[i] == 1.0
-
-struct Market
+mutable struct Market
     asset_day::Vector{Int}
     base_rates::Vector{Float64}
     asset_price::Vector{Float64}
@@ -95,15 +95,13 @@ struct AssetInfo
     start::Int
     tax_regime::String
     bonus::Float64
-    deliverable::Bool
+    deliverable::Any
 end
 
 struct VPPending
-    name::Int
-    tax_debt::Float64
+    asset::Int
     flat_rate::Float64
     bonus::Float64
-    spb_used::Float64
     assessment_date::Int
 end
 
@@ -121,7 +119,10 @@ mutable struct Totals
     cgt_base_taxed_ytd::Float64
     cgt_loss_added_ytd::Float64
     cgt_loss_used_ytd::Float64
-    vp_pending::Vector{VPPending}
+    cgt_pool_start_ytd::Float64
+    vp_pending::Vector{VPPending}                        # leer = nicht vorhanden
+    p23_due::Vector{Pair{Int,Float64}}                    # leer = nicht vorhanden
+    private_sale_net_ytd_by::Vector{Pair{Int,Float64}}    # § 23-Jahressaldo je Asset
 end
 
 struct Sim
@@ -248,16 +249,20 @@ function perform_market_update!(sim::Sim, index::Int)
     return nothing
 end
 
-function batch_market_update!(sim::Sim, start_idx::Int, end_idx::Int)
+function batch_market_update!(sim::Sim, start_idx::Int, end_idx::Int, portfolio::Vector{Float64})
     nd = end_idx - start_idx + 1
     nd <= 0 && return nothing
     n = length(sim.names)
-    portfolio = zeros(nd)
+    length(portfolio) < nd && resize!(portfolio, nd)
+    @inbounds for k in 1:nd
+        portfolio[k] = 0.0
+    end
     @inbounds for a in 1:n
         st = sim.status[a]; rp = sim.report[a]
         count = st.count; money = st.money
         prices = sim.market[a].asset_price
-        for (k, i) in enumerate(start_idx:end_idx)
+        for k in 1:nd
+            i = start_idx + k - 1
             worth = count * prices[i]
             total = worth + money
             rp.worth[i] = worth
@@ -273,7 +278,8 @@ function batch_market_update!(sim::Sim, start_idx::Int, end_idx::Int)
     @inbounds for a in 1:n
         rp = sim.report[a]
         w = 0.0
-        for (k, i) in enumerate(start_idx:end_idx)
+        for k in 1:nd
+            i = start_idx + k - 1
             p = portfolio[k]
             w = p > 0.0 ? rp.total[i] / p : 0.0
             rp.share[i] = w
@@ -338,7 +344,9 @@ function calculate_private_sale_tax(buys::Vector{Lot}, front::Int, trade_count::
         if avail > 0
             sell = cpp_min(avail, units_remaining)
             y, m, d = ymd(b.date)
-            one_year_later = (m == 2 && d == 29 && !is_leap(y + 1)) ? days_from_civil(y + 1, 3, 1) :
+            # Fristende am gleichnamigen Tag des Folgejahres (§§ 187, 188 Abs. 2 BGB);
+            # Kauf am 29.02.: Fristende 28.02. (§ 188 Abs. 3 BGB), ab 01.03. steuerfrei
+            one_year_later = (m == 2 && d == 29 && !is_leap(y + 1)) ? days_from_civil(y + 1, 2, 28) :
                              days_from_civil(y + 1, m, d)
             is_exempt = current_date > one_year_later
             lot_gain = sell * (sell_price - b.price)
@@ -396,6 +404,7 @@ end
 # tax_core_RCpp.cpp
 # ═══════════════════════════════════════════════════════════════════════════
 
+"Vorabpauschale je Lot (`flat_rate_rcpp`): Bezug Jahresanfangskurs, Deckel, Zwölftelung."
 function flat_rate(buys::Vector{Lot}, front::Int, base_rate::Float64, year_start_price::Float64,
                    market_price::Float64, soy::Int, eoy::Int)
     n = length(buys)
@@ -408,18 +417,16 @@ function flat_rate(buys::Vector{Lot}, front::Int, base_rate::Float64, year_start
         rem <= 0 && continue
         vp = 0.0
         if b.date <= eoy
-            if b.date < soy
-                months_factor = 1.0
-                reference_value = rem * year_start_price
-            else
+            months_factor = 1.0
+            if b.date >= soy
                 _, m, _ = ymd(b.date)
                 months_factor = (12.0 - (m - 1)) / 12.0
-                reference_value = rem * b.price
             end
-            base_worth = reference_value * base_rate * 0.7 * months_factor
+            reference_value = rem * year_start_price
+            base_worth = reference_value * base_rate * 0.7
             market_worth = rem * market_price
             growth = cpp_max(0.0, market_worth - reference_value)
-            vp = cpp_max(0.0, cpp_min(base_worth, growth))
+            vp = cpp_max(0.0, cpp_min(base_worth, growth)) * months_factor
         end
         push!(idx, i)
         push!(vps, vp)
@@ -477,7 +484,7 @@ function vp_tax!(flat_rate_value::Float64, bonus::Float64, t::Totals, tax_rate::
     return (tax = tax, spb_used = spb_offset, taxable_amount = taxable_flat_rate)
 end
 
-function _fifo_fast(units::Float64, cu::Vector{Float64}, cc::Vector{Float64}, prices::Vector{Float64})
+@inline function _fifo_fast(units::Float64, cu::Vector{Float64}, cc::Vector{Float64}, prices::Vector{Float64})
     n = length(cu)
     units <= 0 && return 0.0
     units >= cu[n] && return cc[n] / cu[n]
@@ -495,27 +502,46 @@ end
 
 const REGIME_CODE = Dict("none" => 0, "investment_fund" => 1, "capital_gains" => 2, "private_sale" => 3)
 
+"Verkaufsstückzahl für einen Ziel-Nettoerlös (`sell_count_rcpp`)."
 function sell_count(buys::Vector{Lot}, front::Int, target::Float64, trade_price::Float64,
                     total_shares::Float64, fractions::Bool, regime::Int, bonus::Float64,
                     loss_pool::Float64, tax_rate::Float64)
     zero_ = (sell_count = 0.0, fifo_price = 0.0)
     n = length(buys)
     front > n && return zero_
-    units = Float64[]; prices = Float64[]
+    units = Float64[]; prices = Float64[]; vpu = Float64[]
+    any_vp = false
     @inbounds for i in front:n
         b = buys[i]
-        if b.remaining > 0
-            push!(units, b.remaining); push!(prices, b.price)
+        rem = b.remaining
+        if rem > 0
+            push!(units, rem); push!(prices, b.price)
+            lot_vp = b.vp
+            v = (regime == 1 && lot_vp > 0) ? lot_vp / rem : 0.0
+            v > 0 && (any_vp = true)
+            push!(vpu, v)
         end
     end
     isempty(units) && return zero_
-    cu = similar(units); cc = similar(units)
-    su = _LD0; sc = _LD0
-    @inbounds for k in eachindex(units)
-        su = su + F80(units[k])
-        cu[k] = Float64(su)
-        sc = sc + F80(units[k] * prices[k])
-        cc[k] = Float64(sc)
+    nl = length(units)
+    cu = similar(units); cc = similar(units); cv = similar(units)
+    su = _LD0; sc = _LD0; sv = _LD0
+    @inbounds for k in 1:nl
+        su = su + F80(units[k]); cu[k] = Float64(su)
+        sc = sc + F80(units[k] * prices[k]); cc[k] = Float64(sc)
+        sv = sv + F80(units[k] * vpu[k]); cv[k] = Float64(sv)
+    end
+    function fifo_vp(sell::Float64)
+        (!any_vp || sell <= 0) && return 0.0
+        sell >= cu[nl] && return cv[nl]
+        lot = 0
+        while lot < nl && cu[lot+1] < sell
+            lot += 1
+        end
+        lot >= nl && (lot = nl - 1)
+        prev_u = lot > 0 ? cu[lot] : 0.0
+        prev_v = lot > 0 ? cv[lot] : 0.0
+        return prev_v + (sell - prev_u) * vpu[lot+1]
     end
     function objective(sell::Float64)
         sell <= 0 && return -target
@@ -524,7 +550,7 @@ function sell_count(buys::Vector{Lot}, front::Int, target::Float64, trade_price:
         gain = (trade_price - fp) * sell
         tax = 0.0
         if regime == 1
-            adj = gain * (1.0 - bonus)
+            adj = (gain - fifo_vp(sell)) * (1.0 - bonus)
             tax = cpp_max(adj - loss_pool, 0.0) * tax_rate
         elseif regime == 2
             tax = cpp_max(gain - loss_pool, 0.0) * tax_rate

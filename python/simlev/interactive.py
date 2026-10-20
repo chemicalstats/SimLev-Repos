@@ -16,7 +16,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from ._dates import fmt_date
-from ._rnum import r_cumsum
+from ._rnum import NA_REAL, r_as_character, r_cummax, r_sprintf
 
 __all__ = ["plot_interactive"]
 
@@ -42,33 +42,43 @@ def _thin_index(n: int, max_points: int) -> np.ndarray:
 
 
 def _build_data(x, max_points: int) -> dict:
+    """``.build_dashboard_data``: Daten je Serie, gleichmäßig auf ``max_points`` ausgedünnt."""
+    from .dashboard import _dashboard_returns, _get
     dates = np.asarray(x.dates).astype("datetime64[D]").astype(np.int64)
     n = dates.size
     keep = _thin_index(n, max_points) - 1
-    assets = list(x.report.keys())
-    totals = [np.asarray(x.report[a]["total"], dtype=float)[keep] for a in assets]
-    tot_sum = totals[0].copy()
-    for t in totals[1:]:
-        tot_sum = tot_sum + t
-    flows = np.asarray(x.report[assets[0]]["flows"], dtype=float).copy()
-    for a in assets[1:]:
-        flows = flows + np.asarray(x.report[a]["flows"], dtype=float)
-    invested = r_cumsum(flows)[keep]
-    dd = np.asarray(x.drawdowns, dtype=float)[keep]
+    report = _get(x, "report") or {}
+    assets = list(report.keys())
+    totals = [np.asarray(report[a]["total"], dtype=float)[keep] for a in assets]
+    tot_sum = None
+    for t in totals:
+        tot_sum = t.copy() if tot_sum is None else tot_sum + t
+    fi = _dashboard_returns(x)                 # Sparplan-Kennung, Einzahlungssumme (Start + Sparraten)
+    invested = np.asarray(fi["invested"], dtype=float)[keep]
+    ddx = _get(x, "drawdowns")
+    if ddx is not None:
+        dd = np.asarray(ddx, dtype=float)[keep]
+    else:
+        w = np.asarray(x.worth, dtype=float)
+        cm = r_cummax(w)
+        dd = (-(cm - w) / cm * 0 + (w / cm - 1))[keep]
     weights = []
     for t in totals:
         with np.errstate(divide="ignore", invalid="ignore"):
             weights.append(np.where(tot_sum > 0, 100 * t / tot_sum, 0.0))
+    fx = _get(x, "filled")
     return {
         "dates": [fmt_date(int(z)) for z in dates[keep]],
-        "filled": np.asarray(x.filled, dtype=bool)[keep],
+        "filled": np.asarray(fx, dtype=bool)[keep] if fx is not None else np.zeros(0, dtype=bool),
         "assets": assets,
         "worth": np.asarray(x.worth, dtype=float)[keep],
         "invested": invested,
         "totals": totals,
         "weights": weights,
         "drawdown": 100 * dd,
-        "result": x,
+        "stats": _get(x, "statistics"),
+        "cagr": _get(x, "cagr"),
+        "external_flows": fi["external_flows"],
     }
 
 
@@ -93,7 +103,7 @@ def _plotly_figure(d: dict, panels: Sequence[str]):
             fig.add_trace(go.Scatter(x=d["dates"], y=t, name=a, mode="lines"), row=r, col=1)
         fig.add_trace(go.Scatter(x=d["dates"], y=d["worth"], name="Gesamt", mode="lines", line={"width": 3}),
                       row=r, col=1)
-        fig.add_trace(go.Scatter(x=d["dates"], y=d["invested"], name="Einzahlungen", mode="lines",
+        fig.add_trace(go.Scatter(x=d["dates"], y=d["invested"], name="Einzahlungen (inkl. Start, brutto)", mode="lines",
                                  line={"dash": "dot"}), row=r, col=1)
         fig.update_yaxes(title_text="EUR", row=r, col=1)
         r += 1
@@ -110,47 +120,67 @@ def _plotly_figure(d: dict, panels: Sequence[str]):
 def _js_panel(pid: str, title: str, series: list[dict], unit: str, fill_first: bool = False) -> str:
     ser = []
     for s in series:
-        w = s.get("width", 1.6)
-        ws = ("%d" % w) if float(w).is_integer() else repr(float(w))
+        ws = r_as_character(float(s.get("width", 1.6)))
         ser.append('{name:"%s",col:"%s",w:%s,dash:%s,v:%s}' % (
             s["name"], s["col"], ws, "true" if s.get("dash") else "false", _num2js(s["vals"])))
     return 'makePanel("%s","%s",[%s],"%s",%s);' % (pid, title, ",".join(ser), unit,
                                                   "true" if fill_first else "false")
 
 
-def _stat_line(x) -> str:
-    def p(fmt: str, v: Any) -> str:
-        return "NA" if v is None or (isinstance(v, float) and math.isnan(v)) else fmt % v
-    s = x.statistics
-    return "CAGR %s%% &middot; Sharpe %s &middot; Max. Drawdown %s%%" % (
-        p("%.2f", 100 * x.cagr if not math.isnan(x.cagr) else math.nan),
-        p("%.2f", s.get("sharpe", math.nan)),
-        p("%.1f", 100 * s.get("max_drawdown", math.nan)))
+def _stat_line(d: dict) -> str:
+    """Kopfzeile mit CAGR, Sharpe und Max. Drawdown; mit Sparplan geld- bzw. zeitgewichtet beschriftet."""
+    st = d["stats"]
+    if st is None:
+        return ""
+
+    def num(v):
+        return NA_REAL if v is None else v    # %||% NA
+    fmt = ("CAGR (geldgewichtet) %.2f%% &middot; Sharpe %.2f &middot; Max. Drawdown (zeitgewichtet) %.1f%%"
+           if d["external_flows"] is True else "CAGR %.2f%% &middot; Sharpe %.2f &middot; Max. Drawdown %.1f%%")
+    return r_sprintf(fmt, 100 * num(d["cagr"]), num(st.get("sharpe")), 100 * num(st.get("max_drawdown")))
 
 
 def _build_html(d: dict, panels: Sequence[str]) -> str:
     series_perf = [{"name": a, "col": _PAL[i % len(_PAL)], "vals": d["totals"][i], "width": 1.4}
                    for i, a in enumerate(d["assets"])]
     series_perf.append({"name": "Gesamt", "col": "#111111", "vals": d["worth"], "width": 2.4})
-    series_perf.append({"name": "Einzahlungen", "col": "#888888", "vals": d["invested"], "width": 1.4,
+    series_perf.append({"name": "Einzahlungen (inkl. Start, brutto)", "col": "#888888", "vals": d["invested"], "width": 1.4,
                         "dash": True})
     series_w = [{"name": a, "col": _PAL[i % len(_PAL)], "vals": d["weights"][i], "width": 1.6}
                 for i, a in enumerate(d["assets"])]
     calls, divs = [], []
     if "performance" in panels:
         divs.append('<div class="panel" id="performance"></div>')
-        calls.append(_js_panel("performance", "Portfolio Performance", series_perf, " EUR"))
+        calls.append(_js_panel("performance", "Wertentwicklung des Depots", series_perf, " EUR"))
     if "drawdown" in panels:
         divs.append('<div class="panel" id="drawdown"></div>')
-        calls.append(_js_panel("drawdown", "Drawdown",
+        calls.append(_js_panel("drawdown", "Drawdown (zeitgewichtet)" if d["external_flows"] is True else "Drawdown",
                                [{"name": "Drawdown", "col": "#C0392B", "vals": d["drawdown"], "width": 1.6}],
                                " %", fill_first=True))
     if "weights" in panels:
         divs.append('<div class="panel" id="weights"></div>')
         calls.append(_js_panel("weights", "Asset-Gewichte", series_w, " %"))
-    stat_line = _stat_line(d["result"])
+    stat_line = _stat_line(d)
     return (_HTML_HEAD + stat_line + _HTML_SUB + "\n".join(divs) + _HTML_MID1 + _chr2js(d["dates"]) + ";\nvar FILLED="
             + _num2js(d["filled"].astype(float)) + _HTML_SCRIPT + "\n".join(calls) + _HTML_TAIL)
+
+
+def _match_arg_several(arg, choices: tuple) -> list[str]:
+    """``match.arg(arg, choices, several.ok = TRUE)``: nicht passende Werte werden still verworfen."""
+    from .config import _pmatch
+    if arg is None:
+        return [choices[0]]
+    vals = [arg] if isinstance(arg, str) else list(arg) if isinstance(arg, (list, tuple, np.ndarray)) else None
+    if vals is None or not all(isinstance(v, str) for v in vals):
+        raise ValueError("'arg' must be NULL or a character vector")
+    if not vals:
+        raise ValueError("'arg' must be of length >= 1")
+    idx = [_pmatch(v, choices) for v in vals]
+    if all(i is None for i in idx):
+        chs = [c for c in dict.fromkeys(choices) if c]
+        raise ValueError(("'arg' should be %s" if len(chs) == 1 else "'arg' should be one of %s")
+                         % ", ".join("“%s”" % c for c in chs))
+    return [choices[i] for i in idx if i is not None]
 
 
 def plot_interactive(x, file: str | None = None, panels: Sequence[str] = _PANELS, max_points: int = 6000,
@@ -163,9 +193,7 @@ def plot_interactive(x, file: str | None = None, panels: Sequence[str] = _PANELS
     """
     from .config import _match_arg
     engine = _match_arg(engine, ("auto", "plotly", "html"), "engine")
-    if isinstance(panels, str):
-        panels = [panels]
-    panels = [_match_arg(p, _PANELS, "panels") for p in panels]
+    panels = _match_arg_several(panels, _PANELS)
     if file is None:
         fd, file = tempfile.mkstemp(prefix="simlev_dashboard_", suffix=".html")
         os.close(fd)

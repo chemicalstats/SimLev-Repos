@@ -1,145 +1,163 @@
-"""Tests für asset_config und Strategie-Funktionen (Port von test-asset_config.R / test-strategy.R / test-tax.R)."""
-import warnings
+"""Port von test-asset_config.R und test-strategy.R (SimLev 0.5.0)."""
+import datetime as dt
 
-import numpy as np
 import pandas as pd
 import pytest
 
-from simlev import (AssetConfig, Strategy, add_asset, as_list, asset_config, create_strategy, migrate_strategy,
-                    remove_asset, update_asset, validate_strategy)
+from simlev import (AssetConfig, Strategy, add_asset, as_list, asset_config, compute_rebal_trigger, create_strategy,
+                    migrate_strategy, remove_asset, update_asset, validate_strategy)
 
 
+# ── asset_config ──────────────────────────────────────────────────────────
 def test_etf_configuration():
     cfg = asset_config(asset_class="etf", asset_share=0.7, asset_bonus=30)
     assert isinstance(cfg, AssetConfig)
-    assert cfg.asset_class == "etf"
-    assert cfg.asset_share == 0.7
-    assert cfg.asset_bonus == 30
+    assert cfg.asset_class == "etf" and cfg["asset_share"] == 0.7 and cfg.asset_bonus == 30
     assert cfg.tax_regime == "investment_fund"
     assert cfg.deliverable is False
+    assert list(cfg.keys()) == ["asset_class", "action_type", "asset_share", "asset_spread", "asset_bonus",
+                                "deliverable", "asset_start", "tax_regime", "signal_buy", "signal_sell"]
 
 
-@pytest.mark.parametrize("cls,deliv,regime", [
-    ("etf", False, "investment_fund"),
-    ("etn", True, "private_sale"),
-    ("etn", False, "capital_gains"),
-    ("etc", True, "private_sale"),
-    ("etc", False, "capital_gains"),
-    ("certificate", False, "capital_gains"),
-])
-def test_tax_regime_inference(cls, deliv, regime):
-    assert asset_config(asset_class=cls, deliverable=deliv).tax_regime == regime
-
-
-def test_tax_regime_override():
-    assert asset_config(asset_class="etf", tax_regime="capital_gains").tax_regime == "capital_gains"
+def test_deliverable_regimes():
+    assert asset_config(asset_class="etc", deliverable=True).tax_regime == "private_sale"
+    assert asset_config(asset_class="etn", deliverable=False).tax_regime == "capital_gains"
+    assert asset_config(asset_class="certificate").tax_regime == "capital_gains"
 
 
 @pytest.mark.parametrize("old,deliv,regime", [("etn_deliverable", True, "private_sale"),
                                               ("etn_standard", False, "capital_gains")])
 def test_backward_compatibility(old, deliv, regime):
-    with pytest.warns(UserWarning, match="deprecated"):
+    with pytest.warns(UserWarning, match='asset_class = "%s" ist veraltet' % old):
         cfg = asset_config(asset_class=old)
-    assert cfg.asset_class == "etn"
-    assert cfg.deliverable is deliv
-    assert cfg.tax_regime == regime
+    assert cfg.asset_class == "etn" and cfg.deliverable is deliv and cfg.tax_regime == regime
 
 
-@pytest.mark.parametrize("share", [0, 1.5, -0.1])
-def test_asset_share_validation(share):
-    with pytest.raises(ValueError, match="between 0"):
-        asset_config(asset_share=share)
+def test_asset_share_validation():
+    with pytest.raises(ValueError, match=r"asset_share muss ein Anteil größer 0 und höchstens 1 sein .*nicht 0\."):
+        asset_config(asset_share=0)
+    with pytest.raises(ValueError, match=r"nicht 1\.5; für 1\.5 % asset_share = 0\.015 angeben"):
+        asset_config(asset_share=1.5)
+    with pytest.raises(ValueError, match=r"nicht -0\.1\."):
+        asset_config(asset_share=-0.1)
+    with pytest.raises(ValueError, match=r'asset_share muss eine einzelne Zahl sein, nicht "0.5"'):
+        asset_config(asset_share="0.5")
 
 
-def test_signal_requires_columns():
-    with pytest.raises(ValueError, match="signal_buy and signal_sell"):
+def test_other_validations():
+    with pytest.raises(ValueError, match="müssen signal_buy und signal_sell angegeben werden"):
         asset_config(action_type="signal")
     cfg = asset_config(action_type="signal", signal_buy="buy_col", signal_sell="sell_col")
-    assert cfg.signal_buy == "buy_col" and cfg.signal_sell == "sell_col"
-
-
-def test_invalid_tax_regime():
-    with pytest.raises(ValueError, match="Invalid tax_regime"):
+    assert (cfg.signal_buy, cfg.signal_sell) == ("buy_col", "sell_col")
+    with pytest.raises(ValueError, match='tax_regime = "invalid" ist ungültig'):
         asset_config(tax_regime="invalid")
+    with pytest.raises(ValueError, match="asset_spread muss >= 0 sein"):
+        asset_config(asset_spread=-1)
+    with pytest.raises(ValueError, match="asset_bonus muss zwischen 0 und 100 liegen"):
+        asset_config(asset_bonus=101)
+    with pytest.warns(UserWarning, match="asset_bonus = 0.3 wird als 0.3 % Teilfreistellung gelesen"):
+        asset_config(asset_bonus=0.3)
+    with pytest.raises(ValueError, match="'arg' should be one of “etf”, “etn”"):
+        asset_config("xyz")
+    with pytest.raises(ValueError, match='asset_start = "abc" ist kein Datum'):
+        asset_config(asset_start="abc")
+    assert asset_config(asset_start="2016-07-15").asset_start == dt.date(2016, 7, 15)
 
 
-def test_partial_matching_like_r():
-    assert asset_config("cert").asset_class == "certificate"
-    assert asset_config(action_type="sig", signal_buy="a", signal_sell="b").action_type == "signal"
+def test_print_asset_config():
+    out = str(asset_config(asset_class="etf", asset_bonus=30))
+    assert out == ("Asset-Konfiguration\n-------------------\n  Klasse:       etf\n  Aktion:       bnh\n"
+                   "  Anteil:       100.0%\n  Steuerregime: investment_fund\n  Teilfrei.:    30%")
+    assert str(asset_config("etc", deliverable=True)).endswith("  Lieferbar:    TRUE")
 
 
-def test_print_asset_config(capsys):
-    asset_config(asset_class="etf", asset_bonus=30).print()
-    out = capsys.readouterr().out
-    assert "Asset Configuration" in out and "etf" in out and "investment_fund" in out
-
-
-def _two_asset():
-    return create_strategy(SPY=asset_config("etf", "bnh", 0.6, 0.1, 30),
-                           BND=asset_config("etf", "bnh", 0.4, 0.05, 0))
-
-
+# ── Strategie ─────────────────────────────────────────────────────────────
 def test_create_strategy():
-    s = _two_asset()
-    assert isinstance(s, Strategy)
-    assert list(s) == ["SPY", "BND"]
+    s = create_strategy(ETF=asset_config(asset_class="etf"), Gold=asset_config(asset_class="etc"))
+    assert isinstance(s, Strategy) and list(s) == ["ETF", "Gold"]
+    s2 = create_strategy(assets={"ETF": {"asset_class": "etf", "asset_share": 0.7},
+                                 "Bond": {"asset_class": "etf", "asset_share": 0.3, "asset_bonus": 0}})
+    assert isinstance(s2.ETF, AssetConfig) and isinstance(s2["Bond"], AssetConfig)
 
 
-def test_create_strategy_assets_param_and_plain_dicts():
-    s = create_strategy(assets={"A": {"asset_class": "etf", "asset_share": 1.0}})
-    assert isinstance(s["A"], AssetConfig)
-    with pytest.raises(ValueError):
-        create_strategy(assets={"A": asset_config()}, B=asset_config())
-
-
-def test_create_strategy_rejects_empty():
-    with pytest.raises(ValueError, match="At least one"):
+def test_create_strategy_errors():
+    with pytest.raises(ValueError, match="mindestens eine Asset-Konfiguration"):
         create_strategy()
+    with pytest.raises(ValueError, match="alle Assets müssen benannt sein"):
+        create_strategy(asset_config())
+    with pytest.raises(ValueError, match="nicht beides"):
+        create_strategy(A=asset_config(), assets={"B": asset_config()})
+    with pytest.raises(ValueError, match="Asset 'A' muss ein asset_config\\(\\)-Objekt oder eine Liste sein, nicht numeric"):
+        create_strategy(A=5)
 
 
-def test_validate_strategy_columns():
-    s = _two_asset()
-    df = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=3), "SPY": [1, 2, 3], "BND": [1, 2, 3]})
-    assert validate_strategy(s, df)
-    with pytest.raises(ValueError, match="Assets not found in data: BND"):
-        validate_strategy(s, df.drop(columns="BND"))
-    sig = create_strategy(SPY=asset_config("etf", "signal", signal_buy="b", signal_sell="s"))
-    with pytest.raises(ValueError, match="Signal column 'b' not found"):
-        validate_strategy(sig, df)
+def test_validate_strategy():
+    s = create_strategy(ETF=asset_config(asset_class="etf"))
+    assert validate_strategy(s, pd.DataFrame({"date": [pd.Timestamp("2024-01-01")], "ETF": [100]}))
+    with pytest.raises(ValueError, match=r"Kursspalte\(n\) 'ETF' fehlen in data"):
+        validate_strategy(s, pd.DataFrame({"date": [pd.Timestamp("2024-01-01")], "Other": [100]}))
+    s2 = create_strategy(ETF=asset_config(action_type="signal", signal_buy="buy_signal", signal_sell="sell_signal"))
+    assert validate_strategy(s2, pd.DataFrame({"ETF": [100], "buy_signal": [True], "sell_signal": [False]}))
+    with pytest.raises(ValueError, match="signal_buy-Spalte 'buy_signal' fehlt in data"):
+        validate_strategy(s2, pd.DataFrame({"ETF": [100]}))
+    with pytest.raises(ValueError, match='strategy muss ein Objekt der Klasse "strategy"'):
+        validate_strategy({})
 
 
 def test_add_update_remove():
-    s = _two_asset()
-    s2 = add_asset(s, "GOLD", asset_config("etc", asset_share=0.1, deliverable=True))
-    assert "GOLD" in s2 and "GOLD" not in s
-    s3 = update_asset(s2, "SPY", asset_share=0.5)
-    assert s3["SPY"].asset_share == 0.5
-    with pytest.warns(UserWarning, match="Unknown parameter"):
-        update_asset(s2, "SPY", nonsense=1)
-    with pytest.raises(ValueError, match="not found"):
-        update_asset(s2, "XXX", asset_share=0.5)
-    s4 = remove_asset(s3, "GOLD")
-    assert list(s4) == ["SPY", "BND"]
-    with pytest.warns(UserWarning, match="empty"):
-        remove_asset(create_strategy(A=asset_config()), "A")
+    s = create_strategy(ETF=asset_config(asset_share=0.5))
+    s = add_asset(s, "Gold", asset_config(asset_class="etc"))
+    assert list(s) == ["ETF", "Gold"]
+    s = update_asset(s, "ETF", asset_share=0.8)
+    assert s.ETF.asset_share == 0.8
+    with pytest.raises(ValueError, match="Asset 'Unknown' ist nicht in der Strategie"):
+        update_asset(s, "Unknown", asset_share=0.5)
+    with pytest.warns(UserWarning, match="unbekannter Parameter 'nonsense' wird ignoriert"):
+        update_asset(s, "ETF", nonsense=1)
+    s = remove_asset(s, "Gold")
+    assert list(s) == ["ETF"]
+    with pytest.warns(UserWarning, match="keine Assets mehr"):
+        remove_asset(s, "ETF")
+
+
+def test_update_asset_rederives_regime():
+    # R1-25: abgeleitetes Steuerregime wird nach Änderung von deliverable neu abgeleitet
+    s = create_strategy(G=asset_config("etc", deliverable=True))
+    assert update_asset(s, "G", deliverable=False).G.tax_regime == "capital_gains"
+    s2 = create_strategy(G=asset_config("etc", deliverable=True, tax_regime="investment_fund"))
+    assert update_asset(s2, "G", deliverable=False).G.tax_regime == "investment_fund"
 
 
 def test_migrate_strategy(capsys):
-    old = {"G": {"asset_class": "etn_deliverable", "asset_share": 1.0}}
-    new = migrate_strategy(old)
-    assert new["G"].asset_class == "etn" and new["G"].deliverable is True
-    assert "Migrating G" in capsys.readouterr().out
+    old = {"Gold": {"asset_class": "etn_deliverable", "action_type": "bnh", "asset_share": 1.0, "asset_spread": 0.1,
+                    "asset_bonus": 0}}
+    new = migrate_strategy(old, verbose=False)
+    assert new.Gold.asset_class == "etn" and new.Gold.deliverable is True and new.Gold.tax_regime == "private_sale"
+    migrate_strategy(old)
+    assert "migrate_strategy: Gold: etn_deliverable -> etn mit deliverable = TRUE" in capsys.readouterr().err
 
 
 def test_print_and_summary(capsys):
-    s = _two_asset()
-    s.print()
+    s = create_strategy(ETF=asset_config(asset_share=0.7), Gold=asset_config(asset_share=0.3, asset_class="etc"))
+    assert str(s) == ("Anlagestrategie (2 Assets)\n================================\n\nETF:\n"
+                      "  Klasse: etf | Anteil: 70% | Steuer: investment_fund\nGold:\n"
+                      "  Klasse: etc | Anteil: 30% | Steuer: capital_gains")
     s.summary()
     out = capsys.readouterr().out
-    assert "Investment Strategy (2 assets)" in out
-    assert "Total allocation: 100.0%" in out
+    assert "Strategie-Übersicht: 2 Assets" in out and "Gesamtgewicht: 100.0%" in out
+    assert "  investment_fund: 1 Asset" in out
+    assert as_list(s) == {"ETF": dict(s.ETF), "Gold": dict(s.Gold)}
 
 
-def test_as_list():
-    lst = as_list(_two_asset())
-    assert type(lst) is dict and type(lst["SPY"]) is dict
+# ── compute_rebal_trigger ─────────────────────────────────────────────────
+def test_trigger_first_observation_reference():
+    # R1-21: Referenz = erster nicht fehlender Wert, NA löst nicht aus
+    d = pd.DataFrame({"lev": [float("nan"), float("nan"), 2, 2.2, 2.5, 2.4, float("nan"), 3]})
+    assert list(compute_rebal_trigger(d, "abs_leverage", 15, lev_col="lev").rebal_trigger) == \
+        [False, False, False, True, True, False, False, True]
+    assert list(compute_rebal_trigger(d, "rel_leverage", 10, lev_col="lev").rebal_trigger) == \
+        [False, False, False, True, True, False, False, True]
+    with pytest.raises(ValueError, match="Spalte 'zz' fehlt"):
+        compute_rebal_trigger(d, "vol_band", vol_col="zz")
+    with pytest.raises(ValueError, match="benötigt eine nicht-leere Liste 'triggers'"):
+        compute_rebal_trigger(d, "combined")

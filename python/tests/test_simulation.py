@@ -153,7 +153,7 @@ def test_dca_without_days_and_rebalancing_sells():
                        "B": 100 * np.cumprod(1 + rng.normal(-2e-4, 0.004, 730))})
     s = create_strategy(A=asset_config("etf", "bnh", 0.5, 0, 30), B=asset_config("etf", "bnh", 0.5, 0, 30))
     r2 = simulation(d2, s, balance_mode=True, balance_span=1, balance_unit="month")
-    assert sum(r2.sells.values()) > 0
+    assert r2.sells.sum() > 0
 
 
 def test_event_col_runs():
@@ -308,11 +308,11 @@ def test_vp_offset_against_loss_pot():
             dl["buyL"] = False
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            r = simulation(dl, s, tax_mode="person", tax_rate=25, base_rate_flex=True, base_rate_data="base_rate",
+            r = simulation(dl, s, start_value=10000, tax_mode="person", tax_rate=25, base_rate_flex=True, base_rate_data="base_rate",
                            use_sparer_pauschbetrag=False, details=True)
         out = buf.getvalue()
-        paid = sum(float(x) for x in re.findall(r"Paying Vorabpauschale of ([0-9.]+) EUR", out))
-        paid += sum(float(x) for x in re.findall(r"pay remaining ([0-9.]+) EUR", out))
+        paid = sum(float(x) for x in re.findall(r"Zahlung Vorabpauschale ([0-9.]+) EUR", out))
+        paid += sum(float(x) for x in re.findall(r"Anteile verkauft für den Rest von ([0-9.]+) EUR", out))
         return r, paid
 
     ra, pa = run(False)
@@ -369,6 +369,54 @@ def test_print_and_summary(capsys):
     r = simulation(make_data(400), legacy_strategy(), tax_mode="person", liquidate=True)
     r.print()
     res = r.summary()
+    print(res)
     out = capsys.readouterr().out
-    assert "SimLev Simulation Results" in out and "SimLev Summary" in out
-    assert res["n_days"] == 400
+    assert "SimLev Simulationsergebnisse" in out and "SimLev Zusammenfassung" in out
+    assert res["n_days"] == 400 and res.n_days == 400
+
+
+# ── Nachgetragen aus test-simulation.R ─────────────────────────────────────
+def test_liquidation_runs():
+    r = quiet(simulation, make_data(), legacy_strategy(), start_value=10000, liquidate=True)
+    assert len(r.worth) == 100
+
+
+def test_skewness_kurtosis_numeric():
+    x = np.random.default_rng(1).normal(size=100)
+    for f in (simlev.engine.calculate_skewness, simlev.engine.calculate_kurtosis):
+        v = f(x)
+        assert isinstance(v, float) and not math.isnan(v)
+
+
+def test_trading_day_annualisation_after_locf():
+    rng = np.random.default_rng(99)
+    wd = weekdays("2021-01-04", "2021-12-31")
+    gapped = pd.DataFrame({"date": wd, "ETF": 100 * np.cumprod(1 + rng.normal(4e-4, 0.011, len(wd)))})
+    full_d = pd.date_range("2021-01-04", "2021-12-31")
+    full = pd.DataFrame({"date": full_d, "ETF": 100 * np.cumprod(1 + rng.normal(4e-4, 0.011, len(full_d)))})
+    assert math.isfinite(quiet(simulation, gapped, legacy_strategy(), start_value=10000).statistics["sharpe"])
+    assert math.isfinite(quiet(simulation, full, legacy_strategy(), start_value=10000).statistics["sharpe"])
+
+
+def test_liquidate_keeps_vp_in_earlier_years():
+    rng = np.random.default_rng(9)
+    wd = weekdays("2022-01-01", "2023-06-30")
+    d = pd.DataFrame({"date": wd, "ETF": 100 * np.cumprod(1 + rng.normal(8e-4, 0.008, len(wd))), "base_rate": 2.55})
+    s = create_strategy(ETF=asset_config("etf", "bnh", asset_share=1, asset_spread=0, asset_bonus=30))
+    r = quiet(simulation, d, s, start_value=10000, tax_mode="person", tax_rate=26.375, base_rate_flex=True,
+              base_rate_data="base_rate", use_sparer_pauschbetrag=False, liquidate=True)
+    px = d.set_index("date").ETF.reindex(pd.DatetimeIndex(r.dates)).to_numpy()
+    cnt = r.report["ETF"]["worth"] / px
+    assert cnt[idx(r, "2022-12-30")] > cnt[idx(r, "2023-01-02")]
+
+
+def test_balance_thresh_in_percent():
+    rng = np.random.default_rng(3)
+    n = 730
+    data = pd.DataFrame({"date": days("2021-01-01", n), "A": 100 * np.cumprod(1 + rng.normal(8e-4, 0.012, n)),
+                         "B": 100 * np.cumprod(1 + rng.normal(-2e-4, 0.004, n))})
+    st = create_strategy(A=asset_config("etf", "bnh", asset_share=0.5, asset_spread=0, asset_bonus=30),
+                         B=asset_config("etf", "bnh", asset_share=0.5, asset_spread=0, asset_bonus=30))
+    kw = dict(start_value=10000, balance_mode=True, balance_span=1, balance_unit="month")
+    assert simulation(data, st, balance_thresh=5, **kw).sells.sum() > 0
+    assert simulation(data, st, balance_thresh=90, **kw).sells.sum() == 0

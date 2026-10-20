@@ -249,8 +249,10 @@ def calculate_private_sale_tax(buys: list, front_index: int, trade_count: float,
             buy_days = int(b["date"])
             buy_price = b["price"]
             y, m, d = ymd(buy_days)
+            # T-3: Fristende am gleichnamigen Tag des Folgejahres (§§ 187, 188 Abs. 2 BGB);
+            # Kauf am 29.02.: Fristende 28.02. (§ 188 Abs. 3 BGB), ab 01.03. steuerfrei
             if m == 2 and d == 29 and not is_leap(y + 1):
-                one_year_later = days_from_civil(y + 1, 3, 1)
+                one_year_later = days_from_civil(y + 1, 2, 28)
             else:
                 one_year_later = days_from_civil(y + 1, m, d)
             is_exempt = current_date > one_year_later
@@ -323,6 +325,7 @@ def update_fifo_front(buys: list, front_index: int) -> int:
 
 def flat_rate(buys: list, front_index: int, base_rate: float, year_start_price: float,
               market_price: float, soy_days: int, eoy_days: int) -> dict:
+    """Vorabpauschale je Lot (``flat_rate_rcpp``): Bezug Jahresanfangskurs, Deckel, Zwölftelung."""
     n = len(buys)
     empty = {"total_vp": 0.0, "lot_indices": [], "lot_vps": []}
     if front_index > n:
@@ -339,17 +342,15 @@ def flat_rate(buys: list, front_index: int, base_rate: float, year_start_price: 
         buy_days = int(b["date"])
         vp = 0.0
         if buy_days <= eoy_days:
-            if buy_days < soy_days:
-                months_factor = 1.0
-                reference_value = rem * year_start_price
-            else:
+            months_factor = 1.0
+            if buy_days >= soy_days:
                 _, m, _ = ymd(buy_days)
                 months_factor = (12.0 - (m - 1)) / 12.0
-                reference_value = rem * b["price"]
-            base_worth = reference_value * base_rate * 0.7 * months_factor
+            reference_value = rem * year_start_price
+            base_worth = reference_value * base_rate * 0.7
             market_worth = rem * market_price
             growth = _max(0.0, market_worth - reference_value)
-            vp = _max(0.0, _min(base_worth, growth))
+            vp = _max(0.0, _min(base_worth, growth)) * months_factor
         idx.append(i)
         vps.append(vp)
     total = LD(0)
@@ -427,12 +428,15 @@ def _fifo_fast(units: float, cu: list, cc: list, prices: list) -> float:
 def sell_count(buys: list, front_index: int, target: float, trade_price: float,
                total_shares: float, fractions: bool, regime: int, bonus: float,
                loss_pool: float, tax_rate: float) -> dict:
+    """Verkaufsstückzahl für einen Ziel-Nettoerlös (``sell_count_rcpp``)."""
     zero = {"sell_count": 0.0, "fifo_price": 0.0}
     n = len(buys)
     if front_index > n:
         return zero
     units: list[float] = []
     prices: list[float] = []
+    vpu: list[float] = []
+    any_vp = False
     for i in range(front_index, n + 1):
         b = buys[i - 1]
         if not b:
@@ -441,17 +445,41 @@ def sell_count(buys: list, front_index: int, target: float, trade_price: float,
         if rem > 0:
             units.append(rem)
             prices.append(b["price"])
+            lot_vp = b.get("vp", 0.0)
+            v = lot_vp / rem if (regime == 1 and lot_vp > 0) else 0.0
+            if v > 0:
+                any_vp = True
+            vpu.append(v)
     if not units:
         return zero
+    nl = len(units)
     cu: list[float] = []
     cc: list[float] = []
+    cv: list[float] = []
     su = LD(0)
     sc = LD(0)
-    for u, p in zip(units, prices):
+    sv = LD(0)
+    for u, p, v in zip(units, prices, vpu):
         su += LD(u)
         cu.append(float(su))
         sc += LD(u * p)
         cc.append(float(sc))
+        sv += LD(u * v)
+        cv.append(float(sv))
+
+    def fifo_vp(sell: float) -> float:
+        if not any_vp or sell <= 0:
+            return 0.0
+        if sell >= cu[nl - 1]:
+            return cv[nl - 1]
+        lot = 0
+        while lot < nl and cu[lot] < sell:
+            lot += 1
+        if lot >= nl:
+            lot = nl - 1
+        prev_u = cu[lot - 1] if lot > 0 else 0.0
+        prev_v = cv[lot - 1] if lot > 0 else 0.0
+        return prev_v + (sell - prev_u) * vpu[lot]
 
     def objective(sell: float) -> float:
         if sell <= 0:
@@ -462,7 +490,7 @@ def sell_count(buys: list, front_index: int, target: float, trade_price: float,
         gain = (trade_price - fp) * sell
         tax = 0.0
         if regime == 1:
-            adj = gain * (1.0 - bonus)
+            adj = (gain - fifo_vp(sell)) * (1.0 - bonus)
             tax = _max(adj - loss_pool, 0.0) * tax_rate
         elif regime == 2:
             tax = _max(gain - loss_pool, 0.0) * tax_rate

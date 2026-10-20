@@ -21,22 +21,21 @@ Günstigerprüfung werden Tag für Tag mitgeführt. Ein Backtest zeigt so nicht
 nur das Ergebnis *vor* Steuern, sondern auch, was einem deutschen
 Privatanleger am Ende tatsächlich geblieben wäre.
 
-SimLev gibt es in drei Sprachen. Das R-Paket ist die Referenz; die Python-
-und die Julia-Fassung laufen eigenständig ohne R und rechnen **bitgleich**
-zu einem *früheren* Stand des R-Pakets, dem Stand vor den Korrekturen
-(Commit 54b5b4f, damals ebenfalls als 0.5.0 bezeichnet; im Folgenden
-„Stand 54b5b4f“): Jeder Tageswert, jede Kennzahl, jeder Steuerbetrag und
-auch die Textausgabe stimmen mit diesem Stand exakt überein. Die
-Fehlerkorrekturen, die steuerrechtlichen Anpassungen und die deutschen
-Ausgaben der aktuellen R-Fassung 0.5.0 sind in Python und Julia noch nicht
-nachgezogen; zur aktuellen R-Fassung sind sie **nicht** bitgleich (siehe
-[Bitgleichheit](#bitgleichheit-zum-r-paket)).
+SimLev gibt es in drei Sprachen. Das R-Paket ist die Referenz. Die
+Python-Fassung 0.5.0 und die Julia-Fassung 0.5.0 sind vollständige Ports
+der aktuellen R-Fassung 0.5.0 mit allen Erweiterungen und rechnen
+**bitgleich** zu ihr: Jeder Tageswert, jede Kennzahl, jeder Steuerbetrag
+und auch die (deutsche) Textausgabe stimmen exakt überein (siehe
+[Bitgleichheit](#bitgleichheit-zum-r-paket)). Frühere Fassungen der Ports
+(0.1.0) enthielten nur die Engine und entsprachen einem früheren Stand des
+R-Pakets vor den Korrekturen (Commit 54b5b4f, damals ebenfalls als 0.5.0
+bezeichnet; im Folgenden „Stand 54b5b4f“).
 
 | Fassung | Ordner | Benötigt | Besonderheit |
 |---|---|---|---|
 | **R** | [`r/`](r/) | R ≥ 4.0, C++-Compiler (Rcpp) | Referenzimplementierung |
-| **Python** | [`python/`](python/) | Python ≥ 3.9, `numpy`, `pandas` | reines Python, kein Compiler nötig |
-| **Julia** | [`julia/`](julia/) | Julia ≥ 1.10, keine externen Pakete | bitgleich zum Stand 54b5b4f auf allen Plattformen, 10- bis 35-mal so schnell wie R |
+| **Python** | [`python/`](python/) | Python ≥ 3.9, `numpy`, `pandas` | vollständiger Port von R 0.5.0 einschließlich aller Erweiterungen, bitgleich unter Linux x86-64; reines Python, kein Compiler nötig |
+| **Julia** | [`julia/`](julia/) | Julia ≥ 1.10, keine externen Pakete | vollständiger Port von R 0.5.0 einschließlich aller Erweiterungen, bitgleich unter Linux x86-64; nur Standardbibliothek, Engine etwa 5- bis 30-mal so schnell wie R |
 
 > **Sprachspezifische Beispiele sind aufklappbar.** Klicken Sie in den
 > Abschnitten unten auf **R**, **Python** oder **Julia**, um den Code für
@@ -56,7 +55,7 @@ nachgezogen; zur aktuellen R-Fassung sind sie **nicht** bitgleich (siehe
   - [Rebalancing](#rebalancing)
   - [Besteuerung](#besteuerung)
   - [Splits bei gehebelten Produkten](#splits-bei-gehebelten-produkten)
-- [Erweiterungen im R-Paket](#erweiterungen-im-r-paket)
+- [Erweiterungen in R, Python und Julia](#erweiterungen-in-r-python-und-julia)
   - [Arbeitsweise und Glossar](#arbeitsweise-und-glossar)
   - [Backcast von Produkten](#backcast-von-produkten)
   - [Bootstrap-Studien](#bootstrap-studien)
@@ -93,21 +92,21 @@ nachgezogen; zur aktuellen R-Fassung sind sie **nicht** bitgleich (siehe
 | **Steuern** | InvStG-Fondsbesteuerung, Abgeltungsteuer nach § 20 EStG, private Veräußerungsgeschäfte nach § 23 EStG |
 | **Kennzahlen** | CAGR, TTWROR, Volatilität, Sharpe, Sortino, Calmar, Omega, Ulcer Index, Drawdown-Dauer u. v. m. |
 | **Visualisierung** | Statisches Dashboard (R: Base-Grafik, Python: matplotlib, Julia: SVG) und interaktives, offline lauffähiges HTML-Dashboard |
-| **Backcast** *(nur R)* | Rückrechnung von ETF/ETP-Historien aus Basisindex, TER-Reihe, Hebel und Tagesgeld; Fit der Abweichung mit Out-of-Sample-Test |
-| **Bootstrap** *(nur R)* | 14 Verfahren (Block, stationär, Regime, EVT, (GJR-)GARCH, MS-GARCH …), Hebelprodukte, Strategie-Studien über Hunderttausende Pfade |
-| **Entnahmephase** *(nur R)* | 14 Entnahmeregeln (4-%-Regel, Vanguard, Guyton-Klinger …) auf Kohorten, Bootstrap-Pfaden oder gespeicherten Simulationsergebnissen, mit vereinfachter deutscher Steuer |
-| **Analyse** *(nur R)* | `deep_analysis()`: Alpha, Beta, Capture, Tracking Error, Information Ratio, M², VaR/CVaR, MWRR, Rendite- und Monatstabellen, Drawdown-Tabelle, rollierende Kennzahlen; Sensitivitäten für Rebalancing, Lump Sum vs. DCA und Hebel |
-| **Parametersuche** *(nur R)* | Raster, Zufallssuche und Latin Hypercube über Strategie-, Signal- und Simulationsparameter; Plateau-Auswahl, Probability of Backtest Overfitting, Deflated Sharpe Ratio, Walk-Forward, Prüfung der besten Punkte auf Bootstrap-Pfaden |
-| **Datenaufbereitung** *(nur R)* | Quellen zusammenführen, Prüfbericht (Lücken, Spikes, Splits), Makroreihen mit Veröffentlichungsverzug, Währung, Total Return, reale Werte, Verkettung, Portfolio-Vorlagen |
-| **Abhängigkeiten** *(nur R)* | Rang- und Tail-Abhängigkeit, Copulas (Gauß, t, Clayton, Gumbel, Frank), DCC, Korrelation je Regime von Inflation, Zinsen oder Spreads mit Block-Bootstrap, Quantilsregression, CoVaR |
-| **Taktische Allokation** *(nur R)* | Regeln mit Rückfall-Portfolio, Momentum-Rotation, Dual Momentum, Canary-Schutz, Zielvolatilität (auch bedingt, nur in extremen Phasen), Glidepath, Kern-Satellit; Ausführung mit Steuern und Kosten über die Engine |
-| **Optimierung** *(nur R)* | Minimum-Varianz, maximale Sharpe Ratio, maximale Diversifikation, Risikoparität mit Budgets, HRP, minimaler CVaR; Grenzen, Ledoit-Wolf, Resampling, Effizienzgrenze, rollierende Optimierung, Risikobeiträge |
-| **Synthetische Reihen** *(nur R)* | Anleihe-Index aus Renditen (konstante Laufzeit), Geldmarkt-Index aus Tagesgeld, währungsgesicherte Reihen |
+| **Backcast** | Rückrechnung von ETF/ETP-Historien aus Basisindex, TER-Reihe, Hebel und Tagesgeld; Fit der Abweichung mit Out-of-Sample-Test |
+| **Bootstrap** | 14 Verfahren (Block, stationär, Regime, EVT, (GJR-)GARCH, MS-GARCH …), Hebelprodukte, Strategie-Studien über Hunderttausende Pfade |
+| **Entnahmephase** | 14 Entnahmeregeln (4-%-Regel, Vanguard, Guyton-Klinger …) auf Kohorten, Bootstrap-Pfaden oder gespeicherten Simulationsergebnissen, mit vereinfachter deutscher Steuer |
+| **Analyse** | `deep_analysis()`: Alpha, Beta, Capture, Tracking Error, Information Ratio, M², VaR/CVaR, MWRR, Rendite- und Monatstabellen, Drawdown-Tabelle, rollierende Kennzahlen; Sensitivitäten für Rebalancing, Lump Sum vs. DCA und Hebel |
+| **Parametersuche** | Raster, Zufallssuche und Latin Hypercube über Strategie-, Signal- und Simulationsparameter; Plateau-Auswahl, Probability of Backtest Overfitting, Deflated Sharpe Ratio, Walk-Forward, Prüfung der besten Punkte auf Bootstrap-Pfaden |
+| **Datenaufbereitung** | Quellen zusammenführen, Prüfbericht (Lücken, Spikes, Splits), Makroreihen mit Veröffentlichungsverzug, Währung, Total Return, reale Werte, Verkettung, Portfolio-Vorlagen |
+| **Abhängigkeiten** | Rang- und Tail-Abhängigkeit, Copulas (Gauß, t, Clayton, Gumbel, Frank), DCC, Korrelation je Regime von Inflation, Zinsen oder Spreads mit Block-Bootstrap, Quantilsregression, CoVaR |
+| **Taktische Allokation** | Regeln mit Rückfall-Portfolio, Momentum-Rotation, Dual Momentum, Canary-Schutz, Zielvolatilität (auch bedingt, nur in extremen Phasen), Glidepath, Kern-Satellit; Ausführung mit Steuern und Kosten über die Engine |
+| **Optimierung** | Minimum-Varianz, maximale Sharpe Ratio, maximale Diversifikation, Risikoparität mit Budgets, HRP, minimaler CVaR; Grenzen, Ledoit-Wolf, Resampling, Effizienzgrenze, rollierende Optimierung, Risikobeiträge |
+| **Synthetische Reihen** | Anleihe-Index aus Renditen (konstante Laufzeit), Geldmarkt-Index aus Tagesgeld, währungsgesicherte Reihen |
 | **Deutsche Praxis** | Ordergebühren (fix, prozentual, Mindest-/Höchstbetrag, eigene Sparplan-Gebühr), Kirchensteuer, jährliches Ausschöpfen des Sparer-Pauschbetrags |
-| **Szenarien** *(nur R)* | Entropy Pooling mit eigenen Annahmen, Copula-Szenarien unter Stress, Krisen-Replay |
-| **Planung** *(nur R)* | Länder-Bootstrap, eigene Renditeannahmen, zufällige Ruhestandsdauer nach eigenen Vorgaben, zielbasierte Allokation per dynamischer Programmierung |
-| **Prüfungen** *(nur R)* | Sharpe-Differenztest (Ledoit-Wolf), Reality Check und SPA, Mindest-Historie, Harvey-Liu-Abschläge, CPCV, Signal-Analyse, Hidden-Markov-Regime, reale Kennzahlen, Rendite-Heatmaps |
-| **Geschwindigkeit** | 30 Jahre Tagesdaten mit drei Assets, Sparplan, Rebalancing und Steuern in 0,02 s (Julia) bis 0,23 s (R) |
+| **Szenarien** | Entropy Pooling mit eigenen Annahmen, Copula-Szenarien unter Stress, Krisen-Replay |
+| **Planung** | Länder-Bootstrap, eigene Renditeannahmen, zufällige Ruhestandsdauer nach eigenen Vorgaben, zielbasierte Allokation per dynamischer Programmierung |
+| **Prüfungen** | Sharpe-Differenztest (Ledoit-Wolf), Reality Check und SPA, Mindest-Historie, Harvey-Liu-Abschläge, CPCV, Signal-Analyse, Hidden-Markov-Regime, reale Kennzahlen, Rendite-Heatmaps |
+| **Geschwindigkeit** | 30 Jahre Tagesdaten mit drei Assets, Sparplan, Rebalancing und Steuern in rund 0,03 s (Julia) bis 0,2 s (R) |
 
 ## Installation
 
@@ -157,16 +156,17 @@ Aus einem lokalen Klon:
 
 ``` bash
 cd python
-pip install .                 # nur die Engine (numpy, pandas)
-pip install ".[plot]"         # zusätzlich matplotlib für das Dashboard
-pip install ".[all]"          # zusätzlich plotly für interaktive plotly-Figuren
+pip install .                 # Engine und alle Erweiterungen (numpy, pandas)
+pip install ".[plot]"         # zusätzlich matplotlib für Grafiken
+pip install ".[all]"          # zusätzlich plotly und scipy
 ```
 
 | Paket | Wofür | Pflicht? |
 |---|---|---|
 | `numpy`, `pandas` | Rechenkern und Datenaufnahme | ja |
-| `matplotlib` | Statisches Dashboard (`result.plot()`, `export_dashboard`) | optional |
+| `matplotlib` | Grafiken: Dashboard (`result.plot()`, `export_dashboard`) und `plot()` der Erweiterungen | optional |
 | `plotly` | Interaktives Dashboard als plotly-Figur | optional |
+| `scipy` | Ersatzweg für Eigenvektoren ohne System-LAPACK (nicht bitgleich) | optional |
 | `pytest` | Test-Suite | optional |
 
 </details>
@@ -174,7 +174,8 @@ pip install ".[all]"          # zusätzlich plotly für interaktive plotly-Figur
 <details>
 <summary><b>Julia</b></summary>
 
-Benötigt wird **Julia ab Version 1.10**. Weitere Pakete sind nicht nötig.
+Benötigt wird **Julia ab Version 1.10** (geprüft mit Julia 1.13.2). Weitere
+Pakete sind nicht nötig, nur die Standardbibliothek.
 
 ``` julia
 using Pkg
@@ -183,9 +184,12 @@ Pkg.add(url = "https://github.com/chemicalstats/SimLev-Repos", subdir = "julia")
 # Pkg.develop(path = "pfad/zu/SimLev-Repos/julia")
 ```
 
-Beim ersten `using SimLev` kompiliert Julia das Paket einmalig vor (etwa
-20–30 Sekunden). Danach lädt es in Sekundenbruchteilen, und schon der erste
-Aufruf von `simulation()` ist schnell.
+Beim ersten `using SimLev` kompiliert Julia das Paket einmalig vor; das
+dauert einige Minuten. Danach lädt es in unter einer Sekunde. Der erste
+Aufruf einer Funktion in einer Sitzung kompiliert noch nach (auf der
+Prüfmaschine etwa 2 Sekunden für `simulation()`, etwa 5 Sekunden für das
+erste Dashboard); jeder weitere Aufruf ist schnell (siehe
+[`julia/README.md`](julia/README.md#installation)).
 
 </details>
 
@@ -306,8 +310,7 @@ print(result)
 result.plot()
 ```
 
-Die Ausgabe unten ist das Ergebnis der R-Engine 0.5.0 für genau diese
-Kursdaten:
+Ausgabe (dieselbe liefert das R-Paket 0.5.0 für diese Kursdaten):
 
 ```
   Wertentwicklung
@@ -331,13 +334,6 @@ Kursdaten:
 
 Aus 10.000 EUR wurden 19.193,75 EUR, also 6,75 % pro Jahr. Ohne Steuern
 (`tax_mode="none"`) wären es 21.015,24 EUR (7,72 % p. a.) gewesen.
-
-> **Hinweis:** Die Python-Fassung rechnet noch auf dem Stand 54b5b4f, gibt
-> die Ausgabe auf Englisch aus („Performance“, „Final Value“, „Risk“ …) und
-> liefert hier die alten Werte: Endwert 19.195,90 EUR, Max Drawdown
-> 35,75 %, gezahlte Steuern 1.813,50 EUR, SPB genutzt 1.337,11 EUR
-> (Ersparnis 352,66 EUR), ohne Steuern 21.009,66 EUR. CAGR, TTWROR (je
-> 6,75 %) und die längste Durststrecke sind gleich.
 
 <p align="center">
   <img src="docs/figures/dashboard-python.png" alt="SimLev-Dashboard aus Python" width="100%" />
@@ -375,34 +371,35 @@ result = simulation(data, strategy;
     liquidate = true,
     risk_free = 2)
 
+display(result)
 plot_dashboard(result)
 ```
 
-```
-  Performance
-  ─────────────────────
-  CAGR:             +4.53%
-  TTWROR:           +4.53%
-  Final Value:      15558.32 EUR
+Ausgabe von `display(result)` (dieselben Zahlen liefern R 0.5.0 und
+Python 0.5.0 für diese Kursdaten):
 
-  Risk
+```
+  Wertentwicklung
   ─────────────────────
-  Max Drawdown:     36.57%
-  Longest DD:       666 Tage
+  CAGR:             +4.54%
+  TTWROR:           +4.54%
+  Endwert:          15581.60 EUR
+
+  Risiko
+  ─────────────────────
+  Max. Drawdown:    36.59%
+  ...
+  Längster DD:      666 Tage
   ...
   Steuern
   ─────────────────────
-  Gezahlte Steuern: 744.73 EUR
-  SPB genutzt:      2044.75 EUR (Ersparnis: 539.30 EUR)
+  Gezahlte Steuern: 758.08 EUR
+  Verlustvortrag:   0.00 EUR (§ 20) / 0.00 EUR (§ 23)
+  SPB genutzt:      2017.67 EUR (Ersparnis: 532.16 EUR)
 ```
 
-Aus 10.000 EUR wurden 15.558,32 EUR, also 4,53 % pro Jahr. Ohne Steuern
-(`tax_mode = "none"`) wären es 16.303,40 EUR (5,02 % p. a.) gewesen.
-
-> **Hinweis:** Diese Ausgabe stammt von der Julia-Fassung, die noch auf dem
-> Stand 54b5b4f rechnet. Mit der aktuellen R-Engine ist sie für diese
-> Kursdaten nicht nachgerechnet; Endwert und Steuerwerte können abweichen
-> (vergleiche das Python-Beispiel).
+Aus 10.000 EUR wurden 15.581,60 EUR, also 4,54 % pro Jahr. Ohne Steuern
+(`tax_mode = "none"`) wären es 16.339,67 EUR (5,04 % p. a.) gewesen.
 
 <p align="center">
   <img src="docs/figures/dashboard-julia.png" alt="SimLev-Dashboard aus Julia" width="100%" />
@@ -412,16 +409,19 @@ Aus 10.000 EUR wurden 15.558,32 EUR, also 4,53 % pro Jahr. Ohne Steuern
 
 **Warum unterscheiden sich die Zahlen?** Jede Sprache erzeugt die
 synthetischen Kurse mit ihrem eigenen Zufallsgenerator, die Preisreihen sind
-also verschieden. Mit identischen Eingabedaten lieferten alle drei Fassungen
-bis zum Stand 54b5b4f exakt dasselbe Ergebnis. Python und Julia sind auf die
-Korrekturen und steuerrechtlichen Anpassungen der aktuellen R-Fassung noch nicht
-nachgezogen und weichen deshalb bei Steuern, Sparplänen, Rebalancing,
-einigen Kennzahlen (z. B. Sortino) und Sonderfällen von R ab (siehe [Bitgleichheit](#bitgleichheit-zum-r-paket)).
+also verschieden. Mit identischen Eingabedaten liefern alle drei Fassungen
+exakt dasselbe Ergebnis: Mit den Kursen des R-Beispiels (in Python erzeugt
+mit `simlev.set_seed(42)`, `simlev._r.rng.rnorm()` und
+`simlev._rnum.r_cumprod()`, in Julia mit `set_seed(42)`,
+`SimLev.RRng.rnorm()` und `SimLev.RBase.r_cumprod()`) zeigen auch Python und
+Julia 17.765,20 EUR Endwert und 1.368,47 EUR Steuern. Ebenso liefern R und
+Julia mit den Kursen des Python-Beispiels 19.193,75 EUR und R und Python mit
+den Kursen des Julia-Beispiels 15.581,60 EUR (Kurse jeweils als CSV mit
+voller Genauigkeit übergeben).
 
-**So lesen Sie das Ergebnis** (Bezeichnungen der R-Ausgabe; Python und
-Julia: *Final Value*, *Max Drawdown*, *Longest DD*): *Endwert* ist der
+**So lesen Sie das Ergebnis:** *Endwert* ist der
 Depotwert nach allen Spreads und Steuern, *CAGR* die jährliche
-Wachstumsrate (mit Sparplan in R die geldgewichtete Rendite, siehe
+Wachstumsrate (mit Sparplan die geldgewichtete Rendite, siehe
 [Sparpläne](#sparpläne-dca)). *Max. Drawdown* ist der schlimmste
 zwischenzeitliche Verlust vom letzten Höchststand, *Längster DD* die
 längste Durststrecke bis zum nächsten Höchststand. *SPB genutzt*
@@ -458,7 +458,7 @@ Erwartet wird eine Tabelle mit
 |---|---|---|---|
 | Tabelle | `data.frame` | `pandas.DataFrame` oder `dict` aus Spalten | NamedTuple von Vektoren, `Dict`, `DataFrame` oder jede Tabelle mit `propertynames`/`getproperty` |
 | `date` | `Date` oder Text `"JJJJ-MM-TT"` | `datetime64`, `datetime.date` oder Text | `Date`, `DateTime`, Text oder Tage seit 1970-01-01 |
-| Fehlende Werte | `NA` | `NaN` | `missing` |
+| Fehlende Werte | `NA` | `NaN` (oder `simlev.NA`) | `missing` (oder `SimLev.NA`) |
 
 **Fehlende Kalendertage** wie Wochenenden und Feiertage füllt SimLev
 automatisch mit dem letzten bekannten Kurs auf (*Last Observation Carried
@@ -470,8 +470,8 @@ Rebalancing, Liquidation) auf einen aufgefüllten Tag, wird es auf den
 nächsten echten Handelstag verschoben. Würde es dadurch in den Folgemonat
 rutschen, wird es auf den vorherigen Handelstag vorgezogen.
 
-Die aktuelle R-Fassung prüft die Daten zusätzlich: Unsortierte Daten werden mit Hinweis
-sortiert, einzelne fehlende Kurse (`NA`) innerhalb einer Reihe per LOCF
+Zusätzlich prüft SimLev die Daten: Unsortierte
+Daten werden mit Hinweis sortiert, einzelne fehlende Kurse (`NA`) innerhalb einer Reihe per LOCF
 gefüllt, führende fehlende Kurse wirken wie ein späterer `asset_start`, und
 doppelte Datumswerte oder Kurse ≤ 0 führen zu einer Fehlermeldung.
 
@@ -577,12 +577,10 @@ Rebalancing oder Liquidation.
 
 **Gestaffelte Starts:** Mit `asset_start` in `asset_config()` wird ein Asset
 erst ab einem Datum handelbar. Bis dahin liegt das Kapital in den bereits
-handelbaren Assets. In der aktuellen R-Fassung wird am Starttag auch ohne `balance_mode` auf
+handelbaren Assets. Am Starttag wird auch ohne `balance_mode` auf
 die Zielgewichte umgeschichtet, damit das neue Asset Mittel erhält; beginnt
 eine Kursreihe mit fehlenden Werten, gilt ihr erster Kurs als `asset_start`,
-und ein `asset_start` nach dem letzten Datentag ist ein Fehler. Python und
-Julia (Stand 54b5b4f) schichten am Starttag nur mit `balance_mode` um; ohne
-Rebalancing bleibt ein später startendes Asset dort leer.
+und ein `asset_start` nach dem letzten Datentag ist ein Fehler.
 
 Mit `action_type = "signal"` steigt das Asset ein und aus, wann immer Ihre
 Signalspalten es vorgeben. Die Signale berechnen Sie vorab selbst; SimLev
@@ -704,14 +702,14 @@ spart Verkäufe und damit Steuern, weil das Depot über frisches Geld statt
 über Umschichtungen ins Gleichgewicht kommt.
 
 **Wichtig bei Sparplänen: CAGR und TTWROR unterscheiden sich.** Mit
-Einzahlungen ist die CAGR in R die **geldgewichtete** Rendite: der interne
+Einzahlungen ist die CAGR die **geldgewichtete** Rendite: der interne
 Zinsfuß (XIRR) aus Startbetrag, datierten Sparraten und Endwert, gerechnet
 mit Kalendertagen / 365,25. Sie beantwortet, wie sich *Ihr* eingezahltes
 Geld verzinst hat, und hängt davon ab, wann wie viel eingezahlt wurde. Die
 TTWROR (*True Time-Weighted Rate of Return*) rechnet die Einzahlungen heraus
 und misst nur, wie gut die Strategie gearbeitet hat; sie ist die Zahl, die
 Sie mit anderen Strategien oder mit einem Index vergleichen sollten. Auch
-Drawdowns, Ulcer Index und Drawdown-Dauern misst R mit Sparplan auf dem
+Drawdowns, Ulcer Index und Drawdown-Dauern misst SimLev mit Sparplan auf dem
 zeitgewichteten Wertindex `twr_index`, und Calmar, Serenity und Martin Ratio
 verwenden dann die TTWROR; `print()` kennzeichnet das („geldgewichtet,
 XIRR“, „zeitgewichtet“) und zeigt zusätzlich die Summe der Einzahlungen.
@@ -722,13 +720,10 @@ plus 120 Raten zu 250 EUR). Der Endwert nach Steuern beträgt 59.480,25 EUR,
 die CAGR (geldgewichtet) 6,20 % und die TTWROR 6,09 %; der maximale
 Drawdown (zeitgewichtet) liegt bei 20,92 %.
 
-> **Python und Julia** (Stand 54b5b4f) weisen als CAGR noch die
-> Wachstumsrate des Depotwerts *einschließlich* der Einzahlungen aus und
-> messen Drawdowns auf dem Depotwert. Mit den Daten des Python-Schnellstarts
-> zeigt Python für diesen Sparplan einen Endwert von 70.447,78 EUR, eine CAGR
-> von 21,3 % und eine TTWROR von 6,6 %; die aktuelle R-Fassung liefert für dieselben Daten
-> 70.424,36 EUR, eine CAGR (geldgewichtet) von 8,79 % und eine TTWROR von
-> 6,57 %.
+Python und Julia rechnen genauso: Mit denselben Kursen liefern sie
+dieselben Werte, und mit den Daten des Python-Schnellstarts liefern alle
+drei Fassungen für diesen Sparplan 70.424,36 EUR, eine CAGR
+(geldgewichtet) von 8,79 % und eine TTWROR von 6,57 %.
 
 ### Rebalancing
 
@@ -749,7 +744,7 @@ simulation(data, strategy, balance_mode = TRUE, balance_span = 1, balance_unit =
 simulation(data, strategy, balance_mode = TRUE, balance_span = 1, balance_unit = "year",
            balance_thresh = 5)
 
-# relatives Band (nur R): Ziel 40 % darf zwischen 30 % und 50 % liegen
+# relatives Band: Ziel 40 % darf zwischen 30 % und 50 % liegen
 simulation(data, strategy, balance_mode = TRUE, balance_span = 1, balance_unit = "month",
            balance_thresh = 25, balance_thresh_type = "relative")
 
@@ -776,6 +771,10 @@ simlev.simulation(data, strategy, balance_mode=True, balance_span=1, balance_uni
 simlev.simulation(data, strategy, balance_mode=True, balance_span=1, balance_unit="year",
                   balance_thresh=5)
 
+# relatives Band: Ziel 40 % darf zwischen 30 % und 50 % liegen
+simlev.simulation(data, strategy, balance_mode=True, balance_span=1, balance_unit="month",
+                  balance_thresh=25, balance_thresh_type="relative")
+
 # ereignisbasiert; data["sigma_ewma"] enthält eine selbst berechnete Volatilitätsschätzung
 data = simlev.compute_rebal_trigger(data, type="vol_band", threshold=20, vol_col="sigma_ewma")
 simlev.simulation(data, strategy, event_col="rebal_trigger",
@@ -792,7 +791,12 @@ simlev.simulation(data, strategy, event_col="rebal_trigger",
 simulation(data, strategy; balance_mode = true, balance_span = 1, balance_unit = "quarter")
 
 # mit Toleranzschwelle: nur handeln, wenn ein Gewicht > 5 % abweicht
-simulation(data, strategy; balance_mode = true, balance_unit = "year", balance_thresh = 5)
+simulation(data, strategy; balance_mode = true, balance_span = 1, balance_unit = "year",
+           balance_thresh = 5)
+
+# relatives Band: Ziel 40 % darf zwischen 30 % und 50 % liegen
+simulation(data, strategy; balance_mode = true, balance_span = 1, balance_unit = "month",
+           balance_thresh = 25, balance_thresh_type = "relative")
 
 # ereignisbasiert; data.sigma_ewma enthält eine selbst berechnete Volatilitätsschätzung
 data = compute_rebal_trigger(data, "vol_band"; threshold = 20, vol_col = "sigma_ewma")
@@ -830,9 +834,9 @@ an Event-Tagen aus Datenspalten fest.
 | `"funds"` | Vereinfachte Fondshülle: laufende Kosten (`funds_fee`, wie eine TER) und eine Performancegebühr mit High-Watermark (`bonus_fee`); bei Liquidation Steuer auf den Gesamtgewinn |
 
 Die folgende Beschreibung gibt den Stand der aktuellen R-Engine 0.5.0
-wieder. Python und Julia rechnen noch nach dem Stand 54b5b4f; wo sie anders
-rechnen, ist es
-jeweils vermerkt (Einzelheiten in [`r/NEWS.md`](r/NEWS.md)).
+wieder; Python 0.5.0 und Julia 0.5.0 rechnen bitgleich genauso. Was sich
+gegenüber dem Stand 54b5b4f geändert hat, steht in
+[`r/NEWS.md`](r/NEWS.md).
 
 Im Modus `"person"` bildet SimLev unter anderem folgende Regeln ab:
 
@@ -853,9 +857,7 @@ Im Modus `"person"` bildet SimLev unter anderem folgende Regeln ab:
   endet die Simulation vorher, am letzten Tag. Reicht das Cash nicht,
   werden Anteile verkauft (bei `fractions = FALSE` auf ganze Stück
   aufgerundet). Bereits versteuerte Vorabpauschalen mindern später den
-  Veräußerungsgewinn (§ 19 InvStG). *Python und Julia (Stand 54b5b4f)*
-  rechnen die Vorabpauschale noch nach der alten Logik, u. a. mit
-  `base_rate_flex` mit dem Basiszins vom 31.12.
+  Veräußerungsgewinn (§ 19 InvStG).
 - **Sparer-Pauschbetrag**: Jährlich bleiben 1.000 EUR Kapitalerträge
   steuerfrei, einstellbar über `sparer_pauschbetrag` (für Ehepaare z. B.
   `2000`).
@@ -868,7 +870,6 @@ Im Modus `"person"` bildet SimLev unter anderem folgende Regeln ab:
   zuerst bereits gezahlte Steuer erstattet, dann der genutzte
   Pauschbetrag wieder freigegeben; erst der Rest geht in den Verlusttopf.
   Die Erstattung des letzten Jahresabschlusses ist im Endwert enthalten.
-  *Python und Julia (Stand 54b5b4f)* rechnen hier noch nach der alten Logik.
 - **Private Veräußerungsgeschäfte** (§ 23 EStG): Für Assets mit
   Lieferanspruch (z. B. physisches Gold) sind Gewinne nach einem Jahr
   Haltedauer steuerfrei (bei Kauf am 29.02. endet die Frist am 28.02. des
@@ -881,9 +882,7 @@ Im Modus `"person"` bildet SimLev unter anderem folgende Regeln ab:
   steuerpflichtig, darunter ist er steuerfrei und der Vortrag bleibt
   unverändert. Die Steuer wird vom Depot bezahlt, am Abrechnungstag der
   Vorabpauschale (erster Handelstag des Folgejahres), sonst am letzten Tag,
-  aus dem Cash oder per Zwangsverkauf. *Python und Julia (Stand 54b5b4f)*
-  weisen die § 23-Steuer nur aus, ziehen sie aber nicht vom Depot ab, und
-  prüfen die Freigrenze noch nach der alten Logik.
+  aus dem Cash oder per Zwangsverkauf.
 - **Günstigerprüfung** (§ 32d Abs. 6 EStG): Mit `use_guenstigerpruefung`
   wird der persönliche Steuersatz angewendet, wenn die Belastung
   einschließlich Zuschlagsteuern niedriger ist als die Abgeltungsteuer.
@@ -893,19 +892,17 @@ Im Modus `"person"` bildet SimLev unter anderem folgende Regeln ab:
   TRUE`) und der günstigere Satz durchgehend verwendet. Mit
   `taxable_income` wird unterjährig die Abgeltungsteuer einbehalten und im
   Jahresabschluss mit der Tarifbelastung verglichen; die Differenz wird
-  erstattet (siehe unten). *Python und Julia (Stand 54b5b4f)* verwenden
-  noch eine starre Schwelle: persönlicher Satz unter 25 %.
-- **Umschichtungen**: Beim Rebalancing schätzt R die Steuer auf den
+  erstattet (siehe unten).
+- **Umschichtungen**: Beim Rebalancing schätzt SimLev die Steuer auf den
   Verkauf mit freiem Sparer-Pauschbetrag, Verlusttopf, Anrechnung der
   Vorabpauschale und dem Satz der Günstigerprüfung und berücksichtigt das
-  beim Asset liegende Cash. So wird nicht mehr zu viel verkauft und am selben
-  Tag zurückgekauft. *Python und Julia (Stand 54b5b4f)* verwenden noch die
-  alte Schätzung.
+  beim Asset liegende Cash. So wird nicht zu viel verkauft und am selben
+  Tag zurückgekauft.
 
-Kirchensteuer (`church_tax`) gibt es bisher nur im R-Paket (siehe
-[Gebühren, Kirchensteuer und Freibetrag](#gebühren-kirchensteuer-und-freibetrag)).
+Zur Kirchensteuer (`church_tax`) siehe
+[Gebühren, Kirchensteuer und Freibetrag](#gebühren-kirchensteuer-und-freibetrag).
 
-**Einkommensteuertarif (nur R).** Mit `taxable_income`, dem zu
+**Einkommensteuertarif.** Mit `taxable_income`, dem zu
 versteuernden Einkommen *ohne* die Kapitalerträge und § 23-Gewinne der
 Simulation in EUR je Kalenderjahr (eine Zahl für alle Jahre, ein nach
 Jahren benannter Vektor oder `data.frame(year, taxable_income)`), rechnet
@@ -913,7 +910,8 @@ Jahren benannter Vektor oder `data.frame(year, taxable_income)`), rechnet
 § 32a Abs. 1 EStG und dem Solidaritätszuschlag nach §§ 3, 4 SolZG
 (Freigrenze 20.350 EUR, Milderungszone 11,9 %). Mitgeliefert ist die
 Rechtslage ab VZ 2026 für die Einzelveranlagung (Grundtarif, kein
-Splitting) in der Datei `inst/extdata/steuertarif.csv`; ein anderer Tarif
+Splitting) in der Datei `inst/extdata/steuertarif.csv` (Python:
+`simlev/data/steuertarif.csv`, Julia: `julia/data/steuertarif.csv`); ein anderer Tarif
 wird über `tax_tariff = "<Datei>"` bzw. `read_tax_tariff()` eingelesen.
 Dann gilt:
 
@@ -944,8 +942,7 @@ Vereinfachungen: Der Tarif gilt für alle Simulationsjahre, die
 Kirchensteuer wird nicht gerundet und ohne Kinderfreibeträge (§ 51a EStG)
 berechnet, ein Verlustrücktrag kommt nicht vor (Einzelheiten in
 `?simulation`, Abschnitt „Einkommensteuertarif“). Ohne `taxable_income`
-rechnet die Engine wie oben mit `marginal_tax_rate`. Python und Julia
-kennen `taxable_income`, `tax_tariff` und `read_tax_tariff()` nicht.
+rechnet die Engine wie oben mit `marginal_tax_rate`.
 
 <details>
 <summary><b>R</b>: Beispiel mit Einkommensteuertarif</summary>
@@ -997,23 +994,25 @@ wird 2020 dem Einkommen hinzugerechnet, was 2,18 EUR nachkostet. Im
 Liquidationsjahr 2024 mit 35.793,85 EUR Kapitalerträgen ist die
 Abgeltungsteuer günstiger; der § 23-Gewinn des Goldes (1.922,33 EUR)
 kostet 394,58 EUR. Insgesamt zahlt das Depot 12.833,82 EUR Steuern; ohne
-Günstigerprüfung (sonst gleicher Aufruf) wären es 13.616,07 EUR.
+Günstigerprüfung (sonst gleicher Aufruf) wären es 13.616,07 EUR. Python
+und Julia liefern mit denselben Kursdaten (erzeugt wie unter „Warum
+unterscheiden sich die Zahlen?“ beschrieben) dieselbe Tabelle und dieselben
+12.833,82 EUR; in Julia steht sie unter `res.tax_report.tariff_years`.
 
 </details>
 
-Im Modus `"funds"` belastet R die Fondskosten `funds_fee` linear je
+Im Modus `"funds"` belastet SimLev die Fondskosten `funds_fee` linear je
 Kalendertag (ein volles Kalenderjahr kostet genau `funds_fee` Prozent), am
 31.12. und anteilig am letzten Tag; fehlendes Cash wird per Teilverkauf
 ohne Ordergebühr und Spread beschafft. Die High-Watermark der
 Performancegebühr `bonus_fee` wird um Einzahlungen erhöht und nach Abzug der
 Gebühren fortgeschrieben. Bei Liquidation wird der Gesamtgewinn (Endwert
 minus Startkapital minus Einzahlungen) versteuert. Werden `funds_fee` oder
-`bonus_fee` bei einem anderen `tax_mode` angegeben, wirken sie nicht; R
-0.5.0 warnt dann. *Python und Julia
-(Stand 54b5b4f)* belasten die Fondskosten bei voll investiertem Depot nicht
-(z. B. zwei Jahre ohne Kursänderung mit `funds_fee = 1`: R 9.801 EUR, Python
-10.000 EUR aus 10.000 EUR) und rechnen auch die übrigen Punkte noch nach der
-alten Logik.
+`bonus_fee` bei einem anderen `tax_mode` angegeben, wirken sie nicht;
+SimLev warnt dann. (Bis zum Stand 54b5b4f wurden die Fondskosten bei voll
+investiertem Depot nicht belastet: zwei Jahre ohne Kursänderung und ohne
+Spread mit `funds_fee = 1` ergeben jetzt 9.801 EUR, damals 10.000 EUR aus
+10.000 EUR.)
 
 **Modellphilosophie:** SimLev projiziert die *heutige* Rechtslage in die
 Vergangenheit, also aktuellen Pauschbetrag, aktuelle
@@ -1035,15 +1034,29 @@ Sie dafür die Kursreihe *ohne* Split-Bereinigung. Für die Besteuerung
 Split-Verhältnis angepasst, Kaufdaten und damit Haltedauern bleiben
 erhalten.
 
-## Erweiterungen im R-Paket
+## Erweiterungen in R, Python und Julia
 
-Die folgenden Funktionen gibt es bisher nur im R-Paket. Fast alle rechnen
-um die Engine herum; die wenigen neuen Optionen von `simulation()`
-(relative Rebalancing-Bänder, Ordergebühren, Kirchensteuer,
-`harvest_mode`) sind standardmäßig aus. Die Golden-Master-Fälle blieben
-dadurch bitgleich; erst die Fehlerkorrekturen und steuerrechtlichen
-Anpassungen nach dem Stand 54b5b4f haben alle 105 Fälle verändert, mindestens in der
-Druckausgabe (siehe
+Die folgenden Funktionen gibt es im R-Paket und mit gleichen Namen,
+Argumenten und Ergebnissen in der Python- und der Julia-Fassung. Die
+Beispiele sind in R geschrieben. In Python und Julia gelten die
+Schreibweisen aus
+[Unterschiede zwischen den Sprachen](#unterschiede-zwischen-den-sprachen):
+in Python `simlev.bootstrap_study(...)` und `{"us": "us_ret"}` statt
+`c(us = "us_ret")`, in Julia `bootstrap_study(df, cfg, "stationary"; n = …)`
+mit Schlüsselwörtern nach dem Semikolon, `(us = "us_ret",)` und ein
+`RFrame` als Datentabelle; Bedingungen stehen in beiden Ports als Text.
+Je zwei ausgeführte Beispiele stehen in
+[`python/README.md`](python/README.md#erweiterungen) und
+[`julia/README.md`](julia/README.md#erweiterungen). Wo R mit `cores > 1`
+parallel rechnet, rechnen Python und Julia sequenziell, aber mit derselben
+Zufallssemantik und damit denselben Ergebnissen.
+
+Fast alle Funktionen rechnen um die Engine herum; die wenigen neuen
+Optionen von `simulation()` (relative Rebalancing-Bänder, Ordergebühren,
+Kirchensteuer, `harvest_mode`) sind standardmäßig aus. Die
+Golden-Master-Fälle blieben dadurch bitgleich; erst die Fehlerkorrekturen
+und steuerrechtlichen Anpassungen nach dem Stand 54b5b4f haben alle 105
+Fälle verändert, mindestens in der Druckausgabe (siehe
 [`r/NEWS.md`](r/NEWS.md)). Ausführliche Beispiele, die die Projektskripte
 nachbilden, stehen in
 [`r/inst/examples/backcast_bootstrap_withdrawal_examples.md`](r/inst/examples/backcast_bootstrap_withdrawal_examples.md).
@@ -1051,8 +1064,9 @@ Was sich in welcher Version geändert hat, steht in [`r/NEWS.md`](r/NEWS.md).
 
 ### Arbeitsweise und Glossar
 
-Alle Funktionen arbeiten mit demselben Datenformat: einem `data.frame` mit
-der Spalte `date` (Klasse `Date`) und je Anlage einer Spalte mit dem
+Alle Funktionen arbeiten mit demselben Datenformat: einem `data.frame`
+(Python: `pandas.DataFrame`, Julia: `RFrame`) mit der Spalte `date` (Klasse `Date`) und je
+Anlage einer Spalte mit dem
 **Kursniveau** (keine Renditen). Daraus ergeben sich vier Wege durch das
 Paket:
 
@@ -1061,7 +1075,7 @@ Paket:
 | **Eigene Daten einlesen** (z. B. `read.csv()` + `as.Date()`) | `check_series()`, `align_series()`, `align_macro()`, `convert_currency()`, `total_return_index()`, `deflate()`, `splice_series()`, `backcast_fit()`/`backcast()` |
 | **Daten erzeugen** | `leveraged_series()`, `bond_index_from_yields()`, `money_market_index()`, `currency_hedged_index()`, `set_expected_return()`, `bootstrap()` + `bootstrap_data()`, `pooled_bootstrap()`, `copula_scenarios()` |
 | **Simulieren** | `simulation()` mit `asset_config()`/`create_strategy()` oder `strategy_from_weights()` (Einkommensteuertarif: `read_tax_tariff()`); `tactical_simulation()`, `bootstrap_study()`, `param_search()`, `sensitivity_grid()` |
-| **Fertige Simulationen weiterverarbeiten** (auch mit `saveRDS()` gespeichert und später geladen) | `deep_analysis()`, `return_heatmap()`, `sharpe_test()`, `min_track_record()`, `result_index()`, `withdrawal_paths()`/`withdrawal_simulation()`; Studien und Suchen: `bootstrap_probability()`, `pbo()`, `deflated_sharpe()`, `reality_check()`, `sharpe_haircut()` |
+| **Fertige Simulationen weiterverarbeiten** (auch mit `saveRDS()` gespeichert und später geladen, in Julia mit `Serialization`) | `deep_analysis()`, `return_heatmap()`, `sharpe_test()`, `min_track_record()`, `result_index()`, `withdrawal_paths()`/`withdrawal_simulation()`; Studien und Suchen: `bootstrap_probability()`, `pbo()`, `deflated_sharpe()`, `reality_check()`, `sharpe_haircut()` |
 
 Die Argumentnamen sind über die Versionen gewachsen und nicht überall
 einheitlich. Für das ganze Paket gilt:
@@ -1181,7 +1195,8 @@ summary(study)
 
 Verfahren: `raw`, `block`, `circular`, `stationary`, `wild`, `regime`, `evt`,
 `tails`, `reset`, `garch`, `gjr_garch`, `ms_garch`, `ms_ar_garch_m`,
-`tvtp_ms_garch` (die MS-Verfahren benötigen das Paket `MSGARCH`), optional
+`tvtp_ms_garch` (die MS-Verfahren benötigen das R-Paket `MSGARCH`; in
+Python und Julia melden sie wie R ohne `MSGARCH`, dass das Paket fehlt), optional
 mit ESS-gewichteter Gittersuche über Hyperparameter. `block_length()`
 schätzt Blocklängen nach Politis & White (2004).
 
@@ -1228,8 +1243,8 @@ Sparer-Pauschbetrag und Vorabpauschale.
 Wird als `start_value` ein Ergebnis von `simulation()` übergeben, ist
 dessen Endwert das Startvermögen (ein Endwert ≤ 0 ist ein Fehler). Wurde
 die Ansparphase mit `tax_mode = "person"` gerechnet (Element `open_lots`)
-und rechnet auch die Entnahmephase mit `tax_mode = "person"`, übernimmt R
-0.5.0 ohne eigenes `cost_basis` die einzelnen Lots und verkauft bei jeder
+und rechnet auch die Entnahmephase mit `tax_mode = "person"`, übernimmt
+SimLev 0.5.0 ohne eigenes `cost_basis` die einzelnen Lots und verkauft bei jeder
 Entnahme je Asset die ältesten Lots zuerst (FIFO, mit Anrechnung der
 Vorabpauschale wie in der Engine). Nicht ausdrücklich angegebene Werte
 werden aus dem Ergebnis übernommen: `asset_bonus` (gemeinsame
@@ -1535,28 +1550,28 @@ at Risk (`method = "min_cdar"`) und die Kovarianzschätzer `"ewma"`,
 
 ## Ergebnisse auswerten
 
-`simulation()` liefert ein `SimLevResult`. Gemeinsame Bestandteile heißen
-in allen drei Sprachen gleich; einige gibt es nur in einer Fassung:
+`simulation()` liefert ein `SimLevResult`. Die Bestandteile heißen in allen
+drei Sprachen gleich:
 
 | Bestandteil | Inhalt |
 |---|---|
 | `dates`, `filled` | Simulationstage und Markierung der per LOCF aufgefüllten Tage |
 | `worth` | Täglicher Gesamtwert des Depots in EUR (einschließlich Einzahlungen) |
-| `twr_index` | *Nur R:* zeitgewichteter Wertindex (Start = 1), um Einzahlungen bereinigt; Grundlage der TTWROR und, mit Sparplan, der Drawdowns |
-| `invested` | *Nur R:* je Tag Startwert plus kumulierte Einzahlungen in EUR, brutto vor Kaufkosten |
-| `external_flows` | *Nur R:* logisch, `TRUE` bei Einzahlungen nach dem Starttag (Sparplan) |
-| `drawdowns` | Täglicher Abstand zum bisherigen Höchststand als Anteil; in R mit Sparplan auf `twr_index` |
-| `cagr`, `ttwror` | Jährliche Wachstumsrate und zeitgewichtete Rendite (TTWROR) als Anteil; in R mit Sparplan ist `cagr` die geldgewichtete Rendite (XIRR), in Python und Julia (Stand 54b5b4f) die Wachstumsrate des Depotwerts einschließlich Einzahlungen |
+| `twr_index` | Zeitgewichteter Wertindex (Start = 1), um Einzahlungen bereinigt; Grundlage der TTWROR und, mit Sparplan, der Drawdowns |
+| `invested` | Je Tag Startwert plus kumulierte Einzahlungen in EUR, brutto vor Kaufkosten |
+| `external_flows` | Logisch, `TRUE` bei Einzahlungen nach dem Starttag (Sparplan) |
+| `drawdowns` | Täglicher Abstand zum bisherigen Höchststand als Anteil; mit Sparplan auf `twr_index` |
+| `cagr`, `ttwror` | Jährliche Wachstumsrate und zeitgewichtete Rendite (TTWROR) als Anteil; mit Sparplan ist `cagr` die geldgewichtete Rendite (XIRR) |
 | `statistics` | Alle Risiko- und Renditekennzahlen |
 | `report` | Je Asset tägliche Werte: `worth`, `money`, `flows`, `total`, `share` |
-| `tax_report` | Gezahlte Steuern, Verlustvorträge, genutzter Pauschbetrag und dessen Steuerersparnis; *nur R:* `open_tax_debt` (am Ende offene, nicht gedeckte Steuerschuld in EUR, sonst 0) und mit `taxable_income` `tariff_years` (Veranlagung je Jahr); bei `tax_mode = "person"` `next_year` (Steuerzustand des Jahres nach dem letzten Datentag: verbrauchter Sparer-Pauschbetrag, Verlusttöpfe, mit `taxable_income` der letzte Kirchensteuer-Bescheid) für eine Fortsetzung, z. B. in der Entnahmephase |
-| `undefined_metrics` | *Nur R:* `data.frame(metric, reason, detail)` mit einer Zeile je Kennzahl, die `NA` ist (z. B. negativer Endwert, Einzeltag, Volatilität 0); `print()` und `summary()` zeigen sie als „nicht definiert (Ursache)“. Der Endwert bleibt unverändert, auch wenn er negativ ist |
-| `open_lots` | *Nur R; nur mit `tax_mode = "person"` gefüllt, sonst `NULL`:* je Asset die am letzten Tag gehaltenen Lots (Kaufdatum, Stück, Anschaffungskurs, anzurechnende Vorabpauschale) mit Steuerregime, Teilfreistellung, Cash, `asset_spread` und `order_fee`; `withdrawal_simulation(start_value = <Ergebnis>)` verkauft daraus per FIFO |
-| `buys`, `sells` | Durchschnittliche Anzahl Käufe und Verkäufe pro Jahr je Asset (in R bei einem Einzeltag `NA`) |
-| `fees_paid`, `harvest_days` | *Nur R:* Summe der Ordergebühren (mit `order_fee`/`dca_fee`) und Termine der Gewinnrealisierung (mit `harvest_mode`) |
+| `tax_report` | Gezahlte Steuern, Verlustvorträge, genutzter Pauschbetrag und dessen Steuerersparnis; `open_tax_debt` (am Ende offene, nicht gedeckte Steuerschuld in EUR, sonst 0) und mit `taxable_income` `tariff_years` (Veranlagung je Jahr); bei `tax_mode = "person"` `next_year` (Steuerzustand des Jahres nach dem letzten Datentag: verbrauchter Sparer-Pauschbetrag, Verlusttöpfe, mit `taxable_income` der letzte Kirchensteuer-Bescheid) für eine Fortsetzung, z. B. in der Entnahmephase |
+| `undefined_metrics` | `data.frame(metric, reason, detail)` mit einer Zeile je Kennzahl, die `NA` ist (z. B. negativer Endwert, Einzeltag, Volatilität 0); `print()` und `summary()` zeigen sie als „nicht definiert (Ursache)“. Der Endwert bleibt unverändert, auch wenn er negativ ist |
+| `open_lots` | *Nur mit `tax_mode = "person"` gefüllt, sonst `NULL`:* je Asset die am letzten Tag gehaltenen Lots (Kaufdatum, Stück, Anschaffungskurs, anzurechnende Vorabpauschale) mit Steuerregime, Teilfreistellung, Cash, `asset_spread` und `order_fee`; `withdrawal_simulation(start_value = <Ergebnis>)` verkauft daraus per FIFO |
+| `buys`, `sells` | Durchschnittliche Anzahl Käufe und Verkäufe pro Jahr je Asset (bei einem Einzeltag `NA`) |
+| `fees_paid`, `harvest_days` | Summe der Ordergebühren (mit `order_fee`/`dca_fee`) und Termine der Gewinnrealisierung (mit `harvest_mode`) |
 | `trades` | *Nur Python und Julia:* alle Lots, Verkäufe, Vorabpauschalen und Gebühren je Asset |
 
-`summary(result)` liefert in R unter anderem `total_return_twr`
+`summary(result)` liefert unter anderem `total_return_twr`
 (zeitgewichtete Gesamtrendite), `return_on_invested` ((Endwert −
 Eingezahlt) / Eingezahlt) und `total_return` als Alias für
 `total_return_twr`; mit Sparplan zeigt die Ausgabe beide Renditen.
@@ -1595,7 +1610,6 @@ fig = result.plot()                                    # alle Standard-Panels (m
 result.plot(style="compact")
 result.plot(style="custom", panels=["performance", "drawdown", "monthly"])
 result.plot(compare=result_ohne_steuer)
-result.plot(currency="€")
 
 simlev.export_dashboard(result, "backtest.pdf", width=16, height=10)
 simlev.plot_interactive(result, file="backtest.html")   # engine="plotly" für eine plotly-Figur
@@ -1615,9 +1629,8 @@ plot_dashboard(result)                                    # SVG, in Jupyter, Plu
 plot_dashboard(result; style = "compact")
 plot_dashboard(result; style = "custom", panels = ["performance", "drawdown", "monthly"])
 plot_dashboard(result; compare = result_ohne_steuer)
-plot_dashboard(result; currency = "€", file = "backtest.svg")
 
-export_dashboard(result, "backtest.svg"; width = 16, height = 10)   # auch .html; .pdf/.png über rsvg-convert
+export_dashboard(result, "backtest.svg"; width = 16, height = 10)   # immer SVG; PDF/PNG z. B. mit rsvg-convert
 plot_interactive(result; file = "backtest.html")
 ```
 
@@ -1642,72 +1655,63 @@ SimLev aus R kennt, muss nur wenige Schreibweisen umstellen:
 |---|---|---|
 | `NULL` | `None` | `nothing` |
 | `TRUE` / `FALSE` | `True` / `False` | `true` / `false` |
-| `NA` | `NaN` | `missing` (in Daten) bzw. `NA` |
+| `NA` | `simlev.NA` (numerisch) bzw. `None` | `SimLev.NA` (numerisch) bzw. `missing` |
 | `c(20, 400)` | `(20, 400)` oder `[20, 400]` | `[20, 400]` |
-| `list(A = "w1")` | `{"A": "w1"}` | `(A = "w1",)` |
-| `data.frame(...)` | `pandas.DataFrame(...)` | NamedTuple oder `DataFrame(...)` |
+| `c(us = "us_ret")`, `list(A = "w1")` | `{"us": "us_ret"}`, `{"A": "w1"}` | `(us = "us_ret",)`, `(A = "w1",)` |
+| `data.frame(...)` | `pandas.DataFrame(...)` | `RFrame(...)`; für `simulation()` auch NamedTuple oder `DataFrame(...)` |
 | `simulation(data, s, start_value = 1e4)` | `simlev.simulation(data, s, start_value=1e4)` | `simulation(data, s; start_value = 1e4)` |
 | `result$worth` | `result.worth` | `result.worth` |
 | `result$statistics$sharpe` | `result.statistics["sharpe"]` | `result.statistics.sharpe` |
 | `result$report$WORLD$total` | `result.report["WORLD"]["total"]` | `result.report["WORLD"].total` |
-| `print(result)`, `summary(result)` | `print(result)`, `result.summary()` | `display(result)`, `summary(result)` |
-| `plot(result)` | `result.plot()` | `plot_dashboard(result)` |
+| `print(x)` | `print(x)` | `display(x)` |
+| `summary(x)` | `simlev.summary(x)` oder `x.summary()` | `summary(result)`, allgemein `r_summary(x)` |
+| `plot(x)` | `x.plot()` oder `simlev.plot(x)` | `plot_dashboard(result)`, allgemein `r_plot(x)` |
+| `set.seed(42)` | `simlev.set_seed(42)` | `set_seed(42)` |
+| `bootstrap_probability(st, cagr > 0.05)` | `simlev.bootstrap_probability(st, "cagr > 0.05")` | `bootstrap_probability(st, "cagr > 0.05")` |
+| `function(df) signal_sma(df$INDEX, 200)` | `lambda df: simlev.signal_sma(df["INDEX"], 200)` | `df -> signal_sma(df["INDEX"], 200)` |
 
-Gegenüber dem Stand 54b5b4f betrafen die bewussten Abweichungen der Ports
-vom R-Paket nur Komfort, Darstellung und fehlerhafte Eingaben, nie
-Rechenergebnisse gültiger Eingaben. Die späteren Korrekturen und
-steuerrechtlichen Anpassungen der aktuellen R-Fassung 0.5.0 sind in Python
-und Julia noch nicht nachgezogen; dort weichen auch Rechenergebnisse ab (Steuern, Sparplan-
-Kennzahlen, Fondsmodus, später startende Assets u. a., siehe
-[Besteuerung](#besteuerung) und
-[Bitgleichheit](#bitgleichheit-zum-r-paket)). Daneben gilt:
+Python 0.5.0 und Julia 0.5.0 rechnen in allen Funktionen wie die aktuelle
+R-Fassung; die Unterschiede betreffen nur Schreibweisen und Komfort (siehe
+[`python/README.md`](python/README.md) und
+[`julia/README.md`](julia/README.md)). Daneben gilt:
 
+- **Bedingungen als Text** (`tactical_rules()`, `bootstrap_probability()`,
+  `regime_subset()`, `view_prob()`): R nimmt Ausdrücke, Python und Julia
+  nehmen Text und werten ihn mit demselben Auswerter in **R-Syntax** aus
+  (`"cagr > 0.05 & max_drawdown <= 0.3"`, `"!eq > 90"`, `"x %in% c(1, 2)"`,
+  mit R's Vorrangregeln, NA-Logik, Indizierung und `if`/`else`; geprüft an
+  über 1.000 Ausdrücken gegen R). Funktionsdefinitionen, Schleifen und
+  benannte Vektoren unterstützt der Auswerter nicht; statt Text geht
+  jeweils auch eine Funktion der Zielsprache.
+- **Argumentnamen**, die in der Zielsprache Schlüsselwörter sind, bekommen
+  einen Unterstrich: in Python `yield_`, `raise_` und `from_`, in Julia
+  z. B. `end_`.
+- **Zwischenstände** von `bootstrap_study(chunk_dir = …)` speichert Python
+  als Pickle, Julia in einem eigenen Textformat statt RDS.
 - Die **Kopfzeile des interaktiven Dashboards** zeigt in allen drei
-  Fassungen CAGR, Sharpe und Max. Drawdown (in R beim Stand 54b5b4f wegen
-  eines Fehlers „CAGR NA% · Sharpe NA“). Die aktuelle R-Fassung beschriftet
-  sie mit Sparplan als „CAGR (geldgewichtet)“ und „Max. Drawdown
-  (zeitgewichtet)“.
-- `export_html_dashboard()` ist im R-Paket ein Platzhalter. In Python und
-  Julia schreibt die Funktion das interaktive Dashboard.
+  Fassungen CAGR, Sharpe und Max. Drawdown, mit Sparplan als „CAGR
+  (geldgewichtet)“ und „Max. Drawdown (zeitgewichtet)“ (in R beim Stand
+  54b5b4f wegen eines Fehlers „CAGR NA% · Sharpe NA“). Das HTML von Python
+  und Julia ist byte-identisch zu R.
+- `export_html_dashboard()` ist in allen drei Fassungen nur ein
+  Platzhalter; das interaktive Dashboard schreibt `plot_interactive()`.
 - **Doppelte Datumswerte** führen in allen drei Fassungen zu einer
   Fehlermeldung (in R erst nach dem Stand 54b5b4f; vorher rechnete R
   stillschweigend mit einem verschobenen Kalender weiter).
 - Das **statische Dashboard** zeichnet jede Sprache mit eigenen Mitteln
-  (R: Base-Grafik, Python: matplotlib, Julia: SVG). Panels und
-  Beschriftungen entsprechen dem Stand 54b5b4f; die späteren Änderungen in
-  R (deutsche Beschriftungen, Kennzahlen wie in `statistics`, siehe unten)
-  fehlen in Python und Julia noch.
-- **Sprache der Ausgaben:** Die aktuelle R-Fassung gibt alle Meldungen,
+  (R: Base-Grafik, Python: matplotlib, Julia: SVG). Python und Julia zeigen
+  dieselben Panels, deutschen Beschriftungen und Kennzahlen wie R (die
+  Grafik selbst ist nicht bitgleich, die dargestellten Daten schon). Die
+  `plot()`-Methoden der übrigen Ergebnisobjekte zeichnen in Python mit
+  matplotlib, in Julia als SVG.
+- **Sprache der Ausgaben:** Alle drei Fassungen geben alle Meldungen,
   `print()`, `summary()` und das Dashboard auf Deutsch aus („SimLev
-  Simulationsergebnisse“, „Wertentwicklung“, „Endwert“, „Risiko“ …). Python
-  und Julia zeigen noch die englischen Bezeichnungen des Stands 54b5b4f
-  („Performance“, „Final Value“, „Risk“ …).
-
-- **Backcast, Bootstrap und Entnahmephase** (`backcast_fit()`,
-  `bootstrap()`, `bootstrap_study()`, `withdrawal_simulation()` u. a.) gibt
-  es bisher nur im R-Paket, ebenso `deep_analysis()`, die
-  Sensitivitätsfunktionen, relative Rebalancing-Bänder
-  (`balance_thresh_type = "relative"`), Parametersuche mit
-  Überanpassungs-Prüfung, Datenaufbereitung, Abhängigkeitsanalyse,
-  taktische Allokation, Optimierung, synthetische Anleihereihen, Szenarien,
-  Planung und statistische Prüfungen. Ordergebühren, Kirchensteuer,
-  `harvest_mode`, der Einkommensteuertarif (`taxable_income`,
-  `tax_tariff`, `read_tax_tariff()`) und die neuen Ergebniselemente der
-  aktuellen R-Fassung (`twr_index`, `invested`, `external_flows`, `undefined_metrics`,
-  `open_lots`) sind dagegen Teil der R-Engine und in den Ports noch nicht
-  nachgezogen.
-
-Aus dem Stand 54b5b4f übernommene Eigenheiten der Ports:
-
-- Das Statistik-Panel des Dashboards zeigt in Python und Julia eine
-  vereinfachte „Sharpe Ratio“ `(CAGR − 2 %) / (σ · √252)`. Sie weicht
-  deshalb von `statistics$sharpe` ab; maßgeblich ist der Wert in
-  `statistics`. Die aktuelle R-Fassung zeigt im Dashboard (`plot()`) Sharpe, Volatilität,
-  rollierende und monatliche Renditen übereinstimmend mit `x$statistics`
-  (mit Sparplan zuflussbereinigt).
-- Das Argument `spread` von `simulation()` hat keine Wirkung. Spreads
-  werden je Asset über `asset_spread` gesetzt; die aktuelle R-Fassung warnt, wenn `spread`
-  angegeben wird.
+  Simulationsergebnisse“, „Wertentwicklung“, „Endwert“, „Risiko“ …).
+- `result.trades` (alle Buchungen je Asset) gibt es nur in Python und
+  Julia.
+- Das Argument `spread` von `simulation()` hat in allen Fassungen keine
+  Wirkung. Spreads werden je Asset über `asset_spread` gesetzt; SimLev
+  warnt, wenn `spread` angegeben wird.
 
 Weitere sprachspezifische Hinweise stehen in den READMEs der Unterordner
 [`r/`](r/README.md), [`python/`](python/README.md) und
@@ -1715,11 +1719,15 @@ Weitere sprachspezifische Hinweise stehen in den READMEs der Unterordner
 
 ## Bitgleichheit zum R-Paket
 
-„Bitgleich“ heißt: Für dieselben Eingaben liefern Python und Julia dieselben
-IEEE-754-Gleitkommazahlen wie das R-Paket im Stand 54b5b4f, ohne jede
-Toleranz (zur aktuellen R-Fassung siehe unten). Das betrifft alle
-Tageswerte, alle Kennzahlen, alle Steuerwerte, die Ausgabe von
-`print(result)` und die Detailprotokolle von `details = TRUE`.
+„Bitgleich“ heißt: Für dieselben Eingaben liefert ein Port dieselben
+IEEE-754-Gleitkommazahlen wie das R-Paket, ohne jede Toleranz. Python 0.5.0
+und Julia 0.5.0 sind bitgleich zur aktuellen R-Fassung 0.5.0, und zwar für
+`simulation()` (alle Tageswerte, Kennzahlen, Steuerwerte, die Ausgabe von
+`print(result)` und die Detailprotokolle von `details = TRUE`) und für alle
+übrigen Funktionen (Ergebnisse, Druck- und Konsolenausgaben, Warnungen und
+Fehlermeldungen). Beide Ports werden streng geprüft: Sie unterscheiden wie
+R `NA` und `NaN` (in Python ist `simlev.NA` R's `NA`, ein gewöhnliches
+`nan` R's `NaN`) und müssen auch das Vorzeichen der Null treffen.
 
 Dafür bilden die Ports nicht nur die Logik, sondern auch die
 **Rechenweise** von R exakt nach:
@@ -1727,30 +1735,69 @@ Dafür bilden die Ports nicht nur die Logik, sondern auch die
 - **80-Bit-`long double`.** R summiert bei `sum()`, `mean()`, `var()`,
   `cumsum()`, `prod()` und `rowSums()` intern mit dem 80-Bit-Format der
   x87-FPU. Python nutzt dafür `numpy.longdouble` in derselben Reihenfolge.
-  Julia kennt diesen Typ nicht und enthält deshalb einen eigenen Typ `F80`,
-  der die x87-Arithmetik einschließlich Rundung, Über- und Unterlauf und
-  NaN-Regeln in Software bitgenau nachbildet.
+  Julia kennt diesen Typ nicht; SimLev.jl rechnet mit einem eigenen Typ
+  `F80`, auf x86-64 direkt mit dem x87-Format der Hardware (über
+  `llvmcall`), auf anderen Prozessoren mit einem Software-Nachbau, der
+  Rundung, Über- und Unterlauf und NaN-Regeln bitgenau nachbildet.
+- **Mathematische Funktionen** (`exp`, `log`, `log1p`, `pow` …) kommen wie
+  in R aus glibc-libm (Python über das Modul `math`, Julia per `ccall`),
+  weil die Funktionen von numpy und Julia in den letzten Bits abweichen.
 - **Potenzen** folgen R's Sonderregeln (`x^2` als `x*x`, sonst `pow()` der
   C-Bibliothek). Kalender, `round()`, `format()`, `sprintf()` und Modulo
   verhalten sich wie in R.
-- Die **C++-Kerne** des R-Pakets (FIFO, Steuern, Markt-Updates) sind Zeile
-  für Zeile übertragen.
+- Die **C++-Kerne** des R-Pakets (FIFO, Steuern, Markt-Updates, Bootstrap,
+  Entnahme, Abhängigkeiten, Optimierung und Signale) sind Zeile für Zeile
+  übertragen.
+- **R-Interna.** Für die Erweiterungen bilden Python in `simlev/_r/` und
+  Julia in `julia/src/r/` nach, was R selbst beisteuert: Zufallszahlen
+  (Mersenne-Twister, L'Ecuyer-CMRG-Streams, `sample.int`, `rnorm` …),
+  Verteilungsfunktionen aus nmath, die benötigten stats-Funktionen
+  (`quantile`, `cor`, `optim`, `optimize`, `uniroot`, `lm`, `glm`,
+  `smooth.spline`, `density`, `fft`, `hclust` …), lineare Algebra wie die
+  Referenz-BLAS/LAPACK und LINPACK sowie Formatierung und Druckausgabe;
+  Julia zusätzlich einen Auswerter für Bedingungen in R-Syntax.
 
 **So wurde es geprüft:** [`golden/golden_cases.R`](golden/golden_cases.R)
-und [`golden/stress_cases.R`](golden/stress_cases.R) erzeugen Szenarien,
-rechnen sie mit dem R-Paket und speichern Eingaben und Ergebnisse binär
-exakt. Die Vergleichswerkzeuge der Ports rechnen dieselben Szenarien nach
-und vergleichen jeden Wert Bit für Bit.
+und [`golden/stress_cases.R`](golden/stress_cases.R) erzeugen Szenarien für
+die Engine, die Generatoren in [`golden/modules/`](golden/modules/) Fälle
+für alle übrigen Funktionen; sie rechnen mit dem R-Paket und speichern
+Eingaben und Ergebnisse binär exakt. Die Vergleichswerkzeuge der Ports
+rechnen dieselben Fälle nach und vergleichen jeden Wert Bit für Bit.
 
-| Satz | Python | Julia |
+| Satz | Python 0.5.0 | Julia 0.5.0 |
 |---|---|---|
-| Gezielte Fälle für jeden Steuer- und Sonderpfad (Vorabpauschale mit Zwangsverkauf, 29.-Februar-Lots nach § 23, Splits, LOCF-Lücken, Event-Rebalancing, Günstigerprüfung u. a.) plus Zufallsfälle | 658, alle bitgleich | 706, alle bitgleich |
-| Stressfälle (30 Jahre, Totalverlust-Hebel, mehrere Signal-Assets, konstante Preise, Schalttage, Extremwerte, Fehlerpfade) | – | 1.631, alle bitgleich bis auf eine bewusste Abweichung (doppelte Datumswerte) |
+| Engine: gezielte Fälle für jeden Steuer- und Sonderpfad (Vorabpauschale mit Zwangsverkauf, 29.-Februar-Lots nach § 23, Splits, LOCF-Lücken, Event-Rebalancing, Günstigerprüfung u. a.) plus Zufallsfälle | 68 in `golden/cases/`, alle bitgleich (strikt, NA ≠ NaN) | 68, alle bitgleich (strikt, NA ≠ NaN) |
+| Engine: Stressfälle (30 Jahre, Totalverlust-Hebel, mehrere Signal-Assets, konstante Preise, Schalttage, Extremwerte, Fehlerpfade) | 37 in `golden/extra/`, alle bitgleich (strikt) | 37, alle bitgleich (strikt) |
+| Engine: frisch erzeugte Zufalls- und Stressfälle beider Generatoren | 669, alle bitgleich | 469, alle bitgleich |
+| Engine: Fälle mit den neuen Argumenten (`order_fee`, `dca_fee`, `church_tax`, `harvest_*`, `taxable_income`, `tax_tariff`) | 750, alle bitgleich | 92 eigene Fälle, alle bitgleich (strikt) |
+| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS (Module `evd`, `rugarch`, `imputets`) und die R-Interna (29 Module in `golden/modules/`) | 4.536, alle bitgleich (strikt, NA ≠ NaN, mit Vorzeichen der Null) | 4.536, alle bitgleich (strikt, NA ≠ NaN, mit Vorzeichen der Null) |
 
-Ein Teil dieser Fälle liegt im Ordner [`golden/`](golden/) und wird von
-den Testsuiten der Ports geprüft: die 68 Fälle in `golden/cases/` von
-Python und Julia, die 37 Stressfälle in `golden/extra/` zusätzlich von
-Julia. Die Tabelle beschreibt den Stand 54b5b4f.
+Die Fälle in [`golden/`](golden/) prüfen beide Suiten: die 105
+Engine-Fälle in `golden/cases/` und `golden/extra/` vollständig und die
+4.536 Modul-Fälle in Python vollständig, in Julia standardmäßig in einer
+Auswahl und mit `SIMLEV_FULL_TESTS=1` vollständig.
+
+**Optionale R-Pakete.** Ist evd, rugarch bzw. imputeTS installiert, nimmt
+R einen anderen Weg: `.fit_tail` (Tail-Modell im Bootstrap, Verfahren
+`"evt"`) schätzt die GPD per `evd::fpot`; `.fit_garch11`
+(Bootstrap-Verfahren `garch` und `gjr_garch`, Kopplung weiterer Reihen,
+`dcc_fit()`, `dependence_analysis()`) schätzt per `rugarch::ugarchfit`;
+`.fill_na` (Backcast mit `fill = "stine"` bzw. `index_fill = "stine"`)
+interpoliert per `imputeTS::na_interpolation(option = "stine")` nach
+Stineman statt linear mit Hinweis. Python und Julia bilden die drei
+Pakete bitgleich nach – evd 2.3-7.1 `fpot`; rugarch 1.5-6 `ugarchfit` mit
+Rsolnp 1.16 `solnp`, numDeriv-Hesse-Matrix, `stats::nlminb` und `gosolnp`
+(mit truncnorm 1.0-9) als Ausweichwegen; imputeTS 3.4 mit stinepack 1.5 –
+und verhalten sich standardmäßig wie R mit allen drei Paketen.
+`SIMLEV_R_SUGGESTS=none` bildet R ohne die Pakete nach (`optim`, Momente
+bzw. lineare Interpolation), eine Liste wie `SIMLEV_R_SUGGESTS=evd,imputeTS`
+nur die genannten. gosolnp (zufällige Neustarts) erreicht die
+Solver-Kette in R bei etwa 1 % zufälliger Reihen; wie R setzt er dabei den
+globalen Zufallszustand aus der Uhrzeit (`set.seed` mit den
+Unix-Sekunden), das Ergebnis hängt dann in R wie in den Ports von der
+Sekunde des Aufrufs ab. `SIMLEV_R_SYS_TIME` (Sekunden seit 1970) stellt
+die Uhr der Ports fest. MSGARCH, plotly und TTR gelten als nicht
+installiert; die MS-GARCH-Verfahren melden wie R, dass das Paket fehlt.
 
 **Aktuelle R-Fassung 0.5.0:** Nach dem Stand 54b5b4f korrigiert das
 R-Paket Rechenfehler der Engine (Fondsmodus, Splits mit ganzen Anteilen,
@@ -1761,34 +1808,62 @@ Besteuerung nach geltendem Recht um (Vorabpauschale, Verlustverrechnung,
 Kennzahlen mit Sparplan geld- bzw. zeitgewichtet, kennzeichnet nicht
 definierte Kennzahlen mit Ursache und gibt alle Meldungen und Ausgaben auf
 Deutsch aus. Alle 105 Golden-Fälle sind mit der aktuellen R-Fassung neu
-erzeugt. Python und Julia (0.1.0) rechnen noch auf dem Stand 54b5b4f:
-Python trifft keinen der 68 Fälle in `golden/cases/` vollständig (die
-Druckausgabe weicht in allen ab); nur in 2 Fällen (`f18`, `f19`) sind alle
-Zahlenfelder noch bitgleich. Die Bitgleichheits-Tests der Python-Suite
-schlagen für alle 68 Fälle fehl; Julia wurde gegen die neuen Fälle nicht
-geprüft. Was sich geändert hat, steht in [`r/NEWS.md`](r/NEWS.md).
+erzeugt. Python 0.5.0 und Julia 0.5.0 haben alle Änderungen übernommen und
+treffen alle 105 Fälle bitgleich, einschließlich Druckausgabe. Was sich
+geändert hat, steht in [`r/NEWS.md`](r/NEWS.md),
+[`python/NEWS.md`](python/NEWS.md) und [`julia/NEWS.md`](julia/NEWS.md).
 
-**Plattformen:** Die Referenz ist R unter Linux x86-64. Python ist dort
-bitgleich, wo `numpy.longdouble` 80 Bit hat (Linux x86-64); auf Plattformen
-mit 64-Bit-`long double` wie macOS auf Apple Silicon prüfen die Tests mit
-einer Toleranz von 1e-9. Julia rechnet `F80` in Software und ist daher
-plattformunabhängig bitgleich bis auf `pow()` aus der C-Bibliothek: Unter
-macOS und Windows können davon abhängige Werte (Fondsgebühren, CAGR, einige
-Kennzahlen) im letzten Bit abweichen.
+**Plattformen:** Die Referenz ist R unter Linux x86-64 (die Modul-Fälle
+entstanden mit R 4.3.3). Python ist
+dort bitgleich, wo `numpy.longdouble` 80 Bit hat (Linux x86-64) und die
+mathematischen Funktionen aus glibc-libm kommen; numpy-Transzendental-
+funktionen verwendet SimLev bewusst nicht, weil sie auf Rechnern mit
+AVX-512 abweichen. Eigenvektoren (`eigen()`, u. a. in
+`portfolio_optimize()`) holt Python wie R aus der Referenz-LAPACK des
+Systems (Pfad über `SIMLEV_LAPACK` wählbar); fehlt sie, rechnen scipy bzw.
+numpy ohne Bitgleichheitsgarantie (mit einer Warnung). Auf Plattformen mit 64-Bit-`long
+double` wie macOS auf Apple Silicon überspringt die Python-Suite die
+Bitgleichheits-Tests. Grafiken sind in den
+Ports nicht bitgleich, die berechneten Daten schon. Julia ist unter Linux
+x86-64 mit glibc geprüft; Eigenvektoren holt es wie Python aus der
+Referenz-LAPACK des Systems (`SIMLEV_LAPACK`, ohne sie mit Warnung über
+`LinearAlgebra.eigen`, ohne Bitgleichheitsgarantie). Die libm-Aufrufe der
+R-Interna gehen in Julia unter Linux an glibc (`libm.so.6`); unter macOS
+und Windows lädt das Paket mit der dortigen C-Bibliothek, ist dort aber
+nicht geprüft und nicht bitgleich zugesagt.
+
+**Zeichenketten-Reihenfolge.** R sortiert und vergleicht Zeichenketten
+(`sort`, `order`, `rank`, `factor`-Stufen, `table`, `split`, `<`/`>`)
+nicht nach Codepunkten, sondern mit der ICU-Kollation des Locales; unter
+`LC_ALL=C.UTF-8` ist das der Collator „root“ (`a A ä b B`), unter
+`LC_ALL=C` die Byte-Reihenfolge. Python (ctypes) und Julia (ccall) bilden
+das mit der System-ICU nach (`libicui18n.so.<N>`, Debian/Ubuntu: Paket
+`libicu<N>`; Pfad über `SIMLEV_ICU`) und richten sich wie R nach den
+Locale-Variablen. `SIMLEV_COLLATE=C` erzwingt die Byte-Reihenfolge,
+`SIMLEV_COLLATE=icu:root` die Reihenfolge von R unter `C.UTF-8` (so prüfen
+die Testsuiten, unabhängig vom Locale des Rechners). Ohne ICU wird nach
+Codepunkten verglichen, mit einer Warnung; Ergebnisse mit Zeichen-Sortierung
+sind dann nicht bitgleich.
 
 ## Geschwindigkeit
 
-Gemessen auf derselben Maschine (Mittel aus fünf Läufen, Julia nach dem
-Vorkompilieren):
+Gemessen mit R 0.5.0, Python 0.5.0 und Julia 0.5.0 auf derselben Maschine
+(Linux x86-64, zwei Kerne; R 4.3.3, Python 3.13, Julia 1.13.2), Mittel aus
+fünf Läufen nach einem ersten Aufruf, Julia nach dem Vorkompilieren:
 
 | Szenario | R | Python | Julia |
 |---|---|---|---|
-| 30 Jahre, 3 Assets, Sparplan, jährliches Rebalancing, Steuern | 0,23 s | 0,077 s | **0,016 s** |
-| 30 Jahre, Fondsmodus, Splits, ganze Anteile, Schwellen-Rebalancing | 0,13 s | 0,048 s | **0,021 s** |
-| 3,5 Jahre, 3 Assets, zwei Signal-Assets, § 23, Sparplan | 0,071 s | 0,028 s | **0,002 s** |
+| 30 Jahre, 3 Assets (Aktien-ETF, Renten-ETF, ETC mit Lieferanspruch), Sparplan, jährliches Rebalancing, Steuern | 0,17 s | 0,12 s | **0,033 s** |
+| 30 Jahre, Hebelzertifikat und Renten-ETF, Fondsmodus, Splits, ganze Anteile, Schwellen-Rebalancing | 0,17 s | 0,09 s | **0,012 s** |
+| 3,5 Jahre, 3 Assets, zwei Signal-Assets, § 23, Sparplan | 0,09 s | 0,026 s | **0,003 s** |
 
-Die Messung beschreibt den Stand 54b5b4f; die aktuelle R-Fassung ist für
-diese Tabelle nicht neu gemessen.
+Alle drei Fassungen rechneten dieselben Kursdaten (synthetisch, in R
+erzeugt und als CSV mit voller Genauigkeit eingelesen) und kamen in jedem
+Szenario auf denselben Endwert. Die Messskripte liegen nicht im
+Repository. Nicht enthalten ist die Kompilierung beim ersten Aufruf in
+einer Julia-Sitzung (hier rund 2 Sekunden für das erste `simulation()`).
+Die frühere Tabelle für den Stand 54b5b4f (Julia 0.1.0) beruhte auf
+anderen Szenarien und ist mit diesen Werten nicht vergleichbar.
 
 Parameterstudien mit Hunderten von Läufen sind damit in allen drei
 Fassungen problemlos möglich.
@@ -1811,8 +1886,7 @@ Kursbewegungen. SimLev nutzt das und unterscheidet zwei Pfade:
 - **Keine Steuer- oder Anlageberatung.** SimLev ist ein Analysewerkzeug.
   Die Steuerlogik ist sorgfältig umgesetzt, bildet aber nicht jeden
   Einzelfall ab (z. B. ausländische Quellensteuer, Ausschüttungen als
-  eigene Zahlungsströme; Kirchensteuer und Ordergebühren gibt es bisher nur
-  im R-Paket). Für verbindliche Aussagen
+  eigene Zahlungsströme). Für verbindliche Aussagen
   wenden Sie sich an eine Steuerberaterin oder einen Steuerberater.
 - **Die Qualität der Ergebnisse hängt von den Eingabedaten ab.** Achten Sie
   auf bereinigte Kursreihen (Ausschüttungen, Splits – außer Sie lassen
@@ -1829,11 +1903,14 @@ SimLev-Repos/
 ├── README.md          diese Seite
 ├── LICENSE.md         GPL-3
 ├── r/                 R-Paket (DESCRIPTION, R/, src/, man/, tests/, vignettes/)
-├── python/            Python-Paket (pyproject.toml, simlev/, tests/, tools/, examples/)
-├── julia/             Julia-Paket (Project.toml, src/, test/, tools/, examples/)
+├── python/            Python-Paket (pyproject.toml, simlev/ mit _r/, tests/, tools/, examples/)
+├── julia/             Julia-Paket (Project.toml, src/ mit r/, data/, test/, tools/, examples/)
 ├── golden/            gemeinsame Referenzfälle aus R und ihre Generatoren
-│   ├── cases/         68 Golden-Master-Fälle (Python und Julia)
-│   ├── extra/         37 Stressfälle (Julia)
+│   ├── cases/         68 Golden-Master-Fälle der Engine (Python und Julia)
+│   ├── extra/         37 Stressfälle der Engine (Python und Julia)
+│   ├── modules/       4.536 Referenzfälle aller Funktionen in 29 Modulen
+│   │                  (je Fall R-, Python- und Julia-Code), Generatoren
+│   │                  gen_<modul>.R und ref_tools.R
 │   ├── golden_cases.R
 │   └── stress_cases.R
 └── docs/              Logo, Hex-Sticker, Dashboard-Abbildungen
@@ -1841,9 +1918,12 @@ SimLev-Repos/
 
 Jede Fassung ist ein eigenständiges Paket mit eigener Versionsnummer
 (R: `r/DESCRIPTION`, Python: `python/pyproject.toml`, Julia:
-`julia/Project.toml`). Die Änderungen des R-Pakets je Version stehen in
-[`r/NEWS.md`](r/NEWS.md). Wer `golden/` ändert, prüft beide Ports mit den
-Testsuiten unten.
+`julia/Project.toml`). Die Änderungen je Version stehen in
+[`r/NEWS.md`](r/NEWS.md), [`python/NEWS.md`](python/NEWS.md) und
+[`julia/NEWS.md`](julia/NEWS.md); Hinweise für die Weiterentwicklung der
+Ports in [`python/DEVELOPING.md`](python/DEVELOPING.md) und
+[`julia/DEVELOPING.md`](julia/DEVELOPING.md). Wer `golden/` ändert, prüft
+beide Ports mit den Testsuiten unten.
 
 **Tests ausführen:**
 
@@ -1864,12 +1944,17 @@ rcmdcheck::rcmdcheck("r")
 ``` bash
 cd python
 pip install ".[test]"
-pytest                       # 124 Tests, davon 68 Bitgleichheits-Tests gegen R
+pytest                                  # 5.762 Tests, alle bestanden
+python tools/compare_golden.py          # Engine: golden/cases und golden/extra (105 Fälle)
+python tools/compare_reference.py       # alle Funktionen: golden/modules (4.536 Fälle)
 ```
 
-Mit den neu erzeugten Golden-Fällen der aktuellen R-Fassung schlagen alle 68
-Bitgleichheits-Tests fehl (in 2 Fällen nur wegen der Druckausgabe), bis die Python-Fassung nachgezogen ist (siehe
-[Bitgleichheit](#bitgleichheit-zum-r-paket)).
+Die Suite enthält 4.536 Modul-Referenzfälle und die 105 Golden-Master-Fälle
+der Engine; die übrigen Tests prüfen Engine und R-Interna. Einzelne Module
+oder Fälle prüft `python tools/compare_reference.py <modul> [-k id] [-v]`
+bzw. `python tools/compare_golden.py [ordner …] [-k fall …] [-v]`. Auf
+Plattformen ohne 80-Bit-`long double` werden die Bitgleichheits-Tests
+übersprungen.
 
 </details>
 
@@ -1878,17 +1963,30 @@ Bitgleichheits-Tests fehl (in 2 Fällen nur wegen der Druckausgabe), bis die Pyt
 
 ``` bash
 cd julia
-julia --project -e 'using Pkg; Pkg.test()'                     # Bitgleichheits-Tests gegen golden/cases und golden/extra
-julia --project tools/compare_golden.jl ../golden/cases        # Golden-Master-Abgleich mit Ausgabe
+julia --project -e 'using Pkg; Pkg.test()'                     # 946 Tests, alle bestanden
+SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()' # dazu alle 4.536 Modul-Referenzfälle
+julia --project tools/compare_golden.jl ../golden/cases        # Engine: ein Ordner (auch ../golden/extra)
+julia --project tools/compare_reference.jl                     # alle Funktionen: golden/modules (4.536 Fälle)
 ```
+
+`Pkg.test()` prüft die 105 Golden-Master-Fälle der Engine vollständig
+(strikt, NA ≠ NaN), von den Modul-Referenzfällen eine Auswahl von bis zu
+vier je Modul, dazu `F80`, Engine, Ausgabe und den Auswerter für
+Bedingungen. Einzelne Module oder Fälle prüft
+`julia --project tools/compare_reference.jl <modul> [-k id] [-v]` bzw.
+`julia --project tools/compare_golden.jl <ordner> [fall …]`.
 
 </details>
 
 Die Tests finden die Referenzfälle über den relativen Pfad `../golden`.
-Liegen sie woanders, setzen Sie die Umgebungsvariable `SIMLEV_GOLDEN_DIR`.
+Liegen sie woanders, setzen Sie die Umgebungsvariable `SIMLEV_GOLDEN_DIR`
+(Python zusätzlich `SIMLEV_MODULE_DIR` für `golden/modules`; in Julia
+nimmt `tools/compare_reference.jl` den Ordner über `--dir`).
 
 **Neue Referenzfälle** erzeugen Sie mit R, dem R-Paket SimLev und
-`jsonlite`; Details stehen in [`golden/README.md`](golden/README.md).
+`jsonlite` (`golden/golden_cases.R`, `golden/stress_cases.R` und
+`golden/modules/gen_<modul>.R`); Details stehen in
+[`golden/README.md`](golden/README.md).
 
 ## Hilfe und Mitwirken
 

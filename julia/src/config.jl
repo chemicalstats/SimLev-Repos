@@ -1,5 +1,10 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Asset-Konfiguration und Strategie-Objekte (Port von asset_config.R / strategy.R)
+#
+# AssetConfig, Strategy (und SimLevResult in result.jl) sind dünne Hüllen um
+# eine RList: Zugriff wie in R über `x.feld` bzw. `x["feld"]`, `keys(x)` in
+# R-Reihenfolge, `r_class(x)` liefert die S3-Klassen, `show(io, MIME"text/plain"(), x)`
+# die Druckausgabe der R-Methode.
 # ─────────────────────────────────────────────────────────────────────────────
 
 const ASSET_CLASSES = ("etf", "etn", "etc", "certificate", "etn_standard", "etn_deliverable")
@@ -8,335 +13,422 @@ const VALID_REGIMES = ("investment_fund", "capital_gains", "private_sale")
 const _FIELDS = ("asset_class", "action_type", "asset_share", "asset_spread", "asset_bonus",
                  "deliverable", "asset_start", "tax_regime", "signal_buy", "signal_sell")
 
-"Nachbildung von R's `match.arg` (inklusive eindeutiger Präfixe)."
-function match_arg(value, choices, argname::AbstractString)
+"Gemeinsame Methoden der RList-Hüllen (`T` hat das Feld `data::RList`)."
+macro _rlist_wrapper(T, classes)
+    quote
+        Base.length(x::$T) = length(getfield(x, :data))
+        Base.iterate(x::$T, i::Int = 1) = iterate(getfield(x, :data), i)
+        Base.getindex(x::$T, k::AbstractString) = getfield(x, :data)[k]
+        Base.getindex(x::$T, k::Symbol) = getfield(x, :data)[String(k)]
+        Base.getindex(x::$T, i::Integer) = getfield(x, :data)[i]
+        Base.setindex!(x::$T, v, k::AbstractString) = (getfield(x, :data)[k] = v; x)
+        Base.setindex!(x::$T, v, k::Symbol) = (getfield(x, :data)[String(k)] = v; x)
+        Base.haskey(x::$T, k::AbstractString) = haskey(getfield(x, :data), k)
+        Base.haskey(x::$T, k::Symbol) = haskey(getfield(x, :data), String(k))
+        Base.get(x::$T, k::Union{AbstractString,Symbol}, d) = get(getfield(x, :data), String(k), d)
+        Base.keys(x::$T) = keys(getfield(x, :data))
+        Base.values(x::$T) = values(getfield(x, :data))
+        Base.delete!(x::$T, k::AbstractString) = (delete!(getfield(x, :data), k); x)
+        Base.getproperty(x::$T, s::Symbol) = s === :data ? getfield(x, :data) : getfield(x, :data)[String(s)]
+        Base.setproperty!(x::$T, s::Symbol, v) = (getfield(x, :data)[String(s)] = v)
+        Base.propertynames(x::$T, private::Bool = false) = Tuple(Symbol.(keys(getfield(x, :data))))
+        Base.copy(x::$T) = $T(copy(getfield(x, :data)))
+        SimLev.r_class(x::$T) = String[$(classes)...]
+        function Base.show(io::IO, ::MIME"text/plain", x::$T)
+            f = _dispatch(_PRINTERS, x, "print")
+            f === nothing ? print(io, x) : f(io, x)
+        end
+    end |> esc
+end
+
+"Validierte Konfiguration eines Assets (R-Klasse `asset_config`); Felder wie in R."
+struct AssetConfig <: AbstractDict{String,Any}
+    data::RList
+end
+@_rlist_wrapper AssetConfig ("asset_config", "list")
+Base.show(io::IO, a::AssetConfig) = print(io, "AssetConfig(", r_deparse(a["asset_class"]), ", ", r_deparse(a["action_type"]),
+                                          ", ", r_deparse(a["asset_share"]), ")")
+
+"Geordnete Sammlung benannter AssetConfig-Objekte (R-Klasse `strategy`)."
+struct Strategy <: AbstractDict{String,Any}
+    data::RList
+end
+@_rlist_wrapper Strategy ("strategy", "list")
+Base.show(io::IO, s::Strategy) = print(io, "Strategy(", join(keys(s), ", "), ")")
+
+# ── match.arg und Hilfen ─────────────────────────────────────────────────────
+
+function _pmatch(value::AbstractString, choices)
+    i = findfirst(==(value), choices)
+    i !== nothing && return i
+    isempty(value) && return nothing
+    hits = [i for (i, c) in enumerate(choices) if startswith(c, value)]
+    return length(hits) == 1 ? hits[1] : nothing
+end
+
+"Nachbildung von R's `match.arg` (eindeutige Präfixe, R-Meldungen)."
+function match_arg(value, choices, argname::AbstractString = "arg")
     choices = Tuple(String(c) for c in choices)
     value === nothing && return choices[1]
     if value isa Union{AbstractVector,Tuple}
-        Tuple(String(v) for v in value) == choices && return choices[1]
-        length(value) == 1 || throw(ArgumentError("'$argname' must be of length 1"))
-        value = first(value)
+        Tuple(string(v) for v in value) == choices && return choices[1]
+        all(v -> v isa AbstractString, value) || error("'arg' must be NULL or a character vector")
+        length(value) > 1 && error("'arg' must be of length 1")
+        value = isempty(value) ? "" : first(value)
     end
+    value isa Union{AbstractString,Symbol} || error("'arg' must be NULL or a character vector")
     v = String(string(value))
-    v in choices && return v
-    hits = isempty(v) ? String[] : [c for c in choices if startswith(c, v)]
-    length(hits) == 1 && return hits[1]
-    throw(ArgumentError("'arg' should be one of " * join(("\"$c\"" for c in choices), ", ") *
-                        " (argument '$argname')"))
+    i = _pmatch(v, choices)
+    if i === nothing
+        chs = unique([c for c in choices if !isempty(c)])
+        error((length(chs) == 1 ? "'arg' should be " : "'arg' should be one of ") * join(("“$(c)”" for c in chs), ", "))
+    end
+    return choices[i]
 end
 
-"""
-    AssetConfig
+_is_num1(x) = x isa Real && !(x isa Bool) && !isnan(Float64(x))
 
-Validierte Konfiguration eines Assets (R-Klasse `asset_config`). Felder:
-`asset_class`, `action_type`, `asset_share`, `asset_spread`, `asset_bonus`,
-`deliverable`, `asset_start`, `tax_regime`, `signal_buy`, `signal_sell`.
-"""
-struct AssetConfig
-    asset_class::String
-    action_type::String
-    asset_share::Float64
-    asset_spread::Float64
-    asset_bonus::Float64
-    deliverable::Bool
-    asset_start::Union{Nothing,Date}
-    tax_regime::String
-    signal_buy::Union{Nothing,String}
-    signal_sell::Union{Nothing,String}
+"Klassenname wie `class(x)[1]` in R (für Meldungen)."
+function _r_class1(@nospecialize(x))
+    x === nothing && return "NULL"
+    cl = r_class(x)
+    isempty(cl) || return cl[1]
+    x isa Bool && return "logical"
+    x isa Integer && return "integer"
+    x isa Real && return "numeric"
+    x isa AbstractString && return "character"
+    x isa Date && return "Date"
+    x isa DateTime && return "POSIXct"
+    x isa Function && return "function"
+    x isa RFrame && return "data.frame"
+    x isa AbstractMatrix && return "matrix"
+    if x isa AbstractVector
+        T = Base.nonmissingtype(eltype(x))
+        T <: Bool && return "logical"
+        T <: Integer && return "integer"
+        T <: Real && return "numeric"
+        T <: AbstractString && return "character"
+        T <: Date && return "Date"
+        return "list"
+    end
+    (x isa AbstractDict || x isa NamedTuple || x isa Tuple) && return "list"
+    return string(nameof(typeof(x)))
 end
 
-_opt_date(::Nothing) = nothing
-_opt_date(d::Date) = d
-_opt_date(d) = from_days(to_days(d))
-_opt_str(::Nothing) = nothing
-_opt_str(s) = String(string(s))
+"Einheitliche Sicht auf benannte Listen (RList, Dict, NamedTuple, Pair-Vektor, Hüllen)."
+_is_mapping(x) = x isa AbstractDict || x isa NamedTuple || x isa AbstractVector{<:Pair}
+_kvpairs(x::NamedTuple) = [String(k) => v for (k, v) in pairs(x)]
+_kvpairs(x::AbstractVector{<:Pair}) = [String(string(p.first)) => p.second for p in x]
+_kvpairs(x::AbstractDict) = [String(string(k)) => v for (k, v) in x]
+
+_to_date_or_nothing(x) = (z = _as_date(x); z === nothing ? nothing : from_days(z))
 
 """
     asset_config(asset_class = "etf", action_type = "bnh", asset_share = 1.0,
-                 asset_spread = 0.1, asset_bonus = 0.0; deliverable = false,
-                 asset_start = nothing, tax_regime = nothing,
-                 signal_buy = nothing, signal_sell = nothing)
+                 asset_spread = 0.1, asset_bonus = 0.0, deliverable = false,
+                 asset_start = nothing, tax_regime = nothing, signal_buy = nothing,
+                 signal_sell = nothing)
 
-Erstellt und validiert die Konfiguration eines Assets. Raten folgen der
-Paket-Konvention **in Prozent**: `asset_spread = 0.1` bedeutet 0,1 % vollen
-Bid-Ask-Spread, `asset_bonus = 30` bedeutet 30 % Teilfreistellung.
-`asset_share` ist ein relatives Zielgewicht in (0, 1].
-
-Die ersten fünf Argumente können positionell (wie in R) oder als
-Schlüsselwort übergeben werden.
+Asset-Konfiguration erstellen und prüfen (R: `asset_config()`). Alle Argumente
+dürfen positionell (Reihenfolge wie in R) oder als Schlüsselwort angegeben
+werden. Raten in Prozent: `asset_spread = 0.1` = 0,1 % voller Bid-Ask-Spread,
+`asset_bonus = 30` = 30 % Teilfreistellung; `asset_share` ist ein Anteil in (0, 1].
 """
-function asset_config(cls = nothing, act = nothing,
-                      share = nothing, spread = nothing, bonus = nothing;
-                      asset_class = nothing, action_type = nothing,
-                      asset_share = nothing, asset_spread = nothing, asset_bonus = nothing,
-                      deliverable::Bool = false, asset_start = nothing, tax_regime = nothing,
-                      signal_buy = nothing, signal_sell = nothing)
-    cls !== nothing && asset_class !== nothing && throw(ArgumentError("asset_class doppelt angegeben"))
-    act !== nothing && action_type !== nothing && throw(ArgumentError("action_type doppelt angegeben"))
-    asset_class = something(cls, asset_class, ASSET_CLASSES)
-    action_type = something(act, action_type, ACTION_TYPES)
-    share !== nothing && asset_share !== nothing && throw(ArgumentError("asset_share doppelt angegeben"))
-    spread !== nothing && asset_spread !== nothing && throw(ArgumentError("asset_spread doppelt angegeben"))
-    bonus !== nothing && asset_bonus !== nothing && throw(ArgumentError("asset_bonus doppelt angegeben"))
-    s = something(share, asset_share, 1.0)
-    sp = something(spread, asset_spread, 0.1)
-    bo = something(bonus, asset_bonus, 0.0)
+function asset_config(args...; kw...)
+    length(args) > length(_FIELDS) && error("unused argument ($(r_deparse(args[length(_FIELDS)+1])))")
+    vals = Dict{String,Any}()
+    for (i, a) in enumerate(args)
+        vals[_FIELDS[i]] = a
+    end
+    for (k, v) in kw
+        ks = String(k)
+        ks in _FIELDS || error("unused argument ($ks = $(r_deparse(v)))")
+        haskey(vals, ks) && error("formal argument \"$ks\" matched by multiple actual arguments")
+        vals[ks] = v
+    end
+    return _asset_config(vals)
+end
 
-    asset_class = match_arg(asset_class, ASSET_CLASSES, "asset_class")
-    action_type = match_arg(action_type, ACTION_TYPES, "action_type")
-
+function _asset_config(vals::Dict{String,Any})
+    asset_class = match_arg(get(vals, "asset_class", ASSET_CLASSES), ASSET_CLASSES, "asset_class")
+    action_type = match_arg(get(vals, "action_type", ACTION_TYPES), ACTION_TYPES, "action_type")
+    asset_share = get(vals, "asset_share", 1.0)
+    asset_spread = get(vals, "asset_spread", 0.1)
+    asset_bonus = get(vals, "asset_bonus", 0.0)
+    deliverable = get(vals, "deliverable", false)
+    asset_start = get(vals, "asset_start", nothing)
+    tax_regime = get(vals, "tax_regime", nothing)
+    signal_buy = get(vals, "signal_buy", nothing)
+    signal_sell = get(vals, "signal_sell", nothing)
     if asset_class == "etn_standard"
-        @warn "asset_class 'etn_standard' is deprecated. Use 'etn' with deliverable = FALSE."
-        asset_class = "etn"
-        deliverable = false
+        @warn "asset_config: asset_class = \"etn_standard\" ist veraltet; stattdessen asset_class = \"etn\" mit deliverable = FALSE verwenden."
+        asset_class = "etn"; deliverable = false
     elseif asset_class == "etn_deliverable"
-        @warn "asset_class 'etn_deliverable' is deprecated. Use 'etn' with deliverable = TRUE."
-        asset_class = "etn"
-        deliverable = true
+        @warn "asset_config: asset_class = \"etn_deliverable\" ist veraltet; stattdessen asset_class = \"etn\" mit deliverable = TRUE verwenden."
+        asset_class = "etn"; deliverable = true
     end
-
-    (s <= 0 || s > 1) && throw(ArgumentError("asset_share must be between 0 (exclusive) and 1 (inclusive)"))
-    sp < 0 && throw(ArgumentError("asset_spread must be non-negative"))
-    (bo < 0 || bo > 100) && throw(ArgumentError("asset_bonus must be between 0 and 100 percent (e.g., 30 for 30%)"))
+    for (x, arg) in ((asset_share, "asset_share"), (asset_spread, "asset_spread"), (asset_bonus, "asset_bonus"))
+        _is_num1(x) || error("asset_config: $arg muss eine einzelne Zahl sein, nicht $(r_deparse(x)).")
+    end
+    if asset_share <= 0 || asset_share > 1
+        error("asset_config: asset_share muss ein Anteil größer 0 und höchstens 1 sein (z. B. 0.6 für 60 %), nicht " *
+              r_format1(asset_share) *
+              (asset_share > 1 && asset_share <= 100 ?
+               "; für $(r_format1(asset_share)) % asset_share = $(r_format1(asset_share / 100)) angeben" : "") * ".")
+    end
+    asset_spread < 0 && error("asset_config: asset_spread muss >= 0 sein (voller Spread in Prozent, z. B. 0.1 für 0,1 %), nicht $(r_format1(asset_spread)).")
+    (asset_bonus < 0 || asset_bonus > 100) &&
+        error("asset_config: asset_bonus muss zwischen 0 und 100 liegen (Teilfreistellung in Prozent, z. B. 30 für 30 %), nicht $(r_format1(asset_bonus)).")
+    if asset_bonus > 0 && asset_bonus < 1
+        @warn "asset_config: asset_bonus = $(r_format1(asset_bonus)) wird als $(r_format1(asset_bonus)) % Teilfreistellung gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(asset_bonus * 100))."
+    end
+    if asset_start !== nothing
+        st = (asset_start isa Union{AbstractVector,Tuple}) ? (length(asset_start) == 1 ? _to_date_or_nothing(first(asset_start)) : nothing) :
+             _to_date_or_nothing(asset_start)
+        st === nothing && error("asset_config: asset_start = $(r_deparse(asset_start)) ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
+        asset_start = st
+    end
     if action_type == "signal" && (signal_buy === nothing || signal_sell === nothing)
-        throw(ArgumentError("signal_buy and signal_sell must be specified when action_type = 'signal'"))
+        error("asset_config: bei action_type = \"signal\" müssen signal_buy und signal_sell angegeben werden (Namen der Signalspalten in data).")
     end
-
     if tax_regime === nothing
         tax_regime = asset_class == "etf" ? "investment_fund" :
-                     asset_class in ("etn", "etc") ? (deliverable ? "private_sale" : "capital_gains") :
+                     asset_class in ("etn", "etc") ? (_isTRUE(deliverable) ? "private_sale" : "capital_gains") :
                      "capital_gains"
-    elseif !(String(tax_regime) in VALID_REGIMES)
-        throw(ArgumentError("Invalid tax_regime. Must be one of: " * join(VALID_REGIMES, ", ")))
+    elseif !(tax_regime isa AbstractString && tax_regime in VALID_REGIMES)
+        error("asset_config: tax_regime = $(r_deparse(tax_regime)) ist ungültig; erlaubt sind $(join(VALID_REGIMES, ", ")) (oder NULL: aus asset_class abgeleitet).")
     end
-
-    return AssetConfig(asset_class, action_type, Float64(s), Float64(sp), Float64(bo), deliverable,
-                       _opt_date(asset_start), String(tax_regime), _opt_str(signal_buy), _opt_str(signal_sell))
+    d = RList("asset_class" => asset_class, "action_type" => action_type, "asset_share" => asset_share,
+              "asset_spread" => asset_spread, "asset_bonus" => asset_bonus, "deliverable" => deliverable,
+              "asset_start" => asset_start, "tax_regime" => String(tax_regime),
+              "signal_buy" => signal_buy === nothing ? nothing : String(string(signal_buy)),
+              "signal_sell" => signal_sell === nothing ? nothing : String(string(signal_sell)))
+    return AssetConfig(d)
 end
 
-"Konvertiert eine AssetConfig in ein Dict (Feldname => Wert)."
-function as_dict(a::AssetConfig)
-    d = Dict{String,Any}()
-    for f in _FIELDS
-        d[f] = getfield(a, Symbol(f))
-    end
-    return d
-end
+_isTRUE(x) = x isa Bool && x
 
+"`do.call(asset_config, <Liste>)` (unbekannte Felder sind ein Fehler wie in R)."
 function _config_from_mapping(m)
-    kw = Dict{Symbol,Any}()
-    unknown = String[]
-    for (k, v) in _pairs(m)
-        ks = String(string(k))
-        ks in _FIELDS ? (kw[Symbol(ks)] = v) : push!(unknown, ks)
+    ps = _kvpairs(m isa AssetConfig ? collect(m) : m)
+    unknown = [p for p in ps if !(p.first in _FIELDS)]
+    if !isempty(unknown)
+        error("unused argument" * (length(unknown) > 1 ? "s" : "") * " (" *
+              join(("$(p.first) = $(r_deparse(p.second))" for p in unknown), ", ") * ")")
     end
-    isempty(unknown) || throw(ArgumentError("unused argument(s): " * join(unknown, ", ")))
-    return asset_config(; kw...)
+    return _asset_config(Dict{String,Any}(ps))
 end
 
-_pairs(m::AbstractDict) = pairs(m)
-_pairs(m::NamedTuple) = pairs(m)
-_pairs(m::AbstractVector{<:Pair}) = m
-_pairs(m::AssetConfig) = ((Symbol(f), getfield(m, Symbol(f))) for f in _FIELDS)
-
-function Base.show(io::IO, ::MIME"text/plain", a::AssetConfig)
-    print(io, "Asset Configuration\n-------------------\n")
-    print(io, rsprintf("  Class:        %s\n", a.asset_class))
-    print(io, rsprintf("  Action:       %s\n", a.action_type))
-    print(io, rsprintf("  Share:        %.1f%%\n", a.asset_share * 100))
-    print(io, rsprintf("  Tax Regime:   %s", a.tax_regime))
-    a.asset_class == "etf" && print(io, rsprintf("\n  Teilfrei.:    %.0f%%", a.asset_bonus))
-    a.asset_class in ("etn", "etc") && print(io, rsprintf("\n  Deliverable:  %s", a.deliverable ? "TRUE" : "FALSE"))
+function _print_asset_config(io::IO, x)
+    println(io, "Asset-Konfiguration")
+    println(io, "-------------------")
+    println(io, r_sprintf("  Klasse:       %s", x["asset_class"]))
+    println(io, r_sprintf("  Aktion:       %s", x["action_type"]))
+    println(io, r_sprintf("  Anteil:       %.1f%%", x["asset_share"] * 100))
+    print(io, r_sprintf("  Steuerregime: %s\n", x["tax_regime"]))
+    x["asset_class"] == "etf" && print(io, r_sprintf("  Teilfrei.:    %.0f%%\n", x["asset_bonus"]))
+    x["asset_class"] in ("etn", "etc") && print(io, r_sprintf("  Lieferbar:    %s\n", x["deliverable"]))
 end
-Base.show(io::IO, a::AssetConfig) = print(io, "AssetConfig(\"", a.asset_class, "\", \"", a.action_type, "\", ",
-                                          a.asset_share, ", ", a.asset_spread, ", ", a.asset_bonus, ")")
-
-"""
-    Strategy
-
-Geordnete Sammlung benannter [`AssetConfig`](@ref)-Objekte (R-Klasse `strategy`).
-Verhält sich wie ein unveränderliches, geordnetes `AbstractDict{String,AssetConfig}`.
-"""
-struct Strategy <: AbstractDict{String,AssetConfig}
-    names::Vector{String}
-    assets::Vector{AssetConfig}
-end
-
-Base.length(s::Strategy) = length(s.names)
-function Base.iterate(s::Strategy, i::Int = 1)
-    i > length(s.names) && return nothing
-    return (s.names[i] => s.assets[i], i + 1)
-end
-Base.haskey(s::Strategy, k::AbstractString) = String(k) in s.names
-Base.haskey(s::Strategy, k::Symbol) = haskey(s, String(k))
-function Base.getindex(s::Strategy, k::Union{AbstractString,Symbol})
-    i = findfirst(==(String(k)), s.names)
-    i === nothing && throw(KeyError(String(k)))
-    return s.assets[i]
-end
-function Base.get(s::Strategy, k::Union{AbstractString,Symbol}, default)
-    i = findfirst(==(String(k)), s.names)
-    return i === nothing ? default : s.assets[i]
-end
-Base.keys(s::Strategy) = copy(s.names)
-Base.values(s::Strategy) = copy(s.assets)
 
 """
     create_strategy(; NAME = asset_config(...), ...)
     create_strategy("NAME" => asset_config(...), ...)
     create_strategy(; assets = ...)
 
-Erstellt eine Strategie aus benannten Asset-Konfigurationen. Statt
-`AssetConfig`-Objekten werden auch NamedTuples/Dicts mit den Feldern von
-[`asset_config`](@ref) angenommen. Die Reihenfolge bleibt erhalten.
+Strategie aus benannten Asset-Konfigurationen erstellen (R: `create_strategy()`).
+Einfache Listen (NamedTuple, Dict, Pair-Vektor) werden mit `asset_config()`
+geprüft; die Gewichte werden nicht normiert.
 """
-function create_strategy(args::Pair...; assets = nothing, kwargs...)
-    if assets !== nothing && (length(kwargs) > 0 || !isempty(args))
-        throw(ArgumentError("Provide either ... arguments or 'assets', not both"))
-    end
-    items = Pair{String,Any}[]
-    if assets !== nothing
-        (assets isa Union{AbstractDict,NamedTuple,AbstractVector{<:Pair}}) ||
-            throw(ArgumentError("'assets' must be a named list"))
-        for (k, v) in _pairs(assets)
-            push!(items, String(string(k)) => v)
-        end
-    else
-        for (k, v) in args
-            push!(items, String(string(k)) => v)
-        end
-        for (k, v) in kwargs
-            push!(items, String(k) => v)
-        end
-    end
-    isempty(items) && throw(ArgumentError("At least one asset configuration is required"))
-    any(p -> isempty(p.first), items) && throw(ArgumentError("All assets must be named"))
-    names = String[]
-    cfgs = AssetConfig[]
-    for (k, v) in items
-        cfg = v isa AssetConfig ? v :
-              v isa Union{AbstractDict,NamedTuple} ? _config_from_mapping(v) :
-              throw(ArgumentError("Asset '$k' must be an asset_config object or list"))
-        i = findfirst(==(k), names)
-        if i === nothing
-            push!(names, k); push!(cfgs, cfg)
+function create_strategy(args...; assets = nothing, kwargs...)
+    n_dots = length(args) + length(kwargs)
+    assets !== nothing && n_dots > 0 && error("create_strategy: Assets entweder über ... oder über assets angeben, nicht beides.")
+    dots = Pair{String,Any}[]
+    unnamed = false
+    for a in args
+        if a isa Pair
+            push!(dots, String(string(a.first)) => a.second)
         else
-            cfgs[i] = cfg
+            unnamed = true
+            push!(dots, "" => a)
         end
     end
-    return Strategy(names, cfgs)
+    for (k, v) in kwargs
+        push!(dots, String(k) => v)
+    end
+    if assets !== nothing
+        if !_is_mapping(assets)
+            error("create_strategy: assets muss eine benannte Liste sein (Name = Kursspalte in data), nicht " *
+                  (assets isa Union{AbstractVector,Tuple} ? "eine unbenannte Liste" : _r_class1(assets)) * ".")
+        end
+        dots = Pair{String,Any}[p for p in _kvpairs(assets)]
+    end
+    isempty(dots) && error("create_strategy: mindestens eine Asset-Konfiguration angeben, z. B. create_strategy(ETF = asset_config(\"etf\")).")
+    (unnamed || any(p -> isempty(p.first), dots)) &&
+        error("create_strategy: alle Assets müssen benannt sein (Name = Kursspalte in data), z. B. create_strategy(ETF = asset_config(\"etf\")).")
+    seen = Set{String}()
+    for p in dots
+        p.first in seen && error("create_strategy: Asset-Name '$(p.first)' kommt mehrfach vor; jeder Name darf nur einmal vorkommen.")
+        push!(seen, p.first)
+    end
+    out = RList()
+    for (name, cfg) in dots
+        if cfg isa AssetConfig
+            out[name] = cfg
+        elseif inherits(cfg, "asset_config") && cfg isa RList
+            out[name] = AssetConfig(copy(cfg))
+        elseif _is_mapping(cfg)
+            out[name] = _config_from_mapping(cfg)
+        else
+            error("create_strategy: Asset '$name' muss ein asset_config()-Objekt oder eine Liste sein, nicht $(_r_class1(cfg)).")
+        end
+    end
+    return Strategy(out)
 end
 
-_colnames(data) = data isa AbstractDict ? [String(string(k)) for k in keys(data)] :
+_colnames(data) = data isa RFrame ? names(data) : data isa AbstractDict ? [String(string(k)) for k in keys(data)] :
                   [String(string(k)) for k in propertynames(data)]
 
-"Prüft eine Strategie und – optional – ob alle Spalten in `data` existieren."
-function validate_strategy(strategy, data = nothing)
-    strategy isa Strategy || throw(ArgumentError("Object is not a strategy"))
+"Strategie (und optional die Spalten von `data`) prüfen; `true` oder Fehler."
+function validate_strategy(strategy, data_pos = nothing; data = data_pos)
+    inherits(strategy, "strategy") ||
+        error("validate_strategy: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
+    for (name, a) in strategy
+        inherits(a, "asset_config") || error("validate_strategy: Asset '$name' ist kein asset_config()-Objekt (Klasse $(_r_class1(a))).")
+    end
     if data !== nothing
         cols = _colnames(data)
-        missing_ = [n for n in strategy.names if !(n in cols)]
-        isempty(missing_) || throw(ArgumentError("Assets not found in data: " * join(missing_, ", ")))
+        miss = [n for n in keys(strategy) if !(n in cols)]
+        isempty(miss) || error("validate_strategy: Kursspalte(n) " * join(("'$m'" for m in miss), ", ") *
+                               " fehlen in data (je Asset eine Spalte gleichen Namens; vorhanden: $(join(cols, ", "))).")
         for (name, a) in strategy
-            if a.action_type == "signal"
-                a.signal_buy in cols || throw(ArgumentError("Signal column '$(a.signal_buy)' not found (asset '$name')"))
-                a.signal_sell in cols || throw(ArgumentError("Signal column '$(a.signal_sell)' not found (asset '$name')"))
+            if a["action_type"] == "signal"
+                a["signal_buy"] in cols || error("validate_strategy: signal_buy-Spalte '$(a["signal_buy"])' fehlt in data (Asset '$name').")
+                a["signal_sell"] in cols || error("validate_strategy: signal_sell-Spalte '$(a["signal_sell"])' fehlt in data (Asset '$name').")
             end
         end
     end
     return true
 end
 
-"Fügt ein Asset hinzu und gibt eine neue Strategie zurück."
+"Asset hinzufügen bzw. ersetzen (gibt eine neue Strategie zurück)."
 function add_asset(strategy, name::AbstractString, asset)
-    strategy isa Strategy || throw(ArgumentError("First argument must be a strategy object"))
-    asset isa AssetConfig || throw(ArgumentError("asset must be an asset_config object"))
-    names = copy(strategy.names); cfgs = copy(strategy.assets)
-    i = findfirst(==(String(name)), names)
-    if i === nothing
-        push!(names, String(name)); push!(cfgs, asset)
-    else
-        cfgs[i] = asset
-    end
-    return Strategy(names, cfgs)
+    inherits(strategy, "strategy") ||
+        error("add_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
+    inherits(asset, "asset_config") || error("add_asset: asset muss ein asset_config()-Objekt sein, nicht $(_r_class1(asset)).")
+    out = Strategy(RList(collect(strategy)...))
+    out[String(name)] = asset
+    return out
 end
 
-"Aktualisiert Felder eines Assets, validiert neu und gibt eine neue Strategie zurück."
+"""
+    update_asset(strategy, name; felder...)
+
+Felder eines Assets ändern und mit `asset_config()` neu prüfen. Ändert sich
+`asset_class` oder `deliverable` ohne Angabe von `tax_regime`, wird ein bisher
+automatisch abgeleitetes Steuerregime neu abgeleitet.
+"""
 function update_asset(strategy, name::AbstractString; updates...)
-    strategy isa Strategy || throw(ArgumentError("First argument must be a strategy object"))
-    haskey(strategy, name) || throw(ArgumentError("Asset '$name' not found in strategy"))
-    d = as_dict(strategy[name])
-    for (k, v) in updates
-        ks = String(k)
-        if !(ks in _FIELDS)
-            @warn "Unknown parameter '$ks' ignored"
+    inherits(strategy, "strategy") ||
+        error("update_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
+    haskey(strategy, name) || error("update_asset: Asset '$name' ist nicht in der Strategie (vorhanden: $(join(keys(strategy), ", "))).")
+    asset = RList(collect(strategy[name])...)
+    upd = [String(k) => v for (k, v) in updates]
+    if any(p -> p.first in ("asset_class", "deliverable"), upd) && !any(p -> p.first == "tax_regime", upd)
+        derived = try
+            tmp = copy(asset); tmp["tax_regime"] = nothing
+            Base.CoreLogging.with_logger(Base.CoreLogging.NullLogger()) do
+                _config_from_mapping(collect(tmp))["tax_regime"]
+            end
+        catch
+            nothing
+        end
+        derived == get(asset, "tax_regime", nothing) && (asset["tax_regime"] = nothing)
+    end
+    for (param, value) in upd
+        if !haskey(asset, param)
+            @warn "update_asset: unbekannter Parameter '$param' wird ignoriert (möglich: $(join(keys(asset), ", ")))."
             continue
         end
-        d[ks] = v
+        asset[param] = value
     end
-    return add_asset(strategy, name, _config_from_mapping(d))
+    out = Strategy(RList(collect(strategy)...))
+    out[String(name)] = _config_from_mapping(collect(asset))
+    return out
 end
 
-"Entfernt ein Asset und gibt eine neue Strategie zurück."
+"Asset entfernen (Warnung, wenn die Strategie danach leer ist)."
 function remove_asset(strategy, name::AbstractString)
-    strategy isa Strategy || throw(ArgumentError("First argument must be a strategy object"))
-    i = findfirst(==(String(name)), strategy.names)
-    i === nothing && throw(ArgumentError("Asset '$name' not found in strategy"))
-    names = deleteat!(copy(strategy.names), i)
-    cfgs = deleteat!(copy(strategy.assets), i)
-    isempty(names) && @warn "Strategy is now empty"
-    return Strategy(names, cfgs)
+    inherits(strategy, "strategy") ||
+        error("remove_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
+    haskey(strategy, name) || error("remove_asset: Asset '$name' ist nicht in der Strategie (vorhanden: $(join(keys(strategy), ", "))).")
+    out = Strategy(RList(collect(strategy)...))
+    delete!(out, String(name))
+    length(out) == 0 && @warn "remove_asset: Nach dem Entfernen von '$name' enthält die Strategie keine Assets mehr."
+    return out
 end
 
-"Wandelt Strategien mit veralteten Assetklassen in das aktuelle Format um."
+"Strategien mit veralteten Assetklassen (etn_deliverable, etn_standard) umwandeln."
 function migrate_strategy(old_strategy; verbose::Bool = true)
-    names = String[]; cfgs = AssetConfig[]
-    for (name, asset) in _pairs(old_strategy)
-        d = Dict{String,Any}(String(string(k)) => v for (k, v) in _pairs(asset))
-        cls = get(d, "asset_class", nothing)
+    out = RList()
+    for (name, asset) in _kvpairs(old_strategy isa Strategy ? collect(old_strategy) : old_strategy)
+        a = RList(_kvpairs(asset isa AssetConfig ? collect(asset) : asset)...)
+        cls = get(a, "asset_class", nothing)
         if cls == "etn_deliverable"
-            verbose && @info "Migrating $name: etn_deliverable -> etn + deliverable=TRUE"
-            d["asset_class"] = "etn"; d["deliverable"] = true
+            verbose && println(stderr, "migrate_strategy: $name: etn_deliverable -> etn mit deliverable = TRUE")
+            a["asset_class"] = "etn"; a["deliverable"] = true
         elseif cls == "etn_standard"
-            verbose && @info "Migrating $name: etn_standard -> etn + deliverable=FALSE"
-            d["asset_class"] = "etn"; d["deliverable"] = false
+            verbose && println(stderr, "migrate_strategy: $name: etn_standard -> etn mit deliverable = FALSE")
+            a["asset_class"] = "etn"; a["deliverable"] = false
         end
-        push!(names, String(string(name))); push!(cfgs, _config_from_mapping(d))
+        out[name] = _config_from_mapping(collect(a))
     end
-    return Strategy(names, cfgs)
+    return Strategy(out)
 end
 
-"Entfernt die Klassen-Hülle: Strategie → `Dict{String,Dict{String,Any}}` (Reihenfolge in `keys` beachten)."
-as_list(s::Strategy) = [n => as_dict(a) for (n, a) in s]
-as_list(a::AssetConfig) = as_dict(a)
+"Klassen-Hülle entfernen (R: `as_list()`): Strategie → RList ohne Klasse."
+as_list(s::Strategy) = RList(collect(s)...)
+as_list(a::AssetConfig) = RList(collect(a)...)
+as_list(x::RList) = (y = copy(x); y.class = String[]; y)
 as_list(x) = collect(x)
 
-function Base.show(io::IO, ::MIME"text/plain", s::Strategy)
-    print(io, rsprintf("Investment Strategy (%d assets)\n", length(s)))
-    print(io, "================================\n")
-    for (name, a) in s
-        print(io, rsprintf("\n%s:\n", name))
-        print(io, rsprintf("  Class: %s | Share: %.0f%% | Tax: %s", a.asset_class, a.asset_share * 100, a.tax_regime))
+function _print_strategy(io::IO, x)
+    n = length(x)
+    println(io, r_sprintf("Anlagestrategie (%d %s)", n, n == 1 ? "Asset" : "Assets"))
+    println(io, "================================\n")
+    for (name, a) in x
+        println(io, name, ":")
+        print(io, r_sprintf("  Klasse: %s | Anteil: %.0f%% | Steuer: %s\n", a["asset_class"], a["asset_share"] * 100, a["tax_regime"]))
     end
 end
-Base.show(io::IO, s::Strategy) = print(io, "Strategy(", join(s.names, ", "), ")")
 
-"Kompakte Übersicht einer Strategie (wie R's `summary.strategy`)."
-function Base.summary(s::Strategy; io::IO = stdout)
-    print(io, rsprintf("Strategy Summary: %d assets\n\n", length(s)))
-    total_share = r_sum([a.asset_share for a in s.assets])
-    print(io, rsprintf("Total allocation: %.1f%%\n", total_share * 100))
-    abs(total_share - 1) > 0.001 && print(io, "  (Note: Does not sum to 100%)\n")
-    print(io, "\nBy Tax Regime:\n")
-    regimes = [a.tax_regime for a in s.assets]
+function _summary_strategy_text(x)
+    n = length(x)
+    io = IOBuffer()
+    println(io, r_sprintf("Strategie-Übersicht: %d %s\n", n, n == 1 ? "Asset" : "Assets"))
+    total_share = r_sum([a["asset_share"] for (_, a) in x])
+    println(io, r_sprintf("Gesamtgewicht: %.1f%%", total_share * 100))
+    abs(total_share - 1) > 0.001 && println(io, "  (Hinweis: Summe ist nicht 100%)")
+    println(io, "\nNach Steuerregime:")
+    regimes = [a["tax_regime"] for (_, a) in x]
     for r in unique(regimes)
-        print(io, rsprintf("  %s: %d asset(s)\n", r, count(==(r), regimes)))
+        k = count(==(r), regimes)
+        println(io, r_sprintf("  %s: %d %s", r, k, k == 1 ? "Asset" : "Assets"))
     end
+    return String(take!(io))
+end
+
+"Übersicht einer Strategie (R: `summary.strategy`): druckt und gibt die Strategie zurück."
+function Base.summary(s::Strategy; io::IO = stdout)
+    print(io, _summary_strategy_text(s))
     return s
 end
-
-"Kompakte Übersicht einer Asset-Konfiguration (wie R's `summary.asset_config`)."
+"Wie `print` (R: `summary.asset_config`)."
 function Base.summary(a::AssetConfig; io::IO = stdout)
-    show(io, MIME"text/plain"(), a); println(io)
+    _print_asset_config(io, a)
     return a
 end
+
+register_print!("asset_config", _print_asset_config)
+register_print!("strategy", _print_strategy)
+register_summary!("strategy", (x, args...; io::IO = stdout, kw...) -> (print(io, _summary_strategy_text(x)); x))
+register_summary!("asset_config", (x, args...; io::IO = stdout, kw...) -> (_print_asset_config(io, x); x))

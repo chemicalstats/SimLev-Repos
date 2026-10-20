@@ -299,9 +299,9 @@
   }
   # Fondskosten wirken nur im Fondsmodus: ausdruecklich angegebene Werte sonst nicht still ignorieren
   if (tax_mode != "funds" && (given[["funds_fee"]] || given[["bonus_fee"]])) {
-    given <- c("funds_fee", "bonus_fee")[c(given[["funds_fee"]], given[["bonus_fee"]])]
+    ign <- c("funds_fee", "bonus_fee")[c(given[["funds_fee"]], given[["bonus_fee"]])]
     warning(sprintf("simulation: %s wirkt nur bei tax_mode = \"funds\" (hier tax_mode = \"%s\") und wird ignoriert.",
-                    paste(given, collapse = " und "), tax_mode), call. = FALSE)
+                    paste(ign, collapse = " und "), tax_mode), call. = FALSE)
   }
   # R2-04: Fondskosten (Prozent-Konvention)
   if (tax_mode == "funds") {

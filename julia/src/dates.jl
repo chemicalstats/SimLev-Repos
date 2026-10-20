@@ -29,11 +29,6 @@ function to_days(d::AbstractString)
 end
 to_days(d) = throw(ArgumentError("Kann $(repr(d)) nicht als Datum interpretieren"))
 
-function first_of_month(z::Integer)
-    y, m, _ = ymd(z)
-    return days_from_civil(y, m, 1)
-end
-
 function add_months_first(z_first::Integer, k::Integer)
     y, m, _ = ymd(z_first)
     tot = (y * 12 + (m - 1)) + k
@@ -45,14 +40,3 @@ function ym_key(z::Integer)
     return y * 12 + m
 end
 
-"`as.Date(paste(y, m, d, sep = '-'), format = '%Y-%m-%d')` wie R (ungültig → nothing)."
-function r_strptime_ymd(y, m, d)
-    ys, ms, ds = r_num_str(y), r_num_str(m), r_num_str(d)
-    my = match(r"^(\d{1,4})$", ys)
-    my === nothing && return nothing
-    mm = match(r"^(\d{1,2})$", ms)
-    mm === nothing && return nothing
-    md = match(r"^(\d{1,2})", ds)
-    md === nothing && return nothing
-    return valid_civil(parse(Int, my.captures[1]), parse(Int, mm.captures[1]), parse(Int, md.captures[1]))
-end

@@ -188,7 +188,9 @@ function run_case(path; strict_na::Bool = true, verbose::Bool = false)
     buf = IOBuffer()
     res = try
         Base.CoreLogging.with_logger(Base.CoreLogging.NullLogger()) do
-            SimLev.simulation(data, strategy; io = buf, args...)
+            redirect_stderr(devnull) do
+                SimLev.simulation(data, strategy; io = buf, args...)
+            end
         end
     catch e
         haskey(d, "error") && return String[]
@@ -199,19 +201,23 @@ function run_case(path; strict_na::Bool = true, verbose::Bool = false)
     errs = String[]
     cmp_vec!(errs, "worth", r["worth"], res.worth; strict_na)
     cmp_vec!(errs, "drawdowns", r["drawdowns"], res.drawdowns; strict_na)
-    Bool.(_vec(r["filled"])) == res.filled || push!(errs, "filled unterschiedlich")
+    Bool.(_vec(r["filled"])) == collect(res.filled) || push!(errs, "filled unterschiedlich")
     cmp_vec!(errs, "cagr", r["cagr"], res.cagr; strict_na)
     cmp_vec!(errs, "ttwror", r["ttwror"], res.ttwror; strict_na)
     for (k, v) in pairs(r["statistics"])
-        cmp_vec!(errs, "stat." * k, v, getfield(res.statistics, Symbol(k)); strict_na)
+        cmp_vec!(errs, "stat." * k, v, res.statistics[k]; strict_na)
     end
     for (k, v) in pairs(r["tax_report"])
-        cmp_vec!(errs, "tax." * k, v, getfield(res.tax_report, Symbol(k)); strict_na)
+        got = get(res.tax_report, k, nothing)
+        got isa SimLev.RFrame && continue                      # tariff_years: nicht im Golden-Format
+        got isa SimLev.RList && (got = Float64[Float64(x) for x in values(got)])   # next_year: Werte in R-Reihenfolge
+        got === nothing && (push!(errs, "tax.$k fehlt"); continue)
+        cmp_vec!(errs, "tax." * k, v, got; strict_na)
     end
     for (k, v) in pairs(r["buys"]); cmp_vec!(errs, "buys." * k, v, res.buys[k]; strict_na); end
     for (k, v) in pairs(r["sells"]); cmp_vec!(errs, "sells." * k, v, res.sells[k]; strict_na); end
     for (a, fields) in pairs(r["report"]), (f, v) in pairs(fields)
-        cmp_vec!(errs, "report.$a.$f", v, getfield(res.report[a], Symbol(f)); strict_na)
+        cmp_vec!(errs, "report.$a.$f", v, res.report[a][f]; strict_na)
     end
     if haskey(d, "stdout") && d["stdout"] !== nothing
         got = String(take!(buf))

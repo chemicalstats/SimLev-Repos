@@ -399,6 +399,11 @@ test_that("D funds_fee/bonus_fee ohne Fondsmodus: Warnung", {
   expect_warning(simulation(df, st, tax_mode = "person", funds_fee = 1, bonus_fee = 0), "funds_fee und bonus_fee wirkt nur")
   expect_no_warning(simulation(df, st, tax_mode = "funds", funds_fee = 0.5))
   expect_no_warning(simulation(df, st, tax_mode = "person"))
+  # die Warnung darf given nicht ueberschreiben: spaetere Pruefungen (church_tax, taxable_income) laufen weiter
+  expect_warning(r <- simulation(df, st, funds_fee = 1, church_tax = 9), "funds_fee wirkt nur")
+  expect_s3_class(r, "SimLevResult")
+  expect_warning(expect_warning(simulation(df, st, tax_mode = "person", funds_fee = 0.5, tax_rate = 25, church_tax = 9),
+                                "funds_fee wirkt nur"), "church_tax")
 })
 
 # ---------------------------------------------------------------- E open_lots

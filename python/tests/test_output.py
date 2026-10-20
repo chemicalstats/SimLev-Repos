@@ -81,6 +81,14 @@ def test_dashboard_and_exports(tmp_path):
     pdf = tmp_path / "x.pdf"
     simlev.export_dashboard(r, str(pdf))
     assert pdf.exists() and pdf.stat().st_size > 1000
+    # wie R 0.5.0: Platzhalter (ohne plotly ein Fehler, sonst nur eine Meldung; keine Datei)
     html = tmp_path / "x.html"
-    simlev.export_html_dashboard(r, str(html))
-    assert html.exists()
+    try:
+        import plotly  # noqa: F401
+        simlev.export_html_dashboard(r, str(html))
+    except ImportError:
+        with pytest.raises(ValueError, match="Das Paket 'plotly' wird für HTML-Dashboards benötigt"):
+            simlev.export_html_dashboard(r, str(html))
+    assert not html.exists()
+    import matplotlib.pyplot as plt
+    plt.close("all")

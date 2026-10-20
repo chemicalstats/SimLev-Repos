@@ -1,10 +1,20 @@
 """Vergleicht die Python-Engine bitgenau mit Golden-Master-Ergebnissen aus R.
 
-Aufruf: python compare_golden.py <golden_dir> [case_id ...]
+Aufruf::
+
+    python compare_golden.py [<ordner_oder_datei> ...] [-k fall ...] [-v]
+
+Ohne Pfad werden ``golden/cases`` und ``golden/extra`` geprüft. Gelesen werden
+``.json.gz`` und ``.json``. Verglichen werden ``worth``, ``drawdowns``, ``filled``,
+``cagr``, ``ttwror``, ``statistics``, ``tax_report``, ``buys``, ``sells``, ``report``,
+die Druckausgabe (``print``) und – bei ``details = TRUE`` – die Konsolenausgabe
+(``stdout``). Fehlerfälle (``error``) müssen auch in Python einen Fehler auslösen.
 """
 from __future__ import annotations
 
+import argparse
 import contextlib
+import gzip
 import io
 import json
 import math
@@ -15,13 +25,26 @@ import warnings
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, ".."))
 import simlev  # noqa: E402
+
+ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+DEFAULT_DIRS = [os.path.join(ROOT, "golden", "cases"), os.path.join(ROOT, "golden", "extra")]
+
+
+_NA_REAL = np.array([0x7FF00000000007A2], dtype=np.uint64).view(np.float64)[0]
+STRICT_NA = os.environ.get("SIMLEV_LAX_NA", "0") != "1"   # NA und NaN unterscheiden wie R
+
+
+def _isna_arr(a):
+    a = np.ascontiguousarray(a, dtype=np.float64)
+    return np.isnan(a) & ((a.view(np.uint64) & np.uint64(0xFFFFFFFF)) == np.uint64(1954))
 
 
 def unhex(v):
     if v is None or v == "NA":
-        return float("nan")
+        return float(_NA_REAL)
     if v == "NaN":
         return float("nan")
     if isinstance(v, (int, float)):
@@ -29,8 +52,16 @@ def unhex(v):
     return float.fromhex(v)
 
 
+def read_json(path):
+    if path.endswith(".gz"):
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            return json.load(fh)
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
 def load_case(path):
-    d = json.load(open(path))
+    d = read_json(path)
     cols = {}
     for nm in d["data"]["order"]:
         c = d["data"]["cols"][nm]
@@ -48,18 +79,9 @@ def load_case(path):
     df = pd.DataFrame(cols)
     strategy = {}
     for nm, a in d["strategy"].items():
-        a = {k: (unhex(v["hex"]) if isinstance(v, dict) and "hex" in v else v) for k, v in a.items()}
-        strategy[nm] = a
+        strategy[nm] = {k: (unhex(v["hex"]) if isinstance(v, dict) and "hex" in v else v) for k, v in a.items()}
     args = dict(d["args"])
     return d, df, strategy, args
-
-
-def same(a, b):
-    a = float(a)
-    b = float(b)
-    if math.isnan(a) and math.isnan(b):
-        return True
-    return a == b
 
 
 def cmp_vec(name, ref, got, errs):
@@ -68,7 +90,11 @@ def cmp_vec(name, ref, got, errs):
     if ref.size != got.size:
         errs.append("%s: Länge %d vs %d" % (name, ref.size, got.size))
         return
-    bad = np.flatnonzero(~((ref == got) | (np.isnan(ref) & np.isnan(got))))
+    same = (ref == got) & (np.signbit(ref) == np.signbit(got))      # Vorzeichen der Null mitprüfen
+    both_nan = np.isnan(ref) & np.isnan(got)
+    if STRICT_NA:
+        both_nan &= _isna_arr(ref) == _isna_arr(got)
+    bad = np.flatnonzero(~(same | both_nan))
     if bad.size:
         i = bad[0]
         errs.append("%s: %d Abweichungen, erste bei %d: R=%r Py=%r" % (name, bad.size, i, ref[i], got[i]))
@@ -80,7 +106,7 @@ def run(path, verbose=False):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         try:
-            with contextlib.redirect_stdout(buf):
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
                 res = simlev.simulation(df, strategy, **args)
         except Exception as exc:  # noqa: BLE001
             if "error" in d:
@@ -101,7 +127,12 @@ def run(path, verbose=False):
     for k, v in r["statistics"].items():
         cmp_vec("stat." + k, v, res.statistics[k], errs)
     for k, v in r["tax_report"].items():
-        cmp_vec("tax." + k, v, res.tax_report[k], errs)
+        got = res.tax_report.get(k)
+        if isinstance(got, dict):          # next_year (neuere Fälle): Werte in R-Reihenfolge
+            got = [float(x) for x in got.values()]
+        elif isinstance(got, pd.DataFrame):  # tariff_years: nicht im Golden-Format
+            continue
+        cmp_vec("tax." + k, v, got, errs)
     for k, v in r["buys"].items():
         cmp_vec("buys." + k, v, res.buys[k], errs)
     for k, v in r["sells"].items():
@@ -123,29 +154,56 @@ def run(path, verbose=False):
         errs.append("print()-Ausgabe unterscheidet sich")
         if verbose:
             import difflib
-            errs.append("\n".join(difflib.unified_diff(r["print"].splitlines(), res.format().splitlines(), lineterm="")))
+            errs.append("\n".join(difflib.unified_diff(r["print"].splitlines(), res.format().splitlines(),
+                                                       lineterm="")))
     return errs
 
 
-def main():
-    gdir = sys.argv[1]
-    ids = sys.argv[2:]
-    files = sorted(os.listdir(gdir))
-    if ids:
-        files = [i + ".json" for i in ids]
-    n_ok = 0
-    failed = []
-    for f in files:
-        errs = run(os.path.join(gdir, f), verbose=bool(ids))
-        if errs:
-            failed.append(f)
-            print("FAIL", f)
-            for e in errs[:8]:
-                print("   ", e)
+def collect(paths, ids):
+    files = []
+    for p in paths:
+        if os.path.isdir(p):
+            for f in sorted(os.listdir(p)):
+                if f.endswith(".json.gz") or f.endswith(".json"):
+                    files.append(os.path.join(p, f))
         else:
-            n_ok += 1
-    print("\n%d/%d Fälle bitgleich" % (n_ok, len(files)))
-    return 0 if not failed else 1
+            files.append(p)
+    if ids:
+        files = [f for f in files if os.path.basename(f).split(".json")[0] in ids]
+    return files
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("paths", nargs="*", help="Ordner oder Dateien (Standard: golden/cases und golden/extra)")
+    ap.add_argument("-k", "--case", nargs="*", default=[], help="nur diese Fälle (ohne Endung)")
+    ap.add_argument("-v", "--verbose", action="store_true", help="Unterschiede ausführlich zeigen")
+    ap.add_argument("-q", "--quiet", action="store_true", help="nur die Zusammenfassung")
+    a = ap.parse_args(argv)
+    paths = a.paths or DEFAULT_DIRS
+    total_ok = total = 0
+    failed_all = []
+    for p in paths:
+        files = collect([p], a.case)
+        if not files:
+            continue
+        n_ok = 0
+        for f in files:
+            errs = run(f, verbose=a.verbose)
+            if errs:
+                failed_all.append(f)
+                if not a.quiet:
+                    print("FAIL", os.path.basename(f))
+                    for e in errs[:8]:
+                        print("   ", e)
+            else:
+                n_ok += 1
+        print("%s: %d/%d Fälle bitgleich" % (p, n_ok, len(files)))
+        total_ok += n_ok
+        total += len(files)
+    if len(paths) > 1:
+        print("gesamt: %d/%d Fälle bitgleich" % (total_ok, total))
+    return 0 if not failed_all else 1
 
 
 if __name__ == "__main__":

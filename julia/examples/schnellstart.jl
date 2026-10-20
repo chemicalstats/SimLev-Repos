@@ -31,7 +31,7 @@ result = simulation(data, strategy;
 display(result)
 println()
 
-# 4. Dashboards
-plot_dashboard(result; file = "schnellstart_dashboard.svg", currency = "€")
+# 4. Dashboards: statisch als SVG, interaktiv als eigenständige HTML-Datei
+export_dashboard(result, "schnellstart_dashboard.svg")
 plot_interactive(result; file = "schnellstart_dashboard.html", open = false)
 println("Dashboards geschrieben: schnellstart_dashboard.svg, schnellstart_dashboard.html")

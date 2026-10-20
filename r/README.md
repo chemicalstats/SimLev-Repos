@@ -11,11 +11,9 @@
 ---
 
 Dies ist das R-Paket **SimLev**, die Referenzimplementierung. Die
-Python- und die Julia-Fassung im selben Repository rechnen bitgleich zu
-einem früheren Stand dieses Pakets (Commit 54b5b4f, vor den Korrekturen,
-damals ebenfalls als 0.5.0 bezeichnet), nicht zur aktuellen Fassung; die
-Korrekturen, steuerrechtlichen Anpassungen und deutschen Ausgaben sind dort
-noch nicht nachgezogen (siehe [`NEWS.md`](NEWS.md)).
+Python-Fassung 0.5.0 und die Julia-Fassung 0.5.0 im selben Repository sind
+vollständige Ports dieser Fassung und rechnen bitgleich zu ihr (siehe
+[`NEWS.md`](NEWS.md)).
 
 **Die vollständige Dokumentation mit Schnellstart, Grundkonzepten und
 Beispielen für alle drei Sprachen steht in der

@@ -1,155 +1,170 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Eingabedaten: spaltenorientierte Sicht nach R-Semantik
+# Eingabedaten der Engine: spaltenorientierte Sicht mit R-Spaltenarten
 #
-# Akzeptiert werden NamedTuples von Vektoren, Dicts (String/Symbol => Vektor)
-# und jede Tabelle, die ihre Spalten über `propertynames`/`getproperty`
-# bereitstellt (z. B. ein DataFrame aus DataFrames.jl).
+# Akzeptiert werden RFrame, NamedTuples von Vektoren, Dicts (String/Symbol =>
+# Vektor) und Pair-Vektoren. Spaltenarten wie in R:
+#   :numeric   Vector{Float64} (NA bleibt NA, NaN bleibt NaN)
+#   :logical   Vector{Union{Missing,Bool}}
+#   :character Vector{Union{Missing,String}}   (:factor ebenso)
+#   :date      Vector{Float64} Tage seit 1970-01-01 (NA = fehlend)
+#   :posixct   wie :date (aus Datum-Uhrzeit)
+#   :other     Vector{Any}
+#   :filled    Vector{Bool} (interne Spalte ".filled")
 # ─────────────────────────────────────────────────────────────────────────────
 
-mutable struct Col
-    kind::Symbol                 # :date, :numeric, :logical, :other
-    num::Vector{Float64}         # numerisch; logisch als 1.0 / 0.0 / NA
-    other::Vector{Any}
-end
-
-mutable struct SimData
+mutable struct _Frame
     names::Vector{String}
-    cols::Dict{String,Col}
-    days::Vector{Int}
-    nrow::Int
-    filled::Union{Nothing,Vector{Bool}}
+    cols::Dict{String,AbstractVector}
+    kinds::Dict{String,Symbol}
+    filled_attr::Any
 end
 
-Base.haskey(d::SimData, name::AbstractString) = haskey(d.cols, name) || name == "date"
-
-function _raw_columns(data)
-    data === nothing && throw(ArgumentError("'data' must be a data.frame"))
-    if data isa AbstractDict
-        names = [String(string(k)) for k in keys(data)]
-        vals = [data[k] for k in keys(data)]
-    elseif data isa NamedTuple
-        names = [String(k) for k in keys(data)]
-        vals = [v for v in values(data)]
-    else
-        pn = try
-            propertynames(data)
-        catch
-            throw(ArgumentError("'data' must be a data.frame"))
-        end
-        names = [String(string(k)) for k in pn]
-        vals = [getproperty(data, k) for k in pn]
+_fnrow(fr::_Frame) = isempty(fr.names) ? 0 : length(fr.cols[fr.names[1]])
+Base.haskey(fr::_Frame, name::AbstractString) = haskey(fr.cols, name)
+function _fset!(fr::_Frame, name::String, v::AbstractVector, kind::Symbol)
+    haskey(fr.cols, name) || push!(fr.names, name)
+    fr.cols[name] = v
+    fr.kinds[name] = kind
+    return fr
+end
+function _fdrop!(fr::_Frame, name::String)
+    if haskey(fr.cols, name)
+        filter!(!=(name), fr.names)
+        delete!(fr.cols, name); delete!(fr.kinds, name)
     end
-    all(v -> v isa AbstractVector, vals) || throw(ArgumentError("'data' must be a data.frame"))
-    return names, vals
+    return fr
+end
+function _ftake!(fr::_Frame, idx::AbstractVector{Int})
+    for nm in fr.names
+        fr.cols[nm] = fr.cols[nm][idx]
+    end
+    return fr
+end
+_fis_numeric(fr::_Frame, name) = get(fr.kinds, name, :none) == :numeric
+function _fr_class(fr::_Frame, name)
+    k = get(fr.kinds, name, :other)
+    k == :numeric && return "numeric"
+    k == :logical && return "logical"
+    k == :character && return "character"
+    k == :factor && return "factor"
+    k == :date && return "Date"
+    k == :posixct && return "POSIXct"
+    return "list"
 end
 
-_date_days(v::AbstractVector{<:Date}) = Int[to_days(x) for x in v]
-_date_days(v::AbstractVector{<:DateTime}) = Int[to_days(x) for x in v]
-_date_days(v::AbstractVector{<:Integer}) = Int[Int(x) for x in v]
-_date_days(v::AbstractVector) = Int[to_days(x) for x in v]
+"is.na() für einen Spalteneintrag."
+_isna_val(x) = x === missing || x === nothing || (x isa AbstractFloat && isnan(x))
+_isna_vec(v::AbstractVector{Float64}) = BitVector(isnan.(v))
+_isna_vec(v::AbstractVector) = BitVector([_isna_val(x) for x in v])
 
-function _classify(v::AbstractVector)
-    n = length(v)
+const _EPOCH_D = Date(1970, 1, 1)
+_dday(d::Date) = Float64(Dates.value(d - _EPOCH_D))
+
+function _classify_values(vals::AbstractVector)
+    n = length(vals)
+    ok = [v for v in vals if !_isna_val(v)]
+    isempty(ok) && return (:logical, Vector{Union{Missing,Bool}}(fill(missing, n)))
+    all(v -> v isa Bool, ok) && return (:logical, Union{Missing,Bool}[_isna_val(v) ? missing : Bool(v) for v in vals])
+    all(v -> v isa Real, ok) && return (:numeric, Float64[_isna_val(v) ? NA : Float64(v) for v in vals])
+    all(v -> v isa AbstractString, ok) && return (:character, Union{Missing,String}[_isna_val(v) ? missing : String(v) for v in vals])
+    if all(v -> v isa Date, ok)
+        return (:date, Float64[_isna_val(v) ? NA : _dday(v) for v in vals])
+    end
+    if all(v -> v isa Union{Date,DateTime}, ok)
+        return (:posixct, Float64[_isna_val(v) ? NA : _dday(Date(v)) for v in vals])
+    end
+    return (:other, Any[v for v in vals])
+end
+
+"Eine Spalte in (Art, Vektor) umwandeln."
+function _column(v)
+    v isa RVector && (v = v.values)
+    v isa AbstractVector || (v = [v])
     T = eltype(v)
     S = Base.nonmissingtype(T)
-    if S <: Bool
-        return Col(:logical, Float64[x === missing ? NA : (x ? 1.0 : 0.0) for x in v], Any[])
-    elseif S <: Real
-        return Col(:numeric, Float64[x === missing ? NA : Float64(x) for x in v], Any[])
+    if S === Bool
+        return (:logical, Vector{Union{Missing,Bool}}(v))
+    elseif S <: Real && S !== Union{}
+        return (:numeric, Float64[x === missing ? NA : Float64(x) for x in v])
+    elseif S <: AbstractString
+        return (:character, Union{Missing,String}[x === missing ? missing : String(x) for x in v])
+    elseif S === Date
+        return (:date, Float64[x === missing ? NA : _dday(x) for x in v])
+    elseif S === DateTime
+        return (:posixct, Float64[x === missing ? NA : _dday(Date(x)) for x in v])
     end
-    vals = [x for x in v if !(x === missing || x === nothing || (x isa AbstractFloat && isnan(x)))]
-    if !isempty(vals) && all(x -> x isa Bool, vals)
-        return Col(:logical, Float64[(x === missing || x === nothing) ? NA : (x ? 1.0 : 0.0) for x in v], Any[])
-    elseif !isempty(vals) && all(x -> x isa Real && !(x isa Bool), vals)
-        return Col(:numeric, Float64[(x === missing || x === nothing) ? NA : Float64(x) for x in v], Any[])
-    elseif isempty(vals)
-        return Col(:logical, fill(NA, n), Any[])
-    end
-    return Col(:other, Float64[], Any[x for x in v])
+    return _classify_values(collect(Any, v))
 end
 
-function SimData(data)
-    names, vals = _raw_columns(data)
-    "date" in names || throw(ArgumentError("'data' must contain a 'date' column"))
-    cols = Dict{String,Col}()
-    days = Int[]
-    for (nm, v) in zip(names, vals)
-        if nm == "date"
-            days = _date_days(v)
-            continue
-        end
-        cols[nm] = _classify(v)
+function _raw_columns(data)
+    if data isa RFrame
+        return names(data), collect(data.cols), get(attrs(data), "filled", nothing)
+    elseif data isa NamedTuple
+        return [String(k) for k in keys(data)], collect(values(data)), nothing
+    elseif data isa AbstractDict
+        ks = collect(keys(data))
+        return [String(string(k)) for k in ks], [data[k] for k in ks], nothing
+    elseif data isa AbstractVector{<:Pair}
+        return [String(string(p.first)) for p in data], [p.second for p in data], nothing
     end
-    lens = Set([length(days); [c.kind == :other ? length(c.other) : length(c.num) for c in values(cols)]])
-    length(lens) == 1 || throw(ArgumentError("all columns of 'data' must have the same length"))
-    return SimData(names, cols, days, first(lens), nothing)
+    error("unbekannte Datenstruktur")
 end
 
-function _locf_fill!(v::Vector{Float64})
-    nonna = findall(!isnan, v)
-    isempty(nonna) && return v
-    idx = zeros(Int, length(v))
-    idx[nonna] = nonna
-    m = 0
-    @inbounds for i in eachindex(idx)
-        m = max(m, idx[i])
-        idx[i] = m
-    end
-    idx[idx .== 0] .= nonna[1]
-    return v[idx]
-end
-
-function _fill_calendar!(d::SimData)
-    dates = d.days
-    start, stop = dates[1], dates[end]
-    all_dates = collect(start:stop)
-    pos = Dict{Int,Int}()
-    for (i, z) in enumerate(dates)
-        if start <= z <= stop
-            haskey(pos, z) && throw(ArgumentError("doppelte Datumswerte in 'data' werden nicht unterstützt"))
-            pos[z] = i
+function _to_frame(data)
+    nms, vals, fa = _raw_columns(data)
+    for (i, nm) in enumerate(nms)
+        if nm in nms[1:i-1]
+            error("simulation: Spaltenname '$nm' kommt in 'data' mehrfach vor; jede Spalte muss eindeutig benannt sein.")
         end
     end
-    n = length(all_dates)
-    src = [get(pos, z, 0) for z in all_dates]
-    filled = src .== 0
-    for nm in d.names
-        nm == "date" && continue
-        c = d.cols[nm]
-        if c.kind == :numeric
-            out = fill(NA, n)
-            for j in 1:n
-                src[j] > 0 && (out[j] = c.num[src[j]])
-            end
-            c.num = _locf_fill!(out)
-        elseif c.kind == :logical
-            out = zeros(Float64, n)
-            for j in 1:n
-                if src[j] > 0
-                    x = c.num[src[j]]
-                    out[j] = isnan(x) ? 0.0 : x       # R: NA in logischen Spalten -> FALSE
-                end
-            end
-            c.num = out
-        else
-            out = Vector{Any}(nothing, n)
-            for j in 1:n
-                src[j] > 0 && (out[j] = c.other[src[j]])
-            end
-            c.other = out
-        end
+    cols = Dict{String,AbstractVector}(); kinds = Dict{String,Symbol}()
+    for (nm, v) in zip(nms, vals)
+        k, a = _column(v)
+        cols[nm] = a; kinds[nm] = k
     end
-    d.days = all_dates
-    d.nrow = n
-    d.filled = filled
-    return d
+    lens = unique([length(a) for a in values(cols)])
+    length(lens) > 1 && error("simulation: alle Spalten von 'data' müssen gleich lang sein.")
+    return _Frame(collect(String, nms), cols, kinds, fa)
 end
 
-"`as.logical()` für eine Spalte; NA -> false (für Event-Flags)."
-function _as_logical(c::Col)
-    if c.kind == :other
-        return Bool[x isa AbstractString ? (x in ("TRUE", "true", "T", "True")) :
-                    x isa Bool ? x : (x isa Real && !isnan(x) && x != 0) for x in c.other]
+"Attribut `filled`: (Matrix oder nothing, Spaltennamen oder nothing, Zeilenzahl)."
+function _filled_matrix(fa)
+    fa === nothing && return (nothing, nothing, 0)
+    if fa isa RFrame
+        cols = [Bool[x === true for x in c] for c in fa.cols]
+        m = isempty(cols) ? falses(nrow(fa), 0) : BitMatrix(hcat(cols...))
+        return (m, names(fa), nrow(fa))
+    elseif fa isa NamedMat
+        return (BitMatrix(Bool.(fa.data)), fa.colnames, size(fa.data, 1))
+    elseif fa isa AbstractMatrix
+        return (BitMatrix(Bool.(fa)), nothing, size(fa, 1))
+    elseif fa isa NamedTuple || fa isa AbstractDict
+        ps = _kvpairs(fa)
+        isempty(ps) && return (falses(0, 0), String[], 0)
+        m = BitMatrix(hcat([Bool.(collect(p.second)) for p in ps]...))
+        return (m, [p.first for p in ps], size(m, 1))
+    elseif fa isa AbstractVector
+        return (nothing, nothing, length(fa))
     end
-    return Bool[!isnan(x) && x != 0 for x in c.num]
+    return (nothing, nothing, 1)
+end
+
+"`as.logical()` einer Spalte (NA → false) für Event-Flags."
+function _as_logical_col(fr::_Frame, col::String)
+    v = fr.cols[col]
+    k = fr.kinds[col]
+    out = falses(length(v))
+    for (i, x) in enumerate(v)
+        _isna_val(x) && continue
+        if k == :numeric
+            out[i] = x != 0
+        elseif x isa AbstractString
+            out[i] = x in ("TRUE", "true", "T", "True")
+        elseif x isa Bool
+            out[i] = x
+        elseif x isa Real
+            out[i] = x != 0
+        end
+    end
+    return out
 end

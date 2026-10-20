@@ -1,148 +1,234 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Ergebnisobjekt der Simulation (R-Klasse `SimLevResult`)
+# Ergebnisobjekt der Simulation (R-Klasse `SimLevResult`) mit print und summary
+# (print.SimLevResult, summary.SimLevResult, print.summary.SimLevResult)
 # ─────────────────────────────────────────────────────────────────────────────
 
-"Geordnetes, unveränderliches Dict mit String-Schlüsseln (wie eine benannte R-Liste)."
-struct NamedList{V} <: AbstractDict{String,V}
-    keys::Vector{String}
-    vals::Vector{V}
-end
-NamedList(p::Vector{<:Pair}) = NamedList([String(x.first) for x in p], [x.second for x in p])
-const NamedVec = NamedList{Float64}
-const OrderedReport = NamedList
-
-Base.length(d::NamedList) = length(d.keys)
-Base.iterate(d::NamedList, i::Int = 1) = i > length(d.keys) ? nothing : (d.keys[i] => d.vals[i], i + 1)
-function Base.getindex(d::NamedList, k::Union{AbstractString,Symbol})
-    i = findfirst(==(String(k)), d.keys)
-    i === nothing && throw(KeyError(String(k)))
-    return d.vals[i]
-end
-Base.getindex(d::NamedList, i::Integer) = d.vals[i]
-Base.haskey(d::NamedList, k::Union{AbstractString,Symbol}) = String(k) in d.keys
-function Base.get(d::NamedList, k::Union{AbstractString,Symbol}, default)
-    i = findfirst(==(String(k)), d.keys)
-    return i === nothing ? default : d.vals[i]
-end
-Base.keys(d::NamedList) = copy(d.keys)
-Base.values(d::NamedList) = copy(d.vals)
+# ── Ergebnisobjekt (R-Klasse SimLevResult) ─────────────────────────────────
 
 """
     SimLevResult
 
-Ergebnis von [`simulation`](@ref). Felder (wie die Listenelemente in R):
-`dates`, `filled`, `worth`, `cagr`, `ttwror`, `drawdowns`, `statistics`
-(NamedTuple), `buys`, `sells`, `report` (je Asset ein NamedTuple mit
-`worth`, `money`, `flows`, `total`, `share`), `tax_report` (NamedTuple).
-Zusätzlich enthält `trades` die Lots, Verkäufe, Steuer- und Gebührenbuchungen.
-
-`NA` wird wie in R als NaN mit Nutzlast 1954 geführt; [`isna_strict`](@ref)
-unterscheidet es von `NaN`.
+Ergebnis von [`simulation`](@ref) (R-Klasse `SimLevResult`). Zugriff auf alle
+R-Elemente über `res.name` oder `res["name"]`, Reihenfolge wie in R: `dates`,
+`filled`, `worth`, `twr_index`, `invested`, `external_flows`, `cagr`, `ttwror`,
+`drawdowns`, `statistics` (RList), `buys`/`sells` (RVector je Asset), `report`
+(RList je Asset mit `worth`, `money`, `flows`, `total`, `share`), `tax_report`
+(RList; `tariff_years` als RFrame, `next_year` als RList), `undefined_metrics`
+(RFrame `metric`, `reason`, `detail`), `open_lots` (RList je Asset oder
+`nothing`) sowie ggf. `fees_paid` und `harvest_days`. Zusätzlich (nur Julia)
+liefert `res.trades` die Lots, Verkäufe, Steuer- und Gebührenbuchungen je Asset.
 """
-struct SimLevResult
-    dates::Vector{Date}
-    filled::Vector{Bool}
-    worth::Vector{Float64}
-    cagr::Float64
-    ttwror::Float64
-    drawdowns::Vector{Float64}
-    statistics::NamedTuple
-    buys::NamedList{Float64}
-    sells::NamedList{Float64}
-    report::NamedList
-    tax_report::NamedTuple
-    trades::NamedList
+struct SimLevResult <: AbstractDict{String,Any}
+    data::RList
+    trades::Any
+end
+Base.length(x::SimLevResult) = length(getfield(x, :data))
+Base.iterate(x::SimLevResult, i::Int = 1) = iterate(getfield(x, :data), i)
+Base.getindex(x::SimLevResult, k::AbstractString) = getfield(x, :data)[k]
+Base.getindex(x::SimLevResult, k::Symbol) = k === :trades ? getfield(x, :trades) : getfield(x, :data)[String(k)]
+Base.getindex(x::SimLevResult, i::Integer) = getfield(x, :data)[i]
+Base.haskey(x::SimLevResult, k::AbstractString) = haskey(getfield(x, :data), k)
+Base.haskey(x::SimLevResult, k::Symbol) = haskey(getfield(x, :data), String(k))
+Base.get(x::SimLevResult, k::Union{AbstractString,Symbol}, d) = get(getfield(x, :data), String(k), d)
+Base.keys(x::SimLevResult) = keys(getfield(x, :data))
+Base.values(x::SimLevResult) = values(getfield(x, :data))
+function Base.getproperty(x::SimLevResult, s::Symbol)
+    s === :data && return getfield(x, :data)
+    s === :trades && return getfield(x, :trades)
+    return getfield(x, :data)[String(s)]
+end
+Base.propertynames(x::SimLevResult, private::Bool = false) = Tuple(Symbol.(keys(getfield(x, :data))))
+# wie eine R-Liste erweiterbar (R: `res$tactical <- ...`)
+Base.setindex!(x::SimLevResult, v, k::AbstractString) = (getfield(x, :data)[String(k)] = v; x)
+Base.setindex!(x::SimLevResult, v, k::Symbol) = setindex!(x, v, String(k))
+function Base.setproperty!(x::SimLevResult, s::Symbol, v)
+    s in (:data, :trades) && error("SimLevResult: Feld $s ist nicht änderbar")
+    getfield(x, :data)[String(s)] = v
+end
+Base.delete!(x::SimLevResult, k::AbstractString) = (delete!(getfield(x, :data), k); x)
+Base.copy(x::SimLevResult) = SimLevResult(copy(getfield(x, :data)), getfield(x, :trades))
+r_class(::SimLevResult) = ["SimLevResult"]
+Base.show(io::IO, ::MIME"text/plain", x::SimLevResult) = print(io, format_result(x))
+Base.show(io::IO, x::SimLevResult) =
+    print(io, "SimLevResult(", length(x["worth"]), " Tage, Endwert ", r_sprintf("%.2f", x["worth"][end]), " EUR)")
+
+"Ergebnis von `summary(<SimLevResult>)` (R-Klasse `summary.SimLevResult`)."
+struct SimLevSummary <: AbstractDict{String,Any}
+    data::RList
+end
+@_rlist_wrapper SimLevSummary ("summary.SimLevResult",)
+Base.show(io::IO, x::SimLevSummary) = print(io, "SimLevSummary(", x["n_days"], " Tage)")
+
+# ── Druckausgabe (print.SimLevResult) ──────────────────────────────────────
+
+const _RULE = "═"^62
+const _SUBRULE = "  " * "─"^21
+
+_isna_any(x) = x === nothing || x === missing || (x isa AbstractFloat && isnan(x))
+
+function _undef_text(x, metric::String)
+    um = get(x, "undefined_metrics", nothing)
+    d = nothing
+    if um isa RFrame
+        j = findfirst(==(metric), um["metric"])
+        j !== nothing && (d = um["detail"][j])
+    end
+    return d === nothing ? "nicht definiert" : "nicht definiert ($d)"
 end
 
-Base.getindex(r::SimLevResult, k::Union{Symbol,AbstractString}) = getfield(r, Symbol(k))
-
-"Text von `print(result)` aus dem R-Paket (zeichengleich)."
-function format_result(x::SimLevResult)
-    s = x.statistics
+"Text von `print(result)` aus dem R-Paket (zeichengleich, ohne abschließenden Zeilenumbruch)."
+function format_result(x)
+    s = x["statistics"]
+    ext = _is_true(get(x, "external_flows", false))
     io = IOBuffer()
-    p(args...) = print(io, rsprintf(args...))
-    print(io, "\n", _RULE, "\n                    SimLev Simulation Results                  \n", _RULE, "\n\n")
-    print(io, "  Performance\n  ─────────────────────\n")
-    p("  CAGR:             %+.2f%%\n", x.cagr * 100)
-    p("  TTWROR:           %+.2f%%\n", x.ttwror * 100)
-    p("  Final Value:      %.2f EUR\n", x.worth[end])
-    print(io, "\n  Risk\n  ─────────────────────\n")
-    p("  Max Drawdown:     %.2f%%\n", s.max_drawdown * 100)
-    p("  Avg Drawdown:     %.2f%%\n", s.average_drawdown * 100)
-    p("  Ulcer Index:      %.4f\n", s.ulcer_index)
-    p("  Longest DD:       %d Tage\n", s.longest_drawdown)
-    p("  Avg Recovery:     %s Tage\n", isnan(s.avg_recovery_time) ? "–" : rsprintf("%.0f", s.avg_recovery_time))
-    print(io, "\n  Ratios\n  ─────────────────────\n")
-    fr(v) = isnan(v) ? "–" : rsprintf("%+.3f", v)
-    p("  Sharpe:           %s\n", fr(s.sharpe))
-    p("  Sortino:          %s\n", fr(s.sortino))
-    p("  Calmar:           %s\n", fr(s.calmar))
-    p("  Omega:            %s\n", fr(s.omega))
-    p("  Gain/Pain:        %s\n", fr(s.gain_to_pain))
-    p("  Serenity:         %s\n", fr(s.serenity))
-    p("  Martin Ratio:              %s\n", fr(s.martin_ratio))
-    print(io, "\n  Distribution\n  ─────────────────────\n")
-    p("  Daily Mean:       %+.4f%%\n", s.mean * 100)
-    p("  Daily Std Dev:    %.4f%%\n", s.sd * 100)
-    p("  Skewness:         %.3f\n", s.skewness)
-    p("  Kurtosis:         %.3f\n", s.kurtosis)
-    print(io, "\n")
-    tr = x.tax_report
-    if tr.total_taxes_paid > 0
-        print(io, "  Steuern\n  ─────────────────────\n")
-        p("  Gezahlte Steuern: %.2f EUR\n", tr.total_taxes_paid)
-        p("  Verlustvortrag:   %.2f EUR (§ 20) / %.2f EUR (§ 23)\n", tr.loss_carryforward_capital, tr.loss_carryforward_private)
-        if tr.sparer_pauschbetrag_annual > 0
-            p("  SPB genutzt:      %.2f EUR (Ersparnis: %.2f EUR)\n", tr.sparer_pauschbetrag_used, tr.sparer_pauschbetrag_tax_saved)
+    ln(t) = println(io, t)
+    ln(""); ln(_RULE); ln("                 SimLev Simulationsergebnisse                 "); ln(_RULE); ln("")
+    ln("  Wertentwicklung"); ln(_SUBRULE)
+    pct(v, metric, suffix = "") = _isna_any(v) ? _undef_text(x, metric) : r_sprintf("%+.2f%%%s", v * 100, suffix)
+    if ext
+        ln("  CAGR:             " * pct(x["cagr"], "cagr", " (geldgewichtet, XIRR)"))
+        ln("  TTWROR:           " * pct(x["ttwror"], "ttwror", " (zeitgewichtet)"))
+    else
+        ln("  CAGR:             " * pct(x["cagr"], "cagr"))
+        ln("  TTWROR:           " * pct(x["ttwror"], "ttwror"))
+    end
+    ln(r_sprintf("  Endwert:          %.2f EUR", x["worth"][end]))
+    ext && ln(r_sprintf("  Eingezahlt:       %.2f EUR (Start + Sparraten)", x["invested"][end]))
+    ln("")
+    ln(ext ? "  Risiko (zeitgewichtet, ohne Einzahlungseffekte)" : "  Risiko")
+    ln(_SUBRULE)
+    ln(r_sprintf("  Max. Drawdown:    %.2f%%", s["max_drawdown"] * 100))
+    ln(r_sprintf("  Mittl. Drawdown:  %.2f%%", s["average_drawdown"] * 100))
+    ln(r_sprintf("  Ulcer Index:      %.4f", s["ulcer_index"]))
+    ln("  Längster DD:      " * _n_tage(s["longest_drawdown"]))
+    ln("  Mittl. Erholung:  " * (_isna_any(s["avg_recovery_time"]) ? "–" : _n_tage(r_sprintf("%.0f", s["avg_recovery_time"]))))
+    ln("")
+    ln("  Kennzahlen"); ln(_SUBRULE)
+    fr(v) = _isna_any(v) ? "–" : r_sprintf("%+.3f", v)
+    ln("  Sharpe:           " * fr(s["sharpe"]))
+    ln("  Sortino:          " * fr(s["sortino"]))
+    ln("  Calmar:           " * fr(s["calmar"]))
+    ln("  Omega:            " * fr(s["omega"]))
+    ln("  Gain/Pain:        " * fr(s["gain_to_pain"]))
+    ln("  Serenity:         " * fr(s["serenity"]))
+    ln("  Martin Ratio:     " * fr(s["martin_ratio"]))
+    ext && ln("  (Calmar, Serenity, Martin mit TTWROR)")
+    ln("")
+    ln("  Verteilung"); ln(_SUBRULE)
+    ln(r_sprintf("  Mittel je Tag:    %+.4f%%", s["mean"] * 100))
+    ln(r_sprintf("  Std.-Abw. je Tag: %.4f%%", s["sd"] * 100))
+    num3(v, metric) = _isna_any(v) ? _undef_text(x, metric) : r_sprintf("%.3f", v)
+    ln("  Schiefe:          " * num3(s["skewness"], "skewness"))
+    ln("  Wölbung:          " * num3(s["kurtosis"], "kurtosis"))
+    ln("")
+    tr = get(x, "tax_report", nothing)
+    if tr !== nothing && tr["total_taxes_paid"] > 0
+        ln("  Steuern"); ln(_SUBRULE)
+        ln(r_sprintf("  Gezahlte Steuern: %.2f EUR", tr["total_taxes_paid"]))
+        ln(r_sprintf("  Verlustvortrag:   %.2f EUR (§ 20) / %.2f EUR (§ 23)", tr["loss_carryforward_capital"], tr["loss_carryforward_private"]))
+        otd = get(tr, "open_tax_debt", nothing)
+        (otd isa Real && !isnan(otd) && otd > 0) && ln(r_sprintf("  Steuerschuld:     %.2f EUR (offen, nicht gedeckt)", otd))
+        if tr["sparer_pauschbetrag_annual"] > 0
+            ln(r_sprintf("  SPB genutzt:      %.2f EUR (Ersparnis: %.2f EUR)", tr["sparer_pauschbetrag_used"], tr["sparer_pauschbetrag_tax_saved"]))
         end
-        print(io, "\n")
+        ln("")
     end
     print(io, _RULE)
     return String(take!(io))
 end
 
-Base.show(io::IO, ::MIME"text/plain", x::SimLevResult) = print(io, format_result(x))
-Base.show(io::IO, x::SimLevResult) =
-    print(io, "SimLevResult(", length(x.worth), " Tage, Endwert ", rsprintf("%.2f", x.worth[end]), " EUR)")
+# ── summary.SimLevResult ───────────────────────────────────────────────────
 
-"""
-    summary(result::SimLevResult; verbose = true)
-
-Kompakte Kennzahlenübersicht wie R's `summary.SimLevResult`. Gibt die Werte
-als NamedTuple zurück und druckt sie bei `verbose = true`.
-"""
-function Base.summary(x::SimLevResult; verbose::Bool = true, io::IO = stdout)
-    n_days = length(x.worth)
-    s = x.statistics
-    start, stop = x.worth[1], x.worth[end]
-    res = (n_days = n_days, n_years = r_round(n_days / 365.25, 2), start_value = start, end_value = stop,
-           total_return = (stop / start) - 1, cagr = x.cagr, ttwror = x.ttwror,
-           sharpe = s.sharpe, sortino = s.sortino, calmar = s.calmar, omega = s.omega,
-           gain_to_pain = s.gain_to_pain, serenity = s.serenity, martin_ratio = s.martin_ratio,
-           max_drawdown = s.max_drawdown, average_drawdown = s.average_drawdown, ulcer_index = s.ulcer_index,
-           longest_drawdown = s.longest_drawdown, avg_recovery_time = s.avg_recovery_time,
-           statistics = s, tax_report = x.tax_report)
-    if verbose
-        p(args...) = print(io, rsprintf(args...))
-        print(io, "\n", _RULE, "\n                    SimLev Summary                             \n", _RULE, "\n\n")
-        p("  Zeitraum:         %d Tage (%.1f Jahre)\n", n_days, res.n_years)
-        p("  Start:            %.2f EUR\n", start)
-        p("  Ende:             %.2f EUR\n", stop)
-        p("  Gesamtrendite:    %+.2f%%\n", res.total_return * 100)
-        p("  CAGR:             %+.2f%%\n", x.cagr * 100)
-        p("  TTWROR:           %+.2f%%\n", x.ttwror * 100)
-        print(io, "\n")
-        f(v; pct = false) = isnan(v) ? "–" : (pct ? rsprintf("%.2f%%", v * 100) : rsprintf("%.3f", v))
-        rows = ["Sharpe" => f(s.sharpe), "Sortino" => f(s.sortino), "Calmar" => f(s.calmar),
-                "Omega" => f(s.omega), "Gain/Pain" => f(s.gain_to_pain), "Serenity" => f(s.serenity),
-                "Martin" => f(s.martin_ratio), "Max DD" => f(s.max_drawdown; pct = true),
-                "Avg DD" => f(s.average_drawdown; pct = true), "Ulcer" => f(s.ulcer_index),
-                "Longest DD" => rsprintf("%d d", s.longest_drawdown),
-                "Avg Recovery" => (isnan(s.avg_recovery_time) ? "–" : rsprintf("%.0f d", s.avg_recovery_time))]
-        for (k, v) in rows
-            p("  %-16s %s\n", k, v)
-        end
-        print(io, "\n", _RULE, "\n")
+function _summary_result(object)
+    worth = object["worth"]
+    n_days = length(worth)
+    s = object["statistics"]
+    ext = _is_true(get(object, "external_flows", false))
+    invested = get(object, "invested", nothing)
+    twr = get(object, "twr_index", nothing)
+    res = RList(; class = ["summary.SimLevResult"])
+    res["n_days"] = n_days
+    res["n_years"] = r_round(n_days / 365.25, 2)
+    res["start_value"] = worth[1]
+    res["start_capital"] = invested !== nothing ?
+        invested[1] - r_sum(Float64[rp["flows"][1] for (_, rp) in object["report"]]; na_rm = true) : NA
+    res["end_value"] = worth[end]
+    res["total_return_twr"] = ext ? twr[end] / twr[1] - 1 : (worth[end] / worth[1]) - 1
+    res["return_on_invested"] = NA
+    res["total_return"] = NA
+    res["invested"] = invested !== nothing ? invested[end] : worth[1]
+    res["cagr"] = object["cagr"]
+    res["ttwror"] = object["ttwror"]
+    for k in ("sharpe", "sortino", "calmar", "omega", "gain_to_pain", "serenity", "martin_ratio", "max_drawdown",
+              "average_drawdown", "ulcer_index", "longest_drawdown", "avg_recovery_time")
+        res[k] = s[k]
     end
+    res["statistics"] = s
+    res["tax_report"] = get(object, "tax_report", nothing)
+    res["undefined_metrics"] = get(object, "undefined_metrics", nothing)
+    res["external_flows"] = ext
+    res["total_return"] = res["total_return_twr"]
+    res["return_on_invested"] = (res["end_value"] - res["invested"]) / res["invested"]
+    return SimLevSummary(res)
+end
+
+"Text von `print(summary(result))` aus dem R-Paket (ohne abschließenden Zeilenumbruch)."
+function format_summary(x)
+    s = x["statistics"]
+    n_days = x["n_days"]
+    ext = _is_true(get(x, "external_flows", false))
+    io = IOBuffer()
+    ln(t) = println(io, t)
+    ln(""); ln(_RULE); ln("                    SimLev Zusammenfassung                    "); ln(_RULE); ln("")
+    ln(r_sprintf("  Zeitraum:         %s (%.1f Jahre)", _n_tage(n_days), x["n_years"]))
+    sc = get(x, "start_capital", nothing)
+    (sc !== nothing && !_isna_any(sc)) && ln(r_sprintf("  Startkapital:     %.2f EUR", sc))
+    ln(r_sprintf("  Depotwert Starttag: %.2f EUR", x["start_value"]))
+    ln(r_sprintf("  Ende:             %.2f EUR", x["end_value"]))
+    pct(v, metric, suffix = "") = _isna_any(v) ? _undef_text(x, metric) : r_sprintf("%+.2f%%%s", v * 100, suffix)
+    if ext
+        ln(r_sprintf("  Eingezahlt:       %.2f EUR (Start + Sparraten)", x["invested"]))
+        ln(r_sprintf("  Gesamtrendite (zeitgewichtet): %+.2f %%", x["total_return_twr"] * 100))
+        ln(r_sprintf("  Gewinn je eingezahltem EUR:    %+.2f %% (Endwert %.2f EUR / Eingezahlt %.2f EUR - 1)",
+                     x["return_on_invested"] * 100, x["end_value"], x["invested"]))
+        ln("  CAGR:             " * pct(x["cagr"], "cagr", " (geldgewichtet, XIRR)"))
+        ln("  TTWROR:           " * pct(x["ttwror"], "ttwror", " (zeitgewichtet)"))
+    else
+        ln(r_sprintf("  Gesamtrendite:    %+.2f%%", x["total_return"] * 100))
+        ln("  CAGR:             " * pct(x["cagr"], "cagr"))
+        ln("  TTWROR:           " * pct(x["ttwror"], "ttwror"))
+    end
+    ln("")
+    fmt(v, p = false) = _isna_any(v) ? "–" : (p ? r_sprintf("%.2f%%", v * 100) : r_sprintf("%.3f", v))
+    rows = ["Sharpe" => fmt(s["sharpe"]), "Sortino" => fmt(s["sortino"]), "Calmar" => fmt(s["calmar"]),
+            "Omega" => fmt(s["omega"]), "Gain/Pain" => fmt(s["gain_to_pain"]), "Serenity" => fmt(s["serenity"]),
+            "Martin" => fmt(s["martin_ratio"]), "Max. DD" => fmt(s["max_drawdown"], true),
+            "Mittl. DD" => fmt(s["average_drawdown"], true), "Ulcer" => fmt(s["ulcer_index"]),
+            "Längster DD" => r_sprintf("%d d", s["longest_drawdown"]),
+            "Mittl. Erholung" => (_isna_any(s["avg_recovery_time"]) ? "–" : r_sprintf("%.0f d", s["avg_recovery_time"]))]
+    for (k, v) in rows
+        ln("  " * rpad(k, 16) * " " * v)
+    end
+    ext && ln("  (Drawdowns zeitgewichtet; Calmar, Serenity, Martin mit TTWROR)")
+    ln("")
+    print(io, _RULE)
+    return String(take!(io))
+end
+
+"""
+    summary(result::SimLevResult; verbose = false, io = stdout)
+
+Zusammenfassung wie R's `summary.SimLevResult`: gibt ein `SimLevSummary`
+(R-Klasse `summary.SimLevResult`) zurück, dessen Druckausgabe der R-Methode
+entspricht; mit `verbose = true` wird sie zusätzlich auf `io` gedruckt.
+Ebenso über das generische `r_summary(result)`.
+"""
+function Base.summary(x::SimLevResult; verbose::Bool = false, io::IO = stdout)
+    res = _summary_result(x)
+    verbose && println(io, format_summary(res))
     return res
 end
+
+register_print!("SimLevResult", (io, x) -> print(io, format_result(x)))
+register_print!("summary.SimLevResult", (io, x) -> print(io, format_summary(x)))
+register_summary!("SimLevResult", (x, args...; kw...) -> _summary_result(x))

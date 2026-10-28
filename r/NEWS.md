@@ -14,6 +14,14 @@ Recht um, gibt alle Ausgaben auf Deutsch aus und erzeugt alle 105 Fälle
 neu (siehe unten). Python 0.5.0 und Julia 0.5.0 sind zu allen 105 Fällen
 bitgleich.
 
+## SimLev 0.7.0
+
+Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- MS-GARCH: Maximum-Likelihood-Schätzung nach Haas, Mittnik und Paolella (2004) für 2–3 Regime mit sGARCH/gjrGARCH; Startwerte aus HMM-EM und Rangeinteilung, Raster und BFGS.
+- Bootstrap: Verfahren ms_garch nutzt die eigene Schätzung; das Paket MSGARCH wird nicht mehr gebraucht.
+- Prüfung: im Vergleich mit MSGARCH 20 von 20 Fällen gleichwertig; R, Python und Julia bitgleich.
+
 ## SimLev 0.6.0
 
 Minor-Update (Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -770,9 +778,7 @@ in `DESCRIPTION`); die Pakete selbst sind nicht mehr nötig und aus den
   Erzeugen installiert hatte) entfällt in allen Fällen und in
   `golden/modules/ref_tools.R`; Python und Julia brauchen ohne nachgebildete
   optionale Pakete keinen Schalter mehr (`SIMLEV_R_SUGGESTS` entfällt).
-  Inhaltlich sind die Fälle unverändert. MSGARCH bleibt in den `Suggests`:
-  Ohne das Paket brechen die MS-GARCH-Verfahren wie bisher mit einer
-  Meldung ab.
+  Inhaltlich sind die Fälle unverändert.
 
 ### Ohne Rcpp
 
@@ -791,6 +797,27 @@ in `DESCRIPTION`); die Pakete selbst sind nicht mehr nötig und aus den
   `.sim_buy_cpp()` statt `perform_trade_buy_cpp()`, `.sim_p20_tax_cpp()`
   statt `p20_tax_rcpp()`, `.sim_market_update_batch_cpp()` statt
   `batch_market_update()`.
+
+### MS-GARCH ohne MSGARCH
+
+* Die Verfahren `"ms_garch"`, `"ms_ar_garch_m"` und `"tvtp_ms_garch"` von
+  `bootstrap()` und `bootstrap_study()` brauchen das Paket MSGARCH nicht
+  mehr; es ist aus den `Suggests` gestrichen. SimLev schätzt das
+  MS-GARCH-Modell selbst per Maximum Likelihood nach Haas, Mittnik und
+  Paolella (2004): Normalverteilung, je Regime ein Varianzpfad `"sGARCH"`
+  oder `"gjrGARCH"`, die Pfade aller Regime laufen parallel; Likelihood
+  über den Hamilton-Filter (neuer C-Kern `src/ms_garch.c`), Maximierung mit
+  `optim()` (BFGS) aus deterministischen Startwerten (Baum-Welch-EM des
+  Gauß'schen HMM und Rangeinteilung der rollierenden Volatilität, je mit
+  kleinem Raster für α, γ, β und die Übergangsmatrix), Regime aufsteigend
+  nach unbedingter Varianz, Regimepfad per Viterbi. Die Schätzung zieht
+  keine Zufallszahlen.
+* Die Schätzwerte und damit die Pfade weichen von MSGARCH-Schätzungen ab
+  (eigene Startwerte, Parametrisierung und Startvarianz).
+* Als Varianzmodell je Regime (`ms_garch_model`, `ms_ar_garch_model`,
+  `tvtp_garch_model`) sind nur noch `"sGARCH"` und `"gjrGARCH"` erlaubt,
+  als Regimezahl ganze Zahlen ab 2; andere Werte sind ein Fehler mit
+  deutscher Meldung.
 
 ## SimLev 0.4.0
 

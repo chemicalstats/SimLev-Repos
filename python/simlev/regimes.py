@@ -76,6 +76,99 @@ def _hmm_viterbi(lB, lA, lp0):
     return path
 
 
+def _hmm_em(X, k, init, max_iter, tol, ridge):
+    """Baum-Welch-EM des Gauss'schen HMM aus einem Startwert (``.hmm_em``).
+
+    Args:
+        X: Matrix Perioden x Spalten.
+        k: Anzahl Zustände.
+        init: dict ``mu`` (k x Spalten), ``S`` (Liste k Kovarianzmatrizen),
+            ``A`` (Übergangsmatrix k x k); Startverteilung gleichverteilt.
+        max_iter, tol: Höchstzahl Iterationen und relative Abbruchschranke
+            (Abbruch, wenn sich die Log-Likelihood um weniger als
+            ``tol * (1 + |logL|)`` ändert).
+        ridge: Matrix, die jeder Kovarianzmatrix im M-Schritt zugeschlagen wird.
+
+    Returns:
+        dict ``mu``, ``S``, ``A``, ``p0``, ``ll``, ``filtered``, ``smoothed``,
+        ``lB``, ``iter``; ``ll``, ``filtered``, ``smoothed`` und ``lB`` zu den
+        gelieferten (zuletzt geschätzten) Parametern.
+    """
+    X = np.asarray(X, dtype=np.float64)
+    Tn, d = X.shape
+    k = int(k)
+    la = _dep._linalg()
+    with np.errstate(all="ignore"):
+        mu = np.array(init["mu"], dtype=np.float64).reshape(k, d)
+        S = [np.array(s, dtype=np.float64) for s in init["S"]]
+        A = np.array(init["A"], dtype=np.float64)
+        p0 = np.full(k, 1 / k)
+        ll_old = -math.inf
+
+        def estep():
+            lB = np.column_stack([_ldmvn(X, mu[j, :], S[j]) for j in range(k)])
+            m = lB[:, 0].copy()
+            for j in range(1, k):
+                b = lB[:, j]
+                m = np.where(np.isnan(b) | (b > m), b, m)   # pmax: NaN/NA in b gewinnt, NaN/NA in m bleibt
+            fb = _core.hmm_forward_backward(_libm.exp(lB - m.reshape(-1, 1)), A, p0)
+            ll = r_sum(_libm.log(fb["scale"])) + r_sum(m)
+            return lB, fb, ll
+        it = 0
+        for it in range(1, int(max_iter) + 1):
+            lB, fb, ll = estep()
+            ga = fb["smoothed"]
+            xi = fb["xi"]
+            p0 = ga[0, :].copy()
+            A = xi / r_rowsums(xi).reshape(-1, 1)
+            for j in range(k):
+                w = ga[:, j]
+                sw = r_sum(w)
+                mu[j, :] = r_colsums(X * w.reshape(-1, 1)) / sw
+                Xc = X - mu[j, :].reshape(1, -1)
+                S[j] = np.asarray(la.crossprod(Xc * np.sqrt(w).reshape(-1, 1)), dtype=np.float64) / sw + ridge
+            if abs(ll - ll_old) < tol * (1 + abs(ll)):
+                break
+            ll_old = ll
+        lB, fb, ll = estep()
+    return {"mu": mu, "S": S, "A": A, "p0": p0, "ll": ll, "filtered": fb["filtered"], "smoothed": fb["smoothed"],
+            "lB": lB, "iter": it}
+
+
+def _hmm_init_cl(X, cl, k, ridge):
+    """HMM-Startwert aus einer Einteilung der Perioden in k Gruppen (``.hmm_init_cl``).
+
+    Mittelwert und Kovarianz (plus ``ridge``) je Gruppe, Übergangsmatrix 0.9
+    auf der Diagonale, Rest gleich verteilt.
+    """
+    X = np.asarray(X, dtype=np.float64)
+    cl = np.asarray(cl).ravel()
+    k = int(k)
+    with np.errstate(all="ignore"):
+        mu = np.vstack([_dep._colmeans(X[cl == j + 1, :]) for j in range(k)])
+        S = [np.asarray(_dep._stats().cov(X[cl == j + 1, :]), dtype=np.float64) + ridge for j in range(k)]
+    off = 0.1 / max(1, k - 1)
+    A = np.full((k, k), off) + np.eye(k) * (0.9 - off)
+    return {"mu": mu, "S": S, "A": A}
+
+
+def _hmm_init_rank(X, k, win, ridge):
+    """Deterministischer HMM-Startwert (``.hmm_init_rank``).
+
+    Rangeinteilung einer rollierenden Volatilität (Wurzel des gleitenden
+    Mittelwerts von ``rowSums(X^2)`` über ``win`` Perioden; fehlende
+    Anfangswerte = Median) in k gleich große Gruppen (``cut(rank(vol), k)``),
+    daraus :func:`_hmm_init_cl`.
+    """
+    X = np.asarray(X, dtype=np.float64)
+    with np.errstate(invalid="ignore"):   # NA am Rand (signalisierendes NaN) ohne Warnung wie in R
+        vol = np.sqrt(_dep._roll_mean(r_rowsums(X * X), win))
+    na = np.isnan(vol)
+    if na.any():
+        vol[na] = _dep._median(vol, na_rm=True)
+    return _hmm_init_cl(X, _dep._cut_n(_dep._rank_avg(vol), k), k, ridge)
+
+
 def _cov2cor(V):
     """``stats::cov2cor``."""
     V = np.asarray(V, dtype=np.float64)
@@ -172,70 +265,22 @@ def regime_hmm(data, columns, k=2, frequency=("week", "day", "month"), n_start=5
     dd = _dep._days(rd["date"].to_numpy())
     ppy = (Tn - 1) / ((dd[Tn - 1] - dd[0]) / 365.25)
     ridge = np.eye(d) * (1e-10 + 1e-6 * r_mean([r_var(X[:, j]) for j in range(d)]))
-    la = _dep._linalg()
-
-    def fit_once(init):
-        mu = init["mu"].copy()
-        S = [s.copy() for s in init["S"]]
-        A = init["A"].copy()
-        p0 = np.full(k, 1 / k)
-        ll_old = -math.inf
-
-        def estep():
-            lB = np.column_stack([_ldmvn(X, mu[j, :], S[j]) for j in range(k)])
-            m = lB[:, 0].copy()
-            for j in range(1, k):
-                b = lB[:, j]
-                with np.errstate(invalid="ignore"):   # pmax: NaN/NA in b gewinnt, NaN/NA in m bleibt
-                    m = np.where(np.isnan(b) | (b > m), b, m)
-            fb = _core.hmm_forward_backward(_libm.exp(lB - m.reshape(-1, 1)), A, p0)
-            ll = r_sum(_libm.log(fb["scale"])) + r_sum(m)
-            return lB, fb, ll
-        it = 0
-        for it in range(1, int(max_iter) + 1):
-            lB, fb, ll = estep()
-            ga = fb["smoothed"]
-            xi = fb["xi"]
-            p0 = ga[0, :].copy()
-            A = xi / r_rowsums(xi).reshape(-1, 1)
-            for j in range(k):
-                w = ga[:, j]
-                sw = r_sum(w)
-                mu[j, :] = r_colsums(X * w.reshape(-1, 1)) / sw
-                Xc = X - mu[j, :].reshape(1, -1)
-                S[j] = np.asarray(la.crossprod(Xc * np.sqrt(w).reshape(-1, 1)), dtype=np.float64) / sw + ridge
-            if abs(ll - ll_old) < tol * (1 + abs(ll)):
-                break
-            ll_old = ll
-        lB, fb, ll = estep()
-        return {"mu": mu, "S": S, "A": A, "p0": p0, "ll": ll, "filtered": fb["filtered"], "smoothed": fb["smoothed"],
-                "lB": lB, "iter": it}
+    win = int(max(4, float(_fmt.r_round(ppy / 12))))
 
     def make_inits():
         rng = _dep._rng()
         res = []
         for s in range(1, int(n_start) + 1):
-            with np.errstate(invalid="ignore"):   # NA am Rand (signalisierendes NaN) ohne Warnung wie in R
-                vol = np.sqrt(_dep._roll_mean(r_rowsums(X * X), int(max(4, float(_fmt.r_round(ppy / 12))))))
-            na = np.isnan(vol)
-            if na.any():
-                vol[na] = _dep._median(vol, na_rm=True)
             if s == 1:
-                cl = _dep._cut_n(_dep._rank_avg(vol), k)
+                res.append(_hmm_init_rank(X, k, win, ridge))
             else:
-                cl = np.asarray(rng.sample_int(k, Tn, replace=True), dtype=np.int64)
-            mu = np.vstack([_dep._colmeans(X[cl == j + 1, :]) for j in range(k)])
-            S = [np.asarray(_dep._stats().cov(X[cl == j + 1, :]), dtype=np.float64) + ridge for j in range(k)]
-            off = 0.1 / max(1, k - 1)
-            A = np.full((k, k), off) + np.eye(k) * (0.9 - off)
-            res.append({"mu": mu, "S": S, "A": A})
+                res.append(_hmm_init_cl(X, np.asarray(rng.sample_int(k, Tn, replace=True), dtype=np.int64), k, ridge))
         return res
     inits = _dep._with_rng_restore(make_inits, seed)
     fits = []
     for i in inits:
         try:
-            with np.errstate(all="ignore"):
-                fits.append(fit_once(i))
+            fits.append(_hmm_em(X, k, i, max_iter, tol, ridge))
         except Exception:  # noqa: BLE001 - tryCatch(error = NULL)
             continue
     if not fits:
@@ -321,4 +366,4 @@ SimLevHMM.plot = _plot_method(_plot_hmm, "SimLevHMM")
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
 from ._r.base import quiet_fp  # noqa: E402
 
-quiet_fp(globals(), list(__all__) + ["_hmm_viterbi", "_ldmvn"])
+quiet_fp(globals(), list(__all__) + ["_hmm_viterbi", "_ldmvn", "_hmm_em", "_hmm_init_cl", "_hmm_init_rank"])

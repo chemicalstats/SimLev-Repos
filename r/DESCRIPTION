@@ -1,7 +1,7 @@
 Package: SimLev
 Type: Package
 Title: Simulation and Backtesting with German Investment Taxation
-Version: 0.6.0
+Version: 0.7.0
 Authors@R: person("ChemicalStats", "von der Mauerstrasse",
                   role = c("aut", "cre", "cph"),
                   email = "chemicalstatsy@protonmail.com")
@@ -41,7 +41,7 @@ Copyright: Teile übernommen aus evd (Alec Stephenson), imputeTS (Steffen
 Encoding: UTF-8
 Depends: R (>= 4.0)
 Imports: stats, graphics, grDevices, utils, parallel, methods
-Suggests: testthat (>= 3.0.0), knitr, rmarkdown, MSGARCH
+Suggests: testthat (>= 3.0.0), knitr, rmarkdown
 VignetteBuilder: knitr
 Config/testthat/edition: 3
 RoxygenNote: 7.3.1

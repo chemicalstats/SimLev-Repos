@@ -319,7 +319,7 @@ werden außerdem Druck- und Konsolenausgabe, Warnungen und Fehlermeldungen.
 | Engine: gezielte Fälle für jeden Steuer- und Sonderpfad plus Zufallsfälle (`golden/cases/`) | 68 | alle bitgleich, einschließlich `print` und `details = true` |
 | Engine: Stressfälle (`golden/extra/`) | 37 | alle bitgleich, einschließlich `print` und `details = true` |
 | Engine: frisch erzeugte Zufalls- und Stressfälle beider Generatoren | 469 | alle bitgleich |
-| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS und die R-Interna (29 Module in `golden/modules/`) | 4.536 | alle bitgleich |
+| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS und die R-Interna (30 Module in `golden/modules/`) | 4.563 | alle bitgleich |
 
 **Plattformen:** Die Referenz ist R unter Linux x86-64 (die Modul-Fälle
 entstanden mit R 4.3.3); dort ist die Julia-Fassung geprüft. Die
@@ -343,8 +343,9 @@ Uhrzeit, das Ergebnis hängt dann von der Sekunde des Aufrufs ab;
 imputeTS 3.4 (`na_interpolation` mit `option = "stine"` und `"linear"`, stinepack 1.5) ist
 ebenfalls nachgebildet (`RImputeTS`, `RStinepack`): `fill = "stine"` im
 Backcast interpoliert immer nach Stineman wie R, das beide Pakete
-übernommen hat (`.imputets_na_interpolation`; Herkunft in `COPYRIGHTS.md`). MSGARCH gilt als nicht
-installiert (die MS-GARCH-Verfahren melden wie R, dass das Paket fehlt);
+übernommen hat (`.imputets_na_interpolation`; Herkunft in `COPYRIGHTS.md`). Die
+MS-GARCH-Verfahren schätzen ihr Modell wie R selbst, ohne MSGARCH (`SimLev.MsGarch`,
+Port von `.ms_garch_fit` und dem Kern `src/ms_garch.c`);
 einen Schalter für optionale R-Pakete gibt es nicht mehr. `nlminb` (PORT) liest an drei Stellen nicht
 gesetzte Variablen (in R Stapelreste); Julia setzt 0, was nur in
 Sonderfällen die Meldung (Code 3 statt 5) oder Läufe mit Inf/NaN in
@@ -353,8 +354,8 @@ Gradient bzw. Hesse-Matrix ändern kann.
 ## Tests
 
 ``` bash
-julia --project -e 'using Pkg; Pkg.test()'               # 929 Tests: Engine, R-Interna, Referenzfälle (Auswahl)
-SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()'   # dazu alle 4.536 Modul-Referenzfälle
+julia --project -e 'using Pkg; Pkg.test()'               # 1.211 Tests: Engine, R-Interna, Referenzfälle (Auswahl)
+SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()'   # dazu alle 4.563 Modul-Referenzfälle
 julia --project tools/compare_golden.jl ../golden/cases   # Engine-Fälle eines Ordners (auch ../golden/extra)
 julia --project tools/compare_reference.jl [modul …] [-k muster] [-v]   # Modul-Referenzfälle
 ```
@@ -393,11 +394,11 @@ src/
   svg.jl            Grafikmodul: SimLevPlot, plot-API und alle SVG-Zeichenbausteine
   dashboard.jl      statisches SVG-Dashboard (Daten und Panels)
   <modul>.jl        Erweiterungen, je eine R-Datei (data_prep, backcast, bonds, signals,
-                    bootstrap, withdrawal, dependence, regimes, scenarios, optimize,
+                    bootstrap, withdrawal, dependence, regimes, ms_garch, scenarios, optimize,
                     tactical, deep_analysis, planning, analysis_tests, overfitting,
                     param_search, sensitivity)
-  <name>_core.jl    C++-Kerne der Erweiterungen (bootstrap, signals, withdrawal,
-                    dependence, optimize)
+  <name>_core.jl    C++-Kerne der Erweiterungen (bootstrap mit dem C-Kern ms_garch.c,
+                    signals, withdrawal, dependence, optimize)
   exports.jl        öffentliche Funktionen der Untermodule für `using SimLev`
   precompile.jl     Arbeitslast für die Vorkompilierung
 data/               Tarifdatei steuertarif.csv, R-Farbnamen r_colors.csv

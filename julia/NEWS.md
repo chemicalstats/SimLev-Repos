@@ -1,5 +1,13 @@
 # SimLev.jl (Julia) – Änderungen je Version
 
+## SimLev.jl 0.7.0
+
+Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- MS-GARCH: Maximum-Likelihood-Schätzung nach Haas, Mittnik und Paolella (2004) für 2–3 Regime mit sGARCH/gjrGARCH; Startwerte aus HMM-EM und Rangeinteilung, Raster und BFGS.
+- Bootstrap: Verfahren ms_garch nutzt die eigene Schätzung; das Paket MSGARCH wird nicht mehr gebraucht.
+- Prüfung: im Vergleich mit MSGARCH 20 von 20 Fällen gleichwertig; R, Python und Julia bitgleich.
+
 ## SimLev.jl 0.6.0
 
 Minor-Update (Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -84,6 +92,18 @@ weiterhin nur die Standardbibliothek (`Dates`, `Printf`, `Logging`;
   und `%%`. Die Python-Fassung nutzt dafür Python- bzw. pandas-Ausdrücke.
 * `cores > 1` rechnet sequenziell mit der Zufallssemantik von
   `mclapply(mc.set.seed = FALSE)`, also mit denselben Ergebnissen wie R.
+* MS-GARCH ohne MSGARCH, eigene Schätzung wie R: Die Verfahren
+  `"ms_garch"`, `"ms_ar_garch_m"` und `"tvtp_ms_garch"` von `bootstrap()`
+  und `bootstrap_study()` laufen jetzt auch in Julia, bitgleich zu R. Das
+  Untermodul `SimLev.MsGarch` (`src/ms_garch.jl`, Port von
+  `r/R/ms_garch.R`) schätzt das Modell nach Haas, Mittnik und Paolella
+  (2004) per Maximum Likelihood (`optim` mit BFGS aus deterministischen
+  Startwerten: Baum-Welch-EM und Rangeinteilung der Volatilität, je mit
+  kleinem Raster); den Hamilton-Filter rechnet
+  `BootstrapCore.ms_garch_filter` (Port von `r/src/ms_garch.c`). Das EM von
+  `regime_hmm()` ist wie in R in `Regimes._hmm_em`, `_hmm_init_rank` und
+  `_hmm_init_cl` herausgelöst (Ergebnis unverändert). Die Meldung „Paket
+  fehlt“ entfällt.
 
 ### Rechenweise
 
@@ -208,9 +228,8 @@ weiterhin nur die Standardbibliothek (`Dates`, `Printf`, `Logging`;
   Meldung ab. Da R evd, imputeTS und rugarch übernommen hat, entfallen das
   Untermodul `RSuggests` (`src/r/suggests.jl`) und die Umgebungsvariable
   `SIMLEV_R_SUGGESTS`; die Referenzfälle haben kein Feld `suggests` mehr.
-  MSGARCH gilt
-  als nicht installiert (die MS-GARCH-Verfahren melden wie R, dass
-  `MSGARCH` fehlt).
+  MSGARCH wird nicht gebraucht; die MS-GARCH-Verfahren schätzen wie R
+  selbst (siehe Erweiterungen).
 * `nlminb`: An drei Stellen liest die PORT-Bibliothek nicht gesetzte
   Variablen (in R Stapelreste); Julia setzt 0. Das kann nur in
   Sonderfällen die Meldung (Code 3 statt 5) oder Läufe mit Inf/NaN in

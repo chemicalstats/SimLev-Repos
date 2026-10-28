@@ -3,7 +3,8 @@
  *
  * Seit 0.5.0 ohne Rcpp: Die C++-Kerne haben extern "C"-Huellen (am Ende der
  * jeweiligen .cpp-Datei, Rahmen in simlev_capi.h), die C-Uebernahmen
- * (vendor_*.c) ihre eigenen .Call-Huellen. Registriert sind nur .Call-Routinen
+ * (vendor_*.c) und der MS-GARCH-Filter (ms_garch.c) ihre eigenen
+ * .Call-Huellen. Registriert sind nur .Call-Routinen
  * unter Namen ohne Praefix; NAMESPACE laedt sie mit
  * useDynLib(SimLev, .registration = TRUE, .fixes = "C_"), in R heissen sie
  * daher C_<name> (z. B. C_sim_buy, gerufen von .sim_buy_cpp in R/cores.R).
@@ -34,6 +35,8 @@ extern SEXP C_sim_fifo_price(SEXP, SEXP, SEXP);
 extern SEXP C_sim_fifo_vp(SEXP, SEXP, SEXP);
 extern SEXP C_sim_private_sale_tax(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sim_fifo_consume(SEXP, SEXP, SEXP);
+/* ms_garch.c */
+extern SEXP C_ms_garch_filter(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 /* research_core.cpp */
 extern SEXP C_proj_box_simplex(SEXP, SEXP, SEXP);
 extern SEXP C_qp_box_simplex(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
@@ -92,6 +95,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"sim_fifo_vp", (DL_FUNC) &C_sim_fifo_vp, 3},
     {"sim_private_sale_tax", (DL_FUNC) &C_sim_private_sale_tax, 5},
     {"sim_fifo_consume", (DL_FUNC) &C_sim_fifo_consume, 3},
+    /* ms_garch.c */
+    {"ms_garch_filter", (DL_FUNC) &C_ms_garch_filter, 8},
     /* research_core.cpp */
     {"proj_box_simplex", (DL_FUNC) &C_proj_box_simplex, 3},
     {"qp_box_simplex", (DL_FUNC) &C_qp_box_simplex, 8},

@@ -223,7 +223,7 @@ bootstrap = _callable_module("bootstrap")
 deep_analysis = _callable_module("deep_analysis")
 param_search = _callable_module("param_search")
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 __all__ = [
     "AssetConfig",

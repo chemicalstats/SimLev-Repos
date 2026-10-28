@@ -1,4 +1,4 @@
-"""Bootstrap-Kerne (Port von ``r/src/bootstrap_core.cpp`` und ``.garch_filter``).
+"""Bootstrap-Kerne (Port von ``r/src/bootstrap_core.cpp``, ``.garch_filter`` und ``r/src/ms_garch.c``).
 
 Jeder Kern liefert wie im Original die 1-basierten Quellzeilen der gezogenen
 Beobachtungen; parametrische Verfahren zusätzlich die simulierte
@@ -18,7 +18,7 @@ from ._r import rng as _rng
 __all__ = ["boot_idx_iid", "boot_idx_block", "boot_idx_stationary", "boot_idx_regime",
            "boot_idx_tails", "boot_wild", "boot_reset", "boot_evt", "boot_garch",
            "boot_ms_garch", "rolling_vol", "assign_regimes", "estimate_trans_mat",
-           "garch_filter"]
+           "garch_filter", "ms_garch_filter"]
 
 
 def _draw_int(n: int) -> int:
@@ -501,3 +501,149 @@ def garch_filter(ep, om: float, al: float, be: float, ga: float, v0: float) -> n
         if v < 1e-14:
             v = 1e-14
     return s2
+
+
+# ── MS-GARCH-Filter (r/src/ms_garch.c) ──────────────────────────────────────
+#
+# Hamilton-Filter mit parallelen Varianzpfaden je Regime (Haas, Mittnik und
+# Paolella 2004). Rechenfolge wie im C-Kern: Summen beginnen bei 0.0 und
+# laufen über k (bzw. i) aufsteigend, jede Formel in der Klammerung des
+# C-Codes (y^2 als y * y, 2 pi als 2.0 * M_PI), ohne fma. Elementweise
+# Operationen (+ - * / sqrt) rechnet numpy exakt gerundet wie C; exp und log
+# kommen aus libm (math.*), mit den C-Randfällen (Überlauf -> Inf,
+# log(0) = -Inf, log(<0) = NaN).
+
+def _msg_num(x, length, name):
+    """Argument als double-Vektor (wie ``coerceVector``, Matrizen spaltenweise) mit Längenprüfung."""
+    a = np.asarray(x)
+    if a.dtype.kind not in "biuf":
+        raise ValueError("ms_garch_filter: '%s' muss numerisch sein." % name)
+    v = np.asarray(a, dtype=np.float64).ravel(order="F")
+    if length >= 0 and v.size != length:
+        raise ValueError("ms_garch_filter: '%s' muss die Länge %d haben (erhalten: %d)." % (name, length, v.size))
+    return v
+
+
+def _c_exp_list(v):
+    try:
+        return list(map(math.exp, v))
+    except (OverflowError, ValueError):
+        out = []
+        for x in v:
+            try:
+                out.append(math.exp(x))
+            except OverflowError:
+                out.append(math.inf)
+        return out
+
+
+def _c_log1(x):
+    if x > 0.0:
+        return math.log(x)
+    if x == 0.0:
+        return -math.inf
+    return x if x != x else math.nan
+
+
+def _c_log_list(v):
+    try:
+        return list(map(math.log, v))
+    except (OverflowError, ValueError):
+        return [_c_log1(x) for x in v]
+
+
+def _c_div(a, b):
+    """C-Division ``a / b`` auch für ``b == 0``."""
+    if b != 0.0:
+        return a / b
+    with np.errstate(all="ignore"):
+        return float(np.float64(a) / np.float64(b))
+
+
+def ms_garch_filter(y, omega, alpha, beta, gamma, P, xi0, h1) -> dict:
+    """``.ms_garch_filter``: Hamilton-Filter des MS-GARCH-Modells (``r/src/ms_garch.c``).
+
+    Liefert ``loglik`` sowie die n x K-Matrizen ``h`` (Varianzpfade),
+    ``pred`` (xi_{t|t-1}), ``filt`` (xi_{t|t}) und ``lB`` (Log-Normaldichte je
+    Regime). ``loglik`` ist ``-Inf``, sobald ein ``f_t`` nicht endlich oder
+    <= 0 ist; die Rechnung läuft dennoch weiter.
+    """
+    yv = _msg_num(y, -1, "y")
+    n = yv.size
+    if n < 1:
+        raise ValueError("ms_garch_filter: 'y' darf nicht leer sein.")
+    om = _msg_num(omega, -1, "omega")
+    K = om.size
+    if K < 1 or K > 1000:
+        raise ValueError("ms_garch_filter: 'omega' muss 1 bis 1000 Werte haben (einen je Regime).")
+    al = _msg_num(alpha, K, "alpha")
+    be = _msg_num(beta, K, "beta")
+    ga = _msg_num(gamma, K, "gamma")
+    Pv = _msg_num(P, K * K, "P")
+    xi = _msg_num(xi0, K, "xi0")
+    h1 = float(_msg_num(h1, 1, "h1")[0])
+    two_pi = 2.0 * math.pi
+    with np.errstate(all="ignore"):
+        # Varianzpfade: h[t, k] = (omega_k + a * e2) + beta_k * h[t-1, k], a = alpha_k + gamma_k * ind
+        H = np.empty((n, K))
+        if n > 1:
+            e = yv[:-1]
+            e2 = e * e
+            ind = np.where(e < 0.0, 1.0, 0.0)
+        for k in range(K):
+            col = [h1]
+            if n > 1:
+                a = al[k] + ga[k] * ind
+                c = (om[k] + a * e2).tolist()
+                b = float(be[k])
+                hp = h1
+                for ct in c:
+                    hp = ct + b * hp
+                    col.append(hp)
+            H[:, k] = col
+        # Dichten und Log-Emissionen: q = (-0.5 * y2) / hk, phi = exp(q) / sqrt(2 pi hk),
+        # lB = q - 0.5 * log(2 pi hk)
+        y2 = yv * yv
+        Q = (-0.5 * y2).reshape(-1, 1) / H
+        TH = two_pi * H
+        qf = Q.ravel().tolist()
+        EX = np.array(_c_exp_list(qf), dtype=np.float64).reshape(n, K)
+        PHI = EX / np.sqrt(TH)
+        LG = np.array(_c_log_list(TH.ravel().tolist()), dtype=np.float64).reshape(n, K)
+        LB = Q - 0.5 * LG
+    # Filter: Zähler pred * phi, Summe f, Teilung, Vorhersage t(P) %*% filt
+    Pm = [[float(Pv[i + K * j]) for j in range(K)] for i in range(K)]
+    rK = range(K)
+    phi_rows = PHI.tolist()
+    pred_rows = []
+    filt_rows = []
+    pr = [float(v) for v in xi]
+    ll = 0.0
+    ok = True
+    for t in range(n):
+        ph = phi_rows[t]
+        pred_rows.append(pr)
+        num = [pr[k] * ph[k] for k in rK]
+        f = 0.0
+        for v in num:
+            f = f + v
+        if f - f != 0.0 or f <= 0.0:
+            ok = False
+        else:
+            ll = ll + math.log(f)
+        if f != 0.0:
+            fl = [v / f for v in num]
+        else:
+            fl = [_c_div(v, f) for v in num]
+        filt_rows.append(fl)
+        if t + 1 < n:
+            nx = []
+            for j in rK:
+                s = 0.0
+                for i in rK:
+                    s = s + Pm[i][j] * fl[i]
+                nx.append(s)
+            pr = nx
+    return {"loglik": ll if ok else -math.inf, "h": H,
+            "pred": np.array(pred_rows, dtype=np.float64).reshape(n, K),
+            "filt": np.array(filt_rows, dtype=np.float64).reshape(n, K), "lB": LB}

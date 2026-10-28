@@ -14,7 +14,7 @@
 
 Verfahren: raw, block, circular, stationary, wild, regime, evt, tails, reset,
 garch, gjr_garch, ms_garch, ms_ar_garch_m, tvtp_ms_garch (die MS-GARCH-Familie
-verlangt in R das Paket MSGARCH; Python meldet denselben Fehler).
+schätzt ihr Modell wie R selbst, :mod:`simlev.ms_garch`).
 
 Datenstrukturen: Pfade sind ``pandas.DataFrame`` (Spalten = Pfadnamen, eine
 Zeile je Pfadzeile); die Niveau-Variante der Zusatzreihen steht in
@@ -1036,9 +1036,91 @@ def _prepare_regime_info(base_ret, vol_window, n_regimes):
     return {"regimes": reg, "trans": _core.estimate_trans_mat(reg, int(n_regimes)), "vol": vol}
 
 
+@_quiet
 def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp):
-    """MS-GARCH-Familie (benötigt in R das Paket MSGARCH, das nicht verfügbar ist)."""
-    _stop("MS-GARCH-Verfahren erfordern das Paket 'MSGARCH' (install.packages('MSGARCH')).")
+    """MS-GARCH-Familie vorbereiten (Port von ``.prepare_ms_info``; eigene ML-Schätzung
+    :func:`simlev.ms_garch._ms_garch_fit`); ``base`` 1-basiert."""
+    from . import ms_garch as _msg
+    _msg._ms_garch_check(K, garch_model)
+    st = _stats()
+    ex = returns[:, base - 1] - 1
+    n = len(ex)
+    try:
+        fit = _msg._ms_garch_fit(ex, K, garch_model)
+    except Exception as e:  # noqa: BLE001 - tryCatch(..., error = function(e) stop(...))
+        _stop(_sp("MS-GARCH(%d, %s) Fit fehlgeschlagen: %s", int(float(np.asarray(K).ravel()[0])), garch_model, str(e)))
+    K = int(float(np.asarray(K).ravel()[0]))
+    om, al, be, ga = fit["omega"], fit["alpha"], fit["beta"], fit["gamma"]
+    P = fit["P"]
+    reg = np.asarray(fit["regimes"], dtype=np.int64)
+    idx = [np.flatnonzero(reg == r) for r in range(1, K + 1)]
+    mu = np.array([r_mean(ex[i]) if len(i) >= 10 else r_mean(ex) for i in idx], dtype=np.float64)
+    s2 = fit["s2"]
+    sig = np.sqrt(np.where(np.isnan(s2), s2, np.maximum(s2, 1e-14)))
+    phi = np.zeros(K)
+    lam = np.zeros(K)
+    lag_ex = np.concatenate([[0.0], ex[:-1]])
+    if ar_gm:
+        for r in range(K):
+            i = idx[r]
+            if len(i) < 30:
+                continue
+            try:
+                b = float(np.asarray(st.lm_fit(np.column_stack([np.ones(len(i)), lag_ex[i]]), ex[i])["coefficients"],
+                                     dtype=np.float64)[1])
+            except Exception:  # noqa: BLE001 - tryCatch(..., error = function(e) NA)
+                b = _NAN
+            if math.isfinite(b):
+                phi[r] = max(-0.5, min(0.5, b))
+            try:
+                lv = float(np.asarray(st.lm_fit(sig[i].reshape(-1, 1), ex[i] - mu[r] - phi[r] * lag_ex[i])["coefficients"],
+                                      dtype=np.float64)[0])
+            except Exception:  # noqa: BLE001
+                lv = _NAN
+            if math.isfinite(lv):
+                lam[r] = max(-5.0, min(5.0, lv))
+    unc = np.zeros(K)
+    for r in range(K):
+        p = al[r] + be[r] + ga[r] / 2
+        if p < 0.9999 and om[r] > 0:
+            unc[r] = om[r] / (1 - p)
+        else:
+            i = idx[r]
+            unc[r] = r_var(ex[i]) if len(i) >= 10 else r_var(ex)
+    delta = np.zeros((K, K))
+    if tvtp:
+        for i in range(K):
+            frm = np.flatnonzero(reg[:-1] == i + 1)
+            if len(frm) < 50:
+                continue
+            x = s2[frm] / unc[i] - 1
+            to = reg[frm + 1]
+            for j in range(K):
+                if j != i and int(np.sum(to == j + 1)) >= 5:
+                    try:
+                        g = st.glm("y ~ x", family=st.binomial(), env={"y": (to == j + 1).astype(np.int64), "x": x})
+                        d = float(st.coef(g)["x"])
+                    except Exception:  # noqa: BLE001 - tryCatch(..., error = function(e) NA)
+                        d = _NAN
+                    if math.isfinite(d):
+                        delta[i, j] = max(-3.0, min(3.0, d))
+    ri = reg - 1
+    cm = mu[ri] + phi[ri] * lag_ex + lam[ri] * sig
+    z = (ex - cm) / sig
+    z[~np.isfinite(z)] = 0.0
+    pools = [i + 1 if len(i) >= 10 else np.arange(1, n + 1) for i in idx]
+    for r in range(K):
+        i = pools[r] - 1
+        sv = r_sd(z[i])
+        if math.isfinite(sv) and sv > 0:
+            z[i] = (z[i] - r_mean(z[i])) / sv
+    pi_ = _msg._ms_garch_stat(P)
+    _message(_sp("MS-GARCH(%d, %s%s%s): P(stay) = %s", K, garch_model, ", AR-M" if ar_gm else "",
+                 ", TVTP" if tvtp else "", "/".join(_sp("%.3f", float(v)) for v in np.diag(P))))
+    return {"K": K, "mu": mu, "omega": om, "alpha": al, "beta": be, "gamma": ga, "phi": phi, "lambda": lam,
+            "trans": P, "delta": delta, "unc": unc, "stat": pi_ / r_sum(pi_),
+            "pools": [np.asarray(p, dtype=np.int64) for p in pools], "z": z, "regimes": reg,
+            "cross": _fit_cross(returns, config, base)}
 
 
 def _prepare_method_info(returns, config, method, params):
@@ -1134,6 +1216,13 @@ def _generate_returns(returns, method, p, info, n_out):
         g = _core.boot_garch(n_out, info["base"] - 1, k, f["mu"], f["omega"], f["alpha"], f["beta"], f["gamma"],
                              f["s2_init"], f["z"], np.arange(1, n + 1), cr["cols"], cr["mu"], cr["om"], cr["al"],
                              cr["be"], cr["ratio"], cr["s2"], cr["z"])
+    elif method in ("ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"):
+        m = info["ms"]
+        cr = m["cross"]
+        g = _core.boot_ms_garch(n_out, info["base"] - 1, k, int(m["K"]), m["mu"], m["omega"], m["alpha"], m["beta"],
+                                m["gamma"], m["phi"], m["lambda"], m["trans"], m["delta"], m["unc"], m["stat"],
+                                m["pools"], m["z"], cr["cols"], cr["mu"], cr["om"], cr["al"], cr["be"], cr["ratio"],
+                                cr["s2"], cr["z"])
     else:
         _stop("Unbekannte Methode: %s" % method)
     return g

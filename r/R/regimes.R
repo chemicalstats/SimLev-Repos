@@ -36,6 +36,67 @@
   path
 }
 
+#' Baum-Welch-EM des Gauss'schen HMM aus einem Startwert
+#'
+#' @param X Matrix Perioden x Spalten.
+#' @param k Anzahl Zustaende.
+#' @param init list(mu = Matrix k x Spalten, S = Liste k Kovarianzmatrizen,
+#'   A = Uebergangsmatrix k x k); Startverteilung gleichverteilt.
+#' @param max_iter,tol Hoechstzahl Iterationen und relative Abbruchschranke
+#'   (Abbruch, wenn sich die Log-Likelihood um weniger als tol * (1 + |logL|)
+#'   aendert).
+#' @param ridge Matrix, die jeder Kovarianzmatrix im M-Schritt zugeschlagen wird.
+#' @return list(mu, S, A, p0, ll, filtered, smoothed, lB, iter); ll,
+#'   filtered, smoothed und lB zu den gelieferten (zuletzt geschaetzten)
+#'   Parametern.
+#' @keywords internal
+#' @noRd
+.hmm_em <- function(X, k, init, max_iter, tol, ridge) {
+  Tn <- nrow(X)
+  mu <- init$mu; S <- init$S; A <- init$A; p0 <- rep(1 / k, k); ll_old <- -Inf
+  estep <- function() {                                           # E-Schritt mit den aktuellen Parametern
+    lB <- vapply(seq_len(k), function(j) .ldmvn(X, mu[j, ], S[[j]]), numeric(Tn))
+    if (!is.matrix(lB)) lB <- matrix(lB, ncol = k)
+    m <- lB[, 1]; for (j in seq_len(k)[-1]) m <- pmax(m, lB[, j])   # Zeilenmaximum (wie apply(lB, 1, max), aber vektorisiert)
+    fb <- .hmm_forward_backward(exp(lB - m), A, p0)               # Kern in C++
+    list(lB = lB, fb = fb, ll = sum(log(fb$scale)) + sum(m))
+  }
+  for (it in seq_len(max_iter)) {
+    es <- estep(); ga <- es$fb$smoothed; xi <- es$fb$xi; ll <- es$ll
+    p0 <- ga[1, ]; A <- xi / rowSums(xi)
+    for (j in seq_len(k)) { w <- ga[, j]; sw <- sum(w); mu[j, ] <- colSums(X * w) / sw
+      Xc <- sweep(X, 2, mu[j, ]); S[[j]] <- crossprod(Xc * sqrt(w)) / sw + ridge }
+    if (abs(ll - ll_old) < tol * (1 + abs(ll))) break
+    ll_old <- ll
+  }
+  es <- estep()       # Log-Likelihood und Wahrscheinlichkeiten zu den gelieferten (zuletzt geschaetzten) Parametern
+  list(mu = mu, S = S, A = A, p0 = p0, ll = es$ll, filtered = es$fb$filtered, smoothed = es$fb$smoothed, lB = es$lB, iter = it)
+}
+
+#' HMM-Startwert aus einer Einteilung der Perioden in k Gruppen: Mittelwert
+#' und Kovarianz (plus ridge) je Gruppe, Uebergangsmatrix 0.9 auf der
+#' Diagonale, Rest gleich verteilt
+#' @keywords internal
+#' @noRd
+.hmm_init_cl <- function(X, cl, k, ridge) {
+  d <- ncol(X)
+  list(mu = matrix(vapply(seq_len(k), function(j) colMeans(X[cl == j, , drop = FALSE]), numeric(d)), k, d, byrow = TRUE),
+       S = lapply(seq_len(k), function(j) stats::cov(X[cl == j, , drop = FALSE]) + ridge),
+       A = matrix(0.1 / max(1, k - 1), k, k) + diag(0.9 - 0.1 / max(1, k - 1), k))
+}
+
+#' Deterministischer HMM-Startwert: Rangeinteilung einer rollierenden
+#' Volatilitaet sqrt(gleitender Mittelwert von rowSums(X^2) ueber win
+#' Perioden; fehlende Anfangswerte = Median) in k gleich grosse Gruppen
+#' (cut(rank(vol), k)), daraus .hmm_init_cl
+#' @keywords internal
+#' @noRd
+.hmm_init_rank <- function(X, k, win, ridge) {
+  vol <- sqrt(.roll_mean(rowSums(X^2), win))
+  vol[is.na(vol)] <- stats::median(vol, na.rm = TRUE)
+  .hmm_init_cl(X, cut(rank(vol), k, labels = FALSE), k, ridge)
+}
+
 #' Hidden-Markov-Modell fuer Marktregime
 #'
 #' Gauss'sches HMM mit \code{k} Zustaenden (eigener Mittelwert und eigene
@@ -135,37 +196,13 @@ regime_hmm <- function(data, columns, k = 2L, frequency = c("week", "day", "mont
                                  paste0("'", flat, "'", collapse = ", ")))
   ppy <- (Tn - 1) / (as.numeric(rd$date[Tn] - rd$date[1]) / 365.25)
   ridge <- diag(1e-10 + 1e-6 * mean(apply(X, 2, stats::var)), d)
-  fit_once <- function(init) {
-    mu <- init$mu; S <- init$S; A <- init$A; p0 <- rep(1 / k, k); ll_old <- -Inf
-    estep <- function() {                                           # E-Schritt mit den aktuellen Parametern
-      lB <- vapply(seq_len(k), function(j) .ldmvn(X, mu[j, ], S[[j]]), numeric(Tn))
-      if (!is.matrix(lB)) lB <- matrix(lB, ncol = k)
-      m <- lB[, 1]; for (j in seq_len(k)[-1]) m <- pmax(m, lB[, j])   # Zeilenmaximum (wie apply(lB, 1, max), aber vektorisiert)
-      fb <- .hmm_forward_backward(exp(lB - m), A, p0)               # Kern in C++
-      list(lB = lB, fb = fb, ll = sum(log(fb$scale)) + sum(m))
-    }
-    for (it in seq_len(max_iter)) {
-      es <- estep(); ga <- es$fb$smoothed; xi <- es$fb$xi; ll <- es$ll
-      p0 <- ga[1, ]; A <- xi / rowSums(xi)
-      for (j in seq_len(k)) { w <- ga[, j]; sw <- sum(w); mu[j, ] <- colSums(X * w) / sw
-        Xc <- sweep(X, 2, mu[j, ]); S[[j]] <- crossprod(Xc * sqrt(w)) / sw + ridge }
-      if (abs(ll - ll_old) < tol * (1 + abs(ll))) break
-      ll_old <- ll
-    }
-    es <- estep()       # Log-Likelihood und Wahrscheinlichkeiten zu den gelieferten (zuletzt geschaetzten) Parametern
-    list(mu = mu, S = S, A = A, p0 = p0, ll = es$ll, filtered = es$fb$filtered, smoothed = es$fb$smoothed, lB = es$lB, iter = it)
-  }
   inits <- .with_rng_restore(seed = seed, {
     lapply(seq_len(n_start), function(s) {
-      vol <- sqrt(.roll_mean(rowSums(X^2), max(4, round(ppy / 12))))
-      vol[is.na(vol)] <- stats::median(vol, na.rm = TRUE)
-      cl <- if (s == 1) cut(rank(vol), k, labels = FALSE) else sample.int(k, Tn, replace = TRUE)
-      list(mu = matrix(vapply(seq_len(k), function(j) colMeans(X[cl == j, , drop = FALSE]), numeric(d)), k, d, byrow = TRUE),
-           S = lapply(seq_len(k), function(j) stats::cov(X[cl == j, , drop = FALSE]) + ridge),
-           A = matrix(0.1 / max(1, k - 1), k, k) + diag(0.9 - 0.1 / max(1, k - 1), k))
+      if (s == 1) .hmm_init_rank(X, k, max(4, round(ppy / 12)), ridge)
+      else .hmm_init_cl(X, sample.int(k, Tn, replace = TRUE), k, ridge)
     })
   })
-  fits <- lapply(inits, function(i) tryCatch(fit_once(i), error = function(e) NULL))
+  fits <- lapply(inits, function(i) tryCatch(.hmm_em(X, k, i, max_iter, tol, ridge), error = function(e) NULL))
   fits <- Filter(Negate(is.null), fits)
   if (!length(fits)) stop("regime_hmm: Sch\u00e4tzung fehlgeschlagen.")
   f <- fits[[which.max(vapply(fits, `[[`, 0, "ll"))]]

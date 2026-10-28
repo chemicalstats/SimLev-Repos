@@ -85,6 +85,10 @@ include("rexpr_tests.jl")
 include("api_tests.jl")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Eigene MS-GARCH-Schätzung (Port von r/tests/testthat/test-ms-garch.R)
+include("ms_garch_tests.jl")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Referenzfälle der Module (golden/modules): standardmäßig eine schnelle
 # Auswahl (je Modul bis zu `_QUICK_PER_MODULE` gleichmäßig verteilte Fälle),
 # vollständig mit SIMLEV_FULL_TESTS=1.

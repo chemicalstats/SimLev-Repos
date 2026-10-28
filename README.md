@@ -1194,8 +1194,9 @@ summary(study)
 
 Verfahren: `raw`, `block`, `circular`, `stationary`, `wild`, `regime`, `evt`,
 `tails`, `reset`, `garch`, `gjr_garch`, `ms_garch`, `ms_ar_garch_m`,
-`tvtp_ms_garch` (die MS-Verfahren benötigen das R-Paket `MSGARCH`; in
-Python und Julia melden sie wie R ohne `MSGARCH`, dass das Paket fehlt), optional
+`tvtp_ms_garch` (die MS-Verfahren schätzen ihr Modell in allen drei
+Sprachen selbst per Maximum Likelihood nach Haas, Mittnik und Paolella
+(2004), ohne das R-Paket `MSGARCH`; Python und Julia rechnen bitgleich zu R), optional
 mit ESS-gewichteter Gittersuche über Hyperparameter. `block_length()`
 schätzt Blocklängen nach Politis & White (2004).
 
@@ -1757,11 +1758,11 @@ rechnen dieselben Fälle nach und vergleichen jeden Wert Bit für Bit.
 | Engine: Stressfälle (30 Jahre, Totalverlust-Hebel, mehrere Signal-Assets, konstante Preise, Schalttage, Extremwerte, Fehlerpfade) | 37 in `golden/extra/`, alle bitgleich (strikt) | 37, alle bitgleich (strikt) |
 | Engine: frisch erzeugte Zufalls- und Stressfälle beider Generatoren | 669, alle bitgleich | 469, alle bitgleich |
 | Engine: Fälle mit den neuen Argumenten (`order_fee`, `dca_fee`, `church_tax`, `harvest_*`, `taxable_income`, `tax_tariff`) | 750, alle bitgleich | 92 eigene Fälle, alle bitgleich (strikt) |
-| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS (Module `evd`, `rugarch`, `imputets`) und die R-Interna (29 Module in `golden/modules/`) | 4.536, alle bitgleich (strikt, NA ≠ NaN, mit Vorzeichen der Null) | 4.536, alle bitgleich (strikt, NA ≠ NaN, mit Vorzeichen der Null) |
+| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS (Module `evd`, `rugarch`, `imputets`) und die R-Interna (30 Module in `golden/modules/`) | 4.563, alle bitgleich (strikt, NA ≠ NaN, mit Vorzeichen der Null) | 4.563, alle bitgleich (strikt, NA ≠ NaN, mit Vorzeichen der Null) |
 
 Die Fälle in [`golden/`](golden/) prüfen beide Suiten: die 105
 Engine-Fälle in `golden/cases/` und `golden/extra/` vollständig und die
-4.536 Modul-Fälle in Python vollständig, in Julia standardmäßig in einer
+4.563 Modul-Fälle in Python vollständig, in Julia standardmäßig in einer
 Auswahl und mit `SIMLEV_FULL_TESTS=1` vollständig.
 
 **Optionale R-Pakete.** `.fit_tail` (Tail-Modell im Bootstrap, Verfahren
@@ -1793,8 +1794,10 @@ Solver-Kette in R bei etwa 1 % zufälliger Reihen; wie R setzt er dabei den
 globalen Zufallszustand aus der Uhrzeit (`set.seed` mit den
 Unix-Sekunden), das Ergebnis hängt dann in R wie in den Ports von der
 Sekunde des Aufrufs ab. `SIMLEV_R_SYS_TIME` (Sekunden seit 1970) stellt
-die Uhr der Ports fest. MSGARCH gilt als nicht installiert; die
-MS-GARCH-Verfahren melden wie R, dass das Paket fehlt.
+die Uhr der Ports fest. MSGARCH wird nicht mehr gebraucht: Die
+MS-GARCH-Verfahren schätzen ihr Modell wie R selbst (`.ms_garch_fit` mit
+dem Kern `src/ms_garch.c`; in Python `simlev.ms_garch`, in Julia
+`SimLev.MsGarch`).
 
 **Aktuelle R-Fassung 0.5.0:** Nach dem Stand 54b5b4f korrigiert das
 R-Paket Rechenfehler der Engine (Fondsmodus, Splits mit ganzen Anteilen,
@@ -1905,7 +1908,7 @@ SimLev-Repos/
 ├── golden/            gemeinsame Referenzfälle aus R und ihre Generatoren
 │   ├── cases/         68 Golden-Master-Fälle der Engine (Python und Julia)
 │   ├── extra/         37 Stressfälle der Engine (Python und Julia)
-│   ├── modules/       4.536 Referenzfälle aller Funktionen in 29 Modulen
+│   ├── modules/       4.563 Referenzfälle aller Funktionen in 30 Modulen
 │   │                  (je Fall R-, Python- und Julia-Code), Generatoren
 │   │                  gen_<modul>.R und ref_tools.R
 │   ├── golden_cases.R
@@ -1941,12 +1944,12 @@ rcmdcheck::rcmdcheck("r")
 ``` bash
 cd python
 pip install ".[test]"
-pytest                                  # 5.755 Tests, alle bestanden
+pytest                                  # 5.840 Tests, alle bestanden
 python tools/compare_golden.py          # Engine: golden/cases und golden/extra (105 Fälle)
-python tools/compare_reference.py       # alle Funktionen: golden/modules (4.536 Fälle)
+python tools/compare_reference.py       # alle Funktionen: golden/modules (4.563 Fälle)
 ```
 
-Die Suite enthält 4.536 Modul-Referenzfälle und die 105 Golden-Master-Fälle
+Die Suite enthält 4.563 Modul-Referenzfälle und die 105 Golden-Master-Fälle
 der Engine; die übrigen Tests prüfen Engine und R-Interna. Einzelne Module
 oder Fälle prüft `python tools/compare_reference.py <modul> [-k id] [-v]`
 bzw. `python tools/compare_golden.py [ordner …] [-k fall …] [-v]`. Auf
@@ -1960,10 +1963,10 @@ Plattformen ohne 80-Bit-`long double` werden die Bitgleichheits-Tests
 
 ``` bash
 cd julia
-julia --project -e 'using Pkg; Pkg.test()'                     # 929 Tests, alle bestanden
-SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()' # dazu alle 4.536 Modul-Referenzfälle
+julia --project -e 'using Pkg; Pkg.test()'                     # 1.211 Tests, alle bestanden
+SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()' # dazu alle 4.563 Modul-Referenzfälle
 julia --project tools/compare_golden.jl ../golden/cases        # Engine: ein Ordner (auch ../golden/extra)
-julia --project tools/compare_reference.jl                     # alle Funktionen: golden/modules (4.536 Fälle)
+julia --project tools/compare_reference.jl                     # alle Funktionen: golden/modules (4.563 Fälle)
 ```
 
 `Pkg.test()` prüft die 105 Golden-Master-Fälle der Engine vollständig

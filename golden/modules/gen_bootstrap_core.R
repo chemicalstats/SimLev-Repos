@@ -1,4 +1,5 @@
-# Referenzfälle für die Bootstrap-Kerne (r/src/bootstrap_core.cpp, .garch_filter).
+# Referenzfälle für die Bootstrap-Kerne (r/src/bootstrap_core.cpp, .garch_filter,
+# MS-GARCH-Filter .ms_garch_filter aus r/src/ms_garch.c).
 source("golden/modules/ref_tools.R"); ref_init("bootstrap_core")
 set.seed(100)
 X <- cbind(1 + rnorm(300, 4e-4, 0.011), 1 + rnorm(300, 2e-4, 0.006), 1 + rnorm(300, 0, 0.02))
@@ -54,4 +55,28 @@ ref_case("helpers", "v <- SimLev:::.rolling_vol(X[, 1], 21L); th <- c(0, quantil
 result = [v, C.rolling_vol(X[:5, 1], 10), C.assign_regimes(v, np.asarray(th, float)), C.estimate_trans_mat(reg, 3, 0.1), C.garch_filter(X[:, 0] - 1, 1e-6, 0.07, 0.9, 0.04, 1e-4)]"), inputs = I,
      jl = J('v = C.rolling_vol(X[:, 1], 21); th = vcat(0.0, SL.RStats.quantile(v, [.33, .66]), Inf)
 result = [v, C.rolling_vol(X[1:5, 2], 10), C.assign_regimes(v, th), C.estimate_trans_mat(reg, 3, 0.1), C.garch_filter(X[:, 1] .- 1, 1e-6, 0.07, 0.9, 0.04, 1e-4)]'))
+# MS-GARCH-Filter (src/ms_garch.c): Hamilton-Filter mit parallelen Varianzpfaden je Regime
+set.seed(11); I$ym <- rnorm(60, 0, 0.01)
+I$ym0 <- I$ym; I$ym0[20] <- 1   # Dichte 0 in allen Regimen ab t = 20: loglik = -Inf, filt/pred NaN
+I$P2 <- matrix(c(.95, .05, .1, .9), 2, byrow = TRUE)
+I$P3 <- matrix(c(.9, .05, .05, .1, .8, .1, .02, .08, .9), 3, byrow = TRUE)
+MF <- list(
+  msg_filter_K2_sgarch = c("ym, c(1e-6, 5e-6), c(.05, .1), c(.9, .8), c(0, 0), P2, c(2/3, 1/3), var(ym)",
+                           "ym, [1e-6, 5e-6], [.05, .1], [.9, .8], [0, 0], P2, [2/3, 1/3], _st.var(ym)",
+                           "ym, [1e-6, 5e-6], [.05, .1], [.9, .8], [0, 0], P2, [2/3, 1/3], SL.RStats.var(ym)"),
+  msg_filter_K3_gjr = c("ym, c(1e-6, 3e-6, 1e-5), c(.03, .06, .1), c(.95, .9, .8), c(0, .04, .1), P3, c(.5, .3, .2), 1e-4",
+                        "ym, [1e-6, 3e-6, 1e-5], [.03, .06, .1], [.95, .9, .8], [0, .04, .1], P3, [.5, .3, .2], 1e-4",
+                        "ym, [1e-6, 3e-6, 1e-5], [.03, .06, .1], [.95, .9, .8], [0, .04, .1], P3, [.5, .3, .2], 1e-4"),
+  msg_filter_neginf = c("ym0, c(1e-6, 5e-6), c(.05, .1), c(.9, .8), c(.02, .05), P2, c(.5, .5), 1e-4",
+                        "ym0, [1e-6, 5e-6], [.05, .1], [.9, .8], [.02, .05], P2, [.5, .5], 1e-4",
+                        "ym0, [1e-6, 5e-6], [.05, .1], [.9, .8], [.02, .05], P2, [.5, .5], 1e-4"),
+  msg_filter_err_len = c("ym, c(1e-6, 5e-6), c(.05, .1), c(.9, .8), c(0, 0), P2, c(.5, .3, .2), 1e-4",
+                         "ym, [1e-6, 5e-6], [.05, .1], [.9, .8], [0, 0], P2, [.5, .3, .2], 1e-4",
+                         "ym, [1e-6, 5e-6], [.05, .1], [.9, .8], [0, 0], P2, [.5, .3, .2], 1e-4"))
+for (k in names(MF)) {
+  a <- MF[[k]]
+  ref_case(k, sprintf("SimLev:::.ms_garch_filter(%s)", a[1]),
+           paste0(P, "from simlev._r import stats as _st\n", sprintf("result = C.ms_garch_filter(%s)", a[2])), inputs = I[c("ym", "ym0", "P2", "P3")],
+           jl = J(sprintf("result = C.ms_garch_filter(%s)", a[3])))
+}
 ref_done()

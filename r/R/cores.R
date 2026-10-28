@@ -9,6 +9,8 @@
 # Rueckgabewert liefern unsichtbar NULL. Die Engine-Kerne aendern sim_mem bzw.
 # die uebergebenen Listen an Ort und Stelle.
 #
+# Der MS-GARCH-Filter (src/ms_garch.c) ist ein C-Kern mit eigener .Call-Huelle.
+#
 # Die C-Uebernahmen haben ihre Huellen bei der R-Uebernahme:
 # C_evd_nlgpd (R/vendor_evd.R), C_rugarch_sgarchfilterC und
 # C_rugarch_gjrgarchfilterC (R/vendor_rugarch.R), C_truncnorm_rtruncnorm
@@ -74,6 +76,16 @@
 
 .estimate_trans_mat <- function(regimes, K, alpha = 0.1) {
   .Call(C_estimate_trans_mat, regimes, K, alpha)
+}
+
+# ── MS-GARCH-Filter (src/ms_garch.c) ─────────────────────────────────────────
+# Hamilton-Filter mit parallelen Varianzpfaden je Regime (Haas, Mittnik und
+# Paolella 2004); h1 = Startvarianz aller Regime. Liefert list(loglik, h, pred,
+# filt, lB) mit n x K-Matrizen (pred = xi_{t|t-1}, filt = xi_{t|t}, lB =
+# Log-Normaldichte je Regime). Genutzt von .ms_garch_fit (R/ms_garch.R).
+
+.ms_garch_filter <- function(y, omega, alpha, beta, gamma, P, xi0, h1) {
+  .Call(C_ms_garch_filter, y, omega, alpha, beta, gamma, P, xi0, h1)
 }
 
 # ── Abhaengigkeit (src/dependence_core.cpp) ──────────────────────────────────

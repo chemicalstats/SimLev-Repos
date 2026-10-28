@@ -101,6 +101,111 @@ function _hmm_viterbi(lB, lA, lp0)
     path
 end
 
+"""
+Baum-Welch-EM des Gauss'schen HMM aus einem Startwert (`.hmm_em`).
+
+`X`: Matrix Perioden × Spalten; `k`: Anzahl Zustände; `init`: NamedTuple
+`(mu, S, A)` (mu k × Spalten, S Vektor von k Kovarianzmatrizen, A
+Übergangsmatrix k × k), Startverteilung gleichverteilt; `max_iter`, `tol`:
+Höchstzahl Iterationen und relative Abbruchschranke (Abbruch, wenn sich die
+Log-Likelihood um weniger als `tol * (1 + |logL|)` ändert); `ridge`: Matrix,
+die jeder Kovarianzmatrix im M-Schritt zugeschlagen wird. Liefert
+`(mu, S, A, p0, ll, filtered, smoothed, lB, iter)`; ll, filtered, smoothed und
+lB zu den gelieferten (zuletzt geschätzten) Parametern.
+"""
+function _hmm_em(X, k, init, max_iter, tol, ridge)
+    D = _D()
+    X = _fmat(X)
+    Tn, d = size(X)
+    k = Int(k)
+    lg = SimLev.RLibm.log; ex = SimLev.RLibm.exp
+    mu = copy(_fmat(init.mu)); S = [copy(_fmat(s)) for s in init.S]; A = copy(_fmat(init.A))
+    p0 = fill(1 / k, k)
+    ll_old = -Inf
+    function estep()
+        lB = reduce(hcat, [_ldmvn(X, mu[j, :], S[j]) for j in 1:k])
+        lB = reshape(lB, Tn, k)
+        m = lB[:, 1]
+        for j in 2:k
+            m = _pmax2(m, lB[:, j])
+        end
+        E = Matrix{Float64}(undef, Tn, k)
+        for j in 1:k, i in 1:Tn
+            E[i, j] = ex(lB[i, j] - m[i])
+        end
+        fb = SimLev.DependenceCore.hmm_forward_backward(E, A, p0)
+        ll = SimLev.r_sum(lg.(fb["scale"])) + SimLev.r_sum(m)
+        lB, fb, ll
+    end
+    it = 0
+    for it_ in 1:Int(max_iter)
+        it = it_
+        lB, fb, ll = estep()
+        ga = fb["smoothed"]; xi = fb["xi"]
+        p0 = ga[1, :]
+        rsx = D._rowsums(xi)
+        A = Matrix{Float64}(undef, k, k)
+        for j in 1:k, i in 1:k
+            A[i, j] = xi[i, j] / rsx[i]
+        end
+        for j in 1:k
+            w = ga[:, j]
+            sw = SimLev.r_sum(w)
+            mu[j, :] = D._colsums(X .* w) ./ sw
+            Xc = Matrix{Float64}(undef, Tn, d)
+            sq = sqrt.(w)
+            for c in 1:d, i in 1:Tn
+                Xc[i, c] = (X[i, c] - mu[j, c]) * sq[i]
+            end
+            S[j] = _fmat(D._flex(SimLev.RLinalg.crossprod, (Xc,))) ./ sw .+ ridge
+        end
+        abs(ll - ll_old) < tol * (1 + abs(ll)) && break
+        ll_old = ll
+    end
+    lB, fb, ll = estep()
+    (mu = mu, S = S, A = A, p0 = p0, ll = ll, filtered = fb["filtered"], smoothed = fb["smoothed"], lB = lB, iter = it)
+end
+
+"""
+HMM-Startwert aus einer Einteilung `cl` der Perioden in k Gruppen (`.hmm_init_cl`):
+Mittelwert und Kovarianz (plus `ridge`) je Gruppe, Übergangsmatrix 0.9 auf der
+Diagonale, Rest gleich verteilt.
+"""
+function _hmm_init_cl(X, cl, k, ridge)
+    D = _D()
+    X = _fmat(X)
+    d = size(X, 2)
+    k = Int(k)
+    mu = Matrix{Float64}(undef, k, d)
+    for j in 1:k
+        mu[j, :] = D._colmeans(X[cl .== j, :])
+    end
+    S = [_fmat(SimLev.RStats.cov(X[cl .== j, :])) .+ ridge for j in 1:k]
+    off = 0.1 / max(1, k - 1)
+    A = fill(off, k, k)
+    for i in 1:k
+        A[i, i] += 0.9 - off
+    end
+    (mu = mu, S = S, A = A)
+end
+
+"""
+Deterministischer HMM-Startwert (`.hmm_init_rank`): Rangeinteilung einer
+rollierenden Volatilität (Wurzel des gleitenden Mittelwerts von `rowSums(X^2)`
+über `win` Perioden; fehlende Anfangswerte = Median) in k gleich große Gruppen
+(`cut(rank(vol), k)`), daraus `_hmm_init_cl`.
+"""
+function _hmm_init_rank(X, k, win, ridge)
+    D = _D()
+    X = _fmat(X)
+    vol = sqrt.(D._roll_mean(D._rowsums(X .* X), win))
+    if any(isnan, vol)
+        md = D._median(vol; na_rm = true)
+        vol = [isnan(v) ? md : v for v in vol]
+    end
+    _hmm_init_cl(X, D._cut_n(D._rank_avg(vol), Int(k)), k, ridge)
+end
+
 "`stats::cov2cor` (über RStats, mit R's Warnung)."
 _cov2cor(V) = _fmat(SimLev.RStats.cov2cor(_fmat(V)))
 
@@ -144,84 +249,24 @@ function regime_hmm(data, columns; k = 2, frequency = ("week", "day", "month"), 
     for i in 1:d
         ridge[i, i] = rv
     end
-    lg = SimLev.RLibm.log; ex = SimLev.RLibm.exp
-
-    function fit_once(init)
-        mu = copy(init.mu); S = [copy(s) for s in init.S]; A = copy(init.A)
-        p0 = fill(1 / k, k)
-        ll_old = -Inf
-        function estep()
-            lB = reduce(hcat, [_ldmvn(X, mu[j, :], S[j]) for j in 1:k])
-            lB = reshape(lB, Tn, k)
-            m = lB[:, 1]
-            for j in 2:k
-                m = _pmax2(m, lB[:, j])
-            end
-            E = Matrix{Float64}(undef, Tn, k)
-            for j in 1:k, i in 1:Tn
-                E[i, j] = ex(lB[i, j] - m[i])
-            end
-            fb = SimLev.DependenceCore.hmm_forward_backward(E, A, p0)
-            ll = SimLev.r_sum(lg.(fb["scale"])) + SimLev.r_sum(m)
-            lB, fb, ll
-        end
-        it = 0
-        for it_ in 1:Int(max_iter)
-            it = it_
-            lB, fb, ll = estep()
-            ga = fb["smoothed"]; xi = fb["xi"]
-            p0 = ga[1, :]
-            rsx = D._rowsums(xi)
-            A = Matrix{Float64}(undef, k, k)
-            for j in 1:k, i in 1:k
-                A[i, j] = xi[i, j] / rsx[i]
-            end
-            for j in 1:k
-                w = ga[:, j]
-                sw = SimLev.r_sum(w)
-                mu[j, :] = D._colsums(X .* w) ./ sw
-                Xc = Matrix{Float64}(undef, Tn, d)
-                sq = sqrt.(w)
-                for c in 1:d, i in 1:Tn
-                    Xc[i, c] = (X[i, c] - mu[j, c]) * sq[i]
-                end
-                S[j] = _fmat(D._flex(SimLev.RLinalg.crossprod, (Xc,))) ./ sw .+ ridge
-            end
-            abs(ll - ll_old) < tol * (1 + abs(ll)) && break
-            ll_old = ll
-        end
-        lB, fb, ll = estep()
-        (mu = mu, S = S, A = A, p0 = p0, ll = ll, filtered = fb["filtered"], smoothed = fb["smoothed"], lB = lB, iter = it)
-    end
-
+    lg = SimLev.RLibm.log
+    win = max(4.0, D._r_round(ppy / 12))
     inits = D._with_rng_restore(seed) do
         res = Any[]
         for s in 1:Int(n_start)
-            vol = sqrt.(D._roll_mean(D._rowsums(X .* X), max(4.0, D._r_round(ppy / 12))))
-            if any(isnan, vol)
-                md = D._median(vol; na_rm = true)
-                vol = [isnan(v) ? md : v for v in vol]
+            if s == 1
+                push!(res, _hmm_init_rank(X, k, win, ridge))
+            else
+                cl = Int.(D._fvec(D._flex(SimLev.RRng.sample_int, (k, Tn), NamedTuple(), (replace = true,))))
+                push!(res, _hmm_init_cl(X, cl, k, ridge))
             end
-            cl = s == 1 ? D._cut_n(D._rank_avg(vol), k) :
-                          Int.(D._fvec(D._flex(SimLev.RRng.sample_int, (k, Tn), NamedTuple(), (replace = true,))))
-            mu = Matrix{Float64}(undef, k, d)
-            for j in 1:k
-                mu[j, :] = D._colmeans(X[cl .== j, :])
-            end
-            S = [_fmat(SimLev.RStats.cov(X[cl .== j, :])) .+ ridge for j in 1:k]
-            off = 0.1 / max(1, k - 1)
-            A = fill(off, k, k)
-            for i in 1:k
-                A[i, i] += 0.9 - off
-            end
-            push!(res, (mu = mu, S = S, A = A))
         end
         res
     end
     fits = Any[]
     for i in inits
         f = try
-            fit_once(i)
+            _hmm_em(X, k, i, max_iter, tol, ridge)
         catch e
             e isa InterruptException && rethrow()
             nothing

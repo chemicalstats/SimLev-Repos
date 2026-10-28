@@ -1,5 +1,13 @@
 # simlev (Python) – Änderungen je Version
 
+## simlev (Python) 0.7.0
+
+Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- MS-GARCH: Maximum-Likelihood-Schätzung nach Haas, Mittnik und Paolella (2004) für 2–3 Regime mit sGARCH/gjrGARCH; Startwerte aus HMM-EM und Rangeinteilung, Raster und BFGS.
+- Bootstrap: Verfahren ms_garch nutzt die eigene Schätzung; das Paket MSGARCH wird nicht mehr gebraucht.
+- Prüfung: im Vergleich mit MSGARCH 20 von 20 Fällen gleichwertig; R, Python und Julia bitgleich.
+
 ## simlev (Python) 0.6.0
 
 Minor-Update (Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -110,10 +118,21 @@ Python-Modul:
   `portfolio_returns()`, `goal_optimize()`.
 * Prüfungen (`analysis_tests`): `signal_analysis()`, `sharpe_test()`,
   `reality_check()`, `min_track_record()`, `return_heatmap()`.
+* MS-GARCH ohne MSGARCH, eigene Schätzung wie R: Die Verfahren
+  `"ms_garch"`, `"ms_ar_garch_m"` und `"tvtp_ms_garch"` von `bootstrap()`
+  und `bootstrap_study()` laufen jetzt auch in Python, bitgleich zu R.
+  `simlev.ms_garch` (Port von `r/R/ms_garch.R`) schätzt das Modell nach
+  Haas, Mittnik und Paolella (2004) per Maximum Likelihood (`optim` mit
+  BFGS aus deterministischen Startwerten: Baum-Welch-EM und
+  Rangeinteilung der Volatilität, je mit kleinem Raster); den
+  Hamilton-Filter rechnet `_bootstrap_core.ms_garch_filter` (Port von
+  `r/src/ms_garch.c`). Das EM von `regime_hmm()` ist wie in R in
+  `regimes._hmm_em`, `_hmm_init_rank` und `_hmm_init_cl` herausgelöst
+  (Ergebnis unverändert). Die Meldung „Paket fehlt“ entfällt.
 
-Die C++-Kerne des R-Pakets stehen in `_bootstrap_core.py`,
-`_withdrawal_core.py`, `_dependence_core.py`, `_optimize_core.py` und
-`_signals_core.py`. Die `plot()`-Methoden der Ergebnisobjekte zeichnen wie
+Die C++-Kerne des R-Pakets stehen in `_bootstrap_core.py` (dort auch der
+C-Kern `ms_garch.c`), `_withdrawal_core.py`, `_dependence_core.py`,
+`_optimize_core.py` und `_signals_core.py`. Die `plot()`-Methoden der Ergebnisobjekte zeichnen wie
 die Julia-Fassung als SVG (siehe unten, „Grafiken ohne matplotlib“).
 
 ### R-Kompatibilitätsschicht `simlev._r` (neu)
@@ -273,8 +292,7 @@ Innerer Aufbau (ohne Änderung der öffentlichen Namen und Ergebnisse):
 * Kein Schalter für optionale R-Pakete: Da R evd, imputeTS und rugarch
   übernommen hat, entfallen `simlev._r.suggests` (`has`, `EMULATED`) und
   die Umgebungsvariable `SIMLEV_R_SUGGESTS`; die Referenzfälle haben kein
-  Feld `suggests` mehr. Die MS-GARCH-Verfahren melden weiterhin wie R
-  ohne MSGARCH, dass das Paket fehlt.
+  Feld `suggests` mehr.
 * Neu: `NA` und `NaN` werden wie in R unterschieden. `simlev.NA` ist R's
   `NA_real_` (NaN mit Nutzlast 1954), ein gewöhnliches `nan` ist R's `NaN`;
   `simlev.isna_strict(x)` erkennt nur `NA`. Druckausgabe, `format()`,
@@ -289,9 +307,8 @@ Innerer Aufbau (ohne Änderung der öffentlichen Namen und Ergebnisse):
 * Die Referenzen entstanden mit R 4.3.3. evd, rugarch und imputeTS sind
   nachgebildet und gelten immer, wie das R-Paket mit seinen übernommenen
   Fassungen. gosolnp setzt wie in R den Zufallszustand aus der
-  Uhrzeit; reproduzierbar mit `SIMLEV_R_SYS_TIME`. MSGARCH gilt als nicht
-  installiert; die MS-GARCH-Verfahren melden wie R ohne MSGARCH, dass das
-  Paket fehlt.
+  Uhrzeit; reproduzierbar mit `SIMLEV_R_SYS_TIME`. MSGARCH wird nicht
+  gebraucht; die MS-GARCH-Verfahren schätzen wie R selbst.
 * `nlminb`: An drei Stellen liest die PORT-Bibliothek nicht gesetzte
   Variablen (in R Stapelreste); Python setzt 0. Das kann nur in
   Sonderfällen die Meldung (Code 3 statt 5, `convergence` 0) oder Läufe mit

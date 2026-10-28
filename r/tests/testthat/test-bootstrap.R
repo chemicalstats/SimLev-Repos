@@ -21,7 +21,7 @@ test_that("bootstrap_config validates and names products", {
   expect_error(bootstrap_config(c(a = "a"), letfs = list(list(base = "a", finance = "rate"))), "nicht in aux")
 })
 
-test_that("all non-MSGARCH methods produce valid paths with aux and products", {
+test_that("all non-MS-GARCH methods produce valid paths with aux and products", {
   d <- make_boot_data(); cfg <- make_cfg()
   for (m in c("raw", "block", "circular", "stationary", "wild", "regime", "evt", "tails", "reset", "garch", "gjr_garch")) {
     b <- suppressWarnings(suppressMessages(bootstrap(d, cfg, m, n = 3, params = list(L = 20, block_length = 20),

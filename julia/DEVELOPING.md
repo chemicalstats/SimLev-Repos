@@ -38,8 +38,8 @@ und `precompile.jl`.
 | `src/engine.jl` u. a. | – | `simulation()` und Strategie/Config (r/R/simulation.R, sim_*.R, …) |
 | `src/svg.jl` | – | Grafikmodul: `SimLevPlot`, `_plot_method` & Co., alle SVG-Zeichenbausteine (siehe [Grafik](#grafik)) → `simlev/svg.py` |
 | `src/dashboard.jl` | – | Dashboard-Daten und Panels, `plot_dashboard`, `export_dashboard` (r/R/plot_dashboard.R) → `dashboard.py` |
-| `src/<modul>.jl` | `DataPrep`, `Backcast`, `Bonds`, `Signals`, `Bootstrap`, `Withdrawal`, `Dependence`, `Regimes`, `Scenarios`, `Optimize`, `Tactical`, `DeepAnalysis`, `Planning`, `AnalysisTests`, `Overfitting`, `ParamSearch`, `Sensitivity` | je eine R-Datei `r/R/<modul>.R` → `python/simlev/<modul>.py` |
-| `src/<name>_core.jl` | `BootstrapCore`, `SignalsCore`, `WithdrawalCore`, `DependenceCore`, `OptimizeCore` | C++-Kerne aus `r/src/` → `python/simlev/_<name>_core.py` |
+| `src/<modul>.jl` | `DataPrep`, `Backcast`, `Bonds`, `Signals`, `Bootstrap`, `Withdrawal`, `Dependence`, `Regimes`, `MsGarch`, `Scenarios`, `Optimize`, `Tactical`, `DeepAnalysis`, `Planning`, `AnalysisTests`, `Overfitting`, `ParamSearch`, `Sensitivity` | je eine R-Datei `r/R/<modul>.R` → `python/simlev/<modul>.py` |
+| `src/<name>_core.jl` | `BootstrapCore`, `SignalsCore`, `WithdrawalCore`, `DependenceCore`, `OptimizeCore` | C++-Kerne aus `r/src/` (`BootstrapCore` zusätzlich der C-Kern `ms_garch.c`) → `python/simlev/_<name>_core.py` |
 | `src/exports.jl` | – | sammelt die öffentlichen Funktionen der Untermodule für `using SimLev` |
 
 Funktionen anderer Untermodule werden **im Funktionsrumpf qualifiziert**
@@ -115,10 +115,11 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
 14. long-double-Summen laufen auf x86-64 über die x87-Hardware; ist das
     Ergebnis NaN, rechnen `r_sum` & Co. mit `F80Soft` nach, weil R's
     NA/NaN-Vorrang sonst vom erzeugten Maschinencode abhinge.
-15. `requireNamespace(pkg, quietly = TRUE)` für ein optionales Paket: R
-    fragt nur noch MSGARCH ab (evd, imputeTS und rugarch sind übernommen,
-    ihr Weg gilt immer); MSGARCH ist nicht nachgebildet, die Ports werfen
-    wie R ohne das Paket dessen Fehlermeldung, ohne Schalter. `Sys.time()` →
+15. Optionale R-Pakete fragt R nicht mehr ab (kein `requireNamespace`):
+    evd, imputeTS und rugarch sind übernommen, ihr Weg gilt immer; MSGARCH
+    ist durch die eigene Schätzung (`r/R/ms_garch.R`, Kern `r/src/ms_garch.c`;
+    hier `src/ms_garch.jl` und `BootstrapCore.ms_garch_filter`) ersetzt.
+    Einen Schalter für optionale Pakete gibt es nicht. `Sys.time()` →
     `RBase.sys_time()` (Prüfschalter `SIMLEV_R_SYS_TIME`).
 
 Keine externen Pakete; erlaubt ist nur die Standardbibliothek (`Dates`,

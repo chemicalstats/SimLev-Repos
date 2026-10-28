@@ -42,7 +42,7 @@ ausgewertet.}
 \item{"tails"}{Empirische Tail-Schichtung des Referenzindex (\code{tail_prob})}
 \item{"reset"}{Chronologie mit zufaellig gespiegelten Segmenten (\code{p_break}); erhaelt die Chronologie}
 \item{"garch", "gjr_garch"}{(GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung ueber \code{cross} in \code{\link[=bootstrap_config]{bootstrap_config()}})}
-\item{"ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"}{Markov-Switching-GARCH-Familie; benoetigt das Paket MSGARCH (\code{ms_n_regimes}/\code{ms_garch_model}, \code{ms_ar_n_regimes}/\code{ms_ar_garch_model} bzw. \code{tvtp_n_regimes}/\code{tvtp_garch_model})}
+\item{"ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"}{Markov-Switching-GARCH-Familie: eigene ML-Schaetzung des MS-GARCH-Modells nach Haas, Mittnik und Paolella (2004), Normalverteilung, Varianzmodell "sGARCH" oder "gjrGARCH" je Regime; "ms_ar_garch_m" zusaetzlich mit AR- und GARCH-in-Mean-Termen je Regime, "tvtp_ms_garch" mit zeitvariablen Uebergangswahrscheinlichkeiten (\code{ms_n_regimes}/\code{ms_garch_model}, \code{ms_ar_n_regimes}/\code{ms_ar_garch_model} bzw. \code{tvtp_n_regimes}/\code{tvtp_garch_model})}
 }
 Bei "wild" und "reset" muss \code{path_length} der Laenge der Historie
 entsprechen.}
@@ -77,9 +77,17 @@ GPD modellieren (Standard \code{TRUE}).}
 \item{p_break}{Wahrscheinlichkeit je Zeile als Anteil (0 bis 1), dass
 bei "reset" ein neues Segment beginnt (Standard 0.02).}
 \item{ms_n_regimes, ms_ar_n_regimes, tvtp_n_regimes}{Anzahl Regime fuer
-"ms_garch", "ms_ar_garch_m" bzw. "tvtp_ms_garch" (Standard je 2).}
+"ms_garch", "ms_ar_garch_m" bzw. "tvtp_ms_garch" (Standard je 2). Hat die
+Reihe weniger deutlich getrennte Regime als angefordert (z. B. drei Regime
+auf einer Reihe mit nur einem oder zwei Volatilitaetszustaenden), kann ein
+Regime entarten: Verweilwahrscheinlichkeit nahe 0 (Meldung "P(stay)"),
+kaum oder keine Tage im Regimepfad, mitunter Persistenz nahe 1 mit
+unplausibel hoher unbedingter Varianz; die Log-Likelihood liegt dann kaum
+ueber der mit einem Regime weniger. In diesem Fall die Anzahl Regime
+verkleinern.}
 \item{ms_garch_model, ms_ar_garch_model, tvtp_garch_model}{Varianzmodell
-je Regime, an MSGARCH weitergereicht (Standard je "gjrGARCH").}
+je Regime: "sGARCH" (GARCH(1,1)) oder "gjrGARCH" (GJR-GARCH(1,1),
+Standard je "gjrGARCH"); andere Werte sind ein Fehler.}
 }
 Der Eintrag \code{garch_order} (Standard \code{c(1, 1)}) ist vorhanden,
 aendert aber nichts: die GARCH-Verfahren schaetzen immer GARCH(1,1).}
@@ -206,6 +214,12 @@ cfg3 <- bootstrap_config(c(us = "us"), aux = c(cpi = "cpi", zins = "zins"), inpu
   aux_type = c(cpi = "level", zins = "rate"))
 b3 <- bootstrap(h, cfg3, "stationary", n = 2, params = list(L = 50), seed = 1, progress = FALSE)
 range(diff(log(b3$paths[[1]][, "cpi"])) * 365)   # stets log(1.02): keine Spruenge
+}
+\references{
+Haas, M., Mittnik, S. & Paolella, M.S. (2004), A New Approach
+to Markov-Switching GARCH Models, Journal of Financial Econometrics 2(4)
+(Verfahren "ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"); Hamilton, J.D.
+(1989), Econometrica 57(2) (Filter).
 }
 \seealso{
 \code{\link[=bootstrap_config]{bootstrap_config()}}, \code{\link[=bootstrap_data]{bootstrap_data()}}, \code{\link[=bootstrap_study]{bootstrap_study()}},

@@ -1,4 +1,4 @@
-# BootstrapCore – Port von r/src/bootstrap_core.cpp und .garch_filter
+# BootstrapCore – Port von r/src/bootstrap_core.cpp, .garch_filter und r/src/ms_garch.c
 #
 # Jeder Kern liefert wie im Original die 1-basierten Quellzeilen der gezogenen
 # Beobachtungen; parametrische Verfahren zusätzlich die simulierte
@@ -13,7 +13,7 @@ using Dates
 
 export boot_idx_iid, boot_idx_block, boot_idx_stationary, boot_idx_regime, boot_idx_tails,
        boot_wild, boot_reset, boot_evt, boot_garch, boot_ms_garch, rolling_vol, assign_regimes,
-       estimate_trans_mat, garch_filter
+       estimate_trans_mat, garch_filter, ms_garch_filter
 
 _rng() = SimLev.RRng
 _runif1(a, b) = Float64(_rng().runif1(Float64(a), Float64(b)))
@@ -545,6 +545,104 @@ function garch_filter(ep, om, al, be, ga, v0)
         v < 1e-14 && (v = 1e-14)
     end
     return s2
+end
+
+# ── MS-GARCH-Filter (r/src/ms_garch.c) ──────────────────────────────────────
+#
+# Hamilton-Filter mit parallelen Varianzpfaden je Regime (Haas, Mittnik und
+# Paolella 2004). Rechenfolge wie im C-Kern: Summen beginnen bei 0.0 und laufen
+# über k (bzw. i) aufsteigend, jede Formel in der Klammerung des C-Codes (y^2 als
+# y * y, 2 pi als 2.0 * M_PI), ohne fma; exp und log aus glibc-libm (RLibm).
+
+"Argument als double-Vektor (wie `coerceVector`, Matrizen spaltenweise) mit Längenprüfung."
+function _msg_num(x, len::Int, name::AbstractString)
+    v = x isa SimLev.NamedMat ? vec(Matrix{Float64}(x.data)) :
+        x isa Real ? [Float64(x)] :
+        (x isa AbstractArray && (eltype(x) <: Real || all(e -> e isa Real, x))) ? Float64[Float64(e) for e in vec(x)] :
+        _stop("ms_garch_filter: '$name' muss numerisch sein.")
+    (len >= 0 && length(v) != len) && _stop("ms_garch_filter: '$name' muss die Länge $len haben (erhalten: $(length(v))).")
+    return v
+end
+
+@inline _msg_sqrt(x::Float64) = x < 0.0 ? NaN : sqrt(x)
+
+"""
+`.ms_garch_filter`: Hamilton-Filter des MS-GARCH-Modells (r/src/ms_garch.c).
+
+Liefert `RList(loglik, h, pred, filt, lB)` mit n × K-Matrizen (`pred` =
+ξ_{t|t-1}, `filt` = ξ_{t|t}, `lB` = Log-Normaldichte je Regime); `loglik` ist
+`-Inf`, sobald ein `f_t` nicht endlich oder ≤ 0 ist (die Rechnung läuft weiter).
+"""
+function ms_garch_filter(y, omega, alpha, beta, gamma, P, xi0, h1)
+    yv = _msg_num(y, -1, "y")
+    n = length(yv)
+    n < 1 && _stop("ms_garch_filter: 'y' darf nicht leer sein.")
+    om = _msg_num(omega, -1, "omega")
+    K = length(om)
+    (K < 1 || K > 1000) && _stop("ms_garch_filter: 'omega' muss 1 bis 1000 Werte haben (einen je Regime).")
+    al = _msg_num(alpha, K, "alpha")
+    be = _msg_num(beta, K, "beta")
+    ga = _msg_num(gamma, K, "gamma")
+    Pv = _msg_num(P, K * K, "P")
+    xi = _msg_num(xi0, K, "xi0")
+    h1v = _msg_num(h1, 1, "h1")[1]
+    ex = SimLev.RLibm.exp; lg = SimLev.RLibm.log
+    two_pi = 2.0 * Float64(pi)
+    h = Matrix{Float64}(undef, n, K)
+    pred = Matrix{Float64}(undef, n, K)
+    filt = Matrix{Float64}(undef, n, K)
+    lB = Matrix{Float64}(undef, n, K)
+    ll = 0.0
+    ok = true
+    @inbounds for k in 1:K
+        pred[1, k] = xi[k]
+    end
+    @inbounds for t in 1:n
+        # Varianzpfade
+        if t == 1
+            for k in 1:K
+                h[1, k] = h1v
+            end
+        else
+            e = yv[t-1]
+            e2 = e * e
+            ind = e < 0.0 ? 1.0 : 0.0
+            for k in 1:K
+                a = al[k] + ga[k] * ind
+                h[t, k] = (om[k] + a * e2) + be[k] * h[t-1, k]
+            end
+        end
+        # Dichten, Mischungsdichte und Log-Emissionen
+        y2 = yv[t] * yv[t]
+        f = 0.0
+        for k in 1:K
+            hk = h[t, k]
+            q = (-0.5 * y2) / hk
+            phi = ex(q) / _msg_sqrt(two_pi * hk)
+            lB[t, k] = q - 0.5 * lg(two_pi * hk)
+            filt[t, k] = pred[t, k] * phi          # Zähler, unten geteilt
+            f = f + filt[t, k]
+        end
+        if !isfinite(f) || f <= 0.0
+            ok = false
+        else
+            ll = ll + lg(f)
+        end
+        for k in 1:K
+            filt[t, k] = filt[t, k] / f
+        end
+        # Vorhersage für t + 1
+        if t < n
+            for j in 1:K
+                s = 0.0
+                for i in 1:K
+                    s = s + Pv[i+K*(j-1)] * filt[t, i]
+                end
+                pred[t+1, j] = s
+            end
+        end
+    end
+    return SimLev.RList("loglik" => (ok ? ll : -Inf), "h" => h, "pred" => pred, "filt" => filt, "lB" => lB)
 end
 
 end # module

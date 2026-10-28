@@ -1020,9 +1020,106 @@ function _prepare_regime_info(base_ret, vol_window, n_regimes)
     return RList("regimes" => reg, "trans" => _core().estimate_trans_mat(reg, Int(trunc(Float64(n_regimes)))), "vol" => vol)
 end
 
-"MS-GARCH-Familie (benötigt in R das Paket MSGARCH, das nicht verfügbar ist)."
-_prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp) =
-    _stop("MS-GARCH-Verfahren erfordern das Paket 'MSGARCH' (install.packages('MSGARCH')).")
+"""
+MS-GARCH-Familie vorbereiten (Port von `.prepare_ms_info`; eigene ML-Schätzung
+`SimLev.MsGarch._ms_garch_fit`); `base` 1-basiert.
+"""
+function _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp)
+    MG = SimLev.MsGarch
+    MG._ms_garch_check(K, garch_model)
+    st = SimLev.RStats
+    R = _mat(returns)
+    ex = R[:, base] .- 1; n = length(ex)
+    Ki = Int(Float64(K isa AbstractVector || K isa Tuple ? first(K) : K))
+    gm = String(garch_model isa AbstractVector || garch_model isa Tuple ? first(garch_model) : garch_model)
+    fit = try
+        MG._ms_garch_fit(ex, K, garch_model)
+    catch e
+        e isa InterruptException && rethrow()
+        _stop(_sp("MS-GARCH(%d, %s) Fit fehlgeschlagen: %s", Ki, gm, _errmsg(e)))
+    end
+    K = Ki
+    om = fit["omega"]; al = fit["alpha"]; be = fit["beta"]; ga = fit["gamma"]
+    P = fit["P"]
+    reg = Int.(fit["regimes"])
+    idx = [findall(==(r), reg) for r in 1:K]
+    mu = Float64[length(i) >= 10 ? SimLev.r_mean(ex[i]) : SimLev.r_mean(ex) for i in idx]
+    s2 = fit["s2"]
+    sig = Float64[sqrt(isnan(v) ? v : max(v, 1e-14)) for v in s2]
+    phi = zeros(K); lam = zeros(K)
+    lag_ex = vcat(0.0, ex[1:n-1])
+    if ar_gm
+        for r in 1:K
+            i = idx[r]
+            length(i) < 30 && continue
+            b = try
+                Float64(_dvec(st.lm_fit(hcat(ones(length(i)), lag_ex[i]), ex[i])["coefficients"])[2])
+            catch e
+                e isa InterruptException && rethrow()
+                NA
+            end
+            isfinite(b) && (phi[r] = max(-0.5, min(0.5, b)))
+            l = try
+                Float64(_dvec(st.lm_fit(reshape(sig[i], :, 1), ex[i] .- mu[r] .- phi[r] .* lag_ex[i])["coefficients"])[1])
+            catch e
+                e isa InterruptException && rethrow()
+                NA
+            end
+            isfinite(l) && (lam[r] = max(-5.0, min(5.0, l)))
+        end
+    end
+    unc = zeros(K)
+    for r in 1:K
+        p = al[r] + be[r] + ga[r] / 2
+        if p < 0.9999 && om[r] > 0
+            unc[r] = om[r] / (1 - p)
+        else
+            i = idx[r]
+            unc[r] = length(i) >= 10 ? SimLev.r_var(ex[i]) : SimLev.r_var(ex)
+        end
+    end
+    delta = zeros(K, K)
+    if tvtp
+        for i in 1:K
+            from = findall(==(i), reg[1:n-1])
+            length(from) < 50 && continue
+            x = s2[from] ./ unc[i] .- 1; to = reg[from .+ 1]
+            for j in 1:K
+                if j != i && count(==(j), to) >= 5
+                    d = try
+                        g = st.glm("y ~ x"; family = st.r_binomial(), env = Dict("y" => Int.(to .== j), "x" => x))
+                        Float64(st.coef(g)["x"])
+                    catch e
+                        e isa InterruptException && rethrow()
+                        NA
+                    end
+                    isfinite(d) && (delta[i, j] = max(-3.0, min(3.0, d)))
+                end
+            end
+        end
+    end
+    cm = Float64[mu[reg[t]] + phi[reg[t]] * lag_ex[t] + lam[reg[t]] * sig[t] for t in 1:n]
+    z = Float64[(ex[t] - cm[t]) / sig[t] for t in 1:n]
+    for t in 1:n
+        isfinite(z[t]) || (z[t] = 0.0)
+    end
+    pools = [length(i) < 10 ? collect(1:n) : i for i in idx]
+    for r in 1:K
+        i = pools[r]
+        sv = SimLev.r_sd(z[i])
+        if isfinite(sv) && sv > 0
+            mz = SimLev.r_mean(z[i])
+            z[i] = (z[i] .- mz) ./ sv
+        end
+    end
+    pi_ = MG._ms_garch_stat(P)
+    _message(_sp("MS-GARCH(%d, %s%s%s): P(stay) = %s", K, gm, ar_gm ? ", AR-M" : "", tvtp ? ", TVTP" : "",
+                 join([_sp("%.3f", P[r, r]) for r in 1:K], "/")))
+    sp = SimLev.r_sum(pi_)
+    return RList("K" => K, "mu" => mu, "omega" => om, "alpha" => al, "beta" => be, "gamma" => ga, "phi" => phi,
+                 "lambda" => lam, "trans" => P, "delta" => delta, "unc" => unc, "stat" => pi_ ./ sp,
+                 "pools" => [Int.(p) for p in pools], "z" => z, "regimes" => reg, "cross" => _fit_cross(R, config, base))
+end
 
 _istrue(x) = x === true || (x isa AbstractVector && length(x) == 1 && x[1] === true)
 
@@ -1113,6 +1210,11 @@ function _generate_returns(returns, method, p, info, n_out)
         C.boot_garch(n_out, info["base"] - 1, k, f["mu"], f["omega"], f["alpha"], f["beta"], f["gamma"],
                      f["s2_init"], f["z"], collect(1:n), cr["cols"], cr["mu"], cr["om"], cr["al"],
                      cr["be"], cr["ratio"], cr["s2"], cr["z"])
+    elseif method in ("ms_garch", "ms_ar_garch_m", "tvtp_ms_garch")
+        m = info["ms"]; cr = m["cross"]
+        C.boot_ms_garch(n_out, info["base"] - 1, k, Int(m["K"]), m["mu"], m["omega"], m["alpha"], m["beta"], m["gamma"],
+                        m["phi"], m["lambda"], m["trans"], m["delta"], m["unc"], m["stat"], m["pools"], m["z"],
+                        cr["cols"], cr["mu"], cr["om"], cr["al"], cr["be"], cr["ratio"], cr["s2"], cr["z"])
     else
         _stop(@sprintf("Unbekannte Methode: %s", method))
     end

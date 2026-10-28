@@ -599,33 +599,19 @@ block_length <- function(x, transform = c("none", "abs", "squared")) {
   list(regimes = reg, trans = .estimate_trans_mat(reg, as.integer(n_regimes)), vol = vol)
 }
 
-#' MS-GARCH-Familie vorbereiten (benoetigt MSGARCH)
+#' MS-GARCH-Familie vorbereiten (eigene ML-Schaetzung, .ms_garch_fit in R/ms_garch.R)
 #' @keywords internal
 #' @noRd
 .prepare_ms_info <- function(returns, config, base, K, garch_model, ar_gm, tvtp) {
-  if (!requireNamespace("MSGARCH", quietly = TRUE))
-    stop("MS-GARCH-Verfahren erfordern das Paket 'MSGARCH' (install.packages('MSGARCH')).")
+  .ms_garch_check(K, garch_model)
   ex <- returns[, base] - 1; n <- length(ex)
-  spec <- MSGARCH::CreateSpec(variance.spec = list(model = rep(garch_model, K)),
-                              distribution.spec = list(distribution = rep("norm", K)),
-                              switch.spec = list(do.mix = FALSE))
-  fit <- tryCatch(MSGARCH::FitML(spec = spec, data = ex),
+  fit <- tryCatch(.ms_garch_fit(ex, K, garch_model),
                   error = function(e) stop(sprintf("MS-GARCH(%d, %s) Fit fehlgeschlagen: %s", K, garch_model, e$message)))
-  cf <- fit$par
-  g <- function(p) vapply(seq_len(K), function(r) { v <- cf[paste0(p, "_", r)]; if (is.na(v)) 0 else unname(v) }, 0)
-  om <- g("alpha0"); al <- g("alpha1"); be <- g("beta"); ga <- if (garch_model == "gjrGARCH") g("alpha2") else rep(0, K)
-  P <- MSGARCH::TransMat(fit)
-  P <- P / rowSums(P)
-  st <- MSGARCH::State(fit)
-  reg <- if (!is.null(st$Viterbi)) as.integer(if (is.matrix(st$Viterbi) || is.array(st$Viterbi)) st$Viterbi[, 1] else st$Viterbi)
-         else if (!is.null(st$SmoothProb)) apply(st$SmoothProb[-1, 1, , drop = TRUE], 1, which.max) else rep(1L, n)
-  reg <- reg[seq_len(n)]
+  om <- fit$omega; al <- fit$alpha; be <- fit$beta; ga <- fit$gamma
+  P <- fit$P
+  reg <- fit$regimes
   mu <- vapply(seq_len(K), function(r) { i <- which(reg == r); if (length(i) >= 10) mean(ex[i]) else mean(ex) }, 0)
-  s2 <- tryCatch(as.numeric(MSGARCH::Volatility(fit))^2, error = function(e) NULL)
-  if (is.null(s2) || length(s2) != n) {
-    s2 <- numeric(n); s2[1] <- stats::var(ex); res <- ex - mean(ex)
-    for (t in 2:n) { r <- reg[t]; s2[t] <- max(1e-14, om[r] + (al[r] + ga[r] * (res[t - 1] < 0)) * res[t - 1]^2 + be[r] * s2[t - 1]) }
-  }
+  s2 <- fit$s2
   sig <- sqrt(pmax(s2, 1e-14))
   phi <- lam <- rep(0, K)
   lag_ex <- c(0, ex[-n])
@@ -996,7 +982,7 @@ block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'     \item{"tails"}{Empirische Tail-Schichtung des Referenzindex (\code{tail_prob})}
 #'     \item{"reset"}{Chronologie mit zufaellig gespiegelten Segmenten (\code{p_break}); erhaelt die Chronologie}
 #'     \item{"garch", "gjr_garch"}{(GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung ueber \code{cross} in [bootstrap_config()])}
-#'     \item{"ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"}{Markov-Switching-GARCH-Familie; benoetigt das Paket MSGARCH (\code{ms_n_regimes}/\code{ms_garch_model}, \code{ms_ar_n_regimes}/\code{ms_ar_garch_model} bzw. \code{tvtp_n_regimes}/\code{tvtp_garch_model})}
+#'     \item{"ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"}{Markov-Switching-GARCH-Familie: eigene ML-Schaetzung des MS-GARCH-Modells nach Haas, Mittnik und Paolella (2004), Normalverteilung, Varianzmodell "sGARCH" oder "gjrGARCH" je Regime; "ms_ar_garch_m" zusaetzlich mit AR- und GARCH-in-Mean-Termen je Regime, "tvtp_ms_garch" mit zeitvariablen Uebergangswahrscheinlichkeiten (\code{ms_n_regimes}/\code{ms_garch_model}, \code{ms_ar_n_regimes}/\code{ms_ar_garch_model} bzw. \code{tvtp_n_regimes}/\code{tvtp_garch_model})}
 #'   }
 #'   Bei "wild" und "reset" muss \code{path_length} der Laenge der Historie
 #'   entsprechen.
@@ -1029,9 +1015,17 @@ block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'     \item{p_break}{Wahrscheinlichkeit je Zeile als Anteil (0 bis 1), dass
 #'       bei "reset" ein neues Segment beginnt (Standard 0.02).}
 #'     \item{ms_n_regimes, ms_ar_n_regimes, tvtp_n_regimes}{Anzahl Regime fuer
-#'       "ms_garch", "ms_ar_garch_m" bzw. "tvtp_ms_garch" (Standard je 2).}
+#'       "ms_garch", "ms_ar_garch_m" bzw. "tvtp_ms_garch" (Standard je 2). Hat die
+#'       Reihe weniger deutlich getrennte Regime als angefordert (z. B. drei Regime
+#'       auf einer Reihe mit nur einem oder zwei Volatilitaetszustaenden), kann ein
+#'       Regime entarten: Verweilwahrscheinlichkeit nahe 0 (Meldung "P(stay)"),
+#'       kaum oder keine Tage im Regimepfad, mitunter Persistenz nahe 1 mit
+#'       unplausibel hoher unbedingter Varianz; die Log-Likelihood liegt dann kaum
+#'       ueber der mit einem Regime weniger. In diesem Fall die Anzahl Regime
+#'       verkleinern.}
 #'     \item{ms_garch_model, ms_ar_garch_model, tvtp_garch_model}{Varianzmodell
-#'       je Regime, an MSGARCH weitergereicht (Standard je "gjrGARCH").}
+#'       je Regime: "sGARCH" (GARCH(1,1)) oder "gjrGARCH" (GJR-GARCH(1,1),
+#'       Standard je "gjrGARCH"); andere Werte sind ein Fehler.}
 #'   }
 #'   Der Eintrag \code{garch_order} (Standard \code{c(1, 1)}) ist vorhanden,
 #'   aendert aber nichts: die GARCH-Verfahren schaetzen immer GARCH(1,1).
@@ -1139,6 +1133,10 @@ block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   aux_type = c(cpi = "level", zins = "rate"))
 #' b3 <- bootstrap(h, cfg3, "stationary", n = 2, params = list(L = 50), seed = 1, progress = FALSE)
 #' range(diff(log(b3$paths[[1]][, "cpi"])) * 365)   # stets log(1.02): keine Spruenge
+#' @references Haas, M., Mittnik, S. & Paolella, M.S. (2004), A New Approach
+#'   to Markov-Switching GARCH Models, Journal of Financial Econometrics 2(4)
+#'   (Verfahren "ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"); Hamilton, J.D.
+#'   (1989), Econometrica 57(2) (Filter).
 #' @seealso [bootstrap_config()], [bootstrap_data()], [bootstrap_study()],
 #'   [withdrawal_paths()]
 #' @export
@@ -1505,6 +1503,10 @@ study_metrics <- function(res) {
 #' summary(st)
 #' bootstrap_probability(st, ttwror >= 0.10 & max_drawdown <= 0.6)
 #' }
+#' @references Haas, M., Mittnik, S. & Paolella, M.S. (2004), A New Approach
+#'   to Markov-Switching GARCH Models, Journal of Financial Econometrics 2(4)
+#'   (Verfahren "ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"); Hamilton, J.D.
+#'   (1989), Econometrica 57(2) (Filter).
 #' @seealso [bootstrap()], [bootstrap_probability()], [simulation()],
 #'   [withdrawal_paths()]
 #' @export

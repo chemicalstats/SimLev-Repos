@@ -280,8 +280,9 @@ Voraussetzungen der Bitgleichheit:
   `simlev._r.imputets`, `simlev._r.stinepack`) ist ebenfalls nachgebildet:
   `fill = "stine"`/`index_fill = "stine"` im Backcast interpolieren immer
   nach Stineman wie R, das beide Pakete übernommen hat
-  (`.imputets_na_interpolation`; Herkunft in `COPYRIGHTS.md`). `MSGARCH` gilt als nicht
-  installiert; die MS-GARCH-Verfahren melden wie R, dass das Paket fehlt.
+  (`.imputets_na_interpolation`; Herkunft in `COPYRIGHTS.md`). Die
+  MS-GARCH-Verfahren schätzen ihr Modell wie R selbst, ohne `MSGARCH`
+  (`simlev.ms_garch`, Port von `.ms_garch_fit` und dem Kern `src/ms_garch.c`).
   Einen Schalter für optionale R-Pakete gibt es nicht mehr.
 - **nlminb:** Die PORT-Bibliothek liest an drei Stellen nicht gesetzte
   lokale Variablen (in R zufällige Stapelreste); Python setzt dort 0. Das
@@ -308,7 +309,7 @@ Geprüft wurde:
   `details = TRUE`; zusätzlich 669 frisch erzeugte Zufalls- und Stressfälle
   und 750 Fälle mit den neuen Argumenten (`order_fee`, `dca_fee`,
   `church_tax`, `harvest_*`, `taxable_income`, `tax_tariff`).
-- **Alle Funktionen:** 4.536 Referenzfälle in 29 Modulen unter
+- **Alle Funktionen:** 4.563 Referenzfälle in 30 Modulen unter
   `golden/modules/`, darunter die R-Interna (`r_fmt`, `r_linalg`,
   `r_nmath`, `r_rng`, `r_stats`); alle bitgleich in Ergebnis,
   Konsolen- und Druckausgabe, Warnungen und Fehlermeldungen.
@@ -330,13 +331,13 @@ Bekannte Grenzen:
 
 ``` bash
 pip install ".[test]"
-pytest                                        # 5.755 Tests, Laufzeit rund 7 Minuten
+pytest                                        # 5.840 Tests, Laufzeit rund 7 Minuten
 python tools/compare_golden.py                # Engine: golden/cases und golden/extra
 python tools/compare_reference.py             # Erweiterungen: alle Module unter golden/modules
 python tools/compare_reference.py optimize -k cov_ -v      # ein Modul, ausgewählte Fälle, ausführlich
 ```
 
-Die Test-Suite enthält 4.536 Modul-Referenzfälle
+Die Test-Suite enthält 4.563 Modul-Referenzfälle
 (`tests/test_module_reference.py`) und die 105 Golden-Master-Fälle der
 Engine (`tests/test_golden_master.py`, dazu ein Test, dass die Fälle
 gefunden werden). Die übrigen 1.120 Tests prüfen die Engine (überwiegend
@@ -372,6 +373,7 @@ simlev/
   bonds.py           Anleihe-, Geldmarkt- und gesicherte Reihen
   signals.py         Signal-Bausteine (signal_sma() …); Kerne in _signals_core.py
   bootstrap.py       Bootstrap, Bootstrap-Studien; Kerne in _bootstrap_core.py
+  ms_garch.py        eigene MS-GARCH-Schätzung (ms_garch.R; Filter in _bootstrap_core.py)
   withdrawal.py      Entnahmephase; Kern in _withdrawal_core.py
   deep_analysis.py   deep_analysis()
   sensitivity.py     Sensitivitäten, Lump Sum vs. DCA, Hebelreihen

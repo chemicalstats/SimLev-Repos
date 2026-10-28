@@ -158,6 +158,20 @@ case("bs_msgarch", paste0(CFG_R, "bootstrap(d, cfg, 'ms_garch', n = 1, seed = 1)
      jl = paste0(CFG_J, 'result = bootstrap(d, cfg, "ms_garch"; n = 1, seed = 1)'))
 case("bs_tvtp", paste0(CFG_R, "bootstrap(d, cfg, 'tvtp_ms_garch', n = 1, seed = 1)"), paste0(CFG_P, "result = bootstrap(d, cfg, 'tvtp_ms_garch', n=1, seed=1)"), I,
      jl = paste0(CFG_J, 'result = bootstrap(d, cfg, "tvtp_ms_garch"; n = 1, seed = 1)'))
+# MS-GARCH-Verfahren mit Parametern (eigene Schätzung .ms_garch_fit), Fehlerwege der Prüfung
+MS <- list(
+  bs_ms_ar = c("ms_ar_garch_m", "list()", "{}", "(;)"),
+  bs_ms_sgarch = c("ms_garch", "list(ms_garch_model = 'sGARCH')", "{'ms_garch_model': 'sGARCH'}", '(ms_garch_model = "sGARCH",)'),
+  bs_ms_K3 = c("ms_garch", "list(ms_n_regimes = 3)", "{'ms_n_regimes': 3}", "(ms_n_regimes = 3,)"),
+  bs_tvtp_K3 = c("tvtp_ms_garch", "list(tvtp_n_regimes = 3)", "{'tvtp_n_regimes': 3}", "(tvtp_n_regimes = 3,)"),
+  bs_ms_err_egarch = c("ms_garch", "list(ms_garch_model = 'eGARCH')", "{'ms_garch_model': 'eGARCH'}", '(ms_garch_model = "eGARCH",)'),
+  bs_ms_err_K1 = c("tvtp_ms_garch", "list(tvtp_n_regimes = 1)", "{'tvtp_n_regimes': 1}", "(tvtp_n_regimes = 1,)"))
+for (k in names(MS)) {
+  a <- MS[[k]]
+  case(k, paste0(CFG_R, sprintf("bootstrap(d, cfg, '%s', n = 1, seed = 1, params = %s)", a[1], a[2])),
+       paste0(CFG_P, sprintf("result = bootstrap(d, cfg, '%s', n=1, seed=1, params=%s)", a[1], a[3])), I,
+       jl = paste0(CFG_J, sprintf('result = bootstrap(d, cfg, "%s"; n = 1, seed = 1, params = %s)', a[1], a[4])))
+}
 
 # Zusatzreihen als Niveau / Rate, Kursniveaus, Attribut aux_level
 CF3_R <- "cfg3 <- bootstrap_config(c(us = 'us'), aux = c(cpi = 'cpi', zins = 'zins', infl = 'infl'), input = 'prices', aux_type = c(cpi = 'level', zins = 'rate'), letfs = list(list(base = 'us', leverage = 3, finance = 'zins', spread = 0.5)))\n"

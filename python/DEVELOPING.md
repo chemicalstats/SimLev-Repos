@@ -22,8 +22,10 @@ Was speziell die Engine (`simulation()`) betrifft, steht im Abschnitt
   `rtruncnorm` (`.rugarch_ugarchfit`, `.rsolnp_solnp`, `.rsolnp_gosolnp`,
   `.truncnorm_rtruncnorm`) übernommen und `hessian`/`jacobian` eigenständig
   geschrieben (`.sl_richardson_hessian`, `.sl_richardson_jacobian`), `gen_evd.R`, `gen_imputets.R` und
-  `gen_rugarch.R` prüfen diese Fassungen. MSGARCH ist nie installiert; Funktionen,
-  die in R ein fehlendes Paket verlangen, werfen dieselbe Meldung.
+  `gen_rugarch.R` prüfen diese Fassungen. MSGARCH braucht SimLev nicht mehr:
+  Das MS-GARCH-Modell schätzt R selbst (`r/R/ms_garch.R`, Kern
+  `r/src/ms_garch.c`), Python bildet das in `simlev/ms_garch.py` und
+  `_bootstrap_core.ms_garch_filter` nach.
 - Bitgleichheit setzt Linux x86-64 (80-Bit-`long double`), glibc-libm und
   für Eigenvektoren die Referenz-LAPACK des Systems voraus.
 - Immer mit `LC_ALL=C.UTF-8` arbeiten; unter dem C-Locale schlagen die
@@ -119,10 +121,10 @@ sind, heißen `yield_`, `raise_` und `from_`.
    (`order`, `sort`, `rank`, `str_collate`; ICU-Kollation wie R), nie über
    `sorted`, `np.sort`, `np.unique` oder `pd.Categorical` mit Standardordnung.
 10. Bedingungen als Text nur über `simlev._r.rexpr.eval_r` (R-Syntax).
-11. `requireNamespace(pkg, quietly = TRUE)` für ein optionales Paket: R
-    fragt nur noch MSGARCH ab (evd, imputeTS und rugarch sind übernommen,
-    ihr Weg gilt immer); MSGARCH ist nicht nachgebildet, die Ports werfen
-    wie R ohne das Paket dessen Fehlermeldung, ohne Schalter. `Sys.time()` →
+11. Optionale R-Pakete fragt R nicht mehr ab (kein `requireNamespace`):
+    evd, imputeTS und rugarch sind übernommen, ihr Weg gilt immer; MSGARCH
+    ist durch die eigene Schätzung (`r/R/ms_garch.R`) ersetzt. Einen
+    Schalter für optionale Pakete gibt es nicht. `Sys.time()` →
     `simlev._r.base.sys_time()` (Prüfschalter `SIMLEV_R_SYS_TIME`).
 
 ## Gemeinsam genutzte Helfer
@@ -136,6 +138,8 @@ Modul der R-Datei, aus der sie stammen, mit derselben Signatur:
 | `_fill_na`, `_resolve_series` | `backcast.py` |
 | `_roll_mean`, `_roll_var`, `_roll_cov` | `signals.py` |
 | `_with_rng_restore`, `_par_lapply`, `_extract_returns`, `_pw_block`, `_fit_garch11`, `_wquantile` | `bootstrap.py` |
+| `_hmm_em`, `_hmm_init_rank`, `_hmm_init_cl`, `_hmm_viterbi` | `regimes.py` |
+| `_ms_garch_fit`, `_ms_garch_check`, `_ms_garch_stat` | `ms_garch.py` |
 | `result_index`, `_wd_ppy`, `_anniv_ends` | `withdrawal.py` |
 | `_dep_sort_dates`, `_dep_check_prices`, `_dep_returns`, `_kendall` | `dependence.py` |
 | `_as_weights`, `_period_last`, `_hold_rows` | `tactical.py` |
@@ -168,6 +172,7 @@ unverändert bleibt).
 | `bonds.R` | `bonds.py` |
 | `signals.R`; `.roll_mean_core`, `.roll_cov_core` aus `research_core.cpp` | `signals.py`, `_signals_core.py` |
 | `bootstrap.R`, `bootstrap_core.cpp`; `.garch_filter` aus `research_core.cpp` | `bootstrap.py`, `_bootstrap_core.py` |
+| `ms_garch.R`, `ms_garch.c` | `ms_garch.py`, `_bootstrap_core.py` (`ms_garch_filter`) |
 | `withdrawal.R`, `withdrawal_core.cpp` | `withdrawal.py`, `_withdrawal_core.py` |
 | `dependence.R`, `dependence_core.cpp`; `.kendall_tau_core`, `.quantile_reg_core`, `.hmm_forward_backward` aus `research_core.cpp` | `dependence.py`, `_dependence_core.py` |
 | `regimes.R` | `regimes.py` |

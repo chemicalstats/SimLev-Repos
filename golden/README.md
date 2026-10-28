@@ -7,7 +7,7 @@ und die Julia-Fassung ihre Bitgleichheit zum R-Paket prüfen.
 |---|---|---|---|
 | `cases/` | 68 | Python, Julia | Engine: 38 gezielte Fälle für jeden Steuer- und Sonderpfad (`f01`–`f38`) und 30 Zufallsfälle (`r…`) |
 | `extra/` | 37 | Python, Julia | Engine: Stressfälle mit 30 Jahren, Totalverlust-Hebel, mehreren Signal-Assets, konstanten Preisen, Kalender-Randfällen, Extremwerten, Fehlerpfaden (`x…`, `y…`) |
-| `modules/` | 4.536 | Python, Julia | alle übrigen Funktionen des R-Pakets, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS und die nachgebauten R-Interna, je Modul ein Unterordner (siehe unten) |
+| `modules/` | 4.563 | Python, Julia | alle übrigen Funktionen des R-Pakets, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS und die nachgebauten R-Interna, je Modul ein Unterordner (30 Module, siehe unten) |
 
 ## Engine-Fälle (`cases/`, `extra/`)
 
@@ -58,11 +58,12 @@ Je Modul gibt es einen Unterordner mit Fällen und einen Generator
 
 | Modul | Fälle | Prüft |
 |---|---|---|
-| `data_prep` | 159 | Datenaufbereitung, Portfolio-Vorlagen (`data_prep.R`) |
+| `data_prep` | 160 | Datenaufbereitung, Portfolio-Vorlagen (`data_prep.R`) |
 | `backcast` | 88 | `backcast.R` |
 | `signals` | 56 | `signals.R` mit den Rollkernen |
-| `bootstrap_core` | 14 | Kerne aus `bootstrap_core.cpp` |
-| `bootstrap` | 185 | `bootstrap.R` |
+| `bootstrap_core` | 18 | Kerne aus `bootstrap_core.cpp`, MS-GARCH-Filter aus `ms_garch.c` (`.ms_garch_filter`) |
+| `bootstrap` | 190 | `bootstrap.R` |
+| `ms_garch` | 17 | eigene MS-GARCH-Schätzung `ms_garch.R` (`.ms_garch_fit`: K = 2/3, sGARCH/gjrGARCH, drei simulierte Datensätze, Fehlerwege der Prüfung; `simlev/ms_garch.py`, `src/ms_garch.jl`) |
 | `withdrawal` | 313 | `withdrawal.R`, `withdrawal_core.cpp` |
 | `deep_analysis` | 54 | `deep_analysis.R` |
 | `sensitivity` | 37 | `sensitivity.R` |
@@ -88,7 +89,7 @@ Je Modul gibt es einen Unterordner mit Fällen und einen Generator
 | `imputets` | 203 | aus imputeTS 3.4 und stinepack 1.5 übernommen (`SimLev:::.imputets_na_interpolation`, `.imputets_na_locf`, `.stinepack_stinterp`): `na_interpolation` (stine), `na_locf`, stinepack `stinterp`, `.fill_na(…, "stine")`, `backcast_fit`/`backcast` mit `"stine"` (`simlev/_r/imputets.py`, `stinepack.py`, `src/r/imputets.jl`, `stinepack.jl`) |
 | `rugarch` | 173 | aus rugarch 1.5-6, Rsolnp 1.16 und truncnorm 1.0-9 übernommen (`SimLev:::.rugarch_ugarchfit`, `.rugarch_coef`, `.rsolnp_solnp`, `.rsolnp_gosolnp`, `.truncnorm_rtruncnorm`), Ableitungen eigenständig (`.sl_richardson_hessian`, `.sl_richardson_jacobian`, gegen numDeriv 2016.8-1.1 geprüft): `ugarchfit`→`coef` (auch mit den Ausweichwegen nlminb und gosolnp, Zufallszustand danach), `solnp`, `gosolnp`, `rtruncnorm`, `.fit_garch11`, Bootstrap `garch`/`gjr_garch`, `dcc_fit`, `dependence_analysis` (`simlev/_r/rugarch.py`, `solnp.py`, `truncnorm.py`, `src/r/rugarch.jl`, `solnp.jl`, `truncnorm.jl`) |
 
-Python 0.5.0 und Julia 0.5.0 sind zu allen 4.536 Fällen bitgleich, bei strenger
+Python 0.5.0 und Julia 0.5.0 sind zu allen 4.563 Fällen bitgleich, bei strenger
 Unterscheidung von `NA` und `NaN` und mit dem Vorzeichen der Null.
 
 ### Format
@@ -118,9 +119,9 @@ werden als `skip` übergangen.
 ### Neu erzeugen
 
 Benötigt werden R (die Referenzen entstanden mit R 4.3.3), das installierte
-R-Paket SimLev 0.5.0 und `jsonlite`, aber **nicht** das optionale Paket
-MSGARCH: Die MS-GARCH-Fälle beschreiben die Fehlermeldung, mit der R ohne
-dieses Paket abbricht (so melden es auch die Ports). evd ist ins R-Paket übernommen
+R-Paket SimLev 0.5.0 und `jsonlite`, aber **nicht** das Paket MSGARCH:
+SimLev schätzt das MS-GARCH-Modell selbst (`.ms_garch_fit`, Kern
+`src/ms_garch.c`; Ports `simlev.ms_garch` bzw. `SimLev.MsGarch`). evd ist ins R-Paket übernommen
 (`.evd_fpot`); `gen_evd.R` braucht evd nicht mehr, seine Fälle (zuvor mit
 evd 2.3-7.1 erzeugt) sind mit der Übernahme bitgleich. Ebenso sind imputeTS
 und stinepack übernommen (`.imputets_na_interpolation`,

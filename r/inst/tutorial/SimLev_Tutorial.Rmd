@@ -313,7 +313,7 @@ Original.
 | `evt`, `tails` | GPD- bzw. empirische Tails plus Bulk | `tail_prob` |
 | `reset` | Chronologie mit gespiegelten Segmenten | `p_break` |
 | `garch`, `gjr_garch` | (GJR-)GARCH(1,1), Filtered Historical Simulation | – |
-| `ms_garch`, `ms_ar_garch_m`, `tvtp_ms_garch` | Markov-Switching-GARCH-Familie (Paket MSGARCH) | `*_n_regimes` |
+| `ms_garch`, `ms_ar_garch_m`, `tvtp_ms_garch` | Markov-Switching-GARCH-Familie (eigene ML-Schätzung nach Haas, Mittnik und Paolella 2004) | `*_n_regimes` |
 
 Bei den GARCH-Verfahren wird je Simulationstag **ein** historisches Datum
 gezogen und dessen standardisierte Residuen für alle Reihen verwendet

@@ -27,13 +27,13 @@ _fvec(x) = SimLev.Dependence._fvec(x)
 "Log-Dichte der multivariaten Normalverteilung je Zeile (`.ldmvn`)."
 function _ldmvn(X, mu, S)
     X = _fmat(X); mu = _fvec(mu)
-    L = _fmat(SimLev.RLinalg.chol(_fmat(S)))
+    L = _fmat(SimLev.SLib.chol(_fmat(S)))                    # Cholesky der C-Bibliothek slc (B.5)
     n, d = size(X)
     Xc = Matrix{Float64}(undef, n, d)
     for j in 1:d, i in 1:n
         Xc[i, j] = X[i, j] - mu[j]
     end
-    Z = permutedims(_fmat(_D()._flex(SimLev.RLinalg.backsolve, (L, permutedims(Xc)), NamedTuple(), (transpose = true,))))
+    Z = permutedims(_fmat(SimLev.SLib.backsolve(L, permutedims(Xc); transpose = true)))
     rs = _D()._rowsums(Z .* Z)
     sl = SimLev.r_sum([SimLev.RLibm.log(L[i, i]) for i in 1:size(L, 1)])
     c = 0.5 * d * SimLev.RLibm.log(2 * pi)
@@ -157,7 +157,7 @@ function _hmm_em(X, k, init, max_iter, tol, ridge)
             for c in 1:d, i in 1:Tn
                 Xc[i, c] = (X[i, c] - mu[j, c]) * sq[i]
             end
-            S[j] = _fmat(D._flex(SimLev.RLinalg.crossprod, (Xc,))) ./ sw .+ ridge
+            S[j] = _fmat(SimLev.SLib.crossprod(Xc)) ./ sw .+ ridge   # slc-Kreuzprodukt (B.6)
         end
         abs(ll - ll_old) < tol * (1 + abs(ll)) && break
         ll_old = ll
@@ -251,17 +251,15 @@ function regime_hmm(data, columns; k = 2, frequency = ("week", "day", "month"), 
     end
     lg = SimLev.RLibm.log
     win = max(4.0, D._r_round(ppy / 12))
-    inits = D._with_rng_restore(seed) do
-        res = Any[]
-        for s in 1:Int(n_start)
-            if s == 1
-                push!(res, _hmm_init_rank(X, k, win, ridge))
-            else
-                cl = Int.(D._fvec(D._flex(SimLev.RRng.sample_int, (k, Tn), NamedTuple(), (replace = true,))))
-                push!(res, _hmm_init_cl(X, cl, k, ridge))
-            end
+    rs = n_start >= 2 ? SimLev.SLib.main_stream(seed) : nothing   # Hauptstrom (Entwurf C.5), nur bei Zufallsstarts
+    inits = Any[]
+    for s in 1:Int(n_start)
+        if s == 1
+            push!(inits, _hmm_init_rank(X, k, win, ridge))
+        else
+            cl = Vector{Int}(SimLev.SLib.sample(k, Tn; replace = true, stream = rs))
+            push!(inits, _hmm_init_cl(X, cl, k, ridge))
         end
-        res
     end
     fits = Any[]
     for i in inits

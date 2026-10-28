@@ -9,8 +9,8 @@ aufgaben: kommagetrennt (z. B. T1,T8), Voreinstellung alle außer P1 (= P1c1,
 P1c2: bootstrap mit cores=1 und 2, Fork; nur auf Anforderung). Je Aufgabe 1
 Aufwärmlauf (erster_lauf_s), dann 3 gemessene Läufe (Median, Min, Max). Ein
 Kern: cores=1, wo die Funktion es kennt; BLAS-Threads setzt run.sh. Die Daten
-entstehen mit dem R-Zufallsgenerator der Python-Fassung (simlev._r.rng) und
-sind dieselben Zahlen wie in bench.R (Prüfsumme in der Ausgabe).
+entstehen mit dem Zufall von SimLev (simlev_seed, simlev._lib; seit Etappe 9.6a)
+und sind dieselben Zahlen wie in bench.R (Prüfsumme in der Ausgabe).
 """
 import contextlib
 import io
@@ -32,23 +32,13 @@ T_LOAD = time.perf_counter() - t0
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
-from simlev._r import rng  # noqa: E402
+from simlev import _lib as rng  # noqa: E402  (seit Etappe 9.6a: Zufall von SimLev)
 from simlev._r.rnum import r_cumprod, r_sum  # noqa: E402
 from simlev.ms_garch import _ms_garch_fit  # noqa: E402
-from simlev import _bootstrap_core  # noqa: E402
 
-# Sprache in der CSV: "Python" mit C-Erweiterung (seit Etappe 7.3a simlev._ext mit allen gemeinsamen
-# Kernen, Etappe 7.2 simlev._ext_msgarch), "Python ohne C" mit reinen Python-Kernen (nicht gebaut oder
-# SIMLEV_NO_EXT=1); getattr: auch für ältere Stände
-def _ext_active():
-    from simlev._r import env as _env
-    if hasattr(_env, "ext"):
-        return _env.ext() is not None
-    return getattr(_bootstrap_core, "_ext_msgarch", lambda: None)() is not None
-
-
-LANG = "Python" if _ext_active() else "Python ohne C"
-print("C-Erweiterung simlev._ext: %s (Sprache %s)" % ("aktiv" if LANG == "Python" else "aus", LANG))
+# Sprache in der CSV: "Python" (seit Etappe 9.6c ist die C-Erweiterung simlev._ext Pflicht; die
+# frühere Sprache "Python ohne C" mit reinen Python-Kernen und SIMLEV_NO_EXT=1 gibt es nicht mehr)
+LANG = "Python"
 
 
 def dates(start, n):
@@ -60,10 +50,10 @@ def path(level, n, m, s):
 
 
 # ── Daten wie bench.R ──
-rng.set_seed(1); n = 10958
+sl.simlev_seed(1); n = 10958
 A = path(100, n, 3e-4, 0.01); B = path(50, n, 1e-4, 0.003)
 d30 = pd.DataFrame({"date": dates("1995-01-01", n), "A": A, "B": B})
-rng.set_seed(7); n = 7305
+sl.simlev_seed(7); n = 7305
 cols = {}
 for nm, m, s in (("aktien", 3e-4, 0.011), ("bonds", 1e-4, 0.003), ("gold", 2e-4, 0.009), ("em", 3e-4, 0.014)):
     cols[nm] = path(100, n, m, s)
@@ -72,12 +62,12 @@ W = (1 + rng.rnorm(30 * 2000, 0.05, 0.15)).reshape((30, 2000), order="F")
 
 
 def sim_msgjr(n, om, al, ga, be, P, seed):
-    rng.set_seed(seed); K = len(om)
+    sl.simlev_seed(seed); K = len(om)
     om, al, ga, be, P = (np.asarray(v, dtype=float) for v in (om, al, ga, be, P))
     hk = om / (1 - al - ga / 2 - be); s = 1; y = np.zeros(n)
     for t in range(1, n + 1):
         if t > 1:
-            s = int(rng.sample_int(K, 1, prob=P[s - 1, :])[0]); e = y[t - 2]
+            s = int(rng.sample(K, 1, prob=P[s - 1, :])[0]); e = y[t - 2]
             hk = om + (al + ga * float(e < 0)) * (e * e) + be * hk
         y[t - 1] = np.sqrt(hk[s - 1]) * rng.rnorm(1)[0]
     return y

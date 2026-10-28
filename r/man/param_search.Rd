@@ -103,10 +103,12 @@ Sparplan geldgewichtet, XIRR).}
 Unix per Fork (\code{parallel::mclapply}), unter Windows per
 PSOCK-Cluster.}
 
-\item{seed}{Startwert (ganze Zahl) fuer den Versuchsplan bei
-\code{"random"}/\code{"lhs"}; der Zufallszustand der Sitzung wird danach
-wiederhergestellt. \code{NULL} (Standard) = aktueller Zufallszustand,
-der dabei normal weiterlaeuft (wiederholte Aufrufe ziehen andere Punkte).}
+\item{seed}{Startwert fuer den Versuchsplan bei \code{"random"}/\code{"lhs"} (Standard
+\code{NULL}; bei \code{"grid"} ohne Bedeutung). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}), wiederholte
+Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
+Die Auswertung der Punkte ist deterministisch, das Ergebnis haengt nicht von \code{cores} ab.}
 
 \item{keep_returns}{Logisch (Standard \code{TRUE}): taegliche Renditen je
 Punkt speichern (noetig fuer \code{\link[=overfit_pbo]{overfit_pbo()}}, \code{\link[=sharpe_deflated]{sharpe_deflated()}},

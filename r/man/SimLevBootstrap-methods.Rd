@@ -76,6 +76,8 @@ Kish-Stichprobengroesse \eqn{(\sum w)^2 / \sum w^2}: bei gleichen Gewichten
 (ohne ESS) genau \code{\link[stats:quantile]{stats::quantile()}} mit \code{type = 7}, sonst eine
 stetig von den Gewichten abhaengende Interpolation benachbarter Werte.
 \code{print()} einer Studie gibt eine Kurzinfo und die Zusammenfassung aus.
-\code{plot()} zeichnet (ungewichtete) Dichten einer Kennzahl je Strategie.
+\code{plot()} zeichnet (ungewichtete) Dichten einer Kennzahl je Strategie
+(Gauss-Kerndichte der C-Bibliothek von SimLev mit Bandbreite nach Silverman,
+direkt summiert; die Kurven weichen minimal von \code{density()} ab).
 }
 \keyword{internal}

@@ -306,63 +306,10 @@ _errmsg(e) = e isa ErrorException ? e.msg : e isa ArgumentError ? e.msg :
              (hasproperty(e, :msg) ? string(getproperty(e, :msg)) : sprint(showerror, e))
 
 # ═══════════════════════════════════════════════════════════════════════════
-# RNG-Hilfen (.with_rng_restore, .make_streams; .par_lapply in RParallel)
+# Zufall (Entwurf C.5): Ströme aus SimLev.SLib; .par_lapply in RParallel
 # ═══════════════════════════════════════════════════════════════════════════
 
-_R() = SimLev.RRng
-_rng_kind_get() = collect(String, _R().rng_kind())
-_rng_kind_set(k) = _R().rng_kind(k[1], k[2], k[3])
-
-"""
-    _with_rng_restore(f; seed = <fehlt>)
-
-Zufallszustand sichern und wiederherstellen (Port von `.with_rng_restore`).
-Ohne `seed` wird der Zustand vor dem Aufruf wiederhergestellt; mit einer Zahl
-wird `set_seed(seed)` gesetzt und danach der vorherige Zustand
-wiederhergestellt; `seed = nothing`: nichts setzen, nichts wiederherstellen.
-"""
-function _with_rng_restore(f::Function; seed = _MISSING)
-    seed === nothing && return f()
-    has = _R().has_random_seed()
-    old = has ? _R().get_random_seed() : nothing
-    kind = _rng_kind_get()
-    try
-        seed === _MISSING || _R().set_seed(seed)
-        return f()
-    finally
-        if has
-            _R().set_random_seed(old)
-        else
-            _rng_kind_set(kind)
-            _R().has_random_seed() && _R().rm_random_seed()
-        end
-    end
-end
-
-"Zufallsströme je Pfad (L'Ecuyer-CMRG), Port von `.make_streams`."
-function _make_streams(seed, n)
-    has = _R().has_random_seed()
-    old = has ? _R().get_random_seed() : nothing
-    old_kind = has ? nothing : _rng_kind_get()
-    try
-        _R().rng_kind("L'Ecuyer-CMRG")
-        _R().set_seed(seed)
-        s = _R().get_random_seed()
-        out = Any[]
-        for _ in 1:Int(n)
-            push!(out, s)
-            s = _R().next_rng_stream(s)
-        end
-        return out
-    finally
-        if has
-            _R().set_random_seed(old)
-        else
-            _rng_kind_set(old_kind)
-            _R().has_random_seed() && _R().rm_random_seed()
-        end
-    end
-end
+_SL() = SimLev.SLib
 
 "`.par_lapply(X, FUN, cores)`: steht in Schicht 0 (`SimLev.RParallel.par_lapply`)."
 _par_lapply(X, FUN, cores = 1) = SimLev.RParallel.par_lapply(X, FUN, cores)
@@ -789,103 +736,15 @@ end
 # Modellanpassung (GARCH-Familie, Regime, EVT)
 # ═══════════════════════════════════════════════════════════════════════════
 
-_core() = SimLev.BootstrapCore
-
 """
-GARCH(1,1) / GJR-GARCH(1,1) schätzen (rugarch → optim → Momente), Port von `.fit_garch11`.
-Schätzt wie R (das rugarch übernommen hat, `.rugarch_ugarchfit`) zuerst mit der
-Nachbildung von `rugarch::ugarchfit` (`SimLev.RRugarch`, Solver "hybrid");
-scheitert sie mit einem R-Fehler, folgen wie in R der optim-Pfad (Nelder-Mead)
-und die Momente. Warnungen von rugarch erscheinen wie in R auch bei
-`quiet = true`. Erreicht rugarch den Solver gosolnp, setzt dieser wie in R
-den globalen Zufallszustand neu (Startwert aus der Uhrzeit).
+GARCH(1,1) / GJR-GARCH(1,1) schätzen (ML → Momente), Port von `.fit_garch11`.
+Seit Etappe 9.6b wie R über die C-Bibliothek slc (`SLib.fit_garch11`, Entwurf B.10, F10):
+ML-Punktschätzer unter Normalverteilung (Raster-Starts, BFGS; GJR seit N1 mit α + γ ≥ 0, also auch
+γ < 0, und BFGS von allen sieben Rasterpunkten), bei Fehlschlag die Momente
+mit Warnung; Methodenlabel "konstant", "ml" oder "momente". Der frühere Weg über die
+rugarch-Nachbildung (mit gosolnp und Uhrzeit-Seed) und Nelder-Mead entfällt.
 """
-function _fit_garch11(e; gjr = false, quiet = false)
-    e = _dvec(e)
-    n = length(e)
-    mu = _rmean(e)
-    if _rvar(e) < 1e-16
-        return RList("mu" => mu, "omega" => 1e-20, "alpha" => 0.0, "beta" => 0.0, "gamma" => 0.0,
-                     "s2" => fill(1e-20, n), "z" => zeros(n), "method" => "konstant", "s2_init" => 1e-20)
-    end
-    omega = alpha = beta = nothing
-    gamma = 0.0
-    method = "none"
-    ok = nothing
-    cf = nothing
-    try
-        fit = SimLev.RRugarch.ugarchfit(e; model = gjr ? "gjrGARCH" : "sGARCH", solver = "hybrid")
-        cf = SimLev.RRugarch.coef(fit)
-        ok = cf !== nothing
-    catch err
-        err isa UndefVarError && rethrow()       # sonst: tryCatch(..., error = function(err) NULL)
-        err isa MethodError && rethrow()
-    end
-    # coef(fit) ist NULL (keine Konvergenz): in R werden mu, omega, ... NULL, der optim-Weg
-    # filtert eine leere Reihe und `if (stats::sd(z) > 0)` bricht ab (in R mit erzwungener
-    # Nicht-Konvergenz geprüft)
-    ok === false && error("missing value where TRUE/FALSE needed")
-    if ok === true
-        cv = Dict(zip(cf.names, Float64.(cf.values)))
-        mu = cv["mu"]; omega = cv["omega"]; alpha = cv["alpha1"]; beta = cv["beta1"]
-        gjr && (gamma = cv["gamma1"])
-        method = "rugarch"
-    end
-    filt(om, al, be, ga, m) = _core().garch_filter(e .- m, om, al, be, ga, om / max(1e-6, 1 - al - be - ga / 2))
-    omega === nothing && try
-        sv = _rvar(e)
-        ep = e .- mu
-        ep2 = ep .* ep
-        function nll(th)
-            om = _rexp(th[1])
-            al = 0.5 / (1 + _rexp(-th[2]))
-            be = 0.999 / (1 + _rexp(-th[3]))
-            ga = gjr ? 0.5 / (1 + _rexp(-th[4])) : 0.0
-            al + be + ga / 2 >= 0.9999 && return 1e10
-            s2 = filt(om, al, be, ga, mu)
-            return 0.5 * _rsum(Float64[_rlog(s2[i]) + ep2[i] / s2[i] for i in eachindex(s2)])
-        end
-        lg(p) = _rlog(p / (1 - p))
-        st = [_rlog(sv * 0.05), lg(0.05 / 0.5), lg(0.90 / 0.999)]
-        gjr && push!(st, lg(0.04 / 0.5))
-        gjr && (st[2] = lg(0.02 / 0.5))
-        o = SimLev.RStats.optim(st, nll; method = "Nelder-Mead", control = Dict("maxit" => 4000))
-        par = _dvec(_get(o, "par"))
-        val = Float64(_f1(_get(o, "value")))
-        om = _rexp(par[1])
-        al = 0.5 / (1 + _rexp(-par[2]))
-        be = 0.999 / (1 + _rexp(-par[3]))
-        ga = gjr ? 0.5 / (1 + _rexp(-par[4])) : 0.0
-        if val < 1e9 && al + be + ga / 2 < 0.9999
-            omega, alpha, beta, gamma, method = om, al, be, ga, "optim"
-        end
-    catch err
-        err isa UndefVarError && rethrow()
-        err isa MethodError && rethrow()
-    end
-    if omega === nothing
-        sv = _rvar(e)
-        alpha, beta = 0.08, 0.88
-        gamma = gjr ? 0.04 : 0.0
-        omega = sv * (1 - alpha - beta - gamma / 2)
-        method = "momente"
-        quiet || _warn("GARCH: rugarch und optim fehlgeschlagen, verwende Moment-Schätzer")
-    end
-    s2 = filt(omega, alpha, beta, gamma, mu)
-    z = Float64[(e[i] - mu) / sqrt(s2[i]) for i in 1:n]
-    for i in 1:n
-        isfinite(z[i]) || (z[i] = 0.0)
-    end
-    sdz = _rsd(z)
-    if sdz > 0
-        mz = _rmean(z); sz = _rsd(z)
-        z = (z .- mz) ./ sz
-    end
-    pers = alpha + beta + gamma / 2
-    return RList("mu" => mu, "omega" => omega, "alpha" => alpha, "beta" => beta, "gamma" => gamma, "s2" => s2, "z" => z,
-                 "method" => method, "persistence" => pers,
-                 "s2_init" => pers < 0.9999 ? omega / (1 - pers) : _rvar(e))
-end
+_fit_garch11(e; gjr = false, quiet = false) = _SL().fit_garch11(_dvec(e); gjr = gjr, quiet = quiet)
 
 "Nicht-Referenzreihen als GARCH(1,1) modellieren (Port von `.fit_cross`); `base` 1-basiert."
 function _fit_cross(returns, config, base)
@@ -914,12 +773,11 @@ function _fit_cross(returns, config, base)
 end
 
 """
-Tail-Schätzung (GPD via evd → Momente → empirisch → Default), Port von `.fit_tail`.
+Tail-Schätzung (GPD-ML → Momente → empirisch → Default), Port von `.fit_tail`.
 
-Den GPD-Fit (`.evd_fpot(exc, threshold = 0, std.err = FALSE)`, aus evd 2.3-7.1
-ins R-Paket übernommen, nachgebildet in `SimLev.REvd.fpot`) nimmt R bei
-mindestens 30 Überschreitungen; Fehler darin führen wie das `tryCatch` in R
-zum Momenten-Schätzer.
+Den GPD-Fit (`SLib.gpd_fit`, C-Bibliothek slc, Entwurf B.12) nimmt R bei mindestens
+30 Überschreitungen; Fehler darin (z. B. Suche an der Grenze ξ = -0,999) führen wie
+das `tryCatch` in R zum Momenten-Schätzer.
 """
 function _fit_tail(base_ret, prob, side)
     base_ret = _dvec(base_ret)
@@ -932,9 +790,11 @@ function _fit_tail(base_ret, prob, side)
     method = "none"
     if ne >= 30
         try
-            f = SimLev.REvd.fpot(exc, 0; std_err = false)
-            sc = f["estimate"]["scale"]; sh = f["estimate"]["shape"]
-            scale = sc; shape = sh; method = "MLE"
+            f = _SL().gpd_fit(exc)
+            sc = Float64(f["scale"]); sh = Float64(f["shape"])
+            if isfinite(sc) && sc > 0 && isfinite(sh)
+                scale = sc; shape = sh; method = "MLE"
+            end
         catch e
             e isa InterruptException && rethrow()      # tryCatch(..., error = function(e) NULL)
         end
@@ -972,11 +832,11 @@ end
 
 "Regime aus rollierender Volatilität (Port von `.prepare_regime_info`)."
 function _prepare_regime_info(base_ret, vol_window, n_regimes)
-    vol = _core().rolling_vol(base_ret, Int(trunc(Float64(vol_window))))
+    vol = _SL().rolling_vol(base_ret, Int(trunc(Float64(vol_window))))
     th = _quantile7(vol, _seq_len_out(Float64(n_regimes) + 1))
     th[end] = th[end] + 1e-10
-    reg = _core().assign_regimes(vol, th)
-    return RList("regimes" => reg, "trans" => _core().estimate_trans_mat(reg, Int(trunc(Float64(n_regimes)))), "vol" => vol)
+    reg = _SL().assign_regimes(vol, th)
+    return RList("regimes" => reg, "trans" => _SL().estimate_trans_mat(reg, Int(trunc(Float64(n_regimes)))), "vol" => vol)
 end
 
 """
@@ -986,7 +846,6 @@ MS-GARCH-Familie vorbereiten (Port von `.prepare_ms_info`; eigene ML-Schätzung
 function _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp)
     MG = SimLev.MsGarch
     MG._ms_garch_check(K, garch_model)
-    st = SimLev.RStats
     R = _mat(returns)
     ex = R[:, base] .- 1; n = length(ex)
     Ki = Int(Float64(K isa AbstractVector || K isa Tuple ? first(K) : K))
@@ -1012,14 +871,14 @@ function _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp)
             i = idx[r]
             length(i) < 30 && continue
             b = try
-                Float64(_dvec(st.lm_fit(hcat(ones(length(i)), lag_ex[i]), ex[i])["coefficients"])[2])
+                Float64(_SL().lsfit(hcat(ones(length(i)), lag_ex[i]), ex[i])["coefficients"][2])
             catch e
                 e isa InterruptException && rethrow()
                 NA
             end
             isfinite(b) && (phi[r] = max(-0.5, min(0.5, b)))
             l = try
-                Float64(_dvec(st.lm_fit(reshape(sig[i], :, 1), ex[i] .- mu[r] .- phi[r] .* lag_ex[i])["coefficients"])[1])
+                Float64(_SL().lsfit(reshape(sig[i], :, 1), ex[i] .- mu[r] .- phi[r] .* lag_ex[i])["coefficients"][1])
             catch e
                 e isa InterruptException && rethrow()
                 NA
@@ -1046,8 +905,8 @@ function _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp)
             for j in 1:K
                 if j != i && count(==(j), to) >= 5
                     d = try
-                        g = st.glm("y ~ x"; family = st.r_binomial(), env = Dict("y" => Int.(to .== j), "x" => x))
-                        Float64(st.coef(g)["x"])
+                        g = _SL().logit_irls(hcat(ones(length(x)), x), Float64.(to .== j))   # Logit-IRLS (B.7)
+                        Float64(g["coefficients"][2])
                     catch e
                         e isa InterruptException && rethrow()
                         NA
@@ -1136,44 +995,45 @@ end
 "`as.integer` (Abschneiden)."
 _as_int(x) = x isa Integer ? Int(x) : Int(trunc(Float64(_f1(x))))
 
-"Eine Renditematrix samt Quellzeilen erzeugen (Port von `.generate_returns`)."
-function _generate_returns(returns, method, p, info, n_out)
+"""Eine Renditematrix samt Quellzeilen erzeugen (Port von `.generate_returns`); Ziehungen aus dem
+Strom des Pfads (Kerne slc_boot per `ccall`, Entwurf B.17 und C.5 Regel 6)."""
+function _generate_returns(returns, method, p, info, n_out, stream)
     R = _mat(returns)
     n, k = size(R)
-    from_idx(idx) = RList("ret" => R[idx, :], "idx" => idx)
-    C = _core()
+    from_idx(idx32) = (idx = Vector{Int}(idx32); RList("ret" => R[idx, :], "idx" => idx))
+    C = _SL()
     g = if method == "raw"
-        from_idx(C.boot_idx_iid(n, n_out))
+        from_idx(C.boot_idx_iid(n, n_out; stream = stream))
     elseif method == "block"
-        from_idx(C.boot_idx_block(n, n_out, _as_int(p["block_length"]), false))
+        from_idx(C.boot_idx_block(n, n_out, _as_int(p["block_length"]), false; stream = stream))
     elseif method == "circular"
-        from_idx(C.boot_idx_block(n, n_out, _as_int(p["block_length"]), true))
+        from_idx(C.boot_idx_block(n, n_out, _as_int(p["block_length"]), true; stream = stream))
     elseif method == "stationary"
-        from_idx(C.boot_idx_stationary(n, n_out, Float64(_f1(p["L"]))))
+        from_idx(C.boot_idx_stationary(n, n_out, Float64(_f1(p["L"])); stream = stream))
     elseif method == "regime"
-        from_idx(C.boot_idx_regime(info["regimes"], info["trans"], n_out))
+        from_idx(C.boot_idx_regime(info["regimes"], info["trans"], n_out; stream = stream))
     elseif method == "tails"
-        from_idx(C.boot_idx_tails(n_out, info["p"], info["p"], info["bulk"], info["left"], info["right"]))
+        from_idx(C.boot_idx_tails(n_out, info["p"], info["p"], info["bulk"], info["left"], info["right"]; stream = stream))
     elseif method == "wild"
-        RList("ret" => C.boot_wild(R, _as_int(p["wild_type"])), "idx" => collect(1:n))
+        RList("ret" => C.boot_wild(R, _as_int(p["wild_type"]); stream = stream), "idx" => collect(1:n))
     elseif method == "reset"
-        RList("ret" => C.boot_reset(R, _f1(p["p_break"])), "idx" => collect(1:n))
+        RList("ret" => C.boot_reset(R, _f1(p["p_break"]); stream = stream), "idx" => collect(1:n))
     elseif method == "evt"
         lt = info["left"]; rt = _get(info, "right")
         C.boot_evt(R, info["base"] - 1, n_out, lt["prob"], lt["thresh"], lt["scale"], lt["shape"], lt["pool"],
                    rt === nothing ? 0.0 : rt["prob"], rt === nothing ? Inf : rt["thresh"],
                    rt === nothing ? 0.0 : rt["scale"], rt === nothing ? 0.0 : rt["shape"],
-                   rt === nothing ? Int[] : rt["pool"], info["bulk"])
+                   rt === nothing ? Int[] : rt["pool"], info["bulk"]; stream = stream)
     elseif method in ("garch", "gjr_garch")
         f = info["garch"]; cr = info["cross"]
         C.boot_garch(n_out, info["base"] - 1, k, f["mu"], f["omega"], f["alpha"], f["beta"], f["gamma"],
                      f["s2_init"], f["z"], collect(1:n), cr["cols"], cr["mu"], cr["om"], cr["al"],
-                     cr["be"], cr["ratio"], cr["s2"], cr["z"])
+                     cr["be"], cr["ratio"], cr["s2"], cr["z"]; stream = stream)
     elseif method in ("ms_garch", "ms_ar_garch_m", "tvtp_ms_garch")
         m = info["ms"]; cr = m["cross"]
         C.boot_ms_garch(n_out, info["base"] - 1, k, Int(m["K"]), m["mu"], m["omega"], m["alpha"], m["beta"], m["gamma"],
                         m["phi"], m["lambda"], m["trans"], m["delta"], m["unc"], m["stat"], m["pools"], m["z"],
-                        cr["cols"], cr["mu"], cr["om"], cr["al"], cr["be"], cr["ratio"], cr["s2"], cr["z"])
+                        cr["cols"], cr["mu"], cr["om"], cr["al"], cr["be"], cr["ratio"], cr["s2"], cr["z"]; stream = stream)
     else
         _stop(@sprintf("Unbekannte Methode: %s", method))
     end
@@ -1397,15 +1257,15 @@ function _boot_setup(data, config, method, n, params, ess, ess_grid, path_length
                  "infos" => infos, "combo_of_path" => combo_of_path, "n_paths" => n_paths, "weights" => weights)
 end
 
-"Einen gültigen Pfad mit eigenem Zufallsstrom erzeugen (Port von `.draw_path`); `i` 1-basiert."
+"""Einen gültigen Pfad mit eigenem Zufallsstrom erzeugen (Port von `.draw_path`); `i` 1-basiert.
+`stream` ist der SimLev-Strom des Pfads (Entwurf C.5, Regel 6); Wiederholungen ziehen daraus weiter."""
 function _draw_path(setup, i, stream, config, method, max_tries)
-    _R().set_random_seed(stream)
     c_id = setup["combo_of_path"][i]
     err = "Pfad ungültig (Indexrendite <= 0 oder nicht endlich)"
     ex = setup["ex"]
     for tr in 1:Int(max_tries)
         g = try
-            _generate_returns(ex["ret"], method, setup["base_p"][c_id], setup["infos"][c_id], setup["n_out"])
+            _generate_returns(ex["ret"], method, setup["base_p"][c_id], setup["infos"][c_id], setup["n_out"], stream)
         catch e
             (e isa UndefVarError || e isa MethodError) && rethrow()
             err = _errmsg(e)
@@ -1423,8 +1283,8 @@ end
 # bootstrap()
 # ═══════════════════════════════════════════════════════════════════════════
 
-"`sample.int(.Machine\$integer.max, 1L)`."
-_new_seed() = Int(first(_R().sample_int(2147483647, 1)))
+"Regeln 3 und 4 (Entwurf C.5): `nothing` -> einmal k aus G, sonst geprüft (Wert bleibt)."
+_seed_or_draw(seed) = seed === nothing ? _SL().next_seed() : (_SL().check_seed(seed); seed)
 
 """
     bootstrap(data, config; method = "raw", n = 1000, params = RList(), ess = false,
@@ -1433,6 +1293,10 @@ _new_seed() = Int(first(_R().sample_int(2147483647, 1)))
 
 Bootstrap-Pfade erzeugen (Port von `bootstrap()`); `method` darf auch drittes
 Positionsargument sein. Ergebnis: RList der Klasse `bootstrap_result`.
+
+Zufall (Entwurf C.5): `seed = nothing` zieht genau einmal einen Startwert aus dem
+Zufallszustand von SimLev (`simlev_seed`) und legt ihn unter `seed` ab; jeder Pfad hat
+einen eigenen Strom, das Ergebnis hängt nicht von `cores` oder `julia -t` ab. Ebenso `bootstrap_study` (auch unabhängig von `chunk_size`).
 """
 function bootstrap(data, config, method_pos = nothing; method = "raw", n = 1000, params = RList(), ess = false,
                    ess_grid = nothing, path_length = nothing, max_tries = 10, seed = nothing, cores = 1, progress = true)
@@ -1440,10 +1304,10 @@ function bootstrap(data, config, method_pos = nothing; method = "raw", n = 1000,
     method_pos === nothing || (method = method_pos)
     t0 = time()
     setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
-    seed === nothing && (seed = _new_seed())
-    streams = _with_rng_restore(() -> _make_streams(seed, setup["n_paths"]))
-    res = _with_rng_restore(() -> _par_lapply(1:setup["n_paths"],
-        i -> _draw_path(setup, i, streams[i], config, method, max_tries), cores))
+    seed = _seed_or_draw(seed)
+    streams = _SL().streams(seed, setup["n_paths"])            # Regel 6: U_i = J^i(S_0)
+    res = _par_lapply(1:setup["n_paths"],
+        i -> _draw_path(setup, i, streams[i], config, method, max_tries), cores)
     ok = Bool[r.path !== nothing for r in res]
     tries = Float64[r.tries for r in res]
     if !any(ok)
@@ -1787,9 +1651,9 @@ function bootstrap_study(data, config, method_pos = nothing; method = "stationar
     _len(dates) != n_out + 1 && _stop(@sprintf("dates braucht Länge %d (Pfadlänge + 1).", n_out + 1))
     dates = _todate(dates, "dates")
     burn_in >= n_out && _stop("burn_in ist länger als der Pfad.")
-    seed === nothing && (seed = _new_seed())
+    seed = _seed_or_draw(seed)
     n_paths = setup["n_paths"]
-    streams = _with_rng_restore(() -> _make_streams(seed, n_paths))
+    streams = _SL().streams(seed, n_paths)                     # Regel 6: U_i = J^i(S_0)
     cs = Float64(chunk_size)
     keyv = Float64[ceil(i / cs) for i in 1:n_paths]
     chunks = [findall(==(k), keyv) for k in sort(unique(keyv))]
@@ -1893,7 +1757,7 @@ function bootstrap_study(data, config, method_pos = nothing; method = "stationar
     end
     progress && _message(@sprintf("Bootstrap-Studie '%s': %d Pfade x %d Strategien, %d Chunks, %d Kern(e)",
                                   method, n_paths, length(specs), length(chunks), Int(cores)))
-    resc = _with_rng_restore(() -> _par_lapply(1:length(chunks), run_chunk, cores))
+    resc = _par_lapply(1:length(chunks), run_chunk, cores)
     res = Any[r for ch in resc for r in ch]
     # Ergebnistabelle
     tcols = nothing
@@ -2240,7 +2104,7 @@ _svgnum(v) = @sprintf("%.2f", v)
 Ungewichtete Dichten einer Kennzahl je Strategie als SVG (R: `plot.SimLevBootstrapStudy`).
 
 Liefert `(svg, data)`; `data`: `density` (`strategy`, `x`, `density`: die gezeichneten Punkte von
-`density()` je Strategie im Wertebereich der Kennzahl).
+der Kerndichte `.sl_kde` je Strategie im Wertebereich der Kennzahl).
 """
 function _plot_study(x; metric = "cagr", file = nothing, width = 640, height = 420)
     tab = x["results"]
@@ -2250,8 +2114,8 @@ function _plot_study(x; metric = "cagr", file = nothing, width = 640, height = 4
     dens = Any[]
     for v in dl
         v = filter(isfinite, v)
-        dd = SimLev.RStats.density(v)
-        push!(dens, (_dvec(_get(dd, "x")), _dvec(_get(dd, "y"))))
+        dd = _SL().kde(v)   # Gauß-Kerndichte wie .sl_kde in R (slc, Entwurf B.16; nur Grafik)
+        push!(dens, (_dvec(dd["x"]), _dvec(dd["y"])))
     end
     x0, x1 = isempty(allv) ? (0.0, 1.0) : (minimum(allv), maximum(allv))
     x1 == x0 && (x1 = x0 + 1)

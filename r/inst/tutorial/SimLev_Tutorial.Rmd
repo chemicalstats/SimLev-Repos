@@ -349,8 +349,10 @@ lines(yrs, log10(apply(sapply(P, function(p) p[, "eu_l2"]), 1, median)), col = "
 ```
 
 `path_length` erlaubt Pfade, die länger sind als die Historie. Jeder Pfad
-hat einen eigenen Zufallsstrom (L'Ecuyer-CMRG): Pfad *i* ist für jede
-Kernzahl identisch, und der globale Zufallszustand bleibt unberührt.
+hat einen eigenen Zufallsstrom aus dem Generator von SimLev: Pfad *i* ist
+für jede Kernzahl identisch, und mit `seed = 1` bleibt der Zufallszustand
+von SimLev unberührt (`set.seed()` wirkt auf SimLev nicht; es erzeugt hier
+nur die Beispieldaten).
 `bootstrap_data(b, i)` macht aus einem Pfad einen `data.frame` für
 `simulation()`.
 

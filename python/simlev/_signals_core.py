@@ -1,21 +1,25 @@
 """Rollierende Kerne aus ``r/src/research_core.cpp`` (``.roll_mean_core``, ``.roll_cov_core``).
 
-Bitgleiche Nachbildung der C++-Fassungen (double-Arithmetik in derselben
-Reihenfolge). Mit gebauter Erweiterung rechnen die gemeinsamen Kerne von R und
-Python (``r/src/research_core_impl.cpp`` über ``simlev._ext``, Etappe 7.3a);
-sonst und mit ``SIMLEV_NO_EXT=1`` die Python-Ports (bitgleich).
+Python-Hüllen um die gemeinsamen Kerne von R und Python (``core/research_core_impl.h`` über
+``simlev._ext``, Etappe 7.3a). Die bitgleichen Python-Ports als Rückfall (``SIMLEV_NO_EXT=1``)
+sind mit Etappe 9.6c entfallen.
 """
 from __future__ import annotations
 
 
 import numpy as np
 
-from ._r import env as _env
-from ._r.fmt import NA_REAL
+from . import _ext
 
 __all__ = ["roll_mean_core", "roll_cov_core"]
 
-_NAN = NA_REAL   # R-NA_real_
+_I32 = 2147483647
+
+
+def _n32(n):
+    """Fensterlänge wie R's ``as.integer`` für den Kern: außerhalb von int32 bleibt sie außerhalb von
+    1 … Länge (der Kern liefert dann nur NA)."""
+    return min(max(int(n), -_I32 - 1), _I32)
 
 
 def roll_mean_core(x, n):
@@ -26,68 +30,9 @@ def roll_mean_core(x, n):
     aufgebaut.
     """
     x = np.asarray(x, dtype=np.float64).ravel()
-    m = x.size
-    n = int(n)
-    ext = _env.ext()
-    if ext is not None and -2147483648 <= n <= 2147483647:
-        out = np.empty(m)
-        ext.roll_mean_core(np.ascontiguousarray(x), n, out)
-        return out
-    out = np.full(m, _NAN)
-    if n < 1 or n > m:
-        return out
-    xs = x.tolist()
-    fin = np.isfinite(x).tolist()
-    s = 0.0
-    comp = 0.0
-    bad = 0
-
-    def rebuild(end):
-        nonlocal s, comp, bad
-        s = 0.0
-        comp = 0.0
-        bad = 0
-        for k in range(end - n + 1, end + 1):
-            if fin[k]:
-                v = xs[k]
-                t = s + v
-                if abs(s) >= abs(v):
-                    comp += (s - t) + v
-                else:
-                    comp += (v - t) + s
-                s = t
-            else:
-                bad += 1
-
-    rebuild(n - 1)
-    res = out.tolist()
-    res[n - 1] = _NAN if bad else (s + comp) / n
-    for i in range(n, m):
-        if (i - n) % 4096 == 4095:
-            rebuild(i)
-        else:
-            if fin[i]:
-                v = xs[i]
-                t = s + v
-                if abs(s) >= abs(v):
-                    comp += (s - t) + v
-                else:
-                    comp += (v - t) + s
-                s = t
-            else:
-                bad += 1
-            if fin[i - n]:
-                v = -xs[i - n]
-                t = s + v
-                if abs(s) >= abs(v):
-                    comp += (s - t) + v
-                else:
-                    comp += (v - t) + s
-                s = t
-            else:
-                bad -= 1
-        res[i] = _NAN if bad else (s + comp) / n
-    return np.array(res, dtype=np.float64)
+    out = np.empty(x.size)
+    _ext.roll_mean_core(np.ascontiguousarray(x), _n32(n), out)
+    return out
 
 
 def roll_cov_core(x, y, n):
@@ -98,39 +43,8 @@ def roll_cov_core(x, y, n):
     """
     x = np.asarray(x, dtype=np.float64).ravel()
     y = np.asarray(y, dtype=np.float64).ravel()
-    m = x.size
-    n = int(n)
-    ext = _env.ext()
-    if ext is not None and -2147483648 <= n <= 2147483647:
-        out = np.empty(m)
-        ext.roll_cov_core(np.ascontiguousarray(x), np.ascontiguousarray(y), n, out)
-        return out
-    out = np.full(m, _NAN)
-    if n < 1 or n > m or y.size != m:
-        return out
-    w = m - n + 1                                   # Fenster i = n-1 .. m-1
-    okx = np.isfinite(x) & np.isfinite(y)
-    sx = np.zeros(w)
-    sy = np.zeros(w)
-    bad = np.zeros(w, dtype=bool)
-    for k in range(n):                              # gleiche Summationsreihenfolge je Fenster
-        sx = sx + x[k:k + w]
-        sy = sy + y[k:k + w]
-        bad |= ~okx[k:k + w]
-    mx = sx / n
-    my = sy / n
-    c = np.zeros(w)
-    cx = np.zeros(w)
-    cy = np.zeros(w)
-    for k in range(n):
-        dx = x[k:k + w] - mx
-        dy = y[k:k + w] - my
-        c = c + dx * dy
-        cx = cx + dx
-        cy = cy + dy
-    res = (c - cx * cy / n) / n
-    res[bad] = _NAN
-    out[n - 1:] = res
+    out = np.empty(x.size)
+    _ext.roll_cov_core(np.ascontiguousarray(x), np.ascontiguousarray(y), _n32(n), out)
     return out
 
 

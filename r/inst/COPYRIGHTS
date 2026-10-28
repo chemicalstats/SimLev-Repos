@@ -1,250 +1,60 @@
 SimLev steht unter der GNU General Public License, Version 3 (GPL-3).
-Copyright ChemicalStats von der Mauerstrasse, ausgenommen die unten
-aufgeführten Teile. Sie sind aus anderen R-Paketen unter der GPL übernommen
-und für SimLev angepasst; das Urheberrecht daran liegt bei den genannten
-Autoren, es gelten die Lizenzbedingungen des Originals.
+Copyright ChemicalStats von der Mauerstrasse.
+
+Das Paket enthält keinen Code aus anderen R-Paketen oder Programmen.
 
 
-evd
-===
+Eigener Code
+============
 
-Paket:     evd 2.3-7.1 (CRAN, veröffentlicht 2024-09-21)
-           Functions for Extreme Value Distributions
-Autoren:   Alec Stephenson. Function fbvpot by Chris Ferro.
-           (laut DESCRIPTION von evd)
-Lizenz:    GPL-3
-Quelle:    https://CRAN.R-project.org/package=evd
+R/          R-Code des Pakets.
 
-Dateien in SimLev:
-  R/vendor_evd.R    fpot() und fpot.norm() aus evd R/uvfit.R als interne
-                    Funktionen .evd_fpot() und .evd_fpot_norm()
-  src/vendor_evd.c  nlgpd() aus evd src/pot.c (Rumpf unverändert) als
-                    statische Funktion evd_nlgpd() und die .Call-Hülle
-                    C_evd_nlgpd()
+src/        C++-Kerne der Engine (Markt-Updates, FIFO-Lotverwaltung,
+            Steuer), der Research-, Optimierungs- und Abhängigkeitsrechnungen
+            und der Entnahme (*_core.cpp, *_core_impl.h, simlev_core.h,
+            simlev_capi.h, init.c) sowie die C-Bibliothek von SimLev
+            (slc*.c, slc*.h: Zufall, Verteilungen, lineare Algebra,
+            Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, Bootstrap-Kerne,
+            Stineman-Interpolation, Glättungsspline, Kerndichte) und ihre
+            R-Hüllen (slc_r*.c).
 
-Angepasst für SimLev:
-  * Übernommen ist nur der Weg, den SimLev erreicht: model = "gpd" mit
-    cmax = FALSE und mper = NULL (genutzt von .fit_tail(), bootstrap()
-    mit Verfahren "evt"). Die Argumente und ihre Prüfungen bleiben;
-    model = "pp", cmax = TRUE und mper brechen mit einem Fehler ab, statt
-    nlpp(), clusters() oder fpot.quantile() zu rufen (nicht übernommen).
-  * nlgpd() wird über eine .Call-Hülle statt über .C gerufen, weil SimLev
-    nur .Call-Routinen registriert (src/init.c). Die Hülle kopiert und prüft die Argumente wie .C mit
-    NAOK = FALSE (gleiche Meldungen und Argumentnummern), beginnt mit
-    dns = 0 und gibt dns zurück.
-  * Rechnung, Startwerte, optim()-Aufruf, Meldungen und Ergebnis (Klasse
-    c("pot", "uvevd", "evd")) sind die von evd.
+            Die C-Quellen sind Kopien der kanonischen Dateien im Ordner
+            core/ des Repositorys (tools/core_sync.py). Die C-Bibliothek ist
+            nach Veröffentlichungen geschrieben, nicht nach fremdem Code; der
+            Kopf jeder Datei nennt ihre Quellen, die vollständigen Angaben
+            stehen im Abschnitt "Literatur" der README im Wurzelverzeichnis
+            des Repositorys. Konstanten (Stützwerte, Reihenkoeffizienten,
+            Sprungpolynom des Zufallsgenerators) sind selbst hergeleitet
+            (core/tools/gen_constants.py, nicht Teil des R-Pakets);
+            Verfahrenskonstanten aus den Veröffentlichungen (etwa die
+            Parameter von xoshiro256** und SplitMix64) nennen die Dateiköpfe.
 
-
-imputeTS
-========
-
-Paket:     imputeTS 3.4 (CRAN, veröffentlicht 2025-08-25)
-           Time Series Missing Value Imputation
-Autoren:   Steffen Moritz [aut, cre, cph], Sebastian Gatscha [aut],
-           Earo Wang [ctb], Ron Hause [ctb]
-           (laut DESCRIPTION von imputeTS)
-Lizenz:    GPL-3
-Quelle:    https://CRAN.R-project.org/package=imputeTS
-
-Dateien in SimLev:
-  R/vendor_imputets.R     na_interpolation() aus imputeTS R/na_interpolation.R
-                          und na_locf() aus R/na_locf.R als interne
-                          Funktionen .imputets_na_interpolation() und
-                          .imputets_na_locf()
-  src/vendor_imputets.cpp locf() aus imputeTS src/locf.cpp (Rechnung
-                          unverändert) als imputets_locf(), in R
-                          .imputets_locf() (R/cores.R, .Call-Hülle
-                          C_imputets_locf)
-
-Angepasst für SimLev:
-  * Übernommen ist der Weg, den SimLev erreicht:
-    na_interpolation(option = "stine") (genutzt von .fill_na(),
-    backcast_fit() und backcast() mit index_fill bzw. fill = "stine") und
-    na_locf() für NA am Rand der Stineman-Interpolation (na_remaining =
-    "rev" mit den Optionen "locf" und "nocb"), dazu unverändert
-    na_interpolation(option = "linear") mit stats::approx() (rule = 2,
-    sofern rule nicht über ... gesetzt ist, methods::hasArg(); weitere
-    Argumente gehen über ... an approx()). Argumente, Prüfungen,
-    Matrix-Eingaben, maxgap und Meldungen bleiben; option = "spline" sowie
-    na_remaining = "rm" und "mean" brechen mit einem Fehler ab, statt
-    spline(), na_remove() oder na_mean() zu rufen (nicht übernommen).
-  * In imputets_locf() sind die Rcpp-Typen und -Hilfen (NumericVector,
-    clone(), checkUserInterrupt()) durch gleichwertige Hilfen über R's
-    C-Schnittstelle ersetzt (src/simlev_capi.h: Rf_duplicate, Prüfung auf
-    Benutzerabbruch über R_ToplevelExec), weil SimLev Rcpp nicht mehr nutzt;
-    die Rechnung ist unverändert.
-  * Die Funktionsrümpfe sind sonst unverändert; die übernommenen Funktionen
-    rufen sich unter ihren neuen Namen auf, stinepack::stinterp() als
-    .stinepack_stinterp() (siehe stinepack).
-  * Rechnung, Meldungen und Ergebnisse sind die von imputeTS.
+inst/extdata/steuertarif.csv
+            Tarifdatei für tax_tariff(), von SimLev zusammengestellt; die
+            Zahlen stammen laut Dateikopf aus dem Gesetzestext (§ 32a Abs. 1
+            EStG, §§ 3, 4 SolZG 1995).
 
 
-stinepack
-=========
+Genutzte, aber nicht enthaltene Software
+========================================
 
-Paket:     stinepack 1.5 (CRAN, veröffentlicht 2024-03-07)
-           Stineman, a Consistently Well Behaved Method of Interpolation
-Autoren:   Tomas Johannesson & Halldor Bjornsson, Icelandic Met. Office;
-           Gabor Grothendieck
-           (laut DESCRIPTION von stinepack)
-Lizenz:    GPL (>= 2); in SimLev unter GPL-3 weitergegeben
-Quelle:    https://CRAN.R-project.org/package=stinepack
+R selbst (Grundfunktionen aus base, stats, graphics, grDevices, utils,
+parallel, methods) wird zur Laufzeit genutzt; das R-Paket bildet davon
+nichts nach.
 
-Dateien in SimLev:
-  R/vendor_stinepack.R    stinterp(), stinemanSlopes() und parabolaSlopes()
-                          aus stinepack R/stinterp.R, R/stinemanSlopes.R und
-                          R/parabolaSlopes.R als interne Funktionen
-                          .stinepack_stinterp(), .stinepack_stinemanSlopes()
-                          und .stinepack_parabolaSlopes()
-
-Angepasst für SimLev:
-  * Übernommen ist nur, was .imputets_na_interpolation(option = "stine")
-    braucht; na.stinterp() ist nicht übernommen.
-  * Die Funktionsrümpfe sind unverändert; stinterp() ruft die Steigungen
-    unter ihren neuen Namen auf. Rechnung, Meldungen und Ergebnisse sind
-    die von stinepack.
+Die Python- und die Julia-Fassung von SimLev bilden einige R-Grundfunktionen
+nach; Herkunft und Lizenz dieser Teile stehen in python/COPYRIGHTS.md und
+julia/COPYRIGHTS.md des Repositorys.
 
 
-rugarch
-=======
+Früher übernommene Teile (bis Etappe 9, entfernt)
+=================================================
 
-Paket:     rugarch 1.5-6 (CRAN, veröffentlicht 2026-07-18)
-           Univariate GARCH Models
-Autoren:   Alexios Galanos [aut, cre, cph], Tobias Kley [ctb]
-           (laut DESCRIPTION von rugarch)
-Lizenz:    GPL-3
-Quelle:    https://CRAN.R-project.org/package=rugarch
-
-Dateien in SimLev:
-  R/vendor_rugarch.R    ugarchspec() (.ugarchspec), ugarchfit() (.ugarchfit),
-                        coef() (.ugarchfitcoef) und die Funktionen, die sie
-                        für sGARCH/gjrGARCH rufen (.sgarchfit, .sgarchLLH,
-                        .gjrgarchfit, .gjrgarchLLH, .extractdata, .checkrec,
-                        backcastv, .garchstart, .meqstartpars, .meqstart,
-                        .aparchstart, .distributionstart, .DistributionBounds,
-                        .expand.model, .arfimaxfilter, .garchsolver,
-                        .hybridsolver, .solnpsolver, .nlminbsolver,
-                        .gosolnpsolver, .getcontrol, .solnpctrl, .nlminbctrl,
-                        .gosolnpctrl, .garchconbounds, .sgarchcon,
-                        .gjrgarchcon, .persistsgarch1, .persistgjrgarch1,
-                        pneg, .pnegfunE, .makefitmodel, .hessian2sided,
-                        robustvcv, neweywestcv, repmat, zeros, eps, TinY)
-                        aus R/rugarch-*.R als interne Funktionen
-                        .rugarch_<name> (coef: .rugarch_coef)
-  src/vendor_rugarch.c  sgarchfilterC() und gjrgarchfilterC() aus
-                        src/garchmodels.c, sgarchfilter(), gjrgarchfilter()
-                        und arfimaxfilter() aus src/filters.c,
-                        garchdistribution() (nur Normalverteilung) und
-                        dnormstd() aus src/distributions.c (Rümpfe
-                        unverändert) als statische Funktionen rugarch_<name>
-                        und die .Call-Hüllen C_rugarch_sgarchfilterC() und
-                        C_rugarch_gjrgarchfilterC()
-
-Angepasst für SimLev:
-  * Übernommen ist nur der Weg, den SimLev erreicht: .fit_garch11()
-    (bootstrap() mit den Verfahren "garch" und "gjr_garch", die Kopplung
-    weiterer Reihen, dcc_fit(), dependence_analysis()) schätzt
-    ugarchspec(variance.model = list(model = "sGARCH" bzw. "gjrGARCH",
-    garchOrder = c(1, 1)), mean.model = list(armaOrder = c(0, 0),
-    include.mean = TRUE), distribution.model = "norm") mit
-    ugarchfit(solver = "hybrid") und liest coef(). Argumente, Prüfungen und
-    Meldungen bleiben; andere Modelle und Verteilungen, ARMA-Terme, ARFIMA,
-    GARCH-in-Mean, externe Regressoren, ausschließlich feste Parameter
-    (ugarchfilter), die Solver "lbfgs" und "nloptr", gosolnp mit
-    parallel = TRUE und Daten, die keine numerischen Vektoren sind, brechen
-    mit einem Fehler ab (nicht übernommen).
-  * Statt der S4-Klassen uGARCHspec und uGARCHfit sind spec und fit Listen
-    mit diesen Klassen (Elemente model bzw. fit und model statt der Slots).
-  * .extractdata() nutzt statt as.xts()/xts()/coredata()/index() (Pakete
-    xts und zoo) deren Weg für numerische Vektoren in Basis-R (Index aus
-    den Namen, sonst eine Datumsfolge).
-  * Die Likelihood-Funktionen rufen den C-Filter über .Call-Hüllen statt
-    über .C, weil SimLev nur .Call-Routinen registriert (src/init.c). Die
-    Hüllen prüfen die Argumente wie .C mit
-    NAOK = FALSE (gleiche Meldungen und Argumentnummern), kopieren sie und
-    geben die Liste aller Argumente mit ihren Namen zurück.
-  * Die Funktionsrümpfe sind sonst unverändert (Änderungen sind mit
-    "SimLev:" kommentiert); sie rufen sich unter ihren neuen Namen auf,
-    Rsolnp und truncnorm unter den Namen ihrer übernommenen Fassungen
-    (siehe dort), statt numDeriv::hessian/jacobian die eigenständige
-    Richardson-Extrapolation (siehe "Numerische Ableitungen"). Rechnung,
-    Startwerte, Schranken, Solver-Kette, Zufallszustand (gosolnp),
-    Hesse-Matrix, robuste Kovarianz, Warnungen und Ergebnisse sind die von
-    rugarch.
-
-
-Rsolnp
-======
-
-Paket:     Rsolnp 1.16 (CRAN, veröffentlicht 2015-12-28)
-           General Non-Linear Optimization
-Autoren:   Alexios Ghalanos and Stefan Theussl
-           (laut DESCRIPTION von Rsolnp; Copyright (C) 2009-2013 by Alexios
-           Ghalanos and Stefan Theussl laut inst/COPYRIGHTS von Rsolnp)
-Lizenz:    GPL (laut DESCRIPTION); "All code is subject to the GNU General
-           Public License, Version 3" (inst/COPYRIGHTS von Rsolnp)
-Quelle:    https://CRAN.R-project.org/package=Rsolnp
-
-Dateien in SimLev:
-  R/vendor_rsolnp.R     solnp() und gosolnp() mit .subnp, .checkpars,
-                        .checkfun, .checkineq, .checkeq, .safefunx,
-                        .safefun, .solnpctrl, .vnorm, .solvecond,
-                        .subnpmsg, .report, .ones, .zeros, .emptyfun, .eps,
-                        .randpars, .distr1, .distr2 und .distr3 als interne
-                        Funktionen .rsolnp_<name> (Code aus dem Namensraum
-                        des installierten Pakets, deparse)
-
-Angepasst für SimLev:
-  * Übernommen ist, was rugarch erreicht (.rugarch_solnpsolver und
-    .rugarch_gosolnpsolver): solnp() vollständig, gosolnp() ohne
-    parallele Auswertung; cluster und control$eval.type = 2 (.randpars2)
-    brechen mit einem Fehler ab, statt parallel::clusterExport/parLapply
-    bzw. .randpars2 zu nutzen (nicht übernommen). startpars(), benchmark()
-    und die Testprobleme sind nicht übernommen.
-  * Die Funktionsrümpfe sind sonst unverändert (Formatierung von deparse);
-    sie rufen sich unter ihren neuen Namen auf, truncnorm::rtruncnorm als
-    .truncnorm_rtruncnorm(). Rechnung, Zufallszahlen (set.seed(rseed), bei
-    rseed = NULL der Startwert as.numeric(Sys.time()), der wie im Original
-    den globalen Zufallszustand überschreibt), Meldungen und Ergebnisse
-    sind die von Rsolnp.
-
-
-Numerische Ableitungen
-======================
-
-Numerische Ableitungen (Richardson-Extrapolation) eigenständig
-implementiert; Ergebnisse gegen numDeriv geprüft (R/richardson.R, kein
-Code aus numDeriv übernommen).
-
-
-truncnorm
-=========
-
-Paket:     truncnorm 1.0-9 (CRAN, veröffentlicht 2023-03-20)
-           Truncated Normal Distribution
-Autoren:   Olaf Mersmann [aut, cre], Heike Trautmann [aut], Detlef Steuer
-           [aut], Björn Bornkamp [aut] (laut DESCRIPTION von truncnorm)
-Lizenz:    GPL (>= 2); in SimLev unter GPL-3 weitergegeben
-Quelle:    https://CRAN.R-project.org/package=truncnorm
-
-Dateien in SimLev:
-  R/vendor_truncnorm.R    rtruncnorm() aus R/truncnorm.R als interne
-                          Funktion .truncnorm_rtruncnorm()
-  src/vendor_truncnorm.c  do_rtruncnorm() aus src/rtruncnorm.c mit den
-                          benötigten Makros aus src/sexp_macros.h;
-                          do_rtruncnorm heißt C_truncnorm_rtruncnorm
-  src/vendor_truncnorm_impl.h
-                          die Sampler aus src/rtruncnorm.c (Rümpfe
-                          unverändert, statisch mit dem Präfix truncnorm_)
-                          und die Schleife von do_rtruncnorm
-                          (truncnorm_rtruncnorm_loop); seit Etappe 7.3b
-                          gemeinsam mit der Python-Fassung (Kopie in
-                          python/src/), eingebunden von vendor_truncnorm.c
-
-Angepasst für SimLev:
-  * Übernommen ist nur der Zufallszahlengenerator, den gosolnp für die
-    Startwerte nutzt (.rsolnp_distr2). dtruncnorm, ptruncnorm, qtruncnorm,
-    etruncnorm und vtruncnorm sind nicht übernommen.
-  * Aufruf wie im Original über .Call. Rechnung, Zufallszahlen, Meldungen
-    und Ergebnisse sind die von truncnorm.
+Bis Etappe 9 enthielt das Paket Teile von evd 2.3-7.1, imputeTS 3.4,
+stinepack 1.5, rugarch 1.5-6, Rsolnp 1.16 und truncnorm 1.0-9 (Dateien
+R/vendor_*.R und src/vendor_*). Sie sind entfernt; ihre Aufgaben rechnet
+die C-Bibliothek von SimLev. Diese Pakete und MSGARCH 2.51 dienten bei der
+Entwicklung nur als Vorbild für das Verhalten und als Prüforakel; numDeriv
+2016.8-1.1 war früher Prüforakel der numerischen Ableitungen. Autorinnen,
+Autoren und Lizenzen dieser Pakete stehen im Abschnitt "Literatur" der
+README.

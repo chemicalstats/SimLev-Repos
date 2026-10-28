@@ -2,11 +2,15 @@
 # `parallel::mclapply(X, FUN, mc.cores = cores, mc.preschedule = FALSE,
 # mc.set.seed = FALSE)`. Vorlage: python/simlev/_r/parallel.py.
 #
-# Verhalten wie R (Etappe 5, siehe julia/DEVELOPING.md):
+# Verhalten wie R (Etappe 5, siehe julia/DEVELOPING.md; Zufall seit Etappe 9.6a):
 # * `cores` wird ganzzahlig abgeschnitten; unter zwei Kernen oder mit höchstens
-#   einem Element ist es `lapply` (der Zufallsstrom läuft fortlaufend weiter).
-# * Sonst startet jedes Element mit dem Zufallszustand des Aufrufers; danach ist
-#   der Zustand des Aufrufers unverändert.
+#   einem Element ist es `lapply`.
+# * Zufall (Entwurf C.5, Regeln 6, 7 und 10): jede Einheit läuft als parallele
+#   Einheit (`SimLev.SLib.in_unit`, Merker je Aufgabe): der globale Zufallszustand
+#   von SimLev ist darin gesperrt, auch bei `cores = 1`. Zufällige Einheiten
+#   bekommen ihren Strom als Argument; das Ergebnis hängt nicht von `cores` oder
+#   der Zahl der Threads ab. Die frühere Kopie des R-Zufallszustands je Aufgabe
+#   (`RRng.with_state`) entfällt.
 # * Ergebnisse in der Reihenfolge von `X`; Warnungen der Elemente gehen verloren
 #   (R: im Kindprozess); Meldungen und Ausgaben über `r_stderr()`/`r_stdout()`
 #   erscheinen in der Reihenfolge der Elemente (R: Reihenfolge der Fertigstellung).
@@ -15,8 +19,8 @@
 #
 # Echte Parallelität mit `Threads.@spawn`, wenn Julia mit mehreren Threads läuft
 # (`julia -t auto`, `JULIA_NUM_THREADS`), sonst nacheinander mit derselben
-# Semantik. Jede Aufgabe rechnet mit einer eigenen Kopie des Zufallszustands
-# (`RRng.with_state`) und einem eigenen Ausgabepuffer (task-lokaler Speicher).
+# Semantik. Jede Aufgabe rechnet mit einem eigenen Ausgabepuffer (task-lokaler
+# Speicher).
 module RParallel
 
 import ..SimLev
@@ -113,29 +117,10 @@ function _replay(cap::Capture)
     nothing
 end
 
-# ── Zufallszustand des Aufrufers (sequentielle Fassung) ─────────────────
+# ── Einheit (Entwurf C.5, Regel 7) ───────────────────────────────────────
 
-_R() = SimLev.RRng
-_kind_get() = collect(String, _R().rng_kind())
-
-"Zustand wie `.Random.seed` samt RNGkind (auch ohne `.Random.seed`)."
-function rng_snapshot()
-    has = _R().has_random_seed()
-    seed = has ? _R().get_random_seed() : nothing
-    kind = _kind_get()
-    has || (_R().has_random_seed() && _R().rm_random_seed())
-    return (has, seed, kind)
-end
-"Zustand aus [`rng_snapshot`](@ref) wiederherstellen."
-function rng_reset(snap)
-    has, seed, kind = snap
-    if has
-        _R().set_random_seed(seed)
-    else
-        _R().rng_kind(kind[1], kind[2], kind[3])
-        _R().has_random_seed() && _R().rm_random_seed()
-    end
-end
+"`FUN(x)` als parallele Einheit: der globale Zufallszustand von SimLev ist darin gesperrt."
+_unit(FUN, x) = SimLev.SLib.in_unit(() -> FUN(x))
 
 # ── par_lapply ───────────────────────────────────────────────────────────
 
@@ -150,32 +135,25 @@ von `X`. Parallel mit `Threads.@spawn`, wenn `Threads.nthreads() > 1`.
 """
 function par_lapply(X, FUN, cores = 1)
     xs = collect(X)
-    (cores === nothing || cores <= 1 || length(xs) <= 1) && return Any[FUN(x) for x in xs]
+    (cores === nothing || cores <= 1 || length(xs) <= 1) && return Any[_unit(FUN, x) for x in xs]
     n = min(_ncores(cores), length(xs))
-    n < 2 && return Any[FUN(x) for x in xs]          # mclapply: cores < 2 -> lapply
+    n < 2 && return Any[_unit(FUN, x) for x in xs]   # mclapply: cores < 2 -> lapply
     nt = Threads.nthreads()
     nt < 2 && return _sequential(xs, FUN)
     return _threaded(xs, FUN, min(n, nt))
 end
 
-"Fork-Semantik nacheinander: jedes Element mit dem Zustand des Aufrufers."
+"Fork-Semantik nacheinander (Warnungen der Elemente gehen verloren)."
 function _sequential(xs, FUN)
-    snap = rng_snapshot()
     out = Any[]
-    try
-        for x in xs
-            rng_reset(snap)
-            push!(out, with_logger(() -> FUN(x), NullLogger()))
-        end
-    finally
-        rng_reset(snap)
+    for x in xs
+        push!(out, with_logger(() -> _unit(FUN, x), NullLogger()))
     end
     return out
 end
 
 function _threaded(xs, FUN, n::Int)
     nx = length(xs)
-    snap = _R().copy_state()            # Zustand des Aufrufers (bleibt unverändert)
     res = Vector{Any}(undef, nx)
     caps = Vector{Capture}(undef, nx)
     status = zeros(Int, nx)             # 0 offen, 1 fertig, 2 Fehler
@@ -187,12 +165,9 @@ function _threaded(xs, FUN, n::Int)
             i = Threads.atomic_add!(next, 1)
             (i > nx || i >= stop[]) && break
             cap = Capture()
-            st = _R().TaskState(_R()._copy(snap.S), _R()._copy(snap.RG), _R()._copy(snap.RP))
             try
                 res[i] = task_local_storage(_OUT_KEY, cap) do
-                    _R().with_state(st) do
-                        with_logger(() -> FUN(xs[i]), NullLogger())
-                    end
+                    with_logger(() -> _unit(FUN, xs[i]), NullLogger())
                 end
                 status[i] = 1
             catch e

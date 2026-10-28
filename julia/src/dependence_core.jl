@@ -1,6 +1,8 @@
-# DependenceCore – Port von r/src/dependence_core.cpp (.dcc_filter, chol_small)
-# sowie aus r/src/research_core.cpp .kendall_tau_core, .quantile_reg_core (mit
-# allen Hilfsroutinen) und .hmm_forward_backward.
+# DependenceCore – Port aus r/src/research_core.cpp (core/research_core_impl.h) von
+# .kendall_tau_core, .quantile_reg_core (mit allen Hilfsroutinen) und .hmm_forward_backward
+# (eigener Julia-Port, F2). Der Port des DCC-Filters (.dcc_filter, chol_small aus
+# r/src/dependence_core.cpp) ist mit Etappe 9.6c entfallen; den DCC-Filter rechnet die
+# C-Bibliothek slc (SimLev.SLib.dcc_filter).
 #
 # Die Rechenreihenfolge folgt 1:1 dem C++-Code (einfache Schleifen in double).
 # `std::sort` (libstdc++-Introsort, nicht stabil) ist in `_std_sort!` exakt
@@ -13,7 +15,7 @@ module DependenceCore
 import ..SimLev
 using Dates
 
-export dcc_filter, chol_small, kendall_tau_core, quantile_reg_core, hmm_forward_backward, QuantileRegError
+export kendall_tau_core, quantile_reg_core, hmm_forward_backward, QuantileRegError
 
 "Fehler aus dem Quantilsregressions-Kern (Rcpp `stop`)."
 struct QuantileRegError <: Exception
@@ -185,172 +187,6 @@ function _final_insertion_sort!(a, first, last, less)
     else
         _insertion_sort!(a, first, last, less)
     end
-end
-
-# ─────────────────────────────────────────────────────────────────────────────
-# DCC-Filter
-# ─────────────────────────────────────────────────────────────────────────────
-
-"Cholesky einer kleinen symmetrischen Matrix (zeilenweise, k × k) in `L`; `false`, wenn nicht positiv definit."
-function chol_small(A::Vector{Float64}, L::Vector{Float64}, k::Int)
-    fill!(L, 0.0)
-    for i in 0:(k-1)
-        for j in 0:i
-            s = A[i*k+j+1]
-            for m in 0:(j-1)
-                s -= L[i*k+m+1] * L[j*k+m+1]
-            end
-            if i == j
-                s <= 1e-14 && return false
-                L[i*k+i+1] = sqrt(s)
-            else
-                L[i*k+j+1] = s / L[j*k+j+1]
-            end
-        end
-    end
-    true
-end
-
-"`.dcc_filter(Z, a, b, Qbar, keep)` → RList `nll`, `R`, `ok`."
-function dcc_filter(Z, a::Real, b::Real, Qbar, keep::Bool)
-    Zm = _fmat(Z)
-    Qb = _fmat(Qbar)
-    a = Float64(a); b = Float64(b)
-    r, tn = try
-        _dcc_fast(Zm, a, b, Qb, keep)
-    catch e
-        e isa DomainError || rethrow()
-        nothing, 0                            # sqrt einer negativen Zahl: NaN-genauer Weg
-    end
-    if r === nothing || isnan(r["nll"]) || (keep && any(isnan, view(r["R"], 1:tn, :)))
-        r = _dcc_nan(Zm, a, b, Qb, keep)
-    end
-    r
-end
-
-function _dcc_fast(Zm, a, b, Qb, keep)
-    n, k = size(Zm)
-    np_ = div(k * (k - 1), 2)
-    Q = zeros(k * k); R = zeros(k * k); L = zeros(k * k); y = zeros(k)
-    for i in 0:(k-1), j in 0:(k-1)
-        Q[i*k+j+1] = Qb[i+1, j+1]
-    end
-    out = fill(SimLev.NA, keep ? n : 0, keep ? np_ : 0)
-    rows = 0
-    nll = 0.0
-    ok = true
-    for t in 0:(n-1)
-        if t > 0
-            for i in 0:(k-1), j in 0:(k-1)
-                Q[i*k+j+1] = (1.0 - a - b) * Qb[i+1, j+1] + a * Zm[t, i+1] * Zm[t, j+1] + b * Q[i*k+j+1]
-            end
-        end
-        for i in 0:(k-1), j in 0:(k-1)
-            R[i*k+j+1] = Q[i*k+j+1] / sqrt(Q[i*k+i+1] * Q[j*k+j+1])
-        end
-        if !chol_small(R, L, k)
-            ok = false
-            break
-        end
-        logdet = 0.0; quad = 0.0; zz = 0.0
-        for i in 0:(k-1)
-            s = Zm[t+1, i+1]
-            for m in 0:(i-1)
-                s -= L[i*k+m+1] * y[m+1]
-            end
-            y[i+1] = s / L[i*k+i+1]
-            quad += y[i+1] * y[i+1]
-            zz += Zm[t+1, i+1] * Zm[t+1, i+1]
-            logdet += 2.0 * SimLev.RLibm.log(L[i*k+i+1])
-        end
-        nll += 0.5 * (logdet + quad - zz)
-        if keep
-            p = 1
-            for i in 0:(k-1), j in (i+1):(k-1)
-                out[t+1, p] = R[i*k+j+1]
-                p += 1
-            end
-        end
-        rows = t + 1
-    end
-    ok || (nll = 1e10)
-    SimLev.RList("nll" => nll, "R" => out, "ok" => ok), rows
-end
-
-# NaN-genauer Weg (Etappe 8.0), genutzt, wenn ein Ergebnis NaN ist. Operandenfolge aus
-# C_dcc_filter (objdump des R-Baus): Q = ((a * z_i) * z_j + Qbar * (1 - a - b)) + b * Q,
-# R = Q / sqrt(Q_jj * Q_ii), chol_small mit L_jm * L_im, quad = y^2 + quad, zz = z^2 + zz,
-# logdet = (log + log) + logdet, nll = ((quad + logdet) - zz) * 0.5 + nll (wie Python).
-function _dcc_nan(Zm, a, b, Qb, keep)
-    nad = SimLev.nan_add; nsu = SimLev.nan_sub; nmu = SimLev.nan_mul; ndv = SimLev.nan_div
-    nsq = SimLev.nan_sqrt
-    nlg(x) = x > 0.0 ? SimLev.RLibm.log(x) : x == 0.0 ? -Inf : isnan(x) ? SimLev.nan_quiet(x) : SimLev.X86_NAN
-    n, k = size(Zm)
-    np_ = div(k * (k - 1), 2)
-    Q = zeros(k * k); R = zeros(k * k); L = zeros(k * k); y = zeros(k)
-    for i in 0:(k-1), j in 0:(k-1)
-        Q[i*k+j+1] = Qb[i+1, j+1]
-    end
-    out = fill(SimLev.NA, keep ? n : 0, keep ? np_ : 0)
-    nll = 0.0
-    ok = true
-    c0 = nsu(nsu(1.0, a), b)
-    for t in 0:(n-1)
-        if t > 0
-            for i in 0:(k-1), j in 0:(k-1)
-                v = nad(nmu(nmu(a, Zm[t, i+1]), Zm[t, j+1]), nmu(Qb[i+1, j+1], c0))
-                Q[i*k+j+1] = nad(v, nmu(b, Q[i*k+j+1]))
-            end
-        end
-        for i in 0:(k-1), j in 0:(k-1)
-            R[i*k+j+1] = ndv(Q[i*k+j+1], nsq(nmu(Q[j*k+j+1], Q[i*k+i+1])))
-        end
-        fill!(L, 0.0)
-        pd = true
-        for i in 0:(k-1)
-            for j in 0:i
-                s = R[i*k+j+1]
-                for m in 0:(j-1)
-                    s = nsu(s, nmu(L[j*k+m+1], L[i*k+m+1]))
-                end
-                if i == j
-                    if s <= 1e-14
-                        pd = false; break
-                    end
-                    L[i*k+i+1] = nsq(s)
-                else
-                    L[i*k+j+1] = ndv(s, L[j*k+j+1])
-                end
-            end
-            pd || break
-        end
-        if !pd
-            ok = false
-            break
-        end
-        logdet = 0.0; quad = 0.0; zz = 0.0
-        for i in 0:(k-1)
-            s = Zm[t+1, i+1]
-            for m in 0:(i-1)
-                s = nsu(s, nmu(L[i*k+m+1], y[m+1]))
-            end
-            y[i+1] = ndv(s, L[i*k+i+1])
-            quad = nad(nmu(y[i+1], y[i+1]), quad)
-            zz = nad(nmu(Zm[t+1, i+1], Zm[t+1, i+1]), zz)
-            lg = nlg(L[i*k+i+1])
-            logdet = nad(nad(lg, lg), logdet)
-        end
-        nll = nad(nmu(nsu(nad(quad, logdet), zz), 0.5), nll)
-        if keep
-            p = 1
-            for i in 0:(k-1), j in (i+1):(k-1)
-                out[t+1, p] = R[i*k+j+1]
-                p += 1
-            end
-        end
-    end
-    ok || (nll = 1e10)
-    SimLev.RList("nll" => nll, "R" => out, "ok" => ok)
 end
 
 # ─────────────────────────────────────────────────────────────────────────────

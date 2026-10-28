@@ -201,15 +201,15 @@ function bootstrap_pooled(datasets, columns; weights = nothing, inflation = noth
     cw = cw ./ SimLev.r_sum(cw)
     nrs = [size(g, 1) for g in G]
     nn = Int(n)
-    function draw_all()
+    function draw_all(rs)
         out = Tuple{Vector{Int},Vector{Int}}[]
         for _ in 1:nn
             ctry = zeros(Int, nper); row = zeros(Int, nper); t = 1
             while t <= nper
-                cidx = Int(DA._first(SimLev.RRng.sample_int(nc, 1; prob = cw)))
-                len = 1 + Float64(DA._first(SimLev.RRng.rgeom(1, 1 / Lf)))
+                cidx = Int(first(SimLev.SLib.sample(nc, 1; prob = cw, stream = rs)))
+                len = 1 + first(SimLev.SLib.rgeom(1, 1 / Lf; stream = rs))
                 nr = nrs[cidx]
-                st = Int(DA._first(SimLev.RRng.sample_int(nr, 1)))
+                st = Int(first(SimLev.SLib.sample(nr, 1; stream = rs)))
                 take = Int(min(len, nper - t + 1))
                 for q in 1:take
                     ctry[t-1+q] = cidx
@@ -221,7 +221,7 @@ function bootstrap_pooled(datasets, columns; weights = nothing, inflation = noth
         end
         out
     end
-    draw = SimLev.Bootstrap._with_rng_restore(draw_all; seed = seed)
+    draw = draw_all(SimLev.SLib.main_stream(seed))        # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
     Gall = reduce(vcat, G)
     off = vcat(0, cumsum(nrs))[1:nc]
     gi = zeros(Int, nper, nn)
@@ -256,9 +256,9 @@ end
 # portfolio_returns
 # ═══════════════════════════════════════════════════════════════════════════
 
-"`A %*% x` (Matrix mal Vektor) wie R."
+"`A %m% x` (Matrix mal Vektor) wie R (slc-Matrixprodukt, Entwurf B.6)."
 function _matvec(A::AbstractMatrix, x::AbstractVector)
-    r = SimLev.RLinalg.matprod(Matrix{Float64}(A), reshape(collect(Float64, x), :, 1))
+    r = SimLev.SLib.matmul(Matrix{Float64}(A), reshape(collect(Float64, x), :, 1))
     DA._vecf(r isa SimLev.NamedMat ? r.data : r)
 end
 
@@ -374,9 +374,9 @@ function planning_goal(returns, start_value, goal, horizon; contributions = 0, n
         end
         mid = findall(w -> w > 0 && w < wmax, W)
         if !isempty(mid)
-            z = DA._vecf(SimLev.RNmath.qnorm([min(1 - 1e-12, max(1e-12, v)) for v in Vn]))
+            z = DA._vecf(SimLev.SLib.qnorm(Float64[min(1 - 1e-12, max(1e-12, v)) for v in Vn]))
             Wm = W[mid]
-            pn = DA._vecf(SimLev.RNmath.pnorm(_approx2(lgrid, z, SimLev.RLibm.log.(Wm))))
+            pn = DA._vecf(SimLev.SLib.pnorm(Float64.(_approx2(lgrid, z, SimLev.RLibm.log.(Wm)))))
             alt = goal > 0 ? 0.0 : Float64(Vn[1])
             for (q, i) in enumerate(mid)
                 out[i] = Wm[q] < wmin ? alt : pn[q]
@@ -424,7 +424,7 @@ function planning_goal(returns, start_value, goal, horizon; contributions = 0, n
         Vt[t] = V
     end
     p_dp = interp(V, start_value)[1]
-    function run()
+    function run(rs)
         W = fill(start_value, nsim)
         choice = zeros(Int, horizon, nsim)
         ruined = fill(false, nsim)
@@ -435,12 +435,12 @@ function planning_goal(returns, start_value, goal, horizon; contributions = 0, n
             g = [max(1, min(ng, searchsortedlast(lgrid, SimLev.RLibm.log(max(w, wmin))))) for w in W]
             k = pol[t, g]
             choice[t, :] = k
-            draw = Int.(DA._vecf(SimLev.RRng.sample_int(S, nsim; replace = true)))
+            draw = Vector{Int}(SimLev.SLib.sample(S, nsim; replace = true, stream = rs))
             W = Float64[alive[i] ? base[i] * R[draw[i], k[i]] : 0.0 for i in 1:nsim]
         end
         SimLev.RList("terminal" => W, "choice" => choice, "success" => .!ruined .& (W .>= goal))
     end
-    sim = SimLev.Bootstrap._with_rng_restore(run; seed = seed)
+    sim = run(SimLev.SLib.main_stream(seed))              # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
     p_sim = DA._mean_lgl(sim["success"])
     se = sqrt(p_sim * (1 - p_sim) / nsim)
     tol = 4 * sqrt(max(p_sim * (1 - p_sim), 1 / nsim) / nsim) + 0.01

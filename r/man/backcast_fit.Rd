@@ -66,8 +66,10 @@ Umrechnungsfaktor Indexwaehrung -> Produktwaehrung in denselben Formen wie
 
 \item{model}{\code{"structural"} (Standard, Hebel-/Kostenmodell oben),
 \code{"linear"} (Regression Produktrendite ~ Indexrendite, Stambaugh-
-Backfill) oder \code{"spline"} (Glaettungsspline, Ersatz fuer das GAM aus
-'01 Base Indices'). Die Regressionsmodelle werden auf Renditen direkt
+Backfill) oder \code{"spline"} (kubischer Glaettungsspline nach Reinsch
+mit Knoten an allen Stuetzstellen und GCV-Wahl der Glaettung, Ersatz fuer
+das GAM aus '01 Base Indices'; die Kurve weicht leicht von
+\code{smooth.spline()} ab, das bei vielen Punkten Knoten auswaehlt). Die Regressionsmodelle werden auf Renditen direkt
 aufeinanderfolgender Produktbeobachtungen geschaetzt und eignen sich fuer
 Proxy-Rueckrechnungen (z. B. MSCI USA aus S&P 500).}
 
@@ -113,7 +115,7 @@ des Tages t; k > 0 = Satz aus Zeile t - k).}
 20 gemeinsame Beobachtungen.}
 
 \item{method}{\code{"optimize"} (Standard; ein Parameter mit
-\code{stats::optimize()} (Brent), mehrere mit L-BFGS-B innerhalb von
+\code{stats::optimize()} (Brent), mehrere mit projiziertem BFGS (C-Bibliothek von SimLev) innerhalb von
 \code{bounds}) oder \code{"grid"} (Gittersuche fuer genau einen Parameter,
 wie im Skript).}
 
@@ -136,8 +138,8 @@ TER * T / 365, Fondsbuchhaltung) oder \code{"geometric"}
 ((1 + TER)^(T/365) - 1, wie in den Skripten).}
 
 \item{index_fill}{Fuellmethode fuer Indexluecken: "locf" (Standard),
-"linear" oder "stine" (Stineman wie imputeTS 3.4, dessen Interpolation
-in SimLev uebernommen ist).
+"linear" oder "stine" (Stineman-Interpolation nach Stineman 1980, skaliert
+wie stinepack; eigene Umsetzung in der C-Bibliothek von SimLev).
 Fuehrende Luecken bleiben \code{NA}.}
 
 \item{validate}{Logisch (Standard \code{TRUE}): Out-of-Sample-Pruefung
@@ -165,7 +167,10 @@ als Anteil).}
 \item{validation}{Out-of-Sample-Ergebnis (Zeitraeume \code{train},
 \code{test}, Parameter \code{par}, Testkennzahlen in Prozent) oder
 \code{NULL}.}
-\item{regression}{Regressionsfit (nur "linear"/"spline").}
+\item{regression}{Regressionsfit (nur "linear"/"spline"): \code{coef}
+(Achsenabschnitt, Steigung) bzw. \code{fit} (Splineobjekt der C-Bibliothek
+mit \code{x}, \code{y}, \code{gam}, \code{lambda}, \code{df},
+\code{gcv}; kein \code{smooth.spline}-Objekt).}
 \item{inception, window}{Erstes Produktdatum und Fit-Fenster.}
 \item{drag_per_day}{Drag in Prozent je Kalendertag.}
 \item{call_args}{Daten und Modellangaben fuer \code{\link[=backcast]{backcast()}}.}

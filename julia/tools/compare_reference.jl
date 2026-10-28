@@ -2,12 +2,17 @@
 # Erweiterungsmodule (golden/modules/<modul>/*.json.gz, Format 1 und 2).
 #
 # Aufruf:  julia --project=. tools/compare_reference.jl [modul ...] [-k muster] [-v] [--dir pfad]
+#
+# Etappe 9: ohne SIMLEV_LEGACY_TESTS=1 ausgesetzt (Hinweis, Ende 0), außer --dir bzw.
+# SIMLEV_MODULE_DIR zeigt auf ein anderes Verzeichnis (Gleichlaufprüfung, tools/gleichlauf/).
 
 using SimLev
 include(joinpath(@__DIR__, "..", "test", "reftree.jl"))
 
+const _DEFAULT_MODDIR = normpath(joinpath(@__DIR__, "..", "..", "golden", "modules"))
+
 function main(args)
-    dir = joinpath(@__DIR__, "..", "..", "golden", "modules")
+    dir = SimLev.REnv.module_dir(_DEFAULT_MODDIR)
     k = nothing; verbose = false; mods = String[]
     i = 1
     while i <= length(args)
@@ -17,6 +22,13 @@ function main(args)
         elseif a == "--dir"; dir = args[i+1]; i += 2; continue
         else push!(mods, a) end
         i += 1
+    end
+    # Etappe 9 (Entwurf C.7): Vergleich mit golden/modules ausgesetzt, außer SIMLEV_LEGACY_TESTS=1
+    # oder --dir/SIMLEV_MODULE_DIR zeigt auf ein anderes Verzeichnis (Gleichlauf)
+    if !SimLev.REnv.legacy_tests() && normpath(abspath(dir)) == _DEFAULT_MODDIR
+        println("compare_reference: Etappe 9 – Vergleich mit golden/modules ausgesetzt ",
+                "(SIMLEV_LEGACY_TESTS=1, oder --dir/SIMLEV_MODULE_DIR für ein anderes Verzeichnis)")
+        return 0
     end
     isempty(mods) && (mods = sort([d for d in readdir(dir) if isdir(joinpath(dir, d))]))
     tot = 0; tot_ok = 0

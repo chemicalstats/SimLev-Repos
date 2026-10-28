@@ -1,6 +1,6 @@
 {
  "language": "R",
- "stand": "2026-10-27 – Etappe 8.0: Auswahl aus SimLevWrapperNav",
+ "stand": "2026-10-27 – Etappe 9: SimLev eigenständig",
  "hinweis": "Erzeugt von tools/api_snapshot/run.sh --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
@@ -697,6 +697,9 @@
   "sim_costs": [
    {"name": "order_fee", "kind": "arg", "default": "NULL"},
    {"name": "dca_fee", "kind": "arg", "default": "NULL"}
+  ],
+  "simlev_seed": [
+   {"name": "seed", "kind": "arg", "default": "NULL"}
   ],
   "simulation": [
    {"name": "data", "kind": "arg", "default": null},

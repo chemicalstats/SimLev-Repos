@@ -110,9 +110,9 @@ _getel(r, k) = r isa AbstractDict ? r[k] : r isa NamedTuple ? getfield(r, Symbol
     _fill_na(v, method = "locf"; keep_leading = false)
 
 Fehlende Werte füllen (Port von `.fill_na`): `"locf"`, `"linear"`,
-`"stine"` (Stineman über `RImputeTS.na_interpolation`, wie R mit der aus
-imputeTS 3.4 übernommenen Fassung `.imputets_na_interpolation`) oder
-`"none"`. Mit `keep_leading = true` bleiben führende NA erhalten, sonst wird
+`"stine"` (Stineman-Interpolation der inneren Lücken mit der C-Bibliothek slc,
+`SLib.stineman`, seit Etappe 9.6b; Stützstellen sind die Positionen der
+vorhandenen Werte) oder `"none"`. Mit `keep_leading = true` bleiben führende NA erhalten, sonst wird
 rückwärts gefüllt. Liefert eine Float64-Kopie.
 """
 function _fill_na(v, method = ("locf", "linear", "stine", "none"); keep_leading::Bool = false)
@@ -138,8 +138,8 @@ function _fill_na(v, method = ("locf", "linear", "stine", "none"); keep_leading:
         first_ > 1 && (out[1:first_-1] .= v[first_])
     else
         out = copy(v)
-        inner = first_:last_
-        out[inner] .= Float64.(SimLev.RImputeTS.na_interpolation(v[inner]; option = "stine"))
+        gap = setdiff(first_:last_, ok)                       # innere Lücken; Stützstellen = Positionen der Werte
+        out[gap] .= SimLev.SLib.stineman(Float64.(ok), v[ok], Float64.(gap))   # Stineman (slc, Entwurf B.14)
         last_ < length(v) && (out[last_+1:end] .= v[last_])
         first_ > 1 && (out[1:first_-1] .= v[first_])
     end
@@ -265,8 +265,7 @@ function _bc_model_returns(prep::_Prep, par, model, reg = nothing)
     else
         out = fill(NA, prep.n)
         ok = findall(isfinite, prep.x)
-        p = _stats().predict_smooth_spline(reg["fit"], prep.x[ok])
-        out[ok] .= _getel(p, "y")
+        out[ok] .= SimLev.SLib.smspline_predict(reg["fit"], prep.x[ok])   # außerhalb linear fortgesetzt
         out
     end
     sp = _par(par, "spread"); dr = _par(par, "drag")
@@ -492,10 +491,12 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
         count(ok) < 20 && error("Zu wenige aufeinanderfolgende Beobachtungen für das Regressionsmodell.")
         if model == "linear"
             X = hcat(ones(count(ok)), xx[ok])
-            f = _stats().lm_fit(X, y[ok])
-            return RList("coef" => _getel(f, "coefficients"))
+            f = SimLev.SLib.lsfit(X, y[ok])                         # kleinste Quadrate (Entwurf B.7)
+            return RList("coef" => SimLev.RVector(f["coefficients"]; names = ["x1", "x2"]))
         end
-        return RList("fit" => _stats().smooth_spline(xx[ok], y[ok]; cv = false))
+        fs = SimLev.SLib.smspline_fit(xx[ok], y[ok])               # Glättungsspline (Reinsch 1967, GCV; B.15)
+        return RList("fit" => RList("x" => fs["x"], "y" => fs["y"], "gam" => fs["gam"], "lambda" => fs["lambda"],
+                                    "df" => fs["df"], "gcv" => fs["gcv"]))
     end
     reg = fit_reg(win)
     par0 = _modify_list(RList("drag" => 0.0, "spread" => 0.0, "beta" => 1.0), fixed)
@@ -534,7 +535,7 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
         end
         st = Float64[_par(par0, k) for k in fit]
         lo = Float64[bounds[k][1] for k in fit]; hi = Float64[bounds[k][2] for k in fit]
-        o = _stats().optim(st, t -> obj_fun(t, rws, ob, rg); method = "L-BFGS-B", lower = lo, upper = hi)
+        o = SimLev.SLib.optim(st, t -> obj_fun(t, rws, ob, rg); method = "L-BFGS-B", lower = lo, upper = hi)
         p = copy(par0)
         for (k, t) in zip(fit, _getel(o, "par"))
             p[k] = Float64(t)

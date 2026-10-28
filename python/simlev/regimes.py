@@ -28,7 +28,7 @@ _NA = _fmt.NA_REAL       # R's NA_real_
 
 def _ldmvn(X, mu, S):
     """Log-Dichte der multivariaten Normalverteilung je Zeile (``.ldmvn``)."""
-    la = _dep._linalg()
+    la = _dep._sl()                        # slc: Cholesky, Dreieckslöser, Kreuzprodukt (Entwurf B.5, B.6)
     X = np.asarray(X, dtype=np.float64)
     L = np.asarray(la.chol(np.asarray(S, dtype=np.float64)), dtype=np.float64)
     Xc = X - np.asarray(mu, dtype=np.float64).reshape(1, -1)
@@ -97,7 +97,7 @@ def _hmm_em(X, k, init, max_iter, tol, ridge):
     X = np.asarray(X, dtype=np.float64)
     Tn, d = X.shape
     k = int(k)
-    la = _dep._linalg()
+    la = _dep._sl()                        # slc: Cholesky, Dreieckslöser, Kreuzprodukt (Entwurf B.5, B.6)
     with np.errstate(all="ignore"):
         mu = np.array(init["mu"], dtype=np.float64).reshape(k, d)
         S = [np.array(s, dtype=np.float64) for s in init["S"]]
@@ -240,7 +240,7 @@ def regime_hmm(data, columns, *, k=2, frequency=("week", "day", "month"), n_star
         frequency: ``"week"`` (Standard), ``"day"`` oder ``"month"``.
         n_start: Anzahl Startwerte.
         max_iter, tol: Baum-Welch-Iterationen je Start und relative Abbruchschranke.
-        seed: Startwert der zufälligen Startwerte (``None`` = Zufallsstrom der Sitzung).
+        seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`) der zufälligen Startzuordnungen.
 
     Returns:
         :class:`SimLevHMM`.
@@ -269,16 +269,14 @@ def regime_hmm(data, columns, *, k=2, frequency=("week", "day", "month"), n_star
     ridge = np.eye(d) * (1e-10 + 1e-6 * r_mean([r_var(X[:, j]) for j in range(d)]))
     win = int(max(4, float(_fmt.r_round(ppy / 12))))
 
-    def make_inits():
-        rng = _dep._rng()
-        res = []
-        for s in range(1, int(n_start) + 1):
-            if s == 1:
-                res.append(_hmm_init_rank(X, k, win, ridge))
-            else:
-                res.append(_hmm_init_cl(X, np.asarray(rng.sample_int(k, Tn, replace=True), dtype=np.int64), k, ridge))
-        return res
-    inits = _dep._with_rng_restore(make_inits, seed)
+    sl = _dep._sl()
+    rs = sl.main_stream(seed) if n_start >= 2 else None   # Hauptstrom (Entwurf C.5), nur bei Zufallsstarts
+    inits = []
+    for s in range(1, int(n_start) + 1):
+        if s == 1:
+            inits.append(_hmm_init_rank(X, k, win, ridge))
+        else:
+            inits.append(_hmm_init_cl(X, np.asarray(sl.sample(k, Tn, replace=True, stream=rs), dtype=np.int64), k, ridge))
     fits = []
     for i in inits:
         try:

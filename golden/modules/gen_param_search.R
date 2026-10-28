@@ -2,7 +2,7 @@
 # param_plateau, print/summary, .ps_*-Helfer, .run_spec, .as_spec).
 source("golden/modules/ref_tools.R"); ref_init("param_search")
 P <- paste0("import simlev.param_search as PS\nimport simlev.overfitting as OF\nimport simlev.signals as SG\n",
-            "from simlev._r import rng\nfrom simlev.config import create_strategy, asset_config\n")
+            "from simlev.config import create_strategy, asset_config\n")
 py <- function(code) paste0(P, code)
 J <- "const PS = SL.ParamSearch\n"
 jl <- function(code) paste0(J, code)
@@ -48,14 +48,14 @@ ref_case("design_none", paste0(SP2, "; SimLev:::.ps_design(sp, 'grid', 0, functi
 SP3 <- "sp <- param_space(w = param_range(0, 1), n = param_range(10, 1000, log = TRUE, integer = TRUE), k = c(1, 2, 3))"
 SP3P <- "sp = PS.param_space(w=PS.param_range(0, 1), n=PS.param_range(10, 1000, log=True, integer=True), k=[1.0, 2.0, 3.0])\n"
 SP3J <- 'sp = PS.param_space(w = PS.param_range(0, 1), n = PS.param_range(10, 1000; log = true, integer = true), k = [1.0, 2.0, 3.0])\n'
-ref_case("design_lhs", paste0(SP3, "; set.seed(3); list(SimLev:::.ps_design(sp, 'lhs', 20, NULL), runif(1))"),
-         py(paste0(SP3P, "rng.set_seed(3); result = [PS._ps_design(sp, 'lhs', 20, None), rng.runif(1)]")), jl = jl(paste0(SP3J, 'SL.RRng.set_seed(3); result = [PS._ps_design(sp, "lhs", 20, nothing), SL.RRng.runif(1)]')))
-ref_case("design_rand", paste0(SP3, "; set.seed(4); list(SimLev:::.ps_design(sp, 'random', 15, function(p) p$w < 0.5), runif(1))"),
-         py(paste0(SP3P, "rng.set_seed(4); result = [PS._ps_design(sp, 'random', 15, lambda p: p['w'] < 0.5), rng.runif(1)]")), jl = jl(paste0(SP3J, 'SL.RRng.set_seed(4); result = [PS._ps_design(sp, "random", 15, p -> p["w"] < 0.5), SL.RRng.runif(1)]')))
-ref_case("design_disc", "set.seed(5); sp <- param_space(a = c(1, 2), b = c('u', 'v', 'w')); list(SimLev:::.ps_design(sp, 'random', 10, NULL), runif(1))",
-         py("rng.set_seed(5); sp = PS.param_space(a=[1.0, 2.0], b=['u', 'v', 'w']); result = [PS._ps_design(sp, 'random', 10, None), rng.runif(1)]"), jl = jl('SL.RRng.set_seed(5); sp = PS.param_space(a = [1.0, 2.0], b = ["u", "v", "w"]); result = [PS._ps_design(sp, "random", 10, nothing), SL.RRng.runif(1)]'))
-ref_case("design_lhs1", "set.seed(6); sp <- param_space(a = param_range(0, 1)); list(SimLev:::.ps_design(sp, 'lhs', 1, NULL), SimLev:::.ps_design(sp, 'lhs', 3, NULL))",
-         py("rng.set_seed(6); sp = PS.param_space(a=PS.param_range(0, 1)); result = [PS._ps_design(sp, 'lhs', 1, None), PS._ps_design(sp, 'lhs', 3, None)]"), jl = jl('SL.RRng.set_seed(6); sp = PS.param_space(a = PS.param_range(0, 1)); result = [PS._ps_design(sp, "lhs", 1, nothing), PS._ps_design(sp, "lhs", 3, nothing)]'))
+ref_case("design_lhs", paste0(SP3, "; simlev_seed(3); list(SimLev:::.ps_design(sp, 'lhs', 20, NULL), SimLev:::.sl_runif(1))"),
+         py(paste0(SP3P, "simlev.simlev_seed(3); result = [PS._ps_design(sp, 'lhs', 20, None), simlev._lib.runif(1)]")), jl = jl(paste0(SP3J, 'SL.simlev_seed(3); result = [PS._ps_design(sp, "lhs", 20, nothing), SL.SLib.runif(1)]')))
+ref_case("design_rand", paste0(SP3, "; simlev_seed(4); list(SimLev:::.ps_design(sp, 'random', 15, function(p) p$w < 0.5), SimLev:::.sl_runif(1))"),
+         py(paste0(SP3P, "simlev.simlev_seed(4); result = [PS._ps_design(sp, 'random', 15, lambda p: p['w'] < 0.5), simlev._lib.runif(1)]")), jl = jl(paste0(SP3J, 'SL.simlev_seed(4); result = [PS._ps_design(sp, "random", 15, p -> p["w"] < 0.5), SL.SLib.runif(1)]')))
+ref_case("design_disc", "simlev_seed(5); sp <- param_space(a = c(1, 2), b = c('u', 'v', 'w')); list(SimLev:::.ps_design(sp, 'random', 10, NULL), SimLev:::.sl_runif(1))",
+         py("simlev.simlev_seed(5); sp = PS.param_space(a=[1.0, 2.0], b=['u', 'v', 'w']); result = [PS._ps_design(sp, 'random', 10, None), simlev._lib.runif(1)]"), jl = jl('SL.simlev_seed(5); sp = PS.param_space(a = [1.0, 2.0], b = ["u", "v", "w"]); result = [PS._ps_design(sp, "random", 10, nothing), SL.SLib.runif(1)]'))
+ref_case("design_lhs1", "simlev_seed(6); sp <- param_space(a = param_range(0, 1)); list(SimLev:::.ps_design(sp, 'lhs', 1, NULL), SimLev:::.ps_design(sp, 'lhs', 3, NULL))",
+         py("simlev.simlev_seed(6); sp = PS.param_space(a=PS.param_range(0, 1)); result = [PS._ps_design(sp, 'lhs', 1, None), PS._ps_design(sp, 'lhs', 3, None)]"), jl = jl('SL.simlev_seed(6); sp = PS.param_space(a = PS.param_range(0, 1)); result = [PS._ps_design(sp, "lhs", 1, nothing), PS._ps_design(sp, "lhs", 3, nothing)]'))
 ref_case("as_spec", "st <- create_strategy(A = asset_config('etf', 'bnh', spread = 0.1)); list(SimLev:::.as_spec(st), SimLev:::.as_spec(list(strategy = st, args = list(a = 1))), SimLev:::.as_spec(list(a = 1)))",
          py("st = create_strategy(A=asset_config(asset_class='etf', trading='bnh', spread=0.1)); result = [PS._as_spec(st), PS._as_spec({'strategy': st, 'args': {'a': 1}}), PS._as_spec({'a': 1})]"), jl = jl('st = create_strategy("A" => asset_config("etf", "bnh", spread = 0.1)); result = [PS._as_spec(st), PS._as_spec(RList("strategy" => st, "args" => RList("a" => 1))), PS._as_spec(RList("a" => 1))]'))
 
@@ -128,12 +128,12 @@ ps_case("ps_err_obj", "param_search(d, b, param_space(n = 10, band = 0), objecti
         'result = PS.param_search(d, b, PS.param_space(n = 10.0, band = 0.0); objective = "foo")')
 ps_case("ps_err_none", "param_search(d, space = param_space(n = 10))", "result = PS.param_search(d, space=PS.param_space(n=10.0))",
         'result = PS.param_search(d; space = PS.param_space(n = 10.0))')
-ps_case("ps_random", "set.seed(9); x <- z(param_search(d, b, param_space(n = param_range(5, 60, integer = TRUE), band = param_range(0, 3)), method = 'random', n = 5, seed = 2, burn_in = 60)); list(x, runif(1), param_plateau(x), param_plateau(x, k = 2))",
-        "rng.set_seed(9); x = z(PS.param_search(d, b, PS.param_space(n=PS.param_range(5, 60, integer=True), band=PS.param_range(0, 3)), method='random', n=5, seed=2, burn_in=60)); result = [x, rng.runif(1), PS.param_plateau(x), PS.param_plateau(x, k=2)]",
-        'SL.RRng.set_seed(9); x = z(PS.param_search(d, b, PS.param_space(n = PS.param_range(5, 60; integer = true), band = PS.param_range(0, 3)); method = "random", n = 5, seed = 2, burn_in = 60)); result = [x, SL.RRng.runif(1), PS.param_plateau(x), PS.param_plateau(x; k = 2)]')
-ps_case("ps_lhs", "set.seed(9); x <- z(param_search(d, b, param_space(n = param_range(5, 60, integer = TRUE, log = TRUE), band = c(0, 1)), method = 'lhs', n = 4, burn_in = 60)); list(x, runif(1), dropE(summary(x)))",
-        "rng.set_seed(9); x = z(PS.param_search(d, b, PS.param_space(n=PS.param_range(5, 60, integer=True, log=True), band=[0.0, 1.0]), method='lhs', n=4, burn_in=60)); result = [x, rng.runif(1), dropE(PS.summary(x))]",
-        'SL.RRng.set_seed(9); x = z(PS.param_search(d, b, PS.param_space(n = PS.param_range(5, 60; integer = true, log = true), band = [0.0, 1.0]); method = "lhs", n = 4, burn_in = 60)); result = [x, SL.RRng.runif(1), dropE(r_summary(x))]')
+ps_case("ps_random", "simlev_seed(9); x <- z(param_search(d, b, param_space(n = param_range(5, 60, integer = TRUE), band = param_range(0, 3)), method = 'random', n = 5, seed = 2, burn_in = 60)); list(x, SimLev:::.sl_runif(1), param_plateau(x), param_plateau(x, k = 2))",
+        "simlev.simlev_seed(9); x = z(PS.param_search(d, b, PS.param_space(n=PS.param_range(5, 60, integer=True), band=PS.param_range(0, 3)), method='random', n=5, seed=2, burn_in=60)); result = [x, simlev._lib.runif(1), PS.param_plateau(x), PS.param_plateau(x, k=2)]",
+        'SL.simlev_seed(9); x = z(PS.param_search(d, b, PS.param_space(n = PS.param_range(5, 60; integer = true), band = PS.param_range(0, 3)); method = "random", n = 5, seed = 2, burn_in = 60)); result = [x, SL.SLib.runif(1), PS.param_plateau(x), PS.param_plateau(x; k = 2)]')
+ps_case("ps_lhs", "simlev_seed(9); x <- z(param_search(d, b, param_space(n = param_range(5, 60, integer = TRUE, log = TRUE), band = c(0, 1)), method = 'lhs', n = 4, burn_in = 60)); list(x, SimLev:::.sl_runif(1), dropE(summary(x)))",
+        "simlev.simlev_seed(9); x = z(PS.param_search(d, b, PS.param_space(n=PS.param_range(5, 60, integer=True, log=True), band=[0.0, 1.0]), method='lhs', n=4, burn_in=60)); result = [x, simlev._lib.runif(1), dropE(PS.summary(x))]",
+        'SL.simlev_seed(9); x = z(PS.param_search(d, b, PS.param_space(n = PS.param_range(5, 60; integer = true, log = true), band = [0.0, 1.0]); method = "lhs", n = 4, burn_in = 60)); result = [x, SL.SLib.runif(1), dropE(r_summary(x))]')
 ps_case("ps_noret", "z(param_search(d, b, param_space(n = c(10, 20), band = 0), keep_returns = FALSE, burn_in = 30))",
         "result = z(PS.param_search(d, b, PS.param_space(n=[10.0, 20.0], band=0.0), keep_returns=False, burn_in=30))",
         'result = z(PS.param_search(d, b, PS.param_space(n = [10.0, 20.0], band = 0.0); keep_returns = false, burn_in = 30))')
@@ -212,9 +212,9 @@ ref_case("summary_print", "sm <- structure(list(top = data.frame(id = 1L, n = 50
 ps_case("ps_cores2", "z(param_search(d, b, param_space(n = c(10, 20, 40), band = c(0, 2)), burn_in = 50, cores = 2))",
         "result = z(PS.param_search(d, b, PS.param_space(n=[10.0, 20.0, 40.0], band=[0.0, 2.0]), burn_in=50, cores=2))",
         'result = z(PS.param_search(d, b, PS.param_space(n = [10.0, 20.0, 40.0], band = [0.0, 2.0]); burn_in = 50, cores = 2))')
-ps_case("ps_cores2_random", "set.seed(3); x <- z(param_search(d, b, param_space(n = param_range(5, 60, integer = TRUE), band = param_range(0, 2)), method = 'random', n = 5, seed = 11, burn_in = 60, cores = 2)); list(x, runif(1))",
-        "rng.set_seed(3); x = z(PS.param_search(d, b, PS.param_space(n=PS.param_range(5, 60, integer=True), band=PS.param_range(0, 2)), method='random', n=5, seed=11, burn_in=60, cores=2)); result = [x, rng.runif(1)]",
-        'SL.RRng.set_seed(3); x = z(PS.param_search(d, b, PS.param_space(n = PS.param_range(5, 60; integer = true), band = PS.param_range(0, 2)); method = "random", n = 5, seed = 11, burn_in = 60, cores = 2)); result = [x, SL.RRng.runif(1)]')
+ps_case("ps_cores2_random", "simlev_seed(3); x <- z(param_search(d, b, param_space(n = param_range(5, 60, integer = TRUE), band = param_range(0, 2)), method = 'random', n = 5, seed = 11, burn_in = 60, cores = 2)); list(x, SimLev:::.sl_runif(1))",
+        "simlev.simlev_seed(3); x = z(PS.param_search(d, b, PS.param_space(n=PS.param_range(5, 60, integer=True), band=PS.param_range(0, 2)), method='random', n=5, seed=11, burn_in=60, cores=2)); result = [x, simlev._lib.runif(1)]",
+        'SL.simlev_seed(3); x = z(PS.param_search(d, b, PS.param_space(n = PS.param_range(5, 60; integer = true), band = PS.param_range(0, 2)); method = "random", n = 5, seed = 11, burn_in = 60, cores = 2)); result = [x, SL.SLib.runif(1)]')
 ps_case("ps_cores2_err", "z(param_search(d, function(p) if (p$n > 15) stop('kaputt') else b(p), param_space(n = c(10, 20, 30), band = 0), burn_in = 50, cores = 2))",
         "def bb(p):\n    if p['n'] > 15:\n        raise ValueError('kaputt')\n    return b(p)\nresult = z(PS.param_search(d, bb, PS.param_space(n=[10.0, 20.0, 30.0], band=0.0), burn_in=50, cores=2))",
         'bb(p) = p["n"] > 15 ? error("kaputt") : b(p)

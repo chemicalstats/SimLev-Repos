@@ -383,7 +383,8 @@ function _panel_distribution(c, cell, x, dash)
     mu, sd = r_mean(rets), r_sd(rets)
     if sd > 0
         xsq = [lo + (hi - lo) * i / 99 for i in 0:99]
-        yn = [_libm_exp(-0.5 * ((v - mu) / sd)^2) / (sd * sqrt(2pi)) * length(rets) * (hi - lo) / 50 for v in xsq]
+        dn = SLib.dnorm(xsq, mu, sd)   # Normaldichte der C-Bibliothek slc (wie R)
+        yn = [d * length(rets) * (hi - lo) / 50 for d in dn]
         _polyline!(c, p, xsq, yn; color = _col(col["secondary"]), width = 2, dash = "6,4")
     end
     _line!(c, _px(p, mu), p.y0, _px(p, mu), p.y0 + p.h; color = _col(col["positive"]), width = 2, dash = "6,4")

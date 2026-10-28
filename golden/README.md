@@ -1,5 +1,20 @@
 # Golden-Master-Fälle
 
+> **Ausgesetzt seit Etappe 9.1** (Entwurf SPEZ-9, C.7/C.8): Die gespeicherten Fälle beschreiben
+> SimLev 0.5.0 mit R's Zufallszahlen und den übernommenen Paketen; während Etappe 9 ändern sich
+> Zufall und Kerne. Die Vergleicher (`compare_reference.py/.jl`, `compare_golden.py/.jl`) und die
+> Tests laufen gegen diese Ordner nur mit `SIMLEV_LEGACY_TESTS=1`; ohne den Schalter enden sie mit
+> einem Hinweis und Ende 0. Ersatz bis zum Neuaufbau ist die Gleichlaufprüfung
+> `tools/gleichlauf/run.sh`: Sie erzeugt eine Teilmenge der Fälle mit dem aktuellen R neu
+> (`SIMLEV_MODULE_DIR`, `SIMLEV_GEN_SUBSET`, `SIMLEV_GEN_EXCLUDE` in `modules/ref_tools.R`) und
+> vergleicht Python und Julia streng dagegen. Die Generatoren bleiben unverändert nutzbar.
+>
+> **Seit Etappe 9.6c:** Das Modul `bootstrap_core` (frühere Bootstrap- und MS-GARCH-Kerne mit R's
+> Zufall) ist mit seinen Kernen gestrichen; die Kerne der C-Bibliothek prüft das Gleichlauf-Modul
+> `slc_models` (`tools/gleichlauf/extra_cases_94.R`). Die Module `r_nmath`, `r_rng`, `r_linalg`,
+> `r_nlminb`, `rugarch`, `evd` und `imputets` prüfen entfallene R-Nachbildungen; ihre Dateien bleiben
+> bis zum Neuaufbau der Tests liegen (F24), ihr Python- und Julia-Code ist nicht mehr lauffähig.
+
 Dieser Ordner enthält die gemeinsamen Referenzfälle, an denen die Python-
 und die Julia-Fassung ihre Bitgleichheit zum R-Paket prüfen.
 
@@ -7,7 +22,7 @@ und die Julia-Fassung ihre Bitgleichheit zum R-Paket prüfen.
 |---|---|---|---|
 | `cases/` | 55 | Python, Julia | Engine: 35 gezielte Fälle für jeden Steuer- und Sonderpfad (`f01`–`f38` ohne `f07`, `f08`, `f28`) und 20 Zufallsfälle (`r…`) |
 | `extra/` | 35 | Python, Julia | Engine: Stressfälle mit 30 Jahren, Totalverlust-Hebel, mehreren Signal-Assets, konstanten Preisen, Kalender-Randfällen, Extremwerten, Fehlerpfaden (`x…`, `y…`) |
-| `modules/` | 4.755 | Python, Julia | alle übrigen Funktionen des R-Pakets, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), der Fonds-Wrapper (Modul `wrapper`), die Nachbildung von evd, rugarch und imputeTS und die nachgebauten R-Interna, je Modul ein Unterordner (31 Module, siehe unten) |
+| `modules/` | 4.755 | Python, Julia | alle übrigen Funktionen des R-Pakets, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), der Fonds-Wrapper (Modul `wrapper`), die frühere Nachbildung von evd, rugarch und imputeTS und die nachgebauten R-Interna (diese Module seit Etappe 9.6c ohne lauffähigen Port-Code, siehe oben), je Modul ein Unterordner (31 Module, siehe unten) |
 
 ## Engine-Fälle (`cases/`, `extra/`)
 
@@ -122,7 +137,6 @@ Je Modul gibt es einen Unterordner mit Fällen und einen Generator
 | `data_prep` | 175 | Datenaufbereitung, Portfolio-Vorlagen (`data_prep.R`); seit Etappe 8.0 `strategy_from_weights()`/`portfolio_template()` mit `wrapper` für alle bzw. je Asset, mit `map` und Fehlerfällen |
 | `backcast` | 88 | `backcast.R` |
 | `signals` | 56 | `signals.R` mit den Rollkernen |
-| `bootstrap_core` | 18 | Kerne aus `bootstrap_core.cpp`, MS-GARCH-Filter aus `ms_garch.c` (`.ms_garch_filter`) |
 | `bootstrap` | 197 | `bootstrap.R` (darunter `cores = 2`: `bs_rawcores2pathlength50`, `bs_cores2_*`, `study_returns`, `study_cores2*`) |
 | `ms_garch` | 17 | eigene MS-GARCH-Schätzung `ms_garch.R` (`.ms_garch_fit`: K = 2/3, sGARCH/gjrGARCH, drei simulierte Datensätze, Fehlerwege der Prüfung; `simlev/ms_garch.py`, `src/ms_garch.jl`) |
 | `withdrawal` | 316 | `withdrawal.R`, `withdrawal_core.cpp` |
@@ -172,7 +186,7 @@ Ein Fall ist eine gzip-komprimierte JSON-Datei `<modul>/<id>.json.gz` mit
 | `print` | `print(result)` für Objekte mit eigener print-Methode in SimLev |
 | `warnings` | Warnungen während des Aufrufs |
 | `error` | Fehlermeldung, falls R mit einem Fehler abbricht (statt `result`) |
-| `sys_time` | feste Uhrzeit (Sekunden seit 1970, als Text `%.17g`) für Fälle, deren Ergebnis von `Sys.time()` abhängt (gosolnp); je eine Stelle setzt und eine setzt zurück: in R `.ref_fix_time()` in `ref_case()` (ersetzt `Sys.time` in `baseenv()`, `on.exit` stellt es wieder her), in Python `_fixed_sys_time()` in `run_case()` und in Julia `withenv` in `run_ref_case()` (beide über `SIMLEV_R_SYS_TIME`) |
+| `sys_time` | **N2: entfallen** (`ref_tools.R` schreibt das Feld nicht mehr, `ref_case()` hat kein Argument `sys_time`; die gespeicherten Fälle des ausgesetzten Moduls `rugarch` tragen es noch, `gen_rugarch.R` ist nicht mehr lauffähig). Früher: (seit Etappe 9.6c nur noch in den ausgesetzten rugarch-Fällen; Python und Julia werten es nicht mehr aus) feste Uhrzeit (Sekunden seit 1970, als Text `%.17g`) für Fälle, deren Ergebnis von `Sys.time()` abhängt (gosolnp); je eine Stelle setzt und eine setzt zurück: in R `.ref_fix_time()` in `ref_case()` (ersetzt `Sys.time` in `baseenv()`, `on.exit` stellt es wieder her), in Python `_fixed_sys_time()` in `run_case()` und in Julia `withenv` in `run_ref_case()` (beide über `SIMLEV_R_SYS_TIME`) |
 
 Im Baum hat jedes Objekt einen Typ `t` (`null`, `num`, `int`, `lgl`,
 `chr`, `date`, `list`, `df`, `mat`, `skip`). Zahlen stehen als Hex-Literale
@@ -317,7 +331,7 @@ Für die Referenzfälle relevant (die Ports lesen sie nur in
 
 | Schalter | Zweck | Art |
 |---|---|---|
-| `SIMLEV_R_SYS_TIME` | feste Uhr für gosolnp; die Harnesses setzen sie aus dem Feld `sys_time` eines Falls | Prüfung |
+| `SIMLEV_R_SYS_TIME` | entfallen mit Etappe 9.6c (früher feste Uhr für gosolnp, gesetzt aus dem Feld `sys_time`) | – |
 | `SIMLEV_LAX_NA` | `1`: NA = NaN im Vergleich (Python und Julia) | Prüfung |
 | `SIMLEV_STRICT_ZERO` | `0`: −0 = +0 im Vergleich (Python und Julia) | Prüfung |
 | `SIMLEV_FULL_TESTS` | `1`: `Pkg.test()` prüft alle Modul-Fälle statt bis zu vier je Modul | Prüfung |

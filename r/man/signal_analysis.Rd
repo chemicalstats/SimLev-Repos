@@ -88,8 +88,9 @@ Renditen), \code{sd}, \code{t} (\code{mean / (sd / sqrt(n))}) und
 Stichtage.}
 \item{\code{spread}}{benannter Vektor \code{difference} (Mittel
 oberster minus unterster Bereich, Anteil), \code{t} und \code{p}
-(Welch-t-Test; \code{NA}, wenn einer der beiden Bereiche hoechstens
-2 Werte hat).}
+(Welch-t-Test mit Freiheitsgraden nach Welch-Satterthwaite; \code{NA},
+wenn einer der beiden Bereiche hoechstens 2 Werte hat oder beide konstant
+sind).}
 \item{\code{splits}}{Matrix Bereiche x Zeitabschnitte mit der
 mittleren Vorwaertsrendite (Anteil), Spaltennamen "Jahr-Jahr";
 \code{NULL} bei \code{splits = 1}.}
@@ -97,8 +98,13 @@ mittleren Vorwaertsrendite (Anteil), Spaltennamen "Jahr-Jahr";
 \code{signal} x Bereich \code{signal2}, mittlere Vorwaertsrendite
 als Anteil) und \code{n} (Haeufigkeiten); \code{NULL} ohne
 \code{signal2}.}
-\item{\code{fit}}{Liste mit \code{model} (\code{lm}-Objekt) und
-\code{r_squared} (\eqn{R^2}); \code{NULL} ohne Polynom-Glaettung.}
+\item{\code{fit}}{Liste mit \code{model} und \code{r_squared}
+(\eqn{R^2 = 1 - RSS/TSS}); \code{NULL} ohne Polynom-Glaettung.
+\code{model} ist eine Liste mit \code{coefficients} (Basis 1, z, z^2, ...
+mit z = (signal - Mittel) / Standardabweichung), \code{fitted}
+(angepasste Werte), \code{degree} und \code{basis} (\code{center},
+\code{scale}); bis Etappe 9.6b war es ein \code{lm}-Objekt mit
+orthogonalen Polynomen (angepasste Werte und \eqn{R^2} sind gleich).}
 \item{\code{data}}{data.frame der Stichtage mit \code{date},
 \code{signal}, \code{forward} (Anteil), ggf. \code{signal2},
 \code{bin}, ggf. \code{bin2}.}

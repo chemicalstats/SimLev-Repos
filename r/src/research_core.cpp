@@ -3,7 +3,8 @@
 // Zeitreihen-Hilfen.
 //
 // Die Rechnung steht seit Etappe 7.3a in src/research_core_impl.h (ohne R-Bezug,
-// gemeinsam mit Python: simlev._ext, Kopie in python/src/). Diese Datei wandelt
+// gemeinsam mit Python: simlev._ext; kanonisch seit Etappe 9.6c in core/, Kopie hier ueber
+// tools/core_sync.py). Diese Datei wandelt
 // nur die Argumente um (wie die frueheren Rcpp-Huellen) und ruft die Kerne auf; die
 // Sichten und Aufrufe der Kerne bindet simlev_capi.h an R (Abschnitt "R als Host
 // der gemeinsamen Kerne").
@@ -14,7 +15,7 @@
 //   .min_cdar_core      minimaler Conditional Drawdown at Risk
 //   .quantile_reg_core  lineare Quantilsregression
 //   .hmm_forward_backward  skalierter Vorwaerts-Rueckwaerts-Schritt (Baum-Welch)
-//   .garch_filter       bedingte Varianzen eines GARCH(1,1)/GJR-Modells
+//   (.garch_filter: in N2 entfernt, seit 9.6b ohne Aufrufer)
 //   .roll_mean_core     rollierender Mittelwert mit kompensierter Summe
 //   .kendall_tau_core   Kendalls Tau-b
 //   .roll_cov_core      rollierende Kovarianz
@@ -106,18 +107,6 @@ extern "C" SEXP C_hmm_forward_backward(SEXP s_B, SEXP s_A, SEXP s_p0) {
     sl::NumMat A = sl::num_mat(s_A);
     sl::NumVec p0 = sl::num_vec(s_p0);
     return simlev::hmm_forward_backward(B, A, p0);
-  });
-}
-
-extern "C" SEXP C_garch_filter(SEXP s_ep, SEXP s_om, SEXP s_al, SEXP s_be, SEXP s_ga, SEXP s_v0) {
-  return sl::call([&]() {
-    sl::NumVec ep = sl::num_vec(s_ep);
-    double om = sl::as_double(s_om);
-    double al = sl::as_double(s_al);
-    double be = sl::as_double(s_be);
-    double ga = sl::as_double(s_ga);
-    double v0 = sl::as_double(s_v0);
-    return simlev::garch_filter(ep, om, al, be, ga, v0);
   });
 }
 

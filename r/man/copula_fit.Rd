@@ -45,6 +45,15 @@ gemeinsamen Abstuerze (unterer Tail), Gumbel gemeinsame Anstiege; die um
 (z. B. Aktien und Anleihen in Deflationsphasen) werden die um 90/270 Grad
 rotierten Varianten verwendet. Kendalls Tau wird intern in O(n log n)
 berechnet (gleiches Ergebnis wie \code{stats::cor(method = "kendall")}).
+
+Die t-Copula wird ueber die Profil-Likelihood in den Freiheitsgraden
+\eqn{\nu} geschaetzt, weil die Likelihood in \eqn{\nu} sehr flach ist:
+fuer jedes \eqn{\nu} eines Rasters (\eqn{\nu = 2 + 2^k}, \eqn{k = -4,
+\dots, 12}, und \eqn{\nu = \infty}, der Grenzfall Gauss-Copula) das
+Maximum in der Korrelation, danach eine eindimensionale Suche um den
+besten Rasterpunkt. Liegt das Maximum bei \eqn{\nu > 500} (auch
+\eqn{\nu = \infty}), steht in \code{par2} 500; \code{loglik} gilt fuer
+das gefundene \eqn{\nu}.
 }
 \examples{
 set.seed(1); z <- matrix(rnorm(2000), ncol = 2) \%*\% chol(matrix(c(1, .6, .6, 1), 2))

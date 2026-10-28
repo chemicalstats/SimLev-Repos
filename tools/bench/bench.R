@@ -16,25 +16,27 @@ RUNS <- 3L
 
 t_load <- system.time(suppressMessages(library(SimLev)))[["elapsed"]]
 
-# ── Daten (fester Seed; Python und Julia erzeugen dieselben Zahlen mit dem R-RNG der Ports) ──
+# ── Daten (fester Seed; seit Etappe 9.6a mit dem Zufall von SimLev, simlev_seed(); Python und Julia
+#    erzeugen dieselben Zahlen bitgleich) ──
+.sl_rnorm <- SimLev:::.sl_rnorm; .sl_sample <- SimLev:::.sl_sample
 # S30: zwei Kursreihen, 30 Jahre täglich (wie scratchpad bench.R vom 20.10.2026)
-set.seed(1); n <- 10958
+simlev_seed(1); n <- 10958
 d30 <- data.frame(date = seq(as.Date("1995-01-01"), by = "day", length.out = n),
-                  A = 100 * cumprod(1 + rnorm(n, 3e-4, 0.01)), B = 50 * cumprod(1 + rnorm(n, 1e-4, 0.003)))
+                  A = 100 * cumprod(1 + .sl_rnorm(n, 3e-4, 0.01)), B = 50 * cumprod(1 + .sl_rnorm(n, 1e-4, 0.003)))
 # T1–T7: vier Kursreihen, 20 Jahre täglich, und 2.000 Pfade x 30 Jahre Wachstumsfaktoren (wie bench/gen.R)
-set.seed(7); n <- 7305
+simlev_seed(7); n <- 7305
 d <- data.frame(date = seq(as.Date("2000-01-01"), by = "day", length.out = n),
-                aktien = 100 * cumprod(1 + rnorm(n, 3e-4, 0.011)), bonds = 100 * cumprod(1 + rnorm(n, 1e-4, 0.003)),
-                gold = 100 * cumprod(1 + rnorm(n, 2e-4, 0.009)), em = 100 * cumprod(1 + rnorm(n, 3e-4, 0.014)))
-W <- matrix(1 + rnorm(30 * 2000, 0.05, 0.15), 30, 2000)
+                aktien = 100 * cumprod(1 + .sl_rnorm(n, 3e-4, 0.011)), bonds = 100 * cumprod(1 + .sl_rnorm(n, 1e-4, 0.003)),
+                gold = 100 * cumprod(1 + .sl_rnorm(n, 2e-4, 0.009)), em = 100 * cumprod(1 + .sl_rnorm(n, 3e-4, 0.014)))
+W <- matrix(1 + .sl_rnorm(30 * 2000, 0.05, 0.15), 30, 2000)
 # T8: MS-GJR-GARCH(1,1), 2 Regime, n = 2.000 (Simulation wie golden/modules/gen_ms_garch.R, Datensatz gjr2)
 sim_msgjr <- function(n, om, al, ga, be, P, seed) {
-  set.seed(seed); K <- length(om)
+  simlev_seed(seed); K <- length(om)
   hk <- om / (1 - al - ga / 2 - be); s <- 1L; y <- numeric(n)
   for (t in seq_len(n)) {
-    if (t > 1) { s <- sample.int(K, 1, prob = P[s, ]); e <- y[t - 1]
+    if (t > 1) { s <- .sl_sample(K, 1, prob = P[s, ]); e <- y[t - 1]
       hk <- om + (al + ga * (e < 0)) * e^2 + be * hk }
-    y[t] <- sqrt(hk[s]) * rnorm(1)
+    y[t] <- sqrt(hk[s]) * .sl_rnorm(1)
   }
   y
 }

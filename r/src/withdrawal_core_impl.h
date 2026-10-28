@@ -1,13 +1,14 @@
-// src/withdrawal_core_impl.h
+// core/withdrawal_core_impl.h
 // Entnahme-Simulationen (Decumulation) fuer SimLev, reine Rechnung ohne R und Python
 //
 // GEMEINSAME QUELLE FUER R UND PYTHON (Etappe 7.3a): R ruft den Kern ueber die
-// .Call-Huelle in src/withdrawal_core.cpp auf (sie wandelt nur die R-Objekte um),
+// .Call-Huelle in r/src/withdrawal_core.cpp auf (sie wandelt nur die R-Objekte um),
 // Python ueber das Erweiterungsmodul simlev._ext (python/src/_ext_withdrawal.cpp).
-// Python baut aus einer Byte-fuer-Byte-Kopie in python/src/
-// (python/tests/test_shared_c.py); Aenderungen nur hier vornehmen und danach
-// kopieren. Der reine Python-Kern (simlev/_withdrawal_core.py) rechnet dasselbe
-// und bleibt der Rueckfall.
+// Kanonisch in core/ (seit Etappe 9.6c, F16); R und Python bauen aus
+// Byte-fuer-Byte-Kopien in r/src/ bzw. python/src/core/ (tools/core_sync.py
+// --write/--check); Aenderungen nur in core/ vornehmen und danach kopieren.
+// Die Python-Huelle (simlev/_withdrawal_core.py) ruft nur noch diesen Kern; der reine
+// Python-Kern als Rueckfall ist seit 9.6c entfallen.
 //
 // Aufbau wie alle C++-Kerne (simlev_core.h): statische Funktionen ueber den Sichten
 // simlev_host::NumVec/IntVec/NumMat und den Host-Makros SIMLEV_* (Fehler, NA,

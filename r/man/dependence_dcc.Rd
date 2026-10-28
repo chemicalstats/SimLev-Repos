@@ -21,21 +21,26 @@ Liste mit \code{a}, \code{b} (DCC-Parameter), \code{loglik}
 Zeit x Paare der bedingten Korrelationen \eqn{R_t}; Spaltennamen wie
 \code{pairs}), \code{pairs} (Paarnamen \code{"A ~ B"}), \code{garch}
 (data.frame je Reihe: \code{series}, \code{alpha}, \code{beta},
-\code{method} = Schaetzweg der GARCH-Stufe), \code{z} (Matrix der
+\code{method} = Schaetzweg der GARCH-Stufe: \code{"ml"}, \code{"momente"}
+oder \code{"konstant"}), \code{z} (Matrix der
 standardisierten Residuen) und \code{Qbar}.
 }
 \description{
 Schaetzt zeitvariable Korrelationen zwischen mehreren Renditereihen.
 Zweistufige Schaetzung: univariate GARCH(1,1) mit Konstante je Reihe (wie
-im Bootstrap: mit der aus rugarch 1.5-6 uebernommenen Fassung von
-\code{ugarchfit}, wenn diese scheitert mit optim, notfalls
-Momentschaetzer), danach die Korrelationsdynamik der standardisierten
+im Bootstrap: Maximum Likelihood unter Normalverteilung mit der
+C-Bibliothek von SimLev, notfalls Momentschaetzer), danach die
+Korrelationsdynamik der standardisierten
 Residuen \eqn{z_t}
 \deqn{Q_t = (1 - a - b)\bar Q + a z_{t-1} z_{t-1}' + b Q_{t-1}}
 mit \eqn{Q_1 = \bar Q} (Stichproben-Korrelation der \eqn{z_t}) und
 \eqn{a, b > 0}, \eqn{a + b < 0.999}, per Quasi-Maximum-Likelihood
-(Nelder-Mead; Filter in C++). Die bedingte Korrelation ist
+(Nelder-Mead, ganz in der C-Bibliothek von SimLev). Die bedingte Korrelation ist
 \eqn{R_t = \mathrm{diag}(Q_t)^{-1/2} Q_t \mathrm{diag}(Q_t)^{-1/2}}.
+Die Schaetzung ist deterministisch: Den frueheren zufaelligen Rueckfall der
+GARCH-Stufe (gosolnp mit Startwert aus der Uhrzeit) gibt es nicht mehr; die
+GARCH-Stufe meldet \code{method = "ml"} statt \code{"rugarch"}/\code{"optim"}
+(Etappe 9.6b).
 }
 \examples{
 set.seed(1); n <- 500

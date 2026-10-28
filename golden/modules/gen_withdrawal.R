@@ -4,8 +4,8 @@
 #   LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> Rscript golden/modules/gen_withdrawal.R
 source("golden/modules/ref_tools.R"); ref_init("withdrawal")
 
-P <- "from simlev.bootstrap import *\nfrom simlev.withdrawal import *\nimport simlev.withdrawal as W\nimport simlev._withdrawal_core as WC\nimport simlev._r.rng as RNG\n"
-JP <- "using SimLev.Bootstrap, SimLev.Withdrawal\nconst B = SimLev.Bootstrap\nconst W = SimLev.Withdrawal\nconst WC = SimLev.WithdrawalCore\nconst RNG = SimLev.RRng\n"
+P <- "from simlev.bootstrap import *\nfrom simlev.withdrawal import *\nimport simlev.withdrawal as W\nimport simlev._withdrawal_core as WC\n"
+JP <- "using SimLev.Bootstrap, SimLev.Withdrawal\nconst B = SimLev.Bootstrap\nconst W = SimLev.Withdrawal\nconst WC = SimLev.WithdrawalCore\n"
 case <- function(id, r, py, inputs = list(), jl = NULL, ...) ref_case(id, r = r, py = paste0(P, py), inputs = inputs,
                                                                    jl = if (is.null(jl)) NULL else paste0(JP, jl), ...)
 # Ergebnisse mit Rechenzeit: elapsed auf 0 setzen (beide Seiten)
@@ -469,12 +469,12 @@ for (k in c("uniform", "discrete", "normal", "tri", "sample", "small")) case(pas
 case("hz_draw_walker", "SimLev:::.draw_horizon(withdrawal_horizon('discrete', years = 1:250, prob = (1:250)^2), 50)",
      "result = W._draw_horizon(withdrawal_horizon(type='discrete', years=np.arange(1, 251), prob=np.arange(1, 251) ** 2.0), 50)",
      jl = 'result = W._draw_horizon(withdrawal_horizon("discrete"; years = 1:250, prob = Float64.(1:250) .* (1:250)), 50)')
-case("hz_seed_null", "set.seed(9); a <- SimLev:::.draw_horizon(withdrawal_horizon('uniform', min = 1, max = 50, seed = NULL), 5); list(a, runif(1))",
-     "RNG.set_seed(9); a = W._draw_horizon(withdrawal_horizon(type='uniform', min=1, max=50, seed=None), 5); result = [a, RNG.runif(1)]",
-     jl = 'RNG.set_seed(9); a = W._draw_horizon(withdrawal_horizon("uniform"; min = 1, max = 50, seed = nothing), 5); result = [a, RNG.runif(1)]')
-case("hz_keeps_state", "set.seed(9); a <- SimLev:::.draw_horizon(withdrawal_horizon('uniform', min = 1, max = 50), 5); list(a, runif(1))",
-     "RNG.set_seed(9); a = W._draw_horizon(withdrawal_horizon(type='uniform', min=1, max=50), 5); result = [a, RNG.runif(1)]",
-     jl = 'RNG.set_seed(9); a = W._draw_horizon(withdrawal_horizon("uniform"; min = 1, max = 50), 5); result = [a, RNG.runif(1)]')
+case("hz_seed_null", "simlev_seed(9); a <- SimLev:::.draw_horizon(withdrawal_horizon('uniform', min = 1, max = 50, seed = NULL), 5); list(a, SimLev:::.sl_runif(1))",
+     "simlev.simlev_seed(9); a = W._draw_horizon(withdrawal_horizon(type='uniform', min=1, max=50, seed=None), 5); result = [a, simlev._lib.runif(1)]",
+     jl = 'SL.simlev_seed(9); a = W._draw_horizon(withdrawal_horizon("uniform"; min = 1, max = 50, seed = nothing), 5); result = [a, SL.SLib.runif(1)]')
+case("hz_keeps_state", "simlev_seed(9); a <- SimLev:::.draw_horizon(withdrawal_horizon('uniform', min = 1, max = 50), 5); list(a, SimLev:::.sl_runif(1))",
+     "simlev.simlev_seed(9); a = W._draw_horizon(withdrawal_horizon(type='uniform', min=1, max=50), 5); result = [a, simlev._lib.runif(1)]",
+     jl = 'SL.simlev_seed(9); a = W._draw_horizon(withdrawal_horizon("uniform"; min = 1, max = 50), 5); result = [a, SL.SLib.runif(1)]')
 HE <- list(miss = c("withdrawal_horizon('uniform', min = 3)", "withdrawal_horizon(type='uniform', min=3)",
     'withdrawal_horizon("uniform"; min = 3)'),
            y0 = c("withdrawal_horizon('fixed', years = 0)", "withdrawal_horizon(type='fixed', years=0)",

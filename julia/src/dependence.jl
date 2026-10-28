@@ -66,8 +66,9 @@ _fill_na(x, method; keep_leading = false) =
 _roll_var(x, n) = _fvec(SimLev.Signals._roll_var(x, n))
 _roll_cov(x, y, n) = _fvec(SimLev.Signals._roll_cov(x, y, n))
 _roll_mean(x, n) = _fvec(SimLev.Signals._roll_mean(x, n))
-_with_rng_restore(fn, seed) = SimLev.Bootstrap._with_rng_restore(fn; seed = seed)
-_boot_idx_stationary(n_src, n_out, L) = Vector{Int}(SimLev.BootstrapCore.boot_idx_stationary(n_src, n_out, L))
+"Zufall der C-Bibliothek slc (Entwurf C.5)."
+_SL() = SimLev.SLib
+_boot_idx_stationary(n_src, n_out, L, stream) = Vector{Int}(SimLev.SLib.boot_idx_stationary(n_src, n_out, L; stream = stream))
 _pw_block_stationary(x) = Float64(_el(SimLev.Bootstrap._pw_block(x), "stationary"))
 
 _errmsg(e) = e isa ErrorException ? e.msg : sprint(showerror, e)
@@ -78,7 +79,7 @@ message(text) = (io = SimLev.RParallel.r_stderr(); println(io, text); flush(io);
 "Warnungen unterdrücken (`suppressWarnings`)."
 _quietly(f) = Base.CoreLogging.with_logger(f, Base.CoreLogging.NullLogger())
 
-# ── Statistik-Bausteine (RStats, RNmath, RLinalg, RFmt, RLibm) ─────────────
+# ── Statistik-Bausteine (RStats, RLinalg, RFmt, RLibm, SLib) ──────────────
 
 _quantile(x, probs; na_rm = false) =
     _fvec(_flex(SimLev.RStats.quantile, (_fvec(x),), (probs = _fvec(probs),), (na_rm = na_rm, names = false)))
@@ -93,20 +94,18 @@ function _optimize(f, lower, upper)
     o = SimLev.RStats.optimize(f, [Float64(lower), Float64(upper)])
     Float64(_el(o, "minimum")), Float64(_el(o, "objective"))
 end
-function _optim_nm(par, fn, maxit, reltol)
-    o = _flex(SimLev.RStats.optim, (_fvec(par), fn), NamedTuple(),
-              (method = "Nelder-Mead", control = Dict{String,Any}("maxit" => maxit, "reltol" => reltol)))
-    _fvec(_el(o, "par")), Float64(_el(o, "value"))
-end
-_qnorm(p) = SimLev.RNmath.qnorm(Float64(p))
-_qt(p, df) = SimLev.RNmath.qt(Float64(p), Float64(df))
-_pt(q, df) = SimLev.RNmath.pt(Float64(q), Float64(df))
-_lgamma(x) = Float64(SimLev.RNmath.lgammafn(Float64(x)))
-_plogis(x) = Float64(SimLev.RNmath.plogis(Float64(x)))
-_qlogis(p) = Float64(SimLev.RNmath.qlogis(Float64(p)))
+# Verteilungen der C-Bibliothek slc (Entwurf B.3, B.4), wie .sl_qnorm usw. in R; Zahl oder Feld
+_f64a(x) = x isa AbstractArray ? Float64.(x) : Float64(x)
+_qnorm(p) = SimLev.SLib.qnorm(_f64a(p))
+_qt(p, df) = SimLev.SLib.qt(_f64a(p), Float64(df))
+_pt(q, df) = SimLev.SLib.pt(_f64a(q), Float64(df))
+_lgamma(x) = Float64(SimLev.SLib.lgamma(Float64(x)))
+_plogis(x) = Float64(SimLev.SLib.plogis(Float64(x)))
+_qlogis(p) = Float64(SimLev.SLib.qlogis(Float64(p)))
 _log(x::Real) = SimLev.RLibm.log(Float64(x))
 _exp(x::Real) = SimLev.RLibm.exp(Float64(x))
-_matprod(A, B) = _fmat(SimLev.RLinalg.matprod(_fmat(A), B isa AbstractVector ? reshape(_fvec(B), :, 1) : _fmat(B)))
+"`A %m% B` (slc-Matrixprodukt, Entwurf B.6); Vektor B als Spalte."
+_matprod(A, B) = _fmat(SimLev.SLib.matmul(_fmat(A), B isa AbstractVector ? reshape(_fvec(B), :, 1) : _fmat(B)))
 _matvec(A, b) = vec(_matprod(A, reshape(_fvec(b), :, 1)))
 
 "`sprintf` für einen Satz Skalare (über RFmt)."
@@ -513,17 +512,13 @@ function _cop_ll(family::AbstractString, par, u, v)
     pw = SimLev.r_pow
     if base == "gaussian"
         r = par[1]
-        x = _qnorm.(u); y = _qnorm.(v)
-        r2 = r * r
-        c = -0.5 * lg(1 - r2)
-        ll = c .- (r2 .* (x .* x .+ y .* y) .- 2 .* r .* x .* y) ./ (2 * (1 - r2))
-    elseif base == "t"
+        x = _qnorm(u); y = _qnorm(v)
+        ll = _cop_g_ll(r, x, y, x .* x, y .* y)
+    elseif base == "t"                      # N2: Hilfen _cop_t_c0, _cop_t_ll
         r, nu = par[1], par[2]
-        x = _qt.(u, nu); y = _qt.(v, nu)
-        r2 = r * r
-        c0 = _lgamma((nu + 2) / 2) + _lgamma(nu / 2) - 2 * _lgamma((nu + 1) / 2) - 0.5 * lg(1 - r2)
-        ll = c0 .- (nu + 2) / 2 .* l1p.((x .* x .- 2 .* r .* x .* y .+ y .* y) ./ (nu * (1 - r2))) .+
-             (nu + 1) / 2 .* (l1p.(x .* x ./ nu) .+ l1p.(y .* y ./ nu))
+        x = _qt(u, nu); y = _qt(v, nu)
+        ll = _cop_t_ll(r, nu, _cop_t_c0(nu), x, y, x .* x, y .* y,
+                       (nu + 1) / 2 .* (l1p.(x .* x ./ nu) .+ l1p.(y .* y ./ nu)))
     elseif base == "clayton"
         th = par[1]
         ll = l1p(th) .- (1 + th) .* (lg.(u) .+ lg.(v)) .- (2 + 1 / th) .* lg.(pw.(u, -th) .+ pw.(v, -th) .- 1)
@@ -543,6 +538,58 @@ function _cop_ll(family::AbstractString, par, u, v)
     end
     s = SimLev.r_sum(ll)
     isfinite(s) ? s : -1e10
+end
+
+# N2: Teile der Log-Dichten der Gauss- und t-Copula je Beobachtung (wie .cop_g_ll, .cop_t_ll in R), auch für die
+# Profil-Likelihood in _cop_fit_t; x2 = x^2, y2 = y^2, B = (nu + 1)/2 (log1p(x^2/nu) + log1p(y^2/nu)).
+function _cop_g_ll(r, x, y, x2, y2)
+    r2 = r * r
+    c = -0.5 * SimLev.RLibm.log(1 - r2)
+    c .- (r2 .* (x2 .+ y2) .- 2 .* r .* x .* y) ./ (2 * (1 - r2))
+end
+function _cop_t_ll(r, nu, c0, x, y, x2, y2, B)
+    r2 = r * r
+    c = c0 - 0.5 * SimLev.RLibm.log(1 - r2)
+    c .- (nu + 2) / 2 .* SimLev.RLibm.log1p.((x2 .- 2 .* r .* x .* y .+ y2) ./ (nu * (1 - r2))) .+ B
+end
+"N2: c0(nu) = lgamma((nu+2)/2) + lgamma(nu/2) - 2 lgamma((nu+1)/2); für nu > 64 asymptotisch (`.cop_t_c0`)."
+function _cop_t_c0(nu)
+    nu <= 64 && return _lgamma((nu + 2) / 2) + _lgamma(nu / 2) - 2 * _lgamma((nu + 1) / 2)
+    a = nu / 2
+    ia2 = 1 / (a * a)
+    ((((31 / 9216 * ia2 - 17 / 7168) * ia2 + 1 / 320) * ia2 - 1 / 96) * ia2 + 1 / 4) / a
+end
+"N2: t-Copula per Profil-Likelihood in nu (`.cop_fit_t`); Ergebnis [atanh rho, nu, -loglik]."
+function _cop_fit_t(u, v)
+    best = [0.0, Inf, Inf]
+    function prof(nu)
+        if isinf(nu)
+            x = _fvec(_qnorm(u)); y = _fvec(_qnorm(v)); x2 = x .* x; y2 = y .* y
+            g = th -> (s = SimLev.r_sum(_cop_g_ll(SimLev.RLibm.tanh(th), x, y, x2, y2)); isfinite(s) ? -s : 1e10)
+        else
+            x = _fvec(_qt(u, nu)); y = _fvec(_qt(v, nu)); x2 = x .* x; y2 = y .* y
+            B = (nu + 1) / 2 .* (SimLev.RLibm.log1p.(x2 ./ nu) .+ SimLev.RLibm.log1p.(y2 ./ nu))
+            c0 = _cop_t_c0(nu)
+            g = th -> (s = SimLev.r_sum(_cop_t_ll(SimLev.RLibm.tanh(th), nu, c0, x, y, x2, y2, B)); isfinite(s) ? -s : 1e10)
+        end
+        o = SimLev.RStats.optimize(g, [-20.0, 20.0]; tol = 1e-10)
+        mn = Float64(_el(o, "minimum")); ob = Float64(_el(o, "objective"))
+        if ob < best[3]
+            best[1] = mn; best[2] = nu; best[3] = ob
+        end
+        ob
+    end
+    nus = vcat([2 + 2.0^k for k in -4:12], Inf)
+    K = length(nus)
+    f = [prof(nu) for nu in nus]
+    k = argmin(f)
+    if k >= K - 1
+        SimLev.RStats.optimize(s -> prof(s == 0 ? Inf : 1 / s), [0.0, 1 / nus[K - 2]]; tol = 1e-9)
+    else
+        lo = k == 1 ? _log(nus[1] - 2) - 30 : _log(nus[k - 1] - 2)
+        SimLev.RStats.optimize(t2 -> prof(2 + _exp(t2)), [lo, _log(nus[k + 1] - 2)]; tol = 1e-6)
+    end
+    best
 end
 
 "Tail-Koeffizienten einer Copula (unten, oben) als benannter Vektor (`.cop_lambda`)."
@@ -584,6 +631,9 @@ Gumbel optional mit Rotation `"_90"`, `"_180"`, `"_270"`; `nothing` = Auswahl
 nach dem Vorzeichen von Kendalls Tau. Ergebnis: `RFrame` je Familie
 (aufsteigend nach AIC) mit `family`, `par1`, `par2`, `loglik`, `aic`, `bic`,
 `lambda_lower`, `lambda_upper`; `attrs(out)["tau"]`, `attrs(out)["n"]`.
+Die t-Copula wird über die Profil-Likelihood in den Freiheitsgraden geschätzt (Raster
+nu = 2 + 2^k, k = -4 ... 12, und nu = Inf als Gauss-Grenzfall, danach eindimensionale Suche);
+bei nu > 500 steht in `par2` 500, `loglik` gilt für das gefundene nu.
 """
 function copula_fit(x, y, families_pos = nothing; families = families_pos)
     lx, ly = _len(x), _len(y)
@@ -612,7 +662,7 @@ function copula_fit(x, y, families_pos = nothing; families = families_pos)
         families = tau >= 0 ? ["gaussian", "t", "clayton", "gumbel", "frank", "clayton_180", "gumbel_180"] :
                               ["gaussian", "t", "frank", "clayton_90", "clayton_270", "gumbel_90", "gumbel_270"]
     end
-    rho0 = SimLev.RLibm.sin(pi * tau / 2)
+    # N2: Startwert rho0 entfällt (t-Copula per Profil-Likelihood, _cop_fit_t)
     fam_c = String[]; p1 = Float64[]; p2 = Float64[]; llk = Float64[]; aic = Float64[]; bic = Float64[]
     ll_ = Float64[]; lu_ = Float64[]
     for fam in families
@@ -621,11 +671,9 @@ function copula_fit(x, y, families_pos = nothing; families = families_pos)
         if base == "gaussian"
             mn, ob = _optimize(r -> f([r]), -0.995, 0.995)
             par, nll, k = [mn, _NA], ob, 1
-        elseif base == "t"
-            st = [SimLev.RLibm.atanh(max(min(rho0, 0.95), -0.95)), _log(6.0)]
-            p_, val = _optim_nm(st, th -> f([SimLev.RLibm.tanh(th[1]), 2 + _exp(th[2])]), 500, 1e-10)
-            nu = min(2 + _exp(p_[2]), 500.0)
-            par, nll, k = [SimLev.RLibm.tanh(p_[1]), nu], val, 2
+        elseif base == "t"                  # N2: Profil-Likelihood in nu
+            o = _cop_fit_t(u, v)
+            par, nll, k = [SimLev.RLibm.tanh(o[1]), min(o[2], 500.0)], o[3], 2
         elseif base == "clayton"
             mn, ob = _optimize(lt -> f([_exp(lt)]), _log(1e-4), _log(60.0))
             par, nll, k = [_exp(mn), _NA], ob, 1
@@ -693,7 +741,9 @@ end
 
 DCC(1,1) (Engle 2002) für eine Renditematrix (mindestens zwei Spalten, 100
 Zeilen). Ergebnis: RList `a`, `b`, `loglik`, `correlation` (Zeit × Paare),
-`pairs`, `garch`, `z`, `Qbar`.
+`pairs`, `garch` (`method` = "ml", "momente" oder "konstant"), `z`, `Qbar`.
+Seit Etappe 9.6b wie R: GARCH-Stufe per ML der C-Bibliothek (Label "ml" statt
+"rugarch"/"optim"), Stufe 2 ganz in C; die Schätzung ist deterministisch.
 """
 function dependence_dcc(R)
     Rm, nm = _as_matrix(R)
@@ -704,7 +754,7 @@ function dependence_dcc(R)
     flat = [nm[j] for j in 1:size(Z, 2) if SimLev.r_sd(Z[:, j]) == 0]
     isempty(flat) || error("dependence_dcc: Reihe $(join(["'$f'" for f in flat], ", ")) ist konstant; keine Korrelation schätzbar.")
     Qb = _cormat(Z)
-    ev = _fvec(_el(_flex(SimLev.RLinalg.eigen, (Qb,), NamedTuple(), (symmetric = true, only_values = true)), "values"))
+    ev = _fvec(SimLev.SLib.eigen_sym(Qb; only_values = true)["values"])
     if _rmin(ev) < 1e-8
         C0 = copy(Qb)
         for i in 1:size(C0, 1)
@@ -717,12 +767,10 @@ function dependence_dcc(R)
         error("dependence_dcc: Korrelationsmatrix der standardisierten Residuen ist singulär (z. B. '$(nm[i0])' und '$(nm[j0])': " *
               "Korrelation $(_sprintf("%.6f", Qb[i0, j0]))); DCC nicht schätzbar. Doppelte bzw. linear abhängige Reihen entfernen.")
     end
-    par(th) = (s = 0.999 * _plogis(th[1]); a = s * _plogis(th[2]); (a, s - a))
-    f(th) = (p = par(th); SimLev.DependenceCore.dcc_filter(Z, p[1], p[2], Qb, false)["nll"])
-    st = [_qlogis(0.98 / 0.999), _qlogis(0.03 / 0.98)]
-    opar, oval = _optim_nm(st, f, 2000, 1e-10)
-    a, b = par(opar)
-    fl = SimLev.DependenceCore.dcc_filter(Z, a, b, Qb, true)
+    # Stufe 2 ganz in C (Entwurf B.11, wie .sl_dcc_fit in R): deterministisch
+    o = SimLev.SLib.dcc_fit(Z, Qb)
+    a, b, oval = Float64(_el(o, "a")), Float64(_el(o, "b")), Float64(_el(o, "nll"))
+    fl = SimLev.SLib.dcc_filter(Z, a, b, Qb, true)
     fl["ok"] === true || error("dependence_dcc: bedingte Korrelationsmatrix nicht positiv definit; DCC nicht schätzbar.")
     pn = ["$(nm[i]) ~ $(nm[j])" for (i, j) in _combn2(length(nm))]
     C = NamedMat(fl["R"]; colnames = pn)
@@ -983,14 +1031,14 @@ function dependence_analysis(data, assets; conditions = nothing, frequency = ("w
                                c == "n" ? Int[r[c] for r in rows] : Float64[r[c] for r in rows]) for c in cnames)...)
             if B > 0 && nlv >= 2
                 nk = size(Xk, 1)
-                boot = _with_rng_restore(seed) do
-                    res = Any[]
-                    for _b in 1:Int(B)
-                        idx = _boot_idx_stationary(nk, nk, block)
-                        Xb = Xk[idx, :]; rb = code[idx]
-                        push!(res, (_dep_reg_cor(Xb, rb, nlv, pidx), _dep_reg_cor(Xb, rb, nlv, pidx; rank = true)))
-                    end
-                    res
+                # Regel 3/4: seed = nothing -> einmal k aus G (beim ersten Bootstrap), dann je Zustand wie seed = k
+                seed === nothing && (seed = _SL().next_seed())
+                S = _SL().main_stream(seed)
+                boot = Any[]
+                for _b in 1:Int(B)
+                    idx = _boot_idx_stationary(nk, nk, block, S)
+                    Xb = Xk[idx, :]; rb = code[idx]
+                    push!(boot, (_dep_reg_cor(Xb, rb, nlv, pidx), _dep_reg_cor(Xb, rb, nlv, pidx; rank = true)))
                 end
                 bp = cat([b[1] for b in boot]...; dims = 3)
                 bs = cat([b[2] for b in boot]...; dims = 3)
@@ -1130,13 +1178,14 @@ end
 # Quantilsregression, Tail-Regression, CoVaR
 # ═════════════════════════════════════════════════════════════════════════════
 
+"OLS-Start über `.sl_lsfit` (Householder-QR, Entwurf B.7): (Fit, Rang, Pivot)."
 function _qr_rank_pivot_coef(Xm, y)
-    qx = _flex(SimLev.RLinalg.qr, (Xm,))
-    rank = Int(_el(qx, "rank"))
-    piv = Int.(_fvec(_el(qx, "pivot")))
+    qx = SimLev.SLib.lsfit(_fmat(Xm), _fvec(y))
+    rank = Int(qx["rank"])
+    piv = Int.(qx["pivot"])
     qx, rank, piv
 end
-_qr_coef(qx, y) = _fvec(SimLev.RLinalg.qr_coef(qx, _fvec(y)))
+_qr_coef(qx, y) = _fvec(qx["coefficients"])
 
 _is_numcol(c) = eltype(c) <: Union{Missing,Real} && !(eltype(c) <: Union{Missing,Bool}) && !(eltype(c) === Missing) ||
                 (eltype(c) === Any && all(v -> v === missing || (v isa Real && !(v isa Bool)), c))
@@ -1193,11 +1242,8 @@ function quantile_regression(y, X_pos = nothing, tau_pos = 0.5; X = X_pos, tau =
     RVector(beta; names = nm)
 end
 
-"`coef(lm(y ~ X))` mit Konstante in `X1` (lm.fit und qr.coef rechnen mit LINPACK dieselben Schritte)."
-function _lm_coef(y, X1)
-    qx = _flex(SimLev.RLinalg.qr, (X1,))
-    _qr_coef(qx, y)
-end
+"`.sl_lsfit(X1, y)\$coefficients` (OLS mit Konstante in `X1`, Entwurf B.7)."
+_lm_coef(y, X1) = _fvec(SimLev.SLib.lsfit(_fmat(X1), _fvec(y))["coefficients"])
 
 """
     tail_regression(data, asset, drivers; quantiles = [0.05, 0.25, 0.5, 0.75, 0.95],
@@ -1230,22 +1276,20 @@ function tail_regression(data, asset, drivers; quantiles = [0.05, 0.25, 0.5, 0.7
     n_failed = 0
     if B > 0
         block === nothing && (block = _rmin(_rmax(2.0, _pw_block_stationary(abs.(y .- SimLev.r_mean(y)))), n / 10))
-        bs = _with_rng_restore(seed) do
-            res = Matrix{Float64}[]
-            for _b in 1:Int(B)
-                idx = _boot_idx_stationary(n, n, block)
-                yb = y[idx]; Xb = X1[idx, :]
-                m = try
-                    reduce(hcat, [SimLev.DependenceCore.quantile_reg_core(yb, Xb, quantiles[k], est[:, k],
-                                                                         _rmax(SimLev.r_sd(yb), 1e-12), 1e-10, 2000)[1]
-                                  for k in 1:nq])
-                catch e
-                    e isa SimLev.DependenceCore.QuantileRegError || rethrow()
-                    fill(_NA, p, nq)
-                end
-                push!(res, reshape(m, p, nq))
+        S = _SL().main_stream(seed)                     # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+        bs = Matrix{Float64}[]
+        for _b in 1:Int(B)
+            idx = _boot_idx_stationary(n, n, block, S)
+            yb = y[idx]; Xb = X1[idx, :]
+            m = try
+                reduce(hcat, [SimLev.DependenceCore.quantile_reg_core(yb, Xb, quantiles[k], est[:, k],
+                                                                     _rmax(SimLev.r_sd(yb), 1e-12), 1e-10, 2000)[1]
+                              for k in 1:nq])
+            catch e
+                e isa SimLev.DependenceCore.QuantileRegError || rethrow()
+                fill(_NA, p, nq)
             end
-            res
+            push!(bs, reshape(m, p, nq))
         end
         n_failed = count(a -> any(isnan, a), bs)
         if n_failed == B

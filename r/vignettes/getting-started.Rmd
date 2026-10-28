@@ -42,7 +42,9 @@ SimLev erwartet einen `data.frame` mit einer Spalte `date` (Klasse `Date`)
 und je Asset einer Spalte mit dem **Kursniveau** (keine Renditen). Hebel,
 Dividenden und Finanzierungskosten müssen in der Kursreihe bereits
 enthalten sein. Hier erzeugen wir zehn Jahre synthetische Kurse für einen
-Aktien-ETF (`WORLD`) und einen Anleihe-ETF (`BONDS`):
+Aktien-ETF (`WORLD`) und einen Anleihe-ETF (`BONDS`). `set.seed()` steuert
+dabei nur diese Beispieldaten; den Zufall von SimLev selbst (Bootstrap,
+Szenarien u. a.) setzt `simlev_seed()` bzw. das Argument `seed`:
 
 ```{r}
 library(SimLev)

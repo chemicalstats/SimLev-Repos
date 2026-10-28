@@ -161,7 +161,7 @@ function scenario_entropy_pooling(x, assets, views; states = nothing, frequency 
         A = permutedims(reduce(hcat, Fs))          # Annahmen × Szenarien
         b = bs; ineq = ineqs
         function dual(l)
-            e = .-vec(_fmat(D._flex(SimLev.RLinalg.crossprod, (A, reshape(_fvec(l), :, 1)))))
+            e = .-vec(_fmat(SimLev.SLib.crossprod(A, reshape(_fvec(l), :, 1))))
             mx = D._rmax(e)
             w = p .* SimLev.RLibm.exp.(e .- mx)
             Z = SimLev.r_sum(w)
@@ -170,8 +170,8 @@ function scenario_entropy_pooling(x, assets, views; states = nothing, frequency 
         fn(l) = dual(l)[1]
         gr(l) = b .- D._matvec(A, dual(l)[2])
         lower = [ineq[i] ? 0.0 : -Inf for i in eachindex(b)]
-        o = SimLev.RStats.optim(zeros(length(b)), fn, gr; method = "L-BFGS-B", lower = lower,
-                                control = Dict{String,Any}("maxit" => 5000, "factr" => 1e3, "pgtol" => 1e-12))
+        o = SimLev.SLib.optim(zeros(length(b)), fn, gr; method = "L-BFGS-B", lower = lower,
+                              control = Dict{String,Any}("maxit" => 5000, "factr" => 1e3, "pgtol" => 1e-12))   # projizierter BFGS (slc, B.8)
         q = dual(_fvec(D._el(o, "par")))[2]
         viol = D._matvec(A, q) .- b
         for i in eachindex(viol)
@@ -192,7 +192,7 @@ function scenario_entropy_pooling(x, assets, views; states = nothing, frequency 
     for j in 1:length(assets), i in 1:Tn
         Xc[i, j] = (Xa[i, j] - mu[j]) * sq[i]
     end
-    C = _fmat(D._flex(SimLev.RLinalg.crossprod, (Xc,)))
+    C = _fmat(SimLev.SLib.crossprod(Xc))
     qp = q[q .> 0]
     out = RList(; class = ["SimLevScenarios"])
     out["scenarios"] = S
@@ -213,10 +213,12 @@ end
 _approx_fn(xg, yg) = u -> _fvec(D_el(_D()._flex(SimLev.RStats.approx, (xg, yg), NamedTuple(), (xout = _fvec(u), rule = 2)), "y"))
 D_el(o, k) = _D()._el(o, k)
 
-_rnorm_mat(m, k) = reshape(_fvec(SimLev.RRng.rnorm(Int(m * k))), Int(m), Int(k))
-_chol(A) = _fmat(SimLev.RLinalg.chol(_fmat(A)))
-_solve(A) = _fmat(SimLev.RLinalg.solve(_fmat(A)))
-_rchisq(n, df) = _fvec(SimLev.RRng.rchisq(Int(n), Float64(df)))
+_rnorm_mat(m, k, rs) = reshape(SimLev.SLib.rnorm(Int(m * k); stream = rs), Int(m), Int(k))
+"`.sl_chol(A)` (Cholesky der C-Bibliothek slc, Entwurf B.5)."
+_chol(A) = _fmat(SimLev.SLib.chol(_fmat(A)))
+"`.sl_solve_spd(A)`: Inverse einer symmetrisch positiv definiten Matrix (Entwurf B.5)."
+_solve(A) = _fmat(SimLev.SLib.solve_spd(_fmat(A)))
+_rchisq(n, df, rs) = SimLev.SLib.rchisq(Int(n), Float64(df); stream = rs)
 
 "Benannte Liste (Stress-Bänder): Paare Name => Wert in Reihenfolge; `nothing`, wenn unbenannt."
 function _named_list(x)
@@ -248,7 +250,7 @@ function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stres
     tau = _fmat(D._kendall(NamedMat(X; colnames = assets)))
     R = SimLev.RLibm.sin.(pi .* tau ./ 2)
     named = true
-    ev = D._flex(SimLev.RLinalg.eigen, (R,), NamedTuple(), (symmetric = true,))
+    ev = SimLev.SLib.eigen_sym(R)
     vals = _fvec(D._el(ev, "values"))
     if D._rmin(vals) < 1e-6
         V = _fmat(D._el(ev, "vectors"))
@@ -261,10 +263,10 @@ function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stres
         named = false
     end
     Ri = _solve(R)
-    ldR = Float64(D._el(D._flex(SimLev.RLinalg.determinant, (R,)), "modulus"))
+    ldR = Float64(SimLev.SLib.logdet_spd(R))
     lgam = D._lgamma
     function ll_t(nu)
-        Z = reshape(SimLev.RNmath.qt.(U, nu), Tn, k)
+        Z = reshape(SimLev.SLib.qt(U, nu), Tn, k)
         qv = D._rowsums(D._matprod(Z, Ri) .* Z)
         c0 = lgam((nu + k) / 2) + (k - 1) * lgam(nu / 2) - k * lgam((nu + 1) / 2) - 0.5 * ldR
         terms = (c0 .- (nu + k) / 2 .* SimLev.RLibm.log1p.(qv ./ nu)) .+ (nu + 1) / 2 .* D._rowsums(SimLev.RLibm.log1p.(Z .* Z ./ nu))
@@ -292,13 +294,13 @@ function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stres
     end
     n = Int(n)
     fin = isfinite(nu)
-    sim = D._with_rng_restore(seed) do
+    sim = let rs = SimLev.SLib.main_stream(seed)          # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
         st = st_list === nothing ? Int[] : [findfirst(==(p.first), assets) for p in st_list]
         Z = zeros(n, k)
         if length(st) == 1
             band = _fvec(st_list[1].second)
-            u = _fvec(SimLev.RRng.runif(n, band[1], band[2]))
-            Z[:, st[1]] = fin ? SimLev.RNmath.qt.(u, nu) : SimLev.RNmath.qnorm.(u)
+            u = SimLev.SLib.runif(n, band[1], band[2]; stream = rs)
+            Z[:, st[1]] = fin ? SimLev.SLib.qt(u, nu) : SimLev.SLib.qnorm(u)
         elseif length(st) > 1
             ks = length(st)
             Ls = _chol(R[st, st])
@@ -306,12 +308,12 @@ function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stres
             parts = Matrix{Float64}[]
             nz = 0; drawn = 0.0; m = 100000
             while true
-                E = D._matprod(_rnorm_mat(m, ks), Ls)
+                E = D._matprod(_rnorm_mat(m, ks, rs), Ls)
                 if fin
-                    sc = sqrt.(_rchisq(m, nu) ./ nu)
+                    sc = sqrt.(_rchisq(m, nu, rs) ./ nu)
                     E = E ./ sc
                 end
-                Ub = fin ? SimLev.RNmath.pt.(E, nu) : SimLev.RNmath.pnorm.(E)
+                Ub = fin ? SimLev.SLib.pt(E, nu) : SimLev.SLib.pnorm(E)
                 hit = [count(j -> Ub[i, j] >= lo[j] && Ub[i, j] <= hi[j], 1:ks) == ks for i in 1:size(E, 1)]
                 push!(parts, E[hit, :])
                 nz += count(hit); drawn += m
@@ -335,12 +337,12 @@ function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stres
                     Id[i, i] = 1e-12
                 end
                 L = _chol(Sc .+ Id)
-                E = D._matprod(_rnorm_mat(n, length(rest)), L)
+                E = D._matprod(_rnorm_mat(n, length(rest), rs), L)
                 if fin
                     Zst = Z[:, st]
                     dq = D._rowsums(D._matprod(Zst, Rss_i) .* Zst)
                     ns = length(st)
-                    chi = _rchisq(n, nu + ns)
+                    chi = _rchisq(n, nu + ns, rs)
                     scale = sqrt.((nu .+ dq) ./ (nu + ns) ./ (chi ./ (nu + ns)))
                     Z[:, rest] = M .+ E .* scale
                 else
@@ -348,12 +350,12 @@ function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stres
                 end
             end
         else
-            Z = D._matprod(_rnorm_mat(n, k), _chol(R))
-            fin && (Z = Z ./ sqrt.(_rchisq(n, nu) ./ nu))
+            Z = D._matprod(_rnorm_mat(n, k, rs), _chol(R))
+            fin && (Z = Z ./ sqrt.(_rchisq(n, nu, rs) ./ nu))
         end
         Z
     end
-    V = fin ? SimLev.RNmath.pt.(sim, nu) : SimLev.RNmath.pnorm.(sim)
+    V = fin ? SimLev.SLib.pt(sim, nu) : SimLev.SLib.pnorm(sim)
     Y = k == 0 ? zeros(n, 0) : reshape(reduce(hcat, [qmarg[j](V[:, j]) for j in 1:k]), n, k)
     out_df = RFrame((assets[j] => Y[:, j] for j in 1:k)...)
     stress_out = stress === nothing ? nothing : RList((p.first => p.second for p in st_list)...)

@@ -19,7 +19,8 @@ schätzt ihr Modell wie R selbst, :mod:`simlev.ms_garch`).
 Datenstrukturen: Pfade sind ``pandas.DataFrame`` (Spalten = Pfadnamen, eine
 Zeile je Pfadzeile); die Niveau-Variante der Zusatzreihen steht in
 ``P.attrs["aux_level"]`` (Attribut ``aux_level`` in R). Zufallszahlen
-ausschließlich über :mod:`simlev._r.rng` (L'Ecuyer-Ströme je Pfad wie R).
+ausschließlich aus der C-Bibliothek slc (:mod:`simlev._lib`, Entwurf C.5): ein Strom je Pfad
+U_i = J^i(S_0), gezogen über die Kerne slc_boot (:mod:`simlev._lib_models`), bitgleich zu R.
 """
 from __future__ import annotations
 
@@ -36,12 +37,12 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
-from . import _bootstrap_core as _core
 from ._r import fmt as _fmt
 from ._r.base import env_from_caller
 from ._r import libm as _libm
 from ._r import parallel as _par
-from ._r import rng as _rng
+from . import _lib as _sl
+from . import _lib_models as _slm
 from ._r.rlist import RList
 from ._r.rnum import r_cumprod, r_mean, r_median, r_pow, r_sd, r_sum, r_var
 
@@ -272,57 +273,8 @@ def _to_date(x, what="date"):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# RNG-Hilfen (.with_rng_restore, .make_streams; .par_lapply in _r.parallel)
+# Zufall (Entwurf C.5): Ströme aus simlev._lib; .par_lapply in _r.parallel
 # ═══════════════════════════════════════════════════════════════════════════
-
-def _with_rng_restore(fn, seed=_MISSING):
-    """Zufallszustand sichern und wiederherstellen (Port von ``.with_rng_restore``).
-
-    Ohne ``seed`` wird der Zustand vor dem Aufruf immer wiederhergestellt; mit
-    einer Zahl wird ``set_seed(seed)`` gesetzt und danach der vorherige Zustand
-    wiederhergestellt; ``seed=None``: nichts setzen, nichts wiederherstellen.
-    Ruft ``fn()`` auf und gibt dessen Ergebnis zurück.
-    """
-    if seed is not _MISSING and seed is None:
-        return fn()
-    has = _rng.has_random_seed()
-    old = _rng.get_random_seed() if has else None
-    kind = _rng.rng_kind()
-    try:
-        if seed is not _MISSING:
-            _rng.set_seed(seed)
-        return fn()
-    finally:
-        if has:
-            _rng.set_random_seed(old)
-        else:
-            _rng.rng_kind(kind[0], kind[1], kind[2])
-            if _rng.has_random_seed():
-                _rng.rm_random_seed()
-
-
-def _make_streams(seed, n):
-    """Zufallsströme je Pfad (L'Ecuyer-CMRG), Port von ``.make_streams``."""
-    has = _rng.has_random_seed()
-    old = _rng.get_random_seed() if has else None
-    old_kind = None if has else _rng.rng_kind()
-    try:
-        _rng.rng_kind("L'Ecuyer-CMRG")
-        _rng.set_seed(seed)
-        s = _rng.get_random_seed()
-        out = []
-        for _ in range(int(n)):
-            out.append(s)
-            s = _rng.next_rng_stream(s)
-        return out
-    finally:
-        if has:
-            _rng.set_random_seed(old)
-        else:
-            _rng.rng_kind(old_kind[0], old_kind[1], old_kind[2])
-            if _rng.has_random_seed():
-                _rng.rm_random_seed()
-
 
 # ``.par_lapply`` steht in Schicht 0 (``simlev._r.parallel``); dieser Name leitet weiter.
 _par_lapply = _par.par_lapply
@@ -804,110 +756,15 @@ def _xp(v) -> float:
 
 @_quiet
 def _fit_garch11(e, gjr=False, quiet=False):
-    """GARCH(1,1) / GJR-GARCH(1,1) schätzen (rugarch -> optim -> Momente), Port von ``.fit_garch11``.
+    """GARCH(1,1) / GJR-GARCH(1,1) schätzen (ML -> Momente), Port von ``.fit_garch11``.
 
-    Schätzt wie R (das rugarch übernommen hat, ``.rugarch_ugarchfit``) zuerst
-    mit der Nachbildung von ``rugarch::ugarchfit`` (:mod:`simlev._r.rugarch`,
-    Solver ``"hybrid"``); scheitert sie mit einem R-Fehler, folgen wie in R
-    der optim-Pfad (Nelder-Mead) und die Momente. Warnungen von rugarch
-    erscheinen wie in R auch bei ``quiet = True``. Erreicht rugarch den
-    Solver gosolnp, setzt dieser wie in R den globalen Zufallszustand neu
-    (Startwert aus der Uhrzeit).
+    Seit Etappe 9.6b wie R über die C-Bibliothek slc (``_lib.fit_garch11``, Entwurf B.10, F10):
+    ML-Punktschätzer unter Normalverteilung (Raster-Starts, BFGS; GJR seit N1 mit α + γ >= 0, also auch
+    γ < 0, und BFGS von allen sieben Rasterpunkten), bei Fehlschlag die
+    Momente mit Warnung; Methodenlabel ``"konstant"``, ``"ml"`` oder ``"momente"``. Der frühere
+    Weg über die rugarch-Nachbildung (mit gosolnp und Uhrzeit-Seed) und Nelder-Mead entfällt.
     """
-    e = np.asarray(e, dtype=np.float64).ravel()
-    n = len(e)
-    mu = r_mean(e)
-    if r_var(e) < 1e-16:
-        return {"mu": mu, "omega": 1e-20, "alpha": 0.0, "beta": 0.0, "gamma": 0.0, "s2": np.full(n, 1e-20),
-                "z": np.zeros(n), "method": "konstant", "s2_init": 1e-20}
-    omega = alpha = beta = None
-    gamma = 0.0
-    method = "none"
-    from ._r import rugarch as _rugarch
-    try:
-        fit = _rugarch.ugarchfit(e, model="gjrGARCH" if gjr else "sGARCH", solver="hybrid")
-        cf = _rugarch.coef(fit)
-        ok = cf is not None
-    except (ImportError, NotImplementedError):
-        raise
-    except Exception:  # noqa: BLE001 - tryCatch(..., error = function(err) NULL)
-        ok = None
-    if ok is False:
-        # coef(fit) ist NULL (keine Konvergenz): in R werden mu, omega, ... NULL, der
-        # optim-Weg filtert eine leere Reihe und `if (stats::sd(z) > 0)` bricht ab (in R
-        # mit erzwungener Nicht-Konvergenz geprüft)
-        from ._r.linalg import RError as _RError
-        raise _RError("missing value where TRUE/FALSE needed")
-    if ok:
-        mu = float(cf["mu"])
-        omega = float(cf["omega"])
-        alpha = float(cf["alpha1"])
-        beta = float(cf["beta1"])
-        if gjr:
-            gamma = float(cf["gamma1"])
-        method = "rugarch"
-
-    def filt(om, al, be, ga, m):
-        return _core.garch_filter(e - m, om, al, be, ga, om / max(1e-6, 1 - al - be - ga / 2))
-
-    if omega is None:
-        try:
-            sv = r_var(e)
-            ep = e - mu
-            ep2 = ep * ep
-
-            def nll(th):
-                th = np.asarray(th, dtype=np.float64)
-                om = _xp(th[0])
-                al = 0.5 / (1 + _xp(-th[1]))
-                be = 0.999 / (1 + _xp(-th[2]))
-                ga = 0.5 / (1 + _xp(-th[3])) if gjr else 0.0
-                if al + be + ga / 2 >= 0.9999:
-                    return 1e10
-                s2 = filt(om, al, be, ga, mu)
-                return 0.5 * r_sum(np.asarray(_libm.log(s2), dtype=np.float64) + ep2 / s2)
-
-            def lg(p):
-                return math.log(p / (1 - p))
-
-            st = [math.log(sv * 0.05), lg(0.05 / 0.5), lg(0.90 / 0.999)] + ([lg(0.04 / 0.5)] if gjr else [])
-            if gjr:
-                st[1] = lg(0.02 / 0.5)
-            st_mod = _stats()
-            if not hasattr(st_mod, "optim"):
-                raise NotImplementedError("simlev._r.stats.optim fehlt (Nelder-Mead f\u00fcr .fit_garch11)")
-            o = st_mod.optim(np.array(st, dtype=np.float64), nll, method="Nelder-Mead", control={"maxit": 4000})
-            par = np.asarray(_get(o, "par"), dtype=np.float64)
-            val = float(_get(o, "value"))
-            om = _xp(par[0])
-            al = 0.5 / (1 + _xp(-par[1]))
-            be = 0.999 / (1 + _xp(-par[2]))
-            ga = 0.5 / (1 + _xp(-par[3])) if gjr else 0.0
-            if val < 1e9 and al + be + ga / 2 < 0.9999:
-                omega, alpha, beta, gamma, method = om, al, be, ga, "optim"
-        except (ImportError, ModuleNotFoundError, NotImplementedError):
-            raise
-        except Exception:  # noqa: BLE001 - tryCatch(..., error = function(err) NULL)
-            pass
-    if omega is None:
-        sv = r_var(e)
-        alpha, beta = 0.08, 0.88
-        gamma = 0.04 if gjr else 0.0
-        omega = sv * (1 - alpha - beta - gamma / 2)
-        method = "momente"
-        if not quiet:
-            _warn("GARCH: rugarch und optim fehlgeschlagen, verwende Moment-Schätzer")
-    s2 = filt(omega, alpha, beta, gamma, mu)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        z = (e - mu) / np.sqrt(s2)
-    z[~np.isfinite(z)] = 0.0
-    sdz = r_sd(z)
-    if sdz > 0:
-        z = (z - r_mean(z)) / r_sd(z)
-    pers = alpha + beta + gamma / 2
-    return {"mu": mu, "omega": omega, "alpha": alpha, "beta": beta, "gamma": gamma, "s2": s2, "z": z,
-            "method": method, "persistence": pers,
-            "s2_init": omega / (1 - pers) if pers < 0.9999 else r_var(e)}
+    return _slm.fit_garch11(np.asarray(e, dtype=np.float64).ravel(), gjr=gjr, quiet=quiet)
 
 
 @_quiet
@@ -937,14 +794,12 @@ def _fit_cross(returns, config, base):
 
 @_quiet
 def _fit_tail(base_ret, prob, side):
-    """Tail-Schätzung (GPD via evd -> Momente -> empirisch -> Default), Port von ``.fit_tail``.
+    """Tail-Schätzung (GPD-ML -> Momente -> empirisch -> Default), Port von ``.fit_tail``.
 
-    Den GPD-Fit (``.evd_fpot(exc, threshold = 0, std.err = FALSE)``, aus evd
-    2.3-7.1 ins R-Paket übernommen, nachgebildet in ``simlev._r.evd``) nimmt R
-    bei mindestens 30 Überschreitungen; Fehler darin führen wie das
+    Den GPD-Fit (``_lib.gpd_fit``, C-Bibliothek slc, Entwurf B.12) nimmt R bei mindestens 30
+    Überschreitungen; Fehler darin (z. B. Suche an der Grenze ξ = -0,999) führen wie das
     ``tryCatch`` in R zum Momenten-Schätzer.
     """
-    from ._r import evd as _evd
     base_ret = np.asarray(base_ret, dtype=np.float64)
     thr = float(_quantile7(base_ret, prob if side == "left" else 1 - prob)[0])
     mask = base_ret < thr if side == "left" else base_ret > thr
@@ -954,10 +809,11 @@ def _fit_tail(base_ret, prob, side):
     method = "none"
     if ne >= 30:
         try:
-            f = _evd.fpot(exc, threshold=0, std_err=False)
-            scale = float(f["estimate"]["scale"])
-            shape = float(f["estimate"]["shape"])
-            method = "MLE"
+            f = _slm.gpd_fit(exc)
+            if math.isfinite(f["scale"]) and f["scale"] > 0 and math.isfinite(f["shape"]):
+                scale = float(f["scale"])
+                shape = float(f["shape"])
+                method = "MLE"
         except Exception:      # tryCatch(..., error = function(e) NULL)
             pass
     if scale is None and ne >= 20:
@@ -995,11 +851,11 @@ def _seq_len_out(n_out):
 @_quiet
 def _prepare_regime_info(base_ret, vol_window, n_regimes):
     """Regime aus rollierender Volatilität (Port von ``.prepare_regime_info``)."""
-    vol = _core.rolling_vol(base_ret, int(vol_window))
+    vol = _slm.rolling_vol(base_ret, int(vol_window))
     th = _quantile7(vol, _seq_len_out(float(n_regimes) + 1))
     th[-1] = th[-1] + 1e-10
-    reg = _core.assign_regimes(vol, th)
-    return {"regimes": reg, "trans": _core.estimate_trans_mat(reg, int(n_regimes)), "vol": vol}
+    reg = _slm.assign_regimes(vol, th)
+    return {"regimes": reg, "trans": _slm.estimate_trans_mat(reg, int(n_regimes)), "vol": vol}
 
 
 @_quiet
@@ -1008,7 +864,6 @@ def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp):
     :func:`simlev.ms_garch._ms_garch_fit`); ``base`` 1-basiert."""
     from . import ms_garch as _msg
     _msg._ms_garch_check(K, garch_model)
-    st = _stats()
     ex = returns[:, base - 1] - 1
     n = len(ex)
     try:
@@ -1032,14 +887,14 @@ def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp):
             if len(i) < 30:
                 continue
             try:
-                b = float(np.asarray(st.lm_fit(np.column_stack([np.ones(len(i)), lag_ex[i]]), ex[i])["coefficients"],
+                b = float(np.asarray(_sl.lsfit(np.column_stack([np.ones(len(i)), lag_ex[i]]), ex[i])["coefficients"],
                                      dtype=np.float64)[1])
             except Exception:  # noqa: BLE001 - tryCatch(..., error = function(e) NA)
                 b = _NAN
             if math.isfinite(b):
                 phi[r] = max(-0.5, min(0.5, b))
             try:
-                lv = float(np.asarray(st.lm_fit(sig[i].reshape(-1, 1), ex[i] - mu[r] - phi[r] * lag_ex[i])["coefficients"],
+                lv = float(np.asarray(_sl.lsfit(sig[i].reshape(-1, 1), ex[i] - mu[r] - phi[r] * lag_ex[i])["coefficients"],
                                       dtype=np.float64)[0])
             except Exception:  # noqa: BLE001
                 lv = _NAN
@@ -1064,8 +919,8 @@ def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp):
             for j in range(K):
                 if j != i and int(np.sum(to == j + 1)) >= 5:
                     try:
-                        g = st.glm("y ~ x", family=st.binomial(), env={"y": (to == j + 1).astype(np.int64), "x": x})
-                        d = float(st.coef(g)["x"])
+                        g = _sl.logit_irls(np.column_stack([np.ones(x.size), x]), (to == j + 1).astype(np.float64))
+                        d = float(g["coefficients"][1])   # Logit-IRLS (Entwurf B.7)
                     except Exception:  # noqa: BLE001 - tryCatch(..., error = function(e) NA)
                         d = _NAN
                     if math.isfinite(d):
@@ -1147,8 +1002,10 @@ def _as_int(x) -> int:
 
 
 @_quiet
-def _generate_returns(returns, method, p, info, n_out):
-    """Eine Renditematrix samt Quellzeilen erzeugen (Port von ``.generate_returns``)."""
+def _generate_returns(returns, method, p, info, n_out, stream):
+    """Eine Renditematrix samt Quellzeilen erzeugen (Port von ``.generate_returns``).
+
+    Ziehungen aus dem Strom des Pfads (Kerne slc_boot, Entwurf B.17 und C.5 Regel 6)."""
     n, k = returns.shape
 
     def from_idx(idx):
@@ -1156,39 +1013,39 @@ def _generate_returns(returns, method, p, info, n_out):
         return {"ret": returns[idx - 1, :], "idx": idx}
 
     if method == "raw":
-        g = from_idx(_core.boot_idx_iid(n, n_out))
+        g = from_idx(_slm.boot_idx_iid(n, n_out, stream=stream))
     elif method == "block":
-        g = from_idx(_core.boot_idx_block(n, n_out, _as_int(p["block_length"]), False))
+        g = from_idx(_slm.boot_idx_block(n, n_out, _as_int(p["block_length"]), False, stream=stream))
     elif method == "circular":
-        g = from_idx(_core.boot_idx_block(n, n_out, _as_int(p["block_length"]), True))
+        g = from_idx(_slm.boot_idx_block(n, n_out, _as_int(p["block_length"]), True, stream=stream))
     elif method == "stationary":
-        g = from_idx(_core.boot_idx_stationary(n, n_out, float(p["L"])))
+        g = from_idx(_slm.boot_idx_stationary(n, n_out, float(p["L"]), stream=stream))
     elif method == "regime":
-        g = from_idx(_core.boot_idx_regime(info["regimes"], info["trans"], n_out))
+        g = from_idx(_slm.boot_idx_regime(info["regimes"], info["trans"], n_out, stream=stream))
     elif method == "tails":
-        g = from_idx(_core.boot_idx_tails(n_out, info["p"], info["p"], info["bulk"], info["left"], info["right"]))
+        g = from_idx(_slm.boot_idx_tails(n_out, info["p"], info["p"], info["bulk"], info["left"], info["right"], stream=stream))
     elif method == "wild":
-        g = {"ret": _core.boot_wild(returns, _as_int(p["wild_type"])), "idx": np.arange(1, n + 1)}
+        g = {"ret": _slm.boot_wild(returns, _as_int(p["wild_type"]), stream=stream), "idx": np.arange(1, n + 1)}
     elif method == "reset":
-        g = {"ret": _core.boot_reset(returns, p["p_break"]), "idx": np.arange(1, n + 1)}
+        g = {"ret": _slm.boot_reset(returns, p["p_break"], stream=stream), "idx": np.arange(1, n + 1)}
     elif method == "evt":
         lt, rt = info["left"], info["right"]
-        g = _core.boot_evt(returns, info["base"] - 1, n_out, lt["prob"], lt["thresh"], lt["scale"], lt["shape"],
+        g = _slm.boot_evt(returns, info["base"] - 1, n_out, lt["prob"], lt["thresh"], lt["scale"], lt["shape"],
                            lt["pool"], 0 if rt is None else rt["prob"], math.inf if rt is None else rt["thresh"],
                            0 if rt is None else rt["scale"], 0 if rt is None else rt["shape"],
-                           np.zeros(0, dtype=np.int64) if rt is None else rt["pool"], info["bulk"])
+                           np.zeros(0, dtype=np.int64) if rt is None else rt["pool"], info["bulk"], stream=stream)
     elif method in ("garch", "gjr_garch"):
         f, cr = info["garch"], info["cross"]
-        g = _core.boot_garch(n_out, info["base"] - 1, k, f["mu"], f["omega"], f["alpha"], f["beta"], f["gamma"],
+        g = _slm.boot_garch(n_out, info["base"] - 1, k, f["mu"], f["omega"], f["alpha"], f["beta"], f["gamma"],
                              f["s2_init"], f["z"], np.arange(1, n + 1), cr["cols"], cr["mu"], cr["om"], cr["al"],
-                             cr["be"], cr["ratio"], cr["s2"], cr["z"])
+                             cr["be"], cr["ratio"], cr["s2"], cr["z"], stream=stream)
     elif method in ("ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"):
         m = info["ms"]
         cr = m["cross"]
-        g = _core.boot_ms_garch(n_out, info["base"] - 1, k, int(m["K"]), m["mu"], m["omega"], m["alpha"], m["beta"],
+        g = _slm.boot_ms_garch(n_out, info["base"] - 1, k, int(m["K"]), m["mu"], m["omega"], m["alpha"], m["beta"],
                                 m["gamma"], m["phi"], m["lambda"], m["trans"], m["delta"], m["unc"], m["stat"],
                                 m["pools"], m["z"], cr["cols"], cr["mu"], cr["om"], cr["al"], cr["be"], cr["ratio"],
-                                cr["s2"], cr["z"])
+                                cr["s2"], cr["z"], stream=stream)
     else:
         _stop("Unbekannte Methode: %s" % method)
     return g
@@ -1400,15 +1257,16 @@ def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length):
 
 @_quiet
 def _draw_path(setup, i, stream, config, method, max_tries):
-    """Einen gültigen Pfad mit eigenem Zufallsstrom erzeugen (Port von ``.draw_path``); ``i`` 1-basiert."""
-    _rng.set_random_seed(stream)
+    """Einen gültigen Pfad mit eigenem Zufallsstrom erzeugen (Port von ``.draw_path``); ``i`` 1-basiert.
+
+    ``stream`` ist der SimLev-Strom des Pfads (Entwurf C.5, Regel 6); Wiederholungen ziehen daraus weiter."""
     c_id = int(setup["combo_of_path"][i - 1])
     err = "Pfad ungültig (Indexrendite <= 0 oder nicht endlich)"
     ex = setup["ex"]
     for tr in range(1, int(max_tries) + 1):
         try:
             g = _generate_returns(ex["ret"], method, setup["base_p"][c_id - 1], setup["infos"][c_id - 1],
-                                  setup["n_out"])
+                                  setup["n_out"], stream)
         except (ImportError, ModuleNotFoundError):
             raise
         except Exception as e:  # noqa: BLE001
@@ -1445,11 +1303,6 @@ def _colnames(P):
     return []
 
 
-def _new_seed():
-    """``sample.int(.Machine$integer.max, 1L)``."""
-    return int(np.asarray(_rng.sample_int(2147483647, 1)).ravel()[0])
-
-
 @_quiet
 def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess_grid=None, path_length=None,
               max_tries=10, seed=None, cores=1, progress=True):
@@ -1465,7 +1318,8 @@ def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess
         ess_grid: dict Wertevektoren je Hyperparameter (``None`` = Standardgitter).
         progress: Fortschrittsmeldung (stderr).
         path_length: Pfadlänge in Zeilen (``None`` = Länge der Historie).
-        seed: Startwert (``None`` = aus dem globalen Zufallsstrom gezogen).
+        seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand
+            von SimLev gezogen, siehe :func:`simlev_seed`, und unter ``seed`` abgelegt).
         cores: Anzahl Prozesse (Fork wie R; ohne Fork sequentiell, Ergebnis identisch).
         max_tries: Versuche je Pfad (Standard 10).
 
@@ -1474,12 +1328,14 @@ def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess
     """
     t0 = time.time()
     setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
-    if seed is None:
-        seed = _new_seed()
-    streams = _with_rng_restore(lambda: _make_streams(seed, setup["n_paths"]))
-    res = _with_rng_restore(lambda: _par_lapply(
+    if seed is None:                    # Regel 3/4: None -> einmal k aus G
+        seed = _sl.next_seed()
+    else:
+        _sl.check_seed(seed)
+    streams = _sl.streams(seed, setup["n_paths"])                                 # Regel 6: U_i = J^i(S_0)
+    res = _par_lapply(
         range(1, setup["n_paths"] + 1),
-        lambda i: _draw_path(setup, i, streams[i - 1], config, method, max_tries), cores))
+        lambda i: _draw_path(setup, i, streams[i - 1], config, method, max_tries), cores)
     ok = np.array([r["path"] is not None for r in res], dtype=bool)
     tries = np.array([float(r["tries"]) for r in res])
     if not ok.any():
@@ -1724,6 +1580,9 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
         strategies: dict Name -> Strategie oder dict mit ``strategy`` und optional
             ``signal`` (Funktion ``DataFrame -> DataFrame | dict``), ``args``
             (dict für ``simulation``) und ``map`` (dict Alias -> Pfadspalte).
+        seed: wie in :func:`bootstrap` (``None`` = genau einmal aus dem Zufallszustand von SimLev
+            gezogen und unter ``seed`` abgelegt); jeder Pfad hat einen eigenen Strom, das Ergebnis
+            hängt nicht von ``cores`` oder ``chunk_size`` ab.
         Übrige Argumente wie in R.
 
     Returns:
@@ -1761,10 +1620,12 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
     dates = _to_date(dates, "dates")
     if burn_in >= n_out:
         _stop("burn_in ist länger als der Pfad.")
-    if seed is None:
-        seed = _new_seed()
+    if seed is None:                    # Regel 3/4: None -> einmal k aus G
+        seed = _sl.next_seed()
+    else:
+        _sl.check_seed(seed)
     n_paths = setup["n_paths"]
-    streams = _with_rng_restore(lambda: _make_streams(seed, n_paths))
+    streams = _sl.streams(seed, n_paths)                                          # Regel 6: U_i = J^i(S_0)
     ids = np.arange(1, n_paths + 1)
     chunk_size = float(chunk_size)
     keys = np.ceil(ids / chunk_size)
@@ -1890,7 +1751,7 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
     if progress:
         _message("Bootstrap-Studie '%s': %d Pfade x %d Strategien, %d Chunks, %d Kern(e)"
                  % (method, n_paths, len(specs), len(chunks), int(cores)))
-    res = _with_rng_restore(lambda: _par_lapply(range(1, len(chunks) + 1), run_chunk, cores))
+    res = _par_lapply(range(1, len(chunks) + 1), run_chunk, cores)
     res = [r for ch in res for r in ch]
     tab_parts = []
     for nm in snames:
@@ -2280,7 +2141,7 @@ def _plot_study(x, metric="cagr", width=640, height=420):
 
     Returns:
         :class:`simlev.SimLevPlot`; ``data``: ``density`` (``strategy``, ``x``, ``density``: die gezeichneten
-        Punkte von ``density()`` je Strategie im Wertebereich der Kennzahl).
+        Punkte der Kerndichte ``.sl_kde`` je Strategie im Wertebereich der Kennzahl).
     """
     from .svg import _jl_fmt, _jl_max, _jl_maximum, _jl_minimum, _jl_str as J
     tab = x["results"]
@@ -2293,9 +2154,7 @@ def _plot_study(x, metric="cagr", width=640, height=420):
     dens = []
     for v in dl:
         v = v[np.isfinite(v)]
-        if v.size < 2:   # R's density(): vor nx / N prüfen (_r.stats.density teilt sonst durch 0)
-            raise ValueError("need at least 2 points to select a bandwidth automatically")
-        dd = _stats().density(v)
+        dd = _sl.kde(v)   # Gauß-Kerndichte wie .sl_kde in R (slc, Entwurf B.16; nur Grafik)
         dens.append((np.asarray(_get(dd, "x"), dtype=np.float64), np.asarray(_get(dd, "y"), dtype=np.float64)))
     x0, x1 = (0.0, 1.0) if allv.size == 0 else (_jl_minimum(allv), _jl_maximum(allv))
     if x1 == x0:
@@ -2364,7 +2223,7 @@ SimLevBootstrapStudy.plot = _plot_method(_plot_study, "SimLevBootstrapStudy")
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
 from ._r.base import quiet_fp  # noqa: E402
 
-quiet_fp(globals(), list(__all__) + ["_calculate_ess", "_ess_design", "_extract_returns", "_fit_garch11", "_fit_tail", "_get_base_params", "_get_ess_grid", "_letf_returns", "_make_streams", "_prepare_regime_info", "_pw_block", "_wquantile"])  # bootstrap_probability: env aus dem Aufrufer (env_from_caller)
+quiet_fp(globals(), list(__all__) + ["_calculate_ess", "_ess_design", "_extract_returns", "_fit_garch11", "_fit_tail", "_get_base_params", "_get_ess_grid", "_letf_returns", "_prepare_regime_info", "_pw_block", "_wquantile"])  # bootstrap_probability: env aus dem Aufrufer (env_from_caller)
 
 
 def _make_callable():

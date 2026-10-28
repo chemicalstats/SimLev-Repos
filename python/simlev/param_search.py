@@ -393,9 +393,9 @@ def _row_key(D, i):
     return tuple(out)
 
 
-def _ps_design(space, method, n, constraint):
-    """Versuchsplan erzeugen."""
-    from ._r import rng
+def _ps_design(space, method, n, constraint, stream=None):
+    """Versuchsplan erzeugen (Zufall aus ``stream``, sonst aus dem globalen Zustand von SimLev)."""
+    from . import _lib as rng
     names = list(space.keys())
     if method == "grid":
         D = _expand_grid({k: _ps_levels(space[k]) for k in names})
@@ -409,10 +409,10 @@ def _ps_design(space, method, n, constraint):
             U = np.empty((m, len(names)))
             for j in range(len(names)):
                 if method == "lhs":
-                    s = np.asarray(rng.sample_int(m), dtype=np.float64)
-                    U[:, j] = (s - np.asarray(rng.runif(m), dtype=np.float64)) / m
+                    s = np.asarray(rng.sample(m, stream=stream), dtype=np.float64)
+                    U[:, j] = (s - np.asarray(rng.runif(m, stream=stream), dtype=np.float64)) / m
                 else:
-                    U[:, j] = np.asarray(rng.runif(m), dtype=np.float64)
+                    U[:, j] = np.asarray(rng.runif(m, stream=stream), dtype=np.float64)
             Dn = pd.DataFrame({k: _ps_map(space[k], U[:, j]) for j, k in enumerate(names)}, columns=names)
             Dn = Dn[_ok_rows(Dn, constraint)]
             Dc = Dn if D is None else pd.concat([D, Dn], ignore_index=True)
@@ -538,7 +538,7 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
         objective: Name der Zielgröße (Standard ``"sharpe"``).
         maximize: Zielgröße maximieren (Standard ``True``).
         cores: Anzahl Prozesse (Standard 1).
-        seed: Startwert für den Versuchsplan (Zufallszustand danach wiederhergestellt).
+        seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`) für den Versuchsplan; die Auswertung ist deterministisch und unabhängig von ``cores``.
         keep_returns: tägliche Renditen speichern (Standard ``True``).
 
     Returns:
@@ -563,8 +563,9 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
             return {"strategy": fixed, "args": p}
     from ._sim_blocks import _sim_args_set
     sim_run_args = _sim_args_set({}, sim_args, "param_search")
-    with_rng = _ext("bootstrap", "_with_rng_restore")
-    design = with_rng(lambda: _ps_design(space, method, n, constraint), seed=seed)
+    # Zufall nur im Versuchsplan (Hauptstrom, Entwurf C.5); die Auswertung je Punkt ist deterministisch
+    from ._lib import main_stream
+    design = _ps_design(space, method, n, constraint, None if method == "grid" else main_stream(seed))
     t0 = time.perf_counter()
 
     def run(i):

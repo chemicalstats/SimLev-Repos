@@ -18,28 +18,22 @@ export simulation, SimLevResult, format_result,
        RList, RFrame, RVector, NamedMat, named, nrow, ncol, rows, attrs, r_class, inherits,
        r_summary, r_plot
 
-# R-Interna (R 4.3.3 und optionale R-Pakete), in Abhängigkeitsreihenfolge
+# R-Interna (R 4.3.3), in Abhängigkeitsreihenfolge (seit Etappe 9.6c ohne die Nachbildungen von
+# R's Zufall, nmath, BLAS/LAPACK/LINPACK, optim/PORT und der Übernahmen evd, rugarch, Rsolnp,
+# truncnorm, stinepack, imputeTS; diese Aufgaben rechnet die C-Bibliothek slc, SLib)
 include("r/env.jl")          # Umgebungsschalter SIMLEV_* (einzige Lesestelle)
+include("slib.jl")           # C-Bibliothek slc (Etappe 9.1): Zufall, Verteilungen; deps/build.jl
 include("r/types.jl")
 include("r/ld80.jl")
 include("r/rnum.jl")
 include("r/rformat.jl")
 include("r/libm.jl")
 include("r/base.jl")
-include("r/rng.jl")
 include("r/parallel.jl")     # .par_lapply (Threads), Ausgaben je Aufgabe
-include("r/nmath.jl")
 include("r/fmt.jl")
 include("r/stats.jl")
 include("r/linalg.jl")
 include("r/rexpr.jl")
-include("r/port.jl")
-include("r/evd.jl")
-include("r/truncnorm.jl")
-include("r/solnp.jl")
-include("r/rugarch.jl")
-include("r/stinepack.jl")
-include("r/imputets.jl")
 
 # Engine: simulation() mit Strategie, Config, Ergebnis und Dashboard
 include("dates.jl")
@@ -58,7 +52,6 @@ include("backcast.jl")
 include("bonds.jl")
 include("signals_core.jl")
 include("signals.jl")
-include("bootstrap_core.jl")
 include("bootstrap.jl")
 include("withdrawal_core.jl")
 include("withdrawal.jl")

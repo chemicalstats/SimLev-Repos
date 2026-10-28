@@ -198,7 +198,7 @@ overfit_pbo <- function(x, S = 16L, metric = c("sharpe", "sortino", "geometric",
   for (st in seq(1L, C, by = 2000L)) {
     idx <- st:min(C, st + 1999L); k <- length(idx)
     Ind <- matrix(0, k, S); Ind[cbind(rep(seq_len(k), each = S / 2L), as.vector(combos[, idx]))] <- 1
-    I1 <- Ind %*% B1; I2 <- Ind %*% B2; Id <- Ind %*% Bd; Il <- Ind %*% Bl; Ic <- Ind %*% Bc
+    I1 <- Ind %m% B1; I2 <- Ind %m% B2; Id <- Ind %m% Bd; Il <- Ind %m% Bl; Ic <- Ind %m% Bc
     rep_t <- function(v) matrix(v, k, N, byrow = TRUE)
     IS <- .of_metric(half, I1, I2, Id, Il, metric, c1 = Ic)
     OOS <- .of_metric(half, rep_t(T1) - I1, rep_t(T2) - I2, rep_t(Td) - Id, rep_t(Tl) - Il, metric, c1 = rep_t(Tc) - Ic)
@@ -209,9 +209,10 @@ overfit_pbo <- function(x, S = 16L, metric = c("sharpe", "sortino", "geometric",
     lam[idx] <- log(w / (1 - w)); isb[idx] <- IS[cbind(seq_len(k), best)]; oosb[idx] <- ob
     oosm[idx] <- apply(OOS, 1, stats::median)
   }
-  fit <- stats::lm(oosb ~ isb)
+  ok <- !is.na(isb) & !is.na(oosb)                              # wie lm(): Paare mit NA entfallen
+  cf <- .sl_lsfit(cbind(1, isb[ok]), oosb[ok])$coefficients     # OOS ~ IS, kleinste Quadrate (Entwurf B.7)
   structure(list(pbo = mean(lam <= 0), lambda = lam, is_best = isb, oos_best = oosb, oos_median = oosm,
-                 slope = unname(stats::coef(fit)[2]), intercept = unname(stats::coef(fit)[1]),
+                 slope = unname(cf[2]), intercept = unname(cf[1]),
                  prob_loss = mean(oosb < 0), S = S, n_combos = C, n_points = N, n_obs = bl * S,
                  metric = metric, frequency = frequency, ppy = rr$ppy), class = "SimLevPBO")
 }
@@ -283,7 +284,7 @@ sharpe_probabilistic <- function(r, benchmark = 0, ppy = 52) {
   sr <- mean(r) / stats::sd(r); sr0 <- benchmark / sqrt(ppy)
   z <- (r - mean(r)) / stats::sd(r)
   g3 <- mean(z^3); g4 <- mean(z^4)
-  stats::pnorm((sr - sr0) * sqrt(n - 1) / sqrt(max(1 - g3 * sr + (g4 - 1) / 4 * sr^2, 1e-12)))
+  .sl_pnorm((sr - sr0) * sqrt(n - 1) / sqrt(max(1 - g3 * sr + (g4 - 1) / 4 * sr^2, 1e-12)))
 }
 
 #' Deflated Sharpe Ratio
@@ -367,7 +368,7 @@ sharpe_deflated <- function(x, id = NULL, n_trials = NULL, effective = TRUE,
   Nt <- n_trials %||% (if (effective) n_eff else N)
   v <- if (N > 1) stats::var(sr) else 0
   g <- 0.5772156649
-  sr0 <- if (Nt > 1 && v > 0) sqrt(v) * ((1 - g) * stats::qnorm(1 - 1 / Nt) + g * stats::qnorm(1 - 1 / (Nt * exp(1)))) else 0
+  sr0 <- if (Nt > 1 && v > 0) sqrt(v) * ((1 - g) * .sl_qnorm(1 - 1 / Nt) + g * .sl_qnorm(1 - 1 / (Nt * exp(1)))) else 0
   r <- R[, j]
   structure(list(id = rr$cols[j], sharpe = sr[j] * sqrt(rr$ppy), sr0 = sr0 * sqrt(rr$ppy),
                  psr = sharpe_probabilistic(r, 0, rr$ppy), dsr = sharpe_probabilistic(r, sr0 * sqrt(rr$ppy), rr$ppy),
@@ -729,12 +730,12 @@ sharpe_haircut <- function(x, n_obs = NULL, n_tests = NULL, frequency = c("week"
     ppy <- rr$ppy; ids <- rr$cols
   }
   M <- n_tests %||% length(sr)
-  tstat <- sr * sqrt(Tn); p <- 2 * stats::pnorm(-abs(tstat))
+  tstat <- sr * sqrt(Tn); p <- 2 * .sl_pnorm(-abs(tstat))
   padj <- function(method) {
     pp <- c(p, rep(1, max(0, M - length(p))))                       # unbekannte weitere Tests: p = 1
     stats::p.adjust(pp, method = method, n = max(M, length(p)))[seq_along(p)]
   }
-  back <- function(pa) sign(sr) * stats::qnorm(1 - pmin(pa, 1) / 2) / sqrt(Tn) * sqrt(ppy)
+  back <- function(pa) sign(sr) * .sl_qnorm(pmin(pa, 1) / 2, lower.tail = FALSE) / sqrt(Tn) * sqrt(ppy)   # oberes Ende (F23)
   out <- data.frame(id = ids, sharpe = sr * sqrt(ppy), t = tstat, p = p)
   for (m in c(bonferroni = "bonferroni", holm = "holm", bhy = "BY")) {
     nm <- names(which(c(bonferroni = "bonferroni", holm = "holm", bhy = "BY") == m))

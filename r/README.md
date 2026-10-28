@@ -12,8 +12,12 @@
 
 Dies ist das R-Paket **SimLev**, die Referenzimplementierung. Die
 Python-Fassung 0.5.0 und die Julia-Fassung 0.5.0 im selben Repository sind
-vollständige Ports dieser Fassung und rechnen bitgleich zu ihr (siehe
-[`NEWS.md`](NEWS.md)).
+vollständige Ports dieser Fassung und rechnen bitgleich zu ihr: Alle drei
+nutzen dieselbe eigene C-Bibliothek für Zufall und Numerik (siehe
+[Gleichlauf](../README.md#gleichlauf-der-drei-sprachen) und
+[`NEWS.md`](NEWS.md)). Das Paket enthält keinen Code aus fremden Paketen;
+die Quellen der Verfahren stehen im Abschnitt
+[Literatur](../README.md#literatur) der Haupt-README.
 
 **Die vollständige Dokumentation mit Schnellstart, Grundkonzepten und
 Beispielen für alle drei Sprachen steht in der
@@ -23,8 +27,9 @@ R-Paket betrifft.
 ## Installation
 
 SimLev enthält C++- und C-Code (Marktupdates, FIFO-Lotverwaltung, Steuerkern,
-Bootstrap- und Entnahme-Kerne; angebunden über R's eigene C-Schnittstelle,
-ohne Rcpp) und wird aus dem Quellcode kompiliert. Zum Installieren braucht es
+Entnahme- und Research-Kerne sowie die C-Bibliothek mit Zufall, Verteilungen,
+linearer Algebra, Optimierern, Modellen und Bootstrap-Kernen; angebunden über
+R's eigene C-Schnittstelle, ohne Rcpp) und wird aus dem Quellcode kompiliert. Zum Installieren braucht es
 außer Basis-R keine weiteren Pakete. Neben **R ≥ 4.0** brauchen Sie einen
 funktionierenden Compiler:
 
@@ -129,13 +134,17 @@ plot(result)
 ## Tests
 
 ``` r
-devtools::test()            # im Ordner r/
-rcmdcheck::rcmdcheck()      # vollständiger Paket-Check
+rcmdcheck::rcmdcheck()      # Paket-Check: Beispiele, Vignette, Rauchproben tests/etappe9*.R
 ```
 
-Die Golden-Master-Fälle in [`../golden/`](../golden/) werden mit diesem
-Paket erzeugt. Wer die Rechenlogik ändert, muss die Fälle neu erzeugen und
-die Python- und Julia-Fassung entsprechend nachziehen.
+Die testthat-Suite (`tests/testthat/`) beschreibt den Stand vor dem eigenen
+Zufall und den eigenen Kernen und ist bis zu ihrem Neuaufbau ausgesetzt;
+`tests/testthat.R` führt sie nur mit `SIMLEV_LEGACY_TESTS=1` aus. Die
+Referenzfälle für Python und Julia erzeugen die Generatoren in
+[`../golden/`](../golden/) mit diesem Paket; die Gleichlaufprüfung
+`tools/gleichlauf/run.sh` (Repo-Wurzel) erzeugt sie neu und vergleicht beide
+Ports damit. Wer die Rechenlogik ändert, zieht die Python- und die
+Julia-Fassung nach und prüft mit dem Gleichlauf.
 
 ### Eingefrorene Schnittstelle
 
@@ -144,7 +153,9 @@ Argumente in Reihenfolge mit Standardwerten) ist in
 [`../tools/api_snapshot/frozen/r.json`](../tools/api_snapshot/frozen/r.json)
 festgehalten. `tests/testthat/test-api-frozen.R` vergleicht die Quellen damit
 und nennt jede Abweichung; beim Prüfen des gebauten Pakets (`R CMD check`)
-ist die Datei nicht erreichbar, der Test wird dann übersprungen. Eine gewollte
+ist die Datei nicht erreichbar, der Test wird dann übersprungen. Solange die
+testthat-Suite ausgesetzt ist, prüft `tools/api_snapshot/run.sh --check`
+(Repo-Wurzel) die Schnittstelle aller drei Sprachen. Eine gewollte
 Änderung: Eintrag oben in `tools/api_snapshot/CHANGES.md` (Datum, was,
 warum), dann aus der Repo-Wurzel `tools/api_snapshot/run.sh --freeze`
 (siehe [`tools/api_snapshot/README.md`](../tools/api_snapshot/README.md)).
@@ -192,14 +203,17 @@ R/
   analysis_tests.R           signal_analysis(), sharpe_test(), overfit_reality_check(),
                              sharpe_min_track_record(), result_heatmap()
   regimes.R                  regime_hmm(), regime_states()
+  ms_garch.R                 eigene MS-GARCH-Schätzung (Kern in der C-Bibliothek)
   cores.R                    .Call-Hüllen der C++-Kerne
+  slc.R, slc_*.R             Hüllen der C-Bibliothek, simlev_seed()
   utils.R
-src/                         C++-Kerne (FIFO, Steuern, Markt-Updates,
-                             Bootstrap-Verfahren, Entnahmeregeln, DCC),
+src/                         C++-Kerne (FIFO, Steuern, Markt-Updates, Research,
+                             Entnahmeregeln) und C-Bibliothek slc*.c (Kopien aus
+                             ../core/, nur dort ändern), Hüllen slc_r*.c,
                              init.c (Registrierung), simlev_capi.h
                              (Anbindung an R's C-Schnittstelle)
 man/                         Hilfeseiten
-tests/testthat/              Test-Suite
+tests/                       Rauchproben etappe9*.R; testthat/ (ausgesetzt)
 vignettes/                   Einführung
 inst/examples/               Beispielsammlungen
 ```

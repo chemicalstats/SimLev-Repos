@@ -1,14 +1,16 @@
 /*
- * src/simlev_core.h -- Gemeinsame Kerne von R und Python: Aufbau, Host-Schnittstelle,
- * Rueckmeldungen, Zufallszahlen, Gleitkomma-Regeln (Etappe 7.3a, 7.3b)
+ * core/simlev_core.h -- Gemeinsame Kerne von R und Python: Aufbau, Host-Schnittstelle,
+ * Rueckmeldungen, Gleitkomma-Regeln (Etappe 7.3a, 7.3b; Ort seit 9.6c)
  *
- * GEMEINSAME QUELLE FUER R UND PYTHON. Jeder native Kern des R-Pakets ist geteilt in
- * die Rechnung (src/<datei>_impl.h, MS-GARCH ms_garch_impl.c/.h; ohne R- und
- * Python-Header) und die Huellen (R: src/<datei>.c/.cpp mit den .Call-Funktionen;
- * Python: python/src/_ext_<kern>.cpp im Modul simlev._ext). Python baut aus
- * Byte-fuer-Byte-Kopien in python/src/ (Liste in python/tests/test_shared_c.py);
- * Aenderungen nur in r/src/, danach kopieren. Seit Etappe 7.3b auch die Kerne mit
- * Zufallszahlen (bootstrap_core_impl.h, vendor_truncnorm_impl.h).
+ * GEMEINSAME QUELLE FUER R UND PYTHON. Jeder geteilte native Kern ist geteilt in die
+ * Rechnung (<datei>_impl.h; ohne R- und Python-Header) und die Huellen (R:
+ * r/src/<datei>.cpp mit den .Call-Funktionen; Python: python/src/_ext_<kern>.cpp im Modul
+ * simlev._ext). Kanonisch sind die Dateien seit Etappe 9.6c (F16) in core/; R und Python
+ * bauen aus Byte-fuer-Byte-Kopien in r/src/ bzw. python/src/core/ (tools/core_sync.py
+ * --write/--check). Aenderungen nur in core/, danach kopieren. Julia hat eigene Ports
+ * dieser Kerne (F2). Zufallszahlen zieht seit Etappe 9.6c keiner der geteilten Kerne mehr;
+ * die frueheren Bootstrap-, DCC- und MS-GARCH-Kerne rechnet die C-Bibliothek slc
+ * (core/slc_*.c).
  *
  * Host-Schnittstelle. Ein Kern sieht seinen Host nur ueber diese Namen; die
  * einbindende Huelle definiert sie vorher (R: simlev_capi.h, Abschnitt "R als Host der
@@ -35,23 +37,7 @@
  *   SIMLEV_SET_FLAG               Python: Tupel), Attribut setzen
  *   SIMLEV_R_FINITE(x)            R_finite (Python: std::isfinite)
  *
- * Kerne mit Zufallszahlen (Etappe 7.3b, bootstrap_core_impl.h) ziehen nur ueber den Host:
- *
- *   simlev_host::runif(a, b), rnorm(mu, sigma), rgeom(p)
- *                                 R: genau Rf_runif, Rf_rnorm, Rf_rgeom aus R's nmath
- *                                 (R's RNG; GetRNGstate/PutRNGstate in sl::call);
- *                                 Python: die C-Nachbildung von R's Zufallszahlen
- *                                 (python/src/_rng_r.c) auf dem Zustand von simlev._r.rng,
- *                                 den die Huelle uebergibt und danach zurueckschreibt
- *   SIMLEV_RNG                    vom Host gesetzt, wenn er die Zufallsfunktionen stellt
- *   simlev_host::LglVec, IntList  logischer Vektor; Liste von Ganzzahlvektoren mit
- *   SIMLEV_LIST_INT(l, i)         Zugriff auf das i-te Element (R: sl::int_vec(sl::at(l, i)))
- *   SIMLEV_INT(n)                 Ganzzahl-Ergebnisvektor (R: sl::new_int)
- *
- * Der C-Kern vendor_truncnorm_impl.h nutzt unveraendert die Namen aus R's Rmath.h und R.h
- * (runif, rnorm, rexp, dnorm, R_CheckUserInterrupt, NA_REAL, R_FINITE ...); R stellt sie
- * ueber Rmath.h, Python in python/src/_ext_truncnorm_c.c (wie in R als Aufrufe und
- * Variablen ausserhalb der Uebersetzungseinheit, damit der Compiler gleich uebersetzt).
+ *   simlev_host::LglVec           logischer Vektor (R: sl::LglVec)
  *
  * Engine-Kerne (simulation_core_impl.h, fifo_core_impl.h, tax_core_impl.h) arbeiten auf
  * dem Simulationszustand des Hosts: simlev_host::Obj (R: SEXP, Python: PyObject*) mit

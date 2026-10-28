@@ -37,9 +37,12 @@ Laufzeiten (\code{discrete}) bzw. Stichprobe (\code{sample}). Bei
 
 \item{mode}{\code{triangular}: haeufigster Wert in Jahren.}
 
-\item{seed}{Startwert fuer die Ziehung (Standard 1); der globale
-Zufallszustand bleibt unveraendert. \code{NULL} = aktueller
-Zufallszustand, der dabei normal weiterlaeuft (jede Ziehung anders).}
+\item{seed}{Startwert fuer die Ziehung der Laufzeiten (Standard 1; ganze Zahl mit
+\eqn{|seed| < 2^{53}}); der Zufallszustand von SimLev bleibt dann unveraendert.
+\code{NULL} = bei jeder Ziehung wird genau einmal ein Startwert aus dem Zufallszustand von
+SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}), jede Ziehung ist anders; \code{\link[=withdrawal_max_rate]{withdrawal_max_rate()}}
+loest \code{NULL} einmal auf und nutzt in allen Suchschritten dieselben Laufzeiten.
+\code{set.seed()} wirkt nicht.}
 }
 \value{
 Objekt der Klasse \code{SimLevHorizon} (Liste mit \code{type},
@@ -52,8 +55,8 @@ Argument \code{horizon} von \code{\link[=withdrawal_simulation]{withdrawal_simul
 Beschreibt, wie lange die Entnahmephase dauern soll - fest oder als
 Verteilung nach eigenen Vorgaben. Jeder Pfad von \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}
 erhaelt eine eigene Laufzeit, gezogen mit festem Startwert (gleiche
-Laufzeiten bei wiederholten Aufrufen, etwa in \code{\link[=withdrawal_max_rate]{withdrawal_max_rate()}};
-nicht bei \code{seed = NULL}).
+Laufzeiten bei wiederholten Aufrufen; mit \code{seed = NULL} je Aufruf
+andere, ausser innerhalb von \code{\link[=withdrawal_max_rate]{withdrawal_max_rate()}}).
 }
 \details{
 \describe{

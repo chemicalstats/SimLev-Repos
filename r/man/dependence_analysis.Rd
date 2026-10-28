@@ -82,9 +82,10 @@ n / 10).}
 \item{tail_q}{Tail-Wahrscheinlichkeit als Anteil (Standard 0.10) fuer die
 Tail-Kennzahlen je Regime.}
 
-\item{seed}{Startwert fuer den Bootstrap. Mit Startwert ist das Ergebnis reproduzierbar und der
-Zufallszustand der Sitzung bleibt unveraendert; mit \code{NULL} wird der
-Zufallsstrom der Sitzung normal weitergezogen.}
+\item{seed}{Startwert fuer den Bootstrap. Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}), wiederholte
+Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.}
 
 \item{x}{Objekt der Klasse \code{SimLevDependence}.}
 

@@ -5,7 +5,7 @@ Re-exportiert die Summenhilfen aus :mod:`simlev._r.rnum` (unterste Schicht:
 Textausgabe der Engine in :mod:`simlev._r.rformat`) und ergänzt
 Funktionen von R's base mit R-Namen für Vektoren, Matrizen und DataFrames
 (``colSums``, ``rowMeans``, ``cumprod``, ``cummax``, ``diff``, ``pmin``,
-``range`` …), ``sys_time`` sowie ``quiet_fp``/``env_from_caller`` für die
+``range`` …) sowie ``quiet_fp``/``env_from_caller`` für die
 öffentlichen Funktionen der Module.
 """
 from __future__ import annotations
@@ -30,18 +30,16 @@ import functools as _functools
 import inspect as _inspect
 import math as _math
 import sys as _sys
-import time as _time
 
 import numpy as _np
 import pandas as _pd
 
-from . import env as _env
 
 _LD = _np.longdouble
 
 __all__ = ["r_cumsum", "r_mean", "r_mean_int", "r_mod1", "r_pow", "r_pow_vec", "r_prod",
            "r_rowsums", "r_sd", "r_sum", "r_var", "colSums", "colMeans", "rowSums", "rowMeans",
-           "cumprod", "cummax", "cummin", "mean", "diff", "pmin", "pmax", "range", "sys_time"]
+           "cumprod", "cummax", "cummin", "mean", "diff", "pmin", "pmax", "range"]
 
 
 def _mat(x):
@@ -259,20 +257,6 @@ def range(*args, na_rm=False, finite=False):  # noqa: A001 - Name wie in R
         warnings.warn("no non-missing arguments to max; returning -Inf")
         return _np.array([_math.inf, -_math.inf])
     return _np.array([float(v.min()), float(v.max())])
-
-
-def sys_time():
-    """``as.numeric(Sys.time())``: Sekunden seit 1970-01-01 UTC (Double, mit Nachkommastellen).
-
-    Zentrale Uhr der R-Nachbildungen (z. B. ``Rsolnp::gosolnp`` mit
-    ``rseed = NULL``). Ist die Umgebungsvariable ``SIMLEV_R_SYS_TIME``
-    gesetzt (eine Zahl, Sekunden seit 1970), liefert die Funktion diesen
-    Wert statt der Uhrzeit (Prüfschalter für Tests und Referenzfälle).
-    """
-    v = _env.r_sys_time()
-    if v is not None and v.strip() != "":
-        return float(v)
-    return _time.time()
 
 
 def caller_env(frame):

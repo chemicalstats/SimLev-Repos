@@ -4,7 +4,7 @@
 # `r_sd`, `r_cumsum`, `r_prod`, `r_rowsums`, `r_pow`, `r_pow_vec`, `r_mod1`,
 # `r_mean_int`) und ergänzt weitere Funktionen von R's base:
 # `colSums`, `colMeans`, `rowSums`, `rowMeans`, `r_cumprod`, `r_cummax`,
-# `r_cummin`, `mean`, `r_diff`, `pmin`, `pmax`, `r_range`, `sys_time`.
+# `r_cummin`, `mean`, `r_diff`, `pmin`, `pmax`, `r_range`.
 # Vorlage: python/simlev/_r/base.py; maßgeblich R's `src/main/array.c`
 # (do_colsum), `cum.c`, `summary.c` (do_pmin, rmin/rmax).
 #
@@ -289,21 +289,6 @@ function r_range(args...; na_rm::Bool = false, finite::Bool = false)
         t > hi && (hi = t)
     end
     return [lo, hi]
-end
-
-"""
-    sys_time()
-
-`as.numeric(Sys.time())`: Sekunden seit 1970-01-01 UTC (Float64, mit
-Nachkommastellen). Zentrale Uhr der R-Nachbildungen (z. B. `Rsolnp::gosolnp`
-mit `rseed = NULL`). Ist die Umgebungsvariable `SIMLEV_R_SYS_TIME` gesetzt
-(eine Zahl, Sekunden seit 1970), liefert die Funktion diesen Wert statt der
-Uhrzeit (Prüfschalter für Tests und Referenzfälle).
-"""
-function sys_time()
-    v = SimLev.REnv.r_sys_time()
-    isempty(strip(v)) || return parse(Float64, strip(v))
-    return time()
 end
 
 end # module

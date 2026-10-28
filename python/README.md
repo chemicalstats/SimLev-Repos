@@ -11,10 +11,11 @@
 ---
 
 Dieses Paket ist die Python-Fassung des R-Pakets SimLev. Version 0.5.0 ist
-ein vollständiger Port der aktuellen R-Fassung 0.5.0: Alle 115 Exporte des
+ein vollständiger Port der aktuellen R-Fassung 0.5.0: Alle 116 Exporte des
 R-Pakets gibt es hier mit gleichem Namen, gleichen Argumenten und gleichen
 Voreinstellungen. Das Paket läuft **eigenständig ohne R** und benötigt nur
-`numpy` und `pandas`.
+`numpy` und `pandas`; zum Installieren braucht es einen C- und
+C++-Compiler, weil die Rechenkerne als C-Erweiterung gebaut werden.
 
 Die Ergebnisse sind **bitgleich** zu R 0.5.0: Jeder Tageswert, jede
 Kennzahl, jeder Steuerbetrag, die (deutsche) Druckausgabe sowie Warnungen
@@ -23,7 +24,7 @@ Engine `simulation()` und für alle Erweiterungen (Backcast, Bootstrap,
 Entnahmephase, Analyse, Parametersuche, Abhängigkeiten, Taktik, Optimierung,
 Szenarien, Planung, Prüfungen). Wie das geprüft wurde und unter welchen
 Voraussetzungen es gilt, steht unten unter
-[Bitgleichheit und Plattformen](#bitgleichheit-und-plattformen). Was sich
+[Gleichlauf und Plattformen](#gleichlauf-und-plattformen). Was sich
 gegenüber der Vorversion 0.1.0 geändert hat, steht in
 [NEWS.md](NEWS.md).
 
@@ -32,19 +33,21 @@ Beispielen für alle drei Sprachen steht in der
 [Haupt-README](https://github.com/chemicalstats/SimLev-Repos#readme).** Maßgeblich
 für Argumente und Ergebnisse sind die Hilfeseiten des R-Pakets
 (`r/man/*.Rd`); die Docstrings (`help(simlev.bootstrap_study)`) fassen sie
-kurz zusammen. Hier finden Sie nur, was speziell die Python-Fassung
+kurz zusammen. Die Quellen der Verfahren (Bootstrap, Volatilitätsmodelle, Abhängigkeiten, Portfolio, Tests, Entnahme und die Numerik der eigenen C-Bibliothek) stehen im Abschnitt [Literatur](https://github.com/chemicalstats/SimLev-Repos#literatur) der Haupt-README. Hier finden Sie nur, was speziell die Python-Fassung
 betrifft.
 
 ## Installation
 
 SimLev läuft ab Python 3.10 (geprüft ab Python 3.10, zuletzt mit Python
-3.13, numpy 2.5, pandas 3.0). Ein Compiler wird nicht benötigt; ist einer
-vorhanden, baut `pip` zusätzlich eine C/C++-Erweiterung mit den nativen
-Kernen des R-Pakets (Engine, MS-GARCH-Filter, Entnahme, DCC, Optimierung,
-rugarch-Filter, Bootstrap-Ziehungen, truncnorm u. a.), die etwa die
-MS-GARCH-Schätzung (Bootstrap-Verfahren `ms_garch`, `ms_ar_garch_m`,
-`tvtp_ms_garch`), die Bootstrap-Ziehungen und die Simulation deutlich
-schneller macht.
+3.13, numpy 2.5, pandas 3.0). Zum Installieren braucht es einen C- und
+C++-Compiler (C99, C++17) und die Python-Header: `pip` baut dabei die
+C-Erweiterung `simlev._ext` aus `src/`. Sie enthält die C-Bibliothek von
+SimLev (Zufall, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD,
+DCC, MS-GARCH, Bootstrap-Kerne, Stineman, Glättungsspline, Kerndichte) und
+die mit R geteilten Kerne von Engine, FIFO, Steuer, Research und Entnahme,
+aus denselben Quellen wie das R-Paket (`core/` im Repository). Ohne
+Compiler bricht die Installation mit der Meldung von setuptools ab; einen
+Rückfall auf reine Python-Kerne gibt es nicht mehr.
 
 ``` bash
 pip install "simlev @ git+https://github.com/chemicalstats/SimLev-Repos#subdirectory=python"
@@ -53,29 +56,20 @@ pip install "simlev @ git+https://github.com/chemicalstats/SimLev-Repos#subdirec
 Aus einem lokalen Klon (im Ordner `python/`):
 
 ``` bash
-pip install .                 # Engine, alle Erweiterungen und Grafiken (numpy, pandas)
+pip install .                              # Paket mit C-Erweiterung
+python setup.py build_ext --inplace        # nur bauen, für die Arbeit direkt im Klon
 ```
 
-- **Mit C-Compiler** (unter Linux `gcc` bzw. `build-essential` und die
-  Python-Header, z. B. `python3-dev`; unter macOS die Xcode Command Line
-  Tools; unter Windows die Build Tools für Visual Studio): `pip install`
-  baut `simlev._ext` aus `src/` mit. Das Modul nutzt dieselben Kerne wie
-  das R-Paket (`r/src/*_impl.h`, `r/src/ms_garch_impl.c`) und rechnet
-  bitgleich zu den reinen Python-Kernen; die Kerne mit Zufallszahlen ziehen
-  dabei über eine C-Nachbildung von R's Zufallszahlen (`src/_rng_r.c`) auf
-  demselben Zustand wie `simlev._r.rng`. Für einen Klon, aus dem ohne
-  Installation gearbeitet wird: `python setup.py build_ext --inplace`.
-- **Ohne Compiler** (oder wenn der Bau scheitert): `pip install` meldet
-  das und installiert das Paket trotzdem; SimLev rechnet dann wie bisher
-  rein in Python, mit denselben Ergebnissen, nur langsamer. Ob die
-  Erweiterung aktiv ist, zeigt
-  `simlev._r.env.ext() is not None`.
+Compiler: unter Linux `gcc`/`g++` bzw. `build-essential` und die
+Python-Header (z. B. `python3-dev`), unter macOS die Xcode Command Line
+Tools, unter Windows die Build Tools für Visual Studio. Geprüft ist nur
+Linux auf x86-64.
 
 | Paket | Wofür | Pflicht? |
 |---|---|---|
-| `numpy`, `pandas` | Rechenkern und Datenaufnahme | ja |
-| C/C++-Compiler (C++17) | schnellere Kerne (`simlev._ext`) | optional |
-| `pytest` | Ausführen der Test-Suite | optional |
+| `numpy`, `pandas` | Datenhaltung und Datenaufnahme | ja |
+| C- und C++-Compiler (C99, C++17), Python-Header | Bau der C-Erweiterung `simlev._ext` | ja |
+| `pytest` | Rauchproben (`tests/`) | optional |
 
 ## Kurzbeispiel
 
@@ -96,15 +90,15 @@ data = pd.DataFrame({
 })
 
 strategy = simlev.create_strategy(
-    WORLD=simlev.asset_config("etf", trading="bnh", share=0.7, spread=0.1, partial_exemption=30),
-    BONDS=simlev.asset_config("etf", trading="bnh", share=0.3, spread=0.1, partial_exemption=0),
+    WORLD=simlev.asset_config(asset_class="etf", trading="bnh", share=0.7, spread=0.1, partial_exemption=30),
+    BONDS=simlev.asset_config(asset_class="etf", trading="bnh", share=0.3, spread=0.1, partial_exemption=0),
 )
 
 result = simlev.simulation(
     data, strategy,
     start_value=10000,
-    rebalance=simlev.rebalance_plan(1, unit="year"),
-    tax=simlev.tax_profile(26.375),
+    rebalance=simlev.rebalance_plan(span=1, unit="year"),
+    tax=simlev.tax_profile(rate=26.375),
     liquidate=True, risk_free=2,
 )
 
@@ -133,7 +127,7 @@ result.plot()
 ```
 
 Das ist dieselbe Ausgabe, die das R-Paket 0.5.0 für diese Kursdaten liefert.
-Ohne Steuern (`tax_mode="none"`) wären es 21.015,24 EUR (7,72 % p. a.).
+Ohne Steuern (`tax=None`) wären es 21.015,24 EUR (7,72 % p. a.).
 
 ## Erweiterungen
 
@@ -146,22 +140,22 @@ cfg = simlev.bootstrap_config({"WORLD": "WORLD", "BONDS": "BONDS"}, input="price
 study = simlev.bootstrap_study(data, cfg, "stationary", n=200, params={"L": 250},
                                strategies={"mix": strategy}, seed=42, progress=False)
 print(simlev.summary(study))                               # Verteilungen der Kennzahlen
-simlev.bootstrap_probability(study, "cagr > 0.05")         # Wahrscheinlichkeit: 0.705
+simlev.bootstrap_probability(study, "cagr > 0.05")         # Wahrscheinlichkeit: 0.625
 ```
 
 ```
   cagr (mit Sparplan geldgewichtet, XIRR)
   Strategie          Mittel        q05       q25       q50       q75       q95
-  mix                 8.71%      0.10%     4.10%     8.40%    12.83%    19.16%
+  mix                 7.37%     -1.77%     3.30%     6.95%    10.62%    17.72%
   ...
   max_drawdown
   Strategie          Mittel        q05       q25       q50       q75       q95
-  mix                30.55%     19.64%    24.52%    30.19%    35.76%    43.76%
+  mix                32.69%     20.73%    24.93%    31.65%    38.83%    50.32%
 ```
 
 ``` python
 # Risikoparität aus Wochenrenditen
-opt = simlev.portfolio_optimize(data, ["WORLD", "BONDS"], method="risk_parity")
+opt = simlev.portfolio_optimize(data, assets=["WORLD", "BONDS"], method="risk_parity")
 print(opt)
 ```
 
@@ -177,10 +171,11 @@ CVaR(0.05) 1.65 % je Periode, CDaR(0.05) 8.64 % (kumuliert)
 Diversifikationsverhältnis 1.39, effektive Anzahl: Gewichte 1.5, Risiko 2.0
 ```
 
-Die Bootstrap-Studie zieht ihre Zufallszahlen wie R: Mit denselben
-Kursdaten und `seed = 42` liefert `bootstrap_study()` in R dieselben
-Kennzahlen bis auf das letzte Bit, ebenso `portfolio_optimize()` dieselben
-Gewichte.
+Die Bootstrap-Studie zieht ihre Zufallszahlen aus dem eigenen Generator
+von SimLev, in R, Python und Julia derselbe: Mit denselben Kursdaten (hier
+als CSV mit voller Genauigkeit an R übergeben) und `seed = 42` liefert
+`bootstrap_study()` in R dieselben Kennzahlen bis auf das letzte Bit, ebenso
+`portfolio_optimize()` dieselben Gewichte.
 
 **Fonds-Wrapper** (Zertifikat oder Fonds über eine innere Strategie, Etappe 6.5c): ein Asset der
 Strategie, dessen Kurs der Anteilswert der inneren Strategie ist (Verwaltungsgebühr täglich je
@@ -216,7 +211,7 @@ R-Paket:
 | `print(x)` | `print(x)` |
 | `summary(x)` | `simlev.summary(x)` oder `x.summary()` |
 | `plot(x)` | `simlev.plot(x)` oder `x.plot()` |
-| `set.seed(42)` | `simlev.set_seed(42)` |
+| `simlev_seed(42)` | `simlev.simlev_seed(42)` |
 | `bootstrap_probability(st, cagr > 0.05)` | `simlev.bootstrap_probability(st, "cagr > 0.05")` |
 | `function(df) signal_sma(df$INDEX, 200)` | `lambda df: simlev.signal_sma(df["INDEX"], 200)` |
 | Argumente `yield`, `raise`, `from` | `yield_`, `raise_`, `from_` |
@@ -232,11 +227,11 @@ Besonderheiten der Python-Fassung:
   zugleich Modul und aufrufbare Funktion:
   `simlev.bootstrap(...)` wirkt wie in R, `import simlev.bootstrap`
   erreicht das Modul.
-- Zufallszahlen erzeugt SimLev mit einem Nachbau von R's Generatoren
-  (Mersenne-Twister, L'Ecuyer-CMRG-Streams, `sample.int`, `rnorm` u. a.).
-  Der Zustand ist global wie `.Random.seed`; `simlev.set_seed()` entspricht
-  `set.seed()`. numpy-Zufallszahlen (wie im Kurzbeispiel) beeinflussen ihn
-  nicht.
+- Zufallszahlen zieht SimLev aus seinem eigenen Generator in der
+  C-Bibliothek (xoshiro256**, in R und Julia derselbe).
+  `simlev.simlev_seed(42)` setzt seinen Zustand wie `simlev_seed(42)` in R;
+  zufällige Funktionen nehmen außerdem `seed`. numpy-Zufallszahlen (wie im
+  Kurzbeispiel) beeinflussen ihn nicht.
 - Bedingungen als Text (`tactical_rules()`, `bootstrap_probability()`,
   `regime_subset()`, `view_prob()`) werden wie in R in **R-Syntax**
   ausgewertet (`"inflation >= 4"`, `"cagr > 0 & max_drawdown <= 0.3"`,
@@ -248,88 +243,46 @@ Besonderheiten der Python-Fassung:
 - `bootstrap_study(chunk_dir=...)` schreibt die Zwischenstände als Pickle
   statt als RDS.
 - `cores > 1` rechnet wie R mit Fork-Prozessen (`multiprocessing`, Kontext
-  `"fork"`) und derselben Zufallssemantik wie `mclapply(mc.set.seed = FALSE)`:
-  bei gleichem `cores` stimmen die Ergebnisse mit R überein. Wo es keinen Fork
-  gibt (Windows, macOS mit dem Standard `spawn`), rechnet Python nacheinander,
-  mit denselben Ergebnissen. Ausgaben und Meldungen der Einheiten erscheinen in
+  `"fork"`). Jeder Pfad bzw. jede Einheit hat einen eigenen Zufallsstrom;
+  die Ergebnisse hängen nicht von `cores` ab und stimmen mit R überein. Wo es
+  keinen Fork gibt (Windows, macOS mit dem Standard `spawn`), rechnet Python
+  nacheinander, mit denselben Ergebnissen. Ausgaben und Meldungen der Einheiten erscheinen in
   deren Reihenfolge (R: in der Reihenfolge der Fertigstellung).
 - Hinweise wie die Meldung über aufgefüllte Kalendertage erscheinen, wie
   R's `message()`, auf `stderr`; Warnungen sind `UserWarning`, Fehler
   `ValueError`, jeweils mit dem deutschen Wortlaut des R-Pakets.
 
-## Bitgleichheit und Plattformen
+## Gleichlauf und Plattformen
 
-Die Python-Fassung bildet nicht nur die Logik, sondern auch die
-Rechenweise von R nach. Die dafür nötigen R-Interna liegen in
-`simlev/_r/`: Zufallszahlen, Verteilungsfunktionen aus R's nmath (`qnorm`,
-`pt`, `qt`, `pbeta`, `lgamma` …), die benötigten Teile von `stats`
-(`quantile`, `cor` einschließlich Kendall und Spearman, `optim` mit
-Nelder-Mead, BFGS, CG und L-BFGS-B, `optimize`, `uniroot`, `lm`, `glm`,
-`smooth.spline`, `density`, `fft`, `hclust`, `p.adjust`, `t.test` …),
-lineare Algebra (Matrixprodukte wie die Referenz-BLAS, `solve`, `chol`,
-`qr` nach LINPACK, `determinant`, `eigen`) sowie `format`, `formatC`,
-`sprintf`, `round` und die `print`-Ausgabe von Vektoren, Matrizen und
-data.frames.
+Python, R und Julia rechnen Zufall und Numerik mit derselben C-Bibliothek
+(Quellen in `core/` des Repositorys, in Python als `simlev._ext` gebaut).
+Darüber hinaus bildet die Python-Fassung die Grundfunktionen von R nach,
+die SimLev nutzt (Modul `simlev/_r/`): Summen in 80-Bit-`long double`,
+Sortieren, Ränge, Quantile, `cor`, `approx`, `filter`, `optimize`,
+`uniroot`, `hclust`, `p.adjust`, Kalender, `round`, `format`, `formatC`,
+`sprintf` und die `print`-Ausgabe von Vektoren, Matrizen und data.frames,
+dazu den Auswerter für Bedingungen in R-Syntax. Welche R-Quellen das sind,
+steht in [`COPYRIGHTS.md`](COPYRIGHTS.md).
 
-Voraussetzungen der Bitgleichheit:
+Voraussetzungen des Gleichlaufs:
 
 - **Linux auf x86-64.** R summiert intern mit 80-Bit-`long double`; die
   Python-Fassung nutzt dafür `numpy.longdouble` in derselben Reihenfolge.
   Auf Plattformen mit 64-Bit-`long double` (z. B. macOS auf Apple Silicon)
-  rechnet auch R anders; dort können die letzten Bits abweichen, und die
-  Bitgleichheits-Tests werden übersprungen.
+  rechnet auch R anders; dort können die letzten Bits abweichen.
 - **glibc-libm.** Exponential-, Logarithmus- und Potenzfunktionen kommen
   wie in R aus der C-Bibliothek. numpy-Transzendentalfunktionen werden
   bewusst nicht verwendet, weil sie auf Rechnern mit AVX-512 in den letzten
   Bits abweichen.
-- **Referenz-LAPACK für Eigenvektoren.** Eigenwerte sind rein in Python
-  portiert. Eigenvektoren von `eigen()` (genutzt u. a. in
-  `portfolio_optimize()`) holt SimLev wie R über ctypes aus der
-  Referenz-LAPACK des Systems (unter Debian/Ubuntu
-  `/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3`); ein anderer Pfad lässt
-  sich über die Umgebungsvariable `SIMLEV_LAPACK` setzen. Fehlt sie,
-  rechnet numpy, dann ohne Bitgleichheitsgarantie; SimLev warnt in diesem
-  Fall einmal.
+- **Gleicher Compiler, gleiche Einstellungen.** Die C-Bibliothek wird wie
+  in R mit `-O2 -ffp-contract=off -fno-fast-math` übersetzt; jede
+  Kerndatei bricht bei `-ffast-math` ab.
 - **Zeichenketten-Reihenfolge wie R.** Sortieren und Vergleichen von
   Zeichenketten folgt R's ICU-Kollation (unter `C.UTF-8` „root“: `a A ä b
   B`) über die System-ICU (`libicui18n`, Pfad über `SIMLEV_ICU`);
   `SIMLEV_COLLATE=C` erzwingt die Byte-Reihenfolge wie R unter `LC_ALL=C`,
   `SIMLEV_COLLATE=icu:root` die von R unter `C.UTF-8`. Ohne ICU: Codepunkte
-  mit Warnung, nicht bitgleich.
-- **Optionale R-Pakete.** `evd` (2.3-7.1, `fpot`) und `rugarch` (1.5-6,
-  `ugarchfit` mit Rsolnp 1.16 `solnp` und `stats::nlminb`) sind
-  nachgebildet (`simlev._r.evd`, `simlev._r.rugarch`, `simlev._r.solnp`,
-  `simlev._r.stats.nlminb`). Das Tail-Modell schätzt ab 30
-  Überschreitungen immer per GPD-ML wie R, das `evd::fpot` übernommen hat
-  (`.evd_fpot`; Herkunft in `COPYRIGHTS.md`). Die GARCH-Schätzung
-  (Bootstrap `garch`/`gjr_garch`, Kopplung, `dependence_dcc()`,
-  `dependence_analysis()`) läuft immer per rugarch-Nachbildung,
-  einschließlich der Warnungen von rugarch, wie R, das `ugarchfit` mit
-  Rsolnp und truncnorm übernommen hat (`.rugarch_ugarchfit`;
-  Herkunft in `COPYRIGHTS.md`); `optim` und die Momente bleiben nur der
-  Rückfall, wenn der Fit mit einem Fehler scheitert. Auch rugarchs
-  letzter Ausweichweg gosolnp (`simlev._r.solnp.gosolnp`, mit
-  `simlev._r.truncnorm.rtruncnorm`) ist nachgebildet; ihn erreicht die
-  Solver-Kette in R bei etwa 1 % zufälliger Reihen. Wie in R setzt er den
-  globalen Zufallszustand aus der Uhrzeit (`set.seed` mit den
-  Unix-Sekunden), das Ergebnis hängt dann von der Sekunde des Aufrufs ab;
-  `SIMLEV_R_SYS_TIME` (Sekunden seit 1970) stellt die Uhr fest. `imputeTS`
-  (3.4, `na_interpolation` mit `option = "stine"` und `"linear"`, stinepack 1.5 `stinterp`;
-  `simlev._r.imputets`, `simlev._r.stinepack`) ist ebenfalls nachgebildet:
-  `fill = "stine"`/`index_fill = "stine"` im Backcast interpolieren immer
-  nach Stineman wie R, das beide Pakete übernommen hat
-  (`.imputets_na_interpolation`; Herkunft in `COPYRIGHTS.md`). Die
-  MS-GARCH-Verfahren schätzen ihr Modell wie R selbst, ohne `MSGARCH`
-  (`simlev.ms_garch`, Port von `.ms_garch_fit`; den Filterkern
-  `src/ms_garch_impl.c` nutzt Python als C-Erweiterung mit, sonst rechnet
-  der Python-Port in `_bootstrap_core.py`).
-  Einen Schalter für optionale R-Pakete gibt es nicht mehr.
-- **nlminb:** Die PORT-Bibliothek liest an drei Stellen nicht gesetzte
-  lokale Variablen (in R zufällige Stapelreste); Python setzt dort 0. Das
-  kann nur in Sonderfällen abweichen: die Meldung „X-convergence (3)“
-  statt „both X-convergence and relative convergence (5)“ (`convergence`
-  ist in beiden Fällen 0) bzw. Läufe mit Hesse-Funktion und Inf/NaN in
-  Gradient oder Hesse-Matrix.
+  mit Warnung, nicht gleich zu R.
 - **Grafiken** entstehen wie in der Julia-Fassung ohne Zusatzpaket als
   SVG. `result.plot()` und alle `plot()`-Methoden liefern ein
   `simlev.SimLevPlot` (in Jupyter direkt sichtbar; `p.save("x.svg")`
@@ -342,17 +295,14 @@ Voraussetzungen der Bitgleichheit:
   `p.data` schon. Gespeichert wird nur als SVG; für PDF oder PNG die
   Datei z. B. mit `rsvg-convert` oder CairoSVG umwandeln.
 
-Geprüft wurde:
-
-- **Engine:** die 68 Golden-Fälle in `golden/cases/` und die 37 Stressfälle
-  in `golden/extra/`, alle bitgleich einschließlich Druckausgabe und
-  `details = TRUE`; zusätzlich 669 frisch erzeugte Zufalls- und Stressfälle
-  und 750 Fälle mit den neuen Argumenten (`order_fee`, `dca_fee`,
-  `church_tax`, `harvest_*`, `taxable_income`, `tax_tariff`).
-- **Alle Funktionen:** 4.755 Referenzfälle in 31 Modulen unter
-  `golden/modules/`, darunter die R-Interna (`r_fmt`, `r_linalg`,
-  `r_nmath`, `r_rng`, `r_stats`); alle bitgleich in Ergebnis,
-  Konsolen- und Druckausgabe, Warnungen und Fehlermeldungen.
+Geprüft wird mit der Gleichlaufprüfung `tools/gleichlauf/run.sh` im
+Repository: Sie erzeugt die Referenzfälle mit dem aktuellen R-Paket neu und
+vergleicht Python bitgenau dagegen (Ergebnis, Konsolen- und Druckausgabe,
+Warnungen, Fehlermeldungen; NA ≠ NaN, Vorzeichen der Null). Der letzte
+vollständige Lauf (27.10.2026) ergab 4.260 von 4.260 Modul-Fällen und
+1.182 von 1.182 Engine-Fällen gleich (siehe
+[Gleichlauf](../README.md#gleichlauf-der-drei-sprachen) in der
+Haupt-README).
 
 Bekannte Grenzen:
 
@@ -363,45 +313,41 @@ Bekannte Grenzen:
   `simlev.NA` ein signalisierendes NaN ist, meldet numpy bei Rechnungen
   damit „invalid value“; SimLev unterdrückt diese Warnungen in seinen
   Funktionen.
-- Nichtzentrale Verteilungen (`ncp`) und einige selten genutzte Optionen
-  der stats-Funktionen sind nicht portiert, weil das Paket sie nicht
+- Verteilungen, Optimierer und lineare Algebra der C-Bibliothek decken ab,
+  was SimLev braucht (etwa keine nichtzentralen Verteilungen); auch von den
+  nachgebildeten R-Grundfunktionen gibt es nur die Optionen, die das Paket
   verwendet.
 
 ## Tests
 
 ``` bash
 pip install ".[test]"
-pytest                                        # 5.201 Tests, Laufzeit rund 7 Minuten (ohne C-Erweiterung rund 10)
-python tools/compare_golden.py                # Engine: golden/cases und golden/extra
-python tools/compare_reference.py             # Erweiterungen: alle Module unter golden/modules
-python tools/compare_reference.py optimize -k cov_ -v      # ein Modul, ausgewählte Fälle, ausführlich
+pytest                                        # Rauchproben der C-Bibliothek (tests/test_etappe9_*.py)
+python ../tools/core_sync.py --check          # Kopien der C-Quellen gleich core/ (aus python/)
 ```
 
-Die Test-Suite enthält 4.755 Modul-Referenzfälle
-(`tests/test_module_reference.py`) und die 90 Golden-Master-Fälle der
-Engine (`tests/test_golden_master.py`, dazu ein Test, dass die Fälle
-gefunden werden). Die übrigen 1.120 Tests prüfen die Engine (überwiegend
-aus den testthat-Tests des R-Pakets übertragen) und die R-Interna in
-`simlev/_r/`. `compare_golden.py` nimmt
-Ordner oder Dateien sowie `-k fall …`, `-v` und `-q`;
-`compare_reference.py` nimmt Modulnamen sowie `-k muster` und `-v`.
-Ist die C-Erweiterung gebaut, laufen Tests und Vergleiche mit ihr;
-`SIMLEV_NO_EXT=1` erzwingt die reinen Python-Kerne (beide Wege müssen
-bitgleich sein).
+Die frühere Test-Suite (Engine, R-Interna, Referenzfälle in `golden/`)
+beschreibt den Stand vor dem eigenen Zufall und den eigenen Kernen und ist
+bis zu ihrem Neuaufbau ausgesetzt; `SIMLEV_LEGACY_TESTS=1` lädt sie (Dateien,
+die entfallene Module nutzen, scheitern dann). `tools/compare_golden.py` und
+`tools/compare_reference.py` vergleichen mit gespeicherten Fällen; ohne den
+Schalter enden sie mit einem Hinweis, außer `SIMLEV_GOLDEN_DIR` bzw.
+`SIMLEV_MODULE_DIR` zeigt auf frisch erzeugte Fälle. Maßgeblich ist bis
+dahin die Gleichlaufprüfung aus der Repo-Wurzel:
 
-Die Referenzfälle liegen im gemeinsamen Ordner `golden/` im Hauptverzeichnis
-des Repositorys. Die Tests finden ihn automatisch, solange Sie im
-Repository arbeiten; sonst setzen Sie `SIMLEV_GOLDEN_DIR` (Engine-Fälle,
-mehrere Ordner durch `os.pathsep` getrennt) bzw. `SIMLEV_MODULE_DIR`
-(Ordner `golden/modules`). Wie die Fälle aufgebaut sind und neu erzeugt
-werden, steht in [`golden/README.md`](../golden/README.md); Hinweise für die
+``` bash
+LC_ALL=C.UTF-8 tools/gleichlauf/run.sh --quick    # baut R, Python und Julia, erzeugt und vergleicht
+```
+
+Wie die Fälle aufgebaut sind und erzeugt werden, steht in
+[`golden/README.md`](../golden/README.md); Hinweise für die
 Weiterentwicklung in [DEVELOPING.md](DEVELOPING.md).
 
 ## Projektstruktur
 
 ```
 simlev/
-  __init__.py        öffentliche Funktionen (alle 115 Exporte des R-Pakets)
+  __init__.py        öffentliche Funktionen (alle 116 Exporte des R-Pakets)
   engine.py          simulation(), Ablaufsteuerung (simulation.R, utils.R)
   _sim_blocks.py     Bausteine sim_costs(), dca_plan(), rebalance_plan(), split_rule(), tax_profile(),
                      income_rate(), income_tariff(), harvest_rule(), funds_costs() (sim_blocks.R)
@@ -410,7 +356,7 @@ simlev/
   _sim_phases.py     Phasen 1–2: Eingabeprüfung, Datenvorbereitung (sim_validate.R, sim_prepare.R)
   _sim_loop.py       Phasen 3–5: Zahlungshelfer, Tagesschleife, Jahresabschluss (sim_actions.R, sim_loop.R)
   _sim_evaluate.py   Phase 6: Renditen, Kennzahlen, Ergebnisobjekt (sim_evaluate.R)
-  _core.py           Rechenkerne der Engine (simulation_core.cpp, fifo_core.cpp, tax_core.cpp)
+  _core.py           Hüllen der Engine-Kerne (simulation_core, fifo_core, tax_core in simlev._ext)
   _dates.py          Datumshelfer (Tage seit 1970, strptime wie R)
   config.py          asset_config(), create_strategy() & Co. (asset_config.R, strategy.R)
   wrapper.py         Fonds-Wrapper: wrapper_config(), wrapper_nav() (wrapper.R)
@@ -423,8 +369,8 @@ simlev/
   backcast.py        backcast_fit(), backcast()
   bonds.py           Anleihe-, Geldmarkt- und gesicherte Reihen
   signals.py         Signal-Bausteine (signal_sma() …); Kerne in _signals_core.py
-  bootstrap.py       Bootstrap, Bootstrap-Studien; Kerne in _bootstrap_core.py
-  ms_garch.py        eigene MS-GARCH-Schätzung (ms_garch.R; Filter in _bootstrap_core.py)
+  bootstrap.py       Bootstrap, Bootstrap-Studien (Kerne in der C-Bibliothek)
+  ms_garch.py        eigene MS-GARCH-Schätzung (ms_garch.R; Kern in der C-Bibliothek)
   withdrawal.py      Entnahmephase; Kern in _withdrawal_core.py
   deep_analysis.py   result_analysis()
   sensitivity.py     Sensitivitäten, Lump Sum vs. DCA, Hebelreihen
@@ -438,27 +384,27 @@ simlev/
   planning.py        Länder-Bootstrap, Renditeannahmen, planning_goal()
   analysis_tests.py  statistische Prüfungen
   data/              steuertarif.csv (Tarif ab VZ 2026), r_colors.csv (R-Farbnamen)
-  _r/                R-Kompatibilitätsschicht
+  _lib.py, _lib_*.py Hüllen der C-Bibliothek (Zufall, simlev_seed, Verteilungen, lineare
+                     Algebra, Optimierer, Modelle, Bootstrap-Kerne)
+  _r/                Nachbildungen von R-Grundfunktionen
     rnum.py          NA, Summen mit long double, pow, uniroot (unterste Schicht)
     rformat.py       Rundung und Textausgabe der Engine (round, signif, format, sprintf)
-    rng.py           Zufallszahlen wie R
-    nmath.py         Verteilungsfunktionen (mit _toms708.py, _cmath.py)
-    stats.py         stats-Interna, sammelt die Themenmodule stats_sort.py (Sortieren, Quantile),
-                     stats_cor.py (cor, cov, scale), stats_smooth.py (approx, filter, fft, density,
-                     smooth.spline), stats_optim.py (optimize, uniroot, optim, nlminb),
-                     stats_models.py (lm, glm, p.adjust, t.test …), stats_cluster.py (dist, hclust);
-                     dazu _optim.py, _lbfgsb.py, _sbart.py, _fft.py, port.py
-    linalg.py        lineare Algebra (mit _blas.py, _linpack.py, _lapack.py)
+    stats.py         sammelt die Themenmodule stats_sort.py (Sortieren, Quantile),
+                     stats_cor.py (cor, cov, scale), stats_smooth.py (approx, filter),
+                     stats_optim.py (optimize, uniroot; mit _optim.py),
+                     stats_models.py (coef, p.adjust, ecdf, aggregate …), stats_cluster.py (dist, hclust)
+    linalg.py        outer, diag, isSymmetric, all.equal
     base.py, libm.py base-Funktionen mit long double, libm-Funktionen
     fmt.py           format, sprintf, print wie R
+    _collate.py      Zeichenketten-Kollation über ICU
+    rexpr.py         Bedingungen in R-Syntax
+    parallel.py      par_lapply (Fork)
     rlist.py         Basisklasse RList der Ergebnisobjekte
     reftree.py       Laden und Vergleichen der Referenzfälle
-src/                 optionale C/C++-Erweiterung simlev._ext: _ext*.cpp/.c (Hüllen),
-                     _rng_r.c/.h (C-Nachbildung von R's Zufallszahlen) und
-                     simlev_core.h, *_impl.h, ms_garch_impl.c/.h (Kopien der gemeinsamen
-                     Kerne aus r/src/)
-setup.py             Bau der Erweiterung (optional, setuptools Extension)
-tests/               pytest-Suite
+src/                 C-Erweiterung simlev._ext: _ext*.cpp/.c (Hüllen) und core/ (Kopien der
+                     C-Bibliothek und der gemeinsamen Kerne aus core/ im Repository)
+setup.py             Bau der Erweiterung (Pflicht, setuptools Extension)
+tests/               Rauchproben; frühere Suite ausgesetzt (SIMLEV_LEGACY_TESTS=1)
 tools/               compare_golden.py, compare_reference.py
 examples/            lauffähige Beispiele
 ```

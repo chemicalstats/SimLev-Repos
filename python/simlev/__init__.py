@@ -43,6 +43,8 @@ from .svg import SimLevPlot
 from .result import summary as _summary_result
 from ._tax_tariff import SimLevTaxTariff, tax_tariff
 from .trigger import rebalance_trigger
+# Zufallszustand der C-Bibliothek slc (Etappe 9.1, simlev/_lib.py)
+from ._lib import simlev_seed
 
 
 # Erweiterungsmodule (R-Dateien gleichen Namens)
@@ -79,7 +81,6 @@ from .signals import (  # noqa: E402
     signal_volatility,
     signal_combine,
 )
-from ._r.rng import rng_kind, set_seed  # noqa: E402
 from ._r.rnum import NA_REAL as NA  # noqa: E402,F401  R's NA_real_ (NaN mit Nutzlast 1954)
 
 # Analysemodule (Schicht 3) werden erst beim ersten Zugriff auf einen ihrer Namen geladen
@@ -154,7 +155,7 @@ backcast = _callable_module("backcast")
 
 _LAZY_NAMES = {name: mod for mod, names in _LAZY.items() for name in names}
 # Untermodule, die beim sofortigen Laden als Attribute von simlev entstanden (für dir(simlev))
-_LAZY_SUBMODULES = tuple(_LAZY) + ("_bootstrap_core", "_dependence_core", "_optimize_core", "_withdrawal_core")
+_LAZY_SUBMODULES = tuple(_LAZY) + ("_dependence_core", "_optimize_core", "_withdrawal_core")
 
 
 def __getattr__(name):
@@ -178,7 +179,7 @@ _LAZY_HIDDEN = frozenset({"_importlib", "_LAZY", "_LAZY_NAMES", "_LAZY_SUBMODULE
 def __dir__():
     return sorted((set(globals()) - _LAZY_HIDDEN) | set(_LAZY_NAMES) | set(_LAZY_SUBMODULES))
 
-__version__ = "0.10.0"
+__version__ = "1.0.0"
 
 __all__ = [
     "AssetConfig",
@@ -219,8 +220,6 @@ __all__ = [
     "SimLevWrapperNav",
     "summary",
     "plot",
-    "set_seed",
-    "rng_kind",
     "NA",
     "isna_strict",
     "series_align",
@@ -356,6 +355,7 @@ __all__ = [
     "SimLevLumpSum",
     "strategy_update_asset",
     "strategy_validate",
+    "simlev_seed",
 ]
 
 

@@ -102,9 +102,10 @@ dann das Mittel der Einzeloptimierungen.}
 Resampling in Perioden. \code{NULL} (Standard) = \eqn{T^{1/3}} gerundet,
 mindestens 2 (T = Anzahl Perioden).}
 
-\item{seed}{Startwert fuer das Resampling. Mit Startwert ist das Ergebnis reproduzierbar und der
-Zufallszustand der Sitzung bleibt unveraendert; mit \code{NULL} wird der
-Zufallsstrom der Sitzung normal weitergezogen.}
+\item{seed}{Startwert fuer das Resampling. Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}), wiederholte
+Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.}
 }
 \value{
 Objekt der Klasse \code{SimLevOptimization}, eine Liste mit

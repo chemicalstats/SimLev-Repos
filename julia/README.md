@@ -12,17 +12,18 @@
 
 Dieses Paket ist die Julia-Fassung 0.5.0 des R-Pakets SimLev. Sie ist ein
 **vollständiger Port** der aktuellen R-Fassung 0.5.0: die Engine
-`simulation()` und alle Erweiterungen, insgesamt alle 115 Exporte aus
+`simulation()` und alle Erweiterungen, insgesamt alle 116 Exporte aus
 `r/NAMESPACE`. Sie läuft **eigenständig ohne R** und braucht **keine
 externen Julia-Pakete**, nur die Standardbibliothek (`Dates`, `Printf`,
-`Logging`; `LinearAlgebra` nur als Ersatzweg für Eigenvektoren).
+`Logging`, `Libdl`) und zum Bau einen C-Compiler für die C-Bibliothek von
+SimLev.
 
 Die Julia-Fassung rechnet **bitgleich** zum R-Paket 0.5.0: Jeder
 Tageswert, jede Kennzahl, jeder Steuerbetrag, die (deutsche) Druck- und
-Konsolenausgabe, Warnungen und Fehlermeldungen stimmen exakt überein,
-geprüft an allen 2.645 gemeinsamen Referenzfällen in [`../golden/`](../golden/)
-und an 469 frisch erzeugten Zufalls- und Stressfällen der Engine (siehe
-[Bitgleichheit](#bitgleichheit-und-plattformen)). Die Engine ist je nach
+Konsolenausgabe, Warnungen und Fehlermeldungen stimmen exakt überein. Zufall
+und Numerik kommen in beiden aus derselben C-Bibliothek; geprüft wird mit
+der Gleichlaufprüfung des Repositorys (siehe
+[Gleichlauf](#gleichlauf-und-plattformen)). Die Engine ist je nach
 Szenario etwa 5- bis 30-mal so schnell wie das R-Paket (siehe
 [Geschwindigkeit](../README.md#geschwindigkeit) in der Haupt-README).
 
@@ -32,13 +33,19 @@ Hinweise für die Weiterentwicklung stehen in [`DEVELOPING.md`](DEVELOPING.md).
 
 **Die vollständige Dokumentation mit Grundkonzepten, Steuerlogik und
 Beispielen für alle drei Sprachen steht in der
-[Haupt-README](../README.md).** Hier finden Sie nur, was speziell die
+[Haupt-README](../README.md).** Die Quellen der Verfahren (Bootstrap, Volatilitätsmodelle, Abhängigkeiten, Portfolio, Tests, Entnahme und die Numerik der eigenen C-Bibliothek) stehen im Abschnitt [Literatur](../README.md#literatur) der Haupt-README. Hier finden Sie nur, was speziell die
 Julia-Fassung betrifft.
 
 ## Installation
 
 Benötigt wird **Julia ab Version 1.10** (laut `Project.toml`; geprüft ist
-die Fassung ab Julia 1.10, zuletzt mit Julia 1.13.2).
+die Fassung ab Julia 1.10, zuletzt mit Julia 1.13.2) und ein **C-Compiler**:
+`Pkg.add` bzw. `Pkg.build("SimLev")` führt `deps/build.jl` aus, das die
+C-Bibliothek von SimLev (Quellen in `deps/core/`, Kopien aus `core/` im
+Repository) mit `cc`, `gcc` oder `clang` zu `deps/usr/lib/libslc`
+übersetzt; einen anderen Compiler wählt `ENV["SIMLEV_CC"]`. Ohne die
+Bibliothek bricht `using SimLev` mit einem Hinweis auf `Pkg.build` ab.
+Geprüft ist nur Linux auf x86-64.
 
 ``` julia
 using Pkg
@@ -109,17 +116,16 @@ plot_dashboard(result)          # SVG, in Jupyter, Pluto und VS Code direkt sich
 ```
 
 Aus 10.000 EUR wurden 15.581,60 EUR, also 4,54 % pro Jahr. Ohne Steuern
-(`tax_mode = "none"`) wären es 16.339,67 EUR (5,04 % p. a.) gewesen.
+(`tax = nothing`) wären es 16.339,67 EUR (5,04 % p. a.) gewesen.
 
 Die Kurse erzeugt hier Julias eigener Zufallsgenerator; sie unterscheiden
 sich deshalb von denen der R- und Python-Beispiele. Mit denselben Kursdaten
 liefern alle drei Fassungen dasselbe Ergebnis: R 0.5.0 und Python 0.5.0
 kommen mit diesen Kursen (als CSV mit voller Genauigkeit übergeben) auf
 denselben Endwert, dieselbe CAGR und dieselben Steuern bis auf das letzte
-Bit. Umgekehrt erzeugt Julia mit `set_seed(42)`,
-`SimLev.RRng.rnorm(n, 4e-4, 0.010)` und `SimLev.RBase.r_cumprod()` die
-Kurse des R-Beispiels und zeigt dann wie R 17.765,20 EUR Endwert und
-1.368,47 EUR Steuern, mit zeichengleicher Ausgabe von `display(result)`.
+Bit. Umgekehrt zeigt Julia mit den Kursen des R-Beispiels (ebenfalls als
+CSV übergeben) wie R 17.765,20 EUR Endwert und 1.368,47 EUR Steuern, mit
+zeichengleicher Ausgabe von `display(result)`.
 
 ## Von R zu Julia
 
@@ -149,7 +155,7 @@ Einige Funktionen nehmen wie in R weitere Argumente auch positionell, etwa
 | `print(x)` | `display(x)` |
 | `summary(result)` | `summary(result)`; für alle Objekte `r_summary(x)` |
 | `plot(result)` | `plot_dashboard(result)`; für alle Objekte `r_plot(x)` |
-| `set.seed(42)` | `set_seed(42)` |
+| `simlev_seed(42)` | `simlev_seed(42)` |
 | `bootstrap_probability(st, cagr > 0.05)` | `bootstrap_probability(st, "cagr > 0.05")` |
 | `function(df) signal_sma(df$INDEX, 200)` | `df -> signal_sma(df["INDEX"], 200)` |
 | `saveRDS(res, "lauf.rds")`, `readRDS(...)` | `using Serialization; serialize("lauf.jls", res)`, `deserialize(...)` |
@@ -176,11 +182,11 @@ Besonderheiten der Julia-Fassung:
   `bootstrap_study()` und `portfolio_optimize()`) nur ein `RFrame`.
   Übergeben Sie ihnen deshalb ein `RFrame`; ein NamedTuple `nt` wandelt
   `RFrame(pairs(nt)...)` um.
-- Zufallszahlen erzeugt SimLev mit einem Nachbau von R's Generatoren
-  (Mersenne-Twister, L'Ecuyer-CMRG-Streams, `sample.int`, `rnorm` u. a.)
-  im Untermodul `SimLev.RRng`. Der Zustand ist global wie `.Random.seed`;
-  `set_seed()` entspricht `set.seed()`. Julias eigene Zufallszahlen (wie
-  im Kurzbeispiel) beeinflussen ihn nicht.
+- Zufallszahlen zieht SimLev aus seinem eigenen Generator in der
+  C-Bibliothek (xoshiro256**, in R und Python derselbe; Hüllen in
+  `SimLev.SLib`). `simlev_seed(42)` setzt seinen Zustand wie in R;
+  zufällige Funktionen nehmen außerdem `seed`. Julias eigene Zufallszahlen
+  (wie im Kurzbeispiel) beeinflussen ihn nicht.
 - **Bedingungen als Text** (`tactical_rules()`, `bootstrap_probability()`,
   `regime_subset()`, `view_prob()`) werden wie in R in **R-Syntax**
   ausgewertet: `"inflation >= 4"`, `"cagr > 0.05 & max_drawdown <= 0.3"`,
@@ -195,9 +201,9 @@ Besonderheiten der Julia-Fassung:
   R-Pakets.
 - `cores > 1` rechnet mit Threads (`Threads.@spawn`), wenn Julia mit mehreren
   Threads gestartet ist (`julia -t auto`, `julia -t 2` oder
-  `JULIA_NUM_THREADS`), sonst nacheinander; in beiden Fällen mit derselben
-  Zufallssemantik wie `mclapply(mc.set.seed = FALSE)` in R, bei gleichem
-  `cores` stimmen die Ergebnisse also mit R überein. Meldungen der Einheiten
+  `JULIA_NUM_THREADS`), sonst nacheinander. Jeder Pfad bzw. jede Einheit
+  hat einen eigenen Zufallsstrom; die Ergebnisse hängen weder von `cores`
+  noch von der Zahl der Threads ab und stimmen mit R überein. Meldungen der Einheiten
   erscheinen in deren Reihenfolge. `bootstrap_study(chunk_dir = …)` schreibt
   die Zwischenstände in einem eigenen Textformat (Dateinamen wie in R auf
   `.rds`, aber nicht mit R lesbar).
@@ -218,11 +224,6 @@ Besonderheiten der Julia-Fassung:
   CairoSVG um. Eigene Grafiken (etwa mit Plots.jl oder Makie) bauen Sie aus
   `data`, z. B. `p = r_plot(result); df = p.data["performance"]` mit den
   Spalten `date` und `strategy`.
-- Eigenvektoren (`eigen()`, u. a. in `portfolio_optimize()`) holt SimLev
-  wie R aus der Referenz-LAPACK des Systems (Pfad über die
-  Umgebungsvariable `SIMLEV_LAPACK` wählbar). Fehlt sie, rechnet SimLev mit
-  einer Warnung über `LinearAlgebra.eigen` weiter, ohne
-  Bitgleichheitsgarantie.
 - **Zeichenketten-Reihenfolge wie R.** Sortieren und Vergleichen von
   Zeichenketten folgt R's ICU-Kollation (unter `C.UTF-8` „root“: `a A ä b
   B`) über die System-ICU (`libicui18n` per `ccall`, Pfad über `SIMLEV_ICU`);
@@ -253,14 +254,14 @@ display(bootstrap_probability(study, "cagr > 0.05 & max_drawdown <= 0.3"))
 ```
   cagr (mit Sparplan geldgewichtet, XIRR)
   Strategie          Mittel        q05       q25       q50       q75       q95
-  mix                 5.34%      0.14%     2.51%     5.17%     7.77%    11.98%
+  mix                 5.03%     -0.88%     2.58%     4.77%     7.10%    11.32%
   ...
   max_drawdown
   Strategie          Mittel        q05       q25       q50       q75       q95
-  mix                31.25%     21.36%    25.85%    30.02%    36.04%    42.67%
+  mix                31.64%     21.49%    25.81%    31.06%    36.21%    45.33%
   ...
   strategy                         condition probability         se   n
-1      mix cagr > 0.05 & max_drawdown <= 0.3        0.33 0.03324906 200
+1      mix cagr > 0.05 & max_drawdown <= 0.3       0.275 0.03157333 200
 ```
 
 ``` julia
@@ -297,10 +298,13 @@ nav = wrapper_nav(df, w)          # RFrame der Klasse SimLevWrapperNav: date, na
 res = simulation(df, create_strategy(Zertifikat = asset_config("certificate"; spread = 0.5, wrapper = w)))
 ```
 
-## Bitgleichheit und Plattformen
+## Gleichlauf und Plattformen
 
-SimLev.jl bildet nicht nur die Logik, sondern auch die Rechenweise von R
-exakt nach (Einzelheiten in [`DEVELOPING.md`](DEVELOPING.md)):
+SimLev.jl rechnet Zufall und Numerik mit derselben C-Bibliothek wie R und
+Python (Hüllen per `ccall` in `src/slib*.jl`) und bildet darüber hinaus die
+Rechenweise von R nach, wo SimLev Grundfunktionen von R nutzt (Einzelheiten
+in [`DEVELOPING.md`](DEVELOPING.md), Herkunft in
+[`COPYRIGHTS.md`](COPYRIGHTS.md)):
 
 - **80-Bit-`long double`.** R summiert bei `sum()`, `mean()`, `var()`,
   `cumsum()`, `prod()` und `rowSums()` intern mit dem 80-Bit-Format der
@@ -313,94 +317,61 @@ exakt nach (Einzelheiten in [`DEVELOPING.md`](DEVELOPING.md)):
   ruft SimLev wie R aus glibc-libm auf (per `ccall`); Julias eigene
   Funktionen weichen in den letzten Bits ab. Potenzen folgen R's
   Sonderregeln (`x^2` als `x*x`, sonst `pow()`).
-- **Lineare Algebra** wie die Referenz-BLAS/LAPACK und LINPACK von R
-  (Matrixprodukte in derselben Summationsreihenfolge, Eigenvektoren aus der
-  System-LAPACK, siehe oben).
-- **R-Interna** im Ordner `src/r/`: Zufallszahlen, Verteilungsfunktionen
-  aus nmath, die benötigten stats-Funktionen (`quantile`, `cor`, `optim`,
-  `optimize`, `uniroot`, `lm`, `glm`, `smooth.spline`, `density`, `fft`,
-  `hclust` …), Formatierung und Druckausgabe (`format`, `formatC`,
-  `sprintf`, `round`, `print` von Vektoren, Matrizen und data.frames) und
-  ein Auswerter für Bedingungen in R-Syntax.
-- Die **C++-Kerne** des R-Pakets (FIFO, Steuern, Markt-Updates, Bootstrap,
-  Entnahme, Abhängigkeiten, Optimierung, Signale) sind Zeile für Zeile
-  übertragen.
+- **R-Grundfunktionen** im Ordner `src/r/`: Sortieren, Ränge, Quantile,
+  `cor`, `approx`, `filter`, `optimize`, `uniroot`, `hclust`, `p.adjust`,
+  Formatierung und Druckausgabe (`format`, `formatC`, `sprintf`, `round`,
+  `print` von Vektoren, Matrizen und data.frames) und ein Auswerter für
+  Bedingungen in R-Syntax.
+- Die **C++-Kerne** des R-Pakets (FIFO, Steuern, Markt-Updates, Entnahme,
+  Abhängigkeiten, Optimierung, Signale) sind Zeile für Zeile übertragen.
 
 Geprüft wird ohne Toleranz und so streng wie in der Python-Fassung: `NA`
 und `NaN` werden unterschieden, ebenso das Vorzeichen der Null; verglichen
 werden außerdem Druck- und Konsolenausgabe, Warnungen und Fehlermeldungen.
+Die Gleichlaufprüfung `tools/gleichlauf/run.sh` im Repository erzeugt die
+Referenzfälle mit dem aktuellen R-Paket neu und vergleicht Julia (und
+Python) damit. Der letzte vollständige Lauf (27.10.2026) ergab 4.260 von
+4.260 Modul-Fällen und 1.182 von 1.182 Engine-Fällen gleich.
 
-| Satz | Fälle | Ergebnis |
-|---|---|---|
-| Engine: gezielte Fälle für jeden Steuer- und Sonderpfad plus Zufallsfälle (`golden/cases/`) | 55 | alle bitgleich, einschließlich `print` und `details = true` |
-| Engine: Stressfälle (`golden/extra/`) | 35 | alle bitgleich, einschließlich `print` und `details = true` |
-| Engine: frisch erzeugte Zufalls- und Stressfälle beider Generatoren | 469 | alle bitgleich |
-| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), der Fonds-Wrapper (Modul `wrapper`), die Nachbildung von evd, rugarch und imputeTS und die R-Interna (31 Module in `golden/modules/`) | 4.755 | alle bitgleich |
-
-**Plattformen:** Die Referenz ist R unter Linux x86-64 (die Modul-Fälle
-entstanden mit R 4.3.3); dort ist die Julia-Fassung geprüft. Die
-mathematischen Funktionen der R-Interna lädt sie aus `libm.so.6`, also aus
-glibc; unter macOS und Windows ist die Fassung nicht geprüft.
-
-**Optionale R-Pakete:** evd (2.3-7.1, `fpot`) und rugarch (1.5-6,
-`ugarchfit` mit Rsolnp 1.16 `solnp`, Richardson-Hesse-Matrix und `nlminb`)
-sind nachgebildet. Das Tail-Modell schätzt ab 30 Überschreitungen immer
-per GPD-ML wie R, das `evd::fpot` übernommen hat (`.evd_fpot`; Herkunft in
-`COPYRIGHTS.md`). Die GARCH-Schätzung in Bootstrap, `dependence_dcc` und
-`dependence_analysis` läuft immer per rugarch-Nachbildung wie R, das
-`ugarchfit` mit Rsolnp und truncnorm übernommen hat
-(`.rugarch_ugarchfit`; Herkunft in `COPYRIGHTS.md`); `optim` und die
-Momente bleiben nur der Rückfall, wenn der Fit mit einem Fehler scheitert.
-Auch rugarchs letzter Ausweichweg gosolnp (mit `truncnorm::rtruncnorm`)
-ist nachgebildet; ihn erreicht die Solver-Kette in R bei etwa 1 %
-zufälliger Reihen. Wie in R setzt er den globalen Zufallszustand aus der
-Uhrzeit, das Ergebnis hängt dann von der Sekunde des Aufrufs ab;
-`ENV["SIMLEV_R_SYS_TIME"]` (Sekunden seit 1970) stellt die Uhr fest.
-imputeTS 3.4 (`na_interpolation` mit `option = "stine"` und `"linear"`, stinepack 1.5) ist
-ebenfalls nachgebildet (`RImputeTS`, `RStinepack`): `fill = "stine"` im
-Backcast interpoliert immer nach Stineman wie R, das beide Pakete
-übernommen hat (`.imputets_na_interpolation`; Herkunft in `COPYRIGHTS.md`). Die
-MS-GARCH-Verfahren schätzen ihr Modell wie R selbst, ohne MSGARCH (`SimLev.MsGarch`,
-Port von `.ms_garch_fit` und dem Kern `src/ms_garch.c`);
-einen Schalter für optionale R-Pakete gibt es nicht mehr. `nlminb` (PORT) liest an drei Stellen nicht
-gesetzte Variablen (in R Stapelreste); Julia setzt 0, was nur in
-Sonderfällen die Meldung (Code 3 statt 5) oder Läufe mit Inf/NaN in
-Gradient bzw. Hesse-Matrix ändern kann.
+**Plattformen:** Die Referenz ist R unter Linux x86-64 (R 4.3.3); dort ist
+die Julia-Fassung geprüft. Die mathematischen Funktionen lädt sie aus
+`libm.so.6`, also aus glibc; unter macOS und Windows ist die Fassung nicht
+geprüft und der Gleichlauf nicht zugesagt.
 
 ## Tests
 
 ``` bash
-julia --project -e 'using Pkg; Pkg.test()'               # 1.317 Tests: Engine, R-Interna, Referenzfälle (Auswahl)
-SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()'   # dazu alle 4.755 Modul-Referenzfälle
-julia --project tools/compare_golden.jl                  # Engine: golden/cases und golden/extra; auch [ordner …] [-k fall …]
-julia --project tools/compare_reference.jl [modul …] [-k muster] [-v]   # Modul-Referenzfälle
+julia --project -e 'using Pkg; Pkg.test()'      # Testsatz „Etappe 9“: Rauchproben der C-Bibliothek
 ```
 
-Die Testsuite prüft die 68 Golden-Master-Fälle aus `golden/cases/` und die
-37 Stressfälle aus `golden/extra/` vollständig, von den Modul-Fällen in
-`golden/modules/` ohne `SIMLEV_FULL_TESTS=1` bis zu vier je Modul; dazu
-kommen eigene Tests für `F80`, Engine, Ausgabe und den Auswerter für
-Bedingungen. Auf der Prüfmaschine lief `Pkg.test()` in rund 3,5 Minuten.
-Liegen die Engine-Fälle woanders, setzen Sie `SIMLEV_GOLDEN_DIR` auf den
-Ordner, der `cases/` und `extra/` enthält; `compare_reference.jl` nimmt
-den Ordner der Modul-Fälle über `--dir`. Für die Fehlersuche lockern
-`SIMLEV_LAX_NA=1` (NA = NaN) und `SIMLEV_STRICT_ZERO=0` (−0 = +0) den
-Vergleich der Modul-Fälle.
+Die frühere Testsuite (Engine, R-Interna, Referenzfälle in `golden/`)
+beschreibt den Stand vor dem eigenen Zufall und den eigenen Kernen und ist
+bis zu ihrem Neuaufbau ausgesetzt; `SIMLEV_LEGACY_TESTS=1` lädt sie
+(Dateien, die entfallene Module nutzen, scheitern dann).
+`tools/compare_golden.jl` und `tools/compare_reference.jl` vergleichen mit
+gespeicherten Fällen; ohne den Schalter enden sie mit einem Hinweis, außer
+`SIMLEV_GOLDEN_DIR` bzw. `SIMLEV_MODULE_DIR` zeigt auf frisch erzeugte
+Fälle. Maßgeblich ist bis dahin die Gleichlaufprüfung aus der Repo-Wurzel
+(`LC_ALL=C.UTF-8 tools/gleichlauf/run.sh --quick`). Für die Fehlersuche
+lockern `SIMLEV_LAX_NA=1` (NA = NaN) und `SIMLEV_STRICT_ZERO=0` (−0 = +0)
+den Vergleich der Modul-Fälle.
 
 ## Projektstruktur
 
 ```
 Project.toml        Paketbeschreibung (Version, nur Standardbibliothek)
+deps/               build.jl (baut die C-Bibliothek libslc), core/ (Kopien der C-Quellen aus core/)
 src/
   SimLev.jl         Modul, Exporte, Reihenfolge der Dateien
-  r/                R-Interna: Datenstrukturen (types.jl), F80: x87-long double (ld80.jl),
+  slib*.jl          Hüllen der C-Bibliothek per ccall (Zufall, simlev_seed, Verteilungen,
+                    lineare Algebra, Optimierer, Modelle, Bootstrap-Kerne)
+  r/                R-Grundfunktionen: Datenstrukturen (types.jl), F80: x87-long double (ld80.jl),
                     R-kompatible Numerik und Textausgabe der Engine (rnum.jl, rformat.jl),
-                    libm, long-double-Summen (base.jl), Zufallszahlen (rng.jl),
-                    Verteilungen (nmath.jl), stats (stats.jl mit den Themen stats_sort.jl,
-                    stats_cor.jl, stats_smooth.jl, stats_optim.jl, stats_models.jl,
-                    stats_cluster.jl), lineare Algebra (linalg.jl, _blas.jl,
-                    _lapack.jl, _linpack.jl), Formatierung (fmt.jl), Bedingungen in
-                    R-Syntax (rexpr.jl)
+                    libm, long-double-Summen (base.jl), stats (stats.jl mit den Themen
+                    stats_sort.jl, stats_cor.jl, stats_smooth.jl, stats_optim.jl,
+                    stats_models.jl, stats_cluster.jl), outer/diag (linalg.jl),
+                    Formatierung (fmt.jl), Kollation (_collate.jl), Bedingungen in
+                    R-Syntax (rexpr.jl), parallel.jl
   dates.jl          Datumslogik
   config.jl         asset_config, Strategien
   trigger.jl        rebalance_trigger
@@ -416,12 +387,11 @@ src/
                     bootstrap, withdrawal, dependence, regimes, ms_garch, scenarios, optimize,
                     tactical, deep_analysis, planning, analysis_tests, overfitting,
                     param_search, sensitivity)
-  <name>_core.jl    C++-Kerne der Erweiterungen (bootstrap mit dem C-Kern ms_garch.c,
-                    signals, withdrawal, dependence, optimize)
+  <name>_core.jl    Ports der C++-Kerne der Erweiterungen (signals, withdrawal, dependence, optimize)
   exports.jl        öffentliche Funktionen der Untermodule für `using SimLev`
   precompile.jl     Arbeitslast für die Vorkompilierung
 data/               Tarifdatei steuertarif.csv, R-Farbnamen r_colors.csv
-test/               Testsuite; reftree.jl und golden_tools.jl lesen die Referenzfälle
+test/               Rauchproben „Etappe 9“; frühere Suite ausgesetzt; reftree.jl liest Referenzfälle
 tools/              compare_golden.jl (Engine), compare_reference.jl (Module)
 examples/           Lauffähige Beispiele
 ```

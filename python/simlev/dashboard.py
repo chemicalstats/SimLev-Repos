@@ -529,10 +529,9 @@ def _panel_distribution(c, cell, x, dash):
     if sd > 0:
         n = rets.size
         xsq = [lo + (hi - lo) * i / 99 for i in range(100)]
-        yn = []
-        for v in xsq:
-            z = (v - mu) / sd
-            yn.append(_libm_exp(-0.5 * (z * z)) / (sd * math.sqrt(2 * math.pi)) * n * (hi - lo) / 50)
+        from . import _lib
+        dn = _lib.dnorm(np.array(xsq, dtype=np.float64), mu, sd)   # Normaldichte der C-Bibliothek slc (wie R)
+        yn = [float(d) * n * (hi - lo) / 50 for d in dn]
         _polyline(c, p, xsq, yn, color=_col(col["secondary"]), width=2, dash="6,4")
     _line(c, _px(p, mu), p.y0, _px(p, mu), p.y0 + p.h, color=_col(col["positive"]), width=2, dash="6,4")
     st = _get(x, "statistics")

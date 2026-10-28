@@ -59,14 +59,9 @@ def _linalg():
     return linalg
 
 
-def _nmath():
-    from ._r import nmath
-    return nmath
-
-
-def _rng():
-    from ._r import rng
-    return rng
+def _sl():
+    from . import _lib
+    return _lib
 
 
 def _to_date(x, what="date"):
@@ -99,13 +94,15 @@ def _boot():
     return bootstrap
 
 
-def _with_rng_restore(fn, seed):
-    return _boot()._with_rng_restore(fn, seed=seed)
+def _sl():
+    """Zufall der C-Bibliothek slc (Entwurf C.5): ``simlev._lib``."""
+    from . import _lib
+    return _lib
 
 
-def _boot_idx_stationary(n_src, n_out, L):
-    from ._bootstrap_core import boot_idx_stationary
-    return boot_idx_stationary(n_src, n_out, L)
+def _boot_idx_stationary(n_src, n_out, L, stream):
+    from ._lib_models import boot_idx_stationary
+    return boot_idx_stationary(n_src, n_out, L, stream=stream)
 
 
 def message(text):
@@ -342,7 +339,7 @@ def _as_matrix(X):
     return a, None
 
 
-# ── Statistik-Bausteine (über simlev._r.stats/linalg/nmath) ────────────────
+# ── Statistik-Bausteine (über simlev._r.stats/linalg und die C-Bibliothek simlev._lib) ──
 
 def _quantile(x, probs, na_rm=False):
     return _stats().quantile(np.asarray(x, dtype=np.float64), probs, na_rm=na_rm, names=False)
@@ -378,34 +375,29 @@ def _optimize(f, lower, upper):
     return float(o["minimum"]), float(o["objective"])
 
 
-def _optim_nm(par, fn, maxit, reltol):
-    o = _stats().optim(np.asarray(par, dtype=np.float64), fn, method="Nelder-Mead",
-                       control={"maxit": maxit, "reltol": reltol})
-    return np.asarray(o["par"], dtype=np.float64), float(o["value"])
-
-
+# Verteilungen der C-Bibliothek slc (Entwurf B.3, B.4), wie .sl_qnorm usw. in R
 def _qnorm(p):
-    return _nmath().qnorm(p)
+    return _sl().qnorm(p)
 
 
 def _qt(p, df):
-    return _nmath().qt(p, df)
+    return _sl().qt(p, df)
 
 
 def _pt(q, df):
-    return _nmath().pt(q, df)
+    return _sl().pt(q, df)
 
 
 def _lgamma(x):
-    return float(_nmath().lgammafn(x))
+    return float(_sl().lgamma(x))
 
 
 def _plogis(x):
-    return float(_nmath().plogis(x))
+    return float(_sl().plogis(x))
 
 
 def _qlogis(p):
-    return float(_nmath().qlogis(p))
+    return float(_sl().qlogis(p))
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -580,16 +572,13 @@ def _cop_ll(family, par, u, v):
             r = par[0]
             x = np.asarray(_qnorm(u), dtype=np.float64)
             y = np.asarray(_qnorm(v), dtype=np.float64)
-            r2 = r * r
-            ll = -0.5 * lg(1 - r2) - (r2 * (x * x + y * y) - 2 * r * x * y) / (2 * (1 - r2))
-        elif base == "t":
+            ll = _cop_g_ll(r, x, y, x * x, y * y)
+        elif base == "t":                     # N2: Hilfen _cop_t_c0, _cop_t_ll
             r, nu = par[0], par[1]
             x = np.asarray(_qt(u, nu), dtype=np.float64)
             y = np.asarray(_qt(v, nu), dtype=np.float64)
-            r2 = r * r
-            c0 = _lgamma((nu + 2) / 2) + _lgamma(nu / 2) - 2 * _lgamma((nu + 1) / 2) - 0.5 * lg(1 - r2)
-            ll = (c0 - (nu + 2) / 2 * l1p((x * x - 2 * r * x * y + y * y) / (nu * (1 - r2)))
-                  + (nu + 1) / 2 * (l1p(x * x / nu) + l1p(y * y / nu)))
+            ll = _cop_t_ll(r, nu, _cop_t_c0(nu), x, y, x * x, y * y,
+                           (nu + 1) / 2 * (l1p(x * x / nu) + l1p(y * y / nu)))
         elif base == "clayton":
             th = par[0]
             ll = (_libm.log1p(th) - (1 + th) * (lg(u) + lg(v))
@@ -613,6 +602,71 @@ def _cop_ll(family, par, u, v):
             raise ValueError("Unbekannte Copula-Familie '%s'." % family)
     s = r_sum(ll)
     return -1e10 if not math.isfinite(s) else s
+
+
+# N2: Teile der Log-Dichten der Gauss- und t-Copula je Beobachtung (wie .cop_g_ll, .cop_t_ll in R), auch für die
+# Profil-Likelihood in _cop_fit_t; x2 = x^2, y2 = y^2, B = (nu + 1)/2 (log1p(x^2/nu) + log1p(y^2/nu)).
+def _cop_g_ll(r, x, y, x2, y2):
+    r2 = r * r
+    with np.errstate(all="ignore"):
+        return -0.5 * _libm.log(1 - r2) - (r2 * (x2 + y2) - 2 * r * x * y) / (2 * (1 - r2))
+
+
+def _cop_t_ll(r, nu, c0, x, y, x2, y2, B):
+    r2 = r * r
+    with np.errstate(all="ignore"):
+        c = c0 - 0.5 * _libm.log(1 - r2)
+        return c - (nu + 2) / 2 * _libm.log1p((x2 - 2 * r * x * y + y2) / (nu * (1 - r2))) + B
+
+
+def _cop_t_c0(nu):
+    """N2: c0(nu) = lgamma((nu+2)/2) + lgamma(nu/2) - 2 lgamma((nu+1)/2); für nu > 64 asymptotisch (``.cop_t_c0``)."""
+    if nu <= 64:
+        return _lgamma((nu + 2) / 2) + _lgamma(nu / 2) - 2 * _lgamma((nu + 1) / 2)
+    a = nu / 2
+    ia2 = 1 / (a * a)
+    return ((((31 / 9216 * ia2 - 17 / 7168) * ia2 + 1 / 320) * ia2 - 1 / 96) * ia2 + 1 / 4) / a
+
+
+def _cop_fit_t(u, v):
+    """N2: t-Copula per Profil-Likelihood in nu (``.cop_fit_t``); Ergebnis [atanh rho, nu, -loglik]."""
+    best = [0.0, math.inf, math.inf]
+
+    def prof(nu):
+        if math.isinf(nu):
+            x = np.asarray(_qnorm(u), dtype=np.float64)
+            y = np.asarray(_qnorm(v), dtype=np.float64)
+            x2, y2 = x * x, y * y
+
+            def g(th):
+                s = r_sum(_cop_g_ll(math.tanh(th), x, y, x2, y2))
+                return 1e10 if not math.isfinite(s) else -s
+        else:
+            x = np.asarray(_qt(u, nu), dtype=np.float64)
+            y = np.asarray(_qt(v, nu), dtype=np.float64)
+            x2, y2 = x * x, y * y
+            B = (nu + 1) / 2 * (_libm.log1p(x2 / nu) + _libm.log1p(y2 / nu))
+            c0 = _cop_t_c0(nu)
+
+            def g(th):
+                s = r_sum(_cop_t_ll(math.tanh(th), nu, c0, x, y, x2, y2, B))
+                return 1e10 if not math.isfinite(s) else -s
+        o = _stats().optimize(g, (-20.0, 20.0), tol=1e-10)
+        mn, ob = float(o["minimum"]), float(o["objective"])
+        if ob < best[2]:
+            best[0], best[1], best[2] = mn, nu, ob
+        return ob
+
+    nus = [2 + 2.0 ** k for k in range(-4, 13)] + [math.inf]
+    K = len(nus)
+    f = [prof(nu) for nu in nus]
+    k = int(np.argmin(f)) + 1                       # 1-basiert wie which.min
+    if k >= K - 1:
+        _stats().optimize(lambda s: prof(math.inf if s == 0 else 1 / s), (0.0, 1 / nus[K - 3]), tol=1e-9)
+    else:
+        lo = _libm.log(nus[0] - 2) - 30 if k == 1 else _libm.log(nus[k - 2] - 2)
+        _stats().optimize(lambda t2: prof(2 + _libm.exp(t2)), (lo, _libm.log(nus[k] - 2)), tol=1e-6)
+    return best
 
 
 def _cop_lambda(family, par):
@@ -647,6 +701,10 @@ def _finite_pairs(x, y):
 
 def copula_fit(x, y, *, families=None):
     """Copulas an zwei Reihen anpassen (Pseudo-ML auf Rängen, Auswahl per AIC).
+
+    Die t-Copula wird über die Profil-Likelihood in den Freiheitsgraden geschätzt (Raster
+    nu = 2 + 2^k, k = -4 ... 12, und nu = Inf als Gauss-Grenzfall, danach eindimensionale Suche);
+    bei nu > 500 steht in ``par2`` 500, ``loglik`` gilt für das gefundene nu.
 
     Args:
         x, y: Numerische Vektoren gleicher Länge (nur die Ränge zählen); Paare
@@ -689,7 +747,7 @@ def copula_fit(x, y, *, families=None):
     if families is None:
         families = (["gaussian", "t", "clayton", "gumbel", "frank", "clayton_180", "gumbel_180"] if tau >= 0
                     else ["gaussian", "t", "frank", "clayton_90", "clayton_270", "gumbel_90", "gumbel_270"])
-    rho0 = math.sin(_PI * tau / 2)
+    # N2: Startwert rho0 entfällt (t-Copula per Profil-Likelihood, _cop_fit_t)
     rows = []
     for fam in families:
         base = fam.split("_", 1)[0]
@@ -699,11 +757,9 @@ def copula_fit(x, y, *, families=None):
         if base == "gaussian":
             mn, ob = _optimize(lambda r: f([r]), -0.995, 0.995)
             par, nll, k = [mn, _NAN], ob, 1
-        elif base == "t":
-            st = [_libm.atanh(max(min(rho0, 0.95), -0.95)), math.log(6)]
-            p_, val = _optim_nm(st, lambda th: f([math.tanh(th[0]), 2 + _libm.exp(th[1])]), 500, 1e-10)
-            nu = min(2 + _libm.exp(p_[1]), 500)
-            par, nll, k = [math.tanh(p_[0]), nu], val, 2
+        elif base == "t":                     # N2: Profil-Likelihood in nu
+            o = _cop_fit_t(u, v)
+            par, nll, k = [math.tanh(o[0]), min(o[1], 500)], o[2], 2
         elif base == "clayton":
             mn, ob = _optimize(lambda lt: f([_libm.exp(lt)]), math.log(1e-4), math.log(60))
             par, nll, k = [_libm.exp(mn), _NAN], ob, 1
@@ -779,7 +835,11 @@ def dependence_dcc(R):
 
     Returns:
         dict mit ``a``, ``b``, ``loglik``, ``correlation`` (DataFrame Zeit x
-        Paare), ``pairs``, ``garch`` (DataFrame), ``z``, ``Qbar``.
+        Paare), ``pairs``, ``garch`` (DataFrame; ``method`` = ``"ml"``, ``"momente"``
+        oder ``"konstant"``), ``z``, ``Qbar``.
+
+    Seit Etappe 9.6b wie R: GARCH-Stufe per ML der C-Bibliothek (Label ``"ml"`` statt
+    ``"rugarch"``/``"optim"``), Stufe 2 ganz in C; die Schätzung ist deterministisch.
     """
     Rm, nm = _as_matrix(R)
     if Rm.shape[1] < 2 or Rm.shape[0] < 100:
@@ -793,7 +853,7 @@ def dependence_dcc(R):
     if flat:
         raise ValueError("dependence_dcc: Reihe %s ist konstant; keine Korrelation schätzbar." % ", ".join("'%s'" % f for f in flat))
     Qb = _cormat(Z)
-    ev = np.asarray(_linalg().eigen(Qb, symmetric=True, only_values=True)["values"], dtype=np.float64)
+    ev = np.asarray(_sl().eigen_sym(Qb, only_values=True)["values"], dtype=np.float64)
     if _rmin(ev) < 1e-8:
         C0 = Qb.copy()
         np.fill_diagonal(C0, 0.0)
@@ -805,18 +865,10 @@ def dependence_dcc(R):
                          "Korrelation %s); DCC nicht schätzbar. Doppelte bzw. linear abhängige Reihen entfernen."
                          % (nm[i0], nm[j0], _sprintf("%.6f", float(Qb[i0, j0]))))
 
-    def par(th):
-        s = 0.999 * _plogis(th[0])
-        a = s * _plogis(th[1])
-        return a, s - a
-
-    def f(th):
-        a, b = par(th)
-        return _core.dcc_filter(Z, a, b, Qb, False)["nll"]
-    st = [_qlogis(0.98 / 0.999), _qlogis(0.03 / 0.98)]
-    opar, oval = _optim_nm(st, f, 2000, 1e-10)
-    a, b = par(opar)
-    fl = _core.dcc_filter(Z, a, b, Qb, True)
+    # Stufe 2 ganz in C (Entwurf B.11, wie .sl_dcc_fit in R): deterministisch
+    o = _sl().dcc_fit(Z, Qb)
+    a, b, oval = float(o["a"]), float(o["b"]), float(o["nll"])
+    fl = _sl().dcc_filter(Z, a, b, Qb, True)
     if not fl["ok"]:
         raise ValueError("dependence_dcc: bedingte Korrelationsmatrix nicht positiv definit; DCC nicht schätzbar.")
     pn = ["%s ~ %s" % (nm[i], nm[j]) for i, j in _combn2(len(nm))]
@@ -943,7 +995,7 @@ def dependence_analysis(data, assets, *, conditions=None, frequency=("week", "da
         B: Bootstrap-Wiederholungen für die Regime-Vergleiche (0 = aus).
         block: mittlere Blocklänge (``None`` = Politis-White).
         tail_q: Tail-Wahrscheinlichkeit für die Kennzahlen je Regime.
-        seed: Startwert für den Bootstrap (``None`` = Zufallsstrom der Sitzung).
+        seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`) für den Bootstrap.
 
     Returns:
         :class:`SimLevDependence`.
@@ -1078,16 +1130,16 @@ def dependence_analysis(data, assets, *, conditions=None, frequency=("week", "da
             ct = pd.DataFrame(rows)
             if B > 0 and nlv >= 2:
                 nk = Xk.shape[0]
-
-                def run(nk=nk, Xk=Xk, code=code, nlv=nlv):
-                    res = []
-                    for _b in range(int(B)):
-                        idx = np.asarray(_boot_idx_stationary(nk, nk, block), dtype=np.int64) - 1
-                        Xb = Xk[idx, :]
-                        rb = code[idx]
-                        res.append((_dep_reg_cor(Xb, rb, nlv, pidx), _dep_reg_cor(Xb, rb, nlv, pidx, rank=True)))
-                    return res
-                boot = _with_rng_restore(run, seed)
+                # Regel 3/4: seed=None -> einmal k aus G (beim ersten Bootstrap), dann je Zustand wie seed=k
+                if seed is None:
+                    seed = _sl().next_seed()
+                S = _sl().main_stream(seed)
+                boot = []
+                for _b in range(int(B)):
+                    idx = np.asarray(_boot_idx_stationary(nk, nk, block, S), dtype=np.int64) - 1
+                    Xb = Xk[idx, :]
+                    rb = code[idx]
+                    boot.append((_dep_reg_cor(Xb, rb, nlv, pidx), _dep_reg_cor(Xb, rb, nlv, pidx, rank=True)))
                 bp = np.stack([b[0] for b in boot], axis=2)
                 bs = np.stack([b[1] for b in boot], axis=2)
                 hi_ = np.full(len(ct), _NAN)
@@ -1397,8 +1449,9 @@ def _plot_covar(x, width=800, height=450):
 # Quantilsregression, Tail-Regression, CoVaR
 # ═════════════════════════════════════════════════════════════════════════════
 
-def _qr_decomp(X):
-    return _linalg().qr(X)
+def _qr_decomp(X, y):
+    """OLS-Start über ``.sl_lsfit`` (Householder-QR, Entwurf B.7): dict(coefficients, rank, pivot, ...)."""
+    return _sl().lsfit(X, y)
 
 
 def quantile_regression(y, *, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=2000):
@@ -1462,14 +1515,14 @@ def quantile_regression(y, *, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=
         raise ValueError("quantile_regression: keine Regressoren (X = NULL und intercept = FALSE).")
     if y.size < p:
         raise ValueError("quantile_regression: %d vollständige Beobachtungen für %d Koeffizienten." % (y.size, p))
-    qx = _qr_decomp(Xm)
+    qx = _qr_decomp(Xm, y)
     rank = int(qx["rank"])
     if rank < p:
         piv = np.asarray(qx["pivot"], dtype=np.int64)
         bad = [nm[int(k) - 1] for k in piv[rank:]]
         raise ValueError("quantile_regression: Regressoren linear abhängig (%s); doppelte oder konstante Spalten entfernen "
                          "(die Konstante ist bei intercept = TRUE schon enthalten)." % ", ".join("'%s'" % b for b in bad))
-    beta = np.asarray(_linalg().qr_coef(qx, y), dtype=np.float64).ravel()
+    beta = np.asarray(qx["coefficients"], dtype=np.float64).ravel()
     sc = _rmax(r_sd(y), 1e-12)
     beta, opt = _core.quantile_reg_core(y, Xm, tau, beta, sc, tol, int(maxit))
     if not opt:
@@ -1506,12 +1559,8 @@ class SimLevTailRegression(RList):
 
 
 def _lm_coef(y, X1):
-    """``coef(lm(y ~ X))`` mit Konstante in ``X1``."""
-    # lm.fit (Cdqrls) und qr.coef (dqrcf) rechnen mit LINPACK dqrdc2/dqrsl dieselben Schritte
-    la = _linalg()
-    q = la.qr(X1)
-    b = np.asarray(la.qr_coef(q, y), dtype=np.float64)
-    return b
+    """``.sl_lsfit(X1, y)$coefficients`` (OLS mit Konstante in ``X1``, Entwurf B.7)."""
+    return np.asarray(_sl().lsfit(X1, y)["coefficients"], dtype=np.float64)
 
 
 def tail_regression(data, asset, drivers, *, quantiles=(0.05, 0.25, 0.5, 0.75, 0.95),
@@ -1526,7 +1575,7 @@ def tail_regression(data, asset, drivers, *, quantiles=(0.05, 0.25, 0.5, 0.75, 0
         frequency: ``"week"``, ``"day"`` oder ``"month"``.
         B: Bootstrap-Wiederholungen (0 = keine Standardfehler).
         block: mittlere Blocklänge (``None`` = Politis-White).
-        seed: Startwert für den Bootstrap.
+        seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`) für den Bootstrap.
 
     Returns:
         :class:`SimLevTailRegression`.
@@ -1556,22 +1605,20 @@ def tail_regression(data, asset, drivers, *, quantiles=(0.05, 0.25, 0.5, 0.75, 0
         if block is None:
             block = _rmin(_rmax(2, float(_boot()._pw_block(np.abs(y - r_mean(y)))["stationary"])), n / 10)
 
-        def run():
-            res = []
-            for _b in range(int(B)):
-                idx = np.asarray(_boot_idx_stationary(n, n, block), dtype=np.int64) - 1
-                yb = y[idx]
-                Xb = X1[idx, :]
-                try:
-                    cols = []
-                    for k in range(nq):
-                        bk, _o = _core.quantile_reg_core(yb, Xb, quantiles[k], est[:, k], _rmax(r_sd(yb), 1e-12), 1e-10, 2000)
-                        cols.append(bk)
-                    res.append(np.column_stack(cols))
-                except _core.QuantileRegError:
-                    res.append(np.full((p, nq), _NAN))
-            return res
-        bs = _with_rng_restore(run, seed)
+        S = _sl().main_stream(seed)                     # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+        bs = []
+        for _b in range(int(B)):
+            idx = np.asarray(_boot_idx_stationary(n, n, block, S), dtype=np.int64) - 1
+            yb = y[idx]
+            Xb = X1[idx, :]
+            try:
+                cols = []
+                for k in range(nq):
+                    bk, _o = _core.quantile_reg_core(yb, Xb, quantiles[k], est[:, k], _rmax(r_sd(yb), 1e-12), 1e-10, 2000)
+                    cols.append(bk)
+                bs.append(np.column_stack(cols))
+            except _core.QuantileRegError:
+                bs.append(np.full((p, nq), _NAN))
         n_failed = int(sum(bool(np.isnan(a).any()) for a in bs))
         if n_failed == B:
             warnings.warn("tail_regression: keine der %d Bootstrap-Stichproben schätzbar (singuläre Regressoren); "
@@ -1628,8 +1675,8 @@ class SimLevCoVaR(RList):
 
 
 def _matvec(M, b):
-    la = _linalg()
-    return np.asarray(la.matprod(np.asarray(M, dtype=np.float64), np.asarray(b, dtype=np.float64).reshape(-1, 1)),
+    """``drop(M %m% b)`` (slc-Matrixprodukt, Entwurf B.6)."""
+    return np.asarray(_sl().matmul(np.asarray(M, dtype=np.float64), np.asarray(b, dtype=np.float64).reshape(-1, 1)),
                       dtype=np.float64).ravel()
 
 

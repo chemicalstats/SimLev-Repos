@@ -20,9 +20,9 @@ import pandas as pd
 
 from ._r import fmt as _fmt
 from ._r.fmt import NA_REAL
-from ._r import nmath as _nm
+from . import _lib
 from ._r.rlist import RList
-from ._r.rnum import LD, r_isna, r_mean, r_median, r_pow, r_sd
+from ._r.rnum import LD, r_isna, r_mean, r_median, r_pow, r_sd, r_sum, r_var
 from .deep_analysis import (
     _col_means, _da_deflate, _da_series, _dates, _days, _ext, _fill_na, _is_num_scalar, _key_isoweek,
     _key_month, _key_year, _last_of_key, _match_arg, _mean_lgl, _message, _quantile, _sp, _stats,
@@ -145,20 +145,42 @@ def _st(z):
 
 
 def _welch(x, y):
-    """``stats::t.test(x, y)`` (Welch) → (statistic, p.value)."""
-    tt = _stats("t_test")(np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64))
-    stat, p = tt["statistic"], tt["p.value"]
-    return float(np.asarray(stat, dtype=np.float64).ravel()[0]), float(np.asarray(p, dtype=np.float64).ravel()[0])
+    """Welch-Test wie ``.sl_welch_test`` (R, Entwurf B.16) → (statistic, p.value); p über ``_lib.pt``.
+    Bei se = 0 (beide Stichproben konstant) NA."""
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    nx, ny = x.size, y.size
+    ax = r_var(x) / nx
+    ay = r_var(y) / ny
+    se2 = ax + ay
+    if not math.isfinite(se2) or not se2 > 0:
+        return NA_REAL, NA_REAL
+    tt = (r_mean(x) - r_mean(y)) / math.sqrt(se2)
+    nu = (se2 * se2) / ((ax * ax) / (nx - 1) + (ay * ay) / (ny - 1))
+    return tt, 2 * float(_lib.pt(-abs(tt), nu))
 
 
 def _poly_lm(df, degree):
-    """``lm(forward ~ stats::poly(signal, degree), data = df)``; liefert (Modell, R²)."""
-    m = _stats("lm")("forward ~ stats::poly(signal, degree)", data=df[["signal", "forward"]], degree=int(degree))
-    lab = "stats::poly(signal, degree)"
-    co = m["coefficients"]
-    if int(degree) == 1 and isinstance(co, pd.Series) and list(co.index) == ["(Intercept)", lab + "1"]:
-        m["coefficients"] = pd.Series(co.to_numpy(), index=["(Intercept)", lab])   # R: Matrixterm mit einer Spalte ohne Suffix
-    return m, float(_stats("summary_lm")(m)["r.squared"])
+    """Polynom-Kleinstquadrate wie ``.sl_poly_fit`` (R, Entwurf B.7): Basis 1, z, ..., z^d mit
+    z = (x - mean(x)) / sd(x), Lösung über ``_lib.lsfit``; r² = 1 - RSS/TSS. Liefert (Modell, R²)."""
+    x = df["signal"].to_numpy(dtype=np.float64)
+    y = df["forward"].to_numpy(dtype=np.float64)
+    degree = int(degree)
+    cx = r_mean(x)
+    sx = r_sd(x)
+    z = (x - cx) / sx
+    X = np.ones((z.size, degree + 1), dtype=np.float64)
+    for j in range(degree):
+        X[:, j + 1] = X[:, j] * z
+    names = ["(Intercept)"] + (["z"] if degree >= 1 else []) + ["z^%d" % k for k in range(2, degree + 1)]
+    f = _lib.lsfit(X, y)
+    res = f["residuals"]
+    d = y - r_mean(y)
+    r2 = 1 - r_sum(res * res) / r_sum(d * d)
+    model = {"coefficients": pd.Series(np.asarray(f["coefficients"], dtype=np.float64), index=names),
+             "fitted": np.asarray(f["fitted.values"], dtype=np.float64), "degree": degree,
+             "basis": pd.Series([cx, sx], index=["center", "scale"], dtype=np.float64)}
+    return model, float(r2)
 
 
 def _stats_mod():
@@ -192,7 +214,9 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
         degree: Grad der Polynom-Regression (0 = keine).
 
     Returns:
-        :class:`SimLevSignalAnalysis`.
+        :class:`SimLevSignalAnalysis`. Seit Etappe 9.6b ist ``fit["model"]`` wie in R ein dict
+        ``coefficients``, ``fitted``, ``degree``, ``basis`` (kein lm-Objekt mehr); der Welch-Test
+        rechnet mit dem t-Verteilungskern der C-Bibliothek.
     """
     if not isinstance(data, pd.DataFrame) or "date" not in [str(c) for c in data.columns]:
         raise ValueError("signal_analysis: data muss ein data.frame mit Spalte 'date' sein.")
@@ -384,14 +408,14 @@ class SimLevSignalAnalysis(RList):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _crossprod(A, B=None):
-    lin = __import__("simlev._r.linalg", fromlist=["crossprod"])
-    r = lin.crossprod(A) if B is None else lin.crossprod(A, B)
+    """``.sl_crossprod`` (slc-Matrixprodukt, Entwurf B.6)."""
+    r = _lib.crossprod(A) if B is None else _lib.crossprod(A, B)
     return np.asarray(r.to_numpy() if isinstance(r, pd.DataFrame) else r, dtype=np.float64)
 
 
 def _matprod(A, B):
-    lin = __import__("simlev._r.linalg", fromlist=["matprod"])
-    r = lin.matprod(A, B)
+    """``%m%`` (slc-Matrixprodukt, Entwurf B.6)."""
+    r = _lib.matmul(A, B)
     return np.asarray(r.to_numpy() if isinstance(r, pd.DataFrame) else r, dtype=np.float64)
 
 
@@ -409,13 +433,16 @@ def _hac_cov(Y, lag=None):
     return S
 
 
-def _with_rng(fn, seed):
-    return _ext("bootstrap", "_with_rng_restore")(fn, seed=seed)
+def _main_stream(seed):
+    """Hauptstrom (Entwurf C.5, Regeln 3 bis 5)."""
+    from ._lib import main_stream
+    return main_stream(seed)
 
 
-def _boot_idx(n, m, L):
-    from ._bootstrap_core import boot_idx_stationary
-    return boot_idx_stationary(n, m, L) - 1
+def _boot_idx(n, m, L, stream):
+    """``.sl_boot_idx_stationary(n, m, L, stream)`` als 0-basierte Indizes."""
+    from ._lib_models import boot_idx_stationary
+    return boot_idx_stationary(n, m, L, stream=stream).astype(np.int64) - 1
 
 
 def _ppy_default(frequency):
@@ -436,7 +463,7 @@ def sharpe_test(x, y, *, frequency=("week", "day", "month"), method=("hac", "boo
         frequency: ``"week"`` (Standard), ``"day"`` oder ``"month"``.
         method: ``"hac"`` (Delta-Methode, Newey-West) oder ``"bootstrap"``.
         B: Bootstrap-Wiederholungen. block: mittlere Blocklänge (``None`` =
-            ``max(2, round(T^(1/3)))``). seed: Startwert (``None`` = keiner).
+            ``max(2, round(T^(1/3)))``). seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`).
         ppy: Perioden je Jahr (``None`` = Standard bzw. geschätzt).
 
     Returns:
@@ -495,21 +522,18 @@ def sharpe_test(x, y, *, frequency=("week", "day", "month"), method=("hac", "boo
         q = _matprod(_matprod(grad.reshape(1, 4), Psi), grad.reshape(4, 1))
         se = math.sqrt(float(q.ravel()[0]) / Tn)
         z = d0 / se
-        p = 2 * float(_nm.pnorm(-abs(z)))
-        qq = float(_nm.qnorm(0.975))
+        p = 2 * float(_lib.pnorm(-abs(z)))
+        qq = float(_lib.qnorm(0.975))
         ci = [d0 + (-1 * qq) * se, d0 + (1 * qq) * se]
     else:
         if block is None:
             block = max(2.0, float(_fmt.r_round(r_pow(Tn, 1 / 3))))
 
-        def run():
-            out = np.empty(int(B))
-            for i in range(int(B)):
-                k = _boot_idx(Tn, Tn, block)
-                out[i] = _sr(ra[k]) - _sr(rb[k])
-            return out
-
-        db = _with_rng(run, seed)
+        S = _main_stream(seed)
+        db = np.empty(int(B))
+        for i in range(int(B)):
+            k = _boot_idx(Tn, Tn, block, S)
+            db[i] = _sr(ra[k]) - _sr(rb[k])
         se = r_sd(db)
         z = d0 / se
         p = _mean_lgl(np.abs(db - d0) >= abs(d0))
@@ -537,7 +561,7 @@ def overfit_reality_check(x, *, benchmark=None, B=999, block=None, frequency=("w
             Vektor der Benchmark-Renditen.
         B: Bootstrap-Wiederholungen. block: mittlere Blocklänge.
         frequency: ``"week"``, ``"day"`` oder ``"month"`` (Aggregation mit Datum).
-        dates: Datum je Zeile (nur Matrix-Eingabe). seed: Startwert.
+        dates: Datum je Zeile (nur Matrix-Eingabe). seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`).
 
     Returns:
         :class:`SimLevRealityCheck`.
@@ -581,13 +605,10 @@ def overfit_reality_check(x, *, benchmark=None, B=999, block=None, frequency=("w
     if block is None:
         block = max(2.0, float(_fmt.r_round(r_pow(Tn, 1 / 3))))
 
-    def run():
-        out = np.empty((int(B), K))
-        for i in range(int(B)):
-            out[i] = _col_means(D[_boot_idx(Tn, Tn, block), :])
-        return out
-
-    Fb = _with_rng(run, seed)
+    S = _main_stream(seed)
+    Fb = np.empty((int(B), K))
+    for i in range(int(B)):
+        Fb[i] = _col_means(D[_boot_idx(Tn, Tn, block, S), :])
     sq = math.sqrt(Tn)
     om = np.maximum(_apply_sd(Fb), 1e-12) * sq
     V = float(np.max(sq * fbar))
@@ -662,7 +683,7 @@ def sharpe_min_track_record(x, *, target=0, prob=0.95, frequency=("week", "day",
     if sr <= sr0:
         need = math.inf
     else:
-        qq = float(_nm.qnorm(prob)) / (sr - sr0)
+        qq = float(_lib.qnorm(prob)) / (sr - sr0)
         need = 1 + (1 - g3 * sr + (g4 - 1) / 4 * (sr * sr)) * (qq * qq)
     nr = len(r)
     return pd.Series([sr * math.sqrt(ppy), float(nr), need, need / ppy, nr / ppy, float(nr >= need)],
@@ -806,7 +827,7 @@ def _plot_signal(x):
     _ana_points(s, q, sv, fv)
     sc = {"signal": sv.copy(), "forward": fw.copy()}
     if x.get("fit") is not None:
-        fitted = np.asarray(x["fit"]["model"]["fitted.values"], dtype=np.float64).ravel()
+        fitted = np.asarray(x["fit"]["model"]["fitted"], dtype=np.float64).ravel()
         o = np.argsort(sv, kind="stable")
         _ana_lines(s, q, sv[o], 100 * fitted[o], col="#B5562B", lwd=2)
         sc["fitted"] = fitted.copy()

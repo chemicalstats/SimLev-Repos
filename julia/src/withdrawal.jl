@@ -31,7 +31,7 @@ const _MISSING = B._MISSING
 const _Missing = B._Missing
 import ..Bootstrap: _stop, _warn, _message, _sp, _fmt1, _fmtstrs, _show, _as_char, _round0, _isnum, _numvec, _num1, _f1,
                     _dvec, _ivec, _mat, _get, _names, _values, _len, _rval, _rsum, _rmean, _rprod, _rpow, _rlog, _rexp,
-                    _cumprod, _cummax, _median, _quantile7, _weighted_mean, _wquantile, _with_rng_restore, _uniq,
+                    _cumprod, _cummax, _median, _quantile7, _weighted_mean, _wquantile, _uniq,
                     _match_arg, _todate, _seq_dates, _days, _is_boot_result, _is_study, _is_result, _deparse,
                     _quiet, _no_messages, _aux_type_of, _cfg_list, _as_numeric_col, _pmax, _pmin, _istrue
 
@@ -1140,6 +1140,14 @@ function withdrawal_max_rate(x, rule_pos = _MISSING; rule = _MISSING, success = 
         _stop(@sprintf("withdrawal_max_rate: tol muss eine Zahl > 0 in Prozentpunkten sein (z. B. 0.005; erhalten: %s).", _show(tol)))
     end
     lower = Float64(lower); upper = Float64(upper); success = Float64(success); tol = Float64(tol)
+    # Entwurf C.5, Regel 9: ein Horizont mit seed = nothing wird einmal zu k aufgelöst; alle
+    # Suchschritte ziehen damit dieselben Laufzeiten
+    hz = get(kwargs, :horizon, nothing)
+    if _is_horizon(hz) && _get(hz, "seed") === nothing && hz["type"] != "fixed"
+        hz = copy(hz)
+        hz["seed"] = SimLev.SLib.next_seed()
+        kwargs = (; kwargs..., horizon = hz)
+    end
     first = Ref(true)
     function f(rate)
         rl = copy(rule)
@@ -1350,6 +1358,7 @@ function withdrawal_horizon(type_pos = nothing; type = type_pos, type_ = type, y
         _stop(_sp("withdrawal_horizon('triangular'): mode (%g) muss zwischen min (%g) und max (%g) liegen.", mode, min, max))
     end
     t == "normal" && sd < 0 && _stop("withdrawal_horizon('normal'): sd muss >= 0 sein.")
+    seed === nothing || SimLev.SLib.check_seed(seed)          # Entwurf C.5, Regel 2
     out = RList("type" => t, "seed" => seed; class = "SimLevHorizon")
     for k in need
         out[k] = _rval(given[k])
@@ -1367,10 +1376,12 @@ end
 "Laufzeiten ziehen (Port von `.draw_horizon`); ganzzahlig, mindestens 1."
 function _draw_horizon(h, n)
     n = Int(n)
+    # Hauptstrom aus h["seed"] (Entwurf C.5, Regeln 3, 4 und 9); "fixed" zieht nicht
+    rs = h["type"] == "fixed" ? nothing : SimLev.SLib.main_stream(_get(h, "seed"))
     function pick(x, prob = nothing)
         x = _dvec(x)
-        ix = prob === nothing ? SimLev.RRng.sample_int(length(x), n; replace = true) :
-             SimLev.RRng.sample_int(length(x), n; replace = true, prob = _dvec(prob))
+        ix = prob === nothing ? SimLev.SLib.sample(length(x), n; replace = true, stream = rs) :
+             SimLev.SLib.sample(length(x), n; replace = true, prob = _dvec(prob), stream = rs)
         return x[_ivec(ix)]
     end
     function body()
@@ -1379,12 +1390,12 @@ function _draw_horizon(h, n)
         t == "uniform" && return pick(_seq_from_to(_f1(h["min"]), _f1(h["max"])))
         t == "discrete" && return pick(h["years"], h["prob"])
         if t == "normal"
-            z = _dvec(SimLev.RRng.rnorm(n, Float64(_f1(h["mean"])), Float64(_f1(h["sd"]))))
+            z = SimLev.SLib.rnorm(n, Float64(_f1(h["mean"])), Float64(_f1(h["sd"])); stream = rs)
             r = Float64[_round0(v) for v in z]
             return Float64[_pmin(Float64(_f1(h["max"])), _pmax(Float64(_f1(h["min"])), v)) for v in r]
         end
         if t == "triangular"
-            u = _dvec(SimLev.RRng.runif(n))
+            u = SimLev.SLib.runif(n; stream = rs)
             a, b, c = Float64(_f1(h["min"])), Float64(_f1(h["max"])), Float64(_f1(h["mode"]))
             b == a && return fill(a, n)
             f = (c - a) / (b - a)
@@ -1392,8 +1403,7 @@ function _draw_horizon(h, n)
         end
         return pick(h["years"])
     end
-    seed = _get(h, "seed")
-    out = seed === nothing ? body() : _with_rng_restore(body; seed = seed)
+    out = body()
     return Int[Int(trunc(_pmax(1.0, v))) for v in out]
 end
 

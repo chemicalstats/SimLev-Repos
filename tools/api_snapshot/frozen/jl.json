@@ -1,6 +1,6 @@
 {
  "language": "Julia",
- "stand": "2026-10-27 – Etappe 8.0: Auswahl aus SimLevWrapperNav",
+ "stand": "2026-10-27 – Etappe 9: SimLev eigenständig",
  "hinweis": "Erzeugt von tools/api_snapshot/run.sh --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
@@ -550,14 +550,6 @@
    {"name": "x", "kind": "positional", "default": null},
    {"name": "base", "kind": "keyword", "default": "100"}
   ],
-  "rng_kind": [
-   {"name": "kind_", "kind": "positional", "default": "nothing"},
-   {"name": "normal_kind_", "kind": "positional", "default": "nothing"},
-   {"name": "sample_kind_", "kind": "positional", "default": "nothing"},
-   {"name": "kind", "kind": "keyword", "default": "kind_"},
-   {"name": "normal_kind", "kind": "keyword", "default": "normal_kind_"},
-   {"name": "sample_kind", "kind": "keyword", "default": "sample_kind_"}
-  ],
   "rows": [
    {"name": "df", "kind": "positional", "default": null},
    {"name": "idx", "kind": "positional", "default": null}
@@ -686,15 +678,6 @@
    {"name": "dates", "kind": "keyword", "default": "nothing"},
    {"name": "series...", "kind": "kwargs_rest", "default": null}
   ],
-  "set_seed": [
-   {"name": "seed", "kind": "positional", "default": null},
-   {"name": "kind_", "kind": "positional", "default": "nothing"},
-   {"name": "normal_kind_", "kind": "positional", "default": "nothing"},
-   {"name": "sample_kind_", "kind": "positional", "default": "nothing"},
-   {"name": "kind", "kind": "keyword", "default": "kind_"},
-   {"name": "normal_kind", "kind": "keyword", "default": "normal_kind_"},
-   {"name": "sample_kind", "kind": "keyword", "default": "sample_kind_"}
-  ],
   "sharpe_deflated": [
    {"name": "x", "kind": "positional", "default": null},
    {"name": "id", "kind": "keyword", "default": "nothing"},
@@ -811,6 +794,9 @@
    {"name": "dca_fee_pos", "kind": "positional", "default": "nothing"},
    {"name": "order_fee", "kind": "keyword", "default": "order_fee_pos"},
    {"name": "dca_fee", "kind": "keyword", "default": "dca_fee_pos"}
+  ],
+  "simlev_seed": [
+   {"name": "seed", "kind": "positional", "default": "nothing"}
   ],
   "simulation": [
    {"name": "data", "kind": "positional", "default": null},

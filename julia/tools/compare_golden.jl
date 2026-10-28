@@ -11,11 +11,14 @@
 #
 # Weiterhin möglich: compare_golden.jl <golden_dir> [case_id ...] (Argumente, die
 # kein vorhandener Pfad sind, gelten als Fallkennungen).
+#
+# Etappe 9: ohne SIMLEV_LEGACY_TESTS=1 ist der Vergleich mit golden/cases und golden/extra
+# ausgesetzt (Hinweis, Ende 0); andere Verzeichnisse (Gleichlauf) werden verglichen.
 
 using SimLev
 include(joinpath(@__DIR__, "..", "test", "golden_tools.jl"))
 
-const DEFAULT_DIRS = [joinpath(@__DIR__, "..", "..", "golden", d) for d in ("cases", "extra")]
+const DEFAULT_DIRS = [normpath(joinpath(@__DIR__, "..", "..", "golden", d)) for d in ("cases", "extra")]
 
 _case_id(f) = replace(basename(f), r"\.json(\.gz)?$" => "")
 
@@ -40,6 +43,12 @@ function main(args)
     end
     verbose |= !isempty(ids)
     isempty(paths) && (paths = DEFAULT_DIRS)
+    # Etappe 9 (Entwurf C.7): Vergleich mit golden/cases und golden/extra ausgesetzt
+    if !SimLev.REnv.legacy_tests() && sort(normpath.(abspath.(paths))) == sort(DEFAULT_DIRS)
+        println("compare_golden: Etappe 9 – Vergleich mit golden/cases und golden/extra ausgesetzt ",
+                "(SIMLEV_LEGACY_TESTS=1, oder andere Verzeichnisse angeben)")
+        return 0
+    end
     total_ok = 0; total = 0; n_failed = 0
     t_all = time()
     for p in paths

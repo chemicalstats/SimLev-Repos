@@ -1,1 +1,3 @@
 include src/*.c src/*.cpp src/*.h
+include src/core/*.c src/core/*.h
+include COPYRIGHTS.md

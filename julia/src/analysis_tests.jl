@@ -95,17 +95,37 @@ end
 const _ST_NAMES = ["n", "mean", "median", "win_rate", "sd", "t"]
 _median(z) = DA._vecf(SimLev.RStats.median(collect(Float64, z)))[1]
 
-"`stats::t.test(x, y)` (Welch) → (statistic, p.value)."
+"""Welch-Test wie `.sl_welch_test` (R, Entwurf B.16) → (statistic, p.value); p über `SLib.pt`.
+Bei se = 0 (beide Stichproben konstant) NA."""
 function _welch(x, y)
-    tt = SimLev.RStats.t_test(collect(Float64, x), collect(Float64, y))
-    DA._vecf(DA._rget(tt, "statistic"))[1], DA._vecf(DA._rget(tt, "p.value"))[1]
+    x = collect(Float64, x); y = collect(Float64, y)
+    nx, ny = length(x), length(y)
+    ax = SimLev.r_var(x) / nx; ay = SimLev.r_var(y) / ny
+    se2 = ax + ay
+    (isfinite(se2) && se2 > 0) || return (_NA, _NA)
+    tt = (SimLev.r_mean(x) - SimLev.r_mean(y)) / sqrt(se2)
+    nu = (se2 * se2) / ((ax * ax) / (nx - 1) + (ay * ay) / (ny - 1))
+    tt, 2 * SimLev.SLib.pt(-abs(tt), nu)
 end
 
-"`lm(forward ~ stats::poly(signal, degree), data = df)` → (Modell, R²)."
+"""Polynom-Kleinstquadrate wie `.sl_poly_fit` (R, Entwurf B.7): Basis 1, z, ..., z^d mit
+z = (x - mean(x)) / sd(x), Lösung über `SLib.lsfit`; r² = 1 - RSS/TSS → (Modell, R²)."""
 function _poly_lm(df, degree)
-    m = SimLev.RStats.lm("forward ~ stats::poly(signal, degree)"; data = df, degree = Int(degree))
-    r2 = DA._vecf(DA._rget(SimLev.RStats.summary_lm(m), "r.squared"))[1]
-    m, r2
+    x = DA._f64(df["signal"]); y = DA._f64(df["forward"]); degree = Int(degree)
+    cx = SimLev.r_mean(x); sx = SimLev.r_sd(x)
+    z = (x .- cx) ./ sx
+    X = ones(Float64, length(z), degree + 1)
+    for j in 1:degree
+        X[:, j + 1] = X[:, j] .* z
+    end
+    nms = vcat(["(Intercept)"], degree >= 1 ? ["z"] : String[], ["z^$k" for k in 2:degree])
+    f = SimLev.SLib.lsfit(X, y)
+    res = f["residuals"]; d = y .- SimLev.r_mean(y)
+    r2 = 1 - SimLev.r_sum(res .* res) / SimLev.r_sum(d .* d)
+    model = SimLev.RList("coefficients" => SimLev.RVector(f["coefficients"]; names = nms),
+                         "fitted" => f["fitted.values"], "degree" => degree,
+                         "basis" => SimLev.RVector([cx, sx]; names = ["center", "scale"]))
+    model, r2
 end
 
 """
@@ -113,7 +133,9 @@ end
                     signal2 = nothing, bins2 = 3, splits = 1, degree = 2)
 
 Vorwärtsrenditen je Signalbereich (R: `signal_analysis()`); Ergebnis: `RList`
-der Klasse `SimLevSignalAnalysis`.
+der Klasse `SimLevSignalAnalysis`. Seit Etappe 9.6b ist `fit["model"]` wie in R eine
+Liste `coefficients`, `fitted`, `degree`, `basis` (kein lm-Objekt mehr); der Welch-Test
+rechnet mit dem t-Verteilungskern der C-Bibliothek.
 """
 function signal_analysis(data, signal, target; horizon = 21, step = nothing, bins = 5, breaks = nothing,
                          signal2 = nothing, bins2 = 3, splits = 1, degree = 2)
@@ -292,7 +314,7 @@ function _plot_signal(x; file = nothing)
     _ana_points(s, q, sv, fv)
     sc = SimLev.RFrame("signal" => copy(sv), "forward" => DA._f64(dd["forward"]))
     if get(x, "fit", nothing) !== nothing
-        fitted = DA._vecf(DA._rget(x["fit"]["model"], "fitted.values"))
+        fitted = DA._vecf(DA._rget(x["fit"]["model"], "fitted"))
         o = sortperm(sv; alg = MergeSort)
         _ana_lines(s, q, sv[o], 100 .* fitted[o]; col = "#B5562B", lwd = 2)
         sc["fitted"] = copy(fitted)
@@ -310,9 +332,10 @@ end
 # ═══════════════════════════════════════════════════════════════════════════
 
 _mat(r) = Matrix{Float64}(r isa SimLev.NamedMat ? r.data : r)
-_crossprod(A) = _mat(SimLev.RLinalg.crossprod(Matrix{Float64}(A)))
-_crossprod(A, B) = _mat(SimLev.RLinalg.crossprod(Matrix{Float64}(A), Matrix{Float64}(B)))
-_matprod(A, B) = _mat(SimLev.RLinalg.matprod(Matrix{Float64}(A), Matrix{Float64}(B)))
+# Matrixprodukte der C-Bibliothek slc (Entwurf B.6), wie .sl_crossprod und %m% in R
+_crossprod(A) = _mat(SimLev.SLib.crossprod(Matrix{Float64}(A)))
+_crossprod(A, B) = _mat(SimLev.SLib.crossprod(Matrix{Float64}(A), Matrix{Float64}(B)))
+_matprod(A, B) = _mat(SimLev.SLib.matmul(Matrix{Float64}(A), Matrix{Float64}(B)))
 
 "Newey-West-Kovarianz mit Bartlett-Kern (`.hac_cov`)."
 function _hac_cov(Y, lag = nothing)
@@ -329,8 +352,9 @@ function _hac_cov(Y, lag = nothing)
     S
 end
 
-_with_rng(f, seed) = SimLev.Bootstrap._with_rng_restore(f; seed = seed)
-_boot_idx(n, m, L) = Int.(DA._vecf(SimLev.BootstrapCore.boot_idx_stationary(n, m, L)))
+"Hauptstrom (Entwurf C.5, Regeln 3 bis 5)."
+_main_stream(seed) = SimLev.SLib.main_stream(seed)
+_boot_idx(n, m, L, stream) = Vector{Int}(SimLev.SLib.boot_idx_stationary(n, m, L; stream = stream))
 _ppy_default(frequency) = Dict("day" => 252.0, "week" => 52.0, "month" => 12.0)[frequency]
 _sr(r) = SimLev.r_mean(r) / SimLev.r_sd(r)
 
@@ -385,20 +409,17 @@ function sharpe_test(x, y; frequency = ["week", "day", "month"], method = ["hac"
         q = _matprod(_matprod(reshape(grad, 1, 4), Psi), reshape(grad, 4, 1))
         se = sqrt(q[1] / Tn)
         z = d0 / se
-        p = 2 * DA._vecf(SimLev.RNmath.pnorm(-abs(z)))[1]
-        qq = DA._vecf(SimLev.RNmath.qnorm(0.975))[1]
+        p = 2 * SimLev.SLib.pnorm(-abs(z))
+        qq = SimLev.SLib.qnorm(0.975)
         ci = [d0 + (-1 * qq) * se, d0 + (1 * qq) * se]
     else
         block === nothing && (block = max(2.0, SimLev.RFmt.r_round(SimLev.r_pow(Tn, 1 / 3), 0)))
-        function run()
-            out = Vector{Float64}(undef, Int(B))
-            for i in 1:Int(B)
-                k = _boot_idx(Tn, Tn, block)
-                out[i] = _sr(ra[k]) - _sr(rb[k])
-            end
-            out
+        S = _main_stream(seed)
+        dbs = Vector{Float64}(undef, Int(B))
+        for i in 1:Int(B)
+            k = _boot_idx(Tn, Tn, block, S)
+            dbs[i] = _sr(ra[k]) - _sr(rb[k])
         end
-        dbs = _with_rng(run, seed)
         se = SimLev.r_sd(dbs)
         z = d0 / se
         p = DA._mean_lgl(abs.(dbs .- d0) .>= abs(d0))
@@ -449,14 +470,11 @@ function overfit_reality_check(x; benchmark = nothing, B = 999, block = nothing,
     Tn, K = size(D)
     fbar = DA._col_means(D)
     block === nothing && (block = max(2.0, SimLev.RFmt.r_round(SimLev.r_pow(Tn, 1 / 3), 0)))
-    function run()
-        out = Matrix{Float64}(undef, Int(B), K)
-        for i in 1:Int(B)
-            out[i, :] = DA._col_means(D[_boot_idx(Tn, Tn, block), :])
-        end
-        out
+    S = _main_stream(seed)
+    Fb = Matrix{Float64}(undef, Int(B), K)
+    for i in 1:Int(B)
+        Fb[i, :] = DA._col_means(D[_boot_idx(Tn, Tn, block, S), :])
     end
-    Fb = _with_rng(run, seed)
     sq = sqrt(Tn)
     om = Float64[max(SimLev.r_sd(Fb[:, j]), 1e-12) * sq for j in 1:K]
     V = DA._rmax(sq .* fbar)
@@ -515,7 +533,7 @@ function sharpe_min_track_record(x; target = 0, prob = 0.95, frequency = ["week"
     need = if sr <= sr0
         Inf
     else
-        qq = DA._vecf(SimLev.RNmath.qnorm(prob))[1] / (sr - sr0)
+        qq = SimLev.SLib.qnorm(Float64(prob)) / (sr - sr0)
         1 + (1 - g3 * sr + (g4 - 1) / 4 * (sr * sr)) * (qq * qq)
     end
     nr = length(r)

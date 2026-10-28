@@ -83,15 +83,15 @@
   type <- match.arg(type)
   S <- stats::cov(R); N <- ncol(R); Tn <- nrow(R)
   if (type == "sample" || N < 2) return(S)
-  psd <- function(M) { e <- eigen(M, symmetric = TRUE); M2 <- e$vectors %*% diag(pmax(e$values, 1e-12), N) %*% t(e$vectors)
+  psd <- function(M) { e <- .sl_eigen_sym(M); M2 <- e$vectors %m% diag(pmax(e$values, 1e-12), N) %m% t(e$vectors)
                        dimnames(M2) <- dimnames(S); (M2 + t(M2)) / 2 }
   if (type == "ledoit_wolf") {
     X <- sweep(R, 2, colMeans(R))
-    S1 <- crossprod(X) / Tn
+    S1 <- .sl_crossprod(X) / Tn
     m <- sum(diag(S1)) / N
     nrm <- function(A) sum(A^2) / N
     d2 <- nrm(S1 - diag(m, N))
-    b2 <- min(d2, sum(vapply(seq_len(Tn), function(t) nrm(tcrossprod(X[t, ]) - S1), 0)) / Tn^2)
+    b2 <- min(d2, sum(vapply(seq_len(Tn), function(t) nrm(.sl_tcrossprod(X[t, ]) - S1), 0)) / Tn^2)
     a2 <- d2 - b2
     Sh <- (b2 / d2) * diag(m, N) + (a2 / d2) * S1
     dimnames(Sh) <- dimnames(S)
@@ -101,7 +101,7 @@
     hl <- min(52, max(5, Tn / 4)); lam <- 0.5^(1 / hl)
     w <- lam^((Tn - 1):0); w <- w / sum(w)
     mu <- colSums(R * w); X <- sweep(R, 2, mu)
-    return(psd(crossprod(X * sqrt(w)) / (1 - sum(w^2))))
+    return(psd(.sl_crossprod(X * sqrt(w)) / (1 - sum(w^2))))
   }
   sd <- sqrt(diag(S))
   if (type == "denoise") {
@@ -111,17 +111,17 @@
       if (sum(pos) > 0) out[pos, pos] <- .opt_cov(R[, pos, drop = FALSE], "denoise")
       return(out)
     }
-    C <- stats::cov2cor(S); e <- eigen(C, symmetric = TRUE)
+    C <- stats::cov2cor(S); e <- .sl_eigen_sym(C)
     lmax <- (1 + sqrt(N / Tn))^2
     noise <- e$values < lmax
     if (sum(noise) > 1) e$values[noise] <- mean(e$values[noise])
-    C2 <- e$vectors %*% diag(e$values, N) %*% t(e$vectors); C2 <- stats::cov2cor(C2)
+    C2 <- e$vectors %m% diag(e$values, N) %m% t(e$vectors); C2 <- stats::cov2cor(C2)
     return(psd(C2 * outer(sd, sd)))
   }
   # Gerber-Statistik (GS2): (n_konkordant - n_diskordant) / (n_konkordant + n_diskordant)
   H <- 0.5 * sd
   Up <- sweep(R, 2, H, ">="); Dn <- sweep(R, 2, -H, "<=")
-  Uu <- crossprod(Up * 1); Dd <- crossprod(Dn * 1); Ud <- crossprod(Up * 1, Dn * 1)
+  Uu <- .sl_crossprod(Up * 1); Dd <- .sl_crossprod(Dn * 1); Ud <- .sl_crossprod(Up * 1, Dn * 1)
   nc <- Uu + Dd; nd <- Ud + t(Ud)
   G <- ifelse(nc + nd > 0, (nc - nd) / (nc + nd), 0); diag(G) <- 1
   psd(G * outer(sd, sd))
@@ -138,7 +138,7 @@
 #' @noRd
 .qp_simplex <- function(Q, cvec, lo, hi, w0 = NULL, maxit = 20000L, tol = 1e-12) {
   N <- ncol(Q); Q <- as.matrix(Q); storage.mode(Q) <- "double"
-  L <- max(eigen(Q, symmetric = TRUE, only.values = TRUE)$values, 1e-12)
+  L <- max(.sl_eigen_sym(Q, only.values = TRUE)$values, 1e-12)
   .qp_box_simplex(Q, as.numeric(cvec), as.numeric(lo), as.numeric(hi), as.numeric(w0 %||% rep(1 / N, N)),
                   L, as.integer(maxit), tol)
 }
@@ -148,11 +148,11 @@
 #' @noRd
 .risk_parity <- function(S, b) {
   N <- ncol(S); y <- 1 / sqrt(diag(S)); y <- y / sum(y)
-  f <- function(y) 0.5 * drop(t(y) %*% S %*% y) - sum(b * log(y))
+  f <- function(y) 0.5 * drop(t(y) %m% S %m% y) - sum(b * log(y))
   for (it in 1:200) {
-    g <- drop(S %*% y) - b / y
+    g <- drop(S %m% y) - b / y
     H <- S + diag(b / y^2, N)
-    dx <- solve(H, g)
+    dx <- .sl_solve_spd(H, g)                         # H symmetrisch positiv definit (Cholesky, slc)
     step <- 1
     while (any(y - step * dx <= 0) || f(y - step * dx) > f(y) - 1e-4 * step * sum(g * dx)) { step <- step / 2; if (step < 1e-12) break }
     y <- y - step * dx
@@ -176,7 +176,7 @@
     nxt <- list()
     for (cl in clusters) if (length(cl) > 1) {
       h <- floor(length(cl) / 2); c1 <- cl[1:h]; c2 <- cl[(h + 1):length(cl)]
-      cv <- function(ix) { s <- S[ix, ix, drop = FALSE]; iv <- 1 / diag(s); iv <- iv / sum(iv); drop(t(iv) %*% s %*% iv) }
+      cv <- function(ix) { s <- S[ix, ix, drop = FALSE]; iv <- 1 / diag(s); iv <- iv / sum(iv); drop(t(iv) %m% s %m% iv) }
       v1 <- cv(c1); v2 <- cv(c2); a <- 1 - v1 / (v1 + v2)
       w[c1] <- w[c1] * a; w[c2] <- w[c2] * (1 - a)
       nxt <- c(nxt, list(c1), list(c2))
@@ -193,7 +193,7 @@
 .min_cvar <- function(R, alpha, lo, hi) {
   N <- ncol(R); R <- as.matrix(R); storage.mode(R) <- "double"; sc <- stats::sd(as.vector(R))
   w <- .proj_capped_simplex(rep(1 / N, N), lo, hi)
-  zeta <- stats::quantile(-drop(R %*% w), 1 - alpha, names = FALSE)
+  zeta <- stats::quantile(-drop(R %m% w), 1 - alpha, names = FALSE)
   .min_cvar_core(R, alpha, as.numeric(lo), as.numeric(hi), w, zeta, sc * c(0.05, 0.005), 2000L)
 }
 
@@ -273,7 +273,7 @@
     stop(sprintf("%s: mu f\u00fcr alle Anlagen angeben; es fehlt ein Wert f\u00fcr %s (benannter Vektor mit allen Anlagen oder ein Wert je Spalte in Spaltenreihenfolge).",
                  method, paste0("'", nm[is.na(m)], "'", collapse = ", ")))
   rf <- risk_free / 100
-  sharpe_of <- function(w, mm) (sum(w * mm) - rf) / sqrt(drop(t(w) %*% S %*% w))
+  sharpe_of <- function(w, mm) (sum(w * mm) - rf) / sqrt(drop(t(w) %m% S %m% w))
   best_sharpe <- function(mm) {
     lg <- seq(log(500), log(0.05), length.out = 30)
     ws <- vector("list", length(lg)); prev <- NULL
@@ -417,9 +417,10 @@
 #' @param block Mittlere Blocklaenge des stationaeren Bootstraps fuer das
 #'   Resampling in Perioden. \code{NULL} (Standard) = \eqn{T^{1/3}} gerundet,
 #'   mindestens 2 (T = Anzahl Perioden).
-#' @param seed Startwert fuer das Resampling. Mit Startwert ist das Ergebnis reproduzierbar und der
-#'   Zufallszustand der Sitzung bleibt unveraendert; mit `NULL` wird der
-#'   Zufallsstrom der Sitzung normal weitergezogen.
+#' @param seed Startwert fuer das Resampling. Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+#'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+#'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
+#'   Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
 #' @return Objekt der Klasse \code{SimLevOptimization}, eine Liste mit
 #'   \describe{
 #'     \item{weights}{Benannter Gewichtsvektor (Anteile, Summe 1).}
@@ -474,10 +475,9 @@ portfolio_optimize <- function(x, assets = NULL,
   wb <- NULL
   if (resample > 0) {
     block <- block %||% max(2, round(nrow(R)^(1 / 3)))
-    wb <- .with_rng_restore(seed = seed, {
-      matrix(vapply(seq_len(resample), function(b) core(R[.boot_idx_stationary(nrow(R), nrow(R), block), , drop = FALSE]), numeric(N)),
-             ncol = N, byrow = TRUE)
-    })
+    S <- .sl_main_stream(seed)                                  # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+    wb <- matrix(vapply(seq_len(resample), function(b) core(R[.sl_boot_idx_stationary(nrow(R), nrow(R), block, stream = S), , drop = FALSE]), numeric(N)),
+                 ncol = N, byrow = TRUE)
     colnames(wb) <- nm
     w <- colMeans(wb); w <- w / sum(w)
   }
@@ -491,13 +491,13 @@ portfolio_optimize <- function(x, assets = NULL,
 #' @noRd
 .opt_summary <- function(w, R, ppy, cov_type, risk_free, alpha) {
   S <- .opt_cov(R, cov_type) * ppy; m <- colMeans(R) * ppy
-  vol <- sqrt(max(drop(t(w) %*% S %*% w), 0)); ret <- sum(w * m)
-  rp <- drop(R %*% w)
+  vol <- sqrt(max(drop(t(w) %m% S %m% w), 0)); ret <- sum(w * m)
+  rp <- drop(R %m% w)
   if (vol <= 1e-10) {                               # Portfolio ohne Schwankung: Quotienten nicht definiert
     warning("Portfolio ohne Schwankung (Volatilit\u00e4t 0, nur Anlagen mit konstanter Rendite): Sharpe Ratio, Diversifikationsverh\u00e4ltnis und Risikoanteile sind nicht definiert (NA).")
     vol <- 0; vq <- NA_real_
   } else vq <- vol
-  rc <- w * drop(S %*% w) / vq
+  rc <- w * drop(S %m% w) / vq
   list(weights = w,
        stats = c(expected_return = ret, volatility = vol, sharpe = (ret - risk_free / 100) / vq,
                  cvar = .cvar_hist(rp, alpha), cdar = .cdar_hist(rp, alpha), diversification_ratio = sum(w * sqrt(diag(S))) / vq,
@@ -577,7 +577,7 @@ portfolio_frontier <- function(x, assets = NULL, n = 40L, lower = 0, upper = 1, 
   W <- matrix(vapply(exp(seq(log(1e4), log(0.02), length.out = n)), function(g) .qp_simplex(g * S, -m, lo, hi), numeric(length(nm))),
               ncol = length(nm), byrow = TRUE)
   colnames(W) <- nm
-  ret <- drop(W %*% m); vol <- sqrt(pmax(rowSums((W %*% S) * W), 0))
+  ret <- drop(W %m% m); vol <- sqrt(pmax(rowSums((W %m% S) * W), 0))
   keep <- !duplicated(round(cbind(ret, vol), 6))
   sh <- ifelse(vol > 1e-10, (ret - risk_free / 100) / vol, NA_real_)       # Volatilitaet 0: Sharpe nicht definiert
   fr <- data.frame(expected_return = ret, volatility = vol, sharpe = sh, W, check.names = FALSE)[keep, , drop = FALSE]
@@ -762,10 +762,10 @@ portfolio_risk_contributions <- function(x, weights, measure = c("volatility", "
                                 paste(setdiff(avail, "date"), collapse = ", ")))
   rr <- .opt_returns(x, names(weights), frequency); R <- rr$R; w <- weights[colnames(R)]
   if (measure == "volatility") {
-    S <- .opt_cov(R, cov) * rr$ppy; tot <- sqrt(drop(t(w) %*% S %*% w))
-    mc <- drop(S %*% w) / tot; rc <- w * mc
+    S <- .opt_cov(R, cov) * rr$ppy; tot <- sqrt(drop(t(w) %m% S %m% w))
+    mc <- drop(S %m% w) / tot; rc <- w * mc
   } else {
-    rp <- drop(R %*% w); L <- -rp; v <- stats::quantile(L, 1 - alpha, names = FALSE); tail <- L >= v
+    rp <- drop(R %m% w); L <- -rp; v <- stats::quantile(L, 1 - alpha, names = FALSE); tail <- L >= v
     mc <- colMeans(-R[tail, , drop = FALSE]); rc <- mc * w; tot <- sum(rc)   # Grenzbeitrag auch fuer Gewicht 0
   }
   out <- data.frame(asset = names(w), weight = unname(w), contribution = unname(rc), share = unname(rc / tot),
@@ -887,7 +887,7 @@ portfolio_cpcv <- function(x, assets = NULL, methods = c("equal", "inverse_vol",
                     error = function(e) { fails[[length(fails) + 1L]] <<- data.frame(method = nm, split = cidx, message = conditionMessage(e),
                                                                                       stringsAsFactors = FALSE); NULL })
       if (is.null(w)) next
-      r <- drop(Rte %*% w[colnames(R)])
+      r <- drop(Rte %m% w[colnames(R)])
       rows[[length(rows) + 1L]] <- data.frame(method = nm, split = cidx, return = mean(r) * rr$ppy,
                                               volatility = stats::sd(r) * sqrt(rr$ppy),
                                               sharpe = mean(r) / stats::sd(r) * sqrt(rr$ppy),

@@ -1547,7 +1547,10 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
 #' @param tol Genauigkeit in Prozentpunkten (Standard 0.005; > 0). Es muss
 #'   0 <= lower < upper <= 100 gelten.
 #' @param ... weitere Argumente fuer [withdrawal_simulation()] (z. B.
-#'   \code{inflation}, \code{tax_mode}, \code{horizon}).
+#'   \code{inflation}, \code{tax_mode}, \code{horizon}). Ein \code{horizon} aus
+#'   [withdrawal_horizon()] mit \code{seed = NULL} wird einmal zu einem Startwert aufgeloest
+#'   (ein Zug aus dem Zufallszustand von SimLev, [simlev_seed()]); alle Suchschritte vergleichen
+#'   damit dieselben Laufzeiten.
 #' @return Rate in Prozent (Zahl; 4 = 4 %) mit Attribut \code{"success"}
 #'   (erreichte Erfolgsquote als Anteil). \code{NA}, wenn schon \code{lower}
 #'   die Zielquote verfehlt; \code{upper}, wenn selbst \code{upper} sie
@@ -1575,11 +1578,18 @@ withdrawal_max_rate <- function(x, rule = withdrawal_rule("constant"), success =
   if (!num1(tol) || tol <= 0)
     stop(sprintf("withdrawal_max_rate: tol muss eine Zahl > 0 in Prozentpunkten sein (z. B. 0.005; erhalten: %s).",
                  paste(format(tol), collapse = ", ")))
+  # Entwurf C.5, Regel 9: ein Horizont mit seed = NULL wird einmal zu k aufgeloest; alle
+  # Suchschritte ziehen damit dieselben Laufzeiten
+  hz <- list(...)[["horizon"]]
+  sim <- if (inherits(hz, "SimLevHorizon") && is.null(hz$seed) && !identical(hz$type, "fixed")) {
+    hz$seed <- .sl_next_seed()
+    function(rl, horizon, ...) withdrawal_simulation(x, rl, keep_paths = FALSE, horizon = hz, ...)
+  } else function(rl, ...) withdrawal_simulation(x, rl, keep_paths = FALSE, ...)
   first <- TRUE   # Hinweise und Warnungen (gleiche Eingaben) nur beim ersten Suchschritt
   f <- function(rate) {
     rl <- rule; rl$rate <- rate
-    s <- if (first) withdrawal_simulation(x, rl, keep_paths = FALSE, ...)
-         else suppressWarnings(suppressMessages(withdrawal_simulation(x, rl, keep_paths = FALSE, ...)))
+    s <- if (first) sim(rl, ...)
+         else suppressWarnings(suppressMessages(sim(rl, ...)))
     first <<- FALSE
     stats::weighted.mean(s$paths$success, s$weights)
   }
@@ -1724,8 +1734,8 @@ plot.SimLevWithdrawal <- function(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95), ...
 #' Beschreibt, wie lange die Entnahmephase dauern soll - fest oder als
 #' Verteilung nach eigenen Vorgaben. Jeder Pfad von [withdrawal_simulation()]
 #' erhaelt eine eigene Laufzeit, gezogen mit festem Startwert (gleiche
-#' Laufzeiten bei wiederholten Aufrufen, etwa in [withdrawal_max_rate()];
-#' nicht bei \code{seed = NULL}).
+#' Laufzeiten bei wiederholten Aufrufen; mit \code{seed = NULL} je Aufruf
+#' andere, ausser innerhalb von [withdrawal_max_rate()]).
 #'
 #' \describe{
 #'   \item{fixed}{\code{years}: feste Laufzeit.}
@@ -1760,9 +1770,12 @@ plot.SimLevWithdrawal <- function(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95), ...
 #'   \code{normal}, \code{triangular}); \code{min <= max}.
 #' @param mean,sd \code{normal}: Mittelwert und Standardabweichung in Jahren.
 #' @param mode \code{triangular}: haeufigster Wert in Jahren.
-#' @param seed Startwert fuer die Ziehung (Standard 1); der globale
-#'   Zufallszustand bleibt unveraendert. \code{NULL} = aktueller
-#'   Zufallszustand, der dabei normal weiterlaeuft (jede Ziehung anders).
+#' @param seed Startwert fuer die Ziehung der Laufzeiten (Standard 1; ganze Zahl mit
+#'   \eqn{|seed| < 2^{53}}); der Zufallszustand von SimLev bleibt dann unveraendert.
+#'   \code{NULL} = bei jeder Ziehung wird genau einmal ein Startwert aus dem Zufallszustand von
+#'   SimLev gezogen (siehe [simlev_seed()]), jede Ziehung ist anders; [withdrawal_max_rate()]
+#'   loest \code{NULL} einmal auf und nutzt in allen Suchschritten dieselben Laufzeiten.
+#'   \code{set.seed()} wirkt nicht.
 #' @return Objekt der Klasse \code{SimLevHorizon} (Liste mit \code{type},
 #'   \code{seed} und den benoetigten Parametern) zur Uebergabe an das
 #'   Argument \code{horizon} von [withdrawal_simulation()] bzw.
@@ -1799,6 +1812,7 @@ withdrawal_horizon <- function(type = c("fixed", "uniform", "discrete", "normal"
   if (type == "triangular" && (mode < min || mode > max))
     stop(sprintf("withdrawal_horizon('triangular'): mode (%g) muss zwischen min (%g) und max (%g) liegen.", mode, min, max))
   if (type == "normal" && sd < 0) stop("withdrawal_horizon('normal'): sd muss >= 0 sein.")
+  if (!is.null(seed)) .sl_check_seed(seed)                     # Entwurf C.5, Regel 2
   structure(c(list(type = type, seed = seed), given[need]), class = "SimLevHorizon")
 }
 
@@ -1806,18 +1820,18 @@ withdrawal_horizon <- function(type = c("fixed", "uniform", "discrete", "normal"
 #' @keywords internal
 #' @noRd
 .draw_horizon <- function(h, n) {
-  pick <- function(x, prob = NULL) x[sample.int(length(x), n, replace = TRUE, prob = prob)]   # auch bei Laenge 1 aus x
-  out <- .with_rng_restore(seed = h$seed, {
-    switch(h$type,
-      fixed = rep(h$years, n),
-      uniform = pick(seq(h$min, h$max)),
-      discrete = pick(h$years, h$prob),
-      normal = pmin(h$max, pmax(h$min, round(stats::rnorm(n, h$mean, h$sd)))),
-      triangular = { u <- stats::runif(n); a <- h$min; b <- h$max; c <- h$mode
-                     if (b == a) rep(a, n) else { f <- (c - a) / (b - a)
-                     round(ifelse(u < f, a + sqrt(u * (b - a) * (c - a)), b - sqrt((1 - u) * (b - a) * (b - c)))) } },
-      sample = pick(h$years))
-  })
+  # Hauptstrom aus h$seed (Entwurf C.5, Regeln 3, 4 und 9); "fixed" zieht nicht
+  rs <- if (identical(h$type, "fixed")) NULL else .sl_main_stream(h$seed)
+  pick <- function(x, prob = NULL) x[.sl_sample(length(x), n, replace = TRUE, prob = prob, stream = rs)]   # auch bei Laenge 1 aus x
+  out <- switch(h$type,
+    fixed = rep(h$years, n),
+    uniform = pick(seq(h$min, h$max)),
+    discrete = pick(h$years, h$prob),
+    normal = pmin(h$max, pmax(h$min, round(.sl_rnorm(n, h$mean, h$sd, stream = rs)))),
+    triangular = { u <- .sl_runif(n, stream = rs); a <- h$min; b <- h$max; c <- h$mode
+                   if (b == a) rep(a, n) else { f <- (c - a) / (b - a)
+                   round(ifelse(u < f, a + sqrt(u * (b - a) * (c - a)), b - sqrt((1 - u) * (b - a) * (b - c)))) } },
+    sample = pick(h$years))
   as.integer(pmax(1, out))
 }
 

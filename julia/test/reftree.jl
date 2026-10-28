@@ -340,12 +340,9 @@ end
 
 "Führt einen Fall aus; Rückgabe: Liste der Abweichungen (leer = bitgleich)."
 function run_ref_case(case; kw...)
-    # feste Uhrzeit des Falls (Feld sys_time) für SimLev.RBase.sys_time; setzt danach zurück
-    st = get(case, "sys_time", nothing)
-    st === nothing && return _run_ref_case(case; kw...)
-    SimLev.REnv.with_r_sys_time(st isa AbstractString ? String(st) : string(Float64(st))) do
-        _run_ref_case(case; kw...)
-    end
+    # Das Feld sys_time (feste Uhr für gosolnp) wird seit Etappe 9.6c nicht mehr ausgewertet;
+    # nur die ausgesetzten Fälle des Moduls rugarch haben es.
+    return _run_ref_case(case; kw...)
 end
 
 function _run_ref_case(case; check_print = true, check_output = true, check_warnings = true)

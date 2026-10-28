@@ -101,11 +101,11 @@ _asvec(x::RVector) = Float64[Float64(v) for v in x.values]
 _asvec(x::AbstractArray) = Float64[Float64(v) for v in vec(x)]
 _asvec(x::Real) = Float64[Float64(x)]
 
-"`x %*% y` (Referenz-BLAS-Reihenfolge über RLinalg)."
-_mp(x, y) = _asmat(SimLev.RLinalg.matprod(_asmat(x), _asmat(y)))
-"`drop(R %*% w)`."
+"`x %m% y` (slc-Matrixprodukt, Entwurf B.6)."
+_mp(x, y) = _asmat(SimLev.SLib.matmul(_asmat(x), _asmat(y)))
+"`drop(R %m% w)`."
 _mat_vec(R, w) = vec(_mp(R, reshape(_asvec(w), :, 1)))
-"`drop(t(w) %*% S %*% w)`."
+"`drop(t(w) %m% S %m% w)`."
 function _quad(w, S)
     wv = _asvec(w)
     _mp(_mp(reshape(wv, 1, :), S), reshape(wv, :, 1))[1, 1]
@@ -117,12 +117,12 @@ _cov2cor(S) = _asmat(SimLev.RStats.cov2cor(_asmat(S)))
 
 _getf(o, k::String) = o isa AbstractDict ? o[k] : o isa NamedTuple ? getfield(o, Symbol(k)) : getproperty(o, Symbol(k))
 
-"`eigen(M, symmetric = TRUE)` → (Werte absteigend, Vektoren)."
+"`.sl_eigen_sym(M)` (Jacobi der C-Bibliothek slc, Entwurf B.5) → (Werte absteigend, Vektoren)."
 function _eigen_sym(M)
-    e = SimLev.RLinalg.eigen(_asmat(M); symmetric = true)
+    e = SimLev.SLib.eigen_sym(_asmat(M))
     (_asvec(_getf(e, "values")), _asmat(_getf(e, "vectors")))
 end
-_eigvals_sym(M) = _asvec(_getf(SimLev.RLinalg.eigen(_asmat(M); symmetric = true, only_values = true), "values"))
+_eigvals_sym(M) = _asvec(_getf(SimLev.SLib.eigen_sym(_asmat(M); only_values = true), "values"))
 
 "`stats::quantile(x, p, names = FALSE, type = 7)` (ein Wert)."
 function _quantile(x, p)
@@ -394,7 +394,7 @@ function _opt_cov_m(R::Matrix{Float64}, type::String)
     if type == "ledoit_wolf"
         cm = _colmeans(R)
         X = R .- reshape(cm, 1, :)
-        S1 = _asmat(SimLev.RLinalg.crossprod(X)) ./ Tn
+        S1 = _asmat(SimLev.SLib.crossprod(X)) ./ Tn
         m = _ldsum(_diag(S1)) / N
         dm = _diagm(m, N)
         nrm(Am) = (a = vec(Am); _ldsum(a .* a) / N)
@@ -402,7 +402,7 @@ function _opt_cov_m(R::Matrix{Float64}, type::String)
         acc = Vector{Float64}(undef, Tn)
         for t in 1:Tn
             xt = X[t, :]
-            acc[t] = nrm(xt .* permutedims(xt) .- S1)
+            acc[t] = nrm(SimLev.SLib.tcrossprod(xt) .- S1)
         end
         b2 = min(d2, _ldsum(acc) / (Float64(Tn) * Float64(Tn)))
         a2 = d2 - b2
@@ -417,7 +417,7 @@ function _opt_cov_m(R::Matrix{Float64}, type::String)
         mu = Float64[_ldsum(R[:, j] .* w) for j in 1:N]
         X = R .- reshape(mu, 1, :)
         Xs = X .* sqrt.(w)
-        C = _asmat(SimLev.RLinalg.crossprod(Xs)) ./ (1 - _ldsum(w .* w))
+        C = _asmat(SimLev.SLib.crossprod(Xs)) ./ (1 - _ldsum(w .* w))
         return _psd(C, N)
     end
     sd = Float64[_sqrt(v) for v in _diag(S)]
@@ -447,7 +447,7 @@ function _opt_cov_m(R::Matrix{Float64}, type::String)
     H = 0.5 .* sd
     Up = Float64.(R .>= reshape(H, 1, :))
     Dn = Float64.(R .<= reshape(-H, 1, :))
-    cp(A, B) = Float64[sum(A[:, i] .* B[:, j]) for i in 1:N, j in 1:N]    # ganzzahlige Zählungen (exakt)
+    cp(A, B) = _asmat(SimLev.SLib.crossprod(A, B))    # ganzzahlige Zählungen (slc-Kreuzprodukt, exakt)
     Uu = cp(Up, Up)
     Dd = cp(Dn, Dn)
     Ud = cp(Up, Dn)
@@ -500,7 +500,7 @@ function _risk_parity(S, b)
     for _ in 1:200
         g = _mat_vec(S, y) .- b ./ y
         H = S .+ _diagm(b ./ (y .* y), N)
-        dx = _asvec(SimLev.RLinalg.solve(H, g))
+        dx = _asvec(SimLev.SLib.solve_spd(H, g))   # H symmetrisch positiv definit
         step = 1.0
         while true
             yn = y .- step .* dx
@@ -726,15 +726,12 @@ function portfolio_optimize(x; assets = nothing, method = nothing, lower = 0, up
     if resample > 0
         blk = block === nothing ? max(2.0, Float64(SimLev.RFmt.r_round(SimLev.r_pow(Float64(T), 1 / 3)))) : block
         nres = Int(resample)
-        run = function ()
-            out = Matrix{Float64}(undef, nres, N)
-            for bb in 1:nres
-                idx = SimLev.BootstrapCore.boot_idx_stationary(T, T, blk)
-                out[bb, :] = core(A[idx, :])
-            end
-            out
+        S = SimLev.SLib.main_stream(seed)               # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+        wbm = Matrix{Float64}(undef, nres, N)
+        for bb in 1:nres
+            idx = Vector{Int}(SimLev.SLib.boot_idx_stationary(T, T, blk; stream = S))
+            wbm[bb, :] = core(A[idx, :])
         end
-        wbm = SimLev.Bootstrap._with_rng_restore(run; seed = seed)
         wb = NamedMat(wbm; colnames = nm)
         wv = _colmeans(wbm)
         w = wv ./ _ldsum(wv)

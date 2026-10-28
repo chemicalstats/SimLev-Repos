@@ -38,10 +38,12 @@ for (m, fs) in _MODULE_EXPORTS
     end
 end
 
-"`set.seed()` wie in R (globaler Zufallszustand, siehe `RRng`)."
-const set_seed = RRng.set_seed
-const rng_kind = RRng.rng_kind
-export set_seed, rng_kind, tax_tariff, SimLevSummary, format_summary
+# Zufallszustand der C-Bibliothek slc (Etappe 9.1, src/slib.jl)
+const simlev_seed = SLib.simlev_seed
+export simlev_seed
+
+# set_seed/rng_kind (Nachbildung von R's Zufall, RRng) sind mit Etappe 9.6c entfallen (Entwurf C.6)
+export tax_tariff, SimLevSummary, format_summary
 # Bausteine für simulation() (Etappe 6.3, sim_blocks.jl)
 export sim_costs, dca_plan, rebalance_plan, split_rule, tax_profile, income_rate, income_tariff, harvest_rule,
        funds_costs

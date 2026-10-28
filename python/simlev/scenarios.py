@@ -214,7 +214,7 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
         val = float(v["value"]) * float(v["value"]) if t == "vol" else float(v["value"])
         sg = {"=": 0, "<=": 1, ">=": -1}[v["op"]]
         rows.append((-f if sg == -1 else f, -val if sg == -1 else val, sg != 0))
-    la = _dep._linalg()
+    la = _dep._sl()                        # slc-Matrixprodukt (Entwurf B.6)
     if not rows:
         q = p
     else:
@@ -235,12 +235,12 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
 
         def gr(l):
             q_ = dual(l)[1]
-            return b - np.asarray(la.matprod(A, q_.reshape(-1, 1)), dtype=np.float64).ravel()
+            return b - np.asarray(la.matmul(A, q_.reshape(-1, 1)), dtype=np.float64).ravel()
         lower = np.where(ineq, 0.0, -math.inf)
-        o = _dep._stats().optim(np.zeros(b.size), fn, gr, method="L-BFGS-B", lower=lower,
-                                control={"maxit": 5000, "factr": 1e3, "pgtol": 1e-12})
+        o = la.optim(np.zeros(b.size), fn, gr, method="L-BFGS-B", lower=lower,
+                     control={"maxit": 5000, "factr": 1e3, "pgtol": 1e-12})   # projizierter BFGS (slc, Entwurf B.8)
         q = dual(np.asarray(o["par"], dtype=np.float64))[1]
-        viol = np.asarray(la.matprod(A, q.reshape(-1, 1)), dtype=np.float64).ravel() - b
+        viol = np.asarray(la.matmul(A, q.reshape(-1, 1)), dtype=np.float64).ravel() - b
         viol[ineq] = np.maximum(viol[ineq], 0)
         mv = _dep._rmax(np.abs(viol))
         if mv > 1e-4 * _dep._rmax(1, np.abs(b)):
@@ -283,20 +283,23 @@ def _approx_fn(xg, yg):
 
 
 def _matprod(A, B):
-    return np.asarray(_dep._linalg().matprod(np.asarray(A, dtype=np.float64), np.asarray(B, dtype=np.float64)),
+    """``A %m% B`` (slc-Matrixprodukt, Entwurf B.6)."""
+    return np.asarray(_dep._sl().matmul(np.asarray(A, dtype=np.float64), np.asarray(B, dtype=np.float64)),
                       dtype=np.float64)
 
 
 def _chol(A):
-    return np.asarray(_dep._linalg().chol(np.asarray(A, dtype=np.float64)), dtype=np.float64)
+    """``.sl_chol(A)`` (Cholesky der C-Bibliothek slc, Entwurf B.5)."""
+    return np.asarray(_dep._sl().chol(np.asarray(A, dtype=np.float64)), dtype=np.float64)
 
 
 def _solve(A):
-    return np.asarray(_dep._linalg().solve(np.asarray(A, dtype=np.float64)), dtype=np.float64)
+    """``.sl_solve_spd(A)``: Inverse einer symmetrisch positiv definiten Matrix (Entwurf B.5)."""
+    return np.asarray(_dep._sl().solve_spd(np.asarray(A, dtype=np.float64)), dtype=np.float64)
 
 
-def _rnorm_mat(m, k):
-    v = np.asarray(_dep._rng().rnorm(int(m * k)), dtype=np.float64)
+def _rnorm_mat(m, k, stream):
+    v = np.asarray(_dep._sl().rnorm(int(m * k), stream=stream), dtype=np.float64)
     return v.reshape((k, m)).T.copy()
 
 
@@ -312,7 +315,7 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
         stress: dict ``{anlage: (von, bis)}`` mit Quantilbändern (Anteile);
             ``None`` = unbedingte Simulation.
         frequency: ``"week"``, ``"day"`` oder ``"month"``.
-        seed: Startwert der Ziehung.
+        seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`) der Ziehung.
 
     Returns:
         :class:`SimLevScenarios`.
@@ -328,8 +331,8 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
     tau = np.asarray(_dep._kendall(pd.DataFrame(X, columns=assets)), dtype=np.float64)
     R = np.asarray(_libm.sin(_PI_HALF_FACTOR * tau / 2), dtype=np.float64)
     named = True
-    la = _dep._linalg()
-    ev = la.eigen(R, symmetric=True)
+    la = _dep._sl()
+    ev = la.eigen_sym(R)
     vals = np.asarray(ev["values"], dtype=np.float64)
     if _dep._rmin(vals) < 1e-6:
         V = np.asarray(ev["vectors"], dtype=np.float64)
@@ -337,8 +340,8 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
         R = _cov2cor(R)
         named = False
     Ri = _solve(R)
-    ldR = float(la.determinant(R)["modulus"])
-    nm = _dep._nmath()
+    ldR = float(la.logdet_spd(R))
+    nm = _dep._sl()                        # Verteilungen der C-Bibliothek slc (Entwurf B.3, B.4)
 
     def ll_t(nu):
         Z = np.asarray(nm.qt(U, nu), dtype=np.float64).reshape(U.shape)
@@ -362,15 +365,15 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
             if not good:
                 raise ValueError("stress: Band für '%s' muss c(von, bis) mit 0 <= von < bis <= 1 sein (Anteile, keine Prozent; "
                                  "erhalten: %s)." % (a, _dep._fmt1(b)))
-    rng = _dep._rng()
+    rng = _dep._sl()
 
-    def draw():
+    def draw(rs):
         st = [] if stress is None else [assets.index(a) for a in stress.keys()]
         Z = np.zeros((n, k))
         fin = math.isfinite(nu)
         if len(st) == 1:
             band = [float(v) for v in np.asarray(list(stress.values())[0], dtype=np.float64)]
-            u = np.asarray(rng.runif(n, band[0], band[1]), dtype=np.float64)
+            u = np.asarray(rng.runif(n, band[0], band[1], stream=rs), dtype=np.float64)
             Z[:, st[0]] = np.asarray(nm.qt(u, nu) if fin else nm.qnorm(u), dtype=np.float64)
         elif len(st) > 1:
             ks = len(st)
@@ -382,9 +385,9 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
             drawn = 0.0
             m = 100000
             while True:
-                E = _matprod(_rnorm_mat(m, ks), Ls)
+                E = _matprod(_rnorm_mat(m, ks, rs), Ls)
                 if fin:
-                    E = E / np.sqrt(np.asarray(rng.rchisq(m, nu), dtype=np.float64) / nu).reshape(-1, 1)
+                    E = E / np.sqrt(np.asarray(rng.rchisq(m, nu, stream=rs), dtype=np.float64) / nu).reshape(-1, 1)
                 Ub = np.asarray(nm.pt(E, nu) if fin else nm.pnorm(E), dtype=np.float64).reshape(E.shape)
                 hit = ((Ub >= lo.reshape(1, -1)) & (Ub <= hi.reshape(1, -1))).sum(axis=1) == ks
                 parts.append(E[hit, :])
@@ -409,22 +412,22 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
                 M = _matprod(Z[:, st], RR.T)
                 Sc = R[np.ix_(rest, rest)] - _matprod(RR, Rrs.T)
                 L = _chol(Sc + np.eye(len(rest)) * 1e-12)
-                E = _matprod(_rnorm_mat(n, len(rest)), L)
+                E = _matprod(_rnorm_mat(n, len(rest), rs), L)
                 if fin:
                     Zst = Z[:, st]
                     dq = r_rowsums(_matprod(Zst, Rss_i) * Zst)
                     ns = len(st)
-                    chi = np.asarray(rng.rchisq(n, nu + ns), dtype=np.float64)
+                    chi = np.asarray(rng.rchisq(n, nu + ns, stream=rs), dtype=np.float64)
                     scale = np.sqrt((nu + dq) / (nu + ns) / (chi / (nu + ns)))
                     Z[:, rest] = M + E * scale.reshape(-1, 1)
                 else:
                     Z[:, rest] = M + E
         else:
-            Z = _matprod(_rnorm_mat(n, k), _chol(R))
+            Z = _matprod(_rnorm_mat(n, k, rs), _chol(R))
             if fin:
-                Z = Z / np.sqrt(np.asarray(rng.rchisq(n, nu), dtype=np.float64) / nu).reshape(-1, 1)
+                Z = Z / np.sqrt(np.asarray(rng.rchisq(n, nu, stream=rs), dtype=np.float64) / nu).reshape(-1, 1)
         return Z
-    sim = _dep._with_rng_restore(draw, seed)
+    sim = draw(rng.main_stream(seed))              # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
     if math.isfinite(nu):
         V = np.asarray(nm.pt(sim, nu), dtype=np.float64).reshape(sim.shape)
     else:

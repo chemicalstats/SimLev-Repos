@@ -8,7 +8,7 @@ libm-Aufrufe (``math``) wie in R.
 Konventionen
 ------------
 * Namen wie in R, ``.`` → ``_`` (``weighted.mean`` → :func:`weighted_mean`,
-  ``lm.fit`` → :func:`lm_fit`, ``p.adjust`` → :func:`p_adjust`, …).
+  ``p.adjust`` → :func:`p_adjust`, …).
 * Argumentnamen und Voreinstellungen wie in R (``na.rm`` → ``na_rm``).
 * Eingaben: numpy-Arrays, Listen, Skalare, ``pandas.Series`` (benannte
   Vektoren) und ``pandas.DataFrame`` bzw. 2-D-Arrays (Matrizen).
@@ -26,11 +26,15 @@ und ``simlev._r.stats.<name>`` gültig bleiben:
 
 * :mod:`.stats_sort`    Hilfen, Sortieren, Ränge, Einteilen, Quantile, Median
 * :mod:`.stats_cor`     ``cor``, ``cov``, ``var``, ``sd``, ``cov2cor``, ``scale``
-* :mod:`.stats_smooth`  ``approx``, ``filter``, ``fft``, ``density``, ``smooth.spline``
-* :mod:`.stats_optim`   ``optimize``, ``uniroot``, ``optim``, ``optimhess``, ``nlminb``
-* :mod:`.stats_models`  ``lm``, ``glm``, ``poly``, ``predict``, ``p.adjust``, ``ecdf``,
-  ``ave``, ``aggregate``, ``t.test``
+* :mod:`.stats_smooth`  ``approx``, ``approxfun``, ``filter``
+* :mod:`.stats_optim`   ``optimize``, ``uniroot``
+* :mod:`.stats_models`  ``coef``, ``fitted``, ``residuals``, ``p.adjust``, ``ecdf``, ``ave``,
+  ``aggregate``
 * :mod:`.stats_cluster` ``dist``, ``hclust``
+
+Seit Etappe 9.6c entfallen ``optim``, ``optimhess``, ``nlminb``, ``lm``/``lm.fit``, ``poly``,
+``summary.lm``, ``glm``/``binomial``, ``t.test``, ``predict``, ``fft``, ``density``, ``bw.nrd0``
+und ``smooth.spline``; SimLev rechnet sie mit der C-Bibliothek slc (:mod:`simlev._lib`).
 """
 from __future__ import annotations
 
@@ -51,47 +55,16 @@ from .stats_sort import (
     seq_len_out,
 )
 from .stats_cor import var, sd, cov, cor, cov2cor, scale
-from .stats_smooth import (
-    SmoothSpline,
-    approx,
-    approxfun,
-    filter,
-    smooth_spline,
-    predict_smooth_spline,
-    density,
-    bw_nrd0,
-    fft,
-)
-from .stats_optim import optimize, optimise, uniroot, optim, optimhess, nlminb
-from .stats_models import (
-    LMFit,
-    GLMFit,
-    glm_fit,
-    lm_fit,
-    lm,
-    poly,
-    summary_lm,
-    glm,
-    binomial,
-    predict,
-    p_adjust,
-    t_test,
-    ave,
-    aggregate,
-    ecdf,
-    fitted,
-    coef,
-    residuals,
-)
+from .stats_smooth import approx, approxfun, filter
+from .stats_optim import optimize, optimise, uniroot
+from .stats_models import p_adjust, ave, aggregate, ecdf, fitted, coef, residuals
 from .stats_cluster import RDist, RHclust, dist_as_matrix, hclust, dist, as_dist
 from . import stats_sort as _sort
 
 __all__ = [
-    "RError", "LMFit", "GLMFit", "RDist", "RHclust", "SmoothSpline", "dist_as_matrix", "glm_fit", "quantile", "median", "var", "sd", "cov", "cor", "cov2cor",
-    "weighted_mean", "scale", "approx", "approxfun", "filter", "optimize", "optimise",
-    "uniroot", "optim", "optimhess", "nlminb", "lm_fit", "lm", "poly", "summary_lm", "glm", "binomial",
-    "smooth_spline", "predict_smooth_spline", "predict", "density", "bw_nrd0", "fft",
-    "hclust", "dist", "as_dist", "p_adjust", "t_test", "rank", "order", "sort", "rle",
+    "RError", "RDist", "RHclust", "dist_as_matrix", "quantile", "median", "var", "sd", "cov", "cor",
+    "cov2cor", "weighted_mean", "scale", "approx", "approxfun", "filter", "optimize", "optimise",
+    "uniroot", "hclust", "dist", "as_dist", "p_adjust", "rank", "order", "sort", "rle",
     "cut", "findInterval", "tabulate", "ave", "aggregate", "complete_cases", "ecdf",
     "fitted", "coef", "residuals", "seq_len_out", "str_collate",
 ]

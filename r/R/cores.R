@@ -1,4 +1,4 @@
-# R-Huellen der C++-Kerne (src/*.cpp) und der C-Uebernahmen (src/vendor_*.c).
+# R-Huellen der C++-Kerne (src/*.cpp).
 #
 # Seit 0.5.0 ohne Rcpp: Die Kerne sind ueber R's C-Schnittstelle angebunden
 # (src/simlev_capi.h, Registrierung in src/init.c). NAMESPACE laedt die
@@ -9,91 +9,11 @@
 # Rueckgabewert liefern unsichtbar NULL. Die Engine-Kerne aendern sim_mem bzw.
 # die uebergebenen Listen an Ort und Stelle.
 #
-# Der MS-GARCH-Filter (src/ms_garch.c) ist ein C-Kern mit eigener .Call-Huelle;
-# die Rechnung steht in src/ms_garch_impl.c, die auch Python nutzt (Etappe 7.2).
-#
-# Die C-Uebernahmen haben ihre Huellen bei der R-Uebernahme:
-# C_evd_nlgpd (R/vendor_evd.R), C_rugarch_sgarchfilterC und
-# C_rugarch_gjrgarchfilterC (R/vendor_rugarch.R), C_truncnorm_rtruncnorm
-# (R/vendor_truncnorm.R).
-
-# ── Bootstrap-Kerne (src/bootstrap_core.cpp) ─────────────────────────────────
-
-.boot_idx_iid <- function(n_src, n_out) {
-  .Call(C_boot_idx_iid, n_src, n_out)
-}
-
-.boot_idx_block <- function(n_src, n_out, block_length, circular) {
-  .Call(C_boot_idx_block, n_src, n_out, block_length, circular)
-}
-
-.boot_idx_stationary <- function(n_src, n_out, L) {
-  .Call(C_boot_idx_stationary, n_src, n_out, L)
-}
-
-.boot_idx_regime <- function(regimes, trans, n_out) {
-  .Call(C_boot_idx_regime, regimes, trans, n_out)
-}
-
-.boot_idx_tails <- function(n_out, p_l, p_r, bulk_idx, left_idx, right_idx) {
-  .Call(C_boot_idx_tails, n_out, p_l, p_r, bulk_idx, left_idx, right_idx)
-}
-
-.boot_wild <- function(returns, type) {
-  .Call(C_boot_wild, returns, type)
-}
-
-.boot_reset <- function(returns, p_break) {
-  .Call(C_boot_reset, returns, p_break)
-}
-
-.boot_evt <- function(returns, base, n_out, p_l, thresh_l, scale_l, shape_l, pool_l,
-                      p_r, thresh_r, scale_r, shape_r, pool_r, bulk_idx) {
-  .Call(C_boot_evt, returns, base, n_out, p_l, thresh_l, scale_l, shape_l, pool_l,
-        p_r, thresh_r, scale_r, shape_r, pool_r, bulk_idx)
-}
-
-.boot_garch <- function(n_out, base, k, mu, omega, alpha, beta, gamma, s2_init, z_base, valid,
-                        cross_cols, cmu, com, cal, cbe, cratio, cs2, z_cross) {
-  .Call(C_boot_garch, n_out, base, k, mu, omega, alpha, beta, gamma, s2_init, z_base, valid,
-        cross_cols, cmu, com, cal, cbe, cratio, cs2, z_cross)
-}
-
-.boot_ms_garch <- function(n_out, base, k, K, mu, omega, alpha, beta, gamma, phi, lambda,
-                           trans, delta, unc_var, stat_prob, pools, z_base, cross_cols,
-                           cmu, com, cal, cbe, cratio, cs2, z_cross) {
-  .Call(C_boot_ms_garch, n_out, base, k, K, mu, omega, alpha, beta, gamma, phi, lambda,
-        trans, delta, unc_var, stat_prob, pools, z_base, cross_cols,
-        cmu, com, cal, cbe, cratio, cs2, z_cross)
-}
-
-.rolling_vol <- function(x, window) {
-  .Call(C_rolling_vol, x, window)
-}
-
-.assign_regimes <- function(vol, thresh) {
-  .Call(C_assign_regimes, vol, thresh)
-}
-
-.estimate_trans_mat <- function(regimes, K, alpha = 0.1) {
-  .Call(C_estimate_trans_mat, regimes, K, alpha)
-}
-
-# ── MS-GARCH-Filter (src/ms_garch.c) ─────────────────────────────────────────
-# Hamilton-Filter mit parallelen Varianzpfaden je Regime (Haas, Mittnik und
-# Paolella 2004); h1 = Startvarianz aller Regime. Liefert list(loglik, h, pred,
-# filt, lB) mit n x K-Matrizen (pred = xi_{t|t-1}, filt = xi_{t|t}, lB =
-# Log-Normaldichte je Regime). Genutzt von .ms_garch_fit (R/ms_garch.R).
-
-.ms_garch_filter <- function(y, omega, alpha, beta, gamma, P, xi0, h1) {
-  .Call(C_ms_garch_filter, y, omega, alpha, beta, gamma, P, xi0, h1)
-}
-
-# ── Abhaengigkeit (src/dependence_core.cpp) ──────────────────────────────────
-
-.dcc_filter <- function(Z, a, b, Qbar, keep) {
-  .Call(C_dcc_filter, Z, a, b, Qbar, keep)
-}
+# Die Rechnung der Kerne steht in den geteilten Dateien *_impl.h, kanonisch in core/ (seit
+# Etappe 9.6c, F16; Kopien in src/ ueber tools/core_sync.py). Die frueheren Bootstrap-, DCC-
+# und MS-GARCH-Kerne (bootstrap_core.cpp, dependence_core.cpp, ms_garch.c) und
+# die C-Uebernahmen (vendor_*) sind mit Etappe 9.6c entfallen; ihre Aufgaben rechnet die
+# C-Bibliothek slc (R/slc*.R).
 
 # ── Optimierung, Regression, Regime, Zeitreihen (src/research_core.cpp) ──────
 
@@ -119,10 +39,6 @@
 
 .hmm_forward_backward <- function(B, A, p0) {
   .Call(C_hmm_forward_backward, B, A, p0)
-}
-
-.garch_filter <- function(ep, om, al, be, ga, v0) {
-  .Call(C_garch_filter, ep, om, al, be, ga, v0)
 }
 
 .roll_mean_core <- function(x, n) {
@@ -228,12 +144,6 @@
                                 regime, bonus, loss_pool, tax_rate) {
   .Call(C_sim_sell_count, buys, front_index, target, trade_price, total_shares, fractions,
         regime, bonus, loss_pool, tax_rate)
-}
-
-# ── imputeTS-Uebernahme (src/vendor_imputets.cpp) ────────────────────────────
-
-.imputets_locf <- function(x, reverse) {
-  .Call(C_imputets_locf, x, reverse)
 }
 
 # ── Entnahme (src/withdrawal_core.cpp) ───────────────────────────────────────

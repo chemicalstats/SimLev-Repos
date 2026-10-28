@@ -56,10 +56,10 @@ aggregiert, die Zeilen gelten dann als Perioden.}
 Matrix-Eingabe fuer die Aggregation; \code{NULL} (Standard) = keine
 Aggregation. Bei \code{SimLevParamSearch} wird \code{x$dates} verwendet.}
 
-\item{seed}{Startwert (ganze Zahl); \code{NULL} (Standard) = kein fester
-Startwert. Mit Startwert ist das Ergebnis reproduzierbar und der
-Zufallszustand der Sitzung bleibt unveraendert; mit \code{NULL} wird der
-Zufallsstrom der Sitzung normal weitergezogen.}
+\item{seed}{Startwert (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}), wiederholte
+Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.}
 
 \item{...}{ungenutzt.}
 }

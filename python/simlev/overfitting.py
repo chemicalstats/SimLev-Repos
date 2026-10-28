@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 from ._r import libm as _libm
-from ._r import nmath as _nmath
+from . import _lib
 from ._r import fmt as _fmt
 from ._r.rlist import RList
 from ._r.rnum import LD, r_mean, r_mean_int, r_median, r_pow, r_prod, r_cumprod, r_sum, r_var, r_sd
@@ -118,9 +118,8 @@ def _rowsum(M, codes, ng):
 
 
 def _matprod(A, B):
-    """``A %*% B`` wie R (``simlev._r.linalg.matprod``)."""
-    from ._r.linalg import matprod
-    return np.asarray(matprod(A, B), dtype=np.float64)
+    """``A %m% B`` wie R (slc-Matrixprodukt, Entwurf B.6)."""
+    return np.asarray(_lib.matmul(A, B), dtype=np.float64)
 
 
 def _which_max(v):
@@ -160,8 +159,8 @@ def _stats(name):
 
 
 def _lm_coef(x, y):
-    """Koeffizienten (Achsenabschnitt, Steigung) von ``lm(y ~ x)``."""
-    f = _stats("lm_fit")
+    """Koeffizienten (Achsenabschnitt, Steigung) wie ``.sl_lsfit(cbind(1, x), y)`` (Entwurf B.7)."""
+    f = _lib.lsfit
     x = np.asarray(x, float)
     y = np.asarray(y, float)
     ok = ~(np.isnan(x) | np.isnan(y))                 # na.action = na.omit
@@ -570,7 +569,7 @@ def sharpe_probabilistic(r, *, benchmark=0, ppy=52):
     den = 1 - g3 * sr + (g4 - 1) / 4 * (sr * sr)
     den = den if (math.isnan(den) or den >= 1e-12) else 1e-12
     q = (sr - sr0) * math.sqrt(n - 1) / math.sqrt(den)
-    return float(_nmath.pnorm(q))
+    return float(_lib.pnorm(q))
 
 
 class SimLevDSR(RList):
@@ -641,7 +640,7 @@ def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 
     v = r_var(sr) if N > 1 else 0.0
     g = 0.5772156649
     if Nt > 1 and v > 0:
-        sr0 = math.sqrt(v) * ((1 - g) * _nmath.qnorm(1 - 1 / Nt) + g * _nmath.qnorm(1 - 1 / (Nt * _libm.exp(1.0))))
+        sr0 = math.sqrt(v) * ((1 - g) * _lib.qnorm(1 - 1 / Nt) + g * _lib.qnorm(1 - 1 / (Nt * _libm.exp(1.0))))
     else:
         sr0 = 0.0
     r = R[:, j]
@@ -962,14 +961,14 @@ def sharpe_haircut(x, *, n_obs=None, n_tests=None, frequency=("week", "day", "mo
         ids = rr.cols
     M = n_tests if n_tests is not None else sr.size
     tstat = sr * math.sqrt(Tn)
-    p = 2 * np.asarray(_nmath.pnorm(-np.abs(tstat)), dtype=np.float64)
+    p = 2 * np.asarray(_lib.pnorm(-np.abs(tstat)), dtype=np.float64)
 
     def padj(method):
         pp = np.concatenate([p, np.ones(int(max(0, M - p.size)))])
         return _p_adjust(pp, method, max(M, p.size))[:p.size]
 
     def back(pa):
-        return _sign(sr) * np.asarray(_nmath.qnorm(1 - np.minimum(pa, 1) / 2), dtype=np.float64) / math.sqrt(Tn) * math.sqrt(ppy)
+        return _sign(sr) * np.asarray(_lib.qnorm(np.minimum(pa, 1) / 2, lower_tail=False), dtype=np.float64) / math.sqrt(Tn) * math.sqrt(ppy)   # oberes Ende (F23)
     out = pd.DataFrame({"id": ids, "sharpe": sr * math.sqrt(ppy), "t": tstat, "p": p})
     if names is not None:
         out.index = names

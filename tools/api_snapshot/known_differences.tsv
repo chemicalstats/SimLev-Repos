@@ -8,7 +8,8 @@
 #   status      bewusst (wird nicht gemeldet) oder unklar (wird gemeldet und eigens aufgelistet)
 #   begruendung nur aus Doku oder Code; sonst status unklar
 #   quelle      Fundstelle (Datei, Abschnitt, Zeile)
-# Die erste passende Zeile gilt. Stand: 25.10.2026 (Etappe 3, offene Fälle entschieden in Etappe 6.0).
+# Die erste passende Zeile gilt. Stand: 25.10.2026 (Etappe 3, offene Fälle entschieden in Etappe 6.0);
+# 27.10.2026 (Etappe 9.6c): set_seed und rng_kind gestrichen (Exporte entfallen, Entwurf C.6 Nr. 14).
 schluessel	sprache	art	detail	status	begruendung	quelle
 print.*	*	argument_fehlt	... (in R ungenutzt)	bewusst	R-Methoden müssen die Argumente der Generik print(x, ...) übernehmen; der R-Rumpf wertet `...` nicht aus, also ist das Verhalten gleich	R-Doku „Writing R Extensions“ 7.1; api_r.R dots_used = FALSE
 summary.*	*	argument_fehlt	... (in R ungenutzt)	bewusst	wie print: `...` gehört zur Generik summary(object, ...), der R-Rumpf wertet es nicht aus	R-Doku „Writing R Extensions“ 7.1; api_r.R dots_used = FALSE
@@ -33,8 +34,6 @@ regime_subset	*	argument_extra	env	bewusst	Bedingungen sind in den Ports Text in
 tactical_rules	*	argument_extra	env	bewusst	Bedingungen sind in den Ports Text in R-Syntax; freie Variablen kommen aus env, sonst aus dem Namensraum des Aufrufers (R: Ausdruck mit parent.frame())	python/DEVELOPING.md „Datenstrukturen“; julia/DEVELOPING.md Tabelle src/r/rexpr.jl
 summary	R	fehlt	*	bewusst	generisches summary() der Ports; in R die Basis-Generik	python/DEVELOPING.md „Datenstrukturen“; julia/DEVELOPING.md „Datenstrukturen“ (r_summary)
 plot	R	fehlt	*	bewusst	generisches plot() der Ports; in R die Basis-Generik	python/DEVELOPING.md „Datenstrukturen“; julia/DEVELOPING.md „Datenstrukturen“ (r_plot)
-set_seed	R	fehlt	*	bewusst	Gegenstück der R-Basisfunktion set.seed()	python/DEVELOPING.md Regel 4 und „Referenzfälle“; julia/src/exports.jl
-rng_kind	R	fehlt	*	bewusst	Gegenstück der R-Basisfunktion RNGkind()	Docstrings python/simlev/_r/rng.py:343, julia/src/r/rng.jl:294
 isna_strict	R	fehlt	*	bewusst	unterscheidet R's NA von NaN (in R is.na/is.nan)	julia/DEVELOPING.md „Datenstrukturen“; python/simlev/_r/rexpr.py:107
 attrs	R	fehlt	*	bewusst	Julia-Hilfe für die R-Datenstrukturen (RList, RFrame, RVector); in R Basisfunktionen	julia/DEVELOPING.md „Datenstrukturen“; Kopf von julia/src/r/types.jl
 attrs	Python	fehlt	*	bewusst	Python nutzt dafür dict/pandas (RList, DataFrame, Series)	python/DEVELOPING.md „Datenstrukturen“

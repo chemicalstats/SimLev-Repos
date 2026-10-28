@@ -24,7 +24,7 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
-from ._r import imputets as _imputets
+from . import _lib
 from ._r import libm as _libm
 from ._r.base import quiet_fp
 from ._r.fmt import NA_REAL
@@ -148,10 +148,9 @@ def _fill_na(v, method=("locf", "linear", "stine", "none"), keep_leading=False):
 
     Args:
         v: numerischer Vektor.
-        method: ``"locf"`` (Standard), ``"linear"``, ``"stine"`` (Stineman über
-            die imputeTS-Nachbildung ``simlev._r.imputets``, wie R mit der aus
-            imputeTS 3.4 übernommenen Fassung ``.imputets_na_interpolation``)
-            oder ``"none"``.
+        method: ``"locf"`` (Standard), ``"linear"``, ``"stine"`` (Stineman-Interpolation der
+            inneren Lücken mit der C-Bibliothek slc, ``_lib.stineman``, seit Etappe 9.6b; Stützstellen
+            sind die Positionen der vorhandenen Werte) oder ``"none"``.
         keep_leading: Führende NAs beibehalten (True) oder rückwärts füllen.
 
     Returns:
@@ -179,7 +178,8 @@ def _fill_na(v, method=("locf", "linear", "stine", "none"), keep_leading=False):
             out[:first] = v[first]
     else:
         out = v.copy()
-        out[first:last + 1] = np.asarray(_imputets.na_interpolation(v[first:last + 1], option="stine"), dtype=np.float64)
+        gap = np.setdiff1d(np.arange(first, last + 1), ok)       # innere Lücken (0-basiert)
+        out[gap] = _lib.stineman((ok + 1).astype(np.float64), v[ok], (gap + 1).astype(np.float64))
         if last < len(v) - 1:
             out[last + 1:] = v[last]
         if first > 0:
@@ -409,27 +409,25 @@ def _optimize(f, lower, upper, tol):
 
 
 def _optim_lbfgsb(par, fn, lower, upper):
-    from ._r import stats as _st
-    o = _st.optim(np.asarray(par, dtype=np.float64), fn, method="L-BFGS-B", lower=lower, upper=upper)
+    """``.sl_optim(..., method = "L-BFGS-B")`` (projizierter BFGS der C-Bibliothek slc)."""
+    o = _lib.optim(np.asarray(par, dtype=np.float64), fn, method="L-BFGS-B", lower=lower, upper=upper)
     return np.asarray(o["par"], dtype=np.float64), float(o["value"]), int(o["convergence"])
 
 
 def _lm_fit_coef(X, y):
-    from ._r import stats as _st
-    f = _st.lm_fit(X, y)
-    coef = f["coefficients"] if isinstance(f, Mapping) else f.coefficients
-    return coef
+    """``.sl_lsfit(cbind(1, x), y)$coefficients`` mit den Namen x1, x2 (wie lm.fit)."""
+    f = _lib.lsfit(X, y)
+    return pd.Series(np.asarray(f["coefficients"], dtype=np.float64), index=["x%d" % (k + 1) for k in range(X.shape[1])])
 
 
 def _smooth_spline(x, y):
-    from ._r import stats as _st
-    return _st.smooth_spline(x, y, cv=False)
+    """``.sl_smspline_fit(x, y)``: Glättungsspline (Reinsch 1967, GCV; Entwurf B.15)."""
+    return RList(**_lib.smspline_fit(x, y))
 
 
 def _spline_predict(fit, x):
-    from ._r import stats as _st
-    p = _st.predict_smooth_spline(fit, x)
-    return np.asarray(p["y"] if isinstance(p, Mapping) else p.y, dtype=np.float64)
+    """``.sl_smspline_predict(fit, x)``; außerhalb der Knoten lineare Fortsetzung."""
+    return np.asarray(_lib.smspline_predict(fit, x), dtype=np.float64)
 
 
 def _modify_list(base, val):

@@ -2,7 +2,7 @@
 // .Call-Huellen der Engine-Kerne aus src/tax_core_impl.h (Etappe 7.3a).
 //
 // Die Kerne (Rechnung und Zugriffe auf sim_mem) stehen seit Etappe 7.3a in
-// src/tax_core_impl.h (gemeinsam mit Python: simlev._ext, Kopie in python/src/); diese Datei
+// src/tax_core_impl.h (gemeinsam mit Python: simlev._ext; kanonisch in core/, F16); diese Datei
 // bindet sie mit dem R-Host aus simlev_capi.h ein und enthaelt die .Call-Huellen
 // (Umwandlung der Argumente wie frueher).
 

@@ -1,5 +1,16 @@
 # simlev (Python) – Änderungen je Version
 
+## simlev (Python) 1.0.0
+
+Major-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Rechenkern: eigene C-Bibliothek für alle drei Sprachen (Julia per ccall): Zufallsgenerator, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR-, GPD-, DCC- und MS-GARCH-Schätzung, Stineman-Interpolation, Glättungsspline, Kerndichte; geschrieben nach Fachliteratur.
+- Unabhängigkeit: kein Code aus evd, imputeTS, stinepack, rugarch, Rsolnp, truncnorm oder numDeriv mehr; die Pakete stehen nur noch im Literaturverzeichnis.
+- Zufall: eigener Generator mit simlev_seed() und seed-Argument; set.seed steuert SimLev nicht mehr; Ergebnisse unabhängig von cores und in R, Python und Julia gleich. Zufallsergebnisse ändern sich gegenüber 0.10.0.
+- Schätzer: GJR-GARCH mit gamma < 0 unter alpha + gamma >= 0 und Stationarität (im Vergleich mit rugarch 51 von 51 Fällen gleichwertig oder besser); MS-GARCH mit analytischem Gradienten; t-Copula über ein Profil in nu mit Gauss-Grenzfall; qnorm mit eigenen Startnäherungen, rnorm und rgamma schneller als in R.
+- Geändert: GARCH-Label "ml", dependence_dcc deterministisch; set_seed und rng_kind in Python und Julia entfallen; C-Bibliothek in Python und Julia Pflicht.
+- Doku: Literaturabschnitt mit 112 geprüften Quellen, COPYRIGHTS und NEWS neu; Schnittstelle neu eingefroren.
+
 ## simlev (Python) 0.10.0
 
 Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -68,6 +79,75 @@ R-Pakets vor den Korrekturen (Commit 54b5b4f). Zwischenversionen 0.2 bis
 0.4 der Python-Fassung gibt es nicht; alle Änderungen sind in 0.5.0
 zusammengefasst. Die Begründungen der fachlichen Änderungen stehen in
 [`r/NEWS.md`](../r/NEWS.md), Abschnitt „SimLev 0.5.0“.
+
+### Etappe 9 – SimLev eigenständig
+
+Entscheidung des Nutzers vom 27.10.2026: SimLev nutzt keine Funktionen aus
+fremden Paketen mehr. Zufall und Numerik rechnet wie in R und Julia die
+eigene C-Bibliothek (Quellen in `core/` des Repositorys, Kopien in
+`src/core/`, Hüllen `simlev._lib`). Die vollständige Liste, was ersetzt
+wurde, die Laufzeiten und die Begründungen stehen in
+[`r/NEWS.md`](../r/NEWS.md) (Abschnitt „Etappe 9“); die Ergebnisse sind
+bitgleich zu R. Die Quellen der Verfahren stehen im Abschnitt
+[Literatur](../README.md#literatur) der Haupt-README, die bleibenden
+Nachbildungen von R-Grundfunktionen in [`COPYRIGHTS.md`](COPYRIGHTS.md).
+
+**Was ersetzt wurde:** die Nachbildungen von R's Zufallszahlen
+(`simlev._r.rng`, C-Fassung `src/_rng_r.c`), Verteilungen (`nmath`,
+`_toms708`, `_cmath`), linearer Algebra (`_blas`, `_lapack`, `_linpack`,
+Teile von `linalg`), Optimierern (`_lbfgsb`, `port`, `optim` in
+`stats_optim`/`_optim`), `lm`/`glm`/`t.test` (`stats_models`),
+`smooth.spline`/`density`/`fft` (`_sbart`, `_fft`, `stats_smooth`) und der
+Pakete evd, rugarch, Rsolnp, truncnorm, imputeTS und stinepack
+(`simlev._r.{evd, rugarch, solnp, truncnorm, imputets, stinepack}`), dazu
+`simlev._bootstrap_core` und die reinen Python-Kerne als Rückfall.
+
+**Was sich für Nutzer ändert, mit Umstellungshinweisen** (Einzelheiten wie
+in R):
+
+- **Installation:** Die C-Erweiterung `simlev._ext` ist Pflicht; zum
+  Installieren braucht es einen C- und C++-Compiler und die Python-Header.
+  Ohne Compiler bricht `pip install` ab (bisher rechnete SimLev dann in
+  reinem Python).
+- **Zufall und `seed`:** Die Exporte `set_seed` und `rng_kind` entfallen.
+  Den Zustand setzt `simlev.simlev_seed(k)`; zufällige Funktionen nehmen
+  weiter `seed`. Mit `seed=None` zieht ein Aufruf genau einmal einen
+  Startwert aus dem Zustand von SimLev. Ergebnisse hängen nicht von `cores`
+  ab. Zufällige Ergebnisse ändern sich gegenüber früher (anderer Generator,
+  gleiche Verteilung). Umstellung: `simlev.set_seed(1); simlev.bootstrap(…)`
+  wird zu `simlev.bootstrap(…, seed=1)` oder `simlev.simlev_seed(1);
+  simlev.bootstrap(…)`.
+- **GARCH-Label `"ml"`** statt `"rugarch"`/`"optim"`, **`dependence_dcc()`
+  deterministisch**, **GJR mit γ ≥ 0**, eigener **Spline** und eigene
+  **Kerndichte**, strengere **Fehler bei Randfällen** (NA/NaN/Inf in der
+  rechten Seite eines Gleichungssystems, nicht endliche Werte bei Stineman;
+  0×0-Matrix ergibt ein leeres Ergebnis), **Welch-Test mit NA** bei
+  konstanten Bereichen in `signal_analysis()`, **Schranken bei BFGS und
+  Nelder-Mead** in der internen Hülle `simlev._lib.optim` ein Fehler, häufiger
+  die **Warnung zur IGARCH-Nähe**: wie in [`r/NEWS.md`](../r/NEWS.md).
+- **Schalter entfallen:** `SIMLEV_NO_EXT` (reine Python-Kerne),
+  `SIMLEV_LAPACK` (System-LAPACK für Eigenvektoren) und `SIMLEV_R_SYS_TIME`
+  (Uhr für gosolnp).
+- **Laufzeit** (`tools/bench`, Median, ein Kern, vor und nach dem Einbau der
+  eigenen Kerne): GARCH-Bootstrap (T2) 0,253 → 0,040 s, `dependence_analysis`
+  mit DCC (T5) 0,515 → 0,114 s, `simulation` 30 Jahre (S30) 0,120 → 0,079 s,
+  MS-GARCH-Schätzung (T8) 0,518 → 1,271 s (zwölf statt zwei Starts im
+  gemeinsamen C-Kern); die übrigen Aufgaben etwa gleich. Tabelle in
+  [`r/NEWS.md`](../r/NEWS.md).
+
+**Tests:** Die frühere Suite ist bis zum Neuaufbau ausgesetzt
+(`SIMLEV_LEGACY_TESTS=1` lädt sie); `pytest` führt die Rauchproben
+`tests/test_etappe9_*.py` aus. Maßgeblich ist die Gleichlaufprüfung
+`tools/gleichlauf/run.sh` (27.10.2026: 4.260/4.260 Modul- und 1.182/1.182
+Engine-Fälle bitgleich zu R).
+
+### Eigene numerische Kerne (Etappe 9.6b)
+
+- **C-Bibliothek statt der Nachbildungen von R's Numerik:** Verteilungen, lineare Algebra und Matrixprodukt, kleinste Quadrate und Logit-IRLS, Welch-Test, Kerndichte, Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, Stineman und Glättungsspline rufen wie in R die C-Bibliothek (`simlev._lib`) statt `simlev._r.nmath`, `linalg`, `stats_models`, `stats_smooth`, `stats_optim`, `rugarch`, `evd` und `imputets`; die Nachbildungen werden nicht mehr aufgerufen und entfallen in 9.6c. Geänderte Ergebnisse und Labels (GARCH `"ml"`, DCC deterministisch, Spline, Kerndichte, `signal_analysis()["fit"]["model"]`) wie in [`r/NEWS.md`](../r/NEWS.md); bitgleich zu R.
+
+### Eigener Zufall (Etappe 9.6a)
+
+- **Zufall der C-Bibliothek statt der Nachbildung von R's Zufallszahlen:** Alle zufälligen Funktionen ziehen wie in R aus dem Zufallszustand von SimLev (neu `simlev_seed()`); `seed=None` zieht genau einmal einen Startwert daraus, `set_seed()` (Nachbildung von R's `set.seed()`) wirkt auf SimLev nicht mehr. Ergebnisse bitgleich zu R und unabhängig von `cores`; Einzelheiten in [`r/NEWS.md`](../r/NEWS.md).
 
 ### Reine Python-Kerne in NaN-Randfällen (Etappe 8.0)
 

@@ -7,20 +7,18 @@ Untermodule:
 - ``rformat`` Rundung und Textausgabe der Engine (``r_round``, ``r_signif``, ``r_format``, ``r_sprintf``)
 - ``libm``    elementweise libm-Funktionen (statt numpy-SIMD-Varianten)
 - ``base``    Funktionen von R's base (``colSums``, ``cumprod``, ``pmin`` …) mit long double wie R,
-  ``quiet_fp``, ``sys_time``
-- ``rng``     R-Zufallszahlengeneratoren (Mersenne-Twister, L'Ecuyer-CMRG)
-- ``nmath``   Verteilungsfunktionen aus R's nmath
-- ``stats``   quantile, cor, optim, nlminb (PORT-Bibliothek in ``port``), optimize, uniroot, lm, glm, density, …
-- ``linalg``  Matrixprodukte wie Referenz-BLAS, solve, chol, eigen, qr
+  ``quiet_fp``
+- ``stats``   quantile, cor, optimize, uniroot, approx, filter, p.adjust, hclust, …
+- ``linalg``  outer, diag, isSymmetric und Hilfen (``RError``)
 - ``fmt``     format, formatC, round, signif, print von Vektoren/data.frames
-- ``evd``     Nachbildung von evd::fpot (GPD-Fit; aus evd 2.3-7.1 ins R-Paket übernommen)
-- ``solnp``   Nachbildung von Rsolnp::solnp (SQP mit Nebenbedingungen) und gosolnp (Zufallsstarts)
-- ``truncnorm`` Nachbildung von truncnorm::rtruncnorm (gestutzte Normalverteilung)
-- ``rugarch`` Nachbildung von rugarch::ugarchfit für .fit_garch11 (optionales R-Paket rugarch)
-- ``stinepack`` Nachbildung von stinepack::stinterp (Stineman-Interpolation, Steigungen; aus stinepack 1.5 ins R-Paket übernommen)
-- ``imputets`` Nachbildung von imputeTS::na_interpolation/na_locf für .fill_na (aus imputeTS 3.4 ins R-Paket übernommen)
-- ``port``    PORT-Bibliothek für ``stats.nlminb`` (stats ``port.c``, ``portsrc.f``)
 - ``rexpr``   Auswertung von R-Ausdrücken als Text (Bedingungen in R-Syntax)
 - ``rlist``   Basisklasse für R-Listen-Ergebnisse
+- ``parallel`` Nachbildung von ``.par_lapply`` (Fork)
+- ``env``     Umgebungsschalter ``SIMLEV_*``
 - ``reftree`` Vergleich mit R-Referenzfällen
+
+Seit Etappe 9.6c entfallen die Nachbildungen von R's Zufall (``rng``), nmath, BLAS/LAPACK/LINPACK,
+optim/L-BFGS-B/PORT, smooth.spline, FFT und TOMS 708 sowie der Übernahmen evd, rugarch, Rsolnp,
+truncnorm, stinepack und imputeTS; SimLev rechnet diese Aufgaben mit der C-Bibliothek slc
+(:mod:`simlev._lib`).
 """

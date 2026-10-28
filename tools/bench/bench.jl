@@ -7,8 +7,8 @@
 # Je Aufgabe 1 Aufwärmlauf (erster_lauf_s; enthält in Julia die Kompilierung),
 # dann 3 gemessene Läufe (Median, Min, Max). Ein Kern: cores = 1, wo die
 # Funktion es kennt; Threads setzt run.sh. Die Daten entstehen mit dem
-# R-Zufallsgenerator der Julia-Fassung (SimLev.RRng) und sind dieselben Zahlen
-# wie in bench.R (Prüfsumme in der Ausgabe).
+# Zufall von SimLev (simlev_seed, SimLev.SLib; seit Etappe 9.6a) und sind dieselben
+# Zahlen wie in bench.R (Prüfsumme in der Ausgabe).
 
 const OUT = length(ARGS) >= 1 ? ARGS[1] : joinpath("tools", "bench", "out", "julia.csv")
 const ONLY = length(ARGS) >= 2 ? reduce(vcat, [a == "P1" ? ["P1c1", "P1c2"] : [String(a)] for a in split(ARGS[2], ",")]) : nothing
@@ -19,26 +19,26 @@ using Dates, Printf, Logging
 
 median(v) = (s = sort(v); n = length(s); isodd(n) ? s[(n + 1) ÷ 2] : (s[n ÷ 2] + s[n ÷ 2 + 1]) / 2)
 
-const R = SimLev.RRng
+const R = SimLev.SLib   # seit Etappe 9.6a: Zufall von SimLev (vorher RRng)
 const RB = SimLev.RBase
 
 path(level, n, m, s) = level .* RB.r_cumprod(1 .+ R.rnorm(n, m, s))
 
 # ── Daten wie bench.R ──
-R.set_seed(1); n = 10958
+SimLev.simlev_seed(1); n = 10958
 A = path(100, n, 3e-4, 0.01); B = path(50, n, 1e-4, 0.003)
 d30 = (date = collect(Date(1995, 1, 1):Day(1):(Date(1995, 1, 1) + Day(n - 1))), A = A, B = B)
-R.set_seed(7); n = 7305
+SimLev.simlev_seed(7); n = 7305
 ak = path(100, n, 3e-4, 0.011); bo = path(100, n, 1e-4, 0.003); go = path(100, n, 2e-4, 0.009); em = path(100, n, 3e-4, 0.014)
 d = (date = collect(Date(2000, 1, 1):Day(1):(Date(2000, 1, 1) + Day(n - 1))), aktien = ak, bonds = bo, gold = go, em = em)
 W = reshape(1 .+ R.rnorm(30 * 2000, 0.05, 0.15), 30, 2000)
 
 function sim_msgjr(n, om, al, ga, be, P, seed)
-    R.set_seed(seed); K = length(om)
+    SimLev.simlev_seed(seed); K = length(om)
     hk = om ./ (1 .- al .- ga ./ 2 .- be); s = 1; y = zeros(n)
     for t in 1:n
         if t > 1
-            s = Int(first(R.sample_int(K, 1; prob = P[s, :]))); e = y[t-1]
+            s = Int(first(R.sample(K, 1; prob = P[s, :]))); e = y[t-1]
             hk = om .+ (al .+ ga .* Float64(e < 0)) .* (e * e) .+ be .* hk
         end
         y[t] = sqrt(hk[s]) * first(R.rnorm(1))

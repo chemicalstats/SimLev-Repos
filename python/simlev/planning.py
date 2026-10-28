@@ -22,8 +22,7 @@ import pandas as pd
 from ._r import fmt as _fmt
 from ._r.fmt import NA_REAL
 from ._r import libm as _libm
-from ._r import nmath as _nm
-from ._r import rng as _rng
+from . import _lib as _sl
 from ._r.rlist import RList
 from ._r.rnum import r_mean, r_sd, r_sum
 from .deep_analysis import (
@@ -213,7 +212,7 @@ def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequen
         L: mittlere Blocklänge in Perioden (``None`` = 10 Jahre).
         country_weights: Ziehungswahrscheinlichkeiten je Land.
         target: Renditeannahmen in Prozent p. a. (Skalar oder benannt).
-        seed: Startwert (``None`` = aktueller Zufallsstrom).
+        seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`).
 
     Returns:
         ``withdrawal_paths``-Objekt (``returns``, ``inflation``, ``assets``,
@@ -264,17 +263,17 @@ def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequen
     cw = cw / r_sum(cw)
     nrs = [g.shape[0] for g in G]
 
-    def draw_all():
+    def draw_all(S):
         out = []
         for _ in range(int(n)):
             ctry = np.zeros(nper, dtype=np.int64)
             row = np.zeros(nper, dtype=np.int64)
             t = 1
             while t <= nper:
-                cidx = int(_rng.sample_int(nc, 1, prob=cw)[0])
-                ln = 1 + float(_rng.rgeom(1, 1 / L)[0])
+                cidx = int(_sl.sample(nc, 1, prob=cw, stream=S)[0])
+                ln = 1 + float(_sl.rgeom(1, 1 / L, stream=S)[0])
                 nr = nrs[cidx - 1]
-                st = int(_rng.sample_int(nr, 1)[0])
+                st = int(_sl.sample(nr, 1, stream=S)[0])
                 take = int(min(ln, nper - t + 1))
                 idx = ((st - 1 + np.arange(1, take + 1) - 1) % nr) + 1
                 ctry[t - 1:t - 1 + take] = cidx
@@ -283,7 +282,7 @@ def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequen
             out.append((ctry, row))
         return out
 
-    draw = _ext("bootstrap", "_with_rng_restore")(draw_all, seed=seed)
+    draw = draw_all(_sl.main_stream(seed))          # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
     Gall = np.vstack(G)
     off = np.concatenate([[0], np.cumsum(nrs)])[:nc]
     gi = np.column_stack([off[c - 1] + r for c, r in draw]) if draw else np.zeros((nper, 0), dtype=np.int64)
@@ -311,9 +310,8 @@ def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequen
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _dgemv_n(A, x):
-    """``A %*% x`` (Matrix mal Vektor) wie R (``R_Matprod = "default"``)."""
-    from ._r import linalg as _lin
-    r = _lin.matprod(A, x.reshape(-1, 1))
+    """``A %m% x`` (Matrix mal Vektor) wie R (slc-Matrixprodukt, Entwurf B.6)."""
+    r = _sl.matmul(A, x.reshape(-1, 1))
     return np.asarray(r.to_numpy() if isinstance(r, pd.DataFrame) else r, dtype=np.float64).ravel()
 
 
@@ -386,7 +384,7 @@ def planning_goal(returns, start_value, goal, horizon, *, contributions=0, n_gri
         horizon: Anzahl Perioden (ganze Zahl >= 1).
         contributions: Zahlung je Periode (Skalar oder Vektor, ``rep_len``).
         n_grid: Punkte des logarithmischen Vermögensrasters (>= 2).
-        n_sim: Pfade der Vorwärtssimulation. seed: Startwert.
+        n_sim: Pfade der Vorwärtssimulation. seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`).
 
     Returns:
         :class:`SimLevGoalPlan`.
@@ -462,10 +460,10 @@ def planning_goal(returns, start_value, goal, horizon, *, contributions=0, n_gri
         out[W >= wmax] = 1.0 * (wmax >= goal)
         out[W <= 0] = 0.0
         mid = (W > 0) & (W < wmax)
-        z = _nm.qnorm(np.minimum(1 - 1e-12, np.maximum(1e-12, np.asarray(Vn, dtype=np.float64))))
+        z = _sl.qnorm(np.minimum(1 - 1e-12, np.maximum(1e-12, np.asarray(Vn, dtype=np.float64))))
         Wm = W[mid]
         if Wm.size:
-            pn = np.atleast_1d(np.asarray(_nm.pnorm(_approx2(lgrid, np.asarray(z, dtype=np.float64), _libm.log(Wm))),
+            pn = np.atleast_1d(np.asarray(_sl.pnorm(_approx2(lgrid, np.asarray(z, dtype=np.float64), _libm.log(Wm))),
                                           dtype=np.float64))
             alt = 0.0 if goal > 0 else float(Vn[0])
             out[mid] = np.where(Wm < wmin, alt, pn)
@@ -500,7 +498,7 @@ def planning_goal(returns, start_value, goal, horizon, *, contributions=0, n_gri
         Vt[t - 1] = V
     p_dp = float(interp(V, start_value)[0])
 
-    def run():
+    def run(st):
         W = np.repeat(start_value, n_sim)
         choice = np.zeros((horizon, n_sim), dtype=np.int64)
         ruined = np.zeros(n_sim, dtype=bool)
@@ -511,11 +509,11 @@ def planning_goal(returns, start_value, goal, horizon, *, contributions=0, n_gri
             g = np.maximum(1, np.minimum(ng, np.searchsorted(lgrid, _libm.log(np.maximum(W, wmin)), side="right")))
             k = pol[t, g - 1]
             choice[t, :] = k
-            draw = _rng.sample_int(S, n_sim, replace=True)
+            draw = _sl.sample(S, n_sim, replace=True, stream=st)
             W = np.where(alive, base * R[draw - 1, k - 1], 0.0)
         return {"terminal": W, "choice": choice, "success": ~ruined & (W >= goal)}
 
-    sim = _ext("bootstrap", "_with_rng_restore")(run, seed=seed)
+    sim = run(_sl.main_stream(seed))                # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
     p_sim = _mean_lgl(sim["success"])
     se = math.sqrt(p_sim * (1 - p_sim) / n_sim)
     tol = 4 * math.sqrt(max(p_sim * (1 - p_sim), 1 / n_sim) / n_sim) + 0.01

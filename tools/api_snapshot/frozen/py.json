@@ -1,6 +1,6 @@
 {
  "language": "Python",
- "stand": "2026-10-27 – Etappe 8.0: Auswahl aus SimLevWrapperNav",
+ "stand": "2026-10-27 – Etappe 9: SimLev eigenständig",
  "hinweis": "Erzeugt von tools/api_snapshot/run.sh --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
@@ -486,11 +486,6 @@
    {"name": "x", "kind": "positional_or_keyword", "default": null},
    {"name": "base", "kind": "keyword_only", "default": "100"}
   ],
-  "rng_kind": [
-   {"name": "kind", "kind": "positional_or_keyword", "default": "None"},
-   {"name": "normal_kind", "kind": "positional_or_keyword", "default": "None"},
-   {"name": "sample_kind", "kind": "positional_or_keyword", "default": "None"}
-  ],
   "scenario_copula": [
    {"name": "x", "kind": "positional_or_keyword", "default": null},
    {"name": "assets", "kind": "positional_or_keyword", "default": null},
@@ -614,12 +609,6 @@
    {"name": "dates", "kind": "keyword_only", "default": "None"},
    {"name": "series", "kind": "var_keyword", "default": null}
   ],
-  "set_seed": [
-   {"name": "seed", "kind": "positional_or_keyword", "default": null},
-   {"name": "kind", "kind": "positional_or_keyword", "default": "None"},
-   {"name": "normal_kind", "kind": "positional_or_keyword", "default": "None"},
-   {"name": "sample_kind", "kind": "positional_or_keyword", "default": "None"}
-  ],
   "sharpe_deflated": [
    {"name": "x", "kind": "positional_or_keyword", "default": null},
    {"name": "id", "kind": "keyword_only", "default": "None"},
@@ -726,6 +715,9 @@
   "sim_costs": [
    {"name": "order_fee", "kind": "keyword_only", "default": "None"},
    {"name": "dca_fee", "kind": "keyword_only", "default": "None"}
+  ],
+  "simlev_seed": [
+   {"name": "seed", "kind": "positional_or_keyword", "default": "None"}
   ],
   "simulation": [
    {"name": "data", "kind": "positional_or_keyword", "default": null},

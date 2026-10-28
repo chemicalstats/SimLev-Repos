@@ -7,7 +7,6 @@ machen, und Vorher-Werte für den C++-Pilot (Etappe 7).
 R_LIBS=<Bibliothek mit installiertem SimLev> tools/bench/run.sh          # alle Aufgaben außer P1
 R_LIBS=<…> tools/bench/run.sh P1                                          # cores = 1 gegen 2 (Julia mit 2 Threads)
 R_LIBS=<…> tools/bench/run.sh T1,T8                                       # Auswahl
-R_LIBS=<…> tools/bench/run.sh --ohne-c T8                                 # dazu Python ohne C-Erweiterung (auch mit P1)
 python3 tools/bench/merge.py --md --alt tools/bench/anhang_e_2026-10-20.csv tools/bench/out/*.csv
 ```
 
@@ -20,27 +19,27 @@ am selben Tag schreibt `ergebnis_<JJJJ-MM-TT>_2.csv`, dann `_3`, … (bei `P1`
 letzten Laufs; jeder Lauf überschreibt ihn (alle Zeilen stehen auch in der Ergebnisdatei). Die Skripte einzeln: `Rscript tools/bench/bench.R [csv] [aufgaben]`,
 `python3 tools/bench/bench.py …`, `julia --project=julia tools/bench/bench.jl …` (aus der Repo-Wurzel).
 
-**Python mit und ohne C-Erweiterung (Etappe 7.2, seit 7.3a alle gemeinsamen Kerne):** `bench.py`
-misst mit der C-Erweiterung `simlev._ext`, wenn sie gebaut ist (Sprache `Python`), sonst bzw. mit
-`SIMLEV_NO_EXT=1` die reinen Python-Kerne (Sprache `Python ohne C`); die erste Ausgabezeile nennt
-den Zustand.
-`run.sh --ohne-c …` misst Python zusätzlich ohne Erweiterung (`out/python_ohne_c*.csv`).
+**Python:** `bench.py` misst mit der C-Erweiterung `simlev._ext` (Sprache `Python`). Seit Etappe
+9.6c ist sie Pflicht; die frühere Messung ohne Erweiterung (`SIMLEV_NO_EXT=1`, Sprache `Python ohne
+C`, `run.sh --ohne-c`) entfällt mit den reinen Python-Kernen. Ältere Ergebnisdateien enthalten
+diese Zeilen noch.
 
 **Messweise:** je Aufgabe 1 Aufwärmlauf (`erster_lauf_s`; in Julia mit Kompilierung), dann
 3 Läufe; Spalten `aufgabe, sprache, median_s, min_s, max_s, erster_lauf_s`. Julia vorher einmal
 vollständig vorkompilieren (ohne `SIMLEV_SKIP_PRECOMPILE`), sonst enthält der erste Lauf die
 ganze Kompilierung.
 
-**Daten:** in den Skripten mit festem Seed erzeugt; Python und Julia nutzen den R-Zufallsgenerator
-der Ports und erhalten dieselben Zahlen wie R (die Zeile `Daten:` zeigt Prüfsummen, die in allen
-drei Sprachen gleich sein müssen).
+**Daten:** in den Skripten mit festem Seed erzeugt, seit Etappe 9.6a mit dem Zufall von SimLev
+(`simlev_seed()` und die Ziehungen der C-Bibliothek, bitgleich in allen drei Sprachen; vorher R's
+Zufallsgenerator und seine Nachbildung in den Ports, daher andere Zahlen als in den früheren
+Ergebnisdateien). Die Zeile `Daten:` zeigt Prüfsummen, die in allen drei Sprachen gleich sein müssen.
 
 | Aufgabe | Inhalt |
 |---|---|
 | `Laden` | `library(SimLev)` / `import simlev` / `using SimLev` im laufenden Prozess (einmal gemessen) |
 | `S30` | `simulation` 30 Jahre täglich, 2 Assets, Steuer `person`, Sparplan 200 monatlich, Rebalancing vierteljährlich |
 | `T1` | `bootstrap` stationär, 200 Pfade × 10 Jahre (2.520 Tage) |
-| `T2` | `bootstrap` GARCH (rugarch-Weg), 50 Pfade × 10 Jahre |
+| `T2` | `bootstrap` GARCH (eigene ML-Schätzung der C-Bibliothek, bis Etappe 9.6b rugarch-Weg), 50 Pfade × 10 Jahre |
 | `T3` | `bootstrap_study` stationär, 50 Pfade × 10 Jahre, eine Strategie (Simulation je Pfad) |
 | `T4` | `withdrawal_simulation`, konstante Entnahme 4 %, 2.000 Pfade × 30 Jahre |
 | `T5` | `dependence_analysis`, 4 Assets mit DCC, ohne Copulas |

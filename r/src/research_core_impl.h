@@ -1,14 +1,15 @@
-// src/research_core_impl.h
+// core/research_core_impl.h
 // Rechenkerne fuer Optimierung, Regression, Regime und Zeitreihen-Hilfen, reine
 // Rechnung ohne R und Python.
 //
 // GEMEINSAME QUELLE FUER R UND PYTHON (Etappe 7.3a): R ruft die Kerne ueber die
-// .Call-Huellen in src/research_core.cpp auf (sie wandeln nur die R-Objekte um),
+// .Call-Huellen in r/src/research_core.cpp auf (sie wandeln nur die R-Objekte um),
 // Python ueber das Erweiterungsmodul simlev._ext (python/src/_ext_research.cpp).
-// Python baut aus einer Byte-fuer-Byte-Kopie in python/src/
-// (python/tests/test_shared_c.py); Aenderungen nur hier vornehmen und danach
-// kopieren. Die reinen Python-Kerne (simlev/_optimize_core.py, _dependence_core.py,
-// _signals_core.py, _bootstrap_core.py) rechnen dasselbe und bleiben der Rueckfall.
+// Kanonisch in core/ (seit Etappe 9.6c, F16); R und Python bauen aus
+// Byte-fuer-Byte-Kopien in r/src/ bzw. python/src/core/ (tools/core_sync.py
+// --write/--check); Aenderungen nur in core/ vornehmen und danach kopieren.
+// Die Python-Huellen (simlev/_optimize_core.py, _dependence_core.py, _signals_core.py)
+// rufen nur noch diese Kerne; die reinen Python-Kerne als Rueckfall sind seit 9.6c entfallen.
 //
 // Aufbau wie alle C++-Kerne (simlev_core.h): statische Funktionen ueber den Sichten
 // simlev_host::NumVec/IntVec/NumMat und den Host-Makros SIMLEV_* (Fehler, NA,
@@ -30,7 +31,7 @@
 //                      Hunter & Lange 2000, mit exakter Ecken-Politur bzw.
 //                      Austauschschritten bis zum Optimalitaetsnachweis)
 //   hmm_forward_backward  skalierter Vorwaerts-Rueckwaerts-Schritt (Baum-Welch)
-//   garch_filter       bedingte Varianzen eines GARCH(1,1)/GJR-Modells
+//   (garch_filter: in N2 entfernt; seit 9.6b ohne Aufrufer, ersetzt durch sl_garch11_filter)
 //   roll_mean_core     rollierender Mittelwert mit kompensierter Summe
 //   kendall_tau_core   Kendalls Tau-b (long double, auf x86-64 80 Bit)
 //   roll_cov_core      rollierende Kovarianz
@@ -640,23 +641,6 @@ static auto hmm_forward_backward(simlev_host::NumMat B, simlev_host::NumMat A, s
     for (int i = 0; i < K; ++i) for (int j = 0; j < K; ++j) xi(i, j) += al(t, i) * tmp[j] * A(i, j) / cs[t + 1];
   }
   return SIMLEV_LIST("filtered", al, "smoothed", ga, "xi", xi, "scale", cs);
-}
-
-// ---------------------------------------------------------------------------
-// GARCH(1,1)/GJR-Filter
-// ---------------------------------------------------------------------------
-
-// s2[t] = v_t, v_{t+1} = om + (al + ga * 1{ep_t < 0}) ep_t^2 + be v_t, Untergrenze 1e-14.
-static auto garch_filter(simlev_host::NumVec ep, double om, double al, double be, double ga, double v0) {
-  const int n = ep.size();
-  auto s2 = SIMLEV_NUM(n);
-  double v = v0;
-  for (int t = 0; t < n; ++t) {
-    s2[t] = v;
-    v = om + (al + ga * (ep[t] < 0.0 ? 1.0 : 0.0)) * (ep[t] * ep[t]) + be * v;
-    if (v < 1e-14) v = 1e-14;
-  }
-  return SIMLEV_DONE(s2);
 }
 
 // ---------------------------------------------------------------------------

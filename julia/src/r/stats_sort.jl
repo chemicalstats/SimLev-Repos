@@ -526,6 +526,14 @@ end
 
 @inline _rcmp(a::Float64, b::Float64) = a < b ? -1 : a > b ? 1 : 0
 
+"Feld mit verschobenem Index: `z[i]` greift auf `z.v[i + z.o]` zu (bis 9.6c in `_fft.jl`)."
+struct _Off{T,V<:AbstractVector{T}}
+    v::V
+    o::Int
+end
+@inline Base.getindex(z::_Off, i::Int) = @inbounds z.v[i+z.o]
+@inline Base.setindex!(z::_Off, x, i::Int) = @inbounds (z.v[i+z.o] = x)
+
 function _rpsort2!(x, lo::Int, hi::Int, k::Int)       # 0-basierte Indizes über _Off
     L, R = lo, hi
     while L < R

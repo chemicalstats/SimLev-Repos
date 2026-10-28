@@ -55,7 +55,7 @@ Sucht die Szenario-Wahrscheinlichkeiten \eqn{q}, die alle Annahmen erfuellen
 und dabei der Ausgangsverteilung \eqn{p} (Standard: gleichgewichtete
 Historie) am naechsten kommen,
 \deqn{\min_q \sum_j q_j \log(q_j / p_j)\quad\text{u. d. N.}\quad Aq = b,\; Gq \le h,\; \textstyle\sum q = 1.}
-Geloest ueber das duale Problem (L-BFGS-B). Damit lassen sich Fragen
+Geloest ueber das duale Problem (projizierter BFGS der C-Bibliothek von SimLev). Damit lassen sich Fragen
 stellen wie: "Wie sieht die gemeinsame Verteilung von Aktien und Anleihen
 aus, wenn die Inflation im Mittel 5 \% betraegt?" - alle Abhaengigkeiten
 bleiben aus der Historie erhalten, nur die Gewichte der Szenarien aendern

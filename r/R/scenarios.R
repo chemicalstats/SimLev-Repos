@@ -98,7 +98,7 @@ view_vol <- function(var, value, op = c("=", "<=", ">=")) list(type = "vol", var
 #' und dabei der Ausgangsverteilung \eqn{p} (Standard: gleichgewichtete
 #' Historie) am naechsten kommen,
 #' \deqn{\min_q \sum_j q_j \log(q_j / p_j)\quad\text{u. d. N.}\quad Aq = b,\; Gq \le h,\; \textstyle\sum q = 1.}
-#' Geloest ueber das duale Problem (L-BFGS-B). Damit lassen sich Fragen
+#' Geloest ueber das duale Problem (projizierter BFGS der C-Bibliothek von SimLev). Damit lassen sich Fragen
 #' stellen wie: "Wie sieht die gemeinsame Verteilung von Aktien und Anleihen
 #' aus, wenn die Inflation im Mittel 5 % betraegt?" - alle Abhaengigkeiten
 #' bleiben aus der Historie erhalten, nur die Gewichte der Szenarien aendern
@@ -178,23 +178,23 @@ scenario_entropy_pooling <- function(x, assets, views, states = NULL, frequency 
   if (!length(rows)) { q <- p } else {
   A <- do.call(rbind, lapply(rows, `[[`, "f")); b <- vapply(rows, `[[`, 0, "b"); ineq <- vapply(rows, `[[`, TRUE, "ineq")
   dual <- function(l) {
-    e <- -drop(crossprod(A, l)); mx <- max(e); w <- p * exp(e - mx); Z <- sum(w)
+    e <- -drop(.sl_crossprod(A, l)); mx <- max(e); w <- p * exp(e - mx); Z <- sum(w)
     list(val = log(Z) + mx + sum(l * b), q = w / Z)
   }
   fn <- function(l) dual(l)$val
-  gr <- function(l) { q <- dual(l)$q; b - drop(A %*% q) }
+  gr <- function(l) { q <- dual(l)$q; b - drop(A %m% q) }
   lower <- ifelse(ineq, 0, -Inf)
-  o <- stats::optim(rep(0, length(b)), fn, gr, method = "L-BFGS-B", lower = lower,
-                    control = list(maxit = 5000, factr = 1e3, pgtol = 1e-12))
+  o <- .sl_optim(rep(0, length(b)), fn, gr, method = "L-BFGS-B", lower = lower,
+                 control = list(maxit = 5000, factr = 1e3, pgtol = 1e-12))   # projizierter BFGS (slc, Entwurf B.8)
   q <- dual(o$par)$q
-  viol <- drop(A %*% q) - b; viol[ineq] <- pmax(viol[ineq], 0)
+  viol <- drop(A %m% q) - b; viol[ineq] <- pmax(viol[ineq], 0)
   if (max(abs(viol)) > 1e-4 * max(1, abs(b))) warning(sprintf("Annahmen nicht vollst\u00e4ndig erf\u00fcllbar (Abweichung %.2e).", max(abs(viol))))
   }
   wsd <- function(v, w) { m <- sum(w * v); sqrt(sum(w * (v - m)^2)) }
   summ <- data.frame(var = vars, mean_prior = m0, mean_post = vapply(vars, function(v) sum(q * S[[v]]), 0),
                      sd_prior = vapply(vars, function(v) wsd(S[[v]], p), 0), sd_post = vapply(vars, function(v) wsd(S[[v]], q), 0),
                      row.names = NULL, stringsAsFactors = FALSE)
-  Xa <- as.matrix(S[, assets, drop = FALSE]); mu <- colSums(Xa * q); C <- crossprod(sweep(Xa, 2, mu) * sqrt(q))
+  Xa <- as.matrix(S[, assets, drop = FALSE]); mu <- colSums(Xa * q); C <- .sl_crossprod(sweep(Xa, 2, mu) * sqrt(q))
   structure(list(scenarios = S, prob = q, prior = p, assets = assets, states = states, views = views,
                  effective_n = exp(-sum(q[q > 0] * log(q[q > 0]))), summary = summ,
                  correlation = stats::cov2cor(C), frequency = frequency, kind = "entropy_pooling"),
@@ -239,9 +239,10 @@ scenario_entropy_pooling <- function(x, assets, views, states = NULL, frequency 
 #'   \code{NULL} (Standard) = unbedingte Simulation.
 #' @param frequency Renditefrequenz bei Kursdaten: \code{"week"} (Standard,
 #'   ISO-Woche), \code{"day"} oder \code{"month"}.
-#' @param seed Startwert der Ziehung. Mit Startwert ist das Ergebnis reproduzierbar und der
-#'   Zufallszustand der Sitzung bleibt unveraendert; mit `NULL` wird der
-#'   Zufallsstrom der Sitzung normal weitergezogen.
+#' @param seed Startwert der Ziehung. Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+#'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+#'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
+#'   Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
 #' @return Objekt der Klasse \code{SimLevScenarios} mit \code{scenarios}
 #'   (data.frame mit \code{n} Zeilen, eine Spalte je Anlage, in der Einheit
 #'   der Eingangsrenditen, bei Kursdaten Prozent je Periode), \code{prob}
@@ -272,12 +273,12 @@ scenario_copula <- function(x, assets, n = 10000L, family = c("t", "gaussian"), 
   X <- as.matrix(S[, assets, drop = FALSE]); k <- ncol(X); Tn <- nrow(X)
   U <- apply(X, 2, .pobs)
   tau <- .kendall(X); R <- sin(pi * tau / 2)
-  ev <- eigen(R, symmetric = TRUE); if (min(ev$values) < 1e-6) {
-    R <- ev$vectors %*% diag(pmax(ev$values, 1e-6)) %*% t(ev$vectors); R <- stats::cov2cor(R) }
-  Ri <- solve(R); ldR <- as.numeric(determinant(R)$modulus)
+  ev <- .sl_eigen_sym(R); if (min(ev$values) < 1e-6) {
+    R <- ev$vectors %m% diag(pmax(ev$values, 1e-6)) %m% t(ev$vectors); R <- stats::cov2cor(R) }
+  Ri <- .sl_solve_spd(R); ldR <- .sl_logdet_spd(R)              # R positiv definit (Cholesky, slc)
   ll_t <- function(nu) {
-    Z <- stats::qt(U, nu); q <- rowSums((Z %*% Ri) * Z)
-    sum(lgamma((nu + k) / 2) + (k - 1) * lgamma(nu / 2) - k * lgamma((nu + 1) / 2) - 0.5 * ldR -
+    Z <- .sl_qt(U, nu); q <- rowSums((Z %m% Ri) * Z)
+    sum(.sl_lgamma((nu + k) / 2) + (k - 1) * .sl_lgamma(nu / 2) - k * .sl_lgamma((nu + 1) / 2) - 0.5 * ldR -
           (nu + k) / 2 * log1p(q / nu) + (nu + 1) / 2 * rowSums(log1p(Z^2 / nu)))
   }
   nu <- if (family == "t") stats::optimize(function(v) -ll_t(v), c(2.1, 100))$minimum else Inf
@@ -292,21 +293,22 @@ scenario_copula <- function(x, assets, n = 10000L, family = c("t", "gaussian"), 
         stop(sprintf("stress: Band f\u00fcr '%s' muss c(von, bis) mit 0 <= von < bis <= 1 sein (Anteile, keine Prozent; erhalten: %s).",
                      a, paste(format(b), collapse = ", "))) }
   }
-  sim <- .with_rng_restore(seed = seed, {
+  sim <- {
+    rs <- .sl_main_stream(seed)                                 # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
     st <- if (is.null(stress)) integer(0) else match(names(stress), assets)
     Z <- matrix(0, n, k)
     if (length(st) == 1) {
-      band <- stress[[1]]; u <- stats::runif(n, band[1], band[2])
-      Z[, st] <- if (is.finite(nu)) stats::qt(u, nu) else stats::qnorm(u)
+      band <- stress[[1]]; u <- .sl_runif(n, band[1], band[2], stream = rs)
+      Z[, st] <- if (is.finite(nu)) .sl_qt(u, nu) else .sl_qnorm(u)
     } else if (length(st) > 1) {
       # mehrere Stress-Anlagen: gemeinsam aus ihrer Copula, bedingt auf alle Baender (Verwerfung)
-      ks <- length(st); Ls <- chol(R[st, st, drop = FALSE])
+      ks <- length(st); Ls <- .sl_chol(R[st, st, drop = FALSE])
       lo <- vapply(stress, `[`, 0, 1); hi <- vapply(stress, `[`, 0, 2)
       Zs <- matrix(0, 0, ks); drawn <- 0; m <- 1e5
       repeat {
-        E <- matrix(stats::rnorm(m * ks), m) %*% Ls
-        if (is.finite(nu)) E <- E / sqrt(stats::rchisq(m, nu) / nu)
-        Ub <- if (is.finite(nu)) stats::pt(E, nu) else stats::pnorm(E)
+        E <- matrix(.sl_rnorm(m * ks, stream = rs), m) %m% Ls
+        if (is.finite(nu)) E <- E / sqrt(.sl_rchisq(m, nu, stream = rs) / nu)
+        Ub <- if (is.finite(nu)) .sl_pt(E, nu) else .sl_pnorm(E)
         hit <- rowSums(Ub >= rep(lo, each = m) & Ub <= rep(hi, each = m)) == ks
         Zs <- rbind(Zs, E[hit, , drop = FALSE]); drawn <- drawn + m
         if (nrow(Zs) >= n) break
@@ -319,27 +321,27 @@ scenario_copula <- function(x, assets, n = 10000L, family = c("t", "gaussian"), 
     if (length(st)) {
       rest <- setdiff(seq_len(k), st)
       if (length(rest)) {
-        Rss <- R[st, st, drop = FALSE]; Rrs <- R[rest, st, drop = FALSE]; Rss_i <- solve(Rss)
-        M <- Z[, st, drop = FALSE] %*% t(Rrs %*% Rss_i)
-        Sc <- R[rest, rest, drop = FALSE] - Rrs %*% Rss_i %*% t(Rrs)
-        L <- chol(Sc + diag(1e-12, length(rest)))
-        E <- matrix(stats::rnorm(n * length(rest)), n) %*% L
+        Rss <- R[st, st, drop = FALSE]; Rrs <- R[rest, st, drop = FALSE]; Rss_i <- .sl_solve_spd(Rss)
+        M <- Z[, st, drop = FALSE] %m% t(Rrs %m% Rss_i)
+        Sc <- R[rest, rest, drop = FALSE] - Rrs %m% Rss_i %m% t(Rrs)
+        L <- .sl_chol(Sc + diag(1e-12, length(rest)))
+        E <- matrix(.sl_rnorm(n * length(rest), stream = rs), n) %m% L
         if (is.finite(nu)) {
-          dq <- rowSums((Z[, st, drop = FALSE] %*% Rss_i) * Z[, st, drop = FALSE])
-          scale <- sqrt((nu + dq) / (nu + length(st)) / (stats::rchisq(n, nu + length(st)) / (nu + length(st))))
+          dq <- rowSums((Z[, st, drop = FALSE] %m% Rss_i) * Z[, st, drop = FALSE])
+          scale <- sqrt((nu + dq) / (nu + length(st)) / (.sl_rchisq(n, nu + length(st), stream = rs) / (nu + length(st))))
           Z[, rest] <- M + E * scale
         } else Z[, rest] <- M + E
       }
     } else {
-      Z <- matrix(stats::rnorm(n * k), n) %*% chol(R)
-      if (is.finite(nu)) Z <- Z / sqrt(stats::rchisq(n, nu) / nu)
+      Z <- matrix(.sl_rnorm(n * k, stream = rs), n) %m% .sl_chol(R)
+      if (is.finite(nu)) Z <- Z / sqrt(.sl_rchisq(n, nu, stream = rs) / nu)
     }
     Z
-  })
-  V <- if (is.finite(nu)) stats::pt(sim, if (length(stress)) nu + 0 else nu) else stats::pnorm(sim)
+  }
+  V <- if (is.finite(nu)) .sl_pt(sim, if (length(stress)) nu + 0 else nu) else .sl_pnorm(sim)
   if (length(stress) && is.finite(nu)) {
     rest <- setdiff(seq_len(k), match(names(stress), assets))
-    V[, rest] <- stats::pt(sim[, rest], nu)
+    V[, rest] <- .sl_pt(sim[, rest], nu)
   }
   Y <- vapply(seq_len(k), function(j) qmarg[[j]](V[, j]), numeric(n))
   if (!is.matrix(Y)) Y <- matrix(Y, ncol = k)
@@ -411,7 +413,7 @@ scenario_risk <- function(x, weights, alpha = 0.05) {
   unk <- setdiff(names(weights), names(x$scenarios))
   if (length(unk)) stop(sprintf("scenario_risk: unbekannte Anlage(n) %s.", paste0("'", unk, "'", collapse = ", ")))
   X <- as.matrix(x$scenarios[, names(weights), drop = FALSE]); q <- x$prob
-  r <- unname(drop(X %*% weights))
+  r <- unname(drop(X %m% weights))
   o <- order(r); cw <- cumsum(q[o])
   qf <- function(a) r[o][which(cw >= a)[1]]
   var_a <- -qf(alpha)
@@ -505,12 +507,12 @@ scenario_crisis <- function(data, weights, crises = NULL, rebalance = FALSE) {
     s <- which(d >= crises$start[i])[1]; e <- utils::tail(which(d <= crises$end[i]), 1)
     if (is.na(s) || !length(e) || e <= s || anyNA(P[s, ])) return(NULL)
     rel <- sweep(P[s:e, , drop = FALSE], 2, P[s, ], "/")
-    port <- if (rebalance) cumprod(c(1, drop((rel[-1, , drop = FALSE] / rel[-nrow(rel), , drop = FALSE]) %*% w))) else drop(rel %*% w)
+    port <- if (rebalance) cumprod(c(1, drop((rel[-1, , drop = FALSE] / rel[-nrow(rel), , drop = FALSE]) %m% w))) else drop(rel %m% w)
     dd <- min(port / cummax(port) - 1)
     pk <- max(port)
     after <- if (e < length(d)) {
       relx <- sweep(P[e:length(d), , drop = FALSE], 2, P[s, ], "/")
-      px <- drop(relx %*% w)
+      px <- drop(relx %m% w)
       k <- which(px >= 1)[1]; if (is.na(k)) NA_real_ else as.numeric(d[e + k - 1] - d[e])
     } else NA_real_
     data.frame(crisis = crises$crisis[i], start = d[s], end = d[e], portfolio = 100 * (port[length(port)] - 1),

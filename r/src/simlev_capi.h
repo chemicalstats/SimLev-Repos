@@ -8,13 +8,13 @@
 // von Rcpp::compileAttributes() erzeugten Huellen und ruft den Kern ueber
 // sl::call() auf:
 //
-//   * Zufallszahlen: GetRNGstate() beim Eintritt, PutRNGstate() vor der
-//     Rueckkehr, auch nach Fehlern - wie Rcpp::RNGScope, das RcppExports um jede
-//     exportierte Funktion legte (auch um Funktionen ohne Zufallszahlen).
-//     Ausnahme wie bei Rcpp: bricht ein direkter Aufruf der C-Schnittstelle mit
-//     einem R-Fehler ab, entfaellt PutRNGstate() (siehe rcall).
+//   * Zufallszahlen: sl::call beruehrt R's Zufallszustand nicht (Entwurf C.5, Regel 10).
+//     Die frueheren Kerne mit R's Zufallszahlen (bootstrap_core.cpp, ueber sl::call_rng mit
+//     GetRNGstate/PutRNGstate wie Rcpp::RNGScope) sind mit Etappe 9.6c entfallen; N2 hat
+//     auch den danach wirkungslosen Schalter rng von call_impl und put_rng in rcall/run
+//     entfernt.
 //   * Fehler: sl::stop() wirft eine C++-Ausnahme. sl::call() faengt sie, raeumt
-//     auf (C++-Objekte, gehaltene R-Objekte, RNG-Zustand) und loest erst danach
+//     auf (C++-Objekte, gehaltene R-Objekte) und loest erst danach
 //     den Fehler in R aus: stop(cond) mit cond = simpleError(Text, call = NULL),
 //     wie Rcpp es mit seiner Bedingung tat. conditionMessage() ist damit der Text
 //     von sl::stop() und conditionCall() NULL wie bei Rcpp::stop(); nur die
@@ -43,13 +43,11 @@
 //     ganzzahligem dim-Attribut, Skalare als neue Vektoren der Laenge 1,
 //     benannte Listen mit names-Attribut.
 //
-// Seit Etappe 7.3a stehen die Kerne in src/*_impl.h bzw. ms_garch_impl.c (gemeinsam
-// mit Python, siehe simlev_core.h; seit 7.3b auch die Bootstrap-Kerne mit
-// Zufallszahlen). Diese Datei ist ihr R-Host: der Abschnitt "R als Host der
-// gemeinsamen Kerne" am Ende bindet die Namen simlev_host::* und SIMLEV_* an genau die
-// Aufrufe von sl:: bzw. R's nmath (Rf_runif, Rf_rnorm, Rf_rgeom), die vor der Teilung
-// im Kern standen (gleicher Maschinencode). Eine .Call-Huelle bindet erst diese Datei,
-// dann den Kern ein.
+// Seit Etappe 7.3a stehen die Kerne in src/*_impl.h (gemeinsam mit Python, siehe
+// simlev_core.h; kanonisch seit Etappe 9.6c in core/). Diese Datei ist ihr R-Host: der
+// Abschnitt "R als Host der gemeinsamen Kerne" am Ende bindet die Namen simlev_host::* und
+// SIMLEV_* an genau die Aufrufe von sl::, die vor der Teilung im Kern standen (gleicher
+// Maschinencode). Eine .Call-Huelle bindet erst diese Datei, dann den Kern ein.
 #ifndef SIMLEV_CAPI_H
 #define SIMLEV_CAPI_H
 
@@ -66,12 +64,9 @@
 #include <string>
 #include <vector>
 
-// Aus R's nmath bzw. der Unterbrechungsbehandlung; bewusst ohne Rmath.h, dessen
-// Makros (beta, sign, dt ...) Bezeichner in den Kernen umbenennen wuerden.
+// Aus R's Unterbrechungsbehandlung; bewusst ohne Rmath.h, dessen Makros (beta, sign,
+// dt ...) Bezeichner in den Kernen umbenennen wuerden.
 extern "C" {
-double Rf_runif(double a, double b);
-double Rf_rnorm(double mu, double sigma);
-double Rf_rgeom(double p);
 void Rf_onintr(void);
 }
 
@@ -93,7 +88,6 @@ class error : public std::exception {
 struct interrupted {};                 // Benutzerabbruch
 struct unwind_jump {                  // R-Fehler waehrend eines geschuetzten R-Aufrufs
   SEXP token;
-  bool put_rng;                        // PutRNGstate() vor dem Fortsetzen (siehe rcall)
 };
 
 inline std::string format(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -166,21 +160,13 @@ template <class F> SEXP invoke(void* data) { return (*static_cast<F*>(data))(); 
 // Fuehrt f() (liefert SEXP) aus; bricht f mit einem R-Fehler ab, wirft rcall
 // unwind_jump, und sl::call() setzt den Fehler nach dem Aufraeumen fort.
 // Das Ergebnis ist ungeschuetzt (sofort keep() oder einhaengen).
-//
-// put_rng bildet nach, ob Rcpp bei diesem R-Fehler PutRNGstate() ausfuehrte:
-// R-Code (as.list, as.character) wertete Rcpp unter R_UnwindProtect aus, der
-// Destruktor von RNGScope lief (put_rng = true); direkte Aufrufe der
-// C-Schnittstelle (Rf_allocVector, Rf_coerceVector, Rf_setAttrib,
-// SET_VECTOR_ELT) sprangen ohne ihn zurueck nach R (put_rng = false). Sichtbar
-// ist das nur, wenn .Random.seed vor dem Aufruf fehlte (in den Kernen treten
-// solche Fehler vor der ersten Zufallszahl auf).
-template <class F> SEXP rcall(F f, bool put_rng = false) {
+template <class F> SEXP rcall(F f) {
   detail::jump_target target;
   SEXP token = PROTECT(R_MakeUnwindCont());
   if (setjmp(target.buf)) {
     R_PreserveObject(token);
     UNPROTECT(1);
-    throw unwind_jump{token, put_rng};
+    throw unwind_jump{token};
   }
   SEXP res = R_UnwindProtect(&detail::invoke<F>, &f, &detail::jump_back, &target, token);
   UNPROTECT(1);
@@ -200,10 +186,6 @@ inline SEXP& pending_token() {
   static SEXP token = nullptr;
   return token;
 }
-inline bool& pending_put_rng() {
-  static bool put = true;
-  return put;
-}
 inline void set_message(const char* msg) {
   char* buf = message_buffer();
   std::strncpy(buf, msg, 8191);
@@ -217,7 +199,6 @@ template <class F> int run(F& body, SEXP& res) {
     return 0;
   } catch (const unwind_jump& u) {
     pending_token() = u.token;
-    pending_put_rng() = u.put_rng;
     return 3;
   } catch (const interrupted&) {
     return 1;
@@ -262,11 +243,11 @@ inline void raise(int status) {
 }
 }  // namespace detail
 
-// Rahmen jeder .Call-Huelle: RNG-Zustand holen, Kern ausfuehren (Umwandlung der
-// Argumente eingeschlossen), RNG-Zustand zurueckschreiben, gehaltene Objekte
-// freigeben, dann Ergebnis zurueckgeben oder den Fehler in R ausloesen.
-template <class F> SEXP call(F&& body) {
-  GetRNGstate();
+// Rahmen jeder .Call-Huelle: Kern ausfuehren (Umwandlung der Argumente
+// eingeschlossen), gehaltene Objekte freigeben, dann Ergebnis zurueckgeben oder den
+// Fehler in R ausloesen. Seit Etappe 9.6a (Entwurf C.5, Regel 10) liest und schreibt kein
+// Kern mehr .Random.seed (N2: Schalter rng entfernt).
+template <class F> SEXP call_impl(F& body) {
   frame f;
   f.anchor = nullptr;
   f.prev = current_frame();
@@ -275,13 +256,13 @@ template <class F> SEXP call(F&& body) {
   const int status = detail::run(body, res);
   if (status != 0) res = R_NilValue;
   PROTECT(res);
-  if (status != 3 || detail::pending_put_rng()) PutRNGstate();
   current_frame() = f.prev;
   if (f.anchor != nullptr) R_ReleaseObject(f.anchor);
   UNPROTECT(1);
   if (status != 0) detail::raise(status);
   return res;
 }
+template <class F> SEXP call(F&& body) { return call_impl(body); }
 
 // Rcpp::checkUserInterrupt()
 namespace detail {
@@ -316,7 +297,7 @@ inline SEXP call_r(const char* fun, SEXP x) {
     SEXP res = Rf_eval(expr, R_GlobalEnv);
     UNPROTECT(1);
     return res;
-  }, true);
+  });
 }
 
 // r_cast<VECSXP>
@@ -613,7 +594,7 @@ inline void put(SEXP list, R_xlen_t i, SEXP value) {
 // R als Host der gemeinsamen Kerne (Etappe 7.3a, Schnittstelle in simlev_core.h)
 // ---------------------------------------------------------------------------
 //
-// Die Kerne in src/*_impl.h sind gewoehnliche statische Funktionen ueber den Typen
+// Die Kerne in src/*_impl.h (Kopien aus core/) sind gewoehnliche statische Funktionen ueber den Typen
 // simlev_host::NumVec/IntVec/NumMat und den Makros SIMLEV_*. Fuer R stehen dort
 // genau die Typen und Aufrufe, die frueher direkt im Kern standen; der Compiler
 // uebersetzt die Kerne daher in der .Call-Huelle wie vor der Teilung (gleicher
@@ -628,19 +609,12 @@ typedef sl::NumMat NumMat;
 // as_double, as_int, num_vec, named_list, new_num, new_int, Date aus sl.
 typedef SEXP Obj;
 using namespace sl;
-// Kerne mit Zufallszahlen (Etappe 7.3b, bootstrap_core_impl.h): logische Vektoren, Listen
-// von Ganzzahlvektoren (R: die Liste selbst, Zugriff ueber SIMLEV_LIST_INT) und genau die
-// Zufallsfunktionen aus R's nmath, die der Kern vor der Teilung aufrief.
+// logische Vektoren (die Kerne mit Zufallszahlen, die dazu auch Listen von
+// Ganzzahlvektoren und R's runif/rnorm/rgeom brauchten, sind mit Etappe 9.6c entfallen)
 typedef sl::LglVec LglVec;
-typedef SEXP IntList;
-inline double runif(double a, double b) { return Rf_runif(a, b); }
-inline double rnorm(double mu, double sigma) { return Rf_rnorm(mu, sigma); }
-inline double rgeom(double p) { return Rf_rgeom(p); }
 }  // namespace simlev_host
 
-#define SIMLEV_RNG 1                                            // Host stellt runif/rnorm/rgeom (R's RNG)
 #define SIMLEV_INT(...) sl::new_int(__VA_ARGS__)                // Ganzzahlvektor (0)
-#define SIMLEV_LIST_INT(l, i) sl::int_vec(sl::at(l, i))         // i-tes Element einer Liste als Ganzzahlvektor
 
 #define SIMLEV_NA NA_REAL                                       // R's NA_real_
 #define SIMLEV_FAIL sl::stop                                    // Fehler: stop() mit dem Text

@@ -3,12 +3,12 @@
 #   LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> Rscript golden/modules/gen_bootstrap.R
 source("golden/modules/ref_tools.R"); ref_init("bootstrap")
 
-P <- "from simlev.bootstrap import *\nfrom simlev.withdrawal import *\nimport simlev.bootstrap as B\nimport simlev._r.rng as RNG\n"
+P <- "from simlev.bootstrap import *\nfrom simlev.withdrawal import *\nimport simlev.bootstrap as B\n"
 CFG_R <- "cfg <- bootstrap_config(c(us = 'us', eu = 'eu'), regime_index = 'us', aux = c(rate = 'rate'),
   letfs = list(list(base = 'eu', leverage = 2, finance = 'rate', expense = 0.5), list(base = 'us', leverage = -1, finance = 'rate', expense = 0.6)))\n"
 CFG_P <- "cfg = bootstrap_config({'us': 'us', 'eu': 'eu'}, regime_index='us', aux={'rate': 'rate'},
   letfs=[{'base': 'eu', 'leverage': 2, 'finance': 'rate', 'expense': 0.5}, {'base': 'us', 'leverage': -1, 'finance': 'rate', 'expense': 0.6}])\n"
-JP <- "using SimLev.Bootstrap, SimLev.Withdrawal\nconst B = SimLev.Bootstrap\nconst RNG = SimLev.RRng\n"
+JP <- "using SimLev.Bootstrap, SimLev.Withdrawal\nconst B = SimLev.Bootstrap\n"
 CFG_J <- 'cfg = bootstrap_config((us = "us", eu = "eu"), regime_index = "us", aux = (rate = "rate",),
   letfs = [(base = "eu", leverage = 2, finance = "rate", expense = 0.5), (base = "us", leverage = -1, finance = "rate", expense = 0.6)])\n'
 case <- function(id, r, py, inputs = list(), jl = NULL, ...) ref_case(id, r = r, py = paste0(P, py), inputs = inputs,
@@ -242,23 +242,34 @@ case("base_params", "SimLev:::.get_base_params('raw', list(L = 3, foo = 1), 10)"
      jl = 'result = B._get_base_params("raw", (L = 3, foo = 1), 10)')
 
 # Seeds und globaler Zufallszustand
-case("seed_null", "set.seed(3); b <- bootstrap(d, bootstrap_config(c(us = 'us')), 'raw', n = 1, progress = FALSE, path_length = 5); list(b$seed, b$paths, runif(2))",
-     "RNG.set_seed(3); b = bootstrap(d, bootstrap_config({'us': 'us'}), method='raw', n=1, progress=False, path_length=5); result = [b['seed'], b['paths'], RNG.runif(2)]", I,
-     jl = 'RNG.set_seed(3); b = bootstrap(d, bootstrap_config((us = "us",)), "raw"; n = 1, progress = false, path_length = 5); result = [b["seed"], b["paths"], RNG.runif(2)]')
-case("seed_keeps_state", "set.seed(99); invisible(bootstrap(d, bootstrap_config(c(us = 'us')), 'stationary', n = 2, seed = 1, progress = FALSE)); runif(3)",
-     "RNG.set_seed(99); bootstrap(d, bootstrap_config({'us': 'us'}), method='stationary', n=2, seed=1, progress=False); result = RNG.runif(3)", I,
-     jl = 'RNG.set_seed(99); bootstrap(d, bootstrap_config((us = "us",)), "stationary"; n = 2, seed = 1, progress = false); result = RNG.runif(3)')
-case("seed_lecuyer_global", "set.seed(5, kind = \"L'Ecuyer-CMRG\"); b <- bootstrap(d, bootstrap_config(c(us = 'us')), 'raw', n = 1, seed = 2, progress = FALSE, path_length = 4); x <- c(runif(2), b$paths[[1]]); RNGkind('Mersenne-Twister'); x",
-     "RNG.set_seed(5, kind=\"L'Ecuyer-CMRG\"); b = bootstrap(d, bootstrap_config({'us': 'us'}), method='raw', n=1, seed=2, progress=False, path_length=4); result = np.concatenate([RNG.runif(2), b['paths'][0].to_numpy().ravel()]); RNG.rng_kind('Mersenne-Twister')", I,
-     jl = 'RNG.set_seed(5; kind = "L\'Ecuyer-CMRG"); b = bootstrap(d, bootstrap_config((us = "us",)), "raw"; n = 1, seed = 2, progress = false, path_length = 4); x = vcat(RNG.runif(2), vec(b["paths"][1].data)); RNG.rng_kind("Mersenne-Twister"); result = x')
-case("streams", "SimLev:::.make_streams(7, 3)", "result = B._make_streams(7, 3)",
-     jl = 'result = B._make_streams(7, 3)')
-case("rng_restore", "set.seed(42); a <- SimLev:::.with_rng_restore(runif(2)); b <- runif(2); c1 <- SimLev:::.with_rng_restore(runif(1), seed = 1); c2 <- runif(1); e <- SimLev:::.with_rng_restore(runif(1), seed = NULL); f <- runif(1); list(a, b, c1, c2, e, f)",
-     "RNG.set_seed(42); a = B._with_rng_restore(lambda: RNG.runif(2)); b = RNG.runif(2); c1 = B._with_rng_restore(lambda: RNG.runif(1), seed=1); c2 = RNG.runif(1); e = B._with_rng_restore(lambda: RNG.runif(1), seed=None); f = RNG.runif(1); result = [a, b, c1, c2, e, f]",
-     jl = 'RNG.set_seed(42); a = B._with_rng_restore(() -> RNG.runif(2)); b = RNG.runif(2); c1 = B._with_rng_restore(() -> RNG.runif(1); seed = 1); c2 = RNG.runif(1); e = B._with_rng_restore(() -> RNG.runif(1); seed = nothing); f = RNG.runif(1); result = [a, b, c1, c2, e, f]')
-case("par_lapply", "set.seed(1); a <- SimLev:::.par_lapply(1:3, function(i) runif(1), 2L); b <- runif(1); c1 <- SimLev:::.par_lapply(1:2, function(i) runif(1), 1L); list(a, b, c1)",
-     "RNG.set_seed(1); a = B._par_lapply([1, 2, 3], lambda i: RNG.runif(1), 2); b = RNG.runif(1); c1 = B._par_lapply([1, 2], lambda i: RNG.runif(1), 1); result = [a, b, c1]",
-     jl = 'RNG.set_seed(1); a = B._par_lapply(1:3, i -> RNG.runif(1), 2); b = RNG.runif(1); c1 = B._par_lapply(1:2, i -> RNG.runif(1), 1); result = [a, b, c1]')
+case("seed_null", "simlev_seed(3); b <- bootstrap(d, bootstrap_config(c(us = 'us')), 'raw', n = 1, progress = FALSE, path_length = 5); list(b$seed, b$paths, SimLev:::.sl_runif(2))",
+     "simlev.simlev_seed(3); b = bootstrap(d, bootstrap_config({'us': 'us'}), method='raw', n=1, progress=False, path_length=5); result = [b['seed'], b['paths'], simlev._lib.runif(2)]", I,
+     jl = 'SL.simlev_seed(3); b = bootstrap(d, bootstrap_config((us = "us",)), "raw"; n = 1, progress = false, path_length = 5); result = [b["seed"], b["paths"], SL.SLib.runif(2)]')
+case("seed_keeps_state", "simlev_seed(99); invisible(bootstrap(d, bootstrap_config(c(us = 'us')), 'stationary', n = 2, seed = 1, progress = FALSE)); SimLev:::.sl_runif(3)",
+     "simlev.simlev_seed(99); bootstrap(d, bootstrap_config({'us': 'us'}), method='stationary', n=2, seed=1, progress=False); result = simlev._lib.runif(3)", I,
+     jl = 'SL.simlev_seed(99); bootstrap(d, bootstrap_config((us = "us",)), "stationary"; n = 2, seed = 1, progress = false); result = SL.SLib.runif(3)')
+# 9.6a: R's Zufallszustand (set.seed, RNGkind) wirkt auf SimLev nicht (Entwurf C.5, Regel 10). 9.6c neu
+# gefasst: R setzt seinen Zustand weiter um; Python und Julia haben keine Nachbildung von R's Zufall mehr
+# (set_seed/rng_kind entfallen) und rechnen dieselben SimLev-Aufrufe ohne diese Zwischenschritte.
+case("seed_rkind_ignored", "simlev_seed(5); set.seed(5, kind = \"L'Ecuyer-CMRG\"); b <- bootstrap(d, bootstrap_config(c(us = 'us')), 'raw', n = 1, progress = FALSE, path_length = 4); set.seed(6); b2 <- bootstrap(d, bootstrap_config(c(us = 'us')), 'raw', n = 1, seed = b$seed, progress = FALSE, path_length = 4); RNGkind('Mersenne-Twister'); list(b$seed, b$paths, identical(b$paths, b2$paths), SimLev:::.sl_runif(2))",
+     "simlev.simlev_seed(5); b = bootstrap(d, bootstrap_config({'us': 'us'}), method='raw', n=1, progress=False, path_length=4); b2 = bootstrap(d, bootstrap_config({'us': 'us'}), method='raw', n=1, seed=b['seed'], progress=False, path_length=4); result = [b['seed'], b['paths'], all((x.to_numpy() == y.to_numpy()).all() for x, y in zip(b['paths'], b2['paths'])), simlev._lib.runif(2)]", I,
+     jl = 'SL.simlev_seed(5); b = bootstrap(d, bootstrap_config((us = "us",)), "raw"; n = 1, progress = false, path_length = 4); b2 = bootstrap(d, bootstrap_config((us = "us",)), "raw"; n = 1, seed = b["seed"], progress = false, path_length = 4); result = Any[b["seed"], b["paths"], all(x.data == y.data for (x, y) in zip(b["paths"], b2["paths"])), SL.SLib.runif(2)]')
+case("streams", "lapply(SimLev:::.sl_streams(7, 3), SimLev:::.sl_state_hex)", "result = [s.hex() for s in simlev._lib.streams(7, 3)]",
+     jl = 'result = [SL.SLib.state_hex(s) for s in SL.SLib.streams(7, 3)]')
+# 9.6a: Hauptstrom (Entwurf C.5, Regeln 3 und 4): seed = NULL zieht einmal aus G, seed = s laesst G unberuehrt
+case("main_stream", "simlev_seed(42); a <- SimLev:::.sl_state_hex(SimLev:::.sl_main_stream(NULL)); b <- SimLev:::.sl_state_hex(SimLev:::.sl_main_stream(1)); c1 <- SimLev:::.sl_runif(1); simlev_seed(42); k <- SimLev:::.sl_next_seed(); e <- SimLev:::.sl_state_hex(SimLev:::.sl_stream(k)); list(a, b, c1, k, identical(a, e))",
+     "simlev.simlev_seed(42); a = simlev._lib.main_stream(None).hex(); b = simlev._lib.main_stream(1).hex(); c1 = simlev._lib.runif(1); simlev.simlev_seed(42); k = simlev._lib.next_seed(); e = simlev._lib.Stream(k).hex(); result = [a, b, c1, k, a == e]",
+     jl = 'SL.simlev_seed(42); a = SL.SLib.state_hex(SL.SLib.main_stream(nothing)); b = SL.SLib.state_hex(SL.SLib.main_stream(1)); c1 = SL.SLib.runif(1); SL.simlev_seed(42); k = SL.SLib.next_seed(); e = SL.SLib.state_hex(SL.SLib.Stream(k)); result = Any[a, b, c1, k, a == e]')
+# 9.6a: Einheiten ziehen aus ihrem Strom (Regel 6); G ist in Einheiten gesperrt (Regel 7)
+case("par_lapply", "simlev_seed(1); s <- SimLev:::.sl_streams(3, 3); a <- SimLev:::.par_lapply(1:3, function(i) SimLev:::.sl_runif(1, stream = s[[i]]), 2L); b <- SimLev:::.sl_runif(1); s2 <- SimLev:::.sl_streams(4, 2); c1 <- SimLev:::.par_lapply(1:2, function(i) SimLev:::.sl_runif(1, stream = s2[[i]]), 1L); list(a, b, c1)",
+     "simlev.simlev_seed(1); s = simlev._lib.streams(3, 3); a = B._par_lapply([1, 2, 3], lambda i: simlev._lib.runif(1, stream=s[i - 1]), 2); b = simlev._lib.runif(1); s2 = simlev._lib.streams(4, 2); c1 = B._par_lapply([1, 2], lambda i: simlev._lib.runif(1, stream=s2[i - 1]), 1); result = [a, b, c1]",
+     jl = 'SL.simlev_seed(1); s = SL.SLib.streams(3, 3); a = B._par_lapply(1:3, i -> SL.SLib.runif(1; stream = s[i]), 2); b = SL.SLib.runif(1); s2 = SL.SLib.streams(4, 2); c1 = B._par_lapply(1:2, i -> SL.SLib.runif(1; stream = s2[i]), 1); result = [a, b, c1]')
+case("par_lapply_global_err", "SimLev:::.par_lapply(1:2, function(i) SimLev:::.sl_runif(1), 1L)",
+     "result = B._par_lapply([1, 2], lambda i: simlev._lib.runif(1), 1)",
+     jl = 'result = B._par_lapply(1:2, i -> SL.SLib.runif(1), 1)')
+case("bs_seed_null_repro", "simlev_seed(11); b1 <- bootstrap(d, bootstrap_config(c(us = 'us')), 'stationary', n = 3, progress = FALSE, path_length = 30); b2 <- bootstrap(d, bootstrap_config(c(us = 'us')), 'stationary', n = 3, progress = FALSE, path_length = 30, seed = b1$seed, cores = 2); list(b1$seed, identical(b1$paths, b2$paths), b1$paths[[3]])",
+     "simlev.simlev_seed(11); b1 = bootstrap(d, bootstrap_config({'us': 'us'}), method='stationary', n=3, progress=False, path_length=30); b2 = bootstrap(d, bootstrap_config({'us': 'us'}), method='stationary', n=3, progress=False, path_length=30, seed=b1['seed'], cores=2); result = [b1['seed'], all((x.to_numpy() == y.to_numpy()).all() for x, y in zip(b1['paths'], b2['paths'])), b1['paths'][2]]", I,
+     jl = 'SL.simlev_seed(11); b1 = bootstrap(d, bootstrap_config((us = "us",)), "stationary"; n = 3, progress = false, path_length = 30); b2 = bootstrap(d, bootstrap_config((us = "us",)), "stationary"; n = 3, progress = false, path_length = 30, seed = b1["seed"], cores = 2); result = Any[b1["seed"], all(x.data == y.data for (x, y) in zip(b1["paths"], b2["paths"])), b1["paths"][3]]')
 
 # Fehler und Warnungen
 E <- list(
@@ -328,9 +339,11 @@ case("fit_garch_short", "SimLev:::.fit_garch11(d$us[1:30] - 1)", "result = B._fi
 case("fit_tail", "list(SimLev:::.fit_tail(d$us, 0.05, 'left'), SimLev:::.fit_tail(d$us, 0.05, 'right'), SimLev:::.fit_tail(d$us[1:150], 0.05, 'left'), SimLev:::.fit_tail(d$us[1:60], 0.05, 'left'))",
      "result = [B._fit_tail(d['us'].to_numpy(), 0.05, 'left'), B._fit_tail(d['us'].to_numpy(), 0.05, 'right'), B._fit_tail(d['us'].to_numpy()[:150], 0.05, 'left'), B._fit_tail(d['us'].to_numpy()[:60], 0.05, 'left')]", I,
      jl = 'result = [B._fit_tail(d.us, 0.05, "left"), B._fit_tail(d.us, 0.05, "right"), B._fit_tail(d.us[1:150], 0.05, "left"), B._fit_tail(d.us[1:60], 0.05, "left")]')
-case("fit_tail_heavy", "set.seed(8); x <- 1 + c(rnorm(380, 0, 0.01), -rexp(20, 10)); SimLev:::.fit_tail(x, 0.05, 'left')",
-     "RNG.set_seed(8); x = 1 + np.concatenate([RNG.rnorm(380, 0, 0.01), -RNG.rexp(20, 10)]); result = B._fit_tail(x, 0.05, 'left')",
-     jl = 'RNG.set_seed(8); x = 1 .+ vcat(RNG.rnorm(380, 0, 0.01), -RNG.rexp(20, 10)); result = B._fit_tail(x, 0.05, "left")')
+# 9.6b: Daten im Generator erzeugt und als Eingabe gespeichert (die Fallcodes ziehen nicht mehr mit R's Zufall bzw. RNG)
+set.seed(8); xh <- 1 + c(rnorm(380, 0, 0.01), -rexp(20, 10))
+case("fit_tail_heavy", "SimLev:::.fit_tail(x, 0.05, 'left')",
+     "result = B._fit_tail(x, 0.05, 'left')", list(x = xh),
+     jl = 'result = B._fit_tail(x, 0.05, "left")')
 case("regime_info", "SimLev:::.prepare_regime_info(d$us, 15, 3)", "result = B._prepare_regime_info(d['us'].to_numpy(), 15, 3)", I,
      jl = 'result = B._prepare_regime_info(d.us, 15, 3)')
 case("letf_ret", "SimLev:::.letf_returns(d$us[1:10], list(leverage = -2, finance = 'r', days = 'tg', expense = 0.4, spread = 0.2, rate_basis = 360, ter_basis = 365), cbind(r = d$rate[1:10], tg = c(1, 3, 1, 1, 1, 3, 1, 1, 1, 2)))",
@@ -580,15 +593,15 @@ case("study_print_paired", paste0(SB_R, "st <- bootstrap_study(ds, cfgb, 'statio
      jl = paste0(SB_J, 'st = bootstrap_study(ds, cfgb, "stationary"; n = 3, params = (L = 20,), path_length = 150, seed = 6, progress = false, benchmark = "a", strategies = (a = bnh, h = create_strategy(akt = asset_config("etf", "bnh", share = 0.5, spread = 0.1)))); st["elapsed"] = 2.25; result = st'))
 
 # ── cores = 2 (Etappe 5): Ergebnis und Zufallszustand danach wie bei Fork ───
-case("bs_cores2_rng", paste0(CFG_R, "set.seed(4); b <- bootstrap(d, cfg, 'stationary', n = 5, seed = 1, progress = FALSE, cores = 2, path_length = 120); list(b, runif(1))"),
-     paste0(CFG_P, "RNG.set_seed(4); b = bootstrap(d, cfg, method='stationary', n=5, seed=1, progress=False, cores=2, path_length=120); result = [b, RNG.runif(1)]"), I,
-     jl = paste0(CFG_J, 'RNG.set_seed(4); b = bootstrap(d, cfg, "stationary"; n = 5, seed = 1, progress = false, cores = 2, path_length = 120); result = [b, RNG.runif(1)]'))
+case("bs_cores2_rng", paste0(CFG_R, "simlev_seed(4); b <- bootstrap(d, cfg, 'stationary', n = 5, seed = 1, progress = FALSE, cores = 2, path_length = 120); list(b, SimLev:::.sl_runif(1))"),
+     paste0(CFG_P, "simlev.simlev_seed(4); b = bootstrap(d, cfg, method='stationary', n=5, seed=1, progress=False, cores=2, path_length=120); result = [b, simlev._lib.runif(1)]"), I,
+     jl = paste0(CFG_J, 'SL.simlev_seed(4); b = bootstrap(d, cfg, "stationary"; n = 5, seed = 1, progress = false, cores = 2, path_length = 120); result = [b, SL.SLib.runif(1)]'))
 case("bs_cores2_garch", "bootstrap(d, bootstrap_config(c(us = 'us', eu = 'eu')), 'gjr_garch', n = 3, seed = 6, progress = FALSE, path_length = 80, cores = 2)",
      "result = bootstrap(d, bootstrap_config({'us': 'us', 'eu': 'eu'}), method='gjr_garch', n=3, seed=6, progress=False, path_length=80, cores=2)", I,
      jl = 'result = bootstrap(d, bootstrap_config((us = "us", eu = "eu")), "gjr_garch"; n = 3, seed = 6, progress = false, path_length = 80, cores = 2)')
-case("study_cores2", paste0(STR_R, "set.seed(8); st <- bootstrap_study(ds, cfgs, 'stationary', n = 4, params = list(L = 30), path_length = 400, burn_in = 35, seed = 1, progress = FALSE, benchmark = 'bnh', strategies = strats, chunk_size = 1, cores = 2); st$elapsed <- 0; list(st, runif(1))"),
-     paste0(STR_P, "RNG.set_seed(8); st = bootstrap_study(ds, cfgs, 'stationary', n=4, params={'L': 30}, path_length=400, burn_in=35, seed=1, progress=False, benchmark='bnh', strategies=strats, chunk_size=1, cores=2); st['elapsed'] = 0; result = [st, RNG.runif(1)]"), Is,
-     jl = paste0(STR_J, 'RNG.set_seed(8); st = bootstrap_study(ds, cfgs, "stationary"; n = 4, params = (L = 30,), path_length = 400, burn_in = 35, seed = 1, progress = false, benchmark = "bnh", strategies = strats, chunk_size = 1, cores = 2); st["elapsed"] = 0; result = [st, RNG.runif(1)]'))
+case("study_cores2", paste0(STR_R, "simlev_seed(8); st <- bootstrap_study(ds, cfgs, 'stationary', n = 4, params = list(L = 30), path_length = 400, burn_in = 35, seed = 1, progress = FALSE, benchmark = 'bnh', strategies = strats, chunk_size = 1, cores = 2); st$elapsed <- 0; list(st, SimLev:::.sl_runif(1))"),
+     paste0(STR_P, "simlev.simlev_seed(8); st = bootstrap_study(ds, cfgs, 'stationary', n=4, params={'L': 30}, path_length=400, burn_in=35, seed=1, progress=False, benchmark='bnh', strategies=strats, chunk_size=1, cores=2); st['elapsed'] = 0; result = [st, simlev._lib.runif(1)]"), Is,
+     jl = paste0(STR_J, 'SL.simlev_seed(8); st = bootstrap_study(ds, cfgs, "stationary"; n = 4, params = (L = 30,), path_length = 400, burn_in = 35, seed = 1, progress = false, benchmark = "bnh", strategies = strats, chunk_size = 1, cores = 2); st["elapsed"] = 0; result = [st, SL.SLib.runif(1)]'))
 case("study_cores2_warn", paste0(SB_R, "mk <- function(k) function(df) { for (j in seq_len(k)) warning(paste('W', j)); list(x = 1) }; st <- bootstrap_study(ds, cfgb, 'raw', n = 3, path_length = 100, seed = 1, progress = FALSE, chunk_size = 1, cores = 2, strategies = list(a = list(strategy = bnh, signal = mk(3)), b = list(strategy = bnh, signal = mk(2)))); list(st$results, st$warnings)"),
      paste0(SB_P, "def mk(k):\n    def f(df):\n        for j in range(1, k + 1):\n            warnings.warn('W %d' % j)\n        return {'x': 1}\n    return f\nimport warnings\nst = bootstrap_study(ds, cfgb, 'raw', n=3, path_length=100, seed=1, progress=False, chunk_size=1, cores=2, strategies={'a': {'strategy': bnh, 'signal': mk(3)}, 'b': {'strategy': bnh, 'signal': mk(2)}}); result = [st['results'], st['warnings']]"), Is,
      jl = paste0(SB_J, 'mk(k) = df -> (for j in 1:k; @warn "W $j"; end; (x = 1,))

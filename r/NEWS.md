@@ -14,6 +14,17 @@ Recht um, gibt alle Ausgaben auf Deutsch aus und erzeugt alle 105 Fälle
 neu (siehe unten). Python 0.5.0 und Julia 0.5.0 sind zu allen Fällen
 bitgleich (seit Etappe 6.5c 90; die 15 Fälle des entfernten Fondsmodus entfielen).
 
+## SimLev 1.0.0
+
+Major-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Rechenkern: eigene C-Bibliothek für alle drei Sprachen (Julia per ccall): Zufallsgenerator, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR-, GPD-, DCC- und MS-GARCH-Schätzung, Stineman-Interpolation, Glättungsspline, Kerndichte; geschrieben nach Fachliteratur.
+- Unabhängigkeit: kein Code aus evd, imputeTS, stinepack, rugarch, Rsolnp, truncnorm oder numDeriv mehr; die Pakete stehen nur noch im Literaturverzeichnis.
+- Zufall: eigener Generator mit simlev_seed() und seed-Argument; set.seed steuert SimLev nicht mehr; Ergebnisse unabhängig von cores und in R, Python und Julia gleich. Zufallsergebnisse ändern sich gegenüber 0.10.0.
+- Schätzer: GJR-GARCH mit gamma < 0 unter alpha + gamma >= 0 und Stationarität (im Vergleich mit rugarch 51 von 51 Fällen gleichwertig oder besser); MS-GARCH mit analytischem Gradienten; t-Copula über ein Profil in nu mit Gauss-Grenzfall; qnorm mit eigenen Startnäherungen, rnorm und rgamma schneller als in R.
+- Geändert: GARCH-Label "ml", dependence_dcc deterministisch; set_seed und rng_kind in Python und Julia entfallen; C-Bibliothek in Python und Julia Pflicht.
+- Doku: Literaturabschnitt mit 112 geprüften Quellen, COPYRIGHTS und NEWS neu; Schnittstelle neu eingefroren.
+
 ## SimLev 0.10.0
 
 Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -94,6 +105,157 @@ Ergebniselemente (z. B. `fees_paid`, `harvest_days`, `twr_index`,
 `withdrawal_simulation()`, `failed_dates`, `B_failed`, `probability_dp`,
 `full_years`, `initial`) sowie klare Fehlermeldungen und Warnungen bei
 ungültigen Eingaben. Alle Meldungen und Ausgaben sind deutsch.
+
+### Etappe 9 – SimLev eigenständig
+
+Entscheidung des Nutzers vom 27.10.2026: SimLev nutzt keine Funktionen aus
+fremden Paketen mehr. Zufall und Numerik rechnet eine eigene C-Bibliothek
+(kanonisch in `core/`, Kopien in `src/`, `python/src/core/`,
+`julia/deps/core/`), die R, Python und Julia gemeinsam nutzen. Die Pakete
+evd, imputeTS, stinepack, rugarch, Rsolnp, truncnorm, MSGARCH und numDeriv
+erscheinen nur noch als Literatur bzw. Prüforakel (Abschnitt „Literatur“
+der Haupt-README); `inst/COPYRIGHTS` und das Feld `Copyright:` in
+`DESCRIPTION` nennen keine fremden Autoren mehr. Die Quellen jedes Kerns
+stehen im Kopf seiner Datei und im Abschnitt „Literatur“.
+
+**Was ersetzt wurde:**
+
+| Bereich | bisher | jetzt (C-Bibliothek von SimLev) |
+|---|---|---|
+| Zufall | R's Zufallszahlen (`set.seed()`, Mersenne-Twister, L'Ecuyer-CMRG je Pfad, `sample.int`, `rnorm`, `rgeom`, `rchisq`) | xoshiro256** mit SplitMix64-Seeding, unabhängige Ströme über Sprünge um 2^128, eigene Ziehungen (Inversion, Lemire, Marsaglia-Tsang); neu `simlev_seed()` |
+| Verteilungen | `pnorm`, `qnorm`, `dnorm`, `pt`, `qt`, `lgamma`, `plogis`, `qlogis` aus R | eigene Kerne (Reihen, Kettenbrüche, Asymptotik nach DLMF) |
+| lineare Algebra | `chol`, `solve`, `backsolve`, `determinant`, `eigen`, `%*%`, `crossprod`, `tcrossprod`, `qr`, `lm`, `lm.fit`, `poly`, `glm` | Cholesky, SPD-Löser, Jacobi-Eigenwerte, Householder-QR mit Pivotisierung, Logit-IRLS, Matrixprodukt mit fester Summationsfolge |
+| Optimierer | `optim` (Nelder-Mead, BFGS, L-BFGS-B) | BFGS, projizierter BFGS, Nelder-Mead |
+| GARCH/GJR (`bootstrap()` `"garch"`, `"gjr_garch"`, Kopplung, `dependence_dcc()`, `dependence_analysis()`) | `ugarchfit` aus rugarch mit Rsolnp (`solnp`, `gosolnp`), truncnorm und eigener Richardson-Hesse-Matrix | eigene Maximum-Likelihood-Schätzung |
+| GPD (`"evt"`) | `fpot` aus evd | eigene Maximum-Likelihood-Schätzung |
+| DCC | `optim` (Nelder-Mead) und eigener Filter | ganz in C |
+| MS-GARCH (`"ms_garch"`, `"ms_ar_garch_m"`, `"tvtp_ms_garch"`) | eigene Schätzung mit `optim`, 2 Starts | ganz in C, 12 Starts |
+| Stineman (`fill = "stine"`, `index_fill = "stine"`) | `na_interpolation` aus imputeTS mit `stinterp` aus stinepack | eigener Kern |
+| Glättungsspline (`backcast_fit(model = "spline")`) | `smooth.spline` | Reinsch-Spline mit Knoten an allen Stützstellen, Glättung per GCV |
+| Kerndichte (nur Grafik) | `density` | eigene Gauß-Kerndichte, Bandbreite nach Silverman |
+| Welch-Test (`signal_analysis()`) | `t.test` | eigener Welch-Test |
+| Bootstrap-Kerne | C++ mit R's Zufallszahlen | C mit dem Zufall von SimLev |
+
+Weiter genutzt werden Grundfunktionen von R wie `quantile`, `sort`, `order`,
+`cor`, `approx`, `filter`, `optimize`, `uniroot`, `hclust`, `p.adjust`,
+`format` und `sprintf`; Python und Julia bilden sie nach (siehe
+`python/COPYRIGHTS.md`, `julia/COPYRIGHTS.md`).
+
+**Was sich für Nutzer ändert, mit Umstellungshinweisen:**
+
+- **Zufall und `seed`:** `set.seed()`, `RNGkind()` und `.Random.seed` wirken
+  auf SimLev nicht mehr; SimLev liest, setzt und löscht `.Random.seed` nie.
+  Den Zustand setzt `simlev_seed(k)`; zufällige Funktionen nehmen weiter
+  `seed`. Mit `seed = NULL` zieht ein Aufruf genau einmal einen Startwert k
+  aus dem Zustand von SimLev und rechnet wie mit `seed = k`
+  (`bootstrap()`/`bootstrap_study()` legen k unter `$seed` ab); mit
+  `seed = k` bleibt der Zustand unberührt. Ergebnisse hängen nicht von
+  `cores` oder `chunk_size` ab und sind in R, Python und Julia bitgleich.
+  Zufällige Ergebnisse ändern sich gegenüber früher (anderer Generator,
+  gleiche Verteilung); mit einem alten Seed gespeicherte Ergebnisse lassen
+  sich nicht exakt wiederholen. `withdrawal_max_rate()` löst
+  `horizon$seed = NULL` einmal auf und nutzt in allen Suchschritten dieselben
+  Laufzeiten. Umstellung: `set.seed(1); bootstrap(…)` wird zu
+  `bootstrap(…, seed = 1)` oder `simlev_seed(1); bootstrap(…)`. Eigene
+  Eingabedaten dürfen weiter mit `set.seed()` und `rnorm()` erzeugt werden.
+- **GARCH-Label `"ml"`:** Die GARCH-Stufe meldet ihren Weg als `"ml"` statt
+  `"rugarch"` bzw. `"optim"` (Rückfälle `"momente"` und `"konstant"`; Spalte
+  `method` von `dependence_dcc()`, Meldungen von `bootstrap()`). Code, der
+  auf `"rugarch"` prüft, muss auf `"ml"` umgestellt werden. Die
+  Schätzwerte ändern sich; die Log-Likelihood ist in den Referenzreihen gleich
+  oder höher als mit rugarch (Ausnahme GJR mit negativem Leverage, unten).
+  Die rugarch-Meldung zu weniger als 100 Datenpunkten entfällt; neu ist die
+  Warnung „GARCH: ML-Schätzung fehlgeschlagen, verwende Moment-Schätzer“.
+- **`dependence_dcc()` deterministisch:** Der seltene Rückfall auf gosolnp,
+  der den Zufallszustand aus der Uhrzeit setzte, entfällt. Wiederholte Aufrufe
+  liefern dieselben Zahlen, unabhängig von der Uhrzeit.
+- **GJR mit γ ≥ 0:** Die Parametrisierung erzwingt γ ≥ 0. Bei negativem
+  Leverage-Effekt schätzt SimLev γ = 0, wo rugarch ein kleines negatives γ
+  zuließ (α + γ ≥ 0); in 19 von 51 GJR-Prüffällen lag rugarch dort besser,
+  um bis zu 1,6·10⁻³ relativ in der Log-Likelihood. Umstellung: Bei Daten mit
+  negativem Leverage `"garch"` statt `"gjr_garch"` verwenden.
+- **Spline und Kerndichte:** `backcast_fit(model = "spline")` nutzt einen
+  Reinsch-Glättungsspline mit Knoten an allen Stützstellen statt
+  `smooth.spline()` (das bei vielen Punkten Knoten auswählt);
+  `regression$fit` ist ein Splineobjekt von SimLev. In den Referenzfällen
+  weichen die Renditen um bis zu 3·10⁻³ relativ ab, die Kennzahlen um bis zu
+  1,6 %; der Zielwert des Fits ist gleich oder kleiner. Die Kerndichte in
+  `plot()` von Bootstrap-Studien summiert direkt statt über FFT; gegen
+  `density()` lag der Unterschied bei bis zu 4,2·10⁻³ des Maximums (nur
+  Grafik).
+- **Fehler bei Randfällen:** Die Kerne prüfen ihre Eingaben strenger als R:
+  NA, NaN oder Inf in der rechten Seite eines linearen Gleichungssystems
+  (Risikoparität, Copula-Szenarien) ergibt den Fehler „solve: NA/NaN/Inf in
+  der rechten Seite“ statt NA im Ergebnis; nicht endliche Werte in einer
+  Stineman-Interpolation (`fill = "stine"`) ergeben „stinterp: NA/NaN/Inf
+  in y“ statt Inf/NaN; eine 0×0-Matrix ergibt ein leeres Ergebnis statt eines
+  Fehlers. Die Meldung zu einer nicht positiv definiten Matrix ist deutsch
+  („chol: Matrix nicht positiv definit (führende Minore der Ordnung k)“).
+- **Welch-Test mit NA:** Sind in `signal_analysis()` beide verglichenen
+  Bereiche konstant, sind t und p `NA`, statt dass `t.test()` mit „data are
+  essentially constant“ abbricht. `signal_analysis()$fit$model` ist kein
+  `lm`-Objekt mehr (Koeffizienten `(Intercept)`, `z`, `z^2`, …, Basis
+  `c(center, scale)`); angepasste Werte und R² sind gleich.
+- **Schranken bei BFGS und Nelder-Mead:** Die interne Optimierer-Hülle
+  `.sl_optim()` bricht mit einem Fehler ab, wenn Schranken mit BFGS oder
+  Nelder-Mead übergeben werden (`optim()` warnte und wechselte das
+  Verfahren). Kein exportierter Aufruf ist betroffen; wer `.sl_optim()`
+  direkt nutzt, wählt `"L-BFGS-B"` bzw. `"PBFGS"`.
+- **Warnung zur IGARCH-Nähe:** Auf Daten ohne Volatilitätsbündelung liegt die
+  ML-Schätzung oft am Rand β → 1; dann erscheint häufiger die Warnung
+  „GARCH: Persistenz 1.0000 (nahe IGARCH)“ (ab Persistenz 0,999). Die
+  Simulation läuft weiter; der Filter startet dann mit der
+  Stichprobenvarianz.
+- **Weitere kleine Änderungen:** `sharpe_haircut()` rechnet die
+  Rücktransformation über das obere Ende der Normalverteilung (sichtbar nur
+  bei p < 10⁻⁸); die IRLS-Warnung lautet „glm: Algorithmus konvergiert nicht“
+  statt „glm.fit: algorithm did not converge“. Alle übrigen Ergebnisse
+  ändern sich nur im Rahmen der Rechengenauigkeit.
+
+**Laufzeit** (`tools/bench`, Median in Sekunden, ein Kern, vor und nach dem
+Einbau der eigenen Kerne in Etappe 9.6b, beide mit dem eigenen Zufall):
+
+| Aufgabe | R vorher | R jetzt | Python vorher | Python jetzt | Julia vorher | Julia jetzt |
+|---|---|---|---|---|---|---|
+| S30 `simulation`, 30 Jahre | 0,228 | 0,223 | 0,120 | 0,079 | 0,023 | 0,019 |
+| T1 `bootstrap` stationär | 0,039 | 0,040 | 0,031 | 0,039 | 0,023 | 0,014 |
+| T2 `bootstrap` GARCH | 0,390 | 0,028 | 0,253 | 0,040 | 0,163 | 0,021 |
+| T3 `bootstrap_study` | 0,477 | 0,570 | 0,537 | 0,528 | 0,094 | 0,099 |
+| T4 `withdrawal_simulation` | 0,060 | 0,110 | 0,111 | 0,111 | 0,073 | 0,052 |
+| T5 `dependence_analysis` mit DCC | 0,393 | 0,051 | 0,515 | 0,114 | 0,076 | 0,031 |
+| T6 `min_cvar` | 0,084 | 0,083 | 0,157 | 0,120 | 0,085 | 0,083 |
+| T7 `hrp` | 0,005 | 0,007 | 0,045 | 0,044 | 0,004 | 0,004 |
+| T8 MS-GARCH-Schätzung | 0,938 | 1,293 | 0,518 | 1,271 | 0,265 | 1,325 |
+
+GARCH und DCC sind 6- bis 14-mal schneller. Die MS-GARCH-Schätzung ist in
+allen drei Sprachen gleich teuer (etwa 1,3 s), weil sie jetzt im selben
+C-Kern zwölf statt zwei Starts rechnet. T3 und T4 schwanken in R; zwei
+Wiederholungen ergaben keinen gesicherten Unterschied.
+
+**Entfernt:** `R/vendor_*.R` und `src/vendor_*` (evd, imputeTS, stinepack,
+rugarch, Rsolnp, truncnorm), `R/richardson.R`, die früheren Bootstrap-, DCC-
+und MS-GARCH-Kerne (`src/bootstrap_core.cpp`, `src/dependence_core.cpp`,
+`src/ms_garch.c`) und die nicht mehr genutzten Hüllen (`.imputets_locf`,
+`.dcc_filter`, `.ms_garch_filter`, `.boot_*`, `.ms_garch_unpack/pack/stat`).
+Die geteilten Kerne der Engine, FIFO, Steuer, Research und Entnahme liegen
+kanonisch in `core/`; ihr Maschinencode in R ist unverändert. Die
+Schnittstelle ist mit `simlev_seed()` neu festgeschrieben
+(`tools/api_snapshot/CHANGES.md`).
+
+**Tests:** Die testthat-Suite und die gespeicherten Referenzfälle beschreiben
+den Stand davor und sind bis zum Neuaufbau ausgesetzt (`SIMLEV_LEGACY_TESTS=1`
+führt sie aus). Bis dahin prüft die Gleichlaufprüfung
+`tools/gleichlauf/run.sh`: Der vollständige Lauf vom 27.10.2026 ergab 4.260
+von 4.260 Modul-Fällen und 1.182 von 1.182 Engine-Fällen in Python und Julia
+bitgleich zu R.
+
+### Eigene numerische Kerne (Etappe 9.6b)
+
+- **Verteilungen, lineare Algebra, Optimierer und Modelle aus der C-Bibliothek von SimLev statt R's stats bzw. der übernommenen Pakete:** `pnorm`/`qnorm`/`dnorm`/`pt`/`qt`/`lgamma`/`plogis`/`qlogis`, `chol`/`solve`/`backsolve`/`determinant`/`eigen`, `%*%`/`crossprod`/`tcrossprod` (internes `%m%`, je Element aufsteigend summiert), `qr`/`lm`/`lm.fit`/`poly`/`glm`, `t.test` (eigener Welch-Test), `density` (eigene Gauß-Kerndichte, nur Grafik) und `optim` (BFGS, projizierter BFGS, Nelder-Mead) rechnen in SimLev selbst. **Geänderte Ergebnisse:** Die GARCH-Stufe von `bootstrap()` (`"garch"`, `"gjr_garch"`, Kopplung) und `dependence_dcc()`/`dependence_analysis()` schätzt per eigener ML (GJR mit γ ≥ 0) statt mit rugarch und meldet den Weg `"ml"` statt `"rugarch"`/`"optim"` (Warnung „GARCH: ML-Schätzung fehlgeschlagen, verwende Moment-Schätzer“); `dependence_dcc()` ist deterministisch (kein gosolnp-Rückfall mit Uhrzeit-Seed mehr); der GPD-Fit (`"evt"`) nutzt eine eigene ML statt evd; MS-GARCH läuft ganz in C mit zwölf Starts; `backcast_fit(model = "spline")` nutzt einen Reinsch-Glättungsspline mit Knoten an allen Stützstellen (`regression$fit` ist ein SimLev-Splineobjekt), `"stine"` eine eigene Stineman-Interpolation; `signal_analysis()$fit$model` ist kein `lm`-Objekt mehr (Koeffizienten, angepasste Werte, Grad, Basis; angepasste Werte und R² unverändert); `sharpe_haircut()` rechnet die Rücktransformation über das obere Normalende. Alle übrigen Ergebnisse ändern sich nur im Rahmen der Rechengenauigkeit; R, Python und Julia bleiben bitgleich. Zusammenfassung oben (Etappe 9).
+
+### Eigener Zufall (Etappe 9.6a)
+
+- **Zufall von SimLev statt R's Zufallszahlen:** Alle zufälligen Funktionen (`bootstrap()`, `bootstrap_study()`, `param_bootstrap()`, `param_search()`, `sharpe_test()`, `overfit_reality_check()`, `dependence_analysis()`, `tail_regression()`, `portfolio_optimize()`, `portfolio_rolling()`, `bootstrap_pooled()`, `planning_goal()`, `scenario_copula()`, `regime_hmm()`, `withdrawal_horizon()`/`withdrawal_simulation()`/`withdrawal_max_rate()`) ziehen aus dem Zufallszustand von SimLev (xoshiro256**, neu `simlev_seed()`); `seed = NULL` zieht genau einmal einen Startwert daraus, `set.seed()` wirkt nicht mehr. Zufällige Ergebnisse ändern sich daher (gleiche Verteilung), sind aber in R, Python und Julia bitgleich und unabhängig von `cores`; `withdrawal_max_rate()` nutzt bei `horizon$seed = NULL` in allen Suchschritten dieselben Laufzeiten. Zusammenfassung oben (Etappe 9).
 
 ### Restpunkte Fonds-Wrapper (Etappe 8.0)
 

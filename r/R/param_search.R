@@ -117,7 +117,7 @@ print.SimLevParamSpace <- function(x, ...) {
 #' Versuchsplan erzeugen
 #' @keywords internal
 #' @noRd
-.ps_design <- function(space, method, n, constraint) {
+.ps_design <- function(space, method, n, constraint, stream = NULL) {
   ok_rows <- function(D) {
     if (is.null(constraint)) return(rep(TRUE, nrow(D)))
     vapply(seq_len(nrow(D)), function(i) isTRUE(constraint(as.list(D[i, , drop = FALSE]))), TRUE)
@@ -130,7 +130,8 @@ print.SimLevParamSpace <- function(x, ...) {
     while ((is.null(D) || nrow(D) < n) && tries < 20L) {
       m <- if (is.null(D)) n else max(n, 2L * (n - nrow(D)))
       U <- vapply(seq_along(space), function(j)
-        if (method == "lhs") (sample.int(m) - stats::runif(m)) / m else stats::runif(m), numeric(m))
+        if (method == "lhs") (.sl_sample(m, stream = stream) - .sl_runif(m, stream = stream)) / m
+        else .sl_runif(m, stream = stream), numeric(m))
       if (!is.matrix(U)) U <- matrix(U, nrow = m)
       Dn <- as.data.frame(lapply(seq_along(space), function(j) .ps_map(space[[j]], U[, j])),
                           stringsAsFactors = FALSE, col.names = names(space))
@@ -225,10 +226,12 @@ print.SimLevParamSpace <- function(x, ...) {
 #' @param cores Anzahl paralleler Prozesse (ganze Zahl, Standard 1); unter
 #'   Unix per Fork (\code{parallel::mclapply}), unter Windows per
 #'   PSOCK-Cluster.
-#' @param seed Startwert (ganze Zahl) fuer den Versuchsplan bei
-#'   \code{"random"}/\code{"lhs"}; der Zufallszustand der Sitzung wird danach
-#'   wiederhergestellt. \code{NULL} (Standard) = aktueller Zufallszustand,
-#'   der dabei normal weiterlaeuft (wiederholte Aufrufe ziehen andere Punkte).
+#' @param seed Startwert fuer den Versuchsplan bei \code{"random"}/\code{"lhs"} (Standard
+#'   \code{NULL}; bei \code{"grid"} ohne Bedeutung). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+#'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+#'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
+#'   Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
+#'   Die Auswertung der Punkte ist deterministisch, das Ergebnis haengt nicht von \code{cores} ab.
 #' @param keep_returns Logisch (Standard \code{TRUE}): taegliche Renditen je
 #'   Punkt speichern (noetig fuer [overfit_pbo()], [sharpe_deflated()],
 #'   [overfit_walk_forward()], [overfit_reality_check()], [sharpe_haircut()]).
@@ -281,7 +284,8 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
     builder <- function(p) list(strategy = strategy, args = p)
   }
   sim_run_args <- .sim_args_set(list(), sim_args, "param_search")
-  design <- .with_rng_restore(.ps_design(space, method, n, constraint), seed = seed)
+  # Zufall nur im Versuchsplan (Hauptstrom, Entwurf C.5); die Auswertung je Punkt ist deterministisch
+  design <- .ps_design(space, method, n, constraint, if (method == "grid") NULL else .sl_main_stream(seed))
   t0 <- Sys.time()
   run <- function(i) {
     p <- as.list(design[i, , drop = FALSE])

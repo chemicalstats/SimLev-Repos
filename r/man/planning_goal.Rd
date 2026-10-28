@@ -46,10 +46,10 @@ genauer, aber langsamer.}
 \item{n_sim}{Anzahl Pfade der Vorwaertssimulation der optimalen Politik
 (Standard 5000).}
 
-\item{seed}{Startwert fuer die Vorwaertssimulation; der globale
-Zufallszustand wird danach wiederhergestellt. \code{NULL} (Standard) =
-aktueller Zufallszustand, der dabei normal weiterlaeuft (wiederholte
-Aufrufe simulieren andere Pfade).}
+\item{seed}{Startwert fuer die Vorwaertssimulation (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}), wiederholte
+Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.}
 }
 \value{
 Objekt der Klasse \code{SimLevGoalPlan} (Liste):

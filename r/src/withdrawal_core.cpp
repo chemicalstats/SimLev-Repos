@@ -3,7 +3,7 @@
 //
 // Die Rechnung steht seit Etappe 7.3a in src/withdrawal_core_impl.h (ohne R-Bezug,
 // Regeln, Zeitkonvention und Steuermodell siehe dort; gemeinsam mit Python:
-// simlev._ext, Kopie in python/src/). Diese Datei wandelt nur die Argumente um
+// simlev._ext; kanonisch in core/, F16). Diese Datei wandelt nur die Argumente um
 // (wie die fruehere Rcpp-Huelle) und ruft den Kern auf; die Sichten und Aufrufe des
 // Kerns bindet simlev_capi.h an R (Abschnitt "R als Host der gemeinsamen Kerne").
 

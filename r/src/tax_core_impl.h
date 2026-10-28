@@ -25,11 +25,12 @@
 // (simlev_host nimmt den Namensraum sl auf), der Compiler erzeugt daher denselben
 // Maschinencode wie vor der Teilung (geprueft per Disassemblierung); Python stellt
 // dieselben Zugriffe auf seine Objekte (python/src/_ext_common.h, _ext_engine.cpp).
-// R ruft die Kerne ueber die .Call-Huellen in src/tax_core.cpp auf, Python ueber
-// simlev._ext. Python baut aus einer Byte-fuer-Byte-Kopie in python/src/
-// (python/tests/test_shared_c.py); Aenderungen nur hier vornehmen und danach
-// kopieren. Die reinen Python-Kerne (simlev/_core.py) rechnen dasselbe und bleiben
-// der Rueckfall.
+// R ruft die Kerne ueber die .Call-Huellen in r/src/tax_core.cpp auf, Python ueber
+// simlev._ext. Kanonisch in core/ (seit Etappe 9.6c, F16); R und Python bauen aus
+// Byte-fuer-Byte-Kopien in r/src/ bzw. python/src/core/ (tools/core_sync.py
+// --write/--check); Aenderungen nur in core/ vornehmen und danach kopieren.
+// Die Python-Huellen (simlev/_core.py) rufen nur noch diese Kerne; die reinen
+// Python-Kerne als Rueckfall sind seit 9.6c entfallen.
 
 #ifndef SIMLEV_TAX_CORE_IMPL_H
 #define SIMLEV_TAX_CORE_IMPL_H

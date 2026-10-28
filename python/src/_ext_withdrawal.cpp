@@ -1,9 +1,9 @@
 /*
  * python/src/_ext_withdrawal.cpp -- Python-Huelle des Entnahme-Kerns (.wd_simulate)
  *
- * Etappe 7.3a. Gemeinsamer Kern mit R (r/src/withdrawal_core_impl.h, Kopie hier);
+ * Etappe 7.3a. Gemeinsamer Kern mit R (core/withdrawal_core_impl.h, Kopie in src/core/);
  * aufgerufen aus simlev._withdrawal_core.wd_simulate, das die Argumente vorher
- * wie der reine Python-Kern umwandelt. Matrizen spaltenweise als flache
+ * wie R umwandelt. Matrizen spaltenweise als flache
  * double-Puffer mit Zeilen- und Spaltenzahl, lot_group als int32-Puffer.
  *
  *   wd_simulate(R, nr, nc, INF, nr, nc, CAPE, nr, nc, BASE, nr, nc, ppy, rule, rp,
@@ -15,10 +15,10 @@
  *
  * shape = (ny, paths, wealth_nr, wealth_nc, end_nr, end_nc); die Felder kommen als
  * bytearray (float64, spaltenweise). Fehler des Kerns: ValueError mit dem Text
- * von R (die Python-Seite macht daraus WdError wie der reine Python-Kern).
+ * von R (die Python-Seite macht daraus WdError).
  */
 #include "_ext_common.h"
-#include "withdrawal_core_impl.h"
+#include "core/withdrawal_core_impl.h"
 
 namespace {
 

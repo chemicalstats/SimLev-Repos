@@ -314,7 +314,7 @@ plot.SimLevResult <- function(
     
     # Normalverteilung ueberlagern
     x_seq <- seq(min(returns), max(returns), length.out = 100)
-    y_norm <- dnorm(x_seq, mean = mean(returns), sd = sd(returns))
+    y_norm <- .sl_dnorm(x_seq, mean = mean(returns), sd = sd(returns))
     y_norm_scaled <- y_norm * length(returns) * diff(range(returns)) / 50
     lines(x_seq, y_norm_scaled, col = colors$secondary, lwd = 2, lty = 2)
     

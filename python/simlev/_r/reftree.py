@@ -532,18 +532,10 @@ def _uniq(seq):
 def run_case(case, check_print=True, check_output=True, check_warnings=True):
     """Führt einen Fall aus; liefert Liste der Abweichungen (leer = bitgleich).
 
-    Hat der Fall eine feste Uhrzeit (Feld ``sys_time``), gilt sie während des
-    Falls über ``SIMLEV_R_SYS_TIME`` (:func:`simlev._r.base.sys_time`).
+    Das Feld ``sys_time`` (feste Uhrzeit für gosolnp) wird seit Etappe 9.6c nicht mehr
+    ausgewertet; nur die ausgesetzten Fälle des Moduls ``rugarch`` haben es.
     """
-    with _fixed_sys_time(case.get("sys_time")):
-        return _run_case(case, check_print, check_output, check_warnings)
-
-
-@contextlib.contextmanager
-def _fixed_sys_time(st):
-    """Setzt ``SIMLEV_R_SYS_TIME`` auf die Uhrzeit ``st`` des Falls und danach zurück."""
-    with _env.fixed_r_sys_time(st):
-        yield
+    return _run_case(case, check_print, check_output, check_warnings)
 
 
 def _run_case(case, check_print, check_output, check_warnings):

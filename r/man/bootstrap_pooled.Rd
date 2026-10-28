@@ -61,10 +61,10 @@ Verschiebung wird ueber die gepoolten Renditen aller Laender bestimmt und
 fuer alle Laender gleich angewendet (wie \code{\link[=series_shift_return]{series_shift_return()}}).
 \code{NULL} (Standard) = historische Renditen.}
 
-\item{seed}{Startwert fuer den Zufallsgenerator; der globale
-Zufallszustand wird danach wiederhergestellt. \code{NULL} (Standard) =
-aktueller Zufallszustand, der dabei normal weiterlaeuft (wiederholte
-Aufrufe liefern verschiedene Pfade).}
+\item{seed}{Startwert der Ziehung (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}), wiederholte
+Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.}
 }
 \value{
 Objekt der Klasse \code{withdrawal_paths} (Liste) mit

@@ -36,9 +36,10 @@ keine Standardfehler und Intervalle).}
 \code{NULL} (Standard) = Politis-White-Schaetzung auf den absoluten
 Abweichungen der Rendite vom Mittel (begrenzt auf 2 bis n / 10).}
 
-\item{seed}{Startwert fuer den Bootstrap. Mit Startwert ist das Ergebnis reproduzierbar und der
-Zufallszustand der Sitzung bleibt unveraendert; mit \code{NULL} wird der
-Zufallsstrom der Sitzung normal weitergezogen.}
+\item{seed}{Startwert fuer den Bootstrap. Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}), wiederholte
+Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.}
 }
 \value{
 Objekt der Klasse \code{SimLevTailRegression} mit

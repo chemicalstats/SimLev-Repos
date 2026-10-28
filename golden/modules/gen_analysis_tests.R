@@ -1,12 +1,11 @@
 # Referenzfälle für r/R/analysis_tests.R (signal_analysis, sharpe_test, overfit_reality_check,
 # sharpe_min_track_record, result_heatmap, .ret_from, .hac_cov) -> python/simlev/analysis_tests.py
 source("golden/modules/ref_tools.R"); ref_init("analysis_tests")
-P <- "from simlev import analysis_tests as AT\nfrom simlev._r import rng as RNG\n"
+P <- "from simlev import analysis_tests as AT\n"
 JH <- "AT = SL.AnalysisTests\n"   # Kopf des Julia-Codes (jl)
-# lm-Objekt auf vergleichbare Teile reduzieren (call/terms/qr/model sind R-intern)
+# 9.6b: fit$model ist kein lm-Objekt mehr, sondern list(coefficients, fitted, degree, basis) (Entwurf C.6 Nr. 7)
 # table2d$n: Klasse table und benannte (leere) dimnames-Namen entfernen (reftree vergleicht dimnames als Liste)
-LM <- "sa$fit$model <- unclass(sa$fit$model)[c('coefficients', 'residuals', 'fitted.values', 'rank', 'df.residual')]
-  if (!is.null(sa$table2d)) { sa$table2d$n <- unclass(sa$table2d$n); dimnames(sa$table2d$n) <- unname(dimnames(sa$table2d$n)) }; sa"
+LM <- "if (!is.null(sa$table2d)) { sa$table2d$n <- unclass(sa$table2d$n); dimnames(sa$table2d$n) <- unname(dimnames(sa$table2d$n)) }; sa"
 
 # ── signal_analysis ─────────────────────────────────────────────────────────
 set.seed(1); n <- 3 * 365
@@ -107,9 +106,9 @@ ref_case("st_vec_hac_day", "sharpe_test(ra[1:300], rb[1:300], frequency = 'day')
 ref_case("st_vec_boot_block", "sharpe_test(ra, rb, method = 'bootstrap', B = 200, block = 5.5, seed = 7, frequency = 'month')",
          paste0(P, "result = AT.sharpe_test(ra, rb, method='bootstrap', B=200, block=5.5, seed=7, frequency='month')"), I,
          jl = paste0(JH, 'result = AT.sharpe_test(ra, rb; method = "bootstrap", B = 200, block = 5.5, seed = 7, frequency = "month")'))
-ref_case("st_vec_boot_noseed", "set.seed(9); x <- sharpe_test(ra[1:200], rb[1:200], method = 'bootstrap', B = 100); c(x, runif(1))",
-         paste0(P, "RNG.set_seed(9); x = AT.sharpe_test(ra[:200], rb[:200], method='bootstrap', B=100); result = np.append(x.to_numpy(), RNG.runif(1))"), I,
-         jl = paste0(JH, 'SL.RRng.set_seed(9); x = AT.sharpe_test(ra[1:200], rb[1:200]; method = "bootstrap", B = 100); result = vcat(x.values, SL.RRng.runif(1))'))
+ref_case("st_vec_boot_noseed", "simlev_seed(9); x <- sharpe_test(ra[1:200], rb[1:200], method = 'bootstrap', B = 100); c(x, SimLev:::.sl_runif(1))",
+         paste0(P, "simlev.simlev_seed(9); x = AT.sharpe_test(ra[:200], rb[:200], method='bootstrap', B=100); result = np.append(x.to_numpy(), simlev._lib.runif(1))"), I,
+         jl = paste0(JH, 'SL.simlev_seed(9); x = AT.sharpe_test(ra[1:200], rb[1:200]; method = "bootstrap", B = 100); result = vcat(x.values, SL.SLib.runif(1))'))
 ref_case("st_vec_na", "x <- ra; x[c(3, 10)] <- NA; y <- rb; y[20] <- Inf; sharpe_test(x, y)",
          paste0(P, "x = ra.copy(); x[[2, 9]] = simlev._r.fmt.NA_REAL; y = rb.copy(); y[19] = np.inf; result = AT.sharpe_test(x, y)"), I,
          jl = paste0(JH, 'x = copy(ra); x[[3, 10]] .= SL.NA; y = copy(rb); y[20] = Inf; result = AT.sharpe_test(x, y)'))
@@ -182,9 +181,9 @@ ref_case("rc_one", "list(overfit_reality_check(r1, B = 199, frequency = 'day', s
          jl = paste0(JH, 'result = Any[AT.overfit_reality_check(r1; B = 199, frequency = "day", seed = 1), AT.overfit_reality_check(hcat(r1, r1); B = 199, frequency = "day", seed = 1)]'))
 ref_case("rc_print_one", "overfit_reality_check(r1, B = 99, frequency = 'day', seed = 1)", paste0(P, "result = AT.overfit_reality_check(r1, B=99, frequency='day', seed=1)"), list(r1 = r1),
          jl = paste0(JH, 'result = AT.overfit_reality_check(r1; B = 99, frequency = "day", seed = 1)'))
-ref_case("rc_noseed", "set.seed(11); x <- overfit_reality_check(R[1:200, 1:3], B = 50, frequency = 'day'); list(x, runif(2))",
-         paste0(P, "RNG.set_seed(11); x = AT.overfit_reality_check(R[:200, :3], B=50, frequency='day'); result = [x, RNG.runif(2)]"), I,
-         jl = paste0(JH, 'SL.RRng.set_seed(11); x = AT.overfit_reality_check(R[1:200, 1:3]; B = 50, frequency = "day"); result = Any[x, SL.RRng.runif(2)]'))
+ref_case("rc_noseed", "simlev_seed(11); x <- overfit_reality_check(R[1:200, 1:3], B = 50, frequency = 'day'); list(x, SimLev:::.sl_runif(2))",
+         paste0(P, "simlev.simlev_seed(11); x = AT.overfit_reality_check(R[:200, :3], B=50, frequency='day'); result = [x, simlev._lib.runif(2)]"), I,
+         jl = paste0(JH, 'SL.simlev_seed(11); x = AT.overfit_reality_check(R[1:200, 1:3]; B = 50, frequency = "day"); result = Any[x, SL.SLib.runif(2)]'))
 ref_case("rc_err_bench", "overfit_reality_check(R, benchmark = 'zz', B = 10, seed = 1)", paste0(P, "result = AT.overfit_reality_check(R, benchmark='zz', B=10, seed=1)"), I,
          jl = paste0(JH, 'result = AT.overfit_reality_check(R; benchmark = "zz", B = 10, seed = 1)'))
 ref_case("rc_err_bench_num", "overfit_reality_check(R, benchmark = 11, B = 10, seed = 1)", paste0(P, "result = AT.overfit_reality_check(R, benchmark=11, B=10, seed=1)"), I,

@@ -21,7 +21,7 @@
 #  regime_subset()         Zeilen eines Regimes fuer Stress-Bootstraps
 #
 #  Alles ohne Zusatzpakete; die univariaten GARCH-Fits der DCC-Stufe nutzen
-#  wie der Bootstrap die aus rugarch uebernommene Fassung (R/vendor_rugarch.R).
+#  wie der Bootstrap die eigene ML-Schaetzung der C-Bibliothek slc (.sl_fit_garch11).
 #  Drittvariablen gehen immer verzoegert ein: Die Rendite der Periode t wird
 #  dem Zustand zugeordnet, der am Ende der Periode t - 1 bekannt war. Fuer
 #  Makrodaten mit Veroeffentlichungsverzug vorher series_align_macro() verwenden.
@@ -127,14 +127,12 @@
   if (rot == "180") { u <- 1 - u; v <- 1 - v } else if (rot == "90") u <- 1 - u else if (rot == "270") v <- 1 - v
   ll <- switch(base,
     gaussian = {
-      r <- par[1]; x <- stats::qnorm(u); y <- stats::qnorm(v)
-      -0.5 * log(1 - r^2) - (r^2 * (x^2 + y^2) - 2 * r * x * y) / (2 * (1 - r^2))
+      r <- par[1]; x <- .sl_qnorm(u); y <- .sl_qnorm(v)
+      .cop_g_ll(r, x, y, x^2, y^2)
     },
-    t = {
-      r <- par[1]; nu <- par[2]; x <- stats::qt(u, nu); y <- stats::qt(v, nu)
-      lgamma((nu + 2) / 2) + lgamma(nu / 2) - 2 * lgamma((nu + 1) / 2) - 0.5 * log(1 - r^2) -
-        (nu + 2) / 2 * log1p((x^2 - 2 * r * x * y + y^2) / (nu * (1 - r^2))) +
-        (nu + 1) / 2 * (log1p(x^2 / nu) + log1p(y^2 / nu))
+    t = {                                                         # N2: Hilfen .cop_t_c0, .cop_t_ll
+      r <- par[1]; nu <- par[2]; x <- .sl_qt(u, nu); y <- .sl_qt(v, nu)
+      .cop_t_ll(r, nu, .cop_t_c0(nu), x, y, x^2, y^2, (nu + 1) / 2 * (log1p(x^2 / nu) + log1p(y^2 / nu)))
     },
     clayton = {
       th <- par[1]
@@ -155,6 +153,65 @@
   if (!is.finite(s)) -1e10 else s
 }
 
+# N2: Teile der Log-Dichten der Gauss- und t-Copula (je Beobachtung), auch für die Profil-Likelihood in
+# .cop_fit_t; x2 = x^2, y2 = y^2, B = (nu + 1)/2 (log1p(x^2/nu) + log1p(y^2/nu)) vorab. Gleiche Rechenfolge wie
+# bisher in .cop_ll.
+#' @keywords internal
+#' @noRd
+.cop_g_ll <- function(r, x, y, x2, y2) -0.5 * log(1 - r^2) - (r^2 * (x2 + y2) - 2 * r * x * y) / (2 * (1 - r^2))
+
+#' @keywords internal
+#' @noRd
+.cop_t_ll <- function(r, nu, c0, x, y, x2, y2, B)
+  c0 - 0.5 * log(1 - r^2) - (nu + 2) / 2 * log1p((x2 - 2 * r * x * y + y2) / (nu * (1 - r^2))) + B
+
+# N2: c0(nu) = lgamma((nu + 2)/2) + lgamma(nu/2) - 2 lgamma((nu + 1)/2) der t-Copula. Für nu > 64 löschen sich die
+# lgamma-Werte aus (bei nu = 1e8 ist die Differenz reines Rundungsrauschen), daher dort die Stirling-Reihe mit
+# Bernoulli-Polynomen (DLMF 5.11.8, h = 0 und 1/2): c0 = -2 sum_{k ungerade} (2^-k - 2) B_{k+1} / (k (k+1) a^k),
+# a = nu/2, also 1/(4a) - 1/(96 a^3) + 1/(320 a^5) - 17/(7168 a^7) + 31/(9216 a^9) (Rest < 1e-16 relativ).
+#' @keywords internal
+#' @noRd
+.cop_t_c0 <- function(nu) {
+  if (nu <= 64) return(.sl_lgamma((nu + 2) / 2) + .sl_lgamma(nu / 2) - 2 * .sl_lgamma((nu + 1) / 2))
+  a <- nu / 2; ia2 <- 1 / (a * a)
+  ((((31 / 9216 * ia2 - 17 / 7168) * ia2 + 1 / 320) * ia2 - 1 / 96) * ia2 + 1 / 4) / a
+}
+
+# N2: t-Copula per Profil-Likelihood in nu (statt Nelder-Mead in beiden Parametern; die Likelihood ist in nu sehr
+# flach). Für festes nu hängt die Log-Likelihood nur über x = qt(u, nu), y = qt(v, nu) von nu ab; das Maximum in
+# rho (Variable atanh rho in [-20, 20], Brent mit tol 1e-10) braucht daher nur eine qt-Auswertung je nu.
+# Raster nu = 2 + 2^k, k = -4 ... 12, und nu = Inf (Grenzfall Gauss-Copula, Dichte .cop_g_ll); um den besten
+# Rasterpunkt Brent in log(nu - 2) zwischen den Nachbarn (unten bis 2^-4 e^-30), am oberen Ende in s = 1/nu auf
+# [0, 1/(2 + 2^11)]. Ergebnis: bester ausgewerteter Punkt c(atanh rho, nu, -loglik).
+#' @keywords internal
+#' @noRd
+.cop_fit_t <- function(u, v) {
+  best <- c(0, Inf, Inf)
+  prof <- function(nu) {
+    if (is.infinite(nu)) {
+      x <- .sl_qnorm(u); y <- .sl_qnorm(v); x2 <- x^2; y2 <- y^2
+      g <- function(th) { s <- sum(.cop_g_ll(tanh(th), x, y, x2, y2)); if (!is.finite(s)) 1e10 else -s }
+    } else {
+      x <- .sl_qt(u, nu); y <- .sl_qt(v, nu); x2 <- x^2; y2 <- y^2
+      B <- (nu + 1) / 2 * (log1p(x2 / nu) + log1p(y2 / nu)); c0 <- .cop_t_c0(nu)
+      g <- function(th) { s <- sum(.cop_t_ll(tanh(th), nu, c0, x, y, x2, y2, B)); if (!is.finite(s)) 1e10 else -s }
+    }
+    o <- stats::optimize(g, c(-20, 20), tol = 1e-10)
+    if (o$objective < best[3]) best <<- c(o$minimum, nu, o$objective)
+    o$objective
+  }
+  nus <- c(2 + 2^(-4:12), Inf); K <- length(nus)
+  f <- vapply(nus, prof, 0)
+  k <- which.min(f)
+  if (k >= K - 1L) {
+    stats::optimize(function(s) prof(if (s == 0) Inf else 1 / s), c(0, 1 / nus[K - 2L]), tol = 1e-9)
+  } else {
+    lo <- if (k == 1L) log(nus[1] - 2) - 30 else log(nus[k - 1L] - 2)
+    stats::optimize(function(t2) prof(2 + exp(t2)), c(lo, log(nus[k + 1L] - 2)), tol = 1e-6)
+  }
+  best
+}
+
 #' Tail-Koeffizienten einer Copula (unten, oben)
 #' @keywords internal
 #' @noRd
@@ -162,7 +219,7 @@
   rot <- sub("^[a-z]+_?", "", family); base <- sub("_.*$", "", family)
   lam <- switch(base,
     gaussian = c(0, 0), frank = c(0, 0),
-    t = rep(2 * stats::pt(-sqrt((par[2] + 1) * (1 - par[1]) / (1 + par[1])), par[2] + 1), 2),
+    t = rep(2 * .sl_pt(-sqrt((par[2] + 1) * (1 - par[1]) / (1 + par[1])), par[2] + 1), 2),
     clayton = c(2^(-1 / par[1]), 0),
     gumbel = c(0, 2 - 2^(1 / par[1])))
   if (rot == "180") lam <- rev(lam)
@@ -183,6 +240,15 @@
 #' (z. B. Aktien und Anleihen in Deflationsphasen) werden die um 90/270 Grad
 #' rotierten Varianten verwendet. Kendalls Tau wird intern in O(n log n)
 #' berechnet (gleiches Ergebnis wie \code{stats::cor(method = "kendall")}).
+#'
+#' Die t-Copula wird ueber die Profil-Likelihood in den Freiheitsgraden
+#' \eqn{\nu} geschaetzt, weil die Likelihood in \eqn{\nu} sehr flach ist:
+#' fuer jedes \eqn{\nu} eines Rasters (\eqn{\nu = 2 + 2^k}, \eqn{k = -4,
+#' \dots, 12}, und \eqn{\nu = \infty}, der Grenzfall Gauss-Copula) das
+#' Maximum in der Korrelation, danach eine eindimensionale Suche um den
+#' besten Rasterpunkt. Liegt das Maximum bei \eqn{\nu > 500} (auch
+#' \eqn{\nu = \infty}), steht in \code{par2} 500; \code{loglik} gilt fuer
+#' das gefundene \eqn{\nu}.
 #'
 #' @param x,y Numerische Vektoren gleicher Laenge (z. B. Renditen; nur die
 #'   Raenge zaehlen). Paare mit nicht endlichen Werten werden entfernt;
@@ -234,18 +300,15 @@ copula_fit <- function(x, y, families = NULL) {
   if (is.null(families)) families <- if (tau >= 0)
     c("gaussian", "t", "clayton", "gumbel", "frank", "clayton_180", "gumbel_180")
     else c("gaussian", "t", "frank", "clayton_90", "clayton_270", "gumbel_90", "gumbel_270")
-  rho0 <- sin(pi * tau / 2); at <- abs(tau)
+  # N2: Startwert rho0 = sin(pi tau / 2) entfällt (t-Copula per Profil-Likelihood, .cop_fit_t)
   fit1 <- function(fam) {
     base <- sub("_.*$", "", fam)
     f <- function(p) -.cop_ll(fam, p, u, v)
     res <- switch(base,
       gaussian = { o <- stats::optimize(function(r) f(r), c(-0.995, 0.995)); list(par = c(o$minimum, NA), nll = o$objective, k = 1) },
-      t = {
-        o <- stats::optim(c(atanh(max(min(rho0, 0.95), -0.95)), log(6)),
-                          function(th) f(c(tanh(th[1]), 2 + exp(th[2]))), method = "Nelder-Mead",
-                          control = list(maxit = 500, reltol = 1e-10))
-        nu <- min(2 + exp(o$par[2]), 500)
-        list(par = c(tanh(o$par[1]), nu), nll = o$value, k = 2)
+      t = {                                                     # N2: Profil-Likelihood in nu
+        o <- .cop_fit_t(u, v)
+        list(par = c(tanh(o[1]), min(o[2], 500)), nll = o[3], k = 2)
       },
       clayton = { o <- stats::optimize(function(lt) f(exp(lt)), c(log(1e-4), log(60))); list(par = c(exp(o$minimum), NA), nll = o$objective, k = 1) },
       gumbel = { o <- stats::optimize(function(lt) f(1 + exp(lt)), c(log(1e-5), log(60))); list(par = c(1 + exp(o$minimum), NA), nll = o$objective, k = 1) },
@@ -319,15 +382,19 @@ tail_dependence <- function(x, y, q = c(0.01, 0.025, 0.05, 0.10, 0.20)) {
 #'
 #' Schaetzt zeitvariable Korrelationen zwischen mehreren Renditereihen.
 #' Zweistufige Schaetzung: univariate GARCH(1,1) mit Konstante je Reihe (wie
-#' im Bootstrap: mit der aus rugarch 1.5-6 uebernommenen Fassung von
-#' \code{ugarchfit}, wenn diese scheitert mit optim, notfalls
-#' Momentschaetzer), danach die Korrelationsdynamik der standardisierten
+#' im Bootstrap: Maximum Likelihood unter Normalverteilung mit der
+#' C-Bibliothek von SimLev, notfalls Momentschaetzer), danach die
+#' Korrelationsdynamik der standardisierten
 #' Residuen \eqn{z_t}
 #' \deqn{Q_t = (1 - a - b)\bar Q + a z_{t-1} z_{t-1}' + b Q_{t-1}}
 #' mit \eqn{Q_1 = \bar Q} (Stichproben-Korrelation der \eqn{z_t}) und
 #' \eqn{a, b > 0}, \eqn{a + b < 0.999}, per Quasi-Maximum-Likelihood
-#' (Nelder-Mead; Filter in C++). Die bedingte Korrelation ist
+#' (Nelder-Mead, ganz in der C-Bibliothek von SimLev). Die bedingte Korrelation ist
 #' \eqn{R_t = \mathrm{diag}(Q_t)^{-1/2} Q_t \mathrm{diag}(Q_t)^{-1/2}}.
+#' Die Schaetzung ist deterministisch: Den frueheren zufaelligen Rueckfall der
+#' GARCH-Stufe (gosolnp mit Startwert aus der Uhrzeit) gibt es nicht mehr; die
+#' GARCH-Stufe meldet \code{method = "ml"} statt \code{"rugarch"}/\code{"optim"}
+#' (Etappe 9.6b).
 #'
 #' @param R Numerische Renditematrix oder data.frame (Zeilen = Zeit, Spalten
 #'   = Reihen; mindestens zwei Spalten und 100 Zeilen, keine fehlenden
@@ -341,7 +408,8 @@ tail_dependence <- function(x, y, q = c(0.01, 0.025, 0.05, 0.10, 0.20)) {
 #'   Zeit x Paare der bedingten Korrelationen \eqn{R_t}; Spaltennamen wie
 #'   \code{pairs}), \code{pairs} (Paarnamen \code{"A ~ B"}), \code{garch}
 #'   (data.frame je Reihe: \code{series}, \code{alpha}, \code{beta},
-#'   \code{method} = Schaetzweg der GARCH-Stufe), \code{z} (Matrix der
+#'   \code{method} = Schaetzweg der GARCH-Stufe: \code{"ml"}, \code{"momente"}
+#'   oder \code{"konstant"}), \code{z} (Matrix der
 #'   standardisierten Residuen) und \code{Qbar}.
 #' @seealso [dependence_analysis()] (ruft \code{dependence_dcc()} fuer alle Anlagen
 #'   auf), [copula_fit()], [tail_dependence()].
@@ -366,22 +434,21 @@ dependence_dcc <- function(R) {
   if (length(flat)) stop(sprintf("dependence_dcc: Reihe %s ist konstant; keine Korrelation sch\u00e4tzbar.", paste0("'", nm[flat], "'", collapse = ", ")))
   Qb <- stats::cor(Z)
   # (nahezu) perfekt korrelierte Reihen: Qbar und damit R_t sind singulaer
-  ev <- eigen(Qb, symmetric = TRUE, only.values = TRUE)$values
+  ev <- .sl_eigen_sym(Qb, only.values = TRUE)$values
   if (min(ev) < 1e-8) {
     C0 <- Qb; diag(C0) <- 0; ij <- which(abs(C0) == max(abs(C0)), arr.ind = TRUE)[1, ]
     stop(sprintf("dependence_dcc: Korrelationsmatrix der standardisierten Residuen ist singul\u00e4r (z. B. '%s' und '%s': Korrelation %.6f); DCC nicht sch\u00e4tzbar. Doppelte bzw. linear abh\u00e4ngige Reihen entfernen.",
                  nm[ij[1]], nm[ij[2]], Qb[ij[1], ij[2]]))
   }
-  par <- function(th) { s <- 0.999 * stats::plogis(th[1]); a <- s * stats::plogis(th[2]); c(a, s - a) }
-  f <- function(th) { p <- par(th); .dcc_filter(Z, p[1], p[2], Qb, FALSE)$nll }
-  st <- c(stats::qlogis(0.98 / 0.999), stats::qlogis(0.03 / 0.98))
-  o <- stats::optim(st, f, method = "Nelder-Mead", control = list(maxit = 2000, reltol = 1e-10))
-  p <- par(o$par)
-  fl <- .dcc_filter(Z, p[1], p[2], Qb, TRUE)
+  # Stufe 2 ganz in C (Entwurf B.11): s = 0.999 plogis(th1), a = s plogis(th2), b = s - a; Start
+  # (qlogis(0.98/0.999), qlogis(0.03/0.98)), Nelder-Mead (maxit 2000, reltol 1e-10); deterministisch
+  o <- .sl_dcc_fit(Z, Qb)
+  p <- c(o$a, o$b)
+  fl <- .sl_dcc_filter(Z, p[1], p[2], Qb, TRUE)
   if (!isTRUE(fl$ok)) stop("dependence_dcc: bedingte Korrelationsmatrix nicht positiv definit; DCC nicht sch\u00e4tzbar.")
   pn <- utils::combn(nm, 2, paste, collapse = " ~ ")
   C <- fl$R; colnames(C) <- pn
-  list(a = p[1], b = p[2], loglik = -o$value, correlation = C, pairs = pn,
+  list(a = p[1], b = p[2], loglik = -o$nll, correlation = C, pairs = pn,
        garch = data.frame(series = nm, alpha = vapply(g, `[[`, 0, "alpha"), beta = vapply(g, `[[`, 0, "beta"),
                           method = vapply(g, `[[`, "", "method")), z = Z, Qbar = Qb)
 }
@@ -492,9 +559,10 @@ dependence_dcc <- function(R) {
 #'   n / 10).
 #' @param tail_q Tail-Wahrscheinlichkeit als Anteil (Standard 0.10) fuer die
 #'   Tail-Kennzahlen je Regime.
-#' @param seed Startwert fuer den Bootstrap. Mit Startwert ist das Ergebnis reproduzierbar und der
-#'   Zufallszustand der Sitzung bleibt unveraendert; mit `NULL` wird der
-#'   Zufallsstrom der Sitzung normal weitergezogen.
+#' @param seed Startwert fuer den Bootstrap. Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+#'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+#'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
+#'   Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
 #' @return Objekt der Klasse \code{SimLevDependence}, eine Liste mit
 #'   \describe{
 #'     \item{returns}{data.frame mit \code{date} (Periodenende), den
@@ -631,12 +699,13 @@ dependence_analysis <- function(data, assets, conditions = NULL, frequency = c("
       ct <- do.call(rbind, rows)
       if (B > 0 && length(lv) >= 2) {
         nk <- nrow(Xk)
-        boot <- .with_rng_restore(seed = seed, {
-          lapply(seq_len(B), function(b) {
-            idx <- .boot_idx_stationary(nk, nk, block)
-            list(p = .dep_reg_cor(Xk[idx, , drop = FALSE], rk[idx], lv, pidx),
-                 s = .dep_reg_cor(Xk[idx, , drop = FALSE], rk[idx], lv, pidx, rank = TRUE))
-          })
+        # Regel 3/4: seed = NULL -> einmal k aus G (beim ersten Bootstrap), dann je Zustand wie seed = k
+        if (is.null(seed)) seed <- .sl_next_seed()
+        S <- .sl_main_stream(seed)
+        boot <- lapply(seq_len(B), function(b) {
+          idx <- .sl_boot_idx_stationary(nk, nk, block, stream = S)
+          list(p = .dep_reg_cor(Xk[idx, , drop = FALSE], rk[idx], lv, pidx),
+               s = .dep_reg_cor(Xk[idx, , drop = FALSE], rk[idx], lv, pidx, rank = TRUE))
         })
         bp <- simplify2array(lapply(boot, `[[`, "p")); bs <- simplify2array(lapply(boot, `[[`, "s"))
         if (length(dim(bp)) == 2) { bp <- array(bp, c(1, dim(bp))); bs <- array(bs, c(1, dim(bs))) }
@@ -874,11 +943,11 @@ quantile_regression <- function(y, X = NULL, tau = 0.5, intercept = TRUE, tol = 
   ok <- is.finite(y) & rowSums(!is.finite(X)) == 0; y <- y[ok]; X <- X[ok, , drop = FALSE]
   if (!ncol(X)) stop("quantile_regression: keine Regressoren (X = NULL und intercept = FALSE).")
   if (length(y) < ncol(X)) stop(sprintf("quantile_regression: %d vollst\u00e4ndige Beobachtungen f\u00fcr %d Koeffizienten.", length(y), ncol(X)))
-  qx <- qr(X)
+  qx <- .sl_lsfit(X, y)                                        # OLS-Start: Householder-QR (Entwurf B.7)
   if (qx$rank < ncol(X))
     stop(sprintf("quantile_regression: Regressoren linear abh\u00e4ngig (%s); doppelte oder konstante Spalten entfernen (die Konstante ist bei intercept = TRUE schon enthalten).",
                  paste0("'", nm[qx$pivot[(qx$rank + 1):ncol(X)]], "'", collapse = ", ")))
-  beta <- qr.coef(qx, y)
+  beta <- qx$coefficients
   sc <- max(stats::sd(y), 1e-12)
   storage.mode(X) <- "double"
   beta <- .quantile_reg_core(y, X, tau, as.numeric(beta), sc, tol, as.integer(maxit))
@@ -916,9 +985,10 @@ quantile_regression <- function(y, X = NULL, tau = 0.5, intercept = TRUE, tol = 
 #' @param block Mittlere Blocklaenge des stationaeren Bootstraps in Perioden.
 #'   \code{NULL} (Standard) = Politis-White-Schaetzung auf den absoluten
 #'   Abweichungen der Rendite vom Mittel (begrenzt auf 2 bis n / 10).
-#' @param seed Startwert fuer den Bootstrap. Mit Startwert ist das Ergebnis reproduzierbar und der
-#'   Zufallszustand der Sitzung bleibt unveraendert; mit `NULL` wird der
-#'   Zufallsstrom der Sitzung normal weitergezogen.
+#' @param seed Startwert fuer den Bootstrap. Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+#'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+#'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
+#'   Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
 #' @return Objekt der Klasse \code{SimLevTailRegression} mit
 #'   \code{coefficients} (data.frame: \code{quantile}, \code{term},
 #'   \code{estimate}, \code{se} (Bootstrap-Standardabweichung),
@@ -960,13 +1030,12 @@ tail_regression <- function(data, asset, drivers, quantiles = c(0.05, 0.25, 0.5,
   n_failed <- 0L
   if (B > 0) {
     block <- block %||% min(max(2, .pw_block(abs(y - mean(y)))[["stationary"]]), n / 10)
-    bs <- .with_rng_restore(seed = seed, {
-      lapply(seq_len(B), function(b) { idx <- .boot_idx_stationary(n, n, block)
-        yb <- y[idx]; Xb <- X1[idx, , drop = FALSE]
-        # z. B. Treiber in der Stichprobe konstant -> singulaer: Wiederholung als NA
-        tryCatch(vapply(seq_along(quantiles), function(k) qfit(yb, Xb, k), numeric(ncol(X) + 1)),
-                 error = function(e) matrix(NA_real_, ncol(X) + 1, length(quantiles))) })
-    })
+    S <- .sl_main_stream(seed)                                  # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+    bs <- lapply(seq_len(B), function(b) { idx <- .sl_boot_idx_stationary(n, n, block, stream = S)
+      yb <- y[idx]; Xb <- X1[idx, , drop = FALSE]
+      # z. B. Treiber in der Stichprobe konstant -> singulaer: Wiederholung als NA
+      tryCatch(vapply(seq_along(quantiles), function(k) qfit(yb, Xb, k), numeric(ncol(X) + 1)),
+               error = function(e) matrix(NA_real_, ncol(X) + 1, length(quantiles))) })
     n_failed <- sum(vapply(bs, anyNA, TRUE))
     if (n_failed == B) warning(sprintf("tail_regression: keine der %d Bootstrap-Stichproben sch\u00e4tzbar (singul\u00e4re Regressoren); keine Standardfehler.", B))
     else if (n_failed > 0) warning(sprintf("tail_regression: %d von %d Bootstrap-Stichproben nicht sch\u00e4tzbar (singul\u00e4re Regressoren, z. B. Treiber in der Stichprobe konstant); Standardfehler und Intervalle aus den \u00fcbrigen %d.",
@@ -978,7 +1047,7 @@ tail_regression <- function(data, asset, drivers, quantiles = c(0.05, 0.25, 0.5,
   coefs <- data.frame(quantile = rep(quantiles, each = length(terms)), term = rep(terms, length(quantiles)),
                       estimate = as.vector(est), se = as.vector(se), lower = as.vector(lo), upper = as.vector(hi),
                       stringsAsFactors = FALSE)
-  ols <- stats::coef(stats::lm(y ~ X)); names(ols) <- terms
+  ols <- .sl_lsfit(X1, y)$coefficients; names(ols) <- terms   # OLS (Entwurf B.7)
   structure(list(coefficients = coefs, ols = ols, asset = asset, drivers = drivers, quantiles = quantiles,
                  n = n, frequency = frequency, B = B, B_failed = n_failed, block = block, data = rd), class = "SimLevTailRegression")
 }
@@ -1079,9 +1148,9 @@ tail_covar <- function(data, system, assets, state = NULL, q = 0.05, frequency =
     xi <- 100 * rd[[a]]
     bq <- quantile_regression(xi, M, q); bm <- quantile_regression(xi, M, 0.5)
     Mi <- if (is.null(M)) matrix(1, length(xi), 1) else cbind(1, M)
-    var_q <- drop(Mi %*% bq); var_m <- drop(Mi %*% bm)
+    var_q <- drop(Mi %m% bq); var_m <- drop(Mi %m% bm)
     bs <- quantile_regression(ys, cbind(xi, M), q)
-    covar <- bs[1] + bs[2] * var_q + (if (!is.null(M)) drop(M %*% bs[-(1:2)]) else 0)
+    covar <- bs[1] + bs[2] * var_q + (if (!is.null(M)) drop(M %m% bs[-(1:2)]) else 0)
     dcv <- bs[2] * (var_q - var_m)
     list(summary = data.frame(asset = a, beta = unname(bs[2]), var = mean(var_q), covar = mean(covar),
                               delta_covar = mean(dcv), delta_covar_min = min(dcv), stringsAsFactors = FALSE),

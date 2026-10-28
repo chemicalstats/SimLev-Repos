@@ -1,5 +1,5 @@
-# Referenzfälle für dependence.R (+ Kerne .dcc_filter, .kendall_tau_core,
-# .quantile_reg_core aus dependence_core.cpp/research_core.cpp).
+# Referenzfälle für dependence.R (+ Kerne .kendall_tau_core, .quantile_reg_core aus
+# research_core.cpp; DCC-Filter seit 9.6c über die C-Bibliothek slc, .sl_dcc_filter).
 source("golden/modules/ref_tools.R"); ref_init("dependence")
 `%||%` <- function(a, b) if (is.null(a)) b else a
 P <- "from simlev import _dependence_core as C\nfrom simlev import dependence as D\n"
@@ -49,17 +49,19 @@ ref_case("kendall_na", "list(SimLev:::.kendall(Mn), SimLev:::.kendall(Mn[, 1], M
          paste0(P, "result = [D._kendall(Mn), D._kendall(Mn.iloc[:, 0], Mn.iloc[:, 1]), D._kendall(np.arange(1, 6), np.ones(5))]"),
          inputs = list(Mn = Mn), jl = paste0(J, "result = [D._kendall(Mn), D._kendall(Mn[:, 1], Mn[:, 2]), D._kendall(1:5, ones(5))]"))
 
-# DCC-Filter
+# DCC-Filter. 9.6c neu gefasst: der frühere Kern .dcc_filter (dependence_core.cpp) und seine Ports
+# (Python _dependence_core, Julia DependenceCore) sind entfallen; dieselben Aufrufe über den
+# slc-Filter (R .sl_dcc_filter, Python simlev._lib.dcc_filter, Julia SLib.dcc_filter).
 set.seed(11); Z <- matrix(rnorm(600), 200); Z[, 2] <- 0.5 * Z[, 1] + Z[, 2]; Z[, 3] <- Z[, 3] - 0.3 * Z[, 1]
 Qb <- cor(Z)
-ref_case("dcc_filter", "list(SimLev:::.dcc_filter(Z, 0.05, 0.9, Qb, TRUE), SimLev:::.dcc_filter(Z, 0.02, 0.95, Qb, FALSE), SimLev:::.dcc_filter(Z[, 1:2], 0.1, 0.8, Qb[1:2, 1:2], TRUE))",
-         paste0(P, "result = [C.dcc_filter(Z, 0.05, 0.9, Qb, True), C.dcc_filter(Z, 0.02, 0.95, Qb, False), C.dcc_filter(Z[:, :2], 0.1, 0.8, Qb[:2, :2], True)]"),
+ref_case("dcc_filter", "list(SimLev:::.sl_dcc_filter(Z, 0.05, 0.9, Qb, TRUE), SimLev:::.sl_dcc_filter(Z, 0.02, 0.95, Qb, FALSE), SimLev:::.sl_dcc_filter(Z[, 1:2], 0.1, 0.8, Qb[1:2, 1:2], TRUE))",
+         paste0(P, "import simlev._lib as L\nresult = [L.dcc_filter(Z, 0.05, 0.9, Qb, True), L.dcc_filter(Z, 0.02, 0.95, Qb, False), L.dcc_filter(Z[:, :2], 0.1, 0.8, Qb[:2, :2], True)]"),
          inputs = list(Z = Z, Qb = Qb),
-         jl = paste0(J, "result = [C.dcc_filter(Z, 0.05, 0.9, Qb, true), C.dcc_filter(Z, 0.02, 0.95, Qb, false), C.dcc_filter(Z[:, 1:2], 0.1, 0.8, Qb[1:2, 1:2], true)]"))
+         jl = paste0(J, "L = SL.SLib\nresult = [L.dcc_filter(Z, 0.05, 0.9, Qb, true), L.dcc_filter(Z, 0.02, 0.95, Qb, false), L.dcc_filter(Z[:, 1:2], 0.1, 0.8, Qb[1:2, 1:2], true)]"))
 Qs <- matrix(c(1, 1, 1, 1), 2)
-ref_case("dcc_filter_bad", "SimLev:::.dcc_filter(Z[, 1:2], 0.05, 0.9, Qs, TRUE)",
-         paste0(P, "result = C.dcc_filter(Z[:, :2], 0.05, 0.9, Qs, True)"), inputs = list(Z = Z, Qs = Qs),
-         jl = paste0(J, "result = C.dcc_filter(Z[:, 1:2], 0.05, 0.9, Qs, true)"))
+ref_case("dcc_filter_bad", "SimLev:::.sl_dcc_filter(Z[, 1:2], 0.05, 0.9, Qs, TRUE)",
+         paste0(P, "import simlev._lib as L\nresult = L.dcc_filter(Z[:, :2], 0.05, 0.9, Qs, True)"), inputs = list(Z = Z, Qs = Qs),
+         jl = paste0(J, "L = SL.SLib\nresult = L.dcc_filter(Z[:, 1:2], 0.05, 0.9, Qs, true)"))
 
 # Quantilsregressions-Kern
 set.seed(5); n <- 300; x <- rnorm(n); y <- 0.4 * x + rt(n, 3); X <- cbind(1, x)
@@ -185,8 +187,9 @@ ref_case("fitcop_fam", "copula_fit(x, y, c('frank', 'gumbel_180', 'clayton_270',
          paste0(P, "result = D.copula_fit(x, y, families=['frank', 'gumbel_180', 'clayton_270', 'gaussian'])"), inputs = CX[c("x", "y")],
          jl = paste0(J, 'result = D.copula_fit(x, y, ["frank", "gumbel_180", "clayton_270", "gaussian"])'))
 set.seed(3); th <- 3; u <- runif(200); t <- runif(200); v <- ((t^(-th / (1 + th)) - 1) * u^(-th) + 1)^(-1 / th)
-ref_case("fitcop_clayton", "copula_fit(qnorm(u), qnorm(v))", paste0(P, "from simlev._r import nmath\nresult = D.copula_fit(nmath.qnorm(u), nmath.qnorm(v))"),
-         inputs = list(u = u, v = v), jl = paste0(J, "result = D.copula_fit(SL.RNmath.qnorm.(u), SL.RNmath.qnorm.(v))"))
+# 9.6b: Normalquantil der C-Bibliothek slc in allen drei Sprachen (statt stats::qnorm und der nmath-Nachbildung)
+ref_case("fitcop_clayton", "copula_fit(SimLev:::.sl_qnorm(u), SimLev:::.sl_qnorm(v))", paste0(P, "from simlev import _lib\nresult = D.copula_fit(_lib.qnorm(u), _lib.qnorm(v))"),
+         inputs = list(u = u, v = v), jl = paste0(J, "result = D.copula_fit(SL.SLib.qnorm(u), SL.SLib.qnorm(v))"))
 xna <- CX$x[1:60]; yna <- CX$y[1:60]; xna[c(3, 9)] <- NA; yna[20] <- Inf
 ref_case("fitcop_na", "copula_fit(xna, round(yna, 1), 'gaussian')", paste0(P, "result = D.copula_fit(xna, simlev._r.fmt.r_round(yna, 1), families='gaussian')"),
          inputs = list(xna = xna, yna = yna), jl = paste0(J, 'result = D.copula_fit(xna, SL.RFmt.r_round.(yna, 1), "gaussian")'))

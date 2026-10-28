@@ -92,8 +92,9 @@
 #'       Stichtage.}
 #'     \item{\code{spread}}{benannter Vektor \code{difference} (Mittel
 #'       oberster minus unterster Bereich, Anteil), \code{t} und \code{p}
-#'       (Welch-t-Test; \code{NA}, wenn einer der beiden Bereiche hoechstens
-#'       2 Werte hat).}
+#'       (Welch-t-Test mit Freiheitsgraden nach Welch-Satterthwaite; \code{NA},
+#'       wenn einer der beiden Bereiche hoechstens 2 Werte hat oder beide konstant
+#'       sind).}
 #'     \item{\code{splits}}{Matrix Bereiche x Zeitabschnitte mit der
 #'       mittleren Vorwaertsrendite (Anteil), Spaltennamen "Jahr-Jahr";
 #'       \code{NULL} bei \code{splits = 1}.}
@@ -101,8 +102,13 @@
 #'       \code{signal} x Bereich \code{signal2}, mittlere Vorwaertsrendite
 #'       als Anteil) und \code{n} (Haeufigkeiten); \code{NULL} ohne
 #'       \code{signal2}.}
-#'     \item{\code{fit}}{Liste mit \code{model} (\code{lm}-Objekt) und
-#'       \code{r_squared} (\eqn{R^2}); \code{NULL} ohne Polynom-Glaettung.}
+#'     \item{\code{fit}}{Liste mit \code{model} und \code{r_squared}
+#'       (\eqn{R^2 = 1 - RSS/TSS}); \code{NULL} ohne Polynom-Glaettung.
+#'       \code{model} ist eine Liste mit \code{coefficients} (Basis 1, z, z^2, ...
+#'       mit z = (signal - Mittel) / Standardabweichung), \code{fitted}
+#'       (angepasste Werte), \code{degree} und \code{basis} (\code{center},
+#'       \code{scale}); bis Etappe 9.6b war es ein \code{lm}-Objekt mit
+#'       orthogonalen Polynomen (angepasste Werte und \eqn{R^2} sind gleich).}
 #'     \item{\code{data}}{data.frame der Stichtage mit \code{date},
 #'       \code{signal}, \code{forward} (Anteil), ggf. \code{signal2},
 #'       \code{bin}, ggf. \code{bin2}.}
@@ -180,13 +186,13 @@ signal_analysis <- function(data, signal, target, horizon = 21L, step = NULL, bi
     check.names = FALSE) else NULL))
   rownames(tab) <- NULL
   lv <- levels(df$bin); lo <- df$forward[df$bin == lv[1]]; hi <- df$forward[df$bin == lv[length(lv)]]
-  wt <- if (length(lo) > 2 && length(hi) > 2) stats::t.test(hi, lo) else NULL
+  wt <- if (length(lo) > 2 && length(hi) > 2) .sl_welch_test(hi, lo) else NULL   # Welch-Test (Entwurf B.16)
   spread <- c(difference = mean(hi) - mean(lo), t = if (!is.null(wt)) unname(wt$statistic) else NA,
               p = if (!is.null(wt)) wt$p.value else NA)
   fit <- NULL
   if (degree > 0 && length(unique(df$signal)) > degree + 1) {
-    m <- stats::lm(forward ~ stats::poly(signal, degree), data = df)
-    fit <- list(model = m, r_squared = summary(m)$r.squared)
+    m <- .sl_poly_fit(df$signal, df$forward, degree)         # kleinste Quadrate (B.7), r^2 aus den Residuen (B.16)
+    fit <- list(model = m[c("coefficients", "fitted", "degree", "basis")], r_squared = m$r_squared)
   }
   spl <- NULL
   if (splits > 1) {
@@ -240,7 +246,7 @@ plot.SimLevSignalAnalysis <- function(x, ...) {
   graphics::abline(h = 100 * x$overall["mean"], lty = 2, col = "#B5562B")
   graphics::plot(x$data$signal, 100 * x$data$forward, pch = 16, cex = 0.4, col = grDevices::adjustcolor("#2C6E9B", 0.4),
                  xlab = x$signal_name, ylab = "Vorw\u00e4rtsrendite (%)", main = "Streudiagramm")
-  if (!is.null(x$fit)) { o <- order(x$data$signal); graphics::lines(x$data$signal[o], 100 * stats::fitted(x$fit$model)[o], col = "#B5562B", lwd = 2) }
+  if (!is.null(x$fit)) { o <- order(x$data$signal); graphics::lines(x$data$signal[o], 100 * x$fit$model$fitted[o], col = "#B5562B", lwd = 2) }
   graphics::abline(h = 0, col = "grey50", lty = 3)
   invisible(x)
 }
@@ -250,8 +256,8 @@ plot.SimLevSignalAnalysis <- function(x, ...) {
 #' @noRd
 .hac_cov <- function(Y, lag = NULL) {
   Tn <- nrow(Y); lag <- lag %||% floor(4 * (Tn / 100)^(2 / 9))
-  Yc <- sweep(Y, 2, colMeans(Y)); S <- crossprod(Yc) / Tn
-  for (l in seq_len(lag)) { G <- crossprod(Yc[(l + 1):Tn, , drop = FALSE], Yc[1:(Tn - l), , drop = FALSE]) / Tn
+  Yc <- sweep(Y, 2, colMeans(Y)); S <- .sl_crossprod(Yc) / Tn
+  for (l in seq_len(lag)) { G <- .sl_crossprod(Yc[(l + 1):Tn, , drop = FALSE], Yc[1:(Tn - l), , drop = FALSE]) / Tn
     S <- S + (1 - l / (lag + 1)) * (G + t(G)) }
   S
 }
@@ -304,10 +310,10 @@ plot.SimLevSignalAnalysis <- function(x, ...) {
 #'   (geometrisch verteilte Blocklaengen, Bloecke laufen zyklisch ueber das
 #'   Ende); \code{NULL} (Standard) = \code{max(2, round(T^(1/3)))} mit
 #'   \eqn{T} = Anzahl Renditepaare. Nur bei \code{method = "bootstrap"}.
-#' @param seed Startwert (ganze Zahl) fuer den Bootstrap; \code{NULL}
-#'   (Standard) = kein fester Startwert. Mit Startwert ist das Ergebnis reproduzierbar und der
-#'   Zufallszustand der Sitzung bleibt unveraendert; mit `NULL` wird der
-#'   Zufallsstrom der Sitzung normal weitergezogen.
+#' @param seed Startwert fuer den Bootstrap (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+#'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+#'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
+#'   Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
 #' @param ppy Perioden je Jahr fuer die Annualisierung. \code{NULL}
 #'   (Standard) = bei Vektoren 252 (\code{"day"}), 52 (\code{"week"}) bzw. 12
 #'   (\code{"month"}); bei Ergebnissen und data.frames aus den gemeinsamen
@@ -370,12 +376,12 @@ sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c(
     grad <- c(g[1] / (g[1] - mu[1]^2)^1.5, -g[2] / (g[2] - mu[2]^2)^1.5,
               -0.5 * mu[1] / (g[1] - mu[1]^2)^1.5, 0.5 * mu[2] / (g[2] - mu[2]^2)^1.5)
     Psi <- .hac_cov(cbind(ra, rb, ra^2, rb^2))
-    se <- sqrt(drop(t(grad) %*% Psi %*% grad) / Tn)
-    z <- d0 / se; p <- 2 * stats::pnorm(-abs(z)); ci <- d0 + c(-1, 1) * stats::qnorm(0.975) * se
+    se <- sqrt(drop(t(grad) %m% Psi %m% grad) / Tn)
+    z <- d0 / se; p <- 2 * .sl_pnorm(-abs(z)); ci <- d0 + c(-1, 1) * .sl_qnorm(0.975) * se
   } else {
     block <- block %||% max(2, round(Tn^(1 / 3)))
-    db <- .with_rng_restore(seed = seed, {
-      vapply(seq_len(B), function(i) { k <- .boot_idx_stationary(Tn, Tn, block); sr(ra[k]) - sr(rb[k]) }, 0) })
+    S <- .sl_main_stream(seed)                                  # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+    db <- vapply(seq_len(B), function(i) { k <- .sl_boot_idx_stationary(Tn, Tn, block, stream = S); sr(ra[k]) - sr(rb[k]) }, 0)
     se <- stats::sd(db); z <- d0 / se; p <- mean(abs(db - d0) >= abs(d0))
     ci <- stats::quantile(db, c(0.025, 0.975), names = FALSE)
   }
@@ -432,10 +438,10 @@ sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c(
 #' @param dates Datum je Zeile von \code{x} (Date oder umwandelbar), nur bei
 #'   Matrix-Eingabe fuer die Aggregation; \code{NULL} (Standard) = keine
 #'   Aggregation. Bei \code{SimLevParamSearch} wird \code{x$dates} verwendet.
-#' @param seed Startwert (ganze Zahl); \code{NULL} (Standard) = kein fester
-#'   Startwert. Mit Startwert ist das Ergebnis reproduzierbar und der
-#'   Zufallszustand der Sitzung bleibt unveraendert; mit `NULL` wird der
-#'   Zufallsstrom der Sitzung normal weitergezogen.
+#' @param seed Startwert (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+#'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+#'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
+#'   Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
 #' @return Objekt der Klasse \code{SimLevRealityCheck}, eine Liste mit
 #'   \code{p_rc} (p-Wert Reality Check), \code{p_spa} (p-Wert SPA,
 #'   konsistente Variante), \code{p_spa_lower}, \code{p_spa_upper} (untere
@@ -481,8 +487,8 @@ overfit_reality_check <- function(x, benchmark = NULL, B = 999L, block = NULL, f
   D <- R - b; Tn <- nrow(D); K <- ncol(D)
   fbar <- colMeans(D)
   block <- block %||% max(2, round(Tn^(1 / 3)))
-  Fb <- .with_rng_restore(seed = seed, {
-    vapply(seq_len(B), function(i) colMeans(D[.boot_idx_stationary(Tn, Tn, block), , drop = FALSE]), numeric(K)) })
+  S <- .sl_main_stream(seed)                                    # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+  Fb <- vapply(seq_len(B), function(i) colMeans(D[.sl_boot_idx_stationary(Tn, Tn, block, stream = S), , drop = FALSE]), numeric(K))
   Fb <- matrix(Fb, nrow = B, ncol = K, byrow = TRUE)          # B x K, auch bei einem Kandidaten (vapply liefert dann einen Vektor)
   om <- pmax(apply(Fb, 2, stats::sd), 1e-12) * sqrt(Tn)
   V <- max(sqrt(Tn) * fbar)
@@ -562,7 +568,7 @@ sharpe_min_track_record <- function(x, target = 0, prob = 0.95, frequency = c("w
   ppy <- ppy %||% (if (!is.null(a$date)) (length(r) - 1) / (as.numeric(diff(range(a$date))) / 365.25) else switch(frequency, day = 252, week = 52, month = 12))
   sr <- mean(r) / stats::sd(r); sr0 <- target / sqrt(ppy)
   z <- (r - mean(r)) / stats::sd(r); g3 <- mean(z^3); g4 <- mean(z^4)
-  need <- if (sr <= sr0) Inf else 1 + (1 - g3 * sr + (g4 - 1) / 4 * sr^2) * (stats::qnorm(prob) / (sr - sr0))^2
+  need <- if (sr <= sr0) Inf else 1 + (1 - g3 * sr + (g4 - 1) / 4 * sr^2) * (.sl_qnorm(prob) / (sr - sr0))^2
   c(sharpe = sr * sqrt(ppy), periods = length(r), needed_periods = need, needed_years = need / ppy,
     available_years = length(r) / ppy, sufficient = as.numeric(length(r) >= need))
 }

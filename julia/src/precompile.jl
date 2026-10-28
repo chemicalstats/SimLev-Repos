@@ -1,7 +1,7 @@
 # Kleine Arbeitslast beim Vorkompilieren: Maschinencode für die Engine und die
 # häufigen Wege der Erweiterungen – für die hier benutzten Argumenttypen –
 # landet im Paket-Cache. Das verkürzt den ersten Aufruf von simulation(),
-# bootstrap() (stationär, GARCH über den rugarch-Weg), bootstrap_study(),
+# bootstrap() (stationär, GARCH über die ML-Schätzung der C-Bibliothek slc), bootstrap_study(),
 # der MS-GARCH-Schätzung, withdrawal_simulation(), portfolio_optimize(),
 # result_analysis() und des Fonds-Wrappers (wrapper_nav(), Wrapper-Asset) deutlich, macht ihn aber nicht so schnell wie spätere
 # Aufrufe: Laden des Caches, Laufzeit-Dispatch und Methoden für andere
@@ -11,16 +11,16 @@
 # Auswahl (Etappe 4.8): Jeder Baustein kostet bei jeder Änderung am Paket
 # Vorkompilierzeit. Seltene Wege (param_search/Überanpassung,
 # dependence_analysis, Szenarien, Sensitivitäten, Taktik, Planung,
-# series_align) übersetzt erst ihr erster Aufruf; dafür sind rugarch
-# (bootstrap "garch") und MS-GARCH (_ms_garch_fit) aufgenommen, deren erster
-# Lauf sonst 10 bzw. 6 s dauerte.
+# series_align) übersetzt erst ihr erster Aufruf; dafür sind GARCH (bootstrap
+# "garch", bis 9.6b über die rugarch-Nachbildung) und MS-GARCH (_ms_garch_fit)
+# aufgenommen, deren erster Lauf sonst 10 bzw. 6 s dauerte.
 #
-# Die Arbeitslast verändert den Laufzeitzustand nicht: Der Zufallszustand
-# (`RRng`) wird am Ende auf den Ausgangszustand zurückgesetzt (wie in
-# `RRng.__init__`), Zwischenspeicher und Bibliotheks-Handles (LAPACK, ICU)
-# werden geleert, damit keine Zeiger aus der Vorkompilierung in den Cache
-# geraten. Jeder Baustein läuft in `try`; die gesamte Arbeitslast steht
-# zusätzlich in `try … catch`: Ein Fehler (z. B. fehlende System-LAPACK/ICU,
+# Die Arbeitslast verändert den Laufzeitzustand nicht: Die Daten kommen aus
+# einem eigenen SimLev-Strom (`SLib.main_stream(1)`, der globale Zustand bleibt
+# unberührt; seit Etappe 9.6b statt der R-Nachbildung `RRng`, die mit 9.6c entfallen ist), Zwischenspeicher
+# und Bibliotheks-Handles (ICU) werden geleert, damit keine Zeiger aus der
+# Vorkompilierung in den Cache geraten. Jeder Baustein läuft in `try`; die gesamte Arbeitslast steht
+# zusätzlich in `try … catch`: Ein Fehler (z. B. fehlende ICU,
 # andere libm) darf das Laden des Pakets nie verhindern.
 # `_precompile_ext(; strict = true)` meldet Fehler (für Tests). Abschalten:
 # SIMLEV_SKIP_PRECOMPILE=1 (alles), SIMLEV_SKIP_PRECOMPILE_EXT=1 (Erweiterungen).
@@ -36,12 +36,12 @@ function _precompile_ext(; strict::Bool = false)
     end
     io = IOBuffer()
     sh(x) = (show(io, MIME"text/plain"(), x); x)
-    seed_old = RRng.has_random_seed() ? RRng.get_random_seed() : nothing
     try
         n = 900
         dates = collect(Date(2015, 1, 1):Day(1):Date(2015, 1, 1) + Day(n - 1))
-        RRng.set_seed(1)
-        ra = RRng.rnorm(n, 3e-4, 0.01); rb = RRng.rnorm(n, 1e-4, 0.004); rc = RRng.rnorm(n, 2e-4, 0.007)
+        rs = SLib.main_stream(1)
+        ra = SLib.rnorm(n, 3e-4, 0.01; stream = rs); rb = SLib.rnorm(n, 1e-4, 0.004; stream = rs)
+        rc = SLib.rnorm(n, 2e-4, 0.007; stream = rs)
         A = 100 .* r_cumprod(1 .+ ra); B = 100 .* r_cumprod(1 .+ rb); C = 100 .* r_cumprod(1 .+ rc)
         d = RFrame("date" => dates, "A" => A, "B" => B, "C" => C, "infl" => [2.0 + sin(i / 90) for i in 1:n],
                    "zins" => [1.0 + (i > 400) for i in 1:n])
@@ -60,7 +60,7 @@ function _precompile_ext(; strict::Bool = false)
             sh(stv); sh(r_summary(stv))
             sh(Bootstrap.bootstrap_probability(stv, "cagr > 0 & max_drawdown < 0.5"))
         end
-        # GARCH über den rugarch-Weg (bootstrap "garch") und MS-GARCH-Schätzung
+        # GARCH (ML-Schätzung in slc, bootstrap "garch") und MS-GARCH-Schätzung
         step("garch") do
             cfg = Bootstrap.bootstrap_config((akt = "A",); input = "prices")
             sh(Bootstrap.bootstrap(d, cfg, "garch"; n = 2, path_length = 200, seed = 1, progress = false))
@@ -90,12 +90,7 @@ function _precompile_ext(; strict::Bool = false)
                                           benchmark = "X", rolling_years = 1))
         end
     finally
-        # Zufallszustand und Zwischenspeicher wie vorher
-        if seed_old === nothing
-            RRng.__init__()
-        else
-            RRng.set_random_seed(seed_old)
-        end
+        # Zwischenspeicher wie vorher (der globale Zufallszustand bleibt unberührt)
         empty!(RExpr._CACHE)
     end
     return errs
@@ -151,7 +146,6 @@ end
 "Zustand nach der Arbeitslast zurücksetzen (Zufall, Zwischenspeicher, Bibliotheks-Handles)."
 function _precompile_reset()
     for f in (() -> empty!(RExpr._CACHE),
-              () -> (RLinalg._SYSLAPACK[] = false; RLinalg._LAPACK_WARNED[] = false),
               () -> RStats.collate_reset())
         try
             f()

@@ -156,10 +156,10 @@ series_shift_return <- function(data, columns, target, type = c("returns", "pric
 #'   Verschiebung wird ueber die gepoolten Renditen aller Laender bestimmt und
 #'   fuer alle Laender gleich angewendet (wie [series_shift_return()]).
 #'   \code{NULL} (Standard) = historische Renditen.
-#' @param seed Startwert fuer den Zufallsgenerator; der globale
-#'   Zufallszustand wird danach wiederhergestellt. \code{NULL} (Standard) =
-#'   aktueller Zufallszustand, der dabei normal weiterlaeuft (wiederholte
-#'   Aufrufe liefern verschiedene Pfade).
+#' @param seed Startwert der Ziehung (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+#'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+#'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
+#'   Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
 #' @return Objekt der Klasse \code{withdrawal_paths} (Liste) mit
 #'   \code{returns} (Matrix Perioden x Pfade der Brutto-Portfoliorenditen),
 #'   \code{inflation} (Matrix gleicher Form, Brutto-Inflation je Periode;
@@ -220,18 +220,17 @@ bootstrap_pooled <- function(datasets, columns, weights = NULL, inflation = NULL
   L <- L %||% (10 * ppy)
   nper <- as.integer(years * ppy); nc <- length(G)
   cw <- country_weights %||% rep(1 / nc, nc); cw <- cw / sum(cw)
-  draw <- .with_rng_restore(seed = seed, {
-    lapply(seq_len(n), function(i) {
-      ctry <- integer(nper); row <- integer(nper); t <- 1L
-      while (t <= nper) {
-        cidx <- sample.int(nc, 1L, prob = cw); len <- 1L + stats::rgeom(1L, 1 / L)
-        nr <- nrow(G[[cidx]]); st <- sample.int(nr, 1L)
-        idx <- ((st - 1L + seq_len(len) - 1L) %% nr) + 1L
-        take <- seq_len(min(len, nper - t + 1L))
-        ctry[t - 1L + take] <- cidx; row[t - 1L + take] <- idx[take]; t <- t + length(take)
-      }
-      list(c = ctry, r = row)
-    })
+  S <- .sl_main_stream(seed)                                    # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+  draw <- lapply(seq_len(n), function(i) {
+    ctry <- integer(nper); row <- integer(nper); t <- 1L
+    while (t <= nper) {
+      cidx <- .sl_sample(nc, 1L, prob = cw, stream = S); len <- 1L + .sl_rgeom(1L, 1 / L, stream = S)
+      nr <- nrow(G[[cidx]]); st <- .sl_sample(nr, 1L, stream = S)
+      idx <- ((st - 1L + seq_len(len) - 1L) %% nr) + 1L
+      take <- seq_len(min(len, nper - t + 1L))
+      ctry[t - 1L + take] <- cidx; row[t - 1L + take] <- idx[take]; t <- t + length(take)
+    }
+    list(c = ctry, r = row)
   })
   Gall <- do.call(rbind, lapply(G, function(g) as.matrix(g[, cols, drop = FALSE])))   # alle Laender untereinander
   off <- c(0L, cumsum(vapply(G, nrow, 0L)))[seq_len(nc)]
@@ -284,7 +283,7 @@ portfolio_returns <- function(data, candidates, frequency = c("year", "quarter",
   frequency <- match.arg(frequency)
   a <- unique(unlist(lapply(candidates, names)))
   G <- .period_gross(data, a, frequency)
-  M <- vapply(candidates, function(w) drop(G[, names(w), drop = FALSE] %*% (w / sum(w))), numeric(nrow(G)))
+  M <- vapply(candidates, function(w) drop(G[, names(w), drop = FALSE] %m% (w / sum(w))), numeric(nrow(G)))
   if (!is.matrix(M)) M <- matrix(M, ncol = length(candidates))
   colnames(M) <- names(candidates) %||% paste0("P", seq_along(candidates))
   M
@@ -351,10 +350,10 @@ portfolio_returns <- function(data, candidates, frequency = c("year", "quarter",
 #'   genauer, aber langsamer.
 #' @param n_sim Anzahl Pfade der Vorwaertssimulation der optimalen Politik
 #'   (Standard 5000).
-#' @param seed Startwert fuer die Vorwaertssimulation; der globale
-#'   Zufallszustand wird danach wiederhergestellt. \code{NULL} (Standard) =
-#'   aktueller Zufallszustand, der dabei normal weiterlaeuft (wiederholte
-#'   Aufrufe simulieren andere Pfade).
+#' @param seed Startwert fuer die Vorwaertssimulation (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+#'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+#'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
+#'   Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
 #' @return Objekt der Klasse \code{SimLevGoalPlan} (Liste):
 #'   \describe{
 #'     \item{\code{probability}}{Zielwahrscheinlichkeit der gefundenen
@@ -430,8 +429,8 @@ planning_goal <- function(returns, start_value, goal, horizon, contributions = 0
   interp <- function(Vn, W) {
     out <- numeric(length(W)); out[W >= wmax] <- 1 * (wmax >= goal); out[W <= 0] <- 0
     mid <- W > 0 & W < wmax
-    z <- stats::qnorm(pmin(1 - 1e-12, pmax(1e-12, Vn)))
-    out[mid] <- ifelse(W[mid] < wmin, if (goal > 0) 0 else Vn[1], stats::pnorm(stats::approx(log(grid), z, log(W[mid]), rule = 2)$y))
+    z <- .sl_qnorm(pmin(1 - 1e-12, pmax(1e-12, Vn)))
+    out[mid] <- ifelse(W[mid] < wmin, if (goal > 0) 0 else Vn[1], .sl_pnorm(stats::approx(log(grid), z, log(W[mid]), rule = 2)$y))
     out
   }
   expect <- function(Vn, base, k, last) {                 # E[V(base * R_k)] je Rasterpunkt
@@ -458,17 +457,18 @@ planning_goal <- function(returns, start_value, goal, horizon, contributions = 0
     Vt[[t]] <- V
   }
   p_dp <- interp(V, start_value)
-  sim <- .with_rng_restore(seed = seed, {
+  sim <- {
+    st <- .sl_main_stream(seed)                                 # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
     W <- rep(start_value, n_sim); choice <- matrix(NA_integer_, horizon, n_sim); ruined <- rep(FALSE, n_sim)
     for (t in seq_len(horizon)) {
       base <- W + cf[t]; alive <- base > 0 & !ruined; ruined <- ruined | !alive
       g <- pmax(1L, pmin(ng, findInterval(log(pmax(W, wmin)), log(grid))))   # Politik je Vermoegen vor der Zahlung
       k <- pol[t, g]; choice[t, ] <- k
-      draw <- sample.int(S, n_sim, replace = TRUE)
+      draw <- .sl_sample(S, n_sim, replace = TRUE, stream = st)
       W <- ifelse(alive, base * R[cbind(draw, k)], 0)
     }
     list(terminal = W, choice = choice, success = !ruined & W >= goal)
-  })
+  }
   # Kontrolle gegen die Vorwaertssimulation: weicht der DP-Wert deutlich ab, gilt der simulierte
   # gemeldet wird die erreichte Erfolgsquote der Politik (unverzerrt, im Mittel <= Optimum), nicht der
   # nach oben verzerrte DP-Wert; grosse Abweichung = Raster zu grob

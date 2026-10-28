@@ -1,5 +1,16 @@
 # SimLev.jl (Julia) – Änderungen je Version
 
+## SimLev.jl 1.0.0
+
+Major-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Rechenkern: eigene C-Bibliothek für alle drei Sprachen (Julia per ccall): Zufallsgenerator, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR-, GPD-, DCC- und MS-GARCH-Schätzung, Stineman-Interpolation, Glättungsspline, Kerndichte; geschrieben nach Fachliteratur.
+- Unabhängigkeit: kein Code aus evd, imputeTS, stinepack, rugarch, Rsolnp, truncnorm oder numDeriv mehr; die Pakete stehen nur noch im Literaturverzeichnis.
+- Zufall: eigener Generator mit simlev_seed() und seed-Argument; set.seed steuert SimLev nicht mehr; Ergebnisse unabhängig von cores und in R, Python und Julia gleich. Zufallsergebnisse ändern sich gegenüber 0.10.0.
+- Schätzer: GJR-GARCH mit gamma < 0 unter alpha + gamma >= 0 und Stationarität (im Vergleich mit rugarch 51 von 51 Fällen gleichwertig oder besser); MS-GARCH mit analytischem Gradienten; t-Copula über ein Profil in nu mit Gauss-Grenzfall; qnorm mit eigenen Startnäherungen, rnorm und rgamma schneller als in R.
+- Geändert: GARCH-Label "ml", dependence_dcc deterministisch; set_seed und rng_kind in Python und Julia entfallen; C-Bibliothek in Python und Julia Pflicht.
+- Doku: Literaturabschnitt mit 112 geprüften Quellen, COPYRIGHTS und NEWS neu; Schnittstelle neu eingefroren.
+
 ## SimLev.jl 0.10.0
 
 Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -70,6 +81,73 @@ zusammengefasst. Die Begründungen der fachlichen Änderungen stehen in
 [`r/NEWS.md`](../r/NEWS.md), Abschnitt „SimLev 0.5.0“. Das Paket braucht
 weiterhin nur die Standardbibliothek (`Dates`, `Printf`, `Logging`;
 `LinearAlgebra` nur als Ersatzweg für Eigenvektoren).
+
+### Etappe 9 – SimLev eigenständig
+
+Entscheidung des Nutzers vom 27.10.2026: SimLev nutzt keine Funktionen aus
+fremden Paketen mehr. Zufall und Numerik rechnet wie in R und Python die
+eigene C-Bibliothek (Quellen in `core/` des Repositorys, Kopien in
+`deps/core/`, gebaut von `deps/build.jl`, Hüllen `SimLev.SLib` per
+`ccall`). Die vollständige Liste, was ersetzt wurde, die Laufzeiten und die
+Begründungen stehen in [`r/NEWS.md`](../r/NEWS.md) (Abschnitt „Etappe 9“);
+die Ergebnisse sind bitgleich zu R. Die Quellen der Verfahren stehen im
+Abschnitt [Literatur](../README.md#literatur) der Haupt-README, die
+bleibenden Nachbildungen von R-Grundfunktionen in
+[`COPYRIGHTS.md`](COPYRIGHTS.md).
+
+**Was ersetzt wurde:** die Module `RRng`, `RNmath`, `RPort`, `REvd`,
+`RRugarch`, `RSolnp`, `RTruncnorm`, `RStinepack` und `RImputeTS` samt
+`src/r/{_toms708, _cmath, _blas, _lapack, _linpack, _lbfgsb, _sbart,
+_fft}.jl`, die Teile von `RLinalg` und `RStats` für `optim`, `lm`, `glm`,
+`t.test`, `smooth.spline`, `density` und die lineare Algebra, `BootstrapCore`
+und der Port des DCC-Filters. Die eigenen Ports der Engine-, FIFO-, Steuer-,
+Research-, Entnahme- und Abhängigkeitskerne bleiben.
+
+**Was sich für Nutzer ändert, mit Umstellungshinweisen** (Einzelheiten wie
+in R):
+
+- **Installation:** `Pkg.add`/`Pkg.build` braucht einen C-Compiler (`cc`,
+  `gcc` oder `clang`, sonst `ENV["SIMLEV_CC"]`); ohne die gebaute Bibliothek
+  bricht `using SimLev` mit einem Hinweis auf `Pkg.build("SimLev")` ab. Das
+  Paket braucht kein `LinearAlgebra` und keine System-LAPACK mehr.
+- **Zufall und `seed`:** Die Exporte `set_seed` und `rng_kind` entfallen.
+  Den Zustand setzt `simlev_seed(k)` (prozessweit mit Sperre); zufällige
+  Funktionen nehmen weiter `seed`. Mit `seed = nothing` zieht ein Aufruf
+  genau einmal einen Startwert aus dem Zustand von SimLev. Ergebnisse hängen
+  weder von `cores` noch von `julia -t` ab. Zufällige Ergebnisse ändern sich
+  gegenüber früher (anderer Generator, gleiche Verteilung). Umstellung:
+  `set_seed(1); bootstrap(…)` wird zu `bootstrap(…; seed = 1)` oder
+  `simlev_seed(1); bootstrap(…)`.
+- **GARCH-Label `"ml"`** statt `"rugarch"`/`"optim"`, **`dependence_dcc()`
+  deterministisch**, **GJR mit γ ≥ 0**, eigener **Spline** und eigene
+  **Kerndichte**, strengere **Fehler bei Randfällen** (NA/NaN/Inf in der
+  rechten Seite eines Gleichungssystems, nicht endliche Werte bei Stineman;
+  0×0-Matrix ergibt ein leeres Ergebnis), **Welch-Test mit NA** bei
+  konstanten Bereichen in `signal_analysis()`, **Schranken bei BFGS und
+  Nelder-Mead** in der internen Hülle `SLib.optim` ein Fehler, häufiger die
+  **Warnung zur IGARCH-Nähe**: wie in [`r/NEWS.md`](../r/NEWS.md).
+- **Schalter entfallen:** `SIMLEV_LAPACK` und `SIMLEV_R_SYS_TIME`; neu
+  `SIMLEV_CC` (Compiler für `Pkg.build`).
+- **Laufzeit** (`tools/bench`, Median, ein Kern, vor und nach dem Einbau der
+  eigenen Kerne): GARCH-Bootstrap (T2) 0,163 → 0,021 s, `dependence_analysis`
+  mit DCC (T5) 0,076 → 0,031 s, `simulation` 30 Jahre (S30) 0,023 → 0,019 s,
+  MS-GARCH-Schätzung (T8) 0,265 → 1,325 s (zwölf statt zwei Starts im
+  gemeinsamen C-Kern); die übrigen Aufgaben etwa gleich. Tabelle in
+  [`r/NEWS.md`](../r/NEWS.md).
+
+**Tests:** Die frühere Suite ist bis zum Neuaufbau ausgesetzt
+(`SIMLEV_LEGACY_TESTS=1` lädt sie); `Pkg.test()` führt den Testsatz
+„Etappe 9“ aus. Maßgeblich ist die Gleichlaufprüfung
+`tools/gleichlauf/run.sh` (27.10.2026: 4.260/4.260 Modul- und 1.182/1.182
+Engine-Fälle bitgleich zu R).
+
+### Eigene numerische Kerne (Etappe 9.6b)
+
+- **C-Bibliothek statt `RNmath`, `RLinalg`, `RStats` (optim, lm, glm, smooth.spline, density, t.test), `RRugarch`, `REvd` und `RImputeTS`:** Verteilungen, lineare Algebra und Matrixprodukt, kleinste Quadrate und Logit-IRLS, Welch-Test, Kerndichte, Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, Stineman und Glättungsspline laufen wie in R per `ccall` in der C-Bibliothek (`SimLev.SLib`); die Arbeitslast der Vorkompilierung zieht ihre Daten aus einem SimLev-Strom statt aus `RRng`. Die Nachbildungen werden nicht mehr aufgerufen und entfallen in 9.6c. Geänderte Ergebnisse und Labels (GARCH `"ml"`, DCC deterministisch, Spline, Kerndichte, `signal_analysis()["fit"]["model"]`) wie in [`r/NEWS.md`](../r/NEWS.md); bitgleich zu R.
+
+### Eigener Zufall (Etappe 9.6a)
+
+- **Zufall der C-Bibliothek statt `RRng`:** Alle zufälligen Funktionen ziehen wie in R aus dem Zufallszustand von SimLev (neu `simlev_seed()`, prozessweit mit Sperre); `seed = nothing` zieht genau einmal einen Startwert daraus, `set_seed()` wirkt auf SimLev nicht mehr; die Bootstrap-Kerne laufen per `ccall` in der C-Bibliothek. Ergebnisse bitgleich zu R und unabhängig von `cores` und `julia -t`; Einzelheiten in [`r/NEWS.md`](../r/NEWS.md).
 
 ### Ports in NaN-Randfällen (Etappe 8.0)
 

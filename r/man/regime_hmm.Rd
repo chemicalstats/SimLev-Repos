@@ -48,10 +48,11 @@ zaehlt das Ergebnis mit der hoechsten Log-Likelihood.}
 Log-Likelihood um weniger als \code{tol * (1 + |logL|)} aendert
 (Standard 1e-7).}
 
-\item{seed}{Startwert (ganze Zahl, Standard 1) fuer die zufaelligen
-Startwerte. Mit Startwert ist das Ergebnis reproduzierbar und der
-Zufallszustand der Sitzung bleibt unveraendert; mit \code{NULL} wird der
-Zufallsstrom der Sitzung normal weitergezogen.}
+\item{seed}{Startwert (Standard 1) fuer die zufaelligen Startzuordnungen (nur bei
+\code{n_start > 1}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}), wiederholte
+Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.}
 
 \item{x}{Objekt der Klasse \code{SimLevHMM}.}
 

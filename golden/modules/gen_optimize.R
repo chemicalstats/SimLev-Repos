@@ -4,7 +4,7 @@
 #   LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> Rscript golden/modules/gen_optimize.R
 source("golden/modules/ref_tools.R"); ref_init("optimize")
 
-P <- "from simlev import optimize as O\nfrom simlev import _optimize_core as C\nfrom simlev._r import rng as RNG\n"
+P <- "from simlev import optimize as O\nfrom simlev import _optimize_core as C\n"
 J <- "O = SL.Optimize; C = SL.OptimizeCore\n"   # Kopf des Julia-Codes (jl)
 cs <- function(id, r, py, inputs = I, jl = NULL, ...) {
   used <- names(inputs)[vapply(names(inputs), function(k) grepl(sprintf("(^|[^A-Za-z0-9_.])%s([^A-Za-z0-9_.]|$)", k), r), TRUE)]
@@ -189,12 +189,12 @@ cs("po_resample", "portfolio_optimize(R, resample = 6, seed = 1)", "result = O.p
 cs("po_resample_ms", "portfolio_optimize(R4, method = 'max_sharpe', resample = 3, block = 5, seed = 7)",
    "result = O.portfolio_optimize(R4, method='max_sharpe', resample=3, block=5, seed=7)",
    jl = 'result = O.portfolio_optimize(R4; method = "max_sharpe", resample = 3, block = 5, seed = 7)')
-cs("po_resample_null", "set.seed(3); x <- portfolio_optimize(R, method = 'risk_parity', resample = 4); list(x, runif(2))",
-   "RNG.set_seed(3); x = O.portfolio_optimize(R, method='risk_parity', resample=4); result = [x, RNG.runif(2)]",
-   jl = 'SL.RRng.set_seed(3); x = O.portfolio_optimize(R; method = "risk_parity", resample = 4); result = [x, SL.RRng.runif(2)]')
-cs("po_resample_restore", "set.seed(4); x <- portfolio_optimize(R, method = 'hrp', resample = 3, seed = 9); list(x$weights, x$resampled, runif(2))",
-   "RNG.set_seed(4); x = O.portfolio_optimize(R, method='hrp', resample=3, seed=9); result = [x.weights, x.resampled, RNG.runif(2)]",
-   jl = 'SL.RRng.set_seed(4); x = O.portfolio_optimize(R; method = "hrp", resample = 3, seed = 9); result = [x["weights"], x["resampled"], SL.RRng.runif(2)]')
+cs("po_resample_null", "simlev_seed(3); x <- portfolio_optimize(R, method = 'risk_parity', resample = 4); list(x, SimLev:::.sl_runif(2))",
+   "simlev.simlev_seed(3); x = O.portfolio_optimize(R, method='risk_parity', resample=4); result = [x, simlev._lib.runif(2)]",
+   jl = 'SL.simlev_seed(3); x = O.portfolio_optimize(R; method = "risk_parity", resample = 4); result = [x, SL.SLib.runif(2)]')
+cs("po_resample_restore", "simlev_seed(4); x <- portfolio_optimize(R, method = 'hrp', resample = 3, seed = 9); list(x$weights, x$resampled, SimLev:::.sl_runif(2))",
+   "simlev.simlev_seed(4); x = O.portfolio_optimize(R, method='hrp', resample=3, seed=9); result = [x.weights, x.resampled, simlev._lib.runif(2)]",
+   jl = 'SL.simlev_seed(4); x = O.portfolio_optimize(R; method = "hrp", resample = 3, seed = 9); result = [x["weights"], x["resampled"], SL.SLib.runif(2)]')
 cs("po_resample_n1", "portfolio_optimize(R1, resample = 5, seed = 1)", "result = O.portfolio_optimize(R1, resample=5, seed=1)",
    jl = 'result = O.portfolio_optimize(R1; resample = 5, seed = 1)')
 cs("po_n1", "portfolio_optimize(R1, method = 'hrp')", "result = O.portfolio_optimize(R1, method='hrp')",

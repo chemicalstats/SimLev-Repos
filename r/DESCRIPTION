@@ -1,7 +1,7 @@
 Package: SimLev
 Type: Package
 Title: Simulation and Backtesting with German Investment Taxation
-Version: 0.10.0
+Version: 1.0.0
 Authors@R: person("ChemicalStats", "von der Mauerstrasse",
                   role = c("aut", "cre", "cph"),
                   email = "chemicalstatsy@protonmail.com")
@@ -30,14 +30,12 @@ Description: A fast/slow-path backtesting engine for leveraged and unleveraged E
     multiple-testing haircuts, Sharpe ratio and reality-check tests, signal
     analysis, hidden Markov regimes, multi-country bootstraps, user-defined
     retirement horizons and goal-based dynamic programming. Performance-critical
-    parts are implemented in C++ and C.
+    parts are implemented in C++ and C. Random numbers, distributions, linear
+    algebra, optimisers, the GARCH, GPD, DCC and Markov-switching GARCH
+    estimation, the bootstrap kernels, the smoothing spline and the kernel
+    density come from SimLev's own C library, which the Python and Julia
+    versions share; the package contains no code from other packages.
 License: GPL-3
-Copyright: Teile übernommen aus evd (Alec Stephenson), imputeTS (Steffen
-    Moritz, Sebastian Gatscha, Earo Wang, Ron Hause), stinepack (Tomas
-    Johannesson, Halldor Bjornsson, Gabor Grothendieck), rugarch (Alexios
-    Galanos, Tobias Kley), Rsolnp (Alexios Ghalanos, Stefan Theussl) und
-    truncnorm (Olaf Mersmann, Heike Trautmann, Detlef Steuer, Björn
-    Bornkamp), siehe inst/COPYRIGHTS.
 Encoding: UTF-8
 Depends: R (>= 4.0)
 Imports: stats, graphics, grDevices, utils, parallel, methods

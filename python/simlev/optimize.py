@@ -28,7 +28,8 @@ import pandas as pd
 from . import _optimize_core as _core
 from ._r import fmt as _fmt
 from ._r import libm as _libm
-from ._r import linalg as _la
+from . import _lib
+from ._r import linalg as _la          # bleibende Hilfen diag, outer (Inventar A.3.2)
 from ._r.rlist import RList
 from ._r.rnum import r_mean, r_pow, r_sd
 from .tactical import (
@@ -98,17 +99,17 @@ def _col_means(R):
 
 
 def _mp(x, y):
-    """``x %*% y`` (Ergebnis ndarray)."""
-    return np.asarray(_la.matprod(x, y), dtype=np.float64)
+    """``x %m% y`` (slc-Matrixprodukt, Entwurf B.6; Ergebnis ndarray)."""
+    return np.asarray(_lib.matmul(x, y), dtype=np.float64)
 
 
 def _mat_vec(R, w):
-    """``drop(R %*% w)``."""
+    """``drop(R %m% w)``."""
     return _mp(np.asarray(R, dtype=np.float64), np.asarray(w, dtype=np.float64).ravel()).ravel()
 
 
 def _quad(w, S):
-    """``drop(t(w) %*% S %*% w)``."""
+    """``drop(t(w) %m% S %m% w)``."""
     w = np.asarray(w, dtype=np.float64).ravel()
     return float(_mp(_mp(w.reshape(1, -1), S), w).ravel()[0])
 
@@ -313,7 +314,7 @@ def _opt_flat(S, nm):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _psd(M, N):
-    e = _la.eigen(M, symmetric=True)
+    e = _lib.eigen_sym(M)
     V = np.asarray(e["vectors"], dtype=np.float64)
     vals = np.asarray(e["values"], dtype=np.float64)
     D = _la.diag(np.maximum(vals, 1e-12), N)
@@ -330,7 +331,7 @@ def _opt_cov_m(R, type):  # noqa: A002
         return S
     if type == "ledoit_wolf":
         X = R - _colmeans(R)[None, :]
-        S1 = np.asarray(_la.crossprod(X), dtype=np.float64) / Tn
+        S1 = np.asarray(_lib.crossprod(X), dtype=np.float64) / Tn
         m = _sum(np.diag(S1)) / N
         dm = _la.diag(m, N)
 
@@ -340,7 +341,7 @@ def _opt_cov_m(R, type):  # noqa: A002
         d2 = nrm(S1 - dm)
         acc = np.empty(Tn)
         for t in range(Tn):
-            acc[t] = nrm(np.outer(X[t, :], X[t, :]) - S1)
+            acc[t] = nrm(np.asarray(_lib.tcrossprod(X[t, :]), dtype=np.float64) - S1)
         b2 = min(d2, _sum(acc) / (Tn * Tn))
         a2 = d2 - b2
         Sh = (b2 / d2) * dm + (a2 / d2) * S1
@@ -353,7 +354,7 @@ def _opt_cov_m(R, type):  # noqa: A002
         mu = np.array([_sum(R[:, j] * w) for j in range(N)])
         X = R - mu[None, :]
         Xs = X * np.sqrt(w)[:, None]
-        C = np.asarray(_la.crossprod(Xs), dtype=np.float64) / (1 - _sum(w * w))
+        C = np.asarray(_lib.crossprod(Xs), dtype=np.float64) / (1 - _sum(w * w))
         return _psd(C, N)
     sd = np.sqrt(np.diag(S))
     if type == "denoise":
@@ -365,7 +366,7 @@ def _opt_cov_m(R, type):  # noqa: A002
                 out[np.ix_(ix, ix)] = _opt_cov_m(R[:, ix], "denoise")
             return out
         C = np.asarray(_st().cov2cor(S), dtype=np.float64)
-        e = _la.eigen(C, symmetric=True)
+        e = _lib.eigen_sym(C)
         vals = np.asarray(e["values"], dtype=np.float64).copy()
         V = np.asarray(e["vectors"], dtype=np.float64)
         q = 1 + math.sqrt(N / Tn)
@@ -379,9 +380,9 @@ def _opt_cov_m(R, type):  # noqa: A002
     H = 0.5 * sd
     Up = (R >= H[None, :]).astype(np.float64)
     Dn = (R <= -H[None, :]).astype(np.float64)
-    Uu = Up.T @ Up
-    Dd = Dn.T @ Dn
-    Ud = Up.T @ Dn
+    Uu = np.asarray(_lib.crossprod(Up), dtype=np.float64)
+    Dd = np.asarray(_lib.crossprod(Dn), dtype=np.float64)
+    Ud = np.asarray(_lib.crossprod(Up, Dn), dtype=np.float64)
     nc = Uu + Dd
     nd = Ud + Ud.T
     with np.errstate(all="ignore"):
@@ -410,7 +411,7 @@ def _qp_simplex(Q, cvec, lo, hi, w0=None, maxit=20000, tol=1e-12):
     """``.qp_simplex``: FISTA für min 0.5 w'Qw + c'w auf dem beschränkten Simplex."""
     Q = np.asarray(Q, dtype=np.float64)
     N = Q.shape[1]
-    ev = np.asarray(_la.eigen(Q, symmetric=True, only_values=True)["values"], dtype=np.float64)
+    ev = np.asarray(_lib.eigen_sym(Q, only_values=True)["values"], dtype=np.float64)
     L = max(float(ev.max()), 1e-12) if not np.isnan(ev).any() else _NAN
     w0 = np.repeat(1 / N, N) if w0 is None else w0
     return _core.qp_box_simplex(Q, cvec, lo, hi, w0, L, int(maxit), tol)
@@ -431,7 +432,7 @@ def _risk_parity(S, b):
     for _ in range(200):
         g = _mat_vec(S, y) - b / y
         H = S + _la.diag(b / (y * y), N)
-        dx = np.asarray(_la.solve(H, g), dtype=np.float64).ravel()
+        dx = np.asarray(_lib.solve_spd(H, g), dtype=np.float64).ravel()   # H symmetrisch positiv definit
         step = 1.0
         while True:
             yn = y - step * dx
@@ -705,7 +706,7 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
         frequency: ``"week"`` (Standard), ``"day"`` oder ``"month"``.
         resample: Anzahl Block-Bootstrap-Stichproben (Michaud; 0 = aus).
         block: mittlere Blocklänge (``None`` = T^(1/3) gerundet, mindestens 2).
-        seed: Startwert für das Resampling (Zustand der Sitzung bleibt unverändert).
+        seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`) für das Resampling.
 
     Returns:
         :class:`SimLevOptimization` mit ``weights``, ``stats``, ``risk``, ``alpha``,
@@ -738,19 +739,15 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
         T = len(R)
         if block is None:
             block = max(2, float(_fmt.r_round(r_pow(T, 1 / 3))))
-        from ._bootstrap_core import boot_idx_stationary
-        from .bootstrap import _with_rng_restore
+        from ._lib import main_stream
+        from ._lib_models import boot_idx_stationary
 
         A = R.to_numpy(dtype=np.float64)
-
-        def run():
-            out = np.empty((int(resample), N))
-            for bb in range(int(resample)):
-                idx = np.asarray(boot_idx_stationary(T, T, block), dtype=np.int64) - 1
-                out[bb, :] = core(pd.DataFrame(A[idx, :], columns=nm)).to_numpy()
-            return out
-
-        wbm = _with_rng_restore(run, seed=seed)
+        S = main_stream(seed)                           # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+        wbm = np.empty((int(resample), N))
+        for bb in range(int(resample)):
+            idx = np.asarray(boot_idx_stationary(T, T, block, stream=S), dtype=np.int64) - 1
+            wbm[bb, :] = core(pd.DataFrame(A[idx, :], columns=nm)).to_numpy()
         wb = pd.DataFrame(wbm, columns=nm)
         wv = _colmeans(wbm)
         w = pd.Series(wv / _sum(wv), index=nm)

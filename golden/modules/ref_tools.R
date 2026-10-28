@@ -14,9 +14,7 @@
 #   print               capture.output(print(result)) oder NULL
 #   warnings            Warnungen (Texte) während des Aufrufs
 #   error               Fehlermeldung, falls R mit Fehler abbricht
-#   sys_time            (optional) feste Uhrzeit as.numeric(Sys.time()) während des
-#                       Aufrufs, als Text ("%.17g"); die Harnesses setzen dann
-#                       SIMLEV_R_SYS_TIME (z. B. für Rsolnp::gosolnp mit rseed = NULL)
+#   (N2: das Feld sys_time, feste Uhrzeit für die ausgesetzten rugarch-Fälle, ist entfallen)
 #
 # Eingabespeicher (Format 2): Eingaben, deren kanonische JSON-Form (der Text, den
 # toJSON() unten für sie schreibt: kompakt, UTF-8) mindestens .REF_INLINE_MAX Bytes
@@ -32,6 +30,15 @@
 # Zahlen als Hex-Literale ("%a"), NA als "NA", NaN als "NaN"; Attribute
 # `names`, `dim`, `dimnames`, `class` werden mitgeschrieben.
 #
+# Gleichlaufprüfung (Etappe 9.1, tools/gleichlauf/, Entwurf C.8):
+#   SIMLEV_MODULE_DIR   anderer Wurzelordner für die Ausgabe (Standard golden/modules); ref_init()
+#                       leert nur <SIMLEV_MODULE_DIR>/<modul>
+#   SIMLEV_GEN_SUBSET=m nur die Fälle, deren Kennung (Modul/Fall) per Prüfsumme in eine
+#                       1/m-Stichprobe fällt (deterministisch; m = 1 oder leer: alle); die übrigen
+#                       Fälle werden nicht ausgewertet
+#   SIMLEV_GEN_EXCLUDE  regulärer Ausdruck: Fälle, deren Kennung passt, werden nicht ausgewertet
+#                       (z. B. r_stats-Fälle zu Routinen, die Etappe 9 ersetzt)
+#
 # Verwendung in einem Generator (Arbeitsverzeichnis = Repo-Wurzel):
 #   source("golden/modules/ref_tools.R")
 #   ref_init("bootstrap")
@@ -44,7 +51,31 @@ suppressMessages({ library(SimLev); library(jsonlite) })
 
 .REF_INLINE_MAX <- 256L    # kürzere Eingaben bleiben im Fall
 
-ref_init <- function(module, outdir = file.path("golden", "modules", module)) {
+.ref_root <- function() {
+  d <- Sys.getenv("SIMLEV_MODULE_DIR")
+  if (nzchar(d)) d else file.path("golden", "modules")
+}
+
+.ref_subset <- function() {
+  m <- suppressWarnings(as.integer(Sys.getenv("SIMLEV_GEN_SUBSET")))
+  if (is.na(m) || m < 1L) 1L else m
+}
+
+# Prüfsumme der Kennung: Polynom-Hash zur Basis 131 modulo 2^31 - 1 (in double exakt)
+.ref_hash <- function(key) {
+  h <- 0
+  for (cc in utf8ToInt(enc2utf8(key))) h <- (h * 131 + cc) %% 2147483647
+  h
+}
+
+.ref_in_subset <- function(id) {
+  ex <- Sys.getenv("SIMLEV_GEN_EXCLUDE")
+  if (nzchar(ex) && grepl(ex, id, perl = TRUE)) return(FALSE)
+  m <- .ref_subset()
+  m == 1L || .ref_hash(paste0(.ref$module, "/", id)) %% m == 0
+}
+
+ref_init <- function(module, outdir = file.path(.ref_root(), module)) {
   .ref_flush()
   dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
   old <- list.files(outdir, "\\.json\\.gz$", full.names = TRUE)   # auch _inputs.json.gz
@@ -146,23 +177,12 @@ enc <- function(x) {
   any(vapply(class(x), function(cl) exists(paste0("print.", cl), envir = ns, inherits = FALSE), NA))
 }
 
-# Sys.time() liefert bis zum Aufruf von undo() den festen Wert t (Ersatz in baseenv(),
-# gilt auch für Aufrufe aus Paket-Namensräumen, z. B. Rsolnp::gosolnp)
-.ref_fix_time <- function(t) {
-  be <- baseenv(); old <- get("Sys.time", be)
-  unlockBinding("Sys.time", be); assign("Sys.time", function() .POSIXct(t), be); lockBinding("Sys.time", be)
-  function() { unlockBinding("Sys.time", be); assign("Sys.time", old, be); lockBinding("Sys.time", be) }
-}
-
 # print = NA: Druckausgabe nur für Objekte mit eigener print-Methode in SimLev
-# sys_time: feste Uhrzeit (Sekunden seit 1970) während des Aufrufs (Feld sys_time)
-ref_case <- function(id, r, py, inputs = list(), print = NA, note = NULL, jl = NULL, sys_time = NULL) {
+# (N2: Argument sys_time entfallen)
+ref_case <- function(id, r, py, inputs = list(), print = NA, note = NULL, jl = NULL) {
+  if (!.ref_in_subset(id)) return(invisible(NULL))
   env <- new.env(parent = globalenv())
   for (k in names(inputs)) assign(k, inputs[[k]], envir = env)
-  if (!is.null(sys_time)) {
-    undo_time <- .ref_fix_time(sys_time)
-    on.exit(undo_time(), add = TRUE)
-  }
   warns <- character(0)
   err <- NULL
   out_txt <- character(0)
@@ -175,7 +195,6 @@ ref_case <- function(id, r, py, inputs = list(), print = NA, note = NULL, jl = N
   case <- list(id = id, module = .ref$module, note = note,
                inputs = lapply(inputs, function(x) .ref_input(enc(x))), r = r, py = py)
   if (!is.null(jl)) case$jl <- jl
-  if (!is.null(sys_time)) case$sys_time <- sprintf("%.17g", sys_time)
   if (!is.null(err)) case$error <- err
   else {
     case$result <- enc(res)

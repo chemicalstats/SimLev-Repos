@@ -1,0 +1,83 @@
+# Gleitkomma der C-Bibliothek slc (Entwurf C.2/C.3, Etappe 9.1): C99, kein Zusammenziehen zu fma,
+# kein fast-math; gleiche Flags wie python/setup.py und julia/deps/build.jl (-O2 setzt R ueber CFLAGS).
+# Die Flags gelten nur fuer die slc-Dateien (eigene Variable und ausdrueckliche Regeln statt
+# PKG_CFLAGS, damit die uebrigen C-Dateien unveraendert uebersetzt werden). Die Kerndateien brechen
+# bei __FAST_MATH__ ab (slc_internal.h).
+SLC_CFLAGS = -std=c99 -ffp-contract=off -fno-fast-math
+
+# erstes Ziel: die Bibliothek (sonst wuerde die erste Regel unten das Standardziel)
+all: $(SHLIB)
+
+slc_ctx.o: slc_ctx.c slc.h slc_internal.h slc_constants.h
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_ctx.c -o slc_ctx.o
+
+slc_normal.o: slc_normal.c slc.h slc_internal.h slc_constants.h
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_normal.c -o slc_normal.o
+
+slc_rng.o: slc_rng.c slc.h slc_internal.h slc_constants.h
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_rng.c -o slc_rng.o
+
+slc_sample.o: slc_sample.c slc.h slc_internal.h slc_constants.h
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_sample.c -o slc_sample.o
+
+slc_special.o: slc_special.c slc.h slc_internal.h slc_constants.h
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_special.c -o slc_special.o
+
+slc_r.o: slc_r.c slc.h
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_r.c -o slc_r.o
+
+# 9.2: Kerne der Etappe 9.2 und ihre Huelle slc_r_linalg.c (gleiche Flags)
+SLC92_DEPS = slc.h slc_linalg.h slc_internal.h slc_la_internal.h slc_constants.h
+
+slc_linalg.o: slc_linalg.c $(SLC92_DEPS)
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_linalg.c -o slc_linalg.o
+
+slc_matmul.o: slc_matmul.c $(SLC92_DEPS)
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_matmul.c -o slc_matmul.o
+
+slc_lsq.o: slc_lsq.c $(SLC92_DEPS)
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_lsq.c -o slc_lsq.o
+
+slc_stine.o: slc_stine.c $(SLC92_DEPS)
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_stine.c -o slc_stine.o
+
+slc_spline.o: slc_spline.c $(SLC92_DEPS)
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_spline.c -o slc_spline.o
+
+slc_kde.o: slc_kde.c $(SLC92_DEPS)
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_kde.c -o slc_kde.o
+
+slc_r_linalg.o: slc_r_linalg.c slc.h slc_linalg.h
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_r_linalg.c -o slc_r_linalg.o
+
+# 9.3: Optimierer (slc_opt.c, slc_opt_test.c) und ihre R-Huelle slc_r_opt.c, gleiche Flags
+slc_opt.o: slc_opt.c slc.h slc_opt.h slc_internal.h
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_opt.c -o slc_opt.o
+
+slc_opt_test.o: slc_opt_test.c slc.h slc_opt.h slc_internal.h
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_opt_test.c -o slc_opt_test.o
+
+slc_r_opt.o: slc_r_opt.c slc.h slc_opt.h
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_r_opt.c -o slc_r_opt.o
+
+# 9.4: Modelle (slc_garch.c, slc_gpd.c, slc_dcc.c, slc_msgarch.c, slc_boot.c) und ihre R-Huelle
+# slc_r_models.c, gleiche Flags
+SLC94_DEPS = slc.h slc_models.h slc_opt.h slc_internal.h slc_la_internal.h slc_constants.h
+
+slc_garch.o: slc_garch.c $(SLC94_DEPS)
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_garch.c -o slc_garch.o
+
+slc_gpd.o: slc_gpd.c $(SLC94_DEPS)
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_gpd.c -o slc_gpd.o
+
+slc_dcc.o: slc_dcc.c $(SLC94_DEPS)
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_dcc.c -o slc_dcc.o
+
+slc_msgarch.o: slc_msgarch.c $(SLC94_DEPS)
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_msgarch.c -o slc_msgarch.o
+
+slc_boot.o: slc_boot.c $(SLC94_DEPS)
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_boot.c -o slc_boot.o
+
+slc_r_models.o: slc_r_models.c slc.h slc_models.h slc_opt.h
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_r_models.c -o slc_r_models.o

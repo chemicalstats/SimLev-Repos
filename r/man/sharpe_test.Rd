@@ -51,10 +51,10 @@ bei \code{method = "bootstrap"}.}
 Ende); \code{NULL} (Standard) = \code{max(2, round(T^(1/3)))} mit
 \eqn{T} = Anzahl Renditepaare. Nur bei \code{method = "bootstrap"}.}
 
-\item{seed}{Startwert (ganze Zahl) fuer den Bootstrap; \code{NULL}
-(Standard) = kein fester Startwert. Mit Startwert ist das Ergebnis reproduzierbar und der
-Zufallszustand der Sitzung bleibt unveraendert; mit \code{NULL} wird der
-Zufallsstrom der Sitzung normal weitergezogen.}
+\item{seed}{Startwert fuer den Bootstrap (Standard \code{NULL}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}), wiederholte
+Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.}
 
 \item{ppy}{Perioden je Jahr fuer die Annualisierung. \code{NULL}
 (Standard) = bei Vektoren 252 (\code{"day"}), 52 (\code{"week"}) bzw. 12

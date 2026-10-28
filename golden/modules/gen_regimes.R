@@ -43,9 +43,9 @@ ref_case("hmm_week", "regime_hmm(d, 'aktien', k = 2)", paste0(P, "result = RG.re
 ref_case("hmm_week2", "regime_hmm(d, c('aktien', 'anleihen'), k = 2L, n_start = 3, seed = 5, max_iter = 40L, tol = 1e-5)",
          paste0(P, "result = RG.regime_hmm(d, ['aktien', 'anleihen'], k=2, n_start=3, seed=5, max_iter=40, tol=1e-5)"), inputs = H,
          jl = paste0(J, 'result = RG.regime_hmm(d, ["aktien", "anleihen"]; k = 2, n_start = 3, seed = 5, max_iter = 40, tol = 1e-5)'))
-ref_case("hmm_seednull", "set.seed(9); x <- regime_hmm(d, 'anleihen', k = 3, n_start = 2, seed = NULL, max_iter = 30); list(x, runif(2))",
-         paste0(P, "simlev._r.rng.set_seed(9); x = RG.regime_hmm(d, 'anleihen', k=3, n_start=2, seed=None, max_iter=30); result = [x, simlev._r.rng.runif(2)]"), inputs = H,
-         jl = paste0(J, 'SL.RRng.set_seed(9); x = RG.regime_hmm(d, "anleihen"; k = 3, n_start = 2, seed = nothing, max_iter = 30); result = [x, SL.RRng.runif(2)]'))
+ref_case("hmm_seednull", "simlev_seed(9); x <- regime_hmm(d, 'anleihen', k = 3, n_start = 2, seed = NULL, max_iter = 30); list(x, SimLev:::.sl_runif(2))",
+         paste0(P, "simlev.simlev_seed(9); x = RG.regime_hmm(d, 'anleihen', k=3, n_start=2, seed=None, max_iter=30); result = [x, simlev._lib.runif(2)]"), inputs = H,
+         jl = paste0(J, 'SL.simlev_seed(9); x = RG.regime_hmm(d, "anleihen"; k = 3, n_start = 2, seed = nothing, max_iter = 30); result = [x, SL.SLib.runif(2)]'))
 # Review 7 (B7-05): bekannte Referenzwerte
 set.seed(11); n <- 4 * 365
 d7 <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = n))

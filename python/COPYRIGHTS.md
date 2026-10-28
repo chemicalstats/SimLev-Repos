@@ -1,149 +1,82 @@
-# Urheberrecht und Lizenzen nachgebildeter Teile
+# Urheberrecht und Lizenzen
 
 SimLev für Python steht unter der GNU General Public License, Version 3
-(GPL-3, siehe `LICENSE.md`). Copyright ChemicalStats von der Mauerstrasse,
-ausgenommen die unten aufgeführten Teile: Sie bilden Code anderer R-Pakete
-und von R selbst unter der GPL bitgleich nach (Übertragung nach Python bzw.
-C, angepasst für SimLev).
-Das Urheberrecht am Original liegt bei den genannten Autoren; es gelten die
-Lizenzbedingungen des Originals. Das R-Paket enthält die übernommenen Teile
-selbst, siehe `r/inst/COPYRIGHTS`.
+(GPL-3, siehe `LICENSE.md`). Copyright ChemicalStats von der Mauerstrasse.
 
-## evd
+SimLev enthält **keinen Code aus anderen Paketen**. Bis Etappe 9 bildete
+die Python-Fassung Teile von evd, imputeTS, stinepack, rugarch, Rsolnp und
+truncnorm sowie R's Zufallszahlen, Verteilungsfunktionen (nmath), lineare
+Algebra (BLAS, LAPACK, LINPACK) und Optimierer (`optim`, `nlminb`) nach;
+diese Teile sind entfernt. Zufall und Numerik rechnet jetzt die eigene
+C-Bibliothek von SimLev (siehe unten). Die Pakete dienten nur als Vorbild
+und Prüforakel; ihre Angaben stehen im Abschnitt
+[Literatur](../README.md#literatur) der Haupt-README.
+
+Es bleiben Nachbildungen von **Grundfunktionen von R** (Abschnitt 2). Sie
+sind nötig, damit die Python-Fassung zeichengleich zu R rechnet und ausgibt.
+
+## 1. Eigener Code
+
+| Teil | Inhalt |
+|---|---|
+| `simlev/*.py` | alle Funktionen von SimLev |
+| `src/core/` | Kopien der kanonischen C-Quellen aus `core/` (Repo-Wurzel, `tools/core_sync.py`): die C-Bibliothek `slc*.c`, `slc*.h` (Zufall, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, Bootstrap-Kerne, Stineman, Glättungsspline, Kerndichte) und die gemeinsamen C++-Kerne `simlev_core.h`, `*_core_impl.h` (Engine, FIFO, Steuer, Research, Entnahme) |
+| `src/_ext*.c`, `src/_ext*.cpp`, `src/_ext_common.h` | Hüllen der C-Erweiterung `simlev._ext` |
+| `simlev/_lib*.py` | Python-Hüllen der C-Bibliothek |
+| `simlev/_r/rlist.py`, `reftree.py`, `env.py` | Ergebnisobjekte, Vergleich mit den Referenzfällen, Umgebungsschalter |
+
+Die C-Bibliothek ist nach Veröffentlichungen geschrieben, nicht nach fremdem
+Code. Der Kopf jeder Datei in `core/` nennt ihre Quellen; die vollständigen
+Angaben stehen im Abschnitt [Literatur](../README.md#literatur).
+
+## 2. Nachbildungen von R-Grundfunktionen
 
 | | |
 |---|---|
-| Paket | evd 2.3-7.1 (CRAN, 2024-09-21), *Functions for Extreme Value Distributions* |
-| Autoren | Alec Stephenson. Function fbvpot by Chris Ferro. (laut DESCRIPTION von evd) |
-| Lizenz | GPL-3 |
-| Quelle | <https://CRAN.R-project.org/package=evd> |
-| Datei in SimLev | `simlev/_r/evd.py` |
+| Programm | R 4.3.3 (2024-02-29), *The R Project for Statistical Computing*, <https://www.R-project.org/> |
+| Rechteinhaber | laut den Dateiköpfen der genannten R-Quellen: The R Core Team; Robert Gentleman und Ross Ihaka; The R Foundation; einzelne Dateien nennen weitere Personen (siehe Abschnitt 3) |
+| Lizenz | GPL (≥ 2) laut den Dateiköpfen; in SimLev unter GPL-3 weitergegeben |
 
-Nachgebildet sind `fpot` und `fpot.norm` aus `R/uvfit.R` (nur
-`model = "gpd"` mit `cmax = FALSE` und `mper = NULL`) und `nlgpd` aus
-`src/pot.c`. Im R-Paket entsprechen dem `.evd_fpot` (`r/R/vendor_evd.R`)
-und `C_evd_nlgpd` (`r/src/vendor_evd.c`).
+Die Module in `simlev/_r/` übertragen die Rechenweise dieser R-Funktionen
+nach Python (gleiche Rechenreihenfolge, `long double`-Summen, gleiche Texte):
 
-## imputeTS
+| Modul | R-Funktionen | R-Quellen (R 4.3.3) |
+|---|---|---|
+| `rnum.py`, `base.py` | `sum`, `mean`, `var`, `sd`, `prod`, `cumsum`, `cumprod`, `cummax`, `cummin`, `rowSums`, `colSums`, `rowMeans`, `colMeans`, `pmin`, `pmax`, `range`, `diff`, Potenz `R_POW`, `%%`, Nullstelle `R_zeroin2` | `src/main/summary.c`, `cum.c`, `array.c`, `arithmetic.c`; `src/library/stats/src/zeroin.c` |
+| `libm.py` | Randregeln von R um die libm-Funktionen (`log(0) = -Inf` u. a.) | `src/main/arithmetic.c` |
+| `rformat.py`, `fmt.py` | `round`, `signif`, `format`, `formatC`, `prettyNum`, `sprintf`, `as.character`, `paste`, `print` von Vektoren, Matrizen, data.frames, Faktoren und Listen, Datumsformate | `src/main/format.c`, `printutils.c`, `printvector.c`, `printarray.c`, `print.c`, `paste.c`, `sprintf.c`, `util.c`; `src/nmath/fround.c`, `fprec.c`; `src/library/base/R/format.R`, `dataframe.R`, `factor.R`, `dates.R` |
+| `_collate.py` | Vergleich und Sortierung von Zeichenketten (`Scollate`) | `src/main/util.c` |
+| `stats_sort.py` | `order`, `sort`, `rank`, partielle Sortierung, `rle`, `tabulate`, `findInterval`, `cut`, `complete.cases`, `quantile`, `median`, `weighted.mean` | `src/main/sort.c`, `qsort-body.c`, `seq.c`; `src/library/base/R/sort.R`, `rle.R`, `cut.R`, `findInt.R`; `src/library/stats/R/quantile.R`, `median.R`, `weighted.mean.R` |
+| `stats_cor.py` | `cor` (Pearson, Kendall, Spearman), `cov`, `var`, `sd`, `cov2cor`, `scale` | `src/library/stats/src/cov.c`, `stats/R/cor.R`; `src/library/base/R/scale.R` |
+| `stats_smooth.py` | `approx`, `approxfun`, `filter` | `src/library/stats/R/approx.R`, `filter.R`; `stats/src/approx.c`, `filter.c` |
+| `stats_optim.py`, `_optim.py` | `optimize`, `uniroot` | `src/library/stats/R/optimize.R`; `stats/src/optimize.c`, `zeroin.c` |
+| `stats_models.py` | `coef`, `fitted`, `residuals`, `p.adjust`, `ecdf`, `ave`, `aggregate` | `src/library/stats/R/lm.R` (Zugriffe), `p.adjust.R`, `ecdf.R`, `ave.R`, `aggregate.R` |
+| `stats_cluster.py` | `dist`, `as.dist`, `hclust` | `src/library/stats/R/dist.R`, `hclust.R`; `stats/src/distance.c`, `hclust.f` |
+| `linalg.py` | `outer`, `diag`, `isSymmetric`, `all.equal` (numerisch) | `src/library/base/R/outer.R`, `diag.R`, `all.equal.R` |
+| `rexpr.py` | Zerlegen und Auswerten von Bedingungen in R-Syntax (Lexer, Grammatik und Vorrang, NA-Logik, Indizierung) | `src/main/gram.y` und die Semantik der Grundoperatoren |
+| `parallel.py` | Verhalten von `parallel::mclapply(mc.preschedule = FALSE)` für SimLev's `.par_lapply` (nur das Verhalten: Reihenfolge, Fehler, Ausgaben) | `src/library/parallel/R/unix/mclapply.R` |
 
-| | |
+## 3. Teile, die in R selbst Übersetzungen älteren Codes sind
+
+Die Dateiköpfe bzw. Kommentare der R-Quellen nennen für einige der
+nachgebildeten Funktionen eine ältere Herkunft:
+
+| Funktion | Herkunft laut R-Quelle |
 |---|---|
-| Paket | imputeTS 3.4 (CRAN, 2025-08-25), *Time Series Missing Value Imputation* |
-| Autoren | Steffen Moritz [aut, cre, cph], Sebastian Gatscha [aut], Earo Wang [ctb], Ron Hause [ctb] (laut DESCRIPTION von imputeTS) |
-| Lizenz | GPL-3 |
-| Quelle | <https://CRAN.R-project.org/package=imputeTS> |
-| Datei in SimLev | `simlev/_r/imputets.py` |
+| `optimize` (`Brent_fmin`) | `optimize.c`: „fmin.f -- translated by f2c“, Brents Verfahren `fmin` (Netlib) |
+| `uniroot` (`R_zeroin2`, auch `r_uniroot` der Engine) | `zeroin.c`: „from NETLIB c/brent.shar with max.iter, add'l info and convergence details hacked in by Peter Dalgaard“ |
+| `hclust` | `hclust.f`: „F. Murtagh, ESA/ESO/STECF, Garching, February 1986. Modifications for R: Ross Ihaka, Dec 1996“ |
+| Sortierung (`qsort-body.c`) | „Based on CACM algorithm #347 by R. C. Singleton (1969)“ |
+| `signif` (`fprec.c`) | „a translation into C of a Fortran subroutine by W. Fullerton of Los Alamos Scientific Laboratory“ |
+| `sprintf` (`sprintf.c`) | „Originally written by Jonathan Rougier“ |
+| Parser (`gram.y`) | Rechteinhaber zusätzlich Romain Francois (2009–2011) |
 
-Nachgebildet sind `na_interpolation` aus `R/na_interpolation.R`
-(`option = "stine"` und `"linear"`, diese mit `approx` und `rule = 2`, ohne
-weitere Argumente für `approx`; `"spline"` bricht wie im R-Paket ab),
-`na_locf` aus `R/na_locf.R` (ohne `na_remaining = "rm"`/`"mean"`) und der
-C++-Kern `locf` aus `src/locf.cpp`. Im R-Paket entsprechen dem
-`.imputets_na_interpolation`, `.imputets_na_locf` (`r/R/vendor_imputets.R`)
-und `.imputets_locf` (`r/src/vendor_imputets.cpp`).
+## 4. Zur Laufzeit genutzt, nicht enthalten
 
-## stinepack
+- glibc-libm (mathematische Funktionen über das Modul `math`),
+- die System-ICU (`libicui18n`, Kollation über ctypes),
+- numpy und pandas (Datenhaltung).
 
-| | |
-|---|---|
-| Paket | stinepack 1.5 (CRAN, 2024-03-07), *Stineman, a Consistently Well Behaved Method of Interpolation* |
-| Autoren | Tomas Johannesson & Halldor Bjornsson, Icelandic Met. Office; Gabor Grothendieck (laut DESCRIPTION von stinepack) |
-| Lizenz | GPL (>= 2), in SimLev unter GPL-3 |
-| Quelle | <https://CRAN.R-project.org/package=stinepack> |
-| Datei in SimLev | `simlev/_r/stinepack.py` |
-
-Nachgebildet sind `stinterp`, `stinemanSlopes` und `parabolaSlopes` aus
-`R/stinterp.R`, `R/stinemanSlopes.R` und `R/parabolaSlopes.R`. Im R-Paket
-entsprechen dem `.stinepack_stinterp`, `.stinepack_stinemanSlopes` und
-`.stinepack_parabolaSlopes` (`r/R/vendor_stinepack.R`).
-
-## rugarch
-
-| | |
-|---|---|
-| Paket | rugarch 1.5-6 (CRAN, 2026-07-18), *Univariate GARCH Models* |
-| Autoren | Alexios Galanos [aut, cre, cph], Tobias Kley [ctb] (laut DESCRIPTION von rugarch) |
-| Lizenz | GPL-3 |
-| Quelle | <https://CRAN.R-project.org/package=rugarch> |
-| Datei in SimLev | `simlev/_r/rugarch.py` |
-
-Nachgebildet ist `ugarchfit(spec, data, solver = "hybrid")` mit `coef()`
-für die Spezifikation aus `.fit_garch11` (sGARCH bzw. gjrGARCH(1,1),
-ARMA(0,0) mit Mittelwert, Normalverteilung): `.sgarchfit`/`.gjrgarchfit`,
-Startwerte und Schranken aus `R/rugarch-startpars.R`, die Likelihood
-`.sgarchLLH`/`.gjrgarchLLH` mit dem C-Filter aus `src/garchmodels.c`,
-`src/filters.c` und `dnormstd` aus `src/distributions.c`, die Solver-Kette
-`.hybridsolver` (solnp → nlminb → zweimal gosolnp), `.makefitmodel` mit
-`.hessian2sided`, `robustvcv` und `neweywestcv` aus
-`R/rugarch-numderiv.R` und die Warnungen von rugarch. Im R-Paket
-entspricht dem `.rugarch_ugarchspec`, `.rugarch_ugarchfit`, `.rugarch_coef`
-(`r/R/vendor_rugarch.R`) mit dem C-Filter in `r/src/vendor_rugarch.c`.
-
-## Rsolnp
-
-| | |
-|---|---|
-| Paket | Rsolnp 1.16 (CRAN, 2015-12-28), *General Non-Linear Optimization* |
-| Autoren | Alexios Ghalanos and Stefan Theussl (laut DESCRIPTION von Rsolnp) |
-| Lizenz | GPL (DESCRIPTION); GPL-3 laut `inst/COPYRIGHTS` von Rsolnp |
-| Quelle | <https://CRAN.R-project.org/package=Rsolnp> |
-| Datei in SimLev | `simlev/_r/solnp.py` |
-
-Nachgebildet sind `solnp` mit `.subnp` und den Hilfen sowie `gosolnp`
-mit `.randpars` und `.safefun` (ohne `cluster`, `control$eval.type = 2`
-und `trace`). Im R-Paket entsprechen dem `.rsolnp_solnp` und
-`.rsolnp_gosolnp` (`r/R/vendor_rsolnp.R`).
-
-## Numerische Ableitungen
-
-Numerische Ableitungen (Richardson-Extrapolation) eigenständig
-implementiert; Ergebnisse gegen numDeriv geprüft (`simlev/_r/rugarch.py`: `_richardson_hessian`, `_richardson_jacobian`;
-im R-Paket `r/R/richardson.R`; kein Code aus numDeriv übernommen).
-
-## truncnorm
-
-| | |
-|---|---|
-| Paket | truncnorm 1.0-9 (CRAN, 2023-03-20), *Truncated Normal Distribution* |
-| Autoren | Olaf Mersmann [aut, cre], Heike Trautmann [aut], Detlef Steuer [aut], Björn Bornkamp [aut] (laut DESCRIPTION von truncnorm) |
-| Lizenz | GPL (>= 2), in SimLev unter GPL-3 |
-| Quelle | <https://CRAN.R-project.org/package=truncnorm> |
-| Datei in SimLev | `simlev/_r/truncnorm.py` |
-
-Nachgebildet ist `rtruncnorm` aus `R/truncnorm.R` mit `do_rtruncnorm` und
-den Samplern aus `src/rtruncnorm.c`. Im R-Paket entsprechen dem
-`.truncnorm_rtruncnorm` (`r/R/vendor_truncnorm.R`) und
-`C_truncnorm_rtruncnorm` (`r/src/vendor_truncnorm.c`). Die C-Erweiterung
-`simlev._ext` übersetzt die Sampler und die Schleife von `do_rtruncnorm`
-selbst (`src/vendor_truncnorm_impl.h`, Byte-für-Byte-Kopie von
-`r/src/vendor_truncnorm_impl.h`, eingebunden in `src/_ext_truncnorm_c.c`).
-
-## R (Zufallszahlen)
-
-| | |
-|---|---|
-| Programm | R 4.3.3 (2024-02-29), *The R Project for Statistical Computing* |
-| Autoren | R Core Team; Ross Ihaka und Robert Gentleman; The R Foundation (laut den Dateiköpfen) |
-| Lizenz | GPL (>= 2), in SimLev unter GPL-3 |
-| Quelle | <https://www.R-project.org/>, `src/main/RNG.c`, `src/nmath/snorm.c`, `qnorm.c`, `sexp.c`, `runif.c`, `rnorm.c`, `rexp.c`, `rgeom.c`, `rpois.c`, `fsign.c`, `dnorm.c` |
-| Dateien in SimLev | `simlev/_r/rng.py` (Python), `src/_rng_r.c` und `src/_rng_r.h` (C, Etappe 7.3b) |
-
-Nachgebildet sind R's Zufallszahlen (`unif_rand` mit den Generatoren
-Mersenne-Twister und L'Ecuyer-CMRG, `norm_rand` mit Inversion über
-`qnorm5`, `exp_rand`) und die Verteilungen, die SimLev zieht. Die
-C-Nachbildung in `src/_rng_r.c` übernimmt die Funktionsrümpfe aus R; statt
-R's statischer Variablen arbeitet sie auf dem Zustand von `simlev/_r/rng.py`.
-
-Der Mersenne-Twister trägt in R (`src/main/RNG.c`) diesen Vermerk, der hier
-übernommen ist:
-
-> A C-program for MT19937: Real number version ([0,1)-interval) (1999/10/28).
-> Coded by Takuji Nishimura, considering the suggestions by Topher Cooper and
-> Marc Rieffel in July-Aug. 1997.
-> Copyright (C) 1997, 1999 Makoto Matsumoto and Takuji Nishimura.
-> When you use this, send an email to: matumoto@math.keio.ac.jp with an
-> appropriate reference to your work.
-> REFERENCE: M. Matsumoto and T. Nishimura, "Mersenne Twister: A
-> 623-Dimensionally Equidistributed Uniform Pseudo-Random Number Generator",
-> ACM Transactions on Modeling and Computer Simulation, Vol. 8, No. 1,
-> January 1998, pp 3--30.
+Die Pakete evd, imputeTS, stinepack, rugarch, Rsolnp, truncnorm, MSGARCH und
+numDeriv sind weder enthalten noch eine Abhängigkeit (siehe
+[Literatur](../README.md#literatur)).

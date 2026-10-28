@@ -6,6 +6,13 @@ Die Julia-Fassung ist ein bitgleicher Port des R-Pakets SimLev 0.5.0 (Ordner
 bitgleich geprüfter Zwischenschritt, der die Rechenreihenfolge von R
 nachbildet und sich als Vorlage für die Übersetzung eignet.
 
+> **Stand Etappe 9:** Zufall und Numerik rechnet die eigene C-Bibliothek slc (Abschnitte
+> [C-Bibliothek](#c-bibliothek-pflicht), [Zufall](#zufall-etappe-9) und
+> [Tests in Etappe 9](#tests-in-etappe-9)). `src/r/` bildet nur noch Grundfunktionen von R nach
+> (Liste und Herkunft in [`COPYRIGHTS.md`](COPYRIGHTS.md)); `RRng`, `RNmath`, die
+> BLAS/LAPACK/LINPACK-Ports, `optim`/`nlminb` und die früher übernommenen Pakete gibt es nicht
+> mehr.
+
 ## Aufbau
 
 Alles liegt im Modul `SimLev`; die Bausteine sind Untermodule. Die Tabelle
@@ -17,31 +24,23 @@ und `precompile.jl`.
 | Datei | Untermodul | Inhalt (R-Vorlage → Python-Vorlage) |
 |---|---|---|
 | `src/r/env.jl` | `REnv` | Umgebungsschalter `SIMLEV_*`: einzige Stelle, die sie liest oder setzt (siehe [Schalter](#schalter-simlev_)) → `_r/env.py` |
+| `src/slib.jl` (+ `slib_linalg.jl`, `slib_opt.jl`, `slib_models.jl`) | `SLib` | Hüllen der C-Bibliothek slc per `ccall` (Zufall, Verteilungen, lineare Algebra, Optimierer, Modelle, Bootstrap-Kerne); Bibliothek aus `deps/build.jl` (siehe [C-Bibliothek](#c-bibliothek-pflicht)) → `simlev/_lib*.py` |
 | `src/r/types.jl` | – | R-Datenstrukturen (`RList`, `RFrame`, `RVector`, `NamedMat`), Druck-/summary-/plot-Registrierung |
 | `src/r/ld80.jl` | – | `F80`: 80-Bit-`long double` (x86-64: x87-Hardware über `llvmcall`, sonst Software-Nachbau `F80Soft`) |
 | `src/r/rnum.jl` | – | `NA`, `isna_strict`, Summen/Mittel/Varianz in `long double` (`r_sum`, `r_mean`, …), `r_pow` (`R_POW`), `r_uniroot`, zentrale Auswahl der C-Bibliotheken (`_LIBM`, `_LIBC`, `_SNPRINTF`) → `_r/rnum.py` |
 | `src/r/rformat.jl` | – | Textausgabe der Engine: `r_sprintf` (NA/NaN/Inf wie R), `r_format`, `r_as_character`, `r_deparse`, `r_round`, `r_signif` → `_r/rformat.py` |
 | `src/r/libm.jl` | `RLibm` | glibc-libm (`exp`, `log`, `log1p`, `expm1`, `pow`, `tanh`, …) → `_r/libm.py` |
 | `src/r/base.jl` | `RBase` | Summen, Mittel, `cumsum`, `cumprod`, `rowSums`, … mit `long double` → `_r/base.py` |
-| `src/r/rng.jl` | `RRng` | Zufallszahlen (`set_seed`, `runif`, `rnorm`, `sample_int`, L'Ecuyer-Streams); Zustand je Aufgabe über `TaskState`/`with_state` → `_r/rng.py` |
 | `src/r/parallel.jl` | `RParallel` | `.par_lapply` mit `Threads.@spawn` (`par_lapply`), Meldungen und Ausgaben je Aufgabe (`r_stderr`, `r_stdout`, `suppress_messages`), siehe [Parallelität](#parallelität-cores) → `_r/parallel.py` |
-| `src/r/nmath.jl` | `RNmath` | Verteilungen (`qnorm`, `pt`, `qt`, `pbeta`/toms708, `lgamma` …) → `_r/nmath.py`, `_r/_toms708.py`, `_r/_cmath.py` |
 | `src/r/fmt.jl` | `RFmt` | `format`, `formatC`, `sprintf`, `round`, `signif`, `print` von Vektoren/Matrizen/data.frames → `_r/fmt.py` |
-| `src/r/stats.jl` | `RStats` | Modulkopf mit Exporten; bindet die Themen ein (gleiche Namen wie in Python): `stats_sort.jl` (Hilfen, `order`, `r_sort`, `r_rank`, `cut`, `quantile`, `median`, …), `stats_cor.jl` (`cor`, `cov`, `var`, `scale`), `stats_smooth.jl` (`approx`, `r_filter`, `fft`, `density`, `smooth_spline`), `stats_optim.jl` (`optimize`, `uniroot`, `optim`, `nlminb`), `stats_models.jl` (`lm`, `glm`, `poly`, `predict`, `p_adjust`, `ecdf`, `ave`, `aggregate`, `t_test`), `stats_cluster.jl` (`dist`, `hclust`) → `_r/stats.py` (Sammelmodul) und `_r/stats_*.py` |
-| `src/r/linalg.jl` | `RLinalg` | `matprod`, `crossprod`, `solve`, `chol`, `qr` (LINPACK), `determinant`, `eigen` → `_r/linalg.py`, `_r/_blas.py`, `_r/_lapack.py`, `_r/_linpack.py` |
+| `src/r/stats.jl` | `RStats` | Modulkopf mit Exporten; bindet die Themen ein (gleiche Namen wie in Python): `stats_sort.jl` (Hilfen, `order`, `r_sort`, `r_rank`, `cut`, `quantile`, `median`, …), `stats_cor.jl` (`cor`, `cov`, `var`, `scale`), `stats_smooth.jl` (`approx`, `r_filter`), `stats_optim.jl` (`optimize`, `uniroot`), `stats_models.jl` (`coef`, `fitted`, `p_adjust`, `ecdf`, `ave`, `aggregate`), `stats_cluster.jl` (`dist`, `hclust`) → `_r/stats.py` (Sammelmodul) und `_r/stats_*.py` |
+| `src/r/linalg.jl` | `RLinalg` | `outer`, `diag`, `is_symmetric`, `all_equal_numeric` (seit 9.6c ohne `matprod`, `solve`, `chol`, `qr`, `eigen` und die BLAS/LAPACK/LINPACK-Ports) → `_r/linalg.py` |
 | `src/r/rexpr.jl` | `RExpr` | Ausdrücke in R-Syntax als Text (`eval(parse(text = …), data, env)`): ein gemeinsamer Auswerter für Bedingungen in `bootstrap_probability`, `regime_subset`, `view_prob`/`scenario_entropy_pooling` und `tactical_rules` (R-Vorrang inkl. schwach bindendem `!`, NA-Logik, `%in%`, `%%`, Funktionen über `RLibm`/`RFmt`) |
-| `src/r/port.jl` | `RPort` | PORT-Bibliothek für `RStats.nlminb` (stats `port.c`, `portsrc.f`, `nlminb.R`) → `_r/port.py` |
-| `src/r/evd.jl` | `REvd` | evd 2.3-7.1 `fpot`, `nlgpd` (`src/pot.c`; in R übernommen als `.evd_fpot`, immer aktiv) → `_r/evd.py` |
-| `src/r/truncnorm.jl` | `RTruncnorm` | truncnorm 1.0-9 `rtruncnorm` (in R übernommen als `.truncnorm_rtruncnorm`) → `_r/truncnorm.py` |
-| `src/r/solnp.jl` | `RSolnp` | Rsolnp 1.16 `solnp`, `gosolnp` (in R übernommen als `.rsolnp_solnp`, `.rsolnp_gosolnp`) → `_r/solnp.py` |
-| `src/r/rugarch.jl` | `RRugarch` | rugarch 1.5-6 `ugarchfit`/`coef` für sGARCH/gjrGARCH(1,1), Solver „hybrid“ (solnp → nlminb → gosolnp), Filter aus `src/filters.c`, eigene Richardson-Hesse-Matrix `_richardson_hessian` (in R übernommen als `.rugarch_ugarchfit`, Ableitungen `.sl_richardson_hessian` in `r/R/richardson.R`, immer aktiv) → `_r/rugarch.py` |
-| `src/r/stinepack.jl` | `RStinepack` | stinepack 1.5 `stinterp`, `stinemanSlopes`, `parabolaSlopes` (in R übernommen als `.stinepack_stinterp`) → `_r/stinepack.py` |
-| `src/r/imputets.jl` | `RImputeTS` | imputeTS 3.4 `na_interpolation` (stine, linear), `na_locf` (`src/locf.cpp`; in R übernommen als `.imputets_na_interpolation`, immer aktiv) → `_r/imputets.py` |
 | `src/engine.jl` u. a. | – | `simulation()` und Strategie/Config: `engine.jl` (Hilfen, Handels- und Steuerfunktionen; r/R/sim_base.R → `_sim_base.py`), `sim_phases.jl` (r/R/sim_validate.R, sim_prepare.R → `_sim_phases.py`), `sim_loop.jl` (r/R/sim_actions.R, sim_loop.R → `_sim_loop.py`), `sim_evaluate.jl` (r/R/sim_evaluate.R → `_sim_evaluate.py`; dazu `simulation()` und `_simulation_flat()` aus r/R/simulation.R → `engine.py`), `sim_blocks.jl` (Bausteine, r/R/sim_blocks.R → `_sim_blocks.py`), `wrapper.jl` (Fonds-Wrapper `wrapper_config`, `wrapper_nav`, Anteilswert `_wrapper_nav_calc`, r/R/wrapper.R → `wrapper.py`; Hilfen der Strategie `_strategy_columns`, `_strategy_wrappers` in `config.jl`) |
 | `src/svg.jl` | – | Grafikmodul: `SimLevPlot`, `_plot_method` & Co., alle SVG-Zeichenbausteine (siehe [Grafik](#grafik)) → `simlev/svg.py` |
 | `src/dashboard.jl` | – | Dashboard-Daten und Panels, `plot_dashboard`, `export_dashboard` (r/R/plot_dashboard.R) → `dashboard.py` |
 | `src/<modul>.jl` | `DataPrep`, `Backcast`, `Bonds`, `Signals`, `Bootstrap`, `Withdrawal`, `Dependence`, `Regimes`, `MsGarch`, `Scenarios`, `Optimize`, `Tactical`, `DeepAnalysis`, `Planning`, `AnalysisTests`, `Overfitting`, `ParamSearch`, `Sensitivity` | je eine R-Datei `r/R/<modul>.R` → `python/simlev/<modul>.py` |
-| `src/<name>_core.jl` | `BootstrapCore`, `SignalsCore`, `WithdrawalCore`, `DependenceCore`, `OptimizeCore` | C++-Kerne aus `r/src/` (`BootstrapCore` zusätzlich der C-Kern `ms_garch.c`) → `python/simlev/_<name>_core.py` |
+| `src/<name>_core.jl` | `SignalsCore`, `WithdrawalCore`, `DependenceCore`, `OptimizeCore` | eigene Ports der geteilten C++-Kerne aus `core/` (F2; Python ruft sie als C-Erweiterung) → `python/simlev/_<name>_core.py`; `BootstrapCore` und der Port des DCC-Filters sind mit 9.6c entfallen |
 | `src/exports.jl` | – | sammelt die öffentlichen Funktionen der Untermodule für `using SimLev` |
 
 Funktionen anderer Untermodule werden **im Funktionsrumpf qualifiziert**
@@ -84,16 +83,14 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
    (auch beim Broadcasting: `RLibm.exp.(x)`); `x^2` ist in R `x*x`, sonst
    `RLibm.pow` (R's `R_POW`-Regeln, siehe `src/r/rnum.jl`). `sqrt`, `abs`, `floor`,
    `ceil`, `+ - * /` sind exakt. Kein `muladd`/`fma`, kein `@fastmath`.
-4. **Keine Matrixprodukte mit `*`** (OpenBLAS): `RLinalg.matprod`,
-   `crossprod` usw. bilden die Referenz-BLAS-Reihenfolge nach. Eigenvektoren
-   kommen wie in R aus der Referenz-LAPACK des Systems (`ccall` auf
-   `liblapack.so.3`, Pfad über `SIMLEV_LAPACK`); ohne sie warnt SimLev und
-   rechnet mit `LinearAlgebra.eigen` (nicht bitgleich).
+4. **Keine Matrixprodukte mit `*`** (OpenBLAS): Matrixprodukte, Cholesky, Löser, Eigenwerte und
+   QR kommen wie in R aus der C-Bibliothek (`SLib.matmul`, `crossprod`, `chol`, `eigen_sym`, …;
+   seit 9.6b/9.6c, keine System-LAPACK mehr).
 5. Sortieren, Runden und Formatieren immer über `RStats`/`RFmt` (R's
    Sortierverfahren bei Gleichständen und ±0, R's `round`-Algorithmus,
    C-`printf` für Zahlen).
-6. Zufall nur über `RRng` (globaler Zustand wie `.Random.seed`, in einer
-   `par_lapply`-Aufgabe deren eigene Kopie).
+6. Zufall nur über `SLib` (Zustand von SimLev bzw. ein `SLib.Stream`, siehe
+   [Zufall](#zufall-etappe-9)); `RRng` ist mit 9.6c entfallen.
 7. NA und NaN wie in R auseinanderhalten: Arithmetik mit NA ergibt auf x86
    wie in R wieder NA; wo R `NA_real_` setzt, `SimLev.NA` setzen.
 8. R-`warning(text)` → `@warn text` (nur die Meldung, keine weiteren
@@ -124,24 +121,23 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
     Dasselbe gilt für double: treffen in `a + b` oder `a * b` zwei NaN
     aufeinander (NA und NaN), behält x86 den ersten Operanden der Anweisung,
     und LLVM darf die Operanden tauschen. Die Ports der nativen Kerne
-    (Engine `core.jl`, `BootstrapCore`, `DependenceCore`, `RTruncnorm`,
-    `OptimizeCore.quantile7`) schreiben solche Stellen mit `nan_add`,
+    (Engine `core.jl`, `DependenceCore`, `OptimizeCore.quantile7`; bis 9.6c auch
+    `BootstrapCore` und `RTruncnorm`) schreiben solche Stellen mit `nan_add`,
     `nan_mul` usw. (`src/r/rnum.jl`) in der Operandenfolge des R-Baus
     (objdump von `SimLev.so`; seit Etappe 8.0, gleich wie Python), längere
     Kerne rechnen bei einem NaN im Ergebnis Schritt für Schritt nach
-    (`_hmm_nan`, `_dcc_nan`, `_ms_garch_filter_nan`). `std::min`/`std::max`
+    (`_hmm_nan`; bis 9.6c `_dcc_nan`, `_ms_garch_filter_nan`). `std::min`/`std::max`
     als `cpp_min`/`cpp_max` (NaN ergibt den ersten bzw. konstanten Operanden),
     nie Julias `min`/`max` (die NaN weitergeben); `x - y` statt `x += -y`
-    (NaN-Vorzeichen). Feste Randfälle in `test/nan_kerne_tests.jl`.
-15. Optionale R-Pakete fragt R nicht mehr ab (kein `requireNamespace`):
-    evd, imputeTS und rugarch sind übernommen, ihr Weg gilt immer; MSGARCH
-    ist durch die eigene Schätzung (`r/R/ms_garch.R`, Kern `r/src/ms_garch.c`;
-    hier `src/ms_garch.jl` und `BootstrapCore.ms_garch_filter`) ersetzt.
-    Einen Schalter für optionale Pakete gibt es nicht. `Sys.time()` →
-    `RBase.sys_time()` (Prüfschalter `SIMLEV_R_SYS_TIME`).
+    (NaN-Vorzeichen). Feste Randfälle in `test/nan_kerne_tests.jl`. Wo die C++-Kerne
+    `std::sort`/`std::nth_element` nutzen, bilden die Ports deren Verhalten aus libstdc++ (GCC 13)
+    nach (`_std_sort!` in `dependence_core.jl`, `optimize_core.jl`; Herkunft in `COPYRIGHTS.md`).
+15. Optionale R-Pakete gibt es nicht mehr: Seit Etappe 9.6c sind auch die Übernahmen (evd,
+    imputeTS, stinepack, rugarch, Rsolnp, truncnorm) entfallen; ihre Aufgaben rechnet slc.
+    `RBase.sys_time()` und `SIMLEV_R_SYS_TIME` (gosolnp) gibt es nicht mehr.
 
-Keine externen Pakete; erlaubt ist nur die Standardbibliothek (`Dates`,
-`Printf`, `Logging`; `LinearAlgebra` nur als Ersatzweg für Eigenvektoren).
+Keine externen Pakete; erlaubt ist nur die Standardbibliothek (`Dates`, `Printf`, `Logging`,
+`Libdl`). Zum Bau (`Pkg.build`) braucht SimLev einen C-Compiler.
 
 ## Parallelität (`cores`)
 
@@ -151,8 +147,9 @@ parallel rechnet (Aufrufer: `bootstrap`, `bootstrap_study`, `param_search`,
 `sensitivity_leverage`; `Bootstrap._par_lapply` und `ParamSearch._par_lapply`
 leiten weiter). Semantik wie `parallel::mclapply(mc.preschedule = FALSE,
 mc.set.seed = FALSE)` (Verhalten in R 4.3.3 ermittelt in Etappe 5): unter
-zwei Kernen oder mit höchstens einem Element `lapply`; sonst startet jede
-Einheit mit dem Zufallszustand des Aufrufers, der danach unverändert ist;
+zwei Kernen oder mit höchstens einem Element `lapply`; sonst rechnet jede
+Einheit mit dem Strom, den ihr der Aufrufer mitgibt (seit 9.6a, Regeln C.5; der globale Zustand
+ist in einer Einheit gesperrt);
 Ergebnisse in Eingangsreihenfolge; Warnungen gehen verloren; Meldungen und
 Ausgaben erscheinen in Einheitenreihenfolge; beim ersten Fehler (in
 Einheitenreihenfolge) erscheinen die Ausgaben davor, dann der Fehler. R
@@ -163,25 +160,22 @@ denselben Fehlern.
 Mit `Threads.nthreads() > 1` (`julia -t auto`, `julia -t 2`,
 `JULIA_NUM_THREADS`) startet `par_lapply` `min(cores, nthreads)` Aufgaben
 (`Threads.@spawn`), die sich die Einheiten der Reihe nach holen; mit einem
-Thread rechnet `_sequential` nacheinander. Jede Einheit bekommt eine eigene
-Kopie des Zufallszustands (`RRng.TaskState`: Generator und die statischen
-Werte von rgamma/rpois, `RRng.with_state`) und einen eigenen Ausgabepuffer,
-beides im task-lokalen Speicher; Warnungen verwirft ein `NullLogger` je
+Thread rechnet `_sequential` nacheinander. Jede Einheit setzt den Merker `SLib.in_unit` und
+bekommt einen eigenen Ausgabepuffer im task-lokalen Speicher (die frühere Kopie des
+R-Zufallszustands über `RRng.with_state` ist mit 9.6a/9.6c entfallen); Warnungen verwirft ein `NullLogger` je
 Aufgabe. Referenzfälle zusätzlich mit `julia -t 2` prüfen.
 
 **Regeln für neue Module (Thread-Sicherheit):**
 
 1. Parallel nur über `par_lapply`, nie eigene Tasks oder Threads.
 2. Keine veränderlichen globalen Zustände. Was eine Rechnung sich merken muss,
-   gehört in lokale Variablen oder Argumente (wie `_Bsplvb` in
-   `src/r/_sbart.jl`); Zustände, die für einen Aufruf gelten (Handler,
+   gehört in lokale Variablen oder Argumente; Zustände, die für einen Aufruf gelten (Handler,
    Schalter), in den task-lokalen Speicher (`task_local_storage(f, key,
    wert)`, wie `_with_bounds_handler` in `src/optimize.jl`); einmalige
    Einrichtung (Bibliotheken laden, Tabellen) unter einer `ReentrantLock`
-   und erst am Ende als fertig markieren (wie `_collate_init!`,
-   `system_lapack`); Caches mit Sperre (wie `RFmt`/`rformat`, `RExpr`).
-3. Zufall nur über `RRng`; dessen Funktionen holen den Zustand über `_st()`,
-   `_rg()`, `_rp()`, nie direkt über `_S`, `_RG`, `_RP`.
+   und erst am Ende als fertig markieren (wie `_collate_init!`); Caches mit Sperre (wie `RFmt`/`rformat`, `RExpr`).
+3. Zufall nur über `SLib` mit einem `Stream` als Argument (in einer Einheit nie der globale
+   Zustand, siehe [Zufall](#zufall-etappe-9)).
 4. Meldungen über `RParallel.r_stderr()`, Ausgaben einer Einheit über
    `RParallel.r_stdout()`; nie `redirect_stdout`/`redirect_stderr` in
    Paketcode (wirkt prozessweit). Direkte Schreibzugriffe auf `stdout`
@@ -232,6 +226,11 @@ und zugleich nach `python/simlev/svg.py`.
 
 ## Referenzfälle und Prüfung
 
+> Seit Etappe 9 ausgesetzt (siehe [Tests in Etappe 9](#tests-in-etappe-9)): Die gespeicherten
+> Fälle beschreiben den Stand vor dem eigenen Zufall und den eigenen Kernen. Generatoren und
+> Vergleicher unten gelten weiter; frische Fälle erzeugt und vergleicht die Gleichlaufprüfung
+> `tools/gleichlauf/run.sh`, die nach jeder Änderung an der Rechenlogik läuft.
+
 Die Referenzfälle unter `golden/modules/<modul>/` erzeugen die Generatoren
 `golden/modules/gen_<modul>.R`. Jeder Aufruf `ref_case(id, r = …, py = …,
 jl = …)` trägt R-, Python- und Julia-Code; der Julia-Code setzt `result`
@@ -249,7 +248,7 @@ Konsolenausgabe, Warnungen und Fehlermeldungen. Bei der Entwicklung spart
 `SIMLEV_SKIP_PRECOMPILE=1` die Vorkompilier-Arbeitslast.
 
 Die Arbeitslast in `src/precompile.jl` deckt nur häufige Wege ab: Engine,
-`bootstrap` (stationär und `"garch"` über den rugarch-Weg),
+`bootstrap` (stationär und `"garch"`, seit 9.6b über die ML-Schätzung in slc),
 `bootstrap_study`, `_ms_garch_fit`, Entnahme, Optimierung und
 `result_analysis` (Etappe 4.8; gemessen auf zwei Kernen, Julia 1.13.2):
 
@@ -299,27 +298,71 @@ Alle Umgebungsschalter liest (und setzt) nur `src/r/env.jl` (`SimLev.REnv`);
 Paket, Vorkompilierung, Tests und Werkzeuge holen sie von dort
 (`test/layers_tests.jl` prüft das). Wann gelesen wird, bestimmt die
 aufrufende Stelle: `test/reftree.jl` beim Laden, die Kollation beim ersten
-Vergleich (neu nach `RStats.collate_reset()`), LAPACK beim ersten Laden der
-Bibliothek, `RBase.sys_time()` bei jedem Aufruf, `precompile.jl` beim
+Vergleich (neu nach `RStats.collate_reset()`), `precompile.jl` beim
 Vorkompilieren.
 
 | Schalter | Zweck | Art |
 |---|---|---|
 | `SIMLEV_COLLATE` | Sortierung: `icu:<Locale>` (`icu:root` wie R unter C.UTF-8) oder `C` (Bytes); ohne Angabe nach `LC_ALL`/`LC_COLLATE`/`LANG` | Nutzer |
 | `SIMLEV_ICU` | Pfad zur ICU-Bibliothek (`libicui18n`) | Nutzer |
-| `SIMLEV_LAPACK` | Pfad zur Referenz-LAPACK (`dsyevr_`) | Nutzer |
-| `SIMLEV_R_SYS_TIME` | feste Uhr für `RBase.sys_time()` (gosolnp), Sekunden seit 1970; `run_ref_case` setzt sie aus dem Feld `sys_time` eines Falls | Prüfung |
 | `SIMLEV_LAX_NA` | `1`: NA = NaN im Vergleich (`reftree.jl`) | Prüfung |
 | `SIMLEV_STRICT_ZERO` | `0`: −0 = +0 im Vergleich (`reftree.jl`) | Prüfung |
 | `SIMLEV_FULL_TESTS` | `1`: `Pkg.test()` prüft alle Modul-Fälle statt bis zu vier je Modul | Prüfung |
 | `SIMLEV_GOLDEN_DIR` | anderer Wurzelordner der Engine-Fälle (`cases/`, `extra/`) für `Pkg.test()` | Prüfung |
 | `SIMLEV_SKIP_PRECOMPILE` | `1`: keine Arbeitslast beim Vorkompilieren | Entwicklung |
 | `SIMLEV_SKIP_PRECOMPILE_EXT` | `1`: Arbeitslast ohne die Analysemodule | Entwicklung |
+| `SIMLEV_LEGACY_TESTS` | `1`: alte Tests und Referenzvergleiche laufen (Etappe 9: sonst ausgesetzt, siehe [Tests in Etappe 9](#tests-in-etappe-9)) | Prüfung |
+| `SIMLEV_MODULE_DIR` | anderer Ordner der Modul-Fälle (`compare_reference.jl`, Gleichlauf) | Prüfung |
+| `SIMLEV_CC` | C-Compiler für `Pkg.build` (gelesen in `deps/build.jl`) | Bau |
+
+Seit Etappe 9.6c (Entwurf C.6 Nr. 10) entfallen `SIMLEV_LAPACK` und `SIMLEV_R_SYS_TIME`.
 
 `reftree.jl` setzt `SIMLEV_COLLATE=icu:root`, falls nicht gesetzt (die
 Referenzen entstanden unter C.UTF-8). Die Generatoren in `golden/modules/`
 lesen eigene Schalter (`SIMLEV_R_NMATH_SRC`, `SIMLEV_ALLOW_PARTIAL`, siehe
 `golden/README.md`).
+
+## C-Bibliothek (Pflicht)
+
+Zufall, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, die
+Bootstrap-Kerne, Stineman, Glättungsspline und Kerndichte rechnet die C-Bibliothek slc (Etappe
+9.1–9.6c). `deps/build.jl` (läuft bei `Pkg.build`/`Pkg.add`) übersetzt `deps/core/*.c` mit
+`-std=c99 -O2 -fPIC -ffp-contract=off -fno-fast-math` zu `deps/usr/lib/libslc` und schreibt
+`deps/deps.jl`; der Compiler kommt aus `SIMLEV_CC`, sonst `cc`, `gcc` oder `clang`. Ohne Bibliothek
+bricht `using SimLev` mit einer Meldung ab, die `Pkg.build("SimLev")` mit C-Compiler verlangt. Die
+Hüllen stehen in `src/slib*.jl` (`SimLev.SLib`, `ccall`, Fehler über den Kontext `sl_ctx`).
+
+**Ort der Quellen (`core/`, Entwurf C.1, F16):** kanonisch in `core/` (nur dort ändern); Kopien
+der slc-Dateien liegen in `julia/deps/core/`, `r/src/` und `python/src/core/`. Die geteilten
+C++-Kerne von R und Python (`core/simlev_core.h`, `core/*_core_impl.h`: Engine, FIFO, Steuer,
+Research, Entnahme) liegen seit 9.6c ebenfalls in `core/`, werden aber nur nach `r/src/` und
+`python/src/core/` kopiert: Julia behält seine eigenen Ports dieser Kerne (F2; `core.jl`,
+`signals_core.jl`, `withdrawal_core.jl`, `dependence_core.jl`, `optimize_core.jl`).
+`tools/core_sync.py --write` kopiert, `--check` vergleicht alle Kopien per SHA-256 (Ende 1 bei
+Abweichung) und läuft in jeder Gleichlaufprüfung.
+
+## Zufall (Etappe 9)
+
+Den globalen Zustand hält `SLib` prozessweit mit `ReentrantLock` (F3); alle Ziehungen rechnet die
+C-Bibliothek (xoshiro256**, SplitMix64, Ströme über Sprünge um 2^128). Regeln wie in R und Python
+(Entwurf C.5): `simlev_seed(seed)` setzt den Zustand (ganze Zahl, |seed| < 2^53; ohne Argument aus
+Uhrzeit, Prozessnummer und Zähler); `seed = nothing` an einer zufälligen Funktion zieht genau
+einmal k aus dem Zustand und rechnet wie mit `seed = k`; `seed = s` lässt ihn unberührt
+(Hauptstrom `SLib.main_stream(s)`); Einheiten von `par_lapply` bekommen ihre Ströme
+`SLib.streams` vor der Verteilung, das Ergebnis hängt nicht von `cores` oder `julia -t` ab. Die
+Nachbildung von R's Zufall (`RRng`, Exporte `set_seed`/`rng_kind`) ist mit 9.6c entfallen.
+
+## Tests in Etappe 9
+
+Die alten Tests sind bis zum Neuaufbau ausgesetzt (Entwurf C.7); keine Datei wird gelöscht.
+`test/runtests.jl` führt ohne `SIMLEV_LEGACY_TESTS=1` nur den Testsatz „Etappe 9“ aus (die
+Rauchproben `test/etappe9*.jl`) und lädt die übrigen Dateien nicht. Mit dem Schalter laufen alle
+alten Tests; Dateien, die entfallene Module nutzen (`RRng`, `RNmath`, `RLinalg`-Teile,
+`BootstrapCore` …, etwa `ms_garch_tests.jl`, `nan_kerne_tests.jl`, `parallel_tests.jl`), scheitern
+dann erwartungsgemäß. `tools/compare_reference.jl` und `compare_golden.jl` enden ohne Schalter mit
+Hinweis, außer `SIMLEV_MODULE_DIR` bzw. `SIMLEV_GOLDEN_DIR` zeigt auf einen Gleichlauf-Ordner.
+Ersatz ist die Gleichlaufprüfung `tools/gleichlauf/run.sh` (siehe
+[`python/DEVELOPING.md`](../python/DEVELOPING.md#tests-in-etappe-9)).
 
 ## Schichten
 

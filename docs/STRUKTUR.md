@@ -3,8 +3,8 @@
 Diese Datei ist erzeugt; nicht von Hand ändern.
 
 - **Erzeugt** mit `tools/api_snapshot/run.sh` (Auszüge `api_r.R`, `api_py.py`, `api_jl.jl`, Vergleich `compare_api.py`, diese Datei `make_struktur.py`) aus `tools/api_snapshot/api.json`.
-- **Stand:** 2026-10-27.
-- **Umfang:** R 115 Exporte und 78 S3-Methoden, Python 120 Funktionen und 79 Methoden, Julia 130 Funktionen und 77 Methoden.
+- **Stand:** 2026-10-28.
+- **Umfang:** R 116 Exporte und 78 S3-Methoden, Python 119 Funktionen und 79 Methoden, Julia 129 Funktionen und 77 Methoden.
 - **Zuordnung:** R `a.b` → `a_b`; S3-Methode `<generic>.<Klasse>` → Python `<Klasse>.<generic>` (print über `.print` bzw. `.format`), Julia registrierte Methode (`show`, `r_summary`, `r_plot`). Regeln: `python/DEVELOPING.md`, `julia/DEVELOPING.md`.
 - **Abweichungen** der Argumente und Standardwerte meldet `compare_api.py`; bekannte stehen in `tools/api_snapshot/known_differences.tsv`.
 - Dateien relativ zu `r/R/`, `python/simlev/` bzw. `julia/src/`.
@@ -13,13 +13,13 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 
 | Schicht | Inhalt | R | Python | Julia |
 |---|---|---|---|---|
-| 0 | R-Interna, eingebaute Pakete | (R selbst), `vendor_*` | `simlev/_r/` | `src/r/` |
+| 0 | R-Grundfunktionen, Hüllen der C-Bibliothek | (R selbst), `slc*.R` | `simlev/_r/`, `_lib*.py` | `src/r/`, `slib*.jl` |
 | 1 | Daten und Strategie | `data_prep.R`, `strategy.R` … | `data_prep.py`, `config.py` | `data_prep.jl`, `config.jl` |
 | 2 | Engine | `simulation.R`, `sim_*.R`, Kerne | `engine.py`, `_sim_*.py`, `_core.py`, `result.py` | `engine.jl`, `sim_*.jl` |
 | 3 | Analysen | je eine `.R` | je ein Modul | je eine Datei |
 | 4 | Ausgabe | `print`-Methoden, `plot_dashboard.R` | `svg.py`, `dashboard.py` | `svg.jl`, `dashboard.jl` |
 
-## Öffentliche Funktionen (R-Exporte) (115)
+## Öffentliche Funktionen (R-Exporte) (116)
 
 | Name R | Datei R | Name Python | Datei Python | Name Julia | Datei Julia |
 |---|---|---|---|---|---|
@@ -113,6 +113,7 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `split_rule` | `sim_blocks.R` | `split_rule` | `_sim_blocks.py` | `split_rule` | `sim_blocks.jl` |
 | `tax_profile` | `sim_blocks.R` | `tax_profile` | `_sim_blocks.py` | `tax_profile` | `sim_blocks.jl` |
 | `simulation` | `simulation.R` | `simulation` | `engine.py` | `simulation` | `sim_evaluate.jl` |
+| `simlev_seed` | `slc.R` | `simlev_seed` | `_lib.py` | `simlev_seed` | `slib.jl` |
 | `create_strategy` | `strategy.R` | `create_strategy` | `config.py` | `create_strategy` | `config.jl` |
 | `strategy_add_asset` | `strategy.R` | `strategy_add_asset` | `config.py` | `strategy_add_asset` | `config.jl` |
 | `strategy_remove_asset` | `strategy.R` | `strategy_remove_asset` | `config.py` | `strategy_remove_asset` | `config.jl` |
@@ -224,7 +225,7 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | – | – | `SimLevParamRange.format` | `param_search.py` | – | – |
 | – | – | `WithdrawalPathsPB.format` | `planning.py` | – | – |
 
-## Nur in den Ports (15)
+## Nur in den Ports (13)
 
 | Name R | Datei R | Name Python | Datei Python | Name Julia | Datei Julia |
 |---|---|---|---|---|---|
@@ -239,7 +240,5 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | – | – | `plot` | `__init__.py` | `r_plot` | `r/types.jl` |
 | – | – | – | – | `plot_dashboard` | `dashboard.jl` |
 | – | – | – | – | `r_class` | `config.jl` |
-| – | – | `rng_kind` | `_r/rng.py` | `rng_kind` | `r/rng.jl` |
 | – | – | – | – | `rows` | `r/types.jl` |
-| – | – | `set_seed` | `_r/rng.py` | `set_seed` | `r/rng.jl` |
 | – | – | `summary` | `__init__.py` | `r_summary` | `r/types.jl` |

@@ -35,7 +35,7 @@ Renditen ab dem ersten Produktkurs an oder nach diesem Datum (Fehler,
 wenn danach kein Produktkurs vorliegt).}
 
 \item{fill}{Fuellmethode fuer Produktluecken nach der Verkettung:
-"locf" (Standard, wie die Engine), "linear", "stine" (Stineman wie imputeTS) oder "model"
+"locf" (Standard, wie die Engine), "linear", "stine" (Stineman, wie bei \code{index_fill}) oder "model"
 (Lueckentage mit Modellrenditen, Endpunkte aus echten Kursen; erhaelt die
 echten Kurse an allen Beobachtungstagen).}
 

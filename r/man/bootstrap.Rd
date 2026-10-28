@@ -41,8 +41,8 @@ ausgewertet.}
 \item{"evt"}{GPD-Tails des Referenzindex plus empirischer Bulk (\code{tail_prob}, \code{both_tails}); uebrige Indizes ueber das historische Verhaeltnis zum Referenzindex gekoppelt}
 \item{"tails"}{Empirische Tail-Schichtung des Referenzindex (\code{tail_prob})}
 \item{"reset"}{Chronologie mit zufaellig gespiegelten Segmenten (\code{p_break}); erhaelt die Chronologie}
-\item{"garch", "gjr_garch"}{(GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung ueber \code{cross} in \code{\link[=bootstrap_config]{bootstrap_config()}})}
-\item{"ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"}{Markov-Switching-GARCH-Familie: eigene ML-Schaetzung des MS-GARCH-Modells nach Haas, Mittnik und Paolella (2004), Normalverteilung, Varianzmodell "sGARCH" oder "gjrGARCH" je Regime; "ms_ar_garch_m" zusaetzlich mit AR- und GARCH-in-Mean-Termen je Regime, "tvtp_ms_garch" mit zeitvariablen Uebergangswahrscheinlichkeiten (\code{ms_n_regimes}/\code{ms_garch_model}, \code{ms_ar_n_regimes}/\code{ms_ar_garch_model} bzw. \code{tvtp_n_regimes}/\code{tvtp_garch_model})}
+\item{"garch", "gjr_garch"}{(GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung ueber \code{cross} in \code{\link[=bootstrap_config]{bootstrap_config()}}). Geschaetzt per Maximum Likelihood unter Normalverteilung mit der C-Bibliothek von SimLev (GJR mit \eqn{\alpha + \gamma \ge 0}, also auch \eqn{\gamma < 0}; bis Version 1.0.0 \eqn{\gamma \ge 0}; BFGS von sieben Rasterpunkten), notfalls mit Momentschaetzern; die Meldungen nennen den Weg "ml" bzw. "momente" (bis Etappe 9.6b "rugarch"/"optim")}
+\item{"ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"}{Markov-Switching-GARCH-Familie: eigene ML-Schaetzung des MS-GARCH-Modells nach Haas, Mittnik und Paolella (2004), Normalverteilung, Varianzmodell "sGARCH" oder "gjrGARCH" je Regime (GJR mit \eqn{\alpha + \gamma \ge 0}, also auch \eqn{\gamma < 0}; BFGS mit analytischem Gradienten von 12 bzw. bei "gjrGARCH" 20 Startpunkten); "ms_ar_garch_m" zusaetzlich mit AR- und GARCH-in-Mean-Termen je Regime, "tvtp_ms_garch" mit zeitvariablen Uebergangswahrscheinlichkeiten (\code{ms_n_regimes}/\code{ms_garch_model}, \code{ms_ar_n_regimes}/\code{ms_ar_garch_model} bzw. \code{tvtp_n_regimes}/\code{tvtp_garch_model})}
 }
 Bei "wild" und "reset" muss \code{path_length} der Laenge der Historie
 entsprechen.}
@@ -113,15 +113,16 @@ mindestens 1); \code{NULL} (Standard) = Anzahl verwendbarer Zeilen der Historie.
 z. B. 50-jaehrige Pfade aus 30 Jahren Historie erzeugen. Jeder Pfad hat
 \code{path_length + 1} Zeilen (Startzeile plus Schritte).}
 
-\item{seed}{Ganzzahliger Startwert; \code{NULL} (Standard) = zufaellig
-gezogen (im Ergebnis unter \code{seed} gespeichert). Jeder Pfad erhaelt
-einen eigenen L'Ecuyer-Strom, so dass Pfad i unabhaengig von
-\code{cores} ist und \code{\link[=bootstrap]{bootstrap()}} und \code{\link[=bootstrap_study]{bootstrap_study()}} mit gleichem
-Seed (und gleichen Daten, Verfahren, \code{params}, \code{ess} und
-\code{path_length}) dieselben Pfade erzeugen.
-Mit angegebenem Seed bleibt der globale Zufallszustand unveraendert;
-mit \code{seed = NULL} wird der Seed aus dem globalen Zufallsstrom
-gezogen, wiederholte Aufrufe liefern daher verschiedene Pfade.}
+\item{seed}{Ganzzahliger Startwert (\eqn{|seed| < 2^{53}}); \code{NULL} (Standard) = genau
+einmal aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}; ganze Zahl von 0
+bis \eqn{2^{31} - 1}, im Ergebnis unter \code{seed} gespeichert, damit reproduzierbar).
+Jeder Pfad i erhaelt einen eigenen Strom (Sprung um \eqn{2^{128}} Schritte je Pfad), so
+dass Pfad i unabhaengig von \code{cores} (und bei \code{\link[=bootstrap_study]{bootstrap_study()}} von
+\code{chunk_size}) ist und \code{\link[=bootstrap]{bootstrap()}} und \code{\link[=bootstrap_study]{bootstrap_study()}} mit gleichem Seed (und
+gleichen Daten, Verfahren, \code{params}, \code{ess} und \code{path_length})
+dieselben Pfade erzeugen. Mit angegebenem Seed bleibt der Zufallszustand von SimLev
+unveraendert; mit \code{seed = NULL} liefern wiederholte Aufrufe verschiedene Pfade.
+\code{set.seed()} wirkt nicht.}
 
 \item{cores}{Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK-Cluster auf
 Windows).}

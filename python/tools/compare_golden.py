@@ -4,7 +4,9 @@ Aufruf::
 
     python compare_golden.py [<ordner_oder_datei> ...] [-k fall ...] [-v]
 
-Ohne Pfad werden ``golden/cases`` und ``golden/extra`` geprüft. Gelesen werden
+Ohne Pfad werden ``golden/cases`` und ``golden/extra`` geprüft (bzw. ``SIMLEV_GOLDEN_DIR``).
+Etappe 9: ohne ``SIMLEV_LEGACY_TESTS=1`` ist dieser Vergleich ausgesetzt (Hinweis, Ende 0),
+außer es sind andere Verzeichnisse angegeben (Gleichlaufprüfung). Gelesen werden
 ``.json.gz`` und ``.json``. Verglichen werden ``worth``, ``drawdowns``, ``filled``,
 ``cagr``, ``ttwror``, ``statistics``, ``tax_report``, ``buys``, ``sells``, ``report``,
 die Druckausgabe (``print``) und – bei ``details = TRUE`` – die Konsolenausgabe
@@ -188,7 +190,13 @@ def main(argv=None):
     ap.add_argument("-v", "--verbose", action="store_true", help="Unterschiede ausführlich zeigen")
     ap.add_argument("-q", "--quiet", action="store_true", help="nur die Zusammenfassung")
     a = ap.parse_args(argv)
-    paths = a.paths or DEFAULT_DIRS
+    gdir = _env.golden_dir()
+    paths = a.paths or (gdir.split(os.pathsep) if gdir else DEFAULT_DIRS)
+    # Etappe 9 (Entwurf C.7): Vergleich mit golden/cases und golden/extra ausgesetzt
+    if not _env.legacy_tests() and sorted(os.path.abspath(p) for p in paths) == sorted(DEFAULT_DIRS):
+        print("compare_golden: Etappe 9 – Vergleich mit golden/cases und golden/extra ausgesetzt "
+              "(SIMLEV_LEGACY_TESTS=1, oder Pfade/SIMLEV_GOLDEN_DIR für andere Verzeichnisse)")
+        return 0
     total_ok = total = 0
     failed_all = []
     for p in paths:

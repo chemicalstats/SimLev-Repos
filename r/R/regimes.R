@@ -15,7 +15,7 @@
 #' @keywords internal
 #' @noRd
 .ldmvn <- function(X, mu, S) {
-  L <- chol(S); Z <- t(backsolve(L, t(sweep(X, 2, mu)), transpose = TRUE))
+  L <- .sl_chol(S); Z <- t(.sl_backsolve(L, t(sweep(X, 2, mu)), transpose = TRUE))
   -0.5 * rowSums(Z^2) - sum(log(diag(L))) - 0.5 * ncol(X) * log(2 * pi)
 }
 
@@ -65,7 +65,7 @@
     es <- estep(); ga <- es$fb$smoothed; xi <- es$fb$xi; ll <- es$ll
     p0 <- ga[1, ]; A <- xi / rowSums(xi)
     for (j in seq_len(k)) { w <- ga[, j]; sw <- sum(w); mu[j, ] <- colSums(X * w) / sw
-      Xc <- sweep(X, 2, mu[j, ]); S[[j]] <- crossprod(Xc * sqrt(w)) / sw + ridge }
+      Xc <- sweep(X, 2, mu[j, ]); S[[j]] <- .sl_crossprod(Xc * sqrt(w)) / sw + ridge }
     if (abs(ll - ll_old) < tol * (1 + abs(ll))) break
     ll_old <- ll
   }
@@ -134,10 +134,11 @@
 #'   300) und relative Abbruchschranke: Abbruch, wenn sich die
 #'   Log-Likelihood um weniger als \code{tol * (1 + |logL|)} aendert
 #'   (Standard 1e-7).
-#' @param seed Startwert (ganze Zahl, Standard 1) fuer die zufaelligen
-#'   Startwerte. Mit Startwert ist das Ergebnis reproduzierbar und der
-#'   Zufallszustand der Sitzung bleibt unveraendert; mit `NULL` wird der
-#'   Zufallsstrom der Sitzung normal weitergezogen.
+#' @param seed Startwert (Standard 1) fuer die zufaelligen Startzuordnungen (nur bei
+#'   \code{n_start > 1}). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+#'   Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+#'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
+#'   Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
 #' @return Objekt der Klasse \code{SimLevHMM}, eine Liste mit
 #'   \describe{
 #'     \item{\code{transition}}{Uebergangsmatrix k x k (Zeile = von, Spalte =
@@ -196,11 +197,10 @@ regime_hmm <- function(data, columns, k = 2L, frequency = c("week", "day", "mont
                                  paste0("'", flat, "'", collapse = ", ")))
   ppy <- (Tn - 1) / (as.numeric(rd$date[Tn] - rd$date[1]) / 365.25)
   ridge <- diag(1e-10 + 1e-6 * mean(apply(X, 2, stats::var)), d)
-  inits <- .with_rng_restore(seed = seed, {
-    lapply(seq_len(n_start), function(s) {
-      if (s == 1) .hmm_init_rank(X, k, max(4, round(ppy / 12)), ridge)
-      else .hmm_init_cl(X, sample.int(k, Tn, replace = TRUE), k, ridge)
-    })
+  rs <- if (isTRUE(n_start >= 2)) .sl_main_stream(seed) else NULL   # Hauptstrom (Entwurf C.5), nur bei Zufallsstarts
+  inits <- lapply(seq_len(n_start), function(s) {
+    if (s == 1) .hmm_init_rank(X, k, max(4, round(ppy / 12)), ridge)
+    else .hmm_init_cl(X, .sl_sample(k, Tn, replace = TRUE, stream = rs), k, ridge)
   })
   fits <- lapply(inits, function(i) tryCatch(.hmm_em(X, k, i, max_iter, tol, ridge), error = function(e) NULL))
   fits <- Filter(Negate(is.null), fits)

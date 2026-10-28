@@ -79,10 +79,10 @@
 #' Fehlende Werte fuellen
 #'
 #' @param v numerischer Vektor.
-#' @param method "none", "locf", "linear" oder "stine" (Stineman ueber die
-#'   aus imputeTS 3.4 und stinepack 1.5 uebernommene Fassung von
-#'   na_interpolation, .imputets_na_interpolation in R/vendor_imputets.R;
-#'   imputeTS muss nicht installiert sein).
+#' @param method "none", "locf", "linear" oder "stine" (Stineman-Interpolation
+#'   der inneren Luecken mit der C-Bibliothek slc, .sl_stineman, seit Etappe 9.6b;
+#'   Stuetzstellen sind die Positionen der vorhandenen Werte). "locf" rechnet
+#'   SimLev selbst (ohne die C-Huelle .imputets_locf).
 #' @param keep_leading Fuehrende NAs beibehalten (TRUE) oder rueckwaerts fuellen.
 #' @keywords internal
 #' @noRd
@@ -103,8 +103,8 @@
     if (first > 1L) out[1:(first - 1L)] <- v[first]
   } else {
     out <- v
-    inner <- first:last
-    out[inner] <- as.numeric(.imputets_na_interpolation(v[inner], option = "stine"))
+    gap <- setdiff(first:last, ok)                       # innere Luecken; Stuetzstellen = Positionen der Werte
+    out[gap] <- .sl_stineman(ok, v[ok], gap)             # Stineman (1980), skaliert (Entwurf B.14, slc)
     if (last < length(v)) out[(last + 1L):length(v)] <- v[last]
     if (first > 1L) out[1:(first - 1L)] <- v[first]
   }
@@ -206,7 +206,7 @@
     reg$coef[1] + reg$coef[2] * prep$x
   } else {
     out <- rep(NA_real_, prep$n); ok <- is.finite(prep$x)
-    out[ok] <- stats::predict(reg$fit, prep$x[ok])$y
+    out[ok] <- .sl_smspline_predict(reg$fit, prep$x[ok])   # ausserhalb der Knoten linear fortgesetzt
     out
   }
   base - par[["spread"]] * prep$sp_unit - par[["drag"]] * prep$dr_unit
@@ -320,8 +320,10 @@
 #'   \code{ter} (z. B. Spaltenname). Der Index wird mit \code{fx} multipliziert.
 #' @param model \code{"structural"} (Standard, Hebel-/Kostenmodell oben),
 #'   \code{"linear"} (Regression Produktrendite ~ Indexrendite, Stambaugh-
-#'   Backfill) oder \code{"spline"} (Glaettungsspline, Ersatz fuer das GAM aus
-#'   '01 Base Indices'). Die Regressionsmodelle werden auf Renditen direkt
+#'   Backfill) oder \code{"spline"} (kubischer Glaettungsspline nach Reinsch
+#'   mit Knoten an allen Stuetzstellen und GCV-Wahl der Glaettung, Ersatz fuer
+#'   das GAM aus '01 Base Indices'; die Kurve weicht leicht von
+#'   \code{smooth.spline()} ab, das bei vielen Punkten Knoten auswaehlt). Die Regressionsmodelle werden auf Renditen direkt
 #'   aufeinanderfolgender Produktbeobachtungen geschaetzt und eignen sich fuer
 #'   Proxy-Rueckrechnungen (z. B. MSCI USA aus S&P 500).
 #' @param fit Zeichenvektor der zu schaetzenden Parameter (Standard
@@ -357,7 +359,7 @@
 #'   "JJJJ-MM-TT"); \code{NULL} (Standard) = gesamte Ueberlappung. Mindestens
 #'   20 gemeinsame Beobachtungen.
 #' @param method \code{"optimize"} (Standard; ein Parameter mit
-#'   \code{stats::optimize()} (Brent), mehrere mit L-BFGS-B innerhalb von
+#'   \code{stats::optimize()} (Brent), mehrere mit projiziertem BFGS (C-Bibliothek von SimLev) innerhalb von
 #'   \code{bounds}) oder \code{"grid"} (Gittersuche fuer genau einen Parameter,
 #'   wie im Skript).
 #' @param grid Gitterwerte fuer \code{method = "grid"} in der Einheit des
@@ -375,8 +377,8 @@
 #'   TER * T / 365, Fondsbuchhaltung) oder \code{"geometric"}
 #'   ((1 + TER)^(T/365) - 1, wie in den Skripten).
 #' @param index_fill Fuellmethode fuer Indexluecken: "locf" (Standard),
-#'   "linear" oder "stine" (Stineman wie imputeTS 3.4, dessen Interpolation
-#'   in SimLev uebernommen ist).
+#'   "linear" oder "stine" (Stineman-Interpolation nach Stineman 1980, skaliert
+#'   wie stinepack; eigene Umsetzung in der C-Bibliothek von SimLev).
 #'   Fuehrende Luecken bleiben \code{NA}.
 #' @param validate Logisch (Standard \code{TRUE}): Out-of-Sample-Pruefung
 #'   (Fit auf der juengeren Haelfte der Produktbeobachtungen, Test auf der
@@ -402,7 +404,10 @@
 #'     \item{validation}{Out-of-Sample-Ergebnis (Zeitraeume \code{train},
 #'       \code{test}, Parameter \code{par}, Testkennzahlen in Prozent) oder
 #'       \code{NULL}.}
-#'     \item{regression}{Regressionsfit (nur "linear"/"spline").}
+#'     \item{regression}{Regressionsfit (nur "linear"/"spline"): \code{coef}
+#'       (Achsenabschnitt, Steigung) bzw. \code{fit} (Splineobjekt der C-Bibliothek
+#'       mit \code{x}, \code{y}, \code{gam}, \code{lambda}, \code{df},
+#'       \code{gcv}; kein \code{smooth.spline}-Objekt).}
 #'     \item{inception, window}{Erstes Produktdatum und Fit-Fenster.}
 #'     \item{drag_per_day}{Drag in Prozent je Kalendertag.}
 #'     \item{call_args}{Daten und Modellangaben fuer [backcast()].}
@@ -509,8 +514,8 @@ backcast_fit <- function(data, product, index,
     xx <- prep$x[o]
     ok <- is.finite(y) & is.finite(xx) & !is.na(prep$prod[o - 1L])
     if (sum(ok) < 20) stop("Zu wenige aufeinanderfolgende Beobachtungen f\u00fcr das Regressionsmodell.")
-    if (model == "linear") list(coef = stats::coef(stats::lm.fit(cbind(1, xx[ok]), y[ok])))
-    else list(fit = stats::smooth.spline(xx[ok], y[ok], cv = FALSE))
+    if (model == "linear") list(coef = stats::setNames(.sl_lsfit(cbind(1, xx[ok]), y[ok])$coefficients, c("x1", "x2")))
+    else list(fit = .sl_smspline_fit(xx[ok], y[ok]))   # Glaettungsspline (Reinsch 1967, GCV; Entwurf B.15)
   }
   reg <- fit_reg(win)
 
@@ -545,7 +550,7 @@ backcast_fit <- function(data, product, index,
     }
     st <- unlist(par0[fit])
     lo <- vapply(fit, function(k) bounds[[k]][1], 0); hi <- vapply(fit, function(k) bounds[[k]][2], 0)
-    o <- stats::optim(st, function(t) obj_fun(t, rows, ob, rg), method = "L-BFGS-B", lower = lo, upper = hi)
+    o <- .sl_optim(st, function(t) obj_fun(t, rows, ob, rg), method = "L-BFGS-B", lower = lo, upper = hi)
     p <- par0; p[fit] <- as.list(o$par)
     list(par = p, value = o$value, grid = NULL, convergence = o$convergence)
   }
@@ -621,7 +626,7 @@ backcast_fit <- function(data, product, index,
 #'   Renditen ab dem ersten Produktkurs an oder nach diesem Datum (Fehler,
 #'   wenn danach kein Produktkurs vorliegt).
 #' @param fill Fuellmethode fuer Produktluecken nach der Verkettung:
-#'   "locf" (Standard, wie die Engine), "linear", "stine" (Stineman wie imputeTS) oder "model"
+#'   "locf" (Standard, wie die Engine), "linear", "stine" (Stineman, wie bei \code{index_fill}) oder "model"
 #'   (Lueckentage mit Modellrenditen, Endpunkte aus echten Kursen; erhaelt die
 #'   echten Kurse an allen Beobachtungstagen).
 #' @param rebase \code{NULL} (Standard; Produkteinheiten, echte Kurse bleiben

@@ -1,9 +1,9 @@
 /*
  * python/src/_ext_research.cpp -- Python-Huellen der Kerne aus research_core_impl.h
  *
- * Etappe 7.3a. Gemeinsamer Kern mit R (r/src/research_core_impl.h, Kopie hier);
- * aufgerufen aus simlev._optimize_core, _dependence_core, _signals_core und
- * _bootstrap_core, die vorher wie der reine Python-Kern umwandeln. Matrizen
+ * Etappe 7.3a. Gemeinsamer Kern mit R (core/research_core_impl.h, Kopie in src/core/);
+ * aufgerufen aus simlev._optimize_core, _dependence_core und _signals_core, die vorher
+ * wie R umwandeln. Matrizen
  * kommen spaltenweise als flache double-Puffer mit Zeilen- und Spaltenzahl;
  * Ergebnisse fester Laenge schreibt der Kern in vom Aufrufer bereitgestellte
  * Puffer (out), Ergebnisse veraenderlicher Laenge kommen als bytearray zurueck.
@@ -14,17 +14,17 @@
  *   min_cdar_core(R, T, N, alpha, lo, hi, iters, out)
  *   quantile_reg_core(y, X, n, p, tau, beta0, sc, tol, maxit) -> (beta | None, optimal)
  *   hmm_forward_backward(B, T, K, A, anr, p0, al, be, ga, xi, cs)
- *   garch_filter(ep, om, al, be, ga, v0, s2)
  *   roll_mean_core(x, n, out)
  *   kendall_tau_core(x, y) -> float
  *   roll_cov_core(x, y, n, out)
  *
  * Die Huellen pruefen die Laengen so, dass der Kern nur innerhalb der Puffer liest
- * und schreibt (die R-Kerne setzen dieselben Laengen stillschweigend voraus); die
- * aufrufenden Python-Funktionen nehmen bei anderen Eingaben den reinen Python-Kern.
+ * und schreibt (die R-Kerne setzen dieselben Laengen stillschweigend voraus); andere
+ * Eingaben weisen die aufrufenden Python-Funktionen vorher ab (die reinen Python-Kerne
+ * als Rueckfall sind seit Etappe 9.6c entfallen).
  */
 #include "_ext_common.h"
-#include "research_core_impl.h"
+#include "core/research_core_impl.h"
 
 namespace {
 
@@ -176,20 +176,6 @@ PyObject* r_hmm(PyObject*, PyObject* args) {
     Py_RETURN_NONE;
 }
 
-PyObject* r_garch(PyObject*, PyObject* args) {
-    PyObject *oep, *os2;
-    double om, al, be, ga, v0;
-    const char* fn = "garch_filter";
-    if (!PyArg_ParseTuple(args, "OdddddO:garch_filter", &oep, &om, &al, &be, &ga, &v0, &os2)) return nullptr;
-    ext::Buf ep, s2;
-    if (!ext::get(oep, ep, 'd', false, fn, "ep") || !ext::get(os2, s2, 'd', true, fn, "s2", ep.n)) return nullptr;
-    if (!ext::run([&] {
-            ext::Vec r = simlev::garch_filter(ext::vec(ep), om, al, be, ga, v0);
-            ext::put(s2, r.ptr, r.len);
-        })) return nullptr;
-    Py_RETURN_NONE;
-}
-
 PyObject* r_rmean(PyObject*, PyObject* args) {
     PyObject *ox, *oout;
     int n;
@@ -240,7 +226,6 @@ PyMethodDef simlev_ext_research_methods[] = {
     {"quantile_reg_core", r_qreg, METH_VARARGS,
      "quantile_reg_core(y, X, n, p, tau, beta0, sc, tol, maxit) -> (beta | None, optimal)"},
     {"hmm_forward_backward", r_hmm, METH_VARARGS, "hmm_forward_backward(B, T, K, A, anr, p0, al, be, ga, xi, cs)"},
-    {"garch_filter", r_garch, METH_VARARGS, "garch_filter(ep, om, al, be, ga, v0, s2)"},
     {"roll_mean_core", r_rmean, METH_VARARGS, "roll_mean_core(x, n, out)"},
     {"kendall_tau_core", r_kendall, METH_VARARGS, "kendall_tau_core(x, y) -> float"},
     {"roll_cov_core", r_rcov, METH_VARARGS, "roll_cov_core(x, y, n, out)"},

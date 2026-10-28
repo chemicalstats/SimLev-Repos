@@ -8,8 +8,11 @@
 #
 # Konventionen
 # * Namen wie in R bzw. der Python-Fassung, `.` → `_` (weighted.mean →
-#   weighted_mean, lm.fit → lm_fit, p.adjust → p_adjust, …). Kollisionen mit
-#   Base: r_sort, r_rank, r_filter, r_binomial.
+#   weighted_mean, p.adjust → p_adjust, …). Kollisionen mit Base: r_sort,
+#   r_rank, r_filter.
+# * Seit Etappe 9.6c entfallen optim, optimhess, nlminb, lm/lm_fit, poly, summary_lm,
+#   glm/r_binomial, t_test, predict, fft, density, bw_nrd0 und smooth_spline (eigene
+#   Verfahren der C-Bibliothek slc, SimLev.SLib).
 # * Eingaben: Vektoren (NA = SimLev.NA bzw. missing), RVector (benannt),
 #   Matrix, NamedMat, RFrame, Skalare.
 # * Ergebnisse: Länge 1 als Skalar, sonst Vector; benannte Vektoren als
@@ -25,9 +28,8 @@ import ..SimLev: RList, RVector, NamedMat, RFrame, NA, isna_strict, F80
 using Dates
 
 export quantile, median, var, sd, cov, cor, cov2cor, weighted_mean, scale, approx, approxfun,
-       r_filter, optimize, optimise, uniroot, optim, optimhess, nlminb, lm_fit, lm, poly, summary_lm, glm, glm_fit,
-       r_binomial, smooth_spline, predict_smooth_spline, predict, density, bw_nrd0, fft, hclust, dist,
-       as_dist, dist_as_matrix, p_adjust, t_test, r_rank, order, r_sort, sort_partial, rle, cut,
+       r_filter, optimize, optimise, uniroot, hclust, dist,
+       as_dist, dist_as_matrix, p_adjust, r_rank, order, r_sort, sort_partial, rle, cut,
        findInterval, tabulate, ave, aggregate, complete_cases, ecdf, fitted, coef, residuals,
        seq_len_out, ApproxFun, str_collate, r_isless
 
@@ -39,9 +41,6 @@ const _DBL_MAX = 1.7976931348623157e308
 
 include("_collate.jl")
 include("_optim.jl")
-include("_lbfgsb.jl")
-include("_fft.jl")
-include("_sbart.jl")
 
 # Kollationszustand (ICU-Handles) gilt nur im laufenden Prozess.
 # Beim Laden nur zurücksetzen (nach der Vorkompilierung wären Zeiger ungültig).

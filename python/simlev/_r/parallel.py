@@ -1,12 +1,15 @@
 """Nachbildung von SimLev's ``.par_lapply`` (``r/R/bootstrap.R``): ``parallel::mclapply``
 mit ``mc.preschedule = FALSE`` und ``mc.set.seed = FALSE``.
 
-Verhalten (ermittelt in Etappe 5, siehe ``python/DEVELOPING.md``):
+Verhalten (ermittelt in Etappe 5, siehe ``python/DEVELOPING.md``; Zufall seit Etappe 9.6a):
 
 - ``cores`` wird wie in ``mclapply`` ganzzahlig abgeschnitten; bei weniger als zwei Kernen
-  oder höchstens einem Element ist es ``lapply`` (der Zufallsstrom läuft fortlaufend weiter).
-- Sonst startet **jedes Element mit dem Zufallszustand des Aufrufers** (das Kind erbt
-  ``.Random.seed`` beim Fork); danach ist der Zustand des Aufrufers unverändert.
+  oder höchstens einem Element ist es ``lapply``.
+- Zufall (Entwurf C.5, Regeln 6, 7 und 10): Jede Einheit läuft als parallele Einheit
+  (:func:`simlev._lib.in_unit`): der globale Zufallszustand von SimLev ist darin gesperrt, auch
+  bei ``cores = 1``. Zufällige Einheiten bekommen ihren Strom als Argument; das Ergebnis hängt
+  damit nicht von ``cores`` ab. Die frühere Sicherung und Wiederherstellung des
+  R-Zufallszustands je Element entfällt.
 - Ergebnisse in der Reihenfolge von ``X``; Warnungen der Elemente gehen wie in Kindprozessen
   verloren; was ein Element auf ``sys.stdout``/``sys.stderr`` schreibt, erscheint im
   Elternprozess in der Reihenfolge der Elemente (R: Reihenfolge der Fertigstellung).
@@ -18,9 +21,8 @@ Kern ein Kindprozess über ``multiprocessing`` (Kontext ``"fork"``), dynamische 
 ``mc.preschedule = FALSE``. Die Arbeitsfunktion (meist eine Closure) liegt vor dem Fork in
 ``_JOB``; an die Kinder gehen nur Indizes, zurück kommen gepickelte Ergebnisse (bitgleich, auch
 NA mit Nutzlast 1954 und -0). Lässt sich ein Ergebnis nicht pickeln (z. B. weil es eine Closure
-enthält), rechnet der Elternprozess dieses Element selbst, mit demselben Zufallszustand. Auf
-Plattformen ohne Fork (Windows, macOS mit Standard ``spawn``) rechnet ``par_lapply``
-sequentiell mit derselben Semantik.
+enthält), rechnet der Elternprozess dieses Element selbst. Auf Plattformen ohne Fork (Windows,
+macOS mit Standard ``spawn``) rechnet ``par_lapply`` sequentiell mit derselben Semantik.
 """
 from __future__ import annotations
 
@@ -30,11 +32,9 @@ import pickle
 import sys
 import warnings
 
-from . import rng as _rng
+__all__ = ["par_lapply", "fork_available"]
 
-__all__ = ["par_lapply", "fork_available", "rng_snapshot", "rng_reset"]
-
-# Auftrag für die Kindprozesse: (X, FUN, Zufallszustand), gesetzt vor dem Fork.
+# Auftrag für die Kindprozesse: (X, FUN), gesetzt vor dem Fork.
 _JOB = None
 
 
@@ -46,24 +46,11 @@ def fork_available() -> bool:
     return "fork" in mp.get_all_start_methods()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Zufallszustand des Aufrufers
-# ═══════════════════════════════════════════════════════════════════════════
-
-def rng_snapshot():
-    """Zustand wie ``.Random.seed`` samt RNGkind (auch ohne ``.Random.seed``)."""
-    has = _rng.has_random_seed()
-    return (has, _rng.get_random_seed() if has else None, _rng._S.kind, _rng._S.n01, _rng._S.sample)
-
-
-def rng_reset(snap) -> None:
-    """Zustand aus :func:`rng_snapshot` wiederherstellen."""
-    has, seed, kind, n01, smp = snap
-    if has:
-        _rng.set_random_seed(seed)
-    else:
-        _rng._S.kind, _rng._S.n01, _rng._S.sample = kind, n01, smp
-        _rng.rm_random_seed()
+def _unit(FUN, x):
+    """``FUN(x)`` als parallele Einheit (Entwurf C.5, Regel 7: G gesperrt)."""
+    from .. import _lib
+    with _lib.in_unit():
+        return FUN(x)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -79,27 +66,22 @@ def par_lapply(X, FUN, cores=1):
     """Port von ``.par_lapply(X, FUN, cores)``; Ergebnis als Liste."""
     X = list(X)
     if cores is None or cores <= 1 or len(X) <= 1:
-        return [FUN(x) for x in X]
+        return [_unit(FUN, x) for x in X]
     n = min(_ncores(cores), len(X))
     if n < 2:                                   # mclapply: cores < 2 -> lapply
-        return [FUN(x) for x in X]
+        return [_unit(FUN, x) for x in X]
     if not fork_available():
         return _sequential(X, FUN)
     return _forked(X, FUN, n)
 
 
 def _sequential(X, FUN):
-    """Fork-Semantik nacheinander: jedes Element mit dem Zustand des Aufrufers."""
-    snap = rng_snapshot()
+    """Fork-Semantik nacheinander (Warnungen der Elemente gehen verloren)."""
     out = []
-    try:
-        for x in X:
-            rng_reset(snap)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                out.append(FUN(x))
-    finally:
-        rng_reset(snap)
+    for x in X:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            out.append(_unit(FUN, x))
     return out
 
 
@@ -154,16 +136,15 @@ def _replay(chunks) -> None:
                 pass
 
 
-def _run_one(X, FUN, snap, i):
+def _run_one(X, FUN, i):
     """Ein Element im Kind: (ok, Wert oder Ausnahme, Ausgaben)."""
     rec = _Rec()
     old = sys.stdout, sys.stderr
     sys.stdout, sys.stderr = _Stream(rec, 1, old[0]), _Stream(rec, 2, old[1])
     try:
-        rng_reset(snap)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            val, ok = FUN(X[i]), True
+            val, ok = _unit(FUN, X[i]), True
     except BaseException as e:  # noqa: BLE001 - wird im Elternprozess erneut geworfen
         val, ok = e, False
     finally:
@@ -197,13 +178,13 @@ def _plain_error(e):
 
 def _worker(conn) -> None:
     """Kindprozess: Indizes empfangen, Element rechnen, Ergebnis senden."""
-    X, FUN, snap = _JOB
+    X, FUN = _JOB
     try:
         while True:
             i = conn.recv()
             if i is None:
                 break
-            ok, val, chunks = _run_one(X, FUN, snap, i)
+            ok, val, chunks = _run_one(X, FUN, i)
             conn.send_bytes(_dumps(i, ok, val, chunks))
     except (EOFError, BrokenPipeError, KeyboardInterrupt):
         pass
@@ -216,10 +197,9 @@ def _forked(X, FUN, n):
     import multiprocessing as mp
     from multiprocessing.connection import wait as _wait
 
-    snap = rng_snapshot()
     ctx = mp.get_context("fork")
     prev = _JOB
-    _JOB = (X, FUN, snap)
+    _JOB = (X, FUN)
     procs, active = [], {}
     nx = len(X)
     nxt = 0
@@ -269,7 +249,7 @@ def _forked(X, FUN, n):
             # Ausgaben in Elementreihenfolge, sobald alle davor fertig sind
             while emitted < nx and state[emitted] in (1, 3) and emitted < first_err:
                 if state[emitted] == 3:
-                    res[emitted] = _in_parent(X, FUN, snap, emitted)
+                    res[emitted] = _in_parent(X, FUN, emitted)
                 else:
                     _replay(outs[emitted])
                     outs[emitted] = None
@@ -290,15 +270,10 @@ def _forked(X, FUN, n):
             if not done and p.is_alive():
                 p.terminate()          # Abbruch: noch rechnende Kinder beenden
             p.join()
-        rng_reset(snap)
 
 
-def _in_parent(X, FUN, snap, i):
-    """Element im Elternprozess rechnen (Ergebnis nicht pickelbar), Zustand wie im Kind."""
-    try:
-        rng_reset(snap)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            return FUN(X[i])
-    finally:
-        rng_reset(snap)
+def _in_parent(X, FUN, i):
+    """Element im Elternprozess rechnen (Ergebnis nicht pickelbar), wie im Kind."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return _unit(FUN, X[i])

@@ -1,8 +1,8 @@
 /*
  * python/src/_ext_engine.cpp -- Python-Huelle der Engine-Kerne (simulation_core, fifo_core, tax_core)
  *
- * Etappe 7.3a. Gemeinsame Kerne mit R (r/src/simulation_core_impl.h, fifo_core_impl.h,
- * tax_core_impl.h, Kopien hier). Die Kerne arbeiten auf dem Simulationszustand des
+ * Etappe 7.3a. Gemeinsame Kerne mit R (core/simulation_core_impl.h, fifo_core_impl.h,
+ * tax_core_impl.h, Kopien in src/core/). Die Kerne arbeiten auf dem Simulationszustand des
  * Hosts; diese Datei stellt den Python-Host: simlev_host::Obj ist PyObject*, und die
  * Zugriffe (as_list, at, get, set, put, has, as_double, as_int, num_vec, named_list,
  * new_num, new_int, Date; SIMLEV_XLENGTH, SIMLEV_LENGTH, SIMLEV_IS_NULL,
@@ -459,9 +459,9 @@ inline const char* string_at(Obj v, Py_ssize_t i) {
 #define SIMLEV_STRING_AT(v, i) simlev_host::string_at(v, i)
 #define SIMLEV_MARK_DATE(v) ((void) 0)   /* Python: asset_day bleibt eine Zahl (int) */
 
-#include "simulation_core_impl.h"
-#include "fifo_core_impl.h"
-#include "tax_core_impl.h"
+#include "core/simulation_core_impl.h"
+#include "core/fifo_core_impl.h"
+#include "core/tax_core_impl.h"
 
 namespace {
 

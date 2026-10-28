@@ -30,12 +30,12 @@ import pandas as pd
 
 from . import _withdrawal_core as _wcore
 from ._r import fmt as _fmt
-from ._r import rng as _rng
+from . import _lib as _sl
 from ._r.rlist import RList
 from ._r.rnum import r_cummax, r_cumprod, r_mean, r_mean_int, r_median, r_pow, r_pow_vec, r_prod, r_sum
 from .bootstrap import (_quiet, _get, _is_boot_result, _is_num, _is_study, _message, _names, _num1, _num_vec,
                         _quantile7, _r_round0, _show, _sp, _stop, _strip1, _values, _warn, _weighted_mean,
-                        _with_rng_restore, _wquantile, summary, plot)
+                        _wquantile, summary, plot)
 
 __all__ = [
     "withdrawal_rule", "WithdrawalRule", "withdrawal_cohorts", "WithdrawalPaths", "result_index",
@@ -1462,6 +1462,13 @@ def withdrawal_max_rate(x, *, rule=None, success=0.95, lower=0.5, upper=20, tol=
     if not _num1(tol) or float(tol) <= 0:
         _stop("withdrawal_max_rate: tol muss eine Zahl > 0 in Prozentpunkten sein (z. B. 0.005; erhalten: %s)."
               % _show(tol))
+    # Entwurf C.5, Regel 9: ein Horizont mit seed=None wird einmal zu k aufgelöst; alle Suchschritte
+    # ziehen damit dieselben Laufzeiten
+    hz = kwargs.get("horizon")
+    if isinstance(hz, SimLevHorizon) and hz.get("seed") is None and hz.get("type") != "fixed":
+        hz = SimLevHorizon(hz.items())
+        hz["seed"] = _sl.next_seed()
+        kwargs = dict(kwargs, horizon=hz)
     state = {"first": True}
 
     def f(rate):
@@ -1689,7 +1696,12 @@ def _is_horizon(x) -> bool:
 
 def withdrawal_horizon(*, type=("fixed", "uniform", "discrete", "normal", "triangular", "sample"),  # noqa: A002
                   years=None, prob=None, min=None, max=None, mean=None, sd=None, mode=None, seed=1):  # noqa: A002
-    """Laufzeit der Entnahmephase nach eigenen Annahmen (siehe R-Dokumentation ``withdrawal_horizon``)."""
+    """Laufzeit der Entnahmephase nach eigenen Annahmen (siehe R-Dokumentation ``withdrawal_horizon``).
+
+    ``seed``: Startwert der Laufzeiten (Standard 1; ganze Zahl, ``|seed| < 2**53``); ``None`` = bei jeder
+    Ziehung genau einmal aus dem Zufallszustand von SimLev (:func:`simlev.simlev_seed`);
+    :func:`withdrawal_max_rate` löst ``None`` einmal auf (gleiche Laufzeiten in allen Suchschritten).
+    """
     type = _match_arg(type, ("fixed", "uniform", "discrete", "normal", "triangular", "sample"))  # noqa: A001
     need = {"fixed": ["years"], "uniform": ["min", "max"], "discrete": ["years", "prob"],
             "normal": ["mean", "sd", "min", "max"], "triangular": ["min", "mode", "max"], "sample": ["years"]}[type]
@@ -1718,6 +1730,8 @@ def withdrawal_horizon(*, type=("fixed", "uniform", "discrete", "normal", "trian
                   float(mode), float(min), float(max)))
     if type == "normal" and sd < 0:
         _stop("withdrawal_horizon('normal'): sd muss >= 0 sein.")
+    if seed is not None:
+        _sl.check_seed(seed)                            # Entwurf C.5, Regel 2
     return SimLevHorizon([("type", type), ("seed", seed)] + [(k, given[k]) for k in need])
 
 
@@ -1733,10 +1747,12 @@ def _seq_from_to(a, b):
 def _draw_horizon(h, n):
     """Laufzeiten ziehen (Port von ``.draw_horizon``); ganzzahlig, mindestens 1."""
     n = int(n)
+    # Hauptstrom aus h["seed"] (Entwurf C.5, Regeln 3, 4 und 9); "fixed" zieht nicht
+    rs = None if h["type"] == "fixed" else _sl.main_stream(h.get("seed") if isinstance(h, Mapping) else None)
 
     def pick(x, prob=None):
         x = np.atleast_1d(np.asarray(x, dtype=np.float64))
-        ix = np.asarray(_rng.sample_int(len(x), n, replace=True, prob=prob)).astype(np.int64)
+        ix = np.asarray(_sl.sample(len(x), n, replace=True, prob=prob, stream=rs)).astype(np.int64)
         return x[ix - 1]
 
     def body():
@@ -1748,11 +1764,11 @@ def _draw_horizon(h, n):
         if t == "discrete":
             return pick(h["years"], np.atleast_1d(np.asarray(h["prob"], dtype=np.float64)))
         if t == "normal":
-            z = np.asarray(_rng.rnorm(n, float(h["mean"]), float(h["sd"])), dtype=np.float64)
+            z = np.asarray(_sl.rnorm(n, float(h["mean"]), float(h["sd"]), stream=rs), dtype=np.float64)
             r = np.array([_r_round0(v) for v in z])
             return np.minimum(float(h["max"]), np.maximum(float(h["min"]), r))
         if t == "triangular":
-            u = np.atleast_1d(np.asarray(_rng.runif(n), dtype=np.float64))
+            u = np.atleast_1d(np.asarray(_sl.runif(n, stream=rs), dtype=np.float64))
             a, b, c = float(h["min"]), float(h["max"]), float(h["mode"])
             if b == a:
                 return np.full(n, a)
@@ -1762,7 +1778,7 @@ def _draw_horizon(h, n):
             return np.array([_r_round0(v) for v in np.where(u < f, v1, v2)])
         return pick(h["years"])
 
-    out = _with_rng_restore(body, seed=h.get("seed") if isinstance(h, Mapping) else None)
+    out = body()
     out = np.maximum(1.0, np.asarray(out, dtype=np.float64))
     return np.trunc(out).astype(np.int64)
 

@@ -435,11 +435,11 @@ function _combn(S::Int, k::Int)
     out
 end
 
-"Koeffizienten (Achsenabschnitt, Steigung) von `lm(y ~ x)` (na.omit)."
+"Koeffizienten (Achsenabschnitt, Steigung) wie `.sl_lsfit(cbind(1, x), y)` (na.omit; Entwurf B.7)."
 function _lm_coef(x::Vector{Float64}, y::Vector{Float64})
     ok = [!(isnan(a) || isnan(b)) for (a, b) in zip(x, y)]
     X = hcat(ones(count(ok)), x[ok])
-    fit = SL.RStats.lm_fit(X, y[ok])
+    fit = SL.SLib.lsfit(X, y[ok])
     cf = fit isa AbstractVector ? fit : (fit isa SL.RList || fit isa AbstractDict) ? fit["coefficients"] :
          hasproperty(fit, :coefficients) ? getproperty(fit, :coefficients) : fit[:coefficients]
     cf = cf isa SL.RVector ? cf.values : collect(cf)
@@ -483,7 +483,7 @@ function overfit_pbo(x; S = 16, metric = nothing, frequency = nothing, dates = n
         for (r, ci) in enumerate(idx), s in combos[ci]
             Ind[r, s] = 1.0
         end
-        mp(B) = Matrix{Float64}(SL.RLinalg.matprod(Ind, B))
+        mp(B) = Matrix{Float64}(SL.SLib.matmul(Ind, B))   # slc-Matrixprodukt (B.6)
         I1, I2, Id, Il, Ic = mp(B1), mp(B2), mp(Bd), mp(Bl), mp(Bc)
         rep_t(v) = repeat(permutedims(v), k, 1)
         IS = _of_metric(half, I1, I2, Id, Il, metric; c1 = Ic)
@@ -581,7 +581,7 @@ function sharpe_probabilistic(r; benchmark = 0, ppy = 52)
     g4 = SL.r_mean(Float64[SL.r_pow(e, 4.0) for e in z])
     den = 1 - g3 * sr + (g4 - 1) / 4 * (sr * sr)
     den = isnan(den) ? den : max(den, 1e-12)
-    return Float64(SL.RNmath.pnorm((sr - sr0) * sqrt(Float64(n - 1)) / sqrt(den)))
+    return Float64(SL.SLib.pnorm((sr - sr0) * sqrt(Float64(n - 1)) / sqrt(den)))
 end
 
 """
@@ -620,8 +620,8 @@ function sharpe_deflated(x; id = nothing, n_trials = nothing, effective::Bool = 
     Nt = n_trials !== nothing ? n_trials : (effective ? n_eff : N)
     v = N > 1 ? SL.r_var(sr) : 0.0
     g = 0.5772156649
-    sr0 = (Nt > 1 && v > 0) ? sqrt(v) * ((1 - g) * SL.RNmath.qnorm(1 - 1 / Nt) +
-                                         g * SL.RNmath.qnorm(1 - 1 / (Nt * SL.RLibm.exp(1.0)))) : 0.0
+    sr0 = (Nt > 1 && v > 0) ? sqrt(v) * ((1 - g) * SL.SLib.qnorm(1 - 1 / Nt) +
+                                         g * SL.SLib.qnorm(1 - 1 / (Nt * SL.RLibm.exp(1.0)))) : 0.0
     r = R[:, j]
     sq = sqrt(rr.ppy)
     return SL.RList("id" => rr.cols[j], "sharpe" => sr[j] * sq, "sr0" => sr0 * sq,
@@ -892,13 +892,13 @@ function sharpe_haircut(x; n_obs = nothing, n_tests = nothing, frequency = nothi
     end
     M = n_tests !== nothing ? n_tests : length(sr)
     tstat = sr .* sqrt(Float64(Tn))
-    p = 2 .* Float64[SL.RNmath.pnorm(-abs(t)) for t in tstat]
+    p = 2 .* SL.SLib.pnorm(Float64[-abs(t) for t in tstat])
     function padj(method)
         pp = vcat(p, ones(Int(max(0, M - length(p)))))
         pv = SL.RStats.p_adjust(pp, method; n = max(M, length(p)))
         return Float64[_f64(v) for v in pv][1:length(p)]
     end
-    back(pa) = _sign.(sr) .* Float64[SL.RNmath.qnorm(1 - min(a, 1) / 2) for a in pa] ./ sqrt(Float64(Tn)) .* sqrt(ppy)
+    back(pa) = _sign.(sr) .* SL.SLib.qnorm(Float64[min(a, 1) / 2 for a in pa]; lower_tail = false) ./ sqrt(Float64(Tn)) .* sqrt(ppy)   # oberes Ende (F23)
     sh = sr .* sqrt(ppy)
     out = SL.RFrame("id" => ids, "sharpe" => sh, "t" => tstat, "p" => p)
     for (nm, m) in (("bonferroni", "bonferroni"), ("holm", "holm"), ("bhy", "BY"))

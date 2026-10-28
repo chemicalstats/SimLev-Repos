@@ -1,7 +1,7 @@
 # Referenzfälle für r/R/planning.R (series_shift_return, .period_gross, bootstrap_pooled,
 # portfolio_returns, planning_goal, print.SimLevGoalPlan) -> python/simlev/planning.py
 source("golden/modules/ref_tools.R"); ref_init("planning")
-P <- "from simlev import planning as PL\nfrom simlev._r import rng as RNG\n"
+P <- "from simlev import planning as PL\n"
 JH <- "PL = SL.Planning\n"   # Kopf des Julia-Codes (jl)
 SH <- function(call) sprintf("x <- %s; list(data = x, shift = attr(x, 'shift'))", call)
 PSH <- function(call) paste0(P, sprintf("x = %s\nresult = {'data': x, 'shift': x.attrs['shift']}", call))
@@ -105,12 +105,12 @@ ref_case("pb_quarter", "bootstrap_pooled(dm, c('aktien', 'anleihen'), frequency 
 ref_case("pb_month", "bootstrap_pooled(dm, 'aktien', frequency = 'month', n = 6, years = 3, L = 6, country_weights = c(0.9, 0.1), seed = 7)",
          paste0(P, "result = PL.bootstrap_pooled(dm, 'aktien', frequency='month', n=6, years=3, L=6, country_weights=[0.9, 0.1], seed=7)"), I,
          jl = paste0(JH, 'result = PL.bootstrap_pooled(dm, "aktien"; frequency = "month", n = 6, years = 3, L = 6, country_weights = [0.9, 0.1], seed = 7)'))
-ref_case("pb_noseed", "set.seed(42); a <- bootstrap_pooled(ds, 'aktien', n = 8, years = 5, L = 2); list(a, runif(1))",
-         paste0(P, "RNG.set_seed(42); a = PL.bootstrap_pooled(ds, 'aktien', n=8, years=5, L=2); result = [a, RNG.runif(1)]"), I,
-         jl = paste0(JH, 'SL.RRng.set_seed(42); a = PL.bootstrap_pooled(ds, "aktien"; n = 8, years = 5, L = 2); result = Any[a, SL.RRng.runif(1)]'))
-ref_case("pb_seed_restore", "set.seed(42); a <- bootstrap_pooled(ds, 'aktien', n = 3, years = 5, L = 2, seed = 1); runif(2)",
-         paste0(P, "RNG.set_seed(42); a = PL.bootstrap_pooled(ds, 'aktien', n=3, years=5, L=2, seed=1); result = RNG.runif(2)"), I,
-         jl = paste0(JH, 'SL.RRng.set_seed(42); a = PL.bootstrap_pooled(ds, "aktien"; n = 3, years = 5, L = 2, seed = 1); result = SL.RRng.runif(2)'))
+ref_case("pb_noseed", "simlev_seed(42); a <- bootstrap_pooled(ds, 'aktien', n = 8, years = 5, L = 2); list(a, SimLev:::.sl_runif(1))",
+         paste0(P, "simlev.simlev_seed(42); a = PL.bootstrap_pooled(ds, 'aktien', n=8, years=5, L=2); result = [a, simlev._lib.runif(1)]"), I,
+         jl = paste0(JH, 'SL.simlev_seed(42); a = PL.bootstrap_pooled(ds, "aktien"; n = 8, years = 5, L = 2); result = Any[a, SL.SLib.runif(1)]'))
+ref_case("pb_seed_restore", "simlev_seed(42); a <- bootstrap_pooled(ds, 'aktien', n = 3, years = 5, L = 2, seed = 1); SimLev:::.sl_runif(2)",
+         paste0(P, "simlev.simlev_seed(42); a = PL.bootstrap_pooled(ds, 'aktien', n=3, years=5, L=2, seed=1); result = simlev._lib.runif(2)"), I,
+         jl = paste0(JH, 'SL.simlev_seed(42); a = PL.bootstrap_pooled(ds, "aktien"; n = 3, years = 5, L = 2, seed = 1); result = SL.SLib.runif(2)'))
 ref_case("pb_err_names", "bootstrap_pooled(unname(ds), 'aktien', n = 5)", paste0(P, "result = PL.bootstrap_pooled(list(ds.values()), 'aktien', n=5)"), I,
          jl = paste0(JH, 'result = PL.bootstrap_pooled(collect(values(ds)), "aktien"; n = 5)'))
 ref_case("pb_err_w", "bootstrap_pooled(ds, c('aktien', 'anleihen'), weights = 1, n = 5, L = 5, seed = 1)", paste0(P, "result = PL.bootstrap_pooled(ds, ['aktien', 'anleihen'], weights=1, n=5, L=5, seed=1)"), I,
@@ -175,9 +175,9 @@ S5 <- cbind(safe = exp(rnorm(5, 0.02, 0.01)), mid = exp(rnorm(5, 0.04, 0.1)), ri
 ref_case("go_warn", "planning_goal(S5, 100, 123.4, 4, n_grid = 301, n_sim = 3000, seed = 1)",
          paste0(P, "result = PL.planning_goal(S5, 100, 123.4, 4, n_grid=301, n_sim=3000, seed=1)"), list(S5 = S5),
          jl = paste0(JH, 'result = PL.planning_goal(S5, 100, 123.4, 4; n_grid = 301, n_sim = 3000, seed = 1)'))
-ref_case("go_noseed", "set.seed(8); g <- planning_goal(R[1:30, ], 100, 120, 3, n_grid = 12, n_sim = 80); list(g, runif(1))",
-         paste0(P, "RNG.set_seed(8); g = PL.planning_goal(R.iloc[:30], 100, 120, 3, n_grid=12, n_sim=80); result = [g, RNG.runif(1)]"), I,
-         jl = paste0(JH, 'SL.RRng.set_seed(8); g = PL.planning_goal(SL.NamedMat(R.data[1:30, :]; colnames = R.colnames[:]), 100, 120, 3; n_grid = 12, n_sim = 80); result = Any[g, SL.RRng.runif(1)]'))
+ref_case("go_noseed", "simlev_seed(8); g <- planning_goal(R[1:30, ], 100, 120, 3, n_grid = 12, n_sim = 80); list(g, SimLev:::.sl_runif(1))",
+         paste0(P, "simlev.simlev_seed(8); g = PL.planning_goal(R.iloc[:30], 100, 120, 3, n_grid=12, n_sim=80); result = [g, simlev._lib.runif(1)]"), I,
+         jl = paste0(JH, 'SL.simlev_seed(8); g = PL.planning_goal(SL.NamedMat(R.data[1:30, :]; colnames = R.colnames[:]), 100, 120, 3; n_grid = 12, n_sim = 80); result = Any[g, SL.SLib.runif(1)]'))
 ref_case("go_err_R", "planning_goal(-R, 1, 2, 3)", paste0(P, "result = PL.planning_goal(-R, 1, 2, 3)"), I,
          jl = paste0(JH, 'result = PL.planning_goal(-R.data, 1, 2, 3)'))
 ref_case("go_err_R_na", "x <- R; x[2, 2] <- NA; planning_goal(x, 1, 2, 3)", paste0(P, "x = R.copy(); x.iloc[1, 1] = simlev._r.fmt.NA_REAL; result = PL.planning_goal(x, 1, 2, 3)"), I,

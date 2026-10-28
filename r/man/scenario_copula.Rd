@@ -35,9 +35,10 @@ Fehler.
 \item{frequency}{Renditefrequenz bei Kursdaten: \code{"week"} (Standard,
 ISO-Woche), \code{"day"} oder \code{"month"}.}
 
-\item{seed}{Startwert der Ziehung. Mit Startwert ist das Ergebnis reproduzierbar und der
-Zufallszustand der Sitzung bleibt unveraendert; mit \code{NULL} wird der
-Zufallsstrom der Sitzung normal weitergezogen.}
+\item{seed}{Startwert der Ziehung. Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
+Zufallszustand von SimLev bleibt unveraendert; mit \code{NULL} wird genau einmal ein
+Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}), wiederholte
+Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.}
 }
 \value{
 Objekt der Klasse \code{SimLevScenarios} mit \code{scenarios}

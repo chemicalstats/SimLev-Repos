@@ -108,9 +108,9 @@ set.seed(7); XS <- data.frame(x = rnorm(150), y = rnorm(150)); XS$z <- XS$x + 1e
 ref_case("cs_table_psd", "scenario_copula(XS, c('x', 'y', 'z'), n = 200, seed = 8)",
          paste0(P, "result = SC.scenario_copula(XS, ['x', 'y', 'z'], n=200, seed=8)"), inputs = list(XS = XS),
          jl = paste0(J, 'result = SC.scenario_copula(XS, ["x", "y", "z"]; n = 200, seed = 8)'))
-ref_case("cs_seednull", "set.seed(10); x <- scenario_copula(XS, c('x', 'y'), n = 100, family = 'gaussian'); list(x, runif(2))",
-         paste0(P, "simlev._r.rng.set_seed(10); x = SC.scenario_copula(XS, ['x', 'y'], n=100, family='gaussian'); result = [x, simlev._r.rng.runif(2)]"), inputs = list(XS = XS),
-         jl = paste0(J, 'SL.RRng.set_seed(10); x = SC.scenario_copula(XS, ["x", "y"]; n = 100, family = "gaussian"); result = [x, SL.RRng.runif(2)]'))
+ref_case("cs_seednull", "simlev_seed(10); x <- scenario_copula(XS, c('x', 'y'), n = 100, family = 'gaussian'); list(x, SimLev:::.sl_runif(2))",
+         paste0(P, "simlev.simlev_seed(10); x = SC.scenario_copula(XS, ['x', 'y'], n=100, family='gaussian'); result = [x, simlev._lib.runif(2)]"), inputs = list(XS = XS),
+         jl = paste0(J, 'SL.simlev_seed(10); x = SC.scenario_copula(XS, ["x", "y"]; n = 100, family = "gaussian"); result = [x, SL.SLib.runif(2)]'))
 JST <- c("1" = "[[0, 0.1]]", "2" = "(zz = [0, 0.1],)", "3" = "(x = [0.2, 0.1],)", "4" = "(x = [0, 5],)", "5" = "(x = 0.1,)",
          "6" = "SL.RList()", "7" = "(x = [SL.NA, 0.1],)")
 for (st in list(c("1", "list(c(0, 0.1))", "[[0, 0.1]]"), c("2", "list(zz = c(0, 0.1))", "{'zz': [0, 0.1]}"), c("3", "list(x = c(0.2, 0.1))", "{'x': [0.2, 0.1]}"),

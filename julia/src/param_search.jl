@@ -218,7 +218,7 @@ function _unique_rows(D::SL.RFrame)
 end
 
 "Versuchsplan erzeugen (`.ps_design`)."
-function _ps_design(space, method, n, constraint)
+function _ps_design(space, method, n, constraint, stream = nothing)
     nm = collect(keys(space))
     if method == "grid"
         D = _expand_grid(nm, Any[_ps_levels(space[k]) for k in nm])
@@ -230,10 +230,10 @@ function _ps_design(space, method, n, constraint)
             U = Matrix{Float64}(undef, m, length(nm))
             for j in eachindex(nm)
                 if method == "lhs"
-                    s = Float64[Float64(v) for v in SL.RRng.sample_int(m)]
-                    U[:, j] = (s .- Float64[Float64(v) for v in _vec(SL.RRng.runif(m))]) ./ m
+                    s = Float64[Float64(v) for v in SL.SLib.sample(m; stream = stream)]
+                    U[:, j] = (s .- SL.SLib.runif(m; stream = stream)) ./ m
                 else
-                    U[:, j] = Float64[Float64(v) for v in _vec(SL.RRng.runif(m))]
+                    U[:, j] = SL.SLib.runif(m; stream = stream)
                 end
             end
             Dn = SL.RFrame((k => collect(_vec(_ps_map(space[k], U[:, j]))) for (j, k) in enumerate(nm))...; nrow = m)
@@ -304,8 +304,6 @@ end
 "`.par_lapply(X, FUN, cores)` (Schicht 0: `SimLev.RParallel.par_lapply`)."
 _par_lapply(X, f, cores) = SL.RParallel.par_lapply(X, f, cores)
 
-"`.with_rng_restore(expr, seed = seed)` mit explizit übergebenem `seed`."
-_with_rng(f, seed) = seed === nothing ? f() : SL.Bootstrap._with_rng_restore(f; seed = seed)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Parametersuche
@@ -347,7 +345,8 @@ function param_search(data, builder_pos = nothing, space_pos = _MISSING; builder
         builder = p -> SL.RList("strategy" => fixed, "args" => p)
     end
     sim_run_args = SL._sim_args_set(SL.RList(), sim_args, "param_search")
-    design = _with_rng(() -> _ps_design(space, method, n, constraint), seed)
+    # Zufall nur im Versuchsplan (Hauptstrom, Entwurf C.5); die Auswertung je Punkt ist deterministisch
+    design = _ps_design(space, method, n, constraint, method == "grid" ? nothing : SL.SLib.main_stream(seed))
     t0 = time()
     function run(i)
         p = _row_list(design, i)

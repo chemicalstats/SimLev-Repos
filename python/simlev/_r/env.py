@@ -8,32 +8,30 @@ Funktion liest die Umgebung bei jedem Aufruf neu; wann gelesen wird, bestimmt de
 |---|---|---|
 | ``SIMLEV_COLLATE`` | Sortierung: ``icu:<Locale>`` (``icu:root`` wie R unter C.UTF-8) oder ``C`` (Bytes) | Nutzer |
 | ``SIMLEV_ICU`` | Pfad zur ICU-Bibliothek (``libicui18n``) | Nutzer |
-| ``SIMLEV_LAPACK`` | Pfad zur Referenz-LAPACK (``dsyevr_``) | Nutzer |
-| ``SIMLEV_R_SYS_TIME`` | feste Uhr für ``sys_time()`` (gosolnp), Sekunden seit 1970 | Prüfung |
 | ``SIMLEV_LAX_NA`` | ``1``: NA = NaN im Vergleich mit den Referenzfällen | Prüfung |
 | ``SIMLEV_STRICT_ZERO`` | ``0``: −0 = +0 im Vergleich mit den Referenzfällen | Prüfung |
 | ``SIMLEV_GOLDEN_DIR`` | andere Ordner der Engine-Fälle für pytest (mit ``os.pathsep`` getrennt) | Prüfung |
 | ``SIMLEV_MODULE_DIR`` | anderer Ordner der Modul-Fälle für pytest | Prüfung |
-| ``SIMLEV_NO_EXT`` | ``1``: C-Erweiterung nicht nutzen, reiner Python-Kern (Rückfall prüfen) | Prüfung |
+| ``SIMLEV_LEGACY_TESTS`` | ``1``: die alten Tests und Referenzvergleiche laufen (Etappe 9: sonst ausgesetzt) | Prüfung |
+
+Seit Etappe 9.6c (Entwurf C.6 Nr. 10) entfallen ``SIMLEV_NO_EXT`` (die C-Erweiterung ist
+Pflicht, es gibt keine reinen Python-Kerne mehr), ``SIMLEV_LAPACK`` (keine System-LAPACK) und
+``SIMLEV_R_SYS_TIME`` (feste Uhr für gosolnp).
 """
-import contextlib
 import os
 
-__all__ = ["SWITCHES", "collate", "icu_path", "lapack_path", "r_sys_time", "fixed_r_sys_time",
-           "lax_na", "strict_zero", "set_collate_default", "golden_dir", "module_dir", "no_ext",
-           "use_ext", "ext"]
+__all__ = ["SWITCHES", "collate", "icu_path", "lax_na", "strict_zero", "set_collate_default",
+           "golden_dir", "module_dir", "legacy_tests"]
 
 # Name -> (Zweck, Art); Art: Nutzer, Prüfung (Julia zusätzlich: Entwicklung; R-Generatoren: Generator)
 SWITCHES = {
     "SIMLEV_COLLATE": ("Sortierung: icu:<Locale> (icu:root wie R unter C.UTF-8) oder C (Bytes)", "Nutzer"),
     "SIMLEV_ICU": ("Pfad zur ICU-Bibliothek (libicui18n)", "Nutzer"),
-    "SIMLEV_LAPACK": ("Pfad zur Referenz-LAPACK (dsyevr_)", "Nutzer"),
-    "SIMLEV_R_SYS_TIME": ("feste Uhr für sys_time() (gosolnp), Sekunden seit 1970", "Prüfung"),
     "SIMLEV_LAX_NA": ("1: NA = NaN im Vergleich mit den Referenzfällen", "Prüfung"),
     "SIMLEV_STRICT_ZERO": ("0: -0 = +0 im Vergleich mit den Referenzfällen", "Prüfung"),
     "SIMLEV_GOLDEN_DIR": ("andere Ordner der Engine-Fälle für pytest (os.pathsep-getrennt)", "Prüfung"),
     "SIMLEV_MODULE_DIR": ("anderer Ordner der Modul-Fälle für pytest", "Prüfung"),
-    "SIMLEV_NO_EXT": ("1: C-Erweiterung nicht nutzen, reiner Python-Kern (Rückfall prüfen)", "Prüfung"),
+    "SIMLEV_LEGACY_TESTS": ("1: die alten Tests und Referenzvergleiche laufen (Etappe 9: sonst ausgesetzt)", "Prüfung"),
 }
 
 
@@ -49,35 +47,7 @@ def icu_path():
     return os.environ.get("SIMLEV_ICU")
 
 
-def lapack_path():
-    """``SIMLEV_LAPACK`` oder ``None``."""
-    return os.environ.get("SIMLEV_LAPACK")
-
-
 # ── Prüfung ─────────────────────────────────────────────────────────────────
-
-def r_sys_time():
-    """``SIMLEV_R_SYS_TIME`` als Text oder ``None``."""
-    return os.environ.get("SIMLEV_R_SYS_TIME")
-
-
-@contextlib.contextmanager
-def fixed_r_sys_time(st):
-    """Setzt ``SIMLEV_R_SYS_TIME`` auf ``st`` (Text oder Zahl) und danach zurück; ``None``: nichts."""
-    if st is None:
-        yield
-        return
-    name = "SIMLEV_R_SYS_TIME"
-    old = os.environ.get(name)
-    os.environ[name] = st if isinstance(st, str) else repr(float(st))
-    try:
-        yield
-    finally:
-        if old is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = old
-
 
 def lax_na():
     """``SIMLEV_LAX_NA=1``: NA und NaN im Vergleich gleich (Voreinstellung: unterschieden)."""
@@ -104,44 +74,7 @@ def module_dir():
     return os.environ.get("SIMLEV_MODULE_DIR")
 
 
-def no_ext():
-    """``SIMLEV_NO_EXT=1``: die C/C++-Erweiterung (``simlev._ext``) nicht nutzen, sondern die
-    reinen Python-Kerne (Rückfall, bitgleich); gelesen bei jedem Aufruf von :func:`ext` (Etappe 7.2)."""
-    return os.environ.get("SIMLEV_NO_EXT", "0") == "1"
-
-
-# None = noch nicht geladen, False = nicht gebaut
-_EXT = None
-
-
-def ext():
-    """Das Erweiterungsmodul ``simlev._ext`` mit den gemeinsamen Kernen von R und Python oder
-    ``None`` (nicht gebaut oder ``SIMLEV_NO_EXT=1``; dann rechnen die reinen Python-Kerne).
-
-    Geladen beim ersten Aufruf; ``SIMLEV_NO_EXT`` wird bei jedem Aufruf gelesen (Etappe 7.3a).
-    """
-    global _EXT
-    if no_ext():
-        return None
-    if _EXT is None:
-        try:
-            from .. import _ext as m
-        except ImportError:
-            m = False
-        _EXT = m
-    return _EXT or None
-
-
-@contextlib.contextmanager
-def use_ext(flag):
-    """Setzt ``SIMLEV_NO_EXT`` für die Dauer des Blocks (``flag`` falsch: ``1``, wahr: ``0``), danach zurück."""
-    name = "SIMLEV_NO_EXT"
-    old = os.environ.get(name)
-    os.environ[name] = "0" if flag else "1"
-    try:
-        yield
-    finally:
-        if old is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = old
+def legacy_tests():
+    """``SIMLEV_LEGACY_TESTS=1``: die alten Tests (pytest) und Referenzvergleiche laufen; ohne den
+    Schalter sind sie in Etappe 9 ausgesetzt (Entwurf C.7), nur die Rauchproben laufen."""
+    return os.environ.get("SIMLEV_LEGACY_TESTS", "") == "1"

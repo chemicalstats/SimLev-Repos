@@ -16,7 +16,7 @@ import os
 
 # Schichten (zentrales Entwicklungsdokument, Anhang F)
 SCHICHTEN = [
-    ("0", "R-Interna, eingebaute Pakete", "(R selbst), `vendor_*`", "`simlev/_r/`", "`src/r/`"),
+    ("0", "R-Grundfunktionen, Hüllen der C-Bibliothek", "(R selbst), `slc*.R`", "`simlev/_r/`, `_lib*.py`", "`src/r/`, `slib*.jl`"),
     ("1", "Daten und Strategie", "`data_prep.R`, `strategy.R` …", "`data_prep.py`, `config.py`", "`data_prep.jl`, `config.jl`"),
     ("2", "Engine", "`simulation.R`, `sim_*.R`, Kerne", "`engine.py`, `_sim_*.py`, `_core.py`, `result.py`", "`engine.jl`, `sim_*.jl`"),
     ("3", "Analysen", "je eine `.R`", "je ein Modul", "je eine Datei"),

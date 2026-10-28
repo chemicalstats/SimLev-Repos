@@ -477,66 +477,18 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 # Modellanpassung (GARCH-Familie, Regime, EVT)
 # ─────────────────────────────────────────────────────────────────────────────
 
-#' GARCH(1,1) / GJR-GARCH(1,1) schaetzen (rugarch -> optim -> Momente)
+#' GARCH(1,1) / GJR-GARCH(1,1) schaetzen (ML -> Momente)
 #'
-#' Der Fit nutzt die aus rugarch 1.5-6 uebernommene Fassung von ugarchspec,
-#' ugarchfit und coef (.rugarch_ugarchspec, .rugarch_ugarchfit, .rugarch_coef
-#' in R/vendor_rugarch.R, mit Rsolnp und truncnorm; die numerischen
-#' Ableitungen rechnet R/richardson.R); rugarch muss nicht installiert sein. Scheitert der Fit mit einem Fehler, folgen optim
-#' und die Momente.
+#' Seit Etappe 9.6b mit der C-Bibliothek slc (.sl_fit_garch11, R/slc_models.R;
+#' Entwurf B.10, F10): ML-Punktschaetzer unter Normalverteilung (Raster-Starts,
+#' BFGS, Umparametrisierung wie MS-GARCH; GJR seit N1 mit alpha + gamma >= 0, also
+#' auch gamma < 0, und BFGS von allen sieben Rasterpunkten), bei Fehlschlag die
+#' Momente mit Warnung; Methodenlabel "konstant", "ml" oder "momente". Der
+#' fruehere Weg ueber rugarch (mit Rsolnp/gosolnp und dessen Uhrzeit-Seed) und
+#' die Nelder-Mead-Stufe entfallen.
 #' @keywords internal
 #' @noRd
-.fit_garch11 <- function(e, gjr = FALSE, quiet = FALSE) {
-  n <- length(e)
-  mu <- mean(e); omega <- alpha <- beta <- NULL; gamma <- 0; method <- "none"
-  if (stats::var(e) < 1e-16) {
-    return(list(mu = mu, omega = 1e-20, alpha = 0, beta = 0, gamma = 0, s2 = rep(1e-20, n),
-                z = rep(0, n), method = "konstant", s2_init = 1e-20))
-  }
-  tryCatch({
-    spec <- .rugarch_ugarchspec(variance.model = list(model = if (gjr) "gjrGARCH" else "sGARCH", garchOrder = c(1, 1)),
-                                mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
-                                distribution.model = "norm")
-    fit <- .rugarch_ugarchfit(spec = spec, data = e, solver = "hybrid")
-    cf <- .rugarch_coef(fit)
-    mu <- unname(cf["mu"]); omega <- unname(cf["omega"]); alpha <- unname(cf["alpha1"]); beta <- unname(cf["beta1"])
-    if (gjr) gamma <- unname(cf["gamma1"])
-    method <- "rugarch"
-  }, error = function(err) NULL)
-  filt <- function(om, al, be, ga, m) .garch_filter(e - m, om, al, be, ga, om / max(1e-6, 1 - al - be - ga / 2))
-  if (is.null(omega)) tryCatch({
-    sv <- stats::var(e); ep <- e - mu
-    nll <- function(th) {
-      om <- exp(th[1]); al <- 0.5 / (1 + exp(-th[2])); be <- 0.999 / (1 + exp(-th[3]))
-      ga <- if (gjr) 0.5 / (1 + exp(-th[4])) else 0
-      if (al + be + ga / 2 >= 0.9999) return(1e10)
-      s2 <- filt(om, al, be, ga, mu)
-      0.5 * sum(log(s2) + ep^2 / s2)
-    }
-    lg <- function(p) log(p / (1 - p))
-    st <- c(log(sv * 0.05), lg(0.05 / 0.5), lg(0.90 / 0.999), if (gjr) lg(0.04 / 0.5))
-    if (gjr) st[2] <- lg(0.02 / 0.5)
-    o <- stats::optim(st, nll, method = "Nelder-Mead", control = list(maxit = 4000))
-    om <- exp(o$par[1]); al <- 0.5 / (1 + exp(-o$par[2])); be <- 0.999 / (1 + exp(-o$par[3]))
-    ga <- if (gjr) 0.5 / (1 + exp(-o$par[4])) else 0
-    if (o$value < 1e9 && al + be + ga / 2 < 0.9999) {
-      omega <- om; alpha <- al; beta <- be; gamma <- ga; method <- "optim"
-    }
-  }, error = function(err) NULL)
-  if (is.null(omega)) {
-    sv <- stats::var(e); alpha <- 0.08; beta <- 0.88; gamma <- if (gjr) 0.04 else 0
-    omega <- sv * (1 - alpha - beta - gamma / 2); method <- "momente"
-    if (!quiet) warning("GARCH: rugarch und optim fehlgeschlagen, verwende Moment-Sch\u00e4tzer")
-  }
-  s2 <- filt(omega, alpha, beta, gamma, mu)
-  z <- (e - mu) / sqrt(s2)
-  z[!is.finite(z)] <- 0
-  if (stats::sd(z) > 0) z <- (z - mean(z)) / stats::sd(z)
-  pers <- alpha + beta + gamma / 2
-  list(mu = mu, omega = omega, alpha = alpha, beta = beta, gamma = gamma, s2 = s2, z = z,
-       method = method, persistence = pers,
-       s2_init = if (pers < 0.9999) omega / (1 - pers) else stats::var(e))
-}
+.fit_garch11 <- function(e, gjr = FALSE, quiet = FALSE) .sl_fit_garch11(e, gjr = gjr, quiet = quiet)
 
 #' Nicht-Referenzreihen als GARCH(1,1) modellieren (ratio oder joint)
 #' @keywords internal
@@ -561,10 +513,10 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
        z = do.call(cbind, lapply(fits, `[[`, "z")))
 }
 
-#' Tail-Schaetzung (GPD via evd::fpot -> Momente -> empirisch -> Default)
+#' Tail-Schaetzung (GPD-ML -> Momente -> empirisch -> Default)
 #'
-#' Der GPD-Fit nutzt die aus evd 2.3-7.1 uebernommene Fassung von fpot
-#' (.evd_fpot, R/vendor_evd.R); evd muss nicht installiert sein.
+#' Der GPD-Fit nutzt seit Etappe 9.6b die C-Bibliothek slc (.sl_gpd_fit,
+#' Entwurf B.12: ML in (log sigma, xi) mit Startwerten nach Hosking/Wallis 1987).
 #' @keywords internal
 #' @noRd
 .fit_tail <- function(base_ret, prob, side) {
@@ -573,8 +525,8 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   exc <- if (side == "left") thr - base_ret[mask] else base_ret[mask] - thr
   ne <- length(exc); scale <- shape <- NULL; method <- "none"
   if (ne >= 30) tryCatch({
-    f <- .evd_fpot(exc, threshold = 0, std.err = FALSE)
-    scale <- unname(f$estimate["scale"]); shape <- unname(f$estimate["shape"]); method <- "MLE"
+    f <- .sl_gpd_fit(exc)
+    if (is.finite(f$scale) && f$scale > 0 && is.finite(f$shape)) { scale <- f$scale; shape <- f$shape; method <- "MLE" }
   }, error = function(e) NULL)
   if (is.null(scale) && ne >= 20) {
     m <- mean(exc); v <- stats::var(exc)
@@ -592,11 +544,11 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' @keywords internal
 #' @noRd
 .prepare_regime_info <- function(base_ret, vol_window, n_regimes) {
-  vol <- .rolling_vol(base_ret, as.integer(vol_window))
+  vol <- .sl_rolling_vol(base_ret, as.integer(vol_window))
   th <- stats::quantile(vol, probs = seq(0, 1, length.out = n_regimes + 1))
   th[length(th)] <- th[length(th)] + 1e-10
-  reg <- .assign_regimes(vol, th)
-  list(regimes = reg, trans = .estimate_trans_mat(reg, as.integer(n_regimes)), vol = vol)
+  reg <- .sl_assign_regimes(vol, th)
+  list(regimes = reg, trans = .sl_estimate_trans_mat(reg, as.integer(n_regimes)), vol = vol)
 }
 
 #' MS-GARCH-Familie vorbereiten (eigene ML-Schaetzung, .ms_garch_fit in R/ms_garch.R)
@@ -617,9 +569,9 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   lag_ex <- c(0, ex[-n])
   if (ar_gm) for (r in seq_len(K)) {
     i <- which(reg == r); if (length(i) < 30) next
-    b <- tryCatch(stats::lm.fit(cbind(1, lag_ex[i]), ex[i])$coefficients[2], error = function(e) NA)
+    b <- tryCatch(.sl_lsfit(cbind(1, lag_ex[i]), ex[i])$coefficients[2], error = function(e) NA)
     if (is.finite(b)) phi[r] <- max(-0.5, min(0.5, b))
-    l <- tryCatch(stats::lm.fit(cbind(sig[i]), ex[i] - mu[r] - phi[r] * lag_ex[i])$coefficients[1], error = function(e) NA)
+    l <- tryCatch(.sl_lsfit(cbind(sig[i]), ex[i] - mu[r] - phi[r] * lag_ex[i])$coefficients[1], error = function(e) NA)
     if (is.finite(l)) lam[r] <- max(-5, min(5, l))
   }
   unc <- vapply(seq_len(K), function(r) {
@@ -631,7 +583,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
     from <- which(reg[-n] == i); if (length(from) < 50) next
     x <- s2[from] / unc[i] - 1; to <- reg[from + 1]
     for (j in seq_len(K)) if (j != i && sum(to == j) >= 5) {
-      d <- tryCatch(stats::coef(stats::glm(as.integer(to == j) ~ x, family = stats::binomial()))["x"], error = function(e) NA)
+      d <- tryCatch(.sl_logit_irls(cbind(1, x), as.integer(to == j))$coefficients[2], error = function(e) NA)   # Logit-IRLS (B.7)
       if (is.finite(d)) delta[i, j] <- max(-3, min(3, d))
     }
   }
@@ -639,7 +591,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   z <- (ex - cm) / sig; z[!is.finite(z)] <- 0
   pools <- lapply(seq_len(K), function(r) { i <- which(reg == r); if (length(i) < 10) seq_len(n) else i })
   for (r in seq_len(K)) { i <- pools[[r]]; s <- stats::sd(z[i]); if (is.finite(s) && s > 0) z[i] <- (z[i] - mean(z[i])) / s }
-  pi_ <- rep(1 / K, K); for (it in 1:1000) { p2 <- as.numeric(pi_ %*% P); if (max(abs(p2 - pi_)) < 1e-12) break; pi_ <- p2 }
+  pi_ <- rep(1 / K, K); for (it in 1:1000) { p2 <- as.numeric(pi_ %m% P); if (max(abs(p2 - pi_)) < 1e-12) break; pi_ <- p2 }
   message(sprintf("MS-GARCH(%d, %s%s%s): P(stay) = %s", K, garch_model, if (ar_gm) ", AR-M" else "",
                   if (tvtp) ", TVTP" else "", paste(sprintf("%.3f", diag(P)), collapse = "/")))
   list(K = K, mu = mu, omega = om, alpha = al, beta = be, gamma = ga, phi = phi, lambda = lam,
@@ -691,35 +643,36 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' Eine Renditematrix samt Quellzeilen erzeugen
 #' @keywords internal
 #' @noRd
-.generate_returns <- function(returns, method, p, info, n_out) {
+.generate_returns <- function(returns, method, p, info, n_out, stream) {
   n <- nrow(returns); k <- ncol(returns)
   from_idx <- function(idx) list(ret = returns[idx, , drop = FALSE], idx = idx)
+  # Ziehungen aus dem Strom des Pfads (Kerne slc_boot, Entwurf B.17 und C.5 Regel 6)
   g <- switch(method,
-    raw        = from_idx(.boot_idx_iid(n, n_out)),
-    block      = from_idx(.boot_idx_block(n, n_out, as.integer(p$block_length), FALSE)),
-    circular   = from_idx(.boot_idx_block(n, n_out, as.integer(p$block_length), TRUE)),
-    stationary = from_idx(.boot_idx_stationary(n, n_out, as.numeric(p$L))),
-    regime     = from_idx(.boot_idx_regime(info$regimes, info$trans, n_out)),
-    tails      = from_idx(.boot_idx_tails(n_out, info$p, info$p, info$bulk, info$left, info$right)),
-    wild       = list(ret = .boot_wild(returns, as.integer(p$wild_type)), idx = seq_len(n)),
-    reset      = list(ret = .boot_reset(returns, p$p_break), idx = seq_len(n)),
+    raw        = from_idx(.sl_boot_idx_iid(n, n_out, stream = stream)),
+    block      = from_idx(.sl_boot_idx_block(n, n_out, as.integer(p$block_length), FALSE, stream = stream)),
+    circular   = from_idx(.sl_boot_idx_block(n, n_out, as.integer(p$block_length), TRUE, stream = stream)),
+    stationary = from_idx(.sl_boot_idx_stationary(n, n_out, as.numeric(p$L), stream = stream)),
+    regime     = from_idx(.sl_boot_idx_regime(info$regimes, info$trans, n_out, stream = stream)),
+    tails      = from_idx(.sl_boot_idx_tails(n_out, info$p, info$p, info$bulk, info$left, info$right, stream = stream)),
+    wild       = list(ret = .sl_boot_wild(returns, as.integer(p$wild_type), stream = stream), idx = seq_len(n)),
+    reset      = list(ret = .sl_boot_reset(returns, p$p_break, stream = stream), idx = seq_len(n)),
     evt = {
       l <- info$left; r <- info$right
-      .boot_evt(returns, info$base - 1L, n_out, l$prob, l$thresh, l$scale, l$shape, as.integer(l$pool),
-                if (is.null(r)) 0 else r$prob, if (is.null(r)) Inf else r$thresh,
-                if (is.null(r)) 0 else r$scale, if (is.null(r)) 0 else r$shape,
-                if (is.null(r)) integer(0) else as.integer(r$pool), as.integer(info$bulk))
+      .sl_boot_evt(returns, info$base - 1L, n_out, l$prob, l$thresh, l$scale, l$shape, as.integer(l$pool),
+                   if (is.null(r)) 0 else r$prob, if (is.null(r)) Inf else r$thresh,
+                   if (is.null(r)) 0 else r$scale, if (is.null(r)) 0 else r$shape,
+                   if (is.null(r)) integer(0) else as.integer(r$pool), as.integer(info$bulk), stream = stream)
     },
     garch = , gjr_garch = {
       f <- info$garch; cr <- info$cross
-      .boot_garch(n_out, info$base - 1L, k, f$mu, f$omega, f$alpha, f$beta, f$gamma, f$s2_init,
-                  f$z, seq_len(n), cr$cols, cr$mu, cr$om, cr$al, cr$be, cr$ratio, cr$s2, cr$z)
+      .sl_boot_garch(n_out, info$base - 1L, k, f$mu, f$omega, f$alpha, f$beta, f$gamma, f$s2_init,
+                     f$z, seq_len(n), cr$cols, cr$mu, cr$om, cr$al, cr$be, cr$ratio, cr$s2, cr$z, stream = stream)
     },
     ms_garch = , ms_ar_garch_m = , tvtp_ms_garch = {
       m <- info$ms; cr <- m$cross
-      .boot_ms_garch(n_out, info$base - 1L, k, as.integer(m$K), m$mu, m$omega, m$alpha, m$beta, m$gamma,
-                     m$phi, m$lambda, m$trans, m$delta, m$unc, m$stat, m$pools, m$z,
-                     cr$cols, cr$mu, cr$om, cr$al, cr$be, cr$ratio, cr$s2, cr$z)
+      .sl_boot_ms_garch(n_out, info$base - 1L, k, as.integer(m$K), m$mu, m$omega, m$alpha, m$beta, m$gamma,
+                        m$phi, m$lambda, m$trans, m$delta, m$unc, m$stat, m$pools, m$z,
+                        cr$cols, cr$mu, cr$om, cr$al, cr$be, cr$ratio, cr$s2, cr$z, stream = stream)
     },
     stop(sprintf("Unbekannte Methode: %s", method)))
   colnames(g$ret) <- colnames(returns)
@@ -784,49 +737,6 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
     }
   }
   P
-}
-
-#' Zufallsstroeme je Pfad (L'Ecuyer-CMRG), unabhaengig von Kernen/Chunks
-#' @keywords internal
-#' @noRd
-.make_streams <- function(seed, n) {
-  if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
-    old <- get(".Random.seed", envir = globalenv())
-    on.exit(assign(".Random.seed", old, envir = globalenv()), add = TRUE)
-  } else {
-    old_kind <- RNGkind()
-    on.exit({ RNGkind(old_kind[1], old_kind[2], old_kind[3])
-              if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) rm(".Random.seed", envir = globalenv()) }, add = TRUE)
-  }
-  RNGkind("L'Ecuyer-CMRG")
-  set.seed(seed)
-  s <- get(".Random.seed", envir = globalenv())
-  out <- vector("list", n)
-  for (i in seq_len(n)) { out[[i]] <- s; s <- parallel::nextRNGStream(s) }
-  out
-}
-
-#' Zufallszustand sichern und wiederherstellen
-#'
-#' Ohne Argument \code{seed} (interne Stroeme, z. B. je Bootstrap-Pfad): der
-#' Zustand vor dem Aufruf wird immer wiederhergestellt. Mit \code{seed}: bei
-#' einer Zahl wird \code{set.seed(seed)} gesetzt und danach der vorherige
-#' Zustand wiederhergestellt; bei \code{seed = NULL} wird nichts gesetzt und
-#' nichts wiederhergestellt, der globale Zufallsstrom laeuft normal weiter
-#' (wiederholte Aufrufe liefern verschiedene Ergebnisse).
-#' @keywords internal
-#' @noRd
-.with_rng_restore <- function(expr, seed) {
-  if (!missing(seed) && is.null(seed)) return(force(expr))
-  has <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
-  old <- if (has) get(".Random.seed", envir = globalenv()) else NULL
-  kind <- RNGkind()
-  on.exit({
-    if (has) assign(".Random.seed", old, envir = globalenv())
-    else { RNGkind(kind[1], kind[2], kind[3]); if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) rm(".Random.seed", envir = globalenv()) }
-  })
-  if (!missing(seed)) set.seed(seed)
-  force(expr)
 }
 
 #' ESS-Design: Simulationsbudget auf Hyperparameter-Kombinationen verteilen
@@ -915,14 +825,16 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 }
 
 #' Einen gueltigen Pfad mit eigenem Zufallsstrom erzeugen (mit Wiederholungen)
+#'
+#' \code{stream} ist der SimLev-Strom des Pfads (Entwurf C.5, Regel 6); Wiederholungen ziehen
+#' daraus weiter.
 #' @keywords internal
 #' @noRd
 .draw_path <- function(setup, i, stream, config, method, max_tries) {
-  assign(".Random.seed", stream, envir = globalenv())
   c_id <- setup$combo_of_path[i]
   err <- "Pfad ung\u00fcltig (Indexrendite <= 0 oder nicht endlich)"
   for (try in seq_len(max_tries)) {
-    g <- tryCatch(.generate_returns(setup$ex$ret, method, setup$base_p[[c_id]], setup$infos[[c_id]], setup$n_out),
+    g <- tryCatch(.generate_returns(setup$ex$ret, method, setup$base_p[[c_id]], setup$infos[[c_id]], setup$n_out, stream),
                   error = function(e) { err <<- conditionMessage(e); NULL })
     if (!is.null(g)) {
       P <- .build_path(g, setup$ex$aux, config, aux_ratio = setup$ex$aux_ratio, aux_start = setup$ex$aux_start)
@@ -935,30 +847,35 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' Parallele Ausfuehrung (fork auf Unix, PSOCK auf Windows)
 #'
 #' Unix: [.par_lapply_fork()] (Einheiten in Pakete gebuendelt, ein Fork je Paket).
+#' Jede Einheit laeuft als parallele Einheit im Sinne von Entwurf C.5, Regel 7
+#' (Merker \code{.sl_state$in_unit}): der globale Zufallszustand von SimLev ist darin gesperrt,
+#' auch bei \code{cores = 1}. Zufaellige Einheiten bekommen ihren Strom als Argument (Regel 6); damit
+#' haengt das Ergebnis nicht von \code{cores} ab. R's Zufallszustand (\code{.Random.seed})
+#' wird weder gelesen noch gesetzt (Regel 10).
 #' @keywords internal
 #' @noRd
 .par_lapply <- function(X, FUN, cores) {
-  if (cores <= 1 || length(X) <= 1) return(lapply(X, FUN))
+  if (cores <= 1 || length(X) <= 1) return(.sl_in_unit(lapply(X, FUN)))
   if (.Platform$OS.type == "unix") return(.par_lapply_fork(X, FUN, cores))
   cl <- parallel::makePSOCKcluster(cores)
   on.exit(parallel::stopCluster(cl))
-  parallel::clusterEvalQ(cl, suppressPackageStartupMessages(library(SimLev)))
+  parallel::clusterEvalQ(cl, { suppressPackageStartupMessages(library(SimLev))
+    assign("in_unit", TRUE, envir = SimLev:::.sl_state) })      # Merker "in Einheit" (Regel 7)
   parallel::parLapplyLB(cl, X, FUN)
 }
 
 #' Fork mit gebuendelten Einheiten (Unix)
 #'
-#' Ergebnis wie bisher \code{parallel::mclapply(X, FUN, mc.cores = cores,
-#' mc.preschedule = FALSE, mc.set.seed = FALSE)} mit einem Fork je Einheit
-#' (Verhalten in Etappe 5 ermittelt), aber mit einem Fork je Paket:
+#' Ergebnis wie \code{parallel::mclapply(X, FUN, mc.cores = cores,
+#' mc.preschedule = FALSE, mc.set.seed = FALSE)} mit einem Fork je Einheit,
+#' aber mit einem Fork je Paket:
 #' \itemize{
 #'   \item P = min(Einheiten, 4 * cores) Pakete aufeinanderfolgender Einheiten,
 #'     Groessen um hoechstens 1 verschieden; \code{mclapply} verteilt die Pakete
 #'     dynamisch, jedes Paket rechnet seine Einheiten der Reihe nach.
-#'   \item Zufall: vor jeder Einheit \code{.Random.seed} auf den Zustand beim
-#'     Aufruf (bisher: Fork-Abbild); ohne \code{.Random.seed} wird er entfernt
-#'     (Generatorart wie beim Aufruf), die Einheit saet dann selbst aus Uhrzeit
-#'     und PID wie bisher das Kind. Der Elternprozess bleibt unveraendert.
+#'   \item Zufall: keiner der Sonderwege von frueher (Etappe 9.6a, Entwurf C.5 Regel 10).
+#'     SimLev-Einheiten ziehen nur aus dem Strom, den sie als Argument bekommen; R's
+#'     Zufallszustand (\code{.Random.seed}, \code{RNGkind()}) wird weder gelesen noch gesetzt.
 #'   \item Fehler: je Einheit \code{try}, \code{try-error} mit derselben Meldung
 #'     und Bedingung wie bisher (Aufruf \code{FUN(X[[i]], ...)} fuer die ersten
 #'     \code{cores} Einheiten, danach \code{FUN(X[[nexti]], ...)}, wie in
@@ -972,36 +889,23 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'     Einheiten desselben Pakets (keine Arbeitsfunktion haengt davon ab).
 #' }
 #' \code{1 < cores < 2} (und ungueltiges \code{cores}): wie bisher \code{mclapply}
-#' selbst (also \code{lapply} bzw. dessen Fehler). Ebenso ungebuendelt bei
-#' Normalverteilung "Box-Muller" oder eigenem Generator ("user-supplied"):
-#' deren Zustand liegt nicht (nur) in \code{.Random.seed}.
+#' selbst (also \code{lapply} bzw. dessen Fehler).
 #' @keywords internal
 #' @noRd
 .par_lapply_fork <- function(X, FUN, cores) {
   nc <- suppressWarnings(as.integer(cores))
-  # Box-Muller und eigene Generatoren haben Zustand ausserhalb von .Random.seed, den nur ein
-  # frischer Fork je Einheit wie bisher uebernimmt: dann ungebuendelt wie bisher
-  kind <- RNGkind()
-  if (is.na(nc) || nc < 2L || kind[1] == "user-supplied" || kind[2] %in% c("Box-Muller", "user-supplied"))
-    return(parallel::mclapply(X, FUN, mc.cores = cores, mc.preschedule = FALSE, mc.set.seed = FALSE))
+  if (is.na(nc) || nc < 2L)
+    return(.sl_in_unit(parallel::mclapply(X, FUN, mc.cores = cores, mc.preschedule = FALSE, mc.set.seed = FALSE)))
   if (!is.vector(X) || is.object(X)) X <- as.list(X)          # wie mclapply
   FUN <- match.fun(FUN)
   n <- length(X)
   ce <- min(nc, n)                                            # Kinder beim Start (mclapply)
   n_pk <- min(n, 4L * nc)
   packs <- unname(split(seq_len(n), ((seq_len(n) - 1) * n_pk) %/% n))
-  genv <- globalenv()
-  has_seed <- exists(".Random.seed", envir = genv, inherits = FALSE)
-  seed0 <- if (has_seed) get(".Random.seed", envir = genv, inherits = FALSE) else NULL
   run_pack <- function(idx, ...) {
-    kind0 <- if (!has_seed) RNGkind() else NULL
     out <- vector("list", length(idx)); err <- logical(length(idx))
+    .sl_state$in_unit <- TRUE                                 # Merker "in Einheit" (Regel 7), nur im Kind
     for (k in seq_along(idx)) {
-      if (has_seed) assign(".Random.seed", seed0, envir = genv)
-      else {
-        if (!identical(RNGkind(), kind0)) suppressWarnings(RNGkind(kind0[1], kind0[2], kind0[3]))
-        if (exists(".Random.seed", envir = genv, inherits = FALSE)) rm(".Random.seed", envir = genv)
-      }
       # Aufruf wortgleich wie in mclapply (Meldung und Bedingung des try-error)
       i <- nexti <- idx[[k]]
       r <- if (i <= ce) try(list(FUN(X[[i]], ...)), silent = TRUE) else try(list(FUN(X[[nexti]], ...)), silent = TRUE)
@@ -1059,8 +963,8 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'     \item{"evt"}{GPD-Tails des Referenzindex plus empirischer Bulk (\code{tail_prob}, \code{both_tails}); uebrige Indizes ueber das historische Verhaeltnis zum Referenzindex gekoppelt}
 #'     \item{"tails"}{Empirische Tail-Schichtung des Referenzindex (\code{tail_prob})}
 #'     \item{"reset"}{Chronologie mit zufaellig gespiegelten Segmenten (\code{p_break}); erhaelt die Chronologie}
-#'     \item{"garch", "gjr_garch"}{(GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung ueber \code{cross} in [bootstrap_config()])}
-#'     \item{"ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"}{Markov-Switching-GARCH-Familie: eigene ML-Schaetzung des MS-GARCH-Modells nach Haas, Mittnik und Paolella (2004), Normalverteilung, Varianzmodell "sGARCH" oder "gjrGARCH" je Regime; "ms_ar_garch_m" zusaetzlich mit AR- und GARCH-in-Mean-Termen je Regime, "tvtp_ms_garch" mit zeitvariablen Uebergangswahrscheinlichkeiten (\code{ms_n_regimes}/\code{ms_garch_model}, \code{ms_ar_n_regimes}/\code{ms_ar_garch_model} bzw. \code{tvtp_n_regimes}/\code{tvtp_garch_model})}
+#'     \item{"garch", "gjr_garch"}{(GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung ueber \code{cross} in [bootstrap_config()]). Geschaetzt per Maximum Likelihood unter Normalverteilung mit der C-Bibliothek von SimLev (GJR mit \eqn{\alpha + \gamma \ge 0}, also auch \eqn{\gamma < 0}; bis Version 1.0.0 \eqn{\gamma \ge 0}; BFGS von sieben Rasterpunkten), notfalls mit Momentschaetzern; die Meldungen nennen den Weg "ml" bzw. "momente" (bis Etappe 9.6b "rugarch"/"optim")}
+#'     \item{"ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"}{Markov-Switching-GARCH-Familie: eigene ML-Schaetzung des MS-GARCH-Modells nach Haas, Mittnik und Paolella (2004), Normalverteilung, Varianzmodell "sGARCH" oder "gjrGARCH" je Regime (GJR mit \eqn{\alpha + \gamma \ge 0}, also auch \eqn{\gamma < 0}; BFGS mit analytischem Gradienten von 12 bzw. bei "gjrGARCH" 20 Startpunkten); "ms_ar_garch_m" zusaetzlich mit AR- und GARCH-in-Mean-Termen je Regime, "tvtp_ms_garch" mit zeitvariablen Uebergangswahrscheinlichkeiten (\code{ms_n_regimes}/\code{ms_garch_model}, \code{ms_ar_n_regimes}/\code{ms_ar_garch_model} bzw. \code{tvtp_n_regimes}/\code{tvtp_garch_model})}
 #'   }
 #'   Bei "wild" und "reset" muss \code{path_length} der Laenge der Historie
 #'   entsprechen.
@@ -1124,15 +1028,16 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   mindestens 1); \code{NULL} (Standard) = Anzahl verwendbarer Zeilen der Historie. Damit lassen sich
 #'   z. B. 50-jaehrige Pfade aus 30 Jahren Historie erzeugen. Jeder Pfad hat
 #'   \code{path_length + 1} Zeilen (Startzeile plus Schritte).
-#' @param seed Ganzzahliger Startwert; \code{NULL} (Standard) = zufaellig
-#'   gezogen (im Ergebnis unter \code{seed} gespeichert). Jeder Pfad erhaelt
-#'   einen eigenen L'Ecuyer-Strom, so dass Pfad i unabhaengig von
-#'   \code{cores} ist und [bootstrap()] und [bootstrap_study()] mit gleichem
-#'   Seed (und gleichen Daten, Verfahren, \code{params}, \code{ess} und
-#'   \code{path_length}) dieselben Pfade erzeugen.
-#'   Mit angegebenem Seed bleibt der globale Zufallszustand unveraendert;
-#'   mit \code{seed = NULL} wird der Seed aus dem globalen Zufallsstrom
-#'   gezogen, wiederholte Aufrufe liefern daher verschiedene Pfade.
+#' @param seed Ganzzahliger Startwert (\eqn{|seed| < 2^{53}}); \code{NULL} (Standard) = genau
+#'   einmal aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]; ganze Zahl von 0
+#'   bis \eqn{2^{31} - 1}, im Ergebnis unter \code{seed} gespeichert, damit reproduzierbar).
+#'   Jeder Pfad i erhaelt einen eigenen Strom (Sprung um \eqn{2^{128}} Schritte je Pfad), so
+#'   dass Pfad i unabhaengig von \code{cores} (und bei [bootstrap_study()] von
+#'   \code{chunk_size}) ist und [bootstrap()] und [bootstrap_study()] mit gleichem Seed (und
+#'   gleichen Daten, Verfahren, \code{params}, \code{ess} und \code{path_length})
+#'   dieselben Pfade erzeugen. Mit angegebenem Seed bleibt der Zufallszustand von SimLev
+#'   unveraendert; mit \code{seed = NULL} liefern wiederholte Aufrufe verschiedene Pfade.
+#'   \code{set.seed()} wirkt nicht.
 #' @param cores Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK-Cluster auf
 #'   Windows).
 #' @param max_tries Versuche je Pfad (Standard 10), falls ein Pfad ungueltig
@@ -1223,10 +1128,10 @@ bootstrap <- function(data, config, method = "raw", n = 1000, params = list(), e
                       cores = 1L, progress = TRUE) {
   t0 <- Sys.time()
   setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
-  if (is.null(seed)) seed <- sample.int(.Machine$integer.max, 1L)
-  streams <- .with_rng_restore(.make_streams(seed, setup$n_paths))
-  res <- .with_rng_restore(.par_lapply(seq_len(setup$n_paths), function(i)
-    .draw_path(setup, i, streams[[i]], config, method, max_tries), cores))
+  if (is.null(seed)) seed <- .sl_next_seed() else .sl_check_seed(seed)   # Regel 3/4: NULL -> einmal k aus G
+  streams <- .sl_streams(seed, setup$n_paths)                 # Regel 6: U_i = J^i(S_0) je Pfad
+  res <- .par_lapply(seq_len(setup$n_paths), function(i)
+    .draw_path(setup, i, streams[[i]], config, method, max_tries), cores)
   ok <- !vapply(res, function(r) is.null(r$path), TRUE)
   tries <- vapply(res, `[[`, 0, "tries")
   if (!any(ok)) stop(sprintf("Keine g\u00fcltigen Pfade erzeugt (%d Versuche; letzte Ursache: %s).",
@@ -1613,8 +1518,8 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
   if (length(dates) != setup$n_out + 1L) stop(sprintf("dates braucht L\u00e4nge %d (Pfadl\u00e4nge + 1).", setup$n_out + 1L))
   dates <- .to_date(dates, "dates")
   if (burn_in >= setup$n_out) stop("burn_in ist l\u00e4nger als der Pfad.")
-  if (is.null(seed)) seed <- sample.int(.Machine$integer.max, 1L)
-  streams <- .with_rng_restore(.make_streams(seed, setup$n_paths))
+  if (is.null(seed)) seed <- .sl_next_seed() else .sl_check_seed(seed)   # Regel 3/4: NULL -> einmal k aus G
+  streams <- .sl_streams(seed, setup$n_paths)                 # Regel 6: U_i = J^i(S_0) je Pfad
   chunks <- split(seq_len(setup$n_paths), ceiling(seq_len(setup$n_paths) / chunk_size))
   if (!is.null(chunk_dir)) dir.create(chunk_dir, showWarnings = FALSE, recursive = TRUE)
   sim_rows <- (burn_in + 1L):(setup$n_out + 1L)
@@ -1663,7 +1568,7 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
     list(id = i, rows = rows, aux = aux_ret, path = if (i <= keep_paths) dp$path else NULL)
   }
   run_chunk <- function(ci) {
-    f <- if (!is.null(chunk_dir)) file.path(chunk_dir, sprintf("chunk_%05d_seed%d%s.rds", ci, seed,
+    f <- if (!is.null(chunk_dir)) file.path(chunk_dir, sprintf("chunk_%05d_seed%.0f%s.rds", ci, seed,
                                                            if (keep_returns != "none") paste0("_", keep_returns) else "")) else NULL
     if (!is.null(f) && file.exists(f)) return(readRDS(f))
     out <- lapply(chunks[[ci]], eval_path)
@@ -1674,7 +1579,7 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
   }
   if (progress) message(sprintf("Bootstrap-Studie '%s': %d Pfade x %d Strategien, %d Chunks, %d Kern(e)",
                                 method, setup$n_paths, length(specs), length(chunks), cores))
-  res <- .with_rng_restore(.par_lapply(seq_along(chunks), run_chunk, cores))
+  res <- .par_lapply(seq_along(chunks), run_chunk, cores)
   failed_chunks <- vapply(res, function(r) inherits(r, "try-error") || !is.list(r), TRUE)
   if (any(failed_chunks)) warning(sprintf("%d Chunks mit Fehler: %s", sum(failed_chunks),
                                           paste(unique(unlist(res[failed_chunks])), collapse = "; ")))
@@ -1864,7 +1769,9 @@ bootstrap_probability <- function(study, ..., thresholds = NULL) {
 #' (ohne ESS) genau [stats::quantile()] mit \code{type = 7}, sonst eine
 #' stetig von den Gewichten abhaengende Interpolation benachbarter Werte.
 #' \code{print()} einer Studie gibt eine Kurzinfo und die Zusammenfassung aus.
-#' \code{plot()} zeichnet (ungewichtete) Dichten einer Kennzahl je Strategie.
+#' \code{plot()} zeichnet (ungewichtete) Dichten einer Kennzahl je Strategie
+#' (Gauss-Kerndichte der C-Bibliothek von SimLev mit Bandbreite nach Silverman,
+#' direkt summiert; die Kurven weichen minimal von \code{density()} ab).
 #'
 #' @param x Ein \code{bootstrap_config}-, \code{bootstrap_result}-,
 #'   \code{SimLevBootstrapStudy}- oder \code{summary.SimLevBootstrapStudy}-Objekt.
@@ -1984,7 +1891,7 @@ plot.SimLevBootstrapStudy <- function(x, metric = "cagr", ...) {
   dl <- lapply(x$strategies, function(s) tab[[metric]][tab$strategy == s])
   rng <- range(unlist(dl), finite = TRUE)
   cols <- grDevices::hcl.colors(length(dl), "Dark 3")
-  dens <- lapply(dl, function(v) stats::density(v[is.finite(v)]))
+  dens <- lapply(dl, function(v) .sl_kde(v[is.finite(v)]))   # Gauss-Kerndichte (slc, Entwurf B.16; nur Grafik)
   plot(NULL, xlim = rng, ylim = c(0, max(vapply(dens, function(d) max(d$y), 0))),
        xlab = metric, ylab = "Dichte", main = sprintf("Verteilung %s (%s, %d Pfade)", metric, x$method, x$n_paths), ...)
   for (i in seq_along(dens)) graphics::lines(dens[[i]], col = cols[i], lwd = 1.5)

@@ -327,7 +327,7 @@ function _print_hmm(io::IO, x)
     nothing
 end
 
-function _plot_hmm(x; file = nothing, width = 900, height = 380)
+function _plot_hmm(x; data = nothing, file = nothing, width = 900, height = 380)   # data: wie R angenommen, ungenutzt
     D = _D()
     k = Int(x["k"])
     top = _fmat(x["filtered"])[:, k]

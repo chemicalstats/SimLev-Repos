@@ -23,33 +23,33 @@ test_that("R3-02/R4-15 .with_rng_restore: ohne seed laeuft der Strom weiter, mit
   expect_identical(x, f(7)); expect_identical(y, z)                 # globaler Zustand unveraendert
   set.seed(42); u <- SimLev:::.with_rng_restore(stats::runif(1)); v <- stats::runif(1)
   expect_identical(u, v)                                            # ohne Argument: immer wiederherstellen (interne Stroeme)
-  # pooled_bootstrap und goal_optimize ohne seed: wiederholte Aufrufe verschieden
+  # bootstrap_pooled und planning_goal ohne seed: wiederholte Aufrufe verschieden
   set.seed(1)
   land <- function(mu) { d <- data.frame(date = seq.Date(as.Date("1950-12-31"), by = "year", length.out = 70))
     d$aktien <- 100 * cumprod(exp(rnorm(70, mu, 0.18))); d }
   ds <- list(de = land(0.05), us = land(0.07))
   set.seed(42)
-  p1 <- pooled_bootstrap(ds, "aktien", n = 50, L = 5); p2 <- pooled_bootstrap(ds, "aktien", n = 50, L = 5)
+  p1 <- bootstrap_pooled(ds, "aktien", n = 50, L = 5); p2 <- bootstrap_pooled(ds, "aktien", n = 50, L = 5)
   expect_false(identical(p1$returns, p2$returns))
-  expect_identical(pooled_bootstrap(ds, "aktien", n = 50, L = 5, seed = 3)$returns,
-                   pooled_bootstrap(ds, "aktien", n = 50, L = 5, seed = 3)$returns)
+  expect_identical(bootstrap_pooled(ds, "aktien", n = 50, L = 5, seed = 3)$returns,
+                   bootstrap_pooled(ds, "aktien", n = 50, L = 5, seed = 3)$returns)
   R <- bp_goal_R()[, c(1, 3)]
-  g1 <- goal_optimize(R, 1e5, 1.5e5, 10, n_grid = 51, n_sim = 500)
-  g2 <- goal_optimize(R, 1e5, 1.5e5, 10, n_grid = 51, n_sim = 500)
+  g1 <- planning_goal(R, 1e5, 1.5e5, 10, n_grid = 51, n_sim = 500)
+  g2 <- planning_goal(R, 1e5, 1.5e5, 10, n_grid = 51, n_sim = 500)
   expect_false(identical(g1$simulation, g2$simulation))
 })
 
-test_that("R3-07 plateau: unguenstigster Nachbar bei max_drawdown ist das Maximum", {
+test_that("R3-07 param_plateau: unguenstigster Nachbar bei max_drawdown ist das Maximum", {
   x <- structure(list(results = data.frame(id = 1:4, n = c(10, 20, 30, 40), sharpe = c(1, 2, 3, 4),
                                            max_drawdown = c(0.1, 0.5, 0.2, 0.3), cagr = c(0.05, 0.02, 0.04, 0.01)),
                       params = "n", method = "grid", space = param_space(n = c(10, 20, 30, 40)),
                       objective = "sharpe", maximize = TRUE), class = "SimLevParamSearch")
-  pl <- plateau(x, metric = "max_drawdown")
+  pl <- param_plateau(x, metric = "max_drawdown")
   expect_equal(pl$plateau_min, c(0.5, 0.5, 0.5, 0.3))              # vorher Minimum 0.1, 0.1, 0.2, 0.2
-  expect_equal(plateau(x, metric = "cagr")$plateau_min, c(0.02, 0.02, 0.01, 0.01))
-  expect_equal(plateau(x)$plateau_min, c(1, 1, 2, 3))
+  expect_equal(param_plateau(x, metric = "cagr")$plateau_min, c(0.02, 0.02, 0.01, 0.01))
+  expect_equal(param_plateau(x)$plateau_min, c(1, 1, 2, 3))
   x$maximize <- FALSE; x$objective <- "max_drawdown"
-  expect_equal(plateau(x)$plateau_min, c(0.5, 0.5, 0.5, 0.3))
+  expect_equal(param_plateau(x)$plateau_min, c(0.5, 0.5, 0.5, 0.3))
 })
 
 test_that("R4-01 Niveau-Zusatzreihen: Inflation aus kumulierten Zeilenverhaeltnissen statt Spruengen", {
@@ -89,28 +89,28 @@ test_that("R4-02 withdrawal_cohorts prueft das Monatsraster", {
   expect_error(withdrawal_cohorts(m[-50, ], price = "depot", years = 10, step = "year"), "l\u00fcckenlose Monatsdaten")
 })
 
-test_that("R4-03/R4-13 horizon_model: Einzelwerte und triangular-Grenzfaelle", {
-  expect_equal(unique(SimLev:::.draw_horizon(horizon_model("uniform", min = 30, max = 30), 500)), 30L)
-  expect_equal(unique(SimLev:::.draw_horizon(horizon_model("sample", years = 25), 500)), 25L)
-  expect_equal(unique(SimLev:::.draw_horizon(horizon_model("discrete", years = 30, prob = 1), 500)), 30L)
-  expect_output(print(horizon_model("discrete", years = 30, prob = 1)), "Bereich 30 bis 30")
-  expect_equal(unique(SimLev:::.draw_horizon(horizon_model("triangular", min = 30, mode = 30, max = 30), 100)), 30L)
-  expect_error(horizon_model("triangular", min = 20, mode = 50, max = 30), "mode")
+test_that("R4-03/R4-13 withdrawal_horizon: Einzelwerte und triangular-Grenzfaelle", {
+  expect_equal(unique(SimLev:::.draw_horizon(withdrawal_horizon("uniform", min = 30, max = 30), 500)), 30L)
+  expect_equal(unique(SimLev:::.draw_horizon(withdrawal_horizon("sample", years = 25), 500)), 25L)
+  expect_equal(unique(SimLev:::.draw_horizon(withdrawal_horizon("discrete", years = 30, prob = 1), 500)), 30L)
+  expect_output(print(withdrawal_horizon("discrete", years = 30, prob = 1)), "Bereich 30 bis 30")
+  expect_equal(unique(SimLev:::.draw_horizon(withdrawal_horizon("triangular", min = 30, mode = 30, max = 30), 100)), 30L)
+  expect_error(withdrawal_horizon("triangular", min = 20, mode = 50, max = 30), "mode")
   # gueltige Eingaben unveraendert (gleiche Ziehung wie sample())
-  h <- horizon_model("uniform", min = 20, max = 30)
+  h <- withdrawal_horizon("uniform", min = 20, max = 30)
   set.seed(h$seed); ref <- sample(20:30, 100, replace = TRUE)
   expect_identical(SimLev:::.draw_horizon(h, 100), as.integer(ref))
   set.seed(1); R <- matrix(exp(rnorm(40 * 50, 0.04, 0.15)), 40)
-  ws <- withdrawal_simulation(R, withdrawal_rule("constant"), inflation = 2, horizon = horizon_model("uniform", min = 30, max = 30))
+  ws <- withdrawal_simulation(R, withdrawal_rule("constant"), inflation = 2, horizon = withdrawal_horizon("uniform", min = 30, max = 30))
   expect_equal(unique(ws$paths$horizon), 30L)
 })
 
 test_that("R4-04/R4-11 withdrawal_simulation: Dimensionen von base_rate/inflation, inflation = NULL", {
   R <- matrix(1.06, 30, 3)
-  expect_error(withdrawal_simulation(R, withdrawal_rule("constant", rate = 4), tax_mode = "person", base_rate = matrix(2.5, 1, 1)),
+  expect_error(withdrawal_simulation(R, withdrawal_rule("constant", rate = 4), tax = tax_profile(), base_rate = matrix(2.5, 1, 1)),
                "base_rate als Matrix")
-  ref <- withdrawal_simulation(R, withdrawal_rule("constant", rate = 4), tax_mode = "person", base_rate = 2.5)
-  full <- withdrawal_simulation(R, withdrawal_rule("constant", rate = 4), tax_mode = "person", base_rate = matrix(2.5, 30, 3))
+  ref <- withdrawal_simulation(R, withdrawal_rule("constant", rate = 4), tax = tax_profile(), base_rate = 2.5)
+  full <- withdrawal_simulation(R, withdrawal_rule("constant", rate = 4), tax = tax_profile(), base_rate = matrix(2.5, 30, 3))
   expect_equal(full$paths, ref$paths)
   expect_error(withdrawal_simulation(matrix(1.04, 30, 3), withdrawal_rule("constant"), inflation = matrix(1.02, 30, 1)),
                "dieselbe Dimension")
@@ -144,47 +144,47 @@ test_that("R4-06/R4-09 summary p_better bei dd_q50/dd_q90 und bootstrap_probabil
   expect_equal(f(st)$probability, ref)                                        # vorher Fehler
 })
 
-test_that("R4-07/R4-17 goal_optimize: stufentreue Wahrscheinlichkeiten, Gleichstand, Pruefungen", {
+test_that("R4-07/R4-17 planning_goal: stufentreue Wahrscheinlichkeiten, Gleichstand, Pruefungen", {
   R <- bp_goal_R()
   mc <- function(k, sv, goal, h, cf = 0, N = 100000) { set.seed(11); W <- rep(sv, N); alive <- rep(TRUE, N)
     for (t in 1:h) { b <- W + cf; alive <- alive & b > 0; W <- ifelse(alive, b * R[sample.int(nrow(R), N, TRUE), k], 0) }
     mean(alive & W >= goal) }
-  g <- goal_optimize(R, 1e5, 1.5e5, 10, n_sim = 20000, seed = 1)
+  g <- planning_goal(R, 1e5, 1.5e5, 10, n_sim = 20000, seed = 1)
   expect_lt(max(abs(unname(g$static) - sapply(1:3, mc, 1e5, 1.5e5, 10))), 0.006)   # vorher 0.115 statt 0.094
   expect_lt(max(abs(g$probability - mean(g$simulation$success))), 0.015)
-  g2 <- goal_optimize(R, 1e5, 0, 20, contributions = -8000, n_sim = 20000, seed = 1)
+  g2 <- planning_goal(R, 1e5, 0, 20, contributions = -8000, n_sim = 20000, seed = 1)
   expect_lt(max(abs(unname(g2$static[1]) - mc(1, 1e5, 0, 20, -8000))), 0.003)      # vorher 0.026 statt 0.005
   expect_lt(max(abs(g2$probability - mean(g2$simulation$success))), 0.015)        # vorher 0.450 vs 0.424
   # Gleichstand: Kandidat mit geringster Streuung
-  g3 <- goal_optimize(R, 2e5, 1e5, 10, n_grid = 101, n_sim = 2000, seed = 1)
+  g3 <- planning_goal(R, 2e5, 1e5, 10, n_grid = 101, n_sim = 2000, seed = 1)
   expect_equal(g3$candidates[g3$policy[10, which(g3$grid > 1e6)[1]]], "a20")
   expect_equal(g3$candidates[g3$policy[1, which(g3$grid < 200)[1]]], "a20")
-  expect_error(goal_optimize(R, 0, 1e5, 10), "start_value")
-  expect_error(goal_optimize(R, 1e5, 1.5e5, 0), "horizon muss eine ganze Zahl")
+  expect_error(planning_goal(R, 0, 1e5, 10), "start_value")
+  expect_error(planning_goal(R, 1e5, 1.5e5, 0), "horizon muss eine ganze Zahl")
 })
 
-test_that("R4-08/R4-19 set_expected_return: unsortierte Kurse, fehlende Zielspalte", {
+test_that("R4-08/R4-19 series_shift_return: unsortierte Kurse, fehlende Zielspalte", {
   set.seed(1)
   p <- data.frame(date = seq.Date(as.Date("2000-01-01"), by = "day", length.out = 3650))
   p$us <- 100 * cumprod(exp(rnorm(3650, 3e-4, 0.01)))
   o <- sample(nrow(p)); ps <- p[o, ]
-  y <- set_expected_return(ps, "us", 4, type = "prices")
-  ys <- set_expected_return(p, "us", 4, type = "prices")
+  y <- series_shift_return(ps, "us", 4, type = "prices")
+  ys <- series_shift_return(p, "us", 4, type = "prices")
   expect_equal(y$us, ys$us[o])                                     # gleiche Zeilenreihenfolge wie Eingabe
   expect_equal((ys$us[3650] / ys$us[1])^(365.25 / 3649) - 1, 0.04, tolerance = 1e-10)
-  expect_error(set_expected_return(data.frame(us = rep(1.001, 10), eu = 1.001), c("us", "eu"), c(us = 4)), "fehlt f\u00fcr: eu")
+  expect_error(series_shift_return(data.frame(us = rep(1.001, 10), eu = 1.001), c("us", "eu"), c(us = 4)), "fehlt f\u00fcr: eu")
 })
 
-test_that("R4-10 pooled_bootstrap: unbenannte und falsch benannte Gewichte", {
+test_that("R4-10 bootstrap_pooled: unbenannte und falsch benannte Gewichte", {
   set.seed(1)
   land <- function(mu) { d <- data.frame(date = seq.Date(as.Date("1950-12-31"), by = "year", length.out = 70))
     d$aktien <- 100 * cumprod(exp(rnorm(70, mu, 0.18))); d$anleihen <- 100 * cumprod(exp(rnorm(70, 0.02, 0.06))); d }
   ds <- list(de = land(0.05), us = land(0.07))
-  p <- pooled_bootstrap(ds, c("aktien", "anleihen"), weights = c(0.6, 0.4), n = 5, L = 5, seed = 1)
-  q <- pooled_bootstrap(ds, c("aktien", "anleihen"), weights = c(aktien = 0.6, anleihen = 0.4), n = 5, L = 5, seed = 1)
+  p <- bootstrap_pooled(ds, c("aktien", "anleihen"), weights = c(0.6, 0.4), n = 5, L = 5, seed = 1)
+  q <- bootstrap_pooled(ds, c("aktien", "anleihen"), weights = c(aktien = 0.6, anleihen = 0.4), n = 5, L = 5, seed = 1)
   expect_equal(p$returns, q$returns); expect_equal(dim(p$returns), c(30L, 5L))
-  expect_error(pooled_bootstrap(ds, c("aktien", "anleihen"), weights = c(aktien = 0.6, bonds = 0.4), n = 5, L = 5, seed = 1), "weights")
-  expect_error(pooled_bootstrap(ds, c("aktien", "anleihen"), weights = 1, n = 5, L = 5, seed = 1), "weights")
+  expect_error(bootstrap_pooled(ds, c("aktien", "anleihen"), weights = c(aktien = 0.6, bonds = 0.4), n = 5, L = 5, seed = 1), "weights")
+  expect_error(bootstrap_pooled(ds, c("aktien", "anleihen"), weights = 1, n = 5, L = 5, seed = 1), "weights")
 })
 
 test_that("R4-12 withdrawal_paths prueft dates", {

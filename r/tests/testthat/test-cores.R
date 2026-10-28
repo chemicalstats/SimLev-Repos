@@ -54,7 +54,7 @@ test_that("quantile regression reaches the exact optimum (vertex search)", {
   set.seed(5); n <- 300; x <- rnorm(n); y <- 0.4 * x + rt(n, 3); X <- cbind(1, x)
   rho <- function(b, tau) { r <- y - X %*% b; sum(r * (tau - (r < 0))) }
   for (tau in c(0.1, 0.5, 0.9)) {
-    b <- quantile_reg(y, cbind(x = x), tau)
+    b <- quantile_regression(y, cbind(x = x), tau)
     best <- Inf
     for (i in 1:(n - 1)) for (j in (i + 1):n) if (abs(x[i] - x[j]) > 1e-9) {
       bb <- solve(X[c(i, j), ], y[c(i, j)]); v <- rho(bb, tau); if (v < best) best <- v

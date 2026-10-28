@@ -31,7 +31,7 @@ Beginn jeder Periode). Eingabe ist ein data.frame mit Spalte \code{date}
 (Klasse Date) und Kursspalten (Niveaus, keine Renditen); Periodenwerte
 sind die Kurse am letzten Datum jeder Kalenderperiode (fehlende Kurse
 werden fortgeschrieben, eine unvollstaendige letzte Periode zaehlt mit).
-Das Ergebnis dient als Szenario-Stichprobe fuer \code{\link[=goal_optimize]{goal_optimize()}}.
+Das Ergebnis dient als Szenario-Stichprobe fuer \code{\link[=planning_goal]{planning_goal()}}.
 }
 \examples{
 set.seed(1)
@@ -44,5 +44,5 @@ cand <- lapply(c(a20 = 0.2, a60 = 0.6, a100 = 1),
 round(portfolio_returns(d, cand), 3)
 }
 \seealso{
-\code{\link[=goal_optimize]{goal_optimize()}}, \code{\link[=pooled_bootstrap]{pooled_bootstrap()}}
+\code{\link[=planning_goal]{planning_goal()}}, \code{\link[=bootstrap_pooled]{bootstrap_pooled()}}
 }

@@ -1,5 +1,5 @@
-# Referenzfälle für r/R/analysis_tests.R (signal_analysis, sharpe_test, reality_check,
-# min_track_record, return_heatmap, .ret_from, .hac_cov) -> python/simlev/analysis_tests.py
+# Referenzfälle für r/R/analysis_tests.R (signal_analysis, sharpe_test, overfit_reality_check,
+# sharpe_min_track_record, result_heatmap, .ret_from, .hac_cov) -> python/simlev/analysis_tests.py
 source("golden/modules/ref_tools.R"); ref_init("analysis_tests")
 P <- "from simlev import analysis_tests as AT\nfrom simlev._r import rng as RNG\n"
 JH <- "AT = SL.AnalysisTests\n"   # Kopf des Julia-Codes (jl)
@@ -137,14 +137,14 @@ ref_case("st_err_freq", "sharpe_test(ra, rb, frequency = 'year')", paste0(P, "re
          jl = paste0(JH, 'result = AT.sharpe_test(ra, rb; frequency = "year")'))
 ref_case("st_err_input", "sharpe_test(list(1), list(2))", paste0(P, "result = AT.sharpe_test({'a': 1}, {'b': 2})"), I,
          jl = paste0(JH, 'result = AT.sharpe_test(Any[1], Any[2])'))
-SIM <- "sa = simlev.simulation(p[['date', 'a']], simlev.create_strategy(a=simlev.asset_config('etf', 'bnh')))\nsb = simlev.simulation(p[['date', 'b']], simlev.create_strategy(b=simlev.asset_config('etf', 'bnh')), dca_mode=True, dca_value=100, dca_span=1)\n"
+SIM <- "sa = simlev.simulation(p[['date', 'a']], simlev.create_strategy(a=simlev.asset_config(asset_class='etf', trading='bnh')))\nsb = simlev.simulation(p[['date', 'b']], simlev.create_strategy(b=simlev.asset_config(asset_class='etf', trading='bnh')), dca=simlev.dca_plan(value=100, span=1))\n"
 ref_case("st_sim", "sa <- simulation(p[, c('date', 'a')], create_strategy(a = asset_config('etf', 'bnh')))
-  sb <- simulation(p[, c('date', 'b')], create_strategy(b = asset_config('etf', 'bnh')), dca_mode = TRUE, dca_value = 100, dca_span = 1)
-  list(sharpe_test(sa, sb, frequency = 'month'), sharpe_test(sa, sb, frequency = 'day'), min_track_record(sb), min_track_record(sa, frequency = 'day', target = 0.2))",
-  paste0(P, SIM, "result = [AT.sharpe_test(sa, sb, frequency='month'), AT.sharpe_test(sa, sb, frequency='day'), AT.min_track_record(sb), AT.min_track_record(sa, frequency='day', target=0.2)]"), I,
+  sb <- simulation(p[, c('date', 'b')], create_strategy(b = asset_config('etf', 'bnh')), dca = dca_plan(value = 100, span = 1))
+  list(sharpe_test(sa, sb, frequency = 'month'), sharpe_test(sa, sb, frequency = 'day'), sharpe_min_track_record(sb), sharpe_min_track_record(sa, frequency = 'day', target = 0.2))",
+  paste0(P, SIM, "result = [AT.sharpe_test(sa, sb, frequency='month'), AT.sharpe_test(sa, sb, frequency='day'), AT.sharpe_min_track_record(sb), AT.sharpe_min_track_record(sa, frequency='day', target=0.2)]"), I,
          jl = paste0(JH, 'sa = SL.simulation(SL.RFrame("date" => p.date, "a" => p.a), SL.create_strategy("a" => SL.asset_config("etf", "bnh")))
-sb = SL.simulation(SL.RFrame("date" => p.date, "b" => p.b), SL.create_strategy("b" => SL.asset_config("etf", "bnh")); dca_mode = true, dca_value = 100, dca_span = 1)
-result = Any[AT.sharpe_test(sa, sb; frequency = "month"), AT.sharpe_test(sa, sb; frequency = "day"), AT.min_track_record(sb), AT.min_track_record(sa; frequency = "day", target = 0.2)]'))
+sb = SL.simulation(SL.RFrame("date" => p.date, "b" => p.b), SL.create_strategy("b" => SL.asset_config("etf", "bnh")); dca = SL.dca_plan(; value = 100, span = 1))
+result = Any[AT.sharpe_test(sa, sb; frequency = "month"), AT.sharpe_test(sa, sb; frequency = "day"), AT.sharpe_min_track_record(sb), AT.sharpe_min_track_record(sa; frequency = "day", target = 0.2)]'))
 
 # ── .ret_from ───────────────────────────────────────────────────────────────
 q <- p[c(1:40, 45:300), c("date", "a")]; q$a[c(5, 6)] <- NA
@@ -152,72 +152,72 @@ ref_case("ret_from", "list(SimLev:::.ret_from(q, 'week'), SimLev:::.ret_from(q, 
          paste0(P, "result = [AT._ret_from(q, 'week'), AT._ret_from(q, 'month'), AT._ret_from(q, 'day'), AT._ret_from(q, 'month', 2), AT._ret_from(np.arange(1, 6) / 100, 'day')]"), list(q = q),
          jl = paste0(JH, 'result = Any[AT._ret_from(q, "week"), AT._ret_from(q, "month"), AT._ret_from(q, "day"), AT._ret_from(q, "month", 2), AT._ret_from(collect(1:5) ./ 100, "day")]'))
 
-# ── reality_check ───────────────────────────────────────────────────────────
+# ── overfit_reality_check ───────────────────────────────────────────────────────────
 set.seed(4); R <- matrix(rnorm(800 * 10, 0, 0.01), 800); R[, 2] <- R[, 2] + 0.003
 I <- list(R = R)
-ref_case("rc_day", "reality_check(R, B = 200, frequency = 'day', seed = 1)", paste0(P, "result = AT.reality_check(R, B=200, frequency='day', seed=1)"), I,
-         jl = paste0(JH, 'result = AT.reality_check(R; B = 200, frequency = "day", seed = 1)'))
-ref_case("rc_default", "reality_check(R[, 1:4], B = 99, seed = 3)", paste0(P, "result = AT.reality_check(R[:, :4], B=99, seed=3)"), I,
-         jl = paste0(JH, 'result = AT.reality_check(R[:, 1:4]; B = 99, seed = 3)'))
-ref_case("rc_block", "reality_check(R, B = 150, block = 12.5, frequency = 'month', seed = 2)", paste0(P, "result = AT.reality_check(R, B=150, block=12.5, frequency='month', seed=2)"), I,
-         jl = paste0(JH, 'result = AT.reality_check(R; B = 150, block = 12.5, frequency = "month", seed = 2)'))
-ref_case("rc_bench_num", "reality_check(R, benchmark = 3, B = 100, frequency = 'day', seed = 1)", paste0(P, "result = AT.reality_check(R, benchmark=3, B=100, frequency='day', seed=1)"), I,
-         jl = paste0(JH, 'result = AT.reality_check(R; benchmark = 3, B = 100, frequency = "day", seed = 1)'))
-ref_case("rc_bench_vec", "reality_check(R[, 1:5], benchmark = R[, 6], B = 100, frequency = 'day', seed = 1)", paste0(P, "result = AT.reality_check(R[:, :5], benchmark=R[:, 5], B=100, frequency='day', seed=1)"), I,
-         jl = paste0(JH, 'result = AT.reality_check(R[:, 1:5]; benchmark = R[:, 6], B = 100, frequency = "day", seed = 1)'))
+ref_case("rc_day", "overfit_reality_check(R, B = 200, frequency = 'day', seed = 1)", paste0(P, "result = AT.overfit_reality_check(R, B=200, frequency='day', seed=1)"), I,
+         jl = paste0(JH, 'result = AT.overfit_reality_check(R; B = 200, frequency = "day", seed = 1)'))
+ref_case("rc_default", "overfit_reality_check(R[, 1:4], B = 99, seed = 3)", paste0(P, "result = AT.overfit_reality_check(R[:, :4], B=99, seed=3)"), I,
+         jl = paste0(JH, 'result = AT.overfit_reality_check(R[:, 1:4]; B = 99, seed = 3)'))
+ref_case("rc_block", "overfit_reality_check(R, B = 150, block = 12.5, frequency = 'month', seed = 2)", paste0(P, "result = AT.overfit_reality_check(R, B=150, block=12.5, frequency='month', seed=2)"), I,
+         jl = paste0(JH, 'result = AT.overfit_reality_check(R; B = 150, block = 12.5, frequency = "month", seed = 2)'))
+ref_case("rc_bench_num", "overfit_reality_check(R, benchmark = 3, B = 100, frequency = 'day', seed = 1)", paste0(P, "result = AT.overfit_reality_check(R, benchmark=3, B=100, frequency='day', seed=1)"), I,
+         jl = paste0(JH, 'result = AT.overfit_reality_check(R; benchmark = 3, B = 100, frequency = "day", seed = 1)'))
+ref_case("rc_bench_vec", "overfit_reality_check(R[, 1:5], benchmark = R[, 6], B = 100, frequency = 'day', seed = 1)", paste0(P, "result = AT.overfit_reality_check(R[:, :5], benchmark=R[:, 5], B=100, frequency='day', seed=1)"), I,
+         jl = paste0(JH, 'result = AT.overfit_reality_check(R[:, 1:5]; benchmark = R[:, 6], B = 100, frequency = "day", seed = 1)'))
 Rn <- R[, 1:4]; colnames(Rn) <- c("a", "b", "c", "d"); Rn[1:10, 4] <- NA; Rn <- cbind(Rn, e = NA)
-ref_case("rc_bench_name", "reality_check(Rn, benchmark = 'c', B = 100, frequency = 'day', seed = 1)", paste0(P, "result = AT.reality_check(Rn, benchmark='c', B=100, frequency='day', seed=1)"), list(Rn = Rn),
-         jl = paste0(JH, 'result = AT.reality_check(Rn; benchmark = "c", B = 100, frequency = "day", seed = 1)'))
-ref_case("rc_df", "reality_check(as.data.frame(Rn), B = 50, frequency = 'day', seed = 5)", paste0(P, "result = AT.reality_check(Rn, B=50, frequency='day', seed=5)"), list(Rn = as.data.frame(Rn)),
-         jl = paste0(JH, 'result = AT.reality_check(Rn; B = 50, frequency = "day", seed = 5)'))
+ref_case("rc_bench_name", "overfit_reality_check(Rn, benchmark = 'c', B = 100, frequency = 'day', seed = 1)", paste0(P, "result = AT.overfit_reality_check(Rn, benchmark='c', B=100, frequency='day', seed=1)"), list(Rn = Rn),
+         jl = paste0(JH, 'result = AT.overfit_reality_check(Rn; benchmark = "c", B = 100, frequency = "day", seed = 1)'))
+ref_case("rc_df", "overfit_reality_check(as.data.frame(Rn), B = 50, frequency = 'day', seed = 5)", paste0(P, "result = AT.overfit_reality_check(Rn, B=50, frequency='day', seed=5)"), list(Rn = as.data.frame(Rn)),
+         jl = paste0(JH, 'result = AT.overfit_reality_check(Rn; B = 50, frequency = "day", seed = 5)'))
 dts <- seq.Date(as.Date("2018-01-01"), by = "day", length.out = 800)
-ref_case("rc_dates_week", "reality_check(R[, 1:6], dates = dts, B = 120, seed = 1)", paste0(P, "result = AT.reality_check(R[:, :6], dates=dts, B=120, seed=1)"), list(R = R, dts = dts),
-         jl = paste0(JH, 'result = AT.reality_check(R[:, 1:6]; dates = dts, B = 120, seed = 1)'))
-ref_case("rc_dates_month", "reality_check(R[, 1:6], benchmark = 1, dates = format(dts), frequency = 'month', B = 120, seed = 1)",
-         paste0(P, "result = AT.reality_check(R[:, :6], benchmark=1, dates=np.datetime_as_string(dts), frequency='month', B=120, seed=1)"), list(R = R, dts = dts),
-         jl = paste0(JH, 'result = AT.reality_check(R[:, 1:6]; benchmark = 1, dates = string.(dts), frequency = "month", B = 120, seed = 1)'))
+ref_case("rc_dates_week", "overfit_reality_check(R[, 1:6], dates = dts, B = 120, seed = 1)", paste0(P, "result = AT.overfit_reality_check(R[:, :6], dates=dts, B=120, seed=1)"), list(R = R, dts = dts),
+         jl = paste0(JH, 'result = AT.overfit_reality_check(R[:, 1:6]; dates = dts, B = 120, seed = 1)'))
+ref_case("rc_dates_month", "overfit_reality_check(R[, 1:6], benchmark = 1, dates = format(dts), frequency = 'month', B = 120, seed = 1)",
+         paste0(P, "result = AT.overfit_reality_check(R[:, :6], benchmark=1, dates=np.datetime_as_string(dts), frequency='month', B=120, seed=1)"), list(R = R, dts = dts),
+         jl = paste0(JH, 'result = AT.overfit_reality_check(R[:, 1:6]; benchmark = 1, dates = string.(dts), frequency = "month", B = 120, seed = 1)'))
 set.seed(1); r1 <- matrix(rnorm(500, 0.0004, 0.01), ncol = 1)
-ref_case("rc_one", "list(reality_check(r1, B = 199, frequency = 'day', seed = 1), reality_check(cbind(r1, r1), B = 199, frequency = 'day', seed = 1))",
-         paste0(P, "result = [AT.reality_check(r1, B=199, frequency='day', seed=1), AT.reality_check(np.column_stack([r1, r1]), B=199, frequency='day', seed=1)]"), list(r1 = r1),
-         jl = paste0(JH, 'result = Any[AT.reality_check(r1; B = 199, frequency = "day", seed = 1), AT.reality_check(hcat(r1, r1); B = 199, frequency = "day", seed = 1)]'))
-ref_case("rc_print_one", "reality_check(r1, B = 99, frequency = 'day', seed = 1)", paste0(P, "result = AT.reality_check(r1, B=99, frequency='day', seed=1)"), list(r1 = r1),
-         jl = paste0(JH, 'result = AT.reality_check(r1; B = 99, frequency = "day", seed = 1)'))
-ref_case("rc_noseed", "set.seed(11); x <- reality_check(R[1:200, 1:3], B = 50, frequency = 'day'); list(x, runif(2))",
-         paste0(P, "RNG.set_seed(11); x = AT.reality_check(R[:200, :3], B=50, frequency='day'); result = [x, RNG.runif(2)]"), I,
-         jl = paste0(JH, 'SL.RRng.set_seed(11); x = AT.reality_check(R[1:200, 1:3]; B = 50, frequency = "day"); result = Any[x, SL.RRng.runif(2)]'))
-ref_case("rc_err_bench", "reality_check(R, benchmark = 'zz', B = 10, seed = 1)", paste0(P, "result = AT.reality_check(R, benchmark='zz', B=10, seed=1)"), I,
-         jl = paste0(JH, 'result = AT.reality_check(R; benchmark = "zz", B = 10, seed = 1)'))
-ref_case("rc_err_bench_num", "reality_check(R, benchmark = 11, B = 10, seed = 1)", paste0(P, "result = AT.reality_check(R, benchmark=11, B=10, seed=1)"), I,
-         jl = paste0(JH, 'result = AT.reality_check(R; benchmark = 11, B = 10, seed = 1)'))
-ref_case("rc_err_bench_len", "reality_check(R, benchmark = c(0.1, 0.2), B = 10, seed = 1)", paste0(P, "result = AT.reality_check(R, benchmark=[0.1, 0.2], B=10, seed=1)"), I,
-         jl = paste0(JH, 'result = AT.reality_check(R; benchmark = [0.1, 0.2], B = 10, seed = 1)'))
-ref_case("rc_err_x", "reality_check(letters, B = 10)", paste0(P, "result = AT.reality_check(np.array(list('abcdefghijklmnopqrstuvwxyz'), dtype=object), B=10)"), I,
-         jl = paste0(JH, 'result = AT.reality_check(string.(collect("abcdefghijklmnopqrstuvwxyz")); B = 10)'))
+ref_case("rc_one", "list(overfit_reality_check(r1, B = 199, frequency = 'day', seed = 1), overfit_reality_check(cbind(r1, r1), B = 199, frequency = 'day', seed = 1))",
+         paste0(P, "result = [AT.overfit_reality_check(r1, B=199, frequency='day', seed=1), AT.overfit_reality_check(np.column_stack([r1, r1]), B=199, frequency='day', seed=1)]"), list(r1 = r1),
+         jl = paste0(JH, 'result = Any[AT.overfit_reality_check(r1; B = 199, frequency = "day", seed = 1), AT.overfit_reality_check(hcat(r1, r1); B = 199, frequency = "day", seed = 1)]'))
+ref_case("rc_print_one", "overfit_reality_check(r1, B = 99, frequency = 'day', seed = 1)", paste0(P, "result = AT.overfit_reality_check(r1, B=99, frequency='day', seed=1)"), list(r1 = r1),
+         jl = paste0(JH, 'result = AT.overfit_reality_check(r1; B = 99, frequency = "day", seed = 1)'))
+ref_case("rc_noseed", "set.seed(11); x <- overfit_reality_check(R[1:200, 1:3], B = 50, frequency = 'day'); list(x, runif(2))",
+         paste0(P, "RNG.set_seed(11); x = AT.overfit_reality_check(R[:200, :3], B=50, frequency='day'); result = [x, RNG.runif(2)]"), I,
+         jl = paste0(JH, 'SL.RRng.set_seed(11); x = AT.overfit_reality_check(R[1:200, 1:3]; B = 50, frequency = "day"); result = Any[x, SL.RRng.runif(2)]'))
+ref_case("rc_err_bench", "overfit_reality_check(R, benchmark = 'zz', B = 10, seed = 1)", paste0(P, "result = AT.overfit_reality_check(R, benchmark='zz', B=10, seed=1)"), I,
+         jl = paste0(JH, 'result = AT.overfit_reality_check(R; benchmark = "zz", B = 10, seed = 1)'))
+ref_case("rc_err_bench_num", "overfit_reality_check(R, benchmark = 11, B = 10, seed = 1)", paste0(P, "result = AT.overfit_reality_check(R, benchmark=11, B=10, seed=1)"), I,
+         jl = paste0(JH, 'result = AT.overfit_reality_check(R; benchmark = 11, B = 10, seed = 1)'))
+ref_case("rc_err_bench_len", "overfit_reality_check(R, benchmark = c(0.1, 0.2), B = 10, seed = 1)", paste0(P, "result = AT.overfit_reality_check(R, benchmark=[0.1, 0.2], B=10, seed=1)"), I,
+         jl = paste0(JH, 'result = AT.overfit_reality_check(R; benchmark = [0.1, 0.2], B = 10, seed = 1)'))
+ref_case("rc_err_x", "overfit_reality_check(letters, B = 10)", paste0(P, "result = AT.overfit_reality_check(np.array(list('abcdefghijklmnopqrstuvwxyz'), dtype=object), B=10)"), I,
+         jl = paste0(JH, 'result = AT.overfit_reality_check(string.(collect("abcdefghijklmnopqrstuvwxyz")); B = 10)'))
 
-# ── min_track_record ────────────────────────────────────────────────────────
+# ── sharpe_min_track_record ────────────────────────────────────────────────────────
 set.seed(1); r <- rnorm(520, 0.002, 0.02)
 nn <- 10 * 365
 dm <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = nn)[seq(1, nn, 2)])
 dm$value <- 100 * cumprod(1 + rnorm(nrow(dm), 4e-4, 0.01)); dm$other <- 1
 I <- list(r = r, dm = dm)
-ref_case("mt_vec", "min_track_record(r, target = 0, ppy = 52)", paste0(P, "result = AT.min_track_record(r, target=0, ppy=52)"), I,
-         jl = paste0(JH, 'result = AT.min_track_record(r; target = 0, ppy = 52)'))
-ref_case("mt_vec2", "min_track_record(r, target = 0.5, prob = 0.9, ppy = 52)", paste0(P, "result = AT.min_track_record(r, target=0.5, prob=0.9, ppy=52)"), I,
-         jl = paste0(JH, 'result = AT.min_track_record(r; target = 0.5, prob = 0.9, ppy = 52)'))
-ref_case("mt_vec_inf", "min_track_record(r, target = 3)", paste0(P, "result = AT.min_track_record(r, target=3)"), I,
-         jl = paste0(JH, 'result = AT.min_track_record(r; target = 3)'))
-ref_case("mt_vec_month", "x <- r; x[5] <- NA; min_track_record(x, frequency = 'month')", paste0(P, "x = r.copy(); x[4] = simlev._r.fmt.NA_REAL; result = AT.min_track_record(x, frequency='month')"), I,
-         jl = paste0(JH, 'x = copy(r); x[5] = SL.NA; result = AT.min_track_record(x; frequency = "month")'))
-ref_case("mt_df_month", "min_track_record(dm, frequency = 'month')", paste0(P, "result = AT.min_track_record(dm, frequency='month')"), I,
-         jl = paste0(JH, 'result = AT.min_track_record(dm; frequency = "month")'))
-ref_case("mt_df_week", "min_track_record(dm, target = 0.1, prob = 0.99)", paste0(P, "result = AT.min_track_record(dm, target=0.1, prob=0.99)"), I,
-         jl = paste0(JH, 'result = AT.min_track_record(dm; target = 0.1, prob = 0.99)'))
-ref_case("mt_df_day", "min_track_record(dm, frequency = 'day', ppy = 182.6)", paste0(P, "result = AT.min_track_record(dm, frequency='day', ppy=182.6)"), I,
-         jl = paste0(JH, 'result = AT.min_track_record(dm; frequency = "day", ppy = 182.6)'))
-ref_case("mt_err_freq", "min_track_record(r, frequency = 'x')", paste0(P, "result = AT.min_track_record(r, frequency='x')"), I,
-         jl = paste0(JH, 'result = AT.min_track_record(r; frequency = "x")'))
+ref_case("mt_vec", "sharpe_min_track_record(r, target = 0, ppy = 52)", paste0(P, "result = AT.sharpe_min_track_record(r, target=0, ppy=52)"), I,
+         jl = paste0(JH, 'result = AT.sharpe_min_track_record(r; target = 0, ppy = 52)'))
+ref_case("mt_vec2", "sharpe_min_track_record(r, target = 0.5, prob = 0.9, ppy = 52)", paste0(P, "result = AT.sharpe_min_track_record(r, target=0.5, prob=0.9, ppy=52)"), I,
+         jl = paste0(JH, 'result = AT.sharpe_min_track_record(r; target = 0.5, prob = 0.9, ppy = 52)'))
+ref_case("mt_vec_inf", "sharpe_min_track_record(r, target = 3)", paste0(P, "result = AT.sharpe_min_track_record(r, target=3)"), I,
+         jl = paste0(JH, 'result = AT.sharpe_min_track_record(r; target = 3)'))
+ref_case("mt_vec_month", "x <- r; x[5] <- NA; sharpe_min_track_record(x, frequency = 'month')", paste0(P, "x = r.copy(); x[4] = simlev._r.fmt.NA_REAL; result = AT.sharpe_min_track_record(x, frequency='month')"), I,
+         jl = paste0(JH, 'x = copy(r); x[5] = SL.NA; result = AT.sharpe_min_track_record(x; frequency = "month")'))
+ref_case("mt_df_month", "sharpe_min_track_record(dm, frequency = 'month')", paste0(P, "result = AT.sharpe_min_track_record(dm, frequency='month')"), I,
+         jl = paste0(JH, 'result = AT.sharpe_min_track_record(dm; frequency = "month")'))
+ref_case("mt_df_week", "sharpe_min_track_record(dm, target = 0.1, prob = 0.99)", paste0(P, "result = AT.sharpe_min_track_record(dm, target=0.1, prob=0.99)"), I,
+         jl = paste0(JH, 'result = AT.sharpe_min_track_record(dm; target = 0.1, prob = 0.99)'))
+ref_case("mt_df_day", "sharpe_min_track_record(dm, frequency = 'day', ppy = 182.6)", paste0(P, "result = AT.sharpe_min_track_record(dm, frequency='day', ppy=182.6)"), I,
+         jl = paste0(JH, 'result = AT.sharpe_min_track_record(dm; frequency = "day", ppy = 182.6)'))
+ref_case("mt_err_freq", "sharpe_min_track_record(r, frequency = 'x')", paste0(P, "result = AT.sharpe_min_track_record(r, frequency='x')"), I,
+         jl = paste0(JH, 'result = AT.sharpe_min_track_record(r; frequency = "x")'))
 
-# ── return_heatmap ──────────────────────────────────────────────────────────
+# ── result_heatmap ──────────────────────────────────────────────────────────
 set.seed(1)
 wk <- data.frame(date = seq.Date(as.Date("2005-01-01"), by = "week", length.out = 16 * 52 + 10))
 wk$value <- 100 * cumprod(1 + rnorm(nrow(wk), 1.5e-3, 0.02))
@@ -227,35 +227,35 @@ cal <- seq.Date(as.Date("2012-01-01"), as.Date("2016-12-30"), by = "day"); td <-
 set.seed(2); tdd <- data.frame(date = td, value = 100 * cumprod(1 + rnorm(length(td), 3e-4, 0.01)))
 cpi <- data.frame(date = seq.Date(as.Date("2004-01-01"), by = "month", length.out = 240), value = 100 * 1.002^(0:239))
 I <- list(wk = wk, lin = lin, tdd = tdd, cpi = cpi)
-ref_case("hm_week", "return_heatmap(wk, max_years = 10)", paste0(P, "result = AT.return_heatmap(wk, max_years=10)"), I,
-         jl = paste0(JH, 'result = AT.return_heatmap(wk; max_years = 10)'))
-ref_case("hm_week_all", "return_heatmap(wk)", paste0(P, "result = AT.return_heatmap(wk)"), I,
-         jl = paste0(JH, 'result = AT.return_heatmap(wk)'))
-ref_case("hm_week_infl", "return_heatmap(wk, inflation = 2, max_years = 4)", paste0(P, "result = AT.return_heatmap(wk, inflation=2, max_years=4)"), I,
-         jl = paste0(JH, 'result = AT.return_heatmap(wk; inflation = 2, max_years = 4)'))
-ref_case("hm_week_cpi", "return_heatmap(wk, inflation = cpi, max_years = 30)", paste0(P, "result = AT.return_heatmap(wk, inflation=cpi, max_years=30)"), I,
-         jl = paste0(JH, 'result = AT.return_heatmap(wk; inflation = cpi, max_years = 30)'))
-ref_case("hm_cpi_vec", "return_heatmap(wk[wk$date >= as.Date('2006-01-01'), ], inflation = setNames(cpi$value, format(cpi$date)))",
-         paste0(P, "w2 = wk[wk['date'] >= np.datetime64('2006-01-01')]\nresult = AT.return_heatmap(w2, inflation=pd.Series(cpi['value'].to_numpy(), index=np.datetime_as_string(cpi['date'].to_numpy())))"), I,
+ref_case("hm_week", "result_heatmap(wk, max_years = 10)", paste0(P, "result = AT.result_heatmap(wk, max_years=10)"), I,
+         jl = paste0(JH, 'result = AT.result_heatmap(wk; max_years = 10)'))
+ref_case("hm_week_all", "result_heatmap(wk)", paste0(P, "result = AT.result_heatmap(wk)"), I,
+         jl = paste0(JH, 'result = AT.result_heatmap(wk)'))
+ref_case("hm_week_infl", "result_heatmap(wk, inflation = 2, max_years = 4)", paste0(P, "result = AT.result_heatmap(wk, inflation=2, max_years=4)"), I,
+         jl = paste0(JH, 'result = AT.result_heatmap(wk; inflation = 2, max_years = 4)'))
+ref_case("hm_week_cpi", "result_heatmap(wk, inflation = cpi, max_years = 30)", paste0(P, "result = AT.result_heatmap(wk, inflation=cpi, max_years=30)"), I,
+         jl = paste0(JH, 'result = AT.result_heatmap(wk; inflation = cpi, max_years = 30)'))
+ref_case("hm_cpi_vec", "result_heatmap(wk[wk$date >= as.Date('2006-01-01'), ], inflation = setNames(cpi$value, format(cpi$date)))",
+         paste0(P, "w2 = wk[wk['date'] >= np.datetime64('2006-01-01')]\nresult = AT.result_heatmap(w2, inflation=pd.Series(cpi['value'].to_numpy(), index=np.datetime_as_string(cpi['date'].to_numpy())))"), I,
          jl = paste0(JH, 'w2 = SL.rows(wk, wk.date .>= Date(2006, 1, 1))
-result = AT.return_heatmap(w2; inflation = SL.RVector(cpi.value; names = string.(cpi.date)))'))
-ref_case("hm_cpi_late", "return_heatmap(wk, inflation = cpi[cpi$date >= as.Date('2006-01-01'), ])", paste0(P, "result = AT.return_heatmap(wk, inflation=cpi[cpi['date'] >= np.datetime64('2006-01-01')])"), I,
-         jl = paste0(JH, 'result = AT.return_heatmap(wk; inflation = SL.rows(cpi, cpi.date .>= Date(2006, 1, 1)))'))
-ref_case("hm_stub", "return_heatmap(lin)", paste0(P, "result = AT.return_heatmap(lin)"), I,
-         jl = paste0(JH, 'result = AT.return_heatmap(lin)'))
-ref_case("hm_trading", "return_heatmap(tdd)", paste0(P, "result = AT.return_heatmap(tdd)"), I,
-         jl = paste0(JH, 'result = AT.return_heatmap(tdd)'))
-ref_case("hm_unsorted", "return_heatmap(tdd[nrow(tdd):1, ], max_years = 2)", paste0(P, "result = AT.return_heatmap(tdd.iloc[::-1], max_years=2)"), I,
-         jl = paste0(JH, 'result = AT.return_heatmap(SL.rows(tdd, SL.nrow(tdd):-1:1); max_years = 2)'))
-ref_case("hm_short", "return_heatmap(tdd[1:300, ])", paste0(P, "result = AT.return_heatmap(tdd.iloc[:300])"), I,
-         jl = paste0(JH, 'result = AT.return_heatmap(SL.rows(tdd, 1:300))'))
-ref_case("hm_oneyear", "return_heatmap(lin[1:366, ])", paste0(P, "result = AT.return_heatmap(lin.iloc[:366])"), I,
-         jl = paste0(JH, 'result = AT.return_heatmap(SL.rows(lin, 1:366))'))
-ref_case("hm_err_list", "return_heatmap(list(a = lin, b = lin))", paste0(P, "result = AT.return_heatmap({'a': lin, 'b': lin})"), I,
-         jl = paste0(JH, 'result = AT.return_heatmap(SL.RList("a" => lin, "b" => lin))'))
-SIMH <- "rr = simlev.simulation(tdd.rename(columns={'value': 'A'}), simlev.create_strategy(A=simlev.asset_config('etf', 'bnh')), dca_mode=True, dca_value=50, dca_span=1)\n"
-ref_case("hm_sim", "rr <- simulation(setNames(tdd, c('date', 'A')), create_strategy(A = asset_config('etf', 'bnh')), dca_mode = TRUE, dca_value = 50, dca_span = 1); return_heatmap(rr, inflation = 1.5)",
-         paste0(P, SIMH, "result = AT.return_heatmap(rr, inflation=1.5)"), I,
-         jl = paste0(JH, 'rr = SL.simulation(SL.RFrame("date" => tdd.date, "A" => tdd.value), SL.create_strategy("A" => SL.asset_config("etf", "bnh")); dca_mode = true, dca_value = 50, dca_span = 1)
-result = AT.return_heatmap(rr; inflation = 1.5)'))
+result = AT.result_heatmap(w2; inflation = SL.RVector(cpi.value; names = string.(cpi.date)))'))
+ref_case("hm_cpi_late", "result_heatmap(wk, inflation = cpi[cpi$date >= as.Date('2006-01-01'), ])", paste0(P, "result = AT.result_heatmap(wk, inflation=cpi[cpi['date'] >= np.datetime64('2006-01-01')])"), I,
+         jl = paste0(JH, 'result = AT.result_heatmap(wk; inflation = SL.rows(cpi, cpi.date .>= Date(2006, 1, 1)))'))
+ref_case("hm_stub", "result_heatmap(lin)", paste0(P, "result = AT.result_heatmap(lin)"), I,
+         jl = paste0(JH, 'result = AT.result_heatmap(lin)'))
+ref_case("hm_trading", "result_heatmap(tdd)", paste0(P, "result = AT.result_heatmap(tdd)"), I,
+         jl = paste0(JH, 'result = AT.result_heatmap(tdd)'))
+ref_case("hm_unsorted", "result_heatmap(tdd[nrow(tdd):1, ], max_years = 2)", paste0(P, "result = AT.result_heatmap(tdd.iloc[::-1], max_years=2)"), I,
+         jl = paste0(JH, 'result = AT.result_heatmap(SL.rows(tdd, SL.nrow(tdd):-1:1); max_years = 2)'))
+ref_case("hm_short", "result_heatmap(tdd[1:300, ])", paste0(P, "result = AT.result_heatmap(tdd.iloc[:300])"), I,
+         jl = paste0(JH, 'result = AT.result_heatmap(SL.rows(tdd, 1:300))'))
+ref_case("hm_oneyear", "result_heatmap(lin[1:366, ])", paste0(P, "result = AT.result_heatmap(lin.iloc[:366])"), I,
+         jl = paste0(JH, 'result = AT.result_heatmap(SL.rows(lin, 1:366))'))
+ref_case("hm_err_list", "result_heatmap(list(a = lin, b = lin))", paste0(P, "result = AT.result_heatmap({'a': lin, 'b': lin})"), I,
+         jl = paste0(JH, 'result = AT.result_heatmap(SL.RList("a" => lin, "b" => lin))'))
+SIMH <- "rr = simlev.simulation(tdd.rename(columns={'value': 'A'}), simlev.create_strategy(A=simlev.asset_config(asset_class='etf', trading='bnh')), dca=simlev.dca_plan(value=50, span=1))\n"
+ref_case("hm_sim", "rr <- simulation(setNames(tdd, c('date', 'A')), create_strategy(A = asset_config('etf', 'bnh')), dca = dca_plan(value = 50, span = 1)); result_heatmap(rr, inflation = 1.5)",
+         paste0(P, SIMH, "result = AT.result_heatmap(rr, inflation=1.5)"), I,
+         jl = paste0(JH, 'rr = SL.simulation(SL.RFrame("date" => tdd.date, "A" => tdd.value), SL.create_strategy("A" => SL.asset_config("etf", "bnh")); dca = SL.dca_plan(; value = 50, span = 1))
+result = AT.result_heatmap(rr; inflation = 1.5)'))
 ref_done()

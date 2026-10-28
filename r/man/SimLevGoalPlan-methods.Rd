@@ -10,7 +10,7 @@
 \method{plot}{SimLevGoalPlan}(x, ...)
 }
 \arguments{
-\item{x}{Objekt der Klasse \code{SimLevGoalPlan} aus \code{\link[=goal_optimize]{goal_optimize()}}.}
+\item{x}{Objekt der Klasse \code{SimLevGoalPlan} aus \code{\link[=planning_goal]{planning_goal()}}.}
 
 \item{...}{Bei \code{plot()} weitere Argumente fuer
 \code{\link[graphics:image]{graphics::image()}}; bei \code{print()} ohne Wirkung.}
@@ -27,6 +27,6 @@ Periode und Vermoegen (Vermoegen log10, Ausschnitt von \code{goal / 20}
 bis \code{3 * goal}; gestrichelte Linie = Ziel).
 }
 \seealso{
-\code{\link[=goal_optimize]{goal_optimize()}}
+\code{\link[=planning_goal]{planning_goal()}}
 }
 \keyword{internal}

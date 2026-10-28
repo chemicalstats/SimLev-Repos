@@ -15,16 +15,16 @@ data = (date  = collect(Date(2015, 1, 1):Day(1):Date(2015, 1, 1) + Day(n - 1)),
 # 2. Strategie: Gewichte, Kosten und Teilfreistellung
 #    (30 % für Aktien-ETFs, 0 % für Renten-ETFs)
 strategy = create_strategy(
-    WORLD = asset_config("etf", "bnh"; asset_share = 0.7, asset_spread = 0.1, asset_bonus = 30),
-    BONDS = asset_config("etf", "bnh"; asset_share = 0.3, asset_spread = 0.1, asset_bonus = 0),
+    WORLD = asset_config("etf", "bnh"; share = 0.7, spread = 0.1, partial_exemption = 30),
+    BONDS = asset_config("etf", "bnh"; share = 0.3, spread = 0.1, partial_exemption = 0),
 )
 
 # 3. Simulation: 10.000 EUR Einmalanlage, jährliches Rebalancing,
 #    deutsche Privatbesteuerung, Verkauf aller Positionen am Ende
 result = simulation(data, strategy;
     start_value = 10000,
-    balance_mode = true, balance_span = 1, balance_unit = "year",
-    tax_mode = "person", tax_rate = 26.375,
+    rebalance = rebalance_plan(1; unit = "year"),
+    tax = tax_profile(26.375),
     liquidate = true,
     risk_free = 2)
 

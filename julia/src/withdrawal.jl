@@ -6,7 +6,7 @@
 #   withdrawal_paths       Periodenrenditen aus Bootstrap-Pfaden, Ergebnislisten oder Studien
 #   result_index           zeitgewichteter Wertindex eines Simulationsergebnisses
 #   withdrawal_simulation  schneller Kern über viele Pfade, optional mit Steuern
-#   perfect_withdrawal_rate, withdrawal_max_rate, horizon_model
+#   withdrawal_perfect_rate, withdrawal_max_rate, withdrawal_horizon
 #
 # PROZENT-KONVENTION: rate, ceiling, floor, cut, raise, exp_return usw. in
 # Prozent (rate = 4 bedeutet 4 % p. a.), wie im restlichen Paket.
@@ -16,8 +16,8 @@ import ..SimLev
 using Dates
 using Printf
 
-export withdrawal_rule, withdrawal_cohorts, result_index, withdrawal_paths, perfect_withdrawal_rate,
-       withdrawal_simulation, withdrawal_max_rate, horizon_model
+export withdrawal_rule, withdrawal_cohorts, result_index, withdrawal_paths, withdrawal_perfect_rate,
+       withdrawal_simulation, withdrawal_max_rate, withdrawal_horizon
 
 const RList = SimLev.RList
 const RFrame = SimLev.RFrame
@@ -446,13 +446,13 @@ _vapply_mat(vecs, L) = L == 1 ? reshape(Float64[v[1] for v in vecs], :, 1) :
 
 """
     withdrawal_paths(x; column = nothing, strategy = nothing, inflation = nothing, inflation_type = "level",
-                     frequency = "year", dates = nothing, start_date = "2000-01-01", cape = nothing)
+                     frequency = "year", dates = nothing, start = "2000-01-01", cape = nothing)
 
 Pfade in Periodenrenditen für Entnahmen umwandeln (Port von `withdrawal_paths()`).
 `x`: SimLevBootstrapStudy, Liste von SimLevResult oder bootstrap_result.
 """
 function withdrawal_paths(x; column = nothing, strategy = nothing, inflation = nothing, inflation_type = _MISSING,
-                          frequency = nothing, dates = nothing, start_date = "2000-01-01", cape = nothing)
+                          frequency = nothing, dates = nothing, start = "2000-01-01", cape = nothing)
     x = SimLev.as_rframe(x)
     it_given = inflation_type !== _MISSING
     frequency = _match_arg(frequency, ("year", "quarter", "month"))
@@ -528,7 +528,7 @@ function withdrawal_paths(x; column = nothing, strategy = nothing, inflation = n
     column in cn || _stop(@sprintf("Spalte '%s' nicht im Pfad. Verfügbar: %s", column, join(cn, ", ")))
     nr = B._nrow(P1)
     if dates === nothing
-        dates = _seq_dates(_todate(start_date, "start_date")[1], nr)
+        dates = _seq_dates(_todate(start, "start")[1], nr)
     else
         dates = _todate(dates, "dates")
         length(dates) != nr && _stop(@sprintf("dates hat Länge %d, die Pfade haben %d Zeilen (path_length + 1); ein Datum je Pfadzeile angeben.", length(dates), nr))
@@ -601,13 +601,13 @@ function _annual_real(wp)
 end
 
 """
-    perfect_withdrawal_rate(real_returns; legacy = 0)
+    withdrawal_perfect_rate(real_returns; legacy = 0)
 
 Perfect Withdrawal Rate (PWR) je Pfad in Prozent. `real_returns`: Matrix
 (Jahre × Pfade) realer Brutto-Jahresrenditen, Vektor (ein Pfad) oder
 `withdrawal_paths`-Objekt.
 """
-function perfect_withdrawal_rate(real_returns; legacy = 0)
+function withdrawal_perfect_rate(real_returns; legacy = 0)
     _is_wp(real_returns) && (real_returns = _annual_real(real_returns))
     R = try
         _numvec(real_returns) === nothing ? nothing : _as_matrix(real_returns)
@@ -615,17 +615,17 @@ function perfect_withdrawal_rate(real_returns; legacy = 0)
         nothing
     end
     if R === nothing || isempty(R) || any(isnan, R) || any(!isfinite, R)
-        _stop("perfect_withdrawal_rate: real_returns muss eine Matrix endlicher realer Brutto-Jahresrenditen sein (1.05 = +5 %).")
+        _stop("withdrawal_perfect_rate: real_returns muss eine Matrix endlicher realer Brutto-Jahresrenditen sein (1.05 = +5 %).")
     end
     med = _median(vec(R))
     if med < 0.5
-        _stop(@sprintf("perfect_withdrawal_rate: real_returns sieht nicht wie Brutto-Renditen aus (Median %s); erwartet z. B. 1.05 für +5 %%, nicht 0.05 (Nettorendite: 1 + r übergeben).",
+        _stop(@sprintf("withdrawal_perfect_rate: real_returns sieht nicht wie Brutto-Renditen aus (Median %s); erwartet z. B. 1.05 für +5 %%, nicht 0.05 (Nettorendite: 1 + r übergeben).",
                        _fmt1(med; digits = 4)))
     end
-    any(<(0), R) && _stop("perfect_withdrawal_rate: Brutto-Renditen in real_returns müssen >= 0 sein (0 = Totalverlust).")
+    any(<(0), R) && _stop("withdrawal_perfect_rate: Brutto-Renditen in real_returns müssen >= 0 sein (0 = Totalverlust).")
     lv = _numvec(legacy)
     if lv === nothing || length(lv) != 1 || !isfinite(lv[1]) || lv[1] < 0
-        _stop(@sprintf("perfect_withdrawal_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 %% des Startvermögens; erhalten: %s).", _show(legacy)))
+        _stop(@sprintf("withdrawal_perfect_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 %% des Startvermögens; erhalten: %s).", _show(legacy)))
     end
     lg = lv[1]
     out = Vector{Float64}(undef, size(R, 2))
@@ -734,41 +734,59 @@ function _col_ld(M::Matrix{Float64}, mean::Bool)
     return out
 end
 
+"Steuerangaben der Person prüfen (R: `.wd_tax_mode`, F2): `nothing` → \"none\", `tax_profile()` → \"person\"."
+function _wd_tax_mode(tax)
+    tax === nothing && return "none"
+    (tax isa RList && SimLev.inherits(tax, "SimLevTaxProfile")) ||
+        _stop("withdrawal_simulation: tax muss NULL oder ein Objekt aus tax_profile() sein, nicht $(SimLev._blk_cls(tax)).")
+    ct = tax["church_tax"]; pst = tax["private_sale_threshold"]
+    un = ["church_tax" => (ct isa Real && ct > 0), "private_sale_threshold" => !(pst isa Real && pst == 1000),
+          "base_rate" => tax["base_rate"] !== nothing, "guenstigerpruefung" => tax["guenstigerpruefung"] === true,
+          "income" => tax["income"] !== nothing, "harvest" => tax["harvest"] !== nothing]
+    bad = [p.first for p in un if p.second]
+    isempty(bad) || _stop("withdrawal_simulation: tax_profile($(join(bad, ", "))) bildet die Entnahmephase nicht ab; " *
+                          "ausgewertet werden rate und sparer_pauschbetrag (Basiszins über base_rate von withdrawal_simulation()).")
+    return "person"
+end
+
 """
     withdrawal_simulation(x, rule = withdrawal_rule("constant"); start_value = 1e6, inflation = 0,
                           frequency = "year", strategy = nothing, years = nothing, timing = "start",
-                          income = nothing, tax_mode = "none", tax_rate = 26.375, asset_bonus = 30,
-                          sparer_pauschbetrag = 1000, base_rate = 3.20, vorabpauschale = true, sale_cost = 0,
+                          income = nothing, tax = nothing, partial_exemption = 30,
+                          base_rate = 3.20, vorabpauschale = true, sale_cost = 0,
                           cost_basis = 100, loss_carryforward = 0, gamma = 2, keep_paths = true, horizon = nothing)
 
 Entnahme-Simulation über viele Pfade (Port von `withdrawal_simulation()`).
 `x`: withdrawal_paths, Renditematrix (Perioden × Pfade), SimLevResult,
-Liste von SimLevResult oder Bootstrap-Studie. Ergebnis: RList der Klasse
+Liste von SimLevResult oder Bootstrap-Studie. `tax`: `nothing` (ohne Steuern) oder
+`tax_profile()` (F2: ausgewertet werden `rate` und `sparer_pauschbetrag`). Ergebnis: RList der Klasse
 `SimLevWithdrawal`.
 """
 function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_value = 1e6, inflation = 0,
                                frequency = nothing, strategy = nothing, years = nothing, timing = nothing,
-                               income = nothing, tax_mode = nothing, tax_rate = 26.375, asset_bonus = _MISSING,
-                               sparer_pauschbetrag = 1000, base_rate = 3.20, vorabpauschale = _MISSING,
+                               income = nothing, tax = nothing, partial_exemption = _MISSING,
+                               base_rate = 3.20, vorabpauschale = _MISSING,
                                sale_cost = _MISSING, cost_basis = _MISSING, loss_carryforward = _MISSING,
                                gamma = 2, keep_paths = true, horizon = nothing)
     x = SimLev.as_rframe(x)
     rule_pos === _MISSING || (rule = rule_pos)
     rule === _MISSING && (rule = withdrawal_rule("constant"))
-    ab_missing = asset_bonus === _MISSING; vp_missing = vorabpauschale === _MISSING
+    ab_missing = partial_exemption === _MISSING; vp_missing = vorabpauschale === _MISSING
     sc_missing = sale_cost === _MISSING; cb_missing = cost_basis === _MISSING; lc_missing = loss_carryforward === _MISSING
-    asset_bonus = _num(_dflt(asset_bonus, 30.0)); vorabpauschale = _dflt(vorabpauschale, true)
+    partial_exemption = _num(_dflt(partial_exemption, 30.0)); vorabpauschale = _dflt(vorabpauschale, true)
     sale_cost = _num(_dflt(sale_cost, 0.0)); cost_basis = _num(_dflt(cost_basis, 100.0))
     loss_carryforward = _num(_dflt(loss_carryforward, 0.0))
     freq_arg = frequency
     timing = _match_arg(timing, ("start", "end"))
-    tax_mode = _match_arg(tax_mode, ("none", "person"))
+    tax_mode = _wd_tax_mode(tax)
+    tax_rate = tax === nothing ? 26.375 : tax["rate"]
+    sparer_pauschbetrag = tax === nothing ? 1000 : tax["sparer_pauschbetrag"]
     if horizon !== nothing && !_is_horizon(horizon)
         if !_num1(horizon) || _f1(horizon) <= 0
-            _stop(@sprintf("withdrawal_simulation: 'horizon' muss NULL, ein Objekt aus horizon_model() oder eine Zahl von Jahren > 0 sein, nicht %s.",
+            _stop(@sprintf("withdrawal_simulation: 'horizon' muss NULL, ein Objekt aus withdrawal_horizon() oder eine Zahl von Jahren > 0 sein, nicht %s.",
                            _show(horizon)))
         end
-        horizon = horizon_model("fixed"; years = horizon)
+        horizon = withdrawal_horizon("fixed"; years = horizon)
     end
     _is_rule(rule) || _stop("rule muss mit withdrawal_rule() erstellt werden.")
     inflation === nothing && (inflation = 0)
@@ -783,9 +801,7 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
                            arg, _fmt1(_num(v)), _fmt1(_num(v)), unit, _fmt1(_f1(v) * 100)))
         end
     end
-    chk(tax_rate, "tax_rate", "eine Zahl von 0 bis 100 in Prozent (z. B. 26.375)"; lo = 0.0, hi = 100.0); frac(tax_rate, "tax_rate")
-    chk(asset_bonus, "asset_bonus", "eine Zahl von 0 bis 100 in Prozent (z. B. 30)"; lo = 0.0, hi = 100.0); frac(asset_bonus, "asset_bonus")
-    chk(sparer_pauschbetrag, "sparer_pauschbetrag", "eine Zahl >= 0 (EUR je Planjahr, z. B. 1000)")
+    chk(partial_exemption, "partial_exemption", "eine Zahl von 0 bis 100 in Prozent (z. B. 30)"; lo = 0.0, hi = 100.0); frac(partial_exemption, "partial_exemption")
     chk(sale_cost, "sale_cost", "eine Zahl von 0 bis unter 100 in Prozent (z. B. 0.1)"; lo = 0.0, hi = 99.999)
     chk(cost_basis, "cost_basis", "eine Zahl >= 0 in Prozent des Startwerts (z. B. 100)"); frac(cost_basis, "cost_basis")
     chk(loss_carryforward, "loss_carryforward", "eine Zahl >= 0 (EUR)")
@@ -850,7 +866,7 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
                 cost_basis = 100 * basis / sv
                 tax_mode == "person" && (lots = _wd_lots(ol, report, sv))
             else
-                tax_mode == "person" && _warn("cost_basis: Näherung 100 x (Startwert brutto + Einzahlungen) / Endwert, da das Ansparergebnis keine offenen Lots enthält (simulation() ohne tax_mode = 'person' oder älteres Ergebnis); realisierte Gewinne und Cash zählen dabei als stille Reserven. Für genaue Werte die Ansparphase mit tax_mode = 'person' rechnen oder cost_basis angeben.")
+                tax_mode == "person" && _warn("cost_basis: Näherung 100 x (Startwert brutto + Einzahlungen) / Endwert, da das Ansparergebnis keine offenen Lots enthält (simulation() ohne tax = tax_profile() oder älteres Ergebnis); realisierte Gewinne und Cash zählen dabei als stille Reserven. Für genaue Werte die Ansparphase mit tax = tax_profile() rechnen oder cost_basis angeben.")
                 inv = _get(sres, "invested")
                 inv = inv === nothing ? Float64[] : _dvec(inv)
                 start_gross = !isempty(inv) ? inv[1] : acc["worth"][1]
@@ -870,23 +886,23 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
                 adopted["vorabpauschale"] = false
             end
             if mixed
-                _warn(_sp("Am Ende gehaltene Assets mit verschiedenen Regimen (Investmentfonds: %s; andere: %s): withdrawal_simulation() wendet Vorabpauschale (vorabpauschale = %s) und Teilfreistellung (asset_bonus = %g %%) auf den ganzen Bestand an; beide werden nicht übernommen.",
-                          join(hold_n[fund], ", "), join(hold_n[.!fund], ", "), _istrue(vorabpauschale) ? "TRUE" : "FALSE", asset_bonus))
+                _warn(_sp("Am Ende gehaltene Assets mit verschiedenen Regimen (Investmentfonds: %s; andere: %s): withdrawal_simulation() wendet Vorabpauschale (vorabpauschale = %s) und Teilfreistellung (partial_exemption = %g %%) auf den ganzen Bestand an; beide werden nicht übernommen.",
+                          join(hold_n[fund], ", "), join(hold_n[.!fund], ", "), _istrue(vorabpauschale) ? "TRUE" : "FALSE", partial_exemption))
             end
             if any(==("private_sale"), reg)
-                _warn(_sp("Assets mit Regime 'private_sale' (Paragraf 23 EStG: %s) am Ende der Ansparphase: Spekulationsfrist und Freigrenze bildet withdrawal_simulation() nicht ab; deren Gewinne werden wie Fondsgewinne mit Teilfreistellung asset_bonus = %g %% besteuert.",
-                          join(hold_n[reg .== "private_sale"], ", "), asset_bonus))
+                _warn(_sp("Assets mit Regime 'private_sale' (Paragraf 23 EStG: %s) am Ende der Ansparphase: Spekulationsfrist und Freigrenze bildet withdrawal_simulation() nicht ab; deren Gewinne werden wie Fondsgewinne mit Teilfreistellung partial_exemption = %g %% besteuert.",
+                          join(hold_n[reg .== "private_sale"], ", "), partial_exemption))
             end
             fs = reg .!= "private_sale"
-            tfs_all = Float64[r == "investment_fund" ? Float64(_get(a, "asset_bonus", 0.0)) : 0.0 for (a, r) in zip(hold, reg)]
+            tfs_all = Float64[r == "investment_fund" ? Float64(_get(a, "partial_exemption", 0.0)) : 0.0 for (a, r) in zip(hold, reg)]
             tfs = tfs_all[fs]
             fs_names = hold_n[fs]
             if ab_missing && !mixed && !isempty(tfs) && all(fs) && all(abs.(tfs .- tfs[1]) .< 1e-9)
-                asset_bonus = tfs[1]
-                adopted["asset_bonus"] = asset_bonus
-            elseif !mixed && !isempty(tfs) && any(abs.(tfs .- asset_bonus) .> 1e-9)
-                _warn(_sp("asset_bonus = %g %%, aber die am Ende gehaltenen Assets haben die Teilfreistellung %s; withdrawal_simulation() rechnet mit einer Teilfreistellung für den ganzen Bestand (asset_bonus passend angeben; bei verschiedenen Werten keine exakte Abbildung).",
-                          asset_bonus, join([_sp("%s %g %%", n, t) for (n, t) in zip(fs_names, tfs)], ", ")))
+                partial_exemption = tfs[1]
+                adopted["partial_exemption"] = partial_exemption
+            elseif !mixed && !isempty(tfs) && any(abs.(tfs .- partial_exemption) .> 1e-9)
+                _warn(_sp("partial_exemption = %g %%, aber die am Ende gehaltenen Assets haben die Teilfreistellung %s; withdrawal_simulation() rechnet mit einer Teilfreistellung für den ganzen Bestand (partial_exemption passend angeben; bei verschiedenen Werten keine exakte Abbildung).",
+                          partial_exemption, join([_sp("%s %g %%", n, t) for (n, t) in zip(fs_names, tfs)], ", ")))
             end
             tr = _get(sres, "tax_report")
             ny_ = _get(tr, "next_year")
@@ -899,7 +915,7 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
                 adopted["loss_carryforward"] = _f1(lc)
             end
             ny_is_list && num1p(_get(ny_, "sparer_pauschbetrag_used")) && (spb_used1 = _f1(_get(ny_, "sparer_pauschbetrag_used")))
-            spr = Float64[(s = _get(a, "asset_spread"); _isnum(s) ? Float64(s) : NA) for a in hold]
+            spr = Float64[(s = _get(a, "spread"); _isnum(s) ? Float64(s) : NA) for a in hold]
             if sc_missing && !isempty(spr) && !any(isnan, spr)
                 if all(abs.(spr .- spr[1]) .< 1e-12)
                     sale_cost = spr[1] / 2
@@ -954,7 +970,7 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
         x = withdrawal_paths(x; strategy = strategy, inflation = inflation, frequency = _match_arg(freq_arg, ("year", "quarter", "month")))
     end
     if src_taxed && tax_mode == "person" && _istrue(vorabpauschale)
-        _warn("Das Quellergebnis wurde mit Steuern gerechnet (Vorabpauschale im Index enthalten); vorabpauschale = FALSE oder eine Quelle mit tax_mode = 'none' vermeidet Doppelzählung.")
+        _warn("Das Quellergebnis wurde mit Steuern gerechnet (Vorabpauschale im Index enthalten); vorabpauschale = FALSE oder eine Quelle ohne Steuern (simulation(tax = NULL)) vermeidet Doppelzählung.")
     end
     if !_is_wp(x)
         frequency = _match_arg(freq_arg, ("year", "quarter", "month"))
@@ -1021,7 +1037,7 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     rp = _wd_param_vector(rule)
     t0 = time()
     core = _wcore().wd_simulate(R, I, CAPE, BASE, ppy, _rule_code(rule["type"]), rp, timing == "start", start_value, inc,
-                                tax_mode == "person", Float64(tax_rate) / 100, Float64(asset_bonus) / 100, Float64(sparer_pauschbetrag),
+                                tax_mode == "person", Float64(tax_rate) / 100, Float64(partial_exemption) / 100, Float64(sparer_pauschbetrag),
                                 _istrue(vorabpauschale), Float64(sale_cost) / 100, Float64(cost_basis) / 100, Float64(loss_carryforward),
                                 _istrue(keep_paths) || horizon !== nothing,
                                 lots === nothing ? Float64[] : lots["n"], lots === nothing ? Float64[] : lots["basis"],
@@ -1041,7 +1057,7 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
         Float64[(r = min(Int(H[i]), nfy); r > 0 ? fun(sp[1:r, i]) : NA) for i in 1:ncol]
     end
     pwr = (ppy == 1 || size(R, 1) >= ppy) ?
-          perfect_withdrawal_rate(_annual_real(RList("returns" => R, "inflation" => I, "frequency" => x["frequency"]))) : nothing
+          withdrawal_perfect_rate(_annual_real(RList("returns" => R, "inflation" => I, "frequency" => x["frequency"]))) : nothing
     pwr = pwr === nothing ? Union{Missing,Bool}[missing for _ in 1:ncol] :
           Float64[pwr[(i-1)%length(pwr)+1] for i in 1:ncol]
     dep = Float64[ceil(v / ppy) for v in core["depletion_period"]]
@@ -1072,7 +1088,7 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
         paths["spending_drawdown"] = per_path(dd_fun, H); paths["ce_spending"] = per_path(ce_fun, H)
         if ppy == 1
             AR = _annual_real(RList("returns" => R, "inflation" => I, "frequency" => x["frequency"]))
-            paths["pwr"] = Float64[perfect_withdrawal_rate(AR[1:H[i], i:i])[1] for i in eachindex(H)]
+            paths["pwr"] = Float64[withdrawal_perfect_rate(AR[1:H[i], i:i])[1] for i in eachindex(H)]
         else
             paths["pwr"] = fill(NA, length(H))
         end
@@ -1230,7 +1246,11 @@ function _print_summary_wd(io::IO, x)
     print(io, "\n", _WLINE)   # ohne abschließenden Zeilenumbruch
 end
 
-_print_wd(io::IO, x) = _print_summary_wd(io, _summary_wd(x))
+"R `print.SimLevWithdrawal(x, ...)`: druckt `summary(x, ...)`; `probs` geht an summary, andere Schlüsselwörter ignoriert (wie R)."
+function _print_wd(io::IO, x; kw...)
+    _print_summary_wd(io, _summary_wd(x; (k => v for (k, v) in kw if k === :probs)...))
+    return nothing
+end
 
 "Fächer des realen Vermögens und des realen Jahreskonsums als SVG (R: `plot.SimLevWithdrawal`)."
 function _plot_wd(x; probs = [0.05, 0.25, 0.5, 0.75, 0.95], file = nothing, width = 900, height = 380)
@@ -1286,42 +1306,42 @@ end
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-    horizon_model(type = "fixed"; years = nothing, prob = nothing, min = nothing, max = nothing,
+    withdrawal_horizon(type = "fixed"; years = nothing, prob = nothing, min = nothing, max = nothing,
                   mean = nothing, sd = nothing, mode = nothing, seed = 1)
 
-Laufzeit der Entnahmephase nach eigenen Annahmen (Port von `horizon_model()`).
+Laufzeit der Entnahmephase nach eigenen Annahmen (Port von `withdrawal_horizon()`).
 """
-function horizon_model(type_pos = nothing; type = type_pos, type_ = type, years = nothing, prob = nothing, min = nothing, max = nothing,
+function withdrawal_horizon(type_pos = nothing; type = type_pos, type_ = type, years = nothing, prob = nothing, min = nothing, max = nothing,
                        mean = nothing, sd = nothing, mode = nothing, seed = 1)
     t = _match_arg(type_, ("fixed", "uniform", "discrete", "normal", "triangular", "sample"))
     need = Dict("fixed" => ["years"], "uniform" => ["min", "max"], "discrete" => ["years", "prob"],
                 "normal" => ["mean", "sd", "min", "max"], "triangular" => ["min", "mode", "max"], "sample" => ["years"])[t]
     given = Dict{String,Any}("years" => years, "prob" => prob, "min" => min, "max" => max, "mean" => mean, "sd" => sd, "mode" => mode)
     miss = [k for k in need if given[k] === nothing]
-    isempty(miss) || _stop(@sprintf("horizon_model('%s') braucht: %s", t, join(miss, ", ")))
+    isempty(miss) || _stop(@sprintf("withdrawal_horizon('%s') braucht: %s", t, join(miss, ", ")))
     for k in need
         v = given[k]
         multi = k == "prob" || (k == "years" && t in ("discrete", "sample"))
         a = _numvec(v)
         if a === nothing || isempty(a) || any(!isfinite, a) || (!multi && length(a) != 1)
-            _stop(@sprintf("horizon_model('%s'): %s muss %s sein (erhalten: %s).", t, k,
+            _stop(@sprintf("withdrawal_horizon('%s'): %s muss %s sein (erhalten: %s).", t, k,
                            multi ? "ein endlicher Zahlenvektor" : "eine endliche Zahl", _show(v)))
         end
     end
     for k in [k for k in need if k in ("years", "min", "max", "mean", "mode")]
         any(_numvec(given[k]) .<= 0) &&
-            _stop(@sprintf("horizon_model('%s'): %s muss > 0 sein (Laufzeit in Jahren; erhalten: %s).", t, k, _show(given[k])))
+            _stop(@sprintf("withdrawal_horizon('%s'): %s muss > 0 sein (Laufzeit in Jahren; erhalten: %s).", t, k, _show(given[k])))
     end
     if t == "discrete"
         yv, pv = _numvec(years), _numvec(prob)
         (length(yv) != length(pv) || any(pv .< 0) || _rsum(pv) <= 0) &&
-            _stop("horizon_model('discrete'): years und prob gleich lang, prob >= 0 mit Summe > 0.")
+            _stop("withdrawal_horizon('discrete'): years und prob gleich lang, prob >= 0 mit Summe > 0.")
     end
     min !== nothing && max !== nothing && _f1(min) > _f1(max) && _stop("min <= max erforderlich.")
     if t == "triangular" && (mode < min || mode > max)
-        _stop(_sp("horizon_model('triangular'): mode (%g) muss zwischen min (%g) und max (%g) liegen.", mode, min, max))
+        _stop(_sp("withdrawal_horizon('triangular'): mode (%g) muss zwischen min (%g) und max (%g) liegen.", mode, min, max))
     end
-    t == "normal" && sd < 0 && _stop("horizon_model('normal'): sd muss >= 0 sein.")
+    t == "normal" && sd < 0 && _stop("withdrawal_horizon('normal'): sd muss >= 0 sein.")
     out = RList("type" => t, "seed" => seed; class = "SimLevHorizon")
     for k in need
         out[k] = _rval(given[k])

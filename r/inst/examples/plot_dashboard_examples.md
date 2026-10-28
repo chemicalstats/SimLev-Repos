@@ -158,10 +158,10 @@ export_dashboard(result, "backtest_results.pdf")
 bnh_strategy <- create_strategy(
   SPY = asset_config(
     asset_class = "etf",
-    action_type = "bnh",
-    asset_share = 1.0,
-    asset_spread = 0.1,
-    asset_bonus = 30
+    trading = "bnh",
+    share = 1.0,
+    spread = 0.1,
+    partial_exemption = 30
   )
 )
 
@@ -178,10 +178,7 @@ result_dca <- simulation(
   data = data,
   strategy = dca_strategy,
   start_value = 1000,
-  dca_mode = TRUE,
-  dca_value = 500,
-  dca_span = 1,
-  dca_unit = "month"
+  dca = dca_plan(500, 1, unit = "month")
 )
 
 # Vergleich visualisieren

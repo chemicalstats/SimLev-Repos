@@ -28,8 +28,8 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
                            marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                            use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
                            funds_fee, bonus_fee, fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
-                           order_fee, dca_fee, harvest_mode, harvest_day, taxable_income, tax_tariff, given::_Given,
-                           io::IO)
+                           order_fee, dca_fee, harvest_mode, harvest_day, taxable_income, tariff, given::_Given,
+                           io::IO, blocks::Bool = false)
     @nospecialize
     tax_mode = match_arg(tax_mode, ("none", "person", "funds"), "tax_mode")
     if !(data isa RFrame || data isa NamedTuple || data isa AbstractDict || data isa AbstractVector{<:Pair})
@@ -40,7 +40,7 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         error("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein (z. B. aus create_strategy()), nicht " *
               (strategy === nothing ? "fehlend" : "leer (Länge 0)") * ".")
     end
-    spread !== nothing && @warn "simulation: Das Argument 'spread' wird nicht ausgewertet; maßgeblich ist asset_spread je Asset (asset_config())."
+    spread !== nothing && @warn "simulation: Das Argument 'spread' wird nicht ausgewertet; maßgeblich ist spread je Asset (asset_config())."
     names_d = data isa RFrame ? names(data) : String[]
     dup = [nm for (i, nm) in enumerate(names_d) if nm in names_d[1:i-1]]
     if !_is_mapping(strategy) || any(p -> isempty(p.first), _kvpairs(strategy isa Union{AssetConfig,Strategy} ? collect(strategy) : strategy))
@@ -62,11 +62,11 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         end
         tr_ = get(a, "tax_regime", nothing)
         if tr_ !== nothing && (!(tr_ isa AbstractString) || !(tr_ in VALID_REGIMES))
-            error("simulation: tax_regime $(r_deparse(tr_)) von Asset '$nm' ist ungültig; erlaubt sind investment_fund, capital_gains, private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern tax_mode = \"none\" verwenden.")
+            error("simulation: tax_regime $(r_deparse(tr_)) von Asset '$nm' ist ungültig; erlaubt sind investment_fund, capital_gains, private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern $(blocks ? "tax = NULL" : "tax_mode = \"none\"") verwenden.")
         end
-        at = get(a, "action_type", nothing)
+        at = get(a, "trading", nothing)
         if !(at isa AbstractString) || !(at in ("bnh", "signal"))
-            error("simulation: action_type $(_show_arg(at)) von Asset '$nm' ist ungültig; erlaubt sind \"bnh\" und \"signal\".")
+            error("simulation: trading $(_show_arg(at)) von Asset '$nm' ist ungültig; erlaubt sind \"bnh\" und \"signal\".")
         end
     end
     haskey(fr, "date") || error("simulation: Spalte 'date' fehlt in 'data'.")
@@ -116,7 +116,7 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     dup_first === nothing || error("simulation: Datum $(fmt_date(Int(dup_first))) kommt in 'data' mehrfach vor ($n_dup doppelte Zeilen); je Tag genau eine Zeile.")
     nrow_ = _fnrow(fr)
     if filled_attr !== nothing && fa_n != nrow_
-        @warn "simulation: Attribut 'filled' von 'data' hat $fa_n Zeilen, 'data' aber $nrow_ (z. B. nach Zeilenauswahl einer align_series()-Ausgabe); es wird ignoriert, aufgefüllte Tage gelten dann als Handelstage. Zeitraum besser mit align_series(..., start =, end =) wählen."
+        @warn "simulation: Attribut 'filled' von 'data' hat $fa_n Zeilen, 'data' aber $nrow_ (z. B. nach Zeilenauswahl einer series_align()-Ausgabe); es wird ignoriert, aufgefüllte Tage gelten dann als Handelstage. Zeitraum besser mit series_align(..., start =, end =) wählen."
         fa_m = nothing
     end
     pre_filled = falses(nrow_)
@@ -151,10 +151,10 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         isempty(ok) && error("simulation: Kursspalte '$nm' enthält nur NA.")
         if length(ok) < length(v)
             if ok[1] > 1
-                st0 = get(a, "asset_start", nothing)
+                st0 = get(a, "start", nothing)
                 st_new = max(Int(dvals[ok[1]]), st0 === nothing ? Int(dvals[1]) : _date_or_fail(st0))
-                a["asset_start"] = st_new
-                _message("Hinweis: '$nm' hat erst ab $(fmt_date(Int(dvals[ok[1]]))) Kurse; das Asset wird wie mit asset_start = $(fmt_date(st_new)) behandelt.")
+                a["start"] = st_new
+                _message("Hinweis: '$nm' hat erst ab $(fmt_date(Int(dvals[ok[1]]))) Kurse; das Asset wird wie mit start = $(fmt_date(st_new)) behandelt.")
             end
             n_gap = count(isnan, v) - (ok[1] - 1)
             n_gap > 0 && _message("Hinweis: '$nm': $n_gap fehlende Kurse (NA) per LOCF gefüllt.")
@@ -168,25 +168,28 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     (!_is_num(start_value) || start_value <= 0) &&
         error("simulation: start_value muss eine positive Zahl sein (Anfangskapital in EUR, z. B. 10000), nicht $(r_deparse(start_value)).")
     start_value = Float64(start_value)
-    if !_is_num(tax_rate) || isnan(Float64(tax_rate)) || tax_rate < 0 || tax_rate > 100
+    if !blocks && (!_is_num(tax_rate) || isnan(Float64(tax_rate)) || tax_rate < 0 || tax_rate > 100)
         error("simulation: tax_rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 für 26,375 %), nicht $(r_deparse(tax_rate)).")
     end
     tax_rate = Float64(tax_rate)
-    0 < tax_rate < 1 && @warn "simulation: tax_rate = $(r_format1(tax_rate)) wird als $(r_format1(tax_rate)) % gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(tax_rate * 100))."
+    !blocks && 0 < tax_rate < 1 && @warn "simulation: tax_rate = $(r_format1(tax_rate)) wird als $(r_format1(tax_rate)) % gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(tax_rate * 100))."
     if church_tax !== nothing
-        if !_is_num(church_tax) || isnan(Float64(church_tax)) || church_tax < 0 || church_tax > 100
+        if !blocks && (!_is_num(church_tax) || isnan(Float64(church_tax)) || church_tax < 0 || church_tax > 100)
             error("simulation: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9), nicht $(join(r_format(church_tax), ", ")).")
         end
         church_tax = Float64(church_tax)
-        if 0 < church_tax < 1
+        if blocks
+        elseif 0 < church_tax < 1
             @warn "simulation: church_tax = $(r_format1(church_tax)) wird als $(r_format1(church_tax)) % gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(church_tax * 100))."
         elseif church_tax > 9
             @warn "simulation: church_tax = $(r_format1(church_tax)) % ist ungewöhnlich hoch (Kirchensteuer in Deutschland: 8 oder 9 %)."
         end
     end
-    _is_true(harvest_mode) && tax_mode != "person" && @warn "simulation: harvest_mode wirkt nur mit tax_mode = \"person\" und wird hier ignoriert."
+    !blocks && _is_true(harvest_mode) && tax_mode != "person" && @warn "simulation: harvest_mode wirkt nur mit tax_mode = \"person\" und wird hier ignoriert."
+    # Fondsmodus mit tax_profile(harvest = ...)
+    blocks && _is_true(harvest_mode) && tax_mode != "person" && @warn "simulation: harvest (tax_profile(harvest = harvest_rule())) wirkt nicht im Fondsmodus (funds = funds_costs()) und wird hier ignoriert."
     function chk_num(x, arg, what; mn = 0.0, null_ok = false)
-        x === nothing && null_ok && return
+        (x === nothing && null_ok || blocks) && return
         if !_is_num(x) || !isfinite(Float64(x)) || (mn !== nothing && x < mn)
             error("simulation: '$arg' muss $what sein, nicht $(_show_arg(x)).")
         end
@@ -199,11 +202,12 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     chk_num(balance_thresh, "balance_thresh", "NULL oder eine einzelne endliche Zahl >= 0 in Prozent (z. B. 5)"; null_ok = true)
     for (a, x) in (("use_guenstigerpruefung", use_guenstigerpruefung), ("include_soli_on_income_tax", include_soli_on_income_tax),
                    ("fractions", fractions), ("use_sparer_pauschbetrag", use_sparer_pauschbetrag))
-        x isa Bool || error("simulation: '$a' muss TRUE oder FALSE sein, nicht $(_show_arg(x)).")
+        (!blocks || a == "fractions") && !(x isa Bool) && error("simulation: '$a' muss TRUE oder FALSE sein, nicht $(_show_arg(x)).")
     end
     sparer_pauschbetrag = Float64(sparer_pauschbetrag)
     private_sale_threshold = Float64(private_sale_threshold)
     function frac_warn(x, arg, hi = 1.0)
+        blocks && arg != "risk_free" && return
         if _is_num(x) && isfinite(Float64(x)) && 0 < x < hi
             @warn "simulation: $arg = $(r_format1(x)) wird als $(r_format1(x)) % gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(x * 100))."
         end
@@ -213,13 +217,13 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     frac_warn(balance_thresh, "balance_thresh", 0.2)
     frac_warn(risk_free, "risk_free", 0.05)
     risk_free isa AbstractString && haskey(fr, risk_free) && _frac_warn_col(fr, String(risk_free), "risk_free", 0.05)
-    !_is_true(dca_mode) && dca_value !== nothing && @warn "simulation: dca_value wirkt nur mit dca_mode = TRUE und wird ignoriert."
-    if !_is_true(balance_mode) && event_col === nothing && balance_thresh !== nothing
+    !blocks && !_is_true(dca_mode) && dca_value !== nothing && @warn "simulation: dca_value wirkt nur mit dca_mode = TRUE und wird ignoriert."
+    if !blocks && !_is_true(balance_mode) && event_col === nothing && balance_thresh !== nothing
         @warn "simulation: balance_thresh wirkt nur mit balance_mode = TRUE oder event_col (Rebalancing) und wird ignoriert."
     end
     event_col === nothing && _g(given, "event_mode") && @warn "simulation: event_mode wirkt nur zusammen mit event_col und wird ignoriert."
     function check_days(x, arg)
-        x === nothing && return
+        (x === nothing || blocks) && return
         v = _num_vec(x)
         if v === nothing || any(isnan, v) || any(d -> d < 1 || d > 31 || d != r_round(d), v)
             shown = r_format(x isa Union{AbstractVector,Tuple} ? collect(Any, x) : x)
@@ -230,7 +234,7 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     check_days(balance_days, "balance_days")
     days_out = Dict{String,Any}()
     for (a, x) in (("dca_days", dca_days), ("balance_days", balance_days))
-        if x !== nothing
+        if x !== nothing && !blocks
             v = _num_vec(x)
             u = unique(v)
             if length(u) < length(v)
@@ -241,7 +245,7 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         days_out[a] = x
     end
     dca_days, balance_days = days_out["dca_days"], days_out["balance_days"]
-    if _is_true(split_mode) && split_thresh !== nothing
+    if !blocks && _is_true(split_mode) && split_thresh !== nothing
         st_v = _num_vec(split_thresh)
         if st_v === nothing || length(st_v) != 2 || any(isnan, st_v)
             shown = r_format(split_thresh isa Union{AbstractVector,Tuple} ? collect(Any, split_thresh) : split_thresh)
@@ -255,7 +259,7 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         gv = [a for a in ("funds_fee", "bonus_fee") if given.d[a]]
         @warn "simulation: $(join(gv, " und ")) wirkt nur bei tax_mode = \"funds\" (hier tax_mode = \"$tax_mode\") und wird ignoriert."
     end
-    if tax_mode == "funds"
+    if tax_mode == "funds" && !blocks
         for (a, x) in (("funds_fee", funds_fee), ("bonus_fee", bonus_fee))
             if !_is_num(x) || isnan(Float64(x)) || x < 0 || x > 100
                 error("simulation: $a muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. " *
@@ -265,20 +269,21 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         end
     end
     tariff_on = taxable_income !== nothing && tax_mode == "person"
-    taxable_income !== nothing && tax_mode != "person" && @warn "simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"$tax_mode\") und wird ignoriert."
-    taxable_income === nothing && tax_tariff !== nothing && @warn "simulation: tax_tariff wirkt nur zusammen mit taxable_income (zu versteuerndes Einkommen je Jahr) und wird ignoriert."
+    taxable_income !== nothing && tax_mode != "person" && @warn(blocks ? "simulation: income_tariff() (tax_profile(income =)) wirkt nicht im Fondsmodus (funds = funds_costs()) und wird ignoriert." :
+        "simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"$tax_mode\") und wird ignoriert.")
+    taxable_income === nothing && tariff !== nothing && @warn "simulation: tax_tariff wirkt nur zusammen mit taxable_income (zu versteuerndes Einkommen je Jahr) und wird ignoriert."
     tariff_env = nothing
     if tariff_on
         y0, y1 = year_of(Int(minimum(dvals))), year_of(Int(maximum(dvals)))
         zv = _check_taxable_income(taxable_income, collect(y0:y1))
-        tt = if tax_tariff === nothing
-            read_tax_tariff()
-        elseif inherits(tax_tariff, "SimLevTaxTariff")
-            tax_tariff
-        elseif tax_tariff isa AbstractString
-            read_tax_tariff(tax_tariff)
+        tt = if tariff === nothing
+            tax_tariff()
+        elseif inherits(tariff, "SimLevTaxTariff")
+            tariff
+        elseif tariff isa AbstractString
+            tax_tariff(tariff)
         else
-            error("simulation: tax_tariff muss NULL (mitgelieferte Tarifdatei), ein Dateipfad oder ein Objekt aus read_tax_tariff() sein.")
+            error("simulation: tax_tariff muss NULL (mitgelieferte Tarifdatei), ein Dateipfad oder ein Objekt aus tax_tariff() sein.")
         end
         tariff_env = TariffEnv()
         tariff_env.tariff = tt
@@ -295,10 +300,12 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     is_private(a) = get(a, "tax_regime", nothing) == "private_sale" || get(a, "asset_class", nothing) == "etn_deliverable" ||
                     (get(a, "asset_class", nothing) in ("etn", "etc") && _is_true(get(a, "deliverable", nothing)))
     has_private_sale = any(p -> is_private(p.second), strat)
-    if has_private_sale && marginal_tax_rate === nothing && tax_mode == "person" && !tariff_on
+    if has_private_sale && marginal_tax_rate === nothing && tax_mode == "person" && !tariff_on && blocks
+        @warn "simulation: Der Grenzsteuersatz ist nicht gesetzt (tax_profile(income = income_rate(marginal_rate))), die Strategie enthält aber Assets mit tax_regime = \"private_sale\"; Gewinne nach Paragraf 23 EStG werden dann möglicherweise nicht korrekt besteuert. income_rate(marginal_rate) in Prozent angeben (z. B. 42)."
+    elseif has_private_sale && marginal_tax_rate === nothing && tax_mode == "person" && !tariff_on
         @warn "simulation: marginal_tax_rate ist nicht gesetzt, die Strategie enthält aber Assets mit tax_regime = \"private_sale\"; Gewinne nach Paragraf 23 EStG werden dann möglicherweise nicht korrekt besteuert. marginal_tax_rate in Prozent angeben (z. B. 42)."
     end
-    if marginal_tax_rate !== nothing && (marginal_tax_rate < 0 || marginal_tax_rate > 50)
+    if !blocks && marginal_tax_rate !== nothing && (marginal_tax_rate < 0 || marginal_tax_rate > 50)
         error("simulation: marginal_tax_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 für 42 %), nicht $(r_deparse(marginal_tax_rate)).")
     end
     if church_tax !== nothing && church_tax > 0
@@ -315,28 +322,31 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     fee_order = _fee_spec(order_fee)
     fee_dca = dca_fee === nothing ? fee_order : _fee_spec(dca_fee)
     fees_on = fee_order !== nothing || fee_dca !== nothing
-    if _is_true(harvest_mode)
+    if _is_true(harvest_mode) && !blocks
         if !(harvest_day isa AbstractString) || !occursin(r"^\d{2}-\d{2}$", harvest_day) || harvest_day >= "12-31"
             error("harvest_day im Format 'MM-TT' und vor dem 31.12. angeben (z. B. '12-15').")
         end
     end
     if _truthy_mode(dca_mode)
         one_num(x) = _is_num(x) && isfinite(Float64(x))
-        (!one_num(dca_value) || dca_value <= 0) &&
+        !blocks && (!one_num(dca_value) || dca_value <= 0) &&
             error("simulation: 'dca_value' muss bei dca_mode = TRUE eine einzelne endliche Zahl > 0 sein (Betrag je Sparplan-Termin in EUR), nicht $(_show_arg(dca_value)).")
-        (!one_num(dca_span) || dca_span < 1 || dca_span != r_round(Float64(dca_span))) &&
+        !blocks && (!one_num(dca_span) || dca_span < 1 || dca_span != r_round(Float64(dca_span))) &&
             error("simulation: 'dca_span' muss bei dca_mode = TRUE eine einzelne ganze Zahl >= 1 sein (Perioden zwischen zwei Terminen), nicht $(_show_arg(dca_span)).")
         dca_value = Float64(dca_value)
     end
-    shares = Float64[(s = get(a, "asset_share", nothing); s === nothing ? NA : Float64(s)) for (_, a) in strat]
+    shares = Float64[(s = get(a, "share", nothing); s === nothing ? NA : Float64(s)) for (_, a) in strat]
     total_weight = r_sum(shares; na_rm = true)
     if abs(total_weight - 1.0) > 1e-6
-        error(r_sprintf("simulation: Asset-Gewichte (asset_share) summieren sich auf %.4f, müssen aber exakt 1.0 ergeben (Anteile, z. B. 0.6 und 0.4).\n  Aktuelle Gewichte: %s",
-                        total_weight, join((r_sprintf("%s=%.3f", k, (s = get(v, "asset_share", nothing); s === nothing ? NA : Float64(s))) for (k, v) in strat), ", ")))
+        error(r_sprintf("simulation: Asset-Gewichte (share) summieren sich auf %.4f, müssen aber exakt 1.0 ergeben (Anteile, z. B. 0.6 und 0.4).\n  Aktuelle Gewichte: %s",
+                        total_weight, join((r_sprintf("%s=%.3f", k, (s = get(v, "share", nothing); s === nothing ? NA : Float64(s))) for (k, v) in strat), ", ")))
     end
     effective_tax_rate = tax_rate
     if use_guenstigerpruefung && !tariff_on
-        if mtr === nothing
+        if mtr === nothing && blocks
+            @warn "simulation: Günstigerprüfung aktiviert (tax_profile(guenstigerpruefung = TRUE)), aber der Grenzsteuersatz (income_rate(marginal_rate)) ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer (" *
+                  r_as_character(r_round(tax_rate * 100, 2)) * " %).\nFür eine korrekte Günstigerprüfung tax_profile(income = income_rate(marginal_rate)) in Prozent angeben (z. B. 42)."
+        elseif mtr === nothing
             @warn "simulation: Günstigerprüfung aktiviert (use_guenstigerpruefung = TRUE), aber 'marginal_tax_rate' ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer (" *
                   r_as_character(r_round(tax_rate * 100, 2)) * " %).\nFür eine korrekte Günstigerprüfung marginal_tax_rate in Prozent angeben (z. B. 42)."
         else
@@ -371,13 +381,13 @@ function _locf_fill(v::Vector{Float64})
     return out
 end
 
-function _sim_prepare_data(fr::_Frame, pre_filled::BitVector, base_rate_flex, base_rate_data)
+function _sim_prepare_data(fr::_Frame, pre_filled::BitVector, base_rate_flex, base_rate_data, blocks::Bool = false)
     @nospecialize
     dates = fr.cols["date"]::Vector{Float64}
     start_date = Int(dates[1])
     stopp_date = Int(dates[end])
     flex = _is_true(base_rate_flex) && base_rate_data isa AbstractString && haskey(fr, base_rate_data)
-    flex && _frac_warn_col(fr, String(base_rate_data), "base_rate_data", 0.05)
+    flex && _frac_warn_col(fr, String(base_rate_data), blocks ? "base_rate" : "base_rate_data", 0.05)
     if flex
         col = fr.cols[base_rate_data]
         k = fr.kinds[base_rate_data]
@@ -447,7 +457,8 @@ function _signal_col(fr::_Frame, col, n::Int)
 end
 
 function _sim_build_state(fr::_Frame, strategy, start_value::Float64, start_date::Int, stopp_date::Int,
-                          sparer_pauschbetrag::Float64, use_spb::Bool, base_rate, base_rate_flex, base_rate_data)
+                          sparer_pauschbetrag::Float64, use_spb::Bool, base_rate, base_rate_flex, base_rate_data,
+                          blocks::Bool = false)
     @nospecialize
     n = _fnrow(fr)
     totals = Totals(start_value, 0.0, 0.0, 0.0, 0.0, 0.0, sparer_pauschbetrag, use_spb ? sparer_pauschbetrag : 0.0,
@@ -463,25 +474,26 @@ function _sim_build_state(fr::_Frame, strategy, start_value::Float64, start_date
                      ac in ("etn", "etc") ? (deliverable ? "private_sale" : "capital_gains") :
                      ac == "etn_deliverable" ? "private_sale" : "capital_gains"
         end
-        st_raw = get(a, "asset_start", nothing)
-        bonus = get(a, "asset_bonus", nothing)
+        st_raw = get(a, "start", nothing)
+        bonus = get(a, "partial_exemption", nothing)
         dl = get(a, "deliverable", nothing)
         push!(names_, name)
-        push!(assets, AssetInfo(ac, get(a, "action_type", ""), st_raw === nothing ? start_date : _date_or_fail(st_raw),
+        push!(assets, AssetInfo(ac, get(a, "trading", ""), st_raw === nothing ? start_date : _date_or_fail(st_raw),
                                 regime, (bonus === nothing ? 0.0 : Float64(bonus)) / 100, dl === nothing ? false : dl))
-        if get(a, "action_type", nothing) == "signal"
+        if get(a, "trading", nothing) == "signal"
             sb, ss = get(a, "signal_buy", nothing), get(a, "signal_sell", nothing)
             (sb === nothing || !haskey(fr, sb)) &&
                 error("simulation: signal_buy-Spalte '$(sb === nothing ? "NULL" : sb)' fehlt im Datensatz (Asset '$name').")
             (ss === nothing || !haskey(fr, ss)) &&
                 error("simulation: signal_sell-Spalte '$(ss === nothing ? "NULL" : ss)' fehlt im Datensatz (Asset '$name').")
         end
-        share = Float64(a["asset_share"])
+        share = Float64(a["share"])
         push!(status, Status(0.0, 0.0, 0.0, share * start_value, share * start_value, share, share, 0.0))
         local br::Vector{Float64}
         if _truthy_mode(base_rate_flex)
             if base_rate_data === nothing || !haskey(fr, base_rate_data)
                 base_rate_data === nothing && error("simulation: base_rate_flex = TRUE braucht base_rate_data (Name der Basiszins-Spalte in data, Prozent p. a.); base_rate_data fehlt.")
+                blocks && error("simulation: base_rate-Spalte '$base_rate_data' fehlt in data (tax_profile(base_rate = \"$base_rate_data\") braucht eine Basiszins-Spalte in Prozent p. a.; vorhanden: $(join(fr.names, ", "))).")
                 error("simulation: base_rate_data-Spalte '$base_rate_data' fehlt in data (base_rate_flex = TRUE braucht eine Basiszins-Spalte in Prozent p. a.; vorhanden: $(join(fr.names, ", "))).")
             end
             col = fr.cols[base_rate_data]
@@ -489,7 +501,7 @@ function _sim_build_state(fr::_Frame, strategy, start_value::Float64, start_date
         else
             br = fill(base_rate === nothing ? 0.0 : Float64(base_rate), n)
         end
-        spread_a = get(a, "asset_spread", nothing)
+        spread_a = get(a, "spread", nothing)
         push!(market, Market(days, br, copy(fr.cols[name]::Vector{Float64}), _signal_col(fr, get(a, "signal_buy", nothing), n),
                              _signal_col(fr, get(a, "signal_sell", nothing), n),
                              (spread_a === nothing ? 0.0 : Float64(spread_a)) / 100))
@@ -505,7 +517,8 @@ end
 function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, stopp_date::Int, liquidate,
                              dca_mode, dca_span, dca_unit, dca_days, dca_value, dca_anchor, dca_start, dca_skip,
                              balance_mode, balance_span, balance_unit, balance_days, balance_anchor, balance_start,
-                             balance_skip, event_col, event_mode, event_weight, split_mode, split_thresh)
+                             balance_skip, event_col, event_mode, event_weight, split_mode, split_thresh,
+                             blocks::Bool = false)
     @nospecialize
     flag_date = collect(start_date:stopp_date)
     n = length(flag_date)
@@ -518,7 +531,7 @@ function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, st
         (!_is_true(mode) || sd0 === nothing) && continue
         sd1 = _as_date(sd0)
         sd1 === nothing && error("simulation: $(a)_start = '$(sd0 isa AbstractString ? sd0 : r_format1(sd0))' ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
-        sd1 > stopp_date && error("simulation: $(a)_start ($(fmt_date(sd1))) liegt nach dem letzten Datentag ($(fmt_date(stopp_date))); es gäbe keine Termine.")
+        sd1 > stopp_date && error("simulation: $(blocks ? "start von " * (a == "dca" ? "dca_plan()" : "rebalance_plan()") : a * "_start") ($(fmt_date(sd1))) liegt nach dem letzten Datentag ($(fmt_date(stopp_date))); es gäbe keine Termine.")
     end
     flag_rebalance = _calculate_dates_flags(balance_mode, balance_span, balance_unit, balance_days, flag_date, nothing,
                                             balance_anchor, balance_start, balance_skip, liq)
@@ -571,7 +584,7 @@ function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, st
     end
     for (a, name) in enumerate(flag_assets)
         st_a = sim.assets[a].start
-        st_a > stopp_date && error("simulation: asset_start von '$name' ($(fmt_date(st_a))) liegt nach dem letzten Datentag ($(fmt_date(stopp_date))); das Asset wäre nie handelbar. asset_start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie entfernen.")
+        st_a > stopp_date && error("simulation: start von '$name' ($(fmt_date(st_a))) liegt nach dem letzten Datentag ($(fmt_date(stopp_date))); das Asset wäre nie handelbar. start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie entfernen.")
     end
     fl = Flags(flag_date, flag_filled, flag_assets, BitVector(flag_liquidate), BitVector(flag_rebalance), BitVector(flag_dca),
                flag_dca_n, flag_taxes, flag_event, flag_trade, BitVector(flag_split), Int[], Int[], falses(n), Int[],
@@ -581,7 +594,7 @@ end
 
 function _sim_init_weights!(sim::Sim, fl::Flags, start_value::Float64)
     initial = [a for a in eachindex(fl.flag_assets) if sim.assets[a].start <= fl.flag_date[1]]
-    isempty(initial) && error("simulation: Kein Asset ist am ersten Datentag ($(fmt_date(fl.flag_date[1]))) handelbar (asset_start bzw. erste Kurse später); mindestens ein Asset muss ab Beginn handelbar sein.")
+    isempty(initial) && error("simulation: Kein Asset ist am ersten Datentag ($(fmt_date(fl.flag_date[1]))) handelbar (start bzw. erste Kurse später); mindestens ein Asset muss ab Beginn handelbar sein.")
     initial_weights_sum = r_sum([sim.status[a].actual for a in initial])
     all_weights_sum = r_sum([sim.status[a].actual for a in eachindex(fl.flag_assets)])
     for a in eachindex(fl.flag_assets)

@@ -23,9 +23,10 @@ TOP = 5   # Paketschnittstelle simlev/__init__.py
 LAYERS = {
     # 1 Daten und Strategie: Eingaben der Simulation (Reihen, Strategie, Signale, Tarif)
     "config": 1, "data_prep": 1, "backcast": 1, "bonds": 1, "signals": 1, "_signals_core": 1,
-    "trigger": 1, "tax_tariff": 1, "_dates": 1,
+    "trigger": 1, "_tax_tariff": 1, "_dates": 1,
     # 2 Engine
     "engine": 2, "_sim_base": 2, "_sim_phases": 2, "_sim_loop": 2, "_sim_evaluate": 2, "_core": 2,
+    "_sim_blocks": 2,   # Bausteine von simulation(): nutzen Engine-Helfer (_sim_base) und Daten-Schicht (config, _tax_tariff)
     "result": 2,
     # 3 Analysen (je ein Modul, Kerne bei ihrem Modul)
     "bootstrap": 3, "_bootstrap_core": 3, "ms_garch": 3, "withdrawal": 3, "_withdrawal_core": 3,
@@ -162,7 +163,8 @@ def test_analysemodule_erst_bei_bedarf():
         "vals = [getattr(simlev, n) for n in simlev.__all__]\n"
         "assert dir(simlev) == d0, set(dir(simlev)) ^ set(d0)\n"
         "assert all(isinstance(getattr(simlev, m), types.ModuleType) and callable(getattr(simlev, m))\n"
-        "           for m in ('backcast', 'bootstrap', 'deep_analysis', 'param_search'))\n"
+        "           for m in ('backcast', 'bootstrap', 'param_search'))\n"
+        "assert isinstance(simlev.deep_analysis, types.ModuleType) and not callable(simlev.deep_analysis)\n"
         "from simlev import SimLevHMM, bootstrap_study\n"
         "assert SimLevHMM.__module__ == 'simlev.regimes' and bootstrap_study is simlev.bootstrap.bootstrap_study\n"
         "print(','.join(early))\n")

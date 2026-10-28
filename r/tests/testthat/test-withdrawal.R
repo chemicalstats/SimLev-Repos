@@ -25,10 +25,10 @@ test_that("constant rule: success iff rate <= perfect withdrawal rate", {
 
 test_that("PWR closed form matches a brute-force root", {
   r <- c(1.1, 0.8, 1.05, 1.2, 0.95)
-  pwr <- perfect_withdrawal_rate(matrix(r)) / 100
+  pwr <- withdrawal_perfect_rate(matrix(r)) / 100
   P <- 1; for (x in r) P <- (P - pwr) * x
   expect_equal(P, 0, tolerance = 1e-12)
-  pwr_leg <- perfect_withdrawal_rate(matrix(r), legacy = 0.5) / 100
+  pwr_leg <- withdrawal_perfect_rate(matrix(r), legacy = 0.5) / 100
   P <- 1; for (x in r) P <- (P - pwr_leg) * x
   expect_equal(P, 0.5, tolerance = 1e-12)
 })
@@ -84,7 +84,7 @@ test_that("all rules run, monthly frequency and taxes reduce outcomes", {
   }
   expect_error(withdrawal_simulation(R, withdrawal_rule("cape")), "CAPE")
   w0 <- withdrawal_simulation(R, withdrawal_rule("constant"), inflation = 2)
-  wt <- withdrawal_simulation(R, withdrawal_rule("constant"), inflation = 2, tax_mode = "person")
+  wt <- withdrawal_simulation(R, withdrawal_rule("constant"), inflation = 2, tax = tax_profile())
   expect_true(all(wt$paths$terminal_real <= w0$paths$terminal_real + 1e-6))
   expect_gt(sum(wt$paths$taxes), 0)
   set.seed(2)
@@ -123,7 +123,7 @@ test_that("bootstrap paths can be converted for withdrawals", {
   d <- data.frame(eq = 1 + rnorm(n, 3e-4, 0.01), cpi = 100 * 1.0001^(0:(n - 1)))
   b <- bootstrap(d, bootstrap_config(c(eq = "eq"), aux = c(cpi = "cpi")), "stationary", n = 5,
                  params = list(L = 30), path_length = 7310, seed = 1, progress = FALSE)
-  wp <- withdrawal_paths(b, "eq", inflation = 2, start_date = "2000-01-01")
+  wp <- withdrawal_paths(b, "eq", inflation = 2, start = "2000-01-01")
   expect_equal(nrow(wp$returns), 20L)
   ws <- withdrawal_simulation(wp, withdrawal_rule("percent", rate = 4))
   expect_true(all(ws$paths$success))
@@ -133,9 +133,9 @@ test_that("result_index removes cash flows (TWR index)", {
   set.seed(4)
   d <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = 800),
                   ETF = 100 * cumprod(1 + rnorm(800, 3e-4, 0.01)))
-  st <- create_strategy(ETF = asset_config("etf", "bnh", asset_spread = 0))
+  st <- create_strategy(ETF = asset_config("etf", "bnh", spread = 0))
   r1 <- simulation(d, st, start_value = 1000)
-  r2 <- simulation(d, st, start_value = 1000, dca_mode = TRUE, dca_value = 500, dca_span = 1)
+  r2 <- simulation(d, st, start_value = 1000, dca = dca_plan(value = 500, span = 1))
   i1 <- result_index(r1); i2 <- result_index(r2)
   expect_equal(i1$value, 100 * d$ETF / d$ETF[1], tolerance = 1e-10)
   expect_equal(i2$value, i1$value, tolerance = 1e-10)        # Sparplan aendert die TWR nicht
@@ -147,7 +147,7 @@ test_that("a saved simulation() result drives the withdrawal phase", {
   set.seed(4)
   d <- data.frame(date = seq.Date(as.Date("1980-01-01"), as.Date("2019-12-31"), by = "day"))
   d$ETF <- 100 * cumprod(1 + rnorm(nrow(d), 3e-4, 0.01))
-  res <- simulation(d, create_strategy(ETF = asset_config("etf", "bnh", asset_spread = 0)), start_value = 1e5)
+  res <- simulation(d, create_strategy(ETF = asset_config("etf", "bnh", spread = 0)), start_value = 1e5)
   f <- tempfile(fileext = ".rds"); saveRDS(res, f); res <- readRDS(f)
   co <- withdrawal_cohorts(res, years = 25, step = "year", inflation = 2)
   expect_equal(nrow(co$returns), 25L)
@@ -159,20 +159,19 @@ test_that("a saved simulation() result drives the withdrawal phase", {
   w2 <- withdrawal_simulation(res, withdrawal_rule("constant", rate = 4), years = 25, inflation = 2)
   expect_equal(w1$paths$terminal_real, w2$paths$terminal_real)
   # Startvermoegen und Kostenbasis aus der Ansparphase
-  acc <- simulation(d[1:3650, ], create_strategy(ETF = asset_config("etf", "bnh", asset_spread = 0)),
-                    start_value = 1e4, dca_mode = TRUE, dca_value = 500, dca_span = 1)
+  acc <- simulation(d[1:3650, ], create_strategy(ETF = asset_config("etf", "bnh", spread = 0)), start_value = 1e4, dca = dca_plan(value = 500, span = 1))
   # Ansparphase ohne tax_mode = "person": keine offenen Lots, daher Naeherung mit Warnung
   expect_warning(withdrawal_simulation(res, withdrawal_rule("percent", rate = 4), years = 25, inflation = 2,
-                                       start_value = acc, tax_mode = "person"), "cost_basis: N\u00e4herung")
+                                       start_value = acc, tax = tax_profile()), "cost_basis: N\u00e4herung")
   w3 <- suppressWarnings(withdrawal_simulation(res, withdrawal_rule("percent", rate = 4), years = 25, inflation = 2,
-                                               start_value = acc, tax_mode = "person"))
+                                               start_value = acc, tax = tax_profile()))
   expect_equal(w3$start_value, tail(acc$worth, 1))
   expect_true(all(w3$paths$taxes > 0))
 })
 
 test_that("a list of simulation() results is used path by path", {
   set.seed(9)
-  st <- create_strategy(ETF = asset_config("etf", "bnh", asset_spread = 0))
+  st <- create_strategy(ETF = asset_config("etf", "bnh", spread = 0))
   dd <- seq.Date(as.Date("2000-01-01"), by = "day", length.out = 3660)
   runs <- lapply(1:4, function(k) simulation(data.frame(date = dd, ETF = 100 * cumprod(1 + rnorm(length(dd), 3e-4, 0.01))), st))
   wp <- withdrawal_paths(runs, inflation = 2)

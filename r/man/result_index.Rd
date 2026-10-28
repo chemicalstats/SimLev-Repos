@@ -36,8 +36,7 @@ dabei als 1 gesetzt.
 \examples{
 d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 400),
                 ETF = 100 * cumprod(1 + rnorm(400, 3e-4, 0.01)))
-res <- simulation(d, create_strategy(ETF = asset_config("etf", "bnh")),
-                  dca_mode = TRUE, dca_value = 100, dca_span = 1)
+res <- simulation(d, create_strategy(ETF = asset_config("etf", "bnh")), dca = dca_plan(value = 100, span = 1))
 head(result_index(res))
 }
 \seealso{

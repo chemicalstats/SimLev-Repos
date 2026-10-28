@@ -21,7 +21,7 @@ function _nrow_any(df)
     df isa RFrame && return nrow(df)
     df isa NamedTuple && return isempty(df) ? 0 : length(first(df))
     df isa AbstractDict && return isempty(df) ? 0 : length(first(values(df)))
-    error("compute_rebal_trigger: df muss ein data.frame sein.")
+    error("rebalance_trigger: df muss ein data.frame sein.")
 end
 
 function _with_col(df, name::AbstractString, v::AbstractVector)
@@ -36,17 +36,17 @@ function _with_col(df, name::AbstractString, v::AbstractVector)
         out[keytype(out) === Symbol ? Symbol(name) : name] = v
         return out
     end
-    error("compute_rebal_trigger: df muss ein data.frame sein.")
+    error("rebalance_trigger: df muss ein data.frame sein.")
 end
 
 _f64(x) = x === missing || x === nothing ? NA : Float64(x)
 _first_obs(v) = (i = findfirst(!isnan, v); i === nothing ? length(v) : i)
 
 """
-    compute_rebal_trigger(df, type; threshold = 10, lev_col = "target_leverage",
+    rebalance_trigger(df, type; threshold = 10, lev_col = "target_leverage",
                           vol_col = "sigma_ewma", triggers = nothing, out_col = "rebal_trigger")
 
-Logische Trigger-Spalte für `simulation(...; event_col = ...)` vorberechnen
+Logische Trigger-Spalte für `simulation(...; rebalance = rebalance_plan(; event_col = ...))` vorberechnen
 (`type` = `"abs_leverage"`, `"rel_leverage"`, `"vol_band"` oder `"combined"`).
 `threshold` **in Prozent** (intern /100). Die Referenz ist der erste nicht
 fehlende Wert und springt nur an Trigger-Tagen; NA löst nicht aus. `"combined"`
@@ -54,12 +54,12 @@ verknüpft die Sub-Trigger aus `triggers` (Liste benannter Listen) per ODER.
 Gibt eine Kopie von `df` (RFrame, NamedTuple oder Dict) mit der Spalte
 `out_col` zurück; Tag 1 ist immer `false`.
 """
-function compute_rebal_trigger(df, type::AbstractString; threshold::Real = 10,
+function rebalance_trigger(df, type::AbstractString; threshold::Real = 10,
                                lev_col::AbstractString = "target_leverage",
                                vol_col::AbstractString = "sigma_ewma",
                                triggers = nothing, out_col::AbstractString = "rebal_trigger")
     n = _nrow_any(df)
-    n < 1 && error("compute_rebal_trigger: leerer data.frame.")
+    n < 1 && error("rebalance_trigger: leerer data.frame.")
     thr = threshold / 100
     trig = falses(n)
     if type == "abs_leverage" || type == "rel_leverage"
@@ -98,7 +98,7 @@ function compute_rebal_trigger(df, type::AbstractString; threshold::Real = 10,
             haskey(kw, :df) && delete!(kw, :df)
             st = String(pop!(kw, :type))
             haskey(kw, :out_col) || (kw[:out_col] = "..__sub__..")
-            sub_df = compute_rebal_trigger(df, st; kw...)
+            sub_df = rebalance_trigger(df, st; kw...)
             trig .|= Bool.(_getcol(sub_df, String(kw[:out_col])))
         end
     else

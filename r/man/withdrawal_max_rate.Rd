@@ -17,7 +17,7 @@ withdrawal_max_rate(
 \arguments{
 \item{x}{Renditequelle wie in \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}:
 \code{withdrawal_paths} (z. B. aus \code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}},
-\code{\link[=withdrawal_paths]{withdrawal_paths()}}, \code{\link[=pooled_bootstrap]{pooled_bootstrap()}}), Renditematrix,
+\code{\link[=withdrawal_paths]{withdrawal_paths()}}, \code{\link[=bootstrap_pooled]{bootstrap_pooled()}}), Renditematrix,
 \code{SimLevResult}, Liste von \code{SimLevResult} oder
 \code{SimLevBootstrapStudy}.}
 
@@ -59,6 +59,6 @@ R <- matrix(exp(rnorm(30 * 200, 0.05, 0.15)), 30)    # 30 Jahre, 200 Pfade
 withdrawal_max_rate(R, withdrawal_rule("constant"), success = 0.9, inflation = 2)
 }
 \seealso{
-\code{\link[=withdrawal_simulation]{withdrawal_simulation()}}, \code{\link[=perfect_withdrawal_rate]{perfect_withdrawal_rate()}},
+\code{\link[=withdrawal_simulation]{withdrawal_simulation()}}, \code{\link[=withdrawal_perfect_rate]{withdrawal_perfect_rate()}},
 \code{\link[=withdrawal_rule]{withdrawal_rule()}}
 }

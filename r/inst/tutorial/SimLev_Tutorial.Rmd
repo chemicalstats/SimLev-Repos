@@ -69,23 +69,23 @@ Sensitivitäten weisen darauf hin („cagr: mit Sparplan geldgewichtet“).
 <div class="arrow">→</div>
 <div class="step"><b>Entnahme</b><br><code>withdrawal_simulation()</code><br>Regeln, Erfolgsquoten, Steuern</div>
 <div class="arrow">→</div>
-<div class="step"><b>Analyse</b><br><code>deep_analysis()</code><br>Benchmark, Risiko, Sensitivitäten</div>
+<div class="step"><b>Analyse</b><br><code>result_analysis()</code><br>Benchmark, Risiko, Sensitivitäten</div>
 </div>
 
 | Baustein | Hauptfunktionen | Ergebnisobjekt |
 |---|---|---|
 | Backcast | `backcast_fit()`, `backcast()` | `SimLevBackcastFit`, `SimLevBackcast` |
-| Bootstrap | `bootstrap_config()`, `bootstrap()`, `bootstrap_study()`, `block_length()`, `bootstrap_probability()` | `bootstrap_result`, `SimLevBootstrapStudy` |
-| Analyse | `deep_analysis()`, `sensitivity_grid()`, `rebalancing_sensitivity()`, `lumpsum_vs_dca()`, `leverage_sensitivity()` | `SimLevAnalysis`, `SimLevSensitivity`, `SimLevLumpSum` |
-| Daten | `align_series()`, `check_series()`, `align_macro()`, `splice_series()`, `portfolio_template()` | `data.frame`, `SimLevDataCheck`, Strategie |
-| Parametersuche | `param_search()`, `plateau()`, `pbo()`, `deflated_sharpe()`, `walk_forward()`, `param_bootstrap()`, `signal_*()` | `SimLevParamSearch`, `SimLevPBO`, `SimLevDSR`, `SimLevWalkForward` |
-| Abhängigkeiten | `dependence_analysis()`, `fit_copula()`, `tail_dependence()`, `dcc_fit()`, `tail_regression()`, `covar_analysis()`, `validate_dependence()`, `regime_subset()` | `SimLevDependence`, `SimLevTailRegression`, `SimLevCoVaR` |
-| Taktik | `tactical_rules()`, `tactical_rotation()`, `target_volatility()`, `conditional_volatility()`, `glidepath()`, `blend_weights()`, `tactical_simulation()` | `SimLevWeights`, `SimLevResult` |
-| Optimierung | `portfolio_optimize()`, `efficient_frontier()`, `rolling_optimization()`, `risk_contributions()` | `SimLevOptimization`, `SimLevFrontier` |
-| Synthetische Reihen | `bond_index_from_yields()`, `money_market_index()`, `currency_hedged_index()` | Indexvektor |
-| Szenarien | `entropy_pooling()`, `copula_scenarios()`, `scenario_risk()`, `crisis_replay()` | `SimLevScenarios` |
-| Planung | `set_expected_return()`, `pooled_bootstrap()`, `horizon_model()`, `goal_optimize()` | `withdrawal_paths`, `SimLevGoalPlan` |
-| Prüfungen | `sharpe_test()`, `reality_check()`, `sharpe_haircut()`, `min_track_record()`, `cpcv_portfolio()`, `signal_analysis()`, `regime_hmm()`, `return_heatmap()` | diverse |
+| Bootstrap | `bootstrap_config()`, `bootstrap()`, `bootstrap_study()`, `bootstrap_block_length()`, `bootstrap_probability()` | `bootstrap_result`, `SimLevBootstrapStudy` |
+| Analyse | `result_analysis()`, `sensitivity_grid()`, `sensitivity_rebalancing()`, `planning_lumpsum_vs_dca()`, `sensitivity_leverage()` | `SimLevAnalysis`, `SimLevSensitivity`, `SimLevLumpSum` |
+| Daten | `series_align()`, `series_check()`, `series_align_macro()`, `series_splice()`, `portfolio_template()` | `data.frame`, `SimLevDataCheck`, Strategie |
+| Parametersuche | `param_search()`, `param_plateau()`, `overfit_pbo()`, `sharpe_deflated()`, `overfit_walk_forward()`, `param_bootstrap()`, `signal_*()` | `SimLevParamSearch`, `SimLevPBO`, `SimLevDSR`, `SimLevWalkForward` |
+| Abhängigkeiten | `dependence_analysis()`, `copula_fit()`, `tail_dependence()`, `dependence_dcc()`, `tail_regression()`, `tail_covar()`, `dependence_validate()`, `regime_subset()` | `SimLevDependence`, `SimLevTailRegression`, `SimLevCoVaR` |
+| Taktik | `tactical_rules()`, `tactical_rotation()`, `tactical_target_volatility()`, `tactical_conditional_volatility()`, `tactical_glidepath()`, `tactical_blend()`, `tactical_simulation()` | `SimLevWeights`, `SimLevResult` |
+| Optimierung | `portfolio_optimize()`, `portfolio_frontier()`, `portfolio_rolling()`, `portfolio_risk_contributions()` | `SimLevOptimization`, `SimLevFrontier` |
+| Synthetische Reihen | `index_bond()`, `index_money_market()`, `index_currency_hedged()` | Indexvektor |
+| Szenarien | `scenario_entropy_pooling()`, `scenario_copula()`, `scenario_risk()`, `scenario_crisis()` | `SimLevScenarios` |
+| Planung | `series_shift_return()`, `bootstrap_pooled()`, `withdrawal_horizon()`, `planning_goal()` | `withdrawal_paths`, `SimLevGoalPlan` |
+| Prüfungen | `sharpe_test()`, `overfit_reality_check()`, `sharpe_haircut()`, `sharpe_min_track_record()`, `portfolio_cpcv()`, `signal_analysis()`, `regime_hmm()`, `result_heatmap()` | diverse |
 | Entnahme | `withdrawal_rule()`, `withdrawal_cohorts()`, `withdrawal_paths()`, `withdrawal_simulation()`, `withdrawal_max_rate()`, `result_index()` | `SimLevWithdrawal` |
 
 <div class="note">
@@ -324,7 +324,7 @@ Residuen unabhängig gezogen, wodurch ihre Korrelation verloren ging.
 
 ```{r blocklength}
 lr <- log(as.matrix(hist[, c("us_index_l1_return", "eu_index_l1_return")]))
-rbind(Renditen = block_length(lr)[1, ], Betraege = block_length(lr, "abs")[1, ])
+rbind(Renditen = bootstrap_block_length(lr)[1, ], Betraege = bootstrap_block_length(lr, "abs")[1, ])
 ```
 
 Die Politis-White-Regel optimiert die Varianzschätzung des Mittelwerts. Auf
@@ -366,18 +366,18 @@ sma_eur <- function(df, n = 310) {
   s <- stats::filter(df$eu, rep(1 / n, n), sides = 1)
   list(buy = df$eu >= s, sell = df$eu < s)
 }
-letf_bnh <- create_strategy(letf = asset_config("etf", "bnh", asset_bonus = 30))
-letf_sma <- create_strategy(letf = asset_config("etf", "signal", asset_bonus = 30,
+letf_bnh <- create_strategy(letf = asset_config("etf", "bnh", partial_exemption = 30))
+letf_sma <- create_strategy(letf = asset_config("etf", "signal", partial_exemption = 30,
                                                 signal_buy = "buy", signal_sell = "sell"))
 strategies <- list(
   bh_ls  = list(strategy = letf_bnh, map = c(letf = "eu_l2")),
   sma_ls = list(strategy = letf_sma, map = c(letf = "eu_l2"), signal = sma_eur),
-  index  = create_strategy(eu = asset_config("etf", "bnh", asset_bonus = 30))
+  index  = create_strategy(eu = asset_config("etf", "bnh", partial_exemption = 30))
 )
 study <- bootstrap_study(
   hist, cfg, method = "stationary", n = 120, params = list(L = 250),
   strategies = strategies, path_length = 365 * 22, burn_in = 730,
-  start_date = "1975-01-01", sim_args = list(start_value = 1000),
+  start = "1975-01-01", sim_args = list(start_value = 1000),
   benchmark = "bh_ls", seed = 42, cores = 2, progress = FALSE,
   keep_returns = "year", keep_aux = "cpi"
 )
@@ -521,7 +521,7 @@ withdrawal_max_rate(co, withdrawal_rule("guyton_klinger"), success = 0.95)
 
 ## Steuern in der Entnahmephase
 
-Mit `tax_mode = "person"` rechnet der schnelle Kern einen thesaurierenden
+Mit `tax = tax_profile()` rechnet der schnelle Kern einen thesaurierenden
 Fondsbestand nach heutiger Rechtslage: Verkaufsgewinne mit Teilfreistellung,
 Verlustverrechnung vor Sparer-Pauschbetrag, Abgeltungsteuer und die
 Vorabpauschale (Basiszins 2026: 3,20 %), die beim späteren Verkauf
@@ -530,7 +530,7 @@ Startwerts an – bei einem lange angesparten Depot deutlich unter 100.
 
 ```{r tax}
 wd_tax <- withdrawal_simulation(co, withdrawal_rule("constant", rate = 4), start_value = 1e6,
-                                tax_mode = "person", asset_bonus = 30, cost_basis = 45)
+                                tax = tax_profile(), partial_exemption = 30, cost_basis = 45)
 s0 <- summary(wd); s1 <- summary(wd_tax)
 data.frame(row.names = c("ohne Steuern", "mit Steuern, Kostenquote 45 %"),
            Erfolg = sprintf("%.1f %%", 100 * c(s0$success_rate, s1$success_rate)),
@@ -546,7 +546,7 @@ lässt sich speichern und später als Renditequelle verwenden.
 ## Ein Simulationslauf
 
 ```{r saved}
-strat <- create_strategy(ETF = asset_config("etf", "bnh", asset_bonus = 30))
+strat <- create_strategy(ETF = asset_config("etf", "bnh", partial_exemption = 30))
 run   <- simulation(data.frame(date = hist$date, ETF = bc$value), strat, start_value = 1e5)
 f     <- file.path(tempdir(), "lauf_letf.rds")
 saveRDS(run, f)
@@ -574,8 +574,8 @@ Endwert als Startvermögen. Ohne Angabe von `cost_basis` leitet
 das Ergebnis am letzten Tag nur noch Cash hält (z. B. mit
 `liquidate = TRUE`); sonst näherungsweise (Startkapital brutto +
 Einzahlungen) / Endwert mit Durchschnittskosten. Wurde die Ansparphase mit
-`tax_mode = "person"` gerechnet, übernimmt eine Entnahmephase mit
-`tax_mode = "person"` stattdessen die offenen Lots (`open_lots`) und
+`tax = tax_profile()` gerechnet, übernimmt eine Entnahmephase mit
+`tax = tax_profile()` stattdessen die offenen Lots (`open_lots`) und
 verkauft sie per FIFO wie die Engine; dazu Teilfreistellung, Verlusttopf,
 halben Spread und den Stand des Sparer-Pauschbetrags, soweit diese nicht
 ausdrücklich angegeben sind (Element `adopted`). Hier ist die Ansparphase
@@ -585,11 +585,10 @@ Tutorial sind Warnungen und Hinweise ausgeblendet):
 
 ```{r accum}
 anspar <- simulation(data.frame(date = hist$date[1:(365 * 25)], ETF = hist$eu_ndtr_l1[1:(365 * 25)]),
-                     strat, start_value = 1e4, dca_mode = TRUE, dca_value = 500,
-                     dca_span = 1, dca_unit = "month")
+                     strat, start_value = 1e4, dca = dca_plan(500, 1, unit = "month"))
 wd_life <- withdrawal_simulation(run, withdrawal_rule("guyton_klinger", rate = 4.5),
                                  start_value = anspar, years = 25, inflation = 2,
-                                 tax_mode = "person")
+                                 tax = tax_profile())
 c(Startvermoegen = wd_life$start_value, Erfolg = summary(wd_life)$success_rate)
 ```
 
@@ -612,7 +611,7 @@ knitr::kable(round(t(res_wd)), format.args = list(big.mark = "."))
 
 <div class="note">
 <b>Doppelzählung vermeiden.</b> Wurde die Quelle bereits mit
-<code>tax_mode = "person"</code> gerechnet, steckt die Vorabpauschale schon in
+<code>tax = tax_profile()</code> gerechnet, steckt die Vorabpauschale schon in
 den Renditen. Dann in der Entnahmephase <code>vorabpauschale = FALSE</code>
 setzen oder die Quelle ohne Steuern rechnen; das Paket warnt in diesem Fall.
 </div>
@@ -621,7 +620,7 @@ setzen oder die Quelle ohne Steuern rechnen; das Paket warnt in diesem Fall.
 
 ## Gespeicherte Läufe auswerten
 
-`deep_analysis()` wertet ein oder mehrere Ergebnisse von `simulation()`
+`result_analysis()` wertet ein oder mehrere Ergebnisse von `simulation()`
 nachträglich aus – etwa mit `readRDS()` geladene Läufe – im Umfang von
 Portfolio-Backtestern wie testfol.io. Wir vergleichen den Index, den
 zurückgerechneten 2x-ETF und eine jährlich rebalancierte 50/50-Mischung aus
@@ -634,14 +633,14 @@ erst montags zeigen und Beta und Korrelation verzerren.
 win  <- hist$date >= as.Date("2005-01-01")
 bcm  <- backcast(fit, fill = "model")          # Wochenenden mit Modellrenditen statt LOCF
 dat  <- data.frame(date = hist$date[win], INDEX = hist$eu_ndtr_l1[win], LETF = bcm$value[win])
-etf  <- function(share = 1) asset_config("etf", "bnh", asset_share = share, asset_bonus = 30)
+etf  <- function(share = 1) asset_config("etf", "bnh", share = share, partial_exemption = 30)
 runs <- list(
   Index    = simulation(dat, create_strategy(INDEX = etf())),
   LETF_2x  = simulation(dat, create_strategy(LETF = etf())),
   Mischung = simulation(dat, create_strategy(INDEX = etf(0.5), LETF = etf(0.5)),
-                        balance_mode = TRUE, balance_span = 1, balance_unit = "year")
+                        rebalance = rebalance_plan(1, unit = "year"))
 )
-da <- deep_analysis(runs, benchmark = "Index", risk_free = 2)
+da <- result_analysis(runs, benchmark = "Index", risk_free = 2)
 da
 ```
 
@@ -668,27 +667,27 @@ plot(da, "monthly", series = "LETF_2x")
 
 ## Rebalancing-Sensitivität
 
-`rebalancing_sensitivity()` rechnet dieselbe Strategie mit verschiedenen
+`sensitivity_rebalancing()` rechnet dieselbe Strategie mit verschiedenen
 Frequenzen, optional mit Versatz vor dem Periodenende und mit Toleranzbändern.
 Neu in `simulation()` ist das relative Band
 (`balance_thresh_type = "relative"`): 25 bedeutet, dass ein Zielgewicht von
 50 % zwischen 37,5 % und 62,5 % schwanken darf.
 
 ```{r rebal}
-rs <- rebalancing_sensitivity(dat, create_strategy(INDEX = etf(0.5), LETF = etf(0.5)),
+rs <- sensitivity_rebalancing(dat, create_strategy(INDEX = etf(0.5), LETF = etf(0.5)),
                               bands = c(NA, 25), band_type = "relative", cores = 2)
 rs
 ```
 
 ## Einmalanlage oder gestreckter Einstieg
 
-`lumpsum_vs_dca()` vergleicht für rollierende Starttermine die sofortige
+`planning_lumpsum_vs_dca()` vergleicht für rollierende Starttermine die sofortige
 Anlage mit einem Einstieg in zwölf Monatsraten, jeweils nach zehn Jahren.
 **MLSA** ist der mittlere Vorsprung der Einmalanlage, wenn sie vorn liegt,
 **MLSD** der mittlere Rückstand, wenn sie hinten liegt.
 
 ```{r lsdca}
-lsd <- lumpsum_vs_dca(data.frame(date = hist$date, INDEX = hist$eu_ndtr_l1),
+lsd <- planning_lumpsum_vs_dca(data.frame(date = hist$date, INDEX = hist$eu_ndtr_l1),
                       create_strategy(INDEX = etf()), amount = 10000, months = 12,
                       horizon = 10, step = 3, cores = 2)
 lsd
@@ -696,13 +695,13 @@ lsd
 
 ## Hebel-Sensitivität
 
-`leveraged_series()` erzeugt aus einem Index eine täglich zurückgesetzte
+`series_leverage()` erzeugt aus einem Index eine täglich zurückgesetzte
 Hebelreihe (Hebel, TER, Tagesgeld, Spread – wie die Ticker-Parameter bei
-testfol.io); `leverage_sensitivity()` simuliert sie für eine Hebelreihe und
+testfol.io); `sensitivity_leverage()` simuliert sie für eine Hebelreihe und
 bestimmt den Hebel mit der höchsten CAGR bzw. Sharpe Ratio.
 
 ```{r levsens, fig.height = 3.2}
-lv <- leverage_sensitivity(hist, "eu_ndtr_l1", leverages = seq(0.5, 4, by = 0.5),
+lv <- sensitivity_leverage(hist, "eu_ndtr_l1", leverages = seq(0.5, 4, by = 0.5),
                            rate = "eu_rate", expense = 0.6, cores = 2)
 lv
 plot(lv, metric = "cagr")
@@ -749,14 +748,14 @@ sapply(roh, nrow)
 
 ## Quellen zusammenführen
 
-`align_series()` legt beliebig viele Quellen auf einen gemeinsamen Kalender.
+`series_align()` legt beliebig viele Quellen auf einen gemeinsamen Kalender.
 Für `simulation()` sind lückenlose Kalendertage üblich; Wochenenden und
 Feiertage werden innerhalb der Laufzeit einer Reihe mit dem letzten Kurs
 gefüllt (LOCF), davor und danach bleibt `NA`. Das Attribut `filled` zeigt,
 welche Werte gefüllt wurden.
 
 ```{r align}
-mkt <- align_series(aktien = roh$aktien, anleihen = roh$anleihen, gold = roh$gold,
+mkt <- series_align(aktien = roh$aktien, anleihen = roh$anleihen, gold = roh$gold,
                     etf = roh$etf, range = "all")
 mkt[mkt$date >= as.Date("2010-02-24"), ][1:5, ]
 colSums(attr(mkt, "filled"))
@@ -767,7 +766,7 @@ Mit `calendar = "intersect"` bleiben nur gemeinsame Handelstage,
 
 ## Daten prüfen
 
-`check_series()` sucht Datumsprobleme, Lücken, Sprünge, Spikes (Sprung mit
+`series_check()` sucht Datumsprobleme, Lücken, Sprünge, Spikes (Sprung mit
 sofortigem Rücklauf, typischer Datenfehler), wahrscheinliche Splits (Sprung
 nahe einem ganzzahligen Verhältnis) und stehende Kurse. Wir bauen in eine
 Kopie des ETF zwei typische Fehler ein:
@@ -777,42 +776,42 @@ kaputt <- roh$etf
 kaputt$value[3000] <- kaputt$value[3000] * 1.4                 # Ausreisser
 i <- kaputt$date >= as.Date("2021-06-01")
 kaputt$value[i] <- kaputt$value[i] / 4                          # unbereinigter Split 1:4
-check_series(kaputt, jump = 25)
+series_check(kaputt, jump = 25)
 ```
 
 ## Makroreihen mit Veröffentlichungsverzug
 
 Die Inflation für Januar ist erst Mitte Februar bekannt. Wer sie schon am
 1. Januar verwendet, rechnet mit Informationen aus der Zukunft – in Signalen
-genauso wie in bedingten Analysen. `align_macro()` ordnet jeden Wert erst ab
+genauso wie in bedingten Analysen. `series_align_macro()` ordnet jeden Wert erst ab
 seiner Veröffentlichung zu und kann ihn vorher umformen (`"yoy"`,
 `"mom"`, `"diff"`, `"yoy_diff"`).
 
 ```{r macro}
-mkt <- align_macro(mkt, hvpi, "inflation", lag = 45, transform = "yoy")
+mkt <- series_align_macro(mkt, hvpi, "inflation", lag = 45, transform = "yoy")
 mkt[mkt$date %in% as.Date(c("2000-02-14", "2000-02-15", "2000-03-15")), c("date", "inflation")]
 ```
 
-`convert_currency()` rechnet über eine Kursreihe um, `total_return_index()`
+`series_convert_currency()` rechnet über eine Kursreihe um, `index_total_return()`
 macht aus einem Kursindex mit Ausschüttungen (und Quellensteuer) einen
-Total-Return-Index, `deflate()` erzeugt reale Reihen über einen Preisindex.
+Total-Return-Index, `series_deflate()` erzeugt reale Reihen über einen Preisindex.
 
 ## Reihen verketten
 
-`splice_series()` verbindet mehrere Reihen renditebasiert. Die erste hat
+`series_splice()` verbindet mehrere Reihen renditebasiert. Die erste hat
 Vorrang und bleibt unverändert; davor (und in ihren Lücken) werden die
 Renditen der nächsten Reihe verkettet. Hier: der echte ETF, davor eine mit
-`leveraged_series()` modellierte 2x-Reihe auf den Index.
+`series_leverage()` modellierte 2x-Reihe auf den Index.
 
 ```{r splice}
-modell <- data.frame(date = dates, value = leveraged_series(hist, "eu_ndtr_l1", leverage = 2,
+modell <- data.frame(date = dates, value = series_leverage(hist, "eu_ndtr_l1", leverage = 2,
                                                            rate = "eu_rate", expense = 0.5))
-lang <- splice_series(etf = roh$etf, modell = modell)
+lang <- series_splice(etf = roh$etf, modell = modell)
 table(lang$source, useNA = "ifany")
 ```
 
 Der Backcast aus Kapitel 3 ist die genauere Variante desselben Gedankens;
-`splice_series()` ist für Ketten aus mehreren Quellen gedacht (Fonds →
+`series_splice()` ist für Ketten aus mehreren Quellen gedacht (Fonds →
 Backcast → Proxy).
 
 ## Portfolio-Vorlagen
@@ -825,8 +824,8 @@ die Liste aller Vorlagen). Die Rollen
 ```{r templates}
 unique(portfolio_template()$template)
 p6040 <- portfolio_template("60_40", map = c(stocks = "aktien", bonds = "anleihen"),
-                            asset_bonus = c(aktien = 30, anleihen = 0))
-p6040$aktien$asset_bonus; p6040$anleihen$asset_share
+                            partial_exemption = c(aktien = 30, anleihen = 0))
+p6040$aktien$partial_exemption; p6040$anleihen$share
 ```
 
 # Parametersuche ohne Selbstbetrug
@@ -848,7 +847,7 @@ Durchschnitt mit 8 Fensterlängen zwischen 50 und 400 Tagen und 4 Bändern,
 ```{r ps}
 sdat <- data.frame(date = hist$date, eu = hist$eu_ndtr_l1, letf = bcm$value)
 sdat <- sdat[sdat$date >= as.Date("1979-01-01"), ]
-letf_sig <- create_strategy(letf = asset_config("etf", "signal", asset_bonus = 30,
+letf_sig <- create_strategy(letf = asset_config("etf", "signal", partial_exemption = 30,
                                                 signal_buy = "buy", signal_sell = "sell"))
 ps <- param_search(sdat,
   builder = function(p) list(strategy = letf_sig,
@@ -870,12 +869,12 @@ Punkte statt des vollen Rasters – sinnvoll ab drei oder vier Dimensionen.
 
 ## Plateau statt Spitze
 
-Eine einzelne Spitze im Raster ist oft Zufall. `plateau()` bewertet jeden
+Eine einzelne Spitze im Raster ist oft Zufall. `param_plateau()` bewertet jeden
 Punkt zusammen mit seinen Nachbarn (eine Rasterstufe in jede Richtung);
 `summary()` nennt neben dem besten Punkt das beste Plateau.
 
 ```{r plateau}
-pl <- plateau(ps)
+pl <- param_plateau(ps)
 head(pl[order(-pl$plateau_mean), ], 4)
 ```
 
@@ -898,12 +897,12 @@ die `param_search()` je Punkt speichert:
   die jeweils folgenden Testjahre zu einer echten Out-of-Sample-Reihe.
 
 ```{r overfit}
-po <- pbo(ps); po
-ds <- deflated_sharpe(ps); ds
+po <- overfit_pbo(ps); po
+ds <- sharpe_deflated(ps); ds
 ```
 
 ```{r wf, fig.height = 3.2}
-wf <- walk_forward(ps, train = 10, test = 3)
+wf <- overfit_walk_forward(ps, train = 10, test = 3)
 wf$summary
 plot(wf)
 ```
@@ -982,7 +981,7 @@ Die Kurve λ(q) unterscheidet Gauß-Abhängigkeit (λ fällt für kleine q gegen
 null) von echter Tail-Abhängigkeit (λ bleibt positiv); die gestrichelten
 Linien sind die Tail-Koeffizienten der gewählten Copula. Zur Auswahl stehen
 Gauß-, t-, Clayton-, Gumbel- und Frank-Copula samt Rotationen für negative
-Abhängigkeit; `fit_copula()` und `tail_dependence()` gibt es auch einzeln.
+Abhängigkeit; `copula_fit()` und `tail_dependence()` gibt es auch einzeln.
 
 ## Quantile statt Mittelwerte
 
@@ -996,7 +995,7 @@ Block-Bootstrap-Fehlern. Wir nehmen ein jährlich rebalanciertes
 m2   <- mkt[mkt$date >= as.Date("1976-03-01"), ]
 port <- simulation(m2[, c("date", "aktien", "anleihen")],
                    strategy_from_weights(c(aktien = 0.6, anleihen = 0.4)),
-                   balance_mode = TRUE, balance_span = 1, balance_unit = "year")
+                   rebalance = rebalance_plan(1, unit = "year"))
 m2$portfolio <- result_index(port)$value
 tr <- tail_regression(m2, "portfolio", "inflation", quantiles = c(0.05, 0.25, 0.5, 0.75, 0.95),
                       B = 99, seed = 1)
@@ -1016,24 +1015,24 @@ Wochen werden schlechter, ohne dass der Mittelwert es verrät.
 
 ## Welche Anlage zieht das Portfolio mit?
 
-`covar_analysis()` berechnet CoVaR und ΔCoVaR nach Adrian & Brunnermeier
+`tail_covar()` berechnet CoVaR und ΔCoVaR nach Adrian & Brunnermeier
 (2016): um wie viel sich das 5-%-Quantil des Portfolios verschiebt, wenn
 eine Anlage selbst in ihrem 5-%-Quantil statt im Median steht – optional
 abhängig vom Zustand der Drittvariable.
 
 ```{r covar}
-covar_analysis(m2, "portfolio", c("aktien", "anleihen"), state = "inflation")
+tail_covar(m2, "portfolio", c("aktien", "anleihen"), state = "inflation")
 ```
 
 ## Erhalten die Bootstrap-Pfade die Abhängigkeit?
 
-`validate_dependence()` vergleicht Korrelation, Kendalls Tau und
+`dependence_validate()` vergleicht Korrelation, Kendalls Tau und
 Tail-Abhängigkeit der Historie mit ihrer Verteilung über die Pfade. Ein
 Perzentil nahe 0 oder 1 heißt: Das Verfahren gibt diese Eigenschaft nicht
 wieder.
 
 ```{r validate}
-validate_dependence(b, hist, agg = 7, q = 0.05)
+dependence_validate(b, hist, agg = 7, q = 0.05)
 ```
 
 ## Stress-Szenarien
@@ -1045,7 +1044,7 @@ direkt an `bootstrap()` oder `bootstrap_study()` übergeben: Die Pfade
 bestehen dann nur aus Blöcken dieses Regimes, mitsamt Zins und Preisindex.
 
 ```{r stress}
-hist$inflation <- align_macro(hist$date, hvpi, lag = 45, transform = "yoy")
+hist$inflation <- series_align_macro(hist$date, hvpi, lag = 45, transform = "yoy")
 stress <- regime_subset(hist, "inflation >= 4", min_run = 180)
 attr(stress, "episodes")[, c("start_date", "end_date", "length")]
 bs <- bootstrap(stress, cfg, "stationary", n = 20, params = list(L = 250),
@@ -1057,8 +1056,8 @@ round(median(sapply(bs$paths, function(p) p[nrow(p), "rate"])), 2)   # Zinsnivea
 
 ## Geldmarkt und Anleihen aus Zinsreihen
 
-Für taktische Strategien braucht es einen sicheren Hafen. `money_market_index()`
-verzinst einen Tageszins (Act/360), `bond_index_from_yields()` macht aus
+Für taktische Strategien braucht es einen sicheren Hafen. `index_money_market()`
+verzinst einen Tageszins (Act/360), `index_bond()` macht aus
 einer Renditereihe einen Total-Return-Index einer Anleihe mit konstanter
 Laufzeit: Jeden Tag wird eine Par-Anleihe gekauft und am Folgetag zur neuen
 Rendite bewertet, Kupon plus Kursänderung (Swinkels 2019). Als
@@ -1068,8 +1067,8 @@ Laufzeitprämie um einen Prozentpunkt.
 ```{r mm-bond}
 praemie <- as.numeric(stats::filter(rnorm(n, 0, 0.04), 0.998, method = "recursive"))
 rendite10 <- hist$eu_rate + 1 + praemie
-mkt$geldmarkt <- money_market_index(mkt, hist$eu_rate)
-mkt$bund10    <- bond_index_from_yields(mkt, rendite10, maturity = 10, coupon_frequency = 1)
+mkt$geldmarkt <- index_money_market(mkt, hist$eu_rate)
+mkt$bund10    <- index_bond(mkt, rendite10, maturity = 10, coupon_frequency = 1)
 ab80 <- mkt$date >= as.Date("1980-01-01")
 m3 <- mkt[ab80, ]
 attr(m3, "filled") <- attr(mkt, "filled")[ab80, , drop = FALSE]   # aufgefuellte Tage mitnehmen
@@ -1078,7 +1077,7 @@ kennz <- function(v) { jahre <- (length(v) - 1) / 365.25; r <- diff(log(v)); r <
 round(sapply(m3[, c("aktien", "anleihen", "gold", "bund10", "geldmarkt")], kennz), 2)
 ```
 
-`currency_hedged_index()` ergänzt währungsgesicherte Reihen: lokale Rendite
+`index_currency_hedged()` ergänzt währungsgesicherte Reihen: lokale Rendite
 plus Zinsdifferenz zwischen Heimat- und Fremdwährung, abzüglich Kosten.
 
 ## Regeln mit Rückfall-Portfolio
@@ -1096,11 +1095,11 @@ w_regel <- tactical_rules(m3, list(
     list(when = "inflation < 3.5",                    weights = c(anleihen = 1))),
   default = c(geldmarkt = 1))
 w_regel
-etf_args <- list(asset_bonus = c(aktien = 30, gold = 0, anleihen = 0, bund10 = 0, geldmarkt = 0))
+etf_args <- list(partial_exemption = c(aktien = 30, gold = 0, anleihen = 0, bund10 = 0, geldmarkt = 0))
 taktik <- tactical_simulation(m3, w_regel, rebalance = "month", tolerance = 5, lag = 1, asset_args = etf_args)
 fix6040 <- tactical_simulation(m3, tactical_rules(m3, list(), default = c(aktien = 0.6, anleihen = 0.4)),
                                rebalance = "year", asset_args = etf_args)
-vgl <- deep_analysis(list(Regel = taktik, `60/40` = fix6040))
+vgl <- result_analysis(list(Regel = taktik, `60/40` = fix6040))
 round(vgl$metrics[c("cagr", "volatility", "max_drawdown", "sharpe", "trades_per_year"), ], 3)
 ```
 
@@ -1126,18 +1125,18 @@ rot <- tactical_simulation(m3, w_rot, asset_args = etf_args)
 
 ## Zielvolatilität und Glidepath
 
-`target_volatility()` skaliert den Risikoteil so, dass die geschätzte
+`tactical_target_volatility()` skaliert den Risikoteil so, dass die geschätzte
 Volatilität dem Ziel entspricht; der Rest liegt im Geldmarkt.
-`glidepath()` verschiebt Gewichte über die Zeit, `blend_weights()` mischt
+`tactical_glidepath()` verschiebt Gewichte über die Zeit, `tactical_blend()` mischt
 Gewichtsreihen zu einem Kern-Satellit-Portfolio.
 
 ```{r tvol}
-w_tv  <- target_volatility(m3, c(aktien = 1), safe = "geldmarkt", target = 10, window = 63)
+w_tv  <- tactical_target_volatility(m3, c(aktien = 1), safe = "geldmarkt", target = 10, window = 63)
 tv    <- tactical_simulation(m3, w_tv, rebalance = "month", tolerance = 3, asset_args = etf_args)
-w_gp  <- glidepath(m3, from = c(aktien = 0.9, anleihen = 0.1), to = c(aktien = 0.4, anleihen = 0.6))
-w_ks  <- blend_weights(kern = w_gp, satellit = w_rot, shares = c(0.8, 0.2))
+w_gp  <- tactical_glidepath(m3, from = c(aktien = 0.9, anleihen = 0.1), to = c(aktien = 0.4, anleihen = 0.6))
+w_ks  <- tactical_blend(kern = w_gp, satellit = w_rot, shares = c(0.8, 0.2))
 ks    <- tactical_simulation(m3, w_ks, rebalance = "quarter", asset_args = etf_args)
-alle  <- deep_analysis(list(Regel = taktik, Rotation = rot, Zielvola = tv, `Kern-Satellit` = ks, `60/40` = fix6040))
+alle  <- result_analysis(list(Regel = taktik, Rotation = rot, Zielvola = tv, `Kern-Satellit` = ks, `60/40` = fix6040))
 round(alle$metrics[c("cagr", "volatility", "max_drawdown", "sharpe"), ], 3)
 ```
 
@@ -1145,7 +1144,7 @@ Die Zielvolatilität trifft ihr Ziel ungefähr: Die realisierte Volatilität
 liegt nahe 10 %, weil die Schätzung auf den vergangenen 63 Handelstagen
 beruht und monatlich angepasst wird.
 
-`conditional_volatility()` greift nur in extremen Phasen ein (Bongaerts,
+`tactical_conditional_volatility()` greift nur in extremen Phasen ein (Bongaerts,
 Kang & van Dijk 2020). Liegt die geschätzte Volatilität im obersten Fünftel
 ihrer bisherigen Werte, sinkt der Aktienanteil vom Grundanteil 80 % im
 Verhältnis bisherige Durchschnittsvola zu aktueller Vola; im untersten
@@ -1153,12 +1152,12 @@ Fünftel steigt er entsprechend, höchstens auf 100 %. Dazwischen bleibt
 er bei 80 %. Schwellen und Durchschnitt stammen nur aus der Vergangenheit.
 
 ```{r cvol, fig.height = 3.0}
-w_cv <- conditional_volatility(m3, c(aktien = 1), safe = "geldmarkt", base = 0.8, upper = 0.8, lower = 0.2)
+w_cv <- tactical_conditional_volatility(m3, c(aktien = 1), safe = "geldmarkt", base = 0.8, upper = 0.8, lower = 0.2)
 w_cv
 w_80 <- tactical_rules(m3, list(), default = c(aktien = 0.8, geldmarkt = 0.2))
 cv   <- tactical_simulation(m3, w_cv, rebalance = "month", tolerance = 3, asset_args = etf_args)
 f80  <- tactical_simulation(m3, w_80, rebalance = "month", tolerance = 3, asset_args = etf_args)
-vgl  <- deep_analysis(list(`fest 80 %` = f80, bedingt = cv, Zielvola = tv))
+vgl  <- result_analysis(list(`fest 80 %` = f80, bedingt = cv, Zielvola = tv))
 round(vgl$metrics[c("cagr", "volatility", "max_drawdown", "sharpe"), ], 3)
 c(`Umschichtungen bedingt` = sum(diff(w_cv$aktien) != 0), `Umschichtungen Zielvola` = sum(diff(w_tv$aktien) != 0))
 plot(w_cv)
@@ -1188,11 +1187,11 @@ opt$risk_parity
 
 Verfahren, die erwartete Renditen nutzen (`max_sharpe`), reagieren stark auf
 Schätzfehler; `resample` mittelt die Gewichte über Block-Bootstrap-Stichproben
-(Michaud). `risk_contributions()` zerlegt Volatilität oder CVaR eines
+(Michaud). `portfolio_risk_contributions()` zerlegt Volatilität oder CVaR eines
 beliebigen Gewichtsvektors:
 
 ```{r riskc}
-risk_contributions(m3, c(aktien = 0.6, anleihen = 0.3, gold = 0.1), measure = "cvar")
+portfolio_risk_contributions(m3, c(aktien = 0.6, anleihen = 0.3, gold = 0.1), measure = "cvar")
 ```
 
 Die Beiträge addieren sich zum CVaR des Portfolios. Ein negativer Beitrag
@@ -1200,21 +1199,21 @@ zeigt eine Anlage, die in den schlechtesten Wochen im Mittel gewonnen hat –
 hier die Anleihen, die in den meisten Jahren gegen Aktien absichern.
 
 ```{r frontier, fig.height = 3.4}
-plot(efficient_frontier(m3, ass, upper = 0.6))
+plot(portfolio_frontier(m3, ass, upper = 0.6))
 ```
 
 ## Optimierung außerhalb der Stichprobe
 
 Eine Optimierung über die ganze Historie kennt die Zukunft. Ehrlicher ist
-`rolling_optimization()`: Jedes Quartal wird auf den letzten drei Jahren
+`portfolio_rolling()`: Jedes Quartal wird auf den letzten drei Jahren
 optimiert und das Ergebnis bis zum nächsten Termin gehalten. Die
 Zielgewichte laufen dann wie jede taktische Strategie durch die Engine.
 
 ```{r rolling, fig.height = 3.2}
-w_rp <- rolling_optimization(m3, ass, "risk_parity", window = 3, every = "quarter")
+w_rp <- portfolio_rolling(m3, ass, "risk_parity", window = 3, every = "quarter")
 rp   <- tactical_simulation(m3, w_rp, rebalance = "quarter", tolerance = 3, asset_args = etf_args)
 plot(w_rp)
-round(deep_analysis(list(`Risikoparität rollierend` = rp, `60/40` = fix6040))$metrics[
+round(result_analysis(list(`Risikoparität rollierend` = rp, `60/40` = fix6040))$metrics[
   c("cagr", "volatility", "max_drawdown", "sharpe"), ], 3)
 ```
 
@@ -1222,23 +1221,23 @@ round(deep_analysis(list(`Risikoparität rollierend` = rp, `60/40` = fix6040))$m
 
 ## Gebühren, Kirchensteuer und Freibetrag
 
-Drei optionale Argumente von `simulation()` bilden die deutsche Praxis
-genauer ab. Ohne sie rechnet die Engine unverändert.
+Drei optionale Angaben in den Bausteinen von `simulation()` bilden die
+deutsche Praxis genauer ab. Ohne sie rechnet die Engine unverändert.
 
-* `order_fee` und `dca_fee`: feste und prozentuale Ordergebühren mit Mindest-
+* `sim_costs(order_fee, dca_fee)`: feste und prozentuale Ordergebühren mit Mindest-
   und Höchstbetrag, für Sparplankäufe getrennt einstellbar. Gebühren erhöhen
   den Einstandskurs bzw. mindern den Verkaufserlös und wirken damit auch
   steuerlich.
-* `church_tax`: Kirchensteuersatz; der Abgeltungsteuersatz wird nach § 32d
+* `tax_profile(church_tax = )`: Kirchensteuersatz; der Abgeltungsteuersatz wird nach § 32d
   Abs. 1 EStG angepasst (rund 27,995 % bei 9 %). Die Kirchensteuer wirkt
   auch auf die Einkommensteuer (§ 23-Steuer, persönlicher Satz der
   Günstigerprüfung). Ihr Sonderausgabenabzug ist mit einem festen
-  `marginal_tax_rate` nicht abgebildet; mit `taxable_income` (Tarifweg,
+  Grenzsteuersatz (`income_rate()`) nicht abgebildet; mit `income_tariff()` (Tarifweg,
   siehe unten) ist die Kirchensteuer Sonderausgabe im Jahr ihrer Zahlung,
   Erstattungen werden verrechnet bzw. hinzugerechnet. Die Kirchensteuer auf
   die Abgeltungsteuer ist nicht abziehbar, außer die Günstigerprüfung ist
   günstiger.
-* `harvest_mode`: Einmal im Jahr werden Gewinne bis zum noch freien
+* `tax_profile(harvest = harvest_rule())`: Einmal im Jahr werden Gewinne bis zum noch freien
   Sparer-Pauschbetrag (und bis zur Höhe des Verlusttopfs) realisiert und
   sofort wieder angelegt. Das hebt den Einstandskurs steuerfrei an.
 
@@ -1246,15 +1245,15 @@ Ein Aktien-ETF-Sparplan über 45 Jahre, am Ende vollständig verkauft:
 
 ```{r praxis}
 m4 <- m3[, c("date", "aktien")]
-st_etf <- create_strategy(aktien = asset_config("etf", "bnh", asset_bonus = 30, asset_spread = 0.1))
-lauf <- function(...) simulation(m4, st_etf, start_value = 10000, dca_mode = TRUE, dca_value = 300,
-                                  dca_span = 1, tax_mode = "person", liquidate = TRUE, ...)
+st_etf <- create_strategy(aktien = asset_config("etf", "bnh", partial_exemption = 30, spread = 0.1))
+lauf <- function(tax = tax_profile(), ...) simulation(m4, st_etf, start_value = 10000, dca = dca_plan(300, 1),
+                                                      tax = tax, liquidate = TRUE, ...)
 varianten <- list(
   `Basis`                        = lauf(),
-  `1 EUR je Sparrate`            = lauf(order_fee = 1),
-  `Kirchensteuer 9 %`            = lauf(church_tax = 9),
-  `Freibetrag ausschoepfen`      = lauf(harvest_mode = TRUE),
-  `Freibetrag + 1 EUR je Order`  = lauf(harvest_mode = TRUE, order_fee = 1, dca_fee = 0))
+  `1 EUR je Sparrate`            = lauf(costs = sim_costs(order_fee = 1)),
+  `Kirchensteuer 9 %`            = lauf(tax_profile(church_tax = 9)),
+  `Freibetrag ausschoepfen`      = lauf(tax_profile(harvest = harvest_rule())),
+  `Freibetrag + 1 EUR je Order`  = lauf(tax_profile(harvest = harvest_rule()), costs = sim_costs(order_fee = 1, dca_fee = 0)))
 data.frame(Endwert = sapply(varianten, function(r) round(tail(r$worth, 1))),
            Steuern = sapply(varianten, function(r) round(r$tax_report$total_taxes_paid)),
            Gebuehren = sapply(varianten, function(r) round(if (is.null(r$fees_paid)) 0 else r$fees_paid)))
@@ -1267,12 +1266,12 @@ Bei 1 € je Order fallen die Kosten für Verkauf und Rückkauf kaum ins Gewicht
 
 ## Einkommensteuertarif und Günstigerprüfung
 
-Mit `taxable_income`, dem zu versteuernden Einkommen *ohne* die Erträge
+Mit `income_tariff(taxable_income)`, dem zu versteuernden Einkommen *ohne* die Erträge
 der Simulation in EUR je Kalenderjahr, rechnet `simulation()` § 23-Steuer
 und Günstigerprüfung exakt nach dem Einkommensteuertarif (§ 32a EStG) mit
 Solidaritätszuschlag; ohne diese Angabe gilt ein fester Satz
-`marginal_tax_rate`. Der Tarif steht in einer austauschbaren Datei, die
-`read_tax_tariff()` liest und prüft (mitgeliefert: Rechtslage ab VZ 2026,
+(`income_rate(marginal_rate)`). Der Tarif steht in einer austauschbaren Datei, die
+`tax_tariff()` liest und prüft (mitgeliefert: Rechtslage ab VZ 2026,
 Einzelveranlagung). Unterjährig wird wie bei einer Bank die
 Abgeltungsteuer einbehalten; im Jahresabschluss wird mit der
 Tarifbelastung verglichen und die Differenz im Folgejahr erstattet, wenn
@@ -1280,12 +1279,12 @@ der Tarif günstiger ist. Die Kirchensteuer ist dabei Sonderausgabe im Jahr
 ihrer Zahlung; `tax_report$tariff_years` zeigt die Rechnung je Jahr.
 
 ```{r tarif}
-read_tax_tariff()
-lauf_vp <- function(...) lauf(base_rate = 2.55, church_tax = 9, ...)   # mit Vorabpauschale
+tax_tariff()
+lauf_vp <- function(...) lauf(tax_profile(base_rate = 2.55, church_tax = 9, ...))   # mit Vorabpauschale
 tarif <- list(
   `Abgeltungsteuer, KiSt 9 %`      = lauf_vp(),
-  `Guenstigerpruefung, zvE 14 000` = lauf_vp(use_guenstigerpruefung = TRUE, taxable_income = 14000),
-  `Guenstigerpruefung, zvE 60 000` = lauf_vp(use_guenstigerpruefung = TRUE, taxable_income = 60000))
+  `Guenstigerpruefung, zvE 14 000` = lauf_vp(guenstigerpruefung = TRUE, income = income_tariff(14000)),
+  `Guenstigerpruefung, zvE 60 000` = lauf_vp(guenstigerpruefung = TRUE, income = income_tariff(60000)))
 data.frame(Steuern = sapply(tarif, function(r) round(r$tax_report$total_taxes_paid)),
            Jahre_Tarif_guenstiger = sapply(tarif, function(r)
              if (is.null(r$tax_report$tariff_years)) NA else sum(r$tax_report$tariff_years$guenstiger)),
@@ -1303,7 +1302,7 @@ günstiger, das Ergebnis gleicht dem der Abgeltungsteuer.
 
 ## Szenarien mit eigenen Annahmen
 
-`entropy_pooling()` gewichtet die historischen Wochen so um, dass eigene
+`scenario_entropy_pooling()` gewichtet die historischen Wochen so um, dass eigene
 Annahmen erfüllt sind, und weicht dabei so wenig wie möglich von der
 Historie ab (Meucci 2008). Alle Abhängigkeiten bleiben erhalten – nur die
 Gewichte der Wochen ändern sich. Frage: Wie sehen Aktien und Anleihen aus,
@@ -1311,8 +1310,8 @@ wenn die (veröffentlichte) Inflation im Mittel 5 % beträgt?
 
 ```{r ep}
 w64 <- c(aktien = 0.6, anleihen = 0.4)
-ep0 <- entropy_pooling(m3, c("aktien", "anleihen"), list(), states = "inflation")
-ep  <- entropy_pooling(m3, c("aktien", "anleihen"), list(view_mean("inflation", 5)), states = "inflation")
+ep0 <- scenario_entropy_pooling(m3, c("aktien", "anleihen"), list(), states = "inflation")
+ep  <- scenario_entropy_pooling(m3, c("aktien", "anleihen"), list(view_mean("inflation", 5)), states = "inflation")
 ep
 rbind(Historie        = c(scenario_risk(ep0, w64)[c("mean", "volatility", "cvar")], korrelation = ep0$correlation[1, 2]),
       `Inflation 5 %` = c(scenario_risk(ep, w64)[c("mean", "volatility", "cvar")],  korrelation = ep$correlation[1, 2]))
@@ -1326,16 +1325,16 @@ absichern möchte. Die effektive Szenarioanzahl zeigt, wie stark die Annahme
 die Historie verbiegen muss: Bleiben nur wenige effektive Wochen übrig, ist
 die Annahme weit von der Erfahrung entfernt.
 
-`copula_scenarios()` simuliert aus einer t-Copula mit den historischen
+`scenario_copula()` simuliert aus einer t-Copula mit den historischen
 Rändern; mit `stress` wird eine Anlage in ein Quantilband gezwungen, die
-übrigen folgen der bedingten Verteilung. `crisis_replay()` führt ein
+übrigen folgen der bedingten Verteilung. `scenario_crisis()` führt ein
 Portfolio durch historische Krisenfenster.
 
 ```{r copula}
-cs <- copula_scenarios(m3, c("aktien", "anleihen", "gold"), n = 20000,
+cs <- scenario_copula(m3, c("aktien", "anleihen", "gold"), n = 20000,
                        stress = list(aktien = c(0, 0.05)), seed = 1)
 print(cs$summary[, c("var", "mean_prior", "mean_post")], digits = 3)
-crisis_replay(m3, c(aktien = 0.6, anleihen = 0.3, gold = 0.1))[, c("crisis", "portfolio", "max_drawdown", "aktien", "anleihen", "gold")]
+scenario_crisis(m3, c(aktien = 0.6, anleihen = 0.3, gold = 0.1))[, c("crisis", "portfolio", "max_drawdown", "aktien", "anleihen", "gold")]
 ```
 
 Zwingt man die Aktien in ihre schlechtesten 5 % der Wochen, steigen die
@@ -1349,26 +1348,26 @@ Fenster werden als Tabelle mit `name`, `start` und `end` übergeben.
 ## Planung über lange Horizonte
 
 Historische Mittelwerte sind für die Zukunft oft zu optimistisch.
-`set_expected_return()` verschiebt eine Reihe auf eine eigene Renditeannahme
-(Streuung und Muster bleiben), `pooled_bootstrap()` zieht Blöcke aus
+`series_shift_return()` verschiebt eine Reihe auf eine eigene Renditeannahme
+(Streuung und Muster bleiben), `bootstrap_pooled()` zieht Blöcke aus
 mehreren Ländern (Anarkulova, Cederburg & O'Doherty 2022). Als zweites
 „Land“ dient hier dieselbe Historie mit nur 2 % Aktienrendite.
 
 ```{r pooled}
 land_a <- m3[, c("date", "aktien", "anleihen")]
 land_a$cpi <- 100 * cumprod(c(1, rep(1 + 0.02 / 365.25, nrow(land_a) - 1)))
-land_b <- set_expected_return(land_a, "aktien", 2, type = "prices")
-pb <- pooled_bootstrap(list(A = land_a, B = land_b), c("aktien", "anleihen"),
+land_b <- series_shift_return(land_a, "aktien", 2, type = "prices")
+pb <- bootstrap_pooled(list(A = land_a, B = land_b), c("aktien", "anleihen"),
                        weights = c(aktien = 0.6, anleihen = 0.4), inflation = "cpi",
                        n = 2000, years = 40, seed = 1)
 ```
 
-Die Ruhestandsdauer muss nicht fest sein. `horizon_model()` beschreibt sie
+Die Ruhestandsdauer muss nicht fest sein. `withdrawal_horizon()` beschreibt sie
 nach eigenen Vorgaben – fest, gleichverteilt, diskret, normal, dreieckig
 oder als eigene Stichprobe; Sterbetafeln sind bewusst nicht eingebaut.
 
 ```{r horizon}
-h <- horizon_model("discrete", years = c(25, 30, 35, 40), prob = c(0.3, 0.4, 0.2, 0.1))
+h <- withdrawal_horizon("discrete", years = c(25, 30, 35, 40), prob = c(0.3, 0.4, 0.2, 0.1))
 h
 regel <- withdrawal_rule("constant", rate = 3.5)
 c(`fest 30 Jahre` = mean(withdrawal_simulation(pb, regel, years = 30)$paths$success),
@@ -1379,7 +1378,7 @@ c(`fest 30 Jahre` = mean(withdrawal_simulation(pb, regel, years = 30)$paths$succ
 Mit dem zufälligen Horizont liegt die Erfolgsquote zwischen den festen
 Fällen, und jeder Pfad wird nur über seine eigene Laufzeit bewertet.
 
-`goal_optimize()` bestimmt per dynamischer Programmierung für jeden
+`planning_goal()` bestimmt per dynamischer Programmierung für jeden
 Zeitpunkt und jedes Vermögen das Portfolio mit der höchsten
 Wahrscheinlichkeit, ein Ziel zu erreichen (Das et al. 2020). Hier: 100.000 €
 Start, 6.000 € Sparrate im Jahr, Ziel 400.000 € (real) in 20 Jahren.
@@ -1388,7 +1387,7 @@ Start, 6.000 € Sparrate im Jahr, Ziel 400.000 € (real) in 20 Jahren.
 kand <- lapply(seq(0, 1, 0.25), function(a) c(aktien = a, anleihen = 1 - a))
 names(kand) <- sprintf("Aktien %d %%", seq(0, 100, 25))
 Rk <- rbind(portfolio_returns(land_a, kand, "year"), portfolio_returns(land_b, kand, "year")) / 1.02
-gp <- goal_optimize(Rk, start_value = 1e5, goal = 4e5, horizon = 20, contributions = 6000, seed = 1)
+gp <- planning_goal(Rk, start_value = 1e5, goal = 4e5, horizon = 20, contributions = 6000, seed = 1)
 gp
 plot(gp)
 ```
@@ -1401,26 +1400,26 @@ Aktienanteil, weil das Ziel sonst kaum erreichbar ist.
 
 ```{r tests}
 round(sharpe_test(taktik, fix6040), 3)            # Regel aus Kapitel 11 gegen 60/40
-reality_check(ps, B = 299, seed = 1)              # Parametersuche aus Kapitel 9 gegen 0
+overfit_reality_check(ps, B = 299, seed = 1)              # Parametersuche aus Kapitel 9 gegen 0
 head(sharpe_haircut(ps)[, c("id", "sharpe", "sharpe_bonferroni", "sharpe_bhy", "haircut_bhy")], 3)
-round(min_track_record(taktik, target = 0.3), 2)
+round(sharpe_min_track_record(taktik, target = 0.3), 2)
 ```
 
 `sharpe_test()` prüft robust gegen Autokorrelation und dicke Ränder, ob
 sich zwei Sharpe Ratios unterscheiden (Ledoit & Wolf 2008).
-`reality_check()` fragt, ob die beste von vielen Strategien die Benchmark
+`overfit_reality_check()` fragt, ob die beste von vielen Strategien die Benchmark
 mehr als zufällig schlägt (White 2000; Hansen 2005), `sharpe_haircut()`
 rechnet die Sharpe Ratio auf die Zahl der Versuche herunter (Harvey & Liu
-2015), `min_track_record()` nennt die nötige Historienlänge. Im Beispiel
+2015), `sharpe_min_track_record()` nennt die nötige Historienlänge. Im Beispiel
 unterscheidet sich die taktische Regel nicht signifikant von 60/40. Die beste
 Kombination der Parametersuche schlägt die Nullbenchmark zwar auch nach
 Berücksichtigung der Auswahl, ihre Sharpe Ratio schrumpft nach dem
 BHY-Verfahren aber deutlich.
-`cpcv_portfolio()` vergleicht Optimierer über alle kombinatorischen
+`portfolio_cpcv()` vergleicht Optimierer über alle kombinatorischen
 Trainings-/Testaufteilungen:
 
 ```{r cpcv}
-cpcv_portfolio(m3, ass, methods = c("equal", "inverse_vol", "min_variance", "risk_parity", "hrp", "max_sharpe"))
+portfolio_cpcv(m3, ass, methods = c("equal", "inverse_vol", "min_variance", "risk_parity", "hrp", "max_sharpe"))
 ```
 
 ## Signale, Regime und Startzeitpunkte
@@ -1449,11 +1448,11 @@ plot(hmm)
 m3$regime <- regime_states(hmm, m3$date)
 ```
 
-`return_heatmap()` zeigt die reale Rendite je Startjahr und Haltedauer:
+`result_heatmap()` zeigt die reale Rendite je Startjahr und Haltedauer:
 
 ```{r heatmap, fig.height = 3.6}
-cpi_tag <- align_macro(m3$date, hvpi, lag = 0)
-hm <- return_heatmap(fix6040, inflation = data.frame(date = m3$date, value = cpi_tag), max_years = 30)
+cpi_tag <- series_align_macro(m3$date, hvpi, lag = 0)
+hm <- result_heatmap(fix6040, inflation = data.frame(date = m3$date, value = cpi_tag), max_years = 30)
 hm
 plot(hm)
 ```
@@ -1468,51 +1467,52 @@ plot(hm)
 | `bootstrap(data, config, method, n, params, path_length, seed, cores)` | Pfade erzeugen |
 | `bootstrap_study(…, strategies, sim_args, burn_in, benchmark, keep_returns)` | Strategien auf Pfaden auswerten |
 | `bootstrap_probability(study, …)` | Wahrscheinlichkeiten beliebiger Bedingungen |
-| `block_length(x, transform)` | Blocklänge nach Politis & White |
+| `bootstrap_block_length(x, transform)` | Blocklänge nach Politis & White |
 | `withdrawal_rule(type, rate, …)` | Entnahmeregel |
 | `withdrawal_cohorts(data, price, inflation, years)` | historische Kohorten |
 | `withdrawal_paths(x, column, strategy, inflation)` | Pfade aus Bootstrap, Ergebnislisten, Studien |
 | `withdrawal_simulation(x, rule, start_value, …)` | Entnahme-Simulation |
 | `withdrawal_max_rate(x, rule, success)` | höchste Anfangsrate |
-| `perfect_withdrawal_rate(real_returns)` | PWR je Pfad |
+| `withdrawal_perfect_rate(real_returns)` | PWR je Pfad |
 | `result_index(result)` | Wertindex eines `simulation()`-Ergebnisses |
-| `deep_analysis(x, benchmark, risk_free)` | vertiefte Auswertung gespeicherter Läufe |
+| `result_analysis(x, benchmark, risk_free)` | vertiefte Auswertung gespeicherter Läufe |
 | `sensitivity_grid(data, strategy, grid)` | `simulation()` im Parameterraster |
-| `rebalancing_sensitivity(data, strategy, bands, band_type)` | Rebalancing-Varianten |
-| `lumpsum_vs_dca(data, strategy, months, horizon)` | Einmalanlage vs. gestreckter Einstieg |
-| `leveraged_series()`, `leverage_sensitivity()` | Hebelreihe und Kennzahlen über den Hebel |
-| `align_series(…, calendar, range, fill)` | Quellen auf einen Kalender legen |
-| `check_series(data, jump, stale)` | Prüfbericht: Lücken, Spikes, Splits |
-| `align_macro(data, macro, name, lag, transform)` | Makroreihe ab Veröffentlichung zuordnen |
-| `convert_currency()`, `total_return_index()`, `deflate()` | Währung, Total Return, reale Werte |
-| `splice_series(…)` | Reihen renditebasiert verketten |
+| `sensitivity_rebalancing(data, strategy, bands, band_type)` | Rebalancing-Varianten |
+| `planning_lumpsum_vs_dca(data, strategy, months, horizon)` | Einmalanlage vs. gestreckter Einstieg |
+| `series_leverage()`, `sensitivity_leverage()` | Hebelreihe und Kennzahlen über den Hebel |
+| `series_align(…, calendar, range, fill)` | Quellen auf einen Kalender legen |
+| `series_check(data, jump, stale)` | Prüfbericht: Lücken, Spikes, Splits |
+| `series_align_macro(data, macro, name, lag, transform)` | Makroreihe ab Veröffentlichung zuordnen |
+| `series_convert_currency()`, `index_total_return()`, `series_deflate()` | Währung, Total Return, reale Werte |
+| `series_splice(…)` | Reihen renditebasiert verketten |
 | `strategy_from_weights()`, `portfolio_template()` | Strategien aus Gewichten bzw. Vorlagen |
 | `signal_sma()`, `signal_ema()`, `signal_crossover()`, `signal_momentum()`, `signal_drawdown()`, `signal_volatility()`, `signal_combine()` | Signal-Bausteine |
 | `param_space()`, `param_range()`, `param_search(data, builder, space, method)` | Parametersuche |
-| `plateau()`, `pbo()`, `deflated_sharpe()`, `probabilistic_sharpe()`, `walk_forward()` | Prüfung auf Überanpassung |
+| `param_plateau()`, `overfit_pbo()`, `sharpe_deflated()`, `sharpe_probabilistic()`, `overfit_walk_forward()` | Prüfung auf Überanpassung |
 | `param_bootstrap(search, data, config, top, map)` | beste Punkte auf Bootstrap-Pfaden |
 | `dependence_analysis(data, assets, conditions, breaks)` | Korrelation, Tail-Abhängigkeit, Copula, DCC, Regime |
-| `fit_copula()`, `tail_dependence()`, `dcc_fit()` | Einzelbausteine der Abhängigkeitsanalyse |
-| `quantile_reg()`, `tail_regression()`, `covar_analysis()` | Quantilsregression, CoVaR |
-| `validate_dependence(boot, data)`, `regime_subset(data, condition)` | Bootstrap-Prüfung, Stress-Regime |
+| `copula_fit()`, `tail_dependence()`, `dependence_dcc()` | Einzelbausteine der Abhängigkeitsanalyse |
+| `quantile_regression()`, `tail_regression()`, `tail_covar()` | Quantilsregression, CoVaR |
+| `dependence_validate(boot, data)`, `regime_subset(data, condition)` | Bootstrap-Prüfung, Stress-Regime |
 | `tactical_rules(data, rules, default)` | Regeln mit Rückfall-Portfolio |
 | `tactical_rotation(data, assets, top, safe, canary)` | Momentum-Rotation, Dual Momentum, Canary |
-| `target_volatility()`, `conditional_volatility()` | Zielvolatilität, bedingt nur in extremen Phasen |
-| `glidepath()`, `blend_weights()` | Glidepath, Kern-Satellit |
+| `tactical_target_volatility()`, `tactical_conditional_volatility()` | Zielvolatilität, bedingt nur in extremen Phasen |
+| `tactical_glidepath()`, `tactical_blend()` | Glidepath, Kern-Satellit |
 | `tactical_simulation(data, weights, rebalance, tolerance, lag)` | Zielgewichte mit der Engine ausführen |
 | `portfolio_optimize(x, assets, method, lower, upper, cov, resample)` | Portfolio-Optimierung |
-| `efficient_frontier()`, `rolling_optimization()`, `risk_contributions()` | Effizienzgrenze, Optimierung außerhalb der Stichprobe, Risikobeiträge |
-| `bond_index_from_yields()`, `money_market_index()`, `currency_hedged_index()` | Anleihe-, Geldmarkt- und gesicherte Reihen |
-| `simulation(…, order_fee, dca_fee, church_tax, harvest_mode)` | Gebühren, Kirchensteuer, Freibetrag ausschöpfen |
-| `read_tax_tariff(file)`, `simulation(…, taxable_income, tax_tariff)` | Einkommensteuertarif, Günstigerprüfung nach Tarif |
-| `entropy_pooling(x, assets, views, states)`, `view_mean()`, `view_prob()`, `view_vol()` | Szenarien mit eigenen Annahmen |
-| `copula_scenarios(x, assets, stress)`, `scenario_risk()`, `crisis_replay()` | Stress-Szenarien und Krisen |
-| `set_expected_return()`, `pooled_bootstrap()` | Renditeannahmen, Länder-Bootstrap |
-| `horizon_model()`, `withdrawal_simulation(…, horizon)` | Ruhestandsdauer nach eigenen Vorgaben |
-| `portfolio_returns()`, `goal_optimize()` | zielbasierte Allokation |
-| `sharpe_test()`, `reality_check()`, `sharpe_haircut()`, `min_track_record()` | statistische Prüfungen |
-| `cpcv_portfolio()` | kombinatorische Kreuzvalidierung von Optimierern |
-| `signal_analysis()`, `regime_hmm()`, `regime_states()`, `return_heatmap()` | Signale, Regime, Startzeitpunkte |
+| `portfolio_frontier()`, `portfolio_rolling()`, `portfolio_risk_contributions()` | Effizienzgrenze, Optimierung außerhalb der Stichprobe, Risikobeiträge |
+| `index_bond()`, `index_money_market()`, `index_currency_hedged()` | Anleihe-, Geldmarkt- und gesicherte Reihen |
+| `simulation(…, costs, dca, rebalance, splits, tax, funds)` | Bausteine `sim_costs()`, `dca_plan()`, `rebalance_plan()`, `split_rule()`, `tax_profile()`, `funds_costs()` |
+| `tax_profile(church_tax, harvest = harvest_rule())` | Kirchensteuer, Freibetrag ausschöpfen |
+| `tax_tariff(file)`, `tax_profile(income = income_tariff(taxable_income, tariff))` | Einkommensteuertarif, Günstigerprüfung nach Tarif |
+| `scenario_entropy_pooling(x, assets, views, states)`, `view_mean()`, `view_prob()`, `view_vol()` | Szenarien mit eigenen Annahmen |
+| `scenario_copula(x, assets, stress)`, `scenario_risk()`, `scenario_crisis()` | Stress-Szenarien und Krisen |
+| `series_shift_return()`, `bootstrap_pooled()` | Renditeannahmen, Länder-Bootstrap |
+| `withdrawal_horizon()`, `withdrawal_simulation(…, horizon)` | Ruhestandsdauer nach eigenen Vorgaben |
+| `portfolio_returns()`, `planning_goal()` | zielbasierte Allokation |
+| `sharpe_test()`, `overfit_reality_check()`, `sharpe_haircut()`, `sharpe_min_track_record()` | statistische Prüfungen |
+| `portfolio_cpcv()` | kombinatorische Kreuzvalidierung von Optimierern |
+| `signal_analysis()`, `regime_hmm()`, `regime_states()`, `result_heatmap()` | Signale, Regime, Startzeitpunkte |
 
 **Literatur.** Bengen (1994, 2001), *Journal of Financial Planning*;
 Cooley, Hubbard & Walz (1998), *AAII Journal*; Guyton & Klinger (2006),

@@ -18,7 +18,7 @@
 #' Berechnet § 20 EStG Kapitalertragsteuer
 #' @keywords internal
 #' @noRd
-calculate_paragraph_20_tax <- function(trade_gain, bonus, totals, tax_rate, use_spb) {
+.calculate_paragraph_20_tax <- function(trade_gain, bonus, totals, tax_rate, use_spb) {
   # C++-Port (tax_core.cpp); totals wird IN PLACE mutiert
   res <- .sim_p20_tax_cpp(trade_gain, bonus, totals, tax_rate, use_spb)
   return(list(tax = res$tax, totals = totals, spb_used = res$spb_used))
@@ -42,7 +42,7 @@ calculate_paragraph_20_tax <- function(trade_gain, bonus, totals, tax_rate, use_
 #' @return Liste mit tax, totals, spb_used, taxable_amount
 #' @keywords internal
 #' @noRd
-calculate_vorabpauschale_tax <- function(flat_rate, bonus, totals, tax_rate, use_spb) {
+.calculate_vorabpauschale_tax <- function(flat_rate, bonus, totals, tax_rate, use_spb) {
   # C++-Port (tax_core.cpp, R-2: Verlusttopf vor SPB); totals in place
   res <- .sim_vp_tax_cpp(flat_rate, bonus, totals, tax_rate, use_spb)
   return(list(tax = res$tax, totals = totals, spb_used = res$spb_used,
@@ -170,7 +170,7 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
 #' @return Logischer Vektor: TRUE, wenn an diesem Tag mindestens ein Asset splittet
 #' @keywords internal
 #' @noRd
-calculate_split_flags <- function(input, base, mode, dates, split_thresh = NULL) {
+.calculate_split_flags <- function(input, base, mode, dates, split_thresh = NULL) {
   if (!mode || is.null(split_thresh)) {
     return(rep(FALSE, length(dates)))
   }
@@ -229,14 +229,14 @@ calculate_split_flags <- function(input, base, mode, dates, split_thresh = NULL)
 #'
 #' @details
 #' Liefert TRUE, wenn:
-#' - action_type = "signal" UND Kaufsignal-Spalte TRUE UND money > 0 UND count = 0 (Einstieg)
-#' - action_type = "signal" UND count > 0 UND money > 0 UND kein Verkaufssignal (A7-09: neues Geld
+#' - trading = "signal" UND Kaufsignal-Spalte TRUE UND money > 0 UND count = 0 (Einstieg)
+#' - trading = "signal" UND count > 0 UND money > 0 UND kein Verkaufssignal (A7-09: neues Geld
 #'   einer offenen Position sofort anlegen)
-#' - action_type = "bnh" UND money > 0
+#' - trading = "bnh" UND money > 0
 #' 
 #' @keywords internal
 #' @noRd
-calculate_buy_signal <- function(input, name, index){
+.calculate_buy_signal <- function(input, name, index){
   signal_buy <- FALSE
 
   if(input[["assets"]][[name]][["style"]] == "signal" && input[["market"]][[name]][["signal_buy"]][index] && input[["status"]][[name]][["money"]] > 0 && input[["status"]][[name]][["count"]] == 0){
@@ -258,7 +258,7 @@ calculate_buy_signal <- function(input, name, index){
 }
 
 #--------> Hilfsfunktion zur Evaluation von Verkaufssignalen:
-calculate_sell_signal <- function(input, name, index){
+.calculate_sell_signal <- function(input, name, index){
   signal_sell <- FALSE
 
   if(input[["assets"]][[name]][["style"]] == "signal" && input[["market"]][[name]][["signal_sell"]][index] && input[["status"]][[name]][["count"]] > 0){
@@ -273,7 +273,7 @@ calculate_sell_signal <- function(input, name, index){
 }
 
 #--------> Hilfsfunktion zur Berechnung des FIFO-Kaufpreises:
-calculate_fifo_price <- function(trades, units, front_index = 1){
+.calculate_fifo_price <- function(trades, units, front_index = 1){
   # C++-Port (fifo_core.cpp)
   .sim_fifo_price_cpp(trades, units, as.integer(front_index))
 }
@@ -289,13 +289,13 @@ calculate_fifo_price <- function(trades, units, front_index = 1){
 #' @return Anteilige Vorabpauschale in EUR
 #' @keywords internal
 #' @noRd
-calculate_fifo_vorabpauschale <- function(trades, units, front_index = 1) {
+.calculate_fifo_vorabpauschale <- function(trades, units, front_index = 1) {
   # C++-Port (fifo_core.cpp)
   .sim_fifo_vp_cpp(trades, units, as.integer(front_index))
 }
   
 #--------> Hilfsfunktion zur lot-weisen Steuerberechnung für § 23 EStG:
-calculate_private_sale_tax <- function(input, name, trade_count, sell_price, current_date) {
+.calculate_private_sale_tax <- function(input, name, trade_count, sell_price, current_date) {
   # C++-Port (fifo_core.cpp), Par.-23-Jahresfrist kalendergenau in C++
   .sim_private_sale_tax_cpp(
     input[["trades"]][[name]][["buys"]],
@@ -308,45 +308,45 @@ calculate_private_sale_tax <- function(input, name, trade_count, sell_price, cur
 #' @noRd
 .show_arg_s <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = "")
 
-#--------> Tarifweg (simulation(taxable_income =)): Hilfsfunktionen zur Jahresrechnung
+#--------> Tarifweg (income_tariff()): Hilfsfunktionen zur Jahresrechnung
 #' taxable_income pruefen: eine Zahl (alle Jahre), nach Jahr benannter Vektor oder data.frame (Jahr, Betrag)
 #' @param x Eingabe taxable_income
 #' @param years Ganzzahlen. Kalenderjahre der Simulation (jedes muss vorkommen)
 #' @return Liste all (Zahl fuer alle Jahre oder NULL) und by_year (benannter Vektor oder NULL)
 #' @keywords internal
 #' @noRd
-.check_taxable_income <- function(x, years) {
+.check_taxable_income <- function(x, years, who = "simulation") {
   form <- "eine Zahl (zvE in EUR f\u00fcr alle Jahre), ein nach Kalenderjahren benannter Zahlenvektor (z. B. c(\"2024\" = 50000, \"2025\" = 52000)) oder ein data.frame mit den Spalten year und taxable_income"
   if (is.data.frame(x)) {
     nm <- tolower(names(x))
     yc <- match(c("year", "jahr"), nm); yc <- yc[!is.na(yc)][1]
     vc <- match(c("taxable_income", "betrag", "amount", "zve"), nm); vc <- vc[!is.na(vc)][1]
     if (is.na(yc) || is.na(vc)) {
-      if (ncol(x) != 2L) stop(sprintf("simulation: taxable_income als data.frame braucht die Spalten year und taxable_income (oder genau zwei Spalten Jahr, Betrag); vorhanden: %s.",
+      if (ncol(x) != 2L) stop(sprintf("%s: taxable_income als data.frame braucht die Spalten year und taxable_income (oder genau zwei Spalten Jahr, Betrag); vorhanden: %s.", who,
                                       paste(names(x), collapse = ", ")), call. = FALSE)
       yc <- 1L; vc <- 2L
     }
-    if (!is.numeric(x[[vc]])) stop(sprintf("simulation: taxable_income: Spalte '%s' (Betrag) muss numerisch sein.", names(x)[vc]), call. = FALSE)
+    if (!is.numeric(x[[vc]])) stop(sprintf("%s: taxable_income: Spalte '%s' (Betrag) muss numerisch sein.", who, names(x)[vc]), call. = FALSE)
     x <- stats::setNames(as.numeric(x[[vc]]), as.character(x[[yc]]))
   }
   if (!is.numeric(x) || !length(x) || is.matrix(x))
-    stop(sprintf("simulation: taxable_income muss %s sein, nicht %s.", form, paste(utils::head(format(x), 3), collapse = ", ")), call. = FALSE)
+    stop(sprintf("%s: taxable_income muss %s sein, nicht %s.", who, form, paste(utils::head(format(x), 3), collapse = ", ")), call. = FALSE)
   if (any(!is.finite(x))) {
     i <- which(!is.finite(x))[1]
-    stop(sprintf("simulation: taxable_income enth\u00e4lt einen ung\u00fcltigen Wert (%s%s); erwartet werden endliche Betr\u00e4ge in EUR.",
+    stop(sprintf("%s: taxable_income enth\u00e4lt einen ung\u00fcltigen Wert (%s%s); erwartet werden endliche Betr\u00e4ge in EUR.", who,
                  format(x[i]), if (!is.null(names(x))) sprintf(" f\u00fcr %s", names(x)[i]) else ""), call. = FALSE)
   }
   if (length(x) == 1L && is.null(names(x))) return(list(all = unname(as.numeric(x)), by_year = NULL))
   if (is.null(names(x)) || any(is.na(names(x)) | names(x) == ""))
-    stop(sprintf("simulation: taxable_income mit %d Werten muss nach Kalenderjahren benannt sein; erwartet wird %s.", length(x), form), call. = FALSE)
+    stop(sprintf("%s: taxable_income mit %d Werten muss nach Kalenderjahren benannt sein; erwartet wird %s.", who, length(x), form), call. = FALSE)
   yy <- suppressWarnings(as.integer(trimws(names(x))))
   if (anyNA(yy) || any(as.character(yy) != trimws(names(x))))
-    stop(sprintf("simulation: taxable_income: Name '%s' ist kein Kalenderjahr (erwartet z. B. \"2024\").",
+    stop(sprintf("%s: taxable_income: Name '%s' ist kein Kalenderjahr (erwartet z. B. \"2024\").", who,
                  names(x)[which(is.na(yy) | as.character(yy) != trimws(names(x)))[1]]), call. = FALSE)
-  if (anyDuplicated(yy)) stop(sprintf("simulation: taxable_income: Jahr %d kommt mehrfach vor.", yy[anyDuplicated(yy)]), call. = FALSE)
+  if (anyDuplicated(yy)) stop(sprintf("%s: taxable_income: Jahr %d kommt mehrfach vor.", who, yy[anyDuplicated(yy)]), call. = FALSE)
   miss <- setdiff(years, yy)
   if (length(miss))
-    stop(sprintf("simulation: taxable_income fehlt f\u00fcr %s %s (angegeben: %s); je Kalenderjahr der Simulation (%d bis %d) wird ein Betrag ben\u00f6tigt.",
+    stop(sprintf("%s: taxable_income fehlt f\u00fcr %s %s (angegeben: %s); je Kalenderjahr der Simulation (%d bis %d) wird ein Betrag ben\u00f6tigt.", who,
                  if (length(miss) == 1L) "Simulationsjahr" else "Simulationsjahre", paste(miss, collapse = ", "),
                  paste(sort(yy), collapse = ", "), min(years), max(years)), call. = FALSE)
   list(all = NULL, by_year = stats::setNames(unname(as.numeric(x)), as.character(yy)))
@@ -507,7 +507,7 @@ calculate_private_sale_tax <- function(input, name, trade_count, sell_price, cur
 #' @param effective_tax_rate Zahl oder NULL. Effektiver Steuersatz als Anteil fuer die § 20-Erstattung
 #' @param details Logisch. Sollen Details ausgegeben werden?
 #' @param church_factor Zahl. Kirchensteuersatz als Anteil der Einkommensteuer (church_tax / 100, sonst 0)
-#' @param tariff_env Umgebung oder NULL. Tarifrechnung (simulation(taxable_income =)): Tarif, zvE je
+#' @param tariff_env Umgebung oder NULL. Tarifrechnung (income_tariff()): Tarif, zvE je
 #'   Jahr, Kirchensteuer-Sonderausgaben, Jahreszeilen und faellige Erstattung (siehe .tariff_close());
 #'   NULL = bisheriger Weg mit marginal_tax_rate
 #'
@@ -534,7 +534,7 @@ calculate_private_sale_tax <- function(input, name, trade_count, sell_price, cur
 #'
 #' @keywords internal
 #' @noRd
-handle_year_change <- function(input, current_date, marginal_tax_rate, 
+.handle_year_change <- function(input, current_date, marginal_tax_rate, 
                                private_sale_threshold, sparer_pauschbetrag,
                                use_sparer_pauschbetrag, soli_factor_income = 1.0,
                                effective_tax_rate = NULL,
@@ -791,7 +791,7 @@ handle_year_change <- function(input, current_date, marginal_tax_rate,
 
 
 #--------> Hilfsfunktion zur Berechnung des FIFO-Grenzindex:
-update_fifo_front <- function(trades, front_index){
+.update_fifo_front <- function(trades, front_index){
   while(front_index <= length(trades)){
     buy <- trades[[front_index]]
 
@@ -828,7 +828,7 @@ update_fifo_front <- function(trades, front_index){
 #'
 #' @param filled Logischer Vektor (wie dates) oder NULL: TRUE = aufgefuellter Tag (kein Handelstag)
 #' @noRd
-calculate_flat_rate <- function(input, name, index, dates, tax_regime = NULL, filled = NULL) {
+.calculate_flat_rate <- function(input, name, index, dates, tax_regime = NULL, filled = NULL) {
   # P6: tax_regime wird vom Aufrufer übergeben (Lookup-Vektor)
   # Vorabpauschale nur für investment_fund
   if (is.null(tax_regime)) tax_regime <- input[["assets"]][[name]][["tax_regime"]]
@@ -889,7 +889,7 @@ calculate_flat_rate <- function(input, name, index, dates, tax_regime = NULL, fi
 
 
 #--------> Hilfsfunktion zur Berechnung der Fongsgebühren:
-calculate_fund_fees <- function(input, index, dates, assets, funds_fee, bonus_fee, details){
+.calculate_fund_fees <- function(input, index, dates, assets, funds_fee, bonus_fee, details){
   # Abrechnungszeitraum: 1.1. des laufenden Jahres (bzw. Simulationsbeginn) bis heute
   event_date <- as.Date(paste0(format(dates[index], "%Y"), "-01-01"))
   dates_index <- which(dates >= event_date & dates <= dates[index])
@@ -953,19 +953,19 @@ calculate_fund_fees <- function(input, index, dates, assets, funds_fee, bonus_fe
 #' @param marginal_tax_rate Zahl. Persoenlicher Grenzsteuersatz als Anteil (fuer § 23)
 #' @param tax_regime Zeichenkette oder NULL. Steuerregime des Assets (NULL = aus sim_mem)
 #'
-#' @details Die geschaetzte Steuer folgt dem Verkauf (calculate_paragraph_20_tax): Gewinn nach
+#' @details Die geschaetzte Steuer folgt dem Verkauf (.calculate_paragraph_20_tax): Gewinn nach
 #'   § 19-Anrechnung der Lot-VP, Teilfreistellung, freier Verlusttopf, freier Sparer-Pauschbetrag.
 #'   § 23-Gewinne werden erst am Jahresende besteuert (Schaetzung 0).
 #' @return Liste mit sell_count und fifo_price
 #' @keywords internal
 #' @noRd
-calculate_sell_count <- function(input, name, target, index, spread, fractions, 
+.calculate_sell_count <- function(input, name, target, index, spread, fractions, 
                                             tax_mode, tax_rate, marginal_tax_rate = NULL,
                                             tax_regime = NULL) {
   
   # KORREKTUR K1: market_price aus input auslesen
   market_price <- input[["market"]][[name]][["asset_price"]][index]
-  trade_price <- apply_spread(market_price, spread, "sell")
+  trade_price <- .apply_spread(market_price, spread, "sell")
   total_shares <- input[["status"]][[name]][["count"]]
 
   # Early returns
@@ -988,7 +988,7 @@ calculate_sell_count <- function(input, name, target, index, spread, fractions,
   if (is.null(tax_regime)) tax_regime <- input[["assets"]][[name]][["tax_regime"]]
   tax_regime <- if (tax_mode == "person") tax_regime else "none"
   bonus <- if (tax_regime == "investment_fund") input[["assets"]][[name]][["bonus"]] else 0
-  # R3a-04: wie calculate_paragraph_20_tax erst Verlusttopf, dann freier Sparer-Pauschbetrag
+  # R3a-04: wie .calculate_paragraph_20_tax erst Verlusttopf, dann freier Sparer-Pauschbetrag
   # (ohne Pauschbetrag ist der Rest 0); die § 19-Anrechnung der Lot-VP rechnet .sim_sell_count_cpp
   loss_pool <- input[["totals"]][["loss_capital_gains"]] +
     max(0, input[["totals"]][["sparer_pauschbetrag_remaining"]] %||% 0)
@@ -1132,11 +1132,11 @@ calculate_kurtosis <- function(x, na.rm = TRUE, excess = TRUE){
 #'
 #' @examples
 #' # 1:4 Split von Asset "AAPL"
-#' sim_mem <- forward_asset_split(sim_mem, "AAPL", ratio = 4, index = 100, fractions = TRUE)
+#' sim_mem <- .forward_asset_split(sim_mem, "AAPL", ratio = 4, index = 100, fractions = TRUE)
 #'
 #' @keywords internal
 #' @noRd
-forward_asset_split <- function(input, name, ratio, index, fractions) {
+.forward_asset_split <- function(input, name, ratio, index, fractions) {
   
 
   # Aktuelle Werte auslesen
@@ -1180,7 +1180,7 @@ forward_asset_split <- function(input, name, ratio, index, fractions) {
   }
   
   # FIFO-Front aktualisieren (erstes Lot mit remaining > 0 finden)
-  input[["trades"]][[name]][["fifo_front"]] <- update_fifo_front(
+  input[["trades"]][[name]][["fifo_front"]] <- .update_fifo_front(
     trades = input[["trades"]][[name]][["buys"]], 
     front_index = 1
   )
@@ -1213,7 +1213,7 @@ forward_asset_split <- function(input, name, ratio, index, fractions) {
 #'
 #' @keywords internal
 #' @noRd
-apply_spread <- function(price, spread, direction = c("buy", "sell")) {
+.apply_spread <- function(price, spread, direction = c("buy", "sell")) {
   direction <- match.arg(direction)
   
   # H-1: 'spread' = voller Bid-Ask-Spread; je Seite die Haelfte (Halb-Spread).
@@ -1257,11 +1257,11 @@ apply_spread <- function(price, spread, direction = c("buy", "sell")) {
 #'
 #' @examples
 #' # 10:1 Reverse-Split von Asset "XYZ"
-#' sim_mem <- reverse_asset_split(sim_mem, "XYZ", ratio = 10, index = 100, fractions = FALSE)
+#' sim_mem <- .reverse_asset_split(sim_mem, "XYZ", ratio = 10, index = 100, fractions = FALSE)
 #'
 #' @keywords internal
 #' @noRd
-reverse_asset_split <- function(input, name, ratio, index, fractions) {
+.reverse_asset_split <- function(input, name, ratio, index, fractions) {
   
   # Aktuelle Werte auslesen
   current_count <- input[["status"]][[name]][["count"]]
@@ -1299,7 +1299,7 @@ reverse_asset_split <- function(input, name, ratio, index, fractions) {
   }
   
   # FIFO-Front aktualisieren
-  input[["trades"]][[name]][["fifo_front"]] <- update_fifo_front(
+  input[["trades"]][[name]][["fifo_front"]] <- .update_fifo_front(
     trades = input[["trades"]][[name]][["buys"]], 
     front_index = 1
   )
@@ -1309,7 +1309,7 @@ reverse_asset_split <- function(input, name, ratio, index, fractions) {
   input[["status"]][[name]][["price"]] <- split_price
   input[["status"]][[name]][["worth"]] <- split_worth
   
-  # Preishistorie anpassen (alle Preise, vgl. forward_asset_split, R1-06)
+  # Preishistorie anpassen (alle Preise, vgl. .forward_asset_split, R1-06)
   input[["market"]][[name]][["asset_price"]] <- input[["market"]][[name]][["asset_price"]] * ratio
   
   return(input)
@@ -1338,7 +1338,7 @@ reverse_asset_split <- function(input, name, ratio, index, fractions) {
 #'
 #' @examples
 #' # Forward-Split 1:4
-#' sim_mem <- perform_asset_split(
+#' sim_mem <- .perform_asset_split(
 #'   input = sim_mem,
 #'   name = "AAPL",
 #'   ratio = 4,
@@ -1351,7 +1351,7 @@ reverse_asset_split <- function(input, name, ratio, index, fractions) {
 #'
 #' @keywords internal
 #' @noRd
-perform_asset_split <- function(input, name, ratio, index, type,
+.perform_asset_split <- function(input, name, ratio, index, type,
                                  fractions = TRUE,
                                  details = FALSE,
                                  current_date = NULL) {
@@ -1368,7 +1368,7 @@ perform_asset_split <- function(input, name, ratio, index, type,
   
   # Split durchführen
   if (type == "forward") {
-    input <- forward_asset_split(
+    input <- .forward_asset_split(
       input = input,
       name = name,
       ratio = ratio,
@@ -1376,7 +1376,7 @@ perform_asset_split <- function(input, name, ratio, index, type,
       fractions = fractions
     )
   } else {
-    input <- reverse_asset_split(
+    input <- .reverse_asset_split(
       input = input,
       name = name,
       ratio = ratio,
@@ -1412,7 +1412,7 @@ perform_asset_split <- function(input, name, ratio, index, type,
 #' P7: Kernlogik (Report-Update + Lot-Erstellung) in C++ .sim_buy_cpp.
 #' R-Wrapper berechnet trade_count (Spread, Fractions-Logik) und gibt Details aus.
 #' @noRd
-perform_trade_buy <- function(input, count = NULL, name, index, reason = "", spread, fractions, details, current_date = NULL){
+.perform_trade_buy <- function(input, count = NULL, name, index, reason = "", spread, fractions, details, current_date = NULL){
 
   market_price <- input[["market"]][[name]][["asset_price"]][index]
   if (is.na(market_price) || market_price <= 0) {
@@ -1421,7 +1421,7 @@ perform_trade_buy <- function(input, count = NULL, name, index, reason = "", spr
     return(input)
   }
 
-  trade_price <- apply_spread(market_price, spread, "buy")
+  trade_price <- .apply_spread(market_price, spread, "buy")
 
   trade_count <- if(is.null(count)){
     if(fractions){
@@ -1467,7 +1467,7 @@ perform_trade_buy <- function(input, count = NULL, name, index, reason = "", spr
 }
 
 #--------> Hilfsfunktion zur Realisierung von Verkäufen:
-perform_trade_sell <- function(input, count = NULL, price = NULL, name, index, 
+.perform_trade_sell <- function(input, count = NULL, price = NULL, name, index, 
                                 tax_mode, tax_rate,  # Original-Rate für Reporting
                                 effective_tax_rate = NULL,
                                 marginal_tax_rate = NULL,
@@ -1482,7 +1482,7 @@ perform_trade_sell <- function(input, count = NULL, price = NULL, name, index,
   }
   
   market_price <- input[["market"]][[name]][["asset_price"]][index]
-  trade_price <- apply_spread(market_price, spread, "sell")
+  trade_price <- .apply_spread(market_price, spread, "sell")
   current_date <- input[["market"]][[name]][["asset_day"]][index]
   
   # EC2: Überverkauf-Schutz
@@ -1509,7 +1509,7 @@ if (trade_count <= 0) {
   }
   
   fifo_price <- if (is.null(price) && tax_mode == "person") {
-    calculate_fifo_price(
+    .calculate_fifo_price(
       trades = input[["trades"]][[name]][["buys"]], 
       units = trade_count, 
       front_index = input[["trades"]][[name]][["fifo_front"]]
@@ -1538,7 +1538,7 @@ if (trade_count <= 0) {
       bonus <- input[["assets"]][[name]][["bonus"]]
       
       # § 19 InvStG: Bereits gezahlte Vorabpauschalen abziehen
-      vorabpauschale_paid <- calculate_fifo_vorabpauschale(
+      vorabpauschale_paid <- .calculate_fifo_vorabpauschale(
         trades = input[["trades"]][[name]][["buys"]],
         units = trade_count,
         front_index = input[["trades"]][[name]][["fifo_front"]]
@@ -1547,7 +1547,7 @@ if (trade_count <= 0) {
       # Angepasster Gewinn = Bruttogewinn - bereits versteuerte Vorabpauschalen
       adjusted_trade_gain <- trade_gain - vorabpauschale_paid
       
-      result <- calculate_paragraph_20_tax(
+      result <- .calculate_paragraph_20_tax(
         trade_gain = adjusted_trade_gain,  # Nach VP-Anrechnung
         bonus = bonus, 
         totals = input[["totals"]], 
@@ -1574,7 +1574,7 @@ if (trade_count <= 0) {
     # I3: effective_tax_rate für Günstigerprüfung
     # ============================================================
     else if (tax_regime == "capital_gains") {
-      result <- calculate_paragraph_20_tax(
+      result <- .calculate_paragraph_20_tax(
         trade_gain = trade_gain, 
         bonus = 0, 
         totals = input[["totals"]], 
@@ -1590,7 +1590,7 @@ if (trade_count <= 0) {
     # ============================================================
     # 
     # M2 KORREKTUR: Verlustverrechnung erfolgt NICHT bei jedem Verkauf,
-    # sondern erst am Jahresende in handle_year_change().
+    # sondern erst am Jahresende in .handle_year_change().
     # 
     # Hier werden nur die YTD-Tracker aktualisiert:
     # - private_sale_gains_ytd: Gewinne aus Verkäufen < 1 Jahr Haltedauer
@@ -1599,7 +1599,7 @@ if (trade_count <= 0) {
     # Der Verlustvortrag (loss_private_sales) wird NICHT angetastet!
     # ============================================================
     else if (tax_regime == "private_sale") {
-      lot_result <- calculate_private_sale_tax(
+      lot_result <- .calculate_private_sale_tax(
         input = input,
         name = name,
         trade_count = trade_count,
@@ -1658,7 +1658,7 @@ if (trade_count <= 0) {
       # ══════════════════════════════════════════════════════════════════
       
       # WICHTIG: Keine sofortige Steuer bei § 23!
-      # Die Steuer wird am Jahresende in handle_year_change() berechnet.
+      # Die Steuer wird am Jahresende in .handle_year_change() berechnet.
       capital_gains_tax <- 0
     }
   }
@@ -1776,7 +1776,7 @@ if (trade_count <= 0) {
 #' Verlusttopf) realisieren und den Erloes sofort wieder anlegen
 #' @keywords internal
 #' @noRd
-perform_gain_harvest <- function(input, name, index, tax_regime, spread, fractions, use_loss_pot, use_spb,
+.perform_gain_harvest <- function(input, name, index, tax_regime, spread, fractions, use_loss_pot, use_spb,
                                  tax_mode, tax_rate, effective_tax_rate, marginal_tax_rate,
                                  private_sale_threshold, details) {
   if (!tax_regime %in% c("investment_fund", "capital_gains")) return(input)
@@ -1787,15 +1787,15 @@ perform_gain_harvest <- function(input, name, index, tax_regime, spread, fractio
   if (room <= 0.01) return(input)
   market_price <- input[["market"]][[name]][["asset_price"]][index]
   if (is.na(market_price) || market_price <= 0) return(input)
-  sell_price <- apply_spread(market_price, spread, "sell")
+  sell_price <- .apply_spread(market_price, spread, "sell")
   trades <- input[["trades"]][[name]][["buys"]]; front <- input[["trades"]][[name]][["fifo_front"]]
   bonus <- if (tax_regime == "investment_fund") input[["assets"]][[name]][["bonus"]] else 0
   fee <- .fee_env$current
   taxable <- function(n, with_fee = TRUE) {
     if (n <= 0) return(0)
     px <- sell_price; if (with_fee && !is.null(fee)) px <- px - .fee_amount(fee, n * sell_price) / n
-    g <- (px - calculate_fifo_price(trades, n, front)) * n
-    if (tax_regime == "investment_fund") g <- g - calculate_fifo_vorabpauschale(trades, n, front)
+    g <- (px - .calculate_fifo_price(trades, n, front)) * n
+    if (tax_regime == "investment_fund") g <- g - .calculate_fifo_vorabpauschale(trades, n, front)
     (1 - bonus) * g
   }
   first_lot <- min(total, max(1e-9, total * 1e-6))
@@ -1809,12 +1809,12 @@ perform_gain_harvest <- function(input, name, index, tax_regime, spread, fractio
   if (n <= 0 || taxable(n) <= 0) return(input)
   if (details) cat(sprintf("Freibetrag:\tRealisierung von Gewinnen %.2f EUR mit %.4fx %s (freier Sparer-Pauschbetrag/Verlusttopf %.2f EUR)\n",
                            taxable(n), n, name, room))
-  input <- perform_trade_sell(input = input, count = n, name = name, index = index, tax_mode = tax_mode,
+  input <- .perform_trade_sell(input = input, count = n, name = name, index = index, tax_mode = tax_mode,
                               tax_rate = tax_rate, effective_tax_rate = effective_tax_rate,
                               marginal_tax_rate = marginal_tax_rate, private_sale_threshold = private_sale_threshold,
                               use_sparer_pauschbetrag = use_spb, tax_regime = tax_regime,
                               reason = "Freibetrag:", spread = spread, details = details)
-  input <- perform_trade_buy(input = input, name = name, index = index, reason = "Freibetrag:", spread = spread,
+  input <- .perform_trade_buy(input = input, name = name, index = index, reason = "Freibetrag:", spread = spread,
                              fractions = fractions, details = details)
   input
 }

@@ -5,12 +5,12 @@
 - :func:`bootstrap_config` – Spezifikation (Indizes,
   Hebelprodukte, Zusatzreihen)
 - :func:`bootstrap` – erzeugt Preis-Pfade im Speicher
-- :func:`validate_bootstrap` – bereinigt ein Bootstrap-Ergebnis
+- :func:`bootstrap_validate` – bereinigt ein Bootstrap-Ergebnis
 - :func:`bootstrap_data` – ein Pfad als ``DataFrame`` für :func:`simlev.simulation`
 - :func:`bootstrap_study` – Strategien auf Bootstrap-Pfaden auswerten
-- :func:`study_metrics` – Standard-Kennzahlen einer Simulation
+- :func:`bootstrap_study_metrics` – Standard-Kennzahlen einer Simulation
 - :func:`bootstrap_probability` – Wahrscheinlichkeiten aus einer Studie
-- :func:`block_length` – automatische Blocklänge (Politis & White 2004)
+- :func:`bootstrap_block_length` – automatische Blocklänge (Politis & White 2004)
 
 Verfahren: raw, block, circular, stationary, wild, regime, evt, tails, reset,
 garch, gjr_garch, ms_garch, ms_ar_garch_m, tvtp_ms_garch (die MS-GARCH-Familie
@@ -24,7 +24,6 @@ ausschließlich über :mod:`simlev._r.rng` (L'Ecuyer-Ströme je Pfad wie R).
 from __future__ import annotations
 
 import contextlib
-import inspect
 import io
 import math
 import os
@@ -47,8 +46,8 @@ from ._r.rlist import RList
 from ._r.rnum import r_cumprod, r_mean, r_median, r_pow, r_sd, r_sum, r_var
 
 __all__ = [
-    "bootstrap_config", "BootstrapConfig", "block_length", "bootstrap",
-    "BootstrapResult", "validate_bootstrap", "bootstrap_data", "study_metrics", "bootstrap_study",
+    "bootstrap_config", "BootstrapConfig", "bootstrap_block_length", "bootstrap",
+    "BootstrapResult", "bootstrap_validate", "bootstrap_data", "bootstrap_study_metrics", "bootstrap_study",
     "SimLevBootstrapStudy", "SummarySimLevBootstrapStudy", "bootstrap_probability", "summary",
     "plot",
 ]
@@ -381,7 +380,7 @@ def _aux_type_of(at, nm):
     return None
 
 
-def bootstrap_config(indices, letfs=(), regime_index=None, aux=None, aux_type=None,
+def bootstrap_config(indices, *, letfs=(), regime_index=None, aux=None, aux_type=None,
                      cross=("ratio", "joint"), input=("returns", "prices")):  # noqa: A002
     """Bootstrap-Konfiguration erstellen.
 
@@ -748,7 +747,7 @@ def _pw_block(x):
 
 
 @_quiet
-def block_length(x, transform=("none", "abs", "squared")):
+def bootstrap_block_length(x, *, transform=("none", "abs", "squared")):
     """Optimale Blocklänge nach Politis & White (2004) mit Korrektur von Patton et al. (2009).
 
     Args:
@@ -787,7 +786,7 @@ def _resolve_auto(params, returns, config, method):
     for nm in ("L", "block_length"):
         if isinstance(params.get(nm), str) and params.get(nm) == "auto":
             lr = np.asarray(_libm.log(returns), dtype=np.float64)
-            b = pd.concat([block_length(lr), block_length(lr, "abs")])
+            b = pd.concat([bootstrap_block_length(lr), bootstrap_block_length(lr, transform="abs")])
             col = "stationary" if nm == "L" else "circular"
             params[nm] = max(1.0, _r_round0(float(b[col].max())))
             _message("Automatische Blocklänge (%s, Politis-White, max. über Reihen und |r|): %d"
@@ -1452,8 +1451,8 @@ def _new_seed():
 
 
 @_quiet
-def bootstrap(data, config, method="raw", n=1000, params=None, ess=False, ess_grid=None, progress=True,
-              path_length=None, seed=None, cores=1, max_tries=10):
+def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess_grid=None, path_length=None,
+              max_tries=10, seed=None, cores=1, progress=True):
     """Bootstrap-Pfade erzeugen.
 
     Args:
@@ -1510,7 +1509,7 @@ def _is_boot_result(x) -> bool:
 
 
 @_quiet
-def validate_bootstrap(result, min_rows=None, verbose=True):
+def bootstrap_validate(result, *, min_rows=None, verbose=True):
     """Bootstrap-Ergebnis validieren und bereinigen.
 
     Entfernt leere, unvollständige oder nicht endliche Pfade sowie Pfade mit
@@ -1557,14 +1556,14 @@ def validate_bootstrap(result, min_rows=None, verbose=True):
 
 
 @_quiet
-def bootstrap_data(result, i=1, dates=None, start_date="2000-01-01"):
+def bootstrap_data(result, *, i=1, dates=None, start="2000-01-01"):
     """Bootstrap-Pfad als ``DataFrame`` für :func:`simlev.simulation`.
 
     Args:
         result: :class:`BootstrapResult` oder eine einzelne Pfadmatrix (``DataFrame``).
         i: Pfadnummer (1-basiert wie in R; Standard 1).
         dates: Datumsvektor (Länge = Zeilen des Pfads) oder ``None``.
-        start_date: Startdatum für ``dates=None``.
+        start: Startdatum für ``dates=None``.
 
     Returns:
         ``DataFrame`` mit Spalte ``date`` und allen Pfadspalten; ausdrücklich als
@@ -1577,7 +1576,7 @@ def bootstrap_data(result, i=1, dates=None, start_date="2000-01-01"):
     P = result["paths"][int(i) - 1]
     nr = P.shape[0]
     if dates is None:
-        dates = _seq_dates(_to_date(start_date, "start_date"), nr)
+        dates = _seq_dates(_to_date(start, "start"), nr)
     if len(np.atleast_1d(dates)) != nr:
         _stop("dates hat Länge %d, Pfad hat %d Zeilen." % (len(np.atleast_1d(dates)), nr))
     d = _to_date(dates, "dates")
@@ -1610,7 +1609,7 @@ def _res_get(res, name, default=None):
 
 
 @_quiet
-def study_metrics(res):
+def bootstrap_study_metrics(res):
     """Standard-Kennzahlen für :func:`bootstrap_study` (benannter Vektor als ``Series``)."""
     s = _res_get(res, "statistics", {})
     dq = _quantile7(np.asarray(_res_get(res, "drawdowns"), dtype=np.float64), [0.5, 0.9])
@@ -1687,20 +1686,9 @@ def _deparse(v) -> str:
 
 
 def _sim_call(df, strategy, args):
-    """``do.call(simulation, c(list(data = df, strategy = strategy), args))``."""
-    from .engine import simulation
-    try:
-        sig = inspect.signature(simulation)
-        names = set(sig.parameters)
-        has_kw = any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values())
-    except (TypeError, ValueError):  # pragma: no cover
-        names, has_kw = set(), True
-    if not has_kw:
-        bad = [k for k in args if k not in names]
-        if bad:
-            txt = ", ".join("%s = %s" % (k, _deparse(args[k])) for k in bad)
-            _stop("unused argument%s (%s)" % ("s" if len(bad) > 1 else "", txt))
-    return simulation(df, strategy, **args)
+    """``simulation()`` mit den aufgelösten sim_args (R: ``.sim_call``)."""
+    from ._sim_blocks import _sim_call as call
+    return call(df, strategy, args)
 
 
 def _anniv_ends(dates, frequency):
@@ -1721,11 +1709,11 @@ def _year_month(d):
 
 
 @_quiet
-def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, params=None, ess=False,
-                    ess_grid=None, path_length=None, dates=None, start_date="2000-01-01", burn_in=0,
-                    sim_args=None, metrics=study_metrics, benchmark=None, cores=1, chunk_size=25, seed=None,
-                    chunk_dir=None, max_tries=10, keep_paths=0, keep_returns=("none", "year", "quarter", "month"),
-                    keep_aux=None, progress=True):
+def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, *, params=None, ess=False,
+                    ess_grid=None, path_length=None, dates=None, start="2000-01-01", burn_in=0,
+                    sim_args=None, metrics=bootstrap_study_metrics, benchmark=None, chunk_dir=None, keep_paths=0,
+                    keep_returns=("none", "year", "quarter", "month"), keep_aux=None, max_tries=10, chunk_size=25,
+                    seed=None, cores=1, progress=True):
     """Strategien auf Bootstrap-Pfaden auswerten.
 
     Erzeugt Pfade wie :func:`bootstrap`, berechnet je Pfad die Signale,
@@ -1759,11 +1747,15 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
     snames = list(specs.keys())
     if benchmark is not None and benchmark not in snames:
         _stop("benchmark muss einer der Strategienamen sein.")
-    sim_args = dict(sim_args or {})
+    # Argumente für simulation() je Strategie einmal auflösen (Bausteine, Pfade; alte flache Namen: Fehler)
+    from ._sim_blocks import _sim_args_set
+    sim_args = _sim_args_set({}, sim_args, "bootstrap_study")
+    for nm0 in snames:
+        specs[nm0]["sim"] = _sim_args_set(sim_args, specs[nm0].get("args"), "bootstrap_study")
     setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
     n_out = setup["n_out"]
     if dates is None:
-        dates = _seq_dates(_to_date(start_date, "start_date"), n_out + 1)
+        dates = _seq_dates(_to_date(start, "start"), n_out + 1)
     if len(np.atleast_1d(dates)) != n_out + 1:
         _stop("dates braucht Länge %d (Pfadlänge + 1)." % (n_out + 1))
     dates = _to_date(dates, "dates")
@@ -1851,7 +1843,7 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
                     df[a2] = df[col]
             if burn_in > 0:
                 df = df.iloc[burn_in:].reset_index(drop=True)
-            args = _modify_list(sim_args, dict(sp.get("args") or {}))
+            args = sp["sim"]
             try:
                 with contextlib.redirect_stderr(io.StringIO()):
                     res = run(lambda: _sim_call(df, sp["strategy"], args))

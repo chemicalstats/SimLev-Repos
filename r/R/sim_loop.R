@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # .sim_run_days() steuert die Tage: zusammenhaengende Tage ohne Ereignis in einem C++-Aufruf
-# (.sim_market_update_batch_cpp), Jahreswechsel (handle_year_change) und Abrechnung der Vorabpauschale des
+# (.sim_market_update_batch_cpp), Jahreswechsel (.handle_year_change) und Abrechnung der Vorabpauschale des
 # Vorjahres direkt, die uebrigen Ereignisse in den Tagesschritten .sim_day_*() in fester
 # Reihenfolge: Aktivierung, Split, Sparplan, Handel, Rebalancing, Gewinnrealisierung, Vorabpauschale
 # (31.12.), Fondskosten, Liquidation. Jeder Schritt gibt sim_mem zurueck (C++-Funktionen aendern
@@ -60,7 +60,7 @@
     
     # === Jahreswechsel prüfen (nur an Tagen wo das Jahr wechselt) ===
     if (flag_year_change[time]) {
-      sim_mem <- handle_year_change(
+      sim_mem <- .handle_year_change(
         input = sim_mem,
         current_date = flag_date[time],
         marginal_tax_rate = marginal_tax_rate,
@@ -92,7 +92,7 @@
     flag_fast_report <- TRUE
 
     #--------> § 18 Abs. 3 InvStG: Zufluss der Vorabpauschale des Vorjahres (erster
-    # Handelstag, nach handle_year_change, vor allen Trades des Tages)
+    # Handelstag, nach .handle_year_change, vor allen Trades des Tages)
     # R3a-02: am selben Tag (nach der VP) die § 23-Steuer des Vorjahres aus dem Depot zahlen
     if (tax_mode == "person" && flag_vp_settle[time] &&
         (length(sim_mem[["totals"]][["vp_pending"]]) || length(sim_mem[["totals"]][["p23_due"]]) || .gp_pending())) {
@@ -244,7 +244,7 @@
   effective_tax_rate <- cfg$effective_tax_rate; marginal_tax_rate <- cfg$marginal_tax_rate
   private_sale_threshold <- cfg$private_sale_threshold; use_sparer_pauschbetrag <- cfg$use_sparer_pauschbetrag
   # A7-07: Ein Asset ohne Bestand (spaeterer Start, Signal-Asset in Cash) splittet trotzdem: seine Kursreihe
-  # wird wie in calculate_split_flags umgerechnet, sonst entfiele der Split endgueltig und spaetere Kaeufe
+  # wird wie in .calculate_split_flags umgerechnet, sonst entfiele der Split endgueltig und spaetere Kaeufe
   # erfolgten zu Kursen ueber der oberen Schwelle (die vorab bestimmten Split-Termine passten nicht mehr)
   for(name in setdiff(flag_assets, active_assets[vapply(active_assets, function(nm) sim_mem[["status"]][[nm]][["count"]] > 0, logical(1))])){
     px0 <- sim_mem[["market"]][[name]][["asset_price"]][time]
@@ -260,7 +260,7 @@
       split_price <- sim_mem[["market"]][[name]][["asset_price"]][time]
 
       if(split_price > split_thresh[[2]]){
-        sim_mem <- perform_asset_split(input = sim_mem, name = name, ratio = split_price / 100,
+        sim_mem <- .perform_asset_split(input = sim_mem, name = name, ratio = split_price / 100,
                                        type = "forward", index = time,                                        
 fractions = fractions,
 details = details,
@@ -269,7 +269,7 @@ current_date = flag_date[time]
       }
 
       if(split_price < split_thresh[[1]]){
-        sim_mem <- perform_asset_split(input = sim_mem, name = name, ratio = 100 / split_price,
+        sim_mem <- .perform_asset_split(input = sim_mem, name = name, ratio = 100 / split_price,
                                        type = "reverse", index = time,                                        
 fractions = fractions,
 details = details,
@@ -283,7 +283,7 @@ current_date = flag_date[time]
       split_frac <- split_cnt - floor(split_cnt + 1e-9)
       if (!fractions && split_frac > 1e-9) {
         fee_keep <- .fee_env$current; .fee_env$current <- NULL
-        sim_mem <- perform_trade_sell(input = sim_mem, count = split_frac, name = name, index = time,
+        sim_mem <- .perform_trade_sell(input = sim_mem, count = split_frac, name = name, index = time,
           tax_mode = tax_mode, tax_rate = tax_rate, effective_tax_rate = effective_tax_rate,
           marginal_tax_rate = marginal_tax_rate, private_sale_threshold = private_sale_threshold,
           use_sparer_pauschbetrag = use_sparer_pauschbetrag, tax_regime = tax_regimes[[name]],
@@ -310,11 +310,11 @@ current_date = flag_date[time]
   flag_assets <- fl$flag_assets; flag_date <- fl$flag_date; flag_dca_n <- fl$flag_dca_n
   dca_value <- cfg$dca_value
   dca_amount <- dca_value * flag_dca_n[time]   # R1-16: mehrere Termine am selben Handelstag
-  # R-1: DCA-Verteilung nach STRATEGIE-Gewichten (asset_share), renormiert
+  # R-1: DCA-Verteilung nach STRATEGIE-Gewichten (share), renormiert
   # ueber die derzeit aktiven Assets (inkl. Cash-Reserven signalbedingt
   # wartender (aktivierter!) Signal-Assets — Gleichbehandlung nach Zielgewicht). Ohne balance_dca:
   # fixer Split (70:30 bleibt 70:30, egal wie das Depot driftet).
-  strat_w <- sapply(active_assets, function(name) strategy[[name]][["asset_share"]])
+  strat_w <- sapply(active_assets, function(name) strategy[[name]][["share"]])
   strat_w <- strat_w / sum(strat_w, na.rm = TRUE)
 
   if(balance_dca && length(active_assets) > 1){
@@ -368,8 +368,8 @@ current_date = flag_date[time]
   trade_event <- FALSE
 
   for(name in active_assets){   # P-1/O-1: nur aktive Assets handeln
-    flag_buy <- calculate_buy_signal(input = sim_mem, name = name, index = time)
-    flag_sell <- calculate_sell_signal(input = sim_mem, name = name, index = time)
+    flag_buy <- .calculate_buy_signal(input = sim_mem, name = name, index = time)
+    flag_sell <- .calculate_sell_signal(input = sim_mem, name = name, index = time)
 
     if(flag_buy){
       # R1-04/R2-01: Sparplankauf (Buy-and-Hold am Sparplantag) mit dca_fee, sonst order_fee
@@ -378,7 +378,7 @@ current_date = flag_date[time]
     }
 
     if(flag_sell){
-      sim_mem <- perform_trade_sell(input = sim_mem, name = name, index = time, tax_mode = tax_mode, tax_rate = tax_rate,
+      sim_mem <- .perform_trade_sell(input = sim_mem, name = name, index = time, tax_mode = tax_mode, tax_rate = tax_rate,
         effective_tax_rate = effective_tax_rate,
         marginal_tax_rate = marginal_tax_rate,
         private_sale_threshold = private_sale_threshold,
@@ -440,7 +440,7 @@ current_date = flag_date[time]
       .sig_buy  <- isTRUE(sim_mem[["market"]][[name]][["signal_buy"]][time])
       .sig_sell <- isTRUE(sim_mem[["market"]][[name]][["signal_sell"]][time])
       if(.has_pos && .sig_sell){
-        sim_mem <- perform_trade_sell(input = sim_mem, name = name, index = time,
+        sim_mem <- .perform_trade_sell(input = sim_mem, name = name, index = time,
           tax_mode = tax_mode, tax_rate = tax_rate,
           effective_tax_rate = effective_tax_rate,
           marginal_tax_rate = marginal_tax_rate,
@@ -452,7 +452,7 @@ current_date = flag_date[time]
         signal_cash_only <- c(signal_cash_only, name)
       } else if(!.has_pos && .sig_buy){
         # Signal-Entry aus der eigenen Cash-Reserve; danach normale Teilnahme
-        sim_mem <- perform_trade_buy(input = sim_mem, name = name, index = time,
+        sim_mem <- .perform_trade_buy(input = sim_mem, name = name, index = time,
           reason = "Rebalancing/Signal-Einstieg:",
           spread = spread_rates[[name]], fractions = fractions, details = details)
       } else if(!.has_pos && !.sig_buy){
@@ -533,14 +533,14 @@ current_date = flag_date[time]
         if(sim_mem[["status"]][[name]][["count"]] > 0 && sell_target > 0){
           # R3a-04: Steuerschaetzung wie beim Verkauf (effektiver Satz, Verlusttopf, Pauschbetrag,
           # § 19-Anrechnung), damit kein Ueberverkauf mit Rueckkauf am selben Tag entsteht
-          sell_result <- calculate_sell_count(
+          sell_result <- .calculate_sell_count(
             input = sim_mem, name = name, target = sell_target, 
             index = time, spread = spread_rates[[name]], 
             fractions = fractions, tax_mode = tax_mode, tax_rate = effective_tax_rate,
             marginal_tax_rate = marginal_tax_rate,
             tax_regime = tax_regimes[[name]])
           
-          sim_mem <- perform_trade_sell(
+          sim_mem <- .perform_trade_sell(
             input = sim_mem, name = name, 
             count = sell_result[["sell_count"]], 
             price = sell_result[["fifo_price"]], 
@@ -586,7 +586,7 @@ current_date = flag_date[time]
                           name, sim_mem[["status"]][[name]][["money"]]))
             }
           } else {
-            sim_mem <- perform_trade_buy(
+            sim_mem <- .perform_trade_buy(
               input = sim_mem, name = name, index = time,
               reason = "Rebalancing:",
               spread = spread_rates[[name]],
@@ -645,7 +645,7 @@ current_date = flag_date[time]
   private_sale_threshold <- cfg$private_sale_threshold
   if (fees_on) .fee_env$current <- fee_order
   for (name in active_assets) {
-    sim_mem <- perform_gain_harvest(sim_mem, name, time, tax_regimes[[name]], spread_rates[[name]],
+    sim_mem <- .perform_gain_harvest(sim_mem, name, time, tax_regimes[[name]], spread_rates[[name]],
                                     fractions, harvest_loss_pot, use_sparer_pauschbetrag,
                                     tax_mode, tax_rate, effective_tax_rate, marginal_tax_rate,
                                     private_sale_threshold, details)
@@ -675,7 +675,7 @@ current_date = flag_date[time]
       if (tax_regime == "investment_fund" && sim_mem[["status"]][[name]][["count"]] > 0) {
         
         # Vorabpauschale berechnen (reine Lesefunktion, keine Seiteneffekte)
-        vp_result <- calculate_flat_rate(
+        vp_result <- .calculate_flat_rate(
           input = sim_mem, 
           name = name, 
           index = time, 
@@ -687,7 +687,7 @@ current_date = flag_date[time]
         
         # VP pro Lot in sim_mem speichern (direkt by-reference, kein Copy-on-Modify)
         # Dies ist der Fix für den kritischen VP-Bug: Die Schreiboperation erfolgt
-        # im Aufrufer auf sim_mem, nicht in calculate_flat_rate auf einer lokalen Kopie.
+        # im Aufrufer auf sim_mem, nicht in .calculate_flat_rate auf einer lokalen Kopie.
         for (vp_k in seq_along(vp_result$lot_indices)) {
           vp_i <- vp_result$lot_indices[vp_k]
           current_vp <- sim_mem[["trades"]][[name]][["buys"]][[vp_i]][["vp"]] %||% 0
@@ -729,7 +729,7 @@ current_date = flag_date[time]
   flag_assets <- fl$flag_assets; flag_date <- fl$flag_date
   .raise_cash <- act$.raise_cash
   .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)   # Tageswerte
-  result_fees <- calculate_fund_fees(
+  result_fees <- .calculate_fund_fees(
     input = sim_mem, index = time, dates = flag_date, assets = flag_assets,
     funds_fee = funds_fee, bonus_fee = bonus_fee, details = details)
   sim_mem[["totals"]][["total_value"]] <- result_fees[["total_value"]]
@@ -768,7 +768,7 @@ current_date = flag_date[time]
   for(name in flag_assets){
     if(sim_mem[["status"]][[name]][["count"]] > 0){
       tax_type <- ifelse(tax_mode == "person", "person", "none")
-      sim_mem <- perform_trade_sell(input = sim_mem, name = name, index = time, 
+      sim_mem <- .perform_trade_sell(input = sim_mem, name = name, index = time, 
         tax_mode = tax_type, tax_rate = tax_rate, 
         effective_tax_rate = effective_tax_rate,
         marginal_tax_rate = marginal_tax_rate,
@@ -838,7 +838,7 @@ current_date = flag_date[time]
   # Simulationstag belasten. R4-02: Der finale Jahresabschluss wird vollstaendig uebernommen
   # (eine § 20-Erstattung wird dem Cash gutgeschrieben und landet im Endwert, wie bei jedem
   # Jahreswechsel); danach wird der Tagesbericht des letzten Tages immer neu berechnet.
-  final_year_change <- function(sim_mem) handle_year_change(
+  final_year_change <- function(sim_mem) .handle_year_change(
       input = sim_mem,
       current_date = as.Date(paste0(as.integer(format(stopp_date, "%Y")) + 1, "-01-01")),
       marginal_tax_rate = marginal_tax_rate,
@@ -860,7 +860,7 @@ current_date = flag_date[time]
         # Verkauf), im laufenden Jahr zahlen, danach das Jahr schliessen und die VP buchen (Differenz
         # zur endgueltigen Steuer, z. B. wenn der Verkaufsgewinn den Verlustvortrag mindert, wird ausgeglichen)
         dry <- unserialize(serialize(sim_mem, NULL))
-        dry <- suppressWarnings(handle_year_change(
+        dry <- suppressWarnings(.handle_year_change(
           input = dry, current_date = as.Date(paste0(as.integer(format(stopp_date, "%Y")) + 1, "-01-01")),
           marginal_tax_rate = marginal_tax_rate, private_sale_threshold = private_sale_threshold,
           sparer_pauschbetrag = sparer_pauschbetrag, use_sparer_pauschbetrag = use_sparer_pauschbetrag,

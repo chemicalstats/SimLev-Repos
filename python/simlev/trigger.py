@@ -5,7 +5,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-__all__ = ["compute_rebal_trigger"]
+__all__ = ["rebalance_trigger"]
 
 
 def _col(df: Any, name: str):
@@ -19,7 +19,7 @@ def _nrow(df: Any) -> int:
         return len(df)
     if isinstance(df, Mapping):
         return len(np.atleast_1d(next(iter(df.values())))) if len(df) else 0
-    raise ValueError("compute_rebal_trigger: df muss ein data.frame sein.")
+    raise ValueError("rebalance_trigger: df muss ein data.frame sein.")
 
 
 def _first_obs(v: np.ndarray) -> int:
@@ -28,16 +28,17 @@ def _first_obs(v: np.ndarray) -> int:
     return int(ok[0]) if ok.size else v.size - 1
 
 
-def compute_rebal_trigger(
+def rebalance_trigger(
     df: Any,
     type: str,
+    *,
     threshold: float = 10,
     lev_col: str = "target_leverage",
     vol_col: str = "sigma_ewma",
     triggers: Sequence[Mapping[str, Any]] | None = None,
     out_col: str = "rebal_trigger",
 ):
-    """Logische Trigger-Spalte für ``simulation(..., event_col = ...)`` vorberechnen.
+    """Logische Trigger-Spalte für ``simulation(..., rebalance=rebalance_plan(event_col=...))`` vorberechnen.
 
     ``threshold`` **in Prozent** (intern /100): bei ``"abs_leverage"`` Prozentpunkte des Hebels,
     bei ``"rel_leverage"``/``"vol_band"`` relative Abweichung. Die Referenz ist der erste nicht
@@ -47,7 +48,7 @@ def compute_rebal_trigger(
     """
     n = _nrow(df)
     if n < 1:
-        raise ValueError("compute_rebal_trigger: leerer data.frame.")
+        raise ValueError("rebalance_trigger: leerer data.frame.")
     threshold = threshold / 100
     trig = np.zeros(n, dtype=bool)
     if type in ("abs_leverage", "rel_leverage"):
@@ -86,7 +87,7 @@ def compute_rebal_trigger(
         for sub in triggers:
             args = {"df": df, "out_col": "..__sub__.."}
             args.update(sub)
-            sub_df = compute_rebal_trigger(**args)
+            sub_df = rebalance_trigger(**args)
             trig = trig | np.asarray(_col(sub_df, "..__sub__.."), dtype=bool)
     else:
         raise ValueError("Unbekannter type='%s'." % type)

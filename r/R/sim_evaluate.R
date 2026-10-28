@@ -279,7 +279,7 @@
   if (!is.finite(mean_excess)) mean_excess <- 0
   if (!is.finite(sd_excess))   sd_excess   <- 0
   downside_excess    <- excess_returns[excess_returns < 0]
-  # A7-08: Downside-Abweichung ueber ALLE Beobachtungen (Sortino/Price, wie deep_analysis):
+  # A7-08: Downside-Abweichung ueber ALLE Beobachtungen (Sortino/Price, wie result_analysis):
   # sqrt(mean(pmin(Ueberschussrendite, 0)^2)); vorher nur ueber die negativen Tage
   downside_sd_excess <- if (length(downside_excess) > 0) sqrt(mean(pmin(excess_returns, 0)^2, na.rm = TRUE)) else 0
 
@@ -476,9 +476,9 @@
                            price = vapply(lots, function(b) b[["price"]], numeric(1)),
                            vp = vapply(lots, function(b) b[["vp"]] %||% 0, numeric(1))),
          regime = tax_regimes[[nm]],
-         asset_bonus = 100 * sim_mem[["assets"]][[nm]][["bonus"]],
+         partial_exemption = 100 * sim_mem[["assets"]][[nm]][["bonus"]],
          cash = sim_mem[["status"]][[nm]][["money"]],
-         asset_spread = strategy[[nm]][["asset_spread"]] %||% 0,   # voller Spread in Prozent (wie asset_config)
+         spread = strategy[[nm]][["spread"]] %||% 0,   # voller Spread in Prozent (wie asset_config)
          order_fee = order_fee)                                    # wie uebergeben (NULL = keine Ordergebuehr)
   }), flag_assets) else NULL
 

@@ -293,7 +293,7 @@ end
 # fifo_core.cpp
 # ═══════════════════════════════════════════════════════════════════════════
 
-function calculate_fifo_price(buys::Vector{Lot}, units::Float64, front::Int)
+function _calculate_fifo_price(buys::Vector{Lot}, units::Float64, front::Int)
     units_trade = units
     total_price = 0.0
     i = front
@@ -311,7 +311,7 @@ function calculate_fifo_price(buys::Vector{Lot}, units::Float64, front::Int)
     return units > 0 ? total_price / units : 0.0
 end
 
-function calculate_fifo_vorabpauschale(buys::Vector{Lot}, units::Float64, front::Int)
+function _calculate_fifo_vorabpauschale(buys::Vector{Lot}, units::Float64, front::Int)
     units_trade = units
     total_vp = 0.0
     i = front
@@ -332,7 +332,7 @@ function calculate_fifo_vorabpauschale(buys::Vector{Lot}, units::Float64, front:
     return total_vp
 end
 
-function calculate_private_sale_tax(buys::Vector{Lot}, front::Int, trade_count::Float64,
+function _calculate_private_sale_tax(buys::Vector{Lot}, front::Int, trade_count::Float64,
                                     sell_price::Float64, current_date::Int)
     units_remaining = trade_count
     i = front
@@ -392,7 +392,7 @@ function fifo_consume!(sim::Sim, a::Int, trade_count::Float64)
     return nothing
 end
 
-function update_fifo_front(buys::Vector{Lot}, front::Int)
+function _update_fifo_front(buys::Vector{Lot}, front::Int)
     @inbounds while front <= length(buys)
         buys[front].remaining > 0 && return front
         front += 1

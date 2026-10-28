@@ -61,17 +61,17 @@ head(data, 3)
 
 Jedes Asset beschreibt `asset_config()`, `create_strategy()` fasst die
 Assets zusammen und prüft die Eingaben sofort. Zielgewichte
-(`asset_share`) sind Anteile und müssen sich zu 1 summieren; Spreads und
-Teilfreistellung werden **in Prozent** angegeben (`asset_spread = 0.1`
-heißt 0,1 % voller Spread, `asset_bonus = 30` heißt 30 % Teilfreistellung
+(`share`) sind Anteile und müssen sich zu 1 summieren; Spreads und
+Teilfreistellung werden **in Prozent** angegeben (`spread = 0.1`
+heißt 0,1 % voller Spread, `partial_exemption = 30` heißt 30 % Teilfreistellung
 für Aktien-ETFs).
 
 ```{r}
 strategy <- create_strategy(
-  WORLD = asset_config("etf", action_type = "bnh",
-                       asset_share = 0.7, asset_spread = 0.1, asset_bonus = 30),
-  BONDS = asset_config("etf", action_type = "bnh",
-                       asset_share = 0.3, asset_spread = 0.1, asset_bonus = 0)
+  WORLD = asset_config("etf", trading = "bnh",
+                       share = 0.7, spread = 0.1, partial_exemption = 30),
+  BONDS = asset_config("etf", trading = "bnh",
+                       share = 0.3, spread = 0.1, partial_exemption = 0)
 )
 strategy
 ```
@@ -85,11 +85,11 @@ Solidaritätszuschlag, in Prozent) und Verkauf aller Positionen am Ende:
 ```{r}
 result <- simulation(
   data, strategy,
-  start_value  = 10000,
-  balance_mode = TRUE, balance_span = 1, balance_unit = "year",
-  tax_mode     = "person", tax_rate = 26.375,
-  liquidate    = TRUE,
-  risk_free    = 2
+  start_value = 10000,
+  rebalance   = rebalance_plan(span = 1, unit = "year"),
+  tax         = tax_profile(rate = 26.375),
+  liquidate   = TRUE,
+  risk_free   = 2
 )
 result
 ```
@@ -110,17 +110,16 @@ plot(result)
 ## Sparplan
 
 Ein Sparplan investiert zusätzlich regelmäßig einen festen Betrag, hier
-250 EUR im Monat. Mit `balance_dca = TRUE` fließt jede Rate zuerst in
+250 EUR im Monat. Mit `dca_plan(fill_deficits = TRUE)` fließt jede Rate zuerst in
 untergewichtete Assets.
 
 ```{r}
 result_dca <- simulation(
   data, strategy,
   start_value = 10000,
-  dca_mode = TRUE, dca_value = 250, dca_span = 1, dca_unit = "month",
-  balance_dca = TRUE,
-  balance_mode = TRUE, balance_span = 1, balance_unit = "year",
-  tax_mode = "person", tax_rate = 26.375,
+  dca = dca_plan(value = 250, span = 1, unit = "month", fill_deficits = TRUE),
+  rebalance = rebalance_plan(span = 1, unit = "year"),
+  tax = tax_profile(rate = 26.375),
   liquidate = TRUE
 )
 round(100 * c(CAGR_geldgewichtet = result_dca$cagr, TTWROR = result_dca$ttwror), 2)  # in Prozent
@@ -133,7 +132,7 @@ eignet sich die zeitgewichtete Rendite TTWROR.
 
 ## Rebalancing mit Toleranzband
 
-`balance_thresh` ist ein Band **in Prozent**: Mit `balance_thresh = 5`
+`rebalance_plan(thresh = )` ist ein Band **in Prozent**: Mit `thresh = 5`
 wird an einem Termin nur umgeschichtet, wenn ein Gewicht um mehr als
 5 Prozentpunkte vom Ziel abweicht.
 
@@ -141,9 +140,8 @@ wird an einem Termin nur umgeschichtet, wenn ein Gewicht um mehr als
 result_band <- simulation(
   data, strategy,
   start_value = 10000,
-  balance_mode = TRUE, balance_span = 1, balance_unit = "quarter",
-  balance_thresh = 5,
-  tax_mode = "person", liquidate = TRUE
+  rebalance = rebalance_plan(span = 1, unit = "quarter", thresh = 5),
+  tax = tax_profile(), liquidate = TRUE
 )
 result_band$sells
 ```
@@ -172,7 +170,7 @@ deshalb nicht direkt vergleichbar.
 
 - `?simulation`: alle Argumente der Engine, u. a. Signale, Splits,
   Fondsmodus, Ordergebühren, Kirchensteuer und Einkommensteuertarif
-  (`taxable_income`, `read_tax_tariff()`).
+  (`income_tariff(taxable_income)`, `tax_tariff()`).
 - `?SimLev`: Arbeitsweise und Glossar der Einheiten und Argumentnamen.
 - Tutorial zu Backcast, Bootstrap, Entnahmephase, Analyse und Planung:
   `system.file("tutorial", "SimLev_Tutorial.Rmd", package = "SimLev")`.

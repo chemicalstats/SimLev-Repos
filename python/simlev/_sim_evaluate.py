@@ -365,7 +365,7 @@ def _sim_result(sim: dict, trades: dict, fl: dict, cfg: dict, r: dict, rs: dict,
         open_lots = {}
         for nm in flag_assets:
             lots = [b for b in trades[nm]["buys"] if b and b["remaining"] > 0]
-            sp_ = strategy[nm].get("asset_spread")
+            sp_ = strategy[nm].get("spread")
             open_lots[nm] = {
                 "lots": pd.DataFrame({
                     "date": pd.Series(np.array([b["date"] for b in lots], dtype=np.int64).astype("datetime64[D]")),
@@ -373,9 +373,9 @@ def _sim_result(sim: dict, trades: dict, fl: dict, cfg: dict, r: dict, rs: dict,
                     "price": pd.Series([b["price"] for b in lots], dtype=np.float64),
                     "vp": pd.Series([b.get("vp") if b.get("vp") is not None else 0.0 for b in lots], dtype=np.float64)}),
                 "regime": fl["tax_regimes"][nm],
-                "asset_bonus": 100 * sim["assets"][nm]["bonus"],
+                "partial_exemption": 100 * sim["assets"][nm]["bonus"],
                 "cash": sim["status"][nm]["money"],
-                "asset_spread": 0.0 if sp_ is None else float(sp_),
+                "spread": 0.0 if sp_ is None else float(sp_),
                 "order_fee": cfg["order_fee"],
             }
     totals = sim["totals"]

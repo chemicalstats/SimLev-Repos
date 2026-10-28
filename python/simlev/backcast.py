@@ -484,7 +484,7 @@ def _as_char_vec(x):
     return [str(v) for v in np.ravel(np.asarray(x, dtype=object))]
 
 
-def backcast_fit(data, product, index, ter=0, leverage=1, rate=None, fx=None,
+def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
                  model=("structural", "linear", "spline"), fit="drag", fixed=None,
                  objective=("level", "return", "hybrid"), loss=("rmse", "mse", "mae", "median", "max"),
                  horizon=1, hybrid_weight=0.5, lag=0, rate_lag=0, start=None, end=None,
@@ -719,7 +719,7 @@ class SimLevBackcast(pd.DataFrame):
 
     __str__ = __repr__
 
-def backcast(fit=None, data=None, params=None, splice="inception", fill=("locf", "linear", "stine", "model"),
+def backcast(*, fit=None, data=None, params=None, splice="inception", fill=("locf", "linear", "stine", "model"),
              rebase=None, **kwargs):
     """Produkt-Kursreihe zurückrechnen und verketten.
 

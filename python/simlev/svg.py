@@ -620,7 +620,7 @@ def _yaxis(lo: float, hi: float) -> tuple[np.ndarray, list[str]]:
 # ═════════════════════════════════════════════════════════════════════════════
 # 5. Stil Analysegrafiken (`_ana_*`)
 # ═════════════════════════════════════════════════════════════════════════════
-# plot(<SimLevAnalysis>) (deep_analysis), plot(<SimLevSignalAnalysis>) und
+# plot(<SimLevAnalysis>) (result_analysis), plot(<SimLevSignalAnalysis>) und
 # plot(<SimLevHeatmap>) (analysis_tests), plot(<SimLevGoalPlan>) (planning): Zeichenfläche
 # `_AnaSvg` mit Feldern `_ana_panel` (Rand 60/30 px, log. y-Achse möglich), Koordinaten
 # `string(round(v; digits = 2))` (`_ana_n`), Schrift sans-serif.

@@ -38,7 +38,13 @@ Jede exportierte R-Funktion hat ein Python-Gegenstück mit gleichem Namen
 Voreinstellungen. Ergebnisse sind **bitgleich** (IEEE-754-Doubles
 identisch), Druckausgaben (`print`) zeichengleich, Fehlermeldungen und
 Warnungen wortgleich (deutsch). Argumente, die in Python Schlüsselwörter
-sind, heißen `yield_`, `raise_` und `from_`.
+sind, heißen `yield_`, `raise_` und `from_`. Nicht-Pflichtargumente öffentlicher Funktionen
+gehen nur als Schlüsselwort (`*` in der Signatur, Anhang A Regel 5, Etappe
+6.5); Pflichtargumente bleiben positionell, auch wenn sie in R nach
+optionalen Argumenten stehen (`bootstrap_study(data, config, method, n,
+strategies, *, …)`, `param_search(data, builder, space, *, …)`,
+`tactical_glidepath(data, from_, to, *, …)`). Ausgenommen sind die
+Nachbildungen von R-Basisfunktionen ohne R-Export (`set_seed`, `rng_kind`).
 
 ## Datenstrukturen (R ↔ Python)
 
@@ -134,7 +140,7 @@ Modul der R-Datei, aus der sie stammen, mit derselben Signatur:
 
 | Helfer | Modul |
 |---|---|
-| `_to_date`, `_add_months`, `align_series`, `_num_text_cols`, `_num_text_stop`, `_cpi_level` | `data_prep.py` |
+| `_to_date`, `_add_months`, `series_align`, `_num_text_cols`, `_num_text_stop`, `_cpi_level` | `data_prep.py` |
 | `_fill_na`, `_resolve_series` | `backcast.py` |
 | `_roll_mean`, `_roll_var`, `_roll_cov` | `signals.py` |
 | `_with_rng_restore`, `_extract_returns`, `_pw_block`, `_fit_garch11`, `_wquantile` | `bootstrap.py` |
@@ -144,7 +150,7 @@ Modul der R-Datei, aus der sie stammen, mit derselben Signatur:
 | `result_index`, `_wd_ppy`, `_anniv_ends` | `withdrawal.py` |
 | `_dep_sort_dates`, `_dep_check_prices`, `_dep_returns`, `_kendall` | `dependence.py` |
 | `_as_weights`, `_period_last`, `_hold_rows` | `tactical.py` |
-| `_of_returns`, `_as_spec`, `_ps_neighbours`, `plateau` | `overfitting.py`, `param_search.py` |
+| `_of_returns`, `_as_spec`, `_ps_neighbours`, `param_plateau` | `overfitting.py`, `param_search.py` |
 | `_da_series`, `_da_deflate` | `deep_analysis.py` |
 | `simulation`, `_xirr_rate`, `calculate_skewness`, `calculate_kurtosis`, `calculate_dates_flags` | `engine.py` (`simulation`; die übrigen stehen in `_sim_base.py` und sind über `engine` erreichbar) |
 
@@ -158,8 +164,8 @@ nichts setzen. `.par_lapply(X, FUN, cores)` wird zu
 
 `par_lapply` in `simlev/_r/parallel.py` ist die einzige Stelle, die parallel
 rechnet; `bootstrap`, `bootstrap_study`, `param_search` (auch über
-`walk_forward`/`param_bootstrap`), `sensitivity_grid`,
-`rebalancing_sensitivity`, `lumpsum_vs_dca` und `leverage_sensitivity` rufen
+`overfit_walk_forward`/`param_bootstrap`), `sensitivity_grid`,
+`sensitivity_rebalancing`, `planning_lumpsum_vs_dca` und `sensitivity_leverage` rufen
 sie auf. Sie bildet `parallel::mclapply(mc.preschedule = FALSE, mc.set.seed =
 FALSE)` nach (Verhalten in R 4.3.3 ermittelt in Etappe 5):
 
@@ -205,7 +211,8 @@ FALSE)` nach (Verhalten in R 4.3.3 ermittelt in Etappe 5):
 
 | R-Quelle | Python |
 |---|---|
-| `simulation.R`, `utils.R` | `engine.py` (Einstieg `simulation()`), `_dates.py` (Numerik aus `_r/rnum.py`) |
+| `simulation.R`, `utils.R` | `engine.py` (Einstieg `simulation()`, Engine `_simulation_flat()`), `_dates.py` (Numerik aus `_r/rnum.py`) |
+| `sim_blocks.R` | `_sim_blocks.py` (Bausteine, Übersetzer `_sim_from_blocks`, `sim_args` und Pfade der Aufrufer: `_sim_args_set`, `_sim_check_names`, `_sim_call`) |
 | `sim_base.R` | `_sim_base.py` |
 | `sim_validate.R`, `sim_prepare.R` | `_sim_phases.py` |
 | `sim_actions.R`, `sim_loop.R` | `_sim_loop.py` |
@@ -213,7 +220,7 @@ FALSE)` nach (Verhalten in R 4.3.3 ermittelt in Etappe 5):
 | `simulation_core.cpp`, `fifo_core.cpp`, `tax_core.cpp` | `_core.py` |
 | `asset_config.R`, `strategy.R` | `config.py` |
 | `compute_rebal_trigger.R` | `trigger.py` |
-| `tax_tariff.R`, `inst/extdata/steuertarif.csv` | `tax_tariff.py`, `data/steuertarif.csv` |
+| `tax_tariff.R`, `inst/extdata/steuertarif.csv` | `_tax_tariff.py`, `data/steuertarif.csv` |
 | `print`/`summary` von `SimLevResult` | `result.py` |
 | `plot_dashboard.R` | `dashboard.py` (Daten und Panels; R-Farbnamen in `data/r_colors.csv`) |
 | Grafik (ohne R-Datei; R zeichnet mit Basisgrafik) | `svg.py` (`SimLevPlot`, plot-API, alle SVG-Zeichenbausteine) |
@@ -244,9 +251,9 @@ Python-Modul je R-Datei (Ausnahmen: die Engine-Phasen, siehe
 [Aufbau der Engine](#aufbau-der-engine), und die stats-Interna, siehe
 [stats-Interna](#stats-interna)); C++-Kerne stehen in `simlev/_<name>_core.py`.
 Öffentliche Funktionen stehen in `__all__` des Moduls und werden in
-`simlev/__init__.py` exportiert. `bootstrap`, `backcast`, `deep_analysis`
-und `param_search` sind dort zugleich Modul und aufrufbare Funktion
-(`_callable_module`).
+`simlev/__init__.py` exportiert. `bootstrap`, `backcast` und
+`param_search` sind dort zugleich Modul und aufrufbare Funktion
+(`_callable_module`); `result_analysis` steht im Modul `deep_analysis`.
 
 ## stats-Interna
 
@@ -275,7 +282,7 @@ Importrichtung (ohne Kreise): `stats_sort` ← `stats_cor` ← `stats_smooth` �
 Dieser Abschnitt gilt für `simulation()` und alles, was daran hängt
 (`engine.py`, `_sim_base.py`, `_sim_phases.py`, `_sim_loop.py`,
 `_sim_evaluate.py`, `_core.py`, `_dates.py`, `config.py`, `trigger.py`,
-`result.py`, `tax_tariff.py`, `dashboard.py`), und für Module, die die
+`result.py`, `_tax_tariff.py`, `_sim_blocks.py`, `dashboard.py`), und für Module, die die
 Engine aufrufen oder ihre Helfer verwenden.
 
 ### Aufbau der Engine
@@ -284,7 +291,8 @@ Die Engine ist wie in R und Julia nach Phasen auf Dateien verteilt:
 
 | Python | R | Julia | Inhalt |
 |---|---|---|---|
-| `engine.py` | `simulation.R` | `engine.jl` (Kopf, `include`s), `sim_evaluate.jl` (`simulation`) | Einstieg `simulation()`; bietet die öffentlichen Helfer und `_as_date`, `_r_class_name` weiter an |
+| `_sim_blocks.py` | `sim_blocks.R` | `sim_blocks.jl` | Bausteine `sim_costs()`, `dca_plan()`, `rebalance_plan()`, `split_rule()`, `tax_profile()`, `income_rate()`, `income_tariff()`, `harvest_rule()`, `funds_costs()` mit Prüfung und Druck; `_sim_from_blocks` übersetzt sie in die flachen Engine-Argumente; `_sim_args_set` setzt `sim_args` und Pfade wie `"dca.value"` der Aufrufer (Etappe 6.4) |
+| `engine.py` | `simulation.R` | `engine.jl` (Kopf, `include`s), `sim_evaluate.jl` (`simulation`, `_simulation_flat`) | Einstieg `simulation()` (Bausteine) und Engine `_simulation_flat()` (flache Argumente); bietet die öffentlichen Helfer und `_as_date`, `_r_class_name` weiter an |
 | `_sim_base.py` | `sim_base.R` | `engine.jl` | Ausgabe- und Datumshilfen, Spaltendaten (`_Frame`), Gebühren, Termine und Flags, Handels- und Steuerfunktionen, Tarifweg, Jahreswechsel, Kennzahlen (`_xirr_rate`, Schiefe, Wölbung) |
 | `_sim_phases.py` | `sim_validate.R`, `sim_prepare.R` | `sim_phases.jl` | Phase 1 `_sim_check_inputs`, Phase 2 `_sim_prepare_data`, `_sim_build_state`, `_sim_build_calendar`, `_sim_init_weights`, `_sim_build_schedule` |
 | `_sim_loop.py` | `sim_actions.R`, `sim_loop.R` | `sim_loop.jl` | Phase 3 `_Actions`, Phase 4 `_sim_run_days` mit `_sim_day_*`, Phase 5 `_sim_close_years` |
@@ -320,7 +328,7 @@ weil `engine.py` alle Phasenmodule einbindet und diese ihrerseits
 | `data.frame` (`undefined_metrics`, `tariff_years`, `open_lots$A$lots`) | `pandas.DataFrame` |
 | `NULL` (z. B. `open_lots` ohne Steuern, `order_fee` nicht gesetzt) | `None`; ein Element, das R weglässt, fehlt auch im dict |
 | `asset_config`, `strategy`, `SimLevTaxTariff`, `summary.SimLevResult` | `AssetConfig`, `Strategy`, `SimLevTaxTariff`, `SimLevSummary` (alle `RList`; `format()` liefert genau die R-Druckausgabe) |
-| `attr(data, "filled")` | `data.attrs["filled"]`: bool-`DataFrame`, eine Spalte je Kursreihe (wie in `align_series`) |
+| `attr(data, "filled")` | `data.attrs["filled"]`: bool-`DataFrame`, eine Spalte je Kursreihe (wie in `series_align`) |
 
 - Python-`int` zählt als R-`double`. `_r_class_name()` in `_sim_base.py` (über `engine` erreichbar)
   liefert für Meldungen den Klassennamen wie `class(x)[1]`.
@@ -365,9 +373,9 @@ Nullstellensuche, in `rformat.py` Runden und Textausgabe:
 
 `simulation`, `xirr_rate` / `_xirr_rate`, `calculate_skewness`,
 `calculate_kurtosis`, `calculate_partials`, `calculate_dates_flags`,
-`apply_spread`, `create_strategy`, `asset_config` (sowie `add_asset`,
-`update_asset`, `remove_asset`, `validate_strategy`),
-`compute_rebal_trigger` und `read_tax_tariff`. Dazu kommen die
+`_apply_spread`, `create_strategy`, `asset_config` (sowie `strategy_add_asset`,
+`strategy_update_asset`, `strategy_remove_asset`, `strategy_validate`),
+`rebalance_trigger` und `tax_tariff`. Dazu kommen die
 Dashboard-Daten `dashboard._dashboard_returns(res)` (wie
 `.dashboard_returns`).
 
@@ -485,6 +493,24 @@ Tests in `tests/` prüfen, was kein Fall abdeckt: Eigenschaften und
 Handrechnungen auf eigenen Daten, Fehlerklassen, Warnungen, Dateien,
 Grafiken und Schalter.
 
+## Eingefrorene Schnittstelle
+
+Die öffentliche Schnittstelle 0.5.0 ist in `tools/api_snapshot/frozen/py.json`
+festgehalten (Etappe 6.6): je Funktion aus `simlev.__all__` und je Methode
+`print`/`summary`/`plot` der Klassen mit `r_class` die Argumente in
+Reihenfolge mit Art (`positional_or_keyword`, `keyword_only`, …) und
+Standardwert als Text (`repr`), dazu die Namen der exportierten Klassen;
+ohne Modul, Datei, Zeile und Datum. `tests/test_api_frozen.py` ruft dafür den
+Auszug `tools/api_snapshot/api_py.py --frozen-check` in einem eigenen Prozess
+auf und nennt bei Abweichung jede Änderung (Funktion neu oder weg, Argument
+neu, weg oder umsortiert, Art oder Standardwert geändert).
+
+Eine gewollte Änderung der Schnittstelle wird bewusst neu festgeschrieben:
+Eintrag oben in `tools/api_snapshot/CHANGES.md` (Datum, was sich ändert,
+warum), dann aus der Repo-Wurzel `tools/api_snapshot/run.sh --freeze`; das
+schreibt `frozen/` für alle drei Sprachen neu und bricht ohne neuen Eintrag
+ab. Einzelheiten in [`tools/api_snapshot/README.md`](../tools/api_snapshot/README.md).
+
 ## Schalter `SIMLEV_*`
 
 Alle Umgebungsschalter liest (und setzt) nur `simlev/_r/env.py`; Paket,
@@ -514,8 +540,8 @@ lesen eigene Schalter (`SIMLEV_R_NMATH_SRC`, `SIMLEV_ALLOW_PARTIAL`, siehe
 
 Die Module gehören zu fünf Schichten (Anhang F des Entwicklungsdokuments):
 0 R-Interna (`simlev/_r/`), 1 Daten und Strategie (`config`, `data_prep`,
-`backcast`, `bonds`, `signals`, `trigger`, `tax_tariff`, `_dates`),
-2 Engine (`engine`, `_sim_*`, `_core`, `result`), 3 Analysen (je ein Modul
+`backcast`, `bonds`, `signals`, `trigger`, `_tax_tariff`, `_dates`),
+2 Engine (`engine`, `_sim_*` einschließlich `_sim_blocks`, `_core`, `result`), 3 Analysen (je ein Modul
 mit seinem Kern), 4 Ausgabe (`svg`, `dashboard`). `tests/test_layers.py`
 liest alle Importe (auch in Funktionen und über `_ext("modul", …)`) und
 prüft, dass kein Modul eine höhere Schicht importiert; die Zuordnung und
@@ -527,7 +553,7 @@ Namen in `_LAZY` und lädt ein Modul beim ersten Zugriff auf einen seiner
 Namen (PEP 562, `__getattr__`/`__dir__`). `from simlev import X`,
 `simlev.X`, `dir(simlev)` und `__all__` wirken wie zuvor. Ein neuer
 öffentlicher Name eines Analysemoduls kommt in `_LAZY` und `__all__`;
-`bootstrap`, `deep_analysis` und `param_search` machen sich am Dateiende
+`bootstrap` und `param_search` machen sich am Dateiende
 selbst aufrufbar (`_make_callable`).
 
 ## Codestil

@@ -1,14 +1,14 @@
 test_that("asset_config creates valid ETF configuration", {
   cfg <- asset_config(
     asset_class = "etf",
-    asset_share = 0.7,
-    asset_bonus = 30
+    share = 0.7,
+    partial_exemption = 30
   )
   
   expect_s3_class(cfg, "asset_config")
   expect_equal(cfg$asset_class, "etf")
-  expect_equal(cfg$asset_share, 0.7)
-  expect_equal(cfg$asset_bonus, 30)
+  expect_equal(cfg$share, 0.7)
+  expect_equal(cfg$partial_exemption, 30)
   expect_equal(cfg$tax_regime, "investment_fund")
   expect_false(cfg$deliverable)
 })
@@ -58,32 +58,32 @@ test_that("backward compatibility for etn_standard", {
 })
 
 
-test_that("asset_share validation", {
+test_that("share validation", {
   expect_error(
-    asset_config(asset_share = 0),
-    "asset_share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein .*nicht 0\\."
+    asset_config(share = 0),
+    "share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein .*nicht 0\\."
   )
   
   expect_error(
-    asset_config(asset_share = 1.5),
-    "asset_share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein .*nicht 1.5; f\u00fcr 1.5 % asset_share = 0.015 angeben"
+    asset_config(share = 1.5),
+    "share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein .*nicht 1.5; f\u00fcr 1.5 % share = 0.015 angeben"
   )
   
   expect_error(
-    asset_config(asset_share = -0.1),
-    "asset_share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein .*nicht -0.1\\."
+    asset_config(share = -0.1),
+    "share muss ein Anteil gr\u00f6\u00dfer 0 und h\u00f6chstens 1 sein .*nicht -0.1\\."
   )
 })
 
 
 test_that("signal requires buy and sell columns", {
   expect_error(
-    asset_config(action_type = "signal"),
+    asset_config(trading = "signal"),
     "m\u00fcssen signal_buy und signal_sell angegeben werden"
   )
   
   cfg <- asset_config(
-    action_type = "signal",
+    trading = "signal",
     signal_buy = "buy_col",
     signal_sell = "sell_col"
   )
@@ -102,7 +102,7 @@ test_that("invalid tax_regime is rejected", {
 
 
 test_that("print.asset_config works", {
-  cfg <- asset_config(asset_class = "etf", asset_bonus = 30)
+  cfg <- asset_config(asset_class = "etf", partial_exemption = 30)
   expect_output(print(cfg), "Asset-Konfiguration")
   expect_output(print(cfg), "etf")
   expect_output(print(cfg), "investment_fund")

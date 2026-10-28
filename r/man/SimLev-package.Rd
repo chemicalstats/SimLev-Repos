@@ -20,28 +20,28 @@
   \code{data.frame} mit einer Spalte \code{date} (Klasse \code{Date}) und
   je Anlage einer Spalte mit dem \emph{Kursniveau} (keine Renditen), z. B.
   aus \code{read.csv()}. Vorbereitung:
-  \code{\link{check_series}} (Lücken, Sprünge, stehende Kurse),
-  \code{\link{align_series}} (mehrere Quellen auf einen Kalender),
-  \code{\link{align_macro}} (Makroreihen mit Veröffentlichungsverzug),
-  \code{\link{convert_currency}}, \code{\link{total_return_index}},
-  \code{\link{deflate}}, \code{\link{splice_series}} sowie
+  \code{\link{series_check}} (Lücken, Sprünge, stehende Kurse),
+  \code{\link{series_align}} (mehrere Quellen auf einen Kalender),
+  \code{\link{series_align_macro}} (Makroreihen mit Veröffentlichungsverzug),
+  \code{\link{series_convert_currency}}, \code{\link{index_total_return}},
+  \code{\link{series_deflate}}, \code{\link{series_splice}} sowie
   \code{\link{backcast_fit}}/\code{\link{backcast}} (Produkthistorie aus
   einem Basisindex zurückrechnen).
 
   \strong{2. Daten erzeugen.} Synthetische oder simulierte Reihen im selben
-  Format liefern \code{\link{leveraged_series}},
-  \code{\link{bond_index_from_yields}}, \code{\link{money_market_index}},
-  \code{\link{currency_hedged_index}}, \code{\link{set_expected_return}}
+  Format liefern \code{\link{series_leverage}},
+  \code{\link{index_bond}}, \code{\link{index_money_market}},
+  \code{\link{index_currency_hedged}}, \code{\link{series_shift_return}}
   (eigene Renditeannahme), \code{\link{bootstrap}} mit
   \code{\link{bootstrap_data}} (ein Pfad als \code{data.frame} für
-  \code{\link{simulation}}), \code{\link{pooled_bootstrap}} und
-  \code{\link{copula_scenarios}}.
+  \code{\link{simulation}}), \code{\link{bootstrap_pooled}} und
+  \code{\link{scenario_copula}}.
 
   \strong{3. Simulieren.} \code{\link{simulation}} mit einer Strategie aus
   \code{\link{asset_config}} und \code{\link{create_strategy}} (oder
   \code{\link{strategy_from_weights}}); mit \code{taxable_income} rechnet
   \code{\link{simulation}} § 23-Steuer und Günstigerprüfung nach dem
-  Einkommensteuertarif, den \code{\link{read_tax_tariff}} aus einer
+  Einkommensteuertarif, den \code{\link{tax_tariff}} aus einer
   austauschbaren Datei liest (mitgeliefert: Rechtslage ab VZ 2026,
   Einzelveranlagung); taktische Zielgewichte führt
   \code{\link{tactical_simulation}} aus, viele Pfade
@@ -50,17 +50,17 @@
 
   \strong{4. Fertige Simulationen weiterverarbeiten.} Ein
   \code{SimLevResult} (auch mit \code{saveRDS()} gespeichert und später
-  geladen) oder eine Liste davon geht an \code{\link{deep_analysis}},
-  \code{\link{return_heatmap}}, \code{\link{sharpe_test}},
-  \code{\link{min_track_record}}, \code{\link{result_index}} (Wertindex als
+  geladen) oder eine Liste davon geht an \code{\link{result_analysis}},
+  \code{\link{result_heatmap}}, \code{\link{sharpe_test}},
+  \code{\link{sharpe_min_track_record}}, \code{\link{result_index}} (Wertindex als
   \code{data.frame}) und \code{\link{withdrawal_paths}} bzw.
   \code{\link{withdrawal_simulation}} (Entnahmephase auf gerechneten
   Pfaden; mit \code{start_value} = Ergebnis einer Ansparphase mit
   \code{tax_mode = "person"} übernimmt sie die offenen Lots per FIFO sowie
   Teilfreistellung, Verlusttopf, halben Spread und den Stand des
   Sparer-Pauschbetrags aus \code{tax_report$next_year}). Studien und Parametersuchen werten
-  \code{\link{bootstrap_probability}}, \code{\link{pbo}},
-  \code{\link{deflated_sharpe}}, \code{\link{reality_check}} und
+  \code{\link{bootstrap_probability}}, \code{\link{overfit_pbo}},
+  \code{\link{sharpe_deflated}}, \code{\link{overfit_reality_check}} und
   \code{\link{sharpe_haircut}} aus. Grafiken: \code{plot()},
   \code{\link{export_dashboard}} (PDF).
 }
@@ -72,60 +72,60 @@
     \item{Prozent-Konvention}{Steuersätze, Spreads, Gebühren, TER, Zinsen,
       Inflation, Entnahmeraten, Zielvolatilitäten und Toleranzbänder werden
       in \strong{Prozent} angegeben (\code{5} = 5 \%), z. B.
-      \code{tax_rate = 26.375}, \code{asset_spread = 0.1},
+      \code{tax_rate = 26.375}, \code{spread = 0.1},
       \code{risk_free = 2}, \code{balance_thresh = 5}, \code{rate = 4}.}
-    \item{Anteile (0 bis 1)}{Gewichte (\code{asset_share},
+    \item{Anteile (0 bis 1)}{Gewichte (\code{share},
       \code{weights}, \code{lower}/\code{upper} in
       \code{\link{portfolio_optimize}}, \code{base},
       \code{min_exposure}/\code{max_exposure}) und Wahrscheinlichkeiten
       bzw. Quantile (\code{alpha}, \code{q}, \code{quantiles},
       \code{tail_q}, \code{prob}, \code{success}, \code{upper}/\code{lower}
-      in \code{\link{conditional_volatility}}). Ausnahme:
+      in \code{\link{tactical_conditional_volatility}}). Ausnahme:
       \code{stock_share} in \code{\link{withdrawal_rule}} ist in Prozent
       (\code{60} = 60 \%).}
     \item{Ergebnisse}{Kennzahlen von \code{\link{simulation}},
-      \code{\link{deep_analysis}} und \code{\link{study_metrics}} (CAGR,
+      \code{\link{result_analysis}} und \code{\link{bootstrap_study_metrics}} (CAGR,
       Volatilität, Drawdown) sind Anteile (\code{0.05} = 5 \%). Mit
       Sparplan ist \code{cagr} in \code{\link{simulation}} die
       geldgewichtete Rendite (XIRR), Drawdowns sind zeitgewichtet; nicht
       definierte Kennzahlen (\code{NA}) stehen mit Ursache in
       \code{undefined_metrics}. Die
       Renditen in \code{\link{tail_regression}},
-      \code{\link{covar_analysis}} und den Szenario-Funktionen sind Prozent
+      \code{\link{tail_covar}} und den Szenario-Funktionen sind Prozent
       je Periode.}
     \item{Wiederholungen}{\code{B} (Bootstrap-Wiederholungen in
       \code{\link{dependence_analysis}}, \code{\link{tail_regression}},
-      \code{\link{reality_check}}, \code{\link{sharpe_test}}), \code{n}
+      \code{\link{overfit_reality_check}}, \code{\link{sharpe_test}}), \code{n}
       (Anzahl Pfade oder Szenarien in \code{\link{bootstrap}},
-      \code{\link{bootstrap_study}}, \code{\link{pooled_bootstrap}},
-      \code{\link{copula_scenarios}}), \code{n_sim} (Simulationspfade in
-      \code{\link{goal_optimize}}).}
+      \code{\link{bootstrap_study}}, \code{\link{bootstrap_pooled}},
+      \code{\link{scenario_copula}}), \code{n_sim} (Simulationspfade in
+      \code{\link{planning_goal}}).}
     \item{Blocklänge}{Mittlere Länge der Blöcke im Block-Bootstrap:
       \code{block} (in Perioden der gewählten \code{frequency}),
       \code{L} bzw. \code{block_length} in den Verfahrensparametern von
       \code{\link{bootstrap}} (in Zeilen) und \code{L} in
-      \code{\link{pooled_bootstrap}} (in Perioden).}
+      \code{\link{bootstrap_pooled}} (in Perioden).}
     \item{\code{frequency}, \code{every}, \code{rebalance}}{
       \code{frequency} ist die Periodenlänge, auf der Renditen gemessen
       werden (\code{"day"}, \code{"week"}, \code{"month"}, \dots).
       \code{every} ist der Entscheidungs- bzw. Anpassungsrhythmus von
       Gewichts-Erzeugern. \code{rebalance} ist in
       \code{\link{tactical_simulation}} der Handelsrhythmus (Text), in
-      \code{\link{crisis_replay}} ein Schalter (\code{TRUE}/\code{FALSE}).
+      \code{\link{scenario_crisis}} ein Schalter (\code{TRUE}/\code{FALSE}).
       In \code{\link{simulation}} heißen die Rebalancing-Argumente
       \code{balance_*}.}
     \item{Toleranzband}{Dieselbe Idee heißt \code{balance_thresh}
       (\code{\link{simulation}}), \code{tolerance}
       (\code{\link{tactical_simulation}}) und \code{bands}
-      (\code{\link{rebalancing_sensitivity}}), jeweils in Prozent. Das
+      (\code{\link{sensitivity_rebalancing}}), jeweils in Prozent. Das
       Argument \code{band} der Signal-Bausteine ist dagegen eine Hysterese
       um den Schwellenwert.}
-    \item{\code{horizon}}{In \code{\link{goal_optimize}} Anzahl Perioden,
+    \item{\code{horizon}}{In \code{\link{planning_goal}} Anzahl Perioden,
       in \code{\link{signal_analysis}} Zeilen der Daten, in
-      \code{\link{lumpsum_vs_dca}} Jahre,
+      \code{\link{planning_lumpsum_vs_dca}} Jahre,
       in \code{\link{backcast_fit}} Produktbeobachtungen, in
       \code{\link{withdrawal_simulation}} ein Objekt aus
-      \code{\link{horizon_model}} oder eine Zahl in Jahren.
+      \code{\link{withdrawal_horizon}} oder eine Zahl in Jahren.
       \code{\link{withdrawal_rule}} hat kein \code{horizon}; die Restjahre
       der Regeln ergeben sich aus der Zahl der Planjahre der Simulation.}
     \item{\code{inflation}}{Je nach Funktion der Name einer Spalte bzw.
@@ -140,15 +140,15 @@
     \item{\code{taxable_income}}{Zu versteuerndes Einkommen ohne die
       Erträge der Simulation in \strong{EUR je Kalenderjahr}
       (\code{\link{simulation}}). In der Tarifdatei von
-      \code{\link{read_tax_tariff}} sind \code{ab}, \code{bezug},
+      \code{\link{tax_tariff}} sind \code{ab}, \code{bezug},
       \code{teiler} und \code{c} in EUR; bei linearen Zonen ist \code{b}
       der Grenzsteuersatz als Anteil (\code{0.42}), die Soli-Sätze stehen
       in Prozent (\code{5.5}, \code{11.9}).}
     \item{\code{ppy}}{Perioden je Jahr für die Annualisierung. Ohne Angabe
       meist aus den Daten geschätzt (Perioden geteilt durch Jahre);
-      \code{\link{probabilistic_sharpe}} und \code{\link{sharpe_haircut}}
+      \code{\link{sharpe_probabilistic}} und \code{\link{sharpe_haircut}}
       verwenden für Vektoren den Standard 52, die Signal-Bausteine 365.25.}
-    \item{\code{asset_bonus}}{Teilfreistellung in Prozent (30 Aktienfonds,
+    \item{\code{partial_exemption}}{Teilfreistellung in Prozent (30 Aktienfonds,
       15 Mischfonds, 0 sonst).}
   }
 }
@@ -172,8 +172,8 @@
   Maintainer: ChemicalStats von der Mauerstrasse
 }
 \seealso{
-  \code{\link{simulation}}, \code{\link{read_tax_tariff}}, \code{\link{asset_config}},
-  \code{\link{create_strategy}}, \code{\link{deep_analysis}},
+  \code{\link{simulation}}, \code{\link{tax_tariff}}, \code{\link{asset_config}},
+  \code{\link{create_strategy}}, \code{\link{result_analysis}},
   \code{\link{withdrawal_simulation}}, \code{\link{plot.SimLevResult}}
 }
 \examples{
@@ -187,24 +187,22 @@ data <- data.frame(
   MSCI = 100 * cumprod(1 + rnorm(n, 4e-4, 0.012)),
   BOND =  50 * cumprod(1 + rnorm(n, 1e-4, 0.004))
 )
-check_series(data)
+series_check(data)
 
 # 2. Strategie und Simulation (Prozent-Konvention: 0.1 = 0,1 \% Spread)
 strategy <- create_strategy(
-  MSCI = asset_config("etf", action_type = "bnh",
-                      asset_share = 0.7, asset_spread = 0.1, asset_bonus = 30),
-  BOND = asset_config("etf", action_type = "bnh",
-                      asset_share = 0.3, asset_spread = 0.1, asset_bonus = 0)
+  MSCI = asset_config("etf", trading = "bnh",
+                      share = 0.7, spread = 0.1, partial_exemption = 30),
+  BOND = asset_config("etf", trading = "bnh",
+                      share = 0.3, spread = 0.1, partial_exemption = 0)
 )
-result <- simulation(data, strategy, start_value = 10000, tax_mode = "person",
-                     balance_mode = TRUE, balance_unit = "year", liquidate = TRUE,
-                     risk_free = 2)
+result <- simulation(data, strategy, start_value = 10000, rebalance = rebalance_plan(unit = "year"), tax = tax_profile(), liquidate = TRUE, risk_free = 2)
 print(result)
 
 # 3. Weiterverarbeitung: speichern, laden, auswerten
 f <- file.path(tempdir(), "lauf.rds")
 saveRDS(result, f)
-da <- deep_analysis(list(Strategie = readRDS(f)))
+da <- result_analysis(list(Strategie = readRDS(f)))
 da$metrics[c("cagr", "volatility", "max_drawdown"), ]
 head(result_index(result))
 }

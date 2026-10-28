@@ -59,7 +59,7 @@ besser als der Benchmark ist (groesserer Wert; bei \code{max_drawdown},
 der Differenz Strategie minus Benchmark; \code{NULL} ohne Benchmark),
 \code{n_paths}, \code{method}, \code{benchmark} und \code{path_length}.
 Kennzahlen behalten die Einheit aus \code{metrics} (bei
-\code{\link[=study_metrics]{study_metrics()}} z. B. CAGR als Anteil; die Ausgabe zeigt Prozent).
+\code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}} z. B. CAGR als Anteil; die Ausgabe zeigt Prozent).
 Mit Sparplan ist \code{cagr} geldgewichtet (XIRR); die Ausgabe
 kennzeichnet das in der Ueberschrift der Kennzahl.
 }

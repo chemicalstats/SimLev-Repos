@@ -58,7 +58,7 @@ sie fehlen in Standardfehlern und Intervallen, mit Warnung),
 \description{
 Schaetzt fuer mehrere Quantile, wie sich die Verteilung der Periodenrendite
 einer Anlage mit dem (verzoegerten) Zustand von Drittvariablen verschiebt
-(lineare Quantilsregression mit \code{\link[=quantile_reg]{quantile_reg()}}, zum Vergleich OLS fuer
+(lineare Quantilsregression mit \code{\link[=quantile_regression]{quantile_regression()}}, zum Vergleich OLS fuer
 den Mittelwert). Ein negativer Koeffizient der Inflation im 5-\%-Quantil
 heisst z. B.: Bei hoeherer Inflation fallen die schlechten Perioden
 schlechter aus, auch wenn sich der Median kaum bewegt. Standardfehler per
@@ -81,6 +81,6 @@ tr <- tail_regression(d, "aktien", "inflation", quantiles = c(0.05, 0.5, 0.95),
 tr
 }
 \seealso{
-\code{\link[=align_macro]{align_macro()}} zur Vorbereitung der Treiber,
-\code{\link[=dependence_analysis]{dependence_analysis()}}, \code{\link[=covar_analysis]{covar_analysis()}}, \code{\link[=quantile_reg]{quantile_reg()}}.
+\code{\link[=series_align_macro]{series_align_macro()}} zur Vorbereitung der Treiber,
+\code{\link[=dependence_analysis]{dependence_analysis()}}, \code{\link[=tail_covar]{tail_covar()}}, \code{\link[=quantile_regression]{quantile_regression()}}.
 }

@@ -129,7 +129,7 @@ def test_ms_garch_methods_run_end_to_end(ms_sim):
         buf = io.StringIO()
         with warnings.catch_warnings(), contextlib.redirect_stderr(buf):
             warnings.simplefilter("ignore")
-            b = simlev.bootstrap(d, cfg, method, n=2, seed=1, progress=False, params=params or {})
+            b = simlev.bootstrap(d, cfg, method=method, n=2, seed=1, progress=False, params=params or {})
         return b, buf.getvalue()
 
     for m in ("ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"):

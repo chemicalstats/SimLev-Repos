@@ -1,12 +1,12 @@
 # DataPrep – r/R/data_prep.R (Vorlage python/simlev/data_prep.py)
 #
-#   align_series        Quellen nach Datum zusammenführen, Kalender, Füllung
-#   check_series        Prüfbericht (Lücken, Ausreißer, Spikes, Splits, stehende Kurse)
-#   align_macro         Makroreihen mit Veröffentlichungsverzug auf den Tageskalender
-#   convert_currency    Währungsumrechnung
-#   total_return_index  Kurs- zu Total-Return-Index
-#   deflate             reale Werte über einen Preisindex
-#   splice_series       Ketten aus mehreren Reihen
+#   series_align        Quellen nach Datum zusammenführen, Kalender, Füllung
+#   series_check        Prüfbericht (Lücken, Ausreißer, Spikes, Splits, stehende Kurse)
+#   series_align_macro         Makroreihen mit Veröffentlichungsverzug auf den Tageskalender
+#   series_convert_currency    Währungsumrechnung
+#   index_total_return  Kurs- zu Total-Return-Index
+#   series_deflate             reale Werte über einen Preisindex
+#   series_splice       Ketten aus mehreren Reihen
 #   strategy_from_weights, portfolio_template
 #
 # Datumswerte: R-`Date`-Vektoren entsprechen `Vector{Date}` (mit NA:
@@ -19,8 +19,8 @@ using ..SimLev: RList, RFrame, RVector, NamedMat, nrow, ncol, attrs, NA, isna_st
                 register_print!, register_summary!, r_class, inherits
 using Dates
 
-export align_series, check_series, align_macro, convert_currency, total_return_index, deflate,
-       splice_series, strategy_from_weights, portfolio_template
+export series_align, series_check, series_align_macro, series_convert_currency, index_total_return, series_deflate,
+       series_splice, strategy_from_weights, portfolio_template
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Allgemeine Hilfen (R-Semantik)
@@ -519,7 +519,7 @@ function _dp_frame(x, name)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# align_series
+# series_align
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Benannte Quellen: Schlüsselwörter oder Paare "Name" => Quelle (für Namen,
@@ -545,9 +545,9 @@ function _match_days(a, b)
 end
 
 """
-    align_series(; calendar = "day", range = "common", fill = "locf",
+    series_align(; calendar = "day", range = "common", fill = "locf",
                  max_gap = Inf, start = nothing, end_ = nothing, sources...)
-    align_series("name" => quelle, ...; kwargs...)
+    series_align("name" => quelle, ...; kwargs...)
 
 Datenquellen nach Datum zusammenführen. Benannte Quellen (Name =
 Spaltenname im Ergebnis) als `RFrame(date, value)` (eine numerische Spalte),
@@ -556,7 +556,7 @@ Datumsnamen. Liefert ein `RFrame` mit Spalte `date` und je einer Spalte pro
 Reihe; `attrs(df)["filled"]` ist ein `RFrame` aus Bool-Spalten (TRUE =
 gefüllter Wert).
 """
-function align_series(args...; calendar = ("day", "union", "intersect"), range = ("common", "all"),
+function series_align(args...; calendar = ("day", "union", "intersect"), range = ("common", "all"),
                       fill = ("locf", "linear", "none"), max_gap = Inf, start = nothing, end_ = nothing,
                       sources...)
     calendar = _match_arg(calendar, ("day", "union", "intersect"))
@@ -564,7 +564,7 @@ function align_series(args...; calendar = ("day", "union", "intersect"), range =
     fill = _match_arg(fill, ("locf", "linear", "none"))
     src = _named_sources(args, sources)
     (src === nothing || isempty(src) || any(p -> p[1] == "", src)) &&
-        error("align_series: Quellen benennen, z. B. align_series(us = df1, eu = df2).")
+        error("series_align: Quellen benennen, z. B. series_align(us = df1, eu = df2).")
     fr = [(k, _dp_frame(v, k)) for (k, v) in src]
     fdays = [_days(f["date"]) for (_, f) in fr]
     first_ = [isempty(d) ? NA : d[1] for d in fdays]
@@ -573,15 +573,15 @@ function align_series(args...; calendar = ("day", "union", "intersect"), range =
     lo = rng == "common" ? maximum(first_) : minimum(first_)
     hi = rng == "common" ? minimum(last_) : maximum(last_)
     if start !== nothing
-        s0 = _days(_to_date(start, "align_series: start"))
+        s0 = _days(_to_date(start, "series_align: start"))
         lo = any(isnan, s0) ? NA : maximum(vcat([lo], s0))
     end
     if end_ !== nothing
-        e0 = _days(_to_date(end_, "align_series: end"))
+        e0 = _days(_to_date(end_, "series_align: end"))
         hi = any(isnan, e0) ? NA : minimum(vcat([hi], e0))
     end
     (isnan(lo) || isnan(hi)) && error("missing value where TRUE/FALSE needed")
-    lo > hi && error("align_series: Die Quellen überlappen sich nicht.")
+    lo > hi && error("series_align: Die Quellen überlappen sich nicht.")
     dates = if calendar == "day"
         [lo + i for i in 0:Int(floor(hi - lo))]
     elseif calendar == "union"
@@ -603,7 +603,7 @@ function align_series(args...; calendar = ("day", "union", "intersect"), range =
         fd = fdays[j]
         for k in names(f)
             k == "date" && continue
-            k in onames && error("align_series: Spaltenname '$(k)' kommt mehrfach vor.")
+            k in onames && error("series_align: Spaltenname '$(k)' kommt mehrfach vor.")
             vals = f[k]
             mi = _match_days(dates, fd)
             v = Float64[m > 0 ? vals[m] : NA for m in mi]
@@ -632,7 +632,7 @@ function align_series(args...; calendar = ("day", "union", "intersect"), range =
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# check_series
+# series_check
 # ═══════════════════════════════════════════════════════════════════════════
 
 function _which_min(a)
@@ -669,16 +669,16 @@ function _rle(b::AbstractVector{Bool})
 end
 
 """
-    check_series(data; columns = nothing, jump = 20, stale = 10, revert = 0.8)
+    series_check(data; columns = nothing, jump = 20, stale = 10, revert = 0.8)
 
 Kursreihen prüfen: Prüfbericht (Klasse `SimLevDataCheck`) mit `summary`,
 `issues` und `settings`. Die Daten werden nicht geändert.
 """
-function check_series(data; columns = nothing, jump = 20, stale = 10, revert = 0.8)
+function series_check(data; columns = nothing, jump = 20, stale = 10, revert = 0.8)
     data = SimLev.as_rframe(data)
     data = _as_frame(data)
-    (data isa RFrame && "date" in _names(data)) || error("check_series: data.frame mit Spalte 'date' erwartet.")
-    d = _days(_to_date(_col(data, "date"), "check_series: date"; strict = false))
+    (data isa RFrame && "date" in _names(data)) || error("series_check: data.frame mit Spalte 'date' erwartet.")
+    d = _days(_to_date(_col(data, "date"), "series_check: date"; strict = false))
     if columns === nothing
         columns = [k for k in _names(data) if _is_numeric_col(_col(data, k)) && k != "date"]
     elseif columns isa AbstractString
@@ -812,6 +812,12 @@ function format_SimLevDataCheck(x; max_issues = 25)
 end
 _chomp(s) = (s = String(s); endswith(s, "\n") ? s[1:prevind(s, end)] : s)
 
+"Registrierte Druckmethode (R `print.SimLevDataCheck(x, max_issues = 25L, ...)`; weitere Schlüsselwörter ignoriert wie R)."
+function _print_datacheck(io::IO, x; max_issues = 25, kw...)
+    print(io, format_SimLevDataCheck(x; max_issues = max_issues))
+    return nothing
+end
+
 "`print.SimLevDataCheck(x, max_issues = 25)`."
 function print_SimLevDataCheck(x; max_issues = 25, io::IO = stdout)
     println(io, format_SimLevDataCheck(x; max_issues = max_issues))
@@ -819,11 +825,11 @@ function print_SimLevDataCheck(x; max_issues = 25, io::IO = stdout)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# align_macro
+# series_align_macro
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-    align_macro(data, macro_; name = "macro", lag = 0, lag_unit = "day",
+    series_align_macro(data, macro_; name = "macro", lag = 0, lag_unit = "day",
                 transform = "level", periods = nothing)
 
 Makroreihen mit Veröffentlichungsverzug auf den Tageskalender legen: Ein
@@ -831,7 +837,7 @@ Wert gilt ab `Referenzdatum + lag` bis zum nächsten verfügbaren Wert. Bei
 einem Datumsvektor als `data` ein Float64-Vektor gleicher Länge, sonst eine
 Kopie von `data` mit neuer Spalte `name`.
 """
-function align_macro(data, macro_; name = "macro", lag = 0, lag_unit = ("day", "month"),
+function series_align_macro(data, macro_; name = "macro", lag = 0, lag_unit = ("day", "month"),
                      transform = ("level", "yoy", "mom", "diff", "yoy_diff"), periods = nothing)
     data = SimLev.as_rframe(data)
     macro_ = SimLev.as_rframe(macro_)
@@ -874,7 +880,7 @@ function align_macro(data, macro_; name = "macro", lag = 0, lag_unit = ("day", "
     end
     df = _as_frame(data)
     is_df = df isa RFrame
-    dates = _days(_to_date(is_df ? _col(df, "date") : data, "align_macro: data"))
+    dates = _days(_to_date(is_df ? _col(df, "date") : data, "series_align_macro: data"))
     o = _stable_order(avail)
     avail = avail[o]; vv = vv[o]
     out = Vector{Float64}(undef, length(dates))
@@ -895,18 +901,18 @@ function align_macro(data, macro_; name = "macro", lag = 0, lag_unit = ("day", "
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# convert_currency, total_return_index, deflate
+# series_convert_currency, index_total_return, series_deflate
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-    convert_currency(data, columns, fx; method = "divide", suffix = nothing)
+    series_convert_currency(data, columns, fx; method = "divide", suffix = nothing)
 
 Währung umrechnen: je Zeile Kurs durch den Wechselkurs teilen (`"divide"`)
 oder mit ihm multiplizieren (`"multiply"`). `fx` als Spaltenname,
 `RFrame(date, value)` (Stufenfunktion), benannter Vektor, Vektor der Länge
 `nrow(data)` oder Skalar.
 """
-function convert_currency(data, columns, fx; method = ("divide", "multiply"), suffix = nothing)
+function series_convert_currency(data, columns, fx; method = ("divide", "multiply"), suffix = nothing)
     data = SimLev.as_rframe(data)
     fx = SimLev.as_rframe(fx)
     method = _match_arg(method, ("divide", "multiply"))
@@ -914,10 +920,10 @@ function convert_currency(data, columns, fx; method = ("divide", "multiply"), su
     data = _as_frame(data)
     nms = _names(data)
     miss = unique([c for c in columns if !(c in nms)])
-    isempty(miss) || error("convert_currency: Spalte(n) $(join(("'" * m * "'" for m in miss), ", ")) fehlen in data (vorhanden: $(join(nms, ", "))).")
+    isempty(miss) || error("series_convert_currency: Spalte(n) $(join(("'" * m * "'" for m in miss), ", ")) fehlen in data (vorhanden: $(join(nms, ", "))).")
     f = SimLev.Backcast._resolve_series(fx, data, "fx")
     bad = [i for i in eachindex(f) if !isfinite(f[i]) || f[i] <= 0]
-    isempty(bad) || error("convert_currency: Wechselkurs fx muss positiv sein; $(length(bad)) Zeilen ungültig (z. B. Zeile $(bad[1]): $(_fmt_num(f[bad[1]]))).")
+    isempty(bad) || error("series_convert_currency: Wechselkurs fx muss positiv sein; $(length(bad)) Zeilen ungültig (z. B. Zeile $(bad[1]): $(_fmt_num(f[bad[1]]))).")
     data = copy(data)
     for k in columns
         nm = suffix === nothing ? k : k * suffix
@@ -930,13 +936,13 @@ end
 _rep_len(x, n) = (v = x isa AbstractVector ? x : [x]; n == 0 ? Float64[] : Float64[v[mod1(i, length(v))] for i in 1:n])
 
 """
-    total_return_index(price; dividends = nothing, yield = nothing, withholding = 0,
+    index_total_return(price; dividends = nothing, yield = nothing, withholding = 0,
                        dates = nothing, start = nothing)
 
 Total-Return-Index aus Kursindex und Ausschüttungen:
 `r_t = (P_t + D_t (1 - w)) / P_{t-1} - 1 + y_t/100 (1-w) Δt/365.25`.
 """
-function total_return_index(price; dividends = nothing, yield = nothing, yield_ = nothing, withholding = 0,
+function index_total_return(price; dividends = nothing, yield = nothing, yield_ = nothing, withholding = 0,
                             dates = nothing, start = nothing)
     yv = yield === nothing ? yield_ : yield
     p = _as_numeric(price)
@@ -946,10 +952,10 @@ function total_return_index(price; dividends = nothing, yield = nothing, yield_ 
     D = dividends === nothing ? zeros(n) : (x = _as_numeric(dividends); x[isnan.(x)] .= 0; x)
     y = yv === nothing ? zeros(n) : _rep_len(_as_numeric(yv), n)
     if dates !== nothing
-        dd = _days(_to_date(dates, "total_return_index: dates"))
-        length(dd) != n && error("total_return_index: dates hat Länge $(length(dd)), price $(n).")
+        dd = _days(_to_date(dates, "index_total_return: dates"))
+        length(dd) != n && error("index_total_return: dates hat Länge $(length(dd)), price $(n).")
         (any(isnan, dd) || any(i -> dd[i+1] < dd[i], 1:length(dd)-1)) &&
-            error("total_return_index: dates müssen vollständig und aufsteigend sortiert sein (wie price).")
+            error("index_total_return: dates müssen vollständig und aufsteigend sortiert sein (wie price).")
         dt = vcat(0.0, [dd[i+1] - dd[i] for i in 1:n-1])
     else
         dt = ones(n)
@@ -995,27 +1001,27 @@ function _cpi_level(cpi, data, dts, what)
 end
 
 """
-    deflate(data, columns, cpi; base_date = nothing, suffix = "_real")
+    series_deflate(data, columns, cpi; base_date = nothing, suffix = "_real")
 
 Reale Werte über einen Preisindex: `real_t = nominal_t * cpi_b / cpi_t`.
 """
-function deflate(data, columns, cpi; base_date = nothing, suffix = "_real")
+function series_deflate(data, columns, cpi; base_date = nothing, suffix = "_real")
     data = SimLev.as_rframe(data)
     cpi = SimLev.as_rframe(cpi)
     columns isa AbstractString && (columns = [columns])
     data = _as_frame(data)
-    dts = _days(_to_date(_col(data, "date"), "deflate: data\$date"))
+    dts = _days(_to_date(_col(data, "date"), "series_deflate: data\$date"))
     c0 = _cpi_level(cpi, data, dts, "cpi")
     known = findall(!isnan, c0)
-    isempty(known) && error("deflate: Preisindex cpi hat keinen Wert im Zeitraum von data.")
-    known[1] > 1 && message("Hinweis: deflate: Preisindex erst ab $(_date_str(dts[known[1]])) bekannt; $(known[1] - 1) Zeilen davor bleiben NA.")
+    isempty(known) && error("series_deflate: Preisindex cpi hat keinen Wert im Zeitraum von data.")
+    known[1] > 1 && message("Hinweis: series_deflate: Preisindex erst ab $(_date_str(dts[known[1]])) bekannt; $(known[1] - 1) Zeilen davor bleiben NA.")
     b = if base_date === nothing
         known[1]
     else
         bd = _days(_to_date(base_date, "base_date"))
         _which_min([abs(t - bd[1]) for t in dts])
     end
-    isnan(c0[b]) && error("deflate: am Bezugsdatum $(_date_str(dts[b])) ist kein Preisindex bekannt (erster Wert am $(_date_str(dts[known[1]]))); base_date später wählen.")
+    isnan(c0[b]) && error("series_deflate: am Bezugsdatum $(_date_str(dts[b])) ist kein Preisindex bekannt (erster Wert am $(_date_str(dts[known[1]]))); base_date später wählen.")
     data = copy(data)
     for k in columns
         data[k * suffix] = _as_numeric(_col(data, k)) ./ c0 .* c0[b]
@@ -1024,31 +1030,31 @@ function deflate(data, columns, cpi; base_date = nothing, suffix = "_real")
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# splice_series
+# series_splice
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-    splice_series(; dates = nothing, series...)
-    splice_series("name" => reihe, ...; dates = nothing)
+    series_splice(; dates = nothing, series...)
+    series_splice("name" => reihe, ...; dates = nothing)
 
 Reihen verketten (Proxy → Index → Fonds); die erste Reihe hat Vorrang.
 Mindestens zwei benannte Reihen in Prioritätsreihenfolge, alle als
 numerische Vektoren gleicher Länge (dann `dates` angeben) oder alle als
 `RFrame(date, value)`. Liefert `RFrame(date, value, source)`.
 """
-function splice_series(args...; dates = nothing, series...)
+function series_splice(args...; dates = nothing, series...)
     src = _named_sources(args, series)
-    (src === nothing || length(src) < 2 || any(p -> p[1] == "", src)) && error("splice_series: mindestens zwei benannte Reihen.")
+    (src === nothing || length(src) < 2 || any(p -> p[1] == "", src)) && error("series_splice: mindestens zwei benannte Reihen.")
     nms = [s[1] for s in src]
     Fl = nothing
     if all(s -> _as_frame(s[2]) isa RFrame, src)
-        al = align_series((k => _as_frame(v) for (k, v) in src)...; range = "all")
+        al = series_align((k => _as_frame(v) for (k, v) in src)...; range = "all")
         dates = al["date"]
         V = [Float64.(al[k]) for k in nms]
         F = attrs(al)["filled"]
         Fl = [Bool.(F[k]) for k in nms]
     else
-        dates === nothing && error("splice_series: 'dates' angeben, wenn Vektoren übergeben werden.")
+        dates === nothing && error("series_splice: 'dates' angeben, wenn Vektoren übergeben werden.")
         V = [_as_numeric(v) for (_, v) in src]
     end
     n = length(V[1])
@@ -1074,7 +1080,7 @@ function splice_series(args...; dates = nothing, series...)
     pick = [something(findfirst(j -> isfinite(Rm[j][i]), 1:nc), 0) for i in 1:n]
     r = Float64[pick[i] > 0 ? Rm[pick[i]][i] : NA for i in 1:n]
     a = findfirst(!isnan, p)
-    a === nothing && error("splice_series: Die erste Reihe hat keine Werte.")
+    a === nothing && error("series_splice: Die erste Reihe hat keine Werte.")
     lv = fill(NA, n)
     lv[a] = p[a]
     for t in a+1:n
@@ -1091,7 +1097,7 @@ function splice_series(args...; dates = nothing, series...)
         isnan(lv[i]) && (srcname[i] = missing)
     end
     any(ismissing, srcname) || (srcname = String[s for s in srcname])
-    return RFrame("date" => _to_date(dates, "splice_series: dates"), "value" => lv, "source" => srcname)
+    return RFrame("date" => _to_date(dates, "series_splice: dates"), "value" => lv, "source" => srcname)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1113,7 +1119,7 @@ _rlen(v) = v === nothing ? 0 : v isa Union{AbstractVector,NamedTuple,AbstractDic
     strategy_from_weights(weights; kwargs...)
 
 Strategie aus einem benannten Gewichtsvektor (`RVector`, Paare, NamedTuple
-oder Dict); jedes Asset erhält `asset_share = Gewicht`. Weitere Argumente
+oder Dict); jedes Asset erhält `share = Gewicht`. Weitere Argumente
 gehen an `asset_config`: ein einzelner Wert gilt für alle Assets, benannte
 Vektoren werden je Asset zugeordnet.
 """
@@ -1147,7 +1153,7 @@ function strategy_from_weights(weights; kwargs...)
             (_rlen(val) == 1 && _isna(val)) && continue
             push!(a, key => val)
         end
-        push!(assets, nm => SimLev.asset_config(; asset_share = w[i], a...))
+        push!(assets, nm => SimLev.asset_config(; share = w[i], a...))
     end
     return SimLev.create_strategy(; assets = assets)
 end
@@ -1208,7 +1214,7 @@ function _template_list()
 end
 
 function __init__()
-    register_print!("SimLevDataCheck", (io, x) -> print(io, format_SimLevDataCheck(x)))
+    register_print!("SimLevDataCheck", _print_datacheck)
 end
 
 end # module

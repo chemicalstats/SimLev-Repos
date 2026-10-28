@@ -1,6 +1,6 @@
 """Vertiefte Auswertung gespeicherter Ergebnisse (Port von ``r/R/deep_analysis.R``).
 
-:func:`deep_analysis` analysiert ein oder mehrere Ergebnisse von
+:func:`result_analysis` analysiert ein oder mehrere Ergebnisse von
 :func:`simlev.simulation` (oder beliebige Kursreihen) nachträglich, im Umfang
 von Portfolio-Backtestern wie testfol.io: Benchmark-Kennzahlen (Alpha, Beta,
 Capture, Tracking Error, Information Ratio, M²), VaR/CVaR, Rendite- und
@@ -29,7 +29,7 @@ from ._r.rnum import LD, r_cummax, r_cumsum, r_mean, r_mean_int, r_pow, r_prod, 
 from .svg import (_MONATE_KURZ, _AnaSvg, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_ramp, _ana_rect,
                   _ana_svg_done, _ana_text, _ana_year_ticks, _jl_max, _jl_maximum, _jl_min, _jl_minimum)
 
-__all__ = ["deep_analysis", "SimLevAnalysis"]
+__all__ = ["result_analysis", "SimLevAnalysis"]
 
 _NAN = float("nan")   # R-NaN (z. B. mean() leerer Vektoren)
 _NA = NA_REAL         # R-NA_real_
@@ -699,14 +699,14 @@ def _da_rolling(s, b, window_m, rf_cum):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# deep_analysis
+# result_analysis
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _is_list_like(x):
     return isinstance(x, (list, tuple, Mapping)) and not isinstance(x, pd.DataFrame) and not _is_result(x)
 
 
-def deep_analysis(x, benchmark=None, risk_free=0, rolling_years=3, var_levels=(0.01, 0.05, 0.10), top_drawdowns=10,
+def result_analysis(x, *, benchmark=None, risk_free=0, rolling_years=3, var_levels=(0.01, 0.05, 0.10), top_drawdowns=10,
                   inflation=None):
     """Vertiefte Analyse von Simulationsergebnissen.
 
@@ -934,7 +934,7 @@ def _nchar(s):
 
 
 class SimLevAnalysis(RList):
-    """Ergebnis von :func:`deep_analysis` (R-Klasse ``SimLevAnalysis``).
+    """Ergebnis von :func:`result_analysis` (R-Klasse ``SimLevAnalysis``).
 
     ``print(x)`` zeigt die wichtigsten Kennzahlen, :meth:`summary` zusätzlich
     Jahresrenditen und die größten Drawdowns, ``plot`` Grafiken (SVG, :class:`simlev.SimLevPlot`).
@@ -1171,20 +1171,3 @@ from ._r.base import quiet_fp  # noqa: E402
 
 quiet_fp(globals(), __all__ + ["_da_drawdowns", "_da_rf", "_without_filled"])
 
-
-def _make_callable():
-    """Macht dieses Modul aufrufbar wie die gleichnamige Funktion (``simlev.deep_analysis(...)`` wie in R;
-    ``simlev.deep_analysis.<name>`` und ``import simlev.deep_analysis`` erreichen weiter das Modul). Steht hier statt
-    in ``__init__.py``, weil das Modul erst bei Bedarf geladen wird (PEP 562)."""
-    import sys
-    import types
-
-    class _CallableModule(types.ModuleType):
-        def __call__(self, *args, **kwargs):
-            return getattr(self, "deep_analysis")(*args, **kwargs)
-
-    sys.modules[__name__].__class__ = _CallableModule
-
-
-_make_callable()
-del _make_callable

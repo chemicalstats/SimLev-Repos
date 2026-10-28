@@ -33,7 +33,7 @@ dependence_analysis(
 \arguments{
 \item{data}{data.frame mit Spalte \code{date} (Klasse Date oder in Date
 umwandelbar), Kursspalten (Kursniveaus, keine Renditen) und
-Zustandsspalten (z. B. mit \code{\link[=align_series]{align_series()}} und \code{\link[=align_macro]{align_macro()}}
+Zustandsspalten (z. B. mit \code{\link[=series_align]{series_align()}} und \code{\link[=series_align_macro]{series_align_macro()}}
 vorbereitet).}
 
 \item{assets}{Zeichenvektor der Kursspalten (mindestens zwei).}
@@ -65,10 +65,10 @@ erscheinen mit \code{n = 0} und \code{NA}-Kennzahlen.}
 gewaehlten Frequenz. \code{NULL} (Standard) = Anzahl Perioden je Jahr
 (aus den Daten ermittelt, mindestens 10).}
 
-\item{dcc}{Logisch: DCC(1,1) mit \code{\link[=dcc_fit]{dcc_fit()}} schaetzen (nur bei
+\item{dcc}{Logisch: DCC(1,1) mit \code{\link[=dependence_dcc]{dependence_dcc()}} schaetzen (nur bei
 mindestens 100 Perioden; Fehler werden als Meldung ausgegeben).}
 
-\item{copulas}{Logisch: Copula-Fits mit \code{\link[=fit_copula]{fit_copula()}} je Paar (und je
+\item{copulas}{Logisch: Copula-Fits mit \code{\link[=copula_fit]{copula_fit()}} je Paar (und je
 Regime ab 40 Perioden).}
 
 \item{B}{Anzahl Bootstrap-Wiederholungen fuer die Regime-Vergleiche
@@ -119,12 +119,12 @@ AIC), \code{copula_lambda_lower}, \code{copula_lambda_upper},
 \code{t_rho}, \code{t_nu} (Parameter der t-Copula).}
 \item{tail}{Ergebnis von \code{\link[=tail_dependence]{tail_dependence()}} je Paar (Spalte
 \code{pair}) und Quantil.}
-\item{copulas}{Benannte Liste der \code{\link[=fit_copula]{fit_copula()}}-Tabellen je Paar oder
+\item{copulas}{Benannte Liste der \code{\link[=copula_fit]{copula_fit()}}-Tabellen je Paar oder
 \code{NULL}.}
 \item{rolling}{data.frame mit \code{date} und der rollierenden
 Korrelation je Paar (\code{NULL}, wenn die Historie nicht laenger als
 \code{window} ist).}
-\item{dcc}{Ergebnis von \code{\link[=dcc_fit]{dcc_fit()}} oder \code{NULL}.}
+\item{dcc}{Ergebnis von \code{\link[=dependence_dcc]{dependence_dcc()}} oder \code{NULL}.}
 \item{conditional}{Liste je Zustandsvariable: data.frame je Paar und
 Regime mit \code{n}, \code{vol_1}, \code{vol_2} (annualisierte
 Volatilitaet der Log-Renditen als Anteil), \code{pearson},
@@ -184,6 +184,6 @@ da
 }
 }
 \seealso{
-\code{\link[=align_series]{align_series()}}, \code{\link[=align_macro]{align_macro()}} zur Vorbereitung;
-\code{\link[=tail_regression]{tail_regression()}}, \code{\link[=covar_analysis]{covar_analysis()}}, \code{\link[=regime_subset]{regime_subset()}}.
+\code{\link[=series_align]{series_align()}}, \code{\link[=series_align_macro]{series_align_macro()}} zur Vorbereitung;
+\code{\link[=tail_regression]{tail_regression()}}, \code{\link[=tail_covar]{tail_covar()}}, \code{\link[=regime_subset]{regime_subset()}}.
 }

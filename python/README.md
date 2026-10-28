@@ -11,7 +11,7 @@
 ---
 
 Dieses Paket ist die Python-Fassung des R-Pakets SimLev. Version 0.5.0 ist
-ein vollständiger Port der aktuellen R-Fassung 0.5.0: Alle 104 Exporte des
+ein vollständiger Port der aktuellen R-Fassung 0.5.0: Alle 113 Exporte des
 R-Pakets gibt es hier mit gleichem Namen, gleichen Argumenten und gleichen
 Voreinstellungen. Das Paket läuft **eigenständig ohne R** und benötigt nur
 `numpy` und `pandas`.
@@ -74,15 +74,15 @@ data = pd.DataFrame({
 })
 
 strategy = simlev.create_strategy(
-    WORLD=simlev.asset_config("etf", action_type="bnh", asset_share=0.7, asset_spread=0.1, asset_bonus=30),
-    BONDS=simlev.asset_config("etf", action_type="bnh", asset_share=0.3, asset_spread=0.1, asset_bonus=0),
+    WORLD=simlev.asset_config("etf", trading="bnh", share=0.7, spread=0.1, partial_exemption=30),
+    BONDS=simlev.asset_config("etf", trading="bnh", share=0.3, spread=0.1, partial_exemption=0),
 )
 
 result = simlev.simulation(
     data, strategy,
     start_value=10000,
-    balance_mode=True, balance_span=1, balance_unit="year",
-    tax_mode="person", tax_rate=26.375,
+    rebalance=simlev.rebalance_plan(1, unit="year"),
+    tax=simlev.tax_profile(26.375),
     liquidate=True, risk_free=2,
 )
 
@@ -193,8 +193,8 @@ in R, und `print(x)` liefert genau die Ausgabe der R-`print`-Methode.
 
 Besonderheiten der Python-Fassung:
 
-- `simlev.bootstrap`, `simlev.backcast`, `simlev.deep_analysis` und
-  `simlev.param_search` sind zugleich Modul und aufrufbare Funktion:
+- `simlev.bootstrap`, `simlev.backcast` und `simlev.param_search` sind
+  zugleich Modul und aufrufbare Funktion:
   `simlev.bootstrap(...)` wirkt wie in R, `import simlev.bootstrap`
   erreicht das Modul.
 - Zufallszahlen erzeugt SimLev mit einem Nachbau von R's Generatoren
@@ -267,7 +267,7 @@ Voraussetzungen der Bitgleichheit:
   `simlev._r.stats.nlminb`). Das Tail-Modell schätzt ab 30
   Überschreitungen immer per GPD-ML wie R, das `evd::fpot` übernommen hat
   (`.evd_fpot`; Herkunft in `COPYRIGHTS.md`). Die GARCH-Schätzung
-  (Bootstrap `garch`/`gjr_garch`, Kopplung, `dcc_fit()`,
+  (Bootstrap `garch`/`gjr_garch`, Kopplung, `dependence_dcc()`,
   `dependence_analysis()`) läuft immer per rugarch-Nachbildung,
   einschließlich der Warnungen von rugarch, wie R, das `ugarchfit` mit
   Rsolnp und truncnorm übernommen hat (`.rugarch_ugarchfit`;
@@ -312,7 +312,7 @@ Geprüft wurde:
   `details = TRUE`; zusätzlich 669 frisch erzeugte Zufalls- und Stressfälle
   und 750 Fälle mit den neuen Argumenten (`order_fee`, `dca_fee`,
   `church_tax`, `harvest_*`, `taxable_income`, `tax_tariff`).
-- **Alle Funktionen:** 4.578 Referenzfälle in 30 Modulen unter
+- **Alle Funktionen:** 4.656 Referenzfälle in 30 Modulen unter
   `golden/modules/`, darunter die R-Interna (`r_fmt`, `r_linalg`,
   `r_nmath`, `r_rng`, `r_stats`); alle bitgleich in Ergebnis,
   Konsolen- und Druckausgabe, Warnungen und Fehlermeldungen.
@@ -340,7 +340,7 @@ python tools/compare_reference.py             # Erweiterungen: alle Module unter
 python tools/compare_reference.py optimize -k cov_ -v      # ein Modul, ausgewählte Fälle, ausführlich
 ```
 
-Die Test-Suite enthält 4.578 Modul-Referenzfälle
+Die Test-Suite enthält 4.656 Modul-Referenzfälle
 (`tests/test_module_reference.py`) und die 105 Golden-Master-Fälle der
 Engine (`tests/test_golden_master.py`, dazu ein Test, dass die Fälle
 gefunden werden). Die übrigen 1.120 Tests prüfen die Engine (überwiegend
@@ -361,8 +361,10 @@ Weiterentwicklung in [DEVELOPING.md](DEVELOPING.md).
 
 ```
 simlev/
-  __init__.py        öffentliche Funktionen (alle 104 Exporte des R-Pakets)
+  __init__.py        öffentliche Funktionen (alle 113 Exporte des R-Pakets)
   engine.py          simulation(), Ablaufsteuerung (simulation.R, utils.R)
+  _sim_blocks.py     Bausteine sim_costs(), dca_plan(), rebalance_plan(), split_rule(), tax_profile(),
+                     income_rate(), income_tariff(), harvest_rule(), funds_costs() (sim_blocks.R)
   _sim_base.py       Hilfen, Gebühren, Termine, Handels- und Steuerfunktionen, Tarifweg,
                      Jahreswechsel, Kennzahlen (sim_base.R)
   _sim_phases.py     Phasen 1–2: Eingabeprüfung, Datenvorbereitung (sim_validate.R, sim_prepare.R)
@@ -371,8 +373,8 @@ simlev/
   _core.py           Rechenkerne der Engine (simulation_core.cpp, fifo_core.cpp, tax_core.cpp)
   _dates.py          Datumshelfer (Tage seit 1970, strptime wie R)
   config.py          asset_config(), create_strategy() & Co. (asset_config.R, strategy.R)
-  trigger.py         compute_rebal_trigger()
-  tax_tariff.py      read_tax_tariff(), Einkommensteuertarif
+  trigger.py         rebalance_trigger()
+  _tax_tariff.py     tax_tariff(), Einkommensteuertarif
   result.py          SimLevResult mit print/summary/plot
   svg.py             Grafikmodul: SimLevPlot, plot-API und alle SVG-Zeichenbausteine
   dashboard.py       Dashboard: Daten und Panels (SVG)
@@ -383,7 +385,7 @@ simlev/
   bootstrap.py       Bootstrap, Bootstrap-Studien; Kerne in _bootstrap_core.py
   ms_garch.py        eigene MS-GARCH-Schätzung (ms_garch.R; Filter in _bootstrap_core.py)
   withdrawal.py      Entnahmephase; Kern in _withdrawal_core.py
-  deep_analysis.py   deep_analysis()
+  deep_analysis.py   result_analysis()
   sensitivity.py     Sensitivitäten, Lump Sum vs. DCA, Hebelreihen
   param_search.py    Parametersuche, Plateau
   overfitting.py     PBO, Deflated Sharpe, Walk-Forward, Harvey-Liu
@@ -392,7 +394,7 @@ simlev/
   scenarios.py       Entropy Pooling, Copula-Szenarien, Krisen-Replay
   tactical.py        taktische Allokation
   optimize.py        Portfolio-Optimierung, Risikobeiträge; Kerne in _optimize_core.py
-  planning.py        Länder-Bootstrap, Renditeannahmen, goal_optimize()
+  planning.py        Länder-Bootstrap, Renditeannahmen, planning_goal()
   analysis_tests.py  statistische Prüfungen
   data/              steuertarif.csv (Tarif ab VZ 2026), r_colors.csv (R-Farbnamen)
   _r/                R-Kompatibilitätsschicht

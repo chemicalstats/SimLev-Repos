@@ -1,0 +1,1282 @@
+{
+ "language": "R",
+ "stand": "2026-10-26 – Schnittstelle 0.5.0 festgehalten",
+ "hinweis": "Erzeugt von tools/api_snapshot/run.sh --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
+ "functions": {
+  "asset_config": [
+   {"name": "asset_class", "kind": "arg", "default": "c(\"etf\", \"etn\", \"etc\", \"certificate\", \"etn_standard\", \"etn_deliverable\")", "match_arg": true},
+   {"name": "trading", "kind": "arg", "default": "c(\"bnh\", \"signal\")", "match_arg": true},
+   {"name": "share", "kind": "arg", "default": "1"},
+   {"name": "spread", "kind": "arg", "default": "0.1"},
+   {"name": "partial_exemption", "kind": "arg", "default": "0"},
+   {"name": "deliverable", "kind": "arg", "default": "FALSE"},
+   {"name": "start", "kind": "arg", "default": "NULL"},
+   {"name": "tax_regime", "kind": "arg", "default": "NULL"},
+   {"name": "signal_buy", "kind": "arg", "default": "NULL"},
+   {"name": "signal_sell", "kind": "arg", "default": "NULL"}
+  ],
+  "backcast": [
+   {"name": "fit", "kind": "arg", "default": "NULL"},
+   {"name": "data", "kind": "arg", "default": "NULL"},
+   {"name": "params", "kind": "arg", "default": "NULL"},
+   {"name": "splice", "kind": "arg", "default": "\"inception\""},
+   {"name": "fill", "kind": "arg", "default": "c(\"locf\", \"linear\", \"stine\", \"model\")", "match_arg": true},
+   {"name": "rebase", "kind": "arg", "default": "NULL"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "backcast_fit": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "product", "kind": "arg", "default": null},
+   {"name": "index", "kind": "arg", "default": null},
+   {"name": "ter", "kind": "arg", "default": "0"},
+   {"name": "leverage", "kind": "arg", "default": "1"},
+   {"name": "rate", "kind": "arg", "default": "NULL"},
+   {"name": "fx", "kind": "arg", "default": "NULL"},
+   {"name": "model", "kind": "arg", "default": "c(\"structural\", \"linear\", \"spline\")", "match_arg": true},
+   {"name": "fit", "kind": "arg", "default": "\"drag\""},
+   {"name": "fixed", "kind": "arg", "default": "list()"},
+   {"name": "objective", "kind": "arg", "default": "c(\"level\", \"return\", \"hybrid\")", "match_arg": true},
+   {"name": "loss", "kind": "arg", "default": "c(\"rmse\", \"mse\", \"mae\", \"median\", \"max\")", "match_arg": true},
+   {"name": "horizon", "kind": "arg", "default": "1L"},
+   {"name": "hybrid_weight", "kind": "arg", "default": "0.5"},
+   {"name": "lag", "kind": "arg", "default": "0L"},
+   {"name": "rate_lag", "kind": "arg", "default": "0L"},
+   {"name": "start", "kind": "arg", "default": "NULL"},
+   {"name": "end", "kind": "arg", "default": "NULL"},
+   {"name": "method", "kind": "arg", "default": "c(\"optimize\", \"grid\")", "match_arg": true},
+   {"name": "grid", "kind": "arg", "default": "seq(-3, 3, by = 0.005)"},
+   {"name": "bounds", "kind": "arg", "default": "list(drag = c(-10, 10), spread = c(-5, 10), beta = c(0.5, 1.5))"},
+   {"name": "ter_basis", "kind": "arg", "default": "365"},
+   {"name": "rate_basis", "kind": "arg", "default": "360"},
+   {"name": "accrual", "kind": "arg", "default": "c(\"linear\", \"geometric\")", "match_arg": true},
+   {"name": "index_fill", "kind": "arg", "default": "c(\"locf\", \"linear\", \"stine\")", "match_arg": true},
+   {"name": "validate", "kind": "arg", "default": "TRUE"}
+  ],
+  "bootstrap": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "config", "kind": "arg", "default": null},
+   {"name": "method", "kind": "arg", "default": "\"raw\""},
+   {"name": "n", "kind": "arg", "default": "1000"},
+   {"name": "params", "kind": "arg", "default": "list()"},
+   {"name": "ess", "kind": "arg", "default": "FALSE"},
+   {"name": "ess_grid", "kind": "arg", "default": "NULL"},
+   {"name": "path_length", "kind": "arg", "default": "NULL"},
+   {"name": "max_tries", "kind": "arg", "default": "10L"},
+   {"name": "seed", "kind": "arg", "default": "NULL"},
+   {"name": "cores", "kind": "arg", "default": "1L"},
+   {"name": "progress", "kind": "arg", "default": "TRUE"}
+  ],
+  "bootstrap_block_length": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "transform", "kind": "arg", "default": "c(\"none\", \"abs\", \"squared\")", "match_arg": true}
+  ],
+  "bootstrap_config": [
+   {"name": "indices", "kind": "arg", "default": null},
+   {"name": "letfs", "kind": "arg", "default": "list()"},
+   {"name": "regime_index", "kind": "arg", "default": "NULL"},
+   {"name": "aux", "kind": "arg", "default": "NULL"},
+   {"name": "aux_type", "kind": "arg", "default": "NULL"},
+   {"name": "cross", "kind": "arg", "default": "c(\"ratio\", \"joint\")", "match_arg": true},
+   {"name": "input", "kind": "arg", "default": "c(\"returns\", \"prices\")", "match_arg": true}
+  ],
+  "bootstrap_data": [
+   {"name": "result", "kind": "arg", "default": null},
+   {"name": "i", "kind": "arg", "default": "1L"},
+   {"name": "dates", "kind": "arg", "default": "NULL"},
+   {"name": "start", "kind": "arg", "default": "\"2000-01-01\""}
+  ],
+  "bootstrap_pooled": [
+   {"name": "datasets", "kind": "arg", "default": null},
+   {"name": "columns", "kind": "arg", "default": null},
+   {"name": "weights", "kind": "arg", "default": "NULL"},
+   {"name": "inflation", "kind": "arg", "default": "NULL"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"year\", \"quarter\", \"month\")", "match_arg": true},
+   {"name": "n", "kind": "arg", "default": "1000L"},
+   {"name": "years", "kind": "arg", "default": "30L"},
+   {"name": "L", "kind": "arg", "default": "NULL"},
+   {"name": "country_weights", "kind": "arg", "default": "NULL"},
+   {"name": "target", "kind": "arg", "default": "NULL"},
+   {"name": "seed", "kind": "arg", "default": "NULL"}
+  ],
+  "bootstrap_probability": [
+   {"name": "study", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null},
+   {"name": "thresholds", "kind": "arg", "default": "NULL"}
+  ],
+  "bootstrap_study": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "config", "kind": "arg", "default": null},
+   {"name": "method", "kind": "arg", "default": "\"stationary\""},
+   {"name": "n", "kind": "arg", "default": "1000"},
+   {"name": "strategies", "kind": "arg", "default": null},
+   {"name": "params", "kind": "arg", "default": "list()"},
+   {"name": "ess", "kind": "arg", "default": "FALSE"},
+   {"name": "ess_grid", "kind": "arg", "default": "NULL"},
+   {"name": "path_length", "kind": "arg", "default": "NULL"},
+   {"name": "dates", "kind": "arg", "default": "NULL"},
+   {"name": "start", "kind": "arg", "default": "\"2000-01-01\""},
+   {"name": "burn_in", "kind": "arg", "default": "0L"},
+   {"name": "sim_args", "kind": "arg", "default": "list()"},
+   {"name": "metrics", "kind": "arg", "default": "bootstrap_study_metrics"},
+   {"name": "benchmark", "kind": "arg", "default": "NULL"},
+   {"name": "chunk_dir", "kind": "arg", "default": "NULL"},
+   {"name": "keep_paths", "kind": "arg", "default": "0L"},
+   {"name": "keep_returns", "kind": "arg", "default": "c(\"none\", \"year\", \"quarter\", \"month\")", "match_arg": true},
+   {"name": "keep_aux", "kind": "arg", "default": "NULL"},
+   {"name": "max_tries", "kind": "arg", "default": "10L"},
+   {"name": "chunk_size", "kind": "arg", "default": "25L"},
+   {"name": "seed", "kind": "arg", "default": "NULL"},
+   {"name": "cores", "kind": "arg", "default": "1L"},
+   {"name": "progress", "kind": "arg", "default": "TRUE"}
+  ],
+  "bootstrap_study_metrics": [
+   {"name": "res", "kind": "arg", "default": null}
+  ],
+  "bootstrap_validate": [
+   {"name": "result", "kind": "arg", "default": null},
+   {"name": "min_rows", "kind": "arg", "default": "NULL"},
+   {"name": "verbose", "kind": "arg", "default": "TRUE"}
+  ],
+  "copula_fit": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "y", "kind": "arg", "default": null},
+   {"name": "families", "kind": "arg", "default": "NULL"}
+  ],
+  "create_strategy": [
+   {"name": "...", "kind": "dots", "default": null},
+   {"name": "assets", "kind": "arg", "default": "NULL"}
+  ],
+  "dca_plan": [
+   {"name": "value", "kind": "arg", "default": null},
+   {"name": "span", "kind": "arg", "default": null},
+   {"name": "days", "kind": "arg", "default": "NULL"},
+   {"name": "unit", "kind": "arg", "default": "c(\"month\", \"quarter\", \"year\")", "match_arg": true},
+   {"name": "anchor", "kind": "arg", "default": "c(\"start\", \"end\")", "match_arg": true},
+   {"name": "start", "kind": "arg", "default": "NULL"},
+   {"name": "skip", "kind": "arg", "default": "FALSE"},
+   {"name": "fill_deficits", "kind": "arg", "default": "FALSE"}
+  ],
+  "dependence_analysis": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "assets", "kind": "arg", "default": null},
+   {"name": "conditions", "kind": "arg", "default": "NULL"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
+   {"name": "quantiles", "kind": "arg", "default": "c(0.05, 0.1)"},
+   {"name": "breaks", "kind": "arg", "default": "NULL"},
+   {"name": "n_regimes", "kind": "arg", "default": "3L"},
+   {"name": "window", "kind": "arg", "default": "NULL"},
+   {"name": "dcc", "kind": "arg", "default": "TRUE"},
+   {"name": "copulas", "kind": "arg", "default": "TRUE"},
+   {"name": "B", "kind": "arg", "default": "499L"},
+   {"name": "block", "kind": "arg", "default": "NULL"},
+   {"name": "tail_q", "kind": "arg", "default": "0.1"},
+   {"name": "seed", "kind": "arg", "default": "NULL"}
+  ],
+  "dependence_dcc": [
+   {"name": "R", "kind": "arg", "default": null}
+  ],
+  "dependence_validate": [
+   {"name": "boot", "kind": "arg", "default": null},
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "agg", "kind": "arg", "default": "5L"},
+   {"name": "q", "kind": "arg", "default": "0.1"},
+   {"name": "max_paths", "kind": "arg", "default": "200L"}
+  ],
+  "export_dashboard": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "filename", "kind": "arg", "default": "\"dashboard.pdf\""},
+   {"name": "width", "kind": "arg", "default": "14"},
+   {"name": "height", "kind": "arg", "default": "10"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "funds_costs": [
+   {"name": "fee", "kind": "arg", "default": "0.95"},
+   {"name": "performance_fee", "kind": "arg", "default": "5"}
+  ],
+  "harvest_rule": [
+   {"name": "day", "kind": "arg", "default": "\"12-15\""},
+   {"name": "loss_pot", "kind": "arg", "default": "TRUE"}
+  ],
+  "income_rate": [
+   {"name": "marginal_rate", "kind": "arg", "default": null},
+   {"name": "soli_rate", "kind": "arg", "default": "0"}
+  ],
+  "income_tariff": [
+   {"name": "taxable_income", "kind": "arg", "default": null},
+   {"name": "tariff", "kind": "arg", "default": "NULL"}
+  ],
+  "index_bond": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "yield", "kind": "arg", "default": null},
+   {"name": "maturity", "kind": "arg", "default": "10"},
+   {"name": "coupon_frequency", "kind": "arg", "default": "1"},
+   {"name": "method", "kind": "arg", "default": "c(\"exact\", \"duration\")", "match_arg": true},
+   {"name": "start", "kind": "arg", "default": "100"}
+  ],
+  "index_currency_hedged": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "local", "kind": "arg", "default": null},
+   {"name": "domestic_rate", "kind": "arg", "default": null},
+   {"name": "foreign_rate", "kind": "arg", "default": null},
+   {"name": "cost", "kind": "arg", "default": "0"},
+   {"name": "basis", "kind": "arg", "default": "360"},
+   {"name": "start", "kind": "arg", "default": "NULL"}
+  ],
+  "index_money_market": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "rate", "kind": "arg", "default": null},
+   {"name": "spread", "kind": "arg", "default": "0"},
+   {"name": "basis", "kind": "arg", "default": "360"},
+   {"name": "start", "kind": "arg", "default": "100"}
+  ],
+  "index_total_return": [
+   {"name": "price", "kind": "arg", "default": null},
+   {"name": "dividends", "kind": "arg", "default": "NULL"},
+   {"name": "yield", "kind": "arg", "default": "NULL"},
+   {"name": "withholding", "kind": "arg", "default": "0"},
+   {"name": "dates", "kind": "arg", "default": "NULL"},
+   {"name": "start", "kind": "arg", "default": "NULL"}
+  ],
+  "momentum_score": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "assets", "kind": "arg", "default": null},
+   {"name": "lookbacks", "kind": "arg", "default": "c(1, 3, 6, 12)"},
+   {"name": "type", "kind": "arg", "default": "c(\"average\", \"13612w\")", "match_arg": true}
+  ],
+  "overfit_pbo": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "S", "kind": "arg", "default": "16L"},
+   {"name": "metric", "kind": "arg", "default": "c(\"sharpe\", \"sortino\", \"geometric\", \"mean\")", "match_arg": true},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
+   {"name": "dates", "kind": "arg", "default": "NULL"},
+   {"name": "risk_free", "kind": "arg", "default": "0"}
+  ],
+  "overfit_reality_check": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "benchmark", "kind": "arg", "default": "NULL"},
+   {"name": "B", "kind": "arg", "default": "999L"},
+   {"name": "block", "kind": "arg", "default": "NULL"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
+   {"name": "dates", "kind": "arg", "default": "NULL"},
+   {"name": "seed", "kind": "arg", "default": "NULL"}
+  ],
+  "overfit_walk_forward": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "train", "kind": "arg", "default": "5"},
+   {"name": "test", "kind": "arg", "default": "1"},
+   {"name": "step", "kind": "arg", "default": "test"},
+   {"name": "anchored", "kind": "arg", "default": "FALSE"},
+   {"name": "metric", "kind": "arg", "default": "c(\"sharpe\", \"sortino\", \"geometric\", \"mean\")", "match_arg": true},
+   {"name": "select", "kind": "arg", "default": "c(\"best\", \"plateau\")", "match_arg": true},
+   {"name": "risk_free", "kind": "arg", "default": "0"}
+  ],
+  "param_bootstrap": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "config", "kind": "arg", "default": null},
+   {"name": "ids", "kind": "arg", "default": "NULL"},
+   {"name": "top", "kind": "arg", "default": "5L"},
+   {"name": "by", "kind": "arg", "default": "c(\"objective\", \"plateau\")", "match_arg": true},
+   {"name": "map", "kind": "arg", "default": "NULL"},
+   {"name": "include", "kind": "arg", "default": "list()"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "param_plateau": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "metric", "kind": "arg", "default": "x$objective"},
+   {"name": "radius", "kind": "arg", "default": "1L"},
+   {"name": "k", "kind": "arg", "default": "5L"}
+  ],
+  "param_range": [
+   {"name": "lower", "kind": "arg", "default": null},
+   {"name": "upper", "kind": "arg", "default": null},
+   {"name": "n", "kind": "arg", "default": "5"},
+   {"name": "step", "kind": "arg", "default": "NULL"},
+   {"name": "integer", "kind": "arg", "default": "FALSE"},
+   {"name": "log", "kind": "arg", "default": "FALSE"}
+  ],
+  "param_search": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "builder", "kind": "arg", "default": "NULL"},
+   {"name": "space", "kind": "arg", "default": null},
+   {"name": "strategy", "kind": "arg", "default": "NULL"},
+   {"name": "method", "kind": "arg", "default": "c(\"grid\", \"random\", \"lhs\")", "match_arg": true},
+   {"name": "n", "kind": "arg", "default": "50L"},
+   {"name": "constraint", "kind": "arg", "default": "NULL"},
+   {"name": "sim_args", "kind": "arg", "default": "list()"},
+   {"name": "burn_in", "kind": "arg", "default": "0L"},
+   {"name": "metrics", "kind": "arg", "default": "bootstrap_study_metrics"},
+   {"name": "objective", "kind": "arg", "default": "\"sharpe\""},
+   {"name": "maximize", "kind": "arg", "default": "TRUE"},
+   {"name": "keep_returns", "kind": "arg", "default": "TRUE"},
+   {"name": "seed", "kind": "arg", "default": "NULL"},
+   {"name": "cores", "kind": "arg", "default": "1L"}
+  ],
+  "param_space": [
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "planning_goal": [
+   {"name": "returns", "kind": "arg", "default": null},
+   {"name": "start_value", "kind": "arg", "default": null},
+   {"name": "goal", "kind": "arg", "default": null},
+   {"name": "horizon", "kind": "arg", "default": null},
+   {"name": "contributions", "kind": "arg", "default": "0"},
+   {"name": "n_grid", "kind": "arg", "default": "301L"},
+   {"name": "n_sim", "kind": "arg", "default": "5000L"},
+   {"name": "seed", "kind": "arg", "default": "NULL"}
+  ],
+  "planning_lumpsum_vs_dca": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "strategy", "kind": "arg", "default": null},
+   {"name": "amount", "kind": "arg", "default": "10000"},
+   {"name": "months", "kind": "arg", "default": "12"},
+   {"name": "horizon", "kind": "arg", "default": "10"},
+   {"name": "step", "kind": "arg", "default": "1"},
+   {"name": "sim_args", "kind": "arg", "default": "list()"},
+   {"name": "cores", "kind": "arg", "default": "1L"}
+  ],
+  "portfolio_cpcv": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "assets", "kind": "arg", "default": "NULL"},
+   {"name": "methods", "kind": "arg", "default": "c(\"equal\", \"inverse_vol\", \"min_variance\", \"risk_parity\", \"max_sharpe\")"},
+   {"name": "n_groups", "kind": "arg", "default": "6L"},
+   {"name": "test_groups", "kind": "arg", "default": "2L"},
+   {"name": "purge", "kind": "arg", "default": "2L"},
+   {"name": "embargo", "kind": "arg", "default": "2L"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true}
+  ],
+  "portfolio_frontier": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "assets", "kind": "arg", "default": "NULL"},
+   {"name": "n", "kind": "arg", "default": "40L"},
+   {"name": "lower", "kind": "arg", "default": "0"},
+   {"name": "upper", "kind": "arg", "default": "1"},
+   {"name": "cov", "kind": "arg", "default": "c(\"sample\", \"ledoit_wolf\", \"ewma\", \"denoise\", \"gerber\")", "match_arg": true},
+   {"name": "risk_free", "kind": "arg", "default": "0"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true}
+  ],
+  "portfolio_optimize": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "assets", "kind": "arg", "default": "NULL"},
+   {"name": "method", "kind": "arg", "default": "c(\"min_variance\", \"max_sharpe\", \"mean_variance\", \"max_diversification\", \"risk_parity\", \"hrp\", \"min_cvar\", \"min_cdar\", \"inverse_vol\", \"equal\")", "match_arg": true},
+   {"name": "lower", "kind": "arg", "default": "0"},
+   {"name": "upper", "kind": "arg", "default": "1"},
+   {"name": "cov", "kind": "arg", "default": "c(\"sample\", \"ledoit_wolf\", \"ewma\", \"denoise\", \"gerber\")", "match_arg": true},
+   {"name": "mu", "kind": "arg", "default": "NULL"},
+   {"name": "risk_free", "kind": "arg", "default": "0"},
+   {"name": "risk_aversion", "kind": "arg", "default": "4"},
+   {"name": "budget", "kind": "arg", "default": "NULL"},
+   {"name": "alpha", "kind": "arg", "default": "0.05"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
+   {"name": "resample", "kind": "arg", "default": "0L"},
+   {"name": "block", "kind": "arg", "default": "NULL"},
+   {"name": "seed", "kind": "arg", "default": "NULL"}
+  ],
+  "portfolio_returns": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "candidates", "kind": "arg", "default": null},
+   {"name": "frequency", "kind": "arg", "default": "c(\"year\", \"quarter\", \"month\")", "match_arg": true}
+  ],
+  "portfolio_risk_contributions": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "weights", "kind": "arg", "default": null},
+   {"name": "measure", "kind": "arg", "default": "c(\"volatility\", \"cvar\")", "match_arg": true},
+   {"name": "alpha", "kind": "arg", "default": "0.05"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
+   {"name": "cov", "kind": "arg", "default": "c(\"sample\", \"ledoit_wolf\", \"ewma\", \"denoise\", \"gerber\")", "match_arg": true}
+  ],
+  "portfolio_rolling": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "assets", "kind": "arg", "default": null},
+   {"name": "method", "kind": "arg", "default": "\"min_variance\""},
+   {"name": "window", "kind": "arg", "default": "3"},
+   {"name": "every", "kind": "arg", "default": "c(\"month\", \"quarter\", \"year\")", "match_arg": true},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "portfolio_template": [
+   {"name": "name", "kind": "arg", "default": "NULL"},
+   {"name": "map", "kind": "arg", "default": "NULL"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "quantile_regression": [
+   {"name": "y", "kind": "arg", "default": null},
+   {"name": "X", "kind": "arg", "default": "NULL"},
+   {"name": "tau", "kind": "arg", "default": "0.5"},
+   {"name": "intercept", "kind": "arg", "default": "TRUE"},
+   {"name": "tol", "kind": "arg", "default": "1e-10"},
+   {"name": "maxit", "kind": "arg", "default": "2000L"}
+  ],
+  "rebalance_plan": [
+   {"name": "span", "kind": "arg", "default": "NULL"},
+   {"name": "days", "kind": "arg", "default": "NULL"},
+   {"name": "unit", "kind": "arg", "default": "c(\"month\", \"quarter\", \"year\")", "match_arg": true},
+   {"name": "anchor", "kind": "arg", "default": "c(\"start\", \"end\")", "match_arg": true},
+   {"name": "start", "kind": "arg", "default": "NULL"},
+   {"name": "skip", "kind": "arg", "default": "FALSE"},
+   {"name": "thresh", "kind": "arg", "default": "NULL"},
+   {"name": "thresh_type", "kind": "arg", "default": "c(\"absolute\", \"relative\")", "match_arg": true},
+   {"name": "event_col", "kind": "arg", "default": "NULL"},
+   {"name": "event_mode", "kind": "arg", "default": "c(\"additional\", \"replace\")", "match_arg": true},
+   {"name": "event_weight", "kind": "arg", "default": "NULL"}
+  ],
+  "rebalance_trigger": [
+   {"name": "df", "kind": "arg", "default": null},
+   {"name": "type", "kind": "arg", "default": null},
+   {"name": "threshold", "kind": "arg", "default": "10"},
+   {"name": "lev_col", "kind": "arg", "default": "\"target_leverage\""},
+   {"name": "vol_col", "kind": "arg", "default": "\"sigma_ewma\""},
+   {"name": "triggers", "kind": "arg", "default": "NULL"},
+   {"name": "out_col", "kind": "arg", "default": "\"rebal_trigger\""}
+  ],
+  "regime_hmm": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "columns", "kind": "arg", "default": null},
+   {"name": "k", "kind": "arg", "default": "2L"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
+   {"name": "n_start", "kind": "arg", "default": "5L"},
+   {"name": "max_iter", "kind": "arg", "default": "300L"},
+   {"name": "tol", "kind": "arg", "default": "1e-07"},
+   {"name": "seed", "kind": "arg", "default": "1L"}
+  ],
+  "regime_states": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "dates", "kind": "arg", "default": null},
+   {"name": "type", "kind": "arg", "default": "c(\"filtered\", \"smoothed\", \"viterbi\")", "match_arg": true},
+   {"name": "output", "kind": "arg", "default": "c(\"state\", \"probability\")", "match_arg": true},
+   {"name": "state_prob", "kind": "arg", "default": "x$k"},
+   {"name": "lag", "kind": "arg", "default": "1L"}
+  ],
+  "regime_subset": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "condition", "kind": "arg", "default": null},
+   {"name": "min_run", "kind": "arg", "default": "1L"}
+  ],
+  "result_analysis": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "benchmark", "kind": "arg", "default": "NULL"},
+   {"name": "risk_free", "kind": "arg", "default": "0"},
+   {"name": "rolling_years", "kind": "arg", "default": "3"},
+   {"name": "var_levels", "kind": "arg", "default": "c(0.01, 0.05, 0.1)"},
+   {"name": "top_drawdowns", "kind": "arg", "default": "10"},
+   {"name": "inflation", "kind": "arg", "default": "NULL"}
+  ],
+  "result_heatmap": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "inflation", "kind": "arg", "default": "NULL"},
+   {"name": "max_years", "kind": "arg", "default": "30L"}
+  ],
+  "result_index": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "base", "kind": "arg", "default": "100"}
+  ],
+  "scenario_copula": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "assets", "kind": "arg", "default": null},
+   {"name": "n", "kind": "arg", "default": "10000L"},
+   {"name": "family", "kind": "arg", "default": "c(\"t\", \"gaussian\")", "match_arg": true},
+   {"name": "stress", "kind": "arg", "default": "NULL"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
+   {"name": "seed", "kind": "arg", "default": "NULL"}
+  ],
+  "scenario_crisis": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "weights", "kind": "arg", "default": null},
+   {"name": "crises", "kind": "arg", "default": "NULL"},
+   {"name": "rebalance", "kind": "arg", "default": "FALSE"}
+  ],
+  "scenario_entropy_pooling": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "assets", "kind": "arg", "default": null},
+   {"name": "views", "kind": "arg", "default": null},
+   {"name": "states", "kind": "arg", "default": "NULL"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
+   {"name": "prior", "kind": "arg", "default": "NULL"}
+  ],
+  "scenario_risk": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "weights", "kind": "arg", "default": null},
+   {"name": "alpha", "kind": "arg", "default": "0.05"}
+  ],
+  "sensitivity_grid": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "strategy", "kind": "arg", "default": null},
+   {"name": "grid", "kind": "arg", "default": null},
+   {"name": "sim_args", "kind": "arg", "default": "list()"},
+   {"name": "metrics", "kind": "arg", "default": "bootstrap_study_metrics"},
+   {"name": "keep_results", "kind": "arg", "default": "FALSE"},
+   {"name": "cores", "kind": "arg", "default": "1L"}
+  ],
+  "sensitivity_leverage": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "index", "kind": "arg", "default": null},
+   {"name": "leverages", "kind": "arg", "default": "seq(0.5, 4, by = 0.25)", "value": "c(0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4)"},
+   {"name": "rate", "kind": "arg", "default": "0"},
+   {"name": "expense", "kind": "arg", "default": "0"},
+   {"name": "spread", "kind": "arg", "default": "0"},
+   {"name": "strategy", "kind": "arg", "default": "NULL"},
+   {"name": "sim_args", "kind": "arg", "default": "list()"},
+   {"name": "metrics", "kind": "arg", "default": "bootstrap_study_metrics"},
+   {"name": "cores", "kind": "arg", "default": "1L"}
+  ],
+  "sensitivity_rebalancing": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "strategy", "kind": "arg", "default": null},
+   {"name": "frequencies", "kind": "arg", "default": "list(monthly = c(\"month\", 1), bimonthly = c(\"month\", 2), quarterly = c(\"quarter\", 1), four_monthly = c(\"month\", 4), semiannual = c(\"month\", 6), yearly = c(\"year\", 1))"},
+   {"name": "offsets", "kind": "arg", "default": "NULL"},
+   {"name": "bands", "kind": "arg", "default": "NA"},
+   {"name": "band_type", "kind": "arg", "default": "c(\"absolute\", \"relative\")", "match_arg": true},
+   {"name": "include_none", "kind": "arg", "default": "TRUE"},
+   {"name": "sim_args", "kind": "arg", "default": "list()"},
+   {"name": "metrics", "kind": "arg", "default": "bootstrap_study_metrics"},
+   {"name": "cores", "kind": "arg", "default": "1L"}
+  ],
+  "series_align": [
+   {"name": "...", "kind": "dots", "default": null},
+   {"name": "calendar", "kind": "arg", "default": "c(\"day\", \"union\", \"intersect\")", "match_arg": true},
+   {"name": "range", "kind": "arg", "default": "c(\"common\", \"all\")", "match_arg": true},
+   {"name": "fill", "kind": "arg", "default": "c(\"locf\", \"linear\", \"none\")", "match_arg": true},
+   {"name": "max_gap", "kind": "arg", "default": "Inf"},
+   {"name": "start", "kind": "arg", "default": "NULL"},
+   {"name": "end", "kind": "arg", "default": "NULL"}
+  ],
+  "series_align_macro": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "macro", "kind": "arg", "default": null},
+   {"name": "name", "kind": "arg", "default": "\"macro\""},
+   {"name": "lag", "kind": "arg", "default": "0"},
+   {"name": "lag_unit", "kind": "arg", "default": "c(\"day\", \"month\")", "match_arg": true},
+   {"name": "transform", "kind": "arg", "default": "c(\"level\", \"yoy\", \"mom\", \"diff\", \"yoy_diff\")", "match_arg": true},
+   {"name": "periods", "kind": "arg", "default": "NULL"}
+  ],
+  "series_check": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "columns", "kind": "arg", "default": "NULL"},
+   {"name": "jump", "kind": "arg", "default": "20"},
+   {"name": "stale", "kind": "arg", "default": "10"},
+   {"name": "revert", "kind": "arg", "default": "0.8"}
+  ],
+  "series_convert_currency": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "columns", "kind": "arg", "default": null},
+   {"name": "fx", "kind": "arg", "default": null},
+   {"name": "method", "kind": "arg", "default": "c(\"divide\", \"multiply\")", "match_arg": true},
+   {"name": "suffix", "kind": "arg", "default": "NULL"}
+  ],
+  "series_deflate": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "columns", "kind": "arg", "default": null},
+   {"name": "cpi", "kind": "arg", "default": null},
+   {"name": "base_date", "kind": "arg", "default": "NULL"},
+   {"name": "suffix", "kind": "arg", "default": "\"_real\""}
+  ],
+  "series_leverage": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "index", "kind": "arg", "default": null},
+   {"name": "leverage", "kind": "arg", "default": "2"},
+   {"name": "rate", "kind": "arg", "default": "0"},
+   {"name": "expense", "kind": "arg", "default": "0"},
+   {"name": "spread", "kind": "arg", "default": "0"},
+   {"name": "start", "kind": "arg", "default": "100"}
+  ],
+  "series_shift_return": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "columns", "kind": "arg", "default": null},
+   {"name": "target", "kind": "arg", "default": null},
+   {"name": "type", "kind": "arg", "default": "c(\"returns\", \"prices\")", "match_arg": true},
+   {"name": "ppy", "kind": "arg", "default": "NULL"}
+  ],
+  "series_splice": [
+   {"name": "...", "kind": "dots", "default": null},
+   {"name": "dates", "kind": "arg", "default": "NULL"}
+  ],
+  "sharpe_deflated": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "id", "kind": "arg", "default": "NULL"},
+   {"name": "n_trials", "kind": "arg", "default": "NULL"},
+   {"name": "effective", "kind": "arg", "default": "TRUE"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
+   {"name": "dates", "kind": "arg", "default": "NULL"},
+   {"name": "risk_free", "kind": "arg", "default": "0"}
+  ],
+  "sharpe_haircut": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "n_obs", "kind": "arg", "default": "NULL"},
+   {"name": "n_tests", "kind": "arg", "default": "NULL"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
+   {"name": "dates", "kind": "arg", "default": "NULL"},
+   {"name": "risk_free", "kind": "arg", "default": "0"},
+   {"name": "ppy", "kind": "arg", "default": "52"}
+  ],
+  "sharpe_min_track_record": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "target", "kind": "arg", "default": "0"},
+   {"name": "prob", "kind": "arg", "default": "0.95"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
+   {"name": "ppy", "kind": "arg", "default": "NULL"}
+  ],
+  "sharpe_probabilistic": [
+   {"name": "r", "kind": "arg", "default": null},
+   {"name": "benchmark", "kind": "arg", "default": "0"},
+   {"name": "ppy", "kind": "arg", "default": "52"}
+  ],
+  "sharpe_test": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "y", "kind": "arg", "default": null},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
+   {"name": "method", "kind": "arg", "default": "c(\"hac\", \"bootstrap\")", "match_arg": true},
+   {"name": "B", "kind": "arg", "default": "2000L"},
+   {"name": "block", "kind": "arg", "default": "NULL"},
+   {"name": "ppy", "kind": "arg", "default": "NULL"},
+   {"name": "seed", "kind": "arg", "default": "NULL"}
+  ],
+  "signal_analysis": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "signal", "kind": "arg", "default": null},
+   {"name": "target", "kind": "arg", "default": null},
+   {"name": "horizon", "kind": "arg", "default": "21L"},
+   {"name": "step", "kind": "arg", "default": "NULL"},
+   {"name": "bins", "kind": "arg", "default": "5L"},
+   {"name": "breaks", "kind": "arg", "default": "NULL"},
+   {"name": "signal2", "kind": "arg", "default": "NULL"},
+   {"name": "bins2", "kind": "arg", "default": "3L"},
+   {"name": "splits", "kind": "arg", "default": "1L"},
+   {"name": "degree", "kind": "arg", "default": "2L"}
+  ],
+  "signal_combine": [
+   {"name": "...", "kind": "dots", "default": null},
+   {"name": "op", "kind": "arg", "default": "c(\"and\", \"or\")", "match_arg": true}
+  ],
+  "signal_crossover": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "fast", "kind": "arg", "default": "50"},
+   {"name": "slow", "kind": "arg", "default": "200"},
+   {"name": "type", "kind": "arg", "default": "c(\"sma\", \"ema\")", "match_arg": true},
+   {"name": "band", "kind": "arg", "default": "0"},
+   {"name": "lag", "kind": "arg", "default": "0"}
+  ],
+  "signal_drawdown": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "sell_dd", "kind": "arg", "default": "20"},
+   {"name": "buy_dd", "kind": "arg", "default": "10"},
+   {"name": "window", "kind": "arg", "default": "NULL"},
+   {"name": "lag", "kind": "arg", "default": "0"}
+  ],
+  "signal_ema": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "n", "kind": "arg", "default": "200"},
+   {"name": "band", "kind": "arg", "default": "0"},
+   {"name": "lag", "kind": "arg", "default": "0"}
+  ],
+  "signal_momentum": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "n", "kind": "arg", "default": "250"},
+   {"name": "threshold", "kind": "arg", "default": "0"},
+   {"name": "band", "kind": "arg", "default": "0"},
+   {"name": "lag", "kind": "arg", "default": "0"}
+  ],
+  "signal_sma": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "n", "kind": "arg", "default": "200"},
+   {"name": "band", "kind": "arg", "default": "0"},
+   {"name": "lag", "kind": "arg", "default": "0"}
+  ],
+  "signal_state": [
+   {"name": "signal", "kind": "arg", "default": null},
+   {"name": "initial", "kind": "arg", "default": "FALSE"}
+  ],
+  "signal_volatility": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "n", "kind": "arg", "default": "20"},
+   {"name": "threshold", "kind": "arg", "default": "25"},
+   {"name": "band", "kind": "arg", "default": "0"},
+   {"name": "ppy", "kind": "arg", "default": "365.25"},
+   {"name": "lag", "kind": "arg", "default": "0"}
+  ],
+  "sim_costs": [
+   {"name": "order_fee", "kind": "arg", "default": "NULL"},
+   {"name": "dca_fee", "kind": "arg", "default": "NULL"}
+  ],
+  "simulation": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "strategy", "kind": "arg", "default": null},
+   {"name": "start_value", "kind": "arg", "default": "10000"},
+   {"name": "costs", "kind": "arg", "default": "sim_costs()"},
+   {"name": "dca", "kind": "arg", "default": "NULL"},
+   {"name": "rebalance", "kind": "arg", "default": "NULL"},
+   {"name": "splits", "kind": "arg", "default": "NULL"},
+   {"name": "tax", "kind": "arg", "default": "NULL"},
+   {"name": "funds", "kind": "arg", "default": "NULL"},
+   {"name": "risk_free", "kind": "arg", "default": "0"},
+   {"name": "fractions", "kind": "arg", "default": "TRUE"},
+   {"name": "liquidate", "kind": "arg", "default": "FALSE"},
+   {"name": "details", "kind": "arg", "default": "FALSE"}
+  ],
+  "split_rule": [
+   {"name": "thresh", "kind": "arg", "default": null}
+  ],
+  "strategy_add_asset": [
+   {"name": "strategy", "kind": "arg", "default": null},
+   {"name": "name", "kind": "arg", "default": null},
+   {"name": "asset", "kind": "arg", "default": null}
+  ],
+  "strategy_from_weights": [
+   {"name": "weights", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "strategy_remove_asset": [
+   {"name": "strategy", "kind": "arg", "default": null},
+   {"name": "name", "kind": "arg", "default": null}
+  ],
+  "strategy_update_asset": [
+   {"name": "strategy", "kind": "arg", "default": null},
+   {"name": "name", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "strategy_validate": [
+   {"name": "strategy", "kind": "arg", "default": null},
+   {"name": "data", "kind": "arg", "default": "NULL"}
+  ],
+  "tactical_blend": [
+   {"name": "...", "kind": "dots", "default": null},
+   {"name": "shares", "kind": "arg", "default": "NULL"}
+  ],
+  "tactical_conditional_volatility": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "weights", "kind": "arg", "default": null},
+   {"name": "safe", "kind": "arg", "default": null},
+   {"name": "base", "kind": "arg", "default": "1"},
+   {"name": "upper", "kind": "arg", "default": "0.8"},
+   {"name": "lower", "kind": "arg", "default": "0.2"},
+   {"name": "target", "kind": "arg", "default": "NULL"},
+   {"name": "window", "kind": "arg", "default": "63L"},
+   {"name": "min_exposure", "kind": "arg", "default": "0"},
+   {"name": "max_exposure", "kind": "arg", "default": "1"},
+   {"name": "min_history", "kind": "arg", "default": "3"},
+   {"name": "scaling", "kind": "arg", "default": "c(\"inverse\", \"fixed\")", "match_arg": true},
+   {"name": "high_exposure", "kind": "arg", "default": "NULL"},
+   {"name": "low_exposure", "kind": "arg", "default": "NULL"},
+   {"name": "every", "kind": "arg", "default": "c(\"month\", \"week\", \"day\", \"quarter\")", "match_arg": true},
+   {"name": "ppy", "kind": "arg", "default": "NULL"}
+  ],
+  "tactical_glidepath": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "from", "kind": "arg", "default": null},
+   {"name": "to", "kind": "arg", "default": null},
+   {"name": "start", "kind": "arg", "default": "NULL"},
+   {"name": "end", "kind": "arg", "default": "NULL"},
+   {"name": "every", "kind": "arg", "default": "c(\"year\", \"quarter\", \"month\")", "match_arg": true}
+  ],
+  "tactical_rotation": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "assets", "kind": "arg", "default": null},
+   {"name": "top", "kind": "arg", "default": "1L"},
+   {"name": "safe", "kind": "arg", "default": "NULL"},
+   {"name": "absolute", "kind": "arg", "default": "TRUE"},
+   {"name": "canary", "kind": "arg", "default": "NULL"},
+   {"name": "breadth", "kind": "arg", "default": "NULL"},
+   {"name": "lookbacks", "kind": "arg", "default": "c(1, 3, 6, 12)"},
+   {"name": "type", "kind": "arg", "default": "c(\"average\", \"13612w\")", "match_arg": true},
+   {"name": "every", "kind": "arg", "default": "c(\"month\", \"week\", \"quarter\")", "match_arg": true},
+   {"name": "weighting", "kind": "arg", "default": "c(\"equal\", \"inverse_vol\")", "match_arg": true}
+  ],
+  "tactical_rules": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "rules", "kind": "arg", "default": null},
+   {"name": "default", "kind": "arg", "default": null}
+  ],
+  "tactical_simulation": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "weights", "kind": "arg", "default": null},
+   {"name": "rebalance", "kind": "arg", "default": "c(\"switch\", \"month\", \"quarter\", \"year\")", "match_arg": true},
+   {"name": "tolerance", "kind": "arg", "default": "NULL"},
+   {"name": "tolerance_type", "kind": "arg", "default": "c(\"absolute\", \"relative\")", "match_arg": true},
+   {"name": "lag", "kind": "arg", "default": "1L"},
+   {"name": "asset_args", "kind": "arg", "default": "list()"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "tactical_target_volatility": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "weights", "kind": "arg", "default": null},
+   {"name": "safe", "kind": "arg", "default": null},
+   {"name": "target", "kind": "arg", "default": "10"},
+   {"name": "window", "kind": "arg", "default": "63L"},
+   {"name": "max_exposure", "kind": "arg", "default": "1"},
+   {"name": "every", "kind": "arg", "default": "c(\"month\", \"week\", \"day\", \"quarter\")", "match_arg": true},
+   {"name": "ppy", "kind": "arg", "default": "NULL"}
+  ],
+  "tail_covar": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "system", "kind": "arg", "default": null},
+   {"name": "assets", "kind": "arg", "default": null},
+   {"name": "state", "kind": "arg", "default": "NULL"},
+   {"name": "q", "kind": "arg", "default": "0.05"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true}
+  ],
+  "tail_dependence": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "y", "kind": "arg", "default": null},
+   {"name": "q", "kind": "arg", "default": "c(0.01, 0.025, 0.05, 0.1, 0.2)"}
+  ],
+  "tail_regression": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "asset", "kind": "arg", "default": null},
+   {"name": "drivers", "kind": "arg", "default": null},
+   {"name": "quantiles", "kind": "arg", "default": "c(0.05, 0.25, 0.5, 0.75, 0.95)"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"week\", \"day\", \"month\")", "match_arg": true},
+   {"name": "B", "kind": "arg", "default": "199L"},
+   {"name": "block", "kind": "arg", "default": "NULL"},
+   {"name": "seed", "kind": "arg", "default": "NULL"}
+  ],
+  "tax_profile": [
+   {"name": "rate", "kind": "arg", "default": "26.375"},
+   {"name": "church_tax", "kind": "arg", "default": "0"},
+   {"name": "sparer_pauschbetrag", "kind": "arg", "default": "1000"},
+   {"name": "private_sale_threshold", "kind": "arg", "default": "1000"},
+   {"name": "base_rate", "kind": "arg", "default": "NULL"},
+   {"name": "guenstigerpruefung", "kind": "arg", "default": "FALSE"},
+   {"name": "income", "kind": "arg", "default": "NULL"},
+   {"name": "harvest", "kind": "arg", "default": "NULL"}
+  ],
+  "tax_tariff": [
+   {"name": "file", "kind": "arg", "default": "NULL"}
+  ],
+  "view_mean": [
+   {"name": "var", "kind": "arg", "default": null},
+   {"name": "value", "kind": "arg", "default": null},
+   {"name": "op", "kind": "arg", "default": "c(\"=\", \"<=\", \">=\")", "match_arg": true}
+  ],
+  "view_prob": [
+   {"name": "expr", "kind": "arg", "default": null},
+   {"name": "value", "kind": "arg", "default": null},
+   {"name": "op", "kind": "arg", "default": "c(\"=\", \"<=\", \">=\")", "match_arg": true}
+  ],
+  "view_vol": [
+   {"name": "var", "kind": "arg", "default": null},
+   {"name": "value", "kind": "arg", "default": null},
+   {"name": "op", "kind": "arg", "default": "c(\"=\", \"<=\", \">=\")", "match_arg": true}
+  ],
+  "withdrawal_cohorts": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "price", "kind": "arg", "default": "\"value\""},
+   {"name": "inflation", "kind": "arg", "default": "NULL"},
+   {"name": "years", "kind": "arg", "default": "30"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"year\", \"quarter\", \"month\")", "match_arg": true},
+   {"name": "step", "kind": "arg", "default": "c(\"month\", \"year\")", "match_arg": true},
+   {"name": "wrap", "kind": "arg", "default": "FALSE"},
+   {"name": "cape", "kind": "arg", "default": "NULL"},
+   {"name": "base_rate", "kind": "arg", "default": "NULL"},
+   {"name": "inflation_type", "kind": "arg", "default": "c(\"level\", \"rate_pa\")", "match_arg": true}
+  ],
+  "withdrawal_horizon": [
+   {"name": "type", "kind": "arg", "default": "c(\"fixed\", \"uniform\", \"discrete\", \"normal\", \"triangular\", \"sample\")", "match_arg": true},
+   {"name": "years", "kind": "arg", "default": "NULL"},
+   {"name": "prob", "kind": "arg", "default": "NULL"},
+   {"name": "min", "kind": "arg", "default": "NULL"},
+   {"name": "max", "kind": "arg", "default": "NULL"},
+   {"name": "mean", "kind": "arg", "default": "NULL"},
+   {"name": "sd", "kind": "arg", "default": "NULL"},
+   {"name": "mode", "kind": "arg", "default": "NULL"},
+   {"name": "seed", "kind": "arg", "default": "1L"}
+  ],
+  "withdrawal_max_rate": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "rule", "kind": "arg", "default": "withdrawal_rule(\"constant\")"},
+   {"name": "success", "kind": "arg", "default": "0.95"},
+   {"name": "lower", "kind": "arg", "default": "0.5"},
+   {"name": "upper", "kind": "arg", "default": "20"},
+   {"name": "tol", "kind": "arg", "default": "0.005"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "withdrawal_paths": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "column", "kind": "arg", "default": "NULL"},
+   {"name": "strategy", "kind": "arg", "default": "NULL"},
+   {"name": "inflation", "kind": "arg", "default": "NULL"},
+   {"name": "inflation_type", "kind": "arg", "default": "c(\"level\", \"rate_pa\")", "match_arg": true},
+   {"name": "frequency", "kind": "arg", "default": "c(\"year\", \"quarter\", \"month\")", "match_arg": true},
+   {"name": "dates", "kind": "arg", "default": "NULL"},
+   {"name": "start", "kind": "arg", "default": "\"2000-01-01\""},
+   {"name": "cape", "kind": "arg", "default": "NULL"}
+  ],
+  "withdrawal_perfect_rate": [
+   {"name": "real_returns", "kind": "arg", "default": null},
+   {"name": "legacy", "kind": "arg", "default": "0"}
+  ],
+  "withdrawal_rule": [
+   {"name": "type", "kind": "arg", "default": "names(.wd_rules)", "value": "c(\"constant\", \"percent\", \"vanguard\", \"guyton_klinger\", \"floor_ceiling\", \"clyatt\", \"ratchet\", \"endowment\", \"one_over_n\", \"vpw\", \"abw\", \"cape\", \"sensible\", \"hebeler\")", "match_arg": true},
+   {"name": "rate", "kind": "arg", "default": "4"},
+   {"name": "ceiling", "kind": "arg", "default": "NULL"},
+   {"name": "floor", "kind": "arg", "default": "NULL"},
+   {"name": "cut", "kind": "arg", "default": "10"},
+   {"name": "raise", "kind": "arg", "default": "10"},
+   {"name": "cpr_years", "kind": "arg", "default": "15"},
+   {"name": "inflation_cap", "kind": "arg", "default": "Inf"},
+   {"name": "skip_inflation", "kind": "arg", "default": "TRUE"},
+   {"name": "smoothing", "kind": "arg", "default": "NULL"},
+   {"name": "exp_return", "kind": "arg", "default": "NULL"},
+   {"name": "stock_share", "kind": "arg", "default": "60"},
+   {"name": "age", "kind": "arg", "default": "65"},
+   {"name": "max_age", "kind": "arg", "default": "100"},
+   {"name": "fv", "kind": "arg", "default": "0"},
+   {"name": "cape_a", "kind": "arg", "default": "1.75"},
+   {"name": "cape_b", "kind": "arg", "default": "0.5"},
+   {"name": "ratchet_threshold", "kind": "arg", "default": "1.5"},
+   {"name": "ratchet_gap", "kind": "arg", "default": "3"},
+   {"name": "extra", "kind": "arg", "default": "10"},
+   {"name": "floor95", "kind": "arg", "default": "95"},
+   {"name": "min_real", "kind": "arg", "default": "0"},
+   {"name": "max_real", "kind": "arg", "default": "Inf"},
+   {"name": "max_rate", "kind": "arg", "default": "100"}
+  ],
+  "withdrawal_simulation": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "rule", "kind": "arg", "default": "withdrawal_rule(\"constant\")"},
+   {"name": "start_value", "kind": "arg", "default": "1e+06"},
+   {"name": "inflation", "kind": "arg", "default": "0"},
+   {"name": "frequency", "kind": "arg", "default": "c(\"year\", \"quarter\", \"month\")", "match_arg": true},
+   {"name": "strategy", "kind": "arg", "default": "NULL"},
+   {"name": "years", "kind": "arg", "default": "NULL"},
+   {"name": "timing", "kind": "arg", "default": "c(\"start\", \"end\")", "match_arg": true},
+   {"name": "income", "kind": "arg", "default": "NULL"},
+   {"name": "tax", "kind": "arg", "default": "NULL"},
+   {"name": "partial_exemption", "kind": "arg", "default": "30"},
+   {"name": "base_rate", "kind": "arg", "default": "3.2"},
+   {"name": "vorabpauschale", "kind": "arg", "default": "TRUE"},
+   {"name": "sale_cost", "kind": "arg", "default": "0"},
+   {"name": "cost_basis", "kind": "arg", "default": "100"},
+   {"name": "loss_carryforward", "kind": "arg", "default": "0"},
+   {"name": "gamma", "kind": "arg", "default": "2"},
+   {"name": "keep_paths", "kind": "arg", "default": "TRUE"},
+   {"name": "horizon", "kind": "arg", "default": "NULL"}
+  ]
+ },
+ "methods": {
+  "plot.SimLevAnalysis": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "type", "kind": "arg", "default": "c(\"overview\", \"growth\", \"drawdown\", \"rolling\", \"annual\", \"monthly\")", "match_arg": true},
+   {"name": "series", "kind": "arg", "default": "1"},
+   {"name": "metric", "kind": "arg", "default": "\"cagr\""},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevBackcast": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "log", "kind": "arg", "default": "TRUE"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevBackcastFit": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevBootstrapStudy": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "metric", "kind": "arg", "default": "\"cagr\""},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevCoVaR": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevDependence": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "type", "kind": "arg", "default": "c(\"overview\", \"rolling\", \"tail\", \"conditional\", \"scatter\")", "match_arg": true},
+   {"name": "pair", "kind": "arg", "default": "1"},
+   {"name": "condition", "kind": "arg", "default": "1"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevFrontier": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevGoalPlan": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevHMM": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "data", "kind": "arg", "default": "NULL"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevHeatmap": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevOptimization": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevPBO": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevParamSearch": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "metric", "kind": "arg", "default": "x$objective"},
+   {"name": "params", "kind": "arg", "default": "utils::head(x$params, 2)"},
+   {"name": "fun", "kind": "arg", "default": "max"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevResult": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "style", "kind": "arg", "default": "c(\"full\", \"compact\", \"custom\")", "match_arg": true},
+   {"name": "panels", "kind": "arg", "default": "c(\"performance\", \"drawdown\", \"distribution\", \"rolling\", \"monthly\", \"stats\")"},
+   {"name": "compare", "kind": "arg", "default": "NULL"},
+   {"name": "colors", "kind": "arg", "default": "NULL"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevSensitivity": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "metric", "kind": "arg", "default": "\"cagr\""},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevSignalAnalysis": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevTailRegression": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevWalkForward": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevWeights": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "main", "kind": "arg", "default": "\"Zielgewichte\""},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "plot.SimLevWithdrawal": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "probs", "kind": "arg", "default": "c(0.05, 0.25, 0.5, 0.75, 0.95)"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevAnalysis": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevBackcast": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevBackcastFit": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevBootstrapStudy": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevCPCV": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevCoVaR": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevDSR": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevDataCheck": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "max_issues", "kind": "arg", "default": "25L"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevDcaPlan": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevDependence": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevFrontier": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevFundsCosts": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevGoalPlan": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevHMM": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevHarvestRule": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevHeatmap": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevHorizon": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevIncomeRate": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevIncomeTariff": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevLumpSum": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevOptimization": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevPBO": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevParamSearch": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevParamSpace": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevRealityCheck": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevRebalancePlan": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevResult": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevScenarios": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevSensitivity": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevSignalAnalysis": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevSimCosts": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevSplitRule": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevTailRegression": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevTaxProfile": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevTaxTariff": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevWalkForward": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevWeights": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevWithdrawal": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.asset_config": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.bootstrap_config": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.bootstrap_result": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.strategy": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.summary.SimLevBootstrapStudy": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.summary.SimLevParamSearch": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.summary.SimLevResult": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.summary.SimLevWithdrawal": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.withdrawal_rule": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "summary.SimLevAnalysis": [
+   {"name": "object", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "summary.SimLevBackcastFit": [
+   {"name": "object", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "summary.SimLevBootstrapStudy": [
+   {"name": "object", "kind": "arg", "default": null},
+   {"name": "metrics", "kind": "arg", "default": "c(\"cagr\", \"ttwror\", \"max_drawdown\", \"sharpe\", \"ulcer_index\", \"final_value\")"},
+   {"name": "probs", "kind": "arg", "default": "c(0.05, 0.25, 0.5, 0.75, 0.95)"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "summary.SimLevParamSearch": [
+   {"name": "object", "kind": "arg", "default": null},
+   {"name": "top", "kind": "arg", "default": "10L"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "summary.SimLevResult": [
+   {"name": "object", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "summary.SimLevWithdrawal": [
+   {"name": "object", "kind": "arg", "default": null},
+   {"name": "probs", "kind": "arg", "default": "c(0.05, 0.25, 0.5, 0.75, 0.95)"},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "summary.asset_config": [
+   {"name": "object", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "summary.strategy": [
+   {"name": "object", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ]
+ },
+ "classes": [],
+ "other": []
+}

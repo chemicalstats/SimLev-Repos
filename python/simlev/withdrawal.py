@@ -9,9 +9,9 @@
 - :func:`result_index` – zeitgewichteter Wertindex eines Simulationsergebnisses
 - :func:`withdrawal_simulation` – schneller Kern über viele Pfade, optional mit
   vereinfachter deutscher Besteuerung
-- :func:`perfect_withdrawal_rate` – PWR nach Suarez, Suarez & Walz (2015)
+- :func:`withdrawal_perfect_rate` – PWR nach Suarez, Suarez & Walz (2015)
 - :func:`withdrawal_max_rate` – maximale Anfangsrate für eine Ziel-Erfolgsquote
-- :func:`horizon_model` – Laufzeit der Entnahmephase
+- :func:`withdrawal_horizon` – Laufzeit der Entnahmephase
 
 PROZENT-KONVENTION: rate, ceiling, floor, cut, raise, exp_return usw. in
 Prozent (rate = 4 bedeutet 4 % p. a.), wie im restlichen Paket.
@@ -39,8 +39,8 @@ from .bootstrap import (_quiet, _get, _is_boot_result, _is_num, _is_study, _mess
 
 __all__ = [
     "withdrawal_rule", "WithdrawalRule", "withdrawal_cohorts", "WithdrawalPaths", "result_index",
-    "withdrawal_paths", "perfect_withdrawal_rate", "withdrawal_simulation", "SimLevWithdrawal",
-    "SummarySimLevWithdrawal", "withdrawal_max_rate", "horizon_model", "SimLevHorizon", "summary", "plot",
+    "withdrawal_paths", "withdrawal_perfect_rate", "withdrawal_simulation", "SimLevWithdrawal",
+    "SummarySimLevWithdrawal", "withdrawal_max_rate", "withdrawal_horizon", "SimLevHorizon", "summary", "plot",
 ]
 
 _NAN = float("nan")      # R's NaN
@@ -260,7 +260,7 @@ def _rshow(x) -> str:
     return _show(x)
 
 
-def withdrawal_rule(type=tuple(_WD_RULES), rate=4, ceiling=None, floor=None, cut=10, raise_=10,  # noqa: A002
+def withdrawal_rule(*, type=tuple(_WD_RULES), rate=4, ceiling=None, floor=None, cut=10, raise_=10,  # noqa: A002
                     cpr_years=15, inflation_cap=math.inf, skip_inflation=True, smoothing=None, exp_return=None,
                     stock_share=60, age=65, max_age=100, fv=0, cape_a=1.75, cape_b=0.5, ratchet_threshold=1.5,
                     ratchet_gap=3, extra=10, floor95=95, min_real=0, max_real=math.inf, max_rate=100, **kwargs):
@@ -425,7 +425,7 @@ def _df_col(data, name):
 
 
 @_quiet
-def withdrawal_cohorts(data, price="value", inflation=None, years=30, frequency=_DEF_FREQ, step=("month", "year"),
+def withdrawal_cohorts(data, *, price="value", inflation=None, years=30, frequency=_DEF_FREQ, step=("month", "year"),
                        wrap=False, cape=None, base_rate=None, inflation_type=_DEF_IT):
     """Historische Entnahme-Kohorten bilden (siehe R-Dokumentation ``withdrawal_cohorts``).
 
@@ -555,7 +555,7 @@ def withdrawal_cohorts(data, price="value", inflation=None, years=30, frequency=
 
 
 @_quiet
-def result_index(x, base=100):
+def result_index(x, *, base=100):
     """Zeitgewichteter Wertindex eines Simulationsergebnisses.
 
     Returns:
@@ -637,8 +637,8 @@ def _is_result_list(x) -> bool:
 
 
 @_quiet
-def withdrawal_paths(x, column=None, strategy=None, inflation=None, inflation_type=_DEF_IT, frequency=_DEF_FREQ,
-                     dates=None, start_date="2000-01-01", cape=None):
+def withdrawal_paths(x, *, column=None, strategy=None, inflation=None, inflation_type=_DEF_IT, frequency=_DEF_FREQ,
+                     dates=None, start="2000-01-01", cape=None):
     """Pfade in Perioden-Renditen für Entnahmen umwandeln (siehe R-Dokumentation).
 
     Args:
@@ -738,7 +738,7 @@ def withdrawal_paths(x, column=None, strategy=None, inflation=None, inflation_ty
         _stop("Spalte '%s' nicht im Pfad. Verfügbar: %s" % (column, ", ".join(cn)))
     nr = P1.shape[0]
     if dates is None:
-        d0 = np.asarray(_to_date(start_date, "start_date")).astype("datetime64[D]").ravel()[0]
+        d0 = np.asarray(_to_date(start, "start")).astype("datetime64[D]").ravel()[0]
         dates = d0 + np.arange(nr).astype("timedelta64[D]")
     else:
         dates = np.asarray(_to_date(dates, "dates")).astype("datetime64[D]")
@@ -821,7 +821,7 @@ def _annual_real(wp):
 
 
 @_quiet
-def perfect_withdrawal_rate(real_returns, legacy=0):
+def withdrawal_perfect_rate(real_returns, *, legacy=0):
     """Perfect Withdrawal Rate (PWR) je Pfad in Prozent.
 
     Args:
@@ -836,17 +836,17 @@ def perfect_withdrawal_rate(real_returns, legacy=0):
     except (TypeError, ValueError):
         R = None
     if R is None or not R.size or np.isnan(R).any() or (~np.isfinite(R)).any():
-        _stop("perfect_withdrawal_rate: real_returns muss eine Matrix endlicher realer Brutto-Jahresrenditen sein "
+        _stop("withdrawal_perfect_rate: real_returns muss eine Matrix endlicher realer Brutto-Jahresrenditen sein "
               "(1.05 = +5 %).")
     med = r_median(R.ravel(order="F"))
     if med < 0.5:
-        _stop(("perfect_withdrawal_rate: real_returns sieht nicht wie Brutto-Renditen aus (Median %s); erwartet z. B. "
+        _stop(("withdrawal_perfect_rate: real_returns sieht nicht wie Brutto-Renditen aus (Median %s); erwartet z. B. "
                "1.05 für +5 %%, nicht 0.05 (Nettorendite: 1 + r übergeben).") % _fmt1(med, digits=4))
     if (R < 0).any():
-        _stop("perfect_withdrawal_rate: Brutto-Renditen in real_returns müssen >= 0 sein (0 = Totalverlust).")
+        _stop("withdrawal_perfect_rate: Brutto-Renditen in real_returns müssen >= 0 sein (0 = Totalverlust).")
     lv = _num_vec(legacy)
     if lv is None or lv.size != 1 or not math.isfinite(lv[0]) or lv[0] < 0:
-        _stop("perfect_withdrawal_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 %% des Startvermögens; "
+        _stop("withdrawal_perfect_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 %% des Startvermögens; "
               "erhalten: %s)." % _show(legacy))
     legacy = float(lv[0])
     out = np.empty(R.shape[1])
@@ -949,8 +949,14 @@ class SimLevWithdrawal(RList):
 
     # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
-    def format(self) -> str:
-        return self.summary().format()
+    def format(self, **kwargs) -> str:
+        # R print.SimLevWithdrawal(x, ...): print(summary(x, ...)); ``probs`` geht an summary,
+        # andere Schlüsselwörter fängt R's summary-Methode über ``...`` ab (ignoriert).
+        return self.summary(**{k: v for k, v in kwargs.items() if k == "probs"}).format()
+
+    def print(self, **kwargs):
+        print(self.format(**kwargs))
+        return self
 
 
 class SummarySimLevWithdrawal(RList):
@@ -974,9 +980,31 @@ def _is_logical1(v) -> bool:
 
 
 @_quiet
-def withdrawal_simulation(x, rule=None, start_value=1e6, inflation=0, frequency=_DEF_FREQ, strategy=None, years=None,
-                          timing=("start", "end"), income=None, tax_mode=("none", "person"), tax_rate=26.375,
-                          asset_bonus=_D30, sparer_pauschbetrag=1000, base_rate=3.20, vorabpauschale=_D_TRUE,
+def _wd_tax_mode(tax):
+    """Steuerangaben der Person prüfen (R: ``.wd_tax_mode``, F2): ``None`` → ``"none"``, ``tax_profile()`` →
+    ``"person"``; Angaben, die die Entnahmephase nicht abbildet, ergeben einen Fehler."""
+    if tax is None:
+        return "none"
+    from ._sim_blocks import SimLevTaxProfile
+    if not isinstance(tax, SimLevTaxProfile):
+        from ._sim_blocks import _cls
+        _stop("withdrawal_simulation: tax muss NULL oder ein Objekt aus tax_profile() sein, nicht %s." % _cls(tax))
+    ct = tax["church_tax"]
+    pst = tax["private_sale_threshold"]
+    un = [("church_tax", ct is not None and _num1(ct) and float(ct) > 0),
+          ("private_sale_threshold", not (_num1(pst) and float(pst) == 1000)),
+          ("base_rate", tax["base_rate"] is not None), ("guenstigerpruefung", tax["guenstigerpruefung"] is True),
+          ("income", tax["income"] is not None), ("harvest", tax["harvest"] is not None)]
+    bad = [k for k, v in un if v]
+    if bad:
+        _stop("withdrawal_simulation: tax_profile(%s) bildet die Entnahmephase nicht ab; ausgewertet werden rate und "
+              "sparer_pauschbetrag (Basiszins über base_rate von withdrawal_simulation())." % ", ".join(bad))
+    return "person"
+
+
+def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequency=_DEF_FREQ, strategy=None, years=None,
+                          timing=("start", "end"), income=None, tax=None,
+                          partial_exemption=_D30, base_rate=3.20, vorabpauschale=_D_TRUE,
                           sale_cost=_D0, cost_basis=_D100, loss_carryforward=_D0LC, gamma=2, keep_paths=True,
                           horizon=None):
     """Entnahme-Simulation über viele Pfade (siehe R-Dokumentation ``withdrawal_simulation``).
@@ -985,31 +1013,35 @@ def withdrawal_simulation(x, rule=None, start_value=1e6, inflation=0, frequency=
         x: :class:`WithdrawalPaths`, Renditematrix (Perioden x Pfade),
             ``SimLevResult``, Liste von ``SimLevResult`` oder Bootstrap-Studie.
         rule: :func:`withdrawal_rule` (Standard: konstante Regel mit 4 %).
+        tax: ``None`` (ohne Steuern) oder :func:`simlev.tax_profile` (F2: ausgewertet werden ``rate`` und
+            ``sparer_pauschbetrag``); die Bestandsmerkmale bleiben eigene Argumente.
 
     Returns:
         :class:`SimLevWithdrawal`.
     """
     if rule is None:
-        rule = withdrawal_rule("constant")
-    ab_missing = isinstance(asset_bonus, _Dflt)
+        rule = withdrawal_rule(type="constant")
+    ab_missing = isinstance(partial_exemption, _Dflt)
     vp_missing = vorabpauschale is _D_TRUE
     sc_missing = isinstance(sale_cost, _Dflt)
     cb_missing = isinstance(cost_basis, _Dflt)
     lc_missing = isinstance(loss_carryforward, _Dflt)
     if vp_missing:
         vorabpauschale = True
-    asset_bonus = float(asset_bonus) if ab_missing else asset_bonus
+    partial_exemption = float(partial_exemption) if ab_missing else partial_exemption
     sale_cost = float(sale_cost) if sc_missing else sale_cost
     cost_basis = float(cost_basis) if cb_missing else cost_basis
     loss_carryforward = float(loss_carryforward) if lc_missing else loss_carryforward
     freq_arg = frequency
     timing = _match_arg(timing, ("start", "end"))
-    tax_mode = _match_arg(tax_mode, ("none", "person"))
+    tax_mode = _wd_tax_mode(tax)
+    tax_rate = 26.375 if tax is None else tax["rate"]
+    sparer_pauschbetrag = 1000 if tax is None else tax["sparer_pauschbetrag"]
     if horizon is not None and not _is_horizon(horizon):
         if not _num1(horizon) or float(horizon) <= 0:
-            _stop("withdrawal_simulation: 'horizon' muss NULL, ein Objekt aus horizon_model() oder eine Zahl von Jahren "
+            _stop("withdrawal_simulation: 'horizon' muss NULL, ein Objekt aus withdrawal_horizon() oder eine Zahl von Jahren "
                   "> 0 sein, nicht %s." % _show(horizon))
-        horizon = horizon_model("fixed", years=horizon)
+        horizon = withdrawal_horizon(type="fixed", years=horizon)
     if not _is_rule(rule):
         _stop("rule muss mit withdrawal_rule() erstellt werden.")
     if inflation is None:
@@ -1024,11 +1056,8 @@ def withdrawal_simulation(x, rule=None, start_value=1e6, inflation=0, frequency=
             _warn("withdrawal_simulation: %s = %s wird als %s %s gelesen (Prozent-Konvention); gemeint war vermutlich %s."
                   % (arg, _fmt1(v), _fmt1(v), unit, _fmt1(float(v) * 100)))
 
-    chk(tax_rate, "tax_rate", "eine Zahl von 0 bis 100 in Prozent (z. B. 26.375)", 0, 100)
-    frac(tax_rate, "tax_rate")
-    chk(asset_bonus, "asset_bonus", "eine Zahl von 0 bis 100 in Prozent (z. B. 30)", 0, 100)
-    frac(asset_bonus, "asset_bonus")
-    chk(sparer_pauschbetrag, "sparer_pauschbetrag", "eine Zahl >= 0 (EUR je Planjahr, z. B. 1000)")
+    chk(partial_exemption, "partial_exemption", "eine Zahl von 0 bis 100 in Prozent (z. B. 30)", 0, 100)
+    frac(partial_exemption, "partial_exemption")
     chk(sale_cost, "sale_cost", "eine Zahl von 0 bis unter 100 in Prozent (z. B. 0.1)", 0, 99.999)
     chk(cost_basis, "cost_basis", "eine Zahl >= 0 in Prozent des Startwerts (z. B. 100)")
     frac(cost_basis, "cost_basis")
@@ -1097,9 +1126,9 @@ def withdrawal_simulation(x, rule=None, start_value=1e6, inflation=0, frequency=
             else:
                 if tax_mode == "person":
                     _warn("cost_basis: Näherung 100 x (Startwert brutto + Einzahlungen) / Endwert, da das "
-                          "Ansparergebnis keine offenen Lots enthält (simulation() ohne tax_mode = 'person' oder "
+                          "Ansparergebnis keine offenen Lots enthält (simulation() ohne tax = tax_profile() oder "
                           "älteres Ergebnis); realisierte Gewinne und Cash zählen dabei als stille Reserven. "
-                          "Für genaue Werte die Ansparphase mit tax_mode = 'person' rechnen oder cost_basis angeben.")
+                          "Für genaue Werte die Ansparphase mit tax = tax_profile() rechnen oder cost_basis angeben.")
                 inv = _rget(sres, "invested")
                 inv = np.asarray(inv, dtype=np.float64).ravel() if inv is not None else np.zeros(0)
                 start_gross = float(inv[0]) if len(inv) else float(acc["worth"].to_numpy()[0])
@@ -1117,26 +1146,26 @@ def withdrawal_simulation(x, rule=None, start_value=1e6, inflation=0, frequency=
             if mixed:
                 _warn(("Am Ende gehaltene Assets mit verschiedenen Regimen (Investmentfonds: %s; andere: %s): "
                        "withdrawal_simulation() wendet Vorabpauschale (vorabpauschale = %s) und Teilfreistellung "
-                       "(asset_bonus = %s %%) auf den ganzen Bestand an; beide werden nicht übernommen.")
+                       "(partial_exemption = %s %%) auf den ganzen Bestand an; beide werden nicht übernommen.")
                       % (", ".join(n for n, f in zip(hold_n, fund) if f), ", ".join(n for n, f in zip(hold_n, fund) if not f),
-                         "TRUE" if vorabpauschale is True else "FALSE", _sp("%g", float(asset_bonus))))
+                         "TRUE" if vorabpauschale is True else "FALSE", _sp("%g", float(partial_exemption))))
             if any(r == "private_sale" for r in reg):
                 _warn(("Assets mit Regime 'private_sale' (Paragraf 23 EStG: %s) am Ende der Ansparphase: Spekulationsfrist "
                        "und Freigrenze bildet withdrawal_simulation() nicht ab; deren Gewinne werden wie Fondsgewinne mit "
-                       "Teilfreistellung asset_bonus = %s %% besteuert.")
-                      % (", ".join(n for n, r in zip(hold_n, reg) if r == "private_sale"), _sp("%g", float(asset_bonus))))
+                       "Teilfreistellung partial_exemption = %s %% besteuert.")
+                      % (", ".join(n for n, r in zip(hold_n, reg) if r == "private_sale"), _sp("%g", float(partial_exemption))))
             fs = [r != "private_sale" for r in reg]
-            tfs_all = [float(_get(a, "asset_bonus", 0)) if r == "investment_fund" else 0.0 for a, r in zip(hold, reg)]
+            tfs_all = [float(_get(a, "partial_exemption", 0)) if r == "investment_fund" else 0.0 for a, r in zip(hold, reg)]
             tfs = [t for t, f in zip(tfs_all, fs) if f]
             fs_names = [n for n, f in zip(hold_n, fs) if f]
             if ab_missing and not mixed and tfs and all(fs) and all(abs(t - tfs[0]) < 1e-9 for t in tfs):
-                asset_bonus = tfs[0]
-                adopted["asset_bonus"] = asset_bonus
-            elif not mixed and tfs and any(abs(t - float(asset_bonus)) > 1e-9 for t in tfs):
-                _warn(("asset_bonus = %s %%, aber die am Ende gehaltenen Assets haben die Teilfreistellung %s; "
+                partial_exemption = tfs[0]
+                adopted["partial_exemption"] = partial_exemption
+            elif not mixed and tfs and any(abs(t - float(partial_exemption)) > 1e-9 for t in tfs):
+                _warn(("partial_exemption = %s %%, aber die am Ende gehaltenen Assets haben die Teilfreistellung %s; "
                        "withdrawal_simulation() rechnet mit einer Teilfreistellung für den ganzen Bestand "
-                       "(asset_bonus passend angeben; bei verschiedenen Werten keine exakte Abbildung).")
-                      % (_sp("%g", float(asset_bonus)), ", ".join(_sp("%s %g %%", n, t) for n, t in zip(fs_names, tfs))))
+                       "(partial_exemption passend angeben; bei verschiedenen Werten keine exakte Abbildung).")
+                      % (_sp("%g", float(partial_exemption)), ", ".join(_sp("%s %g %%", n, t) for n, t in zip(fs_names, tfs))))
             tr = _rget(sres, "tax_report", {})
             ny_ = _get(tr, "next_year")
 
@@ -1152,7 +1181,7 @@ def withdrawal_simulation(x, rule=None, start_value=1e6, inflation=0, frequency=
                 spb_used1 = float(_get(ny_, "sparer_pauschbetrag_used"))
             spr = []
             for a in hold:
-                s = _get(a, "asset_spread")
+                s = _get(a, "spread")
                 spr.append(float(s) if _is_num(s) else _NA)
             if sc_missing and spr and not any(math.isnan(s) for s in spr):
                 if all(abs(s - spr[0]) < 1e-12 for s in spr):
@@ -1205,7 +1234,7 @@ def withdrawal_simulation(x, rule=None, start_value=1e6, inflation=0, frequency=
         x = withdrawal_paths(x, strategy=strategy, inflation=inflation, frequency=_match_arg(freq_arg, _DEF_FREQ))
     if src_taxed and tax_mode == "person" and vorabpauschale is True:
         _warn("Das Quellergebnis wurde mit Steuern gerechnet (Vorabpauschale im Index enthalten); vorabpauschale = FALSE "
-              "oder eine Quelle mit tax_mode = 'none' vermeidet Doppelzählung.")
+              "oder eine Quelle ohne Steuern (simulation(tax = NULL)) vermeidet Doppelzählung.")
     if not _is_wp(x):
         frequency = _match_arg(freq_arg, _DEF_FREQ)
         try:
@@ -1296,7 +1325,7 @@ def withdrawal_simulation(x, rule=None, start_value=1e6, inflation=0, frequency=
     t0 = time.time()
     core = _wcore.wd_simulate(
         R, I, CAPE, BASE, int(ppy), _WD_RULES[rule["type"]], rp, timing == "start", start_value, inc,
-        tax_mode == "person", float(tax_rate) / 100, float(asset_bonus) / 100, float(sparer_pauschbetrag),
+        tax_mode == "person", float(tax_rate) / 100, float(partial_exemption) / 100, float(sparer_pauschbetrag),
         vorabpauschale is True, float(sale_cost) / 100, float(cost_basis) / 100, float(loss_carryforward),
         keep_paths is True or horizon is not None,
         lots["n"] if lots is not None else np.zeros(0), lots["basis"] if lots is not None else np.zeros(0),
@@ -1336,7 +1365,7 @@ def withdrawal_simulation(x, rule=None, start_value=1e6, inflation=0, frequency=
         return np.array([float(np.cumsum(M[:, j].astype(LD))[-1]) if M.shape[0] else 0.0 for j in range(M.shape[1])])
 
     if ppy == 1 or R.shape[0] >= ppy:
-        pwr = perfect_withdrawal_rate(_annual_real({"returns": R, "inflation": I, "frequency": x["frequency"]}))
+        pwr = withdrawal_perfect_rate(_annual_real({"returns": R, "inflation": I, "frequency": x["frequency"]}))
     else:
         pwr = np.array([_NA])
     pwr = np.resize(np.asarray(pwr, dtype=np.float64), ncol)
@@ -1379,7 +1408,7 @@ def withdrawal_simulation(x, rule=None, start_value=1e6, inflation=0, frequency=
         paths["ce_spending"] = per_path(ce_fun, H)
         if ppy == 1:
             AR = _annual_real({"returns": R, "inflation": I, "frequency": x["frequency"]})
-            paths["pwr"] = np.array([perfect_withdrawal_rate(AR[:int(H[i]), i:i + 1])[0] for i in range(len(H))])
+            paths["pwr"] = np.array([withdrawal_perfect_rate(AR[:int(H[i]), i:i + 1])[0] for i in range(len(H))])
         else:
             paths["pwr"] = _NA
         if keep_paths is not True:
@@ -1396,7 +1425,7 @@ def withdrawal_simulation(x, rule=None, start_value=1e6, inflation=0, frequency=
 
 
 @_quiet
-def withdrawal_max_rate(x, rule=None, success=0.95, lower=0.5, upper=20, tol=0.005, **kwargs):
+def withdrawal_max_rate(x, *, rule=None, success=0.95, lower=0.5, upper=20, tol=0.005, **kwargs):
     """Maximale Anfangsrate für eine Ziel-Erfolgsquote (Bisektion).
 
     Returns:
@@ -1404,7 +1433,7 @@ def withdrawal_max_rate(x, rule=None, success=0.95, lower=0.5, upper=20, tol=0.0
         ``nan``, wenn schon ``lower`` die Zielquote verfehlt.
     """
     if rule is None:
-        rule = withdrawal_rule("constant")
+        rule = withdrawal_rule(type="constant")
     if not _is_rule(rule):
         _stop("rule muss mit withdrawal_rule() erstellt werden.")
     if rule["type"] in ("one_over_n", "vpw", "abw", "cape", "hebeler"):
@@ -1428,11 +1457,11 @@ def withdrawal_max_rate(x, rule=None, success=0.95, lower=0.5, upper=20, tol=0.0
         rl = WithdrawalRule(rule.items())
         rl["rate"] = rate
         if state["first"]:
-            s = withdrawal_simulation(x, rl, keep_paths=False, **kwargs)
+            s = withdrawal_simulation(x, rule=rl, keep_paths=False, **kwargs)
         else:
             with warnings.catch_warnings(), contextlib.redirect_stderr(io.StringIO()):
                 warnings.simplefilter("ignore")
-                s = withdrawal_simulation(x, rl, keep_paths=False, **kwargs)
+                s = withdrawal_simulation(x, rule=rl, keep_paths=False, **kwargs)
         state["first"] = False
         return _weighted_mean(s["paths"]["success"].to_numpy(dtype=np.float64), s["weights"])
 
@@ -1647,37 +1676,37 @@ def _is_horizon(x) -> bool:
     return isinstance(x, SimLevHorizon) or "SimLevHorizon" in getattr(x, "r_class", ())
 
 
-def horizon_model(type=("fixed", "uniform", "discrete", "normal", "triangular", "sample"),  # noqa: A002
+def withdrawal_horizon(*, type=("fixed", "uniform", "discrete", "normal", "triangular", "sample"),  # noqa: A002
                   years=None, prob=None, min=None, max=None, mean=None, sd=None, mode=None, seed=1):  # noqa: A002
-    """Laufzeit der Entnahmephase nach eigenen Annahmen (siehe R-Dokumentation ``horizon_model``)."""
+    """Laufzeit der Entnahmephase nach eigenen Annahmen (siehe R-Dokumentation ``withdrawal_horizon``)."""
     type = _match_arg(type, ("fixed", "uniform", "discrete", "normal", "triangular", "sample"))  # noqa: A001
     need = {"fixed": ["years"], "uniform": ["min", "max"], "discrete": ["years", "prob"],
             "normal": ["mean", "sd", "min", "max"], "triangular": ["min", "mode", "max"], "sample": ["years"]}[type]
     given = {"years": years, "prob": prob, "min": min, "max": max, "mean": mean, "sd": sd, "mode": mode}
     miss = [k for k in need if given[k] is None]
     if miss:
-        _stop("horizon_model('%s') braucht: %s" % (type, ", ".join(miss)))
+        _stop("withdrawal_horizon('%s') braucht: %s" % (type, ", ".join(miss)))
     for k in need:
         v = given[k]
         multi = k == "prob" or (k == "years" and type in ("discrete", "sample"))
         a = _num_vec(v)
         if a is None or not a.size or (~np.isfinite(a)).any() or (not multi and a.size != 1):
-            _stop("horizon_model('%s'): %s muss %s sein (erhalten: %s)." % (
+            _stop("withdrawal_horizon('%s'): %s muss %s sein (erhalten: %s)." % (
                 type, k, "ein endlicher Zahlenvektor" if multi else "eine endliche Zahl", _show(v)))
     for k in [k for k in need if k in ("years", "min", "max", "mean", "mode")]:
         if (_num_vec(given[k]) <= 0).any():
-            _stop("horizon_model('%s'): %s muss > 0 sein (Laufzeit in Jahren; erhalten: %s)." % (type, k, _show(given[k])))
+            _stop("withdrawal_horizon('%s'): %s muss > 0 sein (Laufzeit in Jahren; erhalten: %s)." % (type, k, _show(given[k])))
     if type == "discrete":
         yv, pv = _num_vec(years), _num_vec(prob)
         if len(yv) != len(pv) or (pv < 0).any() or r_sum(pv) <= 0:
-            _stop("horizon_model('discrete'): years und prob gleich lang, prob >= 0 mit Summe > 0.")
+            _stop("withdrawal_horizon('discrete'): years und prob gleich lang, prob >= 0 mit Summe > 0.")
     if min is not None and max is not None and min > max:
         _stop("min <= max erforderlich.")
     if type == "triangular" and (mode < min or mode > max):
-        _stop(_sp("horizon_model('triangular'): mode (%g) muss zwischen min (%g) und max (%g) liegen.",
+        _stop(_sp("withdrawal_horizon('triangular'): mode (%g) muss zwischen min (%g) und max (%g) liegen.",
                   float(mode), float(min), float(max)))
     if type == "normal" and sd < 0:
-        _stop("horizon_model('normal'): sd muss >= 0 sein.")
+        _stop("withdrawal_horizon('normal'): sd muss >= 0 sein.")
     return SimLevHorizon([("type", type), ("seed", seed)] + [(k, given[k]) for k in need])
 
 

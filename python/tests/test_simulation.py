@@ -15,7 +15,8 @@ import pandas as pd
 import pytest
 
 import simlev
-from simlev import asset_config, compute_rebal_trigger, create_strategy, simulation
+from simlev import asset_config, rebalance_trigger, create_strategy, simulation
+from simlev import dca_plan, rebalance_plan, tax_profile  # Bausteine (Etappe 6.3)
 
 
 def days(start, n):
@@ -28,8 +29,8 @@ def make_data(n=100, seed=42):
 
 
 def legacy_strategy():
-    return {"ETF": {"asset_class": "etf", "action_type": "bnh", "asset_share": 1.0, "asset_spread": 0.1,
-                    "asset_bonus": 0}}
+    return {"ETF": {"asset_class": "etf", "trading": "bnh", "share": 1.0, "spread": 0.1,
+                    "partial_exemption": 0}}
 
 
 def weekdays(start, end):
@@ -54,26 +55,25 @@ def test_runs_and_structure():
 def test_dca_increases_value_and_records_flows():
     d = make_data(365)
     r0 = simulation(d, legacy_strategy(), start_value=10000)
-    r1 = simulation(d, legacy_strategy(), start_value=10000, dca_mode=True, dca_value=1000, dca_span=1,
-                    dca_unit="month", dca_days=1)
+    r1 = simulation(d, legacy_strategy(), start_value=10000, dca=dca_plan(value=1000, span=1, days=1, unit="month"))
     assert r1.worth[-1] > r0.worth[-1]
     assert r1.report["ETF"]["flows"].sum() > 0
 
 
 def test_tax_modes_run():
     d = make_data()
-    simulation(d, legacy_strategy(), tax_mode="none", liquidate=True)
-    simulation(d, legacy_strategy(), tax_mode="person", tax_rate=26.375, liquidate=True)
+    simulation(d, legacy_strategy(), liquidate=True)
+    simulation(d, legacy_strategy(), tax=tax_profile(rate=26.375), liquidate=True)
 
 
 def test_rebalancing_runs():
     d = make_data(365)
     rng = np.random.default_rng(42)
     d["BOND"] = 50 * np.cumprod(1 + rng.normal(0.0002, 0.005, 365))
-    s = {"ETF": {"asset_class": "etf", "action_type": "bnh", "asset_share": 0.6, "asset_spread": 0.1, "asset_bonus": 0},
-         "BOND": {"asset_class": "etf", "action_type": "bnh", "asset_share": 0.4, "asset_spread": 0.05,
-                  "asset_bonus": 30}}
-    simulation(d, s, balance_mode=True, balance_span=1, balance_unit="quarter", balance_days=1)
+    s = {"ETF": {"asset_class": "etf", "trading": "bnh", "share": 0.6, "spread": 0.1, "partial_exemption": 0},
+         "BOND": {"asset_class": "etf", "trading": "bnh", "share": 0.4, "spread": 0.05,
+                  "partial_exemption": 30}}
+    simulation(d, s, rebalance=rebalance_plan(span=1, days=1, unit="quarter"))
 
 
 def test_single_day_and_zero_start():
@@ -83,7 +83,7 @@ def test_single_day_and_zero_start():
 
 
 def test_weights_must_sum_to_one():
-    s = create_strategy(A=asset_config(asset_share=0.5), B=asset_config(asset_share=0.4))
+    s = create_strategy(A=asset_config(share=0.5), B=asset_config(share=0.4))
     d = make_data()
     d["A"] = d["ETF"]
     d["B"] = d["ETF"]
@@ -146,13 +146,13 @@ def test_risk_free_variants():
 def test_dca_without_days_and_rebalancing_sells():
     rng = np.random.default_rng(1)
     d = pd.DataFrame({"date": days("2022-01-01", 365), "ETF": 100 * np.cumprod(1 + rng.normal(4e-4, 0.01, 365))})
-    r = simulation(d, legacy_strategy(), start_value=1000, dca_mode=True, dca_value=1000, dca_span=1)
+    r = simulation(d, legacy_strategy(), start_value=1000, dca=dca_plan(value=1000, span=1))
     assert (np.abs(r.report["ETF"]["flows"]) > 1e-9).sum() > 9
     rng = np.random.default_rng(3)
     d2 = pd.DataFrame({"date": days("2021-01-01", 730), "A": 100 * np.cumprod(1 + rng.normal(8e-4, 0.012, 730)),
                        "B": 100 * np.cumprod(1 + rng.normal(-2e-4, 0.004, 730))})
-    s = create_strategy(A=asset_config("etf", "bnh", 0.5, 0, 30), B=asset_config("etf", "bnh", 0.5, 0, 30))
-    r2 = simulation(d2, s, balance_mode=True, balance_span=1, balance_unit="month")
+    s = create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=0.5, spread=0, partial_exemption=30), B=asset_config(asset_class="etf", trading="bnh", share=0.5, spread=0, partial_exemption=30))
+    r2 = simulation(d2, s, rebalance=rebalance_plan(span=1, unit="month"))
     assert r2.sells.sum() > 0
 
 
@@ -161,8 +161,8 @@ def test_event_col_runs():
     n = 300
     d = pd.DataFrame({"date": days("2022-01-01", n), "ETF": 100 * np.cumprod(1 + rng.normal(4e-4, 0.01, n)),
                       "target_leverage": 2 + 0.5 * np.sin(np.linspace(0, 4 * np.pi, n))})
-    d = compute_rebal_trigger(d, type="abs_leverage", threshold=10)
-    r = simulation(d, legacy_strategy(), event_col="rebal_trigger")
+    d = rebalance_trigger(d, type="abs_leverage", threshold=10)
+    r = simulation(d, legacy_strategy(), rebalance=rebalance_plan(event_col="rebal_trigger", event_mode="replace", skip=True))
     assert math.isfinite(r.worth[-1])
 
 
@@ -173,7 +173,7 @@ def _wd_2022():
 
 
 def test_dca_shifted_off_filled_days():
-    r = quiet(simulation, _wd_2022(), legacy_strategy(), start_value=1000, dca_mode=True, dca_value=1000, dca_span=1)
+    r = quiet(simulation, _wd_2022(), legacy_strategy(), start_value=1000, dca=dca_plan(value=1000, span=1))
     fl = np.flatnonzero(np.abs(r.report["ETF"]["flows"]) > 1e-9)
     assert r.filled[fl].sum() == 0
     flow_dates = set(str(x) for x in r.dates[fl])
@@ -181,8 +181,7 @@ def test_dca_shifted_off_filled_days():
 
 
 def test_month_end_pulled_back():
-    r = quiet(simulation, _wd_2022(), legacy_strategy(), start_value=1000, dca_mode=True, dca_value=1000,
-              dca_span=1, dca_days=1, dca_anchor="end")
+    r = quiet(simulation, _wd_2022(), legacy_strategy(), start_value=1000, dca=dca_plan(value=1000, span=1, days=1, anchor="end"))
     fl = np.flatnonzero(np.abs(r.report["ETF"]["flows"]) > 1e-9)
     flow_dates = set(str(x) for x in r.dates[fl])
     assert r.filled[fl].sum() == 0
@@ -199,7 +198,7 @@ def pulse(buy_on, sell_on=None, n=120, seed=2):
     return d
 
 
-SIG = create_strategy(SIG=asset_config("etf", "signal", 1, 0, 30, signal_buy="buy_sig", signal_sell="sell_sig"))
+SIG = create_strategy(SIG=asset_config(asset_class="etf", trading="signal", share=1, spread=0, partial_exemption=30, signal_buy="buy_sig", signal_sell="sell_sig"))
 
 
 def idx(r, day):
@@ -207,11 +206,11 @@ def idx(r, day):
 
 
 def test_signal_entry_exit_on_rebalance_day():
-    r = simulation(pulse("2022-02-01"), SIG, balance_mode=True, balance_span=1, balance_unit="month")
+    r = simulation(pulse("2022-02-01"), SIG, rebalance=rebalance_plan(span=1, unit="month"))
     assert r.report["SIG"]["worth"][idx(r, "2022-02-02")] > 0
     assert r.report["SIG"]["worth"][idx(r, "2022-01-15")] == 0
     assert r.report["SIG"]["money"][idx(r, "2022-01-15")] > 9999
-    r2 = simulation(pulse("2022-01-10", "2022-03-01"), SIG, balance_mode=True, balance_span=1, balance_unit="month")
+    r2 = simulation(pulse("2022-01-10", "2022-03-01"), SIG, rebalance=rebalance_plan(span=1, unit="month"))
     assert r2.report["SIG"]["worth"][idx(r2, "2022-02-28")] > 0
     assert r2.report["SIG"]["worth"][idx(r2, "2022-03-02")] == 0
     assert r2.report["SIG"]["money"][idx(r2, "2022-03-02")] > 0
@@ -222,9 +221,9 @@ def test_inactive_signal_asset_holds_cash_reserve():
     n = 120
     d = pd.DataFrame({"date": days("2022-01-03", n), "W": 100 * np.cumprod(1 + rng.normal(4e-4, 0.01, n)),
                       "S": 100 * np.cumprod(1 + rng.normal(4e-4, 0.01, n)), "b": False, "sl": False})
-    s = create_strategy(W=asset_config("etf", "bnh", 0.5, 0, 30),
-                        S=asset_config("etf", "signal", 0.5, 0, 30, signal_buy="b", signal_sell="sl"))
-    r = simulation(d, s, balance_mode=True, balance_span=1, balance_unit="month", balance_thresh=1)
+    s = create_strategy(W=asset_config(asset_class="etf", trading="bnh", share=0.5, spread=0, partial_exemption=30),
+                        S=asset_config(asset_class="etf", trading="signal", share=0.5, spread=0, partial_exemption=30, signal_buy="b", signal_sell="sl"))
+    r = simulation(d, s, rebalance=rebalance_plan(span=1, unit="month", thresh=1))
     i = idx(r, "2022-02-02")
     assert r.report["S"]["worth"].max() == 0
     total = r.report["W"]["total"][i] + r.report["S"]["total"][i]
@@ -233,7 +232,7 @@ def test_inactive_signal_asset_holds_cash_reserve():
 
 
 # ── Vorabpauschale (§ 18 Abs. 3 InvStG) ───────────────────────────────────
-VP_S = create_strategy(ETF=asset_config("etf", "bnh", 1, 0, 30))
+VP_S = create_strategy(ETF=asset_config(asset_class="etf", trading="bnh", share=1, spread=0, partial_exemption=30))
 
 
 def vp_data(end="2023-01-31", gaps=True, seed=9):
@@ -251,8 +250,7 @@ def counts(r, d):
 
 def test_vp_settled_first_trading_day():
     d = vp_data()
-    r = quiet(simulation, d, VP_S, tax_mode="person", base_rate_flex=True, base_rate_data="base_rate",
-              use_sparer_pauschbetrag=False)
+    r = quiet(simulation, d, VP_S, tax=tax_profile(sparer_pauschbetrag=0, base_rate="base_rate"))
     c = counts(r, d)
     assert c[idx(r, "2022-12-30")] > c[idx(r, "2023-01-02")]
     assert r.tax_report["total_taxes_paid"] > 0
@@ -260,15 +258,13 @@ def test_vp_settled_first_trading_day():
 
 def test_vp_immediate_when_simulation_ends_dec31():
     d = vp_data("2022-12-31", gaps=False)
-    r = simulation(d, VP_S, tax_mode="person", base_rate_flex=True, base_rate_data="base_rate",
-                   use_sparer_pauschbetrag=False)
+    r = simulation(d, VP_S, tax=tax_profile(sparer_pauschbetrag=0, base_rate="base_rate"))
     assert r.tax_report["total_taxes_paid"] > 0
 
 
 def test_deferred_vp_not_double_counted():
     d = vp_data("2024-01-31")
-    r = quiet(simulation, d, VP_S, tax_mode="person", base_rate_flex=True, base_rate_data="base_rate",
-              use_sparer_pauschbetrag=False)
+    r = quiet(simulation, d, VP_S, tax=tax_profile(sparer_pauschbetrag=0, base_rate="base_rate"))
     c = counts(r, d)
     assert c[idx(r, "2022-12-30")] - c[idx(r, "2023-01-03")] > 0
     assert c[idx(r, "2023-12-29")] - c[idx(r, "2024-01-03")] > 0
@@ -280,15 +276,15 @@ def linear_data():
 
 
 def test_tax_rate_in_percent():
-    s = create_strategy(ETF=asset_config("etf", "bnh", 1, 0, 0))
-    r = simulation(linear_data(), s, tax_mode="person", tax_rate=26.375, use_sparer_pauschbetrag=False, liquidate=True)
+    s = create_strategy(ETF=asset_config(asset_class="etf", trading="bnh", share=1, spread=0, partial_exemption=0))
+    r = simulation(linear_data(), s, tax=tax_profile(rate=26.375, sparer_pauschbetrag=0), liquidate=True)
     gain = 10000 * 1.5 - 10000
     assert r.tax_report["total_taxes_paid"] / gain == pytest.approx(0.26375, rel=1e-6)
 
 
 def test_asset_bonus_in_percent():
-    s = create_strategy(ETF=asset_config("etf", "bnh", 1, 0, 30))
-    r = simulation(linear_data(), s, tax_mode="person", tax_rate=25, use_sparer_pauschbetrag=False, liquidate=True)
+    s = create_strategy(ETF=asset_config(asset_class="etf", trading="bnh", share=1, spread=0, partial_exemption=30))
+    r = simulation(linear_data(), s, tax=tax_profile(rate=25, sparer_pauschbetrag=0), liquidate=True)
     assert r.tax_report["total_taxes_paid"] == pytest.approx(5000 * 0.7 * 0.25, rel=1e-6)
 
 
@@ -299,8 +295,8 @@ def test_vp_offset_against_loss_pot():
     d = pd.DataFrame({"date": dd, "B": 100 * 1.06 ** t, "L": 100 - 40 * t, "base_rate": 3.0})
     d["buyL"] = d["date"] == pd.Timestamp("2019-02-01")
     d["sellL"] = d["date"] == pd.Timestamp("2019-11-01")
-    s = create_strategy(B=asset_config("etf", "bnh", 0.9, 0, 0),
-                        L=asset_config("etf", "signal", 0.1, 0, 0, signal_buy="buyL", signal_sell="sellL"))
+    s = create_strategy(B=asset_config(asset_class="etf", trading="bnh", share=0.9, spread=0, partial_exemption=0),
+                        L=asset_config(asset_class="etf", trading="signal", share=0.1, spread=0, partial_exemption=0, signal_buy="buyL", signal_sell="sellL"))
 
     def run(with_loss):
         dl = d.copy()
@@ -308,8 +304,7 @@ def test_vp_offset_against_loss_pot():
             dl["buyL"] = False
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            r = simulation(dl, s, start_value=10000, tax_mode="person", tax_rate=25, base_rate_flex=True, base_rate_data="base_rate",
-                           use_sparer_pauschbetrag=False, details=True)
+            r = simulation(dl, s, start_value=10000, tax=tax_profile(rate=25, sparer_pauschbetrag=0, base_rate="base_rate"), details=True)
         out = buf.getvalue()
         paid = sum(float(x) for x in re.findall(r"Zahlung Vorabpauschale ([0-9.]+) EUR", out))
         paid += sum(float(x) for x in re.findall(r"Anteile verkauft für den Rest von ([0-9.]+) EUR", out))
@@ -328,13 +323,13 @@ def r1():
     n = 200
     d = pd.DataFrame({"date": days("2022-01-03", n), "A": 100 * np.cumprod(1 + rng.normal(15e-4, 0.01, n)),
                       "B": 100 * np.cumprod(1 + rng.normal(-2e-4, 0.004, n))})
-    s = create_strategy(A=asset_config("etf", "bnh", 0.7, 0, 30), B=asset_config("etf", "bnh", 0.3, 0, 30))
+    s = create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=0.7, spread=0, partial_exemption=30), B=asset_config(asset_class="etf", trading="bnh", share=0.3, spread=0, partial_exemption=30))
     return d, s
 
 
 def test_dca_split_by_strategy_weights():
     d, s = r1()
-    r = simulation(d, s, dca_mode=True, dca_value=500, dca_span=1)
+    r = simulation(d, s, dca=dca_plan(value=500, span=1))
     i = int(np.flatnonzero((r.report["A"]["flows"] > 0) & (r.dates > np.datetime64("2022-05-01")))[0])
     assert r.report["A"]["flows"][i] == pytest.approx(350, abs=1e-9)
     assert r.report["B"]["flows"][i] == pytest.approx(150, abs=1e-9)
@@ -342,7 +337,7 @@ def test_dca_split_by_strategy_weights():
 
 def test_balance_dca_fills_deficits():
     d, s = r1()
-    r = simulation(d, s, dca_mode=True, dca_value=500, dca_span=1, balance_dca=True)
+    r = simulation(d, s, dca=dca_plan(value=500, span=1, fill_deficits=True))
     fa, fb = r.report["A"]["flows"], r.report["B"]["flows"]
     j = int(np.flatnonzero((fa + fb > 499) & (r.dates > np.datetime64("2022-05-01")))[0])
     ta, tb = r.report["A"]["total"][j - 1], r.report["B"]["total"][j - 1]
@@ -353,9 +348,9 @@ def test_dca_renormalized_over_active_assets():
     d, _ = r1()
     rng = np.random.default_rng(2)
     d["C"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.006, len(d)))
-    s = create_strategy(A=asset_config("etf", "bnh", 0.63, 0, 30), B=asset_config("etf", "bnh", 0.27, 0, 30),
-                        C=asset_config("etf", "bnh", 0.10, 0, 0, asset_start="2022-04-01"))
-    r = simulation(d, s, dca_mode=True, dca_value=500, dca_span=1)
+    s = create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=0.63, spread=0, partial_exemption=30), B=asset_config(asset_class="etf", trading="bnh", share=0.27, spread=0, partial_exemption=30),
+                        C=asset_config(asset_class="etf", trading="bnh", share=0.10, spread=0, partial_exemption=0, start="2022-04-01"))
+    r = simulation(d, s, dca=dca_plan(value=500, span=1))
     k1 = int(np.flatnonzero((r.report["A"]["flows"] > 0) & (r.dates < np.datetime64("2022-04-01")))[0])
     k2 = int(np.flatnonzero(r.report["C"]["flows"] > 0)[0])
     assert r.report["A"]["flows"][k1] == pytest.approx(350, abs=1e-9)
@@ -366,7 +361,7 @@ def test_dca_renormalized_over_active_assets():
 
 # ── Ausgabe ───────────────────────────────────────────────────────────────
 def test_print_and_summary(capsys):
-    r = simulation(make_data(400), legacy_strategy(), tax_mode="person", liquidate=True)
+    r = simulation(make_data(400), legacy_strategy(), tax=tax_profile(), liquidate=True)
     r.print()
     res = r.summary()
     print(res)
@@ -402,9 +397,8 @@ def test_liquidate_keeps_vp_in_earlier_years():
     rng = np.random.default_rng(9)
     wd = weekdays("2022-01-01", "2023-06-30")
     d = pd.DataFrame({"date": wd, "ETF": 100 * np.cumprod(1 + rng.normal(8e-4, 0.008, len(wd))), "base_rate": 2.55})
-    s = create_strategy(ETF=asset_config("etf", "bnh", asset_share=1, asset_spread=0, asset_bonus=30))
-    r = quiet(simulation, d, s, start_value=10000, tax_mode="person", tax_rate=26.375, base_rate_flex=True,
-              base_rate_data="base_rate", use_sparer_pauschbetrag=False, liquidate=True)
+    s = create_strategy(ETF=asset_config(asset_class="etf", trading="bnh", share=1, spread=0, partial_exemption=30))
+    r = quiet(simulation, d, s, start_value=10000, tax=tax_profile(rate=26.375, sparer_pauschbetrag=0, base_rate="base_rate"), liquidate=True)
     px = d.set_index("date").ETF.reindex(pd.DatetimeIndex(r.dates)).to_numpy()
     cnt = r.report["ETF"]["worth"] / px
     assert cnt[idx(r, "2022-12-30")] > cnt[idx(r, "2023-01-02")]
@@ -415,8 +409,7 @@ def test_balance_thresh_in_percent():
     n = 730
     data = pd.DataFrame({"date": days("2021-01-01", n), "A": 100 * np.cumprod(1 + rng.normal(8e-4, 0.012, n)),
                          "B": 100 * np.cumprod(1 + rng.normal(-2e-4, 0.004, n))})
-    st = create_strategy(A=asset_config("etf", "bnh", asset_share=0.5, asset_spread=0, asset_bonus=30),
-                         B=asset_config("etf", "bnh", asset_share=0.5, asset_spread=0, asset_bonus=30))
-    kw = dict(start_value=10000, balance_mode=True, balance_span=1, balance_unit="month")
-    assert simulation(data, st, balance_thresh=5, **kw).sells.sum() > 0
-    assert simulation(data, st, balance_thresh=90, **kw).sells.sum() == 0
+    st = create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=0.5, spread=0, partial_exemption=30),
+                         B=asset_config(asset_class="etf", trading="bnh", share=0.5, spread=0, partial_exemption=30))
+    assert simulation(data, st, start_value=10000, rebalance=rebalance_plan(span=1, unit="month", thresh=5)).sells.sum() > 0
+    assert simulation(data, st, start_value=10000, rebalance=rebalance_plan(span=1, unit="month", thresh=90)).sells.sum() == 0

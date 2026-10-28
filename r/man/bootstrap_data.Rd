@@ -4,7 +4,7 @@
 \alias{bootstrap_data}
 \title{Bootstrap-Pfad als data.frame fuer simulation()}
 \usage{
-bootstrap_data(result, i = 1L, dates = NULL, start_date = "2000-01-01")
+bootstrap_data(result, i = 1L, dates = NULL, start = "2000-01-01")
 }
 \arguments{
 \item{result}{\code{bootstrap_result} aus \code{\link[=bootstrap]{bootstrap()}} oder eine einzelne
@@ -15,9 +15,9 @@ Pfadmatrix (z. B. \code{result$paths[[i]]}).}
 \item{dates}{Datumsvektor mit genau so vielen Elementen wie der Pfad Zeilen
 hat (\code{path_length + 1}), z. B. ein Handelstagskalender;
 \code{NULL} (Standard) = aufeinanderfolgende Kalendertage ab
-\code{start_date}.}
+\code{start}.}
 
-\item{start_date}{Startdatum fuer \code{dates = NULL} (Zeichenkette oder
+\item{start}{Startdatum fuer \code{dates = NULL} (Zeichenkette oder
 Date, Standard "2000-01-01").}
 }
 \value{
@@ -48,7 +48,7 @@ d <- data.frame(r = 1 + rnorm(800, 3e-4, 0.01))
 cfg <- bootstrap_config(c(idx = "r"), letfs = list(list(base = "idx", leverage = 2)))
 b <- bootstrap(d, cfg, "stationary", n = 2, params = list(L = 20),
   path_length = 400, seed = 1, progress = FALSE)
-x <- bootstrap_data(b, i = 2, start_date = "2030-01-01")
+x <- bootstrap_data(b, i = 2, start = "2030-01-01")
 head(x, 3)
 res <- simulation(x, create_strategy(idx_l2 = asset_config("etf", "bnh")))
 res$cagr

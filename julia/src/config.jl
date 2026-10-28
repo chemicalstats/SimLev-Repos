@@ -10,8 +10,8 @@
 const ASSET_CLASSES = ("etf", "etn", "etc", "certificate", "etn_standard", "etn_deliverable")
 const ACTION_TYPES = ("bnh", "signal")
 const VALID_REGIMES = ("investment_fund", "capital_gains", "private_sale")
-const _FIELDS = ("asset_class", "action_type", "asset_share", "asset_spread", "asset_bonus",
-                 "deliverable", "asset_start", "tax_regime", "signal_buy", "signal_sell")
+const _FIELDS = ("asset_class", "trading", "share", "spread", "partial_exemption",
+                 "deliverable", "start", "tax_regime", "signal_buy", "signal_sell")
 
 "Gemeinsame Methoden der RList-Hüllen (`T` hat das Feld `data::RList`)."
 macro _rlist_wrapper(T, classes)
@@ -46,8 +46,8 @@ struct AssetConfig <: AbstractDict{String,Any}
     data::RList
 end
 @_rlist_wrapper AssetConfig ("asset_config", "list")
-Base.show(io::IO, a::AssetConfig) = print(io, "AssetConfig(", r_deparse(a["asset_class"]), ", ", r_deparse(a["action_type"]),
-                                          ", ", r_deparse(a["asset_share"]), ")")
+Base.show(io::IO, a::AssetConfig) = print(io, "AssetConfig(", r_deparse(a["asset_class"]), ", ", r_deparse(a["trading"]),
+                                          ", ", r_deparse(a["share"]), ")")
 
 "Geordnete Sammlung benannter AssetConfig-Objekte (R-Klasse `strategy`)."
 struct Strategy <: AbstractDict{String,Any}
@@ -124,15 +124,15 @@ _kvpairs(x::AbstractDict) = [String(string(k)) => v for (k, v) in x]
 _to_date_or_nothing(x) = (z = _as_date(x); z === nothing ? nothing : from_days(z))
 
 """
-    asset_config(asset_class = "etf", action_type = "bnh", asset_share = 1.0,
-                 asset_spread = 0.1, asset_bonus = 0.0, deliverable = false,
-                 asset_start = nothing, tax_regime = nothing, signal_buy = nothing,
+    asset_config(asset_class = "etf", trading = "bnh", share = 1.0,
+                 spread = 0.1, partial_exemption = 0.0, deliverable = false,
+                 start = nothing, tax_regime = nothing, signal_buy = nothing,
                  signal_sell = nothing)
 
 Asset-Konfiguration erstellen und prüfen (R: `asset_config()`). Alle Argumente
 dürfen positionell (Reihenfolge wie in R) oder als Schlüsselwort angegeben
-werden. Raten in Prozent: `asset_spread = 0.1` = 0,1 % voller Bid-Ask-Spread,
-`asset_bonus = 30` = 30 % Teilfreistellung; `asset_share` ist ein Anteil in (0, 1].
+werden. Raten in Prozent: `spread = 0.1` = 0,1 % voller Bid-Ask-Spread,
+`partial_exemption = 30` = 30 % Teilfreistellung; `share` ist ein Anteil in (0, 1].
 """
 function asset_config(args...; kw...)
     length(args) > length(_FIELDS) && error("unused argument ($(r_deparse(args[length(_FIELDS)+1])))")
@@ -151,12 +151,12 @@ end
 
 function _asset_config(vals::Dict{String,Any})
     asset_class = match_arg(get(vals, "asset_class", ASSET_CLASSES), ASSET_CLASSES, "asset_class")
-    action_type = match_arg(get(vals, "action_type", ACTION_TYPES), ACTION_TYPES, "action_type")
-    asset_share = get(vals, "asset_share", 1.0)
-    asset_spread = get(vals, "asset_spread", 0.1)
-    asset_bonus = get(vals, "asset_bonus", 0.0)
+    trading = match_arg(get(vals, "trading", ACTION_TYPES), ACTION_TYPES, "trading")
+    share = get(vals, "share", 1.0)
+    spread = get(vals, "spread", 0.1)
+    partial_exemption = get(vals, "partial_exemption", 0.0)
     deliverable = get(vals, "deliverable", false)
-    asset_start = get(vals, "asset_start", nothing)
+    start = get(vals, "start", nothing)
     tax_regime = get(vals, "tax_regime", nothing)
     signal_buy = get(vals, "signal_buy", nothing)
     signal_sell = get(vals, "signal_sell", nothing)
@@ -167,29 +167,29 @@ function _asset_config(vals::Dict{String,Any})
         @warn "asset_config: asset_class = \"etn_deliverable\" ist veraltet; stattdessen asset_class = \"etn\" mit deliverable = TRUE verwenden."
         asset_class = "etn"; deliverable = true
     end
-    for (x, arg) in ((asset_share, "asset_share"), (asset_spread, "asset_spread"), (asset_bonus, "asset_bonus"))
+    for (x, arg) in ((share, "share"), (spread, "spread"), (partial_exemption, "partial_exemption"))
         _is_num1(x) || error("asset_config: $arg muss eine einzelne Zahl sein, nicht $(r_deparse(x)).")
     end
-    if asset_share <= 0 || asset_share > 1
-        error("asset_config: asset_share muss ein Anteil größer 0 und höchstens 1 sein (z. B. 0.6 für 60 %), nicht " *
-              r_format1(asset_share) *
-              (asset_share > 1 && asset_share <= 100 ?
-               "; für $(r_format1(asset_share)) % asset_share = $(r_format1(asset_share / 100)) angeben" : "") * ".")
+    if share <= 0 || share > 1
+        error("asset_config: share muss ein Anteil größer 0 und höchstens 1 sein (z. B. 0.6 für 60 %), nicht " *
+              r_format1(share) *
+              (share > 1 && share <= 100 ?
+               "; für $(r_format1(share)) % share = $(r_format1(share / 100)) angeben" : "") * ".")
     end
-    asset_spread < 0 && error("asset_config: asset_spread muss >= 0 sein (voller Spread in Prozent, z. B. 0.1 für 0,1 %), nicht $(r_format1(asset_spread)).")
-    (asset_bonus < 0 || asset_bonus > 100) &&
-        error("asset_config: asset_bonus muss zwischen 0 und 100 liegen (Teilfreistellung in Prozent, z. B. 30 für 30 %), nicht $(r_format1(asset_bonus)).")
-    if asset_bonus > 0 && asset_bonus < 1
-        @warn "asset_config: asset_bonus = $(r_format1(asset_bonus)) wird als $(r_format1(asset_bonus)) % Teilfreistellung gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(asset_bonus * 100))."
+    spread < 0 && error("asset_config: spread muss >= 0 sein (voller Spread in Prozent, z. B. 0.1 für 0,1 %), nicht $(r_format1(spread)).")
+    (partial_exemption < 0 || partial_exemption > 100) &&
+        error("asset_config: partial_exemption muss zwischen 0 und 100 liegen (Teilfreistellung in Prozent, z. B. 30 für 30 %), nicht $(r_format1(partial_exemption)).")
+    if partial_exemption > 0 && partial_exemption < 1
+        @warn "asset_config: partial_exemption = $(r_format1(partial_exemption)) wird als $(r_format1(partial_exemption)) % Teilfreistellung gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(partial_exemption * 100))."
     end
-    if asset_start !== nothing
-        st = (asset_start isa Union{AbstractVector,Tuple}) ? (length(asset_start) == 1 ? _to_date_or_nothing(first(asset_start)) : nothing) :
-             _to_date_or_nothing(asset_start)
-        st === nothing && error("asset_config: asset_start = $(r_deparse(asset_start)) ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
-        asset_start = st
+    if start !== nothing
+        st = (start isa Union{AbstractVector,Tuple}) ? (length(start) == 1 ? _to_date_or_nothing(first(start)) : nothing) :
+             _to_date_or_nothing(start)
+        st === nothing && error("asset_config: start = $(r_deparse(start)) ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
+        start = st
     end
-    if action_type == "signal" && (signal_buy === nothing || signal_sell === nothing)
-        error("asset_config: bei action_type = \"signal\" müssen signal_buy und signal_sell angegeben werden (Namen der Signalspalten in data).")
+    if trading == "signal" && (signal_buy === nothing || signal_sell === nothing)
+        error("asset_config: bei trading = \"signal\" müssen signal_buy und signal_sell angegeben werden (Namen der Signalspalten in data).")
     end
     if tax_regime === nothing
         tax_regime = asset_class == "etf" ? "investment_fund" :
@@ -198,9 +198,9 @@ function _asset_config(vals::Dict{String,Any})
     elseif !(tax_regime isa AbstractString && tax_regime in VALID_REGIMES)
         error("asset_config: tax_regime = $(r_deparse(tax_regime)) ist ungültig; erlaubt sind $(join(VALID_REGIMES, ", ")) (oder NULL: aus asset_class abgeleitet).")
     end
-    d = RList("asset_class" => asset_class, "action_type" => action_type, "asset_share" => asset_share,
-              "asset_spread" => asset_spread, "asset_bonus" => asset_bonus, "deliverable" => deliverable,
-              "asset_start" => asset_start, "tax_regime" => String(tax_regime),
+    d = RList("asset_class" => asset_class, "trading" => trading, "share" => share,
+              "spread" => spread, "partial_exemption" => partial_exemption, "deliverable" => deliverable,
+              "start" => start, "tax_regime" => String(tax_regime),
               "signal_buy" => signal_buy === nothing ? nothing : String(string(signal_buy)),
               "signal_sell" => signal_sell === nothing ? nothing : String(string(signal_sell)))
     return AssetConfig(d)
@@ -223,10 +223,10 @@ function _print_asset_config(io::IO, x)
     println(io, "Asset-Konfiguration")
     println(io, "-------------------")
     println(io, r_sprintf("  Klasse:       %s", x["asset_class"]))
-    println(io, r_sprintf("  Aktion:       %s", x["action_type"]))
-    println(io, r_sprintf("  Anteil:       %.1f%%", x["asset_share"] * 100))
+    println(io, r_sprintf("  Aktion:       %s", x["trading"]))
+    println(io, r_sprintf("  Anteil:       %.1f%%", x["share"] * 100))
     print(io, r_sprintf("  Steuerregime: %s\n", x["tax_regime"]))
-    x["asset_class"] == "etf" && print(io, r_sprintf("  Teilfrei.:    %.0f%%\n", x["asset_bonus"]))
+    x["asset_class"] == "etf" && print(io, r_sprintf("  Teilfrei.:    %.0f%%\n", x["partial_exemption"]))
     x["asset_class"] in ("etn", "etc") && print(io, r_sprintf("  Lieferbar:    %s\n", x["deliverable"]))
 end
 
@@ -289,21 +289,21 @@ _colnames(data) = data isa RFrame ? names(data) : data isa AbstractDict ? [Strin
                   [String(string(k)) for k in propertynames(data)]
 
 "Strategie (und optional die Spalten von `data`) prüfen; `true` oder Fehler."
-function validate_strategy(strategy, data_pos = nothing; data = data_pos)
+function strategy_validate(strategy, data_pos = nothing; data = data_pos)
     inherits(strategy, "strategy") ||
-        error("validate_strategy: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
+        error("strategy_validate: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
     for (name, a) in strategy
-        inherits(a, "asset_config") || error("validate_strategy: Asset '$name' ist kein asset_config()-Objekt (Klasse $(_r_class1(a))).")
+        inherits(a, "asset_config") || error("strategy_validate: Asset '$name' ist kein asset_config()-Objekt (Klasse $(_r_class1(a))).")
     end
     if data !== nothing
         cols = _colnames(data)
         miss = [n for n in keys(strategy) if !(n in cols)]
-        isempty(miss) || error("validate_strategy: Kursspalte(n) " * join(("'$m'" for m in miss), ", ") *
+        isempty(miss) || error("strategy_validate: Kursspalte(n) " * join(("'$m'" for m in miss), ", ") *
                                " fehlen in data (je Asset eine Spalte gleichen Namens; vorhanden: $(join(cols, ", "))).")
         for (name, a) in strategy
-            if a["action_type"] == "signal"
-                a["signal_buy"] in cols || error("validate_strategy: signal_buy-Spalte '$(a["signal_buy"])' fehlt in data (Asset '$name').")
-                a["signal_sell"] in cols || error("validate_strategy: signal_sell-Spalte '$(a["signal_sell"])' fehlt in data (Asset '$name').")
+            if a["trading"] == "signal"
+                a["signal_buy"] in cols || error("strategy_validate: signal_buy-Spalte '$(a["signal_buy"])' fehlt in data (Asset '$name').")
+                a["signal_sell"] in cols || error("strategy_validate: signal_sell-Spalte '$(a["signal_sell"])' fehlt in data (Asset '$name').")
             end
         end
     end
@@ -311,26 +311,26 @@ function validate_strategy(strategy, data_pos = nothing; data = data_pos)
 end
 
 "Asset hinzufügen bzw. ersetzen (gibt eine neue Strategie zurück)."
-function add_asset(strategy, name::AbstractString, asset)
+function strategy_add_asset(strategy, name::AbstractString, asset)
     inherits(strategy, "strategy") ||
-        error("add_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
-    inherits(asset, "asset_config") || error("add_asset: asset muss ein asset_config()-Objekt sein, nicht $(_r_class1(asset)).")
+        error("strategy_add_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
+    inherits(asset, "asset_config") || error("strategy_add_asset: asset muss ein asset_config()-Objekt sein, nicht $(_r_class1(asset)).")
     out = Strategy(RList(collect(strategy)...))
     out[String(name)] = asset
     return out
 end
 
 """
-    update_asset(strategy, name; felder...)
+    strategy_update_asset(strategy, name; felder...)
 
 Felder eines Assets ändern und mit `asset_config()` neu prüfen. Ändert sich
 `asset_class` oder `deliverable` ohne Angabe von `tax_regime`, wird ein bisher
 automatisch abgeleitetes Steuerregime neu abgeleitet.
 """
-function update_asset(strategy, name::AbstractString; updates...)
+function strategy_update_asset(strategy, name::AbstractString; updates...)
     inherits(strategy, "strategy") ||
-        error("update_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
-    haskey(strategy, name) || error("update_asset: Asset '$name' ist nicht in der Strategie (vorhanden: $(join(keys(strategy), ", "))).")
+        error("strategy_update_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
+    haskey(strategy, name) || error("strategy_update_asset: Asset '$name' ist nicht in der Strategie (vorhanden: $(join(keys(strategy), ", "))).")
     asset = RList(collect(strategy[name])...)
     upd = [String(k) => v for (k, v) in updates]
     if any(p -> p.first in ("asset_class", "deliverable"), upd) && !any(p -> p.first == "tax_regime", upd)
@@ -346,7 +346,7 @@ function update_asset(strategy, name::AbstractString; updates...)
     end
     for (param, value) in upd
         if !haskey(asset, param)
-            @warn "update_asset: unbekannter Parameter '$param' wird ignoriert (möglich: $(join(keys(asset), ", ")))."
+            @warn "strategy_update_asset: unbekannter Parameter '$param' wird ignoriert (möglich: $(join(keys(asset), ", ")))."
             continue
         end
         asset[param] = value
@@ -357,13 +357,13 @@ function update_asset(strategy, name::AbstractString; updates...)
 end
 
 "Asset entfernen (Warnung, wenn die Strategie danach leer ist)."
-function remove_asset(strategy, name::AbstractString)
+function strategy_remove_asset(strategy, name::AbstractString)
     inherits(strategy, "strategy") ||
-        error("remove_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
-    haskey(strategy, name) || error("remove_asset: Asset '$name' ist nicht in der Strategie (vorhanden: $(join(keys(strategy), ", "))).")
+        error("strategy_remove_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht $(_r_class1(strategy)).")
+    haskey(strategy, name) || error("strategy_remove_asset: Asset '$name' ist nicht in der Strategie (vorhanden: $(join(keys(strategy), ", "))).")
     out = Strategy(RList(collect(strategy)...))
     delete!(out, String(name))
-    length(out) == 0 && @warn "remove_asset: Nach dem Entfernen von '$name' enthält die Strategie keine Assets mehr."
+    length(out) == 0 && @warn "strategy_remove_asset: Nach dem Entfernen von '$name' enthält die Strategie keine Assets mehr."
     return out
 end
 
@@ -373,7 +373,7 @@ function _print_strategy(io::IO, x)
     println(io, "================================\n")
     for (name, a) in x
         println(io, name, ":")
-        print(io, r_sprintf("  Klasse: %s | Anteil: %.0f%% | Steuer: %s\n", a["asset_class"], a["asset_share"] * 100, a["tax_regime"]))
+        print(io, r_sprintf("  Klasse: %s | Anteil: %.0f%% | Steuer: %s\n", a["asset_class"], a["share"] * 100, a["tax_regime"]))
     end
 end
 
@@ -381,7 +381,7 @@ function _summary_strategy_text(x)
     n = length(x)
     io = IOBuffer()
     println(io, r_sprintf("Strategie-Übersicht: %d %s\n", n, n == 1 ? "Asset" : "Assets"))
-    total_share = r_sum([a["asset_share"] for (_, a) in x])
+    total_share = r_sum([a["share"] for (_, a) in x])
     println(io, r_sprintf("Gesamtgewicht: %.1f%%", total_share * 100))
     abs(total_share - 1) > 0.001 && println(io, "  (Hinweis: Summe ist nicht 100%)")
     println(io, "\nNach Steuerregime:")

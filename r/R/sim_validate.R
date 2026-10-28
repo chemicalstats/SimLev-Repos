@@ -70,9 +70,12 @@
 #' Zweck: Argumente von simulation() pruefen (Fehler und Warnungen wie dokumentiert), Prozentangaben
 #' in Anteile umrechnen, Ordergebuehren, Einkommensteuertarif und effektiven Steuersatz
 #' (Guenstigerpruefung) bestimmen.
-#' Eingabe: die gleichnamigen Argumente von simulation(); given = benannter logischer Vektor, TRUE =
-#' Argument im Aufruf angegeben (statt missing() bei Argumenten mit Standardwert).
-#' Ausgabe: Liste cfg mit data und strategy (geprueft, ggf. sortiert bzw. mit asset_start), den
+#' Eingabe: die gleichnamigen Argumente von .simulation_flat() (tariff = tax_tariff); given = benannter
+#' logischer Vektor, TRUE = Argument im Aufruf angegeben (statt missing() bei Argumenten mit Standardwert);
+#' blocks = TRUE: Aufruf aus simulation() mit Bausteinen. Dann haben die Bausteine ihre Argumente schon
+#' geprueft (die Pruefungen hier entfallen, Warnungen kommen nicht doppelt), und Meldungen nennen die
+#' Bausteine statt der flachen Argumente.
+#' Ausgabe: Liste cfg mit data und strategy (geprueft, ggf. sortiert bzw. mit start), den
 #' Steuerwerten als Anteil (tax_rate, marginal_tax_rate, effective_tax_rate, soli_factor_income,
 #' church_k), tariff_env, den Gebuehren (fee_order, fee_dca, fees_on), pre_filled und den hier
 #' ausgewerteten Einstellungen.
@@ -86,7 +89,7 @@
                               use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax,
                               base_rate, funds_fee, bonus_fee, fractions, risk_free, split_mode, split_thresh,
                               event_col, church_tax, order_fee, dca_fee, harvest_mode, harvest_day,
-                              taxable_income, tax_tariff, given) {
+                              taxable_income, tariff, given, blocks = FALSE) {
     # === PARAMETER-VALIDIERUNG ===
   tax_mode <- match.arg(tax_mode)
   
@@ -100,10 +103,10 @@
                  if (missing(strategy)) "fehlend" else "leer (L\u00e4nge 0)"))
   }
   if (!is.null(spread))   # R1-26: Argument bleibt fuer die Signatur (Python/Julia) erhalten
-    warning("simulation: Das Argument 'spread' wird nicht ausgewertet; ma\u00dfgeblich ist asset_spread je Asset (asset_config()).", call. = FALSE)
+    warning("simulation: Das Argument 'spread' wird nicht ausgewertet; ma\u00dfgeblich ist spread je Asset (asset_config()).", call. = FALSE)
 
   # --- Eingabepruefung der Daten (R1-13/14/15/17/22) ---
-  filled_attr <- attr(data, "filled")                 # align_series(): gefuellte Werte (Matrix)
+  filled_attr <- attr(data, "filled")                 # series_align(): gefuellte Werte (Matrix)
   if (!identical(class(data), "data.frame")) data <- as.data.frame(data, stringsAsFactors = FALSE)  # z. B. tibble
   if (is.null(names(strategy)) || any(names(strategy) == ""))
     stop("simulation: Alle Assets in 'strategy' m\u00fcssen benannt sein (Name = Kursspalte in 'data').")
@@ -125,11 +128,11 @@
                    .show_arg_s(a$asset_class), nm, paste(cls_ok[1:4], collapse = ", ")), call. = FALSE)
     if (!is.null(a$tax_regime) && (!is.character(a$tax_regime) || length(a$tax_regime) != 1L ||
                                    !a$tax_regime %in% c("investment_fund", "capital_gains", "private_sale")))
-      stop(sprintf("simulation: tax_regime %s von Asset '%s' ist ung\u00fcltig; erlaubt sind investment_fund, capital_gains, private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern tax_mode = \"none\" verwenden.",
-                   .show_arg_s(a$tax_regime), nm), call. = FALSE)
-    if (!is.character(a$action_type) || length(a$action_type) != 1L || !a$action_type %in% c("bnh", "signal"))
-      stop(sprintf("simulation: action_type %s von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\".",
-                   .show_arg_s(a$action_type), nm), call. = FALSE)
+      stop(sprintf("simulation: tax_regime %s von Asset '%s' ist ung\u00fcltig; erlaubt sind investment_fund, capital_gains, private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern %s verwenden.",
+                   .show_arg_s(a$tax_regime), nm, if (blocks) "tax = NULL" else "tax_mode = \"none\""), call. = FALSE)
+    if (!is.character(a$trading) || length(a$trading) != 1L || !a$trading %in% c("bnh", "signal"))
+      stop(sprintf("simulation: trading %s von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\".",
+                   .show_arg_s(a$trading), nm), call. = FALSE)
   }
   if (!"date" %in% names(data)) stop("simulation: Spalte 'date' fehlt in 'data'.")
   miss <- setdiff(names(strategy), names(data))
@@ -162,12 +165,12 @@
   if (anyDuplicated(data$date))
     stop(sprintf("simulation: Datum %s kommt in 'data' mehrfach vor (%d doppelte Zeilen); je Tag genau eine Zeile.",
                  format(data$date[anyDuplicated(data$date)]), sum(duplicated(data$date))))
-  # Tage ohne echten Kurs: aus align_series() (Attribut 'filled') bzw. Zeilen, in denen alle Kurse NA sind
+  # Tage ohne echten Kurs: aus series_align() (Attribut 'filled') bzw. Zeilen, in denen alle Kurse NA sind
   # R2-03: Attribut mit anderer Zeilenzahl (z. B. nach Zeilenauswahl) ist nicht zuordenbar (traegt keine Daten)
   if (!is.null(filled_attr) && (n_fa <- if (is.matrix(filled_attr)) nrow(filled_attr) else length(filled_attr)) != nrow(data)) {
     warning(sprintf(paste0("simulation: Attribut 'filled' von 'data' hat %d Zeilen, 'data' aber %d (z. B. nach Zeilenauswahl einer ",
-                           "align_series()-Ausgabe); es wird ignoriert, aufgef\u00fcllte Tage gelten dann als Handelstage. ",
-                           "Zeitraum besser mit align_series(..., start =, end =) w\u00e4hlen."), n_fa, nrow(data)), call. = FALSE)
+                           "series_align()-Ausgabe); es wird ignoriert, aufgef\u00fcllte Tage gelten dann als Handelstage. ",
+                           "Zeitraum besser mit series_align(..., start =, end =) w\u00e4hlen."), n_fa, nrow(data)), call. = FALSE)
     filled_attr <- NULL
   }
   pre_filled <- rep(FALSE, nrow(data))
@@ -187,11 +190,11 @@
     ok <- which(!is.na(v))
     if (!length(ok)) stop(sprintf("simulation: Kursspalte '%s' enth\u00e4lt nur NA.", nm))
     if (length(ok) < length(v)) {
-      if (ok[1] > 1L) {                               # spaeter startendes Asset: wie asset_start
-        st0 <- strategy[[nm]][["asset_start"]]
+      if (ok[1] > 1L) {                               # spaeter startendes Asset: wie start
+        st0 <- strategy[[nm]][["start"]]
         st_new <- max(data$date[ok[1]], if (is.null(st0)) data$date[1] else as.Date(st0))
-        strategy[[nm]][["asset_start"]] <- st_new
-        message(sprintf("Hinweis: '%s' hat erst ab %s Kurse; das Asset wird wie mit asset_start = %s behandelt.",
+        strategy[[nm]][["start"]] <- st_new
+        message(sprintf("Hinweis: '%s' hat erst ab %s Kurse; das Asset wird wie mit start = %s behandelt.",
                         nm, format(data$date[ok[1]]), format(st_new)))
       }
       n_gap <- sum(is.na(v)) - (ok[1] - 1L)
@@ -211,7 +214,8 @@
                  paste(deparse(start_value), collapse = "")))
   }
   
-  # tax_rate
+  # tax_rate (mit Bausteinen: tax_profile() hat rate und church_tax geprueft)
+  if (!blocks) {
   if (!is.numeric(tax_rate) || length(tax_rate) != 1L || is.na(tax_rate) || tax_rate < 0 || tax_rate > 100) {
     stop(sprintf("simulation: tax_rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 f\u00fcr 26,375 %%), nicht %s.",
                  paste(deparse(tax_rate), collapse = "")))
@@ -231,6 +235,8 @@
   }
   if (isTRUE(harvest_mode) && tax_mode != "person")
     warning("simulation: harvest_mode wirkt nur mit tax_mode = \"person\" und wird hier ignoriert.", call. = FALSE)
+  } else if (isTRUE(harvest_mode) && tax_mode != "person")   # Fondsmodus mit tax_profile(harvest =)
+    warning("simulation: harvest (tax_profile(harvest = harvest_rule())) wirkt nicht im Fondsmodus (funds = funds_costs()) und wird hier ignoriert.", call. = FALSE)
   # A7-10: Steuer- und Schalterargumente pruefen (einzelne endliche Zahl bzw. TRUE/FALSE); sonst kryptische
   # R-Fehler bzw. stille Fehldeutung (z. B. private_sale_threshold = "1000": Textvergleich)
   .show_arg <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = "")
@@ -239,6 +245,12 @@
     if (!is.numeric(x) || length(x) != 1L || !is.finite(x) || (!is.null(min) && x < min))
       stop(sprintf("simulation: '%s' muss %s sein, nicht %s.", arg, what, .show_arg(x)), call. = FALSE)
   }
+  .frac_warn <- function(x, arg, hi = 1) {
+    if (is.numeric(x) && length(x) == 1L && is.finite(x) && x > 0 && x < hi)
+      warning(sprintf("simulation: %s = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
+                      arg, format(x), format(x), format(x * 100)), call. = FALSE)
+  }
+  if (!blocks) {
   .chk_num(sparer_pauschbetrag, "sparer_pauschbetrag", "eine einzelne endliche Zahl >= 0 (EUR je Jahr, z. B. 1000)")
   .chk_num(private_sale_threshold, "private_sale_threshold", "eine einzelne endliche Zahl >= 0 (Freigrenze in EUR, z. B. 1000)")
   .chk_num(base_rate, "base_rate", "NULL oder eine einzelne endliche Zahl (Basiszins in Prozent, z. B. 2.29; negativ erlaubt)",
@@ -255,17 +267,17 @@
   # 2016-2019 um 0.25 % p. a.; als Anteil gemeinte Zinsen liegen meist bei 0.01-0.05), balance_thresh < 0.2
   # (Band von 0.5 Prozentpunkten ist ueblich; als Anteil gemeinte Baender 0.01-0.15); marginal_tax_rate < 1
   # (Grenzsteuersaetze unter 1 % gibt es nicht, der Eingangssatz ist 14 %)
-  .frac_warn <- function(x, arg, hi = 1) {
-    if (is.numeric(x) && length(x) == 1L && is.finite(x) && x > 0 && x < hi)
-      warning(sprintf("simulation: %s = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
-                      arg, format(x), format(x), format(x * 100)), call. = FALSE)
-  }
   .frac_warn(base_rate, "base_rate", hi = 0.05); .frac_warn(marginal_tax_rate, "marginal_tax_rate")
-  .frac_warn(balance_thresh, "balance_thresh", hi = 0.2); .frac_warn(risk_free, "risk_free", hi = 0.05)
+  .frac_warn(balance_thresh, "balance_thresh", hi = 0.2)
+  }
+  if (blocks && (!is.logical(fractions) || length(fractions) != 1L || is.na(fractions)))
+    stop(sprintf("simulation: '%s' muss TRUE oder FALSE sein, nicht %s.", "fractions", .show_arg(fractions)), call. = FALSE)
+  .frac_warn(risk_free, "risk_free", hi = 0.05)
   # R9-06: dieselbe Schwelle fuer risk_free als Spaltenname (Median der Spalte; base_rate_data: .sim_prepare_data)
   if (is.character(risk_free) && length(risk_free) == 1L && !is.na(risk_free) && risk_free %in% names(data))
     .frac_warn_col(data[[risk_free]], "risk_free", risk_free, hi = 0.05)
-  # C7-04: wirkungslose Argumente nicht still ignorieren
+  # C7-04: wirkungslose Argumente nicht still ignorieren (mit Bausteinen: in den Bausteinen geprueft)
+  if (!blocks) {
   if (!isTRUE(dca_mode) && !is.null(dca_value))
     warning("simulation: dca_value wirkt nur mit dca_mode = TRUE und wird ignoriert.", call. = FALSE)
   if (!isTRUE(balance_mode) && is.null(event_col) && !is.null(balance_thresh))
@@ -312,21 +324,23 @@
                      a, if (a == "funds_fee") "0.95 f\u00fcr 0,95 % p. a." else "5 f\u00fcr 5 %", paste(format(x), collapse = ", ")))
     }
   }
+  }
 
   # Einkommensteuertarif (taxable_income, tax_tariff): zvE je Kalenderjahr pruefen, Tarif lesen
   tariff_on <- !is.null(taxable_income) && tax_mode == "person"
   if (!is.null(taxable_income) && tax_mode != "person")
-    warning(sprintf("simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"%s\") und wird ignoriert.", tax_mode), call. = FALSE)
-  if (is.null(taxable_income) && !is.null(tax_tariff))
+    warning(if (blocks) "simulation: income_tariff() (tax_profile(income =)) wirkt nicht im Fondsmodus (funds = funds_costs()) und wird ignoriert."
+            else sprintf("simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"%s\") und wird ignoriert.", tax_mode), call. = FALSE)
+  if (is.null(taxable_income) && !is.null(tariff))
     warning("simulation: tax_tariff wirkt nur zusammen mit taxable_income (zu versteuerndes Einkommen je Jahr) und wird ignoriert.", call. = FALSE)
   tariff_env <- NULL
   if (tariff_on) {
     sim_years <- seq(as.integer(format(min(data$date), "%Y")), as.integer(format(max(data$date), "%Y")))
     zv <- .check_taxable_income(taxable_income, sim_years)
-    tt <- if (is.null(tax_tariff)) read_tax_tariff()
-          else if (inherits(tax_tariff, "SimLevTaxTariff")) tax_tariff
-          else if (is.character(tax_tariff) && length(tax_tariff) == 1L && !is.na(tax_tariff)) read_tax_tariff(tax_tariff)
-          else stop("simulation: tax_tariff muss NULL (mitgelieferte Tarifdatei), ein Dateipfad oder ein Objekt aus read_tax_tariff() sein.", call. = FALSE)
+    tt <- if (is.null(tariff)) tax_tariff()
+          else if (inherits(tariff, "SimLevTaxTariff")) tariff
+          else if (is.character(tariff) && length(tariff) == 1L && !is.na(tariff)) tax_tariff(tariff)
+          else stop("simulation: tax_tariff muss NULL (mitgelieferte Tarifdatei), ein Dateipfad oder ein Objekt aus tax_tariff() sein.", call. = FALSE)
     tariff_env <- new.env(parent = emptyenv())
     tariff_env$tariff <- tt
     tariff_env$zve_all <- zv$all; tariff_env$zve <- zv$by_year
@@ -349,10 +363,14 @@
     (isTRUE(a$asset_class %in% c("etn", "etc")) && isTRUE(a$deliverable))
   }))
   if (has_private_sale && is.null(marginal_tax_rate) && tax_mode == "person" && !tariff_on) {   # R2-07: nur wenn § 23 besteuert wird
+    if (blocks)
+      warning("simulation: Der Grenzsteuersatz ist nicht gesetzt (tax_profile(income = income_rate(marginal_rate))), die Strategie enth\u00e4lt aber Assets mit tax_regime = \"private_sale\"; ",
+              "Gewinne nach Paragraf 23 EStG werden dann m\u00f6glicherweise nicht korrekt besteuert. income_rate(marginal_rate) in Prozent angeben (z. B. 42).")
+    else
     warning("simulation: marginal_tax_rate ist nicht gesetzt, die Strategie enth\u00e4lt aber Assets mit tax_regime = \"private_sale\"; ",
             "Gewinne nach Paragraf 23 EStG werden dann m\u00f6glicherweise nicht korrekt besteuert. marginal_tax_rate in Prozent angeben (z. B. 42).")
   }
-  if (!is.null(marginal_tax_rate) && (marginal_tax_rate < 0 || marginal_tax_rate > 50)) {
+  if (!blocks && !is.null(marginal_tax_rate) && (marginal_tax_rate < 0 || marginal_tax_rate > 50)) {
     stop(sprintf("simulation: marginal_tax_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 f\u00fcr 42 %%), nicht %s.",
                  paste(deparse(marginal_tax_rate), collapse = "")))
   }
@@ -381,15 +399,15 @@
   fees_on <- !is.null(fee_order) || !is.null(fee_dca)
   .fee_env$current <- NULL; .fee_env$paid <- 0
   # (simulation() setzt .fee_env$current beim Verlassen zurueck, wenn fees_on)
-  if (isTRUE(harvest_mode)) {
+  if (isTRUE(harvest_mode) && !blocks) {
     if (!grepl("^\\d{2}-\\d{2}$", harvest_day) || harvest_day >= "12-31")
       stop("harvest_day im Format 'MM-TT' und vor dem 31.12. angeben (z. B. '12-15').")
   }
-  # base_rate: KEINE Division hier — calculate_flat_rate teilt an der Verbrauchsstelle /100
+  # base_rate: KEINE Division hier — .calculate_flat_rate teilt an der Verbrauchsstelle /100
   
   # DCA-Parameter
   # R4-07: einzelne endliche Zahlen pruefen (sonst kryptische R-Fehler bei Vektor, NA oder Text)
-  if (dca_mode) {
+  if (dca_mode && !blocks) {
     .one_num <- function(x) is.numeric(x) && length(x) == 1L && is.finite(x)
     .show <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = "")
     if (!.one_num(dca_value) || dca_value <= 0)
@@ -401,12 +419,12 @@
   }
 
   # Gewichtssumme validieren
-  total_weight <- sum(sapply(strategy, function(a) a$asset_share), na.rm = TRUE)
+  total_weight <- sum(sapply(strategy, function(a) a$share), na.rm = TRUE)
   if (abs(total_weight - 1.0) > 1e-6) {
     stop(sprintf(
-      "simulation: Asset-Gewichte (asset_share) summieren sich auf %.4f, m\u00fcssen aber exakt 1.0 ergeben (Anteile, z. B. 0.6 und 0.4).\n  Aktuelle Gewichte: %s",
+      "simulation: Asset-Gewichte (share) summieren sich auf %.4f, m\u00fcssen aber exakt 1.0 ergeben (Anteile, z. B. 0.6 und 0.4).\n  Aktuelle Gewichte: %s",
       total_weight,
-      paste(sprintf("%s=%.3f", names(strategy), sapply(strategy, function(a) a$asset_share)), collapse = ", ")
+      paste(sprintf("%s=%.3f", names(strategy), sapply(strategy, function(a) a$share)), collapse = ", ")
     ))
   }
 
@@ -429,9 +447,17 @@
   effective_tax_rate <- tax_rate  # Default: 26.375%
 
   # Tarifweg: unterjaehrig Abgeltungsteuer wie bei einer Bank (auch in der Verkaufsschaetzung),
-  # Guenstigerpruefung im Jahresabschluss (handle_year_change -> .tariff_close)
+  # Guenstigerpruefung im Jahresabschluss (.handle_year_change -> .tariff_close)
   if (use_guenstigerpruefung && !tariff_on) {
     if (is.null(marginal_tax_rate)) {
+      if (blocks)
+      warning(
+        "simulation: G\u00fcnstigerpr\u00fcfung aktiviert (tax_profile(guenstigerpruefung = TRUE)), aber der Grenzsteuersatz (income_rate(marginal_rate)) ist nicht gesetzt.\n",
+        "Verwendet wird die Abgeltungsteuer (", round(tax_rate * 100, 2), " %).\n",
+        "F\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung tax_profile(income = income_rate(marginal_rate)) in Prozent angeben (z. B. 42).",
+        call. = FALSE
+      )
+      else
       warning(
         "simulation: G\u00fcnstigerpr\u00fcfung aktiviert (use_guenstigerpruefung = TRUE), aber 'marginal_tax_rate' ist nicht gesetzt.\n",
         "Verwendet wird die Abgeltungsteuer (", round(tax_rate * 100, 2), " %).\n",

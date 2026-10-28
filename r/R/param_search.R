@@ -5,11 +5,11 @@
 #  param_search()                  Raster, Zufallssuche oder Latin Hypercube;
 #                                  ruft simulation() je Punkt auf, speichert
 #                                  Kennzahlen und taegliche TWR-Renditen
-#  plateau()                       Nachbarschafts-Glaettung der Zielgroesse
+#  param_plateau()                       Nachbarschafts-Glaettung der Zielgroesse
 #                                  (robuste Wahl statt Spitze)
 #
-#  Die gespeicherten Renditen sind die Grundlage fuer pbo(), deflated_sharpe()
-#  und walk_forward() (overfitting.R). Strategien werden ueber eine
+#  Die gespeicherten Renditen sind die Grundlage fuer overfit_pbo(), sharpe_deflated()
+#  und overfit_walk_forward() (overfitting.R). Strategien werden ueber eine
 #  'builder'-Funktion beschrieben, die aus einem Parametersatz dieselbe
 #  Spezifikation liefert wie ein Element von bootstrap_study(strategies = ...):
 #  list(strategy, signal, args, map). Damit laesst sich jeder Rasterpunkt ohne
@@ -50,7 +50,7 @@
 #'   (benannte Liste der Dimensionen); \code{param_range}: Objekt der Klasse
 #'   \code{SimLevParamRange} (Liste mit \code{lower}, \code{upper}, \code{n},
 #'   \code{step}, \code{integer}, \code{log}).
-#' @seealso [param_search()], [plateau()]
+#' @seealso [param_search()], [param_plateau()]
 #' @examples
 #' sp <- param_space(n = param_range(50, 400, n = 8, integer = TRUE, log = TRUE),
 #'                   band = c(0, 1, 2), w = param_range(0.3, 0.9, step = 0.1))
@@ -156,8 +156,8 @@ print.SimLevParamSpace <- function(x, ...) {
   if (!is.null(sp$data)) df <- sp$data(df)
   if (!is.null(sp$map)) for (a in names(sp$map)) df[[a]] <- df[[sp$map[[a]]]]
   if (burn_in > 0) df <- df[(burn_in + 1L):nrow(df), , drop = FALSE]
-  args <- utils::modifyList(sim_args, sp$args %||% list())
-  suppressWarnings(suppressMessages(do.call(simulation, c(list(data = df, strategy = sp$strategy), args))))
+  args <- .sim_args_set(sim_args, sp$args, "param_search")
+  suppressWarnings(suppressMessages(.sim_call(df, sp$strategy, args)))
 }
 
 #' Builder-Ergebnis in eine Spezifikation umwandeln
@@ -170,8 +170,8 @@ print.SimLevParamSpace <- function(x, ...) {
 #' Wertet eine Strategie fuer jeden Punkt eines Parameterraums mit
 #' [simulation()] aus. Neben den Kennzahlen werden die taeglichen
 #' zeitgewichteten Renditen jedes Punkts gespeichert; darauf bauen die
-#' Ueberanpassungs-Pruefungen [pbo()], [deflated_sharpe()] und
-#' [walk_forward()] auf.
+#' Ueberanpassungs-Pruefungen [overfit_pbo()], [sharpe_deflated()] und
+#' [overfit_walk_forward()] auf.
 #'
 #' Je Punkt wird die Spezifikation in dieser Reihenfolge angewandt:
 #' \code{signal(df)} auf dem vollen Datensatz, dann \code{data(df)}, dann
@@ -179,7 +179,7 @@ print.SimLevParamSpace <- function(x, ...) {
 #' schliesslich [simulation()] mit \code{sim_args}, ueberschrieben durch
 #' \code{args}. Fehler einzelner Punkte brechen die Suche nicht ab, sondern
 #' stehen in \code{results$error}. Das Ergebnis laesst sich auch mit
-#' [reality_check()] und [sharpe_haircut()] weiterverarbeiten.
+#' [overfit_reality_check()] und [sharpe_haircut()] weiterverarbeiten.
 #'
 #' @param data data.frame wie in [simulation()] (Spalte \code{date} und
 #'   Kursspalten als Niveaus), inklusive Vorlauf fuer Signale (siehe
@@ -191,7 +191,7 @@ print.SimLevParamSpace <- function(x, ...) {
 #'   data.frame oder Liste von Spalten, z. B. mit [signal_sma()]),
 #'   \code{args} (Liste) ueberschreibt \code{sim_args}, \code{map} (benannter
 #'   Zeichenvektor) legt Spalten-Aliase an, \code{data} ist optional eine
-#'   Funktion \code{df -> df} (z. B. eine Hebelreihe mit [leveraged_series()]
+#'   Funktion \code{df -> df} (z. B. eine Hebelreihe mit [series_leverage()]
 #'   anlegen). \code{NULL} (Standard) = ohne \code{builder}: die Parameter
 #'   werden als Argumente von [simulation()] fuer \code{strategy} verwendet.
 #' @param space Suchraum aus [param_space()] (oder benannte Liste, die an
@@ -215,7 +215,7 @@ print.SimLevParamSpace <- function(x, ...) {
 #'   Tage), die nach der Signalberechnung verworfen werden (Signal-Vorlauf;
 #'   ganze Zahl, Standard 0).
 #' @param metrics Funktion \code{SimLevResult ->} benannter numerischer
-#'   Vektor (Standard [study_metrics()]: u. a. \code{cagr},
+#'   Vektor (Standard [bootstrap_study_metrics()]: u. a. \code{cagr},
 #'   \code{max_drawdown} als Anteil, \code{sharpe}; \code{cagr} ist mit
 #'   Sparplan geldgewichtet, XIRR).
 #' @param objective Name der Zielgroesse (Element von \code{metrics}, Standard
@@ -230,8 +230,8 @@ print.SimLevParamSpace <- function(x, ...) {
 #'   wiederhergestellt. \code{NULL} (Standard) = aktueller Zufallszustand,
 #'   der dabei normal weiterlaeuft (wiederholte Aufrufe ziehen andere Punkte).
 #' @param keep_returns Logisch (Standard \code{TRUE}): taegliche Renditen je
-#'   Punkt speichern (noetig fuer [pbo()], [deflated_sharpe()],
-#'   [walk_forward()], [reality_check()], [sharpe_haircut()]).
+#'   Punkt speichern (noetig fuer [overfit_pbo()], [sharpe_deflated()],
+#'   [overfit_walk_forward()], [overfit_reality_check()], [sharpe_haircut()]).
 #' @return Objekt der Klasse \code{SimLevParamSearch}, eine Liste mit
 #'   \describe{
 #'     \item{\code{results}}{data.frame je Punkt: \code{id}, eine Spalte je
@@ -251,7 +251,7 @@ print.SimLevParamSpace <- function(x, ...) {
 #'     \item{\code{elapsed}}{Laufzeit in Sekunden.}
 #'   }
 #'   Methoden \code{print}, \code{summary}, \code{plot}; Weiterverarbeitung
-#'   mit [plateau()], [pbo()], [deflated_sharpe()], [walk_forward()],
+#'   mit [param_plateau()], [overfit_pbo()], [sharpe_deflated()], [overfit_walk_forward()],
 #'   [param_bootstrap()].
 #' @examples
 #' \donttest{
@@ -266,24 +266,26 @@ print.SimLevParamSpace <- function(x, ...) {
 #' dim(ps$returns)    # Tage x Punkte
 #' plot(ps)           # Heatmap der Zielgroesse ueber n und band
 #' }
-#' @seealso [plateau()], [pbo()], [deflated_sharpe()], [walk_forward()], [sensitivity_grid()]
+#' @seealso [param_plateau()], [overfit_pbo()], [sharpe_deflated()], [overfit_walk_forward()], [sensitivity_grid()]
 #' @export
 param_search <- function(data, builder = NULL, space, strategy = NULL,
                          method = c("grid", "random", "lhs"), n = 50L, constraint = NULL,
-                         sim_args = list(), burn_in = 0L, metrics = study_metrics,
-                         objective = "sharpe", maximize = TRUE, cores = 1L, seed = NULL,
-                         keep_returns = TRUE) {
+                         sim_args = list(), burn_in = 0L, metrics = bootstrap_study_metrics,
+                         objective = "sharpe", maximize = TRUE, keep_returns = TRUE, seed = NULL,
+                         cores = 1L) {
   method <- match.arg(method)
   if (!inherits(space, "SimLevParamSpace")) space <- do.call(param_space, as.list(space))
   if (is.null(builder)) {
     if (is.null(strategy)) stop("param_search: 'builder' oder 'strategy' angeben.")
+    .sim_check_names(names(space), "param_search")   # Dimensionen = Argumente von simulation() bzw. Pfade
     builder <- function(p) list(strategy = strategy, args = p)
   }
+  sim_run_args <- .sim_args_set(list(), sim_args, "param_search")
   design <- .with_rng_restore(.ps_design(space, method, n, constraint), seed = seed)
   t0 <- Sys.time()
   run <- function(i) {
     p <- as.list(design[i, , drop = FALSE])
-    res <- tryCatch(.run_spec(data, .as_spec(builder(p)), sim_args, burn_in), error = function(e) e)
+    res <- tryCatch(.run_spec(data, .as_spec(builder(p)), sim_run_args, burn_in), error = function(e) e)
     if (inherits(res, "error")) return(list(m = NULL, err = conditionMessage(res)))
     m <- tryCatch(metrics(res), error = function(e) NULL)
     if (is.null(m)) return(list(m = NULL, err = "metrics() fehlgeschlagen"))
@@ -366,7 +368,7 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
 #'   \code{dd_q90}, \code{ulcer_index} und \code{longest_drawdown}
 #'   (kleiner = besser), sonst das Minimum) und \code{neighbours} (Anzahl Punkte der Nachbarschaft). Die
 #'   Einheit entspricht der Kennzahl.
-#' @seealso [param_search()], [walk_forward()] (\code{select = "plateau"}),
+#' @seealso [param_search()], [overfit_walk_forward()] (\code{select = "plateau"}),
 #'   [param_bootstrap()] (\code{by = "plateau"})
 #' @examples
 #' set.seed(1)
@@ -375,11 +377,11 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
 #' st <- create_strategy(A = asset_config("etf", "signal", signal_buy = "buy", signal_sell = "sell"))
 #' ps <- param_search(d, function(p) list(strategy = st, signal = function(df) signal_sma(df$A, p$n, p$band)),
 #'                    param_space(n = c(50, 100, 200), band = c(0, 2)), burn_in = 250)
-#' pl <- plateau(ps)
+#' pl <- param_plateau(ps)
 #' cbind(ps$results[, c("n", "band")], pl[, -1])
-#' plateau(ps, metric = "cagr")
+#' param_plateau(ps, metric = "cagr")
 #' @export
-plateau <- function(x, metric = x$objective, radius = 1L, k = 5L) {
+param_plateau <- function(x, metric = x$objective, radius = 1L, k = 5L) {
   if (!inherits(x, "SimLevParamSearch")) stop("x muss ein SimLevParamSearch sein.")
   tab <- x$results; v <- tab[[metric]]
   nb <- .ps_neighbours(x, radius, k)
@@ -398,7 +400,7 @@ plateau <- function(x, metric = x$objective, radius = 1L, k = 5L) {
 #'   besten Punkte nach der Zielgroesse (ganze Zahl, Standard 10).
 #'   \code{summary()} liefert ein Objekt der Klasse
 #'   \code{summary.SimLevParamSearch} mit \code{top} (Tabelle mit Spalte
-#'   \code{plateau} = \code{plateau_mean} aus [plateau()]), \code{best},
+#'   \code{plateau} = \code{plateau_mean} aus [param_plateau()]), \code{best},
 #'   \code{best_plateau} (Zeilen von \code{results}), \code{n},
 #'   \code{n_failed}, \code{objective}, \code{method}, \code{params} und
 #'   \code{elapsed}.
@@ -408,7 +410,7 @@ plateau <- function(x, metric = x$objective, radius = 1L, k = 5L) {
 #' @export
 summary.SimLevParamSearch <- function(object, top = 10L, ...) {
   tab <- object$results; obj <- object$objective
-  pl <- plateau(object)
+  pl <- param_plateau(object)
   tab$plateau <- pl$plateau_mean
   ord <- order(tab[[obj]], decreasing = isTRUE(object$maximize), na.last = TRUE)
   ordp <- order(tab$plateau, decreasing = isTRUE(object$maximize), na.last = TRUE)

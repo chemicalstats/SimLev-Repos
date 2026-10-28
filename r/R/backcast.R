@@ -426,7 +426,7 @@
 #' bc <- backcast(fit)
 #' head(bc)
 #'
-#' @seealso [backcast()], [leveraged_series()], [simulation()]
+#' @seealso [backcast()], [series_leverage()], [simulation()]
 #' @export
 backcast_fit <- function(data, product, index,
                          ter = 0, leverage = 1, rate = NULL, fx = NULL,
@@ -646,14 +646,14 @@ backcast_fit <- function(data, product, index,
 #' set.seed(1); n <- 1000
 #' d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
 #' d$idx <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
-#' d$etf <- leveraged_series(d, "idx", leverage = 2, rate = 2, expense = 0.6)
+#' d$etf <- series_leverage(d, "idx", leverage = 2, rate = 2, expense = 0.6)
 #' d$etf[1:600] <- NA                       # Produkt erst ab Tag 601
 #' bc <- backcast(data = d, product = "etf", index = "idx", leverage = 2,
 #'                rate = 2, ter = 0.6, rebase = 100)
 #' bc[599:602, ]
 #' table(bc$source)
 #' attr(bc, "splice_date")
-#' @seealso [backcast_fit()], [leveraged_series()], [simulation()]
+#' @seealso [backcast_fit()], [series_leverage()], [simulation()]
 #' @export
 backcast <- function(fit = NULL, data = NULL, params = NULL,
                      splice = "inception",

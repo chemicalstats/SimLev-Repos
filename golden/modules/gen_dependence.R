@@ -173,49 +173,49 @@ ref_case("cop_bad", "SimLev:::.cop_ll('student', 1, uu, vv)", paste0(P, "result 
 ref_case("cop_nonfinite", "SimLev:::.cop_ll('gaussian', 1, uu, vv)", paste0(P, "result = D._cop_ll('gaussian', 1, uu, vv)"), inputs = list(uu = uu, vv = vv),
          jl = paste0(J, 'result = D._cop_ll("gaussian", 1, uu, vv)'))
 
-# fit_copula
+# copula_fit
 set.seed(1); n <- 300
 z <- matrix(rnorm(2 * n), ncol = 2) %*% chol(matrix(c(1, .6, .6, 1), 2)); w <- sqrt(rchisq(n, 4) / 4)
 CX <- list(x = z[, 1] / w, y = z[, 2] / w, yn = -z[, 2])
-ref_case("fitcop_t", "fit_copula(x, y)", paste0(P, "result = D.fit_copula(x, y)"), inputs = CX[c("x", "y")],
-         jl = paste0(J, "result = D.fit_copula(x, y)"))
-ref_case("fitcop_neg", "fit_copula(x, yn)", paste0(P, "result = D.fit_copula(x, yn)"), inputs = CX[c("x", "yn")],
-         jl = paste0(J, "result = D.fit_copula(x, yn)"))
-ref_case("fitcop_fam", "fit_copula(x, y, c('frank', 'gumbel_180', 'clayton_270', 'gaussian'))",
-         paste0(P, "result = D.fit_copula(x, y, ['frank', 'gumbel_180', 'clayton_270', 'gaussian'])"), inputs = CX[c("x", "y")],
-         jl = paste0(J, 'result = D.fit_copula(x, y, ["frank", "gumbel_180", "clayton_270", "gaussian"])'))
+ref_case("fitcop_t", "copula_fit(x, y)", paste0(P, "result = D.copula_fit(x, y)"), inputs = CX[c("x", "y")],
+         jl = paste0(J, "result = D.copula_fit(x, y)"))
+ref_case("fitcop_neg", "copula_fit(x, yn)", paste0(P, "result = D.copula_fit(x, yn)"), inputs = CX[c("x", "yn")],
+         jl = paste0(J, "result = D.copula_fit(x, yn)"))
+ref_case("fitcop_fam", "copula_fit(x, y, c('frank', 'gumbel_180', 'clayton_270', 'gaussian'))",
+         paste0(P, "result = D.copula_fit(x, y, families=['frank', 'gumbel_180', 'clayton_270', 'gaussian'])"), inputs = CX[c("x", "y")],
+         jl = paste0(J, 'result = D.copula_fit(x, y, ["frank", "gumbel_180", "clayton_270", "gaussian"])'))
 set.seed(3); th <- 3; u <- runif(200); t <- runif(200); v <- ((t^(-th / (1 + th)) - 1) * u^(-th) + 1)^(-1 / th)
-ref_case("fitcop_clayton", "fit_copula(qnorm(u), qnorm(v))", paste0(P, "from simlev._r import nmath\nresult = D.fit_copula(nmath.qnorm(u), nmath.qnorm(v))"),
-         inputs = list(u = u, v = v), jl = paste0(J, "result = D.fit_copula(SL.RNmath.qnorm.(u), SL.RNmath.qnorm.(v))"))
+ref_case("fitcop_clayton", "copula_fit(qnorm(u), qnorm(v))", paste0(P, "from simlev._r import nmath\nresult = D.copula_fit(nmath.qnorm(u), nmath.qnorm(v))"),
+         inputs = list(u = u, v = v), jl = paste0(J, "result = D.copula_fit(SL.RNmath.qnorm.(u), SL.RNmath.qnorm.(v))"))
 xna <- CX$x[1:60]; yna <- CX$y[1:60]; xna[c(3, 9)] <- NA; yna[20] <- Inf
-ref_case("fitcop_na", "fit_copula(xna, round(yna, 1), 'gaussian')", paste0(P, "result = D.fit_copula(xna, simlev._r.fmt.r_round(yna, 1), 'gaussian')"),
-         inputs = list(xna = xna, yna = yna), jl = paste0(J, 'result = D.fit_copula(xna, SL.RFmt.r_round.(yna, 1), "gaussian")'))
-ref_case("fitcop_err_len", "fit_copula(1:30, 1:29)", paste0(P, "result = D.fit_copula(np.arange(1, 31), np.arange(1, 30))"),
-         jl = paste0(J, "result = D.fit_copula(1:30, 1:29)"))
-ref_case("fitcop_err_n", "fit_copula(c(1:19, NA), 1:20)", paste0(P, "result = D.fit_copula(np.r_[np.arange(1., 20), simlev._r.fmt.NA_REAL], np.arange(1, 21))"),
-         jl = paste0(J, "result = D.fit_copula(vcat(1.0:19.0, SL.NA), 1:20)"))
-ref_case("fitcop_err_fam", "fit_copula(x, y, c('t', 'gaussian_90', 'joe', 'gumbel_45'))",
-         paste0(P, "result = D.fit_copula(x, y, ['t', 'gaussian_90', 'joe', 'gumbel_45'])"), inputs = CX[c("x", "y")],
-         jl = paste0(J, 'result = D.fit_copula(x, y, ["t", "gaussian_90", "joe", "gumbel_45"])'))
-ref_case("fitcop_err_const", "fit_copula(rep(1, 30), 1:30)", paste0(P, "result = D.fit_copula(np.ones(30), np.arange(1, 31))"),
-         jl = paste0(J, "result = D.fit_copula(ones(30), 1:30)"))
+ref_case("fitcop_na", "copula_fit(xna, round(yna, 1), 'gaussian')", paste0(P, "result = D.copula_fit(xna, simlev._r.fmt.r_round(yna, 1), families='gaussian')"),
+         inputs = list(xna = xna, yna = yna), jl = paste0(J, 'result = D.copula_fit(xna, SL.RFmt.r_round.(yna, 1), "gaussian")'))
+ref_case("fitcop_err_len", "copula_fit(1:30, 1:29)", paste0(P, "result = D.copula_fit(np.arange(1, 31), np.arange(1, 30))"),
+         jl = paste0(J, "result = D.copula_fit(1:30, 1:29)"))
+ref_case("fitcop_err_n", "copula_fit(c(1:19, NA), 1:20)", paste0(P, "result = D.copula_fit(np.r_[np.arange(1., 20), simlev._r.fmt.NA_REAL], np.arange(1, 21))"),
+         jl = paste0(J, "result = D.copula_fit(vcat(1.0:19.0, SL.NA), 1:20)"))
+ref_case("fitcop_err_fam", "copula_fit(x, y, c('t', 'gaussian_90', 'joe', 'gumbel_45'))",
+         paste0(P, "result = D.copula_fit(x, y, families=['t', 'gaussian_90', 'joe', 'gumbel_45'])"), inputs = CX[c("x", "y")],
+         jl = paste0(J, 'result = D.copula_fit(x, y, ["t", "gaussian_90", "joe", "gumbel_45"])'))
+ref_case("fitcop_err_const", "copula_fit(rep(1, 30), 1:30)", paste0(P, "result = D.copula_fit(np.ones(30), np.arange(1, 31))"),
+         jl = paste0(J, "result = D.copula_fit(ones(30), 1:30)"))
 
 # tail_dependence
 set.seed(1); z0 <- rnorm(500); tx <- z0 + rnorm(500); ty <- z0 + rnorm(500)
 ref_case("tail_default", "tail_dependence(tx, ty)", paste0(P, "result = D.tail_dependence(tx, ty)"), inputs = list(tx = tx, ty = ty),
          jl = paste0(J, "result = D.tail_dependence(tx, ty)"))
-ref_case("tail_q", "tail_dependence(tx, ty, c(0.05, 0.1, 0.3))", paste0(P, "result = D.tail_dependence(tx, ty, [0.05, 0.1, 0.3])"), inputs = list(tx = tx, ty = ty),
+ref_case("tail_q", "tail_dependence(tx, ty, c(0.05, 0.1, 0.3))", paste0(P, "result = D.tail_dependence(tx, ty, q=[0.05, 0.1, 0.3])"), inputs = list(tx = tx, ty = ty),
          jl = paste0(J, "result = D.tail_dependence(tx, ty, [0.05, 0.1, 0.3])"))
 txs <- tx[1:30]; tys <- round(ty[1:30]); txs[2] <- NaN
-ref_case("tail_small", "tail_dependence(txs, tys, c(0.1, 0.5))", paste0(P, "result = D.tail_dependence(txs, tys, [0.1, 0.5])"), inputs = list(txs = txs, tys = tys),
+ref_case("tail_small", "tail_dependence(txs, tys, c(0.1, 0.5))", paste0(P, "result = D.tail_dependence(txs, tys, q=[0.1, 0.5])"), inputs = list(txs = txs, tys = tys),
          jl = paste0(J, "result = D.tail_dependence(txs, tys, [0.1, 0.5])"))
-ref_case("tail_const", "tail_dependence(rep(1, 40), 1:40, 0.4)", paste0(P, "result = D.tail_dependence(np.ones(40), np.arange(1, 41), 0.4)"),
+ref_case("tail_const", "tail_dependence(rep(1, 40), 1:40, 0.4)", paste0(P, "result = D.tail_dependence(np.ones(40), np.arange(1, 41), q=0.4)"),
          jl = paste0(J, "result = D.tail_dependence(ones(40), 1:40, 0.4)"))
-ref_case("tail_err_q", "tail_dependence(tx, ty, c(0.05, 1, 5))", paste0(P, "result = D.tail_dependence(tx, ty, [0.05, 1, 5])"), inputs = list(tx = tx, ty = ty),
+ref_case("tail_err_q", "tail_dependence(tx, ty, c(0.05, 1, 5))", paste0(P, "result = D.tail_dependence(tx, ty, q=[0.05, 1, 5])"), inputs = list(tx = tx, ty = ty),
          jl = paste0(J, "result = D.tail_dependence(tx, ty, [0.05, 1, 5])"))
-ref_case("tail_err_q2", "tail_dependence(tx, ty, numeric(0))", paste0(P, "result = D.tail_dependence(tx, ty, [])"), inputs = list(tx = tx, ty = ty),
+ref_case("tail_err_q2", "tail_dependence(tx, ty, numeric(0))", paste0(P, "result = D.tail_dependence(tx, ty, q=[])"), inputs = list(tx = tx, ty = ty),
          jl = paste0(J, "result = D.tail_dependence(tx, ty, Float64[])"))
-ref_case("tail_err_q3", "tail_dependence(tx, ty, 'a')", paste0(P, "result = D.tail_dependence(tx, ty, 'a')"), inputs = list(tx = tx, ty = ty),
+ref_case("tail_err_q3", "tail_dependence(tx, ty, 'a')", paste0(P, "result = D.tail_dependence(tx, ty, q='a')"), inputs = list(tx = tx, ty = ty),
          jl = paste0(J, 'result = D.tail_dependence(tx, ty, "a")'))
 ref_case("tail_err_len", "tail_dependence(1:3, 1:4)", paste0(P, "result = D.tail_dependence(np.arange(1, 4), np.arange(1, 5))"),
          jl = paste0(J, "result = D.tail_dependence(1:3, 1:4)"))
@@ -226,20 +226,20 @@ ref_case("tail_err_n", "tail_dependence(c(1, NA), c(2, 3))", paste0(P, "result =
 set.seed(1); n <- 300
 RR <- cbind(a = rnorm(n, 0, 0.01), b = rnorm(n, 0, 0.01), c = rnorm(n, 0, 0.012))
 RR[, "b"] <- 0.5 * RR[, "a"] + sqrt(0.75) * RR[, "b"]
-ref_case("dcc_fit2", "dcc_fit(RR[, 1:2])", paste0(P, "result = D.dcc_fit(RR.iloc[:, :2])"), inputs = list(RR = RR),
-         jl = paste0(J, "result = D.dcc_fit(sub(RR, :, 1:2))"))
-ref_case("dcc_fit3", "dcc_fit(unname(RR))", paste0(P, "result = D.dcc_fit(RR.to_numpy())"), inputs = list(RR = RR),
-         jl = paste0(J, "result = D.dcc_fit(RR.data)"))
-ref_case("dcc_err_n", "dcc_fit(RR[1:99, ])", paste0(P, "result = D.dcc_fit(RR.iloc[:99])"), inputs = list(RR = RR),
-         jl = paste0(J, "result = D.dcc_fit(sub(RR, 1:99, :))"))
-ref_case("dcc_err_k", "dcc_fit(RR[, 1, drop = FALSE])", paste0(P, "result = D.dcc_fit(RR.iloc[:, :1])"), inputs = list(RR = RR),
-         jl = paste0(J, "result = D.dcc_fit(sub(RR, :, 1:1))"))
+ref_case("dcc_fit2", "dependence_dcc(RR[, 1:2])", paste0(P, "result = D.dependence_dcc(RR.iloc[:, :2])"), inputs = list(RR = RR),
+         jl = paste0(J, "result = D.dependence_dcc(sub(RR, :, 1:2))"))
+ref_case("dcc_fit3", "dependence_dcc(unname(RR))", paste0(P, "result = D.dependence_dcc(RR.to_numpy())"), inputs = list(RR = RR),
+         jl = paste0(J, "result = D.dependence_dcc(RR.data)"))
+ref_case("dcc_err_n", "dependence_dcc(RR[1:99, ])", paste0(P, "result = D.dependence_dcc(RR.iloc[:99])"), inputs = list(RR = RR),
+         jl = paste0(J, "result = D.dependence_dcc(sub(RR, 1:99, :))"))
+ref_case("dcc_err_k", "dependence_dcc(RR[, 1, drop = FALSE])", paste0(P, "result = D.dependence_dcc(RR.iloc[:, :1])"), inputs = list(RR = RR),
+         jl = paste0(J, "result = D.dependence_dcc(sub(RR, :, 1:1))"))
 RC <- RR; RC[, "c"] <- 0.001
-ref_case("dcc_err_const", "dcc_fit(RC)", paste0(P, "result = D.dcc_fit(RC)"), inputs = list(RC = RC),
-         jl = paste0(J, "result = D.dcc_fit(RC)"))
+ref_case("dcc_err_const", "dependence_dcc(RC)", paste0(P, "result = D.dependence_dcc(RC)"), inputs = list(RC = RC),
+         jl = paste0(J, "result = D.dependence_dcc(RC)"))
 RS <- cbind(RR, d = RR[, "a"] * 2)
-ref_case("dcc_err_sing", "dcc_fit(RS)", paste0(P, "result = D.dcc_fit(RS)"), inputs = list(RS = RS),
-         jl = paste0(J, "result = D.dcc_fit(RS)"))
+ref_case("dcc_err_sing", "dependence_dcc(RS)", paste0(P, "result = D.dependence_dcc(RS)"), inputs = list(RS = RS),
+         jl = paste0(J, "result = D.dependence_dcc(RS)"))
 
 # Regime aus Zustandsvariablen
 set.seed(5); cvx <- rnorm(200); cvd <- sample(1:2, 200, TRUE); cvd2 <- c(rep(0, 150), 1:50)
@@ -297,43 +297,43 @@ ref_case("da_err2", "dependence_analysis(d1, c('stocks', 'bonds'), frequency = '
 ref_case("da_err3", "dependence_analysis(d1, c('stocks', 'bonds'), frequency = 'year')", paste0(P, "result = D.dependence_analysis(d1, ['stocks', 'bonds'], frequency='year')"), inputs = list(d1 = d1[1:10, ]),
          jl = paste0(J, 'result = D.dependence_analysis(d1, ["stocks", "bonds"]; frequency = "year")'))
 
-# quantile_reg
+# quantile_regression
 set.seed(1); x <- rnorm(200); y <- 1 + 2 * x + rnorm(200) * (1 + abs(x)); x2 <- rnorm(200)
 QI <- list(x = x, y = y, x2 = x2)
-ref_case("qreg_basic", "list(quantile_reg(y, x, 0.9), quantile_reg(y, NULL, 0.3), quantile_reg(y, cbind(a = x, b = x2), 0.5), quantile_reg(y, data.frame(u = x), 0.1, intercept = FALSE))",
-         paste0(P, "result = [D.quantile_reg(y, x, 0.9), D.quantile_reg(y, None, 0.3), D.quantile_reg(y, pd.DataFrame({'a': x, 'b': x2}), 0.5), D.quantile_reg(y, pd.DataFrame({'u': x}), 0.1, intercept=False)]"), inputs = QI,
-         jl = paste0(J, 'result = [D.quantile_reg(y, x, 0.9), D.quantile_reg(y, nothing, 0.3), D.quantile_reg(y, SL.NamedMat(hcat(x, x2); colnames = ["a", "b"]), 0.5), D.quantile_reg(y, SL.RFrame("u" => x), 0.1; intercept = false)]'))
-ref_case("qreg_na", "y2 <- y; y2[3] <- NA; x3 <- x; x3[7] <- Inf; quantile_reg(y2, cbind(x3, x2), 0.25, tol = 1e-8, maxit = 50L)",
-         paste0(P, "y2 = y.copy(); y2[2] = simlev._r.fmt.NA_REAL; x3 = x.copy(); x3[6] = np.inf; result = D.quantile_reg(y2, pd.DataFrame({'x3': x3, 'x2': x2}), 0.25, tol=1e-8, maxit=50)"), inputs = QI,
-         jl = paste0(J, 'y2 = copy(y); y2[3] = SL.NA; x3 = copy(x); x3[7] = Inf; result = D.quantile_reg(y2, SL.NamedMat(hcat(x3, x2); colnames = ["x3", "x2"]), 0.25; tol = 1e-8, maxit = 50)'))
+ref_case("qreg_basic", "list(quantile_regression(y, x, 0.9), quantile_regression(y, NULL, 0.3), quantile_regression(y, cbind(a = x, b = x2), 0.5), quantile_regression(y, data.frame(u = x), 0.1, intercept = FALSE))",
+         paste0(P, "result = [D.quantile_regression(y, X=x, tau=0.9), D.quantile_regression(y, X=None, tau=0.3), D.quantile_regression(y, X=pd.DataFrame({'a': x, 'b': x2}), tau=0.5), D.quantile_regression(y, X=pd.DataFrame({'u': x}), tau=0.1, intercept=False)]"), inputs = QI,
+         jl = paste0(J, 'result = [D.quantile_regression(y, x, 0.9), D.quantile_regression(y, nothing, 0.3), D.quantile_regression(y, SL.NamedMat(hcat(x, x2); colnames = ["a", "b"]), 0.5), D.quantile_regression(y, SL.RFrame("u" => x), 0.1; intercept = false)]'))
+ref_case("qreg_na", "y2 <- y; y2[3] <- NA; x3 <- x; x3[7] <- Inf; quantile_regression(y2, cbind(x3, x2), 0.25, tol = 1e-8, maxit = 50L)",
+         paste0(P, "y2 = y.copy(); y2[2] = simlev._r.fmt.NA_REAL; x3 = x.copy(); x3[6] = np.inf; result = D.quantile_regression(y2, X=pd.DataFrame({'x3': x3, 'x2': x2}), tau=0.25, tol=1e-8, maxit=50)"), inputs = QI,
+         jl = paste0(J, 'y2 = copy(y); y2[3] = SL.NA; x3 = copy(x); x3[7] = Inf; result = D.quantile_regression(y2, SL.NamedMat(hcat(x3, x2); colnames = ["x3", "x2"]), 0.25; tol = 1e-8, maxit = 50)'))
 for (tv in list("0", "1", "c(0.1, 0.2)", "NA", "'a'"))
-  ref_case(sprintf("qreg_err_tau_%s", gsub("[^a-z0-9]", "", tv)), sprintf("quantile_reg(y, x, %s)", tv),
-           paste0(P, sprintf("result = D.quantile_reg(y, x, %s)", c("0" = "0", "1" = "1", "c(0.1, 0.2)" = "[0.1, 0.2]", "NA" = "simlev._r.fmt.NA_REAL", "'a'" = "'a'")[[tv]])), inputs = QI,
-           jl = paste0(J, sprintf("result = D.quantile_reg(y, x, %s)", c("0" = "0", "1" = "1", "c(0.1, 0.2)" = "[0.1, 0.2]", "NA" = "missing", "'a'" = '"a"')[[tv]])))
-ref_case("qreg_err_y", "quantile_reg(letters, x)", paste0(P, "result = D.quantile_reg(np.array(list('abc'), dtype=object), x)"), inputs = QI,
-         jl = paste0(J, 'result = D.quantile_reg(string.(collect("abcdefghijklmnopqrstuvwxyz")), x)'))
-ref_case("qreg_err_df", "quantile_reg(y, data.frame(a = x, f = factor(x > 0), g = 'z'))", paste0(P, "result = D.quantile_reg(y, pd.DataFrame({'a': x, 'f': pd.Categorical(x > 0), 'g': 'z'}))"), inputs = QI,
-         jl = paste0(J, 'result = D.quantile_reg(y, SL.RFrame("a" => x, "f" => string.(x .> 0), "g" => fill("z", length(x))))'))
-ref_case("qreg_err_rows", "quantile_reg(y, x[-1])", paste0(P, "result = D.quantile_reg(y, x[1:])"), inputs = QI,
-         jl = paste0(J, "result = D.quantile_reg(y, x[2:end])"))
-ref_case("qreg_err_noreg", "quantile_reg(y, NULL, intercept = FALSE)", paste0(P, "result = D.quantile_reg(y, None, intercept=False)"), inputs = QI,
-         jl = paste0(J, "result = D.quantile_reg(y, nothing; intercept = false)"))
-ref_case("qreg_err_few", "quantile_reg(y[1:2], cbind(x, x2)[1:2, ])", paste0(P, "result = D.quantile_reg(y[:2], np.column_stack([x, x2])[:2])"), inputs = QI,
-         jl = paste0(J, "result = D.quantile_reg(y[1:2], hcat(x, x2)[1:2, :])"))
-ref_case("qreg_err_coll", "quantile_reg(y, cbind(a = x, b = 2 * x, c = 1))", paste0(P, "result = D.quantile_reg(y, pd.DataFrame({'a': x, 'b': 2 * x, 'c': 1.0}))"), inputs = QI,
-         jl = paste0(J, 'result = D.quantile_reg(y, SL.NamedMat(hcat(x, 2 .* x, ones(length(x))); colnames = ["a", "b", "c"]))'))
-ref_case("qreg_err_X", "quantile_reg(y, matrix(letters[1:2], 200, 1))", paste0(P, "result = D.quantile_reg(y, np.full((200, 1), 'a', dtype=object))"), inputs = QI,
-         jl = paste0(J, 'result = D.quantile_reg(y, fill("a", 200, 1))'))
+  ref_case(sprintf("qreg_err_tau_%s", gsub("[^a-z0-9]", "", tv)), sprintf("quantile_regression(y, x, %s)", tv),
+           paste0(P, sprintf("result = D.quantile_regression(y, X=x, tau=%s)", c("0" = "0", "1" = "1", "c(0.1, 0.2)" = "[0.1, 0.2]", "NA" = "simlev._r.fmt.NA_REAL", "'a'" = "'a'")[[tv]])), inputs = QI,
+           jl = paste0(J, sprintf("result = D.quantile_regression(y, x, %s)", c("0" = "0", "1" = "1", "c(0.1, 0.2)" = "[0.1, 0.2]", "NA" = "missing", "'a'" = '"a"')[[tv]])))
+ref_case("qreg_err_y", "quantile_regression(letters, x)", paste0(P, "result = D.quantile_regression(np.array(list('abc'), dtype=object), X=x)"), inputs = QI,
+         jl = paste0(J, 'result = D.quantile_regression(string.(collect("abcdefghijklmnopqrstuvwxyz")), x)'))
+ref_case("qreg_err_df", "quantile_regression(y, data.frame(a = x, f = factor(x > 0), g = 'z'))", paste0(P, "result = D.quantile_regression(y, X=pd.DataFrame({'a': x, 'f': pd.Categorical(x > 0), 'g': 'z'}))"), inputs = QI,
+         jl = paste0(J, 'result = D.quantile_regression(y, SL.RFrame("a" => x, "f" => string.(x .> 0), "g" => fill("z", length(x))))'))
+ref_case("qreg_err_rows", "quantile_regression(y, x[-1])", paste0(P, "result = D.quantile_regression(y, X=x[1:])"), inputs = QI,
+         jl = paste0(J, "result = D.quantile_regression(y, x[2:end])"))
+ref_case("qreg_err_noreg", "quantile_regression(y, NULL, intercept = FALSE)", paste0(P, "result = D.quantile_regression(y, X=None, intercept=False)"), inputs = QI,
+         jl = paste0(J, "result = D.quantile_regression(y, nothing; intercept = false)"))
+ref_case("qreg_err_few", "quantile_regression(y[1:2], cbind(x, x2)[1:2, ])", paste0(P, "result = D.quantile_regression(y[:2], X=np.column_stack([x, x2])[:2])"), inputs = QI,
+         jl = paste0(J, "result = D.quantile_regression(y[1:2], hcat(x, x2)[1:2, :])"))
+ref_case("qreg_err_coll", "quantile_regression(y, cbind(a = x, b = 2 * x, c = 1))", paste0(P, "result = D.quantile_regression(y, X=pd.DataFrame({'a': x, 'b': 2 * x, 'c': 1.0}))"), inputs = QI,
+         jl = paste0(J, 'result = D.quantile_regression(y, SL.NamedMat(hcat(x, 2 .* x, ones(length(x))); colnames = ["a", "b", "c"]))'))
+ref_case("qreg_err_X", "quantile_regression(y, matrix(letters[1:2], 200, 1))", paste0(P, "result = D.quantile_regression(y, X=np.full((200, 1), 'a', dtype=object))"), inputs = QI,
+         jl = paste0(J, 'result = D.quantile_regression(y, fill("a", 200, 1))'))
 # Warnung (Optimalität nicht nachgewiesen) bei sehr kurzen MM-Stufen
 set.seed(21); wq <- NULL
 for (s in 1:400) { n <- sample(8:60, 1); p <- sample(1:3, 1); disc <- runif(1) < 0.5
   X <- matrix(if (disc) sample(0:2, n * (p - 1), TRUE) + 0 else round(rnorm(n * (p - 1)), 1), n)
   yy <- if (disc) sample(0:3, n, TRUE) + 0 else round(rt(n, 2), 1); tau <- sample(c(0.01, 0.03, 0.1, 0.5, 0.9, 0.97, 0.99), 1)
   if (qr(cbind(1, X))$rank < p) next
-  w <- tryCatch({ quantile_reg(yy, X, tau, maxit = 1L); NULL }, warning = function(w) TRUE)
+  w <- tryCatch({ quantile_regression(yy, X, tau, maxit = 1L); NULL }, warning = function(w) TRUE)
   if (isTRUE(w)) { wq <- list(yy = yy, X = X, tau = tau); break } }
-if (!is.null(wq)) ref_case("qreg_warn", "quantile_reg(yy, X, tau, maxit = 1L)", paste0(P, "result = D.quantile_reg(yy, X, tau, maxit=1)"), inputs = wq,
-                          jl = paste0(J, "result = D.quantile_reg(yy, X, tau; maxit = 1)"))
+if (!is.null(wq)) ref_case("qreg_warn", "quantile_regression(yy, X, tau, maxit = 1L)", paste0(P, "result = D.quantile_regression(yy, X=X, tau=tau, maxit=1)"), inputs = wq,
+                          jl = paste0(J, "result = D.quantile_regression(yy, X, tau; maxit = 1)"))
 
 # tail_regression
 ref_case("treg_basic", "tail_regression(d1, 'bonds', 'inflation', quantiles = c(0.1, 0.5, 0.9), B = 19, seed = 1)",
@@ -351,37 +351,37 @@ ref_case("treg_fail", "tail_regression(dsp, 'stocks', 'event', quantiles = c(0.5
 ref_case("treg_err", "tail_regression(d1[1:100, ], 'stocks', 'zins')", paste0(P, "result = D.tail_regression(d1.iloc[:100], 'stocks', 'zins')"), inputs = list(d1 = d1[1:100, ]),
          jl = paste0(J, 'result = D.tail_regression(d1, "stocks", "zins")'))
 
-# covar_analysis
+# tail_covar
 dp <- d1; dp$port <- 0.6 * dp$stocks / dp$stocks[1] + 0.4 * dp$bonds / dp$bonds[1]
-ref_case("covar_basic", "covar_analysis(dp, 'port', c('stocks', 'bonds'))", paste0(P, "result = D.covar_analysis(dp, 'port', ['stocks', 'bonds'])"), inputs = list(dp = dp),
-         jl = paste0(J, 'result = D.covar_analysis(dp, "port", ["stocks", "bonds"])'))
-ref_case("covar_state", "covar_analysis(dp, 'port', c('stocks', 'gold', 'port'), state = c('inflation', 'zins'), q = 0.1, frequency = 'month')",
-         paste0(P, "result = D.covar_analysis(dp, 'port', ['stocks', 'gold', 'port'], state=['inflation', 'zins'], q=0.1, frequency='month')"), inputs = list(dp = dp),
-         jl = paste0(J, 'result = D.covar_analysis(dp, "port", ["stocks", "gold", "port"]; state = ["inflation", "zins"], q = 0.1, frequency = "month")'))
+ref_case("covar_basic", "tail_covar(dp, 'port', c('stocks', 'bonds'))", paste0(P, "result = D.tail_covar(dp, 'port', ['stocks', 'bonds'])"), inputs = list(dp = dp),
+         jl = paste0(J, 'result = D.tail_covar(dp, "port", ["stocks", "bonds"])'))
+ref_case("covar_state", "tail_covar(dp, 'port', c('stocks', 'gold', 'port'), state = c('inflation', 'zins'), q = 0.1, frequency = 'month')",
+         paste0(P, "result = D.tail_covar(dp, 'port', ['stocks', 'gold', 'port'], state=['inflation', 'zins'], q=0.1, frequency='month')"), inputs = list(dp = dp),
+         jl = paste0(J, 'result = D.tail_covar(dp, "port", ["stocks", "gold", "port"]; state = ["inflation", "zins"], q = 0.1, frequency = "month")'))
 
-# validate_dependence
+# dependence_validate
 set.seed(4); n <- 1200
 e <- matrix(rnorm(2 * n), ncol = 2) %*% chol(matrix(c(1, .5, .5, 1), 2))
 h <- data.frame(us = exp(0.01 * e[, 1]), eu = exp(0.01 * e[, 2]), jp = exp(0.012 * rnorm(n)), infl = rep(c(1, 5, 1), c(400, 400, 400)))
 cfg <- bootstrap_config(c(us = "us", eu = "eu"))
 PB <- paste0(P, "from simlev import bootstrap as BS\n")
 JB <- paste0(J, "BS = SL.Bootstrap\n")
-ref_case("valdep", "b <- bootstrap(h, cfg, 'stationary', n = 6, params = list(L = 20), seed = 1, progress = FALSE); validate_dependence(b, h, agg = 5, max_paths = 4)",
-         paste0(PB, "cfg = BS.bootstrap_config({'us': 'us', 'eu': 'eu'})\nb = BS.bootstrap(h, cfg, 'stationary', n=6, params={'L': 20}, seed=1, progress=False)\nresult = D.validate_dependence(b, h, agg=5, max_paths=4)"),
+ref_case("valdep", "b <- bootstrap(h, cfg, 'stationary', n = 6, params = list(L = 20), seed = 1, progress = FALSE); dependence_validate(b, h, agg = 5, max_paths = 4)",
+         paste0(PB, "cfg = BS.bootstrap_config({'us': 'us', 'eu': 'eu'})\nb = BS.bootstrap(h, cfg, method='stationary', n=6, params={'L': 20}, seed=1, progress=False)\nresult = D.dependence_validate(b, h, agg=5, max_paths=4)"),
          inputs = list(h = h),
-         jl = paste0(JB, 'cfg = BS.bootstrap_config(SL.named("us" => "us", "eu" => "eu"))\nb = BS.bootstrap(h, cfg; method = "stationary", n = 6, params = Dict("L" => 20), seed = 1, progress = false)\nresult = D.validate_dependence(b, h; agg = 5, max_paths = 4)'))
-ref_case("valdep3", "cfg3 <- bootstrap_config(c(us = 'us', eu = 'eu', jp = 'jp')); b <- bootstrap(h, cfg3, 'iid', n = 3, seed = 2, progress = FALSE); validate_dependence(b, h, agg = 10L, q = 0.2)",
-         paste0(PB, "cfg3 = BS.bootstrap_config({'us': 'us', 'eu': 'eu', 'jp': 'jp'})\nb = BS.bootstrap(h, cfg3, 'iid', n=3, seed=2, progress=False)\nresult = D.validate_dependence(b, h, agg=10, q=0.2)"),
+         jl = paste0(JB, 'cfg = BS.bootstrap_config(SL.named("us" => "us", "eu" => "eu"))\nb = BS.bootstrap(h, cfg; method = "stationary", n = 6, params = Dict("L" => 20), seed = 1, progress = false)\nresult = D.dependence_validate(b, h; agg = 5, max_paths = 4)'))
+ref_case("valdep3", "cfg3 <- bootstrap_config(c(us = 'us', eu = 'eu', jp = 'jp')); b <- bootstrap(h, cfg3, 'iid', n = 3, seed = 2, progress = FALSE); dependence_validate(b, h, agg = 10L, q = 0.2)",
+         paste0(PB, "cfg3 = BS.bootstrap_config({'us': 'us', 'eu': 'eu', 'jp': 'jp'})\nb = BS.bootstrap(h, cfg3, method='iid', n=3, seed=2, progress=False)\nresult = D.dependence_validate(b, h, agg=10, q=0.2)"),
          inputs = list(h = h),
-         jl = paste0(JB, 'cfg3 = BS.bootstrap_config(SL.named("us" => "us", "eu" => "eu", "jp" => "jp"))\nb = BS.bootstrap(h, cfg3; method = "iid", n = 3, seed = 2, progress = false)\nresult = D.validate_dependence(b, h; agg = 10, q = 0.2)'))
-ref_case("valdep_err1", "validate_dependence(list(), h)", paste0(P, "result = D.validate_dependence({}, h)"), inputs = list(h = h[1:5, ]),
-         jl = paste0(J, "result = D.validate_dependence(SL.RList(), h)"))
-ref_case("valdep_err2", "b <- bootstrap(h, bootstrap_config(c(us = 'us')), 'iid', n = 2, seed = 1, progress = FALSE); validate_dependence(b, h)",
-         paste0(PB, "b = BS.bootstrap(h, BS.bootstrap_config({'us': 'us'}), 'iid', n=2, seed=1, progress=False)\nresult = D.validate_dependence(b, h)"), inputs = list(h = h),
-         jl = paste0(JB, 'b = BS.bootstrap(h, BS.bootstrap_config(SL.named("us" => "us")); method = "iid", n = 2, seed = 1, progress = false)\nresult = D.validate_dependence(b, h)'))
-ref_case("valdep_err3", "b <- bootstrap(h, cfg, 'iid', n = 2, seed = 1, progress = FALSE); validate_dependence(b, h, agg = 100)",
-         paste0(PB, "cfg = BS.bootstrap_config({'us': 'us', 'eu': 'eu'})\nb = BS.bootstrap(h, cfg, 'iid', n=2, seed=1, progress=False)\nresult = D.validate_dependence(b, h, agg=100)"), inputs = list(h = h),
-         jl = paste0(JB, 'cfg = BS.bootstrap_config(SL.named("us" => "us", "eu" => "eu"))\nb = BS.bootstrap(h, cfg; method = "iid", n = 2, seed = 1, progress = false)\nresult = D.validate_dependence(b, h; agg = 100)'))
+         jl = paste0(JB, 'cfg3 = BS.bootstrap_config(SL.named("us" => "us", "eu" => "eu", "jp" => "jp"))\nb = BS.bootstrap(h, cfg3; method = "iid", n = 3, seed = 2, progress = false)\nresult = D.dependence_validate(b, h; agg = 10, q = 0.2)'))
+ref_case("valdep_err1", "dependence_validate(list(), h)", paste0(P, "result = D.dependence_validate({}, h)"), inputs = list(h = h[1:5, ]),
+         jl = paste0(J, "result = D.dependence_validate(SL.RList(), h)"))
+ref_case("valdep_err2", "b <- bootstrap(h, bootstrap_config(c(us = 'us')), 'iid', n = 2, seed = 1, progress = FALSE); dependence_validate(b, h)",
+         paste0(PB, "b = BS.bootstrap(h, BS.bootstrap_config({'us': 'us'}), method='iid', n=2, seed=1, progress=False)\nresult = D.dependence_validate(b, h)"), inputs = list(h = h),
+         jl = paste0(JB, 'b = BS.bootstrap(h, BS.bootstrap_config(SL.named("us" => "us")); method = "iid", n = 2, seed = 1, progress = false)\nresult = D.dependence_validate(b, h)'))
+ref_case("valdep_err3", "b <- bootstrap(h, cfg, 'iid', n = 2, seed = 1, progress = FALSE); dependence_validate(b, h, agg = 100)",
+         paste0(PB, "cfg = BS.bootstrap_config({'us': 'us', 'eu': 'eu'})\nb = BS.bootstrap(h, cfg, method='iid', n=2, seed=1, progress=False)\nresult = D.dependence_validate(b, h, agg=100)"), inputs = list(h = h),
+         jl = paste0(JB, 'cfg = BS.bootstrap_config(SL.named("us" => "us", "eu" => "eu"))\nb = BS.bootstrap(h, cfg; method = "iid", n = 2, seed = 1, progress = false)\nresult = D.dependence_validate(b, h; agg = 100)'))
 
 # regime_subset
 rs <- function(...) { s <- regime_subset(...); list(data = s, episodes = attr(s, "episodes")) }

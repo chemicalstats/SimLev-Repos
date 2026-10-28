@@ -2,7 +2,7 @@
 
 Klassen: SimLevSignalAnalysis, SimLevHeatmap (analysis_tests), SimLevBackcastFit,
 SimLevBackcast (backcast), SimLevBootstrapStudy (bootstrap), SimLevAnalysis
-(deep_analysis), SimLevDependence, SimLevTailRegression, SimLevCoVaR (dependence).
+(result_analysis), SimLevDependence, SimLevTailRegression, SimLevCoVaR (dependence).
 Die Objekte stammen aus den Referenzfällen unter ``golden/modules`` (Python-Code
 der Fälle), damit Python und Julia dieselben Eingaben zeichnen.
 """
@@ -227,7 +227,7 @@ def test_dependence_values():
     assert _same(p.data["rolling"]["rolling"], x["rolling"][pn]) and _same(p.data["rolling"]["dcc"], x["dcc"]["correlation"][pn])
     assert _days(p.data["rolling"]["date"]) == _days(x["rolling"]["date"])
     qg = [0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5]
-    td = simlev.dependence.tail_dependence(x["returns"]["stocks"], x["returns"]["bonds"], qg)
+    td = simlev.dependence.tail_dependence(x["returns"]["stocks"], x["returns"]["bonds"], q=qg)
     assert _same(p.data["tail"]["q"], qg) and _same(p.data["tail"]["lower"], td["lower"])
     assert _same(p.data["tail"]["independence"], qg)
     ct = x["conditional"]["inflation"]

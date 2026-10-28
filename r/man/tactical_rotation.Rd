@@ -95,5 +95,5 @@ Keuning, J. W. (2018), Breadth Momentum and the Canary Universe: Defensive
 Asset Allocation (DAA), SSRN 3212862.
 }
 \seealso{
-\code{\link[=momentum_score]{momentum_score()}}, \code{\link[=tactical_simulation]{tactical_simulation()}}, \code{\link[=blend_weights]{blend_weights()}}
+\code{\link[=momentum_score]{momentum_score()}}, \code{\link[=tactical_simulation]{tactical_simulation()}}, \code{\link[=tactical_blend]{tactical_blend()}}
 }

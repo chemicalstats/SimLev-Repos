@@ -7,16 +7,16 @@
 #                          DCC(1,1) und bedingte Analyse nach Regimen von
 #                          Drittvariablen (Inflation, Zinsen, Spreads, ...)
 #                          mit Block-Bootstrap-Konfidenzintervallen
-#  fit_copula()            Gauss, t, Clayton, Gumbel, Frank inkl. Rotationen
+#  copula_fit()            Gauss, t, Clayton, Gumbel, Frank inkl. Rotationen
 #                          (pseudo-ML auf Raengen, Auswahl per AIC)
 #  tail_dependence()       empirische Tail-Koeffizienten und Exceedance-
 #                          Korrelationen je Quantil
-#  dcc_fit()               DCC(1,1) nach Engle (2002), Kern in C++
-#  quantile_reg()          lineare Quantilsregression (MM-Algorithmus,
+#  dependence_dcc()               DCC(1,1) nach Engle (2002), Kern in C++
+#  quantile_regression()          lineare Quantilsregression (MM-Algorithmus,
 #                          Hunter & Lange 2000)
 #  tail_regression()       Renditequantile in Abhaengigkeit von Drittvariablen
-#  covar_analysis()        CoVaR / Delta-CoVaR (Adrian & Brunnermeier 2016)
-#  validate_dependence()   erhalten Bootstrap-Pfade die historische
+#  tail_covar()        CoVaR / Delta-CoVaR (Adrian & Brunnermeier 2016)
+#  dependence_validate()   erhalten Bootstrap-Pfade die historische
 #                          Abhaengigkeitsstruktur?
 #  regime_subset()         Zeilen eines Regimes fuer Stress-Bootstraps
 #
@@ -24,7 +24,7 @@
 #  wie der Bootstrap die aus rugarch uebernommene Fassung (R/vendor_rugarch.R).
 #  Drittvariablen gehen immer verzoegert ein: Die Rendite der Periode t wird
 #  dem Zustand zugeordnet, der am Ende der Periode t - 1 bekannt war. Fuer
-#  Makrodaten mit Veroeffentlichungsverzug vorher align_macro() verwenden.
+#  Makrodaten mit Veroeffentlichungsverzug vorher series_align_macro() verwenden.
 # =============================================================================
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -208,29 +208,29 @@
 #'   \code{tau} (Kendalls Tau) und \code{n} (Anzahl Paare).
 #' @seealso [tail_dependence()] fuer die empirischen Tail-Koeffizienten,
 #'   [dependence_analysis()] (Copula-Fits fuer alle Paare),
-#'   [copula_scenarios()].
+#'   [scenario_copula()].
 #' @references Genest, C., Ghoudi, K. & Rivest, L.-P. (1995), Biometrika
 #'   82(3); Joe, H. (2014), Dependence Modeling with Copulas.
 #' @examples
 #' set.seed(1); z <- matrix(rnorm(2000), ncol = 2) %*% chol(matrix(c(1, .6, .6, 1), 2))
 #' w <- sqrt(rchisq(1000, 4) / 4); x <- z[, 1] / w; y <- z[, 2] / w   # t-Abhaengigkeit
-#' fit_copula(x, y)[, c("family", "par1", "par2", "aic", "lambda_lower")]
+#' copula_fit(x, y)[, c("family", "par1", "par2", "aic", "lambda_lower")]
 #' @export
-fit_copula <- function(x, y, families = NULL) {
-  if (length(x) != length(y)) stop(sprintf("fit_copula: x und y m\u00fcssen gleich lang sein (%d bzw. %d Werte).", length(x), length(y)))
+copula_fit <- function(x, y, families = NULL) {
+  if (length(x) != length(y)) stop(sprintf("copula_fit: x und y m\u00fcssen gleich lang sein (%d bzw. %d Werte).", length(x), length(y)))
   ok <- is.finite(x) & is.finite(y); x <- x[ok]; y <- y[ok]
   n <- length(x)
-  if (n < 20) stop("fit_copula: mindestens 20 Beobachtungen n\u00f6tig.")
+  if (n < 20) stop("copula_fit: mindestens 20 Beobachtungen n\u00f6tig.")
   if (!is.null(families)) {
     base <- sub("_.*$", "", families); rot <- ifelse(grepl("_", families), sub("^[^_]*_", "", families), "")
     bad <- !base %in% c("gaussian", "t", "clayton", "gumbel", "frank") | !rot %in% c("", "90", "180", "270") |
       (base %in% c("gaussian", "t", "frank") & rot != "")
-    if (any(bad)) stop(sprintf("fit_copula: unbekannte Familie %s; erlaubt sind gaussian, t, frank sowie clayton und gumbel mit optionaler Rotation _90, _180 oder _270.",
+    if (any(bad)) stop(sprintf("copula_fit: unbekannte Familie %s; erlaubt sind gaussian, t, frank sowie clayton und gumbel mit optionaler Rotation _90, _180 oder _270.",
                                paste0("'", families[bad], "'", collapse = ", ")))
   }
   u <- .pobs(x); v <- .pobs(y)
   tau <- .kendall(x, y)
-  if (!is.finite(tau)) stop("fit_copula: x oder y ist konstant (keine Rangstreuung); keine Copula sch\u00e4tzbar.")
+  if (!is.finite(tau)) stop("copula_fit: x oder y ist konstant (keine Rangstreuung); keine Copula sch\u00e4tzbar.")
   if (is.null(families)) families <- if (tau >= 0)
     c("gaussian", "t", "clayton", "gumbel", "frank", "clayton_180", "gumbel_180")
     else c("gaussian", "t", "frank", "clayton_90", "clayton_270", "gumbel_90", "gumbel_270")
@@ -287,8 +287,8 @@ fit_copula <- function(x, y, families = NULL) {
 #'   (Exceedance-Korrelationen; \code{NA} bei weniger als 8 gemeinsamen
 #'   Ueberschreitungen oder Streuung 0), \code{n_lower}, \code{n_upper}
 #'   (Anzahl der Paare, die gemeinsam im unteren bzw. oberen Tail liegen).
-#' @seealso [fit_copula()] (implizite Tail-Koeffizienten),
-#'   [dependence_analysis()], [validate_dependence()].
+#' @seealso [copula_fit()] (implizite Tail-Koeffizienten),
+#'   [dependence_analysis()], [dependence_validate()].
 #' @references Longin, F. & Solnik, B. (2001), Journal of Finance 56(2).
 #' @examples
 #' set.seed(1); z <- rnorm(2000); x <- z + rnorm(2000); y <- z + rnorm(2000)
@@ -343,33 +343,33 @@ tail_dependence <- function(x, y, q = c(0.01, 0.025, 0.05, 0.10, 0.20)) {
 #'   (data.frame je Reihe: \code{series}, \code{alpha}, \code{beta},
 #'   \code{method} = Schaetzweg der GARCH-Stufe), \code{z} (Matrix der
 #'   standardisierten Residuen) und \code{Qbar}.
-#' @seealso [dependence_analysis()] (ruft \code{dcc_fit()} fuer alle Anlagen
-#'   auf), [fit_copula()], [tail_dependence()].
+#' @seealso [dependence_analysis()] (ruft \code{dependence_dcc()} fuer alle Anlagen
+#'   auf), [copula_fit()], [tail_dependence()].
 #' @examples
 #' set.seed(1); n <- 500
 #' R <- cbind(a = rnorm(n, 0, 0.01), b = rnorm(n, 0, 0.01))
 #' R[, "b"] <- 0.5 * R[, "a"] + sqrt(0.75) * R[, "b"]
-#' fit <- dcc_fit(R)
+#' fit <- dependence_dcc(R)
 #' c(a = fit$a, b = fit$b)
 #' tail(fit$correlation, 3)
 #' @references Engle, R. (2002), Journal of Business & Economic Statistics
 #'   20(3), 339-350.
 #' @export
-dcc_fit <- function(R) {
+dependence_dcc <- function(R) {
   R <- as.matrix(R)
-  if (ncol(R) < 2 || nrow(R) < 100) stop("dcc_fit: mindestens zwei Reihen und 100 Beobachtungen.")
+  if (ncol(R) < 2 || nrow(R) < 100) stop("dependence_dcc: mindestens zwei Reihen und 100 Beobachtungen.")
   nm <- colnames(R) %||% paste0("V", seq_len(ncol(R)))
   g <- lapply(seq_len(ncol(R)), function(j) .fit_garch11(R[, j], quiet = TRUE))
   Z <- vapply(g, `[[`, numeric(nrow(R)), "z")
   if (!is.matrix(Z)) Z <- matrix(Z, ncol = ncol(R))
   flat <- which(apply(Z, 2, stats::sd) == 0)
-  if (length(flat)) stop(sprintf("dcc_fit: Reihe %s ist konstant; keine Korrelation sch\u00e4tzbar.", paste0("'", nm[flat], "'", collapse = ", ")))
+  if (length(flat)) stop(sprintf("dependence_dcc: Reihe %s ist konstant; keine Korrelation sch\u00e4tzbar.", paste0("'", nm[flat], "'", collapse = ", ")))
   Qb <- stats::cor(Z)
   # (nahezu) perfekt korrelierte Reihen: Qbar und damit R_t sind singulaer
   ev <- eigen(Qb, symmetric = TRUE, only.values = TRUE)$values
   if (min(ev) < 1e-8) {
     C0 <- Qb; diag(C0) <- 0; ij <- which(abs(C0) == max(abs(C0)), arr.ind = TRUE)[1, ]
-    stop(sprintf("dcc_fit: Korrelationsmatrix der standardisierten Residuen ist singul\u00e4r (z. B. '%s' und '%s': Korrelation %.6f); DCC nicht sch\u00e4tzbar. Doppelte bzw. linear abh\u00e4ngige Reihen entfernen.",
+    stop(sprintf("dependence_dcc: Korrelationsmatrix der standardisierten Residuen ist singul\u00e4r (z. B. '%s' und '%s': Korrelation %.6f); DCC nicht sch\u00e4tzbar. Doppelte bzw. linear abh\u00e4ngige Reihen entfernen.",
                  nm[ij[1]], nm[ij[2]], Qb[ij[1], ij[2]]))
   }
   par <- function(th) { s <- 0.999 * stats::plogis(th[1]); a <- s * stats::plogis(th[2]); c(a, s - a) }
@@ -378,7 +378,7 @@ dcc_fit <- function(R) {
   o <- stats::optim(st, f, method = "Nelder-Mead", control = list(maxit = 2000, reltol = 1e-10))
   p <- par(o$par)
   fl <- .dcc_filter(Z, p[1], p[2], Qb, TRUE)
-  if (!isTRUE(fl$ok)) stop("dcc_fit: bedingte Korrelationsmatrix nicht positiv definit; DCC nicht sch\u00e4tzbar.")
+  if (!isTRUE(fl$ok)) stop("dependence_dcc: bedingte Korrelationsmatrix nicht positiv definit; DCC nicht sch\u00e4tzbar.")
   pn <- utils::combn(nm, 2, paste, collapse = " ~ ")
   C <- fl$R; colnames(C) <- pn
   list(a = p[1], b = p[2], loglik = -o$value, correlation = C, pairs = pn,
@@ -456,7 +456,7 @@ dcc_fit <- function(R) {
 #'
 #' @param data data.frame mit Spalte \code{date} (Klasse Date oder in Date
 #'   umwandelbar), Kursspalten (Kursniveaus, keine Renditen) und
-#'   Zustandsspalten (z. B. mit [align_series()] und [align_macro()]
+#'   Zustandsspalten (z. B. mit [series_align()] und [series_align_macro()]
 #'   vorbereitet).
 #' @param assets Zeichenvektor der Kursspalten (mindestens zwei).
 #' @param conditions Zeichenvektor der Zustandsspalten (Drittvariablen, in
@@ -480,9 +480,9 @@ dcc_fit <- function(R) {
 #' @param window Fenster der rollierenden Pearson-Korrelation in Perioden der
 #'   gewaehlten Frequenz. \code{NULL} (Standard) = Anzahl Perioden je Jahr
 #'   (aus den Daten ermittelt, mindestens 10).
-#' @param dcc Logisch: DCC(1,1) mit [dcc_fit()] schaetzen (nur bei
+#' @param dcc Logisch: DCC(1,1) mit [dependence_dcc()] schaetzen (nur bei
 #'   mindestens 100 Perioden; Fehler werden als Meldung ausgegeben).
-#' @param copulas Logisch: Copula-Fits mit [fit_copula()] je Paar (und je
+#' @param copulas Logisch: Copula-Fits mit [copula_fit()] je Paar (und je
 #'   Regime ab 40 Perioden).
 #' @param B Anzahl Bootstrap-Wiederholungen fuer die Regime-Vergleiche
 #'   (ganze Zahl, Standard 499; 0 = aus).
@@ -511,12 +511,12 @@ dcc_fit <- function(R) {
 #'       \code{t_rho}, \code{t_nu} (Parameter der t-Copula).}
 #'     \item{tail}{Ergebnis von [tail_dependence()] je Paar (Spalte
 #'       \code{pair}) und Quantil.}
-#'     \item{copulas}{Benannte Liste der [fit_copula()]-Tabellen je Paar oder
+#'     \item{copulas}{Benannte Liste der [copula_fit()]-Tabellen je Paar oder
 #'       \code{NULL}.}
 #'     \item{rolling}{data.frame mit \code{date} und der rollierenden
 #'       Korrelation je Paar (\code{NULL}, wenn die Historie nicht laenger als
 #'       \code{window} ist).}
-#'     \item{dcc}{Ergebnis von [dcc_fit()] oder \code{NULL}.}
+#'     \item{dcc}{Ergebnis von [dependence_dcc()] oder \code{NULL}.}
 #'     \item{conditional}{Liste je Zustandsvariable: data.frame je Paar und
 #'       Regime mit \code{n}, \code{vol_1}, \code{vol_2} (annualisierte
 #'       Volatilitaet der Log-Renditen als Anteil), \code{pearson},
@@ -535,8 +535,8 @@ dcc_fit <- function(R) {
 #'   sowie \code{assets}, \code{conditions}, \code{frequency}, \code{ppy}
 #'   (Perioden je Jahr, aus den Daten), \code{window}, \code{block},
 #'   \code{B}, \code{tail_q}. Methoden \code{print} und \code{plot}.
-#' @seealso [align_series()], [align_macro()] zur Vorbereitung;
-#'   [tail_regression()], [covar_analysis()], [regime_subset()].
+#' @seealso [series_align()], [series_align_macro()] zur Vorbereitung;
+#'   [tail_regression()], [tail_covar()], [regime_subset()].
 #' @examples
 #' \donttest{
 #' set.seed(1); n <- 3000
@@ -565,7 +565,7 @@ dependence_analysis <- function(data, assets, conditions = NULL, frequency = c("
                kendall = .kendall(X))
   pidx <- t(utils::combn(length(assets), 2)); pn <- apply(pidx, 1, function(p) paste(assets[p], collapse = " ~ "))
   tails <- lapply(seq_len(nrow(pidx)), function(i) cbind(pair = pn[i], tail_dependence(X[, pidx[i, 1]], X[, pidx[i, 2]], quantiles)))
-  cops <- if (copulas) lapply(seq_len(nrow(pidx)), function(i) fit_copula(X[, pidx[i, 1]], X[, pidx[i, 2]])) else NULL
+  cops <- if (copulas) lapply(seq_len(nrow(pidx)), function(i) copula_fit(X[, pidx[i, 1]], X[, pidx[i, 2]])) else NULL
   if (!is.null(cops)) names(cops) <- pn
   ptab <- data.frame(pair = pn, pearson = cors$pearson[pidx], spearman = cors$spearman[pidx], kendall = cors$kendall[pidx],
                      stringsAsFactors = FALSE)
@@ -590,7 +590,7 @@ dependence_analysis <- function(data, assets, conditions = NULL, frequency = c("
       roll[[pn[i]]] <- cv / sqrt(pmax(vx * vy, 1e-300))
     }
   }
-  dc <- if (dcc && n >= 100) tryCatch(dcc_fit(X), error = function(e) { message("DCC nicht gesch\u00e4tzt: ", conditionMessage(e)); NULL }) else NULL
+  dc <- if (dcc && n >= 100) tryCatch(dependence_dcc(X), error = function(e) { message("DCC nicht gesch\u00e4tzt: ", conditionMessage(e)); NULL }) else NULL
   # bedingte Analyse
   cond <- diffs <- regimes <- NULL
   if (length(conditions)) {
@@ -613,7 +613,7 @@ dependence_analysis <- function(data, assets, conditions = NULL, frequency = c("
         td <- if (length(s) >= 20) tail_dependence(x, y, tail_q) else NULL
         fams <- if (length(s) >= 2 && isTRUE(.kendall(x, y) < 0)) c("t", "gaussian", "clayton_90", "clayton_270")
                 else c("t", "gaussian", "clayton", "gumbel")
-        tc <- if (copulas && length(s) >= 40) tryCatch(fit_copula(x, y, fams), error = function(e) NULL) else NULL
+        tc <- if (copulas && length(s) >= 40) tryCatch(copula_fit(x, y, fams), error = function(e) NULL) else NULL
         tt <- if (!is.null(tc)) tc[tc$family == "t", ] else NULL
         rows[[length(rows) + 1L]] <- data.frame(
           pair = pn[i], regime = l, n = length(s),
@@ -846,44 +846,44 @@ plot.SimLevDependence <- function(x, type = c("overview", "rolling", "tail", "co
 #'   \code{y} je Einheit des Regressors: \code{"(Intercept)"} (falls
 #'   \code{intercept = TRUE}) und je Spalte von \code{X} deren Name (sonst
 #'   \code{x1}, \code{x2}, ...).
-#' @seealso [tail_regression()] und [covar_analysis()] nutzen
-#'   \code{quantile_reg()} fuer Renditen.
+#' @seealso [tail_regression()] und [tail_covar()] nutzen
+#'   \code{quantile_regression()} fuer Renditen.
 #' @references Koenker, R. & Bassett, G. (1978), Econometrica 46(1);
 #'   Hunter, D. R. & Lange, K. (2000), Journal of Computational and Graphical
 #'   Statistics 9(1); Barrodale, I. & Roberts, F. D. K. (1974), Communications
 #'   of the ACM 17(6).
 #' @examples
 #' set.seed(1); x <- rnorm(500); y <- 1 + 2 * x + rnorm(500) * (1 + abs(x))
-#' quantile_reg(y, x, 0.9)
+#' quantile_regression(y, x, 0.9)
 #' @export
-quantile_reg <- function(y, X = NULL, tau = 0.5, intercept = TRUE, tol = 1e-10, maxit = 2000L) {
+quantile_regression <- function(y, X = NULL, tau = 0.5, intercept = TRUE, tol = 1e-10, maxit = 2000L) {
   if (!is.numeric(tau) || length(tau) != 1 || !is.finite(tau) || tau <= 0 || tau >= 1)
-    stop(sprintf("quantile_reg: tau muss eine Zahl echt zwischen 0 und 1 sein (erhalten: %s).", paste(format(tau), collapse = ", ")))
-  if (!is.numeric(y)) stop("quantile_reg: y muss numerisch sein.")
+    stop(sprintf("quantile_regression: tau muss eine Zahl echt zwischen 0 und 1 sein (erhalten: %s).", paste(format(tau), collapse = ", ")))
+  if (!is.numeric(y)) stop("quantile_regression: y muss numerisch sein.")
   y <- as.numeric(y)
   if (is.data.frame(X)) {
     nn <- names(X)[!vapply(X, is.numeric, TRUE)]
-    if (length(nn)) stop(sprintf("quantile_reg: Spalte(n) %s von X nicht numerisch (Faktoren vorher z. B. mit model.matrix() in Indikatorspalten umwandeln).",
+    if (length(nn)) stop(sprintf("quantile_regression: Spalte(n) %s von X nicht numerisch (Faktoren vorher z. B. mit model.matrix() in Indikatorspalten umwandeln).",
                                  paste0("'", nn, "'", collapse = ", ")))
   }
   X <- if (is.null(X)) matrix(0, length(y), 0) else as.matrix(X)
-  if (!is.numeric(X)) stop("quantile_reg: X muss numerisch sein.")
-  if (nrow(X) != length(y)) stop(sprintf("quantile_reg: X hat %d Zeilen, y aber %d Werte.", nrow(X), length(y)))
+  if (!is.numeric(X)) stop("quantile_regression: X muss numerisch sein.")
+  if (nrow(X) != length(y)) stop(sprintf("quantile_regression: X hat %d Zeilen, y aber %d Werte.", nrow(X), length(y)))
   nm <- colnames(X) %||% if (ncol(X)) paste0("x", seq_len(ncol(X))) else character(0)
   if (intercept) { X <- cbind(1, X); nm <- c("(Intercept)", nm) }
   ok <- is.finite(y) & rowSums(!is.finite(X)) == 0; y <- y[ok]; X <- X[ok, , drop = FALSE]
-  if (!ncol(X)) stop("quantile_reg: keine Regressoren (X = NULL und intercept = FALSE).")
-  if (length(y) < ncol(X)) stop(sprintf("quantile_reg: %d vollst\u00e4ndige Beobachtungen f\u00fcr %d Koeffizienten.", length(y), ncol(X)))
+  if (!ncol(X)) stop("quantile_regression: keine Regressoren (X = NULL und intercept = FALSE).")
+  if (length(y) < ncol(X)) stop(sprintf("quantile_regression: %d vollst\u00e4ndige Beobachtungen f\u00fcr %d Koeffizienten.", length(y), ncol(X)))
   qx <- qr(X)
   if (qx$rank < ncol(X))
-    stop(sprintf("quantile_reg: Regressoren linear abh\u00e4ngig (%s); doppelte oder konstante Spalten entfernen (die Konstante ist bei intercept = TRUE schon enthalten).",
+    stop(sprintf("quantile_regression: Regressoren linear abh\u00e4ngig (%s); doppelte oder konstante Spalten entfernen (die Konstante ist bei intercept = TRUE schon enthalten).",
                  paste0("'", nm[qx$pivot[(qx$rank + 1):ncol(X)]], "'", collapse = ", ")))
   beta <- qr.coef(qx, y)
   sc <- max(stats::sd(y), 1e-12)
   storage.mode(X) <- "double"
   beta <- .quantile_reg_core(y, X, tau, as.numeric(beta), sc, tol, as.integer(maxit))
   if (!isTRUE(attr(beta, "optimal")))
-    warning("quantile_reg: Optimalit\u00e4t nicht nachgewiesen; Ergebnis ist eine Ecke mit nicht gr\u00f6\u00dferem Zielwert als die MM-N\u00e4herung (bzw. die MM-N\u00e4herung selbst, falls keine solche Ecke gefunden wurde).")
+    warning("quantile_regression: Optimalit\u00e4t nicht nachgewiesen; Ergebnis ist eine Ecke mit nicht gr\u00f6\u00dferem Zielwert als die MM-N\u00e4herung (bzw. die MM-N\u00e4herung selbst, falls keine solche Ecke gefunden wurde).")
   stats::setNames(as.numeric(beta), nm)
 }
 
@@ -891,7 +891,7 @@ quantile_reg <- function(y, X = NULL, tau = 0.5, intercept = TRUE, tol = 1e-10, 
 #'
 #' Schaetzt fuer mehrere Quantile, wie sich die Verteilung der Periodenrendite
 #' einer Anlage mit dem (verzoegerten) Zustand von Drittvariablen verschiebt
-#' (lineare Quantilsregression mit [quantile_reg()], zum Vergleich OLS fuer
+#' (lineare Quantilsregression mit [quantile_regression()], zum Vergleich OLS fuer
 #' den Mittelwert). Ein negativer Koeffizient der Inflation im 5-%-Quantil
 #' heisst z. B.: Bei hoeherer Inflation fallen die schlechten Perioden
 #' schlechter aus, auch wenn sich der Median kaum bewegt. Standardfehler per
@@ -932,8 +932,8 @@ quantile_reg <- function(y, X = NULL, tau = 0.5, intercept = TRUE, tol = 1e-10, 
 #'   schaetzbar waren, z. B. weil ein Treiber in der Stichprobe konstant ist;
 #'   sie fehlen in Standardfehlern und Intervallen, mit Warnung),
 #'   \code{block}. Methoden \code{print} und \code{plot}.
-#' @seealso [align_macro()] zur Vorbereitung der Treiber,
-#'   [dependence_analysis()], [covar_analysis()], [quantile_reg()].
+#' @seealso [series_align_macro()] zur Vorbereitung der Treiber,
+#'   [dependence_analysis()], [tail_covar()], [quantile_regression()].
 #' @examples
 #' set.seed(1); n <- 3 * 365
 #' d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
@@ -950,7 +950,7 @@ tail_regression <- function(data, asset, drivers, quantiles = c(0.05, 0.25, 0.5,
   rd <- rd[stats::complete.cases(rd[, c(asset, drivers)]), , drop = FALSE]
   y <- 100 * rd[[asset]]; X <- as.matrix(rd[, drivers, drop = FALSE]); n <- length(y)
   if (n < 30) stop("tail_regression: zu wenige Perioden.")
-  est <- vapply(quantiles, function(q) quantile_reg(y, X, q), numeric(ncol(X) + 1))
+  est <- vapply(quantiles, function(q) quantile_regression(y, X, q), numeric(ncol(X) + 1))
   if (!is.matrix(est)) est <- matrix(est, nrow = 1)
   X1 <- cbind(1, X); storage.mode(X1) <- "double"
   qfit <- function(yb, Xb, k)                                   # Bootstrap: Start bei der Punktschaetzung
@@ -1022,7 +1022,7 @@ plot.SimLevTailRegression <- function(x, ...) {
 #' zeitvariabel:
 #' \deqn{X^{sys}_t = \alpha + \beta X^i_t + \gamma' M_{t-1} + \varepsilon \quad (\text{Quantil } q)}
 #' \deqn{\Delta CoVaR_t = \beta\,(VaR^i_t(q) - VaR^i_t(0.5))}
-#' Dabei ist \eqn{VaR^i_t(p)} das per [quantile_reg()] geschaetzte
+#' Dabei ist \eqn{VaR^i_t(p)} das per [quantile_regression()] geschaetzte
 #' (bei \code{state = NULL} konstante) p-Quantil der Rendite der Anlage, also
 #' eine Rendite mit Vorzeichen (Verluste negativ), und
 #' \eqn{CoVaR_t = \alpha + \beta VaR^i_t(q) + \gamma' M_{t-1}}.
@@ -1056,8 +1056,8 @@ plot.SimLevTailRegression <- function(x, ...) {
 #'   }
 #'   sowie \code{system}, \code{state}, \code{q}, \code{frequency} und
 #'   \code{n} (Anzahl Perioden). Methoden \code{print} und \code{plot}.
-#' @seealso [quantile_reg()], [tail_regression()], [dependence_analysis()],
-#'   [risk_contributions()].
+#' @seealso [quantile_regression()], [tail_regression()], [dependence_analysis()],
+#'   [portfolio_risk_contributions()].
 #' @examples
 #' set.seed(1); n <- 3 * 365
 #' d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
@@ -1065,11 +1065,11 @@ plot.SimLevTailRegression <- function(x, ...) {
 #' d$aktien <- 100 * cumprod(1 + 0.01 * e)
 #' d$anleihen <- 100 * cumprod(1 + 0.004 * (0.3 * e + rnorm(n)))
 #' d$portfolio <- 0.6 * d$aktien + 0.4 * d$anleihen
-#' covar_analysis(d, "portfolio", c("aktien", "anleihen"), q = 0.05)
+#' tail_covar(d, "portfolio", c("aktien", "anleihen"), q = 0.05)
 #' @references Adrian, T. & Brunnermeier, M. K. (2016), American Economic
 #'   Review 106(7), 1705-1741.
 #' @export
-covar_analysis <- function(data, system, assets, state = NULL, q = 0.05, frequency = c("week", "day", "month")) {
+tail_covar <- function(data, system, assets, state = NULL, q = 0.05, frequency = c("week", "day", "month")) {
   frequency <- match.arg(frequency)
   rd <- .dep_returns(data, unique(c(system, assets)), state, frequency)
   rd <- rd[stats::complete.cases(rd), , drop = FALSE]
@@ -1077,10 +1077,10 @@ covar_analysis <- function(data, system, assets, state = NULL, q = 0.05, frequen
   ys <- 100 * rd[[system]]
   res <- lapply(assets, function(a) {
     xi <- 100 * rd[[a]]
-    bq <- quantile_reg(xi, M, q); bm <- quantile_reg(xi, M, 0.5)
+    bq <- quantile_regression(xi, M, q); bm <- quantile_regression(xi, M, 0.5)
     Mi <- if (is.null(M)) matrix(1, length(xi), 1) else cbind(1, M)
     var_q <- drop(Mi %*% bq); var_m <- drop(Mi %*% bm)
-    bs <- quantile_reg(ys, cbind(xi, M), q)
+    bs <- quantile_regression(ys, cbind(xi, M), q)
     covar <- bs[1] + bs[2] * var_q + (if (!is.null(M)) drop(M %*% bs[-(1:2)]) else 0)
     dcv <- bs[2] * (var_q - var_m)
     list(summary = data.frame(asset = a, beta = unname(bs[2]), var = mean(var_q), covar = mean(covar),
@@ -1154,7 +1154,7 @@ plot.SimLevCoVaR <- function(x, ...) {
 #'   \code{percentile} (Anteil der Pfade mit Wert <= Historie, 0 bis 1;
 #'   Werte nahe 0 oder 1 zeigen, dass die Pfade die Kennzahl nicht
 #'   wiedergeben).
-#' @seealso [bootstrap()], [validate_bootstrap()], [tail_dependence()],
+#' @seealso [bootstrap()], [bootstrap_validate()], [tail_dependence()],
 #'   [dependence_analysis()].
 #' @examples
 #' set.seed(2)
@@ -1163,12 +1163,12 @@ plot.SimLevCoVaR <- function(x, ...) {
 #' cfg <- bootstrap_config(c(us = "us", eu = "eu"))
 #' b <- bootstrap(d, cfg, "stationary", n = 20, params = list(L = 20), seed = 1,
 #'                progress = FALSE)
-#' validate_dependence(b, d, agg = 5, q = 0.10)
+#' dependence_validate(b, d, agg = 5, q = 0.10)
 #' @export
-validate_dependence <- function(boot, data, agg = 5L, q = 0.10, max_paths = 200L) {
+dependence_validate <- function(boot, data, agg = 5L, q = 0.10, max_paths = 200L) {
   if (!inherits(boot, "bootstrap_result")) stop("boot muss ein bootstrap_result sein.")
   cfg <- boot$config
-  if (length(cfg$index_names) < 2) stop("validate_dependence: mindestens zwei Indizes in der Konfiguration.")
+  if (length(cfg$index_names) < 2) stop("dependence_validate: mindestens zwei Indizes in der Konfiguration.")
   hist <- log(.extract_returns(data, cfg)$ret)
   aggr <- function(L) { k <- nrow(L) %/% agg; if (k < 20) stop("Zu wenige Perioden nach Aggregation.")
     rowsum(L[seq_len(k * agg), , drop = FALSE], rep(seq_len(k), each = agg)) }

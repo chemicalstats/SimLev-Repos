@@ -33,7 +33,7 @@ test_that("B7-09: portfolio_optimize() prueft alpha, mu wie lower/upper, warnt b
   expect_error(portfolio_optimize(R, method = "min_cvar", alpha = 5), "alpha .*\\(0, 0.5\\].*0.05 statt 5")
   expect_error(portfolio_optimize(R, method = "min_cvar", alpha = 0.95), "nicht das Konfidenzniveau \\(0.95 -> alpha = 0.05\\)")
   expect_error(portfolio_optimize(R, alpha = 0), "alpha")
-  expect_error(risk_contributions(R, c(A = 0.5, B = 0.5), measure = "cvar", alpha = 0.95), "risk_contributions: alpha")
+  expect_error(portfolio_risk_contributions(R, c(A = 0.5, B = 0.5), measure = "cvar", alpha = 0.95), "portfolio_risk_contributions: alpha")
   expect_silent(portfolio_optimize(R, method = "min_cvar", alpha = 0.5))
   # mu: unbenannt in Spaltenreihenfolge (vorher "mu fuer alle Anlagen angeben."), unbekannte Namen genannt
   w_named <- portfolio_optimize(R, method = "max_sharpe", mu = c(A = 5, B = 6, C = 7, D = 8))$weights
@@ -47,15 +47,15 @@ test_that("B7-09: portfolio_optimize() prueft alpha, mu wie lower/upper, warnt b
   expect_warning(w26 <- portfolio_optimize(R, upper = 26), "upper: Obergrenze\\(n\\) > 1 \\(A = 26")
   expect_equal(w26$weights, portfolio_optimize(R, upper = 1)$weights)
   expect_silent(portfolio_optimize(R, upper = 0.26))
-  # rolling_optimization: die Warnung erscheint einmal (Vorabpruefung), nicht je Termin
+  # portfolio_rolling: die Warnung erscheint einmal (Vorabpruefung), nicht je Termin
   set.seed(1); n <- 4 * 365
   d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
   d$a <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01)); d$b <- 100 * cumprod(1 + rnorm(n, 1e-4, 0.003))
   msgs <- character()
-  withCallingHandlers(rolling_optimization(d, c("a", "b"), window = 2, every = "quarter", upper = 70),
+  withCallingHandlers(portfolio_rolling(d, c("a", "b"), window = 2, every = "quarter", upper = 70),
                       warning = function(w) { msgs <<- c(msgs, conditionMessage(w)); invokeRestart("muffleWarning") })
   expect_length(grep("Obergrenze", msgs), 1)
-  expect_error(rolling_optimization(d, c("a", "b"), window = 2, alpha = 0.95), "rolling_optimization: alpha")
+  expect_error(portfolio_rolling(d, c("a", "b"), window = 2, alpha = 0.95), "portfolio_rolling: alpha")
   # Inf in Renditen: vorher "infinite or missing values in 'x'"
   R2 <- R; R2[5, 2] <- Inf
   expect_error(portfolio_optimize(R2), "unendliche Rendite\\(n\\).*Spalte\\(n\\) 'B'.*Zeile 5")
@@ -111,26 +111,31 @@ test_that("C7-07: bootstrap_study() nennt Fehler der Einzelsimulationen und fass
   d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
   d$aktien <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
   cfg <- bootstrap_config(c(akt = "aktien"), input = "prices")
-  bnh <- create_strategy(akt = asset_config("etf", "bnh", asset_bonus = 30))
+  bnh <- create_strategy(akt = asset_config("etf", "bnh", partial_exemption = 30))
   run <- function(..., n = 10, cores = 1) bootstrap_study(d, cfg, "stationary", n = n, params = list(L = 30), path_length = 2 * 365,
                                                           cores = cores, chunk_size = 5, seed = 1, progress = FALSE, ...)
   # vorher nur "Keine Strategie-Ergebnisse - Strategie, Signale und sim_args pruefen."
+  # Etappe 6.4: unbekannte und alte flache Namen in sim_args sofort mit Hinweis auf den Baustein
   expect_error(run(strategies = list(bnh = bnh), sim_args = list(taxmode = "person")),
-               "alle 10 Pfad-Strategie-Kombinationen fehlgeschlagen.*Strategie 'bnh', Simulation, 10-mal: unused argument \\(taxmode")
+               "bootstrap_study: unbekanntes Argument taxmode f\u00fcr simulation\\(\\)")
+  expect_error(run(strategies = list(bnh = bnh), sim_args = list(tax_mode = "person")),
+               "bootstrap_study: tax_mode gibt es nicht mehr; bitte tax = tax_profile")
+  expect_error(run(strategies = list(bnh = bnh), sim_args = list(start_value = 1, dca.span = 1)),
+               "dca_plan: 'value' muss")
   expect_error(run(strategies = list(sig = list(strategy = create_strategy(akt = asset_config("etf", "signal", signal_buy = "b", signal_sell = "s")),
                                                 signal = function(df) stop("Spalte fehlt")))),
                "Strategie 'sig', Signal, 10-mal: Spalte fehlt")
   # eine Strategie scheitert: Warnung mit der Meldung, Einzelheiten in $errors
-  expect_warning(st <- run(strategies = list(ok = bnh, kaputt = list(strategy = bnh, args = list(tax_rate = 260)))),
-                 "10 Pfad-Strategie-Kombinationen ohne Ergebnis.*Strategie 'kaputt', Simulation, 10-mal: simulation: tax_rate muss")
+  expect_warning(st <- run(strategies = list(ok = bnh, kaputt = list(strategy = bnh, args = list(start_value = -1)))),
+                 "10 Pfad-Strategie-Kombinationen ohne Ergebnis.*Strategie 'kaputt', Simulation, 10-mal: simulation: start_value muss")
   expect_identical(as.vector(table(st$results$strategy)), 10L)
   expect_identical(st$errors$strategy, "kaputt"); expect_identical(st$errors$n, 10L); expect_identical(st$errors$stage, "Simulation")
   # Warnungen der Einzelsimulationen: vorher 0 (verschluckt), jetzt eine zusammengefasste mit Anzahl
   msgs <- character()
-  st <- withCallingHandlers(run(n = 20, strategies = list(bnh = bnh), sim_args = list(funds_fee = 1)),
+  st <- withCallingHandlers(run(n = 20, strategies = list(bnh = bnh), sim_args = list(risk_free = 0.01)),
                             warning = function(w) { msgs <<- c(msgs, conditionMessage(w)); invokeRestart("muffleWarning") })
   expect_length(msgs, 1)
-  expect_match(msgs, "Warnungen der Einzelsimulationen \\(1 verschiedene.*\\[Strategie 'bnh', 20 von 20 Pfaden\\] simulation: funds_fee")
+  expect_match(msgs, "Warnungen der Einzelsimulationen \\(1 verschiedene.*\\[Strategie 'bnh', 20 von 20 Pfaden\\] simulation: risk_free = 0.01")
   expect_identical(st$warnings$n, 20L); expect_null(st$errors)
   expect_identical(nrow(st$results), 20L)
   # ohne Warnungen/Fehler: Felder NULL, Ergebnisse unveraendert
@@ -138,17 +143,17 @@ test_that("C7-07: bootstrap_study() nennt Fehler der Einzelsimulationen und fass
   expect_null(st0$warnings); expect_null(st0$errors)
   # parallel gleich behandelt
   skip_on_os("windows"); skip_on_cran()
-  sp <- suppressWarnings(run(n = 20, cores = 2, strategies = list(ok = bnh, kaputt = list(strategy = bnh, args = list(tax_rate = 260))),
-                             sim_args = list(funds_fee = 1)))
-  ss <- suppressWarnings(run(n = 20, cores = 1, strategies = list(ok = bnh, kaputt = list(strategy = bnh, args = list(tax_rate = 260))),
-                             sim_args = list(funds_fee = 1)))
+  sp <- suppressWarnings(run(n = 20, cores = 2, strategies = list(ok = bnh, kaputt = list(strategy = bnh, args = list(start_value = -1))),
+                             sim_args = list(risk_free = 0.01)))
+  ss <- suppressWarnings(run(n = 20, cores = 1, strategies = list(ok = bnh, kaputt = list(strategy = bnh, args = list(start_value = -1))),
+                             sim_args = list(risk_free = 0.01)))
   expect_identical(sp$errors, ss$errors); expect_identical(sp$warnings, ss$warnings); expect_identical(sp$results, ss$results)
 })
 
 test_that("C7-08: plot.SimLevResult prueft panels, warnt ohne style = 'custom' und ergaenzt Teilfarben", {
   set.seed(7); n <- 500
   data <- data.frame(date = seq.Date(as.Date("2021-01-01"), by = "day", length.out = n), ETF = 100 * cumprod(1 + rnorm(n, 4e-4, 0.012)))
-  r <- suppressWarnings(simulation(data, create_strategy(ETF = asset_config("etf", asset_share = 1))))
+  r <- suppressWarnings(simulation(data, create_strategy(ETF = asset_config("etf", share = 1))))
   grDevices::pdf(NULL); on.exit(grDevices::dev.off(), add = TRUE)
   # vorher: kein Fehler, leeres Layout
   expect_error(plot(r, style = "custom", panels = c("perfromance", "drawdwon")), "unbekannte\\(s\\) Panel\\(s\\) \"perfromance\", \"drawdwon\"")
@@ -167,7 +172,7 @@ test_that("C7-08: plot.SimLevResult prueft panels, warnt ohne style = 'custom' u
 test_that("R8-06: plot(colors =) akzeptiert R-Farbnamen, prueft Farbwerte, Transparenz per adjustcolor()", {
   set.seed(7); n <- 500
   data <- data.frame(date = seq.Date(as.Date("2021-01-01"), by = "day", length.out = n), ETF = 100 * cumprod(1 + rnorm(n, 4e-4, 0.012)))
-  r <- suppressWarnings(simulation(data, create_strategy(ETF = asset_config("etf", asset_share = 1))))
+  r <- suppressWarnings(simulation(data, create_strategy(ETF = asset_config("etf", share = 1))))
   grDevices::pdf(NULL); on.exit(grDevices::dev.off(), add = TRUE)
   # vorher: invalid color name 'navy30' bzw. 'darkred40'
   expect_silent(plot(r, colors = list(primary = "navy")))
@@ -190,8 +195,8 @@ test_that("R8-07: portfolio_optimize(upper = Inf) = keine Obergrenze (wie 1, ohn
   expect_identical(a, portfolio_optimize(R, upper = 1))
   expect_identical(portfolio_optimize(R, upper = c(A = 0.3, B = Inf)), portfolio_optimize(R, upper = c(A = 0.3)))
   expect_identical(unname(a$bounds["upper", ]), rep(1, 4))
-  expect_silent(ef <- efficient_frontier(R, n = 5, upper = Inf))
-  expect_identical(ef, efficient_frontier(R, n = 5))
+  expect_silent(ef <- portfolio_frontier(R, n = 5, upper = Inf))
+  expect_identical(ef, portfolio_frontier(R, n = 5))
   expect_warning(portfolio_optimize(R, upper = c(A = 26, B = Inf)), "Obergrenze\\(n\\) > 1 \\(A = 26\\)")
   expect_error(portfolio_optimize(R, lower = Inf), "Grenzen nicht erf\u00fcllbar")
   expect_error(portfolio_optimize(R, upper = -Inf), "Grenzen nicht erf\u00fcllbar")
@@ -211,7 +216,7 @@ test_that("Layout style = 'custom': 3/5/7 Panels ohne Warnung, jedes Panel genau
   expect_identical(lay(3), matrix(c(1L, 2L, 3L, 0L), nrow = 2, byrow = TRUE))   # vorher matrix(1:3, nrow = 2): Panel 1 doppelt, Warnung
   set.seed(7); n <- 500
   data <- data.frame(date = seq.Date(as.Date("2021-01-01"), by = "day", length.out = n), ETF = 100 * cumprod(1 + rnorm(n, 4e-4, 0.012)))
-  r <- suppressWarnings(simulation(data, create_strategy(ETF = asset_config("etf", asset_share = 1))))
+  r <- suppressWarnings(simulation(data, create_strategy(ETF = asset_config("etf", share = 1))))
   grDevices::pdf(NULL); on.exit(grDevices::dev.off(), add = TRUE)
   # Beispiel aus der Hilfeseite: vorher "data length [3] is not a sub-multiple or multiple of the number of rows [2]"
   expect_silent(plot(r, style = "custom", panels = c("performance", "drawdown", "distribution")))
@@ -225,9 +230,9 @@ test_that("Panel performance: y-Achse \u00fcber alle Kurven (Vergleich, Einzahlu
   d <- data.frame(date = seq.Date(as.Date("2021-01-01"), by = "day", length.out = n), ETF = 100 * cumprod(1 + rnorm(n, 4e-4, 0.012)),
                   B = 100 * cumprod(1 + rnorm(n, -6e-4, 0.008)), C = 100 * cumprod(1 + rnorm(n, -1e-3, 0.01)))
   S <- function(...) suppressWarnings(suppressMessages(simulation(...)))
-  r <- S(d, create_strategy(ETF = asset_config("etf", asset_share = 1)))
-  r2 <- S(d, create_strategy(B = asset_config("etf", asset_share = 1)))       # liegt unter r
-  rl <- S(d, create_strategy(C = asset_config("etf", asset_share = 1)), dca_mode = TRUE, dca_value = 500, dca_span = 1)
+  r <- S(d, create_strategy(ETF = asset_config("etf", share = 1)))
+  r2 <- S(d, create_strategy(B = asset_config("etf", share = 1)))       # liegt unter r
+  rl <- S(d, create_strategy(C = asset_config("etf", share = 1)), dca = dca_plan(value = 500, span = 1))
   inv <- SimLev:::.dashboard_returns(rl)$invested
   expect_gt(max(inv), max(rl$worth))                                           # Einzahlungen ueber dem Depotwert
   grDevices::pdf(NULL); on.exit(grDevices::dev.off(), add = TRUE)
@@ -252,8 +257,8 @@ test_that("Dashboard: Raender passen zu den Beschriftungen (nichts abgeschnitten
   d <- data.frame(date = seq.Date(as.Date("2021-01-01"), by = "day", length.out = n), ETF = 100 * cumprod(1 + rnorm(n, 4e-4, 0.012)),
                   B = 100 * cumprod(1 + rnorm(n, 1e-4, 0.008)))
   S <- function(...) suppressWarnings(suppressMessages(simulation(...)))
-  r <- S(d, create_strategy(ETF = asset_config("etf", asset_share = 0.6), B = asset_config("etf", asset_share = 0.4)), start_value = 250000)
-  r2 <- S(d, create_strategy(B = asset_config("etf", asset_share = 1)), start_value = 250000)
+  r <- S(d, create_strategy(ETF = asset_config("etf", share = 0.6), B = asset_config("etf", share = 0.4)), start_value = 250000)
+  r2 <- S(d, create_strategy(B = asset_config("etf", share = 1)), start_value = 250000)
   # y-Achsen (Depotwert, Monats-Heatmap): linker Rand >= Breite der Tick-Labels + Abstand + Achsentitel
   # (vorher 4 bzw. 5 Zeilen fest: "250 Tsd. EUR" abgeschnitten, "Depotwert" ueberlappte die Labels)
   e <- new.env(); e$ax <- list(); e$tx <- list()
@@ -285,8 +290,8 @@ test_that("Strategievergleich: Gruen = Strategie 1 besser, bei Max. DD und Volat
   d <- data.frame(date = seq.Date(as.Date("2021-01-01"), by = "day", length.out = n), ETF = 100 * cumprod(1 + rnorm(n, 4e-4, 0.012)),
                   B = 100 * cumprod(1 + rnorm(n, 1e-4, 0.008)))
   S <- function(...) suppressWarnings(suppressMessages(simulation(...)))
-  r <- S(d, create_strategy(ETF = asset_config("etf", asset_share = 0.6), B = asset_config("etf", asset_share = 0.4)))
-  r2 <- S(d, create_strategy(B = asset_config("etf", asset_share = 1)))
+  r <- S(d, create_strategy(ETF = asset_config("etf", share = 0.6), B = asset_config("etf", share = 0.4)))
+  r2 <- S(d, create_strategy(B = asset_config("etf", share = 1)))
   pos <- "#06A77D"; neg <- "#D62246"; neu <- "#6C757D"
   diff_cols <- function(a, b) {                            # Farben der Differenzspalte (x = 0.95) mitschneiden
     e <- new.env(); e$v <- list()
@@ -308,7 +313,7 @@ test_that("Strategievergleich: Gruen = Strategie 1 besser, bei Max. DD und Volat
 test_that("Dashboard-Betr\u00e4ge: Kennzahlen mit vollen Betraegen, Endwert-Label mit 3 Stellen, Achsenwerte exakt", {
   set.seed(42); n <- 365 * 4
   d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n), A = 100 * cumprod(1 + rnorm(n, 4e-4, 0.010)))
-  r <- suppressWarnings(suppressMessages(simulation(d, create_strategy(A = asset_config("etf", asset_share = 1)), start_value = 10000)))
+  r <- suppressWarnings(suppressMessages(simulation(d, create_strategy(A = asset_config("etf", share = 1)), start_value = 10000)))
   e <- new.env(); e$tx <- character(); e$ax <- list()
   suppressMessages({
     trace("text.default", exit = bquote(assign("tx", c(get("tx", envir = .(e)), as.character(labels)), envir = .(e))),
@@ -336,8 +341,7 @@ test_that("R9-04: Startkapital ohne die Sparrate des Starttags (start_value)", {
   set.seed(42); n <- 365 * 2
   d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n),
                   W = 100 * cumprod(1 + rnorm(n, 4e-4, 0.010)), B = 50 * cumprod(1 + rnorm(n, 1e-4, 0.003)))
-  r <- suppressWarnings(suppressMessages(simulation(d, create_strategy(W = asset_config("etf", asset_share = 0.7), B = asset_config("etf", asset_share = 0.3)),
-                                                    start_value = 10000, dca_mode = TRUE, dca_value = 250, dca_span = 1, dca_unit = "month")))
+  r <- suppressWarnings(suppressMessages(simulation(d, create_strategy(W = asset_config("etf", share = 0.7), B = asset_config("etf", share = 0.3)), start_value = 10000, dca = dca_plan(value = 250, span = 1, unit = "month"))))
   expect_identical(r$invested[1], 10250)                       # Startkapital + erste Sparrate am Starttag
   e <- new.env(); e$tx <- character()
   suppressMessages(trace("text.default", exit = bquote(assign("tx", c(get("tx", envir = .(e)), as.character(labels)), envir = .(e))),
@@ -353,8 +357,8 @@ test_that("R9-05: Korrelation = rollierende Korrelation Strategie/Vergleich; ohn
   d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n),
                   W = 100 * cumprod(1 + rnorm(n, 4e-4, 0.010)), B = 50 * cumprod(1 + rnorm(n, 1e-4, 0.003)))
   S <- function(...) suppressWarnings(suppressMessages(simulation(...)))
-  r1 <- S(d, create_strategy(W = asset_config("etf", asset_share = 0.7), B = asset_config("etf", asset_share = 0.3)))
-  r2 <- S(d, create_strategy(B = asset_config("etf", asset_share = 1)))
+  r1 <- S(d, create_strategy(W = asset_config("etf", share = 0.7), B = asset_config("etf", share = 0.3)))
+  r2 <- S(d, create_strategy(B = asset_config("etf", share = 1)))
   e <- new.env(); e$tx <- character()
   suppressMessages(trace("text.default", exit = bquote(assign("tx", c(get("tx", envir = .(e)), as.character(labels)), envir = .(e))),
                          where = graphics::plot.default, print = FALSE))

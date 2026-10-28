@@ -1,11 +1,11 @@
 # =============================================================================
 #  rebal_trigger_cookbook.R  (Beispielskript, nicht Teil des Paket-Codes)
 #  Aufruf: source(system.file("examples", "rebal_trigger_cookbook.R", package = "SimLev"))
-#  Fuer die meisten Faelle genuegt die eingebaute Funktion compute_rebal_trigger().
+#  Fuer die meisten Faelle genuegt die eingebaute Funktion rebalance_trigger().
 #
 #  Manuelle Vorberechnung der Event-/Vol-Signalspalte (event_col) — OHNE
 #  eingebaute Funktion. Der Nutzer legt die TRUE/FALSE-Spalte selbst im Datensatz
-#  an und uebergibt sie via simulation(..., event_col = "<spaltenname>").
+#  an und uebergibt sie via simulation(..., rebalance = rebalance_plan(event_col = "<spaltenname>", event_mode = "replace", skip = TRUE)).
 #
 #  Gemeinsames Prinzip aller Hebel-/Vol-Varianten:
 #  Die Referenzgroesse ("zuletzt gehaltener Hebel" bzw. "Vola am letzten
@@ -103,7 +103,7 @@ df$trig_comb <- df$trig_abs | df$trig_vol     # z.B. abs_leverage ODER vol_band
 # ─────────────────────────────────────────────────────────────────────────────
 # OPTIONAL — ereignisgetriebene Ziel-Gewichte (event_weight)
 #   Spalte mit dem gewuenschten Zielgewicht je Event-Tag. Bei einem LETF ist das
-#   typischerweise der (normierte) Ziel-Hebel. simulation(..., event_weight=...)
+#   typischerweise der (normierte) Ziel-Hebel. simulation(...)
 #   uebernimmt den Wert an Event-Tagen als active_targets.
 # ─────────────────────────────────────────────────────────────────────────────
 # Bei einem einzigen Asset ist das Zielgewicht 1 (100%); der Hebel wirkt ueber
@@ -117,15 +117,17 @@ print(df[, c("target_leverage","sigma_ewma",
 
 # ── Uebergabe an die Engine (Skizze; benoetigt kompiliertes Paket) ──────────
 # strategy <- create_strategy(
-#   LETF = asset_config("etf", action_type = "bnh", asset_share = 1.0,
-#                       asset_spread = 0.0, asset_bonus = 0)   # Steuerregime aus der Klasse: investment_fund
+#   LETF = asset_config("etf", trading = "bnh", share = 1.0,
+#                       spread = 0.0, partial_exemption = 0)   # Steuerregime aus der Klasse: investment_fund
 # )
-# # Steuern: simulation(..., tax_mode = "person") rechnet nach dem Regime des Assets;
-# # ohne Steuern tax_mode = "none" (Standard). Ein Regime "none" gibt es nicht.
+# # Steuern: simulation(..., tax = tax_profile()) rechnet nach dem Regime des Assets;
+# # ohne Steuern tax = NULL (Standard). Ein Regime "none" gibt es nicht.
 #
 # res <- simulation(
 #   data = df, strategy = strategy, start_value = 10000,
-#   event_col    = "trig_vol",                 # selbst berechnete Spalte
-#   event_mode   = "replace",                  # oder "additional" (zus. zum Kalender)
-#   event_weight = c(LETF = "w_LETF")          # optional
+#   rebalance = rebalance_plan(
+#     event_col    = "trig_vol",               # selbst berechnete Spalte
+#     event_mode   = "replace",                # oder "additional" (zus. zum Kalender)
+#     skip         = TRUE,                     # nur an Ereignistagen umschichten
+#     event_weight = c(LETF = "w_LETF"))       # optional
 # )

@@ -193,8 +193,8 @@ data <- data.frame(
   ETF  = 100 * cumprod(1 + rnorm(n, 4e-4, 0.012))
 )
 strategy <- create_strategy(
-  ETF = asset_config("etf", action_type = "bnh",
-                     asset_share = 1, asset_spread = 0.1, asset_bonus = 30)
+  ETF = asset_config("etf", trading = "bnh",
+                     share = 1, spread = 0.1, partial_exemption = 30)
 )
 result <- simulation(data, strategy, start_value = 10000)
 
@@ -224,8 +224,7 @@ plot(result, colors = list(
 export_dashboard(result, "bericht.pdf", width = 16, height = 10)
 
 # Zwei Strategien vergleichen
-result2 <- simulation(data, strategy, start_value = 10000,
-                      balance_mode = TRUE, balance_unit = "year")
+result2 <- simulation(data, strategy, start_value = 10000, rebalance = rebalance_plan(unit = "year"))
 plot(result, compare = result2)
 }
 }

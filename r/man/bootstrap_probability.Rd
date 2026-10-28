@@ -38,7 +38,7 @@ einen maximalen Drawdown nicht zu ueberschreiten (wie \code{calc_metrics} in
 \details{
 Die Bedingungen werden zeilenweise in \code{study$results} ausgewertet;
 verwendbar sind dort alle Spalten, also die Kennzahlen aus \code{metrics}
-(bei \code{\link[=study_metrics]{study_metrics()}} z. B. \code{cagr}, \code{ttwror},
+(bei \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}} z. B. \code{cagr}, \code{ttwror},
 \code{max_drawdown} als Anteil) sowie \code{path}, \code{weight},
 \code{combo} und \code{tries}. Zeilen mit \code{NA}-Ergebnis zaehlen nicht.
 Freie Variablen in den Bedingungen (z. B. eine Schwelle \code{thr}) werden
@@ -60,5 +60,5 @@ bootstrap_probability(st, cagr > 0,
   thresholds = list(letf = list(ziel = quote(cagr > 0.10))))
 }
 \seealso{
-\code{\link[=bootstrap_study]{bootstrap_study()}}, \code{\link[=study_metrics]{study_metrics()}}
+\code{\link[=bootstrap_study]{bootstrap_study()}}, \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}}
 }

@@ -15,16 +15,16 @@ data = pd.DataFrame({
 
 # 2. Strategie: Gewichte, Spread und Teilfreistellung (in Prozent)
 strategy = simlev.create_strategy(
-    WORLD=simlev.asset_config("etf", action_type="bnh", asset_share=0.7, asset_spread=0.1, asset_bonus=30),
-    BONDS=simlev.asset_config("etf", action_type="bnh", asset_share=0.3, asset_spread=0.1, asset_bonus=0),
+    WORLD=simlev.asset_config("etf", trading="bnh", share=0.7, spread=0.1, partial_exemption=30),
+    BONDS=simlev.asset_config("etf", trading="bnh", share=0.3, spread=0.1, partial_exemption=0),
 )
 
 # 3. Simulation
 result = simlev.simulation(
     data, strategy,
     start_value=10000,
-    balance_mode=True, balance_span=1, balance_unit="year",
-    tax_mode="person", tax_rate=26.375,
+    rebalance=simlev.rebalance_plan(1, unit="year"),
+    tax=simlev.tax_profile(26.375),
     liquidate=True,
     risk_free=2,
 )

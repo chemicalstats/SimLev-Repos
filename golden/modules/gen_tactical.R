@@ -169,133 +169,133 @@ cs("rot_err_short", "tactical_rotation(d[1:300, ], c('A', 'B'), safe = 'CASH')",
 cs("rot_err_every", "tactical_rotation(d, c('A', 'B'), safe = 'CASH', every = 'year')", "result = T.tactical_rotation(d, ['A', 'B'], safe='CASH', every='year')",
    jl = 'result = T.tactical_rotation(d, ["A", "B"]; safe = "CASH", every = "year")')
 
-# ── target_volatility ────────────────────────────────────────────────────────
-cs("tv_static", "target_volatility(d, c(A = 0.8, B = 0.2), safe = 'CASH', target = 8)",
-   "result = T.target_volatility(d, {'A': 0.8, 'B': 0.2}, safe='CASH', target=8)",
-   jl = 'result = T.target_volatility(d, SL.named("A" => 0.8, "B" => 0.2), "CASH"; target = 8)')
-cs("tv_attrs", "w <- target_volatility(d, c(A = 1), safe = 'CASH', target = 5, every = 'week', window = 21); list(attr(w, 'exposure'), attr(w, 'volatility'))",
-   "w = T.target_volatility(d, {'A': 1}, safe='CASH', target=5, every='week', window=21); result = [w.attrs['exposure'], w.attrs['volatility']]",
-   jl = 'w = T.target_volatility(d, SL.named("A" => 1), "CASH"; target = 5, every = "week", window = 21); result = [SL.attrs(w)["exposure"], SL.attrs(w)["volatility"]]')
-cs("tv_rot", "target_volatility(d, tactical_rotation(d, c('A', 'B'), safe = 'C'), safe = 'CASH', target = 6, every = 'day', max_exposure = 0.9)",
-   "result = T.target_volatility(d, T.tactical_rotation(d, ['A', 'B'], safe='C'), safe='CASH', target=6, every='day', max_exposure=0.9)",
-   jl = 'result = T.target_volatility(d, T.tactical_rotation(d, ["A", "B"]; safe = "C"), "CASH"; target = 6, every = "day", max_exposure = 0.9)')
-cs("tv_ppy", "w <- target_volatility(wd2, c(A = 0.5, B = 0.5), safe = 'CASH', ppy = 252, every = 'quarter'); list(w, attr(w, 'exposure'))",
-   "w = T.target_volatility(wd2, {'A': 0.5, 'B': 0.5}, safe='CASH', ppy=252, every='quarter'); result = [w, w.attrs['exposure']]",
+# ── tactical_target_volatility ────────────────────────────────────────────────────────
+cs("tv_static", "tactical_target_volatility(d, c(A = 0.8, B = 0.2), safe = 'CASH', target = 8)",
+   "result = T.tactical_target_volatility(d, {'A': 0.8, 'B': 0.2}, safe='CASH', target=8)",
+   jl = 'result = T.tactical_target_volatility(d, SL.named("A" => 0.8, "B" => 0.2), "CASH"; target = 8)')
+cs("tv_attrs", "w <- tactical_target_volatility(d, c(A = 1), safe = 'CASH', target = 5, every = 'week', window = 21); list(attr(w, 'exposure'), attr(w, 'volatility'))",
+   "w = T.tactical_target_volatility(d, {'A': 1}, safe='CASH', target=5, every='week', window=21); result = [w.attrs['exposure'], w.attrs['volatility']]",
+   jl = 'w = T.tactical_target_volatility(d, SL.named("A" => 1), "CASH"; target = 5, every = "week", window = 21); result = [SL.attrs(w)["exposure"], SL.attrs(w)["volatility"]]')
+cs("tv_rot", "tactical_target_volatility(d, tactical_rotation(d, c('A', 'B'), safe = 'C'), safe = 'CASH', target = 6, every = 'day', max_exposure = 0.9)",
+   "result = T.tactical_target_volatility(d, T.tactical_rotation(d, ['A', 'B'], safe='C'), safe='CASH', target=6, every='day', max_exposure=0.9)",
+   jl = 'result = T.tactical_target_volatility(d, T.tactical_rotation(d, ["A", "B"]; safe = "C"), "CASH"; target = 6, every = "day", max_exposure = 0.9)')
+cs("tv_ppy", "w <- tactical_target_volatility(wd2, c(A = 0.5, B = 0.5), safe = 'CASH', ppy = 252, every = 'quarter'); list(w, attr(w, 'exposure'))",
+   "w = T.tactical_target_volatility(wd2, {'A': 0.5, 'B': 0.5}, safe='CASH', ppy=252, every='quarter'); result = [w, w.attrs['exposure']]",
    inputs = list(wd2 = d[!format(d$date, "%u") %in% c("6", "7"), ]),
-   jl = 'w = T.target_volatility(wd2, SL.named("A" => 0.5, "B" => 0.5), "CASH"; ppy = 252, every = "quarter"); result = [w, SL.attrs(w)["exposure"]]')
-cs("tv_safe_in_w", "target_volatility(d, c(A = 0.6, CASH = 0.4), safe = 'CASH', target = 20)",
-   "result = T.target_volatility(d, pd.Series({'A': 0.6, 'CASH': 0.4}), safe='CASH', target=20)",
-   jl = 'result = T.target_volatility(d, SL.named("A" => 0.6, "CASH" => 0.4), "CASH"; target = 20)')
-cs("tv_warn", "target_volatility(d, c(A = 1), safe = 'CASH', target = 0.1)", "result = T.target_volatility(d, {'A': 1}, safe='CASH', target=0.1)",
-   jl = 'result = T.target_volatility(d, SL.named("A" => 1), "CASH"; target = 0.1)')
-cs("tv_err_kredit", "target_volatility(d, c(A = 1), safe = 'CASH', max_exposure = 2)", "result = T.target_volatility(d, {'A': 1}, safe='CASH', max_exposure=2)",
-   jl = 'result = T.target_volatility(d, SL.named("A" => 1), "CASH"; max_exposure = 2)')
-cs("tv_err_miss", "target_volatility(d, c(A = 1, gold = 0.5, x = 1), safe = 'CASH')", "result = T.target_volatility(d, {'A': 1, 'gold': 0.5, 'x': 1}, safe='CASH')",
-   jl = 'result = T.target_volatility(d, SL.named("A" => 1, "gold" => 0.5, "x" => 1), "CASH")')
-cs("tv_err_safe", "target_volatility(d, c(A = 1), safe = 'geld')", "result = T.target_volatility(d, {'A': 1}, safe='geld')",
-   jl = 'result = T.target_volatility(d, SL.named("A" => 1), "geld")')
-cs("tv_err_unnamed", "target_volatility(d, c(1, 2), safe = 'CASH')", "result = T.target_volatility(d, [1, 2], safe='CASH')",
-   jl = 'result = T.target_volatility(d, [1, 2], "CASH")')
-cs("tv_err_mismatch", "target_volatility(d, tactical_rules(d[1:100, ], list(), default = c(A = 1)), safe = 'CASH')",
-   "result = T.target_volatility(d, T.tactical_rules(d.iloc[:100], [], default={'A': 1}), safe='CASH')",
-   jl = 'result = T.target_volatility(d, T.tactical_rules(SL.rows(d, 1:100), [], SL.named("A" => 1)), "CASH")')
-cs("tv_err_short", "target_volatility(d[1:50, ], c(A = 1), safe = 'CASH')", "result = T.target_volatility(d.iloc[:50], {'A': 1}, safe='CASH')",
-   jl = 'result = T.target_volatility(SL.rows(d, 1:50), SL.named("A" => 1), "CASH")')
+   jl = 'w = T.tactical_target_volatility(wd2, SL.named("A" => 0.5, "B" => 0.5), "CASH"; ppy = 252, every = "quarter"); result = [w, SL.attrs(w)["exposure"]]')
+cs("tv_safe_in_w", "tactical_target_volatility(d, c(A = 0.6, CASH = 0.4), safe = 'CASH', target = 20)",
+   "result = T.tactical_target_volatility(d, pd.Series({'A': 0.6, 'CASH': 0.4}), safe='CASH', target=20)",
+   jl = 'result = T.tactical_target_volatility(d, SL.named("A" => 0.6, "CASH" => 0.4), "CASH"; target = 20)')
+cs("tv_warn", "tactical_target_volatility(d, c(A = 1), safe = 'CASH', target = 0.1)", "result = T.tactical_target_volatility(d, {'A': 1}, safe='CASH', target=0.1)",
+   jl = 'result = T.tactical_target_volatility(d, SL.named("A" => 1), "CASH"; target = 0.1)')
+cs("tv_err_kredit", "tactical_target_volatility(d, c(A = 1), safe = 'CASH', max_exposure = 2)", "result = T.tactical_target_volatility(d, {'A': 1}, safe='CASH', max_exposure=2)",
+   jl = 'result = T.tactical_target_volatility(d, SL.named("A" => 1), "CASH"; max_exposure = 2)')
+cs("tv_err_miss", "tactical_target_volatility(d, c(A = 1, gold = 0.5, x = 1), safe = 'CASH')", "result = T.tactical_target_volatility(d, {'A': 1, 'gold': 0.5, 'x': 1}, safe='CASH')",
+   jl = 'result = T.tactical_target_volatility(d, SL.named("A" => 1, "gold" => 0.5, "x" => 1), "CASH")')
+cs("tv_err_safe", "tactical_target_volatility(d, c(A = 1), safe = 'geld')", "result = T.tactical_target_volatility(d, {'A': 1}, safe='geld')",
+   jl = 'result = T.tactical_target_volatility(d, SL.named("A" => 1), "geld")')
+cs("tv_err_unnamed", "tactical_target_volatility(d, c(1, 2), safe = 'CASH')", "result = T.tactical_target_volatility(d, [1, 2], safe='CASH')",
+   jl = 'result = T.tactical_target_volatility(d, [1, 2], "CASH")')
+cs("tv_err_mismatch", "tactical_target_volatility(d, tactical_rules(d[1:100, ], list(), default = c(A = 1)), safe = 'CASH')",
+   "result = T.tactical_target_volatility(d, T.tactical_rules(d.iloc[:100], [], default={'A': 1}), safe='CASH')",
+   jl = 'result = T.tactical_target_volatility(d, T.tactical_rules(SL.rows(d, 1:100), [], SL.named("A" => 1)), "CASH")')
+cs("tv_err_short", "tactical_target_volatility(d[1:50, ], c(A = 1), safe = 'CASH')", "result = T.tactical_target_volatility(d.iloc[:50], {'A': 1}, safe='CASH')",
+   jl = 'result = T.tactical_target_volatility(SL.rows(d, 1:50), SL.named("A" => 1), "CASH")')
 
-# ── conditional_volatility ───────────────────────────────────────────────────
-cs("cv_basic", "conditional_volatility(d, c(A = 1), safe = 'CASH', base = 0.8, min_history = 1)",
-   "result = T.conditional_volatility(d, {'A': 1}, safe='CASH', base=0.8, min_history=1)",
-   jl = 'result = T.conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 0.8, min_history = 1)')
-cs("cv_attrs", "w <- conditional_volatility(d, c(A = 0.7, B = 0.3), safe = 'CASH', base = 0.8, min_history = 1, every = 'week')
+# ── tactical_conditional_volatility ───────────────────────────────────────────────────
+cs("cv_basic", "tactical_conditional_volatility(d, c(A = 1), safe = 'CASH', base = 0.8, min_history = 1)",
+   "result = T.tactical_conditional_volatility(d, {'A': 1}, safe='CASH', base=0.8, min_history=1)",
+   jl = 'result = T.tactical_conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 0.8, min_history = 1)')
+cs("cv_attrs", "w <- tactical_conditional_volatility(d, c(A = 0.7, B = 0.3), safe = 'CASH', base = 0.8, min_history = 1, every = 'week')
    list(attr(w, 'exposure'), attr(w, 'volatility'), attr(w, 'state'), attr(w, 'thresholds'))",
-   "w = T.conditional_volatility(d, {'A': 0.7, 'B': 0.3}, safe='CASH', base=0.8, min_history=1, every='week')
+   "w = T.tactical_conditional_volatility(d, {'A': 0.7, 'B': 0.3}, safe='CASH', base=0.8, min_history=1, every='week')
 result = [w.attrs['exposure'], w.attrs['volatility'], w.attrs['state'], w.attrs['thresholds']]",
-   jl = 'w = T.conditional_volatility(d, SL.named("A" => 0.7, "B" => 0.3), "CASH"; base = 0.8, min_history = 1, every = "week")
+   jl = 'w = T.tactical_conditional_volatility(d, SL.named("A" => 0.7, "B" => 0.3), "CASH"; base = 0.8, min_history = 1, every = "week")
 result = [SL.attrs(w)["exposure"], SL.attrs(w)["volatility"], SL.attrs(w)["state"], SL.attrs(w)["thresholds"]]')
-cs("cv_fixed", "conditional_volatility(d, c(A = 1), safe = 'CASH', base = 0.7, min_history = 1, scaling = 'fixed', high_exposure = 0.3, low_exposure = 0.9)",
-   "result = T.conditional_volatility(d, {'A': 1}, safe='CASH', base=0.7, min_history=1, scaling='fixed', high_exposure=0.3, low_exposure=0.9)",
-   jl = 'result = T.conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 0.7, min_history = 1, scaling = "fixed", high_exposure = 0.3, low_exposure = 0.9)')
-cs("cv_fixed_nolow", "conditional_volatility(d, c(A = 1), safe = 'CASH', base = 0.7, min_history = 1, scaling = 'fixed', high_exposure = 0.2, lower = NULL)",
-   "result = T.conditional_volatility(d, {'A': 1}, safe='CASH', base=0.7, min_history=1, scaling='fixed', high_exposure=0.2, lower=None)",
-   jl = 'result = T.conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 0.7, min_history = 1, scaling = "fixed", high_exposure = 0.2, lower = nothing)')
-cs("cv_msg", "conditional_volatility(d, c(A = 1), safe = 'CASH', min_history = 1)", "result = T.conditional_volatility(d, {'A': 1}, safe='CASH', min_history=1)",
-   jl = 'result = T.conditional_volatility(d, SL.named("A" => 1), "CASH"; min_history = 1)')
-cs("cv_nolower", "w <- conditional_volatility(d, c(A = 1), safe = 'CASH', lower = NULL, min_history = 1, upper = 0.7, target = 12, every = 'day'); list(w, attr(w, 'thresholds'), attr(w, 'state'))",
-   "w = T.conditional_volatility(d, {'A': 1}, safe='CASH', lower=None, min_history=1, upper=0.7, target=12, every='day'); result = [w, w.attrs['thresholds'], w.attrs['state']]",
-   jl = 'w = T.conditional_volatility(d, SL.named("A" => 1), "CASH"; lower = nothing, min_history = 1, upper = 0.7, target = 12, every = "day"); result = [w, SL.attrs(w)["thresholds"], SL.attrs(w)["state"]]')
-cs("cv_target_warn", "conditional_volatility(d, c(B = 1), safe = 'C', base = 0.5, min_history = 1.5, target = 0.12, min_exposure = 0.2, max_exposure = 0.9, every = 'quarter')",
-   "result = T.conditional_volatility(d, {'B': 1}, safe='C', base=0.5, min_history=1.5, target=0.12, min_exposure=0.2, max_exposure=0.9, every='quarter')",
-   jl = 'result = T.conditional_volatility(d, SL.named("B" => 1), "C"; base = 0.5, min_history = 1.5, target = 0.12, min_exposure = 0.2, max_exposure = 0.9, every = "quarter")')
-cs("cv_warn_hist", "conditional_volatility(d, c(A = 1), safe = 'CASH', base = 0.8, min_history = 10)",
-   "result = T.conditional_volatility(d, {'A': 1}, safe='CASH', base=0.8, min_history=10)",
-   jl = 'result = T.conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 0.8, min_history = 10)')
-cs("cv_err_kredit", "conditional_volatility(d, c(A = 1), safe = 'CASH', max_exposure = 1.5)", "result = T.conditional_volatility(d, {'A': 1}, safe='CASH', max_exposure=1.5)",
-   jl = 'result = T.conditional_volatility(d, SL.named("A" => 1), "CASH"; max_exposure = 1.5)')
-cs("cv_err_base", "conditional_volatility(d, c(A = 1), safe = 'CASH', base = 1.2, max_exposure = 1)", "result = T.conditional_volatility(d, {'A': 1}, safe='CASH', base=1.2)",
-   jl = 'result = T.conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 1.2, max_exposure = 1)')
-cs("cv_err_min", "conditional_volatility(d, c(A = 1), safe = 'CASH', base = 0.5, min_exposure = 0.6)", "result = T.conditional_volatility(d, {'A': 1}, safe='CASH', base=0.5, min_exposure=0.6)",
-   jl = 'result = T.conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 0.5, min_exposure = 0.6)')
-cs("cv_err_upper", "conditional_volatility(d, c(A = 1), safe = 'CASH', upper = 1)", "result = T.conditional_volatility(d, {'A': 1}, safe='CASH', upper=1)",
-   jl = 'result = T.conditional_volatility(d, SL.named("A" => 1), "CASH"; upper = 1)')
-cs("cv_err_lower", "conditional_volatility(d, c(A = 1), safe = 'CASH', lower = 0.9)", "result = T.conditional_volatility(d, {'A': 1}, safe='CASH', lower=0.9)",
-   jl = 'result = T.conditional_volatility(d, SL.named("A" => 1), "CASH"; lower = 0.9)')
-cs("cv_err_fixed", "conditional_volatility(d, c(A = 1), safe = 'CASH', scaling = 'fixed', high_exposure = 0.3)",
-   "result = T.conditional_volatility(d, {'A': 1}, safe='CASH', scaling='fixed', high_exposure=0.3)",
-   jl = 'result = T.conditional_volatility(d, SL.named("A" => 1), "CASH"; scaling = "fixed", high_exposure = 0.3)')
-cs("cv_err_high", "conditional_volatility(d, c(A = 1), safe = 'CASH', base = 0.5, scaling = 'fixed', high_exposure = 0.6, lower = NULL)",
-   "result = T.conditional_volatility(d, {'A': 1}, safe='CASH', base=0.5, scaling='fixed', high_exposure=0.6, lower=None)",
-   jl = 'result = T.conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 0.5, scaling = "fixed", high_exposure = 0.6, lower = nothing)')
-cs("cv_err_low", "conditional_volatility(d, c(A = 1), safe = 'CASH', base = 0.5, scaling = 'fixed', high_exposure = 0.3, low_exposure = 0.4)",
-   "result = T.conditional_volatility(d, {'A': 1}, safe='CASH', base=0.5, scaling='fixed', high_exposure=0.3, low_exposure=0.4)",
-   jl = 'result = T.conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 0.5, scaling = "fixed", high_exposure = 0.3, low_exposure = 0.4)')
-cs("cv_err_short", "conditional_volatility(d[1:40, ], c(A = 1), safe = 'CASH', base = 0.8)", "result = T.conditional_volatility(d.iloc[:40], {'A': 1}, safe='CASH', base=0.8)",
-   jl = 'result = T.conditional_volatility(SL.rows(d, 1:40), SL.named("A" => 1), "CASH"; base = 0.8)')
+cs("cv_fixed", "tactical_conditional_volatility(d, c(A = 1), safe = 'CASH', base = 0.7, min_history = 1, scaling = 'fixed', high_exposure = 0.3, low_exposure = 0.9)",
+   "result = T.tactical_conditional_volatility(d, {'A': 1}, safe='CASH', base=0.7, min_history=1, scaling='fixed', high_exposure=0.3, low_exposure=0.9)",
+   jl = 'result = T.tactical_conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 0.7, min_history = 1, scaling = "fixed", high_exposure = 0.3, low_exposure = 0.9)')
+cs("cv_fixed_nolow", "tactical_conditional_volatility(d, c(A = 1), safe = 'CASH', base = 0.7, min_history = 1, scaling = 'fixed', high_exposure = 0.2, lower = NULL)",
+   "result = T.tactical_conditional_volatility(d, {'A': 1}, safe='CASH', base=0.7, min_history=1, scaling='fixed', high_exposure=0.2, lower=None)",
+   jl = 'result = T.tactical_conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 0.7, min_history = 1, scaling = "fixed", high_exposure = 0.2, lower = nothing)')
+cs("cv_msg", "tactical_conditional_volatility(d, c(A = 1), safe = 'CASH', min_history = 1)", "result = T.tactical_conditional_volatility(d, {'A': 1}, safe='CASH', min_history=1)",
+   jl = 'result = T.tactical_conditional_volatility(d, SL.named("A" => 1), "CASH"; min_history = 1)')
+cs("cv_nolower", "w <- tactical_conditional_volatility(d, c(A = 1), safe = 'CASH', lower = NULL, min_history = 1, upper = 0.7, target = 12, every = 'day'); list(w, attr(w, 'thresholds'), attr(w, 'state'))",
+   "w = T.tactical_conditional_volatility(d, {'A': 1}, safe='CASH', lower=None, min_history=1, upper=0.7, target=12, every='day'); result = [w, w.attrs['thresholds'], w.attrs['state']]",
+   jl = 'w = T.tactical_conditional_volatility(d, SL.named("A" => 1), "CASH"; lower = nothing, min_history = 1, upper = 0.7, target = 12, every = "day"); result = [w, SL.attrs(w)["thresholds"], SL.attrs(w)["state"]]')
+cs("cv_target_warn", "tactical_conditional_volatility(d, c(B = 1), safe = 'C', base = 0.5, min_history = 1.5, target = 0.12, min_exposure = 0.2, max_exposure = 0.9, every = 'quarter')",
+   "result = T.tactical_conditional_volatility(d, {'B': 1}, safe='C', base=0.5, min_history=1.5, target=0.12, min_exposure=0.2, max_exposure=0.9, every='quarter')",
+   jl = 'result = T.tactical_conditional_volatility(d, SL.named("B" => 1), "C"; base = 0.5, min_history = 1.5, target = 0.12, min_exposure = 0.2, max_exposure = 0.9, every = "quarter")')
+cs("cv_warn_hist", "tactical_conditional_volatility(d, c(A = 1), safe = 'CASH', base = 0.8, min_history = 10)",
+   "result = T.tactical_conditional_volatility(d, {'A': 1}, safe='CASH', base=0.8, min_history=10)",
+   jl = 'result = T.tactical_conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 0.8, min_history = 10)')
+cs("cv_err_kredit", "tactical_conditional_volatility(d, c(A = 1), safe = 'CASH', max_exposure = 1.5)", "result = T.tactical_conditional_volatility(d, {'A': 1}, safe='CASH', max_exposure=1.5)",
+   jl = 'result = T.tactical_conditional_volatility(d, SL.named("A" => 1), "CASH"; max_exposure = 1.5)')
+cs("cv_err_base", "tactical_conditional_volatility(d, c(A = 1), safe = 'CASH', base = 1.2, max_exposure = 1)", "result = T.tactical_conditional_volatility(d, {'A': 1}, safe='CASH', base=1.2)",
+   jl = 'result = T.tactical_conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 1.2, max_exposure = 1)')
+cs("cv_err_min", "tactical_conditional_volatility(d, c(A = 1), safe = 'CASH', base = 0.5, min_exposure = 0.6)", "result = T.tactical_conditional_volatility(d, {'A': 1}, safe='CASH', base=0.5, min_exposure=0.6)",
+   jl = 'result = T.tactical_conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 0.5, min_exposure = 0.6)')
+cs("cv_err_upper", "tactical_conditional_volatility(d, c(A = 1), safe = 'CASH', upper = 1)", "result = T.tactical_conditional_volatility(d, {'A': 1}, safe='CASH', upper=1)",
+   jl = 'result = T.tactical_conditional_volatility(d, SL.named("A" => 1), "CASH"; upper = 1)')
+cs("cv_err_lower", "tactical_conditional_volatility(d, c(A = 1), safe = 'CASH', lower = 0.9)", "result = T.tactical_conditional_volatility(d, {'A': 1}, safe='CASH', lower=0.9)",
+   jl = 'result = T.tactical_conditional_volatility(d, SL.named("A" => 1), "CASH"; lower = 0.9)')
+cs("cv_err_fixed", "tactical_conditional_volatility(d, c(A = 1), safe = 'CASH', scaling = 'fixed', high_exposure = 0.3)",
+   "result = T.tactical_conditional_volatility(d, {'A': 1}, safe='CASH', scaling='fixed', high_exposure=0.3)",
+   jl = 'result = T.tactical_conditional_volatility(d, SL.named("A" => 1), "CASH"; scaling = "fixed", high_exposure = 0.3)')
+cs("cv_err_high", "tactical_conditional_volatility(d, c(A = 1), safe = 'CASH', base = 0.5, scaling = 'fixed', high_exposure = 0.6, lower = NULL)",
+   "result = T.tactical_conditional_volatility(d, {'A': 1}, safe='CASH', base=0.5, scaling='fixed', high_exposure=0.6, lower=None)",
+   jl = 'result = T.tactical_conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 0.5, scaling = "fixed", high_exposure = 0.6, lower = nothing)')
+cs("cv_err_low", "tactical_conditional_volatility(d, c(A = 1), safe = 'CASH', base = 0.5, scaling = 'fixed', high_exposure = 0.3, low_exposure = 0.4)",
+   "result = T.tactical_conditional_volatility(d, {'A': 1}, safe='CASH', base=0.5, scaling='fixed', high_exposure=0.3, low_exposure=0.4)",
+   jl = 'result = T.tactical_conditional_volatility(d, SL.named("A" => 1), "CASH"; base = 0.5, scaling = "fixed", high_exposure = 0.3, low_exposure = 0.4)')
+cs("cv_err_short", "tactical_conditional_volatility(d[1:40, ], c(A = 1), safe = 'CASH', base = 0.8)", "result = T.tactical_conditional_volatility(d.iloc[:40], {'A': 1}, safe='CASH', base=0.8)",
+   jl = 'result = T.tactical_conditional_volatility(SL.rows(d, 1:40), SL.named("A" => 1), "CASH"; base = 0.8)')
 
-# ── glidepath, blend_weights ─────────────────────────────────────────────────
-cs("gp_basic", "glidepath(d, from = c(A = 0.9, C = 0.1), to = c(A = 0.3, C = 0.7))", "result = T.glidepath(d, from_={'A': 0.9, 'C': 0.1}, to={'A': 0.3, 'C': 0.7})",
-   jl = 'result = T.glidepath(d, SL.named("A" => 0.9, "C" => 0.1), SL.named("A" => 0.3, "C" => 0.7))')
-cs("gp_dates", "glidepath(seq.Date(as.Date('2025-01-01'), as.Date('2030-12-31'), by = 'day'), from = c(aktien = 0.9, anleihen = 0.1),
+# ── tactical_glidepath, tactical_blend ─────────────────────────────────────────────────
+cs("gp_basic", "tactical_glidepath(d, from = c(A = 0.9, C = 0.1), to = c(A = 0.3, C = 0.7))", "result = T.tactical_glidepath(d, from_={'A': 0.9, 'C': 0.1}, to={'A': 0.3, 'C': 0.7})",
+   jl = 'result = T.tactical_glidepath(d, SL.named("A" => 0.9, "C" => 0.1), SL.named("A" => 0.3, "C" => 0.7))')
+cs("gp_dates", "tactical_glidepath(seq.Date(as.Date('2025-01-01'), as.Date('2030-12-31'), by = 'day'), from = c(aktien = 0.9, anleihen = 0.1),
                  to = c(anleihen = 0.6, geld = 0.4), start = '2026-03-01', end = as.Date('2029-06-30'), every = 'quarter')",
-   "result = T.glidepath(np.arange(np.datetime64('2025-01-01'), np.datetime64('2031-01-01')), from_={'aktien': 0.9, 'anleihen': 0.1},
+   "result = T.tactical_glidepath(np.arange(np.datetime64('2025-01-01'), np.datetime64('2031-01-01')), from_={'aktien': 0.9, 'anleihen': 0.1},
                     to={'anleihen': 0.6, 'geld': 0.4}, start='2026-03-01', end=np.datetime64('2029-06-30'), every='quarter')",
-   jl = 'result = T.glidepath(collect(Date(2025, 1, 1):Day(1):Date(2030, 12, 31)), SL.named("aktien" => 0.9, "anleihen" => 0.1),
+   jl = 'result = T.tactical_glidepath(collect(Date(2025, 1, 1):Day(1):Date(2030, 12, 31)), SL.named("aktien" => 0.9, "anleihen" => 0.1),
                     SL.named("anleihen" => 0.6, "geld" => 0.4); start = "2026-03-01", end_ = Date(2029, 6, 30), every = "quarter")')
-cs("gp_month", "glidepath(d, from = c(A = 1), to = c(B = 1), every = 'month', start = '2011-01-01', end = '2014-01-01')",
-   "result = T.glidepath(d, from_={'A': 1}, to={'B': 1}, every='month', start='2011-01-01', end='2014-01-01')",
-   jl = 'result = T.glidepath(d, SL.named("A" => 1), SL.named("B" => 1); every = "month", start = "2011-01-01", end_ = "2014-01-01")')
-cs("gp_jump", "glidepath(d, from = c(A = 0.9, C = 0.1), to = c(A = 0.4, C = 0.6), start = '2013-06-15', end = '2013-06-15')",
-   "result = T.glidepath(d, from_={'A': 0.9, 'C': 0.1}, to={'A': 0.4, 'C': 0.6}, start='2013-06-15', end='2013-06-15')",
-   jl = 'result = T.glidepath(d, SL.named("A" => 0.9, "C" => 0.1), SL.named("A" => 0.4, "C" => 0.6); start = "2013-06-15", end_ = "2013-06-15")')
-cs("gp_err", "glidepath(d, from = c(A = 0.9, C = 0.1), to = c(A = 0.4, C = 0.6), start = '2014-01-01', end = '2013-01-01')",
-   "result = T.glidepath(d, from_={'A': 0.9, 'C': 0.1}, to={'A': 0.4, 'C': 0.6}, start='2014-01-01', end='2013-01-01')",
-   jl = 'result = T.glidepath(d, SL.named("A" => 0.9, "C" => 0.1), SL.named("A" => 0.4, "C" => 0.6); start = "2014-01-01", end_ = "2013-01-01")')
-cs("gp_err_date", "glidepath(d, from = c(A = 1), to = c(B = 1), start = '01.01.2013')", "result = T.glidepath(d, from_={'A': 1}, to={'B': 1}, start='01.01.2013')",
-   jl = 'result = T.glidepath(d, SL.named("A" => 1), SL.named("B" => 1); start = "01.01.2013")')
-cs("bl_basic", "gp <- glidepath(d, from = c(A = 0.9, C = 0.1), to = c(A = 0.3, C = 0.7)); ro <- tactical_rotation(d, c('A', 'B'), top = 1, safe = c('C', 'CASH'))
-   blend_weights(x = gp, y = ro, shares = c(0.5, 0.5))",
-   "gp = T.glidepath(d, from_={'A': 0.9, 'C': 0.1}, to={'A': 0.3, 'C': 0.7}); ro = T.tactical_rotation(d, ['A', 'B'], top=1, safe=['C', 'CASH'])
-result = T.blend_weights(gp, ro, shares=[0.5, 0.5])",
-   jl = 'gp = T.glidepath(d, SL.named("A" => 0.9, "C" => 0.1), SL.named("A" => 0.3, "C" => 0.7)); ro = T.tactical_rotation(d, ["A", "B"]; top = 1, safe = ["C", "CASH"])
-result = T.blend_weights(gp, ro; shares = [0.5, 0.5])')
-cs("bl_default", "blend_weights(tactical_rules(d, list(), default = c(A = 1)), tactical_rules(d, list(), default = c(B = 1)), tactical_rules(d, list(list(when = 'A > B', weights = c(C = 1))), default = c(CASH = 1)))",
-   "result = T.blend_weights(T.tactical_rules(d, [], default={'A': 1}), T.tactical_rules(d, [], default={'B': 1}), T.tactical_rules(d, [{'when': 'A > B', 'weights': {'C': 1}}], default={'CASH': 1}))",
-   jl = 'result = T.blend_weights(T.tactical_rules(d, [], SL.named("A" => 1)), T.tactical_rules(d, [], SL.named("B" => 1)), T.tactical_rules(d, [SL.RList("when" => "A > B", "weights" => SL.named("C" => 1))], SL.named("CASH" => 1)))')
-cs("bl_shares", "blend_weights(tactical_rules(d, list(), default = c(A = 1)), tactical_rules(d, list(), default = c(B = 1)), shares = c(3, 1))",
-   "result = T.blend_weights(T.tactical_rules(d, [], default={'A': 1}), T.tactical_rules(d, [], default={'B': 1}), shares=[3, 1])",
-   jl = 'result = T.blend_weights(T.tactical_rules(d, [], SL.named("A" => 1)), T.tactical_rules(d, [], SL.named("B" => 1)); shares = [3, 1])')
-cs("bl_err_shares", "blend_weights(tactical_rules(d, list(), default = c(A = 1)), tactical_rules(d, list(), default = c(B = 1)), shares = 0.7)",
-   "result = T.blend_weights(T.tactical_rules(d, [], default={'A': 1}), T.tactical_rules(d, [], default={'B': 1}), shares=0.7)",
-   jl = 'result = T.blend_weights(T.tactical_rules(d, [], SL.named("A" => 1)), T.tactical_rules(d, [], SL.named("B" => 1)); shares = 0.7)')
-cs("bl_err_neg", "blend_weights(tactical_rules(d, list(), default = c(A = 1)), tactical_rules(d, list(), default = c(B = 1)), shares = c(0.5, -0.25))",
-   "result = T.blend_weights(T.tactical_rules(d, [], default={'A': 1}), T.tactical_rules(d, [], default={'B': 1}), shares=[0.5, -0.25])",
-   jl = 'result = T.blend_weights(T.tactical_rules(d, [], SL.named("A" => 1)), T.tactical_rules(d, [], SL.named("B" => 1)); shares = [0.5, -0.25])')
-cs("bl_err_type", "blend_weights(c(A = 1))", "result = T.blend_weights({'A': 1})",
-   jl = 'result = T.blend_weights(SL.named("A" => 1))')
-cs("bl_err_empty", "blend_weights()", "result = T.blend_weights()",
-   jl = 'result = T.blend_weights()')
-cs("bl_err_dates", "blend_weights(tactical_rules(d, list(), default = c(A = 1)), tactical_rules(d[1:10, ], list(), default = c(B = 1)))",
-   "result = T.blend_weights(T.tactical_rules(d, [], default={'A': 1}), T.tactical_rules(d.iloc[:10], [], default={'B': 1}))",
-   jl = 'result = T.blend_weights(T.tactical_rules(d, [], SL.named("A" => 1)), T.tactical_rules(SL.rows(d, 1:10), [], SL.named("B" => 1)))')
+cs("gp_month", "tactical_glidepath(d, from = c(A = 1), to = c(B = 1), every = 'month', start = '2011-01-01', end = '2014-01-01')",
+   "result = T.tactical_glidepath(d, from_={'A': 1}, to={'B': 1}, every='month', start='2011-01-01', end='2014-01-01')",
+   jl = 'result = T.tactical_glidepath(d, SL.named("A" => 1), SL.named("B" => 1); every = "month", start = "2011-01-01", end_ = "2014-01-01")')
+cs("gp_jump", "tactical_glidepath(d, from = c(A = 0.9, C = 0.1), to = c(A = 0.4, C = 0.6), start = '2013-06-15', end = '2013-06-15')",
+   "result = T.tactical_glidepath(d, from_={'A': 0.9, 'C': 0.1}, to={'A': 0.4, 'C': 0.6}, start='2013-06-15', end='2013-06-15')",
+   jl = 'result = T.tactical_glidepath(d, SL.named("A" => 0.9, "C" => 0.1), SL.named("A" => 0.4, "C" => 0.6); start = "2013-06-15", end_ = "2013-06-15")')
+cs("gp_err", "tactical_glidepath(d, from = c(A = 0.9, C = 0.1), to = c(A = 0.4, C = 0.6), start = '2014-01-01', end = '2013-01-01')",
+   "result = T.tactical_glidepath(d, from_={'A': 0.9, 'C': 0.1}, to={'A': 0.4, 'C': 0.6}, start='2014-01-01', end='2013-01-01')",
+   jl = 'result = T.tactical_glidepath(d, SL.named("A" => 0.9, "C" => 0.1), SL.named("A" => 0.4, "C" => 0.6); start = "2014-01-01", end_ = "2013-01-01")')
+cs("gp_err_date", "tactical_glidepath(d, from = c(A = 1), to = c(B = 1), start = '01.01.2013')", "result = T.tactical_glidepath(d, from_={'A': 1}, to={'B': 1}, start='01.01.2013')",
+   jl = 'result = T.tactical_glidepath(d, SL.named("A" => 1), SL.named("B" => 1); start = "01.01.2013")')
+cs("bl_basic", "gp <- tactical_glidepath(d, from = c(A = 0.9, C = 0.1), to = c(A = 0.3, C = 0.7)); ro <- tactical_rotation(d, c('A', 'B'), top = 1, safe = c('C', 'CASH'))
+   tactical_blend(x = gp, y = ro, shares = c(0.5, 0.5))",
+   "gp = T.tactical_glidepath(d, from_={'A': 0.9, 'C': 0.1}, to={'A': 0.3, 'C': 0.7}); ro = T.tactical_rotation(d, ['A', 'B'], top=1, safe=['C', 'CASH'])
+result = T.tactical_blend(gp, ro, shares=[0.5, 0.5])",
+   jl = 'gp = T.tactical_glidepath(d, SL.named("A" => 0.9, "C" => 0.1), SL.named("A" => 0.3, "C" => 0.7)); ro = T.tactical_rotation(d, ["A", "B"]; top = 1, safe = ["C", "CASH"])
+result = T.tactical_blend(gp, ro; shares = [0.5, 0.5])')
+cs("bl_default", "tactical_blend(tactical_rules(d, list(), default = c(A = 1)), tactical_rules(d, list(), default = c(B = 1)), tactical_rules(d, list(list(when = 'A > B', weights = c(C = 1))), default = c(CASH = 1)))",
+   "result = T.tactical_blend(T.tactical_rules(d, [], default={'A': 1}), T.tactical_rules(d, [], default={'B': 1}), T.tactical_rules(d, [{'when': 'A > B', 'weights': {'C': 1}}], default={'CASH': 1}))",
+   jl = 'result = T.tactical_blend(T.tactical_rules(d, [], SL.named("A" => 1)), T.tactical_rules(d, [], SL.named("B" => 1)), T.tactical_rules(d, [SL.RList("when" => "A > B", "weights" => SL.named("C" => 1))], SL.named("CASH" => 1)))')
+cs("bl_shares", "tactical_blend(tactical_rules(d, list(), default = c(A = 1)), tactical_rules(d, list(), default = c(B = 1)), shares = c(3, 1))",
+   "result = T.tactical_blend(T.tactical_rules(d, [], default={'A': 1}), T.tactical_rules(d, [], default={'B': 1}), shares=[3, 1])",
+   jl = 'result = T.tactical_blend(T.tactical_rules(d, [], SL.named("A" => 1)), T.tactical_rules(d, [], SL.named("B" => 1)); shares = [3, 1])')
+cs("bl_err_shares", "tactical_blend(tactical_rules(d, list(), default = c(A = 1)), tactical_rules(d, list(), default = c(B = 1)), shares = 0.7)",
+   "result = T.tactical_blend(T.tactical_rules(d, [], default={'A': 1}), T.tactical_rules(d, [], default={'B': 1}), shares=0.7)",
+   jl = 'result = T.tactical_blend(T.tactical_rules(d, [], SL.named("A" => 1)), T.tactical_rules(d, [], SL.named("B" => 1)); shares = 0.7)')
+cs("bl_err_neg", "tactical_blend(tactical_rules(d, list(), default = c(A = 1)), tactical_rules(d, list(), default = c(B = 1)), shares = c(0.5, -0.25))",
+   "result = T.tactical_blend(T.tactical_rules(d, [], default={'A': 1}), T.tactical_rules(d, [], default={'B': 1}), shares=[0.5, -0.25])",
+   jl = 'result = T.tactical_blend(T.tactical_rules(d, [], SL.named("A" => 1)), T.tactical_rules(d, [], SL.named("B" => 1)); shares = [0.5, -0.25])')
+cs("bl_err_type", "tactical_blend(c(A = 1))", "result = T.tactical_blend({'A': 1})",
+   jl = 'result = T.tactical_blend(SL.named("A" => 1))')
+cs("bl_err_empty", "tactical_blend()", "result = T.tactical_blend()",
+   jl = 'result = T.tactical_blend()')
+cs("bl_err_dates", "tactical_blend(tactical_rules(d, list(), default = c(A = 1)), tactical_rules(d[1:10, ], list(), default = c(B = 1)))",
+   "result = T.tactical_blend(T.tactical_rules(d, [], default={'A': 1}), T.tactical_rules(d.iloc[:10], [], default={'B': 1}))",
+   jl = 'result = T.tactical_blend(T.tactical_rules(d, [], SL.named("A" => 1)), T.tactical_rules(SL.rows(d, 1:10), [], SL.named("B" => 1)))')
 
 # ── interne Helfer ───────────────────────────────────────────────────────────
 cs("helpers", "dd <- d$date[1:800]; list(SimLev:::.period_last(dd, 'day')[1:5], SimLev:::.period_last(dd, 'week'), SimLev:::.period_last(dd, 'month'),
@@ -320,35 +320,35 @@ tsim <- function(id, r, py, inputs = I3, jl) cs(id, paste0(r, "; list(tactical =
                                             paste0(py, "\nresult = {'tactical': res.tactical, 'worth': res.worth, 'dates': res.dates}"), inputs = inputs,
                                             jl = paste0(jl, '\nresult = SL.RList("tactical" => res.tactical, "worth" => res.worth, "dates" => res.dates)'))
 tsim("ts_rules", "wr <- tactical_rules(ds, list(list(when = list(buy = b2, sell = s2), weights = c(A = 1))), default = c(C = 1))
-   res <- tactical_simulation(ds, wr, lag = 1, asset_args = list(asset_spread = 0))",
+   res <- tactical_simulation(ds, wr, lag = 1, asset_args = list(spread = 0))",
    "wr = T.tactical_rules(ds, [{'when': {'buy': b2, 'sell': s2}, 'weights': {'A': 1}}], default={'C': 1})
-res = T.tactical_simulation(ds, wr, lag=1, asset_args={'asset_spread': 0})",
+res = T.tactical_simulation(ds, wr, lag=1, asset_args={'spread': 0})",
    jl = 'wr = T.tactical_rules(ds, [SL.RList("when" => SL.RList("buy" => b2, "sell" => s2), "weights" => SL.named("A" => 1))], SL.named("C" => 1))
-res = T.tactical_simulation(ds, wr; lag = 1, asset_args = (asset_spread = 0,))')
+res = T.tactical_simulation(ds, wr; lag = 1, asset_args = (spread = 0,))')
 tsim("ts_year_lag0", "ws <- tactical_rules(ds, list(), default = c(A = 0.6, C = 0.4))
-   res <- tactical_simulation(ds, ws, rebalance = 'year', lag = 0, asset_args = list(asset_spread = 0))",
+   res <- tactical_simulation(ds, ws, rebalance = 'year', lag = 0, asset_args = list(spread = 0))",
    "ws = T.tactical_rules(ds, [], default={'A': 0.6, 'C': 0.4})
-res = T.tactical_simulation(ds, ws, rebalance='year', lag=0, asset_args={'asset_spread': 0})",
+res = T.tactical_simulation(ds, ws, rebalance='year', lag=0, asset_args={'spread': 0})",
    jl = 'ws = T.tactical_rules(ds, [], SL.named("A" => 0.6, "C" => 0.4))
-res = T.tactical_simulation(ds, ws; rebalance = "year", lag = 0, asset_args = (asset_spread = 0,))')
-tsim("ts_tol", "ws <- glidepath(ds, from = c(A = 0.8, C = 0.2), to = c(A = 0.4, C = 0.6), every = 'quarter')
-   res <- tactical_simulation(ds, ws, rebalance = 'month', tolerance = 5, lag = 2, asset_args = list(asset_spread = 0.1, asset_bonus = c(A = 30, C = 0)))",
-   "ws = T.glidepath(ds, from_={'A': 0.8, 'C': 0.2}, to={'A': 0.4, 'C': 0.6}, every='quarter')
-res = T.tactical_simulation(ds, ws, rebalance='month', tolerance=5, lag=2, asset_args={'asset_spread': 0.1, 'asset_bonus': pd.Series({'A': 30, 'C': 0})})",
-   jl = 'ws = T.glidepath(ds, SL.named("A" => 0.8, "C" => 0.2), SL.named("A" => 0.4, "C" => 0.6); every = "quarter")
-res = T.tactical_simulation(ds, ws; rebalance = "month", tolerance = 5, lag = 2, asset_args = (asset_spread = 0.1, asset_bonus = SL.named("A" => 30, "C" => 0)))')
+res = T.tactical_simulation(ds, ws; rebalance = "year", lag = 0, asset_args = (spread = 0,))')
+tsim("ts_tol", "ws <- tactical_glidepath(ds, from = c(A = 0.8, C = 0.2), to = c(A = 0.4, C = 0.6), every = 'quarter')
+   res <- tactical_simulation(ds, ws, rebalance = 'month', tolerance = 5, lag = 2, asset_args = list(spread = 0.1, partial_exemption = c(A = 30, C = 0)))",
+   "ws = T.tactical_glidepath(ds, from_={'A': 0.8, 'C': 0.2}, to={'A': 0.4, 'C': 0.6}, every='quarter')
+res = T.tactical_simulation(ds, ws, rebalance='month', tolerance=5, lag=2, asset_args={'spread': 0.1, 'partial_exemption': pd.Series({'A': 30, 'C': 0})})",
+   jl = 'ws = T.tactical_glidepath(ds, SL.named("A" => 0.8, "C" => 0.2), SL.named("A" => 0.4, "C" => 0.6); every = "quarter")
+res = T.tactical_simulation(ds, ws; rebalance = "month", tolerance = 5, lag = 2, asset_args = (spread = 0.1, partial_exemption = SL.named("A" => 30, "C" => 0)))')
 tsim("ts_rel_tax", "ws <- tactical_rules(ds, list(list(when = list(buy = b2, sell = s2), weights = c(A = 0.7, C = 0.3))), default = c(A = 0.2, C = 0.8))
-   res <- tactical_simulation(ds, ws, rebalance = 'quarter', tolerance = 20, tolerance_type = 'relative', tax_mode = 'person', start_value = 50000)",
+   res <- tactical_simulation(ds, ws, rebalance = 'quarter', tolerance = 20, tolerance_type = 'relative', tax = tax_profile(), start_value = 50000)",
    "ws = T.tactical_rules(ds, [{'when': {'buy': b2, 'sell': s2}, 'weights': {'A': 0.7, 'C': 0.3}}], default={'A': 0.2, 'C': 0.8})
-res = T.tactical_simulation(ds, ws, rebalance='quarter', tolerance=20, tolerance_type='relative', tax_mode='person', start_value=50000)",
+res = T.tactical_simulation(ds, ws, rebalance='quarter', tolerance=20, tolerance_type='relative', tax=simlev.tax_profile(), start_value=50000)",
    jl = 'ws = T.tactical_rules(ds, [SL.RList("when" => SL.RList("buy" => b2, "sell" => s2), "weights" => SL.named("A" => 0.7, "C" => 0.3))], SL.named("A" => 0.2, "C" => 0.8))
-res = T.tactical_simulation(ds, ws; rebalance = "quarter", tolerance = 20, tolerance_type = "relative", tax_mode = "person", start_value = 50000)')
+res = T.tactical_simulation(ds, ws; rebalance = "quarter", tolerance = 20, tolerance_type = "relative", tax = SL.tax_profile(), start_value = 50000)')
 tsim("ts_dca", "ws <- tactical_rules(ds, list(list(when = list(buy = b2, sell = s2), weights = c(A = 1))), default = c(A = 0.3, C = 0.7))
-   res <- tactical_simulation(ds, ws, dca_mode = TRUE, dca_value = 500, dca_span = 1, dca_unit = 'quarter')",
+   res <- tactical_simulation(ds, ws, dca = dca_plan(500, 1, unit = 'quarter'))",
    "ws = T.tactical_rules(ds, [{'when': {'buy': b2, 'sell': s2}, 'weights': {'A': 1}}], default={'A': 0.3, 'C': 0.7})
-res = T.tactical_simulation(ds, ws, dca_mode=True, dca_value=500, dca_span=1, dca_unit='quarter')",
+res = T.tactical_simulation(ds, ws, dca=simlev.dca_plan(500, 1, unit='quarter'))",
    jl = 'ws = T.tactical_rules(ds, [SL.RList("when" => SL.RList("buy" => b2, "sell" => s2), "weights" => SL.named("A" => 1))], SL.named("A" => 0.3, "C" => 0.7))
-res = T.tactical_simulation(ds, ws; dca_mode = true, dca_value = 500, dca_span = 1, dca_unit = "quarter")')
+res = T.tactical_simulation(ds, ws; dca = SL.dca_plan(500, 1; unit = "quarter"))')
 cal <- seq.Date(as.Date("2021-01-04"), as.Date("2021-03-31"), by = "day")
 wkd <- cal[!format(cal, "%u") %in% c("6", "7")]
 set.seed(11); al <- data.frame(date = cal, aktien = NA_real_, geld = 100)
@@ -358,19 +358,19 @@ al$aktien <- SimLev:::.fill_na(al$aktien, "locf")
 I4 <- list(al = al, fl = fl)
 tsim("ts_filled", "a2 <- al; attr(a2, 'filled') <- fl
    w <- tactical_rules(a2, list(list(when = a2$date >= as.Date('2021-02-05'), weights = c(aktien = 1))), default = c(geld = 1))
-   res <- tactical_simulation(a2, w, lag = 1, asset_args = list(asset_spread = 0))",
+   res <- tactical_simulation(a2, w, lag = 1, asset_args = list(spread = 0))",
    "a2 = al.copy(); a2.attrs['filled'] = fl
 w = T.tactical_rules(a2, [{'when': a2['date'] >= np.datetime64('2021-02-05'), 'weights': {'aktien': 1}}], default={'geld': 1})
-res = T.tactical_simulation(a2, w, lag=1, asset_args={'asset_spread': 0})", inputs = I4,
+res = T.tactical_simulation(a2, w, lag=1, asset_args={'spread': 0})", inputs = I4,
    jl = 'a2 = copy(al); SL.attrs(a2)["filled"] = fl
 w = T.tactical_rules(a2, [SL.RList("when" => a2.date .>= Date(2021, 2, 5), "weights" => SL.named("aktien" => 1))], SL.named("geld" => 1))
-res = T.tactical_simulation(a2, w; lag = 1, asset_args = (asset_spread = 0,))')
+res = T.tactical_simulation(a2, w; lag = 1, asset_args = (spread = 0,))')
 tsim("ts_nofilled", "w <- tactical_rules(al, list(list(when = al$date >= as.Date('2021-02-05'), weights = c(aktien = 1))), default = c(geld = 1))
-   res <- tactical_simulation(al, w, lag = 1, asset_args = list(asset_spread = 0))",
+   res <- tactical_simulation(al, w, lag = 1, asset_args = list(spread = 0))",
    "w = T.tactical_rules(al, [{'when': al['date'] >= np.datetime64('2021-02-05'), 'weights': {'aktien': 1}}], default={'geld': 1})
-res = T.tactical_simulation(al, w, lag=1, asset_args={'asset_spread': 0})", inputs = I4,
+res = T.tactical_simulation(al, w, lag=1, asset_args={'spread': 0})", inputs = I4,
    jl = 'w = T.tactical_rules(al, [SL.RList("when" => al.date .>= Date(2021, 2, 5), "weights" => SL.named("aktien" => 1))], SL.named("geld" => 1))
-res = T.tactical_simulation(al, w; lag = 1, asset_args = (asset_spread = 0,))')
+res = T.tactical_simulation(al, w; lag = 1, asset_args = (spread = 0,))')
 tsim("ts_gaps", "ws <- tactical_rules(ds[seq(1, nrow(ds), 3), ], list(list(when = 'A > 101', weights = c(A = 1))), default = c(C = 1))
    res <- tactical_simulation(ds, ws, lag = 3)",
    "ws = T.tactical_rules(ds.iloc[::3].reset_index(drop=True), [{'when': 'A > 101', 'weights': {'A': 1}}], default={'C': 1})
@@ -379,6 +379,9 @@ res = T.tactical_simulation(ds, ws, lag=3)",
 res = T.tactical_simulation(ds, ws; lag = 3)')
 cs("ts_err_w", "tactical_simulation(ds, c(A = 1))", "result = T.tactical_simulation(ds, {'A': 1})", inputs = I3,
    jl = 'result = T.tactical_simulation(ds, SL.named("A" => 1))')
+cs("ts_err_flat", "tactical_simulation(ds, tactical_rules(ds, list(), default = c(A = 1)), dca_mode = TRUE, dca_value = 100)",
+   "result = T.tactical_simulation(ds, T.tactical_rules(ds, [], default={'A': 1}), dca_mode=True, dca_value=100)", inputs = I3,
+   jl = 'result = T.tactical_simulation(ds, T.tactical_rules(ds, [], SL.named("A" => 1)); dca_mode = true, dca_value = 100)')
 cs("ts_err_args", "tactical_simulation(ds, tactical_rules(ds, list(), default = c(A = 1)), balance_mode = TRUE, event_col = 'x')",
    "result = T.tactical_simulation(ds, T.tactical_rules(ds, [], default={'A': 1}), balance_mode=True, event_col='x')", inputs = I3,
    jl = 'result = T.tactical_simulation(ds, T.tactical_rules(ds, [], SL.named("A" => 1)); balance_mode = true, event_col = "x")')

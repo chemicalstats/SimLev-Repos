@@ -407,8 +407,8 @@ _message(s::AbstractString) = println(SimLev.RParallel.r_stderr(), s)
 # Handels- und Steuerfunktionen (sim_base.R, früher simulation.R)
 # ═══════════════════════════════════════════════════════════════════════════
 
-"`apply_spread(price, spread, direction)`: Kauf- bzw. Verkaufskurs mit halbem Spread."
-apply_spread(price::Real, spread::Real, direction::AbstractString = "buy") =
+"`_apply_spread(price, spread, direction)`: Kauf- bzw. Verkaufskurs mit halbem Spread."
+_apply_spread(price::Real, spread::Real, direction::AbstractString = "buy") =
     direction == "buy" ? Float64(price) * (1 + Float64(spread) / 2) : Float64(price) * (1 - Float64(spread) / 2)
 
 "Wert eines Signals in `&&`-Ausdrücken (Zahl ungleich 0 = TRUE; NA ist ein Fehler)."
@@ -455,7 +455,7 @@ function _perform_trade_buy!(R::Run, sim::Sim, a::Int, index::Int, reason::Strin
                         market_price, sim.names[a], fmt_date(mk.asset_day[index]))
         return nothing
     end
-    trade_price = apply_spread(market_price, spread, "buy")
+    trade_price = _apply_spread(market_price, spread, "buy")
     local trade_count::Float64
     if count === nothing
         money = sim.status[a].money
@@ -490,7 +490,7 @@ function _perform_trade_sell!(R::Run, sim::Sim, a::Int, index::Int, tax_mode::St
     mk = sim.market[a]
     name = sim.names[a]
     market_price = mk.asset_price[index]
-    trade_price = apply_spread(market_price, spread, "sell")
+    trade_price = _apply_spread(market_price, spread, "sell")
     current_date = mk.asset_day[index]
     available = sim.status[a].count
     local trade_count::Float64
@@ -513,7 +513,7 @@ function _perform_trade_sell!(R::Run, sim::Sim, a::Int, index::Int, tax_mode::St
     end
     tr = sim.trades[a]
     fifo_price = if price === nothing && tax_mode == "person"
-        calculate_fifo_price(tr.buys, trade_count, tr.fifo_front)
+        _calculate_fifo_price(tr.buys, trade_count, tr.fifo_front)
     else
         price === nothing ? 0.0 : Float64(price)
     end
@@ -526,7 +526,7 @@ function _perform_trade_sell!(R::Run, sim::Sim, a::Int, index::Int, tax_mode::St
         totals = sim.totals
         if regime == "investment_fund"
             bonus = sim.assets[a].bonus
-            vp_paid = calculate_fifo_vorabpauschale(tr.buys, trade_count, tr.fifo_front)
+            vp_paid = _calculate_fifo_vorabpauschale(tr.buys, trade_count, tr.fifo_front)
             adjusted = trade_gain - vp_paid
             res = p20_tax!(adjusted, bonus, totals, effective_tax_rate, use_spb)
             capital_gains_tax = res.tax
@@ -539,7 +539,7 @@ function _perform_trade_sell!(R::Run, sim::Sim, a::Int, index::Int, tax_mode::St
             res = p20_tax!(trade_gain, 0.0, totals, effective_tax_rate, use_spb)
             capital_gains_tax = res.tax
         elseif regime == "private_sale"
-            lot_result = calculate_private_sale_tax(tr.buys, tr.fifo_front, trade_count, trade_price, current_date)
+            lot_result = _calculate_private_sale_tax(tr.buys, tr.fifo_front, trade_count, trade_price, current_date)
             if R.details
                 lot_result.exempt_gain > 0 && _cat(R, r_sprintf("\t\t=> Steuerfreier Gewinn (Haltedauer > 1 Jahr): %.2f EUR\n", lot_result.exempt_gain))
                 lot_result.exempt_loss > 0 && _cat(R, r_sprintf("\t\t=> Nicht verrechenbarer Verlust (Haltedauer > 1 Jahr): %.2f EUR\n", lot_result.exempt_loss))
@@ -588,7 +588,7 @@ end
 function _calculate_sell_count(sim::Sim, a::Int, target::Float64, index::Int, spread::Float64, fractions::Bool,
                                tax_mode::String, tax_rate::Float64, tax_regime::Union{Nothing,String} = nothing)
     market_price = sim.market[a].asset_price[index]
-    trade_price = apply_spread(market_price, spread, "sell")
+    trade_price = _apply_spread(market_price, spread, "sell")
     total_shares = sim.status[a].count
     total_shares <= 0 && return (sell_count = 0.0, fifo_price = 0.0)
     target <= 0 && return (sell_count = 0.0, fifo_price = 0.0)
@@ -680,7 +680,7 @@ function _split!(sim::Sim, a::Int, ratio::Float64, forward::Bool)
             b.original = orig / ratio
         end
     end
-    tr.fifo_front = update_fifo_front(tr.buys, 1)
+    tr.fifo_front = _update_fifo_front(tr.buys, 1)
     st.count = split_count
     st.price = split_price
     st.worth = current_worth
@@ -712,7 +712,7 @@ function _perform_gain_harvest!(R::Run, sim::Sim, a::Int, index::Int, tax_regime
     room <= 0.01 && return nothing
     market_price = sim.market[a].asset_price[index]
     (isnan(market_price) || market_price <= 0) && return nothing
-    sell_price = apply_spread(market_price, spread, "sell")
+    sell_price = _apply_spread(market_price, spread, "sell")
     trades = sim.trades[a].buys
     front = sim.trades[a].fifo_front
     bonus = tax_regime == "investment_fund" ? sim.assets[a].bonus : 0.0
@@ -723,8 +723,8 @@ function _perform_gain_harvest!(R::Run, sim::Sim, a::Int, index::Int, tax_regime
         if with_fee && fee !== nothing
             px = px - _fee_amount(fee, n * sell_price) / n
         end
-        g = (px - calculate_fifo_price(trades, n, front)) * n
-        tax_regime == "investment_fund" && (g = g - calculate_fifo_vorabpauschale(trades, n, front))
+        g = (px - _calculate_fifo_price(trades, n, front)) * n
+        tax_regime == "investment_fund" && (g = g - _calculate_fifo_vorabpauschale(trades, n, front))
         return (1 - bonus) * g
     end
     first_lot = _rmin(total, _rmax(1e-9, total * 1e-6))
@@ -762,7 +762,7 @@ end
 # Tarifweg (taxable_income, tax_tariff)
 # ═══════════════════════════════════════════════════════════════════════════
 
-function _check_taxable_income(x, years::Vector{Int})
+function _check_taxable_income(x, years::Vector{Int}, who::String = "simulation")
     @nospecialize
     form = "eine Zahl (zvE in EUR für alle Jahre), ein nach Kalenderjahren benannter Zahlenvektor (z. B. c(\"2024\" = 50000, \"2025\" = 52000)) oder ein data.frame mit den Spalten year und taxable_income"
     nms = nothing
@@ -777,11 +777,11 @@ function _check_taxable_income(x, years::Vector{Int})
             j !== nothing && (vc = j; break)
         end
         if yc === nothing || vc === nothing
-            ncol(x) != 2 && error("simulation: taxable_income als data.frame braucht die Spalten year und taxable_income (oder genau zwei Spalten Jahr, Betrag); vorhanden: $(join(names(x), ", ")).")
+            ncol(x) != 2 && error("$who: taxable_income als data.frame braucht die Spalten year und taxable_income (oder genau zwei Spalten Jahr, Betrag); vorhanden: $(join(names(x), ", ")).")
             yc, vc = 1, 2
         end
         kind, col = _column(x.cols[vc])
-        kind != :numeric && error("simulation: taxable_income: Spalte '$(names(x)[vc])' (Betrag) muss numerisch sein.")
+        kind != :numeric && error("$who: taxable_income: Spalte '$(names(x)[vc])' (Betrag) muss numerisch sein.")
         vals = collect(Float64, col)
         nms = [_isna_val(v) ? "NA" : yrname(v) for v in x.cols[yc]]
     elseif x isa RVector
@@ -799,29 +799,29 @@ function _check_taxable_income(x, years::Vector{Int})
     end
     if vals === nothing || x isa AbstractMatrix
         shown = r_format(x isa Union{AbstractVector,Tuple} ? collect(Any, x) : x)
-        error("simulation: taxable_income muss $form sein, nicht $(join(first(shown, 3), ", ")).")
+        error("$who: taxable_income muss $form sein, nicht $(join(first(shown, 3), ", ")).")
     end
     for (i, v) in enumerate(vals)
-        isfinite(v) || error("simulation: taxable_income enthält einen ungültigen Wert ($(r_format1(v))" *
+        isfinite(v) || error("$who: taxable_income enthält einen ungültigen Wert ($(r_format1(v))" *
                              (nms !== nothing ? " für $(nms[i])" : "") * "); erwartet werden endliche Beträge in EUR.")
     end
     length(vals) == 1 && nms === nothing && return (all = vals[1], by_year = nothing)
     if nms === nothing || any(isempty, nms)
-        error("simulation: taxable_income mit $(length(vals)) Werten muss nach Kalenderjahren benannt sein; erwartet wird $form.")
+        error("$who: taxable_income mit $(length(vals)) Werten muss nach Kalenderjahren benannt sein; erwartet wird $form.")
     end
     yy = Int[]
     for nm in nms
         t = strip(nm)
         y = occursin(r"^[-+]?\d+(\.\d*)?([eE][-+]?\d+)?$", t) ? (v = r_as_numeric(t); isfinite(v) ? Int(trunc(v)) : nothing) : nothing
-        (y === nothing || string(y) != t) && error("simulation: taxable_income: Name '$nm' ist kein Kalenderjahr (erwartet z. B. \"2024\").")
+        (y === nothing || string(y) != t) && error("$who: taxable_income: Name '$nm' ist kein Kalenderjahr (erwartet z. B. \"2024\").")
         push!(yy, y)
     end
     for (i, y) in enumerate(yy)
-        y in yy[1:i-1] && error("simulation: taxable_income: Jahr $y kommt mehrfach vor.")
+        y in yy[1:i-1] && error("$who: taxable_income: Jahr $y kommt mehrfach vor.")
     end
     miss = [y for y in years if !(y in yy)]
     if !isempty(miss)
-        error("simulation: taxable_income fehlt für " * (length(miss) == 1 ? "Simulationsjahr" : "Simulationsjahre") * " " *
+        error("$who: taxable_income fehlt für " * (length(miss) == 1 ? "Simulationsjahr" : "Simulationsjahre") * " " *
               join(miss, ", ") * " (angegeben: " * join(sort(yy), ", ") * "); je Kalenderjahr der Simulation (" *
               string(minimum(years)) * " bis " * string(maximum(years)) * ") wird ein Betrag benötigt.")
     end
@@ -941,7 +941,7 @@ function _tariff_book!(sim::Sim, env::TariffEnv, D::Float64)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Jahreswechsel (handle_year_change)
+# Jahreswechsel (_handle_year_change)
 # ═══════════════════════════════════════════════════════════════════════════
 
 function _handle_year_change!(R::Run, sim::Sim, current_date::Int, tariff_env::Union{Nothing,TariffEnv}, details::Bool)
@@ -1183,3 +1183,4 @@ end
 include("sim_phases.jl")
 include("sim_loop.jl")
 include("sim_evaluate.jl")
+include("sim_blocks.jl")

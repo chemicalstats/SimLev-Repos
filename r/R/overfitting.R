@@ -1,14 +1,14 @@
 # =============================================================================
 #  overfitting.R  —  Schutz vor Ueberanpassung bei Parametersuchen
 # -----------------------------------------------------------------------------
-#  pbo()                    Probability of Backtest Overfitting mit
+#  overfit_pbo()                    Probability of Backtest Overfitting mit
 #                           Combinatorially Symmetric Cross-Validation
 #                           (Bailey, Borwein, Lopez de Prado & Zhu 2017)
-#  deflated_sharpe()        Deflated Sharpe Ratio (Bailey & Lopez de Prado
+#  sharpe_deflated()        Deflated Sharpe Ratio (Bailey & Lopez de Prado
 #                           2014) inkl. effektiver Versuchsanzahl
-#  probabilistic_sharpe()   Probabilistic Sharpe Ratio (Bailey & Lopez de
+#  sharpe_probabilistic()   Probabilistic Sharpe Ratio (Bailey & Lopez de
 #                           Prado 2012)
-#  walk_forward()           rollierende Auswahl In-Sample, Bewertung
+#  overfit_walk_forward()           rollierende Auswahl In-Sample, Bewertung
 #                           Out-of-Sample
 #  param_bootstrap()        beste Punkte einer Suche auf Bootstrap-Pfaden
 #
@@ -107,7 +107,7 @@
 #' Block braucht mindestens 4 Perioden. Eingabe ist eine Parametersuche oder
 #' eine Renditematrix (eine Spalte je Variante). Mehrere fertige
 #' Simulationen (Liste von \code{SimLevResult}) werden vorher zu einer
-#' Matrix zusammengefasst, siehe Beispiel bei [reality_check()].
+#' Matrix zusammengefasst, siehe Beispiel bei [overfit_reality_check()].
 #'
 #' @param x Renditequelle:
 #'   \itemize{
@@ -162,26 +162,26 @@
 #'   \code{n_points} (Anzahl Spalten), \code{n_obs} (verwendete Perioden),
 #'   \code{metric}, \code{frequency} und \code{ppy}. Die Kennzahlen sind je
 #'   Periode angegeben, nicht annualisiert.
-#' @seealso [param_search()], [deflated_sharpe()], [walk_forward()],
-#'   [plateau()]
+#' @seealso [param_search()], [sharpe_deflated()], [overfit_walk_forward()],
+#'   [param_plateau()]
 #' @references Bailey, D. H., Borwein, J., Lopez de Prado, M. & Zhu, Q. J.
 #'   (2017). The probability of backtest overfitting. Journal of Computational
 #'   Finance 20(4), 39-69.
 #' @examples
 #' set.seed(1)
 #' R <- matrix(rnorm(2000 * 30, 2e-4, 0.01), 2000)  # 30 Zufallsstrategien
-#' pbo(R, S = 10, frequency = "day")$pbo           # ~ 0.5: reine Zufallsauswahl
-#' pb <- pbo(R, S = 10, frequency = "day", metric = "geometric")
+#' overfit_pbo(R, S = 10, frequency = "day")$pbo           # ~ 0.5: reine Zufallsauswahl
+#' pb <- overfit_pbo(R, S = 10, frequency = "day", metric = "geometric")
 #' pb
 #' plot(pb)
 #' @export
-pbo <- function(x, S = 16L, metric = c("sharpe", "sortino", "geometric", "mean"),
+overfit_pbo <- function(x, S = 16L, metric = c("sharpe", "sortino", "geometric", "mean"),
                 frequency = c("week", "day", "month"), dates = NULL, risk_free = 0) {
   metric <- match.arg(metric); frequency <- match.arg(frequency)
   S <- as.integer(S)
   if (S < 2L || S %% 2L) stop("S muss gerade und >= 2 sein.")
   rr <- .of_returns(x, frequency, dates, risk_free)
-  if (metric == "sharpe") rr <- .of_drop_flat(rr, "pbo")
+  if (metric == "sharpe") rr <- .of_drop_flat(rr, "overfit_pbo")
   R <- rr$R; N <- ncol(R); Tn <- nrow(R)
   if (N < 2L) stop("Mindestens zwei Punkte n\u00f6tig.")
   bl <- Tn %/% S
@@ -216,7 +216,7 @@ pbo <- function(x, S = 16L, metric = c("sharpe", "sortino", "geometric", "mean")
                  metric = metric, frequency = frequency, ppy = rr$ppy), class = "SimLevPBO")
 }
 
-#' @rdname pbo
+#' @rdname overfit_pbo
 #' @param ... ungenutzt.
 #' @export
 print.SimLevPBO <- function(x, ...) {
@@ -233,7 +233,7 @@ print.SimLevPBO <- function(x, ...) {
   invisible(x)
 }
 
-#' @rdname pbo
+#' @rdname overfit_pbo
 #' @export
 plot.SimLevPBO <- function(x, ...) {
   old <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(old))
@@ -269,16 +269,16 @@ plot.SimLevPBO <- function(x, ...) {
 #'   Wochenrenditen; z. B. 252 fuer Handelstage, 12 fuer Monate). Wird nicht
 #'   geschaetzt und dient nur der Umrechnung von \code{benchmark}.
 #' @return Eine Zahl: Wahrscheinlichkeit als Anteil (0 bis 1).
-#' @seealso [deflated_sharpe()], [min_track_record()], [sharpe_test()]
+#' @seealso [sharpe_deflated()], [sharpe_min_track_record()], [sharpe_test()]
 #' @examples
 #' set.seed(1)
 #' r <- rnorm(520, 0.002, 0.02)                    # 10 Jahre Wochenrenditen
-#' probabilistic_sharpe(r, benchmark = 0, ppy = 52)  # P(wahre SR > 0)
-#' probabilistic_sharpe(r, benchmark = 1, ppy = 52)  # P(wahre SR > 1 p. a.)
+#' sharpe_probabilistic(r, benchmark = 0, ppy = 52)  # P(wahre SR > 0)
+#' sharpe_probabilistic(r, benchmark = 1, ppy = 52)  # P(wahre SR > 1 p. a.)
 #' @references Bailey, D. H. & Lopez de Prado, M. (2012). The Sharpe ratio
 #'   efficient frontier. Journal of Risk 15(2), 3-44.
 #' @export
-probabilistic_sharpe <- function(r, benchmark = 0, ppy = 52) {
+sharpe_probabilistic <- function(r, benchmark = 0, ppy = 52) {
   r <- r[is.finite(r)]; n <- length(r)
   sr <- mean(r) / stats::sd(r); sr0 <- benchmark / sqrt(ppy)
   z <- (r - mean(r)) / stats::sd(r)
@@ -299,12 +299,12 @@ probabilistic_sharpe <- function(r, benchmark = 0, ppy = 52) {
 #' Korrelation verwendet (mindestens 1; bei negativer mittlerer Korrelation
 #' \eqn{N}). \eqn{V[\widehat{SR}_n]} ist die Varianz der Sharpe Ratios je
 #' Periode ueber alle Punkte. PSR und DSR werden mit
-#' [probabilistic_sharpe()] berechnet. Spalten ohne Schwankung
+#' [sharpe_probabilistic()] berechnet. Spalten ohne Schwankung
 #' (Standardabweichung <= 1e-10 je Periode, z. B. ein Punkt, der nur
 #' Geldmarkt mit festem Zins haelt) haben keine definierte Sharpe Ratio und
 #' werden mit Warnung ausgeschlossen.
 #'
-#' @param x Renditequelle wie bei [pbo()]: \code{SimLevParamSearch} aus
+#' @param x Renditequelle wie bei [overfit_pbo()]: \code{SimLevParamSearch} aus
 #'   [param_search()] mit gespeicherten Renditen oder numerische
 #'   Renditematrix bzw. data.frame nur aus numerischen Spalten (Zeilen =
 #'   Perioden, Spalten = Punkte, einfache Renditen als Anteil). Bei
@@ -319,7 +319,7 @@ probabilistic_sharpe <- function(r, benchmark = 0, ppy = 52) {
 #'   \code{effective}).
 #' @param effective Logisch. \code{TRUE} (Standard) = effektive
 #'   Versuchsanzahl \eqn{N_{eff}}; \code{FALSE} = Anzahl gueltiger Spalten.
-#' @inheritParams pbo
+#' @inheritParams overfit_pbo
 #' @return Objekt der Klasse \code{SimLevDSR}, eine Liste mit \code{id}
 #'   (gepruefter Punkt), \code{sharpe} (seine Sharpe Ratio p. a.),
 #'   \code{sr0} (erwartetes Maximum ohne Koennen, p. a.), \code{psr}
@@ -331,14 +331,14 @@ probabilistic_sharpe <- function(r, benchmark = 0, ppy = 52) {
 #'   Perioden) und \code{frequency}. Annualisiert wird mit
 #'   \eqn{\sqrt{ppy}}; \code{ppy} wird wie unter \code{risk_free}
 #'   beschrieben bestimmt.
-#' @seealso [param_search()], [pbo()], [probabilistic_sharpe()],
+#' @seealso [param_search()], [overfit_pbo()], [sharpe_probabilistic()],
 #'   [sharpe_haircut()]
 #' @examples
 #' set.seed(1)
 #' R <- matrix(rnorm(2000 * 20, 2e-4, 0.01), 2000)   # 20 Zufallsstrategien
-#' ds <- deflated_sharpe(R, frequency = "day")       # ohne Datum: ppy = 252
+#' ds <- sharpe_deflated(R, frequency = "day")       # ohne Datum: ppy = 252
 #' ds
-#' deflated_sharpe(R, frequency = "day", n_trials = 100)$dsr
+#' sharpe_deflated(R, frequency = "day", n_trials = 100)$dsr
 #'
 #' # Parametersuche
 #' set.seed(1)
@@ -347,14 +347,14 @@ probabilistic_sharpe <- function(r, benchmark = 0, ppy = 52) {
 #' st <- create_strategy(A = asset_config("etf", "signal", signal_buy = "buy", signal_sell = "sell"))
 #' ps <- param_search(d, function(p) list(strategy = st, signal = function(df) signal_sma(df$A, p$n, p$band)),
 #'                    param_space(n = c(50, 100, 200), band = c(0, 2)), burn_in = 250)
-#' deflated_sharpe(ps)
+#' sharpe_deflated(ps)
 #' @references Bailey, D. H. & Lopez de Prado, M. (2014). The deflated Sharpe
 #'   ratio. Journal of Portfolio Management 40(5), 94-107.
 #' @export
-deflated_sharpe <- function(x, id = NULL, n_trials = NULL, effective = TRUE,
+sharpe_deflated <- function(x, id = NULL, n_trials = NULL, effective = TRUE,
                             frequency = c("week", "day", "month"), dates = NULL, risk_free = 0) {
   frequency <- match.arg(frequency)
-  rr <- .of_drop_flat(.of_returns(x, frequency, dates, risk_free), "deflated_sharpe"); R <- rr$R
+  rr <- .of_drop_flat(.of_returns(x, frequency, dates, risk_free), "sharpe_deflated"); R <- rr$R
   N <- ncol(R)
   sr <- .of_col_metric(R, "sharpe")
   j <- if (is.null(id)) which.max(sr) else {
@@ -370,12 +370,12 @@ deflated_sharpe <- function(x, id = NULL, n_trials = NULL, effective = TRUE,
   sr0 <- if (Nt > 1 && v > 0) sqrt(v) * ((1 - g) * stats::qnorm(1 - 1 / Nt) + g * stats::qnorm(1 - 1 / (Nt * exp(1)))) else 0
   r <- R[, j]
   structure(list(id = rr$cols[j], sharpe = sr[j] * sqrt(rr$ppy), sr0 = sr0 * sqrt(rr$ppy),
-                 psr = probabilistic_sharpe(r, 0, rr$ppy), dsr = probabilistic_sharpe(r, sr0 * sqrt(rr$ppy), rr$ppy),
+                 psr = sharpe_probabilistic(r, 0, rr$ppy), dsr = sharpe_probabilistic(r, sr0 * sqrt(rr$ppy), rr$ppy),
                  n_trials = Nt, n_points = N, n_eff = n_eff, rho = rho, var_sr = v * rr$ppy, n_obs = nrow(R),
                  frequency = frequency), class = "SimLevDSR")
 }
 
-#' @rdname deflated_sharpe
+#' @rdname sharpe_deflated
 #' @param ... ungenutzt.
 #' @export
 print.SimLevDSR <- function(x, ...) {
@@ -427,12 +427,12 @@ print.SimLevDSR <- function(x, ...) {
 #'   immer am ersten Tag (expandierendes Fenster).
 #' @param metric Auswahl- und Bewertungskennzahl, je Fenster aus den
 #'   Tagesrenditen: \code{"sharpe"} (Standard), \code{"sortino"},
-#'   \code{"geometric"} oder \code{"mean"} (Definitionen wie bei [pbo()], je
+#'   \code{"geometric"} oder \code{"mean"} (Definitionen wie bei [overfit_pbo()], je
 #'   Tag, nicht annualisiert; hoeher = besser).
 #' @param select \code{"best"} (Standard): Punkt mit der hoechsten
 #'   Trainings-Kennzahl; \code{"plateau"}: Punkt mit dem hoechsten Mittel der
 #'   Trainings-Kennzahl ueber seine Nachbarschaft (Nachbarn wie in
-#'   [plateau()] mit \code{radius = 1} bzw. \code{k = 5}).
+#'   [param_plateau()] mit \code{radius = 1} bzw. \code{k = 5}).
 #' @param risk_free Risikoloser Zins in Prozent p. a. (2 = 2 %, Standard 0);
 #'   wird als \code{risk_free / 100 / ppy} von jeder Tagesrendite abgezogen,
 #'   \code{ppy} = (Anzahl Tage - 1) / (Zeitspanne in Tagen / 365.25). Wirkt
@@ -467,7 +467,7 @@ print.SimLevDSR <- function(x, ...) {
 #'       \code{train}, \code{test}, \code{anchored}, \code{params}}{Rueckschau-Punkt
 #'       und Einstellungen.}
 #'   }
-#' @seealso [param_search()], [plateau()], [pbo()], [param_bootstrap()]
+#' @seealso [param_search()], [param_plateau()], [overfit_pbo()], [param_bootstrap()]
 #' @examples
 #' set.seed(1)
 #' d <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = 3000))
@@ -475,13 +475,13 @@ print.SimLevDSR <- function(x, ...) {
 #' st <- create_strategy(A = asset_config("etf", "signal", signal_buy = "buy", signal_sell = "sell"))
 #' ps <- param_search(d, function(p) list(strategy = st, signal = function(df) signal_sma(df$A, p$n, p$band)),
 #'                    param_space(n = c(50, 100, 200), band = c(0, 2)), burn_in = 250)
-#' wf <- walk_forward(ps, train = 3, test = 1)
+#' wf <- overfit_walk_forward(ps, train = 3, test = 1)
 #' wf
 #' wf$summary
 #' plot(wf)
-#' walk_forward(ps, train = 3, test = 1, anchored = TRUE, select = "plateau")$summary
+#' overfit_walk_forward(ps, train = 3, test = 1, anchored = TRUE, select = "plateau")$summary
 #' @export
-walk_forward <- function(x, train = 5, test = 1, step = test, anchored = FALSE,
+overfit_walk_forward <- function(x, train = 5, test = 1, step = test, anchored = FALSE,
                          metric = c("sharpe", "sortino", "geometric", "mean"),
                          select = c("best", "plateau"), risk_free = 0) {
   metric <- match.arg(metric); select <- match.arg(select)
@@ -540,7 +540,7 @@ walk_forward <- function(x, train = 5, test = 1, step = test, anchored = FALSE,
             class = "SimLevWalkForward")
 }
 
-#' @rdname walk_forward
+#' @rdname overfit_walk_forward
 #' @param ... ungenutzt.
 #' @export
 print.SimLevWalkForward <- function(x, ...) {
@@ -561,7 +561,7 @@ print.SimLevWalkForward <- function(x, ...) {
   invisible(x)
 }
 
-#' @rdname walk_forward
+#' @rdname overfit_walk_forward
 #' @export
 plot.SimLevWalkForward <- function(x, ...) {
   s <- x$series
@@ -603,7 +603,7 @@ plot.SimLevWalkForward <- function(x, ...) {
 #'   \code{ids}.
 #' @param by Rangfolge fuer \code{top}: \code{"objective"} (Standard,
 #'   Zielgroesse der Suche) oder \code{"plateau"} (\code{plateau_mean} aus
-#'   [plateau()]); Richtung nach \code{x$maximize}, Punkte mit \code{NA}
+#'   [param_plateau()]); Richtung nach \code{x$maximize}, Punkte mit \code{NA}
 #'   entfallen.
 #' @param map Benannter Zeichenvektor von Spalten-Aliasen, die jeder
 #'   Spezifikation hinzugefuegt werden, z. B. \code{c(letf = "eu_l2")}, wenn
@@ -621,7 +621,7 @@ plot.SimLevWalkForward <- function(x, ...) {
 #'   Namen aus \code{include}). Attribut \code{param_ids}: benannter Vektor
 #'   Strategiename -> \code{id}.
 #' @seealso [param_search()], [bootstrap_study()], [bootstrap_probability()],
-#'   [walk_forward()]
+#'   [overfit_walk_forward()]
 #' @examples
 #' set.seed(2); n <- 1500
 #' h <- data.frame(us = 1 + rnorm(n, 3e-4, 0.01))     # Historie: Brutto-Tagesrenditen
@@ -641,7 +641,7 @@ param_bootstrap <- function(x, data, config, ids = NULL, top = 5L, by = c("objec
   by <- match.arg(by)
   if (!inherits(x, "SimLevParamSearch")) stop("x muss ein SimLevParamSearch sein.")
   if (is.null(ids)) {
-    v <- if (by == "plateau") plateau(x)$plateau_mean else x$results[[x$objective]]
+    v <- if (by == "plateau") param_plateau(x)$plateau_mean else x$results[[x$objective]]
     ids <- x$results$id[utils::head(order(v, decreasing = isTRUE(x$maximize), na.last = NA), top)]
   }
   specs <- lapply(ids, function(i) {
@@ -650,8 +650,12 @@ param_bootstrap <- function(x, data, config, ids = NULL, top = 5L, by = c("objec
     sp
   })
   names(specs) <- paste0("p", ids)
+  # sim_args aus ... ergaenzen die der Suche (oberste Ebene; Bausteine werden ersetzt, nicht gemischt)
+  dots <- list(...); sa <- x$sim_args %||% list()
+  if ("sim_args" %in% names(dots)) { sa <- .sim_args_set(sa, dots$sim_args, "param_bootstrap"); dots$sim_args <- NULL }
   args <- utils::modifyList(list(data = data, config = config, strategies = c(specs, include),
-                                 sim_args = x$sim_args, burn_in = x$burn_in), list(...))
+                                 burn_in = x$burn_in), dots)
+  args$sim_args <- sa
   st <- do.call(bootstrap_study, args)
   attr(st, "param_ids") <- stats::setNames(ids, names(specs))
   st
@@ -677,7 +681,7 @@ param_bootstrap <- function(x, data, config, ids = NULL, top = 5L, by = c("objec
 #' @param x Eingabe: \code{SimLevParamSearch} aus [param_search()] mit
 #'   gespeicherten Renditen, numerische Renditematrix bzw. data.frame nur aus
 #'   numerischen Spalten (Zeilen = Perioden, Spalten = Punkte, einfache
-#'   Renditen als Anteil; wie bei [pbo()]) oder numerischer Vektor
+#'   Renditen als Anteil; wie bei [overfit_pbo()]) oder numerischer Vektor
 #'   annualisierter Sharpe Ratios (dann \code{n_obs} und \code{ppy}
 #'   angeben).
 #' @param n_obs Anzahl Perioden \eqn{T}, auf denen die Sharpe Ratios
@@ -688,9 +692,9 @@ param_bootstrap <- function(x, data, config, ids = NULL, top = 5L, by = c("objec
 #'   frueheren Suchen entsprechend hoeher ansetzen (fehlende Versuche gehen
 #'   mit p = 1 in die Korrektur ein).
 #' @param frequency,dates,risk_free Aggregation, Datum und risikoloser Zins
-#'   (Prozent p. a.) wie bei [pbo()]; nur bei Suche oder Matrix.
+#'   (Prozent p. a.) wie bei [overfit_pbo()]; nur bei Suche oder Matrix.
 #' @param ppy Perioden je Jahr, nur bei Vektor-Eingabe (Standard 52 =
-#'   Wochen). Bei Suche oder Matrix wird es wie bei [pbo()] bestimmt (aus
+#'   Wochen). Bei Suche oder Matrix wird es wie bei [overfit_pbo()] bestimmt (aus
 #'   dem Datum geschaetzt, sonst 252/52/12 je \code{frequency}).
 #' @return data.frame je Punkt, absteigend nach \code{sharpe} sortiert, mit
 #'   \code{id} (Punkt bzw. Spaltennummer; bei Vektoren die Position),
@@ -701,7 +705,7 @@ param_bootstrap <- function(x, data, config, ids = NULL, top = 5L, by = c("objec
 #'   Ratio p. a.) und \code{haircut_<verfahren>} (Abschlag als Anteil;
 #'   \code{NA} bei \code{sharpe = 0}). Attribute \code{n_tests} und
 #'   \code{n_obs}.
-#' @seealso [deflated_sharpe()], [pbo()], [reality_check()],
+#' @seealso [sharpe_deflated()], [overfit_pbo()], [overfit_reality_check()],
 #'   [param_search()]
 #' @examples
 #' # Zwei Sharpe Ratios p. a. aus 10 Jahren Wochendaten, 50 Versuche insgesamt

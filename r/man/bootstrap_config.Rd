@@ -162,5 +162,5 @@ cfg3 <- bootstrap_config(c(us = "us_ret"), aux = c(cpi = "us_cpi", zins = "us_ra
 cfg3$aux_type
 }
 \seealso{
-\code{\link[=bootstrap]{bootstrap()}}, \code{\link[=bootstrap_study]{bootstrap_study()}}, \code{\link[=block_length]{block_length()}}
+\code{\link[=bootstrap]{bootstrap()}}, \code{\link[=bootstrap_study]{bootstrap_study()}}, \code{\link[=bootstrap_block_length]{bootstrap_block_length()}}
 }

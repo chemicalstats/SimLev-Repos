@@ -26,7 +26,7 @@
 #      deparse); Rechnung, Zufallszahlen (set.seed(rseed), bei rseed = NULL
 #      der Startwert as.numeric(Sys.time())), Meldungen und Ergebnisse sind
 #      die von Rsolnp
-#  Genutzt von .rugarch_ugarchfit() (.fit_garch11: bootstrap(), dcc_fit(),
+#  Genutzt von .rugarch_ugarchfit() (.fit_garch11: bootstrap(), dependence_dcc(),
 #  dependence_analysis()).
 # =============================================================================
 

@@ -1,5 +1,5 @@
-# Einkommensteuertarif als Datei (read_tax_tariff, § 32a Abs. 1 EStG, §§ 3, 4 SolZG ab VZ 2026)
-.tt <- function() read_tax_tariff()
+# Einkommensteuertarif als Datei (tax_tariff, § 32a Abs. 1 EStG, §§ 3, 4 SolZG ab VZ 2026)
+.tt <- function() tax_tariff()
 .T <- function(x, tt = .tt()) SimLev:::.tariff_income_tax(tt, x)
 .S <- function(e, tt = .tt()) SimLev:::.tariff_soli(tt, e)
 .tt_file <- function(lines) { f <- tempfile(fileext = ".csv"); writeLines(lines, f); f }
@@ -50,59 +50,58 @@ test_that("Soli: Freigrenze, Milderungszone, voller Satz, Cent abrunden", {
 })
 
 test_that("Tarifdatei: Fehlermeldungen bei kaputter Datei, Warnung bei Sprung", {
-  expect_error(read_tax_tariff(file.path(tempdir(), "gibt_es_nicht.csv")), "nicht gefunden")
-  expect_error(read_tax_tariff(.tt_file(sub(",c$", ",x", .tt_ok))), "fehlen die Spalten c")
-  expect_error(read_tax_tariff(.tt_file(sub("^zone,10001", "zonen,10001", .tt_ok))), "art = 'zonen'")
-  expect_error(read_tax_tariff(.tt_file(sub("0.2,0$", "zwei,0", .tt_ok))), "Spalte 'b' in Datenzeile 2 .*nicht numerisch")
-  expect_error(read_tax_tariff(.tt_file(sub("^zone,0,", "zone,5,", .tt_ok))), "erste Zone muss bei ab = 0")
-  expect_error(read_tax_tariff(.tt_file(c(.tt_ok[1:3], "zone,0,0,1,0,0,0", .tt_ok[5]))), "streng aufsteigend")
-  expect_error(read_tax_tariff(.tt_file(c(.tt_ok, "soli,1,,,1,1,"))), "genau eine soli-Zeile geben \\(gefunden: 2\\)")
-  expect_error(read_tax_tariff(.tt_file(.tt_ok[-5])), "genau eine soli-Zeile geben \\(gefunden: 0\\)")
-  expect_error(read_tax_tariff(.tt_file(sub("10000,1,0,0.2", "10000,0,0,0.2", .tt_ok))), "teiler muss > 0")
-  expect_error(read_tax_tariff(.tt_file(sub("5.5,11.9", "155,11.9", .tt_ok))), "Zuschlagsatz \\(a\\) muss zwischen 0 und 100")
+  expect_error(tax_tariff(file.path(tempdir(), "gibt_es_nicht.csv")), "nicht gefunden")
+  expect_error(tax_tariff(.tt_file(sub(",c$", ",x", .tt_ok))), "fehlen die Spalten c")
+  expect_error(tax_tariff(.tt_file(sub("^zone,10001", "zonen,10001", .tt_ok))), "art = 'zonen'")
+  expect_error(tax_tariff(.tt_file(sub("0.2,0$", "zwei,0", .tt_ok))), "Spalte 'b' in Datenzeile 2 .*nicht numerisch")
+  expect_error(tax_tariff(.tt_file(sub("^zone,0,", "zone,5,", .tt_ok))), "erste Zone muss bei ab = 0")
+  expect_error(tax_tariff(.tt_file(c(.tt_ok[1:3], "zone,0,0,1,0,0,0", .tt_ok[5]))), "streng aufsteigend")
+  expect_error(tax_tariff(.tt_file(c(.tt_ok, "soli,1,,,1,1,"))), "genau eine soli-Zeile geben \\(gefunden: 2\\)")
+  expect_error(tax_tariff(.tt_file(.tt_ok[-5])), "genau eine soli-Zeile geben \\(gefunden: 0\\)")
+  expect_error(tax_tariff(.tt_file(sub("10000,1,0,0.2", "10000,0,0,0.2", .tt_ok))), "teiler muss > 0")
+  expect_error(tax_tariff(.tt_file(sub("5.5,11.9", "155,11.9", .tt_ok))), "Zuschlagsatz \\(a\\) muss zwischen 0 und 100")
   # Sprung: 0,2 x 10001 = 2000,20 statt 0 an der Grenze
-  expect_warning(read_tax_tariff(.tt_file(sub("10001,10000,1", "10001,0,1", .tt_ok))),
+  expect_warning(tax_tariff(.tt_file(sub("10001,10000,1", "10001,0,1", .tt_ok))),
                  "springt an der Zonengrenze 10001 EUR um 2000.20 EUR")
-  expect_no_warning(read_tax_tariff(.tt_file(.tt_ok)))
+  expect_no_warning(tax_tariff(.tt_file(.tt_ok)))
 })
 
 test_that("Eigene Tarifdatei wirkt in simulation() (Datei und Objekt)", {
   # flacher Testtarif: 20 % ueber 10 000 EUR; § 23-Gewinn 2500 bei zvE 50 000 -> 500 EUR ESt, kein Soli
   f <- .tt_file(.tt_ok)
-  expect_equal(.T(50000, read_tax_tariff(f)), 8000)
+  expect_equal(.T(50000, tax_tariff(f)), 8000)
   d <- seq.Date(as.Date("2020-01-01"), as.Date("2021-03-31"), by = "day")
   df <- data.frame(date = d, G = ifelse(d < as.Date("2020-06-01"), 100, 150), H = 50)
   df$ev <- d == as.Date("2020-07-01"); df$wG <- 0; df$wH <- 1
-  st <- create_strategy(G = asset_config("etc", "bnh", asset_share = 0.5, asset_spread = 0, deliverable = TRUE),
-                        H = asset_config("certificate", "bnh", asset_share = 0.5, asset_spread = 0))
-  run <- function(...) suppressMessages(simulation(df, st, start_value = 1e4, tax_mode = "person", taxable_income = 50000,
-                                                   event_col = "ev", event_mode = "replace", event_weight = c(G = "wG", H = "wH"), ...))
-  expect_equal(run(tax_tariff = f)$tax_report$total_taxes_paid, 500)
-  expect_equal(run(tax_tariff = read_tax_tariff(f))$tax_report$total_taxes_paid, 500)
+  st <- create_strategy(G = asset_config("etc", "bnh", share = 0.5, spread = 0, deliverable = TRUE),
+                        H = asset_config("certificate", "bnh", share = 0.5, spread = 0))
+  run <- function(...) suppressMessages(simulation(df, st, start_value = 1e4, rebalance = rebalance_plan(event_col = "ev", event_mode = "replace", skip = TRUE, event_weight = c(G = "wG", H = "wH")), tax = tax_profile(income = income_tariff(taxable_income = 50000, ...))))
+  expect_equal(run(tariff = f)$tax_report$total_taxes_paid, 500)
+  expect_equal(run(tariff = tax_tariff(f))$tax_report$total_taxes_paid, 500)
   expect_equal(run()$tax_report$total_taxes_paid, 11437 - 10548)        # mitgelieferter Tarif: T(52 500) - T(50 000)
-  expect_error(run(tax_tariff = 42), "tax_tariff muss NULL")
+  expect_error(run(tariff = 42), "income_tariff: tariff muss NULL")
 })
 
 test_that("R5-02: Plausibilitaet der Zonen (Grenzsteuersatz, T(x) <= x) und Trennzeichen", {
   base <- c("art,ab,bezug,teiler,a,b,c", "zone,0,0,1,0,0,0")
   soli <- "soli,20350,,,5.5,11.9,"
   # b = 42 statt 0.42 (Prozent statt Anteil): Fehler mit Zeile, Wert und Einheitenhinweis
-  expect_error(read_tax_tariff(.tt_file(c(base, "zone,10001,0,1,0,42,-420042", soli))),
+  expect_error(tax_tariff(.tt_file(c(base, "zone,10001,0,1,0,42,-420042", soli))),
                "Zone ab 10001 EUR \\(Datenzeile 2\\): Grenzsteuersatz 42 bei x = 10001 EUR liegt nicht zwischen 0 und 1.*0.42 f\u00fcr 42 %, nicht 42.*Soli-S\u00e4tze dagegen in Prozent")
   # negativer Grenzsteuersatz
-  expect_error(read_tax_tariff(.tt_file(c(base, "zone,10001,0,1,0,-0.1,1000.1", soli))), "Grenzsteuersatz -0.1 bei x = 10001")
+  expect_error(tax_tariff(.tt_file(c(base, "zone,10001,0,1,0,-0.1,1000.1", soli))), "Grenzsteuersatz -0.1 bei x = 10001")
   # quadratische letzte Zone: Grenzsteuersatz am oberen Rand (10 Mio. EUR) ueber 1
-  expect_error(read_tax_tariff(.tt_file(c(base, "zone,10001,10000,10000,500,1000,0", soli))),
+  expect_error(tax_tariff(.tt_file(c(base, "zone,10001,10000,10000,500,1000,0", soli))),
                "Grenzsteuersatz 100 bei x = 10000000 EUR")
   # Steuer groesser als das Einkommen (Konstante c zu gross)
-  expect_error(read_tax_tariff(.tt_file(c(base, "zone,10001,0,1,0,0.2,50000", soli))),
+  expect_error(tax_tariff(.tt_file(c(base, "zone,10001,0,1,0,0.2,50000", soli))),
                "Steuer 52000.20 EUR bei x = 10001 EUR \u00fcbersteigt das Einkommen")
   # Semikolon-CSV (deutsches Excel) und Dezimalkomma
-  expect_error(read_tax_tariff(.tt_file(gsub(",", ";", .tt_ok))), "nur eine Spalte gelesen.*Semikolon")
-  expect_error(read_tax_tariff(.tt_file(sub("0.2,0$", "0,2,0", .tt_ok))),
+  expect_error(tax_tariff(.tt_file(gsub(",", ";", .tt_ok))), "nur eine Spalte gelesen.*Semikolon")
+  expect_error(tax_tariff(.tt_file(sub("0.2,0$", "0,2,0", .tt_ok))),
                "hat die Zeile 'zone,10001,10000,1,0,0,2,0' 8 Felder, die Kopfzeile 7.*Punkt \\(0.42, nicht 0,42\\)")
   # mitgelieferte Datei besteht alle Pruefungen ohne Warnung; Kopf nennt die Einheiten
-  expect_no_warning(read_tax_tariff())
+  expect_no_warning(tax_tariff())
   hd <- readLines(system.file("extdata", "steuertarif.csv", package = "SimLev"))
   expect_true(any(grepl("Grenzsteuersatz als ANTEIL, 0.42 fuer 42 % (NICHT 42)", hd, fixed = TRUE)))   # Kopf der Tarifdatei (inst/extdata)
   expect_true(any(grepl("soli: PROZENT", hd, fixed = TRUE)))

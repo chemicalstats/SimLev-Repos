@@ -10,9 +10,10 @@ import pandas as pd
 import pytest
 
 import simlev
-from simlev import asset_config, create_strategy, read_tax_tariff, simulation
+from simlev import asset_config, create_strategy, tax_tariff, simulation
 
 from _helpers import days, sim, sim_out, sim_warn
+from simlev import dca_plan, funds_costs, harvest_rule, income_rate, income_tariff, rebalance_plan, sim_costs, tax_profile  # Bausteine (Etappe 6.3)
 
 
 def E(v, tol=1.5e-8):
@@ -42,16 +43,17 @@ def D(s):
     return pd.Timestamp(s)
 
 
-def p23(p2=150, end="2021-03-31", **kw):
+def p23(p2=150, end="2021-03-31", tax=None, **kw):
     d = days("2020-01-01", end)
     df = pd.DataFrame({"date": d, "G": np.where(d < D("2020-06-01"), 100.0, p2), "H": 50.0})
     df["ev"] = d == D("2020-07-01")
     df["wG"] = 0.0
     df["wH"] = 1.0
-    st = create_strategy(G=asset_config("etc", "bnh", asset_share=0.5, asset_spread=0, deliverable=True),
-                         H=asset_config("certificate", "bnh", asset_share=0.5, asset_spread=0))
-    return sim(df, st, start_value=1e4, tax_mode="person", event_col="ev", event_mode="replace",
-               event_weight={"G": "wG", "H": "wH"}, **kw)
+    st = create_strategy(G=asset_config(asset_class="etc", trading="bnh", share=0.5, spread=0, deliverable=True),
+                         H=asset_config(asset_class="certificate", trading="bnh", share=0.5, spread=0))
+    return sim(df, st, start_value=1e4, rebalance=rebalance_plan(event_col="ev", event_mode="replace", skip=True,
+                                                                 event_weight={"G": "wG", "H": "wH"}),
+               tax=tax_profile() if tax is None else tax, **kw)
 
 
 def gp_df(end="2021-03-31", pz=70):
@@ -67,14 +69,15 @@ ST_ZM = None
 
 
 def st_zm():
-    return create_strategy(Z=asset_config("certificate", "bnh", asset_share=0.5, asset_spread=0),
-                           M=asset_config("certificate", "bnh", asset_share=0.5, asset_spread=0))
+    return create_strategy(Z=asset_config(asset_class="certificate", trading="bnh", share=0.5, spread=0),
+                           M=asset_config(asset_class="certificate", trading="bnh", share=0.5, spread=0))
 
 
-def gp(end="2021-03-31", pz=70, out=False, **kw):
+def gp(end="2021-03-31", pz=70, out=False, tax=None, **kw):
     f = sim_out if out else sim
-    return f(gp_df(end, pz), st_zm(), start_value=2e4, tax_mode="person", event_col="ev", event_mode="replace",
-             event_weight={"Z": "wZ", "M": "wM"}, **kw)
+    return f(gp_df(end, pz), st_zm(), start_value=2e4,
+             rebalance=rebalance_plan(event_col="ev", event_mode="replace", skip=True, event_weight={"Z": "wZ", "M": "wM"}),
+             tax=tax_profile() if tax is None else tax, **kw)
 
 
 def col(ty, name):
@@ -83,7 +86,7 @@ def col(ty, name):
 
 # ── A a) § 23 mit Tarif ─────────────────────────────────────────────────────
 def test_a_p23_tarif_soli_kist():
-    r = p23(taxable_income=74000, church_tax=9)
+    r = p23(tax=tax_profile(church_tax=9, income=income_tariff(taxable_income=74000)))
     ty = r.tax_report["tariff_years"]
     assert ty["church_tax_paid_deductible"].iloc[1] == E(94.5)
     assert ty["deduction_effect"].iloc[1] == E(-43.6)
@@ -94,21 +97,21 @@ def test_a_p23_tarif_soli_kist():
     row = ty.iloc[0]
     assert [row[c] for c in ("gain_p23", "income_tax_p23", "soli_p23", "church_tax_p23", "tax_p23")] == \
         E([2500, 1050, 76.63, 94.5, 1221.13])
-    assert p23(taxable_income=50000).tax_report["total_taxes_paid"] == E(T(52500) - T(50000))
+    assert p23(tax=tax_profile(income=income_tariff(taxable_income=50000))).tax_report["total_taxes_paid"] == E(T(52500) - T(50000))
     assert T(52500) - T(50000) == 889
 
 
 def test_a_soli_freigrenze():
-    r0 = p23(taxable_income=72466)
+    r0 = p23(tax=tax_profile(income=income_tariff(taxable_income=72466)))
     assert r0.tax_report["total_taxes_paid"] == E(1050)
     assert r0.tax_report["tariff_years"]["soli_p23"].iloc[0] == 0
-    assert p23(taxable_income=72469).tax_report["total_taxes_paid"] == E(1050.11)
+    assert p23(tax=tax_profile(income=income_tariff(taxable_income=72469))).tax_report["total_taxes_paid"] == E(1050.11)
 
 
 def test_a_freigrenze_p23():
-    r = p23(p2=119.98, taxable_income=50000)
+    r = p23(p2=119.98, tax=tax_profile(income=income_tariff(taxable_income=50000)))
     assert r.tax_report["total_taxes_paid"] == 0 and r.tax_report["tariff_years"]["gain_p23"].iloc[0] == 0
-    r2 = p23(p2=120, taxable_income=50000)
+    r2 = p23(p2=120, tax=tax_profile(income=income_tariff(taxable_income=50000)))
     assert r2.tax_report["total_taxes_paid"] == E(T(51000) - T(50000))
     assert r2.tax_report["tariff_years"]["gain_p23"].iloc[0] == E(1000)
 
@@ -121,10 +124,9 @@ def test_a_verlustjahr_p23():
     df["ev"] = d.isin(ev)
     df["wG"] = np.where(d == ev[1], 0.5, 0.0)
     df["wH"] = 1 - df.wG
-    st = create_strategy(G=asset_config("etc", "bnh", asset_share=0.5, asset_spread=0, deliverable=True),
-                         H=asset_config("certificate", "bnh", asset_share=0.5, asset_spread=0))
-    r = sim(df, st, start_value=1e4, tax_mode="person", taxable_income=50000, event_col="ev", event_mode="replace",
-            event_weight={"G": "wG", "H": "wH"})
+    st = create_strategy(G=asset_config(asset_class="etc", trading="bnh", share=0.5, spread=0, deliverable=True),
+                         H=asset_config(asset_class="certificate", trading="bnh", share=0.5, spread=0))
+    r = sim(df, st, start_value=1e4, rebalance=rebalance_plan(event_col="ev", event_mode="replace", skip=True, event_weight={"G": "wG", "H": "wH"}), tax=tax_profile(income=income_tariff(taxable_income=50000)))
     ty = r.tax_report["tariff_years"]
     assert col(ty, "tax_p23") == E([0, T(52750) - T(50000)])
     assert col(ty, "gain_p23") == E([0, 2750])
@@ -132,36 +134,37 @@ def test_a_verlustjahr_p23():
 
 
 def test_a_pruefungen():
-    d1 = p23(taxable_income=74000).tax_report["total_taxes_paid"]
-    assert p23(taxable_income={"2020": 74000, "2021": 1}).tax_report["total_taxes_paid"] == E(d1)
-    assert p23(taxable_income=pd.Series({"2020": 74000.0, "2021": 1.0})).tax_report["total_taxes_paid"] == E(d1)
-    assert p23(taxable_income=pd.DataFrame({"year": [2020, 2021], "taxable_income": 74000.0})
-               ).tax_report["total_taxes_paid"] == E(d1)
+    d1 = p23(tax=tax_profile(income=income_tariff(taxable_income=74000))).tax_report["total_taxes_paid"]
+    assert p23(tax=tax_profile(income=income_tariff(taxable_income={"2020": 74000, "2021": 1}))).tax_report["total_taxes_paid"] == E(d1)
+    assert p23(tax=tax_profile(income=income_tariff(taxable_income=pd.Series({"2020": 74000.0, "2021": 1.0})))).tax_report["total_taxes_paid"] == E(d1)
+    assert p23(tax=tax_profile(income=income_tariff(taxable_income=pd.DataFrame({"year": [2020, 2021], "taxable_income": 74000.0})))).tax_report["total_taxes_paid"] == E(d1)
     with pytest.raises(ValueError, match="taxable_income fehlt für Simulationsjahr 2021"):
-        p23(taxable_income={"2020": 74000})
+        p23(tax=tax_profile(income=income_tariff(taxable_income={"2020": 74000})))
     with pytest.raises(ValueError, match="muss nach Kalenderjahren benannt sein"):
-        p23(taxable_income=[1, 2])
+        p23(tax=tax_profile(income=income_tariff(taxable_income=[1, 2])))
     with pytest.raises(ValueError, match="Name 'x' ist kein Kalenderjahr"):
-        p23(taxable_income={"2020": 1, "x": 2})
+        p23(tax=tax_profile(income=income_tariff(taxable_income={"2020": 1, "x": 2})))
     with pytest.raises(ValueError, match="ungültigen Wert"):
-        p23(taxable_income=math.nan)
+        p23(tax=tax_profile(income=income_tariff(taxable_income=math.nan)))
     with pytest.raises(ValueError, match="taxable_income muss eine Zahl"):
-        p23(taxable_income="50000")
+        p23(tax=tax_profile(income=income_tariff(taxable_income="50000")))
     small = pd.DataFrame({"date": days("2020-01-01", "2020-03-01"), "A": 100.0})
-    st = create_strategy(A=asset_config("etf", "bnh", asset_share=1))
-    _, w = sim_warn(small, st, tax_mode="person", taxable_income=50000, marginal_tax_rate=42,
-                    include_soli_on_income_tax=True)
-    assert any("marginal_tax_rate, include_soli_on_income_tax wirkt dann nicht" in x for x in w)
-    assert p23(taxable_income=74000, marginal_tax_rate=20).tax_report["total_taxes_paid"] == E(d1)
-    assert any('taxable_income wirkt nur bei tax_mode = "person"' in x
-               for x in sim_warn(small, st, taxable_income=50000)[1])
-    assert any("tax_tariff wirkt nur zusammen mit taxable_income" in x
-               for x in sim_warn(small, st, tax_mode="person", tax_tariff=read_tax_tariff())[1])
+    st = create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=1))
+    # income_rate() und income_tariff() schließen sich aus (ein Baustein in tax_profile(income=))
+    with pytest.raises(ValueError, match="schließen sich aus"):
+        tax_profile(income=[income_rate(42), income_tariff(50000)])
+    with pytest.raises(ValueError, match=r"income muss NULL, ein Objekt aus income_rate\(\) oder aus income_tariff\(\)"):
+        tax_profile(income=42)
+    assert p23(tax=tax_profile(income=income_tariff(taxable_income=74000))).tax_report["total_taxes_paid"] == E(d1)
+    with pytest.raises(ValueError, match="taxable_income .* fehlt"):
+        income_tariff()
+    with pytest.raises(ValueError, match="income_tariff: tariff muss NULL"):
+        income_tariff(50000, tariff=42)
 
 
 # ── A b) Günstigerprüfung ───────────────────────────────────────────────────
 def test_b_guenstigerpruefung_erstattung():
-    r = gp(taxable_income=10000, use_guenstigerpruefung=True)
+    r = gp(tax=tax_profile(guenstigerpruefung=True, income=income_tariff(taxable_income=10000)))
     ty = r.tax_report["tariff_years"]
     assert ty["capital_income"].iloc[0] == E(3000)
     assert ty["abgeltung_burden"].iloc[0] == E(791.25)
@@ -173,19 +176,19 @@ def test_b_guenstigerpruefung_erstattung():
     assert r.worth[-1] == E(24000 - 95)
     row = ty.iloc[1]
     assert [row["capital_income"], row["abgeltung_burden"], row["refund"]] == E([0, 0, 0])
-    r0 = gp(taxable_income=10000)
+    r0 = gp(tax=tax_profile(income=income_tariff(taxable_income=10000)))
     assert r0.tax_report["total_taxes_paid"] == E(791.25)
     assert np.isnan(r0.tax_report["tariff_years"]["tariff_burden"].iloc[0])
-    rh = gp(taxable_income=100000, use_guenstigerpruefung=True)
+    rh = gp(tax=tax_profile(guenstigerpruefung=True, income=income_tariff(taxable_income=100000)))
     assert not bool(rh.tax_report["tariff_years"]["guenstiger"].iloc[0])
     assert rh.tax_report["tariff_years"]["tariff_burden"].iloc[0] == E(1409.94)
     assert rh.tax_report["total_taxes_paid"] == E(791.25)
 
 
 def test_b_gp_finaler_abschluss_und_kist():
-    r = gp(end="2020-12-30", taxable_income=10000, use_guenstigerpruefung=True)
+    r = gp(end="2020-12-30", tax=tax_profile(guenstigerpruefung=True, income=income_tariff(taxable_income=10000)))
     assert r.worth[-1] == E(24000 - 95)
-    rk = gp(taxable_income=10000, use_guenstigerpruefung=True, church_tax=9)
+    rk = gp(tax=tax_profile(church_tax=9, guenstigerpruefung=True, income=income_tariff(taxable_income=10000)))
     abg = 3000 * 0.25 / (1 + 0.25 * 0.09) * (1 + 0.055 + 0.09)
     kabg = 3000 * 0.25 / (1 + 0.25 * 0.09) * 0.09
     ty = rk.tax_report["tariff_years"]
@@ -198,7 +201,7 @@ def test_b_gp_finaler_abschluss_und_kist():
     assert ty["church_tax_refunded"].iloc[1] == E(kabg - 7.65)
     assert ty["church_tax_net_deduction"].iloc[1] == E(7.65 - kabg)
     assert ty["taxable_income_net"].iloc[1] == E(10000 + kabg - 7.65)
-    rl = gp(pz=30, taxable_income=10000, use_guenstigerpruefung=True)
+    rl = gp(pz=30, tax=tax_profile(guenstigerpruefung=True, income=income_tariff(taxable_income=10000)))
     assert rl.tax_report["tariff_years"]["capital_income"].iloc[0] == 0
     assert rl.tax_report["tariff_years"]["refund"].iloc[0] == 0
 
@@ -206,10 +209,9 @@ def test_b_gp_finaler_abschluss_und_kist():
 def test_b_vp_nach_letztem_abschluss():
     d = days("2020-01-01", "2020-12-31")
     df = pd.DataFrame({"date": d, "A": 100 + 20 * np.arange(len(d)) / (len(d) - 1)})
-    st = create_strategy(A=asset_config("etf", "bnh", asset_share=1, asset_spread=0, asset_bonus=30))
-    r = sim(df, st, start_value=1e6, tax_mode="person", base_rate=2.29, taxable_income=10000,
-            use_guenstigerpruefung=True)
-    r0 = sim(df, st, start_value=1e6, tax_mode="person", base_rate=2.29)
+    st = create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=1, spread=0, partial_exemption=30))
+    r = sim(df, st, start_value=1e6, tax=tax_profile(base_rate=2.29, guenstigerpruefung=True, income=income_tariff(taxable_income=10000)))
+    r0 = sim(df, st, start_value=1e6, tax=tax_profile(base_rate=2.29))
     ty = r.tax_report["tariff_years"]
     assert list(ty["year"]) == [2020, 2021]
     abg = r0.tax_report["total_taxes_paid"]
@@ -231,10 +233,9 @@ def test_c_kist_sonderausgabe_p23():
     df["ev"] = d.isin(pd.to_datetime(["2020-07-01", "2020-08-01", "2021-07-01"]))
     df["wG"] = np.where(d == D("2020-08-01"), 0.5, 0.0)
     df["wH"] = 1 - df.wG
-    st = create_strategy(G=asset_config("etc", "bnh", asset_share=0.5, asset_spread=0, deliverable=True),
-                         H=asset_config("certificate", "bnh", asset_share=0.5, asset_spread=0))
-    r = sim(df, st, start_value=1e4, tax_mode="person", taxable_income={"2020": 50000, "2021": 60000}, church_tax=9,
-            event_col="ev", event_mode="replace", event_weight={"G": "wG", "H": "wH"})
+    st = create_strategy(G=asset_config(asset_class="etc", trading="bnh", share=0.5, spread=0, deliverable=True),
+                         H=asset_config(asset_class="certificate", trading="bnh", share=0.5, spread=0))
+    r = sim(df, st, start_value=1e4, rebalance=rebalance_plan(event_col="ev", event_mode="replace", skip=True, event_weight={"G": "wG", "H": "wH"}), tax=tax_profile(church_tax=9, income=income_tariff(taxable_income={"2020": 50000, "2021": 60000})))
     ty = r.tax_report["tariff_years"]
     t1, k1 = 889 * 1.09, 889 * 0.09
     assert ty["tax_p23"].iloc[0] == E(t1)
@@ -246,7 +247,7 @@ def test_c_kist_sonderausgabe_p23():
     assert ty["deduction_effect"].iloc[1] == E((T(base) - T(60000)) * 1.09)
     assert ty["settlement"].iloc[1] == E((T(base + g2) - T(60000)) * 1.09)
     assert r.tax_report["total_taxes_paid"] == E(t1 + (T(base + g2) - T(60000)) * 1.09)
-    rg = gp(taxable_income=10000, church_tax=9)
+    rg = gp(tax=tax_profile(church_tax=9, income=income_tariff(taxable_income=10000)))
     assert col(rg.tax_report["tariff_years"], "church_tax_net_deduction") == E([0, 0])
     assert col(rg.tax_report["tariff_years"], "settlement") == E([0, 0])
 
@@ -259,8 +260,7 @@ def test_c_kist_gp_drei_jahre():
     df["ev"] = d.isin(ev)
     df["wZ"] = np.where(d == ev[1], 1.0, 0.0)
     df["wM"] = 1 - df.wZ
-    r = sim(df, st_zm(), start_value=2e4, tax_mode="person", taxable_income=14000, use_guenstigerpruefung=True,
-            church_tax=9, event_col="ev", event_mode="replace", event_weight={"Z": "wZ", "M": "wM"})
+    r = sim(df, st_zm(), start_value=2e4, rebalance=rebalance_plan(event_col="ev", event_mode="replace", skip=True, event_weight={"Z": "wZ", "M": "wM"}), tax=tax_profile(church_tax=9, guenstigerpruefung=True, income=income_tariff(taxable_income=14000)))
     ty = r.tax_report["tariff_years"]
     q = 0.25 / 1.0225
     rate = q * (1 + 0.055 + 0.09)
@@ -293,7 +293,7 @@ def test_c_kist_gp_drei_jahre():
 
 
 def test_e_details_tarifrechnung():
-    _, out = gp(out=True, taxable_income=10000, use_guenstigerpruefung=True)
+    _, out = gp(out=True, tax=tax_profile(guenstigerpruefung=True, income=income_tariff(taxable_income=10000)))
     import re
     assert any("Tarif 2020: zvE 10000.00 EUR - KiSt-Sonderausgaben 0.00 EUR (gezahlt 0.00, erstattet 0.00) = "
                "10000.00 EUR" in ln for ln in out)
@@ -315,7 +315,7 @@ def um(r, m, field="reason"):
 
 def test_b_too_short():
     df = pd.DataFrame({"date": [pd.Timestamp("2020-01-01")], "A": [100.0]})
-    st = create_strategy(A=asset_config("etf", "bnh", asset_share=1))
+    st = create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=1))
     with pytest.warns(UserWarning, match=r"Zeitraum 1 Tag \(Laufzeit 0 Jahre\): cagr und ttwror sind nicht definiert"):
         r = simulation(df, st)
     assert um(r, "cagr") == "too_short" and um(r, "ttwror") == "too_short"
@@ -334,7 +334,7 @@ def test_b_too_short():
 
 def test_b_zero_volatility():
     r = simulation(pd.DataFrame({"date": days("2020-01-01", "2020-06-30"), "A": 100.0}),
-                   create_strategy(A=asset_config("etf", "bnh", asset_share=1, asset_spread=0)))
+                   create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=1, spread=0)))
     for m in ("skewness", "kurtosis", "sharpe"):
         assert um(r, m) == "zero_volatility"
     assert um(r, "cv") == "zero_mean_return"
@@ -345,7 +345,7 @@ def test_b_zero_volatility():
 def test_b_steigender_kurs():
     d = days("2020-01-01", "2020-12-31")
     r = simulation(pd.DataFrame({"date": d, "A": 100 * 1.001 ** np.arange(len(d))}),
-                   create_strategy(A=asset_config("etf", "bnh", asset_share=1, asset_spread=0)))
+                   create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=1, spread=0)))
     for m in ("sortino", "omega", "gain_to_pain"):
         assert um(r, m) == "no_negative_returns"
     for m in ("calmar", "serenity", "martin_ratio"):
@@ -359,7 +359,7 @@ def test_b_alles_definiert():
     i = np.arange(1, len(d) + 1)
     p = 100 + 10 * np.array([math.sin(v / 20) for v in i]) + i / 10
     r = simulation(pd.DataFrame({"date": d, "A": p}),
-                   create_strategy(A=asset_config("etf", "bnh", asset_share=1, asset_spread=0)))
+                   create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=1, spread=0)))
     assert r.undefined_metrics.shape == (0, 3)
     assert list(r.undefined_metrics.columns) == ["metric", "reason", "detail"]
     assert r.tax_report["open_tax_debt"] == 0
@@ -383,8 +383,8 @@ def test_c_summary_renditen():
     dd = days("2020-01-01", "2021-12-31")
     p = np.where(dd < D("2020-06-01"), 100.0, np.where(dd < D("2021-07-01"), 80.0, 100.0))
     p[-1] = 150
-    r0 = sim(pd.DataFrame({"date": dd, "A": p}), create_strategy(A=asset_config("etf", "bnh", asset_share=1,
-                                                                                 asset_spread=0)))
+    r0 = sim(pd.DataFrame({"date": dd, "A": p}), create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=1,
+                                                                                 spread=0)))
     s0 = simlev.summary(r0)
     out0 = str(s0)
     assert "Gesamtrendite:    +50.00%" in out0 and "Gewinn je eingezahltem" not in out0
@@ -392,15 +392,28 @@ def test_c_summary_renditen():
 
 
 # ── D funds_fee/bonus_fee ───────────────────────────────────────────────────
-def test_d_funds_fee_ohne_fondsmodus():
+def test_d_fondsmodus_mit_tax_profile():
+    from simlev.engine import _simulation_flat
     df = pd.DataFrame({"date": days("2020-01-01", "2020-03-01"), "A": 100.0})
-    st = create_strategy(A=asset_config("etf", "bnh", asset_share=1))
-    assert any('funds_fee wirkt nur bei tax_mode = "funds" (hier tax_mode = "none")' in x
-               for x in sim_warn(df, st, funds_fee=0.5)[1])
-    assert any("funds_fee und bonus_fee wirkt nur" in x
-               for x in sim_warn(df, st, tax_mode="person", funds_fee=1, bonus_fee=0)[1])
-    assert sim_warn(df, st, tax_mode="funds", funds_fee=0.5)[1] == []
-    assert sim_warn(df, st, tax_mode="person")[1] == []
+    st = create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=1))
+    dd = days("2020-01-01", "2020-12-31")
+    dg = pd.DataFrame({"date": dd, "A": np.linspace(100, 160, len(dd))})
+    r9 = simulation(dg, st, funds=funds_costs(), tax=tax_profile(church_tax=9), liquidate=True)
+    f9 = _simulation_flat(dg, st, tax_mode="funds", church_tax=9, liquidate=True)
+    assert np.array_equal(np.asarray(r9["worth"]), np.asarray(f9["worth"]))
+    assert r9["tax_report"]["total_taxes_paid"] == f9["tax_report"]["total_taxes_paid"]
+    r0 = simulation(dg, st, funds=funds_costs(), liquidate=True)
+    assert r9["tax_report"]["total_taxes_paid"] > r0["tax_report"]["total_taxes_paid"]
+    _, w = sim_warn(df, st, funds=funds_costs(), tax=tax_profile(harvest=harvest_rule()))
+    assert any("wirkt nicht im Fondsmodus" in x for x in w)
+    _, w = sim_warn(df, st, funds=funds_costs(), tax=tax_profile(income=income_tariff(50000)))
+    assert any("income_tariff() (tax_profile(income =)) wirkt nicht im Fondsmodus" in x for x in w)
+    assert sim_warn(df, st, funds=funds_costs(fee=0.5))[1] == []
+    assert sim_warn(df, st, tax=tax_profile())[1] == []
+    with pytest.raises(ValueError, match=r"funds muss NULL oder ein Objekt aus funds_costs\(\)"):
+        simulation(df, st, funds={"fee": 1})
+    with pytest.raises(ValueError, match="rate und church_tax schließen sich aus"):
+        tax_profile(rate=25, church_tax=9)
 
 
 # ── E open_lots ─────────────────────────────────────────────────────────────
@@ -409,19 +422,19 @@ def test_e_open_lots_liquidation():
     n = len(d)
     k = np.arange(n)
     df = pd.DataFrame({"date": d, "A": 100 * 1.0005 ** k, "G": 50 * 1.002 ** k})
-    st = create_strategy(A=asset_config("etf", "bnh", asset_share=0.6, asset_spread=0.2, asset_bonus=30),
-                         G=asset_config("etc", "bnh", asset_share=0.4, asset_spread=0.2, deliverable=True))
-    args = dict(start_value=1e4, tax_mode="person", base_rate=2, marginal_tax_rate=30, dca_mode=True, dca_value=5000,
-                dca_span=3, use_sparer_pauschbetrag=False)
+    st = create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=0.6, spread=0.2, partial_exemption=30),
+                         G=asset_config(asset_class="etc", trading="bnh", share=0.4, spread=0.2, deliverable=True))
+    args = dict(start_value=1e4, tax=tax_profile(base_rate=2, sparer_pauschbetrag=0, income=income_rate(30)),
+                dca=dca_plan(value=5000, span=3))
     r = sim(df, st, **args)
     rl = sim(df, st, liquidate=True, **args)
     ol = r.open_lots
     assert list(ol) == ["A", "G"]
-    assert ol["A"]["regime"] == "investment_fund" and ol["A"]["asset_bonus"] == 30
-    assert ol["A"]["asset_spread"] == E(0.2) and ol["G"]["asset_spread"] == E(0.2)
+    assert ol["A"]["regime"] == "investment_fund" and ol["A"]["partial_exemption"] == 30
+    assert ol["A"]["spread"] == E(0.2) and ol["G"]["spread"] == E(0.2)
     assert "order_fee" in ol["A"] and ol["A"]["order_fee"] is None
     fee = {"fixed": 4.9, "percent": 0.25, "max": 59}
-    rf = sim(df.iloc[:60], st, start_value=1e4, tax_mode="person", order_fee=fee)
+    rf = sim(df.iloc[:60], st, start_value=1e4, costs=sim_costs(order_fee=fee), tax=tax_profile())
     assert rf.open_lots["G"]["order_fee"] == fee
     la, lg = ol["A"]["lots"], ol["G"]["lots"]
     assert la["vp"].sum() > 0
@@ -439,7 +452,7 @@ def test_e_open_lots_liquidation():
     assert r.worth[-1] - rl.worth[-1] == E(la["units"].sum() * df.A.iloc[-1] * 0.001 +
                                            lg["units"].sum() * df.G.iloc[-1] * 0.001 + tax_A + t23, 1e-6)
     assert rl.tax_report["total_taxes_paid"] - r.tax_report["total_taxes_paid"] == E(tax_A + t23, 1e-6)
-    assert simulation(df.iloc[:30, :2], create_strategy(A=asset_config("etf", "bnh", asset_share=1))).open_lots is None
+    assert simulation(df.iloc[:30, :2], create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=1))).open_lots is None
 
 
 def test_r5_05_kein_fliesskommarest():
@@ -450,8 +463,7 @@ def test_r5_05_kein_fliesskommarest():
     df["ev"] = d.isin(ev)
     df["wZ"] = np.where(d == ev[1], 1.0, 0.0)
     df["wM"] = 1 - df.wZ
-    r = sim(df, st_zm(), start_value=2e4, tax_mode="person", event_col="ev", event_mode="replace",
-            event_weight={"Z": "wZ", "M": "wM"}, taxable_income=10000, use_guenstigerpruefung=True)
+    r = sim(df, st_zm(), start_value=2e4, rebalance=rebalance_plan(event_col="ev", event_mode="replace", skip=True, event_weight={"Z": "wZ", "M": "wM"}), tax=tax_profile(guenstigerpruefung=True, income=income_tariff(taxable_income=10000)))
     assert r.tax_report["total_taxes_paid"] == 0
     assert r.tax_report["tariff_years"]["refund"].iloc[1] > 0
     assert "Gezahlte Steuern" not in str(r)
@@ -467,13 +479,12 @@ def test_next_year():
         df["wZ"] = 0.0
         df["wM"] = 4000.0
         return df
-    st = create_strategy(A=asset_config("etf", "bnh", asset_share=0.5, asset_spread=0, asset_bonus=30),
-                         Z=asset_config("certificate", "bnh", asset_share=0.25, asset_spread=0),
-                         M=asset_config("certificate", "bnh", asset_share=0.25, asset_spread=0))
+    st = create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=0.5, spread=0, partial_exemption=30),
+                         Z=asset_config(asset_class="certificate", trading="bnh", share=0.25, spread=0),
+                         M=asset_config(asset_class="certificate", trading="bnh", share=0.25, spread=0))
 
     def run(end, **kw):
-        return sim(mk(end), st, start_value=1e4, tax_mode="person", base_rate=2.29, event_col="ev",
-                   event_mode="replace", event_weight={"A": "wA", "Z": "wZ", "M": "wM"}, **kw)
+        return sim(mk(end), st, start_value=1e4, rebalance=rebalance_plan(event_col="ev", event_mode="replace", skip=True, event_weight={"A": "wA", "Z": "wZ", "M": "wM"}), tax=tax_profile(base_rate=2.29), **kw)
     ny = run("2020-12-31").tax_report["next_year"]
     assert ny["year"] == 2021
     assert ny["loss_capital_start"] == E(1000) and ny["loss_capital_used"] == E(56.105)
@@ -486,16 +497,16 @@ def test_next_year():
                              "private_sale_net")] == [0, 0, 0, 0]
     assert ny2["loss_carryforward_capital"] == E(1000) and ny2["sparer_pauschbetrag_remaining"] == E(1000)
     d = days("2020-01-01", "2020-12-31")
-    sa = create_strategy(A=asset_config("etf", "bnh", asset_share=1, asset_spread=0, asset_bonus=30))
+    sa = create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=1, spread=0, partial_exemption=30))
     da = pd.DataFrame({"date": d, "A": np.where(d < D("2020-12-01"), 100.0, 120.0)})
-    ny3 = sim(da, sa, tax_mode="person", base_rate=2.29).tax_report["next_year"]
+    ny3 = sim(da, sa, tax=tax_profile(base_rate=2.29)).tax_report["next_year"]
     assert ny3["sparer_pauschbetrag_used"] == E(112.21)
     assert ny3["sparer_pauschbetrag_remaining"] == E(1000 - 112.21)
-    r4 = sim(da, sa, tax_mode="person", base_rate=2.29, use_sparer_pauschbetrag=False)
+    r4 = sim(da, sa, tax=tax_profile(sparer_pauschbetrag=0, base_rate=2.29))
     ny4 = r4.tax_report["next_year"]
     assert ny4["sparer_pauschbetrag_used"] == 0 and ny4["sparer_pauschbetrag_remaining"] == 0
     assert ny4["capital_income_taxed"] == E(112.21)
     assert r4.tax_report["total_taxes_paid"] > 112.21 * 0.26375
-    ny5 = sim(da, sa, tax_mode="person", base_rate=2.29, taxable_income=10000).tax_report["next_year"]
+    ny5 = sim(da, sa, tax=tax_profile(base_rate=2.29, income=income_tariff(taxable_income=10000))).tax_report["next_year"]
     assert ny5["church_tax_settlement"] == 0 and ny5["tariff_assessed"] is False
     assert "next_year" not in sim(da, sa).tax_report or sim(da, sa).tax_report.get("next_year") is None

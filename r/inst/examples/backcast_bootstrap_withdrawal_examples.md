@@ -101,8 +101,8 @@ sma_usd <- function(df, n = 430) {
   list(buy = df$us >= s, sell = df$us < s)
 }
 
-letf_bnh <- create_strategy(letf = asset_config("etf", "bnh", asset_bonus = 30))
-letf_sma <- create_strategy(letf = asset_config("etf", "signal", asset_bonus = 30,
+letf_bnh <- create_strategy(letf = asset_config("etf", "bnh", partial_exemption = 30))
+letf_sma <- create_strategy(letf = asset_config("etf", "signal", partial_exemption = 30,
                                                 signal_buy = "buy", signal_sell = "sell"))
 dca <- list(dca_mode = TRUE, dca_value = 1000, dca_span = 1, dca_unit = "month")
 
@@ -116,8 +116,8 @@ strategies <- list(
 study <- bootstrap_study(
   msci_data, cfg, method = "stationary", n = 100000,
   params = list(L = 250), strategies = strategies,
-  start_date = "1975-01-01", burn_in = 731,     # wie keep_dates ab 1977
-  sim_args = list(start_value = 1000, tax_mode = "none"),
+  start = "1975-01-01", burn_in = 731,     # wie keep_dates ab 1977
+  sim_args = list(start_value = 1000),
   benchmark = "bh_ls", cores = parallel::detectCores() - 2,
   chunk_size = 250, chunk_dir = "./03 Results Data/08 Strategy Bootstrap Analysis/Chunks",
   seed = 42, keep_returns = "year"              # fuer die Entnahmephase
@@ -135,11 +135,10 @@ Hinweise zu den Kennzahlen: Für die Strategie mit Sparplan (`bh_dca`) ist
 auf dem zeitgewichteten Wertindex gemessen; `summary()` beschriftet die
 CAGR entsprechend. Für den Vergleich von Strategien mit und ohne Sparplan
 eignet sich `ttwror`. Das ursprüngliche Projektskript übergab zusätzlich
-`funds_fee = 1, bonus_fee = 5`. Diese Argumente wirken nur mit
-`tax_mode = "funds"`; mit `tax_mode = "none"` blieben sie ohne Wirkung, und
-`simulation()` warnt. Sie sind deshalb oben weggelassen; das
+`funds_fee = 1, bonus_fee = 5`. Diese Kosten gehören zum Fondsmodus
+und blieben dort ohne ihn ohne Wirkung. Sie sind deshalb oben weggelassen; das
 Ergebnis ist dasselbe. Für eine Studie mit Fondskosten
-`tax_mode = "funds", funds_fee = 1, bonus_fee = 5` angeben.
+`sim_args = list(funds = funds_costs(fee = 1, performance_fee = 5))` angeben.
 
 Die Pfade werden nach der Auswertung verworfen. Der Speicherbedarf hängt daher
 nicht von `n` ab, anders als bei der Zwischenspeicherung von 100.000 Pfaden im
@@ -152,7 +151,7 @@ Hinweise zur Methodik:
 - Trendfolge-Signale brauchen Blöcke, die mindestens so lang wie der
   Signal-Vorlauf sind. Daher die Ergebnisse über mehrere Blocklängen
   vergleichen, z. B. mit `ess = TRUE, ess_grid = list(L = c(20, 60, 250, 500))`.
-- `block_length(log(returns), "abs")` schätzt die Blocklänge nach
+- `bootstrap_block_length(log(returns), "abs")` schätzt die Blocklänge nach
   Politis & White aus dem Volatilitäts-Clustering.
 - `method = "raw"` und `"wild"` zerstören die Zeitabhängigkeit. Sie dienen als
   Nullmodell, nicht als realistische Pfade.
@@ -168,7 +167,7 @@ methods <- list(raw = list(), stationary = list(L = 250), block = list(block_len
                 evt = list(tail_prob = 0.05), garch = list(), gjr_garch = list())
 studies <- lapply(names(methods), function(m)
   bootstrap_study(msci_data, cfg, m, n = 10000, params = methods[[m]], strategies = strategies,
-                  start_date = "1975-01-01", burn_in = 731, benchmark = "bh_ls", seed = 42,
+                  start = "1975-01-01", burn_in = 731, benchmark = "bh_ls", seed = 42,
                   cores = 8))
 names(studies) <- names(methods)
 do.call(rbind, lapply(names(studies), function(m)
@@ -185,7 +184,7 @@ lässt sich speichern und später als Renditequelle verwenden.
 ### 3.1 Aus einem gespeicherten Simulationslauf
 
 ```r
-res <- simulation(eu_data, create_strategy(eu_l2 = asset_config("etf", "bnh", asset_bonus = 30)),
+res <- simulation(eu_data, create_strategy(eu_l2 = asset_config("etf", "bnh", partial_exemption = 30)),
                   start_value = 1e5)
 saveRDS(res, "lauf_letf.rds")
 
@@ -195,7 +194,7 @@ head(result_index(res))      # zeitgewichteter Wertindex (ohne Ein-/Auszahlungen
 # Historische Kohorten ueber den Verlauf des Ergebnisses (30 Jahre, monatliche Starts)
 wd <- withdrawal_simulation(res, withdrawal_rule("guyton_klinger", rate = 5),
                             years = 30, inflation = 2, start_value = 1e6,
-                            tax_mode = "person", asset_bonus = 30)
+                            tax = tax_profile(), partial_exemption = 30)
 wd
 plot(wd)
 ```
@@ -206,11 +205,11 @@ Wird `start_value` als Ansparergebnis übergeben, gilt dessen Endwert als
 Startvermögen (ein Endwert ≤ 0 ist ein Fehler). Ohne Angabe von
 `cost_basis` gilt:
 
-- Wurde die Ansparphase mit `tax_mode = "person"` gerechnet (Element
+- Wurde die Ansparphase mit `tax = tax_profile()` gerechnet (Element
   `open_lots`) und rechnet die Entnahmephase ebenfalls mit
-  `tax_mode = "person"`, übernimmt sie die offenen Lots und verkauft je
+  `tax = tax_profile()`, übernimmt sie die offenen Lots und verkauft je
   Asset die ältesten zuerst (FIFO, wie die Engine). Nicht ausdrücklich
-  angegebene `asset_bonus`, `loss_carryforward` (allgemeiner Verlusttopf),
+  angegebene `partial_exemption`, `loss_carryforward` (allgemeiner Verlusttopf),
   `sale_cost` (halber Spread) und der im ersten Planjahr schon verbrauchte
   Sparer-Pauschbetrag werden aus dem Ergebnis übernommen, ohne gehaltene
   Fonds auch `vorabpauschale = FALSE`. Ein Hinweis nennt die Werte, das
@@ -218,20 +217,19 @@ Startvermögen (ein Endwert ≤ 0 ist ein Fehler). Ohne Angabe von
 - Hält das Ergebnis am letzten Tag nur noch Cash (z. B. mit
   `liquidate = TRUE`), gilt 100 %; alle Gewinne sind schon versteuert.
 - Sonst die Näherung (Startkapital brutto + Einzahlungen) / Endwert mit
-  Durchschnittskosten, bei `tax_mode = "person"` in der Entnahmephase mit
+  Durchschnittskosten, bei `tax = tax_profile()` in der Entnahmephase mit
   Warnung. Sie behandelt bereits versteuerte Gewinne wie stille Reserven.
 
 Kirchensteuer und Einkommensteuertarif der Ansparphase übernimmt die
 Entnahmephase nicht (fester Satz `tax_rate`; weitere Grenzen in
 `?withdrawal_simulation`). Im Beispiel unten ist die Ansparphase ohne
-`tax_mode = "person"` gerechnet, es gilt also die Näherung (mit Warnung).
+`tax = tax_profile()` gerechnet, es gilt also die Näherung (mit Warnung).
 
 ```r
-anspar <- simulation(eu_data, strat, start_value = 1e4, dca_mode = TRUE,
-                     dca_value = 500, dca_span = 1, dca_unit = "month")
+anspar <- simulation(eu_data, strat, start_value = 1e4, dca = dca_plan(500, 1, unit = "month"))
 wd <- withdrawal_simulation(res, withdrawal_rule("vanguard", rate = 4),
                             start_value = anspar, years = 30, inflation = 2,
-                            tax_mode = "person")
+                            tax = tax_profile())
 ```
 
 ### 3.3 Auf den Pfaden einer Bootstrap-Studie

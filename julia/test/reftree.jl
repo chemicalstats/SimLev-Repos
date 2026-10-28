@@ -170,6 +170,7 @@ _names_of(x) = nothing
 _names_of(x::SimLev.RVector) = x.names
 _names_of(x::AbstractDict) = String.(collect(keys(x)))
 _names_of(x::NamedTuple) = String.(collect(keys(x)))
+_names_of(x::AbstractVector{<:Pair}) = String[string(p.first) for p in x]   # benannter Vektor als Paare ("A" => "wA")
 
 function _flat(x)
     x isa SimLev.RFrame && return vcat([collect(c) for c in x.cols]...)
@@ -178,6 +179,7 @@ function _flat(x)
     x isa SimLev.RVector && return collect(x.values)
     x isa AbstractDict && return collect(values(x))
     x isa NamedTuple && return collect(values(x))
+    x isa AbstractVector{<:Pair} && return Any[p.second for p in x]
     x isa AbstractVector && return collect(x)
     x isa Tuple && return collect(x)
     return Any[x]

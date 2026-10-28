@@ -1,15 +1,15 @@
 # =============================================================================
 #  data_prep.R  —  Daten- und Portfolio-Aufbereitung
 # -----------------------------------------------------------------------------
-#  align_series()        Quellen nach Datum zusammenfuehren, Kalender, Fuellung
-#  check_series()        Pruefbericht: Luecken, Ausreisser, Spikes, Splits,
+#  series_align()        Quellen nach Datum zusammenfuehren, Kalender, Fuellung
+#  series_check()        Pruefbericht: Luecken, Ausreisser, Spikes, Splits,
 #                        stehende Kurse, Datumsprobleme
-#  align_macro()         Makroreihen (Inflation, Zinsen, Spreads) mit
+#  series_align_macro()         Makroreihen (Inflation, Zinsen, Spreads) mit
 #                        Veroeffentlichungsverzug auf den Tageskalender legen
-#  convert_currency()    Waehrungsumrechnung ueber eine Kursreihe
-#  total_return_index()  Kurs- zu Total-Return-Index (Dividenden, Quellensteuer)
-#  deflate()             reale Werte ueber einen Preisindex
-#  splice_series()       Ketten aus mehreren Reihen (Proxy -> Index -> Fonds)
+#  series_convert_currency()    Waehrungsumrechnung ueber eine Kursreihe
+#  index_total_return()  Kurs- zu Total-Return-Index (Dividenden, Quellensteuer)
+#  series_deflate()             reale Werte ueber einen Preisindex
+#  series_splice()       Ketten aus mehreren Reihen (Proxy -> Index -> Fonds)
 #  strategy_from_weights(), portfolio_template()  Portfolios aus Gewichten
 #                        bzw. bekannten Vorlagen
 #
@@ -129,10 +129,10 @@
 #' Kalendertags-Kalender: Wochenenden und Feiertage werden gefuellt, und
 #' unterschiedliche Boersenkalender (z. B. US- und EU-Feiertage) werden ohne
 #' Zeilenverlust vereinheitlicht. Das Ergebnis passt direkt in
-#' [simulation()], [check_series()], [deep_analysis()] (je Reihe als
+#' [simulation()], [series_check()], [result_analysis()] (je Reihe als
 #' `data.frame(date, value)`) und die Gewichts-Erzeuger wie
 #' [tactical_rules()]. [simulation()], [tactical_simulation()] und
-#' [deep_analysis()] werten das Attribut `filled` aus: Ein Tag, an dem keine
+#' [result_analysis()] werten das Attribut `filled` aus: Ein Tag, an dem keine
 #' Anlage der Strategie einen echten Kurs hat, gilt als aufgefuellt (kein
 #' Handel, nicht in den Risikokennzahlen) - genau wie Kalendertage, die
 #' [simulation()] bei Handelstagsdaten selbst per LOCF auffuellt.
@@ -177,12 +177,12 @@
 #' @return data.frame mit Spalte \code{date} (Klasse Date) und je einer
 #'   numerischen Spalte pro Reihe, mit Attribut \code{filled} (logische
 #'   Matrix Zeilen x Reihen, TRUE = gefuellter Wert).
-#' @seealso [check_series()] zur Pruefung, [splice_series()],
-#'   [convert_currency()], [simulation()]
+#' @seealso [series_check()] zur Pruefung, [series_splice()],
+#'   [series_convert_currency()], [simulation()]
 #' @examples
 #' a <- data.frame(date = as.Date("2024-01-01") + c(0, 1, 2, 5), value = c(100, 101, 102, 103))
 #' b <- data.frame(date = as.Date("2024-01-02") + 0:5, value = 50 + 0:5)
-#' align_series(us = a, eu = b)
+#' series_align(us = a, eu = b)
 #'
 #' # Eigene Daten: CSV mit Handelstagen (ohne Wochenenden), Datum als TT.MM.JJJJ
 #' set.seed(1)
@@ -194,21 +194,21 @@
 #'           csv, row.names = FALSE)
 #' roh <- read.csv(csv)
 #' roh$Datum <- as.Date(roh$Datum, format = "%d.%m.%Y")
-#' d <- align_series(etf = roh)    # erste Spalte = Datum, Wertspalte heisst "etf"
+#' d <- series_align(etf = roh)    # erste Spalte = Datum, Wertspalte heisst "etf"
 #' head(d, 4)
 #' colSums(attr(d, "filled"))      # gefuellte Wochenendtage
 #' res <- simulation(d, create_strategy(etf = asset_config("etf", "bnh")))
 #' @export
-align_series <- function(..., calendar = c("day", "union", "intersect"), range = c("common", "all"),
+series_align <- function(..., calendar = c("day", "union", "intersect"), range = c("common", "all"),
                          fill = c("locf", "linear", "none"), max_gap = Inf, start = NULL, end = NULL) {
   calendar <- match.arg(calendar); range <- match.arg(range); fill <- match.arg(fill)
   src <- list(...)
-  if (!length(src) || is.null(names(src)) || any(names(src) == "")) stop("align_series: Quellen benennen, z. B. align_series(us = df1, eu = df2).")
+  if (!length(src) || is.null(names(src)) || any(names(src) == "")) stop("series_align: Quellen benennen, z. B. series_align(us = df1, eu = df2).")
   fr <- Map(.dp_frame, src, names(src))
   first <- do.call(c, lapply(fr, function(f) f$date[1])); last <- do.call(c, lapply(fr, function(f) f$date[nrow(f)]))
   lo <- if (range == "common") max(first) else min(first); hi <- if (range == "common") min(last) else max(last)
-  if (!is.null(start)) lo <- max(lo, .to_date(start, "align_series: start")); if (!is.null(end)) hi <- min(hi, .to_date(end, "align_series: end"))
-  if (lo > hi) stop("align_series: Die Quellen \u00fcberlappen sich nicht.")
+  if (!is.null(start)) lo <- max(lo, .to_date(start, "series_align: start")); if (!is.null(end)) hi <- min(hi, .to_date(end, "series_align: end"))
+  if (lo > hi) stop("series_align: Die Quellen \u00fcberlappen sich nicht.")
   dates <- switch(calendar,
     day = seq.Date(lo, hi, by = "day"),
     union = sort(unique(do.call(c, lapply(fr, `[[`, "date")))),
@@ -217,7 +217,7 @@ align_series <- function(..., calendar = c("day", "union", "intersect"), range =
   out <- data.frame(date = dates)
   filled <- list()
   for (f in fr) for (k in setdiff(names(f), "date")) {
-    if (k %in% names(out)) stop(sprintf("align_series: Spaltenname '%s' kommt mehrfach vor.", k))
+    if (k %in% names(out)) stop(sprintf("series_align: Spaltenname '%s' kommt mehrfach vor.", k))
     v <- f[[k]][match(as.numeric(dates), as.numeric(f$date))]
     obs <- !is.na(v)
     in_life <- dates >= f$date[1] & dates <= f$date[nrow(f)]
@@ -244,7 +244,7 @@ align_series <- function(..., calendar = c("day", "union", "intersect"), range =
 #' Erstellt einen Pruefbericht fuer eigene Kursreihen, bevor sie in
 #' [simulation()] oder die Analysefunktionen gehen. Erwartet wird ein
 #' data.frame mit Spalte `date` und Kursspalten (Niveaus, keine Renditen),
-#' z. B. aus [align_series()]. Gemeldet werden: fehlende oder nicht lesbare
+#' z. B. aus [series_align()]. Gemeldet werden: fehlende oder nicht lesbare
 #' Daten (z. B. Leerzeile am Dateiende), doppelte oder unsortierte
 #' Daten, Kalenderluecken ueber 5 Tage, fehlende Werte innerhalb der
 #' Laufzeit, Spruenge, wahrscheinliche Splits (Sprung nahe einem
@@ -285,7 +285,7 @@ align_series <- function(..., calendar = c("day", "union", "intersect"), range =
 #'   }
 #'   \code{print()} zeigt die Zusammenfassung und die ersten
 #'   \code{max_issues} (Standard 25) Funde.
-#' @seealso [align_series()], [splice_series()]
+#' @seealso [series_align()], [series_splice()]
 #' @examples
 #' set.seed(1); n <- 400
 #' d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = n),
@@ -293,13 +293,13 @@ align_series <- function(..., calendar = c("day", "union", "intersect"), range =
 #' d$A[100] <- d$A[100] * 1.5            # Ausreisser mit Ruecklauf (Spike)
 #' d$A[300:n] <- d$A[300:n] / 2          # Split 2:1
 #' d$A[200:215] <- d$A[200]              # stehender Kurs
-#' chk <- check_series(d)
+#' chk <- series_check(d)
 #' chk
 #' chk$summary
 #' @export
-check_series <- function(data, columns = NULL, jump = 20, stale = 10, revert = 0.8) {
-  if (!is.data.frame(data) || !"date" %in% names(data)) stop("check_series: data.frame mit Spalte 'date' erwartet.")
-  d <- .to_date(data$date, "check_series: date", strict = FALSE)
+series_check <- function(data, columns = NULL, jump = 20, stale = 10, revert = 0.8) {
+  if (!is.data.frame(data) || !"date" %in% names(data)) stop("series_check: data.frame mit Spalte 'date' erwartet.")
+  d <- .to_date(data$date, "series_check: date", strict = FALSE)
   columns <- columns %||% setdiff(names(data)[vapply(data, is.numeric, TRUE)], "date")
   issues <- list()
   add <- function(col, i, type, value, info = NA_real_)
@@ -375,10 +375,10 @@ print.SimLevDataCheck <- function(x, max_issues = 25L, ...) {
 #' Wert (Stufenfunktion); davor ist das Ergebnis NA. Die Umrechnung
 #' (\code{transform}) erfolgt auf der Makroreihe selbst, vor der Zuordnung.
 #' Das Ergebnis eignet sich z. B. fuer Bedingungen in [tactical_rules()]
-#' (\code{"inflation > 3"}) oder als Preisindex fuer [deflate()].
+#' (\code{"inflation > 3"}) oder als Preisindex fuer [series_deflate()].
 #'
 #' @param data Datumsvektor oder data.frame mit Spalte \code{date} (z. B. aus
-#'   [align_series()]).
+#'   [series_align()]).
 #' @param macro \code{data.frame(date, value)} (es zaehlt die erste
 #'   numerische Spalte; fehlt \code{date}, gilt die erste Spalte als Datum)
 #'   oder benannter numerischer Vektor mit Datumsnamen. \code{date} ist der
@@ -405,15 +405,15 @@ print.SimLevDataCheck <- function(x, max_issues = 25L, ...) {
 #' @return Bei Datumsvektor ein numerischer Vektor gleicher Laenge, sonst
 #'   \code{data} mit neuer Spalte \code{name} (NA vor dem ersten
 #'   bekannten Wert).
-#' @seealso [align_series()], [deflate()], [tactical_rules()]
+#' @seealso [series_align()], [series_deflate()], [tactical_rules()]
 #' @examples
 #' cpi <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "month", length.out = 36),
 #'                   value = 100 * 1.002^(0:35))
 #' d <- data.frame(date = seq.Date(as.Date("2021-01-01"), by = "day", length.out = 400))
-#' d <- align_macro(d, cpi, "inflation", lag = 45, transform = "yoy")
+#' d <- series_align_macro(d, cpi, "inflation", lag = 45, transform = "yoy")
 #' head(d[!is.na(d$inflation), ], 3)
 #' @export
-align_macro <- function(data, macro, name = "macro", lag = 0, lag_unit = c("day", "month"),
+series_align_macro <- function(data, macro, name = "macro", lag = 0, lag_unit = c("day", "month"),
                         transform = c("level", "yoy", "mom", "diff", "yoy_diff"), periods = NULL) {
   lag_unit <- match.arg(lag_unit); transform <- match.arg(transform)
   m <- .dp_frame(macro, "macro"); v <- m[[2]]; md <- m$date
@@ -432,7 +432,7 @@ align_macro <- function(data, macro, name = "macro", lag = 0, lag_unit = c("day"
               diff = v - shift(prev), yoy_diff = v - shift(prev_y))
   avail <- if (lag_unit == "day" || lag == 0) md + if (lag_unit == "day") lag else 0 else
     .add_months(md, lag)                     # + lag Kalendermonate, auf das Monatsende begrenzt (31.01. + 1 = 29.02.)
-  dates <- .to_date(if (is.data.frame(data)) data$date else data, "align_macro: data")
+  dates <- .to_date(if (is.data.frame(data)) data$date else data, "series_align_macro: data")
   o <- order(avail); avail <- avail[o]; v <- v[o]
   j <- findInterval(as.numeric(dates), as.numeric(avail))
   out <- ifelse(j > 0, v[pmax(j, 1L)], NA_real_)
@@ -445,7 +445,7 @@ align_macro <- function(data, macro, name = "macro", lag = 0, lag_unit = c("day"
 #' Rechnet Kursspalten eines data.frames tageweise mit einem Wechselkurs in
 #' eine andere Waehrung um, z. B. einen US-Index in USD nach EUR, bevor er in
 #' [simulation()] geht. Erwartet wird ein data.frame mit Spalte `date` und
-#' Kursniveaus (z. B. aus [align_series()]). Je Zeile wird der Kurs durch
+#' Kursniveaus (z. B. aus [series_align()]). Je Zeile wird der Kurs durch
 #' den Wechselkurs geteilt (\code{"divide"}) oder mit ihm multipliziert
 #' (\code{"multiply"}); eine Kurssicherung wird nicht abgebildet.
 #'
@@ -463,24 +463,24 @@ align_macro <- function(data, macro, name = "macro", lag = 0, lag_unit = c("day"
 #' @param suffix Endung fuer neue Spalten (z. B. \code{"_eur"}); Standard
 #'   \code{NULL} = die Spalten in \code{columns} werden ueberschrieben.
 #' @return \code{data} mit umgerechneten (bzw. zusaetzlichen) Spalten.
-#' @seealso [align_series()], [deflate()]
+#' @seealso [series_align()], [series_deflate()]
 #' @examples
 #' d <- data.frame(date = seq.Date(as.Date("2024-01-01"), by = "day", length.out = 5),
 #'                 sp500_usd = c(4700, 4710, 4690, 4720, 4730),
 #'                 eurusd = c(1.10, 1.11, 1.10, 1.09, 1.10))
-#' convert_currency(d, "sp500_usd", fx = "eurusd", suffix = "_eur")
+#' series_convert_currency(d, "sp500_usd", fx = "eurusd", suffix = "_eur")
 #' # Wechselkurs als Stufenfunktion (gilt ab dem jeweiligen Datum)
 #' fx <- data.frame(date = as.Date(c("2024-01-01", "2024-01-03")), value = c(1.10, 1.05))
-#' convert_currency(d, "sp500_usd", fx = fx)
+#' series_convert_currency(d, "sp500_usd", fx = fx)
 #' @export
-convert_currency <- function(data, columns, fx, method = c("divide", "multiply"), suffix = NULL) {
+series_convert_currency <- function(data, columns, fx, method = c("divide", "multiply"), suffix = NULL) {
   method <- match.arg(method)
   miss <- setdiff(columns, names(data))
-  if (length(miss)) stop(sprintf("convert_currency: Spalte(n) %s fehlen in data (vorhanden: %s).",
+  if (length(miss)) stop(sprintf("series_convert_currency: Spalte(n) %s fehlen in data (vorhanden: %s).",
                                  paste0("'", miss, "'", collapse = ", "), paste(names(data), collapse = ", ")))
   f <- .resolve_series(fx, data, "fx")
   bad <- which(!is.finite(f) | f <= 0)
-  if (length(bad)) stop(sprintf("convert_currency: Wechselkurs fx muss positiv sein; %d Zeilen ung\u00fcltig (z. B. Zeile %d: %s).",
+  if (length(bad)) stop(sprintf("series_convert_currency: Wechselkurs fx muss positiv sein; %d Zeilen ung\u00fcltig (z. B. Zeile %d: %s).",
                                 length(bad), bad[1], format(f[bad[1]])))
   for (k in columns) {
     nm <- if (is.null(suffix)) k else paste0(k, suffix)
@@ -517,24 +517,24 @@ convert_currency <- function(data, columns, fx, method = c("divide", "multiply")
 #'   \code{NULL} = 1 Tag je Zeile (nur fuer \code{yield} von Bedeutung).
 #' @param start Startwert des Index (Standard \code{NULL} = erster Kurs).
 #' @return Numerischer Indexvektor gleicher Laenge wie \code{price}.
-#' @seealso [splice_series()], [convert_currency()], [align_series()]
+#' @seealso [series_splice()], [series_convert_currency()], [series_align()]
 #' @examples
 #' p <- c(100, 101, 99, 100, 102, 103)
 #' div <- c(0, 0, 0, 2, 0, 0)              # 2 je Anteil am Ex-Tag (Zeile 4)
-#' total_return_index(p, dividends = div, withholding = 15)
+#' index_total_return(p, dividends = div, withholding = 15)
 #' # Laufende Dividendenrendite 2 % p. a. mit Kalenderdaten
 #' dts <- seq.Date(as.Date("2024-01-01"), by = "day", length.out = 6)
-#' total_return_index(p, yield = 2, dates = dts)
+#' index_total_return(p, yield = 2, dates = dts)
 #' @export
-total_return_index <- function(price, dividends = NULL, yield = NULL, withholding = 0, dates = NULL, start = NULL) {
+index_total_return <- function(price, dividends = NULL, yield = NULL, withholding = 0, dates = NULL, start = NULL) {
   p <- as.numeric(price); n <- length(p); w <- withholding / 100
   if (anyNA(p)) p <- .fill_na(p, "locf")
   D <- if (is.null(dividends)) rep(0, n) else { x <- as.numeric(dividends); x[is.na(x)] <- 0; x }
   y <- if (is.null(yield)) rep(0, n) else rep_len(as.numeric(yield), n)
   if (!is.null(dates)) {
-    dates <- .to_date(dates, "total_return_index: dates")
-    if (length(dates) != n) stop(sprintf("total_return_index: dates hat L\u00e4nge %d, price %d.", length(dates), n))
-    if (anyNA(dates) || is.unsorted(dates)) stop("total_return_index: dates m\u00fcssen vollst\u00e4ndig und aufsteigend sortiert sein (wie price).")
+    dates <- .to_date(dates, "index_total_return: dates")
+    if (length(dates) != n) stop(sprintf("index_total_return: dates hat L\u00e4nge %d, price %d.", length(dates), n))
+    if (anyNA(dates) || is.unsorted(dates)) stop("index_total_return: dates m\u00fcssen vollst\u00e4ndig und aufsteigend sortiert sein (wie price).")
   }
   dt <- if (is.null(dates)) rep(1, n) else c(0, diff(as.numeric(dates)))
   r <- c(0, (p[-1] + D[-1] * (1 - w)) / p[-n] - 1 + y[-1] / 100 * (1 - w) * dt[-1] / 365.25)
@@ -549,15 +549,15 @@ total_return_index <- function(price, dividends = NULL, yield = NULL, withholdin
 #' Erwartet wird ein data.frame mit Spalte `date` und einem Preisindex als
 #' Niveau (z. B. Verbraucherpreisindex), keine Inflationsrate. Die realen
 #' Spalten kommen als neue Spalten hinzu und koennen wie Kursspalten in
-#' [simulation()] oder [deep_analysis()] verwendet werden; fuer die reale
-#' Auswertung fertiger Ergebnisse hat [deep_analysis()] ein eigenes
+#' [simulation()] oder [result_analysis()] verwendet werden; fuer die reale
+#' Auswertung fertiger Ergebnisse hat [result_analysis()] ein eigenes
 #' Argument \code{inflation}.
 #'
 #' @param data data.frame mit Spalte \code{date} und den Spalten aus
 #'   \code{columns}.
 #' @param columns Zeichenvektor der Spalten, die deflationiert werden.
 #' @param cpi Preisindex-Niveau: Spaltenname in \code{data} (NA per LOCF
-#'   gefuellt; z. B. mit [align_macro()] und Veroeffentlichungsverzug
+#'   gefuellt; z. B. mit [series_align_macro()] und Veroeffentlichungsverzug
 #'   vorbereitet), \code{data.frame(date, value)} (Stufenfunktion: Wert gilt
 #'   ab seinem Datum), benannter Vektor mit Datumsnamen oder Vektor der
 #'   Laenge \code{nrow(data)}. Vor dem ersten bekannten Wert wird nicht
@@ -569,26 +569,26 @@ total_return_index <- function(price, dividends = NULL, yield = NULL, withholdin
 #' @param suffix Endung fuer die neuen Spalten (Standard \code{"_real"}).
 #' @return \code{data} mit zusaetzlichen realen Spalten
 #'   \code{paste0(columns, suffix)}.
-#' @seealso [align_macro()], [convert_currency()], [deep_analysis()]
+#' @seealso [series_align_macro()], [series_convert_currency()], [result_analysis()]
 #' @examples
 #' cpi <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "month", length.out = 36),
 #'                   value = 100 * 1.003^(0:35))
 #' d <- data.frame(date = seq.Date(as.Date("2021-01-01"), by = "day", length.out = 400),
 #'                 depot = 10000 * 1.0002^(0:399))
 #' # CPI mit einem Monat Veroeffentlichungsverzug auf den Tageskalender legen
-#' d <- align_macro(d, cpi, "cpi", lag = 1, lag_unit = "month")
-#' d <- deflate(d, "depot", cpi = "cpi")
+#' d <- series_align_macro(d, cpi, "cpi", lag = 1, lag_unit = "month")
+#' d <- series_deflate(d, "depot", cpi = "cpi")
 #' tail(d, 3)
 #' @export
-deflate <- function(data, columns, cpi, base_date = NULL, suffix = "_real") {
-  dts <- .to_date(data$date, "deflate: data$date")
+series_deflate <- function(data, columns, cpi, base_date = NULL, suffix = "_real") {
+  dts <- .to_date(data$date, "series_deflate: data$date")
   c0 <- .cpi_level(cpi, data, dts, "cpi")
   known <- which(!is.na(c0))
-  if (!length(known)) stop("deflate: Preisindex cpi hat keinen Wert im Zeitraum von data.")
-  if (known[1] > 1L) message(sprintf("Hinweis: deflate: Preisindex erst ab %s bekannt; %d Zeilen davor bleiben NA.",
+  if (!length(known)) stop("series_deflate: Preisindex cpi hat keinen Wert im Zeitraum von data.")
+  if (known[1] > 1L) message(sprintf("Hinweis: series_deflate: Preisindex erst ab %s bekannt; %d Zeilen davor bleiben NA.",
                                      format(dts[known[1]]), known[1] - 1L))
   b <- if (is.null(base_date)) known[1] else which.min(abs(as.numeric(dts - .to_date(base_date, "base_date"))))
-  if (is.na(c0[b])) stop(sprintf("deflate: am Bezugsdatum %s ist kein Preisindex bekannt (erster Wert am %s); base_date sp\u00e4ter w\u00e4hlen.",
+  if (is.na(c0[b])) stop(sprintf("series_deflate: am Bezugsdatum %s ist kein Preisindex bekannt (erster Wert am %s); base_date sp\u00e4ter w\u00e4hlen.",
                                  format(dts[b]), format(dts[known[1]])))
   for (k in columns) data[[paste0(k, suffix)]] <- as.numeric(data[[k]]) / c0 * c0[b]
   data
@@ -624,12 +624,12 @@ deflate <- function(data, columns, cpi, base_date = NULL, suffix = "_real") {
 #' das Niveau der Kette richtet sich nach der ersten Reihe. Vor dem Start
 #' der ersten Reihe wird rueckwaerts verkettet, solange Renditen vorliegen.
 #' Das Ergebnis laesst sich als Kursspalte in [simulation()] oder als
-#' \code{data.frame(date, value)} in [deep_analysis()] verwenden.
+#' \code{data.frame(date, value)} in [result_analysis()] verwenden.
 #'
 #' @param ... Mindestens zwei benannte Reihen in Prioritaetsreihenfolge,
 #'   entweder alle als numerische Vektoren gleicher Laenge (z. B. Spalten
 #'   eines gemeinsamen data.frames; dann \code{dates} angeben) oder alle als
-#'   \code{data.frame(date, value)} (sie werden mit [align_series()] und
+#'   \code{data.frame(date, value)} (sie werden mit [series_align()] und
 #'   \code{range = "all"} auf Kalendertage gelegt und per LOCF gefuellt).
 #'   Bei data.frames gelten Folgen von mehr als 4 Kalendertagen (laenger als
 #'   ein langes Wochenende), an denen die erste Reihe nur gefuellt ist,
@@ -646,28 +646,28 @@ deflate <- function(data, columns, cpi, base_date = NULL, suffix = "_real") {
 #'   \code{source}: Name der Reihe, deren Wert (erste Reihe) bzw. Rendite vom
 #'   Vortag auf diesen Tag verwendet wurde (NA, wo keine Rendite vorliegt,
 #'   z. B. in der ersten Zeile).
-#' @seealso [align_series()], [backcast()], [total_return_index()],
-#'   [check_series()]
+#' @seealso [series_align()], [backcast()], [index_total_return()],
+#'   [series_check()]
 #' @examples
 #' set.seed(1)
 #' proxy <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = 1500))
 #' proxy$value <- 100 * cumprod(1 + rnorm(1500, 3e-4, 0.01))
 #' fonds <- proxy[proxy$date >= as.Date("2012-01-01"), ]
 #' fonds$value <- 0.5 * fonds$value      # anderes Kursniveau
-#' lang <- splice_series(fonds = fonds, proxy = proxy)
+#' lang <- series_splice(fonds = fonds, proxy = proxy)
 #' head(lang, 3)
 #' table(lang$source)
 #' @export
-splice_series <- function(..., dates = NULL) {
+series_splice <- function(..., dates = NULL) {
   src <- list(...)
-  if (length(src) < 2 || is.null(names(src)) || any(names(src) == "")) stop("splice_series: mindestens zwei benannte Reihen.")
+  if (length(src) < 2 || is.null(names(src)) || any(names(src) == "")) stop("series_splice: mindestens zwei benannte Reihen.")
   Fl <- NULL
   if (all(vapply(src, is.data.frame, TRUE))) {
-    al <- do.call(align_series, c(src, list(range = "all")))
+    al <- do.call(series_align, c(src, list(range = "all")))
     dates <- al$date; V <- as.matrix(al[, names(src)])
     Fl <- attr(al, "filled")[, names(src), drop = FALSE]       # per LOCF gefuellte Tage (keine echten Werte)
   } else {
-    if (is.null(dates)) stop("splice_series: 'dates' angeben, wenn Vektoren \u00fcbergeben werden.")
+    if (is.null(dates)) stop("series_splice: 'dates' angeben, wenn Vektoren \u00fcbergeben werden.")
     V <- do.call(cbind, lapply(src, as.numeric)); colnames(V) <- names(src)
   }
   n <- nrow(V)
@@ -685,13 +685,13 @@ splice_series <- function(..., dates = NULL) {
   pick <- apply(Rm, 1, function(r) { j <- which(is.finite(r)); if (length(j)) j[1] else NA_integer_ })
   r <- Rm[cbind(seq_len(n), ifelse(is.na(pick), 1L, pick))]; r[is.na(pick)] <- NA
   a <- which(!is.na(p))[1]
-  if (is.na(a)) stop("splice_series: Die erste Reihe hat keine Werte.")
+  if (is.na(a)) stop("series_splice: Die erste Reihe hat keine Werte.")
   lv <- rep(NA_real_, n); lv[a] <- p[a]
   if (a < n) for (t in (a + 1L):n) lv[t] <- if (!is.na(p[t])) p[t] else if (!is.na(r[t])) lv[t - 1L] * (1 + r[t]) else lv[t - 1L]
   if (a > 1L) for (t in a:2L) { if (is.na(r[t])) break; lv[t - 1L] <- lv[t] / (1 + r[t]) }
   srcname <- ifelse(!is.na(p), names(src)[1], ifelse(is.na(pick), NA, names(src)[pmax(pick, 1L)]))
   srcname[is.na(lv)] <- NA
-  data.frame(date = .to_date(dates, "splice_series: dates"), value = lv, source = srcname, stringsAsFactors = FALSE)
+  data.frame(date = .to_date(dates, "series_splice: dates"), value = lv, source = srcname, stringsAsFactors = FALSE)
 }
 
 #' Strategie aus Gewichten
@@ -699,8 +699,8 @@ splice_series <- function(..., dates = NULL) {
 #' Baut aus einem benannten Gewichtsvektor eine statische Strategie fuer
 #' [simulation()], ohne jedes Asset einzeln mit [asset_config()] anlegen zu
 #' muessen. Die Namen muessen den Kursspalten des Datensatzes entsprechen
-#' (z. B. aus [align_series()]). Jedes Asset erhaelt
-#' \code{asset_share = Gewicht}; alle weiteren Einstellungen kommen aus
+#' (z. B. aus [series_align()]). Jedes Asset erhaelt
+#' \code{share = Gewicht}; alle weiteren Einstellungen kommen aus
 #' \code{...} oder den Standardwerten von [asset_config()] (ETF, Buy and
 #' Hold).
 #'
@@ -710,10 +710,10 @@ splice_series <- function(..., dates = NULL) {
 #'   Namen eindeutig, und die Summe muss 1 sein (wie in [simulation()];
 #'   sonst Fehler schon hier).
 #' @param ... Weitere Argumente fuer [asset_config()] (z. B.
-#'   \code{asset_class}, \code{asset_spread} in Prozent, \code{asset_bonus}
+#'   \code{asset_class}, \code{spread} in Prozent, \code{partial_exemption}
 #'   in Prozent). Ein unbenannter einzelner Wert gilt fuer alle Assets;
 #'   benannte Vektoren werden je Asset zugeordnet, auch mit einem einzigen
-#'   Element wie \code{asset_bonus = c(aktien = 30)} (fehlende Assets
+#'   Element wie \code{partial_exemption = c(aktien = 30)} (fehlende Assets
 #'   behalten den Standardwert, Namen ohne passendes Asset werden
 #'   ignoriert). Nur ein einzelner benannter Wert, dessen Name kein Asset
 #'   ist, gilt fuer alle Assets.
@@ -721,10 +721,10 @@ splice_series <- function(..., dates = NULL) {
 #' @seealso [portfolio_template()], [create_strategy()], [simulation()],
 #'   [tactical_simulation()]
 #' @examples
-#' strategy_from_weights(c(world = 0.6, bonds = 0.4), asset_spread = c(world = 0.1, bonds = 0.05))
+#' strategy_from_weights(c(world = 0.6, bonds = 0.4), spread = c(world = 0.1, bonds = 0.05))
 #' st <- strategy_from_weights(c(aktien = 0.7, gold = 0.3),
 #'                             asset_class = c(aktien = "etf", gold = "etc"),
-#'                             asset_bonus = c(aktien = 30, gold = 0))
+#'                             partial_exemption = c(aktien = 30, gold = 0))
 #' sapply(st, `[[`, "asset_class")
 #' @export
 strategy_from_weights <- function(weights, ...) {
@@ -741,7 +741,7 @@ strategy_from_weights <- function(weights, ...) {
   assets <- lapply(names(weights), function(nm) {
     a <- lapply(extra, function(v) if (per_asset(v)) unname(v[nm]) else v)
     a <- a[!vapply(a, function(v) length(v) == 1 && is.na(v), TRUE)]
-    do.call(asset_config, c(list(asset_share = unname(weights[nm])), a))
+    do.call(asset_config, c(list(share = unname(weights[nm])), a))
   })
   names(assets) <- names(weights)
   create_strategy(assets = assets)
@@ -788,7 +788,7 @@ strategy_from_weights <- function(weights, ...) {
 #'   Unbekannte Rollen und mehrere Rollen auf derselben Spalte sind ein
 #'   Fehler.
 #' @param ... Weitere Argumente fuer [strategy_from_weights()] bzw.
-#'   [asset_config()] (z. B. \code{asset_spread}, \code{asset_bonus}).
+#'   [asset_config()] (z. B. \code{spread}, \code{partial_exemption}).
 #' @return Mit \code{name}: Objekt der Klasse \code{strategy} fuer
 #'   [simulation()]; ohne \code{name}: data.frame aller Vorlagen mit
 #'   \code{template}, \code{role} und \code{weight} (Anteil, 0.6 = 60 %).

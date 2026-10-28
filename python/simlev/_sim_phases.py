@@ -14,7 +14,7 @@ from ._dates import fmt_date, from_days, year_of
 from ._r.rformat import r_as_character, r_deparse, r_format, r_format1, r_round
 from ._r.rnum import r_median, r_sum
 from .config import _match_arg
-from .tax_tariff import SimLevTaxTariff, read_tax_tariff
+from ._tax_tariff import SimLevTaxTariff, tax_tariff
 from ._r.rnum import NA_REAL as NA  # R's NA_real_ (Nutzlast 1954)
 from ._sim_base import (
     _FEE,
@@ -68,7 +68,11 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
                       marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                       use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
                       funds_fee, bonus_fee, fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
-                      order_fee, dca_fee, harvest_mode, harvest_day, taxable_income, tax_tariff, given) -> dict:
+                      order_fee, dca_fee, harvest_mode, harvest_day, taxable_income, tariff, given,
+                      blocks=False) -> dict:
+    """Phase 1 (``.sim_check_inputs``). ``tariff`` = Argument ``tax_tariff`` von ``_simulation_flat``;
+    ``blocks=True``: Aufruf aus ``simulation()`` mit Bausteinen (Prüfungen der Bausteine entfallen hier,
+    Meldungen nennen die Bausteine)."""
     tax_mode = _match_arg(tax_mode, ("none", "person", "funds"), "tax_mode")
     if not isinstance(data, (pd.DataFrame, Mapping)):
         _stop("simulation: data muss ein data.frame mit Spalte 'date' und je Asset einer Kursspalte sein, nicht %s."
@@ -77,7 +81,7 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
         _stop("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein (z. B. aus "
               "create_strategy()), nicht %s." % ("fehlend" if strategy is None else "leer (L\u00e4nge 0)"))
     if spread is not None:
-        _warn("simulation: Das Argument 'spread' wird nicht ausgewertet; ma\u00dfgeblich ist asset_spread je Asset "
+        _warn("simulation: Das Argument 'spread' wird nicht ausgewertet; ma\u00dfgeblich ist spread je Asset "
               "(asset_config()).")
     if isinstance(data, pd.DataFrame):
         names_d = [str(c) for c in data.columns]
@@ -108,11 +112,11 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
         if tr_ is not None and (not isinstance(tr_, str) or tr_ not in ("investment_fund", "capital_gains",
                                                                            "private_sale")):
             _stop("simulation: tax_regime %s von Asset '%s' ist ung\u00fcltig; erlaubt sind investment_fund, capital_gains, "
-                  "private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern tax_mode = \"none\" verwenden."
-                  % (r_deparse(tr_), nm))
-        at = a.get("action_type")
+                  "private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern %s verwenden."
+                  % (r_deparse(tr_), nm, "tax = NULL" if blocks else "tax_mode = \"none\""))
+        at = a.get("trading")
         if not isinstance(at, str) or at not in ("bnh", "signal"):
-            _stop("simulation: action_type %s von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\"."
+            _stop("simulation: trading %s von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\"."
                   % (r_deparse(at), nm))
     if "date" not in fr:
         _stop("simulation: Spalte 'date' fehlt in 'data'.")
@@ -168,8 +172,8 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     nrow = fr.nrow
     if filled_attr is not None and fa_n != nrow:
         _warn("simulation: Attribut 'filled' von 'data' hat %d Zeilen, 'data' aber %d (z. B. nach Zeilenauswahl einer "
-              "align_series()-Ausgabe); es wird ignoriert, aufgef\u00fcllte Tage gelten dann als Handelstage. Zeitraum "
-              "besser mit align_series(..., start =, end =) w\u00e4hlen." % (fa_n, nrow))
+              "series_align()-Ausgabe); es wird ignoriert, aufgef\u00fcllte Tage gelten dann als Handelstage. Zeitraum "
+              "besser mit series_align(..., start =, end =) w\u00e4hlen." % (fa_n, nrow))
         fa_m = None
     pre_filled = np.zeros(nrow, dtype=bool)
     if fa_m is not None and fa_m.shape[0] == nrow and fa_cols is not None:
@@ -204,10 +208,10 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
             _stop("simulation: Kursspalte '%s' enth\u00e4lt nur NA." % nm)
         if ok.size < v.size:
             if ok[0] > 0:
-                st0 = strat[nm].get("asset_start")
+                st0 = strat[nm].get("start")
                 st_new = max(int(dvals[ok[0]]), int(dvals[0]) if st0 is None else _date_or_fail(st0))
-                strat[nm]["asset_start"] = st_new
-                _message("Hinweis: '%s' hat erst ab %s Kurse; das Asset wird wie mit asset_start = %s behandelt."
+                strat[nm]["start"] = st_new
+                _message("Hinweis: '%s' hat erst ab %s Kurse; das Asset wird wie mit start = %s behandelt."
                          % (nm, fmt_date(int(dvals[ok[0]])), fmt_date(st_new)))
             n_gap = int(np.isnan(v).sum()) - int(ok[0])
             if n_gap > 0:
@@ -225,32 +229,37 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
         _stop("simulation: start_value muss eine positive Zahl sein (Anfangskapital in EUR, z. B. 10000), nicht %s."
               % r_deparse(start_value))
     start_value = float(start_value)
-    if not _is_num(tax_rate) or math.isnan(float(tax_rate)) or tax_rate < 0 or tax_rate > 100:
+    if not blocks and (not _is_num(tax_rate) or math.isnan(float(tax_rate)) or tax_rate < 0 or tax_rate > 100):
         _stop("simulation: tax_rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 f\u00fcr "
               "26,375 %%), nicht %s." % r_deparse(tax_rate))
     tax_rate = float(tax_rate)
-    if 0 < tax_rate < 1:
+    if not blocks and 0 < tax_rate < 1:
         _warn("simulation: tax_rate = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s."
               % (r_format1(tax_rate), r_format1(tax_rate), r_format1(tax_rate * 100)))
     if church_tax is not None:
-        if not _is_num(church_tax) or math.isnan(float(church_tax)) or church_tax < 0 or church_tax > 100:
+        if not blocks and (not _is_num(church_tax) or math.isnan(float(church_tax)) or church_tax < 0 or church_tax > 100):
             _stop("simulation: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9), "
                   "nicht %s." % ", ".join(r_format(church_tax)))
         church_tax = float(church_tax)
-        if 0 < church_tax < 1:
+        if blocks:
+            pass
+        elif 0 < church_tax < 1:
             _warn("simulation: church_tax = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s."
                   % (r_format1(church_tax), r_format1(church_tax), r_format1(church_tax * 100)))
         elif church_tax > 9:
             _warn("simulation: church_tax = %s %% ist ungew\u00f6hnlich hoch (Kirchensteuer in Deutschland: 8 oder 9 %%)."
                   % r_format1(church_tax))
-    if _is_true(harvest_mode) and tax_mode != "person":
+    if not blocks and _is_true(harvest_mode) and tax_mode != "person":
         _warn("simulation: harvest_mode wirkt nur mit tax_mode = \"person\" und wird hier ignoriert.")
+    elif blocks and _is_true(harvest_mode) and tax_mode != "person":   # Fondsmodus mit tax_profile(harvest=)
+        _warn("simulation: harvest (tax_profile(harvest = harvest_rule())) wirkt nicht im Fondsmodus "
+              "(funds = funds_costs()) und wird hier ignoriert.")
 
     def show_arg(x):
         return "NULL" if x is None else r_deparse(x)
 
     def chk_num(x, arg, what, mn=0.0, null_ok=False):
-        if x is None and null_ok:
+        if x is None and null_ok or blocks:
             return
         if not _is_num(x) or not math.isfinite(float(x)) or (mn is not None and x < mn):
             _stop("simulation: '%s' muss %s sein, nicht %s." % (arg, what, show_arg(x)))
@@ -266,7 +275,7 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     for a, x in (("use_guenstigerpruefung", use_guenstigerpruefung),
                  ("include_soli_on_income_tax", include_soli_on_income_tax),
                  ("fractions", fractions), ("use_sparer_pauschbetrag", use_sparer_pauschbetrag)):
-        if not _is_bool(x):
+        if (not blocks or a == "fractions") and not _is_bool(x):
             _stop("simulation: '%s' muss TRUE oder FALSE sein, nicht %s." % (a, show_arg(x)))
     sparer_pauschbetrag = float(sparer_pauschbetrag)
     private_sale_threshold = float(private_sale_threshold)
@@ -276,6 +285,8 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     use_sparer_pauschbetrag = bool(use_sparer_pauschbetrag)
 
     def frac_warn(x, arg, hi=1.0):
+        if blocks and arg != "risk_free":
+            return
         if _is_num(x) and math.isfinite(float(x)) and 0 < x < hi:
             _warn("simulation: %s = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s."
                   % (arg, r_format1(x), r_format1(x), r_format1(x * 100)))
@@ -285,16 +296,16 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     frac_warn(risk_free, "risk_free", hi=0.05)
     if isinstance(risk_free, str) and risk_free in fr:
         _frac_warn_col(fr, risk_free, "risk_free", hi=0.05)
-    if not _is_true(dca_mode) and dca_value is not None:
+    if not blocks and not _is_true(dca_mode) and dca_value is not None:
         _warn("simulation: dca_value wirkt nur mit dca_mode = TRUE und wird ignoriert.")
-    if not _is_true(balance_mode) and event_col is None and balance_thresh is not None:
+    if not blocks and not _is_true(balance_mode) and event_col is None and balance_thresh is not None:
         _warn("simulation: balance_thresh wirkt nur mit balance_mode = TRUE oder event_col (Rebalancing) und wird "
               "ignoriert.")
     if event_col is None and given["event_mode"]:
         _warn("simulation: event_mode wirkt nur zusammen mit event_col und wird ignoriert.")
 
     def check_days(x, arg):
-        if x is None:
+        if x is None or blocks:
             return
         v = _num_vec(x)
         if v is None or any(math.isnan(d) for d in v) or any(d < 1 or d > 31 or d != r_round(d) for d in v):
@@ -304,7 +315,7 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     check_days(balance_days, "balance_days")
     days_out = {}
     for a, x in (("dca_days", dca_days), ("balance_days", balance_days)):
-        if x is not None:
+        if x is not None and not blocks:
             v = _num_vec(x)
             u = []
             for d in v:
@@ -316,7 +327,7 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
                 x = u
         days_out[a] = x
     dca_days, balance_days = days_out["dca_days"], days_out["balance_days"]
-    if _is_true(split_mode) and split_thresh is not None:
+    if not blocks and _is_true(split_mode) and split_thresh is not None:
         st_v = _num_vec(split_thresh)
         if st_v is None or len(st_v) != 2 or any(math.isnan(v) for v in st_v):
             shown = r_format(list(split_thresh) if isinstance(split_thresh, (list, tuple, np.ndarray)) else split_thresh)
@@ -331,7 +342,7 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
         gv = [a for a, g in (("funds_fee", given["funds_fee"]), ("bonus_fee", given["bonus_fee"])) if g]
         _warn("simulation: %s wirkt nur bei tax_mode = \"funds\" (hier tax_mode = \"%s\") und wird ignoriert."
               % (" und ".join(gv), tax_mode))
-    if tax_mode == "funds":
+    if tax_mode == "funds" and not blocks:
         for a, x in (("funds_fee", funds_fee), ("bonus_fee", bonus_fee)):
             if not _is_num(x) or math.isnan(float(x)) or x < 0 or x > 100:
                 _stop("simulation: %s muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. %s), nicht %s."
@@ -340,23 +351,25 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
 
     tariff_on = taxable_income is not None and tax_mode == "person"
     if taxable_income is not None and tax_mode != "person":
-        _warn("simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"%s\") und wird ignoriert." % tax_mode)
-    if taxable_income is None and tax_tariff is not None:
+        _warn("simulation: income_tariff() (tax_profile(income =)) wirkt nicht im Fondsmodus (funds = funds_costs()) "
+              "und wird ignoriert." if blocks else
+              "simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"%s\") und wird ignoriert." % tax_mode)
+    if taxable_income is None and tariff is not None:
         _warn("simulation: tax_tariff wirkt nur zusammen mit taxable_income (zu versteuerndes Einkommen je Jahr) und "
               "wird ignoriert.")
     tariff_env = None
     if tariff_on:
         y0, y1 = year_of(int(dvals.min())), year_of(int(dvals.max()))
         zv = _check_taxable_income(taxable_income, list(range(y0, y1 + 1)))
-        if tax_tariff is None:
-            tt = read_tax_tariff()
-        elif isinstance(tax_tariff, SimLevTaxTariff):
-            tt = tax_tariff
-        elif isinstance(tax_tariff, str):
-            tt = read_tax_tariff(tax_tariff)
+        if tariff is None:
+            tt = tax_tariff()
+        elif isinstance(tariff, SimLevTaxTariff):
+            tt = tariff
+        elif isinstance(tariff, str):
+            tt = tax_tariff(file=tariff)
         else:
             _stop("simulation: tax_tariff muss NULL (mitgelieferte Tarifdatei), ein Dateipfad oder ein Objekt aus "
-                  "read_tax_tariff() sein.")
+                  "tax_tariff() sein.")
         tariff_env = _TariffEnv()
         tariff_env.tariff = tt
         tariff_env.zve_all = zv["all"]
@@ -375,11 +388,15 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
         return (a.get("tax_regime") == "private_sale" or a.get("asset_class") == "etn_deliverable"
                 or (a.get("asset_class") in ("etn", "etc") and _is_true(a.get("deliverable"))))
     has_private_sale = any(is_private(a) for a in strat.values())
-    if has_private_sale and marginal_tax_rate is None and tax_mode == "person" and not tariff_on:
+    if has_private_sale and marginal_tax_rate is None and tax_mode == "person" and not tariff_on and blocks:
+        _warn("simulation: Der Grenzsteuersatz ist nicht gesetzt (tax_profile(income = income_rate(marginal_rate))), die "
+              "Strategie enth\u00e4lt aber Assets mit tax_regime = \"private_sale\"; Gewinne nach Paragraf 23 EStG werden "
+              "dann m\u00f6glicherweise nicht korrekt besteuert. income_rate(marginal_rate) in Prozent angeben (z. B. 42).")
+    elif has_private_sale and marginal_tax_rate is None and tax_mode == "person" and not tariff_on:
         _warn("simulation: marginal_tax_rate ist nicht gesetzt, die Strategie enth\u00e4lt aber Assets mit tax_regime = "
               "\"private_sale\"; Gewinne nach Paragraf 23 EStG werden dann m\u00f6glicherweise nicht korrekt besteuert. "
               "marginal_tax_rate in Prozent angeben (z. B. 42).")
-    if marginal_tax_rate is not None and (marginal_tax_rate < 0 or marginal_tax_rate > 50):
+    if not blocks and marginal_tax_rate is not None and (marginal_tax_rate < 0 or marginal_tax_rate > 50):
         _stop("simulation: marginal_tax_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 f\u00fcr "
               "42 %%), nicht %s." % r_deparse(marginal_tax_rate))
     if church_tax is not None and church_tax > 0:
@@ -400,29 +417,34 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     fees_on = fee_order is not None or fee_dca is not None
     _FEE.current = None
     _FEE.paid = 0.0
-    if _is_true(harvest_mode):
+    if _is_true(harvest_mode) and not blocks:
         if not isinstance(harvest_day, str) or not re.match(r"^\d{2}-\d{2}$", harvest_day) or harvest_day >= "12-31":
             _stop("harvest_day im Format 'MM-TT' und vor dem 31.12. angeben (z. B. '12-15').")
     if dca_mode:
         def one_num(x):
             return _is_num(x) and math.isfinite(float(x))
-        if not one_num(dca_value) or dca_value <= 0:
+        if not blocks and (not one_num(dca_value) or dca_value <= 0):
             _stop("simulation: 'dca_value' muss bei dca_mode = TRUE eine einzelne endliche Zahl > 0 sein (Betrag je "
                   "Sparplan-Termin in EUR), nicht %s." % show_arg(dca_value))
-        if not one_num(dca_span) or dca_span < 1 or dca_span != r_round(float(dca_span)):
+        if not blocks and (not one_num(dca_span) or dca_span < 1 or dca_span != r_round(float(dca_span))):
             _stop("simulation: 'dca_span' muss bei dca_mode = TRUE eine einzelne ganze Zahl >= 1 sein (Perioden "
                   "zwischen zwei Terminen), nicht %s." % show_arg(dca_span))
         dca_value = float(dca_value)
-    shares = [a.get("asset_share") for a in strat.values()]
+    shares = [a.get("share") for a in strat.values()]
     total_weight = r_sum([NA if s is None else float(s) for s in shares], na_rm=True)
     if abs(total_weight - 1.0) > 1e-6:
-        _stop(_sp("simulation: Asset-Gewichte (asset_share) summieren sich auf %.4f, m\u00fcssen aber exakt 1.0 ergeben "
+        _stop(_sp("simulation: Asset-Gewichte (share) summieren sich auf %.4f, m\u00fcssen aber exakt 1.0 ergeben "
                   "(Anteile, z. B. 0.6 und 0.4).\n  Aktuelle Gewichte: %s", total_weight,
-                  ", ".join(_sp("%s=%.3f", k, NA if v.get("asset_share") is None else float(v.get("asset_share")))
+                  ", ".join(_sp("%s=%.3f", k, NA if v.get("share") is None else float(v.get("share")))
                             for k, v in strat.items())))
     effective_tax_rate = tax_rate
     if use_guenstigerpruefung and not tariff_on:
-        if marginal_tax_rate is None:
+        if marginal_tax_rate is None and blocks:
+            _warn("simulation: G\u00fcnstigerpr\u00fcfung aktiviert (tax_profile(guenstigerpruefung = TRUE)), aber der "
+                  "Grenzsteuersatz (income_rate(marginal_rate)) ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer ("
+                  + r_as_character(r_round(tax_rate * 100, 2)) + " %).\nF\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung "
+                  "tax_profile(income = income_rate(marginal_rate)) in Prozent angeben (z. B. 42).")
+        elif marginal_tax_rate is None:
             _warn("simulation: G\u00fcnstigerpr\u00fcfung aktiviert (use_guenstigerpruefung = TRUE), aber 'marginal_tax_rate' "
                   "ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer (" + r_as_character(r_round(tax_rate * 100, 2)) +
                   " %).\nF\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung marginal_tax_rate in Prozent angeben (z. B. 42).")
@@ -471,12 +493,12 @@ def _locf_fill(v: np.ndarray) -> np.ndarray:
     return v[idx - 1]
 
 
-def _sim_prepare_data(fr: _Frame, pre_filled: np.ndarray, base_rate_flex, base_rate_data) -> dict:
+def _sim_prepare_data(fr: _Frame, pre_filled: np.ndarray, base_rate_flex, base_rate_data, blocks=False) -> dict:
     dates = fr.get("date")
     start_date = int(dates[0])
     stopp_date = int(dates[-1])
     if _is_true(base_rate_flex) and isinstance(base_rate_data, str) and base_rate_data in fr:
-        _frac_warn_col(fr, base_rate_data, "base_rate_data", hi=0.05)
+        _frac_warn_col(fr, base_rate_data, "base_rate" if blocks else "base_rate_data", hi=0.05)
     if _is_true(base_rate_flex) and isinstance(base_rate_data, str) and base_rate_data in fr:
         col = fr.get(base_rate_data)
         k = fr.kinds[base_rate_data]
@@ -533,7 +555,7 @@ def _signal_col(fr: _Frame, col: str | None, n: int) -> np.ndarray:
 
 def _sim_build_state(fr: _Frame, strategy: dict, start_value: float, start_date: int, stopp_date: int,
                      sparer_pauschbetrag: float, use_sparer_pauschbetrag: bool, base_rate, base_rate_flex,
-                     base_rate_data) -> dict:
+                     base_rate_data, blocks=False) -> dict:
     n = fr.nrow
     sim: dict = {
         "assets": {}, "status": {}, "market": {}, "trades": {}, "report": {},
@@ -555,15 +577,15 @@ def _sim_build_state(fr: _Frame, strategy: dict, start_value: float, start_date:
             regime = {"etf": "investment_fund", "etn": "private_sale" if deliverable else "capital_gains",
                       "etc": "private_sale" if deliverable else "capital_gains", "certificate": "capital_gains",
                       "etn_standard": "capital_gains", "etn_deliverable": "private_sale"}.get(ac, "capital_gains")
-        st_raw = a.get("asset_start")
-        bonus = a.get("asset_bonus")
+        st_raw = a.get("start")
+        bonus = a.get("partial_exemption")
         sim["assets"][name] = {
-            "class": ac, "style": a.get("action_type"),
+            "class": ac, "style": a.get("trading"),
             "start": start_date if st_raw is None else _date_or_fail(st_raw),
             "tax_regime": regime, "bonus": (0.0 if bonus is None else float(bonus)) / 100,
             "deliverable": a.get("deliverable") if a.get("deliverable") is not None else False,
         }
-        if a.get("action_type") == "signal":
+        if a.get("trading") == "signal":
             sb, ss = a.get("signal_buy"), a.get("signal_sell")
             if sb is None or sb not in fr:
                 _stop("simulation: signal_buy-Spalte '%s' fehlt im Datensatz (Asset '%s')." % (sb if sb is not None
@@ -571,7 +593,7 @@ def _sim_build_state(fr: _Frame, strategy: dict, start_value: float, start_date:
             if ss is None or ss not in fr:
                 _stop("simulation: signal_sell-Spalte '%s' fehlt im Datensatz (Asset '%s')." % (ss if ss is not None
                                                                                              else "NULL", name))
-        share = float(a.get("asset_share"))
+        share = float(a.get("share"))
         sim["status"][name] = {"count": 0.0, "price": 0.0, "worth": 0.0, "money": share * start_value,
                                "total": share * start_value, "target": share, "actual": share, "differ": 0.0}
         if base_rate_flex:
@@ -579,13 +601,17 @@ def _sim_build_state(fr: _Frame, strategy: dict, start_value: float, start_date:
                 if base_rate_data is None:
                     _stop("simulation: base_rate_flex = TRUE braucht base_rate_data (Name der Basiszins-Spalte in data, "
                           "Prozent p. a.); base_rate_data fehlt.")
+                if blocks:
+                    _stop("simulation: base_rate-Spalte '%s' fehlt in data (tax_profile(base_rate = \"%s\") braucht eine "
+                          "Basiszins-Spalte in Prozent p. a.; vorhanden: %s)." % (base_rate_data, base_rate_data,
+                                                                                  ", ".join(fr.names)))
                 _stop("simulation: base_rate_data-Spalte '%s' fehlt in data (base_rate_flex = TRUE braucht eine "
                       "Basiszins-Spalte in Prozent p. a.; vorhanden: %s)." % (base_rate_data, ", ".join(fr.names)))
             br = np.array(fr.get(base_rate_data), dtype=np.float64)
             br[np.isnan(br)] = 0.0
         else:
             br = np.full(n, float(base_rate) if base_rate is not None else 0.0)
-        spread_a = a.get("asset_spread")
+        spread_a = a.get("spread")
         sim["market"][name] = {
             "asset_day": np.arange(start_date, stopp_date + 1, dtype=np.int64),
             "base_rates": br,
@@ -623,7 +649,7 @@ def _as_logical_col(fr: _Frame, col: str) -> np.ndarray:
 def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, stopp_date: int, liquidate,
                         dca_mode, dca_span, dca_unit, dca_days, dca_value, dca_anchor, dca_start, dca_skip,
                         balance_mode, balance_span, balance_unit, balance_days, balance_anchor, balance_start,
-                        balance_skip, event_col, event_mode, event_weight, split_mode, split_thresh) -> dict:
+                        balance_skip, event_col, event_mode, event_weight, split_mode, split_thresh, blocks=False) -> dict:
     flag_date = np.arange(start_date, stopp_date + 1, dtype=np.int64)
     n = flag_date.size
     if ".filled" in fr:
@@ -642,8 +668,9 @@ def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, 
             _stop("simulation: %s_start = '%s' ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\")."
                   % (a, r_format1(sd0) if not isinstance(sd0, str) else sd0))
         if sd1 > stopp_date:
-            _stop("simulation: %s_start (%s) liegt nach dem letzten Datentag (%s); es g\u00e4be keine Termine."
-                  % (a, fmt_date(sd1), fmt_date(stopp_date)))
+            _stop("simulation: %s (%s) liegt nach dem letzten Datentag (%s); es g\u00e4be keine Termine."
+                  % (("start von %s" % ("dca_plan()" if a == "dca" else "rebalance_plan()")) if blocks else a + "_start",
+                     fmt_date(sd1), fmt_date(stopp_date)))
     flag_rebalance = _calculate_dates_flags(balance_mode, balance_span, balance_unit, balance_days, flag_date, None,
                                             balance_anchor, balance_start, balance_skip, liquidate)
     flag_dca = _calculate_dates_flags(dca_mode, dca_span, dca_unit, dca_days, flag_date, dca_value, dca_anchor,
@@ -700,8 +727,8 @@ def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, 
     for name in flag_assets:
         st_a = sim["assets"][name]["start"]
         if st_a is not None and st_a > stopp_date:
-            _stop("simulation: asset_start von '%s' (%s) liegt nach dem letzten Datentag (%s); das Asset w\u00e4re nie "
-                  "handelbar. asset_start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie "
+            _stop("simulation: start von '%s' (%s) liegt nach dem letzten Datentag (%s); das Asset w\u00e4re nie "
+                  "handelbar. start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie "
                   "entfernen." % (name, fmt_date(st_a), fmt_date(stopp_date)))
     return {"data": fr,
             "flags": {"flag_date": flag_date, "flag_filled": flag_filled, "flag_assets": flag_assets,
@@ -714,7 +741,7 @@ def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, 
 def _sim_init_weights(sim: dict, flag_assets: list, flag_date: np.ndarray, start_value: float) -> dict:
     initial_assets = [nm for nm in flag_assets if sim["assets"][nm]["start"] <= int(flag_date[0])]
     if not initial_assets:
-        _stop("simulation: Kein Asset ist am ersten Datentag (%s) handelbar (asset_start bzw. erste Kurse sp\u00e4ter); "
+        _stop("simulation: Kein Asset ist am ersten Datentag (%s) handelbar (start bzw. erste Kurse sp\u00e4ter); "
               "mindestens ein Asset muss ab Beginn handelbar sein." % fmt_date(int(flag_date[0])))
     initial_weights_sum = r_sum([sim["status"][nm]["actual"] for nm in initial_assets])
     all_weights_sum = r_sum([sim["status"][nm]["actual"] for nm in flag_assets])

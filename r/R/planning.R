@@ -1,15 +1,15 @@
 # =============================================================================
 #  planning.R  —  Renditeannahmen, Laender-Bootstrap und Zielplanung
 # -----------------------------------------------------------------------------
-#  set_expected_return()  verschiebt historische Renditen auf eine eigene
+#  series_shift_return()  verschiebt historische Renditen auf eine eigene
 #                         Renditeannahme (Streuung, Abhaengigkeiten und
 #                         Verlaufsmuster bleiben erhalten); vor bootstrap()
-#  pooled_bootstrap()     stationaerer Block-Bootstrap ueber mehrere Laender:
+#  bootstrap_pooled()     stationaerer Block-Bootstrap ueber mehrere Laender:
 #                         je Block wird ein Land gezogen (Anarkulova,
 #                         Cederburg & O'Doherty 2022); liefert Pfade fuer
 #                         withdrawal_simulation()
 #  portfolio_returns()    Periodenrenditen von Kandidaten-Portfolios
-#  goal_optimize()        dynamische Programmierung: welches Portfolio
+#  planning_goal()        dynamische Programmierung: welches Portfolio
 #                         maximiert je Zeitpunkt und Vermoegen die
 #                         Wahrscheinlichkeit, ein Ziel zu erreichen (Das,
 #                         Ostrov, Radhakrishnan & Srivastav 2020)
@@ -49,16 +49,16 @@
 #'   benannter Vektor der angewendeten Verschiebung je Spalte in Prozent p. a.
 #'   (geometrisch; negativ = Rendite abgesenkt). Fehlende Werte werden bei der
 #'   Mittelwertbildung ignoriert.
-#' @seealso [bootstrap()], [pooled_bootstrap()] (Argument \code{target})
+#' @seealso [bootstrap()], [bootstrap_pooled()] (Argument \code{target})
 #' @examples
 #' set.seed(1)
 #' d <- data.frame(date = seq.Date(as.Date("2000-01-01"), by = "day", length.out = 3650))
 #' d$us <- exp(rnorm(3650, 3e-4, 0.01))
-#' d2 <- set_expected_return(d, "us", 4)
+#' d2 <- series_shift_return(d, "us", 4)
 #' prod(d2$us)^(365.25 / 3650) - 1      # etwa 0.04 = 4 % p. a.
 #' attr(d2, "shift")
 #' @export
-set_expected_return <- function(data, columns, target, type = c("returns", "prices"), ppy = NULL) {
+series_shift_return <- function(data, columns, target, type = c("returns", "prices"), ppy = NULL) {
   type <- match.arg(type)
   if (!is.data.frame(data)) stop("data muss ein data.frame sein.")
   miss <- setdiff(columns, names(data))
@@ -70,7 +70,7 @@ set_expected_return <- function(data, columns, target, type = c("returns", "pric
                  paste(if (is.null(names(target))) columns else setdiff(columns, names(target)), collapse = ", ")))
   n <- nrow(data)
   # Reihenfolge der Zeilen: bei Kursniveaus zaehlt die zeitliche Abfolge (nach date, falls vorhanden)
-  dd <- if ("date" %in% names(data)) .to_date(data$date, "set_expected_return: data$date") else NULL
+  dd <- if ("date" %in% names(data)) .to_date(data$date, "series_shift_return: data$date") else NULL
   o <- if (!is.null(dd)) order(dd) else seq_len(n)
   if (type == "prices" && !is.null(dd) && anyDuplicated(dd))
     stop("type = 'prices': date enth\u00e4lt doppelte Daten; Kursniveaus brauchen eine eindeutige Zeitfolge.")
@@ -122,7 +122,7 @@ set_expected_return <- function(data, columns, target, type = c("returns", "pric
 #' Periode und laeuft am Ende der Landeshistorie zyklisch am Anfang weiter.
 #' Das Ergebnis ist ein \code{withdrawal_paths}-Objekt und kann direkt an
 #' [withdrawal_simulation()], [withdrawal_max_rate()] oder
-#' [perfect_withdrawal_rate()] uebergeben werden.
+#' [withdrawal_perfect_rate()] uebergeben werden.
 #'
 #' @param datasets Benannte Liste von data.frames (Name = Land), jeweils mit
 #'   Spalte \code{date} (Klasse Date oder umwandelbar), den Kursspalten aus
@@ -154,7 +154,7 @@ set_expected_return <- function(data, columns, target, type = c("returns", "pric
 #' @param target Optional Renditeannahmen in Prozent p. a. (geometrisch):
 #'   Skalar fuer alle \code{columns} oder benannter Vektor je Spalte. Die
 #'   Verschiebung wird ueber die gepoolten Renditen aller Laender bestimmt und
-#'   fuer alle Laender gleich angewendet (wie [set_expected_return()]).
+#'   fuer alle Laender gleich angewendet (wie [series_shift_return()]).
 #'   \code{NULL} (Standard) = historische Renditen.
 #' @param seed Startwert fuer den Zufallsgenerator; der globale
 #'   Zufallszustand wird danach wiederhergestellt. \code{NULL} (Standard) =
@@ -171,7 +171,7 @@ set_expected_return <- function(data, columns, target, type = c("returns", "pric
 #'   \code{countries} (Zeichenmatrix Perioden x Pfade: gezogenes Land) und
 #'   \code{country_names}.
 #' @seealso [withdrawal_simulation()], [withdrawal_max_rate()],
-#'   [set_expected_return()], [portfolio_returns()]
+#'   [series_shift_return()], [portfolio_returns()]
 #' @references Anarkulova, A., Cederburg, S. & O'Doherty, M. S. (2022), Stocks
 #'   for the long run? Evidence from a broad sample of developed markets,
 #'   Journal of Financial Economics 143(1), 409-433.
@@ -184,7 +184,7 @@ set_expected_return <- function(data, columns, target, type = c("returns", "pric
 #'   d$cpi <- 100 * cumprod(exp(rnorm(70, 0.025, 0.02)))
 #'   d
 #' }
-#' pb <- pooled_bootstrap(list(de = land(0.05), us = land(0.07)), c("aktien", "anleihen"),
+#' pb <- bootstrap_pooled(list(de = land(0.05), us = land(0.07)), c("aktien", "anleihen"),
 #'                        weights = c(aktien = 0.6, anleihen = 0.4), inflation = "cpi",
 #'                        n = 200, years = 30, L = 5, seed = 1)
 #' dim(pb$returns)                 # 30 Jahre x 200 Pfade
@@ -192,7 +192,7 @@ set_expected_return <- function(data, columns, target, type = c("returns", "pric
 #' ws <- withdrawal_simulation(pb, withdrawal_rule("constant", rate = 4))
 #' mean(ws$paths$success)
 #' @export
-pooled_bootstrap <- function(datasets, columns, weights = NULL, inflation = NULL,
+bootstrap_pooled <- function(datasets, columns, weights = NULL, inflation = NULL,
                              frequency = c("year", "quarter", "month"), n = 1000L, years = 30L, L = NULL,
                              country_weights = NULL, target = NULL, seed = NULL) {
   frequency <- match.arg(frequency)
@@ -255,7 +255,7 @@ pooled_bootstrap <- function(datasets, columns, weights = NULL, inflation = NULL
 #' (Klasse Date) und Kursspalten (Niveaus, keine Renditen); Periodenwerte
 #' sind die Kurse am letzten Datum jeder Kalenderperiode (fehlende Kurse
 #' werden fortgeschrieben, eine unvollstaendige letzte Periode zaehlt mit).
-#' Das Ergebnis dient als Szenario-Stichprobe fuer [goal_optimize()].
+#' Das Ergebnis dient als Szenario-Stichprobe fuer [planning_goal()].
 #'
 #' @param data data.frame mit Spalte \code{date} und allen in
 #'   \code{candidates} genannten Kursspalten (Niveaus).
@@ -269,7 +269,7 @@ pooled_bootstrap <- function(datasets, columns, weights = NULL, inflation = NULL
 #' @return Numerische Matrix Perioden x Kandidaten mit Brutto-Renditen (z. B.
 #'   1.05 = +5 %); nur Perioden, in denen alle beteiligten Kursspalten Werte
 #'   haben.
-#' @seealso [goal_optimize()], [pooled_bootstrap()]
+#' @seealso [planning_goal()], [bootstrap_pooled()]
 #' @examples
 #' set.seed(1)
 #' n <- 10 * 365
@@ -341,7 +341,7 @@ portfolio_returns <- function(data, candidates, frequency = c("year", "quarter",
 #' @param horizon Anzahl Perioden bis zum Ziel (ganze Zahl >= 1; Periodenlaenge
 #'   wie die Zeilen von \code{returns}, z. B. Jahre bei Jahresrenditen).
 #'   Nicht zu verwechseln mit \code{horizon} in [withdrawal_simulation()]
-#'   (Objekt aus [horizon_model()] oder Jahre).
+#'   (Objekt aus [withdrawal_horizon()] oder Jahre).
 #' @param contributions Zahlung je Periode als Geldbetrag (Standard 0):
 #'   Skalar oder Vektor (wird mit \code{rep_len()} auf \code{horizon}
 #'   Perioden gebracht); positiv = Einzahlung, negativ = Entnahme, jeweils
@@ -383,7 +383,7 @@ portfolio_returns <- function(data, candidates, frequency = c("year", "quarter",
 #'     \item{\code{candidates}}{Namen der Kandidaten.}
 #'   }
 #'   Ausgabe mit \code{print()}, Grafik der Politik mit \code{plot()}.
-#' @seealso [portfolio_returns()], [pooled_bootstrap()],
+#' @seealso [portfolio_returns()], [bootstrap_pooled()],
 #'   [withdrawal_simulation()]
 #' @references Das, S. R., Ostrov, D., Radhakrishnan, A. & Srivastav, D.
 #'   (2020), Dynamic portfolio allocation in goals-based wealth management,
@@ -392,13 +392,13 @@ portfolio_returns <- function(data, candidates, frequency = c("year", "quarter",
 #' set.seed(1)
 #' R <- sapply(c(a20 = 0.2, a60 = 0.6, a100 = 1),
 #'             function(a) exp(rnorm(500, 0.01 + 0.04 * a, 0.02 + 0.16 * a)))
-#' gp <- goal_optimize(R, start_value = 100000, goal = 150000, horizon = 10,
+#' gp <- planning_goal(R, start_value = 100000, goal = 150000, horizon = 10,
 #'                     contributions = 2000, n_grid = 101, n_sim = 1000, seed = 1)
 #' gp
 #' gp$probability          # Anteil, z. B. 0.79 = 79 %
 #' plot(gp)
 #' @export
-goal_optimize <- function(returns, start_value, goal, horizon, contributions = 0, n_grid = 301L,
+planning_goal <- function(returns, start_value, goal, horizon, contributions = 0, n_grid = 301L,
                           n_sim = 5000L, seed = NULL) {
   R <- as.matrix(returns); K <- ncol(R); S <- nrow(R)
   num1 <- function(v) is.numeric(v) && length(v) == 1L && is.finite(v)
@@ -475,7 +475,7 @@ goal_optimize <- function(returns, start_value, goal, horizon, contributions = 0
   p_sim <- mean(sim$success); se <- sqrt(p_sim * (1 - p_sim) / n_sim)
   tol <- 4 * sqrt(max(p_sim * (1 - p_sim), 1 / n_sim) / n_sim) + 0.01
   if (abs(p_dp - p_sim) > tol)
-    warning(sprintf(paste0("goal_optimize: DP-Wert %.1f %% weicht von der Vorw\u00e4rtssimulation %.1f %% ab; ",
+    warning(sprintf(paste0("planning_goal: DP-Wert %.1f %% weicht von der Vorw\u00e4rtssimulation %.1f %% ab; ",
                            "probability ist der simulierte Wert (n_grid erh\u00f6hen)."), 100 * p_dp, 100 * p_sim))
   structure(list(probability = p_sim, probability_se = se, probability_dp = p_dp, static = static, policy = pol, grid = grid, value = Vt,
                  simulation = sim, goal = goal, start_value = start_value, horizon = horizon,
@@ -491,11 +491,11 @@ goal_optimize <- function(returns, start_value, goal, horizon, contributions = 0
 #' Periode und Vermoegen (Vermoegen log10, Ausschnitt von \code{goal / 20}
 #' bis \code{3 * goal}; gestrichelte Linie = Ziel).
 #'
-#' @param x Objekt der Klasse \code{SimLevGoalPlan} aus [goal_optimize()].
+#' @param x Objekt der Klasse \code{SimLevGoalPlan} aus [planning_goal()].
 #' @param ... Bei \code{plot()} weitere Argumente fuer
 #'   [graphics::image()]; bei \code{print()} ohne Wirkung.
 #' @return \code{x} (unsichtbar).
-#' @seealso [goal_optimize()]
+#' @seealso [planning_goal()]
 #' @rdname SimLevGoalPlan-methods
 #' @keywords internal
 #' @export

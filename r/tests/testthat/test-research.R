@@ -50,7 +50,7 @@ test_that("param_space designs: grid, constraint, random and LHS", {
 
 test_that("param_search reproduces simulation(), keeps returns and supports overfitting checks", {
   d <- make_px(365 * 12)
-  st <- create_strategy(A = asset_config("etf", "signal", signal_buy = "buy", signal_sell = "sell", asset_spread = 0))
+  st <- create_strategy(A = asset_config("etf", "signal", signal_buy = "buy", signal_sell = "sell", spread = 0))
   b <- function(p) list(strategy = st, signal = function(df) signal_sma(df$A, p$n, p$band))
   ps <- param_search(d, b, param_space(n = c(50, 100, 200), band = c(0, 2)), burn_in = 250)
   expect_s3_class(ps, "SimLevParamSearch")
@@ -66,28 +66,31 @@ test_that("param_search reproduces simulation(), keeps returns and supports over
   # ohne builder: simulation()-Argumente
   st2 <- create_strategy(A = asset_config("etf", "bnh", 0.5), B = asset_config("etf", "bnh", 0.5))
   d$B <- 100 * cumprod(1 + rnorm(nrow(d), 1e-4, 0.004))
-  ps2 <- param_search(d, space = param_space(balance_thresh = c(2, 5, 10)), strategy = st2,
-                      sim_args = list(balance_mode = TRUE, balance_span = 1, balance_unit = "month"))
-  r2 <- simulation(d, st2, balance_mode = TRUE, balance_span = 1, balance_unit = "month", balance_thresh = 5)
+  ps2 <- param_search(d, space = param_space(rebalance.thresh = c(2, 5, 10)), strategy = st2,
+                      sim_args = list(rebalance = rebalance_plan(span = 1, unit = "month")))
+  expect_identical(ps2$params, "rebalance.thresh"); expect_true("rebalance.thresh" %in% names(ps2$results))
+  expect_error(param_search(d, space = param_space(balance_thresh = 2), strategy = st2),
+               "param_search: balance_thresh gibt es nicht mehr; bitte rebalance = rebalance_plan\\(thresh = ")
+  r2 <- simulation(d, st2, rebalance = rebalance_plan(span = 1, unit = "month", thresh = 5))
   expect_equal(ps2$results$cagr[2], r2$cagr)
   # Fehler werden je Punkt protokolliert
   bad <- param_search(d, function(p) if (p$n > 60) stop("kaputt") else b(p), param_space(n = c(50, 100), band = 0), burn_in = 250)
   expect_true(is.na(bad$results$error[1]) && grepl("kaputt", bad$results$error[2]))
   # Plateau
-  pl <- plateau(ps)
+  pl <- param_plateau(ps)
   expect_equal(pl$neighbours, c(4, 6, 4, 4, 6, 4))
   expect_equal(pl$plateau_mean[1], mean(ps$results$sharpe[c(1, 2, 4, 5)]))
   expect_output(print(ps), "Bestes Plateau")
   pdf(NULL); on.exit(dev.off(), add = TRUE)
   expect_silent(plot(ps)); expect_silent(plot(ps, params = "n"))
   # Ueberanpassung
-  pb <- pbo(ps, S = 8)
+  pb <- overfit_pbo(ps, S = 8)
   expect_s3_class(pb, "SimLevPBO"); expect_equal(pb$n_combos, choose(8, 4))
   expect_true(pb$pbo >= 0 && pb$pbo <= 1)
-  ds <- deflated_sharpe(ps)
+  ds <- sharpe_deflated(ps)
   expect_true(ds$n_eff >= 1 && ds$n_eff <= 6)
   expect_true(ds$dsr <= ds$psr + 1e-12)
-  wf <- walk_forward(ps, train = 4, test = 2)
+  wf <- overfit_walk_forward(ps, train = 4, test = 2)
   expect_s3_class(wf, "SimLevWalkForward")
   W <- wf$windows
   expect_true(all(W$test_start[-1] > W$test_end[-nrow(W)]))
@@ -98,19 +101,19 @@ test_that("param_search reproduces simulation(), keeps returns and supports over
   expect_output(print(ds), "Deflated")
 })
 
-test_that("pbo matches brute force; DSR and PSR behave", {
+test_that("overfit_pbo matches brute force; DSR and PSR behave", {
   set.seed(5); R <- matrix(rnorm(400 * 7, 1e-4, 0.01), 400)
   S <- 6; bl <- 400 %/% S; R2 <- R[(400 - bl * S + 1):400, ]; blk <- rep(1:S, each = bl)
   cb <- combn(S, S / 2); lam <- numeric(ncol(cb))
   sh <- function(M) apply(M, 2, function(r) mean(r) / sd(r))
   for (c in seq_len(ncol(cb))) { is <- blk %in% cb[, c]; a <- sh(R2[is, ]); b <- sh(R2[!is, ])
     w <- rank(b)[which.max(a)] / (ncol(R) + 1); lam[c] <- log(w / (1 - w)) }
-  expect_equal(pbo(R, S = S, frequency = "day")$lambda, lam)
+  expect_equal(overfit_pbo(R, S = S, frequency = "day")$lambda, lam)
   R[, 1] <- R[, 1] + 0.003
-  expect_lt(pbo(R, S = S, frequency = "day")$pbo, 0.05)
-  expect_gt(deflated_sharpe(R, frequency = "day")$dsr, 0.95)
-  expect_gt(probabilistic_sharpe(rnorm(1000, 0.01, 0.02), 0, 52), 0.99)
-  expect_lt(probabilistic_sharpe(rnorm(1000, 0, 0.02), 1, 52), 0.05)
+  expect_lt(overfit_pbo(R, S = S, frequency = "day")$pbo, 0.05)
+  expect_gt(sharpe_deflated(R, frequency = "day")$dsr, 0.95)
+  expect_gt(sharpe_probabilistic(rnorm(1000, 0.01, 0.02), 0, 52), 0.99)
+  expect_lt(sharpe_probabilistic(rnorm(1000, 0, 0.02), 1, 52), 0.05)
 })
 
 test_that("param_bootstrap evaluates the best points on bootstrap paths", {
@@ -127,52 +130,52 @@ test_that("param_bootstrap evaluates the best points on bootstrap paths", {
   expect_true(all(names(attr(bs, "param_ids")) %in% bs$results$strategy))
 })
 
-test_that("align_series, check_series and align_macro", {
+test_that("series_align, series_check and series_align_macro", {
   a <- data.frame(date = as.Date("2024-01-01") + c(0, 1, 2, 5, 30), value = c(100, 101, 102, 103, 110))
   b <- data.frame(date = as.Date("2024-01-02") + 0:40, close = 50 + 0:40)
-  x <- align_series(us = a, eu = b)
+  x <- series_align(us = a, eu = b)
   expect_equal(x$date[1], as.Date("2024-01-02")); expect_equal(x$date[nrow(x)], as.Date("2024-01-31"))
   expect_equal(x$us[1:6], c(101, 102, 102, 102, 103, 103))
   expect_equal(unname(attr(x, "filled")[1:4, "us"]), c(FALSE, FALSE, TRUE, TRUE))
-  expect_true(all(is.na(suppressMessages(align_series(us = a, eu = b, max_gap = 10))$us[6:29])))
-  xi <- align_series(us = a, eu = b, calendar = "intersect", range = "all")
+  expect_true(all(is.na(suppressMessages(series_align(us = a, eu = b, max_gap = 10))$us[6:29])))
+  xi <- series_align(us = a, eu = b, calendar = "intersect", range = "all")
   expect_equal(xi$date, as.Date(c("2024-01-02", "2024-01-03", "2024-01-06", "2024-01-31")))
-  expect_error(align_series(a, b), "benennen")
+  expect_error(series_align(a, b), "benennen")
   set.seed(1); n <- 600
   p <- 100 * cumprod(1 + rnorm(n, 0, 0.01)); p[300:n] <- p[300:n] / 2; p[400] <- p[400] * 1.6; p[500:515] <- p[500]
-  ck <- check_series(data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = n), A = p))
+  ck <- series_check(data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = n), A = p))
   expect_equal(ck$summary$splits, 1L); expect_equal(ck$summary$spikes, 1L); expect_equal(ck$summary$stale_max, 16L)
   expect_equal(ck$summary$jumps, 2L)
   expect_output(print(ck), "Datenpr\u00fcfung")
   cpi <- data.frame(date = seq.Date(as.Date("2019-01-01"), by = "month", length.out = 36), value = 100 * 1.003^(0:35))
   d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 120))
-  y <- align_macro(d, cpi, "infl", lag = 45, transform = "yoy")$infl
+  y <- series_align_macro(d, cpi, "infl", lag = 45, transform = "yoy")$infl
   expect_true(all(is.na(y[d$date < as.Date("2020-02-15")])))
   expect_equal(y[d$date == as.Date("2020-02-15")], 100 * (1.003^12 - 1))
-  m <- align_macro(d$date, cpi, lag = 1, lag_unit = "month")
+  m <- series_align_macro(d$date, cpi, lag = 1, lag_unit = "month")
   expect_equal(m[1], 100 * 1.003^11); expect_equal(m[d$date == as.Date("2020-02-01")], 100 * 1.003^12)
-  expect_equal(align_macro(d$date, cpi, transform = "diff")[40], 100 * (1.003^13 - 1.003^12))
+  expect_equal(series_align_macro(d$date, cpi, transform = "diff")[40], 100 * (1.003^13 - 1.003^12))
 })
 
 test_that("currency, total return, deflation, splicing and portfolios", {
   d <- data.frame(date = as.Date("2024-01-01") + 0:3, A = c(110, 121, 132, 143), fx = c(1.1, 1.1, 1.2, 1.3))
-  expect_equal(convert_currency(d, "A", "fx")$A, c(100, 110, 110, 110))
-  expect_equal(convert_currency(d, "A", 2, "multiply", "_x")$A_x, 2 * d$A)
-  expect_equal(total_return_index(c(100, 100, 98, 99), dividends = c(0, 0, 2, 0), withholding = 15),
+  expect_equal(series_convert_currency(d, "A", "fx")$A, c(100, 110, 110, 110))
+  expect_equal(series_convert_currency(d, "A", 2, "multiply", "_x")$A_x, 2 * d$A)
+  expect_equal(index_total_return(c(100, 100, 98, 99), dividends = c(0, 0, 2, 0), withholding = 15),
                100 * cumprod(c(1, 1, 99.7 / 100, 99 / 98)))
-  tri <- total_return_index(rep(100, 366), yield = 2, dates = seq.Date(as.Date("2021-01-01"), by = "day", length.out = 366))
+  tri <- index_total_return(rep(100, 366), yield = 2, dates = seq.Date(as.Date("2021-01-01"), by = "day", length.out = 366))
   expect_equal(tri[366], 100 * (1 + 0.02 / 365.25)^365, tolerance = 1e-10)
-  dd <- deflate(data.frame(date = d$date, A = d$A, cpi = c(100, 110, 121, 130)), "A", "cpi")
+  dd <- series_deflate(data.frame(date = d$date, A = d$A, cpi = c(100, 110, 121, 130)), "A", "cpi")
   expect_equal(dd$A_real, d$A / c(100, 110, 121, 130) * 100)
   f1 <- data.frame(date = as.Date("2024-03-01") + 0:5, value = c(10, 11, 12, 12.5, 13, 14))
   f2 <- data.frame(date = as.Date("2024-02-20") + 0:20, value = 200 + 0:20)
-  sp <- splice_series(fund = f1, proxy = f2)
+  sp <- series_splice(fund = f1, proxy = f2)
   expect_equal(sp$value[sp$source %in% "fund"], f1$value)
   pre <- sp$date < as.Date("2024-03-01")
   expect_equal(sp$value[pre] / 10, (200 + 0:9) / 210)
   expect_equal(sp$value[nrow(sp)] / 14, 220 / 215)
-  st <- strategy_from_weights(c(w = 0.6, b = 0.4), asset_spread = c(w = 0.1, b = 0.05), asset_class = "etf")
-  expect_equal(c(st$w$asset_share, st$b$asset_share, st$b$asset_spread), c(0.6, 0.4, 0.05))
+  st <- strategy_from_weights(c(w = 0.6, b = 0.4), spread = c(w = 0.1, b = 0.05), asset_class = "etf")
+  expect_equal(c(st$w$share, st$b$share, st$b$spread), c(0.6, 0.4, 0.05))
   expect_error(strategy_from_weights(c(a = 0.7, b = 0.5)), "summieren")
   pt <- portfolio_template("permanent", map = c(stocks = "W"))
   expect_equal(names(pt), c("W", "long_bonds", "cash", "gold"))
@@ -187,13 +190,13 @@ test_that("copula densities, fits and tail dependence", {
                  1, tolerance = 0.01)
   set.seed(1); n <- 3000
   z <- matrix(rnorm(2 * n), ncol = 2) %*% chol(matrix(c(1, .6, .6, 1), 2)); w <- sqrt(rchisq(n, 4) / 4)
-  fc <- fit_copula(z[, 1] / w, z[, 2] / w)
+  fc <- copula_fit(z[, 1] / w, z[, 2] / w)
   expect_equal(fc$family[1], "t"); expect_equal(fc$par1[1], 0.6, tolerance = 0.05); expect_equal(fc$par2[1], 4, tolerance = 0.3)
   th <- 3; u <- runif(n); t <- runif(n); v <- ((t^(-th / (1 + th)) - 1) * u^(-th) + 1)^(-1 / th)
-  fcl <- fit_copula(qnorm(u), qnorm(v))
+  fcl <- copula_fit(qnorm(u), qnorm(v))
   expect_equal(fcl$family[1], "clayton"); expect_equal(fcl$par1[1], 3, tolerance = 0.1)
   expect_equal(fcl$lambda_lower[1], 2^(-1 / fcl$par1[1]))
-  fn <- fit_copula(z[, 1], -z[, 2])
+  fn <- copula_fit(z[, 1], -z[, 2])
   expect_true(all(c("clayton_90", "gumbel_270") %in% fn$family)); expect_lt(fn$par1[fn$family == "gaussian"], 0)
   ind <- tail_dependence(rnorm(20000), rnorm(20000), c(0.05, 0.2))
   expect_equal(ind$lower, c(0.05, 0.2), tolerance = 0.15)
@@ -201,7 +204,7 @@ test_that("copula densities, fits and tail dependence", {
 
 test_that("quantile regression, DCC and dependence analysis with third variables", {
   set.seed(2); x <- rnorm(600); y <- 1 + 2 * x + rnorm(600) * (1 + abs(x))
-  qr0 <- quantile_reg(y, NULL, 0.3)
+  qr0 <- quantile_regression(y, NULL, 0.3)
   ys <- sort(y); chk <- function(b) sum((y - b) * (0.3 - (y < b)))
   expect_true(qr0 >= ys[180] - 1e-6 && qr0 <= ys[181] + 1e-6)          # Loesungsmenge [y(180), y(181)]
   expect_equal(chk(qr0), chk(ys[180]), tolerance = 1e-8)
@@ -210,7 +213,7 @@ test_that("quantile regression, DCC and dependence analysis with third variables
   pr <- combn(40, 2); best <- Inf
   for (j in seq_len(ncol(pr))) { i1 <- pr[1, j]; i2 <- pr[2, j]
     b2 <- (ysm[i2] - ysm[i1]) / (xs[i2] - xs[i1]); best <- min(best, loss(c(ysm[i1] - b2 * xs[i1], b2))) }
-  expect_equal(loss(quantile_reg(ysm, xs, 0.9)), best, tolerance = 1e-7)
+  expect_equal(loss(quantile_regression(ysm, xs, 0.9)), best, tolerance = 1e-7)
   n <- 365 * 16
   d <- data.frame(date = seq.Date(as.Date("2000-01-01"), by = "day", length.out = n))
   infl <- rep(rep(c(1, 5), each = 365), length.out = n)
@@ -235,18 +238,18 @@ test_that("quantile regression, DCC and dependence analysis with third variables
   tr <- tail_regression(d, "bonds", "inflation", quantiles = c(0.1, 0.5, 0.9), B = 19, seed = 1)
   expect_equal(nrow(tr$coefficients), 6L); expect_output(print(tr), "Quantilsregression")
   d$port <- 0.6 * d$stocks / d$stocks[1] + 0.4 * d$bonds / d$bonds[1]
-  cv <- covar_analysis(d, "port", c("stocks", "bonds"))
+  cv <- tail_covar(d, "port", c("stocks", "bonds"))
   expect_true(all(cv$summary$delta_covar < 0)); expect_output(print(cv), "CoVaR")
   expect_silent(plot(tr)); expect_silent(plot(cv))
 })
 
-test_that("validate_dependence and regime_subset", {
+test_that("dependence_validate and regime_subset", {
   set.seed(4); n <- 2000
   e <- matrix(rnorm(2 * n), ncol = 2) %*% chol(matrix(c(1, .5, .5, 1), 2))
   h <- data.frame(us = exp(0.01 * e[, 1]), eu = exp(0.01 * e[, 2]), infl = rep(c(1, 5, 1), c(700, 600, 700)))
   cfg <- bootstrap_config(c(us = "us", eu = "eu"))
   b <- bootstrap(h, cfg, "stationary", n = 10, params = list(L = 20), seed = 1, progress = FALSE)
-  vd <- validate_dependence(b, h, agg = 5, max_paths = 10)
+  vd <- dependence_validate(b, h, agg = 5, max_paths = 10)
   expect_equal(nrow(vd), 5L); expect_true(all(vd$percentile >= 0 & vd$percentile <= 1))
   s <- regime_subset(h, "infl >= 4", min_run = 50)
   expect_equal(nrow(s), 600L); expect_equal(attr(s, "episodes")$start, 701L)

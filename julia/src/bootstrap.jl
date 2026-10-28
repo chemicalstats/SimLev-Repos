@@ -3,7 +3,7 @@
 # Bootstrap-Pfade für Indizes, Hebelprodukte und Signale:
 #   bootstrap_config  Spezifikation (Indizes, Hebelprodukte, Zusatzreihen)
 #   bootstrap                         Preis-Pfade im Speicher (Klasse bootstrap_result)
-#   validate_bootstrap, bootstrap_data, study_metrics, bootstrap_study,
+#   bootstrap_validate, bootstrap_data, bootstrap_study_metrics, bootstrap_study,
 #   bootstrap_probability, block_length
 #
 # Datenstrukturen wie in R: Pfade sind Matrizen mit Spaltennamen (NamedMat),
@@ -23,8 +23,8 @@ import ..SimLev
 using Dates
 using Printf
 
-export bootstrap_config, block_length, bootstrap, validate_bootstrap, bootstrap_data,
-       study_metrics, bootstrap_study, bootstrap_probability
+export bootstrap_config, bootstrap_block_length, bootstrap, bootstrap_validate, bootstrap_data,
+       bootstrap_study_metrics, bootstrap_study, bootstrap_probability
 
 const RList = SimLev.RList
 const RFrame = SimLev.RFrame
@@ -735,14 +735,14 @@ function _pw_block(x)
 end
 
 """
-    block_length(x; transform = "none")
+    bootstrap_block_length(x; transform = "none")
 
 Optimale Blocklänge nach Politis & White (2004) mit Korrektur von Patton et
 al. (2009). `x`: Vektor, Matrix (auch `NamedMat`) oder `RFrame`; `transform`:
 "none", "abs" (`|x - mean|`) oder "squared". Ergebnis: Matrix (eine Zeile je
 Reihe) mit Spalten `stationary` und `circular`.
 """
-function block_length(x, transform_ = nothing; transform = nothing)
+function bootstrap_block_length(x, transform_ = nothing; transform = nothing)
     transform = _match_arg(transform === nothing ? transform_ : transform, ("none", "abs", "squared"))
     if x isa RFrame
         cols = names(x)
@@ -775,7 +775,7 @@ function _resolve_auto(params, returns, config, method)
         if v isa AbstractString && v == "auto"
             R = _mat(returns)
             lr = NamedMat(map(z -> _rlog(z), R); colnames = _colnames(returns))
-            b1 = block_length(lr); b2 = block_length(lr, "abs")
+            b1 = bootstrap_block_length(lr); b2 = bootstrap_block_length(lr, "abs")
             col = nm == "L" ? 1 : 2
             mx = max(maximum(b1.data[:, col]), maximum(b2.data[:, col]))
             params[nm] = max(1.0, _round0(mx))
@@ -1427,15 +1427,15 @@ end
 _new_seed() = Int(first(_R().sample_int(2147483647, 1)))
 
 """
-    bootstrap(data, config; method = "raw", n = 1000, params = nothing, ess = false,
-              ess_grid = nothing, progress = true, path_length = nothing, seed = nothing,
-              cores = 1, max_tries = 10)
+    bootstrap(data, config; method = "raw", n = 1000, params = RList(), ess = false,
+              ess_grid = nothing, path_length = nothing, max_tries = 10, seed = nothing,
+              cores = 1, progress = true)
 
 Bootstrap-Pfade erzeugen (Port von `bootstrap()`); `method` darf auch drittes
 Positionsargument sein. Ergebnis: RList der Klasse `bootstrap_result`.
 """
-function bootstrap(data, config, method_pos = nothing; method = "raw", n = 1000, params = nothing, ess = false,
-                   ess_grid = nothing, progress = true, path_length = nothing, seed = nothing, cores = 1, max_tries = 10)
+function bootstrap(data, config, method_pos = nothing; method = "raw", n = 1000, params = RList(), ess = false,
+                   ess_grid = nothing, path_length = nothing, max_tries = 10, seed = nothing, cores = 1, progress = true)
     data = SimLev.as_rframe(data)
     method_pos === nothing || (method = method_pos)
     t0 = time()
@@ -1480,13 +1480,13 @@ function _print_boot_result(io::IO, x)
 end
 
 """
-    validate_bootstrap(result; min_rows = nothing, verbose = true)
+    bootstrap_validate(result; min_rows = nothing, verbose = true)
 
 Bootstrap-Ergebnis validieren und bereinigen: entfernt leere, unvollständige
 oder nicht endliche Pfade sowie Pfade mit abweichender Zeilenzahl und normiert
 die Gewichte neu auf Mittel 1.
 """
-function validate_bootstrap(result; min_rows = nothing, verbose = true)
+function bootstrap_validate(result; min_rows = nothing, verbose = true)
     _is_boot_result(result) || _stop("result muss ein bootstrap_result-Objekt sein")
     P = collect(Any, something(_get(result, "paths"), Any[]))
     isempty(P) && _stop("Keine Pfade im Ergebnis vorhanden")
@@ -1543,17 +1543,17 @@ function _path_frame(dates, P)
 end
 
 """
-    bootstrap_data(result, i = 1; dates = nothing, start_date = "2000-01-01")
+    bootstrap_data(result, i = 1; dates = nothing, start = "2000-01-01")
 
 Bootstrap-Pfad als RFrame für `simulation()`: Spalte `date` und alle
 Pfadspalten; ausdrücklich als "rate" gekennzeichnete Zusatzreihen stehen im
 Attribut `aux_type` (`attrs(df)["aux_type"]`).
 """
-function bootstrap_data(result, i_pos = 1; i = i_pos, dates = nothing, start_date = "2000-01-01")
+function bootstrap_data(result, i_pos = 1; i = i_pos, dates = nothing, start = "2000-01-01")
     is_res = _is_boot_result(result)
     P = is_res ? result["paths"][Int(i)] : result
     nr = _nrow(P)
-    dates === nothing && (dates = _seq_dates(_todate(start_date, "start_date")[1], nr))
+    dates === nothing && (dates = _seq_dates(_todate(start, "start")[1], nr))
     _len(dates) != nr && _stop(@sprintf("dates hat Länge %d, Pfad hat %d Zeilen.", _len(dates), nr))
     d = _todate(dates, "dates")
     out = _path_frame(d, P)
@@ -1588,7 +1588,7 @@ function _tot(v)
 end
 
 "Standard-Kennzahlen einer Simulation für [`bootstrap_study`](@ref) (benannter Vektor)."
-function study_metrics(res)
+function bootstrap_study_metrics(res)
     s = _get(res, "statistics", RList())
     dq = _quantile7(_dvec(_get(res, "drawdowns")), [0.5, 0.9])
     worth = _dvec(_get(res, "worth"))
@@ -1634,35 +1634,8 @@ function _deparse(v)
     return string(v)
 end
 
-"Schlüsselwörter von `simulation()` (oder `nothing`, wenn beliebige erlaubt sind)."
-function _sim_kwnames()
-    out = Symbol[]
-    for m in methods(SimLev.simulation)
-        kws = try
-            Base.kwarg_decl(m)
-        catch
-            Symbol[]
-        end
-        for k in kws
-            endswith(string(k), "...") && return nothing
-            push!(out, k)
-        end
-    end
-    return out
-end
-
-"`do.call(simulation, c(list(data = df, strategy = strategy), args))`."
-function _sim_call(df, strategy, args::RList)
-    kw = _sim_kwnames()
-    if kw !== nothing
-        bad = [k for k in keys(args) if !(Symbol(k) in kw)]
-        if !isempty(bad)
-            txt = join([string(k, " = ", _deparse(args[k])) for k in bad], ", ")
-            _stop(string("unused argument", length(bad) > 1 ? "s" : "", " (", txt, ")"))
-        end
-    end
-    return SimLev.simulation(df, strategy; (Symbol(k) => v for (k, v) in args)...)
-end
+"`simulation()` mit den aufgelösten sim_args (R: `.sim_call`)."
+_sim_call(df, strategy, args) = SimLev._sim_call(df, strategy, args)
 
 "Logische Spalten: `NA` → `FALSE`."
 function _logical_fill(v)
@@ -1765,22 +1738,24 @@ function _load_chunk(f)
 end
 
 """
-    bootstrap_study(data, config; method = "stationary", n = 1000, strategies, params = nothing,
+    bootstrap_study(data, config; method = "stationary", n = 1000, strategies, params = RList(),
                     ess = false, ess_grid = nothing, path_length = nothing, dates = nothing,
-                    start_date = "2000-01-01", burn_in = 0, sim_args = nothing, metrics = study_metrics,
-                    benchmark = nothing, cores = 1, chunk_size = 25, seed = nothing, chunk_dir = nothing,
-                    max_tries = 10, keep_paths = 0, keep_returns = "none", keep_aux = nothing, progress = true)
+                    start = "2000-01-01", burn_in = 0, sim_args = RList(), metrics = bootstrap_study_metrics,
+                    benchmark = nothing, chunk_dir = nothing, keep_paths = 0, keep_returns = "none",
+                    keep_aux = nothing, max_tries = 10, chunk_size = 25, seed = nothing, cores = 1, progress = true)
 
 Strategien auf Bootstrap-Pfaden auswerten (Port von `bootstrap_study()`).
 `strategies`: benannte Liste (NamedTuple/Dict/Pairs) Name → Strategie oder
 Spezifikation `(strategy = …, signal = df -> …, args = (…), map = (alias = "spalte",))`;
 die Signal-Funktion bekommt ein RFrame und liefert ein RFrame oder benannte Spalten.
+`strategies` ist Pflicht wie in R; der Standardwert `nothing` ist das Gegenstück zu
+R's `missing(strategies)` und ergibt dieselbe Meldung.
 """
 function bootstrap_study(data, config, method_pos = nothing; method = "stationary", n = 1000, strategies = nothing,
-                         params = nothing, ess = false, ess_grid = nothing, path_length = nothing, dates = nothing,
-                         start_date = "2000-01-01", burn_in = 0, sim_args = nothing, metrics = study_metrics,
-                         benchmark = nothing, cores = 1, chunk_size = 25, seed = nothing, chunk_dir = nothing,
-                         max_tries = 10, keep_paths = 0, keep_returns = nothing, keep_aux = nothing, progress = true)
+                         params = RList(), ess = false, ess_grid = nothing, path_length = nothing, dates = nothing,
+                         start = "2000-01-01", burn_in = 0, sim_args = RList(), metrics = bootstrap_study_metrics,
+                         benchmark = nothing, chunk_dir = nothing, keep_paths = 0, keep_returns = nothing,
+                         keep_aux = nothing, max_tries = 10, chunk_size = 25, seed = nothing, cores = 1, progress = true)
     data = SimLev.as_rframe(data)
     method_pos === nothing || (method = method_pos)
     keep_returns = _match_arg(keep_returns, ("none", "year", "quarter", "month"))
@@ -1803,10 +1778,12 @@ function bootstrap_study(data, config, method_pos = nothing; method = "stationar
         end
     end
     benchmark !== nothing && !(benchmark in snames) && _stop("benchmark muss einer der Strategienamen sein.")
-    sim_args = _as_rlist(sim_args)
+    # Argumente für simulation() je Strategie einmal auflösen (Bausteine, Pfade; alte flache Namen: Fehler)
+    sim_args = SimLev._sim_args_set(RList(), sim_args, "bootstrap_study")
+    spec_sim = Dict{String,Any}(k => SimLev._sim_args_set(sim_args, _get(specs[k], "args"), "bootstrap_study") for k in snames)
     setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
     n_out = setup["n_out"]
-    dates === nothing && (dates = _seq_dates(_todate(start_date, "start_date")[1], n_out + 1))
+    dates === nothing && (dates = _seq_dates(_todate(start, "start")[1], n_out + 1))
     _len(dates) != n_out + 1 && _stop(@sprintf("dates braucht Länge %d (Pfadlänge + 1).", n_out + 1))
     dates = _todate(dates, "dates")
     burn_in >= n_out && _stop("burn_in ist länger als der Pfad.")
@@ -1874,7 +1851,7 @@ function bootstrap_study(data, config, method_pos = nothing; method = "stationar
                 end
             end
             bi > 0 && (df = _sim_rows(df, bi+1:SimLev.nrow(df)))
-            args = _modify_list(sim_args, _get(sp, "args"))
+            args = spec_sim[nm]
             res = try
                 _no_messages(() -> run(() -> _sim_call(df, _get(sp, "strategy"), args)))
             catch e

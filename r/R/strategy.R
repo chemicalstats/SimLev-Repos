@@ -4,7 +4,7 @@
 #' Eine Strategie legt fest, welche Assets in eine Portfolio-Simulation eingehen
 #' und wie sie jeweils konfiguriert sind. Einfache Listen werden mit
 #' asset_config() umgewandelt und dabei geprueft. Die Gewichte werden nicht
-#' normiert; simulation() verlangt eine Summe der asset_share von 1.
+#' normiert; simulation() verlangt eine Summe der share von 1.
 #'
 #' @param ... Benannte asset_config-Objekte (oder Listen von asset_config-Argumenten).
 #'   Die Namen werden zu Asset-Bezeichnern und muessen Spaltennamen der Daten entsprechen.
@@ -15,11 +15,11 @@
 #'
 #' @examples
 #' strategy <- create_strategy(
-#'   MSCI_World = asset_config(asset_class = "etf", asset_share = 0.8, asset_bonus = 30),
-#'   Gold = asset_config(asset_class = "etc", asset_share = 0.2, deliverable = TRUE)
+#'   MSCI_World = asset_config(asset_class = "etf", share = 0.8, partial_exemption = 30),
+#'   Gold = asset_config(asset_class = "etc", share = 0.2, deliverable = TRUE)
 #' )
 #'
-#' @seealso [asset_config()], [validate_strategy()], [simulation()]
+#' @seealso [asset_config()], [strategy_validate()], [simulation()]
 #' @export
 #' @noRd
 create_strategy <- function(..., assets = NULL) {
@@ -79,19 +79,19 @@ create_strategy <- function(..., assets = NULL) {
 #'
 #' @examples
 #' \dontrun{
-#' validate_strategy(strategy, market_data)
+#' strategy_validate(strategy, market_data)
 #' }
 #'
 #' @export
 #' @noRd
-validate_strategy <- function(strategy, data = NULL) {
+strategy_validate <- function(strategy, data = NULL) {
   if (!inherits(strategy, "strategy")) {
-    stop(sprintf("validate_strategy: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht %s.", class(strategy)[1]))
+    stop(sprintf("strategy_validate: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht %s.", class(strategy)[1]))
   }
   
   for (i in seq_along(strategy)) {
     if (!inherits(strategy[[i]], "asset_config")) {
-      stop(sprintf("validate_strategy: Asset '%s' ist kein asset_config()-Objekt (Klasse %s).", names(strategy)[i], class(strategy[[i]])[1]))
+      stop(sprintf("strategy_validate: Asset '%s' ist kein asset_config()-Objekt (Klasse %s).", names(strategy)[i], class(strategy[[i]])[1]))
     }
   }
   
@@ -101,19 +101,19 @@ validate_strategy <- function(strategy, data = NULL) {
     
     missing_assets <- setdiff(asset_names, data_cols)
     if (length(missing_assets) > 0) {
-      stop(sprintf("validate_strategy: Kursspalte(n) %s fehlen in data (je Asset eine Spalte gleichen Namens; vorhanden: %s).",
+      stop(sprintf("strategy_validate: Kursspalte(n) %s fehlen in data (je Asset eine Spalte gleichen Namens; vorhanden: %s).",
                    paste0("'", missing_assets, "'", collapse = ", "), paste(data_cols, collapse = ", ")))
     }
     
     for (name in asset_names) {
       asset <- strategy[[name]]
-      if (asset$action_type == "signal") {
+      if (asset$trading == "signal") {
         if (!asset$signal_buy %in% data_cols) {
-          stop(sprintf("validate_strategy: signal_buy-Spalte '%s' fehlt in data (Asset '%s').",
+          stop(sprintf("strategy_validate: signal_buy-Spalte '%s' fehlt in data (Asset '%s').",
                        asset$signal_buy, name))
         }
         if (!asset$signal_sell %in% data_cols) {
-          stop(sprintf("validate_strategy: signal_sell-Spalte '%s' fehlt in data (Asset '%s').",
+          stop(sprintf("strategy_validate: signal_sell-Spalte '%s' fehlt in data (Asset '%s').",
                        asset$signal_sell, name))
         }
       }
@@ -133,12 +133,12 @@ validate_strategy <- function(strategy, data = NULL) {
 #' @return Aktualisiertes strategy-Objekt
 #' @export
 #' @noRd
-add_asset <- function(strategy, name, asset) {
+strategy_add_asset <- function(strategy, name, asset) {
   if (!inherits(strategy, "strategy")) {
-    stop(sprintf("add_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht %s.", class(strategy)[1]))
+    stop(sprintf("strategy_add_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht %s.", class(strategy)[1]))
   }
   if (!inherits(asset, "asset_config")) {
-    stop(sprintf("add_asset: asset muss ein asset_config()-Objekt sein, nicht %s.", class(asset)[1]))
+    stop(sprintf("strategy_add_asset: asset muss ein asset_config()-Objekt sein, nicht %s.", class(asset)[1]))
   }
   
   strategy[[name]] <- asset
@@ -150,7 +150,7 @@ add_asset <- function(strategy, name, asset) {
 #'
 #' @param strategy Ein strategy-Objekt
 #' @param name Zeichenkette. Name des zu aendernden Assets
-#' @param ... Zu aendernde Felder (z. B. asset_share = 0.5); unbekannte Felder werden
+#' @param ... Zu aendernde Felder (z. B. share = 0.5); unbekannte Felder werden
 #'   mit Warnung ignoriert. Das Asset wird danach mit asset_config() neu geprueft.
 #'   Aendert sich asset_class oder deliverable und wird tax_regime nicht mit
 #'   angegeben, wird ein bisher automatisch abgeleitetes tax_regime neu abgeleitet;
@@ -159,13 +159,13 @@ add_asset <- function(strategy, name, asset) {
 #' @return Aktualisiertes strategy-Objekt
 #' @export
 #' @noRd
-update_asset <- function(strategy, name, ...) {
+strategy_update_asset <- function(strategy, name, ...) {
   if (!inherits(strategy, "strategy")) {
-    stop(sprintf("update_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht %s.", class(strategy)[1]))
+    stop(sprintf("strategy_update_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht %s.", class(strategy)[1]))
   }
   
   if (!name %in% names(strategy)) {
-    stop(sprintf("update_asset: Asset '%s' ist nicht in der Strategie (vorhanden: %s).", name, paste(names(strategy), collapse = ", ")))
+    stop(sprintf("strategy_update_asset: Asset '%s' ist nicht in der Strategie (vorhanden: %s).", name, paste(names(strategy), collapse = ", ")))
   }
   
   updates <- list(...)
@@ -181,7 +181,7 @@ update_asset <- function(strategy, name, ...) {
   
   for (param in names(updates)) {
     if (!param %in% names(asset)) {
-      warning(sprintf("update_asset: unbekannter Parameter '%s' wird ignoriert (m\u00f6glich: %s).", param, paste(names(asset), collapse = ", ")))
+      warning(sprintf("strategy_update_asset: unbekannter Parameter '%s' wird ignoriert (m\u00f6glich: %s).", param, paste(names(asset), collapse = ", ")))
       next
     }
     asset[param] <- list(updates[[param]])
@@ -200,19 +200,19 @@ update_asset <- function(strategy, name, ...) {
 #' @return Aktualisiertes strategy-Objekt (Warnung, wenn es danach leer ist)
 #' @export
 #' @noRd
-remove_asset <- function(strategy, name) {
+strategy_remove_asset <- function(strategy, name) {
   if (!inherits(strategy, "strategy")) {
-    stop(sprintf("remove_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht %s.", class(strategy)[1]))
+    stop(sprintf("strategy_remove_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht %s.", class(strategy)[1]))
   }
   
   if (!name %in% names(strategy)) {
-    stop(sprintf("remove_asset: Asset '%s' ist nicht in der Strategie (vorhanden: %s).", name, paste(names(strategy), collapse = ", ")))
+    stop(sprintf("strategy_remove_asset: Asset '%s' ist nicht in der Strategie (vorhanden: %s).", name, paste(names(strategy), collapse = ", ")))
   }
   
   strategy[[name]] <- NULL
   
   if (length(strategy) == 0) {
-    warning(sprintf("remove_asset: Nach dem Entfernen von '%s' enth\u00e4lt die Strategie keine Assets mehr.", name))
+    warning(sprintf("strategy_remove_asset: Nach dem Entfernen von '%s' enth\u00e4lt die Strategie keine Assets mehr.", name))
   }
   
   return(strategy)
@@ -233,7 +233,7 @@ print.strategy <- function(x, ...) {
     asset <- x[[name]]
     cat(sprintf("%s:\n", name))
     cat(sprintf("  Klasse: %s | Anteil: %.0f%% | Steuer: %s\n",
-                asset$asset_class, asset$asset_share * 100, asset$tax_regime))
+                asset$asset_class, asset$share * 100, asset$tax_regime))
   }
   
   invisible(x)
@@ -249,7 +249,7 @@ print.strategy <- function(x, ...) {
 summary.strategy <- function(object, ...) {
   cat(sprintf("Strategie-\u00dcbersicht: %d %s\n\n", length(object), if (length(object) == 1L) "Asset" else "Assets"))
   
-  total_share <- sum(sapply(object, function(a) a$asset_share))
+  total_share <- sum(sapply(object, function(a) a$share))
   cat(sprintf("Gesamtgewicht: %.1f%%\n", total_share * 100))
   
   if (abs(total_share - 1) > 0.001) {

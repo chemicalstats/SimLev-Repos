@@ -15,19 +15,19 @@ bootstrap_study(
   ess_grid = NULL,
   path_length = NULL,
   dates = NULL,
-  start_date = "2000-01-01",
+  start = "2000-01-01",
   burn_in = 0L,
   sim_args = list(),
-  metrics = study_metrics,
+  metrics = bootstrap_study_metrics,
   benchmark = NULL,
-  cores = 1L,
-  chunk_size = 25L,
-  seed = NULL,
   chunk_dir = NULL,
-  max_tries = 10L,
   keep_paths = 0L,
   keep_returns = c("none", "year", "quarter", "month"),
   keep_aux = NULL,
+  max_tries = 10L,
+  chunk_size = 25L,
+  seed = NULL,
+  cores = 1L,
   progress = TRUE
 )
 }
@@ -94,12 +94,12 @@ Standardwerte). Je Verfahren werden nur die oben genannten Eintraege
 verwendet:
 \describe{
 \item{L}{Erwartete Blocklaenge in Zeilen fuer "stationary" (Zahl >= 1,
-Standard 20) oder \code{"auto"} (\code{\link[=block_length]{block_length()}}, Spalte
+Standard 20) oder \code{"auto"} (\code{\link[=bootstrap_block_length]{bootstrap_block_length()}}, Spalte
 \code{stationary}).}
 \item{block_length}{Feste Blocklaenge in Zeilen fuer "block" und
 "circular" (ganze Zahl, Standard 20; bei "block" hoechstens Zeilen der
 Historie minus 1, bei "circular" hoechstens Zeilen der Historie) oder
-\code{"auto"} (\code{\link[=block_length]{block_length()}}, Spalte \code{circular}).}
+\code{"auto"} (\code{\link[=bootstrap_block_length]{bootstrap_block_length()}}, Spalte \code{circular}).}
 \item{wild_type}{Gewichte beim Wild Bootstrap: 0 = Rademacher
 (Standard), 1 = Mammen, 2 = Standardnormal; andere Werte sind ein
 Fehler.}
@@ -146,9 +146,9 @@ mindestens 1); \code{NULL} (Standard) = Anzahl verwendbarer Zeilen der Historie.
 z. B. 50-jaehrige Pfade aus 30 Jahren Historie erzeugen. Jeder Pfad hat
 \code{path_length + 1} Zeilen (Startzeile plus Schritte).}
 
-\item{dates, start_date}{Kalender der Pfade: \code{dates} ist ein
+\item{dates, start}{Kalender der Pfade: \code{dates} ist ein
 Datumsvektor der Laenge \code{path_length + 1}; \code{NULL} (Standard) =
-aufeinanderfolgende Kalendertage ab \code{start_date} (Standard
+aufeinanderfolgende Kalendertage ab \code{start} (Standard
 "2000-01-01"), siehe \code{\link[=bootstrap_data]{bootstrap_data()}}.}
 
 \item{burn_in}{Anzahl Anfangszeilen des Pfads, die nach der
@@ -157,10 +157,14 @@ eine 430-Tage-SMA; Standard 0). Muss kleiner als \code{path_length} sein.}
 
 \item{sim_args}{Benannte Liste gemeinsamer Argumente fuer \code{\link[=simulation]{simulation()}}
 (Standard \code{list()}), z. B. \code{list(start_value = 1000,
-  tax_mode = "person")}.}
+  tax = tax_profile())}: Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
+also auch Bausteine (z. B. \code{dca = dca_plan(100, 1)}, \code{tax = tax_profile()}) und
+Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
+\code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.5.0 vor den Bausteinen, z. B.
+\code{dca_value}) ergeben einen Fehler, der den Baustein nennt.}
 
 \item{metrics}{Funktion \code{SimLevResult -> benannter numerischer Vektor}
-(Standard \code{\link[=study_metrics]{study_metrics()}}); die Namen werden zu Spalten von
+(Standard \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}}); die Namen werden zu Spalten von
 \code{results}.}
 
 \item{benchmark}{Name einer Strategie aus \code{strategies} als Vergleich
@@ -234,7 +238,7 @@ Objekt der Klasse \code{SimLevBootstrapStudy}, eine Liste mit
 \code{strategy}, \code{path} (Pfadnummer), \code{weight}
 (Pfadgewicht), \code{combo} (ESS-Kombination), \code{tries}
 (Versuche) und den Kennzahlen aus \code{metrics} (bei
-\code{\link[=study_metrics]{study_metrics()}} z. B. \code{cagr} und \code{max_drawdown} als Anteil).}
+\code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}} z. B. \code{cagr} und \code{max_drawdown} als Anteil).}
 \item{method, n_paths, strategies, benchmark, config, params, seed,
 burn_in, path_length, elapsed}{Metadaten (\code{elapsed} in Sekunden).}
 \item{ess_design, path_weights}{ESS-Design (oder \code{NULL}) und
@@ -290,9 +294,9 @@ st <- bootstrap_study(d, cfg, "stationary", n = 4, params = list(L = 30),
   path_length = 2 * 365 + 100, burn_in = 100, cores = 1, seed = 1,
   progress = FALSE, benchmark = "bnh", keep_returns = "year",
   strategies = list(
-    bnh = create_strategy(akt_l2 = asset_config("etf", "bnh", asset_bonus = 30)),
+    bnh = create_strategy(akt_l2 = asset_config("etf", "bnh", partial_exemption = 30)),
     sma = list(strategy = create_strategy(akt_l2 = asset_config("etf", "signal",
-                 asset_bonus = 30, signal_buy = "buy", signal_sell = "sell")),
+                 partial_exemption = 30, signal_buy = "buy", signal_sell = "sell")),
                signal = sma)))
 st$results[, c("strategy", "path", "cagr", "max_drawdown")]
 bootstrap_probability(st, cagr > 0, joint = cagr > 0 & max_drawdown <= 0.5)
@@ -310,11 +314,11 @@ sma_signal <- function(df, n = 310) {
 }
 st <- bootstrap_study(hist, cfg, "stationary", n = 1000, params = list(L = 250),
   strategies = list(
-    bnh = create_strategy(eu_l2 = asset_config("etf", "bnh", asset_bonus = 30)),
+    bnh = create_strategy(eu_l2 = asset_config("etf", "bnh", partial_exemption = 30)),
     sma = list(strategy = create_strategy(eu_l2 = asset_config("etf", "signal",
-                 asset_bonus = 30, signal_buy = "buy", signal_sell = "sell")),
+                 partial_exemption = 30, signal_buy = "buy", signal_sell = "sell")),
                signal = sma_signal)),
-  sim_args = list(start_value = 1000, tax_mode = "person"),
+  sim_args = list(start_value = 1000, tax = tax_profile()),
   burn_in = 730, benchmark = "bnh", cores = 8, seed = 42)
 summary(st)
 bootstrap_probability(st, ttwror >= 0.10 & max_drawdown <= 0.6)

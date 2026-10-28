@@ -9,9 +9,9 @@ sensitivity_grid(
   strategy,
   grid,
   sim_args = list(),
-  metrics = study_metrics,
-  cores = 1L,
-  keep_results = FALSE
+  metrics = bootstrap_study_metrics,
+  keep_results = FALSE,
+  cores = 1L
 )
 }
 \arguments{
@@ -20,17 +20,32 @@ sensitivity_grid(
 \code{\link[=create_strategy]{create_strategy()}}.}
 
 \item{grid}{Benannte Liste von Argumentwerten fuer \code{\link[=simulation]{simulation()}}; alle
-Kombinationen werden gerechnet, z. B.
-\code{list(balance_unit = c("month", "year"), balance_thresh = c(5, 10))}.
-Alternativ ein data.frame mit einer Zeile je Lauf. Listen-Spalten
-(z. B. \code{split_thresh}) sind erlaubt. \code{NA} laesst das Argument
-weg (Standardwert von \code{\link[=simulation]{simulation()}} bzw. Wert aus \code{sim_args}).}
+Kombinationen werden gerechnet. Parameter der Bausteine werden mit Pfad
+\code{"<Baustein>.<Parameter>"} angesprochen, z. B.
+\code{list(rebalance.unit = c("month", "year"), rebalance.thresh = c(5, 10))},
+\code{"dca.value"}, \code{"tax.rate"}, \code{"tax.church_tax"}; Teilbausteine von
+\code{tax_profile()} mit drei Teilen (\code{"tax.income.marginal_rate"},
+\code{"tax.income.taxable_income"}, \code{"tax.harvest.day"}). Ein Pfad baut den
+Baustein fuer jeden Lauf neu: Grundwerte aus dem gleichnamigen Baustein in
+\code{sim_args} (ohne ihn die Standardwerte des Konstruktors, z. B.
+\code{dca_plan(value, span)} braucht dann beide Pfade); mehrere Pfade eines Bausteins
+gelten zusammen. Ohne Punkt sind es Argumente von \code{simulation()}
+(\code{start_value}, \code{risk_free}, \code{fractions}, \code{liquidate},
+\code{details} oder ein ganzer Baustein als Listen-Spalte). Unbekannte Pfade und die
+alten Einzelargumente (z. B. \code{balance_unit}) ergeben einen Fehler mit den
+moeglichen Bausteinen und Parametern. Alternativ ein data.frame mit einer Zeile je
+Lauf. Listen-Spalten (z. B. \code{splits.thresh}) sind erlaubt. \code{NA} laesst das
+Argument weg (Standardwert bzw. Wert aus \code{sim_args}).}
 
 \item{sim_args}{Benannte Liste gemeinsamer Argumente fuer alle Laeufe
-(Standard \code{list()}); Werte aus \code{grid} haben Vorrang.}
+(Standard \code{list()}); Werte aus \code{grid} haben Vorrang. Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
+also auch Bausteine (z. B. \code{dca = dca_plan(100, 1)}, \code{tax = tax_profile()}) und
+Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
+\code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.5.0 vor den Bausteinen, z. B.
+\code{dca_value}) ergeben einen Fehler, der den Baustein nennt.}
 
 \item{metrics}{Funktion \code{SimLevResult -> benannter numerischer Vektor}
-(Standard \code{\link[=study_metrics]{study_metrics()}}).}
+(Standard \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}}).}
 
 \item{cores}{Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).}
 
@@ -39,7 +54,7 @@ zusaetzlich als Attribut \code{results} zurueckgeben.}
 }
 \value{
 data.frame: Rasterspalten (Listen-Spalten als Text "a/b"), die
-Kennzahlen aus \code{metrics} (bei \code{\link[=study_metrics]{study_metrics()}} z. B. \code{cagr}
+Kennzahlen aus \code{metrics} (bei \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}} z. B. \code{cagr}
 als Anteil; mit Sparplan geldgewichtet, XIRR) und, falls ein Lauf
 fehlschlug, eine Spalte \code{error} (Fehlermeldung, Kennzahlen dann \code{NA}); schlagen alle Laeufe fehl,
 ein Fehler mit den Meldungen der Laeufe. Bei
@@ -50,17 +65,19 @@ ein Fehler mit den Meldungen der Laeufe. Bei
 Ruft \code{\link[=simulation]{simulation()}} fuer jede Kombination von \code{grid} auf denselben
 Daten und derselben Strategie auf und sammelt die Kennzahlen in einem
 data.frame (eine Zeile je Lauf). Grundlage der speziellen Studien in
-diesem Abschnitt (\code{\link[=rebalancing_sensitivity]{rebalancing_sensitivity()}}, \code{\link[=leverage_sensitivity]{leverage_sensitivity()}}).
+diesem Abschnitt (\code{\link[=sensitivity_rebalancing]{sensitivity_rebalancing()}}, \code{\link[=sensitivity_leverage]{sensitivity_leverage()}}).
 }
 \examples{
 set.seed(1)
 d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = 1500))
 d$A <- 100 * cumprod(1 + rnorm(1500, 3e-4, 0.01)); d$B <- 100 * cumprod(1 + rnorm(1500, 1e-4, 0.004))
 st <- create_strategy(A = asset_config("etf", "bnh", 0.6), B = asset_config("etf", "bnh", 0.4))
-sensitivity_grid(d, st, list(balance_unit = c("month", "year")),
-                 sim_args = list(balance_mode = TRUE, balance_span = 1))[, c("balance_unit", "cagr", "trades")]
+sensitivity_grid(d, st, list(rebalance.unit = c("month", "year")),
+                 sim_args = list(rebalance = rebalance_plan(span = 1)))[, c("rebalance.unit", "cagr", "trades")]
+sensitivity_grid(d, st, list(dca.value = c(100, 200), tax.rate = c(20, 26.375)),
+                 sim_args = list(dca = dca_plan(50, 1), tax = tax_profile()))[, c("dca.value", "tax.rate", "cagr")]
 }
 \seealso{
-\code{\link[=rebalancing_sensitivity]{rebalancing_sensitivity()}}, \code{\link[=leverage_sensitivity]{leverage_sensitivity()}},
-\code{\link[=study_metrics]{study_metrics()}}, \code{\link[=simulation]{simulation()}}
+\code{\link[=sensitivity_rebalancing]{sensitivity_rebalancing()}}, \code{\link[=sensitivity_leverage]{sensitivity_leverage()}},
+\code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}}, \code{\link[=simulation]{simulation()}}
 }

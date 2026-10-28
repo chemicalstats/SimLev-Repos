@@ -4,7 +4,7 @@
 #  param_search()                  Raster, Zufallssuche oder Latin Hypercube;
 #                                  simulation() je Punkt, Kennzahlen und
 #                                  tägliche TWR-Renditen
-#  plateau()                       Nachbarschafts-Glättung der Zielgröße
+#  param_plateau()                       Nachbarschafts-Glättung der Zielgröße
 module ParamSearch
 
 import ..SimLev
@@ -15,8 +15,10 @@ using Dates
 const SL = SimLev
 const NA = SimLev.NA
 const OF = SimLev.Overfitting
+# Platzhalter für ein R-Argument ohne Standardwert (space in param_search)
+const _MISSING = SimLev.Bootstrap._MISSING
 
-export param_space, param_range, param_search, plateau
+export param_space, param_range, param_search, param_plateau
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Suchraum
@@ -294,11 +296,9 @@ function _run_spec(df, sp, sim_args, burn_in)
         end
     end
     burn_in > 0 && (df = SL.rows(df, (Int(burn_in) + 1):SL.nrow(df)))
-    a = OF._lget(sp, "args")
-    args = OF._modify_list(sim_args === nothing ? SL.RList() : sim_args, a === nothing ? SL.RList() : a)
-    kw = Dict{Symbol,Any}(Symbol(k) => v for (k, v) in args)
+    args = SL._sim_args_set(sim_args, OF._lget(sp, "args"), "param_search")
     st = OF._lget(sp, "strategy")
-    return OF._quiet(() -> SL.simulation(df, st; kw...))
+    return OF._quiet(() -> SL._sim_call(df, st, args))
 end
 
 "`.par_lapply(X, FUN, cores)` (Schicht 0: `SimLev.RParallel.par_lapply`)."
@@ -313,10 +313,15 @@ _with_rng(f, seed) = seed === nothing ? f() : SL.Bootstrap._with_rng_restore(f; 
 
 """
     param_search(data, builder, space; strategy = nothing, method = "grid", n = 50,
-                 constraint = nothing, sim_args = RList(), burn_in = 0,
-                 metrics = study_metrics, objective = "sharpe", maximize = true,
-                 cores = 1, seed = nothing, keep_returns = true)
-    param_search(data; space, strategy, ...)
+                 constraint = nothing, sim_args = nothing, burn_in = 0,
+                 metrics = nothing, objective = "sharpe", maximize = true,
+                 keep_returns = true, seed = nothing, cores = 1)
+    param_search(data; builder = nothing, space, strategy, ...)
+
+`builder` und `space` gehen positionell oder als Schlüsselwort. `builder`
+hat wie in R den Standardwert `nothing`; `space` ist wie in R Pflicht (ohne
+`space` die Meldung von R `argument "space" is missing, with no default`).
+`sim_args = nothing` steht für R `list()`, `metrics = nothing` für `bootstrap_study_metrics`.
 
 Wertet eine Strategie für jeden Punkt eines Parameterraums mit `simulation()`
 aus. `builder(p)` erhält eine benannte Liste `p` (`RList`) und liefert eine
@@ -325,26 +330,29 @@ Strategie oder eine Spezifikation `(strategy, signal, args, map, data)`
 Argumente von `simulation()` für `strategy` verwendet. Ergebnis: `RList` der
 Klasse `SimLevParamSearch` (`results`, `returns`, `dates`, …).
 """
-param_search(data, builder_pos = nothing; builder = builder_pos, space, kw...) = param_search(data, builder, space; kw...)
-function param_search(data, builder, space; strategy = nothing, method = nothing, n = 50, constraint = nothing,
+function param_search(data, builder_pos = nothing, space_pos = _MISSING; builder = builder_pos, space = space_pos,
+                      strategy = nothing, method = nothing, n = 50, constraint = nothing,
                       sim_args = nothing, burn_in = 0, metrics = nothing, objective = "sharpe", maximize = true,
-                      cores = 1, seed = nothing, keep_returns::Bool = true)
+                      keep_returns::Bool = true, seed = nothing, cores = 1)
     data = SimLev.as_rframe(data)
     method = OF._match_arg(method, ("grid", "random", "lhs"))
     sim_args = sim_args === nothing ? SL.RList() : OF._as_rlist(sim_args)
-    metrics === nothing && (metrics = SL.Bootstrap.study_metrics)
+    metrics === nothing && (metrics = SL.Bootstrap.bootstrap_study_metrics)
+    space === _MISSING && error("argument \"space\" is missing, with no default")
     (space isa SL.RList && SL.inherits(space, "SimLevParamSpace")) || (space = param_space(OF._kv(space)...))
     if builder === nothing
         strategy === nothing && error("param_search: 'builder' oder 'strategy' angeben.")
         fixed = strategy
+        SL._sim_check_names(collect(keys(space)), "param_search")   # Dimensionen = Argumente von simulation() bzw. Pfade
         builder = p -> SL.RList("strategy" => fixed, "args" => p)
     end
+    sim_run_args = SL._sim_args_set(SL.RList(), sim_args, "param_search")
     design = _with_rng(() -> _ps_design(space, method, n, constraint), seed)
     t0 = time()
     function run(i)
         p = _row_list(design, i)
         res = try
-            _run_spec(data, _as_spec(builder(p)), sim_args, burn_in)
+            _run_spec(data, _as_spec(builder(p)), sim_run_args, burn_in)
         catch e
             e isa InterruptException && rethrow()
             return (m = nothing, err = OF._cond_msg(e), date = nothing, ret = nothing)
@@ -479,14 +487,14 @@ end
 const _LOWER_BETTER = ("max_drawdown", "avg_drawdown", "dd_q50", "dd_q90", "ulcer_index", "longest_drawdown")
 
 """
-    plateau(x; metric = x.objective, radius = 1, k = 5)
+    param_plateau(x; metric = x.objective, radius = 1, k = 5)
 
 Plateau-Wert je Punkt einer Parametersuche: Mittel (`plateau_mean`) und
 ungünstigster Wert (`plateau_min`) der Kennzahl über die Nachbarschaft
 (Raster: höchstens `radius` Stufen je Dimension; sonst die `k` nächsten
 Punkte im rangskalierten Raum). Ergebnis: `RFrame`.
 """
-function plateau(x; metric = nothing, radius = 1, k = 5)
+function param_plateau(x; metric = nothing, radius = 1, k = 5)
     (x isa SL.RList && SL.inherits(x, "SimLevParamSearch")) || error("x muss ein SimLevParamSearch sein.")
     metric === nothing && (metric = x["objective"])
     tab = x["results"]
@@ -513,7 +521,7 @@ _select(df::SL.RFrame, cols) = SL.RFrame((c => df[c] for c in cols)...; nrow = S
 function _summary_ps(object; top = 10, kw...)
     tab = copy(object["results"])
     obj = String(object["objective"])
-    pl = plateau(object)
+    pl = param_plateau(object)
     tab["plateau"] = pl["plateau_mean"]
     mx = get(object, "maximize", nothing) === true
     ord = OF._order(OF._tofloat(tab[obj]); decreasing = mx)
@@ -555,7 +563,11 @@ function _print_summary_ps(io::IO, x)
     nothing
 end
 
-_print_ps(io::IO, x) = _print_summary_ps(io, _summary_ps(x))
+"R `print.SimLevParamSearch(x, ...)`: druckt `summary(x, ...)`; Schlüsselwörter gehen an summary (z. B. `top`)."
+function _print_ps(io::IO, x; kw...)
+    _print_summary_ps(io, _summary_ps(x; kw...))
+    return nothing
+end
 
 function _plot_ps(x; metric = nothing, params = nothing, fun = maximum, file = nothing, kw...)
     tab = x["results"]

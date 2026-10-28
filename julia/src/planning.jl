@@ -1,12 +1,12 @@
 # Planning – r/R/planning.R (Vorlage python/simlev/planning.py)
 #
-#   set_expected_return()  verschiebt historische Renditen auf eine eigene
+#   series_shift_return()  verschiebt historische Renditen auf eine eigene
 #                          Renditeannahme (Streuung, Abhängigkeiten und
 #                          Verlaufsmuster bleiben erhalten)
-#   pooled_bootstrap()     stationärer Block-Bootstrap über mehrere Länder
+#   bootstrap_pooled()     stationärer Block-Bootstrap über mehrere Länder
 #                          (Anarkulova, Cederburg & O'Doherty 2022)
 #   portfolio_returns()    Periodenrenditen von Kandidaten-Portfolios
-#   goal_optimize()        dynamische Programmierung für Zielwahrscheinlich-
+#   planning_goal()        dynamische Programmierung für Zielwahrscheinlich-
 #                          keiten (Das, Ostrov, Radhakrishnan & Srivastav 2020)
 module Planning
 
@@ -14,7 +14,7 @@ import ..SimLev
 using ..SimLev: _AnaSvg, _ana_hline, _ana_legend, _ana_panel, _ana_ramp, _ana_rect, _ana_svg_done
 using Dates
 
-export set_expected_return, pooled_bootstrap, portfolio_returns, goal_optimize
+export series_shift_return, bootstrap_pooled, portfolio_returns, planning_goal
 
 const DA = SimLev.DeepAnalysis
 const _NA = SimLev.NA
@@ -33,18 +33,18 @@ _as_num(a) = Float64[Float64(e) for e in a]
 _cols(columns) = columns isa AbstractString ? [String(columns)] : String[String(c) for c in columns]
 
 # ═══════════════════════════════════════════════════════════════════════════
-# set_expected_return
+# series_shift_return
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-    set_expected_return(data, columns, target; type = ["returns", "prices"], ppy = nothing)
+    series_shift_return(data, columns, target; type = ["returns", "prices"], ppy = nothing)
 
 Verschiebt die logarithmierten Renditen der Spalten `columns` so, dass ihre
-geometrische Rendite `target` Prozent p. a. beträgt (R: `set_expected_return()`).
+geometrische Rendite `target` Prozent p. a. beträgt (R: `series_shift_return()`).
 Ergebnis: Kopie von `data`; `attrs(x)["shift"]` = angewendete Verschiebung je
 Spalte in Prozent p. a.
 """
-function set_expected_return(data, columns, target; type = ["returns", "prices"], ppy = nothing)
+function series_shift_return(data, columns, target; type = ["returns", "prices"], ppy = nothing)
     data = SimLev.as_rframe(data)
     type = DA._match_arg(type, ["returns", "prices"])
     DA._is_frame(data) || DA._stop("data muss ein data.frame sein.")
@@ -70,7 +70,7 @@ function set_expected_return(data, columns, target; type = ["returns", "prices"]
         end
     end
     n = SimLev.nrow(data)
-    dd = "date" in nms ? DA._to_date_days(data["date"], "set_expected_return: data\$date") : nothing
+    dd = "date" in nms ? DA._to_date_days(data["date"], "series_shift_return: data\$date") : nothing
     o = if dd !== nothing
         ok = findall(!isnan, dd); nn = findall(isnan, dd)
         vcat(ok[sortperm(dd[ok]; alg = MergeSort)], nn)
@@ -144,14 +144,14 @@ end
 _wd_ppy(frequency) = SimLev.Withdrawal._wd_ppy(frequency)
 
 """
-    pooled_bootstrap(datasets, columns; weights = nothing, inflation = nothing,
+    bootstrap_pooled(datasets, columns; weights = nothing, inflation = nothing,
                      frequency = ["year", "quarter", "month"], n = 1000, years = 30, L = nothing,
                      country_weights = nothing, target = nothing, seed = nothing)
 
-Länder-Bootstrap für lange Horizonte (R: `pooled_bootstrap()`); Ergebnis ist
+Länder-Bootstrap für lange Horizonte (R: `bootstrap_pooled()`); Ergebnis ist
 ein `withdrawal_paths`-Objekt (`RList`).
 """
-function pooled_bootstrap(datasets, columns; weights = nothing, inflation = nothing,
+function bootstrap_pooled(datasets, columns; weights = nothing, inflation = nothing,
                           frequency = ["year", "quarter", "month"], n = 1000, years = 30, L = nothing,
                           country_weights = nothing, target = nothing, seed = nothing)
     frequency = DA._match_arg(frequency, ["year", "quarter", "month"])
@@ -291,7 +291,7 @@ function portfolio_returns(data, candidates; frequency = ["year", "quarter", "mo
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# goal_optimize
+# planning_goal
 # ═══════════════════════════════════════════════════════════════════════════
 
 "`approx(x, y, xout, rule = 2)\$y`."
@@ -322,13 +322,13 @@ function _as_matrix(r)
 end
 
 """
-    goal_optimize(returns, start_value, goal, horizon; contributions = 0, n_grid = 301,
+    planning_goal(returns, start_value, goal, horizon; contributions = 0, n_grid = 301,
                   n_sim = 5000, seed = nothing)
 
-Zielbasierte Allokation per dynamischer Programmierung (R: `goal_optimize()`).
+Zielbasierte Allokation per dynamischer Programmierung (R: `planning_goal()`).
 Ergebnis: `RList` der Klasse `SimLevGoalPlan`.
 """
-function goal_optimize(returns, start_value, goal, horizon; contributions = 0, n_grid = 301, n_sim = 5000, seed = nothing)
+function planning_goal(returns, start_value, goal, horizon; contributions = 0, n_grid = 301, n_sim = 5000, seed = nothing)
     returns = SimLev.as_rframe(returns)
     R, cn0, isnum = _as_matrix(returns)
     S, K = R === nothing ? (0, 0) : size(R)
@@ -445,7 +445,7 @@ function goal_optimize(returns, start_value, goal, horizon; contributions = 0, n
     se = sqrt(p_sim * (1 - p_sim) / nsim)
     tol = 4 * sqrt(max(p_sim * (1 - p_sim), 1 / nsim) / nsim) + 0.01
     if abs(p_dp - p_sim) > tol
-        @warn DA._sp("goal_optimize: DP-Wert %.1f %% weicht von der Vorwärtssimulation %.1f %% ab; probability ist der simulierte Wert (n_grid erhöhen).",
+        @warn DA._sp("planning_goal: DP-Wert %.1f %% weicht von der Vorwärtssimulation %.1f %% ab; probability ist der simulierte Wert (n_grid erhöhen).",
                      100 * p_dp, 100 * p_sim)
     end
     SimLev.RList("probability" => p_sim, "probability_se" => se, "probability_dp" => p_dp,

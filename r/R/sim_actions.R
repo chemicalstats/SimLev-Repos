@@ -33,26 +33,26 @@
       if (time == 1L && money - dca_part > 0.005) {
         .fee_env$current <- fee_order
         sim_mem[["status"]][[name]][["money"]] <- money - dca_part
-        sim_mem <- perform_trade_buy(input = sim_mem, name = name, index = time, reason = reason,
+        sim_mem <- .perform_trade_buy(input = sim_mem, name = name, index = time, reason = reason,
                                      spread = spread_rates[[name]], fractions = fractions, details = details)
         sim_mem[["status"]][[name]][["money"]] <- sim_mem[["status"]][[name]][["money"]] + dca_part
       }
       .fee_env$current <- fee_dca
     }
-    sim_mem <- perform_trade_buy(input = sim_mem, name = name, index = time, reason = reason,
+    sim_mem <- .perform_trade_buy(input = sim_mem, name = name, index = time, reason = reason,
                                  spread = spread_rates[[name]], fractions = fractions, details = details)
     if (fees_on) .fee_env$current <- fee_order
     sim_mem
   }
 
   # Verkaufsmenge, deren Erloes nach Steuer UND Ordergebuehr 'need' deckt (R1-18).
-  # Ohne Ordergebuehr identisch mit calculate_sell_count(target = need). Steuerschaetzung mit dem
+  # Ohne Ordergebuehr identisch mit .calculate_sell_count(target = need). Steuerschaetzung mit dem
   # effektiven Satz (Guenstigerpruefung), wie beim Verkauf selbst (R3a-04).
   # round_up = TRUE (Zwangsverkauf fuer eine Zahlung, R3a-03): bei fractions = FALSE die
   # aufgerundete statt der naechstliegenden Stueckzahl (fifo_price = NULL: Verkauf rechnet FIFO selbst)
   .sell_count_net <- function(sim_mem, name, need, time, round_up = FALSE) {
     fr <- fractions || round_up
-    sc_of <- function(target) calculate_sell_count(
+    sc_of <- function(target) .calculate_sell_count(
       input = sim_mem, name = name, target = target, index = time,
       spread = spread_rates[[name]], fractions = fr,
       tax_mode = tax_mode, tax_rate = effective_tax_rate,
@@ -60,7 +60,7 @@
     fee <- .fee_env$current
     target <- need
     if (!is.null(fee)) {
-      px <- apply_spread(sim_mem[["market"]][[name]][["asset_price"]][time], spread_rates[[name]], "sell")
+      px <- .apply_spread(sim_mem[["market"]][[name]][["asset_price"]][time], spread_rates[[name]], "sell")
       for (k in 1:3) target <- need + .fee_amount(fee, max(sc_of(target)[["sell_count"]], 1e-12) * px)
     }
     res <- sc_of(target)
@@ -77,7 +77,7 @@
     if (short <= 0 || sim_mem[["status"]][[name]][["count"]] <= 0) return(sim_mem)
     fee_keep <- .fee_env$current; .fee_env$current <- NULL
     on.exit(.fee_env$current <- fee_keep, add = TRUE)
-    sell <- function(sim_mem, n) perform_trade_sell(
+    sell <- function(sim_mem, n) .perform_trade_sell(
       input = sim_mem, count = n, name = name, index = time,
       tax_mode = tax_mode, tax_rate = tax_rate, effective_tax_rate = effective_tax_rate,
       marginal_tax_rate = marginal_tax_rate, private_sale_threshold = private_sale_threshold,
@@ -86,7 +86,7 @@
     n_sell <- if (tax_mode != "person") {        # keine Steuer auf den Verkauf: Stueckzahl exakt
       px <- sim_mem[["market"]][[name]][["asset_price"]][time]
       min(sim_mem[["status"]][[name]][["count"]], if (fractions) short / px else ceiling(short / px - 1e-9))
-    } else calculate_sell_count(
+    } else .calculate_sell_count(
       input = sim_mem, name = name, target = short, index = time, spread = 0, fractions = fractions,
       tax_mode = tax_mode, tax_rate = effective_tax_rate, marginal_tax_rate = marginal_tax_rate,
       tax_regime = tax_regimes[[name]])[["sell_count"]]
@@ -130,7 +130,7 @@
       if (k > 1 || !(n_sell > 0))   # Nachverkauf: mindestens ein Stueck bzw. der Rest
         n_sell <- max(n_sell, if (fractions) min(sim_mem[["status"]][[name]][["count"]], 1e-6) else min(1, sim_mem[["status"]][[name]][["count"]]))
       before <- raised(sim_mem)
-      sim_mem <- perform_trade_sell(
+      sim_mem <- .perform_trade_sell(
         input = sim_mem, count = n_sell,
         price = sell_result[["fifo_price"]], name = name, index = time,
         tax_mode = tax_mode, tax_rate = tax_rate,
@@ -211,7 +211,7 @@
     sim_mem
   }
 
-  # R3a-02: § 23-Steuer des Vorjahres (in handle_year_change festgesetzt und in total_taxes gebucht)
+  # R3a-02: § 23-Steuer des Vorjahres (in .handle_year_change festgesetzt und in total_taxes gebucht)
   # aus dem Depot zahlen, am Abrechnungstag der Vorabpauschale (nach dieser) bzw. am letzten Tag
   # R9-02: Im Tarifweg ist p23_due die Nachzahlung der Jahresveranlagung (Paragraf-23-Steuer, Wirkung der
   # Kirchensteuer-Sonderausgaben, Guenstigerpruefung), auch ohne Paragraf-23-Gewinn; die details-Ausgabe
@@ -266,14 +266,14 @@
     res <- vector("list", length(pend))
     if (length(pend) > 1L) {
       taxable <- vapply(pend, function(p) p[["flat_rate"]] * (1 - p[["bonus"]]), numeric(1))
-      pooled <- calculate_vorabpauschale_tax(flat_rate = sum(taxable), bonus = 0, totals = sim_mem[["totals"]],
+      pooled <- .calculate_vorabpauschale_tax(flat_rate = sum(taxable), bonus = 0, totals = sim_mem[["totals"]],
                                              tax_rate = effective_tax_rate, use_spb = use_sparer_pauschbetrag)
       sim_mem[["totals"]] <- pooled$totals
       share <- if (sum(taxable) > 0) taxable / sum(taxable) else rep(1 / length(pend), length(pend))
       for (j in seq_along(pend)) res[[j]] <- list(tax = pooled$tax * share[j], spb_used = pooled$spb_used * share[j])
     } else if (length(pend) == 1L) {
       p <- pend[[1]]
-      r1 <- calculate_vorabpauschale_tax(flat_rate = p[["flat_rate"]], bonus = p[["bonus"]], totals = sim_mem[["totals"]],
+      r1 <- .calculate_vorabpauschale_tax(flat_rate = p[["flat_rate"]], bonus = p[["bonus"]], totals = sim_mem[["totals"]],
                                          tax_rate = effective_tax_rate, use_spb = use_sparer_pauschbetrag)
       sim_mem[["totals"]] <- r1$totals
       res[[1]] <- list(tax = r1$tax, spb_used = r1$spb_used)
@@ -283,7 +283,7 @@
 
   # § 18 Abs. 3 InvStG: Zufluss der am 31.12. festgesetzten Vorabpauschalen. Die Steuer
   # (Teilfreistellung, § 20-Verlusttopf, Sparer-Pauschbetrag, Guenstigerpruefung) wird
-  # mit den Toepfen des Zuflussjahres berechnet (Aufruf nach handle_year_change);
+  # mit den Toepfen des Zuflussjahres berechnet (Aufruf nach .handle_year_change);
   # die VP zaehlt damit als Kapitalertrag des Zuflussjahres. prepaid: je offener VP bereits gezahlter
   # Betrag (A7-11, Ende am 31.12.)
   .settle_vp <- function(sim_mem, time, prepaid = NULL) {

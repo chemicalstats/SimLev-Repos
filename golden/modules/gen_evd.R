@@ -175,7 +175,7 @@ C2_P <- "cfg2 = bootstrap_config({'a': 'a', 'b': 'b'})\n"
 C2_J <- 'cfg2 = bootstrap_config((a = "a", b = "b"))\n'
 BS <- function(id, cr, cp, cj, dat, cfg, extra = "", pextra = "", jextra = "", n = 2, seed = 1)
   case(paste0("bs_", id), paste0(cr, sprintf("bootstrap(%s, %s, 'evt', n = %d, seed = %d, progress = FALSE%s)", dat, cfg, n, seed, extra)),
-       paste0(cp, sprintf("result = bootstrap(%s, %s, 'evt', n=%d, seed=%d, progress=False%s)", dat, cfg, n, seed, pextra)), IB,
+       paste0(cp, sprintf("result = bootstrap(%s, %s, method='evt', n=%d, seed=%d, progress=False%s)", dat, cfg, n, seed, pextra)), IB,
        jl = paste0(cj, sprintf('result = bootstrap(%s, %s, "evt"; n = %d, seed = %d, progress = false%s)', dat, cfg, n, seed, jextra)))
 BS("evt", CFG_R, CFG_P, CFG_J, "d", "cfg")
 BS("evt_p10", CFG_R, CFG_P, CFG_J, "d", "cfg", ", params = list(tail_prob = 0.1, both_tails = FALSE)",
@@ -194,7 +194,7 @@ set.seed(1); ns <- 2 * 365
 ds <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = ns))
 ds$aktien <- 100 * cumprod(1 + 0.01 * rt(ns, 3) / sqrt(3)); ds$zins <- 2
 SR <- "cfgs <- bootstrap_config(c(akt = 'aktien'), aux = c(zins = 'zins'), input = 'prices')\nstrats <- list(bnh = create_strategy(akt = asset_config('etf', 'bnh')))\n"
-SP <- "import simlev\ncfgs = bootstrap_config({'akt': 'aktien'}, aux={'zins': 'zins'}, input='prices')\nstrats = {'bnh': simlev.create_strategy(akt=simlev.asset_config('etf', 'bnh'))}\n"
+SP <- "import simlev\ncfgs = bootstrap_config({'akt': 'aktien'}, aux={'zins': 'zins'}, input='prices')\nstrats = {'bnh': simlev.create_strategy(akt=simlev.asset_config(asset_class='etf', trading='bnh'))}\n"
 SJ <- 'cfgs = bootstrap_config((akt = "aktien",), aux = (zins = "zins",), input = "prices")\nstrats = (bnh = create_strategy(akt = asset_config("etf", "bnh")),)\n'
 case("study_evt", paste0(SR, "st <- bootstrap_study(ds, cfgs, 'evt', n = 2, path_length = 300, seed = 1, progress = FALSE, strategies = strats, params = list(both_tails = TRUE)); st$elapsed <- 0; st"),
      paste0(SP, "st = bootstrap_study(ds, cfgs, 'evt', n=2, path_length=300, seed=1, progress=False, strategies=strats, params={'both_tails': True}); st['elapsed'] = 0; result = st"), list(ds = ds),

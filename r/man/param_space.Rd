@@ -15,7 +15,8 @@ param_range(lower, upper, n = 5, step = NULL, integer = FALSE, log = FALSE)
 \arguments{
 \item{...}{Benannte Dimensionen (alle Namen Pflicht; sie werden zu den
 Namen der Liste \code{p} im \code{builder}, ohne \code{builder} zu
-Argumentnamen von \code{\link[=simulation]{simulation()}}). Jede ist entweder ein nicht leerer
+Argumentnamen von \code{\link[=simulation]{simulation()}} bzw. Pfaden zu Parametern der
+Bausteine wie \code{dca.value} oder \code{rebalance.thresh}). Jede ist entweder ein nicht leerer
 atomarer Vektor diskreter Werte (numerisch, Zeichen, logisch) oder ein
 Bereich aus \code{param_range()}. Bei \code{print()} ungenutzt.}
 
@@ -61,5 +62,5 @@ sp <- param_space(n = param_range(50, 400, n = 8, integer = TRUE, log = TRUE),
 sp
 }
 \seealso{
-\code{\link[=param_search]{param_search()}}, \code{\link[=plateau]{plateau()}}
+\code{\link[=param_search]{param_search()}}, \code{\link[=param_plateau]{param_plateau()}}
 }

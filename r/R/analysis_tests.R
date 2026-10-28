@@ -5,12 +5,12 @@
 #                       optional fuer zwei Signale und je Zeitabschnitt
 #  sharpe_test()        Unterschied zweier Sharpe Ratios (Ledoit & Wolf 2008:
 #                       HAC-Delta-Methode oder Block-Bootstrap)
-#  reality_check()      White (2000) Reality Check und Hansen (2005) SPA:
+#  overfit_reality_check()      White (2000) Reality Check und Hansen (2005) SPA:
 #                       schlaegt die beste von vielen Strategien die
 #                       Benchmark mehr als zufaellig?
-#  min_track_record()   Mindestlaenge einer Historie fuer eine Sharpe-Aussage
+#  sharpe_min_track_record()   Mindestlaenge einer Historie fuer eine Sharpe-Aussage
 #                       (Bailey & Lopez de Prado 2012)
-#  return_heatmap()     annualisierte (reale) Renditen je Startjahr und
+#  result_heatmap()     annualisierte (reale) Renditen je Startjahr und
 #                       Haltedauer
 # =============================================================================
 
@@ -319,9 +319,9 @@ plot.SimLevSignalAnalysis <- function(x, ...) {
 #'   (\code{difference / se}), \code{p_value} (zweiseitig, Anteil),
 #'   \code{ci_low}, \code{ci_high} (95-%-Intervall der Differenz, p. a.) und
 #'   \code{n} (Anzahl verwendeter Renditepaare).
-#' @seealso [min_track_record()], [probabilistic_sharpe()],
-#'   [reality_check()] (viele Strategien gegen eine Benchmark),
-#'   [deep_analysis()]
+#' @seealso [sharpe_min_track_record()], [sharpe_probabilistic()],
+#'   [overfit_reality_check()] (viele Strategien gegen eine Benchmark),
+#'   [result_analysis()]
 #' @examples
 #' set.seed(1); n <- 3 * 365
 #' d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
@@ -342,7 +342,7 @@ plot.SimLevSignalAnalysis <- function(x, ...) {
 #'   850-859.
 #' @export
 sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c("hac", "bootstrap"),
-                        B = 2000L, block = NULL, seed = NULL, ppy = NULL) {
+                        B = 2000L, block = NULL, ppy = NULL, seed = NULL) {
   frequency <- match.arg(frequency); method <- match.arg(method)
   a <- .ret_from(x, frequency); b <- .ret_from(y, frequency)
   if (is.null(a$date) != is.null(b$date))
@@ -445,13 +445,13 @@ sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c(
 #'   nicht annualisiert), \code{n} (Anzahl Perioden), \code{k} (Anzahl
 #'   Kandidaten) und \code{B}. Kleiner p-Wert = die beste Strategie schlaegt
 #'   die Benchmark auch nach Beruecksichtigung der Auswahl.
-#' @seealso [param_search()], [pbo()], [deflated_sharpe()],
+#' @seealso [param_search()], [overfit_pbo()], [sharpe_deflated()],
 #'   [sharpe_test()] (Vergleich zweier Strategien)
 #' @examples
 #' set.seed(4)
 #' R <- matrix(rnorm(800 * 10, 0, 0.01), 800)  # 10 Strategien, Tagesrenditen
 #' R[, 2] <- R[, 2] + 0.003                     # eine mit echter Ueberrendite
-#' reality_check(R, B = 200, frequency = "day", seed = 1)
+#' overfit_reality_check(R, B = 200, frequency = "day", seed = 1)
 #'
 #' # Fertige Simulationen: Liste von SimLevResult -> Renditematrix
 #' set.seed(1); n <- 3 * 365
@@ -461,13 +461,13 @@ sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c(
 #'             b = simulation(d, create_strategy(b = asset_config("etf", "bnh"))),
 #'             c = simulation(d, create_strategy(c = asset_config("etf", "bnh"))))
 #' Rr <- sapply(res, function(r) { v <- result_index(r)$value; v[-1] / v[-length(v)] - 1 })
-#' reality_check(Rr, benchmark = "c", dates = result_index(res$a)$date[-1],
+#' overfit_reality_check(Rr, benchmark = "c", dates = result_index(res$a)$date[-1],
 #'               B = 200, seed = 1)
 #' @references White, H. (2000), A reality check for data snooping,
 #'   Econometrica 68(5); Hansen, P. R. (2005), A test for superior
 #'   predictive ability, Journal of Business & Economic Statistics 23(4).
 #' @export
-reality_check <- function(x, benchmark = NULL, B = 999L, block = NULL, frequency = c("week", "day", "month"),
+overfit_reality_check <- function(x, benchmark = NULL, B = 999L, block = NULL, frequency = c("week", "day", "month"),
                           dates = NULL, seed = NULL) {
   frequency <- match.arg(frequency)
   rr <- .of_returns(x, frequency, dates); R <- rr$R
@@ -496,7 +496,7 @@ reality_check <- function(x, benchmark = NULL, B = 999L, block = NULL, frequency
             class = "SimLevRealityCheck")
 }
 
-#' @rdname reality_check
+#' @rdname overfit_reality_check
 #' @param ... ungenutzt.
 #' @export
 print.SimLevRealityCheck <- function(x, ...) {
@@ -542,21 +542,21 @@ print.SimLevRealityCheck <- function(x, ...) {
 #'   liegt), \code{needed_years} (\code{needed_periods / ppy}),
 #'   \code{available_years} (\code{periods / ppy}) und \code{sufficient}
 #'   (1 = \code{periods >= needed_periods}, sonst 0).
-#' @seealso [probabilistic_sharpe()], [sharpe_test()], [deflated_sharpe()]
+#' @seealso [sharpe_probabilistic()], [sharpe_test()], [sharpe_deflated()]
 #' @examples
 #' set.seed(1)
 #' r <- rnorm(520, 0.002, 0.02)          # 10 Jahre Wochenrenditen
-#' min_track_record(r, target = 0, ppy = 52)
-#' min_track_record(r, target = 0.5, prob = 0.9, ppy = 52)
+#' sharpe_min_track_record(r, target = 0, ppy = 52)
+#' sharpe_min_track_record(r, target = 0.5, prob = 0.9, ppy = 52)
 #' # Kursreihe als data.frame(date, value), Monatsrenditen
 #' n <- 10 * 365
 #' d <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = n),
 #'                 value = 100 * cumprod(1 + rnorm(n, 4e-4, 0.01)))
-#' min_track_record(d, frequency = "month")
+#' sharpe_min_track_record(d, frequency = "month")
 #' @references Bailey, D. H. & Lopez de Prado, M. (2012), The Sharpe ratio
 #'   efficient frontier, Journal of Risk 15(2).
 #' @export
-min_track_record <- function(x, target = 0, prob = 0.95, frequency = c("week", "day", "month"), ppy = NULL) {
+sharpe_min_track_record <- function(x, target = 0, prob = 0.95, frequency = c("week", "day", "month"), ppy = NULL) {
   frequency <- match.arg(frequency)
   a <- .ret_from(x, frequency); r <- a$r[is.finite(a$r)]
   ppy <- ppy %||% (if (!is.null(a$date)) (length(r) - 1) / (as.numeric(diff(range(a$date))) / 365.25) else switch(frequency, day = 252, week = 52, month = 12))
@@ -582,7 +582,7 @@ min_track_record <- function(x, target = 0, prob = 0.95, frequency = c("week", "
 #' hoechstens um die groesste Zeilenluecke der Reihe (hoechstens 7 Tage)
 #' vor dem 31.12. liegt, bei Handelstagen also z. B. der 30.12.
 #' Die Daten werden nach Datum sortiert, doppelte Daten wie in
-#' [deep_analysis()] behandelt.
+#' [result_analysis()] behandelt.
 #'
 #' @param x Eine Reihe: \code{SimLevResult} aus [simulation()] (verwendet
 #'   wird der um Ein- und Auszahlungen bereinigte Wertindex aus
@@ -590,7 +590,7 @@ min_track_record <- function(x, target = 0, prob = 0.95, frequency = c("week", "
 #'   einer Wertspalte (\code{value}, sonst die erste numerische Spalte;
 #'   Niveaus, keine Renditen; fehlende Werte werden fortgeschrieben). Eine
 #'   Liste mehrerer Reihen wird nicht angenommen; dafuer die Funktion je
-#'   Element aufrufen, z. B. \code{lapply(liste, return_heatmap)}. Bei
+#'   Element aufrufen, z. B. \code{lapply(liste, result_heatmap)}. Bei
 #'   \code{print()}/\code{plot()}: Objekt der Klasse \code{SimLevHeatmap}.
 #' @param inflation Optional fuer reale Renditen: \code{NULL} (Standard) =
 #'   nominal; eine Zahl = Inflationsrate in Prozent p. a. (2 = 2 %), tageweise
@@ -610,17 +610,17 @@ min_track_record <- function(x, target = 0, prob = 0.95, frequency = c("week", "
 #'   \code{inflation}). \code{print()} zeigt die Zusammenfassung fuer 1, 3,
 #'   5, 10, 15, 20, 25 und 30 Jahre in Prozent; \code{plot()} zeichnet die
 #'   Heatmap (Farbskala bei +/- 25 % begrenzt).
-#' @seealso [deep_analysis()], [result_index()], [simulation()], [deflate()]
+#' @seealso [result_analysis()], [result_index()], [simulation()], [series_deflate()]
 #' @examples
 #' set.seed(1); n <- 12 * 365
 #' d <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = n))
 #' d$value <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
-#' hm <- return_heatmap(d, inflation = 2, max_years = 10)   # real, 2 Prozent p. a.
+#' hm <- result_heatmap(d, inflation = 2, max_years = 10)   # real, 2 Prozent p. a.
 #' hm
 #' round(100 * hm$matrix[1:3, 1:3], 1)                        # in Prozent p. a.
 #' plot(hm)
 #' @export
-return_heatmap <- function(x, inflation = NULL, max_years = 30L) {
+result_heatmap <- function(x, inflation = NULL, max_years = 30L) {
   s <- .da_series(x, "x")
   if (!is.null(inflation)) s <- .da_deflate(s, inflation)
   yr <- as.integer(format(s$date, "%Y")); m <- length(yr)
@@ -632,7 +632,7 @@ return_heatmap <- function(x, inflation = NULL, max_years = 30L) {
   base <- c(s$value[1], s$value[e]); years <- c(yr[1] - 1L, yr[e])
   if (format(s$date[1], "%m-%d") != "01-01") { base <- s$value[e]; years <- yr[e] }   # erstes volles Jahr
   ny <- length(base) - 1L
-  if (ny < 1L) stop("return_heatmap: Die Reihe umfasst kein vollst\u00e4ndiges Kalenderjahr.")
+  if (ny < 1L) stop("result_heatmap: Die Reihe umfasst kein vollst\u00e4ndiges Kalenderjahr.")
   H <- min(max_years, ny)
   M <- matrix(NA_real_, ny, H, dimnames = list(years[-1], seq_len(H)))
   for (i in seq_len(ny)) for (h in seq_len(min(H, ny - i + 1L))) M[i, h] <- (base[i + h] / base[i])^(1 / h) - 1
@@ -642,7 +642,7 @@ return_heatmap <- function(x, inflation = NULL, max_years = 30L) {
   structure(list(matrix = M, summary = summ, real = !is.null(inflation)), class = "SimLevHeatmap")
 }
 
-#' @rdname return_heatmap
+#' @rdname result_heatmap
 #' @param ... Bei \code{print()} ungenutzt; bei \code{plot()} an
 #'   [graphics::image()] weitergereicht.
 #' @export
@@ -655,7 +655,7 @@ print.SimLevHeatmap <- function(x, ...) {
   invisible(x)
 }
 
-#' @rdname return_heatmap
+#' @rdname result_heatmap
 #' @export
 plot.SimLevHeatmap <- function(x, ...) {
   M <- 100 * x$matrix

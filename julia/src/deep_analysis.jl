@@ -1,6 +1,6 @@
 # DeepAnalysis – r/R/deep_analysis.R (Vorlage python/simlev/deep_analysis.py)
 #
-# deep_analysis() analysiert ein oder mehrere Ergebnisse von simulation()
+# result_analysis() analysiert ein oder mehrere Ergebnisse von simulation()
 # (oder beliebige Kursreihen) nachträglich: Benchmark-Kennzahlen (Alpha, Beta,
 # Capture, Tracking Error, Information Ratio, M²), VaR/CVaR, Rendite- und
 # Monatstabellen, Saisonalität, Drawdown-Tabelle, rollierende Kennzahlen und
@@ -15,7 +15,7 @@ using ..SimLev: _AnaSvg, _MONATE_KURZ, _ana_hline, _ana_legend, _ana_lines, _ana
                 _ana_svg_done, _ana_text, _ana_year_ticks
 using Dates
 
-export deep_analysis
+export result_analysis
 
 const _NA = SimLev.NA
 const _MONTH_ABB = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -423,7 +423,7 @@ function _da_series(x, name::AbstractString)
         d = _to_date_days(x["date"], "'$name': Spalte 'date'")
         fm = get(SimLev.attrs(x), "filled", nothing)
         fl = fill(false, length(v))
-        if fm isa SimLev.RFrame && SimLev.nrow(fm) == length(v)        # align_series(): Bool-Spalten als RFrame
+        if fm isa SimLev.RFrame && SimLev.nrow(fm) == length(v)        # series_align(): Bool-Spalten als RFrame
             fn = names(fm)
             j = vc in fn ? vc : length(fn) == 1 ? fn[1] : nothing
             j === nothing || (fl = Bool[e === true for e in fm[j]])
@@ -761,7 +761,7 @@ function _da_rolling(s::DASeries, b, window_m, rf_cum)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# deep_analysis
+# result_analysis
 # ═══════════════════════════════════════════════════════════════════════════
 
 _is_listlike(x) = (x isa AbstractDict && !_is_result(x)) || x isa AbstractVector{<:Pair} ||
@@ -779,10 +779,10 @@ function _list_items(x)
 end
 
 """
-    deep_analysis(x; benchmark = nothing, risk_free = 0, rolling_years = 3,
+    result_analysis(x; benchmark = nothing, risk_free = 0, rolling_years = 3,
                   var_levels = [0.01, 0.05, 0.10], top_drawdowns = 10, inflation = nothing)
 
-Vertiefte Analyse von Simulationsergebnissen (R: `deep_analysis()`).
+Vertiefte Analyse von Simulationsergebnissen (R: `result_analysis()`).
 `x`: `SimLevResult`, data.frame (`RFrame` mit `date` und Wertspalte) oder eine
 Liste davon (`RList`/`Dict`/`Vector`; unbenannt: Reihen `S1`, `S2`, …).
 Ergebnis: `RList` der Klasse `SimLevAnalysis` (`metrics`, `benchmark_metrics`,
@@ -790,7 +790,7 @@ Ergebnis: `RList` der Klasse `SimLevAnalysis` (`metrics`, `benchmark_metrics`,
 `rolling_years`, `correlation`, `series`, `risk_free`, `var_levels`, `real`);
 Ausgabe mit `show`, `r_summary` und `r_plot`.
 """
-function deep_analysis(x; benchmark = nothing, risk_free = 0, rolling_years = 3,
+function result_analysis(x; benchmark = nothing, risk_free = 0, rolling_years = 3,
                        var_levels = [0.01, 0.05, 0.10], top_drawdowns = 10, inflation = nothing)
     x = SimLev.as_rframe(x)
     benchmark = SimLev.as_rframe(benchmark)

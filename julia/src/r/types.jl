@@ -18,7 +18,7 @@
 # Druckausgabe: `register_print!(klasse, f)` mit `f(io, x)`; `show(io,
 # MIME"text/plain"(), x)` schreibt dann exakt die Ausgabe der R-print-Methode.
 # Ebenso `register_summary!` / `register_plot!` für die generischen
-# Funktionen `r_summary(x, args...)` und `r_plot(x, args...)`.
+# Funktionen `r_summary(object, args...)` und `r_plot(x, args...)`.
 # ─────────────────────────────────────────────────────────────────────────────
 
 const _PRINTERS = Dict{String,Function}()
@@ -335,11 +335,11 @@ Base.show(io::IO, df::RFrame) = print(io, "RFrame(", nrow(df), " × ", ncol(df),
 const _DEFAULT_PRINT = Ref{Function}((io, x) -> print(io, x))
 _default_print(io, x) = _DEFAULT_PRINT[](io, x)
 
-"Generisches `summary()` wie in R (Methode nach S3-Klasse)."
-function r_summary(x, args...; kw...)
-    f = _dispatch(_SUMMARIES, x, "summary")
-    f === nothing && error("summary(): keine Methode für $(typeof(x))")
-    f(x, args...; kw...)
+"Generisches `summary(object, ...)` wie in R (Methode nach S3-Klasse; Argumentname `object` wie R)."
+function r_summary(object, args...; kw...)
+    f = _dispatch(_SUMMARIES, object, "summary")
+    f === nothing && error("summary(): keine Methode für $(typeof(object))")
+    f(object, args...; kw...)
 end
 "Generisches `plot()` wie in R (Methode nach S3-Klasse; erzeugt SVG)."
 function r_plot(x, args...; kw...)

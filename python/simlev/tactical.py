@@ -6,11 +6,11 @@ mit dem Zielgewicht, das nach Schlusskurs des Tages bekannt ist):
 - :func:`tactical_rules`          geordnete Bedingungen -> Zielportfolio, Rückfall
 - :func:`tactical_rotation`       Momentum-Rotation: Top-N, Dual Momentum,
   Canary-/Breitenschutz (Keller & Keuning)
-- :func:`target_volatility`       Zielvolatilität (Moreira & Muir 2017)
-- :func:`conditional_volatility`  nur in extremen Volatilitätsphasen skalieren
+- :func:`tactical_target_volatility`       Zielvolatilität (Moreira & Muir 2017)
+- :func:`tactical_conditional_volatility`  nur in extremen Volatilitätsphasen skalieren
   (Bongaerts, Kang & van Dijk 2020)
-- :func:`glidepath`               Gewichte zeitlich zwischen zwei Allokationen
-- :func:`blend_weights`           Kern-Satellit: Mischung mehrerer Gewichtsreihen
+- :func:`tactical_glidepath`               Gewichte zeitlich zwischen zwei Allokationen
+- :func:`tactical_blend`           Kern-Satellit: Mischung mehrerer Gewichtsreihen
 - :func:`signal_state`            Kauf-/Verkaufssignale -> dauerhafter Zustand
 - :func:`momentum_score`          Momentum-Score je Anlage
 
@@ -33,8 +33,18 @@ from ._r.base import env_from_caller
 from ._r import libm as _libm
 from .svg import _alloc_c, _alloc_ramp, _esc, _jl_str, _jl_unique
 
+
+class _Missing:
+    """Platzhalter für ein R-Argument ohne Standardwert (Gegenstück zu R's fehlendem Argument)."""
+
+    def __repr__(self):
+        return "<missing>"
+
+
+_MISSING = _Missing()
+
 __all__ = ["SimLevWeights", "signal_state", "momentum_score", "tactical_rules", "tactical_rotation",
-           "target_volatility", "conditional_volatility", "glidepath", "blend_weights",
+           "tactical_target_volatility", "tactical_conditional_volatility", "tactical_glidepath", "tactical_blend",
            "tactical_simulation", "print_SimLevWeights", "plot_SimLevWeights"]
 
 LD = np.longdouble
@@ -438,7 +448,7 @@ def _lgl(v):
     return val, na
 
 
-def signal_state(signal, initial=False):
+def signal_state(signal, *, initial=False):
     """Signale in einen dauerhaften Zustand übersetzen.
 
     ``True`` ab einem Kaufsignal bis zum nächsten Verkaufssignal. Zeilen, in denen
@@ -486,7 +496,7 @@ def _momentum_back(d, lookbacks):
     return back
 
 
-def momentum_score(data, assets, lookbacks=(1, 3, 6, 12), type=("average", "13612w")):  # noqa: A002
+def momentum_score(data, assets, *, lookbacks=(1, 3, 6, 12), type=("average", "13612w")):  # noqa: A002
     """Momentum-Score: mittlere Rendite über mehrere Rückblicke (Kalendermonate).
 
     Args:
@@ -562,7 +572,7 @@ def _as_logical(v, n):
 
 
 @env_from_caller
-def tactical_rules(data, rules, default, env=None):
+def tactical_rules(data, rules, default, *, env=None):
     """Regelbasierte taktische Allokation.
 
     Geordnete Bedingungen wählen je Tag ein Zielportfolio; die erste zutreffende
@@ -638,7 +648,7 @@ def tactical_rules(data, rules, default, env=None):
 # tactical_rotation
 # ═══════════════════════════════════════════════════════════════════════════
 
-def tactical_rotation(data, assets, top=1, safe=None, absolute=True, canary=None, breadth=None,
+def tactical_rotation(data, assets, *, top=1, safe=None, absolute=True, canary=None, breadth=None,
                       lookbacks=(1, 3, 6, 12), type=("average", "13612w"),  # noqa: A002
                       every=("month", "week", "quarter"), weighting=("equal", "inverse_vol")):
     """Momentum-Rotation, Dual Momentum und Canary-Schutz.
@@ -687,7 +697,7 @@ def tactical_rotation(data, assets, top=1, safe=None, absolute=True, canary=None
                              "breadth muss mindestens 1 sein (Anzahl Canary-Anlagen mit negativem Score für "
                              "vollen Schutz; ist: %s)." % " ".join(_fmt1(bv)))
     allc = _unique(assets + safe + canary)
-    Sdf = momentum_score(data, allc, lookbacks, type)
+    Sdf = momentum_score(data, allc, lookbacks=lookbacks, type=type)
     S = Sdf.to_numpy(dtype=np.float64)
     ci = {a: j for j, a in enumerate(allc)}
     d = _days(_to_date(_col(data, "date"), "data$date"))
@@ -823,7 +833,7 @@ def _g(x):
     return _fmt.sprintf("%g", float(x))
 
 
-def target_volatility(data, weights, safe, target=10, window=63, max_exposure=1,
+def tactical_target_volatility(data, weights, safe, *, target=10, window=63, max_exposure=1,
                       every=("month", "week", "day", "quarter"), ppy=None):
     """Zielvolatilität: Risikoanteil ``min(max_exposure, (target / 100) / vol)``.
 
@@ -868,7 +878,7 @@ def _quantile7(x, p):
     return float(np.asarray(q, dtype=np.float64).ravel()[0])
 
 
-def conditional_volatility(data, weights, safe, base=1, upper=0.8, lower=0.2, target=None, window=63,
+def tactical_conditional_volatility(data, weights, safe, *, base=1, upper=0.8, lower=0.2, target=None, window=63,
                            min_exposure=0, max_exposure=1, min_history=3, scaling=("inverse", "fixed"),
                            high_exposure=None, low_exposure=None, every=("month", "week", "day", "quarter"),
                            ppy=None):
@@ -879,7 +889,7 @@ def conditional_volatility(data, weights, safe, base=1, upper=0.8, lower=0.2, ta
     ``lower``-Quantil erhöht; dazwischen gilt ``base``.
 
     Args:
-        data, weights, safe, window, every, ppy: wie :func:`target_volatility`.
+        data, weights, safe, window, every, ppy: wie :func:`tactical_target_volatility`.
         base: Grundanteil (0 bis ``max_exposure``).
         upper, lower: Quantil-Wahrscheinlichkeiten (``lower=None`` schaltet das
             Hochskalieren ab).
@@ -982,10 +992,10 @@ def conditional_volatility(data, weights, safe, base=1, upper=0.8, lower=0.2, ta
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# glidepath, blend_weights
+# tactical_glidepath, tactical_blend
 # ═══════════════════════════════════════════════════════════════════════════
 
-def glidepath(data, from_=None, to=None, start=None, end=None, every=("year", "quarter", "month"), **kwargs):
+def tactical_glidepath(data, from_=_MISSING, to=_MISSING, *, start=None, end=None, every=("year", "quarter", "month"), **kwargs):
     """Glidepath zwischen zwei Allokationen.
 
     Stufenweise lineare Bewegung von ``from_`` (R: ``from``) nach ``to``; eine Stufe
@@ -995,8 +1005,8 @@ def glidepath(data, from_=None, to=None, start=None, end=None, every=("year", "q
 
     Args:
         data: ``DataFrame`` mit Spalte ``date`` oder Datumsvektor.
-        from_, to: Gewichte am Anfang und Ende (``from`` ist in Python reserviert;
-            ``**{"from": ...}`` geht ebenfalls).
+        from_, to: Gewichte am Anfang und Ende, beide Pflicht wie in R (``from`` ist in
+            Python reserviert; ``**{"from": ...}`` geht ebenfalls).
         start, end: Beginn und Ende (Datum oder "JJJJ-MM-TT"; ``None`` = erstes bzw.
             letztes Datum).
         every: ``"year"``, ``"quarter"`` oder ``"month"``.
@@ -1007,10 +1017,16 @@ def glidepath(data, from_=None, to=None, start=None, end=None, every=("year", "q
     if "from" in kwargs:
         from_ = kwargs.pop("from")
     if kwargs:
-        raise TypeError("glidepath: unbekannte Argumente %s" % ", ".join(kwargs))
+        raise TypeError("tactical_glidepath: unbekannte Argumente %s" % ", ".join(kwargs))
     every = _match_arg(every, ("year", "quarter", "month"))
     src = _col(data, "date") if isinstance(data, pd.DataFrame) else data
-    d = _days(_to_date(src, "glidepath: Datum"))
+    d = _days(_to_date(src, "tactical_glidepath: Datum"))
+    # R verlangt from und to (kein Standardwert); der Platzhalter steht nur, weil from_ als
+    # Schlüsselwort-Ersatz einen Standardwert braucht. Meldung wie R bei fehlendem Argument.
+    if from_ is _MISSING:
+        raise ValueError('argument "from" is missing, with no default')
+    if to is _MISSING:
+        raise ValueError('argument "to" is missing, with no default')
     fn, fv = _named(from_)
     tn, tv = _named(to)
     a = _unique((fn or []) + (tn or []))
@@ -1023,7 +1039,7 @@ def glidepath(data, from_=None, to=None, start=None, end=None, every=("year", "q
     s = _days(_to_date(_as_dates([d[0]]) if start is None else start, "start"))[0]
     e = _days(_to_date(_as_dates([d[-1]]) if end is None else end, "end"))[0]
     if e < s:
-        raise ValueError("glidepath: end (%s) liegt vor start (%s); für den umgekehrten Weg from und to tauschen."
+        raise ValueError("tactical_glidepath: end (%s) liegt vor start (%s); für den umgekehrten Weg from und to tauschen."
                          % (_datefmt1(e), _datefmt1(s)))
     pl = _period_last(d, every)
     rows = np.array(_unique([1] + [int(r) for r in pl]), dtype=np.int64)
@@ -1036,7 +1052,7 @@ def glidepath(data, from_=None, to=None, start=None, end=None, every=("year", "q
     return _as_weights_m(_as_dates(d), H, a, "glidepath")
 
 
-def blend_weights(*args, shares=None, **kwargs):
+def tactical_blend(*args, shares=None, **kwargs):
     """Gewichtsreihen mischen (Kern-Satellit): je Zeile und Anlage
     ``sum_k shares_k * w_k``, dann auf Summe 1 normiert.
 
@@ -1050,18 +1066,18 @@ def blend_weights(*args, shares=None, **kwargs):
     """
     ws = list(args) + list(kwargs.values())
     if not ws or not all(_is_weights(w) for w in ws):
-        raise ValueError("blend_weights: ... muss aus SimLevWeights bestehen.")
+        raise ValueError("tactical_blend: ... muss aus SimLevWeights bestehen.")
     if shares is None:
         shares = np.repeat(1 / len(ws), len(ws))
     sh = np.atleast_1d(np.asarray(shares, dtype=np.float64))
     if len(sh) != len(ws) or np.isnan(sh).any() or (sh < 0).any() or _ldsum(sh) <= 0:
-        raise ValueError("blend_weights: shares braucht %d nichtnegative Anteile (einen je Gewichtsreihe, z. B. "
+        raise ValueError("tactical_blend: shares braucht %d nichtnegative Anteile (einen je Gewichtsreihe, z. B. "
                          "c(0.7, 0.3)); erhalten: %s." % (len(ws), ", ".join(_fmt1(sh))))
     d = _days(np.asarray(ws[0]["date"]))
     for w in ws:
         dw = _days(np.asarray(w["date"]))
         if len(dw) != len(d) or not np.array_equal(dw, d, equal_nan=True):
-            raise ValueError("blend_weights: unterschiedliche Daten.")
+            raise ValueError("tactical_blend: unterschiedliche Daten.")
     a = _unique([str(c) for w in ws for c in w.columns[1:]])
     W = np.zeros((len(d), len(a)))
     for k, w in enumerate(ws):
@@ -1174,7 +1190,7 @@ def _filled_attr(data):
     return fl
 
 
-def tactical_simulation(data, weights, rebalance=("switch", "month", "quarter", "year"), tolerance=None,
+def tactical_simulation(data, weights, *, rebalance=("switch", "month", "quarter", "year"), tolerance=None,
                         tolerance_type=("absolute", "relative"), lag=1, asset_args=None, **kwargs):
     """Taktische Allokation simulieren.
 
@@ -1191,9 +1207,10 @@ def tactical_simulation(data, weights, rebalance=("switch", "month", "quarter", 
         tolerance_type: ``"absolute"`` oder ``"relative"``.
         lag: Verzögerung in Zeilen (ganze Zahl >= 0).
         asset_args: Argumente für :func:`asset_config` über ``strategy_from_weights``.
-        **kwargs: weitere Argumente für :func:`simlev.simulation` (nicht erlaubt:
-            ``event_col``, ``event_mode``, ``event_weight``, ``balance_mode``,
-            ``balance_thresh``).
+        **kwargs: weitere Argumente für :func:`simlev.simulation`, z. B. ``tax=tax_profile()``,
+            ``dca=dca_plan(...)``; das Rebalancing steuert die Funktion selbst (``rebalance.*`` und die
+            alten ``event_col``, ``event_mode``, ``event_weight``, ``balance_mode``, ``balance_thresh``
+            sind ein Fehler).
 
     Returns:
         ``SimLevResult`` mit zusätzlichem Element ``tactical`` (``weights``, ``events``,
@@ -1205,9 +1222,12 @@ def tactical_simulation(data, weights, rebalance=("switch", "month", "quarter", 
         raise ValueError("weights muss ein SimLevWeights sein.")
     sim_args = dict(kwargs)
     asset_args = {} if asset_args is None else dict(asset_args)
-    bad = [k for k in sim_args if k in ("event_col", "event_mode", "event_weight", "balance_mode", "balance_thresh")]
+    bad = [k for k in sim_args if k in ("event_col", "event_mode", "event_weight", "balance_mode", "balance_thresh")
+           or str(k).startswith("rebalance.")]
     if bad:
         raise ValueError("tactical_simulation steuert %s selbst." % ", ".join(_unique(bad)))
+    from ._sim_blocks import _sim_args_set
+    sim_args = _sim_args_set({}, sim_args, "tactical_simulation")
     assets = [str(c) for c in weights.columns[1:]]
     miss = _setdiff(assets, _df_names(data))
     if miss:
@@ -1249,18 +1269,13 @@ def tactical_simulation(data, weights, rebalance=("switch", "month", "quarter", 
     ev = change.copy()
     if rebalance != "switch":
         ev[_period_last(d, rebalance) - 1] = True
-    if sim_args.get("dca_mode") is True:
+    dp = sim_args.get("dca")
+    if dp is not None:
         from .engine import calculate_dates_flags
         cal = np.arange(int(d[0]), int(d[n - 1]) + 1)
-
-        def g(key, default):
-            v = sim_args.get(key)
-            return default if v is None else v
-
-        flg = np.asarray(calculate_dates_flags(True, g("dca_span", 1), g("dca_unit", "month"), sim_args.get("dca_days"),
-                                               cal, g("dca_value", 1), g("dca_anchor", "start"),
-                                               sim_args.get("dca_start"), g("dca_skip", False),
-                                               g("liquidate", False)), dtype=bool)
+        liq = sim_args.get("liquidate")
+        flg = np.asarray(calculate_dates_flags(True, dp["span"], dp["unit"], dp["days"], cal, dp["value"], dp["anchor"],
+                                               dp["start"], dp["skip"], False if liq is None else liq), dtype=bool)
         j = _find_interval(cal[flg].astype(np.float64) - 1e-9, d) + 1
         ev[j[j <= n] - 1] = True
     if n:
@@ -1278,12 +1293,11 @@ def tactical_simulation(data, weights, rebalance=("switch", "month", "quarter", 
     w0 = w0 / _ldsum(w0)
     from .data_prep import strategy_from_weights
     st = strategy_from_weights(pd.Series(w0, index=assets), **asset_args)
-    from .engine import simulation
-    args = dict(data=df, strategy=st, event_col=".tev", event_mode="replace",
-                event_weight={a: c for a, c in zip(assets, wcols)}, balance_thresh=tolerance,
-                balance_thresh_type=tolerance_type)
-    args.update(sim_args)
-    res = simulation(**args)
+    from ._sim_blocks import _sim_call, rebalance_plan
+    # Ereignis-Rebalancing nur an den Terminen, ohne Umschichten am ersten Tag (skip = True)
+    rb = rebalance_plan(event_col=".tev", event_mode="replace", skip=True,
+                        event_weight={a: c for a, c in zip(assets, wcols)}, thresh=tolerance, thresh_type=tolerance_type)
+    res = _sim_call(df, st, {"rebalance": rb, **sim_args})
     tw = _as_weights_m(_as_dates(d), W, assets, weights.attrs.get("source"))
     res["tactical"] = {"weights": tw, "events": _as_dates(d[ev]), "switches": int(change.sum()), "lag": lag,
                        "rebalance": rebalance}

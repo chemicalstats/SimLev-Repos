@@ -4,10 +4,10 @@
   optional für zwei Signale und je Zeitabschnitt
 - :func:`sharpe_test`      Unterschied zweier Sharpe Ratios (Ledoit & Wolf 2008:
   HAC-Delta-Methode oder Block-Bootstrap)
-- :func:`reality_check`    White (2000) Reality Check und Hansen (2005) SPA
-- :func:`min_track_record` Mindestlänge einer Historie für eine Sharpe-Aussage
+- :func:`overfit_reality_check`    White (2000) Reality Check und Hansen (2005) SPA
+- :func:`sharpe_min_track_record` Mindestlänge einer Historie für eine Sharpe-Aussage
   (Bailey & López de Prado 2012)
-- :func:`return_heatmap`   annualisierte (reale) Renditen je Startjahr und
+- :func:`result_heatmap`   annualisierte (reale) Renditen je Startjahr und
   Haltedauer
 """
 from __future__ import annotations
@@ -31,7 +31,7 @@ from .deep_analysis import (
 from .svg import (_AnaSvg, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_points, _ana_ramp, _ana_rect,
                   _ana_svg_done)
 
-__all__ = ["signal_analysis", "sharpe_test", "reality_check", "min_track_record", "return_heatmap",
+__all__ = ["signal_analysis", "sharpe_test", "overfit_reality_check", "sharpe_min_track_record", "result_heatmap",
            "SimLevSignalAnalysis", "SimLevRealityCheck", "SimLevHeatmap"]
 
 _NAN = NA_REAL   # R-NA_real_
@@ -171,7 +171,7 @@ def _sum_ld(x):
     return float(np.cumsum(x.astype(LD))[-1]) if x.size else 0.0
 
 
-def signal_analysis(data, signal, target, horizon=21, step=None, bins=5, breaks=None,
+def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, breaks=None,
                     signal2=None, bins2=3, splits=1, degree=2):
     """Signal-Analyse: Vorwärtsrenditen je Signalbereich.
 
@@ -426,8 +426,8 @@ def _sr(r):
     return r_mean(r) / r_sd(r)
 
 
-def sharpe_test(x, y, frequency=("week", "day", "month"), method=("hac", "bootstrap"), B=2000, block=None,
-                seed=None, ppy=None):
+def sharpe_test(x, y, *, frequency=("week", "day", "month"), method=("hac", "bootstrap"), B=2000, block=None,
+                ppy=None, seed=None):
     """Test auf gleiche Sharpe Ratios (Ledoit & Wolf 2008).
 
     Args:
@@ -520,14 +520,14 @@ def sharpe_test(x, y, frequency=("week", "day", "month"), method=("hac", "bootst
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# reality_check
+# overfit_reality_check
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _apply_sd(M):
     return np.array([r_sd(M[:, j]) for j in range(M.shape[1])], dtype=np.float64)
 
 
-def reality_check(x, benchmark=None, B=999, block=None, frequency=("week", "day", "month"), dates=None, seed=None):
+def overfit_reality_check(x, *, benchmark=None, B=999, block=None, frequency=("week", "day", "month"), dates=None, seed=None):
     """White Reality Check und Hansen-SPA-Test.
 
     Args:
@@ -610,7 +610,7 @@ def reality_check(x, benchmark=None, B=999, block=None, frequency=("week", "day"
 
 
 class SimLevRealityCheck(RList):
-    """Ergebnis von :func:`reality_check` (R-Klasse ``SimLevRealityCheck``)."""
+    """Ergebnis von :func:`overfit_reality_check` (R-Klasse ``SimLevRealityCheck``)."""
 
     r_class = ("SimLevRealityCheck",)
 
@@ -625,10 +625,10 @@ class SimLevRealityCheck(RList):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# min_track_record
+# sharpe_min_track_record
 # ═══════════════════════════════════════════════════════════════════════════
 
-def min_track_record(x, target=0, prob=0.95, frequency=("week", "day", "month"), ppy=None):
+def sharpe_min_track_record(x, *, target=0, prob=0.95, frequency=("week", "day", "month"), ppy=None):
     """Mindestlänge einer Historie (Minimum Track Record Length, Bailey & López de Prado 2012).
 
     Args:
@@ -671,10 +671,10 @@ def min_track_record(x, target=0, prob=0.95, frequency=("week", "day", "month"),
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# return_heatmap
+# result_heatmap
 # ═══════════════════════════════════════════════════════════════════════════
 
-def return_heatmap(x, inflation=None, max_years=30):
+def result_heatmap(x, *, inflation=None, max_years=30):
     """Renditen je Startjahr und Haltedauer (annualisiert, wahlweise real).
 
     Args:
@@ -706,7 +706,7 @@ def return_heatmap(x, inflation=None, max_years=30):
         years = [int(yr[i]) for i in e]
     ny = len(base) - 1
     if ny < 1:
-        raise ValueError("return_heatmap: Die Reihe umfasst kein vollständiges Kalenderjahr.")
+        raise ValueError("result_heatmap: Die Reihe umfasst kein vollständiges Kalenderjahr.")
     H = int(min(max_years, ny))
     M = np.full((ny, H), _NAN)
     for i in range(ny):
@@ -728,7 +728,7 @@ def return_heatmap(x, inflation=None, max_years=30):
 
 
 class SimLevHeatmap(RList):
-    """Ergebnis von :func:`return_heatmap` (R-Klasse ``SimLevHeatmap``)."""
+    """Ergebnis von :func:`result_heatmap` (R-Klasse ``SimLevHeatmap``)."""
 
     r_class = ("SimLevHeatmap",)
 

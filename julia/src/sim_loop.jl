@@ -42,7 +42,7 @@ function _sell_count_net(R::Run, sim::Sim, a::Int, need::Float64, time::Int; rou
     fee = R.fee_current
     target = need
     if fee !== nothing
-        px = apply_spread(sim.market[a].asset_price[time], fl.spread_rates[a], "sell")
+        px = _apply_spread(sim.market[a].asset_price[time], fl.spread_rates[a], "sell")
         for _ in 1:3
             target = need + _fee_amount(fee, _rmax(sc_of(target).sell_count, 1e-12) * px)
         end
@@ -404,7 +404,7 @@ function _sim_day_dca!(R::Run, sim::Sim, time::Int, active::Vector{Int}, balance
     @nospecialize
     fl, cfg = R.fl, R.cfg
     dca_amount = cfg.dca_value * fl.flag_dca_n[time]
-    strat_w = Float64[Float64(cfg.strategy[a].second["asset_share"]) for a in active]
+    strat_w = Float64[Float64(cfg.strategy[a].second["share"]) for a in active]
     strat_w = strat_w ./ r_sum(strat_w; na_rm = true)
     if _is_true(balance_dca) && length(active) > 1
         calculate_total_report!(sim, time)

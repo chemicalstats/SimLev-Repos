@@ -1,23 +1,23 @@
 # =============================================================================
 #  scenarios.R  —  Szenarien mit eigenen Annahmen und Stresstests
 # -----------------------------------------------------------------------------
-#  entropy_pooling()    gewichtet historische (oder simulierte) Szenarien so
+#  scenario_entropy_pooling()    gewichtet historische (oder simulierte) Szenarien so
 #                       um, dass sie eigene Annahmen ("Views") erfuellen, bei
 #                       minimaler relativer Entropie zur Ausgangsverteilung
 #                       (Meucci 2008, Fully Flexible Probabilities)
 #  view_mean(), view_prob(), view_vol()   Bausteine fuer Annahmen
-#  copula_scenarios()   Szenarien aus t- bzw. Gauss-Copula mit empirischen
+#  scenario_copula()   Szenarien aus t- bzw. Gauss-Copula mit empirischen
 #                       Raendern, optional unter Stress (bedingt auf ein
 #                       Quantilband einzelner Anlagen)
 #  scenario_risk()      Portfolio-Kennzahlen auf (gewichteten) Szenarien
-#  crisis_replay()      ein Portfolio durch historische Krisenfenster
+#  scenario_crisis()      ein Portfolio durch historische Krisenfenster
 # =============================================================================
 
 #' Annahmen fuer Entropy Pooling
 #'
-#' Bausteine fuer die Annahmen ("Views") von [entropy_pooling()]. Jede
+#' Bausteine fuer die Annahmen ("Views") von [scenario_entropy_pooling()]. Jede
 #' Funktion beschreibt nur die Annahme; geprueft und umgesetzt wird sie erst
-#' in [entropy_pooling()] auf der Szenario-Tabelle. Werte stehen in der
+#' in [scenario_entropy_pooling()] auf der Szenario-Tabelle. Werte stehen in der
 #' Einheit der Szenario-Spalten: Bei Kursdaten sind das einfache Renditen in
 #' Prozent je Periode (-5 = -5 %), Zustandsvariablen in ihrer eigenen
 #' Einheit.
@@ -47,12 +47,12 @@
 #'   \code{">="}.
 #' @return Liste mit \code{type} (\code{"mean"}, \code{"prob"} oder
 #'   \code{"vol"}), \code{var} bzw. \code{expr}, \code{value} und \code{op}.
-#' @seealso [entropy_pooling()], [scenario_risk()].
+#' @seealso [scenario_entropy_pooling()], [scenario_risk()].
 #' @examples
 #' set.seed(1); X <- data.frame(aktien = rnorm(1000, 0.15, 2), anleihen = rnorm(1000, 0.05, 0.6))
 #' v <- list(view_mean("aktien", -0.2), view_prob("aktien < -2", 0.15, ">="),
 #'           view_vol("anleihen", 0.8))
-#' ep <- entropy_pooling(X, c("aktien", "anleihen"), v)
+#' ep <- scenario_entropy_pooling(X, c("aktien", "anleihen"), v)
 #' ep$summary
 #' @name views
 NULL
@@ -143,20 +143,20 @@ view_vol <- function(var, value, op = c("=", "<=", ">=")) list(type = "vol", var
 #'   \code{views}, \code{frequency} und \code{kind} (\code{"entropy_pooling"}).
 #'   Methode \code{print}.
 #' @seealso [view_mean()], [view_prob()], [view_vol()],
-#'   [scenario_risk()], [copula_scenarios()], [dependence_analysis()].
+#'   [scenario_risk()], [scenario_copula()], [dependence_analysis()].
 #' @references Meucci, A. (2008), Fully Flexible Views: Theory and Practice,
 #'   Risk 21(10), 97-102.
 #' @examples
 #' set.seed(1); X <- data.frame(aktien = rnorm(1000, 0.15, 2), anleihen = rnorm(1000, 0.05, 0.6))
-#' ep <- entropy_pooling(X, c("aktien", "anleihen"), list(view_mean("aktien", -0.2)))
+#' ep <- scenario_entropy_pooling(X, c("aktien", "anleihen"), list(view_mean("aktien", -0.2)))
 #' ep
 #' @export
-entropy_pooling <- function(x, assets, views, states = NULL, frequency = c("week", "day", "month"), prior = NULL) {
+scenario_entropy_pooling <- function(x, assets, views, states = NULL, frequency = c("week", "day", "month"), prior = NULL) {
   frequency <- match.arg(frequency)
   S <- .scen_frame(x, assets, states, frequency)
   Tn <- nrow(S)
   if (!is.null(prior) && (!is.numeric(prior) || length(prior) != Tn || any(!is.finite(prior)) || any(prior < 0) || sum(prior) <= 0))
-    stop(sprintf("entropy_pooling: prior muss %d endliche Werte >= 0 mit positiver Summe haben (einer je Szenario; erhalten: L\u00e4nge %d%s).",
+    stop(sprintf("scenario_entropy_pooling: prior muss %d endliche Werte >= 0 mit positiver Summe haben (einer je Szenario; erhalten: L\u00e4nge %d%s).",
                  Tn, length(prior), if (is.numeric(prior) && any(prior < 0, na.rm = TRUE)) ", negative Werte" else ""))
   p <- prior %||% rep(1 / Tn, Tn); p <- p / sum(p)
   vars <- intersect(c(assets, states), names(S))
@@ -213,7 +213,7 @@ entropy_pooling <- function(x, assets, views, states = NULL, frequency = c("week
 #' Phasen erwarten laesst (einschliesslich gemeinsamer Abstuerze bei der
 #' t-Copula).
 #'
-#' Die Periodenrenditen werden wie bei [entropy_pooling()] gebildet
+#' Die Periodenrenditen werden wie bei [scenario_entropy_pooling()] gebildet
 #' (einfache Renditen in Prozent je Periode aus Kursdaten; eine fertige
 #' Tabelle ohne \code{date} wird unveraendert verwendet). Die Raender sind
 #' die empirischen Quantilfunktionen mit linearer Interpolation; simulierte
@@ -252,20 +252,20 @@ entropy_pooling <- function(x, assets, views, states = NULL, frequency = c("week
 #'   \code{sd_post} der Szenarien), \code{correlation} (Pearson-Korrelation
 #'   der Szenarien), \code{assets}, \code{frequency}, \code{kind}
 #'   (\code{"copula"}). Methode \code{print}; weiter mit [scenario_risk()].
-#' @seealso [scenario_risk()], [entropy_pooling()], [fit_copula()],
-#'   [crisis_replay()].
+#' @seealso [scenario_risk()], [scenario_entropy_pooling()], [copula_fit()],
+#'   [scenario_crisis()].
 #' @examples
 #' set.seed(1); n <- 3 * 365
 #' d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
 #' e <- rnorm(n)
 #' d$aktien <- 100 * cumprod(1 + 0.01 * e)
 #' d$anleihen <- 100 * cumprod(1 + 0.004 * (0.3 * e + rnorm(n)))
-#' cs <- copula_scenarios(d, c("aktien", "anleihen"), n = 2000,
+#' cs <- scenario_copula(d, c("aktien", "anleihen"), n = 2000,
 #'                        stress = list(aktien = c(0, 0.05)), seed = 1)
 #' cs
 #' scenario_risk(cs, c(aktien = 0.6, anleihen = 0.4))
 #' @export
-copula_scenarios <- function(x, assets, n = 10000L, family = c("t", "gaussian"), stress = NULL,
+scenario_copula <- function(x, assets, n = 10000L, family = c("t", "gaussian"), stress = NULL,
                              frequency = c("week", "day", "month"), seed = NULL) {
   family <- match.arg(family); frequency <- match.arg(frequency)
   S <- .scen_frame(x, assets, NULL, frequency)
@@ -371,7 +371,7 @@ print.SimLevScenarios <- function(x, ...) {
 #'
 #' Berechnet die Portfoliorendite \eqn{r_j = \sum_i w_i X_{ji}} je Szenario
 #' und daraus Kennzahlen, gewichtet mit den Szenario-Wahrscheinlichkeiten
-#' \code{x$prob} (z. B. nach [entropy_pooling()]). Quantile sind die
+#' \code{x$prob} (z. B. nach [scenario_entropy_pooling()]). Quantile sind die
 #' kleinste Szenariorendite, bei der die kumulierte Wahrscheinlichkeit den
 #' Wert erreicht. Der CVaR ist der erwartete Verlust in der
 #' Wahrscheinlichkeitsmasse \code{alpha} der schlechtesten Szenarien
@@ -381,7 +381,7 @@ print.SimLevScenarios <- function(x, ...) {
 #' der CVaR kohaerent und faellt monoton in \code{alpha}.
 #'
 #' @param x Objekt der Klasse \code{SimLevScenarios} aus
-#'   [entropy_pooling()] oder [copula_scenarios()].
+#'   [scenario_entropy_pooling()] oder [scenario_copula()].
 #' @param weights Benannter Gewichtsvektor (Anteile, Namen = Anlagespalten
 #'   der Szenarien); wird nicht normiert.
 #' @param alpha Tail-Wahrscheinlichkeit als Anteil fuer VaR und CVaR
@@ -392,14 +392,14 @@ print.SimLevScenarios <- function(x, ...) {
 #'   der Szenarien (bei Kursdaten Prozent je Periode) sowie
 #'   \code{prob_loss} (Wahrscheinlichkeit einer negativen Rendite als Anteil
 #'   0 bis 1).
-#' @seealso [entropy_pooling()], [copula_scenarios()], [crisis_replay()],
-#'   [risk_contributions()].
+#' @seealso [scenario_entropy_pooling()], [scenario_copula()], [scenario_crisis()],
+#'   [portfolio_risk_contributions()].
 #' @references Rockafellar, R. T. & Uryasev, S. (2002), Conditional
 #'   value-at-risk for general loss distributions, Journal of Banking &
 #'   Finance 26(7), 1443-1471.
 #' @examples
 #' set.seed(1); X <- data.frame(aktien = rnorm(1000, 0.15, 2), anleihen = rnorm(1000, 0.05, 0.6))
-#' ep <- entropy_pooling(X, c("aktien", "anleihen"), list(view_mean("aktien", -0.2)))
+#' ep <- scenario_entropy_pooling(X, c("aktien", "anleihen"), list(view_mean("aktien", -0.2)))
 #' scenario_risk(ep, c(aktien = 0.6, anleihen = 0.4))
 #' @export
 scenario_risk <- function(x, weights, alpha = 0.05) {
@@ -475,30 +475,30 @@ scenario_risk <- function(x, weights, alpha = 0.05) {
 #'   nicht darunter; \code{NA} =
 #'   nicht erholt bzw. Daten enden) und je Anlage deren Rendite im Fenster in
 #'   Prozent.
-#' @seealso [copula_scenarios()], [scenario_risk()], [regime_subset()],
-#'   [align_series()].
+#' @seealso [scenario_copula()], [scenario_risk()], [regime_subset()],
+#'   [series_align()].
 #' @examples
 #' set.seed(1); n <- 4 * 365
 #' d <- data.frame(date = seq.Date(as.Date("2018-01-01"), by = "day", length.out = n))
 #' d$aktien <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.012))
 #' d$anleihen <- 100 * cumprod(1 + rnorm(n, 1e-4, 0.003))
-#' crisis_replay(d, c(aktien = 0.6, anleihen = 0.4))
+#' scenario_crisis(d, c(aktien = 0.6, anleihen = 0.4))
 #' kr <- data.frame(crisis = "Test", start = as.Date("2019-05-01"), end = as.Date("2019-09-30"))
-#' crisis_replay(d, c(aktien = 0.6, anleihen = 0.4), crises = kr, rebalance = TRUE)
+#' scenario_crisis(d, c(aktien = 0.6, anleihen = 0.4), crises = kr, rebalance = TRUE)
 #' @export
-crisis_replay <- function(data, weights, crises = NULL, rebalance = FALSE) {
+scenario_crisis <- function(data, weights, crises = NULL, rebalance = FALSE) {
   crises <- crises %||% .default_crises
-  if (!is.data.frame(data) || !"date" %in% names(data)) stop("crisis_replay: data.frame mit Spalte 'date' erwartet.")
+  if (!is.data.frame(data) || !"date" %in% names(data)) stop("scenario_crisis: data.frame mit Spalte 'date' erwartet.")
   if (!is.data.frame(crises) || !all(c("crisis", "start", "end") %in% names(crises)))
-    stop("crisis_replay: crises muss ein data.frame mit den Spalten crisis, start, end sein.")
+    stop("scenario_crisis: crises muss ein data.frame mit den Spalten crisis, start, end sein.")
   if (!is.numeric(weights) || is.null(names(weights)) || any(names(weights) == "") || any(!is.finite(weights)))
-    stop("crisis_replay: weights muss ein benannter numerischer Vektor ohne NA sein (Namen = Kursspalten).")
+    stop("scenario_crisis: weights muss ein benannter numerischer Vektor ohne NA sein (Namen = Kursspalten).")
   unk <- setdiff(names(weights), setdiff(names(data), "date"))
-  if (length(unk)) stop(sprintf("crisis_replay: Kursspalte(n) %s fehlen in data.", paste0("'", unk, "'", collapse = ", ")))
-  if (sum(weights) <= 0) stop(sprintf("crisis_replay: Summe der Gewichte muss positiv sein (erhalten %g); sie wird auf 1 normiert.", sum(weights)))
+  if (length(unk)) stop(sprintf("scenario_crisis: Kursspalte(n) %s fehlen in data.", paste0("'", unk, "'", collapse = ", ")))
+  if (sum(weights) <= 0) stop(sprintf("scenario_crisis: Summe der Gewichte muss positiv sein (erhalten %g); sie wird auf 1 normiert.", sum(weights)))
   data <- .dep_sort_dates(data)
   d <- data$date; a <- names(weights); w <- weights / sum(weights)
-  crises$start <- .to_date(crises$start, "crisis_replay: crises$start"); crises$end <- .to_date(crises$end, "crisis_replay: crises$end")
+  crises$start <- .to_date(crises$start, "scenario_crisis: crises$start"); crises$end <- .to_date(crises$end, "scenario_crisis: crises$end")
   P <- vapply(a, function(k) .fill_na(.dep_check_prices(as.numeric(data[[k]]), k, d), "locf", keep_leading = TRUE), numeric(nrow(data)))
   if (!is.matrix(P)) P <- matrix(P, ncol = length(a), dimnames = list(NULL, a))
   rows <- lapply(seq_len(nrow(crises)), function(i) {

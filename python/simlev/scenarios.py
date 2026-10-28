@@ -1,12 +1,12 @@
 """Szenarien mit eigenen Annahmen und Stresstests (Port von ``r/R/scenarios.R``).
 
-- :func:`entropy_pooling`   gewichtet Szenarien so um, dass sie eigene Annahmen
+- :func:`scenario_entropy_pooling`   gewichtet Szenarien so um, dass sie eigene Annahmen
   ("Views") erfüllen, bei minimaler relativer Entropie (Meucci 2008)
 - :func:`view_mean`, :func:`view_prob`, :func:`view_vol`   Bausteine für Annahmen
-- :func:`copula_scenarios`  Szenarien aus t- bzw. Gauss-Copula mit empirischen
+- :func:`scenario_copula`  Szenarien aus t- bzw. Gauss-Copula mit empirischen
   Rändern, optional unter Stress
 - :func:`scenario_risk`     Portfolio-Kennzahlen auf (gewichteten) Szenarien
-- :func:`crisis_replay`     ein Portfolio durch historische Krisenfenster
+- :func:`scenario_crisis`     ein Portfolio durch historische Krisenfenster
 """
 from __future__ import annotations
 
@@ -24,8 +24,8 @@ from ._r import libm as _libm
 from ._r.rlist import RList
 from ._r.rnum import LD, r_colsums, r_cumprod, r_rowsums, r_sd, r_sum
 
-__all__ = ["view_mean", "view_prob", "view_vol", "entropy_pooling", "copula_scenarios", "scenario_risk",
-           "crisis_replay", "SimLevScenarios"]
+__all__ = ["view_mean", "view_prob", "view_vol", "scenario_entropy_pooling", "scenario_copula", "scenario_risk",
+           "scenario_crisis", "SimLevScenarios"]
 
 _NAN = _fmt.NA_REAL      # R's NA_real_ (alle Verwendungen hier sind NA)
 
@@ -55,20 +55,20 @@ def _view_value(value, what, lo=-math.inf, hi=math.inf):
     return value
 
 
-def view_mean(var, value, op=("=", "<=", ">=")):
+def view_mean(var, value, *, op=("=", "<=", ">=")):
     """Annahme an den Erwartungswert einer Spalte (Einheit der Spalte)."""
     v = _view_value(value, "view_mean")
     return {"type": "mean", "var": var, "value": v, "op": _match_arg(op, ("=", "<=", ">="))}
 
 
-def view_prob(expr, value, op=("=", "<=", ">=")):
+def view_prob(expr, value, *, op=("=", "<=", ">=")):
     """Annahme an die Wahrscheinlichkeit eines Ereignisses (Ausdruck in R-Syntax über die Spalten,
     z. B. ``"aktien < -2 & inflation > 2"``; siehe :mod:`simlev._r.rexpr`)."""
     v = _view_value(value, "view_prob", 0, 1)
     return {"type": "prob", "expr": expr, "value": v, "op": _match_arg(op, ("=", "<=", ">="))}
 
 
-def view_vol(var, value, op=("=", "<=", ">=")):
+def view_vol(var, value, *, op=("=", "<=", ">=")):
     """Annahme an die Standardabweichung einer Spalte (Einheit der Spalte, >= 0)."""
     v = _view_value(value, "view_vol", 0)
     return {"type": "vol", "var": var, "value": v, "op": _match_arg(op, ("=", "<=", ">="))}
@@ -109,7 +109,7 @@ def _eval_expr(expr, S, env=None):
 
 
 class SimLevScenarios(RList):
-    """Szenarien aus :func:`entropy_pooling` bzw. :func:`copula_scenarios`."""
+    """Szenarien aus :func:`scenario_entropy_pooling` bzw. :func:`scenario_copula`."""
 
     r_class = ("SimLevScenarios",)
 
@@ -144,7 +144,7 @@ class SimLevScenarios(RList):
 
 
 @env_from_caller
-def entropy_pooling(x, assets, views, states=None, frequency=("week", "day", "month"), prior=None, env=None):
+def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week", "day", "month"), prior=None, env=None):
     """Entropy Pooling: Szenarien auf eigene Annahmen umgewichten.
 
     Args:
@@ -174,7 +174,7 @@ def entropy_pooling(x, assets, views, states=None, frequency=("week", "day", "mo
             bad = (not np.isfinite(pf).all()) or (pf < 0).any() or r_sum(pf) <= 0
         if bad:
             neg = ", negative Werte" if isnum and (pa.astype(np.float64)[~np.isnan(pa.astype(np.float64))] < 0).any() else ""
-            raise ValueError("entropy_pooling: prior muss %d endliche Werte >= 0 mit positiver Summe haben (einer je Szenario; "
+            raise ValueError("scenario_entropy_pooling: prior muss %d endliche Werte >= 0 mit positiver Summe haben (einer je Szenario; "
                              "erhalten: Länge %d%s)." % (Tn, pa.size, neg))
         p = pa.astype(np.float64)
     else:
@@ -300,7 +300,7 @@ def _rnorm_mat(m, k):
     return v.reshape((k, m)).T.copy()
 
 
-def copula_scenarios(x, assets, n=10000, family=("t", "gaussian"), stress=None, frequency=("week", "day", "month"),
+def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None, frequency=("week", "day", "month"),
                      seed=None):
     """Szenarien aus einer Copula mit empirischen Rändern.
 
@@ -470,7 +470,7 @@ def _isnum_arr(a):
     return False
 
 
-def scenario_risk(x, weights, alpha=0.05):
+def scenario_risk(x, weights, *, alpha=0.05):
     """Portfolio-Kennzahlen auf Szenarien (gewichtet mit ``x.prob``).
 
     Args:
@@ -527,7 +527,7 @@ _DEFAULT_CRISES = pd.DataFrame({
                     dtype="datetime64[D]")})
 
 
-def crisis_replay(data, weights, crises=None, rebalance=False):
+def scenario_crisis(data, weights, *, crises=None, rebalance=False):
     """Portfolio durch historische Krisen führen.
 
     Args:
@@ -542,27 +542,27 @@ def crisis_replay(data, weights, crises=None, rebalance=False):
     if crises is None:
         crises = _DEFAULT_CRISES
     if not isinstance(data, pd.DataFrame) or "date" not in data.columns:
-        raise ValueError("crisis_replay: data.frame mit Spalte 'date' erwartet.")
+        raise ValueError("scenario_crisis: data.frame mit Spalte 'date' erwartet.")
     if not isinstance(crises, pd.DataFrame) or not all(c in crises.columns for c in ("crisis", "start", "end")):
-        raise ValueError("crisis_replay: crises muss ein data.frame mit den Spalten crisis, start, end sein.")
+        raise ValueError("scenario_crisis: crises muss ein data.frame mit den Spalten crisis, start, end sein.")
     names, vals = _named_weights(weights)
     if (not _isnum_arr(vals) or names is None or any(nm_ == "" for nm_ in names)
             or not np.isfinite(np.asarray(vals, dtype=np.float64)).all()):
-        raise ValueError("crisis_replay: weights muss ein benannter numerischer Vektor ohne NA sein (Namen = Kursspalten).")
+        raise ValueError("scenario_crisis: weights muss ein benannter numerischer Vektor ohne NA sein (Namen = Kursspalten).")
     unk = [nm_ for nm_ in names if nm_ not in [c for c in data.columns if c != "date"]]
     if unk:
-        raise ValueError("crisis_replay: Kursspalte(n) %s fehlen in data." % ", ".join("'%s'" % u for u in dict.fromkeys(unk)))
+        raise ValueError("scenario_crisis: Kursspalte(n) %s fehlen in data." % ", ".join("'%s'" % u for u in dict.fromkeys(unk)))
     wv = np.asarray(vals, dtype=np.float64)
     sw = r_sum(wv)
     if sw <= 0:
-        raise ValueError("crisis_replay: Summe der Gewichte muss positiv sein (erhalten %s); sie wird auf 1 normiert."
+        raise ValueError("scenario_crisis: Summe der Gewichte muss positiv sein (erhalten %s); sie wird auf 1 normiert."
                          % _fmt.sprintf("%g", sw))
     data = _dep._dep_sort_dates(data)
     d = _dep._dates_arr(data["date"].to_numpy())
     dd = _dep._days(d)
     w = wv / sw
-    cs = _dep._days(_dep._to_date(crises["start"], "crisis_replay: crises$start"))
-    ce = _dep._days(_dep._to_date(crises["end"], "crisis_replay: crises$end"))
+    cs = _dep._days(_dep._to_date(crises["start"], "scenario_crisis: crises$start"))
+    ce = _dep._days(_dep._to_date(crises["end"], "scenario_crisis: crises$end"))
     P = np.column_stack([_dep._fill_na(_dep._dep_check_prices(_dep._num(data[a]), a, d), "locf", keep_leading=True)
                          for a in names])
     rows = []
@@ -613,4 +613,4 @@ def _cummax_nan(x):
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
 from ._r.base import quiet_fp  # noqa: E402
 
-quiet_fp(globals(), __all__)  # entropy_pooling: env aus dem Aufrufer (env_from_caller)
+quiet_fp(globals(), __all__)  # scenario_entropy_pooling: env aus dem Aufrufer (env_from_caller)

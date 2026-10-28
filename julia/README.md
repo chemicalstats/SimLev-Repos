@@ -12,7 +12,7 @@
 
 Dieses Paket ist die Julia-Fassung 0.5.0 des R-Pakets SimLev. Sie ist ein
 **vollständiger Port** der aktuellen R-Fassung 0.5.0: die Engine
-`simulation()` und alle Erweiterungen, insgesamt alle 104 Exporte aus
+`simulation()` und alle Erweiterungen, insgesamt alle 113 Exporte aus
 `r/NAMESPACE`. Sie läuft **eigenständig ohne R** und braucht **keine
 externen Julia-Pakete**, nur die Standardbibliothek (`Dates`, `Printf`,
 `Logging`; `LinearAlgebra` nur als Ersatzweg für Eigenvektoren).
@@ -74,14 +74,14 @@ data = (date  = collect(Date(2015, 1, 1):Day(1):Date(2015, 1, 1) + Day(n - 1)),
         BONDS =  50 .* cumprod(1 .+ 1e-4 .+ 0.003 .* randn(rng, n)))
 
 strategy = create_strategy(
-    WORLD = asset_config("etf", "bnh"; asset_share = 0.7, asset_spread = 0.1, asset_bonus = 30),
-    BONDS = asset_config("etf", "bnh"; asset_share = 0.3, asset_spread = 0.1, asset_bonus = 0),
+    WORLD = asset_config("etf", "bnh"; share = 0.7, spread = 0.1, partial_exemption = 30),
+    BONDS = asset_config("etf", "bnh"; share = 0.3, spread = 0.1, partial_exemption = 0),
 )
 
 result = simulation(data, strategy;
     start_value = 10000,
-    balance_mode = true, balance_span = 1, balance_unit = "year",
-    tax_mode = "person", tax_rate = 26.375,
+    rebalance = rebalance_plan(1; unit = "year"),
+    tax = tax_profile(26.375),
     liquidate = true, risk_free = 2)
 
 display(result)
@@ -128,8 +128,10 @@ R-Paket. Pflichtargumente stehen vor dem Semikolon, die übrigen werden als
 Schlüsselwörter übergeben (`simulation(data, strategy; start_value = 1e4)`,
 `portfolio_optimize(df; assets = ["WORLD", "BONDS"], method = "risk_parity")`).
 Einige Funktionen nehmen wie in R weitere Argumente auch positionell, etwa
-`asset_config("etf", "bnh", 0.6, 0.1, 30)` oder
-`bootstrap_study(df, cfg, "stationary"; …)`.
+`asset_config("etf", "bnh", 0.6, 0.1, 30)`,
+`bootstrap_study(df, cfg, "stationary"; …)` oder die Bausteine von
+`simulation()` (`dca_plan(100, 1; days = 15)`, `split_rule([50, 200])`,
+`tax_profile(; income = income_rate(42))`).
 
 | R | Julia |
 |---|---|
@@ -322,7 +324,7 @@ werden außerdem Druck- und Konsolenausgabe, Warnungen und Fehlermeldungen.
 | Engine: gezielte Fälle für jeden Steuer- und Sonderpfad plus Zufallsfälle (`golden/cases/`) | 68 | alle bitgleich, einschließlich `print` und `details = true` |
 | Engine: Stressfälle (`golden/extra/`) | 37 | alle bitgleich, einschließlich `print` und `details = true` |
 | Engine: frisch erzeugte Zufalls- und Stressfälle beider Generatoren | 469 | alle bitgleich |
-| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS und die R-Interna (30 Module in `golden/modules/`) | 4.578 | alle bitgleich |
+| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS und die R-Interna (30 Module in `golden/modules/`) | 4.656 | alle bitgleich |
 
 **Plattformen:** Die Referenz ist R unter Linux x86-64 (die Modul-Fälle
 entstanden mit R 4.3.3); dort ist die Julia-Fassung geprüft. Die
@@ -333,7 +335,7 @@ glibc; unter macOS und Windows ist die Fassung nicht geprüft.
 `ugarchfit` mit Rsolnp 1.16 `solnp`, Richardson-Hesse-Matrix und `nlminb`)
 sind nachgebildet. Das Tail-Modell schätzt ab 30 Überschreitungen immer
 per GPD-ML wie R, das `evd::fpot` übernommen hat (`.evd_fpot`; Herkunft in
-`COPYRIGHTS.md`). Die GARCH-Schätzung in Bootstrap, `dcc_fit` und
+`COPYRIGHTS.md`). Die GARCH-Schätzung in Bootstrap, `dependence_dcc` und
 `dependence_analysis` läuft immer per rugarch-Nachbildung wie R, das
 `ugarchfit` mit Rsolnp und truncnorm übernommen hat
 (`.rugarch_ugarchfit`; Herkunft in `COPYRIGHTS.md`); `optim` und die
@@ -358,7 +360,7 @@ Gradient bzw. Hesse-Matrix ändern kann.
 
 ``` bash
 julia --project -e 'using Pkg; Pkg.test()'               # 1.221 Tests: Engine, R-Interna, Referenzfälle (Auswahl)
-SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()'   # dazu alle 4.578 Modul-Referenzfälle
+SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()'   # dazu alle 4.656 Modul-Referenzfälle
 julia --project tools/compare_golden.jl                  # Engine: golden/cases und golden/extra; auch [ordner …] [-k fall …]
 julia --project tools/compare_reference.jl [modul …] [-k muster] [-v]   # Modul-Referenzfälle
 ```
@@ -390,11 +392,11 @@ src/
                     R-Syntax (rexpr.jl)
   dates.jl          Datumslogik
   config.jl         asset_config, Strategien
-  trigger.jl        compute_rebal_trigger
+  trigger.jl        rebalance_trigger
   data.jl           Eingabetabellen, Kalender-Auffüllung (LOCF)
   core.jl           Zustand, FIFO, Steuer- und Marktkerne (Port der C++-Dateien)
-  engine.jl         simulation() mit sim_phases.jl, sim_loop.jl, sim_evaluate.jl
-  tax_tariff.jl     Einkommensteuertarif, read_tax_tariff
+  engine.jl         simulation() mit sim_phases.jl, sim_loop.jl, sim_evaluate.jl, sim_blocks.jl
+  tax_tariff.jl     Einkommensteuertarif, tax_tariff
   result.jl         SimLevResult, print/summary
   svg.jl            Grafikmodul: SimLevPlot, plot-API und alle SVG-Zeichenbausteine
   dashboard.jl      statisches SVG-Dashboard (Daten und Panels)

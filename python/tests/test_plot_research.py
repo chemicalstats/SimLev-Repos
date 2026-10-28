@@ -211,10 +211,10 @@ def test_plot_api_warnings_and_files(tmp_path):
     p = x.plot(file=str(f))
     assert f.read_text(encoding="utf-8") == p.svg
     h = _obj("regimes/hmm_week")
-    with warnings.catch_warnings(record=True) as wl:              # R kennt data = NULL; Julia nicht
+    with warnings.catch_warnings(record=True) as wl:              # wie R: data wird angenommen und nicht verwendet
         warnings.simplefilter("always")
         h.plot(data=None)
-    assert [str(m.message) for m in wl] == ["plot.SimLevHMM: unbekanntes Argument 'data' wird ignoriert (Tippfehler?)."]
+    assert [str(m.message) for m in wl] == []
     o = _obj("optimize/po4_min_variance")
     assert 'width="640"' in simlev.plot(o, width=640).svg
     with warnings.catch_warnings(record=True) as wl:               # wie Julia: Optionen nur als Schlüsselwort

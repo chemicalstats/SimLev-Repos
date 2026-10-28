@@ -2,33 +2,33 @@
 # stehen nach `using SimLev` direkt zur Verfügung.
 
 const _MODULE_EXPORTS = (
-    (:DataPrep, (:align_series, :check_series, :align_macro, :convert_currency, :total_return_index, :deflate,
-                 :splice_series, :strategy_from_weights, :portfolio_template)),
+    (:DataPrep, (:series_align, :series_check, :series_align_macro, :series_convert_currency, :index_total_return, :series_deflate,
+                 :series_splice, :strategy_from_weights, :portfolio_template)),
     (:Backcast, (:backcast_fit, :backcast)),
-    (:Bonds, (:bond_index_from_yields, :money_market_index, :currency_hedged_index)),
+    (:Bonds, (:index_bond, :index_money_market, :index_currency_hedged)),
     (:Signals, (:signal_sma, :signal_ema, :signal_crossover, :signal_momentum, :signal_drawdown,
                 :signal_volatility, :signal_combine)),
-    (:Bootstrap, (:bootstrap_config, :block_length, :bootstrap, :validate_bootstrap,
-                  :bootstrap_data, :study_metrics, :bootstrap_study, :bootstrap_probability)),
+    (:Bootstrap, (:bootstrap_config, :bootstrap_block_length, :bootstrap, :bootstrap_validate,
+                  :bootstrap_data, :bootstrap_study_metrics, :bootstrap_study, :bootstrap_probability)),
     (:Withdrawal, (:withdrawal_rule, :withdrawal_cohorts, :result_index, :withdrawal_paths,
-                   :perfect_withdrawal_rate, :withdrawal_simulation, :withdrawal_max_rate, :horizon_model)),
-    (:Dependence, (:fit_copula, :tail_dependence, :dcc_fit, :dependence_analysis, :quantile_reg,
-                   :tail_regression, :covar_analysis, :validate_dependence, :regime_subset)),
+                   :withdrawal_perfect_rate, :withdrawal_simulation, :withdrawal_max_rate, :withdrawal_horizon)),
+    (:Dependence, (:copula_fit, :tail_dependence, :dependence_dcc, :dependence_analysis, :quantile_regression,
+                   :tail_regression, :tail_covar, :dependence_validate, :regime_subset)),
     (:Regimes, (:regime_hmm, :regime_states)),
-    (:Scenarios, (:view_mean, :view_prob, :view_vol, :entropy_pooling, :copula_scenarios, :scenario_risk,
-                  :crisis_replay)),
-    (:Optimize, (:portfolio_optimize, :efficient_frontier, :rolling_optimization, :risk_contributions,
-                 :cpcv_portfolio)),
-    (:Tactical, (:signal_state, :momentum_score, :tactical_rules, :tactical_rotation, :target_volatility,
-                 :conditional_volatility, :glidepath, :blend_weights, :tactical_simulation)),
-    (:DeepAnalysis, (:deep_analysis,)),
-    (:Planning, (:set_expected_return, :pooled_bootstrap, :portfolio_returns, :goal_optimize)),
-    (:AnalysisTests, (:signal_analysis, :sharpe_test, :reality_check, :min_track_record, :return_heatmap)),
-    (:Overfitting, (:pbo, :probabilistic_sharpe, :deflated_sharpe, :walk_forward, :param_bootstrap,
+    (:Scenarios, (:view_mean, :view_prob, :view_vol, :scenario_entropy_pooling, :scenario_copula, :scenario_risk,
+                  :scenario_crisis)),
+    (:Optimize, (:portfolio_optimize, :portfolio_frontier, :portfolio_rolling, :portfolio_risk_contributions,
+                 :portfolio_cpcv)),
+    (:Tactical, (:signal_state, :momentum_score, :tactical_rules, :tactical_rotation, :tactical_target_volatility,
+                 :tactical_conditional_volatility, :tactical_glidepath, :tactical_blend, :tactical_simulation)),
+    (:DeepAnalysis, (:result_analysis,)),
+    (:Planning, (:series_shift_return, :bootstrap_pooled, :portfolio_returns, :planning_goal)),
+    (:AnalysisTests, (:signal_analysis, :sharpe_test, :overfit_reality_check, :sharpe_min_track_record, :result_heatmap)),
+    (:Overfitting, (:overfit_pbo, :sharpe_probabilistic, :sharpe_deflated, :overfit_walk_forward, :param_bootstrap,
                     :sharpe_haircut)),
-    (:ParamSearch, (:param_space, :param_range, :param_search, :plateau)),
-    (:Sensitivity, (:sensitivity_grid, :rebalancing_sensitivity, :lumpsum_vs_dca, :leveraged_series,
-                    :leverage_sensitivity)),
+    (:ParamSearch, (:param_space, :param_range, :param_search, :param_plateau)),
+    (:Sensitivity, (:sensitivity_grid, :sensitivity_rebalancing, :planning_lumpsum_vs_dca, :series_leverage,
+                    :sensitivity_leverage)),
 )
 
 for (m, fs) in _MODULE_EXPORTS
@@ -41,4 +41,7 @@ end
 "`set.seed()` wie in R (globaler Zufallszustand, siehe `RRng`)."
 const set_seed = RRng.set_seed
 const rng_kind = RRng.rng_kind
-export set_seed, rng_kind, read_tax_tariff, SimLevSummary, format_summary
+export set_seed, rng_kind, tax_tariff, SimLevSummary, format_summary
+# Bausteine für simulation() (Etappe 6.3, sim_blocks.jl)
+export sim_costs, dca_plan, rebalance_plan, split_rule, tax_profile, income_rate, income_tariff, harvest_rule,
+       funds_costs

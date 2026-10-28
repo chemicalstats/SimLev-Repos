@@ -33,7 +33,7 @@ from ._sim_base import (
     _FEE,
     _num_vec,
     _unwrap,
-    apply_spread,
+    _apply_spread,
     calculate_dates_flags,
     calculate_kurtosis,
     calculate_partials,
@@ -49,6 +49,7 @@ from ._sim_phases import (
     _sim_prepare_data,
 )
 from ._sim_loop import _Actions, _sim_close_years, _sim_run_days
+from . import _sim_blocks as _blocks
 from ._sim_evaluate import (
     _sim_compact_trades,
     _sim_result,
@@ -57,8 +58,8 @@ from ._sim_evaluate import (
     _sim_undefined_metrics,
 )
 
-__all__ = ["simulation", "calculate_skewness", "calculate_kurtosis", "calculate_partials",
-           "calculate_dates_flags", "xirr_rate", "apply_spread"]
+__all__ = ["simulation", "_simulation_flat", "calculate_skewness", "calculate_kurtosis", "calculate_partials",
+           "calculate_dates_flags", "xirr_rate", "_apply_spread"]
 
 # Wiederausgabe interner Namen, die andere Module über ``engine`` nutzen
 # (``config.py``: ``_as_date``, ``dashboard.py``: ``_r_class_name``)
@@ -72,7 +73,54 @@ _xirr_rate = _base._xirr_rate
 # Hauptfunktion
 # ═══════════════════════════════════════════════════════════════════════════
 
+class _CostsDefault:
+    """Standard ``costs = sim_costs()`` (wird im Rumpf angelegt; Text wie in R)."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "sim_costs()"
+
+
+_SIM_COSTS = _CostsDefault()
+
+
 def simulation(
+    data: Any,
+    strategy: Mapping[str, Mapping[str, Any]],
+    *,
+    start_value: float = 10000,
+    costs: Any = _SIM_COSTS,
+    dca: Any = None,
+    rebalance: Any = None,
+    splits: Any = None,
+    tax: Any = None,
+    funds: Any = None,
+    risk_free: float | str | None = 0,
+    fractions: bool = True,
+    liquidate: bool = False,
+    details: bool = False,
+):
+    """Portfolio-Simulation (Backtest) mit Bausteinen (Etappe 6.3, Anhang C).
+
+    Bitgleiche Portierung von ``simulation()`` aus dem R-Paket SimLev 0.5.0. Die Einstellungen kommen als
+    Bausteine: ``costs = sim_costs()`` (Standard), ``dca = dca_plan()``, ``rebalance = rebalance_plan()``,
+    ``splits = split_rule()``, ``tax = tax_profile()`` (mit ``income = income_rate()`` oder
+    ``income_tariff()`` und ``harvest = harvest_rule()``) und ``funds = funds_costs()``; ``None`` heißt aus.
+    ``funds`` zusammen mit ``tax`` ist der Fondsmodus mit eigenen Steuern (Satz bzw. Kirchensteuer aus
+    ``tax_profile()``). Die Bausteine werden mit ``_sim_from_blocks`` in die
+    internen Werte übersetzt; die Engine (``_simulation_flat``) rechnet unverändert.
+
+    Rückgabe: :class:`simlev.SimLevResult` mit den Elementen wie in R.
+    """
+    if isinstance(costs, _CostsDefault):
+        costs = _blocks.sim_costs()
+    flat = _blocks._sim_from_blocks(costs, dca, rebalance, splits, tax, funds)
+    return _simulation_flat(data, strategy, start_value=start_value, risk_free=risk_free, fractions=fractions,
+                            liquidate=liquidate, details=details, _blocks=True, **flat)
+
+
+def _simulation_flat(
     data: Any,
     strategy: Mapping[str, Mapping[str, Any]],
     start_value: float = 10000,
@@ -135,10 +183,14 @@ def simulation(
     # Einkommensteuertarif
     taxable_income: Any = None,
     tax_tariff: Any = None,
+    _blocks: bool = False,
 ):
-    """Portfolio-Simulation (Backtest) mit Sparplan, Rebalancing und deutscher Besteuerung.
+    """Engine von ``simulation()`` mit den internen (flachen) Argumenten (R: ``.simulation_flat``).
 
-    Bitgleiche Portierung von ``simulation()`` aus dem R-Paket SimLev 0.5.0. Alle Raten und
+    ``simulation()`` ruft sie mit den aus den Bausteinen übersetzten Werten auf (``_blocks=True``). Die
+    Aufrufer mit ``sim_args`` gehen seit Etappe 6.4 über ``simulation()`` (``_sim_blocks._sim_args_set``).
+
+    Bitgleiche Portierung der Rechnung von ``simulation()`` aus dem R-Paket SimLev 0.5.0. Alle Raten und
     Schwellen werden **in Prozent** angegeben (``tax_rate=26.375``, ``balance_thresh=5``,
     ``risk_free=2`` …). Argumente und Voreinstellungen entsprechen 1:1 denen in R; ``None``
     steht für ``NULL``, ``True``/``False`` für ``TRUE``/``FALSE``, Folgen für ``c(...)``,
@@ -148,7 +200,7 @@ def simulation(
     ``dict(fixed=, percent=, min=, max=)``), ``church_tax`` (Prozent), ``harvest_mode``,
     ``harvest_day`` (``"MM-TT"``), ``harvest_loss_pot``, ``taxable_income`` (Zahl, ``dict``
     Jahr -> zvE, ``pandas.Series`` oder ``DataFrame(year, taxable_income)``) und
-    ``tax_tariff`` (``None``, Dateipfad oder :func:`simlev.read_tax_tariff`-Objekt).
+    ``tax_tariff`` (``None``, Dateipfad oder :func:`simlev.tax_tariff`-Objekt).
 
     Hinweise (R: ``message()``) gehen nach ``sys.stderr``, Warnungen sind
     ``warnings.warn``-Warnungen, Fehler ``ValueError`` (Texte wie in R). Die
@@ -160,7 +212,8 @@ def simulation(
     ``tax_report``, ``undefined_metrics``, ``open_lots``, ggf. ``fees_paid`` und
     ``harvest_days``).
     """
-    given = {
+    given = {k: False for k in ("tax_rate", "marginal_tax_rate", "include_soli_on_income_tax", "soli_rate_income_tax",
+                                "funds_fee", "bonus_fee", "event_mode")} if _blocks else {
         "tax_rate": not isinstance(tax_rate, _Default),
         "marginal_tax_rate": not isinstance(marginal_tax_rate, _Default),
         "include_soli_on_income_tax": not isinstance(include_soli_on_income_tax, _Default),
@@ -184,18 +237,18 @@ def simulation(
             base_rate=base_rate, funds_fee=funds_fee, bonus_fee=bonus_fee, fractions=fractions, risk_free=risk_free,
             split_mode=split_mode, split_thresh=split_thresh, event_col=event_col, church_tax=church_tax,
             order_fee=order_fee, dca_fee=dca_fee, harvest_mode=harvest_mode, harvest_day=harvest_day,
-            taxable_income=taxable_income, tax_tariff=tax_tariff, given=given)
+            taxable_income=taxable_income, tariff=tax_tariff, given=given, blocks=_blocks)
         if split_thresh is not None:
             split_thresh = _num_vec(split_thresh)
-        prep = _sim_prepare_data(cfg["data"], cfg["pre_filled"], base_rate_flex, base_rate_data)
+        prep = _sim_prepare_data(cfg["data"], cfg["pre_filled"], base_rate_flex, base_rate_data, blocks=_blocks)
         sim = _sim_build_state(prep["data"], cfg["strategy"], cfg["start_value"], prep["start_date"],
                                prep["stopp_date"], cfg["sparer_pauschbetrag"], cfg["use_sparer_pauschbetrag"],
-                               cfg["base_rate"], base_rate_flex, base_rate_data)
+                               cfg["base_rate"], base_rate_flex, base_rate_data, blocks=_blocks)
         cal = _sim_build_calendar(prep["data"], sim, cfg["strategy"], prep["start_date"], prep["stopp_date"],
                                   liquidate, cfg["dca_mode"], dca_span, dca_unit, cfg["dca_days"], cfg["dca_value"],
                                   dca_anchor, dca_start, dca_skip, cfg["balance_mode"], balance_span, balance_unit,
                                   cfg["balance_days"], balance_anchor, balance_start, balance_skip, cfg["event_col"],
-                                  event_mode, event_weight, cfg["split_mode"], split_thresh)
+                                  event_mode, event_weight, cfg["split_mode"], split_thresh, blocks=_blocks)
         fr = cal["data"]
         fl = cal["flags"]
         if cfg["event_col"] is not None:

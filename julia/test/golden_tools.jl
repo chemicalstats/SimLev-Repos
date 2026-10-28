@@ -149,14 +149,26 @@ function load_case(path)
     else
         SimLev.create_strategy([nm => SimLev._config_from_mapping(Dict(f)) for (nm, f) in items]...)
     end
-    args = Pair{Symbol,Any}[]
-    for (k, v) in pairs(d["args"])
-        v = _plain(v)
-        v isa AbstractVector && !isempty(v) && all(x -> x isa Number, v) && (v = [x for x in v])
-        push!(args, Symbol(k) => v)
-    end
+    args = Pair{Symbol,Any}[Symbol(k) => _arg(v) for (k, v) in pairs(d["args"])]
     return d, data, strategy, args
 end
+
+"Baustein aus dem Fall (`{\"block\": <Konstruktor>, \"args\": {...}}`, Etappe 6.3); angelegt erst in `run_case`."
+struct _BlockSpec
+    ctor::Symbol
+    args::Vector{Pair{Symbol,Any}}
+end
+
+function _arg(v)
+    if v isa JObj && haskey(v, "block") && haskey(v, "args")
+        return _BlockSpec(Symbol(v["block"]), Pair{Symbol,Any}[Symbol(k) => _arg(x) for (k, x) in pairs(v["args"])])
+    end
+    v = _plain(v)
+    v isa AbstractVector && !isempty(v) && all(x -> x isa Number, v) && (v = [x for x in v])
+    return v
+end
+
+_mkblock(v) = v isa _BlockSpec ? getfield(SimLev, v.ctor)(; (p.first => _mkblock(p.second) for p in v.args)...) : v
 
 # ── Vergleich ───────────────────────────────────────────────────────────────
 _tok(x::Float64) = isnan(x) ? (SimLev.isna_strict(x) ? "NA" : "NaN") : string(reinterpret(UInt64, x); base = 16)
@@ -189,7 +201,7 @@ function run_case(path; strict_na::Bool = true, verbose::Bool = false)
     res = try
         Base.CoreLogging.with_logger(Base.CoreLogging.NullLogger()) do
             redirect_stderr(devnull) do
-                SimLev.simulation(data, strategy; io = buf, args...)
+                SimLev.simulation(data, strategy; io = buf, (p.first => _mkblock(p.second) for p in args)...)
             end
         end
     catch e

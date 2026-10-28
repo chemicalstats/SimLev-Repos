@@ -18,12 +18,12 @@ from ._dates import days_from_civil, fmt_date, from_days, is_leap, year_of
 from ._r.rformat import r_as_character, r_deparse, r_format, r_format1, r_sprintf
 from ._r.rnum import r_colsums, r_mean, r_pow, r_pow_vec, r_sd, r_sum, r_uniroot
 from .config import _match_arg
-from .tax_tariff import SimLevTaxTariff, tariff_income_tax, tariff_soli
+from ._tax_tariff import SimLevTaxTariff, tariff_income_tax, tariff_soli
 from ._r.rnum import NA_REAL as NA  # R's NA_real_ (Nutzlast 1954)
 
 __all__ = [
     "calculate_skewness", "calculate_kurtosis", "calculate_partials", "calculate_dates_flags",
-    "xirr_rate", "apply_spread",
+    "xirr_rate", "_apply_spread",
 ]
 
 
@@ -699,7 +699,7 @@ def _perform_trade_sell(sim: dict, name: str, index: int, tax_mode: str, tax_rat
         _FEE.paid = _FEE.paid + fee_paid
     tr = sim["trades"][name]
     if price is None and tax_mode == "person":
-        fifo_price = core.calculate_fifo_price(tr["buys"], trade_count, int(tr["fifo_front"]))
+        fifo_price = core._calculate_fifo_price(tr["buys"], trade_count, int(tr["fifo_front"]))
     else:
         fifo_price = 0.0 if price is None else price
     trade_gain = (trade_price - fifo_price) * trade_count
@@ -713,7 +713,7 @@ def _perform_trade_sell(sim: dict, name: str, index: int, tax_mode: str, tax_rat
         totals = sim["totals"]
         if tax_regime == "investment_fund":
             bonus = sim["assets"][name]["bonus"]
-            vp_paid = core.calculate_fifo_vorabpauschale(tr["buys"], trade_count, int(tr["fifo_front"]))
+            vp_paid = core._calculate_fifo_vorabpauschale(tr["buys"], trade_count, int(tr["fifo_front"]))
             adjusted = trade_gain - vp_paid
             res = core.p20_tax(adjusted, bonus, totals, effective_tax_rate, use_sparer_pauschbetrag)
             capital_gains_tax = res["tax"]
@@ -727,7 +727,7 @@ def _perform_trade_sell(sim: dict, name: str, index: int, tax_mode: str, tax_rat
             res = core.p20_tax(trade_gain, 0.0, totals, effective_tax_rate, use_sparer_pauschbetrag)
             capital_gains_tax = res["tax"]
         elif tax_regime == "private_sale":
-            lot_result = core.calculate_private_sale_tax(tr["buys"], int(tr["fifo_front"]), trade_count,
+            lot_result = core._calculate_private_sale_tax(tr["buys"], int(tr["fifo_front"]), trade_count,
                                                          trade_price, current_date)
             if details:
                 if lot_result["exempt_gain"] > 0:
@@ -895,7 +895,7 @@ def _split(sim: dict, name: str, ratio: float, forward: bool) -> dict:
             nb["remaining"] = buy["remaining"] / ratio
             nb["original"] = orig / ratio
         tr["buys"][k] = nb
-    tr["fifo_front"] = core.update_fifo_front(tr["buys"], 1)
+    tr["fifo_front"] = core._update_fifo_front(tr["buys"], 1)
     st["count"] = split_count
     st["price"] = split_price
     st["worth"] = current_worth
@@ -949,9 +949,9 @@ def _perform_gain_harvest(sim: dict, name: str, index: int, tax_regime: str, spr
         px = sell_price
         if with_fee and fee is not None:
             px = px - _fee_amount(fee, n * sell_price) / n
-        g = (px - core.calculate_fifo_price(trades, n, front)) * n
+        g = (px - core._calculate_fifo_price(trades, n, front)) * n
         if tax_regime == "investment_fund":
-            g = g - core.calculate_fifo_vorabpauschale(trades, n, front)
+            g = g - core._calculate_fifo_vorabpauschale(trades, n, front)
         return (1 - bonus) * g
     first_lot = _rmin(total, _rmax(1e-9, total * 1e-6))
     if taxable(first_lot, False) <= 0:
@@ -986,7 +986,7 @@ def _perform_gain_harvest(sim: dict, name: str, index: int, tax_regime: str, spr
 # Tarifweg (taxable_income, tax_tariff)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _check_taxable_income(x: Any, years: list[int]) -> dict:
+def _check_taxable_income(x: Any, years: list[int], who: str = "simulation") -> dict:
     form = ("eine Zahl (zvE in EUR f\u00fcr alle Jahre), ein nach Kalenderjahren benannter Zahlenvektor "
             "(z. B. c(\"2024\" = 50000, \"2025\" = 52000)) oder ein data.frame mit den Spalten year und taxable_income")
     names: list | None = None
@@ -997,12 +997,12 @@ def _check_taxable_income(x: Any, years: list[int]) -> dict:
         vc = next((nm.index(c) for c in ("taxable_income", "betrag", "amount", "zve") if c in nm), None)
         if yc is None or vc is None:
             if x.shape[1] != 2:
-                _stop("simulation: taxable_income als data.frame braucht die Spalten year und taxable_income (oder "
+                _stop(who + ": taxable_income als data.frame braucht die Spalten year und taxable_income (oder "
                       "genau zwei Spalten Jahr, Betrag); vorhanden: %s." % ", ".join(str(c) for c in x.columns))
             yc, vc = 0, 1
         kind, col = _column(x.iloc[:, vc])
         if kind != "numeric":
-            _stop("simulation: taxable_income: Spalte '%s' (Betrag) muss numerisch sein." % x.columns[vc])
+            _stop(who + ": taxable_income: Spalte '%s' (Betrag) muss numerisch sein." % x.columns[vc])
         vals = [float(v) for v in col]
         names = [r_as_character(v) if _is_num(v) else str(v) for v in x.iloc[:, yc]]
     elif isinstance(x, pd.Series):
@@ -1023,15 +1023,15 @@ def _check_taxable_income(x: Any, years: list[int]) -> dict:
             vals = None
     if vals is None or (isinstance(x, np.ndarray) and x.ndim > 1):
         shown = r_format(list(x) if isinstance(x, (list, tuple, np.ndarray)) else x)
-        _stop("simulation: taxable_income muss %s sein, nicht %s." % (form, ", ".join(shown[:3])))
+        _stop(who + ": taxable_income muss %s sein, nicht %s." % (form, ", ".join(shown[:3])))
     for i, v in enumerate(vals):
         if not math.isfinite(v):
-            _stop("simulation: taxable_income enth\u00e4lt einen ung\u00fcltigen Wert (%s%s); erwartet werden endliche "
+            _stop(who + ": taxable_income enth\u00e4lt einen ung\u00fcltigen Wert (%s%s); erwartet werden endliche "
                   "Betr\u00e4ge in EUR." % (r_format1(v), (" f\u00fcr %s" % names[i]) if names is not None else ""))
     if len(vals) == 1 and names is None:
         return {"all": vals[0], "by_year": None}
     if names is None or any(nm is None or nm == "" for nm in names):
-        _stop("simulation: taxable_income mit %d Werten muss nach Kalenderjahren benannt sein; erwartet wird %s."
+        _stop(who + ": taxable_income mit %d Werten muss nach Kalenderjahren benannt sein; erwartet wird %s."
               % (len(vals), form))
     yy = []
     for nm in names:
@@ -1041,14 +1041,14 @@ def _check_taxable_income(x: Any, years: list[int]) -> dict:
         except ValueError:
             y = None
         if y is None or str(y) != t:
-            _stop("simulation: taxable_income: Name '%s' ist kein Kalenderjahr (erwartet z. B. \"2024\")." % nm)
+            _stop(who + ": taxable_income: Name '%s' ist kein Kalenderjahr (erwartet z. B. \"2024\")." % nm)
         yy.append(y)
     for i, y in enumerate(yy):
         if y in yy[:i]:
-            _stop("simulation: taxable_income: Jahr %d kommt mehrfach vor." % y)
+            _stop(who + ": taxable_income: Jahr %d kommt mehrfach vor." % y)
     miss = [y for y in years if y not in yy]
     if miss:
-        _stop("simulation: taxable_income fehlt f\u00fcr %s %s (angegeben: %s); je Kalenderjahr der Simulation "
+        _stop(who + ": taxable_income fehlt f\u00fcr %s %s (angegeben: %s); je Kalenderjahr der Simulation "
               "(%d bis %d) wird ein Betrag ben\u00f6tigt." % ("Simulationsjahr" if len(miss) == 1 else "Simulationsjahre",
                                                               ", ".join(str(m) for m in miss),
                                                               ", ".join(str(y) for y in sorted(yy)),
@@ -1194,7 +1194,7 @@ def _tariff_book(sim: dict, env: _TariffEnv, D: float) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Jahreswechsel (handle_year_change)
+# Jahreswechsel (_handle_year_change)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _handle_year_change(sim: dict, current_date: int, marginal_tax_rate, private_sale_threshold,
@@ -1482,8 +1482,6 @@ def xirr_rate(t, amount, end_value: float, horizon: float) -> float:
     return _xirr_rate(np.asarray(t, dtype=np.float64), np.asarray(amount, dtype=np.float64), float(end_value),
                       float(horizon))
 
-
-apply_spread = _apply_spread
 
 
 # R rechnet mit NA (signalisierendes NaN) ohne Gleitkomma-Warnungen; numpy meldete sonst

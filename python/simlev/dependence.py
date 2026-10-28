@@ -4,14 +4,14 @@
   empirische Tail-Abhängigkeit, Exceedance-Korrelationen, Copula-Fits,
   rollierende Korrelation, DCC(1,1) und bedingte Analyse nach Regimen von
   Drittvariablen mit Block-Bootstrap-Konfidenzintervallen
-- :func:`fit_copula`           Gauss, t, Clayton, Gumbel, Frank inkl. Rotationen
+- :func:`copula_fit`           Gauss, t, Clayton, Gumbel, Frank inkl. Rotationen
 - :func:`tail_dependence`      empirische Tail-Koeffizienten und
   Exceedance-Korrelationen je Quantil
-- :func:`dcc_fit`              DCC(1,1) nach Engle (2002)
-- :func:`quantile_reg`         lineare Quantilsregression
+- :func:`dependence_dcc`              DCC(1,1) nach Engle (2002)
+- :func:`quantile_regression`         lineare Quantilsregression
 - :func:`tail_regression`      Renditequantile in Abhängigkeit von Drittvariablen
-- :func:`covar_analysis`       CoVaR / Delta-CoVaR (Adrian & Brunnermeier 2016)
-- :func:`validate_dependence`  erhalten Bootstrap-Pfade die Abhängigkeitsstruktur?
+- :func:`tail_covar`       CoVaR / Delta-CoVaR (Adrian & Brunnermeier 2016)
+- :func:`dependence_validate`  erhalten Bootstrap-Pfade die Abhängigkeitsstruktur?
 - :func:`regime_subset`        Zeilen eines Regimes für Stress-Bootstraps
 
 Drittvariablen gehen immer verzögert ein: Die Rendite der Periode t wird dem
@@ -34,8 +34,8 @@ from ._r import libm as _libm
 from ._r.rlist import RList
 from ._r.rnum import LD, r_mean, r_pow, r_pow_vec, r_sd, r_sum
 
-__all__ = ["fit_copula", "tail_dependence", "dcc_fit", "dependence_analysis", "quantile_reg",
-           "tail_regression", "covar_analysis", "validate_dependence", "regime_subset",
+__all__ = ["copula_fit", "tail_dependence", "dependence_dcc", "dependence_analysis", "quantile_regression",
+           "tail_regression", "tail_covar", "dependence_validate", "regime_subset",
            "SimLevDependence", "SimLevTailRegression", "SimLevCoVaR"]
 
 _NAN = _fmt.NA_REAL      # R's NA_real_ (Standard hier; arithmetisches NaN: _RNAN)
@@ -645,7 +645,7 @@ def _finite_pairs(x, y):
     return x[ok], y[ok]
 
 
-def fit_copula(x, y, families=None):
+def copula_fit(x, y, *, families=None):
     """Copulas an zwei Reihen anpassen (Pseudo-ML auf Rängen, Auswahl per AIC).
 
     Args:
@@ -663,11 +663,11 @@ def fit_copula(x, y, families=None):
     """
     lx, ly = len(np.atleast_1d(x)), len(np.atleast_1d(y))
     if lx != ly:
-        raise ValueError("fit_copula: x und y müssen gleich lang sein (%d bzw. %d Werte)." % (lx, ly))
+        raise ValueError("copula_fit: x und y müssen gleich lang sein (%d bzw. %d Werte)." % (lx, ly))
     x, y = _finite_pairs(x, y)
     n = x.size
     if n < 20:
-        raise ValueError("fit_copula: mindestens 20 Beobachtungen nötig.")
+        raise ValueError("copula_fit: mindestens 20 Beobachtungen nötig.")
     if families is not None:
         import re
         families = _as_names(families)
@@ -679,13 +679,13 @@ def fit_copula(x, y, families=None):
                     or (base in ("gaussian", "t", "frank") and rot != "")):
                 bad.append(f)
         if bad:
-            raise ValueError("fit_copula: unbekannte Familie %s; erlaubt sind gaussian, t, frank sowie clayton und gumbel "
+            raise ValueError("copula_fit: unbekannte Familie %s; erlaubt sind gaussian, t, frank sowie clayton und gumbel "
                              "mit optionaler Rotation _90, _180 oder _270." % ", ".join("'%s'" % b for b in bad))
     u = _pobs(x)
     v = _pobs(y)
     tau = _kendall(x, y)
     if not math.isfinite(tau):
-        raise ValueError("fit_copula: x oder y ist konstant (keine Rangstreuung); keine Copula schätzbar.")
+        raise ValueError("copula_fit: x oder y ist konstant (keine Rangstreuung); keine Copula schätzbar.")
     if families is None:
         families = (["gaussian", "t", "clayton", "gumbel", "frank", "clayton_180", "gumbel_180"] if tau >= 0
                     else ["gaussian", "t", "frank", "clayton_90", "clayton_270", "gumbel_90", "gumbel_270"])
@@ -725,7 +725,7 @@ def fit_copula(x, y, families=None):
     return out
 
 
-def tail_dependence(x, y, q=(0.01, 0.025, 0.05, 0.10, 0.20)):
+def tail_dependence(x, y, *, q=(0.01, 0.025, 0.05, 0.10, 0.20)):
     """Empirische Tail-Abhängigkeit und Exceedance-Korrelationen.
 
     Args:
@@ -770,7 +770,7 @@ def tail_dependence(x, y, q=(0.01, 0.025, 0.05, 0.10, 0.20)):
 # DCC
 # ═════════════════════════════════════════════════════════════════════════════
 
-def dcc_fit(R):
+def dependence_dcc(R):
     """DCC(1,1)-Modell (Engle 2002).
 
     Args:
@@ -783,7 +783,7 @@ def dcc_fit(R):
     """
     Rm, nm = _as_matrix(R)
     if Rm.shape[1] < 2 or Rm.shape[0] < 100:
-        raise ValueError("dcc_fit: mindestens zwei Reihen und 100 Beobachtungen.")
+        raise ValueError("dependence_dcc: mindestens zwei Reihen und 100 Beobachtungen.")
     if nm is None:
         nm = ["V%d" % (j + 1) for j in range(Rm.shape[1])]
     fg = _boot()._fit_garch11
@@ -791,7 +791,7 @@ def dcc_fit(R):
     Z = np.column_stack([np.asarray(gi["z"], dtype=np.float64) for gi in g])
     flat = [nm[j] for j in range(Z.shape[1]) if r_sd(Z[:, j]) == 0]
     if flat:
-        raise ValueError("dcc_fit: Reihe %s ist konstant; keine Korrelation schätzbar." % ", ".join("'%s'" % f for f in flat))
+        raise ValueError("dependence_dcc: Reihe %s ist konstant; keine Korrelation schätzbar." % ", ".join("'%s'" % f for f in flat))
     Qb = _cormat(Z)
     ev = np.asarray(_linalg().eigen(Qb, symmetric=True, only_values=True)["values"], dtype=np.float64)
     if _rmin(ev) < 1e-8:
@@ -801,7 +801,7 @@ def dcc_fit(R):
         mx = np.max(ab)
         hits = np.argwhere((ab == mx).T)        # spaltenweise wie which(arr.ind = TRUE)
         j0, i0 = int(hits[0][0]), int(hits[0][1])
-        raise ValueError("dcc_fit: Korrelationsmatrix der standardisierten Residuen ist singulär (z. B. '%s' und '%s': "
+        raise ValueError("dependence_dcc: Korrelationsmatrix der standardisierten Residuen ist singulär (z. B. '%s' und '%s': "
                          "Korrelation %s); DCC nicht schätzbar. Doppelte bzw. linear abhängige Reihen entfernen."
                          % (nm[i0], nm[j0], _sprintf("%.6f", float(Qb[i0, j0]))))
 
@@ -818,7 +818,7 @@ def dcc_fit(R):
     a, b = par(opar)
     fl = _core.dcc_filter(Z, a, b, Qb, True)
     if not fl["ok"]:
-        raise ValueError("dcc_fit: bedingte Korrelationsmatrix nicht positiv definit; DCC nicht schätzbar.")
+        raise ValueError("dependence_dcc: bedingte Korrelationsmatrix nicht positiv definit; DCC nicht schätzbar.")
     pn = ["%s ~ %s" % (nm[i], nm[j]) for i, j in _combn2(len(nm))]
     C = pd.DataFrame(fl["R"], columns=pn)
     garch = pd.DataFrame({"series": nm, "alpha": [float(gi["alpha"]) for gi in g],
@@ -924,7 +924,7 @@ class SimLevDependence(RList):
         return _print_dependence(self)
 
 
-def dependence_analysis(data, assets, conditions=None, frequency=("week", "day", "month"),
+def dependence_analysis(data, assets, *, conditions=None, frequency=("week", "day", "month"),
                         quantiles=(0.05, 0.10), breaks=None, n_regimes=3, window=None,
                         dcc=True, copulas=True, B=499, block=None, tail_q=0.10, seed=None):
     """Abhängigkeitsanalyse mit Tail-Risiko und Drittvariablen.
@@ -973,12 +973,12 @@ def dependence_analysis(data, assets, conditions=None, frequency=("week", "day",
     pn = ["%s ~ %s" % (assets[i], assets[j]) for i, j in pidx]
     tails = []
     for k, (i, j) in enumerate(pidx):
-        td = tail_dependence(X[:, i], X[:, j], quantiles)
+        td = tail_dependence(X[:, i], X[:, j], q=quantiles)
         td.insert(0, "pair", pn[k])
         tails.append(td)
     cops = None
     if copulas:
-        cops = {pn[k]: fit_copula(X[:, i], X[:, j]) for k, (i, j) in enumerate(pidx)}
+        cops = {pn[k]: copula_fit(X[:, i], X[:, j]) for k, (i, j) in enumerate(pidx)}
     ptab = pd.DataFrame({"pair": pn, "pearson": [pear[i, j] for i, j in pidx],
                          "spearman": [spear[i, j] for i, j in pidx], "kendall": [kend[i, j] for i, j in pidx]})
     for q in quantiles.tolist():
@@ -1008,7 +1008,7 @@ def dependence_analysis(data, assets, conditions=None, frequency=("week", "day",
     dc = None
     if dcc and n >= 100:
         try:
-            dc = dcc_fit(pd.DataFrame(X, columns=assets))
+            dc = dependence_dcc(pd.DataFrame(X, columns=assets))
         except ValueError as e:
             message("DCC nicht geschätzt: " + str(e))
             dc = None
@@ -1051,14 +1051,14 @@ def dependence_analysis(data, assets, conditions=None, frequency=("week", "day",
                     s = np.nonzero(code == li + 1)[0]
                     x = Xk[s, i]
                     y = Xk[s, j]
-                    td = tail_dependence(x, y, tail_q) if s.size >= 20 else None
+                    td = tail_dependence(x, y, q=tail_q) if s.size >= 20 else None
                     kt = _kendall(x, y) if s.size >= 2 else _NAN
                     fams = (["t", "gaussian", "clayton_90", "clayton_270"] if s.size >= 2 and kt < 0
                             else ["t", "gaussian", "clayton", "gumbel"])
                     tc = None
                     if copulas and s.size >= 40:
                         try:
-                            tc = fit_copula(x, y, fams)
+                            tc = copula_fit(x, y, families=fams)
                         except Exception:  # noqa: BLE001 - tryCatch(error = NULL)
                             tc = None
                     tt = tc[tc["family"] == "t"] if tc is not None else None
@@ -1275,7 +1275,7 @@ def _plot_dependence(x, type=("overview", "rolling", "tail", "conditional", "sca
 
     def p_tail(c, box):
         qg = [0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5]
-        td = tail_dependence(X[ab[0]], X[ab[1]], qg)
+        td = tail_dependence(X[ab[0]], X[ab[1]], q=qg)
         lq = [_jl_log10(v) for v in qg]
         lo = np.asarray(td["lower"], dtype=np.float64)
         up = np.asarray(td["upper"], dtype=np.float64)
@@ -1401,7 +1401,7 @@ def _qr_decomp(X):
     return _linalg().qr(X)
 
 
-def quantile_reg(y, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=2000):
+def quantile_regression(y, *, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=2000):
     """Lineare Quantilsregression (exakte Lösung mit Optimalitätsnachweis).
 
     Args:
@@ -1421,16 +1421,16 @@ def quantile_reg(y, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=2000):
     if (tv.size != 1 or isinstance(tv[0], (bool, np.bool_, str)) or tv[0] is None
             or not isinstance(tv[0], (int, float, np.integer, np.floating))
             or not math.isfinite(float(tv[0])) or float(tv[0]) <= 0 or float(tv[0]) >= 1):
-        raise ValueError("quantile_reg: tau muss eine Zahl echt zwischen 0 und 1 sein (erhalten: %s)." % _fmt1(tau))
+        raise ValueError("quantile_regression: tau muss eine Zahl echt zwischen 0 und 1 sein (erhalten: %s)." % _fmt1(tau))
     tau = float(tv[0])
     ya = np.asarray(y.to_numpy() if isinstance(y, pd.Series) else y)
     if ya.dtype.kind not in "fiu":
-        raise ValueError("quantile_reg: y muss numerisch sein.")
+        raise ValueError("quantile_regression: y muss numerisch sein.")
     y = ya.astype(np.float64).ravel()
     if isinstance(X, pd.DataFrame):
         nn = [str(c) for c in X.columns if X[c].dtype.kind not in "fiu"]
         if nn:
-            raise ValueError("quantile_reg: Spalte(n) %s von X nicht numerisch (Faktoren vorher z. B. mit model.matrix() "
+            raise ValueError("quantile_regression: Spalte(n) %s von X nicht numerisch (Faktoren vorher z. B. mit model.matrix() "
                              "in Indikatorspalten umwandeln)." % ", ".join("'%s'" % c for c in nn))
     if X is None:
         Xm = np.zeros((y.size, 0))
@@ -1442,13 +1442,13 @@ def quantile_reg(y, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=2000):
         else:
             Xa = np.asarray(X.to_numpy() if isinstance(X, pd.Series) else X)
             if Xa.dtype.kind not in "fiu":
-                raise ValueError("quantile_reg: X muss numerisch sein.")
+                raise ValueError("quantile_regression: X muss numerisch sein.")
             Xm = Xa.astype(np.float64)
             if Xm.ndim == 1:
                 Xm = Xm.reshape(-1, 1)
             nm = None
         if Xm.shape[0] != y.size:
-            raise ValueError("quantile_reg: X hat %d Zeilen, y aber %d Werte." % (Xm.shape[0], y.size))
+            raise ValueError("quantile_regression: X hat %d Zeilen, y aber %d Werte." % (Xm.shape[0], y.size))
         if nm is None:
             nm = ["x%d" % (j + 1) for j in range(Xm.shape[1])]
     if intercept:
@@ -1459,21 +1459,21 @@ def quantile_reg(y, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=2000):
     Xm = Xm[ok, :]
     p = Xm.shape[1]
     if not p:
-        raise ValueError("quantile_reg: keine Regressoren (X = NULL und intercept = FALSE).")
+        raise ValueError("quantile_regression: keine Regressoren (X = NULL und intercept = FALSE).")
     if y.size < p:
-        raise ValueError("quantile_reg: %d vollständige Beobachtungen für %d Koeffizienten." % (y.size, p))
+        raise ValueError("quantile_regression: %d vollständige Beobachtungen für %d Koeffizienten." % (y.size, p))
     qx = _qr_decomp(Xm)
     rank = int(qx["rank"])
     if rank < p:
         piv = np.asarray(qx["pivot"], dtype=np.int64)
         bad = [nm[int(k) - 1] for k in piv[rank:]]
-        raise ValueError("quantile_reg: Regressoren linear abhängig (%s); doppelte oder konstante Spalten entfernen "
+        raise ValueError("quantile_regression: Regressoren linear abhängig (%s); doppelte oder konstante Spalten entfernen "
                          "(die Konstante ist bei intercept = TRUE schon enthalten)." % ", ".join("'%s'" % b for b in bad))
     beta = np.asarray(_linalg().qr_coef(qx, y), dtype=np.float64).ravel()
     sc = _rmax(r_sd(y), 1e-12)
     beta, opt = _core.quantile_reg_core(y, Xm, tau, beta, sc, tol, int(maxit))
     if not opt:
-        warnings.warn("quantile_reg: Optimalität nicht nachgewiesen; Ergebnis ist eine Ecke mit nicht größerem "
+        warnings.warn("quantile_regression: Optimalität nicht nachgewiesen; Ergebnis ist eine Ecke mit nicht größerem "
                       "Zielwert als die MM-Näherung (bzw. die MM-Näherung selbst, falls keine solche Ecke gefunden wurde).")
     return pd.Series(np.asarray(beta, dtype=np.float64), index=nm)
 
@@ -1514,7 +1514,7 @@ def _lm_coef(y, X1):
     return b
 
 
-def tail_regression(data, asset, drivers, quantiles=(0.05, 0.25, 0.5, 0.75, 0.95),
+def tail_regression(data, asset, drivers, *, quantiles=(0.05, 0.25, 0.5, 0.75, 0.95),
                     frequency=("week", "day", "month"), B=199, block=None, seed=None):
     """Renditequantile in Abhängigkeit von Drittvariablen (Quantilsregression).
 
@@ -1544,7 +1544,7 @@ def tail_regression(data, asset, drivers, quantiles=(0.05, 0.25, 0.5, 0.75, 0.95
         raise ValueError("tail_regression: zu wenige Perioden.")
     p = X.shape[1] + 1
     Xdf = pd.DataFrame(X, columns=drivers)
-    est = np.column_stack([quantile_reg(y, Xdf, q).to_numpy() for q in quantiles.tolist()])
+    est = np.column_stack([quantile_regression(y, X=Xdf, tau=q).to_numpy() for q in quantiles.tolist()])
     X1 = np.column_stack([np.ones(n), X])
     terms = ["(Intercept)"] + drivers
     nq = quantiles.size
@@ -1607,7 +1607,7 @@ def tail_regression(data, asset, drivers, quantiles=(0.05, 0.25, 0.5, 0.75, 0.95
 
 
 class SimLevCoVaR(RList):
-    """Ergebnis von :func:`covar_analysis` (R-Klasse ``SimLevCoVaR``)."""
+    """Ergebnis von :func:`tail_covar` (R-Klasse ``SimLevCoVaR``)."""
 
     r_class = ("SimLevCoVaR",)
 
@@ -1633,7 +1633,7 @@ def _matvec(M, b):
                       dtype=np.float64).ravel()
 
 
-def covar_analysis(data, system, assets, state=None, q=0.05, frequency=("week", "day", "month")):
+def tail_covar(data, system, assets, *, state=None, q=0.05, frequency=("week", "day", "month")):
     """CoVaR und Delta-CoVaR (Adrian & Brunnermeier 2016).
 
     Args:
@@ -1662,13 +1662,13 @@ def covar_analysis(data, system, assets, state=None, q=0.05, frequency=("week", 
     nr = len(rd)
     for a in assets:
         xi = 100 * rd[a].to_numpy(dtype=np.float64)
-        bq = quantile_reg(xi, Mdf, q).to_numpy()
-        bm = quantile_reg(xi, Mdf, 0.5).to_numpy()
+        bq = quantile_regression(xi, X=Mdf, tau=q).to_numpy()
+        bm = quantile_regression(xi, X=Mdf, tau=0.5).to_numpy()
         Mi = np.ones((nr, 1)) if M is None else np.column_stack([np.ones(nr), M])
         var_q = _matvec(Mi, bq)
         var_m = _matvec(Mi, bm)
         Xs = pd.DataFrame({"xi": xi}) if M is None else pd.concat([pd.DataFrame({"xi": xi}), Mdf], axis=1)
-        bs = quantile_reg(ys, Xs, q).to_numpy()
+        bs = quantile_regression(ys, X=Xs, tau=q).to_numpy()
         covar = bs[0] + bs[1] * var_q + (_matvec(M, bs[2:]) if M is not None else 0)
         dcv = bs[1] * (var_q - var_m)
         summ.append({"asset": a, "beta": float(bs[1]), "var": r_mean(var_q), "covar": r_mean(covar),
@@ -1699,7 +1699,7 @@ def _rowsum_blocks(L, agg, k):
     return out
 
 
-def validate_dependence(boot, data, agg=5, q=0.10, max_paths=200):
+def dependence_validate(boot, data, *, agg=5, q=0.10, max_paths=200):
     """Abhängigkeitsstruktur von Bootstrap-Pfaden prüfen.
 
     Args:
@@ -1720,7 +1720,7 @@ def validate_dependence(boot, data, agg=5, q=0.10, max_paths=200):
     cfg = boot["config"]
     idx_names = _as_names(cfg["index_names"])
     if len(idx_names) < 2:
-        raise ValueError("validate_dependence: mindestens zwei Indizes in der Konfiguration.")
+        raise ValueError("dependence_validate: mindestens zwei Indizes in der Konfiguration.")
     ret = _boot()._extract_returns(data, cfg)["ret"]
     hist = _libm.log(np.asarray(ret, dtype=np.float64))
     agg = int(agg)
@@ -1737,7 +1737,7 @@ def validate_dependence(boot, data, agg=5, q=0.10, max_paths=200):
         for i, j in _combn2(A.shape[1]):
             x = A[:, i]
             y = A[:, j]
-            td = tail_dependence(x, y, q)
+            td = tail_dependence(x, y, q=q)
             out += [_kendall(x, y), _cor1(x, y), float(td["lower"].iloc[0]), float(td["upper"].iloc[0]),
                     float(td["exceed_lower"].iloc[0])]
         return np.array(out, dtype=np.float64)
@@ -1782,7 +1782,7 @@ def _eval_condition(expr, data, env=None):
 
 
 @env_from_caller
-def regime_subset(data, condition, min_run=1, env=None):
+def regime_subset(data, condition, *, min_run=1, env=None):
     """Zeilen eines Regimes für Stress-Bootstraps.
 
     Args:

@@ -10,7 +10,7 @@
 #  Lizenz:    GPL-3
 #  Angepasst fuer SimLev (siehe inst/COPYRIGHTS):
 #    * uebernommen ist der Weg, den .fit_garch11() erreicht (bootstrap() mit
-#      "garch"/"gjr_garch", die Kopplung .fit_cross(), dcc_fit(),
+#      "garch"/"gjr_garch", die Kopplung .fit_cross(), dependence_dcc(),
 #      dependence_analysis()):
 #        spec <- ugarchspec(variance.model = list(model = "sGARCH" bzw.
 #                  "gjrGARCH", garchOrder = c(1, 1)), mean.model =

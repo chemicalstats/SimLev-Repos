@@ -8,7 +8,7 @@ scenario_risk(x, weights, alpha = 0.05)
 }
 \arguments{
 \item{x}{Objekt der Klasse \code{SimLevScenarios} aus
-\code{\link[=entropy_pooling]{entropy_pooling()}} oder \code{\link[=copula_scenarios]{copula_scenarios()}}.}
+\code{\link[=scenario_entropy_pooling]{scenario_entropy_pooling()}} oder \code{\link[=scenario_copula]{scenario_copula()}}.}
 
 \item{weights}{Benannter Gewichtsvektor (Anteile, Namen = Anlagespalten
 der Szenarien); wird nicht normiert.}
@@ -27,7 +27,7 @@ der Szenarien (bei Kursdaten Prozent je Periode) sowie
 \description{
 Berechnet die Portfoliorendite \eqn{r_j = \sum_i w_i X_{ji}} je Szenario
 und daraus Kennzahlen, gewichtet mit den Szenario-Wahrscheinlichkeiten
-\code{x$prob} (z. B. nach \code{\link[=entropy_pooling]{entropy_pooling()}}). Quantile sind die
+\code{x$prob} (z. B. nach \code{\link[=scenario_entropy_pooling]{scenario_entropy_pooling()}}). Quantile sind die
 kleinste Szenariorendite, bei der die kumulierte Wahrscheinlichkeit den
 Wert erreicht. Der CVaR ist der erwartete Verlust in der
 Wahrscheinlichkeitsmasse \code{alpha} der schlechtesten Szenarien
@@ -38,7 +38,7 @@ der CVaR kohaerent und faellt monoton in \code{alpha}.
 }
 \examples{
 set.seed(1); X <- data.frame(aktien = rnorm(1000, 0.15, 2), anleihen = rnorm(1000, 0.05, 0.6))
-ep <- entropy_pooling(X, c("aktien", "anleihen"), list(view_mean("aktien", -0.2)))
+ep <- scenario_entropy_pooling(X, c("aktien", "anleihen"), list(view_mean("aktien", -0.2)))
 scenario_risk(ep, c(aktien = 0.6, anleihen = 0.4))
 }
 \references{
@@ -47,6 +47,6 @@ value-at-risk for general loss distributions, Journal of Banking &
 Finance 26(7), 1443-1471.
 }
 \seealso{
-\code{\link[=entropy_pooling]{entropy_pooling()}}, \code{\link[=copula_scenarios]{copula_scenarios()}}, \code{\link[=crisis_replay]{crisis_replay()}},
-\code{\link[=risk_contributions]{risk_contributions()}}.
+\code{\link[=scenario_entropy_pooling]{scenario_entropy_pooling()}}, \code{\link[=scenario_copula]{scenario_copula()}}, \code{\link[=scenario_crisis]{scenario_crisis()}},
+\code{\link[=portfolio_risk_contributions]{portfolio_risk_contributions()}}.
 }

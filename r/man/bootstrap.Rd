@@ -12,11 +12,11 @@ bootstrap(
   params = list(),
   ess = FALSE,
   ess_grid = NULL,
-  progress = TRUE,
   path_length = NULL,
+  max_tries = 10L,
   seed = NULL,
   cores = 1L,
-  max_tries = 10L
+  progress = TRUE
 )
 }
 \arguments{
@@ -58,12 +58,12 @@ Standardwerte). Je Verfahren werden nur die oben genannten Eintraege
 verwendet:
 \describe{
 \item{L}{Erwartete Blocklaenge in Zeilen fuer "stationary" (Zahl >= 1,
-Standard 20) oder \code{"auto"} (\code{\link[=block_length]{block_length()}}, Spalte
+Standard 20) oder \code{"auto"} (\code{\link[=bootstrap_block_length]{bootstrap_block_length()}}, Spalte
 \code{stationary}).}
 \item{block_length}{Feste Blocklaenge in Zeilen fuer "block" und
 "circular" (ganze Zahl, Standard 20; bei "block" hoechstens Zeilen der
 Historie minus 1, bei "circular" hoechstens Zeilen der Historie) oder
-\code{"auto"} (\code{\link[=block_length]{block_length()}}, Spalte \code{circular}).}
+\code{"auto"} (\code{\link[=bootstrap_block_length]{bootstrap_block_length()}}, Spalte \code{circular}).}
 \item{wild_type}{Gewichte beim Wild Bootstrap: 0 = Rademacher
 (Standard), 1 = Mammen, 2 = Standardnormal; andere Werte sind ein
 Fehler.}
@@ -202,8 +202,8 @@ cfg2 <- bootstrap_config(c(akt = "aktien"), input = "prices",
   letfs = list(list(base = "akt", leverage = 2, finance = 3, expense = 0.6)))
 b2 <- bootstrap(p, cfg2, "block", n = 3, params = list(block_length = 30),
   path_length = 500, seed = 7, progress = FALSE)
-x <- bootstrap_data(b2, 1, start_date = "2030-01-01")
-res <- simulation(x, create_strategy(akt_l2 = asset_config("etf", "bnh", asset_bonus = 30)))
+x <- bootstrap_data(b2, 1, start = "2030-01-01")
+res <- simulation(x, create_strategy(akt_l2 = asset_config("etf", "bnh", partial_exemption = 30)))
 res$cagr
 
 # CPI als Niveau, Zins als Rate: der Pfad enthaelt den kumulierten CPI

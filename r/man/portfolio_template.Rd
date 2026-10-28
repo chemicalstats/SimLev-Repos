@@ -19,7 +19,7 @@ Unbekannte Rollen und mehrere Rollen auf derselben Spalte sind ein
 Fehler.}
 
 \item{...}{Weitere Argumente fuer \code{\link[=strategy_from_weights]{strategy_from_weights()}} bzw.
-\code{\link[=asset_config]{asset_config()}} (z. B. \code{asset_spread}, \code{asset_bonus}).}
+\code{\link[=asset_config]{asset_config()}} (z. B. \code{spread}, \code{partial_exemption}).}
 }
 \value{
 Mit \code{name}: Objekt der Klasse \code{strategy}

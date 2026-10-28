@@ -7,13 +7,26 @@ und die Julia-Fassung ihre Bitgleichheit zum R-Paket prüfen.
 |---|---|---|---|
 | `cases/` | 68 | Python, Julia | Engine: 38 gezielte Fälle für jeden Steuer- und Sonderpfad (`f01`–`f38`) und 30 Zufallsfälle (`r…`) |
 | `extra/` | 37 | Python, Julia | Engine: Stressfälle mit 30 Jahren, Totalverlust-Hebel, mehreren Signal-Assets, konstanten Preisen, Kalender-Randfällen, Extremwerten, Fehlerpfaden (`x…`, `y…`) |
-| `modules/` | 4.578 | Python, Julia | alle übrigen Funktionen des R-Pakets, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS und die nachgebauten R-Interna, je Modul ein Unterordner (30 Module, siehe unten) |
+| `modules/` | 4.656 | Python, Julia | alle übrigen Funktionen des R-Pakets, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS und die nachgebauten R-Interna, je Modul ein Unterordner (30 Module, siehe unten) |
 
 ## Engine-Fälle (`cases/`, `extra/`)
 
 Jeder Fall ist eine gzip-komprimierte JSON-Datei mit den Eingabedaten, der
 Strategie, den Argumenten von `simulation()` und den exakten Ergebnissen
 aus R (Gleitkommazahlen als Hex-Literale, `NA` und `NaN` getrennt).
+
+Seit Etappe 6.3 stehen in `args` die Bausteine von `simulation()`, je
+Baustein als `{"block": "<Konstruktor>", "args": {...}}` (verschachtelt für
+`income` und `harvest` in `tax_profile()`); die Vergleichswerkzeuge legen die
+Bausteine mit den Konstruktoren der Zielsprache an. Die flachen Argumente
+bis 6.2 stehen daneben in `args_flat`. Übersetzt hat
+`golden/tools/blocks_from_flat.py` (Regeln dort; `--check` prüft die
+Übersetzung aller Fälle), die Generatoren `golden_cases.R` und
+`stress_cases.R` beschreiben ihre Fälle weiter flach und übersetzen sie mit
+`golden/tools/blocks_from_flat.R` (gleiche Regeln). Die erwarteten
+Ergebnisse sind dabei gleich geblieben (Fälle ohne Sparer-Pauschbetrag: das
+Echo `tax_report$sparer_pauschbetrag_annual` ist jetzt 0, die Zeile
+„SPB genutzt“ entfällt).
 
 Stand R 0.5.0 (aktuelle Fassung): Alle 105 Fälle sind nach den
 Engine-Korrekturen, steuerrechtlichen Anpassungen und der Übersetzung der
@@ -77,7 +90,7 @@ Je Modul gibt es einen Unterordner mit Fällen und einen Generator
 | `optimize` | 180 | `optimize.R` mit den Optimierungskernen |
 | `planning` | 58 | `planning.R` |
 | `analysis_tests` | 81 | `analysis_tests.R` |
-| `engine` | 254 | `simulation()` mit den Argumenten von 0.5.0 (`order_fee`, `dca_fee`, `church_tax`, `harvest_*`, `taxable_income`, `tax_tariff`), Günstigerprüfung, Fondsmodus, Sparplan, Rebalancing-Bänder, Splits, später startende Assets, `details = TRUE`, `summary()`, vollständiges Ergebnis (u. a. `fees_paid`, `harvest_days`, `open_lots`, `tax_report` mit `open_tax_debt`, `tariff_years`, `next_year`), `read_tax_tariff()`, Warn- und Fehlerpfade; 22 Zufallsfälle (`zz…`) |
+| `engine` | 332 | `simulation()` mit den Bausteinen von 6.3 (`sim_costs()`, `dca_plan()`, `rebalance_plan()`, `split_rule()`, `tax_profile()` mit `income_rate()`, `income_tariff()`, `harvest_rule()`, `funds_costs()`; Prüfungen und Druckausgabe der Bausteine: `bk…`, `pr…`) und den Argumenten von 0.5.0 (`order_fee`, `dca_fee`, `church_tax`, `harvest_*`, `taxable_income`, `tax_tariff`), Günstigerprüfung, Fondsmodus, Sparplan, Rebalancing-Bänder, Splits, später startende Assets, `details = TRUE`, `summary()`, vollständiges Ergebnis (u. a. `fees_paid`, `harvest_days`, `open_lots`, `tax_report` mit `open_tax_debt`, `tariff_years`, `next_year`), `tax_tariff()`, Warn- und Fehlerpfade; 22 Zufallsfälle (`zz…`) |
 | `r_rng` | 20 | Zufallszahlen (Python: `simlev/_r/rng.py`, Julia: `src/r/rng.jl`) |
 | `r_nmath` | 64 | Verteilungsfunktionen (`simlev/_r/nmath.py`, `src/r/nmath.jl`) |
 | `r_stats` | 384 | stats-Interna (`simlev/_r/stats.py`, `src/r/stats.jl`) |
@@ -88,9 +101,9 @@ Je Modul gibt es einen Unterordner mit Fällen und einen Generator
 | `r_nlminb` | 104 | `stats::nlminb` mit allen PORT-Varianten (`simlev/_r/port.py`, `src/r/port.jl`) |
 | `evd` | 129 | aus evd 2.3-7.1 übernommen (`SimLev:::.evd_fpot`, `C_evd_nlgpd`): `fpot`, `nlgpd`, `.fit_tail`, `bootstrap(…, "evt")` (`simlev/_r/evd.py`, `src/r/evd.jl`) |
 | `imputets` | 203 | aus imputeTS 3.4 und stinepack 1.5 übernommen (`SimLev:::.imputets_na_interpolation`, `.imputets_na_locf`, `.stinepack_stinterp`): `na_interpolation` (stine), `na_locf`, stinepack `stinterp`, `.fill_na(…, "stine")`, `backcast_fit`/`backcast` mit `"stine"` (`simlev/_r/imputets.py`, `stinepack.py`, `src/r/imputets.jl`, `stinepack.jl`) |
-| `rugarch` | 173 | aus rugarch 1.5-6, Rsolnp 1.16 und truncnorm 1.0-9 übernommen (`SimLev:::.rugarch_ugarchfit`, `.rugarch_coef`, `.rsolnp_solnp`, `.rsolnp_gosolnp`, `.truncnorm_rtruncnorm`), Ableitungen eigenständig (`.sl_richardson_hessian`, `.sl_richardson_jacobian`, gegen numDeriv 2016.8-1.1 geprüft): `ugarchfit`→`coef` (auch mit den Ausweichwegen nlminb und gosolnp, Zufallszustand danach), `solnp`, `gosolnp`, `rtruncnorm`, `.fit_garch11`, Bootstrap `garch`/`gjr_garch`, `dcc_fit`, `dependence_analysis` (`simlev/_r/rugarch.py`, `solnp.py`, `truncnorm.py`, `src/r/rugarch.jl`, `solnp.jl`, `truncnorm.jl`) |
+| `rugarch` | 173 | aus rugarch 1.5-6, Rsolnp 1.16 und truncnorm 1.0-9 übernommen (`SimLev:::.rugarch_ugarchfit`, `.rugarch_coef`, `.rsolnp_solnp`, `.rsolnp_gosolnp`, `.truncnorm_rtruncnorm`), Ableitungen eigenständig (`.sl_richardson_hessian`, `.sl_richardson_jacobian`, gegen numDeriv 2016.8-1.1 geprüft): `ugarchfit`→`coef` (auch mit den Ausweichwegen nlminb und gosolnp, Zufallszustand danach), `solnp`, `gosolnp`, `rtruncnorm`, `.fit_garch11`, Bootstrap `garch`/`gjr_garch`, `dependence_dcc`, `dependence_analysis` (`simlev/_r/rugarch.py`, `solnp.py`, `truncnorm.py`, `src/r/rugarch.jl`, `solnp.jl`, `truncnorm.jl`) |
 
-Python 0.5.0 und Julia 0.5.0 sind zu allen 4.578 Fällen bitgleich, bei strenger
+Python 0.5.0 und Julia 0.5.0 sind zu allen 4.656 Fällen bitgleich, bei strenger
 Unterscheidung von `NA` und `NaN` und mit dem Vorzeichen der Null. Die Fälle mit
 `cores > 1` rechnen in Python mit Fork und in Julia unter `julia -t 2` mit Threads
 echt parallel; Julia prüft sie zusätzlich mit einem Thread.

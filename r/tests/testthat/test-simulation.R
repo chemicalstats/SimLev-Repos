@@ -20,10 +20,10 @@ create_test_strategy <- function() {
   list(
     ETF = list(
       asset_class = "etf",
-      action_type = "bnh",
-      asset_share = 1.0,
-      asset_spread = 0.1,
-      asset_bonus = 0,
+      trading = "bnh",
+      share = 1.0,
+      spread = 0.1,
+      partial_exemption = 0,
       signal_buy = NULL,
       signal_sell = NULL
     )
@@ -86,14 +86,7 @@ test_that("DCA increases portfolio value", {
   
   result_no_dca <- simulation(data, strategy, start_value = 10000)
   
-  result_dca <- simulation(
-    data, strategy, start_value = 10000,
-    dca_mode = TRUE,
-    dca_value = 1000,
-    dca_span = 1,
-    dca_unit = "month",
-    dca_days = 1
-  )
+  result_dca <- simulation(data, strategy, start_value = 10000, dca = dca_plan(value = 1000, span = 1, days = 1, unit = "month"))
   
   # DCA should add ~12 * $1000 = $12000 over the year
   expect_gt(tail(result_dca$worth, 1), tail(result_no_dca$worth, 1))
@@ -103,14 +96,7 @@ test_that("DCA flows are recorded in report", {
   data <- create_test_data(n_days = 100)
   strategy <- create_test_strategy()
   
-  result <- simulation(
-    data, strategy, start_value = 10000,
-    dca_mode = TRUE,
-    dca_value = 500,
-    dca_span = 1,
-    dca_unit = "month",
-    dca_days = 1
-  )
+  result <- simulation(data, strategy, start_value = 10000, dca = dca_plan(value = 500, span = 1, days = 1, unit = "month"))
   
   flows <- result$report$ETF$flows
   expect_true(sum(flows) > 0)
@@ -124,11 +110,7 @@ test_that("tax mode 'none' calculates no taxes", {
   data <- create_test_data()
   strategy <- create_test_strategy()
   
-  result <- simulation(
-    data, strategy, start_value = 10000,
-    tax_mode = "none",
-    liquidate = TRUE
-  )
+  result <- simulation(data, strategy, start_value = 10000, liquidate = TRUE)
   
   # Without tax tracking, we can't directly verify, but it should run
  expect_no_error(result)
@@ -139,12 +121,7 @@ test_that("tax mode 'person' runs without errors", {
   strategy <- create_test_strategy()
   
   expect_no_error({
-    result <- simulation(
-      data, strategy, start_value = 10000,
-      tax_mode = "person",
-      tax_rate = 26.375,
-      liquidate = TRUE
-    )
+    result <- simulation(data, strategy, start_value = 10000, tax = tax_profile(rate = 26.375), liquidate = TRUE)
   })
 })
 
@@ -161,25 +138,19 @@ test_that("rebalancing runs without errors", {
   
   strategy <- list(
     ETF = list(
-      asset_class = "etf", action_type = "bnh",
-      asset_share = 0.6, asset_spread = 0.1, asset_bonus = 0,
+      asset_class = "etf", trading = "bnh",
+      share = 0.6, spread = 0.1, partial_exemption = 0,
       signal_buy = NULL, signal_sell = NULL
     ),
     BOND = list(
-      asset_class = "etf", action_type = "bnh",
-      asset_share = 0.4, asset_spread = 0.05, asset_bonus = 30,
+      asset_class = "etf", trading = "bnh",
+      share = 0.4, spread = 0.05, partial_exemption = 30,
       signal_buy = NULL, signal_sell = NULL
     )
   )
   
   expect_no_error({
-    result <- simulation(
-      data, strategy, start_value = 10000,
-      balance_mode = TRUE,
-      balance_span = 1,
-      balance_unit = "quarter",
-      balance_days = 1
-    )
+    result <- simulation(data, strategy, start_value = 10000, rebalance = rebalance_plan(span = 1, days = 1, unit = "quarter"))
   })
 })
 
@@ -425,9 +396,7 @@ test_that("DCA fires without explicit dca_days (monthly schedule)", {
     ETF  = 100 * cumprod(1 + rnorm(n, 4e-4, 0.01))
   )
   strategy <- create_test_strategy()
-  result <- simulation(data, strategy, start_value = 1000,
-                       dca_mode = TRUE, dca_value = 1000,
-                       dca_span = 1, dca_unit = "month")
+  result <- simulation(data, strategy, start_value = 1000, dca = dca_plan(value = 1000, span = 1, unit = "month"))
 
   # Externe Zufluesse muessen an ~11-12 Monatsterminen ankommen
   flow_days <- sum(abs(result$report$ETF$flows) > 1e-9)
@@ -443,14 +412,12 @@ test_that("periodic rebalancing fires without explicit balance_days", {
     B = 100 * cumprod(1 + rnorm(n, -2e-4, 0.004))    # driftet schwach
   )
   strategy <- create_strategy(
-    A = asset_config("etf", action_type = "bnh", asset_share = 0.5,
-                     asset_spread = 0, asset_bonus = 30),
-    B = asset_config("etf", action_type = "bnh", asset_share = 0.5,
-                     asset_spread = 0, asset_bonus = 30)
+    A = asset_config("etf", trading = "bnh", share = 0.5,
+                     spread = 0, partial_exemption = 30),
+    B = asset_config("etf", trading = "bnh", share = 0.5,
+                     spread = 0, partial_exemption = 30)
   )
-  result <- simulation(data, strategy, start_value = 10000,
-                       balance_mode = TRUE, balance_span = 1,
-                       balance_unit = "month")
+  result <- simulation(data, strategy, start_value = 10000, rebalance = rebalance_plan(span = 1, unit = "month"))
 
   # Rebalancing MUSS Verkaeufe erzeugen (A wird wiederholt zurueckgestutzt)
   expect_gt(sum(result$sells), 0)
@@ -464,11 +431,10 @@ test_that("event_col rebalancing is available and runs", {
     ETF  = 100 * cumprod(1 + rnorm(n, 4e-4, 0.01)),
     target_leverage = 2 + 0.5 * sin(seq(0, 4 * pi, length.out = n))
   )
-  data <- compute_rebal_trigger(data, type = "abs_leverage", threshold = 10)
+  data <- rebalance_trigger(data, type = "abs_leverage", threshold = 10)
   strategy <- create_test_strategy()
   expect_no_error({
-    result <- simulation(data, strategy, start_value = 10000,
-                         event_col = "rebal_trigger")
+    result <- simulation(data, strategy, start_value = 10000, rebalance = rebalance_plan(event_col = "rebal_trigger", event_mode = "replace", skip = TRUE))
   })
   expect_true(is.finite(tail(result$worth, 1)))
 })
@@ -484,8 +450,7 @@ test_that("scheduled DCA never executes on filled days (shift forward)", {
   wd  <- all[as.integer(format(all, "%u")) <= 5]
   data <- data.frame(date = wd, ETF = 100 * cumprod(1 + rnorm(length(wd), 4e-4, 0.01)))
   strategy <- create_test_strategy()
-  r <- simulation(data, strategy, start_value = 1000,
-                  dca_mode = TRUE, dca_value = 1000, dca_span = 1, dca_unit = "month")
+  r <- simulation(data, strategy, start_value = 1000, dca = dca_plan(value = 1000, span = 1, unit = "month"))
   fl <- which(abs(r$report$ETF$flows) > 1e-9)
   expect_equal(sum(r$filled[fl]), 0)                    # nie an LOCF-Tagen
   # 01.05.2022 (So) -> 02.05. (Mo); 01.10.2022 (Sa) -> 03.10. (Mo)
@@ -499,9 +464,7 @@ test_that("month-end schedule is pulled BACK to previous trading day", {
   wd  <- all[as.integer(format(all, "%u")) <= 5]
   data <- data.frame(date = wd, ETF = 100 * cumprod(1 + rnorm(length(wd), 4e-4, 0.01)))
   strategy <- create_test_strategy()
-  r <- simulation(data, strategy, start_value = 1000,
-                  dca_mode = TRUE, dca_value = 1000, dca_span = 1,
-                  dca_unit = "month", dca_days = 1, dca_anchor = "end")
+  r <- simulation(data, strategy, start_value = 1000, dca = dca_plan(value = 1000, span = 1, days = 1, unit = "month", anchor = "end"))
   fl <- which(abs(r$report$ETF$flows) > 1e-9)
   expect_equal(sum(r$filled[fl]), 0)
   # 30.04. = Sa -> 29.04. (Fr, gleicher Monat); 31.07. = So -> 29.07. (Fr)
@@ -525,22 +488,20 @@ create_pulse_data <- function(buy_on, sell_on = NULL, seed = 2, n = 120) {
 }
 
 signal_strategy <- function() create_strategy(
-  SIG = asset_config("etf", action_type = "signal", asset_share = 1,
-                     asset_spread = 0, asset_bonus = 30,
+  SIG = asset_config("etf", trading = "signal", share = 1,
+                     spread = 0, partial_exemption = 30,
                      signal_buy = "buy_sig", signal_sell = "sell_sig"))
 
 test_that("pulse buy signal on a rebalance day is executed (signal entry)", {
   d <- create_pulse_data(buy_on = "2022-02-01")     # 01.02. = Monats-Rebalance-Tag
-  r <- simulation(d, signal_strategy(), start_value = 10000,
-                  balance_mode = TRUE, balance_span = 1, balance_unit = "month")
+  r <- simulation(d, signal_strategy(), start_value = 10000, rebalance = rebalance_plan(span = 1, unit = "month"))
   i <- which(r$dates == as.Date("2022-02-02"))
   expect_gt(r$report$SIG$worth[i], 0)
 })
 
 test_that("signal asset without buy signal is not force-bought by rebalancing", {
   d <- create_pulse_data(buy_on = "2022-02-01")
-  r <- simulation(d, signal_strategy(), start_value = 10000,
-                  balance_mode = TRUE, balance_span = 1, balance_unit = "month")
+  r <- simulation(d, signal_strategy(), start_value = 10000, rebalance = rebalance_plan(span = 1, unit = "month"))
   i <- which(r$dates == as.Date("2022-01-15"))      # vor dem Kaufsignal
   expect_equal(r$report$SIG$worth[i], 0)
   expect_gt(r$report$SIG$money[i], 9999)
@@ -548,8 +509,7 @@ test_that("signal asset without buy signal is not force-bought by rebalancing", 
 
 test_that("sell signal on a rebalance day exits; proceeds stay in asset cash", {
   d <- create_pulse_data(buy_on = "2022-01-10", sell_on = "2022-03-01")  # 01.03. = Rebalance-Tag
-  r <- simulation(d, signal_strategy(), start_value = 10000,
-                  balance_mode = TRUE, balance_span = 1, balance_unit = "month")
+  r <- simulation(d, signal_strategy(), start_value = 10000, rebalance = rebalance_plan(span = 1, unit = "month"))
   i_pre  <- which(r$dates == as.Date("2022-02-28"))
   i_post <- which(r$dates == as.Date("2022-03-02"))
   expect_gt(r$report$SIG$worth[i_pre], 0)           # vorher investiert
@@ -572,14 +532,12 @@ create_vp_data <- function() {
 }
 
 vp_strategy <- function() create_strategy(
-  ETF = asset_config("etf", action_type = "bnh", asset_share = 1,
-                     asset_spread = 0, asset_bonus = 30))
+  ETF = asset_config("etf", trading = "bnh", share = 1,
+                     spread = 0, partial_exemption = 30))
 
 test_that("VP is settled on first trading day of new year, not on Dec 31", {
   d <- create_vp_data()
-  r <- simulation(d, vp_strategy(), start_value = 10000, tax_mode = "person",
-                  tax_rate = 26.375, base_rate_flex = TRUE,
-                  base_rate_data = "base_rate", use_sparer_pauschbetrag = FALSE)
+  r <- simulation(d, vp_strategy(), start_value = 10000, tax = tax_profile(rate = 26.375, sparer_pauschbetrag = 0, base_rate = "base_rate"))
   px  <- d$ETF[match(r$dates, d$date)]
   cnt <- r$report$ETF$worth / px
   i_1230 <- which(r$dates == as.Date("2022-12-30"))
@@ -597,9 +555,7 @@ test_that("VP falls back to immediate payment when simulation ends at year end",
   set.seed(9)
   d <- data.frame(date = dd, ETF = 100 * cumprod(1 + rnorm(length(dd), 8e-4, 0.008)))
   d$base_rate <- 2.55
-  r <- simulation(d, vp_strategy(), start_value = 10000, tax_mode = "person",
-                  tax_rate = 26.375, base_rate_flex = TRUE,
-                  base_rate_data = "base_rate", use_sparer_pauschbetrag = FALSE)
+  r <- simulation(d, vp_strategy(), start_value = 10000, tax = tax_profile(rate = 26.375, sparer_pauschbetrag = 0, base_rate = "base_rate"))
   expect_gt(r$tax_report$total_taxes_paid, 0)   # sofort beglichen (Fallback)
 })
 
@@ -611,9 +567,7 @@ test_that("deferred VP is not double-counted against next year's assessment", {
   set.seed(9)
   d <- data.frame(date = wd, ETF = 100 * cumprod(1 + rnorm(length(wd), 8e-4, 0.008)))
   d$base_rate <- 2.55
-  r <- simulation(d, vp_strategy(), start_value = 10000, tax_mode = "person",
-                  tax_rate = 26.375, base_rate_flex = TRUE,
-                  base_rate_data = "base_rate", use_sparer_pauschbetrag = FALSE)
+  r <- simulation(d, vp_strategy(), start_value = 10000, tax = tax_profile(rate = 26.375, sparer_pauschbetrag = 0, base_rate = "base_rate"))
   px  <- d$ETF[match(r$dates, d$date)]
   cnt <- r$report$ETF$worth / px
   drop1 <- cnt[which(r$dates == as.Date("2022-12-30"))] -
@@ -632,23 +586,19 @@ test_that("deferred VP is not double-counted against next year's assessment", {
 test_that("tax_rate is interpreted as percent (26.375 = 26.375%)", {
   d <- data.frame(date = seq.Date(as.Date("2022-01-03"), by = "day", length.out = 200),
                   ETF  = seq(100, 150, length.out = 200))
-  s <- create_strategy(ETF = asset_config("etf", "bnh", asset_share = 1,
-                                          asset_spread = 0, asset_bonus = 0))
-  r <- simulation(d, s, start_value = 10000, tax_mode = "person",
-                  tax_rate = 26.375, use_sparer_pauschbetrag = FALSE,
-                  liquidate = TRUE)
+  s <- create_strategy(ETF = asset_config("etf", "bnh", share = 1,
+                                          spread = 0, partial_exemption = 0))
+  r <- simulation(d, s, start_value = 10000, tax = tax_profile(rate = 26.375, sparer_pauschbetrag = 0), liquidate = TRUE)
   gain <- 10000 * (150 / 100) - 10000
   expect_equal(r$tax_report$total_taxes_paid / gain, 0.26375, tolerance = 1e-6)
 })
 
-test_that("asset_bonus is interpreted as percent (30 = 30% Teilfreistellung)", {
+test_that("partial_exemption is interpreted as percent (30 = 30% Teilfreistellung)", {
   d <- data.frame(date = seq.Date(as.Date("2022-01-03"), by = "day", length.out = 200),
                   ETF  = seq(100, 150, length.out = 200))
-  s <- create_strategy(ETF = asset_config("etf", "bnh", asset_share = 1,
-                                          asset_spread = 0, asset_bonus = 30))
-  r <- simulation(d, s, start_value = 10000, tax_mode = "person",
-                  tax_rate = 26.375, use_sparer_pauschbetrag = FALSE,
-                  liquidate = TRUE)
+  s <- create_strategy(ETF = asset_config("etf", "bnh", share = 1,
+                                          spread = 0, partial_exemption = 30))
+  r <- simulation(d, s, start_value = 10000, tax = tax_profile(rate = 26.375, sparer_pauschbetrag = 0), liquidate = TRUE)
   gain <- 5000
   expect_equal(r$tax_report$total_taxes_paid / gain, 0.26375 * 0.70, tolerance = 1e-6)
 })
@@ -664,12 +614,9 @@ test_that("liquidate=TRUE does not disable Vorabpauschale in earlier years", {
   set.seed(9)
   d <- data.frame(date = wd, ETF = 100 * cumprod(1 + rnorm(length(wd), 8e-4, 0.008)))
   d$base_rate <- 2.55
-  s <- create_strategy(ETF = asset_config("etf", "bnh", asset_share = 1,
-                                          asset_spread = 0, asset_bonus = 30))
-  r <- simulation(d, s, start_value = 10000, tax_mode = "person",
-                  tax_rate = 26.375, base_rate_flex = TRUE,
-                  base_rate_data = "base_rate", use_sparer_pauschbetrag = FALSE,
-                  liquidate = TRUE)
+  s <- create_strategy(ETF = asset_config("etf", "bnh", share = 1,
+                                          spread = 0, partial_exemption = 30))
+  r <- simulation(d, s, start_value = 10000, tax = tax_profile(rate = 26.375, sparer_pauschbetrag = 0, base_rate = "base_rate"), liquidate = TRUE)
   # VP 2022 wird am ersten Handelstag 2023 per Zwangsverkauf beglichen,
   # obwohl liquidate=TRUE (Liquidation erst am 30.06.2023)
   px  <- d$ETF[match(r$dates, d$date)]
@@ -688,16 +635,12 @@ test_that("balance_thresh is interpreted as percent (5 = 5%)", {
     B = 100 * cumprod(1 + rnorm(n, -2e-4, 0.004))
   )
   strategy <- create_strategy(
-    A = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0, asset_bonus = 30),
-    B = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0, asset_bonus = 30)
+    A = asset_config("etf", "bnh", share = 0.5, spread = 0, partial_exemption = 30),
+    B = asset_config("etf", "bnh", share = 0.5, spread = 0, partial_exemption = 30)
   )
-  r5 <- simulation(data, strategy, start_value = 10000,
-                   balance_mode = TRUE, balance_span = 1, balance_unit = "month",
-                   balance_thresh = 5)          # 5 %
+  r5 <- simulation(data, strategy, start_value = 10000, rebalance = rebalance_plan(span = 1, unit = "month", thresh = 5))          # 5 %
   expect_gt(sum(r5$sells), 0)                   # Abweichung > 5% -> Rebalancing feuert
-  r90 <- simulation(data, strategy, start_value = 10000,
-                    balance_mode = TRUE, balance_span = 1, balance_unit = "month",
-                    balance_thresh = 90)        # 90 % -> nie
+  r90 <- simulation(data, strategy, start_value = 10000, rebalance = rebalance_plan(span = 1, unit = "month", thresh = 90))        # 90 % -> nie
   expect_equal(sum(r90$sells), 0)
 })
 
@@ -713,13 +656,11 @@ test_that("inactive signal asset holds its target weight as own CASH reserve", {
                   S = 100 * cumprod(1 + rnorm(n, 4e-4, 0.01)))
   d$b <- FALSE; d$sl <- FALSE                    # Signal-Asset dauerhaft "out"
   s <- create_strategy(
-    W = asset_config("etf", "bnh",    asset_share = 0.5, asset_spread = 0, asset_bonus = 30),
-    S = asset_config("etf", "signal", asset_share = 0.5, asset_spread = 0, asset_bonus = 30,
+    W = asset_config("etf", "bnh",    share = 0.5, spread = 0, partial_exemption = 30),
+    S = asset_config("etf", "signal", share = 0.5, spread = 0, partial_exemption = 30,
                      signal_buy = "b", signal_sell = "sl")
   )
-  r <- simulation(d, s, start_value = 10000,
-                  balance_mode = TRUE, balance_span = 1, balance_unit = "month",
-                  balance_thresh = 1)
+  r <- simulation(d, s, start_value = 10000, rebalance = rebalance_plan(span = 1, unit = "month", thresh = 1))
   i_post <- which(r$dates == as.Date("2022-02-02"))   # nach Monats-Rebalance
 
   # 1) Nie Aktien im inaktiven Signal-Asset
@@ -749,14 +690,12 @@ test_that("VP is offset against the loss pot before SPB (bank practice)", {
   d$buyL  <- d$date == as.Date("2019-02-01")
   d$sellL <- d$date == as.Date("2019-11-01")                        # Verlust ~ -30 %
   s <- create_strategy(
-    B = asset_config("etf", "bnh",    asset_share = 0.9, asset_spread = 0, asset_bonus = 0),
-    L = asset_config("etf", "signal", asset_share = 0.1, asset_spread = 0, asset_bonus = 0,
+    B = asset_config("etf", "bnh",    share = 0.9, spread = 0, partial_exemption = 0),
+    L = asset_config("etf", "signal", share = 0.1, spread = 0, partial_exemption = 0,
                      signal_buy = "buyL", signal_sell = "sellL"))
   run <- function(with_loss) {
     dl <- d; if (!with_loss) { dl$buyL <- FALSE }
-    o <- capture.output(r <- simulation(dl, s, start_value = 10000, tax_mode = "person",
-           tax_rate = 25, base_rate_flex = TRUE, base_rate_data = "base_rate",
-           use_sparer_pauschbetrag = FALSE, details = TRUE))
+    o <- capture.output(r <- simulation(dl, s, start_value = 10000, tax = tax_profile(rate = 25, sparer_pauschbetrag = 0, base_rate = "base_rate"), details = TRUE))
     vp_a <- sum(as.numeric(sub(".*Zahlung Vorabpauschale ([0-9.]+) EUR.*", "\\1",
              grep("Zahlung Vorabpauschale", o, value = TRUE))))
     vp_b <- sum(as.numeric(sub(".*Rest von ([0-9.]+) EUR.*", "\\1",
@@ -784,21 +723,18 @@ r1_data <- function() {
              B = 100 * cumprod(1 + rnorm(n, -2e-4, 0.004)))
 }
 r1_strategy <- function() create_strategy(
-  A = asset_config("etf", "bnh", asset_share = 0.7, asset_spread = 0, asset_bonus = 30),
-  B = asset_config("etf", "bnh", asset_share = 0.3, asset_spread = 0, asset_bonus = 30))
+  A = asset_config("etf", "bnh", share = 0.7, spread = 0, partial_exemption = 30),
+  B = asset_config("etf", "bnh", share = 0.3, spread = 0, partial_exemption = 30))
 
 test_that("DCA splits by strategy weights regardless of portfolio drift", {
-  r <- simulation(r1_data(), r1_strategy(), start_value = 10000,
-                  dca_mode = TRUE, dca_value = 500, dca_span = 1, dca_unit = "month")
+  r <- simulation(r1_data(), r1_strategy(), start_value = 10000, dca = dca_plan(value = 500, span = 1, unit = "month"))
   i <- which(r$report$A$flows > 0 & r$dates > as.Date("2022-05-01"))[1]
   expect_equal(r$report$A$flows[i], 350, tolerance = 1e-9)   # 70 %
   expect_equal(r$report$B$flows[i], 150, tolerance = 1e-9)   # 30 %
 })
 
 test_that("balance_dca fills value deficits toward strategy weights", {
-  r <- simulation(r1_data(), r1_strategy(), start_value = 10000,
-                  dca_mode = TRUE, dca_value = 500, dca_span = 1, dca_unit = "month",
-                  balance_dca = TRUE)
+  r <- simulation(r1_data(), r1_strategy(), start_value = 10000, dca = dca_plan(value = 500, span = 1, unit = "month", fill_deficits = TRUE))
   j <- which(r$report$A$flows + r$report$B$flows > 499 &
              r$dates > as.Date("2022-05-01"))[1]
   tA <- r$report$A$total[j-1]; tB <- r$report$B$total[j-1]
@@ -810,12 +746,11 @@ test_that("DCA renormalizes strategy weights over active assets", {
   d <- r1_data(); set.seed(2)
   d$C <- 100 * cumprod(1 + rnorm(nrow(d), 3e-4, 0.006))
   s <- create_strategy(
-    A = asset_config("etf", "bnh", asset_share = 0.63, asset_spread = 0, asset_bonus = 30),
-    B = asset_config("etf", "bnh", asset_share = 0.27, asset_spread = 0, asset_bonus = 30),
-    C = asset_config("etf", "bnh", asset_share = 0.10, asset_spread = 0, asset_bonus = 0,
-                     asset_start = as.Date("2022-04-01")))
-  r <- simulation(d, s, start_value = 10000,
-                  dca_mode = TRUE, dca_value = 500, dca_span = 1, dca_unit = "month")
+    A = asset_config("etf", "bnh", share = 0.63, spread = 0, partial_exemption = 30),
+    B = asset_config("etf", "bnh", share = 0.27, spread = 0, partial_exemption = 30),
+    C = asset_config("etf", "bnh", share = 0.10, spread = 0, partial_exemption = 0,
+                     start = as.Date("2022-04-01")))
+  r <- simulation(d, s, start_value = 10000, dca = dca_plan(value = 500, span = 1, unit = "month"))
   k1 <- which(r$report$A$flows > 0 & r$dates < as.Date("2022-04-01"))[1]
   k2 <- which(r$report$C$flows > 0)[1]
   expect_equal(r$report$A$flows[k1], 350, tolerance = 1e-9)  # 63/0.9

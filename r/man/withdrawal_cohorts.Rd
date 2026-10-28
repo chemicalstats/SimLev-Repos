@@ -97,7 +97,7 @@ Die Daten muessen jeden Kalendermonat zwischen erstem und letztem Datum
 enthalten (Tages-, Wochen- oder Monatsdaten); sonst, etwa bei
 Jahresdaten, bricht die Funktion ab.
 Das Ergebnis geht direkt an \code{\link[=withdrawal_simulation]{withdrawal_simulation()}},
-\code{\link[=withdrawal_max_rate]{withdrawal_max_rate()}} oder \code{\link[=perfect_withdrawal_rate]{perfect_withdrawal_rate()}}.
+\code{\link[=withdrawal_max_rate]{withdrawal_max_rate()}} oder \code{\link[=withdrawal_perfect_rate]{withdrawal_perfect_rate()}}.
 }
 \examples{
 set.seed(1)

@@ -8,7 +8,7 @@
 #  result_index()           zeitgewichteter Wertindex eines simulation()-Ergebnisses
 #  withdrawal_simulation()  schneller C++-Kern ueber viele Pfade, optional mit
 #                           vereinfachter deutscher Besteuerung
-#  perfect_withdrawal_rate() PWR nach Suarez, Suarez & Walz (2015)
+#  withdrawal_perfect_rate() PWR nach Suarez, Suarez & Walz (2015)
 #  withdrawal_max_rate()    maximale Anfangsrate fuer eine Ziel-Erfolgsquote
 #
 #  Die Entnahmephase ist bewusst von simulation() getrennt: Ein Ergebnis von
@@ -90,7 +90,7 @@
 #' Capital-Preservation-Rule von \code{guyton_klinger}) sind kein Argument der
 #' Regel: Sie ergeben sich in [withdrawal_simulation()] aus der Zahl der
 #' Planjahre (Pfadlaenge bzw. \code{years}). Eine zufaellige Laufzeit je Pfad
-#' (\code{horizon} in [withdrawal_simulation()], Objekt aus [horizon_model()])
+#' (\code{horizon} in [withdrawal_simulation()], Objekt aus [withdrawal_horizon()])
 #' aendert nur die Auswertung (Erfolg, Konsum und Endvermoegen bis zum
 #' Horizont); die Regel rechnet weiter mit den Restjahren der vollen
 #' Pfadlaenge.
@@ -174,7 +174,7 @@
 #'   Vanguard (2021), Sustainable spending rates in turbulent markets;
 #'   Bogleheads Wiki, Variable percentage withdrawal; Kitces (2015);
 #'   Suarez, Suarez & Walz (2015), Financial Services Review 24.
-#' @seealso [withdrawal_simulation()], [withdrawal_max_rate()], [horizon_model()]
+#' @seealso [withdrawal_simulation()], [withdrawal_max_rate()], [withdrawal_horizon()]
 #' @examples
 #' withdrawal_rule("constant", rate = 4)
 #' withdrawal_rule("guyton_klinger", rate = 5.2)
@@ -318,7 +318,7 @@ print.withdrawal_rule <- function(x, ...) {
 #' enthalten (Tages-, Wochen- oder Monatsdaten); sonst, etwa bei
 #' Jahresdaten, bricht die Funktion ab.
 #' Das Ergebnis geht direkt an [withdrawal_simulation()],
-#' [withdrawal_max_rate()] oder [perfect_withdrawal_rate()].
+#' [withdrawal_max_rate()] oder [withdrawal_perfect_rate()].
 #'
 #' @param data data.frame mit Spalte \code{date} (Klasse Date oder
 #'   umwandelbar) und der Kursspalte \code{price} (ggf. auch Spalten fuer
@@ -550,7 +550,7 @@ result_index <- function(x, base = 100) {
 #' }
 #' Ein einzelnes \code{SimLevResult} wird hier nicht angenommen (dafuer
 #' [withdrawal_cohorts()]). Bereits fertige \code{withdrawal_paths} (aus
-#' [withdrawal_cohorts()] oder [pooled_bootstrap()]) und Renditematrizen
+#' [withdrawal_cohorts()] oder [bootstrap_pooled()]) und Renditematrizen
 #' werden direkt an [withdrawal_simulation()] uebergeben;
 #' \code{withdrawal_simulation()} ruft diese Funktion fuer Studien und
 #' Ergebnislisten auch selbst auf.
@@ -597,10 +597,10 @@ result_index <- function(x, base = 100) {
 #' @param frequency Periodenlaenge: \code{"year"} (Standard), \code{"quarter"}
 #'   oder \code{"month"}. Bei Studien gilt stattdessen die gespeicherte
 #'   Frequenz.
-#' @param dates,start_date Nur bei \code{bootstrap_result}: Kalender der
+#' @param dates,start Nur bei \code{bootstrap_result}: Kalender der
 #'   Pfadzeilen. \code{dates} = Date-Vektor (oder in Date umwandelbar) mit
 #'   genau einem Datum je Pfadzeile, streng aufsteigend;
-#'   \code{NULL} (Standard) = taegliche Kalenderdaten ab \code{start_date}
+#'   \code{NULL} (Standard) = taegliche Kalenderdaten ab \code{start}
 #'   (Standard \code{"2000-01-01"}), d. h. jede Pfadzeile zaehlt als ein
 #'   Kalendertag. Fuer Pfade aus Handelstagen passende \code{dates} angeben
 #'   (siehe [bootstrap_data()]).
@@ -639,7 +639,7 @@ result_index <- function(x, base = 100) {
 withdrawal_paths <- function(x, column = NULL, strategy = NULL, inflation = NULL,
                              inflation_type = c("level", "rate_pa"),
                              frequency = c("year", "quarter", "month"), dates = NULL,
-                             start_date = "2000-01-01", cape = NULL) {
+                             start = "2000-01-01", cape = NULL) {
   it_given <- !missing(inflation_type)
   frequency <- match.arg(frequency); inflation_type <- match.arg(inflation_type)
   # Art der Zusatzreihe aus bootstrap_config(aux_type = ...): bestimmt die Behandlung als Inflation;
@@ -706,7 +706,7 @@ withdrawal_paths <- function(x, column = NULL, strategy = NULL, inflation = NULL
   if (is.null(column)) stop("Bei bootstrap_result muss 'column' angegeben werden.")
   P1 <- x$paths[[1]]
   if (!column %in% colnames(P1)) stop(sprintf("Spalte '%s' nicht im Pfad. Verf\u00fcgbar: %s", column, paste(colnames(P1), collapse = ", ")))
-  if (is.null(dates)) dates <- seq.Date(.to_date(start_date, "start_date"), by = "day", length.out = nrow(P1))
+  if (is.null(dates)) dates <- seq.Date(.to_date(start, "start"), by = "day", length.out = nrow(P1))
   else {
     dates <- .to_date(dates, "dates")
     if (length(dates) != nrow(P1))
@@ -778,20 +778,20 @@ withdrawal_paths <- function(x, column = NULL, strategy = NULL, inflation = NULL
 #' @examples
 #' set.seed(1)
 #' R <- matrix(exp(rnorm(30 * 5, 0.03, 0.12)), 30)   # 30 Jahre, 5 Pfade, real
-#' perfect_withdrawal_rate(R)
-#' perfect_withdrawal_rate(R, legacy = 0.5)
+#' withdrawal_perfect_rate(R)
+#' withdrawal_perfect_rate(R, legacy = 0.5)
 #' @export
-perfect_withdrawal_rate <- function(real_returns, legacy = 0) {
+withdrawal_perfect_rate <- function(real_returns, legacy = 0) {
   if (inherits(real_returns, "withdrawal_paths")) real_returns <- .annual_real(real_returns)
   R <- as.matrix(real_returns)
   if (!is.numeric(R) || !length(R) || anyNA(R) || any(!is.finite(R)))
-    stop("perfect_withdrawal_rate: real_returns muss eine Matrix endlicher realer Brutto-Jahresrenditen sein (1.05 = +5 %).")
+    stop("withdrawal_perfect_rate: real_returns muss eine Matrix endlicher realer Brutto-Jahresrenditen sein (1.05 = +5 %).")
   if (stats::median(R) < 0.5)
-    stop(sprintf(paste0("perfect_withdrawal_rate: real_returns sieht nicht wie Brutto-Renditen aus (Median %s); erwartet z. B. 1.05 ",
+    stop(sprintf(paste0("withdrawal_perfect_rate: real_returns sieht nicht wie Brutto-Renditen aus (Median %s); erwartet z. B. 1.05 ",
                         "f\u00fcr +5 %%, nicht 0.05 (Nettorendite: 1 + r \u00fcbergeben)."), format(stats::median(R), digits = 4)))
-  if (any(R < 0)) stop("perfect_withdrawal_rate: Brutto-Renditen in real_returns m\u00fcssen >= 0 sein (0 = Totalverlust).")
+  if (any(R < 0)) stop("withdrawal_perfect_rate: Brutto-Renditen in real_returns m\u00fcssen >= 0 sein (0 = Totalverlust).")
   if (!is.numeric(legacy) || length(legacy) != 1L || !is.finite(legacy) || legacy < 0)
-    stop(sprintf("perfect_withdrawal_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 %% des Startverm\u00f6gens; erhalten: %s).",
+    stop(sprintf("withdrawal_perfect_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 %% des Startverm\u00f6gens; erhalten: %s).",
                  paste(format(legacy), collapse = ", ")))
   apply(R, 2, function(r) {
     tail_prod <- rev(cumprod(rev(r)))                     # prod_{j=i..n}
@@ -869,7 +869,7 @@ perfect_withdrawal_rate <- function(real_returns, legacy = 0) {
 #' Entnahme-Simulation ueber viele Pfade
 #'
 #' Simuliert eine Entnahmeregel auf historischen Kohorten ([withdrawal_cohorts()]),
-#' Bootstrap-Pfaden ([withdrawal_paths()], [pooled_bootstrap()]), gespeicherten
+#' Bootstrap-Pfaden ([withdrawal_paths()], [bootstrap_pooled()]), gespeicherten
 #' Ergebnissen von [simulation()] bzw. [bootstrap_study()] oder einer
 #' beliebigen Renditematrix. Je Pfad entstehen Erfolg, Erschoepfungsjahr,
 #' reales Endvermoegen, Konsumkennzahlen, Steuern und die Perfect Withdrawal
@@ -929,7 +929,7 @@ perfect_withdrawal_rate <- function(real_returns, legacy = 0) {
 #' Lots zuerst; Gewinn je Lot = Erloes x (1 - \code{sale_cost} / 100) minus
 #' Anschaffungskosten minus anteilige Vorabpauschale (§ 19 InvStG), die
 #' Gewinne aller verkauften Lots werden summiert und mit Teilfreistellung
-#' \code{asset_bonus}, Verlusttopf, Sparer-Pauschbetrag und \code{tax_rate}
+#' \code{partial_exemption}, Verlusttopf, Sparer-Pauschbetrag und \code{tax_rate}
 #' besteuert (wie [simulation()] je Verkauf, siehe dort \code{open_lots}).
 #' Cash am Ende der Ansparphase ist eine eigene Position mit Basis = Betrag,
 #' die wie bisher mit der Depotrendite waechst und anteilig verkauft wird.
@@ -988,7 +988,7 @@ perfect_withdrawal_rate <- function(real_returns, legacy = 0) {
 #' @param x Renditequelle, eine der folgenden:
 #'   \describe{
 #'     \item{\code{withdrawal_paths}}{aus [withdrawal_cohorts()],
-#'       [withdrawal_paths()] oder [pooled_bootstrap()]; Inflation und
+#'       [withdrawal_paths()] oder [bootstrap_pooled()]; Inflation und
 #'       Frequenz stammen aus dem Objekt (\code{inflation} und
 #'       \code{frequency} werden ignoriert).}
 #'     \item{Matrix}{(Perioden x Pfade) von Brutto-Periodenrenditen nach
@@ -1009,11 +1009,11 @@ perfect_withdrawal_rate <- function(real_returns, legacy = 0) {
 #'   sofern \code{cost_basis} nicht angegeben ist, wird \code{cost_basis}
 #'   daraus abgeleitet (siehe dort). Bei \code{tax_mode = "person"} wird
 #'   gewarnt, wenn die am Ende gehaltenen Assets eine andere Teilfreistellung
-#'   als \code{asset_bonus} haben (Regime \code{"capital_gains"} zaehlt als
+#'   als \code{partial_exemption} haben (Regime \code{"capital_gains"} zaehlt als
 #'   0 %) oder das Regime \code{"private_sale"} (§ 23 EStG) haben, das die
 #'   Entnahmephase nicht abbildet. Mit \code{tax_mode = "person"} werden
 #'   ausserdem die Lots (FIFO, siehe Details) und nicht angegebene
-#'   \code{asset_bonus}, \code{loss_carryforward} und \code{sale_cost} aus
+#'   \code{partial_exemption}, \code{loss_carryforward} und \code{sale_cost} aus
 #'   dem Ergebnis uebernommen (siehe dort); was uebernommen wurde, meldet
 #'   ein Hinweis (\code{message()}) und steht im Ergebnis unter
 #'   \code{adopted}. Ausdrueckliche Angaben haben immer Vorrang.
@@ -1055,14 +1055,14 @@ perfect_withdrawal_rate <- function(real_returns, legacy = 0) {
 #'   \code{"person"} (vereinfachte deutsche Besteuerung, siehe Details).
 #' @param tax_rate Abgeltungsteuer inkl. Solidaritaetszuschlag in Prozent
 #'   (Standard 26.375; 0 bis 100). Wie in [simulation()] sind
-#'   \code{tax_rate}, \code{asset_bonus}, \code{sale_cost},
+#'   \code{tax_rate}, \code{partial_exemption}, \code{sale_cost},
 #'   \code{cost_basis}, \code{sparer_pauschbetrag},
 #'   \code{loss_carryforward} und \code{gamma} einzelne endliche Zahlen im
 #'   zulaessigen Bereich (sonst Fehler); Werte zwischen 0 und 1 bei
-#'   \code{tax_rate}, \code{asset_bonus} und \code{cost_basis} sowie
+#'   \code{tax_rate}, \code{partial_exemption} und \code{cost_basis} sowie
 #'   zwischen 0 und 0,05 bei \code{inflation} (Zahl) und \code{base_rate}
 #'   (Zahl) loesen eine Warnung aus (vermutlich Anteil statt Prozent).
-#' @param asset_bonus Teilfreistellung in Prozent (Standard 30 fuer
+#' @param partial_exemption Teilfreistellung in Prozent (Standard 30 fuer
 #'   Aktienfonds; 15 fuer Mischfonds). Nicht angegeben und \code{start_value}
 #'   ein \code{SimLevResult} mit \code{open_lots}: die gemeinsame
 #'   Teilfreistellung der am Ende gehaltenen Assets (Regime
@@ -1094,7 +1094,7 @@ perfect_withdrawal_rate <- function(real_returns, legacy = 0) {
 #' @param sale_cost Verkaufskosten in Prozent des Verkaufsbetrags (Standard 0;
 #'   z. B. halber Spread). Nicht angegeben und \code{start_value} ein
 #'   \code{SimLevResult} mit \code{open_lots}: der halbe Spread
-#'   (\code{asset_spread}) der am Ende gehaltenen Assets, sofern alle
+#'   (\code{spread}) der am Ende gehaltenen Assets, sofern alle
 #'   denselben Spread haben (sonst 0 mit Warnung; ohne Spread-Angabe im
 #'   Ergebnis 0). Ordergebuehren bildet die Entnahmephase nicht ab; waren sie
 #'   in der Ansparphase gesetzt, warnt die Funktion.
@@ -1118,7 +1118,7 @@ perfect_withdrawal_rate <- function(real_returns, legacy = 0) {
 #'       Verkauf ergibt dieselbe Steuer wie in [simulation()] beim Verkauf
 #'       derselben Stueckzahl, wenn \code{sale_cost} dem halben Spread
 #'       entspricht, keine Ordergebuehr anfaellt, alle Assets die
-#'       Teilfreistellung \code{asset_bonus} haben und Topf und
+#'       Teilfreistellung \code{partial_exemption} haben und Topf und
 #'       Sparer-Pauschbetrag gleich stehen.}
 #'     \item{sonst}{(Ergebnis ohne \code{tax_mode = "person"} oder aelter):
 #'       die Naeherung 100 x (Startwert brutto + Summe der Einzahlungen) /
@@ -1140,7 +1140,7 @@ perfect_withdrawal_rate <- function(real_returns, legacy = 0) {
 #'   (\code{gamma = 1}: geometrisches Mittel).
 #' @param keep_paths Logisch: Vermoegensmatrix \code{wealth} zurueckgeben
 #'   (Standard \code{TRUE}).
-#' @param horizon Optional Laufzeit je Pfad: Objekt aus [horizon_model()]
+#' @param horizon Optional Laufzeit je Pfad: Objekt aus [withdrawal_horizon()]
 #'   (zufaellige Laufzeit in Jahren je Pfad) oder eine Zahl > 0 = feste Laufzeit in
 #'   Jahren. \code{NULL} (Standard) = volle Pfadlaenge. Dann gilt ein Pfad als
 #'   erfolgreich, wenn das Vermoegen bis zu seinem Horizont reicht;
@@ -1152,7 +1152,7 @@ perfect_withdrawal_rate <- function(real_returns, legacy = 0) {
 #'   Pfadlaenge in \code{paths$success_full}). Horizonte ueber der Pfadlaenge
 #'   werden mit Warnung gekuerzt. Die Regel selbst rechnet weiter mit den
 #'   Restjahren der vollen Pfadlaenge. Nicht zu verwechseln mit \code{horizon}
-#'   in [goal_optimize()] (Perioden).
+#'   in [planning_goal()] (Perioden).
 #'
 #' @return Objekt der Klasse \code{SimLevWithdrawal} (Liste):
 #'   \describe{
@@ -1191,7 +1191,7 @@ perfect_withdrawal_rate <- function(real_returns, legacy = 0) {
 #'       und \code{tax_mode = "person"}: benannte Liste der aus der
 #'       Ansparphase uebernommenen Werte (\code{lots} = Anzahl FIFO-Lots
 #'       einschliesslich Cash-Position, \code{cost_basis} bei
-#'       Durchschnittskosten, \code{asset_bonus}, \code{loss_carryforward},
+#'       Durchschnittskosten, \code{partial_exemption}, \code{loss_carryforward},
 #'       \code{sale_cost}, \code{sparer_pauschbetrag_used_year1} = im ersten
 #'       Planjahr bereits verbrauchter Pauschbetrag, \code{vorabpauschale} =
 #'       \code{FALSE} ohne gehaltene Fonds); sonst \code{NULL}.}
@@ -1222,17 +1222,22 @@ perfect_withdrawal_rate <- function(real_returns, legacy = 0) {
 withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_value = 1e6,
                                   inflation = 0, frequency = c("year", "quarter", "month"),
                                   strategy = NULL,
-                                  years = NULL, timing = c("start", "end"), income = NULL,
-                                  tax_mode = c("none", "person"), tax_rate = 26.375,
-                                  asset_bonus = 30, sparer_pauschbetrag = 1000, base_rate = 3.20,
+                                  years = NULL, timing = c("start", "end"), income = NULL, tax = NULL,
+                                  partial_exemption = 30, base_rate = 3.20,
                                   vorabpauschale = TRUE, sale_cost = 0, cost_basis = 100,
                                   loss_carryforward = 0, gamma = 2, keep_paths = TRUE, horizon = NULL) {
-  timing <- match.arg(timing); tax_mode <- match.arg(tax_mode)
+  timing <- match.arg(timing)
+  # F2 (Etappe 6.4): Steuerdaten der Person aus tax_profile() (rate, sparer_pauschbetrag); NULL = ohne Steuern.
+  # Die Bestandsmerkmale (partial_exemption, vorabpauschale, cost_basis, loss_carryforward, sale_cost) und der
+  # Basiszins (base_rate, auch Matrix) bleiben eigene Argumente.
+  tax_mode <- .wd_tax_mode(tax)
+  tax_rate <- if (is.null(tax)) 26.375 else tax$rate
+  sparer_pauschbetrag <- if (is.null(tax)) 1000 else tax$sparer_pauschbetrag
   if (!is.null(horizon) && !inherits(horizon, "SimLevHorizon")) {
     if (!is.numeric(horizon) || length(horizon) != 1L || !is.finite(horizon) || horizon <= 0)
-      stop(sprintf("withdrawal_simulation: 'horizon' muss NULL, ein Objekt aus horizon_model() oder eine Zahl von Jahren > 0 sein, nicht %s.",
+      stop(sprintf("withdrawal_simulation: 'horizon' muss NULL, ein Objekt aus withdrawal_horizon() oder eine Zahl von Jahren > 0 sein, nicht %s.",
                    paste(format(horizon), collapse = ", ")), call. = FALSE)
-    horizon <- horizon_model("fixed", years = horizon)
+    horizon <- withdrawal_horizon("fixed", years = horizon)
   }
   if (!inherits(rule, "withdrawal_rule")) stop("rule muss mit withdrawal_rule() erstellt werden.")
   if (is.null(inflation)) inflation <- 0                    # NULL = keine Inflation (wie 0)
@@ -1247,9 +1252,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
       warning(sprintf("withdrawal_simulation: %s = %s wird als %s %s gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
                       arg, format(x), format(x), unit, format(x * 100)), call. = FALSE)
   }
-  .chk(tax_rate, "tax_rate", "eine Zahl von 0 bis 100 in Prozent (z. B. 26.375)", 0, 100); .frac(tax_rate, "tax_rate")
-  .chk(asset_bonus, "asset_bonus", "eine Zahl von 0 bis 100 in Prozent (z. B. 30)", 0, 100); .frac(asset_bonus, "asset_bonus")
-  .chk(sparer_pauschbetrag, "sparer_pauschbetrag", "eine Zahl >= 0 (EUR je Planjahr, z. B. 1000)")
+  .chk(partial_exemption, "partial_exemption", "eine Zahl von 0 bis 100 in Prozent (z. B. 30)", 0, 100); .frac(partial_exemption, "partial_exemption")
   .chk(sale_cost, "sale_cost", "eine Zahl von 0 bis unter 100 in Prozent (z. B. 0.1)", 0, 99.999)
   .chk(cost_basis, "cost_basis", "eine Zahl >= 0 in Prozent des Startwerts (z. B. 100)"); .frac(cost_basis, "cost_basis")
   .chk(loss_carryforward, "loss_carryforward", "eine Zahl >= 0 (EUR)")
@@ -1304,8 +1307,8 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
       } else {
         if (tax_mode == "person")
           warning("cost_basis: N\u00e4herung 100 x (Startwert brutto + Einzahlungen) / Endwert, da das Ansparergebnis keine offenen Lots ",
-                  "enth\u00e4lt (simulation() ohne tax_mode = 'person' oder \u00e4lteres Ergebnis); realisierte Gewinne und Cash z\u00e4hlen dabei ",
-                  "als stille Reserven. F\u00fcr genaue Werte die Ansparphase mit tax_mode = 'person' rechnen oder cost_basis angeben.")
+                  "enth\u00e4lt (simulation() ohne tax = tax_profile() oder \u00e4lteres Ergebnis); realisierte Gewinne und Cash z\u00e4hlen dabei ",
+                  "als stille Reserven. F\u00fcr genaue Werte die Ansparphase mit tax = tax_profile() rechnen oder cost_basis angeben.")
         # Naeherung: Startbetrag brutto (vor Kaufkosten des Starttags) wie x$invested der Engine
         # plus Einzahlungen, bezogen auf den Endwert (realisierte, versteuerte Gewinne und Cash
         # werden dabei nicht abgezogen)
@@ -1314,7 +1317,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
         cost_basis <- 100 * invested / sv
       }
     }
-    # Die Entnahmephase kennt nur einen Bestand mit einer Teilfreistellung (asset_bonus) und
+    # Die Entnahmephase kennt nur einen Bestand mit einer Teilfreistellung (partial_exemption) und
     # Abgeltungsteuer: einheitliche Werte der gehaltenen Assets uebernehmen, sonst melden
     if (tax_mode == "person" && has_lots) {
       hold <- ol[.wd_held(ol, start_value$report, sv)]            # gehalten = Endwert > 0 (nicht nur Stueckreste)
@@ -1326,23 +1329,23 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
       if (mixed)
         warning(sprintf(paste0("Am Ende gehaltene Assets mit verschiedenen Regimen (Investmentfonds: %s; andere: %s): ",
                                "withdrawal_simulation() wendet Vorabpauschale (vorabpauschale = %s) und Teilfreistellung ",
-                               "(asset_bonus = %g %%) auf den ganzen Bestand an; beide werden nicht \u00fcbernommen."),
+                               "(partial_exemption = %g %%) auf den ganzen Bestand an; beide werden nicht \u00fcbernommen."),
                         paste(names(hold)[fund], collapse = ", "), paste(names(hold)[!fund], collapse = ", "),
-                        isTRUE(vorabpauschale), asset_bonus))
+                        isTRUE(vorabpauschale), partial_exemption))
       if (any(reg == "private_sale"))
         warning(sprintf(paste0("Assets mit Regime 'private_sale' (Paragraf 23 EStG: %s) am Ende der Ansparphase: Spekulationsfrist und ",
                                "Freigrenze bildet withdrawal_simulation() nicht ab; deren Gewinne werden wie Fondsgewinne mit ",
-                               "Teilfreistellung asset_bonus = %g %% besteuert."), paste(names(hold)[reg == "private_sale"], collapse = ", "),
-                        asset_bonus))
+                               "Teilfreistellung partial_exemption = %g %% besteuert."), paste(names(hold)[reg == "private_sale"], collapse = ", "),
+                        partial_exemption))
       fs <- reg != "private_sale"
-      tfs <- ifelse(reg == "investment_fund", vapply(hold, function(a) as.numeric(a$asset_bonus %||% 0), 0), 0)[fs]
-      if (missing(asset_bonus) && !mixed && length(tfs) && all(fs) && all(abs(tfs - tfs[1]) < 1e-9)) {
-        asset_bonus <- unname(tfs[1]); adopted$asset_bonus <- asset_bonus
-      } else if (!mixed && length(tfs) && any(abs(tfs - asset_bonus) > 1e-9))
-        warning(sprintf(paste0("asset_bonus = %g %%, aber die am Ende gehaltenen Assets haben die Teilfreistellung %s; ",
+      tfs <- ifelse(reg == "investment_fund", vapply(hold, function(a) as.numeric(a$partial_exemption %||% 0), 0), 0)[fs]
+      if (missing(partial_exemption) && !mixed && length(tfs) && all(fs) && all(abs(tfs - tfs[1]) < 1e-9)) {
+        partial_exemption <- unname(tfs[1]); adopted$partial_exemption <- partial_exemption
+      } else if (!mixed && length(tfs) && any(abs(tfs - partial_exemption) > 1e-9))
+        warning(sprintf(paste0("partial_exemption = %g %%, aber die am Ende gehaltenen Assets haben die Teilfreistellung %s; ",
                                "withdrawal_simulation() rechnet mit einer Teilfreistellung f\u00fcr den ganzen Bestand ",
-                               "(asset_bonus passend angeben; bei verschiedenen Werten keine exakte Abbildung)."),
-                        asset_bonus, paste(sprintf("%s %g %%", names(hold)[fs], tfs), collapse = ", ")))
+                               "(partial_exemption passend angeben; bei verschiedenen Werten keine exakte Abbildung)."),
+                        partial_exemption, paste(sprintf("%s %g %%", names(hold)[fs], tfs), collapse = ", ")))
       # Steuerzustand des Jahres nach dem letzten Datentag (= erstes Planjahr): was die Engine diesem Jahr
       # schon zugerechnet hat (am 31.12. festgesetzte Vorabpauschale: Pauschbetrag und Verlusttopf)
       ny <- start_value$tax_report$next_year
@@ -1354,8 +1357,8 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
         loss_carryforward <- lc; adopted$loss_carryforward <- lc
       }
       if (is.list(ny) && num1(ny$sparer_pauschbetrag_used)) spb_used1 <- ny$sparer_pauschbetrag_used
-      # Verkaufskosten = halber Spread, wenn alle gehaltenen Assets denselben Spread haben (Feld asset_spread)
-      spr <- vapply(hold, function(a) if (is.numeric(a$asset_spread) && length(a$asset_spread) == 1L) a$asset_spread else NA_real_, 0)
+      # Verkaufskosten = halber Spread, wenn alle gehaltenen Assets denselben Spread haben (Feld spread)
+      spr <- vapply(hold, function(a) if (is.numeric(a$spread) && length(a$spread) == 1L) a$spread else NA_real_, 0)
       if (missing(sale_cost) && length(spr) && !anyNA(spr)) {
         if (all(abs(spr - spr[1]) < 1e-12)) { sale_cost <- unname(spr[1]) / 2; adopted$sale_cost <- sale_cost }
         else warning(sprintf(paste0("sale_cost nicht \u00fcbernommen: die gehaltenen Assets haben verschiedene Spreads (%s); ",
@@ -1395,7 +1398,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
   }
   if (src_taxed && tax_mode == "person" && isTRUE(vorabpauschale))
     warning("Das Quellergebnis wurde mit Steuern gerechnet (Vorabpauschale im Index enthalten); ",
-            "vorabpauschale = FALSE oder eine Quelle mit tax_mode = 'none' vermeidet Doppelz\u00e4hlung.")
+            "vorabpauschale = FALSE oder eine Quelle ohne Steuern (simulation(tax = NULL)) vermeidet Doppelz\u00e4hlung.")
   if (!inherits(x, "withdrawal_paths")) {
     frequency <- match.arg(frequency)
     R <- as.matrix(x)
@@ -1448,7 +1451,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
   rp <- .wd_param_vector(rule)
   t0 <- Sys.time()
   core <- .wd_simulate(R, I, CAPE, BASE, as.integer(ppy), .wd_rules[[rule$type]], rp, timing == "start",
-                       start_value, inc, tax_mode == "person", tax_rate / 100, asset_bonus / 100,
+                       start_value, inc, tax_mode == "person", tax_rate / 100, partial_exemption / 100,
                        sparer_pauschbetrag, isTRUE(vorabpauschale), sale_cost / 100, cost_basis / 100,
                        loss_carryforward, isTRUE(keep_paths) || !is.null(horizon),
                        lots$n %||% numeric(0), lots$basis %||% numeric(0), lots$vp %||% numeric(0), lots$group %||% integer(0),
@@ -1461,7 +1464,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
   # Konsumkennzahlen je Jahr nur ueber volle Planjahre (ein Rumpfjahr zaehlt nicht als volles Jahr)
   per_path <- function(fun, H = rep(ny, ncol(sp)))
     vapply(seq_len(ncol(sp)), function(i) { r <- seq_len(min(H[i], nfy)); if (length(r)) fun(sp[r, i]) else NA_real_ }, 0)
-  pwr <- if (ppy == 1L || nrow(R) >= ppy) perfect_withdrawal_rate(.annual_real(list(returns = R, inflation = I, frequency = x$frequency))) else NA
+  pwr <- if (ppy == 1L || nrow(R) >= ppy) withdrawal_perfect_rate(.annual_real(list(returns = R, inflation = I, frequency = x$frequency))) else NA
   paths <- data.frame(
     success = core$failed == 0,
     depletion_year = ceiling(core$depletion_period / ppy),
@@ -1496,7 +1499,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
     paths$spending_drawdown <- per_path(dd_fun, H); paths$ce_spending <- per_path(ce_fun, H)
     if (ppy == 1L) {
       AR <- .annual_real(list(returns = R, inflation = I, frequency = x$frequency))
-      paths$pwr <- vapply(seq_along(H), function(i) perfect_withdrawal_rate(AR[seq_len(H[i]), i, drop = FALSE]), 0)
+      paths$pwr <- vapply(seq_along(H), function(i) withdrawal_perfect_rate(AR[seq_len(H[i]), i, drop = FALSE]), 0)
     } else paths$pwr <- NA_real_
     if (!keep_paths) core$wealth <- NULL
   }
@@ -1522,7 +1525,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
 #'
 #' @param x Renditequelle wie in [withdrawal_simulation()]:
 #'   \code{withdrawal_paths} (z. B. aus [withdrawal_cohorts()],
-#'   [withdrawal_paths()], [pooled_bootstrap()]), Renditematrix,
+#'   [withdrawal_paths()], [bootstrap_pooled()]), Renditematrix,
 #'   \code{SimLevResult}, Liste von \code{SimLevResult} oder
 #'   \code{SimLevBootstrapStudy}.
 #' @param rule Objekt aus [withdrawal_rule()]; dessen \code{rate} wird
@@ -1542,7 +1545,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
 #'   (erreichte Erfolgsquote als Anteil). \code{NA}, wenn schon \code{lower}
 #'   die Zielquote verfehlt; \code{upper}, wenn selbst \code{upper} sie
 #'   erreicht.
-#' @seealso [withdrawal_simulation()], [perfect_withdrawal_rate()],
+#' @seealso [withdrawal_simulation()], [withdrawal_perfect_rate()],
 #'   [withdrawal_rule()]
 #' @examples
 #' set.seed(1)
@@ -1587,7 +1590,7 @@ withdrawal_max_rate <- function(x, rule = withdrawal_rule("constant"), success =
 #' Methoden fuer Entnahme-Objekte
 #'
 #' Ausgabe-, Zusammenfassungs- und Grafikmethoden fuer Entnahmeregeln
-#' ([withdrawal_rule()]), Laufzeitmodelle ([horizon_model()]) und Ergebnisse
+#' ([withdrawal_rule()]), Laufzeitmodelle ([withdrawal_horizon()]) und Ergebnisse
 #' von [withdrawal_simulation()].
 #'
 #' \code{print()} einer Regel zeigt Typ und die von ihr genutzten Parameter; \code{print()}
@@ -1760,12 +1763,12 @@ plot.SimLevWithdrawal <- function(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95), ...
 #'   [SimLevWithdrawal-methods]).
 #' @seealso [withdrawal_simulation()], [withdrawal_max_rate()]
 #' @examples
-#' h <- horizon_model("discrete", years = c(25, 30, 35, 40), prob = c(0.3, 0.4, 0.2, 0.1))
+#' h <- withdrawal_horizon("discrete", years = c(25, 30, 35, 40), prob = c(0.3, 0.4, 0.2, 0.1))
 #' h
 #' R <- matrix(exp(rnorm(40 * 500, 0.05, 0.15)), 40)
 #' withdrawal_simulation(R, withdrawal_rule("constant", rate = 4), inflation = 2, horizon = h)
 #' @export
-horizon_model <- function(type = c("fixed", "uniform", "discrete", "normal", "triangular", "sample"),
+withdrawal_horizon <- function(type = c("fixed", "uniform", "discrete", "normal", "triangular", "sample"),
                           years = NULL, prob = NULL, min = NULL, max = NULL, mean = NULL, sd = NULL, mode = NULL,
                           seed = 1L) {
   type <- match.arg(type)
@@ -1773,22 +1776,22 @@ horizon_model <- function(type = c("fixed", "uniform", "discrete", "normal", "tr
                  normal = c("mean", "sd", "min", "max"), triangular = c("min", "mode", "max"), sample = "years")
   given <- list(years = years, prob = prob, min = min, max = max, mean = mean, sd = sd, mode = mode)
   miss <- need[vapply(need, function(k) is.null(given[[k]]), TRUE)]
-  if (length(miss)) stop(sprintf("horizon_model('%s') braucht: %s", type, paste(miss, collapse = ", ")))
+  if (length(miss)) stop(sprintf("withdrawal_horizon('%s') braucht: %s", type, paste(miss, collapse = ", ")))
   for (k in need) {
     v <- given[[k]]; multi <- k %in% c("prob") || (k == "years" && type %in% c("discrete", "sample"))
     if (!is.numeric(v) || !length(v) || any(!is.finite(v)) || (!multi && length(v) != 1L))
-      stop(sprintf("horizon_model('%s'): %s muss %s sein (erhalten: %s).", type, k,
+      stop(sprintf("withdrawal_horizon('%s'): %s muss %s sein (erhalten: %s).", type, k,
                    if (multi) "ein endlicher Zahlenvektor" else "eine endliche Zahl", paste(format(v), collapse = ", ")))
   }
   # Laufzeiten in Jahren muessen positiv sein (0 oder negativ wurde still zu 1 Jahr)
   for (k in intersect(need, c("years", "min", "max", "mean", "mode"))) if (any(given[[k]] <= 0))
-    stop(sprintf("horizon_model('%s'): %s muss > 0 sein (Laufzeit in Jahren; erhalten: %s).", type, k, paste(format(given[[k]]), collapse = ", ")))
+    stop(sprintf("withdrawal_horizon('%s'): %s muss > 0 sein (Laufzeit in Jahren; erhalten: %s).", type, k, paste(format(given[[k]]), collapse = ", ")))
   if (type == "discrete" && (length(years) != length(prob) || any(prob < 0) || sum(prob) <= 0))
-    stop("horizon_model('discrete'): years und prob gleich lang, prob >= 0 mit Summe > 0.")
+    stop("withdrawal_horizon('discrete'): years und prob gleich lang, prob >= 0 mit Summe > 0.")
   if (!is.null(min) && !is.null(max) && min > max) stop("min <= max erforderlich.")
   if (type == "triangular" && (mode < min || mode > max))
-    stop(sprintf("horizon_model('triangular'): mode (%g) muss zwischen min (%g) und max (%g) liegen.", mode, min, max))
-  if (type == "normal" && sd < 0) stop("horizon_model('normal'): sd muss >= 0 sein.")
+    stop(sprintf("withdrawal_horizon('triangular'): mode (%g) muss zwischen min (%g) und max (%g) liegen.", mode, min, max))
+  if (type == "normal" && sd < 0) stop("withdrawal_horizon('normal'): sd muss >= 0 sein.")
   structure(c(list(type = type, seed = seed), given[need]), class = "SimLevHorizon")
 }
 
@@ -1818,4 +1821,26 @@ print.SimLevHorizon <- function(x, ...) {
   cat(sprintf("Laufzeit der Entnahmephase (%s): Mittel %.1f Jahre, Median %g, 90 %%-Quantil %g, Bereich %g bis %g\n",
               x$type, mean(d), stats::median(d), stats::quantile(d, 0.9, names = FALSE), min(d), max(d)))
   invisible(x)
+}
+
+#' Steuerangaben der Person fuer withdrawal_simulation() pruefen (F2)
+#'
+#' Zweck: tax = NULL (ohne Steuern) oder tax_profile(); die Entnahmephase wertet daraus rate und
+#' sparer_pauschbetrag aus. Abweichende Angaben, die sie nicht abbildet (church_tax, private_sale_threshold,
+#' base_rate, guenstigerpruefung, income, harvest), ergeben einen Fehler.
+#' Ausgabe: "none" oder "person".
+#' @keywords internal
+#' @noRd
+.wd_tax_mode <- function(tax) {
+  if (is.null(tax)) return("none")
+  if (!inherits(tax, "SimLevTaxProfile"))
+    stop(sprintf("withdrawal_simulation: tax muss NULL oder ein Objekt aus tax_profile() sein, nicht %s.",
+                 paste(class(tax), collapse = "/")), call. = FALSE)
+  un <- c(church_tax = isTRUE(tax$church_tax > 0), private_sale_threshold = !identical(as.numeric(tax$private_sale_threshold), 1000),
+          base_rate = !is.null(tax$base_rate), guenstigerpruefung = isTRUE(tax$guenstigerpruefung),
+          income = !is.null(tax$income), harvest = !is.null(tax$harvest))
+  if (any(un))
+    stop(sprintf("withdrawal_simulation: tax_profile(%s) bildet die Entnahmephase nicht ab; ausgewertet werden rate und sparer_pauschbetrag (Basiszins \u00fcber base_rate von withdrawal_simulation()).",
+                 paste(names(un)[un], collapse = ", ")), call. = FALSE)
+  "person"
 }

@@ -6,18 +6,18 @@
 #                           Volatilität, Gleichgewichtung; Box-Grenzen,
 #                           Kovarianzschätzer (Stichprobe, Ledoit-Wolf, EWMA,
 #                           Rauschfilter, Gerber), Resampling (Michaud)
-#   efficient_frontier()    Effizienzgrenze unter denselben Grenzen
-#   rolling_optimization()  Optimierung in rollierenden Fenstern → Zielgewichte für
+#   portfolio_frontier()    Effizienzgrenze unter denselben Grenzen
+#   portfolio_rolling()  Optimierung in rollierenden Fenstern → Zielgewichte für
 #                           tactical_simulation()
-#   risk_contributions()    Euler-Zerlegung von Volatilität bzw. CVaR
-#   cpcv_portfolio()        kombinatorische Kreuzvalidierung (CPCV)
+#   portfolio_risk_contributions()    Euler-Zerlegung von Volatilität bzw. CVaR
+#   portfolio_cpcv()        kombinatorische Kreuzvalidierung (CPCV)
 #
 # Löser ohne Zusatzpakete (Kerne in OptimizeCore): FISTA auf dem beschränkten
 # Simplex, gedämpftes Newton-Verfahren für die Risikoparität, geglätteter CVaR,
 # Clusterbaum (hclust "single") für HRP.
 #
 # Ergebnisobjekte: `RList` mit Klasse `SimLevOptimization`, `SimLevFrontier`,
-# `SimLevCPCV`; rolling_optimization() liefert `SimLevWeights` (RFrame, siehe
+# `SimLevCPCV`; portfolio_rolling() liefert `SimLevWeights` (RFrame, siehe
 # Tactical) mit den Attributen `source`, `decision_rows`, `failed_dates` in
 # `attrs(w)`. Eingaben: Renditematrix (`Matrix`, `NamedMat`, `RFrame` ohne
 # `date`) oder Kursdaten (`RFrame` mit Spalte `date`); benannte Vektoren als
@@ -29,7 +29,7 @@ using ..SimLev: _alloc_c, _alloc_ticks, _esc
 using ..SimLev: RList, RFrame, RVector, NamedMat, NA, isna_strict, F80
 using Dates
 
-export portfolio_optimize, efficient_frontier, rolling_optimization, risk_contributions, cpcv_portfolio,
+export portfolio_optimize, portfolio_frontier, portfolio_rolling, portfolio_risk_contributions, portfolio_cpcv,
        print_SimLevOptimization, print_SimLevFrontier, print_SimLevCPCV,
        plot_SimLevOptimization, plot_SimLevFrontier
 
@@ -221,7 +221,7 @@ _df_names(x) = String[]
 
 _isnum_col(c) = eltype(c) <: Union{Missing,Real} && !(nonmissingtype(eltype(c)) <: Bool) && nonmissingtype(eltype(c)) !== Union{}
 
-"Interne Renditen mit ppy (R-Klasse `SimLevOptReturns`, für cpcv_portfolio)."
+"Interne Renditen mit ppy (R-Klasse `SimLevOptReturns`, für portfolio_cpcv)."
 _opt_returns_obj(A, cn, ppy) = RList("R" => NamedMat(A; colnames = cn), "ppy" => ppy; class = "SimLevOptReturns")
 
 "`.opt_returns`: Periodenrenditen (einfach) → (R = Matrix, cn, ppy, dates)."
@@ -802,13 +802,13 @@ end
 print_SimLevOptimization(x) = print_SimLevOptimization(stdout, x)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# efficient_frontier
+# portfolio_frontier
 # ═══════════════════════════════════════════════════════════════════════════
 
 _dup_key(z::Float64) = isnan(z) ? (isna_strict(z) ? "NA" : "NaN") : (z == 0 ? 0.0 : z)
 
 """
-    efficient_frontier(x; assets = nothing, n = 40, lower = 0, upper = 1, cov = "sample",
+    portfolio_frontier(x; assets = nothing, n = 40, lower = 0, upper = 1, cov = "sample",
                        risk_free = 0, frequency = "week")
 
 Effizienzgrenze: für `n` Risikoaversionen von 1e4 bis 0.02 (logarithmisch)
@@ -816,7 +816,7 @@ max μ'w − γ/2 w'Σw unter denselben Grenzen wie [`portfolio_optimize`](@ref)
 Ergebnis `RList` der Klasse `SimLevFrontier` mit `frontier`, `assets`,
 `risk_free`, `frequency`.
 """
-function efficient_frontier(x; assets = nothing, n = 40, lower = 0, upper = 1, cov = nothing, risk_free = 0,
+function portfolio_frontier(x; assets = nothing, n = 40, lower = 0, upper = 1, cov = nothing, risk_free = 0,
                             frequency = nothing)
     x = SimLev.as_rframe(x)
     cov = _match_arg(cov, _COVS)
@@ -877,11 +877,11 @@ end
 print_SimLevFrontier(x) = print_SimLevFrontier(stdout, x)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# rolling_optimization
+# portfolio_rolling
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-    rolling_optimization(x, assets; method = "min_variance", window = 3, every = "month",
+    portfolio_rolling(data, assets; method = "min_variance", window = 3, every = "month",
                          frequency = "week", kwargs...)
 
 Rollierende Optimierung (Zielgewichte außerhalb der Stichprobe): an jedem
@@ -891,28 +891,28 @@ Termin] mit [`portfolio_optimize`](@ref) optimiert (weitere Argumente über
 `kwargs`); fehlgeschlagene Termine erhalten Gleichgewichtung (Warnung).
 Ergebnis: `SimLevWeights` mit `attrs` `source`, `decision_rows`, `failed_dates`.
 """
-function rolling_optimization(x, assets; method = "min_variance", window = 3, every = nothing, frequency = nothing,
+function portfolio_rolling(data, assets; method = "min_variance", window = 3, every = nothing, frequency = nothing,
                               kwargs...)
-    x = SimLev.as_rframe(x)
+    data = SimLev.as_rframe(data)
     every = _match_arg(every, ["month", "quarter", "year"])
     frequency = _match_arg(frequency, _FREQS)
     if !(method isa AbstractString) || !(method in _METHODS)
         mv = method isa Union{AbstractVector,Tuple} ? collect(method) : [method]
-        error("rolling_optimization: unbekanntes Verfahren $(_q(mv)); erlaubt: $(join(_METHODS, ", ")).")
+        error("portfolio_rolling: unbekanntes Verfahren $(_q(mv)); erlaubt: $(join(_METHODS, ", ")).")
     end
     dots = Dict{String,Any}(String(k) => v for (k, v) in kwargs)
     allowed = [a for a in _PO_FORMALS if !(a in ("x", "assets", "method", "frequency"))]
     bad = _unique([String(k) for (k, _) in kwargs if !(String(k) in allowed)])
-    isempty(bad) || error("rolling_optimization: unbekannte bzw. unbenannte Argumente für portfolio_optimize() in ...: $(_q(bad)).")
-    _has_date(x) || error("rolling_optimization: data.frame mit Spalte 'date' erwartet.")
+    isempty(bad) || error("portfolio_rolling: unbekannte bzw. unbenannte Argumente für portfolio_optimize() in ...: $(_q(bad)).")
+    _has_date(data) || error("portfolio_rolling: data.frame mit Spalte 'date' erwartet.")
     assets = assets isa AbstractString ? [String(assets)] : String[String(a) for a in assets]
-    miss = _setdiff(assets, names(x))
+    miss = _setdiff(assets, names(data))
     isempty(miss) || error("Spalten fehlen: " * join(miss, ", "))
     _opt_check_bounds(something(get(dots, "lower", nothing), 0), something(get(dots, "upper", nothing), 1), assets)
-    _opt_check_alpha(something(get(dots, "alpha", nothing), 0.05), "rolling_optimization")
+    _opt_check_alpha(something(get(dots, "alpha", nothing), 0.05), "portfolio_rolling")
     get(dots, "mu", nothing) === nothing || _opt_bounds(dots["mu"], assets, NA, "mu")
-    x = SimLev.Dependence._dep_sort_dates(x, "x")
-    d = SimLev.DataPrep._to_date(x["date"], "date")
+    data = SimLev.Dependence._dep_sort_dates(data, "data")
+    d = SimLev.DataPrep._to_date(data["date"], "date")
     n = length(d)
     N = length(assets)
     rows = SimLev.Tactical._period_last(d, every)
@@ -927,7 +927,7 @@ function rolling_optimization(x, assets; method = "min_variance", window = 3, ev
     for (k, i) in enumerate(rows)
         di = dv[i]
         sel = (dv .> di - wd) .& (dv .<= di)
-        sub0 = SimLev.rows(x, sel)
+        sub0 = SimLev.rows(data, sel)
         sub = RFrame(sub_cols, AbstractVector[sub0[c] for c in sub_cols])
         w = try
             _with_bounds_handler(_ -> false) do
@@ -947,7 +947,7 @@ function rolling_optimization(x, assets; method = "min_variance", window = 3, ev
     failed = findall(!=(""), msg)
     if !isempty(failed)
         f0 = failed[1]
-        _warn("rolling_optimization: Optimierung an $(length(failed)) von $(length(rows)) Terminen fehlgeschlagen " *
+        _warn("portfolio_rolling: Optimierung an $(length(failed)) von $(length(rows)) Terminen fehlgeschlagen " *
               "(erster am $(Dates.format(d[rows[f0]], "yyyy-mm-dd")): $(msg[f0])); dort Gleichgewichtung. Termine im Attribut 'failed_dates'.")
     end
     H = SimLev.Tactical._hold_rows_m(n, rows, M)
@@ -959,11 +959,11 @@ function rolling_optimization(x, assets; method = "min_variance", window = 3, ev
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# risk_contributions
+# portfolio_risk_contributions
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-    risk_contributions(x, weights; measure = "volatility", alpha = 0.05, frequency = "week",
+    portfolio_risk_contributions(x, weights; measure = "volatility", alpha = 0.05, frequency = "week",
                        cov = "sample")
 
 Risikobeiträge (Euler-Zerlegung) von Volatilität oder historischem CVaR.
@@ -972,12 +972,12 @@ Risikobeiträge (Euler-Zerlegung) von Volatilität oder historischem CVaR.
 `attrs` `total`, `measure`, `effective_n` und bei `"volatility"`
 `diversification_ratio`.
 """
-function risk_contributions(x, weights; measure = nothing, alpha = 0.05, frequency = nothing, cov = nothing)
+function portfolio_risk_contributions(x, weights; measure = nothing, alpha = 0.05, frequency = nothing, cov = nothing)
     x = SimLev.as_rframe(x)
     measure = _match_arg(measure, ["volatility", "cvar"])
     frequency = _match_arg(frequency, _FREQS)
     cov = _match_arg(cov, _COVS)
-    _opt_check_alpha(alpha, "risk_contributions")
+    _opt_check_alpha(alpha, "portfolio_risk_contributions")
     (weights isa RList && SimLev.inherits(weights, "SimLevOptimization")) && (weights = weights["weights"])
     wn, vals, isnum = _named_vec(weights)
     if !isnum || wn === nothing || any(==(""), wn) || any(_isna, vals)
@@ -1027,7 +1027,7 @@ function risk_contributions(x, weights; measure = nothing, alpha = 0.05, frequen
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# cpcv_portfolio
+# portfolio_cpcv
 # ═══════════════════════════════════════════════════════════════════════════
 
 "Alle Kombinationen von `k` aus 1:n in lexikographischer Reihenfolge (`utils::combn`)."
@@ -1062,7 +1062,7 @@ end
 _is_list(x) = x isa Union{RList,NamedTuple,AbstractDict} || (x isa AbstractVector && eltype(x) !== Char && !(eltype(x) <: Union{Real,AbstractString,Missing}))
 
 """
-    cpcv_portfolio(x; assets = nothing, methods = ["equal", "inverse_vol", "min_variance",
+    portfolio_cpcv(x; assets = nothing, methods = ["equal", "inverse_vol", "min_variance",
                    "risk_parity", "max_sharpe"], n_groups = 6, test_groups = 2, purge = 2,
                    embargo = 2, frequency = "week")
 
@@ -1072,7 +1072,7 @@ Prado 2018). `methods`: Zeichenvektor von Verfahren oder benannte Liste
 [`portfolio_optimize`](@ref). Ergebnis `RList` der Klasse `SimLevCPCV` mit
 `splits`, `summary`, `n_splits`, `n_groups`, `test_groups`, `frequency`, `failed`.
 """
-function cpcv_portfolio(x; assets = nothing, methods = ["equal", "inverse_vol", "min_variance", "risk_parity", "max_sharpe"],
+function portfolio_cpcv(x; assets = nothing, methods = ["equal", "inverse_vol", "min_variance", "risk_parity", "max_sharpe"],
                         n_groups = 6, test_groups = 2, purge = 2, embargo = 2, frequency = nothing)
     x = SimLev.as_rframe(x)
     frequency = _match_arg(frequency, _FREQS)
@@ -1084,10 +1084,10 @@ function cpcv_portfolio(x; assets = nothing, methods = ["equal", "inverse_vol", 
         _, vals, isnum = _named_vec(v)
         ok = isnum && length(vals) == 1 && !_isna(vals[1]) &&
              (f = Float64(vals[1]); isfinite(f) && f == Float64(SimLev.RFmt.r_round(f)) && f >= lo)
-        ok || error("cpcv_portfolio: $nm muss eine ganze Zahl >= $lo sein (erhalten: $(join(_fmt_vals(vals, isnum), ", "))).")
+        ok || error("portfolio_cpcv: $nm muss eine ganze Zahl >= $lo sein (erhalten: $(join(_fmt_vals(vals, isnum), ", "))).")
     end
     ng = Int(n_groups); tg = Int(test_groups); purge = Int(purge); embargo = Int(embargo)
-    tg >= ng && error("cpcv_portfolio: test_groups ($tg) muss kleiner als n_groups ($ng) sein, sonst bleibt keine Trainingsgruppe.")
+    tg >= ng && error("portfolio_cpcv: test_groups ($tg) muss kleiner als n_groups ($ng) sein, sonst bleibt keine Trainingsgruppe.")
     specs = if methods isa AbstractString
         Pair{String,Any}[String(methods) => RList("method" => String(methods))]
     elseif methods isa AbstractVector && !isempty(methods) && all(m -> m isa AbstractString, methods)
@@ -1095,7 +1095,7 @@ function cpcv_portfolio(x; assets = nothing, methods = ["equal", "inverse_vol", 
     else
         p = _as_pairs(methods)
         (p === nothing || isempty(p) || any(q -> q.first == "", p)) &&
-            error("cpcv_portfolio: methods muss ein Zeichenvektor oder eine benannte Liste von Argumentlisten sein.")
+            error("portfolio_cpcv: methods muss ein Zeichenvektor oder eine benannte Liste von Argumentlisten sein.")
         p
     end
     allowed_args = [a for a in _PO_FORMALS if !(a in ("x", "assets", "frequency"))]
@@ -1103,13 +1103,13 @@ function cpcv_portfolio(x; assets = nothing, methods = ["equal", "inverse_vol", 
     for (nm, sp) in specs
         sp_p = (sp isa AbstractVector && isempty(sp)) || (sp isa NamedTuple && isempty(sp)) ? Pair{String,Any}[] : _as_pairs(sp)
         (sp_p === nothing || any(q -> q.first == "", sp_p)) &&
-            error("cpcv_portfolio: Eintrag '$nm' von methods muss eine benannte Argumentliste sein.")
+            error("portfolio_cpcv: Eintrag '$nm' von methods muss eine benannte Argumentliste sein.")
         mi = findfirst(q -> q.first == "method", sp_p)
         if mi !== nothing && sp_p[mi].second !== nothing && !(sp_p[mi].second in _METHODS)
-            error("cpcv_portfolio: unbekanntes Verfahren '$(sp_p[mi].second)'; erlaubt: $(join(_METHODS, ", ")).")
+            error("portfolio_cpcv: unbekanntes Verfahren '$(sp_p[mi].second)'; erlaubt: $(join(_METHODS, ", ")).")
         end
         bad = _unique([q.first for q in sp_p if !(q.first in allowed_args)])
-        isempty(bad) || error("cpcv_portfolio: unbekannte Argumente für portfolio_optimize() in '$nm': $(_q(bad)).")
+        isempty(bad) || error("portfolio_cpcv: unbekannte Argumente für portfolio_optimize() in '$nm': $(_q(bad)).")
         push!(spec_pairs, sp_p)
     end
     grp = SimLev.RStats.cut(collect(1.0:Float64(Tn)), Float64(ng); labels = false)
@@ -1164,10 +1164,10 @@ function cpcv_portfolio(x; assets = nothing, methods = ["equal", "inverse_vol", 
     end
     fl = isempty(f_method) ? nothing : RFrame("method" => f_method, "split" => f_split, "message" => f_msg)
     if isempty(r_method)
-        error("cpcv_portfolio: keine Optimierung erfolgreich (z. B. '$(f_method[1])' in Aufteilung $(f_split[1]): $(f_msg[1])).")
+        error("portfolio_cpcv: keine Optimierung erfolgreich (z. B. '$(f_method[1])' in Aufteilung $(f_split[1]): $(f_msg[1])).")
     end
     if fl !== nothing
-        _warn("cpcv_portfolio: $(length(f_method)) von $(length(combos) * length(specs)) Optimierungen fehlgeschlagen " *
+        _warn("portfolio_cpcv: $(length(f_method)) von $(length(combos) * length(specs)) Optimierungen fehlgeschlagen " *
               "(z. B. '$(f_method[1])' in Aufteilung $(f_split[1]): $(f_msg[1])); sie fehlen in der Auswertung, Einzelheiten in \$failed.")
     end
     sp = RFrame("method" => r_method, "split" => r_split, "return" => r_ret, "volatility" => r_vol, "sharpe" => r_sh,

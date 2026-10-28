@@ -25,7 +25,7 @@ const _LLAYERS = Dict(
     "data_prep.jl" => 1, "backcast.jl" => 1, "bonds.jl" => 1, "signals_core.jl" => 1, "signals.jl" => 1,
     # 2 Engine
     "core.jl" => 2, "result.jl" => 2, "engine.jl" => 2, "sim_phases.jl" => 2, "sim_loop.jl" => 2,
-    "sim_evaluate.jl" => 2,
+    "sim_evaluate.jl" => 2, "sim_blocks.jl" => 2,   # Bausteine: Eingaben der Engine, übersetzt in deren Argumente
     # 3 Analysen (je eine Datei, Kerne bei ihrem Modul)
     "bootstrap_core.jl" => 3, "bootstrap.jl" => 3, "withdrawal_core.jl" => 3, "withdrawal.jl" => 3,
     "dependence_core.jl" => 3, "dependence.jl" => 3, "regimes.jl" => 3, "ms_garch.jl" => 3,
@@ -42,7 +42,7 @@ const _LLAYERS = Dict(
 const _LPLOT = "plot-Methode: die Grafikbausteine (_res_*/_ana_*/_grid_*/_alloc_*/_bc_*, _esc) " *
                "liegen in svg.jl (Schicht 4), die plot-Methoden beim Objekt"
 const _LKNOWN = Dict{Tuple{String,String},String}(
-    ("config.jl", "engine.jl") => "_to_date_or_nothing (asset_start) nutzt _as_date der Engine, in der Funktion",
+    ("config.jl", "engine.jl") => "_to_date_or_nothing (start) nutzt _as_date der Engine, in der Funktion",
     [("$f.jl", "svg.jl") => _LPLOT for f in ("backcast", "bootstrap", "withdrawal", "dependence", "regimes",
                                              "optimize", "tactical", "deep_analysis", "planning",
                                              "analysis_tests", "overfitting", "param_search", "sensitivity")]...,

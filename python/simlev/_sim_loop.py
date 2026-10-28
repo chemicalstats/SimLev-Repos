@@ -444,7 +444,7 @@ def _sim_day_dca(sim, time, active_assets, fl, cfg, strategy, balance_dca, detai
     flag_assets, flag_date = fl["flag_assets"], fl["flag_date"]
     t0 = time - 1
     dca_amount = cfg["dca_value"] * fl["flag_dca_n"][t0]
-    strat_w = np.array([float(strategy[nm]["asset_share"]) for nm in active_assets], dtype=np.float64)
+    strat_w = np.array([float(strategy[nm]["share"]) for nm in active_assets], dtype=np.float64)
     strat_w = strat_w / r_sum(strat_w, na_rm=True)
     if balance_dca and len(active_assets) > 1:
         core.calculate_total_report(sim, flag_assets, time)

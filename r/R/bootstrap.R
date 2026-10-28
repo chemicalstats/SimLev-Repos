@@ -9,7 +9,7 @@
 #    bootstrap_study()    erzeugt Pfade, berechnet Signale, simuliert
 #                         Strategien mit simulation() und behaelt nur Kennzahlen
 #                         (streamend, parallel, fortsetzbar)
-#    block_length()       automatische Blocklaenge (Politis & White 2004,
+#    bootstrap_block_length()       automatische Blocklaenge (Politis & White 2004,
 #                         Korrektur Patton, Politis & White 2009)
 #
 #  Verfahren: raw, block, circular, stationary, wild, regime, evt, tails,
@@ -167,7 +167,7 @@
 #' cfg3 <- bootstrap_config(c(us = "us_ret"), aux = c(cpi = "us_cpi", zins = "us_rate"),
 #'   aux_type = c(cpi = "level", zins = "rate"))
 #' cfg3$aux_type
-#' @seealso [bootstrap()], [bootstrap_study()], [block_length()]
+#' @seealso [bootstrap()], [bootstrap_study()], [bootstrap_block_length()]
 #' @export
 bootstrap_config <- function(indices, letfs = list(), regime_index = NULL, aux = NULL, aux_type = NULL,
                              cross = c("ratio", "joint"), input = c("returns", "prices")) {
@@ -407,11 +407,11 @@ print.bootstrap_config <- function(x, ...) {
 #'   Patton, A., Politis, D.N. & White, H. (2009), Econometric Reviews 28(4).
 #' @examples
 #' set.seed(1); x <- arima.sim(list(ar = 0.5), 2000)
-#' block_length(x)
-#' block_length(x, transform = "abs")
+#' bootstrap_block_length(x)
+#' bootstrap_block_length(x, transform = "abs")
 #' @seealso [bootstrap()], [bootstrap_study()]
 #' @export
-block_length <- function(x, transform = c("none", "abs", "squared")) {
+bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   transform <- match.arg(transform)
   x <- as.matrix(x)
   res <- t(apply(x, 2, function(v) {
@@ -464,7 +464,7 @@ block_length <- function(x, transform = c("none", "abs", "squared")) {
   for (nm in c("L", "block_length")) if (identical(params[[nm]], "auto")) {
     base <- which(config$index_names == config$regime_index)
     lr <- log(returns)
-    b <- rbind(block_length(lr), block_length(lr, "abs"))
+    b <- rbind(bootstrap_block_length(lr), bootstrap_block_length(lr, "abs"))
     col <- if (nm == "L") "stationary" else "circular"
     params[[nm]] <- max(1, round(max(b[, col])))
     message(sprintf("Automatische Blockl\u00e4nge (%s, Politis-White, max. \u00fcber Reihen und |r|): %d", nm, params[[nm]]))
@@ -996,12 +996,12 @@ block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   verwendet:
 #'   \describe{
 #'     \item{L}{Erwartete Blocklaenge in Zeilen fuer "stationary" (Zahl >= 1,
-#'       Standard 20) oder \code{"auto"} ([block_length()], Spalte
+#'       Standard 20) oder \code{"auto"} ([bootstrap_block_length()], Spalte
 #'       \code{stationary}).}
 #'     \item{block_length}{Feste Blocklaenge in Zeilen fuer "block" und
 #'       "circular" (ganze Zahl, Standard 20; bei "block" hoechstens Zeilen der
 #'       Historie minus 1, bei "circular" hoechstens Zeilen der Historie) oder
-#'       \code{"auto"} ([block_length()], Spalte \code{circular}).}
+#'       \code{"auto"} ([bootstrap_block_length()], Spalte \code{circular}).}
 #'     \item{wild_type}{Gewichte beim Wild Bootstrap: 0 = Rademacher
 #'       (Standard), 1 = Mammen, 2 = Standardnormal; andere Werte sind ein
 #'       Fehler.}
@@ -1121,8 +1121,8 @@ block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   letfs = list(list(base = "akt", leverage = 2, finance = 3, expense = 0.6)))
 #' b2 <- bootstrap(p, cfg2, "block", n = 3, params = list(block_length = 30),
 #'   path_length = 500, seed = 7, progress = FALSE)
-#' x <- bootstrap_data(b2, 1, start_date = "2030-01-01")
-#' res <- simulation(x, create_strategy(akt_l2 = asset_config("etf", "bnh", asset_bonus = 30)))
+#' x <- bootstrap_data(b2, 1, start = "2030-01-01")
+#' res <- simulation(x, create_strategy(akt_l2 = asset_config("etf", "bnh", partial_exemption = 30)))
 #' res$cagr
 #'
 #' # CPI als Niveau, Zins als Rate: der Pfad enthaelt den kumulierten CPI
@@ -1141,8 +1141,8 @@ block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   [withdrawal_paths()]
 #' @export
 bootstrap <- function(data, config, method = "raw", n = 1000, params = list(), ess = FALSE,
-                      ess_grid = NULL, progress = TRUE, path_length = NULL, seed = NULL,
-                      cores = 1L, max_tries = 10L) {
+                      ess_grid = NULL, path_length = NULL, max_tries = 10L, seed = NULL,
+                      cores = 1L, progress = TRUE) {
   t0 <- Sys.time()
   setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
   if (is.null(seed)) seed <- sample.int(.Machine$integer.max, 1L)
@@ -1199,11 +1199,11 @@ print.bootstrap_result <- function(x, ...) {
 #' b <- bootstrap(d, bootstrap_config(c(idx = "r")), "stationary", n = 3,
 #'   params = list(L = 20), seed = 1, progress = FALSE)
 #' b$paths[[2]][10, 1] <- NA      # einen Pfad beschaedigen
-#' b <- validate_bootstrap(b)
+#' b <- bootstrap_validate(b)
 #' length(b$paths)
 #' @seealso [bootstrap()], [bootstrap_data()]
 #' @export
-validate_bootstrap <- function(result, min_rows = NULL, verbose = TRUE) {
+bootstrap_validate <- function(result, min_rows = NULL, verbose = TRUE) {
   if (!inherits(result, "bootstrap_result")) stop("result muss ein bootstrap_result-Objekt sein")
   if (!length(result$paths)) stop("Keine Pfade im Ergebnis vorhanden")
   P <- result$paths
@@ -1237,8 +1237,8 @@ validate_bootstrap <- function(result, min_rows = NULL, verbose = TRUE) {
 #' @param dates Datumsvektor mit genau so vielen Elementen wie der Pfad Zeilen
 #'   hat (\code{path_length + 1}), z. B. ein Handelstagskalender;
 #'   \code{NULL} (Standard) = aufeinanderfolgende Kalendertage ab
-#'   \code{start_date}.
-#' @param start_date Startdatum fuer \code{dates = NULL} (Zeichenkette oder
+#'   \code{start}.
+#' @param start Startdatum fuer \code{dates = NULL} (Zeichenkette oder
 #'   Date, Standard "2000-01-01").
 #' @return data.frame mit Spalte \code{date} (Klasse Date) und allen
 #'   Pfadspalten (Kursniveaus mit Startwert 100; Zusatzreihen mit
@@ -1260,15 +1260,15 @@ validate_bootstrap <- function(result, min_rows = NULL, verbose = TRUE) {
 #' cfg <- bootstrap_config(c(idx = "r"), letfs = list(list(base = "idx", leverage = 2)))
 #' b <- bootstrap(d, cfg, "stationary", n = 2, params = list(L = 20),
 #'   path_length = 400, seed = 1, progress = FALSE)
-#' x <- bootstrap_data(b, i = 2, start_date = "2030-01-01")
+#' x <- bootstrap_data(b, i = 2, start = "2030-01-01")
 #' head(x, 3)
 #' res <- simulation(x, create_strategy(idx_l2 = asset_config("etf", "bnh")))
 #' res$cagr
 #' @seealso [bootstrap()], [simulation()], [bootstrap_study()]
 #' @export
-bootstrap_data <- function(result, i = 1L, dates = NULL, start_date = "2000-01-01") {
+bootstrap_data <- function(result, i = 1L, dates = NULL, start = "2000-01-01") {
   P <- if (inherits(result, "bootstrap_result")) result$paths[[i]] else result
-  if (is.null(dates)) dates <- seq.Date(.to_date(start_date, "start_date"), by = "day", length.out = nrow(P))
+  if (is.null(dates)) dates <- seq.Date(.to_date(start, "start"), by = "day", length.out = nrow(P))
   if (length(dates) != nrow(P)) stop(sprintf("dates hat L\u00e4nge %d, Pfad hat %d Zeilen.", length(dates), nrow(P)))
   out <- data.frame(date = .to_date(dates, "dates"), as.data.frame(P), check.names = FALSE)
   # ausdruecklich als "rate" gekennzeichnete Reihen mitgeben (fuer withdrawal_cohorts); sonst kein Attribut
@@ -1279,15 +1279,15 @@ bootstrap_data <- function(result, i = 1L, dates = NULL, start_date = "2000-01-0
 }
 
 # Kennzahlen, bei denen ein kleinerer Wert guenstiger ist (Drawdowns); verwendet von
-# summary() einer bootstrap_study() (p_better) und plateau() (unguenstigster Nachbar)
+# summary() einer bootstrap_study() (p_better) und param_plateau() (unguenstigster Nachbar)
 .lower_better <- c("max_drawdown", "avg_drawdown", "dd_q50", "dd_q90", "ulcer_index", "longest_drawdown")
 
 #' Standard-Kennzahlen fuer bootstrap_study()
 #'
 #' Fasst ein Ergebnis von [simulation()] zu einem benannten Kennzahlenvektor
 #' zusammen. Standardwert des Arguments \code{metrics} von
-#' [bootstrap_study()], [sensitivity_grid()], [rebalancing_sensitivity()] und
-#' [leverage_sensitivity()]; eigene Kennzahlfunktionen muessen ebenfalls ein
+#' [bootstrap_study()], [sensitivity_grid()], [sensitivity_rebalancing()] und
+#' [sensitivity_leverage()]; eigene Kennzahlfunktionen muessen ebenfalls ein
 #' \code{SimLevResult} entgegennehmen und einen benannten numerischen Vektor
 #' liefern.
 #'
@@ -1318,10 +1318,10 @@ bootstrap_data <- function(result, i = 1L, dates = NULL, start_date = "2000-01-0
 #' d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
 #' d$aktien <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
 #' res <- simulation(d, create_strategy(aktien = asset_config("etf", "bnh")))
-#' round(study_metrics(res), 4)
+#' round(bootstrap_study_metrics(res), 4)
 #' @seealso [bootstrap_study()], [sensitivity_grid()], [simulation()]
 #' @export
-study_metrics <- function(res) {
+bootstrap_study_metrics <- function(res) {
   s <- res$statistics
   dq <- stats::quantile(res$drawdowns, c(0.5, 0.9), names = FALSE)
   c(cagr = res$cagr, ttwror = res$ttwror, final_value = utils::tail(res$worth, 1),
@@ -1379,15 +1379,15 @@ study_metrics <- function(res) {
 #' @param sim_args Benannte Liste gemeinsamer Argumente fuer [simulation()]
 #'   (Standard \code{list()}), z. B. \code{list(start_value = 1000,
 #'   tax_mode = "person")}.
-#' @param dates,start_date Kalender der Pfade: \code{dates} ist ein
+#' @param dates,start Kalender der Pfade: \code{dates} ist ein
 #'   Datumsvektor der Laenge \code{path_length + 1}; \code{NULL} (Standard) =
-#'   aufeinanderfolgende Kalendertage ab \code{start_date} (Standard
+#'   aufeinanderfolgende Kalendertage ab \code{start} (Standard
 #'   "2000-01-01"), siehe [bootstrap_data()].
 #' @param burn_in Anzahl Anfangszeilen des Pfads, die nach der
 #'   Signalberechnung verworfen werden (Signal-Vorlauf, z. B. 730 Tage fuer
 #'   eine 430-Tage-SMA; Standard 0). Muss kleiner als \code{path_length} sein.
 #' @param metrics Funktion \code{SimLevResult -> benannter numerischer Vektor}
-#'   (Standard [study_metrics()]); die Namen werden zu Spalten von
+#'   (Standard [bootstrap_study_metrics()]); die Namen werden zu Spalten von
 #'   \code{results}.
 #' @param benchmark Name einer Strategie aus \code{strategies} als Vergleich
 #'   fuer die gepaarte Auswertung in \code{summary()}; \code{NULL} (Standard)
@@ -1438,7 +1438,7 @@ study_metrics <- function(res) {
 #'       \code{strategy}, \code{path} (Pfadnummer), \code{weight}
 #'       (Pfadgewicht), \code{combo} (ESS-Kombination), \code{tries}
 #'       (Versuche) und den Kennzahlen aus \code{metrics} (bei
-#'       [study_metrics()] z. B. \code{cagr} und \code{max_drawdown} als Anteil).}
+#'       [bootstrap_study_metrics()] z. B. \code{cagr} und \code{max_drawdown} als Anteil).}
 #'     \item{method, n_paths, strategies, benchmark, config, params, seed,
 #'       burn_in, path_length, elapsed}{Metadaten (\code{elapsed} in Sekunden).}
 #'     \item{ess_design, path_weights}{ESS-Design (oder \code{NULL}) und
@@ -1474,9 +1474,9 @@ study_metrics <- function(res) {
 #'   path_length = 2 * 365 + 100, burn_in = 100, cores = 1, seed = 1,
 #'   progress = FALSE, benchmark = "bnh", keep_returns = "year",
 #'   strategies = list(
-#'     bnh = create_strategy(akt_l2 = asset_config("etf", "bnh", asset_bonus = 30)),
+#'     bnh = create_strategy(akt_l2 = asset_config("etf", "bnh", partial_exemption = 30)),
 #'     sma = list(strategy = create_strategy(akt_l2 = asset_config("etf", "signal",
-#'                  asset_bonus = 30, signal_buy = "buy", signal_sell = "sell")),
+#'                  partial_exemption = 30, signal_buy = "buy", signal_sell = "sell")),
 #'                signal = sma)))
 #' st$results[, c("strategy", "path", "cagr", "max_drawdown")]
 #' bootstrap_probability(st, cagr > 0, joint = cagr > 0 & max_drawdown <= 0.5)
@@ -1494,9 +1494,9 @@ study_metrics <- function(res) {
 #' }
 #' st <- bootstrap_study(hist, cfg, "stationary", n = 1000, params = list(L = 250),
 #'   strategies = list(
-#'     bnh = create_strategy(eu_l2 = asset_config("etf", "bnh", asset_bonus = 30)),
+#'     bnh = create_strategy(eu_l2 = asset_config("etf", "bnh", partial_exemption = 30)),
 #'     sma = list(strategy = create_strategy(eu_l2 = asset_config("etf", "signal",
-#'                  asset_bonus = 30, signal_buy = "buy", signal_sell = "sell")),
+#'                  partial_exemption = 30, signal_buy = "buy", signal_sell = "sell")),
 #'                signal = sma_signal)),
 #'   sim_args = list(start_value = 1000, tax_mode = "person"),
 #'   burn_in = 730, benchmark = "bnh", cores = 8, seed = 42)
@@ -1512,12 +1512,11 @@ study_metrics <- function(res) {
 #' @export
 bootstrap_study <- function(data, config, method = "stationary", n = 1000, strategies,
                             params = list(), ess = FALSE, ess_grid = NULL, path_length = NULL,
-                            dates = NULL, start_date = "2000-01-01", burn_in = 0L,
-                            sim_args = list(), metrics = study_metrics, benchmark = NULL,
-                            cores = 1L, chunk_size = 25L, seed = NULL, chunk_dir = NULL,
-                            max_tries = 10L, keep_paths = 0L,
+                            dates = NULL, start = "2000-01-01", burn_in = 0L,
+                            sim_args = list(), metrics = bootstrap_study_metrics, benchmark = NULL,
+                            chunk_dir = NULL, keep_paths = 0L,
                             keep_returns = c("none", "year", "quarter", "month"), keep_aux = NULL,
-                            progress = TRUE) {
+                            max_tries = 10L, chunk_size = 25L, seed = NULL, cores = 1L, progress = TRUE) {
   keep_returns <- match.arg(keep_returns)
   if (!is.null(keep_aux) && !all(keep_aux %in% config$aux_names))
     stop("keep_aux muss Namen aus config$aux enthalten.")
@@ -1528,8 +1527,11 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
     if (is.list(s) && !is.null(s$strategy) && !inherits(s, "strategy")) s else list(strategy = s)
   })
   if (!is.null(benchmark) && !benchmark %in% names(specs)) stop("benchmark muss einer der Strategienamen sein.")
+  # Argumente fuer simulation() je Strategie einmal aufloesen (Bausteine, Pfade; alte flache Namen: Fehler)
+  sim_args <- .sim_args_set(list(), sim_args, "bootstrap_study")
+  for (nm in names(specs)) specs[[nm]]$sim <- .sim_args_set(sim_args, specs[[nm]]$args, "bootstrap_study")
   setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
-  if (is.null(dates)) dates <- seq.Date(.to_date(start_date, "start_date"), by = "day", length.out = setup$n_out + 1L)
+  if (is.null(dates)) dates <- seq.Date(.to_date(start, "start"), by = "day", length.out = setup$n_out + 1L)
   if (length(dates) != setup$n_out + 1L) stop(sprintf("dates braucht L\u00e4nge %d (Pfadl\u00e4nge + 1).", setup$n_out + 1L))
   dates <- .to_date(dates, "dates")
   if (burn_in >= setup$n_out) stop("burn_in ist l\u00e4nger als der Pfad.")
@@ -1569,9 +1571,7 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
       }
       if (!is.null(sp$map)) for (a in names(sp$map)) df[[a]] <- df[[sp$map[[a]]]]
       if (burn_in > 0) df <- df[(burn_in + 1L):nrow(df), , drop = FALSE]
-      args <- utils::modifyList(sim_args, sp$args %||% list())
-      res <- tryCatch(suppressMessages(catch_w(
-        do.call(simulation, c(list(data = df, strategy = sp$strategy), args)))), error = function(e) e)
+      res <- tryCatch(suppressMessages(catch_w(.sim_call(df, sp$strategy, sp$sim))), error = function(e) e)
       if (inherits(res, "error")) return(fail("Simulation", conditionMessage(res)))
       m <- tryCatch(catch_w(metrics(res)), error = function(e) e)
       if (inherits(m, "error")) return(fail("Kennzahlen", conditionMessage(m)))
@@ -1712,7 +1712,7 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
 #'
 #' Die Bedingungen werden zeilenweise in \code{study$results} ausgewertet;
 #' verwendbar sind dort alle Spalten, also die Kennzahlen aus \code{metrics}
-#' (bei [study_metrics()] z. B. \code{cagr}, \code{ttwror},
+#' (bei [bootstrap_study_metrics()] z. B. \code{cagr}, \code{ttwror},
 #' \code{max_drawdown} als Anteil) sowie \code{path}, \code{weight},
 #' \code{combo} und \code{tries}. Zeilen mit \code{NA}-Ergebnis zaehlen nicht.
 #' Freie Variablen in den Bedingungen (z. B. eine Schwelle \code{thr}) werden
@@ -1748,7 +1748,7 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
 #' bootstrap_probability(st, cagr > 0, joint = cagr > 0.05 & max_drawdown <= 0.3)
 #' bootstrap_probability(st, cagr > 0,
 #'   thresholds = list(letf = list(ziel = quote(cagr > 0.10))))
-#' @seealso [bootstrap_study()], [study_metrics()]
+#' @seealso [bootstrap_study()], [bootstrap_study_metrics()]
 #' @export
 bootstrap_probability <- function(study, ..., thresholds = NULL) {
   if (!inherits(study, "SimLevBootstrapStudy")) stop("study muss ein SimLevBootstrapStudy-Objekt sein.")
@@ -1812,7 +1812,7 @@ bootstrap_probability <- function(study, ..., thresholds = NULL) {
 #'   der Differenz Strategie minus Benchmark; \code{NULL} ohne Benchmark),
 #'   \code{n_paths}, \code{method}, \code{benchmark} und \code{path_length}.
 #'   Kennzahlen behalten die Einheit aus \code{metrics} (bei
-#'   [study_metrics()] z. B. CAGR als Anteil; die Ausgabe zeigt Prozent).
+#'   [bootstrap_study_metrics()] z. B. CAGR als Anteil; die Ausgabe zeigt Prozent).
 #'   Mit Sparplan ist \code{cagr} geldgewichtet (XIRR); die Ausgabe
 #'   kennzeichnet das in der Ueberschrift der Kennzahl.
 #' @name SimLevBootstrap-methods

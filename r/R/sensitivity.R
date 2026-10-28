@@ -2,10 +2,10 @@
 #  sensitivity.R  —  Parameterstudien um simulation()
 # -----------------------------------------------------------------------------
 #  sensitivity_grid()         beliebige simulation()-Argumente im Raster
-#  rebalancing_sensitivity()  Rebalancing-Frequenz, Versatz und Baender
-#  lumpsum_vs_dca()           Einmalanlage gegen gestreckten Einstieg
-#  leveraged_series()         Hebelreihe aus einem Index (MSCI-Formel)
-#  leverage_sensitivity()     Kennzahlen ueber den Hebel, optimaler Hebel
+#  sensitivity_rebalancing()  Rebalancing-Frequenz, Versatz und Baender
+#  planning_lumpsum_vs_dca()           Einmalanlage gegen gestreckten Einstieg
+#  series_leverage()         Hebelreihe aus einem Index (MSCI-Formel)
+#  sensitivity_leverage()     Kennzahlen ueber den Hebel, optimaler Hebel
 # =============================================================================
 
 #' simulation() ueber ein Parameterraster
@@ -13,7 +13,7 @@
 #' Ruft [simulation()] fuer jede Kombination von \code{grid} auf denselben
 #' Daten und derselben Strategie auf und sammelt die Kennzahlen in einem
 #' data.frame (eine Zeile je Lauf). Grundlage der speziellen Studien in
-#' diesem Abschnitt ([rebalancing_sensitivity()], [leverage_sensitivity()]).
+#' diesem Abschnitt ([sensitivity_rebalancing()], [sensitivity_leverage()]).
 #'
 #' @param data,strategy Wie in [simulation()]: data.frame mit Spalte
 #'   \code{date} und Kursspalten (Niveaus) bzw. Strategie aus
@@ -27,12 +27,12 @@
 #' @param sim_args Benannte Liste gemeinsamer Argumente fuer alle Laeufe
 #'   (Standard \code{list()}); Werte aus \code{grid} haben Vorrang.
 #' @param metrics Funktion \code{SimLevResult -> benannter numerischer Vektor}
-#'   (Standard [study_metrics()]).
+#'   (Standard [bootstrap_study_metrics()]).
 #' @param cores Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
 #' @param keep_results Logisch (Standard \code{FALSE}): Ergebnisse der Laeufe
 #'   zusaetzlich als Attribut \code{results} zurueckgeben.
 #' @return data.frame: Rasterspalten (Listen-Spalten als Text "a/b"), die
-#'   Kennzahlen aus \code{metrics} (bei [study_metrics()] z. B. \code{cagr}
+#'   Kennzahlen aus \code{metrics} (bei [bootstrap_study_metrics()] z. B. \code{cagr}
 #'   als Anteil; mit Sparplan geldgewichtet, XIRR) und, falls ein Lauf
 #'   fehlschlug, eine Spalte \code{error} (Fehlermeldung, Kennzahlen dann \code{NA}); schlagen alle Laeufe fehl,
 #'   ein Fehler mit den Meldungen der Laeufe. Bei
@@ -45,18 +45,19 @@
 #' st <- create_strategy(A = asset_config("etf", "bnh", 0.6), B = asset_config("etf", "bnh", 0.4))
 #' sensitivity_grid(d, st, list(balance_unit = c("month", "year")),
 #'                  sim_args = list(balance_mode = TRUE, balance_span = 1))[, c("balance_unit", "cagr", "trades")]
-#' @seealso [rebalancing_sensitivity()], [leverage_sensitivity()],
-#'   [study_metrics()], [simulation()]
+#' @seealso [sensitivity_rebalancing()], [sensitivity_leverage()],
+#'   [bootstrap_study_metrics()], [simulation()]
 #' @export
-sensitivity_grid <- function(data, strategy, grid, sim_args = list(), metrics = study_metrics,
-                             cores = 1L, keep_results = FALSE) {
+sensitivity_grid <- function(data, strategy, grid, sim_args = list(), metrics = bootstrap_study_metrics,
+                             keep_results = FALSE, cores = 1L) {
   design <- if (is.data.frame(grid)) grid else expand.grid(grid, stringsAsFactors = FALSE, KEEP.OUT.ATTRS = FALSE)
   if (!nrow(design)) stop("Leeres Raster.")
+  .sim_check_names(names(design), "sensitivity_grid")   # Argumente von simulation() bzw. Pfade wie "dca.value"
+  sim_args <- .sim_args_set(list(), sim_args, "sensitivity_grid")
   run <- function(i) {
     a <- lapply(design[i, , drop = FALSE], function(v) if (is.list(v)) v[[1]] else v)
     a <- a[!vapply(a, function(v) length(v) == 1L && is.atomic(v) && is.na(v), TRUE)]   # NA = Argument weglassen
-    args <- utils::modifyList(sim_args, a)
-    res <- tryCatch(suppressWarnings(suppressMessages(do.call(simulation, c(list(data = data, strategy = strategy), args)))),
+    res <- tryCatch(suppressWarnings(suppressMessages(.sim_call(data, strategy, .sim_args_set(sim_args, a, "sensitivity_grid")))),
                     error = function(e) e)
     if (inherits(res, "error")) return(list(m = NULL, err = conditionMessage(res), res = NULL))
     list(m = metrics(res), err = NA_character_, res = if (keep_results) res else NULL)
@@ -121,44 +122,44 @@ sensitivity_grid <- function(data, strategy, grid, sim_args = list(), metrics = 
 #' d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = 1500))
 #' d$A <- 100 * cumprod(1 + rnorm(1500, 3e-4, 0.01)); d$B <- 100 * cumprod(1 + rnorm(1500, 1e-4, 0.004))
 #' st <- create_strategy(A = asset_config("etf", "bnh", 0.6), B = asset_config("etf", "bnh", 0.4))
-#' rebalancing_sensitivity(d, st,
+#' sensitivity_rebalancing(d, st,
 #'   frequencies = list(monthly = c("month", 1), yearly = c("year", 1)), bands = c(NA, 5))
-#' rebalancing_sensitivity(d, st, frequencies = list(quarterly = c("quarter", 1)),
+#' sensitivity_rebalancing(d, st, frequencies = list(quarterly = c("quarter", 1)),
 #'   offsets = c(0, 5), include_none = FALSE)
 #' @seealso [sensitivity_grid()], [simulation()]
 #' @export
-rebalancing_sensitivity <- function(data, strategy,
+sensitivity_rebalancing <- function(data, strategy,
                                     frequencies = list(monthly = c("month", 1), bimonthly = c("month", 2),
                                                        quarterly = c("quarter", 1), four_monthly = c("month", 4),
                                                        semiannual = c("month", 6), yearly = c("year", 1)),
                                     offsets = NULL, bands = NA, band_type = c("absolute", "relative"),
-                                    include_none = TRUE, sim_args = list(), metrics = study_metrics, cores = 1L) {
+                                    include_none = TRUE, sim_args = list(), metrics = bootstrap_study_metrics, cores = 1L) {
   band_type <- match.arg(band_type)
+  sim_args <- .sim_args_set(list(), sim_args, "sensitivity_rebalancing")
   rows <- list()
   for (fn in names(frequencies)) {
     f <- frequencies[[fn]]
     for (off in (if (is.null(offsets)) NA else offsets)) for (b in bands) {
-      a <- list(balance_mode = TRUE, balance_unit = f[[1]], balance_span = as.numeric(f[[2]]),
-                balance_thresh_type = band_type)
-      if (!is.na(off)) { a$balance_anchor <- "end"; a$balance_days <- off + 1 }
-      if (!is.na(b)) a$balance_thresh <- b
+      # Rebalancing ueber Pfade: weitere Angaben eines rebalance_plan() aus sim_args bleiben erhalten
+      a <- list(rebalance.unit = f[[1]], rebalance.span = as.numeric(f[[2]]), rebalance.thresh_type = band_type)
+      if (!is.na(off)) { a$rebalance.anchor <- "end"; a$rebalance.days <- off + 1 }
+      if (!is.na(b)) a$rebalance.thresh <- b
       rows[[length(rows) + 1L]] <- list(label = data.frame(frequency = fn, offset = off, band = b, band_type = band_type),
                                          args = a)
     }
   }
   if (include_none) rows[[length(rows) + 1L]] <- list(label = data.frame(frequency = "none", offset = NA, band = NA, band_type = NA),
-                                                      args = list(balance_mode = FALSE))
+                                                      args = list(rebalance = NULL))
   run <- function(i) {
-    args <- utils::modifyList(sim_args, rows[[i]]$args)
-    res <- tryCatch(suppressWarnings(suppressMessages(do.call(simulation, c(list(data = data, strategy = strategy), args)))),
-                    error = function(e) e)
+    res <- tryCatch(suppressWarnings(suppressMessages(
+      .sim_call(data, strategy, .sim_args_set(sim_args, rows[[i]]$args, "sensitivity_rebalancing")))), error = function(e) e)
     if (inherits(res, "error")) return(conditionMessage(res))
     metrics(res)
   }
   out <- .par_lapply(seq_along(rows), run, cores)
   ok <- !vapply(out, is.character, TRUE)
   if (!any(ok)) { err <- table(unlist(out))
-    stop(sprintf("rebalancing_sensitivity: Alle %d L\u00e4ufe fehlgeschlagen: %s", length(out),
+    stop(sprintf("sensitivity_rebalancing: Alle %d L\u00e4ufe fehlgeschlagen: %s", length(out),
                  paste(sprintf("%s (%d x)", names(err), as.integer(err)), collapse = "; ")), call. = FALSE) }
   M <- do.call(rbind, out[ok])
   tab <- data.frame(do.call(rbind, lapply(rows[ok], `[[`, "label")), M, check.names = FALSE, stringsAsFactors = FALSE)
@@ -223,21 +224,23 @@ rebalancing_sensitivity <- function(data, strategy,
 #' set.seed(1); n <- 6 * 365
 #' d <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = n))
 #' d$ETF <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
-#' ld <- lumpsum_vs_dca(d, create_strategy(ETF = asset_config("etf", "bnh")),
+#' ld <- planning_lumpsum_vs_dca(d, create_strategy(ETF = asset_config("etf", "bnh")),
 #'   amount = 12000, months = 12, horizon = 3, step = 6)
 #' ld
 #' attr(ld, "summary")
 #' @seealso [simulation()], [sensitivity_grid()]
 #' @export
-lumpsum_vs_dca <- function(data, strategy, amount = 10000, months = 12, horizon = 10, step = 1,
+planning_lumpsum_vs_dca <- function(data, strategy, amount = 10000, months = 12, horizon = 10, step = 1,
                            sim_args = list(), cores = 1L) {
-  own <- intersect(names(sim_args), c("start_value", "dca_mode", "dca_value", "dca_span", "dca_unit", "dca_skip"))
-  if (length(own)) stop(sprintf("lumpsum_vs_dca setzt %s selbst; aus sim_args entfernen (Betrag \u00fcber amount, Raten \u00fcber months).",
+  nm <- names(sim_args) %||% character(0)
+  own <- nm[nm %in% c("start_value", "dca", "dca_mode", "dca_value", "dca_span", "dca_unit", "dca_skip") | startsWith(nm, "dca.")]
+  if (length(own)) stop(sprintf("planning_lumpsum_vs_dca setzt %s selbst; aus sim_args entfernen (Betrag \u00fcber amount, Raten \u00fcber months).",
                                 paste(own, collapse = ", ")))
-  data$date <- .to_date(data$date, "lumpsum_vs_dca: data$date")
+  sim_args <- .sim_args_set(list(), sim_args, "planning_lumpsum_vs_dca")
+  data$date <- .to_date(data$date, "planning_lumpsum_vs_dca: data$date")
   data <- data[order(data$date), , drop = FALSE]
   d <- data$date
-  if (isTRUE(sim_args$tax_mode == "person"))
+  if (!is.null(sim_args$tax) && is.null(sim_args$funds))
     warning("Mit Steuern ist die Fortschreibung des DCA-Depots nach der Einstiegsphase eine N\u00e4herung (Index der Einmalanlage).")
   firsts <- d[format(d, "%d") == "01"]
   last_ok <- seq.Date(max(d), by = paste0("-", horizon, " years"), length.out = 2)[2]
@@ -248,11 +251,10 @@ lumpsum_vs_dca <- function(data, strategy, amount = 10000, months = 12, horizon 
     e <- seq.Date(s, by = paste(horizon, "years"), length.out = 2)[2] - 1
     e_dca <- seq.Date(s, by = paste(months, "months"), length.out = 2)[2] - 1
     w <- data[d >= s & d <= e, , drop = FALSE]
-    ls <- suppressWarnings(suppressMessages(do.call(simulation, c(list(data = w, strategy = strategy, start_value = amount), sim_args))))
+    ls <- suppressWarnings(suppressMessages(.sim_call(w, strategy, c(list(start_value = amount), sim_args))))
     wd <- data[d >= s & d <= e_dca, , drop = FALSE]
-    dca <- suppressWarnings(suppressMessages(do.call(simulation, c(list(data = wd, strategy = strategy,
-              start_value = amount / months, dca_mode = TRUE, dca_value = amount / months, dca_span = 1,
-              dca_unit = "month", dca_skip = TRUE), sim_args))))
+    dca <- suppressWarnings(suppressMessages(.sim_call(wd, strategy, c(list(start_value = amount / months,
+              dca = dca_plan(value = amount / months, span = 1, unit = "month", skip = TRUE)), sim_args))))
     ix <- result_index(ls)
     k <- match(max(wd$date), ix$date)
     # Kurse der Assets an den Ergebnistagen (letzter Datenwert bis zum Tag), Stueck = Wert / Kurs
@@ -327,12 +329,12 @@ print.SimLevLumpSum <- function(x, ...) {
 #' x <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = 1500))
 #' x$idx <- 100 * cumprod(1 + rnorm(1500, 3e-4, 0.01))
 #' x$zins <- 2                                    # Prozent p. a.
-#' x$l2 <- leveraged_series(x, "idx", leverage = 2, rate = "zins", expense = 0.6, spread = 0.3)
-#' x$short <- leveraged_series(x, "idx", leverage = -1, rate = "zins", expense = 0.6)
+#' x$l2 <- series_leverage(x, "idx", leverage = 2, rate = "zins", expense = 0.6, spread = 0.3)
+#' x$short <- series_leverage(x, "idx", leverage = -1, rate = "zins", expense = 0.6)
 #' tail(x, 2)
-#' @seealso [leverage_sensitivity()], [backcast_fit()], [bootstrap_config()]
+#' @seealso [sensitivity_leverage()], [backcast_fit()], [bootstrap_config()]
 #' @export
-leveraged_series <- function(data, index, leverage = 2, rate = 0, expense = 0, spread = 0, start = 100) {
+series_leverage <- function(data, index, leverage = 2, rate = 0, expense = 0, spread = 0, start = 100) {
   idx <- .fill_na(as.numeric(data[[index]]), "locf")
   dd <- c(1, as.numeric(diff(.to_date(data$date, "data$date"))))
   x <- c(0, idx[-1] / idx[-length(idx)] - 1)
@@ -349,18 +351,18 @@ leveraged_series <- function(data, index, leverage = 2, rate = 0, expense = 0, s
 
 #' Kennzahlen ueber den Hebel
 #'
-#' Erzeugt fuer jeden Hebel eine Reihe mit [leveraged_series()], simuliert
+#' Erzeugt fuer jeden Hebel eine Reihe mit [series_leverage()], simuliert
 #' sie als Buy-and-Hold (oder mit einer eigenen Strategie fuer das Asset
 #' \code{"LEV"}) und bestimmt den Hebel mit der hoechsten CAGR bzw. Sharpe
 #' Ratio, wie die LETF-Analyse von testfol.io. An [simulation()] wird ein
 #' data.frame mit den Spalten \code{date} und \code{LEV} uebergeben.
 #'
-#' @inheritParams leveraged_series
+#' @inheritParams series_leverage
 #' @param leverages Numerischer Vektor der zu pruefenden Hebel (Standard
 #'   \code{seq(0.5, 4, by = 0.25)}).
 #' @param strategy Optional Strategie mit dem Asset \code{"LEV"}; \code{NULL}
 #'   (Standard) = Buy-and-Hold-ETF mit 30 Prozent Teilfreistellung
-#'   (\code{asset_config("etf", "bnh", asset_bonus = 30)}).
+#'   (\code{asset_config("etf", "bnh", partial_exemption = 30)}).
 #' @inheritParams sensitivity_grid
 #' @return data.frame der Klasse \code{SimLevSensitivity} mit \code{leverage}
 #'   und den Kennzahlen aus \code{metrics} (fehlgeschlagene Laeufe fehlen);
@@ -372,19 +374,19 @@ leveraged_series <- function(data, index, leverage = 2, rate = 0, expense = 0, s
 #' set.seed(1)
 #' x <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = 1500))
 #' x$idx <- 100 * cumprod(1 + rnorm(1500, 3e-4, 0.01))
-#' lv <- leverage_sensitivity(x, "idx", leverages = c(1, 1.5, 2, 3), rate = 2, expense = 0.5)
+#' lv <- sensitivity_leverage(x, "idx", leverages = c(1, 1.5, 2, 3), rate = 2, expense = 0.5)
 #' lv
 #' attr(lv, "optimal")
-#' @seealso [leveraged_series()], [sensitivity_grid()], [simulation()]
+#' @seealso [series_leverage()], [sensitivity_grid()], [simulation()]
 #' @export
-leverage_sensitivity <- function(data, index, leverages = seq(0.5, 4, by = 0.25), rate = 0, expense = 0,
-                                 spread = 0, strategy = NULL, sim_args = list(), metrics = study_metrics, cores = 1L) {
-  strategy <- strategy %||% create_strategy(LEV = asset_config("etf", "bnh", asset_bonus = 30))
+sensitivity_leverage <- function(data, index, leverages = seq(0.5, 4, by = 0.25), rate = 0, expense = 0,
+                                 spread = 0, strategy = NULL, sim_args = list(), metrics = bootstrap_study_metrics, cores = 1L) {
+  strategy <- strategy %||% create_strategy(LEV = asset_config("etf", "bnh", partial_exemption = 30))
+  sim_args <- .sim_args_set(list(), sim_args, "sensitivity_leverage")
   run <- function(L) {
-    df <- data.frame(date = .to_date(data$date, "data$date"), LEV = leveraged_series(data, index, L, rate, expense, spread))
+    df <- data.frame(date = .to_date(data$date, "data$date"), LEV = series_leverage(data, index, L, rate, expense, spread))
     if (any(df$LEV <= 0)) df$LEV[df$LEV <= 0] <- 1e-8
-    res <- tryCatch(suppressWarnings(suppressMessages(do.call(simulation, c(list(data = df, strategy = strategy), sim_args)))),
-                    error = function(e) NULL)
+    res <- tryCatch(suppressWarnings(suppressMessages(.sim_call(df, strategy, sim_args))), error = function(e) NULL)
     if (is.null(res)) return(NULL)
     metrics(res)
   }

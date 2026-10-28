@@ -14,10 +14,8 @@ withdrawal_simulation(
   years = NULL,
   timing = c("start", "end"),
   income = NULL,
-  tax_mode = c("none", "person"),
-  tax_rate = 26.375,
-  asset_bonus = 30,
-  sparer_pauschbetrag = 1000,
+  tax = NULL,
+  partial_exemption = 30,
   base_rate = 3.2,
   vorabpauschale = TRUE,
   sale_cost = 0,
@@ -32,7 +30,7 @@ withdrawal_simulation(
 \item{x}{Renditequelle, eine der folgenden:
 \describe{
 \item{\code{withdrawal_paths}}{aus \code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}},
-\code{\link[=withdrawal_paths]{withdrawal_paths()}} oder \code{\link[=pooled_bootstrap]{pooled_bootstrap()}}; Inflation und
+\code{\link[=withdrawal_paths]{withdrawal_paths()}} oder \code{\link[=bootstrap_pooled]{bootstrap_pooled()}}; Inflation und
 Frequenz stammen aus dem Objekt (\code{inflation} und
 \code{frequency} werden ignoriert).}
 \item{Matrix}{(Perioden x Pfade) von Brutto-Periodenrenditen nach
@@ -53,13 +51,13 @@ Entnahme mit 4 \%).}
 Endwert <= 0, etwa durch eine offene Steuerschuld
 \code{tax_report$open_tax_debt}, ist ein Fehler) und,
 sofern \code{cost_basis} nicht angegeben ist, wird \code{cost_basis}
-daraus abgeleitet (siehe dort). Bei \code{tax_mode = "person"} wird
+daraus abgeleitet (siehe dort). Mit Steuern (\code{tax = tax_profile()}) wird
 gewarnt, wenn die am Ende gehaltenen Assets eine andere Teilfreistellung
-als \code{asset_bonus} haben (Regime \code{"capital_gains"} zaehlt als
+als \code{partial_exemption} haben (Regime \code{"capital_gains"} zaehlt als
 0 \%) oder das Regime \code{"private_sale"} (§ 23 EStG) haben, das die
-Entnahmephase nicht abbildet. Mit \code{tax_mode = "person"} werden
+Entnahmephase nicht abbildet. Mit Steuern werden
 ausserdem die Lots (FIFO, siehe Details) und nicht angegebene
-\code{asset_bonus}, \code{loss_carryforward} und \code{sale_cost} aus
+\code{partial_exemption}, \code{loss_carryforward} und \code{sale_cost} aus
 dem Ergebnis uebernommen (siehe dort); was uebernommen wurde, meldet
 ein Hinweis (\code{message()}) und steht im Ergebnis unter
 \code{adopted}. Ausdrueckliche Angaben haben immer Vorrang.}
@@ -104,20 +102,30 @@ Jahresbetrag in Kaufkraft des Startzeitpunkts. Einkommen mindern die
 Depotentnahme (Entnahme = max(0, Regelbetrag - Einkommen)) und zaehlen im
 Konsum (\code{spending}) mit.}
 
-\item{tax_mode}{\code{"none"} (Standard; keine Steuern) oder
-\code{"person"} (vereinfachte deutsche Besteuerung, siehe Details).}
-
-\item{tax_rate}{Abgeltungsteuer inkl. Solidaritaetszuschlag in Prozent
-(Standard 26.375; 0 bis 100). Wie in \code{\link[=simulation]{simulation()}} sind
-\code{tax_rate}, \code{asset_bonus}, \code{sale_cost},
-\code{cost_basis}, \code{sparer_pauschbetrag},
-\code{loss_carryforward} und \code{gamma} einzelne endliche Zahlen im
-zulaessigen Bereich (sonst Fehler); Werte zwischen 0 und 1 bei
-\code{tax_rate}, \code{asset_bonus} und \code{cost_basis} sowie
-zwischen 0 und 0,05 bei \code{inflation} (Zahl) und \code{base_rate}
+\item{tax}{Steuerdaten der Person: \code{NULL} (Standard; keine Steuern)
+oder ein Objekt aus \code{\link[=tax_profile]{tax_profile()}} (vereinfachte deutsche Besteuerung,
+siehe Details). Ausgewertet werden \code{rate} (Abgeltungsteuer inkl.
+Solidaritaetszuschlag in Prozent, Standard 26.375) und
+\code{sparer_pauschbetrag} (Sparer-Pauschbetrag je Planjahr als nominaler
+Geldbetrag, Standard 1000; 2000 bei Zusammenveranlagung; 0 = ohne). Bei
+\code{start_value} = \code{SimLevResult} mit \code{tax_report$next_year}
+steht im ersten Planjahr nur dieser Betrag minus
+\code{next_year$sparer_pauschbetrag_used} zur Verfuegung (siehe Details,
+Kalender; bei gleichem Pauschbetrag wie in der Ansparphase
+\code{next_year$sparer_pauschbetrag_remaining}). Angaben, die die
+Entnahmephase nicht abbildet (\code{church_tax}, \code{private_sale_threshold},
+\code{base_rate}, \code{guenstigerpruefung}, \code{income}, \code{harvest}),
+ergeben einen Fehler; der Basiszins kommt aus \code{base_rate} dieser Funktion.
+Die Bestandsmerkmale (\code{partial_exemption}, \code{vorabpauschale},
+\code{cost_basis}, \code{loss_carryforward}, \code{sale_cost}) sind eigene
+Argumente. Wie in \code{\link[=simulation]{simulation()}} sind \code{partial_exemption},
+\code{sale_cost}, \code{cost_basis}, \code{loss_carryforward} und
+\code{gamma} einzelne endliche Zahlen im zulaessigen Bereich (sonst Fehler);
+Werte zwischen 0 und 1 bei \code{partial_exemption} und \code{cost_basis}
+sowie zwischen 0 und 0,05 bei \code{inflation} (Zahl) und \code{base_rate}
 (Zahl) loesen eine Warnung aus (vermutlich Anteil statt Prozent).}
 
-\item{asset_bonus}{Teilfreistellung in Prozent (Standard 30 fuer
+\item{partial_exemption}{Teilfreistellung in Prozent (Standard 30 fuer
 Aktienfonds; 15 fuer Mischfonds). Nicht angegeben und \code{start_value}
 ein \code{SimLevResult} mit \code{open_lots}: die gemeinsame
 Teilfreistellung der am Ende gehaltenen Assets (Regime
@@ -125,15 +133,6 @@ Teilfreistellung der am Ende gehaltenen Assets (Regime
 das Regime \code{"private_sale"} hat und keine Fonds neben anderen
 Regimen gehalten werden; sonst 30 mit Warnung. Als gehalten gelten Assets
 mit Endwert > 1e-12 x Depotwert (Stueckreste ohne Wert zaehlen nicht).}
-
-\item{sparer_pauschbetrag}{Sparer-Pauschbetrag je Planjahr als nominaler
-Geldbetrag (Standard 1000; 2000 bei Zusammenveranlagung). Bei
-\code{start_value} = \code{SimLevResult} mit
-\code{tax_report$next_year} und \code{tax_mode = "person"} steht im
-ersten Planjahr nur dieser Betrag minus
-\code{next_year$sparer_pauschbetrag_used} zur Verfuegung (siehe Details,
-Kalender; bei gleichem Pauschbetrag wie in der Ansparphase
-\code{next_year$sparer_pauschbetrag_remaining}).}
 
 \item{base_rate}{Basiszins fuer die Vorabpauschale in Prozent (Standard
 3.20 fuer 2026; negative Werte zaehlen als 0): Skalar oder Matrix
@@ -143,7 +142,7 @@ Planjahres. Enthaelt \code{x} eine Basiszins-Reihe (Argument
 \code{base_rate} in \code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}}), wird diese verwendet.}
 
 \item{vorabpauschale}{Logisch: Vorabpauschale beruecksichtigen (Standard
-\code{TRUE}; nur mit \code{tax_mode = "person"} wirksam). Nicht angegeben
+\code{TRUE}; nur mit \code{tax = tax_profile()} wirksam). Nicht angegeben
 und \code{start_value} ein \code{SimLevResult} mit \code{open_lots}, in
 dem kein gehaltenes Asset das Regime \code{"investment_fund"} hat (nur
 ETN/Zertifikate, \code{"capital_gains"}, bzw. \code{"private_sale"}):
@@ -153,7 +152,7 @@ Fonds neben anderen Regimen Warnung, keine Uebernahme.}
 \item{sale_cost}{Verkaufskosten in Prozent des Verkaufsbetrags (Standard 0;
 z. B. halber Spread). Nicht angegeben und \code{start_value} ein
 \code{SimLevResult} mit \code{open_lots}: der halbe Spread
-(\code{asset_spread}) der am Ende gehaltenen Assets, sofern alle
+(\code{spread}) der am Ende gehaltenen Assets, sofern alle
 denselben Spread haben (sonst 0 mit Warnung; ohne Spread-Angabe im
 Ergebnis 0). Ordergebuehren bildet die Entnahmephase nicht ab; waren sie
 in der Ansparphase gesetzt, warnt die Funktion.}
@@ -171,18 +170,18 @@ angegeben:
 \item{nur Cash am letzten Tag}{(z. B. \code{liquidate = TRUE}): 100,
 alle Gewinne sind bereits versteuert.}
 \item{mit offenen Lots}{(Element \code{open_lots}, nur Ergebnisse mit
-\code{tax_mode = "person"}): bei \code{tax_mode = "person"} die Lots
+\code{simulation(tax = tax_profile())}): mit \code{tax = tax_profile()} die Lots
 selbst (FIFO, siehe Details); ihre Summe entspricht 100 x
 (Anschaffungskosten \code{units} x \code{price} plus anzurechnende
 Vorabpauschalen \code{vp} aller Assets plus Cash) / Endwert. Ein
 Verkauf ergibt dieselbe Steuer wie in \code{\link[=simulation]{simulation()}} beim Verkauf
 derselben Stueckzahl, wenn \code{sale_cost} dem halben Spread
 entspricht, keine Ordergebuehr anfaellt, alle Assets die
-Teilfreistellung \code{asset_bonus} haben und Topf und
+Teilfreistellung \code{partial_exemption} haben und Topf und
 Sparer-Pauschbetrag gleich stehen.}
-\item{sonst}{(Ergebnis ohne \code{tax_mode = "person"} oder aelter):
+\item{sonst}{(Ergebnis ohne Steuern oder aelter):
 die Naeherung 100 x (Startwert brutto + Summe der Einzahlungen) /
-Endwert, mit Warnung bei \code{tax_mode = "person"}. Sie behandelt
+Endwert, mit Warnung bei \code{tax = tax_profile()}. Sie behandelt
 bereits realisierte (und versteuerte) Gewinne, Vorabpauschalen und Cash
 wie stille Reserven und ueberschaetzt die spaetere Steuer dann.}
 }}
@@ -204,7 +203,7 @@ Sicherheitsaequivalent der realen jaehrlichen Konsumreihe
 \item{keep_paths}{Logisch: Vermoegensmatrix \code{wealth} zurueckgeben
 (Standard \code{TRUE}).}
 
-\item{horizon}{Optional Laufzeit je Pfad: Objekt aus \code{\link[=horizon_model]{horizon_model()}}
+\item{horizon}{Optional Laufzeit je Pfad: Objekt aus \code{\link[=withdrawal_horizon]{withdrawal_horizon()}}
 (zufaellige Laufzeit in Jahren je Pfad) oder eine Zahl > 0 = feste Laufzeit in
 Jahren. \code{NULL} (Standard) = volle Pfadlaenge. Dann gilt ein Pfad als
 erfolgreich, wenn das Vermoegen bis zu seinem Horizont reicht;
@@ -216,7 +215,7 @@ Pfad mit H Jahren und Horizont H auf laengeren Pfaden ergeben dasselbe) (\code{p
 Pfadlaenge in \code{paths$success_full}). Horizonte ueber der Pfadlaenge
 werden mit Warnung gekuerzt. Die Regel selbst rechnet weiter mit den
 Restjahren der vollen Pfadlaenge. Nicht zu verwechseln mit \code{horizon}
-in \code{\link[=goal_optimize]{goal_optimize()}} (Perioden).}
+in \code{\link[=planning_goal]{planning_goal()}} (Perioden).}
 }
 \value{
 Objekt der Klasse \code{SimLevWithdrawal} (Liste):
@@ -248,15 +247,15 @@ Jahresentnahme (real, vor Abzug von \code{income}).}
 Beginn jedes Planjahres, letzte Zeile am Ende; \code{NULL} bei
 \code{keep_paths = FALSE}.}
 \item{\code{rule}, \code{start_value}, \code{frequency}, \code{horizon},
-\code{tax_mode}, \code{gamma}, \code{timing}}{Eingaben.}
+\code{tax_mode} (\code{"person"} mit \code{tax}, sonst \code{"none"}), \code{gamma}, \code{timing}}{Eingaben.}
 \item{\code{years}, \code{full_years}}{Anzahl Planjahre (einschliesslich
 eines unvollstaendigen letzten Jahres) bzw. voller Planjahre.}
 \item{\code{historical}}{\code{TRUE} bei historischen Kohorten.}
 \item{\code{adopted}}{Nur bei \code{start_value} = \code{SimLevResult}
-und \code{tax_mode = "person"}: benannte Liste der aus der
+und \code{tax = tax_profile()}: benannte Liste der aus der
 Ansparphase uebernommenen Werte (\code{lots} = Anzahl FIFO-Lots
 einschliesslich Cash-Position, \code{cost_basis} bei
-Durchschnittskosten, \code{asset_bonus}, \code{loss_carryforward},
+Durchschnittskosten, \code{partial_exemption}, \code{loss_carryforward},
 \code{sale_cost}, \code{sparer_pauschbetrag_used_year1} = im ersten
 Planjahr bereits verbrauchter Pauschbetrag, \code{vorabpauschale} =
 \code{FALSE} ohne gehaltene Fonds); sonst \code{NULL}.}
@@ -269,7 +268,7 @@ Auswertung mit \code{print()}, \code{summary()} und \code{plot()}
 }
 \description{
 Simuliert eine Entnahmeregel auf historischen Kohorten (\code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}}),
-Bootstrap-Pfaden (\code{\link[=withdrawal_paths]{withdrawal_paths()}}, \code{\link[=pooled_bootstrap]{pooled_bootstrap()}}), gespeicherten
+Bootstrap-Pfaden (\code{\link[=withdrawal_paths]{withdrawal_paths()}}, \code{\link[=bootstrap_pooled]{bootstrap_pooled()}}), gespeicherten
 Ergebnissen von \code{\link[=simulation]{simulation()}} bzw. \code{\link[=bootstrap_study]{bootstrap_study()}} oder einer
 beliebigen Renditematrix. Je Pfad entstehen Erfolg, Erschoepfungsjahr,
 reales Endvermoegen, Konsumkennzahlen, Steuern und die Perfect Withdrawal
@@ -294,7 +293,7 @@ anderen Regeln zaehlt jede nicht voll bezahlte Entnahme als Fehlschlag. Alle "re
 durch die aufgelaufene Inflation geteilt, also in Kaufkraft des
 Startzeitpunkts.
 
-Besteuerung (\code{tax_mode = "person"}): vereinfachtes Modell eines
+Besteuerung (\code{tax = tax_profile()}): vereinfachtes Modell eines
 einzelnen thesaurierenden Fondsbestands nach heutiger Rechtslage
 (Modellphilosophie des Pakets): Verkaufsgewinne mit Teilfreistellung,
 Verlustverrechnung vor Sparer-Pauschbetrag, Abgeltungsteuer;
@@ -319,9 +318,9 @@ mit FIFO. Das Planjahr wird als Steuerjahr behandelt; der Sparer-Pauschbetrag
 steht in jedem Planjahr neu und nominal unveraendert zur Verfuegung.
 
 FIFO mit den Lots einer Ansparphase: Ist \code{start_value} ein
-\code{SimLevResult} mit \code{open_lots} (gerechnet mit \code{tax_mode =
-"person"}), \code{cost_basis} nicht angegeben und \code{tax_mode =
-"person"}, uebernimmt die Entnahmephase die einzelnen Lots: je Asset in
+\code{SimLevResult} mit \code{open_lots} (gerechnet mit \code{tax =
+tax_profile()}), \code{cost_basis} nicht angegeben und \code{tax =
+tax_profile()}, uebernimmt die Entnahmephase die einzelnen Lots: je Asset in
 FIFO-Reihenfolge mit Anschaffungskosten (\code{units} x \code{price}) und
 anzurechnender Vorabpauschale (\code{vp}); der Wert eines Lots ist sein
 Stueckanteil am Endwert des Assets. Ein Verkauf nimmt jedem Asset seinen
@@ -330,7 +329,7 @@ Anteile bleiben daher konstant) und innerhalb des Assets die aeltesten
 Lots zuerst; Gewinn je Lot = Erloes x (1 - \code{sale_cost} / 100) minus
 Anschaffungskosten minus anteilige Vorabpauschale (§ 19 InvStG), die
 Gewinne aller verkauften Lots werden summiert und mit Teilfreistellung
-\code{asset_bonus}, Verlusttopf, Sparer-Pauschbetrag und \code{tax_rate}
+\code{partial_exemption}, Verlusttopf, Sparer-Pauschbetrag und Steuersatz \code{rate}
 besteuert (wie \code{\link[=simulation]{simulation()}} je Verkauf, siehe dort \code{open_lots}).
 Cash am Ende der Ansparphase ist eine eigene Position mit Basis = Betrag,
 die wie bisher mit der Depotrendite waechst und anteilig verkauft wird.
@@ -360,9 +359,9 @@ Steuer auf im Jahr versteuerte Ertraege, wenn spaeter im Jahr Verluste
 entstehen (unterjaehrige Verlustverrechnung, mit Freigabe des
 Pauschbetrags). Gleich sind beide, solange in einem Planjahr alle Verkaeufe
 Gewinne ergeben. (2) Steuersatz: die Entnahmephase rechnet mit dem festen
-Satz \code{tax_rate}; Kirchensteuer (\code{church_tax}), Tarifweg und
-Guenstigerpruefung (\code{taxable_income}, \code{tax_tariff}) der
-Ansparphase werden nicht uebernommen (gegebenenfalls \code{tax_rate}
+Satz \code{rate} aus \code{tax_profile()}; Kirchensteuer (\code{church_tax}), Tarifweg und
+Guenstigerpruefung (\code{income_tariff()}, \code{guenstigerpruefung}) der
+Ansparphase werden nicht uebernommen (gegebenenfalls \code{rate}
 anpassen). (3) Ordergebuehren beim Verkauf bildet die Entnahmephase nicht
 ab (Warnung, wenn sie in der Ansparphase gesetzt waren). (4) Verschiedene
 Teilfreistellungen, Regime \code{"capital_gains"} neben Fonds und
@@ -381,7 +380,7 @@ von Ergebnissen (z. B. je Bootstrap-Pfad) oder eine \code{\link[=bootstrap_study
 \code{keep_returns} liefert je Element einen Pfad (ueber
 \code{\link[=withdrawal_paths]{withdrawal_paths()}}). Ein \code{bootstrap_result} aus \code{\link[=bootstrap]{bootstrap()}} zuerst
 mit \code{\link[=withdrawal_paths]{withdrawal_paths()}} umwandeln.
-Wurde das Quellergebnis bereits mit \code{tax_mode = "person"} gerechnet,
+Wurde das Quellergebnis bereits mit Steuern (\code{tax = tax_profile()}) gerechnet,
 enthaelt der Index schon Vorabpauschalen; dann hier \code{vorabpauschale =
 FALSE} setzen oder die Quelle ohne Steuern rechnen (bei Ergebnissen und
 Ergebnislisten erscheint dazu eine Warnung).

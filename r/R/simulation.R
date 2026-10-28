@@ -22,7 +22,7 @@
 #   \item{investment_fund}{
 #     ETFs und Investmentfonds nach InvStG.
 #     - Teilfreistellung: 30 % bei Aktienfonds, 15 % bei Mischfonds
-#       (je Asset als \code{asset_bonus} in Prozent, z. B. 30)
+#       (je Asset als \code{partial_exemption} in Prozent, z. B. 30)
 #     - Vorabpauschale: jaehrliche Vorabbesteuerung auf Basis des Basiszinses
 #     - Einstandskosten nach FIFO
 #   }
@@ -55,7 +55,7 @@
 #
 # @section Tarifweg (taxable_income, tax_tariff):
 # Mit \code{taxable_income} (zvE je Kalenderjahr ohne die Ertraege der Simulation) rechnet die Engine
-# mit dem Einkommensteuertarif aus einer Datei (read_tax_tariff(), § 32a Abs. 1 EStG, Soli §§ 3, 4
+# mit dem Einkommensteuertarif aus einer Datei (tax_tariff(), § 32a Abs. 1 EStG, Soli §§ 3, 4
 # SolZG; mitgeliefert ab VZ 2026, Einzelveranlagung). § 23: ESt-Zuwachs T(zvE + G23) - T(zvE),
 # Soli-Zuwachs exakt, KiSt church_tax Prozent des ESt-Zuwachses. Guenstigerpruefung: unterjaehrig
 # Abgeltungsteuer, im Jahresabschluss Vergleich der Gesamtbelastung mit und ohne Tarif fuer K,
@@ -82,7 +82,7 @@
 # Besonderheiten:
 # \itemize{
 #   \item M1: Ein negativer Basiszins ergibt VP = 0 (nicht negativ).
-#   \item M3: Eigene Funktion calculate_vorabpauschale_tax(). Die VP wird mit dem
+#   \item M3: Eigene Funktion .calculate_vorabpauschale_tax(). Die VP wird mit dem
 #     allgemeinen § 20-Verlusttopf verrechnet (vor dem Sparer-Pauschbetrag, R-2),
 #     erzeugt aber selbst keinen Verlust.
 #   \item M4: Nur Lots, die zum Jahresende noch gehalten werden, zaehlen.
@@ -93,7 +93,7 @@
 # getrennt gefuehrt:
 # \itemize{
 #   \item Verluste werden NICHT sofort bei jedem Verkauf verrechnet
-#   \item Jahresabrechnung in \code{handle_year_change()}
+#   \item Jahresabrechnung in \code{.handle_year_change()}
 #   \item Verlustvortrag nur mit kuenftigen § 23-Gewinnen verrechenbar
 #   \item Jahressaldo unter 1.000 EUR (Freigrenze) ist steuerfrei, der Vortrag bleibt
 #   \item Ab Erreichen ist der GESAMTE Saldo abzueglich Verlustvortrag steuerpflichtig
@@ -105,7 +105,7 @@
 #   - I3: Guenstigerpruefung (§ 32d Abs. 6 EStG) ergaenzt
 #   - M1: Behandlung negativer Basiszinsen bei der Vorabpauschale korrigiert
 #   - M2: Zeitpunkt der § 23-Verlustverrechnung korrigiert (Jahresende, nicht je Verkauf)
-#   - M3: Eigene Funktion calculate_vorabpauschale_tax() ohne Verlustverrechnung
+#   - M3: Eigene Funktion .calculate_vorabpauschale_tax() ohne Verlustverrechnung
 #     (inzwischen geaendert: Verrechnung mit dem § 20-Verlusttopf, R-2)
 #   - M4: Vorabpauschale nur fuer Lots, die zum Jahresende gehalten werden
 #   - effective_tax_rate fuer die Guenstigerpruefung durchgaengig ergaenzt
@@ -141,15 +141,15 @@
 #'   create_strategy()/asset_config()). Je Asset:
 #'   \describe{
 #'     \item{asset_class}{Zeichenkette: "etf", "etn", "etc", "certificate" (veraltet: "etn_standard", "etn_deliverable")}
-#'     \item{action_type}{Zeichenkette: "bnh" (Buy-and-Hold) oder "signal" (signalgesteuert)}
-#'     \item{asset_share}{Zahl: Zielgewicht als Anteil (0-1); die Summe ueber alle Assets muss 1 ergeben (keine Normierung, sonst Fehler)}
-#'     \item{asset_spread}{Zahl: voller Bid-Ask-Spread in Prozent (z. B. 0.1 = 0,1 \%); je Seite wird der halbe Spread angewandt}
-#'     \item{asset_bonus}{Zahl: Teilfreistellung in Prozent (30 bei Aktien-ETFs, 15 bei Mischfonds, 0 sonst)}
-#'     \item{asset_start}{Date: Ab wann das Asset handelbar ist (optional); am Starttag wird
+#'     \item{trading}{Zeichenkette: "bnh" (Buy-and-Hold) oder "signal" (signalgesteuert)}
+#'     \item{share}{Zahl: Zielgewicht als Anteil (0-1); die Summe ueber alle Assets muss 1 ergeben (keine Normierung, sonst Fehler)}
+#'     \item{spread}{Zahl: voller Bid-Ask-Spread in Prozent (z. B. 0.1 = 0,1 \%); je Seite wird der halbe Spread angewandt}
+#'     \item{partial_exemption}{Zahl: Teilfreistellung in Prozent (30 bei Aktien-ETFs, 15 bei Mischfonds, 0 sonst)}
+#'     \item{start}{Date: Ab wann das Asset handelbar ist (optional); am Starttag wird
 #'       immer auf die Zielgewichte umgeschichtet, auch ohne balance_mode}
 #'     \item{tax_regime}{Zeichenkette: "investment_fund", "capital_gains" oder "private_sale" (optional, sonst aus asset_class und deliverable abgeleitet)}
-#'     \item{signal_buy}{Zeichenkette: Spaltenname der Kaufsignale (Pflicht bei action_type = "signal")}
-#'     \item{signal_sell}{Zeichenkette: Spaltenname der Verkaufssignale (Pflicht bei action_type = "signal")}
+#'     \item{signal_buy}{Zeichenkette: Spaltenname der Kaufsignale (Pflicht bei trading = "signal")}
+#'     \item{signal_sell}{Zeichenkette: Spaltenname der Verkaufssignale (Pflicht bei trading = "signal")}
 #'   }
 #'
 #' @param start_value Zahl. Anfangskapital in EUR. Standard: 10000.
@@ -243,32 +243,30 @@
 #'   strategy = list(
 #'     MSCI_World = list(
 #'       asset_class = "etf",
-#'       action_type = "bnh",
-#'       asset_share = 0.7,
-#'       asset_spread = 0.1,
-#'       asset_bonus = 30   # 30 Prozent Teilfreistellung fuer Aktien-ETF
+#'       trading = "bnh",
+#'       share = 0.7,
+#'       spread = 0.1,
+#'       partial_exemption = 30   # 30 Prozent Teilfreistellung fuer Aktien-ETF
 #'     ),
 #'     Bonds = list(
 #'       asset_class = "etf",
-#'       action_type = "bnh",
-#'       asset_share = 0.3,
-#'       asset_spread = 0.1,
-#'       asset_bonus = 0    # Keine Teilfreistellung fuer Renten-ETF
+#'       trading = "bnh",
+#'       share = 0.3,
+#'       spread = 0.1,
+#'       partial_exemption = 0    # Keine Teilfreistellung fuer Renten-ETF
 #'     )
 #'   ),
 #'   start_value = 50000,
-#'   tax_mode = "person",
-#'   sparer_pauschbetrag = 2000,  # Zusammenveranlagung
-#'   base_rate = 2.29             # Basiszins 2024 in Prozent
+#'   tax = tax_profile(sparer_pauschbetrag = 2000,  # Zusammenveranlagung
+#'                     base_rate = 2.29)            # Basiszins 2024 in Prozent
 #' )
 #'
 #' # Mit Guenstigerpruefung fuer Anleger mit niedrigem Einkommen
 #' result <- simulation(
 #'   data = market_data,
 #'   strategy = my_strategy,
-#'   tax_mode = "person",
-#'   marginal_tax_rate = 20,         # persoenlicher Satz 20 Prozent
-#'   use_guenstigerpruefung = TRUE   # persoenlicher Satz, wenn die Belastung niedriger ist
+#'   tax = tax_profile(income = income_rate(20),     # persoenlicher Satz 20 Prozent
+#'                     guenstigerpruefung = TRUE)    # persoenlicher Satz, wenn die Belastung niedriger ist
 #' )
 #'
 #' # Mit lieferbarem ETN (§ 23 EStG)
@@ -277,25 +275,24 @@
 #'   strategy = list(
 #'     Gold_ETC = list(
 #'       asset_class = "etn_deliverable",
-#'       action_type = "bnh",
-#'       asset_share = 1.0,
-#'       asset_spread = 0.2,
-#'       asset_bonus = 0
+#'       trading = "bnh",
+#'       share = 1.0,
+#'       spread = 0.2,
+#'       partial_exemption = 0
 #'     )
 #'   ),
-#'   tax_mode = "person",
-#'   marginal_tax_rate = 35,       # fuer § 23 benoetigt (Prozent)
-#'   private_sale_threshold = 1000
+#'   tax = tax_profile(income = income_rate(35),     # fuer § 23 benoetigt (Prozent)
+#'                     private_sale_threshold = 1000)
 #' )
 #' }
 #'
 #' @seealso
 #' \itemize{
 #'   \item \code{\link{asset_config}}, \code{\link{create_strategy}} zum Aufbau der Strategie
-#'   \item \code{\link{compute_rebal_trigger}} fuer ereignisbasiertes Rebalancing
-#'   \item \code{\link{deep_analysis}}, \code{\link{withdrawal_paths}} zur Weiterverarbeitung des Ergebnisses
-#'   \item Interne Steuerfunktionen: calculate_paragraph_20_tax(), calculate_vorabpauschale_tax(),
-#'     calculate_private_sale_tax(), handle_year_change()
+#'   \item \code{\link{rebalance_trigger}} fuer ereignisbasiertes Rebalancing
+#'   \item \code{\link{result_analysis}}, \code{\link{withdrawal_paths}} zur Weiterverarbeitung des Ergebnisses
+#'   \item Interne Steuerfunktionen: .calculate_paragraph_20_tax(), .calculate_vorabpauschale_tax(),
+#'     .calculate_private_sale_tax(), .handle_year_change()
 #' }
 #'
 
@@ -303,7 +300,7 @@
 #'   Standard: 10000.
 #'
 #' @param spread Zahl oder NULL. Wird nicht ausgewertet (Warnung, wenn nicht NULL);
-#'   massgeblich ist der Spread je Asset (asset_spread). Standard: NULL.
+#'   massgeblich ist der Spread je Asset (spread). Standard: NULL.
 #'
 #' @param details Logisch. Ausfuehrliches Transaktions- und Steuerprotokoll auf der
 #'   Konsole ausgeben. Standard: FALSE.
@@ -408,7 +405,7 @@
 #'   marginal_tax_rate, include_soli_on_income_tax und soli_rate_income_tax wirken dann nicht (Warnung,
 #'   wenn angegeben). NULL (Standard): bisheriger Weg mit marginal_tax_rate.
 #' @param tax_tariff NULL (mitgelieferte Datei extdata/steuertarif.csv, ab VZ 2026), Dateipfad oder
-#'   Objekt aus \code{\link{read_tax_tariff}()}. Nur mit taxable_income wirksam (sonst Warnung).
+#'   Objekt aus \code{\link{tax_tariff}()}. Nur mit taxable_income wirksam (sonst Warnung).
 #' @return Objekt der Klasse "SimLevResult" (Liste) mit:
 #'   \describe{
 #'     \item{dates}{Date-Vektor der Simulationstage (Kalendertage)}
@@ -449,7 +446,7 @@
 #'       no_negative_returns, no_drawdown, no_recovery, not_finite) und deutscher Klartext; 0 Zeilen,
 #'       wenn alles definiert ist}
 #'     \item{open_lots}{Nur tax_mode = "person": je Asset list(lots = data.frame(date, units, price, vp),
-#'       regime, asset_bonus, cash, asset_spread (Prozent), order_fee (wie uebergeben oder NULL)) der am
+#'       regime, partial_exemption, cash, spread (Prozent), order_fee (wie uebergeben oder NULL)) der am
 #'       letzten Tag gehaltenen Lots (siehe man/simulation.Rd)}
 #'   }
 #'
@@ -463,10 +460,10 @@
 #' strategy <- list(
 #'   ETF = list(
 #'     asset_class = "etf",
-#'     action_type = "bnh",
-#'     asset_share = 1.0,
-#'     asset_spread = 0.1,
-#'     asset_bonus = 0
+#'     trading = "bnh",
+#'     share = 1.0,
+#'     spread = 0.1,
+#'     partial_exemption = 0
 #'   )
 #' )
 #'
@@ -482,7 +479,7 @@
 #' \code{\link{create_strategy}} und \code{\link{asset_config}} zum Aufbau der Strategie,
 #' \code{\link{print.SimLevResult}} zur Ausgabe der Ergebnisse,
 #' \code{\link{plot.SimLevResult}} zur grafischen Darstellung,
-#' \code{\link{deep_analysis}} zur weiteren Auswertung
+#' \code{\link{result_analysis}} zur weiteren Auswertung
 #'
 #' @export
 #' @useDynLib SimLev, .registration = TRUE, .fixes = "C_"
@@ -491,7 +488,30 @@
 #' @importFrom methods hasArg
 #' @noRd
 
-simulation <- function(
+simulation <- function(data, strategy, start_value = 10000,
+                       costs = sim_costs(), dca = NULL, rebalance = NULL, splits = NULL,
+                       tax = NULL, funds = NULL,
+                       risk_free = 0, fractions = TRUE, liquidate = FALSE, details = FALSE) {
+  # Etappe 6.3: Bausteine pruefen und in die Argumente der Engine uebersetzen (.sim_from_blocks); die Engine
+  # (.simulation_flat) rechnet unveraendert. Bedingungen tragen den Aufruf von simulation().
+  sim_call <- sys.call()
+  flat <- .sim_from_blocks(costs, dca, rebalance, splits, tax, funds)
+  args <- c(if (!missing(data)) list(data = data), if (!missing(strategy)) list(strategy = strategy),
+            list(start_value = start_value, risk_free = risk_free, fractions = fractions, liquidate = liquidate,
+                 details = details),
+            flat, list(.blocks = TRUE, .call = sim_call))
+  do.call(.simulation_flat, args, quote = TRUE)   # quote: .call ist ein Aufruf und darf nicht ausgewertet werden
+}
+
+#' Engine von simulation() mit den internen (flachen) Argumenten
+#'
+#' Zweck: die Rechnung von simulation(); simulation() ruft sie mit den aus den Bausteinen uebersetzten Werten
+#' auf (.blocks = TRUE: die Bausteine haben ihre Argumente schon geprueft, Meldungen nennen die Bausteine).
+#' Die Aufrufer mit sim_args (bootstrap_study, param_search, sensitivity_*, planning_lumpsum_vs_dca,
+#' tactical_simulation) gehen seit Etappe 6.4 ueber simulation() (.sim_args_set, .sim_call in sim_blocks.R).
+#' @keywords internal
+#' @noRd
+.simulation_flat <- function(
     data,
     strategy,
     start_value = 10000,
@@ -555,15 +575,20 @@ simulation <- function(
     harvest_loss_pot = TRUE,                # Verlusttopf zusaetzlich zum Freibetrag nutzen
     # === Einkommensteuertarif (Datei) statt marginal_tax_rate ===
     taxable_income = NULL,                  # zvE je Kalenderjahr OHNE die Ertraege dieser Simulation (EUR)
-    tax_tariff = NULL                       # NULL = mitgelieferte Tarifdatei, Dateipfad oder read_tax_tariff()-Objekt
+    tax_tariff = NULL,                      # NULL = mitgelieferte Tarifdatei, Dateipfad oder tax_tariff()-Objekt
+    .blocks = FALSE,                        # TRUE: Aufruf aus simulation() mit Bausteinen
+    .call = NULL                            # Aufruf fuer Bedingungen (aus simulation())
 ) {
   # Ablauf in Phasen (interne Funktionen, Uebersicht in sim_validate.R). Fehler und Warnungen, die
   # direkt in einer Phase entstehen, tragen wie bisher den Aufruf von simulation() (.sim_restore_call).
-  sim_call <- sys.call()
-  given <- c(tax_rate = !missing(tax_rate), marginal_tax_rate = !missing(marginal_tax_rate),
-             include_soli_on_income_tax = !missing(include_soli_on_income_tax),
-             soli_rate_income_tax = !missing(soli_rate_income_tax), funds_fee = !missing(funds_fee),
-             bonus_fee = !missing(bonus_fee), event_mode = !missing(event_mode))
+  sim_call <- if (is.null(.call)) sys.call() else .call
+  # Mit Bausteinen gilt kein Argument als einzeln angegeben (die Bausteine pruefen das Zusammenspiel selbst)
+  given <- if (.blocks) c(tax_rate = FALSE, marginal_tax_rate = FALSE, include_soli_on_income_tax = FALSE,
+                          soli_rate_income_tax = FALSE, funds_fee = FALSE, bonus_fee = FALSE, event_mode = FALSE)
+           else c(tax_rate = !missing(tax_rate), marginal_tax_rate = !missing(marginal_tax_rate),
+                  include_soli_on_income_tax = !missing(include_soli_on_income_tax),
+                  soli_rate_income_tax = !missing(soli_rate_income_tax), funds_fee = !missing(funds_fee),
+                  bonus_fee = !missing(bonus_fee), event_mode = !missing(event_mode))
   withCallingHandlers({
     # 1. Eingabepruefung, Steuer- und Gebuehreneinstellungen
     cfg <- .sim_check_inputs(
@@ -578,15 +603,15 @@ simulation <- function(
       bonus_fee = bonus_fee, fractions = fractions, risk_free = risk_free, split_mode = split_mode,
       split_thresh = split_thresh, event_col = event_col, church_tax = church_tax, order_fee = order_fee,
       dca_fee = dca_fee, harvest_mode = harvest_mode, harvest_day = harvest_day,
-      taxable_income = taxable_income, tax_tariff = tax_tariff, given = given)
+      taxable_income = taxable_income, tariff = tax_tariff, given = given, blocks = .blocks)
     # Ordergebuehren laufen ueber .fee_env an perform_trade_buy/sell; beim Verlassen zuruecksetzen
     if (cfg$fees_on) on.exit({ .fee_env$current <- NULL }, add = TRUE)
 
     # 2. Daten, Zentralstruktur sim_mem, Termine und Flags
-    prep <- .sim_prepare_data(cfg$data, cfg$pre_filled, base_rate_flex, base_rate_data)
+    prep <- .sim_prepare_data(cfg$data, cfg$pre_filled, base_rate_flex, base_rate_data, blocks = .blocks)
     sim_mem <- .sim_build_state(prep$data, cfg$strategy, cfg$start_value, prep$start_date, prep$stopp_date,
                                 cfg$sparer_pauschbetrag, cfg$use_sparer_pauschbetrag, cfg$base_rate,
-                                base_rate_flex, base_rate_data)
+                                base_rate_flex, base_rate_data, blocks = .blocks)
     .sim_check_layout(sim_mem)   # C7-11: vor dem ersten C++-Aufruf
     cal <- .sim_build_calendar(
       data = prep$data, sim_mem = sim_mem, strategy = cfg$strategy, start_date = prep$start_date,
@@ -596,7 +621,7 @@ simulation <- function(
       balance_unit = balance_unit, balance_days = cfg$balance_days, balance_anchor = balance_anchor,
       balance_start = balance_start, balance_skip = balance_skip, event_col = cfg$event_col,
       event_mode = event_mode, event_weight = event_weight, split_mode = cfg$split_mode,
-      split_thresh = split_thresh)
+      split_thresh = split_thresh, blocks = .blocks)
     data <- cal$data
     fl <- cal$flags
     if (!is.null(cfg$event_col)) event_weight <- cal$event_weight

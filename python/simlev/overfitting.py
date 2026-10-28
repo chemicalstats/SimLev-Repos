@@ -1,13 +1,13 @@
 """Schutz vor Überanpassung bei Parametersuchen (R: ``overfitting.R``).
 
-- :func:`pbo`                   Probability of Backtest Overfitting mit
+- :func:`overfit_pbo`                   Probability of Backtest Overfitting mit
                                 Combinatorially Symmetric Cross-Validation
                                 (Bailey, Borwein, López de Prado & Zhu 2017)
-- :func:`deflated_sharpe`       Deflated Sharpe Ratio (Bailey & López de Prado
+- :func:`sharpe_deflated`       Deflated Sharpe Ratio (Bailey & López de Prado
                                 2014) inkl. effektiver Versuchsanzahl
-- :func:`probabilistic_sharpe`  Probabilistic Sharpe Ratio (Bailey & López de
+- :func:`sharpe_probabilistic`  Probabilistic Sharpe Ratio (Bailey & López de
                                 Prado 2012)
-- :func:`walk_forward`          rollierende Auswahl In-Sample, Bewertung
+- :func:`overfit_walk_forward`          rollierende Auswahl In-Sample, Bewertung
                                 Out-of-Sample
 - :func:`param_bootstrap`       beste Punkte einer Suche auf Bootstrap-Pfaden
 - :func:`sharpe_haircut`        Sharpe-Ratio-Abschlag für Mehrfachtests
@@ -34,7 +34,7 @@ from ._r.rnum import LD, r_mean, r_mean_int, r_median, r_pow, r_prod, r_cumprod,
 from .svg import (_jl_unique, _res_abline, _res_fig, _res_finish, _res_hline, _res_legend, _res_line, _res_panel,
                   _res_points, _res_range, _res_rect, _res_vline)
 
-__all__ = ["pbo", "probabilistic_sharpe", "deflated_sharpe", "walk_forward", "param_bootstrap",
+__all__ = ["overfit_pbo", "sharpe_probabilistic", "sharpe_deflated", "overfit_walk_forward", "param_bootstrap",
            "sharpe_haircut", "SimLevPBO", "SimLevDSR", "SimLevWalkForward"]
 
 _NAN = float("nan")      # R's NaN
@@ -376,7 +376,7 @@ def _frame_data(**cols):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SimLevPBO(RList):
-    """Ergebnis von :func:`pbo` (R-Klasse ``SimLevPBO``)."""
+    """Ergebnis von :func:`overfit_pbo` (R-Klasse ``SimLevPBO``)."""
 
     r_class = ("SimLevPBO",)
 
@@ -414,7 +414,7 @@ def _mean_lgl(v, na=None):
     return r_mean_int(v.astype(np.int64))
 
 
-def pbo(x, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
+def overfit_pbo(x, *, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
         frequency=("week", "day", "month"), dates=None, risk_free=0):
     """Probability of Backtest Overfitting (CSCV).
 
@@ -443,7 +443,7 @@ def pbo(x, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
         raise ValueError("S muss gerade und >= 2 sein.")
     rr = _rr(x, frequency, dates, risk_free)
     if metric == "sharpe":
-        rr = _of_drop_flat(rr, "pbo")
+        rr = _of_drop_flat(rr, "overfit_pbo")
     R = rr.R
     N = R.shape[1]
     Tn = R.shape[0]
@@ -542,7 +542,7 @@ def _plot_pbo(x):
 # PSR / DSR
 # ─────────────────────────────────────────────────────────────────────────────
 
-def probabilistic_sharpe(r, benchmark=0, ppy=52):
+def sharpe_probabilistic(r, *, benchmark=0, ppy=52):
     """Probabilistic Sharpe Ratio.
 
     Wahrscheinlichkeit, dass die wahre Sharpe Ratio über ``benchmark`` liegt,
@@ -574,7 +574,7 @@ def probabilistic_sharpe(r, benchmark=0, ppy=52):
 
 
 class SimLevDSR(RList):
-    """Ergebnis von :func:`deflated_sharpe` (R-Klasse ``SimLevDSR``)."""
+    """Ergebnis von :func:`sharpe_deflated` (R-Klasse ``SimLevDSR``)."""
 
     r_class = ("SimLevDSR",)
 
@@ -596,7 +596,7 @@ class SimLevDSR(RList):
         return self
 
 
-def deflated_sharpe(x, id=None, n_trials=None, effective=True,  # noqa: A002 - R-Argumentname
+def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 - R-Argumentname
                     frequency=("week", "day", "month"), dates=None, risk_free=0):
     """Deflated Sharpe Ratio.
 
@@ -609,13 +609,13 @@ def deflated_sharpe(x, id=None, n_trials=None, effective=True,  # noqa: A002 - R
         id: zu prüfender Punkt (``id`` bzw. Spaltennummer); ``None`` = höchste Sharpe Ratio.
         n_trials: Versuchsanzahl (überschreibt die Schätzung).
         effective: effektive Versuchsanzahl verwenden (Standard ``True``).
-        frequency, dates, risk_free: wie bei :func:`pbo`.
+        frequency, dates, risk_free: wie bei :func:`overfit_pbo`.
 
     Returns:
         :class:`SimLevDSR`.
     """
     frequency = _match_arg(frequency, ("week", "day", "month"), "frequency")
-    rr = _of_drop_flat(_rr(x, frequency, dates, risk_free), "deflated_sharpe")
+    rr = _of_drop_flat(_rr(x, frequency, dates, risk_free), "sharpe_deflated")
     R = rr.R
     N = R.shape[1]
     sr = _of_col_metric(R, "sharpe")
@@ -647,7 +647,7 @@ def deflated_sharpe(x, id=None, n_trials=None, effective=True,  # noqa: A002 - R
     r = R[:, j]
     sq = math.sqrt(rr.ppy)
     return SimLevDSR(id=int(rr.cols[j]), sharpe=float(sr[j]) * sq, sr0=sr0 * sq,
-                     psr=probabilistic_sharpe(r, 0, rr.ppy), dsr=probabilistic_sharpe(r, sr0 * sq, rr.ppy),
+                     psr=sharpe_probabilistic(r, benchmark=0, ppy=rr.ppy), dsr=sharpe_probabilistic(r, benchmark=sr0 * sq, ppy=rr.ppy),
                      n_trials=Nt, n_points=N, n_eff=n_eff, rho=rho, var_sr=v * rr.ppy, n_obs=R.shape[0],
                      frequency=frequency)
 
@@ -657,7 +657,7 @@ def deflated_sharpe(x, id=None, n_trials=None, effective=True,  # noqa: A002 - R
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SimLevWalkForward(RList):
-    """Ergebnis von :func:`walk_forward` (R-Klasse ``SimLevWalkForward``)."""
+    """Ergebnis von :func:`overfit_walk_forward` (R-Klasse ``SimLevWalkForward``)."""
 
     r_class = ("SimLevWalkForward",)
 
@@ -735,7 +735,7 @@ def _r_round(x):
     return float(r_round(x))
 
 
-def walk_forward(x, train=5, test=1, step=None, anchored=False,
+def overfit_walk_forward(x, *, train=5, test=1, step=None, anchored=False,
                  metric=("sharpe", "sortino", "geometric", "mean"),
                  select=("best", "plateau"), risk_free=0):
     """Walk-Forward-Auswahl.
@@ -851,7 +851,7 @@ def walk_forward(x, train=5, test=1, step=None, anchored=False,
 # Bootstrap der besten Punkte
 # ─────────────────────────────────────────────────────────────────────────────
 
-def param_bootstrap(x, data, config, ids=None, top=5, by=("objective", "plateau"), map=None,  # noqa: A002
+def param_bootstrap(x, data, config, *, ids=None, top=5, by=("objective", "plateau"), map=None,  # noqa: A002
                     include=None, **kwargs):
     """Beste Punkte einer Parametersuche auf Bootstrap-Pfaden prüfen.
 
@@ -873,14 +873,14 @@ def param_bootstrap(x, data, config, ids=None, top=5, by=("objective", "plateau"
     Returns:
         ``SimLevBootstrapStudy`` mit Attribut ``param_ids`` (Strategiename -> id).
     """
-    from .param_search import _as_spec, plateau, _modify_list, _order, _row_params
+    from .param_search import _as_spec, param_plateau, _modify_list, _order, _row_params
     by = _match_arg(by, ("objective", "plateau"), "by")
     if not _is_param_search(x):
         raise ValueError("x muss ein SimLevParamSearch sein.")
     include = {} if include is None else include
     res = x["results"]
     if ids is None:
-        v = plateau(x)["plateau_mean"].to_numpy(dtype=float) if by == "plateau" else res[x["objective"]].to_numpy(dtype=float)
+        v = param_plateau(x)["plateau_mean"].to_numpy(dtype=float) if by == "plateau" else res[x["objective"]].to_numpy(dtype=float)
         o = _order(v, decreasing=x.get("maximize") is True, na_last=None)
         ids = res["id"].to_numpy()[o[:int(top)]]
     ids = [int(i) for i in np.atleast_1d(ids)]
@@ -890,8 +890,15 @@ def param_bootstrap(x, data, config, ids=None, top=5, by=("objective", "plateau"
         if map is not None:
             sp["map"] = {**dict(sp.get("map") or {}), **dict(map)}
         specs["p%d" % i] = sp
+    # sim_args aus kwargs ergänzen die der Suche (oberste Ebene; Bausteine werden ersetzt, nicht gemischt)
+    dots = dict(kwargs)
+    sa = dict(x.get("sim_args") or {})
+    if "sim_args" in dots:
+        from ._sim_blocks import _sim_args_set
+        sa = _sim_args_set(sa, dots.pop("sim_args"), "param_bootstrap")
     args = _modify_list({"data": data, "config": config, "strategies": {**specs, **dict(include)},
-                         "sim_args": x["sim_args"], "burn_in": x["burn_in"]}, kwargs)
+                         "burn_in": x["burn_in"]}, dots)
+    args["sim_args"] = sa
     st = _ext("bootstrap", "bootstrap_study")(**args)
     pid = pd.Series(ids, index=list(specs.keys()), dtype=np.int64)
     # R-Attribut param_ids: bei Listenobjekten als Python-Attribut ``attrs`` (kein Listenelement)
@@ -911,7 +918,7 @@ def _sign(v):
     return np.where(v > 0, 1.0, np.where(v < 0, -1.0, np.where(np.isnan(v), v, 0.0)))
 
 
-def sharpe_haircut(x, n_obs=None, n_tests=None, frequency=("week", "day", "month"), dates=None,
+def sharpe_haircut(x, *, n_obs=None, n_tests=None, frequency=("week", "day", "month"), dates=None,
                    risk_free=0, ppy=52):
     """Sharpe-Ratio-Abschlag für Mehrfachtests (Harvey & Liu 2015).
 
@@ -924,7 +931,7 @@ def sharpe_haircut(x, n_obs=None, n_tests=None, frequency=("week", "day", "month
             Vektor annualisierter Sharpe Ratios (dann ``n_obs`` und ``ppy``).
         n_obs: Anzahl Perioden (nur und zwingend bei Vektor-Eingabe).
         n_tests: Gesamtzahl der Versuche (Standard: Anzahl Sharpe Ratios).
-        frequency, dates, risk_free: wie bei :func:`pbo`.
+        frequency, dates, risk_free: wie bei :func:`overfit_pbo`.
         ppy: Perioden je Jahr, nur bei Vektor-Eingabe (Standard 52).
 
     Returns:

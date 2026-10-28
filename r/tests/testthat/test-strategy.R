@@ -23,8 +23,8 @@ test_that("create_strategy works with assets parameter", {
 
 test_that("create_strategy converts plain lists", {
   strat <- create_strategy(assets = list(
-    ETF = list(asset_class = "etf", asset_share = 0.7),
-    Bond = list(asset_class = "etf", asset_share = 0.3, asset_bonus = 0)
+    ETF = list(asset_class = "etf", share = 0.7),
+    Bond = list(asset_class = "etf", share = 0.3, partial_exemption = 0)
   ))
   
   expect_s3_class(strat, "strategy")
@@ -46,7 +46,7 @@ test_that("create_strategy rejects unnamed assets", {
 })
 
 
-test_that("validate_strategy checks data columns", {
+test_that("strategy_validate checks data columns", {
   strat <- create_strategy(
     ETF = asset_config(asset_class = "etf")
   )
@@ -56,7 +56,7 @@ test_that("validate_strategy checks data columns", {
     ETF = 100
   )
   
-  expect_true(validate_strategy(strat, good_data))
+  expect_true(strategy_validate(strat, good_data))
   
   bad_data <- data.frame(
     date = as.Date("2024-01-01"),
@@ -64,16 +64,16 @@ test_that("validate_strategy checks data columns", {
   )
   
   expect_error(
-    validate_strategy(strat, bad_data),
+    strategy_validate(strat, bad_data),
     "Kursspalte\\(n\\) 'ETF' fehlen in data"
   )
 })
 
 
-test_that("validate_strategy checks signal columns", {
+test_that("strategy_validate checks signal columns", {
   strat <- create_strategy(
     ETF = asset_config(
-      action_type = "signal",
+      trading = "signal",
       signal_buy = "buy_signal",
       signal_sell = "sell_signal"
     )
@@ -86,7 +86,7 @@ test_that("validate_strategy checks signal columns", {
     sell_signal = FALSE
   )
   
-  expect_true(validate_strategy(strat, good_data))
+  expect_true(strategy_validate(strat, good_data))
   
   bad_data <- data.frame(
     date = as.Date("2024-01-01"),
@@ -94,63 +94,63 @@ test_that("validate_strategy checks signal columns", {
   )
   
   expect_error(
-    validate_strategy(strat, bad_data),
+    strategy_validate(strat, bad_data),
     "signal_buy-Spalte 'buy_signal' fehlt in data"
   )
 })
 
 
-test_that("add_asset adds to strategy", {
+test_that("strategy_add_asset adds to strategy", {
   strat <- create_strategy(
     ETF = asset_config()
   )
   
-  strat <- add_asset(strat, "Gold", asset_config(asset_class = "etc"))
+  strat <- strategy_add_asset(strat, "Gold", asset_config(asset_class = "etc"))
   
   expect_length(strat, 2)
   expect_true("Gold" %in% names(strat))
 })
 
 
-test_that("remove_asset removes from strategy", {
+test_that("strategy_remove_asset removes from strategy", {
   strat <- create_strategy(
     ETF = asset_config(),
     Gold = asset_config(asset_class = "etc")
   )
   
-  strat <- remove_asset(strat, "Gold")
+  strat <- strategy_remove_asset(strat, "Gold")
   
   expect_length(strat, 1)
   expect_false("Gold" %in% names(strat))
 })
 
 
-test_that("remove_asset warns on empty strategy", {
+test_that("strategy_remove_asset warns on empty strategy", {
   strat <- create_strategy(ETF = asset_config())
   
   expect_warning(
-    remove_asset(strat, "ETF"),
+    strategy_remove_asset(strat, "ETF"),
     "keine Assets mehr"
   )
 })
 
 
-test_that("update_asset modifies existing", {
+test_that("strategy_update_asset modifies existing", {
   strat <- create_strategy(
-    ETF = asset_config(asset_share = 0.5)
+    ETF = asset_config(share = 0.5)
   )
   
-  strat <- update_asset(strat, "ETF", asset_share = 0.8)
+  strat <- strategy_update_asset(strat, "ETF", share = 0.8)
   
-  expect_equal(strat$ETF$asset_share, 0.8)
+  expect_equal(strat$ETF$share, 0.8)
 })
 
 
-test_that("update_asset rejects unknown asset", {
+test_that("strategy_update_asset rejects unknown asset", {
   strat <- create_strategy(ETF = asset_config())
   
   expect_error(
-    update_asset(strat, "Unknown", asset_share = 0.5),
+    strategy_update_asset(strat, "Unknown", share = 0.5),
     "Asset 'Unknown' ist nicht in der Strategie"
   )
 })
@@ -169,8 +169,8 @@ test_that("print.strategy works", {
 
 test_that("summary.strategy shows allocation", {
   strat <- create_strategy(
-    ETF = asset_config(asset_share = 0.7),
-    Gold = asset_config(asset_share = 0.3, asset_class = "etc")
+    ETF = asset_config(share = 0.7),
+    Gold = asset_config(share = 0.3, asset_class = "etc")
   )
   
   expect_output(summary(strat), "Gesamtgewicht: 100")

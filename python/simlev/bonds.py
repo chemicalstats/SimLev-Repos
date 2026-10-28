@@ -1,9 +1,9 @@
 """Synthetische Anleihe-, Geldmarkt- und gesicherte Reihen (Port von ``r/R/bonds.R``).
 
-- :func:`bond_index_from_yields`  Total-Return-Index einer Anleihe konstanter
+- :func:`index_bond`  Total-Return-Index einer Anleihe konstanter
   Laufzeit aus einer Renditereihe (Swinkels 2019)
-- :func:`money_market_index`      Geldmarkt-Index aus einem Tageszins (Act/360)
-- :func:`currency_hedged_index`   währungsgesicherte Reihe (gedeckte Zinsparität)
+- :func:`index_money_market`      Geldmarkt-Index aus einem Tageszins (Act/360)
+- :func:`index_currency_hedged`   währungsgesicherte Reihe (gedeckte Zinsparität)
 
 Alle Zinsen in Prozent p. a.; Eingaben als Spaltenname, Vektor, Skalar oder
 ``DataFrame(date, value)`` (Stufenfunktion).
@@ -17,7 +17,7 @@ from .backcast import _fill_na, _resolve_series
 from ._r.base import quiet_fp
 from .data_prep import _as_frame, _as_numeric, _col, _days, _to_date
 
-__all__ = ["bond_index_from_yields", "money_market_index", "currency_hedged_index", "RVector"]
+__all__ = ["index_bond", "index_money_market", "index_currency_hedged", "RVector"]
 
 
 class RVector(np.ndarray):
@@ -50,7 +50,7 @@ def _bond_price(y, coupon, maturity, m):
     return coupon / m * ann + dis
 
 
-def bond_index_from_yields(data, yield_=None, maturity=10, coupon_frequency=1, method=("exact", "duration"),
+def index_bond(data, *, yield_=None, maturity=10, coupon_frequency=1, method=("exact", "duration"),
                            start=100, **kw):
     """Anleihe-Index aus Renditen (konstante Laufzeit).
 
@@ -106,7 +106,7 @@ def bond_index_from_yields(data, yield_=None, maturity=10, coupon_frequency=1, m
     return RVector(out, duration=dur)
 
 
-def money_market_index(data, rate, spread=0, basis=360, start=100):
+def index_money_market(data, rate, *, spread=0, basis=360, start=100):
     """Geldmarkt-Index aus einem Tageszins: ``I_t = I_{t-1} (1 + (i_{t-1} - s)/100 Δt/B)``.
 
     Args:
@@ -128,7 +128,7 @@ def money_market_index(data, rate, spread=0, basis=360, start=100):
     return start * r_cumprod(1 + r)
 
 
-def currency_hedged_index(data, local, domestic_rate, foreign_rate, cost=0, basis=360, start=None):
+def index_currency_hedged(data, local, domestic_rate, foreign_rate, *, cost=0, basis=360, start=None):
     """Währungsgesicherte Reihe: lokale Rendite plus Zinsdifferenz, minus Sicherungskosten.
 
     Args:
@@ -157,4 +157,4 @@ def currency_hedged_index(data, local, domestic_rate, foreign_rate, cost=0, basi
     return s * r_cumprod(1 + r)
 
 
-quiet_fp(globals(), ["bond_index_from_yields", "money_market_index", "currency_hedged_index"])
+quiet_fp(globals(), ["index_bond", "index_money_market", "index_currency_hedged"])

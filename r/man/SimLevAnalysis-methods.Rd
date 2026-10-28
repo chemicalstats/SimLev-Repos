@@ -52,7 +52,7 @@ Drawdown, rollierend und Jahresrenditen), \code{"growth"},
 \code{benchmark}, \code{annual} und \code{drawdowns}.
 }
 \description{
-Ausgabe eines Ergebnisses von \code{\link[=deep_analysis]{deep_analysis()}}. \code{print()} zeigt die
+Ausgabe eines Ergebnisses von \code{\link[=result_analysis]{result_analysis()}}. \code{print()} zeigt die
 wichtigsten Kennzahlen je Reihe (Renditen in Prozent) und, falls
 vorhanden, die Benchmark-Kennzahlen. \code{summary()} druckt zusaetzlich
 die Jahresrenditen in Prozent und je Reihe die fuenf groessten

@@ -18,12 +18,12 @@ tactical_simulation(
 \arguments{
 \item{data}{data.frame mit Spalte \code{date} (Klasse Date) und
 Kursspalten (Niveaus) aller Anlagen der Gewichte (z. B. mit
-\code{\link[=align_series]{align_series()}} vorbereitet). Fehlende Kalendertage fuellt
+\code{\link[=series_align]{series_align()}} vorbereitet). Fehlende Kalendertage fuellt
 \code{\link[=simulation]{simulation()}} selbst.}
 
 \item{weights}{\code{SimLevWeights} (aus \code{\link[=tactical_rules]{tactical_rules()}},
-\code{\link[=tactical_rotation]{tactical_rotation()}}, \code{\link[=target_volatility]{target_volatility()}}, \code{\link[=conditional_volatility]{conditional_volatility()}}, \code{\link[=glidepath]{glidepath()}},
-\code{\link[=blend_weights]{blend_weights()}} oder \code{\link[=rolling_optimization]{rolling_optimization()}}). Daten von
+\code{\link[=tactical_rotation]{tactical_rotation()}}, \code{\link[=tactical_target_volatility]{tactical_target_volatility()}}, \code{\link[=tactical_conditional_volatility]{tactical_conditional_volatility()}}, \code{\link[=tactical_glidepath]{tactical_glidepath()}},
+\code{\link[=tactical_blend]{tactical_blend()}} oder \code{\link[=portfolio_rolling]{portfolio_rolling()}}). Daten von
 \code{data}, die in \code{weights} fehlen, uebernehmen das letzte
 bekannte Zielgewicht.}
 
@@ -43,15 +43,17 @@ Standard 1); mit Attribut \code{filled} in Zeilen mit echten Kursen.}
 
 \item{asset_args}{Liste von Argumenten fuer \code{\link[=asset_config]{asset_config()}} (ueber
 \code{\link[=strategy_from_weights]{strategy_from_weights()}}), z. B.
-\code{list(asset_spread = 0.1, asset_bonus = c(aktien = 30, geld = 0))}.
+\code{list(spread = 0.1, partial_exemption = c(aktien = 30, geld = 0))}.
 Ein unbenannter einzelner Wert gilt fuer alle Anlagen; benannte Vektoren
 werden je Anlage zugeordnet (auch mit einem Element, siehe
 \code{\link[=strategy_from_weights]{strategy_from_weights()}}).}
 
-\item{...}{Weitere Argumente fuer \code{\link[=simulation]{simulation()}} (z. B. Steuern,
-\code{start_value}, \code{dca_mode}). Nicht erlaubt, weil hier
-gesteuert: \code{event_col}, \code{event_mode}, \code{event_weight},
-\code{balance_mode}, \code{balance_thresh}.}
+\item{...}{Weitere Argumente fuer \code{\link[=simulation]{simulation()}} (z. B.
+\code{tax = tax_profile()}, \code{start_value}, \code{dca = dca_plan(...)}). Das
+Rebalancing (\code{rebalance_plan(event_col, event_mode = "replace", skip = TRUE,
+event_weight, thresh = tolerance, thresh_type = tolerance_type)}) steuert die Funktion
+selbst; Pfade \code{"rebalance.*"} und die alten \code{event_col}, \code{event_mode},
+\code{event_weight}, \code{balance_mode}, \code{balance_thresh} sind ein Fehler.}
 }
 \value{
 \code{SimLevResult} wie von \code{\link[=simulation]{simulation()}} mit zusaetzlichem
@@ -60,7 +62,7 @@ um \code{lag} verschobene Zielgewichte als \code{SimLevWeights}),
 \code{events} (Daten der Umschichtungstermine aus Wechseln, Pflege und
 Sparplan, vor Anwendung von \code{tolerance}), \code{switches} (Zahl der
 Zielwechsel), \code{lag} und \code{rebalance}. Das Ergebnis laesst sich
-mit \code{\link[=deep_analysis]{deep_analysis()}} oder \code{\link[=result_index]{result_index()}} weiterverarbeiten.
+mit \code{\link[=result_analysis]{result_analysis()}} oder \code{\link[=result_index]{result_index()}} weiterverarbeiten.
 }
 \description{
 Uebersetzt eine Zielgewichtsreihe in Ereignis-Rebalancing von
@@ -73,8 +75,8 @@ selbst bleibt unveraendert (\code{event_col}, \code{event_mode =
 \details{
 \itemize{
 \item \code{every} vs. \code{rebalance}: Das Argument \code{every} der
-Gewichts-Erzeuger (\code{\link[=tactical_rotation]{tactical_rotation()}}, \code{\link[=target_volatility]{target_volatility()}},
-\code{\link[=glidepath]{glidepath()}} usw.) bestimmt, wann sich das Zielgewicht aendern kann.
+Gewichts-Erzeuger (\code{\link[=tactical_rotation]{tactical_rotation()}}, \code{\link[=tactical_target_volatility]{tactical_target_volatility()}},
+\code{\link[=tactical_glidepath]{tactical_glidepath()}} usw.) bestimmt, wann sich das Zielgewicht aendern kann.
 \code{rebalance} hier bestimmt, wann zusaetzlich ohne Zielwechsel auf
 die aktuellen Zielgewichte zurueckgefuehrt wird. Gehandelt wird an
 jedem Wechsel (nach \code{lag}) und an den Pflegeterminen.
@@ -83,7 +85,7 @@ ist, wird nach \code{lag} Zeilen von \code{data} gehandelt (Standard
 1 = naechste Zeile, bei Kalendertagsdaten also der naechste
 Kalendertag; 0 = am selben Schlusskurs, wie bei vielen
 Online-Backtestern). Traegt \code{data} das Attribut \code{filled}
-aus \code{\link[=align_series]{align_series()}}, zaehlen nur Zeilen, in denen alle Anlagen der
+aus \code{\link[=series_align]{series_align()}}, zaehlen nur Zeilen, in denen alle Anlagen der
 Gewichte echte (nicht gefuellte) Kurse haben: Ein Signal vom Freitag
 wird mit \code{lag = 1} am Montag gehandelt, nicht am Samstag zum
 Freitagskurs. Das Attribut wird an \code{\link[=simulation]{simulation()}} weitergereicht.
@@ -92,7 +94,7 @@ oder ein Rhythmus (\code{"month"}, \code{"quarter"}, \code{"year"};
 jeweils letzte vorhandene Zeile der Periode), zu dem zusaetzlich auf
 die aktuellen Zielgewichte zurueckgefuehrt wird.
 \item \code{tolerance}: Toleranzband in Prozent (wird als
-\code{balance_thresh} an \code{\link[=simulation]{simulation()}} uebergeben); an Terminen, an
+\code{rebalance_plan(thresh = tolerance)} an \code{\link[=simulation]{simulation()}} uebergeben); an Terminen, an
 denen keine Anlage staerker als das Band vom Ziel abweicht, wird nicht
 gehandelt. Gilt auch fuer Wechseltermine.
 \item Umschichtungen nutzen die Rebalancing-Logik der Engine, die mit den
@@ -100,7 +102,7 @@ Ist-Gewichten des letzten Bewertungsstands (Vortag) rechnet; nach einem
 Wechsel koennen daher Reste in der Groessenordnung der Tagesbewegung
 (meist unter einem Prozent) in der verlassenen Anlage bleiben. Ein Pflegerhythmus (\code{rebalance =
     "month"}) gleicht sie aus.
-\item Sparplaene (\code{dca_mode}) zahlen nach den Startgewichten ein; der
+\item Sparplaene (\code{dca = dca_plan(...)}) zahlen nach den Startgewichten ein; der
 Sparplantag wird zum Rebalancing-Termin, so dass die Rate sofort auf die
 aktuellen Zielgewichte verteilt wird.
 }
@@ -113,14 +115,14 @@ d$geld <- 100 * cumprod(rep(1 + 0.01 / 365, n))
 w <- tactical_rules(d, list(list(when = signal_sma(d$aktien, 200, band = 1),
                                  weights = c(aktien = 1))), default = c(geld = 1))
 res <- tactical_simulation(d, w, rebalance = "switch", lag = 1,
-                           asset_args = list(asset_bonus = c(aktien = 30, geld = 0)))
+                           asset_args = list(partial_exemption = c(aktien = 30, geld = 0)))
 res$tactical$switches
 # Zielvolatilitaet, vierteljaehrliche Pflege mit 5-Prozentpunkte-Band
-res2 <- tactical_simulation(d, target_volatility(d, c(aktien = 1), safe = "geld", target = 10),
+res2 <- tactical_simulation(d, tactical_target_volatility(d, c(aktien = 1), safe = "geld", target = 10),
                             rebalance = "quarter", tolerance = 5)
-deep_analysis(list(Regel = res, Zielvola = res2))$metrics[c("cagr", "max_drawdown"), ]
+result_analysis(list(Regel = res, Zielvola = res2))$metrics[c("cagr", "max_drawdown"), ]
 }
 \seealso{
-\code{\link[=simulation]{simulation()}}, \code{\link[=deep_analysis]{deep_analysis()}}, \code{\link[=tactical_rules]{tactical_rules()}},
+\code{\link[=simulation]{simulation()}}, \code{\link[=result_analysis]{result_analysis()}}, \code{\link[=tactical_rules]{tactical_rules()}},
 \code{\link[=tactical_rotation]{tactical_rotation()}}
 }

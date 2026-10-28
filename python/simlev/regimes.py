@@ -210,12 +210,14 @@ class SimLevHMM(RList):
     # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
 
-def _plot_hmm(x, width=900, height=380):
+def _plot_hmm(x, data=None, width=900, height=380):
     """``plot.SimLevHMM`` (SVG): gefilterte Wahrscheinlichkeit des unruhigsten Zustands über der Zeit.
 
     Zeichnet wie Julia mit den Bausteinen der Rastergrafiken (``_grid_svg``, ``_grid_lines`` aus svg.py).
+    ``data`` wird wie in R angenommen und nicht verwendet.
     Liefert ``(svg, data)``: ``filtered`` (``date``, ``probability``).
     """
+    del data  # R plot.SimLevHMM(x, data = NULL, ...): data bleibt ungenutzt
     k = int(x["k"])
     top = np.asarray(x["filtered"], dtype=np.float64)[:, k - 1].copy()
     dates = np.asarray(x["dates"]).astype("datetime64[D]")
@@ -228,7 +230,7 @@ def _plot_hmm(x, width=900, height=380):
     return p.svg, data
 
 
-def regime_hmm(data, columns, k=2, frequency=("week", "day", "month"), n_start=5, max_iter=300, tol=1e-7, seed=1):
+def regime_hmm(data, columns, *, k=2, frequency=("week", "day", "month"), n_start=5, max_iter=300, tol=1e-7, seed=1):
     """Hidden-Markov-Modell für Marktregime.
 
     Args:
@@ -317,7 +319,7 @@ def regime_hmm(data, columns, k=2, frequency=("week", "day", "month"), n_start=5
     return out
 
 
-def regime_states(x, dates, type=("filtered", "smoothed", "viterbi"), output=("state", "probability"),
+def regime_states(x, dates, *, type=("filtered", "smoothed", "viterbi"), output=("state", "probability"),
                   state_prob=None, lag=1):
     """Regime auf einen Tageskalender legen.
 

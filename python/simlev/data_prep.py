@@ -1,14 +1,14 @@
 """Daten- und Portfolio-Aufbereitung (Port von ``r/R/data_prep.R``).
 
-- :func:`align_series`        Quellen nach Datum zusammenführen, Kalender, Füllung
-- :func:`check_series`        Prüfbericht: Lücken, Ausreißer, Spikes, Splits,
+- :func:`series_align`        Quellen nach Datum zusammenführen, Kalender, Füllung
+- :func:`series_check`        Prüfbericht: Lücken, Ausreißer, Spikes, Splits,
                               stehende Kurse, Datumsprobleme
-- :func:`align_macro`         Makroreihen mit Veröffentlichungsverzug auf den
+- :func:`series_align_macro`         Makroreihen mit Veröffentlichungsverzug auf den
                               Tageskalender legen
-- :func:`convert_currency`    Währungsumrechnung über eine Kursreihe
-- :func:`total_return_index`  Kurs- zu Total-Return-Index
-- :func:`deflate`             reale Werte über einen Preisindex
-- :func:`splice_series`       Ketten aus mehreren Reihen (Proxy -> Index -> Fonds)
+- :func:`series_convert_currency`    Währungsumrechnung über eine Kursreihe
+- :func:`index_total_return`  Kurs- zu Total-Return-Index
+- :func:`series_deflate`             reale Werte über einen Preisindex
+- :func:`series_splice`       Ketten aus mehreren Reihen (Proxy -> Index -> Fonds)
 - :func:`strategy_from_weights`, :func:`portfolio_template`
                               Portfolios aus Gewichten bzw. Vorlagen
 
@@ -35,8 +35,8 @@ from ._r.rlist import RList
 from ._r.rnum import r_cumprod, r_isna, r_mean, r_median, r_sum
 
 __all__ = [
-    "align_series", "check_series", "SimLevDataCheck", "align_macro", "convert_currency",
-    "total_return_index", "deflate", "splice_series", "strategy_from_weights",
+    "series_align", "series_check", "SimLevDataCheck", "series_align_macro", "series_convert_currency",
+    "index_total_return", "series_deflate", "series_splice", "strategy_from_weights",
     "portfolio_template",
 ]
 
@@ -643,7 +643,7 @@ def _dp_frame(x, name):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# align_series
+# series_align
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _match_days(a, b) -> np.ndarray:
@@ -655,7 +655,7 @@ def _match_days(a, b) -> np.ndarray:
     return np.array([pos.get(v, -1) for v in a], dtype=np.int64)
 
 
-def align_series(*args, calendar=("day", "union", "intersect"), range=("common", "all"),  # noqa: A002
+def series_align(*args, calendar=("day", "union", "intersect"), range=("common", "all"),  # noqa: A002
                  fill=("locf", "linear", "none"), max_gap=math.inf, start=None, end=None, **sources):
     """Datenquellen nach Datum zusammenführen.
 
@@ -686,7 +686,7 @@ def align_series(*args, calendar=("day", "union", "intersect"), range=("common",
     rng = _match_arg(range, ("common", "all"))
     fill = _match_arg(fill, ("locf", "linear", "none"))
     if args or not sources or any(k == "" for k in sources):
-        raise ValueError("align_series: Quellen benennen, z. B. align_series(us = df1, eu = df2).")
+        raise ValueError("series_align: Quellen benennen, z. B. series_align(us = df1, eu = df2).")
     fr = [(nm,) + _dp_frame(src, nm) for nm, src in sources.items()]
     first = [f[1][0] if len(f[1]) else _NAN for f in fr]
     last = [f[1][-1] if len(f[1]) else _NAN for f in fr]
@@ -695,15 +695,15 @@ def align_series(*args, calendar=("day", "union", "intersect"), range=("common",
     lo = max(first) if rng == "common" else min(first)
     hi = min(last) if rng == "common" else max(last)
     if start is not None:
-        s0 = _days(_to_date(start, "align_series: start"))
+        s0 = _days(_to_date(start, "series_align: start"))
         lo = max([lo] + list(s0)) if not np.isnan(s0).any() else _NAN
     if end is not None:
-        e0 = _days(_to_date(end, "align_series: end"))
+        e0 = _days(_to_date(end, "series_align: end"))
         hi = min([hi] + list(e0)) if not np.isnan(e0).any() else _NAN
     if math.isnan(lo) or math.isnan(hi):
         raise ValueError("missing value where TRUE/FALSE needed")
     if lo > hi:
-        raise ValueError("align_series: Die Quellen \u00fcberlappen sich nicht.")
+        raise ValueError("series_align: Die Quellen \u00fcberlappen sich nicht.")
     if calendar == "day":
         dates = lo + np.arange(int(math.floor(hi - lo)) + 1, dtype=np.float64)
     elif calendar == "union":
@@ -720,7 +720,7 @@ def align_series(*args, calendar=("day", "union", "intersect"), range=("common",
     for nm, fd, fc in fr:
         for k, vals in fc.items():
             if k in out:
-                raise ValueError("align_series: Spaltenname '%s' kommt mehrfach vor." % k)
+                raise ValueError("series_align: Spaltenname '%s' kommt mehrfach vor." % k)
             mi = _match_days(dates, fd)
             v = np.where(mi >= 0, vals[np.maximum(mi, 0)] if len(vals) else _NAN, _NAN).astype(np.float64)
             obs = ~np.isnan(v)
@@ -745,11 +745,11 @@ def align_series(*args, calendar=("day", "union", "intersect"), range=("common",
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# check_series
+# series_check
 # ═══════════════════════════════════════════════════════════════════════════
 
 class SimLevDataCheck(RList):
-    """Prüfbericht aus :func:`check_series` (R-Klasse ``SimLevDataCheck``)."""
+    """Prüfbericht aus :func:`series_check` (R-Klasse ``SimLevDataCheck``)."""
 
     r_class = ("SimLevDataCheck",)
 
@@ -828,7 +828,7 @@ def _rle_true_runs(b):
     return lengths, values
 
 
-def check_series(data, columns=None, jump=20, stale=10, revert=0.8):
+def series_check(data, *, columns=None, jump=20, stale=10, revert=0.8):
     """Kursreihen prüfen.
 
     Erstellt einen Prüfbericht für eigene Kursreihen: fehlende oder nicht
@@ -849,8 +849,8 @@ def check_series(data, columns=None, jump=20, stale=10, revert=0.8):
     """
     data = _as_frame(data)
     if not isinstance(data, pd.DataFrame) or "date" not in _names(data):
-        raise ValueError("check_series: data.frame mit Spalte 'date' erwartet.")
-    d = _days(_to_date(_col(data, "date"), "check_series: date", strict=False))
+        raise ValueError("series_check: data.frame mit Spalte 'date' erwartet.")
+    d = _days(_to_date(_col(data, "date"), "series_check: date", strict=False))
     if columns is None:
         columns = [k for k in _names(data) if _is_numeric_col(_col(data, k)) and k != "date"]
     elif isinstance(columns, str):
@@ -968,7 +968,7 @@ def print_SimLevDataCheck(x, max_issues=25):  # noqa: N802 - R-Name
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# align_macro
+# series_align_macro
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _find_interval(x, vec) -> np.ndarray:
@@ -979,7 +979,7 @@ def _find_interval(x, vec) -> np.ndarray:
     return j
 
 
-def align_macro(data, macro, name="macro", lag=0, lag_unit=("day", "month"),
+def series_align_macro(data, macro, *, name="macro", lag=0, lag_unit=("day", "month"),
                 transform=("level", "yoy", "mom", "diff", "yoy_diff"), periods=None):
     """Makroreihen mit Veröffentlichungsverzug auf den Tageskalender legen.
 
@@ -1048,7 +1048,7 @@ def align_macro(data, macro, name="macro", lag=0, lag_unit=("day", "month"),
     is_df = isinstance(_as_frame(data), pd.DataFrame)
     if is_df:
         data = _as_frame(data)
-    dates = _days(_to_date(_col(data, "date") if is_df else data, "align_macro: data"))
+    dates = _days(_to_date(_col(data, "date") if is_df else data, "series_align_macro: data"))
     o = np.argsort(avail, kind="stable")
     avail = avail[o]
     vv = np.asarray(vv, dtype=np.float64)[o]
@@ -1064,10 +1064,10 @@ def align_macro(data, macro, name="macro", lag=0, lag_unit=("day", "month"),
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# convert_currency, total_return_index, deflate
+# series_convert_currency, index_total_return, series_deflate
 # ═══════════════════════════════════════════════════════════════════════════
 
-def convert_currency(data, columns, fx, method=("divide", "multiply"), suffix=None):
+def series_convert_currency(data, columns, fx, *, method=("divide", "multiply"), suffix=None):
     """Währung umrechnen.
 
     Je Zeile wird der Kurs durch den Wechselkurs geteilt (``"divide"``) oder
@@ -1096,13 +1096,13 @@ def convert_currency(data, columns, fx, method=("divide", "multiply"), suffix=No
         if c not in nms and c not in miss:
             miss.append(c)
     if miss:
-        raise ValueError("convert_currency: Spalte(n) %s fehlen in data (vorhanden: %s)."
+        raise ValueError("series_convert_currency: Spalte(n) %s fehlen in data (vorhanden: %s)."
                          % (", ".join("'%s'" % m for m in miss), ", ".join(nms)))
     f = _resolve_series(fx, data, "fx")
     with np.errstate(invalid="ignore"):
         bad = np.flatnonzero(~np.isfinite(f) | (f <= 0))
     if len(bad):
-        raise ValueError("convert_currency: Wechselkurs fx muss positiv sein; %d Zeilen ung\u00fcltig (z. B. Zeile %d: %s)."
+        raise ValueError("series_convert_currency: Wechselkurs fx muss positiv sein; %d Zeilen ung\u00fcltig (z. B. Zeile %d: %s)."
                          % (len(bad), bad[0] + 1, _fmt_num(f[bad[0]])))
     data = data.copy()
     for k in columns:
@@ -1112,7 +1112,7 @@ def convert_currency(data, columns, fx, method=("divide", "multiply"), suffix=No
     return data
 
 
-def total_return_index(price, dividends=None, yield_=None, withholding=0, dates=None, start=None, **kw):
+def index_total_return(price, *, dividends=None, yield_=None, withholding=0, dates=None, start=None, **kw):
     """Total-Return-Index aus Kursindex und Ausschüttungen.
 
     r_t = (P_t + D_t (1 - w)) / P_{t-1} - 1 + y_t/100 (1-w) Δt/365.25
@@ -1146,11 +1146,11 @@ def total_return_index(price, dividends=None, yield_=None, withholding=0, dates=
         D[np.isnan(D)] = 0
     y = np.zeros(n) if yield_ is None else np.resize(_as_numeric(np.atleast_1d(yield_)), n)
     if dates is not None:
-        dd = _days(_to_date(dates, "total_return_index: dates"))
+        dd = _days(_to_date(dates, "index_total_return: dates"))
         if len(dd) != n:
-            raise ValueError("total_return_index: dates hat L\u00e4nge %d, price %d." % (len(dd), n))
+            raise ValueError("index_total_return: dates hat L\u00e4nge %d, price %d." % (len(dd), n))
         if np.isnan(dd).any() or (np.diff(dd) < 0).any():
-            raise ValueError("total_return_index: dates m\u00fcssen vollst\u00e4ndig und aufsteigend sortiert sein (wie price).")
+            raise ValueError("index_total_return: dates m\u00fcssen vollst\u00e4ndig und aufsteigend sortiert sein (wie price).")
         dt = np.concatenate([[0.0], np.diff(dd)])
     else:
         dt = np.ones(n)
@@ -1197,7 +1197,7 @@ def _cpi_level(cpi, data, dts, what):
     return v
 
 
-def deflate(data, columns, cpi, base_date=None, suffix="_real"):
+def series_deflate(data, columns, cpi, *, base_date=None, suffix="_real"):
     """Reale Werte über einen Preisindex: real_t = nominal_t * cpi_b / cpi_t.
 
     Args:
@@ -1214,13 +1214,13 @@ def deflate(data, columns, cpi, base_date=None, suffix="_real"):
     if isinstance(columns, str):
         columns = [columns]
     data = _as_frame(data)
-    dts = _days(_to_date(_col(data, "date"), "deflate: data$date"))
+    dts = _days(_to_date(_col(data, "date"), "series_deflate: data$date"))
     c0 = _cpi_level(cpi, data, dts, "cpi")
     known = np.flatnonzero(~np.isnan(c0))
     if not len(known):
-        raise ValueError("deflate: Preisindex cpi hat keinen Wert im Zeitraum von data.")
+        raise ValueError("series_deflate: Preisindex cpi hat keinen Wert im Zeitraum von data.")
     if known[0] > 0:
-        message("Hinweis: deflate: Preisindex erst ab %s bekannt; %d Zeilen davor bleiben NA."
+        message("Hinweis: series_deflate: Preisindex erst ab %s bekannt; %d Zeilen davor bleiben NA."
                 % (_date_str(dts[known[0]]), known[0]))
     if base_date is None:
         b = known[0]
@@ -1228,7 +1228,7 @@ def deflate(data, columns, cpi, base_date=None, suffix="_real"):
         bd = _days(_to_date(base_date, "base_date"))
         b = _which_min(list(np.abs(dts - bd[0])))
     if math.isnan(c0[b]):
-        raise ValueError("deflate: am Bezugsdatum %s ist kein Preisindex bekannt (erster Wert am %s); base_date sp\u00e4ter w\u00e4hlen."
+        raise ValueError("series_deflate: am Bezugsdatum %s ist kein Preisindex bekannt (erster Wert am %s); base_date sp\u00e4ter w\u00e4hlen."
                          % (_date_str(dts[b]), _date_str(dts[known[0]])))
     data = data.copy()
     for k in columns:
@@ -1237,10 +1237,10 @@ def deflate(data, columns, cpi, base_date=None, suffix="_real"):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# splice_series
+# series_splice
 # ═══════════════════════════════════════════════════════════════════════════
 
-def splice_series(*args, dates=None, **series):
+def series_splice(*args, dates=None, **series):
     """Reihen verketten (Proxy -> Index -> Fonds).
 
     Verbindet mehrere Reihen renditebasiert zu einer langen Historie; die
@@ -1257,17 +1257,17 @@ def splice_series(*args, dates=None, **series):
     """
     src = series
     if args or len(src) < 2:
-        raise ValueError("splice_series: mindestens zwei benannte Reihen.")
+        raise ValueError("series_splice: mindestens zwei benannte Reihen.")
     names = list(src.keys())
     Fl = None
     if all(isinstance(_as_frame(v), pd.DataFrame) for v in src.values()):
-        al = align_series(**{k: _as_frame(v) for k, v in src.items()}, range="all")
+        al = series_align(**{k: _as_frame(v) for k, v in src.items()}, range="all")
         dts = _days(al["date"].to_numpy())
         V = np.column_stack([al[k].to_numpy(dtype=np.float64) for k in names])
         Fl = np.column_stack([al.attrs["filled"][k].to_numpy(dtype=bool) for k in names])
     else:
         if dates is None:
-            raise ValueError("splice_series: 'dates' angeben, wenn Vektoren \u00fcbergeben werden.")
+            raise ValueError("series_splice: 'dates' angeben, wenn Vektoren \u00fcbergeben werden.")
         V = np.column_stack([_as_numeric(v) for v in src.values()])
         dts = None
     n = V.shape[0]
@@ -1294,7 +1294,7 @@ def splice_series(*args, dates=None, **series):
     r = np.where(has, Rm[np.arange(n), np.maximum(pick, 0)], _NAN)
     nz = np.flatnonzero(~np.isnan(p))
     if not len(nz):
-        raise ValueError("splice_series: Die erste Reihe hat keine Werte.")
+        raise ValueError("series_splice: Die erste Reihe hat keine Werte.")
     a = int(nz[0])
     lv = np.full(n, _NAN)
     lv[a] = p[a]
@@ -1313,7 +1313,7 @@ def splice_series(*args, dates=None, **series):
     srcname = np.array([names[0] if not math.isnan(p[i]) else (None if pick[i] < 0 else names[pick[i]])
                         for i in np.arange(n)], dtype=object)
     srcname[np.isnan(lv)] = None
-    out_dates = _as_dates(dts) if dts is not None else _to_date(dates, "splice_series: dates")
+    out_dates = _as_dates(dts) if dts is not None else _to_date(dates, "series_splice: dates")
     return pd.DataFrame({"date": out_dates, "value": lv, "source": srcname})
 
 
@@ -1338,7 +1338,7 @@ def strategy_from_weights(weights, **kwargs):
     """Strategie aus Gewichten.
 
     Baut aus einem benannten Gewichtsvektor eine statische Strategie für
-    :func:`simulation`; jedes Asset erhält ``asset_share = Gewicht``.
+    :func:`simulation`; jedes Asset erhält ``share = Gewicht``.
 
     Args:
         weights: Benannter Vektor (``dict``/``Series``) Spaltenname -> Gewicht
@@ -1402,7 +1402,7 @@ def strategy_from_weights(weights, **kwargs):
             if val is None or (not isinstance(val, (list, tuple, np.ndarray, pd.Series, Mapping)) and _isna_scalar(val)):
                 continue
             a[key] = val
-        assets[nm] = asset_config(asset_share=float(w[i]), **a)
+        assets[nm] = asset_config(share=float(w[i]), **a)
     return create_strategy(assets=assets)
 
 
@@ -1417,7 +1417,7 @@ _PORTFOLIO_TEMPLATES = {
 }
 
 
-def portfolio_template(name=None, map=None, **kwargs):  # noqa: A002 - R-Argumentname
+def portfolio_template(*, name=None, map=None, **kwargs):  # noqa: A002 - R-Argumentname
     """Portfolio-Vorlagen.
 
     Bekannte statische Allokationen mit Rollen-Namen; über ``map`` werden die

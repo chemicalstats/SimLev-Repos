@@ -178,23 +178,23 @@
 
 # ── Engine: FIFO (src/fifo_core.cpp) ────────────────────────────────────
 
-# FIFO-gewichteter Einstandspreis (Port von calculate_fifo_price)
+# FIFO-gewichteter Einstandspreis (Port von .calculate_fifo_price)
 .sim_fifo_price_cpp <- function(buys, units, front_index) {
   .Call(C_sim_fifo_price, buys, units, front_index)
 }
 
-# Anteilige Vorabpauschale fuer FIFO-Verkauf (Port von calculate_fifo_vorabpauschale)
+# Anteilige Vorabpauschale fuer FIFO-Verkauf (Port von .calculate_fifo_vorabpauschale)
 .sim_fifo_vp_cpp <- function(buys, units, front_index) {
   .Call(C_sim_fifo_vp, buys, units, front_index)
 }
 
-# § 23 EStG lot-weise (Port von calculate_private_sale_tax); current_date als
+# § 23 EStG lot-weise (Port von .calculate_private_sale_tax); current_date als
 # Integer (Tage seit 1970-01-01)
 .sim_private_sale_tax_cpp <- function(buys, front_index, trade_count, sell_price, current_date) {
   .Call(C_sim_private_sale_tax, buys, front_index, trade_count, sell_price, current_date)
 }
 
-# FIFO-Verbrauch nach Verkauf (Port des Loops aus perform_trade_sell); aendert
+# FIFO-Verbrauch nach Verkauf (Port des Loops aus .perform_trade_sell); aendert
 # remaining und vp der Lots und fifo_front an Ort und Stelle
 .sim_fifo_consume_cpp <- function(input, name, trade_count) {
   invisible(.Call(C_sim_fifo_consume, input, name, trade_count))
@@ -202,7 +202,7 @@
 
 # ── Engine: Steuern (src/tax_core.cpp) ──────────────────────────────────
 
-# Vorabpauschale je Lot (Port des Kerns von calculate_flat_rate); base_rate
+# Vorabpauschale je Lot (Port des Kerns von .calculate_flat_rate); base_rate
 # dezimal (> 0), Datumsargumente als Tage seit 1970-01-01
 .sim_flat_rate_cpp <- function(buys, front_index, base_rate, year_start_price, market_price,
                                soy_days, eoy_days) {
@@ -210,18 +210,18 @@
         soy_days, eoy_days)
 }
 
-# § 20-Steuerkern (Port von calculate_paragraph_20_tax); aendert totals an Ort und Stelle
+# § 20-Steuerkern (Port von .calculate_paragraph_20_tax); aendert totals an Ort und Stelle
 .sim_p20_tax_cpp <- function(trade_gain, bonus, totals, tax_rate, use_spb) {
   .Call(C_sim_p20_tax, trade_gain, bonus, totals, tax_rate, use_spb)
 }
 
-# Steuer auf die Vorabpauschale (Port von calculate_vorabpauschale_tax, R-2);
+# Steuer auf die Vorabpauschale (Port von .calculate_vorabpauschale_tax, R-2);
 # aendert totals an Ort und Stelle
 .sim_vp_tax_cpp <- function(flat_rate, bonus, totals, tax_rate, use_spb) {
   .Call(C_sim_vp_tax, flat_rate, bonus, totals, tax_rate, use_spb)
 }
 
-# Verkaufsstueckzahl fuer einen Ziel-Nettoerloes (Port von calculate_sell_count);
+# Verkaufsstueckzahl fuer einen Ziel-Nettoerloes (Port von .calculate_sell_count);
 # regime: 0 = none, 1 = investment_fund, 2 = capital_gains, 3 = private_sale
 .sim_sell_count_cpp <- function(buys, front_index, target, trade_price, total_shares, fractions,
                                 regime, bonus, loss_pool, tax_rate) {

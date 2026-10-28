@@ -96,7 +96,7 @@ def _sig_out(buy, sell, lag=0):
     return {"buy": buy, "sell": sell}
 
 
-def signal_sma(x, n=200, band=0, lag=0):
+def signal_sma(x, *, n=200, band=0, lag=0):
     """Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten ``n`` Zeilen.
 
     Kauf ab ``SMA * (1 + band/100)``, Verkauf unter ``SMA * (1 - band/100)``.
@@ -115,14 +115,14 @@ def signal_sma(x, n=200, band=0, lag=0):
     return _sig_out(_cmp(np.greater_equal, xv, s * (1 + band / 100)), _cmp(np.less, xv, s * (1 - band / 100)), lag)
 
 
-def signal_ema(x, n=200, band=0, lag=0):
+def signal_ema(x, *, n=200, band=0, lag=0):
     """Wie :func:`signal_sma` mit exponentiellem Durchschnitt (Glättung 2/(n+1))."""
     xv = _as_numeric(x)
     s = _ema(xv, n)
     return _sig_out(_cmp(np.greater_equal, xv, s * (1 + band / 100)), _cmp(np.less, xv, s * (1 - band / 100)), lag)
 
 
-def signal_crossover(x, fast=50, slow=200, type=("sma", "ema"), band=0, lag=0):  # noqa: A002
+def signal_crossover(x, *, fast=50, slow=200, type=("sma", "ema"), band=0, lag=0):  # noqa: A002
     """Schneller über langsamem Durchschnitt.
 
     Args:
@@ -141,7 +141,7 @@ def signal_crossover(x, fast=50, slow=200, type=("sma", "ema"), band=0, lag=0): 
     return _sig_out(_cmp(np.greater_equal, f, s * (1 + band / 100)), _cmp(np.less, f, s * (1 - band / 100)), lag)
 
 
-def signal_momentum(x, n=250, threshold=0, band=0, lag=0):
+def signal_momentum(x, *, n=250, threshold=0, band=0, lag=0):
     """Rendite über ``n`` Zeilen in Prozent: Kauf ab ``threshold + band``, Verkauf unter ``threshold - band``."""
     x = _as_numeric(x)
     m = len(x)
@@ -153,7 +153,7 @@ def signal_momentum(x, n=250, threshold=0, band=0, lag=0):
     return _sig_out(_cmp(np.greater_equal, r, threshold + band), _cmp(np.less, r, threshold - band), lag)
 
 
-def signal_drawdown(x, sell_dd=20, buy_dd=10, window=None, lag=0):
+def signal_drawdown(x, *, sell_dd=20, buy_dd=10, window=None, lag=0):
     """Verkauf ab ``sell_dd`` Prozent unter dem (rollierenden) Hoch, Kauf unter ``buy_dd`` Prozent.
 
     Args:
@@ -177,7 +177,7 @@ def signal_drawdown(x, sell_dd=20, buy_dd=10, window=None, lag=0):
     return _sig_out(_cmp(np.less, dd, buy_dd), _cmp(np.greater_equal, dd, sell_dd), lag)
 
 
-def signal_volatility(x, n=20, threshold=25, band=0, ppy=365.25, lag=0):
+def signal_volatility(x, *, n=20, threshold=25, band=0, ppy=365.25, lag=0):
     """Realisierte Volatilität der Log-Renditen über ``n`` Zeilen in Prozent p. a.
 
     Kauf bis ``threshold - band``, Verkauf über ``threshold + band``.

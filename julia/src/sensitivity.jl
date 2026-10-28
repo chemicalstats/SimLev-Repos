@@ -1,10 +1,10 @@
 # Sensitivity – r/R/sensitivity.R (Vorlage python/simlev/sensitivity.py)
 #
 #  sensitivity_grid()         beliebige simulation()-Argumente im Raster
-#  rebalancing_sensitivity()  Rebalancing-Frequenz, Versatz und Bänder
-#  lumpsum_vs_dca()           Einmalanlage gegen gestreckten Einstieg
-#  leveraged_series()         Hebelreihe aus einem Index (MSCI-Formel)
-#  leverage_sensitivity()     Kennzahlen über den Hebel, optimaler Hebel
+#  sensitivity_rebalancing()  Rebalancing-Frequenz, Versatz und Bänder
+#  planning_lumpsum_vs_dca()           Einmalanlage gegen gestreckten Einstieg
+#  series_leverage()         Hebelreihe aus einem Index (MSCI-Formel)
+#  sensitivity_leverage()     Kennzahlen über den Hebel, optimaler Hebel
 module Sensitivity
 
 import ..SimLev
@@ -16,10 +16,11 @@ const NA = SimLev.NA
 const OF = SimLev.Overfitting
 const PS = SimLev.ParamSearch
 
-export sensitivity_grid, rebalancing_sensitivity, lumpsum_vs_dca, leveraged_series, leverage_sensitivity
+export sensitivity_grid, sensitivity_rebalancing, planning_lumpsum_vs_dca, series_leverage, sensitivity_leverage
 
-_metrics(m) = m === nothing ? SL.Bootstrap.study_metrics : m
-_sim(data, strategy, args) = OF._quiet(() -> SL.simulation(data, strategy; Dict{Symbol,Any}(Symbol(k) => v for (k, v) in args)...))
+_metrics(m) = m === nothing ? SL.Bootstrap.bootstrap_study_metrics : m
+# simulation() mit aufgelösten sim_args (Bausteine, Pfade; R: .sim_call)
+_sim(data, strategy, args) = OF._quiet(() -> SL._sim_call(data, strategy, args))
 
 "`table(errs)` als Text `<msg> (<n> x); ...` (Namen sortiert wie R, Kollation `RStats.str_collate`)."
 function _table_msg(errs)
@@ -48,29 +49,30 @@ end
 # ═════════════════════════════════════════════════════════════════════════════
 
 """
-    sensitivity_grid(data, strategy, grid; sim_args = RList(), metrics = study_metrics,
-                     cores = 1, keep_results = false)
+    sensitivity_grid(data, strategy, grid; sim_args = nothing, metrics = nothing,
+                     keep_results = false, cores = 1)
 
 Ruft `simulation()` für jede Kombination von `grid` (benannte Liste von
 Argumentwerten oder `RFrame` mit einer Zeile je Lauf; `NA`/`missing` lässt
 das Argument weg) auf und sammelt die Kennzahlen in einem `RFrame`.
+`sim_args = nothing` steht für R `list()`, `metrics = nothing` für `bootstrap_study_metrics`.
 """
-function sensitivity_grid(data, strategy, grid; sim_args = nothing, metrics = nothing, cores = 1,
-                          keep_results::Bool = false)
+function sensitivity_grid(data, strategy, grid; sim_args = nothing, metrics = nothing, keep_results::Bool = false,
+                          cores = 1)
     data = SimLev.as_rframe(data)
-    sim_args = sim_args === nothing ? SL.RList() : OF._as_rlist(sim_args)
     metrics = _metrics(metrics)
     design = _grid_frame(grid)
     SL.nrow(design) == 0 && error("Leeres Raster.")
+    SL._sim_check_names(names(design), "sensitivity_grid")   # Argumente von simulation() bzw. Pfade wie "dca.value"
+    sim_args = SL._sim_args_set(SL.RList(), sim_args, "sensitivity_grid")
     function run(i)
         a = SL.RList()
         for k in names(design)
             v = _cell(design[k], i)
             _is_na_scalar(v) || (a[k] = v)
         end
-        args = OF._modify_list(sim_args, a)
         res = try
-            _sim(data, strategy, args)
+            _sim(data, strategy, SL._sim_args_set(sim_args, a, "sensitivity_grid"))
         catch e
             e isa InterruptException && rethrow()
             return (m = nothing, err = OF._cond_msg(e), res = nothing)
@@ -111,22 +113,23 @@ _num_of(x) = x isa AbstractString ? parse(Float64, x) : Float64(x)
 _isna_lgl(v) = v === missing || v === nothing      # logisches NA (R: NA)
 
 """
-    rebalancing_sensitivity(data, strategy; frequencies = (monthly … yearly), offsets = nothing,
+    sensitivity_rebalancing(data, strategy; frequencies = (monthly … yearly), offsets = nothing,
                             bands = missing, band_type = "absolute", include_none = true,
-                            sim_args = RList(), metrics = study_metrics, cores = 1)
+                            sim_args = nothing, metrics = nothing, cores = 1)
 
 Vergleicht Rebalancing-Frequenzen (`name => (unit, span)`), Versatz vor dem
 Periodenende (`offsets`, Kalendertage) und Toleranzbänder (`bands`, Prozent;
 `missing`/`NA` = an jedem Termin). Ergebnis: `RFrame` der Klasse
-`SimLevSensitivity` (Attribut `kind = "rebalancing"`).
+`SimLevSensitivity` (Attribut `kind = "rebalancing"`). `sim_args = nothing` steht für
+R `list()`, `metrics = nothing` für `bootstrap_study_metrics`.
 """
-function rebalancing_sensitivity(data, strategy; frequencies = nothing, offsets = nothing, bands = missing,
+function sensitivity_rebalancing(data, strategy; frequencies = nothing, offsets = nothing, bands = missing,
                                  band_type = nothing, include_none::Bool = true, sim_args = nothing, metrics = nothing,
                                  cores = 1)
     data = SimLev.as_rframe(data)
     band_type = OF._match_arg(band_type, ("absolute", "relative"))
     frequencies = frequencies === nothing ? _FREQ : OF._kv(frequencies)
-    sim_args = sim_args === nothing ? SL.RList() : OF._as_rlist(sim_args)
+    sim_args = SL._sim_args_set(SL.RList(), sim_args, "sensitivity_rebalancing")
     metrics = _metrics(metrics)
     offs = offsets === nothing ? Any[missing] : Any[e for e in PS._vec(offsets)]
     bnds = Any[e for e in PS._vec(bands)]
@@ -134,20 +137,20 @@ function rebalancing_sensitivity(data, strategy; frequencies = nothing, offsets 
     for (fn, f) in frequencies
         f = collect(f)
         for off in offs, b in bnds
-            a = SL.RList("balance_mode" => true, "balance_unit" => String(string(f[1])), "balance_span" => _num_of(f[2]),
-                         "balance_thresh_type" => band_type)
+            # Rebalancing über Pfade: weitere Angaben eines rebalance_plan() aus sim_args bleiben erhalten
+            a = SL.RList("rebalance.unit" => String(string(f[1])), "rebalance.span" => _num_of(f[2]),
+                         "rebalance.thresh_type" => band_type)
             if !OF._isna(off)
-                a["balance_anchor"] = "end"; a["balance_days"] = off + 1
+                a["rebalance.anchor"] = "end"; a["rebalance.days"] = off + 1
             end
-            OF._isna(b) || (a["balance_thresh"] = b)
+            OF._isna(b) || (a["rebalance.thresh"] = b)
             push!(rows, (label = (fn, off, b, band_type), args = a))
         end
     end
-    include_none && push!(rows, (label = ("none", missing, missing, missing), args = SL.RList("balance_mode" => false)))
+    include_none && push!(rows, (label = ("none", missing, missing, missing), args = SL.RList("rebalance" => nothing)))
     function run(i)
-        args = OF._modify_list(sim_args, rows[i].args)
         res = try
-            _sim(data, strategy, args)
+            _sim(data, strategy, SL._sim_args_set(sim_args, rows[i].args, "sensitivity_rebalancing"))
         catch e
             e isa InterruptException && rethrow()
             return OF._cond_msg(e)
@@ -156,7 +159,7 @@ function rebalancing_sensitivity(data, strategy; frequencies = nothing, offsets 
     end
     out = SL.RParallel.par_lapply(1:length(rows), run, cores)
     ok = [!(o isa AbstractString) for o in out]
-    any(ok) || error("rebalancing_sensitivity: Alle $(length(out)) Läufe fehlgeschlagen: $(_table_msg(out))")
+    any(ok) || error("sensitivity_rebalancing: Alle $(length(out)) Läufe fehlgeschlagen: $(_table_msg(out))")
     good = out[ok]; lab = [r.label for r in rows[ok]]
     mnames = good[1][1]
     n = length(good)
@@ -196,27 +199,28 @@ end
 _rep_get(rep, a, key) = (r = rep[a]; v = r isa AbstractDict || r isa SL.RList ? r[key] : getproperty(r, Symbol(key)); Float64[Float64(e) for e in v])
 
 """
-    lumpsum_vs_dca(data, strategy; amount = 10000, months = 12, horizon = 10, step = 1,
-                   sim_args = RList(), cores = 1)
+    planning_lumpsum_vs_dca(data, strategy; amount = 10000, months = 12, horizon = 10, step = 1,
+                   sim_args = nothing, cores = 1)
 
 Einmalanlage gegen Einstieg in `months` Monatsraten für rollierende
 Starttermine (Monatserste); Vergleich des Vermögens nach `horizon` Jahren.
 Ergebnis: `RFrame` der Klasse `SimLevLumpSum` mit Attributen `summary` und
-`settings`.
+`settings`. `sim_args = nothing` steht für R `list()`.
 """
-function lumpsum_vs_dca(data, strategy; amount = 10000, months = 12, horizon = 10, step = 1, sim_args = nothing,
+function planning_lumpsum_vs_dca(data, strategy; amount = 10000, months = 12, horizon = 10, step = 1, sim_args = nothing,
                         cores = 1)
     data = SimLev.as_rframe(data)
-    sim_args = sim_args === nothing ? SL.RList() : OF._as_rlist(sim_args)
-    own = [k for k in keys(sim_args) if k in ("start_value", "dca_mode", "dca_value", "dca_span", "dca_unit", "dca_skip")]
-    isempty(own) || error("lumpsum_vs_dca setzt $(join(own, ", ")) selbst; aus sim_args entfernen (Betrag über amount, Raten über months).")
+    sim_args = SL.RList(SL._sim_kv(sim_args)...)
+    own = [k for k in keys(sim_args) if k in ("start_value", "dca", "dca_mode", "dca_value", "dca_span", "dca_unit", "dca_skip") ||
+           startswith(k, "dca.")]
+    isempty(own) || error("planning_lumpsum_vs_dca setzt $(join(own, ", ")) selbst; aus sim_args entfernen (Betrag über amount, Raten über months).")
+    sim_args = SL._sim_args_set(SL.RList(), sim_args, "planning_lumpsum_vs_dca")
     data = PS._as_frame(data)
-    data["date"] = OF._dates(data["date"], "lumpsum_vs_dca: data\$date")
+    data["date"] = OF._dates(data["date"], "planning_lumpsum_vs_dca: data\$date")
     data = SL.rows(data, OF._order(Float64[OF._days(v) for v in data["date"]]))
     d = collect(Date, data["date"])
     dn = Float64[OF._days(v) for v in d]
-    tm = get(sim_args, "tax_mode", nothing)
-    tm isa AbstractString && tm == "person" &&
+    get(sim_args, "tax", nothing) !== nothing && get(sim_args, "funds", nothing) === nothing &&
         @warn "Mit Steuern ist die Fortschreibung des DCA-Depots nach der Einstiegsphase eine Näherung (Index der Einmalanlage)."
     firsts = d[Dates.day.(d) .== 1]
     last_ok = _seq_date_2nd(maximum(d), "-" * _num_str(horizon) * " years")
@@ -234,11 +238,10 @@ function lumpsum_vs_dca(data, strategy; amount = 10000, months = 12, horizon = 1
         e = _seq_date_2nd(s, hz) - Day(1)
         e_dca = _seq_date_2nd(s, mo) - Day(1)
         w = SL.rows(data, (d .>= s) .& (d .<= e))
-        ls = _sim(w, strategy, OF._modify_list(SL.RList("start_value" => amount), sim_args))
+        ls = _sim(w, strategy, SL.RList("start_value" => amount, SL._sim_kv(sim_args)...))
         wd = SL.rows(data, (d .>= s) .& (d .<= e_dca))
-        dca = _sim(wd, strategy, OF._modify_list(SL.RList("start_value" => amount / months, "dca_mode" => true,
-                                                           "dca_value" => amount / months, "dca_span" => 1,
-                                                           "dca_unit" => "month", "dca_skip" => true), sim_args))
+        dp = SL.dca_plan(; value = amount / months, span = 1, unit = "month", skip = true)
+        dca = _sim(wd, strategy, SL.RList("start_value" => amount / months, "dca" => dp, SL._sim_kv(sim_args)...))
         ix = SL.Withdrawal.result_index(ls)
         ixd = collect(Date, ix["date"]); ixv = OF._tofloat(ix["value"])
         k = findfirst(==(maximum(wd["date"])), ixd)
@@ -290,14 +293,14 @@ end
 _col(data, k) = data isa SL.RFrame ? data[k] : OF._lget(data, k)
 
 """
-    leveraged_series(data, index; leverage = 2, rate = 0, expense = 0, spread = 0, start = 100)
+    series_leverage(data, index; leverage = 2, rate = 0, expense = 0, spread = 0, start = 100)
 
 Täglich zurückgesetzte Hebelreihe (Niveau) aus der Indexspalte `index`:
 `r = L x + (1 - L) i T/360 - TER T/365 - s m(L) T/360` (Raten in Prozent
 p. a.; `rate` als Zahl, Spaltenname, Vektor, data.frame(date, value) oder
 benannter Vektor).
 """
-function leveraged_series(data, index; leverage = 2, rate = 0, expense = 0, spread = 0, start = 100)
+function series_leverage(data, index; leverage = 2, rate = 0, expense = 0, spread = 0, start = 100)
     data = SimLev.as_rframe(data)
     idx = OF._tofloat(SL.Backcast._fill_na(OF._tofloat(_col(data, String(index))), "locf"))
     dts = Float64[OF._days(v) for v in OF._dates(_col(data, "date"), "data\$date")]
@@ -317,24 +320,25 @@ function leveraged_series(data, index; leverage = 2, rate = 0, expense = 0, spre
 end
 
 """
-    leverage_sensitivity(data, index; leverages = 0.5:0.25:4, rate = 0, expense = 0, spread = 0,
-                         strategy = nothing, sim_args = RList(), metrics = study_metrics, cores = 1)
+    sensitivity_leverage(data, index; leverages = 0.5:0.25:4, rate = 0, expense = 0, spread = 0,
+                         strategy = nothing, sim_args = nothing, metrics = nothing, cores = 1)
 
-Kennzahlen über den Hebel: je Hebel eine Reihe aus [`leveraged_series`](@ref)
+Kennzahlen über den Hebel: je Hebel eine Reihe aus [`series_leverage`](@ref)
 als Asset `LEV` simuliert. Ergebnis: `RFrame` der Klasse
 `SimLevSensitivity` mit Attributen `optimal` (Hebel mit maximaler CAGR bzw.
-Sharpe Ratio) und `kind = "leverage"`.
+Sharpe Ratio) und `kind = "leverage"`. `sim_args = nothing` steht für R `list()`,
+`metrics = nothing` für `bootstrap_study_metrics`.
 """
-function leverage_sensitivity(data, index; leverages = nothing, rate = 0, expense = 0, spread = 0, strategy = nothing,
+function sensitivity_leverage(data, index; leverages = nothing, rate = 0, expense = 0, spread = 0, strategy = nothing,
                               sim_args = nothing, metrics = nothing, cores = 1)
     data = SimLev.as_rframe(data)
     leverages = leverages === nothing ? PS._seq_by(0.5, 4, 0.25) : OF._tofloat(PS._vec(leverages))
-    sim_args = sim_args === nothing ? SL.RList() : OF._as_rlist(sim_args)
+    sim_args = SL._sim_args_set(SL.RList(), sim_args, "sensitivity_leverage")
     metrics = _metrics(metrics)
-    strategy === nothing && (strategy = SL.create_strategy("LEV" => SL.asset_config("etf", "bnh"; asset_bonus = 30)))
+    strategy === nothing && (strategy = SL.create_strategy("LEV" => SL.asset_config("etf", "bnh"; partial_exemption = 30)))
     dts = OF._dates(_col(data, "date"), "data\$date")
     function run(L)
-        lev = leveraged_series(data, index; leverage = L, rate = rate, expense = expense, spread = spread)
+        lev = series_leverage(data, index; leverage = L, rate = rate, expense = expense, spread = spread)
         lev[lev .<= 0] .= 1e-8
         df = SL.RFrame("date" => dts, "LEV" => lev)
         res = try

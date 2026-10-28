@@ -1,17 +1,17 @@
 # =============================================================================
 #  compute_rebal_trigger.R  —  Vorberechnung der Event-Trigger-Spalte
 # -----------------------------------------------------------------------------
-#  Liefert die binaere Spalte, die simulation(..., event_col = "...") konsumiert.
+#  Liefert die binaere Spalte, die simulation(..., rebalance = rebalance_plan(event_col = "...")) konsumiert.
 #  Die gesamte Band-/Schwellenwert-Logik liegt HIER, ausserhalb der Engine.
 # =============================================================================
 
 #' Ereignis-Trigger-Spalte fuer Rebalancing vorberechnen
 #'
-#' Erzeugt eine logische Spalte fuer simulation(..., event_col = ...). Die
+#' Erzeugt eine logische Spalte fuer simulation(..., rebalance = rebalance_plan(event_col = ...)). Die
 #' Referenz (Hebel bzw. Volatilitaet) ist der erste nicht fehlende Wert (bei
 #' fuehrenden NA, z. B. EWMA-Anlaufphase, ein spaeterer Tag) und springt nur
 #' an Tagen, an denen dieser Trigger ausloest; NA-Werte loesen nicht aus.
-#' Massgebliche Beschreibung: Hilfeseite \code{?compute_rebal_trigger}.
+#' Massgebliche Beschreibung: Hilfeseite \code{?rebalance_trigger}.
 #'
 #' @param df        data.frame mit den taeglichen Feldern (mindestens eine Zeile).
 #' @param type      "abs_leverage", "rel_leverage", "vol_band" oder "combined" (kein Standard).
@@ -26,14 +26,14 @@
 #' @return df mit zusaetzlicher logischer Spalte `out_col` (Tag 1 immer FALSE).
 #' @export
 #' @noRd
-compute_rebal_trigger <- function(df, type,
+rebalance_trigger <- function(df, type,
                                   threshold = 10,
                                   lev_col   = "target_leverage",
                                   vol_col   = "sigma_ewma",
                                   triggers  = NULL,
                                   out_col   = "rebal_trigger"){
   n <- nrow(df)
-  if(n < 1L) stop("compute_rebal_trigger: leerer data.frame.")
+  if(n < 1L) stop("rebalance_trigger: leerer data.frame.")
   threshold <- threshold / 100               # PROZENT-KONVENTION (Sub-Trigger via Rekursion)
   trig <- logical(n)                         # Tag 1 (Einstieg) bleibt immer FALSE
   # R1-21: Referenz = erster nicht fehlender Wert (z. B. nach EWMA-Anlaufphase);
@@ -70,7 +70,7 @@ compute_rebal_trigger <- function(df, type,
       stop("type='combined' ben\u00f6tigt eine nicht-leere Liste 'triggers'.")
     for(sub in triggers){
       args   <- modifyList(list(df = df, out_col = "..__sub__.."), sub)
-      sub_df <- do.call(compute_rebal_trigger, args)
+      sub_df <- do.call(rebalance_trigger, args)
       trig   <- trig | sub_df[["..__sub__.."]]
     }
 

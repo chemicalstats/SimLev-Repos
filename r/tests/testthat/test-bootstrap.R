@@ -1,4 +1,4 @@
-# Tests fuer bootstrap_config(), bootstrap(), bootstrap_study(), block_length()
+# Tests fuer bootstrap_config(), bootstrap(), bootstrap_study(), bootstrap_block_length()
 
 make_boot_data <- function(n = 1500, seed = 5) {
   set.seed(seed)
@@ -88,7 +88,7 @@ test_that("block_length implements Politis-White and detects dependence", {
   set.seed(1)
   x_iid <- rnorm(3000)
   x_ar <- as.numeric(arima.sim(list(ar = 0.7), 3000))
-  b_iid <- block_length(x_iid); b_ar <- block_length(x_ar)
+  b_iid <- bootstrap_block_length(x_iid); b_ar <- bootstrap_block_length(x_ar)
   expect_equal(colnames(b_ar), c("stationary", "circular"))
   expect_lt(b_iid[1, "stationary"], 5)
   expect_gt(b_ar[1, "stationary"], 5)
@@ -111,8 +111,8 @@ test_that("bootstrap_study evaluates strategies on identical paths", {
   d <- make_boot_data(); cfg <- make_cfg()
   sig <- function(df, k = 50) { s <- stats::filter(df$eu, rep(1 / k, k), sides = 1); list(buy = df$eu >= s, sell = df$eu < s) }
   strats <- list(
-    bnh = create_strategy(eu_l2 = asset_config("etf", "bnh", asset_bonus = 30)),
-    sma = list(strategy = create_strategy(letf = asset_config("etf", "signal", asset_bonus = 30,
+    bnh = create_strategy(eu_l2 = asset_config("etf", "bnh", partial_exemption = 30)),
+    sma = list(strategy = create_strategy(letf = asset_config("etf", "signal", partial_exemption = 30,
                                                               signal_buy = "buy", signal_sell = "sell")),
                signal = sig, map = c(letf = "eu_l2")))
   st <- bootstrap_study(d, cfg, "stationary", n = 4, strategies = strats, params = list(L = 50),

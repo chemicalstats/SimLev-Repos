@@ -29,7 +29,7 @@ und `precompile.jl`.
 | `src/r/fmt.jl` | `RFmt` | `format`, `formatC`, `sprintf`, `round`, `signif`, `print` von Vektoren/Matrizen/data.frames → `_r/fmt.py` |
 | `src/r/stats.jl` | `RStats` | Modulkopf mit Exporten; bindet die Themen ein (gleiche Namen wie in Python): `stats_sort.jl` (Hilfen, `order`, `r_sort`, `r_rank`, `cut`, `quantile`, `median`, …), `stats_cor.jl` (`cor`, `cov`, `var`, `scale`), `stats_smooth.jl` (`approx`, `r_filter`, `fft`, `density`, `smooth_spline`), `stats_optim.jl` (`optimize`, `uniroot`, `optim`, `nlminb`), `stats_models.jl` (`lm`, `glm`, `poly`, `predict`, `p_adjust`, `ecdf`, `ave`, `aggregate`, `t_test`), `stats_cluster.jl` (`dist`, `hclust`) → `_r/stats.py` (Sammelmodul) und `_r/stats_*.py` |
 | `src/r/linalg.jl` | `RLinalg` | `matprod`, `crossprod`, `solve`, `chol`, `qr` (LINPACK), `determinant`, `eigen` → `_r/linalg.py`, `_r/_blas.py`, `_r/_lapack.py`, `_r/_linpack.py` |
-| `src/r/rexpr.jl` | `RExpr` | Ausdrücke in R-Syntax als Text (`eval(parse(text = …), data, env)`): ein gemeinsamer Auswerter für Bedingungen in `bootstrap_probability`, `regime_subset`, `view_prob`/`entropy_pooling` und `tactical_rules` (R-Vorrang inkl. schwach bindendem `!`, NA-Logik, `%in%`, `%%`, Funktionen über `RLibm`/`RFmt`) |
+| `src/r/rexpr.jl` | `RExpr` | Ausdrücke in R-Syntax als Text (`eval(parse(text = …), data, env)`): ein gemeinsamer Auswerter für Bedingungen in `bootstrap_probability`, `regime_subset`, `view_prob`/`scenario_entropy_pooling` und `tactical_rules` (R-Vorrang inkl. schwach bindendem `!`, NA-Logik, `%in%`, `%%`, Funktionen über `RLibm`/`RFmt`) |
 | `src/r/port.jl` | `RPort` | PORT-Bibliothek für `RStats.nlminb` (stats `port.c`, `portsrc.f`, `nlminb.R`) → `_r/port.py` |
 | `src/r/evd.jl` | `REvd` | evd 2.3-7.1 `fpot`, `nlgpd` (`src/pot.c`; in R übernommen als `.evd_fpot`, immer aktiv) → `_r/evd.py` |
 | `src/r/truncnorm.jl` | `RTruncnorm` | truncnorm 1.0-9 `rtruncnorm` (in R übernommen als `.truncnorm_rtruncnorm`) → `_r/truncnorm.py` |
@@ -37,7 +37,7 @@ und `precompile.jl`.
 | `src/r/rugarch.jl` | `RRugarch` | rugarch 1.5-6 `ugarchfit`/`coef` für sGARCH/gjrGARCH(1,1), Solver „hybrid“ (solnp → nlminb → gosolnp), Filter aus `src/filters.c`, eigene Richardson-Hesse-Matrix `_richardson_hessian` (in R übernommen als `.rugarch_ugarchfit`, Ableitungen `.sl_richardson_hessian` in `r/R/richardson.R`, immer aktiv) → `_r/rugarch.py` |
 | `src/r/stinepack.jl` | `RStinepack` | stinepack 1.5 `stinterp`, `stinemanSlopes`, `parabolaSlopes` (in R übernommen als `.stinepack_stinterp`) → `_r/stinepack.py` |
 | `src/r/imputets.jl` | `RImputeTS` | imputeTS 3.4 `na_interpolation` (stine, linear), `na_locf` (`src/locf.cpp`; in R übernommen als `.imputets_na_interpolation`, immer aktiv) → `_r/imputets.py` |
-| `src/engine.jl` u. a. | – | `simulation()` und Strategie/Config: `engine.jl` (Hilfen, Handels- und Steuerfunktionen; r/R/sim_base.R → `_sim_base.py`), `sim_phases.jl` (r/R/sim_validate.R, sim_prepare.R → `_sim_phases.py`), `sim_loop.jl` (r/R/sim_actions.R, sim_loop.R → `_sim_loop.py`), `sim_evaluate.jl` (r/R/sim_evaluate.R → `_sim_evaluate.py`; dazu `simulation()` aus r/R/simulation.R → `engine.py`) |
+| `src/engine.jl` u. a. | – | `simulation()` und Strategie/Config: `engine.jl` (Hilfen, Handels- und Steuerfunktionen; r/R/sim_base.R → `_sim_base.py`), `sim_phases.jl` (r/R/sim_validate.R, sim_prepare.R → `_sim_phases.py`), `sim_loop.jl` (r/R/sim_actions.R, sim_loop.R → `_sim_loop.py`), `sim_evaluate.jl` (r/R/sim_evaluate.R → `_sim_evaluate.py`; dazu `simulation()` und `_simulation_flat()` aus r/R/simulation.R → `engine.py`), `sim_blocks.jl` (Bausteine, r/R/sim_blocks.R → `_sim_blocks.py`) |
 | `src/svg.jl` | – | Grafikmodul: `SimLevPlot`, `_plot_method` & Co., alle SVG-Zeichenbausteine (siehe [Grafik](#grafik)) → `simlev/svg.py` |
 | `src/dashboard.jl` | – | Dashboard-Daten und Panels, `plot_dashboard`, `export_dashboard` (r/R/plot_dashboard.R) → `dashboard.py` |
 | `src/<modul>.jl` | `DataPrep`, `Backcast`, `Bonds`, `Signals`, `Bootstrap`, `Withdrawal`, `Dependence`, `Regimes`, `MsGarch`, `Scenarios`, `Optimize`, `Tactical`, `DeepAnalysis`, `Planning`, `AnalysisTests`, `Overfitting`, `ParamSearch`, `Sensitivity` | je eine R-Datei `r/R/<modul>.R` → `python/simlev/<modul>.py` |
@@ -133,8 +133,8 @@ Keine externen Pakete; erlaubt ist nur die Standardbibliothek (`Dates`,
 
 `RParallel.par_lapply` (`src/r/parallel.jl`) ist die einzige Stelle, die
 parallel rechnet (Aufrufer: `bootstrap`, `bootstrap_study`, `param_search`,
-`sensitivity_grid`, `rebalancing_sensitivity`, `lumpsum_vs_dca`,
-`leverage_sensitivity`; `Bootstrap._par_lapply` und `ParamSearch._par_lapply`
+`sensitivity_grid`, `sensitivity_rebalancing`, `planning_lumpsum_vs_dca`,
+`sensitivity_leverage`; `Bootstrap._par_lapply` und `ParamSearch._par_lapply`
 leiten weiter). Semantik wie `parallel::mclapply(mc.preschedule = FALSE,
 mc.set.seed = FALSE)` (Verhalten in R 4.3.3 ermittelt in Etappe 5): unter
 zwei Kernen oder mit höchstens einem Element `lapply`; sonst startet jede
@@ -234,7 +234,7 @@ Konsolenausgabe, Warnungen und Fehlermeldungen. Bei der Entwicklung spart
 Die Arbeitslast in `src/precompile.jl` deckt nur häufige Wege ab: Engine,
 `bootstrap` (stationär und `"garch"` über den rugarch-Weg),
 `bootstrap_study`, `_ms_garch_fit`, Entnahme, Optimierung und
-`deep_analysis` (Etappe 4.8; gemessen auf zwei Kernen, Julia 1.13.2):
+`result_analysis` (Etappe 4.8; gemessen auf zwei Kernen, Julia 1.13.2):
 
 | | vorher | nachher |
 |---|---|---|
@@ -246,7 +246,7 @@ Die Arbeitslast in `src/precompile.jl` deckt nur häufige Wege ab: Engine,
 | Summe Vorkompilieren + erste Läufe aller Aufgaben | 340 s | 292 s |
 
 Seltene Wege (Parametersuche, Abhängigkeiten, Szenarien, Sensitivitäten,
-Taktik, Planung, `align_series`) übersetzt ihr erster Aufruf; deshalb
+Taktik, Planung, `series_align`) übersetzt ihr erster Aufruf; deshalb
 braucht der Testteil von `Pkg.test()`, der alle Module berührt, rund 50 s
 mehr (315 statt 265 s), sodass Vorkompilieren plus `Pkg.test()` nach einer
 Änderung etwa gleich lang bleibt (594 statt 581 s). Ein neuer
@@ -256,6 +256,25 @@ Baustein lohnt sich nur, wenn sein Weg häufig ist: Jeder kostet bei jeder
 Was ein Referenzfall bitgleich prüft, steht nicht noch einmal als Test in
 `test/` (Etappe 4.1); so stehen die konstanten Ausdrücke, die
 `golden/modules/rexpr` wörtlich prüft, nicht mehr in `rexpr_tests.jl`.
+
+## Eingefrorene Schnittstelle
+
+Die öffentliche Schnittstelle 0.5.0 ist in `tools/api_snapshot/frozen/jl.json`
+festgehalten (Etappe 6.6): je Export aus `names(SimLev)` und je registrierter
+`show`/`r_summary`/`r_plot`-Methode die Argumente der Hauptmethode in
+Reihenfolge mit Art (`positional`, `keyword`, `varargs`, `kwargs_rest`) und
+Standardwert aus dem Quelltext, dazu die Namen der exportierten Typen; ohne
+Datei, Zeile, Modul und Datum. `test/api_frozen_tests.jl` (in `runtests.jl`)
+lädt dafür den Auszug `tools/api_snapshot/api_jl.jl` in ein eigenes Modul,
+ruft `frozen_check` im Testprozess auf und nennt bei Abweichung jede Änderung
+(Funktion neu oder weg, Argument neu, weg oder umsortiert, Art oder
+Standardwert geändert).
+
+Eine gewollte Änderung der Schnittstelle wird bewusst neu festgeschrieben:
+Eintrag oben in `tools/api_snapshot/CHANGES.md` (Datum, was sich ändert,
+warum), dann aus der Repo-Wurzel `tools/api_snapshot/run.sh --freeze`; das
+schreibt `frozen/` für alle drei Sprachen neu und bricht ohne neuen Eintrag
+ab. Einzelheiten in [`tools/api_snapshot/README.md`](../tools/api_snapshot/README.md).
 
 ## Schalter `SIMLEV_*`
 

@@ -1,10 +1,10 @@
 """Parameterstudien um ``simulation()`` (R: ``sensitivity.R``).
 
 - :func:`sensitivity_grid`         beliebige ``simulation()``-Argumente im Raster
-- :func:`rebalancing_sensitivity`  Rebalancing-Frequenz, Versatz und Bänder
-- :func:`lumpsum_vs_dca`           Einmalanlage gegen gestreckten Einstieg
-- :func:`leveraged_series`         Hebelreihe aus einem Index (MSCI-Formel)
-- :func:`leverage_sensitivity`     Kennzahlen über den Hebel, optimaler Hebel
+- :func:`sensitivity_rebalancing`  Rebalancing-Frequenz, Versatz und Bänder
+- :func:`planning_lumpsum_vs_dca`           Einmalanlage gegen gestreckten Einstieg
+- :func:`series_leverage`         Hebelreihe aus einem Index (MSCI-Formel)
+- :func:`sensitivity_leverage`     Kennzahlen über den Hebel, optimaler Hebel
 """
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ from .param_search import (_expand_grid, _isna, _match_arg, _modify_list, _py, _
                            _cond_msg, _which_max_py)
 from .svg import _res_fig, _res_finish, _res_line, _res_panel, _res_points, _res_range, _res_rect, _res_vline
 
-__all__ = ["sensitivity_grid", "rebalancing_sensitivity", "lumpsum_vs_dca", "leveraged_series",
-           "leverage_sensitivity", "SimLevSensitivity", "SimLevLumpSum"]
+__all__ = ["sensitivity_grid", "sensitivity_rebalancing", "planning_lumpsum_vs_dca", "series_leverage",
+           "sensitivity_leverage", "SimLevSensitivity", "SimLevLumpSum"]
 
 _NA = _fmt.NA_REAL
 _NAN = _NA          # alle Verwendungen hier sind R's NA
@@ -41,11 +41,17 @@ def _ext(mod, name):
 
 
 def _simulation():
+    """``simulation(data, strategy, **args)`` mit aufgelösten sim_args (R: ``.sim_call``)."""
     return _ext("engine", "simulation")
 
 
+def _args_set(args, over, who):
+    from ._sim_blocks import _sim_args_set
+    return _sim_args_set(args, over, who)
+
+
 def _metrics_default(metrics):
-    return _ext("bootstrap", "study_metrics") if metrics is None else metrics
+    return _ext("bootstrap", "bootstrap_study_metrics") if metrics is None else metrics
 
 
 def _as_series(m):
@@ -132,7 +138,7 @@ def _is_na_scalar(v):
 # sensitivity_grid
 # ─────────────────────────────────────────────────────────────────────────────
 
-def sensitivity_grid(data, strategy, grid, sim_args=None, metrics=None, cores=1, keep_results=False):
+def sensitivity_grid(data, strategy, grid, *, sim_args=None, metrics=None, keep_results=False, cores=1):
     """``simulation()`` über ein Parameterraster.
 
     Ruft ``simulation()`` für jede Kombination von ``grid`` auf denselben Daten
@@ -143,18 +149,20 @@ def sensitivity_grid(data, strategy, grid, sim_args=None, metrics=None, cores=1,
         grid: dict von Argumentwerten (alle Kombinationen) oder data.frame mit
             einer Zeile je Lauf; ``NA`` lässt das Argument weg.
         sim_args: gemeinsame Argumente (Werte aus ``grid`` haben Vorrang).
-        metrics: Funktion ``SimLevResult`` → benannter Vektor (Standard ``study_metrics``).
+        metrics: Funktion ``SimLevResult`` → benannter Vektor (Standard ``bootstrap_study_metrics``).
         cores: Anzahl Prozesse (Standard 1).
         keep_results: Ergebnisse zusätzlich in ``attrs["results"]``.
 
     Returns:
         ``pandas.DataFrame``: Rasterspalten, Kennzahlen und ggf. ``error``.
     """
-    sim_args = {} if sim_args is None else dict(sim_args)
     metrics = _metrics_default(metrics)
     design = _grid_frame(grid)
     if not len(design):
         raise ValueError("Leeres Raster.")
+    from ._sim_blocks import _sim_check_names
+    _sim_check_names([str(k) for k in design.columns], "sensitivity_grid")   # Argumente bzw. Pfade wie "dca.value"
+    sim_args = _args_set({}, sim_args, "sensitivity_grid")
     simulation = _simulation()
 
     def run(i):
@@ -162,9 +170,9 @@ def sensitivity_grid(data, strategy, grid, sim_args=None, metrics=None, cores=1,
         for k in design.columns:
             a[k] = _cell(design[k].iloc[i])
         a = {k: v for k, v in a.items() if not (not _is_list_value(v) and _isna(v))}
-        args = _modify_list(sim_args, a)
         try:
-            res = _quiet(lambda: simulation(data=data, strategy=strategy, **args))
+            args = _args_set(sim_args, a, "sensitivity_grid")
+            res = _quiet(lambda: simulation(data, strategy, **args))
         except Exception as e:  # noqa: BLE001
             return {"m": None, "err": _cond_msg(e), "res": None}
         return {"m": _as_series(metrics(res)), "err": None, "res": res if keep_results else None}
@@ -234,7 +242,7 @@ def _fmt_vec(f, v):
 
 
 class SimLevSensitivity(_RFrame):
-    """Ergebnis von :func:`rebalancing_sensitivity` / :func:`leverage_sensitivity` (R-Klasse ``SimLevSensitivity``)."""
+    """Ergebnis von :func:`sensitivity_rebalancing` / :func:`sensitivity_leverage` (R-Klasse ``SimLevSensitivity``)."""
 
     r_class = ("SimLevSensitivity", "data.frame")
 
@@ -329,7 +337,7 @@ def _num1(v):
 
 
 class SimLevLumpSum(_RFrame):
-    """Ergebnis von :func:`lumpsum_vs_dca` (R-Klasse ``SimLevLumpSum``)."""
+    """Ergebnis von :func:`planning_lumpsum_vs_dca` (R-Klasse ``SimLevLumpSum``)."""
 
     r_class = ("SimLevLumpSum", "data.frame")
 
@@ -363,7 +371,7 @@ def _vec(v):
     return [_py(v)]
 
 
-def rebalancing_sensitivity(data, strategy, frequencies=None, offsets=None, bands=_NAN,
+def sensitivity_rebalancing(data, strategy, *, frequencies=None, offsets=None, bands=_NAN,
                             band_type=("absolute", "relative"), include_none=True, sim_args=None, metrics=None,
                             cores=1):
     """Rebalancing-Sensitivität.
@@ -387,7 +395,7 @@ def rebalancing_sensitivity(data, strategy, frequencies=None, offsets=None, band
     """
     band_type = _match_arg(band_type, ("absolute", "relative"), "band_type")
     frequencies = _FREQ if frequencies is None else frequencies
-    sim_args = {} if sim_args is None else dict(sim_args)
+    sim_args = _args_set({}, sim_args, "sensitivity_rebalancing")
     metrics = _metrics_default(metrics)
     rows = []
     offs = [_NAN] if offsets is None else _vec(offsets)
@@ -396,30 +404,30 @@ def rebalancing_sensitivity(data, strategy, frequencies=None, offsets=None, band
         f = list(f)
         for off in offs:
             for b in bnds:
-                a = {"balance_mode": True, "balance_unit": str(f[0]), "balance_span": float(f[1]),
-                     "balance_thresh_type": band_type}
+                # Rebalancing über Pfade: weitere Angaben eines rebalance_plan() aus sim_args bleiben erhalten
+                a = {"rebalance.unit": str(f[0]), "rebalance.span": float(f[1]), "rebalance.thresh_type": band_type}
                 if not _isna(off):
-                    a["balance_anchor"] = "end"
-                    a["balance_days"] = off + 1
+                    a["rebalance.anchor"] = "end"
+                    a["rebalance.days"] = off + 1
                 if not _isna(b):
-                    a["balance_thresh"] = b
+                    a["rebalance.thresh"] = b
                 rows.append({"label": (fn, _numna(off), _numna(b), band_type),
                              "args": a})
     if include_none:
-        rows.append({"label": ("none", _NAN, _NAN, None), "args": {"balance_mode": False}})
+        rows.append({"label": ("none", _NAN, _NAN, None), "args": {"rebalance": None}})
     simulation = _simulation()
 
     def run(i):
-        args = _modify_list(sim_args, rows[i]["args"])
         try:
-            res = _quiet(lambda: simulation(data=data, strategy=strategy, **args))
+            args = _args_set(sim_args, rows[i]["args"], "sensitivity_rebalancing")
+            res = _quiet(lambda: simulation(data, strategy, **args))
         except Exception as e:  # noqa: BLE001
             return _cond_msg(e)
         return _as_series(metrics(res))
     out = list(_par_lapply(list(range(len(rows))), run, cores))
     ok = [not isinstance(o, str) for o in out]
     if not any(ok):
-        raise ValueError("rebalancing_sensitivity: Alle %d Läufe fehlgeschlagen: %s" % (len(out), _table_msg(out)))
+        raise ValueError("sensitivity_rebalancing: Alle %d Läufe fehlgeschlagen: %s" % (len(out), _table_msg(out)))
     good = [o for o, k in zip(out, ok) if k]
     mnames = [str(k) for k in good[0].index]
     lab = [r["label"] for r, k in zip(rows, ok) if k]
@@ -474,7 +482,7 @@ def _report_get(rep, a, key):
     return np.asarray(v, dtype=np.float64)
 
 
-def lumpsum_vs_dca(data, strategy, amount=10000, months=12, horizon=10, step=1, sim_args=None, cores=1):
+def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=10, step=1, sim_args=None, cores=1):
     """Einmalanlage gegen gestreckten Einstieg (Lump Sum vs. DCA).
 
     Vergleicht für rollierende Starttermine (jeweils am Monatsersten) die
@@ -487,24 +495,25 @@ def lumpsum_vs_dca(data, strategy, amount=10000, months=12, horizon=10, step=1, 
         months: Anzahl Monatsraten (Standard 12).
         horizon: Vergleichshorizont in Jahren (Standard 10).
         step: jeder wievielte mögliche Starttermin (Standard 1).
-        sim_args: weitere ``simulation()``-Argumente (ohne ``start_value`` und ``dca_*``).
+        sim_args: weitere ``simulation()``-Argumente (Bausteine, Pfade; ohne ``start_value`` und ``dca``).
         cores: Anzahl Prozesse.
 
     Returns:
         :class:`SimLevLumpSum` mit ``attrs["summary"]`` und ``attrs["settings"]``.
     """
     sim_args = {} if sim_args is None else dict(sim_args)
-    own = [k for k in sim_args if k in ("start_value", "dca_mode", "dca_value", "dca_span", "dca_unit", "dca_skip")]
+    own = [k for k in sim_args if k in ("start_value", "dca", "dca_mode", "dca_value", "dca_span", "dca_unit", "dca_skip")
+           or str(k).startswith("dca.")]
     if own:
-        raise ValueError("lumpsum_vs_dca setzt %s selbst; aus sim_args entfernen (Betrag über amount, Raten über months)."
+        raise ValueError("planning_lumpsum_vs_dca setzt %s selbst; aus sim_args entfernen (Betrag über amount, Raten über months)."
                          % ", ".join(own))
+    sim_args = _args_set({}, sim_args, "planning_lumpsum_vs_dca")
     data = data.copy()
-    data["date"] = _to_date(data["date"], "lumpsum_vs_dca: data$date")
+    data["date"] = _to_date(data["date"], "planning_lumpsum_vs_dca: data$date")
     data = data.iloc[np.argsort(_days(data["date"].to_numpy()), kind="stable")].reset_index(drop=True)
     d = data["date"].to_numpy().astype("datetime64[D]")
     dn = _days(d)
-    tm = sim_args.get("tax_mode")
-    if isinstance(tm, str) and tm == "person":
+    if sim_args.get("tax") is not None and sim_args.get("funds") is None:
         warnings.warn("Mit Steuern ist die Fortschreibung des DCA-Depots nach der Einstiegsphase eine Näherung "
                       "(Index der Einmalanlage).", UserWarning, stacklevel=2)
     dd = np.array([_civil(z)[2] for z in dn])
@@ -531,11 +540,11 @@ def lumpsum_vs_dca(data, strategy, amount=10000, months=12, horizon=10, step=1, 
         e = _seq_date_2nd(s, hz) - np.timedelta64(1, "D")
         e_dca = _seq_date_2nd(s, mo) - np.timedelta64(1, "D")
         w = data[(d >= s) & (d <= e)].reset_index(drop=True)
-        ls = _quiet(lambda: simulation(data=w, strategy=strategy, start_value=amount, **sim_args))
+        ls = _quiet(lambda: simulation(w, strategy, start_value=amount, **sim_args))
         wd = data[(d >= s) & (d <= e_dca)].reset_index(drop=True)
-        dca = _quiet(lambda: simulation(data=wd, strategy=strategy, start_value=amount / months, dca_mode=True,
-                                        dca_value=amount / months, dca_span=1, dca_unit="month", dca_skip=True,
-                                        **sim_args))
+        from ._sim_blocks import dca_plan
+        dp = dca_plan(value=amount / months, span=1, unit="month", skip=True)
+        dca = _quiet(lambda: simulation(wd, strategy, start_value=amount / months, dca=dp, **sim_args))
         ix = result_index(ls)
         ixd = np.asarray(ix["date"]).astype("datetime64[D]")
         ixv = ix["value"].to_numpy(dtype=np.float64)
@@ -580,7 +589,7 @@ def lumpsum_vs_dca(data, strategy, amount=10000, months=12, horizon=10, step=1, 
 # Hebel
 # ─────────────────────────────────────────────────────────────────────────────
 
-def leveraged_series(data, index, leverage=2, rate=0, expense=0, spread=0, start=100):
+def series_leverage(data, index, *, leverage=2, rate=0, expense=0, spread=0, start=100):
     """Gehebelte Reihe aus einem Index erzeugen (täglich zurückgesetzt, MSCI-Formel plus Kosten).
 
     ``r = L x + (1 - L) i T/360 - TER T/365 - s m(L) T/360`` mit Indexrendite
@@ -617,16 +626,16 @@ def leveraged_series(data, index, leverage=2, rate=0, expense=0, spread=0, start
     return v
 
 
-def leverage_sensitivity(data, index, leverages=None, rate=0, expense=0, spread=0, strategy=None, sim_args=None,
+def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spread=0, strategy=None, sim_args=None,
                          metrics=None, cores=1):
     """Kennzahlen über den Hebel.
 
-    Erzeugt für jeden Hebel eine Reihe mit :func:`leveraged_series`, simuliert
+    Erzeugt für jeden Hebel eine Reihe mit :func:`series_leverage`, simuliert
     sie als Buy-and-Hold (oder mit eigener Strategie für das Asset ``"LEV"``)
     und bestimmt den Hebel mit der höchsten CAGR bzw. Sharpe Ratio.
 
     Args:
-        data, index, rate, expense, spread: wie bei :func:`leveraged_series`.
+        data, index, rate, expense, spread: wie bei :func:`series_leverage`.
         leverages: zu prüfende Hebel (Standard ``seq(0.5, 4, by = 0.25)``).
         strategy: optional Strategie mit Asset ``"LEV"``; Standard Buy-and-Hold-ETF
             mit 30 % Teilfreistellung.
@@ -636,20 +645,20 @@ def leverage_sensitivity(data, index, leverages=None, rate=0, expense=0, spread=
         :class:`SimLevSensitivity` mit ``attrs["optimal"]`` und ``attrs["kind"] = "leverage"``.
     """
     leverages = _seq_by(0.5, 4, 0.25) if leverages is None else np.atleast_1d(np.asarray(leverages, dtype=np.float64))
-    sim_args = {} if sim_args is None else dict(sim_args)
+    sim_args = _args_set({}, sim_args, "sensitivity_leverage")
     metrics = _metrics_default(metrics)
     if strategy is None:
         from .config import asset_config, create_strategy
-        strategy = create_strategy(LEV=asset_config("etf", "bnh", asset_bonus=30))
+        strategy = create_strategy(LEV=asset_config(asset_class="etf", trading="bnh", partial_exemption=30))
     simulation = _simulation()
     dts = _to_date(data["date"], "data$date")
 
     def run(L):
-        lev = leveraged_series(data, index, L, rate, expense, spread)
+        lev = series_leverage(data, index, leverage=L, rate=rate, expense=expense, spread=spread)
         lev = np.where(lev <= 0, 1e-8, lev)
         df = pd.DataFrame({"date": dts, "LEV": lev})
         try:
-            res = _quiet(lambda: simulation(data=df, strategy=strategy, **sim_args))
+            res = _quiet(lambda: simulation(df, strategy, **sim_args))
         except Exception:  # noqa: BLE001
             return None
         return _as_series(metrics(res))

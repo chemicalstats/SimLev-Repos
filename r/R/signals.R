@@ -60,11 +60,11 @@
 #' erwarten: Die Elemente \code{buy} und \code{sell} werden dort als
 #' gleichnamige Spalten an den Datensatz angehaengt. Fuer [simulation()]
 #' haengt man sie selbst an und nennt sie in [asset_config()]
-#' (\code{action_type = "signal"}, \code{signal_buy}, \code{signal_sell});
+#' (\code{trading = "signal"}, \code{signal_buy}, \code{signal_sell});
 #' fuer [tactical_rules()] lassen sie sich direkt als Bedingung verwenden.
 #'
 #' Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B.
-#' eine Spalte aus [align_series()]. Alle Fenster (\code{n}, \code{fast},
+#' eine Spalte aus [series_align()]. Alle Fenster (\code{n}, \code{fast},
 #' \code{slow}, \code{window}, \code{lag}) zaehlen in Zeilen der Daten,
 #' bei Kalendertagsdaten (Wochenenden per LOCF) also in Kalendertagen, bei
 #' Handelstagsdaten in Handelstagen. Solange ein Fenster noch nicht gefuellt

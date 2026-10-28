@@ -5,10 +5,10 @@
 # Attribute in `attrs(w)`):
 #   tactical_rules()          geordnete Bedingungen → Zielportfolio, Rückfall
 #   tactical_rotation()       Momentum-Rotation: Top-N, Dual Momentum, Canary-Schutz
-#   target_volatility()       Zielvolatilität (Moreira & Muir 2017)
-#   conditional_volatility()  nur in extremen Volatilitätsphasen skalieren
-#   glidepath()               Gewichte zeitlich zwischen zwei Allokationen
-#   blend_weights()           Kern-Satellit: Mischung mehrerer Gewichtsreihen
+#   tactical_target_volatility()       Zielvolatilität (Moreira & Muir 2017)
+#   tactical_conditional_volatility()  nur in extremen Volatilitätsphasen skalieren
+#   tactical_glidepath()               Gewichte zeitlich zwischen zwei Allokationen
+#   tactical_blend()           Kern-Satellit: Mischung mehrerer Gewichtsreihen
 #   signal_state()            Kauf-/Verkaufssignale → dauerhafter Zustand
 #   momentum_score()          Momentum-Score je Anlage
 # Ausführung:
@@ -28,8 +28,8 @@ using ..SimLev: _alloc_c, _alloc_ramp, _esc
 using ..SimLev: RList, RFrame, RVector, NamedMat, NA, isna_strict, F80
 using Dates
 
-export signal_state, momentum_score, tactical_rules, tactical_rotation, target_volatility, conditional_volatility,
-       glidepath, blend_weights, tactical_simulation, print_SimLevWeights, plot_SimLevWeights
+export signal_state, momentum_score, tactical_rules, tactical_rotation, tactical_target_volatility, tactical_conditional_volatility,
+       tactical_glidepath, tactical_blend, tactical_simulation, print_SimLevWeights, plot_SimLevWeights
 
 # ═══════════════════════════════════════════════════════════════════════════
 # R-Hilfen
@@ -623,7 +623,7 @@ end
 _g(x) = _sprintf("%g", Float64(x))
 
 """
-    target_volatility(data, weights, safe; target = 10, window = 63, max_exposure = 1,
+    tactical_target_volatility(data, weights, safe; target = 10, window = 63, max_exposure = 1,
                       every = "month", ppy = nothing)
 
 Zielvolatilität: Risikoanteil `min(max_exposure, (target/100) / vol)` an den
@@ -631,7 +631,7 @@ Terminen von `every`, Rest in `safe`. `weights`: `SimLevWeights` oder
 benannter Gewichtsvektor (statisch). Ergebnis `SimLevWeights` mit `attrs`
 `exposure` und `volatility`.
 """
-function target_volatility(data, weights, safe; target = 10, window = 63, max_exposure = 1, every = nothing, ppy = nothing)
+function tactical_target_volatility(data, weights, safe; target = 10, window = 63, max_exposure = 1, every = nothing, ppy = nothing)
     data = SimLev.as_rframe(data)
     every = _match_arg(every, ["month", "week", "day", "quarter"])
     max_exposure > 1 && error("max_exposure > 1 wäre Kredit; die Engine kennt keine Kreditaufnahme (Hebel über Hebelprodukte abbilden).")
@@ -654,7 +654,7 @@ _quantile7(x, p) = (q = SimLev.RStats.quantile(Float64.(x), Float64(p); names = 
                     q isa Real ? Float64(q) : Float64(first(q isa RVector ? q.values : q)))
 
 """
-    conditional_volatility(data, weights, safe; base = 1, upper = 0.8, lower = 0.2,
+    tactical_conditional_volatility(data, weights, safe; base = 1, upper = 0.8, lower = 0.2,
                            target = nothing, window = 63, min_exposure = 0, max_exposure = 1,
                            min_history = 3, scaling = "inverse", high_exposure = nothing,
                            low_exposure = nothing, every = "month", ppy = nothing)
@@ -665,7 +665,7 @@ die geschätzte Volatilität über dem `upper`- bzw. unter dem `lower`-Quantil
 Risikoanteil gesenkt bzw. erhöht; dazwischen gilt `base`. Ergebnis
 `SimLevWeights` mit `attrs` `exposure`, `volatility`, `state`, `thresholds`.
 """
-function conditional_volatility(data, weights, safe; base = 1, upper = 0.8, lower = 0.2, target = nothing, window = 63,
+function tactical_conditional_volatility(data, weights, safe; base = 1, upper = 0.8, lower = 0.2, target = nothing, window = 63,
                                 min_exposure = 0, max_exposure = 1, min_history = 3, scaling = nothing,
                                 high_exposure = nothing, low_exposure = nothing, every = nothing, ppy = nothing)
     data = SimLev.as_rframe(data)
@@ -746,11 +746,11 @@ function conditional_volatility(data, weights, safe; base = 1, upper = 0.8, lowe
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# glidepath, blend_weights
+# tactical_glidepath, tactical_blend
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-    glidepath(data, from_, to; start = nothing, end_ = nothing, every = "year")
+    tactical_glidepath(data, from_, to; start = nothing, end_ = nothing, every = "year")
 
 Glidepath zwischen zwei Allokationen (R: `from`, `to`, `end`): stufenweise
 lineare Bewegung von `from_` nach `to`; eine Stufe beginnt in der ersten
@@ -758,11 +758,11 @@ Zeile und an der letzten Zeile jeder Periode von `every` (`"year"`,
 `"quarter"`, `"month"`), Gewicht `(1 - p) from + p to` mit dem Zeitanteil `p`
 zwischen `start` und `end_`. `data`: `RFrame` mit `date` oder Datumsvektor.
 """
-function glidepath(data, from_, to; start = nothing, end_ = nothing, every = nothing)
+function tactical_glidepath(data, from_, to; start = nothing, end_ = nothing, every = nothing)
     data = SimLev.as_rframe(data)
     every = _match_arg(every, ["year", "quarter", "month"])
     src = data isa RFrame ? data["date"] : data isa Union{NamedTuple,AbstractDict} ? _col(data, "date") : data
-    d = _to_date(src, "glidepath: Datum")
+    d = _to_date(src, "tactical_glidepath: Datum")
     fn, fv = _named(from_)
     tn, tv = _named(to)
     a = _unique(vcat(fn === nothing ? String[] : fn, tn === nothing ? String[] : tn))
@@ -771,7 +771,7 @@ function glidepath(data, from_, to; start = nothing, end_ = nothing, every = not
     tn === nothing || for (k, x) in zip(tn, tv); t[findfirst(==(k), a)] = x; end
     s = _to_date(start === nothing ? d[1] : start, "start")[1]
     e = _to_date(end_ === nothing ? d[end] : end_, "end")[1]
-    e < s && error("glidepath: end ($(Dates.format(e, "yyyy-mm-dd"))) liegt vor start ($(Dates.format(s, "yyyy-mm-dd"))); für den umgekehrten Weg from und to tauschen.")
+    e < s && error("tactical_glidepath: end ($(Dates.format(e, "yyyy-mm-dd"))) liegt vor start ($(Dates.format(s, "yyyy-mm-dd"))); für den umgekehrten Weg from und to tauschen.")
     rows = _unique(vcat(1, _period_last(d, every)))
     sd = _dnum(s); ed = _dnum(e)
     frac = if e > s
@@ -788,25 +788,25 @@ function glidepath(data, from_, to; start = nothing, end_ = nothing, every = not
 end
 
 """
-    blend_weights(ws...; shares = nothing)
+    tactical_blend(ws...; shares = nothing)
 
 Gewichtsreihen mischen (Kern-Satellit): je Zeile und Anlage
 Σₖ sharesₖ · wₖ, dann auf Summe 1 normiert; `ws` sind `SimLevWeights` mit
 identischer Spalte `date`, `shares` Anteile je Reihe (Standard gleich).
 """
-function blend_weights(ws...; shares = nothing)
+function tactical_blend(ws...; shares = nothing)
     ws = collect(ws)
-    (isempty(ws) || !all(_isweights, ws)) && error("blend_weights: ... muss aus SimLevWeights bestehen.")
+    (isempty(ws) || !all(_isweights, ws)) && error("tactical_blend: ... muss aus SimLevWeights bestehen.")
     shares === nothing && (shares = fill(1 / length(ws), length(ws)))
     sh = shares isa Union{AbstractVector,Tuple} ? Float64[_isna(v) ? NA : Float64(v) for v in shares] : [Float64(shares)]
     if length(sh) != length(ws) || any(isnan, sh) || any(<(0), sh) || _ldsum(sh) <= 0
-        error("blend_weights: shares braucht $(length(ws)) nichtnegative Anteile (einen je Gewichtsreihe, z. B. c(0.7, 0.3)); erhalten: $(join(_fmt1(sh), ", ")).")
+        error("tactical_blend: shares braucht $(length(ws)) nichtnegative Anteile (einen je Gewichtsreihe, z. B. c(0.7, 0.3)); erhalten: $(join(_fmt1(sh), ", ")).")
     end
     d = _to_date(ws[1]["date"], "date")
     dn = Float64[_dnum(z) for z in d]
     for w in ws
         dw = Float64[_dnum(z) for z in _to_date(w["date"], "date")]
-        isequal(dw, dn) || error("blend_weights: unterschiedliche Daten.")
+        isequal(dw, dn) || error("tactical_blend: unterschiedliche Daten.")
     end
     a = _unique(reduce(vcat, [names(w)[2:end] for w in ws]))
     W = zeros(length(d), length(a))
@@ -933,9 +933,10 @@ function tactical_simulation(data, weights; rebalance = nothing, tolerance = not
     rebalance = _match_arg(rebalance, ["switch", "month", "quarter", "year"])
     tolerance_type = _match_arg(tolerance_type, ["absolute", "relative"])
     _isweights(weights) || error("weights muss ein SimLevWeights sein.")
-    sim_args = Dict{Symbol,Any}(k => v for (k, v) in kwargs)
-    bad = [String(k) for (k, _) in kwargs if String(k) in ("event_col", "event_mode", "event_weight", "balance_mode", "balance_thresh")]
+    bad = [String(k) for (k, _) in kwargs if String(k) in ("event_col", "event_mode", "event_weight", "balance_mode", "balance_thresh") ||
+           startswith(String(k), "rebalance.")]
     isempty(bad) || error("tactical_simulation steuert $(join(_unique(bad), ", ")) selbst.")
+    sim_args = SimLev._sim_args_set(RList(), RList((String(k) => v for (k, v) in kwargs)...), "tactical_simulation")
     assets = names(weights)[2:end]
     miss = _setdiff(assets, _df_names(data))
     isempty(miss) || error("Kursspalten fehlen: " * join(miss, ", "))
@@ -978,13 +979,13 @@ function tactical_simulation(data, weights; rebalance = nothing, tolerance = not
     change = n > 0 ? vcat(false, _rowsums(abs.(W[2:end, :] .- W[1:end-1, :])) .> 1e-10) : Bool[]
     ev = copy(change)
     rebalance != "switch" && (ev[_period_last(d, rebalance)] .= true)
-    if get(sim_args, :dca_mode, nothing) === true
+    dp = get(sim_args, "dca", nothing)
+    if dp !== nothing
         cal = collect(d[1]:Day(1):d[n])
-        gs(key, def) = (v = get(sim_args, key, nothing); v === nothing ? def : v)
-        flg = SimLev.calculate_dates_flags(true, gs(:dca_span, 1), gs(:dca_unit, "month"), get(sim_args, :dca_days, nothing),
-                                           cal; value = gs(:dca_value, 1), anchor = gs(:dca_anchor, "start"),
-                                           start_date = get(sim_args, :dca_start, nothing), skip_start = gs(:dca_skip, false),
-                                           liquidate = gs(:liquidate, false))
+        liq = get(sim_args, "liquidate", nothing)
+        flg = SimLev.calculate_dates_flags(true, dp["span"], dp["unit"], dp["days"], cal; value = dp["value"],
+                                           anchor = dp["anchor"], start_date = dp["start"], skip_start = dp["skip"],
+                                           liquidate = liq === nothing ? false : liq)
         flg = Bool[f != 0 for f in flg]
         dd = Float64[_dnum(z) for z in d]
         j = _find_interval(Float64[_dnum(z) for z in cal[flg]] .- 1e-9, dd) .+ 1
@@ -1003,11 +1004,11 @@ function tactical_simulation(data, weights; rebalance = nothing, tolerance = not
     aa = asset_args isa NamedTuple ? pairs(asset_args) : asset_args isa AbstractDict ? (Symbol(k) => v for (k, v) in asset_args) :
          (Symbol(p.first) => p.second for p in asset_args)
     st = SimLev.DataPrep.strategy_from_weights(RVector(w0; names = assets); aa...)
-    args = Dict{Symbol,Any}(:event_col => ".tev", :event_mode => "replace",
-                            :event_weight => RList((a => c for (a, c) in zip(assets, wcols))...),
-                            :balance_thresh => tolerance, :balance_thresh_type => tolerance_type)
-    merge!(args, sim_args)
-    res = SimLev.simulation(df, st; args...)
+    # Ereignis-Rebalancing nur an den Terminen, ohne Umschichten am ersten Tag (skip = true)
+    rb = SimLev.rebalance_plan(; event_col = ".tev", event_mode = "replace", skip = true,
+                               event_weight = RList((a => c for (a, c) in zip(assets, wcols))...), thresh = tolerance,
+                               thresh_type = tolerance_type)
+    res = SimLev._sim_call(df, st, RList("rebalance" => rb, SimLev._sim_kv(sim_args)...))
     tw = _as_weights_m(d, W, assets, get(SimLev.attrs(weights), "source", nothing))
     tac = RList("weights" => tw, "events" => d[ev], "switches" => count(change), "lag" => lag, "rebalance" => rebalance)
     res["tactical"] = tac

@@ -1,6 +1,9 @@
 # Eigene Stressfaelle ausserhalb des Parameterraums von golden_cases.R.
 # Aufruf: Rscript stress_cases.R <outdir> <n_random> <seed>
 suppressMessages({library(SimLev); library(jsonlite)})
+# Fälle als flache Argumentlisten beschrieben; simulation() bekommt die übersetzten Bausteine (Etappe 6.3)
+.here <- dirname(normalizePath(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])))
+source(file.path(.here, "tools", "blocks_from_flat.R"))
 args <- commandArgs(TRUE)
 outdir <- args[1]; n_random <- as.integer(args[2]); seed0 <- as.integer(args[3])
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
@@ -18,8 +21,8 @@ enc_data <- function(df) {
 }
 enc_strategy <- function(s) lapply(s, function(a) {
   a <- unclass(a)
-  if (!is.null(a$asset_start)) a$asset_start <- format(as.Date(a$asset_start))
-  for (k in c("asset_share", "asset_spread", "asset_bonus")) if (!is.null(a[[k]])) a[[k]] <- list(hex = hx(a[[k]]))
+  if (!is.null(a$start)) a$start <- format(as.Date(a$start))
+  for (k in c("share", "spread", "partial_exemption")) if (!is.null(a[[k]])) a[[k]] <- list(hex = hx(a[[k]]))
   a
 })
 enc_result <- function(r) list(
@@ -30,11 +33,13 @@ enc_result <- function(r) list(
   print = paste(capture.output(print(r)), collapse = "\n"))
 run_case <- function(id, data, strategy, sargs) {
   stdout_txt <- NULL
+  blk <- blocks_from_flat(sargs)
   res <- tryCatch(suppressWarnings(suppressMessages({
-    stdout_txt <- capture.output(r <- do.call(simulation, c(list(data = data, strategy = strategy), sargs))); r })),
+    stdout_txt <- capture.output(r <- do.call(simulation, c(list(data = data, strategy = strategy),
+                                                             lapply(blk, flatblock_build)))); r })),
     error = function(e) e)
   out <- list(id = id, data = enc_data(data), strategy = enc_strategy(strategy),
-              args = lapply(sargs, function(v) if (inherits(v, "Date")) format(v) else v))
+              args = lapply(blk, function(v) if (inherits(v, "Date")) format(v) else flatblock_json(v)))
   if (inherits(res, "error")) out$error <- conditionMessage(res) else out$result <- enc_result(res)
   if (isTRUE(sargs$details)) out$stdout <- paste(stdout_txt, collapse = "\n")
   writeLines(toJSON(out, digits = NA, auto_unbox = TRUE, null = "null", na = "null"), file.path(outdir, sprintf("%s.json", id)))
@@ -95,7 +100,7 @@ run_case("x16_funds_fee_high", d30[1:2000, ], s30, list(tax_mode = "funds", fund
 # Kalender-Randfaelle
 dl <- data.frame(date = seq.Date(as.Date("2015-12-31"), as.Date("2024-03-01"), by = "day"))
 set.seed(5); dl$X <- gbm(nrow(dl), 80, 3e-4, 0.01); dl$Y <- gbm(nrow(dl), 40, 1e-4, 0.004)
-sl <- create_strategy(X = ac("etf", "bnh", 0.6, 0.1, 30), Y = ac("etc", "bnh", 0.4, 0.1, 0, deliverable = TRUE, asset_start = "2016-02-29"))
+sl <- create_strategy(X = ac("etf", "bnh", 0.6, 0.1, 30), Y = ac("etc", "bnh", 0.4, 0.1, 0, deliverable = TRUE, start = "2016-02-29"))
 for (dd in list(29, 30, 31, c(1, 15, 31))) for (anc in c("start", "end"))
   run_case(sprintf("x17_cal_%s_%s", paste(dd, collapse = "-"), anc), dl, sl,
            list(dca_mode = TRUE, dca_value = 250, dca_span = 1, dca_unit = "month", dca_days = dd, dca_anchor = anc,
@@ -135,7 +140,7 @@ for (k in seq_len(n_random)) {
     st[[nms[i]]] <- ac(cl, if (sig) "signal" else "bnh", sh[i], pick(c(0, 0.01, 0.2, 1, 3)),
                        if (cl == "etf") pick(c(0, 15, 30, 60, 80)) else 0,
                        deliverable = (cl %in% c("etc", "etn")) && runif(1) < 0.5,
-                       asset_start = if (i > 1 && n > 10 && runif(1) < 0.3) format(start + sample(1:(n - 2), 1)) else NULL,
+                       start = if (i > 1 && n > 10 && runif(1) < 0.3) format(start + sample(1:(n - 2), 1)) else NULL,
                        signal_buy = if (sig) paste0("b", i) else NULL, signal_sell = if (sig) paste0("s", i) else NULL)
   }
   st <- create_strategy(assets = st)

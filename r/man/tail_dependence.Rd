@@ -44,6 +44,6 @@ tail_dependence(x, y, q = c(0.05, 0.10))
 Longin, F. & Solnik, B. (2001), Journal of Finance 56(2).
 }
 \seealso{
-\code{\link[=fit_copula]{fit_copula()}} (implizite Tail-Koeffizienten),
-\code{\link[=dependence_analysis]{dependence_analysis()}}, \code{\link[=validate_dependence]{validate_dependence()}}.
+\code{\link[=copula_fit]{copula_fit()}} (implizite Tail-Koeffizienten),
+\code{\link[=dependence_analysis]{dependence_analysis()}}, \code{\link[=dependence_validate]{dependence_validate()}}.
 }

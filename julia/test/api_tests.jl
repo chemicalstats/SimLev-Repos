@@ -12,75 +12,75 @@ const _SL = SimLev
 # In R optionale Argumente der exportierten Funktionen (formals() von SimLev
 # 0.5.0; `.` → `_`, `end` → `end_`). Jedes muss in Julia als Schlüsselwort gehen.
 const _R_OPTIONAL = Dict{Symbol,Tuple}(
-    :add_asset => (),
-    :align_macro => (:name, :lag, :lag_unit, :transform, :periods,),
-    :align_series => (:calendar, :range, :fill, :max_gap, :start, :end_,),
-    :asset_config => (:asset_class, :action_type, :asset_share, :asset_spread, :asset_bonus, :deliverable, :asset_start, :tax_regime, :signal_buy, :signal_sell,),
+    :strategy_add_asset => (),
+    :series_align_macro => (:name, :lag, :lag_unit, :transform, :periods,),
+    :series_align => (:calendar, :range, :fill, :max_gap, :start, :end_,),
+    :asset_config => (:asset_class, :trading, :share, :spread, :partial_exemption, :deliverable, :start, :tax_regime, :signal_buy, :signal_sell,),
     :backcast => (:fit, :data, :params, :splice, :fill, :rebase,),
     :backcast_fit => (:ter, :leverage, :rate, :fx, :model, :fit, :fixed, :objective, :loss, :horizon, :hybrid_weight, :lag, :rate_lag, :start, :end_, :method, :grid, :bounds, :ter_basis, :rate_basis, :accrual, :index_fill, :validate,),
-    :blend_weights => (:shares,),
-    :block_length => (:transform,),
-    :bond_index_from_yields => (:maturity, :coupon_frequency, :method, :start,),
+    :tactical_blend => (:shares,),
+    :bootstrap_block_length => (:transform,),
+    :index_bond => (:maturity, :coupon_frequency, :method, :start,),
     :bootstrap => (:method, :n, :params, :ess, :ess_grid, :progress, :path_length, :seed, :cores, :max_tries,),
     :bootstrap_config => (:letfs, :regime_index, :aux, :aux_type, :cross, :input,),
-    :bootstrap_data => (:i, :dates, :start_date,),
+    :bootstrap_data => (:i, :dates, :start,),
     :bootstrap_probability => (:thresholds,),
-    :bootstrap_study => (:method, :n, :params, :ess, :ess_grid, :path_length, :dates, :start_date, :burn_in, :sim_args, :metrics, :benchmark, :cores, :chunk_size, :seed, :chunk_dir, :max_tries, :keep_paths, :keep_returns, :keep_aux, :progress,),
-    :check_series => (:columns, :jump, :stale, :revert,),
-    :compute_rebal_trigger => (:threshold, :lev_col, :vol_col, :triggers, :out_col,),
-    :conditional_volatility => (:base, :upper, :lower, :target, :window, :min_exposure, :max_exposure, :min_history, :scaling, :high_exposure, :low_exposure, :every, :ppy,),
-    :convert_currency => (:method, :suffix,),
-    :copula_scenarios => (:n, :family, :stress, :frequency, :seed,),
-    :covar_analysis => (:state, :q, :frequency,),
-    :cpcv_portfolio => (:assets, :methods, :n_groups, :test_groups, :purge, :embargo, :frequency,),
+    :bootstrap_study => (:method, :n, :params, :ess, :ess_grid, :path_length, :dates, :start, :burn_in, :sim_args, :metrics, :benchmark, :cores, :chunk_size, :seed, :chunk_dir, :max_tries, :keep_paths, :keep_returns, :keep_aux, :progress,),
+    :series_check => (:columns, :jump, :stale, :revert,),
+    :rebalance_trigger => (:threshold, :lev_col, :vol_col, :triggers, :out_col,),
+    :tactical_conditional_volatility => (:base, :upper, :lower, :target, :window, :min_exposure, :max_exposure, :min_history, :scaling, :high_exposure, :low_exposure, :every, :ppy,),
+    :series_convert_currency => (:method, :suffix,),
+    :scenario_copula => (:n, :family, :stress, :frequency, :seed,),
+    :tail_covar => (:state, :q, :frequency,),
+    :portfolio_cpcv => (:assets, :methods, :n_groups, :test_groups, :purge, :embargo, :frequency,),
     :create_strategy => (:assets,),
-    :crisis_replay => (:crises, :rebalance,),
-    :currency_hedged_index => (:cost, :basis, :start,),
-    :dcc_fit => (),
-    :deep_analysis => (:benchmark, :risk_free, :rolling_years, :var_levels, :top_drawdowns, :inflation,),
-    :deflate => (:base_date, :suffix,),
-    :deflated_sharpe => (:id, :n_trials, :effective, :frequency, :dates, :risk_free,),
+    :scenario_crisis => (:crises, :rebalance,),
+    :index_currency_hedged => (:cost, :basis, :start,),
+    :dependence_dcc => (),
+    :result_analysis => (:benchmark, :risk_free, :rolling_years, :var_levels, :top_drawdowns, :inflation,),
+    :series_deflate => (:base_date, :suffix,),
+    :sharpe_deflated => (:id, :n_trials, :effective, :frequency, :dates, :risk_free,),
     :dependence_analysis => (:conditions, :frequency, :quantiles, :breaks, :n_regimes, :window, :dcc, :copulas, :B, :block, :tail_q, :seed,),
-    :efficient_frontier => (:assets, :n, :lower, :upper, :cov, :risk_free, :frequency,),
-    :entropy_pooling => (:states, :frequency, :prior,),
+    :portfolio_frontier => (:assets, :n, :lower, :upper, :cov, :risk_free, :frequency,),
+    :scenario_entropy_pooling => (:states, :frequency, :prior,),
     :export_dashboard => (:filename, :width, :height,),
-    :fit_copula => (:families,),
-    :glidepath => (:start, :end_, :every,),
-    :goal_optimize => (:contributions, :n_grid, :n_sim, :seed,),
-    :horizon_model => (:type, :years, :prob, :min, :max, :mean, :sd, :mode, :seed,),
-    :leverage_sensitivity => (:leverages, :rate, :expense, :spread, :strategy, :sim_args, :metrics, :cores,),
-    :leveraged_series => (:leverage, :rate, :expense, :spread, :start,),
-    :lumpsum_vs_dca => (:amount, :months, :horizon, :step, :sim_args, :cores,),
-    :min_track_record => (:target, :prob, :frequency, :ppy,),
+    :copula_fit => (:families,),
+    :tactical_glidepath => (:start, :end_, :every,),
+    :planning_goal => (:contributions, :n_grid, :n_sim, :seed,),
+    :withdrawal_horizon => (:type, :years, :prob, :min, :max, :mean, :sd, :mode, :seed,),
+    :sensitivity_leverage => (:leverages, :rate, :expense, :spread, :strategy, :sim_args, :metrics, :cores,),
+    :series_leverage => (:leverage, :rate, :expense, :spread, :start,),
+    :planning_lumpsum_vs_dca => (:amount, :months, :horizon, :step, :sim_args, :cores,),
+    :sharpe_min_track_record => (:target, :prob, :frequency, :ppy,),
     :momentum_score => (:lookbacks, :type,),
-    :money_market_index => (:spread, :basis, :start,),
+    :index_money_market => (:spread, :basis, :start,),
     :param_bootstrap => (:ids, :top, :by, :map, :include,),
     :param_range => (:n, :step, :integer, :log,),
     :param_search => (:builder, :strategy, :method, :n, :constraint, :sim_args, :burn_in, :metrics, :objective, :maximize, :cores, :seed, :keep_returns,),
     :param_space => (),
-    :pbo => (:S, :metric, :frequency, :dates, :risk_free,),
-    :perfect_withdrawal_rate => (:legacy,),
-    :plateau => (:metric, :radius, :k,),
-    :pooled_bootstrap => (:weights, :inflation, :frequency, :n, :years, :L, :country_weights, :target, :seed,),
+    :overfit_pbo => (:S, :metric, :frequency, :dates, :risk_free,),
+    :withdrawal_perfect_rate => (:legacy,),
+    :param_plateau => (:metric, :radius, :k,),
+    :bootstrap_pooled => (:weights, :inflation, :frequency, :n, :years, :L, :country_weights, :target, :seed,),
     :portfolio_optimize => (:assets, :method, :lower, :upper, :cov, :mu, :risk_free, :risk_aversion, :budget, :alpha, :frequency, :resample, :block, :seed,),
     :portfolio_returns => (:frequency,),
     :portfolio_template => (:name, :map,),
-    :probabilistic_sharpe => (:benchmark, :ppy,),
-    :quantile_reg => (:X, :tau, :intercept, :tol, :maxit,),
-    :read_tax_tariff => (:file,),
-    :reality_check => (:benchmark, :B, :block, :frequency, :dates, :seed,),
-    :rebalancing_sensitivity => (:frequencies, :offsets, :bands, :band_type, :include_none, :sim_args, :metrics, :cores,),
+    :sharpe_probabilistic => (:benchmark, :ppy,),
+    :quantile_regression => (:X, :tau, :intercept, :tol, :maxit,),
+    :tax_tariff => (:file,),
+    :overfit_reality_check => (:benchmark, :B, :block, :frequency, :dates, :seed,),
+    :sensitivity_rebalancing => (:frequencies, :offsets, :bands, :band_type, :include_none, :sim_args, :metrics, :cores,),
     :regime_hmm => (:k, :frequency, :n_start, :max_iter, :tol, :seed,),
     :regime_states => (:type, :output, :state_prob, :lag,),
     :regime_subset => (:min_run,),
-    :remove_asset => (),
+    :strategy_remove_asset => (),
     :result_index => (:base,),
-    :return_heatmap => (:inflation, :max_years,),
-    :risk_contributions => (:measure, :alpha, :frequency, :cov,),
-    :rolling_optimization => (:method, :window, :every, :frequency,),
+    :result_heatmap => (:inflation, :max_years,),
+    :portfolio_risk_contributions => (:measure, :alpha, :frequency, :cov,),
+    :portfolio_rolling => (:method, :window, :every, :frequency,),
     :scenario_risk => (:alpha,),
     :sensitivity_grid => (:sim_args, :metrics, :cores, :keep_results,),
-    :set_expected_return => (:type, :ppy,),
+    :series_shift_return => (:type, :ppy,),
     :sharpe_haircut => (:n_obs, :n_tests, :frequency, :dates, :risk_free, :ppy,),
     :sharpe_test => (:frequency, :method, :B, :block, :seed, :ppy,),
     :signal_analysis => (:horizon, :step, :bins, :breaks, :signal2, :bins2, :splits, :degree,),
@@ -92,30 +92,39 @@ const _R_OPTIONAL = Dict{Symbol,Tuple}(
     :signal_sma => (:n, :band, :lag,),
     :signal_state => (:initial,),
     :signal_volatility => (:n, :threshold, :band, :ppy, :lag,),
-    :simulation => (:start_value, :spread, :details, :liquidate, :dca_mode, :dca_value, :dca_span, :dca_days, :dca_unit, :dca_anchor, :dca_start, :dca_skip, :balance_mode, :balance_span, :balance_days, :balance_unit, :balance_anchor, :balance_start, :balance_skip, :balance_dca, :balance_thresh, :balance_thresh_type, :tax_mode, :tax_rate, :marginal_tax_rate, :use_guenstigerpruefung, :private_sale_threshold, :sparer_pauschbetrag, :use_sparer_pauschbetrag, :include_soli_on_income_tax, :soli_rate_income_tax, :base_rate, :base_rate_flex, :base_rate_data, :funds_fee, :bonus_fee, :fractions, :risk_free, :split_mode, :split_thresh, :event_col, :event_mode, :event_weight, :church_tax, :order_fee, :dca_fee, :harvest_mode, :harvest_day, :harvest_loss_pot, :taxable_income, :tax_tariff,),
-    :splice_series => (:dates,),
+    :simulation => (:start_value, :costs, :dca, :rebalance, :splits, :tax, :funds, :risk_free, :fractions, :liquidate, :details,),
+    :sim_costs => (:order_fee, :dca_fee,),
+    :dca_plan => (:days, :unit, :anchor, :start, :skip, :fill_deficits,),
+    :rebalance_plan => (:span, :days, :unit, :anchor, :start, :skip, :thresh, :thresh_type, :event_col, :event_mode, :event_weight,),
+    :split_rule => (),
+    :tax_profile => (:rate, :church_tax, :sparer_pauschbetrag, :private_sale_threshold, :base_rate, :guenstigerpruefung, :income, :harvest,),
+    :income_rate => (:soli_rate,),
+    :income_tariff => (:tariff,),
+    :harvest_rule => (:day, :loss_pot,),
+    :funds_costs => (:fee, :performance_fee,),
+    :series_splice => (:dates,),
     :strategy_from_weights => (),
-    :study_metrics => (),
+    :bootstrap_study_metrics => (),
     :tactical_rotation => (:top, :safe, :absolute, :canary, :breadth, :lookbacks, :type, :every, :weighting,),
     :tactical_rules => (),
     :tactical_simulation => (:rebalance, :tolerance, :tolerance_type, :lag, :asset_args,),
     :tail_dependence => (:q,),
     :tail_regression => (:quantiles, :frequency, :B, :block, :seed,),
-    :target_volatility => (:target, :window, :max_exposure, :every, :ppy,),
-    :total_return_index => (:dividends, :yield, :withholding, :dates, :start,),
-    :update_asset => (),
-    :validate_bootstrap => (:min_rows, :verbose,),
-    :validate_dependence => (:agg, :q, :max_paths,),
-    :validate_strategy => (:data,),
+    :tactical_target_volatility => (:target, :window, :max_exposure, :every, :ppy,),
+    :index_total_return => (:dividends, :yield, :withholding, :dates, :start,),
+    :strategy_update_asset => (),
+    :bootstrap_validate => (:min_rows, :verbose,),
+    :dependence_validate => (:agg, :q, :max_paths,),
+    :strategy_validate => (:data,),
     :view_mean => (:op,),
     :view_prob => (:op,),
     :view_vol => (:op,),
-    :walk_forward => (:train, :test, :step, :anchored, :metric, :select, :risk_free,),
+    :overfit_walk_forward => (:train, :test, :step, :anchored, :metric, :select, :risk_free,),
     :withdrawal_cohorts => (:price, :inflation, :years, :frequency, :step, :wrap, :cape, :base_rate, :inflation_type,),
     :withdrawal_max_rate => (:rule, :success, :lower, :upper, :tol,),
-    :withdrawal_paths => (:column, :strategy, :inflation, :inflation_type, :frequency, :dates, :start_date, :cape,),
+    :withdrawal_paths => (:column, :strategy, :inflation, :inflation_type, :frequency, :dates, :start, :cape,),
     :withdrawal_rule => (:type, :rate, :ceiling, :floor, :cut, :raise, :cpr_years, :inflation_cap, :skip_inflation, :smoothing, :exp_return, :stock_share, :age, :max_age, :fv, :cape_a, :cape_b, :ratchet_threshold, :ratchet_gap, :extra, :floor95, :min_real, :max_real, :max_rate,),
-    :withdrawal_simulation => (:rule, :start_value, :inflation, :frequency, :strategy, :years, :timing, :income, :tax_mode, :tax_rate, :asset_bonus, :sparer_pauschbetrag, :base_rate, :vorabpauschale, :sale_cost, :cost_basis, :loss_carryforward, :gamma, :keep_paths, :horizon,),
+    :withdrawal_simulation => (:rule, :start_value, :inflation, :frequency, :strategy, :years, :timing, :income, :tax, :partial_exemption, :base_rate, :vorabpauschale, :sale_cost, :cost_basis, :loss_carryforward, :gamma, :keep_paths, :horizon,),
 )
 
 "Deklarierte Schlüsselwörter aller Methoden; `true`, wenn eine Methode `kw...` sammelt."
@@ -148,8 +157,8 @@ _api_err(f) = try f(); "" catch e; e isa ErrorException ? e.msg : sprint(showerr
             @test isempty(miss)
         end
     end
-    @test asset_config(asset_class = "etf", action_type = "bnh", asset_share = 0.5).asset_share ==
-          asset_config("etf", "bnh", 0.5).asset_share
+    @test asset_config(asset_class = "etf", trading = "bnh", share = 0.5).share ==
+          asset_config("etf", "bnh", 0.5).share
 end
 
 @testset "Schlüsselwortformen (Befunde)" begin
@@ -161,24 +170,24 @@ end
     d = RFrame("date" => dates, "A" => A, "B" => B)
     same(a, b) = sprint(show, MIME"text/plain"(), a) == sprint(show, MIME"text/plain"(), b)
 
-    @test same(fit_copula(ra, rb, ["gaussian", "t"]), fit_copula(ra, rb; families = ["gaussian", "t"]))
+    @test same(copula_fit(ra, rb, ["gaussian", "t"]), copula_fit(ra, rb; families = ["gaussian", "t"]))
     @test same(tail_dependence(ra, rb, [0.05, 0.1]), tail_dependence(ra, rb; q = [0.05, 0.1]))
     X = reshape(ra, :, 1)
-    @test quantile_reg(rb, X, 0.25) == quantile_reg(rb; X = X, tau = 0.25)
-    @test quantile_reg(rb, X; tau = 0.75) == quantile_reg(rb, X, 0.75)
+    @test quantile_regression(rb, X, 0.25) == quantile_regression(rb; X = X, tau = 0.25)
+    @test quantile_regression(rb, X; tau = 0.75) == quantile_regression(rb, X, 0.75)
     cr = RFrame("crisis" => ["Test"], "start" => [Date(2007, 3, 1)], "end" => [Date(2007, 6, 30)])
     w = named("A" => 0.6, "B" => 0.4)
-    @test same(crisis_replay(d, w, cr), crisis_replay(d, w; crises = cr))
+    @test same(scenario_crisis(d, w, cr), scenario_crisis(d, w; crises = cr))
     b = bootstrap(d, bootstrap_config((A = "A", B = "B"); input = "prices"), "stationary"; n = 2, path_length = 60, seed = 1, progress = false)
     @test same(bootstrap_data(b, 2), bootstrap_data(b; i = 2))
     st = create_strategy(A = asset_config("etf", "bnh"))
-    @test validate_strategy(st, d) == validate_strategy(st; data = d)
-    @test occursin("'A'", _api_err(() -> validate_strategy(st; data = RFrame("date" => dates, "B" => B))))
-    t1 = read_tax_tariff(); t2 = read_tax_tariff(file = t1["file"])
+    @test strategy_validate(st, d) == strategy_validate(st; data = d)
+    @test occursin("'A'", _api_err(() -> strategy_validate(st; data = RFrame("date" => dates, "B" => B))))
+    t1 = tax_tariff(); t2 = tax_tariff(file = t1["file"])
     @test t1["zones"]["a"] == t2["zones"]["a"]
     @test withdrawal_rule("guyton_klinger") == withdrawal_rule(type = "guyton_klinger")
     @test withdrawal_rule(type_ = "vpw")["type"] == "vpw"
-    @test horizon_model("fixed"; years = 30)["type"] == horizon_model(type = "fixed", years = 30)["type"]
+    @test withdrawal_horizon("fixed"; years = 30)["type"] == withdrawal_horizon(type = "fixed", years = 30)["type"]
     @test _SL.view_mean("A", 1.0, "<=") == _SL.view_mean("A", 1.0; op = "<=")
     @test _SL.view_prob("A > 0", 0.4; op = ">=")["op"] == ">="
     @test _SL.view_vol("A", 2.0; op = "=")["op"] == "="
@@ -329,9 +338,9 @@ _bits(v) = reinterpret.(Int64, Float64.(collect(v)))
     g = _plot_case_obj("planning/go_ex")
     pd_ = r_plot(g).data["policy"]
     @test eltype(pd_["choice"]) == Int && eltype(pd_["period"]) == Int
-    # R kennt plot(x, data = NULL) für SimLevHMM; hier unbekannt → Warnung
+    # wie R plot(x, data = NULL): data wird angenommen und nicht verwendet (keine Warnung)
     _, ws = _api_warns(() -> r_plot(h; data = nothing))
-    @test ws == ["plot.SimLevHMM: unbekanntes Argument 'data' wird ignoriert (Tippfehler?)."]
+    @test isempty(ws)
     @test occursin("plot.SimLevPBO: Grafiken werden nur als SVG gespeichert; 'p.png' hat die Endung '.png'.",
                    _api_err(() -> r_plot(_plot_case_obj("overfitting/pbo_sharpe"); file = "p.png")))
 end
@@ -462,9 +471,9 @@ end
         r = bs(x)
         @test same(r["results"], ref["results"]) && r["returns"] == ref["returns"]   # ohne Laufzeit (elapsed)
     end
-    hm = return_heatmap(RFrame("date" => dts, "value" => A))
-    @test same(return_heatmap(["date" => dts, "value" => A]), hm)
-    @test same(return_heatmap((date = dts, value = A)), hm)
+    hm = result_heatmap(RFrame("date" => dts, "value" => A))
+    @test same(result_heatmap(["date" => dts, "value" => A]), hm)
+    @test same(result_heatmap((date = dts, value = A)), hm)
 end
 
 @testset "NA/NaN in Kumulationen wie R" begin

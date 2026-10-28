@@ -2,7 +2,7 @@
 
 Gemeinsamer Auswerter für Bedingungen als Text in
 :func:`simlev.bootstrap_probability`, :func:`simlev.regime_subset`,
-:func:`simlev.view_prob`/:func:`simlev.entropy_pooling` und
+:func:`simlev.view_prob`/:func:`simlev.scenario_entropy_pooling` und
 :func:`simlev.tactical_rules`; 1:1-Übersetzung von ``julia/src/r/rexpr.jl``.
 
 Zerlegen wie R 4.3 (``src/main/gram.y``): derselbe Lexer (Zahlen,

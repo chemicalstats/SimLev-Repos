@@ -318,14 +318,14 @@ function _sim_result(R::Run, sim::Sim, r::_Returns, statistics::RList, undefined
         open_lots = RList()
         for (a, nm) in enumerate(sim.names)
             lots = [b for b in sim.trades[a].buys if b.remaining > 0]
-            sp_ = get(cfg.strategy[a].second, "asset_spread", nothing)
+            sp_ = get(cfg.strategy[a].second, "spread", nothing)
             open_lots[nm] = RList("lots" => RFrame("date" => Date[from_days(b.date) for b in lots],
                                                    "units" => Float64[b.remaining for b in lots],
                                                    "price" => Float64[b.price for b in lots],
                                                    "vp" => Float64[b.vp for b in lots]; class = ["data.frame"]),
-                                  "regime" => fl.tax_regimes[a], "asset_bonus" => 100 * sim.assets[a].bonus,
+                                  "regime" => fl.tax_regimes[a], "partial_exemption" => 100 * sim.assets[a].bonus,
                                   "cash" => sim.status[a].money,
-                                  "asset_spread" => sp_ === nothing ? 0.0 : sp_,
+                                  "spread" => sp_ === nothing ? 0.0 : sp_,
                                   "order_fee" => cfg.order_fee)
         end
     end
@@ -392,40 +392,48 @@ end
 # ── Hauptfunktion ──────────────────────────────────────────────────────────
 
 """
-    simulation(data, strategy; start_value = 10000, details = false, liquidate = false,
-               dca_mode = false, dca_value = nothing, dca_span = nothing, dca_days = nothing,
-               dca_unit = ("month", "quarter", "year"), dca_anchor = ("start", "end"), dca_start = nothing,
-               dca_skip = false, balance_mode = false, balance_span = nothing, balance_days = nothing,
-               balance_unit = ..., balance_anchor = ..., balance_start = nothing, balance_skip = false,
-               balance_dca = false, balance_thresh = nothing, balance_thresh_type = ("absolute", "relative"),
-               tax_mode = ("none", "person", "funds"), tax_rate = 26.375, marginal_tax_rate = nothing,
-               use_guenstigerpruefung = false, private_sale_threshold = 1000, sparer_pauschbetrag = 1000,
-               use_sparer_pauschbetrag = true, include_soli_on_income_tax = false, soli_rate_income_tax = 5.5,
-               base_rate = nothing, base_rate_flex = false, base_rate_data = nothing, funds_fee = 0.95,
-               bonus_fee = 5, fractions = true, risk_free = 0, split_mode = false, split_thresh = nothing,
-               event_col = nothing, event_mode = ("additional", "replace"), event_weight = nothing,
-               church_tax = 0, order_fee = nothing, dca_fee = nothing, harvest_mode = false,
-               harvest_day = "12-15", harvest_loss_pot = true, taxable_income = nothing,
-               tax_tariff = nothing, io = stdout)
+    simulation(data, strategy; start_value = 10000, costs = sim_costs(), dca = nothing,
+               rebalance = nothing, splits = nothing, tax = nothing, funds = nothing, risk_free = 0,
+               fractions = true, liquidate = false, details = false, io = stdout)
 
 Portfolio-Simulation (Backtest) mit Sparplan, Rebalancing und deutscher
 Besteuerung; bitgleiche Portierung von `simulation()` aus dem R-Paket SimLev
-0.5.0. Alle Raten und Schwellen **in Prozent** (`tax_rate = 26.375`,
-`balance_thresh = 5`, `risk_free = 2` …). `nothing` steht für `NULL`.
+0.5.0. Die Einstellungen kommen als Bausteine (Etappe 6.3): `costs =
+sim_costs()` (Standard), `dca = dca_plan()`, `rebalance = rebalance_plan()`,
+`splits = split_rule()`, `tax = tax_profile()` (mit `income = income_rate()`
+oder `income_tariff()` und `harvest = harvest_rule()`) und `funds =
+funds_costs()`; `nothing` heißt aus. `funds` zusammen mit `tax` ist der
+Fondsmodus mit eigenen Steuern (Satz bzw. Kirchensteuer aus `tax_profile()`). Alle Raten und Schwellen **in Prozent** (`risk_free = 2` …).
 
 `data`: RFrame, NamedTuple, Dict oder Pair-Vektor mit Spalte `date` (Date)
 und je Asset einer Kursspalte. `strategy`: Ergebnis von `create_strategy()`
 oder eine benannte Liste (Dict, NamedTuple, Pair-Vektor) von Asset-
-Konfigurationen. `order_fee`/`dca_fee`: Zahl (EUR je Order) oder benannte
-Liste `(fixed =, percent =, min =, max =)`; `taxable_income`: Zahl, nach
-Jahren benannte Liste (`"2024" => 50000`, RVector) oder RFrame(year,
-taxable_income); `tax_tariff`: `nothing`, Dateipfad oder `read_tax_tariff()`.
+Konfigurationen. `risk_free`: Zahl in Prozent p. a. oder Spaltenname in `data`.
 
 Hinweise (R: `message()`) gehen nach `stderr`, Warnungen über `@warn`, Fehler
 als `ErrorException` (Texte wie in R). Die `details`-Ausgabe geht nach `io`.
 Rückgabe: [`SimLevResult`](@ref).
 """
-function simulation(data, strategy; start_value = 10000, spread = nothing, details = false, liquidate = false,
+function simulation(data, strategy; start_value = 10000, costs = sim_costs(), dca = nothing, rebalance = nothing,
+                    splits = nothing, tax = nothing, funds = nothing, risk_free = 0, fractions = true,
+                    liquidate = false, details = false, io::IO = stdout)
+    @nospecialize
+    flat = _sim_from_blocks(costs, dca, rebalance, splits, tax, funds)
+    return _simulation_flat(data, strategy; start_value = start_value, risk_free = risk_free, fractions = fractions,
+                            liquidate = liquidate, details = details, io = io, _blocks = true, flat...)
+end
+
+"""
+    _simulation_flat(data, strategy; start_value, spread, details, liquidate, dca_mode, …, io)
+
+Engine mit den flachen Argumenten bis Etappe 6.2 (R: `.simulation_flat`).
+`simulation()` übersetzt die Bausteine mit `_sim_from_blocks` hierher
+(`_blocks = true`: Prüfungen der Bausteine entfallen, Meldungen nennen die
+Bausteine). Die Aufrufer mit `sim_args` gehen seit Etappe 6.4 über
+`simulation()` (`_sim_args_set`, `_sim_call` in sim_blocks.jl).
+`tax_tariff`: `nothing`, Dateipfad oder `tax_tariff()`.
+"""
+function _simulation_flat(data, strategy; start_value = 10000, spread = nothing, details = false, liquidate = false,
                     dca_mode = false, dca_value = nothing, dca_span = nothing, dca_days = nothing,
                     dca_unit = ("month", "quarter", "year"), dca_anchor = ("start", "end"), dca_start = nothing,
                     dca_skip = false, balance_mode = false, balance_span = nothing, balance_days = nothing,
@@ -439,13 +447,14 @@ function simulation(data, strategy; start_value = 10000, spread = nothing, detai
                     fractions = true, risk_free = 0, split_mode = false, split_thresh = nothing, event_col = nothing,
                     event_mode = _UNSET, event_weight = nothing, church_tax = 0, order_fee = nothing,
                     dca_fee = nothing, harvest_mode = false, harvest_day = "12-15", harvest_loss_pot = true,
-                    taxable_income = nothing, tax_tariff = nothing, io::IO = stdout)
+                    taxable_income = nothing, tax_tariff = nothing, io::IO = stdout, _blocks::Bool = false)
     @nospecialize
     given = _Given(Dict("tax_rate" => !(tax_rate isa _Unset), "marginal_tax_rate" => !(marginal_tax_rate isa _Unset),
                         "include_soli_on_income_tax" => !(include_soli_on_income_tax isa _Unset),
                         "soli_rate_income_tax" => !(soli_rate_income_tax isa _Unset),
                         "funds_fee" => !(funds_fee isa _Unset), "bonus_fee" => !(bonus_fee isa _Unset),
                         "event_mode" => !(event_mode isa _Unset)))
+    _blocks && (given = _Given(Dict(k => false for k in keys(given.d))))
     tax_rate = _val(tax_rate, 26.375)
     marginal_tax_rate = _val(marginal_tax_rate, nothing)
     include_soli_on_income_tax = _val(include_soli_on_income_tax, false)
@@ -459,15 +468,17 @@ function simulation(data, strategy; start_value = 10000, spread = nothing, detai
                                 marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                                 use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
                                 funds_fee, bonus_fee, fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
-                                order_fee, dca_fee, harvest_mode, harvest_day, taxable_income, tax_tariff, given, io)
+                                order_fee, dca_fee, harvest_mode, harvest_day, taxable_income, tax_tariff, given, io,
+                                _blocks)
     split_thresh !== nothing && (split_thresh = _num_vec(split_thresh))
-    start_date, stopp_date = _sim_prepare_data(fr, cfg.pre_filled, base_rate_flex, base_rate_data)
+    start_date, stopp_date = _sim_prepare_data(fr, cfg.pre_filled, base_rate_flex, base_rate_data, _blocks)
     sim = _sim_build_state(fr, cfg.strategy, cfg.start_value, start_date, stopp_date, cfg.sparer_pauschbetrag,
-                           cfg.use_sparer_pauschbetrag, cfg.base_rate, base_rate_flex, base_rate_data)
+                           cfg.use_sparer_pauschbetrag, cfg.base_rate, base_rate_flex, base_rate_data, _blocks)
     fl, ew = _sim_build_calendar(fr, sim, cfg.strategy, start_date, stopp_date, liquidate, cfg.dca_mode, dca_span,
                                  dca_unit, cfg.dca_days, cfg.dca_value, dca_anchor, dca_start, dca_skip, cfg.balance_mode,
                                  balance_span, balance_unit, cfg.balance_days, balance_anchor, balance_start,
-                                 balance_skip, cfg.event_col, event_mode, event_weight, cfg.split_mode, split_thresh)
+                                 balance_skip, cfg.event_col, event_mode, event_weight, cfg.split_mode, split_thresh,
+                                 _blocks)
     cfg.event_col !== nothing && (event_weight = ew)
     event_weight isa Union{Nothing,Vector{Pair{String,Any}}} || (event_weight = Pair{String,Any}[p for p in _kvpairs(event_weight)])
     _sim_init_weights!(sim, fl, cfg.start_value)

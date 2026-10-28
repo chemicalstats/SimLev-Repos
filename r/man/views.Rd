@@ -35,9 +35,9 @@ Liste mit \code{type} (\code{"mean"}, \code{"prob"} oder
 \code{"vol"}), \code{var} bzw. \code{expr}, \code{value} und \code{op}.
 }
 \description{
-Bausteine fuer die Annahmen ("Views") von \code{\link[=entropy_pooling]{entropy_pooling()}}. Jede
+Bausteine fuer die Annahmen ("Views") von \code{\link[=scenario_entropy_pooling]{scenario_entropy_pooling()}}. Jede
 Funktion beschreibt nur die Annahme; geprueft und umgesetzt wird sie erst
-in \code{\link[=entropy_pooling]{entropy_pooling()}} auf der Szenario-Tabelle. Werte stehen in der
+in \code{\link[=scenario_entropy_pooling]{scenario_entropy_pooling()}} auf der Szenario-Tabelle. Werte stehen in der
 Einheit der Szenario-Spalten: Bei Kursdaten sind das einfache Renditen in
 Prozent je Periode (-5 = -5 \%), Zustandsvariablen in ihrer eigenen
 Einheit.
@@ -58,9 +58,9 @@ der Umgewichtung davon abweichen.}
 set.seed(1); X <- data.frame(aktien = rnorm(1000, 0.15, 2), anleihen = rnorm(1000, 0.05, 0.6))
 v <- list(view_mean("aktien", -0.2), view_prob("aktien < -2", 0.15, ">="),
           view_vol("anleihen", 0.8))
-ep <- entropy_pooling(X, c("aktien", "anleihen"), v)
+ep <- scenario_entropy_pooling(X, c("aktien", "anleihen"), v)
 ep$summary
 }
 \seealso{
-\code{\link[=entropy_pooling]{entropy_pooling()}}, \code{\link[=scenario_risk]{scenario_risk()}}.
+\code{\link[=scenario_entropy_pooling]{scenario_entropy_pooling()}}, \code{\link[=scenario_risk]{scenario_risk()}}.
 }

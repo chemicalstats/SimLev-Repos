@@ -14,12 +14,12 @@
 asset_config(
   asset_class  = c("etf", "etn", "etc", "certificate",
                    "etn_standard", "etn_deliverable"),
-  action_type  = c("bnh", "signal"),
-  asset_share  = 1.0,
-  asset_spread = 0.1,
-  asset_bonus  = 0.0,
+  trading  = c("bnh", "signal"),
+  share  = 1.0,
+  spread = 0.1,
+  partial_exemption  = 0.0,
   deliverable  = FALSE,
-  asset_start  = NULL,
+  start  = NULL,
   tax_regime   = NULL,
   signal_buy   = NULL,
   signal_sell  = NULL
@@ -35,7 +35,7 @@ asset_config(
     \code{"etn"} mit \code{deliverable = FALSE} bzw. \code{TRUE} umgesetzt
     werden.
   }
-  \item{action_type}{
+  \item{trading}{
     Character. Handelsstrategie: \code{"bnh"} (Buy-and-Hold) oder
     \code{"signal"} (signalgesteuert). Bei \code{"signal"} steuern die
     Signalspalten nur Ein- und Ausstieg: Ohne Bestand wartet das Geld des
@@ -44,18 +44,18 @@ asset_config(
     bei Buy-and-Hold (nicht am Tag eines Verkaufssignals), unabhängig von
     \code{balance_mode}. Standard: \code{"bnh"}.
   }
-  \item{asset_share}{
+  \item{share}{
     Numerisch (keine Zeichenkette). Zielgewicht des Assets im Portfolio \strong{als Anteil}
     (größer 0 und höchstens 1, z. B. \code{0.6} = 60 \%). Es wird nicht
     normiert: \code{\link{simulation}} verlangt, dass sich die Gewichte aller
     Assets auf 1 summieren. Standard: \code{1}.
   }
-  \item{asset_spread}{
+  \item{spread}{
     Numerisch. Voller Bid-Ask-Spread \strong{in Prozent} (z. B. \code{0.1}
     = 0,1 \%), nicht negativ. Pro Seite wird der halbe Spread angewandt.
     Standard: \code{0.1}.
   }
-  \item{asset_bonus}{
+  \item{partial_exemption}{
     Numerisch. Teilfreistellungssatz nach § 20 Abs. 1 InvStG
     \strong{in Prozent} (0 bis 100; z. B. \code{30} für Aktien-ETFs,
     \code{15} für Mischfonds). Wirkt nur im Regime
@@ -63,12 +63,12 @@ asset_config(
     statt Prozent, z. B. \code{0.3}) werden mit Warnung angenommen.
     Standard: \code{0}.
   }
-  \item{asset_start}{
+  \item{start}{
     Date, Character (\code{"JJJJ-MM-TT"}) oder \code{NULL}. Frühestmögliches
     Kaufdatum für dieses Asset (für gestaffelte Asset-Starts); wird als
     \code{Date} gespeichert, ein ungültiges Datum führt zu einem Fehler. In
     \code{\link{simulation}} erhält das Asset ab diesem Tag sein volles
-    Zielgewicht \code{asset_share}: Am Starttag wird immer auf die
+    Zielgewicht \code{share}: Am Starttag wird immer auf die
     Zielgewichte umgeschichtet (Verkauf der übrigen Assets, Erstkauf des neuen
     Assets; mit Steuern, Spreads und Gebühren wie bei jedem Rebalancing), auch
     ohne \code{balance_mode}; ein zusätzlicher Handelsblock läuft an diesem
@@ -91,24 +91,24 @@ asset_config(
   \item{signal_buy}{
     Character oder \code{NULL}. Name der Spalte in \code{data} mit dem
     Kaufsignal (logisch, \code{TRUE} = kaufen). Bei
-    \code{action_type = "signal"} Pflicht (sonst Fehler).
+    \code{trading = "signal"} Pflicht (sonst Fehler).
   }
   \item{signal_sell}{
     Character oder \code{NULL}. Name der Spalte in \code{data} mit dem
     Verkaufssignal (logisch, \code{TRUE} = verkaufen). Bei
-    \code{action_type = "signal"} Pflicht (sonst Fehler).
+    \code{trading = "signal"} Pflicht (sonst Fehler).
   }
   \item{x, object}{Ein \code{asset_config}-Objekt.}
   \item{...}{Wird ignoriert.}
 }
 \value{
   Objekt der Klasse \code{"asset_config"} (benannte Liste) mit den Feldern
-  \code{asset_class}, \code{action_type}, \code{asset_share},
-  \code{asset_spread}, \code{asset_bonus}, \code{deliverable},
-  \code{asset_start}, \code{tax_regime}, \code{signal_buy},
+  \code{asset_class}, \code{trading}, \code{share},
+  \code{spread}, \code{partial_exemption}, \code{deliverable},
+  \code{start}, \code{tax_regime}, \code{signal_buy},
   \code{signal_sell}; validiert und ggf. mit abgeleitetem \code{tax_regime}.
-  Die Zahlen bleiben in den Einheiten der Eingabe (\code{asset_share} als
-  Anteil, \code{asset_spread} und \code{asset_bonus} in Prozent).
+  Die Zahlen bleiben in den Einheiten der Eingabe (\code{share} als
+  Anteil, \code{spread} und \code{partial_exemption} in Prozent).
 
   \code{print} und \code{summary} geben die Konfiguration auf der Konsole
   aus und liefern \code{x} unsichtbar zurück.
@@ -121,25 +121,25 @@ asset_config(
           \code{"private_sale"}; sonst \code{"capital_gains"}
     \item \code{"certificate"} → \code{"capital_gains"}
   }
-  Der \code{asset_spread} ist der \emph{volle} Bid-Ask-Spread; die Engine
+  Der \code{spread} ist der \emph{volle} Bid-Ask-Spread; die Engine
   wendet den halben Spread je Seite an (Kauf: Briefkurs, Verkauf: Geldkurs).
 }
 \examples{
 # ETF mit Teilfreistellung
 etf <- asset_config(
   asset_class  = "etf",
-  action_type  = "bnh",
-  asset_share  = 0.6,
-  asset_spread = 0.1,
-  asset_bonus  = 30
+  trading  = "bnh",
+  share  = 0.6,
+  spread = 0.1,
+  partial_exemption  = 30
 )
 print(etf)
 
 # Lieferbares ETC (physisches Gold) -> private_sale-Regime
 gold <- asset_config(
   asset_class = "etc",
-  action_type = "bnh",
-  asset_share = 0.2,
+  trading = "bnh",
+  share = 0.2,
   deliverable = TRUE
 )
 gold$tax_regime  # "private_sale"
@@ -147,10 +147,10 @@ gold$tax_regime  # "private_sale"
 # Signal-gesteuertes Asset
 sig <- asset_config(
   asset_class  = "etf",
-  action_type  = "signal",
-  asset_share  = 1.0,
-  asset_spread = 0.1,
-  asset_bonus  = 30,
+  trading  = "signal",
+  share  = 1.0,
+  spread = 0.1,
+  partial_exemption  = 30,
   signal_buy   = "my_buy_col",
   signal_sell  = "my_sell_col"
 )

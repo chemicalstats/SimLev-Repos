@@ -4,10 +4,10 @@
 - :func:`param_search`                       Raster, Zufallssuche oder Latin Hypercube;
                                              ruft ``simulation()`` je Punkt auf, speichert
                                              Kennzahlen und tägliche TWR-Renditen
-- :func:`plateau`                            Nachbarschafts-Glättung der Zielgröße
+- :func:`param_plateau`                            Nachbarschafts-Glättung der Zielgröße
 
-Die gespeicherten Renditen sind die Grundlage für ``pbo()``,
-``deflated_sharpe()`` und ``walk_forward()`` (Modul ``overfitting``).
+Die gespeicherten Renditen sind die Grundlage für ``overfit_pbo()``,
+``sharpe_deflated()`` und ``overfit_walk_forward()`` (Modul ``overfitting``).
 Strategien werden über eine ``builder``-Funktion beschrieben, die aus einem
 Parametersatz dieselbe Spezifikation liefert wie ein Element von
 ``bootstrap_study(strategies = ...)``: ``dict(strategy, signal, args, map, data)``.
@@ -33,11 +33,21 @@ from ._r.parallel import par_lapply as _par_lapply
 from .svg import (_res_fig, _res_finish, _res_line, _res_panel, _res_points, _res_ramp, _res_range, _res_rect,
                   _res_text, _res_tx, _res_ty)
 
-__all__ = ["param_space", "param_range", "param_search", "plateau",
+__all__ = ["param_space", "param_range", "param_search", "param_plateau",
            "SimLevParamSpace", "SimLevParamRange", "SimLevParamSearch", "SummarySimLevParamSearch"]
 
 _NAN = _fmt.NA_REAL   # R's NA_real_ (alle Verwendungen hier sind NA)
 _DBL_EPS = 2.220446049250313e-16
+
+
+class _Missing:
+    """Platzhalter für ein R-Argument ohne Standardwert (Gegenstück zu R's fehlendem Argument)."""
+
+    def __repr__(self):
+        return "<missing>"
+
+
+_MISSING = _Missing()
 
 
 def _ext(mod, name):
@@ -299,7 +309,7 @@ def _fmt_any(v):
     return ", ".join(str(s) for s in np.atleast_1d(_fmt.format(v)))
 
 
-def param_range(lower, upper, n=5, step=None, integer=False, log=False):
+def param_range(lower, upper, *, n=5, step=None, integer=False, log=False):
     """Stetiger Bereich einer Dimension für :func:`param_space`.
 
     Args:
@@ -471,9 +481,9 @@ def _run_spec(df, sp, sim_args, burn_in):
             df[a] = df[src]
     if burn_in > 0:
         df = df.iloc[int(burn_in):].reset_index(drop=True)
-    args = _modify_list(sim_args, sp.get("args") or {})
-    simulation = _ext("engine", "simulation")
-    return _quiet(lambda: simulation(data=df, strategy=sp["strategy"], **args))
+    from ._sim_blocks import _sim_args_set, _sim_call
+    args = _sim_args_set(sim_args, sp.get("args"), "param_search")
+    return _quiet(lambda: _sim_call(df, sp["strategy"], args))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -498,15 +508,15 @@ class SimLevParamSearch(RList):
     # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
 
-def param_search(data, builder=None, space=None, strategy=None, method=("grid", "random", "lhs"), n=50,
+def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("grid", "random", "lhs"), n=50,
                  constraint=None, sim_args=None, burn_in=0, metrics=None, objective="sharpe", maximize=True,
-                 cores=1, seed=None, keep_returns=True):
+                 keep_returns=True, seed=None, cores=1):
     """Parametersuche über Strategie- und Simulationsparameter.
 
     Wertet eine Strategie für jeden Punkt eines Parameterraums mit
     ``simulation()`` aus. Neben den Kennzahlen werden die täglichen
     zeitgewichteten Renditen jedes Punkts gespeichert (Grundlage für
-    ``pbo()``, ``deflated_sharpe()``, ``walk_forward()``).
+    ``overfit_pbo()``, ``sharpe_deflated()``, ``overfit_walk_forward()``).
 
     Je Punkt: ``signal(df)`` auf dem vollen Datensatz, dann ``data(df)``, dann
     ``map``, dann Verwerfen der ersten ``burn_in`` Zeilen, schließlich
@@ -524,7 +534,7 @@ def param_search(data, builder=None, space=None, strategy=None, method=("grid", 
         constraint: optional ``function(p)`` → ``True`` für zulässige Punkte.
         sim_args: gemeinsame Argumente für ``simulation()``.
         burn_in: Anzahl verworfener Zeilen am Anfang (Standard 0).
-        metrics: Funktion ``SimLevResult`` → benannter Vektor (Standard ``study_metrics``).
+        metrics: Funktion ``SimLevResult`` → benannter Vektor (Standard ``bootstrap_study_metrics``).
         objective: Name der Zielgröße (Standard ``"sharpe"``).
         maximize: Zielgröße maximieren (Standard ``True``).
         cores: Anzahl Prozesse (Standard 1).
@@ -537,16 +547,22 @@ def param_search(data, builder=None, space=None, strategy=None, method=("grid", 
     method = _match_arg(method, ("grid", "random", "lhs"), "method")
     sim_args = {} if sim_args is None else dict(sim_args)
     if metrics is None:
-        metrics = _ext("bootstrap", "study_metrics")
+        metrics = _ext("bootstrap", "bootstrap_study_metrics")
+    if space is _MISSING:   # R: space ohne Standardwert; Platzhalter nur, weil builder davor einen hat
+        raise ValueError('argument "space" is missing, with no default')
     if not isinstance(space, SimLevParamSpace):
         space = param_space(**dict(space))
     if builder is None:
         if strategy is None:
             raise ValueError("param_search: 'builder' oder 'strategy' angeben.")
         fixed = strategy
+        from ._sim_blocks import _sim_check_names
+        _sim_check_names(list(space.keys()), "param_search")   # Dimensionen = Argumente von simulation() bzw. Pfade
 
         def builder(p):
             return {"strategy": fixed, "args": p}
+    from ._sim_blocks import _sim_args_set
+    sim_run_args = _sim_args_set({}, sim_args, "param_search")
     with_rng = _ext("bootstrap", "_with_rng_restore")
     design = with_rng(lambda: _ps_design(space, method, n, constraint), seed=seed)
     t0 = time.perf_counter()
@@ -554,7 +570,7 @@ def param_search(data, builder=None, space=None, strategy=None, method=("grid", 
     def run(i):
         p = _row_params(design, i)
         try:
-            res = _run_spec(data, _as_spec(builder(p)), sim_args, burn_in)
+            res = _run_spec(data, _as_spec(builder(p)), sim_run_args, burn_in)
         except Exception as e:  # noqa: BLE001 - tryCatch(error = ...)
             return {"m": None, "err": _cond_msg(e)}
         try:
@@ -692,13 +708,11 @@ def _ps_neighbours(x, radius=1, k=5):
 
 
 def _lower_better():
-    try:
-        return list(_ext("bootstrap", "_lower_better"))
-    except (ImportError, AttributeError):
-        return ["max_drawdown", "avg_drawdown", "dd_q50", "dd_q90", "ulcer_index", "longest_drawdown"]
+    """R ``.lower_better`` (``r/R/bootstrap.R``): Kennzahlen, bei denen kleiner besser ist."""
+    return list(_ext("bootstrap", "_LOWER_BETTER"))
 
 
-def plateau(x, metric=None, radius=1, k=5):
+def param_plateau(x, *, metric=None, radius=1, k=5):
     """Plateau-Wert: Zielgröße über die Nachbarschaft eines Punkts.
 
     Beim Raster sind Nachbarn alle Punkte, die sich in jeder Dimension um
@@ -797,7 +811,7 @@ def _fmt_vec(f, v):
 def _summary_param_search(obj_, top=10):
     tab = obj_["results"].copy()
     obj = obj_["objective"]
-    pl = plateau(obj_)
+    pl = param_plateau(obj_)
     tab["plateau"] = pl["plateau_mean"].to_numpy()
     mx = obj_.get("maximize") is True
     ordv = _order(tab[obj].to_numpy(dtype=np.float64), decreasing=mx, na_last=True)

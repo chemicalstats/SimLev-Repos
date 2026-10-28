@@ -19,14 +19,13 @@
   d$b <- .fm_flag(dd, "2021-01-01"); d$sx <- .fm_flag(dd, "2022-03-01")
   d$sy <- .fm_flag(dd, "2021-06-01"); d$sz <- .fm_flag(dd, "2022-06-01")
   k <- if (vp) 4 else 3
-  cf <- function(s) asset_config("certificate", "signal", asset_share = 1 / k, asset_spread = 0, signal_buy = "b", signal_sell = s)
+  cf <- function(s) asset_config("certificate", "signal", share = 1 / k, spread = 0, signal_buy = "b", signal_sell = s)
   st <- list(X = cf("sx"), Y = cf("sy"), Z = cf("sz"))
   if (vp) {
     d$E <- .fm_step(dd, c("2021-01-01", "2021-12-31"), c(100, 120))
-    st$E <- asset_config("etf", "bnh", asset_share = 0.25, asset_spread = 0, asset_bonus = 0)
+    st$E <- asset_config("etf", "bnh", share = 0.25, spread = 0, partial_exemption = 0)
   }
-  .fm_sim(d, do.call(create_strategy, st), start_value = 5000 * k, tax_mode = "person",
-          base_rate = if (vp) 2.5 else NULL)
+  .fm_sim(d, do.call(create_strategy, st), start_value = 5000 * k, tax = tax_profile(base_rate = if (vp) 2.5 else NULL))
 }
 
 test_that("Punkt 1: Verlust nach Nutzung eines Vortrags erstattet die Steuer, die Vortragsnutzung bleibt", {
@@ -70,8 +69,7 @@ test_that("Punkt 1: Vorabpauschale ist Ertrag des Zuflussjahres und zaehlt zum S
 .fm_dca <- function() {
   dd <- .fm_days("2020-01-01", "2021-12-31")
   p <- ifelse(dd < as.Date("2020-06-01"), 100, ifelse(dd < as.Date("2021-07-01"), 80, 100)); p[length(p)] <- 150
-  .fm_sim(data.frame(date = dd, A = p), create_strategy(A = asset_config("etf", "bnh", asset_share = 1, asset_spread = 0)),
-          start_value = 1000, dca_mode = TRUE, dca_value = 1000, dca_unit = "year", dca_span = 1, dca_skip = TRUE)
+  .fm_sim(data.frame(date = dd, A = p), create_strategy(A = asset_config("etf", "bnh", share = 1, spread = 0)), start_value = 1000, dca = dca_plan(value = 1000, span = 1, unit = "year", skip = TRUE))
 }
 
 test_that("Punkt 2: CAGR mit Sparplan ist der interne Zinsfu\u00df (Handrechnung, unabhaengige Referenz)", {
@@ -91,8 +89,8 @@ test_that("Punkt 2: CAGR mit Sparplan ist der interne Zinsfu\u00df (Handrechnung
   expect_gt((3375 / 1000)^(1 / T) - 1 - r$cagr, 0.4)
   # TTWROR: Index 1 -> 0,8 -> 1 -> 1,5
   expect_equal(r$ttwror, 1.5^(1 / T) - 1, tolerance = 1e-12)
-  # deep_analysis (eigene MWRR) stimmt ueberein
-  expect_equal(r$cagr, deep_analysis(r)$metrics["mwrr", 1], tolerance = 1e-8)
+  # result_analysis (eigene MWRR) stimmt ueberein
+  expect_equal(r$cagr, result_analysis(r)$metrics["mwrr", 1], tolerance = 1e-8)
 })
 
 test_that("Punkt 2: Drawdowns zeitgewichtet, Calmar/Martin mit TTWROR", {
@@ -116,8 +114,7 @@ test_that("Punkt 2: Drawdowns zeitgewichtet, Calmar/Martin mit TTWROR", {
 test_that("Punkt 2: Red-Team-Fall R2-05 (CAGR 82 % bei TTWROR 4 %), Volatilit\u00e4t war schon bereinigt", {
   set.seed(12); n <- 4 * 365
   d <- data.frame(date = seq.Date(as.Date("2019-01-01"), by = "day", length.out = n), A = 100 * exp(cumsum(rnorm(n, 2e-4, 0.011))))
-  r <- .fm_sim(d, create_strategy(A = asset_config("etf", asset_share = 1, asset_spread = 0)),
-               dca_mode = TRUE, dca_value = 2000, dca_span = 1)
+  r <- .fm_sim(d, create_strategy(A = asset_config("etf", share = 1, spread = 0)), dca = dca_plan(value = 2000, span = 1))
   w <- r$worth; fl <- r$report$A$flows; t <- as.numeric(r$dates - r$dates[1]) / 365.25
   # unabhaengige Referenz: Newton auf dem Kapitalwert (Diskontierung auf den Start)
   cf <- -fl; cf[1] <- -w[1]; cf[n] <- cf[n] + w[n]
@@ -134,7 +131,7 @@ test_that("Punkt 2: Red-Team-Fall R2-05 (CAGR 82 % bei TTWROR 4 %), Volatilit\u0
 test_that("Punkt 2: ohne Zufluesse unver\u00e4ndert (alte Formeln bitgleich)", {
   set.seed(3); n <- 900
   d <- data.frame(date = seq.Date(as.Date("2018-01-01"), by = "day", length.out = n), A = 100 * exp(cumsum(rnorm(n, 3e-4, 0.012))))
-  r <- .fm_sim(d, create_strategy(A = asset_config("etf", asset_share = 1, asset_spread = 0.1)), start_value = 10000)
+  r <- .fm_sim(d, create_strategy(A = asset_config("etf", share = 1, spread = 0.1)), start_value = 10000)
   w <- r$worth; yrs <- as.numeric(r$dates[n] - r$dates[1]) / 365.25
   expect_false(r$external_flows)
   expect_identical(r$cagr, (w[n] / w[1])^(1 / yrs) - 1)

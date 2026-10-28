@@ -293,15 +293,15 @@ F2 <- sprintf("f <- backcast_fit(s2, 'etf', 'idx', ter = %s, leverage = 2, rate 
 F2P <- sprintf("f = BC.backcast_fit(s2, 'etf', 'idx', ter=%s, leverage=2, rate='rate')", TERP)
 F2J <- sprintf('f = BC.backcast_fit(s2, "etf", "idx"; ter = %s, leverage = 2, rate = "rate")\n', TERJ)
 case("bc_stine", paste0(F2, "; backcast(f, fill = 'stine', splice = '2006-08-15')"),
-     paste0(F2P, "; result = BC.backcast(f, fill='stine', splice='2006-08-15')"),
+     paste0(F2P, "; result = BC.backcast(fit=f, fill='stine', splice='2006-08-15')"),
      paste0(F2J, 'result = BC.backcast(f; fill = "stine", splice = "2006-08-15")'), IB)
 case("bc_stine_attr", paste0(F2, "; bc <- backcast(f, fill = 'stine', rebase = 100); list(bc = bc, params = attr(bc, 'params'), splice = attr(bc, 'splice_date'))"),
-     paste0(F2P, "; bc = BC.backcast(f, fill='stine', rebase=100)\nresult = dict(bc=bc, params=bc.attrs['params'], splice=bc.attrs['splice_date'])"),
+     paste0(F2P, "; bc = BC.backcast(fit=f, fill='stine', rebase=100)\nresult = dict(bc=bc, params=bc.attrs['params'], splice=bc.attrs['splice_date'])"),
      paste0(F2J, 'bc = BC.backcast(f; fill = "stine", rebase = 100)\nresult = SL.RList("bc" => bc, "params" => SL.attrs(bc)["params"], "splice" => SL.attrs(bc)["splice_date"])'), IB)
 case("bc_nofit_stine", "backcast(data = s3, product = 'etf', index = 'idx', leverage = 2, rate = 'rate', ter = 0.5, fill = 'stine', index_fill = 'stine')",
      "result = BC.backcast(data=s3, product='etf', index='idx', leverage=2, rate='rate', ter=0.5, fill='stine', index_fill='stine')",
      'result = BC.backcast(; data = s3, product = "etf", index = "idx", leverage = 2, rate = "rate", ter = 0.5, fill = "stine", index_fill = "stine")', IB)
 case("bc_fit_stine", "f <- backcast_fit(s3, 'etf', 'idx', leverage = 2, rate = 'rate', index_fill = 'stine'); backcast(f, fill = 'stine')",
-     "f = BC.backcast_fit(s3, 'etf', 'idx', leverage=2, rate='rate', index_fill='stine'); result = BC.backcast(f, fill='stine')",
+     "f = BC.backcast_fit(s3, 'etf', 'idx', leverage=2, rate='rate', index_fill='stine'); result = BC.backcast(fit=f, fill='stine')",
      'f = BC.backcast_fit(s3, "etf", "idx"; leverage = 2, rate = "rate", index_fill = "stine")\nresult = BC.backcast(f; fill = "stine")', IB)
 ref_done()

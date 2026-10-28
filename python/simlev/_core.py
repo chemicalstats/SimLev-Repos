@@ -195,7 +195,7 @@ def batch_market_update(sim: dict, assets: list[str], start_idx: int, end_idx: i
 # fifo_core.cpp
 # ═══════════════════════════════════════════════════════════════════════════
 
-def calculate_fifo_price(buys: list, units: float, front_index: int) -> float:
+def _calculate_fifo_price(buys: list, units: float, front_index: int) -> float:
     units_trade = units
     total_price = 0.0
     i = front_index
@@ -213,7 +213,7 @@ def calculate_fifo_price(buys: list, units: float, front_index: int) -> float:
     return total_price / units if units > 0 else 0.0
 
 
-def calculate_fifo_vorabpauschale(buys: list, units: float, front_index: int) -> float:
+def _calculate_fifo_vorabpauschale(buys: list, units: float, front_index: int) -> float:
     units_trade = units
     total_vp = 0.0
     i = front_index
@@ -233,7 +233,7 @@ def calculate_fifo_vorabpauschale(buys: list, units: float, front_index: int) ->
     return total_vp
 
 
-def calculate_private_sale_tax(buys: list, front_index: int, trade_count: float,
+def _calculate_private_sale_tax(buys: list, front_index: int, trade_count: float,
                                sell_price: float, current_date: int) -> dict:
     units_remaining = trade_count
     i = front_index
@@ -308,7 +308,7 @@ def fifo_consume(sim: dict, name: str, trade_count: float) -> None:
     tr["fifo_front"] = front
 
 
-def update_fifo_front(buys: list, front_index: int) -> int:
+def _update_fifo_front(buys: list, front_index: int) -> int:
     while front_index <= len(buys):
         b = buys[front_index - 1]
         if not b:

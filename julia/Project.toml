@@ -1,7 +1,7 @@
 name = "SimLev"
 uuid = "e2138e0f-4e5d-418f-878f-58afeacfc360"
 authors = ["ChemicalStats von der Mauerstrasse <chemicalstatsy@protonmail.com>"]
-version = "0.8.0"
+version = "0.9.0"
 
 [deps]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"

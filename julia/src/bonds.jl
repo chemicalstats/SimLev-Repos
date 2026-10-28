@@ -1,9 +1,9 @@
 # Bonds – r/R/bonds.R (Vorlage python/simlev/bonds.py)
 #
-#   bond_index_from_yields  Total-Return-Index einer Anleihe konstanter Laufzeit
+#   index_bond  Total-Return-Index einer Anleihe konstanter Laufzeit
 #                           aus einer Renditereihe (Swinkels 2019)
-#   money_market_index      Geldmarkt-Index aus einem Tageszins (Act/360)
-#   currency_hedged_index   währungsgesicherte Reihe (gedeckte Zinsparität)
+#   index_money_market      Geldmarkt-Index aus einem Tageszins (Act/360)
+#   index_currency_hedged   währungsgesicherte Reihe (gedeckte Zinsparität)
 #
 # Alle Zinsen in Prozent p. a.; Eingaben als Spaltenname, Vektor, Skalar oder
 # RFrame(date, value) (Stufenfunktion).
@@ -13,7 +13,7 @@ import ..SimLev
 using ..SimLev: RList, RFrame, RVector, nrow, attrs, NA
 using Dates
 
-export bond_index_from_yields, money_market_index, currency_hedged_index
+export index_bond, index_money_market, index_currency_hedged
 
 const DP = SimLev.DataPrep
 const BC = SimLev.Backcast
@@ -32,7 +32,7 @@ function _bond_price(y, coupon, maturity, m)
 end
 
 """
-    bond_index_from_yields(data, yield; maturity = 10, coupon_frequency = 1,
+    index_bond(data, yield; maturity = 10, coupon_frequency = 1,
                            method = "exact", start = 100)
 
 Anleihe-Index aus Renditen (konstante Laufzeit): an jedem Tag wird eine
@@ -40,7 +40,7 @@ Par-Anleihe (Kupon = Rendite des Vortags) gekauft und am Folgetag zur neuen
 Rendite bewertet; `method = "duration"` nähert über Duration und Konvexität.
 Liefert ein `RVector` (Indexniveau) mit `attrs(x)["duration"]`.
 """
-function bond_index_from_yields(data, yield; maturity = 10, coupon_frequency = 1,
+function index_bond(data, yield; maturity = 10, coupon_frequency = 1,
                                 method = ("exact", "duration"), start = 100)
     data = SimLev.as_rframe(data)
     method = DP._match_arg(method, ("exact", "duration"))
@@ -75,11 +75,11 @@ function bond_index_from_yields(data, yield; maturity = 10, coupon_frequency = 1
 end
 
 """
-    money_market_index(data, rate; spread = 0, basis = 360, start = 100)
+    index_money_market(data, rate; spread = 0, basis = 360, start = 100)
 
 Geldmarkt-Index aus einem Tageszins: `I_t = I_{t-1} (1 + (i_{t-1} - s)/100 Δt/B)`.
 """
-function money_market_index(data, rate; spread = 0, basis = 360, start = 100)
+function index_money_market(data, rate; spread = 0, basis = 360, start = 100)
     data = SimLev.as_rframe(data)
     data = DP._as_frame(data)
     i = BC._resolve_series(rate, data, "rate")
@@ -91,14 +91,14 @@ function money_market_index(data, rate; spread = 0, basis = 360, start = 100)
 end
 
 """
-    currency_hedged_index(data, local_, domestic_rate, foreign_rate; cost = 0,
+    index_currency_hedged(data, local_, domestic_rate, foreign_rate; cost = 0,
                           basis = 360, start = nothing)
 
 Währungsgesicherte Reihe: lokale Rendite plus Zinsdifferenz, minus
 Sicherungskosten (Prozent p. a., Basis 365). `local_` als Spaltenname oder
 Vektor (Lücken per LOCF).
 """
-function currency_hedged_index(data, local_, domestic_rate, foreign_rate; cost = 0, basis = 360, start = nothing)
+function index_currency_hedged(data, local_, domestic_rate, foreign_rate; cost = 0, basis = 360, start = nothing)
     data = SimLev.as_rframe(data)
     data = DP._as_frame(data)
     x = local_ isa AbstractString ? DP._as_numeric(DP._col(data, local_)) : DP._as_numeric(local_)

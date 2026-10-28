@@ -1,6 +1,9 @@
 # Erzeugt Golden-Master-Faelle: Daten + Argumente + exakte R-Ergebnisse (hex).
 # Aufruf: Rscript golden_cases.R <outdir> <n_random> <seed>
 suppressMessages({library(SimLev); library(jsonlite)})
+# Fälle als flache Argumentlisten beschrieben; simulation() bekommt die übersetzten Bausteine (Etappe 6.3)
+.here <- dirname(normalizePath(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])))
+source(file.path(.here, "tools", "blocks_from_flat.R"))
 args <- commandArgs(TRUE)
 outdir <- args[1]; n_random <- as.integer(args[2]); seed0 <- as.integer(args[3])
 dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
@@ -21,8 +24,8 @@ enc_data <- function(df) {
 enc_strategy <- function(s) {
   lapply(s, function(a) {
     a <- unclass(a)
-    if (!is.null(a$asset_start)) a$asset_start <- format(as.Date(a$asset_start))
-    for (k in c("asset_share", "asset_spread", "asset_bonus")) if (!is.null(a[[k]])) a[[k]] <- list(hex = hx(a[[k]]))
+    if (!is.null(a$start)) a$start <- format(as.Date(a$start))
+    for (k in c("share", "spread", "partial_exemption")) if (!is.null(a[[k]])) a[[k]] <- list(hex = hx(a[[k]]))
     a
   })
 }
@@ -42,12 +45,13 @@ enc_result <- function(r) {
 
 run_case <- function(id, data, strategy, sargs) {
   stdout_txt <- NULL
+  blk <- blocks_from_flat(sargs)
   res <- tryCatch(suppressWarnings(suppressMessages({
                     stdout_txt <- capture.output(r <- do.call(simulation,
-                      c(list(data = data, strategy = strategy), sargs))); r })),
+                      c(list(data = data, strategy = strategy), lapply(blk, flatblock_build)))); r })),
                   error = function(e) e)
   out <- list(id = id, data = enc_data(data), strategy = enc_strategy(strategy),
-              args = lapply(sargs, function(v) if (inherits(v, "Date")) format(v) else v))
+              args = lapply(blk, function(v) if (inherits(v, "Date")) format(v) else flatblock_json(v)))
   if (inherits(res, "error")) out$error <- conditionMessage(res) else out$result <- enc_result(res)
   if (isTRUE(sargs$details)) out$stdout <- paste(stdout_txt, collapse = "\n")
   writeLines(toJSON(out, digits = NA, auto_unbox = TRUE, null = "null", na = "null"),
@@ -110,14 +114,14 @@ run_case("f11_splits_int", d9, s9, list(split_mode = TRUE, split_thresh = c(20, 
          tax_mode = "person", start_value = 100000, balance_mode = TRUE, balance_unit = "month", balance_span = 3))
 d10 <- d9; d10$target_leverage <- 2 + 0.5 * sin(seq(0, 12 * pi, length.out = n9))
 d10$sigma_ewma <- 0.01 + 0.005 * abs(sin(seq(0, 40, length.out = n9)))
-d10 <- compute_rebal_trigger(d10, "combined", triggers = list(list(type = "abs_leverage", threshold = 15),
+d10 <- rebalance_trigger(d10, "combined", triggers = list(list(type = "abs_leverage", threshold = 15),
                                                              list(type = "vol_band", threshold = 25)))
 d10$w1 <- d10$target_leverage / 3; d10$w2 <- 1 - d10$w1
 run_case("f12_event_add", d10, s9, list(event_col = "rebal_trigger", balance_mode = TRUE, tax_mode = "person"))
 run_case("f13_event_repl_w", d10, s9, list(event_col = "rebal_trigger", event_mode = "replace",
          event_weight = list(LETF = "w1", SAFE = "w2"), tax_mode = "person", liquidate = TRUE))
-s14 <- create_strategy(WORLD = ac("etf", "bnh", 0.5, 0.1, 30), BONDS = ac("etf", "bnh", 0.3, 0.1, 0, asset_start = "2016-07-15"),
-                       GOLD = ac("etc", "bnh", 0.2, 0.2, 0, asset_start = "2017-02-01"))
+s14 <- create_strategy(WORLD = ac("etf", "bnh", 0.5, 0.1, 30), BONDS = ac("etf", "bnh", 0.3, 0.1, 0, start = "2016-07-15"),
+                       GOLD = ac("etc", "bnh", 0.2, 0.2, 0, start = "2017-02-01"))
 d14 <- d1; d14$GOLD <- gbm(n, 30, 2e-4, 0.009)
 run_case("f14_staggered", d14, s14, list(balance_mode = TRUE, balance_unit = "year", tax_mode = "person", dca_mode = TRUE,
          dca_value = 500, dca_span = 1, dca_unit = "quarter", liquidate = TRUE))
@@ -135,7 +139,7 @@ run_case("f20_losses", d19, create_strategy(A = ac("certificate", "bnh", 0.5, 0.
 d1r <- d1; d1r$sofr <- 2 + sin(seq_len(n) / 50)
 run_case("f21_rf_col", d1r, s2, list(risk_free = "sofr", balance_mode = TRUE, dca_mode = TRUE, dca_value = 50, dca_span = 1))
 run_case("f22_no_spb", d1, s2, list(tax_mode = "person", use_sparer_pauschbetrag = FALSE, base_rate = 3, liquidate = TRUE))
-legacy <- list(ETF = list(asset_class = "etf", action_type = "bnh", asset_share = 1, asset_spread = 0.1, asset_bonus = 0))
+legacy <- list(ETF = list(asset_class = "etf", trading = "bnh", share = 1, spread = 0.1, partial_exemption = 0))
 run_case("f23_legacy_list", d1[, c("date", "WORLD")], list(WORLD = legacy$ETF), list(tax_mode = "person", liquidate = TRUE))
 
 # ── Zufallsszenarien ─────────────────────────────────────────────────────────
@@ -160,7 +164,7 @@ for (k in seq_len(n_random)) {
     st[[nms[i]]] <- ac(cl, if (sig) "signal" else "bnh", sh[i], pick(c(0, 0.05, 0.1, 0.3)),
                        if (cl == "etf") pick(c(0, 15, 30)) else 0,
                        deliverable = (cl %in% c("etc", "etn")) && runif(1) < 0.5,
-                       asset_start = if (i > 1 && runif(1) < 0.25) format(start + sample(1:max(2, n %/% 2), 1)) else NULL,
+                       start = if (i > 1 && runif(1) < 0.25) format(start + sample(1:max(2, n %/% 2), 1)) else NULL,
                        signal_buy = if (sig) "sb" else NULL, signal_sell = if (sig) "ss" else NULL)
   }
   st <- create_strategy(assets = st)
@@ -207,8 +211,8 @@ run_case("f30_details_guenst_no", d1[1:400, ], s2, list(details = TRUE, tax_mode
          marginal_tax_rate = 35))
 run_case("f31_three_days", d1[1:3, ], s2, list(tax_mode = "person"))
 wd2 <- d14[!(as.integer(format(d14$date, "%u")) %in% c(6, 7)), ]
-s31 <- create_strategy(WORLD = ac("etf", "bnh", 0.5, 0.1, 30), BONDS = ac("etf", "bnh", 0.3, 0.1, 0, asset_start = "2016-07-16"),
-                       GOLD = ac("etc", "bnh", 0.2, 0.2, 0, asset_start = "2017-04-30"))
+s31 <- create_strategy(WORLD = ac("etf", "bnh", 0.5, 0.1, 30), BONDS = ac("etf", "bnh", 0.3, 0.1, 0, start = "2016-07-16"),
+                       GOLD = ac("etc", "bnh", 0.2, 0.2, 0, start = "2017-04-30"))
 run_case("f32_start_on_gap", wd2, s31, list(details = TRUE, balance_mode = TRUE, tax_mode = "person", liquidate = TRUE))
 run_case("f33_event_w_missing", d10, s9, list(event_col = "rebal_trigger", event_weight = list(LETF = "w1"),
          balance_mode = TRUE))

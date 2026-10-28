@@ -1,9 +1,9 @@
 # Overfitting – r/R/overfitting.R (Vorlage python/simlev/overfitting.py)
 #
-#  pbo()                    Probability of Backtest Overfitting (CSCV)
-#  probabilistic_sharpe()   Probabilistic Sharpe Ratio
-#  deflated_sharpe()        Deflated Sharpe Ratio inkl. effektiver Versuchsanzahl
-#  walk_forward()           rollierende Auswahl In-Sample, Bewertung Out-of-Sample
+#  overfit_pbo()                    Probability of Backtest Overfitting (CSCV)
+#  sharpe_probabilistic()   Probabilistic Sharpe Ratio
+#  sharpe_deflated()        Deflated Sharpe Ratio inkl. effektiver Versuchsanzahl
+#  overfit_walk_forward()           rollierende Auswahl In-Sample, Bewertung Out-of-Sample
 #  param_bootstrap()        beste Punkte einer Suche auf Bootstrap-Pfaden
 #  sharpe_haircut()         Sharpe-Ratio-Abschlag für Mehrfachtests
 #
@@ -20,7 +20,7 @@ using Logging
 const SL = SimLev
 const NA = SimLev.NA
 
-export pbo, probabilistic_sharpe, deflated_sharpe, walk_forward, param_bootstrap, sharpe_haircut
+export overfit_pbo, sharpe_probabilistic, sharpe_deflated, overfit_walk_forward, param_bootstrap, sharpe_haircut
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Kleine R-Hilfen (auch von ParamSearch / Sensitivity benutzt)
@@ -447,21 +447,21 @@ function _lm_coef(x::Vector{Float64}, y::Vector{Float64})
 end
 
 """
-    pbo(x; S = 16, metric = "sharpe", frequency = "week", dates = nothing, risk_free = 0)
+    overfit_pbo(x; S = 16, metric = "sharpe", frequency = "week", dates = nothing, risk_free = 0)
 
 Probability of Backtest Overfitting mit Combinatorially Symmetric
 Cross-Validation (Bailey, Borwein, López de Prado & Zhu 2017). `x` ist eine
 `SimLevParamSearch` mit Renditen oder eine numerische Renditematrix (Zeilen =
 Perioden, Spalten = Punkte). Ergebnis: `RList` der Klasse `SimLevPBO`.
 """
-function pbo(x; S = 16, metric = nothing, frequency = nothing, dates = nothing, risk_free = 0)
+function overfit_pbo(x; S = 16, metric = nothing, frequency = nothing, dates = nothing, risk_free = 0)
     x = SimLev.as_rframe(x)
     metric = _match_arg(metric, ("sharpe", "sortino", "geometric", "mean"))
     frequency = _match_arg(frequency, ("week", "day", "month"))
     S = trunc(Int, S)
     (S < 2 || isodd(S)) && error("S muss gerade und >= 2 sein.")
     rr = _rr(x, frequency, dates, risk_free)
-    metric == "sharpe" && (rr = _of_drop_flat(rr, "pbo"))
+    metric == "sharpe" && (rr = _of_drop_flat(rr, "overfit_pbo"))
     R = rr.R
     N = size(R, 2); Tn = size(R, 1)
     N < 2 && error("Mindestens zwei Punkte nötig.")
@@ -563,13 +563,13 @@ end
 # ═════════════════════════════════════════════════════════════════════════════
 
 """
-    probabilistic_sharpe(r; benchmark = 0, ppy = 52)
+    sharpe_probabilistic(r; benchmark = 0, ppy = 52)
 
 Wahrscheinlichkeit (Anteil), dass die wahre Sharpe Ratio über `benchmark`
 (p. a.) liegt, unter Berücksichtigung von Stichprobenlänge, Schiefe und
 Wölbung (Bailey & López de Prado 2012).
 """
-function probabilistic_sharpe(r; benchmark = 0, ppy = 52)
+function sharpe_probabilistic(r; benchmark = 0, ppy = 52)
     v = _tofloat(r isa AbstractVector ? r : [r])
     v = filter(isfinite, v)
     n = length(v)
@@ -585,18 +585,18 @@ function probabilistic_sharpe(r; benchmark = 0, ppy = 52)
 end
 
 """
-    deflated_sharpe(x; id = nothing, n_trials = nothing, effective = true,
+    sharpe_deflated(x; id = nothing, n_trials = nothing, effective = true,
                     frequency = "week", dates = nothing, risk_free = 0)
 
 Deflated Sharpe Ratio (Bailey & López de Prado 2014) des besten (oder des
 Punkts `id`) einer Suche bzw. Renditematrix. Ergebnis: `RList` der Klasse
 `SimLevDSR`.
 """
-function deflated_sharpe(x; id = nothing, n_trials = nothing, effective::Bool = true, frequency = nothing,
+function sharpe_deflated(x; id = nothing, n_trials = nothing, effective::Bool = true, frequency = nothing,
                          dates = nothing, risk_free = 0)
     x = SimLev.as_rframe(x)
     frequency = _match_arg(frequency, ("week", "day", "month"))
-    rr = _of_drop_flat(_rr(x, frequency, dates, risk_free), "deflated_sharpe")
+    rr = _of_drop_flat(_rr(x, frequency, dates, risk_free), "sharpe_deflated")
     R = rr.R
     N = size(R, 2)
     sr = _of_col_metric(R, "sharpe")
@@ -625,8 +625,8 @@ function deflated_sharpe(x; id = nothing, n_trials = nothing, effective::Bool = 
     r = R[:, j]
     sq = sqrt(rr.ppy)
     return SL.RList("id" => rr.cols[j], "sharpe" => sr[j] * sq, "sr0" => sr0 * sq,
-                    "psr" => probabilistic_sharpe(r; benchmark = 0, ppy = rr.ppy),
-                    "dsr" => probabilistic_sharpe(r; benchmark = sr0 * sq, ppy = rr.ppy),
+                    "psr" => sharpe_probabilistic(r; benchmark = 0, ppy = rr.ppy),
+                    "dsr" => sharpe_probabilistic(r; benchmark = sr0 * sq, ppy = rr.ppy),
                     "n_trials" => Nt, "n_points" => N, "n_eff" => n_eff, "rho" => rho, "var_sr" => v * rr.ppy,
                     "n_obs" => size(R, 1), "frequency" => frequency; class = "SimLevDSR")
 end
@@ -656,7 +656,7 @@ function _add_m(date::Date, months)
 end
 
 """
-    walk_forward(x; train = 5, test = 1, step = test, anchored = false,
+    overfit_walk_forward(x; train = 5, test = 1, step = test, anchored = false,
                  metric = "sharpe", select = "best", risk_free = 0)
 
 Walk-Forward-Auswahl auf den täglichen Renditen einer `SimLevParamSearch`
@@ -664,7 +664,7 @@ Walk-Forward-Auswahl auf den täglichen Renditen einer `SimLevParamSearch`
 `SimLevWalkForward` mit `windows`, `series`, `summary`, `hindsight_id` und
 den Einstellungen.
 """
-function walk_forward(x; train = 5, test = 1, step = nothing, anchored::Bool = false, metric = nothing,
+function overfit_walk_forward(x; train = 5, test = 1, step = nothing, anchored::Bool = false, metric = nothing,
                       select = nothing, risk_free = 0)
     x = SimLev.as_rframe(x)
     step === nothing && (step = test)
@@ -809,7 +809,7 @@ function param_bootstrap(x, data, config; ids = nothing, top = 5, by = nothing, 
     _is_ps(x) || error("x muss ein SimLevParamSearch sein.")
     res = x["results"]
     if ids === nothing
-        v = by == "plateau" ? SL.ParamSearch.plateau(x)["plateau_mean"] : res[String(x["objective"])]
+        v = by == "plateau" ? SL.ParamSearch.param_plateau(x)["plateau_mean"] : res[String(x["objective"])]
         o = _order(_tofloat(v); decreasing = get(x, "maximize", nothing) === true, na_last = nothing)
         ids = res["id"][o[1:min(Int(top), length(o))]]
     end
@@ -828,9 +828,15 @@ function param_bootstrap(x, data, config; ids = nothing, top = 5, by = nothing, 
         push!(specs, "p$i" => sp)
     end
     strategies = SL.RList(vcat(specs, _kv(include))...)
+    # sim_args aus kwargs ergänzen die der Suche (oberste Ebene; Bausteine werden ersetzt, nicht gemischt)
+    dots = SL.RList((String(k) => v for (k, v) in kwargs)...)
+    sa = SL._sim_args_set(SL.RList(), get(x, "sim_args", SL.RList()), "param_bootstrap")
+    if haskey(dots, "sim_args")
+        sa = SL._sim_args_set(sa, dots["sim_args"], "param_bootstrap"); delete!(dots, "sim_args")
+    end
     args = _modify_list(SL.RList("data" => data, "config" => config, "strategies" => strategies,
-                                 "sim_args" => get(x, "sim_args", SL.RList()), "burn_in" => get(x, "burn_in", 0)),
-                        SL.RList((String(k) => v for (k, v) in kwargs)...))
+                                 "burn_in" => get(x, "burn_in", 0)), dots)
+    args["sim_args"] = sa
     a = Dict{Symbol,Any}(Symbol(k) => v for (k, v) in args if !(k in ("data", "config")))
     st = SL.Bootstrap.bootstrap_study(args["data"], args["config"]; a...)
     pid = SL.RVector(ids; names = String[p.first for p in specs])

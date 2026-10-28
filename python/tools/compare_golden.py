@@ -85,6 +85,13 @@ def load_case(path):
     return d, df, strategy, args
 
 
+def _block(v):
+    """Baustein aus dem Fall (``{"block": <Konstruktor>, "args": {...}}``, Etappe 6.3) anlegen."""
+    if isinstance(v, dict) and "block" in v and "args" in v:
+        return getattr(simlev, v["block"])(**{k: _block(x) for k, x in v["args"].items()})
+    return v
+
+
 def cmp_vec(name, ref, got, errs):
     ref = np.array([unhex(v) for v in (ref if isinstance(ref, list) else [ref])], dtype=np.float64)
     got = np.asarray(got, dtype=np.float64).ravel()
@@ -108,7 +115,7 @@ def run(path, verbose=False):
         warnings.simplefilter("ignore")
         try:
             with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
-                res = simlev.simulation(df, strategy, **args)
+                res = simlev.simulation(df, strategy, **{k: _block(v) for k, v in args.items()})
         except Exception as exc:  # noqa: BLE001
             if "error" in d:
                 return []

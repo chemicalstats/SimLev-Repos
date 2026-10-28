@@ -6,12 +6,12 @@
 #    tactical_rules()     geordnete Bedingungen -> Zielportfolio, Rueckfall
 #    tactical_rotation()  Momentum-Rotation: Top-N, Dual Momentum (absoluter
 #                         Filter), Canary-/Breitenschutz (Keller & Keuning)
-#    target_volatility()  Zielvolatilitaet: Risikoanteil skalieren, Rest in
+#    tactical_target_volatility()  Zielvolatilitaet: Risikoanteil skalieren, Rest in
 #                         eine sichere Anlage (Moreira & Muir 2017)
-#    conditional_volatility() nur in extremen Volatilitaetsphasen skalieren
+#    tactical_conditional_volatility() nur in extremen Volatilitaetsphasen skalieren
 #                         (Bongaerts, Kang & van Dijk 2020)
-#    glidepath()          Gewichte zeitlich zwischen zwei Allokationen
-#    blend_weights()      Kern-Satellit: Mischung mehrerer Gewichtsreihen
+#    tactical_glidepath()          Gewichte zeitlich zwischen zwei Allokationen
+#    tactical_blend()      Kern-Satellit: Mischung mehrerer Gewichtsreihen
 #    signal_state()       Kauf-/Verkaufssignale -> dauerhafter Zustand
 #    momentum_score()     Momentum-Score je Anlage
 #  Ausfuehrung:
@@ -165,7 +165,7 @@ momentum_score <- function(data, assets, lookbacks = c(1, 3, 6, 12), type = c("a
 #' vorkommen, erhalten 0.
 #'
 #' @param data data.frame mit Spalte \code{date} (und den in Bedingungen
-#'   verwendeten Spalten, z. B. aus [align_macro()]).
+#'   verwendeten Spalten, z. B. aus [series_align_macro()]).
 #' @param rules Liste von Regeln \code{list(when = ..., weights = c(A = 0.6,
 #'   B = 0.4))}, in Prioritaetsreihenfolge. \code{when}: logischer Vektor
 #'   der Laenge \code{nrow(data)}, Zeichenkette mit einem R-Ausdruck
@@ -181,8 +181,8 @@ momentum_score <- function(data, assets, lookbacks = c(1, 3, 6, 12), type = c("a
 #'   und \code{source}. \code{print()} zeigt Mittel, Minimum, Maximum und
 #'   letztes Gewicht in Prozent sowie die Zahl der Wechsel, \code{plot()}
 #'   die Gewichte als gestapelte Flaechen.
-#' @seealso [tactical_simulation()], [signals], [align_macro()],
-#'   [blend_weights()]
+#' @seealso [tactical_simulation()], [signals], [series_align_macro()],
+#'   [tactical_blend()]
 #' @examples
 #' set.seed(1)
 #' d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 500))
@@ -260,7 +260,7 @@ tactical_rules <- function(data, rules, default) {
 #'   Attributen \code{scores} (Matrix der Momentum-Scores aller Anlagen je
 #'   Zeile) und \code{decision_rows} (Zeilennummern der
 #'   Entscheidungstermine).
-#' @seealso [momentum_score()], [tactical_simulation()], [blend_weights()]
+#' @seealso [momentum_score()], [tactical_simulation()], [tactical_blend()]
 #' @examples
 #' set.seed(1); n <- 4 * 365
 #' d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
@@ -338,7 +338,7 @@ tactical_rotation <- function(data, assets, top = 1L, safe = NULL, absolute = TR
 #' wird an den Terminen von \code{every} (letzte vorhandene Zeile je
 #' Periode) neu gesetzt und bis zum naechsten Termin gehalten. Vor dem
 #' ersten Termin mit vollem Fenster ist der Risikoanteil 0 (alles in
-#' \code{safe}); anders als bei [conditional_volatility()], wo vorher der
+#' \code{safe}); anders als bei [tactical_conditional_volatility()], wo vorher der
 #' Grundanteil \code{base} gilt (hier gibt es keinen Grundanteil). \code{every} legt nur den Anpassungsrhythmus der
 #' Zielgewichte fest; gehandelt wird in [tactical_simulation()].
 #'
@@ -368,21 +368,21 @@ tactical_rotation <- function(data, assets, top = 1L, safe = NULL, absolute = TR
 #'   Attributen \code{exposure} (Risikoanteil je Zeile, Anteil) und
 #'   \code{volatility} (geschaetzte Volatilitaet des Risikoportfolios je
 #'   Zeile, Anteil p. a., 0.15 = 15 %).
-#' @seealso [conditional_volatility()], [tactical_simulation()],
-#'   [blend_weights()]
+#' @seealso [tactical_conditional_volatility()], [tactical_simulation()],
+#'   [tactical_blend()]
 #' @examples
 #' set.seed(1); n <- 4 * 365
 #' d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
 #' d$aktien <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
 #' d$anleihen <- 100 * cumprod(1 + rnorm(n, 1e-4, 0.003))
 #' d$geld <- 100 * cumprod(rep(1 + 0.01 / 365, n))
-#' tv <- target_volatility(d, c(aktien = 0.8, anleihen = 0.2), safe = "geld", target = 8)
+#' tv <- tactical_target_volatility(d, c(aktien = 0.8, anleihen = 0.2), safe = "geld", target = 8)
 #' tv
 #' summary(attr(tv, "exposure"))
 #' @references Moreira, A. & Muir, T. (2017), Volatility-Managed Portfolios,
 #'   Journal of Finance 72(4).
 #' @export
-target_volatility <- function(data, weights, safe, target = 10, window = 63L, max_exposure = 1,
+tactical_target_volatility <- function(data, weights, safe, target = 10, window = 63L, max_exposure = 1,
                               every = c("month", "week", "day", "quarter"), ppy = NULL) {
   every <- match.arg(every)
   if (max_exposure > 1) stop("max_exposure > 1 w\u00e4re Kredit; die Engine kennt keine Kreditaufnahme (Hebel \u00fcber Hebelprodukte abbilden).")
@@ -443,7 +443,7 @@ target_volatility <- function(data, weights, safe, target = 10, window = 63L, ma
 
 #' Bedingte Volatilitaetssteuerung
 #'
-#' Wie [target_volatility()], aber nur in extremen Volatilitaetsphasen: Liegt
+#' Wie [tactical_target_volatility()], aber nur in extremen Volatilitaetsphasen: Liegt
 #' die geschaetzte Volatilitaet des Risikoportfolios ueber ihrem
 #' \code{upper}-Quantil, wird der Risikoanteil gesenkt, liegt sie unter dem
 #' \code{lower}-Quantil, wird er erhoeht; dazwischen bleibt er beim
@@ -470,7 +470,7 @@ target_volatility <- function(data, weights, safe, target = 10, window = 63L, ma
 #' (0.15 = 15 %). Vor dem ersten Termin von \code{every} gilt der
 #' Grundanteil \code{base}.
 #'
-#' @inheritParams target_volatility
+#' @inheritParams tactical_target_volatility
 #' @param base Grundanteil des Risikoportfolios in normalen Phasen als
 #'   Anteil (0 bis \code{max_exposure}; Standard 1).
 #' @param upper Quantil-Wahrscheinlichkeit (zwischen 0 und 1), ab der die
@@ -504,7 +504,7 @@ target_volatility <- function(data, weights, safe, target = 10, window = 63L, ma
 #'   (data.frame mit \code{date}, \code{lower}, \code{upper} und
 #'   \code{target} als Anteile p. a., wie sie zum jeweiligen Monatsende
 #'   bekannt waren; NA vor \code{min_history}).
-#' @seealso [target_volatility()], [tactical_simulation()]
+#' @seealso [tactical_target_volatility()], [tactical_simulation()]
 #' @references Bongaerts, D., Kang, X. & van Dijk, M. (2020), Conditional
 #'   Volatility Targeting, Financial Analysts Journal 76(4), 54-71.
 #' @examples
@@ -512,11 +512,11 @@ target_volatility <- function(data, weights, safe, target = 10, window = 63L, ma
 #' d <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = n),
 #'                 aktien = 100 * exp(cumsum(rnorm(n, 0.0002, 0.01 * exp(sin(seq_len(n) / 300))))),
 #'                 geld = 100 * cumprod(rep(1 + 0.01 / 365, n)))
-#' cv <- conditional_volatility(d, c(aktien = 1), safe = "geld", base = 0.8)
+#' cv <- tactical_conditional_volatility(d, c(aktien = 1), safe = "geld", base = 0.8)
 #' cv
 #' table(attr(cv, "state"))
 #' @export
-conditional_volatility <- function(data, weights, safe, base = 1, upper = 0.8, lower = 0.2, target = NULL,
+tactical_conditional_volatility <- function(data, weights, safe, base = 1, upper = 0.8, lower = 0.2, target = NULL,
                                    window = 63L, min_exposure = 0, max_exposure = 1, min_history = 3,
                                    scaling = c("inverse", "fixed"), high_exposure = NULL, low_exposure = NULL,
                                    every = c("month", "week", "day", "quarter"), ppy = NULL) {
@@ -591,7 +591,7 @@ conditional_volatility <- function(data, weights, safe, base = 1, upper = 0.8, l
 #' \code{start = end} wechselt die erste Stufe an oder nach diesem Datum
 #' direkt auf \code{to}, \code{end} vor \code{start} ist ein Fehler. Das
 #' Ergebnis geht in [tactical_simulation()] oder als Kern in
-#' [blend_weights()].
+#' [tactical_blend()].
 #'
 #' @param data data.frame mit Spalte \code{date} (z. B. der Datensatz fuer
 #'   [simulation()]) oder Datumsvektor.
@@ -604,20 +604,20 @@ conditional_volatility <- function(data, weights, safe, base = 1, upper = 0.8, l
 #'   \code{"quarter"} oder \code{"month"}.
 #' @return \code{SimLevWeights} (data.frame mit \code{date} und
 #'   Zielgewichten je Anlage, Anteile).
-#' @seealso [blend_weights()], [tactical_simulation()]
+#' @seealso [tactical_blend()], [tactical_simulation()]
 #' @examples
-#' gp <- glidepath(seq.Date(as.Date("2025-01-01"), as.Date("2045-12-31"), by = "day"),
+#' gp <- tactical_glidepath(seq.Date(as.Date("2025-01-01"), as.Date("2045-12-31"), by = "day"),
 #'                 from = c(aktien = 0.9, anleihen = 0.1), to = c(aktien = 0.4, anleihen = 0.6))
 #' gp[c(1, 3653, 7670), ]
 #' @export
-glidepath <- function(data, from, to, start = NULL, end = NULL, every = c("year", "quarter", "month")) {
+tactical_glidepath <- function(data, from, to, start = NULL, end = NULL, every = c("year", "quarter", "month")) {
   every <- match.arg(every)
-  d <- .to_date(if (is.data.frame(data)) data$date else data, "glidepath: Datum")
+  d <- .to_date(if (is.data.frame(data)) data$date else data, "tactical_glidepath: Datum")
   a <- unique(c(names(from), names(to)))
   f <- stats::setNames(rep(0, length(a)), a); f[names(from)] <- from
   t <- stats::setNames(rep(0, length(a)), a); t[names(to)] <- to
   s <- .to_date(start %||% d[1], "start"); e <- .to_date(end %||% d[length(d)], "end")
-  if (e < s) stop(sprintf("glidepath: end (%s) liegt vor start (%s); f\u00fcr den umgekehrten Weg from und to tauschen.", format(e), format(s)))
+  if (e < s) stop(sprintf("tactical_glidepath: end (%s) liegt vor start (%s); f\u00fcr den umgekehrten Weg from und to tauschen.", format(e), format(s)))
   rows <- unique(c(1L, .period_last(d, every)))
   frac <- if (e > s) pmin(1, pmax(0, as.numeric(d[rows] - s) / as.numeric(e - s)))
           else as.numeric(d[rows] >= s)                       # start = end: Sprung von from auf to
@@ -629,7 +629,7 @@ glidepath <- function(data, from, to, start = NULL, end = NULL, every = c("year"
 #' Gewichtsreihen mischen (Kern-Satellit)
 #'
 #' Mischt mehrere Zielgewichtsreihen zu einer, z. B. einen statischen Kern
-#' oder [glidepath()] mit einem taktischen Satelliten aus
+#' oder [tactical_glidepath()] mit einem taktischen Satelliten aus
 #' [tactical_rotation()]: Je Zeile und Anlage ist das Gewicht
 #' \eqn{\sum_k shares_k \cdot w_k}, anschliessend auf Summe 1 normiert.
 #' Anlagen, die in einer Reihe fehlen, zaehlen dort mit 0. Alle Reihen
@@ -642,7 +642,7 @@ glidepath <- function(data, from, to, start = NULL, end = NULL, every = c("year"
 #'   je Reihe); Standard \code{NULL} = gleiche Anteile.
 #' @return \code{SimLevWeights} (data.frame mit \code{date} und
 #'   Zielgewichten aller Anlagen, Anteile) fuer [tactical_simulation()].
-#' @seealso [glidepath()], [tactical_rotation()], [target_volatility()],
+#' @seealso [tactical_glidepath()], [tactical_rotation()], [tactical_target_volatility()],
 #'   [tactical_simulation()]
 #' @examples
 #' set.seed(1); n <- 4 * 365
@@ -650,19 +650,19 @@ glidepath <- function(data, from, to, start = NULL, end = NULL, every = c("year"
 #' d$aktien <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
 #' d$anleihen <- 100 * cumprod(1 + rnorm(n, 1e-4, 0.003))
 #' d$geld <- 100 * cumprod(rep(1 + 0.01 / 365, n))
-#' kern <- glidepath(d, from = c(aktien = 0.8, anleihen = 0.2), to = c(aktien = 0.5, anleihen = 0.5))
+#' kern <- tactical_glidepath(d, from = c(aktien = 0.8, anleihen = 0.2), to = c(aktien = 0.5, anleihen = 0.5))
 #' satellit <- tactical_rotation(d, c("aktien", "anleihen"), safe = "geld")
-#' blend_weights(kern, satellit, shares = c(0.7, 0.3))
+#' tactical_blend(kern, satellit, shares = c(0.7, 0.3))
 #' @export
-blend_weights <- function(..., shares = NULL) {
+tactical_blend <- function(..., shares = NULL) {
   ws <- list(...)
-  if (!length(ws) || !all(vapply(ws, inherits, TRUE, "SimLevWeights"))) stop("blend_weights: ... muss aus SimLevWeights bestehen.")
+  if (!length(ws) || !all(vapply(ws, inherits, TRUE, "SimLevWeights"))) stop("tactical_blend: ... muss aus SimLevWeights bestehen.")
   shares <- shares %||% rep(1 / length(ws), length(ws))
   if (length(shares) != length(ws) || anyNA(shares) || any(shares < 0) || sum(shares) <= 0)
-    stop(sprintf("blend_weights: shares braucht %d nichtnegative Anteile (einen je Gewichtsreihe, z. B. c(0.7, 0.3)); erhalten: %s.",
+    stop(sprintf("tactical_blend: shares braucht %d nichtnegative Anteile (einen je Gewichtsreihe, z. B. c(0.7, 0.3)); erhalten: %s.",
                  length(ws), paste(format(shares), collapse = ", ")))
   d <- ws[[1]]$date
-  if (!all(vapply(ws, function(w) identical(as.numeric(w$date), as.numeric(d)), TRUE))) stop("blend_weights: unterschiedliche Daten.")
+  if (!all(vapply(ws, function(w) identical(as.numeric(w$date), as.numeric(d)), TRUE))) stop("tactical_blend: unterschiedliche Daten.")
   a <- unique(unlist(lapply(ws, function(w) names(w)[-1])))
   W <- matrix(0, length(d), length(a), dimnames = list(NULL, a))
   for (k in seq_along(ws)) for (nm in names(ws[[k]])[-1]) W[, nm] <- W[, nm] + shares[k] * ws[[k]][[nm]]
@@ -684,12 +684,12 @@ print.SimLevWeights <- function(x, ...) {
 }
 
 #' @export
-plot.SimLevWeights <- function(x, ...) {
+plot.SimLevWeights <- function(x, main = "Zielgewichte", ...) {
   W <- as.matrix(x[, -1, drop = FALSE]); d <- x$date
   old <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(old))
   graphics::par(mar = c(3.6, 4.2, 2.6, 7), mgp = c(2.4, 0.6, 0), las = 1, cex.axis = 0.85, xpd = FALSE)
   cols <- grDevices::colorRampPalette(c("#2C6E9B", "#3E8E5A", "#C49A2C", "#B5562B", "#8A5BA8", "#4A4A4A"))(ncol(W))
-  graphics::plot(range(d), c(0, 1), type = "n", xlab = "", ylab = "Gewicht", main = "Zielgewichte", ...)
+  graphics::plot(range(d), c(0, 1), type = "n", xlab = "", ylab = "Gewicht", main = main, ...)
   cum <- cbind(0, t(apply(W, 1, cumsum)))
   for (j in seq_len(ncol(W)))
     graphics::polygon(c(d, rev(d)), c(cum[, j + 1], rev(cum[, j])), col = cols[j], border = NA)
@@ -709,8 +709,8 @@ plot.SimLevWeights <- function(x, ...) {
 #'
 #' \itemize{
 #'   \item \code{every} vs. \code{rebalance}: Das Argument \code{every} der
-#'     Gewichts-Erzeuger ([tactical_rotation()], [target_volatility()],
-#'     [glidepath()] usw.) bestimmt, wann sich das Zielgewicht aendern kann.
+#'     Gewichts-Erzeuger ([tactical_rotation()], [tactical_target_volatility()],
+#'     [tactical_glidepath()] usw.) bestimmt, wann sich das Zielgewicht aendern kann.
 #'     \code{rebalance} hier bestimmt, wann zusaetzlich ohne Zielwechsel auf
 #'     die aktuellen Zielgewichte zurueckgefuehrt wird. Gehandelt wird an
 #'     jedem Wechsel (nach \code{lag}) und an den Pflegeterminen.
@@ -719,7 +719,7 @@ plot.SimLevWeights <- function(x, ...) {
 #'     1 = naechste Zeile, bei Kalendertagsdaten also der naechste
 #'     Kalendertag; 0 = am selben Schlusskurs, wie bei vielen
 #'     Online-Backtestern). Traegt \code{data} das Attribut \code{filled}
-#'     aus [align_series()], zaehlen nur Zeilen, in denen alle Anlagen der
+#'     aus [series_align()], zaehlen nur Zeilen, in denen alle Anlagen der
 #'     Gewichte echte (nicht gefuellte) Kurse haben: Ein Signal vom Freitag
 #'     wird mit \code{lag = 1} am Montag gehandelt, nicht am Samstag zum
 #'     Freitagskurs. Das Attribut wird an [simulation()] weitergereicht.
@@ -743,11 +743,11 @@ plot.SimLevWeights <- function(x, ...) {
 #'
 #' @param data data.frame mit Spalte \code{date} (Klasse Date) und
 #'   Kursspalten (Niveaus) aller Anlagen der Gewichte (z. B. mit
-#'   [align_series()] vorbereitet). Fehlende Kalendertage fuellt
+#'   [series_align()] vorbereitet). Fehlende Kalendertage fuellt
 #'   [simulation()] selbst.
 #' @param weights \code{SimLevWeights} (aus [tactical_rules()],
-#'   [tactical_rotation()], [target_volatility()], [conditional_volatility()], [glidepath()],
-#'   [blend_weights()] oder [rolling_optimization()]). Daten von
+#'   [tactical_rotation()], [tactical_target_volatility()], [tactical_conditional_volatility()], [tactical_glidepath()],
+#'   [tactical_blend()] oder [portfolio_rolling()]). Daten von
 #'   \code{data}, die in \code{weights} fehlen, uebernehmen das letzte
 #'   bekannte Zielgewicht.
 #' @param rebalance Pflegerhythmus: \code{"switch"} (Standard; nur bei
@@ -762,7 +762,7 @@ plot.SimLevWeights <- function(x, ...) {
 #'   Standard 1); mit Attribut \code{filled} in Zeilen mit echten Kursen.
 #' @param asset_args Liste von Argumenten fuer [asset_config()] (ueber
 #'   [strategy_from_weights()]), z. B.
-#'   \code{list(asset_spread = 0.1, asset_bonus = c(aktien = 30, geld = 0))}.
+#'   \code{list(spread = 0.1, partial_exemption = c(aktien = 30, geld = 0))}.
 #'   Ein unbenannter einzelner Wert gilt fuer alle Anlagen; benannte Vektoren
 #'   werden je Anlage zugeordnet (auch mit einem Element, siehe
 #'   [strategy_from_weights()]).
@@ -776,8 +776,8 @@ plot.SimLevWeights <- function(x, ...) {
 #'   \code{events} (Daten der Umschichtungstermine aus Wechseln, Pflege und
 #'   Sparplan, vor Anwendung von \code{tolerance}), \code{switches} (Zahl der
 #'   Zielwechsel), \code{lag} und \code{rebalance}. Das Ergebnis laesst sich
-#'   mit [deep_analysis()] oder [result_index()] weiterverarbeiten.
-#' @seealso [simulation()], [deep_analysis()], [tactical_rules()],
+#'   mit [result_analysis()] oder [result_index()] weiterverarbeiten.
+#' @seealso [simulation()], [result_analysis()], [tactical_rules()],
 #'   [tactical_rotation()]
 #' @examples
 #' set.seed(1); n <- 4 * 365
@@ -787,12 +787,12 @@ plot.SimLevWeights <- function(x, ...) {
 #' w <- tactical_rules(d, list(list(when = signal_sma(d$aktien, 200, band = 1),
 #'                                  weights = c(aktien = 1))), default = c(geld = 1))
 #' res <- tactical_simulation(d, w, rebalance = "switch", lag = 1,
-#'                            asset_args = list(asset_bonus = c(aktien = 30, geld = 0)))
+#'                            asset_args = list(partial_exemption = c(aktien = 30, geld = 0)))
 #' res$tactical$switches
 #' # Zielvolatilitaet, vierteljaehrliche Pflege mit 5-Prozentpunkte-Band
-#' res2 <- tactical_simulation(d, target_volatility(d, c(aktien = 1), safe = "geld", target = 10),
+#' res2 <- tactical_simulation(d, tactical_target_volatility(d, c(aktien = 1), safe = "geld", target = 10),
 #'                             rebalance = "quarter", tolerance = 5)
-#' deep_analysis(list(Regel = res, Zielvola = res2))$metrics[c("cagr", "max_drawdown"), ]
+#' result_analysis(list(Regel = res, Zielvola = res2))$metrics[c("cagr", "max_drawdown"), ]
 #' @export
 tactical_simulation <- function(data, weights, rebalance = c("switch", "month", "quarter", "year"),
                                 tolerance = NULL, tolerance_type = c("absolute", "relative"), lag = 1L,
@@ -800,8 +800,10 @@ tactical_simulation <- function(data, weights, rebalance = c("switch", "month", 
   rebalance <- match.arg(rebalance); tolerance_type <- match.arg(tolerance_type)
   if (!inherits(weights, "SimLevWeights")) stop("weights muss ein SimLevWeights sein.")
   sim_args <- list(...)
-  bad <- intersect(names(sim_args), c("event_col", "event_mode", "event_weight", "balance_mode", "balance_thresh"))
+  nm <- names(sim_args) %||% character(0)
+  bad <- nm[nm %in% c("event_col", "event_mode", "event_weight", "balance_mode", "balance_thresh") | startsWith(nm, "rebalance.")]
   if (length(bad)) stop(sprintf("tactical_simulation steuert %s selbst.", paste(bad, collapse = ", ")))
+  sim_args <- .sim_args_set(list(), sim_args, "tactical_simulation")
   assets <- names(weights)[-1]
   miss <- setdiff(assets, names(data)); if (length(miss)) stop(sprintf("Kursspalten fehlen: %s", paste(miss, collapse = ", ")))
   d <- .to_date(data$date, "data$date")
@@ -813,7 +815,7 @@ tactical_simulation <- function(data, weights, rebalance = c("switch", "month", 
   if (length(lag) != 1L || is.na(lag) || lag < 0L) stop("lag muss eine ganze Zahl >= 0 sein.")
   n <- nrow(W)
   if (lag > 0) {
-    # Verzoegerung in Zeilen mit echten Kursen: Mit Attribut 'filled' (align_series) zaehlen per LOCF
+    # Verzoegerung in Zeilen mit echten Kursen: Mit Attribut 'filled' (series_align) zaehlen per LOCF
     # gefuellte Zeilen (Wochenenden, Feiertage) einer der Anlagen nicht (sonst Handel zum alten Kurs).
     fl <- attr(data, "filled"); real <- rep(TRUE, n)
     if (is.matrix(fl) && nrow(fl) == n && length(fa <- intersect(assets, colnames(fl)))) real <- rowSums(fl[, fa, drop = FALSE]) == 0
@@ -825,12 +827,11 @@ tactical_simulation <- function(data, weights, rebalance = c("switch", "month", 
   change <- c(FALSE, rowSums(abs(W[-1, , drop = FALSE] - W[-n, , drop = FALSE])) > 1e-10)
   ev <- change
   if (rebalance != "switch") ev[.period_last(d, rebalance)] <- TRUE
-  if (isTRUE(sim_args$dca_mode)) {
+  if (!is.null(dp <- sim_args$dca)) {
     cal <- seq.Date(d[1], d[n], by = "day")
-    fl <- calculate_dates_flags(mode = TRUE, span = sim_args$dca_span %||% 1, unit = sim_args$dca_unit %||% "month",
-                                days = sim_args$dca_days, dates = cal, value = sim_args$dca_value %||% 1,
-                                anchor = sim_args$dca_anchor %||% "start", start_date = sim_args$dca_start,
-                                skip_start = sim_args$dca_skip %||% FALSE, liquidate = sim_args$liquidate %||% FALSE)
+    fl <- calculate_dates_flags(mode = TRUE, span = dp$span, unit = dp$unit, days = dp$days, dates = cal,
+                                value = dp$value, anchor = dp$anchor, start_date = dp$start,
+                                skip_start = dp$skip, liquidate = sim_args$liquidate %||% FALSE)
     j <- findInterval(as.numeric(cal[fl]) - 1e-9, as.numeric(d)) + 1L
     ev[j[j <= n]] <- TRUE
   }
@@ -842,10 +843,11 @@ tactical_simulation <- function(data, weights, rebalance = c("switch", "month", 
   df$.tev <- ev
   w0 <- pmax(W[1, ], 1e-9); w0 <- w0 / sum(w0)
   st <- do.call(strategy_from_weights, c(list(weights = stats::setNames(w0, assets)), asset_args))
-  args <- c(list(data = df, strategy = st, event_col = ".tev", event_mode = "replace",
-                 event_weight = stats::setNames(as.list(wcols), assets),
-                 balance_thresh = tolerance, balance_thresh_type = tolerance_type), sim_args)
-  res <- do.call(simulation, args)
+  # Ereignis-Rebalancing nur an den Terminen, ohne Umschichten am ersten Tag (skip = TRUE)
+  rb <- rebalance_plan(event_col = ".tev", event_mode = "replace", skip = TRUE,
+                       event_weight = stats::setNames(as.list(wcols), assets), thresh = tolerance,
+                       thresh_type = tolerance_type)
+  res <- .sim_call(df, st, c(list(rebalance = rb), sim_args))
   res$tactical <- list(weights = .as_weights(d, W, attr(weights, "source")), events = d[ev], switches = sum(change), lag = lag,
                        rebalance = rebalance)
   res

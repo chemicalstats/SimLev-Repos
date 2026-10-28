@@ -51,7 +51,7 @@ fuer volle Planjahre, sonst \code{NA}).
 }
 \description{
 Ausgabe-, Zusammenfassungs- und Grafikmethoden fuer Entnahmeregeln
-(\code{\link[=withdrawal_rule]{withdrawal_rule()}}), Laufzeitmodelle (\code{\link[=horizon_model]{horizon_model()}}) und Ergebnisse
+(\code{\link[=withdrawal_rule]{withdrawal_rule()}}), Laufzeitmodelle (\code{\link[=withdrawal_horizon]{withdrawal_horizon()}}) und Ergebnisse
 von \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}.
 }
 \details{

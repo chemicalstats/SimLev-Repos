@@ -11,9 +11,9 @@ using Dates
 using Printf
 
 export simulation, SimLevResult, format_result,
-       asset_config, AssetConfig, create_strategy, Strategy, validate_strategy,
-       add_asset, update_asset, remove_asset,
-       compute_rebal_trigger, plot_dashboard, export_dashboard,
+       asset_config, AssetConfig, create_strategy, Strategy, strategy_validate,
+       strategy_add_asset, strategy_update_asset, strategy_remove_asset,
+       rebalance_trigger, plot_dashboard, export_dashboard,
        SimLevPlot, NA, isna_strict,
        RList, RFrame, RVector, NamedMat, named, nrow, ncol, rows, attrs, r_class, inherits,
        r_summary, r_plot

@@ -178,7 +178,7 @@ Die Restjahre (\code{one_over_n}, \code{abw}, \code{hebeler} und die
 Capital-Preservation-Rule von \code{guyton_klinger}) sind kein Argument der
 Regel: Sie ergeben sich in \code{\link[=withdrawal_simulation]{withdrawal_simulation()}} aus der Zahl der
 Planjahre (Pfadlaenge bzw. \code{years}). Eine zufaellige Laufzeit je Pfad
-(\code{horizon} in \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}, Objekt aus \code{\link[=horizon_model]{horizon_model()}})
+(\code{horizon} in \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}, Objekt aus \code{\link[=withdrawal_horizon]{withdrawal_horizon()}})
 aendert nur die Auswertung (Erfolg, Konsum und Endvermoegen bis zum
 Horizont); die Regel rechnet weiter mit den Restjahren der vollen
 Pfadlaenge.
@@ -196,5 +196,5 @@ Bogleheads Wiki, Variable percentage withdrawal; Kitces (2015);
 Suarez, Suarez & Walz (2015), Financial Services Review 24.
 }
 \seealso{
-\code{\link[=withdrawal_simulation]{withdrawal_simulation()}}, \code{\link[=withdrawal_max_rate]{withdrawal_max_rate()}}, \code{\link[=horizon_model]{horizon_model()}}
+\code{\link[=withdrawal_simulation]{withdrawal_simulation()}}, \code{\link[=withdrawal_max_rate]{withdrawal_max_rate()}}, \code{\link[=withdrawal_horizon]{withdrawal_horizon()}}
 }

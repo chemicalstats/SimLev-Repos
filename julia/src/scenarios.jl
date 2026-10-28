@@ -1,13 +1,13 @@
 # Scenarios – Port von r/R/scenarios.R (Vorlage python/simlev/scenarios.py)
 #
-#   entropy_pooling()   gewichtet Szenarien so um, dass sie eigene Annahmen
+#   scenario_entropy_pooling()   gewichtet Szenarien so um, dass sie eigene Annahmen
 #                       ("Views") erfüllen, bei minimaler relativer Entropie
 #                       (Meucci 2008, Fully Flexible Probabilities)
 #   view_mean(), view_prob(), view_vol()   Bausteine für Annahmen
-#   copula_scenarios()  Szenarien aus t- bzw. Gauss-Copula mit empirischen
+#   scenario_copula()  Szenarien aus t- bzw. Gauss-Copula mit empirischen
 #                       Rändern, optional unter Stress
 #   scenario_risk()     Portfolio-Kennzahlen auf (gewichteten) Szenarien
-#   crisis_replay()     ein Portfolio durch historische Krisenfenster
+#   scenario_crisis()     ein Portfolio durch historische Krisenfenster
 #
 # `view_prob(expr, …)`: `expr` ist ein Ausdruck als Text in R-Syntax über den
 # Spalten der Szenarien (z. B. "aktien < -2 & inflation > 2"), ausgewertet wie
@@ -18,7 +18,7 @@ module Scenarios
 import ..SimLev
 using Dates
 
-export view_mean, view_prob, view_vol, entropy_pooling, copula_scenarios, scenario_risk, crisis_replay
+export view_mean, view_prob, view_vol, scenario_entropy_pooling, scenario_copula, scenario_risk, scenario_crisis
 
 const _NA = SimLev.NA
 const RFrame = SimLev.RFrame
@@ -85,13 +85,13 @@ _cov2cor(V) = _fmat(SimLev.RStats.cov2cor(_fmat(V)))
 _vget(v, k) = SimLev.Dependence._getopt(v, k)
 
 """
-    entropy_pooling(x, assets, views; states = nothing, frequency = "week", prior = nothing, env = Main)
+    scenario_entropy_pooling(x, assets, views; states = nothing, frequency = "week", prior = nothing, env = Main)
 
 Entropy Pooling: Szenarien (`x`: Kursdaten mit `date` oder fertige
 Szenario-Tabelle) auf Annahmen aus `view_mean`, `view_prob`, `view_vol`
 umgewichten. Klasse `SimLevScenarios`.
 """
-function entropy_pooling(x, assets, views; states = nothing, frequency = ("week", "day", "month"), prior = nothing, env = Main)
+function scenario_entropy_pooling(x, assets, views; states = nothing, frequency = ("week", "day", "month"), prior = nothing, env = Main)
     x = SimLev.as_rframe(x)
     D = _D()
     frequency = D._match_arg(frequency, ("week", "day", "month"))
@@ -109,7 +109,7 @@ function entropy_pooling(x, assets, views; states = nothing, frequency = ("week"
         end
         if bad
             neg = isnum && any(v -> !isnan(Float64(v)) && v < 0, pa) ? ", negative Werte" : ""
-            error("entropy_pooling: prior muss $Tn endliche Werte >= 0 mit positiver Summe haben (einer je Szenario; " *
+            error("scenario_entropy_pooling: prior muss $Tn endliche Werte >= 0 mit positiver Summe haben (einer je Szenario; " *
                   "erhalten: Länge $(length(pa))$neg).")
         end
         p = _fvec(pa)
@@ -227,13 +227,13 @@ function _named_list(x)
 end
 
 """
-    copula_scenarios(x, assets; n = 10000, family = "t", stress = nothing, frequency = "week", seed = nothing)
+    scenario_copula(x, assets; n = 10000, family = "t", stress = nothing, frequency = "week", seed = nothing)
 
 Szenarien aus einer t- bzw. Gauss-Copula mit empirischen Rändern. `stress`:
 benannte Liste (NamedTuple, RList, Vektor von Paaren) von Quantilbändern je
 Anlage, z. B. `(aktien = [0, 0.05],)`. Klasse `SimLevScenarios`.
 """
-function copula_scenarios(x, assets; n = 10000, family = ("t", "gaussian"), stress = nothing,
+function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stress = nothing,
                           frequency = ("week", "day", "month"), seed = nothing)
     x = SimLev.as_rframe(x)
     D = _D()
@@ -478,34 +478,34 @@ function _cummax(x)
 end
 
 """
-    crisis_replay(data, weights; crises = nothing, rebalance = false)
+    scenario_crisis(data, weights; crises = nothing, rebalance = false)
 
 Portfolio (`weights`, auf Summe 1 normiert) durch historische Krisen führen;
 `crises`: RFrame mit `crisis`, `start`, `end` (`nothing` = eingebaute Liste).
 """
-function crisis_replay(data, weights, crises_pos = nothing; crises = crises_pos, rebalance::Bool = false)
+function scenario_crisis(data, weights, crises_pos = nothing; crises = crises_pos, rebalance::Bool = false)
     data = SimLev.as_rframe(data)
     crises = SimLev.as_rframe(crises)
     D = _D()
     crises === nothing && (crises = _DEFAULT_CRISES)
-    (D._is_frame(data) && haskey(D._as_frame(data), "date")) || error("crisis_replay: data.frame mit Spalte 'date' erwartet.")
+    (D._is_frame(data) && haskey(D._as_frame(data), "date")) || error("scenario_crisis: data.frame mit Spalte 'date' erwartet.")
     (D._is_frame(crises) && all(c -> haskey(D._as_frame(crises), c), ("crisis", "start", "end"))) ||
-        error("crisis_replay: crises muss ein data.frame mit den Spalten crisis, start, end sein.")
+        error("scenario_crisis: crises muss ein data.frame mit den Spalten crisis, start, end sein.")
     data = D._as_frame(data); crises = D._as_frame(crises)
     nms, vals = _named_weights(weights)
     (!_isnum_arr(vals) || nms === nothing || any(==(""), nms) || !all(v -> isfinite(Float64(v)), vals)) &&
-        error("crisis_replay: weights muss ein benannter numerischer Vektor ohne NA sein (Namen = Kursspalten).")
+        error("scenario_crisis: weights muss ein benannter numerischer Vektor ohne NA sein (Namen = Kursspalten).")
     unk = unique([k for k in nms if !(k in setdiff(names(data), ["date"]))])
-    isempty(unk) || error("crisis_replay: Kursspalte(n) $(join(["'$u'" for u in unk], ", ")) fehlen in data.")
+    isempty(unk) || error("scenario_crisis: Kursspalte(n) $(join(["'$u'" for u in unk], ", ")) fehlen in data.")
     wv = _fvec(vals)
     sw = SimLev.r_sum(wv)
-    sw <= 0 && error("crisis_replay: Summe der Gewichte muss positiv sein (erhalten $(D._sprintf("%g", sw))); sie wird auf 1 normiert.")
+    sw <= 0 && error("scenario_crisis: Summe der Gewichte muss positiv sein (erhalten $(D._sprintf("%g", sw))); sie wird auf 1 normiert.")
     data = D._dep_sort_dates(data)
     d = collect(data["date"])
     dd = D._days(d)
     w = wv ./ sw
-    cs = D._days(collect(D._to_date(crises["start"], "crisis_replay: crises\$start")))
-    ce = D._days(collect(D._to_date(crises["end"], "crisis_replay: crises\$end")))
+    cs = D._days(collect(D._to_date(crises["start"], "scenario_crisis: crises\$start")))
+    ce = D._days(collect(D._to_date(crises["end"], "scenario_crisis: crises\$end")))
     P = reduce(hcat, [D._fill_na(D._dep_check_prices(D._num(data[a]), a, d), "locf"; keep_leading = true) for a in nms])
     P = reshape(P, length(d), length(nms))
     nd = length(dd)

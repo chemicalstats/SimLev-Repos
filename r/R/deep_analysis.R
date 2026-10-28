@@ -1,7 +1,7 @@
 # =============================================================================
 #  deep_analysis.R  —  Vertiefte Auswertung gespeicherter Ergebnisse
 # -----------------------------------------------------------------------------
-#  deep_analysis() analysiert ein oder mehrere Ergebnisse von simulation()
+#  result_analysis() analysiert ein oder mehrere Ergebnisse von simulation()
 #  (oder beliebige Kursreihen) nachtraeglich, im Umfang von Portfolio-
 #  Backtestern wie testfol.io: Benchmark-Kennzahlen (Alpha, Beta, Capture,
 #  Tracking Error, Information Ratio, M2), VaR/CVaR, Rendite- und
@@ -38,7 +38,7 @@
       stop(sprintf("'%s': Wertspalte '%s' ist nicht numerisch (Klasse %s).", name, vc, class(x[[vc]])[1]))
     }
     v <- as.numeric(x[[vc]]); d <- .to_date(x$date, sprintf("'%s': Spalte 'date'", name))
-    fm <- attr(x, "filled")                                   # gefuellte Tage aus align_series()
+    fm <- attr(x, "filled")                                   # gefuellte Tage aus series_align()
     j <- if (is.matrix(fm) && nrow(fm) == length(v)) { if (vc %in% colnames(fm)) vc else if (ncol(fm) == 1L) 1L else NULL } else NULL
     fl <- if (is.null(j)) rep(FALSE, length(v)) else as.logical(fm[, j]) %in% TRUE
     idx <- which(!is.na(d)); idx <- idx[order(d[idx])]          # Zeilen ohne Datum weg, nach Datum sortieren
@@ -311,11 +311,11 @@
 #'     Zeilen werden nach Datum sortiert, bei doppeltem Datum gilt der letzte
 #'     Wert (mit Hinweis). Fuehrende und nachlaufende NA werden abgeschnitten,
 #'     innere NA per LOCF gefuellt und wie gefuellte Tage behandelt. Traegt
-#'     der data.frame das Attribut \code{filled} aus [align_series()] (Spalte
+#'     der data.frame das Attribut \code{filled} aus [series_align()] (Spalte
 #'     der Wertspalte bzw. einzige Spalte), werden diese Tage aus den
 #'     Tagesrenditen ausgeschlossen. Handelstagsdaten ohne Wochenenden sind
 #'     zulaessig; z. B. eine eigene Kursreihe, ein Ergebnis von
-#'     [splice_series()] oder [result_index()];
+#'     [series_splice()] oder [result_index()];
 #'   \item eine Liste solcher Objekte (auch gemischt); Namen werden zu
 #'     Spaltennamen; ist die Liste nicht vollstaendig benannt, heissen alle
 #'     Reihen \code{S1}, \code{S2}, ... Ein einzelnes Objekt heisst
@@ -374,7 +374,7 @@
 #'   (Standard 10, nach Tiefe sortiert).
 #' @param inflation Optional: Inflation in Prozent p. a. (Skalar, 2 = 2 %)
 #'   oder ein Preisindex-Niveau als \code{data.frame(date, value)} bzw.
-#'   benannter Vektor mit Datumsnamen (z. B. mit [align_macro()]
+#'   benannter Vektor mit Datumsnamen (z. B. mit [series_align_macro()]
 #'   vorbereitet). Dann werden alle Kennzahlen real (in Kaufkraft des
 #'   Startdatums) berechnet, auch die MWRR und der risikolose Zins. Ein
 #'   Preisindex muss am Start jeder Reihe bekannt sein. Standard
@@ -427,17 +427,17 @@
 #' a <- simulation(d, create_strategy(A = asset_config("etf", "bnh")))
 #' b <- simulation(d, create_strategy(A = asset_config("etf", "bnh", 0.6), B = asset_config("etf", "bnh", 0.4)),
 #'                 balance_mode = TRUE, balance_span = 1, balance_unit = "year")
-#' da <- deep_analysis(list(Aktien = a, Mischung = b), benchmark = "Aktien", risk_free = 1)
+#' da <- result_analysis(list(Aktien = a, Mischung = b), benchmark = "Aktien", risk_free = 1)
 #' da
 #' # Eigene Kursreihe als Benchmark (data.frame mit date und Wertspalte), real mit 2 % Inflation
-#' da2 <- deep_analysis(a, benchmark = d[, c("date", "B")], inflation = 2)
+#' da2 <- result_analysis(a, benchmark = d[, c("date", "B")], inflation = 2)
 #' da2$benchmark_metrics[c("beta", "tracking_error"), ]
 #' head(da2$drawdowns$Strategie, 3)
 #' plot(da, type = "annual")
 #' @seealso [result_index()], [simulation()], [tactical_simulation()],
-#'   [align_series()] fuer eigene Kursreihen
+#'   [series_align()] fuer eigene Kursreihen
 #' @export
-deep_analysis <- function(x, benchmark = NULL, risk_free = 0, rolling_years = 3,
+result_analysis <- function(x, benchmark = NULL, risk_free = 0, rolling_years = 3,
                           var_levels = c(0.01, 0.05, 0.10), top_drawdowns = 10, inflation = NULL) {
   if (inherits(x, "SimLevResult") || is.data.frame(x)) x <- list(Strategie = x)
   if (!is.list(x) || !length(x)) stop("x muss ein SimLevResult, ein data.frame oder eine Liste davon sein.")
@@ -510,7 +510,7 @@ deep_analysis <- function(x, benchmark = NULL, risk_free = 0, rolling_years = 3,
 
 #' Methoden fuer SimLevAnalysis
 #'
-#' Ausgabe eines Ergebnisses von [deep_analysis()]. \code{print()} zeigt die
+#' Ausgabe eines Ergebnisses von [result_analysis()]. \code{print()} zeigt die
 #' wichtigsten Kennzahlen je Reihe (Renditen in Prozent) und, falls
 #' vorhanden, die Benchmark-Kennzahlen. \code{summary()} druckt zusaetzlich
 #' die Jahresrenditen in Prozent und je Reihe die fuenf groessten

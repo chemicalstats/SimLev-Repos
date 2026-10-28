@@ -26,16 +26,16 @@ test_that("tax regime inference is correct", {
 
 test_that("Teilfreistellung rates are valid", {
   # Equity ETF: 30%
-  cfg <- asset_config(asset_class = "etf", asset_bonus = 30)
-  expect_equal(cfg$asset_bonus, 30)
+  cfg <- asset_config(asset_class = "etf", partial_exemption = 30)
+  expect_equal(cfg$partial_exemption, 30)
   
   # Mixed ETF: 15%
-  cfg <- asset_config(asset_class = "etf", asset_bonus = 15)
-  expect_equal(cfg$asset_bonus, 15)
+  cfg <- asset_config(asset_class = "etf", partial_exemption = 15)
+  expect_equal(cfg$partial_exemption, 15)
   
   # Bond ETF: 0%
-  cfg <- asset_config(asset_class = "etf", asset_bonus = 0)
-  expect_equal(cfg$asset_bonus, 0)
+  cfg <- asset_config(asset_class = "etf", partial_exemption = 0)
+  expect_equal(cfg$partial_exemption, 0)
 })
 
 

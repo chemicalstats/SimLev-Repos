@@ -1,0 +1,93 @@
+# Umbenennungstabelle für Etappe 6 (Entscheidung F6 vom 25.10.2026: alle Empfehlungen übernommen)
+# art	bereich	alt	neu	bemerkung
+# art: funktion = öffentliche Funktion; argument = Argument (bereich = Funktion oder * für alle); begriff = Argumentname in mehreren Funktionen;
+#      intern = nicht exportierter R-Helfer (R: Punkt davor, Python/Julia: _ davor)
+# Zeilen mit "#entfallen" sind verworfen, "#nach-6.3" werden mit Stufe 6.3 aktiv; Zeilen mit "#angehalten<TAB>" am Anfang sind wegen einer Kollision zurückgestellt (Grund in der letzten Spalte);
+# tools/rename.py lässt sie aus. Zum Anwenden das Präfix und die Grundspalte entfernen.
+funktion	*	align_series	series_align	Familie series_, Tätigkeit danach
+funktion	*	align_macro	series_align_macro	wie series_align, für Makroreihen mit Verzug
+funktion	*	check_series	series_check	
+funktion	*	splice_series	series_splice	
+funktion	*	leveraged_series	series_leverage	Schema „Familie_Tätigkeit“: hebeln statt Partizip; weicht vom ersten Vorschlag „series_leveraged“ ab
+funktion	*	convert_currency	series_convert_currency	eindeutig; kürzere Form verliert „umrechnen“
+funktion	*	deflate	series_deflate	
+funktion	*	set_expected_return	series_shift_return	Rd: „auf eine Renditeannahme verschieben“ – shift trifft es
+funktion	*	total_return_index	index_total_return	
+funktion	*	money_market_index	index_money_market	
+funktion	*	currency_hedged_index	index_currency_hedged	Ergebnis ist ein Index wie die übrigen index_*
+funktion	*	bond_index_from_yields	index_bond	kürzer; dass er aus Renditen entsteht, sagt die Hilfe; weicht vom ersten Vorschlag „index_bond_from_yields“ ab
+funktion	*	add_asset	strategy_add_asset	
+funktion	*	remove_asset	strategy_remove_asset	
+funktion	*	update_asset	strategy_update_asset	
+funktion	*	validate_strategy	strategy_validate	
+funktion	*	compute_rebal_trigger	rebalance_trigger	passt zum neuen Baustein rebalance_plan(event_col = …)
+funktion	*	block_length	bootstrap_block_length	
+funktion	*	pooled_bootstrap	bootstrap_pooled	
+funktion	*	validate_bootstrap	bootstrap_validate	
+funktion	*	study_metrics	bootstrap_study_metrics	Rd: „Standard-Kennzahlen für bootstrap_study()“ – gehört zur Studie; weicht vom ersten Vorschlag „bootstrap_metrics“ ab
+funktion	*	validate_dependence	dependence_validate	prüft die Abhängigkeit von Bootstrap-Pfaden; Familie nach Thema
+funktion	*	dcc_fit	dependence_dcc	
+funktion	*	fit_copula	copula_fit	
+funktion	*	covar_analysis	tail_covar	CoVaR ist ein Tail-Maß; passt zu tail_dependence und tail_regression; weicht vom ersten Vorschlag „dependence_covar“ ab
+funktion	*	quantile_reg	quantile_regression	allgemeines Werkzeug (y, X, tau) ohne Familie, wie bootstrap; ausgeschrieben
+funktion	*	copula_scenarios	scenario_copula	
+funktion	*	crisis_replay	scenario_crisis	
+funktion	*	entropy_pooling	scenario_entropy_pooling	nutzt die view_*-Annahmen, Ergebnis sind Szenariogewichte
+funktion	*	efficient_frontier	portfolio_frontier	
+funktion	*	risk_contributions	portfolio_risk_contributions	
+funktion	*	rolling_optimization	portfolio_rolling	
+funktion	*	cpcv_portfolio	portfolio_cpcv	
+funktion	*	probabilistic_sharpe	sharpe_probabilistic	
+funktion	*	deflated_sharpe	sharpe_deflated	
+funktion	*	min_track_record	sharpe_min_track_record	die Mindestlänge beruht auf der Sharpe Ratio
+funktion	*	pbo	overfit_pbo	
+funktion	*	reality_check	overfit_reality_check	
+funktion	*	walk_forward	overfit_walk_forward	steht in overfitting.R und prüft Auswahl außerhalb der Stichprobe
+funktion	*	plateau	param_plateau	steht in param_search.R und wertet Suchergebnisse aus; passt zu param_*; weicht vom ersten Vorschlag „overfit_plateau“ ab
+funktion	*	target_volatility	tactical_target_volatility	
+funktion	*	conditional_volatility	tactical_conditional_volatility	
+funktion	*	glidepath	tactical_glidepath	
+funktion	*	blend_weights	tactical_blend	
+funktion	*	leverage_sensitivity	sensitivity_leverage	
+funktion	*	rebalancing_sensitivity	sensitivity_rebalancing	
+funktion	*	horizon_model	withdrawal_horizon	
+funktion	*	perfect_withdrawal_rate	withdrawal_perfect_rate	Abkürzung PWR ist nicht selbsterklärend; passt zu withdrawal_max_rate; weicht vom ersten Vorschlag „withdrawal_pwr“ ab
+funktion	*	goal_optimize	planning_goal	neue Familie planning_ (in Anhang A ergänzen)
+funktion	*	lumpsum_vs_dca	planning_lumpsum_vs_dca	
+funktion	*	return_heatmap	result_heatmap	
+funktion	*	deep_analysis	result_analysis	
+funktion	*	read_tax_tariff	tax_tariff	Signatur bleibt tax_tariff(file = NULL); Argument tariff = in income_tariff() passt dazu
+argument	asset_config	action_type	trading	Werte bleiben
+argument	asset_config,withdrawal_simulation	asset_bonus	partial_exemption	irreführender Name (Anhang 1.6)
+argument	asset_config	asset_share	share	
+argument	asset_config	asset_spread	spread	simulation(spread) war wirkungslos (nur Warnung); sim_costs() hat kein spread, der Spread gilt je Asset (6.3)
+argument	asset_config	asset_start	start	
+#entfallen	begriff	dependence_analysis,reality_check,sharpe_test,tail_regression	B	n	Bootstrap-Wiederholungen (Anhang D); Konflikt mit vorhandenem n prüfen	Kollision: dependence_analysis und tail_regression haben eine lokale Variable n (Zahl der Beobachtungen; tail_regression auch Element n im Ergebnis), reality_check hat die Elemente n (= Tn) und B im Ergebnis, sharpe_test das Element n (= Tn, Stichprobenlänge) – n wäre doppelt belegt | Entscheidung 25.10.2026: B bleibt
+begriff	bootstrap_data,bootstrap_study,withdrawal_paths	start_date	start	Anhang D
+# Interne R-Helfer ohne Punkt in r/R/sim*.R (Abgleich NAMESPACE ↔ Definitionen, Etappe 6.1): R mit Punkt, Python/Julia mit _ (soweit nicht schon)
+intern	*	apply_spread	.apply_spread	nicht exportiert; Ports: _apply_spread
+intern	*	calculate_buy_signal	.calculate_buy_signal	nicht exportiert; Ports: _calculate_buy_signal
+#entfallen	intern	*	calculate_dates_flags	.calculate_dates_flags	nicht exportiert; Ports: _calculate_dates_flags	Kollision: Python und Julia haben schon _calculate_dates_flags (Kernfassung mit anderer Signatur neben dem R-gleichen Wrapper) | Entscheidung 25.10.2026: interne Helfer bleiben wie sie sind
+intern	*	calculate_fifo_price	.calculate_fifo_price	nicht exportiert; Ports: _calculate_fifo_price
+intern	*	calculate_fifo_vorabpauschale	.calculate_fifo_vorabpauschale	nicht exportiert; Ports: _calculate_fifo_vorabpauschale
+intern	*	calculate_flat_rate	.calculate_flat_rate	nicht exportiert; Ports: _calculate_flat_rate
+intern	*	calculate_fund_fees	.calculate_fund_fees	nicht exportiert; Ports: _calculate_fund_fees
+#entfallen	intern	*	calculate_kurtosis	.calculate_kurtosis	nicht exportiert; Ports: _calculate_kurtosis	Kollision: Python hat schon _calculate_kurtosis (Kernfassung mit anderer Signatur neben dem R-gleichen Wrapper) | Entscheidung 25.10.2026: interne Helfer bleiben wie sie sind
+intern	*	calculate_paragraph_20_tax	.calculate_paragraph_20_tax	nicht exportiert; Ports: _calculate_paragraph_20_tax
+#entfallen	intern	*	calculate_partials	.calculate_partials	nicht exportiert; Ports: _calculate_partials	Kollision: Python hat schon _calculate_partials (Kernfassung mit anderer Signatur neben dem R-gleichen Wrapper) | Entscheidung 25.10.2026: interne Helfer bleiben wie sie sind
+intern	*	calculate_private_sale_tax	.calculate_private_sale_tax	nicht exportiert; Ports: _calculate_private_sale_tax
+intern	*	calculate_sell_count	.calculate_sell_count	nicht exportiert; Ports: _calculate_sell_count
+intern	*	calculate_sell_signal	.calculate_sell_signal	nicht exportiert; Ports: _calculate_sell_signal
+#entfallen	intern	*	calculate_skewness	.calculate_skewness	nicht exportiert; Ports: _calculate_skewness	Kollision: Python hat schon _calculate_skewness (Kernfassung mit anderer Signatur neben dem R-gleichen Wrapper) | Entscheidung 25.10.2026: interne Helfer bleiben wie sie sind
+intern	*	calculate_split_flags	.calculate_split_flags	nicht exportiert; Ports: _calculate_split_flags
+intern	*	calculate_vorabpauschale_tax	.calculate_vorabpauschale_tax	nicht exportiert; Ports: _calculate_vorabpauschale_tax
+intern	*	forward_asset_split	.forward_asset_split	nicht exportiert; Ports: _forward_asset_split
+intern	*	handle_year_change	.handle_year_change	nicht exportiert; Ports: _handle_year_change
+intern	*	perform_asset_split	.perform_asset_split	nicht exportiert; Ports: _perform_asset_split
+intern	*	perform_gain_harvest	.perform_gain_harvest	nicht exportiert; Ports: _perform_gain_harvest
+intern	*	perform_trade_buy	.perform_trade_buy	nicht exportiert; Ports: _perform_trade_buy
+intern	*	perform_trade_sell	.perform_trade_sell	nicht exportiert; Ports: _perform_trade_sell
+intern	*	reverse_asset_split	.reverse_asset_split	nicht exportiert; Ports: _reverse_asset_split
+intern	*	update_fifo_front	.update_fifo_front	nicht exportiert; Ports: _update_fifo_front
+# Etappe 6.5 (F4): von Hand angewandt (Präfix "#von-Hand"), weil x als Name zu häufig ist (lokale Variablen, Zeichenkette "x" für das Argument von portfolio_optimize)
+#von-Hand	argument	portfolio_rolling	x	data	F4 (Etappe 6.5): erstes Argument ist nur eine Tabelle mit Datumsspalte (Renditematrix nicht möglich)

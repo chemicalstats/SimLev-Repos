@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 import simlev
-from simlev import asset_config, compute_rebal_trigger, create_strategy, simulation
+from simlev import asset_config, rebalance_trigger, create_strategy, simulation
 
 
 def _df():
@@ -17,10 +17,10 @@ def _df():
 
 def test_trigger_types_match_r_reference():
     # Referenzwerte aus dem R-Paket (rebal_trigger_cookbook.R)
-    df = compute_rebal_trigger(_df(), "abs_leverage", threshold=10, out_col="a")
-    df = compute_rebal_trigger(df, "rel_leverage", threshold=10, out_col="r")
-    df = compute_rebal_trigger(df, "vol_band", threshold=20, out_col="v")
-    df = compute_rebal_trigger(df, "combined", triggers=[{"type": "abs_leverage", "threshold": 10},
+    df = rebalance_trigger(_df(), "abs_leverage", threshold=10, out_col="a")
+    df = rebalance_trigger(df, "rel_leverage", threshold=10, out_col="r")
+    df = rebalance_trigger(df, "vol_band", threshold=20, out_col="v")
+    df = rebalance_trigger(df, "combined", triggers=[{"type": "abs_leverage", "threshold": 10},
                                                          {"type": "vol_band", "threshold": 20}], out_col="c")
     T, F = True, False
     assert df["a"].tolist() == [F, F, T, F, T, F, T, F, T, T]
@@ -31,17 +31,17 @@ def test_trigger_types_match_r_reference():
 
 def test_trigger_errors():
     with pytest.raises(ValueError, match="Unbekannter type"):
-        compute_rebal_trigger(_df(), "nope")
+        rebalance_trigger(_df(), "nope")
     with pytest.raises(ValueError, match="fehlt"):
-        compute_rebal_trigger(_df(), "abs_leverage", lev_col="xx")
+        rebalance_trigger(_df(), "abs_leverage", lev_col="xx")
     with pytest.raises(ValueError, match="nicht-leere"):
-        compute_rebal_trigger(_df(), "combined")
+        rebalance_trigger(_df(), "combined")
 
 
 def _result(n=120):
     d = pd.DataFrame({"date": pd.date_range("2022-01-03", periods=n), "A": np.linspace(100, 130, n),
                       "B": np.linspace(100, 110, n)})
-    s = create_strategy(A=asset_config("etf", "bnh", 0.6, 0, 30), B=asset_config("etf", "bnh", 0.4, 0, 0))
+    s = create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=0.6, spread=0, partial_exemption=30), B=asset_config(asset_class="etf", trading="bnh", share=0.4, spread=0, partial_exemption=0))
     return simulation(d, s)
 
 
@@ -56,7 +56,7 @@ def test_dashboard_and_exports(tmp_path):
     assert len(r.plot(compare=r).data) == 8
     svg = tmp_path / "x.svg"
     with contextlib.redirect_stderr(io.StringIO()):
-        simlev.export_dashboard(r, str(svg))
+        simlev.export_dashboard(r, filename=str(svg))
     assert svg.exists() and svg.stat().st_size > 1000
     with pytest.raises(ValueError, match="nur als SVG"):
-        simlev.export_dashboard(r, str(tmp_path / "x.pdf"))
+        simlev.export_dashboard(r, filename=str(tmp_path / "x.pdf"))

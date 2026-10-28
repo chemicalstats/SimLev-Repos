@@ -11,10 +11,10 @@ library(SimLev)
 strategy <- create_strategy(
   SPY = asset_config(
     asset_class = "etf",
-    action_type = "bnh",
-    asset_share = 1.0,
-    asset_spread = 0.1,
-    asset_bonus = 30
+    trading = "bnh",
+    share = 1.0,
+    spread = 0.1,
+    partial_exemption = 30
   )
 )
 
@@ -27,17 +27,17 @@ print(strategy)
 strategy <- create_strategy(
   SPY = asset_config(
     asset_class = "etf",
-    action_type = "bnh",
-    asset_share = 0.60,
-    asset_spread = 0.10,
-    asset_bonus = 30
+    trading = "bnh",
+    share = 0.60,
+    spread = 0.10,
+    partial_exemption = 30
   ),
   BND = asset_config(
     asset_class = "etf",
-    action_type = "bnh",
-    asset_share = 0.40,
-    asset_spread = 0.05,
-    asset_bonus = 0
+    trading = "bnh",
+    share = 0.40,
+    spread = 0.05,
+    partial_exemption = 0
   )
 )
 
@@ -62,10 +62,10 @@ data$spy_sell <- data$sma_short < data$sma_long
 strategy <- create_strategy(
   SPY = asset_config(
     asset_class = "etf",
-    action_type = "signal",       # Signal-based!
-    asset_share = 1.0,
-    asset_spread = 0.10,
-    asset_bonus = 30,
+    trading = "signal",       # Signal-based!
+    share = 1.0,
+    spread = 0.10,
+    partial_exemption = 30,
     signal_buy = "spy_buy",       # Spaltenname in data
     signal_sell = "spy_sell"      # Spaltenname in data
   )
@@ -81,8 +81,8 @@ strategy <- create_strategy(
 strategy <- create_strategy(
   SPY = asset_config(
     asset_class = "etf",
-    action_type = "FALSCH",  # ❌ Error: 'arg' should be one of "bnh", "signal"
-    asset_share = 0.6
+    trading = "FALSCH",  # ❌ Error: 'arg' should be one of "bnh", "signal"
+    share = 0.6
   )
 )
 
@@ -90,8 +90,8 @@ strategy <- create_strategy(
 strategy <- create_strategy(
   SPY = asset_config(
     asset_class = "etf"
-    # kein Fehler: action_type = "bnh", asset_share = 1,
-    # asset_spread = 0.1, asset_bonus = 0
+    # kein Fehler: trading = "bnh", share = 1,
+    # spread = 0.1, partial_exemption = 0
   )
 )
 
@@ -99,10 +99,10 @@ strategy <- create_strategy(
 strategy <- create_strategy(
   SPY = asset_config(
     asset_class = "etf",
-    action_type = "bnh",
-    asset_share = -0.5,      # ❌ Fehler: asset_config: asset_share muss ein Anteil groesser 0 und hoechstens 1 sein (z. B. 0.6 fuer 60 %), nicht -0.5.
-    asset_spread = 0.1,
-    asset_bonus = 150        # ❌ Fehler: asset_config: asset_bonus muss zwischen 0 und 100 liegen (Teilfreistellung in Prozent, z. B. 30 fuer 30 %), nicht 150.
+    trading = "bnh",
+    share = -0.5,      # ❌ Fehler: asset_config: share muss ein Anteil groesser 0 und hoechstens 1 sein (z. B. 0.6 fuer 60 %), nicht -0.5.
+    spread = 0.1,
+    partial_exemption = 150        # ❌ Fehler: asset_config: partial_exemption muss zwischen 0 und 100 liegen (Teilfreistellung in Prozent, z. B. 30 fuer 30 %), nicht 150.
   )
 )
 ```
@@ -110,33 +110,33 @@ strategy <- create_strategy(
 ### Signalspalten bei Buy-and-Hold
 
 ```r
-# Signalspalten bei action_type = "bnh":
+# Signalspalten bei trading = "bnh":
 strategy <- create_strategy(
   SPY = asset_config(
     asset_class = "etf",
-    action_type = "bnh",
-    asset_share = 1.0,
-    asset_spread = 0.1,
-    asset_bonus = 30,
+    trading = "bnh",
+    share = 1.0,
+    spread = 0.1,
+    partial_exemption = 30,
     signal_buy = "buy",
     signal_sell = "sell"
   )
 )
 # Keine Warnung: signal_buy/signal_sell werden gespeichert, aber nur bei
-# action_type = "signal" ausgewertet (simulation() und validate_strategy()).
+# trading = "signal" ausgewertet (simulation() und strategy_validate()).
 ```
 
 ### ✅ Validierung gegen Daten
 
 ```r
 # Prüfe ob Strategy zu Daten passt
-validate_strategy(strategy, data = data)
+strategy_validate(strategy, data = data)
 
 # Fehler wenn Asset fehlt:
-# Fehler: validate_strategy: Kursspalte(n) 'AAPL' fehlen in data (je Asset eine Spalte gleichen Namens; vorhanden: ...).
+# Fehler: strategy_validate: Kursspalte(n) 'AAPL' fehlen in data (je Asset eine Spalte gleichen Namens; vorhanden: ...).
 
 # Fehler wenn Signal-Spalten fehlen:
-# Fehler: validate_strategy: signal_buy-Spalte 'spy_buy' fehlt in data (Asset 'SPY').
+# Fehler: strategy_validate: signal_buy-Spalte 'spy_buy' fehlt in data (Asset 'SPY').
 ```
 
 ## Hilfsfunktionen
@@ -144,48 +144,48 @@ validate_strategy(strategy, data = data)
 Die folgenden Schritte bauen nacheinander auf der Multi-Asset-Strategie aus
 Abschnitt 2 auf (SPY 0,60, BND 0,40). Weil `strategy` in den Abschnitten
 dazwischen überschrieben wurde, wird sie hier neu angelegt; sonst bricht
-`remove_asset(strategy, "BND")` unten mit „Asset 'BND' ist nicht in der
+`strategy_remove_asset(strategy, "BND")` unten mit „Asset 'BND' ist nicht in der
 Strategie“ ab.
 
 ```r
 strategy <- create_strategy(
-  SPY = asset_config(asset_class = "etf", action_type = "bnh",
-                     asset_share = 0.60, asset_spread = 0.10, asset_bonus = 30),
-  BND = asset_config(asset_class = "etf", action_type = "bnh",
-                     asset_share = 0.40, asset_spread = 0.05, asset_bonus = 0)
+  SPY = asset_config(asset_class = "etf", trading = "bnh",
+                     share = 0.60, spread = 0.10, partial_exemption = 30),
+  BND = asset_config(asset_class = "etf", trading = "bnh",
+                     share = 0.40, spread = 0.05, partial_exemption = 0)
 )
 ```
 
 ### Asset hinzufügen
 
 ```r
-strategy <- add_asset(
+strategy <- strategy_add_asset(
   strategy,
   name = "QQQ",
   asset = asset_config(
     asset_class = "etf",
-    action_type = "bnh",
-    asset_share = 0.20,
-    asset_spread = 0.10,
-    asset_bonus = 30
+    trading = "bnh",
+    share = 0.20,
+    spread = 0.10,
+    partial_exemption = 30
   )
 )
 ```
 
 ### Asset aktualisieren
 
-Die Gewichte (`asset_share`) aller Assets müssen zusammen 1 ergeben, sonst
+Die Gewichte (`share`) aller Assets müssen zusammen 1 ergeben, sonst
 bricht `simulation()` mit einer Fehlermeldung ab. Nach dem Hinzufügen von
 QQQ (0,20) liegt die Summe bei 1,20; deshalb wird SPY hier auf 0,40
 gesenkt (SPY 0,40 + BND 0,40 + QQQ 0,20 = 1).
 
 ```r
 # Einzelne Parameter ändern
-strategy <- update_asset(
+strategy <- strategy_update_asset(
   strategy,
   name = "SPY",
-  asset_share = 0.40,
-  asset_spread = 0.15
+  share = 0.40,
+  spread = 0.15
 )
 ```
 
@@ -195,8 +195,8 @@ Nach dem Entfernen von BND fehlen dessen 0,40; SPY übernimmt sie, damit die
 Summe wieder 1 ist (SPY 0,80 + QQQ 0,20).
 
 ```r
-strategy <- remove_asset(strategy, "BND")
-strategy <- update_asset(strategy, name = "SPY", asset_share = 0.80)
+strategy <- strategy_remove_asset(strategy, "BND")
+strategy <- strategy_update_asset(strategy, name = "SPY", share = 0.80)
 ```
 
 ## Ausgabe
@@ -263,22 +263,22 @@ data <- data.frame(
 strategy <- create_strategy(
   SPY = asset_config(
     asset_class = "etf",
-    action_type = "bnh",
-    asset_share = 0.60,
-    asset_spread = 0.10,
-    asset_bonus = 30
+    trading = "bnh",
+    share = 0.60,
+    spread = 0.10,
+    partial_exemption = 30
   ),
   BND = asset_config(
     asset_class = "etf",
-    action_type = "bnh",
-    asset_share = 0.40,
-    asset_spread = 0.05,
-    asset_bonus = 0
+    trading = "bnh",
+    share = 0.40,
+    spread = 0.05,
+    partial_exemption = 0
   )
 )
 
 # 3. Validieren
-validate_strategy(strategy, data = data)
+strategy_validate(strategy, data = data)
 
 # 4. Ausgeben
 print(strategy)
@@ -299,10 +299,10 @@ result <- simulation(
 strategy <- list(
   SPY = list(
     asset_class = "etf",
-    action_type = "bnh",
-    asset_share = 0.6,
-    asset_spread = 0.1,
-    asset_bonus = 30,
+    trading = "bnh",
+    share = 0.6,
+    spread = 0.1,
+    partial_exemption = 30,
     signal_buy = NULL,
     signal_sell = NULL
   )
@@ -314,10 +314,10 @@ strategy <- list(
 strategy <- create_strategy(
   SPY = asset_config(
     asset_class = "etf",
-    action_type = "bnh",
-    asset_share = 0.6,
-    asset_spread = 0.1,
-    asset_bonus = 30
+    trading = "bnh",
+    share = 0.6,
+    spread = 0.1,
+    partial_exemption = 30
   )
 )
 # signal_buy/sell nicht nötig bei bnh!

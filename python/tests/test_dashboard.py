@@ -25,6 +25,7 @@ from simlev.dashboard import (
 from simlev.svg import SimLevPlot, _check_svg_file, _plot_method, _warn_unknown_kw
 
 from _helpers import sim
+from simlev import dca_plan  # Bausteine (Etappe 6.3)
 from test_tax_law import _dca
 
 approx = pytest.approx
@@ -41,7 +42,7 @@ def _series(seed, n, start="2021-01-01", **cols):
 @pytest.fixture(scope="module")
 def r500():
     d = _series(7, 500, ETF=(100, 4e-4, 0.012))
-    return sim(d, create_strategy(ETF=asset_config("etf", asset_share=1)))
+    return sim(d, create_strategy(ETF=asset_config(asset_class="etf", share=1)))
 
 
 @pytest.fixture
@@ -158,9 +159,9 @@ def test_layout_beispiele(r500):
 
 def test_performance_y_bereich_ueber_alle_kurven(monkeypatch):
     d = _series(7, 500, ETF=(100, 4e-4, 0.012), B=(100, -6e-4, 0.008), C=(100, -1e-3, 0.01))
-    r = sim(d, create_strategy(ETF=asset_config("etf", asset_share=1)))
-    r2 = sim(d, create_strategy(B=asset_config("etf", asset_share=1)))
-    rl = sim(d, create_strategy(C=asset_config("etf", asset_share=1)), dca_mode=True, dca_value=500, dca_span=1)
+    r = sim(d, create_strategy(ETF=asset_config(asset_class="etf", share=1)))
+    r2 = sim(d, create_strategy(B=asset_config(asset_class="etf", share=1)))
+    rl = sim(d, create_strategy(C=asset_config(asset_class="etf", share=1)), dca=dca_plan(value=500, span=1))
     inv = _dashboard_returns(rl)["invested"]
     assert inv.max() > rl.worth.max()
 
@@ -180,23 +181,23 @@ def test_performance_y_bereich_ueber_alle_kurven(monkeypatch):
 
 def test_raender_und_export(tmp_path):
     d = _series(7, 3 * 365, ETF=(100, 4e-4, 0.012), B=(100, 1e-4, 0.008))
-    r = sim(d, create_strategy(ETF=asset_config("etf", asset_share=0.6), B=asset_config("etf", asset_share=0.4)),
+    r = sim(d, create_strategy(ETF=asset_config(asset_class="etf", share=0.6), B=asset_config(asset_class="etf", share=0.4)),
             start_value=250000)
-    r2 = sim(d, create_strategy(B=asset_config("etf", asset_share=1)), start_value=250000)
+    r2 = sim(d, create_strategy(B=asset_config(asset_class="etf", share=1)), start_value=250000)
     silent(r, compare=r2)
     silent(r, style="compact")
     silent(r, style="custom", panels=["performance", "rolling", "monthly"])
     f = tmp_path / "d.svg"
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
-        assert export_dashboard(r, str(f), compare=r2) is None
+        assert export_dashboard(r, filename=str(f), compare=r2) is None
     assert f.exists() and err.getvalue() == "export_dashboard: Dashboard gespeichert in %s\n" % f
     svg = f.read_text(encoding="utf-8")
     assert svg.startswith('<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1000"')
     assert svg == plot_dashboard(r, compare=r2, width=1400, height=1000).svg
     with pytest.raises(ValueError, match=r"export_dashboard: Grafiken werden nur als SVG gespeichert; '.*d\.pdf' hat "
                                          r"die Endung '\.pdf'\. Bitte einen Dateinamen auf \.svg angeben"):
-        export_dashboard(r, str(tmp_path / "d.pdf"))
+        export_dashboard(r, filename=str(tmp_path / "d.pdf"))
     assert not (tmp_path / "d.pdf").exists()
     with contextlib.redirect_stderr(io.StringIO()):
         simlev.export_dashboard(r, filename=str(tmp_path / "e.svg"), width=7, height=5)
@@ -207,8 +208,8 @@ def test_raender_und_export(tmp_path):
 
 def test_strategievergleich_farben():
     d = _series(7, 3 * 365, ETF=(100, 4e-4, 0.012), B=(100, 1e-4, 0.008))
-    r = sim(d, create_strategy(ETF=asset_config("etf", asset_share=0.6), B=asset_config("etf", asset_share=0.4)))
-    r2 = sim(d, create_strategy(B=asset_config("etf", asset_share=1)))
+    r = sim(d, create_strategy(ETF=asset_config(asset_class="etf", share=0.6), B=asset_config(asset_class="etf", share=0.4)))
+    r2 = sim(d, create_strategy(B=asset_config(asset_class="etf", share=1)))
     pos, neg, neu = "#06A77D", "#D62246", "#6C757D"
 
     def cols(a, b):
@@ -230,7 +231,7 @@ def test_strategievergleich_farben():
 
 def test_betraege_startkapital_achsen(monkeypatch):
     d = _series(42, 365 * 4, start="2015-01-01", A=(100, 4e-4, 0.010))
-    r = sim(d, create_strategy(A=asset_config("etf", asset_share=1)), start_value=10000)
+    r = sim(d, create_strategy(A=asset_config(asset_class="etf", share=1)), start_value=10000)
     rec = _PanelRecorder(monkeypatch)
     p = silent(r, style="custom", panels=["performance", "stats"])
     tx = texts(p)
@@ -259,8 +260,7 @@ def test_betraege_startkapital_achsen(monkeypatch):
 
 def test_r9_04_startkapital_ohne_sparrate():
     d = _series(42, 365 * 2, start="2015-01-01", W=(100, 4e-4, 0.010), B=(50, 1e-4, 0.003))
-    r = sim(d, create_strategy(W=asset_config("etf", asset_share=0.7), B=asset_config("etf", asset_share=0.3)),
-            start_value=10000, dca_mode=True, dca_value=250, dca_span=1, dca_unit="month")
+    r = sim(d, create_strategy(W=asset_config(asset_class="etf", share=0.7), B=asset_config(asset_class="etf", share=0.3)), start_value=10000, dca=dca_plan(value=250, span=1, unit="month"))
     assert r.invested[0] == 10250
     dep = _stats_sections(r)["Depot"]
     assert "Startkapital: 10000.00 EUR" in dep
@@ -269,8 +269,8 @@ def test_r9_04_startkapital_ohne_sparrate():
 
 def test_r9_05_korrelation():
     d = _series(42, 365 * 3, start="2015-01-01", W=(100, 4e-4, 0.010), B=(50, 1e-4, 0.003))
-    r1 = sim(d, create_strategy(W=asset_config("etf", asset_share=0.7), B=asset_config("etf", asset_share=0.3)))
-    r2 = sim(d, create_strategy(B=asset_config("etf", asset_share=1)))
+    r1 = sim(d, create_strategy(W=asset_config(asset_class="etf", share=0.7), B=asset_config(asset_class="etf", share=0.3)))
+    r2 = sim(d, create_strategy(B=asset_config(asset_class="etf", share=1)))
     p = silent(r1, compare=r2)
     a, b = _dashboard_returns(r1)["all_returns"], _dashboard_returns(r2)["all_returns"]
     rho = _r_cor(a, b)
@@ -289,15 +289,15 @@ def test_r9_05_korrelation():
     assert p.data == {}
     silent(r1)
     with pytest.raises(ValueError, match="compare muss ein SimLevResult über dieselben Tage"):
-        plot_dashboard(r1, compare=sim(d.iloc[:400], create_strategy(B=asset_config("etf"))))
+        plot_dashboard(r1, compare=sim(d.iloc[:400], create_strategy(B=asset_config(asset_class="etf"))))
     with pytest.raises(ValueError, match="Objekt der Klasse 'list'"):
         plot_dashboard(r1, compare=[1, 2])
 
 
 def test_r1_19_r1_22_kurze_reihen_und_export(tmp_path):
     d = _series(12, 3 * 365, start="2020-01-01", A=(100, 4e-4, 0.01))
-    st = create_strategy(A=asset_config("etf", asset_share=1, asset_spread=0))
-    r = sim(d, st, dca_mode=True, dca_value=5000, dca_span=1)
+    st = create_strategy(A=asset_config(asset_class="etf", share=1, spread=0))
+    r = sim(d, st, dca=dca_plan(value=5000, span=1))
     dr = _dashboard_returns(r)
     assert np.std(dr["returns"], ddof=1) == approx(r.statistics["sd"], rel=1e-12)
     assert dr["returns"].max() < 0.1
@@ -310,7 +310,7 @@ def test_r1_19_r1_22_kurze_reihen_und_export(tmp_path):
     del bad["worth"]
     with pytest.raises(Exception):
         with contextlib.redirect_stderr(io.StringIO()):
-            export_dashboard(bad, str(tmp_path / "x.svg"))
+            export_dashboard(bad, filename=str(tmp_path / "x.svg"))
     assert os.listdir(tmp_path) == []
 
 
@@ -341,8 +341,8 @@ def _same(a, b):
 
 def test_data_schluessel_spalten_werte():
     d = _series(42, 365 * 3, start="2015-01-01", W=(100, 4e-4, 0.010), B=(50, 1e-4, 0.003))
-    r1 = sim(d, create_strategy(W=asset_config("etf", asset_share=0.7), B=asset_config("etf", asset_share=0.3)))
-    r2 = sim(d, create_strategy(B=asset_config("etf", asset_share=1)))
+    r1 = sim(d, create_strategy(W=asset_config(asset_class="etf", share=0.7), B=asset_config(asset_class="etf", share=0.3)))
+    r2 = sim(d, create_strategy(B=asset_config(asset_class="etf", share=1)))
     p = silent(r1)
     assert list(p.data) == ["performance", "drawdown", "distribution", "rolling", "monthly", "stats"]
     p = silent(r1, compare=r2)
@@ -378,8 +378,8 @@ def test_data_schluessel_spalten_werte():
     assert dt["comparison"].to_dict("list") == {"label": [z["metric"] for z in rows], "value": [z["v1"] for z in rows],
                                                 "compare": [z["v2"] for z in rows], "diff": [z["diff"] for z in rows]}
     # leere Panels: Tabelle mit Spalten, ohne Zeilen
-    p = silent(sim(d.iloc[:30], create_strategy(B=asset_config("etf"))),
-               compare=sim(d.iloc[:30], create_strategy(W=asset_config("etf"))))
+    p = silent(sim(d.iloc[:30], create_strategy(B=asset_config(asset_class="etf"))),
+               compare=sim(d.iloc[:30], create_strategy(W=asset_config(asset_class="etf"))))
     assert len(p.data["correlation"]) == 0 and list(p.data["correlation"].columns) == ["date", "correlation"]
     assert "Rollierende Korrelation" in texts(p)
 
@@ -487,7 +487,7 @@ def test_dashboard_ohne_matplotlib():
     code = ("import sys; sys.path.insert(0, %r)\n"
             "import numpy as np, pandas as pd, simlev\n"
             "d = pd.DataFrame({'date': pd.date_range('2022-01-03', periods=200), 'A': np.linspace(100, 130, 200)})\n"
-            "r = simlev.simulation(d, simlev.create_strategy(A=simlev.asset_config('etf', asset_share=1)))\n"
+            "r = simlev.simulation(d, simlev.create_strategy(A=simlev.asset_config(asset_class='etf', share=1)))\n"
             "p = r.plot(compare=r); simlev.plot(r)\n"
             "assert 'matplotlib' not in sys.modules\n" % os.path.join(os.path.dirname(__file__), ".."))
     res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,

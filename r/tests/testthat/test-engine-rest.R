@@ -7,13 +7,13 @@
 .er_out <- function(...) { out <- utils::capture.output(r <- .er_sim(..., details = TRUE)); list(r = r, out = out) }
 
 # Lieferbares ETC (§ 23): Kauf 100 Stueck zu 100 am 1.1.2020, Verkauf zu 150 am 1.6.2020 -> Gewinn 5000
-.er_p23 <- function(end = "2021-06-30", ...) {
+.er_p23 <- function(end = "2021-06-30", tax = tax_profile(income = income_rate(marginal_rate = 42)), ...) {
   d <- .er_days("2020-01-01", end)
   df <- data.frame(date = d, G = ifelse(d < as.Date("2020-06-01"), 100, 150))
   df$cb <- d == d[1]; df$cs <- d == as.Date("2020-06-01")
-  st <- create_strategy(G = asset_config("etc", "signal", asset_share = 1, asset_spread = 0, deliverable = TRUE,
+  st <- create_strategy(G = asset_config("etc", "signal", share = 1, spread = 0, deliverable = TRUE,
                                          signal_buy = "cb", signal_sell = "cs"))
-  .er_sim(df, st, start_value = 1e4, tax_mode = "person", marginal_tax_rate = 42, ...)
+  .er_sim(df, st, start_value = 1e4, tax = tax, ...)
 }
 
 # ---------------------------------------------------------------------------
@@ -41,9 +41,9 @@ test_that("R3a-02: § 23-Steuer per Zwangsverkauf, wenn kein Cash da ist (Wieder
   d <- .er_days("2020-01-01", "2021-06-30")
   df <- data.frame(date = d, G = ifelse(d < as.Date("2020-06-01"), 100, 150))
   df$cb <- d %in% as.Date(c("2020-01-01", "2020-07-01")); df$cs <- d == as.Date("2020-06-01")
-  st <- create_strategy(G = asset_config("etc", "signal", asset_share = 1, asset_spread = 0, deliverable = TRUE,
+  st <- create_strategy(G = asset_config("etc", "signal", share = 1, spread = 0, deliverable = TRUE,
                                          signal_buy = "cb", signal_sell = "cs"))
-  r <- .er_sim(df, st, start_value = 1e4, tax_mode = "person", marginal_tax_rate = 42)
+  r <- .er_sim(df, st, start_value = 1e4, tax = tax_profile(income = income_rate(marginal_rate = 42)))
   i <- which(r$dates == as.Date("2021-01-01"))
   expect_equal(r$report$G$worth[i - 1], 15000)
   expect_equal(r$report$G$worth[i], 15000 - 2100, tolerance = 1e-7)   # 14 Stueck x 150 verkauft
@@ -64,10 +64,10 @@ test_that("R3a-01: VP 2020 wird bei kurslosem Jahr 2021 am 1.1.2021 mit den Toep
                    C = .er_lin(d, c("2020-01-01", "2022-02-01", "2022-02-02"), c(100, 100, 90)))
   gap <- d > as.Date("2020-12-31") & d <= as.Date("2021-12-31"); df$A[gap] <- NA; df$C[gap] <- NA
   df$cb <- d == d[1]; df$cs <- d == as.Date("2022-03-01")
-  st <- create_strategy(A = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0),
-                        C = asset_config("certificate", "signal", asset_share = 0.5, asset_spread = 0,
+  st <- create_strategy(A = asset_config("etf", "bnh", share = 0.5, spread = 0),
+                        C = asset_config("certificate", "signal", share = 0.5, spread = 0,
                                          signal_buy = "cb", signal_sell = "cs"))
-  x <- .er_out(df, st, start_value = 1e5, tax_mode = "person", base_rate = 2.55)
+  x <- .er_out(df, st, start_value = 1e5, tax = tax_profile(base_rate = 2.55))
   vp <- grep("Vorabpauschale A \\(festgesetzt 2020", x$out, value = TRUE)
   expect_length(vp, 1L)
   expect_match(vp, "892.50 EUR.*SPB 892.50 EUR, Steuer 0.00 EUR am 2021-01-01")
@@ -83,8 +83,8 @@ test_that("R3a-03: VP-Zwangsverkauf ganzer Stuecke deckt die Steuer (aufgerundet
   # netto 107,83329375 -> 41,21 Stueck -> aufgerundet 42 (vorher 41, Fehlbetrag 23,02 still gekappt)
   d <- .er_days("2020-01-01", "2021-01-31")
   df <- data.frame(date = d, A = .er_lin(d, c("2020-01-01", "2020-12-31", "2021-01-31"), c(100, 110, 110)))
-  st <- create_strategy(A = asset_config("etf", "bnh", asset_share = 1, asset_spread = 0, asset_bonus = 0))
-  x <- .er_out(df, st, start_value = 1e6, tax_mode = "person", base_rate = 2.55, fractions = FALSE)
+  st <- create_strategy(A = asset_config("etf", "bnh", share = 1, spread = 0, partial_exemption = 0))
+  x <- .er_out(df, st, start_value = 1e6, tax = tax_profile(base_rate = 2.55), fractions = FALSE)
   expect_true(any(grepl("Verkauf 42.00x A zu 110.00", x$out)))
   i <- which(x$r$dates == as.Date("2021-01-01"))
   tax_vp <- 16850 * 0.26375; tax_sale <- 42 * 8.215 * 0.26375
@@ -101,11 +101,10 @@ test_that("R3a-02/03: hat das Asset weder Cash noch Bestand, zahlen die \u00fcbr
   df <- data.frame(date = d, G = ifelse(d < as.Date("2020-06-01"), 100, 150), H = 50)
   df$cb <- d == d[1]; df$cs <- d == as.Date("2020-06-01")
   df$ev <- d == as.Date("2020-07-01"); df$wG <- 0; df$wH <- 1
-  st <- create_strategy(G = asset_config("etc", "signal", asset_share = 0.5, asset_spread = 0, deliverable = TRUE,
+  st <- create_strategy(G = asset_config("etc", "signal", share = 0.5, spread = 0, deliverable = TRUE,
                                          signal_buy = "cb", signal_sell = "cs"),
-                        H = asset_config("certificate", "bnh", asset_share = 0.5, asset_spread = 0))
-  r <- .er_sim(df, st, start_value = 1e4, tax_mode = "person", marginal_tax_rate = 42,
-               event_col = "ev", event_mode = "replace", event_weight = c(G = "wG", H = "wH"))
+                        H = asset_config("certificate", "bnh", share = 0.5, spread = 0))
+  r <- .er_sim(df, st, start_value = 1e4, rebalance = rebalance_plan(event_col = "ev", event_mode = "replace", skip = TRUE, event_weight = c(G = "wG", H = "wH")), tax = tax_profile(income = income_rate(marginal_rate = 42)))
   i <- which(r$dates == as.Date("2021-01-01"))
   expect_equal(r$report$G$total[i - 1], 0)
   expect_equal(r$report$H$worth[i - 1], 250 * 50)
@@ -124,9 +123,9 @@ test_that("R3a-04: Aktivierung verkauft genau den Transferbetrag (Gewinn im Paus
   # Gewinn 50 x 19,78 = 989 < 1000 SPB -> Steuer 0 (vorher 52,27 Stueck verkauft, 2,20 zurueckgekauft)
   d <- .er_days("2020-01-01", "2020-12-30")
   df <- data.frame(date = d, A = .er_lin(d, c("2020-01-01", "2020-07-01", "2020-12-30"), c(100, 120, 120)), B = 50)
-  st <- create_strategy(A = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0.2),
-                        B = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0.2, asset_start = as.Date("2020-07-01")))
-  x <- .er_out(df, st, start_value = 1e4, tax_mode = "person")
+  st <- create_strategy(A = asset_config("etf", "bnh", share = 0.5, spread = 0.2),
+                        B = asset_config("etf", "bnh", share = 0.5, spread = 0.2, start = as.Date("2020-07-01")))
+  x <- .er_out(df, st, start_value = 1e4, tax = tax_profile())
   day <- grep("2020-07-01", x$out, value = TRUE)
   expect_true(any(grepl("Verkauf 50.00x A zu 119.88", day)))
   expect_false(any(grepl("Kauf .* A zu", day)))
@@ -139,9 +138,9 @@ test_that("R3a-04: Aktivierung verkauft genau den Transferbetrag (Gewinn im Paus
 test_that("R3a-04: Rebalancing mit teilweise steuerpflichtigem Gewinn: kein Rueckkauf, Steuer exakt", {
   d <- .er_days("2020-01-01", "2020-12-30")
   df <- data.frame(date = d, A = .er_lin(d, c("2020-01-01", "2020-07-01", "2020-12-30"), c(100, 200, 200)), B = 50)
-  st <- create_strategy(A = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0.2),
-                        B = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0.2))
-  x <- .er_out(df, st, start_value = 1e4, tax_mode = "person", balance_mode = TRUE, balance_unit = "month", balance_span = 6)
+  st <- create_strategy(A = asset_config("etf", "bnh", share = 0.5, spread = 0.2),
+                        B = asset_config("etf", "bnh", share = 0.5, spread = 0.2))
+  x <- .er_out(df, st, start_value = 1e4, rebalance = rebalance_plan(span = 6, unit = "month"), tax = tax_profile())
   day <- grep("2020-07-01", x$out, value = TRUE)
   expect_false(any(grepl("\tKauf .* A zu", day)))            # vorher: Kauf 1.32x A
   m <- regmatches(day, regexec("Verkauf ([0-9.]+)x A", day)); n <- as.numeric(m[[which(lengths(m) > 0)[1]]][2])
@@ -154,16 +153,16 @@ test_that("R3a-04: Rebalancing mit teilweise steuerpflichtigem Gewinn: kein Ruec
 })
 
 # ---------------------------------------------------------------------------
-# R3a-05: asset_start nach Datenende -> Fehler
+# R3a-05: start nach Datenende -> Fehler
 # ---------------------------------------------------------------------------
-test_that("R3a-05: asset_start nach dem letzten Datentag ist ein Fehler", {
+test_that("R3a-05: start nach dem letzten Datentag ist ein Fehler", {
   d <- .er_days("2020-01-01", "2021-03-31")
   df <- data.frame(date = d, A = seq(100, 110, length.out = length(d)), B = 50)
-  st <- create_strategy(A = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0),
-                        B = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0, asset_start = as.Date("2022-01-01")))
-  expect_error(simulation(df, st, start_value = 1e4), "asset_start von 'B' \\(2022-01-01\\) liegt nach dem letzten Datentag \\(2021-03-31\\)")
-  expect_error(simulation(df, st, start_value = 1e4, balance_mode = TRUE, balance_unit = "quarter"), "asset_start von 'B'")
-  st$B$asset_start <- as.Date("2021-03-31")             # letzter Tag: zulaessig
+  st <- create_strategy(A = asset_config("etf", "bnh", share = 0.5, spread = 0),
+                        B = asset_config("etf", "bnh", share = 0.5, spread = 0, start = as.Date("2022-01-01")))
+  expect_error(simulation(df, st, start_value = 1e4), "start von 'B' \\(2022-01-01\\) liegt nach dem letzten Datentag \\(2021-03-31\\)")
+  expect_error(simulation(df, st, start_value = 1e4, rebalance = rebalance_plan(unit = "quarter")), "start von 'B'")
+  st$B$start <- as.Date("2021-03-31")             # letzter Tag: zulaessig
   expect_s3_class(.er_sim(df, st, start_value = 1e4), "SimLevResult")
 })
 
@@ -172,21 +171,20 @@ test_that("R3a-05: asset_start nach dem letzten Datentag ist ein Fehler", {
 # ---------------------------------------------------------------------------
 test_that("R3a-06: Kirchensteuer auf § 23-Steuer und persoenlichen Satz, Abgeltungsteuer unver\u00e4ndert", {
   # § 23: 5000 x 42 % x (1 + 0,09) = 2289 (vorher 2100); Endwert 12711
-  r <- .er_p23(church_tax = 9)
+  r <- .er_p23(tax = tax_profile(church_tax = 9, income = income_rate(marginal_rate = 42)))
   expect_equal(r$tax_report$total_taxes_paid, 2289)
   expect_equal(tail(r$worth, 1), 12711)
-  r8 <- .er_p23(church_tax = 8, include_soli_on_income_tax = TRUE)
+  r8 <- .er_p23(tax = tax_profile(church_tax = 8, income = income_rate(marginal_rate = 42, soli_rate = 5.5)))
   expect_equal(r8$tax_report$total_taxes_paid, 5000 * 0.42 * (1 + 0.055 + 0.08))
   # Zertifikat (§ 20): Gewinn 5000, SPB 1000 -> 4000 steuerpflichtig
   d <- .er_days("2020-01-01", "2020-12-31")
   df <- data.frame(date = d, Z = ifelse(d < as.Date("2020-06-01"), 100, 150))
   df$cb <- d == d[1]; df$cs <- d == as.Date("2020-06-01")
-  st <- create_strategy(Z = asset_config("certificate", "signal", asset_share = 1, asset_spread = 0,
+  st <- create_strategy(Z = asset_config("certificate", "signal", share = 1, spread = 0,
                                          signal_buy = "cb", signal_sell = "cs"))
-  g <- .er_sim(df, st, start_value = 1e4, tax_mode = "person", church_tax = 9,
-               marginal_tax_rate = 20, use_guenstigerpruefung = TRUE)
+  g <- .er_sim(df, st, start_value = 1e4, tax = tax_profile(church_tax = 9, guenstigerpruefung = TRUE, income = income_rate(marginal_rate = 20)))
   expect_equal(g$tax_report$total_taxes_paid, 4000 * 0.20 * 1.09)           # vorher 4000 x 20 %
-  a <- .er_sim(df, st, start_value = 1e4, tax_mode = "person", church_tax = 9)
+  a <- .er_sim(df, st, start_value = 1e4, tax = tax_profile(church_tax = 9))
   expect_equal(a$tax_report$total_taxes_paid, 4000 * 0.25 / (1 + 0.25 * 0.09) * (1 + 0.055 + 0.09))  # § 32d
 })
 
@@ -198,8 +196,7 @@ test_that("R3a-07: NA im Basiszins am ersten Handelstag ergibt in beiden Datenfo
     df <- data.frame(date = d, A = .er_lin(d, c("2020-01-01", "2020-12-31", "2021-02-26"), c(100, 110, 110)), BR = 2)
     if (na) df$BR[df$date == as.Date("2020-01-02")] <- NA
     df <- df[df$date != as.Date("2020-01-01"), ]
-    .er_sim(df, create_strategy(A = asset_config("etf", "bnh", asset_share = 1, asset_spread = 0)),
-            start_value = 1e6, tax_mode = "person", base_rate_flex = TRUE, base_rate_data = "BR")
+    .er_sim(df, create_strategy(A = asset_config("etf", "bnh", share = 1, spread = 0)), start_value = 1e6, tax = tax_profile(base_rate = "BR"))
   }
   d <- .er_days("2020-01-01", "2021-02-26"); dt <- d[!format(d, "%u") %in% c("6", "7")]
   expect_equal(run(d)$tax_report$total_taxes_paid, 0)
@@ -224,9 +221,7 @@ test_that("R3B-01: .xirr_rate findet Nullstellen unter u = -200", {
 test_that("R3B-01: simulation() liefert cagr bei Knockout mit Sparplan", {
   dd <- .er_days("2020-01-01", "2023-12-31")
   p <- rep(100, length(dd)); p[dd >= as.Date("2023-12-20")] <- 1e-3
-  expect_silent(r <- suppressMessages(simulation(data.frame(date = dd, A = p),
-                  create_strategy(A = asset_config("etf", "bnh", asset_share = 1, asset_spread = 0)),
-                  start_value = 1000, dca_mode = TRUE, dca_value = 100, dca_span = 1)))
+  expect_silent(r <- suppressMessages(simulation(data.frame(date = dd, A = p), create_strategy(A = asset_config("etf", "bnh", share = 1, spread = 0)), start_value = 1000, dca = dca_plan(value = 100, span = 1))))
   expect_true(is.finite(r$cagr))
   # Probe: S (1 + r)^T + sum F_i (1 + r)^(T - t_i) = V in L = log(1 + r) (unabhaengige Nullstelle)
   fl <- rowSums(sapply(r$report, function(x) x$flows)); fi <- which(seq_along(fl) > 1 & fl != 0)
@@ -242,8 +237,8 @@ test_that("R3B-02: Tagesrendite an Zuflusstagen mit Bewertung zum Zahlungszeitpu
   set.seed(1); n <- 400
   d <- data.frame(date = .er_days("2015-01-01", as.Date("2015-01-01") + n - 1),
                   A = 100 * cumprod(1 + rnorm(n, 3e-4, 0.012)))
-  st <- create_strategy(A = asset_config("etf", "bnh", asset_share = 1, asset_spread = 0.1))
-  r <- .er_sim(d, st, start_value = 1, dca_mode = TRUE, dca_value = 500, dca_span = 1, dca_days = 15)
+  st <- create_strategy(A = asset_config("etf", "bnh", share = 1, spread = 0.1))
+  r <- .er_sim(d, st, start_value = 1, dca = dca_plan(value = 500, span = 1, days = 15))
   w <- r$worth; fl <- rowSums(sapply(r$report, function(x) x$flows)); g <- r$twr_index[-1] / r$twr_index[-n]
   f <- which(fl[-1] != 0); nf <- which(fl[-1] == 0)
   # Handrechnung: V_pre = Bestand_{t-1} * P_t / P_{t-1} + Cash_{t-1}; 1 + r = V_pre / W_{t-1} * W_t / (V_pre + F)
@@ -267,8 +262,8 @@ test_that("R3B-03: invested = Startwert + Einzahlungen (brutto), XIRR mit Brutto
   set.seed(1); n <- 1500
   d <- data.frame(date = .er_days("2015-01-01", as.Date("2015-01-01") + n - 1),
                   A = 100 * cumprod(1 + rnorm(n, 3e-4, 0.012)))
-  st <- create_strategy(A = asset_config("etf", "bnh", asset_share = 1, asset_spread = 2))
-  r <- .er_sim(d, st, start_value = 10000, dca_mode = TRUE, dca_value = 500, dca_span = 1, order_fee = 10)
+  st <- create_strategy(A = asset_config("etf", "bnh", share = 1, spread = 2))
+  r <- .er_sim(d, st, start_value = 10000, costs = sim_costs(order_fee = 10), dca = dca_plan(value = 500, span = 1))
   fl <- rowSums(sapply(r$report, function(x) x$flows))
   expect_equal(r$invested[1], 10000 + 500)                         # vorher 10376,24 (netto)
   expect_equal(tail(r$invested, 1), 10000 + 50 * 500)              # 50 Raten
@@ -304,8 +299,8 @@ test_that("Beschriftung: Ausgaben kennzeichnen cagr als geldgewichtet (XIRR)", {
   d <- data.frame(date = .er_days("2015-01-01", as.Date("2015-01-01") + 599))
   d$A <- 100 * cumprod(1 + rnorm(600, 3e-4, 0.01)); d$B <- 100 * cumprod(1 + rnorm(600, 1e-4, 0.004))
   st <- create_strategy(A = asset_config("etf", "bnh", 0.6), B = asset_config("etf", "bnh", 0.4))
-  rs <- rebalancing_sensitivity(d, st, frequencies = list(yearly = c("year", 1)),
-                                sim_args = list(dca_mode = TRUE, dca_value = 100, dca_span = 1))
+  rs <- sensitivity_rebalancing(d, st, frequencies = list(yearly = c("year", 1)),
+                                sim_args = list(dca = dca_plan(100, 1)))
   expect_true(any(grepl("cagr: mit Sparplan geldgewichtet \\(XIRR\\)", utils::capture.output(print(rs)))))
   sm <- structure(list(top = data.frame(id = 1L, n = 50, cagr = 0.05, sharpe = 0.4, plateau = 0.4),
                        best = data.frame(id = 1L, n = 50, sharpe = 0.4), best_plateau = data.frame(id = 1L, n = 50, sharpe = 0.4, plateau = 0.4),
@@ -322,8 +317,8 @@ test_that("R3B-02: ohne Kosten folgt der zeitgewichtete Index trotz Sparplan exa
   set.seed(7); n <- 500
   d <- data.frame(date = .er_days("2016-01-01", as.Date("2016-01-01") + n - 1),
                   A = 100 * cumprod(1 + rnorm(n, 3e-4, 0.012)))
-  st <- create_strategy(A = asset_config("etf", "bnh", asset_share = 1, asset_spread = 0))
-  r <- .er_sim(d, st, start_value = 1, dca_mode = TRUE, dca_value = 500, dca_span = 1)
+  st <- create_strategy(A = asset_config("etf", "bnh", share = 1, spread = 0))
+  r <- .er_sim(d, st, start_value = 1, dca = dca_plan(value = 500, span = 1))
   expect_true(r$external_flows)
   expect_equal(r$twr_index, d$A / d$A[1], tolerance = 1e-12)
   expect_equal(r$statistics$max_drawdown, max(1 - d$A / cummax(d$A)), tolerance = 1e-12)
@@ -334,33 +329,32 @@ test_that("R3B-02: ohne Kosten folgt der zeitgewichtete Index trotz Sparplan exa
 # ===========================================================================
 
 # Zertifikat (§ 20): Gewinn 5000 am 1.6.2020, SPB 1000 -> 4000 steuerpflichtig
-.er_cert <- function(...) {
+.er_cert <- function(tax = tax_profile(), ...) {
   d <- .er_days("2020-01-01", "2020-12-31")
   df <- data.frame(date = d, Z = ifelse(d < as.Date("2020-06-01"), 100, 150))
   df$cb <- d == d[1]; df$cs <- d == as.Date("2020-06-01")
-  st <- create_strategy(Z = asset_config("certificate", "signal", asset_share = 1, asset_spread = 0,
+  st <- create_strategy(Z = asset_config("certificate", "signal", share = 1, spread = 0,
                                          signal_buy = "cb", signal_sell = "cs"))
-  .er_sim(df, st, start_value = 1e4, tax_mode = "person", ...)
+  .er_sim(df, st, start_value = 1e4, tax = tax, ...)
 }
 
 test_that("R4-01: G\u00fcnstigerpr\u00fcfung vergleicht die Belastung einschliesslich Zuschlagsteuern", {
   # 24,9 % x (1 + 5,5 % + 9 %) = 28,51 % > Abgeltung mit KiSt 25 % / 1,0225 x 1,145 = 27,995 %:
   # Abgeltungsteuer bleibt (vorher 4000 x 0,285105 = 1140,42, also MEHR als ohne Pruefung)
   abg <- 4000 * 0.25 / 1.0225 * 1.145
-  r <- .er_cert(church_tax = 9, include_soli_on_income_tax = TRUE, marginal_tax_rate = 24.9, use_guenstigerpruefung = TRUE)
+  r <- .er_cert(tax = tax_profile(church_tax = 9, guenstigerpruefung = TRUE, income = income_rate(marginal_rate = 24.9, soli_rate = 5.5)))
   expect_equal(r$tax_report$total_taxes_paid, abg)
-  r0 <- .er_cert(church_tax = 9, include_soli_on_income_tax = TRUE, marginal_tax_rate = 24.9)
+  r0 <- .er_cert(tax = tax_profile(church_tax = 9, income = income_rate(marginal_rate = 24.9, soli_rate = 5.5)))
   expect_equal(r$tax_report$total_taxes_paid, r0$tax_report$total_taxes_paid)
   # 25,5 % ohne Soli/KiSt < 26,375 %: persoenlicher Satz (vorher starre 25-%-Schwelle: 1055)
-  expect_equal(.er_cert(marginal_tax_rate = 25.5, use_guenstigerpruefung = TRUE)$tax_report$total_taxes_paid, 4000 * 0.255)
-  expect_equal(.er_cert(marginal_tax_rate = 20, use_guenstigerpruefung = TRUE)$tax_report$total_taxes_paid, 4000 * 0.20)
+  expect_equal(.er_cert(tax = tax_profile(guenstigerpruefung = TRUE, income = income_rate(marginal_rate = 25.5)))$tax_report$total_taxes_paid, 4000 * 0.255)
+  expect_equal(.er_cert(tax = tax_profile(guenstigerpruefung = TRUE, income = income_rate(marginal_rate = 20)))$tax_report$total_taxes_paid, 4000 * 0.20)
   # gleicher Satz in der Verkaufsschaetzung: Umschichtung ohne Rueckkauf
   d <- .er_days("2020-01-01", "2020-12-30")
   df <- data.frame(date = d, A = .er_lin(d, c("2020-01-01", "2020-07-01", "2020-12-30"), c(100, 200, 200)), B = 50)
-  st <- create_strategy(A = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0.2),
-                        B = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0.2))
-  x <- .er_out(df, st, start_value = 1e4, tax_mode = "person", balance_mode = TRUE, balance_unit = "month", balance_span = 6,
-               marginal_tax_rate = 25.5, use_guenstigerpruefung = TRUE)
+  st <- create_strategy(A = asset_config("etf", "bnh", share = 0.5, spread = 0.2),
+                        B = asset_config("etf", "bnh", share = 0.5, spread = 0.2))
+  x <- .er_out(df, st, start_value = 1e4, rebalance = rebalance_plan(span = 6, unit = "month"), tax = tax_profile(guenstigerpruefung = TRUE, income = income_rate(marginal_rate = 25.5)))
   day <- grep("2020-07-01", x$out, value = TRUE)
   expect_false(any(grepl("\tKauf .* A zu", day)))
   expect_lt(abs(x$r$report$A$money[which(x$r$dates == as.Date("2020-07-01"))]), 0.005)
@@ -375,8 +369,8 @@ test_that("R4-02: § 20-Erstattung aus dem finalen Jahresabschluss landet im End
     df <- data.frame(date = d, X = ifelse(d < as.Date("2020-03-01"), 100, 150), Y = ifelse(d < as.Date("2020-10-01"), 100, 70),
                      G = ifelse(d < as.Date("2020-06-01"), 100, if (g_up) 125 else 100))
     df$b <- d == d[1]; df$sx <- d == as.Date("2020-03-01"); df$sy <- d == as.Date("2020-10-01"); df$sg <- d == as.Date("2020-06-01")
-    cf <- function(s, cls = "certificate") asset_config(cls, "signal", asset_share = 1 / 3, asset_spread = 0, deliverable = TRUE, signal_buy = "b", signal_sell = s)
-    .er_sim(df, create_strategy(X = cf("sx"), Y = cf("sy"), G = cf("sg", "etc")), start_value = 15000, tax_mode = "person", marginal_tax_rate = 42)
+    cf <- function(s, cls = "certificate") asset_config(cls, "signal", share = 1 / 3, spread = 0, deliverable = TRUE, signal_buy = "b", signal_sell = s)
+    .er_sim(df, create_strategy(X = cf("sx"), Y = cf("sy"), G = cf("sg", "etc")), start_value = 15000, tax = tax_profile(income = income_rate(marginal_rate = 42)))
   }
   for (end in c("2020-12-31", "2020-11-30", "2021-01-01")) {
     r <- run(end)
@@ -387,40 +381,40 @@ test_that("R4-02: § 20-Erstattung aus dem finalen Jahresabschluss landet im End
   expect_equal(tail(run("2020-12-31", TRUE)$worth, 1), 16725)
 })
 
-test_that("R4-03: deep_analysis mwrr = Engine-cagr auch in Extremfaellen", {
-  st <- create_strategy(A = asset_config("etf", "bnh", asset_share = 1, asset_spread = 0))
+test_that("R4-03: result_analysis mwrr = Engine-cagr auch in Extremfaellen", {
+  st <- create_strategy(A = asset_config("etf", "bnh", share = 1, spread = 0))
   dd <- .er_days("2020-01-01", "2023-12-31"); p <- rep(100, length(dd)); p[dd >= as.Date("2023-12-20")] <- 1e-3
-  r <- .er_sim(data.frame(date = dd, A = p), st, start_value = 1000, dca_mode = TRUE, dca_value = 100, dca_span = 1)
-  expect_equal(unname(suppressMessages(deep_analysis(r))$metrics["mwrr", 1]), r$cagr)            # vorher NA
+  r <- .er_sim(data.frame(date = dd, A = p), st, start_value = 1000, dca = dca_plan(value = 100, span = 1))
+  expect_equal(unname(suppressMessages(result_analysis(r))$metrics["mwrr", 1]), r$cagr)            # vorher NA
   dd <- .er_days("2020-01-01", "2020-03-31"); p <- 100 * 3^(seq_along(dd) / length(dd))
-  r2 <- .er_sim(data.frame(date = dd, A = p), st, start_value = 1000, dca_mode = TRUE, dca_value = 100, dca_span = 1)
+  r2 <- .er_sim(data.frame(date = dd, A = p), st, start_value = 1000, dca = dca_plan(value = 100, span = 1))
   fl <- rowSums(sapply(r2$report, function(x) x$flows)); a <- c(1000 + fl[1], fl[-1]); tau <- as.numeric(dd[length(dd)] - dd) / 365.25
   ref <- uniroot(function(x) sum(a[a != 0] * (1 + x)^tau[a != 0]) - tail(r2$worth, 1), c(0, 1e4), tol = 1e-12)$root
   expect_equal(r2$cagr, ref, tolerance = 1e-9)
-  expect_equal(unname(suppressMessages(deep_analysis(r2))$metrics["mwrr", 1]), r2$cagr, tolerance = 1e-12)   # vorher NA (> 1000 %)
+  expect_equal(unname(suppressMessages(result_analysis(r2))$metrics["mwrr", 1]), r2$cagr, tolerance = 1e-12)   # vorher NA (> 1000 %)
   # ohne Einzahlungen: CAGR wie die Engine
   r3 <- .er_sim(data.frame(date = dd, A = p), st, start_value = 1000)
-  expect_equal(unname(suppressMessages(deep_analysis(r3))$metrics["mwrr", 1]), r3$cagr, tolerance = 1e-12)
+  expect_equal(unname(suppressMessages(result_analysis(r3))$metrics["mwrr", 1]), r3$cagr, tolerance = 1e-12)
 })
 
 test_that("R4-04: cost_basis = 100, wenn das Ansparergebnis nur noch Cash haelt (liquidate)", {
   d <- .er_days("2015-01-01", "2024-12-31")
   df <- data.frame(date = d, A = 100 * 1.08^(as.numeric(d - d[1]) / 365.25))
-  st <- create_strategy(A = asset_config("etf", "bnh", asset_share = 1, asset_spread = 0))
+  st <- create_strategy(A = asset_config("etf", "bnh", share = 1, spread = 0))
   x <- matrix(1.05, nrow = 20, ncol = 1)
-  r <- .er_sim(df, st, start_value = 1e5, tax_mode = "person", base_rate = 1, liquidate = TRUE)
+  r <- .er_sim(df, st, start_value = 1e5, tax = tax_profile(base_rate = 1), liquidate = TRUE)
   expect_equal(tail(r$report$A$worth, 1), 0)
-  w_auto <- withdrawal_simulation(x, withdrawal_rule("constant", rate = 4), start_value = r, tax_mode = "person")
-  w_100 <- withdrawal_simulation(x, withdrawal_rule("constant", rate = 4), start_value = r, tax_mode = "person", cost_basis = 100)
+  w_auto <- withdrawal_simulation(x, withdrawal_rule("constant", rate = 4), start_value = r, tax = tax_profile())
+  w_100 <- withdrawal_simulation(x, withdrawal_rule("constant", rate = 4), start_value = r, tax = tax_profile(), cost_basis = 100)
   expect_equal(w_auto$paths, w_100$paths)                      # vorher Steuern 25058,86 statt 15562,26
   # mit Bestand am Ende: seit open_lots exakte Basis (Anschaffungskosten der Reststuecke nach den Verkaeufen fuer die
   # VP-Steuer plus angerechnete Vorabpauschalen)
   # statt der Naeherung 100 x (Start brutto + Einzahlungen) / Endwert; seit FIFO die Lots selbst (ein Lot = Durchschnitt)
   # und die Teilfreistellung 0 % der Ansparphase (uebernommen)
-  r2 <- .er_sim(df, st, start_value = 1e5, tax_mode = "person", base_rate = 1)
-  w_a2 <- suppressMessages(withdrawal_simulation(x, withdrawal_rule("constant", rate = 4), start_value = r2, tax_mode = "person"))
-  expect_equal(w_a2$adopted$asset_bonus, 0)
-  w_n2 <- suppressMessages(withdrawal_simulation(x, withdrawal_rule("constant", rate = 4), start_value = r2, tax_mode = "person", asset_bonus = 0,
+  r2 <- .er_sim(df, st, start_value = 1e5, tax = tax_profile(base_rate = 1))
+  w_a2 <- suppressMessages(withdrawal_simulation(x, withdrawal_rule("constant", rate = 4), start_value = r2, tax = tax_profile()))
+  expect_equal(w_a2$adopted$partial_exemption, 0)
+  w_n2 <- suppressMessages(withdrawal_simulation(x, withdrawal_rule("constant", rate = 4), start_value = r2, tax = tax_profile(), partial_exemption = 0,
                                 cost_basis = 100 * with(r2$open_lots$A, sum(lots$units * lots$price) + sum(lots$vp) + cash) /
                                   tail(r2$worth, 1)))
   expect_equal(w_a2$paths, w_n2$paths)
@@ -432,11 +426,10 @@ test_that("R4-05: negativer Endwert -> cagr/ttwror NA mit Warnung, Drawdowns <= 
   d <- .er_days("2020-01-01", "2021-06-30")
   df <- data.frame(date = d, G = ifelse(d < as.Date("2020-06-01"), 100, 150), H = ifelse(d < as.Date("2020-10-01"), 50, 1))
   df$ev <- d == as.Date("2020-07-01"); df$wG <- 0; df$wH <- 1
-  st <- create_strategy(G = asset_config("etc", "bnh", asset_share = 0.5, asset_spread = 0, deliverable = TRUE),
-                        H = asset_config("certificate", "bnh", asset_share = 0.5, asset_spread = 0))
+  st <- create_strategy(G = asset_config("etc", "bnh", share = 0.5, spread = 0, deliverable = TRUE),
+                        H = asset_config("certificate", "bnh", share = 0.5, spread = 0))
   w <- character(0)
-  r <- withCallingHandlers(suppressMessages(simulation(df, st, start_value = 1e4, tax_mode = "person", marginal_tax_rate = 42,
-         event_col = "ev", event_mode = "replace", event_weight = c(G = "wG", H = "wH"))),
+  r <- withCallingHandlers(suppressMessages(simulation(df, st, start_value = 1e4, rebalance = rebalance_plan(event_col = "ev", event_mode = "replace", skip = TRUE, event_weight = c(G = "wG", H = "wH")), tax = tax_profile(income = income_rate(marginal_rate = 42)))),
          warning = function(x) { w <<- c(w, conditionMessage(x)); invokeRestart("muffleWarning") })
   expect_equal(tail(r$worth, 1), -800)
   expect_true(is.na(r$cagr) && !is.nan(r$cagr)); expect_true(is.na(r$ttwror) && !is.nan(r$ttwror))
@@ -449,9 +442,8 @@ test_that("R4-05: negativer Endwert -> cagr/ttwror NA mit Warnung, Drawdowns <= 
 test_that("R4-06: Rebalancing verkauft nur Transfer minus vorhandenes Cash (kein Rueckkauf)", {
   d <- .er_days("2020-01-01", "2020-12-31")
   df <- data.frame(date = d, A = approx(as.numeric(range(d)), c(100, 130), xout = as.numeric(d))$y, B = 50)
-  st <- create_strategy(A = asset_config("etf", "bnh", 0.5, asset_spread = 0.2), B = asset_config("etf", "bnh", 0.5, asset_spread = 0.2))
-  x <- .er_out(df, st, start_value = 1e5, tax_mode = "person", dca_mode = TRUE, dca_value = 1000, dca_span = 1,
-               balance_mode = TRUE, balance_unit = "month", balance_span = 1)
+  st <- create_strategy(A = asset_config("etf", "bnh", 0.5, spread = 0.2), B = asset_config("etf", "bnh", 0.5, spread = 0.2))
+  x <- .er_out(df, st, start_value = 1e5, dca = dca_plan(value = 1000, span = 1), rebalance = rebalance_plan(span = 1, unit = "month"), tax = tax_profile())
   day <- grep("am 2020-03-01", x$out, value = TRUE)
   expect_false(any(grepl("\tKauf .* A zu", day)))                     # vorher Kauf 4.76x A
   n <- as.numeric(sub(".*Verkauf ([0-9.]+)x A.*", "\\1", grep("Verkauf .* A zu", day, value = TRUE)))
@@ -466,10 +458,11 @@ test_that("R4-06: Rebalancing verkauft nur Transfer minus vorhandenes Cash (kein
 
 test_that("R4-07: dca_value/dca_span m\u00fcssen einzelne endliche Zahlen sein", {
   d <- data.frame(date = .er_days("2020-01-01", as.Date("2020-01-01") + 399), A = 100)
-  st <- create_strategy(A = asset_config("etf", "bnh", asset_share = 1, asset_spread = 0))
+  st <- create_strategy(A = asset_config("etf", "bnh", share = 1, spread = 0))
   for (v in list(c(100, 200), NA_real_, "100", 0, -5, Inf, NULL))
-    expect_error(simulation(d, st, dca_mode = TRUE, dca_value = v, dca_span = 1), "'dca_value' muss bei dca_mode = TRUE eine einzelne endliche Zahl > 0 sein")
+    expect_error(dca_plan(value = v, span = 1), "dca_plan: 'value' muss eine einzelne endliche Zahl > 0 sein")
   for (v in list(c(1, 2), NA_real_, 1.5, 0, "1"))
-    expect_error(simulation(d, st, dca_mode = TRUE, dca_value = 100, dca_span = v), "'dca_span' muss bei dca_mode = TRUE eine einzelne ganze Zahl >= 1 sein")
-  expect_s3_class(.er_sim(d, st, dca_mode = TRUE, dca_value = 100, dca_span = 2), "SimLevResult")
+    expect_error(dca_plan(value = 100, span = v), "dca_plan: 'span' muss eine einzelne ganze Zahl >= 1 sein")
+  expect_error(dca_plan(100), "dca_plan: 'span' muss .* nicht NULL")
+  expect_s3_class(.er_sim(d, st, dca = dca_plan(value = 100, span = 2)), "SimLevResult")
 })

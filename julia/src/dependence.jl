@@ -4,13 +4,13 @@
 #                           Tail-Abhängigkeit, Exceedance-Korrelationen, Copula-Fits,
 #                           rollierende Korrelation, DCC(1,1), bedingte Analyse nach
 #                           Regimen von Drittvariablen mit Block-Bootstrap
-#   fit_copula()            Gauss, t, Clayton, Gumbel, Frank inkl. Rotationen
+#   copula_fit()            Gauss, t, Clayton, Gumbel, Frank inkl. Rotationen
 #   tail_dependence()       empirische Tail-Koeffizienten und Exceedance-Korrelationen
-#   dcc_fit()               DCC(1,1) nach Engle (2002)
-#   quantile_reg()          lineare Quantilsregression (exakt, mit Optimalitätsnachweis)
+#   dependence_dcc()               DCC(1,1) nach Engle (2002)
+#   quantile_regression()          lineare Quantilsregression (exakt, mit Optimalitätsnachweis)
 #   tail_regression()       Renditequantile in Abhängigkeit von Drittvariablen
-#   covar_analysis()        CoVaR / Delta-CoVaR (Adrian & Brunnermeier 2016)
-#   validate_dependence()   erhalten Bootstrap-Pfade die Abhängigkeitsstruktur?
+#   tail_covar()        CoVaR / Delta-CoVaR (Adrian & Brunnermeier 2016)
+#   dependence_validate()   erhalten Bootstrap-Pfade die Abhängigkeitsstruktur?
 #   regime_subset()         Zeilen eines Regimes für Stress-Bootstraps
 #
 # Drittvariablen gehen immer verzögert ein: Die Rendite der Periode t wird dem
@@ -26,8 +26,8 @@ using ..SimLev: _grid_bars!, _grid_lines!, _grid_scatter!, _grid_svg
 using Dates
 using Printf
 
-export fit_copula, tail_dependence, dcc_fit, dependence_analysis, quantile_reg, tail_regression,
-       covar_analysis, validate_dependence, regime_subset
+export copula_fit, tail_dependence, dependence_dcc, dependence_analysis, quantile_regression, tail_regression,
+       tail_covar, dependence_validate, regime_subset
 
 const _NA = SimLev.NA
 const RFrame = SimLev.RFrame
@@ -576,7 +576,7 @@ end
 _len(x) = x === nothing ? 0 : x isa AbstractString ? 1 : x isa Union{AbstractVector,Tuple} ? length(x) : 1
 
 """
-    fit_copula(x, y, families = nothing)
+    copula_fit(x, y, families = nothing)
 
 Copulas an zwei Reihen anpassen (Pseudo-ML auf Rängen, Auswahl per AIC).
 `families`: `"gaussian"`, `"t"`, `"clayton"`, `"gumbel"`, `"frank"`, Clayton und
@@ -585,12 +585,12 @@ nach dem Vorzeichen von Kendalls Tau. Ergebnis: `RFrame` je Familie
 (aufsteigend nach AIC) mit `family`, `par1`, `par2`, `loglik`, `aic`, `bic`,
 `lambda_lower`, `lambda_upper`; `attrs(out)["tau"]`, `attrs(out)["n"]`.
 """
-function fit_copula(x, y, families_pos = nothing; families = families_pos)
+function copula_fit(x, y, families_pos = nothing; families = families_pos)
     lx, ly = _len(x), _len(y)
-    lx != ly && error("fit_copula: x und y müssen gleich lang sein ($lx bzw. $ly Werte).")
+    lx != ly && error("copula_fit: x und y müssen gleich lang sein ($lx bzw. $ly Werte).")
     x, y = _finite_pairs(x, y)
     n = length(x)
-    n < 20 && error("fit_copula: mindestens 20 Beobachtungen nötig.")
+    n < 20 && error("copula_fit: mindestens 20 Beobachtungen nötig.")
     if families !== nothing
         families = _as_names(families)
         bad = String[]
@@ -602,12 +602,12 @@ function fit_copula(x, y, families_pos = nothing; families = families_pos)
                 push!(bad, f)
             end
         end
-        isempty(bad) || error("fit_copula: unbekannte Familie $(join(["'$b'" for b in bad], ", ")); erlaubt sind gaussian, t, " *
+        isempty(bad) || error("copula_fit: unbekannte Familie $(join(["'$b'" for b in bad], ", ")); erlaubt sind gaussian, t, " *
                               "frank sowie clayton und gumbel mit optionaler Rotation _90, _180 oder _270.")
     end
     u = _pobs(x); v = _pobs(y)
     tau = _kendall(x, y)
-    isfinite(tau) || error("fit_copula: x oder y ist konstant (keine Rangstreuung); keine Copula schätzbar.")
+    isfinite(tau) || error("copula_fit: x oder y ist konstant (keine Rangstreuung); keine Copula schätzbar.")
     if families === nothing
         families = tau >= 0 ? ["gaussian", "t", "clayton", "gumbel", "frank", "clayton_180", "gumbel_180"] :
                               ["gaussian", "t", "frank", "clayton_90", "clayton_270", "gumbel_90", "gumbel_270"]
@@ -689,20 +689,20 @@ end
 # ═════════════════════════════════════════════════════════════════════════════
 
 """
-    dcc_fit(R)
+    dependence_dcc(R)
 
 DCC(1,1) (Engle 2002) für eine Renditematrix (mindestens zwei Spalten, 100
 Zeilen). Ergebnis: RList `a`, `b`, `loglik`, `correlation` (Zeit × Paare),
 `pairs`, `garch`, `z`, `Qbar`.
 """
-function dcc_fit(R)
+function dependence_dcc(R)
     Rm, nm = _as_matrix(R)
-    (size(Rm, 2) < 2 || size(Rm, 1) < 100) && error("dcc_fit: mindestens zwei Reihen und 100 Beobachtungen.")
+    (size(Rm, 2) < 2 || size(Rm, 1) < 100) && error("dependence_dcc: mindestens zwei Reihen und 100 Beobachtungen.")
     nm === nothing && (nm = ["V$j" for j in 1:size(Rm, 2)])
     g = [SimLev.Bootstrap._fit_garch11(Rm[:, j]; quiet = true) for j in 1:size(Rm, 2)]
     Z = reduce(hcat, [_fvec(_el(gi, "z")) for gi in g])
     flat = [nm[j] for j in 1:size(Z, 2) if SimLev.r_sd(Z[:, j]) == 0]
-    isempty(flat) || error("dcc_fit: Reihe $(join(["'$f'" for f in flat], ", ")) ist konstant; keine Korrelation schätzbar.")
+    isempty(flat) || error("dependence_dcc: Reihe $(join(["'$f'" for f in flat], ", ")) ist konstant; keine Korrelation schätzbar.")
     Qb = _cormat(Z)
     ev = _fvec(_el(_flex(SimLev.RLinalg.eigen, (Qb,), NamedTuple(), (symmetric = true, only_values = true)), "values"))
     if _rmin(ev) < 1e-8
@@ -714,7 +714,7 @@ function dcc_fit(R)
         mx = _rmax(ab)
         ci = CartesianIndices(ab)[findfirst(==(mx), vec(ab))]
         i0, j0 = ci[1], ci[2]
-        error("dcc_fit: Korrelationsmatrix der standardisierten Residuen ist singulär (z. B. '$(nm[i0])' und '$(nm[j0])': " *
+        error("dependence_dcc: Korrelationsmatrix der standardisierten Residuen ist singulär (z. B. '$(nm[i0])' und '$(nm[j0])': " *
               "Korrelation $(_sprintf("%.6f", Qb[i0, j0]))); DCC nicht schätzbar. Doppelte bzw. linear abhängige Reihen entfernen.")
     end
     par(th) = (s = 0.999 * _plogis(th[1]); a = s * _plogis(th[2]); (a, s - a))
@@ -723,7 +723,7 @@ function dcc_fit(R)
     opar, oval = _optim_nm(st, f, 2000, 1e-10)
     a, b = par(opar)
     fl = SimLev.DependenceCore.dcc_filter(Z, a, b, Qb, true)
-    fl["ok"] === true || error("dcc_fit: bedingte Korrelationsmatrix nicht positiv definit; DCC nicht schätzbar.")
+    fl["ok"] === true || error("dependence_dcc: bedingte Korrelationsmatrix nicht positiv definit; DCC nicht schätzbar.")
     pn = ["$(nm[i]) ~ $(nm[j])" for (i, j) in _combn2(length(nm))]
     C = NamedMat(fl["R"]; colnames = pn)
     garch = RFrame("series" => nm, "alpha" => Float64[_el(gi, "alpha") for gi in g],
@@ -880,7 +880,7 @@ function dependence_analysis(data, assets; conditions = nothing, frequency = ("w
     if copulas
         cops = RList()
         for (k, (i, j)) in enumerate(pidx)
-            cops[pn[k]] = fit_copula(X[:, i], X[:, j])
+            cops[pn[k]] = copula_fit(X[:, i], X[:, j])
         end
     end
     ptab = RFrame("pair" => pn, "pearson" => [pear[i, j] for (i, j) in pidx], "spearman" => [spear[i, j] for (i, j) in pidx],
@@ -910,7 +910,7 @@ function dependence_analysis(data, assets; conditions = nothing, frequency = ("w
     dc = nothing
     if dcc && n >= 100
         dc = try
-            dcc_fit(NamedMat(X; colnames = assets))
+            dependence_dcc(NamedMat(X; colnames = assets))
         catch e
             e isa InterruptException && rethrow()
             message("DCC nicht geschätzt: " * _errmsg(e))
@@ -955,7 +955,7 @@ function dependence_analysis(data, assets; conditions = nothing, frequency = ("w
                 tc = nothing
                 if copulas && length(s) >= 40
                     tc = try
-                        fit_copula(x, y, fams)
+                        copula_fit(x, y, fams)
                     catch e
                         e isa InterruptException && rethrow()
                         nothing
@@ -1143,31 +1143,31 @@ _is_numcol(c) = eltype(c) <: Union{Missing,Real} && !(eltype(c) <: Union{Missing
 _is_numeric(x) = x isa Real && !(x isa Bool) || (x isa AbstractArray && _is_numcol(x isa NamedMat ? x.data : vec(x)))
 
 """
-    quantile_reg(y, X = nothing, tau = 0.5; intercept = true, tol = 1e-10, maxit = 2000)
+    quantile_regression(y, X = nothing, tau = 0.5; intercept = true, tol = 1e-10, maxit = 2000)
 
 Lineare Quantilsregression (exakte Lösung mit Optimalitätsnachweis). `X`:
 Vektor, Matrix, `NamedMat` oder `RFrame` (ohne Konstante); `nothing` = nur
 Konstante. Ergebnis: benannter Vektor der Koeffizienten.
 """
-function quantile_reg(y, X_pos = nothing, tau_pos = 0.5; X = X_pos, tau = tau_pos, intercept::Bool = true, tol = 1e-10, maxit = 2000)
+function quantile_regression(y, X_pos = nothing, tau_pos = 0.5; X = X_pos, tau = tau_pos, intercept::Bool = true, tol = 1e-10, maxit = 2000)
     tv = tau isa AbstractVector || tau isa Tuple ? collect(tau) : [tau]
     if length(tv) != 1 || !(tv[1] isa Real) || tv[1] isa Bool || !isfinite(Float64(tv[1])) || tv[1] <= 0 || tv[1] >= 1
-        error("quantile_reg: tau muss eine Zahl echt zwischen 0 und 1 sein (erhalten: $(_fmt1(tau))).")
+        error("quantile_regression: tau muss eine Zahl echt zwischen 0 und 1 sein (erhalten: $(_fmt1(tau))).")
     end
     tau = Float64(tv[1])
-    _is_numeric(y isa RVector ? y.values : y) || error("quantile_reg: y muss numerisch sein.")
+    _is_numeric(y isa RVector ? y.values : y) || error("quantile_regression: y muss numerisch sein.")
     y = _fvec(y)
     if X isa RFrame
         nn = [k for k in names(X) if !_is_numcol(X[k])]
-        isempty(nn) || error("quantile_reg: Spalte(n) $(join(["'$c'" for c in nn], ", ")) von X nicht numerisch " *
+        isempty(nn) || error("quantile_regression: Spalte(n) $(join(["'$c'" for c in nn], ", ")) von X nicht numerisch " *
                              "(Faktoren vorher z. B. mit model.matrix() in Indikatorspalten umwandeln).")
     end
     if X === nothing
         Xm = zeros(length(y), 0); nm = String[]
     else
-        X isa RFrame || _is_numeric(X) || error("quantile_reg: X muss numerisch sein.")
+        X isa RFrame || _is_numeric(X) || error("quantile_regression: X muss numerisch sein.")
         Xm, nm = _as_matrix(X)
-        size(Xm, 1) != length(y) && error("quantile_reg: X hat $(size(Xm, 1)) Zeilen, y aber $(length(y)) Werte.")
+        size(Xm, 1) != length(y) && error("quantile_regression: X hat $(size(Xm, 1)) Zeilen, y aber $(length(y)) Werte.")
         nm === nothing && (nm = ["x$j" for j in 1:size(Xm, 2)])
     end
     if intercept
@@ -1177,18 +1177,18 @@ function quantile_reg(y, X_pos = nothing, tau_pos = 0.5; X = X_pos, tau = tau_po
     ok = [isfinite(y[i]) && all(isfinite, view(Xm, i, :)) for i in eachindex(y)]
     y = y[ok]; Xm = Xm[ok, :]
     p = size(Xm, 2)
-    p == 0 && error("quantile_reg: keine Regressoren (X = NULL und intercept = FALSE).")
-    length(y) < p && error("quantile_reg: $(length(y)) vollständige Beobachtungen für $p Koeffizienten.")
+    p == 0 && error("quantile_regression: keine Regressoren (X = NULL und intercept = FALSE).")
+    length(y) < p && error("quantile_regression: $(length(y)) vollständige Beobachtungen für $p Koeffizienten.")
     qx, rank, piv = _qr_rank_pivot_coef(Xm, y)
     if rank < p
         bad = [nm[k] for k in piv[(rank+1):p]]
-        error("quantile_reg: Regressoren linear abhängig ($(join(["'$b'" for b in bad], ", "))); doppelte oder konstante " *
+        error("quantile_regression: Regressoren linear abhängig ($(join(["'$b'" for b in bad], ", "))); doppelte oder konstante " *
               "Spalten entfernen (die Konstante ist bei intercept = TRUE schon enthalten).")
     end
     beta = _qr_coef(qx, y)
     sc = _rmax(SimLev.r_sd(y), 1e-12)
     beta, opt = SimLev.DependenceCore.quantile_reg_core(y, Xm, tau, beta, sc, Float64(tol), Int(maxit))
-    opt === true || @warn "quantile_reg: Optimalität nicht nachgewiesen; Ergebnis ist eine Ecke mit nicht größerem " *
+    opt === true || @warn "quantile_regression: Optimalität nicht nachgewiesen; Ergebnis ist eine Ecke mit nicht größerem " *
                           "Zielwert als die MM-Näherung (bzw. die MM-Näherung selbst, falls keine solche Ecke gefunden wurde)."
     RVector(beta; names = nm)
 end
@@ -1221,7 +1221,7 @@ function tail_regression(data, asset, drivers; quantiles = [0.05, 0.25, 0.5, 0.7
     n < 30 && error("tail_regression: zu wenige Perioden.")
     p = size(X, 2) + 1
     XN = NamedMat(X; colnames = drivers)
-    est = reduce(hcat, [_fvec(quantile_reg(y, XN, q)) for q in quantiles])
+    est = reduce(hcat, [_fvec(quantile_regression(y, XN, q)) for q in quantiles])
     est = reshape(est, p, length(quantiles))
     X1 = hcat(ones(n), X)
     terms = vcat(["(Intercept)"], drivers)
@@ -1296,11 +1296,11 @@ function _print_tail_regression(io::IO, x)
 end
 
 """
-    covar_analysis(data, system, assets; state = nothing, q = 0.05, frequency = "week")
+    tail_covar(data, system, assets; state = nothing, q = 0.05, frequency = "week")
 
 CoVaR und Delta-CoVaR (Adrian & Brunnermeier 2016), Klasse `SimLevCoVaR`.
 """
-function covar_analysis(data, system, assets; state = nothing, q = 0.05, frequency = ("week", "day", "month"))
+function tail_covar(data, system, assets; state = nothing, q = 0.05, frequency = ("week", "day", "month"))
     data = SimLev.as_rframe(data)
     frequency = _match_arg(frequency, ("week", "day", "month"))
     system = String(system)
@@ -1317,11 +1317,11 @@ function covar_analysis(data, system, assets; state = nothing, q = 0.05, frequen
     summ = RFrame[]; series = RFrame[]
     for a in assets
         xi = 100 .* _fvec(rd[a])
-        bq = _fvec(quantile_reg(xi, MN, q)); bm = _fvec(quantile_reg(xi, MN, 0.5))
+        bq = _fvec(quantile_regression(xi, MN, q)); bm = _fvec(quantile_regression(xi, MN, 0.5))
         Mi = M === nothing ? ones(nr, 1) : hcat(ones(nr), M)
         var_q = _matvec(Mi, bq); var_m = _matvec(Mi, bm)
         Xs = M === nothing ? NamedMat(reshape(xi, :, 1); colnames = ["xi"]) : NamedMat(hcat(xi, M); colnames = vcat(["xi"], state))
-        bs = _fvec(quantile_reg(ys, Xs, q))
+        bs = _fvec(quantile_regression(ys, Xs, q))
         covar = M !== nothing ? (bs[1] .+ bs[2] .* var_q) .+ _matvec(M, bs[3:end]) : (bs[1] .+ bs[2] .* var_q) .+ 0.0
         dcv = bs[2] .* (var_q .- var_m)
         push!(summ, RFrame("asset" => [a], "beta" => [bs[2]], "var" => [SimLev.r_mean(var_q)], "covar" => [SimLev.r_mean(covar)],
@@ -1380,18 +1380,18 @@ function _path_matrix(pth, idx_names)
 end
 
 """
-    validate_dependence(boot, data; agg = 5, q = 0.10, max_paths = 200)
+    dependence_validate(boot, data; agg = 5, q = 0.10, max_paths = 200)
 
 Abhängigkeitsstruktur von Bootstrap-Pfaden (`bootstrap_result`) mit der
 Historie vergleichen; `RFrame` mit `pair`, `metric`, `historical`, `median`,
 `p05`, `p95`, `percentile`.
 """
-function validate_dependence(boot, data; agg = 5, q = 0.10, max_paths = 200)
+function dependence_validate(boot, data; agg = 5, q = 0.10, max_paths = 200)
     data = SimLev.as_rframe(data)
     SimLev.inherits(boot, "bootstrap_result") || error("boot muss ein bootstrap_result sein.")
     cfg = boot["config"]
     idx_names = _as_names(_el(cfg, "index_names"))
-    length(idx_names) < 2 && error("validate_dependence: mindestens zwei Indizes in der Konfiguration.")
+    length(idx_names) < 2 && error("dependence_validate: mindestens zwei Indizes in der Konfiguration.")
     ret = _fmat(_el(SimLev.Bootstrap._extract_returns(data, cfg), "ret"))
     hist = SimLev.RLibm.log.(ret)
     agg = Int(agg)

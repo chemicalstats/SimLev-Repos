@@ -5,11 +5,11 @@
   minimaler CVaR/CDaR, inverse Volatilität, Gleichgewichtung; Box-Grenzen,
   Kovarianzschätzer (Stichprobe, Ledoit-Wolf, EWMA, Rauschfilter, Gerber),
   Resampling (Michaud)
-- :func:`efficient_frontier`    Effizienzgrenze unter denselben Grenzen
-- :func:`rolling_optimization`  Optimierung in rollierenden Fenstern -> Zielgewichte
+- :func:`portfolio_frontier`    Effizienzgrenze unter denselben Grenzen
+- :func:`portfolio_rolling`  Optimierung in rollierenden Fenstern -> Zielgewichte
   für :func:`simlev.tactical_simulation`
-- :func:`risk_contributions`    Euler-Zerlegung von Volatilität bzw. CVaR
-- :func:`cpcv_portfolio`        kombinatorische Kreuzvalidierung (CPCV)
+- :func:`portfolio_risk_contributions`    Euler-Zerlegung von Volatilität bzw. CVaR
+- :func:`portfolio_cpcv`        kombinatorische Kreuzvalidierung (CPCV)
 
 Löser ohne Zusatzpakete (Kerne in :mod:`simlev._optimize_core`): FISTA auf dem
 beschränkten Simplex, gedämpftes Newton-Verfahren für die Risikoparität,
@@ -37,8 +37,8 @@ from .tactical import (
 )
 from .svg import _alloc_c, _alloc_ticks, _esc, _jl_max, _jl_min, _jl_str
 
-__all__ = ["portfolio_optimize", "efficient_frontier", "rolling_optimization", "risk_contributions",
-           "cpcv_portfolio", "SimLevOptimization", "SimLevFrontier", "SimLevCPCV", "SimLevBoundsPercent",
+__all__ = ["portfolio_optimize", "portfolio_frontier", "portfolio_rolling", "portfolio_risk_contributions",
+           "portfolio_cpcv", "SimLevOptimization", "SimLevFrontier", "SimLevCPCV", "SimLevBoundsPercent",
            "print_SimLevOptimization", "print_SimLevFrontier", "print_SimLevCPCV",
            "plot_SimLevOptimization", "plot_SimLevFrontier"]
 
@@ -166,7 +166,7 @@ def _sprintf(fmt, *args):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class _OptReturns(dict):
-    """Interne Renditen mit ppy (R-Klasse ``SimLevOptReturns``, cpcv_portfolio)."""
+    """Interne Renditen mit ppy (R-Klasse ``SimLevOptReturns``, portfolio_cpcv)."""
 
 
 def _is_numeric_col(s):
@@ -684,7 +684,7 @@ class SimLevOptimization(RList):
     # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
 
-def portfolio_optimize(x, assets=None, method=_METHODS, lower=0, upper=1, cov=_COVS, mu=None, risk_free=0,
+def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov=_COVS, mu=None, risk_free=0,
                        risk_aversion=4, budget=None, alpha=0.05, frequency=_FREQS, resample=0, block=None, seed=None):
     """Portfolio optimieren (Long-only, Summe 1, optionale Grenzen je Anlage).
 
@@ -880,11 +880,11 @@ def plot_SimLevOptimization(x, width=700, height=420):  # noqa: N802 - R-Name
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# efficient_frontier
+# portfolio_frontier
 # ═══════════════════════════════════════════════════════════════════════════
 
 class SimLevFrontier(RList):
-    """Ergebnis von :func:`efficient_frontier` (R-Klasse ``SimLevFrontier``)."""
+    """Ergebnis von :func:`portfolio_frontier` (R-Klasse ``SimLevFrontier``)."""
 
     r_class = ("SimLevFrontier",)
 
@@ -898,7 +898,7 @@ def _dup_key(v):
     return tuple(("NaN" if _fmt._is_rnan(z) else "NA") if math.isnan(z) else (0.0 if z == 0 else z) for z in v)
 
 
-def efficient_frontier(x, assets=None, n=40, lower=0, upper=1, cov=_COVS, risk_free=0, frequency=_FREQS):
+def portfolio_frontier(x, *, assets=None, n=40, lower=0, upper=1, cov=_COVS, risk_free=0, frequency=_FREQS):
     """Effizienzgrenze: für ``n`` Risikoaversionen von 1e4 bis 0.02 (logarithmisch)
     ``max mu'w - gamma/2 w'Sigma w`` unter denselben Grenzen wie :func:`portfolio_optimize`.
 
@@ -1033,14 +1033,14 @@ def plot_SimLevFrontier(x, width=700, height=480):  # noqa: N802 - R-Name
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# rolling_optimization
+# portfolio_rolling
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _err_text(e):
     return str(e.args[0]) if getattr(e, "args", None) and isinstance(e.args[0], str) else str(e)
 
 
-def rolling_optimization(x, assets, method="min_variance", window=3, every=("month", "quarter", "year"),
+def portfolio_rolling(data, assets, *, method="min_variance", window=3, every=("month", "quarter", "year"),
                          frequency=_FREQS, **kwargs):
     """Rollierende Optimierung (Zielgewichte außerhalb der Stichprobe).
 
@@ -1056,28 +1056,28 @@ def rolling_optimization(x, assets, method="min_variance", window=3, every=("mon
     frequency = _match_arg(frequency, _FREQS)
     if not isinstance(method, str) or method not in _METHODS:
         mv = [method] if isinstance(method, str) or np.ndim(method) == 0 else list(method)
-        raise ValueError("rolling_optimization: unbekanntes Verfahren %s; erlaubt: %s."
+        raise ValueError("portfolio_rolling: unbekanntes Verfahren %s; erlaubt: %s."
                          % (", ".join("'%s'" % m for m in mv), ", ".join(_METHODS)))
     dots = dict(kwargs)
     allowed = [a for a in _PO_FORMALS if a not in ("x", "assets", "method", "frequency")]
     bad = [k for k in dots if k not in allowed]
     if bad:
-        raise ValueError("rolling_optimization: unbekannte bzw. unbenannte Argumente für portfolio_optimize() in "
+        raise ValueError("portfolio_rolling: unbekannte bzw. unbenannte Argumente für portfolio_optimize() in "
                          "...: %s." % ", ".join("'%s'" % b for b in _unique(bad)))
-    if not isinstance(x, pd.DataFrame) or "date" not in [str(c) for c in x.columns]:
-        raise ValueError("rolling_optimization: data.frame mit Spalte 'date' erwartet.")
+    if not isinstance(data, pd.DataFrame) or "date" not in [str(c) for c in data.columns]:
+        raise ValueError("portfolio_rolling: data.frame mit Spalte 'date' erwartet.")
     assets = [assets] if isinstance(assets, str) else [str(a) for a in assets]
-    miss = _setdiff(assets, [str(c) for c in x.columns])
+    miss = _setdiff(assets, [str(c) for c in data.columns])
     if miss:
         raise ValueError("Spalten fehlen: %s" % ", ".join(miss))
     _opt_check_bounds(0 if dots.get("lower") is None else dots["lower"],
                       1 if dots.get("upper") is None else dots["upper"], assets)
-    _opt_check_alpha(0.05 if dots.get("alpha") is None else dots["alpha"], "rolling_optimization")
+    _opt_check_alpha(0.05 if dots.get("alpha") is None else dots["alpha"], "portfolio_rolling")
     if dots.get("mu") is not None:
         _opt_bounds(dots["mu"], assets, _NA, "mu")
     from .dependence import _dep_sort_dates
-    x = _dep_sort_dates(x, "x").reset_index(drop=True)
-    d = _days(np.asarray(x["date"]))
+    data = _dep_sort_dates(data, "data").reset_index(drop=True)
+    d = _days(np.asarray(data["date"]))
     n = len(d)
     N = len(assets)
     rows = _period_last(d, every)
@@ -1092,12 +1092,12 @@ def rolling_optimization(x, assets, method="min_variance", window=3, every=("mon
     for k, i1 in enumerate(rows):
         di = d[i1 - 1]
         sel = (d > di - wd) & (d <= di)
-        sub = x.loc[sel, sub_cols].reset_index(drop=True)
+        sub = data.loc[sel, sub_cols].reset_index(drop=True)
         w = None
         try:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=SimLevBoundsPercent)
-                w = portfolio_optimize(sub, assets, method=method, frequency=frequency, **dots)["weights"]
+                w = portfolio_optimize(sub, assets=assets, method=method, frequency=frequency, **dots)["weights"]
             w = np.asarray(w, dtype=np.float64)
         except Exception as e:  # noqa: BLE001 - wie tryCatch(error = ...)
             msg[k] = _err_text(e)
@@ -1110,7 +1110,7 @@ def rolling_optimization(x, assets, method="min_variance", window=3, every=("mon
     failed = [k for k in range(len(rows)) if msg[k]]
     if failed:
         f0 = failed[0]
-        _warn("rolling_optimization: Optimierung an %d von %d Terminen fehlgeschlagen (erster am %s: %s); dort "
+        _warn("portfolio_rolling: Optimierung an %d von %d Terminen fehlgeschlagen (erster am %s: %s); dort "
               "Gleichgewichtung. Termine im Attribut 'failed_dates'."
               % (len(failed), len(rows), _fmt.format(_as_dates([d[rows[f0] - 1]]))[0], msg[f0]))
     H = _hold_rows_m(n, rows, M)
@@ -1122,10 +1122,10 @@ def rolling_optimization(x, assets, method="min_variance", window=3, every=("mon
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# risk_contributions
+# portfolio_risk_contributions
 # ═══════════════════════════════════════════════════════════════════════════
 
-def risk_contributions(x, weights, measure=("volatility", "cvar"), alpha=0.05, frequency=_FREQS, cov=_COVS):
+def portfolio_risk_contributions(x, weights, *, measure=("volatility", "cvar"), alpha=0.05, frequency=_FREQS, cov=_COVS):
     """Risikobeiträge (Euler-Zerlegung) von Volatilität oder historischem CVaR.
 
     Returns:
@@ -1136,7 +1136,7 @@ def risk_contributions(x, weights, measure=("volatility", "cvar"), alpha=0.05, f
     measure = _match_arg(measure, ("volatility", "cvar"))
     frequency = _match_arg(frequency, _FREQS)
     cov = _match_arg(cov, _COVS)
-    _opt_check_alpha(alpha, "risk_contributions")
+    _opt_check_alpha(alpha, "portfolio_risk_contributions")
     if isinstance(weights, SimLevOptimization):
         weights = weights["weights"]
     names, vals, isnum = _named_vec(weights)
@@ -1184,11 +1184,11 @@ def risk_contributions(x, weights, measure=("volatility", "cvar"), alpha=0.05, f
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# cpcv_portfolio
+# portfolio_cpcv
 # ═══════════════════════════════════════════════════════════════════════════
 
 class SimLevCPCV(RList):
-    """Ergebnis von :func:`cpcv_portfolio` (R-Klasse ``SimLevCPCV``)."""
+    """Ergebnis von :func:`portfolio_cpcv` (R-Klasse ``SimLevCPCV``)."""
 
     r_class = ("SimLevCPCV",)
 
@@ -1204,7 +1204,7 @@ def _int1_ok(v, lo):
     return (math.isfinite(f) and f == float(_fmt.r_round(f)) and f >= lo), vals, isnum
 
 
-def cpcv_portfolio(x, assets=None, methods=("equal", "inverse_vol", "min_variance", "risk_parity", "max_sharpe"),
+def portfolio_cpcv(x, *, assets=None, methods=("equal", "inverse_vol", "min_variance", "risk_parity", "max_sharpe"),
                    n_groups=6, test_groups=2, purge=2, embargo=2, frequency=_FREQS):
     """Kombinatorische Kreuzvalidierung von Optimierungsverfahren (CPCV, Lopez de Prado 2018).
 
@@ -1229,7 +1229,7 @@ def cpcv_portfolio(x, assets=None, methods=("equal", "inverse_vol", "min_varianc
                       (embargo, "embargo", 0)):
         ok, vals, isnum = _int1_ok(v, lo)
         if not ok:
-            raise ValueError("cpcv_portfolio: %s muss eine ganze Zahl >= %d sein (erhalten: %s)."
+            raise ValueError("portfolio_cpcv: %s muss eine ganze Zahl >= %d sein (erhalten: %s)."
                              % (nm, lo, ", ".join(_fmt_vals(vals, isnum))))
     n_groups_v, test_groups_v = n_groups, test_groups
     ng = int(n_groups)
@@ -1237,7 +1237,7 @@ def cpcv_portfolio(x, assets=None, methods=("equal", "inverse_vol", "min_varianc
     purge = int(purge)
     embargo = int(embargo)
     if tg >= ng:
-        raise ValueError("cpcv_portfolio: test_groups (%d) muss kleiner als n_groups (%d) sein, sonst bleibt keine "
+        raise ValueError("portfolio_cpcv: test_groups (%d) muss kleiner als n_groups (%d) sein, sonst bleibt keine "
                          "Trainingsgruppe." % (tg, ng))
     if isinstance(methods, str):
         methods = [methods]
@@ -1246,16 +1246,16 @@ def cpcv_portfolio(x, assets=None, methods=("equal", "inverse_vol", "min_varianc
     elif isinstance(methods, Mapping) and len(methods) and all(str(k) != "" for k in methods.keys()):
         specs = {str(k): v for k, v in methods.items()}
     else:
-        raise ValueError("cpcv_portfolio: methods muss ein Zeichenvektor oder eine benannte Liste von Argumentlisten sein.")
+        raise ValueError("portfolio_cpcv: methods muss ein Zeichenvektor oder eine benannte Liste von Argumentlisten sein.")
     allowed_args = [a for a in _PO_FORMALS if a not in ("x", "assets", "frequency")]
     for nm, sp in specs.items():
         if not isinstance(sp, Mapping) or any(str(k) == "" for k in sp.keys()):
-            raise ValueError("cpcv_portfolio: Eintrag '%s' von methods muss eine benannte Argumentliste sein." % nm)
+            raise ValueError("portfolio_cpcv: Eintrag '%s' von methods muss eine benannte Argumentliste sein." % nm)
         if sp.get("method") is not None and sp["method"] not in _METHODS:
-            raise ValueError("cpcv_portfolio: unbekanntes Verfahren '%s'; erlaubt: %s." % (sp["method"], ", ".join(_METHODS)))
+            raise ValueError("portfolio_cpcv: unbekanntes Verfahren '%s'; erlaubt: %s." % (sp["method"], ", ".join(_METHODS)))
         bad = [k for k in sp.keys() if k not in allowed_args]
         if bad:
-            raise ValueError("cpcv_portfolio: unbekannte Argumente für portfolio_optimize() in '%s': %s."
+            raise ValueError("portfolio_cpcv: unbekannte Argumente für portfolio_optimize() in '%s': %s."
                              % (nm, ", ".join("'%s'" % b for b in _unique(bad))))
     grp = np.asarray(_st().cut(np.arange(1, Tn + 1), ng, labels=False), dtype=np.float64)
     combos = list(itertools.combinations(range(1, ng + 1), tg))
@@ -1308,10 +1308,10 @@ def cpcv_portfolio(x, assets=None, methods=("equal", "inverse_vol", "min_varianc
                          "sharpe": shr, "cdar": _cdar_hist(r, 0.05)})
     fl = pd.DataFrame(fails, columns=["method", "split", "message"]) if fails else None
     if not rows:
-        raise ValueError("cpcv_portfolio: keine Optimierung erfolgreich (z. B. '%s' in Aufteilung %d: %s)."
+        raise ValueError("portfolio_cpcv: keine Optimierung erfolgreich (z. B. '%s' in Aufteilung %d: %s)."
                          % (fl["method"].iloc[0], int(fl["split"].iloc[0]), fl["message"].iloc[0]))
     if fl is not None:
-        _warn("cpcv_portfolio: %d von %d Optimierungen fehlgeschlagen (z. B. '%s' in Aufteilung %d: %s); sie fehlen in der "
+        _warn("portfolio_cpcv: %d von %d Optimierungen fehlgeschlagen (z. B. '%s' in Aufteilung %d: %s); sie fehlen in der "
               "Auswertung, Einzelheiten in $failed." % (len(fl), len(combos) * len(specs), fl["method"].iloc[0],
                                                         int(fl["split"].iloc[0]), fl["message"].iloc[0]))
     sp = pd.DataFrame(rows, columns=["method", "split", "return", "volatility", "sharpe", "cdar"])

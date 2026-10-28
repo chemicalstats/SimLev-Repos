@@ -10,6 +10,7 @@ from simlev import asset_config, create_strategy
 from simlev.engine import xirr_rate
 
 from _helpers import days, flag, idx, sim, sim_out, step
+from simlev import dca_plan, funds_costs, income_rate, rebalance_plan, sim_costs, tax_profile  # Bausteine (Etappe 6.3)
 
 approx = pytest.approx
 
@@ -22,9 +23,9 @@ def test_a1_vp_kauf_im_jahr():
         d = pd.DataFrame({"date": dd, "A": step(dd, ["2021-01-01", "2021-04-15", "2021-12-31"], [100, 120, p_end])})
         d["b"] = flag(dd, "2021-04-15")
         d["s"] = False
-        st = create_strategy(A=asset_config("etf", "signal", asset_share=1, asset_spread=0, signal_buy="b",
+        st = create_strategy(A=asset_config(asset_class="etf", trading="signal", share=1, spread=0, signal_buy="b",
                                             signal_sell="s"))
-        return sim(d, st, tax_mode="person", base_rate=2.5, use_sparer_pauschbetrag=False, fractions=False)
+        return sim(d, st, tax=tax_profile(sparer_pauschbetrag=0, base_rate=2.5), fractions=False)
     r = run(110)
     assert r.tax_report["total_taxes_paid"] == approx(83 * 1.75 * 0.75 * 0.26375, rel=1e-10)
     i = idx(r, "2021-12-31")
@@ -43,9 +44,8 @@ def test_a2_basiszins_erster_handelstag():
     br = np.where(dd < pd.Timestamp("2021-01-01"), 9.0,
                   np.where(dd == pd.Timestamp("2021-12-31"), 0.5, np.where(dd > pd.Timestamp("2021-12-31"), 1.0, 2.5)))
     d = pd.DataFrame({"date": dd, "A": a, "br": br})
-    st = create_strategy(A=asset_config("etf", asset_share=1, asset_spread=0))
-    r = sim(d, st, start_value=10050, tax_mode="person", base_rate_flex=True, base_rate_data="br",
-            use_sparer_pauschbetrag=False, fractions=False)
+    st = create_strategy(A=asset_config(asset_class="etf", share=1, spread=0))
+    r = sim(d, st, start_value=10050, tax=tax_profile(sparer_pauschbetrag=0, base_rate="br"), fractions=False)
     assert r.tax_report["total_taxes_paid"] == approx(175 * 0.26375, rel=1e-10)
 
 
@@ -57,10 +57,10 @@ def _a3(to, use_spb=True, base_rate=2, details=False):
                       "C": step(dd, ["2021-01-01", "2021-06-01"], [100, 130])})
     d["b"] = flag(dd, ["2021-01-01", "2022-01-01"])
     d["s"] = flag(dd, "2021-06-01")
-    st = create_strategy(E=asset_config("etf", asset_share=0.5, asset_spread=0),
-                         C=asset_config("certificate", "signal", asset_share=0.5, asset_spread=0, signal_buy="b",
+    st = create_strategy(E=asset_config(asset_class="etf", share=0.5, spread=0),
+                         C=asset_config(asset_class="certificate", trading="signal", share=0.5, spread=0, signal_buy="b",
                                         signal_sell="s"))
-    kw = dict(start_value=10100, tax_mode="person", base_rate=base_rate, use_sparer_pauschbetrag=use_spb,
+    kw = dict(start_value=10100, tax=tax_profile(base_rate=base_rate, sparer_pauschbetrag=1000 if use_spb else 0),
               fractions=False)
     return sim_out(d, st, **kw) if details else sim(d, st, **kw)
 
@@ -91,11 +91,11 @@ def test_a4_verlust_nach_pauschbetrag():
     d["b"] = flag(dd, "2021-01-01")
     d["sx"] = flag(dd, "2021-03-01")
     d["sy"] = flag(dd, "2021-06-01")
-    st = create_strategy(X=asset_config("certificate", "signal", asset_share=0.5, asset_spread=0, signal_buy="b",
+    st = create_strategy(X=asset_config(asset_class="certificate", trading="signal", share=0.5, spread=0, signal_buy="b",
                                         signal_sell="sx"),
-                         Y=asset_config("certificate", "signal", asset_share=0.5, asset_spread=0, signal_buy="b",
+                         Y=asset_config(asset_class="certificate", trading="signal", share=0.5, spread=0, signal_buy="b",
                                         signal_sell="sy"))
-    r = sim(d, st, tax_mode="person")
+    r = sim(d, st, tax=tax_profile())
     assert r.tax_report["total_taxes_paid"] == approx(0, abs=1e-9)
     assert r.tax_report["sparer_pauschbetrag_used"] == approx(532.97, abs=1e-9)
     assert r.tax_report["loss_carryforward_capital"] == approx(0, abs=1e-9)
@@ -108,8 +108,8 @@ def test_a4_verlust_nach_pauschbetrag():
         d[c] = flag(dd, at)
 
     def cf(s):
-        return asset_config("certificate", "signal", asset_share=1 / 3, asset_spread=0, signal_buy="b", signal_sell=s)
-    r = sim(d, create_strategy(X=cf("sx"), Y=cf("sy"), Z=cf("sz")), start_value=15000, tax_mode="person")
+        return asset_config(asset_class="certificate", trading="signal", share=1 / 3, spread=0, signal_buy="b", signal_sell=s)
+    r = sim(d, create_strategy(X=cf("sx"), Y=cf("sy"), Z=cf("sz")), start_value=15000, tax=tax_profile())
     assert r.tax_report["total_taxes_paid"] == approx(0, abs=1e-9)
     assert r.tax_report["sparer_pauschbetrag_used"] == approx(700, abs=1e-9)
     assert r.tax_report["loss_carryforward_capital"] == approx(0, abs=1e-9)
@@ -128,9 +128,9 @@ def test_a5_freigrenze():
         d["sz"] = flag(dd, "2022-06-01")
 
         def cf(b, s):
-            return asset_config("etc", "signal", asset_share=0.5, asset_spread=0, deliverable=True, signal_buy=b,
+            return asset_config(asset_class="etc", trading="signal", share=0.5, spread=0, deliverable=True, signal_buy=b,
                                 signal_sell=s)
-        return sim(d, create_strategy(X=cf("bx", "sx"), Z=cf("bz", "sz")), tax_mode="person", marginal_tax_rate=40)
+        return sim(d, create_strategy(X=cf("bx", "sx"), Z=cf("bz", "sz")), tax=tax_profile(income=income_rate(marginal_rate=40)))
     r = run(90, 116)
     assert r.tax_report["total_taxes_paid"] == 0 and r.tax_report["loss_carryforward_private"] == 500
     r = run(90, 124)
@@ -148,9 +148,9 @@ def test_a6_haltefrist(buy, sell, tax):
     d = pd.DataFrame({"date": dd, "X": np.where(dd == pd.Timestamp(buy), 100.0, 200.0)})
     d["b"] = flag(dd, buy)
     d["s"] = flag(dd, sell)
-    st = create_strategy(X=asset_config("etc", "signal", asset_share=1, asset_spread=0, deliverable=True,
+    st = create_strategy(X=asset_config(asset_class="etc", trading="signal", share=1, spread=0, deliverable=True,
                                         signal_buy="b", signal_sell="s"))
-    assert sim(d, st, tax_mode="person", marginal_tax_rate=40).tax_report["total_taxes_paid"] == tax
+    assert sim(d, st, tax=tax_profile(income=income_rate(marginal_rate=40))).tax_report["total_taxes_paid"] == tax
 
 
 # ── B7-B9: Fondsmodus ─────────────────────────────────────────────────────
@@ -158,23 +158,20 @@ def test_a6_haltefrist(buy, sell, tax):
                                          ("2021-07-01", "2021-12-31", 184 * 100 / 365)])
 def test_b7_funds_fee_linear(frm, to, cost):
     dd = days(frm, to)
-    r = sim(pd.DataFrame({"date": dd, "A": 100.0}), create_strategy(A=asset_config("etf", asset_share=1, asset_spread=0)),
-            tax_mode="funds", funds_fee=1, bonus_fee=0)
+    r = sim(pd.DataFrame({"date": dd, "A": 100.0}), create_strategy(A=asset_config(asset_class="etf", share=1, spread=0)), funds=funds_costs(fee=1, performance_fee=0))
     assert 10000 - r.worth[-1] == approx(cost, abs=1e-9)
 
 
 def test_b8_high_watermark():
     dd = days("2021-01-01", "2022-12-31")
     d = pd.DataFrame({"date": dd, "A": step(dd, ["2021-01-01", "2021-12-31", "2022-12-31"], [100, 120, 123])})
-    r = sim(d, create_strategy(A=asset_config("etf", asset_share=1, asset_spread=0)), tax_mode="funds", funds_fee=0,
-            bonus_fee=10)
+    r = sim(d, create_strategy(A=asset_config(asset_class="etf", share=1, spread=0)), funds=funds_costs(fee=0, performance_fee=10))
     assert r.worth[-1] == approx(12095 - 29.5, abs=1e-8)
 
 
 def test_b9_teilverkauf_fondskosten():
     dd = days("2021-01-01", "2021-12-31")
-    r = sim(pd.DataFrame({"date": dd, "A": 100.0}), create_strategy(A=asset_config("etf", asset_share=1, asset_spread=1)),
-            tax_mode="funds", funds_fee=1, bonus_fee=0, order_fee=5)
+    r = sim(pd.DataFrame({"date": dd, "A": 100.0}), create_strategy(A=asset_config(asset_class="etf", share=1, spread=1)), costs=sim_costs(order_fee=5), funds=funds_costs(fee=1, performance_fee=0))
     n0 = 9995 / 100.5
     assert r.worth[-1] == approx(n0 * 100 * 0.99, abs=1e-8)
     assert r.fees_paid == 5
@@ -184,19 +181,19 @@ def test_b9_teilverkauf_fondskosten():
 def test_c10_aktivierung():
     dd = days("2021-01-01", "2021-12-31")
     d = pd.DataFrame({"date": dd, "A": 100.0, "B": 50.0})
-    st = create_strategy(A=asset_config("etf", asset_share=0.5, asset_spread=0),
-                         B=asset_config("etf", asset_share=0.5, asset_spread=0, asset_start="2021-07-01"))
+    st = create_strategy(A=asset_config(asset_class="etf", share=0.5, spread=0),
+                         B=asset_config(asset_class="etf", share=0.5, spread=0, start="2021-07-01"))
     r = sim(d, st)
     ii = [idx(r, x) for x in ("2021-06-30", "2021-07-01", "2021-12-31")]
     assert list(r.report["A"]["worth"][ii]) == approx([10000, 5000, 5000], rel=1.5e-8)
     assert list(r.report["B"]["worth"][ii]) == approx([0, 5000, 5000], rel=1.5e-8)
     d2 = d.copy()
     d2.loc[dd < pd.Timestamp("2021-07-01"), "B"] = np.nan
-    r2 = sim(d2, create_strategy(A=asset_config("etf", asset_share=0.5, asset_spread=0),
-                                 B=asset_config("etf", asset_share=0.5, asset_spread=0)))
+    r2 = sim(d2, create_strategy(A=asset_config(asset_class="etf", share=0.5, spread=0),
+                                 B=asset_config(asset_class="etf", share=0.5, spread=0)))
     assert list(r2.report["B"]["worth"][ii]) == approx([0, 5000, 5000], rel=1.5e-8)
     assert np.array_equal(r2.worth, r.worth)
-    r3 = sim(d, st, balance_mode=True, balance_unit="year")
+    r3 = sim(d, st, rebalance=rebalance_plan(unit="year"))
     assert list(r3.report["B"]["worth"][ii]) == approx([0, 5000, 5000], rel=1.5e-8)
 
 
@@ -215,12 +212,12 @@ def _carry(z_price, vp=False):
     k = 4 if vp else 3
 
     def cf(s):
-        return asset_config("certificate", "signal", asset_share=1 / k, asset_spread=0, signal_buy="b", signal_sell=s)
+        return asset_config(asset_class="certificate", trading="signal", share=1 / k, spread=0, signal_buy="b", signal_sell=s)
     st = {"X": cf("sx"), "Y": cf("sy"), "Z": cf("sz")}
     if vp:
         d["E"] = step(dd, ["2021-01-01", "2021-12-31"], [100, 120])
-        st["E"] = asset_config("etf", "bnh", asset_share=0.25, asset_spread=0, asset_bonus=0)
-    return sim(d, create_strategy(**st), start_value=5000 * k, tax_mode="person", base_rate=2.5 if vp else None)
+        st["E"] = asset_config(asset_class="etf", trading="bnh", share=0.25, spread=0, partial_exemption=0)
+    return sim(d, create_strategy(**st), start_value=5000 * k, tax=tax_profile(base_rate=2.5 if vp else None))
 
 
 @pytest.mark.parametrize("z,tax,pot,spb", [(90, 500 * 0.26375, 0, 1000), (70, 0, 0, 500), (50, 0, 500, 0)])
@@ -242,9 +239,8 @@ def _dca():
     dd = days("2020-01-01", "2021-12-31")
     p = np.where(dd < pd.Timestamp("2020-06-01"), 100.0, np.where(dd < pd.Timestamp("2021-07-01"), 80.0, 100.0))
     p[-1] = 150
-    return sim(pd.DataFrame({"date": dd, "A": p}), create_strategy(A=asset_config("etf", "bnh", asset_share=1,
-                                                                                   asset_spread=0)),
-               start_value=1000, dca_mode=True, dca_value=1000, dca_unit="year", dca_span=1, dca_skip=True)
+    return sim(pd.DataFrame({"date": dd, "A": p}), create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=1,
+                                                                                   spread=0)), start_value=1000, dca=dca_plan(value=1000, span=1, unit="year", skip=True))
 
 
 def test_fm2_cagr_xirr():
@@ -277,7 +273,7 @@ def test_fm2_ohne_zufluesse_unveraendert():
     rng = np.random.default_rng(3)
     n = 900
     d = pd.DataFrame({"date": pd.date_range("2018-01-01", periods=n), "A": 100 * np.exp(np.cumsum(rng.normal(3e-4, 0.012, n)))})
-    r = sim(d, create_strategy(A=asset_config("etf", asset_share=1, asset_spread=0.1)), start_value=10000)
+    r = sim(d, create_strategy(A=asset_config(asset_class="etf", share=1, spread=0.1)), start_value=10000)
     w = r.worth
     yrs = (n - 1) / 365.25
     assert r.external_flows is False

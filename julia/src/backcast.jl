@@ -395,7 +395,7 @@ end
 
 """
     backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothing, fx = nothing,
-                 model = "structural", fit = "drag", fixed = nothing, objective = "level",
+                 model = "structural", fit = "drag", fixed = RList(), objective = "level",
                  loss = "rmse", horizon = 1, hybrid_weight = 0.5, lag = 0, rate_lag = 0,
                  start = nothing, end_ = nothing, method = "optimize", grid = nothing,
                  bounds = nothing, ter_basis = 365, rate_basis = 360, accrual = "linear",
@@ -408,7 +408,7 @@ Liste mit Suchintervallen (ergänzt die Standardliste). Liefert eine `RList`
 der Klasse `SimLevBackcastFit`.
 """
 function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothing, fx = nothing,
-                      model = ("structural", "linear", "spline"), fit = "drag", fixed = nothing,
+                      model = ("structural", "linear", "spline"), fit = "drag", fixed = RList(),
                       objective = ("level", "return", "hybrid"), loss = ("rmse", "mse", "mae", "median", "max"),
                       horizon = 1, hybrid_weight = 0.5, lag = 0, rate_lag = 0, start = nothing, end_ = nothing,
                       method = ("optimize", "grid"), grid = nothing, bounds = nothing, ter_basis = 365,
@@ -785,7 +785,7 @@ function summary_SimLevBackcastFit(object; io::IO = stdout)
 end
 
 "Druckausgabe von `SimLevBackcast` (Kopfzeile und die ersten 6 Zeilen)."
-function format_SimLevBackcast(x)
+function format_SimLevBackcast(x; kw...)
     val = x["value"]
     n_bc = count(i -> x["source"][i] == "backcast" && isfinite(val[i]), 1:nrow(x))
     dd = DP._days(x["date"])
@@ -796,11 +796,17 @@ function format_SimLevBackcast(x)
     h = rows(x, 1:min(6, nrow(x)))
     h.class = String[]
     h.attrs = Dict{String,Any}()
-    return head * DP._chomp(SimLev.RFmt.print_data_frame(h))
+    return head * DP._chomp(SimLev.RFmt.print_data_frame(h; kw...))
 end
 
-"`print.SimLevBackcast`."
-print_SimLevBackcast(x; io::IO = stdout) = (println(io, format_SimLevBackcast(x)); x)
+"`print.SimLevBackcast(x, ...)`: Schlüsselwörter gehen wie in R an print.data.frame (z. B. `digits`)."
+print_SimLevBackcast(x; io::IO = stdout, kw...) = (println(io, format_SimLevBackcast(x; kw...)); x)
+
+"Registrierte Druckmethode (R `print.SimLevBackcast(x, ...)`)."
+function _print_backcast(io::IO, x; kw...)
+    print(io, format_SimLevBackcast(x; kw...))
+    return nothing
+end
 
 # ── Grafiken (SVG ohne externe Pakete; Bausteine `_bc_*` in svg.jl) ───────────
 
@@ -860,7 +866,7 @@ function __init__()
     register_print!("SimLevBackcastFit", (io, x) -> print(io, format_SimLevBackcastFit(x)))
     register_summary!("SimLevBackcastFit", (x, args...; kw...) -> summary_SimLevBackcastFit(x))
     register_plot!("SimLevBackcastFit", SimLev._plot_method(plot_SimLevBackcastFit, "SimLevBackcastFit"))
-    register_print!("SimLevBackcast", (io, x) -> print(io, format_SimLevBackcast(x)))
+    register_print!("SimLevBackcast", _print_backcast)
     register_plot!("SimLevBackcast", SimLev._plot_method(plot_SimLevBackcast, "SimLevBackcast"))
 end
 

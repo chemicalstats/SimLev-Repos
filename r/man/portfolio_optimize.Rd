@@ -179,7 +179,7 @@ of Portfolio Management 42(4); Rockafellar, R. T. & Uryasev, S. (2000),
 Journal of Risk 2(3); Michaud, R. (1998), Efficient Asset Management.
 }
 \seealso{
-\code{\link[=efficient_frontier]{efficient_frontier()}}, \code{\link[=risk_contributions]{risk_contributions()}},
-\code{\link[=rolling_optimization]{rolling_optimization()}} (Zielgewichte fuer \code{\link[=tactical_simulation]{tactical_simulation()}}),
-\code{\link[=cpcv_portfolio]{cpcv_portfolio()}}.
+\code{\link[=portfolio_frontier]{portfolio_frontier()}}, \code{\link[=portfolio_risk_contributions]{portfolio_risk_contributions()}},
+\code{\link[=portfolio_rolling]{portfolio_rolling()}} (Zielgewichte fuer \code{\link[=tactical_simulation]{tactical_simulation()}}),
+\code{\link[=portfolio_cpcv]{portfolio_cpcv()}}.
 }

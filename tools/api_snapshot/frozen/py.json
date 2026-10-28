@@ -1,0 +1,1354 @@
+{
+ "language": "Python",
+ "stand": "2026-10-26 – Schnittstelle 0.5.0 festgehalten",
+ "hinweis": "Erzeugt von tools/api_snapshot/run.sh --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
+ "functions": {
+  "asset_config": [
+   {"name": "asset_class", "kind": "keyword_only", "default": "('etf', 'etn', 'etc', 'certificate', 'etn_standard', 'etn_deliverable')"},
+   {"name": "trading", "kind": "keyword_only", "default": "('bnh', 'signal')"},
+   {"name": "share", "kind": "keyword_only", "default": "1.0"},
+   {"name": "spread", "kind": "keyword_only", "default": "0.1"},
+   {"name": "partial_exemption", "kind": "keyword_only", "default": "0.0"},
+   {"name": "deliverable", "kind": "keyword_only", "default": "False"},
+   {"name": "start", "kind": "keyword_only", "default": "None"},
+   {"name": "tax_regime", "kind": "keyword_only", "default": "None"},
+   {"name": "signal_buy", "kind": "keyword_only", "default": "None"},
+   {"name": "signal_sell", "kind": "keyword_only", "default": "None"}
+  ],
+  "backcast": [
+   {"name": "fit", "kind": "keyword_only", "default": "None"},
+   {"name": "data", "kind": "keyword_only", "default": "None"},
+   {"name": "params", "kind": "keyword_only", "default": "None"},
+   {"name": "splice", "kind": "keyword_only", "default": "'inception'"},
+   {"name": "fill", "kind": "keyword_only", "default": "('locf', 'linear', 'stine', 'model')"},
+   {"name": "rebase", "kind": "keyword_only", "default": "None"},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "backcast_fit": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "product", "kind": "positional_or_keyword", "default": null},
+   {"name": "index", "kind": "positional_or_keyword", "default": null},
+   {"name": "ter", "kind": "keyword_only", "default": "0"},
+   {"name": "leverage", "kind": "keyword_only", "default": "1"},
+   {"name": "rate", "kind": "keyword_only", "default": "None"},
+   {"name": "fx", "kind": "keyword_only", "default": "None"},
+   {"name": "model", "kind": "keyword_only", "default": "('structural', 'linear', 'spline')"},
+   {"name": "fit", "kind": "keyword_only", "default": "'drag'"},
+   {"name": "fixed", "kind": "keyword_only", "default": "None"},
+   {"name": "objective", "kind": "keyword_only", "default": "('level', 'return', 'hybrid')"},
+   {"name": "loss", "kind": "keyword_only", "default": "('rmse', 'mse', 'mae', 'median', 'max')"},
+   {"name": "horizon", "kind": "keyword_only", "default": "1"},
+   {"name": "hybrid_weight", "kind": "keyword_only", "default": "0.5"},
+   {"name": "lag", "kind": "keyword_only", "default": "0"},
+   {"name": "rate_lag", "kind": "keyword_only", "default": "0"},
+   {"name": "start", "kind": "keyword_only", "default": "None"},
+   {"name": "end", "kind": "keyword_only", "default": "None"},
+   {"name": "method", "kind": "keyword_only", "default": "('optimize', 'grid')"},
+   {"name": "grid", "kind": "keyword_only", "default": "None"},
+   {"name": "bounds", "kind": "keyword_only", "default": "None"},
+   {"name": "ter_basis", "kind": "keyword_only", "default": "365"},
+   {"name": "rate_basis", "kind": "keyword_only", "default": "360"},
+   {"name": "accrual", "kind": "keyword_only", "default": "('linear', 'geometric')"},
+   {"name": "index_fill", "kind": "keyword_only", "default": "('locf', 'linear', 'stine')"},
+   {"name": "validate", "kind": "keyword_only", "default": "True"}
+  ],
+  "bootstrap": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "config", "kind": "positional_or_keyword", "default": null},
+   {"name": "method", "kind": "keyword_only", "default": "'raw'"},
+   {"name": "n", "kind": "keyword_only", "default": "1000"},
+   {"name": "params", "kind": "keyword_only", "default": "None"},
+   {"name": "ess", "kind": "keyword_only", "default": "False"},
+   {"name": "ess_grid", "kind": "keyword_only", "default": "None"},
+   {"name": "path_length", "kind": "keyword_only", "default": "None"},
+   {"name": "max_tries", "kind": "keyword_only", "default": "10"},
+   {"name": "seed", "kind": "keyword_only", "default": "None"},
+   {"name": "cores", "kind": "keyword_only", "default": "1"},
+   {"name": "progress", "kind": "keyword_only", "default": "True"}
+  ],
+  "bootstrap_block_length": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "transform", "kind": "keyword_only", "default": "('none', 'abs', 'squared')"}
+  ],
+  "bootstrap_config": [
+   {"name": "indices", "kind": "positional_or_keyword", "default": null},
+   {"name": "letfs", "kind": "keyword_only", "default": "()"},
+   {"name": "regime_index", "kind": "keyword_only", "default": "None"},
+   {"name": "aux", "kind": "keyword_only", "default": "None"},
+   {"name": "aux_type", "kind": "keyword_only", "default": "None"},
+   {"name": "cross", "kind": "keyword_only", "default": "('ratio', 'joint')"},
+   {"name": "input", "kind": "keyword_only", "default": "('returns', 'prices')"}
+  ],
+  "bootstrap_data": [
+   {"name": "result", "kind": "positional_or_keyword", "default": null},
+   {"name": "i", "kind": "keyword_only", "default": "1"},
+   {"name": "dates", "kind": "keyword_only", "default": "None"},
+   {"name": "start", "kind": "keyword_only", "default": "'2000-01-01'"}
+  ],
+  "bootstrap_pooled": [
+   {"name": "datasets", "kind": "positional_or_keyword", "default": null},
+   {"name": "columns", "kind": "positional_or_keyword", "default": null},
+   {"name": "weights", "kind": "keyword_only", "default": "None"},
+   {"name": "inflation", "kind": "keyword_only", "default": "None"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('year', 'quarter', 'month')"},
+   {"name": "n", "kind": "keyword_only", "default": "1000"},
+   {"name": "years", "kind": "keyword_only", "default": "30"},
+   {"name": "L", "kind": "keyword_only", "default": "None"},
+   {"name": "country_weights", "kind": "keyword_only", "default": "None"},
+   {"name": "target", "kind": "keyword_only", "default": "None"},
+   {"name": "seed", "kind": "keyword_only", "default": "None"}
+  ],
+  "bootstrap_probability": [
+   {"name": "study", "kind": "positional_or_keyword", "default": null},
+   {"name": "args", "kind": "var_positional", "default": null},
+   {"name": "thresholds", "kind": "keyword_only", "default": "None"},
+   {"name": "env", "kind": "keyword_only", "default": "None"},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "bootstrap_study": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "config", "kind": "positional_or_keyword", "default": null},
+   {"name": "method", "kind": "positional_or_keyword", "default": "'stationary'"},
+   {"name": "n", "kind": "positional_or_keyword", "default": "1000"},
+   {"name": "strategies", "kind": "positional_or_keyword", "default": "None"},
+   {"name": "params", "kind": "keyword_only", "default": "None"},
+   {"name": "ess", "kind": "keyword_only", "default": "False"},
+   {"name": "ess_grid", "kind": "keyword_only", "default": "None"},
+   {"name": "path_length", "kind": "keyword_only", "default": "None"},
+   {"name": "dates", "kind": "keyword_only", "default": "None"},
+   {"name": "start", "kind": "keyword_only", "default": "'2000-01-01'"},
+   {"name": "burn_in", "kind": "keyword_only", "default": "0"},
+   {"name": "sim_args", "kind": "keyword_only", "default": "None"},
+   {"name": "metrics", "kind": "keyword_only", "default": "<function bootstrap_study_metrics>"},
+   {"name": "benchmark", "kind": "keyword_only", "default": "None"},
+   {"name": "chunk_dir", "kind": "keyword_only", "default": "None"},
+   {"name": "keep_paths", "kind": "keyword_only", "default": "0"},
+   {"name": "keep_returns", "kind": "keyword_only", "default": "('none', 'year', 'quarter', 'month')"},
+   {"name": "keep_aux", "kind": "keyword_only", "default": "None"},
+   {"name": "max_tries", "kind": "keyword_only", "default": "10"},
+   {"name": "chunk_size", "kind": "keyword_only", "default": "25"},
+   {"name": "seed", "kind": "keyword_only", "default": "None"},
+   {"name": "cores", "kind": "keyword_only", "default": "1"},
+   {"name": "progress", "kind": "keyword_only", "default": "True"}
+  ],
+  "bootstrap_study_metrics": [
+   {"name": "res", "kind": "positional_or_keyword", "default": null}
+  ],
+  "bootstrap_validate": [
+   {"name": "result", "kind": "positional_or_keyword", "default": null},
+   {"name": "min_rows", "kind": "keyword_only", "default": "None"},
+   {"name": "verbose", "kind": "keyword_only", "default": "True"}
+  ],
+  "copula_fit": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "y", "kind": "positional_or_keyword", "default": null},
+   {"name": "families", "kind": "keyword_only", "default": "None"}
+  ],
+  "create_strategy": [
+   {"name": "args", "kind": "var_positional", "default": null},
+   {"name": "assets", "kind": "keyword_only", "default": "None"},
+   {"name": "named", "kind": "var_keyword", "default": null}
+  ],
+  "dca_plan": [
+   {"name": "value", "kind": "positional_or_keyword", "default": "_MISSING", "default_known": false},
+   {"name": "span", "kind": "positional_or_keyword", "default": "_MISSING", "default_known": false},
+   {"name": "days", "kind": "keyword_only", "default": "None"},
+   {"name": "unit", "kind": "keyword_only", "default": "('month', 'quarter', 'year')"},
+   {"name": "anchor", "kind": "keyword_only", "default": "('start', 'end')"},
+   {"name": "start", "kind": "keyword_only", "default": "None"},
+   {"name": "skip", "kind": "keyword_only", "default": "False"},
+   {"name": "fill_deficits", "kind": "keyword_only", "default": "False"}
+  ],
+  "dependence_analysis": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "assets", "kind": "positional_or_keyword", "default": null},
+   {"name": "conditions", "kind": "keyword_only", "default": "None"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
+   {"name": "quantiles", "kind": "keyword_only", "default": "(0.05, 0.1)"},
+   {"name": "breaks", "kind": "keyword_only", "default": "None"},
+   {"name": "n_regimes", "kind": "keyword_only", "default": "3"},
+   {"name": "window", "kind": "keyword_only", "default": "None"},
+   {"name": "dcc", "kind": "keyword_only", "default": "True"},
+   {"name": "copulas", "kind": "keyword_only", "default": "True"},
+   {"name": "B", "kind": "keyword_only", "default": "499"},
+   {"name": "block", "kind": "keyword_only", "default": "None"},
+   {"name": "tail_q", "kind": "keyword_only", "default": "0.1"},
+   {"name": "seed", "kind": "keyword_only", "default": "None"}
+  ],
+  "dependence_dcc": [
+   {"name": "R", "kind": "positional_or_keyword", "default": null}
+  ],
+  "dependence_validate": [
+   {"name": "boot", "kind": "positional_or_keyword", "default": null},
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "agg", "kind": "keyword_only", "default": "5"},
+   {"name": "q", "kind": "keyword_only", "default": "0.1"},
+   {"name": "max_paths", "kind": "keyword_only", "default": "200"}
+  ],
+  "export_dashboard": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "filename", "kind": "keyword_only", "default": "'dashboard.svg'"},
+   {"name": "width", "kind": "keyword_only", "default": "14"},
+   {"name": "height", "kind": "keyword_only", "default": "10"},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "funds_costs": [
+   {"name": "fee", "kind": "keyword_only", "default": "0.95"},
+   {"name": "performance_fee", "kind": "keyword_only", "default": "5"}
+  ],
+  "harvest_rule": [
+   {"name": "day", "kind": "keyword_only", "default": "'12-15'"},
+   {"name": "loss_pot", "kind": "keyword_only", "default": "True"}
+  ],
+  "income_rate": [
+   {"name": "marginal_rate", "kind": "positional_or_keyword", "default": "_MISSING", "default_known": false},
+   {"name": "soli_rate", "kind": "keyword_only", "default": "0"}
+  ],
+  "income_tariff": [
+   {"name": "taxable_income", "kind": "positional_or_keyword", "default": "_MISSING", "default_known": false},
+   {"name": "tariff", "kind": "keyword_only", "default": "None"}
+  ],
+  "index_bond": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "yield_", "kind": "keyword_only", "default": "None"},
+   {"name": "maturity", "kind": "keyword_only", "default": "10"},
+   {"name": "coupon_frequency", "kind": "keyword_only", "default": "1"},
+   {"name": "method", "kind": "keyword_only", "default": "('exact', 'duration')"},
+   {"name": "start", "kind": "keyword_only", "default": "100"},
+   {"name": "kw", "kind": "var_keyword", "default": null}
+  ],
+  "index_currency_hedged": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "local", "kind": "positional_or_keyword", "default": null},
+   {"name": "domestic_rate", "kind": "positional_or_keyword", "default": null},
+   {"name": "foreign_rate", "kind": "positional_or_keyword", "default": null},
+   {"name": "cost", "kind": "keyword_only", "default": "0"},
+   {"name": "basis", "kind": "keyword_only", "default": "360"},
+   {"name": "start", "kind": "keyword_only", "default": "None"}
+  ],
+  "index_money_market": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "rate", "kind": "positional_or_keyword", "default": null},
+   {"name": "spread", "kind": "keyword_only", "default": "0"},
+   {"name": "basis", "kind": "keyword_only", "default": "360"},
+   {"name": "start", "kind": "keyword_only", "default": "100"}
+  ],
+  "index_total_return": [
+   {"name": "price", "kind": "positional_or_keyword", "default": null},
+   {"name": "dividends", "kind": "keyword_only", "default": "None"},
+   {"name": "yield_", "kind": "keyword_only", "default": "None"},
+   {"name": "withholding", "kind": "keyword_only", "default": "0"},
+   {"name": "dates", "kind": "keyword_only", "default": "None"},
+   {"name": "start", "kind": "keyword_only", "default": "None"},
+   {"name": "kw", "kind": "var_keyword", "default": null}
+  ],
+  "isna_strict": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null}
+  ],
+  "momentum_score": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "assets", "kind": "positional_or_keyword", "default": null},
+   {"name": "lookbacks", "kind": "keyword_only", "default": "(1, 3, 6, 12)"},
+   {"name": "type", "kind": "keyword_only", "default": "('average', '13612w')"}
+  ],
+  "overfit_pbo": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "S", "kind": "keyword_only", "default": "16"},
+   {"name": "metric", "kind": "keyword_only", "default": "('sharpe', 'sortino', 'geometric', 'mean')"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
+   {"name": "dates", "kind": "keyword_only", "default": "None"},
+   {"name": "risk_free", "kind": "keyword_only", "default": "0"}
+  ],
+  "overfit_reality_check": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "benchmark", "kind": "keyword_only", "default": "None"},
+   {"name": "B", "kind": "keyword_only", "default": "999"},
+   {"name": "block", "kind": "keyword_only", "default": "None"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
+   {"name": "dates", "kind": "keyword_only", "default": "None"},
+   {"name": "seed", "kind": "keyword_only", "default": "None"}
+  ],
+  "overfit_walk_forward": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "train", "kind": "keyword_only", "default": "5"},
+   {"name": "test", "kind": "keyword_only", "default": "1"},
+   {"name": "step", "kind": "keyword_only", "default": "None"},
+   {"name": "anchored", "kind": "keyword_only", "default": "False"},
+   {"name": "metric", "kind": "keyword_only", "default": "('sharpe', 'sortino', 'geometric', 'mean')"},
+   {"name": "select", "kind": "keyword_only", "default": "('best', 'plateau')"},
+   {"name": "risk_free", "kind": "keyword_only", "default": "0"}
+  ],
+  "param_bootstrap": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "config", "kind": "positional_or_keyword", "default": null},
+   {"name": "ids", "kind": "keyword_only", "default": "None"},
+   {"name": "top", "kind": "keyword_only", "default": "5"},
+   {"name": "by", "kind": "keyword_only", "default": "('objective', 'plateau')"},
+   {"name": "map", "kind": "keyword_only", "default": "None"},
+   {"name": "include", "kind": "keyword_only", "default": "None"},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "param_plateau": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "metric", "kind": "keyword_only", "default": "None"},
+   {"name": "radius", "kind": "keyword_only", "default": "1"},
+   {"name": "k", "kind": "keyword_only", "default": "5"}
+  ],
+  "param_range": [
+   {"name": "lower", "kind": "positional_or_keyword", "default": null},
+   {"name": "upper", "kind": "positional_or_keyword", "default": null},
+   {"name": "n", "kind": "keyword_only", "default": "5"},
+   {"name": "step", "kind": "keyword_only", "default": "None"},
+   {"name": "integer", "kind": "keyword_only", "default": "False"},
+   {"name": "log", "kind": "keyword_only", "default": "False"}
+  ],
+  "param_search": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "builder", "kind": "positional_or_keyword", "default": "None"},
+   {"name": "space", "kind": "positional_or_keyword", "default": "_MISSING", "default_known": false},
+   {"name": "strategy", "kind": "keyword_only", "default": "None"},
+   {"name": "method", "kind": "keyword_only", "default": "('grid', 'random', 'lhs')"},
+   {"name": "n", "kind": "keyword_only", "default": "50"},
+   {"name": "constraint", "kind": "keyword_only", "default": "None"},
+   {"name": "sim_args", "kind": "keyword_only", "default": "None"},
+   {"name": "burn_in", "kind": "keyword_only", "default": "0"},
+   {"name": "metrics", "kind": "keyword_only", "default": "None"},
+   {"name": "objective", "kind": "keyword_only", "default": "'sharpe'"},
+   {"name": "maximize", "kind": "keyword_only", "default": "True"},
+   {"name": "keep_returns", "kind": "keyword_only", "default": "True"},
+   {"name": "seed", "kind": "keyword_only", "default": "None"},
+   {"name": "cores", "kind": "keyword_only", "default": "1"}
+  ],
+  "param_space": [
+   {"name": "args", "kind": "var_positional", "default": null},
+   {"name": "dims", "kind": "var_keyword", "default": null}
+  ],
+  "planning_goal": [
+   {"name": "returns", "kind": "positional_or_keyword", "default": null},
+   {"name": "start_value", "kind": "positional_or_keyword", "default": null},
+   {"name": "goal", "kind": "positional_or_keyword", "default": null},
+   {"name": "horizon", "kind": "positional_or_keyword", "default": null},
+   {"name": "contributions", "kind": "keyword_only", "default": "0"},
+   {"name": "n_grid", "kind": "keyword_only", "default": "301"},
+   {"name": "n_sim", "kind": "keyword_only", "default": "5000"},
+   {"name": "seed", "kind": "keyword_only", "default": "None"}
+  ],
+  "planning_lumpsum_vs_dca": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "strategy", "kind": "positional_or_keyword", "default": null},
+   {"name": "amount", "kind": "keyword_only", "default": "10000"},
+   {"name": "months", "kind": "keyword_only", "default": "12"},
+   {"name": "horizon", "kind": "keyword_only", "default": "10"},
+   {"name": "step", "kind": "keyword_only", "default": "1"},
+   {"name": "sim_args", "kind": "keyword_only", "default": "None"},
+   {"name": "cores", "kind": "keyword_only", "default": "1"}
+  ],
+  "plot": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "args", "kind": "var_positional", "default": null},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "portfolio_cpcv": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "assets", "kind": "keyword_only", "default": "None"},
+   {"name": "methods", "kind": "keyword_only", "default": "('equal', 'inverse_vol', 'min_variance', 'risk_parity', 'max_sharpe')"},
+   {"name": "n_groups", "kind": "keyword_only", "default": "6"},
+   {"name": "test_groups", "kind": "keyword_only", "default": "2"},
+   {"name": "purge", "kind": "keyword_only", "default": "2"},
+   {"name": "embargo", "kind": "keyword_only", "default": "2"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"}
+  ],
+  "portfolio_frontier": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "assets", "kind": "keyword_only", "default": "None"},
+   {"name": "n", "kind": "keyword_only", "default": "40"},
+   {"name": "lower", "kind": "keyword_only", "default": "0"},
+   {"name": "upper", "kind": "keyword_only", "default": "1"},
+   {"name": "cov", "kind": "keyword_only", "default": "('sample', 'ledoit_wolf', 'ewma', 'denoise', 'gerber')"},
+   {"name": "risk_free", "kind": "keyword_only", "default": "0"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"}
+  ],
+  "portfolio_optimize": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "assets", "kind": "keyword_only", "default": "None"},
+   {"name": "method", "kind": "keyword_only", "default": "('min_variance', 'max_sharpe', 'mean_variance', 'max_diversification', 'risk_parity', 'hrp', 'min_cvar', 'min_cdar', 'inverse_vol', 'equal')"},
+   {"name": "lower", "kind": "keyword_only", "default": "0"},
+   {"name": "upper", "kind": "keyword_only", "default": "1"},
+   {"name": "cov", "kind": "keyword_only", "default": "('sample', 'ledoit_wolf', 'ewma', 'denoise', 'gerber')"},
+   {"name": "mu", "kind": "keyword_only", "default": "None"},
+   {"name": "risk_free", "kind": "keyword_only", "default": "0"},
+   {"name": "risk_aversion", "kind": "keyword_only", "default": "4"},
+   {"name": "budget", "kind": "keyword_only", "default": "None"},
+   {"name": "alpha", "kind": "keyword_only", "default": "0.05"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
+   {"name": "resample", "kind": "keyword_only", "default": "0"},
+   {"name": "block", "kind": "keyword_only", "default": "None"},
+   {"name": "seed", "kind": "keyword_only", "default": "None"}
+  ],
+  "portfolio_returns": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "candidates", "kind": "positional_or_keyword", "default": null},
+   {"name": "frequency", "kind": "keyword_only", "default": "('year', 'quarter', 'month')"}
+  ],
+  "portfolio_risk_contributions": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "weights", "kind": "positional_or_keyword", "default": null},
+   {"name": "measure", "kind": "keyword_only", "default": "('volatility', 'cvar')"},
+   {"name": "alpha", "kind": "keyword_only", "default": "0.05"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
+   {"name": "cov", "kind": "keyword_only", "default": "('sample', 'ledoit_wolf', 'ewma', 'denoise', 'gerber')"}
+  ],
+  "portfolio_rolling": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "assets", "kind": "positional_or_keyword", "default": null},
+   {"name": "method", "kind": "keyword_only", "default": "'min_variance'"},
+   {"name": "window", "kind": "keyword_only", "default": "3"},
+   {"name": "every", "kind": "keyword_only", "default": "('month', 'quarter', 'year')"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "portfolio_template": [
+   {"name": "name", "kind": "keyword_only", "default": "None"},
+   {"name": "map", "kind": "keyword_only", "default": "None"},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "quantile_regression": [
+   {"name": "y", "kind": "positional_or_keyword", "default": null},
+   {"name": "X", "kind": "keyword_only", "default": "None"},
+   {"name": "tau", "kind": "keyword_only", "default": "0.5"},
+   {"name": "intercept", "kind": "keyword_only", "default": "True"},
+   {"name": "tol", "kind": "keyword_only", "default": "1e-10"},
+   {"name": "maxit", "kind": "keyword_only", "default": "2000"}
+  ],
+  "rebalance_plan": [
+   {"name": "span", "kind": "keyword_only", "default": "None"},
+   {"name": "days", "kind": "keyword_only", "default": "None"},
+   {"name": "unit", "kind": "keyword_only", "default": "('month', 'quarter', 'year')"},
+   {"name": "anchor", "kind": "keyword_only", "default": "('start', 'end')"},
+   {"name": "start", "kind": "keyword_only", "default": "None"},
+   {"name": "skip", "kind": "keyword_only", "default": "False"},
+   {"name": "thresh", "kind": "keyword_only", "default": "None"},
+   {"name": "thresh_type", "kind": "keyword_only", "default": "('absolute', 'relative')"},
+   {"name": "event_col", "kind": "keyword_only", "default": "None"},
+   {"name": "event_mode", "kind": "keyword_only", "default": "('additional', 'replace')"},
+   {"name": "event_weight", "kind": "keyword_only", "default": "None"}
+  ],
+  "rebalance_trigger": [
+   {"name": "df", "kind": "positional_or_keyword", "default": null},
+   {"name": "type", "kind": "positional_or_keyword", "default": null},
+   {"name": "threshold", "kind": "keyword_only", "default": "10"},
+   {"name": "lev_col", "kind": "keyword_only", "default": "'target_leverage'"},
+   {"name": "vol_col", "kind": "keyword_only", "default": "'sigma_ewma'"},
+   {"name": "triggers", "kind": "keyword_only", "default": "None"},
+   {"name": "out_col", "kind": "keyword_only", "default": "'rebal_trigger'"}
+  ],
+  "regime_hmm": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "columns", "kind": "positional_or_keyword", "default": null},
+   {"name": "k", "kind": "keyword_only", "default": "2"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
+   {"name": "n_start", "kind": "keyword_only", "default": "5"},
+   {"name": "max_iter", "kind": "keyword_only", "default": "300"},
+   {"name": "tol", "kind": "keyword_only", "default": "1e-07"},
+   {"name": "seed", "kind": "keyword_only", "default": "1"}
+  ],
+  "regime_states": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "dates", "kind": "positional_or_keyword", "default": null},
+   {"name": "type", "kind": "keyword_only", "default": "('filtered', 'smoothed', 'viterbi')"},
+   {"name": "output", "kind": "keyword_only", "default": "('state', 'probability')"},
+   {"name": "state_prob", "kind": "keyword_only", "default": "None"},
+   {"name": "lag", "kind": "keyword_only", "default": "1"}
+  ],
+  "regime_subset": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "condition", "kind": "positional_or_keyword", "default": null},
+   {"name": "min_run", "kind": "keyword_only", "default": "1"},
+   {"name": "env", "kind": "keyword_only", "default": "None"}
+  ],
+  "result_analysis": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "benchmark", "kind": "keyword_only", "default": "None"},
+   {"name": "risk_free", "kind": "keyword_only", "default": "0"},
+   {"name": "rolling_years", "kind": "keyword_only", "default": "3"},
+   {"name": "var_levels", "kind": "keyword_only", "default": "(0.01, 0.05, 0.1)"},
+   {"name": "top_drawdowns", "kind": "keyword_only", "default": "10"},
+   {"name": "inflation", "kind": "keyword_only", "default": "None"}
+  ],
+  "result_heatmap": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "inflation", "kind": "keyword_only", "default": "None"},
+   {"name": "max_years", "kind": "keyword_only", "default": "30"}
+  ],
+  "result_index": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "base", "kind": "keyword_only", "default": "100"}
+  ],
+  "rng_kind": [
+   {"name": "kind", "kind": "positional_or_keyword", "default": "None"},
+   {"name": "normal_kind", "kind": "positional_or_keyword", "default": "None"},
+   {"name": "sample_kind", "kind": "positional_or_keyword", "default": "None"}
+  ],
+  "scenario_copula": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "assets", "kind": "positional_or_keyword", "default": null},
+   {"name": "n", "kind": "keyword_only", "default": "10000"},
+   {"name": "family", "kind": "keyword_only", "default": "('t', 'gaussian')"},
+   {"name": "stress", "kind": "keyword_only", "default": "None"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
+   {"name": "seed", "kind": "keyword_only", "default": "None"}
+  ],
+  "scenario_crisis": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "weights", "kind": "positional_or_keyword", "default": null},
+   {"name": "crises", "kind": "keyword_only", "default": "None"},
+   {"name": "rebalance", "kind": "keyword_only", "default": "False"}
+  ],
+  "scenario_entropy_pooling": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "assets", "kind": "positional_or_keyword", "default": null},
+   {"name": "views", "kind": "positional_or_keyword", "default": null},
+   {"name": "states", "kind": "keyword_only", "default": "None"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
+   {"name": "prior", "kind": "keyword_only", "default": "None"},
+   {"name": "env", "kind": "keyword_only", "default": "None"}
+  ],
+  "scenario_risk": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "weights", "kind": "positional_or_keyword", "default": null},
+   {"name": "alpha", "kind": "keyword_only", "default": "0.05"}
+  ],
+  "sensitivity_grid": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "strategy", "kind": "positional_or_keyword", "default": null},
+   {"name": "grid", "kind": "positional_or_keyword", "default": null},
+   {"name": "sim_args", "kind": "keyword_only", "default": "None"},
+   {"name": "metrics", "kind": "keyword_only", "default": "None"},
+   {"name": "keep_results", "kind": "keyword_only", "default": "False"},
+   {"name": "cores", "kind": "keyword_only", "default": "1"}
+  ],
+  "sensitivity_leverage": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "index", "kind": "positional_or_keyword", "default": null},
+   {"name": "leverages", "kind": "keyword_only", "default": "None"},
+   {"name": "rate", "kind": "keyword_only", "default": "0"},
+   {"name": "expense", "kind": "keyword_only", "default": "0"},
+   {"name": "spread", "kind": "keyword_only", "default": "0"},
+   {"name": "strategy", "kind": "keyword_only", "default": "None"},
+   {"name": "sim_args", "kind": "keyword_only", "default": "None"},
+   {"name": "metrics", "kind": "keyword_only", "default": "None"},
+   {"name": "cores", "kind": "keyword_only", "default": "1"}
+  ],
+  "sensitivity_rebalancing": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "strategy", "kind": "positional_or_keyword", "default": null},
+   {"name": "frequencies", "kind": "keyword_only", "default": "None"},
+   {"name": "offsets", "kind": "keyword_only", "default": "None"},
+   {"name": "bands", "kind": "keyword_only", "default": "NA"},
+   {"name": "band_type", "kind": "keyword_only", "default": "('absolute', 'relative')"},
+   {"name": "include_none", "kind": "keyword_only", "default": "True"},
+   {"name": "sim_args", "kind": "keyword_only", "default": "None"},
+   {"name": "metrics", "kind": "keyword_only", "default": "None"},
+   {"name": "cores", "kind": "keyword_only", "default": "1"}
+  ],
+  "series_align": [
+   {"name": "args", "kind": "var_positional", "default": null},
+   {"name": "calendar", "kind": "keyword_only", "default": "('day', 'union', 'intersect')"},
+   {"name": "range", "kind": "keyword_only", "default": "('common', 'all')"},
+   {"name": "fill", "kind": "keyword_only", "default": "('locf', 'linear', 'none')"},
+   {"name": "max_gap", "kind": "keyword_only", "default": "inf"},
+   {"name": "start", "kind": "keyword_only", "default": "None"},
+   {"name": "end", "kind": "keyword_only", "default": "None"},
+   {"name": "sources", "kind": "var_keyword", "default": null}
+  ],
+  "series_align_macro": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "macro", "kind": "positional_or_keyword", "default": null},
+   {"name": "name", "kind": "keyword_only", "default": "'macro'"},
+   {"name": "lag", "kind": "keyword_only", "default": "0"},
+   {"name": "lag_unit", "kind": "keyword_only", "default": "('day', 'month')"},
+   {"name": "transform", "kind": "keyword_only", "default": "('level', 'yoy', 'mom', 'diff', 'yoy_diff')"},
+   {"name": "periods", "kind": "keyword_only", "default": "None"}
+  ],
+  "series_check": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "columns", "kind": "keyword_only", "default": "None"},
+   {"name": "jump", "kind": "keyword_only", "default": "20"},
+   {"name": "stale", "kind": "keyword_only", "default": "10"},
+   {"name": "revert", "kind": "keyword_only", "default": "0.8"}
+  ],
+  "series_convert_currency": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "columns", "kind": "positional_or_keyword", "default": null},
+   {"name": "fx", "kind": "positional_or_keyword", "default": null},
+   {"name": "method", "kind": "keyword_only", "default": "('divide', 'multiply')"},
+   {"name": "suffix", "kind": "keyword_only", "default": "None"}
+  ],
+  "series_deflate": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "columns", "kind": "positional_or_keyword", "default": null},
+   {"name": "cpi", "kind": "positional_or_keyword", "default": null},
+   {"name": "base_date", "kind": "keyword_only", "default": "None"},
+   {"name": "suffix", "kind": "keyword_only", "default": "'_real'"}
+  ],
+  "series_leverage": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "index", "kind": "positional_or_keyword", "default": null},
+   {"name": "leverage", "kind": "keyword_only", "default": "2"},
+   {"name": "rate", "kind": "keyword_only", "default": "0"},
+   {"name": "expense", "kind": "keyword_only", "default": "0"},
+   {"name": "spread", "kind": "keyword_only", "default": "0"},
+   {"name": "start", "kind": "keyword_only", "default": "100"}
+  ],
+  "series_shift_return": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "columns", "kind": "positional_or_keyword", "default": null},
+   {"name": "target", "kind": "positional_or_keyword", "default": null},
+   {"name": "type", "kind": "keyword_only", "default": "('returns', 'prices')"},
+   {"name": "ppy", "kind": "keyword_only", "default": "None"}
+  ],
+  "series_splice": [
+   {"name": "args", "kind": "var_positional", "default": null},
+   {"name": "dates", "kind": "keyword_only", "default": "None"},
+   {"name": "series", "kind": "var_keyword", "default": null}
+  ],
+  "set_seed": [
+   {"name": "seed", "kind": "positional_or_keyword", "default": null},
+   {"name": "kind", "kind": "positional_or_keyword", "default": "None"},
+   {"name": "normal_kind", "kind": "positional_or_keyword", "default": "None"},
+   {"name": "sample_kind", "kind": "positional_or_keyword", "default": "None"}
+  ],
+  "sharpe_deflated": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "id", "kind": "keyword_only", "default": "None"},
+   {"name": "n_trials", "kind": "keyword_only", "default": "None"},
+   {"name": "effective", "kind": "keyword_only", "default": "True"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
+   {"name": "dates", "kind": "keyword_only", "default": "None"},
+   {"name": "risk_free", "kind": "keyword_only", "default": "0"}
+  ],
+  "sharpe_haircut": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "n_obs", "kind": "keyword_only", "default": "None"},
+   {"name": "n_tests", "kind": "keyword_only", "default": "None"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
+   {"name": "dates", "kind": "keyword_only", "default": "None"},
+   {"name": "risk_free", "kind": "keyword_only", "default": "0"},
+   {"name": "ppy", "kind": "keyword_only", "default": "52"}
+  ],
+  "sharpe_min_track_record": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "target", "kind": "keyword_only", "default": "0"},
+   {"name": "prob", "kind": "keyword_only", "default": "0.95"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
+   {"name": "ppy", "kind": "keyword_only", "default": "None"}
+  ],
+  "sharpe_probabilistic": [
+   {"name": "r", "kind": "positional_or_keyword", "default": null},
+   {"name": "benchmark", "kind": "keyword_only", "default": "0"},
+   {"name": "ppy", "kind": "keyword_only", "default": "52"}
+  ],
+  "sharpe_test": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "y", "kind": "positional_or_keyword", "default": null},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
+   {"name": "method", "kind": "keyword_only", "default": "('hac', 'bootstrap')"},
+   {"name": "B", "kind": "keyword_only", "default": "2000"},
+   {"name": "block", "kind": "keyword_only", "default": "None"},
+   {"name": "ppy", "kind": "keyword_only", "default": "None"},
+   {"name": "seed", "kind": "keyword_only", "default": "None"}
+  ],
+  "signal_analysis": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "signal", "kind": "positional_or_keyword", "default": null},
+   {"name": "target", "kind": "positional_or_keyword", "default": null},
+   {"name": "horizon", "kind": "keyword_only", "default": "21"},
+   {"name": "step", "kind": "keyword_only", "default": "None"},
+   {"name": "bins", "kind": "keyword_only", "default": "5"},
+   {"name": "breaks", "kind": "keyword_only", "default": "None"},
+   {"name": "signal2", "kind": "keyword_only", "default": "None"},
+   {"name": "bins2", "kind": "keyword_only", "default": "3"},
+   {"name": "splits", "kind": "keyword_only", "default": "1"},
+   {"name": "degree", "kind": "keyword_only", "default": "2"}
+  ],
+  "signal_combine": [
+   {"name": "signals", "kind": "var_positional", "default": null},
+   {"name": "op", "kind": "keyword_only", "default": "('and', 'or')"}
+  ],
+  "signal_crossover": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "fast", "kind": "keyword_only", "default": "50"},
+   {"name": "slow", "kind": "keyword_only", "default": "200"},
+   {"name": "type", "kind": "keyword_only", "default": "('sma', 'ema')"},
+   {"name": "band", "kind": "keyword_only", "default": "0"},
+   {"name": "lag", "kind": "keyword_only", "default": "0"}
+  ],
+  "signal_drawdown": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "sell_dd", "kind": "keyword_only", "default": "20"},
+   {"name": "buy_dd", "kind": "keyword_only", "default": "10"},
+   {"name": "window", "kind": "keyword_only", "default": "None"},
+   {"name": "lag", "kind": "keyword_only", "default": "0"}
+  ],
+  "signal_ema": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "n", "kind": "keyword_only", "default": "200"},
+   {"name": "band", "kind": "keyword_only", "default": "0"},
+   {"name": "lag", "kind": "keyword_only", "default": "0"}
+  ],
+  "signal_momentum": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "n", "kind": "keyword_only", "default": "250"},
+   {"name": "threshold", "kind": "keyword_only", "default": "0"},
+   {"name": "band", "kind": "keyword_only", "default": "0"},
+   {"name": "lag", "kind": "keyword_only", "default": "0"}
+  ],
+  "signal_sma": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "n", "kind": "keyword_only", "default": "200"},
+   {"name": "band", "kind": "keyword_only", "default": "0"},
+   {"name": "lag", "kind": "keyword_only", "default": "0"}
+  ],
+  "signal_state": [
+   {"name": "signal", "kind": "positional_or_keyword", "default": null},
+   {"name": "initial", "kind": "keyword_only", "default": "False"}
+  ],
+  "signal_volatility": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "n", "kind": "keyword_only", "default": "20"},
+   {"name": "threshold", "kind": "keyword_only", "default": "25"},
+   {"name": "band", "kind": "keyword_only", "default": "0"},
+   {"name": "ppy", "kind": "keyword_only", "default": "365.25"},
+   {"name": "lag", "kind": "keyword_only", "default": "0"}
+  ],
+  "sim_costs": [
+   {"name": "order_fee", "kind": "keyword_only", "default": "None"},
+   {"name": "dca_fee", "kind": "keyword_only", "default": "None"}
+  ],
+  "simulation": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "strategy", "kind": "positional_or_keyword", "default": null},
+   {"name": "start_value", "kind": "keyword_only", "default": "10000"},
+   {"name": "costs", "kind": "keyword_only", "default": "sim_costs()"},
+   {"name": "dca", "kind": "keyword_only", "default": "None"},
+   {"name": "rebalance", "kind": "keyword_only", "default": "None"},
+   {"name": "splits", "kind": "keyword_only", "default": "None"},
+   {"name": "tax", "kind": "keyword_only", "default": "None"},
+   {"name": "funds", "kind": "keyword_only", "default": "None"},
+   {"name": "risk_free", "kind": "keyword_only", "default": "0"},
+   {"name": "fractions", "kind": "keyword_only", "default": "True"},
+   {"name": "liquidate", "kind": "keyword_only", "default": "False"},
+   {"name": "details", "kind": "keyword_only", "default": "False"}
+  ],
+  "split_rule": [
+   {"name": "thresh", "kind": "positional_or_keyword", "default": "_MISSING", "default_known": false}
+  ],
+  "strategy_add_asset": [
+   {"name": "strategy", "kind": "positional_or_keyword", "default": null},
+   {"name": "name", "kind": "positional_or_keyword", "default": null},
+   {"name": "asset", "kind": "positional_or_keyword", "default": null}
+  ],
+  "strategy_from_weights": [
+   {"name": "weights", "kind": "positional_or_keyword", "default": null},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "strategy_remove_asset": [
+   {"name": "strategy", "kind": "positional_or_keyword", "default": null},
+   {"name": "name", "kind": "positional_or_keyword", "default": null}
+  ],
+  "strategy_update_asset": [
+   {"name": "strategy", "kind": "positional_or_keyword", "default": null},
+   {"name": "name", "kind": "positional_or_keyword", "default": null},
+   {"name": "updates", "kind": "var_keyword", "default": null}
+  ],
+  "strategy_validate": [
+   {"name": "strategy", "kind": "positional_or_keyword", "default": null},
+   {"name": "data", "kind": "keyword_only", "default": "None"}
+  ],
+  "summary": [
+   {"name": "object", "kind": "positional_or_keyword", "default": null},
+   {"name": "args", "kind": "var_positional", "default": null},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "tactical_blend": [
+   {"name": "args", "kind": "var_positional", "default": null},
+   {"name": "shares", "kind": "keyword_only", "default": "None"},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "tactical_conditional_volatility": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "weights", "kind": "positional_or_keyword", "default": null},
+   {"name": "safe", "kind": "positional_or_keyword", "default": null},
+   {"name": "base", "kind": "keyword_only", "default": "1"},
+   {"name": "upper", "kind": "keyword_only", "default": "0.8"},
+   {"name": "lower", "kind": "keyword_only", "default": "0.2"},
+   {"name": "target", "kind": "keyword_only", "default": "None"},
+   {"name": "window", "kind": "keyword_only", "default": "63"},
+   {"name": "min_exposure", "kind": "keyword_only", "default": "0"},
+   {"name": "max_exposure", "kind": "keyword_only", "default": "1"},
+   {"name": "min_history", "kind": "keyword_only", "default": "3"},
+   {"name": "scaling", "kind": "keyword_only", "default": "('inverse', 'fixed')"},
+   {"name": "high_exposure", "kind": "keyword_only", "default": "None"},
+   {"name": "low_exposure", "kind": "keyword_only", "default": "None"},
+   {"name": "every", "kind": "keyword_only", "default": "('month', 'week', 'day', 'quarter')"},
+   {"name": "ppy", "kind": "keyword_only", "default": "None"}
+  ],
+  "tactical_glidepath": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "from_", "kind": "positional_or_keyword", "default": "_MISSING", "default_known": false},
+   {"name": "to", "kind": "positional_or_keyword", "default": "_MISSING", "default_known": false},
+   {"name": "start", "kind": "keyword_only", "default": "None"},
+   {"name": "end", "kind": "keyword_only", "default": "None"},
+   {"name": "every", "kind": "keyword_only", "default": "('year', 'quarter', 'month')"},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "tactical_rotation": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "assets", "kind": "positional_or_keyword", "default": null},
+   {"name": "top", "kind": "keyword_only", "default": "1"},
+   {"name": "safe", "kind": "keyword_only", "default": "None"},
+   {"name": "absolute", "kind": "keyword_only", "default": "True"},
+   {"name": "canary", "kind": "keyword_only", "default": "None"},
+   {"name": "breadth", "kind": "keyword_only", "default": "None"},
+   {"name": "lookbacks", "kind": "keyword_only", "default": "(1, 3, 6, 12)"},
+   {"name": "type", "kind": "keyword_only", "default": "('average', '13612w')"},
+   {"name": "every", "kind": "keyword_only", "default": "('month', 'week', 'quarter')"},
+   {"name": "weighting", "kind": "keyword_only", "default": "('equal', 'inverse_vol')"}
+  ],
+  "tactical_rules": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "rules", "kind": "positional_or_keyword", "default": null},
+   {"name": "default", "kind": "positional_or_keyword", "default": null},
+   {"name": "env", "kind": "keyword_only", "default": "None"}
+  ],
+  "tactical_simulation": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "weights", "kind": "positional_or_keyword", "default": null},
+   {"name": "rebalance", "kind": "keyword_only", "default": "('switch', 'month', 'quarter', 'year')"},
+   {"name": "tolerance", "kind": "keyword_only", "default": "None"},
+   {"name": "tolerance_type", "kind": "keyword_only", "default": "('absolute', 'relative')"},
+   {"name": "lag", "kind": "keyword_only", "default": "1"},
+   {"name": "asset_args", "kind": "keyword_only", "default": "None"},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "tactical_target_volatility": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "weights", "kind": "positional_or_keyword", "default": null},
+   {"name": "safe", "kind": "positional_or_keyword", "default": null},
+   {"name": "target", "kind": "keyword_only", "default": "10"},
+   {"name": "window", "kind": "keyword_only", "default": "63"},
+   {"name": "max_exposure", "kind": "keyword_only", "default": "1"},
+   {"name": "every", "kind": "keyword_only", "default": "('month', 'week', 'day', 'quarter')"},
+   {"name": "ppy", "kind": "keyword_only", "default": "None"}
+  ],
+  "tail_covar": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "system", "kind": "positional_or_keyword", "default": null},
+   {"name": "assets", "kind": "positional_or_keyword", "default": null},
+   {"name": "state", "kind": "keyword_only", "default": "None"},
+   {"name": "q", "kind": "keyword_only", "default": "0.05"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"}
+  ],
+  "tail_dependence": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "y", "kind": "positional_or_keyword", "default": null},
+   {"name": "q", "kind": "keyword_only", "default": "(0.01, 0.025, 0.05, 0.1, 0.2)"}
+  ],
+  "tail_regression": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "asset", "kind": "positional_or_keyword", "default": null},
+   {"name": "drivers", "kind": "positional_or_keyword", "default": null},
+   {"name": "quantiles", "kind": "keyword_only", "default": "(0.05, 0.25, 0.5, 0.75, 0.95)"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('week', 'day', 'month')"},
+   {"name": "B", "kind": "keyword_only", "default": "199"},
+   {"name": "block", "kind": "keyword_only", "default": "None"},
+   {"name": "seed", "kind": "keyword_only", "default": "None"}
+  ],
+  "tax_profile": [
+   {"name": "rate", "kind": "keyword_only", "default": "26.375"},
+   {"name": "church_tax", "kind": "keyword_only", "default": "0"},
+   {"name": "sparer_pauschbetrag", "kind": "keyword_only", "default": "1000"},
+   {"name": "private_sale_threshold", "kind": "keyword_only", "default": "1000"},
+   {"name": "base_rate", "kind": "keyword_only", "default": "None"},
+   {"name": "guenstigerpruefung", "kind": "keyword_only", "default": "False"},
+   {"name": "income", "kind": "keyword_only", "default": "None"},
+   {"name": "harvest", "kind": "keyword_only", "default": "None"}
+  ],
+  "tax_tariff": [
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "view_mean": [
+   {"name": "var", "kind": "positional_or_keyword", "default": null},
+   {"name": "value", "kind": "positional_or_keyword", "default": null},
+   {"name": "op", "kind": "keyword_only", "default": "('=', '<=', '>=')"}
+  ],
+  "view_prob": [
+   {"name": "expr", "kind": "positional_or_keyword", "default": null},
+   {"name": "value", "kind": "positional_or_keyword", "default": null},
+   {"name": "op", "kind": "keyword_only", "default": "('=', '<=', '>=')"}
+  ],
+  "view_vol": [
+   {"name": "var", "kind": "positional_or_keyword", "default": null},
+   {"name": "value", "kind": "positional_or_keyword", "default": null},
+   {"name": "op", "kind": "keyword_only", "default": "('=', '<=', '>=')"}
+  ],
+  "withdrawal_cohorts": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "price", "kind": "keyword_only", "default": "'value'"},
+   {"name": "inflation", "kind": "keyword_only", "default": "None"},
+   {"name": "years", "kind": "keyword_only", "default": "30"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('year', 'quarter', 'month')"},
+   {"name": "step", "kind": "keyword_only", "default": "('month', 'year')"},
+   {"name": "wrap", "kind": "keyword_only", "default": "False"},
+   {"name": "cape", "kind": "keyword_only", "default": "None"},
+   {"name": "base_rate", "kind": "keyword_only", "default": "None"},
+   {"name": "inflation_type", "kind": "keyword_only", "default": "('level', 'rate_pa')"}
+  ],
+  "withdrawal_horizon": [
+   {"name": "type", "kind": "keyword_only", "default": "('fixed', 'uniform', 'discrete', 'normal', 'triangular', 'sample')"},
+   {"name": "years", "kind": "keyword_only", "default": "None"},
+   {"name": "prob", "kind": "keyword_only", "default": "None"},
+   {"name": "min", "kind": "keyword_only", "default": "None"},
+   {"name": "max", "kind": "keyword_only", "default": "None"},
+   {"name": "mean", "kind": "keyword_only", "default": "None"},
+   {"name": "sd", "kind": "keyword_only", "default": "None"},
+   {"name": "mode", "kind": "keyword_only", "default": "None"},
+   {"name": "seed", "kind": "keyword_only", "default": "1"}
+  ],
+  "withdrawal_max_rate": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "rule", "kind": "keyword_only", "default": "None"},
+   {"name": "success", "kind": "keyword_only", "default": "0.95"},
+   {"name": "lower", "kind": "keyword_only", "default": "0.5"},
+   {"name": "upper", "kind": "keyword_only", "default": "20"},
+   {"name": "tol", "kind": "keyword_only", "default": "0.005"},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "withdrawal_paths": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "column", "kind": "keyword_only", "default": "None"},
+   {"name": "strategy", "kind": "keyword_only", "default": "None"},
+   {"name": "inflation", "kind": "keyword_only", "default": "None"},
+   {"name": "inflation_type", "kind": "keyword_only", "default": "('level', 'rate_pa')"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('year', 'quarter', 'month')"},
+   {"name": "dates", "kind": "keyword_only", "default": "None"},
+   {"name": "start", "kind": "keyword_only", "default": "'2000-01-01'"},
+   {"name": "cape", "kind": "keyword_only", "default": "None"}
+  ],
+  "withdrawal_perfect_rate": [
+   {"name": "real_returns", "kind": "positional_or_keyword", "default": null},
+   {"name": "legacy", "kind": "keyword_only", "default": "0"}
+  ],
+  "withdrawal_rule": [
+   {"name": "type", "kind": "keyword_only", "default": "('constant', 'percent', 'vanguard', 'guyton_klinger', 'floor_ceiling', 'clyatt', 'ratchet', 'endowment', 'one_over_n', 'vpw', 'abw', 'cape', 'sensible', 'hebeler')"},
+   {"name": "rate", "kind": "keyword_only", "default": "4"},
+   {"name": "ceiling", "kind": "keyword_only", "default": "None"},
+   {"name": "floor", "kind": "keyword_only", "default": "None"},
+   {"name": "cut", "kind": "keyword_only", "default": "10"},
+   {"name": "raise_", "kind": "keyword_only", "default": "10"},
+   {"name": "cpr_years", "kind": "keyword_only", "default": "15"},
+   {"name": "inflation_cap", "kind": "keyword_only", "default": "inf"},
+   {"name": "skip_inflation", "kind": "keyword_only", "default": "True"},
+   {"name": "smoothing", "kind": "keyword_only", "default": "None"},
+   {"name": "exp_return", "kind": "keyword_only", "default": "None"},
+   {"name": "stock_share", "kind": "keyword_only", "default": "60"},
+   {"name": "age", "kind": "keyword_only", "default": "65"},
+   {"name": "max_age", "kind": "keyword_only", "default": "100"},
+   {"name": "fv", "kind": "keyword_only", "default": "0"},
+   {"name": "cape_a", "kind": "keyword_only", "default": "1.75"},
+   {"name": "cape_b", "kind": "keyword_only", "default": "0.5"},
+   {"name": "ratchet_threshold", "kind": "keyword_only", "default": "1.5"},
+   {"name": "ratchet_gap", "kind": "keyword_only", "default": "3"},
+   {"name": "extra", "kind": "keyword_only", "default": "10"},
+   {"name": "floor95", "kind": "keyword_only", "default": "95"},
+   {"name": "min_real", "kind": "keyword_only", "default": "0"},
+   {"name": "max_real", "kind": "keyword_only", "default": "inf"},
+   {"name": "max_rate", "kind": "keyword_only", "default": "100"},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "withdrawal_simulation": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "rule", "kind": "keyword_only", "default": "None"},
+   {"name": "start_value", "kind": "keyword_only", "default": "1000000.0"},
+   {"name": "inflation", "kind": "keyword_only", "default": "0"},
+   {"name": "frequency", "kind": "keyword_only", "default": "('year', 'quarter', 'month')"},
+   {"name": "strategy", "kind": "keyword_only", "default": "None"},
+   {"name": "years", "kind": "keyword_only", "default": "None"},
+   {"name": "timing", "kind": "keyword_only", "default": "('start', 'end')"},
+   {"name": "income", "kind": "keyword_only", "default": "None"},
+   {"name": "tax", "kind": "keyword_only", "default": "None"},
+   {"name": "partial_exemption", "kind": "keyword_only", "default": "30.0"},
+   {"name": "base_rate", "kind": "keyword_only", "default": "3.2"},
+   {"name": "vorabpauschale", "kind": "keyword_only", "default": "True"},
+   {"name": "sale_cost", "kind": "keyword_only", "default": "0.0"},
+   {"name": "cost_basis", "kind": "keyword_only", "default": "100.0"},
+   {"name": "loss_carryforward", "kind": "keyword_only", "default": "0.0"},
+   {"name": "gamma", "kind": "keyword_only", "default": "2"},
+   {"name": "keep_paths", "kind": "keyword_only", "default": "True"},
+   {"name": "horizon", "kind": "keyword_only", "default": "None"}
+  ]
+ },
+ "methods": {
+  "plot.SimLevAnalysis": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "type", "kind": "keyword_only", "default": "('overview', 'growth', 'drawdown', 'rolling', 'annual', 'monthly')"},
+   {"name": "series", "kind": "keyword_only", "default": "1"},
+   {"name": "metric", "kind": "keyword_only", "default": "'cagr'"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevBackcast": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "log", "kind": "keyword_only", "default": "True"},
+   {"name": "width", "kind": "keyword_only", "default": "720"},
+   {"name": "height", "kind": "keyword_only", "default": "450"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevBackcastFit": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "width", "kind": "keyword_only", "default": "720"},
+   {"name": "height", "kind": "keyword_only", "default": "360"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevBootstrapStudy": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "metric", "kind": "keyword_only", "default": "'cagr'"},
+   {"name": "width", "kind": "keyword_only", "default": "640"},
+   {"name": "height", "kind": "keyword_only", "default": "420"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevCoVaR": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "width", "kind": "keyword_only", "default": "800"},
+   {"name": "height", "kind": "keyword_only", "default": "450"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevDependence": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "type", "kind": "keyword_only", "default": "('overview', 'rolling', 'tail', 'conditional', 'scatter')"},
+   {"name": "pair", "kind": "keyword_only", "default": "1"},
+   {"name": "condition", "kind": "keyword_only", "default": "1"},
+   {"name": "width", "kind": "keyword_only", "default": "900"},
+   {"name": "height", "kind": "keyword_only", "default": "650"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevFrontier": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "width", "kind": "keyword_only", "default": "700"},
+   {"name": "height", "kind": "keyword_only", "default": "480"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevGoalPlan": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevHMM": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "data", "kind": "keyword_only", "default": "None"},
+   {"name": "width", "kind": "keyword_only", "default": "900"},
+   {"name": "height", "kind": "keyword_only", "default": "380"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevHeatmap": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevOptimization": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "width", "kind": "keyword_only", "default": "700"},
+   {"name": "height", "kind": "keyword_only", "default": "420"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevPBO": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevParamSearch": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "metric", "kind": "keyword_only", "default": "None"},
+   {"name": "params", "kind": "keyword_only", "default": "None"},
+   {"name": "fun", "kind": "keyword_only", "default": "<function max>"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevResult": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "style", "kind": "keyword_only", "default": "('full', 'compact', 'custom')"},
+   {"name": "panels", "kind": "keyword_only", "default": "None"},
+   {"name": "compare", "kind": "keyword_only", "default": "None"},
+   {"name": "colors", "kind": "keyword_only", "default": "None"},
+   {"name": "width", "kind": "keyword_only", "default": "1400"},
+   {"name": "height", "kind": "keyword_only", "default": "None"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevSensitivity": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "metric", "kind": "keyword_only", "default": "'cagr'"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevSignalAnalysis": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevTailRegression": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "width", "kind": "keyword_only", "default": "900"},
+   {"name": "height", "kind": "keyword_only", "default": "400"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevWalkForward": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevWeights": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "width", "kind": "keyword_only", "default": "900"},
+   {"name": "height", "kind": "keyword_only", "default": "420"},
+   {"name": "main", "kind": "keyword_only", "default": "'Zielgewichte'"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "plot.SimLevWithdrawal": [
+   {"name": "x", "kind": "positional_or_keyword", "default": null},
+   {"name": "probs", "kind": "keyword_only", "default": "(0.05, 0.25, 0.5, 0.75, 0.95)"},
+   {"name": "width", "kind": "keyword_only", "default": "900"},
+   {"name": "height", "kind": "keyword_only", "default": "380"},
+   {"name": "file", "kind": "keyword_only", "default": "None"}
+  ],
+  "print.SimLevAnalysis": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevBackcast": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "print.SimLevBackcastFit": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevBootstrapStudy": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevCPCV": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevCoVaR": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevDSR": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevDataCheck": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null},
+   {"name": "max_issues", "kind": "positional_or_keyword", "default": "25"}
+  ],
+  "print.SimLevDcaPlan": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevDependence": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevFrontier": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevFundsCosts": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevGoalPlan": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevHMM": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevHarvestRule": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevHeatmap": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevHorizon": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevIncomeRate": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevIncomeTariff": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevLumpSum": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevOptimization": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevPBO": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevParamRange": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevParamSearch": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "print.SimLevParamSpace": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevRealityCheck": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevRebalancePlan": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevResult": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevScenarios": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevSensitivity": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevSignalAnalysis": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevSimCosts": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevSplitRule": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevTailRegression": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevTaxProfile": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevTaxTariff": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevWalkForward": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevWeights": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevWithdrawal": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null},
+   {"name": "kwargs", "kind": "var_keyword", "default": null}
+  ],
+  "print.asset_config": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.bootstrap_config": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.bootstrap_result": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.strategy": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.summary.SimLevBootstrapStudy": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.summary.SimLevParamSearch": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.summary.SimLevResult": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.summary.SimLevWithdrawal": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.withdrawal_paths": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.withdrawal_rule": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "summary.SimLevAnalysis": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "summary.SimLevBackcastFit": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "summary.SimLevBootstrapStudy": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null},
+   {"name": "metrics", "kind": "positional_or_keyword", "default": "('cagr', 'ttwror', 'max_drawdown', 'sharpe', 'ulcer_index', 'final_value')"},
+   {"name": "probs", "kind": "positional_or_keyword", "default": "(0.05, 0.25, 0.5, 0.75, 0.95)"}
+  ],
+  "summary.SimLevParamSearch": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null},
+   {"name": "top", "kind": "positional_or_keyword", "default": "10"}
+  ],
+  "summary.SimLevResult": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null},
+   {"name": "verbose", "kind": "positional_or_keyword", "default": "False"}
+  ],
+  "summary.SimLevWithdrawal": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null},
+   {"name": "probs", "kind": "positional_or_keyword", "default": "(0.05, 0.25, 0.5, 0.75, 0.95)"}
+  ],
+  "summary.asset_config": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "summary.strategy": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ]
+ },
+ "classes": [
+  "AssetConfig",
+  "BootstrapConfig",
+  "BootstrapResult",
+  "RVector",
+  "SimLevAnalysis",
+  "SimLevBackcast",
+  "SimLevBackcastFit",
+  "SimLevBootstrapStudy",
+  "SimLevBoundsPercent",
+  "SimLevCPCV",
+  "SimLevCoVaR",
+  "SimLevDSR",
+  "SimLevDataCheck",
+  "SimLevDcaPlan",
+  "SimLevDependence",
+  "SimLevFrontier",
+  "SimLevFundsCosts",
+  "SimLevGoalPlan",
+  "SimLevHMM",
+  "SimLevHarvestRule",
+  "SimLevHeatmap",
+  "SimLevHorizon",
+  "SimLevIncomeRate",
+  "SimLevIncomeTariff",
+  "SimLevLumpSum",
+  "SimLevOptimization",
+  "SimLevPBO",
+  "SimLevParamRange",
+  "SimLevParamSearch",
+  "SimLevParamSpace",
+  "SimLevPlot",
+  "SimLevRealityCheck",
+  "SimLevRebalancePlan",
+  "SimLevResult",
+  "SimLevScenarios",
+  "SimLevSensitivity",
+  "SimLevSignalAnalysis",
+  "SimLevSimCosts",
+  "SimLevSplitRule",
+  "SimLevSummary",
+  "SimLevTailRegression",
+  "SimLevTaxProfile",
+  "SimLevTaxTariff",
+  "SimLevWalkForward",
+  "SimLevWeights",
+  "SimLevWithdrawal",
+  "Strategy",
+  "SummarySimLevBootstrapStudy",
+  "SummarySimLevParamSearch",
+  "SummarySimLevWithdrawal",
+  "WithdrawalPaths",
+  "WithdrawalRule"
+ ],
+ "other": [
+  "NA"
+ ]
+}

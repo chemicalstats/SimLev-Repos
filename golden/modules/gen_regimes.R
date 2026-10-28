@@ -83,13 +83,13 @@ ref_case("states", "hmm <- regime_hmm(d, 'aktien', k = 2); list(regime_states(hm
          inputs = list(d = d, dq = dq),
          jl = paste0(JH, 'result = [RG.regime_states(hmm, d), RG.regime_states(hmm, dq; output = "probability"), RG.regime_states(hmm, dq; lag = 0),\n  RG.regime_states(hmm, dq; output = "probability", state_prob = 1, lag = 7), RG.regime_states(hmm, vcat(Union{Missing,Date}[dq[1:3]...], [missing]))]'))
 ref_case("states_smoothed", "hmm <- regime_hmm(d, 'aktien', k = 2); list(regime_states(hmm, dq, 'smoothed'), regime_states(hmm, format(dq), 'smoothed', 'probability'))",
-         paste0(PH, "result = [RG.regime_states(hmm, dq, 'smoothed'), RG.regime_states(hmm, [str(v) for v in dq], 'smoothed', 'probability')]"),
+         paste0(PH, "result = [RG.regime_states(hmm, dq, type='smoothed'), RG.regime_states(hmm, [str(v) for v in dq], type='smoothed', output='probability')]"),
          inputs = list(d = d, dq = dq),
          jl = paste0(JH, 'result = [RG.regime_states(hmm, dq; type = "smoothed"), RG.regime_states(hmm, Dates.format.(dq, "yyyy-mm-dd"); type = "smoothed", output = "probability")]'))
 ref_case("states_viterbi", "hmm <- regime_hmm(d, 'aktien', k = 2); regime_states(hmm, data.frame(date = dq), 'viterbi')",
-         paste0(PH, "result = RG.regime_states(hmm, pd.DataFrame({'date': dq}), 'viterbi')"), inputs = list(d = d, dq = dq),
+         paste0(PH, "result = RG.regime_states(hmm, pd.DataFrame({'date': dq}), type='viterbi')"), inputs = list(d = d, dq = dq),
          jl = paste0(JH, 'result = RG.regime_states(hmm, SL.RFrame("date" => dq); type = "viterbi")'))
 ref_case("states_err", "hmm <- regime_hmm(d, 'aktien', k = 2); regime_states(hmm, dq, 'viterbi', 'probability')",
-         paste0(PH, "result = RG.regime_states(hmm, dq, 'viterbi', 'probability')"), inputs = list(d = d, dq = dq),
+         paste0(PH, "result = RG.regime_states(hmm, dq, type='viterbi', output='probability')"), inputs = list(d = d, dq = dq),
          jl = paste0(JH, 'result = RG.regime_states(hmm, dq; type = "viterbi", output = "probability")'))
 ref_done()

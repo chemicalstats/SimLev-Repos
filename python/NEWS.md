@@ -1,5 +1,14 @@
 # simlev (Python) – Änderungen je Version
 
+## simlev (Python) 0.9.0
+
+Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Namen: einheitliche Benennung der Funktionen und Argumente in allen drei Sprachen (Tabelle alt -> neu im Abschnitt 0.5.0).
+- Simulation: simulation() mit Bausteinen sim_costs, dca_plan, rebalance_plan, split_rule, tax_profile und funds_costs; Pfadnotation wie "dca.value" für Raster und Suchräume.
+- Aufrufer: Bootstrap-Studien, Parametersuche, Sensitivitäten und Planung gehen über simulation(); Optionen nur noch als Schlüsselwort.
+- Schnittstelle: Stand der drei Sprachen eingefroren und automatisch abgeglichen.
+
 ## simlev (Python) 0.8.0
 
 Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -42,6 +51,117 @@ R-Pakets vor den Korrekturen (Commit 54b5b4f). Zwischenversionen 0.2 bis
 0.4 der Python-Fassung gibt es nicht; alle Änderungen sind in 0.5.0
 zusammengefasst. Die Begründungen der fachlichen Änderungen stehen in
 [`r/NEWS.md`](../r/NEWS.md), Abschnitt „SimLev 0.5.0“.
+
+### Eingefrorene Schnittstelle (Etappe 6.6)
+
+Die Schnittstelle 0.5.0 ist in `tools/api_snapshot/frozen/py.json` festgehalten und wird von `tests/test_api_frozen.py` und `tools/api_snapshot/run.sh --check` geprüft; Änderungen nur über `run.sh --freeze` mit Eintrag in `tools/api_snapshot/CHANGES.md`.
+
+### Umbenennungen (Etappe 6)
+
+Mechanisch umbenannt mit `tools/rename.py` nach `tools/rename_map.tsv`; die Rechnung ist unverändert (Nachweis über die Referenzfälle). Die alten Namen gibt es nicht mehr.
+
+| Art | gilt für | alt | neu |
+|---|---|---|---|
+| Funktion | – | `align_series` | `series_align` |
+| Funktion | – | `align_macro` | `series_align_macro` |
+| Funktion | – | `check_series` | `series_check` |
+| Funktion | – | `splice_series` | `series_splice` |
+| Funktion | – | `leveraged_series` | `series_leverage` |
+| Funktion | – | `convert_currency` | `series_convert_currency` |
+| Funktion | – | `deflate` | `series_deflate` |
+| Funktion | – | `set_expected_return` | `series_shift_return` |
+| Funktion | – | `total_return_index` | `index_total_return` |
+| Funktion | – | `money_market_index` | `index_money_market` |
+| Funktion | – | `currency_hedged_index` | `index_currency_hedged` |
+| Funktion | – | `bond_index_from_yields` | `index_bond` |
+| Funktion | – | `add_asset` | `strategy_add_asset` |
+| Funktion | – | `remove_asset` | `strategy_remove_asset` |
+| Funktion | – | `update_asset` | `strategy_update_asset` |
+| Funktion | – | `validate_strategy` | `strategy_validate` |
+| Funktion | – | `compute_rebal_trigger` | `rebalance_trigger` |
+| Funktion | – | `block_length` | `bootstrap_block_length` |
+| Funktion | – | `pooled_bootstrap` | `bootstrap_pooled` |
+| Funktion | – | `validate_bootstrap` | `bootstrap_validate` |
+| Funktion | – | `study_metrics` | `bootstrap_study_metrics` |
+| Funktion | – | `validate_dependence` | `dependence_validate` |
+| Funktion | – | `dcc_fit` | `dependence_dcc` |
+| Funktion | – | `fit_copula` | `copula_fit` |
+| Funktion | – | `covar_analysis` | `tail_covar` |
+| Funktion | – | `quantile_reg` | `quantile_regression` |
+| Funktion | – | `copula_scenarios` | `scenario_copula` |
+| Funktion | – | `crisis_replay` | `scenario_crisis` |
+| Funktion | – | `entropy_pooling` | `scenario_entropy_pooling` |
+| Funktion | – | `efficient_frontier` | `portfolio_frontier` |
+| Funktion | – | `risk_contributions` | `portfolio_risk_contributions` |
+| Funktion | – | `rolling_optimization` | `portfolio_rolling` |
+| Funktion | – | `cpcv_portfolio` | `portfolio_cpcv` |
+| Funktion | – | `probabilistic_sharpe` | `sharpe_probabilistic` |
+| Funktion | – | `deflated_sharpe` | `sharpe_deflated` |
+| Funktion | – | `min_track_record` | `sharpe_min_track_record` |
+| Funktion | – | `pbo` | `overfit_pbo` |
+| Funktion | – | `reality_check` | `overfit_reality_check` |
+| Funktion | – | `walk_forward` | `overfit_walk_forward` |
+| Funktion | – | `plateau` | `param_plateau` |
+| Funktion | – | `target_volatility` | `tactical_target_volatility` |
+| Funktion | – | `conditional_volatility` | `tactical_conditional_volatility` |
+| Funktion | – | `glidepath` | `tactical_glidepath` |
+| Funktion | – | `blend_weights` | `tactical_blend` |
+| Funktion | – | `leverage_sensitivity` | `sensitivity_leverage` |
+| Funktion | – | `rebalancing_sensitivity` | `sensitivity_rebalancing` |
+| Funktion | – | `horizon_model` | `withdrawal_horizon` |
+| Funktion | – | `perfect_withdrawal_rate` | `withdrawal_perfect_rate` |
+| Funktion | – | `goal_optimize` | `planning_goal` |
+| Funktion | – | `lumpsum_vs_dca` | `planning_lumpsum_vs_dca` |
+| Funktion | – | `return_heatmap` | `result_heatmap` |
+| Funktion | – | `deep_analysis` | `result_analysis` |
+| Funktion | – | `read_tax_tariff` | `tax_tariff` |
+| Argument | `asset_config` | `action_type` | `trading` |
+| Argument | `asset_config`, `withdrawal_simulation` | `asset_bonus` | `partial_exemption` |
+| Argument | `asset_config` | `asset_share` | `share` |
+| Argument | `asset_config` | `asset_spread` | `spread` |
+| Argument | `asset_config` | `asset_start` | `start` |
+| Argument | `bootstrap_data`, `bootstrap_study`, `withdrawal_paths` | `start_date` | `start` |
+| Argument | `portfolio_rolling` | `x` | `data` |
+| Argumente | `withdrawal_simulation` | `tax_mode`, `tax_rate`, `sparer_pauschbetrag` | `tax = tax_profile(rate, sparer_pauschbetrag)` |
+
+Interne Helfer der Engine (nicht exportiert) folgen dem Namensschema: in R mit Punkt, in Python und Julia mit `_`: `apply_spread`, `calculate_buy_signal`, `calculate_fifo_price`, `calculate_fifo_vorabpauschale`, `calculate_flat_rate`, `calculate_fund_fees`, `calculate_paragraph_20_tax`, `calculate_private_sale_tax`, `calculate_sell_count`, `calculate_sell_signal`, `calculate_split_flags`, `calculate_vorabpauschale_tax`, `forward_asset_split`, `handle_year_change`, `perform_asset_split`, `perform_gain_harvest`, `perform_trade_buy`, `perform_trade_sell`, `reverse_asset_split`, `update_fifo_front`.
+
+### Aufrufer von `simulation()`, Argumentordnung (Etappe 6.4, 6.5)
+
+- **Fondsmodus mit eigenen Steuern** (Korrektur zu 6.3): `simulation(funds = funds_costs(...), tax = tax_profile(...))` ist wieder erlaubt; der Fondsmodus steht für einen eigenen Wrapper (etwa ein Zertifikat) mit eigenen Kosten und eigener Steuer. Aus `tax_profile()` wirken dort wie früher mit `tax_mode = "funds"` der Satz `rate` bzw. die Kirchensteuer `church_tax` (Satz nach § 32d Abs. 1 EStG) für die Steuer auf den Gesamtgewinn bei Liquidation; `harvest` und `income_tariff()` wirken nicht (Warnung), die übrigen Angaben still nicht. Ohne `tax` gilt wie bisher 26,375 %. Referenzfall `ch12` rechnet wieder wie vor 6.3.
+- **`sim_args` mit Bausteinen** in `bootstrap_study()`, `param_search()`, `param_bootstrap()`, `sensitivity_grid()`, `sensitivity_leverage()`, `sensitivity_rebalancing()`, `planning_lumpsum_vs_dca()` und den Zusatzargumenten von `tactical_simulation()`: Argumente von `simulation()`, z. B. `sim_args = list(start_value = 1000, tax = tax_profile(), dca = dca_plan(100, 1))`. Die Aufrufer gehen über `simulation()`. Alte flache Namen sind ein Fehler, der den Baustein nennt: `sensitivity_grid: dca_value gibt es nicht mehr; bitte dca = dca_plan(value = …) (Pfad "dca.value").`; unbekannte Namen ebenso (`unbekanntes Argument … für simulation()`).
+- **Pfade zu Bausteinparametern** (F1) in Rastern (`sensitivity_grid(grid = )`), Suchräumen (`param_space()` ohne `builder`), den `args` einer Spezifikation und in `sim_args`: `"dca.value"`, `"rebalance.thresh"`, `"tax.rate"`, `"tax.church_tax"`, für Teilbausteine `"tax.income.marginal_rate"`, `"tax.harvest.day"`. Ein Pfad baut den Baustein für jeden Lauf neu, Grundwerte aus dem Baustein in `sim_args` (ohne ihn die Standardwerte des Konstruktors). Ergebnisspalten heißen wie der Pfad (bisher wie das flache Argument, z. B. `balance_unit` → `rebalance.unit`). Unbekannte Pfade nennen die möglichen Bausteine und Parameter. `sensitivity_rebalancing()` setzt Frequenz, Versatz und Band über diese Pfade, die übrigen Angaben eines `rebalance_plan()` aus `sim_args` bleiben erhalten.
+- **`withdrawal_simulation(tax = tax_profile())`** (F2) statt `tax_mode`, `tax_rate`, `sparer_pauschbetrag`: ausgewertet werden `rate` und `sparer_pauschbetrag`; was die Entnahmephase nicht abbildet (`church_tax`, `private_sale_threshold`, `base_rate`, `guenstigerpruefung`, `income`, `harvest`), ist ein Fehler. `partial_exemption`, `vorabpauschale`, `cost_basis`, `loss_carryforward`, `sale_cost` und der Basiszins `base_rate` (auch als Matrix) bleiben eigene Argumente; das Ergebniselement `tax_mode` bleibt (`"person"`/`"none"`).
+- **`seed`, `cores`, `progress` am Ende** (Reihenfolge `…, max_tries, chunk_size, seed, cores, progress`): `bootstrap()`, `bootstrap_study()`, `param_search()` (`keep_returns` vor `seed`, `cores`), `sensitivity_grid()` (`keep_results` vor `cores`), `sharpe_test()` (`ppy` vor `seed`).
+- **`portfolio_rolling(data, …)`** statt `x` (F4: das erste Argument ist nur eine Tabelle mit Datumsspalte).
+- **Python: Nicht-Pflichtargumente nur als Schlüsselwort** (`*` in der Signatur, Anhang A Regel 5) in allen öffentlichen Funktionen mit R-Gegenstück, z. B. `asset_config(asset_class='etf', trading='bnh', share=0.6)`, `withdrawal_simulation(R, rule=withdrawal_rule(type='vanguard'))`, `bootstrap(d, cfg, method='stationary', n=100)`. Pflichtargumente bleiben positionell, auch wenn sie in R nach optionalen stehen (`bootstrap_study(data, config, method, n, strategies, *, …)`, `param_search(data, builder, space, *, …)`, `tactical_glidepath(data, from_, to, *, …)`). Nicht betroffen: die Nachbildungen von R-Basisfunktionen `set_seed`, `rng_kind`, `isna_strict`.
+
+### Bausteine für `simulation()` (Etappe 6.3)
+
+`simulation()` nimmt die Einstellungen jetzt als Bausteine (Anhang C):
+
+`simulation(data, strategy, start_value=10000, costs=sim_costs(), dca=None, rebalance=None, splits=None, tax=None, funds=None, risk_free=0, fractions=True, liquidate=False, details=False)`
+
+`None` heißt aus. Die flachen Argumente bis 6.2 gibt es nicht mehr (keine Aliasse); die Engine rechnet unverändert, alle Referenzfälle sind nach der Übersetzung bitgleich (Nachweis mit `golden/tools/blocks_from_flat.py`). Jeder Baustein prüft seine Argumente selbst und hat eine Druckausgabe.
+
+| bisher (flach) | jetzt |
+|---|---|
+| `order_fee`, `dca_fee` | `costs = sim_costs(order_fee, dca_fee)` |
+| `dca_mode = True`, `dca_value`, `dca_span`, `dca_days`, `dca_unit`, `dca_anchor`, `dca_start`, `dca_skip`, `balance_dca` | `dca = dca_plan(value, span, days, unit, anchor, start, skip, fill_deficits)` |
+| `balance_mode = True`, `balance_span`, `balance_days`, `balance_unit`, `balance_anchor`, `balance_start`, `balance_skip`, `balance_thresh`, `balance_thresh_type`, `event_col`, `event_mode`, `event_weight` | `rebalance = rebalance_plan(span, days, unit, anchor, start, skip, thresh, thresh_type, event_col, event_mode, event_weight)` |
+| nur Ereignisse (`balance_mode = False` mit `event_col`, `event_mode = "replace"`) | `rebalance_plan(event_col = , event_mode = "replace", skip = True)` |
+| `split_mode = True`, `split_thresh` | `splits = split_rule(thresh)` |
+| `tax_mode = "person"`, `tax_rate`, `church_tax`, `sparer_pauschbetrag`, `use_sparer_pauschbetrag = False`, `private_sale_threshold`, `base_rate`, `base_rate_flex` mit `base_rate_data`, `use_guenstigerpruefung` | `tax = tax_profile(rate, church_tax, sparer_pauschbetrag, private_sale_threshold, base_rate, guenstigerpruefung, income, harvest)`; `sparer_pauschbetrag = 0` heißt ohne Pauschbetrag, `base_rate` ist eine Zahl oder ein Spaltenname |
+| `marginal_tax_rate`, `include_soli_on_income_tax`, `soli_rate_income_tax` | `income = income_rate(marginal_rate, soli_rate)` (`soli_rate = 0` heißt ohne Soli) |
+| `taxable_income`, `tax_tariff` | `income = income_tariff(taxable_income, tariff)` |
+| `harvest_mode = True`, `harvest_day`, `harvest_loss_pot` | `harvest = harvest_rule(day, loss_pot)` |
+| `tax_mode = "funds"`, `funds_fee`, `bonus_fee` | `funds = funds_costs(fee, performance_fee)` |
+| `spread` (ohne Wirkung, nur Warnung) | entfällt; der Spread gilt je Asset (`asset_config(spread = )`) |
+
+Neue Regeln: `tax_profile()` mit `rate` und `church_tax` > 0 ist ein Fehler (mit Kirchensteuer gilt der Satz nach § 32d Abs. 1 EStG); `income` nimmt entweder `income_rate()` oder `income_tariff()`. Freibetrag-Ausschöpfung ohne persönliche Besteuerung lässt sich nicht mehr angeben (bisher wirkungslos); die Warnungen zu wirkungslosen flachen Argumenten entfallen. Fehlermeldungen der Prüfungen nennen den Baustein (z. B. `dca_plan: 'value' muss …`, `tax_profile: church_tax …`). Mit `sparer_pauschbetrag = 0` steht in `tax_report$sparer_pauschbetrag_annual` 0 (bisher der angegebene Betrag neben `use_sparer_pauschbetrag = False`).
+
+Weitere Änderungen: `plot(<SimLevWeights>, main = "Zielgewichte")` hat den Titel als Argument (R wie die Ports); das Modul `simlev.tax_tariff` heißt `simlev._tax_tariff` (die Funktion `simlev.tax_tariff()` bleibt öffentlich).
+
 
 ### Engine (`simulation()`)
 

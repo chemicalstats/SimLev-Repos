@@ -1,12 +1,12 @@
 """Renditeannahmen, Länder-Bootstrap und Zielplanung (Port von ``r/R/planning.R``).
 
-- :func:`set_expected_return`  verschiebt historische Renditen auf eine eigene
+- :func:`series_shift_return`  verschiebt historische Renditen auf eine eigene
   Renditeannahme (Streuung, Abhängigkeiten und Verlaufsmuster bleiben erhalten)
-- :func:`pooled_bootstrap`     stationärer Block-Bootstrap über mehrere Länder
+- :func:`bootstrap_pooled`     stationärer Block-Bootstrap über mehrere Länder
   (Anarkulova, Cederburg & O'Doherty 2022); liefert Pfade für
   ``withdrawal_simulation()``
 - :func:`portfolio_returns`    Periodenrenditen von Kandidaten-Portfolios
-- :func:`goal_optimize`        dynamische Programmierung: welches Portfolio
+- :func:`planning_goal`        dynamische Programmierung: welches Portfolio
   maximiert je Zeitpunkt und Vermögen die Wahrscheinlichkeit, ein Ziel zu
   erreichen (Das, Ostrov, Radhakrishnan & Srivastav 2020)
 """
@@ -32,7 +32,7 @@ from .deep_analysis import (
 )
 from .svg import _AnaSvg, _ana_hline, _ana_legend, _ana_panel, _ana_ramp, _ana_rect, _ana_svg_done
 
-__all__ = ["set_expected_return", "pooled_bootstrap", "portfolio_returns", "goal_optimize", "SimLevGoalPlan"]
+__all__ = ["series_shift_return", "bootstrap_pooled", "portfolio_returns", "planning_goal", "SimLevGoalPlan"]
 
 _NAN = NA_REAL   # R-NA_real_
 
@@ -63,10 +63,10 @@ def _as_num(a):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# set_expected_return
+# series_shift_return
 # ═══════════════════════════════════════════════════════════════════════════
 
-def set_expected_return(data, columns, target, type=("returns", "prices"), ppy=None):  # noqa: A002 - R-Name
+def series_shift_return(data, columns, target, *, type=("returns", "prices"), ppy=None):  # noqa: A002 - R-Name
     """Historische Renditen auf eine Renditeannahme verschieben.
 
     Verschiebt die logarithmierten Renditen jeder Spalte um eine Konstante, so
@@ -106,7 +106,7 @@ def set_expected_return(data, columns, target, type=("returns", "prices"), ppy=N
         for k, v in zip(tn, tv):
             tg.setdefault(k, float(v))
     n = len(data)
-    dd = _to_date_days(data["date"], "set_expected_return: data$date") if "date" in names else None
+    dd = _to_date_days(data["date"], "series_shift_return: data$date") if "date" in names else None
     if dd is not None:
         o = np.argsort(np.where(np.isnan(dd), np.inf, dd), kind="stable")
         o = np.concatenate([o[~np.isnan(dd[o])], o[np.isnan(dd[o])]])
@@ -186,7 +186,7 @@ def _paths_class():
 
 
 class WithdrawalPathsPB(RList):
-    """Ergebnis von :func:`pooled_bootstrap` (R-Klasse ``withdrawal_paths``), falls Teil B keine Klasse liefert."""
+    """Ergebnis von :func:`bootstrap_pooled` (R-Klasse ``withdrawal_paths``), falls Teil B keine Klasse liefert."""
 
     r_class = ("withdrawal_paths",)
 
@@ -194,7 +194,7 @@ class WithdrawalPathsPB(RList):
         return "<withdrawal_paths: %s>" % ", ".join(self.keys())
 
 
-def pooled_bootstrap(datasets, columns, weights=None, inflation=None, frequency=("year", "quarter", "month"),
+def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequency=("year", "quarter", "month"),
                      n=1000, years=30, L=None, country_weights=None, target=None, seed=None):
     """Länder-Bootstrap für lange Horizonte.
 
@@ -317,7 +317,7 @@ def _dgemv_n(A, x):
     return np.asarray(r.to_numpy() if isinstance(r, pd.DataFrame) else r, dtype=np.float64).ravel()
 
 
-def portfolio_returns(data, candidates, frequency=("year", "quarter", "month")):
+def portfolio_returns(data, candidates, *, frequency=("year", "quarter", "month")):
     """Periodenrenditen von Kandidaten-Portfolios (feste Gewichte, Rebalancing je Periode).
 
     Args:
@@ -353,7 +353,7 @@ def portfolio_returns(data, candidates, frequency=("year", "quarter", "month")):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# goal_optimize
+# planning_goal
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _approx2(x, y, xout):
@@ -373,7 +373,7 @@ def _fmt_vals(v):
     return ", ".join(str(s) for s in np.atleast_1d(out))
 
 
-def goal_optimize(returns, start_value, goal, horizon, contributions=0, n_grid=301, n_sim=5000, seed=None):
+def planning_goal(returns, start_value, goal, horizon, *, contributions=0, n_grid=301, n_sim=5000, seed=None):
     """Zielbasierte Allokation per dynamischer Programmierung (Das et al. 2020).
 
     Bestimmt für jeden Zeitpunkt und jedes Vermögen den Kandidaten, der die
@@ -520,7 +520,7 @@ def goal_optimize(returns, start_value, goal, horizon, contributions=0, n_grid=3
     se = math.sqrt(p_sim * (1 - p_sim) / n_sim)
     tol = 4 * math.sqrt(max(p_sim * (1 - p_sim), 1 / n_sim) / n_sim) + 0.01
     if abs(p_dp - p_sim) > tol:
-        warnings.warn(_sp("goal_optimize: DP-Wert %.1f %% weicht von der Vorwärtssimulation %.1f %% ab; "
+        warnings.warn(_sp("planning_goal: DP-Wert %.1f %% weicht von der Vorwärtssimulation %.1f %% ab; "
                           "probability ist der simulierte Wert (n_grid erhöhen).", 100 * p_dp, 100 * p_sim))
     return SimLevGoalPlan([
         ("probability", p_sim), ("probability_se", se), ("probability_dp", p_dp),
@@ -536,7 +536,7 @@ def _eur(v):
 
 
 class SimLevGoalPlan(RList):
-    """Ergebnis von :func:`goal_optimize` (R-Klasse ``SimLevGoalPlan``)."""
+    """Ergebnis von :func:`planning_goal` (R-Klasse ``SimLevGoalPlan``)."""
 
     r_class = ("SimLevGoalPlan",)
 

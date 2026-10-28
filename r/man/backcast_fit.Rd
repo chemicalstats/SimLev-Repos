@@ -212,5 +212,5 @@ head(bc)
 
 }
 \seealso{
-\code{\link[=backcast]{backcast()}}, \code{\link[=leveraged_series]{leveraged_series()}}, \code{\link[=simulation]{simulation()}}
+\code{\link[=backcast]{backcast()}}, \code{\link[=series_leverage]{series_leverage()}}, \code{\link[=simulation]{simulation()}}
 }

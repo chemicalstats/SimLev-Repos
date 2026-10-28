@@ -95,7 +95,7 @@ bezeichnet; im Folgenden „Stand 54b5b4f“).
 | **Backcast** | Rückrechnung von ETF/ETP-Historien aus Basisindex, TER-Reihe, Hebel und Tagesgeld; Fit der Abweichung mit Out-of-Sample-Test |
 | **Bootstrap** | 14 Verfahren (Block, stationär, Regime, EVT, (GJR-)GARCH, MS-GARCH …), Hebelprodukte, Strategie-Studien über Hunderttausende Pfade |
 | **Entnahmephase** | 14 Entnahmeregeln (4-%-Regel, Vanguard, Guyton-Klinger …) auf Kohorten, Bootstrap-Pfaden oder gespeicherten Simulationsergebnissen, mit vereinfachter deutscher Steuer |
-| **Analyse** | `deep_analysis()`: Alpha, Beta, Capture, Tracking Error, Information Ratio, M², VaR/CVaR, MWRR, Rendite- und Monatstabellen, Drawdown-Tabelle, rollierende Kennzahlen; Sensitivitäten für Rebalancing, Lump Sum vs. DCA und Hebel |
+| **Analyse** | `result_analysis()`: Alpha, Beta, Capture, Tracking Error, Information Ratio, M², VaR/CVaR, MWRR, Rendite- und Monatstabellen, Drawdown-Tabelle, rollierende Kennzahlen; Sensitivitäten für Rebalancing, Lump Sum vs. DCA und Hebel |
 | **Parametersuche** | Raster, Zufallssuche und Latin Hypercube über Strategie-, Signal- und Simulationsparameter; Plateau-Auswahl, Probability of Backtest Overfitting, Deflated Sharpe Ratio, Walk-Forward, Prüfung der besten Punkte auf Bootstrap-Pfaden |
 | **Datenaufbereitung** | Quellen zusammenführen, Prüfbericht (Lücken, Spikes, Splits), Makroreihen mit Veröffentlichungsverzug, Währung, Total Return, reale Werte, Verkettung, Portfolio-Vorlagen |
 | **Abhängigkeiten** | Rang- und Tail-Abhängigkeit, Copulas (Gauß, t, Clayton, Gumbel, Frank), DCC, Korrelation je Regime von Inflation, Zinsen oder Spreads mit Block-Bootstrap, Quantilsregression, CoVaR |
@@ -216,20 +216,20 @@ data <- data.frame(
 # 2. Strategie: Gewichte, Kosten und Teilfreistellung
 #    (30 % für Aktien-ETFs, 0 % für Renten-ETFs)
 strategy <- create_strategy(
-  WORLD = asset_config("etf", action_type = "bnh",
-                       asset_share = 0.7, asset_spread = 0.1, asset_bonus = 30),
-  BONDS = asset_config("etf", action_type = "bnh",
-                       asset_share = 0.3, asset_spread = 0.1, asset_bonus = 0)
+  WORLD = asset_config("etf", trading = "bnh",
+                       share = 0.7, spread = 0.1, partial_exemption = 30),
+  BONDS = asset_config("etf", trading = "bnh",
+                       share = 0.3, spread = 0.1, partial_exemption = 0)
 )
 
 # 3. Simulation
 result <- simulation(
   data, strategy,
-  start_value  = 10000,
-  balance_mode = TRUE, balance_span = 1, balance_unit = "year",
-  tax_mode     = "person", tax_rate = 26.375,
-  liquidate    = TRUE,
-  risk_free    = 2
+  start_value = 10000,
+  rebalance   = rebalance_plan(1, unit = "year"),
+  tax         = tax_profile(26.375),
+  liquidate   = TRUE,
+  risk_free   = 2
 )
 
 print(result)
@@ -257,7 +257,7 @@ plot(result)
 ```
 
 Aus 10.000 EUR wurden nach zehn Jahren, allen Spreads und allen Steuern
-17.765,20 EUR, also 5,93 % pro Jahr. Ohne Steuern (`tax_mode = "none"`) wären
+17.765,20 EUR, also 5,93 % pro Jahr. Ohne Steuern (`tax = NULL`) wären
 es 19.133,67 EUR (6,72 % p. a.) gewesen.
 
 <p align="center">
@@ -288,16 +288,16 @@ data = pd.DataFrame({
 
 # 2. Strategie: Gewichte, Kosten und Teilfreistellung
 strategy = simlev.create_strategy(
-    WORLD=simlev.asset_config("etf", action_type="bnh", asset_share=0.7, asset_spread=0.1, asset_bonus=30),
-    BONDS=simlev.asset_config("etf", action_type="bnh", asset_share=0.3, asset_spread=0.1, asset_bonus=0),
+    WORLD=simlev.asset_config("etf", trading="bnh", share=0.7, spread=0.1, partial_exemption=30),
+    BONDS=simlev.asset_config("etf", trading="bnh", share=0.3, spread=0.1, partial_exemption=0),
 )
 
 # 3. Simulation
 result = simlev.simulation(
     data, strategy,
     start_value=10000,
-    balance_mode=True, balance_span=1, balance_unit="year",
-    tax_mode="person", tax_rate=26.375,
+    rebalance=simlev.rebalance_plan(1, unit="year"),
+    tax=simlev.tax_profile(26.375),
     liquidate=True,
     risk_free=2,
 )
@@ -329,7 +329,7 @@ Ausgabe (dieselbe liefert das R-Paket 0.5.0 für diese Kursdaten):
 ```
 
 Aus 10.000 EUR wurden 19.193,75 EUR, also 6,75 % pro Jahr. Ohne Steuern
-(`tax_mode="none"`) wären es 21.015,24 EUR (7,72 % p. a.) gewesen.
+(`tax=None`) wären es 21.015,24 EUR (7,72 % p. a.) gewesen.
 
 <p align="center">
   <img src="docs/figures/dashboard-python.png" alt="SimLev-Dashboard aus Python" width="100%" />
@@ -355,15 +355,15 @@ data = (date  = collect(Date(2015, 1, 1):Day(1):Date(2015, 1, 1) + Day(n - 1)),
 
 # 2. Strategie: Gewichte, Kosten und Teilfreistellung
 strategy = create_strategy(
-    WORLD = asset_config("etf", "bnh"; asset_share = 0.7, asset_spread = 0.1, asset_bonus = 30),
-    BONDS = asset_config("etf", "bnh"; asset_share = 0.3, asset_spread = 0.1, asset_bonus = 0),
+    WORLD = asset_config("etf", "bnh"; share = 0.7, spread = 0.1, partial_exemption = 30),
+    BONDS = asset_config("etf", "bnh"; share = 0.3, spread = 0.1, partial_exemption = 0),
 )
 
 # 3. Simulation
 result = simulation(data, strategy;
     start_value = 10000,
-    balance_mode = true, balance_span = 1, balance_unit = "year",
-    tax_mode = "person", tax_rate = 26.375,
+    rebalance = rebalance_plan(1; unit = "year"),
+    tax = tax_profile(26.375),
     liquidate = true,
     risk_free = 2)
 
@@ -395,7 +395,7 @@ Python 0.5.0 für diese Kursdaten):
 ```
 
 Aus 10.000 EUR wurden 15.581,60 EUR, also 4,54 % pro Jahr. Ohne Steuern
-(`tax_mode = "none"`) wären es 16.339,67 EUR (5,04 % p. a.) gewesen.
+(`tax = nothing`) wären es 16.339,67 EUR (5,04 % p. a.) gewesen.
 
 <p align="center">
   <img src="docs/figures/dashboard-julia.png" alt="SimLev-Dashboard aus Julia" width="100%" />
@@ -468,7 +468,7 @@ rutschen, wird es auf den vorherigen Handelstag vorgezogen.
 
 Zusätzlich prüft SimLev die Daten: Unsortierte
 Daten werden mit Hinweis sortiert, einzelne fehlende Kurse (`NA`) innerhalb einer Reihe per LOCF
-gefüllt, führende fehlende Kurse wirken wie ein späterer `asset_start`, und
+gefüllt, führende fehlende Kurse wirken wie ein späterer `start`, und
 doppelte Datumswerte oder Kurse ≤ 0 führen zu einer Fehlermeldung.
 
 ### Die Prozent-Konvention
@@ -478,15 +478,15 @@ Dezimalzahl. Das ist die häufigste Fehlerquelle beim Einstieg:
 
 | Argument | Beispiel | Bedeutung |
 |---|---|---|
-| `tax_rate` | `26.375` | 25 % Abgeltungsteuer + 5,5 % Solidaritätszuschlag darauf |
-| `asset_spread` | `0.1` | 0,1 % voller Bid-Ask-Spread (je Kauf/Verkauf die Hälfte) |
-| `asset_bonus` | `30` | 30 % Teilfreistellung |
-| `balance_thresh` | `5` | Rebalancing erst ab 5 % Gewichtsabweichung |
-| `base_rate` | `2.55` | 2,55 % Basiszins für die Vorabpauschale |
+| `tax_profile(rate)` | `26.375` | 25 % Abgeltungsteuer + 5,5 % Solidaritätszuschlag darauf |
+| `spread` | `0.1` | 0,1 % voller Bid-Ask-Spread (je Kauf/Verkauf die Hälfte) |
+| `partial_exemption` | `30` | 30 % Teilfreistellung |
+| `rebalance_plan(thresh)` | `5` | Rebalancing erst ab 5 % Gewichtsabweichung |
+| `tax_profile(base_rate)` | `2.55` | 2,55 % Basiszins für die Vorabpauschale |
 | `risk_free` | `2` | 2 % risikoloser Zins p. a. |
-| `marginal_tax_rate` | `42` | 42 % persönlicher Grenzsteuersatz |
+| `income_rate(marginal_rate)` | `42` | 42 % persönlicher Grenzsteuersatz |
 
-Einzige Ausnahme sind die Zielgewichte `asset_share`. Jedes liegt zwischen
+Einzige Ausnahme sind die Zielgewichte `share`. Jedes liegt zwischen
 0 (ausschließlich) und 1, und zusammen müssen sie sich auf 1 summieren.
 Sonst bricht `simulation()` mit einer Fehlermeldung ab.
 
@@ -502,15 +502,15 @@ bevor eine Simulation startet.
 
 ``` r
 strategy <- create_strategy(
-  WORLD = asset_config("etf", action_type = "bnh", asset_share = 0.6,
-                       asset_spread = 0.10, asset_bonus = 30),
-  EM    = asset_config("etf", action_type = "bnh", asset_share = 0.2,
-                       asset_spread = 0.20, asset_bonus = 30),
-  GOLD  = asset_config("etc", action_type = "bnh", asset_share = 0.2,
+  WORLD = asset_config("etf", trading = "bnh", share = 0.6,
+                       spread = 0.10, partial_exemption = 30),
+  EM    = asset_config("etf", trading = "bnh", share = 0.2,
+                       spread = 0.20, partial_exemption = 30),
+  GOLD  = asset_config("etc", trading = "bnh", share = 0.2,
                        deliverable = TRUE)
 )
 
-validate_strategy(strategy, data)   # prüft zusätzlich, ob alle Spalten in data existieren
+strategy_validate(strategy, data)   # prüft zusätzlich, ob alle Spalten in data existieren
 ```
 
 </details>
@@ -520,12 +520,12 @@ validate_strategy(strategy, data)   # prüft zusätzlich, ob alle Spalten in dat
 
 ``` python
 strategy = simlev.create_strategy(
-    WORLD=simlev.asset_config("etf", action_type="bnh", asset_share=0.6, asset_spread=0.10, asset_bonus=30),
-    EM=simlev.asset_config("etf", action_type="bnh", asset_share=0.2, asset_spread=0.20, asset_bonus=30),
-    GOLD=simlev.asset_config("etc", action_type="bnh", asset_share=0.2, deliverable=True),
+    WORLD=simlev.asset_config("etf", trading="bnh", share=0.6, spread=0.10, partial_exemption=30),
+    EM=simlev.asset_config("etf", trading="bnh", share=0.2, spread=0.20, partial_exemption=30),
+    GOLD=simlev.asset_config("etc", trading="bnh", share=0.2, deliverable=True),
 )
 
-simlev.validate_strategy(strategy, data)   # prüft zusätzlich, ob alle Spalten in data existieren
+simlev.strategy_validate(strategy, data)   # prüft zusätzlich, ob alle Spalten in data existieren
 ```
 
 </details>
@@ -533,18 +533,18 @@ simlev.validate_strategy(strategy, data)   # prüft zusätzlich, ob alle Spalten
 <details>
 <summary><b>Julia</b></summary>
 
-Die ersten fünf Argumente von `asset_config` (`asset_class`, `action_type`,
-`asset_share`, `asset_spread`, `asset_bonus`) dürfen wie in R positionell
+Die ersten fünf Argumente von `asset_config` (`asset_class`, `trading`,
+`share`, `spread`, `partial_exemption`) dürfen wie in R positionell
 oder als Schlüsselwort übergeben werden.
 
 ``` julia
 strategy = create_strategy(
     WORLD = asset_config("etf", "bnh", 0.6, 0.10, 30),
     EM    = asset_config("etf", "bnh", 0.2, 0.20, 30),
-    GOLD  = asset_config("etc"; asset_share = 0.2, deliverable = true),
+    GOLD  = asset_config("etc"; share = 0.2, deliverable = true),
 )
 
-validate_strategy(strategy, data)   # prüft zusätzlich, ob alle Spalten in data existieren
+strategy_validate(strategy, data)   # prüft zusätzlich, ob alle Spalten in data existieren
 ```
 
 </details>
@@ -560,26 +560,26 @@ explizit.
 | `"etn"`, `"etc"` | ja | `private_sale` (§ 23 EStG, steuerfrei nach einem Jahr) | Physisch hinterlegtes Gold mit Lieferanspruch |
 | `"certificate"` | – | `capital_gains` | Zertifikat, Hebelprodukt als Schuldverschreibung |
 
-Bestehende Strategien verändern Sie mit `add_asset()`, `update_asset()` und
-`remove_asset()`, die jeweils eine neue Strategie zurückgeben. Ältere,
+Bestehende Strategien verändern Sie mit `strategy_add_asset()`, `strategy_update_asset()` und
+`strategy_remove_asset()`, die jeweils eine neue Strategie zurückgeben. Ältere,
 als einfache Listen definierte Strategien akzeptiert `simulation()` direkt;
 die veralteten Klassen `"etn_standard"` und `"etn_deliverable"` setzt
 `asset_config()` mit einer Warnung in `"etn"` mit `deliverable` um.
 
 ### Buy-and-Hold und Signalstrategien
 
-Mit `action_type = "bnh"` wird ein Asset am ersten Tag gekauft und
+Mit `trading = "bnh"` wird ein Asset am ersten Tag gekauft und
 gehalten. Käufe und Verkäufe entstehen danach nur noch durch Sparraten,
 Rebalancing oder Liquidation.
 
-**Gestaffelte Starts:** Mit `asset_start` in `asset_config()` wird ein Asset
+**Gestaffelte Starts:** Mit `start` in `asset_config()` wird ein Asset
 erst ab einem Datum handelbar. Bis dahin liegt das Kapital in den bereits
-handelbaren Assets. Am Starttag wird auch ohne `balance_mode` auf
+handelbaren Assets. Am Starttag wird auch ohne `rebalance` auf
 die Zielgewichte umgeschichtet, damit das neue Asset Mittel erhält; beginnt
-eine Kursreihe mit fehlenden Werten, gilt ihr erster Kurs als `asset_start`,
-und ein `asset_start` nach dem letzten Datentag ist ein Fehler.
+eine Kursreihe mit fehlenden Werten, gilt ihr erster Kurs als `start`,
+und ein `start` nach dem letzten Datentag ist ein Fehler.
 
-Mit `action_type = "signal"` steigt das Asset ein und aus, wann immer Ihre
+Mit `trading = "signal"` steigt das Asset ein und aus, wann immer Ihre
 Signalspalten es vorgeben. Die Signale berechnen Sie vorab selbst; SimLev
 macht keine Annahmen über Ihre Handelsregel. Ein klassisches Beispiel ist
 der Kreuzungspunkt zweier gleitender Durchschnitte. In R berechnet sie hier
@@ -596,8 +596,8 @@ data$buy    <- data$sma50 > data$sma200
 data$sell   <- data$sma50 < data$sma200
 
 strategy <- create_strategy(
-  WORLD = asset_config("etf", action_type = "signal",
-                       asset_share = 1, asset_spread = 0.1, asset_bonus = 30,
+  WORLD = asset_config("etf", trading = "signal",
+                       share = 1, spread = 0.1, partial_exemption = 30,
                        signal_buy = "buy", signal_sell = "sell")
 )
 ```
@@ -614,7 +614,7 @@ data["buy"] = (sma50 > sma200).fillna(False)
 data["sell"] = (sma50 < sma200).fillna(False)
 
 strategy = simlev.create_strategy(
-    WORLD=simlev.asset_config("etf", action_type="signal", asset_share=1, asset_spread=0.1, asset_bonus=30,
+    WORLD=simlev.asset_config("etf", trading="signal", share=1, spread=0.1, partial_exemption=30,
                               signal_buy="buy", signal_sell="sell"),
 )
 ```
@@ -652,10 +652,10 @@ Betrag zusätzlich zum Startkapital. Im Beispiel sind es 250 EUR pro Monat:
 result_dca <- simulation(
   data, strategy,
   start_value = 10000,
-  dca_mode = TRUE, dca_value = 250, dca_span = 1, dca_unit = "month",
-  balance_dca = TRUE,       # Sparrate füllt zuerst untergewichtete Assets auf
-  balance_mode = TRUE, balance_span = 1, balance_unit = "year",
-  tax_mode = "person", tax_rate = 26.375,
+  dca = dca_plan(250, 1, unit = "month",
+                 fill_deficits = TRUE),   # Sparrate füllt zuerst untergewichtete Assets auf
+  rebalance = rebalance_plan(1, unit = "year"),
+  tax = tax_profile(26.375),
   liquidate = TRUE
 )
 ```
@@ -669,10 +669,10 @@ result_dca <- simulation(
 result_dca = simlev.simulation(
     data, strategy,
     start_value=10000,
-    dca_mode=True, dca_value=250, dca_span=1, dca_unit="month",
-    balance_dca=True,       # Sparrate füllt zuerst untergewichtete Assets auf
-    balance_mode=True, balance_span=1, balance_unit="year",
-    tax_mode="person", tax_rate=26.375,
+    dca=simlev.dca_plan(250, 1, unit="month",
+                        fill_deficits=True),   # Sparrate füllt zuerst untergewichtete Assets auf
+    rebalance=simlev.rebalance_plan(1, unit="year"),
+    tax=simlev.tax_profile(26.375),
     liquidate=True,
 )
 ```
@@ -685,17 +685,17 @@ result_dca = simlev.simulation(
 ``` julia
 result_dca = simulation(data, strategy;
     start_value = 10000,
-    dca_mode = true, dca_value = 250, dca_span = 1, dca_unit = "month",
-    balance_dca = true,                       # Sparrate füllt zuerst untergewichtete Assets auf
-    balance_mode = true, balance_span = 1, balance_unit = "year",
-    tax_mode = "person", tax_rate = 26.375,
+    dca = dca_plan(250, 1; unit = "month",
+                   fill_deficits = true),     # Sparrate füllt zuerst untergewichtete Assets auf
+    rebalance = rebalance_plan(1; unit = "year"),
+    tax = tax_profile(26.375),
     liquidate = true)
 ```
 
 </details>
 
-Ohne `balance_dca` (Standard) wird jede Rate fest nach den Zielgewichten
-aufgeteilt. Mit `balance_dca` wirkt sie wie ein kleines Rebalancing: Sie
+Ohne `fill_deficits` (Standard) wird jede Rate fest nach den Zielgewichten
+aufgeteilt. Mit `fill_deficits` wirkt sie wie ein kleines Rebalancing: Sie
 fließt zuerst in die Assets, die gerade unter ihrem Zielgewicht liegen. Das
 spart Verkäufe und damit Steuern, weil das Depot über frisches Geld statt
 über Umschichtungen ins Gleichgewicht kommt.
@@ -737,20 +737,20 @@ Kalenderterminen, aber nur wenn sich der Aufwand lohnt, und
 
 ``` r
 # kalenderbasiert
-simulation(data, strategy, balance_mode = TRUE, balance_span = 1, balance_unit = "quarter")
+simulation(data, strategy, rebalance = rebalance_plan(1, unit = "quarter"))
 
 # mit Toleranzschwelle: nur handeln, wenn ein Gewicht > 5 % abweicht
-simulation(data, strategy, balance_mode = TRUE, balance_span = 1, balance_unit = "year",
-           balance_thresh = 5)
+simulation(data, strategy, rebalance = rebalance_plan(1, unit = "year", thresh = 5))
 
 # relatives Band: Ziel 40 % darf zwischen 30 % und 50 % liegen
-simulation(data, strategy, balance_mode = TRUE, balance_span = 1, balance_unit = "month",
-           balance_thresh = 25, balance_thresh_type = "relative")
+simulation(data, strategy, rebalance = rebalance_plan(1, unit = "month", thresh = 25,
+                                                      thresh_type = "relative"))
 
 # ereignisbasiert; data$sigma_ewma enthält eine selbst berechnete Volatilitätsschätzung
-data <- compute_rebal_trigger(data, type = "vol_band", threshold = 20, vol_col = "sigma_ewma")
-simulation(data, strategy, event_col = "rebal_trigger",
-           event_mode = "replace")   # oder "additional" zum Kalender
+data <- rebalance_trigger(data, type = "vol_band", threshold = 20, vol_col = "sigma_ewma")
+simulation(data, strategy, rebalance = rebalance_plan(event_col = "rebal_trigger",
+                                                      event_mode = "replace",   # oder "additional" zum Kalender
+                                                      skip = TRUE))             # nur an Ereignistagen
 ```
 
 Kommentierte Vorlagen für eigene Trigger-Regeln finden Sie in
@@ -764,20 +764,20 @@ Kommentierte Vorlagen für eigene Trigger-Regeln finden Sie in
 
 ``` python
 # kalenderbasiert
-simlev.simulation(data, strategy, balance_mode=True, balance_span=1, balance_unit="quarter")
+simlev.simulation(data, strategy, rebalance=simlev.rebalance_plan(1, unit="quarter"))
 
 # mit Toleranzschwelle: nur handeln, wenn ein Gewicht > 5 % abweicht
-simlev.simulation(data, strategy, balance_mode=True, balance_span=1, balance_unit="year",
-                  balance_thresh=5)
+simlev.simulation(data, strategy, rebalance=simlev.rebalance_plan(1, unit="year", thresh=5))
 
 # relatives Band: Ziel 40 % darf zwischen 30 % und 50 % liegen
-simlev.simulation(data, strategy, balance_mode=True, balance_span=1, balance_unit="month",
-                  balance_thresh=25, balance_thresh_type="relative")
+simlev.simulation(data, strategy, rebalance=simlev.rebalance_plan(1, unit="month", thresh=25,
+                                                                  thresh_type="relative"))
 
 # ereignisbasiert; data["sigma_ewma"] enthält eine selbst berechnete Volatilitätsschätzung
-data = simlev.compute_rebal_trigger(data, type="vol_band", threshold=20, vol_col="sigma_ewma")
-simlev.simulation(data, strategy, event_col="rebal_trigger",
-                  event_mode="replace")   # oder "additional" zum Kalender
+data = simlev.rebalance_trigger(data, type="vol_band", threshold=20, vol_col="sigma_ewma")
+simlev.simulation(data, strategy, rebalance=simlev.rebalance_plan(event_col="rebal_trigger",
+                                                                  event_mode="replace",   # oder "additional" zum Kalender
+                                                                  skip=True))             # nur an Ereignistagen
 ```
 
 </details>
@@ -787,26 +787,26 @@ simlev.simulation(data, strategy, event_col="rebal_trigger",
 
 ``` julia
 # kalenderbasiert
-simulation(data, strategy; balance_mode = true, balance_span = 1, balance_unit = "quarter")
+simulation(data, strategy; rebalance = rebalance_plan(1; unit = "quarter"))
 
 # mit Toleranzschwelle: nur handeln, wenn ein Gewicht > 5 % abweicht
-simulation(data, strategy; balance_mode = true, balance_span = 1, balance_unit = "year",
-           balance_thresh = 5)
+simulation(data, strategy; rebalance = rebalance_plan(1; unit = "year", thresh = 5))
 
 # relatives Band: Ziel 40 % darf zwischen 30 % und 50 % liegen
-simulation(data, strategy; balance_mode = true, balance_span = 1, balance_unit = "month",
-           balance_thresh = 25, balance_thresh_type = "relative")
+simulation(data, strategy; rebalance = rebalance_plan(1; unit = "month", thresh = 25,
+                                                      thresh_type = "relative"))
 
 # ereignisbasiert; data.sigma_ewma enthält eine selbst berechnete Volatilitätsschätzung
-data = compute_rebal_trigger(data, "vol_band"; threshold = 20, vol_col = "sigma_ewma")
-simulation(data, strategy; event_col = "rebal_trigger",
-           event_mode = "replace")   # oder "additional" zum Kalender
+data = rebalance_trigger(data, "vol_band"; threshold = 20, vol_col = "sigma_ewma")
+simulation(data, strategy; rebalance = rebalance_plan(; event_col = "rebal_trigger",
+                                                      event_mode = "replace",   # oder "additional" zum Kalender
+                                                      skip = true))             # nur an Ereignistagen
 ```
 
 </details>
 
-`compute_rebal_trigger()` erzeugt eine logische Spalte, die Sie über
-`event_col` an die Simulation übergeben. Gerade bei gehebelten Strategien
+`rebalance_trigger()` erzeugt eine logische Spalte, die Sie über
+`rebalance_plan(event_col = )` an die Simulation übergeben. Gerade bei gehebelten Strategien
 ist das oft sinnvoller als ein fester Kalender, etwa wenn sich der
 gewünschte Hebel oder die Marktvolatilität spürbar verändert hat.
 
@@ -819,37 +819,38 @@ gewünschte Hebel oder die Marktvolatilität spürbar verändert hat.
 
 Verglichen wird immer mit dem Stand beim *letzten tatsächlichen*
 Rebalancing, nicht mit dem Vortag. So lösen auch viele kleine Bewegungen
-aus, die sich aufsummieren. Optional legt `event_weight` die Zielgewichte
+aus, die sich aufsummieren. Optional legt `rebalance_plan(event_weight = )` die Zielgewichte
 an Event-Tagen aus Datenspalten fest.
 
 ### Besteuerung
 
-Über `tax_mode` wählen Sie eines von drei Modellen:
+Über die Bausteine `tax` und `funds` wählen Sie eines von drei Modellen
+(`tax` und `funds` zusammen sind ein Fehler):
 
-| `tax_mode` | Bedeutung |
+| Angabe | Bedeutung |
 |---|---|
-| `"none"` | Keine Steuern, also die reine Brutto-Performance |
-| `"person"` | Besteuerung eines deutschen Privatanlegers mit vollständiger FIFO-Lotverwaltung |
-| `"funds"` | Vereinfachte Fondshülle: laufende Kosten (`funds_fee`, wie eine TER) und eine Performancegebühr mit High-Watermark (`bonus_fee`); bei Liquidation Steuer auf den Gesamtgewinn |
+| keine (`tax = NULL`, `funds = NULL`) | Keine Steuern, also die reine Brutto-Performance |
+| `tax = tax_profile()` | Besteuerung eines deutschen Privatanlegers mit vollständiger FIFO-Lotverwaltung |
+| `funds = funds_costs()` | Vereinfachte Fondshülle: laufende Kosten (`fee`, wie eine TER) und eine Performancegebühr mit High-Watermark (`performance_fee`); bei Liquidation Steuer auf den Gesamtgewinn |
 
 Die folgende Beschreibung gibt den Stand der aktuellen R-Engine 0.5.0
 wieder; Python 0.5.0 und Julia 0.5.0 rechnen bitgleich genauso. Was sich
 gegenüber dem Stand 54b5b4f geändert hat, steht in
 [`r/NEWS.md`](r/NEWS.md).
 
-Im Modus `"person"` bildet SimLev unter anderem folgende Regeln ab:
+Mit `tax_profile()` bildet SimLev unter anderem folgende Regeln ab:
 
 - **Teilfreistellung** (§ 20 InvStG): Bei Aktien-ETFs bleiben 30 %, bei
   Mischfonds 15 % der Erträge steuerfrei. Den Satz geben Sie je Asset über
-  `asset_bonus` an.
+  `partial_exemption` an.
 - **Vorabpauschale** (§ 18 InvStG): Für thesaurierende Fonds wird jährlich
   ein fiktiver Mindestertrag besteuert. Je am 31.12. gehaltenem Lot beträgt
   er 70 % des Basiszinses auf den Kurs zu Jahresbeginn, höchstens aber den
   Wertzuwachs im Kalenderjahr (Kurs am 31.12. minus Kurs zu Jahresbeginn).
   Beides gilt auch für Anteile, die erst im Lauf des Jahres gekauft wurden;
   sie tragen danach nur (13 − Erwerbsmonat) / 12 dieses Betrags. Der
-  Basiszins kommt fest aus `base_rate` oder, mit `base_rate_flex`, aus einer
-  Datenspalte (`base_rate_data`); maßgeblich ist der Wert vom ersten
+  Basiszins kommt aus `tax_profile(base_rate = )`: fest als Zahl oder als
+  Name einer Datenspalte; maßgeblich ist der Wert vom ersten
   Handelstag des Jahres. Die Vorabpauschale gilt am ersten Handelstag des
   Folgejahres als zugeflossen und wird dort vor den Trades des Tages mit dem
   Sparer-Pauschbetrag und dem Verlusttopf *des Folgejahres* abgerechnet;
@@ -858,8 +859,8 @@ Im Modus `"person"` bildet SimLev unter anderem folgende Regeln ab:
   aufgerundet). Bereits versteuerte Vorabpauschalen mindern später den
   Veräußerungsgewinn (§ 19 InvStG).
 - **Sparer-Pauschbetrag**: Jährlich bleiben 1.000 EUR Kapitalerträge
-  steuerfrei, einstellbar über `sparer_pauschbetrag` (für Ehepaare z. B.
-  `2000`).
+  steuerfrei, einstellbar über `tax_profile(sparer_pauschbetrag = )` (für
+  Ehepaare z. B. `2000`, `0` = ohne Pauschbetrag).
 - **Verlustverrechnung**: Verluste werden mit Gewinnen desselben Topfes
   verrechnet und bei Bedarf vorgetragen; der Verlusttopf wird vor dem
   Sparer-Pauschbetrag verrechnet. Der allgemeine Topf nach § 20 EStG und der
@@ -873,23 +874,24 @@ Im Modus `"person"` bildet SimLev unter anderem folgende Regeln ab:
   Lieferanspruch (z. B. physisches Gold) sind Gewinne nach einem Jahr
   Haltedauer steuerfrei (bei Kauf am 29.02. endet die Frist am 28.02. des
   Folgejahres). Innerhalb der Frist gilt der persönliche Steuersatz,
-  entweder als fester Satz `marginal_tax_rate` oder, mit `taxable_income`,
-  exakt nach dem Einkommensteuertarif (siehe unten), und eine Freigrenze
-  von 1.000 EUR (`private_sale_threshold`). Sie wird auf den Jahressaldo *vor* dem
+  entweder als fester Satz (`income = income_rate(marginal_rate)`) oder, mit
+  `income = income_tariff(taxable_income)`, exakt nach dem
+  Einkommensteuertarif (siehe unten), und eine Freigrenze von 1.000 EUR
+  (`private_sale_threshold`). Sie wird auf den Jahressaldo *vor* dem
   Verlustvortrag angewendet: Erreicht der Saldo die Grenze (genau 1.000 EUR
   eingeschlossen), ist der *gesamte* Saldo abzüglich Verlustvortrag
   steuerpflichtig, darunter ist er steuerfrei und der Vortrag bleibt
   unverändert. Die Steuer wird vom Depot bezahlt, am Abrechnungstag der
   Vorabpauschale (erster Handelstag des Folgejahres), sonst am letzten Tag,
   aus dem Cash oder per Zwangsverkauf.
-- **Günstigerprüfung** (§ 32d Abs. 6 EStG): Mit `use_guenstigerpruefung`
-  wird der persönliche Steuersatz angewendet, wenn die Belastung
+- **Günstigerprüfung** (§ 32d Abs. 6 EStG): Mit
+  `tax_profile(guenstigerpruefung = TRUE)` wird der persönliche Steuersatz angewendet, wenn die Belastung
   einschließlich Zuschlagsteuern niedriger ist als die Abgeltungsteuer.
-  Ohne `taxable_income` wird `marginal_tax_rate` × (1 + Soli-Satz +
-  Kirchensteuersatz) mit dem effektiven Abgeltungsteuersatz verglichen
-  (Soli auf die Einkommensteuer nur mit `include_soli_on_income_tax =
-  TRUE`) und der günstigere Satz durchgehend verwendet. Mit
-  `taxable_income` wird unterjährig die Abgeltungsteuer einbehalten und im
+  Mit `income_rate(marginal_rate, soli_rate)` wird der Grenzsteuersatz ×
+  (1 + Soli-Satz + Kirchensteuersatz) mit dem effektiven
+  Abgeltungsteuersatz verglichen (Soli auf die Einkommensteuer nur mit
+  `soli_rate` > 0) und der günstigere Satz durchgehend verwendet. Mit
+  `income_tariff(taxable_income)` wird unterjährig die Abgeltungsteuer einbehalten und im
   Jahresabschluss mit der Tarifbelastung verglichen; die Differenz wird
   erstattet (siehe unten).
 - **Umschichtungen**: Beim Rebalancing schätzt SimLev die Steuer auf den
@@ -898,20 +900,20 @@ Im Modus `"person"` bildet SimLev unter anderem folgende Regeln ab:
   beim Asset liegende Cash. So wird nicht zu viel verkauft und am selben
   Tag zurückgekauft.
 
-Zur Kirchensteuer (`church_tax`) siehe
+Zur Kirchensteuer (`tax_profile(church_tax = )`) siehe
 [Gebühren, Kirchensteuer und Freibetrag](#gebühren-kirchensteuer-und-freibetrag).
 
-**Einkommensteuertarif.** Mit `taxable_income`, dem zu
+**Einkommensteuertarif.** Mit `income_tariff(taxable_income)`, dem zu
 versteuernden Einkommen *ohne* die Kapitalerträge und § 23-Gewinne der
 Simulation in EUR je Kalenderjahr (eine Zahl für alle Jahre, ein nach
 Jahren benannter Vektor oder `data.frame(year, taxable_income)`), rechnet
-`simulation()` bei `tax_mode = "person"` mit dem Einkommensteuertarif nach
+`simulation()` mit `tax_profile(income = income_tariff(...))` mit dem Einkommensteuertarif nach
 § 32a Abs. 1 EStG und dem Solidaritätszuschlag nach §§ 3, 4 SolZG
 (Freigrenze 20.350 EUR, Milderungszone 11,9 %). Mitgeliefert ist die
 Rechtslage ab VZ 2026 für die Einzelveranlagung (Grundtarif, kein
 Splitting) in der Datei `inst/extdata/steuertarif.csv` (Python:
 `simlev/data/steuertarif.csv`, Julia: `julia/data/steuertarif.csv`); ein anderer Tarif
-wird über `tax_tariff = "<Datei>"` bzw. `read_tax_tariff()` eingelesen.
+wird über `income_tariff(taxable_income, tariff = "<Datei>")` bzw. `tax_tariff()` eingelesen.
 Dann gilt:
 
 - Die § 23-Steuer ist der Zuwachs von Einkommensteuer, Soli und
@@ -933,15 +935,15 @@ Dann gilt:
   des Zuflussjahres (nach der Darstellung der Rechtslage in der
   Fachliteratur, nicht nach einem Urteil). Die Kirchensteuer auf die
   § 23-Steuer wirkt erst im Zahlungsjahr.
-- `marginal_tax_rate`, `include_soli_on_income_tax` und
-  `soli_rate_income_tax` wirken dann nicht (Warnung, wenn angegeben).
+- Ein fester Grenzsteuersatz entfällt dann: `income_rate()` und
+  `income_tariff()` schließen sich aus (`income` nimmt genau einen der beiden).
   `tax_report$tariff_years` zeigt die Veranlagung je Jahr.
 
 Vereinfachungen: Der Tarif gilt für alle Simulationsjahre, die
 Kirchensteuer wird nicht gerundet und ohne Kinderfreibeträge (§ 51a EStG)
 berechnet, ein Verlustrücktrag kommt nicht vor (Einzelheiten in
-`?simulation`, Abschnitt „Einkommensteuertarif“). Ohne `taxable_income`
-rechnet die Engine wie oben mit `marginal_tax_rate`.
+`?simulation`, Abschnitt „Einkommensteuertarif“). Mit `income_rate()`
+rechnet die Engine wie oben mit dem festen Grenzsteuersatz.
 
 <details>
 <summary><b>R</b>: Beispiel mit Einkommensteuertarif</summary>
@@ -955,13 +957,14 @@ data <- data.frame(
   GOLD  =  50 * cumprod(1 + rnorm(n, 3e-4, 0.012))
 )
 strategy <- create_strategy(
-  WORLD = asset_config("etf", action_type = "bnh", asset_share = 0.6, asset_spread = 0.1, asset_bonus = 30),
-  GOLD  = asset_config("etc", action_type = "bnh", asset_share = 0.4, asset_spread = 0.2, deliverable = TRUE)
+  WORLD = asset_config("etf", trading = "bnh", share = 0.6, spread = 0.1, partial_exemption = 30),
+  GOLD  = asset_config("etc", trading = "bnh", share = 0.4, spread = 0.2, deliverable = TRUE)
 )
 res <- simulation(data, strategy, start_value = 100000,
-  balance_mode = TRUE, balance_span = 1, balance_unit = "month", balance_thresh = 3,
-  tax_mode = "person", base_rate = 2.55, liquidate = TRUE, church_tax = 9,
-  use_guenstigerpruefung = TRUE, taxable_income = 14000)
+  rebalance = rebalance_plan(1, unit = "month", thresh = 3),
+  tax = tax_profile(base_rate = 2.55, church_tax = 9, guenstigerpruefung = TRUE,
+                    income = income_tariff(14000)),
+  liquidate = TRUE)
 
 ty <- res$tax_report$tariff_years
 round(ty[ty$year %in% c(2019, 2020, 2024),
@@ -1000,17 +1003,15 @@ unterscheiden sich die Zahlen?“ beschrieben) dieselbe Tabelle und dieselben
 
 </details>
 
-Im Modus `"funds"` belastet SimLev die Fondskosten `funds_fee` linear je
-Kalendertag (ein volles Kalenderjahr kostet genau `funds_fee` Prozent), am
+Mit `funds = funds_costs(fee, performance_fee)` belastet SimLev die Fondskosten `fee` linear je
+Kalendertag (ein volles Kalenderjahr kostet genau `fee` Prozent), am
 31.12. und anteilig am letzten Tag; fehlendes Cash wird per Teilverkauf
 ohne Ordergebühr und Spread beschafft. Die High-Watermark der
-Performancegebühr `bonus_fee` wird um Einzahlungen erhöht und nach Abzug der
+Performancegebühr `performance_fee` wird um Einzahlungen erhöht und nach Abzug der
 Gebühren fortgeschrieben. Bei Liquidation wird der Gesamtgewinn (Endwert
-minus Startkapital minus Einzahlungen) versteuert. Werden `funds_fee` oder
-`bonus_fee` bei einem anderen `tax_mode` angegeben, wirken sie nicht;
-SimLev warnt dann. (Bis zum Stand 54b5b4f wurden die Fondskosten bei voll
+minus Startkapital minus Einzahlungen) versteuert. (Bis zum Stand 54b5b4f wurden die Fondskosten bei voll
 investiertem Depot nicht belastet: zwei Jahre ohne Kursänderung und ohne
-Spread mit `funds_fee = 1` ergeben jetzt 9.801 EUR, damals 10.000 EUR aus
+Spread mit `funds_costs(fee = 1)` ergeben jetzt 9.801 EUR, damals 10.000 EUR aus
 10.000 EUR.)
 
 **Modellphilosophie:** SimLev projiziert die *heutige* Rechtslage in die
@@ -1024,8 +1025,8 @@ nach Steuerreformen direkt vergleichbar.
 ### Splits bei gehebelten Produkten
 
 Manche Hebelprodukte führen Splits oder Zusammenlegungen durch, wenn ihr
-Kurs eine bestimmte Grenze über- oder unterschreitet. Mit `split_mode` und
-`split_thresh` (untere und obere Grenze, in R als `c(20, 400)`, in Python
+Kurs eine bestimmte Grenze über- oder unterschreitet. Mit
+`splits = split_rule(thresh)` (untere und obere Grenze, in R als `c(20, 400)`, in Python
 als `(20, 400)`, in Julia als `[20, 400]`) bildet SimLev das nach: Über der
 oberen Grenze wird gesplittet, unter der unteren zusammengelegt. Übergeben
 Sie dafür die Kursreihe *ohne* Split-Bereinigung. Für die Besteuerung
@@ -1055,7 +1056,7 @@ mit Threads, wenn es mit mehreren Threads gestartet ist (`julia -t auto` bzw.
 
 Fast alle Funktionen rechnen um die Engine herum; die wenigen neuen
 Optionen von `simulation()` (relative Rebalancing-Bänder, Ordergebühren,
-Kirchensteuer, `harvest_mode`) sind standardmäßig aus. Die
+Kirchensteuer, `harvest_rule()`) sind standardmäßig aus. Die
 Golden-Master-Fälle blieben dadurch bitgleich; erst die Fehlerkorrekturen
 und steuerrechtlichen Anpassungen nach dem Stand 54b5b4f haben alle 105
 Fälle verändert, mindestens in der Druckausgabe (siehe
@@ -1074,41 +1075,41 @@ Paket:
 
 | Schritt | Funktionen |
 |---|---|
-| **Eigene Daten einlesen** (z. B. `read.csv()` + `as.Date()`) | `check_series()`, `align_series()`, `align_macro()`, `convert_currency()`, `total_return_index()`, `deflate()`, `splice_series()`, `backcast_fit()`/`backcast()` |
-| **Daten erzeugen** | `leveraged_series()`, `bond_index_from_yields()`, `money_market_index()`, `currency_hedged_index()`, `set_expected_return()`, `bootstrap()` + `bootstrap_data()`, `pooled_bootstrap()`, `copula_scenarios()` |
-| **Simulieren** | `simulation()` mit `asset_config()`/`create_strategy()` oder `strategy_from_weights()` (Einkommensteuertarif: `read_tax_tariff()`); `tactical_simulation()`, `bootstrap_study()`, `param_search()`, `sensitivity_grid()` |
-| **Fertige Simulationen weiterverarbeiten** (auch mit `saveRDS()` gespeichert und später geladen, in Julia mit `Serialization`) | `deep_analysis()`, `return_heatmap()`, `sharpe_test()`, `min_track_record()`, `result_index()`, `withdrawal_paths()`/`withdrawal_simulation()`; Studien und Suchen: `bootstrap_probability()`, `pbo()`, `deflated_sharpe()`, `reality_check()`, `sharpe_haircut()` |
+| **Eigene Daten einlesen** (z. B. `read.csv()` + `as.Date()`) | `series_check()`, `series_align()`, `series_align_macro()`, `series_convert_currency()`, `index_total_return()`, `series_deflate()`, `series_splice()`, `backcast_fit()`/`backcast()` |
+| **Daten erzeugen** | `series_leverage()`, `index_bond()`, `index_money_market()`, `index_currency_hedged()`, `series_shift_return()`, `bootstrap()` + `bootstrap_data()`, `bootstrap_pooled()`, `scenario_copula()` |
+| **Simulieren** | `simulation()` mit `asset_config()`/`create_strategy()` oder `strategy_from_weights()` (Einkommensteuertarif: `tax_tariff()`); `tactical_simulation()`, `bootstrap_study()`, `param_search()`, `sensitivity_grid()` |
+| **Fertige Simulationen weiterverarbeiten** (auch mit `saveRDS()` gespeichert und später geladen, in Julia mit `Serialization`) | `result_analysis()`, `result_heatmap()`, `sharpe_test()`, `sharpe_min_track_record()`, `result_index()`, `withdrawal_paths()`/`withdrawal_simulation()`; Studien und Suchen: `bootstrap_probability()`, `overfit_pbo()`, `sharpe_deflated()`, `overfit_reality_check()`, `sharpe_haircut()` |
 
 Die Argumentnamen sind über die Versionen gewachsen und nicht überall
 einheitlich. Für das ganze Paket gilt:
 
 - **Prozent** (`5` = 5 %): Steuersätze, Spreads, Gebühren, TER, Zinsen,
   Inflation, Entnahmeraten, Zielvolatilitäten und Toleranzbänder.
-- **Anteile** (`0.05` = 5 %): Gewichte (`asset_share`, `weights`,
+- **Anteile** (`0.05` = 5 %): Gewichte (`share`, `weights`,
   `lower`/`upper` der Optimierung, `base`, `min_exposure`/`max_exposure`)
   und Wahrscheinlichkeiten bzw. Quantile (`alpha`, `q`, `quantiles`,
   `prob`, `success`). Ausnahme: `stock_share` in `withdrawal_rule()` ist in
   Prozent.
 - **Ergebnisse**: CAGR, Volatilität und Drawdown aus `simulation()`,
-  `deep_analysis()` und `study_metrics()` sind Anteile; die Renditen in
-  `tail_regression()`, `covar_analysis()` und den Szenario-Funktionen sind
+  `result_analysis()` und `bootstrap_study_metrics()` sind Anteile; die Renditen in
+  `tail_regression()`, `tail_covar()` und den Szenario-Funktionen sind
   Prozent je Periode.
 - **Wiederholungen** heißen `B` (Bootstrap in Tests und Abhängigkeiten),
-  `n` (Pfade oder Szenarien) oder `n_sim` (`goal_optimize()`);
+  `n` (Pfade oder Szenarien) oder `n_sim` (`planning_goal()`);
   **Blocklängen** `block` (in Perioden) oder `L`/`block_length` (in Zeilen
-  bzw. bei `pooled_bootstrap()` in Perioden).
+  bzw. bei `bootstrap_pooled()` in Perioden).
 - **`frequency`** ist die Periodenlänge der Renditen, **`every`** der
   Rhythmus der Gewichts-Erzeuger, **`rebalance`** in
   `tactical_simulation()` der Handelsrhythmus (Text) und in
-  `crisis_replay()` ein Schalter. In `simulation()` heißen die
-  Rebalancing-Argumente `balance_*`.
-- Das **Toleranzband** heißt `balance_thresh` (`simulation()`), `tolerance`
-  (`tactical_simulation()`) und `bands` (`rebalancing_sensitivity()`);
+  `scenario_crisis()` ein Schalter. In `simulation()` ist `rebalance` der
+  Baustein `rebalance_plan()`.
+- Das **Toleranzband** heißt `thresh` (`rebalance_plan()`), `tolerance`
+  (`tactical_simulation()`) und `bands` (`sensitivity_rebalancing()`);
   `band` bei den Signalen ist dagegen eine Hysterese.
-- **`horizon`** zählt in `goal_optimize()` Perioden, in `signal_analysis()`
-  Zeilen, in `lumpsum_vs_dca()` Jahre, in `backcast_fit()`
+- **`horizon`** zählt in `planning_goal()` Perioden, in `signal_analysis()`
+  Zeilen, in `planning_lumpsum_vs_dca()` Jahre, in `backcast_fit()`
   Produktbeobachtungen (Renditehorizont); in `withdrawal_simulation()` ist es
-  ein Objekt aus `horizon_model()` oder eine Zahl in Jahren.
+  ein Objekt aus `withdrawal_horizon()` oder eine Zahl in Jahren.
   `withdrawal_rule()` hat kein `horizon`: Die Restjahre der Regeln ergeben
   sich aus der Zahl der Planjahre der Simulation.
 - **`inflation`** ist je nach Funktion ein Spaltenname, eine Rate in
@@ -1120,10 +1121,10 @@ einheitlich. Für das ganze Paket gilt:
   dann entfallen, widersprechende Angaben sind ein Fehler). Ohne Angabe
   gilt das bisherige Verhalten (als Inflation die Niveau-Variante). **`ppy`** (Perioden je Jahr) wird
   ohne Angabe meist aus den Daten geschätzt.
-- **`asset_bonus`** ist die Teilfreistellung in Prozent.
-- **`taxable_income`** (`simulation()`) ist das zu versteuernde Einkommen
+- **`partial_exemption`** ist die Teilfreistellung in Prozent.
+- **`taxable_income`** (`income_tariff()`) ist das zu versteuernde Einkommen
   ohne die Erträge der Simulation in **EUR je Kalenderjahr**. In der
-  Tarifdatei von `read_tax_tariff()` sind Zonengrenzen, Bezugswerte,
+  Tarifdatei von `tax_tariff()` sind Zonengrenzen, Bezugswerte,
   Teiler und Konstanten in EUR; bei den linearen Zonen ist `b` der
   Grenzsteuersatz als **Anteil** (`0.42`), die Soli-Sätze stehen dagegen in
   **Prozent** (`5.5`, `11.9`).
@@ -1200,7 +1201,7 @@ Verfahren: `raw`, `block`, `circular`, `stationary`, `wild`, `regime`, `evt`,
 `tvtp_ms_garch` (die MS-Verfahren schätzen ihr Modell in allen drei
 Sprachen selbst per Maximum Likelihood nach Haas, Mittnik und Paolella
 (2004), ohne das R-Paket `MSGARCH`; Python und Julia rechnen bitgleich zu R), optional
-mit ESS-gewichteter Gittersuche über Hyperparameter. `block_length()`
+mit ESS-gewichteter Gittersuche über Hyperparameter. `bootstrap_block_length()`
 schätzt Blocklängen nach Politis & White (2004).
 
 ### Entnahmephase
@@ -1217,7 +1218,7 @@ saveRDS(res, "lauf.rds")
 wd <- withdrawal_simulation(readRDS("lauf.rds"),
                             withdrawal_rule("guyton_klinger", rate = 5),
                             years = 30, inflation = 2, start_value = 1e6,
-                            tax_mode = "person")
+                            tax = tax_profile())
 wd                       # Erfolgsquote, SWR/PWR, Konsum- und Vermögensquantile
 plot(wd)
 ```
@@ -1245,12 +1246,12 @@ Sparer-Pauschbetrag und Vorabpauschale.
 
 Wird als `start_value` ein Ergebnis von `simulation()` übergeben, ist
 dessen Endwert das Startvermögen (ein Endwert ≤ 0 ist ein Fehler). Wurde
-die Ansparphase mit `tax_mode = "person"` gerechnet (Element `open_lots`)
-und rechnet auch die Entnahmephase mit `tax_mode = "person"`, übernimmt
+die Ansparphase mit `tax = tax_profile()` gerechnet (Element `open_lots`)
+und rechnet auch die Entnahmephase mit `tax = tax_profile()`, übernimmt
 SimLev 0.5.0 ohne eigenes `cost_basis` die einzelnen Lots und verkauft bei jeder
 Entnahme je Asset die ältesten Lots zuerst (FIFO, mit Anrechnung der
 Vorabpauschale wie in der Engine). Nicht ausdrücklich angegebene Werte
-werden aus dem Ergebnis übernommen: `asset_bonus` (gemeinsame
+werden aus dem Ergebnis übernommen: `partial_exemption` (gemeinsame
 Teilfreistellung der gehaltenen Assets), `loss_carryforward` (allgemeiner
 Verlusttopf), `sale_cost` (halber Spread), der im ersten Planjahr schon
 verbrauchte Sparer-Pauschbetrag (`tax_report$next_year`) und
@@ -1263,19 +1264,19 @@ werden nicht übernommen; die Entnahmephase rechnet mit dem festen Satz
 `tax_rate` (weitere Grenzen in `?withdrawal_simulation`). Ohne Lots gilt
 wie bisher: 100 %, wenn das Ergebnis nur noch Cash hält, sonst die
 Näherung (Startwert + Einzahlungen) / Endwert mit Durchschnittskosten,
-bei `tax_mode = "person"` mit Warnung.
+bei `tax = tax_profile()` mit Warnung.
 
 ### Vertiefte Analyse und Sensitivitäten
 
-`deep_analysis()` wertet gespeicherte Ergebnisse von `simulation()` (einzeln
+`result_analysis()` wertet gespeicherte Ergebnisse von `simulation()` (einzeln
 oder als benannte Liste) oder beliebige Kursreihen nachträglich aus, im
 Umfang von Portfolio-Backtestern wie testfol.io. Grundlage ist der
 zeitgewichtete Wertindex, Sparpläne verzerren die Renditen also nicht. Die
-CAGR (TWR) von `deep_analysis()` entspricht der TTWROR von `simulation()`,
+CAGR (TWR) von `result_analysis()` entspricht der TTWROR von `simulation()`,
 die MWRR mit Sparplan der `cagr` von `simulation()` (dieselbe XIRR-Rechnung).
 
 ``` r
-da <- deep_analysis(list(Aktien = res_a, Mischung = res_b), benchmark = "Aktien", risk_free = 2)
+da <- result_analysis(list(Aktien = res_a, Mischung = res_b), benchmark = "Aktien", risk_free = 2)
 da                    # Kennzahlen und Benchmark-Block
 summary(da)           # zusätzlich Jahresrenditen und größte Drawdowns
 plot(da)              # Wachstum, Drawdowns, rollierende CAGR, Jahresrenditen
@@ -1290,11 +1291,11 @@ plot(da, "monthly")   # Monatsrenditen als Heatmap
 | Tabellen | Jahres- und Monatsrenditen, Saisonalität, größte Drawdowns mit Dauer und Erholung, rollierende CAGR, Volatilität, Sharpe, Drawdown und Beta, Korrelationsmatrizen |
 
 Für Parameterstudien rufen `sensitivity_grid()` (beliebige
-`simulation()`-Argumente im Raster), `rebalancing_sensitivity()` (Frequenz,
-Versatz, absolute oder relative Bänder), `lumpsum_vs_dca()` (Einmalanlage
+`simulation()`-Argumente im Raster), `sensitivity_rebalancing()` (Frequenz,
+Versatz, absolute oder relative Bänder), `planning_lumpsum_vs_dca()` (Einmalanlage
 gegen gestreckten Einstieg über rollierende Starts, mit Gewinnquote, MLSA und
-MLSD) und `leverage_sensitivity()` (Kennzahlen über den Hebel, optimaler
-Hebel) die Engine wiederholt auf, wahlweise parallel. `leveraged_series()`
+MLSD) und `sensitivity_leverage()` (Kennzahlen über den Hebel, optimaler
+Hebel) die Engine wiederholt auf, wahlweise parallel. `series_leverage()`
 erzeugt eine täglich zurückgesetzte Hebelreihe aus einem Index (Hebel, TER,
 Zins, Spread).
 
@@ -1316,41 +1317,41 @@ ps <- param_search(data,
   burn_in = 400, objective = "sharpe", cores = 4)
 summary(ps)           # beste Punkte und bestes Plateau
 plot(ps)              # Heatmap der Zielgröße
-pbo(ps)               # Probability of Backtest Overfitting (CSCV)
-deflated_sharpe(ps)   # Sharpe Ratio nach Mehrfachtest-Korrektur
-walk_forward(ps, train = 5, test = 1)
+overfit_pbo(ps)               # Probability of Backtest Overfitting (CSCV)
+sharpe_deflated(ps)   # Sharpe Ratio nach Mehrfachtest-Korrektur
+overfit_walk_forward(ps, train = 5, test = 1)
 param_bootstrap(ps, hist, cfg, top = 5, method = "stationary", n = 500)
 ```
 
-Eine einzelne Spitze im Raster ist oft Zufall. `plateau()` bewertet jeden
-Punkt mit seinen Nachbarn; `pbo()` misst über alle Aufteilungen der Historie
+Eine einzelne Spitze im Raster ist oft Zufall. `param_plateau()` bewertet jeden
+Punkt mit seinen Nachbarn; `overfit_pbo()` misst über alle Aufteilungen der Historie
 in zwei Hälften, wie oft der In-Sample-beste Punkt Out-of-Sample unter dem
 Median landet (Bailey, Borwein, López de Prado & Zhu 2017);
-`deflated_sharpe()` vergleicht die beste Sharpe Ratio mit dem Maximum, das
+`sharpe_deflated()` vergleicht die beste Sharpe Ratio mit dem Maximum, das
 man aus gleich vielen wertlosen Versuchen erwarten würde, mit einer
 effektiven Versuchsanzahl aus der mittleren Korrelation der Punkte (Bailey &
-López de Prado 2014); `walk_forward()` wählt in rollierenden
+López de Prado 2014); `overfit_walk_forward()` wählt in rollierenden
 Trainingsfenstern und verkettet die folgenden Testfenster.
 
 ### Daten und Portfolios aufbereiten
 
 ``` r
-dat <- align_series(us = msci_usd, fx = eurusd, fund = etf_kurse)    # Kalendertage, LOCF
-check_series(dat)                                                    # Lücken, Spikes, Splits, stehende Kurse
-dat <- convert_currency(dat, "us", "fx")                             # USD-Index in EUR
-dat <- align_macro(dat, hvpi, "inflation", lag = 45, transform = "yoy")   # erst ab Veröffentlichung
-dat <- align_macro(dat, zinskurve, "spread", lag = 1)
-lang <- splice_series(fund = etf_kurse, backcast = bc_df, proxy = msci_usd)
+dat <- series_align(us = msci_usd, fx = eurusd, fund = etf_kurse)    # Kalendertage, LOCF
+series_check(dat)                                                    # Lücken, Spikes, Splits, stehende Kurse
+dat <- series_convert_currency(dat, "us", "fx")                             # USD-Index in EUR
+dat <- series_align_macro(dat, hvpi, "inflation", lag = 45, transform = "yoy")   # erst ab Veröffentlichung
+dat <- series_align_macro(dat, zinskurve, "spread", lag = 1)
+lang <- series_splice(fund = etf_kurse, backcast = bc_df, proxy = msci_usd)
 portfolio_template("permanent", map = c(stocks = "world", long_bonds = "bund_lang",
                                         cash = "geldmarkt", gold = "gold_eur"))
 ```
 
-`align_series()` legt Quellen mit unterschiedlichen Börsenkalendern auf
-einen gemeinsamen Kalender, `check_series()` meldet Auffälligkeiten,
-`align_macro()` ordnet Monats- oder Quartalswerte erst ab dem Tag ihrer
+`series_align()` legt Quellen mit unterschiedlichen Börsenkalendern auf
+einen gemeinsamen Kalender, `series_check()` meldet Auffälligkeiten,
+`series_align_macro()` ordnet Monats- oder Quartalswerte erst ab dem Tag ihrer
 Veröffentlichung zu (sonst stecken Zukunftsinformationen in Signalen und
-bedingten Analysen), `total_return_index()` und `deflate()` rechnen Kurs- in
-Total-Return- bzw. reale Reihen um, `splice_series()` verkettet Reihen
+bedingten Analysen), `index_total_return()` und `series_deflate()` rechnen Kurs- in
+Total-Return- bzw. reale Reihen um, `series_splice()` verkettet Reihen
 renditebasiert mit Vorrang der ersten, `strategy_from_weights()` und
 `portfolio_template()` bauen Strategien aus Gewichten bzw. bekannten
 Allokationen (60/40, Permanent, All Weather, Golden Butterfly, Three Fund,
@@ -1372,20 +1373,20 @@ dep <- dependence_analysis(dat, c("aktien", "anleihen", "gold"),
 dep                  # Korrelationen, Tail-Koeffizienten, beste Copula, DCC, Regime-Vergleich
 plot(dep, "conditional", pair = "aktien ~ anleihen", condition = "inflation")
 tail_regression(dat, "aktien", c("inflation", "spread"))   # Quantile der Rendite
-covar_analysis(dat, system = "portfolio", assets = c("aktien", "anleihen"), state = "spread")
-validate_dependence(bootstrap(hist, cfg, "stationary", n = 200), hist)
+tail_covar(dat, system = "portfolio", assets = c("aktien", "anleihen"), state = "spread")
+dependence_validate(bootstrap(hist, cfg, "stationary", n = 200), hist)
 stress <- regime_subset(hist, "inflation >= 4", min_run = 60)   # Stress-Bootstrap
 ```
 
 | Baustein | Inhalt |
 |---|---|
 | `tail_dependence()` | empirische Koeffizienten λ unten/oben je Quantil, Exceedance-Korrelationen (Longin & Solnik 2001) |
-| `fit_copula()` | Gauß, t, Clayton, Gumbel, Frank, rotierte Varianten für negative Abhängigkeit; Pseudo-ML, AIC, implizite Tail-Abhängigkeit |
-| `dcc_fit()` | DCC(1,1) nach Engle (2002), Filter in C++ |
+| `copula_fit()` | Gauß, t, Clayton, Gumbel, Frank, rotierte Varianten für negative Abhängigkeit; Pseudo-ML, AIC, implizite Tail-Abhängigkeit |
+| `dependence_dcc()` | DCC(1,1) nach Engle (2002), Filter in C++ |
 | bedingte Analyse | Kennzahlen je Regime, Differenz oberstes minus unterstes Regime mit stationärem Block-Bootstrap (Intervall, p-Wert) |
-| `quantile_reg()`, `tail_regression()` | lineare Quantilsregression (MM-Algorithmus), Effekt der Drittvariablen je Quantil mit Block-Bootstrap-Fehlern |
-| `covar_analysis()` | CoVaR und ΔCoVaR nach Adrian & Brunnermeier (2016), optional zeitvariabel über Zustandsvariablen |
-| `validate_dependence()` | erhalten Bootstrap-Pfade Korrelation und Tail-Abhängigkeit der Historie? |
+| `quantile_regression()`, `tail_regression()` | lineare Quantilsregression (MM-Algorithmus), Effekt der Drittvariablen je Quantil mit Block-Bootstrap-Fehlern |
+| `tail_covar()` | CoVaR und ΔCoVaR nach Adrian & Brunnermeier (2016), optional zeitvariabel über Zustandsvariablen |
+| `dependence_validate()` | erhalten Bootstrap-Pfade Korrelation und Tail-Abhängigkeit der Historie? |
 | `regime_subset()` | Zeilen eines Regimes als Grundlage für Stress-Bootstraps |
 
 Alle Verfahren sind ohne Zusatzpakete umgesetzt.
@@ -1408,26 +1409,26 @@ w1 <- tactical_rules(dat, list(
 w2 <- tactical_rotation(dat, c("usa", "europa", "em"), top = 2, safe = c("anleihen", "geldmarkt"),
                         canary = c("em", "anleihen"), type = "13612w")
 # Zielvolatilität, Glidepath und Kern-Satellit
-w3 <- target_volatility(dat, c(aktien = 0.7, anleihen = 0.3), safe = "geldmarkt", target = 10)
+w3 <- tactical_target_volatility(dat, c(aktien = 0.7, anleihen = 0.3), safe = "geldmarkt", target = 10)
 # Bedingt: nur im obersten/untersten Volatilitätsfünftel vom Grundanteil 80 % abweichen
-w3b <- conditional_volatility(dat, c(aktien = 1), safe = "geldmarkt", base = 0.8, upper = 0.8, lower = 0.2)
-w4 <- glidepath(dat, from = c(aktien = 0.9, anleihen = 0.1), to = c(aktien = 0.4, anleihen = 0.6))
-w5 <- blend_weights(kern = w4, satellit = w2, shares = c(0.8, 0.2))
+w3b <- tactical_conditional_volatility(dat, c(aktien = 1), safe = "geldmarkt", base = 0.8, upper = 0.8, lower = 0.2)
+w4 <- tactical_glidepath(dat, from = c(aktien = 0.9, anleihen = 0.1), to = c(aktien = 0.4, anleihen = 0.6))
+w5 <- tactical_blend(kern = w4, satellit = w2, shares = c(0.8, 0.2))
 res <- tactical_simulation(dat, w5, rebalance = "month", tolerance = 5, lag = 1,
-                           asset_args = list(asset_bonus = c(usa = 30, europa = 30, em = 30)),
-                           tax_mode = "person", dca_mode = TRUE, dca_value = 500, dca_span = 1)
+                           asset_args = list(partial_exemption = c(usa = 30, europa = 30, em = 30)),
+                           tax = tax_profile(), dca = dca_plan(500, 1))
 ```
 
 `lag = 1` handelt ein Signal vom Schlusskurs eines Tages am nächsten Tag;
 `lag = 0` entspricht der Konvention vieler Online-Backtester.
 
-`conditional_volatility()` steuert nur in extremen Phasen (Bongaerts, Kang &
+`tactical_conditional_volatility()` steuert nur in extremen Phasen (Bongaerts, Kang &
 van Dijk 2020): Liegt die geschätzte Volatilität über ihrem bisherigen
 80-%-Quantil, sinkt der Risikoanteil auf `base × Vergleichsvola / Vola`;
 unter dem 20-%-Quantil steigt er entsprechend, höchstens auf 100 %.
 Dazwischen bleibt der Grundanteil. Quantile und Vergleichswert (Standard:
 bisheriges Mittel) werden nur aus der Vergangenheit berechnet. Gegenüber
-`target_volatility()` fallen deutlich weniger Umschichtungen an. Weil die
+`tactical_target_volatility()` fallen deutlich weniger Umschichtungen an. Weil die
 Engine keinen Kredit kennt, ist Hochskalieren nur bei `base < 1` möglich;
 mit `scaling = "fixed"` gelten feste Anteile je Phase.
 
@@ -1436,9 +1437,9 @@ mit `scaling = "fixed"` gelten feste Anteile je Phase.
 ``` r
 portfolio_optimize(dat, c("aktien", "anleihen", "gold"), method = "risk_parity")
 portfolio_optimize(dat, assets, method = "max_sharpe", upper = 0.6, cov = "ledoit_wolf", resample = 200)
-plot(efficient_frontier(dat, assets))
-risk_contributions(dat, c(aktien = 0.6, anleihen = 0.3, gold = 0.1), measure = "cvar")
-w <- rolling_optimization(dat, assets, "min_variance", window = 3, every = "quarter")
+plot(portfolio_frontier(dat, assets))
+portfolio_risk_contributions(dat, c(aktien = 0.6, anleihen = 0.3, gold = 0.1), measure = "cvar")
+w <- portfolio_rolling(dat, assets, "min_variance", window = 3, every = "quarter")
 tactical_simulation(dat, w, rebalance = "quarter")      # Optimierung ausserhalb der Stichprobe
 ```
 
@@ -1450,49 +1451,49 @@ Gleichgewichtung; Grenzen je Anlage, Ledoit-Wolf-Schrumpfung und
 Michaud-Resampling über Block-Bootstrap-Stichproben. Die Löser sind ohne
 Zusatzpakete geschrieben (projizierter Gradient mit Beschleunigung,
 gedämpftes Newton-Verfahren) und gegen geschlossene Lösungen getestet.
-`risk_contributions()` zerlegt Volatilität oder CVaR additiv auf die
+`portfolio_risk_contributions()` zerlegt Volatilität oder CVaR additiv auf die
 Anlagen.
 
 ### Anleihen, Geldmarkt und Währungssicherung
 
 ``` r
-dat$bund10 <- bond_index_from_yields(dat, "rendite_10j", maturity = 10, coupon_frequency = 1)
-dat$geldmarkt <- money_market_index(dat, "ester", spread = 0.1)
-dat$sp500_eur_h <- currency_hedged_index(dat, "sp500_usd", domestic_rate = "ester", foreign_rate = "sofr")
+dat$bund10 <- index_bond(dat, "rendite_10j", maturity = 10, coupon_frequency = 1)
+dat$geldmarkt <- index_money_market(dat, "ester", spread = 0.1)
+dat$sp500_eur_h <- index_currency_hedged(dat, "sp500_usd", domestic_rate = "ester", foreign_rate = "sofr")
 ```
 
-`bond_index_from_yields()` bildet einen Total-Return-Index konstanter
+`index_bond()` bildet einen Total-Return-Index konstanter
 Laufzeit aus einer Renditereihe (Kupon plus Neubewertung, wahlweise über
-Duration und Konvexität; Swinkels 2019). `money_market_index()` verzinst
-Act/360, `currency_hedged_index()` addiert die Zinsdifferenz einer
+Duration und Konvexität; Swinkels 2019). `index_money_market()` verzinst
+Act/360, `index_currency_hedged()` addiert die Zinsdifferenz einer
 rollierenden Devisentermin-Absicherung.
 
 ### Gebühren, Kirchensteuer und Freibetrag
 
-Drei optionale Argumente von `simulation()` bilden die deutsche Praxis
-genauer ab; ohne sie rechnet die Engine wie ohne diese Optionen.
+Drei optionale Angaben in den Bausteinen von `simulation()` bilden die
+deutsche Praxis genauer ab; ohne sie rechnet die Engine wie ohne diese Optionen.
 
 ``` r
-simulation(dat, strategie, tax_mode = "person",
-           order_fee = list(fixed = 1),        # z. B. 1 EUR je Order beim Neobroker
-           dca_fee = 0,                        # Sparplan gebührenfrei
-           church_tax = 9,                     # 9 % Kirchensteuer
-           harvest_mode = TRUE, harvest_day = "12-15")   # Freibetrag jährlich ausschöpfen
+simulation(dat, strategie,
+           costs = sim_costs(order_fee = list(fixed = 1),   # z. B. 1 EUR je Order beim Neobroker
+                             dca_fee = 0),                  # Sparplan gebührenfrei
+           tax = tax_profile(church_tax = 9,                # 9 % Kirchensteuer
+                             harvest = harvest_rule("12-15")))   # Freibetrag jährlich ausschöpfen
 ```
 
 Mit `church_tax` wird der Abgeltungsteuersatz nach § 32d Abs. 1 EStG
-angepasst (bei 9 % rund 27,995 % statt 26,375 %; ein abweichend angegebenes
-`tax_rate` wird dabei mit Warnung überschrieben). Dabei wirkt die
+angepasst (bei 9 % rund 27,995 % statt 26,375 %; `rate` und `church_tax`
+zusammen sind ein Fehler). Dabei wirkt die
 Kirchensteuer auch auf die Einkommensteuer, also auf die § 23-Steuer und
-den persönlichen Satz der Günstigerprüfung. Mit festem `marginal_tax_rate`
+den persönlichen Satz der Günstigerprüfung. Mit festem Grenzsteuersatz (`income_rate()`)
 ist der Sonderausgabenabzug der Kirchensteuer dabei nicht abgebildet, mit
-`taxable_income` schon: Die Kirchensteuer ist Sonderausgabe im Jahr ihrer
+`income_tariff()` schon: Die Kirchensteuer ist Sonderausgabe im Jahr ihrer
 Zahlung, Erstattungen werden verrechnet bzw. hinzugerechnet (siehe
 [Besteuerung](#besteuerung)).
 
 Gebühren erhöhen beim Kauf den Einstandskurs und mindern beim Verkauf den
 Erlös, wirken also auch steuerlich; möglich sind feste und prozentuale
-Gebühren mit Mindest- und Höchstbetrag. `harvest_mode` realisiert einmal im
+Gebühren mit Mindest- und Höchstbetrag. `harvest_rule()` realisiert einmal im
 Jahr Gewinne bis zum noch freien Sparer-Pauschbetrag (und wahlweise bis zur
 Höhe des Verlusttopfs) und kauft sofort zurück; das hebt den Einstandskurs
 steuerfrei an. Spread und Gebühren für beide Orders fallen dabei an.
@@ -1501,35 +1502,35 @@ steuerfrei an. Spread und Gebühren für beide Orders fallen dabei an.
 
 ``` r
 # Wie sieht die Welt aus, wenn die Inflation im Mittel 4 % beträgt?
-ep <- entropy_pooling(dat, c("aktien", "anleihen"), list(view_mean("inflation", 4)), states = "inflation")
+ep <- scenario_entropy_pooling(dat, c("aktien", "anleihen"), list(view_mean("inflation", 4)), states = "inflation")
 scenario_risk(ep, c(aktien = 0.6, anleihen = 0.4))
 # Was erwartet die Abhängigkeitsstruktur für Anleihen in den schlechtesten 5 % der Aktienwochen?
-cs <- copula_scenarios(dat, c("aktien", "anleihen"), stress = list(aktien = c(0, 0.05)))
-crisis_replay(dat, c(aktien = 0.6, anleihen = 0.4))   # 1973/74, 1987, 2000-02, 2008, 2011, 2020, 2022
+cs <- scenario_copula(dat, c("aktien", "anleihen"), stress = list(aktien = c(0, 0.05)))
+scenario_crisis(dat, c(aktien = 0.6, anleihen = 0.4))   # 1973/74, 1987, 2000-02, 2008, 2011, 2020, 2022
 ```
 
-`entropy_pooling()` gewichtet historische Szenarien so um, dass eigene
+`scenario_entropy_pooling()` gewichtet historische Szenarien so um, dass eigene
 Annahmen (Mittelwerte, Wahrscheinlichkeiten, Volatilitäten) erfüllt sind, bei
-minimaler Abweichung von der Historie (Meucci 2008). `copula_scenarios()`
+minimaler Abweichung von der Historie (Meucci 2008). `scenario_copula()`
 simuliert aus einer t-Copula mit empirischen Rändern, auf Wunsch bedingt auf
 ein Quantilband einzelner Anlagen.
 
 ### Planung über lange Horizonte
 
 ``` r
-hist_adj <- set_expected_return(hist, c("us", "eu"), target = 5)   # Renditeannahme statt Historie
-pb <- pooled_bootstrap(list(usa = usa, de = de, jp = jp), c("aktien", "anleihen"),
+hist_adj <- series_shift_return(hist, c("us", "eu"), target = 5)   # Renditeannahme statt Historie
+pb <- bootstrap_pooled(list(usa = usa, de = de, jp = jp), c("aktien", "anleihen"),
                        weights = c(aktien = 0.6, anleihen = 0.4), inflation = "cpi", years = 40)
-h  <- horizon_model("discrete", years = c(25, 30, 35, 40), prob = c(0.3, 0.4, 0.2, 0.1))
+h  <- withdrawal_horizon("discrete", years = c(25, 30, 35, 40), prob = c(0.3, 0.4, 0.2, 0.1))
 withdrawal_simulation(pb, withdrawal_rule("guyton_klinger", rate = 4), horizon = h)
-goal_optimize(portfolio_returns(usa, kandidaten), start_value = 1e5, goal = 3e5,
+planning_goal(portfolio_returns(usa, kandidaten), start_value = 1e5, goal = 3e5,
               horizon = 20, contributions = 6000)
 ```
 
 Die Laufzeit der Entnahmephase kann fest sein oder einer eigenen Verteilung
 folgen (gleichverteilt, diskret, normal, dreiecksförmig oder eine eigene
 Stichprobe); es gibt bewusst keine eingebauten Sterbetafeln.
-`goal_optimize()` bestimmt per dynamischer Programmierung für jeden
+`planning_goal()` bestimmt per dynamischer Programmierung für jeden
 Zeitpunkt und jedes Vermögen das Portfolio mit der höchsten Wahrscheinlichkeit,
 ein Ziel zu erreichen (Das et al. 2020), auch für Entnahmen (Ziel 0 =
 Geld reicht bis zum Horizont).
@@ -1539,15 +1540,15 @@ Geld reicht bis zum Horizont).
 | Funktion | Frage |
 |---|---|
 | `sharpe_test(x, y)` | Unterscheiden sich zwei Sharpe Ratios wirklich? (Ledoit & Wolf 2008) |
-| `reality_check(search)` | Schlägt die beste von vielen Strategien die Benchmark mehr als zufällig? (White 2000, Hansen 2005) |
+| `overfit_reality_check(search)` | Schlägt die beste von vielen Strategien die Benchmark mehr als zufällig? (White 2000, Hansen 2005) |
 | `sharpe_haircut(search)` | Wie viel der Sharpe Ratio erklärt die Zahl der Versuche? (Harvey & Liu 2015) |
-| `min_track_record(x)` | Wie lang muss eine Historie sein, damit die Sharpe Ratio belastbar ist? |
-| `cpcv_portfolio(x, assets, methods)` | Wie verteilt sich die Out-of-Sample-Güte von Optimierern? (kombinatorische Kreuzvalidierung) |
+| `sharpe_min_track_record(x)` | Wie lang muss eine Historie sein, damit die Sharpe Ratio belastbar ist? |
+| `portfolio_cpcv(x, assets, methods)` | Wie verteilt sich die Out-of-Sample-Güte von Optimierern? (kombinatorische Kreuzvalidierung) |
 | `signal_analysis(dat, signal, target)` | Was folgt typischerweise auf ein Signalniveau? |
 | `regime_hmm(dat, columns)`, `regime_states()` | In welcher Marktphase sind wir (ohne Zukunftsdaten)? |
-| `return_heatmap(x, inflation)` | Wie hängt die reale Rendite von Startjahr und Haltedauer ab? |
+| `result_heatmap(x, inflation)` | Wie hängt die reale Rendite von Startjahr und Haltedauer ab? |
 
-`deep_analysis(..., inflation = 2)` rechnet alle Kennzahlen real.
+`result_analysis(..., inflation = 2)` rechnet alle Kennzahlen real.
 `portfolio_optimize()` kennt zusätzlich den minimalen Conditional Drawdown
 at Risk (`method = "min_cdar"`) und die Kovarianzschätzer `"ewma"`,
 `"denoise"` und `"gerber"`.
@@ -1568,11 +1569,11 @@ drei Sprachen gleich:
 | `cagr`, `ttwror` | Jährliche Wachstumsrate und zeitgewichtete Rendite (TTWROR) als Anteil; mit Sparplan ist `cagr` die geldgewichtete Rendite (XIRR) |
 | `statistics` | Alle Risiko- und Renditekennzahlen |
 | `report` | Je Asset tägliche Werte: `worth`, `money`, `flows`, `total`, `share` |
-| `tax_report` | Gezahlte Steuern, Verlustvorträge, genutzter Pauschbetrag und dessen Steuerersparnis; `open_tax_debt` (am Ende offene, nicht gedeckte Steuerschuld in EUR, sonst 0) und mit `taxable_income` `tariff_years` (Veranlagung je Jahr); bei `tax_mode = "person"` `next_year` (Steuerzustand des Jahres nach dem letzten Datentag: verbrauchter Sparer-Pauschbetrag, Verlusttöpfe, mit `taxable_income` der letzte Kirchensteuer-Bescheid) für eine Fortsetzung, z. B. in der Entnahmephase |
+| `tax_report` | Gezahlte Steuern, Verlustvorträge, genutzter Pauschbetrag und dessen Steuerersparnis; `open_tax_debt` (am Ende offene, nicht gedeckte Steuerschuld in EUR, sonst 0) und mit `income_tariff()` `tariff_years` (Veranlagung je Jahr); mit `tax_profile()` `next_year` (Steuerzustand des Jahres nach dem letzten Datentag: verbrauchter Sparer-Pauschbetrag, Verlusttöpfe, mit `income_tariff()` der letzte Kirchensteuer-Bescheid) für eine Fortsetzung, z. B. in der Entnahmephase |
 | `undefined_metrics` | `data.frame(metric, reason, detail)` mit einer Zeile je Kennzahl, die `NA` ist (z. B. negativer Endwert, Einzeltag, Volatilität 0); `print()` und `summary()` zeigen sie als „nicht definiert (Ursache)“. Der Endwert bleibt unverändert, auch wenn er negativ ist |
-| `open_lots` | *Nur mit `tax_mode = "person"` gefüllt, sonst `NULL`:* je Asset die am letzten Tag gehaltenen Lots (Kaufdatum, Stück, Anschaffungskurs, anzurechnende Vorabpauschale) mit Steuerregime, Teilfreistellung, Cash, `asset_spread` und `order_fee`; `withdrawal_simulation(start_value = <Ergebnis>)` verkauft daraus per FIFO |
+| `open_lots` | *Nur mit `tax = tax_profile()` gefüllt, sonst `NULL`:* je Asset die am letzten Tag gehaltenen Lots (Kaufdatum, Stück, Anschaffungskurs, anzurechnende Vorabpauschale) mit Steuerregime, Teilfreistellung, Cash, `spread` und `order_fee`; `withdrawal_simulation(start_value = <Ergebnis>)` verkauft daraus per FIFO |
 | `buys`, `sells` | Durchschnittliche Anzahl Käufe und Verkäufe pro Jahr je Asset (bei einem Einzeltag `NA`) |
-| `fees_paid`, `harvest_days` | Summe der Ordergebühren (mit `order_fee`/`dca_fee`) und Termine der Gewinnrealisierung (mit `harvest_mode`) |
+| `fees_paid`, `harvest_days` | Summe der Ordergebühren (mit `sim_costs()`) und Termine der Gewinnrealisierung (mit `harvest_rule()`) |
 | `trades` | *Nur Python und Julia:* alle Lots, Verkäufe, Vorabpauschalen und Gebühren je Asset |
 
 `summary(result)` liefert unter anderem `total_return_twr`
@@ -1656,6 +1657,7 @@ SimLev aus R kennt, muss nur wenige Schreibweisen umstellen:
 | `c(us = "us_ret")`, `list(A = "w1")` | `{"us": "us_ret"}`, `{"A": "w1"}` | `(us = "us_ret",)`, `(A = "w1",)` |
 | `data.frame(...)` | `pandas.DataFrame(...)` | `RFrame(...)`; für `simulation()` auch NamedTuple oder `DataFrame(...)` |
 | `simulation(data, s, start_value = 1e4)` | `simlev.simulation(data, s, start_value=1e4)` | `simulation(data, s; start_value = 1e4)` |
+| `dca_plan(100, 1, days = 15)` | `simlev.dca_plan(100, 1, days=15)` | `dca_plan(100, 1; days = 15)` |
 | `result$worth` | `result.worth` | `result.worth` |
 | `result$statistics$sharpe` | `result.statistics["sharpe"]` | `result.statistics.sharpe` |
 | `result$report$WORLD$total` | `result.report["WORLD"]["total"]` | `result.report["WORLD"].total` |
@@ -1700,9 +1702,9 @@ R-Fassung; die Unterschiede betreffen nur Schreibweisen und Komfort (siehe
   Simulationsergebnisse“, „Wertentwicklung“, „Endwert“, „Risiko“ …).
 - `result.trades` (alle Buchungen je Asset) gibt es nur in Python und
   Julia.
-- Das Argument `spread` von `simulation()` hat in allen Fassungen keine
-  Wirkung. Spreads werden je Asset über `asset_spread` gesetzt; SimLev
-  warnt, wenn `spread` angegeben wird.
+- `simulation()` hat kein Argument `spread` (bis 6.2 war es wirkungslos und
+  ergab nur eine Warnung). Spreads werden je Asset über
+  `asset_config(spread = )` gesetzt.
 
 Weitere sprachspezifische Hinweise stehen in den READMEs der Unterordner
 [`r/`](r/README.md), [`python/`](python/README.md) und
@@ -1761,11 +1763,11 @@ rechnen dieselben Fälle nach und vergleichen jeden Wert Bit für Bit.
 | Engine: Stressfälle (30 Jahre, Totalverlust-Hebel, mehrere Signal-Assets, konstante Preise, Schalttage, Extremwerte, Fehlerpfade) | 37 in `golden/extra/`, alle bitgleich (strikt) | 37, alle bitgleich (strikt) |
 | Engine: frisch erzeugte Zufalls- und Stressfälle beider Generatoren | 669, alle bitgleich | 469, alle bitgleich |
 | Engine: Fälle mit den neuen Argumenten (`order_fee`, `dca_fee`, `church_tax`, `harvest_*`, `taxable_income`, `tax_tariff`) | 750, alle bitgleich | 92 eigene Fälle, alle bitgleich (strikt) |
-| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS (Module `evd`, `rugarch`, `imputets`) und die R-Interna (30 Module in `golden/modules/`) | 4.578, alle bitgleich (strikt, NA ≠ NaN, mit Vorzeichen der Null) | 4.578, alle bitgleich (strikt, NA ≠ NaN, mit Vorzeichen der Null) |
+| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS (Module `evd`, `rugarch`, `imputets`) und die R-Interna (30 Module in `golden/modules/`) | 4.656, alle bitgleich (strikt, NA ≠ NaN, mit Vorzeichen der Null) | 4.656, alle bitgleich (strikt, NA ≠ NaN, mit Vorzeichen der Null) |
 
 Die Fälle in [`golden/`](golden/) prüfen beide Suiten: die 105
 Engine-Fälle in `golden/cases/` und `golden/extra/` vollständig und die
-4.578 Modul-Fälle in Python vollständig, in Julia standardmäßig in einer
+4.656 Modul-Fälle in Python vollständig, in Julia standardmäßig in einer
 Auswahl und mit `SIMLEV_FULL_TESTS=1` vollständig.
 
 **Optionale R-Pakete.** `.fit_tail` (Tail-Modell im Bootstrap, Verfahren
@@ -1779,7 +1781,7 @@ stinepack 1.5, beide ins R-Paket übernommen (`.imputets_na_interpolation`,
 `r/R/vendor_imputets.R`, `r/src/vendor_imputets.cpp`,
 `r/R/vendor_stinepack.R`); imputeTS muss dafür nicht installiert sein.
 `.fit_garch11` (Bootstrap-Verfahren `garch` und `gjr_garch`, Kopplung
-weiterer Reihen, `dcc_fit()`, `dependence_analysis()`) schätzt immer per
+weiterer Reihen, `dependence_dcc()`, `dependence_analysis()`) schätzt immer per
 `ugarchfit` aus rugarch 1.5-6 mit Rsolnp 1.16 `solnp`/`gosolnp` und
 truncnorm 1.0-9 `rtruncnorm`, alle ins R-Paket übernommen
 (`.rugarch_ugarchfit`, `r/R/vendor_rugarch.R`, `r/src/vendor_rugarch.c`,
@@ -1911,7 +1913,7 @@ SimLev-Repos/
 ├── golden/            gemeinsame Referenzfälle aus R und ihre Generatoren
 │   ├── cases/         68 Golden-Master-Fälle der Engine (Python und Julia)
 │   ├── extra/         37 Stressfälle der Engine (Python und Julia)
-│   ├── modules/       4.578 Referenzfälle aller Funktionen in 30 Modulen
+│   ├── modules/       4.656 Referenzfälle aller Funktionen in 30 Modulen
 │   │                  (je Fall R-, Python- und Julia-Code), Generatoren
 │   │                  gen_<modul>.R und ref_tools.R
 │   ├── golden_cases.R
@@ -1949,10 +1951,10 @@ cd python
 pip install ".[test]"
 pytest                                  # 5.020 Tests, alle bestanden
 python tools/compare_golden.py          # Engine: golden/cases und golden/extra (105 Fälle)
-python tools/compare_reference.py       # alle Funktionen: golden/modules (4.578 Fälle)
+python tools/compare_reference.py       # alle Funktionen: golden/modules (4.656 Fälle)
 ```
 
-Die Suite enthält 4.578 Modul-Referenzfälle und die 105 Golden-Master-Fälle
+Die Suite enthält 4.656 Modul-Referenzfälle und die 105 Golden-Master-Fälle
 der Engine; die übrigen Tests prüfen Engine und R-Interna. Einzelne Module
 oder Fälle prüft `python tools/compare_reference.py <modul> [-k id] [-v]`
 bzw. `python tools/compare_golden.py [ordner …] [-k fall …] [-v]`. Auf
@@ -1967,9 +1969,9 @@ Plattformen ohne 80-Bit-`long double` werden die Bitgleichheits-Tests
 ``` bash
 cd julia
 julia --project -e 'using Pkg; Pkg.test()'                     # 1.221 Tests, alle bestanden
-SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()' # dazu alle 4.578 Modul-Referenzfälle
+SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()' # dazu alle 4.656 Modul-Referenzfälle
 julia --project tools/compare_golden.jl                        # Engine: golden/cases und golden/extra (105 Fälle)
-julia --project tools/compare_reference.jl                     # alle Funktionen: golden/modules (4.578 Fälle)
+julia --project tools/compare_reference.jl                     # alle Funktionen: golden/modules (4.656 Fälle)
 ```
 
 `Pkg.test()` prüft die 105 Golden-Master-Fälle der Engine vollständig

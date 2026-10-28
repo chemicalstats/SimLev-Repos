@@ -2,7 +2,7 @@
 #
 # Ein gemeinsamer Auswerter für Bedingungen als Text in
 # `Bootstrap.bootstrap_probability`, `Dependence.regime_subset`,
-# `Scenarios.view_prob`/`entropy_pooling` und `Tactical.tactical_rules`.
+# `Scenarios.view_prob`/`scenario_entropy_pooling` und `Tactical.tactical_rules`.
 # Gegenstück in Python: `python/simlev/_r/rexpr.py` (1:1-Übersetzung).
 #
 # Zerlegen wie R 4.3 (src/main/gram.y): derselbe Lexer (Zahlen, Zeichenketten

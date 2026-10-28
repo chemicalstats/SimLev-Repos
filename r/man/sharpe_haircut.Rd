@@ -18,7 +18,7 @@ sharpe_haircut(
 \item{x}{Eingabe: \code{SimLevParamSearch} aus \code{\link[=param_search]{param_search()}} mit
 gespeicherten Renditen, numerische Renditematrix bzw. data.frame nur aus
 numerischen Spalten (Zeilen = Perioden, Spalten = Punkte, einfache
-Renditen als Anteil; wie bei \code{\link[=pbo]{pbo()}}) oder numerischer Vektor
+Renditen als Anteil; wie bei \code{\link[=overfit_pbo]{overfit_pbo()}}) oder numerischer Vektor
 annualisierter Sharpe Ratios (dann \code{n_obs} und \code{ppy}
 angeben).}
 
@@ -32,10 +32,10 @@ frueheren Suchen entsprechend hoeher ansetzen (fehlende Versuche gehen
 mit p = 1 in die Korrektur ein).}
 
 \item{frequency, dates, risk_free}{Aggregation, Datum und risikoloser Zins
-(Prozent p. a.) wie bei \code{\link[=pbo]{pbo()}}; nur bei Suche oder Matrix.}
+(Prozent p. a.) wie bei \code{\link[=overfit_pbo]{overfit_pbo()}}; nur bei Suche oder Matrix.}
 
 \item{ppy}{Perioden je Jahr, nur bei Vektor-Eingabe (Standard 52 =
-Wochen). Bei Suche oder Matrix wird es wie bei \code{\link[=pbo]{pbo()}} bestimmt (aus
+Wochen). Bei Suche oder Matrix wird es wie bei \code{\link[=overfit_pbo]{overfit_pbo()}} bestimmt (aus
 dem Datum geschaetzt, sonst 252/52/12 je \code{frequency}).}
 }
 \value{
@@ -79,6 +79,6 @@ Harvey, C. R. & Liu, Y. (2015), Backtesting, Journal of
 Portfolio Management 42(1), 13-28.
 }
 \seealso{
-\code{\link[=deflated_sharpe]{deflated_sharpe()}}, \code{\link[=pbo]{pbo()}}, \code{\link[=reality_check]{reality_check()}},
+\code{\link[=sharpe_deflated]{sharpe_deflated()}}, \code{\link[=overfit_pbo]{overfit_pbo()}}, \code{\link[=overfit_reality_check]{overfit_reality_check()}},
 \code{\link[=param_search]{param_search()}}
 }

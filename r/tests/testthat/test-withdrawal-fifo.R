@@ -1,4 +1,4 @@
-# Tests: Entnahmephase mit den Lots der Ansparphase (FIFO) und Uebernahme von asset_bonus,
+# Tests: Entnahmephase mit den Lots der Ansparphase (FIFO) und Uebernahme von partial_exemption,
 # loss_carryforward und sale_cost aus einem SimLevResult
 
 # Ansparphase 2015-2019: A schwankt (Lots zu verschiedenen Kursen), B anders, C = 100 konstant (Geldparkplatz).
@@ -18,14 +18,13 @@
   d
 }
 .ff_run <- function(d, two = FALSE, spb = 0) {
-  st <- if (two) create_strategy(A = asset_config("etf", "bnh", asset_share = 0.4, asset_spread = 0, asset_bonus = 30),
-                                 B = asset_config("etf", "bnh", asset_share = 0.3, asset_spread = 0, asset_bonus = 30),
-                                 C = asset_config("etf", "bnh", asset_share = 0.3, asset_spread = 0, asset_bonus = 30))
-        else create_strategy(A = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0, asset_bonus = 30),
-                             C = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0, asset_bonus = 30))
+  st <- if (two) create_strategy(A = asset_config("etf", "bnh", share = 0.4, spread = 0, partial_exemption = 30),
+                                 B = asset_config("etf", "bnh", share = 0.3, spread = 0, partial_exemption = 30),
+                                 C = asset_config("etf", "bnh", share = 0.3, spread = 0, partial_exemption = 30))
+        else create_strategy(A = asset_config("etf", "bnh", share = 0.5, spread = 0, partial_exemption = 30),
+                             C = asset_config("etf", "bnh", share = 0.5, spread = 0, partial_exemption = 30))
   ew <- if (two) c(A = "wA", B = "wB", C = "wC") else c(A = "wA", C = "wC")
-  suppressWarnings(suppressMessages(simulation(d, st, start_value = 1e5, tax_mode = "person", base_rate = 2, sparer_pauschbetrag = spb,
-                                               event_col = "ev", event_mode = "replace", event_weight = ew)))
+  suppressWarnings(suppressMessages(simulation(d, st, start_value = 1e5, rebalance = rebalance_plan(event_col = "ev", event_mode = "replace", skip = TRUE, event_weight = ew), tax = tax_profile(sparer_pauschbetrag = spb, base_rate = 2))))
 }
 # Verkaufs-Ereignisse am 2.1., 3.1., ... 2020 mit den Gewichten wA (und wB)
 .ff_sales <- function(wA, wB = NULL) {
@@ -61,11 +60,11 @@ test_that("FIFO: Steuer jeder Teilentnahme = Steuer der Engine beim Verkauf ders
   wk <- function(k) {
     I <- matrix(c(net[-1] / net[-3], 1)[seq_len(k)], k, 1)
     suppressMessages(withdrawal_simulation(matrix(1, k, 1), withdrawal_rule("constant", rate = 100 * net[1] / sv), start_value = r0,
-                                           inflation = I, tax_mode = "person", sparer_pauschbetrag = 0, base_rate = 2))
+                                           inflation = I, tax = tax_profile(sparer_pauschbetrag = 0), base_rate = 2))
   }
   w <- lapply(1:3, wk)
   # Spread 0 -> sale_cost 0; Pauschbetrag 0 -> im ersten Planjahr nichts verbraucht; 3 Lots A plus Cash-Position
-  expect_identical(w[[1]]$adopted, list(asset_bonus = 30, loss_carryforward = 0, sale_cost = 0, lots = 4L))
+  expect_identical(w[[1]]$adopted, list(partial_exemption = 30, loss_carryforward = 0, sale_cost = 0, lots = 4L))
   cpi <- c(1, net[2:3] / net[1])
   tax_w <- diff(c(0, vapply(w, function(x) x$paths$taxes, 0))) * cpi                # nominal je Verkauf
   expect_equal(tax_w, tax_e, tolerance = 1e-9)
@@ -75,11 +74,11 @@ test_that("FIFO: Steuer jeder Teilentnahme = Steuer der Engine beim Verkauf ders
   # Durchschnittskosten (bisher) liegen bei Verkauf 1 deutlich darunter
   B <- sum(L$units * L$price) + sum(L$vp) + sum(vapply(r0$open_lots, `[[`, 0, "cash"))
   wa <- suppressMessages(withdrawal_simulation(matrix(1, 1, 1), withdrawal_rule("constant", rate = 100 * net[1] / sv), start_value = r0,
-                                               tax_mode = "person", sparer_pauschbetrag = 0, base_rate = 2, cost_basis = 100 * B / sv))
+                                               tax = tax_profile(sparer_pauschbetrag = 0), base_rate = 2, cost_basis = 100 * B / sv))
   expect_lt(wa$paths$taxes, 0.8 * tax_e[1])
   # ganzer Bestand: weiterhin wie mit Durchschnittskosten
   full <- function(...) suppressMessages(withdrawal_simulation(matrix(1, 1, 1), withdrawal_rule("constant", rate = 100), start_value = r0,
-                                                               tax_mode = "person", sparer_pauschbetrag = 0, base_rate = 2, ...))
+                                                               tax = tax_profile(sparer_pauschbetrag = 0), base_rate = 2, ...))
   expect_equal(full()$paths$taxes, full(cost_basis = 100 * B / sv)$paths$taxes, tolerance = 1e-10)
 })
 
@@ -95,8 +94,8 @@ test_that("FIFO mit Sparer-Pauschbetrag: erstes Planjahr = Jahr nach dem Datenen
   s <- .ff_units(r1n) - .ff_units(r1)
   sv <- r0$worth[length(r0$worth)]; P <- sv / .ff_units(r0)   # kein Cash ausser Rundung: Wert = Stueck x Kurs
   P <- r0$report$A$worth[length(r0$worth)] / .ff_units(r0)
-  wfun <- function(...) suppressMessages(withdrawal_simulation(matrix(1, 1, 1), withdrawal_rule("constant", rate = 100 * (s * P - tax_e) / sv),
-                                                               start_value = r0, tax_mode = "person", base_rate = 2, ...))
+  wfun <- function(tax = tax_profile()) suppressMessages(withdrawal_simulation(matrix(1, 1, 1), withdrawal_rule("constant", rate = 100 * (s * P - tax_e) / sv),
+                                                               start_value = r0, tax = tax, base_rate = 2))
   w <- wfun()
   expect_equal(w$adopted$sparer_pauschbetrag_used_year1, ny$sparer_pauschbetrag_used)
   expect_equal(w$paths$taxes, tax_e, tolerance = 1e-9)          # vorher (voller Pauschbetrag) rund 146 EUR zu wenig
@@ -105,7 +104,7 @@ test_that("FIFO mit Sparer-Pauschbetrag: erstes Planjahr = Jahr nach dem Datenen
   g <- sum(k * (P - L$price)) - sum(L$vp * k / L$units)
   expect_equal(w$paths$taxes, (0.7 * g - ny$sparer_pauschbetrag_remaining) * 0.26375, tolerance = 1e-9)
   # anderer Pauschbetrag in der Entnahmephase: im ersten Jahr dieser minus verbrauchter Betrag
-  w2 <- wfun(sparer_pauschbetrag = 2000)
+  w2 <- wfun(tax = tax_profile(sparer_pauschbetrag = 2000))
   gain <- function(G) { k <- pmin(L$units, pmax(0, G / P - c(0, cumsum(L$units)[-nrow(L)])))
     sum(k * (P - L$price)) - sum(L$vp * k / L$units) }
   tx <- function(G) 0.26375 * max(0, 0.7 * gain(G) - (2000 - ny$sparer_pauschbetrag_used))
@@ -135,7 +134,7 @@ test_that("FIFO mit zwei Assets: Verkauf anteilig je Asset nach der Steuerformel
   tax_of <- function(f) (fifo_gain(LA, f * sum(LA$units), P[["A"]]) + fifo_gain(LB, f * sum(LB$units), P[["B"]])) * 0.7 * 0.26375
   f <- uniroot(function(f) f * sv - tax_of(f) - net, c(0.3, 0.9), tol = 1e-14)$root
   w <- suppressMessages(withdrawal_simulation(matrix(1, 1, 1), withdrawal_rule("constant", rate = 45), start_value = r0,
-                                              tax_mode = "person", sparer_pauschbetrag = 0, base_rate = 2))
+                                              tax = tax_profile(sparer_pauschbetrag = 0), base_rate = 2))
   expect_equal(w$paths$taxes, tax_of(f), tolerance = 1e-9)
   expect_gt(abs(wC), 0)                                                 # Cash-Position (Gewinn 0 bei Rendite 1)
 })
@@ -161,71 +160,69 @@ test_that("FIFO: neue Vorabpauschale je Anteil f\u00fcr alle Lots gleich (Handre
   t_vp <- vp * 0.7 * 0.26375; vu <- vu + 0.014   # § 19: Anrechnung je Anteil fuer alle Lots
   t2 <- sell(W + t_vp, 1.1)                      # Jahr 2: Entnahme plus faellige VP-Steuer
   w <- suppressMessages(withdrawal_simulation(matrix(c(1.1, 1), 2, 1), withdrawal_rule("constant", rate = 30), start_value = r0,
-                                              tax_mode = "person", sparer_pauschbetrag = 0, base_rate = 2))
+                                              tax = tax_profile(sparer_pauschbetrag = 0), base_rate = 2))
   expect_equal(w$paths$taxes, t1 + t_vp + t2, tolerance = 1e-9)
 })
 
-test_that("Uebernahme von asset_bonus, loss_carryforward und sale_cost; ausdrueckliche Angaben haben Vorrang", {
+test_that("Uebernahme von partial_exemption, loss_carryforward und sale_cost; ausdrueckliche Angaben haben Vorrang", {
   d <- data.frame(date = seq.Date(as.Date("2018-01-01"), as.Date("2019-12-31"), by = "day"))
   tt <- as.numeric(d$date - d$date[1]) / 365.25
   d$A <- 100 * (1 - 0.3 * sin(3 * tt)); d$N <- 100 * 1.03^tt
   d$ev <- d$date %in% as.Date(c("2018-01-01", "2018-07-01", "2019-03-01")); d$wA <- c(1, 0.2, 0.6)[pmax(1, cumsum(d$ev))]; d$wN <- 1 - d$wA
-  st <- create_strategy(A = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0.2, asset_bonus = 15),
-                        N = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0.2, asset_bonus = 15))
-  r <- suppressWarnings(suppressMessages(simulation(d, st, start_value = 1e5, tax_mode = "person", base_rate = 1,
-                                                    event_col = "ev", event_mode = "replace", event_weight = c(A = "wA", N = "wN"))))
+  st <- create_strategy(A = asset_config("etf", "bnh", share = 0.5, spread = 0.2, partial_exemption = 15),
+                        N = asset_config("etf", "bnh", share = 0.5, spread = 0.2, partial_exemption = 15))
+  r <- suppressWarnings(suppressMessages(simulation(d, st, start_value = 1e5, rebalance = rebalance_plan(event_col = "ev", event_mode = "replace", skip = TRUE, event_weight = c(A = "wA", N = "wN")), tax = tax_profile(base_rate = 1))))
   lc <- r$tax_report$next_year$loss_carryforward_capital         # Topf zu Beginn des ersten Planjahres
   expect_gt(lc, 0)                                                # Verkauf von A mit Verlust am 1.7.2018
   x <- matrix(1.02, 3, 1)
-  expect_message(w <- withdrawal_simulation(x, start_value = r, tax_mode = "person"),
-                 "Hinweis: aus der Ansparphase \u00fcbernommen: asset_bonus = 15, loss_carryforward = [0-9.]+, sale_cost = 0.1, [0-9]+ Lots \\(FIFO\\)\\.")
-  expect_equal(w$adopted$asset_bonus, 15); expect_equal(w$adopted$loss_carryforward, lc)
-  expect_equal(w$adopted$sale_cost, 0.1)                          # halber Spread 0,2 % (open_lots$asset_spread)
-  ref <- suppressMessages(withdrawal_simulation(x, start_value = r, tax_mode = "person", asset_bonus = 15, loss_carryforward = lc,
+  expect_message(w <- withdrawal_simulation(x, start_value = r, tax = tax_profile()),
+                 "Hinweis: aus der Ansparphase \u00fcbernommen: partial_exemption = 15, loss_carryforward = [0-9.]+, sale_cost = 0.1, [0-9]+ Lots \\(FIFO\\)\\.")
+  expect_equal(w$adopted$partial_exemption, 15); expect_equal(w$adopted$loss_carryforward, lc)
+  expect_equal(w$adopted$sale_cost, 0.1)                          # halber Spread 0,2 % (open_lots$spread)
+  ref <- suppressMessages(withdrawal_simulation(x, start_value = r, tax = tax_profile(), partial_exemption = 15, loss_carryforward = lc,
                                                 sale_cost = 0.1))
   expect_identical(w$paths, ref$paths)
   # aelteres Ergebnis ohne next_year: Topf am Ende der Ansparphase
   ro <- r; ro$tax_report$next_year <- NULL; ro$tax_report$loss_carryforward_capital <- 1234
-  expect_equal(suppressMessages(withdrawal_simulation(x, start_value = ro, tax_mode = "person"))$adopted$loss_carryforward, 1234)
+  expect_equal(suppressMessages(withdrawal_simulation(x, start_value = ro, tax = tax_profile()))$adopted$loss_carryforward, 1234)
   # ausdrueckliche Angaben haben Vorrang und werden nicht als uebernommen gemeldet
-  expect_warning(w2 <- suppressMessages(withdrawal_simulation(x, start_value = r, tax_mode = "person", asset_bonus = 30,
+  expect_warning(w2 <- suppressMessages(withdrawal_simulation(x, start_value = r, tax = tax_profile(), partial_exemption = 30,
                                                               loss_carryforward = 0, sale_cost = 0)),
-                 "asset_bonus = 30 %, aber .*A 15 %, N 15 %")
+                 "partial_exemption = 30 %, aber .*A 15 %, N 15 %")
   expect_identical(names(w2$adopted), "lots")
   expect_false(identical(w2$paths, w$paths))
-  # verschiedene Spreads: keine Uebernahme, Warnung; ohne Feld asset_spread (aeltere Ergebnisse): nichts
-  rs <- r; rs$open_lots$N$asset_spread <- 0.5
-  expect_warning(w4 <- suppressMessages(withdrawal_simulation(x, start_value = rs, tax_mode = "person")),
+  # verschiedene Spreads: keine Uebernahme, Warnung; ohne Feld spread (aeltere Ergebnisse): nichts
+  rs <- r; rs$open_lots$N$spread <- 0.5
+  expect_warning(w4 <- suppressMessages(withdrawal_simulation(x, start_value = rs, tax = tax_profile())),
                  "sale_cost nicht \u00fcbernommen: .*verschiedene Spreads \\(A 0.2 %, N 0.5 %\\)")
   expect_null(w4$adopted$sale_cost)
-  rn <- r; for (a in names(rn$open_lots)) rn$open_lots[[a]]$asset_spread <- NULL
-  expect_warning(w5 <- suppressMessages(withdrawal_simulation(x, start_value = rn, tax_mode = "person")), NA)
+  rn <- r; for (a in names(rn$open_lots)) rn$open_lots[[a]]$spread <- NULL
+  expect_warning(w5 <- suppressMessages(withdrawal_simulation(x, start_value = rn, tax = tax_profile())), NA)
   expect_null(w5$adopted$sale_cost)
   # Ordergebuehr in der Ansparphase (open_lots$order_fee): Warnung
-  rf <- suppressWarnings(suppressMessages(simulation(d, st, start_value = 1e5, tax_mode = "person", base_rate = 1, order_fee = 1,
-                                                     event_col = "ev", event_mode = "replace", event_weight = c(A = "wA", N = "wN"))))
+  rf <- suppressWarnings(suppressMessages(simulation(d, st, start_value = 1e5, costs = sim_costs(order_fee = 1), rebalance = rebalance_plan(event_col = "ev", event_mode = "replace", skip = TRUE, event_weight = c(A = "wA", N = "wN")), tax = tax_profile(base_rate = 1))))
   expect_equal(rf$open_lots$A$order_fee, 1)
-  expect_warning(suppressMessages(withdrawal_simulation(x, start_value = rf, tax_mode = "person")), "Ordergeb\u00fchren der Ansparphase \\(A, N\\)")
+  expect_warning(suppressMessages(withdrawal_simulation(x, start_value = rf, tax = tax_profile())), "Ordergeb\u00fchren der Ansparphase \\(A, N\\)")
   rf$open_lots$A$order_fee <- list(fixed = 0, percent = 0, min = 0, max = Inf); rf$open_lots$N$order_fee <- NULL
-  expect_warning(suppressMessages(withdrawal_simulation(x, start_value = rf, tax_mode = "person")), NA)
+  expect_warning(suppressMessages(withdrawal_simulation(x, start_value = rf, tax = tax_profile())), NA)
   # ohne Steuern keine Uebernahme, kein Hinweis
   expect_silent(w0 <- withdrawal_simulation(x, start_value = r))
   expect_null(w0$adopted)
   # withdrawal_max_rate: Hinweis nur einmal statt je Suchschritt
-  msg <- testthat::capture_messages(withdrawal_max_rate(matrix(1.03, 10, 5), success = 0.9, start_value = r, tax_mode = "person"))
+  msg <- testthat::capture_messages(withdrawal_max_rate(matrix(1.03, 10, 5), success = 0.9, start_value = r, tax = tax_profile()))
   expect_length(msg, 1L)
 })
 
 test_that("ohne Lots unver\u00e4ndert: numerisches start_value bitgleich, ein Lot = Durchschnittskosten", {
   set.seed(3); R <- matrix(exp(rnorm(20 * 4, 0.04, 0.15)), 20)
-  w <- withdrawal_simulation(R, withdrawal_rule("guyton_klinger", rate = 5), start_value = 5e5, inflation = 2, tax_mode = "person",
+  w <- withdrawal_simulation(R, withdrawal_rule("guyton_klinger", rate = 5), start_value = 5e5, inflation = 2, tax = tax_profile(),
                              cost_basis = 60, loss_carryforward = 3000, sale_cost = 0.1, base_rate = 2.5)
   # Referenz: Paketstand vor FIFO (Commit 2c0a43b), seit B7-01 mit der Vorabpauschale im Folgejahr (Toepfe des
   # Folgejahres, letzte VP am Pfadende); ohne Vorabpauschale unveraendert bitgleich zum Stand vor B7-01
   expect_identical(sprintf("%a", c(w$paths$taxes, w$paths$terminal_real)),
                    c("0x1.ba7cc2e9114efp+14", "0x1.bd239668e40fp+14", "0x1.66462295e709ap+15", "0x1.75b999f2411dbp+16",
                      "0x1.c08bc897c3f1cp+14", "0x1.20a91a7d2f701p+17", "0x0p+0", "0x1.0401716570f6cp+19"))
-  w0 <- withdrawal_simulation(R, withdrawal_rule("guyton_klinger", rate = 5), start_value = 5e5, inflation = 2, tax_mode = "person",
+  w0 <- withdrawal_simulation(R, withdrawal_rule("guyton_klinger", rate = 5), start_value = 5e5, inflation = 2, tax = tax_profile(),
                               cost_basis = 60, loss_carryforward = 3000, sale_cost = 0.1, base_rate = 2.5, vorabpauschale = FALSE)
   expect_identical(sprintf("%a", c(w0$paths$taxes, w0$paths$terminal_real)),
                    c("0x1.a45e001312221p+14", "0x1.8565fe4910e9ep+14", "0x1.5c7ebd35e6955p+15", "0x1.2d0d0540ffabep+16",
@@ -234,12 +231,11 @@ test_that("ohne Lots unver\u00e4ndert: numerisches start_value bitgleich, ein Lo
   # Einmalanlage (ein Lot, kein Cash): FIFO = Durchschnittskosten
   d <- data.frame(date = seq.Date(as.Date("2015-01-01"), as.Date("2019-12-31"), by = "day"))
   d$A <- 100 * 1.08^(as.numeric(d$date - d$date[1]) / 365.25)
-  r <- simulation(d, create_strategy(A = asset_config("etf", "bnh", asset_spread = 0, asset_bonus = 30)),
-                  start_value = 1e5, tax_mode = "person", base_rate = 1)
+  r <- simulation(d, create_strategy(A = asset_config("etf", "bnh", spread = 0, partial_exemption = 30)), start_value = 1e5, tax = tax_profile(base_rate = 1))
   B <- with(r$open_lots$A, sum(lots$units * lots$price) + sum(lots$vp) + cash)
-  w1 <- suppressMessages(withdrawal_simulation(R, withdrawal_rule("percent", rate = 5), start_value = r, tax_mode = "person"))
+  w1 <- suppressMessages(withdrawal_simulation(R, withdrawal_rule("percent", rate = 5), start_value = r, tax = tax_profile()))
   expect_equal(w1$adopted$lots, 1L)
-  w2 <- suppressMessages(withdrawal_simulation(R, withdrawal_rule("percent", rate = 5), start_value = r, tax_mode = "person",
+  w2 <- suppressMessages(withdrawal_simulation(R, withdrawal_rule("percent", rate = 5), start_value = r, tax = tax_profile(),
                                                cost_basis = 100 * B / tail(r$worth, 1)))
   expect_equal(w1$paths, w2$paths, tolerance = 1e-10)
 })
@@ -252,36 +248,35 @@ test_that("R6-01: Stueckrest ohne Wert (kuenstlicher Staub-Lot) wird \u00fcbersp
   d$C <- 100
   evd <- c(seq.Date(as.Date("2016-01-01"), as.Date("2019-11-01"), by = "4 months"), as.Date("2019-12-01"))
   d$ev <- d$date %in% evd; d$wA <- seq(0.2, 1, length.out = length(evd))[cumsum(d$ev)]; d$wC <- 1 - d$wA
-  st <- create_strategy(A = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0.4, asset_bonus = 30),
-                        C = asset_config("etf", "bnh", asset_share = 0.5, asset_spread = 0.4, asset_bonus = 30))
-  r <- suppressWarnings(suppressMessages(simulation(d, st, start_value = 1e5, tax_mode = "person", base_rate = 2.5,
-                                                    event_col = "ev", event_mode = "replace", event_weight = c(A = "wA", C = "wC"))))
+  st <- create_strategy(A = asset_config("etf", "bnh", share = 0.5, spread = 0.4, partial_exemption = 30),
+                        C = asset_config("etf", "bnh", share = 0.5, spread = 0.4, partial_exemption = 30))
+  r <- suppressWarnings(suppressMessages(simulation(d, st, start_value = 1e5, rebalance = rebalance_plan(event_col = "ev", event_mode = "replace", skip = TRUE, event_weight = c(A = "wA", C = "wC")), tax = tax_profile(base_rate = 2.5))))
   # Staub-Lot von C (wie vor A7-06 nach Rebalancing auf Gewicht 0: 5,3e-14 Stueck, Endwert 0) kuenstlich anlegen
   r$open_lots$C$lots <- data.frame(date = as.Date("2017-12-31"), units = 5.304251e-14, price = 100.2, vp = 0)
   r$report$C$worth[length(r$report$C$worth)] <- 0
   expect_gt(sum(r$open_lots$C$lots$units), 0); expect_lt(sum(r$open_lots$C$lots$units), 1e-10)
   x <- matrix(1.05, 5, 1)
-  w <- suppressMessages(withdrawal_simulation(x, withdrawal_rule("constant", rate = 4), start_value = r, tax_mode = "person"))
+  w <- suppressMessages(withdrawal_simulation(x, withdrawal_rule("constant", rate = 4), start_value = r, tax = tax_profile()))
   expect_equal(w$adopted$lots, nrow(r$open_lots$A$lots) + (abs(tail(r$worth, 1) - tail(r$report$A$worth, 1)) > 1e-12 * tail(r$worth, 1)))
   expect_equal(w$adopted$sale_cost, 0.2)                          # nur A zaehlt als gehalten
   # gleich wie ohne den Staub-Eintrag
   r2 <- r; r2$open_lots$C <- NULL
   expect_identical(w$paths, suppressMessages(withdrawal_simulation(x, withdrawal_rule("constant", rate = 4), start_value = r2,
-                                                                   tax_mode = "person"))$paths)
+                                                                   tax = tax_profile()))$paths)
   expect_identical(SimLev:::.wd_held(r$open_lots, r$report, tail(r$worth, 1)), "A")
 })
 
 test_that("R6-02: ohne gehaltene Investmentfonds keine Vorabpauschale in der Entnahmephase", {
   d <- data.frame(date = seq.Date(as.Date("2019-01-01"), as.Date("2020-12-31"), by = "day"))
   d$A <- 100 * 1.10^(as.numeric(d$date - d$date[1]) / 365.25)
-  st <- create_strategy(A = asset_config("etn", "bnh", asset_share = 1, asset_spread = 0))
-  r <- simulation(d, st, start_value = 1e5, tax_mode = "person", base_rate = 3, sparer_pauschbetrag = 0)
+  st <- create_strategy(A = asset_config("etn", "bnh", share = 1, spread = 0))
+  r <- simulation(d, st, start_value = 1e5, tax = tax_profile(sparer_pauschbetrag = 0, base_rate = 3))
   expect_equal(r$open_lots$A$regime, "capital_gains")
   x <- matrix(1.10, 3, 1)
-  wf <- function(...) withdrawal_simulation(x, withdrawal_rule("constant", rate = 1), start_value = r, tax_mode = "person",
-                                            base_rate = 3, sparer_pauschbetrag = 0, ...)
+  wf <- function(...) withdrawal_simulation(x, withdrawal_rule("constant", rate = 1), start_value = r, tax = tax_profile(sparer_pauschbetrag = 0),
+                                            base_rate = 3, ...)
   expect_message(w <- wf(), "vorabpauschale = FALSE")
-  expect_identical(w$adopted$vorabpauschale, FALSE); expect_equal(w$adopted$asset_bonus, 0)
+  expect_identical(w$adopted$vorabpauschale, FALSE); expect_equal(w$adopted$partial_exemption, 0)
   w0 <- suppressMessages(wf(vorabpauschale = FALSE))
   expect_identical(w$paths, w0$paths)
   # Handrechnung: drei Verkaeufe zu Jahresbeginn (Kurs 1, 1,1, 1,21 je Anteil), Entnahme 1 % real = 1 % nominal,

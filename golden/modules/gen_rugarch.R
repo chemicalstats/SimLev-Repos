@@ -5,7 +5,7 @@
 # simlev/_r/solnp.py, src/r/solnp.jl), truncnorm 1.0-9 rtruncnorm
 # (SimLev:::.truncnorm_rtruncnorm, r/R/vendor_truncnorm.R, r/src/vendor_truncnorm.c;
 # simlev/_r/truncnorm.py, src/r/truncnorm.jl) und den Weg über rugarch in .fit_garch11
-# (bootstrap(…, "garch"/"gjr_garch"), dcc_fit, dependence_analysis). Hesse-Matrix und Scores
+# (bootstrap(…, "garch"/"gjr_garch"), dependence_dcc, dependence_analysis). Hesse-Matrix und Scores
 # rechnet die eigenständige Richardson-Extrapolation (SimLev:::.sl_richardson_hessian,
 # .sl_richardson_jacobian in r/R/richardson.R; Direktvergleich mit numDeriv als Orakel:
 # golden/modules/check_richardson.R). rugarch, Rsolnp, numDeriv und truncnorm selbst werden
@@ -189,34 +189,34 @@ CFG_J <- 'cfg = bootstrap_config((us = "us", eu = "eu"), regime_index = "us", au
   letfs = [(base = "eu", leverage = 2, finance = "rate", expense = 0.5), (base = "us", leverage = -1, finance = "rate", expense = 0.6)])\n'
 for (m in c("garch", "gjr_garch"))
   case(paste0("bs_", m), paste0(CFG_R, "b <- bootstrap(d, cfg, '", m, "', n = 2, seed = 1, progress = FALSE); b"),
-       paste0(CFG_P, "result = bootstrap(d, cfg, '", m, "', n=2, seed=1, progress=False)"), I,
+       paste0(CFG_P, "result = bootstrap(d, cfg, method='", m, "', n=2, seed=1, progress=False)"), I,
        jl = paste0(CFG_J, "result = bootstrap(d, cfg, \"", m, "\"; n = 2, seed = 1, progress = false)"))
 case("bs_garch_joint", "cfg <- bootstrap_config(c(us = 'us', eu = 'eu'), cross = 'joint'); bootstrap(d, cfg, 'gjr_garch', n = 2, seed = 4, progress = FALSE, path_length = 100)",
-     "cfg = bootstrap_config({'us': 'us', 'eu': 'eu'}, cross='joint'); result = bootstrap(d, cfg, 'gjr_garch', n=2, seed=4, progress=False, path_length=100)", I,
+     "cfg = bootstrap_config({'us': 'us', 'eu': 'eu'}, cross='joint'); result = bootstrap(d, cfg, method='gjr_garch', n=2, seed=4, progress=False, path_length=100)", I,
      jl = 'cfg = bootstrap_config((us = "us", eu = "eu"), cross = "joint"); result = bootstrap(d, cfg, "gjr_garch"; n = 2, seed = 4, progress = false, path_length = 100)')
 case("bs_garch_regime_eu", "cfg <- bootstrap_config(c(us = 'us', eu = 'eu'), regime_index = 'eu'); bootstrap(d, cfg, 'garch', n = 1, seed = 2, progress = FALSE, path_length = 80)",
-     "cfg = bootstrap_config({'us': 'us', 'eu': 'eu'}, regime_index='eu'); result = bootstrap(d, cfg, 'garch', n=1, seed=2, progress=False, path_length=80)", I,
+     "cfg = bootstrap_config({'us': 'us', 'eu': 'eu'}, regime_index='eu'); result = bootstrap(d, cfg, method='garch', n=1, seed=2, progress=False, path_length=80)", I,
      jl = 'cfg = bootstrap_config((us = "us", eu = "eu"), regime_index = "eu"); result = bootstrap(d, cfg, "garch"; n = 1, seed = 2, progress = false, path_length = 80)')
 case("bs_garch_single", "bootstrap(d, bootstrap_config(c(eu = 'eu')), 'garch', n = 2, seed = 3, progress = FALSE, path_length = 60)",
-     "result = bootstrap(d, bootstrap_config({'eu': 'eu'}), 'garch', n=2, seed=3, progress=False, path_length=60)", I,
+     "result = bootstrap(d, bootstrap_config({'eu': 'eu'}), method='garch', n=2, seed=3, progress=False, path_length=60)", I,
      jl = 'result = bootstrap(d, bootstrap_config((eu = "eu",)), "garch"; n = 2, seed = 3, progress = false, path_length = 60)')
 case("bs_garch_hivol", "bootstrap(dv, bootstrap_config(c(us = 'us')), 'garch', n = 2, seed = 1, progress = FALSE)$stats",
-     "result = bootstrap(dv, bootstrap_config({'us': 'us'}), 'garch', n=2, seed=1, progress=False)['stats']", I,
+     "result = bootstrap(dv, bootstrap_config({'us': 'us'}), method='garch', n=2, seed=1, progress=False)['stats']", I,
      jl = 'result = bootstrap(dv, bootstrap_config((us = "us",)), "garch"; n = 2, seed = 1, progress = false)["stats"]')
 case("bs_garch_const", "bootstrap(data.frame(us = rep(1.0001, 50)), bootstrap_config(c(us = 'us')), 'garch', n = 1, seed = 1)",
-     "result = bootstrap(pd.DataFrame({'us': np.full(50, 1.0001)}), bootstrap_config({'us': 'us'}), 'garch', n=1, seed=1)",
+     "result = bootstrap(pd.DataFrame({'us': np.full(50, 1.0001)}), bootstrap_config({'us': 'us'}), method='garch', n=1, seed=1)",
      jl = 'result = bootstrap(SL.RFrame("us" => fill(1.0001, 50)), bootstrap_config((us = "us",)), "garch"; n = 1, seed = 1)')
 case("bs_cross_const", "dd <- d[1:120, 1:2]; dd$eu <- dd$us; bootstrap(dd, bootstrap_config(c(us = 'us', eu = 'eu')), 'garch', n = 1, seed = 1, progress = FALSE, path_length = 30)",
-     "dd = d.iloc[:120, :2].copy(); dd['eu'] = dd['us']; result = bootstrap(dd, bootstrap_config({'us': 'us', 'eu': 'eu'}), 'garch', n=1, seed=1, progress=False, path_length=30)", I,
+     "dd = d.iloc[:120, :2].copy(); dd['eu'] = dd['us']; result = bootstrap(dd, bootstrap_config({'us': 'us', 'eu': 'eu'}), method='garch', n=1, seed=1, progress=False, path_length=30)", I,
      jl = 'dd = SL.RFrame("us" => d.us[1:120], "eu" => d.us[1:120]); result = bootstrap(dd, bootstrap_config((us = "us", eu = "eu")), "garch"; n = 1, seed = 1, progress = false, path_length = 30)')
 case("bs_garch_short", "bootstrap(d[1:70, ], bootstrap_config(c(us = 'us', eu = 'eu')), 'gjr_garch', n = 2, seed = 9, progress = FALSE, path_length = 40)",
-     "result = bootstrap(d.iloc[:70], bootstrap_config({'us': 'us', 'eu': 'eu'}), 'gjr_garch', n=2, seed=9, progress=False, path_length=40)", I,
+     "result = bootstrap(d.iloc[:70], bootstrap_config({'us': 'us', 'eu': 'eu'}), method='gjr_garch', n=2, seed=9, progress=False, path_length=40)", I,
      jl = 'result = bootstrap(SL.RFrame("us" => d.us[1:70], "eu" => d.eu[1:70], "rate" => d.rate[1:70]), bootstrap_config((us = "us", eu = "eu")), "gjr_garch"; n = 2, seed = 9, progress = false, path_length = 40)')
 case("bs_garch_dg", "bootstrap(dg, bootstrap_config(c(us = 'us', eu = 'eu'), cross = 'ratio'), 'gjr_garch', n = 3, seed = 5, progress = FALSE, path_length = 250)",
-     "result = bootstrap(dg, bootstrap_config({'us': 'us', 'eu': 'eu'}, cross='ratio'), 'gjr_garch', n=3, seed=5, progress=False, path_length=250)", I,
+     "result = bootstrap(dg, bootstrap_config({'us': 'us', 'eu': 'eu'}, cross='ratio'), method='gjr_garch', n=3, seed=5, progress=False, path_length=250)", I,
      jl = 'result = bootstrap(dg, bootstrap_config((us = "us", eu = "eu"), cross = "ratio"), "gjr_garch"; n = 3, seed = 5, progress = false, path_length = 250)')
 case("bs_garch_nlminb", "bootstrap(dt, bootstrap_config(c(us = 'us', eu = 'eu')), 'garch', n = 2, seed = 6, progress = FALSE, path_length = 50)",
-     "result = bootstrap(dt, bootstrap_config({'us': 'us', 'eu': 'eu'}), 'garch', n=2, seed=6, progress=False, path_length=50)", I,
+     "result = bootstrap(dt, bootstrap_config({'us': 'us', 'eu': 'eu'}), method='garch', n=2, seed=6, progress=False, path_length=50)", I,
      jl = 'result = bootstrap(dt, bootstrap_config((us = "us", eu = "eu")), "garch"; n = 2, seed = 6, progress = false, path_length = 50)')
 CF3_R <- "cfg3 <- bootstrap_config(c(us = 'us'), aux = c(cpi = 'cpi', zins = 'zins', infl = 'infl'), input = 'prices', aux_type = c(cpi = 'level', zins = 'rate'), letfs = list(list(base = 'us', leverage = 3, finance = 'zins', spread = 0.5)))\n"
 CF3_J <- 'cfg3 = bootstrap_config((us = "us",), aux = (cpi = "cpi", zins = "zins", infl = "infl"), input = "prices", aux_type = (cpi = "level", zins = "rate"), letfs = [(base = "us", leverage = 3, finance = "zins", spread = 0.5)])\n'
@@ -225,28 +225,28 @@ set.seed(21); n2 <- 300
 dp <- data.frame(us = 100 * cumprod(c(1, 1 + rnorm(n2, 3e-4, 0.01))), cpi = 100 * 1.02^((0:n2) / 365),
                  infl = 2, zins = 2 + sin((0:n2) / 40))
 case("aux_level_garch", paste0(CF3_R, "b <- suppressWarnings(bootstrap(dp, cfg3, 'garch', n = 2, seed = 2, progress = FALSE)); c(b$paths, lapply(b$paths, attr, 'aux_level'))"),
-     paste0(CF3_P, "import warnings\nwith warnings.catch_warnings():\n    warnings.simplefilter('ignore')\n    b = bootstrap(dp, cfg3, 'garch', n=2, seed=2, progress=False)\nresult = b['paths'] + [p.attrs['aux_level'] for p in b['paths']]"), list(dp = dp),
+     paste0(CF3_P, "import warnings\nwith warnings.catch_warnings():\n    warnings.simplefilter('ignore')\n    b = bootstrap(dp, cfg3, method='garch', n=2, seed=2, progress=False)\nresult = b['paths'] + [p.attrs['aux_level'] for p in b['paths']]"), list(dp = dp),
      jl = paste0(CF3_J, "result = B._quiet(() -> (b = bootstrap(dp, cfg3, \"garch\"; n = 2, seed = 2, progress = false); vcat(b[\"paths\"], [p.attrs[\"aux_level\"] for p in b[\"paths\"]])))"))
 
-# ── dcc_fit / dependence_analysis ───────────────────────────────────────────
+# ── dependence_dcc / dependence_analysis ───────────────────────────────────────────
 set.seed(1); n <- 300
 RR <- cbind(a = rnorm(n, 0, 0.01), b = rnorm(n, 0, 0.01), c = rnorm(n, 0, 0.012))
 RR[, "b"] <- 0.5 * RR[, "a"] + sqrt(0.75) * RR[, "b"]
 RG2 <- unname(as.matrix(dg - 1))
 JD <- "sub(m, r, c) = SL.NamedMat(m.data[r, c]; colnames = m.colnames[c])\n"
-case("dcc_fit2", "dcc_fit(RR[, 1:2])", "result = D.dcc_fit(RR.iloc[:, :2])", list(RR = RR),
-     jl = paste0(JD, "result = D.dcc_fit(sub(RR, :, 1:2))"))
-case("dcc_fit3", "dcc_fit(unname(RR))", "result = D.dcc_fit(RR.to_numpy())", list(RR = RR),
-     jl = "result = D.dcc_fit(RR.data)")
-case("dcc_fit_dg", "dcc_fit(RG2)", "result = D.dcc_fit(RG2)", list(RG2 = RG2),
-     jl = "result = D.dcc_fit(RG2)")
+case("dcc_fit2", "dependence_dcc(RR[, 1:2])", "result = D.dependence_dcc(RR.iloc[:, :2])", list(RR = RR),
+     jl = paste0(JD, "result = D.dependence_dcc(sub(RR, :, 1:2))"))
+case("dcc_fit3", "dependence_dcc(unname(RR))", "result = D.dependence_dcc(RR.to_numpy())", list(RR = RR),
+     jl = "result = D.dependence_dcc(RR.data)")
+case("dcc_fit_dg", "dependence_dcc(RG2)", "result = D.dependence_dcc(RG2)", list(RG2 = RG2),
+     jl = "result = D.dependence_dcc(RG2)")
 RT <- cbind(x = (dt$us - 1)[1:150], y = (dt$eu - 1)[1:150])
-case("dcc_fit_nlminb", "dcc_fit(RT)", "result = D.dcc_fit(RT)", list(RT = RT),
-     jl = "result = D.dcc_fit(RT)")
+case("dcc_fit_nlminb", "dependence_dcc(RT)", "result = D.dependence_dcc(RT)", list(RT = RT),
+     jl = "result = D.dependence_dcc(RT)")
 RC <- RR; RC[, "c"] <- 0.001
-case("dcc_err_const", "dcc_fit(RC)", "result = D.dcc_fit(RC)", list(RC = RC), jl = "result = D.dcc_fit(RC)")
+case("dcc_err_const", "dependence_dcc(RC)", "result = D.dependence_dcc(RC)", list(RC = RC), jl = "result = D.dependence_dcc(RC)")
 RS <- cbind(RR, d = RR[, "a"] * 2)
-case("dcc_err_sing", "dcc_fit(RS)", "result = D.dcc_fit(RS)", list(RS = RS), jl = "result = D.dcc_fit(RS)")
+case("dcc_err_sing", "dependence_dcc(RS)", "result = D.dependence_dcc(RS)", list(RS = RS), jl = "result = D.dependence_dcc(RS)")
 
 mkdata <- function(seed, n = 1500) {
   set.seed(seed)
@@ -378,7 +378,7 @@ case2("rng_noseed", NOSEED_R,
       list(e = G$outl200),
       jl = "RNG.rm_random_seed(); cf = UG(e)\nresult = SL.RList(\"coef\" => cf, \"u\" => RNG.runif(2), \"seed\" => RNG.get_random_seed()[1:4])")
 
-# .fit_garch11, bootstrap und dcc_fit über gosolnp
+# .fit_garch11, bootstrap und dependence_dcc über gosolnp
 IG <- list(e1 = G$outl200, e2 = G$outl600, e3 = G$spk100, dgo = data.frame(us = 1 + G$outl200),
            dgo2 = data.frame(us = 1 + G$spk100g, eu = 1 + G$outl200[1:100]), RG3 = cbind(a = G$outl200, b = G$outl600[1:200]))
 FG2 <- function(id, rx, px, jx, n_gos) {
@@ -392,13 +392,13 @@ FG2("gos_fit_gjr", "SimLev:::.fit_garch11(e2, gjr = TRUE)", "result = B._fit_gar
     "result = B._fit_garch11(e2; gjr = true)", 1)
 FG2("gos_fit_fail", "SimLev:::.fit_garch11(e3)", "result = B._fit_garch11(e3)", "result = B._fit_garch11(e3)", 2)
 FG2("gos_bs_noseed", "set.seed(1); b <- bootstrap(dgo, bootstrap_config(c(us = 'us')), 'garch', n = 2, progress = FALSE, path_length = 40); list(seed = b$seed, paths = b$paths, u = runif(2))",
-    "RNG.set_seed(1); b = bootstrap(dgo, bootstrap_config({'us': 'us'}), 'garch', n=2, progress=False, path_length=40)\nresult = {'seed': b['seed'], 'paths': b['paths'], 'u': RNG.runif(2)}",
+    "RNG.set_seed(1); b = bootstrap(dgo, bootstrap_config({'us': 'us'}), method='garch', n=2, progress=False, path_length=40)\nresult = {'seed': b['seed'], 'paths': b['paths'], 'u': RNG.runif(2)}",
     "RNG.set_seed(1); b = bootstrap(dgo, bootstrap_config((us = \"us\",)), \"garch\"; n = 2, progress = false, path_length = 40)\nresult = SL.RList(\"seed\" => b[\"seed\"], \"paths\" => b[\"paths\"], \"u\" => RNG.runif(2))", 1)
 FG2("gos_bs_seed", "set.seed(1); b <- bootstrap(dgo2, bootstrap_config(c(us = 'us', eu = 'eu')), 'gjr_garch', n = 2, seed = 4, progress = FALSE, path_length = 40); list(b = b, u = runif(2))",
-    "RNG.set_seed(1); b = bootstrap(dgo2, bootstrap_config({'us': 'us', 'eu': 'eu'}), 'gjr_garch', n=2, seed=4, progress=False, path_length=40)\nresult = {'b': b, 'u': RNG.runif(2)}",
+    "RNG.set_seed(1); b = bootstrap(dgo2, bootstrap_config({'us': 'us', 'eu': 'eu'}), method='gjr_garch', n=2, seed=4, progress=False, path_length=40)\nresult = {'b': b, 'u': RNG.runif(2)}",
     "RNG.set_seed(1); b = bootstrap(dgo2, bootstrap_config((us = \"us\", eu = \"eu\")), \"gjr_garch\"; n = 2, seed = 4, progress = false, path_length = 40)\nresult = SL.RList(\"b\" => b, \"u\" => RNG.runif(2))", 2)
-FG2("gos_dcc", "set.seed(1); list(d = dcc_fit(RG3), u = runif(2))", "RNG.set_seed(1); result = {'d': D.dcc_fit(RG3), 'u': RNG.runif(2)}",
-    "RNG.set_seed(1); result = SL.RList(\"d\" => D.dcc_fit(RG3), \"u\" => RNG.runif(2))", 1)
+FG2("gos_dcc", "set.seed(1); list(d = dependence_dcc(RG3), u = runif(2))", "RNG.set_seed(1); result = {'d': D.dependence_dcc(RG3), 'u': RNG.runif(2)}",
+    "RNG.set_seed(1); result = SL.RList(\"d\" => D.dependence_dcc(RG3), \"u\" => RNG.runif(2))", 1)
 
 # ── gosolnp direkt ──────────────────────────────────────────────────────────
 FN_R <- "fn <- function(x) (x[1] - 1) * (x[1] - 1) + 10 * (x[2] - x[1] * x[1]) * (x[2] - x[1] * x[1])\n"

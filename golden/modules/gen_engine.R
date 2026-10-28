@@ -8,6 +8,10 @@
 # Aufruf aus der Repo-Wurzel:
 #   LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> Rscript golden/modules/gen_engine.R
 source("golden/modules/ref_tools.R")
+# Fälle als flache Argumentlisten beschrieben (wie bis 6.2); simulation() bekommt die nach Anhang C
+# übersetzten Bausteine (golden/tools/blocks_from_flat.R, Etappe 6.3). BK() gibt einen Baustein direkt an.
+source("golden/tools/blocks_from_flat.R")
+BK <- function(ctor, ...) flatblock(ctor, list(...))
 ref_init("engine")
 
 # ── Argumente einmal angeben, Code für R, Python und Julia erzeugen ───────────
@@ -22,6 +26,17 @@ V <- function(x) structure(x, class = "refvar")          # Verweis auf eine Eing
 .str1 <- function(x, L) if (L == "jl") sprintf('"%s"', x) else sprintf("'%s'", x)
 em <- function(v, L) {
   if (inherits(v, "refvar")) return(unclass(v))
+  if (inherits(v, "flatblock")) {               # Baustein: Konstruktoraufruf
+    a <- v$args; nm <- if (is.null(names(a))) rep("", length(a)) else names(a); pos <- !nzchar(nm)   # Positionsargumente zuerst
+    val <- vapply(a, em, "", L)
+    kw <- switch(L, py = sprintf("%s=%s", nm[!pos], val[!pos]), sprintf("%s = %s", nm[!pos], val[!pos]))
+    if (L == "jl") {
+      inner <- paste(val[pos], collapse = ", ")
+      if (length(kw)) inner <- paste0(inner, "; ", paste(kw, collapse = ", "))
+      return(sprintf("SL.%s(%s)", v$ctor, inner))
+    }
+    return(sprintf("%s%s(%s)", if (L == "py") "simlev." else "", v$ctor, paste(c(val[pos], kw), collapse = ", ")))
+  }
   if (is.null(v)) return(switch(L, r = "NULL", py = "None", jl = "nothing"))
   if (is.list(v)) {
     nm <- names(v)
@@ -62,6 +77,8 @@ sim_code <- function(d, s, a, L) switch(L,
 # SIM: ganzes Ergebnis; part = Element (z. B. "tax_report"); wrap = "summary"
 SIM <- function(id, a = list(), d = "d2", s = "s2", extra = list(), part = NULL, wrap = NULL, note = NULL,
                 pre = NULL) {
+  bn <- intersect(names(a), c("costs", "dca", "rebalance", "splits", "tax", "funds"))   # schon Bausteine (BK)
+  a <- c(blocks_from_flat(a[setdiff(names(a), bn)]), a[bn])
   g <- function(x) if (!is.null(extra[[x]])) extra[[x]] else get(x)
   inp <- c(setNames(list(g(d), g(s)), c(d, s)), extra[setdiff(names(extra), c(d, s))])
   r <- sim_code(d, s, a, "r"); py <- sim_code(d, s, a, "py"); jl <- sim_code(d, s, a, "jl")
@@ -82,12 +99,12 @@ PRE_TT <- list(
   r = "f <- tempfile(fileext = '.csv'); writeLines(L, f)",
   py = "import os, tempfile\nfd, f = tempfile.mkstemp(suffix='.csv'); os.close(fd)\nwith open(f, 'w', encoding='utf-8') as fh:\n    fh.write('\\n'.join(np.atleast_1d(L)) + '\\n')",
   jl = 'f = tempname() * ".csv"; write(f, join(L isa AbstractString ? [L] : L, "\\n") * "\\n")')
-# read_tax_tariff(f) mit Pfad 'F' in Ergebnis und Fehlermeldung (Pfade unterscheiden sich je Sprache)
+# tax_tariff(f) mit Pfad 'F' in Ergebnis und Fehlermeldung (Pfade unterscheiden sich je Sprache)
 RT <- function(id, lines, note = NULL) {
   ref_case(id, note = note, inputs = list(L = lines),
-    r = paste0(PRE_TT$r, "\nx <- tryCatch(read_tax_tariff(f), error = function(e) stop(gsub(f, 'F', conditionMessage(e), fixed = TRUE), call. = FALSE))\nx$file <- 'F'\nx"),
-    py = paste0(PRE_TT$py, "\ntry:\n    x = simlev.read_tax_tariff(f)\nexcept Exception as e:\n    raise ValueError(str(e).replace(f, 'F')) from None\nx.file = 'F'\nresult = x"),
-    jl = paste0(PRE_TT$jl, '\nx = try\n    SL.read_tax_tariff(f)\ncatch e\n    error(replace(e isa ErrorException ? e.msg : sprint(showerror, e), f => "F"))\nend\nx["file"] = "F"\nresult = x'))
+    r = paste0(PRE_TT$r, "\nx <- tryCatch(tax_tariff(f), error = function(e) stop(gsub(f, 'F', conditionMessage(e), fixed = TRUE), call. = FALSE))\nx$file <- 'F'\nx"),
+    py = paste0(PRE_TT$py, "\ntry:\n    x = simlev.tax_tariff(file=f)\nexcept Exception as e:\n    raise ValueError(str(e).replace(f, 'F')) from None\nx.file = 'F'\nresult = x"),
+    jl = paste0(PRE_TT$jl, '\nx = try\n    SL.tax_tariff(f)\ncatch e\n    error(replace(e isa ErrorException ? e.msg : sprint(showerror, e), f => "F"))\nend\nx["file"] = "F"\nresult = x'))
 }
 
 # ── Daten (kurze Zeitreihen) ──────────────────────────────────────────────────
@@ -123,7 +140,7 @@ dR$H <- ifelse(dR$date < as.Date("2020-10-01"), 50, 1); dR$ev <- dR$date == as.D
 dL <- data.frame(date = days("2020-06-01", "2020-12-31")); nL <- nrow(dL)
 dL$A <- round(100 * seq(1, 0.7, length.out = nL), 4); dL$B <- round(50 * seq(1, 1.6, length.out = nL), 4)
 dL$ev <- dL$date == as.Date("2020-09-01"); dL$wA <- 0.2; dL$wB <- 0.8
-# jüngeres Asset (NA am Anfang, wie align_series(range = "all"))
+# jüngeres Asset (NA am Anfang, wie series_align(range = "all"))
 dN <- d2; dN$B[seq_len(120)] <- NA
 # Ereignisse mit Gewichten
 dE <- d2; dE$ev <- FALSE; dE$ev[c(40, 130, 200)] <- TRUE; dE$wA <- 0.3 + 0.4 * (seq_len(nrow(dE)) %% 2); dE$wB <- 1 - dE$wA
@@ -133,20 +150,20 @@ s2 <- create_strategy(A = asset_config("etf", "bnh", 0.6, 0.1, 30), B = asset_co
 s1 <- create_strategy(A = asset_config("etf", "bnh", 1, 0.1, 30))
 s1c <- create_strategy(A = asset_config("certificate", "bnh", 1, 0))
 sp <- create_strategy(A = asset_config("etc", "bnh", 0.5, 0.1, 0, deliverable = TRUE), B = asset_config("certificate", "bnh", 0.5, 0.1))
-sC <- create_strategy(A = asset_config("certificate", asset_share = 1, asset_spread = 0))
-sC2 <- create_strategy(A = asset_config("etf", asset_share = .5), B = asset_config("etf", asset_share = .5))
+sC <- create_strategy(A = asset_config("certificate", share = 1, spread = 0))
+sC2 <- create_strategy(A = asset_config("etf", share = .5), B = asset_config("etf", share = .5))
 ssig <- create_strategy(A = asset_config("etc", "signal", 0.5, 0.2, 0, deliverable = TRUE, signal_buy = "b", signal_sell = "s"),
                         B = asset_config("etf", "bnh", 0.5, 0.1, 30))
-sP <- create_strategy(G = asset_config("etc", "bnh", asset_share = 0.5, asset_spread = 0, deliverable = TRUE),
-                      H = asset_config("certificate", "bnh", asset_share = 0.5, asset_spread = 0))
-sG <- create_strategy(Z = asset_config("certificate", "bnh", asset_share = 0.5, asset_spread = 0),
-                      M = asset_config("certificate", "bnh", asset_share = 0.5, asset_spread = 0))
+sP <- create_strategy(G = asset_config("etc", "bnh", share = 0.5, spread = 0, deliverable = TRUE),
+                      H = asset_config("certificate", "bnh", share = 0.5, spread = 0))
+sG <- create_strategy(Z = asset_config("certificate", "bnh", share = 0.5, spread = 0),
+                      M = asset_config("certificate", "bnh", share = 0.5, spread = 0))
 sL <- create_strategy(A = asset_config("etf", "bnh", 0.5, 0, 0), B = asset_config("certificate", "bnh", 0.5, 0))
-sLate <- create_strategy(A = asset_config("etf", "bnh", 0.6, 0.1, 30), B = asset_config("etc", "bnh", 0.4, 0, asset_start = "2020-11-02"))
-sLate2 <- create_strategy(A = asset_config("etf", "bnh", 0.6, 0, asset_start = "2020-10-01"), B = asset_config("etf", "bnh", 0.4, 0, asset_start = "2020-11-02"))
-sLate3 <- create_strategy(A = asset_config("etf", "bnh", 0.6, 0, 0), B = asset_config("etf", "bnh", 0.4, 0, asset_start = "2021-05-08"))
-sLate4 <- create_strategy(A = asset_config("etf", "bnh", 0.6, 0, 0), B = asset_config("etf", "bnh", 0.4, 0, asset_start = "2021-06-01"))
-sN <- create_strategy(A = asset_config("etf", asset_share = .7, asset_spread = 0), B = asset_config("etc", asset_share = .3, asset_spread = 0))
+sLate <- create_strategy(A = asset_config("etf", "bnh", 0.6, 0.1, 30), B = asset_config("etc", "bnh", 0.4, 0, start = "2020-11-02"))
+sLate2 <- create_strategy(A = asset_config("etf", "bnh", 0.6, 0, start = "2020-10-01"), B = asset_config("etf", "bnh", 0.4, 0, start = "2020-11-02"))
+sLate3 <- create_strategy(A = asset_config("etf", "bnh", 0.6, 0, 0), B = asset_config("etf", "bnh", 0.4, 0, start = "2021-05-08"))
+sLate4 <- create_strategy(A = asset_config("etf", "bnh", 0.6, 0, 0), B = asset_config("etf", "bnh", 0.4, 0, start = "2021-06-01"))
+sN <- create_strategy(A = asset_config("etf", share = .7, spread = 0), B = asset_config("etc", share = .3, spread = 0))
 EV_P <- list(event_col = "ev", event_mode = "replace", event_weight = c(G = "wG", H = "wH"))
 EV_G <- list(event_col = "ev", event_mode = "replace", event_weight = c(Z = "wZ", M = "wM"))
 EV_L <- list(event_col = "ev", event_mode = "replace", event_weight = c(A = "wA", B = "wB"))
@@ -187,8 +204,8 @@ SIM("ch01", list(tax_mode = "person", church_tax = 9, balance_mode = TRUE, liqui
 SIM("ch02", list(tax_mode = "person", church_tax = 8, tax_rate = 25, liquidate = TRUE))
 SIM("ch03", list(church_tax = 0.09), d = "dC", s = "sC")
 SIM("ch04", list(church_tax = 12), d = "dT")
-SIM("ch05", list(church_tax = -9), d = "dT")
-SIM("ch06", list(church_tax = "9"), d = "dT")
+SIM("ch05", P(church_tax = -9), d = "dT")
+SIM("ch06", P(church_tax = "9"), d = "dT")
 SIM("ch07", list(church_tax = 100), d = "dC", s = "sC")
 SIM("ch08", list(tax_mode = "person", church_tax = 9, marginal_tax_rate = 35, liquidate = TRUE, details = TRUE), s = "sp")
 SIM("ch09", list(tax_mode = "person", church_tax = 8, use_guenstigerpruefung = TRUE, marginal_tax_rate = 14,
@@ -198,7 +215,7 @@ SIM("ch11", c(P(church_tax = 8, taxable_income = 20000, use_guenstigerpruefung =
 SIM("ch12", list(tax_mode = "funds", church_tax = 9, liquidate = TRUE))
 SIM("ch13", list(church_tax = 9, liquidate = TRUE))
 SIM("ch14", c(P(church_tax = 9, marginal_tax_rate = 42, liquidate = TRUE), EV_P), d = "dP", s = "sP")
-SIM("ch15", list(church_tax = c(8, 9)), d = "dT")
+SIM("ch15", P(church_tax = c(8, 9)), d = "dT")
 
 # ── Freibetrag nutzen (harvest_mode, harvest_day, harvest_loss_pot) ─────────────
 SIM("hv01", list(tax_mode = "person", harvest_mode = TRUE), d = "d1", s = "s1")
@@ -241,7 +258,7 @@ SIM("ti14", P(taxable_income = "50000"), d = "dT")
 SIM("ti15", P(taxable_income = V("ti")), d = "dT", extra = list(ti = c("2020" = 1, "2020" = 2)))
 SIM("ti16", P(taxable_income = 50000, marginal_tax_rate = 42, include_soli_on_income_tax = TRUE), d = "dT")
 SIM("ti17", list(taxable_income = 50000), d = "dT")
-SIM("ti18", P(tax_tariff = V("tt")), d = "dT", pre = list(r = "tt <- read_tax_tariff()", py = "tt = simlev.read_tax_tariff()", jl = "tt = SL.read_tax_tariff()"))
+SIM("ti18", P(tax_tariff = V("tt")), d = "dT", pre = list(r = "tt <- tax_tariff()", py = "tt = simlev.tax_tariff()", jl = "tt = SL.tax_tariff()"))
 SIM("ti19", list(tax_tariff = "x.csv"), d = "dT")
 SIM("ti20", P(taxable_income = 50000, tax_tariff = 42), d = "dT")
 SIM("ti21", P(taxable_income = 50000, tax_tariff = "/nonexistent/steuertarif.csv"), d = "dT")
@@ -250,8 +267,8 @@ TT_OK <- c("# Geltung: Testtarif", "art,ab,bezug,teiler,a,b,c", "zone,0,0,1,0,0,
 SIM("ti22", c(P(taxable_income = 50000, tax_tariff = V("f")), EV_P), d = "dP", s = "sP", extra = list(L = TT_OK), pre = PRE_TT,
     note = "eigene Tarifdatei")
 SIM("ti23", c(P(taxable_income = 50000, tax_tariff = V("tt"), church_tax = 8), EV_P), d = "dP", s = "sP", extra = list(L = TT_OK),
-    pre = list(r = paste0(PRE_TT$r, "\ntt <- read_tax_tariff(f)"), py = paste0(PRE_TT$py, "\ntt = simlev.read_tax_tariff(f)"),
-               jl = paste0(PRE_TT$jl, "\ntt = SL.read_tax_tariff(f)")), note = "eigenes Tarifobjekt")
+    pre = list(r = paste0(PRE_TT$r, "\ntt <- tax_tariff(f)"), py = paste0(PRE_TT$py, "\ntt = simlev.tax_tariff(file=f)"),
+               jl = paste0(PRE_TT$jl, "\ntt = SL.tax_tariff(f)")), note = "eigenes Tarifobjekt")
 SIM("ti24", P(taxable_income = 300000, church_tax = 8, liquidate = TRUE, details = TRUE), s = "sp")
 SIM("ti25", P(taxable_income = V("ti"), base_rate = 2.55, details = TRUE), d = "d1", s = "s1", extra = list(ti = ti_vec3))
 SIM("ti26", c(P(taxable_income = 0, use_guenstigerpruefung = TRUE, details = TRUE), EV_G), d = "dG", s = "sG")
@@ -265,12 +282,12 @@ SIM("ti32", c(P(taxable_income = 12000, use_guenstigerpruefung = TRUE, church_ta
 SIM("ti33", P(taxable_income = 50000, tax_tariff = V("f")), d = "dT", extra = list(L = sub("0.2,0$", "zwei,0", TT_OK)), pre = PRE_TT,
     note = "Fehler beim Lesen der Tarifdatei aus simulation() (Pfad je Sprache verschieden, daher hier ohne Pfad)")
 
-# ── read_tax_tariff() und print ────────────────────────────────────────────────
-ref_case("rt01", r = "x <- read_tax_tariff(); x$file <- 'F'; x", py = "x = simlev.read_tax_tariff(); x.file = 'F'; result = x",
-         jl = 'x = SL.read_tax_tariff(); x["file"] = "F"; result = x')
+# ── tax_tariff() und print ────────────────────────────────────────────────
+ref_case("rt01", r = "x <- tax_tariff(); x$file <- 'F'; x", py = "x = simlev.tax_tariff(); x.file = 'F'; result = x",
+         jl = 'x = SL.tax_tariff(); x["file"] = "F"; result = x')
 RT("rt02", TT_OK)
-ref_case("rt03", r = "read_tax_tariff('/nonexistent/gibt_es_nicht.csv')", py = "result = simlev.read_tax_tariff('/nonexistent/gibt_es_nicht.csv')",
-         jl = 'result = SL.read_tax_tariff("/nonexistent/gibt_es_nicht.csv")')
+ref_case("rt03", r = "tax_tariff('/nonexistent/gibt_es_nicht.csv')", py = "result = simlev.tax_tariff(file='/nonexistent/gibt_es_nicht.csv')",
+         jl = 'result = SL.tax_tariff("/nonexistent/gibt_es_nicht.csv")')
 RT("rt04", sub(",c$", ",x", TT_OK))
 RT("rt05", sub("^zone,10001", "zonen,10001", TT_OK))
 RT("rt06", sub("0.2,0$", "zwei,0", TT_OK))
@@ -288,7 +305,7 @@ RT("rt16", c(TB, "zone,10001,10000,10000,500,1000,0", TS))
 RT("rt17", c(TB, "zone,10001,0,1,0,0.2,50000", TS))
 RT("rt18", gsub(",", ";", TT_OK))
 RT("rt19", sub("0.2,0$", "0,2,0", TT_OK))
-ref_case("rt20", r = "read_tax_tariff(42)", py = "result = simlev.read_tax_tariff(42)", jl = "result = SL.read_tax_tariff(42)")
+ref_case("rt20", r = "tax_tariff(42)", py = "result = simlev.tax_tariff(file=42)", jl = "result = SL.tax_tariff(42)")
 RT("rt21", c("art,ab,bezug,teiler,a,b,c", TS))
 RT("rt22", c(TB, "zone,10001,10000,1,0,0.2,0", "soli,-5,,,5.5,11.9,"))
 RT("rt23", c("# Kopf ohne Geltung", TB, "zone,10001,10000,1,0,0.25,0", "zone,50000.5,0,1,0,0.4,-7500.13", "soli,1e9,,,5.5,11.9,"))
@@ -380,10 +397,10 @@ SIM("sp07", list(split_mode = TRUE, split_thresh = c(80, 125), dca_mode = TRUE, 
 
 # ── später startende Assets ────────────────────────────────────────────────────
 SIM("la01", list(balance_mode = TRUE, tax_mode = "person"), s = "sLate")
-SIM("la02", list(balance_mode = TRUE, balance_unit = "year", details = TRUE), d = "dN", s = "sN", note = "NA am Anfang wie align_series(range = 'all')")
+SIM("la02", list(balance_mode = TRUE, balance_unit = "year", details = TRUE), d = "dN", s = "sN", note = "NA am Anfang wie series_align(range = 'all')")
 SIM("la03", list(start_value = 1e4), s = "sLate4")
 SIM("la04", list(start_value = 1e4, balance_mode = TRUE, balance_unit = "quarter"), s = "sLate4")
-SIM("la05", list(start_value = 1e4), s = "sLate3", note = "asset_start am letzten Datentag")
+SIM("la05", list(start_value = 1e4), s = "sLate3", note = "start am letzten Datentag")
 SIM("la06", list(), s = "sLate2")
 SIM("la07", list(dca_mode = TRUE, dca_value = 100, dca_span = 1, balance_mode = TRUE, order_fee = 1, details = TRUE), s = "sLate")
 SIM("la08", list(dca_mode = TRUE, dca_value = 100, dca_span = 1), d = "dN", s = "sN", wrap = "summary")
@@ -426,11 +443,11 @@ SIM("da05", list(), d = "dChr", note = "Datum als Text")
 SIM("da06", list(), d = "dFmt")
 SIM("da07", list(), d = "dRev", note = "absteigend sortiert")
 SIM("da08", list(), d = "dT", s = "sZ", extra = list(sZ = create_strategy(Z = asset_config("etf"))))
-SIM("da10", list(), d = "dT", s = "sK", extra = list(sK = create_strategy(A = asset_config("etf", asset_share = 1, asset_start = as.Date("2020-01-15")))))
+SIM("da10", list(), d = "dT", s = "sK", extra = list(sK = create_strategy(A = asset_config("etf", share = 1, start = as.Date("2020-01-15")))))
 SIM("da11", list(spread = 5), d = "dT")
 SIM("da12", list(tax_rate = 0.26375), d = "dT")
 SIM("da13", list(tax_mode = "person"), d = "dT", s = "sp")
-SIM("da14", list(tax_mode = "nix"), d = "dT")
+SIM("da14", list(rebalance = BK("rebalance_plan", unit = "nix")), d = "dT", note = "match.arg im Baustein (früher tax_mode = \"nix\")")
 SIM("da15", list(fractions = "ja"), d = "dT")
 SIM("da16", list(start_value = -5), d = "dT")
 SIM("da17", list(base_rate = 0.02, tax_mode = "person"), d = "dT")
@@ -445,23 +462,23 @@ SIM("da24", list(), d = "dT1", s = "s1", wrap = "summary")
 set.seed(7); cal <- days("2019-10-01", "2020-03-31"); wd <- cal[!format(cal, "%u") %in% c("6", "7")]
 us <- data.frame(date = wd, A = round(100 * exp(cumsum(rnorm(length(wd), 4e-4, 0.011))), 4))
 ref_case("da25", inputs = list(us = us, s1 = s1),
-         r = "al <- align_series(A = us)\nsimulation(al[al$date >= as.Date('2020-01-01'), ], s1)",
-         py = "al = simlev.align_series(A=us)\nresult = simlev.simulation(al[al['date'] >= np.datetime64('2020-01-01')], s1)",
-         jl = 'al = SL.align_series(A = us)\nresult = SL.simulation(SL.rows(al, al["date"] .>= Date(2020, 1, 1)), s1)')
+         r = "al <- series_align(A = us)\nsimulation(al[al$date >= as.Date('2020-01-01'), ], s1)",
+         py = "al = simlev.series_align(A=us)\nresult = simlev.simulation(al[al['date'] >= np.datetime64('2020-01-01')], s1)",
+         jl = 'al = SL.series_align(A = us)\nresult = SL.simulation(SL.rows(al, al["date"] .>= Date(2020, 1, 1)), s1)')
 ref_case("da26", inputs = list(dT = dT, s2 = s2), r = "simulation(cbind(dT, dT['A']), s2)",
          py = "result = simlev.simulation(pd.concat([dT, dT[['A']]], axis=1), s2)",
          jl = 'result = SL.simulation(SL.RFrame(vcat(names(dT), "A"), AbstractVector[[dT[k] for k in names(dT)]..., dT["A"]]), s2)')
 
 # ── Asset-Konfiguration (Prüfungen aus test-blue-engine.R) ────────────────────
-ref_case("cf01", r = "asset_config('etf', asset_bonus = 0.3)", py = "result = simlev.asset_config('etf', asset_bonus=0.3)",
-         jl = 'result = SL.asset_config("etf"; asset_bonus = 0.3)')
-ref_case("cf02", r = "asset_config('etf', asset_share = '0.5')", py = "result = simlev.asset_config('etf', asset_share='0.5')",
-         jl = 'result = SL.asset_config("etf"; asset_share = "0.5")')
-ref_case("cf03", r = "asset_config('etf', asset_start = 'kein Datum')", py = "result = simlev.asset_config('etf', asset_start='kein Datum')",
-         jl = 'result = SL.asset_config("etf"; asset_start = "kein Datum")')
-ref_case("cf04", r = "asset_config('etc', 'bnh', 0.3, asset_start = '2020-01-01', deliverable = TRUE)",
-         py = "result = simlev.asset_config('etc', 'bnh', 0.3, asset_start='2020-01-01', deliverable=True)",
-         jl = 'result = SL.asset_config("etc", "bnh", 0.3; asset_start = "2020-01-01", deliverable = true)')
+ref_case("cf01", r = "asset_config('etf', partial_exemption = 0.3)", py = "result = simlev.asset_config(asset_class='etf', partial_exemption=0.3)",
+         jl = 'result = SL.asset_config("etf"; partial_exemption = 0.3)')
+ref_case("cf02", r = "asset_config('etf', share = '0.5')", py = "result = simlev.asset_config(asset_class='etf', share='0.5')",
+         jl = 'result = SL.asset_config("etf"; share = "0.5")')
+ref_case("cf03", r = "asset_config('etf', start = 'kein Datum')", py = "result = simlev.asset_config(asset_class='etf', start='kein Datum')",
+         jl = 'result = SL.asset_config("etf"; start = "kein Datum")')
+ref_case("cf04", r = "asset_config('etc', 'bnh', 0.3, start = '2020-01-01', deliverable = TRUE)",
+         py = "result = simlev.asset_config(asset_class='etc', trading='bnh', share=0.3, start='2020-01-01', deliverable=True)",
+         jl = 'result = SL.asset_config("etc", "bnh", 0.3; start = "2020-01-01", deliverable = true)')
 
 # ── Zufallsfälle: Kombinationen aller Argumente (kurze Reihen, auch mit Lücken) ──
 pick <- function(x) x[[sample.int(length(x), 1)]]
@@ -484,7 +501,7 @@ for (k in 1:22) {
     st[[nms[i]]] <- asset_config(cl, if (sig) "signal" else "bnh", sh[i], pick(c(0, 0.05, 0.1, 0.3)),
                                  if (cl == "etf") pick(c(0, 15, 30)) else 0,
                                  deliverable = (cl %in% c("etc", "etn")) && runif(1) < 0.5,
-                                 asset_start = if (i > 1 && n > 10 && runif(1) < 0.25) format(start + sample(1:max(2, n %/% 2), 1)) else NULL,
+                                 start = if (i > 1 && n > 10 && runif(1) < 0.25) format(start + sample(1:max(2, n %/% 2), 1)) else NULL,
                                  signal_buy = if (sig) "sb" else NULL, signal_sell = if (sig) "ss" else NULL)
   }
   st <- create_strategy(assets = st)
@@ -535,4 +552,98 @@ for (k in 1:22) {
   assign(dname, df); assign(sname, st)
   SIM(sprintf("zz%02d", k), a, d = dname, s = sname, extra = extra, pre = pre)
 }
+# ── Bausteine (Etappe 6.3): Prüfungen, Zusammenspiel, Druck ────────────────────
+BLK <- function(id, b, note = NULL, inputs = list())
+  ref_case(id, r = em(b, "r"), py = paste0("result = ", em(b, "py")), jl = paste0("result = ", em(b, "jl")), note = note,
+           inputs = inputs)
+SIM("bk01", list(tax = BK("tax_profile"), funds = BK("funds_costs")), d = "dT", note = "Fondsmodus mit tax_profile() (Etappe 6.4)")
+SIM("bk02", list(tax = BK("tax_profile", rate = 25, church_tax = 9)), d = "dT", note = "rate mit church_tax: Fehler")
+SIM("bk03", list(tax = BK("tax_profile", rate = 26.375, church_tax = 8)), d = "dT", note = "auch der Standardwert ausdrücklich: Fehler")
+SIM("bk04", list(tax = BK("tax_profile", income = 42)), d = "dT")
+SIM("bk05", list(costs = 5), d = "dT")
+SIM("bk06", list(dca = list(value = 100, span = 1)), d = "dT")
+SIM("bk07", list(costs = NULL), d = "dT", note = "costs = NULL: keine Kosten")
+SIM("bk08", list(tax = BK("tax_profile", base_rate = "br")), d = "dT", note = "Basiszins-Spalte fehlt")
+SIM("bk09", list(tax = BK("tax_profile", guenstigerpruefung = TRUE)), d = "dT", note = "Günstigerprüfung ohne Grenzsteuersatz: Warnung")
+SIM("bk10", list(tax = BK("tax_profile")), d = "dT", s = "sp", note = "§ 23 ohne Grenzsteuersatz: Warnung")
+SIM("bk11", list(rebalance = BK("rebalance_plan", event_col = "ev", event_mode = "replace", event_weight = c(A = "wA", B = "wB"))),
+    d = "dE", s = "sC2", note = "nur Ereignistage, am ersten Tag Kauf über das Rebalancing (skip = FALSE)")
+SIM("bk12", list(rebalance = BK("rebalance_plan", event_col = "ev", event_mode = "replace", skip = TRUE,
+                                event_weight = c(A = "wA", B = "wB")), details = TRUE),
+    d = "dE", s = "sC2", note = "nur Ereignistage, am ersten Tag ohne Rebalancing (skip = TRUE)")
+SIM("bk13", list(tax = BK("tax_profile", sparer_pauschbetrag = 0, base_rate = 2.55), details = TRUE), d = "d1", s = "s1",
+    note = "sparer_pauschbetrag = 0 heißt ohne Pauschbetrag")
+SIM("bk14", list(dca = BK("dca_plan", 100, 1, start = "2025-01-01")), d = "dT", note = "Beginn nach dem letzten Datentag")
+SIM("bk15", list(rebalance = BK("rebalance_plan", start = "2025-01-01")), d = "dT")
+SIM("bk16", list(tax = BK("tax_profile", income = BK("income_tariff", 50000)), funds = NULL), d = "dT", s = "sp")
+SIM("bk17", list(fractions = 1), d = "dT")
+SIM("bk18", list(tax = BK("tax_profile", income = BK("income_tariff", 50000)), funds = BK("funds_costs")), d = "dT",
+    note = "Fondsmodus: income_tariff() wirkt nicht (Warnung)")
+SIM("bk19", list(tax = BK("tax_profile", rate = 20), funds = BK("funds_costs", fee = 0.5), liquidate = TRUE),
+    note = "Fondsmodus mit eigenem Steuersatz")
+BLK("bk20", BK("dca_plan"), note = "value fehlt")
+BLK("bk21", BK("dca_plan", value = 0, span = 1))
+BLK("bk22", BK("dca_plan", value = 100, span = 2.5))
+BLK("bk23", BK("dca_plan", value = 100, span = 1, days = c(5, 5)), note = "doppelte Tage: Warnung")
+BLK("bk24", BK("dca_plan", value = 100, span = 1, days = 32))
+BLK("bk25", BK("dca_plan", value = 100, span = 1, anchor = "mitte"))
+BLK("bk26", BK("dca_plan", value = 100, span = 1, start = "kein Datum"))
+BLK("bk27", BK("dca_plan", value = 100, span = 1, skip = 1))
+BLK("bk28", BK("rebalance_plan", thresh = -1))
+BLK("bk29", BK("rebalance_plan", thresh = 0.05), note = "Anteil statt Prozent: Warnung")
+BLK("bk30", BK("rebalance_plan", event_mode = "replace"), note = "event_mode ohne event_col: Warnung")
+BLK("bk31", BK("rebalance_plan", event_weight = c(A = "wA")), note = "event_weight ohne event_col: Warnung")
+BLK("bk32", BK("rebalance_plan", thresh_type = "prozent"))
+BLK("bk33", BK("rebalance_plan", event_col = 5))
+BLK("bk34", BK("split_rule"), note = "thresh fehlt")
+BLK("bk35", BK("split_rule", c(10, 60, 200)))
+BLK("bk36", BK("split_rule", c(150, 400)), note = "100 nicht eingeschlossen: Warnung")
+BLK("bk37", BK("tax_profile", rate = 0.26375), note = "Anteil statt Prozent: Warnung")
+BLK("bk38", BK("tax_profile", rate = 150))
+BLK("bk39", BK("tax_profile", church_tax = 12), note = "ungewöhnlich hoch: Warnung")
+BLK("bk40", BK("tax_profile", church_tax = "9"))
+BLK("bk41", BK("tax_profile", sparer_pauschbetrag = -1))
+BLK("bk42", BK("tax_profile", private_sale_threshold = "1000"))
+BLK("bk43", BK("tax_profile", base_rate = c(1, 2)))
+BLK("bk44", BK("tax_profile", base_rate = 0.02), note = "Anteil statt Prozent: Warnung")
+BLK("bk45", BK("tax_profile", guenstigerpruefung = "ja"))
+BLK("bk46", BK("tax_profile", harvest = TRUE))
+BLK("bk47", BK("income_rate"), note = "marginal_rate fehlt")
+BLK("bk48", BK("income_rate", 60))
+BLK("bk49", BK("income_rate", 0.42), note = "Anteil statt Prozent: Warnung")
+BLK("bk50", BK("income_rate", 42, soli_rate = -1))
+BLK("bk51", BK("income_tariff"), note = "taxable_income fehlt")
+BLK("bk52", BK("income_tariff", "50000"))
+BLK("bk53", BK("income_tariff", c(1, 2)))
+BLK("bk54", BK("income_tariff", 50000, tariff = 42))
+BLK("bk55", BK("harvest_rule", day = "12-31"))
+BLK("bk56", BK("harvest_rule", loss_pot = "ja"))
+BLK("bk57", BK("funds_costs", fee = 150))
+BLK("bk58", BK("funds_costs", performance_fee = V("na")), inputs = list(na = NA_real_))
+BLK("bk59", BK("sim_costs", order_fee = list(fix = 1)))
+BLK("bk60", BK("sim_costs", dca_fee = -1))
+# Druck und Inhalt der Bausteine
+BLK("pr01", BK("sim_costs"))
+BLK("pr02", BK("sim_costs", order_fee = list(fixed = 1.5, percent = 0.25, min = 3, max = 30), dca_fee = 0))
+BLK("pr03", BK("sim_costs", order_fee = 4.95, dca_fee = list(percent = 1.5)))
+BLK("pr04", BK("dca_plan", 200, 1))
+BLK("pr05", BK("dca_plan", value = 123.45, span = 3, days = c(1, 15), unit = "quarter", anchor = "end", start = "2020-11-01",
+               skip = TRUE, fill_deficits = TRUE))
+BLK("pr06", BK("rebalance_plan"))
+BLK("pr07", BK("rebalance_plan", span = 2, days = 10, unit = "year", thresh = 25, thresh_type = "relative", start = "2021-01-01"))
+BLK("pr08", BK("rebalance_plan", event_col = "ev", event_mode = "replace", skip = TRUE, event_weight = c(A = "wA", B = "wB"), thresh = 5))
+BLK("pr09", BK("rebalance_plan", unit = "quarter", event_col = "ev"))
+BLK("pr10", BK("split_rule", c(20, 400)))
+BLK("pr11", BK("tax_profile"))
+BLK("pr12", BK("tax_profile", church_tax = 9, sparer_pauschbetrag = 0, private_sale_threshold = 600, base_rate = "br",
+               guenstigerpruefung = TRUE, income = BK("income_rate", 42, soli_rate = 5.5), harvest = BK("harvest_rule", day = "11-30", loss_pot = FALSE)))
+BLK("pr13", BK("tax_profile", rate = 25, base_rate = 2.29, income = BK("income_tariff", 50000)))
+BLK("pr14", BK("tax_profile", income = BK("income_tariff", V("ti"))), inputs = list(ti = c("2020" = 50000, "2021" = 52000)))
+BLK("pr15", BK("income_rate", 24.5))
+BLK("pr16", BK("income_tariff", 50000))
+BLK("pr17", BK("harvest_rule"))
+BLK("pr18", BK("funds_costs"))
+BLK("pr19", BK("funds_costs", fee = 0.2, performance_fee = 0))
+BLK("pr20", BK("income_tariff", V("ti")), note = "zvE als data.frame",
+    inputs = list(ti = data.frame(year = 2020:2021, taxable_income = c(50000, 52000))))
 ref_done()

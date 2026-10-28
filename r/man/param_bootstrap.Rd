@@ -34,7 +34,7 @@ den Spalten aus \code{config}, Format wie bei \code{\link[=bootstrap]{bootstrap(
 
 \item{by}{Rangfolge fuer \code{top}: \code{"objective"} (Standard,
 Zielgroesse der Suche) oder \code{"plateau"} (\code{plateau_mean} aus
-\code{\link[=plateau]{plateau()}}); Richtung nach \code{x$maximize}, Punkte mit \code{NA}
+\code{\link[=param_plateau]{param_plateau()}}); Richtung nach \code{x$maximize}, Punkte mit \code{NA}
 entfallen.}
 
 \item{map}{Benannter Zeichenvektor von Spalten-Aliasen, die jeder
@@ -88,5 +88,5 @@ bs$results[, c("strategy", "path", "cagr", "max_drawdown")]
 }
 \seealso{
 \code{\link[=param_search]{param_search()}}, \code{\link[=bootstrap_study]{bootstrap_study()}}, \code{\link[=bootstrap_probability]{bootstrap_probability()}},
-\code{\link[=walk_forward]{walk_forward()}}
+\code{\link[=overfit_walk_forward]{overfit_walk_forward()}}
 }

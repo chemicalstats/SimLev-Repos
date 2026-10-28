@@ -74,7 +74,7 @@ dienen.
 set.seed(1); n <- 1000
 d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
 d$idx <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
-d$etf <- leveraged_series(d, "idx", leverage = 2, rate = 2, expense = 0.6)
+d$etf <- series_leverage(d, "idx", leverage = 2, rate = 2, expense = 0.6)
 d$etf[1:600] <- NA                       # Produkt erst ab Tag 601
 bc <- backcast(data = d, product = "etf", index = "idx", leverage = 2,
                rate = 2, ter = 0.6, rebase = 100)
@@ -83,5 +83,5 @@ table(bc$source)
 attr(bc, "splice_date")
 }
 \seealso{
-\code{\link[=backcast_fit]{backcast_fit()}}, \code{\link[=leveraged_series]{leveraged_series()}}, \code{\link[=simulation]{simulation()}}
+\code{\link[=backcast_fit]{backcast_fit()}}, \code{\link[=series_leverage]{series_leverage()}}, \code{\link[=simulation]{simulation()}}
 }

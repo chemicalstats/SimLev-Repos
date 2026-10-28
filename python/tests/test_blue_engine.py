@@ -9,9 +9,10 @@ import pandas as pd
 import pytest
 
 import simlev
-from simlev import asset_config, compute_rebal_trigger, create_strategy, simulation, update_asset
+from simlev import asset_config, rebalance_trigger, create_strategy, simulation, strategy_update_asset
 
 from _helpers import days, idx, sim, sim_warn
+from simlev import dca_plan, funds_costs, harvest_rule, rebalance_plan, sim_costs, split_rule, tax_profile  # Bausteine (Etappe 6.3)
 
 approx = pytest.approx
 
@@ -24,7 +25,7 @@ def cal(frm, to, **cols):
 
 
 def st1(**kw):
-    return create_strategy(A=asset_config("etf", asset_share=1, asset_spread=0, **kw))
+    return create_strategy(A=asset_config(asset_class="etf", share=1, spread=0, **kw))
 
 
 def quiet(*a, **k):
@@ -33,7 +34,7 @@ def quiet(*a, **k):
 
 
 def test_r1_01_funds_fee_voll_investiert():
-    r = simulation(cal("2020-01-01", "2022-12-30", A=100.0), st1(), tax_mode="funds", funds_fee=10, bonus_fee=0)
+    r = simulation(cal("2020-01-01", "2022-12-30", A=100.0), st1(), funds=funds_costs(fee=10, performance_fee=0))
     v = 10000.0
     v = v - 366 * (0.1 / 366) * v
     v = v - 365 * (0.1 / 365) * v
@@ -48,21 +49,20 @@ def test_r1_02_fondssteuer_bei_liquidation():
         return d
 
     def run(end):
-        return simulation(mk(end), st1(), tax_mode="funds", funds_fee=0, bonus_fee=0, liquidate=True)
+        return simulation(mk(end), st1(), funds=funds_costs(fee=0, performance_fee=0), liquidate=True)
 
     def g(n):
         v = 10000 * 1.0005 ** (n - 1)
         return v - 0.26375 * (v - 10000)
     a, b = run("2022-12-30"), run("2022-12-31")
     assert a.worth[-1] == approx(g(1095), rel=1e-9) and b.worth[-1] == approx(g(1096), rel=1e-9)
-    c1 = simulation(mk("2021-12-31"), st1(), tax_mode="funds", funds_fee=1, bonus_fee=0)
-    c2 = simulation(mk("2021-12-31"), st1(), tax_mode="funds", funds_fee=1, bonus_fee=0, liquidate=True)
+    c1 = simulation(mk("2021-12-31"), st1(), funds=funds_costs(fee=1, performance_fee=0))
+    c2 = simulation(mk("2021-12-31"), st1(), funds=funds_costs(fee=1, performance_fee=0), liquidate=True)
     assert c2.worth[-1] + c2.tax_report["total_taxes_paid"] == approx(c1.worth[-1], rel=1e-9)
 
 
 def test_r1_03_einzahlungen_kein_gewinn():
-    r = simulation(cal("2020-01-01", "2022-12-30", A=100.0), st1(), tax_mode="funds", funds_fee=0, bonus_fee=0,
-                   liquidate=True, dca_mode=True, dca_value=1000, dca_span=1)
+    r = simulation(cal("2020-01-01", "2022-12-30", A=100.0), st1(), dca=dca_plan(value=1000, span=1), funds=funds_costs(fee=0, performance_fee=0), liquidate=True)
     assert r.worth[-1] == 10000 + r.report["A"]["flows"].sum() and r.tax_report["total_taxes_paid"] == 0
 
 
@@ -71,12 +71,12 @@ def test_r1_04_dca_fee_nur_sparplankaeufe():
     n = 3 * 365
     d = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n), "A": 100 * np.cumprod(1 + rng.normal(5e-4, 0.015, n)),
                       "B": 100 * np.cumprod(1 + rng.normal(0, 0.003, n))})
-    st = create_strategy(A=asset_config("etf", asset_share=0.5, asset_spread=0),
-                         B=asset_config("etf", asset_share=0.5, asset_spread=0))
-    r1 = simulation(d, st, balance_mode=True, dca_mode=True, dca_value=100, dca_span=1, order_fee=10, dca_fee=0)
-    r2 = simulation(d, st, balance_mode=True, dca_mode=True, dca_value=100, dca_span=1, dca_days=2, order_fee=10, dca_fee=0)
+    st = create_strategy(A=asset_config(asset_class="etf", share=0.5, spread=0),
+                         B=asset_config(asset_class="etf", share=0.5, spread=0))
+    r1 = simulation(d, st, costs=sim_costs(order_fee=10, dca_fee=0), dca=dca_plan(value=100, span=1), rebalance=rebalance_plan())
+    r2 = simulation(d, st, costs=sim_costs(order_fee=10, dca_fee=0), dca=dca_plan(value=100, span=1, days=2), rebalance=rebalance_plan())
     assert r1.fees_paid > 0 and r1.fees_paid == approx(r2.fees_paid, abs=0.1 * r2.fees_paid)
-    r3 = simulation(d, st, dca_mode=True, dca_value=100, dca_span=1, dca_days=2, order_fee=10, dca_fee=0)
+    r3 = simulation(d, st, costs=sim_costs(order_fee=10, dca_fee=0), dca=dca_plan(value=100, span=1, days=2))
     assert r3.fees_paid == 20
 
 
@@ -86,7 +86,7 @@ def test_r1_05_split_ganze_stuecke():
     d = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n), "A": 100 * np.cumprod(1 + rng.normal(2e-3, 0.01, n))})
     i = int(np.flatnonzero(d.A > 250)[0])
     a = simulation(d, st1(), fractions=False)
-    b = simulation(d, st1(), fractions=False, split_mode=True, split_thresh=(20, 250))
+    b = simulation(d, st1(), fractions=False, splits=split_rule(thresh=(20, 250)))
     assert b.worth[i] == approx(a.worth[i], rel=1e-12)
     cnt = b.report["A"]["worth"][i] / 100
     assert cnt == approx(round(cnt), abs=1e-9)
@@ -94,9 +94,9 @@ def test_r1_05_split_ganze_stuecke():
 
 def test_r1_12_spaeter_startendes_asset():
     d = cal("2020-01-01", "2022-03-10", A=100.0, B=100.0)
-    st = create_strategy(A=asset_config("etf", asset_share=0.5, asset_spread=0),
-                         B=asset_config("etf", asset_share=0.5, asset_spread=0, asset_start="2020-06-01"))
-    r = simulation(d, st, balance_mode=True, balance_unit="year")
+    st = create_strategy(A=asset_config(asset_class="etf", share=0.5, spread=0),
+                         B=asset_config(asset_class="etf", share=0.5, spread=0, start="2020-06-01"))
+    r = simulation(d, st, rebalance=rebalance_plan(unit="year"))
     for dt in ("2020-06-01", "2021-01-01", "2022-01-01"):
         assert r.report["B"]["share"][idx(r, dt)] == approx(0.5, abs=1e-6)
     r2, w = sim_warn(d, st)
@@ -144,7 +144,7 @@ def test_r1_16_zwei_termine_an_einem_handelstag():
     c = days("2020-01-01", "2022-12-31")
     wd = c[c.dayofweek < 5]
     d = pd.DataFrame({"date": wd, "A": 100 * np.cumprod(1 + rng.normal(4e-4, 0.01, len(wd)))})
-    r = quiet(d, st1(), dca_mode=True, dca_value=100, dca_span=1, dca_days=[1, 2])
+    r = quiet(d, st1(), dca=dca_plan(value=100, span=1, days=[1, 2]))
     assert r.report["A"]["flows"].sum() == 36 * 2 * 100
 
 
@@ -153,10 +153,10 @@ def test_r1_17_attribut_filled():
     c = days("2021-01-04", "2021-06-30")
     wd = c[c.dayofweek < 5]
     us = pd.DataFrame({"date": wd, "A": 100 * np.cumprod(1 + rng.normal(0, 0.01, len(wd)))})
-    from simlev.data_prep import align_series
+    from simlev.data_prep import series_align
     with contextlib.redirect_stderr(io.StringIO()):
-        al = align_series(A=us)
-    kw = dict(dca_mode=True, dca_value=100, dca_span=1, balance_mode=True)
+        al = series_align(A=us)
+    kw = dict(dca=dca_plan(value=100, span=1), rebalance=rebalance_plan())
     ra = simulation(al, st1(), **kw)
     rb = quiet(us, st1(), **kw)
     assert np.array_equal(ra.filled, rb.filled) and ra.filled.any()
@@ -171,8 +171,8 @@ def test_r1_17_attribut_filled():
 def test_r1_18_zwangsverkauf_deckt_ordergebuehr():
     d = cal("2020-01-01", "2021-01-31")
     d["A"] = np.linspace(100, 110, len(d))
-    a = simulation(d, st1(), tax_mode="person", base_rate=2, use_sparer_pauschbetrag=False)
-    b = simulation(d, st1(), tax_mode="person", base_rate=2, use_sparer_pauschbetrag=False, order_fee=10)
+    a = simulation(d, st1(), tax=tax_profile(sparer_pauschbetrag=0, base_rate=2))
+    b = simulation(d, st1(), costs=sim_costs(order_fee=10), tax=tax_profile(sparer_pauschbetrag=0, base_rate=2))
     i = int(np.flatnonzero(d.date == pd.Timestamp("2021-01-01"))[0])
 
     def dlt(r):
@@ -186,7 +186,7 @@ def test_r1_19_dashboard_returns():
     rng = np.random.default_rng(12)
     n = 3 * 365
     d = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n), "A": 100 * np.cumprod(1 + rng.normal(4e-4, 0.01, n))})
-    r = simulation(d, st1(), dca_mode=True, dca_value=5000, dca_span=1)
+    r = simulation(d, st1(), dca=dca_plan(value=5000, span=1))
     dr = _dashboard_returns(r)
     assert np.std(dr["returns"], ddof=1) == approx(r.statistics["sd"], rel=1e-12)
     assert dr["returns"].max() < 0.1
@@ -196,9 +196,9 @@ def test_r1_19_dashboard_returns():
 def test_r1_21_trigger_fuehrendes_na():
     df = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=6), "target_leverage": [np.nan, 2, 2.3, 2.3, 1.9, 2],
                        "sigma_ewma": [np.nan, np.nan, .1, .2, .1, .1]})
-    assert list(compute_rebal_trigger(df, "abs_leverage").rebal_trigger) == [False, False, True, False, True, True]
-    assert list(compute_rebal_trigger(df, "vol_band").rebal_trigger) == [False, False, False, True, True, False]
-    assert not compute_rebal_trigger(df.assign(sigma_ewma=np.nan), "vol_band").rebal_trigger.any()
+    assert list(rebalance_trigger(df, "abs_leverage").rebal_trigger) == [False, False, True, False, True, True]
+    assert list(rebalance_trigger(df, "vol_band").rebal_trigger) == [False, False, False, True, True, False]
+    assert not rebalance_trigger(df.assign(sigma_ewma=np.nan), "vol_band").rebal_trigger.any()
 
 
 def test_r1_22_fehler_und_umwandlungen(capsys):
@@ -218,21 +218,21 @@ def test_r1_22_fehler_und_umwandlungen(capsys):
     with pytest.raises(ValueError, match="JJJJ-MM-TT"):
         simulation(dx, st1())
     with pytest.raises(ValueError, match="Kursspalte 'Z' fehlt"):
-        simulation(d, create_strategy(Z=asset_config("etf")))
+        simulation(d, create_strategy(Z=asset_config(asset_class="etf")))
     with pytest.raises(ValueError, match="nach dem letzten Datentag"):
-        simulation(d, st1(), dca_mode=True, dca_value=1, dca_span=1, dca_start="2025-01-01")
+        simulation(d, st1(), dca=dca_plan(value=1, span=1, start="2025-01-01"))
     with pytest.raises(ValueError, match="Kein Asset"):
-        simulation(d, st1(asset_start="2020-06-01"))
+        simulation(d, st1(start="2020-06-01"))
     d["B"] = 100.0
     d["ev"] = False
     d.loc[99, "ev"] = True
     d["wA"] = 0.5
-    st2 = create_strategy(A=asset_config("etf", asset_share=0.5), B=asset_config("etf", asset_share=0.5))
-    assert any("nicht alle Assets" in w for w in sim_warn(d, st2, event_col="ev", event_weight={"A": "wA"})[1])
+    st2 = create_strategy(A=asset_config(asset_class="etf", share=0.5), B=asset_config(asset_class="etf", share=0.5))
+    assert any("nicht alle Assets" in w for w in sim_warn(d, st2, rebalance=rebalance_plan(event_col="ev", event_mode="replace", skip=True, event_weight={"A": "wA"}))[1])
     with pytest.raises(ValueError, match="'xx'"):
-        simulation(d, st2, event_col="ev", event_weight={"A": "wA", "B": "xx"})
+        simulation(d, st2, rebalance=rebalance_plan(event_col="ev", event_mode="replace", skip=True, event_weight={"A": "wA", "B": "xx"}))
     with pytest.raises(ValueError, match="benannt"):
-        simulation(d, st2, event_col="ev", event_weight=["wA", "wA"])
+        simulation(d, st2, rebalance=rebalance_plan(event_col="ev", event_mode="replace", skip=True, event_weight=["wA", "wA"]))
     # POSIXct-ähnlich: Datum-Uhrzeit wird in Date umgewandelt
     dp = d[["date", "A"]].copy()
     dp["date"] = dp.date + pd.Timedelta(hours=12)
@@ -243,61 +243,69 @@ def test_r1_22_fehler_und_umwandlungen(capsys):
 def test_r1_23_plausibilitaet():
     d = cal("2020-01-01", "2021-02-03")
     d["A"] = np.linspace(100, 200, len(d))
-    st = create_strategy(A=asset_config("certificate", asset_share=1, asset_spread=0))
-    assert any("Prozent" in w for w in sim_warn(d, st, church_tax=0.09)[1])
+    st = create_strategy(A=asset_config(asset_class="certificate", share=1, spread=0))
+    with pytest.warns(UserWarning, match="Prozent"):
+        tax_profile(church_tax=0.09)
     for v in (-9, "9"):
         with pytest.raises(ValueError, match="church_tax"):
-            simulation(d, st, church_tax=v)
-    assert any("ungewöhnlich" in w for w in sim_warn(d, st, church_tax=100)[1])
-    assert any("Prozent" in w for w in sim_warn(d, st, tax_rate=0.26375)[1])
+            tax_profile(church_tax=v)
+    with pytest.warns(UserWarning, match="ungewöhnlich"):
+        tax_profile(church_tax=100)
+    with pytest.warns(UserWarning, match="Prozent"):
+        tax_profile(rate=0.26375)
     for v in (40, 0):
-        with pytest.raises(ValueError, match="dca_days"):
-            simulation(d, st, dca_mode=True, dca_value=100, dca_span=1, dca_days=v)
+        with pytest.raises(ValueError, match="dca_plan: days"):
+            dca_plan(value=100, span=1, days=v)
     with pytest.raises(ValueError, match="fix"):
-        simulation(d, st, order_fee={"fix": 5})
+        sim_costs(order_fee={"fix": 5})
     d0 = d.copy()
     d0["A"] = 100.0
-    assert any("nicht verkauft" in w for w in sim_warn(d0, st, start_value=100, order_fee=60, liquidate=True)[1])
-    assert any("harvest_mode" in w for w in sim_warn(d, st, harvest_mode=True)[1])
+    assert any("nicht verkauft" in w for w in sim_warn(d0, st, start_value=100, costs=sim_costs(order_fee=60), liquidate=True)[1])
+    with pytest.raises(ValueError, match="MM-TT"):
+        harvest_rule(day="1231")
     d["ev"] = False
     d.loc[99, "ev"] = True
     d["wN"] = -1.0
     d["B"] = 100.0
-    st2 = create_strategy(A=asset_config("etf", asset_share=0.5), B=asset_config("etf", asset_share=0.5))
+    st2 = create_strategy(A=asset_config(asset_class="etf", share=0.5), B=asset_config(asset_class="etf", share=0.5))
     with pytest.raises(ValueError, match="nicht negative"):
-        simulation(d, st2, event_col="ev", event_weight={"A": "wN", "B": "wN"})
+        simulation(d, st2, rebalance=rebalance_plan(event_col="ev", event_mode="replace", skip=True, event_weight={"A": "wN", "B": "wN"}))
 
 
 def test_r1_24_dca_anchor_end():
     d = cal("2020-01-01", "2020-12-31", A=100.0)
-    r = simulation(d, st1(), dca_mode=True, dca_value=100, dca_span=1, dca_days=31, dca_anchor="end")
+    r = simulation(d, st1(), dca=dca_plan(value=100, span=1, days=31, anchor="end"))
     dts = pd.DatetimeIndex(r.dates[r.report["A"]["flows"] > 0])
     assert list(dts.strftime("%m-%d")) == ["01-01", "03-01", "05-01", "07-01", "08-01", "10-01", "12-01"]
-    r29 = simulation(d, st1(), dca_mode=True, dca_value=100, dca_span=1, dca_days=29, dca_anchor="end")
+    r29 = simulation(d, st1(), dca=dca_plan(value=100, span=1, days=29, anchor="end"))
     assert (r29.report["A"]["flows"] > 0).sum() == 12
 
 
 def test_r1_25_update_asset():
-    s = update_asset(create_strategy(X=asset_config("certificate")), "X", asset_class="etf", asset_bonus=30)
+    s = strategy_update_asset(create_strategy(X=asset_config(asset_class="certificate")), "X", asset_class="etf", partial_exemption=30)
     assert s.X.tax_regime == "investment_fund"
-    assert update_asset(create_strategy(G=asset_config("etc")), "G", deliverable=True).G.tax_regime == "private_sale"
-    s = update_asset(create_strategy(E=asset_config("etf", tax_regime="capital_gains")), "E", deliverable=True)
+    assert strategy_update_asset(create_strategy(G=asset_config(asset_class="etc")), "G", deliverable=True).G.tax_regime == "private_sale"
+    s = strategy_update_asset(create_strategy(E=asset_config(asset_class="etf", tax_regime="capital_gains")), "E", deliverable=True)
     assert s.E.tax_regime == "capital_gains"
 
 
-def test_r1_26_spread_warnt():
-    assert any("spread" in w for w in sim_warn(cal("2020-01-01", "2020-03-01", A=100.0), st1(), spread=5)[1])
+def test_r1_26_kein_spread_argument():
+    import inspect
+    assert "spread" not in inspect.signature(simulation).parameters
+    assert "spread" not in inspect.signature(sim_costs).parameters
+    with pytest.raises(TypeError, match="spread"):
+        simulation(cal("2020-01-01", "2020-03-01", A=100.0), st1(), spread=5)
 
 
 def test_harvest_mode_realisiert_bis_pauschbetrag():
     """harvest_mode: Gewinne einmal im Jahr bis zum freien Sparer-Pauschbetrag realisieren."""
     d = cal("2020-01-01", "2021-12-31")
     d["A"] = np.linspace(100, 200, len(d))
-    st = create_strategy(A=asset_config("etf", asset_share=1, asset_spread=0, asset_bonus=0))
-    r = sim(d, st, start_value=10000, tax_mode="person", harvest_mode=True)
+    st = create_strategy(A=asset_config(asset_class="etf", share=1, spread=0, partial_exemption=0))
+    r = sim(d, st, start_value=10000, tax=tax_profile(harvest=harvest_rule()))
     hd = pd.DatetimeIndex(r.harvest_days)
     assert list(hd.strftime("%Y-%m-%d")) == ["2020-12-15", "2021-12-15"]
     assert r.tax_report["sparer_pauschbetrag_used"] == approx(2000, abs=0.02)
     assert r.tax_report["total_taxes_paid"] == approx(0, abs=0.01)
-    with pytest.raises(ValueError, match="harvest_day im Format 'MM-TT'"):
-        simulation(d, st, tax_mode="person", harvest_mode=True, harvest_day="12-31")
+    with pytest.raises(ValueError, match="harvest_rule: day im Format 'MM-TT'"):
+        harvest_rule(day="12-31")

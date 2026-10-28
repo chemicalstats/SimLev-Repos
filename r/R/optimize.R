@@ -6,10 +6,10 @@
 #                          (Risikobudgets), Hierarchical Risk Parity, minimaler
 #                          CVaR, inverse Volatilitaet, Gleichgewichtung; Box-
 #                          Grenzen, Ledoit-Wolf-Schaetzer, Resampling (Michaud)
-#  efficient_frontier()    Effizienzgrenze unter denselben Grenzen
-#  rolling_optimization()  Optimierung in rollierenden Fenstern -> Zielgewichte
+#  portfolio_frontier()    Effizienzgrenze unter denselben Grenzen
+#  portfolio_rolling()  Optimierung in rollierenden Fenstern -> Zielgewichte
 #                          fuer tactical_simulation() (out of sample)
-#  risk_contributions()    Euler-Zerlegung von Volatilitaet bzw. CVaR
+#  portfolio_risk_contributions()    Euler-Zerlegung von Volatilitaet bzw. CVaR
 #
 #  Alle Loeser ohne Zusatzpakete: beschleunigter projizierter Gradient (FISTA)
 #  auf {sum w = 1, lower <= w <= upper}, gedaempftes Newton-Verfahren fuer die
@@ -21,7 +21,7 @@
 #' @keywords internal
 #' @noRd
 .opt_returns <- function(x, assets = NULL, frequency = "week") {
-  if (inherits(x, "SimLevOptReturns")) {                        # intern (cpcv_portfolio): Renditen mit ppy
+  if (inherits(x, "SimLevOptReturns")) {                        # intern (portfolio_cpcv): Renditen mit ppy
     R <- x$R; if (!is.null(assets)) R <- R[, assets, drop = FALSE]
     return(list(R = R, ppy = x$ppy, dates = NULL))
   }
@@ -441,9 +441,9 @@
 #'   \code{resampled} (Gewichte je Stichprobe oder \code{NULL}),
 #'   \code{cov_type}, \code{frequency}, \code{n_obs} (Anzahl Perioden).
 #'   Methoden \code{print} und \code{plot}.
-#' @seealso [efficient_frontier()], [risk_contributions()],
-#'   [rolling_optimization()] (Zielgewichte fuer [tactical_simulation()]),
-#'   [cpcv_portfolio()].
+#' @seealso [portfolio_frontier()], [portfolio_risk_contributions()],
+#'   [portfolio_rolling()] (Zielgewichte fuer [tactical_simulation()]),
+#'   [portfolio_cpcv()].
 #' @references Ledoit, O. & Wolf, M. (2004), Journal of Multivariate Analysis
 #'   88(2); Spinu, F. (2013), SSRN 2297383; Lopez de Prado, M. (2016), Journal
 #'   of Portfolio Management 42(4); Rockafellar, R. T. & Uryasev, S. (2000),
@@ -560,15 +560,15 @@ plot.SimLevOptimization <- function(x, ...) {
 #'   \code{asset}, \code{expected_return}, \code{volatility}, Anteil p. a.),
 #'   \code{risk_free} und \code{frequency}. Methoden \code{print} und
 #'   \code{plot}.
-#' @seealso [portfolio_optimize()], [risk_contributions()].
+#' @seealso [portfolio_optimize()], [portfolio_risk_contributions()].
 #' @examples
 #' set.seed(1); R <- matrix(rnorm(520 * 3, c(0.002, 0.001, 0.0005), c(0.03, 0.02, 0.01)), 520, byrow = TRUE)
 #' colnames(R) <- c("aktien", "reits", "anleihen")
-#' ef <- efficient_frontier(R, n = 20, upper = 0.7)
+#' ef <- portfolio_frontier(R, n = 20, upper = 0.7)
 #' ef
 #' head(ef$frontier, 3)
 #' @export
-efficient_frontier <- function(x, assets = NULL, n = 40L, lower = 0, upper = 1, cov = c("sample", "ledoit_wolf", "ewma", "denoise", "gerber"),
+portfolio_frontier <- function(x, assets = NULL, n = 40L, lower = 0, upper = 1, cov = c("sample", "ledoit_wolf", "ewma", "denoise", "gerber"),
                                risk_free = 0, frequency = c("week", "day", "month")) {
   cov <- match.arg(cov); frequency <- match.arg(frequency)
   rr <- .opt_returns(x, assets, frequency); R <- rr$R; nm <- colnames(R)
@@ -628,11 +628,11 @@ plot.SimLevFrontier <- function(x, ...) {
 #' Argumente in \code{...}, unerfuellbare Grenzen) brechen sofort ab.
 #' Schlaegt eine Optimierung an einem Termin fehl (z. B. zu wenige Perioden
 #' im Fenster), gilt dort Gleichgewichtung; die Funktion warnt mit der Anzahl
-#' und der ersten Fehlermeldung. Die Zeilen von \code{x} werden nach
+#' und der ersten Fehlermeldung. Die Zeilen von \code{data} werden nach
 #' \code{date} sortiert (mit Hinweis, falls noetig).
 #'
-#' @param x data.frame mit Spalte \code{date} (Date) und Kursspalten
-#'   (Kursniveaus, keine Renditen), z. B. aus [align_series()]. Eine
+#' @param data data.frame mit Spalte \code{date} (Date) und Kursspalten
+#'   (Kursniveaus, keine Renditen), z. B. aus [series_align()]. Eine
 #'   Renditematrix ist hier nicht moeglich.
 #' @param assets Zeichenvektor der Kursspalten (Pflicht).
 #' @param method Verfahren wie in [portfolio_optimize()] (Zeichenkette,
@@ -647,41 +647,41 @@ plot.SimLevFrontier <- function(x, ...) {
 #'   \code{alpha}, \code{resample}, ...).
 #' @return Objekt der Klasse \code{SimLevWeights} (data.frame mit
 #'   \code{date} und einer Gewichtsspalte je Anlage, Anteile mit
-#'   Zeilensumme 1, eine Zeile je Zeile von \code{x}); vor dem ersten
+#'   Zeilensumme 1, eine Zeile je Zeile von \code{data}); vor dem ersten
 #'   Entscheidungstermin gleich gewichtet. Attribute \code{source}
 #'   (\code{"rolling <method>"}), \code{decision_rows} (Zeilennummern der
 #'   Entscheidungstermine) und \code{failed_dates} (Date-Vektor der Termine
 #'   mit fehlgeschlagener Optimierung, dort Gleichgewichtung; leer, wenn
 #'   keine).
 #' @seealso [portfolio_optimize()], [tactical_simulation()],
-#'   [blend_weights()], [cpcv_portfolio()].
+#'   [tactical_blend()], [portfolio_cpcv()].
 #' @examples
 #' set.seed(1); n <- 5 * 365
 #' d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
 #' d$aktien <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01))
 #' d$anleihen <- 100 * cumprod(1 + rnorm(n, 1e-4, 0.003))
-#' w <- rolling_optimization(d, c("aktien", "anleihen"), window = 2, every = "quarter")
+#' w <- portfolio_rolling(d, c("aktien", "anleihen"), window = 2, every = "quarter")
 #' w
 #' @export
-rolling_optimization <- function(x, assets, method = "min_variance", window = 3, every = c("month", "quarter", "year"),
+portfolio_rolling <- function(data, assets, method = "min_variance", window = 3, every = c("month", "quarter", "year"),
                                  frequency = c("week", "day", "month"), ...) {
   every <- match.arg(every); frequency <- match.arg(frequency)
   # Argumentfehler sofort melden (sonst schluege jeder Termin fehl)
   allowed <- eval(formals(portfolio_optimize)$method)
   if (!is.character(method) || length(method) != 1 || !method %in% allowed)
-    stop(sprintf("rolling_optimization: unbekanntes Verfahren %s; erlaubt: %s.", paste0("'", method, "'", collapse = ", "), paste(allowed, collapse = ", ")))
+    stop(sprintf("portfolio_rolling: unbekanntes Verfahren %s; erlaubt: %s.", paste0("'", method, "'", collapse = ", "), paste(allowed, collapse = ", ")))
   dots <- list(...)
   bad <- setdiff(names(dots), setdiff(names(formals(portfolio_optimize)), c("x", "assets", "method", "frequency")))
   if (length(bad) || (length(dots) && is.null(names(dots))) || any(names(dots) == ""))
-    stop(sprintf("rolling_optimization: unbekannte bzw. unbenannte Argumente f\u00fcr portfolio_optimize() in ...: %s.",
+    stop(sprintf("portfolio_rolling: unbekannte bzw. unbenannte Argumente f\u00fcr portfolio_optimize() in ...: %s.",
                  if (length(bad)) paste0("'", bad, "'", collapse = ", ") else "ohne Namen"))
-  if (!is.data.frame(x) || !"date" %in% names(x)) stop("rolling_optimization: data.frame mit Spalte 'date' erwartet.")
-  miss <- setdiff(assets, names(x)); if (length(miss)) stop(sprintf("Spalten fehlen: %s", paste(miss, collapse = ", ")))
+  if (!is.data.frame(data) || !"date" %in% names(data)) stop("portfolio_rolling: data.frame mit Spalte 'date' erwartet.")
+  miss <- setdiff(assets, names(data)); if (length(miss)) stop(sprintf("Spalten fehlen: %s", paste(miss, collapse = ", ")))
   .opt_check_bounds(dots$lower %||% 0, dots$upper %||% 1, assets)
-  .opt_check_alpha(dots$alpha %||% 0.05, "rolling_optimization")
+  .opt_check_alpha(dots$alpha %||% 0.05, "portfolio_rolling")
   if (!is.null(dots$mu)) .opt_bounds(dots$mu, assets, NA_real_, "mu")
-  x <- .dep_sort_dates(x, "x")
-  d <- x$date; n <- length(d); N <- length(assets)
+  data <- .dep_sort_dates(data, "data")
+  d <- data$date; n <- length(d); N <- length(assets)
   rows <- .period_last(d, every)
   first_ok <- d[1] + round(window * 365.25)
   rows <- rows[d[rows] >= first_ok]
@@ -689,7 +689,7 @@ rolling_optimization <- function(x, assets, method = "min_variance", window = 3,
   msg <- character(length(rows))
   M <- matrix(vapply(seq_along(rows), function(k) {
     i <- rows[k]
-    sub <- x[d > d[i] - round(window * 365.25) & d <= d[i], c("date", assets), drop = FALSE]
+    sub <- data[d > d[i] - round(window * 365.25) & d <= d[i], c("date", assets), drop = FALSE]
     w <- tryCatch(withCallingHandlers(portfolio_optimize(sub, assets, method = method, frequency = frequency, ...)$weights,
                                       SimLevBoundsPercent = function(w) invokeRestart("muffleWarning")),   # schon vorab gewarnt
                   error = function(e) { msg[k] <<- conditionMessage(e); rep(NA_real_, N) })
@@ -697,7 +697,7 @@ rolling_optimization <- function(x, assets, method = "min_variance", window = 3,
   }, numeric(N)), ncol = N, byrow = TRUE)
   colnames(M) <- assets
   failed <- which(nzchar(msg))
-  if (length(failed)) warning(sprintf("rolling_optimization: Optimierung an %d von %d Terminen fehlgeschlagen (erster am %s: %s); dort Gleichgewichtung. Termine im Attribut 'failed_dates'.",
+  if (length(failed)) warning(sprintf("portfolio_rolling: Optimierung an %d von %d Terminen fehlgeschlagen (erster am %s: %s); dort Gleichgewichtung. Termine im Attribut 'failed_dates'.",
                                       length(failed), length(rows), format(d[rows[failed[1]]]), msg[failed[1]]))
   H <- .hold_rows(n, rows, M); H[seq_len(rows[1] - 1L), ] <- 1 / N
   out <- .as_weights(d, H, paste("rolling", method))
@@ -741,18 +741,18 @@ rolling_optimization <- function(x, assets, method = "min_variance", window = 3,
 #'   \code{effective_n} (\eqn{1 / \sum share^2}) und nur bei
 #'   \code{"volatility"} \code{diversification_ratio}.
 #' @seealso [portfolio_optimize()] (enthaelt die Volatilitaetsbeitraege der
-#'   optimierten Gewichte), [efficient_frontier()], [covar_analysis()].
+#'   optimierten Gewichte), [portfolio_frontier()], [tail_covar()].
 #' @examples
 #' set.seed(1); R <- matrix(rnorm(520 * 3, c(0.002, 0.001, 0.0005), c(0.03, 0.02, 0.01)), 520, byrow = TRUE)
 #' colnames(R) <- c("aktien", "reits", "anleihen")
 #' w <- c(aktien = 0.5, reits = 0.2, anleihen = 0.3)
-#' risk_contributions(R, w)
-#' risk_contributions(R, w, measure = "cvar", alpha = 0.05)
+#' portfolio_risk_contributions(R, w)
+#' portfolio_risk_contributions(R, w, measure = "cvar", alpha = 0.05)
 #' @export
-risk_contributions <- function(x, weights, measure = c("volatility", "cvar"), alpha = 0.05,
+portfolio_risk_contributions <- function(x, weights, measure = c("volatility", "cvar"), alpha = 0.05,
                                frequency = c("week", "day", "month"), cov = c("sample", "ledoit_wolf", "ewma", "denoise", "gerber")) {
   measure <- match.arg(measure); frequency <- match.arg(frequency); cov <- match.arg(cov)
-  .opt_check_alpha(alpha, "risk_contributions")
+  .opt_check_alpha(alpha, "portfolio_risk_contributions")
   if (inherits(weights, "SimLevOptimization")) weights <- weights$weights
   if (!is.numeric(weights) || is.null(names(weights)) || any(names(weights) == "") || anyNA(weights))
     stop("weights: benannter numerischer Vektor ohne NA erwartet (Namen = Spalten von x).")
@@ -836,39 +836,39 @@ risk_contributions <- function(x, weights, measure = c("volatility", "cvar"), al
 #'   \code{frequency} und \code{failed} (data.frame der fehlgeschlagenen
 #'   Optimierungen mit \code{method}, \code{split}, \code{message} oder
 #'   \code{NULL}). Methode \code{print}.
-#' @seealso [portfolio_optimize()], [rolling_optimization()],
-#'   [walk_forward()], [pbo()].
+#' @seealso [portfolio_optimize()], [portfolio_rolling()],
+#'   [overfit_walk_forward()], [overfit_pbo()].
 #' @examples
 #' set.seed(1); R <- matrix(rnorm(520 * 3, c(0.002, 0.001, 0.0005), c(0.03, 0.02, 0.01)), 520, byrow = TRUE)
 #' colnames(R) <- c("aktien", "reits", "anleihen")
-#' cp <- cpcv_portfolio(R, methods = c("equal", "inverse_vol", "min_variance"),
+#' cp <- portfolio_cpcv(R, methods = c("equal", "inverse_vol", "min_variance"),
 #'                      n_groups = 5, test_groups = 2)
 #' cp
 #' @references Lopez de Prado, M. (2018), Advances in Financial Machine
 #'   Learning, Wiley, Kap. 7 und 12.
 #' @export
-cpcv_portfolio <- function(x, assets = NULL, methods = c("equal", "inverse_vol", "min_variance", "risk_parity", "max_sharpe"),
+portfolio_cpcv <- function(x, assets = NULL, methods = c("equal", "inverse_vol", "min_variance", "risk_parity", "max_sharpe"),
                            n_groups = 6L, test_groups = 2L, purge = 2L, embargo = 2L,
                            frequency = c("week", "day", "month")) {
   frequency <- match.arg(frequency)
   rr <- .opt_returns(x, assets, frequency); R <- rr$R; Tn <- nrow(R)
   int1 <- function(v, nm, lo) if (!is.numeric(v) || length(v) != 1 || !is.finite(v) || v != round(v) || v < lo)
-    stop(sprintf("cpcv_portfolio: %s muss eine ganze Zahl >= %d sein (erhalten: %s).", nm, lo, paste(format(v), collapse = ", ")))
+    stop(sprintf("portfolio_cpcv: %s muss eine ganze Zahl >= %d sein (erhalten: %s).", nm, lo, paste(format(v), collapse = ", ")))
   int1(n_groups, "n_groups", 2); int1(test_groups, "test_groups", 1); int1(purge, "purge", 0); int1(embargo, "embargo", 0)
-  if (test_groups >= n_groups) stop(sprintf("cpcv_portfolio: test_groups (%d) muss kleiner als n_groups (%d) sein, sonst bleibt keine Trainingsgruppe.",
+  if (test_groups >= n_groups) stop(sprintf("portfolio_cpcv: test_groups (%d) muss kleiner als n_groups (%d) sein, sonst bleibt keine Trainingsgruppe.",
                                             test_groups, n_groups))
   specs <- if (is.character(methods)) stats::setNames(lapply(methods, function(m) list(method = m)), methods) else methods
   if (!is.list(specs) || !length(specs) || is.null(names(specs)) || any(names(specs) == ""))
-    stop("cpcv_portfolio: methods muss ein Zeichenvektor oder eine benannte Liste von Argumentlisten sein.")
+    stop("portfolio_cpcv: methods muss ein Zeichenvektor oder eine benannte Liste von Argumentlisten sein.")
   allowed <- eval(formals(portfolio_optimize)$method)
   for (nm in names(specs)) {
     sp <- specs[[nm]]
     if (!is.list(sp) || (length(sp) && (is.null(names(sp)) || any(names(sp) == ""))))
-      stop(sprintf("cpcv_portfolio: Eintrag '%s' von methods muss eine benannte Argumentliste sein.", nm))
+      stop(sprintf("portfolio_cpcv: Eintrag '%s' von methods muss eine benannte Argumentliste sein.", nm))
     if (!is.null(sp$method) && !sp$method %in% allowed)
-      stop(sprintf("cpcv_portfolio: unbekanntes Verfahren '%s'; erlaubt: %s.", sp$method, paste(allowed, collapse = ", ")))
+      stop(sprintf("portfolio_cpcv: unbekanntes Verfahren '%s'; erlaubt: %s.", sp$method, paste(allowed, collapse = ", ")))
     bad <- setdiff(names(sp), setdiff(names(formals(portfolio_optimize)), c("x", "assets", "frequency")))
-    if (length(bad)) stop(sprintf("cpcv_portfolio: unbekannte Argumente f\u00fcr portfolio_optimize() in '%s': %s.", nm, paste0("'", bad, "'", collapse = ", ")))
+    if (length(bad)) stop(sprintf("portfolio_cpcv: unbekannte Argumente f\u00fcr portfolio_optimize() in '%s': %s.", nm, paste0("'", bad, "'", collapse = ", ")))
   }
   grp <- cut(seq_len(Tn), n_groups, labels = FALSE)
   combos <- utils::combn(n_groups, test_groups)
@@ -895,9 +895,9 @@ cpcv_portfolio <- function(x, assets = NULL, methods = c("equal", "inverse_vol",
     }
   }
   fl <- if (length(fails)) do.call(rbind, fails) else NULL
-  if (!length(rows)) stop(sprintf("cpcv_portfolio: keine Optimierung erfolgreich (z. B. '%s' in Aufteilung %d: %s).",
+  if (!length(rows)) stop(sprintf("portfolio_cpcv: keine Optimierung erfolgreich (z. B. '%s' in Aufteilung %d: %s).",
                                   fl$method[1], fl$split[1], fl$message[1]))
-  if (!is.null(fl)) warning(sprintf("cpcv_portfolio: %d von %d Optimierungen fehlgeschlagen (z. B. '%s' in Aufteilung %d: %s); sie fehlen in der Auswertung, Einzelheiten in $failed.",
+  if (!is.null(fl)) warning(sprintf("portfolio_cpcv: %d von %d Optimierungen fehlgeschlagen (z. B. '%s' in Aufteilung %d: %s); sie fehlen in der Auswertung, Einzelheiten in $failed.",
                                     nrow(fl), ncol(combos) * length(specs), fl$method[1], fl$split[1], fl$message[1]))
   sp <- do.call(rbind, rows)
   agg <- function(v) c(mean = mean(v), sd = stats::sd(v), q10 = stats::quantile(v, 0.1, names = FALSE),

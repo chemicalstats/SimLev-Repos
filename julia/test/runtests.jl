@@ -58,20 +58,20 @@ end
 @testset "match_arg wie R" begin
     d = (date = collect(Date(2020, 1, 1):Day(1):Date(2020, 2, 19)), A = 100.0 .+ (1:50))
     s = create_strategy(A = asset_config("etf", "bnh"))
-    msg(; kw...) = try
-        simulation(d, s; dca_mode = true, dca_value = 10, dca_span = 1, balance_mode = true, balance_span = 1, io = devnull, kw...)
+    msg(f) = try
+        f()
         "ok"
     catch e
         e.msg
     end
     with_logger(NullLogger()) do
-        @test msg(dca_unit = "woche") == "'arg' should be one of “month”, “quarter”, “year”"
-        @test msg(balance_unit = "woche") == "'arg' should be one of “month”, “quarter”, “year”"
-        @test msg(tax_mode = "x") == "'arg' should be one of “none”, “person”, “funds”"
-        @test msg(balance_thresh_type = "x") == "'arg' should be one of “absolute”, “relative”"
-        @test msg(dca_unit = ["month", "year"]) == "'arg' must be of length 1"
-        @test msg(dca_anchor = "mitte") == "'arg' should be one of “start”, “end”"
-        @test msg(balance_unit = 1) == "'arg' must be NULL or a character vector"
+        @test msg(() -> dca_plan(10, 1; unit = "woche")) == "'arg' should be one of “month”, “quarter”, “year”"
+        @test msg(() -> rebalance_plan(1; unit = "woche")) == "'arg' should be one of “month”, “quarter”, “year”"
+        @test msg(() -> rebalance_plan(1; thresh_type = "x")) == "'arg' should be one of “absolute”, “relative”"
+        @test msg(() -> dca_plan(10, 1; unit = ["month", "year"])) == "'arg' must be of length 1"
+        @test msg(() -> dca_plan(10, 1; anchor = "mitte")) == "'arg' should be one of “start”, “end”"
+        @test msg(() -> rebalance_plan(1; unit = 1)) == "'arg' must be NULL or a character vector"
+        @test msg(() -> simulation(d, s; dca = dca_plan(10, 1), rebalance = rebalance_plan(1), io = devnull)) == "ok"
     end
 end
 
@@ -95,6 +95,10 @@ include("parallel_tests.jl")
 # ─────────────────────────────────────────────────────────────────────────────
 # Schichten 0–4: keine Zugriffe auf eine höhere Schicht (Etappe 4.4)
 include("layers_tests.jl")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Öffentliche Schnittstelle gegen tools/api_snapshot/frozen/jl.json (Etappe 6.6)
+include("api_frozen_tests.jl")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Referenzfälle der Module (golden/modules): standardmäßig eine schnelle

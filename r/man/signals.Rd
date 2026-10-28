@@ -85,12 +85,12 @@ Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das
 erwarten: Die Elemente \code{buy} und \code{sell} werden dort als
 gleichnamige Spalten an den Datensatz angehaengt. Fuer \code{\link[=simulation]{simulation()}}
 haengt man sie selbst an und nennt sie in \code{\link[=asset_config]{asset_config()}}
-(\code{action_type = "signal"}, \code{signal_buy}, \code{signal_sell});
+(\code{trading = "signal"}, \code{signal_buy}, \code{signal_sell});
 fuer \code{\link[=tactical_rules]{tactical_rules()}} lassen sie sich direkt als Bedingung verwenden.
 }
 \details{
 Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B.
-eine Spalte aus \code{\link[=align_series]{align_series()}}. Alle Fenster (\code{n}, \code{fast},
+eine Spalte aus \code{\link[=series_align]{series_align()}}. Alle Fenster (\code{n}, \code{fast},
 \code{slow}, \code{window}, \code{lag}) zaehlen in Zeilen der Daten,
 bei Kalendertagsdaten (Wochenenden per LOCF) also in Kalendertagen, bei
 Handelstagsdaten in Handelstagen. Solange ein Fenster noch nicht gefuellt

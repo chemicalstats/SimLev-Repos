@@ -11,8 +11,8 @@ sharpe_test(
   method = c("hac", "bootstrap"),
   B = 2000L,
   block = NULL,
-  seed = NULL,
-  ppy = NULL
+  ppy = NULL,
+  seed = NULL
 )
 }
 \arguments{
@@ -110,7 +110,7 @@ testing with the Sharpe ratio, Journal of Empirical Finance 15(5),
 850-859.
 }
 \seealso{
-\code{\link[=min_track_record]{min_track_record()}}, \code{\link[=probabilistic_sharpe]{probabilistic_sharpe()}},
-\code{\link[=reality_check]{reality_check()}} (viele Strategien gegen eine Benchmark),
-\code{\link[=deep_analysis]{deep_analysis()}}
+\code{\link[=sharpe_min_track_record]{sharpe_min_track_record()}}, \code{\link[=sharpe_probabilistic]{sharpe_probabilistic()}},
+\code{\link[=overfit_reality_check]{overfit_reality_check()}} (viele Strategien gegen eine Benchmark),
+\code{\link[=result_analysis]{result_analysis()}}
 }

@@ -3,7 +3,7 @@
 # landet im Paket-Cache. Das verkürzt den ersten Aufruf von simulation(),
 # bootstrap() (stationär, GARCH über den rugarch-Weg), bootstrap_study(),
 # der MS-GARCH-Schätzung, withdrawal_simulation(), portfolio_optimize() und
-# deep_analysis() deutlich, macht ihn aber nicht so schnell wie spätere
+# result_analysis() deutlich, macht ihn aber nicht so schnell wie spätere
 # Aufrufe: Laden des Caches, Laufzeit-Dispatch und Methoden für andere
 # Argumenttypen (oder Pfade, die die Arbeitslast nicht berührt) kosten beim
 # ersten Aufruf weiterhin Übersetzungszeit.
@@ -11,7 +11,7 @@
 # Auswahl (Etappe 4.8): Jeder Baustein kostet bei jeder Änderung am Paket
 # Vorkompilierzeit. Seltene Wege (param_search/Überanpassung,
 # dependence_analysis, Szenarien, Sensitivitäten, Taktik, Planung,
-# align_series) übersetzt erst ihr erster Aufruf; dafür sind rugarch
+# series_align) übersetzt erst ihr erster Aufruf; dafür sind rugarch
 # (bootstrap "garch") und MS-GARCH (_ms_garch_fit) aufgenommen, deren erster
 # Lauf sonst 10 bzw. 6 s dauerte.
 #
@@ -53,7 +53,7 @@ function _precompile_ext(; strict::Bool = false)
             sh(cfg)
             b = Bootstrap.bootstrap(d, cfg, "stationary"; n = 2, path_length = 200, seed = 1, progress = false)
             sh(b)
-            Bootstrap.block_length(ra)
+            Bootstrap.bootstrap_block_length(ra)
             stv = Bootstrap.bootstrap_study(d, Bootstrap.bootstrap_config((A = "A",); input = "prices"), "stationary";
                                             n = 2, path_length = 200, seed = 2, progress = false,
                                             strategies = (a = st1,))
@@ -86,7 +86,7 @@ function _precompile_ext(; strict::Bool = false)
         # Deep analysis
         step("deep_analysis") do
             x1 = RFrame("date" => dates, "value" => A)
-            sh(DeepAnalysis.deep_analysis(RList("X" => x1, "Y" => RFrame("date" => dates, "value" => B));
+            sh(DeepAnalysis.result_analysis(RList("X" => x1, "Y" => RFrame("date" => dates, "value" => B));
                                           benchmark = "X", rolling_years = 1))
         end
     finally
@@ -112,28 +112,33 @@ function _precompile_engine()
     s2 = create_strategy(A = asset_config("etf", "bnh", 0.6, 0.1, 30), B = asset_config("etf", "bnh", 0.4, 0.1, 0))
     s3 = create_strategy(A = asset_config("certificate", "signal", 0.4, 0.2, 0; signal_buy = "b", signal_sell = "s"),
                          B = asset_config("etc", "bnh", 0.3, 0.1, 0; deliverable = true),
-                         C = asset_config("etf", "bnh", 0.3, 0.1, 30; asset_start = dates[100]))
+                         C = asset_config("etf", "bnh", 0.3, 0.1, 30; start = dates[100]))
     io = devnull
     for det in (false, true)
-        r = simulation(data, s2; tax_mode = "person", balance_mode = true, dca_mode = true, dca_value = 100,
-                       dca_span = 1, liquidate = true, base_rate = 2.55, details = det, io = io)
+        r = simulation(data, s2; tax = tax_profile(; base_rate = 2.55), rebalance = rebalance_plan(),
+                       dca = dca_plan(100, 1), liquidate = true, details = det, io = io)
         format_result(r)
         format_summary(summary(r))
         sprint(show, MIME"text/plain"(), r)
-        simulation(data, s3; tax_mode = "person", marginal_tax_rate = 42, balance_mode = true,
-                   balance_unit = "quarter", balance_thresh = 2, split_mode = true, split_thresh = [50, 200],
-                   fractions = false, event_col = "ev", event_weight = (A = "w1",), risk_free = 2,
-                   use_guenstigerpruefung = true, details = det, io = io)
-        simulation(data, s2; tax_mode = "funds", liquidate = true, base_rate_flex = true, base_rate_data = "br",
-                   dca_mode = true, dca_value = 50.0, dca_span = 1, dca_days = [1, 15], dca_unit = "month",
-                   balance_mode = true, balance_days = 31, balance_anchor = "end", risk_free = "br", details = det, io = io)
+        simulation(data, s3; tax = tax_profile(; income = income_rate(42), guenstigerpruefung = true),
+                   rebalance = rebalance_plan(; unit = "quarter", thresh = 2, event_col = "ev", event_weight = (A = "w1",)),
+                   splits = split_rule([50, 200]), fractions = false, risk_free = 2, details = det, io = io)
+        simulation(data, s2; funds = funds_costs(), liquidate = true,
+                   dca = dca_plan(50.0, 1; days = [1, 15], unit = "month"),
+                   rebalance = rebalance_plan(; days = 31, anchor = "end"), risk_free = "br", details = det, io = io)
+        simulation(data, s2; tax = tax_profile(; base_rate = "br"), io = io)
     end
-    simulation(data, s2; tax_mode = "person", order_fee = (fixed = 1, percent = 0.25), dca_fee = 0, church_tax = 9,
-               harvest_mode = true, taxable_income = 50000, use_guenstigerpruefung = true, base_rate = 2,
-               dca_mode = true, dca_value = 100, dca_span = 1, liquidate = true, io = io)
+    simulation(data, s2; costs = sim_costs((fixed = 1, percent = 0.25), 0),
+               tax = tax_profile(; church_tax = 9, base_rate = 2, guenstigerpruefung = true,
+                                 income = income_tariff(50000), harvest = harvest_rule()),
+               dca = dca_plan(100, 1), liquidate = true, io = io)
+    for b in (sim_costs(), dca_plan(100, 1), rebalance_plan(), split_rule([50, 200]), tax_profile(), income_rate(42),
+              income_tariff(50000), harvest_rule(), funds_costs())
+        sprint(show, MIME"text/plain"(), b)
+    end
     gaps = (date = dates[1:2:end], A = px(0.5, 0.05)[1:2:end])
     simulation(gaps, create_strategy(A = asset_config("etf", "bnh", 1.0, 0.1, 30)); io = io)
-    compute_rebal_trigger((date = dates, target_leverage = px(0.1, 0.2) ./ 50), "abs_leverage")
+    rebalance_trigger((date = dates, target_leverage = px(0.1, 0.2) ./ 50), "abs_leverage")
     return nothing
 end
 

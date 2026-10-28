@@ -2,9 +2,9 @@
 #
 #   signal_analysis()    Vorwärtsrenditen je Signalbereich (Regressogramm)
 #   sharpe_test()        Unterschied zweier Sharpe Ratios (Ledoit & Wolf 2008)
-#   reality_check()      White (2000) Reality Check und Hansen (2005) SPA
-#   min_track_record()   Mindestlänge einer Historie (Bailey & López de Prado 2012)
-#   return_heatmap()     annualisierte (reale) Renditen je Startjahr und Haltedauer
+#   overfit_reality_check()      White (2000) Reality Check und Hansen (2005) SPA
+#   sharpe_min_track_record()   Mindestlänge einer Historie (Bailey & López de Prado 2012)
+#   result_heatmap()     annualisierte (reale) Renditen je Startjahr und Haltedauer
 module AnalysisTests
 
 import ..SimLev
@@ -12,7 +12,7 @@ using ..SimLev: _AnaSvg, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_p
                 _ana_svg_done
 using Dates
 
-export signal_analysis, sharpe_test, reality_check, min_track_record, return_heatmap
+export signal_analysis, sharpe_test, overfit_reality_check, sharpe_min_track_record, result_heatmap
 
 const DA = SimLev.DeepAnalysis
 const _NA = SimLev.NA
@@ -338,13 +338,13 @@ const _SHARPE_NAMES = ["sharpe_x", "sharpe_y", "difference", "se", "z", "p_value
 
 """
     sharpe_test(x, y; frequency = ["week", "day", "month"], method = ["hac", "bootstrap"],
-                B = 2000, block = nothing, seed = nothing, ppy = nothing)
+                B = 2000, block = nothing, ppy = nothing, seed = nothing)
 
 Test auf gleiche Sharpe Ratios (Ledoit & Wolf 2008; R: `sharpe_test()`).
 Ergebnis: benannter Vektor (`RVector`).
 """
 function sharpe_test(x, y; frequency = ["week", "day", "month"], method = ["hac", "bootstrap"], B = 2000,
-                     block = nothing, seed = nothing, ppy = nothing)
+                     block = nothing, ppy = nothing, seed = nothing)
     x = SimLev.as_rframe(x)
     y = SimLev.as_rframe(y)
     frequency = DA._match_arg(frequency, ["week", "day", "month"])
@@ -409,17 +409,17 @@ function sharpe_test(x, y; frequency = ["week", "day", "month"], method = ["hac"
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# reality_check
+# overfit_reality_check
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-    reality_check(x; benchmark = nothing, B = 999, block = nothing,
+    overfit_reality_check(x; benchmark = nothing, B = 999, block = nothing,
                   frequency = ["week", "day", "month"], dates = nothing, seed = nothing)
 
-White Reality Check und Hansen-SPA-Test (R: `reality_check()`); Ergebnis:
+White Reality Check und Hansen-SPA-Test (R: `overfit_reality_check()`); Ergebnis:
 `RList` der Klasse `SimLevRealityCheck`.
 """
-function reality_check(x; benchmark = nothing, B = 999, block = nothing, frequency = ["week", "day", "month"],
+function overfit_reality_check(x; benchmark = nothing, B = 999, block = nothing, frequency = ["week", "day", "month"],
                        dates = nothing, seed = nothing)
     x = SimLev.as_rframe(x)
     frequency = DA._match_arg(frequency, ["week", "day", "month"])
@@ -485,15 +485,15 @@ function _print_rc(io::IO, x)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# min_track_record
+# sharpe_min_track_record
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-    min_track_record(x; target = 0, prob = 0.95, frequency = ["week", "day", "month"], ppy = nothing)
+    sharpe_min_track_record(x; target = 0, prob = 0.95, frequency = ["week", "day", "month"], ppy = nothing)
 
-Mindestlänge einer Historie (Minimum Track Record Length; R: `min_track_record()`).
+Mindestlänge einer Historie (Minimum Track Record Length; R: `sharpe_min_track_record()`).
 """
-function min_track_record(x; target = 0, prob = 0.95, frequency = ["week", "day", "month"], ppy = nothing)
+function sharpe_min_track_record(x; target = 0, prob = 0.95, frequency = ["week", "day", "month"], ppy = nothing)
     x = SimLev.as_rframe(x)
     frequency = DA._match_arg(frequency, ["week", "day", "month"])
     a = _ret_from(x, frequency)
@@ -524,16 +524,16 @@ function min_track_record(x; target = 0, prob = 0.95, frequency = ["week", "day"
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# return_heatmap
+# result_heatmap
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-    return_heatmap(x; inflation = nothing, max_years = 30)
+    result_heatmap(x; inflation = nothing, max_years = 30)
 
-Annualisierte (reale) Renditen je Startjahr und Haltedauer (R: `return_heatmap()`);
+Annualisierte (reale) Renditen je Startjahr und Haltedauer (R: `result_heatmap()`);
 Ergebnis: `RList` der Klasse `SimLevHeatmap` (`matrix`, `summary`, `real`).
 """
-function return_heatmap(x; inflation = nothing, max_years = 30)
+function result_heatmap(x; inflation = nothing, max_years = 30)
     x = SimLev.as_rframe(x)
     s = DA._da_series(x, "x")
     inflation === nothing || (s = DA._da_deflate(s, inflation))
@@ -552,7 +552,7 @@ function return_heatmap(x; inflation = nothing, max_years = 30)
         base = v[e]; years = yr[e]
     end
     ny = length(base) - 1
-    ny < 1 && DA._stop("return_heatmap: Die Reihe umfasst kein vollständiges Kalenderjahr.")
+    ny < 1 && DA._stop("result_heatmap: Die Reihe umfasst kein vollständiges Kalenderjahr.")
     H = Int(min(max_years, ny))
     M = fill(_NA, ny, H)
     for i in 1:ny, h in 1:min(H, ny - i + 1)

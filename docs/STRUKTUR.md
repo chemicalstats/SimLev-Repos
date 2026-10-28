@@ -3,8 +3,8 @@
 Diese Datei ist erzeugt; nicht von Hand ändern.
 
 - **Erzeugt** mit `tools/api_snapshot/run.sh` (Auszüge `api_r.R`, `api_py.py`, `api_jl.jl`, Vergleich `compare_api.py`, diese Datei `make_struktur.py`) aus `tools/api_snapshot/api.json`.
-- **Stand:** 2026-10-25.
-- **Umfang:** R 104 Exporte und 66 S3-Methoden, Python 109 Funktionen und 68 Methoden, Julia 119 Funktionen und 66 Methoden.
+- **Stand:** 2026-10-26.
+- **Umfang:** R 113 Exporte und 75 S3-Methoden, Python 118 Funktionen und 77 Methoden, Julia 128 Funktionen und 75 Methoden.
 - **Zuordnung:** R `a.b` → `a_b`; S3-Methode `<generic>.<Klasse>` → Python `<Klasse>.<generic>` (print über `.print` bzw. `.format`), Julia registrierte Methode (`show`, `r_summary`, `r_plot`). Regeln: `python/DEVELOPING.md`, `julia/DEVELOPING.md`.
 - **Abweichungen** der Argumente und Standardwerte meldet `compare_api.py`; bekannte stehen in `tools/api_snapshot/known_differences.tsv`.
 - Dateien relativ zu `r/R/`, `python/simlev/` bzw. `julia/src/`.
@@ -19,83 +19,83 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | 3 | Analysen | je eine `.R` | je ein Modul | je eine Datei |
 | 4 | Ausgabe | `print`-Methoden, `plot_dashboard.R` | `svg.py`, `dashboard.py` | `svg.jl`, `dashboard.jl` |
 
-## Öffentliche Funktionen (R-Exporte) (104)
+## Öffentliche Funktionen (R-Exporte) (113)
 
 | Name R | Datei R | Name Python | Datei Python | Name Julia | Datei Julia |
 |---|---|---|---|---|---|
-| `min_track_record` | `analysis_tests.R` | `min_track_record` | `analysis_tests.py` | `min_track_record` | `analysis_tests.jl` |
-| `reality_check` | `analysis_tests.R` | `reality_check` | `analysis_tests.py` | `reality_check` | `analysis_tests.jl` |
-| `return_heatmap` | `analysis_tests.R` | `return_heatmap` | `analysis_tests.py` | `return_heatmap` | `analysis_tests.jl` |
+| `overfit_reality_check` | `analysis_tests.R` | `overfit_reality_check` | `analysis_tests.py` | `overfit_reality_check` | `analysis_tests.jl` |
+| `result_heatmap` | `analysis_tests.R` | `result_heatmap` | `analysis_tests.py` | `result_heatmap` | `analysis_tests.jl` |
+| `sharpe_min_track_record` | `analysis_tests.R` | `sharpe_min_track_record` | `analysis_tests.py` | `sharpe_min_track_record` | `analysis_tests.jl` |
 | `sharpe_test` | `analysis_tests.R` | `sharpe_test` | `analysis_tests.py` | `sharpe_test` | `analysis_tests.jl` |
 | `signal_analysis` | `analysis_tests.R` | `signal_analysis` | `analysis_tests.py` | `signal_analysis` | `analysis_tests.jl` |
 | `asset_config` | `asset_config.R` | `asset_config` | `config.py` | `asset_config` | `config.jl` |
 | `backcast` | `backcast.R` | `backcast` | `backcast.py` | `backcast` | `backcast.jl` |
 | `backcast_fit` | `backcast.R` | `backcast_fit` | `backcast.py` | `backcast_fit` | `backcast.jl` |
-| `bond_index_from_yields` | `bonds.R` | `bond_index_from_yields` | `bonds.py` | `bond_index_from_yields` | `bonds.jl` |
-| `currency_hedged_index` | `bonds.R` | `currency_hedged_index` | `bonds.py` | `currency_hedged_index` | `bonds.jl` |
-| `money_market_index` | `bonds.R` | `money_market_index` | `bonds.py` | `money_market_index` | `bonds.jl` |
-| `block_length` | `bootstrap.R` | `block_length` | `bootstrap.py` | `block_length` | `bootstrap.jl` |
+| `index_bond` | `bonds.R` | `index_bond` | `bonds.py` | `index_bond` | `bonds.jl` |
+| `index_currency_hedged` | `bonds.R` | `index_currency_hedged` | `bonds.py` | `index_currency_hedged` | `bonds.jl` |
+| `index_money_market` | `bonds.R` | `index_money_market` | `bonds.py` | `index_money_market` | `bonds.jl` |
 | `bootstrap` | `bootstrap.R` | `bootstrap` | `bootstrap.py` | `bootstrap` | `bootstrap.jl` |
+| `bootstrap_block_length` | `bootstrap.R` | `bootstrap_block_length` | `bootstrap.py` | `bootstrap_block_length` | `bootstrap.jl` |
 | `bootstrap_config` | `bootstrap.R` | `bootstrap_config` | `bootstrap.py` | `bootstrap_config` | `bootstrap.jl` |
 | `bootstrap_data` | `bootstrap.R` | `bootstrap_data` | `bootstrap.py` | `bootstrap_data` | `bootstrap.jl` |
 | `bootstrap_probability` | `bootstrap.R` | `bootstrap_probability` | `bootstrap.py` | `bootstrap_probability` | `bootstrap.jl` |
 | `bootstrap_study` | `bootstrap.R` | `bootstrap_study` | `bootstrap.py` | `bootstrap_study` | `bootstrap.jl` |
-| `study_metrics` | `bootstrap.R` | `study_metrics` | `bootstrap.py` | `study_metrics` | `bootstrap.jl` |
-| `validate_bootstrap` | `bootstrap.R` | `validate_bootstrap` | `bootstrap.py` | `validate_bootstrap` | `bootstrap.jl` |
-| `compute_rebal_trigger` | `compute_rebal_trigger.R` | `compute_rebal_trigger` | `trigger.py` | `compute_rebal_trigger` | `trigger.jl` |
-| `align_macro` | `data_prep.R` | `align_macro` | `data_prep.py` | `align_macro` | `data_prep.jl` |
-| `align_series` | `data_prep.R` | `align_series` | `data_prep.py` | `align_series` | `data_prep.jl` |
-| `check_series` | `data_prep.R` | `check_series` | `data_prep.py` | `check_series` | `data_prep.jl` |
-| `convert_currency` | `data_prep.R` | `convert_currency` | `data_prep.py` | `convert_currency` | `data_prep.jl` |
-| `deflate` | `data_prep.R` | `deflate` | `data_prep.py` | `deflate` | `data_prep.jl` |
+| `bootstrap_study_metrics` | `bootstrap.R` | `bootstrap_study_metrics` | `bootstrap.py` | `bootstrap_study_metrics` | `bootstrap.jl` |
+| `bootstrap_validate` | `bootstrap.R` | `bootstrap_validate` | `bootstrap.py` | `bootstrap_validate` | `bootstrap.jl` |
+| `rebalance_trigger` | `compute_rebal_trigger.R` | `rebalance_trigger` | `trigger.py` | `rebalance_trigger` | `trigger.jl` |
+| `index_total_return` | `data_prep.R` | `index_total_return` | `data_prep.py` | `index_total_return` | `data_prep.jl` |
 | `portfolio_template` | `data_prep.R` | `portfolio_template` | `data_prep.py` | `portfolio_template` | `data_prep.jl` |
-| `splice_series` | `data_prep.R` | `splice_series` | `data_prep.py` | `splice_series` | `data_prep.jl` |
+| `series_align` | `data_prep.R` | `series_align` | `data_prep.py` | `series_align` | `data_prep.jl` |
+| `series_align_macro` | `data_prep.R` | `series_align_macro` | `data_prep.py` | `series_align_macro` | `data_prep.jl` |
+| `series_check` | `data_prep.R` | `series_check` | `data_prep.py` | `series_check` | `data_prep.jl` |
+| `series_convert_currency` | `data_prep.R` | `series_convert_currency` | `data_prep.py` | `series_convert_currency` | `data_prep.jl` |
+| `series_deflate` | `data_prep.R` | `series_deflate` | `data_prep.py` | `series_deflate` | `data_prep.jl` |
+| `series_splice` | `data_prep.R` | `series_splice` | `data_prep.py` | `series_splice` | `data_prep.jl` |
 | `strategy_from_weights` | `data_prep.R` | `strategy_from_weights` | `data_prep.py` | `strategy_from_weights` | `data_prep.jl` |
-| `total_return_index` | `data_prep.R` | `total_return_index` | `data_prep.py` | `total_return_index` | `data_prep.jl` |
-| `deep_analysis` | `deep_analysis.R` | `deep_analysis` | `deep_analysis.py` | `deep_analysis` | `deep_analysis.jl` |
-| `covar_analysis` | `dependence.R` | `covar_analysis` | `dependence.py` | `covar_analysis` | `dependence.jl` |
-| `dcc_fit` | `dependence.R` | `dcc_fit` | `dependence.py` | `dcc_fit` | `dependence.jl` |
+| `result_analysis` | `deep_analysis.R` | `result_analysis` | `deep_analysis.py` | `result_analysis` | `deep_analysis.jl` |
+| `copula_fit` | `dependence.R` | `copula_fit` | `dependence.py` | `copula_fit` | `dependence.jl` |
 | `dependence_analysis` | `dependence.R` | `dependence_analysis` | `dependence.py` | `dependence_analysis` | `dependence.jl` |
-| `fit_copula` | `dependence.R` | `fit_copula` | `dependence.py` | `fit_copula` | `dependence.jl` |
-| `quantile_reg` | `dependence.R` | `quantile_reg` | `dependence.py` | `quantile_reg` | `dependence.jl` |
+| `dependence_dcc` | `dependence.R` | `dependence_dcc` | `dependence.py` | `dependence_dcc` | `dependence.jl` |
+| `dependence_validate` | `dependence.R` | `dependence_validate` | `dependence.py` | `dependence_validate` | `dependence.jl` |
+| `quantile_regression` | `dependence.R` | `quantile_regression` | `dependence.py` | `quantile_regression` | `dependence.jl` |
 | `regime_subset` | `dependence.R` | `regime_subset` | `dependence.py` | `regime_subset` | `dependence.jl` |
+| `tail_covar` | `dependence.R` | `tail_covar` | `dependence.py` | `tail_covar` | `dependence.jl` |
 | `tail_dependence` | `dependence.R` | `tail_dependence` | `dependence.py` | `tail_dependence` | `dependence.jl` |
 | `tail_regression` | `dependence.R` | `tail_regression` | `dependence.py` | `tail_regression` | `dependence.jl` |
-| `validate_dependence` | `dependence.R` | `validate_dependence` | `dependence.py` | `validate_dependence` | `dependence.jl` |
-| `cpcv_portfolio` | `optimize.R` | `cpcv_portfolio` | `optimize.py` | `cpcv_portfolio` | `optimize.jl` |
-| `efficient_frontier` | `optimize.R` | `efficient_frontier` | `optimize.py` | `efficient_frontier` | `optimize.jl` |
+| `portfolio_cpcv` | `optimize.R` | `portfolio_cpcv` | `optimize.py` | `portfolio_cpcv` | `optimize.jl` |
+| `portfolio_frontier` | `optimize.R` | `portfolio_frontier` | `optimize.py` | `portfolio_frontier` | `optimize.jl` |
 | `portfolio_optimize` | `optimize.R` | `portfolio_optimize` | `optimize.py` | `portfolio_optimize` | `optimize.jl` |
-| `risk_contributions` | `optimize.R` | `risk_contributions` | `optimize.py` | `risk_contributions` | `optimize.jl` |
-| `rolling_optimization` | `optimize.R` | `rolling_optimization` | `optimize.py` | `rolling_optimization` | `optimize.jl` |
-| `deflated_sharpe` | `overfitting.R` | `deflated_sharpe` | `overfitting.py` | `deflated_sharpe` | `overfitting.jl` |
+| `portfolio_risk_contributions` | `optimize.R` | `portfolio_risk_contributions` | `optimize.py` | `portfolio_risk_contributions` | `optimize.jl` |
+| `portfolio_rolling` | `optimize.R` | `portfolio_rolling` | `optimize.py` | `portfolio_rolling` | `optimize.jl` |
+| `overfit_pbo` | `overfitting.R` | `overfit_pbo` | `overfitting.py` | `overfit_pbo` | `overfitting.jl` |
+| `overfit_walk_forward` | `overfitting.R` | `overfit_walk_forward` | `overfitting.py` | `overfit_walk_forward` | `overfitting.jl` |
 | `param_bootstrap` | `overfitting.R` | `param_bootstrap` | `overfitting.py` | `param_bootstrap` | `overfitting.jl` |
-| `pbo` | `overfitting.R` | `pbo` | `overfitting.py` | `pbo` | `overfitting.jl` |
-| `probabilistic_sharpe` | `overfitting.R` | `probabilistic_sharpe` | `overfitting.py` | `probabilistic_sharpe` | `overfitting.jl` |
+| `sharpe_deflated` | `overfitting.R` | `sharpe_deflated` | `overfitting.py` | `sharpe_deflated` | `overfitting.jl` |
 | `sharpe_haircut` | `overfitting.R` | `sharpe_haircut` | `overfitting.py` | `sharpe_haircut` | `overfitting.jl` |
-| `walk_forward` | `overfitting.R` | `walk_forward` | `overfitting.py` | `walk_forward` | `overfitting.jl` |
+| `sharpe_probabilistic` | `overfitting.R` | `sharpe_probabilistic` | `overfitting.py` | `sharpe_probabilistic` | `overfitting.jl` |
+| `param_plateau` | `param_search.R` | `param_plateau` | `param_search.py` | `param_plateau` | `param_search.jl` |
 | `param_range` | `param_search.R` | `param_range` | `param_search.py` | `param_range` | `param_search.jl` |
 | `param_search` | `param_search.R` | `param_search` | `param_search.py` | `param_search` | `param_search.jl` |
 | `param_space` | `param_search.R` | `param_space` | `param_search.py` | `param_space` | `param_search.jl` |
-| `plateau` | `param_search.R` | `plateau` | `param_search.py` | `plateau` | `param_search.jl` |
-| `goal_optimize` | `planning.R` | `goal_optimize` | `planning.py` | `goal_optimize` | `planning.jl` |
-| `pooled_bootstrap` | `planning.R` | `pooled_bootstrap` | `planning.py` | `pooled_bootstrap` | `planning.jl` |
+| `bootstrap_pooled` | `planning.R` | `bootstrap_pooled` | `planning.py` | `bootstrap_pooled` | `planning.jl` |
+| `planning_goal` | `planning.R` | `planning_goal` | `planning.py` | `planning_goal` | `planning.jl` |
 | `portfolio_returns` | `planning.R` | `portfolio_returns` | `planning.py` | `portfolio_returns` | `planning.jl` |
-| `set_expected_return` | `planning.R` | `set_expected_return` | `planning.py` | `set_expected_return` | `planning.jl` |
+| `series_shift_return` | `planning.R` | `series_shift_return` | `planning.py` | `series_shift_return` | `planning.jl` |
 | `export_dashboard` | `plot_dashboard.R` | `export_dashboard` | `__init__.py` | `export_dashboard` | `dashboard.jl` |
 | `regime_hmm` | `regimes.R` | `regime_hmm` | `regimes.py` | `regime_hmm` | `regimes.jl` |
 | `regime_states` | `regimes.R` | `regime_states` | `regimes.py` | `regime_states` | `regimes.jl` |
-| `copula_scenarios` | `scenarios.R` | `copula_scenarios` | `scenarios.py` | `copula_scenarios` | `scenarios.jl` |
-| `crisis_replay` | `scenarios.R` | `crisis_replay` | `scenarios.py` | `crisis_replay` | `scenarios.jl` |
-| `entropy_pooling` | `scenarios.R` | `entropy_pooling` | `scenarios.py` | `entropy_pooling` | `scenarios.jl` |
+| `scenario_copula` | `scenarios.R` | `scenario_copula` | `scenarios.py` | `scenario_copula` | `scenarios.jl` |
+| `scenario_crisis` | `scenarios.R` | `scenario_crisis` | `scenarios.py` | `scenario_crisis` | `scenarios.jl` |
+| `scenario_entropy_pooling` | `scenarios.R` | `scenario_entropy_pooling` | `scenarios.py` | `scenario_entropy_pooling` | `scenarios.jl` |
 | `scenario_risk` | `scenarios.R` | `scenario_risk` | `scenarios.py` | `scenario_risk` | `scenarios.jl` |
 | `view_mean` | `scenarios.R` | `view_mean` | `scenarios.py` | `view_mean` | `scenarios.jl` |
 | `view_prob` | `scenarios.R` | `view_prob` | `scenarios.py` | `view_prob` | `scenarios.jl` |
 | `view_vol` | `scenarios.R` | `view_vol` | `scenarios.py` | `view_vol` | `scenarios.jl` |
-| `leverage_sensitivity` | `sensitivity.R` | `leverage_sensitivity` | `sensitivity.py` | `leverage_sensitivity` | `sensitivity.jl` |
-| `leveraged_series` | `sensitivity.R` | `leveraged_series` | `sensitivity.py` | `leveraged_series` | `sensitivity.jl` |
-| `lumpsum_vs_dca` | `sensitivity.R` | `lumpsum_vs_dca` | `sensitivity.py` | `lumpsum_vs_dca` | `sensitivity.jl` |
-| `rebalancing_sensitivity` | `sensitivity.R` | `rebalancing_sensitivity` | `sensitivity.py` | `rebalancing_sensitivity` | `sensitivity.jl` |
+| `planning_lumpsum_vs_dca` | `sensitivity.R` | `planning_lumpsum_vs_dca` | `sensitivity.py` | `planning_lumpsum_vs_dca` | `sensitivity.jl` |
 | `sensitivity_grid` | `sensitivity.R` | `sensitivity_grid` | `sensitivity.py` | `sensitivity_grid` | `sensitivity.jl` |
+| `sensitivity_leverage` | `sensitivity.R` | `sensitivity_leverage` | `sensitivity.py` | `sensitivity_leverage` | `sensitivity.jl` |
+| `sensitivity_rebalancing` | `sensitivity.R` | `sensitivity_rebalancing` | `sensitivity.py` | `sensitivity_rebalancing` | `sensitivity.jl` |
+| `series_leverage` | `sensitivity.R` | `series_leverage` | `sensitivity.py` | `series_leverage` | `sensitivity.jl` |
 | `signal_combine` | `signals.R` | `signal_combine` | `signals.py` | `signal_combine` | `signals.jl` |
 | `signal_crossover` | `signals.R` | `signal_crossover` | `signals.py` | `signal_crossover` | `signals.jl` |
 | `signal_drawdown` | `signals.R` | `signal_drawdown` | `signals.py` | `signal_drawdown` | `signals.jl` |
@@ -103,32 +103,41 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `signal_momentum` | `signals.R` | `signal_momentum` | `signals.py` | `signal_momentum` | `signals.jl` |
 | `signal_sma` | `signals.R` | `signal_sma` | `signals.py` | `signal_sma` | `signals.jl` |
 | `signal_volatility` | `signals.R` | `signal_volatility` | `signals.py` | `signal_volatility` | `signals.jl` |
+| `dca_plan` | `sim_blocks.R` | `dca_plan` | `_sim_blocks.py` | `dca_plan` | `sim_blocks.jl` |
+| `funds_costs` | `sim_blocks.R` | `funds_costs` | `_sim_blocks.py` | `funds_costs` | `sim_blocks.jl` |
+| `harvest_rule` | `sim_blocks.R` | `harvest_rule` | `_sim_blocks.py` | `harvest_rule` | `sim_blocks.jl` |
+| `income_rate` | `sim_blocks.R` | `income_rate` | `_sim_blocks.py` | `income_rate` | `sim_blocks.jl` |
+| `income_tariff` | `sim_blocks.R` | `income_tariff` | `_sim_blocks.py` | `income_tariff` | `sim_blocks.jl` |
+| `rebalance_plan` | `sim_blocks.R` | `rebalance_plan` | `_sim_blocks.py` | `rebalance_plan` | `sim_blocks.jl` |
+| `sim_costs` | `sim_blocks.R` | `sim_costs` | `_sim_blocks.py` | `sim_costs` | `sim_blocks.jl` |
+| `split_rule` | `sim_blocks.R` | `split_rule` | `_sim_blocks.py` | `split_rule` | `sim_blocks.jl` |
+| `tax_profile` | `sim_blocks.R` | `tax_profile` | `_sim_blocks.py` | `tax_profile` | `sim_blocks.jl` |
 | `simulation` | `simulation.R` | `simulation` | `engine.py` | `simulation` | `sim_evaluate.jl` |
-| `add_asset` | `strategy.R` | `add_asset` | `config.py` | `add_asset` | `config.jl` |
 | `create_strategy` | `strategy.R` | `create_strategy` | `config.py` | `create_strategy` | `config.jl` |
-| `remove_asset` | `strategy.R` | `remove_asset` | `config.py` | `remove_asset` | `config.jl` |
-| `update_asset` | `strategy.R` | `update_asset` | `config.py` | `update_asset` | `config.jl` |
-| `validate_strategy` | `strategy.R` | `validate_strategy` | `config.py` | `validate_strategy` | `config.jl` |
-| `blend_weights` | `tactical.R` | `blend_weights` | `tactical.py` | `blend_weights` | `tactical.jl` |
-| `conditional_volatility` | `tactical.R` | `conditional_volatility` | `tactical.py` | `conditional_volatility` | `tactical.jl` |
-| `glidepath` | `tactical.R` | `glidepath` | `tactical.py` | `glidepath` | `tactical.jl` |
+| `strategy_add_asset` | `strategy.R` | `strategy_add_asset` | `config.py` | `strategy_add_asset` | `config.jl` |
+| `strategy_remove_asset` | `strategy.R` | `strategy_remove_asset` | `config.py` | `strategy_remove_asset` | `config.jl` |
+| `strategy_update_asset` | `strategy.R` | `strategy_update_asset` | `config.py` | `strategy_update_asset` | `config.jl` |
+| `strategy_validate` | `strategy.R` | `strategy_validate` | `config.py` | `strategy_validate` | `config.jl` |
 | `momentum_score` | `tactical.R` | `momentum_score` | `tactical.py` | `momentum_score` | `tactical.jl` |
 | `signal_state` | `tactical.R` | `signal_state` | `tactical.py` | `signal_state` | `tactical.jl` |
+| `tactical_blend` | `tactical.R` | `tactical_blend` | `tactical.py` | `tactical_blend` | `tactical.jl` |
+| `tactical_conditional_volatility` | `tactical.R` | `tactical_conditional_volatility` | `tactical.py` | `tactical_conditional_volatility` | `tactical.jl` |
+| `tactical_glidepath` | `tactical.R` | `tactical_glidepath` | `tactical.py` | `tactical_glidepath` | `tactical.jl` |
 | `tactical_rotation` | `tactical.R` | `tactical_rotation` | `tactical.py` | `tactical_rotation` | `tactical.jl` |
 | `tactical_rules` | `tactical.R` | `tactical_rules` | `tactical.py` | `tactical_rules` | `tactical.jl` |
 | `tactical_simulation` | `tactical.R` | `tactical_simulation` | `tactical.py` | `tactical_simulation` | `tactical.jl` |
-| `target_volatility` | `tactical.R` | `target_volatility` | `tactical.py` | `target_volatility` | `tactical.jl` |
-| `read_tax_tariff` | `tax_tariff.R` | `read_tax_tariff` | `tax_tariff.py` | `read_tax_tariff` | `tax_tariff.jl` |
-| `horizon_model` | `withdrawal.R` | `horizon_model` | `withdrawal.py` | `horizon_model` | `withdrawal.jl` |
-| `perfect_withdrawal_rate` | `withdrawal.R` | `perfect_withdrawal_rate` | `withdrawal.py` | `perfect_withdrawal_rate` | `withdrawal.jl` |
+| `tactical_target_volatility` | `tactical.R` | `tactical_target_volatility` | `tactical.py` | `tactical_target_volatility` | `tactical.jl` |
+| `tax_tariff` | `tax_tariff.R` | `tax_tariff` | `_tax_tariff.py` | `tax_tariff` | `tax_tariff.jl` |
 | `result_index` | `withdrawal.R` | `result_index` | `withdrawal.py` | `result_index` | `withdrawal.jl` |
 | `withdrawal_cohorts` | `withdrawal.R` | `withdrawal_cohorts` | `withdrawal.py` | `withdrawal_cohorts` | `withdrawal.jl` |
+| `withdrawal_horizon` | `withdrawal.R` | `withdrawal_horizon` | `withdrawal.py` | `withdrawal_horizon` | `withdrawal.jl` |
 | `withdrawal_max_rate` | `withdrawal.R` | `withdrawal_max_rate` | `withdrawal.py` | `withdrawal_max_rate` | `withdrawal.jl` |
 | `withdrawal_paths` | `withdrawal.R` | `withdrawal_paths` | `withdrawal.py` | `withdrawal_paths` | `withdrawal.jl` |
+| `withdrawal_perfect_rate` | `withdrawal.R` | `withdrawal_perfect_rate` | `withdrawal.py` | `withdrawal_perfect_rate` | `withdrawal.jl` |
 | `withdrawal_rule` | `withdrawal.R` | `withdrawal_rule` | `withdrawal.py` | `withdrawal_rule` | `withdrawal.jl` |
 | `withdrawal_simulation` | `withdrawal.R` | `withdrawal_simulation` | `withdrawal.py` | `withdrawal_simulation` | `withdrawal.jl` |
 
-## S3-Methoden (68)
+## S3-Methoden (77)
 
 | Name R | Datei R | Name Python | Datei Python | Name Julia | Datei Julia |
 |---|---|---|---|---|---|
@@ -184,6 +193,15 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `plot.SimLevSensitivity` | `sensitivity.R` | `SimLevSensitivity.plot` | `sensitivity.py` | `r_plot(SimLevSensitivity)` | `sensitivity.jl` |
 | `print.SimLevLumpSum` | `sensitivity.R` | `SimLevLumpSum.print` | `sensitivity.py` | `show(SimLevLumpSum)` | `sensitivity.jl` |
 | `print.SimLevSensitivity` | `sensitivity.R` | `SimLevSensitivity.print` | `sensitivity.py` | `show(SimLevSensitivity)` | `sensitivity.jl` |
+| `print.SimLevDcaPlan` | `sim_blocks.R` | `SimLevDcaPlan.format` | `_sim_blocks.py` | `show(SimLevDcaPlan)` | `sim_blocks.jl` |
+| `print.SimLevFundsCosts` | `sim_blocks.R` | `SimLevFundsCosts.format` | `_sim_blocks.py` | `show(SimLevFundsCosts)` | `sim_blocks.jl` |
+| `print.SimLevHarvestRule` | `sim_blocks.R` | `SimLevHarvestRule.format` | `_sim_blocks.py` | `show(SimLevHarvestRule)` | `sim_blocks.jl` |
+| `print.SimLevIncomeRate` | `sim_blocks.R` | `SimLevIncomeRate.format` | `_sim_blocks.py` | `show(SimLevIncomeRate)` | `sim_blocks.jl` |
+| `print.SimLevIncomeTariff` | `sim_blocks.R` | `SimLevIncomeTariff.format` | `_sim_blocks.py` | `show(SimLevIncomeTariff)` | `sim_blocks.jl` |
+| `print.SimLevRebalancePlan` | `sim_blocks.R` | `SimLevRebalancePlan.format` | `_sim_blocks.py` | `show(SimLevRebalancePlan)` | `sim_blocks.jl` |
+| `print.SimLevSimCosts` | `sim_blocks.R` | `SimLevSimCosts.format` | `_sim_blocks.py` | `show(SimLevSimCosts)` | `sim_blocks.jl` |
+| `print.SimLevSplitRule` | `sim_blocks.R` | `SimLevSplitRule.format` | `_sim_blocks.py` | `show(SimLevSplitRule)` | `sim_blocks.jl` |
+| `print.SimLevTaxProfile` | `sim_blocks.R` | `SimLevTaxProfile.format` | `_sim_blocks.py` | `show(SimLevTaxProfile)` | `sim_blocks.jl` |
 | `print.SimLevResult` | `simulation.R` | `SimLevResult.print` | `result.py` | `show(SimLevResult)` | `result.jl` |
 | `print.summary.SimLevResult` | `simulation.R` | `SimLevSummary.print` | `result.py` | `show(summary.SimLevResult)` | `result.jl` |
 | `summary.SimLevResult` | `simulation.R` | `SimLevResult.summary` | `result.py` | `r_summary(SimLevResult)` | `result.jl` |
@@ -191,10 +209,10 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `summary.strategy` | `strategy.R` | `Strategy.summary` | `config.py` | `r_summary(strategy)` | `config.jl` |
 | `plot.SimLevWeights` | `tactical.R` | `SimLevWeights.plot` | `tactical.py` | `r_plot(SimLevWeights)` | `tactical.jl` |
 | `print.SimLevWeights` | `tactical.R` | `SimLevWeights.format` | `tactical.py` | `show(SimLevWeights)` | `tactical.jl` |
-| `print.SimLevTaxTariff` | `tax_tariff.R` | `SimLevTaxTariff.print` | `tax_tariff.py` | `show(SimLevTaxTariff)` | `tax_tariff.jl` |
+| `print.SimLevTaxTariff` | `tax_tariff.R` | `SimLevTaxTariff.print` | `_tax_tariff.py` | `show(SimLevTaxTariff)` | `tax_tariff.jl` |
 | `plot.SimLevWithdrawal` | `withdrawal.R` | `SimLevWithdrawal.plot` | `withdrawal.py` | `r_plot(SimLevWithdrawal)` | `withdrawal.jl` |
 | `print.SimLevHorizon` | `withdrawal.R` | `SimLevHorizon.format` | `withdrawal.py` | `show(SimLevHorizon)` | `withdrawal.jl` |
-| `print.SimLevWithdrawal` | `withdrawal.R` | `SimLevWithdrawal.format` | `withdrawal.py` | `show(SimLevWithdrawal)` | `withdrawal.jl` |
+| `print.SimLevWithdrawal` | `withdrawal.R` | `SimLevWithdrawal.print` | `withdrawal.py` | `show(SimLevWithdrawal)` | `withdrawal.jl` |
 | `print.summary.SimLevWithdrawal` | `withdrawal.R` | `SummarySimLevWithdrawal.format` | `withdrawal.py` | `show(summary.SimLevWithdrawal)` | `withdrawal.jl` |
 | `print.withdrawal_rule` | `withdrawal.R` | `WithdrawalRule.format` | `withdrawal.py` | `show(withdrawal_rule)` | `withdrawal.jl` |
 | `summary.SimLevWithdrawal` | `withdrawal.R` | `SimLevWithdrawal.summary` | `withdrawal.py` | `r_summary(SimLevWithdrawal)` | `withdrawal.jl` |

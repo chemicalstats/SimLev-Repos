@@ -1,12 +1,12 @@
 # =============================================================================
 #  bonds.R  —  Synthetische Anleihe-, Geldmarkt- und gesicherte Reihen
 # -----------------------------------------------------------------------------
-#  bond_index_from_yields()  Total-Return-Index einer Anleihe konstanter
+#  index_bond()  Total-Return-Index einer Anleihe konstanter
 #                            Laufzeit aus einer Renditereihe (Swinkels 2019):
 #                            Kupon-Ertrag plus Kursaenderung durch
 #                            Neubewertung (exakt) oder Duration/Konvexitaet
-#  money_market_index()      Geldmarkt-Index aus einem Tageszins (Act/360)
-#  currency_hedged_index()   waehrungsgesicherte Reihe: lokale Rendite plus
+#  index_money_market()      Geldmarkt-Index aus einem Tageszins (Act/360)
+#  index_currency_hedged()   waehrungsgesicherte Reihe: lokale Rendite plus
 #                            Zinsdifferenz (gedeckte Zinsparitaet), minus Kosten
 #
 #  Alle Zinsen in Prozent p. a.; Eingaben als Spaltenname, Vektor, Skalar oder
@@ -58,14 +58,14 @@
 #' set.seed(1)
 #' d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 400))
 #' d$y10 <- 2 + cumsum(rnorm(400, 0, 0.03))
-#' b <- bond_index_from_yields(d, "y10", maturity = 10, coupon_frequency = 1)
+#' b <- index_bond(d, "y10", maturity = 10, coupon_frequency = 1)
 #' tail(b, 1)
 #' head(attr(b, "duration"), 3)
-#' b2 <- bond_index_from_yields(d, "y10", method = "duration")
+#' b2 <- index_bond(d, "y10", method = "duration")
 #' tail(b2, 1)
-#' @seealso [money_market_index()], [currency_hedged_index()], [simulation()]
+#' @seealso [index_money_market()], [index_currency_hedged()], [simulation()]
 #' @export
-bond_index_from_yields <- function(data, yield, maturity = 10, coupon_frequency = 1, method = c("exact", "duration"),
+index_bond <- function(data, yield, maturity = 10, coupon_frequency = 1, method = c("exact", "duration"),
                                    start = 100) {
   method <- match.arg(method)
   y <- .resolve_series(yield, data, "yield") / 100
@@ -112,15 +112,15 @@ bond_index_from_yields <- function(data, yield, maturity = 10, coupon_frequency 
 #' @examples
 #' d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 730))
 #' d$estr <- 3
-#' mm <- money_market_index(d, "estr", spread = 0.1)
+#' mm <- index_money_market(d, "estr", spread = 0.1)
 #' tail(mm, 1)
 #' # Zinsstufen: 0 Prozent bis Ende 2020, danach 2 Prozent
-#' mm2 <- money_market_index(d, c("2020-01-01" = 0, "2021-01-01" = 2))
+#' mm2 <- index_money_market(d, c("2020-01-01" = 0, "2021-01-01" = 2))
 #' mm2[c(366, 368, 730)]
-#' @seealso [bond_index_from_yields()], [currency_hedged_index()],
-#'   [leveraged_series()]
+#' @seealso [index_bond()], [index_currency_hedged()],
+#'   [series_leverage()]
 #' @export
-money_market_index <- function(data, rate, spread = 0, basis = 360, start = 100) {
+index_money_market <- function(data, rate, spread = 0, basis = 360, start = 100) {
   i <- .resolve_series(rate, data, "rate")
   d <- .to_date(data$date, "data$date"); n <- length(i)
   days <- c(0, diff(as.numeric(d)))
@@ -155,11 +155,11 @@ money_market_index <- function(data, rate, spread = 0, basis = 360, start = 100)
 #' d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 730))
 #' d$sp500 <- 100 * cumprod(1 + rnorm(730, 3e-4, 0.01))
 #' # EUR-Anleger: Heimatzins 3, US-Zins 5, Kosten 0.1 (Prozent p. a.)
-#' h <- currency_hedged_index(d, "sp500", domestic_rate = 3, foreign_rate = 5, cost = 0.1)
+#' h <- index_currency_hedged(d, "sp500", domestic_rate = 3, foreign_rate = 5, cost = 0.1)
 #' c(ungesichert = tail(d$sp500, 1), gesichert = tail(h, 1))
-#' @seealso [money_market_index()], [convert_currency()], [simulation()]
+#' @seealso [index_money_market()], [series_convert_currency()], [simulation()]
 #' @export
-currency_hedged_index <- function(data, local, domestic_rate, foreign_rate, cost = 0, basis = 360, start = NULL) {
+index_currency_hedged <- function(data, local, domestic_rate, foreign_rate, cost = 0, basis = 360, start = NULL) {
   x <- if (is.character(local)) as.numeric(data[[local]]) else as.numeric(local)
   x <- .fill_na(x, "locf")
   id <- .resolve_series(domestic_rate, data, "domestic_rate"); ifr <- .resolve_series(foreign_rate, data, "foreign_rate")

@@ -221,21 +221,21 @@ F2 <- sprintf("f <- backcast_fit(s, 'etf', 'idx', ter = %s, leverage = 2, rate =
 F2P <- sprintf("f = BC.backcast_fit(s, 'etf', 'idx', ter=%s, leverage=2, rate='rate')", TERP)
 ATTR <- "list(bc = bc, params = attr(bc, 'params'), splice = attr(bc, 'splice_date'))"
 ATTRP <- "result = dict(bc=bc, params=bc.attrs['params'], splice=bc.attrs['splice_date'])"
-rc("bc_fit", paste0(F2, "; backcast(f)"), paste0(F2P, "; result = BC.backcast(f)"), list(s = s2))
+rc("bc_fit", paste0(F2, "; backcast(f)"), paste0(F2P, "; result = BC.backcast(fit=f)"), list(s = s2))
 rc("bc_fit_attr", paste0(F2, "; bc <- backcast(f, params = list(drag = 0.5), fill = 'linear', rebase = 100); ", ATTR),
-   paste0(F2P, "; bc = BC.backcast(f, params={'drag': 0.5}, fill='linear', rebase=100)\n", ATTRP), list(s = s2))
-rc("bc_model", paste0(F2, "; backcast(f, fill = 'model')"), paste0(F2P, "; result = BC.backcast(f, fill='model')"), list(s = s2))
-rc("bc_stine", paste0(F2, "; backcast(f, fill = 'stine', splice = '2006-08-15')"), paste0(F2P, "; result = BC.backcast(f, fill='stine', splice='2006-08-15')"), list(s = s2))
-rc("bc_none", paste0(F2, "; bc <- backcast(f, splice = 'none'); ", ATTR), paste0(F2P, "; bc = BC.backcast(f, splice='none')\n", ATTRP), list(s = s2))
-rc("bc_none_print", paste0(F2, "; backcast(f, splice = 'none')"), paste0(F2P, "; result = BC.backcast(f, splice='none')"), list(s = s2))
+   paste0(F2P, "; bc = BC.backcast(fit=f, params={'drag': 0.5}, fill='linear', rebase=100)\n", ATTRP), list(s = s2))
+rc("bc_model", paste0(F2, "; backcast(f, fill = 'model')"), paste0(F2P, "; result = BC.backcast(fit=f, fill='model')"), list(s = s2))
+rc("bc_stine", paste0(F2, "; backcast(f, fill = 'stine', splice = '2006-08-15')"), paste0(F2P, "; result = BC.backcast(fit=f, fill='stine', splice='2006-08-15')"), list(s = s2))
+rc("bc_none", paste0(F2, "; bc <- backcast(f, splice = 'none'); ", ATTR), paste0(F2P, "; bc = BC.backcast(fit=f, splice='none')\n", ATTRP), list(s = s2))
+rc("bc_none_print", paste0(F2, "; backcast(f, splice = 'none')"), paste0(F2P, "; result = BC.backcast(fit=f, splice='none')"), list(s = s2))
 rc("bc_otherdata", paste0(F2, "; s2 <- s[1:1000, ]; s2$etf[990:1000] <- NA; backcast(f, data = s2, fill = 'model')"),
-   paste0(F2P, "; s2 = s.iloc[:1000].copy(); v = s2['etf'].to_numpy(dtype=float, copy=True); v[989:1000] = simlev._r.fmt.NA_REAL; s2['etf'] = v; result = BC.backcast(f, data=s2, fill='model')"), list(s = s2))
+   paste0(F2P, "; s2 = s.iloc[:1000].copy(); v = s2['etf'].to_numpy(dtype=float, copy=True); v[989:1000] = simlev._r.fmt.NA_REAL; s2['etf'] = v; result = BC.backcast(fit=f, data=s2, fill='model')"), list(s = s2))
 rc("bc_linear", "f <- backcast_fit(s, 'etf', 'idx', ter = 0.2, model = 'linear'); backcast(f, rebase = 100)",
-   "f = BC.backcast_fit(s, 'etf', 'idx', ter=0.2, model='linear'); result = BC.backcast(f, rebase=100)", list(s = s1))
+   "f = BC.backcast_fit(s, 'etf', 'idx', ter=0.2, model='linear'); result = BC.backcast(fit=f, rebase=100)", list(s = s1))
 rc("bc_spline", "f <- backcast_fit(s, 'etf', 'idx', model = 'spline', fx = 'fx', validate = FALSE); backcast(f)",
-   "f = BC.backcast_fit(s, 'etf', 'idx', model='spline', fx='fx', validate=False); result = BC.backcast(f)", list(s = sp))
+   "f = BC.backcast_fit(s, 'etf', 'idx', model='spline', fx='fx', validate=False); result = BC.backcast(fit=f)", list(s = sp))
 rc("bc_nofit", sprintf("backcast(NULL, data = s, product = 'etf', index = 'idx', ter = %s, leverage = 2, rate = 'rate', params = list(drag = 0.4), fill = 'model')", TER),
-   sprintf("result = BC.backcast(None, data=s, product='etf', index='idx', ter=%s, leverage=2, rate='rate', params={'drag': 0.4}, fill='model')", TERP), list(s = s2))
+   sprintf("result = BC.backcast(fit=None, data=s, product='etf', index='idx', ter=%s, leverage=2, rate='rate', params={'drag': 0.4}, fill='model')", TERP), list(s = s2))
 rc("bc_nofit_attr", "bc <- backcast(data = s, product = 'etf', index = 'idx', leverage = 2, rate = 2, ter = 0.6, splice = '2006-01-01', lag = 1, accrual = 'geometric', unknown = 5); list(bc = bc, params = attr(bc, 'params'), splice = attr(bc, 'splice_date'))",
    "bc = BC.backcast(data=s, product='etf', index='idx', leverage=2, rate=2, ter=0.6, splice='2006-01-01', lag=1, accrual='geometric', unknown=5)\nresult = dict(bc=bc, params=bc.attrs['params'], splice=bc.attrs['splice_date'])", list(s = s2))
 rc("bc_noprod", "s$etf <- NA; backcast(data = s, product = 'etf', index = 'idx', fx = 'fx', index_fill = 'linear')",
@@ -252,6 +252,6 @@ rc("bc_err_data", "backcast()", "result = BC.backcast()")
 rc("bc_err_prod", "backcast(data = s, index = 'idx')", "result = BC.backcast(data=s, index='idx')", list(s = s2))
 rc("bc_err_model", "backcast(data = s, product = 'etf', index = 'idx', model = 'linear')",
    "result = BC.backcast(data=s, product='etf', index='idx', model='linear')", list(s = s2))
-rc("bc_err_fit", "backcast(list(a = 1))", "result = BC.backcast({'a': 1})")
+rc("bc_err_fit", "backcast(list(a = 1))", "result = BC.backcast(fit={'a': 1})")
 rc("bc_err_fill", "backcast(data = s, product = 'etf', index = 'idx', fill = 'x')", "result = BC.backcast(data=s, product='etf', index='idx', fill='x')", list(s = s2))
 ref_done()

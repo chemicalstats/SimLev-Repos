@@ -1,0 +1,72 @@
+# Ausnahmen zu tools/rename.py (Etappe 6.2): Treffer, die keiner Regel klar entsprechen, von Hand entschieden.
+# Schlüssel: Datei, alter Name und die Zeile (ohne Einrückung, Stand vor dem Lauf); die Entscheidung gilt für
+# alle Treffer dieses Namens in der Zeile, die nicht schon eine Regel entscheidet. Ohne Eintrag bleibt ein
+# Treffer eines mehrdeutigen Namens (Zweitbedeutung) unverändert; bei eindeutigen Namen bricht der Lauf ab.
+datei	alt	zeile	entscheidung	begruendung
+golden/modules/gen_deep_analysis.R	deep_analysis	# Referenzfälle für r/R/deep_analysis.R (deep_analysis, print/summary, .da_*-Helfer)	umbenennen	Kommentar nennt die Funktion (der Pfad r/R/deep_analysis.R in derselben Zeile bleibt nach Regel)
+golden/modules/gen_overfitting.R	pbo	# Referenzfälle für overfitting.R (pbo, probabilistic_sharpe, deflated_sharpe,	umbenennen	Kommentar zählt die geprüften Funktionen auf
+golden/modules/gen_overfitting.R	deflated_sharpe	# Referenzfälle für overfitting.R (pbo, probabilistic_sharpe, deflated_sharpe,	umbenennen	Kommentar zählt die geprüften Funktionen auf
+golden/modules/gen_overfitting.R	walk_forward	# walk_forward, param_bootstrap, sharpe_haircut, .of_*-Helfer).	umbenennen	Kommentar zählt die geprüften Funktionen auf
+golden/modules/gen_param_search.R	plateau	# plateau, print/summary, .ps_*-Helfer, .run_spec, .as_spec).	umbenennen	Kommentar zählt die geprüften Funktionen auf
+golden/modules/gen_planning.R	pooled_bootstrap	# Referenzfälle für r/R/planning.R (set_expected_return, .period_gross, pooled_bootstrap,	umbenennen	Kommentar zählt die geprüften Funktionen auf
+golden/modules/gen_scenarios.R	entropy_pooling	# view_prob: Ausdrücke in R-Syntax (gemeinsamer Auswerter, Modul rexpr); freie Variablen global (R: parent.frame() von entropy_pooling)	umbenennen	Kommentar nennt die Funktion (parent.frame() von …)
+julia/DEVELOPING.md	entropy_pooling	| `src/r/rexpr.jl` | `RExpr` | Ausdrücke in R-Syntax als Text (`eval(parse(text = …), data, env)`): ein gemeinsamer Auswerter für Bedingungen in `bootstrap_probability`, `regime_subset`, `view_prob`/`entropy_pooling` und `tactical_rules` (R-Vorrang inkl. schwach bindendem `!`, NA-Logik, `%in%`, `%%`, Funktionen über `RLibm`/`RFmt`) |	umbenennen	Doku nennt die Funktion, die Bedingungen auswertet
+julia/DEVELOPING.md	deep_analysis	`deep_analysis` (Etappe 4.8; gemessen auf zwei Kernen, Julia 1.13.2):	umbenennen	Doku nennt die Funktion in der Vorkompilier-Arbeitslast
+julia/src/deep_analysis.jl	deep_analysis	# deep_analysis	umbenennen	Abschnittskopf über der Funktion
+julia/src/optimize.jl	rolling_optimization	# rolling_optimization	umbenennen	Abschnittskopf über der Funktion
+julia/src/optimize.jl	rolling_optimization	_opt_check_alpha(something(get(dots, "alpha", nothing), 0.05), "rolling_optimization")	umbenennen	Funktionsname für die Meldung von .opt_check_alpha ("%s: alpha …")
+julia/src/optimize.jl	risk_contributions	# risk_contributions	umbenennen	Abschnittskopf über der Funktion
+julia/src/optimize.jl	risk_contributions	_opt_check_alpha(alpha, "risk_contributions")	umbenennen	Funktionsname für die Meldung von .opt_check_alpha
+julia/src/overfitting.jl	pbo	metric == "sharpe" && (rr = _of_drop_flat(rr, "pbo"))	umbenennen	Funktionsname für die Meldungen von .of_drop_flat ("%s: … ohne Schwankung")
+julia/src/overfitting.jl	deflated_sharpe	rr = _of_drop_flat(_rr(x, frequency, dates, risk_free), "deflated_sharpe")	umbenennen	Funktionsname für die Meldungen von .of_drop_flat
+julia/src/planning.jl	pooled_bootstrap	"historical" => false, "start_dates" => nothing, "weights" => nothing, "source" => "pooled_bootstrap",	belassen	wie r/R/planning.R (Element source)
+julia/src/precompile.jl	deep_analysis	step("deep_analysis") do	belassen	Name des Vorkompilier-Schritts (Modul)
+julia/src/r/rexpr.jl	entropy_pooling	# `Scenarios.view_prob`/`entropy_pooling` und `Tactical.tactical_rules`.	umbenennen	Kommentar nennt die Funktion
+julia/src/scenarios.jl	entropy_pooling	out["kind"] = "entropy_pooling"	belassen	wie r/R/scenarios.R (Element kind)
+julia/src/svg.jl	deep_analysis	# plot(<SimLevAnalysis>) (deep_analysis), plot(<SimLevSignalAnalysis>) und	umbenennen	Kommentar nennt die Funktion hinter plot(<SimLevAnalysis>)
+julia/src/tactical.jl	target_volatility	out = _risk_weights(rv, expo, safe, "target_volatility")	belassen	wie r/R/tactical.R (Attribut source)
+julia/src/tactical.jl	conditional_volatility	out = _risk_weights(rv, expo, safe, "conditional_volatility")	belassen	wie r/R/tactical.R (Attribut source)
+julia/src/tactical.jl	glidepath	# glidepath, blend_weights	umbenennen	Abschnittskopf über der Funktion
+julia/src/tactical.jl	glidepath	_as_weights_m(d, H, a, "glidepath")	belassen	wie r/R/tactical.R (Attribut source)
+python/DEVELOPING.md	plateau	| `_of_returns`, `_as_spec`, `_ps_neighbours`, `plateau` | `overfitting.py`, `param_search.py` |	umbenennen	Tabelle der gemeinsam genutzten Funktionen
+python/DEVELOPING.md	walk_forward	`walk_forward`/`param_bootstrap`), `sensitivity_grid`,	umbenennen	Aufzählung der aufrufenden Funktionen
+python/DEVELOPING.md	apply_spread	`apply_spread`, `create_strategy`, `asset_config` (sowie `add_asset`,	umbenennen	interner Helfer, Port-Name _apply_spread
+python/simlev/_sim_base.py	apply_spread	apply_spread = _apply_spread	umbenennen	Alias apply_spread = _apply_spread; nach dem Lauf von Hand entfernt (doppelt)
+python/simlev/deep_analysis.py	deep_analysis	# deep_analysis	umbenennen	Abschnittskopf über der Funktion
+python/simlev/optimize.py	rolling_optimization	# rolling_optimization	umbenennen	Abschnittskopf über der Funktion
+python/simlev/optimize.py	rolling_optimization	_opt_check_alpha(0.05 if dots.get("alpha") is None else dots["alpha"], "rolling_optimization")	umbenennen	Funktionsname für die Meldung von .opt_check_alpha
+python/simlev/optimize.py	risk_contributions	# risk_contributions	umbenennen	Abschnittskopf über der Funktion
+python/simlev/optimize.py	risk_contributions	_opt_check_alpha(alpha, "risk_contributions")	umbenennen	Funktionsname für die Meldung von .opt_check_alpha
+python/simlev/overfitting.py	pbo	rr = _of_drop_flat(rr, "pbo")	umbenennen	Funktionsname für die Meldungen von .of_drop_flat
+python/simlev/overfitting.py	deflated_sharpe	rr = _of_drop_flat(_rr(x, frequency, dates, risk_free), "deflated_sharpe")	umbenennen	Funktionsname für die Meldungen von .of_drop_flat
+python/simlev/planning.py	pooled_bootstrap	("historical", False), ("start_dates", None), ("weights", None), ("source", "pooled_bootstrap"),	belassen	wie r/R/planning.R (Element source)
+python/simlev/scenarios.py	entropy_pooling	out["kind"] = "entropy_pooling"	belassen	wie r/R/scenarios.R (Element kind)
+python/simlev/svg.py	deep_analysis	# plot(<SimLevAnalysis>) (deep_analysis), plot(<SimLevSignalAnalysis>) und	umbenennen	Kommentar nennt die Funktion hinter plot(<SimLevAnalysis>)
+python/simlev/tactical.py	target_volatility	out = _risk_weights(rv, expo, safe, "target_volatility")	belassen	wie r/R/tactical.R (Attribut source)
+python/simlev/tactical.py	conditional_volatility	out = _risk_weights(rv, expo, safe, "conditional_volatility")	belassen	wie r/R/tactical.R (Attribut source)
+python/simlev/tactical.py	glidepath	# glidepath, blend_weights	umbenennen	Abschnittskopf über der Funktion
+python/simlev/tactical.py	glidepath	return _as_weights_m(_as_dates(d), H, a, "glidepath")	belassen	wie r/R/tactical.R (Attribut source)
+python/tests/test_plot_analysis.py	deep_analysis	(deep_analysis), SimLevDependence, SimLevTailRegression, SimLevCoVaR (dependence).	umbenennen	Kommentar nennt die Funktion hinter SimLevAnalysis
+r/R/optimize.R	rolling_optimization	.opt_check_alpha(dots$alpha %||% 0.05, "rolling_optimization")	umbenennen	Funktionsname für die Meldung von .opt_check_alpha
+r/R/optimize.R	risk_contributions	.opt_check_alpha(alpha, "risk_contributions")	umbenennen	Funktionsname für die Meldung von .opt_check_alpha
+r/R/overfitting.R	pbo	if (metric == "sharpe") rr <- .of_drop_flat(rr, "pbo")	umbenennen	Funktionsname für die Meldungen von .of_drop_flat
+r/R/overfitting.R	deflated_sharpe	rr <- .of_drop_flat(.of_returns(x, frequency, dates, risk_free), "deflated_sharpe"); R <- rr$R	umbenennen	Funktionsname für die Meldungen von .of_drop_flat
+r/R/planning.R	pooled_bootstrap	historical = FALSE, start_dates = NULL, weights = NULL, source = "pooled_bootstrap",	belassen	Wert des Elements source im Ergebnis (withdrawal_paths); Ergebnis bleibt gleich
+r/R/scenarios.R	entropy_pooling	correlation = stats::cov2cor(C), frequency = frequency, kind = "entropy_pooling"),	belassen	Wert des Elements kind im Ergebnis (SimLevScenarios), wird gedruckt; Ergebnis bleibt gleich
+r/R/sim_evaluate.R	deep_analysis	# A7-08: Downside-Abweichung ueber ALLE Beobachtungen (Sortino/Price, wie deep_analysis):	umbenennen	Kommentar nennt die Funktion
+r/R/tactical.R	target_volatility	out <- .risk_weights(rv, expo, safe, "target_volatility")	belassen	Wert des Attributs source im Ergebnis (SimLevWeights); Ergebnis bleibt gleich
+r/R/tactical.R	conditional_volatility	out <- .risk_weights(rv, expo, safe, "conditional_volatility")	belassen	Wert des Attributs source im Ergebnis; Ergebnis bleibt gleich
+r/R/tactical.R	glidepath	.as_weights(d, H, "glidepath")	belassen	Wert des Attributs source im Ergebnis; Ergebnis bleibt gleich
+r/tests/testthat/test-analysis.R	deep_analysis	test_that("deep_analysis reproduces engine metrics and core identities", {	umbenennen	Testbeschreibung nennt die Funktion
+r/tests/testthat/test-analysis.R	deep_analysis	test_that("deep_analysis accepts data.frames and external benchmarks; VaR/CVaR are ordered", {	umbenennen	Testbeschreibung nennt die Funktion
+r/tests/testthat/test-blue-data.R	glidepath	test_that("R2-08: glidepath mit start = end bzw. end < start", {	umbenennen	Testbeschreibung nennt die Funktion
+r/tests/testthat/test-blue-data.R	deep_analysis	test_that("R2-24: deep_analysis beachtet attr(, 'filled') aus align_series", {	umbenennen	Testbeschreibung nennt die Funktion
+r/tests/testthat/test-blue-data.R	deep_analysis	test_that("R2-27: deep_analysis meldet unbrauchbare Eingaben klar", {	umbenennen	Testbeschreibung nennt die Funktion
+r/tests/testthat/test-blue-planning.R	pooled_bootstrap	# pooled_bootstrap und goal_optimize ohne seed: wiederholte Aufrufe verschieden	umbenennen	Kommentar nennt die Funktion
+r/tests/testthat/test-engine-rest.R	deep_analysis	test_that("R4-03: deep_analysis mwrr = Engine-cagr auch in Extremfaellen", {	umbenennen	Testbeschreibung nennt die Funktion
+r/tests/testthat/test-research.R	pbo	test_that("pbo matches brute force; DSR and PSR behave", {	umbenennen	Testbeschreibung nennt die Funktion
+r/tests/testthat/test-review7-engine.R	deep_analysis	test_that("A7-08: Sortino mit Downside-Abweichung \u00fcber alle Beobachtungen (wie deep_analysis)", {	umbenennen	Testbeschreibung nennt die Funktion
+r/tests/testthat/test-review7-planning.R	walk_forward	test_that("B7-04: + k Monate auf das Monatsende begrenzt (align_macro, walk_forward, .anniv_ends)", {	umbenennen	Testbeschreibung nennt die Funktion
+r/tests/testthat/test-review7-planning.R	walk_forward	test_that("R8-01: walk_forward-Fenster von t0 aus, lueckenlos ohne Ueberlappung (Start 31.08.)", {	umbenennen	Testbeschreibung nennt die Funktion
+r/tests/testthat/test-tactical.R	risk_contributions	test_that("risk_contributions add up; rolling optimization feeds tactical_simulation", {	umbenennen	Testbeschreibung nennt die Funktion
+r/tests/testthat/test-flow-metrics.R	deep_analysis	# deep_analysis (eigene MWRR) stimmt ueberein	umbenennen	Kommentar nennt die Funktion

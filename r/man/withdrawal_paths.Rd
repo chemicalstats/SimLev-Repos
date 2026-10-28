@@ -12,7 +12,7 @@ withdrawal_paths(
   inflation_type = c("level", "rate_pa"),
   frequency = c("year", "quarter", "month"),
   dates = NULL,
-  start_date = "2000-01-01",
+  start = "2000-01-01",
   cape = NULL
 )
 }
@@ -65,10 +65,10 @@ neu rechnen).}
 oder \code{"month"}. Bei Studien gilt stattdessen die gespeicherte
 Frequenz.}
 
-\item{dates, start_date}{Nur bei \code{bootstrap_result}: Kalender der
+\item{dates, start}{Nur bei \code{bootstrap_result}: Kalender der
 Pfadzeilen. \code{dates} = Date-Vektor (oder in Date umwandelbar) mit
 genau einem Datum je Pfadzeile, streng aufsteigend;
-\code{NULL} (Standard) = taegliche Kalenderdaten ab \code{start_date}
+\code{NULL} (Standard) = taegliche Kalenderdaten ab \code{start}
 (Standard \code{"2000-01-01"}), d. h. jede Pfadzeile zaehlt als ein
 Kalendertag. Fuer Pfade aus Handelstagen passende \code{dates} angeben
 (siehe \code{\link[=bootstrap_data]{bootstrap_data()}}).}
@@ -113,7 +113,7 @@ waehlt die Kursspalte der Pfade, die Pfadgewichte werden uebernommen.}
 }
 Ein einzelnes \code{SimLevResult} wird hier nicht angenommen (dafuer
 \code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}}). Bereits fertige \code{withdrawal_paths} (aus
-\code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}} oder \code{\link[=pooled_bootstrap]{pooled_bootstrap()}}) und Renditematrizen
+\code{\link[=withdrawal_cohorts]{withdrawal_cohorts()}} oder \code{\link[=bootstrap_pooled]{bootstrap_pooled()}}) und Renditematrizen
 werden direkt an \code{\link[=withdrawal_simulation]{withdrawal_simulation()}} uebergeben;
 \code{withdrawal_simulation()} ruft diese Funktion fuer Studien und
 Ergebnislisten auch selbst auf.

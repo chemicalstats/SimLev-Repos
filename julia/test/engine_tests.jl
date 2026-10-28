@@ -36,27 +36,29 @@ function T_est(x)
     floor(t)
 end
 # Lieferbares ETC G (§ 23): 50 Stück zu 100, am 1.7.2020 zu p2 alles nach H umgeschichtet
-function p23(; p2 = 150.0, stop = "2021-03-31", kw...)
+function p23(; p2 = 150.0, stop = "2021-03-31", tax = tax_profile(), kw...)
     d = days("2020-01-01", stop)
     df = (date = d, G = [x < Date(2020, 6, 1) ? 100.0 : p2 for x in d], H = fill(50.0, length(d)),
           ev = [x == Date(2020, 7, 1) for x in d], wG = zeros(length(d)), wH = ones(length(d)))
-    st = create_strategy(G = asset_config("etc", "bnh"; asset_share = 0.5, asset_spread = 0, deliverable = true),
-                         H = asset_config("certificate", "bnh"; asset_share = 0.5, asset_spread = 0))
-    quiet(() -> simulation(df, st; start_value = 1e4, tax_mode = "person", event_col = "ev", event_mode = "replace",
-                           event_weight = ["G" => "wG", "H" => "wH"], kw...))
+    st = create_strategy(G = asset_config("etc", "bnh"; share = 0.5, spread = 0, deliverable = true),
+                         H = asset_config("certificate", "bnh"; share = 0.5, spread = 0))
+    quiet(() -> simulation(df, st; start_value = 1e4, tax = tax,
+                           rebalance = rebalance_plan(; event_col = "ev", event_mode = "replace", skip = true,
+                                                      event_weight = ["G" => "wG", "H" => "wH"]), kw...))
 end
 # Zertifikat Z (§ 20): 200 Stück zu 50, am 1.7.2020 zu pz nach M umgeschichtet
-function gp(; stop = "2021-03-31", pz = 70.0, kw...)
+function gp(; stop = "2021-03-31", pz = 70.0, tax = tax_profile(), kw...)
     d = days("2020-01-01", stop)
     df = (date = d, Z = [x < Date(2020, 6, 1) ? 50.0 : pz for x in d], M = fill(100.0, length(d)),
           ev = [x == Date(2020, 7, 1) for x in d], wZ = zeros(length(d)), wM = ones(length(d)))
-    st = create_strategy(Z = asset_config("certificate", "bnh"; asset_share = 0.5, asset_spread = 0),
-                         M = asset_config("certificate", "bnh"; asset_share = 0.5, asset_spread = 0))
-    quiet(() -> simulation(df, st; start_value = 2e4, tax_mode = "person", event_col = "ev", event_mode = "replace",
-                           event_weight = ["Z" => "wZ", "M" => "wM"], kw...))
+    st = create_strategy(Z = asset_config("certificate", "bnh"; share = 0.5, spread = 0),
+                         M = asset_config("certificate", "bnh"; share = 0.5, spread = 0))
+    quiet(() -> simulation(df, st; start_value = 2e4, tax = tax,
+                           rebalance = rebalance_plan(; event_col = "ev", event_mode = "replace", skip = true,
+                                                      event_weight = ["Z" => "wZ", "M" => "wM"]), kw...))
 end
 gbm(rng, n, s0, mu, sig) = s0 .* cumprod(1 .+ mu .+ sig .* randn(rng, n))
-st1(; kw...) = create_strategy(A = asset_config("etf"; asset_share = 1, asset_spread = 0, kw...))
+st1(; kw...) = create_strategy(A = asset_config("etf"; share = 1, spread = 0, kw...))
 
 @testset "R-Numerik und Formatierung" begin
     # Software-Nachbildung (andere Plattformen) und Hardware-long-double rechnen gleich
@@ -95,26 +97,26 @@ st1(; kw...) = create_strategy(A = asset_config("etf"; asset_share = 1, asset_sp
 end
 
 @testset "asset_config und Strategien" begin
-    cfg = asset_config("etf"; asset_share = 0.7, asset_bonus = 30)
+    cfg = asset_config("etf"; share = 0.7, partial_exemption = 30)
     @test cfg isa AssetConfig && r_class(cfg) == ["asset_config", "list"]
-    @test cfg.asset_class == "etf" && cfg["asset_share"] == 0.7 && cfg.tax_regime == "investment_fund"
-    @test collect(keys(cfg)) == ["asset_class", "action_type", "asset_share", "asset_spread", "asset_bonus",
-                                 "deliverable", "asset_start", "tax_regime", "signal_buy", "signal_sell"]
+    @test cfg.asset_class == "etf" && cfg["share"] == 0.7 && cfg.tax_regime == "investment_fund"
+    @test collect(keys(cfg)) == ["asset_class", "trading", "share", "spread", "partial_exemption",
+                                 "deliverable", "start", "tax_regime", "signal_buy", "signal_sell"]
     @test asset_config("etc"; deliverable = true).tax_regime == "private_sale"
-    @test asset_config("etf", "bnh", 0.5, 0.1, 30).asset_bonus == 30
+    @test asset_config("etf", "bnh", 0.5, 0.1, 30).partial_exemption == 30
     c, w = with_warnings(() -> asset_config("etn_deliverable"))
     @test c.asset_class == "etn" && c.deliverable == true && occursin("veraltet", w[1])
-    @test occursin("asset_share muss ein Anteil größer 0", errmsg(() -> asset_config(; asset_share = 50)))
+    @test occursin("share muss ein Anteil größer 0", errmsg(() -> asset_config(; share = 50)))
     @test errmsg(() -> asset_config("xx")) == "'arg' should be one of “etf”, “etn”, “etc”, “certificate”, “etn_standard”, “etn_deliverable”"
-    @test asset_config(; asset_start = "2020-02-01").asset_start == Date(2020, 2, 1)
-    s = create_strategy(A = asset_config("etf"; asset_share = 0.6), B = asset_config("etf"; asset_share = 0.4))
+    @test asset_config(; start = "2020-02-01").start == Date(2020, 2, 1)
+    s = create_strategy(A = asset_config("etf"; share = 0.6), B = asset_config("etf"; share = 0.4))
     @test s isa Strategy && collect(keys(s)) == ["A", "B"]
     @test sprint(show, MIME"text/plain"(), s) == "Anlagestrategie (2 Assets)\n================================\n\nA:\n  Klasse: etf | Anteil: 60% | Steuer: investment_fund\nB:\n  Klasse: etf | Anteil: 40% | Steuer: investment_fund\n"
     @test occursin("mehrfach", errmsg(() -> create_strategy("A" => asset_config(), "A" => asset_config())))
-    @test validate_strategy(s, (date = [Date(2020)], A = [1.0], B = [1.0]))
-    s2 = update_asset(s, "A"; asset_class = "etc", deliverable = true)
+    @test strategy_validate(s, (date = [Date(2020)], A = [1.0], B = [1.0]))
+    s2 = strategy_update_asset(s, "A"; asset_class = "etc", deliverable = true)
     @test s2.A.tax_regime == "private_sale"
-    @test length(remove_asset(s, "A")) == 1
+    @test length(strategy_remove_asset(s, "A")) == 1
 end
 
 @testset "Engine: Grundfunktionen und Ergebnisobjekt" begin
@@ -129,7 +131,7 @@ end
     r2 = copy(r); r2["tactical"] = 1; r2.extra2 = "x"
     @test r2.tactical == 1 && haskey(r2, "extra2") && keys(r2)[end] == "extra2" && !haskey(r, "tactical")
     @test sprint(show, MIME"text/plain"(), r2) == sprint(show, MIME"text/plain"(), r)
-    rp = simulation(d, st1(); tax_mode = "person", order_fee = 5, harvest_mode = true)
+    rp = simulation(d, st1(); tax = tax_profile(; harvest = harvest_rule()), costs = sim_costs(5))
     @test rp.open_lots isa RList && rp.open_lots["A"]["lots"] isa RFrame && rp.fees_paid > 0
     @test rp.tax_report["next_year"]["year"] == 2022 && rp.harvest_days isa Vector{Date}
     @test occursin("Steuern", sprint(show, MIME"text/plain"(), rp)) || rp.tax_report["total_taxes_paid"] == 0
@@ -143,18 +145,31 @@ end
     @test sm isa SL.SimLevSummary && occursin("Zeitraum:         1 Tag (", sprint(show, MIME"text/plain"(), sm))
     @test r_summary(r) isa SL.SimLevSummary
     # Fehler und Warnungen wortgleich
-    @test occursin("summieren sich auf 0.9000", errmsg(() -> simulation(d, create_strategy(A = asset_config(; asset_share = 0.9)))))
+    @test occursin("summieren sich auf 0.9000", errmsg(() -> simulation(d, create_strategy(A = asset_config(; share = 0.9)))))
     @test occursin("Kursspalte 'B' fehlt in 'data'", errmsg(() -> simulation(d, create_strategy(B = asset_config()))))
     dup = (date = [Date(2020, 1, 1); days("2020-01-01", "2020-01-05")], A = collect(101.0:106.0))
     @test occursin("mehrfach vor (1 doppelte Zeilen)", errmsg(() -> simulation(dup, st1())))
-    _, w = with_warnings(() -> simulation(d, st1(); funds_fee = 1))
-    @test w == ["simulation: funds_fee wirkt nur bei tax_mode = \"funds\" (hier tax_mode = \"none\") und wird ignoriert."]
-    _, w = with_warnings(() -> simulation(d, st1(); funds_fee = 1, church_tax = 9))   # given bleibt erhalten
-    @test w == ["simulation: funds_fee wirkt nur bei tax_mode = \"funds\" (hier tax_mode = \"none\") und wird ignoriert."]
-    io = IOBuffer(); simulation(d, st1(); tax_mode = "person", details = true, io = io, liquidate = true)
+    # Fondsmodus mit tax_profile() (Kirchensteuer) wie bis 6.2 mit tax_mode = "funds"
+    dg = (date = days("2020-01-01", "2020-12-31"), A = collect(range(100.0, 160.0; length = 366)))
+    r9 = simulation(dg, st1(); funds = funds_costs(), tax = tax_profile(; church_tax = 9), liquidate = true)
+    f9 = SL._simulation_flat(dg, st1(); tax_mode = "funds", church_tax = 9, liquidate = true)
+    @test r9["worth"] == f9["worth"] && r9["tax_report"]["total_taxes_paid"] == f9["tax_report"]["total_taxes_paid"]
+    r0 = simulation(dg, st1(); funds = funds_costs(), liquidate = true)
+    @test r9["tax_report"]["total_taxes_paid"] > r0["tax_report"]["total_taxes_paid"]
+    @test errmsg(() -> simulation(d, st1(); dca = (value = 100, span = 1))) ==
+          "simulation: dca muss NULL oder ein Objekt aus dca_plan() sein, nicht list."
+    @test errmsg(() -> simulation(d, st1(); tax = funds_costs())) ==
+          "simulation: tax muss NULL oder ein Objekt aus tax_profile() sein, nicht SimLevFundsCosts."
+    @test errmsg(() -> tax_profile(25; church_tax = 9)) ==
+          "tax_profile: rate und church_tax schließen sich aus; rate gilt nur ohne Kirchensteuer (mit church_tax gilt der Satz nach § 32d Abs. 1 EStG)."
+    _, w = with_warnings(() -> rebalance_plan(; event_mode = "replace"))
+    @test w == ["rebalance_plan: event_mode wirkt nur zusammen mit event_col und wird ignoriert."]
+    _, w = with_warnings(() -> simulation(d, st1(); tax = tax_profile(; church_tax = 9)))   # keine given-Warnung
+    @test isempty(w)
+    io = IOBuffer(); simulation(d, st1(); tax = tax_profile(), details = true, io = io, liquidate = true)
     @test occursin("Kauf", String(take!(io)))
     d30 = (date = days("2000-01-01", "2029-12-31"), A = gbm(MersenneTwister(2), 10958, 100, 3e-4, 0.01))
-    run30() = simulation(d30, st1(); dca_mode = true, dca_value = 100, dca_span = 1, balance_mode = true, tax_mode = "person", base_rate = 2)
+    run30() = simulation(d30, st1(); dca = dca_plan(100, 1), rebalance = rebalance_plan(), tax = tax_profile(; base_rate = 2))
     run30()
     @test (@elapsed run30()) < 2          # 30 Jahre täglich (R: mehrere Sekunden)
 end
@@ -162,90 +177,92 @@ end
 @testset "Engine: Gebühren, Kirchensteuer, Freibetrag" begin
     rng = MersenneTwister(2); n = 3 * 365
     d = (date = days("2020-01-01", "2022-12-30"), A = gbm(rng, n, 100, 5e-4, 0.015), B = gbm(rng, n, 100, 0, 0.003))
-    st = create_strategy(A = asset_config("etf"; asset_share = 0.5, asset_spread = 0), B = asset_config("etf"; asset_share = 0.5, asset_spread = 0))
-    r3 = simulation(d, st; dca_mode = true, dca_value = 100, dca_span = 1, dca_days = 2, order_fee = 10, dca_fee = 0)
+    st = create_strategy(A = asset_config("etf"; share = 0.5, spread = 0), B = asset_config("etf"; share = 0.5, spread = 0))
+    r3 = simulation(d, st; dca = dca_plan(100, 1; days = 2), costs = sim_costs(10, 0))
     @test r3.fees_paid == 20            # nur die beiden Erstkäufe am Starttag
-    @test occursin("unbekannte oder unbenannte Felder (fix)", errmsg(() -> simulation(d, st; order_fee = (fix = 5,))))
-    _, w = with_warnings(() -> simulation(d, st; church_tax = 0.09))
-    @test any(occursin("Prozent-Konvention", x) for x in w)
-    _, w = with_warnings(() -> simulation(d, st; harvest_mode = true))
-    @test any(occursin("harvest_mode wirkt nur", x) for x in w)
-    @test errmsg(() -> simulation(d, st; tax_mode = "person", harvest_mode = true, harvest_day = "12-31")) ==
-          "harvest_day im Format 'MM-TT' und vor dem 31.12. angeben (z. B. '12-15')."
+    @test occursin("unbekannte oder unbenannte Felder (fix)", errmsg(() -> sim_costs(; order_fee = (fix = 5,))))
+    _, w = with_warnings(() -> tax_profile(; church_tax = 0.09))
+    @test any(occursin("tax_profile: church_tax = 0.09 wird als 0.09 % gelesen (Prozent-Konvention)", x) for x in w)
+    @test errmsg(() -> harvest_rule("12-31")) ==
+          "harvest_rule: day im Format 'MM-TT' und vor dem 31.12. angeben (z. B. '12-15')."
     # Kirchensteuer: Abgeltungsteuer 25 % / (1 + 0,25 k) × (1 + 5,5 % + k)
     lin = (date = days("2022-01-03", "2022-07-21"), A = collect(range(100, 150; length = 200)))
-    s0 = create_strategy(A = asset_config("certificate"; asset_spread = 0))
-    rk = simulation(lin, s0; tax_mode = "person", church_tax = 9, use_sparer_pauschbetrag = false, liquidate = true)
+    s0 = create_strategy(A = asset_config("certificate"; spread = 0))
+    rk = simulation(lin, s0; tax = tax_profile(; church_tax = 9, sparer_pauschbetrag = 0), liquidate = true)
     @test appr(rk.tax_report["total_taxes_paid"], 5000 * 0.25 / (1 + 0.25 * 0.09) * (1 + 0.055 + 0.09))
 end
 
 @testset "Engine: Einkommensteuertarif (taxable_income)" begin
-    r = p23(taxable_income = 74000, church_tax = 9)
+    r = p23(tax = tax_profile(; church_tax = 9, income = income_tariff(74000)))
     ty = r.tax_report["tariff_years"]
     @test ty["year"] == [2020, 2021]
     @test appr(ty["church_tax_paid_deductible"][2], 94.5) && appr(ty["deduction_effect"][2], -43.6)
     @test appr(ty["settlement"][1], 1221.13) && appr(ty["settlement"][2], -43.6)
     @test appr(r.tax_report["total_taxes_paid"], 1221.13 - 43.6)
     @test appr(r.worth[end], 12500 - 1221.13 + 43.6)
-    @test appr(p23(taxable_income = 50000).tax_report["total_taxes_paid"], T_est(52500) - T_est(50000))
-    @test appr(p23(taxable_income = 72469).tax_report["total_taxes_paid"], 1050.11)
-    @test p23(p2 = 119.98, taxable_income = 50000).tax_report["total_taxes_paid"] == 0
-    d1 = p23(taxable_income = 74000).tax_report["total_taxes_paid"]
-    @test p23(taxable_income = ["2020" => 74000, "2021" => 1]).tax_report["total_taxes_paid"] == d1
-    @test p23(taxable_income = RVector([74000.0, 1.0]; names = ["2020", "2021"])).tax_report["total_taxes_paid"] == d1
-    @test p23(taxable_income = RFrame("year" => [2020, 2021], "taxable_income" => [74000.0, 74000.0])).tax_report["total_taxes_paid"] == d1
-    @test occursin("taxable_income fehlt für Simulationsjahr 2021", errmsg(() -> p23(taxable_income = ["2020" => 74000])))
-    @test occursin("muss nach Kalenderjahren benannt sein", errmsg(() -> p23(taxable_income = [1, 2])))
-    @test occursin("Name 'x' ist kein Kalenderjahr", errmsg(() -> p23(taxable_income = ["2020" => 1, "x" => 2])))
-    @test occursin("ungültigen Wert", errmsg(() -> p23(taxable_income = NA)))
-    @test occursin("taxable_income muss eine Zahl", errmsg(() -> p23(taxable_income = "50000")))
+    @test appr(p23(tax = tax_profile(; income = income_tariff(50000))).tax_report["total_taxes_paid"], T_est(52500) - T_est(50000))
+    @test appr(p23(tax = tax_profile(; income = income_tariff(72469))).tax_report["total_taxes_paid"], 1050.11)
+    @test p23(p2 = 119.98, tax = tax_profile(; income = income_tariff(50000))).tax_report["total_taxes_paid"] == 0
+    ti(x) = tax_profile(; income = income_tariff(x))
+    d1 = p23(tax = ti(74000)).tax_report["total_taxes_paid"]
+    @test p23(tax = ti(["2020" => 74000, "2021" => 1])).tax_report["total_taxes_paid"] == d1
+    @test p23(tax = ti(RVector([74000.0, 1.0]; names = ["2020", "2021"]))).tax_report["total_taxes_paid"] == d1
+    @test p23(tax = ti(RFrame("year" => [2020, 2021], "taxable_income" => [74000.0, 74000.0]))).tax_report["total_taxes_paid"] == d1
+    @test occursin("taxable_income fehlt für Simulationsjahr 2021", errmsg(() -> p23(tax = ti(["2020" => 74000]))))
+    @test startswith(errmsg(() -> ti([1, 2])), "income_tariff: taxable_income mit 2 Werten muss nach Kalenderjahren benannt sein")
+    @test occursin("Name 'x' ist kein Kalenderjahr", errmsg(() -> ti(["2020" => 1, "x" => 2])))
+    @test occursin("ungültigen Wert", errmsg(() -> ti(NA)))
+    @test occursin("taxable_income muss eine Zahl", errmsg(() -> ti("50000")))
+    @test errmsg(() -> income_tariff()) ==
+          "income_tariff: taxable_income (zu versteuerndes Einkommen in EUR je Kalenderjahr ohne die Erträge der Simulation) fehlt."
     # Günstigerprüfung: Erstattung am Abrechnungstag im Endwert
-    g = gp(taxable_income = 10000, use_guenstigerpruefung = true)
+    gpt(; gp_ = false) = tax_profile(; income = income_tariff(10000), guenstigerpruefung = gp_)
+    g = gp(tax = gpt(gp_ = true))
     ty = g.tax_report["tariff_years"]
     @test ty["capital_income"][1] == 3000 && appr(ty["abgeltung_burden"][1], 791.25) && ty["tariff_burden"][1] == 95
     @test ty["guenstiger"][1] && appr(ty["refund"][1], 696.25) && appr(g.tax_report["total_taxes_paid"], 95)
     @test appr(g.worth[end], 24000 - 95)
-    g0 = gp(taxable_income = 10000)
+    g0 = gp(tax = gpt())
     @test appr(g0.tax_report["total_taxes_paid"], 791.25) && isna_strict(g0.tax_report["tariff_years"]["tariff_burden"][1])
-    @test appr(gp(stop = "2020-12-30", taxable_income = 10000, use_guenstigerpruefung = true).worth[end], 24000 - 95)
-    tt = SL.read_tax_tariff()
+    @test appr(gp(stop = "2020-12-30", tax = gpt(gp_ = true)).worth[end], 24000 - 95)
+    tt = SL.tax_tariff()
     @test r_class(tt) == ["SimLevTaxTariff"] && tt["soli"]["satz"] == 5.5
     @test SL._tariff_income_tax(tt, 76500.0) == T_est(76500)
     @test occursin("Einkommensteuertarif (SimLev)\n  Geltung: ab VZ 2026", sprint(show, MIME"text/plain"(), tt))
-    @test occursin("nicht gefunden", errmsg(() -> SL.read_tax_tariff("/nicht/da.csv")))
+    @test occursin("nicht gefunden", errmsg(() -> SL.tax_tariff("/nicht/da.csv")))
 end
 
 @testset "Engine: Vorabpauschale, Fondsmodus, Splits" begin
     d = (date = days("2020-01-01", "2022-12-30"), A = fill(100.0, 1095))
-    r = simulation(d, st1(); tax_mode = "funds", funds_fee = 10, bonus_fee = 0)
+    r = simulation(d, st1(); funds = funds_costs(10, 0))
     v = 10000.0; v -= 366 * (0.1 / 366) * v; v -= 365 * (0.1 / 365) * v; v -= 364 * (0.1 / 365) * v
     @test appr(r.worth[end], v)
     lin = (date = days("2022-01-03", "2022-07-21"), A = collect(range(100, 150; length = 200)))
-    rv = simulation(lin, create_strategy(A = asset_config("etf"; asset_spread = 0, asset_bonus = 30)); tax_mode = "person",
-                    tax_rate = 25, use_sparer_pauschbetrag = false, liquidate = true)
+    rv = simulation(lin, create_strategy(A = asset_config("etf"; spread = 0, partial_exemption = 30));
+                    tax = tax_profile(25; sparer_pauschbetrag = 0), liquidate = true)
     @test appr(rv.tax_report["total_taxes_paid"], 5000 * 0.7 * 0.25)
     rng = MersenneTwister(3); n = 3 * 365
     ds = (date = days("2020-01-01", "2022-12-30"), A = gbm(rng, n, 100, 2e-3, 0.01))
     i = findfirst(>(250), ds.A)
     a = simulation(ds, st1(); fractions = false)
-    b = simulation(ds, st1(); fractions = false, split_mode = true, split_thresh = [20, 250])
+    b = simulation(ds, st1(); fractions = false, splits = split_rule([20, 250]))
     @test isapprox(b.worth[i], a.worth[i]; rtol = 1e-12)
 end
 
 @testset "Trigger" begin
     df = (date = days("2020-01-01", "2020-01-10"), target_leverage = [2.00, 2.05, 2.30, 2.28, 1.95, 1.90, 2.40, 2.42, 2.10, 2.00],
           sigma_ewma = [0.10, 0.11, 0.16, 0.15, 0.10, 0.10, 0.20, 0.22, 0.14, 0.12])
-    df = compute_rebal_trigger(df, "abs_leverage"; threshold = 10, out_col = "a")
-    df = compute_rebal_trigger(df, "vol_band"; threshold = 20, out_col = "v")
-    df = compute_rebal_trigger(df, "combined"; triggers = [(type = "abs_leverage", threshold = 10), (type = "vol_band", threshold = 20)],
+    df = rebalance_trigger(df, "abs_leverage"; threshold = 10, out_col = "a")
+    df = rebalance_trigger(df, "vol_band"; threshold = 20, out_col = "v")
+    df = rebalance_trigger(df, "combined"; triggers = [(type = "abs_leverage", threshold = 10), (type = "vol_band", threshold = 20)],
                                out_col = "c")
     T, F = true, false
     @test df.a == [F, F, T, F, T, F, T, F, T, T]
     @test df.v == [F, F, T, F, T, F, T, F, T, F]
     @test df.c == [F, F, T, F, T, F, T, F, T, T]
-    @test compute_rebal_trigger((date = df.date[1:4], target_leverage = [NA, NA, 2.0, 2.3]), "abs_leverage").rebal_trigger == [F, F, F, T]
-    @test errmsg(() -> compute_rebal_trigger(df, "nope")) == "Unbekannter type='nope'."
-    rf = compute_rebal_trigger(RFrame("x" => [1.0, 2.0], "target_leverage" => [1.0, 2.0]), "abs_leverage")
+    @test rebalance_trigger((date = df.date[1:4], target_leverage = [NA, NA, 2.0, 2.3]), "abs_leverage").rebal_trigger == [F, F, F, T]
+    @test errmsg(() -> rebalance_trigger(df, "nope")) == "Unbekannter type='nope'."
+    rf = rebalance_trigger(RFrame("x" => [1.0, 2.0], "target_leverage" => [1.0, 2.0]), "abs_leverage")
     @test rf isa RFrame && rf["rebal_trigger"] == [F, T]
 end
 

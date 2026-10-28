@@ -17,12 +17,12 @@ param_search(
   constraint = NULL,
   sim_args = list(),
   burn_in = 0L,
-  metrics = study_metrics,
+  metrics = bootstrap_study_metrics,
   objective = "sharpe",
   maximize = TRUE,
-  cores = 1L,
+  keep_returns = TRUE,
   seed = NULL,
-  keep_returns = TRUE
+  cores = 1L
 )
 
 \method{summary}{SimLevParamSearch}(object, top = 10L, ...)
@@ -47,11 +47,15 @@ Kursspalten als Niveaus), inklusive Vorlauf fuer Signale (siehe
 \code{list(strategy, signal, args, map, data)} liefert:
 \code{signal} wie in \code{\link[=bootstrap_study]{bootstrap_study()}} (Funktion \code{df ->}
 data.frame oder Liste von Spalten, z. B. mit \code{\link[=signal_sma]{signal_sma()}}),
-\code{args} (Liste) ueberschreibt \code{sim_args}, \code{map} (benannter
+\code{args} (Liste, wie \code{sim_args}, auch mit Pfaden wie \code{"rebalance.thresh"})
+ueberschreibt \code{sim_args}, \code{map} (benannter
 Zeichenvektor) legt Spalten-Aliase an, \code{data} ist optional eine
-Funktion \code{df -> df} (z. B. eine Hebelreihe mit \code{\link[=leveraged_series]{leveraged_series()}}
+Funktion \code{df -> df} (z. B. eine Hebelreihe mit \code{\link[=series_leverage]{series_leverage()}}
 anlegen). \code{NULL} (Standard) = ohne \code{builder}: die Parameter
-werden als Argumente von \code{\link[=simulation]{simulation()}} fuer \code{strategy} verwendet.}
+werden als Argumente von \code{\link[=simulation]{simulation()}} fuer \code{strategy} verwendet;
+Parameter der Bausteine dann mit Pfad, z. B.
+\code{param_space(rebalance.thresh = c(2, 5), dca.value = c(100, 200))} (wie in
+\code{\link{sensitivity_grid}}); die Spalten von \code{results} heissen wie die Pfade.}
 
 \item{space}{Suchraum aus \code{\link[=param_space]{param_space()}} (oder benannte Liste, die an
 \code{\link[=param_space]{param_space()}} weitergegeben wird).}
@@ -74,14 +78,18 @@ zulaessige Punkte liefert (z. B. Gewichte summieren sich hoechstens zu
 Punkte.}
 
 \item{sim_args}{Benannte Liste gemeinsamer Argumente fuer \code{\link[=simulation]{simulation()}}
-(Standard: keine).}
+(Standard: keine): Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
+also auch Bausteine (z. B. \code{dca = dca_plan(100, 1)}, \code{tax = tax_profile()}) und
+Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
+\code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.5.0 vor den Bausteinen, z. B.
+\code{dca_value}) ergeben einen Fehler, der den Baustein nennt.}
 
 \item{burn_in}{Anzahl Zeilen am Anfang von \code{data} (bei Tagesdaten:
 Tage), die nach der Signalberechnung verworfen werden (Signal-Vorlauf;
 ganze Zahl, Standard 0).}
 
 \item{metrics}{Funktion \code{SimLevResult ->} benannter numerischer
-Vektor (Standard \code{\link[=study_metrics]{study_metrics()}}: u. a. \code{cagr},
+Vektor (Standard \code{\link[=bootstrap_study_metrics]{bootstrap_study_metrics()}}: u. a. \code{cagr},
 \code{max_drawdown} als Anteil, \code{sharpe}; \code{cagr} ist mit
 Sparplan geldgewichtet, XIRR).}
 
@@ -101,8 +109,8 @@ wiederhergestellt. \code{NULL} (Standard) = aktueller Zufallszustand,
 der dabei normal weiterlaeuft (wiederholte Aufrufe ziehen andere Punkte).}
 
 \item{keep_returns}{Logisch (Standard \code{TRUE}): taegliche Renditen je
-Punkt speichern (noetig fuer \code{\link[=pbo]{pbo()}}, \code{\link[=deflated_sharpe]{deflated_sharpe()}},
-\code{\link[=walk_forward]{walk_forward()}}, \code{\link[=reality_check]{reality_check()}}, \code{\link[=sharpe_haircut]{sharpe_haircut()}}).}
+Punkt speichern (noetig fuer \code{\link[=overfit_pbo]{overfit_pbo()}}, \code{\link[=sharpe_deflated]{sharpe_deflated()}},
+\code{\link[=overfit_walk_forward]{overfit_walk_forward()}}, \code{\link[=overfit_reality_check]{overfit_reality_check()}}, \code{\link[=sharpe_haircut]{sharpe_haircut()}}).}
 
 \item{object, x}{Objekt der Klasse \code{SimLevParamSearch}.}
 
@@ -110,7 +118,7 @@ Punkt speichern (noetig fuer \code{\link[=pbo]{pbo()}}, \code{\link[=deflated_sh
 besten Punkte nach der Zielgroesse (ganze Zahl, Standard 10).
 \code{summary()} liefert ein Objekt der Klasse
 \code{summary.SimLevParamSearch} mit \code{top} (Tabelle mit Spalte
-\code{plateau} = \code{plateau_mean} aus \code{\link[=plateau]{plateau()}}), \code{best},
+\code{plateau} = \code{plateau_mean} aus \code{\link[=param_plateau]{param_plateau()}}), \code{best},
 \code{best_plateau} (Zeilen von \code{results}), \code{n},
 \code{n_failed}, \code{objective}, \code{method}, \code{params} und
 \code{elapsed}.}
@@ -152,15 +160,15 @@ ersten erfolgreichen Punkts).}
 \item{\code{elapsed}}{Laufzeit in Sekunden.}
 }
 Methoden \code{print}, \code{summary}, \code{plot}; Weiterverarbeitung
-mit \code{\link[=plateau]{plateau()}}, \code{\link[=pbo]{pbo()}}, \code{\link[=deflated_sharpe]{deflated_sharpe()}}, \code{\link[=walk_forward]{walk_forward()}},
+mit \code{\link[=param_plateau]{param_plateau()}}, \code{\link[=overfit_pbo]{overfit_pbo()}}, \code{\link[=sharpe_deflated]{sharpe_deflated()}}, \code{\link[=overfit_walk_forward]{overfit_walk_forward()}},
 \code{\link[=param_bootstrap]{param_bootstrap()}}.
 }
 \description{
 Wertet eine Strategie fuer jeden Punkt eines Parameterraums mit
 \code{\link[=simulation]{simulation()}} aus. Neben den Kennzahlen werden die taeglichen
 zeitgewichteten Renditen jedes Punkts gespeichert; darauf bauen die
-Ueberanpassungs-Pruefungen \code{\link[=pbo]{pbo()}}, \code{\link[=deflated_sharpe]{deflated_sharpe()}} und
-\code{\link[=walk_forward]{walk_forward()}} auf.
+Ueberanpassungs-Pruefungen \code{\link[=overfit_pbo]{overfit_pbo()}}, \code{\link[=sharpe_deflated]{sharpe_deflated()}} und
+\code{\link[=overfit_walk_forward]{overfit_walk_forward()}} auf.
 }
 \details{
 Je Punkt wird die Spezifikation in dieser Reihenfolge angewandt:
@@ -169,7 +177,7 @@ Je Punkt wird die Spezifikation in dieser Reihenfolge angewandt:
 schliesslich \code{\link[=simulation]{simulation()}} mit \code{sim_args}, ueberschrieben durch
 \code{args}. Fehler einzelner Punkte brechen die Suche nicht ab, sondern
 stehen in \code{results$error}. Das Ergebnis laesst sich auch mit
-\code{\link[=reality_check]{reality_check()}} und \code{\link[=sharpe_haircut]{sharpe_haircut()}} weiterverarbeiten.
+\code{\link[=overfit_reality_check]{overfit_reality_check()}} und \code{\link[=sharpe_haircut]{sharpe_haircut()}} weiterverarbeiten.
 }
 \examples{
 \donttest{
@@ -186,5 +194,5 @@ plot(ps)           # Heatmap der Zielgroesse ueber n und band
 }
 }
 \seealso{
-\code{\link[=plateau]{plateau()}}, \code{\link[=pbo]{pbo()}}, \code{\link[=deflated_sharpe]{deflated_sharpe()}}, \code{\link[=walk_forward]{walk_forward()}}, \code{\link[=sensitivity_grid]{sensitivity_grid()}}
+\code{\link[=param_plateau]{param_plateau()}}, \code{\link[=overfit_pbo]{overfit_pbo()}}, \code{\link[=sharpe_deflated]{sharpe_deflated()}}, \code{\link[=overfit_walk_forward]{overfit_walk_forward()}}, \code{\link[=sensitivity_grid]{sensitivity_grid()}}
 }

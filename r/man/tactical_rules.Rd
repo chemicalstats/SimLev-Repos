@@ -8,7 +8,7 @@ tactical_rules(data, rules, default)
 }
 \arguments{
 \item{data}{data.frame mit Spalte \code{date} (und den in Bedingungen
-verwendeten Spalten, z. B. aus \code{\link[=align_macro]{align_macro()}}).}
+verwendeten Spalten, z. B. aus \code{\link[=series_align_macro]{series_align_macro()}}).}
 
 \item{rules}{Liste von Regeln \code{list(when = ..., weights = c(A = 0.6,
   B = 0.4))}, in Prioritaetsreihenfolge. \code{when}: logischer Vektor
@@ -53,6 +53,6 @@ w <- tactical_rules(d, list(list(when = signal_sma(d$A, 200), weights = c(A = 1)
 table(attr(w, "regime"))
 }
 \seealso{
-\code{\link[=tactical_simulation]{tactical_simulation()}}, \link{signals}, \code{\link[=align_macro]{align_macro()}},
-\code{\link[=blend_weights]{blend_weights()}}
+\code{\link[=tactical_simulation]{tactical_simulation()}}, \link{signals}, \code{\link[=series_align_macro]{series_align_macro()}},
+\code{\link[=tactical_blend]{tactical_blend()}}
 }

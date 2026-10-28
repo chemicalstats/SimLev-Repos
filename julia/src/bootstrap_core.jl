@@ -208,10 +208,11 @@ function boot_wild(returns, type)
     X = _as_mat(returns)
     n, k = size(X)
     mu = zeros(k)
+    nad = SimLev.nan_add; nmu = SimLev.nan_mul
     for j in 1:k
         s = 0.0
         for i in 1:n
-            s += X[i, j]
+            s = nad(s, X[i, j])
         end
         mu[j] = s / n
     end
@@ -230,7 +231,7 @@ function boot_wild(returns, type)
             Float64(_rng().rnorm1(0.0, 1.0))
         end
         for j in 1:k
-            out[i, j] = mu[j] + (X[i, j] - mu[j]) * w
+            out[i, j] = nad((X[i, j] - mu[j]) * w, mu[j])     # R-Bau: ((x - mu) * w) + mu
         end
     end
     return out
@@ -320,15 +321,20 @@ function _Cross(cols, mu, om, al, be, ratio, s2_init)
            _as_bool_vec(ratio), _as_dbl_vec(s2_init), zeros(length(col)))
 end
 
+# NaN-Nutzlast (Etappe 8.0): Operandenfolge des R-Baus (objdump von SimLev.so) über
+# SimLev.nan_add/nan_mul; step_cross: ((al * eps) * eps + om) + be * s2, sqrt(s2) * z,
+# (mu + 1.0) + e, g * base_ret.
 function _step!(cs::_Cross, out::Matrix{Float64}, t::Int, base_ret::Float64, zc::Matrix{Float64}, tstar::Int)
+    nad = SimLev.nan_add; nmu = SimLev.nan_mul
     for c in 1:cs.m
-        s2 = cs.om[c] + cs.al[c] * cs.eps[c] * cs.eps[c] + cs.be[c] * cs.s2[c]
+        ep = cs.eps[c]
+        s2 = nad(nad(nmu(nmu(cs.al[c], ep), ep), cs.om[c]), nmu(cs.be[c], cs.s2[c]))
         s2 < 1e-14 && (s2 = 1e-14)
         cs.s2[c] = s2
-        e = sqrt(s2) * zc[tstar, c]
+        e = nmu(sqrt(s2), zc[tstar, c])
         cs.eps[c] = e
-        g = 1.0 + cs.mu[c] + e
-        out[t, cs.col[c]+1] = cs.ratio[c] ? base_ret * g : g
+        g = nad(nad(cs.mu[c], 1.0), e)
+        out[t, cs.col[c]+1] = cs.ratio[c] ? nmu(g, base_ret) : g
     end
 end
 
@@ -358,13 +364,16 @@ function boot_garch(n_out, base, k, mu, omega, alpha, beta, gamma, s2_init, z_ba
     s2 = Float64(s2_init)
     eps = 0.0
     _state()
+    nad = SimLev.nan_add; nmu = SimLev.nan_mul
     for t in 1:n_out
+        # R-Bau (C_boot_garch): (gamma * ind + alpha) * eps * eps + omega + s2 * beta,
+        # sqrt(s2) * z, (1.0 + mu) + eps
         ind = eps < 0.0 ? 1.0 : 0.0
-        s2 = omega + (alpha + gamma * ind) * eps * eps + beta * s2
+        s2 = nad(nad(nmu(nmu(nad(gamma * ind, alpha), eps), eps), omega), nmu(s2, beta))
         s2 < 1e-14 && (s2 = 1e-14)
         ts = v[_draw_int(nv)+1]
-        eps = sqrt(s2) * zb[ts]
-        rb = 1.0 + mu + eps
+        eps = nmu(sqrt(s2), zb[ts])
+        rb = nad(1.0 + mu, eps)
         out[t, base] = rb
         _step!(cs, out, t, rb, zc, ts)
         idx[t] = ts
@@ -410,13 +419,14 @@ function boot_ms_garch(n_out, base, k, K, mu, omega, alpha, beta, gamma, phi, la
         if t > 1
             old = r
             if tvtp
+                # std::min/std::max wie in C++ (NaN: erster Operand bzw. die Konstante)
                 x = s2 / uv[old] - 1.0
-                x = min(10.0, max(-0.99, x))
+                x = SimLev.cpp_min(10.0, SimLev.cpp_max(-0.99, x))
                 mx = -1e300
                 for j in 1:K
-                    b = max(T[old, j], 1e-10)
+                    b = SimLev.cpp_max(T[old, j], 1e-10)
                     pr[j] = SimLev.RLibm.log(b) + D[old, j] * x
-                    mx = max(mx, pr[j])
+                    mx = SimLev.cpp_max(mx, pr[j])
                 end
                 se = 0.0
                 for j in 1:K
@@ -432,10 +442,13 @@ function boot_ms_garch(n_out, base, k, K, mu, omega, alpha, beta, gamma, phi, la
                 end
             end
             r = _draw_from(pr, K)
-            r != old && (s2 = 0.5 * s2 + 0.5 * uv[r])
+            r != old && (s2 = SimLev.nan_add(0.5 * uv[r], 0.5 * s2))
         end
+        # R-Bau (C_boot_ms_garch): (ind * gamma + alpha) * eps * eps + omega + s2 * beta,
+        # z * sig, ((prev * phi) + mu) + sig * lambda, m + eps, ex + 1.0
+        nad = SimLev.nan_add; nmu = SimLev.nan_mul
         ind = eps < 0.0 ? 1.0 : 0.0
-        s2 = omega[r] + (alpha[r] + gamma[r] * ind) * eps * eps + beta[r] * s2
+        s2 = nad(nad(nmu(nmu(nad(nmu(ind, gamma[r]), alpha[r]), eps), eps), omega[r]), nmu(s2, beta[r]))
         s2 < 1e-14 && (s2 = 1e-14)
         sig = sqrt(s2)
         p = pl[r]
@@ -448,10 +461,10 @@ function boot_ms_garch(n_out, base, k, K, mu, omega, alpha, beta, gamma, phi, la
             end
         end
         ts = p[_draw_int(length(p))+1]
-        eps = sig * zb[ts]
-        m = mu[r] + phi[r] * prev + lam[r] * sig
-        ex = m + eps
-        rb = 1.0 + ex
+        eps = nmu(zb[ts], sig)
+        m = nad(nad(nmu(prev, phi[r]), mu[r]), nmu(sig, lam[r]))
+        ex = nad(m, eps)
+        rb = ex + 1.0
         out[t, base] = rb
         prev = ex
         _step!(cs, out, t, rb, zc, ts)
@@ -487,7 +500,7 @@ function rolling_vol(x, window)
             vol[i] = 0.0
         else
             m = s / cnt
-            vol[i] = sqrt(max(0.0, (sq - cnt * m * m) / (cnt - 1)))
+            vol[i] = sqrt(SimLev.cpp_max(0.0, (sq - cnt * m * m) / (cnt - 1)))   # std::max: NaN -> 0
         end
     end
     return vol
@@ -539,9 +552,11 @@ function garch_filter(ep, om, al, be, ga, v0)
     n = length(e)
     s2 = Vector{Float64}(undef, n)
     v = Float64(v0)
+    nad = SimLev.nan_add; nmu = SimLev.nan_mul
     @inbounds for t in 1:n
         s2[t] = v
-        v = om + (al + ga * (e[t] < 0.0 ? 1.0 : 0.0)) * (e[t] * e[t]) + be * v
+        # R-Bau (C_garch_filter): ((ga * ind + al) * e^2 + om) + v * be
+        v = nad(nad(nmu(nad(ga * (e[t] < 0.0 ? 1.0 : 0.0), al), e[t] * e[t]), om), nmu(v, be))
         v < 1e-14 && (v = 1e-14)
     end
     return s2

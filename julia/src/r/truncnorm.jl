@@ -43,7 +43,7 @@ const _DBL_MAX = 1.7976931348623157e308
 function _ers_a_inf(a::Float64)
     ainv = 1.0 / a
     while true
-        x = SimLev.RRng.rexp1(ainv) + a
+        x = SimLev.nan_add(SimLev.RRng.rexp1(ainv), a)        # R-Bau: rexp(...) + a
         rho = _cexp(-0.5 * _cpow2(x - a))
         _runif(0.0, 1.0) > rho || return x
     end
@@ -52,9 +52,21 @@ end
 function _ers_a_b(a::Float64, b::Float64)
     ainv = 1.0 / a
     while true
-        x = SimLev.RRng.rexp1(ainv) + a
+        x = SimLev.nan_add(SimLev.RRng.rexp1(ainv), a)        # R-Bau: rexp(...) + a
         rho = _cexp(-0.5 * _cpow2(x - a))
         (_runif(0.0, 1.0) > rho || x > b) || return x
+    end
+end
+
+# ers_a_b(-beta, bmax) bzw. ers_a_inf(-beta) (bmax = nothing) wie im R-Bau: gcc rechnet mit
+# beta statt a = -beta (ainv = -1.0 / beta, x = rexp(ainv) - beta; ein NaN in beta behält
+# so sein Vorzeichen).
+function _ers_neg(beta::Float64, bmax)
+    ainv = -1.0 / beta
+    while true
+        x = SimLev.RRng.rexp1(ainv) - beta
+        rho = _cexp(-0.5 * _cpow2(x + beta))
+        (_runif(0.0, 1.0) > rho || (bmax !== nothing && x > bmax)) || return x
     end
 end
 
@@ -92,15 +104,23 @@ function _urs_a_b(a::Float64, b::Float64)
     end
 end
 
+# Rückgaben mean ± sd * x: bei zwei NaN (etwa NA in sd und das NaN von rexp) behält R
+# den ersten Operanden der Maschinenanweisung; Folge je Zweig wie im R-Bau (objdump von
+# C_truncnorm_rtruncnorm): _sx = (sd * x) + mean, _xs = (x * sd) + mean (wie in Python).
+@inline _sx(sd, x, mean) = SimLev.nan_add(SimLev.nan_mul(sd, x), mean)
+@inline _xs(x, sd, mean) = SimLev.nan_add(SimLev.nan_mul(x, sd), mean)
+
 function _r_lefttruncnorm(a::Float64, mean::Float64, sd::Float64)
     alpha = (a - mean) / sd
-    alpha < _T4 && return mean + sd * _nrs_a_inf(alpha)
-    return mean + sd * _ers_a_inf(alpha)
+    alpha < _T4 && return _xs(_nrs_a_inf(alpha), sd, mean)
+    return _sx(sd, _ers_a_inf(alpha), mean)
 end
 
 function _r_righttruncnorm(b::Float64, mean::Float64, sd::Float64)
+    # left(-beta, 0, 1) eingesetzt: mean - ((x + 0.0) * sd)
     beta = (b - mean) / sd
-    return mean - sd * _r_lefttruncnorm(-beta, 0.0, 1.0)
+    x = -beta < _T4 ? _nrs_a_inf(-beta) : _ers_neg(beta, nothing)
+    return mean - SimLev.nan_mul(x + 0.0, sd)
 end
 
 function _r_truncnorm(a::Float64, b::Float64, mean::Float64, sd::Float64)
@@ -111,16 +131,16 @@ function _r_truncnorm(a::Float64, b::Float64, mean::Float64, sd::Float64)
     if beta <= alpha
         return NA
     elseif alpha <= 0 && 0 <= beta                    # 2
-        (phi_a <= _T1 || phi_b <= _T1) && return mean + sd * _nrs_a_b(alpha, beta)   # 2 (a)
-        return mean + sd * _urs_a_b(alpha, beta)      # 2 (b)
+        (phi_a <= _T1 || phi_b <= _T1) && return _xs(_nrs_a_b(alpha, beta), sd, mean)   # 2 (a)
+        return _sx(sd, _urs_a_b(alpha, beta), mean)   # 2 (b)
     elseif alpha > 0                                  # 3
-        phi_a / phi_b <= _T2 && return mean + sd * _urs_a_b(alpha, beta)            # 3 (a)
-        alpha < _T3 && return mean + sd * _hnrs_a_b(alpha, beta)                     # 3 (b)
-        return mean + sd * _ers_a_b(alpha, beta)      # 3 (c)
+        phi_a / phi_b <= _T2 && return _sx(sd, _urs_a_b(alpha, beta), mean)         # 3 (a)
+        alpha < _T3 && return _xs(_hnrs_a_b(alpha, beta), sd, mean)                  # 3 (b)
+        return _sx(sd, _ers_a_b(alpha, beta), mean)   # 3 (c)
     else                                              # 3s
-        phi_b / phi_a <= _T2 && return mean - sd * _urs_a_b(-beta, -alpha)          # 3s (a)
-        beta > -_T3 && return mean - sd * _hnrs_a_b(-beta, -alpha)                   # 3s (b)
-        return mean - sd * _ers_a_b(-beta, -alpha)    # 3s (c)
+        phi_b / phi_a <= _T2 && return mean - SimLev.nan_mul(sd, _urs_a_b(-beta, -alpha))   # 3s (a)
+        beta > -_T3 && return mean - SimLev.nan_mul(sd, _hnrs_a_b(-beta, -alpha))            # 3s (b)
+        return mean - SimLev.nan_mul(_ers_neg(beta, -alpha), sd)                             # 3s (c)
     end
 end
 

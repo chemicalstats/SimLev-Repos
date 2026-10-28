@@ -1228,6 +1228,15 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
             _stop("Bei einem SimLevResult ist 'inflation' ein Prozentsatz p. a.")
         x = withdrawal_cohorts(x, inflation=inflation, years=30 if years is None else years,
                                frequency=_match_arg(freq_arg, _DEF_FREQ))
+    elif "SimLevWrapperNav" in (getattr(x, "r_class", None) or ()):   # Anteilswert eines Fonds-Wrappers (wrapper_nav())
+        if not (_is_num(inflation)):
+            _stop("Bei einem SimLevWrapperNav ist 'inflation' ein Prozentsatz p. a.")
+        x = withdrawal_cohorts(x, price="nav", inflation=inflation, years=30 if years is None else years,
+                               frequency=_match_arg(freq_arg, _DEF_FREQ))
+    elif isinstance(x, pd.DataFrame) and "date" in [str(c) for c in x.columns]:   # Kurstabelle (Etappe 8.0)
+        _stop("x ist eine Tabelle mit Spalte 'date' (z. B. ein Ausschnitt aus wrapper_nav(), der eine gewöhnliche "
+              "Tabelle ist); Kurse zuerst mit withdrawal_cohorts(x, price = \"<Kursspalte>\") in Renditen umwandeln "
+              "oder das ganze Ergebnis von wrapper_nav() übergeben.")
     elif _is_study(x) or _is_result_list(x):
         if not _is_study(x):
             lst = list(x.values()) if isinstance(x, Mapping) else list(x)

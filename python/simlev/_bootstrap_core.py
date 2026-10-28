@@ -201,7 +201,7 @@ def _stationary_dist(P: np.ndarray):
             nw[j] = v
             s += v
         for j in range(K):
-            nw[j] /= s
+            nw[j] = _c_div(nw[j], s)            # s = 0 (Zeilen ohne Masse): Inf/NaN wie C
             diff += abs(nw[j] - pi[j])
         pi = list(nw)
         if diff < 1e-12:
@@ -301,7 +301,9 @@ def boot_wild(returns, type: int) -> np.ndarray:  # noqa: A002
     for j in range(k):
         s = 0.0
         for i in range(n):
-            s += float(X[i, j])
+            x = float(X[i, j])
+            t = s + x
+            s = t if t == t else _n_add(s, x)    # NaN: s + x wie im R-Bau (siehe _n_add)
         mu[j] = s / n if n else math.nan        # n = 0: in C 0/0 (ohne Folgen, keine Zeilen)
     s5 = math.sqrt(5.0)
     mp = (s5 + 1.0) / (2.0 * s5)
@@ -321,7 +323,9 @@ def boot_wild(returns, type: int) -> np.ndarray:  # noqa: A002
             w[i] = mneg if _rng.runif1(0, 1) < mp else mpos
         else:
             w[i] = _rng.rnorm1(0.0, 1.0)
-    return mu[None, :] + (X - mu[None, :]) * w[:, None]
+    # R-Bau: ((x - mu) * w) + mu, bei zwei NaN behält er das von (x - mu) * w
+    P = (X - mu[None, :]) * w[:, None]
+    return np.where(np.isnan(P), P, P + mu[None, :])
 
 
 def boot_reset(returns, p_break: float) -> np.ndarray:
@@ -353,7 +357,11 @@ def _rgpd(scale: float, shape: float) -> float:
         u = 1e-300
     if abs(shape) < 1e-10:
         return -scale * math.log(u)
-    return scale * (math.pow(u, -shape) - 1.0) / shape
+    try:
+        pw = math.pow(u, -shape)
+    except OverflowError:                       # C: pow liefert Inf
+        pw = math.inf
+    return scale * (pw - 1.0) / shape
 
 
 def boot_evt(returns, base: int, n_out: int,
@@ -395,7 +403,7 @@ def boot_evt(returns, base: int, n_out: int,
                 rb = thresh_r + _rgpd(scale_r, shape_r)
                 j = pr[_draw_int(nr)] - 1
             for c in range(k):
-                out[t, c] = rb if c == base else rb * float(X[j, c]) / float(X[j, base])
+                out[t, c] = rb if c == base else _c_div(rb * float(X[j, c]), float(X[j, base]))
             idx[t] = j + 1
         else:
             j = b[_draw_int(nb)] - 1
@@ -435,15 +443,29 @@ class _Cross:
         self.eps = [0.0] * self.m
 
     def step(self, out, t, base_ret, z_cross, tstar):
+        # NaN: Operandenfolge des R-Baus (step_cross): ((al * eps) * eps + om) + be * s2,
+        # sqrt(s2) * z, (mu + 1.0) + e, g * base_ret
         for c in range(self.m):
-            s2 = self.om[c] + self.al[c] * self.eps[c] * self.eps[c] + self.be[c] * self.s2[c]
+            ep = self.eps[c]
+            s2 = self.om[c] + self.al[c] * ep * ep + self.be[c] * self.s2[c]
+            if s2 != s2:
+                s2 = _n_add(_n_add(_n_mul(_n_mul(self.al[c], ep), ep), self.om[c]), _n_mul(self.be[c], self.s2[c]))
             if s2 < 1e-14:
                 s2 = 1e-14
             self.s2[c] = s2
-            e = math.sqrt(s2) * float(z_cross[tstar, c])
+            z = float(z_cross[tstar, c])
+            e = math.sqrt(s2) * z
+            if e != e:
+                e = _n_mul(math.sqrt(s2), z)
             self.eps[c] = e
             g = 1.0 + self.mu[c] + e
-            out[t, self.col[c]] = base_ret * g if self.ratio[c] else g
+            if g != g:
+                g = _n_add(_n_add(self.mu[c], 1.0), e)
+            if self.ratio[c]:
+                g2 = base_ret * g
+                out[t, self.col[c]] = g2 if g2 == g2 else _n_mul(g, base_ret)
+            else:
+                out[t, self.col[c]] = g
 
 
 def boot_garch(n_out, base, k, mu, omega, alpha, beta, gamma, s2_init, z_base, valid,
@@ -476,14 +498,23 @@ def boot_garch(n_out, base, k, mu, omega, alpha, beta, gamma, s2_init, z_base, v
         _call(ext.boot_garch, st, n_out, base, kk, float(mu), float(omega), float(alpha), float(beta), float(gamma),
               s2, _f64(zb), _i32(v), *_cross_args(cs, zc), ret, ix)
         return {"ret": _from_f(ret, n_out, kk), "idx": ix.astype(np.int64)}
+    # NaN: Operandenfolge des R-Baus (C_boot_garch): (gamma * ind + alpha) * eps * eps + omega
+    # + s2 * beta, sqrt(s2) * z, (1.0 + mu) + eps
     for t in range(n_out):
         ind = 1.0 if eps < 0.0 else 0.0
-        s2 = omega + (alpha + gamma * ind) * eps * eps + beta * s2
+        s2n = omega + (alpha + gamma * ind) * eps * eps + beta * s2
+        if s2n != s2n:
+            s2n = _n_add(_n_add(_n_mul(_n_mul(_n_add(gamma * ind, alpha), eps), eps), omega), _n_mul(s2, beta))
+        s2 = s2n
         if s2 < 1e-14:
             s2 = 1e-14
         ts = v[_draw_int(nv)] - 1
         eps = math.sqrt(s2) * zb[ts]
+        if eps != eps:
+            eps = _n_mul(math.sqrt(s2), zb[ts])
         rb = 1.0 + mu + eps
+        if rb != rb:
+            rb = _n_add(1.0 + mu, eps)
         out[t, base] = rb
         cs.step(out, t, rb, zc, ts)
         idx[t] = ts + 1
@@ -564,9 +595,16 @@ def boot_ms_garch(n_out, base, k, K, mu, omega, alpha, beta, gamma, phi, lam,
                     pr[j] = float(T[old, j])
             r = _draw_from(pr, K)
             if r != old:
-                s2 = 0.5 * s2 + 0.5 * uv[r]
+                s2n = 0.5 * s2 + 0.5 * uv[r]
+                s2 = s2n if s2n == s2n else _n_add(0.5 * uv[r], 0.5 * s2)
+        # NaN: Operandenfolge des R-Baus (C_boot_ms_garch): (ind * gamma + alpha) * eps * eps
+        # + omega + s2 * beta, z * sig, ((prev * phi) + mu) + sig * lambda, m + eps, ex + 1.0
         ind = 1.0 if eps < 0.0 else 0.0
-        s2 = omega[r] + (alpha[r] + gamma[r] * ind) * eps * eps + beta[r] * s2
+        s2n = omega[r] + (alpha[r] + gamma[r] * ind) * eps * eps + beta[r] * s2
+        if s2n != s2n:
+            s2n = _n_add(_n_add(_n_mul(_n_mul(_n_add(_n_mul(ind, gamma[r]), alpha[r]), eps), eps), omega[r]),
+                         _n_mul(s2, beta[r]))
+        s2 = s2n
         if s2 < 1e-14:
             s2 = 1e-14
         sig = math.sqrt(s2)
@@ -578,8 +616,14 @@ def boot_ms_garch(n_out, base, k, K, mu, omega, alpha, beta, gamma, phi, lam,
                     break
         ts = p[_draw_int(len(p))]
         eps = sig * zb[ts]
+        if eps != eps:
+            eps = _n_mul(zb[ts], sig)
         m = mu[r] + phi[r] * prev + lam[r] * sig
+        if m != m:
+            m = _n_add(_n_add(_n_mul(prev, phi[r]), mu[r]), _n_mul(sig, lam[r]))
         ex = m + eps
+        if ex != ex:
+            ex = _n_add(m, eps)
         rb = 1.0 + ex
         out[t, base] = rb
         prev = ex
@@ -684,7 +728,13 @@ def garch_filter(ep, om: float, al: float, be: float, ga: float, v0: float) -> n
     v = float(v0)
     for t in range(n):
         s2[t] = v
-        v = om + (al + ga * (1.0 if e[t] < 0.0 else 0.0)) * (e[t] * e[t]) + be * v
+        gi = ga * (1.0 if e[t] < 0.0 else 0.0)
+        e2 = e[t] * e[t]
+        vn = om + (al + gi) * e2 + be * v
+        if vn != vn:
+            # NaN: Operandenfolge des R-Baus (C_garch_filter): ((ga * ind + al) * e^2 + om) + v * be
+            vn = _n_add(_n_add(_n_mul(_n_add(gi, al), e2), om), _n_mul(v, be))
+        v = vn
         if v < 1e-14:
             v = 1e-14
     return s2

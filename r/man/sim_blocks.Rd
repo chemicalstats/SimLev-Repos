@@ -19,17 +19,19 @@
 \alias{print.SimLevIncomeTariff}
 \alias{print.SimLevHarvestRule}
 \alias{print.SimLevFundsCosts}
-\title{Bausteine für simulation(): Kosten, Sparplan, Rebalancing, Splits, Steuern, Fondsmodus}
+\title{Bausteine für simulation(): Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten}
 \description{
 Die Einstellungen von \code{\link{simulation}} werden als Bausteine übergeben:
 \code{costs = sim_costs()}, \code{dca = dca_plan()}, \code{rebalance = rebalance_plan()},
 \code{splits = split_rule()}, \code{tax = tax_profile()} (mit \code{income = income_rate()} oder
-\code{income_tariff()} und \code{harvest = harvest_rule()}) und \code{funds = funds_costs()}.
-\code{NULL} heißt aus (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern, kein
-Fondsmodus). Jeder Baustein prüft seine Argumente beim Anlegen (deutsche Fehlermeldungen und
+\code{income_tariff()} und \code{harvest = harvest_rule()}).
+\code{NULL} heißt aus (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim Anlegen (deutsche Fehlermeldungen und
 Warnungen) und druckt eine kurze Zusammenfassung. \code{simulation()} prüft nur noch das
 Zusammenspiel mit den Daten (z. B. ob die Spalte \code{event_col} in \code{data} steht oder ob
 \code{start} im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
+
+\code{funds_costs()} ist der Kostenbaustein des Fonds-Wrappers
+(\code{\link{wrapper_config}(costs = funds_costs())}); \code{simulation()} nimmt ihn nicht an.
 }
 \usage{
 sim_costs(order_fee = NULL, dca_fee = NULL)
@@ -283,17 +285,15 @@ funds_costs(fee = 0.95, performance_fee = 5)
     \code{TRUE}.
   }
   \item{fee}{
-    \code{funds_costs}: Jährliche Fondskostenquote \strong{in Prozent} (z. B. \code{0.95}).
-    Täglich auf den Wert jedes Assets abgegrenzt (linearer Tagessatz \code{fee / 100} geteilt
-    durch die Kalendertage des Jahres); belastet am 31.12. und anteilig am letzten
-    Simulationstag; fehlendes Cash per Teilverkauf ohne Ordergebühr und Spread. Zulässig 0 bis
-    100 (sonst Fehler). Standard: \code{0.95}.
+    \code{funds_costs}: Jährliche Verwaltungsgebühr (Fondskostenquote) \strong{in Prozent}
+    (z. B. \code{0.95}), im Wrapper täglich je Kalendertag vom Anteilswert abgezogen.
+    Zulässig 0 bis 100 (sonst Fehler). Standard: \code{0.95}.
   }
   \item{performance_fee}{
-    \code{funds_costs}: Jährliche Performancegebühr \strong{in Prozent} des Wertzuwachses
-    über dem bisherigen Höchststand (High-Watermark ab \code{start_value}, erhöht um
-    Sparplan-Einzahlungen; nach einer Belastung gilt der Wert nach Abzug der Gebühren als neuer
-    Höchststand). Zulässig 0 bis 100 (sonst Fehler). Standard: \code{5}.
+    \code{funds_costs}: Performancegebühr \strong{in Prozent} des Wertzuwachses des
+    Anteilswerts über dem Höchststand (High-Water-Mark über die ganze Laufzeit); im Wrapper
+    täglich abgegrenzt und am letzten Datentag jedes Kalenderjahres festgeschrieben.
+    Zulässig 0 bis 100 (sonst Fehler). Standard: \code{5}.
   }
   \item{x}{Ein Baustein.}
   \item{...}{Weitere Argumente (ignoriert).}
@@ -313,11 +313,16 @@ funds_costs(fee = 0.95, performance_fee = 5)
   (auch am ersten Simulationstag und am Starttag später startender Assets wird dann über das
   Rebalancing gekauft); nur mit \code{event_col}, \code{event_mode = "replace"} und
   \code{skip = TRUE} wird ausschließlich an Ereignistagen umgeschichtet.
-  \code{tax = tax_profile()} steht für die persönliche Besteuerung, \code{funds = funds_costs()}
-  für den Fondsmodus (pauschale Fondsbesteuerung mit Steuer auf den Gesamtgewinn bei
-  \code{liquidate = TRUE}). Fondsmodus mit eigenen Steuern: \code{funds = funds_costs()} zusammen
-  mit \code{tax = tax_profile(rate)} bzw. \code{tax_profile(church_tax)}; dann gilt dieser Satz statt
-  \code{26.375} \% (siehe \code{\link{simulation}}, Argument \code{funds}).
+  \code{tax = tax_profile()} steht für die persönliche Besteuerung.
+}
+\section{Fondskosten}{
+  \code{funds_costs(fee, performance_fee)} ist der Kostenbaustein des Fonds-Wrappers:
+  \code{\link{wrapper_config}(strategy, costs = funds_costs(...))}. Die Rechnung
+  (Verwaltungsgebühr je Kalendertag, Performancegebühr gegen die High-Water-Mark) steht
+  in \code{\link{wrapper_nav}}. \code{print()} zeigt die Überschrift
+  \dQuote{Fondskosten (funds_costs)}. Der frühere Fondsmodus
+  \code{simulation(funds = funds_costs())} ist entfernt; \code{simulation(funds = )} ergibt
+  den Fehler für ein unbekanntes Argument.
 }
 \examples{
 dca_plan(200, 1)
@@ -335,5 +340,5 @@ r$tax_report$total_taxes_paid
 }
 \seealso{
   \code{\link{simulation}}, \code{\link{asset_config}}, \code{\link{rebalance_trigger}},
-  \code{\link{tax_tariff}}
+  \code{\link{tax_tariff}}, \code{\link{wrapper_config}}
 }

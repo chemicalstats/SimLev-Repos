@@ -57,8 +57,7 @@ d30 <- data.frame(date = mk_dates("1995-01-01", n30), W = gbm(n30, 100, 3e-4, 0.
 s30 <- create_strategy(W = ac("etf", "bnh", 0.5, 0.1, 30), B = ac("etf", "bnh", 0.3, 0.05, 0), L = ac("etn", "bnh", 0.2, 0.3, 0))
 run_case("x01_30y_dca_rebal_tax", d30, s30, list(start_value = 25000, dca_mode = TRUE, dca_value = 500, dca_span = 1,
          dca_unit = "month", balance_mode = TRUE, balance_unit = "year", tax_mode = "person", base_rate = 2.55, liquidate = TRUE))
-run_case("x02_30y_funds_split_int", d30, s30, list(start_value = 1e6, tax_mode = "funds", split_mode = TRUE,
-         split_thresh = c(10, 500), fractions = FALSE, balance_mode = TRUE, balance_unit = "quarter", balance_thresh = 2))
+# x02_30y_funds_split_int: Fondsmodus, entfernt in Etappe 6.5c
 run_case("x03_30y_details", d30[1:(365*8), ], s30, list(details = TRUE, start_value = 80000, tax_mode = "person",
          marginal_tax_rate = 45, use_guenstigerpruefung = TRUE, balance_mode = TRUE, balance_unit = "month", base_rate = 1.2))
 # Totalverlust-nahe Hebelreihe (Kurs faellt auf ~1e-4 * Start)
@@ -96,7 +95,7 @@ run_case("x14_tax0_bonus60", d30[1:3000, ], create_strategy(W = ac("etf", "bnh",
          list(tax_rate = 0, tax_mode = "person", base_rate = 6))
 run_case("x15_taxrate_odd", d30[1:3000, ], s30, list(tax_rate = 27.99, tax_mode = "person", sparer_pauschbetrag = 1,
          base_rate = 0.01, dca_mode = TRUE, dca_value = 0.01, dca_span = 1))
-run_case("x16_funds_fee_high", d30[1:2000, ], s30, list(tax_mode = "funds", funds_fee = 9.99, bonus_fee = 99, liquidate = TRUE))
+# x16_funds_fee_high: Fondsmodus, entfernt in Etappe 6.5c
 # Kalender-Randfaelle
 dl <- data.frame(date = seq.Date(as.Date("2015-12-31"), as.Date("2024-03-01"), by = "day"))
 set.seed(5); dl$X <- gbm(nrow(dl), 80, 3e-4, 0.01); dl$Y <- gbm(nrow(dl), 40, 1e-4, 0.004)
@@ -172,6 +171,7 @@ for (k in seq_len(n_random)) {
     a$event_mode <- pick(c("additional", "replace")); if (runif(1) < 0.5) a$balance_mode <- TRUE
     if (runif(1) < 0.4) { for (i in seq_along(nms)) df[[paste0("w", i)]] <- runif(nrow(df)); a$event_weight <- setNames(as.list(paste0("w", seq_along(nms))), nms) } }
   if (runif(1) < 0.1) a$details <- TRUE
+  if (tm == "funds") next   # Fondsmodus entfernt (Etappe 6.5c): Fall entfällt, Ziehungen oben bleiben
   run_case(sprintf("y%04d", k), df, st, a)
 }
 cat("fertig\n")

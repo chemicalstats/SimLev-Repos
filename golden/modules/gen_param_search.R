@@ -56,21 +56,21 @@ ref_case("design_disc", "set.seed(5); sp <- param_space(a = c(1, 2), b = c('u', 
          py("rng.set_seed(5); sp = PS.param_space(a=[1.0, 2.0], b=['u', 'v', 'w']); result = [PS._ps_design(sp, 'random', 10, None), rng.runif(1)]"), jl = jl('SL.RRng.set_seed(5); sp = PS.param_space(a = [1.0, 2.0], b = ["u", "v", "w"]); result = [PS._ps_design(sp, "random", 10, nothing), SL.RRng.runif(1)]'))
 ref_case("design_lhs1", "set.seed(6); sp <- param_space(a = param_range(0, 1)); list(SimLev:::.ps_design(sp, 'lhs', 1, NULL), SimLev:::.ps_design(sp, 'lhs', 3, NULL))",
          py("rng.set_seed(6); sp = PS.param_space(a=PS.param_range(0, 1)); result = [PS._ps_design(sp, 'lhs', 1, None), PS._ps_design(sp, 'lhs', 3, None)]"), jl = jl('SL.RRng.set_seed(6); sp = PS.param_space(a = PS.param_range(0, 1)); result = [PS._ps_design(sp, "lhs", 1, nothing), PS._ps_design(sp, "lhs", 3, nothing)]'))
-ref_case("as_spec", "st <- create_strategy(A = asset_config('etf', 'bnh')); list(SimLev:::.as_spec(st), SimLev:::.as_spec(list(strategy = st, args = list(a = 1))), SimLev:::.as_spec(list(a = 1)))",
-         py("st = create_strategy(A=asset_config(asset_class='etf', trading='bnh')); result = [PS._as_spec(st), PS._as_spec({'strategy': st, 'args': {'a': 1}}), PS._as_spec({'a': 1})]"), jl = jl('st = create_strategy("A" => asset_config("etf", "bnh")); result = [PS._as_spec(st), PS._as_spec(RList("strategy" => st, "args" => RList("a" => 1))), PS._as_spec(RList("a" => 1))]'))
+ref_case("as_spec", "st <- create_strategy(A = asset_config('etf', 'bnh', spread = 0.1)); list(SimLev:::.as_spec(st), SimLev:::.as_spec(list(strategy = st, args = list(a = 1))), SimLev:::.as_spec(list(a = 1)))",
+         py("st = create_strategy(A=asset_config(asset_class='etf', trading='bnh', spread=0.1)); result = [PS._as_spec(st), PS._as_spec({'strategy': st, 'args': {'a': 1}}), PS._as_spec({'a': 1})]"), jl = jl('st = create_strategy("A" => asset_config("etf", "bnh", spread = 0.1)); result = [PS._as_spec(st), PS._as_spec(RList("strategy" => st, "args" => RList("a" => 1))), PS._as_spec(RList("a" => 1))]'))
 
 # ── Daten für Suchen ────────────────────────────────────────────────────────
 set.seed(1); n <- 600
 d <- data.frame(date = seq.Date(as.Date("2012-01-30"), by = "day", length.out = n))
 d$A <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.011)); d$B <- 100 * cumprod(1 + rnorm(n, 1e-4, 0.004))
 I <- list(d = d)
-RS <- "st <- create_strategy(A = asset_config('etf', 'signal', signal_buy = 'buy', signal_sell = 'sell'))
+RS <- "st <- create_strategy(A = asset_config('etf', 'signal', signal_buy = 'buy', signal_sell = 'sell', spread = 0.1))
 b <- function(p) list(strategy = st, signal = function(df) signal_sma(df$A, p$n, p$band))
-st2 <- create_strategy(A = asset_config('etf', 'bnh', 0.5), B = asset_config('etf', 'bnh', 0.5))\n"
-PSS <- "st = create_strategy(A=asset_config(asset_class='etf', trading='signal', signal_buy='buy', signal_sell='sell'))
+st2 <- create_strategy(A = asset_config('etf', 'bnh', 0.5, spread = 0.1), B = asset_config('etf', 'bnh', 0.5, spread = 0.1))\n"
+PSS <- "st = create_strategy(A=asset_config(asset_class='etf', trading='signal', signal_buy='buy', signal_sell='sell', spread=0.1))
 def b(p):
     return {'strategy': st, 'signal': lambda df: SG.signal_sma(df['A'], n=p['n'], band=p['band'])}
-st2 = create_strategy(A=asset_config(asset_class='etf', trading='bnh', share=0.5), B=asset_config(asset_class='etf', trading='bnh', share=0.5))
+st2 = create_strategy(A=asset_config(asset_class='etf', trading='bnh', share=0.5, spread=0.1), B=asset_config(asset_class='etf', trading='bnh', share=0.5, spread=0.1))
 def z(x):
     x['elapsed'] = 0.0
     return x
@@ -78,9 +78,9 @@ def dropE(s):
     s['best'] = s['best'].drop(columns='error'); s['best_plateau'] = s['best_plateau'].drop(columns='error')
     return s
 "
-PSJ <- 'st = create_strategy("A" => asset_config("etf", "signal"; signal_buy = "buy", signal_sell = "sell"))
+PSJ <- 'st = create_strategy("A" => asset_config("etf", "signal"; signal_buy = "buy", signal_sell = "sell", spread = 0.1))
 b(p) = RList("strategy" => st, "signal" => df -> SL.Signals.signal_sma(df["A"]; n = p["n"], band = p["band"]))
-st2 = create_strategy("A" => asset_config("etf", "bnh", 0.5), "B" => asset_config("etf", "bnh", 0.5))
+st2 = create_strategy("A" => asset_config("etf", "bnh", 0.5, spread = 0.1), "B" => asset_config("etf", "bnh", 0.5, spread = 0.1))
 z(x) = (x["elapsed"] = 0.0; x)
 dropcol(f, c) = RFrame([k => f[k] for k in names(f) if k != c]...)
 dropE(s) = (s["best"] = dropcol(s["best"], "error"); s["best_plateau"] = dropcol(s["best_plateau"], "error"); s)
@@ -147,14 +147,14 @@ ps_case("ps_metric1", "z(param_search(d, b, param_space(n = c(10, 20), band = 0)
 ps_case("ps_minimize", "x <- z(param_search(d, b, param_space(n = c(10, 20, 40), band = c(0, 2)), objective = 'max_drawdown', maximize = FALSE, burn_in = 50)); list(x, param_plateau(x))",
         "x = z(PS.param_search(d, b, PS.param_space(n=[10.0, 20.0, 40.0], band=[0.0, 2.0]), objective='max_drawdown', maximize=False, burn_in=50)); result = [x, PS.param_plateau(x)]",
         'x = z(PS.param_search(d, b, PS.param_space(n = [10.0, 20.0, 40.0], band = [0.0, 2.0]); objective = "max_drawdown", maximize = false, burn_in = 50)); result = [x, PS.param_plateau(x)]')
-ps_case("ps_spec", "bs <- function(p) list(strategy = create_strategy(L = asset_config('etf', 'bnh')), data = function(df) { df$L2 <- series_leverage(df, 'A', p$lev); df }, map = c(L = 'L2'), args = list(start_value = p$sv))
+ps_case("ps_spec", "bs <- function(p) list(strategy = create_strategy(L = asset_config('etf', 'bnh', spread = 0.1)), data = function(df) { df$L2 <- series_leverage(df, 'A', p$lev); df }, map = c(L = 'L2'), args = list(start_value = p$sv))
   z(param_search(d, bs, param_space(lev = c(1, 2), sv = c(1000, 5000)), sim_args = list(start_value = 1)))",
-        "import simlev.sensitivity as SE\ndef bs(p):\n    def dat(df):\n        df = df.copy(); df['L2'] = SE.series_leverage(df, 'A', leverage=p['lev']); return df\n    return {'strategy': create_strategy(L=asset_config(asset_class='etf', trading='bnh')), 'data': dat, 'map': {'L': 'L2'}, 'args': {'start_value': p['sv']}}\nresult = z(PS.param_search(d, bs, PS.param_space(lev=[1.0, 2.0], sv=[1000.0, 5000.0]), sim_args={'start_value': 1}))",
-        'bs(p) = RList("strategy" => create_strategy("L" => asset_config("etf", "bnh")), "data" => df -> (df["L2"] = SL.Sensitivity.series_leverage(df, "A"; leverage = p["lev"]); df), "map" => named("L" => "L2"), "args" => RList("start_value" => p["sv"]))
+        "import simlev.sensitivity as SE\ndef bs(p):\n    def dat(df):\n        df = df.copy(); df['L2'] = SE.series_leverage(df, 'A', leverage=p['lev']); return df\n    return {'strategy': create_strategy(L=asset_config(asset_class='etf', trading='bnh', spread=0.1)), 'data': dat, 'map': {'L': 'L2'}, 'args': {'start_value': p['sv']}}\nresult = z(PS.param_search(d, bs, PS.param_space(lev=[1.0, 2.0], sv=[1000.0, 5000.0]), sim_args={'start_value': 1}))",
+        'bs(p) = RList("strategy" => create_strategy("L" => asset_config("etf", "bnh", spread = 0.1)), "data" => df -> (df["L2"] = SL.Sensitivity.series_leverage(df, "A"; leverage = p["lev"]); df), "map" => named("L" => "L2"), "args" => RList("start_value" => p["sv"]))
 result = z(PS.param_search(d, bs, PS.param_space(lev = [1.0, 2.0], sv = [1000.0, 5000.0]); sim_args = RList("start_value" => 1)))')
-ps_case("ps_plainstrat", "z(param_search(d, function(p) create_strategy(A = asset_config('etf', 'bnh', p$w), B = asset_config('etf', 'bnh', 1 - p$w)), param_space(w = c(0.3, 0.7))))",
-        "result = z(PS.param_search(d, lambda p: create_strategy(A=asset_config(asset_class='etf', trading='bnh', share=p['w']), B=asset_config(asset_class='etf', trading='bnh', share=1 - p['w'])), PS.param_space(w=[0.3, 0.7])))",
-        'result = z(PS.param_search(d, p -> create_strategy("A" => asset_config("etf", "bnh", p["w"]), "B" => asset_config("etf", "bnh", 1 - p["w"])), PS.param_space(w = [0.3, 0.7])))')
+ps_case("ps_plainstrat", "z(param_search(d, function(p) create_strategy(A = asset_config('etf', 'bnh', p$w, spread = 0.1), B = asset_config('etf', 'bnh', 1 - p$w, spread = 0.1)), param_space(w = c(0.3, 0.7))))",
+        "result = z(PS.param_search(d, lambda p: create_strategy(A=asset_config(asset_class='etf', trading='bnh', share=p['w'], spread=0.1), B=asset_config(asset_class='etf', trading='bnh', share=1 - p['w'], spread=0.1)), PS.param_space(w=[0.3, 0.7])))",
+        'result = z(PS.param_search(d, p -> create_strategy("A" => asset_config("etf", "bnh", p["w"], spread = 0.1), "B" => asset_config("etf", "bnh", 1 - p["w"], spread = 0.1)), PS.param_space(w = [0.3, 0.7])))')
 ps_case("ps_sigdf", "sgd <- function(p) list(strategy = st, signal = function(df) { s <- signal_sma(df$A, p$n); df$buy <- s$buy; df$sell <- s$sell; df })
   z(param_search(d, sgd, param_space(n = c(10, 20)), burn_in = 25))",
         "def sgd(p):\n    def sg(df):\n        s = SG.signal_sma(df['A'], n=p['n']); df = df.copy(); df['buy'] = s['buy']; df['sell'] = s['sell']; return df\n    return {'strategy': st, 'signal': sg}\nresult = z(PS.param_search(d, sgd, PS.param_space(n=[10.0, 20.0]), burn_in=25))",

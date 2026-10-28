@@ -2,8 +2,8 @@
 # häufigen Wege der Erweiterungen – für die hier benutzten Argumenttypen –
 # landet im Paket-Cache. Das verkürzt den ersten Aufruf von simulation(),
 # bootstrap() (stationär, GARCH über den rugarch-Weg), bootstrap_study(),
-# der MS-GARCH-Schätzung, withdrawal_simulation(), portfolio_optimize() und
-# result_analysis() deutlich, macht ihn aber nicht so schnell wie spätere
+# der MS-GARCH-Schätzung, withdrawal_simulation(), portfolio_optimize(),
+# result_analysis() und des Fonds-Wrappers (wrapper_nav(), Wrapper-Asset) deutlich, macht ihn aber nicht so schnell wie spätere
 # Aufrufe: Laden des Caches, Laufzeit-Dispatch und Methoden für andere
 # Argumenttypen (oder Pfade, die die Arbeitslast nicht berührt) kosten beim
 # ersten Aufruf weiterhin Übersetzungszeit.
@@ -123,7 +123,7 @@ function _precompile_engine()
         simulation(data, s3; tax = tax_profile(; income = income_rate(42), guenstigerpruefung = true),
                    rebalance = rebalance_plan(; unit = "quarter", thresh = 2, event_col = "ev", event_weight = (A = "w1",)),
                    splits = split_rule([50, 200]), fractions = false, risk_free = 2, details = det, io = io)
-        simulation(data, s2; funds = funds_costs(), liquidate = true,
+        simulation(data, s2; liquidate = true,
                    dca = dca_plan(50.0, 1; days = [1, 15], unit = "month"),
                    rebalance = rebalance_plan(; days = 31, anchor = "end"), risk_free = "br", details = det, io = io)
         simulation(data, s2; tax = tax_profile(; base_rate = "br"), io = io)
@@ -136,6 +136,12 @@ function _precompile_engine()
               income_tariff(50000), harvest_rule(), funds_costs())
         sprint(show, MIME"text/plain"(), b)
     end
+    # Fonds-Wrapper (Etappe 6.5c): Anteilswert und Wrapper-Asset in simulation()
+    w = wrapper_config(s2; rebalance = rebalance_plan(; unit = "quarter"), costs = funds_costs(0.95, 10))
+    sprint(show, MIME"text/plain"(), w)
+    sprint(show, MIME"text/plain"(), wrapper_nav(data, w))
+    simulation(data, create_strategy(Z = asset_config("certificate"; share = 0.7, wrapper = w),
+                                     C = asset_config("etf", "bnh", 0.3)); tax = tax_profile(), io = io)
     gaps = (date = dates[1:2:end], A = px(0.5, 0.05)[1:2:end])
     simulation(gaps, create_strategy(A = asset_config("etf", "bnh", 1.0, 0.1, 30)); io = io)
     rebalance_trigger((date = dates, target_leverage = px(0.1, 0.2) ./ 50), "abs_leverage")

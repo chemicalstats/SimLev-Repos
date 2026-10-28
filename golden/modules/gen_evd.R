@@ -193,9 +193,9 @@ BS("evt_ess", C2_R, C2_P, C2_J, "d2", "cfg2", ", ess = TRUE, ess_grid = list(tai
 set.seed(1); ns <- 2 * 365
 ds <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = ns))
 ds$aktien <- 100 * cumprod(1 + 0.01 * rt(ns, 3) / sqrt(3)); ds$zins <- 2
-SR <- "cfgs <- bootstrap_config(c(akt = 'aktien'), aux = c(zins = 'zins'), input = 'prices')\nstrats <- list(bnh = create_strategy(akt = asset_config('etf', 'bnh')))\n"
-SP <- "import simlev\ncfgs = bootstrap_config({'akt': 'aktien'}, aux={'zins': 'zins'}, input='prices')\nstrats = {'bnh': simlev.create_strategy(akt=simlev.asset_config(asset_class='etf', trading='bnh'))}\n"
-SJ <- 'cfgs = bootstrap_config((akt = "aktien",), aux = (zins = "zins",), input = "prices")\nstrats = (bnh = create_strategy(akt = asset_config("etf", "bnh")),)\n'
+SR <- "cfgs <- bootstrap_config(c(akt = 'aktien'), aux = c(zins = 'zins'), input = 'prices')\nstrats <- list(bnh = create_strategy(akt = asset_config('etf', 'bnh', spread = 0.1)))\n"
+SP <- "import simlev\ncfgs = bootstrap_config({'akt': 'aktien'}, aux={'zins': 'zins'}, input='prices')\nstrats = {'bnh': simlev.create_strategy(akt=simlev.asset_config(asset_class='etf', trading='bnh', spread=0.1))}\n"
+SJ <- 'cfgs = bootstrap_config((akt = "aktien",), aux = (zins = "zins",), input = "prices")\nstrats = (bnh = create_strategy(akt = asset_config("etf", "bnh", spread = 0.1)),)\n'
 case("study_evt", paste0(SR, "st <- bootstrap_study(ds, cfgs, 'evt', n = 2, path_length = 300, seed = 1, progress = FALSE, strategies = strats, params = list(both_tails = TRUE)); st$elapsed <- 0; st"),
      paste0(SP, "st = bootstrap_study(ds, cfgs, 'evt', n=2, path_length=300, seed=1, progress=False, strategies=strats, params={'both_tails': True}); st['elapsed'] = 0; result = st"), list(ds = ds),
      jl = paste0(SJ, 'st = bootstrap_study(ds, cfgs, "evt"; n = 2, path_length = 300, seed = 1, progress = false, strategies = strats, params = (both_tails = true,)); st["elapsed"] = 0; result = st'))

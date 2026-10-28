@@ -12,7 +12,7 @@ import simlev
 from simlev import asset_config, rebalance_trigger, create_strategy, simulation, strategy_update_asset
 
 from _helpers import days, idx, sim, sim_warn
-from simlev import dca_plan, funds_costs, harvest_rule, rebalance_plan, sim_costs, split_rule, tax_profile  # Bausteine (Etappe 6.3)
+from simlev import dca_plan, harvest_rule, rebalance_plan, sim_costs, split_rule, tax_profile  # Bausteine (Etappe 6.3)
 
 approx = pytest.approx
 
@@ -31,39 +31,6 @@ def st1(**kw):
 def quiet(*a, **k):
     with contextlib.redirect_stderr(io.StringIO()):
         return simulation(*a, **k)
-
-
-def test_r1_01_funds_fee_voll_investiert():
-    r = simulation(cal("2020-01-01", "2022-12-30", A=100.0), st1(), funds=funds_costs(fee=10, performance_fee=0))
-    v = 10000.0
-    v = v - 366 * (0.1 / 366) * v
-    v = v - 365 * (0.1 / 365) * v
-    v = v - 364 * (0.1 / 365) * v
-    assert r.worth[-1] == approx(v, rel=1e-9) and r.worth[-1] < 7500
-
-
-def test_r1_02_fondssteuer_bei_liquidation():
-    def mk(end):
-        d = cal("2020-01-01", end)
-        d["A"] = 100 * 1.0005 ** np.arange(len(d))
-        return d
-
-    def run(end):
-        return simulation(mk(end), st1(), funds=funds_costs(fee=0, performance_fee=0), liquidate=True)
-
-    def g(n):
-        v = 10000 * 1.0005 ** (n - 1)
-        return v - 0.26375 * (v - 10000)
-    a, b = run("2022-12-30"), run("2022-12-31")
-    assert a.worth[-1] == approx(g(1095), rel=1e-9) and b.worth[-1] == approx(g(1096), rel=1e-9)
-    c1 = simulation(mk("2021-12-31"), st1(), funds=funds_costs(fee=1, performance_fee=0))
-    c2 = simulation(mk("2021-12-31"), st1(), funds=funds_costs(fee=1, performance_fee=0), liquidate=True)
-    assert c2.worth[-1] + c2.tax_report["total_taxes_paid"] == approx(c1.worth[-1], rel=1e-9)
-
-
-def test_r1_03_einzahlungen_kein_gewinn():
-    r = simulation(cal("2020-01-01", "2022-12-30", A=100.0), st1(), dca=dca_plan(value=1000, span=1), funds=funds_costs(fee=0, performance_fee=0), liquidate=True)
-    assert r.worth[-1] == 10000 + r.report["A"]["flows"].sum() and r.tax_report["total_taxes_paid"] == 0
 
 
 def test_r1_04_dca_fee_nur_sparplankaeufe():

@@ -37,6 +37,13 @@ Frequenz stammen aus dem Objekt (\code{inflation} und
 Produktkosten (1.05 = +5 Prozent); keine negativen Werte, Median >= 0.5.}
 \item{\code{SimLevResult}}{historische Kohorten ueber dessen Verlauf,
 Laenge \code{years} (Standard 30 Jahre).}
+\item{\code{SimLevWrapperNav}}{Anteilswert eines Fonds-Wrappers aus
+\code{\link[=wrapper_nav]{wrapper_nav()}}: historische Kohorten ueber die Spalte \code{nav}
+wie \code{withdrawal_cohorts(x, price = "nav")}, Laenge \code{years} (Standard 30 Jahre).
+Nur das ganze Objekt: Ein Ausschnitt (\code{x[i, ]}, \code{head()},
+\code{subset()}) ist ein gewoehnlicher \code{data.frame}; Tabellen mit
+Spalte \code{date} ergeben einen Fehler mit Hinweis auf
+\code{withdrawal_cohorts(x, price = "nav")}.}
 \item{Liste von \code{SimLevResult} oder \code{SimLevBootstrapStudy}}{
 (mit \code{keep_returns}; Strategie ueber \code{strategy}) je
 Element bzw. Studienpfad ein Pfad.}

@@ -54,6 +54,10 @@ end
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Fonds-Wrapper (Etappe 6.5c, Port von test-wrapper.R)
+include("wrapper_tests.jl")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # match.arg-Meldungen wortgleich zu R 4.3.3 (mit Rscript geprüft)
 @testset "match_arg wie R" begin
     d = (date = collect(Date(2020, 1, 1):Day(1):Date(2020, 2, 19)), A = 100.0 .+ (1:50))
@@ -87,6 +91,10 @@ include("api_tests.jl")
 # ─────────────────────────────────────────────────────────────────────────────
 # Eigene MS-GARCH-Schätzung (Port von r/tests/testthat/test-ms-garch.R)
 include("ms_garch_tests.jl")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NaN-Randfälle der Ports bitgleich zu R (Etappe 8.0)
+include("nan_kerne_tests.jl")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # par_lapply: Fork-Semantik, Threads, Ausgaben je Aufgabe (Etappe 5)

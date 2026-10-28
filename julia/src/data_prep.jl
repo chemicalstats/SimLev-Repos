@@ -1121,7 +1121,20 @@ _rlen(v) = v === nothing ? 0 : v isa Union{AbstractVector,NamedTuple,AbstractDic
 Strategie aus einem benannten Gewichtsvektor (`RVector`, Paare, NamedTuple
 oder Dict); jedes Asset erhält `share = Gewicht`. Weitere Argumente
 gehen an `asset_config`: ein einzelner Wert gilt für alle Assets, benannte
-Vektoren werden je Asset zugeordnet.
+Vektoren werden je Asset zugeordnet. Ausnahme `wrapper` (Fonds-Wrapper aus
+`wrapper_config()`): ein `SimLevWrapperConfig` gilt für alle Assets, eine
+benannte Liste (NamedTuple, `Dict`, `RList`, Paare) Asset → `SimLevWrapperConfig`
+je Asset (Assets ohne Eintrag bleiben ohne Wrapper). Unbekannte Namen,
+Einträge, die kein `SimLevWrapperConfig` sind, und `wrapper` mit
+`trading = "signal"` für dasselbe Asset sind ein Fehler.
+
+```julia
+w = wrapper_config(create_strategy("A" => asset_config("etf", "bnh", 0.6), "B" => asset_config("etf", "bnh", 0.4));
+                   costs = funds_costs(0.5, 0))
+st = strategy_from_weights(named("fonds" => 0.8, "gold" => 0.2);
+                           asset_class = named("fonds" => "certificate", "gold" => "etc"),
+                           wrapper = (fonds = w,))          # nur "fonds" ist ein Wrapper
+```
 """
 function strategy_from_weights(weights; kwargs...)
     nms, vals = _named(weights)
@@ -1135,6 +1148,12 @@ function strategy_from_weights(weights; kwargs...)
     (any(isnan, w) || any(<=(0), w)) && error("Gewichte müssen positiv sein (Assets mit Gewicht 0 weglassen).")
     s = SimLev.r_sum(w)
     abs(s - 1) > 1e-6 && error(_sprintf("Gewichte summieren sich zu %.4f; simulation() verlangt die Summe 1 (Anteile, 0.6 = 60 %%).", s))
+    # Fonds-Wrapper (Etappe 8.0): ein SimLevWrapperConfig gilt für alle Assets, eine benannte Liste je Asset
+    wmap = Dict{String,Any}()
+    if haskey(kwargs, :wrapper)
+        wmap = _sfw_wrappers(kwargs[:wrapper], nms)
+        kwargs = pairs((; (k => v for (k, v) in kwargs if k !== :wrapper)...))
+    end
     per_asset(v) = (vn = _named(v)[1]; vn !== nothing && (_rlen(v) > 1 || (_rlen(v) == 1 && vn[1] in nms)))
     scalar(v) = v isa Union{AbstractVector,Tuple} && length(v) == 1 ? first(v) :
                 v isa Union{NamedTuple,AbstractDict} && length(v) == 1 ? first(values(v)) :
@@ -1153,9 +1172,53 @@ function strategy_from_weights(weights; kwargs...)
             (_rlen(val) == 1 && _isna(val)) && continue
             push!(a, key => val)
         end
-        push!(assets, nm => SimLev.asset_config(; share = w[i], a...))
+        wr = get(wmap, nm, nothing)
+        if wr === nothing
+            push!(assets, nm => SimLev.asset_config(; share = w[i], a...))
+            continue
+        end
+        ac = try
+            SimLev.asset_config(; share = w[i], a..., wrapper = wr)
+        catch e
+            (e isa ErrorException && e.msg == SimLev._AC_MSG_WRAPPER_SIGNAL) || rethrow()
+            error("wrapper: Asset '$nm' hat trading = \"signal\"; mit wrapper ist nur trading = \"bnh\" möglich (keine Signale auf den Anteilswert; Signale gehen in der inneren Strategie).")
+        end
+        push!(assets, nm => ac)
     end
     return SimLev.create_strategy(; assets = assets)
+end
+
+"""
+    _sfw_wrappers(wv, assets)
+
+Argument `wrapper` von `strategy_from_weights` je Asset (R: `.sfw_wrappers`, Etappe 8.0): `nothing` oder leer →
+ohne Wrapper; ein `SimLevWrapperConfig` → für alle Assets; eine benannte Liste (NamedTuple, `Dict`, `RList`,
+Paare) Asset → `SimLevWrapperConfig` → je Asset, Assets ohne Eintrag ohne Wrapper. Sonst Fehler (Reihenfolge:
+Art, Namen vorhanden, doppelte Namen, unbekannte Namen, Elemente). Ergebnis: `Dict` Asset → Wrapper.
+"""
+function _sfw_wrappers(wv, assets::Vector{String})
+    @nospecialize
+    wv === nothing && return Dict{String,Any}()
+    inherits(wv, "SimLevWrapperConfig") && return Dict{String,Any}(nm => wv for nm in assets)
+    if wv isa RFrame || !(wv isa Union{AbstractDict,NamedTuple,AbstractVector,Tuple,Pair})
+        error("wrapper muss ein Objekt aus wrapper_config() (gilt für alle Assets) oder eine benannte Liste solcher Objekte sein (Name = Asset), nicht $(SimLev._cls_all(wv)).")
+    end
+    _rlen(wv) == 0 && return Dict{String,Any}()
+    nm, vals = wv isa Tuple ? (nothing, collect(Any, wv)) : _named(wv)
+    (nm === nothing || any(k -> k == "", nm)) &&
+        error("wrapper: als Liste braucht jedes Element einen Namen (Name = Asset, z. B. list($(assets[1]) = wrapper_config(...))).")
+    dup = _duplicated(nm)
+    if any(dup)
+        u = unique(nm[dup])
+        error("wrapper: doppelte Namen $(join(("'" * k * "'" for k in u), ", ")); jedes Asset nur einmal angeben.")
+    end
+    unk = [k for k in nm if !(k in assets)]
+    isempty(unk) || error("wrapper: $(join(("'" * k * "'" for k in unk), ", ")) $(length(unk) == 1 ? "ist kein Asset der Strategie" : "sind keine Assets der Strategie") (Assets: $(join(assets, ", "))).")
+    for (k, v) in zip(nm, vals)
+        inherits(v, "SimLevWrapperConfig") ||
+            error("wrapper: Eintrag '$k' muss ein Objekt aus wrapper_config() sein, nicht $(SimLev._cls_all(v)).")
+    end
+    return Dict{String,Any}(zip(nm, vals))
 end
 
 const _PORTFOLIO_TEMPLATES = [

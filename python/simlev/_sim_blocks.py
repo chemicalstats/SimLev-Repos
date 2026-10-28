@@ -11,10 +11,11 @@ R-Klasse (``RList`` mit ``r_class``) und einer Druckausgabe wie die R-``print``-
 - ``tax_profile(rate, church_tax, sparer_pauschbetrag, private_sale_threshold, base_rate,
   guenstigerpruefung, income, harvest)`` mit ``income_rate``, ``income_tariff``, ``harvest_rule``
                                                                    → ``tax``
-- ``funds_costs(fee, performance_fee)``                            → ``funds``
 
 ``None`` heißt aus. ``_sim_from_blocks`` übersetzt die Bausteine in die internen Werte der Engine
-(``engine._simulation_flat``), die unverändert rechnet.
+(``engine._simulation_flat``), die unverändert rechnet. ``funds_costs(fee, performance_fee)`` ist der
+Kostenbaustein für den Fonds-Wrapper (folgt, Etappe 6.5c); ``simulation()`` nimmt ihn nicht an (der alte
+Fondsmodus ist entfernt).
 """
 from __future__ import annotations
 
@@ -319,11 +320,11 @@ class SimLevTaxProfile(RList):
 
 
 class SimLevFundsCosts(RList):
-    """Fondsmodus (R: ``funds_costs()``)."""
+    """Kostenbaustein für den Fonds-Wrapper (folgt; R: ``funds_costs()``)."""
     r_class = ("SimLevFundsCosts",)
 
     def format(self) -> str:
-        return _blk_print("Fondsmodus (funds_costs)",
+        return _blk_print("Fondskosten (funds_costs)",
                           [("Fondskosten", "%s %% p. a." % _fmt(self["fee"])),
                            ("Performancegebühr", "%s %% des Wertzuwachses über dem Höchststand"
                             % _fmt(self["performance_fee"]))])
@@ -495,7 +496,7 @@ def tax_profile(*, rate: Any = _Dflt(26.375), church_tax: Any = 0, sparer_pausch
 
 
 def funds_costs(*, fee: Any = 0.95, performance_fee: Any = 5) -> SimLevFundsCosts:
-    """Fondsmodus für ``simulation()``; siehe R ``?funds_costs``."""
+    """Kostenbaustein für den Fonds-Wrapper (folgt); siehe R ``?funds_costs``."""
     for a, x in (("fee", fee), ("performance_fee", performance_fee)):
         if not _is_num(x) or math.isnan(float(x)) or x < 0 or x > 100:
             _stop("funds_costs: %s muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. %s), nicht %s."
@@ -506,20 +507,18 @@ def funds_costs(*, fee: Any = 0.95, performance_fee: Any = 5) -> SimLevFundsCost
 
 # ── Übersetzer ───────────────────────────────────────────────────────────────
 
-def _sim_from_blocks(costs, dca, rebalance, splits, tax, funds) -> dict:
+def _sim_from_blocks(costs, dca, rebalance, splits, tax) -> dict:
     """Bausteine prüfen und in die Argumente der Engine übersetzen (R: ``.sim_from_blocks``).
 
     ``rebalance_plan()`` heißt ``balance_mode = True``; nur mit ``event_col``, ``event_mode = "replace"`` und
     ``skip = True`` wird ``balance_mode = False``. ``sparer_pauschbetrag = 0`` heißt
-    ``use_sparer_pauschbetrag = False``. Fondsmodus (``funds``) mit ``tax``: ``tax_mode = "funds"`` mit den
-    Angaben aus ``tax_profile()`` (wie R).
+    ``use_sparer_pauschbetrag = False``.
     """
     _blk_check(costs, SimLevSimCosts, "costs", "sim_costs")
     _blk_check(dca, SimLevDcaPlan, "dca", "dca_plan")
     _blk_check(rebalance, SimLevRebalancePlan, "rebalance", "rebalance_plan")
     _blk_check(splits, SimLevSplitRule, "splits", "split_rule")
     _blk_check(tax, SimLevTaxProfile, "tax", "tax_profile")
-    _blk_check(funds, SimLevFundsCosts, "funds", "funds_costs")
     a: dict = {"order_fee": None if costs is None else costs["order_fee"],
                "dca_fee": None if costs is None else costs["dca_fee"]}
     if dca is not None:
@@ -537,7 +536,7 @@ def _sim_from_blocks(costs, dca, rebalance, splits, tax, funds) -> dict:
         a.update(split_mode=True, split_thresh=splits["thresh"])
     if tax is not None:
         br = tax["base_rate"]
-        a.update(tax_mode="person" if funds is None else "funds", tax_rate=tax["rate"], church_tax=tax["church_tax"],
+        a.update(tax_mode="person", tax_rate=tax["rate"], church_tax=tax["church_tax"],
                  sparer_pauschbetrag=tax["sparer_pauschbetrag"], use_sparer_pauschbetrag=tax["sparer_pauschbetrag"] > 0,
                  private_sale_threshold=tax["private_sale_threshold"],
                  base_rate=None if isinstance(br, str) else br, base_rate_flex=isinstance(br, str),
@@ -551,10 +550,6 @@ def _sim_from_blocks(costs, dca, rebalance, splits, tax, funds) -> dict:
             a.update(taxable_income=inc["taxable_income"], tax_tariff=inc["tariff"])
         if tax["harvest"] is not None:
             a.update(harvest_mode=True, harvest_day=tax["harvest"]["day"], harvest_loss_pot=tax["harvest"]["loss_pot"])
-    if funds is not None:
-        if tax is None:
-            a["tax_mode"] = "funds"
-        a.update(funds_fee=funds["fee"], bonus_fee=funds["performance_fee"])
     return a
 
 
@@ -563,10 +558,10 @@ def _sim_from_blocks(costs, dca, rebalance, splits, tax, funds) -> dict:
 # simulation() (auch Bausteine); Raster und Suchräume sprechen Parameter der Bausteine mit Pfad an
 # („dca.value“, „rebalance.thresh“, „tax.income.marginal_rate“). Alte flache Namen ergeben einen Fehler.
 
-_SIM_TOP = ("start_value", "costs", "dca", "rebalance", "splits", "tax", "funds", "risk_free", "fractions",
+_SIM_TOP = ("start_value", "costs", "dca", "rebalance", "splits", "tax", "risk_free", "fractions",
             "liquidate", "details")
 _SIM_BLOCKS = {"costs": "sim_costs", "dca": "dca_plan", "rebalance": "rebalance_plan", "splits": "split_rule",
-               "tax": "tax_profile", "funds": "funds_costs"}
+               "tax": "tax_profile"}
 _SIM_BLOCK_PARAMS = {
     "sim_costs": ("order_fee", "dca_fee"),
     "dca_plan": ("value", "span", "days", "unit", "anchor", "start", "skip", "fill_deficits"),
@@ -575,7 +570,6 @@ _SIM_BLOCK_PARAMS = {
     "split_rule": ("thresh",),
     "tax_profile": ("rate", "church_tax", "sparer_pauschbetrag", "private_sale_threshold", "base_rate",
                     "guenstigerpruefung", "income", "harvest"),
-    "funds_costs": ("fee", "performance_fee"),
     "income_rate": ("marginal_rate", "soli_rate"),
     "income_tariff": ("taxable_income", "tariff"),
     "harvest_rule": ("day", "loss_pot")}
@@ -598,7 +592,7 @@ _SIM_FLAT = {
     "event_weight": ("rebalance.event_weight", ""),
     "split_mode": ("", "splits = split_rule(\u2026) (NULL = ohne Splits)"),
     "split_thresh": ("splits.thresh", ""),
-    "tax_mode": ("", "tax = tax_profile(\u2026) bzw. funds = funds_costs(\u2026) (NULL = ohne)"),
+    "tax_mode": ("", "tax = tax_profile(\u2026) (NULL = ohne)"),
     "tax_rate": ("tax.rate", ""), "church_tax": ("tax.church_tax", ""),
     "sparer_pauschbetrag": ("tax.sparer_pauschbetrag", ""),
     "use_sparer_pauschbetrag": ("", "tax = tax_profile(sparer_pauschbetrag = 0) (0 = ohne Pauschbetrag)"),
@@ -612,7 +606,6 @@ _SIM_FLAT = {
     "taxable_income": ("tax.income.taxable_income", ""), "tax_tariff": ("tax.income.tariff", ""),
     "harvest_mode": ("", "tax = tax_profile(harvest = harvest_rule(\u2026))"),
     "harvest_day": ("tax.harvest.day", ""), "harvest_loss_pot": ("tax.harvest.loss_pot", ""),
-    "funds_fee": ("funds.fee", ""), "bonus_fee": ("funds.performance_fee", ""),
     "order_fee": ("costs.order_fee", ""), "dca_fee": ("costs.dca_fee", "")}
 
 
@@ -677,7 +670,7 @@ def _ctor(name: str):
     global _CTORS
     if _CTORS is None:
         _CTORS = {"sim_costs": sim_costs, "dca_plan": dca_plan, "rebalance_plan": rebalance_plan,
-                  "split_rule": split_rule, "tax_profile": tax_profile, "funds_costs": funds_costs,
+                  "split_rule": split_rule, "tax_profile": tax_profile,
                   "income_rate": income_rate, "income_tariff": income_tariff, "harvest_rule": harvest_rule}
     return _CTORS[name]
 

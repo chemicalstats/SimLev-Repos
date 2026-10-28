@@ -1,3 +1,9 @@
+test_that("asset_config: Standard-Spread ist 0 (Etappe 6.5c)", {
+  expect_identical(asset_config()$spread, 0)
+  expect_identical(formals(asset_config)$spread, 0)
+  expect_identical(create_strategy(A = list(asset_class = "etf"))$A$spread, 0)
+})
+
 test_that("asset_config creates valid ETF configuration", {
   cfg <- asset_config(
     asset_class = "etf",

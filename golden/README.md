@@ -5,9 +5,9 @@ und die Julia-Fassung ihre Bitgleichheit zum R-Paket prüfen.
 
 | Ordner | Fälle | Geprüft von | Inhalt |
 |---|---|---|---|
-| `cases/` | 68 | Python, Julia | Engine: 38 gezielte Fälle für jeden Steuer- und Sonderpfad (`f01`–`f38`) und 30 Zufallsfälle (`r…`) |
-| `extra/` | 37 | Python, Julia | Engine: Stressfälle mit 30 Jahren, Totalverlust-Hebel, mehreren Signal-Assets, konstanten Preisen, Kalender-Randfällen, Extremwerten, Fehlerpfaden (`x…`, `y…`) |
-| `modules/` | 4.656 | Python, Julia | alle übrigen Funktionen des R-Pakets, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS und die nachgebauten R-Interna, je Modul ein Unterordner (30 Module, siehe unten) |
+| `cases/` | 55 | Python, Julia | Engine: 35 gezielte Fälle für jeden Steuer- und Sonderpfad (`f01`–`f38` ohne `f07`, `f08`, `f28`) und 20 Zufallsfälle (`r…`) |
+| `extra/` | 35 | Python, Julia | Engine: Stressfälle mit 30 Jahren, Totalverlust-Hebel, mehreren Signal-Assets, konstanten Preisen, Kalender-Randfällen, Extremwerten, Fehlerpfaden (`x…`, `y…`) |
+| `modules/` | 4.755 | Python, Julia | alle übrigen Funktionen des R-Pakets, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), der Fonds-Wrapper (Modul `wrapper`), die Nachbildung von evd, rugarch und imputeTS und die nachgebauten R-Interna, je Modul ein Unterordner (31 Module, siehe unten) |
 
 ## Engine-Fälle (`cases/`, `extra/`)
 
@@ -28,7 +28,7 @@ Ergebnisse sind dabei gleich geblieben (Fälle ohne Sparer-Pauschbetrag: das
 Echo `tax_report$sparer_pauschbetrag_annual` ist jetzt 0, die Zeile
 „SPB genutzt“ entfällt).
 
-Stand R 0.5.0 (aktuelle Fassung): Alle 105 Fälle sind nach den
+Stand R 0.5.0 (aktuelle Fassung): Alle damals 105 Fälle sind nach den
 Engine-Korrekturen, steuerrechtlichen Anpassungen und der Übersetzung der
 Ausgaben ins Deutsche neu erzeugt (Begründung in `r/NEWS.md`), zuletzt 101
 davon wegen der deutschen Druckausgabe, 19 davon zusätzlich mit geänderten
@@ -38,9 +38,56 @@ nicht zum Golden-Format; sie prüft das Modul `engine` in `modules/` (vollständ
 Ergebnisbäume). `extra/x24_dup_dates.json.gz` erwartet jetzt auch
 in R einen Fehler (doppelte Datumswerte), wie schon in Julia 0.1.0.
 
-- **Python 0.5.0** und **Julia 0.5.0** sind zu allen 105 Fällen
+- **Python 0.5.0** und **Julia 0.5.0** sind zu allen 90 Fällen
   bitgleich, einschließlich Druckausgabe und `details = TRUE`, und
   unterscheiden dabei strikt `NA` und `NaN`.
+
+### Etappe 6.5c: Standard-Spread 0, Fondsmodus entfernt
+
+**Fondsmodus entfernt (Teil B).** `simulation()` hat kein Argument `funds` mehr; alle Fälle, die
+den Fondsmodus nutzten, sind entfallen (in den Generatoren und als Dateien), zusammen 39:
+
+| Ordner | entfernt | Fälle |
+|---|---|---|
+| `cases/` | 13 (68 → 55) | `f07_funds_liq`, `f08_funds_1231`, `f28_details_split_funds`, `r018`, `r035`, `r052`, `r086`, `r171`, `r222`, `r358`, `r443`, `r460`, `r477` |
+| `extra/` | 2 (37 → 35) | `x02_30y_funds_split_int`, `x16_funds_fee_high` |
+| `modules/engine/` | 24 (334 → 310) | `bk01`, `bk18`, `bk19`, `ch12`, `fee05`, `fu01`–`fu11`, `fu14`, `fu16`, `gp05`, `hv15`, `zz02`, `zz08`, `zz13`, `zz20` |
+
+In `bootstrap`, `param_search` und `sensitivity` kam der Fondsmodus nur in Fehlermeldungen vor;
+diese acht Fälle bleiben mit dem neuen Text (die Liste der Bausteine bzw. Argumente nennt `funds`
+nicht mehr): `study_err_flat`, `study_unused`, `ps_err_flat_args`, `ps_err_path`, `ls_err_flat`,
+`sg_err_arg`, `sg_err_block`, `sg_err_path`. `engine/bk16` gibt `funds = NULL` nicht mehr an
+(Ergebnis gleich). Die Zufallsfälle von `golden_cases.R`, `stress_cases.R` und `gen_engine.R`
+ziehen ihre Zufallszahlen wie bisher und lassen nur die Fondsfälle aus; alle übrigen Fälle sind
+bitgleich (Generatoren byte-gleich, im Eingabespeicher `engine/_inputs.json.gz` entfallen nur
+die sieben Eingaben der entfernten Fälle, alle MD5-Verweise der übrigen Fälle sind gleich).
+`funds_costs()` bleibt (Kostenbaustein für den Fonds-Wrapper, Teil C); seine Prüfungen und
+Druckausgabe prüfen `engine/bk57`, `bk58`, `pr18`, `pr19`.
+
+**Fonds-Wrapper (Teil C).** Neues Modul `modules/wrapper` (72 Fälle, Generator
+`gen_wrapper.R`, siehe unten). Alle bisherigen Fälle in `cases/`, `extra/` und den 30
+übrigen Modulen sind byte-gleich; geändert sind nur `engine/pr18` und `engine/pr19`
+(Feld `print`: Überschrift „Fondskosten (funds_costs)“ statt „Fondsmodus (funds_costs)“,
+in Python und Julia gleich angepasst).
+
+**Fonds-Wrapper in Python und Julia (Teil D).** Der Python- und Julia-Code der 72 Fälle ist an
+die Ports angepasst (Generator `gen_wrapper.R`; alle R-Felder `inputs`, `r`, `result`,
+`output`, `print`, `warnings`, `error` und der Eingabespeicher unverändert): Python mit
+Schlüsselwörtern (`funds_costs(fee=…, performance_fee=…)`, `strategy_validate(…, data=…)`,
+`withdrawal_simulation(…, rule=…)`, `splits=np.array([…])`), Julia mit `SL.rows` statt
+Zeilenindizes, Spalten über `x["A"] = …` und Meldungen über `redirect_stderr` in eine
+Datei; Python fängt sie mit `contextlib.redirect_stderr` ein.
+
+**Standard-Spread 0 (Teil A).** `asset_config()` hat den Standard `spread = 0` (bisher 0,1).
+Die gespeicherten Ergebnisse bleiben gleich: Wo ein Generator eine Strategie ohne `spread`
+baut, steht jetzt `spread = 0.1` (bzw. `asset_args = list(spread = 0.1)` in
+`tactical_simulation()` und eine ausdrückliche Strategie in `sensitivity_leverage()`). Bei
+Strategien, die als Eingabe in den Fall gehen, ändert das keine Datei; bei Strategien im
+R-, Python- und Julia-Code eines Falls ändert sich nur dieser Code (164 Fälle in 11 Modulen, darunter
+die acht Fehlerfälle oben).
+Zwei Fälle prüfen den Standard selbst und zeigen jetzt Spread 0:
+`data_prep/sw_na` (`strategy_from_weights(spread = NA)` = Standard) und
+`sensitivity/lvs_default` (Standardstrategie von `sensitivity_leverage()`).
 
 ### Neue Engine-Fälle erzeugen
 
@@ -72,25 +119,26 @@ Je Modul gibt es einen Unterordner mit Fällen und einen Generator
 
 | Modul | Fälle | Prüft |
 |---|---|---|
-| `data_prep` | 160 | Datenaufbereitung, Portfolio-Vorlagen (`data_prep.R`) |
+| `data_prep` | 175 | Datenaufbereitung, Portfolio-Vorlagen (`data_prep.R`); seit Etappe 8.0 `strategy_from_weights()`/`portfolio_template()` mit `wrapper` für alle bzw. je Asset, mit `map` und Fehlerfällen |
 | `backcast` | 88 | `backcast.R` |
 | `signals` | 56 | `signals.R` mit den Rollkernen |
 | `bootstrap_core` | 18 | Kerne aus `bootstrap_core.cpp`, MS-GARCH-Filter aus `ms_garch.c` (`.ms_garch_filter`) |
-| `bootstrap` | 194 | `bootstrap.R` (darunter `cores = 2`: `bs_rawcores2pathlength50`, `bs_cores2_*`, `study_returns`, `study_cores2*`) |
+| `bootstrap` | 197 | `bootstrap.R` (darunter `cores = 2`: `bs_rawcores2pathlength50`, `bs_cores2_*`, `study_returns`, `study_cores2*`) |
 | `ms_garch` | 17 | eigene MS-GARCH-Schätzung `ms_garch.R` (`.ms_garch_fit`: K = 2/3, sGARCH/gjrGARCH, drei simulierte Datensätze, Fehlerwege der Prüfung; `simlev/ms_garch.py`, `src/ms_garch.jl`) |
-| `withdrawal` | 313 | `withdrawal.R`, `withdrawal_core.cpp` |
+| `withdrawal` | 316 | `withdrawal.R`, `withdrawal_core.cpp` |
 | `deep_analysis` | 54 | `deep_analysis.R` |
-| `sensitivity` | 44 | `sensitivity.R` (darunter `cores = 2`/`3`: `*_cores2*`, `sg_cores3_keep`; `sg_cores1_rng` als Gegenstück) |
-| `param_search` | 55 | `param_search.R` (darunter `cores = 2`: `ps_cores2*`) |
+| `sensitivity` | 58 | `sensitivity.R` (darunter `cores = 2`/`3`: `*_cores2*`, `sg_cores3_keep`; `sg_cores1_rng` als Gegenstück) |
+| `param_search` | 59 | `param_search.R` (darunter `cores = 2`: `ps_cores2*`) |
 | `overfitting` | 73 | `overfitting.R` (darunter `cores = 2`: `pb_cores2`) |
 | `dependence` | 136 | `dependence.R`, `dependence_core.cpp` |
 | `regimes` | 20 | `regimes.R` |
 | `scenarios` | 65 | `scenarios.R` |
-| `tactical` | 133 | `tactical.R` |
+| `tactical` | 134 | `tactical.R` |
 | `optimize` | 180 | `optimize.R` mit den Optimierungskernen |
 | `planning` | 58 | `planning.R` |
 | `analysis_tests` | 81 | `analysis_tests.R` |
-| `engine` | 332 | `simulation()` mit den Bausteinen von 6.3 (`sim_costs()`, `dca_plan()`, `rebalance_plan()`, `split_rule()`, `tax_profile()` mit `income_rate()`, `income_tariff()`, `harvest_rule()`, `funds_costs()`; Prüfungen und Druckausgabe der Bausteine: `bk…`, `pr…`) und den Argumenten von 0.5.0 (`order_fee`, `dca_fee`, `church_tax`, `harvest_*`, `taxable_income`, `tax_tariff`), Günstigerprüfung, Fondsmodus, Sparplan, Rebalancing-Bänder, Splits, später startende Assets, `details = TRUE`, `summary()`, vollständiges Ergebnis (u. a. `fees_paid`, `harvest_days`, `open_lots`, `tax_report` mit `open_tax_debt`, `tariff_years`, `next_year`), `tax_tariff()`, Warn- und Fehlerpfade; 22 Zufallsfälle (`zz…`) |
+| `wrapper` | 81 | Fonds-Wrapper (`wrapper.R`, Etappe 6.5c): `wrapper_nav()` (Kosten 0, nur Verwaltungs- bzw. Performancegebühr, beides, Handbeispiel mit Schaltjahr und Jahreswechseln, Wochenenden, Prozent-, feste und `min`/`max`-Ordergebühren mit `volume`, inneres Umschichten mit Kalender und Ereignissen, innere Signale, gestaffelter innerer Start, NA-Tage, Split auf innerer Spalte, ein und zwei Tage, unsortierte Daten, innerer Spread, Attribut `inner`), `simulation()` mit Wrapper-Assets (Zertifikat, Investmentfonds mit Teilfreistellung und Vorabpauschale, Kirchensteuer, Sparplan mit `dca_fee` und äußerem Spread, gemischtes Depot mit äußerem Umschichten, zwei Wrapper, Werktagsdaten mit `liquidate`, `details = TRUE` mit `result$wrappers`, späterer Beginn des Anteilswerts, Splits, `harvest`, Liste als Strategie, ein Tag), Aufrufer (`bootstrap_study` mit `cores` 1 und 2, `param_search` mit `builder`, `sensitivity_grid`, `planning_lumpsum_vs_dca`, `withdrawal_simulation` mit `SimLevWrapperNav` und mit offenen Beständen, `strategy_validate`, `strategy_update_asset`, `strategy_add_asset`), Fehler (verschachtelt, Signal am Wrapper, Spaltenkollision, `volume` fehlt, ungültige Argumente) und Hinweise (innerer Spread, Meldungen der inneren Rechnung als Ergebnis), Druck (`wrapper_config`, `asset_config` mit Wrapper, Strategie, `wrapper_nav` in jedem NAV-Fall); seit Etappe 8.0 Auswahl aus `SimLevWrapperNav` (Zeilen, Spalten, `head`, `subset`, alles: gewöhnliche Tabelle ohne Klasse und Attribute) und `withdrawal_simulation` mit Ausschnitt (Fehler) bzw. über `withdrawal_cohorts` (`simlev/wrapper.py`, `src/wrapper.jl`) |
+| `engine` | 310 | `simulation()` mit den Bausteinen von 6.3 (`sim_costs()`, `dca_plan()`, `rebalance_plan()`, `split_rule()`, `tax_profile()` mit `income_rate()`, `income_tariff()`, `harvest_rule()`; Prüfungen und Druckausgabe der Bausteine einschließlich `funds_costs()`: `bk…`, `pr…`) und den Argumenten von 0.5.0 (`order_fee`, `dca_fee`, `church_tax`, `harvest_*`, `taxable_income`, `tax_tariff`), Günstigerprüfung, Sparplan, Rebalancing-Bänder, Splits, später startende Assets, `details = TRUE`, `summary()`, vollständiges Ergebnis (u. a. `fees_paid`, `harvest_days`, `open_lots`, `tax_report` mit `open_tax_debt`, `tariff_years`, `next_year`), `tax_tariff()`, Warn- und Fehlerpfade; 18 Zufallsfälle (`zz…`) |
 | `r_rng` | 20 | Zufallszahlen (Python: `simlev/_r/rng.py`, Julia: `src/r/rng.jl`) |
 | `r_nmath` | 64 | Verteilungsfunktionen (`simlev/_r/nmath.py`, `src/r/nmath.jl`) |
 | `r_stats` | 384 | stats-Interna (`simlev/_r/stats.py`, `src/r/stats.jl`) |
@@ -103,7 +151,7 @@ Je Modul gibt es einen Unterordner mit Fällen und einen Generator
 | `imputets` | 203 | aus imputeTS 3.4 und stinepack 1.5 übernommen (`SimLev:::.imputets_na_interpolation`, `.imputets_na_locf`, `.stinepack_stinterp`): `na_interpolation` (stine), `na_locf`, stinepack `stinterp`, `.fill_na(…, "stine")`, `backcast_fit`/`backcast` mit `"stine"` (`simlev/_r/imputets.py`, `stinepack.py`, `src/r/imputets.jl`, `stinepack.jl`) |
 | `rugarch` | 173 | aus rugarch 1.5-6, Rsolnp 1.16 und truncnorm 1.0-9 übernommen (`SimLev:::.rugarch_ugarchfit`, `.rugarch_coef`, `.rsolnp_solnp`, `.rsolnp_gosolnp`, `.truncnorm_rtruncnorm`), Ableitungen eigenständig (`.sl_richardson_hessian`, `.sl_richardson_jacobian`, gegen numDeriv 2016.8-1.1 geprüft): `ugarchfit`→`coef` (auch mit den Ausweichwegen nlminb und gosolnp, Zufallszustand danach), `solnp`, `gosolnp`, `rtruncnorm`, `.fit_garch11`, Bootstrap `garch`/`gjr_garch`, `dependence_dcc`, `dependence_analysis` (`simlev/_r/rugarch.py`, `solnp.py`, `truncnorm.py`, `src/r/rugarch.jl`, `solnp.jl`, `truncnorm.jl`) |
 
-Python 0.5.0 und Julia 0.5.0 sind zu allen 4.656 Fällen bitgleich, bei strenger
+Python 0.5.0 und Julia 0.5.0 sind zu allen 4.755 Fällen der 31 Module bitgleich, bei strenger
 Unterscheidung von `NA` und `NaN` und mit dem Vorzeichen der Null. Die Fälle mit
 `cores > 1` rechnen in Python mit Fork und in Julia unter `julia -t 2` mit Threads
 echt parallel; Julia prüft sie zusätzlich mit einem Thread.

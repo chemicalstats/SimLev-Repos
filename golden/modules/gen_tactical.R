@@ -338,17 +338,17 @@ res = T.tactical_simulation(ds, ws, rebalance='month', tolerance=5, lag=2, asset
    jl = 'ws = T.tactical_glidepath(ds, SL.named("A" => 0.8, "C" => 0.2), SL.named("A" => 0.4, "C" => 0.6); every = "quarter")
 res = T.tactical_simulation(ds, ws; rebalance = "month", tolerance = 5, lag = 2, asset_args = (spread = 0.1, partial_exemption = SL.named("A" => 30, "C" => 0)))')
 tsim("ts_rel_tax", "ws <- tactical_rules(ds, list(list(when = list(buy = b2, sell = s2), weights = c(A = 0.7, C = 0.3))), default = c(A = 0.2, C = 0.8))
-   res <- tactical_simulation(ds, ws, rebalance = 'quarter', tolerance = 20, tolerance_type = 'relative', tax = tax_profile(), start_value = 50000)",
+   res <- tactical_simulation(ds, ws, rebalance = 'quarter', tolerance = 20, tolerance_type = 'relative', tax = tax_profile(), start_value = 50000, asset_args = list(spread = 0.1))",
    "ws = T.tactical_rules(ds, [{'when': {'buy': b2, 'sell': s2}, 'weights': {'A': 0.7, 'C': 0.3}}], default={'A': 0.2, 'C': 0.8})
-res = T.tactical_simulation(ds, ws, rebalance='quarter', tolerance=20, tolerance_type='relative', tax=simlev.tax_profile(), start_value=50000)",
+res = T.tactical_simulation(ds, ws, rebalance='quarter', tolerance=20, tolerance_type='relative', tax=simlev.tax_profile(), start_value=50000, asset_args={'spread': 0.1})",
    jl = 'ws = T.tactical_rules(ds, [SL.RList("when" => SL.RList("buy" => b2, "sell" => s2), "weights" => SL.named("A" => 0.7, "C" => 0.3))], SL.named("A" => 0.2, "C" => 0.8))
-res = T.tactical_simulation(ds, ws; rebalance = "quarter", tolerance = 20, tolerance_type = "relative", tax = SL.tax_profile(), start_value = 50000)')
+res = T.tactical_simulation(ds, ws; rebalance = "quarter", tolerance = 20, tolerance_type = "relative", tax = SL.tax_profile(), start_value = 50000, asset_args = (spread = 0.1,))')
 tsim("ts_dca", "ws <- tactical_rules(ds, list(list(when = list(buy = b2, sell = s2), weights = c(A = 1))), default = c(A = 0.3, C = 0.7))
-   res <- tactical_simulation(ds, ws, dca = dca_plan(500, 1, unit = 'quarter'))",
+   res <- tactical_simulation(ds, ws, dca = dca_plan(500, 1, unit = 'quarter'), asset_args = list(spread = 0.1))",
    "ws = T.tactical_rules(ds, [{'when': {'buy': b2, 'sell': s2}, 'weights': {'A': 1}}], default={'A': 0.3, 'C': 0.7})
-res = T.tactical_simulation(ds, ws, dca=simlev.dca_plan(500, 1, unit='quarter'))",
+res = T.tactical_simulation(ds, ws, dca=simlev.dca_plan(500, 1, unit='quarter'), asset_args={'spread': 0.1})",
    jl = 'ws = T.tactical_rules(ds, [SL.RList("when" => SL.RList("buy" => b2, "sell" => s2), "weights" => SL.named("A" => 1))], SL.named("A" => 0.3, "C" => 0.7))
-res = T.tactical_simulation(ds, ws; dca = SL.dca_plan(500, 1; unit = "quarter"))')
+res = T.tactical_simulation(ds, ws; dca = SL.dca_plan(500, 1; unit = "quarter"), asset_args = (spread = 0.1,))')
 cal <- seq.Date(as.Date("2021-01-04"), as.Date("2021-03-31"), by = "day")
 wkd <- cal[!format(cal, "%u") %in% c("6", "7")]
 set.seed(11); al <- data.frame(date = cal, aktien = NA_real_, geld = 100)
@@ -372,11 +372,11 @@ res = T.tactical_simulation(al, w, lag=1, asset_args={'spread': 0})", inputs = I
    jl = 'w = T.tactical_rules(al, [SL.RList("when" => al.date .>= Date(2021, 2, 5), "weights" => SL.named("aktien" => 1))], SL.named("geld" => 1))
 res = T.tactical_simulation(al, w; lag = 1, asset_args = (spread = 0,))')
 tsim("ts_gaps", "ws <- tactical_rules(ds[seq(1, nrow(ds), 3), ], list(list(when = 'A > 101', weights = c(A = 1))), default = c(C = 1))
-   res <- tactical_simulation(ds, ws, lag = 3)",
+   res <- tactical_simulation(ds, ws, lag = 3, asset_args = list(spread = 0.1))",
    "ws = T.tactical_rules(ds.iloc[::3].reset_index(drop=True), [{'when': 'A > 101', 'weights': {'A': 1}}], default={'C': 1})
-res = T.tactical_simulation(ds, ws, lag=3)",
+res = T.tactical_simulation(ds, ws, lag=3, asset_args={'spread': 0.1})",
    jl = 'ws = T.tactical_rules(SL.rows(ds, 1:3:SL.nrow(ds)), [SL.RList("when" => "A > 101", "weights" => SL.named("A" => 1))], SL.named("C" => 1))
-res = T.tactical_simulation(ds, ws; lag = 3)')
+res = T.tactical_simulation(ds, ws; lag = 3, asset_args = (spread = 0.1,))')
 cs("ts_err_w", "tactical_simulation(ds, c(A = 1))", "result = T.tactical_simulation(ds, {'A': 1})", inputs = I3,
    jl = 'result = T.tactical_simulation(ds, SL.named("A" => 1))')
 cs("ts_err_flat", "tactical_simulation(ds, tactical_rules(ds, list(), default = c(A = 1)), dca_mode = TRUE, dca_value = 100)",

@@ -1345,12 +1345,25 @@ def strategy_from_weights(weights, **kwargs):
             als Anteil; alle positiv, Namen eindeutig, Summe 1.
         **kwargs: Weitere Argumente für :func:`asset_config`. Ein einzelner
             Wert gilt für alle Assets; benannte Vektoren (``dict``/``Series``)
-            werden je Asset zugeordnet.
+            werden je Asset zugeordnet. Ausnahme ``wrapper`` (Fonds-Wrapper aus
+            :func:`simlev.wrapper_config`): ein ``SimLevWrapperConfig`` gilt für
+            alle Assets, ein ``dict`` Asset -> ``SimLevWrapperConfig`` je Asset
+            (Assets ohne Eintrag bleiben ohne Wrapper). Unbekannte Namen,
+            Einträge, die kein ``SimLevWrapperConfig`` sind, und ``wrapper`` mit
+            ``trading="signal"`` für dasselbe Asset sind ein Fehler.
 
     Returns:
         ``Strategy`` (wie :func:`create_strategy`).
+
+    Beispiel::
+
+        w = wrapper_config(create_strategy(A=asset_config(share=0.6), B=asset_config(share=0.4)),
+                           costs=funds_costs(fee=0.5))
+        st = strategy_from_weights({"fonds": 0.8, "gold": 0.2},
+                                   asset_class={"fonds": "certificate", "gold": "etc"},
+                                   wrapper={"fonds": w})      # nur 'fonds' ist ein Wrapper
     """
-    from .config import asset_config, create_strategy
+    from .config import _AC_MSG_WRAPPER_SIGNAL, asset_config, create_strategy
     nms, vals = _named(weights)
     if nms is None or any(k is None or k == "" for k in nms):
         raise ValueError("weights muss benannt sein.")
@@ -1367,6 +1380,12 @@ def strategy_from_weights(weights, **kwargs):
     s = r_sum(w)
     if abs(s - 1) > 1e-6:
         raise ValueError("Gewichte summieren sich zu %.4f; simulation() verlangt die Summe 1 (Anteile, 0.6 = 60 %%)." % s)
+
+    # Fonds-Wrapper (Etappe 8.0): ein SimLevWrapperConfig gilt für alle Assets, ein dict je Asset
+    wmap = {}
+    if "wrapper" in kwargs:
+        kwargs = dict(kwargs)
+        wmap = _sfw_wrappers(kwargs.pop("wrapper"), nms)
 
     def per_asset(v):
         vn, vv = _named(v)
@@ -1402,8 +1421,58 @@ def strategy_from_weights(weights, **kwargs):
             if val is None or (not isinstance(val, (list, tuple, np.ndarray, pd.Series, Mapping)) and _isna_scalar(val)):
                 continue
             a[key] = val
-        assets[nm] = asset_config(share=float(w[i]), **a)
+        wr = wmap.get(nm)
+        if wr is None:
+            assets[nm] = asset_config(share=float(w[i]), **a)
+            continue
+        try:
+            assets[nm] = asset_config(share=float(w[i]), **a, wrapper=wr)
+        except ValueError as e:
+            if str(e) == _AC_MSG_WRAPPER_SIGNAL:
+                raise ValueError("wrapper: Asset '%s' hat trading = \"signal\"; mit wrapper ist nur trading = \"bnh\" "
+                                 "möglich (keine Signale auf den Anteilswert; Signale gehen in der inneren Strategie)."
+                                 % nm) from None
+            raise
     return create_strategy(assets=assets)
+
+
+def _sfw_wrappers(wv, assets):
+    """Argument ``wrapper`` von :func:`strategy_from_weights` je Asset (R: ``.sfw_wrappers``, Etappe 8.0).
+
+    ``None`` oder leer -> ohne Wrapper; ein ``SimLevWrapperConfig`` -> für alle Assets; ein ``dict`` (bzw.
+    ``Series``) Asset -> ``SimLevWrapperConfig`` -> je Asset, Assets ohne Eintrag ohne Wrapper. Sonst Fehler
+    (Reihenfolge: Art, Namen vorhanden, doppelte Namen, unbekannte Namen, Elemente). Ergebnis: ``dict``.
+    """
+    from .config import _cls_all, _is_wrapper
+    if wv is None:
+        return {}
+    if _is_wrapper(wv):
+        return {nm: wv for nm in assets}
+    if isinstance(wv, pd.DataFrame) or not isinstance(wv, (Mapping, pd.Series, list, tuple)):
+        raise ValueError("wrapper muss ein Objekt aus wrapper_config() (gilt f\u00fcr alle Assets) oder eine benannte "
+                         "Liste solcher Objekte sein (Name = Asset), nicht %s." % _cls_all(wv))
+    if len(wv) == 0:
+        return {}
+    nm, vals = _named(wv) if not isinstance(wv, (list, tuple)) else (None, list(wv))
+    if nm is None or any(k is None or k == "" for k in nm):
+        raise ValueError("wrapper: als Liste braucht jedes Element einen Namen (Name = Asset, z. B. "
+                         "list(%s = wrapper_config(...)))." % assets[0])
+    dup = _duplicated(nm)
+    if dup.any():
+        u = []
+        for k, dflag in zip(nm, dup):
+            if dflag and k not in u:
+                u.append(k)
+        raise ValueError("wrapper: doppelte Namen %s; jedes Asset nur einmal angeben." % ", ".join("'%s'" % k for k in u))
+    unk = [k for k in nm if k not in assets]
+    if unk:
+        raise ValueError("wrapper: %s %s (Assets: %s)." % (", ".join("'%s'" % k for k in unk),
+                                                           "ist kein Asset der Strategie" if len(unk) == 1
+                                                           else "sind keine Assets der Strategie", ", ".join(assets)))
+    for k, v in zip(nm, vals):
+        if not _is_wrapper(v):
+            raise ValueError("wrapper: Eintrag '%s' muss ein Objekt aus wrapper_config() sein, nicht %s." % (k, _cls_all(v)))
+    return dict(zip(nm, vals))
 
 
 _PORTFOLIO_TEMPLATES = {
@@ -1428,7 +1497,11 @@ def portfolio_template(*, name=None, map=None, **kwargs):  # noqa: A002 - R-Argu
             Funktion die Liste aller Vorlagen; ``map`` und weitere Argumente
             sind dann nicht erlaubt.
         map: Benannter Vektor Rolle -> Spaltenname (``dict``/``Series``).
-        **kwargs: Weitere Argumente für :func:`strategy_from_weights`.
+        **kwargs: Weitere Argumente für :func:`strategy_from_weights`. Namen je
+            Asset (auch die Schlüssel eines ``wrapper``-``dict``) beziehen sich
+            auf die Namen nach ``map``; Rollen ohne ``map``-Eintrag behalten
+            ihren Namen, z. B. ``portfolio_template(name="60_40",
+            map={"stocks": "aktienfonds"}, wrapper={"aktienfonds": w})``.
 
     Returns:
         Mit ``name``: ``Strategy`` für :func:`simulation`; ohne ``name``:

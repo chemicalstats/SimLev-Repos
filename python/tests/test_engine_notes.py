@@ -1,5 +1,5 @@
 """Port von r/tests/testthat/test-engine-notes.R: A Einkommensteuertarif (taxable_income),
-B undefined_metrics, C summary-Renditen, D Warnung funds_fee/bonus_fee, E open_lots, next_year."""
+B undefined_metrics, C summary-Renditen, D Bausteine (ohne den alten Fondsmodus), E open_lots, next_year."""
 import contextlib
 import io
 import math
@@ -13,7 +13,7 @@ import simlev
 from simlev import asset_config, create_strategy, tax_tariff, simulation
 
 from _helpers import days, sim, sim_out, sim_warn
-from simlev import dca_plan, funds_costs, harvest_rule, income_rate, income_tariff, rebalance_plan, sim_costs, tax_profile  # Bausteine (Etappe 6.3)
+from simlev import dca_plan, funds_costs, income_rate, income_tariff, rebalance_plan, sim_costs, tax_profile  # Bausteine (Etappe 6.3)
 
 
 def E(v, tol=1.5e-8):
@@ -391,27 +391,16 @@ def test_c_summary_renditen():
     assert s0.return_on_invested == pytest.approx(s0.total_return_twr, rel=1e-12)
 
 
-# ── D funds_fee/bonus_fee ───────────────────────────────────────────────────
-def test_d_fondsmodus_mit_tax_profile():
-    from simlev.engine import _simulation_flat
+# ── D Bausteine; alter Fondsmodus entfernt (Etappe 6.5c) ─────────────────
+def test_d_bausteine_ohne_fondsmodus():
     df = pd.DataFrame({"date": days("2020-01-01", "2020-03-01"), "A": 100.0})
     st = create_strategy(A=asset_config(asset_class="etf", trading="bnh", share=1))
-    dd = days("2020-01-01", "2020-12-31")
-    dg = pd.DataFrame({"date": dd, "A": np.linspace(100, 160, len(dd))})
-    r9 = simulation(dg, st, funds=funds_costs(), tax=tax_profile(church_tax=9), liquidate=True)
-    f9 = _simulation_flat(dg, st, tax_mode="funds", church_tax=9, liquidate=True)
-    assert np.array_equal(np.asarray(r9["worth"]), np.asarray(f9["worth"]))
-    assert r9["tax_report"]["total_taxes_paid"] == f9["tax_report"]["total_taxes_paid"]
-    r0 = simulation(dg, st, funds=funds_costs(), liquidate=True)
-    assert r9["tax_report"]["total_taxes_paid"] > r0["tax_report"]["total_taxes_paid"]
-    _, w = sim_warn(df, st, funds=funds_costs(), tax=tax_profile(harvest=harvest_rule()))
-    assert any("wirkt nicht im Fondsmodus" in x for x in w)
-    _, w = sim_warn(df, st, funds=funds_costs(), tax=tax_profile(income=income_tariff(50000)))
-    assert any("income_tariff() (tax_profile(income =)) wirkt nicht im Fondsmodus" in x for x in w)
-    assert sim_warn(df, st, funds=funds_costs(fee=0.5))[1] == []
     assert sim_warn(df, st, tax=tax_profile())[1] == []
-    with pytest.raises(ValueError, match=r"funds muss NULL oder ein Objekt aus funds_costs\(\)"):
-        simulation(df, st, funds={"fee": 1})
+    with pytest.raises(ValueError, match=r"tax muss NULL oder ein Objekt aus tax_profile\(\)"):
+        simulation(df, st, tax={"rate": 20})
+    # der übliche Fehler für ein unbekanntes Argument, keine Sonderbehandlung
+    with pytest.raises(TypeError, match="unexpected keyword argument 'funds'"):
+        simulation(df, st, funds=funds_costs())
     with pytest.raises(ValueError, match="rate und church_tax schließen sich aus"):
         tax_profile(rate=25, church_tax=9)
 

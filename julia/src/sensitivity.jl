@@ -220,7 +220,7 @@ function planning_lumpsum_vs_dca(data, strategy; amount = 10000, months = 12, ho
     data = SL.rows(data, OF._order(Float64[OF._days(v) for v in data["date"]]))
     d = collect(Date, data["date"])
     dn = Float64[OF._days(v) for v in d]
-    get(sim_args, "tax", nothing) !== nothing && get(sim_args, "funds", nothing) === nothing &&
+    get(sim_args, "tax", nothing) !== nothing &&
         @warn "Mit Steuern ist die Fortschreibung des DCA-Depots nach der Einstiegsphase eine Näherung (Index der Einmalanlage)."
     firsts = d[Dates.day.(d) .== 1]
     last_ok = _seq_date_2nd(maximum(d), "-" * _num_str(horizon) * " years")
@@ -230,7 +230,12 @@ function planning_lumpsum_vs_dca(data, strategy; amount = 10000, months = 12, ho
     isempty(starts) && error("Historie zu kurz für den Horizont.")
     hz = _num_str(horizon) * " years"; mo = _num_str(months) * " months"
     cache = Dict{String,Vector{Float64}}()
-    function px(a, dates)
+    wraps = SL._strategy_wrappers(strategy)   # Fonds-Wrapper: Asset-Name ist keine Kursspalte (_strategy_columns)
+    function px(a, dates, navs = nothing)
+        if a in wraps                          # Kurs = Anteilswert im Fenster der Einmalanlage (findInterval, mindestens 1)
+            nd, nv = navs[a]
+            return Float64[nv[max(searchsortedlast(nd, Float64(OF._days(t))), 1)] for t in dates]
+        end
         haskey(cache, a) || (cache[a] = OF._tofloat(SL.Backcast._fill_na(OF._tofloat(data[a]), "locf")))
         return Float64[cache[a][searchsortedlast(dn, Float64(OF._days(t)))] for t in dates]
     end
@@ -243,17 +248,28 @@ function planning_lumpsum_vs_dca(data, strategy; amount = 10000, months = 12, ho
         dp = SL.dca_plan(; value = amount / months, span = 1, unit = "month", skip = true)
         dca = _sim(wd, strategy, SL.RList("start_value" => amount / months, "dca" => dp, SL._sim_kv(sim_args)...))
         ix = SL.Withdrawal.result_index(ls)
+        # Fonds-Wrapper: Anteilswert aus den inneren Spalten des Fensters (wie in simulation())
+        navs = Dict{String,Tuple{Vector{Float64},Vector{Float64}}}()
+        if !isempty(wraps)
+            wf = SL._to_frame(w); wf.filled_attr = nothing
+            sa = Dict(SL._strategy_pairs(strategy))
+            for a in wraps
+                nv = OF._quiet(() -> SL._wrapper_nav_calc(wf, SL._aget(sa[a], "wrapper"), get(sim_args, "splits", nothing),
+                                                          "Wrapper '$a'", "planning_lumpsum_vs_dca: Wrapper '$a'"))
+                navs[a] = (Float64[OF._days(v) for v in nv["date"]], Float64.(nv["nav"]))
+            end
+        end
         ixd = collect(Date, ix["date"]); ixv = OF._tofloat(ix["value"])
         k = findfirst(==(maximum(wd["date"])), ixd)
         assets = collect(keys(dca.report))
         rws = k:length(ixd)
         const_ = all(map(assets) do a
-            p = px(a, ixd[rws]); u = _rep_get(ls.report, a, "worth")[rws] ./ p
+            p = px(a, ixd[rws], navs); u = _rep_get(ls.report, a, "worth")[rws] ./ p
             all(isfinite, u) && all(abs.(u .- u[1]) .<= 1e-9 * max(1, abs(u[1])))
         end)
         dca_end = if const_
             nd = length(dca.worth)
-            SL.r_sum(Float64[_rep_get(dca.report, a, "worth")[nd] / px(a, [dca.dates[nd]])[1] * px(a, [ixd[end]])[1] +
+            SL.r_sum(Float64[_rep_get(dca.report, a, "worth")[nd] / px(a, [dca.dates[nd]], navs)[1] * px(a, [ixd[end]], navs)[1] +
                              _rep_get(dca.report, a, "money")[nd] for a in assets])
         else
             dca.worth[end] * ixv[end] / ixv[k]

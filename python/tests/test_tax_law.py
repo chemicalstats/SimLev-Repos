@@ -10,7 +10,7 @@ from simlev import asset_config, create_strategy
 from simlev.engine import xirr_rate
 
 from _helpers import days, flag, idx, sim, sim_out, step
-from simlev import dca_plan, funds_costs, income_rate, rebalance_plan, sim_costs, tax_profile  # Bausteine (Etappe 6.3)
+from simlev import dca_plan, income_rate, rebalance_plan, tax_profile  # Bausteine (Etappe 6.3)
 
 approx = pytest.approx
 
@@ -151,30 +151,6 @@ def test_a6_haltefrist(buy, sell, tax):
     st = create_strategy(X=asset_config(asset_class="etc", trading="signal", share=1, spread=0, deliverable=True,
                                         signal_buy="b", signal_sell="s"))
     assert sim(d, st, tax=tax_profile(income=income_rate(marginal_rate=40))).tax_report["total_taxes_paid"] == tax
-
-
-# ── B7-B9: Fondsmodus ─────────────────────────────────────────────────────
-@pytest.mark.parametrize("frm,to,cost", [("2021-01-01", "2021-12-31", 100), ("2020-01-01", "2020-12-31", 100),
-                                         ("2021-07-01", "2021-12-31", 184 * 100 / 365)])
-def test_b7_funds_fee_linear(frm, to, cost):
-    dd = days(frm, to)
-    r = sim(pd.DataFrame({"date": dd, "A": 100.0}), create_strategy(A=asset_config(asset_class="etf", share=1, spread=0)), funds=funds_costs(fee=1, performance_fee=0))
-    assert 10000 - r.worth[-1] == approx(cost, abs=1e-9)
-
-
-def test_b8_high_watermark():
-    dd = days("2021-01-01", "2022-12-31")
-    d = pd.DataFrame({"date": dd, "A": step(dd, ["2021-01-01", "2021-12-31", "2022-12-31"], [100, 120, 123])})
-    r = sim(d, create_strategy(A=asset_config(asset_class="etf", share=1, spread=0)), funds=funds_costs(fee=0, performance_fee=10))
-    assert r.worth[-1] == approx(12095 - 29.5, abs=1e-8)
-
-
-def test_b9_teilverkauf_fondskosten():
-    dd = days("2021-01-01", "2021-12-31")
-    r = sim(pd.DataFrame({"date": dd, "A": 100.0}), create_strategy(A=asset_config(asset_class="etf", share=1, spread=1)), costs=sim_costs(order_fee=5), funds=funds_costs(fee=1, performance_fee=0))
-    n0 = 9995 / 100.5
-    assert r.worth[-1] == approx(n0 * 100 * 0.99, abs=1e-8)
-    assert r.fees_paid == 5
 
 
 # ── C10: Später startende Assets ──────────────────────────────────────────

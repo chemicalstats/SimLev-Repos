@@ -513,7 +513,7 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
     data = data.iloc[np.argsort(_days(data["date"].to_numpy()), kind="stable")].reset_index(drop=True)
     d = data["date"].to_numpy().astype("datetime64[D]")
     dn = _days(d)
-    if sim_args.get("tax") is not None and sim_args.get("funds") is None:
+    if sim_args.get("tax") is not None:
         warnings.warn("Mit Steuern ist die Fortschreibung des DCA-Depots nach der Einstiegsphase eine Näherung "
                       "(Index der Einmalanlage).", UserWarning, stacklevel=2)
     dd = np.array([_civil(z)[2] for z in dn])
@@ -526,11 +526,20 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
         raise ValueError("Historie zu kurz für den Horizont.")
     simulation = _simulation()
     result_index = _ext("withdrawal", "result_index")
+    wmod = importlib.import_module("simlev.wrapper")
+    cmod = importlib.import_module("simlev.config")
+    wraps = cmod._strategy_wrappers(strategy)   # Fonds-Wrapper: Asset-Name ist keine Kursspalte (_strategy_columns)
+    to_frame = _ext("_sim_base", "_to_frame")
     hz = _r_num_str(horizon) + " years"
     mo = _r_num_str(months) + " months"
     cache = {}
 
-    def px(a, dates):
+    def px(a, dates, navs=None):
+        if a in wraps:
+            nd, nv = navs[a]
+            i = np.searchsorted(nd, _days(np.atleast_1d(dates)), side="right")
+            i[i == 0] = 1
+            return nv[i - 1]
         if a not in cache:
             cache[a] = _fill_locf(data[a].to_numpy(dtype=np.float64))
         k = np.searchsorted(dn, _days(np.atleast_1d(dates)), side="right")
@@ -546,6 +555,16 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
         dp = dca_plan(value=amount / months, span=1, unit="month", skip=True)
         dca = _quiet(lambda: simulation(wd, strategy, start_value=amount / months, dca=dp, **sim_args))
         ix = result_index(ls)
+        # Fonds-Wrapper: Kurs = Anteilswert im Fenster der Einmalanlage (wie in simulation() aus den inneren Spalten)
+        navs = {}
+        if wraps:
+            wf = to_frame(w.copy())
+            wf.filled_attr = None
+            for a in wraps:
+                nv = _quiet(lambda a=a: wmod._wrapper_nav_calc(wf, strategy[a]["wrapper"], sim_args.get("splits"),
+                                                               tag="Wrapper '%s'" % a,
+                                                               who="planning_lumpsum_vs_dca: Wrapper '%s'" % a))
+                navs[a] = wmod._nav_raw(nv)
         ixd = np.asarray(ix["date"]).astype("datetime64[D]")
         ixv = ix["value"].to_numpy(dtype=np.float64)
         wmax = np.asarray(wd["date"]).astype("datetime64[D]").max()
@@ -554,7 +573,7 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
         rows = np.arange(k, len(ix))
         const = True
         for a in assets:
-            p = px(a, ixd[rows])
+            p = px(a, ixd[rows], navs)
             u = _report_get(ls["report"], a, "worth")[rows] / p
             okc = bool(np.isfinite(u).all()) and bool((np.abs(u - u[0]) <= 1e-9 * max(1.0, abs(u[0]))).all())
             if not okc:
@@ -564,8 +583,8 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
             dw = np.asarray(dca["worth"], dtype=np.float64)
             nd = dw.size
             ddates = np.asarray(dca["dates"])
-            vals = [_report_get(dca["report"], a, "worth")[nd - 1] / px(a, ddates[nd - 1:nd])[0] * px(a, ixd[-1:])[0]
-                    + _report_get(dca["report"], a, "money")[nd - 1] for a in assets]
+            vals = [_report_get(dca["report"], a, "worth")[nd - 1] / px(a, ddates[nd - 1:nd], navs)[0]
+                    * px(a, ixd[-1:], navs)[0] + _report_get(dca["report"], a, "money")[nd - 1] for a in assets]
             dca_end = r_sum(np.array(vals, dtype=np.float64))
         else:
             dca_end = float(np.asarray(dca["worth"], dtype=np.float64)[-1]) * ixv[-1] / ixv[k]

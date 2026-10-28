@@ -37,9 +37,7 @@ Regeln (Anhang C, Entscheidungen 6.3):
   tariff)``, sonst ``marginal_tax_rate`` → ``income_rate(marginal_rate, soli_rate)`` mit
   ``soli_rate = soli_rate_income_tax`` (Standard 5.5) bei ``include_soli_on_income_tax = TRUE``;
   ``harvest_mode = TRUE`` → ``harvest_rule(day = harvest_day, loss_pot = harvest_loss_pot)``.
-- ``tax_mode = "funds"``: ``funds_costs(fee = funds_fee, performance_fee = bonus_fee)``; mit Steuerargumenten
-  (``tax_rate``, ``church_tax`` …) dazu ``tax_profile(…)`` nach denselben Regeln wie bei ``"person"``
-  (Etappe 6.4: Fondsmodus mit eigenen Steuern wie bis 6.2).
+- ``tax_mode = "funds"`` (Fondsmodus): seit Etappe 6.5c entfernt, nicht übersetzbar (``Manual``).
 - ``tax_mode = "none"`` oder fehlt: Steuerargumente entfallen.
 - ``order_fee``/``dca_fee`` → ``costs = sim_costs(order_fee, dca_fee)``; ``spread`` entfällt (war wirkungslos).
 - ``start_value``, ``risk_free``, ``fractions``, ``liquidate``, ``details`` bleiben.
@@ -60,7 +58,7 @@ FLAT = ["spread", "dca_mode", "dca_value", "dca_span", "dca_days", "dca_unit", "
         "event_mode", "event_weight", "church_tax", "order_fee", "dca_fee", "harvest_mode", "harvest_day",
         "harvest_loss_pot", "taxable_income", "tax_tariff"]
 KEEP = ["data", "strategy", "start_value", "risk_free", "fractions", "liquidate", "details"]
-BLOCK_ORDER = ["costs", "dca", "rebalance", "splits", "tax", "funds"]
+BLOCK_ORDER = ["costs", "dca", "rebalance", "splits", "tax"]
 STRATEGY_RENAME = {"asset_spread": "spread", "asset_bonus": "partial_exemption"}
 
 
@@ -196,7 +194,7 @@ def dropped(flat, V):
     if "dca" in blocks: on.add("dca_mode")
     if "rebalance" in blocks: on.add("balance_mode")
     if "splits" in blocks: on.add("split_mode")
-    if "tax" in blocks or "funds" in blocks: on.add("tax_mode")
+    if "tax" in blocks: on.add("tax_mode")
     if "tax" in blocks:
         on |= {"use_sparer_pauschbetrag", "base_rate_flex", "include_soli_on_income_tax", "harvest_mode"} & set(flat)
     return [k for k in flat if k in FLAT and k not in t.read and k not in on]
@@ -259,9 +257,9 @@ def convert(flat, V):
         blocks["splits"] = Block("split_rule", [("thresh", flat["split_thresh"])] if has("split_thresh") else [])
     # Steuern
     tm = V.string(g("tax_mode"), "tax_mode") if has("tax_mode") else "none"
-    if tm not in ("none", "person", "funds"):
-        raise Manual("tax_mode = %r" % tm)
-    if tm in ("person", "funds"):
+    if tm not in ("none", "person"):
+        raise Manual("tax_mode = %r" % tm + (" (Fondsmodus, seit Etappe 6.5c entfernt)" if tm == "funds" else ""))
+    if tm == "person":
         a = []
         if has("tax_rate"):
             a.append(("rate", flat["tax_rate"]))
@@ -295,12 +293,7 @@ def convert(flat, V):
         if V.truth(g("harvest_mode"), "harvest_mode"):
             ha = [(n, flat[k]) for k, n in (("harvest_day", "day"), ("harvest_loss_pot", "loss_pot")) if has(k)]
             a.append(("harvest", Block("harvest_rule", ha)))
-        # Fondsmodus (Etappe 6.4): Steuerangaben wie bis 6.2 über tax = tax_profile() zusammen mit funds
-        if tm == "person" or a:
-            blocks["tax"] = Block("tax_profile", a)
-        if tm == "funds":
-            blocks["funds"] = Block("funds_costs", [(n, flat[k]) for k, n in (("funds_fee", "fee"), ("bonus_fee", "performance_fee"))
-                                                    if has(k)])
+        blocks["tax"] = Block("tax_profile", a)
     return kept, blocks
 
 

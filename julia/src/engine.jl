@@ -245,12 +245,13 @@ function _calculate_dates_flags(mode, span, unit, days, dates::Vector{Int}, valu
 end
 _truthy_mode(m) = m isa Bool ? m : (m isa Real ? m != 0 : false)
 
-function _calculate_split_flags(sim::Sim, base::Float64, mode, n::Int, split_thresh)
+function _calculate_split_flags(sim::Sim, base::Float64, mode, n::Int, split_thresh; skip = String[])
     @nospecialize
     (!_truthy_mode(mode) || split_thresh === nothing) && return falses(n)
     lo, hi = Float64(split_thresh[1]), Float64(split_thresh[2])
     flag = falses(n)
     for a in eachindex(sim.names)
+        sim.names[a] in skip && continue   # skip: Assets ohne Splits (Fonds-Wrapper)
         prices = copy(sim.market[a].asset_price)
         for i in 1:n
             cp = prices[i]
@@ -360,6 +361,8 @@ mutable struct Cfg
     event_col::Any
     pre_filled::BitVector
     strategy::Vector{Pair{String,Dict{String,Any}}}
+    no_split::Vector{String}       # Fonds-Wrapper: Assets ohne Splits (Anteilswert)
+    wrappers::Any                  # Fonds-Wrapper: RList der Anteilswerte (nur mit details = true), sonst nothing
 end
 
 mutable struct Flags
@@ -379,7 +382,6 @@ mutable struct Flags
     flag_active::BitVector
     asset_start_indices::Vector{Int}
     flag_harvest::BitVector
-    flag_fund_fee::BitVector
     strategy_types::Vector{String}
     tax_regimes::Vector{String}
     spread_rates::Vector{Float64}
@@ -625,33 +627,6 @@ function _calculate_flat_rate(sim::Sim, a::Int, index::Int, dates::Vector{Int}, 
     market_price = prices[index]
     tr = sim.trades[a]
     return flat_rate(tr.buys, tr.fifo_front, base_rate, year_start_price, market_price, start_of_year, end_of_year)
-end
-
-function _calculate_fund_fees(R::Run, sim::Sim, index::Int, dates::Vector{Int}, funds_fee::Float64, bonus_fee::Float64)
-    cur = dates[index]
-    event_date = days_from_civil(year_of(cur), 1, 1)
-    idx = findall(z -> z >= event_date && z <= cur, dates)
-    na = length(sim.names)
-    isempty(idx) && return (total_fees = 0.0, total_value = sim.totals.total_value, asset_fees = zeros(na))
-    yr = year_of(cur)
-    days_in_year = is_leap(yr) ? 366 : 365
-    daily_rate = funds_fee / 100 / days_in_year
-    basic_fees = Float64[r_sum((sim.report[a].total[i] * daily_rate for i in idx); na_rm = true) for a in 1:na]
-    basic_value = r_sum(basic_fees)
-    flows_period = r_sum([r_sum(view(sim.report[a].flows, idx)) for a in 1:na])
-    total_value = sim.totals.total_value + flows_period
-    status_totals = Float64[sim.status[a].total for a in 1:na]
-    market_value = r_sum(status_totals; na_rm = true)
-    above_mark = market_value > total_value
-    bonus_value = above_mark ? (market_value - total_value) * (bonus_fee / 100) : 0.0
-    asset_fees = market_value > 0 ? basic_fees .+ bonus_value .* status_totals ./ market_value : basic_fees .+ 0.0
-    total_fees = basic_value + bonus_value
-    above_mark && (total_value = _rmax(total_value, market_value - total_fees))
-    if R.details
-        _cat(R, r_sprintf("Fondskosten:\tFondsgebühren %.2f EUR am %s\n\t\t=> Grundgebühr: %.2f EUR; Performancegebühr: %.2f EUR\n",
-                          total_fees, fmt_date(cur), basic_value, bonus_value))
-    end
-    return (total_fees = total_fees, total_value = total_value, asset_fees = asset_fees)
 end
 
 function _split!(sim::Sim, a::Int, ratio::Float64, forward::Bool)
@@ -1184,3 +1159,4 @@ include("sim_phases.jl")
 include("sim_loop.jl")
 include("sim_evaluate.jl")
 include("sim_blocks.jl")
+include("wrapper.jl")       # Fonds-Wrapper (Etappe 6.5c): Anteilswert über simulation()

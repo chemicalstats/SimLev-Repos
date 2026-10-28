@@ -26,6 +26,7 @@ import math
 import numpy as np
 
 from ._r import env as _env
+from ._r.rnum import c_div as _dv
 
 __all__ = ["proj_box_simplex", "qp_box_simplex", "min_cvar_core", "min_cdar_core", "quantile7"]
 
@@ -288,7 +289,7 @@ def qp_box_simplex(Q, cvec, lo, hi, w0, L, maxit, tol):
             for j in rng:
                 s += qi[j] * y[j]
             g[i] = s
-            tmp[i] = y[i] - s / L
+            tmp[i] = y[i] - _dv(s, L)
         wn = _proj(tmp, lo, hi, n)
         dmax = 0.0
         dr = 0.0
@@ -382,7 +383,7 @@ def min_cvar_core(R, alpha, lo, hi, w0, zeta0, scales, maxit):
             acc = 0.0
             for zz in u:
                 acc += _softplus(zz)
-            return z[N] + sc * acc / aT
+            return z[N] + _dv(sc * acc, aT)
 
         def grad(z):
             u = ((port_loss(z) - z[N]) / sc).tolist()
@@ -394,20 +395,20 @@ def min_cvar_core(R, alpha, lo, hi, w0, zeta0, scales, maxit):
             gr = [0.0] * (N + 1)
             for i in range(N):
                 acc = _seqsum(cols[i] * pa)
-                gr[i] = -acc / aT
-            gr[N] = 1.0 - sp / aT
+                gr[i] = _dv(-acc, aT)
+            gr[N] = 1.0 - _dv(sp, aT)
             return gr
 
         yv = list(x)
         t = 1.0
-        L = 1.0 / (alpha * sc)
+        L = _dv(1.0, alpha * sc)
         xn = list(x)
         for _ in range(maxit):
             g = grad(yv)
             fy = f(yv)
             L /= 2.0
             for _ls in range(60):
-                tmp = [yv[i] - g[i] / L for i in range(N + 1)]
+                tmp = [yv[i] - _dv(g[i], L) for i in range(N + 1)]
                 xn = _proj(tmp, lo, hi, N) + [tmp[N]]
                 lin = 0.0
                 sq = 0.0
@@ -444,8 +445,56 @@ def min_cvar_core(R, alpha, lo, hi, w0, zeta0, scales, maxit):
 
 # ── Minimaler CDaR ─────────────────────────────────────────────────────────
 
+def _heap_select(v, first, middle, last, less):
+    length = middle - first
+    if length >= 2:
+        parent = (length - 2) // 2
+        while True:
+            _adjust_heap(v, first, parent, length, v[first + parent], less)
+            if parent == 0:
+                break
+            parent -= 1
+    for i in range(middle, last):
+        if less(v[i], v[first]):
+            value = v[i]
+            v[i] = v[first]
+            _adjust_heap(v, first, 0, length, value, less)
+
+
+def _nth_element(v, nth, less):
+    """``std::nth_element`` aus libstdc++ (GCC 13, Introselect) auf der Liste ``v`` (in place)."""
+    first, last = 0, len(v)
+    if first == last or nth == last:
+        return v
+    depth = 2 * ((last - first).bit_length() - 1)
+    while last - first > 3:
+        if depth == 0:
+            _heap_select(v, first, nth + 1, last, less)
+            v[first], v[nth] = v[nth], v[first]
+            return v
+        depth -= 1
+        mid = first + (last - first) // 2
+        _move_median_to_first(v, first, first + 1, mid, last - 1, less)
+        cut = _unguarded_partition(v, first + 1, last, first, less)
+        if cut <= nth:
+            first = cut
+        else:
+            last = cut
+    _insertion_sort(v, first, last, less)
+    return v
+
+
+def _lt(a, b):
+    return a < b
+
+
 def quantile7(x, p):
-    """Quantil Typ 7 wie ``quantile7`` in research_core.cpp (nth_element + min_element)."""
+    """Quantil Typ 7 wie ``quantile7`` in research_core.cpp (nth_element + min_element).
+
+    Ohne NaN liefert die stabile Sortierung dieselben Werte; mit NaN (Vergleiche
+    immer falsch) hängt das Ergebnis von der Reihenfolge ab, die ``std::nth_element``
+    herstellt, deshalb dann dessen Nachbildung.
+    """
     n = len(x)
     if n == 0:
         from ._r.fmt import NA_REAL
@@ -453,7 +502,18 @@ def quantile7(x, p):
     h = (n - 1) * p
     lo = int(math.floor(h))
     frac = h - lo
-    s = np.sort(np.asarray(x, dtype=np.float64), kind="stable")
+    a = np.asarray(x, dtype=np.float64)
+    if np.isnan(a).any():
+        v = _nth_element(a.tolist(), lo, _lt)
+        xl = v[lo]
+        if frac == 0.0 or lo + 1 >= n:
+            return xl
+        xh = v[lo + 1]
+        for j in range(lo + 2, n):
+            if v[j] < xh:
+                xh = v[j]
+        return xl + frac * (xh - xl)
+    s = np.sort(a, kind="stable")
     xl = float(s[lo])
     if frac == 0.0 or lo + 1 >= n:
         return xl
@@ -462,6 +522,24 @@ def quantile7(x, p):
 
 
 def _cdar_of(r, alpha):
+    if np.isnan(r).any():
+        # NaN: Schleife wie cdar_of in research_core.cpp (std::max hält pk bei NaN)
+        D = []
+        c = 0.0
+        pk = 0.0
+        for x in r.tolist():
+            c += x
+            if pk < c:
+                pk = c
+            D.append(pk - c)
+        v = quantile7(D, 1.0 - alpha)
+        acc = 0.0
+        m = 0
+        for d in D:
+            if d >= v:
+                acc += d
+                m += 1
+        return acc / m if m else 0.0
     c = np.cumsum(r) + 0.0
     pk = np.maximum.accumulate(np.concatenate(([0.0], c)))[1:]
     D = pk - c
@@ -492,7 +570,7 @@ def min_cdar_core(R, alpha, lo, hi, iters):
     for i in range(N):
         CR[1:, i] = np.cumsum(R[:, i]) + 0.0
     sabs = _seqsum(np.abs(R.ravel(order="F")))
-    sc = sabs / (float(T) * N) * math.sqrt(float(T))
+    sc = _dv(sabs, float(T) * N) * math.sqrt(float(T))
     cols = [np.ascontiguousarray(R[:, i]) for i in range(N)]
     crc = [np.ascontiguousarray(CR[:, i]) for i in range(N)]
 
@@ -511,10 +589,26 @@ def min_cdar_core(R, alpha, lo, hi, iters):
         C = np.zeros(T + 1)
         for i in range(N):
             C = C + crc[i] * w[i]
-        pk = np.maximum.accumulate(C)
-        prev = np.concatenate(([-_INF], pk[:-1]))
-        arg = np.maximum.accumulate(np.where(C >= prev, idx, 0))
-        Dt = (pk - C)[1:]
+        if np.isnan(C).any():
+            # NaN: laufendes Maximum wie in research_core.cpp (a >= pk falsch bei NaN)
+            pkv = -_INF
+            am = 0
+            argl = [0] * (T + 1)
+            Dl = [0.0] * T
+            for s_, a_ in enumerate(C.tolist()):
+                if a_ >= pkv:
+                    pkv = a_
+                    am = s_
+                argl[s_] = am
+                if s_ > 0:
+                    Dl[s_ - 1] = pkv - a_
+            arg = np.array(argl, dtype=np.int64)
+            Dt = np.array(Dl, dtype=np.float64)
+        else:
+            pk = np.maximum.accumulate(C)
+            prev = np.concatenate(([-_INF], pk[:-1]))
+            arg = np.maximum.accumulate(np.where(C >= prev, idx, 0))
+            Dt = (pk - C)[1:]
         v = quantile7(Dt, 1.0 - alpha)
         sel = np.nonzero(Dt >= v)[0]
         m = sel.size
@@ -524,11 +618,11 @@ def min_cdar_core(R, alpha, lo, hi, iters):
         gn = 0.0
         for i in range(N):
             gi = _seqsum(crc[i][pi] - crc[i][ti])
-            gi = gi / m
+            gi = _dv(gi, m)
             g[i] = gi
             gn += gi * gi
         den = math.sqrt(gn) / sqN
-        step = 0.5 / (sc * math.sqrt(float(it))) / (den if 1e-12 < den else 1e-12)
+        step = _dv(_dv(0.5, sc * math.sqrt(float(it))), den if 1e-12 < den else 1e-12)
         tmp = [w[i] - step * g[i] / sqN for i in range(N)]
         w = _proj(tmp, lo, hi, N)
         f = _cdar_of(port(w), alpha)

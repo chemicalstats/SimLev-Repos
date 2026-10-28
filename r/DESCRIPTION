@@ -1,7 +1,7 @@
 Package: SimLev
 Type: Package
 Title: Simulation and Backtesting with German Investment Taxation
-Version: 0.9.1
+Version: 0.10.0
 Authors@R: person("ChemicalStats", "von der Mauerstrasse",
                   role = c("aut", "cre", "cph"),
                   email = "chemicalstatsy@protonmail.com")

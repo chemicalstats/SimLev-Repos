@@ -1,6 +1,6 @@
 # Referenzfälle für simulation() mit den Argumenten und Ergebniselementen von 0.5.0
 # (Gebühren, Kirchensteuer, Freibetrag nutzen, Einkommensteuertarif, Günstigerprüfung,
-# Fondsmodus, Sparplan, Rebalancing-Bänder, Splits, später startende Assets,
+# Sparplan, Rebalancing-Bänder, Splits, später startende Assets,
 # details = TRUE, summary()) mit dem vollständigen Ergebnis als Baum sowie
 # Warn- und Fehlerpfade aus den testthat-Dateien der Engine.
 # Ergänzt golden/cases und golden/extra (dort ohne tariff_years/next_year/open_tax_debt).
@@ -77,7 +77,7 @@ sim_code <- function(d, s, a, L) switch(L,
 # SIM: ganzes Ergebnis; part = Element (z. B. "tax_report"); wrap = "summary"
 SIM <- function(id, a = list(), d = "d2", s = "s2", extra = list(), part = NULL, wrap = NULL, note = NULL,
                 pre = NULL) {
-  bn <- intersect(names(a), c("costs", "dca", "rebalance", "splits", "tax", "funds"))   # schon Bausteine (BK)
+  bn <- intersect(names(a), c("costs", "dca", "rebalance", "splits", "tax"))   # schon Bausteine (BK)
   a <- c(blocks_from_flat(a[setdiff(names(a), bn)]), a[bn])
   g <- function(x) if (!is.null(extra[[x]])) extra[[x]] else get(x)
   inp <- c(setNames(list(g(d), g(s)), c(d, s)), extra[setdiff(names(extra), c(d, s))])
@@ -151,7 +151,7 @@ s1 <- create_strategy(A = asset_config("etf", "bnh", 1, 0.1, 30))
 s1c <- create_strategy(A = asset_config("certificate", "bnh", 1, 0))
 sp <- create_strategy(A = asset_config("etc", "bnh", 0.5, 0.1, 0, deliverable = TRUE), B = asset_config("certificate", "bnh", 0.5, 0.1))
 sC <- create_strategy(A = asset_config("certificate", share = 1, spread = 0))
-sC2 <- create_strategy(A = asset_config("etf", share = .5), B = asset_config("etf", share = .5))
+sC2 <- create_strategy(A = asset_config("etf", share = .5, spread = 0.1), B = asset_config("etf", share = .5, spread = 0.1))
 ssig <- create_strategy(A = asset_config("etc", "signal", 0.5, 0.2, 0, deliverable = TRUE, signal_buy = "b", signal_sell = "s"),
                         B = asset_config("etf", "bnh", 0.5, 0.1, 30))
 sP <- create_strategy(G = asset_config("etc", "bnh", share = 0.5, spread = 0, deliverable = TRUE),
@@ -175,7 +175,6 @@ SIM("fee02", list(order_fee = list(fixed = 1, percent = 0.25, min = 2, max = 20)
 SIM("fee03", list(order_fee = 10, dca_fee = 1, dca_mode = TRUE, dca_value = 200, dca_span = 1, balance_mode = TRUE))
 SIM("fee04", list(order_fee = 10, dca_fee = 0, dca_mode = TRUE, dca_value = 100, dca_span = 1, fractions = FALSE,
                   start_value = 50000, tax_mode = "person", liquidate = TRUE))
-SIM("fee05", list(order_fee = list(percent = 0.5), tax_mode = "funds", liquidate = TRUE, balance_mode = TRUE, details = TRUE))
 SIM("fee06", list(order_fee = list(percent = 0.25), dca_fee = 0, dca_mode = TRUE, dca_value = 100, dca_span = 1,
                   dca_days = 2, start_value = 50000), d = "d1", s = "s1", note = "Startkapital mit order_fee, Sparrate mit dca_fee")
 SIM("fee07", list(order_fee = list(percent = 0.25), dca_fee = 0, dca_mode = TRUE, dca_value = 100, dca_span = 1,
@@ -212,7 +211,6 @@ SIM("ch09", list(tax_mode = "person", church_tax = 8, use_guenstigerpruefung = T
                  include_soli_on_income_tax = TRUE, details = TRUE))
 SIM("ch10", c(P(church_tax = 9, taxable_income = 74000, details = TRUE), EV_P), d = "dP", s = "sP")
 SIM("ch11", c(P(church_tax = 8, taxable_income = 20000, use_guenstigerpruefung = TRUE, details = TRUE), EV_G), d = "dG", s = "sG")
-SIM("ch12", list(tax_mode = "funds", church_tax = 9, liquidate = TRUE))
 SIM("ch13", list(church_tax = 9, liquidate = TRUE))
 SIM("ch14", c(P(church_tax = 9, marginal_tax_rate = 42, liquidate = TRUE), EV_P), d = "dP", s = "sP")
 SIM("ch15", P(church_tax = c(8, 9)), d = "dT")
@@ -234,7 +232,6 @@ SIM("hv11", c(P(harvest_mode = TRUE, church_tax = 9, taxable_income = 45000, liq
 SIM("hv12", list(tax_mode = "person", harvest_mode = TRUE, sparer_pauschbetrag = 0), d = "d1", s = "s1")
 SIM("hv13", list(tax_mode = "person", harvest_mode = TRUE, use_sparer_pauschbetrag = FALSE), d = "d1", s = "s1")
 SIM("hv14", list(tax_mode = "person", harvest_mode = TRUE, order_fee = list(fixed = 1, percent = 0.1), balance_mode = TRUE), wrap = "summary")
-SIM("hv15", list(tax_mode = "funds", harvest_mode = TRUE), d = "dT")
 SIM("hv16", list(tax_mode = "person", harvest_mode = TRUE, start_value = 2e5), d = "d1", s = "s1c")
 
 # ── Einkommensteuertarif (taxable_income, tax_tariff) ──────────────────────────
@@ -316,20 +313,11 @@ SIM("gp02", c(P(use_guenstigerpruefung = TRUE, marginal_tax_rate = 14, details =
 SIM("gp03", c(P(use_guenstigerpruefung = TRUE, marginal_tax_rate = 42), EV_G), d = "dG", s = "sG")
 SIM("gp04", c(P(use_guenstigerpruefung = TRUE, marginal_tax_rate = 20, include_soli_on_income_tax = TRUE, soli_rate_income_tax = 5.5), EV_G),
     d = "dG", s = "sG")
-SIM("gp05", list(tax_mode = "funds", use_guenstigerpruefung = TRUE, marginal_tax_rate = 14), d = "dT")
 SIM("gp06", c(P(use_guenstigerpruefung = TRUE, marginal_tax_rate = 20, church_tax = 9, liquidate = TRUE), EV_G), d = "dG", s = "sG")
 SIM("gp07", list(tax_mode = "person", use_guenstigerpruefung = TRUE, marginal_tax_rate = 24, base_rate = 2.55, liquidate = TRUE), d = "d1", s = "s1")
 
-# ── Fondsmodus ────────────────────────────────────────────────────────────────
-SIM("fu01", list(tax_mode = "funds", liquidate = TRUE, details = TRUE))
-SIM("fu02", list(tax_mode = "funds", funds_fee = 1, bonus_fee = 10, liquidate = TRUE), d = "d1", s = "s1")
-SIM("fu03", list(tax_mode = "funds", funds_fee = 0.5, order_fee = 2, balance_mode = TRUE, balance_unit = "quarter"))
-SIM("fu04", list(tax_mode = "funds", funds_fee = 100, bonus_fee = 100), d = "dT")
-SIM("fu05", list(tax_mode = "funds", funds_fee = -1), d = "dT")
-SIM("fu06", list(tax_mode = "funds", funds_fee = V("na")), d = "dT", extra = list(na = NA_real_))
-SIM("fu07", list(tax_mode = "funds", funds_fee = 150), d = "dT")
-SIM("fu08", list(tax_mode = "funds", funds_fee = "1"), d = "dT")
-SIM("fu09", list(tax_mode = "funds", funds_fee = NULL), d = "dT")
+# ── Fondskosten ohne Fondsmodus (der Fondsmodus selbst ist seit Etappe 6.5c entfernt; flache funds_fee/bonus_fee
+#    entfallen bei der Übersetzung in Bausteine) ──────────────────────────────────────────────────────────────
 # funds_fee/bonus_fee außerhalb des Fondsmodus zusammen mit Argumenten, die später given[[...]] prüfen
 # (bis 0.5.0-Entwurf: given überschrieben -> "subscript out of bounds")
 SIM("fg01", list(funds_fee = 1, church_tax = 9), d = "dT")
@@ -337,13 +325,9 @@ SIM("fg02", list(tax_mode = "person", funds_fee = 1, bonus_fee = 10, church_tax 
 SIM("fg03", list(tax_mode = "person", bonus_fee = 5, taxable_income = 50000, marginal_tax_rate = 0.3), d = "dT")
 SIM("fg04", list(tax_mode = "person", funds_fee = 0.5, tax_rate = 25, church_tax = 9), d = "dT")
 SIM("fg05", list(tax_mode = "person", funds_fee = 0.5, taxable_income = 60000, include_soli_on_income_tax = FALSE), d = "dT")
-SIM("fu10", list(tax_mode = "funds", bonus_fee = -20), d = "dT")
-SIM("fu11", list(tax_mode = "funds", bonus_fee = 150), d = "dT")
 SIM("fu12", list(funds_fee = 0.5), d = "dT")
 SIM("fu13", list(tax_mode = "person", funds_fee = 1, bonus_fee = 0), d = "dT")
-SIM("fu14", list(tax_mode = "funds", dca_mode = TRUE, dca_value = 100, dca_span = 1, funds_fee = 2, bonus_fee = 20), d = "d1", s = "s1")
 SIM("fu15", list(funds_fee = V("na")), d = "dT", extra = list(na = NA_real_), note = "ohne Fondsmodus ohne Wirkung")
-SIM("fu16", list(tax_mode = "funds", funds_fee = 1), wrap = "summary")
 
 # ── Sparplan (dca_*) ──────────────────────────────────────────────────────────
 SIM("dc01", list(dca_mode = TRUE, dca_value = 100, dca_span = 1))
@@ -442,8 +426,8 @@ SIM("da04", list(), d = "dNA", note = "LOCF, filled")
 SIM("da05", list(), d = "dChr", note = "Datum als Text")
 SIM("da06", list(), d = "dFmt")
 SIM("da07", list(), d = "dRev", note = "absteigend sortiert")
-SIM("da08", list(), d = "dT", s = "sZ", extra = list(sZ = create_strategy(Z = asset_config("etf"))))
-SIM("da10", list(), d = "dT", s = "sK", extra = list(sK = create_strategy(A = asset_config("etf", share = 1, start = as.Date("2020-01-15")))))
+SIM("da08", list(), d = "dT", s = "sZ", extra = list(sZ = create_strategy(Z = asset_config("etf", spread = 0.1))))
+SIM("da10", list(), d = "dT", s = "sK", extra = list(sK = create_strategy(A = asset_config("etf", share = 1, start = as.Date("2020-01-15"), spread = 0.1))))
 SIM("da11", list(spread = 5), d = "dT")
 SIM("da12", list(tax_rate = 0.26375), d = "dT")
 SIM("da13", list(tax_mode = "person"), d = "dT", s = "sp")
@@ -470,15 +454,15 @@ ref_case("da26", inputs = list(dT = dT, s2 = s2), r = "simulation(cbind(dT, dT['
          jl = 'result = SL.simulation(SL.RFrame(vcat(names(dT), "A"), AbstractVector[[dT[k] for k in names(dT)]..., dT["A"]]), s2)')
 
 # ── Asset-Konfiguration (Prüfungen aus test-blue-engine.R) ────────────────────
-ref_case("cf01", r = "asset_config('etf', partial_exemption = 0.3)", py = "result = simlev.asset_config(asset_class='etf', partial_exemption=0.3)",
-         jl = 'result = SL.asset_config("etf"; partial_exemption = 0.3)')
+ref_case("cf01", r = "asset_config('etf', partial_exemption = 0.3, spread = 0.1)", py = "result = simlev.asset_config(asset_class='etf', partial_exemption=0.3, spread=0.1)",
+         jl = 'result = SL.asset_config("etf"; partial_exemption = 0.3, spread = 0.1)')
 ref_case("cf02", r = "asset_config('etf', share = '0.5')", py = "result = simlev.asset_config(asset_class='etf', share='0.5')",
          jl = 'result = SL.asset_config("etf"; share = "0.5")')
 ref_case("cf03", r = "asset_config('etf', start = 'kein Datum')", py = "result = simlev.asset_config(asset_class='etf', start='kein Datum')",
          jl = 'result = SL.asset_config("etf"; start = "kein Datum")')
-ref_case("cf04", r = "asset_config('etc', 'bnh', 0.3, start = '2020-01-01', deliverable = TRUE)",
-         py = "result = simlev.asset_config(asset_class='etc', trading='bnh', share=0.3, start='2020-01-01', deliverable=True)",
-         jl = 'result = SL.asset_config("etc", "bnh", 0.3; start = "2020-01-01", deliverable = true)')
+ref_case("cf04", r = "asset_config('etc', 'bnh', 0.3, start = '2020-01-01', deliverable = TRUE, spread = 0.1)",
+         py = "result = simlev.asset_config(asset_class='etc', trading='bnh', share=0.3, start='2020-01-01', deliverable=True, spread=0.1)",
+         jl = 'result = SL.asset_config("etc", "bnh", 0.3; start = "2020-01-01", deliverable = true, spread = 0.1)')
 
 # ── Zufallsfälle: Kombinationen aller Argumente (kurze Reihen, auch mit Lücken) ──
 pick <- function(x) x[[sample.int(length(x), 1)]]
@@ -539,7 +523,7 @@ for (k in 1:22) {
     if (runif(1) < 0.2) a$sparer_pauschbetrag <- pick(c(0, 801, 2000))
     if (runif(1) < 0.2) a$private_sale_threshold <- pick(c(0, 600))
   }
-  if (tm == "funds" && runif(1) < 0.5) { a$funds_fee <- pick(c(0, 0.5, 2)); a$bonus_fee <- pick(c(0, 10, 20)) }
+  if (tm == "funds" && runif(1) < 0.5) { a$funds_fee <- pick(c(0, 0.5, 2)); a$bonus_fee <- pick(c(0, 10, 20)) }   # Ziehungen bleiben (Zufallsfolge)
   if (runif(1) < 0.15) a$details <- TRUE
   if (runif(1) < 0.12) { bad <- pick(list(list(tax_rate = 0.26), list(church_tax = 0.08), list(church_tax = 12), list(balance_thresh = 0.05),
                                             list(order_fee = list(fix = 1)), list(harvest_day = "1231"),
@@ -548,6 +532,7 @@ for (k in 1:22) {
                                             list(base_rate = 0.01), list(sparer_pauschbetrag = -1), list(fractions = 1),
                                             list(split_mode = TRUE, split_thresh = c(150, 400)), list(dca_value = 5), list(start_value = -5)))
     a[names(bad)] <- bad }
+  if (tm == "funds") next   # Fondsmodus entfernt (Etappe 6.5c): Fall entfällt, die übrigen bleiben gleich
   dname <- sprintf("dz%02d", k); sname <- sprintf("sz%02d", k)
   assign(dname, df); assign(sname, st)
   SIM(sprintf("zz%02d", k), a, d = dname, s = sname, extra = extra, pre = pre)
@@ -556,7 +541,6 @@ for (k in 1:22) {
 BLK <- function(id, b, note = NULL, inputs = list())
   ref_case(id, r = em(b, "r"), py = paste0("result = ", em(b, "py")), jl = paste0("result = ", em(b, "jl")), note = note,
            inputs = inputs)
-SIM("bk01", list(tax = BK("tax_profile"), funds = BK("funds_costs")), d = "dT", note = "Fondsmodus mit tax_profile() (Etappe 6.4)")
 SIM("bk02", list(tax = BK("tax_profile", rate = 25, church_tax = 9)), d = "dT", note = "rate mit church_tax: Fehler")
 SIM("bk03", list(tax = BK("tax_profile", rate = 26.375, church_tax = 8)), d = "dT", note = "auch der Standardwert ausdrücklich: Fehler")
 SIM("bk04", list(tax = BK("tax_profile", income = 42)), d = "dT")
@@ -575,12 +559,8 @@ SIM("bk13", list(tax = BK("tax_profile", sparer_pauschbetrag = 0, base_rate = 2.
     note = "sparer_pauschbetrag = 0 heißt ohne Pauschbetrag")
 SIM("bk14", list(dca = BK("dca_plan", 100, 1, start = "2025-01-01")), d = "dT", note = "Beginn nach dem letzten Datentag")
 SIM("bk15", list(rebalance = BK("rebalance_plan", start = "2025-01-01")), d = "dT")
-SIM("bk16", list(tax = BK("tax_profile", income = BK("income_tariff", 50000)), funds = NULL), d = "dT", s = "sp")
+SIM("bk16", list(tax = BK("tax_profile", income = BK("income_tariff", 50000))), d = "dT", s = "sp")
 SIM("bk17", list(fractions = 1), d = "dT")
-SIM("bk18", list(tax = BK("tax_profile", income = BK("income_tariff", 50000)), funds = BK("funds_costs")), d = "dT",
-    note = "Fondsmodus: income_tariff() wirkt nicht (Warnung)")
-SIM("bk19", list(tax = BK("tax_profile", rate = 20), funds = BK("funds_costs", fee = 0.5), liquidate = TRUE),
-    note = "Fondsmodus mit eigenem Steuersatz")
 BLK("bk20", BK("dca_plan"), note = "value fehlt")
 BLK("bk21", BK("dca_plan", value = 0, span = 1))
 BLK("bk22", BK("dca_plan", value = 100, span = 2.5))

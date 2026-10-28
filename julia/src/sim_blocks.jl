@@ -14,10 +14,11 @@
 #               base_rate, guenstigerpruefung, income, harvest)          → tax
 #     income_rate(marginal_rate, soli_rate), income_tariff(taxable_income, tariff),
 #     harvest_rule(day, loss_pot)
-#   funds_costs(fee, performance_fee)                                    → funds
 #
 # `nothing` heißt aus. `_sim_from_blocks` übersetzt die Bausteine in die internen
 # Werte der Engine (`_simulation_flat`), die unverändert rechnet.
+# funds_costs(fee, performance_fee) ist der Kostenbaustein für den Fonds-Wrapper (folgt,
+# Etappe 6.5c); simulation() nimmt ihn nicht an (der alte Fondsmodus ist entfernt).
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Prüfhilfen ────────────────────────────────────────────────────────────────
@@ -379,8 +380,8 @@ end
 """
     funds_costs(fee = 0.95, performance_fee = 5)
 
-Fondsmodus für `simulation()` (R: `funds_costs()`): laufende Fondskosten `fee` in
-Prozent p. a. und `performance_fee` in Prozent des Wertzuwachses über dem
+Kostenbaustein für den Fonds-Wrapper (folgt; R: `funds_costs()`): laufende Fondskosten
+`fee` in Prozent p. a. und `performance_fee` in Prozent des Wertzuwachses über dem
 Höchststand. Ergebnis: `RList` der Klasse `SimLevFundsCosts`.
 """
 function funds_costs(fee_pos = 0.95, performance_fee_pos = 5; fee = fee_pos, performance_fee = performance_fee_pos)
@@ -487,7 +488,7 @@ function _print_tax_profile(io::IO, x)
 end
 
 function _print_funds_costs(io::IO, x)
-    _blk_print(io, "Fondsmodus (funds_costs)",
+    _blk_print(io, "Fondskosten (funds_costs)",
                ["Fondskosten" => "$(_blk_fmt(x["fee"])) % p. a.",
                 "Performancegebühr" => "$(_blk_fmt(x["performance_fee"])) % des Wertzuwachses über dem Höchststand"])
 end
@@ -509,18 +510,16 @@ Bausteine prüfen und in die Argumente der Engine übersetzen (R: `.sim_from_blo
 
 `rebalance_plan()` heißt `balance_mode = true`; nur mit `event_col`,
 `event_mode = "replace"` und `skip = true` wird `balance_mode = false`.
-`sparer_pauschbetrag = 0` heißt `use_sparer_pauschbetrag = false`. Fondsmodus (`funds`) mit
-`tax`: `tax_mode = "funds"` mit den Angaben aus `tax_profile()` (wie R).
+`sparer_pauschbetrag = 0` heißt `use_sparer_pauschbetrag = false`.
 Rückgabe: `Vector{Pair{Symbol,Any}}` der Schlüsselwörter von `_simulation_flat`.
 """
-function _sim_from_blocks(costs, dca, rebalance, splits, tax, funds)
+function _sim_from_blocks(costs, dca, rebalance, splits, tax)
     @nospecialize
     _blk_check(costs, "SimLevSimCosts", "costs", "sim_costs")
     _blk_check(dca, "SimLevDcaPlan", "dca", "dca_plan")
     _blk_check(rebalance, "SimLevRebalancePlan", "rebalance", "rebalance_plan")
     _blk_check(splits, "SimLevSplitRule", "splits", "split_rule")
     _blk_check(tax, "SimLevTaxProfile", "tax", "tax_profile")
-    _blk_check(funds, "SimLevFundsCosts", "funds", "funds_costs")
     a = Pair{Symbol,Any}[:order_fee => costs === nothing ? nothing : costs["order_fee"],
                          :dca_fee => costs === nothing ? nothing : costs["dca_fee"]]
     if dca !== nothing
@@ -543,7 +542,7 @@ function _sim_from_blocks(costs, dca, rebalance, splits, tax, funds)
     if tax !== nothing
         br = tax["base_rate"]
         chr = br isa AbstractString
-        append!(a, Pair{Symbol,Any}[:tax_mode => funds === nothing ? "person" : "funds", :tax_rate => tax["rate"], :church_tax => tax["church_tax"],
+        append!(a, Pair{Symbol,Any}[:tax_mode => "person", :tax_rate => tax["rate"], :church_tax => tax["church_tax"],
                                     :sparer_pauschbetrag => tax["sparer_pauschbetrag"],
                                     :use_sparer_pauschbetrag => tax["sparer_pauschbetrag"] > 0,
                                     :private_sale_threshold => tax["private_sale_threshold"],
@@ -562,10 +561,6 @@ function _sim_from_blocks(costs, dca, rebalance, splits, tax, funds)
         h === nothing || append!(a, Pair{Symbol,Any}[:harvest_mode => true, :harvest_day => h["day"],
                                                      :harvest_loss_pot => h["loss_pot"]])
     end
-    if funds !== nothing
-        tax === nothing && push!(a, :tax_mode => "funds")
-        append!(a, Pair{Symbol,Any}[:funds_fee => funds["fee"], :bonus_fee => funds["performance_fee"]])
-    end
     return a
 end
 
@@ -574,10 +569,10 @@ end
 # simulation() (auch Bausteine); Raster und Suchräume sprechen Parameter der Bausteine mit Pfad an
 # („dca.value“, „rebalance.thresh“, „tax.income.marginal_rate“). Alte flache Namen ergeben einen Fehler.
 
-const _SIM_TOP = ("start_value", "costs", "dca", "rebalance", "splits", "tax", "funds", "risk_free", "fractions",
+const _SIM_TOP = ("start_value", "costs", "dca", "rebalance", "splits", "tax", "risk_free", "fractions",
                   "liquidate", "details")
 const _SIM_BLOCKS = ["costs" => "sim_costs", "dca" => "dca_plan", "rebalance" => "rebalance_plan",
-                     "splits" => "split_rule", "tax" => "tax_profile", "funds" => "funds_costs"]
+                     "splits" => "split_rule", "tax" => "tax_profile"]
 const _SIM_BLOCK_PARAMS = Dict{String,Vector{String}}(
     "sim_costs" => ["order_fee", "dca_fee"],
     "dca_plan" => ["value", "span", "days", "unit", "anchor", "start", "skip", "fill_deficits"],
@@ -586,7 +581,6 @@ const _SIM_BLOCK_PARAMS = Dict{String,Vector{String}}(
     "split_rule" => ["thresh"],
     "tax_profile" => ["rate", "church_tax", "sparer_pauschbetrag", "private_sale_threshold", "base_rate",
                       "guenstigerpruefung", "income", "harvest"],
-    "funds_costs" => ["fee", "performance_fee"],
     "income_rate" => ["marginal_rate", "soli_rate"],
     "income_tariff" => ["taxable_income", "tariff"],
     "harvest_rule" => ["day", "loss_pot"])
@@ -609,7 +603,7 @@ const _SIM_FLAT = Dict{String,Tuple{String,String}}(
     "event_weight" => ("rebalance.event_weight", ""),
     "split_mode" => ("", "splits = split_rule(…) (NULL = ohne Splits)"),
     "split_thresh" => ("splits.thresh", ""),
-    "tax_mode" => ("", "tax = tax_profile(…) bzw. funds = funds_costs(…) (NULL = ohne)"),
+    "tax_mode" => ("", "tax = tax_profile(…) (NULL = ohne)"),
     "tax_rate" => ("tax.rate", ""), "church_tax" => ("tax.church_tax", ""),
     "sparer_pauschbetrag" => ("tax.sparer_pauschbetrag", ""),
     "use_sparer_pauschbetrag" => ("", "tax = tax_profile(sparer_pauschbetrag = 0) (0 = ohne Pauschbetrag)"),
@@ -623,7 +617,6 @@ const _SIM_FLAT = Dict{String,Tuple{String,String}}(
     "taxable_income" => ("tax.income.taxable_income", ""), "tax_tariff" => ("tax.income.tariff", ""),
     "harvest_mode" => ("", "tax = tax_profile(harvest = harvest_rule(…))"),
     "harvest_day" => ("tax.harvest.day", ""), "harvest_loss_pot" => ("tax.harvest.loss_pot", ""),
-    "funds_fee" => ("funds.fee", ""), "bonus_fee" => ("funds.performance_fee", ""),
     "order_fee" => ("costs.order_fee", ""), "dca_fee" => ("costs.dca_fee", ""))
 
 _sim_block_ctor(b) = (i = findfirst(p -> p.first == b, _SIM_BLOCKS); i === nothing ? nothing : _SIM_BLOCKS[i].second)
@@ -699,7 +692,7 @@ end
 
 const _SIM_CTORS = Dict{String,Function}("sim_costs" => sim_costs, "dca_plan" => dca_plan,
     "rebalance_plan" => rebalance_plan, "split_rule" => split_rule, "tax_profile" => tax_profile,
-    "funds_costs" => funds_costs, "income_rate" => income_rate, "income_tariff" => income_tariff,
+    "income_rate" => income_rate, "income_tariff" => income_tariff,
     "harvest_rule" => harvest_rule)
 
 _sim_fields(obj) = obj === nothing ? Pair{String,Any}[] : Pair{String,Any}[String(k) => v for (k, v) in obj]

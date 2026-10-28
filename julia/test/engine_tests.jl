@@ -97,6 +97,8 @@ st1(; kw...) = create_strategy(A = asset_config("etf"; share = 1, spread = 0, kw
 end
 
 @testset "asset_config und Strategien" begin
+    @test asset_config().spread === 0.0   # Standard-Spread 0 (Etappe 6.5c)
+    @test create_strategy(A = (asset_class = "etf",)).A.spread === 0.0
     cfg = asset_config("etf"; share = 0.7, partial_exemption = 30)
     @test cfg isa AssetConfig && r_class(cfg) == ["asset_config", "list"]
     @test cfg.asset_class == "etf" && cfg["share"] == 0.7 && cfg.tax_regime == "investment_fund"
@@ -149,13 +151,9 @@ end
     @test occursin("Kursspalte 'B' fehlt in 'data'", errmsg(() -> simulation(d, create_strategy(B = asset_config()))))
     dup = (date = [Date(2020, 1, 1); days("2020-01-01", "2020-01-05")], A = collect(101.0:106.0))
     @test occursin("mehrfach vor (1 doppelte Zeilen)", errmsg(() -> simulation(dup, st1())))
-    # Fondsmodus mit tax_profile() (Kirchensteuer) wie bis 6.2 mit tax_mode = "funds"
-    dg = (date = days("2020-01-01", "2020-12-31"), A = collect(range(100.0, 160.0; length = 366)))
-    r9 = simulation(dg, st1(); funds = funds_costs(), tax = tax_profile(; church_tax = 9), liquidate = true)
-    f9 = SL._simulation_flat(dg, st1(); tax_mode = "funds", church_tax = 9, liquidate = true)
-    @test r9["worth"] == f9["worth"] && r9["tax_report"]["total_taxes_paid"] == f9["tax_report"]["total_taxes_paid"]
-    r0 = simulation(dg, st1(); funds = funds_costs(), liquidate = true)
-    @test r9["tax_report"]["total_taxes_paid"] > r0["tax_report"]["total_taxes_paid"]
+    # alter Fondsmodus (Etappe 6.5c entfernt): der übliche Fehler für ein unbekanntes Schlüsselwort
+    @test_throws MethodError simulation(d, st1(); funds = funds_costs())
+    @test occursin("funds", errmsg(() -> simulation(d, st1(); funds = funds_costs())))
     @test errmsg(() -> simulation(d, st1(); dca = (value = 100, span = 1))) ==
           "simulation: dca muss NULL oder ein Objekt aus dca_plan() sein, nicht list."
     @test errmsg(() -> simulation(d, st1(); tax = funds_costs())) ==
@@ -232,11 +230,7 @@ end
     @test occursin("nicht gefunden", errmsg(() -> SL.tax_tariff("/nicht/da.csv")))
 end
 
-@testset "Engine: Vorabpauschale, Fondsmodus, Splits" begin
-    d = (date = days("2020-01-01", "2022-12-30"), A = fill(100.0, 1095))
-    r = simulation(d, st1(); funds = funds_costs(10, 0))
-    v = 10000.0; v -= 366 * (0.1 / 366) * v; v -= 365 * (0.1 / 365) * v; v -= 364 * (0.1 / 365) * v
-    @test appr(r.worth[end], v)
+@testset "Engine: Vorabpauschale, Splits" begin
     lin = (date = days("2022-01-03", "2022-07-21"), A = collect(range(100, 150; length = 200)))
     rv = simulation(lin, create_strategy(A = asset_config("etf"; spread = 0, partial_exemption = 30));
                     tax = tax_profile(25; sparer_pauschbetrag = 0), liquidate = true)

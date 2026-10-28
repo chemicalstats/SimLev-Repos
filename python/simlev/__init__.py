@@ -37,6 +37,7 @@ from ._sim_blocks import (
     SimLevHarvestRule,
     SimLevFundsCosts,
 )
+from .wrapper import wrapper_config, wrapper_nav, SimLevWrapperConfig, SimLevWrapperNav
 from .result import SimLevResult, SimLevSummary
 from .svg import SimLevPlot
 from .result import summary as _summary_result
@@ -177,7 +178,7 @@ _LAZY_HIDDEN = frozenset({"_importlib", "_LAZY", "_LAZY_NAMES", "_LAZY_SUBMODULE
 def __dir__():
     return sorted((set(globals()) - _LAZY_HIDDEN) | set(_LAZY_NAMES) | set(_LAZY_SUBMODULES))
 
-__version__ = "0.9.1"
+__version__ = "0.10.0"
 
 __all__ = [
     "AssetConfig",
@@ -212,6 +213,10 @@ __all__ = [
     "SimLevIncomeTariff",
     "SimLevHarvestRule",
     "SimLevFundsCosts",
+    "wrapper_config",
+    "wrapper_nav",
+    "SimLevWrapperConfig",
+    "SimLevWrapperNav",
     "summary",
     "plot",
     "set_seed",

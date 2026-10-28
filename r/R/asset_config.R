@@ -1,3 +1,6 @@
+# Meldung von asset_config() fuer wrapper mit trading = "signal" (strategy_from_weights() erkennt sie und nennt das Asset)
+.ac_msg_wrapper_signal <- "asset_config: mit wrapper ist nur trading = \"bnh\" m\u00f6glich (keine Signale auf den Anteilswert; Signale gehen in der inneren Strategie)."
+
 #' Asset-Konfiguration erstellen
 #'
 #' Erstellt eine validierte Asset-Konfiguration fuer Simulationsstrategien.
@@ -24,7 +27,8 @@
 #'   Wird fuer Rebalancing und DCA-Aufteilung genutzt; die Summe ueber alle Assets
 #'   muss in simulation() 1 ergeben. Standard: 1.0.
 #' @param spread Zahl. Voller Bid-Ask-Spread in Prozent (z. B. 0.1 fuer 0,1 %).
-#'   Wird auf Kauf- und Verkaufskurse angewandt (je Seite der halbe Spread). Standard: 0.1.
+#'   Wird auf Kauf- und Verkaufskurse angewandt (je Seite der halbe Spread). Standard: 0 (ohne
+#'   Spread; wer Spreads abbilden will, gibt sie an).
 #' @param partial_exemption Zahl. Teilfreistellung in Prozent (0 bis 100) fuer ETFs:
 #'   \describe{
 #'     \item{30}{Aktien-ETFs (Aktienfonds, >51\% Aktien)}
@@ -47,6 +51,9 @@
 #'   Pflicht bei trading = "signal".
 #' @param signal_sell Zeichenkette oder NULL. Spaltenname der Verkaufssignale in den Daten.
 #'   Pflicht bei trading = "signal".
+#' @param wrapper NULL oder ein Objekt aus wrapper_config(): Das Asset ist dann ein Fonds-Wrapper; sein Name
+#'   ist keine Kursspalte, die Kurse sind der Anteilswert aus der inneren Strategie (wrapper_nav()). Nur mit
+#'   trading = "bnh".
 #'
 #' @return Objekt der Klasse "asset_config" mit der validierten Konfiguration.
 #'
@@ -79,13 +86,14 @@ asset_config <- function(
                     "etn_standard", "etn_deliverable"),
     trading = c("bnh", "signal"),
     share = 1.0,
-    spread = 0.1,
+    spread = 0,
     partial_exemption = 0.0,
     deliverable = FALSE,
     start = NULL,
     tax_regime = NULL,
     signal_buy = NULL,
-    signal_sell = NULL
+    signal_sell = NULL,
+    wrapper = NULL
 ) {
   
   asset_class <- match.arg(asset_class)
@@ -140,6 +148,14 @@ asset_config <- function(
     stop("asset_config: bei trading = \"signal\" m\u00fcssen signal_buy und signal_sell angegeben werden (Namen der Signalspalten in data).")
   }
   
+  # Fonds-Wrapper (Etappe 6.5c): keine Signale auf den Anteilswert (E5)
+  if (!is.null(wrapper)) {
+    if (!inherits(wrapper, "SimLevWrapperConfig"))
+      stop(sprintf("asset_config: wrapper muss NULL oder ein Objekt aus wrapper_config() sein, nicht %s.",
+                   paste(class(wrapper), collapse = "/")))
+    if (trading == "signal") stop(.ac_msg_wrapper_signal)
+  }
+
   # Steuerregime ableiten
   if (is.null(tax_regime)) {
     tax_regime <- switch(asset_class,
@@ -168,6 +184,7 @@ asset_config <- function(
     signal_buy = signal_buy,
     signal_sell = signal_sell
   )
+  if (!is.null(wrapper)) config$wrapper <- wrapper   # nur mit Wrapper ein Feld (sonst Objekt wie bisher)
   
   class(config) <- c("asset_config", "list")
   return(config)
@@ -192,6 +209,11 @@ print.asset_config <- function(x, ...) {
   }
   if (x$asset_class %in% c("etn", "etc")) {
     cat(sprintf("  Lieferbar:    %s\n", x$deliverable))
+  }
+  if (inherits(x$wrapper, "SimLevWrapperConfig")) {
+    w <- x$wrapper
+    cat(sprintf("  Wrapper:      %s; Fondskosten %s %% p. a., Performancegeb\u00fchr %s %%\n",
+                .wrapper_assets_text(w$strategy), .blk_fmt(w$costs$fee), .blk_fmt(w$costs$performance_fee)))
   }
   invisible(x)
 }

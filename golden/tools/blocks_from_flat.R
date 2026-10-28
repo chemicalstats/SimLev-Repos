@@ -56,7 +56,7 @@ blocks_from_flat <- function(a) {
   }
   if (truth("split_mode")) b$splits <- flatblock("split_rule", pick(c(split_thresh = "thresh")))
   tm <- if (has("tax_mode")) a$tax_mode[1] else "none"
-  if (tm %in% c("person", "funds")) {
+  if (identical(tm, "person")) {
     args <- pick(c(tax_rate = "rate", church_tax = "church_tax"))
     if (has("use_sparer_pauschbetrag") && !isTRUE(a$use_sparer_pauschbetrag)) args$sparer_pauschbetrag <- 0
     else if (has("sparer_pauschbetrag")) args["sparer_pauschbetrag"] <- list(a$sparer_pauschbetrag)
@@ -76,13 +76,11 @@ blocks_from_flat <- function(a) {
       args$income <- flatblock("income_rate", ia)
     }
     if (truth("harvest_mode")) args$harvest <- flatblock("harvest_rule", pick(c(harvest_day = "day", harvest_loss_pot = "loss_pot")))
-    # Fondsmodus (Etappe 6.4): Steuerangaben wie bis 6.2 ueber tax = tax_profile() zusammen mit funds
-    if (identical(tm, "person") || length(args)) b$tax <- flatblock("tax_profile", args)
-    if (identical(tm, "funds")) b$funds <- flatblock("funds_costs", pick(c(funds_fee = "fee", bonus_fee = "performance_fee")))
-  } else if (!identical(tm, "none")) stop("blocks_from_flat: tax_mode = ", deparse(tm))
+    b$tax <- flatblock("tax_profile", args)
+  } else if (!identical(tm, "none")) stop("blocks_from_flat: tax_mode = ", deparse(tm), " (den Fondsmodus gibt es seit Etappe 6.5c nicht mehr)")
   out <- list()
   for (k in names(a)) if (k %in% names(keep)) out[k] <- list(a[[k]])
-  for (k in c("costs", "dca", "rebalance", "splits", "tax", "funds")) if (!is.null(b[[k]])) out[[k]] <- b[[k]]
+  for (k in c("costs", "dca", "rebalance", "splits", "tax")) if (!is.null(b[[k]])) out[[k]] <- b[[k]]
   out
 }
 

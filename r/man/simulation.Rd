@@ -23,7 +23,6 @@ simulation(
   rebalance   = NULL,
   splits      = NULL,
   tax         = NULL,
-  funds       = NULL,
   risk_free   = 0,
   fractions   = TRUE,
   liquidate   = FALSE,
@@ -35,7 +34,8 @@ simulation(
     \code{data.frame} mit täglichen Marktdaten. Pflichtfelder: \code{date}
     (Klasse \code{Date}, aufsteigend) und je eine Kursspalte pro Asset (Niveaus,
     keine Renditen; Name muss mit dem Asset-Namen in \code{strategy}
-    übereinstimmen). Optionale Spalten: Basiszins in Prozent (Spaltenname in
+    übereinstimmen; für Fonds-Wrapper die Spalten der inneren Strategie, siehe Abschnitt
+    \dQuote{Fonds-Wrapper}). Optionale Spalten: Basiszins in Prozent (Spaltenname in
     \code{tax_profile(base_rate = )}), logische Signalspalten (für
     \code{trading = "signal"}), Risk-Free-Reihe in Prozent p.a. (Name in
     \code{risk_free}), logische Trigger- und numerische Gewichtsspalten für
@@ -108,22 +108,7 @@ simulation(
     Persönliche Besteuerung (§§ 18--20 InvStG, § 23 EStG) mit FIFO-Buchführung:
     \code{\link{tax_profile}(rate, church_tax, sparer_pauschbetrag, private_sale_threshold,
     base_rate, guenstigerpruefung, income, harvest)} oder \code{NULL} (Standard: keine
-    Steuern). Zusammen mit \code{funds} gilt es für den Fondsmodus (siehe dort).
-  }
-  \item{funds}{
-    Fondsmodus (pauschale Fondsbesteuerung): \code{\link{funds_costs}(fee,
-    performance_fee)} oder \code{NULL} (Standard). Jährliche Kosten am 31.12. und anteilig am
-    letzten Simulationstag; bei \code{liquidate = TRUE} Steuer auf den Gesamtgewinn
-    = Endwert minus \code{start_value} minus Sparplan-Einzahlungen (ausgewiesen in
-    \code{tax_report$total_taxes_paid}). Der Fondsmodus steht für einen eigenen Wrapper
-    (etwa ein Zertifikat) mit eigenen Kosten und eigener Steuer: ohne \code{tax} gilt der Satz
-    26,375 \%, mit \code{tax = tax_profile(rate)} bzw. \code{tax_profile(church_tax)} dieser Satz
-    (mit Kirchensteuer der Satz nach § 32d Abs. 1 EStG). Die übrigen Angaben von
-    \code{tax_profile()} wirken im Fondsmodus nicht: \code{harvest} und \code{income_tariff()}
-    mit Warnung, \code{sparer_pauschbetrag} (nur im Ergebnis \code{tax_report}),
-    \code{private_sale_threshold}, \code{base_rate} (keine Vorabpauschale),
-    \code{income_rate()} und \code{guenstigerpruefung} still (ohne Grenzsteuersatz mit der
-    Warnung zur Günstigerprüfung), wie früher mit \code{tax_mode = "funds"}.
+    Steuern).
   }
   \item{risk_free}{
     Numerisch oder Character. Annualisierte risikolose Rendite
@@ -436,6 +421,11 @@ simulation(
       eine Gebühr ungleich 0 festlegt: Summe der gezahlten Ordergebühren in EUR.}
     \item{\code{harvest_days}}{Nur mit \code{tax_profile(harvest = harvest_rule())}: Date-Vektor
       der Termine der Gewinnrealisierung.}
+    \item{\code{wrappers}}{Nur mit \code{details = TRUE} und Fonds-Wrapper-Assets
+      (\code{asset_config(wrapper = )}): benannte Liste je Wrapper-Asset mit dem
+      \code{SimLevWrapperNav} aus \code{\link{wrapper_nav}} (Anteilswert, Brutto, Gebühren,
+      High-Water-Mark, inneres Ergebnis als Attribut \code{inner}). Ohne \code{details}
+      gibt es das Feld nicht.}
   }
 }
 \examples{
@@ -642,6 +632,37 @@ summary(result_tax)
   eines Verkaufssignals; das Signal steuert nur Ein- und Ausstieg. Ohne
   Bestand wartet das Geld als Cash auf das Kaufsignal.
 }
+\section{Fonds-Wrapper}{
+  Ein Asset mit \code{asset_config(wrapper = \link{wrapper_config}(...))} ist ein Zertifikat
+  bzw. Fonds über eine innere Strategie. Vor der Engine rechnet \code{simulation()} je
+  Wrapper-Asset den Anteilswert mit \code{\link{wrapper_nav}} aus den inneren Spalten von
+  \code{data} und hängt ihn als Kursspalte mit dem Asset-Namen an (vor dem Beginn und an
+  Tagen ohne inneren Kurs \code{NA}). Danach ist das Asset ein gewöhnliches Asset ohne
+  \code{wrapper}: Spread, Order- und Sparplangebühren, Steuern (nach \code{asset_class}
+  bzw. \code{tax_regime}: Zertifikat = Kapitalforderung, \code{tax_regime =
+  "investment_fund"} mit Teilfreistellung und Vorabpauschale), Kirchensteuer, Pauschbetrag,
+  Verlusttöpfe, \code{harvest} und \code{open_lots} gelten wie für jedes Einzelpapier.
+  \itemize{
+    \item Der Asset-Name ist keine Kursspalte; eine Spalte gleichen Namens in \code{data}
+      ist ein Fehler. Gebraucht werden die Kursspalten (und Signal- bzw. Ereignisspalten)
+      der inneren Strategie.
+    \item \code{splits} gelten für die inneren Spalten; der Anteilswert selbst splittet nicht.
+    \item Beginnen die inneren Kurse nach dem ersten Tag von \code{data}, beginnt der
+      Anteilswert später; das Asset wird dann wie jedes später startende Asset behandelt
+      (Hinweis \dQuote{hat erst ab ... Kurse}). Ist der Wrapper das einzige Asset, ist das
+      der Fehler \dQuote{In der ersten Zeile von 'data' fehlen alle Kurse}.
+    \item Meldungen der inneren Rechnung erscheinen als \dQuote{Hinweis: Wrapper '<Name>'
+      (innere Rechnung): ...}, Warnungen und Fehler als \dQuote{simulation: Wrapper
+      '<Name>' (innere Rechnung): ...}.
+    \item Wrapper-Assets handeln nur mit \code{trading = "bnh"} (Signale gehen in der
+      inneren Strategie).
+    \item Aufrufer mit vielen Läufen (\code{\link{bootstrap_study}},
+      \code{\link{param_search}}, \code{\link{sensitivity_grid}},
+      \code{\link{planning_lumpsum_vs_dca}} u. a.) rechnen den Anteilswert je Lauf neu;
+      Bootstrap-Pfade ziehen die inneren Spalten.
+  }
+  Mit \code{details = TRUE} enthält das Ergebnis \code{wrappers} (siehe oben).
+}
 \section{Ereignisbasiertes Rebalancing}{
   Zusammenspiel der Argumente von \code{\link{rebalance_plan}}:
   \describe{
@@ -663,6 +684,6 @@ summary(result_tax)
 \seealso{
   \code{\link{sim_blocks}} (Bausteine), \code{\link{asset_config}}, \code{\link{create_strategy}},
   \code{\link{rebalance_trigger}}, \code{\link{plot.SimLevResult}},
-  \code{\link{tax_tariff}}; Weiterverarbeitung des Ergebnisses mit
+  \code{\link{tax_tariff}}, \code{\link{wrapper_config}}; Weiterverarbeitung des Ergebnisses mit
   \code{\link{result_analysis}} und \code{\link{withdrawal_paths}}
 }

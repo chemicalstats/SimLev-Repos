@@ -5,42 +5,6 @@
 }
 .bt_st1 <- function(...) create_strategy(A = asset_config("etf", share = 1, spread = 0, ...))
 
-test_that("R1-01: funds_fee wird auch bei voll investiertem Depot belastet (Teilverkauf)", {
-  d <- .bt_cal("2020-01-01", "2022-12-30", A = 100)
-  r <- simulation(d, .bt_st1(), funds = funds_costs(fee = 10, performance_fee = 0))
-  # Handrechnung: linearer Tagessatz 0,1 / Tage des Jahres auf konstanten Wert (volles Jahr
-  # genau 10 %), 2022 nur 364 Tage (angepasst an Punkt B7, vorher Tagessatz 1,1^(1/Tage) - 1)
-  v <- 10000; v <- v - 366 * (0.1 / 366) * v; v <- v - 365 * (0.1 / 365) * v
-  v <- v - 364 * (0.1 / 365) * v
-  expect_equal(tail(r$worth, 1), v, tolerance = 1e-9)
-  expect_lt(tail(r$worth, 1), 7500)
-})
-
-test_that("R1-02: Fondssteuer bei Liquidation unabhaengig davon, ob der Endtag der 31.12. ist", {
-  mk <- function(end) { d <- .bt_cal("2020-01-01", end); d$A <- 100 * 1.0005^(seq_len(nrow(d)) - 1); d }
-  run <- function(end) simulation(mk(end), .bt_st1(), funds = funds_costs(fee = 0, performance_fee = 0), liquidate = TRUE)
-  a <- run("2022-12-30"); b <- run("2022-12-31")
-  g <- function(n) { v <- 10000 * 1.0005^(n - 1); v - 0.26375 * (v - 10000) }
-  expect_equal(tail(a$worth, 1), g(1095), tolerance = 1e-9)
-  expect_equal(tail(b$worth, 1), g(1096), tolerance = 1e-9)
-  expect_equal(b$tax_report$total_taxes_paid, 0.26375 * (10000 * 1.0005^1095 - 10000), tolerance = 1e-9)
-  # Jahresgebuehr am 31.12. nicht doppelt: mit funds_fee nur eine Belastung im Endjahr
-  c1 <- simulation(mk("2021-12-31"), .bt_st1(), funds = funds_costs(fee = 1, performance_fee = 0))
-  c2 <- simulation(mk("2021-12-31"), .bt_st1(), funds = funds_costs(fee = 1, performance_fee = 0), liquidate = TRUE)
-  expect_equal(tail(c2$worth, 1) + c2$tax_report$total_taxes_paid, tail(c1$worth, 1), tolerance = 1e-9)
-})
-
-test_that("R1-03: Einzahlungen sind kein Gewinn (Steuer und Performancegebuehr)", {
-  d <- .bt_cal("2020-01-01", "2022-12-30", A = 100)
-  r <- simulation(d, .bt_st1(), dca = dca_plan(value = 1000, span = 1), funds = funds_costs(fee = 0, performance_fee = 0), liquidate = TRUE)
-  expect_equal(tail(r$worth, 1), 10000 + sum(r$report$A$flows))
-  expect_equal(r$tax_report$total_taxes_paid, 0)
-  d2 <- .bt_cal("2020-01-01", "2021-06-30", A = 100, b = FALSE, s = FALSE)
-  st2 <- create_strategy(A = asset_config("etf", "signal", share = 1, spread = 0, signal_buy = "b", signal_sell = "s"))
-  r2 <- simulation(d2, st2, dca = dca_plan(value = 1000, span = 1), funds = funds_costs(fee = 0, performance_fee = 5))
-  expect_equal(tail(r2$worth, 1), 10000 + sum(r2$report$A$flows))
-})
-
 test_that("R1-04: dca_fee nur f\u00fcr Sparplankaeufe, Rebalancing am selben Tag mit order_fee", {
   set.seed(2); n <- 3 * 365
   d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = n),

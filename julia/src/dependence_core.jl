@@ -216,6 +216,19 @@ function dcc_filter(Z, a::Real, b::Real, Qbar, keep::Bool)
     Zm = _fmat(Z)
     Qb = _fmat(Qbar)
     a = Float64(a); b = Float64(b)
+    r, tn = try
+        _dcc_fast(Zm, a, b, Qb, keep)
+    catch e
+        e isa DomainError || rethrow()
+        nothing, 0                            # sqrt einer negativen Zahl: NaN-genauer Weg
+    end
+    if r === nothing || isnan(r["nll"]) || (keep && any(isnan, view(r["R"], 1:tn, :)))
+        r = _dcc_nan(Zm, a, b, Qb, keep)
+    end
+    r
+end
+
+function _dcc_fast(Zm, a, b, Qb, keep)
     n, k = size(Zm)
     np_ = div(k * (k - 1), 2)
     Q = zeros(k * k); R = zeros(k * k); L = zeros(k * k); y = zeros(k)
@@ -223,6 +236,7 @@ function dcc_filter(Z, a::Real, b::Real, Qbar, keep::Bool)
         Q[i*k+j+1] = Qb[i+1, j+1]
     end
     out = fill(SimLev.NA, keep ? n : 0, keep ? np_ : 0)
+    rows = 0
     nll = 0.0
     ok = true
     for t in 0:(n-1)
@@ -250,6 +264,83 @@ function dcc_filter(Z, a::Real, b::Real, Qbar, keep::Bool)
             logdet += 2.0 * SimLev.RLibm.log(L[i*k+i+1])
         end
         nll += 0.5 * (logdet + quad - zz)
+        if keep
+            p = 1
+            for i in 0:(k-1), j in (i+1):(k-1)
+                out[t+1, p] = R[i*k+j+1]
+                p += 1
+            end
+        end
+        rows = t + 1
+    end
+    ok || (nll = 1e10)
+    SimLev.RList("nll" => nll, "R" => out, "ok" => ok), rows
+end
+
+# NaN-genauer Weg (Etappe 8.0), genutzt, wenn ein Ergebnis NaN ist. Operandenfolge aus
+# C_dcc_filter (objdump des R-Baus): Q = ((a * z_i) * z_j + Qbar * (1 - a - b)) + b * Q,
+# R = Q / sqrt(Q_jj * Q_ii), chol_small mit L_jm * L_im, quad = y^2 + quad, zz = z^2 + zz,
+# logdet = (log + log) + logdet, nll = ((quad + logdet) - zz) * 0.5 + nll (wie Python).
+function _dcc_nan(Zm, a, b, Qb, keep)
+    nad = SimLev.nan_add; nsu = SimLev.nan_sub; nmu = SimLev.nan_mul; ndv = SimLev.nan_div
+    nsq = SimLev.nan_sqrt
+    nlg(x) = x > 0.0 ? SimLev.RLibm.log(x) : x == 0.0 ? -Inf : isnan(x) ? SimLev.nan_quiet(x) : SimLev.X86_NAN
+    n, k = size(Zm)
+    np_ = div(k * (k - 1), 2)
+    Q = zeros(k * k); R = zeros(k * k); L = zeros(k * k); y = zeros(k)
+    for i in 0:(k-1), j in 0:(k-1)
+        Q[i*k+j+1] = Qb[i+1, j+1]
+    end
+    out = fill(SimLev.NA, keep ? n : 0, keep ? np_ : 0)
+    nll = 0.0
+    ok = true
+    c0 = nsu(nsu(1.0, a), b)
+    for t in 0:(n-1)
+        if t > 0
+            for i in 0:(k-1), j in 0:(k-1)
+                v = nad(nmu(nmu(a, Zm[t, i+1]), Zm[t, j+1]), nmu(Qb[i+1, j+1], c0))
+                Q[i*k+j+1] = nad(v, nmu(b, Q[i*k+j+1]))
+            end
+        end
+        for i in 0:(k-1), j in 0:(k-1)
+            R[i*k+j+1] = ndv(Q[i*k+j+1], nsq(nmu(Q[j*k+j+1], Q[i*k+i+1])))
+        end
+        fill!(L, 0.0)
+        pd = true
+        for i in 0:(k-1)
+            for j in 0:i
+                s = R[i*k+j+1]
+                for m in 0:(j-1)
+                    s = nsu(s, nmu(L[j*k+m+1], L[i*k+m+1]))
+                end
+                if i == j
+                    if s <= 1e-14
+                        pd = false; break
+                    end
+                    L[i*k+i+1] = nsq(s)
+                else
+                    L[i*k+j+1] = ndv(s, L[j*k+j+1])
+                end
+            end
+            pd || break
+        end
+        if !pd
+            ok = false
+            break
+        end
+        logdet = 0.0; quad = 0.0; zz = 0.0
+        for i in 0:(k-1)
+            s = Zm[t+1, i+1]
+            for m in 0:(i-1)
+                s = nsu(s, nmu(L[i*k+m+1], y[m+1]))
+            end
+            y[i+1] = ndv(s, L[i*k+i+1])
+            quad = nad(nmu(y[i+1], y[i+1]), quad)
+            zz = nad(nmu(Zm[t+1, i+1], Zm[t+1, i+1]), zz)
+            lg = nlg(L[i*k+i+1])
+            logdet = nad(nad(lg, lg), logdet)
+        end
+        nll = nad(nmu(nsu(nad(quad, logdet), zz), 0.5), nll)
         if keep
             p = 1
             for i in 0:(k-1), j in (i+1):(k-1)
@@ -464,7 +555,7 @@ function _qr_pick(y::Vector{Float64}, X::Matrix{Float64}, beta)
         for j in 1:p
             nv += v[j] * v[j]
         end
-        nv <= 1e-10 * max(n0, 1e-300) && continue
+        nv <= 1e-10 * SimLev.cpp_max(n0, 1e-300) && continue
         nv = sqrt(nv)
         for j in 1:p
             push!(Q, v[j] / nv)
@@ -547,9 +638,9 @@ function _qr_subgrad_lp(X::Matrix{Float64}, G::Vector{Int}, v::Vector{Float64}, 
             si += U[q+1] * abs(A[q*p+i+1])
         end
         sgn[i+1] = w[i+1] >= 0.0 ? 1.0 : -1.0
-        S = max(S, si)
+        S = SimLev.cpp_max(S, si)
     end
-    ftol = 1e-9 * max(S, 1e-300)
+    ftol = 1e-9 * SimLev.cpp_max(S, 1e-300)
     col(k, i) = k < m ? A[k*p+i+1] : (k - m == i ? sgn[i+1] : 0.0)
     basis = Int[m + i for i in 0:(p-1)]
     upper = zeros(Bool, nv); inb = zeros(Bool, nv)
@@ -586,7 +677,7 @@ function _qr_subgrad_lp(X::Matrix{Float64}, G::Vector{Int}, v::Vector{Float64}, 
         else
             stall += 1
         end
-        obj_old = min(obj_old, obj)
+        obj_old = SimLev.cpp_min(obj_old, obj)
         for i in 0:(p-1)
             s = 0.0
             for r in 0:(p-1)
@@ -616,16 +707,16 @@ function _qr_subgrad_lp(X::Matrix{Float64}, G::Vector{Int}, v::Vector{Float64}, 
                 s += Bi[r*p+i+1] * A[ent*p+i+1]
             end
             al[r+1] = dir * s
-            amax = max(amax, abs(s))
+            amax = SimLev.cpp_max(amax, abs(s))
         end
-        ptol = 1e-12 * max(amax, 1.0)
+        ptol = 1e-12 * SimLev.cpp_max(amax, 1.0)
         tmax = U[ent+1]; leave = -1; to_upper = false
         for r in 0:(p-1)
             k = basis[r+1]
             if al[r+1] > ptol
-                lim = max(xB[r+1], 0.0) / al[r+1]
+                lim = SimLev.cpp_max(xB[r+1], 0.0) / al[r+1]
             elseif al[r+1] < -ptol && k < m
-                lim = max(U[k+1] - xB[r+1], 0.0) / -al[r+1]
+                lim = SimLev.cpp_max(U[k+1] - xB[r+1], 0.0) / -al[r+1]
             else
                 continue
             end
@@ -668,7 +759,7 @@ function _qr_polish(y::Vector{Float64}, X::Matrix{Float64}, beta, tau::Float64)
     g = zeros(p)
     yscale = 0.0
     for i in 1:n
-        yscale = max(yscale, abs(y[i]))
+        yscale = SimLev.cpp_max(yscale, abs(y[i]))
     end
     Z = Int[]
     for i in 1:n
@@ -710,7 +801,7 @@ function _qr_exchange(y::Vector{Float64}, X::Matrix{Float64}, tau::Float64, h::V
     h = copy(h)
     yscale = 0.0
     for i in 1:n
-        yscale = max(yscale, abs(y[i]))
+        yscale = SimLev.cpp_max(yscale, abs(y[i]))
     end
     A = zeros(p * p); D = zeros(p * p); b = zeros(p); r = zeros(n); g = zeros(p); lam = zeros(p); c = zeros(n); e = zeros(p)
     inh = zeros(Bool, n)
@@ -739,7 +830,7 @@ function _qr_exchange(y::Vector{Float64}, X::Matrix{Float64}, tau::Float64, h::V
         for i in 1:n
             fit = _fit_i(X, i, b, p)
             r[i] = y[i] - fit
-            fscale = max(fscale, abs(fit))
+            fscale = SimLev.cpp_max(fscale, abs(fit))
             f += r[i] * (tau - (r[i] < 0.0 ? 1.0 : 0.0))
         end
         f > f_old + 1e-12 * (1.0 + abs(f_old)) && return 0, out
@@ -871,9 +962,9 @@ function quantile_reg_core(y, X, tau::Real, beta0, sc::Real, tol::Real, maxit::I
             _solve_spd!(A, nb, p) || throw(QuantileRegError("Quantilsregression: singuläres Gleichungssystem."))
             dmax = 0.0; bmax = 0.0
             for j in 1:p
-                dmax = max(dmax, abs(nb[j] - beta[j])); bmax = max(bmax, abs(beta[j]))
+                dmax = SimLev.cpp_max(dmax, abs(nb[j] - beta[j])); bmax = SimLev.cpp_max(bmax, abs(beta[j]))
             end
-            done = dmax <= (e < 3 ? max(tol, 1e-7) : tol) * (1.0 + bmax)
+            done = dmax <= (e < 3 ? SimLev.cpp_max(tol, 1e-7) : tol) * (1.0 + bmax)
             beta = copy(nb)
             done && break
             if it % 25 == 24
@@ -968,6 +1059,74 @@ function hmm_forward_backward(B, A, p0)
         end
         for i in 1:K, j in 1:K
             xi[i, j] += al[t, i] * tmp[j] * Am[i, j] / cs[t+1]
+        end
+    end
+    if any(isnan, cs) || any(isnan, al) || any(isnan, ga) || any(isnan, xi)
+        return _hmm_nan(Bm, Am, p0, T, K)
+    end
+    SimLev.RList("filtered" => al, "smoothed" => ga, "xi" => xi, "scale" => cs)
+end
+
+# NaN-genauer Weg (Etappe 8.0): genutzt, wenn ein Ergebnis NaN ist. Operandenfolge aus
+# C_hmm_forward_backward (objdump des R-Baus): a = p0 * B, s = s + a, v = v + al * A,
+# a = v * B, tmp = B * be, v = v + A * tmp, ga = al * be, rs = rs + ga,
+# xi = ((al * tmp) * A) / cs + xi (wie _hmm_nan in Python).
+function _hmm_nan(Bm, Am, p0, T, K)
+    nad = SimLev.nan_add; nmu = SimLev.nan_mul; ndv = SimLev.nan_div
+    al = zeros(T, K); be = zeros(T, K); ga = zeros(T, K); xi = zeros(K, K)
+    cs = zeros(T); a = zeros(K); tmp = zeros(K)
+    s = 0.0
+    for j in 1:K
+        a[j] = nmu(p0[j], Bm[1, j]); s = nad(s, a[j])
+    end
+    cs[1] = s
+    for j in 1:K
+        al[1, j] = ndv(a[j], s)
+    end
+    for t in 2:T
+        s = 0.0
+        for j in 1:K
+            v = 0.0
+            for i in 1:K
+                v = nad(v, nmu(al[t-1, i], Am[i, j]))
+            end
+            a[j] = nmu(v, Bm[t, j]); s = nad(s, a[j])
+        end
+        cs[t] = s
+        for j in 1:K
+            al[t, j] = ndv(a[j], s)
+        end
+    end
+    for j in 1:K
+        be[T, j] = 1.0
+    end
+    for t in (T-1):-1:1
+        for j in 1:K
+            tmp[j] = nmu(Bm[t+1, j], be[t+1, j])
+        end
+        for i in 1:K
+            v = 0.0
+            for j in 1:K
+                v = nad(v, nmu(Am[i, j], tmp[j]))
+            end
+            be[t, i] = ndv(v, cs[t+1])
+        end
+    end
+    for t in 1:T
+        rs = 0.0
+        for j in 1:K
+            ga[t, j] = nmu(al[t, j], be[t, j]); rs = nad(rs, ga[t, j])
+        end
+        for j in 1:K
+            ga[t, j] = ndv(ga[t, j], rs)
+        end
+    end
+    for t in 1:(T-1)
+        for j in 1:K
+            tmp[j] = nmu(Bm[t+1, j], be[t+1, j])
+        end
+        for i in 1:K, j in 1:K
+            xi[i, j] = nad(ndv(nmu(nmu(al[t, i], tmp[j]), Am[i, j]), cs[t+1]), xi[i, j])
         end
     end
     SimLev.RList("filtered" => al, "smoothed" => ga, "xi" => xi, "scale" => cs)

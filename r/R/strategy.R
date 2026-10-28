@@ -96,8 +96,15 @@ strategy_validate <- function(strategy, data = NULL) {
   }
   
   if (!is.null(data)) {
-    asset_names <- names(strategy)
     data_cols <- colnames(data)
+    # Fonds-Wrapper: der Asset-Name ist keine Kursspalte (Verwechslung ausschliessen), geprueft werden die
+    # Spalten der inneren Strategie (.strategy_columns); ohne Wrapper sind das die Asset-Namen
+    wraps <- .strategy_wrappers(strategy)
+    coll <- intersect(wraps, data_cols)
+    if (length(coll))
+      stop(sprintf("strategy_validate: Asset '%s' ist ein Fonds-Wrapper (asset_config(wrapper = )); data darf keine Spalte gleichen Namens enthalten (der Anteilswert wird aus den inneren Spalten gerechnet).",
+                   coll[1]))
+    asset_names <- .strategy_columns(strategy)
     
     missing_assets <- setdiff(asset_names, data_cols)
     if (length(missing_assets) > 0) {
@@ -105,8 +112,12 @@ strategy_validate <- function(strategy, data = NULL) {
                    paste0("'", missing_assets, "'", collapse = ", "), paste(data_cols, collapse = ", ")))
     }
     
-    for (name in asset_names) {
+    for (name in names(strategy)) {
       asset <- strategy[[name]]
+      if (inherits(asset$wrapper, "SimLevWrapperConfig")) {   # innere Signale
+        strategy_validate(asset$wrapper$strategy, data)
+        next
+      }
       if (asset$trading == "signal") {
         if (!asset$signal_buy %in% data_cols) {
           stop(sprintf("strategy_validate: signal_buy-Spalte '%s' fehlt in data (Asset '%s').",
@@ -180,7 +191,7 @@ strategy_update_asset <- function(strategy, name, ...) {
   }
   
   for (param in names(updates)) {
-    if (!param %in% names(asset)) {
+    if (!param %in% c(names(asset), "wrapper")) {   # wrapper: Feld nur bei Wrapper-Assets vorhanden
       warning(sprintf("strategy_update_asset: unbekannter Parameter '%s' wird ignoriert (m\u00f6glich: %s).", param, paste(names(asset), collapse = ", ")))
       next
     }
@@ -232,8 +243,10 @@ print.strategy <- function(x, ...) {
   for (name in names(x)) {
     asset <- x[[name]]
     cat(sprintf("%s:\n", name))
-    cat(sprintf("  Klasse: %s | Anteil: %.0f%% | Steuer: %s\n",
-                asset$asset_class, asset$share * 100, asset$tax_regime))
+    cat(sprintf("  Klasse: %s | Anteil: %.0f%% | Steuer: %s%s\n",
+                asset$asset_class, asset$share * 100, asset$tax_regime,
+                if (inherits(asset$wrapper, "SimLevWrapperConfig"))
+                  sprintf(" | Wrapper: %s", paste(names(asset$wrapper$strategy), collapse = ", ")) else ""))
   }
   
   invisible(x)

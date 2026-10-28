@@ -26,9 +26,9 @@ function _buy_with_fee!(R::Run, sim::Sim, a::Int, time::Int, reason::String)
 end
 
 function _sell!(R::Run, sim::Sim, a::Int, time::Int, reason::String, spread::Float64; count = nothing,
-                price = nothing, tax_mode = nothing)
+                price = nothing)
     cfg = R.cfg
-    _perform_trade_sell!(R, sim, a, time, tax_mode === nothing ? cfg.tax_mode : tax_mode, cfg.tax_rate,
+    _perform_trade_sell!(R, sim, a, time, cfg.tax_mode, cfg.tax_rate,
                          cfg.effective_tax_rate, cfg.use_sparer_pauschbetrag, R.fl.tax_regimes[a], reason, spread;
                          count = count, price = price)
 end
@@ -52,31 +52,6 @@ function _sell_count_net(R::Run, sim::Sim, a::Int, need::Float64, time::Int; rou
         return (sell_count = _rmin(sim.status[a].count, ceil(res.sell_count - 1e-9)), fifo_price = nothing)
     end
     return (sell_count = res.sell_count, fifo_price = res.fifo_price)
-end
-
-"Bargeld für Fondskosten beschaffen."
-function _raise_cash!(R::Run, sim::Sim, a::Int, need::Float64, time::Int, reason::String)
-    cfg = R.cfg
-    short = need - sim.status[a].money
-    (short <= 0 || sim.status[a].count <= 0) && return nothing
-    fee_keep = R.fee_current
-    R.fee_current = nothing
-    try
-        n_sell = if cfg.tax_mode != "person"
-            px = sim.market[a].asset_price[time]
-            _rmin(sim.status[a].count, cfg.fractions ? short / px : ceil(short / px - 1e-9))
-        else
-            _calculate_sell_count(sim, a, short, time, 0.0, cfg.fractions, cfg.tax_mode, cfg.effective_tax_rate,
-                                  R.fl.tax_regimes[a]).sell_count
-        end
-        _sell!(R, sim, a, time, reason, 0.0; count = n_sell)
-        if !cfg.fractions && sim.status[a].money < need - 1e-9 && sim.status[a].count > 0
-            _sell!(R, sim, a, time, reason, 0.0; count = _rmin(1.0, sim.status[a].count))
-        end
-    finally
-        R.fee_current = fee_keep
-    end
-    return nothing
 end
 
 "Zahlung aus einem Asset; Rückgabe: nicht gedeckter Rest."
@@ -260,8 +235,8 @@ end
 
 # ── Tagesschleife (sim_loop.R) ─────────────────────────────────────────────
 
-function _sim_run_days!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight, split_thresh, funds_fee, bonus_fee,
-                        balance_dca, harvest_loss_pot)
+function _sim_run_days!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight, split_thresh, balance_dca,
+                        harvest_loss_pot)
     @nospecialize
     fl, cfg = R.fl, R.cfg
     flag_date = fl.flag_date
@@ -325,10 +300,6 @@ function _sim_run_days!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight, s
             _sim_day_assess_vp!(R, sim, time, liquidate)
             fast = false
         end
-        if fl.flag_fund_fee[time]
-            _sim_day_fund_fee!(R, sim, time, funds_fee, bonus_fee)
-            fast = false
-        end
         if fl.flag_liquidate[time]
             _sim_day_liquidate!(R, sim, time)
             fast = false
@@ -371,7 +342,7 @@ function _sim_day_split!(R::Run, sim::Sim, time::Int, active::Vector{Int}, split
     lo, hi = Float64(split_thresh[1]), Float64(split_thresh[2])
     held = [a for a in active if sim.status[a].count > 0]
     for a in eachindex(fl.flag_assets)
-        a in held && continue
+        (a in held || fl.flag_assets[a] in cfg.no_split) && continue   # Fonds-Wrapper: der Anteilswert splittet nicht
         px0 = sim.market[a].asset_price[time]
         if px0 > hi || px0 < lo
             sim.market[a].asset_price = sim.market[a].asset_price ./ (px0 / 100)
@@ -382,6 +353,7 @@ function _sim_day_split!(R::Run, sim::Sim, time::Int, active::Vector{Int}, split
         end
     end
     for a in active
+        fl.flag_assets[a] in cfg.no_split && continue
         if sim.status[a].count > 0
             split_price = sim.market[a].asset_price[time]
             split_price > hi && _perform_asset_split!(R, sim, a, split_price / 100, time, "forward", fl.flag_date[time])
@@ -617,55 +589,15 @@ function _sim_day_assess_vp!(R::Run, sim::Sim, time::Int, liquidate)
     return nothing
 end
 
-function _sim_day_fund_fee!(R::Run, sim::Sim, time::Int, funds_fee, bonus_fee)
-    @nospecialize
-    fl = R.fl
-    calculate_total_report!(sim, time)
-    result_fees = _calculate_fund_fees(R, sim, time, fl.flag_date, Float64(funds_fee), Float64(bonus_fee))
-    sim.totals.total_value = result_fees.total_value
-    for a in eachindex(fl.flag_assets)
-        fee_i = result_fees.asset_fees[a]
-        (!isfinite(fee_i) || fee_i <= 0) && continue
-        sim.status[a].money < fee_i && _raise_cash!(R, sim, a, fee_i, time, "Fondskosten:")
-        paid = _rmin(fee_i, _rmax(0.0, sim.status[a].money))
-        sim.status[a].money = sim.status[a].money - paid
-        R.details && _cat(R, r_sprintf("\t\t=> %.2f EUR Gebühren von %s abgezogen\n", paid, fl.flag_assets[a]))
-        push!(sim.trades[a].fees, FeeEntry(fl.flag_date[time], paid))
-    end
-    calculate_total_report!(sim, time)
-    return nothing
-end
-
 function _sim_day_liquidate!(R::Run, sim::Sim, time::Int)
-    fl, cfg = R.fl, R.cfg
-    tax_mode = cfg.tax_mode
+    fl = R.fl
     for a in eachindex(fl.flag_assets)
         if sim.status[a].count > 0
-            _sell!(R, sim, a, time, "Liquidation:", fl.spread_rates[a]; tax_mode = tax_mode == "person" ? "person" : "none")
+            _sell!(R, sim, a, time, "Liquidation:", fl.spread_rates[a])
             if sim.status[a].count > 0
                 @warn r_sprintf("simulation: liquidate = TRUE: Position '%s' (Wert %.2f EUR) wurde nicht verkauft, weil die Ordergebühr den Erlös übersteigt.",
                                 fl.flag_assets[a], sim.status[a].worth)
             end
-        end
-    end
-    if tax_mode == "funds"
-        calculate_total_report!(sim, time)
-        na = length(fl.flag_assets)
-        final_value = r_sum([sim.status[a].total for a in 1:na]; na_rm = true)
-        deposits = r_sum([r_sum(view(sim.report[a].flows, 1:time)) for a in 1:na])
-        total_gains = final_value - cfg.start_value - deposits
-        if total_gains > 0
-            total_taxes = total_gains * cfg.tax_rate
-            cash = Float64[_rmax(0.0, sim.status[a].money) for a in 1:na]
-            sc = r_sum(cash)
-            tax_weights = sc > 0 ? cash ./ sc : fill(1 / na, na)
-            for a in 1:na
-                tpa = _rmin(total_taxes * tax_weights[a], cash[a])
-                sim.status[a].money = sim.status[a].money - tpa
-                sim.totals.total_taxes = sim.totals.total_taxes + tpa
-            end
-            R.details && _cat(R, r_sprintf("Liquidation:\tSteuern %.2f EUR auf den Gesamtgewinn von %.2f EUR am %s\n",
-                                           total_taxes, total_gains, fmt_date(fl.flag_date[time])))
         end
     end
     calculate_total_report!(sim, time)

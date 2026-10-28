@@ -20,7 +20,17 @@ benannte Vektoren werden je Asset zugeordnet, auch mit einem einzigen
 Element wie \code{partial_exemption = c(aktien = 30)} (fehlende Assets
 behalten den Standardwert, Namen ohne passendes Asset werden
 ignoriert). Nur ein einzelner benannter Wert, dessen Name kein Asset
-ist, gilt fuer alle Assets.}
+ist, gilt fuer alle Assets.
+
+\code{wrapper} (Fonds-Wrapper, \code{\link{wrapper_config}}) ist eine
+Ausnahme, weil ein \code{SimLevWrapperConfig} selbst eine benannte Liste
+ist: Ein einzelnes \code{SimLevWrapperConfig} gilt fuer alle Assets; eine
+benannte Liste solcher Objekte (Name = Asset, z. B.
+\code{wrapper = list(world = w)}) gilt je Asset, Assets ohne Eintrag
+bleiben ohne Wrapper. Fehler: Namen, die kein Asset sind, Elemente, die
+kein \code{SimLevWrapperConfig} sind, eine Liste ohne Namen, und
+\code{wrapper} zusammen mit \code{trading = "signal"} fuer dasselbe Asset
+(die Meldung nennt das Asset).}
 }
 \value{
 Objekt der Klasse \code{strategy} (wie \code{\link[=create_strategy]{create_strategy()}}).
@@ -32,7 +42,7 @@ muessen. Die Namen muessen den Kursspalten des Datensatzes entsprechen
 (z. B. aus \code{\link[=series_align]{series_align()}}). Jedes Asset erhaelt
 \code{share = Gewicht}; alle weiteren Einstellungen kommen aus
 \code{...} oder den Standardwerten von \code{\link[=asset_config]{asset_config()}} (ETF, Buy and
-Hold).
+Hold, ohne Spread).
 }
 \examples{
 strategy_from_weights(c(world = 0.6, bonds = 0.4), spread = c(world = 0.1, bonds = 0.05))
@@ -40,6 +50,14 @@ st <- strategy_from_weights(c(aktien = 0.7, gold = 0.3),
                             asset_class = c(aktien = "etf", gold = "etc"),
                             partial_exemption = c(aktien = 30, gold = 0))
 sapply(st, `[[`, "asset_class")
+
+# Fonds-Wrapper je Asset: 'fonds' ist ein Wrapper, 'gold' bleibt ein Einzelpapier
+w <- wrapper_config(create_strategy(A = asset_config("etf", share = 0.6),
+                                    B = asset_config("etf", share = 0.4)),
+                    costs = funds_costs(fee = 0.5))
+st <- strategy_from_weights(c(fonds = 0.8, gold = 0.2), asset_class = c(fonds = "certificate", gold = "etc"),
+                            wrapper = list(fonds = w))
+sapply(st, function(a) !is.null(a$wrapper))
 }
 \seealso{
 \code{\link[=portfolio_template]{portfolio_template()}}, \code{\link[=create_strategy]{create_strategy()}}, \code{\link[=simulation]{simulation()}},

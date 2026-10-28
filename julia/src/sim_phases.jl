@@ -27,12 +27,12 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
                            balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
                            marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                            use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
-                           funds_fee, bonus_fee, fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
+                           fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
                            order_fee, dca_fee, harvest_mode, harvest_day, taxable_income, tariff, given::_Given,
                            io::IO, blocks::Bool = false)
     @nospecialize
-    tax_mode = match_arg(tax_mode, ("none", "person", "funds"), "tax_mode")
-    if !(data isa RFrame || data isa NamedTuple || data isa AbstractDict || data isa AbstractVector{<:Pair})
+    tax_mode = match_arg(tax_mode, ("none", "person"), "tax_mode")
+    if !(data isa RFrame || data isa NamedTuple || data isa AbstractDict || data isa AbstractVector{<:Pair} || data isa _Frame)
         error("simulation: data muss ein data.frame mit Spalte 'date' und je Asset einer Kursspalte sein, nicht " *
               (data === nothing ? "fehlend" : _r_class1(data)) * ".")
     end
@@ -68,9 +68,18 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         if !(at isa AbstractString) || !(at in ("bnh", "signal"))
             error("simulation: trading $(_show_arg(at)) von Asset '$nm' ist ungültig; erlaubt sind \"bnh\" und \"signal\".")
         end
+        w = get(a, "wrapper", nothing)
+        if w !== nothing   # Fonds-Wrapper (Etappe 6.5c, wrapper.jl)
+            _is_wrapper(w) || error("simulation: wrapper von Asset '$nm' muss ein Objekt aus wrapper_config() sein, nicht $(_cls_all(w)).")
+            at == "bnh" || error("simulation: Asset '$nm' ist ein Fonds-Wrapper; dafür ist nur trading = \"bnh\" möglich (keine Signale auf den Anteilswert).")
+        end
     end
     haskey(fr, "date") || error("simulation: Spalte 'date' fehlt in 'data'.")
-    miss = [nm for (nm, _) in strat if !haskey(fr, nm)]
+    # Fonds-Wrapper: Asset-Name ist keine Kursspalte; gebraucht werden die inneren Spalten (_strategy_columns)
+    wraps = _strategy_wrappers(strat)
+    coll = [w for w in wraps if w in fr.names]
+    isempty(coll) || error("simulation: Asset '$(coll[1])' ist ein Fonds-Wrapper (asset_config(wrapper = )); 'data' darf keine Spalte gleichen Namens enthalten (der Anteilswert wird aus den inneren Spalten gerechnet). Spalte umbenennen oder entfernen.")
+    miss = [nm for nm in _strategy_columns(strat) if !haskey(fr, nm)]
     if !isempty(miss)
         error("simulation: " * (length(miss) == 1 ? "Kursspalte" : "Kursspalten") * " " *
               join(("'$m'" for m in miss), ", ") * " " * (length(miss) == 1 ? "fehlt" : "fehlen") *
@@ -96,9 +105,11 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     i_na = findfirst(isnan, dvals)
     i_na === nothing || error("simulation: Spalte 'date' enthält NA (erstmals in Zeile $i_na).")
     fa_m, fa_cols, fa_n = _filled_matrix(filled_attr)
+    resorted = false
     if any(i -> dvals[i+1] < dvals[i], 1:length(dvals)-1)
         o = sortperm(dvals; alg = MergeSort)
         _ftake!(fr, o)
+        resorted = true
         fa_m !== nothing && size(fa_m, 1) == length(o) && (fa_m = fa_m[o, :])
         _message("Hinweis: 'data' war nicht aufsteigend nach Datum sortiert und wurde sortiert.")
     end
@@ -114,6 +125,36 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         push!(seen, z)
     end
     dup_first === nothing || error("simulation: Datum $(fmt_date(Int(dup_first))) kommt in 'data' mehrfach vor ($n_dup doppelte Zeilen); je Tag genau eine Zeile.")
+    # Fonds-Wrapper: Anteilswert je Wrapper-Asset aus den inneren Spalten (wrapper.jl) als Kursspalte mit dem
+    # Asset-Namen anhängen (NA vor dem Beginn und an Tagen ohne inneren Kurs); danach ist das Asset ein
+    # gewöhnliches Asset ohne wrapper. splits gelten für die inneren Spalten, nicht für den Anteilswert.
+    wrapper_navs = nothing
+    if !isempty(wraps)
+        d_in = _fcopy(fr)
+        if fa_m !== nothing && size(fa_m, 1) == _fnrow(fr)
+            d_in.filled_attr = fa_cols === nothing ? Matrix{Bool}(fa_m) :
+                               RFrame((String(c) => Vector{Bool}(fa_m[:, j]) for (j, c) in enumerate(fa_cols))...)
+        elseif resorted
+            d_in.filled_attr = nothing
+        end
+        sp = _is_true(split_mode) && split_thresh !== nothing ?
+             RList("thresh" => _num_vec(split_thresh); class = ["SimLevSplitRule"]) : nothing
+        sd = Dict(strat)
+        wrapper_navs = RList()
+        for nm in wraps
+            wrapper_navs[nm] = _wrapper_nav_calc(d_in, sd[nm]["wrapper"], sp, "Wrapper '$nm'", "simulation: Wrapper '$nm'")
+        end
+        dkey = Dict{Float64,Int}(z => i for (i, z) in enumerate(fr.cols["date"]::Vector{Float64}))
+        for nm in wraps
+            v = fill(NA, _fnrow(fr))
+            nv = wrapper_navs[nm]
+            for (z, x) in zip(nv["date"], nv["nav"])
+                v[dkey[Float64(to_days(z))]] = x
+            end
+            _fset!(fr, nm, v, :numeric)
+            delete!(sd[nm], "wrapper")
+        end
+    end
     nrow_ = _fnrow(fr)
     if filled_attr !== nothing && fa_n != nrow_
         @warn "simulation: Attribut 'filled' von 'data' hat $fa_n Zeilen, 'data' aber $nrow_ (z. B. nach Zeilenauswahl einer series_align()-Ausgabe); es wird ignoriert, aufgefüllte Tage gelten dann als Handelstage. Zeitraum besser mit series_align(..., start =, end =) wählen."
@@ -186,8 +227,6 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         end
     end
     !blocks && _is_true(harvest_mode) && tax_mode != "person" && @warn "simulation: harvest_mode wirkt nur mit tax_mode = \"person\" und wird hier ignoriert."
-    # Fondsmodus mit tax_profile(harvest = ...)
-    blocks && _is_true(harvest_mode) && tax_mode != "person" && @warn "simulation: harvest (tax_profile(harvest = harvest_rule())) wirkt nicht im Fondsmodus (funds = funds_costs()) und wird hier ignoriert."
     function chk_num(x, arg, what; mn = 0.0, null_ok = false)
         (x === nothing && null_ok || blocks) && return
         if !_is_num(x) || !isfinite(Float64(x)) || (mn !== nothing && x < mn)
@@ -255,22 +294,9 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
             @warn "simulation: split_thresh = c($(r_format1(st_v[1])), $(r_format1(st_v[2]))) schließt den Zielkurs 100 nicht ein (erwartet untere < 100 < obere). Ein Split setzt den Kurs auf 100; liegt 100 außerhalb der Schwellen, folgt danach an jedem Tag ein weiterer Split (mit fractions = FALSE jeweils mit Spitzenausgleich)."
         end
     end
-    if tax_mode != "funds" && (_g(given, "funds_fee") || _g(given, "bonus_fee"))
-        gv = [a for a in ("funds_fee", "bonus_fee") if given.d[a]]
-        @warn "simulation: $(join(gv, " und ")) wirkt nur bei tax_mode = \"funds\" (hier tax_mode = \"$tax_mode\") und wird ignoriert."
-    end
-    if tax_mode == "funds" && !blocks
-        for (a, x) in (("funds_fee", funds_fee), ("bonus_fee", bonus_fee))
-            if !_is_num(x) || isnan(Float64(x)) || x < 0 || x > 100
-                error("simulation: $a muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. " *
-                      (a == "funds_fee" ? "0.95 für 0,95 % p. a." : "5 für 5 %") * "), nicht " *
-                      (x !== nothing ? join(r_format(x), ", ") : "NULL") * ".")
-            end
-        end
-    end
     tariff_on = taxable_income !== nothing && tax_mode == "person"
-    taxable_income !== nothing && tax_mode != "person" && @warn(blocks ? "simulation: income_tariff() (tax_profile(income =)) wirkt nicht im Fondsmodus (funds = funds_costs()) und wird ignoriert." :
-        "simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"$tax_mode\") und wird ignoriert.")
+    # nur ohne Bausteine möglich (income_tariff() steht in tax_profile())
+    taxable_income !== nothing && tax_mode != "person" && @warn "simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"$tax_mode\") und wird ignoriert."
     taxable_income === nothing && tariff !== nothing && @warn "simulation: tax_tariff wirkt nur zusammen mit taxable_income (zu versteuerndes Einkommen je Jahr) und wird ignoriert."
     tariff_env = nothing
     if tariff_on
@@ -365,7 +391,8 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     cfg = Cfg(tax_mode, start_value, tax_rate, mtr, effective_tax_rate, soli_factor_income, church_k, tariff_env,
               private_sale_threshold, sparer_pauschbetrag, use_sparer_pauschbetrag, fractions, fee_order, fee_dca, fees_on,
               order_fee, dca_mode, dca_value, dca_days, balance_mode, balance_days, bth, balance_thresh_type, base_rate,
-              risk_free, harvest_mode, split_mode, event_col, BitVector(pre_filled), strat)
+              risk_free, harvest_mode, split_mode, event_col, BitVector(pre_filled), strat,
+              String[w for w in wraps], details == true ? wrapper_navs : nothing)
     return cfg, fr
 end
 
@@ -461,7 +488,7 @@ function _sim_build_state(fr::_Frame, strategy, start_value::Float64, start_date
                           blocks::Bool = false)
     @nospecialize
     n = _fnrow(fr)
-    totals = Totals(start_value, 0.0, 0.0, 0.0, 0.0, 0.0, sparer_pauschbetrag, use_spb ? sparer_pauschbetrag : 0.0,
+    totals = Totals(0.0, 0.0, 0.0, 0.0, 0.0, sparer_pauschbetrag, use_spb ? sparer_pauschbetrag : 0.0,
                     0.0, year_of(start_date), 0.0, 0.0, 0.0, 0.0, VPPending[], Pair{Int,Float64}[], Pair{Int,Float64}[])
     names_ = String[]; assets = AssetInfo[]; status = Status[]; market = Market[]; trades = Trades[]; report = Report[]
     days = collect(start_date:stopp_date)
@@ -505,7 +532,7 @@ function _sim_build_state(fr::_Frame, strategy, start_value::Float64, start_date
         push!(market, Market(days, br, copy(fr.cols[name]::Vector{Float64}), _signal_col(fr, get(a, "signal_buy", nothing), n),
                              _signal_col(fr, get(a, "signal_sell", nothing), n),
                              (spread_a === nothing ? 0.0 : Float64(spread_a)) / 100))
-        push!(trades, Trades(Lot[], SellEntry[], TaxEntry[], FeeEntry[], 1))
+        push!(trades, Trades(Lot[], SellEntry[], TaxEntry[], 1))
         st = status[end]
         worth0 = zeros(n); money0 = zeros(n); total0 = zeros(n)
         worth0[1], money0[1], total0[1] = st.worth, st.money, st.total
@@ -518,7 +545,7 @@ function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, st
                              dca_mode, dca_span, dca_unit, dca_days, dca_value, dca_anchor, dca_start, dca_skip,
                              balance_mode, balance_span, balance_unit, balance_days, balance_anchor, balance_start,
                              balance_skip, event_col, event_mode, event_weight, split_mode, split_thresh,
-                             blocks::Bool = false)
+                             blocks::Bool = false, no_split::Vector{String} = String[])
     @nospecialize
     flag_date = collect(start_date:stopp_date)
     n = length(flag_date)
@@ -566,7 +593,8 @@ function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, st
         flag_rebalance = event_mode == "additional" ? BitVector(flag_rebalance .| flag_event) : copy(flag_event)
     end
     flag_trade = BitVector(.!flag_rebalance .& (flag_date .!= stopp_date) .& .!flag_filled)
-    flag_split = _calculate_split_flags(sim, 100.0, split_mode, n, split_thresh)
+    flag_split = _calculate_split_flags(sim, 100.0, split_mode, n, split_thresh;
+                                        skip = no_split)   # Fonds-Wrapper: keine Splits auf den Anteilswert
     flag_dca_n = Float64.(flag_dca)
     if any(flag_filled)
         mon = [ym_key(z) for z in flag_date]
@@ -588,7 +616,7 @@ function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, st
     end
     fl = Flags(flag_date, flag_filled, flag_assets, BitVector(flag_liquidate), BitVector(flag_rebalance), BitVector(flag_dca),
                flag_dca_n, flag_taxes, flag_event, flag_trade, BitVector(flag_split), Int[], Int[], falses(n), Int[],
-               falses(n), falses(n), String[], String[], Float64[], falses(n), falses(n), falses(n), Int[], n)
+               falses(n), String[], String[], Float64[], falses(n), falses(n), falses(n), Int[], n)
     return fl, ew
 end
 
@@ -616,7 +644,7 @@ function _sim_init_weights!(sim::Sim, fl::Flags, start_value::Float64)
     return nothing
 end
 
-function _sim_build_schedule!(sim::Sim, fl::Flags, stopp_date::Int, tax_mode::String, harvest_mode, harvest_day)
+function _sim_build_schedule!(sim::Sim, fl::Flags, tax_mode::String, harvest_mode, harvest_day)
     @nospecialize
     flag_date, flag_filled = fl.flag_date, fl.flag_filled
     n = length(flag_date)
@@ -648,15 +676,8 @@ function _sim_build_schedule!(sim::Sim, fl::Flags, stopp_date::Int, tax_mode::St
             j === nothing || (flag_harvest[j] = true)
         end
     end
-    flag_fund_fee = BitVector((tax_mode == "funds") .& (fl.flag_taxes .| (flag_date .== stopp_date)))
-    flag_liquidate = fl.flag_liquidate
-    if tax_mode == "funds" && any(flag_liquidate) && !flag_liquidate[n]
-        liq_i = findlast(flag_liquidate)
-        flag_fund_fee[liq_i+1:end] .= false
-        flag_fund_fee[liq_i] = true
-    end
     flag_definite = flag_active .| fl.flag_split .| fl.flag_dca .| fl.flag_rebalance .| fl.flag_taxes .|
-                    flag_liquidate .| flag_harvest .| flag_fund_fee
+                    fl.flag_liquidate .| flag_harvest
     strategy_types = String[sim.assets[a].style for a in 1:na]
     has_bnh = any(==("bnh"), strategy_types)
     has_signal = any(==("signal"), strategy_types)
@@ -698,7 +719,6 @@ function _sim_build_schedule!(sim::Sim, fl::Flags, stopp_date::Int, tax_mode::St
     fl.flag_active = flag_active
     fl.asset_start_indices = asset_start_indices
     fl.flag_harvest = flag_harvest
-    fl.flag_fund_fee = flag_fund_fee
     fl.strategy_types = strategy_types
     fl.tax_regimes = tax_regimes
     fl.spread_rates = spread_rates

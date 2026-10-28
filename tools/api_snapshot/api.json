@@ -1,5 +1,5 @@
 {
- "generated": "2026-10-26",
+ "generated": "2026-10-27",
  "tool": "tools/api_snapshot/compare_api.py",
  "sources": {
   "R": {
@@ -17,18 +17,18 @@
  },
  "counts": {
   "R": {
-   "functions": 113,
-   "methods": 75,
+   "functions": 115,
+   "methods": 78,
    "classes": 0
   },
   "Python": {
-   "functions": 118,
-   "methods": 77,
-   "classes": 52
+   "functions": 120,
+   "methods": 79,
+   "classes": 54
   },
   "Julia": {
-   "functions": 128,
-   "methods": 75,
+   "functions": 130,
+   "methods": 77,
    "classes": 9
   }
  },
@@ -644,7 +644,7 @@
     ],
     "module": "simlev.config",
     "file": "python/simlev/config.py",
-    "line": 85,
+    "line": 134,
     "bases": [
      "RList",
      "OrderedDict",
@@ -705,7 +705,7 @@
     ],
     "module": "simlev.config",
     "file": "python/simlev/config.py",
-    "line": 196,
+    "line": 263,
     "bases": [
      "RList",
      "OrderedDict",
@@ -719,7 +719,7 @@
     ],
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 195,
+    "line": 196,
     "bases": [
      "RList",
      "OrderedDict",
@@ -733,7 +733,7 @@
     ],
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 206,
+    "line": 207,
     "bases": [
      "RList",
      "OrderedDict",
@@ -747,7 +747,7 @@
     ],
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 220,
+    "line": 221,
     "bases": [
      "RList",
      "OrderedDict",
@@ -761,7 +761,7 @@
     ],
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 243,
+    "line": 244,
     "bases": [
      "RList",
      "OrderedDict",
@@ -775,7 +775,7 @@
     ],
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 301,
+    "line": 302,
     "bases": [
      "RList",
      "OrderedDict",
@@ -789,7 +789,7 @@
     ],
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 270,
+    "line": 271,
     "bases": [
      "RList",
      "OrderedDict",
@@ -803,7 +803,7 @@
     ],
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 280,
+    "line": 281,
     "bases": [
      "RList",
      "OrderedDict",
@@ -817,7 +817,7 @@
     ],
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 291,
+    "line": 292,
     "bases": [
      "RList",
      "OrderedDict",
@@ -831,11 +831,43 @@
     ],
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 321,
+    "line": 322,
     "bases": [
      "RList",
      "OrderedDict",
      "dict"
+    ]
+   },
+   {
+    "name": "SimLevWrapperConfig",
+    "r_class": [
+     "SimLevWrapperConfig"
+    ],
+    "module": "simlev.wrapper",
+    "file": "python/simlev/wrapper.py",
+    "line": 62,
+    "bases": [
+     "RList",
+     "OrderedDict",
+     "dict"
+    ]
+   },
+   {
+    "name": "SimLevWrapperNav",
+    "r_class": [
+     "SimLevWrapperNav",
+     "data.frame"
+    ],
+    "module": "simlev.wrapper",
+    "file": "python/simlev/wrapper.py",
+    "line": 180,
+    "bases": [
+     "DataFrame",
+     "NDFrame",
+     "PandasObject",
+     "DirNamesMixin",
+     "IndexingMixin",
+     "OpsMixin"
     ]
    },
    {
@@ -1014,7 +1046,7 @@
     ],
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1665,
+    "line": 1674,
     "bases": [
      "RList",
      "OrderedDict",
@@ -1438,6 +1470,53 @@
  },
  "functions": [
   {
+   "key": "[.SimLevWrapperNav",
+   "kind": "method",
+   "R": {
+    "name": "[.SimLevWrapperNav",
+    "kind": "method",
+    "generic": "[",
+    "class": "SimLevWrapperNav",
+    "file": "r/R/wrapper.R",
+    "line": 257,
+    "args": [
+     {
+      "name": "x",
+      "kind": "arg",
+      "has_default": false,
+      "default": null
+     },
+     {
+      "name": "...",
+      "kind": "dots",
+      "has_default": false,
+      "default": null,
+      "dots_used": true
+     }
+    ],
+    "defaults_known": true,
+    "note": null
+   },
+   "Python": null,
+   "Julia": null,
+   "abweichungen": [
+    {
+     "sprache": "Python",
+     "art": "fehlt",
+     "detail": "fehlt in Python",
+     "info": "vorhanden in R",
+     "status": "bewusst"
+    },
+    {
+     "sprache": "Julia",
+     "art": "fehlt",
+     "detail": "fehlt in Julia",
+     "info": "vorhanden in R",
+     "status": "bewusst"
+    }
+   ]
+  },
+  {
    "key": "asset_config",
    "kind": "function",
    "R": {
@@ -1446,7 +1525,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/asset_config.R",
-    "line": 77,
+    "line": 84,
     "args": [
      {
       "name": "asset_class",
@@ -1472,7 +1551,7 @@
       "name": "spread",
       "kind": "arg",
       "has_default": true,
-      "default": "0.1"
+      "default": "0"
      },
      {
       "name": "partial_exemption",
@@ -1509,6 +1588,12 @@
       "kind": "arg",
       "has_default": true,
       "default": "NULL"
+     },
+     {
+      "name": "wrapper",
+      "kind": "arg",
+      "has_default": true,
+      "default": "NULL"
      }
     ],
     "defaults_known": true,
@@ -1521,7 +1606,7 @@
     "class": null,
     "module": "simlev.config",
     "file": "python/simlev/config.py",
-    "line": 111,
+    "line": 165,
     "args": [
      {
       "name": "asset_class",
@@ -1545,7 +1630,7 @@
       "name": "spread",
       "kind": "keyword_only",
       "has_default": true,
-      "default": "0.1"
+      "default": "0.0"
      },
      {
       "name": "partial_exemption",
@@ -1582,6 +1667,12 @@
       "kind": "keyword_only",
       "has_default": true,
       "default": "None"
+     },
+     {
+      "name": "wrapper",
+      "kind": "keyword_only",
+      "has_default": true,
+      "default": "None"
      }
     ],
     "defaults_known": true,
@@ -1594,7 +1685,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 137,
+    "line": 191,
     "args": [
      {
       "name": "asset_class",
@@ -1618,7 +1709,7 @@
       "name": "spread",
       "kind": "positional",
       "has_default": true,
-      "default": "0.1"
+      "default": "0.0"
      },
      {
       "name": "partial_exemption",
@@ -1652,6 +1743,12 @@
      },
      {
       "name": "signal_sell",
+      "kind": "positional",
+      "has_default": true,
+      "default": "nothing"
+     },
+     {
+      "name": "wrapper",
       "kind": "positional",
       "has_default": true,
       "default": "nothing"
@@ -4297,7 +4394,7 @@
     "class": null,
     "module": "simlev.config",
     "file": "python/simlev/config.py",
-    "line": 235,
+    "line": 304,
     "args": [
      {
       "name": "args",
@@ -4328,7 +4425,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 242,
+    "line": 307,
     "args": [
      {
       "name": "args...",
@@ -4364,7 +4461,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/sim_blocks.R",
-    "line": 139,
+    "line": 140,
     "args": [
      {
       "name": "value",
@@ -4427,7 +4524,7 @@
     "class": null,
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 348,
+    "line": 349,
     "args": [
      {
       "name": "value",
@@ -4492,7 +4589,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 177,
+    "line": 178,
     "args": [
      {
       "name": "value_pos",
@@ -5120,7 +5217,7 @@
     "class": null,
     "module": "simlev",
     "file": "python/simlev/__init__.py",
-    "line": 357,
+    "line": 362,
     "args": [
      {
       "name": "x",
@@ -5316,7 +5413,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/sim_blocks.R",
-    "line": 411,
+    "line": 412,
     "args": [
      {
       "name": "fee",
@@ -5341,7 +5438,7 @@
     "class": null,
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 497,
+    "line": 498,
     "args": [
      {
       "name": "fee",
@@ -5366,7 +5463,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 386,
+    "line": 387,
     "args": [
      {
       "name": "fee_pos",
@@ -5408,7 +5505,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/sim_blocks.R",
-    "line": 286,
+    "line": 287,
     "args": [
      {
       "name": "day",
@@ -5433,7 +5530,7 @@
     "class": null,
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 440,
+    "line": 441,
     "args": [
      {
       "name": "day",
@@ -5458,7 +5555,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 312,
+    "line": 313,
     "args": [
      {
       "name": "day_pos",
@@ -5500,7 +5597,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/sim_blocks.R",
-    "line": 255,
+    "line": 256,
     "args": [
      {
       "name": "marginal_rate",
@@ -5525,7 +5622,7 @@
     "class": null,
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 412,
+    "line": 413,
     "args": [
      {
       "name": "marginal_rate",
@@ -5552,7 +5649,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 267,
+    "line": 268,
     "args": [
      {
       "name": "marginal_rate_pos",
@@ -5596,7 +5693,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/sim_blocks.R",
-    "line": 270,
+    "line": 271,
     "args": [
      {
       "name": "taxable_income",
@@ -5621,7 +5718,7 @@
     "class": null,
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 425,
+    "line": 426,
     "args": [
      {
       "name": "taxable_income",
@@ -5648,7 +5745,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 290,
+    "line": 291,
     "args": [
      {
       "name": "taxable_income_pos",
@@ -6331,7 +6428,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/r/types.jl",
-    "line": 321,
+    "line": 334,
     "args": [
      {
       "name": "x",
@@ -6378,7 +6475,7 @@
     "class": null,
     "module": "simlev",
     "file": "python/simlev/__init__.py",
-    "line": 122,
+    "line": 123,
     "args": [
      {
       "name": "x",
@@ -8538,7 +8635,7 @@
     "class": null,
     "module": "simlev",
     "file": "python/simlev/__init__.py",
-    "line": 375,
+    "line": 380,
     "args": [
      {
       "name": "x",
@@ -8569,7 +8666,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/r/types.jl",
-    "line": 345,
+    "line": 358,
     "args": [
      {
       "name": "x",
@@ -10971,7 +11068,7 @@
     "generic": "plot",
     "class": "SimLevSensitivity",
     "file": "r/R/sensitivity.R",
-    "line": 405,
+    "line": 414,
     "args": [
      {
       "name": "x",
@@ -11035,7 +11132,7 @@
     "class": "SimLevSensitivity",
     "module": "SimLev.Sensitivity",
     "file": "julia/src/sensitivity.jl",
-    "line": 417,
+    "line": 433,
     "args": [
      {
       "name": "x",
@@ -11058,7 +11155,7 @@
     ],
     "defaults_known": true,
     "args_source": "source",
-    "note": "über _plot_method (Zeichenfunktion _plot_sens, julia/src/sensitivity.jl:417)"
+    "note": "über _plot_method (Zeichenfunktion _plot_sens, julia/src/sensitivity.jl:433)"
    },
    "abweichungen": [
     {
@@ -11666,7 +11763,7 @@
     "generic": "plot",
     "class": "SimLevWithdrawal",
     "file": "r/R/withdrawal.R",
-    "line": 1697,
+    "line": 1704,
     "args": [
      {
       "name": "x",
@@ -11698,7 +11795,7 @@
     "class": "SimLevWithdrawal",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1600,
+    "line": 1609,
     "args": [
      {
       "name": "x",
@@ -11742,7 +11839,7 @@
     "class": "SimLevWithdrawal",
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1256,
+    "line": 1264,
     "args": [
      {
       "name": "x",
@@ -11777,7 +11874,7 @@
     ],
     "defaults_known": true,
     "args_source": "source",
-    "note": "über _plot_method (Zeichenfunktion _plot_wd, julia/src/withdrawal.jl:1256)"
+    "note": "über _plot_method (Zeichenfunktion _plot_wd, julia/src/withdrawal.jl:1264)"
    },
    "abweichungen": [
     {
@@ -13073,7 +13170,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/data_prep.R",
-    "line": 801,
+    "line": 856,
     "args": [
      {
       "name": "name",
@@ -13105,7 +13202,7 @@
     "class": null,
     "module": "simlev.data_prep",
     "file": "python/simlev/data_prep.py",
-    "line": 1420,
+    "line": 1489,
     "args": [
      {
       "name": "name",
@@ -13136,7 +13233,7 @@
     "class": null,
     "module": "SimLev.DataPrep",
     "file": "julia/src/data_prep.jl",
-    "line": 1180,
+    "line": 1243,
     "args": [
      {
       "name": "name_pos",
@@ -13872,7 +13969,7 @@
     "generic": "print",
     "class": "SimLevDcaPlan",
     "file": "r/R/sim_blocks.R",
-    "line": 161,
+    "line": 162,
     "args": [
      {
       "name": "x",
@@ -13898,7 +13995,7 @@
     "class": "SimLevDcaPlan",
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 210,
+    "line": 211,
     "args": [
      {
       "name": "self",
@@ -13918,7 +14015,7 @@
     "class": "SimLevDcaPlan",
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 406,
+    "line": 407,
     "args": [
      {
       "name": "x",
@@ -14127,7 +14224,7 @@
     "generic": "print",
     "class": "SimLevFundsCosts",
     "file": "r/R/sim_blocks.R",
-    "line": 424,
+    "line": 425,
     "args": [
      {
       "name": "x",
@@ -14153,7 +14250,7 @@
     "class": "SimLevFundsCosts",
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 325,
+    "line": 326,
     "args": [
      {
       "name": "self",
@@ -14173,7 +14270,7 @@
     "class": "SimLevFundsCosts",
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 489,
+    "line": 490,
     "args": [
      {
       "name": "x",
@@ -14382,7 +14479,7 @@
     "generic": "print",
     "class": "SimLevHarvestRule",
     "file": "r/R/sim_blocks.R",
-    "line": 331,
+    "line": 332,
     "args": [
      {
       "name": "x",
@@ -14408,7 +14505,7 @@
     "class": "SimLevHarvestRule",
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 295,
+    "line": 296,
     "args": [
      {
       "name": "self",
@@ -14428,7 +14525,7 @@
     "class": "SimLevHarvestRule",
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 467,
+    "line": 468,
     "args": [
      {
       "name": "x",
@@ -14552,7 +14649,7 @@
     "generic": "print",
     "class": "SimLevHorizon",
     "file": "r/R/withdrawal.R",
-    "line": 1819,
+    "line": 1826,
     "args": [
      {
       "name": "x",
@@ -14578,7 +14675,7 @@
     "class": "SimLevHorizon",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1670,
+    "line": 1679,
     "args": [
      {
       "name": "self",
@@ -14598,7 +14695,7 @@
     "class": "SimLevHorizon",
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1392,
+    "line": 1400,
     "args": [
      {
       "name": "x",
@@ -14637,7 +14734,7 @@
     "generic": "print",
     "class": "SimLevIncomeRate",
     "file": "r/R/sim_blocks.R",
-    "line": 311,
+    "line": 312,
     "args": [
      {
       "name": "x",
@@ -14663,7 +14760,7 @@
     "class": "SimLevIncomeRate",
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 274,
+    "line": 275,
     "args": [
      {
       "name": "self",
@@ -14683,7 +14780,7 @@
     "class": "SimLevIncomeRate",
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 454,
+    "line": 455,
     "args": [
      {
       "name": "x",
@@ -14722,7 +14819,7 @@
     "generic": "print",
     "class": "SimLevIncomeTariff",
     "file": "r/R/sim_blocks.R",
-    "line": 320,
+    "line": 321,
     "args": [
      {
       "name": "x",
@@ -14748,7 +14845,7 @@
     "class": "SimLevIncomeTariff",
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 284,
+    "line": 285,
     "args": [
      {
       "name": "self",
@@ -14768,7 +14865,7 @@
     "class": "SimLevIncomeTariff",
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 460,
+    "line": 461,
     "args": [
      {
       "name": "x",
@@ -14807,7 +14904,7 @@
     "generic": "print",
     "class": "SimLevLumpSum",
     "file": "r/R/sensitivity.R",
-    "line": 291,
+    "line": 300,
     "args": [
      {
       "name": "x",
@@ -14853,7 +14950,7 @@
     "class": "SimLevLumpSum",
     "module": "SimLev.Sensitivity",
     "file": "julia/src/sensitivity.jl",
-    "line": 276,
+    "line": 292,
     "args": [
      {
       "name": "x",
@@ -15356,7 +15453,7 @@
     "generic": "print",
     "class": "SimLevRebalancePlan",
     "file": "r/R/sim_blocks.R",
-    "line": 203,
+    "line": 204,
     "args": [
      {
       "name": "x",
@@ -15382,7 +15479,7 @@
     "class": "SimLevRebalancePlan",
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 224,
+    "line": 225,
     "args": [
      {
       "name": "self",
@@ -15402,7 +15499,7 @@
     "class": "SimLevRebalancePlan",
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 416,
+    "line": 417,
     "args": [
      {
       "name": "x",
@@ -15441,7 +15538,7 @@
     "generic": "print",
     "class": "SimLevResult",
     "file": "r/R/simulation.R",
-    "line": 681,
+    "line": 666,
     "args": [
      {
       "name": "x",
@@ -15611,7 +15708,7 @@
     "generic": "print",
     "class": "SimLevSensitivity",
     "file": "r/R/sensitivity.R",
-    "line": 426,
+    "line": 435,
     "args": [
      {
       "name": "x",
@@ -15657,7 +15754,7 @@
     "class": "SimLevSensitivity",
     "module": "SimLev.Sensitivity",
     "file": "julia/src/sensitivity.jl",
-    "line": 381,
+    "line": 397,
     "args": [
      {
       "name": "x",
@@ -15781,7 +15878,7 @@
     "generic": "print",
     "class": "SimLevSimCosts",
     "file": "r/R/sim_blocks.R",
-    "line": 127,
+    "line": 128,
     "args": [
      {
       "name": "x",
@@ -15807,7 +15904,7 @@
     "class": "SimLevSimCosts",
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 199,
+    "line": 200,
     "args": [
      {
       "name": "self",
@@ -15827,7 +15924,7 @@
     "class": "SimLevSimCosts",
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 400,
+    "line": 401,
     "args": [
      {
       "name": "x",
@@ -15866,7 +15963,7 @@
     "generic": "print",
     "class": "SimLevSplitRule",
     "file": "r/R/sim_blocks.R",
-    "line": 243,
+    "line": 244,
     "args": [
      {
       "name": "x",
@@ -15892,7 +15989,7 @@
     "class": "SimLevSplitRule",
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 247,
+    "line": 248,
     "args": [
      {
       "name": "self",
@@ -15912,7 +16009,7 @@
     "class": "SimLevSplitRule",
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 434,
+    "line": 435,
     "args": [
      {
       "name": "x",
@@ -16036,7 +16133,7 @@
     "generic": "print",
     "class": "SimLevTaxProfile",
     "file": "r/R/sim_blocks.R",
-    "line": 389,
+    "line": 390,
     "args": [
      {
       "name": "x",
@@ -16062,7 +16159,7 @@
     "class": "SimLevTaxProfile",
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 305,
+    "line": 306,
     "args": [
      {
       "name": "self",
@@ -16082,7 +16179,7 @@
     "class": "SimLevTaxProfile",
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 473,
+    "line": 474,
     "args": [
      {
       "name": "x",
@@ -16376,7 +16473,7 @@
     "generic": "print",
     "class": "SimLevWithdrawal",
     "file": "r/R/withdrawal.R",
-    "line": 1693,
+    "line": 1700,
     "args": [
      {
       "name": "x",
@@ -16428,7 +16525,7 @@
     "class": "SimLevWithdrawal",
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1250,
+    "line": 1258,
     "args": [
      {
       "name": "x",
@@ -16450,6 +16547,176 @@
    "abweichungen": []
   },
   {
+   "key": "print.SimLevWrapperConfig",
+   "kind": "method",
+   "R": {
+    "name": "print.SimLevWrapperConfig",
+    "kind": "method",
+    "generic": "print",
+    "class": "SimLevWrapperConfig",
+    "file": "r/R/wrapper.R",
+    "line": 115,
+    "args": [
+     {
+      "name": "x",
+      "kind": "arg",
+      "has_default": false,
+      "default": null
+     },
+     {
+      "name": "...",
+      "kind": "dots",
+      "has_default": false,
+      "default": null,
+      "dots_used": false
+     }
+    ],
+    "defaults_known": true,
+    "note": null
+   },
+   "Python": {
+    "name": "SimLevWrapperConfig.print",
+    "kind": "method",
+    "generic": "print",
+    "class": "SimLevWrapperConfig",
+    "module": "simlev.wrapper",
+    "file": "python/simlev/wrapper.py",
+    "line": 86,
+    "args": [
+     {
+      "name": "self",
+      "kind": "positional_or_keyword",
+      "has_default": false,
+      "default": null
+     }
+    ],
+    "defaults_known": true,
+    "note": null,
+    "py_class": "SimLevWrapperConfig"
+   },
+   "Julia": {
+    "name": "show(SimLevWrapperConfig)",
+    "kind": "method",
+    "generic": "print",
+    "class": "SimLevWrapperConfig",
+    "module": "SimLev",
+    "file": "julia/src/wrapper.jl",
+    "line": 88,
+    "args": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "has_default": false,
+      "default": null
+     }
+    ],
+    "defaults_known": true,
+    "args_source": "source",
+    "note": "show(io, x): io entfällt"
+   },
+   "abweichungen": [
+    {
+     "sprache": "Python",
+     "art": "argument_fehlt",
+     "detail": "... (in R ungenutzt)",
+     "info": "in R, nicht in Python",
+     "status": "bewusst"
+    },
+    {
+     "sprache": "Julia",
+     "art": "argument_fehlt",
+     "detail": "... (in R ungenutzt)",
+     "info": "in R, nicht in Julia",
+     "status": "bewusst"
+    }
+   ]
+  },
+  {
+   "key": "print.SimLevWrapperNav",
+   "kind": "method",
+   "R": {
+    "name": "print.SimLevWrapperNav",
+    "kind": "method",
+    "generic": "print",
+    "class": "SimLevWrapperNav",
+    "file": "r/R/wrapper.R",
+    "line": 266,
+    "args": [
+     {
+      "name": "x",
+      "kind": "arg",
+      "has_default": false,
+      "default": null
+     },
+     {
+      "name": "...",
+      "kind": "dots",
+      "has_default": false,
+      "default": null,
+      "dots_used": false
+     }
+    ],
+    "defaults_known": true,
+    "note": null
+   },
+   "Python": {
+    "name": "SimLevWrapperNav.format",
+    "kind": "method",
+    "generic": "print",
+    "class": "SimLevWrapperNav",
+    "module": "simlev.wrapper",
+    "file": "python/simlev/wrapper.py",
+    "line": 207,
+    "args": [
+     {
+      "name": "self",
+      "kind": "positional_or_keyword",
+      "has_default": false,
+      "default": null
+     }
+    ],
+    "defaults_known": true,
+    "note": "print über __str__",
+    "py_class": "SimLevWrapperNav"
+   },
+   "Julia": {
+    "name": "show(SimLevWrapperNav)",
+    "kind": "method",
+    "generic": "print",
+    "class": "SimLevWrapperNav",
+    "module": "SimLev",
+    "file": "julia/src/wrapper.jl",
+    "line": 290,
+    "args": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "has_default": false,
+      "default": null
+     }
+    ],
+    "defaults_known": true,
+    "args_source": "source",
+    "note": "show(io, x): io entfällt"
+   },
+   "abweichungen": [
+    {
+     "sprache": "Python",
+     "art": "argument_fehlt",
+     "detail": "... (in R ungenutzt)",
+     "info": "in R, nicht in Python",
+     "status": "bewusst"
+    },
+    {
+     "sprache": "Julia",
+     "art": "argument_fehlt",
+     "detail": "... (in R ungenutzt)",
+     "info": "in R, nicht in Julia",
+     "status": "bewusst"
+    }
+   ]
+  },
+  {
    "key": "print.asset_config",
    "kind": "method",
    "R": {
@@ -16458,7 +16725,7 @@
     "generic": "print",
     "class": "asset_config",
     "file": "r/R/asset_config.R",
-    "line": 183,
+    "line": 200,
     "args": [
      {
       "name": "x",
@@ -16484,7 +16751,7 @@
     "class": "asset_config",
     "module": "simlev.config",
     "file": "python/simlev/config.py",
-    "line": 102,
+    "line": 156,
     "args": [
      {
       "name": "self",
@@ -16504,7 +16771,7 @@
     "class": "asset_config",
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 222,
+    "line": 282,
     "args": [
      {
       "name": "x",
@@ -16713,7 +16980,7 @@
     "generic": "print",
     "class": "strategy",
     "file": "r/R/strategy.R",
-    "line": 228,
+    "line": 239,
     "args": [
      {
       "name": "x",
@@ -16739,7 +17006,7 @@
     "class": "strategy",
     "module": "simlev.config",
     "file": "python/simlev/config.py",
-    "line": 210,
+    "line": 279,
     "args": [
      {
       "name": "self",
@@ -16759,7 +17026,7 @@
     "class": "strategy",
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 370,
+    "line": 442,
     "args": [
      {
       "name": "x",
@@ -16968,7 +17235,7 @@
     "generic": "print",
     "class": "summary.SimLevResult",
     "file": "r/R/simulation.R",
-    "line": 834,
+    "line": 819,
     "args": [
      {
       "name": "x",
@@ -17053,7 +17320,7 @@
     "generic": "print",
     "class": "summary.SimLevWithdrawal",
     "file": "r/R/withdrawal.R",
-    "line": 1661,
+    "line": 1668,
     "args": [
      {
       "name": "x",
@@ -17099,7 +17366,7 @@
     "class": "summary.SimLevWithdrawal",
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1214,
+    "line": 1222,
     "args": [
      {
       "name": "x",
@@ -17471,7 +17738,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/sim_blocks.R",
-    "line": 177,
+    "line": 178,
     "args": [
      {
       "name": "span",
@@ -17554,7 +17821,7 @@
     "class": null,
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 370,
+    "line": 371,
     "args": [
      {
       "name": "span",
@@ -17633,7 +17900,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 212,
+    "line": 213,
     "args": [
      {
       "name": "span_pos",
@@ -18837,7 +19104,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/r/types.jl",
-    "line": 244,
+    "line": 254,
     "args": [
      {
       "name": "df",
@@ -19656,7 +19923,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/sensitivity.R",
-    "line": 382,
+    "line": 391,
     "args": [
      {
       "name": "data",
@@ -19730,7 +19997,7 @@
     "class": null,
     "module": "simlev.sensitivity",
     "file": "python/simlev/sensitivity.py",
-    "line": 629,
+    "line": 648,
     "args": [
      {
       "name": "data",
@@ -19803,7 +20070,7 @@
     "class": null,
     "module": "SimLev.Sensitivity",
     "file": "julia/src/sensitivity.jl",
-    "line": 332,
+    "line": 348,
     "args": [
      {
       "name": "data",
@@ -20962,7 +21229,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/sensitivity.R",
-    "line": 337,
+    "line": 346,
     "args": [
      {
       "name": "data",
@@ -21017,7 +21284,7 @@
     "class": null,
     "module": "simlev.sensitivity",
     "file": "python/simlev/sensitivity.py",
-    "line": 592,
+    "line": 611,
     "args": [
      {
       "name": "data",
@@ -21072,7 +21339,7 @@
     "class": null,
     "module": "SimLev.Sensitivity",
     "file": "julia/src/sensitivity.jl",
-    "line": 303,
+    "line": 319,
     "args": [
      {
       "name": "data",
@@ -23497,7 +23764,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/sim_blocks.R",
-    "line": 120,
+    "line": 121,
     "args": [
      {
       "name": "order_fee",
@@ -23522,7 +23789,7 @@
     "class": null,
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 341,
+    "line": 342,
     "args": [
      {
       "name": "order_fee",
@@ -23547,7 +23814,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 160,
+    "line": 161,
     "args": [
      {
       "name": "order_fee_pos",
@@ -23589,7 +23856,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/simulation.R",
-    "line": 491,
+    "line": 480,
     "args": [
      {
       "name": "data",
@@ -23635,12 +23902,6 @@
      },
      {
       "name": "tax",
-      "kind": "arg",
-      "has_default": true,
-      "default": "NULL"
-     },
-     {
-      "name": "funds",
       "kind": "arg",
       "has_default": true,
       "default": "NULL"
@@ -23731,12 +23992,6 @@
       "default": "None"
      },
      {
-      "name": "funds",
-      "kind": "keyword_only",
-      "has_default": true,
-      "default": "None"
-     },
-     {
       "name": "risk_free",
       "kind": "keyword_only",
       "has_default": true,
@@ -23771,7 +24026,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/sim_evaluate.jl",
-    "line": 417,
+    "line": 418,
     "args": [
      {
       "name": "data",
@@ -23817,12 +24072,6 @@
      },
      {
       "name": "tax",
-      "kind": "keyword",
-      "has_default": true,
-      "default": "nothing"
-     },
-     {
-      "name": "funds",
       "kind": "keyword",
       "has_default": true,
       "default": "nothing"
@@ -23881,7 +24130,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/sim_blocks.R",
-    "line": 228,
+    "line": 229,
     "args": [
      {
       "name": "thresh",
@@ -23900,7 +24149,7 @@
     "class": null,
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 398,
+    "line": 399,
     "args": [
      {
       "name": "thresh",
@@ -23921,7 +24170,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 246,
+    "line": 247,
     "args": [
      {
       "name": "thresh_pos",
@@ -23953,7 +24202,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/strategy.R",
-    "line": 136,
+    "line": 147,
     "args": [
      {
       "name": "strategy",
@@ -23984,7 +24233,7 @@
     "class": null,
     "module": "simlev.config",
     "file": "python/simlev/config.py",
-    "line": 316,
+    "line": 394,
     "args": [
      {
       "name": "strategy",
@@ -24015,7 +24264,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 314,
+    "line": 386,
     "args": [
      {
       "name": "strategy",
@@ -24051,7 +24300,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/data_prep.R",
-    "line": 730,
+    "line": 733,
     "args": [
      {
       "name": "weights",
@@ -24102,7 +24351,7 @@
     "class": null,
     "module": "SimLev.DataPrep",
     "file": "julia/src/data_prep.jl",
-    "line": 1126,
+    "line": 1139,
     "args": [
      {
       "name": "weights",
@@ -24132,7 +24381,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/strategy.R",
-    "line": 203,
+    "line": 214,
     "args": [
      {
       "name": "strategy",
@@ -24157,7 +24406,7 @@
     "class": null,
     "module": "simlev.config",
     "file": "python/simlev/config.py",
-    "line": 363,
+    "line": 441,
     "args": [
      {
       "name": "strategy",
@@ -24182,7 +24431,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 360,
+    "line": 432,
     "args": [
      {
       "name": "strategy",
@@ -24212,7 +24461,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/strategy.R",
-    "line": 162,
+    "line": 173,
     "args": [
      {
       "name": "strategy",
@@ -24244,7 +24493,7 @@
     "class": null,
     "module": "simlev.config",
     "file": "python/simlev/config.py",
-    "line": 328,
+    "line": 406,
     "args": [
      {
       "name": "strategy",
@@ -24275,7 +24524,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 330,
+    "line": 402,
     "args": [
      {
       "name": "strategy",
@@ -24336,7 +24585,7 @@
     "class": null,
     "module": "simlev.config",
     "file": "python/simlev/config.py",
-    "line": 290,
+    "line": 359,
     "args": [
      {
       "name": "strategy",
@@ -24361,7 +24610,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 292,
+    "line": 357,
     "args": [
      {
       "name": "strategy",
@@ -24399,7 +24648,7 @@
     "class": null,
     "module": "simlev",
     "file": "python/simlev/__init__.py",
-    "line": 365,
+    "line": 370,
     "args": [
      {
       "name": "object",
@@ -24430,7 +24679,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/r/types.jl",
-    "line": 339,
+    "line": 352,
     "args": [
      {
       "name": "object",
@@ -24893,7 +25142,7 @@
     "generic": "summary",
     "class": "SimLevResult",
     "file": "r/R/simulation.R",
-    "line": 781,
+    "line": 766,
     "args": [
      {
       "name": "object",
@@ -24991,7 +25240,7 @@
     "generic": "summary",
     "class": "SimLevWithdrawal",
     "file": "r/R/withdrawal.R",
-    "line": 1632,
+    "line": 1639,
     "args": [
      {
       "name": "object",
@@ -25049,7 +25298,7 @@
     "class": "SimLevWithdrawal",
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1169,
+    "line": 1177,
     "args": [
      {
       "name": "obj",
@@ -25066,7 +25315,7 @@
     ],
     "defaults_known": true,
     "args_source": "source",
-    "note": "Hülle um _summary_wd (julia/src/withdrawal.jl:1169)"
+    "note": "Hülle um _summary_wd (julia/src/withdrawal.jl:1177)"
    },
    "abweichungen": [
     {
@@ -25094,7 +25343,7 @@
     "generic": "summary",
     "class": "asset_config",
     "file": "r/R/asset_config.R",
-    "line": 205,
+    "line": 227,
     "args": [
      {
       "name": "object",
@@ -25120,7 +25369,7 @@
     "class": "asset_config",
     "module": "simlev.config",
     "file": "python/simlev/config.py",
-    "line": 106,
+    "line": 160,
     "args": [
      {
       "name": "self",
@@ -25140,7 +25389,7 @@
     "class": "asset_config",
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 410,
+    "line": 484,
     "args": [
      {
       "name": "x",
@@ -25197,7 +25446,7 @@
     "generic": "summary",
     "class": "strategy",
     "file": "r/R/strategy.R",
-    "line": 249,
+    "line": 262,
     "args": [
      {
       "name": "object",
@@ -25223,7 +25472,7 @@
     "class": "strategy",
     "module": "simlev.config",
     "file": "python/simlev/config.py",
-    "line": 229,
+    "line": 298,
     "args": [
      {
       "name": "self",
@@ -25243,7 +25492,7 @@
     "class": "strategy",
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 409,
+    "line": 483,
     "args": [
      {
       "name": "x",
@@ -27099,7 +27348,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/sim_blocks.R",
-    "line": 341,
+    "line": 342,
     "args": [
      {
       "name": "rate",
@@ -27160,7 +27409,7 @@
     "class": null,
     "module": "simlev._sim_blocks",
     "file": "python/simlev/_sim_blocks.py",
-    "line": 448,
+    "line": 449,
     "args": [
      {
       "name": "rate",
@@ -27221,7 +27470,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/sim_blocks.jl",
-    "line": 333,
+    "line": 334,
     "args": [
      {
       "name": "rate_pos",
@@ -27916,7 +28165,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/withdrawal.R",
-    "line": 1771,
+    "line": 1778,
     "args": [
      {
       "name": "type",
@@ -27984,7 +28233,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1681,
+    "line": 1690,
     "args": [
      {
       "name": "type",
@@ -28051,7 +28300,7 @@
     "class": null,
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1314,
+    "line": 1322,
     "args": [
      {
       "name": "type_pos",
@@ -28136,7 +28385,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/withdrawal.R",
-    "line": 1555,
+    "line": 1562,
     "args": [
      {
       "name": "x",
@@ -28192,7 +28441,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1429,
+    "line": 1438,
     "args": [
      {
       "name": "x",
@@ -28247,7 +28496,7 @@
     "class": null,
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1115,
+    "line": 1123,
     "args": [
      {
       "name": "x",
@@ -29544,6 +29793,238 @@
      "status": "bewusst"
     }
    ]
+  },
+  {
+   "key": "wrapper_config",
+   "kind": "function",
+   "R": {
+    "name": "wrapper_config",
+    "kind": "function",
+    "generic": null,
+    "class": null,
+    "file": "r/R/wrapper.R",
+    "line": 68,
+    "args": [
+     {
+      "name": "strategy",
+      "kind": "arg",
+      "has_default": false,
+      "default": null
+     },
+     {
+      "name": "rebalance",
+      "kind": "arg",
+      "has_default": true,
+      "default": "NULL"
+     },
+     {
+      "name": "costs",
+      "kind": "arg",
+      "has_default": true,
+      "default": "funds_costs()"
+     },
+     {
+      "name": "order_fee",
+      "kind": "arg",
+      "has_default": true,
+      "default": "NULL"
+     },
+     {
+      "name": "volume",
+      "kind": "arg",
+      "has_default": true,
+      "default": "NULL"
+     }
+    ],
+    "defaults_known": true,
+    "note": null
+   },
+   "Python": {
+    "name": "wrapper_config",
+    "kind": "function",
+    "generic": null,
+    "class": null,
+    "module": "simlev.wrapper",
+    "file": "python/simlev/wrapper.py",
+    "line": 103,
+    "args": [
+     {
+      "name": "strategy",
+      "kind": "positional_or_keyword",
+      "has_default": false,
+      "default": null
+     },
+     {
+      "name": "rebalance",
+      "kind": "keyword_only",
+      "has_default": true,
+      "default": "None"
+     },
+     {
+      "name": "costs",
+      "kind": "keyword_only",
+      "has_default": true,
+      "default": "funds_costs()"
+     },
+     {
+      "name": "order_fee",
+      "kind": "keyword_only",
+      "has_default": true,
+      "default": "None"
+     },
+     {
+      "name": "volume",
+      "kind": "keyword_only",
+      "has_default": true,
+      "default": "None"
+     }
+    ],
+    "defaults_known": true,
+    "note": null
+   },
+   "Julia": {
+    "name": "wrapper_config",
+    "kind": "function",
+    "generic": null,
+    "class": null,
+    "module": "SimLev",
+    "file": "julia/src/wrapper.jl",
+    "line": 49,
+    "args": [
+     {
+      "name": "strategy",
+      "kind": "positional",
+      "has_default": false,
+      "default": null
+     },
+     {
+      "name": "rebalance",
+      "kind": "keyword",
+      "has_default": true,
+      "default": "nothing"
+     },
+     {
+      "name": "costs",
+      "kind": "keyword",
+      "has_default": true,
+      "default": "funds_costs()"
+     },
+     {
+      "name": "order_fee",
+      "kind": "keyword",
+      "has_default": true,
+      "default": "nothing"
+     },
+     {
+      "name": "volume",
+      "kind": "keyword",
+      "has_default": true,
+      "default": "nothing"
+     }
+    ],
+    "defaults_known": true,
+    "args_source": "source",
+    "note": null
+   },
+   "abweichungen": []
+  },
+  {
+   "key": "wrapper_nav",
+   "kind": "function",
+   "R": {
+    "name": "wrapper_nav",
+    "kind": "function",
+    "generic": null,
+    "class": null,
+    "file": "r/R/wrapper.R",
+    "line": 226,
+    "args": [
+     {
+      "name": "data",
+      "kind": "arg",
+      "has_default": false,
+      "default": null
+     },
+     {
+      "name": "wrapper",
+      "kind": "arg",
+      "has_default": false,
+      "default": null
+     },
+     {
+      "name": "splits",
+      "kind": "arg",
+      "has_default": true,
+      "default": "NULL"
+     }
+    ],
+    "defaults_known": true,
+    "note": null
+   },
+   "Python": {
+    "name": "wrapper_nav",
+    "kind": "function",
+    "generic": null,
+    "class": null,
+    "module": "simlev.wrapper",
+    "file": "python/simlev/wrapper.py",
+    "line": 397,
+    "args": [
+     {
+      "name": "data",
+      "kind": "positional_or_keyword",
+      "has_default": false,
+      "default": null
+     },
+     {
+      "name": "wrapper",
+      "kind": "positional_or_keyword",
+      "has_default": false,
+      "default": null
+     },
+     {
+      "name": "splits",
+      "kind": "keyword_only",
+      "has_default": true,
+      "default": "None"
+     }
+    ],
+    "defaults_known": true,
+    "note": null
+   },
+   "Julia": {
+    "name": "wrapper_nav",
+    "kind": "function",
+    "generic": null,
+    "class": null,
+    "module": "SimLev",
+    "file": "julia/src/wrapper.jl",
+    "line": 256,
+    "args": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "has_default": false,
+      "default": null
+     },
+     {
+      "name": "wrapper",
+      "kind": "positional",
+      "has_default": false,
+      "default": null
+     },
+     {
+      "name": "splits",
+      "kind": "keyword",
+      "has_default": true,
+      "default": "nothing"
+     }
+    ],
+    "defaults_known": true,
+    "args_source": "source",
+    "note": null
+   },
+   "abweichungen": []
   }
  ]
 }

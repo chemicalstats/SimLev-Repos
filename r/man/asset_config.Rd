@@ -16,13 +16,14 @@ asset_config(
                    "etn_standard", "etn_deliverable"),
   trading  = c("bnh", "signal"),
   share  = 1.0,
-  spread = 0.1,
+  spread = 0,
   partial_exemption  = 0.0,
   deliverable  = FALSE,
   start  = NULL,
   tax_regime   = NULL,
   signal_buy   = NULL,
-  signal_sell  = NULL
+  signal_sell  = NULL,
+  wrapper      = NULL
 )
 \method{print}{asset_config}(x, ...)
 \method{summary}{asset_config}(object, ...)
@@ -53,7 +54,7 @@ asset_config(
   \item{spread}{
     Numerisch. Voller Bid-Ask-Spread \strong{in Prozent} (z. B. \code{0.1}
     = 0,1 \%), nicht negativ. Pro Seite wird der halbe Spread angewandt.
-    Standard: \code{0.1}.
+    Standard: \code{0} (ohne Spread; wer Spreads abbilden will, gibt sie an).
   }
   \item{partial_exemption}{
     Numerisch. Teilfreistellungssatz nach § 20 Abs. 1 InvStG
@@ -98,6 +99,18 @@ asset_config(
     Verkaufssignal (logisch, \code{TRUE} = verkaufen). Bei
     \code{trading = "signal"} Pflicht (sonst Fehler).
   }
+  \item{wrapper}{
+    \code{NULL} oder ein Objekt aus \code{\link{wrapper_config}}: Das Asset ist dann
+    ein Fonds-Wrapper (Zertifikat oder Fonds über eine innere Strategie). Sein Name
+    ist \strong{keine} Kursspalte; \code{\link{simulation}} rechnet die Kurse als
+    Anteilswert (\code{\link{wrapper_nav}}) aus den inneren Spalten. Eine Spalte
+    gleichen Namens in \code{data} ist ein Fehler. Mit \code{wrapper} ist nur
+    \code{trading = "bnh"} möglich (keine Signale auf den Anteilswert; Signale
+    gehen in der inneren Strategie). Die äußeren Felder (\code{asset_class},
+    \code{tax_regime}, \code{partial_exemption}, \code{spread}, \code{share},
+    \code{start}) gelten für den Wrapper wie für ein Einzelpapier.
+    Standard: \code{NULL} (kein Wrapper).
+  }
   \item{x, object}{Ein \code{asset_config}-Objekt.}
   \item{...}{Wird ignoriert.}
 }
@@ -106,12 +119,14 @@ asset_config(
   \code{asset_class}, \code{trading}, \code{share},
   \code{spread}, \code{partial_exemption}, \code{deliverable},
   \code{start}, \code{tax_regime}, \code{signal_buy},
-  \code{signal_sell}; validiert und ggf. mit abgeleitetem \code{tax_regime}.
+  \code{signal_sell}, mit Wrapper zusätzlich \code{wrapper}; validiert und ggf.
+  mit abgeleitetem \code{tax_regime}.
   Die Zahlen bleiben in den Einheiten der Eingabe (\code{share} als
   Anteil, \code{spread} und \code{partial_exemption} in Prozent).
 
   \code{print} und \code{summary} geben die Konfiguration auf der Konsole
-  aus und liefern \code{x} unsichtbar zurück.
+  aus (mit Wrapper eine Zeile mit den inneren Assets und den Fondskosten) und
+  liefern \code{x} unsichtbar zurück.
 }
 \details{
   Das \code{tax_regime} wird automatisch abgeleitet, wenn \code{NULL}:
@@ -156,5 +171,5 @@ sig <- asset_config(
 )
 }
 \seealso{
-  \code{\link{create_strategy}}, \code{\link{simulation}}
+  \code{\link{create_strategy}}, \code{\link{simulation}}, \code{\link{wrapper_config}}
 }

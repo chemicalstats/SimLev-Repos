@@ -1,19 +1,20 @@
 {
  "language": "Julia",
- "stand": "2026-10-26 – Schnittstelle 0.5.0 festgehalten",
+ "stand": "2026-10-27 – Etappe 8.0: Auswahl aus SimLevWrapperNav",
  "hinweis": "Erzeugt von tools/api_snapshot/run.sh --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
    {"name": "asset_class", "kind": "positional", "default": "\"etf\""},
    {"name": "trading", "kind": "positional", "default": "\"bnh\""},
    {"name": "share", "kind": "positional", "default": "1.0"},
-   {"name": "spread", "kind": "positional", "default": "0.1"},
+   {"name": "spread", "kind": "positional", "default": "0.0"},
    {"name": "partial_exemption", "kind": "positional", "default": "0.0"},
    {"name": "deliverable", "kind": "positional", "default": "false"},
    {"name": "start", "kind": "positional", "default": "nothing"},
    {"name": "tax_regime", "kind": "positional", "default": "nothing"},
    {"name": "signal_buy", "kind": "positional", "default": "nothing"},
-   {"name": "signal_sell", "kind": "positional", "default": "nothing"}
+   {"name": "signal_sell", "kind": "positional", "default": "nothing"},
+   {"name": "wrapper", "kind": "positional", "default": "nothing"}
   ],
   "attrs": [
    {"name": "F", "kind": "positional", "default": null}
@@ -820,7 +821,6 @@
    {"name": "rebalance", "kind": "keyword", "default": "nothing"},
    {"name": "splits", "kind": "keyword", "default": "nothing"},
    {"name": "tax", "kind": "keyword", "default": "nothing"},
-   {"name": "funds", "kind": "keyword", "default": "nothing"},
    {"name": "risk_free", "kind": "keyword", "default": "0"},
    {"name": "fractions", "kind": "keyword", "default": "true"},
    {"name": "liquidate", "kind": "keyword", "default": "false"},
@@ -1080,6 +1080,18 @@
    {"name": "gamma", "kind": "keyword", "default": "2"},
    {"name": "keep_paths", "kind": "keyword", "default": "true"},
    {"name": "horizon", "kind": "keyword", "default": "nothing"}
+  ],
+  "wrapper_config": [
+   {"name": "strategy", "kind": "positional", "default": null},
+   {"name": "rebalance", "kind": "keyword", "default": "nothing"},
+   {"name": "costs", "kind": "keyword", "default": "funds_costs()"},
+   {"name": "order_fee", "kind": "keyword", "default": "nothing"},
+   {"name": "volume", "kind": "keyword", "default": "nothing"}
+  ],
+  "wrapper_nav": [
+   {"name": "data", "kind": "positional", "default": null},
+   {"name": "wrapper", "kind": "positional", "default": null},
+   {"name": "splits", "kind": "keyword", "default": "nothing"}
   ]
  },
  "methods": {
@@ -1324,6 +1336,12 @@
   "print.SimLevWithdrawal": [
    {"name": "x", "kind": "positional", "default": null},
    {"name": "kw...", "kind": "kwargs_rest", "default": null}
+  ],
+  "print.SimLevWrapperConfig": [
+   {"name": "x", "kind": "positional", "default": null}
+  ],
+  "print.SimLevWrapperNav": [
+   {"name": "x", "kind": "positional", "default": null}
   ],
   "print.asset_config": [
    {"name": "x", "kind": "positional", "default": null}

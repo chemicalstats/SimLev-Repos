@@ -45,3 +45,5 @@ export set_seed, rng_kind, tax_tariff, SimLevSummary, format_summary
 # Bausteine für simulation() (Etappe 6.3, sim_blocks.jl)
 export sim_costs, dca_plan, rebalance_plan, split_rule, tax_profile, income_rate, income_tariff, harvest_rule,
        funds_costs
+# Fonds-Wrapper (Etappe 6.5c, wrapper.jl)
+export wrapper_config, wrapper_nav

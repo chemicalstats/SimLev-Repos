@@ -962,6 +962,14 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
         (_isnum(inflation)) || _stop("Bei einem SimLevResult ist 'inflation' ein Prozentsatz p. a.")
         x = withdrawal_cohorts(x; inflation = inflation, years = years === nothing ? 30 : years,
                                frequency = _match_arg(freq_arg, ("year", "quarter", "month")))
+    elseif SimLev.inherits(x, "SimLevWrapperNav")   # Anteilswert eines Fonds-Wrappers (wrapper_nav()) als Kursreihe
+        (_isnum(inflation)) || _stop("Bei einem SimLevWrapperNav ist 'inflation' ein Prozentsatz p. a.")
+        x = withdrawal_cohorts(x; price = "nav", inflation = inflation, years = years === nothing ? 30 : years,
+                               frequency = _match_arg(freq_arg, ("year", "quarter", "month")))
+    elseif x isa RFrame && haskey(x, "date")   # Kurstabelle, z. B. Ausschnitt aus wrapper_nav() (Etappe 8.0)
+        _stop("x ist eine Tabelle mit Spalte 'date' (z. B. ein Ausschnitt aus wrapper_nav(), der eine gewöhnliche " *
+              "Tabelle ist); Kurse zuerst mit withdrawal_cohorts(x, price = \"<Kursspalte>\") in Renditen umwandeln " *
+              "oder das ganze Ergebnis von wrapper_nav() übergeben.")
     elseif _is_study(x) || _is_result_list(x)
         if !_is_study(x)
             lst = x isa AbstractDict || x isa NamedTuple ? collect(values(x)) : collect(x)

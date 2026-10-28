@@ -15,9 +15,10 @@
 #   tax_profile(rate, church_tax, sparer_pauschbetrag, private_sale_threshold, base_rate,
 #               guenstigerpruefung, income, harvest)                -> tax
 #     income_rate(marginal_rate, soli_rate), income_tariff(taxable_income, tariff), harvest_rule(day, loss_pot)
-#   funds_costs(fee, performance_fee)                               -> funds
 #
-# NULL heisst aus (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern, kein Fondsmodus).
+# NULL heisst aus (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern).
+# funds_costs(fee, performance_fee) ist der Kostenbaustein fuer den Fonds-Wrapper (wrapper_config(costs = ),
+# wrapper.R, Etappe 6.5c); der alte Fondsmodus simulation(funds = ) ist entfernt.
 
 # ── Pruefhilfen ───────────────────────────────────────────────────────────────
 
@@ -405,7 +406,7 @@ print.SimLevTaxProfile <- function(x, ...) {
 
 # ── funds_costs ───────────────────────────────────────────────────────────────
 
-#' Fondsmodus fuer simulation()
+#' Kostenbaustein fuer den Fonds-Wrapper (wrapper_config(costs = ))
 #' @export
 #' @noRd
 funds_costs <- function(fee = 0.95, performance_fee = 5) {
@@ -422,7 +423,7 @@ funds_costs <- function(fee = 0.95, performance_fee = 5) {
 #' @export
 #' @noRd
 print.SimLevFundsCosts <- function(x, ...) {
-  .blk_print("Fondsmodus (funds_costs)",
+  .blk_print("Fondskosten (funds_costs)",
              list("Fondskosten" = sprintf("%s %% p. a.", .blk_fmt(x$fee)),
                   "Performancegeb\u00fchr" = sprintf("%s %% des Wertzuwachses \u00fcber dem H\u00f6chststand", .blk_fmt(x$performance_fee))))
   invisible(x)
@@ -434,24 +435,19 @@ print.SimLevFundsCosts <- function(x, ...) {
 #'
 #' Zweck: simulation() prueft die Klassen der Bausteine und uebersetzt sie in die Argumente der Engine
 #' (.simulation_flat), die unveraendert rechnet.
-#' Fondsmodus (funds): tax_mode = "funds"; mit tax = tax_profile() gelten dessen Angaben wie bis 6.2 die flachen
-#' Steuerargumente im Fondsmodus (wirksam rate und church_tax fuer die Steuer auf den Gesamtgewinn bei
-#' Liquidation; harvest und income_tariff mit Warnung, die uebrigen still ohne Wirkung). Ohne tax gilt der
-#' Standardsatz 26,375 %.
-#' Eingabe: costs, dca, rebalance, splits, tax, funds (Bausteine oder NULL).
+#' Eingabe: costs, dca, rebalance, splits, tax (Bausteine oder NULL).
 #' Ausgabe: benannte Liste der Engine-Argumente.
 #' Rebalancing: rebalance_plan() heisst balance_mode = TRUE; nur mit event_col, event_mode = "replace"
 #' und skip = TRUE wird balance_mode = FALSE (kein Umschichten am ersten Tag, nur an Ereignistagen).
 #' Sparer-Pauschbetrag: sparer_pauschbetrag = 0 heisst ohne Freibetrag (use_sparer_pauschbetrag = FALSE).
 #' @keywords internal
 #' @noRd
-.sim_from_blocks <- function(costs, dca, rebalance, splits, tax, funds) {
+.sim_from_blocks <- function(costs, dca, rebalance, splits, tax) {
   .blk_check(costs, "SimLevSimCosts", "costs", "sim_costs")
   .blk_check(dca, "SimLevDcaPlan", "dca", "dca_plan")
   .blk_check(rebalance, "SimLevRebalancePlan", "rebalance", "rebalance_plan")
   .blk_check(splits, "SimLevSplitRule", "splits", "split_rule")
   .blk_check(tax, "SimLevTaxProfile", "tax", "tax_profile")
-  .blk_check(funds, "SimLevFundsCosts", "funds", "funds_costs")
   a <- list(order_fee = costs$order_fee, dca_fee = costs$dca_fee)
   if (!is.null(dca))
     a <- c(a, list(dca_mode = TRUE, dca_value = dca$value, dca_span = dca$span, dca_days = dca$days,
@@ -468,7 +464,7 @@ print.SimLevFundsCosts <- function(x, ...) {
   if (!is.null(splits)) a <- c(a, list(split_mode = TRUE, split_thresh = splits$thresh))
   if (!is.null(tax)) {
     br <- tax$base_rate
-    a <- c(a, list(tax_mode = if (is.null(funds)) "person" else "funds", tax_rate = tax$rate, church_tax = tax$church_tax,
+    a <- c(a, list(tax_mode = "person", tax_rate = tax$rate, church_tax = tax$church_tax,
                    sparer_pauschbetrag = tax$sparer_pauschbetrag, use_sparer_pauschbetrag = tax$sparer_pauschbetrag > 0,
                    private_sale_threshold = tax$private_sale_threshold,
                    base_rate = if (is.character(br)) NULL else br, base_rate_flex = is.character(br),
@@ -483,10 +479,6 @@ print.SimLevFundsCosts <- function(x, ...) {
     if (!is.null(tax$harvest))
       a <- c(a, list(harvest_mode = TRUE, harvest_day = tax$harvest$day, harvest_loss_pot = tax$harvest$loss_pot))
   }
-  if (!is.null(funds)) {
-    if (is.null(tax)) a$tax_mode <- "funds"
-    a <- c(a, list(funds_fee = funds$fee, bonus_fee = funds$performance_fee))
-  }
   a
 }
 
@@ -500,10 +492,10 @@ print.SimLevFundsCosts <- function(x, ...) {
 # Baustein neu: Grundwerte aus dem vorhandenen Baustein (z. B. aus sim_args), sonst die Standardwerte des
 # Konstruktors. Alte flache Namen (bis 6.3) ergeben einen Fehler mit dem neuen Baustein (E1: keine Aliasse).
 
-.SIM_TOP <- c("start_value", "costs", "dca", "rebalance", "splits", "tax", "funds", "risk_free", "fractions",
+.SIM_TOP <- c("start_value", "costs", "dca", "rebalance", "splits", "tax", "risk_free", "fractions",
               "liquidate", "details")
 .SIM_BLOCKS <- c(costs = "sim_costs", dca = "dca_plan", rebalance = "rebalance_plan", splits = "split_rule",
-                 tax = "tax_profile", funds = "funds_costs")
+                 tax = "tax_profile")
 .SIM_BLOCK_PARAMS <- list(
   sim_costs = c("order_fee", "dca_fee"),
   dca_plan = c("value", "span", "days", "unit", "anchor", "start", "skip", "fill_deficits"),
@@ -512,7 +504,6 @@ print.SimLevFundsCosts <- function(x, ...) {
   split_rule = "thresh",
   tax_profile = c("rate", "church_tax", "sparer_pauschbetrag", "private_sale_threshold", "base_rate",
                   "guenstigerpruefung", "income", "harvest"),
-  funds_costs = c("fee", "performance_fee"),
   income_rate = c("marginal_rate", "soli_rate"),
   income_tariff = c("taxable_income", "tariff"),
   harvest_rule = c("day", "loss_pot"))
@@ -535,7 +526,7 @@ print.SimLevFundsCosts <- function(x, ...) {
   "event_weight", "rebalance.event_weight", "",
   "split_mode", "", "splits = split_rule(\u2026) (NULL = ohne Splits)",
   "split_thresh", "splits.thresh", "",
-  "tax_mode", "", "tax = tax_profile(\u2026) bzw. funds = funds_costs(\u2026) (NULL = ohne)",
+  "tax_mode", "", "tax = tax_profile(\u2026) (NULL = ohne)",
   "tax_rate", "tax.rate", "", "church_tax", "tax.church_tax", "",
   "sparer_pauschbetrag", "tax.sparer_pauschbetrag", "",
   "use_sparer_pauschbetrag", "", "tax = tax_profile(sparer_pauschbetrag = 0) (0 = ohne Pauschbetrag)",
@@ -549,7 +540,6 @@ print.SimLevFundsCosts <- function(x, ...) {
   "taxable_income", "tax.income.taxable_income", "", "tax_tariff", "tax.income.tariff", "",
   "harvest_mode", "", "tax = tax_profile(harvest = harvest_rule(\u2026))",
   "harvest_day", "tax.harvest.day", "", "harvest_loss_pot", "tax.harvest.loss_pot", "",
-  "funds_fee", "funds.fee", "", "bonus_fee", "funds.performance_fee", "",
   "order_fee", "costs.order_fee", "", "dca_fee", "costs.dca_fee", ""),
   ncol = 3, byrow = TRUE, dimnames = list(NULL, c("flat", "path", "hint")))
 

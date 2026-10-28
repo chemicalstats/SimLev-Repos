@@ -1,19 +1,20 @@
 {
  "language": "R",
- "stand": "2026-10-26 – Schnittstelle 0.5.0 festgehalten",
+ "stand": "2026-10-27 – Etappe 8.0: Auswahl aus SimLevWrapperNav",
  "hinweis": "Erzeugt von tools/api_snapshot/run.sh --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
    {"name": "asset_class", "kind": "arg", "default": "c(\"etf\", \"etn\", \"etc\", \"certificate\", \"etn_standard\", \"etn_deliverable\")", "match_arg": true},
    {"name": "trading", "kind": "arg", "default": "c(\"bnh\", \"signal\")", "match_arg": true},
    {"name": "share", "kind": "arg", "default": "1"},
-   {"name": "spread", "kind": "arg", "default": "0.1"},
+   {"name": "spread", "kind": "arg", "default": "0"},
    {"name": "partial_exemption", "kind": "arg", "default": "0"},
    {"name": "deliverable", "kind": "arg", "default": "FALSE"},
    {"name": "start", "kind": "arg", "default": "NULL"},
    {"name": "tax_regime", "kind": "arg", "default": "NULL"},
    {"name": "signal_buy", "kind": "arg", "default": "NULL"},
-   {"name": "signal_sell", "kind": "arg", "default": "NULL"}
+   {"name": "signal_sell", "kind": "arg", "default": "NULL"},
+   {"name": "wrapper", "kind": "arg", "default": "NULL"}
   ],
   "backcast": [
    {"name": "fit", "kind": "arg", "default": "NULL"},
@@ -706,7 +707,6 @@
    {"name": "rebalance", "kind": "arg", "default": "NULL"},
    {"name": "splits", "kind": "arg", "default": "NULL"},
    {"name": "tax", "kind": "arg", "default": "NULL"},
-   {"name": "funds", "kind": "arg", "default": "NULL"},
    {"name": "risk_free", "kind": "arg", "default": "0"},
    {"name": "fractions", "kind": "arg", "default": "TRUE"},
    {"name": "liquidate", "kind": "arg", "default": "FALSE"},
@@ -949,9 +949,25 @@
    {"name": "gamma", "kind": "arg", "default": "2"},
    {"name": "keep_paths", "kind": "arg", "default": "TRUE"},
    {"name": "horizon", "kind": "arg", "default": "NULL"}
+  ],
+  "wrapper_config": [
+   {"name": "strategy", "kind": "arg", "default": null},
+   {"name": "rebalance", "kind": "arg", "default": "NULL"},
+   {"name": "costs", "kind": "arg", "default": "funds_costs()"},
+   {"name": "order_fee", "kind": "arg", "default": "NULL"},
+   {"name": "volume", "kind": "arg", "default": "NULL"}
+  ],
+  "wrapper_nav": [
+   {"name": "data", "kind": "arg", "default": null},
+   {"name": "wrapper", "kind": "arg", "default": null},
+   {"name": "splits", "kind": "arg", "default": "NULL"}
   ]
  },
  "methods": {
+  "[.SimLevWrapperNav": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
   "plot.SimLevAnalysis": [
    {"name": "x", "kind": "arg", "default": null},
    {"name": "type", "kind": "arg", "default": "c(\"overview\", \"growth\", \"drawdown\", \"rolling\", \"annual\", \"monthly\")", "match_arg": true},
@@ -1201,6 +1217,14 @@
    {"name": "...", "kind": "dots", "default": null}
   ],
   "print.SimLevWithdrawal": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevWrapperConfig": [
+   {"name": "x", "kind": "arg", "default": null},
+   {"name": "...", "kind": "dots", "default": null}
+  ],
+  "print.SimLevWrapperNav": [
    {"name": "x", "kind": "arg", "default": null},
    {"name": "...", "kind": "dots", "default": null}
   ],

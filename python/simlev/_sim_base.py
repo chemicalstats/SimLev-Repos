@@ -14,9 +14,9 @@ import numpy as np
 import pandas as pd
 
 from . import _core as core
-from ._dates import days_from_civil, fmt_date, from_days, is_leap, year_of
+from ._dates import days_from_civil, fmt_date, from_days, year_of
 from ._r.rformat import r_as_character, r_deparse, r_format, r_format1, r_sprintf
-from ._r.rnum import r_colsums, r_mean, r_pow, r_pow_vec, r_sd, r_sum, r_uniroot
+from ._r.rnum import r_mean, r_pow, r_pow_vec, r_sd, r_sum, r_uniroot
 from .config import _match_arg
 from ._tax_tariff import SimLevTaxTariff, tariff_income_tax, tariff_soli
 from ._r.rnum import NA_REAL as NA  # R's NA_real_ (Nutzlast 1954)
@@ -276,6 +276,11 @@ class _Frame:
             del self.cols[name]
             del self.kinds[name]
 
+    def copy(self) -> "_Frame":
+        """Kopie mit eigenen Spalten (Fonds-Wrapper: normalisierte Daten für die innere Rechnung)."""
+        return _Frame(list(self.names), {nm: np.copy(self.cols[nm]) for nm in self.names}, dict(self.kinds),
+                      self.filled_attr)
+
     def take(self, idx: np.ndarray) -> None:
         for nm in self.names:
             self.cols[nm] = self.cols[nm][idx]
@@ -376,6 +381,8 @@ def _column(v: Any) -> tuple[str, np.ndarray]:
 
 
 def _to_frame(data: Any) -> _Frame:
+    if isinstance(data, _Frame):   # schon normalisiert (Fonds-Wrapper, innere Rechnung)
+        return data.copy()
     if isinstance(data, pd.DataFrame):
         names = [str(c) for c in data.columns]
         if len(set(names)) != len(names):
@@ -554,13 +561,16 @@ def _calculate_dates_flags(mode, span, unit, days, dates: np.ndarray, value, anc
     return np.array([int(z) in sset for z in dates], dtype=bool)
 
 
-def _calculate_split_flags(sim: dict, base: float, mode: bool, dates: np.ndarray, split_thresh) -> np.ndarray:
+def _calculate_split_flags(sim: dict, base: float, mode: bool, dates: np.ndarray, split_thresh,
+                           skip=()) -> np.ndarray:
     n = dates.size
     if not mode or split_thresh is None:
         return np.zeros(n, dtype=bool)
     lo, hi = float(split_thresh[0]), float(split_thresh[1])
     flag = np.zeros(n, dtype=bool)
     for name in sim["market"]:
+        if name in skip:   # skip: Assets ohne Splits (Fonds-Wrapper)
+            continue
         prices = np.array(sim["market"][name]["asset_price"], dtype=np.float64)
         for i in range(n):
             cp = float(prices[i])
@@ -833,40 +843,6 @@ def _calculate_flat_rate(sim: dict, name: str, index: int, dates: np.ndarray, ta
     tr = sim["trades"][name]
     return core.flat_rate(tr["buys"], int(tr["fifo_front"]), base_rate, year_start_price, market_price,
                           start_of_year, end_of_year)
-
-
-def _calculate_fund_fees(sim: dict, index: int, dates: np.ndarray, assets: list, funds_fee: float,
-                         bonus_fee: float, details: bool) -> dict:
-    cur = int(dates[index - 1])
-    event_date = days_from_civil(year_of(cur), 1, 1)
-    idx = np.flatnonzero((dates >= event_date) & (dates <= cur))
-    zero = {a: 0.0 for a in assets}
-    if idx.size == 0:
-        return {"total_fees": 0.0, "total_value": sim["totals"]["total_value"], "asset_fees": zero}
-    asset_totals = np.column_stack([sim["report"][a]["total"][idx] for a in assets])
-    yr = year_of(cur)
-    days_in_year = 366 if is_leap(yr) else 365
-    daily_rate = funds_fee / 100 / days_in_year
-    basic_fees = r_colsums(asset_totals * daily_rate, na_rm=True)
-    basic_value = r_sum(basic_fees)
-    flows_period = r_sum([r_sum(sim["report"][a]["flows"][idx]) for a in assets])
-    total_value = sim["totals"]["total_value"] + flows_period
-    status_totals = np.array([sim["status"][a]["total"] for a in assets], dtype=np.float64)
-    market_value = r_sum(status_totals, na_rm=True)
-    above_mark = market_value > total_value
-    bonus_value = (market_value - total_value) * (bonus_fee / 100) if above_mark else 0.0
-    if market_value > 0:
-        asset_fees_v = basic_fees + bonus_value * status_totals / market_value
-    else:
-        asset_fees_v = basic_fees + 0.0
-    total_fees = basic_value + bonus_value
-    if above_mark:
-        total_value = _rmax(total_value, market_value - total_fees)
-    if details:
-        _cat(_sp("Fondskosten:\tFondsgeb\u00fchren %.2f EUR am %s\n\t\t=> Grundgeb\u00fchr: %.2f EUR; "
-                 "Performancegeb\u00fchr: %.2f EUR\n", total_fees, fmt_date(cur), basic_value, bonus_value))
-    return {"total_fees": total_fees, "total_value": total_value,
-            "asset_fees": {a: float(v) for a, v in zip(assets, asset_fees_v)}}
 
 
 def _split(sim: dict, name: str, ratio: float, forward: bool) -> dict:

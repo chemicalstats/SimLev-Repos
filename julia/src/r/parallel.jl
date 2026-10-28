@@ -22,10 +22,11 @@ module RParallel
 import ..SimLev
 using Base.CoreLogging: with_logger, NullLogger
 
-export par_lapply, r_stderr, r_stdout, suppress_messages
+export par_lapply, r_stderr, r_stdout, suppress_messages, with_message_stream
 
 const _OUT_KEY = :SimLev_RParallel_capture
 const _MUTE_KEY = :SimLev_RParallel_mute
+const _MSG_KEY = :SimLev_RParallel_messages
 
 # ── Ausgaben je Aufgabe ──────────────────────────────────────────────────
 
@@ -68,6 +69,8 @@ Ziel für R-`message()`: der Ausgabepuffer der laufenden `par_lapply`-Aufgabe,
 """
 function r_stderr()
     _tls_get(_MUTE_KEY, false) === true && return devnull
+    m = _tls_get(_MSG_KEY, nothing)
+    m === nothing || return m::IO
     c = _tls_get(_OUT_KEY, nothing)
     return c === nothing ? stderr : _CapStream(c::Capture, 2)
 end
@@ -80,6 +83,26 @@ end
 
 "`suppressMessages(f())`: Meldungen über `r_stderr()` verwerfen (nur in der laufenden Aufgabe)."
 suppress_messages(f) = task_local_storage(f, _MUTE_KEY, true)
+
+"""
+    with_message_stream(f, io)
+
+`withCallingHandlers(f(), message = …)`: Meldungen über `r_stderr()` gehen während `f()` (in der
+laufenden Aufgabe) an den Strom `io`, der sie umformt und weitergibt (Fonds-Wrapper: Präfix der
+inneren Rechnung). `io` sollte beim Anlegen das bisherige `r_stderr()` als Ziel übernehmen;
+`suppress_messages` innerhalb von `f` verwirft weiter.
+"""
+function with_message_stream(f, io::IO)
+    tls = task_local_storage()
+    had = haskey(tls, _MSG_KEY)
+    old = had ? tls[_MSG_KEY] : nothing
+    tls[_MSG_KEY] = io
+    try
+        return f()
+    finally
+        had ? (tls[_MSG_KEY] = old) : delete!(tls, _MSG_KEY)
+    end
+end
 
 function _replay(cap::Capture)
     isempty(cap.chunks) && return nothing

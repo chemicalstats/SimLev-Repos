@@ -135,13 +135,13 @@ h <- data.frame(us = 1 + rnorm(nb, 3e-4, 0.01))
 db <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = nb + 1), us = 100 * cumprod(c(1, h$us)))
 I3 <- list(h = h, db = db)
 BR <- "cfg <- bootstrap_config(c(us = 'us'))
-st <- create_strategy(us = asset_config('etf', 'signal', signal_buy = 'buy', signal_sell = 'sell'))
+st <- create_strategy(us = asset_config('etf', 'signal', signal_buy = 'buy', signal_sell = 'sell', spread = 0.1))
 ps <- param_search(db, function(p) list(strategy = st, signal = function(df) signal_sma(df$us, p$n)), param_space(n = c(10, 20, 40)), burn_in = 50)\n"
 BP <- "import simlev.signals as SG\nimport simlev.bootstrap as BS\nfrom simlev.config import create_strategy, asset_config\ncfg = BS.bootstrap_config({'us': 'us'})
-st = create_strategy(us=asset_config(asset_class='etf', trading='signal', signal_buy='buy', signal_sell='sell'))
+st = create_strategy(us=asset_config(asset_class='etf', trading='signal', signal_buy='buy', signal_sell='sell', spread=0.1))
 ps = PS.param_search(db, lambda p: {'strategy': st, 'signal': lambda df: SG.signal_sma(df['us'], n=p['n'])}, PS.param_space(n=[10.0, 20.0, 40.0]), burn_in=50)\n"
 BJ <- 'cfg = SL.Bootstrap.bootstrap_config(named("us" => "us"))
-st = create_strategy("us" => asset_config("etf", "signal"; signal_buy = "buy", signal_sell = "sell"))
+st = create_strategy("us" => asset_config("etf", "signal"; signal_buy = "buy", signal_sell = "sell", spread = 0.1))
 ps = PS.param_search(db, p -> RList("strategy" => st, "signal" => df -> SL.Signals.signal_sma(df["us"]; n = p["n"])), PS.param_space(n = [10.0, 20.0, 40.0]); burn_in = 50)\n'
 bcase <- function(id, r, p, j) ref_case(id, paste0(BR, r), py(paste0(BP, p)), I3, jl = jl(paste0(BJ, j)))
 bcase("pb_top", "bs <- param_bootstrap(ps, h, cfg, top = 2, method = 'stationary', n = 3, params = list(L = 50), seed = 1, progress = FALSE); list(attr(bs, 'param_ids'), bs$results)",
@@ -150,9 +150,9 @@ bcase("pb_top", "bs <- param_bootstrap(ps, h, cfg, top = 2, method = 'stationary
 bcase("pb_plateau", "bs <- param_bootstrap(ps, h, cfg, top = 1, by = 'plateau', method = 'block', n = 2, params = list(block_length = 20), seed = 3, progress = FALSE); list(attr(bs, 'param_ids'), bs$results)",
       "bs = OF.param_bootstrap(ps, h, cfg, top=1, by='plateau', method='block', n=2, params={'block_length': 20}, seed=3, progress=False); result = [bs.attrs['param_ids'], bs['results']]",
       'bs = OF.param_bootstrap(ps, h, cfg; top = 1, by = "plateau", method = "block", n = 2, params = RList("block_length" => 20), seed = 3, progress = false); result = [OF.param_ids(bs), bs["results"]]')
-bcase("pb_ids", "bs <- param_bootstrap(ps, h, cfg, ids = c(3, 1), map = c(x = 'us'), include = list(bh = create_strategy(us = asset_config('etf', 'bnh'))), method = 'raw', n = 2, seed = 4, progress = FALSE, burn_in = 60); list(attr(bs, 'param_ids'), bs$results)",
-      "bs = OF.param_bootstrap(ps, h, cfg, ids=[3, 1], map={'x': 'us'}, include={'bh': create_strategy(us=asset_config(asset_class='etf', trading='bnh'))}, method='raw', n=2, seed=4, progress=False, burn_in=60); result = [bs.attrs['param_ids'], bs['results']]",
-      'bs = OF.param_bootstrap(ps, h, cfg; ids = [3, 1], map = named("x" => "us"), include = RList("bh" => create_strategy("us" => asset_config("etf", "bnh"))), method = "raw", n = 2, seed = 4, progress = false, burn_in = 60); result = [OF.param_ids(bs), bs["results"]]')
+bcase("pb_ids", "bs <- param_bootstrap(ps, h, cfg, ids = c(3, 1), map = c(x = 'us'), include = list(bh = create_strategy(us = asset_config('etf', 'bnh', spread = 0.1))), method = 'raw', n = 2, seed = 4, progress = FALSE, burn_in = 60); list(attr(bs, 'param_ids'), bs$results)",
+      "bs = OF.param_bootstrap(ps, h, cfg, ids=[3, 1], map={'x': 'us'}, include={'bh': create_strategy(us=asset_config(asset_class='etf', trading='bnh', spread=0.1))}, method='raw', n=2, seed=4, progress=False, burn_in=60); result = [bs.attrs['param_ids'], bs['results']]",
+      'bs = OF.param_bootstrap(ps, h, cfg; ids = [3, 1], map = named("x" => "us"), include = RList("bh" => create_strategy("us" => asset_config("etf", "bnh", spread = 0.1))), method = "raw", n = 2, seed = 4, progress = false, burn_in = 60); result = [OF.param_ids(bs), bs["results"]]')
 bcase("pb_err", "param_bootstrap(list(a = 1), h, cfg)", "result = OF.param_bootstrap({'a': 1}, h, cfg)",
       'result = OF.param_bootstrap(RList("a" => 1), h, cfg)')
 bcase("ps_real_checks", "list(overfit_pbo(ps, S = 2, frequency = 'week'), sharpe_deflated(ps, frequency = 'day')$psr, sharpe_haircut(ps, frequency = 'month'), overfit_walk_forward(ps, train = 0.5, test = 0.25)$summary)",

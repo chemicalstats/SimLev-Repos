@@ -3,8 +3,8 @@
 Diese Datei ist erzeugt; nicht von Hand ändern.
 
 - **Erzeugt** mit `tools/api_snapshot/run.sh` (Auszüge `api_r.R`, `api_py.py`, `api_jl.jl`, Vergleich `compare_api.py`, diese Datei `make_struktur.py`) aus `tools/api_snapshot/api.json`.
-- **Stand:** 2026-10-26.
-- **Umfang:** R 113 Exporte und 75 S3-Methoden, Python 118 Funktionen und 77 Methoden, Julia 128 Funktionen und 75 Methoden.
+- **Stand:** 2026-10-27.
+- **Umfang:** R 115 Exporte und 78 S3-Methoden, Python 120 Funktionen und 79 Methoden, Julia 130 Funktionen und 77 Methoden.
 - **Zuordnung:** R `a.b` → `a_b`; S3-Methode `<generic>.<Klasse>` → Python `<Klasse>.<generic>` (print über `.print` bzw. `.format`), Julia registrierte Methode (`show`, `r_summary`, `r_plot`). Regeln: `python/DEVELOPING.md`, `julia/DEVELOPING.md`.
 - **Abweichungen** der Argumente und Standardwerte meldet `compare_api.py`; bekannte stehen in `tools/api_snapshot/known_differences.tsv`.
 - Dateien relativ zu `r/R/`, `python/simlev/` bzw. `julia/src/`.
@@ -19,7 +19,7 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | 3 | Analysen | je eine `.R` | je ein Modul | je eine Datei |
 | 4 | Ausgabe | `print`-Methoden, `plot_dashboard.R` | `svg.py`, `dashboard.py` | `svg.jl`, `dashboard.jl` |
 
-## Öffentliche Funktionen (R-Exporte) (113)
+## Öffentliche Funktionen (R-Exporte) (115)
 
 | Name R | Datei R | Name Python | Datei Python | Name Julia | Datei Julia |
 |---|---|---|---|---|---|
@@ -136,8 +136,10 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `withdrawal_perfect_rate` | `withdrawal.R` | `withdrawal_perfect_rate` | `withdrawal.py` | `withdrawal_perfect_rate` | `withdrawal.jl` |
 | `withdrawal_rule` | `withdrawal.R` | `withdrawal_rule` | `withdrawal.py` | `withdrawal_rule` | `withdrawal.jl` |
 | `withdrawal_simulation` | `withdrawal.R` | `withdrawal_simulation` | `withdrawal.py` | `withdrawal_simulation` | `withdrawal.jl` |
+| `wrapper_config` | `wrapper.R` | `wrapper_config` | `wrapper.py` | `wrapper_config` | `wrapper.jl` |
+| `wrapper_nav` | `wrapper.R` | `wrapper_nav` | `wrapper.py` | `wrapper_nav` | `wrapper.jl` |
 
-## S3-Methoden (77)
+## S3-Methoden (80)
 
 | Name R | Datei R | Name Python | Datei Python | Name Julia | Datei Julia |
 |---|---|---|---|---|---|
@@ -216,6 +218,9 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `print.summary.SimLevWithdrawal` | `withdrawal.R` | `SummarySimLevWithdrawal.format` | `withdrawal.py` | `show(summary.SimLevWithdrawal)` | `withdrawal.jl` |
 | `print.withdrawal_rule` | `withdrawal.R` | `WithdrawalRule.format` | `withdrawal.py` | `show(withdrawal_rule)` | `withdrawal.jl` |
 | `summary.SimLevWithdrawal` | `withdrawal.R` | `SimLevWithdrawal.summary` | `withdrawal.py` | `r_summary(SimLevWithdrawal)` | `withdrawal.jl` |
+| `[.SimLevWrapperNav` | `wrapper.R` | – | – | – | – |
+| `print.SimLevWrapperConfig` | `wrapper.R` | `SimLevWrapperConfig.print` | `wrapper.py` | `show(SimLevWrapperConfig)` | `wrapper.jl` |
+| `print.SimLevWrapperNav` | `wrapper.R` | `SimLevWrapperNav.format` | `wrapper.py` | `show(SimLevWrapperNav)` | `wrapper.jl` |
 | – | – | `SimLevParamRange.format` | `param_search.py` | – | – |
 | – | – | `WithdrawalPathsPB.format` | `planning.py` | – | – |
 

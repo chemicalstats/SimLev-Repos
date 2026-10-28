@@ -1,5 +1,14 @@
 # simlev (Python) – Änderungen je Version
 
+## simlev (Python) 0.10.0
+
+Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Wrapper: wrapper_config() und asset_config(wrapper = ) bilden einen Zertifikat- bzw. Fonds-Wrapper als eigene Kursreihe ab (wrapper_nav()); innere Assets mit eigenem Umschichten und Orderkosten, tägliche Verwaltungs- und Performancegebühr mit High-Water-Mark; außen gelten Spread, Gebühren und Steuern wie bei jedem Asset.
+- Geändert: asset_config() hat den Standard-Spread 0; der alte Fondsmodus simulation(funds = ) entfällt.
+- Strategien: strategy_from_weights() und portfolio_template() nehmen Wrapper je Asset.
+- Qualität: NaN-Randfälle der reinen Python- und Julia-Kerne an R angeglichen; Messskript überschreibt keine Ergebnisse.
+
 ## simlev (Python) 0.9.1
 
 Patch-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -59,6 +68,36 @@ R-Pakets vor den Korrekturen (Commit 54b5b4f). Zwischenversionen 0.2 bis
 0.4 der Python-Fassung gibt es nicht; alle Änderungen sind in 0.5.0
 zusammengefasst. Die Begründungen der fachlichen Änderungen stehen in
 [`r/NEWS.md`](../r/NEWS.md), Abschnitt „SimLev 0.5.0“.
+
+### Reine Python-Kerne in NaN-Randfällen (Etappe 8.0)
+
+- **Bitgleich zu R auch ohne C-Erweiterung:** Die reinen Python-Kerne (`SIMLEV_NO_EXT=1` bzw. ohne Compiler) liefern jetzt auch bei NA/NaN-gemischten Eingaben, Division durch 0 und NaN-Vorzeichen dieselben Bits wie R: `min_cvar_core`/`min_cdar_core` (Division durch 0 wie C, `quantile7` mit Nachbildung von `std::nth_element`), `hmm_forward_backward`, `dcc_filter`, `garch_filter`, die Engine-Kerne in `_core.py`, `boot_wild`, `boot_garch`, `boot_ms_garch` und `rtruncnorm` (Operandenfolge des R-Baus über `simlev._r.rnum.n_add` usw., weil CPython je nach spezialisiertem Bytecode bei zwei NaN verschieden wählt); `_qnorm_std` hat den Zweig r > 27 aus R 4.3.3 (Zufallsvergleiche: vorher 2.868/3.000, 377/400, 4.478/4.500, 4.443/4.500, 6.954/7.000, 13.808/14.000 Fälle bitgleich, jetzt alle; neu `tests/test_reine_kerne_nan.py`).
+
+### Restpunkte Fonds-Wrapper (Etappe 8.0)
+
+- **Auswahl aus `wrapper_nav()`:** Jede Auswahl (`iloc`, `loc`, Spalten, `head()`, `tail()`, `query()`, `copy()`) ist ein gewöhnlicher `pandas.DataFrame` ohne `attrs` (bisher wurden `attrs["inner"]` und `attrs["wrapper"]` mitkopiert, tief bei jeder Spaltenauswahl); wie R `[.SimLevWrapperNav`. Umgesetzt über `_NavAttrs` (die `attrs` des ganzen Objekts geben bei der Weitergabe durch pandas ein leeres `dict`).
+- **`withdrawal_simulation()`:** Ein `DataFrame` mit Spalte `date` als `x` ergibt den Fehler wie in R (bisher wurde er ohne Fehler als Renditematrix gelesen).
+- **`strategy_from_weights()`/`portfolio_template()` mit `wrapper`:** ein `SimLevWrapperConfig` für alle Assets, ein `dict` Asset → `SimLevWrapperConfig` je Asset, Fehler wie in R (bisher wurde ein einzelnes `SimLevWrapperConfig` stillschweigend weggelassen).
+
+### Fonds-Wrapper (Etappe 6.5c, Teil C und D)
+
+Port des Fonds-Wrappers aus R (Begründung und Rechenregeln in [`r/NEWS.md`](../r/NEWS.md) und im Kopf von `simlev/wrapper.py`); bitgleich zu R in allen 72 Fällen des neuen Referenzmoduls `golden/modules/wrapper`, mit und ohne C-Erweiterung. Die Schnittstelle ist neu eingefroren (`tools/api_snapshot/CHANGES.md`).
+
+- **Neu:** `wrapper_config(strategy, *, rebalance=None, costs=funds_costs(), order_fee=None, volume=None)` → `SimLevWrapperConfig`, `wrapper_nav(data, wrapper, *, splits=None)` → `SimLevWrapperNav` (`DataFrame` mit `date`, `nav`, `gross`, `fee`, `perf_fee`, `perf_paid`, `hwm`; `attrs["inner"]` und `attrs["wrapper"]`; Teilmengen sind gewöhnliche `DataFrame`) und `asset_config(..., wrapper=None)`. Beide Klassen drucken wie die R-Methoden (`print(x)`, `x.format()`).
+- **Engine:** `simulation()` rechnet je Wrapper-Asset den Anteilswert aus den inneren Spalten (`_sim_phases._sim_check_inputs`) und hängt ihn als Kursspalte an; der Anteilswert splittet nicht (`cfg["no_split"]`), mit `details=True` kommt `result.wrappers` dazu. Die normalisierten Daten gehen als `_Frame` an die innere Rechnung (`simulation()` nimmt intern auch ein `_Frame`).
+- **Paketzustand:** Der Zustand der Ordergebühren (`_sim_base._FEE`, R `.fee_env`) wird vor der inneren Rechnung gesichert und danach, auch nach einem Fehler, wiederhergestellt.
+- **Meldungen:** Hinweise der inneren Rechnung erscheinen auf `sys.stderr` als „Hinweis: Wrapper '<Name>' (innere Rechnung): …“ (in `wrapper_nav()` „wrapper_nav (innere Rechnung)“), Warnungen und Fehler als „simulation: Wrapper '<Name>' (innere Rechnung): …“. Bei Handelstagsdaten steht der Auffüll-Hinweis daher wie in R zweimal.
+- **Aufrufer:** `strategy_validate()` (Spaltenkollision, innere Spalten und Signale), `strategy_update_asset(..., wrapper=…)` (auch `None` zum Entfernen), `planning_lumpsum_vs_dca()` (Kurs des Wrappers = Anteilswert im Fenster) und `withdrawal_simulation(wrapper_nav(...))`; `bootstrap_study`, `param_search`, `sensitivity_*` und `overfit_*` gehen unverändert über `simulation()`. Kursspalten einer Strategie liefert `config._strategy_columns` (R `.strategy_columns`).
+- **Tests:** `tests/test_wrapper.py` (Port von `test-wrapper.R`: Plausibilität, Handbeispiel, Startkosten, NA-Tage, Fehler, Hinweise, Gebührenzustand, Splits, Aufrufer, Druck).
+
+### Standard-Spread 0 und alter Fondsmodus entfernt (Etappe 6.5c, Teil A und B)
+
+Entscheidung des Nutzers vom 26.10.2026 (Begründung in [`r/NEWS.md`](../r/NEWS.md)); die Schnittstelle ist neu eingefroren (`tools/api_snapshot/CHANGES.md`).
+
+- **Standard-Spread jetzt 0:** `asset_config(spread = 0)` statt `0.1`; wer Spreads abbilden will, gibt sie an. Ausdrücklich gesetzte Werte bleiben. Ohne Angabe rechnen damit `asset_config()`, Listen an `create_strategy()`, `strategy_from_weights()`, `portfolio_template()`, die `asset_args` von `tactical_simulation()` und die Standardstrategie von `sensitivity_leverage()` ohne Spread (bisher 0,1 %). Die Referenzfälle bleiben gleich: Ihre Generatoren schreiben `spread = 0.1` jetzt aus.
+- **Alter Fondsmodus entfernt:** `simulation()` hat kein Argument `funds` mehr; `simulation(..., funds=funds_costs())` ergibt den üblichen Fehler für ein unbekanntes Argument (`TypeError: simulation() got an unexpected keyword argument 'funds'`), ohne Sonderbehandlung. Entfallen sind der Engine-Weg `tax_mode = "funds"` (Fondskosten am 31.12. und anteilig am letzten Tag mit Teilverkauf, Performancegebühr gegen den Höchststand des Depots, Steuer auf den Gesamtgewinn bei Liquidation) sowie der Baustein `funds` in `sim_args`, Rastern und Suchräumen (Pfade `"funds.*"`); die flachen Namen `funds_fee` und `bonus_fee` sind jetzt unbekannte Argumente. Die geteilten C/C++-Kerne enthielten keinen Fondscode. `result.trades` hat keinen Eintrag `fees` mehr (er enthielt nur die Fondskosten); entfernt sind auch die Hilfen dafür (`_calculate_fund_fees`, `_Actions.raise_cash`, `flag_fund_fee`, `totals["total_value"]`).
+- **Umstellung:** Nachfolger ist der Fonds-Wrapper `wrapper_config()` (siehe oben, Etappe 6.5c Teil C/D) mit `funds_costs()` als Kostenbaustein: Der Wrapper wird als eigene Kursreihe (Anteilswert) gerechnet und außen wie ein Einzelpapier gehandelt und besteuert. Unterschiede zum alten Modus: Die Fondskosten werden täglich vom Anteilswert abgezogen (bisher am 31.12. aus der Summe der Tageswerte bzw. anteilig am letzten Tag), und die Performancegebühr bemisst sich am Höchststand je Anteil (bisher am Höchststand des Depots, der mit jeder Einzahlung stieg). `funds_costs()` bleibt mit Prüfung und Druckausgabe exportiert; `simulation()` nimmt es nicht an.
+- **Referenzfälle:** Entfernt sind die 39 Referenzfälle des Fondsmodus: 13 in `golden/cases` (`f07_funds_liq`, `f08_funds_1231`, `f28_details_split_funds`, `r018`, `r035`, `r052`, `r086`, `r171`, `r222`, `r358`, `r443`, `r460`, `r477`), 2 in `golden/extra` (`x02_30y_funds_split_int`, `x16_funds_fee_high`) und 24 im Modul `engine` (`bk01`, `bk18`, `bk19`, `ch12`, `fee05`, `fu01`–`fu11`, `fu14`, `fu16`, `gp05`, `hv15`, `zz02`, `zz08`, `zz13`, `zz20`); Engine-Fälle jetzt 90 (55 + 35), Modul-Fälle 4.659. Alle übrigen Fälle rechnen unverändert (Nachweis und Liste in [`golden/README.md`](../golden/README.md)); acht Fehlerfälle in `bootstrap`, `param_search` und `sensitivity` nennen `funds` nicht mehr in der Liste der Bausteine.
 
 ### Geschwindigkeit (Etappe 7.1 bis 7.3b)
 
@@ -145,7 +184,7 @@ Interne Helfer der Engine (nicht exportiert) folgen dem Namensschema: in R mit P
 
 ### Aufrufer von `simulation()`, Argumentordnung (Etappe 6.4, 6.5)
 
-- **Fondsmodus mit eigenen Steuern** (Korrektur zu 6.3): `simulation(funds = funds_costs(...), tax = tax_profile(...))` ist wieder erlaubt; der Fondsmodus steht für einen eigenen Wrapper (etwa ein Zertifikat) mit eigenen Kosten und eigener Steuer. Aus `tax_profile()` wirken dort wie früher mit `tax_mode = "funds"` der Satz `rate` bzw. die Kirchensteuer `church_tax` (Satz nach § 32d Abs. 1 EStG) für die Steuer auf den Gesamtgewinn bei Liquidation; `harvest` und `income_tariff()` wirken nicht (Warnung), die übrigen Angaben still nicht. Ohne `tax` gilt wie bisher 26,375 %. Referenzfall `ch12` rechnet wieder wie vor 6.3.
+- **Fondsmodus mit eigenen Steuern** (Korrektur zu 6.3; seit 6.5c samt Fondsmodus entfernt, siehe oben): `simulation(funds = funds_costs(...), tax = tax_profile(...))` ist wieder erlaubt; der Fondsmodus steht für einen eigenen Wrapper (etwa ein Zertifikat) mit eigenen Kosten und eigener Steuer. Aus `tax_profile()` wirken dort wie früher mit `tax_mode = "funds"` der Satz `rate` bzw. die Kirchensteuer `church_tax` (Satz nach § 32d Abs. 1 EStG) für die Steuer auf den Gesamtgewinn bei Liquidation; `harvest` und `income_tariff()` wirken nicht (Warnung), die übrigen Angaben still nicht. Ohne `tax` gilt wie bisher 26,375 %. Referenzfall `ch12` rechnet wieder wie vor 6.3.
 - **`sim_args` mit Bausteinen** in `bootstrap_study()`, `param_search()`, `param_bootstrap()`, `sensitivity_grid()`, `sensitivity_leverage()`, `sensitivity_rebalancing()`, `planning_lumpsum_vs_dca()` und den Zusatzargumenten von `tactical_simulation()`: Argumente von `simulation()`, z. B. `sim_args = list(start_value = 1000, tax = tax_profile(), dca = dca_plan(100, 1))`. Die Aufrufer gehen über `simulation()`. Alte flache Namen sind ein Fehler, der den Baustein nennt: `sensitivity_grid: dca_value gibt es nicht mehr; bitte dca = dca_plan(value = …) (Pfad "dca.value").`; unbekannte Namen ebenso (`unbekanntes Argument … für simulation()`).
 - **Pfade zu Bausteinparametern** (F1) in Rastern (`sensitivity_grid(grid = )`), Suchräumen (`param_space()` ohne `builder`), den `args` einer Spezifikation und in `sim_args`: `"dca.value"`, `"rebalance.thresh"`, `"tax.rate"`, `"tax.church_tax"`, für Teilbausteine `"tax.income.marginal_rate"`, `"tax.harvest.day"`. Ein Pfad baut den Baustein für jeden Lauf neu, Grundwerte aus dem Baustein in `sim_args` (ohne ihn die Standardwerte des Konstruktors). Ergebnisspalten heißen wie der Pfad (bisher wie das flache Argument, z. B. `balance_unit` → `rebalance.unit`). Unbekannte Pfade nennen die möglichen Bausteine und Parameter. `sensitivity_rebalancing()` setzt Frequenz, Versatz und Band über diese Pfade, die übrigen Angaben eines `rebalance_plan()` aus `sim_args` bleiben erhalten.
 - **`withdrawal_simulation(tax = tax_profile())`** (F2) statt `tax_mode`, `tax_rate`, `sparer_pauschbetrag`: ausgewertet werden `rate` und `sparer_pauschbetrag`; was die Entnahmephase nicht abbildet (`church_tax`, `private_sale_threshold`, `base_rate`, `guenstigerpruefung`, `income`, `harvest`), ist ein Fehler. `partial_exemption`, `vorabpauschale`, `cost_basis`, `loss_carryforward`, `sale_cost` und der Basiszins `base_rate` (auch als Matrix) bleiben eigene Argumente; das Ergebniselement `tax_mode` bleibt (`"person"`/`"none"`).
@@ -157,7 +196,7 @@ Interne Helfer der Engine (nicht exportiert) folgen dem Namensschema: in R mit P
 
 `simulation()` nimmt die Einstellungen jetzt als Bausteine (Anhang C):
 
-`simulation(data, strategy, start_value=10000, costs=sim_costs(), dca=None, rebalance=None, splits=None, tax=None, funds=None, risk_free=0, fractions=True, liquidate=False, details=False)`
+`simulation(data, strategy, start_value=10000, costs=sim_costs(), dca=None, rebalance=None, splits=None, tax=None, risk_free=0, fractions=True, liquidate=False, details=False)`
 
 `None` heißt aus. Die flachen Argumente bis 6.2 gibt es nicht mehr (keine Aliasse); die Engine rechnet unverändert, alle Referenzfälle sind nach der Übersetzung bitgleich (Nachweis mit `golden/tools/blocks_from_flat.py`). Jeder Baustein prüft seine Argumente selbst und hat eine Druckausgabe.
 
@@ -172,7 +211,7 @@ Interne Helfer der Engine (nicht exportiert) folgen dem Namensschema: in R mit P
 | `marginal_tax_rate`, `include_soli_on_income_tax`, `soli_rate_income_tax` | `income = income_rate(marginal_rate, soli_rate)` (`soli_rate = 0` heißt ohne Soli) |
 | `taxable_income`, `tax_tariff` | `income = income_tariff(taxable_income, tariff)` |
 | `harvest_mode = True`, `harvest_day`, `harvest_loss_pot` | `harvest = harvest_rule(day, loss_pot)` |
-| `tax_mode = "funds"`, `funds_fee`, `bonus_fee` | `funds = funds_costs(fee, performance_fee)` |
+| `tax_mode = "funds"`, `funds_fee`, `bonus_fee` | `funds = funds_costs(fee, performance_fee)`, seit 6.5c entfernt (siehe oben) |
 | `spread` (ohne Wirkung, nur Warnung) | entfällt; der Spread gilt je Asset (`asset_config(spread = )`) |
 
 Neue Regeln: `tax_profile()` mit `rate` und `church_tax` > 0 ist ein Fehler (mit Kirchensteuer gilt der Satz nach § 32d Abs. 1 EStG); `income` nimmt entweder `income_rate()` oder `income_tariff()`. Freibetrag-Ausschöpfung ohne persönliche Besteuerung lässt sich nicht mehr angeben (bisher wirkungslos); die Warnungen zu wirkungslosen flachen Argumenten entfallen. Fehlermeldungen der Prüfungen nennen den Baustein (z. B. `dca_plan: 'value' muss …`, `tax_profile: church_tax …`). Mit `sparer_pauschbetrag = 0` steht in `tax_report$sparer_pauschbetrag_annual` 0 (bisher der angegebene Betrag neben `use_sparer_pauschbetrag = False`).
@@ -372,9 +411,9 @@ Innerer Aufbau (ohne Änderung der öffentlichen Namen und Ergebnisse):
 
 ### Prüfwerkzeuge
 
-* `tools/compare_golden.py` prüft ohne Pfadangabe `golden/cases` (68 Fälle)
-  und `golden/extra` (37 Fälle) und nimmt mehrere Ordner oder Dateien sowie
-  die Optionen `-k`, `-v` und `-q`. Alle 105 Fälle sind bitgleich
+* `tools/compare_golden.py` prüft ohne Pfadangabe `golden/cases` (55 Fälle)
+  und `golden/extra` (35 Fälle, seit Etappe 6.5c) und nimmt mehrere Ordner oder Dateien sowie
+  die Optionen `-k`, `-v` und `-q`. Alle 90 Fälle sind bitgleich
   einschließlich Druckausgabe und `details = TRUE`, ebenso 669 frisch
   erzeugte Zufalls- und Stressfälle und 750 Fälle mit den neuen Argumenten.
   Die Test-Suite prüft jetzt auch `golden/extra`.

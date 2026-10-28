@@ -5,12 +5,12 @@
 #' Phase 3 von simulation(): Helfer fuer Kaeufe mit Gebuehr, Zahlungen und Steuerabrechnung
 #'
 #' Zweck: erzeugt die Hilfsfunktionen, die Tagesschleife und Jahresabschluss gemeinsam nutzen
-#' (Kauf mit Sparplan- bzw. Ordergebuehr, Verkaufsmenge nach Steuer und Gebuehr, Bargeld fuer
-#' Fondskosten, Steuerzahlung mit Zwangsverkauf, Abrechnung von Vorabpauschale, Paragraf-23-Steuer und
+#' (Kauf mit Sparplan- bzw. Ordergebuehr, Verkaufsmenge nach Steuer und Gebuehr,
+#' Steuerzahlung mit Zwangsverkauf, Abrechnung von Vorabpauschale, Paragraf-23-Steuer und
 #' Erstattung aus der Guenstigerpruefung). Die Helfer teilen den Zaehler der nicht gedeckten
 #' Steuerzahlungen (tax_unpaid_total).
 #' Eingabe: cfg (aus .sim_check_inputs), fl (Flags aus .sim_build_schedule), details.
-#' Ausgabe: Liste der Helfer (Namen wie im Code: .buy_with_fee, .sell_count_net, .raise_cash,
+#' Ausgabe: Liste der Helfer (Namen wie im Code: .buy_with_fee, .sell_count_net,
 #' .pay_one, .pay_tax, .pay_vp, .settle_p23, .gp_pending, .settle_gp, .vp_taxes, .settle_vp) und
 #' tax_unpaid() (Summe der nicht gedeckten Steuerzahlungen in EUR).
 #' @keywords internal
@@ -70,36 +70,9 @@
     res
   }
 
-  # Bargeld fuer eine Zahlung (Fondskosten, R1-01) beschaffen: fehlender Betrag per Teilverkauf.
-  # Interne Kostenentnahme: ohne Ordergebuehr und ohne Spread (zum Kurs des Tages)
-  .raise_cash <- function(sim_mem, name, need, time, reason) {
-    short <- need - sim_mem[["status"]][[name]][["money"]]
-    if (short <= 0 || sim_mem[["status"]][[name]][["count"]] <= 0) return(sim_mem)
-    fee_keep <- .fee_env$current; .fee_env$current <- NULL
-    on.exit(.fee_env$current <- fee_keep, add = TRUE)
-    sell <- function(sim_mem, n) .perform_trade_sell(
-      input = sim_mem, count = n, name = name, index = time,
-      tax_mode = tax_mode, tax_rate = tax_rate, effective_tax_rate = effective_tax_rate,
-      marginal_tax_rate = marginal_tax_rate, private_sale_threshold = private_sale_threshold,
-      use_sparer_pauschbetrag = use_sparer_pauschbetrag, tax_regime = tax_regimes[[name]],
-      reason = reason, spread = 0, details = details)
-    n_sell <- if (tax_mode != "person") {        # keine Steuer auf den Verkauf: Stueckzahl exakt
-      px <- sim_mem[["market"]][[name]][["asset_price"]][time]
-      min(sim_mem[["status"]][[name]][["count"]], if (fractions) short / px else ceiling(short / px - 1e-9))
-    } else .calculate_sell_count(
-      input = sim_mem, name = name, target = short, index = time, spread = 0, fractions = fractions,
-      tax_mode = tax_mode, tax_rate = effective_tax_rate, marginal_tax_rate = marginal_tax_rate,
-      tax_regime = tax_regimes[[name]])[["sell_count"]]
-    sim_mem <- sell(sim_mem, n_sell)
-    # ganze Stuecke (fractions = FALSE): ggf. ein weiteres Stueck, damit die Zahlung gedeckt ist
-    if (!fractions && sim_mem[["status"]][[name]][["money"]] < need - 1e-9 && sim_mem[["status"]][[name]][["count"]] > 0)
-      sim_mem <- sell(sim_mem, min(1, sim_mem[["status"]][[name]][["count"]]))
-    sim_mem
-  }
-
   # Zahlung (Steuer) aus einem Asset: Fall A Cash, Fall B Zwangsverkauf zum Geldkurs (Spread,
   # Ordergebuehr) zu den Kursen von flag_date[time]. R3a-03: Stueckzahl aufgerundet und bei
-  # Restfehlbetrag nachverkauft (wie .raise_cash), nie still auf 0 gekappt. Rueckgabe: list(sim_mem,
+  # Restfehlbetrag nachverkauft, nie still auf 0 gekappt. Rueckgabe: list(sim_mem,
   # unpaid = nicht gedeckter Rest, wenn das Asset keinen Bestand mehr hat).
   .pay_one <- function(sim_mem, name, amount, time, label) {
     money <- sim_mem[["status"]][[name]][["money"]]
@@ -307,7 +280,7 @@
     sim_mem
   }
 
-  list(.buy_with_fee = .buy_with_fee, .sell_count_net = .sell_count_net, .raise_cash = .raise_cash,
+  list(.buy_with_fee = .buy_with_fee, .sell_count_net = .sell_count_net,
        .pay_one = .pay_one, .pay_tax = .pay_tax, .pay_vp = .pay_vp, .settle_p23 = .settle_p23,
        .gp_pending = .gp_pending, .settle_gp = .settle_gp, .vp_taxes = .vp_taxes, .settle_vp = .settle_vp,
        tax_unpaid = function() tax_unpaid_total)

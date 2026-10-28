@@ -37,7 +37,7 @@ und `precompile.jl`.
 | `src/r/rugarch.jl` | `RRugarch` | rugarch 1.5-6 `ugarchfit`/`coef` für sGARCH/gjrGARCH(1,1), Solver „hybrid“ (solnp → nlminb → gosolnp), Filter aus `src/filters.c`, eigene Richardson-Hesse-Matrix `_richardson_hessian` (in R übernommen als `.rugarch_ugarchfit`, Ableitungen `.sl_richardson_hessian` in `r/R/richardson.R`, immer aktiv) → `_r/rugarch.py` |
 | `src/r/stinepack.jl` | `RStinepack` | stinepack 1.5 `stinterp`, `stinemanSlopes`, `parabolaSlopes` (in R übernommen als `.stinepack_stinterp`) → `_r/stinepack.py` |
 | `src/r/imputets.jl` | `RImputeTS` | imputeTS 3.4 `na_interpolation` (stine, linear), `na_locf` (`src/locf.cpp`; in R übernommen als `.imputets_na_interpolation`, immer aktiv) → `_r/imputets.py` |
-| `src/engine.jl` u. a. | – | `simulation()` und Strategie/Config: `engine.jl` (Hilfen, Handels- und Steuerfunktionen; r/R/sim_base.R → `_sim_base.py`), `sim_phases.jl` (r/R/sim_validate.R, sim_prepare.R → `_sim_phases.py`), `sim_loop.jl` (r/R/sim_actions.R, sim_loop.R → `_sim_loop.py`), `sim_evaluate.jl` (r/R/sim_evaluate.R → `_sim_evaluate.py`; dazu `simulation()` und `_simulation_flat()` aus r/R/simulation.R → `engine.py`), `sim_blocks.jl` (Bausteine, r/R/sim_blocks.R → `_sim_blocks.py`) |
+| `src/engine.jl` u. a. | – | `simulation()` und Strategie/Config: `engine.jl` (Hilfen, Handels- und Steuerfunktionen; r/R/sim_base.R → `_sim_base.py`), `sim_phases.jl` (r/R/sim_validate.R, sim_prepare.R → `_sim_phases.py`), `sim_loop.jl` (r/R/sim_actions.R, sim_loop.R → `_sim_loop.py`), `sim_evaluate.jl` (r/R/sim_evaluate.R → `_sim_evaluate.py`; dazu `simulation()` und `_simulation_flat()` aus r/R/simulation.R → `engine.py`), `sim_blocks.jl` (Bausteine, r/R/sim_blocks.R → `_sim_blocks.py`), `wrapper.jl` (Fonds-Wrapper `wrapper_config`, `wrapper_nav`, Anteilswert `_wrapper_nav_calc`, r/R/wrapper.R → `wrapper.py`; Hilfen der Strategie `_strategy_columns`, `_strategy_wrappers` in `config.jl`) |
 | `src/svg.jl` | – | Grafikmodul: `SimLevPlot`, `_plot_method` & Co., alle SVG-Zeichenbausteine (siehe [Grafik](#grafik)) → `simlev/svg.py` |
 | `src/dashboard.jl` | – | Dashboard-Daten und Panels, `plot_dashboard`, `export_dashboard` (r/R/plot_dashboard.R) → `dashboard.py` |
 | `src/<modul>.jl` | `DataPrep`, `Backcast`, `Bonds`, `Signals`, `Bootstrap`, `Withdrawal`, `Dependence`, `Regimes`, `MsGarch`, `Scenarios`, `Optimize`, `Tactical`, `DeepAnalysis`, `Planning`, `AnalysisTests`, `Overfitting`, `ParamSearch`, `Sensitivity` | je eine R-Datei `r/R/<modul>.R` → `python/simlev/<modul>.py` |
@@ -99,7 +99,9 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
 8. R-`warning(text)` → `@warn text` (nur die Meldung, keine weiteren
    Felder); R-`stop(text)` → `error(text)`; R-`message(text)` → Zeile auf
    `SimLev.RParallel.r_stderr()` (sonst `stderr`), `suppressMessages` →
-   `RParallel.suppress_messages`, nie `redirect_stderr`. Texte wortgleich.
+   `RParallel.suppress_messages`, `withCallingHandlers(message = )` →
+   `RParallel.with_message_stream` (Fonds-Wrapper: Präfix der inneren Rechnung),
+   nie `redirect_stderr`. Texte wortgleich.
 9. Grafiken (SVG, ohne externe Pakete) müssen nicht bitgleich sein, aber
    dasselbe zeigen; berechnete Daten schon.
 
@@ -119,6 +121,18 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
 14. long-double-Summen laufen auf x86-64 über die x87-Hardware; ist das
     Ergebnis NaN, rechnen `r_sum` & Co. mit `F80Soft` nach, weil R's
     NA/NaN-Vorrang sonst vom erzeugten Maschinencode abhinge.
+    Dasselbe gilt für double: treffen in `a + b` oder `a * b` zwei NaN
+    aufeinander (NA und NaN), behält x86 den ersten Operanden der Anweisung,
+    und LLVM darf die Operanden tauschen. Die Ports der nativen Kerne
+    (Engine `core.jl`, `BootstrapCore`, `DependenceCore`, `RTruncnorm`,
+    `OptimizeCore.quantile7`) schreiben solche Stellen mit `nan_add`,
+    `nan_mul` usw. (`src/r/rnum.jl`) in der Operandenfolge des R-Baus
+    (objdump von `SimLev.so`; seit Etappe 8.0, gleich wie Python), längere
+    Kerne rechnen bei einem NaN im Ergebnis Schritt für Schritt nach
+    (`_hmm_nan`, `_dcc_nan`, `_ms_garch_filter_nan`). `std::min`/`std::max`
+    als `cpp_min`/`cpp_max` (NaN ergibt den ersten bzw. konstanten Operanden),
+    nie Julias `min`/`max` (die NaN weitergeben); `x - y` statt `x += -y`
+    (NaN-Vorzeichen). Feste Randfälle in `test/nan_kerne_tests.jl`.
 15. Optionale R-Pakete fragt R nicht mehr ab (kein `requireNamespace`):
     evd, imputeTS und rugarch sind übernommen, ihr Weg gilt immer; MSGARCH
     ist durch die eigene Schätzung (`r/R/ms_garch.R`, Kern `r/src/ms_garch.c`;
@@ -313,7 +327,7 @@ Die Dateien in `src/` gehören zu fünf Schichten (Anhang F des
 Entwicklungsdokuments): 0 R-Interna (`src/r/`), 1 Daten und Strategie
 (`dates.jl`, `config.jl`, `trigger.jl`, `data.jl`, `tax_tariff.jl`,
 `data_prep.jl`, `backcast.jl`, `bonds.jl`, `signals*.jl`), 2 Engine
-(`core.jl`, `result.jl`, `engine.jl`, `sim_*.jl`), 3 Analysen (je eine Datei
+(`core.jl`, `result.jl`, `engine.jl`, `sim_*.jl`, `wrapper.jl`), 3 Analysen (je eine Datei
 mit ihrem Kern), 4 Ausgabe (`svg.jl`, `dashboard.jl`); `SimLev.jl`,
 `exports.jl` und `precompile.jl` sind die Paketebene. `test/layers_tests.jl`
 liest die `using`/`import`-Zeilen, die qualifizierten Zugriffe

@@ -98,8 +98,7 @@ s5 <- create_strategy(GOLD = ac("etc", "signal", 0.5, 0.3, 0, deliverable = TRUE
                       ETF = ac("etf", "bnh", 0.5, 0.1, 30))
 run_case("f06_private_sale", d5, s5, list(tax_mode = "person", marginal_tax_rate = 42, start_value = 200000,
          balance_mode = TRUE, balance_unit = "month", balance_span = 2))
-run_case("f07_funds_liq", d1[1:1500, ], s2, list(tax_mode = "funds", liquidate = TRUE, balance_mode = TRUE))
-run_case("f08_funds_1231", d1[1:(365*2+1), ], s2, list(tax_mode = "funds", liquidate = TRUE, funds_fee = 1.2, bonus_fee = 10))
+# f07_funds_liq, f08_funds_1231: Fondsmodus, entfernt in Etappe 6.5c
 wd <- d1[!(as.integer(format(d1$date, "%u")) %in% c(6, 7)), ]
 run_case("f09_gaps", wd, s2, list(tax_mode = "person", dca_mode = TRUE, dca_value = 300, dca_span = 1, dca_unit = "month",
          dca_days = 1, balance_mode = TRUE, balance_unit = "quarter", balance_span = 1, balance_days = 1,
@@ -189,6 +188,7 @@ for (k in seq_len(n_random)) {
   if (runif(1) < 0.25) { a$split_mode <- TRUE; a$split_thresh <- pick(list(c(20, 400), c(5, 250), c(40, 150))) }
   if (runif(1) < 0.25) { df$tl <- 2 + sin(seq_len(nrow(df)) / pick(c(10, 30))); df$ev <- runif(nrow(df)) < 0.05
     a$event_col <- "ev"; a$event_mode <- pick(c("additional", "replace")); a$balance_mode <- isTRUE(a$balance_mode) }
+  if (tm == "funds") next   # Fondsmodus entfernt (Etappe 6.5c): Fall entfällt, Ziehungen oben bleiben
   run_case(sprintf("r%03d", k), df, st, a)
 }
 
@@ -203,8 +203,7 @@ run_case("f26_details_full", d1[1:900, ], s2, list(details = TRUE, tax_mode = "p
          balance_unit = "quarter", balance_thresh = 2, dca_mode = TRUE, dca_value = 200, dca_span = 1, liquidate = TRUE))
 run_case("f27_details_sig_ps", d5, s5, list(details = TRUE, tax_mode = "person", marginal_tax_rate = 30, start_value = 50000,
          balance_mode = TRUE, balance_unit = "month", balance_span = 3, include_soli_on_income_tax = TRUE))
-run_case("f28_details_split_funds", d9[1:800, ], s9, list(details = TRUE, split_mode = TRUE, split_thresh = c(20, 400),
-         tax_mode = "funds", liquidate = TRUE, fractions = FALSE, start_value = 50000))
+# f28_details_split_funds: Fondsmodus, entfernt in Etappe 6.5c
 run_case("f29_details_guenst", d1[1:800, ], s2, list(details = TRUE, tax_mode = "person", use_guenstigerpruefung = TRUE,
          marginal_tax_rate = 20, liquidate = TRUE))
 run_case("f30_details_guenst_no", d1[1:400, ], s2, list(details = TRUE, tax_mode = "person", use_guenstigerpruefung = TRUE,

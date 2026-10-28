@@ -95,7 +95,6 @@ def simulation(
     rebalance: Any = None,
     splits: Any = None,
     tax: Any = None,
-    funds: Any = None,
     risk_free: float | str | None = 0,
     fractions: bool = True,
     liquidate: bool = False,
@@ -106,16 +105,16 @@ def simulation(
     Bitgleiche Portierung von ``simulation()`` aus dem R-Paket SimLev 0.5.0. Die Einstellungen kommen als
     Bausteine: ``costs = sim_costs()`` (Standard), ``dca = dca_plan()``, ``rebalance = rebalance_plan()``,
     ``splits = split_rule()``, ``tax = tax_profile()`` (mit ``income = income_rate()`` oder
-    ``income_tariff()`` und ``harvest = harvest_rule()``) und ``funds = funds_costs()``; ``None`` heißt aus.
-    ``funds`` zusammen mit ``tax`` ist der Fondsmodus mit eigenen Steuern (Satz bzw. Kirchensteuer aus
-    ``tax_profile()``). Die Bausteine werden mit ``_sim_from_blocks`` in die
-    internen Werte übersetzt; die Engine (``_simulation_flat``) rechnet unverändert.
+    ``income_tariff()`` und ``harvest = harvest_rule()``); ``None`` heißt aus. Den alten Fondsmodus
+    (``funds = funds_costs()``) gibt es seit Etappe 6.5c nicht mehr. Die Bausteine werden mit
+    ``_sim_from_blocks`` in die internen Werte übersetzt; die Engine (``_simulation_flat``) rechnet
+    unverändert.
 
     Rückgabe: :class:`simlev.SimLevResult` mit den Elementen wie in R.
     """
     if isinstance(costs, _CostsDefault):
         costs = _blocks.sim_costs()
-    flat = _blocks._sim_from_blocks(costs, dca, rebalance, splits, tax, funds)
+    flat = _blocks._sim_from_blocks(costs, dca, rebalance, splits, tax)
     return _simulation_flat(data, strategy, start_value=start_value, risk_free=risk_free, fractions=fractions,
                             liquidate=liquidate, details=details, _blocks=True, **flat)
 
@@ -148,7 +147,7 @@ def _simulation_flat(
     balance_thresh: float | None = None,
     balance_thresh_type: str | Sequence[str] = ("absolute", "relative"),
     # Steuern
-    tax_mode: str | Sequence[str] = ("none", "person", "funds"),
+    tax_mode: str | Sequence[str] = ("none", "person"),
     tax_rate: float = _Default(26.375),
     marginal_tax_rate: float | None = _Default(None),
     use_guenstigerpruefung: bool = False,
@@ -161,9 +160,6 @@ def _simulation_flat(
     base_rate: float | None = None,
     base_rate_flex: bool = False,
     base_rate_data: str | None = None,
-    # Fonds
-    funds_fee: float = _Default(0.95),
-    bonus_fee: float = _Default(5),
     # Sonstiges
     fractions: bool = True,
     risk_free: float | str | None = 0,
@@ -213,18 +209,16 @@ def _simulation_flat(
     ``harvest_days``).
     """
     given = {k: False for k in ("tax_rate", "marginal_tax_rate", "include_soli_on_income_tax", "soli_rate_income_tax",
-                                "funds_fee", "bonus_fee", "event_mode")} if _blocks else {
+                                "event_mode")} if _blocks else {
         "tax_rate": not isinstance(tax_rate, _Default),
         "marginal_tax_rate": not isinstance(marginal_tax_rate, _Default),
         "include_soli_on_income_tax": not isinstance(include_soli_on_income_tax, _Default),
         "soli_rate_income_tax": not isinstance(soli_rate_income_tax, _Default),
-        "funds_fee": not isinstance(funds_fee, _Default),
-        "bonus_fee": not isinstance(bonus_fee, _Default),
         "event_mode": not isinstance(event_mode, _Default),
     }
     tax_rate, marginal_tax_rate = _unwrap(tax_rate), _unwrap(marginal_tax_rate)
     include_soli_on_income_tax, soli_rate_income_tax = _unwrap(include_soli_on_income_tax), _unwrap(soli_rate_income_tax)
-    funds_fee, bonus_fee, event_mode = _unwrap(funds_fee), _unwrap(bonus_fee), _unwrap(event_mode)
+    event_mode = _unwrap(event_mode)
     try:
         cfg = _sim_check_inputs(
             data=data, strategy=strategy, start_value=start_value, spread=spread, details=details,
@@ -234,7 +228,7 @@ def _simulation_flat(
             use_guenstigerpruefung=use_guenstigerpruefung, private_sale_threshold=private_sale_threshold,
             sparer_pauschbetrag=sparer_pauschbetrag, use_sparer_pauschbetrag=use_sparer_pauschbetrag,
             include_soli_on_income_tax=include_soli_on_income_tax, soli_rate_income_tax=soli_rate_income_tax,
-            base_rate=base_rate, funds_fee=funds_fee, bonus_fee=bonus_fee, fractions=fractions, risk_free=risk_free,
+            base_rate=base_rate, fractions=fractions, risk_free=risk_free,
             split_mode=split_mode, split_thresh=split_thresh, event_col=event_col, church_tax=church_tax,
             order_fee=order_fee, dca_fee=dca_fee, harvest_mode=harvest_mode, harvest_day=harvest_day,
             taxable_income=taxable_income, tariff=tax_tariff, given=given, blocks=_blocks)
@@ -248,7 +242,8 @@ def _simulation_flat(
                                   liquidate, cfg["dca_mode"], dca_span, dca_unit, cfg["dca_days"], cfg["dca_value"],
                                   dca_anchor, dca_start, dca_skip, cfg["balance_mode"], balance_span, balance_unit,
                                   cfg["balance_days"], balance_anchor, balance_start, balance_skip, cfg["event_col"],
-                                  event_mode, event_weight, cfg["split_mode"], split_thresh, blocks=_blocks)
+                                  event_mode, event_weight, cfg["split_mode"], split_thresh, blocks=_blocks,
+                                  no_split=cfg["no_split"])
         fr = cal["data"]
         fl = cal["flags"]
         if cfg["event_col"] is not None:
@@ -256,10 +251,10 @@ def _simulation_flat(
         init = _sim_init_weights(sim, fl["flag_assets"], fl["flag_date"], cfg["start_value"])
         sim = init["sim"]
         fl["initial_assets"] = init["initial_assets"]
-        fl = _sim_build_schedule(sim, fl, prep["stopp_date"], cfg["tax_mode"], cfg["harvest_mode"], harvest_day)
+        fl = _sim_build_schedule(sim, fl, cfg["tax_mode"], cfg["harvest_mode"], harvest_day)
         act = _Actions(cfg, fl, bool(details))
         sim = _sim_run_days(sim, fl, cfg, act, fr, cfg["strategy"], liquidate, event_weight, split_thresh,
-                            funds_fee, bonus_fee, balance_dca, harvest_loss_pot, bool(details))
+                            balance_dca, harvest_loss_pot, bool(details))
         sim = _sim_close_years(sim, fl, cfg, act, prep["stopp_date"], bool(details))
         trades = _sim_compact_trades(sim, fl["flag_assets"])
         ret = _sim_returns(sim, fl["flag_date"], fl["flag_assets"], fl["flag_filled"], prep["start_date"],

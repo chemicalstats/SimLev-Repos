@@ -169,7 +169,7 @@ deshalb nicht direkt vergleichbar.
 ## Weiter
 
 - `?simulation`: alle Argumente der Engine, u. a. Signale, Splits,
-  Fondsmodus, Ordergebühren, Kirchensteuer und Einkommensteuertarif
+  Ordergebühren, Kirchensteuer und Einkommensteuertarif
   (`income_tariff(taxable_income)`, `tax_tariff()`).
 - `?SimLev`: Arbeitsweise und Glossar der Einheiten und Argumentnamen.
 - Tutorial zu Backcast, Bootstrap, Entnahmephase, Analyse und Planung:

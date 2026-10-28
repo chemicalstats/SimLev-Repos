@@ -31,7 +31,7 @@ _ASSET_CLASSES = ("etf", "etn", "etc", "certificate", "etn_standard", "etn_deliv
 _ACTION_TYPES = ("bnh", "signal")
 _VALID_REGIMES = ("investment_fund", "capital_gains", "private_sale")
 _FIELDS = ("asset_class", "trading", "share", "spread", "partial_exemption",
-           "deliverable", "start", "tax_regime", "signal_buy", "signal_sell")
+           "deliverable", "start", "tax_regime", "signal_buy", "signal_sell", "wrapper")
 
 
 def _pmatch(value: str, choices: tuple) -> int | None:
@@ -82,6 +82,55 @@ def _to_date(x: Any) -> _dt.date | None:
     return _dt.date(1970, 1, 1) + _dt.timedelta(days=int(z))
 
 
+# Meldung von asset_config() für wrapper mit trading = "signal" (strategy_from_weights() erkennt sie und nennt das Asset)
+_AC_MSG_WRAPPER_SIGNAL = ("asset_config: mit wrapper ist nur trading = \"bnh\" möglich (keine Signale auf den Anteilswert; "
+                          "Signale gehen in der inneren Strategie).")
+
+
+def _is_wrapper(x: Any) -> bool:
+    """``inherits(x, "SimLevWrapperConfig")`` (Fonds-Wrapper aus :func:`simlev.wrapper_config`)."""
+    return "SimLevWrapperConfig" in (getattr(x, "r_class", None) or ())
+
+
+def _cls_all(x: Any) -> str:
+    """``paste(class(x), collapse = "/")`` für Meldungen."""
+    rc = getattr(x, "r_class", None)
+    if isinstance(rc, tuple) and rc:
+        return "/".join(rc)
+    if x is None:
+        return "NULL"
+    if isinstance(x, Mapping) or isinstance(x, (list, tuple)):
+        return "list"
+    return _r_class(x)
+
+
+def _fmt15(x: Any) -> str:
+    """``format(x, digits = 15)`` (R: ``.blk_fmt``)."""
+    return r_format1(float(x), digits=15)
+
+
+def _strategy_columns(strategy: Mapping[str, Any]) -> list:
+    """Kursspalten einer Strategie (R: ``.strategy_columns``, ``wrapper.R``): je Asset sein Name, für
+    Wrapper-Assets die Spalten der inneren Strategie; Reihenfolge wie in der Strategie, ohne Doppelte."""
+    cols: list = []
+    for nm, a in strategy.items():
+        w = a.get("wrapper") if isinstance(a, Mapping) else None
+        for c in (_strategy_columns(w["strategy"]) if _is_wrapper(w) else [str(nm)]):
+            if c not in cols:
+                cols.append(c)
+    return cols
+
+
+def _strategy_wrappers(strategy: Mapping[str, Any]) -> list:
+    """Namen der Wrapper-Assets einer Strategie (R: ``.strategy_wrappers``)."""
+    return [str(nm) for nm, a in strategy.items() if isinstance(a, Mapping) and a.get("wrapper") is not None]
+
+
+def _wrapper_assets_text(strategy: Mapping[str, Any]) -> str:
+    """``.wrapper_assets_text``: ``"A 60 %, B 40 %"``."""
+    return ", ".join("%s %s %%" % (nm, _fmt15(100 * a["share"])) for nm, a in strategy.items())
+
+
 class AssetConfig(RList):
     """Validierte Konfiguration eines Assets (R-Klasse ``asset_config``)."""
 
@@ -97,6 +146,11 @@ class AssetConfig(RList):
             lines.append(r_sprintf("  Teilfrei.:    %.0f%%", self["partial_exemption"]))
         if self["asset_class"] in ("etn", "etc"):
             lines.append("  Lieferbar:    %s" % ("TRUE" if self["deliverable"] else "FALSE"))
+        w = self.get("wrapper")
+        if _is_wrapper(w):
+            lines.append("  Wrapper:      %s; Fondskosten %s %% p. a., Performancegebühr %s %%"
+                         % (_wrapper_assets_text(w["strategy"]), _fmt15(w["costs"]["fee"]),
+                            _fmt15(w["costs"]["performance_fee"])))
         return "\n".join(lines)
 
     def print(self) -> "AssetConfig":
@@ -113,19 +167,24 @@ def asset_config(
     asset_class: str | Iterable[str] = _ASSET_CLASSES,
     trading: str | Iterable[str] = _ACTION_TYPES,
     share: float = 1.0,
-    spread: float = 0.1,
+    spread: float = 0.0,
     partial_exemption: float = 0.0,
     deliverable: bool = False,
     start: Any = None,
     tax_regime: str | None = None,
     signal_buy: str | None = None,
     signal_sell: str | None = None,
+    wrapper: Any = None,
 ) -> AssetConfig:
     """Asset-Konfiguration erstellen und prüfen (R: ``asset_config()``).
 
-    Raten in Prozent: ``spread=0.1`` = 0,1 % voller Bid-Ask-Spread, ``partial_exemption=30`` =
-    30 % Teilfreistellung; ``share`` ist ein Anteil in (0, 1]. ``start`` (Datum oder
+    Raten in Prozent: ``spread=0.1`` = 0,1 % voller Bid-Ask-Spread (Standard 0: ohne Spread; wer
+    Spreads abbilden will, gibt sie an), ``partial_exemption=30`` = 30 % Teilfreistellung; ``share`` ist ein Anteil in (0, 1]. ``start`` (Datum oder
     ``"JJJJ-MM-TT"``) wird als ``datetime.date`` gespeichert.
+
+    ``wrapper``: ``None`` oder ein Objekt aus :func:`simlev.wrapper_config` (Etappe 6.5c). Das Asset ist dann
+    ein Fonds-Wrapper: sein Name ist keine Kursspalte, die Kurse sind der Anteilswert der inneren Strategie
+    (:func:`simlev.wrapper_nav`); nur mit ``trading="bnh"``. Das Feld ``wrapper`` gibt es nur mit Wrapper.
     """
     asset_class = _match_arg(asset_class, _ASSET_CLASSES, "asset_class")
     trading = _match_arg(trading, _ACTION_TYPES, "trading")
@@ -167,6 +226,12 @@ def asset_config(
     if trading == "signal" and (signal_buy is None or signal_sell is None):
         raise ValueError("asset_config: bei trading = \"signal\" müssen signal_buy und signal_sell angegeben werden "
                          "(Namen der Signalspalten in data).")
+    if wrapper is not None:   # Fonds-Wrapper (Etappe 6.5c): keine Signale auf den Anteilswert (E5)
+        if not _is_wrapper(wrapper):
+            raise ValueError("asset_config: wrapper muss NULL oder ein Objekt aus wrapper_config() sein, nicht %s."
+                             % _cls_all(wrapper))
+        if trading == "signal":
+            raise ValueError(_AC_MSG_WRAPPER_SIGNAL)
     if tax_regime is None:
         tax_regime = {"etf": "investment_fund",
                       "etn": "private_sale" if deliverable else "capital_gains",
@@ -181,6 +246,8 @@ def asset_config(
                  ("start", start), ("tax_regime", tax_regime), ("signal_buy", signal_buy),
                  ("signal_sell", signal_sell)):
         cfg[k] = v
+    if wrapper is not None:   # nur mit Wrapper ein Feld (sonst Objekt wie bisher)
+        cfg["wrapper"] = wrapper
     return cfg
 
 
@@ -203,8 +270,10 @@ class Strategy(RList):
                  "================================", ""]
         for name, asset in self.items():
             lines.append("%s:" % name)
-            lines.append(r_sprintf("  Klasse: %s | Anteil: %.0f%% | Steuer: %s", asset["asset_class"],
-                                   asset["share"] * 100, asset["tax_regime"]))
+            w = asset.get("wrapper")
+            lines.append(r_sprintf("  Klasse: %s | Anteil: %.0f%% | Steuer: %s%s", asset["asset_class"],
+                                   asset["share"] * 100, asset["tax_regime"],
+                                   (" | Wrapper: %s" % ", ".join(w["strategy"].keys())) if _is_wrapper(w) else ""))
         return "\n".join(lines)
 
     def print(self) -> "Strategy":
@@ -298,11 +367,20 @@ def strategy_validate(strategy: Strategy, *, data: Any = None) -> bool:
                              % (name, _r_class(a)))
     if data is not None:
         cols = [str(c) for c in (data.columns if hasattr(data, "columns") else data.keys())]
-        missing = [n for n in strategy if n not in cols]
+        # Fonds-Wrapper: der Asset-Name ist keine Kursspalte, geprüft werden die Spalten der inneren Strategie
+        coll = [w for w in _strategy_wrappers(strategy) if w in cols]
+        if coll:
+            raise ValueError("strategy_validate: Asset '%s' ist ein Fonds-Wrapper (asset_config(wrapper = )); data darf "
+                             "keine Spalte gleichen Namens enthalten (der Anteilswert wird aus den inneren Spalten "
+                             "gerechnet)." % coll[0])
+        missing = [n for n in _strategy_columns(strategy) if n not in cols]
         if missing:
             raise ValueError("strategy_validate: Kursspalte(n) %s fehlen in data (je Asset eine Spalte gleichen Namens; "
                              "vorhanden: %s)." % (", ".join("'%s'" % m for m in missing), ", ".join(cols)))
         for name, a in strategy.items():
+            if _is_wrapper(a.get("wrapper")):   # innere Signale
+                strategy_validate(a["wrapper"]["strategy"], data=data)
+                continue
             if a["trading"] == "signal":
                 if a["signal_buy"] not in cols:
                     raise ValueError("strategy_validate: signal_buy-Spalte '%s' fehlt in data (Asset '%s')."
@@ -350,7 +428,7 @@ def strategy_update_asset(strategy: Strategy, name: str, **updates: Any) -> Stra
         if derived == asset.get("tax_regime"):
             asset["tax_regime"] = None
     for param, value in updates.items():
-        if param not in asset:
+        if param not in asset and param != "wrapper":   # wrapper: Feld nur bei Wrapper-Assets vorhanden
             warnings.warn("strategy_update_asset: unbekannter Parameter '%s' wird ignoriert (möglich: %s)."
                           % (param, ", ".join(asset.keys())), stacklevel=2)
             continue

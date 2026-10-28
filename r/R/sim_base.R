@@ -170,7 +170,7 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
 #' @return Logischer Vektor: TRUE, wenn an diesem Tag mindestens ein Asset splittet
 #' @keywords internal
 #' @noRd
-.calculate_split_flags <- function(input, base, mode, dates, split_thresh = NULL) {
+.calculate_split_flags <- function(input, base, mode, dates, split_thresh = NULL, skip = character(0)) {
   if (!mode || is.null(split_thresh)) {
     return(rep(FALSE, length(dates)))
   }
@@ -190,6 +190,7 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
   
   # Pro Asset verarbeiten (äußere Schleife bleibt, innere wird vektorisiert)
   for (j in seq_len(n_assets)) {
+    if (names(input[["market"]])[j] %in% skip) next   # skip: Assets ohne Splits (Fonds-Wrapper)
     prices <- split_price[, j]
     i <- 1
     
@@ -886,54 +887,6 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
   return(res)
 }
 
-
-
-#--------> Hilfsfunktion zur Berechnung der Fongsgebühren:
-.calculate_fund_fees <- function(input, index, dates, assets, funds_fee, bonus_fee, details){
-  # Abrechnungszeitraum: 1.1. des laufenden Jahres (bzw. Simulationsbeginn) bis heute
-  event_date <- as.Date(paste0(format(dates[index], "%Y"), "-01-01"))
-  dates_index <- which(dates >= event_date & dates <= dates[index])
-  zero <- setNames(numeric(length(assets)), assets)
-
-  if(length(dates_index) == 0){
-    return(list(total_fees = 0, total_value = input[["totals"]][["total_value"]], asset_fees = zero))
-  }
-
-  asset_totals <- matrix(sapply(assets, function(x) input[["report"]][[x]][["total"]][dates_index]),
-                         nrow = length(dates_index), dimnames = list(NULL, assets))
-
-  # Tagessatz linear bezogen auf die Kalendertage des JAHRES (nicht des Zeitraums):
-  # ein volles Jahr kostet genau funds_fee Prozent, ein Rumpfjahr (Start/Ende
-  # unterjaehrig) traegt nur anteilige Kosten
-  yr <- as.integer(format(dates[index], "%Y"))
-  days_in_year <- if (yr %% 4 == 0 && (yr %% 100 != 0 || yr %% 400 == 0)) 366 else 365
-  daily_rate <- funds_fee / 100 / days_in_year
-  basic_fees <- colSums(asset_totals * daily_rate, na.rm = TRUE)
-  basic_value <- sum(basic_fees)
-
-  # Hoechststand (High-Watermark) um Einzahlungen im Zeitraum erhoehen (R1-03):
-  # Sparraten sind kein Wertzuwachs
-  flows_period <- sum(vapply(assets, function(x) sum(input[["report"]][[x]][["flows"]][dates_index]), numeric(1)))
-  total_value <- input[["totals"]][["total_value"]] + flows_period
-  status_totals <- vapply(assets, function(x) input[["status"]][[x]][["total"]], numeric(1))
-  market_value <- sum(status_totals, na.rm = TRUE)
-
-  above_mark <- market_value > total_value
-  bonus_value <- if (above_mark) (market_value - total_value) * (bonus_fee / 100) else 0
-
-  # Verteilung: Grundkosten je Asset nach dessen abgegrenztem Wert, Performancegebuehr nach Ist-Gewicht
-  asset_fees <- basic_fees + if (market_value > 0) bonus_value * status_totals / market_value else 0
-  total_fees <- basic_value + bonus_value
-
-  # Hoechststand als Wert NACH Abzug der Gebuehren (die Marke sinkt nie)
-  if (above_mark) total_value <- max(total_value, market_value - total_fees)
-
-  if(details){
-    cat(sprintf("Fondskosten:\tFondsgeb\u00fchren %.2f EUR am %s\n\t\t=> Grundgeb\u00fchr: %.2f EUR; Performancegeb\u00fchr: %.2f EUR\n", total_fees, dates[index], basic_value, bonus_value))
-  }
-
-  return(list(total_fees = total_fees, total_value = total_value, asset_fees = asset_fees))
-}
 
 
 #--------> Hilfsfunktion zur Berechnung zu verkaufender Anteile:

@@ -333,6 +333,26 @@ end
 "`std::max(a, b)` aus C++ (`a < b ? b : a`)."
 @inline cpp_max(a::Float64, b::Float64) = a < b ? b : a
 
+# ── NaN-genaue Einzeloperationen (Etappe 8.0) ───────────────────────────────
+# Treffen in einer Operation zwei NaN aufeinander (etwa NA und NaN), behält
+# x86-64/SSE die Nutzlast des ersten Operanden der Maschinenanweisung; welcher
+# das ist, legt der Compiler fest (gcc im R-Bau, LLVM in Julia), bei
+# kommutativen Operationen auch entgegen der Quelltextfolge. `nan_add(a, b)`
+# usw. rechnen wie die SSE-Anweisung mit `a` als erstem Operanden; die Ports
+# nutzen sie mit der Operandenfolge aus dem Maschinencode des R-Baus (objdump
+# von SimLev.so, gcc -O2), ohne NaN rechnen sie wie bisher. Ungültige
+# Operationen (0/0, Inf - Inf, log/sqrt einer negativen Zahl) liefern das
+# Standard-NaN von x86 (`X86_NAN`, Vorzeichen gesetzt). Gleiche Regeln wie
+# `simlev._r.rnum` (Python).
+const X86_NAN = reinterpret(Float64, 0xFFF8000000000000)
+@inline nan_quiet(x::Float64) = reinterpret(Float64, reinterpret(UInt64, x) | 0x0008000000000000)
+@inline _nan2(r::Float64, a::Float64, b::Float64) = (isnan(a) && isnan(b)) ? nan_quiet(a) : r
+@inline nan_add(a::Float64, b::Float64) = _nan2(a + b, a, b)
+@inline nan_sub(a::Float64, b::Float64) = _nan2(a - b, a, b)
+@inline nan_mul(a::Float64, b::Float64) = _nan2(a * b, a, b)
+@inline nan_div(a::Float64, b::Float64) = _nan2(a / b, a, b)
+@inline nan_sqrt(x::Float64) = x >= 0.0 ? sqrt(x) : isnan(x) ? nan_quiet(x) : X86_NAN
+
 # ── Ergänzungen für die Engine 0.5.0 ────────────────────────────────────────
 
 @inline _libm_exp(x::Float64) = ccall((:exp, _LIBM), Float64, (Float64,), x)

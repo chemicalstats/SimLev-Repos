@@ -37,6 +37,8 @@ _mat(x::Real) = fill(Float64(x), 1, 1)
 
 # std::pair<double,int>::operator<
 @inline _lt(a::Tuple{Float64,Int}, b::Tuple{Float64,Int}) = a[1] < b[1] || (!(b[1] < a[1]) && a[2] < b[2])
+# double::operator< (std::nth_element in quantile7)
+@inline _lt(a::Float64, b::Float64) = a < b
 
 @inline function _swap!(v, i, j)
     @inbounds v[i+1], v[j+1] = v[j+1], v[i+1]
@@ -182,6 +184,52 @@ function _final_insertion_sort!(v, first, last)
         _insertion_sort!(v, first, last)
     end
     nothing
+end
+
+function _heap_select!(v, first, middle, last)
+    len = middle - first
+    @inbounds if len >= 2
+        parent = div(len - 2, 2)
+        while true
+            _adjust_heap!(v, first, parent, len, v[first+parent+1])
+            parent == 0 && break
+            parent -= 1
+        end
+    end
+    @inbounds for i in middle:(last-1)
+        if _lt(v[i+1], v[first+1])
+            value = v[i+1]
+            v[i+1] = v[first+1]
+            _adjust_heap!(v, first, 0, len, value)
+        end
+    end
+    nothing
+end
+
+"`std::nth_element` (libstdc++, GCC 13, Introselect) mit 0-basiertem `nth` (in place)."
+function _nth_element!(v::Vector{Float64}, nth::Int)
+    first = 0
+    last = length(v)
+    (first == last || nth == last) && return v
+    depth = 2 * (8 * sizeof(Int) - 1 - leading_zeros(last - first))
+    while last - first > 3
+        if depth == 0
+            _heap_select!(v, first, nth + 1, last)
+            _swap!(v, first, nth)
+            return v
+        end
+        depth -= 1
+        mid = first + div(last - first, 2)
+        _move_median_to_first!(v, first, first + 1, mid, last - 1)
+        cut = _unguarded_partition!(v, first + 1, last, first)
+        if cut <= nth
+            first = cut
+        else
+            last = cut
+        end
+    end
+    _insertion_sort!(v, first, last)
+    v
 end
 
 "`std::sort` (libstdc++) auf einem Vektor von `(double, int)`-Paaren (in place)."
@@ -457,6 +505,18 @@ function quantile7(x::AbstractVector{Float64}, p::Float64)
     h = Float64(n - 1) * p
     lo = Int(floor(h))
     frac = h - Float64(lo)
+    if any(isnan, x)
+        # NaN (Vergleiche falsch): Ergebnis hängt von der Reihenfolge ab, die
+        # std::nth_element herstellt; R-Bau: xl + (xh - xl) * frac
+        v = _nth_element!(Vector{Float64}(x), lo)
+        xl = v[lo+1]
+        (frac == 0.0 || lo + 1 >= n) && return xl
+        xh = v[lo+2]
+        @inbounds for j in (lo+3):n
+            v[j] < xh && (xh = v[j])
+        end
+        return SimLev.nan_add(xl, (xh - xl) * frac)
+    end
     # nth_element/min_element liefern Werte; die Drawdowns sind nie -0, daher genügt Sortieren
     s = Base.sort(x)
     xl = s[lo+1]

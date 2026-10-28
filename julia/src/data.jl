@@ -110,6 +110,11 @@ function _raw_columns(data)
     error("unbekannte Datenstruktur")
 end
 
+"Kopie mit eigenen Spalten (Fonds-Wrapper: normalisierte Daten für die innere Rechnung)."
+_fcopy(fr::_Frame) = _Frame(copy(fr.names), Dict{String,AbstractVector}(nm => copy(fr.cols[nm]) for nm in fr.names),
+                            copy(fr.kinds), fr.filled_attr)
+
+_to_frame(data::_Frame) = _fcopy(data)   # schon normalisiert (Fonds-Wrapper, innere Rechnung)
 function _to_frame(data)
     nms, vals, fa = _raw_columns(data)
     for (i, nm) in enumerate(nms)

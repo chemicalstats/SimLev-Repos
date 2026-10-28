@@ -137,13 +137,13 @@ ref_case("st_err_freq", "sharpe_test(ra, rb, frequency = 'year')", paste0(P, "re
          jl = paste0(JH, 'result = AT.sharpe_test(ra, rb; frequency = "year")'))
 ref_case("st_err_input", "sharpe_test(list(1), list(2))", paste0(P, "result = AT.sharpe_test({'a': 1}, {'b': 2})"), I,
          jl = paste0(JH, 'result = AT.sharpe_test(Any[1], Any[2])'))
-SIM <- "sa = simlev.simulation(p[['date', 'a']], simlev.create_strategy(a=simlev.asset_config(asset_class='etf', trading='bnh')))\nsb = simlev.simulation(p[['date', 'b']], simlev.create_strategy(b=simlev.asset_config(asset_class='etf', trading='bnh')), dca=simlev.dca_plan(value=100, span=1))\n"
-ref_case("st_sim", "sa <- simulation(p[, c('date', 'a')], create_strategy(a = asset_config('etf', 'bnh')))
-  sb <- simulation(p[, c('date', 'b')], create_strategy(b = asset_config('etf', 'bnh')), dca = dca_plan(value = 100, span = 1))
+SIM <- "sa = simlev.simulation(p[['date', 'a']], simlev.create_strategy(a=simlev.asset_config(asset_class='etf', trading='bnh', spread=0.1)))\nsb = simlev.simulation(p[['date', 'b']], simlev.create_strategy(b=simlev.asset_config(asset_class='etf', trading='bnh', spread=0.1)), dca=simlev.dca_plan(value=100, span=1))\n"
+ref_case("st_sim", "sa <- simulation(p[, c('date', 'a')], create_strategy(a = asset_config('etf', 'bnh', spread = 0.1)))
+  sb <- simulation(p[, c('date', 'b')], create_strategy(b = asset_config('etf', 'bnh', spread = 0.1)), dca = dca_plan(value = 100, span = 1))
   list(sharpe_test(sa, sb, frequency = 'month'), sharpe_test(sa, sb, frequency = 'day'), sharpe_min_track_record(sb), sharpe_min_track_record(sa, frequency = 'day', target = 0.2))",
   paste0(P, SIM, "result = [AT.sharpe_test(sa, sb, frequency='month'), AT.sharpe_test(sa, sb, frequency='day'), AT.sharpe_min_track_record(sb), AT.sharpe_min_track_record(sa, frequency='day', target=0.2)]"), I,
-         jl = paste0(JH, 'sa = SL.simulation(SL.RFrame("date" => p.date, "a" => p.a), SL.create_strategy("a" => SL.asset_config("etf", "bnh")))
-sb = SL.simulation(SL.RFrame("date" => p.date, "b" => p.b), SL.create_strategy("b" => SL.asset_config("etf", "bnh")); dca = SL.dca_plan(; value = 100, span = 1))
+         jl = paste0(JH, 'sa = SL.simulation(SL.RFrame("date" => p.date, "a" => p.a), SL.create_strategy("a" => SL.asset_config("etf", "bnh", spread = 0.1)))
+sb = SL.simulation(SL.RFrame("date" => p.date, "b" => p.b), SL.create_strategy("b" => SL.asset_config("etf", "bnh", spread = 0.1)); dca = SL.dca_plan(; value = 100, span = 1))
 result = Any[AT.sharpe_test(sa, sb; frequency = "month"), AT.sharpe_test(sa, sb; frequency = "day"), AT.sharpe_min_track_record(sb), AT.sharpe_min_track_record(sa; frequency = "day", target = 0.2)]'))
 
 # ── .ret_from ───────────────────────────────────────────────────────────────
@@ -253,9 +253,9 @@ ref_case("hm_oneyear", "result_heatmap(lin[1:366, ])", paste0(P, "result = AT.re
          jl = paste0(JH, 'result = AT.result_heatmap(SL.rows(lin, 1:366))'))
 ref_case("hm_err_list", "result_heatmap(list(a = lin, b = lin))", paste0(P, "result = AT.result_heatmap({'a': lin, 'b': lin})"), I,
          jl = paste0(JH, 'result = AT.result_heatmap(SL.RList("a" => lin, "b" => lin))'))
-SIMH <- "rr = simlev.simulation(tdd.rename(columns={'value': 'A'}), simlev.create_strategy(A=simlev.asset_config(asset_class='etf', trading='bnh')), dca=simlev.dca_plan(value=50, span=1))\n"
-ref_case("hm_sim", "rr <- simulation(setNames(tdd, c('date', 'A')), create_strategy(A = asset_config('etf', 'bnh')), dca = dca_plan(value = 50, span = 1)); result_heatmap(rr, inflation = 1.5)",
+SIMH <- "rr = simlev.simulation(tdd.rename(columns={'value': 'A'}), simlev.create_strategy(A=simlev.asset_config(asset_class='etf', trading='bnh', spread=0.1)), dca=simlev.dca_plan(value=50, span=1))\n"
+ref_case("hm_sim", "rr <- simulation(setNames(tdd, c('date', 'A')), create_strategy(A = asset_config('etf', 'bnh', spread = 0.1)), dca = dca_plan(value = 50, span = 1)); result_heatmap(rr, inflation = 1.5)",
          paste0(P, SIMH, "result = AT.result_heatmap(rr, inflation=1.5)"), I,
-         jl = paste0(JH, 'rr = SL.simulation(SL.RFrame("date" => tdd.date, "A" => tdd.value), SL.create_strategy("A" => SL.asset_config("etf", "bnh")); dca = SL.dca_plan(; value = 50, span = 1))
+         jl = paste0(JH, 'rr = SL.simulation(SL.RFrame("date" => tdd.date, "A" => tdd.value), SL.create_strategy("A" => SL.asset_config("etf", "bnh", spread = 0.1)); dca = SL.dca_plan(; value = 50, span = 1))
 result = AT.result_heatmap(rr; inflation = 1.5)'))
 ref_done()

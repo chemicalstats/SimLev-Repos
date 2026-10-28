@@ -25,6 +25,9 @@ __all__ = ["dcc_filter", "chol_small", "kendall_tau_core", "quantile_reg_core",
 
 from ._r import env as _env
 from ._r.fmt import NA_REAL as _NA   # R's NA_real_ (NA_REAL in research_core.cpp)
+from ._r.rnum import c_div as _dv
+from ._r.rnum import n_add as _n_add, n_sub as _n_sub, n_mul as _n_mul, n_div as _n_div, n_sqrt as _n_sqrt, \
+    n_log as _n_log
 
 
 class QuantileRegError(RuntimeError):
@@ -244,6 +247,17 @@ def dcc_filter(Z, a, b, Qbar, keep):
     Zl = Zm.tolist()
     a = float(a)
     b = float(b)
+    try:
+        res, tn = _dcc_filter_fast(Zl, a, b, Qb, keep, n, k, np_)
+    except ValueError:              # math.sqrt einer negativen Zahl: NaN-genauer Weg
+        res, tn = None, 0
+    if res is None or res["nll"] != res["nll"] or (keep and np.isnan(res["R"][:tn]).any()):
+        res = _dcc_filter_nan(Zl, a, b, Qb, keep, n, k, np_)
+    return res
+
+
+def _dcc_filter_fast(Zl, a, b, Qb, keep, n, k, np_):
+    """Schneller Weg von :func:`dcc_filter` (ohne NaN exakt); gibt (Ergebnis, berechnete Zeilen)."""
     Q = [Qb[i][j] for i in range(k) for j in range(k)]
     R = [0.0] * (k * k)
     L = [0.0] * (k * k)
@@ -282,6 +296,79 @@ def dcc_filter(Z, a, b, Qbar, keep):
             zz += zt[i] * zt[i]
             logdet += 2.0 * log(L[i * k + i])
         nll += 0.5 * (logdet + quad - zz)
+        if keep:
+            p = 0
+            for i in range(k):
+                for j in range(i + 1, k):
+                    out[t, p] = R[i * k + j]
+                    p += 1
+    if not ok:
+        nll = 1e10
+    return {"nll": nll, "R": out, "ok": ok}, (t + 1 if ok and n else t if n else 0)
+
+
+def _dcc_filter_nan(Zl, a, b, Qb, keep, n, k, np_):
+    """:func:`dcc_filter` Schritt für Schritt mit der NaN-Wahl des R-Baus.
+
+    Genutzt, wenn ein Ergebnis NaN ist. Jede Operation über ``n_*`` (``simlev._r.rnum``)
+    mit dem ersten Operanden der SSE-Anweisung in ``C_dcc_filter`` (objdump des R-Baus):
+    ``Q = (a * z_i) * z_j + Qbar * (1 - a - b)``, dann ``+ b * Q``; ``Q_jj * Q_ii``;
+    in ``chol_small`` ``L_jm * L_im``; ``quad = y^2 + quad``, ``zz = z^2 + zz``,
+    ``logdet = (log + log) + logdet``, ``nll = ((quad + logdet) - zz) * 0.5 + nll``.
+    """
+    Q = [Qb[i][j] for i in range(k) for j in range(k)]
+    R = [0.0] * (k * k)
+    L = [0.0] * (k * k)
+    y = [0.0] * k
+    out = np.full((n if keep else 0, np_ if keep else 0), _NA)
+    nll = 0.0
+    ok = True
+    c0 = _n_sub(_n_sub(1.0, a), b)
+    for t in range(n):
+        if t > 0:
+            zp = Zl[t - 1]
+            for i in range(k):
+                for j in range(k):
+                    v = _n_add(_n_mul(_n_mul(a, zp[i]), zp[j]), _n_mul(Qb[i][j], c0))
+                    Q[i * k + j] = _n_add(v, _n_mul(b, Q[i * k + j]))
+        for i in range(k):
+            for j in range(k):
+                R[i * k + j] = _n_div(Q[i * k + j], _n_sqrt(_n_mul(Q[j * k + j], Q[i * k + i])))
+        # chol_small
+        for i in range(k * k):
+            L[i] = 0.0
+        pd = True
+        for i in range(k):
+            for j in range(i + 1):
+                sv = R[i * k + j]
+                for m in range(j):
+                    sv = _n_sub(sv, _n_mul(L[j * k + m], L[i * k + m]))
+                if i == j:
+                    if sv <= 1e-14:
+                        pd = False
+                        break
+                    L[i * k + i] = _n_sqrt(sv)
+                else:
+                    L[i * k + j] = _n_div(sv, L[j * k + j])
+            if not pd:
+                break
+        if not pd:
+            ok = False
+            break
+        logdet = 0.0
+        quad = 0.0
+        zz = 0.0
+        zt = Zl[t]
+        for i in range(k):
+            sv = zt[i]
+            for m in range(i):
+                sv = _n_sub(sv, _n_mul(L[i * k + m], y[m]))
+            y[i] = _n_div(sv, L[i * k + i])
+            quad = _n_add(_n_mul(y[i], y[i]), quad)
+            zz = _n_add(_n_mul(zt[i], zt[i]), zz)
+            lg = _n_log(L[i * k + i])
+            logdet = _n_add(_n_add(lg, lg), logdet)
+        nll = _n_add(_n_mul(_n_sub(_n_add(quad, logdet), zz), 0.5), nll)
         if keep:
             p = 0
             for i in range(k):
@@ -927,7 +1014,7 @@ def hmm_forward_backward(B, A, p0):
     cs[0] = s
     row = al[0]
     for j in range(K):
-        row[j] = a[j] / s
+        row[j] = _dv(a[j], s)
     rK = range(K)
     for t in range(1, T):
         s = 0.0
@@ -942,7 +1029,7 @@ def hmm_forward_backward(B, A, p0):
         cs[t] = s
         row = al[t]
         for j in rK:
-            row[j] = a[j] / s
+            row[j] = _dv(a[j], s)
     for j in rK:
         be[T - 1][j] = 1.0
     tmp = [0.0] * K
@@ -958,7 +1045,7 @@ def hmm_forward_backward(B, A, p0):
             Ai = Al[i]
             for j in rK:
                 v += Ai[j] * tmp[j]
-            bt[i] = v / c
+            bt[i] = _dv(v, c)
     alm = np.array(al, dtype=np.float64).reshape(T, K)
     bem = np.array(be, dtype=np.float64).reshape(T, K)
     csv = np.array(cs, dtype=np.float64)
@@ -974,4 +1061,68 @@ def hmm_forward_backward(B, A, p0):
             for j in rK:
                 terms = alm[:-1, i] * tmpm[:, j] * Al[i][j] / csv[1:]
                 xi[i, j] = _seqsum(terms)
+    if np.isnan(csv).any() or np.isnan(ga).any() or np.isnan(xi).any() or np.isnan(alm).any():
+        return _hmm_nan(Bl, Al, p0, T, K)
     return {"filtered": alm, "smoothed": ga, "xi": xi, "scale": csv}
+
+
+def _hmm_nan(Bl, Al, p0, T, K):
+    """:func:`hmm_forward_backward` Schritt für Schritt mit der NaN-Wahl des R-Baus.
+
+    Genutzt, wenn ein Ergebnis NaN ist (sonst ist der schnelle Weg exakt). Operandenfolge
+    aus ``C_hmm_forward_backward`` (objdump des R-Baus): ``a = p0 * B``, ``s = s + a``,
+    ``v = v + al * A``, ``a = v * B``, ``tmp = B * be``, ``v = v + A * tmp``,
+    ``ga = al * be``, ``rs = rs + ga``, ``xi = ((al * tmp) * A) / cs + xi``.
+    """
+    al = [[0.0] * K for _ in range(T)]
+    be = [[0.0] * K for _ in range(T)]
+    cs = [0.0] * T
+    a = [0.0] * K
+    s = 0.0
+    for j in range(K):
+        a[j] = _n_mul(p0[j], Bl[0][j])
+        s = _n_add(s, a[j])
+    cs[0] = s
+    for j in range(K):
+        al[0][j] = _n_div(a[j], s)
+    for t in range(1, T):
+        s = 0.0
+        for j in range(K):
+            v = 0.0
+            for i in range(K):
+                v = _n_add(v, _n_mul(al[t - 1][i], Al[i][j]))
+            a[j] = _n_mul(v, Bl[t][j])
+            s = _n_add(s, a[j])
+        cs[t] = s
+        for j in range(K):
+            al[t][j] = _n_div(a[j], s)
+    for j in range(K):
+        be[T - 1][j] = 1.0
+    tmp = [0.0] * K
+    for t in range(T - 2, -1, -1):
+        for j in range(K):
+            tmp[j] = _n_mul(Bl[t + 1][j], be[t + 1][j])
+        for i in range(K):
+            v = 0.0
+            for j in range(K):
+                v = _n_add(v, _n_mul(Al[i][j], tmp[j]))
+            be[t][i] = _n_div(v, cs[t + 1])
+    ga = [[0.0] * K for _ in range(T)]
+    for t in range(T):
+        rs = 0.0
+        for j in range(K):
+            g = _n_mul(al[t][j], be[t][j])
+            ga[t][j] = g
+            rs = _n_add(rs, g)
+        for j in range(K):
+            ga[t][j] = _n_div(ga[t][j], rs)
+    xi = [[0.0] * K for _ in range(K)]
+    for t in range(T - 1):
+        for j in range(K):
+            tmp[j] = _n_mul(Bl[t + 1][j], be[t + 1][j])
+        for i in range(K):
+            for j in range(K):
+                xi[i][j] = _n_add(_n_div(_n_mul(_n_mul(al[t][i], tmp[j]), Al[i][j]), cs[t + 1]), xi[i][j])
+    f64 = np.float64
+    return {"filtered": np.array(al, dtype=f64).reshape(T, K), "smoothed": np.array(ga, dtype=f64).reshape(T, K),
+            "xi": np.array(xi, dtype=f64).reshape(K, K), "scale": np.array(cs, dtype=f64)}

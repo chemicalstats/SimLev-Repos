@@ -3,12 +3,12 @@
 source("golden/modules/ref_tools.R"); ref_init("sensitivity")
 P <- paste0("import simlev.sensitivity as SE\nfrom simlev.config import create_strategy, asset_config\n",
             "from simlev import dca_plan, rebalance_plan, tax_profile, income_rate\n",
-            "st = create_strategy(A=asset_config(asset_class='etf', trading='bnh', share=0.6), B=asset_config(asset_class='etf', trading='bnh', share=0.4))\n",
+            "st = create_strategy(A=asset_config(asset_class='etf', trading='bnh', share=0.6, spread=0.1), B=asset_config(asset_class='etf', trading='bnh', share=0.4, spread=0.1))\n",
             "st0 = create_strategy(A=asset_config(asset_class='etf', trading='bnh', share=0.6, spread=0), B=asset_config(asset_class='etf', trading='bnh', share=0.4, spread=0))\n",
-            "st1 = create_strategy(A=asset_config(asset_class='etf', trading='bnh'))\n")
-R0 <- paste0("st <- create_strategy(A = asset_config('etf', 'bnh', 0.6), B = asset_config('etf', 'bnh', 0.4))\n",
+            "st1 = create_strategy(A=asset_config(asset_class='etf', trading='bnh', spread=0.1))\n")
+R0 <- paste0("st <- create_strategy(A = asset_config('etf', 'bnh', 0.6, spread = 0.1), B = asset_config('etf', 'bnh', 0.4, spread = 0.1))\n",
              "st0 <- create_strategy(A = asset_config('etf', 'bnh', 0.6, spread = 0), B = asset_config('etf', 'bnh', 0.4, spread = 0))\n",
-             "st1 <- create_strategy(A = asset_config('etf', 'bnh'))\n")
+             "st1 <- create_strategy(A = asset_config('etf', 'bnh', spread = 0.1))\n")
 set.seed(1); n <- 1100
 d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n))
 d$A <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.01)); d$B <- 100 * cumprod(1 + rnorm(n, 1e-4, 0.004))
@@ -20,9 +20,9 @@ dn <- d; dn$A[c(5, 6, 300)] <- NA
 rdf <- data.frame(date = as.Date(c("2015-01-01", "2016-01-01")), value = c(1, 3))
 I <- list(d = d, d5 = d5, dn = dn, rdf = rdf)
 J0 <- 'const SE = SL.Sensitivity
-st = create_strategy("A" => asset_config("etf", "bnh", 0.6), "B" => asset_config("etf", "bnh", 0.4))
+st = create_strategy("A" => asset_config("etf", "bnh", 0.6, spread = 0.1), "B" => asset_config("etf", "bnh", 0.4, spread = 0.1))
 st0 = create_strategy("A" => asset_config("etf", "bnh", 0.6; spread = 0), "B" => asset_config("etf", "bnh", 0.4; spread = 0))
-st1 = create_strategy("A" => asset_config("etf", "bnh"))
+st1 = create_strategy("A" => asset_config("etf", "bnh", spread = 0.1))
 '
 case <- function(id, r, p, j, inputs = I, print = NA) ref_case(id, paste0(R0, r), paste0(P, p), inputs, print = print, jl = paste0(J0, j))
 
@@ -164,26 +164,26 @@ case("lev_gap", "series_leverage(d[c(1:10, 15:30), ], 'A', leverage = 2, rate = 
      'result = SE.series_leverage(rows(d, vcat(1:10, 15:30)), "A"; leverage = 2, rate = 5, expense = 1)')
 
 # ── sensitivity_leverage ────────────────────────────────────────────────────
-case("lvs_basic", "sensitivity_leverage(d, 'A', leverages = c(1, 2, 3), rate = 2, expense = 0.5)",
-     "result = SE.sensitivity_leverage(d, 'A', leverages=[1, 2, 3], rate=2, expense=0.5)",
-     'result = SE.sensitivity_leverage(d, "A"; leverages = [1, 2, 3], rate = 2, expense = 0.5)')
+case("lvs_basic", "sensitivity_leverage(d, 'A', leverages = c(1, 2, 3), rate = 2, expense = 0.5, strategy = create_strategy(LEV = asset_config('etf', 'bnh', partial_exemption = 30, spread = 0.1)))",
+     "result = SE.sensitivity_leverage(d, 'A', leverages=[1, 2, 3], rate=2, expense=0.5, strategy=create_strategy(LEV=asset_config(asset_class='etf', trading='bnh', partial_exemption=30, spread=0.1)))",
+     'result = SE.sensitivity_leverage(d, "A"; leverages = [1, 2, 3], rate = 2, expense = 0.5, strategy = create_strategy("LEV" => asset_config("etf", "bnh", partial_exemption = 30, spread = 0.1)))')
 case("lvs_opt", "x <- sensitivity_leverage(d, 'A', leverages = c(1, 1.5, 2), rate = 2, spread = 0.4); list(attr(x, 'optimal'), attr(x, 'kind'))",
      "x = SE.sensitivity_leverage(d, 'A', leverages=[1, 1.5, 2], rate=2, spread=0.4); result = [x.attrs['optimal'], x.attrs['kind']]",
      'x = SE.sensitivity_leverage(d, "A"; leverages = [1, 1.5, 2], rate = 2, spread = 0.4); result = [attrs(x)["optimal"], attrs(x)["kind"]]')
 case("lvs_default", "sensitivity_leverage(d[1:400, ], 'B')", "result = SE.sensitivity_leverage(d.iloc[:400], 'B')",
      'result = SE.sensitivity_leverage(rows(d, 1:400), "B")')
-case("lvs_metric", "x <- sensitivity_leverage(d, 'A', leverages = c(-1, 1, 20), strategy = create_strategy(LEV = asset_config('etf', 'bnh')), metrics = function(r) c(cagr = r$cagr, max_drawdown = r$statistics$max_drawdown)); list(x, attr(x, 'optimal'))",
-     "x = SE.sensitivity_leverage(d, 'A', leverages=[-1, 1, 20], strategy=create_strategy(LEV=asset_config(asset_class='etf', trading='bnh')), metrics=lambda r: pd.Series({'cagr': r.cagr, 'max_drawdown': r.statistics['max_drawdown']})); result = [x, x.attrs['optimal']]",
-     'x = SE.sensitivity_leverage(d, "A"; leverages = [-1, 1, 20], strategy = create_strategy("LEV" => asset_config("etf", "bnh")), metrics = r -> named("cagr" => r.cagr, "max_drawdown" => r.statistics.max_drawdown)); result = [x, attrs(x)["optimal"]]')
-case("lvs_dca", "sensitivity_leverage(d, 'A', leverages = c(1, 2), sim_args = list(dca = dca_plan(50, 1)))",
-     "result = SE.sensitivity_leverage(d, 'A', leverages=[1, 2], sim_args={'dca': dca_plan(50, 1)})",
-     'result = SE.sensitivity_leverage(d, "A"; leverages = [1, 2], sim_args = RList("dca" => SL.dca_plan(50, 1)))')
-case("lvs_none", "x <- sensitivity_leverage(d, 'A', leverages = c(1, 2), strategy = create_strategy(X = asset_config('etf', 'bnh'))); list(x, attr(x, 'optimal'))",
-     "x = SE.sensitivity_leverage(d, 'A', leverages=[1, 2], strategy=create_strategy(X=asset_config(asset_class='etf', trading='bnh'))); result = [x, x.attrs['optimal']]",
-     'x = SE.sensitivity_leverage(d, "A"; leverages = [1, 2], strategy = create_strategy("X" => asset_config("etf", "bnh"))); result = [x, attrs(x)["optimal"]]')
-case("lvs_nocagr", "x <- sensitivity_leverage(d, 'A', leverages = c(1, 2), metrics = function(r) c(max_drawdown = r$statistics$max_drawdown)); list(x, attr(x, 'optimal'))",
-     "x = SE.sensitivity_leverage(d, 'A', leverages=[1, 2], metrics=lambda r: pd.Series({'max_drawdown': r.statistics['max_drawdown']})); result = [x, x.attrs['optimal']]",
-     'x = SE.sensitivity_leverage(d, "A"; leverages = [1, 2], metrics = r -> named("max_drawdown" => r.statistics.max_drawdown)); result = [x, attrs(x)["optimal"]]')
+case("lvs_metric", "x <- sensitivity_leverage(d, 'A', leverages = c(-1, 1, 20), strategy = create_strategy(LEV = asset_config('etf', 'bnh', spread = 0.1)), metrics = function(r) c(cagr = r$cagr, max_drawdown = r$statistics$max_drawdown)); list(x, attr(x, 'optimal'))",
+     "x = SE.sensitivity_leverage(d, 'A', leverages=[-1, 1, 20], strategy=create_strategy(LEV=asset_config(asset_class='etf', trading='bnh', spread=0.1)), metrics=lambda r: pd.Series({'cagr': r.cagr, 'max_drawdown': r.statistics['max_drawdown']})); result = [x, x.attrs['optimal']]",
+     'x = SE.sensitivity_leverage(d, "A"; leverages = [-1, 1, 20], strategy = create_strategy("LEV" => asset_config("etf", "bnh", spread = 0.1)), metrics = r -> named("cagr" => r.cagr, "max_drawdown" => r.statistics.max_drawdown)); result = [x, attrs(x)["optimal"]]')
+case("lvs_dca", "sensitivity_leverage(d, 'A', leverages = c(1, 2), sim_args = list(dca = dca_plan(50, 1)), strategy = create_strategy(LEV = asset_config('etf', 'bnh', partial_exemption = 30, spread = 0.1)))",
+     "result = SE.sensitivity_leverage(d, 'A', leverages=[1, 2], sim_args={'dca': dca_plan(50, 1)}, strategy=create_strategy(LEV=asset_config(asset_class='etf', trading='bnh', partial_exemption=30, spread=0.1)))",
+     'result = SE.sensitivity_leverage(d, "A"; leverages = [1, 2], sim_args = RList("dca" => SL.dca_plan(50, 1)), strategy = create_strategy("LEV" => asset_config("etf", "bnh", partial_exemption = 30, spread = 0.1)))')
+case("lvs_none", "x <- sensitivity_leverage(d, 'A', leverages = c(1, 2), strategy = create_strategy(X = asset_config('etf', 'bnh', spread = 0.1))); list(x, attr(x, 'optimal'))",
+     "x = SE.sensitivity_leverage(d, 'A', leverages=[1, 2], strategy=create_strategy(X=asset_config(asset_class='etf', trading='bnh', spread=0.1))); result = [x, x.attrs['optimal']]",
+     'x = SE.sensitivity_leverage(d, "A"; leverages = [1, 2], strategy = create_strategy("X" => asset_config("etf", "bnh", spread = 0.1))); result = [x, attrs(x)["optimal"]]')
+case("lvs_nocagr", "x <- sensitivity_leverage(d, 'A', leverages = c(1, 2), metrics = function(r) c(max_drawdown = r$statistics$max_drawdown), strategy = create_strategy(LEV = asset_config('etf', 'bnh', partial_exemption = 30, spread = 0.1))); list(x, attr(x, 'optimal'))",
+     "x = SE.sensitivity_leverage(d, 'A', leverages=[1, 2], metrics=lambda r: pd.Series({'max_drawdown': r.statistics['max_drawdown']}), strategy=create_strategy(LEV=asset_config(asset_class='etf', trading='bnh', partial_exemption=30, spread=0.1))); result = [x, x.attrs['optimal']]",
+     'x = SE.sensitivity_leverage(d, "A"; leverages = [1, 2], metrics = r -> named("max_drawdown" => r.statistics.max_drawdown), strategy = create_strategy("LEV" => asset_config("etf", "bnh", partial_exemption = 30, spread = 0.1))); result = [x, attrs(x)["optimal"]]')
 # ── cores > 1 (Etappe 5): jede Einheit mit dem Zufallszustand des Aufrufers ─
 case("sg_cores2_rng", "set.seed(7); g <- sensitivity_grid(d, st, list(rebalance.unit = c('month', 'quarter', 'year')), sim_args = list(rebalance = rebalance_plan(span = 1)), metrics = function(r) c(u = runif(1), cagr = r$cagr), cores = 2); list(g, runif(1))",
      "from simlev._r import rng as RNG\nRNG.set_seed(7); g = SE.sensitivity_grid(d, st, {'rebalance.unit': ['month', 'quarter', 'year']}, sim_args={'rebalance': rebalance_plan(span=1)}, metrics=lambda r: pd.Series({'u': RNG.runif(1)[0], 'cagr': r.cagr}), cores=2); result = [g, RNG.runif(1)]",
@@ -203,8 +203,8 @@ case("rs_cores2", "sensitivity_rebalancing(d, st, frequencies = list(monthly = c
 case("ls_cores2", "x <- planning_lumpsum_vs_dca(d5, st1, amount = 12000, months = 12, horizon = 3, step = 6, cores = 2); list(x, attr(x, 'summary'))",
      "x = SE.planning_lumpsum_vs_dca(d5, st1, amount=12000, months=12, horizon=3, step=6, cores=2); result = [x, x.attrs['summary']]",
      'x = SE.planning_lumpsum_vs_dca(d5, st1; amount = 12000, months = 12, horizon = 3, step = 6, cores = 2); result = [x, attrs(x)["summary"]]')
-case("lvs_cores2", "x <- sensitivity_leverage(d, 'A', leverages = c(1, 1.5, 2, 3), rate = 2, expense = 0.5, cores = 2); list(x, attr(x, 'optimal'))",
-     "x = SE.sensitivity_leverage(d, 'A', leverages=[1, 1.5, 2, 3], rate=2, expense=0.5, cores=2); result = [x, x.attrs['optimal']]",
-     'x = SE.sensitivity_leverage(d, "A"; leverages = [1, 1.5, 2, 3], rate = 2, expense = 0.5, cores = 2); result = [x, attrs(x)["optimal"]]')
+case("lvs_cores2", "x <- sensitivity_leverage(d, 'A', leverages = c(1, 1.5, 2, 3), rate = 2, expense = 0.5, cores = 2, strategy = create_strategy(LEV = asset_config('etf', 'bnh', partial_exemption = 30, spread = 0.1))); list(x, attr(x, 'optimal'))",
+     "x = SE.sensitivity_leverage(d, 'A', leverages=[1, 1.5, 2, 3], rate=2, expense=0.5, cores=2, strategy=create_strategy(LEV=asset_config(asset_class='etf', trading='bnh', partial_exemption=30, spread=0.1))); result = [x, x.attrs['optimal']]",
+     'x = SE.sensitivity_leverage(d, "A"; leverages = [1, 1.5, 2, 3], rate = 2, expense = 0.5, cores = 2, strategy = create_strategy("LEV" => asset_config("etf", "bnh", partial_exemption = 30, spread = 0.1))); result = [x, attrs(x)["optimal"]]')
 
 ref_done()

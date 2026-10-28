@@ -155,6 +155,8 @@ Modul der R-Datei, aus der sie stammen, mit derselben Signatur:
 | `_of_returns`, `_as_spec`, `_ps_neighbours`, `param_plateau` | `overfitting.py`, `param_search.py` |
 | `_da_series`, `_da_deflate` | `deep_analysis.py` |
 | `simulation`, `_xirr_rate`, `calculate_skewness`, `calculate_kurtosis`, `calculate_dates_flags` | `engine.py` (`simulation`; die übrigen stehen in `_sim_base.py` und sind über `engine` erreichbar) |
+| `_strategy_columns`, `_strategy_wrappers`, `_wrapper_assets_text` (R `wrapper.R`) | `config.py` (Schicht 1, weil `strategy_validate` sie braucht; `wrapper.py` holt sie von dort) |
+| `_wrapper_nav_calc` (R `.wrapper_nav_calc`), `_nav_raw` (Tage und Anteilswerte ohne Kopie der `attrs`) | `wrapper.py` |
 
 `.with_rng_restore(expr, seed)` wird zu `_with_rng_restore(fn,
 seed=_MISSING)`: ruft `fn()` auf; `seed=None` heißt, nichts sichern und
@@ -225,6 +227,7 @@ innerhalb eines Pakets erscheinen Ausgaben dort in Einheitenreihenfolge.
 | `sim_evaluate.R` | `_sim_evaluate.py` |
 | `simulation_core.cpp`, `fifo_core.cpp`, `tax_core.cpp` (Kerne in `*_core_impl.h`) | `_core.py` (mit gebauter Erweiterung die gemeinsamen Kerne, siehe [C-Erweiterung](#c-erweiterung)) |
 | `asset_config.R`, `strategy.R` | `config.py` |
+| `wrapper.R` (Fonds-Wrapper, Etappe 6.5c) | `wrapper.py` (`wrapper_config`, `wrapper_nav`, `SimLevWrapperConfig`, `SimLevWrapperNav`; Engine-Schicht, rechnet mit `simulation()`) |
 | `compute_rebal_trigger.R` | `trigger.py` |
 | `tax_tariff.R`, `inst/extdata/steuertarif.csv` | `_tax_tariff.py`, `data/steuertarif.csv` |
 | `print`/`summary` von `SimLevResult` | `result.py` |
@@ -288,8 +291,21 @@ Importrichtung (ohne Kreise): `stats_sort` ← `stats_cor` ← `stats_smooth` �
 Dieser Abschnitt gilt für `simulation()` und alles, was daran hängt
 (`engine.py`, `_sim_base.py`, `_sim_phases.py`, `_sim_loop.py`,
 `_sim_evaluate.py`, `_core.py`, `_dates.py`, `config.py`, `trigger.py`,
-`result.py`, `_tax_tariff.py`, `_sim_blocks.py`, `dashboard.py`), und für Module, die die
+`result.py`, `_tax_tariff.py`, `_sim_blocks.py`, `wrapper.py`, `dashboard.py`), und für Module, die die
 Engine aufrufen oder ihre Helfer verwenden.
+
+**Fonds-Wrapper (`wrapper.py`, Etappe 6.5c).** `_sim_check_inputs` rechnet nach der Prüfung der
+Datumsspalte je Wrapper-Asset den Anteilswert mit `_wrapper_nav_calc` aus den normalisierten Daten
+(ein `_Frame`; `simulation()` nimmt ihn über `_to_frame` als Kopie an) und hängt ihn als Kursspalte an;
+`cfg["no_split"]` nimmt die Wrapper von den Splits aus, `cfg["wrappers"]` (nur mit `details`) wird
+`result.wrappers`. Die innere Rechnung sichert `_sim_base._FEE` (R `.fee_env`) und stellt ihn auch
+nach einem Fehler wieder her; ihre Meldungen gibt ein Strom an Stelle von `sys.stderr` mit Präfix
+weiter (je Meldung bis zum Zeilenende), ihre Warnungen werden gesammelt und mit Präfix neu
+ausgegeben, Fehler als `ValueError` mit Präfix. `SimLevWrapperNav` ist ein `DataFrame`; jede Auswahl daraus ist ein
+gewöhnlicher `pandas.DataFrame` ohne `attrs` (`_constructor = pd.DataFrame`; die `attrs` `inner` und
+`wrapper` stehen in einem `_NavAttrs`, das bei der Weitergabe durch pandas, `copy.deepcopy`, ein
+leeres `dict` ergibt; R `[.SimLevWrapperNav`, Etappe 8.0). Die Engine liest Tage und Werte über
+`_nav_raw`.
 
 ### Aufbau der Engine
 
@@ -311,7 +327,7 @@ weil `engine.py` alle Phasenmodule einbindet und diese ihrerseits
 
 ### Stand
 
-- `golden/cases` 68/68 und `golden/extra` 37/37 sind bitgleich,
+- `golden/cases` 55/55 und `golden/extra` 35/35 sind bitgleich (seit Etappe 6.5c ohne die 15 Fälle des Fondsmodus),
   einschließlich Druckausgabe und `details = TRUE`
   (`python tools/compare_golden.py [Pfade] [-k ids] [-v] [-q]`).
 - Zusätzlich frisch erzeugte Fälle (300 Zufallsfälle, Seed 777 bzw. 999,
@@ -643,7 +659,9 @@ Zufallszahlen) mit dem Prüfzugang `_ext_rng.cpp` (`rng_draw`, `rng_qnorm`,
   - **Unterstützte Arten:** genau die von `simlev._r.rng`: Generator
     „Mersenne-Twister“ (Voreinstellung) und „L'Ecuyer-CMRG“ (Parallelität),
     Normalverteilung „Inversion“ (mit `qnorm5`, auch dem Zweig `r > 27` aus
-    R 4.3). Die Stichprobenart spielt für diese Kerne keine Rolle.
+    R 4.3; seit Etappe 8.0 ebenso `_qnorm_std` der Python-Nachbildung, erreicht
+    nur für subnormale p, nie über `norm_rand`). Die Stichprobenart spielt für
+    diese Kerne keine Rolle.
   - **Rückfall:** Liefert `c_state()` `None` (andere Art, ungewöhnlicher
     Zustand), rechnet still der reine Python-Kern (bitgleich). Ebenso bei
     Eingaben, die der C-Kern in R nicht sicher rechnet (Indizes außerhalb
@@ -664,9 +682,8 @@ Zufallszahlen) mit dem Prüfzugang `_ext_rng.cpp` (`rng_draw`, `rng_qnorm`,
     `NA_REAL`, `R_PosInf`, `R_NegInf`, `R_FINITE` wie R als Variablen bzw.
     Aufruf aus einer anderen Übersetzungseinheit. Im Zufallsvergleich gegen
     R (Etappe 7.3b) ist die Erweiterung auch mit NA/NaN in den Daten
-    bitgleich; die reinen Python-Kerne `boot_wild`, `boot_garch`,
-    `boot_ms_garch` und `rtruncnorm` liefern in solchen Fällen teils NaN
-    statt NA bzw. umgekehrt (Wert in beiden Fällen fehlend).
+    bitgleich, seit Etappe 8.0 auch die reinen Python-Kerne (siehe
+    „NaN-Nutzlast“ unten).
 - **Gemeinsame Quelle:** Das Python-Quellpaket braucht die Dateien in
   seinem eigenen Baum, deshalb liegen **Byte-für-Byte-Kopien** in
   `python/src/`; `tests/test_shared_c.py` prüft Gleichheit und
@@ -702,12 +719,34 @@ Zufallszahlen) mit dem Prüfzugang `_ext_rng.cpp` (`rng_draw`, `rng_qnorm`,
   arbeiten in Python auf anderen Objekten als in R; `_ext_engine.cpp` ist
   wie der R-Host aufgebaut, damit der Compiler den Kern gleich übersetzt,
   in seltenen Fällen mit NA und NaN in derselben Operation (etwa `NA` als
-  Kontostand und `NaN` als Zufluss) kann Python aber `NaN` statt `NA`
-  liefern (Wert in beiden Fällen fehlend; wie beim reinen Python-Kern). Der
-  reine MS-GARCH-Filter rechnet seit 7.3a in diesem Fall eigens wie R
-  (`_ms_garch_filter_nan`: Operandenfolge aus dem R-Maschinencode, NaN der
-  glibc für `log`/`sqrt` negativer Zahlen); er wird nur genutzt, wenn ein
-  Ergebnis NaN ist.
+  Kontostand und `NaN` als Zufluss) kann die Erweiterung aber `NaN` statt
+  `NA` liefern (Wert in beiden Fällen fehlend; im NaN-reichen
+  Zufallsvergleich 5 von 4.500 Fällen, z. B. `money + flows` statt
+  `flows + money` in `dca`, weil der Python-Host die Werte in Registern statt
+  aus dem Speicher liefert).
+- **NaN-Nutzlast in den reinen Python-Kernen** (Etappe 8.0): CPython wählt
+  bei zwei NaN je nach Zustand des Interpreters verschieden (`a + b` behält
+  im unspezialisierten Bytecode `b`, nach der Spezialisierung `a`; `a * b`
+  behält `a`), numpy je nach Feldlänge. Deshalb bilden die Kerne jede
+  Addition und Multiplikation, bei der zwei NaN zusammentreffen können, mit
+  `simlev._r.rnum.n_add`/`n_mul` (dazu `n_sub`, `n_div`, `n_sqrt`, `n_log`,
+  `n_exp`, `nan_quiet`, `X86_NAN`) in der Operandenfolge des R-Baus nach
+  (aus dem Maschinencode von `SimLev.so`, `objdump -d`, je Stelle im
+  Quelltext vermerkt); `c_div` rechnet `a / b` wie C (Inf/NaN statt
+  `ZeroDivisionError`). Zwei Formen: kurze Rechnungen prüfen das Ergebnis
+  (`r = a + b; if r != r: r = n_add(...)`, Engine `_core.py`, `boot_*`,
+  `garch_filter`), längere rechnen schnell und nur bei einem NaN im
+  Ergebnis noch einmal Schritt für Schritt (`_ms_garch_filter_nan`,
+  `_hmm_nan`, `_dcc_filter_nan`). Wo nur Vergleiche von einem NaN abhängen,
+  genügt dieselbe Kontrollfolge wie in C: `quantile7` bildet bei NaN
+  `std::nth_element` (Introselect) nach, `min_cdar_core` das laufende
+  Maximum. Subtraktion und Division sind eindeutig (`a - b` behält `a`);
+  `x += -y` kehrt das NaN-Vorzeichen um, `x - y` nicht (C: `x -= y`). In den
+  Zufallsvergleichen aus 7.3a/7.3b (mit NaN-reichen Fällen, auch mit
+  frischem, unspezialisiertem Bytecode) sind alle reinen Kerne bitgleich zu
+  R; feste Randfälle in `tests/test_reine_kerne_nan.py`. Ein neuer Kern
+  braucht diese Behandlung, sobald NA und NaN in derselben Operation
+  zusammentreffen können.
 - **Prüfen** in beiden Fällen:
 
   ``` bash

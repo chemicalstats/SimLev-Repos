@@ -1,19 +1,20 @@
 {
  "language": "Python",
- "stand": "2026-10-26 – Schnittstelle 0.5.0 festgehalten",
+ "stand": "2026-10-27 – Etappe 8.0: Auswahl aus SimLevWrapperNav",
  "hinweis": "Erzeugt von tools/api_snapshot/run.sh --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
    {"name": "asset_class", "kind": "keyword_only", "default": "('etf', 'etn', 'etc', 'certificate', 'etn_standard', 'etn_deliverable')"},
    {"name": "trading", "kind": "keyword_only", "default": "('bnh', 'signal')"},
    {"name": "share", "kind": "keyword_only", "default": "1.0"},
-   {"name": "spread", "kind": "keyword_only", "default": "0.1"},
+   {"name": "spread", "kind": "keyword_only", "default": "0.0"},
    {"name": "partial_exemption", "kind": "keyword_only", "default": "0.0"},
    {"name": "deliverable", "kind": "keyword_only", "default": "False"},
    {"name": "start", "kind": "keyword_only", "default": "None"},
    {"name": "tax_regime", "kind": "keyword_only", "default": "None"},
    {"name": "signal_buy", "kind": "keyword_only", "default": "None"},
-   {"name": "signal_sell", "kind": "keyword_only", "default": "None"}
+   {"name": "signal_sell", "kind": "keyword_only", "default": "None"},
+   {"name": "wrapper", "kind": "keyword_only", "default": "None"}
   ],
   "backcast": [
    {"name": "fit", "kind": "keyword_only", "default": "None"},
@@ -735,7 +736,6 @@
    {"name": "rebalance", "kind": "keyword_only", "default": "None"},
    {"name": "splits", "kind": "keyword_only", "default": "None"},
    {"name": "tax", "kind": "keyword_only", "default": "None"},
-   {"name": "funds", "kind": "keyword_only", "default": "None"},
    {"name": "risk_free", "kind": "keyword_only", "default": "0"},
    {"name": "fractions", "kind": "keyword_only", "default": "True"},
    {"name": "liquidate", "kind": "keyword_only", "default": "False"},
@@ -987,6 +987,18 @@
    {"name": "gamma", "kind": "keyword_only", "default": "2"},
    {"name": "keep_paths", "kind": "keyword_only", "default": "True"},
    {"name": "horizon", "kind": "keyword_only", "default": "None"}
+  ],
+  "wrapper_config": [
+   {"name": "strategy", "kind": "positional_or_keyword", "default": null},
+   {"name": "rebalance", "kind": "keyword_only", "default": "None"},
+   {"name": "costs", "kind": "keyword_only", "default": "funds_costs()"},
+   {"name": "order_fee", "kind": "keyword_only", "default": "None"},
+   {"name": "volume", "kind": "keyword_only", "default": "None"}
+  ],
+  "wrapper_nav": [
+   {"name": "data", "kind": "positional_or_keyword", "default": null},
+   {"name": "wrapper", "kind": "positional_or_keyword", "default": null},
+   {"name": "splits", "kind": "keyword_only", "default": "None"}
   ]
  },
  "methods": {
@@ -1234,6 +1246,12 @@
    {"name": "self", "kind": "positional_or_keyword", "default": null},
    {"name": "kwargs", "kind": "var_keyword", "default": null}
   ],
+  "print.SimLevWrapperConfig": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
+  "print.SimLevWrapperNav": [
+   {"name": "self", "kind": "positional_or_keyword", "default": null}
+  ],
   "print.asset_config": [
    {"name": "self", "kind": "positional_or_keyword", "default": null}
   ],
@@ -1341,6 +1359,8 @@
   "SimLevWalkForward",
   "SimLevWeights",
   "SimLevWithdrawal",
+  "SimLevWrapperConfig",
+  "SimLevWrapperNav",
   "Strategy",
   "SummarySimLevBootstrapStudy",
   "SummarySimLevParamSearch",

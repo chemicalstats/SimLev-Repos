@@ -1391,6 +1391,13 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
     src_taxed <- isTRUE(x$tax_report$total_taxes_paid > 0)
     if (!is.numeric(inflation) || length(inflation) != 1L) stop("Bei einem SimLevResult ist 'inflation' ein Prozentsatz p. a.")
     x <- withdrawal_cohorts(x, inflation = inflation, years = years %||% 30, frequency = match.arg(frequency))
+  } else if (inherits(x, "SimLevWrapperNav")) {   # Anteilswert eines Fonds-Wrappers (wrapper_nav()) als Kursreihe
+    if (!is.numeric(inflation) || length(inflation) != 1L) stop("Bei einem SimLevWrapperNav ist 'inflation' ein Prozentsatz p. a.")
+    x <- withdrawal_cohorts(x, price = "nav", inflation = inflation, years = years %||% 30, frequency = match.arg(frequency))
+  } else if (is.data.frame(x) && "date" %in% names(x)) {   # Kurstabelle, z. B. Ausschnitt aus wrapper_nav() (Etappe 8.0)
+    stop(paste0("x ist eine Tabelle mit Spalte 'date' (z. B. ein Ausschnitt aus wrapper_nav(), der eine gew\u00f6hnliche ",
+                "Tabelle ist); Kurse zuerst mit withdrawal_cohorts(x, price = \"<Kursspalte>\") in Renditen umwandeln ",
+                "oder das ganze Ergebnis von wrapper_nav() \u00fcbergeben."))
   } else if (inherits(x, "SimLevBootstrapStudy") || (is.list(x) && length(x) && all(vapply(x, inherits, TRUE, "SimLevResult")))) {
     if (is.list(x) && !inherits(x, "SimLevBootstrapStudy"))
       src_taxed <- any(vapply(x, function(r) isTRUE(r$tax_report$total_taxes_paid > 0), TRUE))

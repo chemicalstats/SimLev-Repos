@@ -102,7 +102,6 @@
     report = setNames(vector("list", length = length(strategy)), names(strategy)),
     # === NEU: Erweiterte Totals-Struktur ===
     totals = list(
-      total_value = start_value,
       total_taxes = 0,
       # § 20 EStG Verlusttopf (ETF, ETN standard, Zertifikate)
       loss_capital_gains = 0,
@@ -202,8 +201,6 @@
       sell_count = 0,
       taxes = vector("list", max_trades),
       tax_count = 0,
-      fees = vector("list", max_trades),
-      fee_count = 0,
       fifo_front = 1
     )
 
@@ -236,7 +233,7 @@
                                 dca_skip, balance_mode, balance_span, balance_unit, balance_days,
                                 balance_anchor, balance_start, balance_skip, event_col,
                                 event_mode = c("additional", "replace"), event_weight, split_mode,
-                                split_thresh, blocks = FALSE) {
+                                split_thresh, blocks = FALSE, no_split = character(0)) {
   #--------> Initialisierung der Flag-Objekte:
   flag_date <- seq.Date(from = as.Date(start_date), to = as.Date(stopp_date), by = "days")
   # A-2: Markierung aufgefuellter (LOCF) Tage, aligned zu flag_date
@@ -300,7 +297,8 @@
   }
 
   flag_trade <- !flag_rebalance & (flag_date != stopp_date) & !flag_filled
-  flag_split <- .calculate_split_flags(input = sim_mem, base = 100, mode = split_mode, dates = flag_date, split_thresh = split_thresh)
+  flag_split <- .calculate_split_flags(input = sim_mem, base = 100, mode = split_mode, dates = flag_date, split_thresh = split_thresh,
+                                       skip = no_split)   # Fonds-Wrapper: keine Splits auf den Anteilswert
 
   # V-1b: Verschiebe-Helfer (naechster Handelstag; am Monatsende vorziehen)
   .shift_off_filled <- function(flags, filled, dates){
@@ -402,17 +400,17 @@
 
 #' Phase 2e von simulation(): Ereignis- und Verarbeitungstage
 #'
-#' Zweck: Aktivierungstage spaeter startender Assets, Termine fuer Gewinnrealisierung und
-#' Fondskosten, statische Asset-Eigenschaften (Stil, Steuerregime, Spread) sowie die Tage mit
+#' Zweck: Aktivierungstage spaeter startender Assets, Termine fuer Gewinnrealisierung,
+#' statische Asset-Eigenschaften (Stil, Steuerregime, Spread) sowie die Tage mit
 #' voller Verarbeitung (Slow-Path), Jahreswechsel und Abrechnungstage der Vorabpauschale.
-#' Eingabe: sim_mem, fl (Flags aus .sim_build_calendar mit initial_assets), data, stopp_date,
+#' Eingabe: sim_mem, fl (Flags aus .sim_build_calendar mit initial_assets), data,
 #' tax_mode, harvest_mode, harvest_day.
 #' Ausgabe: fl, ergaenzt um asset_starts, flag_active, asset_start_indices, flag_harvest,
-#' flag_fund_fee, strategy_types, tax_regimes, spread_rates, flag_slow_path, flag_year_change,
+#' strategy_types, tax_regimes, spread_rates, flag_slow_path, flag_year_change,
 #' flag_vp_settle, individual_days und n_total_days.
 #' @keywords internal
 #' @noRd
-.sim_build_schedule <- function(sim_mem, fl, data, stopp_date, tax_mode, harvest_mode, harvest_day) {
+.sim_build_schedule <- function(sim_mem, fl, data, tax_mode, harvest_mode, harvest_day) {
   flag_date <- fl$flag_date; flag_filled <- fl$flag_filled; flag_assets <- fl$flag_assets
   flag_split <- fl$flag_split; flag_dca <- fl$flag_dca; flag_rebalance <- fl$flag_rebalance
   flag_taxes <- fl$flag_taxes; flag_liquidate <- fl$flag_liquidate
@@ -453,17 +451,7 @@
       if (length(j)) flag_harvest[j[1]] <- TRUE
     }
   }
-  # Fondskosten (tax_mode = "funds"): 31.12. und anteilig am letzten Simulationstag
-  flag_fund_fee <- (tax_mode == "funds") & (flag_taxes | flag_date == stopp_date)
-  # R2-06: endet 'data' auf einem aufgefuellten Tag, wurde die Liquidation auf den letzten Handelstag
-  # verschoben; die anteiligen Fondskosten ziehen mit (Kosten vor der Steuer auf den Gesamtgewinn)
-  n_fd <- length(flag_date)
-  if (tax_mode == "funds" && any(flag_liquidate) && !flag_liquidate[n_fd]) {
-    liq_i <- max(which(flag_liquidate))
-    flag_fund_fee[seq_len(n_fd) > liq_i] <- FALSE   # auch ein aufgefuellter 31.12. danach
-    flag_fund_fee[liq_i] <- TRUE
-  }
-  flag_definite <- flag_active | flag_split | flag_dca | flag_rebalance | flag_taxes | flag_liquidate | flag_harvest | flag_fund_fee
+  flag_definite <- flag_active | flag_split | flag_dca | flag_rebalance | flag_taxes | flag_liquidate | flag_harvest
 
   # 2. Strategie-Typen identifizieren
   strategy_types <- sapply(flag_assets, function(name) sim_mem[["assets"]][[name]][["style"]])
@@ -536,7 +524,7 @@
   n_total_days <- nrow(data)
 
   c(fl, list(asset_starts = asset_starts, flag_active = flag_active, asset_start_indices = asset_start_indices,
-             flag_harvest = flag_harvest, flag_fund_fee = flag_fund_fee, strategy_types = strategy_types,
+             flag_harvest = flag_harvest, strategy_types = strategy_types,
              tax_regimes = tax_regimes, spread_rates = spread_rates, flag_slow_path = flag_slow_path,
              flag_year_change = flag_year_change, flag_vp_settle = flag_vp_settle,
              individual_days = individual_days, n_total_days = n_total_days))

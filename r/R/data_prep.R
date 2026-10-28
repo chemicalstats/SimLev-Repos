@@ -702,7 +702,7 @@ series_splice <- function(..., dates = NULL) {
 #' (z. B. aus [series_align()]). Jedes Asset erhaelt
 #' \code{share = Gewicht}; alle weiteren Einstellungen kommen aus
 #' \code{...} oder den Standardwerten von [asset_config()] (ETF, Buy and
-#' Hold).
+#' Hold, ohne Spread).
 #'
 #' @param weights Benannter numerischer Vektor Spaltenname -> Gewicht als
 #'   Anteil (0.6 = 60 %), z. B. \code{c(world = 0.6, bonds = 0.4)}. Alle
@@ -716,7 +716,10 @@ series_splice <- function(..., dates = NULL) {
 #'   Element wie \code{partial_exemption = c(aktien = 30)} (fehlende Assets
 #'   behalten den Standardwert, Namen ohne passendes Asset werden
 #'   ignoriert). Nur ein einzelner benannter Wert, dessen Name kein Asset
-#'   ist, gilt fuer alle Assets.
+#'   ist, gilt fuer alle Assets. Ausnahme \code{wrapper}: ein
+#'   \code{SimLevWrapperConfig} gilt fuer alle Assets, eine benannte Liste
+#'   solcher Objekte je Asset (Assets ohne Eintrag ohne Wrapper); unbekannte
+#'   Namen, andere Elemente und \code{trading = "signal"} sind ein Fehler.
 #' @return Objekt der Klasse \code{strategy} (wie [create_strategy()]).
 #' @seealso [portfolio_template()], [create_strategy()], [simulation()],
 #'   [tactical_simulation()]
@@ -736,15 +739,65 @@ strategy_from_weights <- function(weights, ...) {
   if (abs(sum(weights) - 1) > 1e-6)
     stop(sprintf("Gewichte summieren sich zu %.4f; simulation() verlangt die Summe 1 (Anteile, 0.6 = 60 %%).", sum(weights)))
   extra <- list(...)
+  # Fonds-Wrapper (Etappe 8.0): ein SimLevWrapperConfig gilt fuer alle Assets, eine benannte Liste je Asset
+  wmap <- list()
+  iw <- match("wrapper", names(extra))
+  if (!is.na(iw)) {
+    wmap <- .sfw_wrappers(extra[[iw]], names(weights))
+    extra <- extra[-iw]
+  }
   # Benannt und Name eines Assets -> je Asset (auch bei einem Element); sonst ein Wert fuer alle
   per_asset <- function(v) !is.null(names(v)) && (length(v) > 1 || names(v) %in% names(weights))
   assets <- lapply(names(weights), function(nm) {
     a <- lapply(extra, function(v) if (per_asset(v)) unname(v[nm]) else v)
     a <- a[!vapply(a, function(v) length(v) == 1 && is.na(v), TRUE)]
-    do.call(asset_config, c(list(share = unname(weights[nm])), a))
+    w <- wmap[[nm]]
+    if (is.null(w)) return(do.call(asset_config, c(list(share = unname(weights[nm])), a)))
+    tryCatch(do.call(asset_config, c(list(share = unname(weights[nm])), a, list(wrapper = w))),
+             error = function(e) {
+               if (identical(conditionMessage(e), .ac_msg_wrapper_signal))
+                 stop(sprintf(paste0("wrapper: Asset '%s' hat trading = \"signal\"; mit wrapper ist nur trading = \"bnh\" ",
+                                     "m\u00f6glich (keine Signale auf den Anteilswert; Signale gehen in der inneren Strategie)."), nm),
+                      call. = FALSE)
+               stop(e)
+             })
   })
   names(assets) <- names(weights)
   create_strategy(assets = assets)
+}
+
+#' Argument wrapper von strategy_from_weights() je Asset (Etappe 8.0)
+#'
+#' Zweck: NULL oder leere Liste -> ohne Wrapper; ein SimLevWrapperConfig -> fuer alle Assets; eine benannte
+#' Liste von SimLevWrapperConfig (Name = Asset) -> je Asset, Assets ohne Eintrag ohne Wrapper. Sonst Fehler
+#' (Reihenfolge der Pruefungen: Art, Namen vorhanden, doppelte Namen, unbekannte Namen, Elemente).
+#' Ausgabe: benannte Liste Asset -> SimLevWrapperConfig.
+#' @keywords internal
+#' @noRd
+.sfw_wrappers <- function(w, assets) {
+  if (is.null(w)) return(list())
+  if (inherits(w, "SimLevWrapperConfig")) return(stats::setNames(rep(list(w), length(assets)), assets))
+  if (!is.list(w) || is.data.frame(w))
+    stop(sprintf(paste0("wrapper muss ein Objekt aus wrapper_config() (gilt f\u00fcr alle Assets) oder eine benannte Liste ",
+                        "solcher Objekte sein (Name = Asset), nicht %s."), paste(class(w), collapse = "/")), call. = FALSE)
+  if (!length(w)) return(list())
+  nm <- names(w)
+  if (is.null(nm) || anyNA(nm) || any(nm == ""))
+    stop(sprintf("wrapper: als Liste braucht jedes Element einen Namen (Name = Asset, z. B. list(%s = wrapper_config(...))).",
+                 assets[1]), call. = FALSE)
+  if (anyDuplicated(nm))
+    stop(sprintf("wrapper: doppelte Namen %s; jedes Asset nur einmal angeben.",
+                 paste0("'", unique(nm[duplicated(nm)]), "'", collapse = ", ")), call. = FALSE)
+  unk <- setdiff(nm, assets)
+  if (length(unk))
+    stop(sprintf("wrapper: %s %s (Assets: %s).", paste0("'", unk, "'", collapse = ", "),
+                 if (length(unk) == 1L) "ist kein Asset der Strategie" else "sind keine Assets der Strategie",
+                 paste(assets, collapse = ", ")), call. = FALSE)
+  for (k in nm)
+    if (!inherits(w[[k]], "SimLevWrapperConfig"))
+      stop(sprintf("wrapper: Eintrag '%s' muss ein Objekt aus wrapper_config() sein, nicht %s.", k,
+                   paste(class(w[[k]]), collapse = "/")), call. = FALSE)
+  w
 }
 
 #' Bekannte Portfolio-Vorlagen
@@ -788,7 +841,9 @@ strategy_from_weights <- function(weights, ...) {
 #'   Unbekannte Rollen und mehrere Rollen auf derselben Spalte sind ein
 #'   Fehler.
 #' @param ... Weitere Argumente fuer [strategy_from_weights()] bzw.
-#'   [asset_config()] (z. B. \code{spread}, \code{partial_exemption}).
+#'   [asset_config()] (z. B. \code{spread}, \code{partial_exemption},
+#'   \code{wrapper}); Namen je Asset (auch einer \code{wrapper}-Liste)
+#'   beziehen sich auf die Namen nach \code{map}.
 #' @return Mit \code{name}: Objekt der Klasse \code{strategy} fuer
 #'   [simulation()]; ohne \code{name}: data.frame aller Vorlagen mit
 #'   \code{template}, \code{role} und \code{weight} (Anteil, 0.6 = 60 %).

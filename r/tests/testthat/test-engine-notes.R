@@ -1,5 +1,5 @@
 # Engine-Erweiterungen: A Einkommensteuertarif (taxable_income), B undefined_metrics, C summary-Renditen,
-# D Warnung funds_fee/bonus_fee, E open_lots
+# D Bausteine (ohne den alten Fondsmodus), E open_lots
 .en_days <- function(a, b) seq.Date(as.Date(a), as.Date(b), by = "day")
 .en_sim <- function(...) suppressWarnings(suppressMessages(simulation(...)))
 # Unabhaengige Handrechnung § 32a Abs. 1 EStG (VZ 2026) fuer Erwartungswerte
@@ -377,28 +377,14 @@ test_that("C summary: total_return_twr, return_on_invested, Alias total_return",
   expect_equal(s0$return_on_invested, s0$total_return_twr, tolerance = 1e-12)
 })
 
-# ---------------------------------------------------------------- D Fondsmodus und Steuern
-test_that("D Fondsmodus mit tax_profile(); Bausteine pruefen ihre Klasse", {
+# ---------------------------------------------------------------- D Bausteine und Steuern
+test_that("D Bausteine pruefen ihre Klasse; simulation(funds = ) gibt es nicht mehr (Etappe 6.5c)", {
   df <- data.frame(date = .en_days("2020-01-01", "2020-03-01"), A = 100)
   st <- create_strategy(A = asset_config("etf", "bnh", share = 1))
-  # Fondsmodus mit eigenen Steuern (Kirchensteuer, Satz) wie bis 6.2 mit tax_mode = "funds"
-  dg <- data.frame(date = .en_days("2020-01-01", "2020-12-31")); dg$A <- seq(100, 160, length.out = nrow(dg))
-  r9 <- simulation(dg, st, funds = funds_costs(), tax = tax_profile(church_tax = 9), liquidate = TRUE)
-  f9 <- SimLev:::.simulation_flat(dg, st, tax_mode = "funds", church_tax = 9, liquidate = TRUE)
-  expect_identical(r9$worth, f9$worth)
-  expect_identical(r9$tax_report, f9$tax_report)
-  r0 <- simulation(dg, st, funds = funds_costs(), liquidate = TRUE)
-  expect_true(r9$tax_report$total_taxes_paid > r0$tax_report$total_taxes_paid)
-  r20 <- simulation(dg, st, funds = funds_costs(), tax = tax_profile(rate = 20), liquidate = TRUE)
-  expect_identical(r20$worth, SimLev:::.simulation_flat(dg, st, tax_mode = "funds", tax_rate = 20, liquidate = TRUE)$worth)
-  expect_warning(simulation(df, st, funds = funds_costs(), tax = tax_profile(harvest = harvest_rule())),
-                 "wirkt nicht im Fondsmodus", fixed = TRUE)
-  expect_warning(simulation(df, st, funds = funds_costs(), tax = tax_profile(income = income_tariff(50000))),
-                 "income_tariff() (tax_profile(income =)) wirkt nicht im Fondsmodus", fixed = TRUE)
-  expect_no_warning(simulation(df, st, funds = funds_costs(), tax = tax_profile(sparer_pauschbetrag = 801)))
-  expect_no_warning(simulation(df, st, funds = funds_costs(fee = 0.5)))
   expect_no_warning(simulation(df, st, tax = tax_profile()))
-  expect_error(simulation(df, st, funds = list(fee = 1)), "funds muss NULL oder ein Objekt aus funds_costs\\(\\)")
+  expect_error(simulation(df, st, tax = list(rate = 20)), "tax muss NULL oder ein Objekt aus tax_profile\\(\\)")
+  # alter Fondsmodus: der uebliche Fehler fuer ein unbekanntes Argument, keine Sonderbehandlung
+  expect_error(simulation(df, st, funds = funds_costs()), "(funds = funds_costs())", fixed = TRUE)
   expect_error(simulation(df, st, tax = tax_profile(rate = 25, church_tax = 9)), "rate und church_tax schlie\u00dfen sich aus")
 })
 

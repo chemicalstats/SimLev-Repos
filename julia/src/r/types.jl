@@ -240,11 +240,24 @@ function Base.setproperty!(df::RFrame, s::Symbol, v)
     df[String(s)] = v
 end
 Base.propertynames(df::RFrame, private::Bool = false) = Tuple(Symbol.(_rf(df, :names)))
-"Zeilen auswählen (Vektor von Indizes oder Bool-Maske), wie `df[rows, , drop = FALSE]`."
+"""
+Klassen, deren Zeilenauswahl mit [`rows`](@ref) eine gewöhnliche Tabelle ohne Klasse und ohne Attribute
+ergibt (R: eigene `[`-Methode, z. B. `[.SimLevWrapperNav`, Etappe 8.0); Eintrag über `register_plain_rows!`.
+"""
+const _PLAIN_ROWS = Set{String}()
+register_plain_rows!(cls::AbstractString) = (push!(_PLAIN_ROWS, String(cls)); nothing)
+
+"""
+Zeilen auswählen (Vektor von Indizes oder Bool-Maske), wie `df[rows, , drop = FALSE]`. Klasse und Attribute
+bleiben, außer für Klassen aus `register_plain_rows!` (dann gewöhnliche Tabelle, wie R mit eigener `[`-Methode).
+"""
 function rows(df::RFrame, idx)
     ii = idx isa AbstractVector{Bool} ? findall(idx) : collect(idx)
+    cl = _rf(df, :class)
+    plain = !isempty(_PLAIN_ROWS) && any(in(_PLAIN_ROWS), cl)
     RFrame(copy(_rf(df, :names)), AbstractVector[c[ii] for c in _rf(df, :cols)], length(ii),
-           _rf(df, :rownames) === nothing ? nothing : _rf(df, :rownames)[ii], copy(_rf(df, :attrs)), copy(_rf(df, :class)))
+           _rf(df, :rownames) === nothing ? nothing : _rf(df, :rownames)[ii],
+           plain ? Dict{String,Any}() : copy(_rf(df, :attrs)), plain ? String[] : copy(cl))
 end
 Base.copy(df::RFrame) = RFrame(copy(_rf(df, :names)), AbstractVector[copy(c) for c in _rf(df, :cols)], nrow(df),
                                _rf(df, :rownames) === nothing ? nothing : copy(_rf(df, :rownames)),

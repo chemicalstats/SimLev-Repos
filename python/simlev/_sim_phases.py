@@ -15,6 +15,9 @@ from ._r.rformat import r_as_character, r_deparse, r_format, r_format1, r_round
 from ._r.rnum import r_median, r_sum
 from .config import _match_arg
 from ._tax_tariff import SimLevTaxTariff, tax_tariff
+from .config import _cls_all, _is_wrapper, _strategy_columns, _strategy_wrappers
+from ._sim_blocks import SimLevSplitRule
+from .wrapper import _nav_raw, _wrapper_nav_calc
 from ._r.rnum import NA_REAL as NA  # R's NA_real_ (Nutzlast 1954)
 from ._sim_base import (
     _FEE,
@@ -67,14 +70,14 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
                       balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
                       marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                       use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
-                      funds_fee, bonus_fee, fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
+                      fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
                       order_fee, dca_fee, harvest_mode, harvest_day, taxable_income, tariff, given,
                       blocks=False) -> dict:
     """Phase 1 (``.sim_check_inputs``). ``tariff`` = Argument ``tax_tariff`` von ``_simulation_flat``;
     ``blocks=True``: Aufruf aus ``simulation()`` mit Bausteinen (Prüfungen der Bausteine entfallen hier,
     Meldungen nennen die Bausteine)."""
-    tax_mode = _match_arg(tax_mode, ("none", "person", "funds"), "tax_mode")
-    if not isinstance(data, (pd.DataFrame, Mapping)):
+    tax_mode = _match_arg(tax_mode, ("none", "person"), "tax_mode")
+    if not isinstance(data, (pd.DataFrame, Mapping, _Frame)):
         _stop("simulation: data muss ein data.frame mit Spalte 'date' und je Asset einer Kursspalte sein, nicht %s."
               % ("fehlend" if data is None else _r_class_name(data)))
     if strategy is None or len(strategy) == 0:
@@ -118,9 +121,23 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
         if not isinstance(at, str) or at not in ("bnh", "signal"):
             _stop("simulation: trading %s von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\"."
                   % (r_deparse(at), nm))
+        if a.get("wrapper") is not None:   # Fonds-Wrapper (Etappe 6.5c, wrapper.py)
+            if not _is_wrapper(a["wrapper"]):
+                _stop("simulation: wrapper von Asset '%s' muss ein Objekt aus wrapper_config() sein, nicht %s."
+                      % (nm, _cls_all(a["wrapper"])))
+            if at != "bnh":
+                _stop("simulation: Asset '%s' ist ein Fonds-Wrapper; daf\u00fcr ist nur trading = \"bnh\" m\u00f6glich "
+                      "(keine Signale auf den Anteilswert)." % nm)
     if "date" not in fr:
         _stop("simulation: Spalte 'date' fehlt in 'data'.")
-    miss = [nm for nm in strat if nm not in fr]
+    # Fonds-Wrapper: Asset-Name ist keine Kursspalte; gebraucht werden die inneren Spalten (_strategy_columns)
+    wraps = _strategy_wrappers(strat)
+    coll = [w for w in wraps if w in fr.names]
+    if coll:
+        _stop("simulation: Asset '%s' ist ein Fonds-Wrapper (asset_config(wrapper = )); 'data' darf keine Spalte "
+              "gleichen Namens enthalten (der Anteilswert wird aus den inneren Spalten gerechnet). Spalte umbenennen "
+              "oder entfernen." % coll[0])
+    miss = [nm for nm in _strategy_columns(strat) if nm not in fr]
     if miss:
         _stop("simulation: %s %s in 'data'; je Asset der Strategie wird eine Spalte gleichen Namens erwartet "
               "(vorhanden: %s)." % ("Kursspalte" if len(miss) == 1 else "Kursspalten",
@@ -150,9 +167,11 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     if np.isnan(dvals).any():
         _stop("simulation: Spalte 'date' enth\u00e4lt NA (erstmals in Zeile %d)." % (int(np.flatnonzero(np.isnan(dvals))[0]) + 1))
     fa_m, fa_cols, fa_n = _filled_matrix(filled_attr)
+    resorted = False
     if np.any(np.diff(dvals) < 0):
         o = np.argsort(dvals, kind="stable")
         fr.take(o)
+        resorted = True
         if fa_m is not None and fa_m.shape[0] == len(o):
             fa_m = fa_m[o, :]
         _message("Hinweis: 'data' war nicht aufsteigend nach Datum sortiert und wurde sortiert.")
@@ -169,6 +188,29 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     if dup_first is not None:
         _stop("simulation: Datum %s kommt in 'data' mehrfach vor (%d doppelte Zeilen); je Tag genau eine Zeile."
               % (fmt_date(int(dup_first)), n_dup))
+    # Fonds-Wrapper: Anteilswert je Wrapper-Asset aus den inneren Spalten (wrapper.py) als Kursspalte mit dem
+    # Asset-Namen anhängen (NA vor dem Beginn und an Tagen ohne inneren Kurs); danach ist das Asset ein
+    # gewöhnliches Asset ohne wrapper. splits gelten für die inneren Spalten, nicht für den Anteilswert.
+    wrapper_navs = None
+    if wraps:
+        d_in = fr.copy()
+        if fa_m is not None and fa_m.shape[0] == fr.nrow:
+            d_in.filled_attr = pd.DataFrame(fa_m, columns=fa_cols) if fa_cols is not None else fa_m
+        elif resorted:
+            d_in.filled_attr = None
+        sp = None
+        if _is_true(split_mode) and split_thresh is not None:
+            sp = SimLevSplitRule()
+            sp["thresh"] = _num_vec(split_thresh)
+        wrapper_navs = {nm: _wrapper_nav_calc(d_in, strat[nm]["wrapper"], sp, tag="Wrapper '%s'" % nm,
+                                              who="simulation: Wrapper '%s'" % nm) for nm in wraps}
+        dkey = {int(z): i for i, z in enumerate(fr.get("date"))}
+        for nm in wraps:
+            v = np.full(fr.nrow, NA)
+            ndays, nnav = _nav_raw(wrapper_navs[nm])
+            v[np.array([dkey[int(z)] for z in ndays], dtype=np.int64)] = nnav
+            fr.set(nm, v, "numeric")
+            del strat[nm]["wrapper"]
     nrow = fr.nrow
     if filled_attr is not None and fa_n != nrow:
         _warn("simulation: Attribut 'filled' von 'data' hat %d Zeilen, 'data' aber %d (z. B. nach Zeilenauswahl einer "
@@ -251,9 +293,6 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
                   % r_format1(church_tax))
     if not blocks and _is_true(harvest_mode) and tax_mode != "person":
         _warn("simulation: harvest_mode wirkt nur mit tax_mode = \"person\" und wird hier ignoriert.")
-    elif blocks and _is_true(harvest_mode) and tax_mode != "person":   # Fondsmodus mit tax_profile(harvest=)
-        _warn("simulation: harvest (tax_profile(harvest = harvest_rule())) wirkt nicht im Fondsmodus "
-              "(funds = funds_costs()) und wird hier ignoriert.")
 
     def show_arg(x):
         return "NULL" if x is None else r_deparse(x)
@@ -338,22 +377,10 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
                   "obere). Ein Split setzt den Kurs auf 100; liegt 100 au\u00dferhalb der Schwellen, folgt danach an jedem "
                   "Tag ein weiterer Split (mit fractions = FALSE jeweils mit Spitzenausgleich)."
                   % (r_format1(st_v[0]), r_format1(st_v[1])))
-    if tax_mode != "funds" and (given["funds_fee"] or given["bonus_fee"]):
-        gv = [a for a, g in (("funds_fee", given["funds_fee"]), ("bonus_fee", given["bonus_fee"])) if g]
-        _warn("simulation: %s wirkt nur bei tax_mode = \"funds\" (hier tax_mode = \"%s\") und wird ignoriert."
-              % (" und ".join(gv), tax_mode))
-    if tax_mode == "funds" and not blocks:
-        for a, x in (("funds_fee", funds_fee), ("bonus_fee", bonus_fee)):
-            if not _is_num(x) or math.isnan(float(x)) or x < 0 or x > 100:
-                _stop("simulation: %s muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. %s), nicht %s."
-                      % (a, "0.95 f\u00fcr 0,95 % p. a." if a == "funds_fee" else "5 f\u00fcr 5 %",
-                         ", ".join(r_format(x)) if x is not None else "NULL"))     # format(NULL) = "NULL"
 
     tariff_on = taxable_income is not None and tax_mode == "person"
-    if taxable_income is not None and tax_mode != "person":
-        _warn("simulation: income_tariff() (tax_profile(income =)) wirkt nicht im Fondsmodus (funds = funds_costs()) "
-              "und wird ignoriert." if blocks else
-              "simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"%s\") und wird ignoriert." % tax_mode)
+    if taxable_income is not None and tax_mode != "person":   # nur ohne Bausteine möglich (income_tariff() in tax_profile())
+        _warn("simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"%s\") und wird ignoriert." % tax_mode)
     if taxable_income is None and tariff is not None:
         _warn("simulation: tax_tariff wirkt nur zusammen mit taxable_income (zu versteuerndes Einkommen je Jahr) und "
               "wird ignoriert.")
@@ -474,7 +501,8 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
             "balance_mode": balance_mode, "balance_days": balance_days,
             "balance_thresh": balance_thresh, "balance_thresh_type": balance_thresh_type,
             "base_rate": base_rate, "risk_free": risk_free, "harvest_mode": harvest_mode,
-            "split_mode": split_mode, "event_col": event_col, "pre_filled": pre_filled}
+            "split_mode": split_mode, "event_col": event_col, "pre_filled": pre_filled,
+            "no_split": list(wraps), "wrappers": wrapper_navs if _is_true(details) else None}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -560,7 +588,7 @@ def _sim_build_state(fr: _Frame, strategy: dict, start_value: float, start_date:
     sim: dict = {
         "assets": {}, "status": {}, "market": {}, "trades": {}, "report": {},
         "totals": {
-            "total_value": start_value, "total_taxes": 0.0, "loss_capital_gains": 0.0, "loss_private_sales": 0.0,
+            "total_taxes": 0.0, "loss_capital_gains": 0.0, "loss_private_sales": 0.0,
             "private_sale_gains_ytd": 0.0, "private_sale_losses_ytd": 0.0,
             "sparer_pauschbetrag_annual": sparer_pauschbetrag,
             "sparer_pauschbetrag_remaining": sparer_pauschbetrag if use_sparer_pauschbetrag else 0.0,
@@ -621,7 +649,7 @@ def _sim_build_state(fr: _Frame, strategy: dict, start_value: float, start_date:
             "spread_rate": (0.0 if spread_a is None else float(spread_a)) / 100,
         }
         sim["trades"][name] = {"buys": [], "buy_count": 0, "sells": [], "sell_count": 0, "taxes": [],
-                               "tax_count": 0, "fees": [], "fee_count": 0, "fifo_front": 1}
+                               "tax_count": 0, "fifo_front": 1}
         st = sim["status"][name]
         worth0, money0, total0 = np.zeros(n), np.zeros(n), np.zeros(n)
         worth0[0], money0[0], total0[0] = st["worth"], st["money"], st["total"]
@@ -649,7 +677,8 @@ def _as_logical_col(fr: _Frame, col: str) -> np.ndarray:
 def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, stopp_date: int, liquidate,
                         dca_mode, dca_span, dca_unit, dca_days, dca_value, dca_anchor, dca_start, dca_skip,
                         balance_mode, balance_span, balance_unit, balance_days, balance_anchor, balance_start,
-                        balance_skip, event_col, event_mode, event_weight, split_mode, split_thresh, blocks=False) -> dict:
+                        balance_skip, event_col, event_mode, event_weight, split_mode, split_thresh, blocks=False,
+                        no_split=()) -> dict:
     flag_date = np.arange(start_date, stopp_date + 1, dtype=np.int64)
     n = flag_date.size
     if ".filled" in fr:
@@ -710,7 +739,8 @@ def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, 
         else:
             flag_rebalance = flag_event.copy()
     flag_trade = ~flag_rebalance & (flag_date != stopp_date) & ~flag_filled
-    flag_split = _calculate_split_flags(sim, 100.0, split_mode, flag_date, split_thresh)
+    flag_split = _calculate_split_flags(sim, 100.0, split_mode, flag_date, split_thresh,
+                                        skip=no_split)   # Fonds-Wrapper: keine Splits auf den Anteilswert
     flag_dca_n = flag_dca.astype(np.float64)
     if flag_filled.any():
         mon = [_ym(int(z)) for z in flag_date]
@@ -761,7 +791,7 @@ def _sim_init_weights(sim: dict, flag_assets: list, flag_date: np.ndarray, start
     return {"sim": sim, "initial_assets": initial_assets}
 
 
-def _sim_build_schedule(sim: dict, fl: dict, stopp_date: int, tax_mode: str, harvest_mode, harvest_day) -> dict:
+def _sim_build_schedule(sim: dict, fl: dict, tax_mode: str, harvest_mode, harvest_day) -> dict:
     flag_date, flag_filled, flag_assets = fl["flag_date"], fl["flag_filled"], fl["flag_assets"]
     n = flag_date.size
     asset_starts = [int(sim["assets"][nm]["start"]) for nm in flag_assets]
@@ -801,15 +831,8 @@ def _sim_build_schedule(sim: dict, fl: dict, stopp_date: int, tax_mode: str, har
                   and not flag_filled[i]]
             if js:
                 flag_harvest[js[0]] = True
-    flag_fund_fee = (tax_mode == "funds") & (fl["flag_taxes"] | (flag_date == stopp_date))
-    flag_liquidate = fl["flag_liquidate"]
-    if tax_mode == "funds" and flag_liquidate.any() and not flag_liquidate[n - 1]:
-        liq_i = int(np.flatnonzero(flag_liquidate).max())
-        flag_fund_fee = flag_fund_fee.copy()
-        flag_fund_fee[liq_i + 1:] = False
-        flag_fund_fee[liq_i] = True
     flag_definite = flag_active | fl["flag_split"] | fl["flag_dca"] | fl["flag_rebalance"] | fl["flag_taxes"] | \
-        flag_liquidate | flag_harvest | flag_fund_fee
+        fl["flag_liquidate"] | flag_harvest
     strategy_types = {nm: sim["assets"][nm]["style"] for nm in flag_assets}
     has_bnh = any(t == "bnh" for t in strategy_types.values())
     has_signal = any(t == "signal" for t in strategy_types.values())
@@ -843,7 +866,7 @@ def _sim_build_schedule(sim: dict, fl: dict, stopp_date: int, tax_mode: str, har
     flag_individual = flag_slow_path | flag_year_change
     out = dict(fl)
     out.update({"asset_starts": asset_starts, "flag_active": flag_active, "asset_start_indices": asset_start_indices,
-                "flag_harvest": flag_harvest, "flag_fund_fee": flag_fund_fee, "strategy_types": strategy_types,
+                "flag_harvest": flag_harvest, "strategy_types": strategy_types,
                 "tax_regimes": tax_regimes, "spread_rates": spread_rates, "flag_slow_path": flag_slow_path,
                 "flag_year_change": flag_year_change, "flag_vp_settle": flag_vp_settle,
                 "individual_days": [int(i) + 1 for i in np.flatnonzero(flag_individual)], "n_total_days": n})

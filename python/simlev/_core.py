@@ -23,8 +23,17 @@ import numpy as np
 
 from ._dates import days_from_civil, is_leap, ymd
 from ._r import env as _env
+from ._r.rnum import c_div as _dv, n_add as _n_add, n_mul as _n_mul
 
 LD = np.longdouble
+
+# NaN-Nutzlast (Etappe 8.0): Treffen in einer Addition oder Multiplikation zwei NaN
+# aufeinander (etwa NA und NaN), behält R (x86-64/SSE) das NaN des ersten Operanden der
+# Maschinenanweisung, die der Compiler gewählt hat; Python wählt je nach Zustand des
+# Interpreters (spezialisierter Bytecode oder nicht) verschieden. Deshalb wird ein
+# NaN-Ergebnis mit ``n_add``/``n_mul`` (``simlev._r.rnum``) in der Operandenfolge des
+# R-Baus (objdump von ``SimLev.so``, gcc -O2) neu gebildet; ohne NaN rechnet der Port wie
+# bisher. Subtraktion und Division brauchen das nicht (nur eine Operandenfolge).
 
 
 def _min(a: float, b: float) -> float:
@@ -50,10 +59,16 @@ def dca_flows_allocation(sim: dict, name: str, flows: float, index: int) -> None
     rp = sim["report"][name]
     i = index - 1
     rp["flows"][i] = flows
-    money = st["money"] + flows
+    m0 = st["money"]
+    money = m0 + flows
+    if money != money:
+        money = _n_add(flows, m0)                # R: flows + money
     st["money"] = money
     rp["money"][i] = money
-    total = money + st["worth"]
+    worth = st["worth"]
+    total = money + worth
+    if total != total:
+        total = _n_add(money, worth)
     st["total"] = total
     rp["total"][i] = total
 
@@ -66,14 +81,24 @@ def calculate_buy_report(sim: dict, name: str, index: int, trade_count: float,
         return
     st = sim["status"][name]
     rp = sim["report"][name]
-    count = st["count"] + trade_count
+    c0 = st["count"]
+    count = c0 + trade_count
+    if count != count:
+        count = _n_add(c0, trade_count)
     st["count"] = count
     st["price"] = market_price
     worth = count * market_price
+    if worth != worth:
+        worth = _n_mul(count, market_price)
     st["worth"] = worth
-    money = st["money"] - (trade_count * trade_price)
+    cost = trade_count * trade_price
+    if cost != cost:
+        cost = _n_mul(trade_count, trade_price)
+    money = st["money"] - cost
     st["money"] = money
     total = worth + money
+    if total != total:
+        total = _n_add(worth, money)
     st["total"] = total
     i = index - 1
     rp["worth"][i] = worth
@@ -94,10 +119,21 @@ def calculate_sell_report(sim: dict, name: str, index: int, trade_count: float,
     st["count"] = count
     st["price"] = market_price
     worth = count * market_price
+    if worth != worth:
+        worth = _n_mul(market_price, count)     # R: market_price * count
     st["worth"] = worth
-    money = st["money"] + ((trade_count * trade_price) - capital_gains_tax)
+    proceeds = trade_count * trade_price
+    if proceeds != proceeds:
+        proceeds = _n_mul(trade_count, trade_price)
+    net = proceeds - capital_gains_tax
+    m0 = st["money"]
+    money = m0 + net
+    if money != money:
+        money = _n_add(net, m0)                  # R: (proceeds - tax) + money
     st["money"] = money
     total = worth + money
+    if total != total:
+        total = _n_add(worth, money)
     st["total"] = total
     i = index - 1
     rp["worth"][i] = worth
@@ -117,17 +153,26 @@ def calculate_total_report(sim: dict, assets: list[str], index: int) -> None:
         rp = report[name]
         price = float(market[name]["asset_price"][i])
         st["price"] = price
-        worth = price * st["count"]
+        count = st["count"]
+        worth = price * count
+        if worth != worth:
+            worth = _n_mul(price, count)
         st["worth"] = worth
         rp["worth"][i] = worth
         money = st["money"]
         rp["money"][i] = money
         total = money + worth
+        if total != total:
+            total = _n_add(worth, money)         # R: worth + money
         st["total"] = total
         rp["total"][i] = total
     total_worth = 0.0
     for name in assets:
-        total_worth += status[name]["total"]
+        t = status[name]["total"]
+        tw = total_worth + t
+        if tw != tw:
+            tw = _n_add(total_worth, t)
+        total_worth = tw
     for name in assets:
         st = status[name]
         w = st["total"] / total_worth if total_worth > 0 else 0.0
@@ -170,10 +215,18 @@ def perform_market_update(sim: dict, assets: list[str], index: int) -> None:
         rp = report[name]
         price = float(market[name]["asset_price"][i])
         money = st["money"]
-        worth = st["count"] * price
+        count = st["count"]
+        worth = count * price
+        if worth != worth:
+            worth = _n_mul(count, price)
         total = worth + money
+        if total != total:
+            total = _n_add(worth, money)
         totals.append(total)
-        total_portfolio += total
+        tp = total_portfolio + total
+        if tp != tp:
+            tp = _n_add(total_portfolio, total)
+        total_portfolio = tp
         rp["worth"][i] = worth
         rp["money"][i] = money
         rp["flows"][i] = 0.0
@@ -198,22 +251,45 @@ def batch_market_update(sim: dict, assets: list[str], start_idx: int, end_idx: i
     s, e = start_idx - 1, end_idx
     status, market, report = sim["status"], sim["market"], sim["report"]
     portfolio = np.zeros(n_days, dtype=np.float64)
+    parts = []
+    nan = False
     for name in assets:
         st = status[name]
-        rp = report[name]
         count = st["count"]
         money = st["money"]
         prices = market[name]["asset_price"][s:e]
         worth = count * prices
         total = worth + money
+        nan = nan or bool(np.isnan(total).any())
+        parts.append((count, money, prices, worth, total))
+    if nan:
+        # NaN: Tag für Tag mit der Operandenfolge des R-Baus (price * count, worth + money,
+        # portfolio + total); numpy wählt bei zwei NaN je nach Feldlänge anders
+        port = [0.0] * n_days
+        for k, (count, money, prices, _w, _t) in enumerate(parts):
+            wl = []
+            tl = []
+            for d, price in enumerate(np.asarray(prices, dtype=np.float64).tolist()):
+                w = _n_mul(price, count)
+                t = _n_add(w, money)
+                wl.append(w)
+                tl.append(t)
+                port[d] = _n_add(port[d], t)
+            parts[k] = (count, money, prices, np.array(wl, dtype=np.float64), np.array(tl, dtype=np.float64))
+    for name, (count, money, prices, worth, total) in zip(assets, parts):
+        st = status[name]
+        rp = report[name]
         rp["worth"][s:e] = worth
         rp["money"][s:e] = money
         rp["flows"][s:e] = 0.0
         rp["total"][s:e] = total
-        portfolio += total
+        if not nan:
+            portfolio += total
         st["price"] = float(prices[-1])
         st["worth"] = float(worth[-1])
         st["total"] = float(total[-1])
+    if nan:
+        portfolio = np.array(port, dtype=np.float64)
     pos = portfolio > 0.0
     safe = np.where(pos, portfolio, 1.0)
     for name in assets:
@@ -244,7 +320,11 @@ def _calculate_fifo_price(buys: list, units: float, front_index: int) -> float:
         rem = b["remaining"]
         if rem > 0:
             sell = _min(rem, units_trade)
-            total_price += sell * b["price"]
+            cost = sell * b["price"]
+            tp = total_price + cost
+            if tp != tp:
+                tp = _n_add(cost, total_price)   # R: price * sell + total_price
+            total_price = tp
             units_trade -= sell
         i += 1
     return total_price / units if units > 0 else 0.0
@@ -300,16 +380,20 @@ def _calculate_private_sale_tax(buys: list, front_index: int, trade_count: float
                 one_year_later = days_from_civil(y + 1, m, d)
             is_exempt = current_date > one_year_later
             lot_gain = sell * (sell_price - buy_price)
+            # R: Gewinn als lot_gain + Summe, Verlust als Summe - lot_gain (das NaN von
+            # lot_gain behält so sein Vorzeichen; -lot_gain würde es umkehren)
             if is_exempt:
                 if lot_gain >= 0:
-                    eg += lot_gain
+                    x = lot_gain + eg
+                    eg = x if x == x else _n_add(lot_gain, eg)
                 else:
-                    el += -lot_gain
+                    el = el - lot_gain
             else:
                 if lot_gain >= 0:
-                    tg += lot_gain
+                    x = lot_gain + tg
+                    tg = x if x == x else _n_add(lot_gain, tg)
                 else:
-                    tl += -lot_gain
+                    tl = tl - lot_gain
             units_remaining -= sell
         i += 1
     return {
@@ -317,7 +401,7 @@ def _calculate_private_sale_tax(buys: list, front_index: int, trade_count: float
         "exempt_loss": el,
         "taxable_gain": tg,
         "taxable_loss": tl,
-        "total_gain": eg - el + tg - tl,
+        "total_gain": _n_add(eg - el, tg) - tl,
     }
 
 
@@ -418,7 +502,8 @@ def p20_tax(trade_gain: float, bonus: float, totals: dict, tax_rate: float, use_
     ext = _env.ext()
     if ext is not None:
         return ext.sim_p20_tax(trade_gain, bonus, totals, tax_rate, use_spb)
-    adjusted_gain = trade_gain * (1.0 - bonus)
+    # NaN-Nutzlast: Operandenfolge des R-Baus über n_add/n_mul (siehe Modulanfang)
+    adjusted_gain = _n_mul(1.0 - bonus, trade_gain)
     if adjusted_gain < 0:
         totals["loss_capital_gains"] = totals["loss_capital_gains"] - adjusted_gain
         totals["cgt_loss_added_ytd"] = _tget(totals, "cgt_loss_added_ytd") - adjusted_gain
@@ -426,18 +511,18 @@ def p20_tax(trade_gain: float, bonus: float, totals: dict, tax_rate: float, use_
     pool = totals["loss_capital_gains"]
     loss_offset = _min(adjusted_gain, pool)
     totals["loss_capital_gains"] = pool - loss_offset
-    totals["cgt_loss_used_ytd"] = _tget(totals, "cgt_loss_used_ytd") + loss_offset
+    totals["cgt_loss_used_ytd"] = _n_add(_tget(totals, "cgt_loss_used_ytd"), loss_offset)
     gain_after_loss = adjusted_gain - loss_offset
     spb_offset = 0.0
     spb_rem = totals["sparer_pauschbetrag_remaining"]
     if use_spb and spb_rem > 0:
         spb_offset = _min(gain_after_loss, spb_rem)
         totals["sparer_pauschbetrag_remaining"] = spb_rem - spb_offset
-        totals["sparer_pauschbetrag_used_total"] = totals["sparer_pauschbetrag_used_total"] + spb_offset
+        totals["sparer_pauschbetrag_used_total"] = _n_add(spb_offset, totals["sparer_pauschbetrag_used_total"])
     taxable_gain = gain_after_loss - spb_offset
-    totals["cgt_base_taxed_ytd"] = _tget(totals, "cgt_base_taxed_ytd") + taxable_gain
-    tax = taxable_gain * tax_rate
-    totals["total_taxes"] = totals["total_taxes"] + tax
+    totals["cgt_base_taxed_ytd"] = _n_add(_tget(totals, "cgt_base_taxed_ytd"), taxable_gain)
+    tax = _n_mul(tax_rate, taxable_gain)
+    totals["total_taxes"] = _n_add(tax, totals["total_taxes"])
     return {"tax": tax, "spb_used": spb_offset}
 
 
@@ -445,20 +530,20 @@ def vp_tax(flat_rate_value: float, bonus: float, totals: dict, tax_rate: float, 
     ext = _env.ext()
     if ext is not None:
         return ext.sim_vp_tax(flat_rate_value, bonus, totals, tax_rate, use_spb)
-    taxable_flat_rate = flat_rate_value * (1.0 - bonus)
+    taxable_flat_rate = _n_mul(1.0 - bonus, flat_rate_value)
     pool = totals["loss_capital_gains"]
     loss_offset = _min(taxable_flat_rate, pool)
     totals["loss_capital_gains"] = pool - loss_offset
-    totals["cgt_loss_used_ytd"] = _tget(totals, "cgt_loss_used_ytd") + loss_offset
+    totals["cgt_loss_used_ytd"] = _n_add(_tget(totals, "cgt_loss_used_ytd"), loss_offset)
     vp_after_loss = taxable_flat_rate - loss_offset
     spb_offset = 0.0
     spb_rem = totals["sparer_pauschbetrag_remaining"]
     if use_spb and spb_rem > 0:
         spb_offset = _min(vp_after_loss, spb_rem)
         totals["sparer_pauschbetrag_remaining"] = spb_rem - spb_offset
-        totals["sparer_pauschbetrag_used_total"] = totals["sparer_pauschbetrag_used_total"] + spb_offset
+        totals["sparer_pauschbetrag_used_total"] = _n_add(spb_offset, totals["sparer_pauschbetrag_used_total"])
     taxable_gain = vp_after_loss - spb_offset
-    totals["cgt_base_taxed_ytd"] = _tget(totals, "cgt_base_taxed_ytd") + _max(0.0, taxable_gain)
+    totals["cgt_base_taxed_ytd"] = _n_add(_max(0.0, taxable_gain), _tget(totals, "cgt_base_taxed_ytd"))
     tax = _max(0.0, taxable_gain * tax_rate)
     return {"tax": tax, "spb_used": spb_offset, "taxable_amount": taxable_flat_rate}
 
@@ -478,7 +563,20 @@ def _fifo_fast(units: float, cu: list, cc: list, prices: list) -> float:
     prev_cost = cc[lot_idx - 2]
     prev_units = cu[lot_idx - 2]
     rem = units - prev_units
-    return (prev_cost + rem * prices[lot_idx - 1]) / units
+    x = rem * prices[lot_idx - 1]
+    c = prev_cost + x
+    if c != c:
+        c = _n_add(x, prev_cost)                 # R: rem * price + prev_cost
+    return c / units
+
+
+def _cfloor(x: float) -> float:
+    """C ``floor`` (NaN und ±Inf unverändert, statt Ausnahme)."""
+    return float(math.floor(x)) if math.isfinite(x) else x
+
+
+def _cceil(x: float) -> float:
+    return float(math.ceil(x)) if math.isfinite(x) else x
 
 
 def sell_count(buys: list, front_index: int, target: float, trade_price: float,
@@ -568,7 +666,7 @@ def sell_count(buys: list, front_index: int, target: float, trade_price: float,
             tax = _max(gain - loss_pool, 0.0) * tax_rate
         return sell * trade_price - tax - target
 
-    initial = target / trade_price
+    initial = _dv(target, trade_price)
     lower = _max(1e-6, initial * 0.1)
     upper = _min(initial * 3.0, total_shares)
     f_lower = objective(lower)
@@ -600,8 +698,8 @@ def sell_count(buys: list, front_index: int, target: float, trade_price: float,
             sell = (lower + upper) * 0.5
 
     if not fractions:
-        tl = float(math.floor(sell))
-        tu = float(math.ceil(sell))
+        tl = _cfloor(sell)
+        tu = _cceil(sell)
         if tl < 1:
             tl = 1.0
         if tu > total_shares:

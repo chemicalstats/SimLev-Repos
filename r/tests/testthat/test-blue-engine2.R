@@ -43,36 +43,19 @@ test_that("R2-03: Attribut 'filled' mit falscher Zeilenzahl -> Warnung", {
   expect_gt(sum(r0$filled), 0)
 })
 
-test_that("R2-04: funds_fee/bonus_fee 0 bis 100, sonst Fehler", {
-  d <- mk_day(400, function(n) rep(100, n))
-  st <- create_strategy(A = asset_config("etf", share = 1, spread = 0))
+test_that("R2-04: funds_costs(): fee/performance_fee 0 bis 100, sonst Fehler", {
   for (v in list(-1, NA, 150, NULL, "1"))
     expect_error(funds_costs(fee = v), "funds_costs: fee muss eine Zahl in Prozent")
   for (v in list(-20, 150, NA))
     expect_error(funds_costs(performance_fee = v), "funds_costs: performance_fee muss eine Zahl in Prozent")
-  expect_no_error(simulation(d, st, funds = funds_costs(fee = 0.95, performance_fee = 0)))
-  expect_no_error(simulation(d, st, funds = funds_costs(fee = 100, performance_fee = 100)))
-  expect_no_error(simulation(d, st))   # ohne Fondsmodus ohne Wirkung
-})
-
-test_that("R2-06: Fondsmodus, Ende auf aufgefuelltem Tag: Kosten vor Steuer", {
-  cal <- seq.Date(as.Date("2021-01-01"), as.Date("2022-01-31"), by = "day")
-  d <- data.frame(date = cal, A = 100 * 1.0015^(seq_along(cal) - 1))
-  wd <- d[!format(d$date, "%u") %in% c("6", "7"), ]
-  al <- series_align(A = wd, end = "2021-12-25")                     # endet Sa 25.12.
-  st <- create_strategy(A = asset_config("etf", share = 1, spread = 0))
-  o <- capture.output(r <- suppressMessages(simulation(al, st, funds = funds_costs(), liquidate = TRUE, details = TRUE)))
-  expect_true(any(grepl("^Fondskosten:\tFondsgeb\u00fchren .* am 2021-12-24", o)))
-  expect_false(any(grepl("Fondsgeb\u00fchren .* am 2021-12-25", o)))
-  E <- tail(r$worth, 1); T <- r$tax_report$total_taxes_paid
-  expect_equal(T, 0.26375 * (E + T - 1e4), tolerance = 1e-9)
+  expect_no_error(funds_costs(fee = 0.95, performance_fee = 0))
+  expect_no_error(funds_costs(fee = 100, performance_fee = 100))
 })
 
 test_that("R2-07: Warnung zu marginal_tax_rate nur bei tax_mode = 'person'", {
   d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 400), A = 100, G = 50)
   st <- create_strategy(A = asset_config("etf", share = .8), G = asset_config("etc", share = .2, deliverable = TRUE))
   expect_no_warning(simulation(d, st))
-  expect_no_warning(simulation(d, st, funds = funds_costs()))
   expect_warning(simulation(d, st, tax = tax_profile()), "income_rate\\(marginal_rate\\)")
 })
 

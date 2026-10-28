@@ -303,8 +303,8 @@ function _sim_undefined_metrics(r::_Returns, statistics::RList, longest_dd::Int,
 end
 
 function _sim_compact_trades(sim::Sim)
-    return RList([sim.names[a] => (buys = sim.trades[a].buys, sells = sim.trades[a].sells, taxes = sim.trades[a].taxes,
-                                    fees = sim.trades[a].fees) for a in eachindex(sim.names)]...)
+    return RList([sim.names[a] => (buys = sim.trades[a].buys, sells = sim.trades[a].sells, taxes = sim.trades[a].taxes)
+                  for a in eachindex(sim.names)]...)
 end
 
 function _sim_result(R::Run, sim::Sim, r::_Returns, statistics::RList, undefined_metrics::RFrame, buys::RVector, sells::RVector)
@@ -386,6 +386,7 @@ function _sim_result(R::Run, sim::Sim, r::_Returns, statistics::RList, undefined
     res["open_lots"] = open_lots
     cfg.fees_on && (res["fees_paid"] = R.fee_paid)
     _is_true(cfg.harvest_mode) && (res["harvest_days"] = Date[from_days(flag_date[i]) for i in findall(fl.flag_harvest)])
+    cfg.wrappers !== nothing && length(cfg.wrappers) > 0 && (res["wrappers"] = cfg.wrappers)   # nur mit details = true
     return SimLevResult(res, _sim_compact_trades(sim))
 end
 
@@ -393,7 +394,7 @@ end
 
 """
     simulation(data, strategy; start_value = 10000, costs = sim_costs(), dca = nothing,
-               rebalance = nothing, splits = nothing, tax = nothing, funds = nothing, risk_free = 0,
+               rebalance = nothing, splits = nothing, tax = nothing, risk_free = 0,
                fractions = true, liquidate = false, details = false, io = stdout)
 
 Portfolio-Simulation (Backtest) mit Sparplan, Rebalancing und deutscher
@@ -401,9 +402,9 @@ Besteuerung; bitgleiche Portierung von `simulation()` aus dem R-Paket SimLev
 0.5.0. Die Einstellungen kommen als Bausteine (Etappe 6.3): `costs =
 sim_costs()` (Standard), `dca = dca_plan()`, `rebalance = rebalance_plan()`,
 `splits = split_rule()`, `tax = tax_profile()` (mit `income = income_rate()`
-oder `income_tariff()` und `harvest = harvest_rule()`) und `funds =
-funds_costs()`; `nothing` heißt aus. `funds` zusammen mit `tax` ist der
-Fondsmodus mit eigenen Steuern (Satz bzw. Kirchensteuer aus `tax_profile()`). Alle Raten und Schwellen **in Prozent** (`risk_free = 2` …).
+oder `income_tariff()` und `harvest = harvest_rule()`); `nothing` heißt aus. Den
+alten Fondsmodus (`funds = funds_costs()`) gibt es seit Etappe 6.5c nicht mehr.
+Alle Raten und Schwellen **in Prozent** (`risk_free = 2` …).
 
 `data`: RFrame, NamedTuple, Dict oder Pair-Vektor mit Spalte `date` (Date)
 und je Asset einer Kursspalte. `strategy`: Ergebnis von `create_strategy()`
@@ -415,10 +416,10 @@ als `ErrorException` (Texte wie in R). Die `details`-Ausgabe geht nach `io`.
 Rückgabe: [`SimLevResult`](@ref).
 """
 function simulation(data, strategy; start_value = 10000, costs = sim_costs(), dca = nothing, rebalance = nothing,
-                    splits = nothing, tax = nothing, funds = nothing, risk_free = 0, fractions = true,
+                    splits = nothing, tax = nothing, risk_free = 0, fractions = true,
                     liquidate = false, details = false, io::IO = stdout)
     @nospecialize
-    flat = _sim_from_blocks(costs, dca, rebalance, splits, tax, funds)
+    flat = _sim_from_blocks(costs, dca, rebalance, splits, tax)
     return _simulation_flat(data, strategy; start_value = start_value, risk_free = risk_free, fractions = fractions,
                             liquidate = liquidate, details = details, io = io, _blocks = true, flat...)
 end
@@ -439,12 +440,11 @@ function _simulation_flat(data, strategy; start_value = 10000, spread = nothing,
                     dca_skip = false, balance_mode = false, balance_span = nothing, balance_days = nothing,
                     balance_unit = ("month", "quarter", "year"), balance_anchor = ("start", "end"),
                     balance_start = nothing, balance_skip = false, balance_dca = false, balance_thresh = nothing,
-                    balance_thresh_type = ("absolute", "relative"), tax_mode = ("none", "person", "funds"),
+                    balance_thresh_type = ("absolute", "relative"), tax_mode = ("none", "person"),
                     tax_rate = _UNSET, marginal_tax_rate = _UNSET, use_guenstigerpruefung = false,
                     private_sale_threshold = 1000, sparer_pauschbetrag = 1000, use_sparer_pauschbetrag = true,
                     include_soli_on_income_tax = _UNSET, soli_rate_income_tax = _UNSET, base_rate = nothing,
-                    base_rate_flex = false, base_rate_data = nothing, funds_fee = _UNSET, bonus_fee = _UNSET,
-                    fractions = true, risk_free = 0, split_mode = false, split_thresh = nothing, event_col = nothing,
+                    base_rate_flex = false, base_rate_data = nothing, fractions = true, risk_free = 0, split_mode = false, split_thresh = nothing, event_col = nothing,
                     event_mode = _UNSET, event_weight = nothing, church_tax = 0, order_fee = nothing,
                     dca_fee = nothing, harvest_mode = false, harvest_day = "12-15", harvest_loss_pot = true,
                     taxable_income = nothing, tax_tariff = nothing, io::IO = stdout, _blocks::Bool = false)
@@ -452,22 +452,19 @@ function _simulation_flat(data, strategy; start_value = 10000, spread = nothing,
     given = _Given(Dict("tax_rate" => !(tax_rate isa _Unset), "marginal_tax_rate" => !(marginal_tax_rate isa _Unset),
                         "include_soli_on_income_tax" => !(include_soli_on_income_tax isa _Unset),
                         "soli_rate_income_tax" => !(soli_rate_income_tax isa _Unset),
-                        "funds_fee" => !(funds_fee isa _Unset), "bonus_fee" => !(bonus_fee isa _Unset),
                         "event_mode" => !(event_mode isa _Unset)))
     _blocks && (given = _Given(Dict(k => false for k in keys(given.d))))
     tax_rate = _val(tax_rate, 26.375)
     marginal_tax_rate = _val(marginal_tax_rate, nothing)
     include_soli_on_income_tax = _val(include_soli_on_income_tax, false)
     soli_rate_income_tax = _val(soli_rate_income_tax, 5.5)
-    funds_fee = _val(funds_fee, 0.95)
-    bonus_fee = _val(bonus_fee, 5)
     event_mode = _val(event_mode, ("additional", "replace"))
     details = details == true
     cfg, fr = _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_span, dca_days,
                                 balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
                                 marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                                 use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
-                                funds_fee, bonus_fee, fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
+                                fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
                                 order_fee, dca_fee, harvest_mode, harvest_day, taxable_income, tax_tariff, given, io,
                                 _blocks)
     split_thresh !== nothing && (split_thresh = _num_vec(split_thresh))
@@ -478,13 +475,13 @@ function _simulation_flat(data, strategy; start_value = 10000, spread = nothing,
                                  dca_unit, cfg.dca_days, cfg.dca_value, dca_anchor, dca_start, dca_skip, cfg.balance_mode,
                                  balance_span, balance_unit, cfg.balance_days, balance_anchor, balance_start,
                                  balance_skip, cfg.event_col, event_mode, event_weight, cfg.split_mode, split_thresh,
-                                 _blocks)
+                                 _blocks, cfg.no_split)
     cfg.event_col !== nothing && (event_weight = ew)
     event_weight isa Union{Nothing,Vector{Pair{String,Any}}} || (event_weight = Pair{String,Any}[p for p in _kvpairs(event_weight)])
     _sim_init_weights!(sim, fl, cfg.start_value)
-    _sim_build_schedule!(sim, fl, stopp_date, cfg.tax_mode, cfg.harvest_mode, harvest_day)
+    _sim_build_schedule!(sim, fl, cfg.tax_mode, cfg.harvest_mode, harvest_day)
     R = Run(cfg, fl, details, io, 0.0, nothing, 0.0)
-    _sim_run_days!(R, sim, fr, liquidate, event_weight, split_thresh, funds_fee, bonus_fee, balance_dca, harvest_loss_pot)
+    _sim_run_days!(R, sim, fr, liquidate, event_weight, split_thresh, balance_dca, harvest_loss_pot)
     _sim_close_years!(R, sim, stopp_date)
     ret = _sim_returns(R, sim, start_date, stopp_date, cfg.start_value)
     statistics, longest_dd = _sim_risk_stats(ret, cfg.risk_free, fr)

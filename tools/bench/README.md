@@ -14,7 +14,10 @@ python3 tools/bench/merge.py --md --alt tools/bench/anhang_e_2026-10-20.csv tool
 `run.sh` misst die drei Sprachen **nacheinander** (nichts anderes nebenher laufen lassen), mit
 `LC_ALL=C.UTF-8` und einem Kern (`OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`,
 `JULIA_NUM_THREADS=1`, `cores = 1`), und schreibt `out/{r,python,julia}.csv` sowie
-`ergebnis_<JJJJ-MM-TT>.csv`. Die Skripte einzeln: `Rscript tools/bench/bench.R [csv] [aufgaben]`,
+`ergebnis_<JJJJ-MM-TT>.csv`. Eine vorhandene Ergebnisdatei wird nie überschrieben: Der nächste Lauf
+am selben Tag schreibt `ergebnis_<JJJJ-MM-TT>_2.csv`, dann `_3`, … (bei `P1`
+`ergebnis_<JJJJ-MM-TT>_parallel_2.csv`). `out/` ist ein Zwischenordner mit den Einzelauszügen des
+letzten Laufs; jeder Lauf überschreibt ihn (alle Zeilen stehen auch in der Ergebnisdatei). Die Skripte einzeln: `Rscript tools/bench/bench.R [csv] [aufgaben]`,
 `python3 tools/bench/bench.py …`, `julia --project=julia tools/bench/bench.jl …` (aus der Repo-Wurzel).
 
 **Python mit und ohne C-Erweiterung (Etappe 7.2, seit 7.3a alle gemeinsamen Kerne):** `bench.py`

@@ -4,7 +4,7 @@
 
 #' Phase 6a von simulation(): Handelslisten kuerzen
 #'
-#' Zweck: die vorab angelegten Listen buys, sells, taxes und fees je Asset auf die Zahl der Eintraege
+#' Zweck: die vorab angelegten Listen buys, sells und taxes je Asset auf die Zahl der Eintraege
 #' kuerzen und die internen Zaehler und fifo_front entfernen.
 #' Eingabe: sim_mem, flag_assets.
 #' Ausgabe: sim_mem.
@@ -17,17 +17,14 @@
     n_buys  <- sim_mem[["trades"]][[name]][["buy_count"]]
     n_sells <- sim_mem[["trades"]][[name]][["sell_count"]]
     n_taxes <- sim_mem[["trades"]][[name]][["tax_count"]]
-    n_fees  <- sim_mem[["trades"]][[name]][["fee_count"]]
     
     sim_mem[["trades"]][[name]][["buys"]]  <- if (n_buys  > 0) sim_mem[["trades"]][[name]][["buys"]][1:n_buys]   else list()
     sim_mem[["trades"]][[name]][["sells"]] <- if (n_sells > 0) sim_mem[["trades"]][[name]][["sells"]][1:n_sells] else list()
     sim_mem[["trades"]][[name]][["taxes"]] <- if (n_taxes > 0) sim_mem[["trades"]][[name]][["taxes"]][1:n_taxes] else list()
-    sim_mem[["trades"]][[name]][["fees"]]  <- if (n_fees  > 0) sim_mem[["trades"]][[name]][["fees"]][1:n_fees]   else list()
     
     sim_mem[["trades"]][[name]][["buy_count"]] <- NULL
     sim_mem[["trades"]][[name]][["sell_count"]] <- NULL
     sim_mem[["trades"]][[name]][["tax_count"]] <- NULL
-    sim_mem[["trades"]][[name]][["fee_count"]] <- NULL
     sim_mem[["trades"]][[name]][["fifo_front"]] <- NULL
   }
 
@@ -540,6 +537,7 @@
 
   if (fees_on) results$fees_paid <- .fee_env$paid
   if (isTRUE(harvest_mode)) results$harvest_days <- flag_date[flag_harvest]
+  if (length(cfg$wrappers)) results$wrappers <- cfg$wrappers   # nur mit details = TRUE und Wrapper-Assets
   class(results) <- "SimLevResult"
   results
 }

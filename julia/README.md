@@ -12,7 +12,7 @@
 
 Dieses Paket ist die Julia-Fassung 0.5.0 des R-Pakets SimLev. Sie ist ein
 **vollständiger Port** der aktuellen R-Fassung 0.5.0: die Engine
-`simulation()` und alle Erweiterungen, insgesamt alle 113 Exporte aus
+`simulation()` und alle Erweiterungen, insgesamt alle 115 Exporte aus
 `r/NAMESPACE`. Sie läuft **eigenständig ohne R** und braucht **keine
 externen Julia-Pakete**, nur die Standardbibliothek (`Dates`, `Printf`,
 `Logging`; `LinearAlgebra` nur als Ersatzweg für Eigenvektoren).
@@ -187,7 +187,7 @@ Besonderheiten der Julia-Fassung:
   mit R's Vorrangregeln, NA-Logik, `%in%` und `%%` (derselbe Auswerter
   wie in der Python-Fassung).
 - `result.trades` enthält zusätzlich alle Buchungen (Lots, Verkäufe,
-  Vorabpauschalen, Gebühren je Asset); in R gibt es kein Gegenstück.
+  Steuerbuchungen wie Vorabpauschalen je Asset); in R gibt es kein Gegenstück.
 - Mit `details = true` schreibt `simulation()` das Ereignisprotokoll des
   R-Pakets nach `io` (Standard: `stdout`). Hinweise, die R mit `message()`
   ausgibt, erscheinen auf `stderr`; R-Warnungen sind `@warn`-Meldungen,
@@ -286,6 +286,17 @@ Ausgabe, Zeichen für Zeichen. Auf der Prüfmaschine dauerten beide Aufrufe
 zusammen im ersten Durchlauf einer Sitzung rund 15 Sekunden (überwiegend
 Kompilierung), danach rund 1,5 Sekunden.
 
+**Fonds-Wrapper** (Zertifikat oder Fonds über eine innere Strategie, Etappe 6.5c): ein Asset der
+Strategie, dessen Kurs der Anteilswert der inneren Strategie ist (Verwaltungsgebühr täglich je
+Kalendertag, Performancegebühr täglich gegen die High-Water-Mark abgegrenzt und am letzten Datentag
+des Jahres festgeschrieben); außen wird er wie ein Einzelpapier gehandelt und besteuert.
+
+``` julia
+w = wrapper_config(strategy; rebalance = rebalance_plan(; unit = "quarter"), costs = funds_costs(0.95, 5))
+nav = wrapper_nav(df, w)          # RFrame der Klasse SimLevWrapperNav: date, nav, gross, fee, perf_fee, perf_paid, hwm
+res = simulation(df, create_strategy(Zertifikat = asset_config("certificate"; spread = 0.5, wrapper = w)))
+```
+
 ## Bitgleichheit und Plattformen
 
 SimLev.jl bildet nicht nur die Logik, sondern auch die Rechenweise von R
@@ -321,10 +332,10 @@ werden außerdem Druck- und Konsolenausgabe, Warnungen und Fehlermeldungen.
 
 | Satz | Fälle | Ergebnis |
 |---|---|---|
-| Engine: gezielte Fälle für jeden Steuer- und Sonderpfad plus Zufallsfälle (`golden/cases/`) | 68 | alle bitgleich, einschließlich `print` und `details = true` |
-| Engine: Stressfälle (`golden/extra/`) | 37 | alle bitgleich, einschließlich `print` und `details = true` |
+| Engine: gezielte Fälle für jeden Steuer- und Sonderpfad plus Zufallsfälle (`golden/cases/`) | 55 | alle bitgleich, einschließlich `print` und `details = true` |
+| Engine: Stressfälle (`golden/extra/`) | 35 | alle bitgleich, einschließlich `print` und `details = true` |
 | Engine: frisch erzeugte Zufalls- und Stressfälle beider Generatoren | 469 | alle bitgleich |
-| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS und die R-Interna (30 Module in `golden/modules/`) | 4.656 | alle bitgleich |
+| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), der Fonds-Wrapper (Modul `wrapper`), die Nachbildung von evd, rugarch und imputeTS und die R-Interna (31 Module in `golden/modules/`) | 4.755 | alle bitgleich |
 
 **Plattformen:** Die Referenz ist R unter Linux x86-64 (die Modul-Fälle
 entstanden mit R 4.3.3); dort ist die Julia-Fassung geprüft. Die
@@ -359,8 +370,8 @@ Gradient bzw. Hesse-Matrix ändern kann.
 ## Tests
 
 ``` bash
-julia --project -e 'using Pkg; Pkg.test()'               # 1.221 Tests: Engine, R-Interna, Referenzfälle (Auswahl)
-SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()'   # dazu alle 4.656 Modul-Referenzfälle
+julia --project -e 'using Pkg; Pkg.test()'               # 1.317 Tests: Engine, R-Interna, Referenzfälle (Auswahl)
+SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()'   # dazu alle 4.755 Modul-Referenzfälle
 julia --project tools/compare_golden.jl                  # Engine: golden/cases und golden/extra; auch [ordner …] [-k fall …]
 julia --project tools/compare_reference.jl [modul …] [-k muster] [-v]   # Modul-Referenzfälle
 ```
@@ -395,7 +406,8 @@ src/
   trigger.jl        rebalance_trigger
   data.jl           Eingabetabellen, Kalender-Auffüllung (LOCF)
   core.jl           Zustand, FIFO, Steuer- und Marktkerne (Port der C++-Dateien)
-  engine.jl         simulation() mit sim_phases.jl, sim_loop.jl, sim_evaluate.jl, sim_blocks.jl
+  engine.jl         simulation() mit sim_phases.jl, sim_loop.jl, sim_evaluate.jl, sim_blocks.jl,
+                    wrapper.jl (Fonds-Wrapper: wrapper_config, wrapper_nav)
   tax_tariff.jl     Einkommensteuertarif, tax_tariff
   result.jl         SimLevResult, print/summary
   svg.jl            Grafikmodul: SimLevPlot, plot-API und alle SVG-Zeichenbausteine

@@ -19,7 +19,10 @@ Unbekannte Rollen und mehrere Rollen auf derselben Spalte sind ein
 Fehler.}
 
 \item{...}{Weitere Argumente fuer \code{\link[=strategy_from_weights]{strategy_from_weights()}} bzw.
-\code{\link[=asset_config]{asset_config()}} (z. B. \code{spread}, \code{partial_exemption}).}
+\code{\link[=asset_config]{asset_config()}} (z. B. \code{spread}, \code{partial_exemption},
+\code{wrapper}). Benannte Werte je Asset, auch die Namen einer
+\code{wrapper}-Liste, beziehen sich auf die Namen nach \code{map}
+(Spaltennamen); Rollen ohne \code{map}-Eintrag behalten ihren Namen.}
 }
 \value{
 Mit \code{name}: Objekt der Klasse \code{strategy}
@@ -49,6 +52,10 @@ Gewichte in der Tabelle in Prozent; in der Strategie als Anteile.
 portfolio_template("permanent", map = c(stocks = "msci_world", long_bonds = "bund_10y",
                                         cash = "geldmarkt", gold = "gold_eur"))
 head(portfolio_template())
+# Aktienteil als Fonds-Wrapper (Name nach map), Anleihen direkt
+w <- wrapper_config(create_strategy(A = asset_config("etf", share = 0.5),
+                                    B = asset_config("etf", share = 0.5)))
+portfolio_template("60_40", map = c(stocks = "aktienfonds"), wrapper = list(aktienfonds = w))
 }
 \seealso{
 \code{\link[=strategy_from_weights]{strategy_from_weights()}}, \code{\link[=simulation]{simulation()}}

@@ -19,6 +19,12 @@ def test_etf_configuration():
                                 "deliverable", "start", "tax_regime", "signal_buy", "signal_sell"]
 
 
+def test_default_spread_0():
+    # Standard-Spread 0 (Etappe 6.5c), auch für Listen an create_strategy
+    assert asset_config().spread == 0 and isinstance(asset_config().spread, float)
+    assert create_strategy(A={"asset_class": "etf"}).A.spread == 0
+
+
 def test_deliverable_regimes():
     assert asset_config(asset_class="etc", deliverable=True).tax_regime == "private_sale"
     assert asset_config(asset_class="etn", deliverable=False).tax_regime == "capital_gains"

@@ -4,7 +4,7 @@ source("golden/modules/ref_tools.R"); ref_init("deep_analysis")
 P <- "from simlev import deep_analysis as DA\n"
 JH <- "DA = SL.DeepAnalysis\n"   # Kopf des Julia-Codes (jl)
 SIM_J <- 'a = SL.simulation(d, SL.create_strategy("A" => SL.asset_config("etf", "bnh"; spread = 0)))
-b = SL.simulation(d, SL.create_strategy("A" => SL.asset_config("etf", "bnh", 0.6), "B" => SL.asset_config("etf", "bnh", 0.4)); dca = SL.dca_plan(; value = 300, span = 1), rebalance = SL.rebalance_plan(; span = 1, unit = "year"))
+b = SL.simulation(d, SL.create_strategy("A" => SL.asset_config("etf", "bnh", 0.6, spread = 0.1), "B" => SL.asset_config("etf", "bnh", 0.4, spread = 0.1)); dca = SL.dca_plan(; value = 300, span = 1), rebalance = SL.rebalance_plan(; span = 1, unit = "year"))
 '
 ST_J <- 'st = SL.create_strategy("A" => SL.asset_config("etf", "bnh"; share = 1, spread = 0))\n'
 
@@ -14,10 +14,10 @@ d$A <- 100 * cumprod(1 + rnorm(n, 3e-4, 0.010))
 d$B <- 100 * cumprod(1 + rnorm(n, 1.5e-4, 0.004))
 I <- list(d = d)
 SIM_R <- "a <- simulation(d, create_strategy(A = asset_config('etf', 'bnh', spread = 0)))
-b <- simulation(d, create_strategy(A = asset_config('etf', 'bnh', 0.6), B = asset_config('etf', 'bnh', 0.4)), dca = dca_plan(value = 300, span = 1), rebalance = rebalance_plan(span = 1, unit = 'year'))
+b <- simulation(d, create_strategy(A = asset_config('etf', 'bnh', 0.6, spread = 0.1), B = asset_config('etf', 'bnh', 0.4, spread = 0.1)), dca = dca_plan(value = 300, span = 1), rebalance = rebalance_plan(span = 1, unit = 'year'))
 "
 SIM_P <- paste0(P, "a = simlev.simulation(d, simlev.create_strategy(A=simlev.asset_config(asset_class='etf', trading='bnh', spread=0)))
-b = simlev.simulation(d, simlev.create_strategy(A=simlev.asset_config(asset_class='etf', trading='bnh', share=0.6), B=simlev.asset_config(asset_class='etf', trading='bnh', share=0.4)), dca=simlev.dca_plan(value=300, span=1), rebalance=simlev.rebalance_plan(span=1, unit='year'))
+b = simlev.simulation(d, simlev.create_strategy(A=simlev.asset_config(asset_class='etf', trading='bnh', share=0.6, spread=0.1), B=simlev.asset_config(asset_class='etf', trading='bnh', share=0.4, spread=0.1)), dca=simlev.dca_plan(value=300, span=1), rebalance=simlev.rebalance_plan(span=1, unit='year'))
 ")
 ref_case("da_sim_bench", paste0(SIM_R, "result_analysis(list(A = a, Mix = b), benchmark = 'A', risk_free = 1, rolling_years = 1)"),
          paste0(SIM_P, "result = DA.result_analysis({'A': a, 'Mix': b}, benchmark='A', risk_free=1, rolling_years=1)"), I,
@@ -99,11 +99,11 @@ ref_case("da_no_drawdown", "result_analysis(list(up = up, x = x1[1:500, ]), benc
 ref_case("da_summary_nodd", "summary(result_analysis(list(up = up, x = x1[1:500, ]), benchmark = x1, rolling_years = 1))",
          paste0(P, "result = DA.result_analysis({'up': up, 'x': x1.iloc[:500]}, benchmark=x1, rolling_years=1).summary()"), list(up = up, x1 = x1),
          jl = paste0(JH, 'result = SL.r_summary(DA.result_analysis(SL.RList("up" => up, "x" => SL.rows(x1, 1:500)); benchmark = x1, rolling_years = 1))'))
-ref_case("da_sim_tax_bench_obj", paste0(SIM_R, "t <- simulation(d, create_strategy(A = asset_config('etf', 'bnh', 0.5), B = asset_config('etf', 'bnh', 0.5)), start_value = 1e6, rebalance = rebalance_plan(span = 1, unit = 'quarter'), tax = tax_profile(), liquidate = TRUE)
+ref_case("da_sim_tax_bench_obj", paste0(SIM_R, "t <- simulation(d, create_strategy(A = asset_config('etf', 'bnh', 0.5, spread = 0.1), B = asset_config('etf', 'bnh', 0.5, spread = 0.1)), start_value = 1e6, rebalance = rebalance_plan(span = 1, unit = 'quarter'), tax = tax_profile(), liquidate = TRUE)
   x <- result_analysis(list(tax = t, a = a), benchmark = b, rolling_years = 1.5, top_drawdowns = 4); x$metrics[c('taxes', 'trades_per_year'), ]; x"),
-         paste0(SIM_P, "t = simlev.simulation(d, simlev.create_strategy(A=simlev.asset_config(asset_class='etf', trading='bnh', share=0.5), B=simlev.asset_config(asset_class='etf', trading='bnh', share=0.5)), start_value=1e6, rebalance=simlev.rebalance_plan(span=1, unit='quarter'), tax=simlev.tax_profile(), liquidate=True)
+         paste0(SIM_P, "t = simlev.simulation(d, simlev.create_strategy(A=simlev.asset_config(asset_class='etf', trading='bnh', share=0.5, spread=0.1), B=simlev.asset_config(asset_class='etf', trading='bnh', share=0.5, spread=0.1)), start_value=1e6, rebalance=simlev.rebalance_plan(span=1, unit='quarter'), tax=simlev.tax_profile(), liquidate=True)
 result = DA.result_analysis({'tax': t, 'a': a}, benchmark=b, rolling_years=1.5, top_drawdowns=4)"), I,
-         jl = paste0(JH, SIM_J, 't = SL.simulation(d, SL.create_strategy("A" => SL.asset_config("etf", "bnh", 0.5), "B" => SL.asset_config("etf", "bnh", 0.5)); start_value = 1e6, rebalance = SL.rebalance_plan(; span = 1, unit = "quarter"), tax = SL.tax_profile(), liquidate = true)
+         jl = paste0(JH, SIM_J, 't = SL.simulation(d, SL.create_strategy("A" => SL.asset_config("etf", "bnh", 0.5, spread = 0.1), "B" => SL.asset_config("etf", "bnh", 0.5, spread = 0.1)); start_value = 1e6, rebalance = SL.rebalance_plan(; span = 1, unit = "quarter"), tax = SL.tax_profile(), liquidate = true)
 result = DA.result_analysis(SL.RList("tax" => t, "a" => a); benchmark = b, rolling_years = 1.5, top_drawdowns = 4)'))
 # Extremfaelle der MWRR (R4-03): Beinahe-Totalverlust und sehr hohe Rendite mit Sparplan
 dd1 <- seq.Date(as.Date("2020-01-01"), as.Date("2023-12-31"), by = "day"); p1 <- rep(100, length(dd1)); p1[dd1 >= as.Date("2023-12-20")] <- 1e-3

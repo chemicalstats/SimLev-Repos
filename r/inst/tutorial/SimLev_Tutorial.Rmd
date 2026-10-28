@@ -930,7 +930,7 @@ verfügbar.
 pb <- param_bootstrap(ps, hist, cfg, top = 3, by = "plateau", map = c(letf = "eu_l2"),
                       include = list(bnh = list(strategy = letf_bnh, map = c(letf = "eu_l2"))),
                       method = "stationary", n = 60, params = list(L = 250),
-                      path_length = 365 * 22, start_date = "1975-01-01",
+                      path_length = 365 * 22, start = "1975-01-01",
                       seed = 7, cores = 2, progress = FALSE)
 attr(pb, "param_ids")
 summary(pb, metrics = c("cagr", "max_drawdown", "sharpe"))
@@ -1502,7 +1502,7 @@ plot(hm)
 | `portfolio_optimize(x, assets, method, lower, upper, cov, resample)` | Portfolio-Optimierung |
 | `portfolio_frontier()`, `portfolio_rolling()`, `portfolio_risk_contributions()` | Effizienzgrenze, Optimierung außerhalb der Stichprobe, Risikobeiträge |
 | `index_bond()`, `index_money_market()`, `index_currency_hedged()` | Anleihe-, Geldmarkt- und gesicherte Reihen |
-| `simulation(…, costs, dca, rebalance, splits, tax, funds)` | Bausteine `sim_costs()`, `dca_plan()`, `rebalance_plan()`, `split_rule()`, `tax_profile()`, `funds_costs()` |
+| `simulation(…, costs, dca, rebalance, splits, tax)` | Bausteine `sim_costs()`, `dca_plan()`, `rebalance_plan()`, `split_rule()`, `tax_profile()` |
 | `tax_profile(church_tax, harvest = harvest_rule())` | Kirchensteuer, Freibetrag ausschöpfen |
 | `tax_tariff(file)`, `tax_profile(income = income_tariff(taxable_income, tariff))` | Einkommensteuertarif, Günstigerprüfung nach Tarif |
 | `scenario_entropy_pooling(x, assets, views, states)`, `view_mean()`, `view_prob()`, `view_vol()` | Szenarien mit eigenen Annahmen |

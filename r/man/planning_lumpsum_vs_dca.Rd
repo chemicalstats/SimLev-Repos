@@ -73,10 +73,12 @@ Jedes Asset behaelt so seine eigenen Gewichte.}
 Vorabpauschale oder Kosten, die Stueck verkaufen) waechst das DCA-Depot
 mit dem zeitgewichteten Index der Einmalanlage (\code{\link[=result_index]{result_index()}}),
 als haette es ab dem Ende der Einstiegsphase deren Gewichte; mit
-Steuern (\code{tax = tax_profile()} ohne Fondsmodus) erscheint dazu eine Warnung.}
+Steuern (\code{tax = tax_profile()}) erscheint dazu eine Warnung.}
 }
 Welche Variante verwendet wurde, steht je Start in der Spalte
-\code{exact}.
+\code{exact}. Fuer Fonds-Wrapper (\code{asset_config(wrapper = )}) ist der Kurs der
+Anteilswert aus \code{\link[=wrapper_nav]{wrapper_nav()}} im Fenster der Einmalanlage,
+wie ihn \code{simulation()} rechnet.
 
 Als Starttermine dienen nur Monatserste, die als Zeile in \code{data}
 vorkommen (bei Handelstagsdaten entfallen Monate, deren Erster kein

@@ -11,7 +11,7 @@
 ---
 
 Dieses Paket ist die Python-Fassung des R-Pakets SimLev. Version 0.5.0 ist
-ein vollständiger Port der aktuellen R-Fassung 0.5.0: Alle 113 Exporte des
+ein vollständiger Port der aktuellen R-Fassung 0.5.0: Alle 115 Exporte des
 R-Pakets gibt es hier mit gleichem Namen, gleichen Argumenten und gleichen
 Voreinstellungen. Das Paket läuft **eigenständig ohne R** und benötigt nur
 `numpy` und `pandas`.
@@ -182,6 +182,19 @@ Kursdaten und `seed = 42` liefert `bootstrap_study()` in R dieselben
 Kennzahlen bis auf das letzte Bit, ebenso `portfolio_optimize()` dieselben
 Gewichte.
 
+**Fonds-Wrapper** (Zertifikat oder Fonds über eine innere Strategie, Etappe 6.5c): ein Asset der
+Strategie, dessen Kurs der Anteilswert der inneren Strategie ist (Verwaltungsgebühr täglich je
+Kalendertag, Performancegebühr täglich gegen die High-Water-Mark abgegrenzt und am letzten Datentag
+des Jahres festgeschrieben); außen wird er wie ein Einzelpapier gehandelt und besteuert.
+
+``` python
+w = simlev.wrapper_config(strategy, rebalance=simlev.rebalance_plan(unit="quarter"),
+                          costs=simlev.funds_costs(fee=0.95, performance_fee=5))
+nav = simlev.wrapper_nav(data, w)          # SimLevWrapperNav: date, nav, gross, fee, perf_fee, perf_paid, hwm
+res = simlev.simulation(data, simlev.create_strategy(
+    Zertifikat=simlev.asset_config(asset_class="certificate", spread=0.5, wrapper=w)))
+```
+
 ## Von R zu Python
 
 Funktionsnamen, Argumente und Voreinstellungen sind identisch mit dem
@@ -231,7 +244,7 @@ Besonderheiten der Python-Fassung:
   (`simlev._r.rexpr`); freie Variablen kommen aus `env` bzw. dem
   Namensraum des Aufrufers. Eine Python-Funktion geht ebenfalls.
 - `result.trades` enthält zusätzlich alle Buchungen (Lots, Verkäufe,
-  Vorabpauschalen, Gebühren je Asset); in R gibt es kein Gegenstück.
+  Steuerbuchungen wie Vorabpauschalen je Asset); in R gibt es kein Gegenstück.
 - `bootstrap_study(chunk_dir=...)` schreibt die Zwischenstände als Pickle
   statt als RDS.
 - `cores > 1` rechnet wie R mit Fork-Prozessen (`multiprocessing`, Kontext
@@ -336,7 +349,7 @@ Geprüft wurde:
   `details = TRUE`; zusätzlich 669 frisch erzeugte Zufalls- und Stressfälle
   und 750 Fälle mit den neuen Argumenten (`order_fee`, `dca_fee`,
   `church_tax`, `harvest_*`, `taxable_income`, `tax_tariff`).
-- **Alle Funktionen:** 4.656 Referenzfälle in 30 Modulen unter
+- **Alle Funktionen:** 4.755 Referenzfälle in 31 Modulen unter
   `golden/modules/`, darunter die R-Interna (`r_fmt`, `r_linalg`,
   `r_nmath`, `r_rng`, `r_stats`); alle bitgleich in Ergebnis,
   Konsolen- und Druckausgabe, Warnungen und Fehlermeldungen.
@@ -358,14 +371,14 @@ Bekannte Grenzen:
 
 ``` bash
 pip install ".[test]"
-pytest                                        # 5.020 Tests, Laufzeit rund 12 Minuten
+pytest                                        # 5.201 Tests, Laufzeit rund 7 Minuten (ohne C-Erweiterung rund 10)
 python tools/compare_golden.py                # Engine: golden/cases und golden/extra
 python tools/compare_reference.py             # Erweiterungen: alle Module unter golden/modules
 python tools/compare_reference.py optimize -k cov_ -v      # ein Modul, ausgewählte Fälle, ausführlich
 ```
 
-Die Test-Suite enthält 4.656 Modul-Referenzfälle
-(`tests/test_module_reference.py`) und die 105 Golden-Master-Fälle der
+Die Test-Suite enthält 4.755 Modul-Referenzfälle
+(`tests/test_module_reference.py`) und die 90 Golden-Master-Fälle der
 Engine (`tests/test_golden_master.py`, dazu ein Test, dass die Fälle
 gefunden werden). Die übrigen 1.120 Tests prüfen die Engine (überwiegend
 aus den testthat-Tests des R-Pakets übertragen) und die R-Interna in
@@ -388,7 +401,7 @@ Weiterentwicklung in [DEVELOPING.md](DEVELOPING.md).
 
 ```
 simlev/
-  __init__.py        öffentliche Funktionen (alle 113 Exporte des R-Pakets)
+  __init__.py        öffentliche Funktionen (alle 115 Exporte des R-Pakets)
   engine.py          simulation(), Ablaufsteuerung (simulation.R, utils.R)
   _sim_blocks.py     Bausteine sim_costs(), dca_plan(), rebalance_plan(), split_rule(), tax_profile(),
                      income_rate(), income_tariff(), harvest_rule(), funds_costs() (sim_blocks.R)
@@ -400,6 +413,7 @@ simlev/
   _core.py           Rechenkerne der Engine (simulation_core.cpp, fifo_core.cpp, tax_core.cpp)
   _dates.py          Datumshelfer (Tage seit 1970, strptime wie R)
   config.py          asset_config(), create_strategy() & Co. (asset_config.R, strategy.R)
+  wrapper.py         Fonds-Wrapper: wrapper_config(), wrapper_nav() (wrapper.R)
   trigger.py         rebalance_trigger()
   _tax_tariff.py     tax_tariff(), Einkommensteuertarif
   result.py          SimLevResult mit print/summary/plot

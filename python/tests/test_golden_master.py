@@ -29,7 +29,7 @@ EXACT = np.finfo(np.longdouble).nmant >= 63
 
 def test_golden_cases_present():
     # Ohne diesen Test würden die Bitgleichheits-Tests bei falschem Pfad still entfallen.
-    assert len(CASES) >= 105 or _env.golden_dir(), "Golden-Fälle fehlen in %s" % (DIRS,)
+    assert len(CASES) >= 90 or _env.golden_dir(), "Golden-Fälle fehlen in %s" % (DIRS,)
 
 
 @pytest.mark.skipif(not EXACT, reason="Bitgleichheit nur mit 80-Bit-long-double (Linux/x86-64)")

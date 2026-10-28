@@ -126,8 +126,8 @@ JL <- list(
   sp_err3 = 'result = DP.series_splice(a = [NA, NA], b = collect(1:2), dates = Date(2024, 1, 1) .+ Day.(0:1))',
   sp_err4 = 'result = DP.series_splice(f1, f2)',
   sw_doc = 'result = DP.strategy_from_weights(named("world" => 0.6, "bonds" => 0.4); spread = named("world" => 0.1, "bonds" => 0.05))',
-  sw_class = 'result = DP.strategy_from_weights(named("aktien" => 0.7, "gold" => 0.3); asset_class = named("aktien" => "etf", "gold" => "etc"), partial_exemption = named("aktien" => 30.0, "gold" => 0.0))',
-  sw_one = 'result = DP.strategy_from_weights(named("aktien" => 0.7, "gold" => 0.3); partial_exemption = named("aktien" => 30.0))',
+  sw_class = 'result = DP.strategy_from_weights(named("aktien" => 0.7, "gold" => 0.3); asset_class = named("aktien" => "etf", "gold" => "etc"), partial_exemption = named("aktien" => 30.0, "gold" => 0.0), spread = 0.1)',
+  sw_one = 'result = DP.strategy_from_weights(named("aktien" => 0.7, "gold" => 0.3); partial_exemption = named("aktien" => 30.0), spread = 0.1)',
   sw_all = 'result = DP.strategy_from_weights(named("a" => 0.5, "b" => 0.5); spread = 0.2, asset_class = "etc", deliverable = true)',
   sw_namedall = 'result = DP.strategy_from_weights(named("a" => 0.5, "b" => 0.5); spread = named("x" => 0.3))',
   sw_na = 'result = DP.strategy_from_weights(named("a" => 0.5, "b" => 0.5); spread = NA)',
@@ -136,7 +136,7 @@ JL <- list(
   sw_err_pos = 'result = DP.strategy_from_weights(named("a" => 1.0, "b" => 0.0))',
   sw_err_name = 'result = DP.strategy_from_weights([0.5, 0.5])',
   sw_err_cfg = 'result = DP.strategy_from_weights(named("a" => 0.5, "b" => 0.5); partial_exemption = named("a" => 130.0))',
-  pt_perm = 'result = DP.portfolio_template("permanent"; map = named("stocks" => "msci_world", "long_bonds" => "bund_10y", "cash" => "geldmarkt", "gold" => "gold_eur"))',
+  pt_perm = 'result = DP.portfolio_template("permanent"; map = named("stocks" => "msci_world", "long_bonds" => "bund_10y", "cash" => "geldmarkt", "gold" => "gold_eur"), spread = 0.1)',
   pt_partial = 'result = DP.portfolio_template("permanent"; map = named("stocks" => "W"), spread = 0)',
   pt_list = 'result = DP.portfolio_template()',
   pt_err1 = 'result = DP.portfolio_template("xyz")',
@@ -160,7 +160,7 @@ JL <- list(
   ch_doc = 'result = BO.index_currency_hedged(d, "sp500", 3, "rf"; cost = 0.1)',
   ch_vec = 'result = BO.index_currency_hedged(d, d.sp500 .* 2, named("2020-01-01" => 1.0, "2020-08-01" => 2.0), RFrame("date" => [Date(2020, 1, 1)], "r" => [0.5]); basis = 365, start = 10)'
 )
-for (tn in names(SimLev:::.portfolio_templates)) JL[[paste0("pt_", tn)]] <- sprintf('result = DP.portfolio_template("%s")', tn)
+for (tn in names(SimLev:::.portfolio_templates)) JL[[paste0("pt_", tn)]] <- sprintf('result = DP.portfolio_template("%s"; spread = 0.1)', tn)
 rc <- function(id, r, py, inputs = list(), ...) {
   if (is.null(JL[[id]])) stop("kein Julia-Code (jl) für Fall ", id)
   ref_case(id, r, paste0(P, py), inputs, jl = paste0(J, JL[[id]]), ...)
@@ -436,10 +436,10 @@ rc("sp_err4", "series_splice(f1, f2)", "result = DP.series_splice(f1, f2)", list
 # ── strategy_from_weights / portfolio_template ─────────────────────────────
 rc("sw_doc", "strategy_from_weights(c(world = 0.6, bonds = 0.4), spread = c(world = 0.1, bonds = 0.05))",
    "result = DP.strategy_from_weights(pd.Series([0.6, 0.4], index=['world', 'bonds']), spread=pd.Series([0.1, 0.05], index=['world', 'bonds']))")
-rc("sw_class", "strategy_from_weights(c(aktien = 0.7, gold = 0.3), asset_class = c(aktien = 'etf', gold = 'etc'), partial_exemption = c(aktien = 30, gold = 0))",
-   "result = DP.strategy_from_weights({'aktien': 0.7, 'gold': 0.3}, asset_class={'aktien': 'etf', 'gold': 'etc'}, partial_exemption={'aktien': 30, 'gold': 0})")
-rc("sw_one", "strategy_from_weights(c(aktien = 0.7, gold = 0.3), partial_exemption = c(aktien = 30))",
-   "result = DP.strategy_from_weights({'aktien': 0.7, 'gold': 0.3}, partial_exemption={'aktien': 30})")
+rc("sw_class", "strategy_from_weights(c(aktien = 0.7, gold = 0.3), asset_class = c(aktien = 'etf', gold = 'etc'), partial_exemption = c(aktien = 30, gold = 0), spread = 0.1)",
+   "result = DP.strategy_from_weights({'aktien': 0.7, 'gold': 0.3}, asset_class={'aktien': 'etf', 'gold': 'etc'}, partial_exemption={'aktien': 30, 'gold': 0}, spread=0.1)")
+rc("sw_one", "strategy_from_weights(c(aktien = 0.7, gold = 0.3), partial_exemption = c(aktien = 30), spread = 0.1)",
+   "result = DP.strategy_from_weights({'aktien': 0.7, 'gold': 0.3}, partial_exemption={'aktien': 30}, spread=0.1)")
 rc("sw_all", "strategy_from_weights(c(a = 0.5, b = 0.5), spread = 0.2, asset_class = 'etc', deliverable = TRUE)",
    "result = DP.strategy_from_weights({'a': 0.5, 'b': 0.5}, spread=0.2, asset_class='etc', deliverable=True)")
 rc("sw_namedall", "strategy_from_weights(c(a = 0.5, b = 0.5), spread = c(x = 0.3))",
@@ -451,12 +451,12 @@ rc("sw_err_dup", "strategy_from_weights(c(a = 0.5, a = 0.5))", "result = DP.stra
 rc("sw_err_pos", "strategy_from_weights(c(a = 1, b = 0))", "result = DP.strategy_from_weights({'a': 1., 'b': 0.})")
 rc("sw_err_name", "strategy_from_weights(c(0.5, 0.5))", "result = DP.strategy_from_weights(np.array([0.5, 0.5]))")
 rc("sw_err_cfg", "strategy_from_weights(c(a = 0.5, b = 0.5), partial_exemption = c(a = 130))", "result = DP.strategy_from_weights({'a': 0.5, 'b': 0.5}, partial_exemption={'a': 130})")
-rc("pt_perm", "portfolio_template('permanent', map = c(stocks = 'msci_world', long_bonds = 'bund_10y', cash = 'geldmarkt', gold = 'gold_eur'))",
-   "result = DP.portfolio_template(name='permanent', map={'stocks': 'msci_world', 'long_bonds': 'bund_10y', 'cash': 'geldmarkt', 'gold': 'gold_eur'})")
+rc("pt_perm", "portfolio_template('permanent', map = c(stocks = 'msci_world', long_bonds = 'bund_10y', cash = 'geldmarkt', gold = 'gold_eur'), spread = 0.1)",
+   "result = DP.portfolio_template(name='permanent', map={'stocks': 'msci_world', 'long_bonds': 'bund_10y', 'cash': 'geldmarkt', 'gold': 'gold_eur'}, spread=0.1)")
 rc("pt_partial", "portfolio_template('permanent', map = c(stocks = 'W'), spread = 0)",
    "result = DP.portfolio_template(name='permanent', map={'stocks': 'W'}, spread=0)")
 for (tn in names(SimLev:::.portfolio_templates))
-  rc(paste0("pt_", tn), sprintf("portfolio_template('%s')", tn), sprintf("result = DP.portfolio_template(name='%s')", tn))
+  rc(paste0("pt_", tn), sprintf("portfolio_template('%s', spread = 0.1)", tn), sprintf("result = DP.portfolio_template(name='%s', spread=0.1)", tn))
 rc("pt_list", "portfolio_template()", "result = DP.portfolio_template()")
 rc("pt_err1", "portfolio_template('xyz')", "result = DP.portfolio_template(name='xyz')")
 rc("pt_err2", "portfolio_template('60_40', map = c(stock = 'A', bonds = 'B'))", "result = DP.portfolio_template(name='60_40', map={'stock': 'A', 'bonds': 'B'})")
@@ -501,4 +501,72 @@ rc("ch_doc", "index_currency_hedged(d, 'sp500', domestic_rate = 3, foreign_rate 
 rc("ch_vec", "index_currency_hedged(d, d$sp500 * 2, c('2020-01-01' = 1, '2020-08-01' = 2), data.frame(date = as.Date('2020-01-01'), r = 0.5), basis = 365, start = 10)",
    "result = BO.index_currency_hedged(d, d['sp500'] * 2, pd.Series([1., 2], index=['2020-01-01', '2020-08-01']), pd.DataFrame(dict(date=np.array(['2020-01-01'], dtype='datetime64[D]'), r=[0.5])), basis=365, start=10)",
    list(d = dh))
+
+# ── strategy_from_weights / portfolio_template mit Fonds-Wrapper je Asset (Etappe 8.0) ──
+WR_R <- paste0("inner <- create_strategy(A = asset_config('etf', 'bnh', 0.6), B = asset_config('etf', 'bnh', 0.4))\n",
+               "wb <- wrapper_config(inner, costs = funds_costs(0.95, 10))\n",
+               "w2 <- wrapper_config(create_strategy(C = asset_config('etf', 'bnh', 1)), costs = funds_costs(0.2, 0))\n")
+WR_P <- paste0("inner = simlev.create_strategy(A=simlev.asset_config(asset_class='etf', trading='bnh', share=0.6), B=simlev.asset_config(asset_class='etf', trading='bnh', share=0.4))\n",
+               "wb = simlev.wrapper_config(inner, costs=simlev.funds_costs(fee=0.95, performance_fee=10))\n",
+               "w2 = simlev.wrapper_config(simlev.create_strategy(C=simlev.asset_config(asset_class='etf', trading='bnh', share=1)), costs=simlev.funds_costs(fee=0.2, performance_fee=0))\n")
+WR_J <- paste0('inner = SL.create_strategy("A" => SL.asset_config("etf", "bnh", 0.6), "B" => SL.asset_config("etf", "bnh", 0.4))\n',
+               'wb = SL.wrapper_config(inner; costs = SL.funds_costs(0.95, 10))\n',
+               'w2 = SL.wrapper_config(SL.create_strategy("C" => SL.asset_config("etf", "bnh", 1)); costs = SL.funds_costs(0.2, 0))\n')
+WRC <- list(
+  sw_wr_all = list("strategy_from_weights(c(world = 0.6, bonds = 0.4), wrapper = wb)",
+                   "result = DP.strategy_from_weights({'world': 0.6, 'bonds': 0.4}, wrapper=wb)",
+                   'result = DP.strategy_from_weights(named("world" => 0.6, "bonds" => 0.4); wrapper = wb)',
+                   "ein SimLevWrapperConfig gilt für alle Assets"),
+  sw_wr_each = list("strategy_from_weights(c(world = 0.6, bonds = 0.3, gold = 0.1), asset_class = c(world = 'certificate', gold = 'etc'), spread = 0.1, wrapper = list(world = wb, bonds = w2))",
+                    "result = DP.strategy_from_weights({'world': 0.6, 'bonds': 0.3, 'gold': 0.1}, asset_class={'world': 'certificate', 'gold': 'etc'}, spread=0.1, wrapper={'world': wb, 'bonds': w2})",
+                    'result = DP.strategy_from_weights(named("world" => 0.6, "bonds" => 0.3, "gold" => 0.1); asset_class = named("world" => "certificate", "gold" => "etc"), spread = 0.1, wrapper = (world = wb, bonds = w2))',
+                    "benannte Liste je Asset; gold ohne Wrapper"),
+  sw_wr_one = list("strategy_from_weights(c(world = 0.6, bonds = 0.4), partial_exemption = c(world = 30), wrapper = list(bonds = w2))",
+                   "result = DP.strategy_from_weights({'world': 0.6, 'bonds': 0.4}, partial_exemption={'world': 30}, wrapper={'bonds': w2})",
+                   'result = DP.strategy_from_weights(named("world" => 0.6, "bonds" => 0.4); partial_exemption = named("world" => 30.0), wrapper = Dict("bonds" => w2))',
+                   "ein Eintrag (Julia: Dict)"),
+  sw_wr_null = list("strategy_from_weights(c(world = 0.6, bonds = 0.4), spread = 0.1, wrapper = NULL)",
+                    "result = DP.strategy_from_weights({'world': 0.6, 'bonds': 0.4}, spread=0.1, wrapper=None)",
+                    'result = DP.strategy_from_weights(named("world" => 0.6, "bonds" => 0.4); spread = 0.1, wrapper = nothing)',
+                    "wrapper = NULL: ohne Wrapper"),
+  pt_wr_all = list("portfolio_template('60_40', wrapper = wb)", "result = DP.portfolio_template(name='60_40', wrapper=wb)",
+                   'result = DP.portfolio_template("60_40"; wrapper = wb)', NULL),
+  pt_wr_map = list("portfolio_template('permanent', map = c(stocks = 'msci_world', gold = 'gold_eur'), spread = 0.1, wrapper = list(msci_world = wb, cash = w2))",
+                   "result = DP.portfolio_template(name='permanent', map={'stocks': 'msci_world', 'gold': 'gold_eur'}, spread=0.1, wrapper={'msci_world': wb, 'cash': w2})",
+                   'result = DP.portfolio_template("permanent"; map = named("stocks" => "msci_world", "gold" => "gold_eur"), spread = 0.1, wrapper = (msci_world = wb, cash = w2))',
+                   "Namen nach map; Rolle cash ohne map-Eintrag"),
+  sw_wr_err_name = list("strategy_from_weights(c(world = 0.6, bonds = 0.4), wrapper = list(world = wb, x = wb, y = w2))",
+                        "result = DP.strategy_from_weights({'world': 0.6, 'bonds': 0.4}, wrapper={'world': wb, 'x': wb, 'y': w2})",
+                        'result = DP.strategy_from_weights(named("world" => 0.6, "bonds" => 0.4); wrapper = (world = wb, x = wb, y = w2))', NULL),
+  pt_wr_err_role = list("portfolio_template('60_40', map = c(stocks = 'A'), wrapper = list(stocks = wb))",
+                        "result = DP.portfolio_template(name='60_40', map={'stocks': 'A'}, wrapper={'stocks': wb})",
+                        'result = DP.portfolio_template("60_40"; map = named("stocks" => "A"), wrapper = (stocks = wb,))',
+                        "Rollenname statt Name nach map"),
+  sw_wr_err_elem = list("strategy_from_weights(c(world = 0.6, bonds = 0.4), wrapper = list(world = wb, bonds = inner))",
+                        "result = DP.strategy_from_weights({'world': 0.6, 'bonds': 0.4}, wrapper={'world': wb, 'bonds': inner})",
+                        'result = DP.strategy_from_weights(named("world" => 0.6, "bonds" => 0.4); wrapper = (world = wb, bonds = inner))', NULL),
+  sw_wr_err_elem2 = list("strategy_from_weights(c(world = 0.6, bonds = 0.4), wrapper = list(world = 1))",
+                         "result = DP.strategy_from_weights({'world': 0.6, 'bonds': 0.4}, wrapper={'world': 1})",
+                         'result = DP.strategy_from_weights(named("world" => 0.6, "bonds" => 0.4); wrapper = (world = 1,))', NULL),
+  sw_wr_err_type = list("strategy_from_weights(c(world = 0.6, bonds = 0.4), wrapper = 'wb')",
+                        "result = DP.strategy_from_weights({'world': 0.6, 'bonds': 0.4}, wrapper='wb')",
+                        'result = DP.strategy_from_weights(named("world" => 0.6, "bonds" => 0.4); wrapper = "wb")', NULL),
+  sw_wr_err_unnamed = list("strategy_from_weights(c(world = 0.6, bonds = 0.4), wrapper = list(wb, w2))",
+                           "result = DP.strategy_from_weights({'world': 0.6, 'bonds': 0.4}, wrapper=[wb, w2])",
+                           'result = DP.strategy_from_weights(named("world" => 0.6, "bonds" => 0.4); wrapper = [wb, w2])', NULL),
+  sw_wr_err_dup = list("strategy_from_weights(c(world = 0.6, bonds = 0.4), wrapper = list(world = wb, world = w2))",
+                       "result = DP.strategy_from_weights({'world': 0.6, 'bonds': 0.4}, wrapper=pd.Series([wb, w2], index=['world', 'world'], dtype=object))",
+                       'result = DP.strategy_from_weights(named("world" => 0.6, "bonds" => 0.4); wrapper = ["world" => wb, "world" => w2])', NULL),
+  sw_wr_err_signal = list("strategy_from_weights(c(world = 0.6, bonds = 0.4), trading = c(world = 'signal'), signal_buy = 'b', signal_sell = 's', wrapper = list(world = wb))",
+                          "result = DP.strategy_from_weights({'world': 0.6, 'bonds': 0.4}, trading={'world': 'signal'}, signal_buy='b', signal_sell='s', wrapper={'world': wb})",
+                          'result = DP.strategy_from_weights(named("world" => 0.6, "bonds" => 0.4); trading = named("world" => "signal"), signal_buy = "b", signal_sell = "s", wrapper = (world = wb,))',
+                          "wrapper und trading = 'signal' für dasselbe Asset: Meldung nennt das Asset"),
+  pt_wr_err_signal = list("portfolio_template('60_40', trading = 'signal', signal_buy = 'b', signal_sell = 's', wrapper = wb)",
+                          "result = DP.portfolio_template(name='60_40', trading='signal', signal_buy='b', signal_sell='s', wrapper=wb)",
+                          'result = DP.portfolio_template("60_40"; trading = "signal", signal_buy = "b", signal_sell = "s", wrapper = wb)', NULL))
+for (id in names(WRC)) {
+  cs <- WRC[[id]]
+  JL[[id]] <- paste0(WR_J, cs[[3]])
+  rc(id, paste0(WR_R, cs[[1]]), paste0(WR_P, cs[[2]]), note = cs[[4]])
+}
 ref_done()

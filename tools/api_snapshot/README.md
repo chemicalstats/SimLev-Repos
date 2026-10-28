@@ -63,7 +63,7 @@ Neu-Festschreiben. Von Hand: `Rscript tools/api_snapshot/api_r.R
 /tmp/a.json --frozen-check tools/api_snapshot/frozen/r.json` (entsprechend
 `api_py.py`, `julia --project=julia tools/api_snapshot/api_jl.jl`).
 
-**Neu festschreiben** (eine gewollte Änderung, z. B. Etappe 6.5b):
+**Neu festschreiben** (eine gewollte Änderung, z. B. Etappe 6.5c):
 
 1. Eintrag oben in `CHANGES.md` (unter der Vorlage):
 

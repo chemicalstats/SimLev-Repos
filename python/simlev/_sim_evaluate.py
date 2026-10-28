@@ -49,7 +49,7 @@ def _sim_compact_trades(sim: dict, flag_assets: list) -> dict:
     for nm in flag_assets:
         tr = sim["trades"][nm]
         out[nm] = {"buys": tr["buys"][:tr["buy_count"]], "sells": tr["sells"][:tr["sell_count"]],
-                   "taxes": tr["taxes"][:tr["tax_count"]], "fees": tr["fees"][:tr["fee_count"]]}
+                   "taxes": tr["taxes"][:tr["tax_count"]]}
     return out
 
 
@@ -436,5 +436,7 @@ def _sim_result(sim: dict, trades: dict, fl: dict, cfg: dict, r: dict, rs: dict,
         res["fees_paid"] = _FEE.paid
     if _is_true(cfg["harvest_mode"]):
         res["harvest_days"] = flag_date[fl["flag_harvest"]].astype("datetime64[D]")
+    if cfg.get("wrappers"):   # nur mit details = TRUE und Wrapper-Assets
+        res["wrappers"] = cfg["wrappers"]
     res._trades = trades
     return res

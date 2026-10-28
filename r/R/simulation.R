@@ -158,7 +158,6 @@
 #'   \describe{
 #'     \item{"none"}{Keine Steuerberechnung (Standard)}
 #'     \item{"person"}{Persoenliche Besteuerung (Abgeltungsteuer/§ 23) mit FIFO-Buchfuehrung}
-#'     \item{"funds"}{Fondsmodell: jaehrliche Kosten (funds_fee, bonus_fee); Steuer auf den Gesamtgewinn bei Liquidation}
 #'   }
 #'
 #' @param tax_rate Zahl. Kapitalertragsteuersatz einschliesslich Soli in Prozent.
@@ -343,21 +342,11 @@
 #'   \describe{
 #'     \item{"none"}{Keine Steuerberechnung (Standard)}
 #'     \item{"person"}{Persoenliche Besteuerung (Abgeltungsteuer, § 23 EStG) mit FIFO-Buchfuehrung}
-#'     \item{"funds"}{Fondsmodell (Fondsbesteuerung): Kosten funds_fee/bonus_fee, bei Liquidation
-#'       Steuer auf den Gesamtgewinn (Endwert - Startkapital - Einzahlungen)}
 #'   }
 #' @param tax_rate Zahl. Steuersatz in Prozent (Standard: 26.375 = 25 % + 5,5 % Soli).
 #' @param base_rate Zahl oder NULL. Basiszins fuer die Vorabpauschale in Prozent (2.29 = 2,29 %).
 #' @param base_rate_flex Logisch. Zeitvariablen Basiszins aus den Daten verwenden.
 #' @param base_rate_data Zeichenkette. Spaltenname des Basiszinses (in Prozent).
-#' @param funds_fee Zahl. Jaehrliche Fondskosten in Prozent p. a. (nur bei tax_mode = "funds");
-#'   linearer Tagessatz funds_fee / 100 / Kalendertage des Jahres (ein volles Jahr kostet genau
-#'   funds_fee Prozent); belastet am 31.12. und anteilig am letzten Tag (bei Liquidation auf
-#'   einem aufgefuellten letzten Tag: am Liquidationstag vor der Steuer), fehlendes Cash per
-#'   Teilverkauf ohne Ordergebuehr und Spread. Zulaessig 0 bis 100 (sonst Fehler).
-#' @param bonus_fee Zahl. Performancegebuehr in Prozent des Wertzuwachses ueber dem Hoechststand
-#'   (um Einzahlungen erhoeht, nach Belastung als Wert nach Abzug der Gebuehren gefuehrt;
-#'   nur bei tax_mode = "funds"). Zulaessig 0 bis 100 (sonst Fehler).
 #'
 #' @section Weitere Parameter:
 #' @param risk_free Zahl oder Zeichenkette. Annualisierte risikolose Rendite in
@@ -490,12 +479,12 @@
 
 simulation <- function(data, strategy, start_value = 10000,
                        costs = sim_costs(), dca = NULL, rebalance = NULL, splits = NULL,
-                       tax = NULL, funds = NULL,
+                       tax = NULL,
                        risk_free = 0, fractions = TRUE, liquidate = FALSE, details = FALSE) {
   # Etappe 6.3: Bausteine pruefen und in die Argumente der Engine uebersetzen (.sim_from_blocks); die Engine
   # (.simulation_flat) rechnet unveraendert. Bedingungen tragen den Aufruf von simulation().
   sim_call <- sys.call()
-  flat <- .sim_from_blocks(costs, dca, rebalance, splits, tax, funds)
+  flat <- .sim_from_blocks(costs, dca, rebalance, splits, tax)
   args <- c(if (!missing(data)) list(data = data), if (!missing(strategy)) list(strategy = strategy),
             list(start_value = start_value, risk_free = risk_free, fractions = fractions, liquidate = liquidate,
                  details = details),
@@ -541,7 +530,7 @@ simulation <- function(data, strategy, start_value = 10000,
     # =========================================
     # STEUERN (mit I3: Günstigerprüfung)
     # =========================================
-    tax_mode = c("none", "person", "funds"),
+    tax_mode = c("none", "person"),
     tax_rate = 26.375,
     marginal_tax_rate = NULL,
     use_guenstigerpruefung = FALSE,  # <-- NEU: I3
@@ -554,9 +543,6 @@ simulation <- function(data, strategy, start_value = 10000,
     base_rate = NULL,
     base_rate_flex = FALSE,
     base_rate_data = NULL,
-    # Fonds
-    funds_fee = 0.95,
-    bonus_fee = 5,
     # Sonstiges
     fractions = TRUE,
     risk_free = 0,                # A-4: Risk-Free-Jahresrate in Prozent (3 = 3 %) ODER Spaltenname in data
@@ -584,11 +570,10 @@ simulation <- function(data, strategy, start_value = 10000,
   sim_call <- if (is.null(.call)) sys.call() else .call
   # Mit Bausteinen gilt kein Argument als einzeln angegeben (die Bausteine pruefen das Zusammenspiel selbst)
   given <- if (.blocks) c(tax_rate = FALSE, marginal_tax_rate = FALSE, include_soli_on_income_tax = FALSE,
-                          soli_rate_income_tax = FALSE, funds_fee = FALSE, bonus_fee = FALSE, event_mode = FALSE)
+                          soli_rate_income_tax = FALSE, event_mode = FALSE)
            else c(tax_rate = !missing(tax_rate), marginal_tax_rate = !missing(marginal_tax_rate),
                   include_soli_on_income_tax = !missing(include_soli_on_income_tax),
-                  soli_rate_income_tax = !missing(soli_rate_income_tax), funds_fee = !missing(funds_fee),
-                  bonus_fee = !missing(bonus_fee), event_mode = !missing(event_mode))
+                  soli_rate_income_tax = !missing(soli_rate_income_tax), event_mode = !missing(event_mode))
   withCallingHandlers({
     # 1. Eingabepruefung, Steuer- und Gebuehreneinstellungen
     cfg <- .sim_check_inputs(
@@ -599,8 +584,8 @@ simulation <- function(data, strategy, start_value = 10000,
       marginal_tax_rate = marginal_tax_rate, use_guenstigerpruefung = use_guenstigerpruefung,
       private_sale_threshold = private_sale_threshold, sparer_pauschbetrag = sparer_pauschbetrag,
       use_sparer_pauschbetrag = use_sparer_pauschbetrag, include_soli_on_income_tax = include_soli_on_income_tax,
-      soli_rate_income_tax = soli_rate_income_tax, base_rate = base_rate, funds_fee = funds_fee,
-      bonus_fee = bonus_fee, fractions = fractions, risk_free = risk_free, split_mode = split_mode,
+      soli_rate_income_tax = soli_rate_income_tax, base_rate = base_rate,
+      fractions = fractions, risk_free = risk_free, split_mode = split_mode,
       split_thresh = split_thresh, event_col = event_col, church_tax = church_tax, order_fee = order_fee,
       dca_fee = dca_fee, harvest_mode = harvest_mode, harvest_day = harvest_day,
       taxable_income = taxable_income, tariff = tax_tariff, given = given, blocks = .blocks)
@@ -621,19 +606,19 @@ simulation <- function(data, strategy, start_value = 10000,
       balance_unit = balance_unit, balance_days = cfg$balance_days, balance_anchor = balance_anchor,
       balance_start = balance_start, balance_skip = balance_skip, event_col = cfg$event_col,
       event_mode = event_mode, event_weight = event_weight, split_mode = cfg$split_mode,
-      split_thresh = split_thresh, blocks = .blocks)
+      split_thresh = split_thresh, blocks = .blocks, no_split = cfg$no_split)
     data <- cal$data
     fl <- cal$flags
     if (!is.null(cfg$event_col)) event_weight <- cal$event_weight
     init <- .sim_init_weights(sim_mem, fl$flag_assets, fl$flag_date, cfg$start_value)
     sim_mem <- init$sim_mem
     fl$initial_assets <- init$initial_assets
-    fl <- .sim_build_schedule(sim_mem, fl, data, prep$stopp_date, cfg$tax_mode, cfg$harvest_mode, harvest_day)
+    fl <- .sim_build_schedule(sim_mem, fl, data, cfg$tax_mode, cfg$harvest_mode, harvest_day)
 
     # 3.-5. Helfer, Tagesschleife, Abschluss des letzten Jahres
     act <- .sim_make_actions(cfg, fl, details)
     sim_mem <- .sim_run_days(sim_mem, fl, cfg, act, data, cfg$strategy, liquidate, event_weight, split_thresh,
-                             funds_fee, bonus_fee, balance_dca, harvest_loss_pot, details)
+                             balance_dca, harvest_loss_pot, details)
     sim_mem <- .sim_close_years(sim_mem, fl, cfg, act, prep$stopp_date, details)
 
     # 6. Auswertung und Ergebnisobjekt

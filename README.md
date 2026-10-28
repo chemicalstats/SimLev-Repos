@@ -88,7 +88,7 @@ bezeichnet; im Folgenden „Stand 54b5b4f“).
 | **Handelslogik** | Buy-and-Hold, signalgesteuerte Ein- und Ausstiege, gestaffelte Asset-Starts, Bruchstücke oder ganze Anteile |
 | **Kapitalflüsse** | Einmalanlage, Sparpläne (monatlich, quartalsweise, jährlich), wahlweise mit Mini-Rebalancing über die Sparrate |
 | **Rebalancing** | Kalenderbasiert, mit Toleranzschwelle oder ereignisbasiert (Hebel- und Volatilitäts-Trigger) |
-| **Kosten** | Bid-Ask-Spread je Asset, optional laufende Fondskosten und Performancegebühr |
+| **Kosten** | Bid-Ask-Spread je Asset (Standard 0), Order- und Sparplangebühren |
 | **Steuern** | InvStG-Fondsbesteuerung, Abgeltungsteuer nach § 20 EStG, private Veräußerungsgeschäfte nach § 23 EStG |
 | **Kennzahlen** | CAGR, TTWROR, Volatilität, Sharpe, Sortino, Calmar, Omega, Ulcer Index, Drawdown-Dauer u. v. m. |
 | **Visualisierung** | Statisches Dashboard (R: Base-Grafik, Python und Julia: SVG ohne Zusatzpaket, mit den dargestellten Daten für eigene Grafiken) |
@@ -824,14 +824,48 @@ an Event-Tagen aus Datenspalten fest.
 
 ### Besteuerung
 
-Über die Bausteine `tax` und `funds` wählen Sie eines von drei Modellen
-(`tax` und `funds` zusammen sind ein Fehler):
+Über den Baustein `tax` wählen Sie eines von zwei Modellen:
 
 | Angabe | Bedeutung |
 |---|---|
-| keine (`tax = NULL`, `funds = NULL`) | Keine Steuern, also die reine Brutto-Performance |
+| keine (`tax = NULL`) | Keine Steuern, also die reine Brutto-Performance |
 | `tax = tax_profile()` | Besteuerung eines deutschen Privatanlegers mit vollständiger FIFO-Lotverwaltung |
-| `funds = funds_costs()` | Vereinfachte Fondshülle: laufende Kosten (`fee`, wie eine TER) und eine Performancegebühr mit High-Watermark (`performance_fee`); bei Liquidation Steuer auf den Gesamtgewinn |
+
+Den früheren Fondsmodus (`simulation(funds = funds_costs())`) gibt es nicht
+mehr; sein Nachfolger ist der Fonds-Wrapper (nächster Abschnitt).
+
+### Fonds-Wrapper (Zertifikat oder Fonds über eine innere Strategie)
+
+Ein Wrapper ist **ein** Asset der Strategie. Innen handelt eine eigene
+Strategie mit Umschichten und optional Ordergebühren; es fallen
+Verwaltungsgebühr und Performancegebühr an. Außen kauft und verkauft der
+Anleger Anteile mit eigenem Spread und eigenen Gebühren und zahlt Steuern wie
+auf ein Einzelpapier:
+
+```r
+inner <- wrapper_config(
+  create_strategy(Welt = asset_config("etf", share = 0.7), Gold = asset_config("etc", share = 0.3)),
+  rebalance = rebalance_plan(unit = "quarter"),
+  costs     = funds_costs(fee = 0.95, performance_fee = 5))
+strategy <- create_strategy(
+  Zertifikat = asset_config("certificate", share = 0.8, spread = 0.5, wrapper = inner),
+  Cash_ETF   = asset_config("etf", share = 0.2, partial_exemption = 30))   # optional daneben
+```
+
+`simulation()` rechnet
+vor der Engine den Anteilswert aus den Spalten `Welt` und `Gold`
+(`wrapper_nav()`): Verwaltungsgebühr täglich je Kalendertag,
+Performancegebühr täglich gegen die High-Water-Mark abgegrenzt und am letzten
+Datentag jedes Jahres festgeschrieben. Der Name `Zertifikat` ist dabei keine
+Kursspalte. Ob der Wrapper steuerlich eine Kapitalforderung
+(`asset_class = "certificate"`) oder ein Investmentfonds
+(`tax_regime = "investment_fund"` mit Teilfreistellung und Vorabpauschale)
+ist, legen Sie selbst fest. Bootstrap-Studien und Parametersuchen ziehen bzw.
+variieren die inneren Spalten und rechnen den Anteilswert je Lauf neu.
+Einzelheiten: `?wrapper_config`, `?wrapper_nav` und Abschnitt „Fonds-Wrapper“
+in `?simulation`. Python und Julia haben dieselbe Schnittstelle
+(`wrapper_config`, `wrapper_nav`, `asset_config(wrapper = …)`) und rechnen
+bitgleich.
 
 Die folgende Beschreibung gibt den Stand der aktuellen R-Engine 0.5.0
 wieder; Python 0.5.0 und Julia 0.5.0 rechnen bitgleich genauso. Was sich
@@ -1002,17 +1036,6 @@ unterscheiden sich die Zahlen?“ beschrieben) dieselbe Tabelle und dieselben
 12.833,82 EUR; in Julia steht sie unter `res.tax_report.tariff_years`.
 
 </details>
-
-Mit `funds = funds_costs(fee, performance_fee)` belastet SimLev die Fondskosten `fee` linear je
-Kalendertag (ein volles Kalenderjahr kostet genau `fee` Prozent), am
-31.12. und anteilig am letzten Tag; fehlendes Cash wird per Teilverkauf
-ohne Ordergebühr und Spread beschafft. Die High-Watermark der
-Performancegebühr `performance_fee` wird um Einzahlungen erhöht und nach Abzug der
-Gebühren fortgeschrieben. Bei Liquidation wird der Gesamtgewinn (Endwert
-minus Startkapital minus Einzahlungen) versteuert. (Bis zum Stand 54b5b4f wurden die Fondskosten bei voll
-investiertem Depot nicht belastet: zwei Jahre ohne Kursänderung und ohne
-Spread mit `funds_costs(fee = 1)` ergeben jetzt 9.801 EUR, damals 10.000 EUR aus
-10.000 EUR.)
 
 **Modellphilosophie:** SimLev projiziert die *heutige* Rechtslage in die
 Vergangenheit, also aktuellen Pauschbetrag, aktuelle
@@ -1574,7 +1597,7 @@ drei Sprachen gleich:
 | `open_lots` | *Nur mit `tax = tax_profile()` gefüllt, sonst `NULL`:* je Asset die am letzten Tag gehaltenen Lots (Kaufdatum, Stück, Anschaffungskurs, anzurechnende Vorabpauschale) mit Steuerregime, Teilfreistellung, Cash, `spread` und `order_fee`; `withdrawal_simulation(start_value = <Ergebnis>)` verkauft daraus per FIFO |
 | `buys`, `sells` | Durchschnittliche Anzahl Käufe und Verkäufe pro Jahr je Asset (bei einem Einzeltag `NA`) |
 | `fees_paid`, `harvest_days` | Summe der Ordergebühren (mit `sim_costs()`) und Termine der Gewinnrealisierung (mit `harvest_rule()`) |
-| `trades` | *Nur Python und Julia:* alle Lots, Verkäufe, Vorabpauschalen und Gebühren je Asset |
+| `trades` | *Nur Python und Julia:* alle Lots, Verkäufe und Steuerbuchungen (z. B. Vorabpauschalen) je Asset |
 
 `summary(result)` liefert unter anderem `total_return_twr`
 (zeitgewichtete Gesamtrendite), `return_on_invested` ((Endwert −
@@ -1704,7 +1727,7 @@ R-Fassung; die Unterschiede betreffen nur Schreibweisen und Komfort (siehe
   Julia.
 - `simulation()` hat kein Argument `spread` (bis 6.2 war es wirkungslos und
   ergab nur eine Warnung). Spreads werden je Asset über
-  `asset_config(spread = )` gesetzt.
+  `asset_config(spread = )` gesetzt; Standard ist 0 (ohne Spread).
 
 Weitere sprachspezifische Hinweise stehen in den READMEs der Unterordner
 [`r/`](r/README.md), [`python/`](python/README.md) und
@@ -1763,11 +1786,11 @@ rechnen dieselben Fälle nach und vergleichen jeden Wert Bit für Bit.
 | Engine: Stressfälle (30 Jahre, Totalverlust-Hebel, mehrere Signal-Assets, konstante Preise, Schalttage, Extremwerte, Fehlerpfade) | 37 in `golden/extra/`, alle bitgleich (strikt) | 37, alle bitgleich (strikt) |
 | Engine: frisch erzeugte Zufalls- und Stressfälle beider Generatoren | 669, alle bitgleich | 469, alle bitgleich |
 | Engine: Fälle mit den neuen Argumenten (`order_fee`, `dca_fee`, `church_tax`, `harvest_*`, `taxable_income`, `tax_tariff`) | 750, alle bitgleich | 92 eigene Fälle, alle bitgleich (strikt) |
-| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS (Module `evd`, `rugarch`, `imputets`) und die R-Interna (30 Module in `golden/modules/`) | 4.656, alle bitgleich (strikt, NA ≠ NaN, mit Vorzeichen der Null) | 4.656, alle bitgleich (strikt, NA ≠ NaN, mit Vorzeichen der Null) |
+| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), der Fonds-Wrapper (Modul `wrapper`), die Nachbildung von evd, rugarch und imputeTS (Module `evd`, `rugarch`, `imputets`) und die R-Interna (31 Module in `golden/modules/`) | 4.755, alle bitgleich (strikt, NA ≠ NaN, mit Vorzeichen der Null) | 4.755, alle bitgleich (strikt, NA ≠ NaN, mit Vorzeichen der Null) |
 
-Die Fälle in [`golden/`](golden/) prüfen beide Suiten: die 105
+Die Fälle in [`golden/`](golden/) prüfen beide Suiten: die 90
 Engine-Fälle in `golden/cases/` und `golden/extra/` vollständig und die
-4.656 Modul-Fälle in Python vollständig, in Julia standardmäßig in einer
+4.755 Modul-Fälle in Python vollständig, in Julia standardmäßig in einer
 Auswahl und mit `SIMLEV_FULL_TESTS=1` vollständig.
 
 **Optionale R-Pakete.** `.fit_tail` (Tail-Modell im Bootstrap, Verfahren
@@ -1805,16 +1828,16 @@ dem Kern `src/ms_garch.c`; in Python `simlev.ms_garch`, in Julia
 `SimLev.MsGarch`).
 
 **Aktuelle R-Fassung 0.5.0:** Nach dem Stand 54b5b4f korrigiert das
-R-Paket Rechenfehler der Engine (Fondsmodus, Splits mit ganzen Anteilen,
+R-Paket Rechenfehler der Engine (Splits mit ganzen Anteilen,
 später startende Assets, Sparplantermine, unsortierte, doppelte oder
 fehlende Daten, Rebalancing zum Tageskurs, Sortino Ratio u. a.), setzt die
 Besteuerung nach geltendem Recht um (Vorabpauschale, Verlustverrechnung,
 § 23 EStG, Kirchensteuer, Günstigerprüfung, Zwangsverkäufe), misst
 Kennzahlen mit Sparplan geld- bzw. zeitgewichtet, kennzeichnet nicht
 definierte Kennzahlen mit Ursache und gibt alle Meldungen und Ausgaben auf
-Deutsch aus. Alle 105 Golden-Fälle sind mit der aktuellen R-Fassung neu
-erzeugt. Python 0.5.0 und Julia 0.5.0 haben alle Änderungen übernommen und
-treffen alle 105 Fälle bitgleich, einschließlich Druckausgabe. Was sich
+Deutsch aus. Alle Golden-Fälle sind mit der aktuellen R-Fassung neu
+erzeugt (seit Etappe 6.5c 90; die 15 Fälle des entfernten Fondsmodus entfielen). Python 0.5.0 und Julia 0.5.0 haben alle Änderungen übernommen und
+treffen alle 90 Fälle bitgleich, einschließlich Druckausgabe. Was sich
 geändert hat, steht in [`r/NEWS.md`](r/NEWS.md),
 [`python/NEWS.md`](python/NEWS.md) und [`julia/NEWS.md`](julia/NEWS.md).
 
@@ -1859,7 +1882,7 @@ fünf Läufen nach einem ersten Aufruf, Julia nach dem Vorkompilieren:
 | Szenario | R | Python | Julia |
 |---|---|---|---|
 | 30 Jahre, 3 Assets (Aktien-ETF, Renten-ETF, ETC mit Lieferanspruch), Sparplan, jährliches Rebalancing, Steuern | 0,17 s | 0,12 s | **0,033 s** |
-| 30 Jahre, Hebelzertifikat und Renten-ETF, Fondsmodus, Splits, ganze Anteile, Schwellen-Rebalancing | 0,17 s | 0,09 s | **0,012 s** |
+| 30 Jahre, Hebelzertifikat und Renten-ETF, Splits, ganze Anteile, Schwellen-Rebalancing (gemessen mit dem inzwischen entfernten Fondsmodus) | 0,17 s | 0,09 s | **0,012 s** |
 | 3,5 Jahre, 3 Assets, zwei Signal-Assets, § 23, Sparplan | 0,09 s | 0,026 s | **0,003 s** |
 
 Alle drei Fassungen rechneten dieselben Kursdaten (synthetisch, in R
@@ -1913,7 +1936,7 @@ SimLev-Repos/
 ├── golden/            gemeinsame Referenzfälle aus R und ihre Generatoren
 │   ├── cases/         68 Golden-Master-Fälle der Engine (Python und Julia)
 │   ├── extra/         37 Stressfälle der Engine (Python und Julia)
-│   ├── modules/       4.656 Referenzfälle aller Funktionen in 30 Modulen
+│   ├── modules/       4.755 Referenzfälle aller Funktionen in 31 Modulen
 │   │                  (je Fall R-, Python- und Julia-Code), Generatoren
 │   │                  gen_<modul>.R und ref_tools.R
 │   ├── golden_cases.R
@@ -1949,12 +1972,12 @@ rcmdcheck::rcmdcheck("r")
 ``` bash
 cd python
 pip install ".[test]"
-pytest                                  # 5.020 Tests, alle bestanden
-python tools/compare_golden.py          # Engine: golden/cases und golden/extra (105 Fälle)
-python tools/compare_reference.py       # alle Funktionen: golden/modules (4.656 Fälle)
+pytest                                  # 5.201 Tests, alle bestanden
+python tools/compare_golden.py          # Engine: golden/cases und golden/extra (90 Fälle)
+python tools/compare_reference.py       # alle Funktionen: golden/modules (4.755 Fälle)
 ```
 
-Die Suite enthält 4.656 Modul-Referenzfälle und die 105 Golden-Master-Fälle
+Die Suite enthält 4.755 Modul-Referenzfälle und die 90 Golden-Master-Fälle
 der Engine; die übrigen Tests prüfen Engine und R-Interna. Einzelne Module
 oder Fälle prüft `python tools/compare_reference.py <modul> [-k id] [-v]`
 bzw. `python tools/compare_golden.py [ordner …] [-k fall …] [-v]`. Auf
@@ -1968,13 +1991,13 @@ Plattformen ohne 80-Bit-`long double` werden die Bitgleichheits-Tests
 
 ``` bash
 cd julia
-julia --project -e 'using Pkg; Pkg.test()'                     # 1.221 Tests, alle bestanden
-SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()' # dazu alle 4.656 Modul-Referenzfälle
-julia --project tools/compare_golden.jl                        # Engine: golden/cases und golden/extra (105 Fälle)
-julia --project tools/compare_reference.jl                     # alle Funktionen: golden/modules (4.656 Fälle)
+julia --project -e 'using Pkg; Pkg.test()'                     # 1.317 Tests, alle bestanden
+SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()' # dazu alle 4.755 Modul-Referenzfälle
+julia --project tools/compare_golden.jl                        # Engine: golden/cases und golden/extra (90 Fälle)
+julia --project tools/compare_reference.jl                     # alle Funktionen: golden/modules (4.755 Fälle)
 ```
 
-`Pkg.test()` prüft die 105 Golden-Master-Fälle der Engine vollständig
+`Pkg.test()` prüft die 90 Golden-Master-Fälle der Engine vollständig
 (strikt, NA ≠ NaN), von den Modul-Referenzfällen eine Auswahl von bis zu
 vier je Modul, dazu `F80`, Engine, Ausgabe und den Auswerter für
 Bedingungen. Einzelne Module oder Fälle prüft

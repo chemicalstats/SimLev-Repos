@@ -22,8 +22,7 @@
 .SIM_PHASES <- c(".sim_check_inputs", ".sim_prepare_data", ".sim_build_state", ".sim_check_layout",
                  ".sim_build_calendar", ".sim_init_weights", ".sim_build_schedule", ".sim_make_actions",
                  ".sim_run_days", ".sim_day_activate", ".sim_day_split", ".sim_day_dca", ".sim_day_trade",
-                 ".sim_day_rebalance", ".sim_day_harvest", ".sim_day_assess_vp", ".sim_day_fund_fee",
-                 ".sim_day_liquidate", ".sim_close_years", ".sim_compact_trades", ".sim_returns",
+                 ".sim_day_rebalance", ".sim_day_harvest", ".sim_day_assess_vp", ".sim_day_liquidate", ".sim_close_years", ".sim_compact_trades", ".sim_returns",
                  ".sim_risk_stats", ".sim_undefined_metrics", ".sim_result")
 
 #' Aufruf von simulation() in Bedingungen aus den Phasen wiederherstellen
@@ -84,10 +83,10 @@
 .sim_check_inputs <- function(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_span,
                               dca_days, balance_mode, balance_days, balance_thresh,
                               balance_thresh_type = c("absolute", "relative"),
-                              tax_mode = c("none", "person", "funds"), tax_rate, marginal_tax_rate,
+                              tax_mode = c("none", "person"), tax_rate, marginal_tax_rate,
                               use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                               use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax,
-                              base_rate, funds_fee, bonus_fee, fractions, risk_free, split_mode, split_thresh,
+                              base_rate, fractions, risk_free, split_mode, split_thresh,
                               event_col, church_tax, order_fee, dca_fee, harvest_mode, harvest_day,
                               taxable_income, tariff, given, blocks = FALSE) {
     # === PARAMETER-VALIDIERUNG ===
@@ -133,9 +132,22 @@
     if (!is.character(a$trading) || length(a$trading) != 1L || !a$trading %in% c("bnh", "signal"))
       stop(sprintf("simulation: trading %s von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\".",
                    .show_arg_s(a$trading), nm), call. = FALSE)
+    if (!is.null(a[["wrapper"]])) {   # Fonds-Wrapper (Etappe 6.5c, wrapper.R)
+      if (!inherits(a[["wrapper"]], "SimLevWrapperConfig"))
+        stop(sprintf("simulation: wrapper von Asset '%s' muss ein Objekt aus wrapper_config() sein, nicht %s.",
+                     nm, paste(class(a[["wrapper"]]), collapse = "/")), call. = FALSE)
+      if (a$trading != "bnh")
+        stop(sprintf("simulation: Asset '%s' ist ein Fonds-Wrapper; daf\u00fcr ist nur trading = \"bnh\" m\u00f6glich (keine Signale auf den Anteilswert).",
+                     nm), call. = FALSE)
+    }
   }
   if (!"date" %in% names(data)) stop("simulation: Spalte 'date' fehlt in 'data'.")
-  miss <- setdiff(names(strategy), names(data))
+  # Fonds-Wrapper: Asset-Name ist keine Kursspalte; gebraucht werden die inneren Spalten (.strategy_columns)
+  wraps <- .strategy_wrappers(strategy)
+  if (length(coll <- intersect(wraps, names(data))))
+    stop(sprintf("simulation: Asset '%s' ist ein Fonds-Wrapper (asset_config(wrapper = )); 'data' darf keine Spalte gleichen Namens enthalten (der Anteilswert wird aus den inneren Spalten gerechnet). Spalte umbenennen oder entfernen.",
+                 coll[1]), call. = FALSE)
+  miss <- setdiff(.strategy_columns(strategy), names(data))
   if (length(miss))
     stop(sprintf("simulation: %s %s in 'data'; je Asset der Strategie wird eine Spalte gleichen Namens erwartet (vorhanden: %s).",
                  if (length(miss) == 1L) "Kursspalte" else "Kursspalten", paste(paste0("'", miss, "'", collapse = ", "),
@@ -165,6 +177,24 @@
   if (anyDuplicated(data$date))
     stop(sprintf("simulation: Datum %s kommt in 'data' mehrfach vor (%d doppelte Zeilen); je Tag genau eine Zeile.",
                  format(data$date[anyDuplicated(data$date)]), sum(duplicated(data$date))))
+  # Fonds-Wrapper: Anteilswert je Wrapper-Asset aus den inneren Spalten (wrapper.R) als Kursspalte mit dem
+  # Asset-Namen anhaengen (NA vor dem Beginn und an Tagen ohne inneren Kurs); danach ist das Asset ein
+  # gewoehnliches asset_config ohne wrapper. splits gelten fuer die inneren Spalten, nicht fuer den Anteilswert.
+  wrapper_navs <- NULL
+  if (length(wraps)) {
+    d_in <- data
+    if (is.matrix(filled_attr) && nrow(filled_attr) == nrow(data)) attr(d_in, "filled") <- filled_attr
+    sp <- if (isTRUE(split_mode) && !is.null(split_thresh)) structure(list(thresh = unlist(split_thresh)), class = "SimLevSplitRule")
+    wrapper_navs <- lapply(stats::setNames(wraps, wraps), function(nm)
+      .wrapper_nav_calc(d_in, strategy[[nm]][["wrapper"]], sp, tag = sprintf("Wrapper '%s'", nm),
+                        who = sprintf("simulation: Wrapper '%s'", nm)))
+    for (nm in wraps) {
+      v <- rep(NA_real_, nrow(data))
+      v[match(wrapper_navs[[nm]]$date, data$date)] <- wrapper_navs[[nm]]$nav
+      data[[nm]] <- v
+      strategy[[nm]][["wrapper"]] <- NULL
+    }
+  }
   # Tage ohne echten Kurs: aus series_align() (Attribut 'filled') bzw. Zeilen, in denen alle Kurse NA sind
   # R2-03: Attribut mit anderer Zeilenzahl (z. B. nach Zeilenauswahl) ist nicht zuordenbar (traegt keine Daten)
   if (!is.null(filled_attr) && (n_fa <- if (is.matrix(filled_attr)) nrow(filled_attr) else length(filled_attr)) != nrow(data)) {
@@ -235,8 +265,7 @@
   }
   if (isTRUE(harvest_mode) && tax_mode != "person")
     warning("simulation: harvest_mode wirkt nur mit tax_mode = \"person\" und wird hier ignoriert.", call. = FALSE)
-  } else if (isTRUE(harvest_mode) && tax_mode != "person")   # Fondsmodus mit tax_profile(harvest =)
-    warning("simulation: harvest (tax_profile(harvest = harvest_rule())) wirkt nicht im Fondsmodus (funds = funds_costs()) und wird hier ignoriert.", call. = FALSE)
+  }
   # A7-10: Steuer- und Schalterargumente pruefen (einzelne endliche Zahl bzw. TRUE/FALSE); sonst kryptische
   # R-Fehler bzw. stille Fehldeutung (z. B. private_sale_threshold = "1000": Textvergleich)
   .show_arg <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = "")
@@ -309,28 +338,12 @@
                              "Ein Split setzt den Kurs auf 100; liegt 100 au\u00dferhalb der Schwellen, folgt danach an jedem Tag ein weiterer Split ",
                              "(mit fractions = FALSE jeweils mit Spitzenausgleich)."), format(st_v[1]), format(st_v[2])), call. = FALSE)
   }
-  # Fondskosten wirken nur im Fondsmodus: ausdruecklich angegebene Werte sonst nicht still ignorieren
-  if (tax_mode != "funds" && (given[["funds_fee"]] || given[["bonus_fee"]])) {
-    ign <- c("funds_fee", "bonus_fee")[c(given[["funds_fee"]], given[["bonus_fee"]])]
-    warning(sprintf("simulation: %s wirkt nur bei tax_mode = \"funds\" (hier tax_mode = \"%s\") und wird ignoriert.",
-                    paste(ign, collapse = " und "), tax_mode), call. = FALSE)
-  }
-  # R2-04: Fondskosten (Prozent-Konvention)
-  if (tax_mode == "funds") {
-    for (a in c("funds_fee", "bonus_fee")) {
-      x <- get(a)
-      if (!is.numeric(x) || length(x) != 1L || is.na(x) || x < 0 || x > 100)
-        stop(sprintf("simulation: %s muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. %s), nicht %s.",
-                     a, if (a == "funds_fee") "0.95 f\u00fcr 0,95 % p. a." else "5 f\u00fcr 5 %", paste(format(x), collapse = ", ")))
-    }
-  }
   }
 
   # Einkommensteuertarif (taxable_income, tax_tariff): zvE je Kalenderjahr pruefen, Tarif lesen
   tariff_on <- !is.null(taxable_income) && tax_mode == "person"
-  if (!is.null(taxable_income) && tax_mode != "person")
-    warning(if (blocks) "simulation: income_tariff() (tax_profile(income =)) wirkt nicht im Fondsmodus (funds = funds_costs()) und wird ignoriert."
-            else sprintf("simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"%s\") und wird ignoriert.", tax_mode), call. = FALSE)
+  if (!is.null(taxable_income) && tax_mode != "person")   # nur ohne Bausteine moeglich (income_tariff() steht in tax_profile())
+    warning(sprintf("simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"%s\") und wird ignoriert.", tax_mode), call. = FALSE)
   if (is.null(taxable_income) && !is.null(tariff))
     warning("simulation: tax_tariff wirkt nur zusammen mit taxable_income (zu versteuerndes Einkommen je Jahr) und wird ignoriert.", call. = FALSE)
   tariff_env <- NULL
@@ -503,5 +516,6 @@
        balance_mode = balance_mode, balance_days = balance_days,
        balance_thresh = balance_thresh, balance_thresh_type = balance_thresh_type,
        base_rate = base_rate, risk_free = risk_free, harvest_mode = harvest_mode,
-       split_mode = split_mode, event_col = event_col, pre_filled = pre_filled)
+       split_mode = split_mode, event_col = event_col, pre_filled = pre_filled,
+       no_split = wraps, wrappers = if (isTRUE(details)) wrapper_navs)
 }

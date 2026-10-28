@@ -1,5 +1,14 @@
 # SimLev.jl (Julia) – Änderungen je Version
 
+## SimLev.jl 0.10.0
+
+Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Wrapper: wrapper_config() und asset_config(wrapper = ) bilden einen Zertifikat- bzw. Fonds-Wrapper als eigene Kursreihe ab (wrapper_nav()); innere Assets mit eigenem Umschichten und Orderkosten, tägliche Verwaltungs- und Performancegebühr mit High-Water-Mark; außen gelten Spread, Gebühren und Steuern wie bei jedem Asset.
+- Geändert: asset_config() hat den Standard-Spread 0; der alte Fondsmodus simulation(funds = ) entfällt.
+- Strategien: strategy_from_weights() und portfolio_template() nehmen Wrapper je Asset.
+- Qualität: NaN-Randfälle der reinen Python- und Julia-Kerne an R angeglichen; Messskript überschreibt keine Ergebnisse.
+
 ## SimLev.jl 0.9.1
 
 Patch-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -61,6 +70,36 @@ zusammengefasst. Die Begründungen der fachlichen Änderungen stehen in
 [`r/NEWS.md`](../r/NEWS.md), Abschnitt „SimLev 0.5.0“. Das Paket braucht
 weiterhin nur die Standardbibliothek (`Dates`, `Printf`, `Logging`;
 `LinearAlgebra` nur als Ersatzweg für Eigenvektoren).
+
+### Ports in NaN-Randfällen (Etappe 8.0)
+
+- **Bitgleich zu R auch bei NA/NaN-gemischten Eingaben:** Die Ports von `min_cdar_core` (`quantile7` mit Nachbildung von `std::nth_element`), `hmm_forward_backward`, `dcc_filter`, `garch_filter`, `rolling_vol` (`std::max` statt Julias `max`), der Engine-Kerne (`core.jl`), `boot_wild`, `boot_garch`, `boot_ms_garch` (auch `std::min`/`std::max` bei TVTP) und `rtruncnorm` rechnen Additionen und Multiplikationen mit zwei möglichen NaN in der Operandenfolge des R-Baus (`nan_add`, `nan_mul` in `src/r/rnum.jl`); in den Zufallsvergleichen gegen R (Fälle wie Python, Etappe 7.3a/7.3b) vorher z. B. `dcc_filter` 377/400, `boot_wild` 1.875/2.000, `rtruncnorm` 1.941/2.000, jetzt alle bitgleich; neu `test/nan_kerne_tests.jl`.
+
+### Restpunkte Fonds-Wrapper (Etappe 8.0)
+
+- **Auswahl aus `wrapper_nav()`:** `rows(x, i)` liefert eine gewöhnliche Tabelle (`RFrame`) ohne Klasse `SimLevWrapperNav` und ohne Attribute (bisher blieben beide); wie R `[.SimLevWrapperNav`. Neu intern `register_plain_rows!` (Klassen, deren Zeilenauswahl gewöhnlich wird); andere Klassen behalten bei `rows` Klasse und Attribute.
+- **`withdrawal_simulation()`:** Ein `RFrame` mit Spalte `date` als `x` ergibt den Fehler wie in R.
+- **`strategy_from_weights()`/`portfolio_template()` mit `wrapper`:** ein `SimLevWrapperConfig` für alle Assets, eine benannte Liste (NamedTuple, `Dict`, `RList`, Paare) je Asset, Fehler wie in R (bisher wurde ein einzelnes `SimLevWrapperConfig` stillschweigend weggelassen).
+
+### Fonds-Wrapper (Etappe 6.5c, Teil C und D)
+
+Port des Fonds-Wrappers aus R (Begründung und Rechenregeln in [`r/NEWS.md`](../r/NEWS.md) und im Kopf von `src/wrapper.jl`); bitgleich zu R in allen 72 Fällen des neuen Referenzmoduls `golden/modules/wrapper`, auch mit `julia -t 2`. Die Schnittstelle ist neu eingefroren (`tools/api_snapshot/CHANGES.md`).
+
+- **Neu (exportiert):** `wrapper_config(strategy; rebalance = nothing, costs = funds_costs(), order_fee = nothing, volume = nothing)` → `RList` der Klasse `SimLevWrapperConfig`, `wrapper_nav(data, wrapper; splits = nothing)` → `RFrame` der Klasse `SimLevWrapperNav` (`date`, `nav`, `gross`, `fee`, `perf_fee`, `perf_paid`, `hwm`; `attrs(x)["inner"]` und `attrs(x)["wrapper"]`) und `asset_config(...; wrapper = nothing)` (auch als elftes Positionsargument wie in R). Druck über `register_print!` wie die R-Methoden; Vorkompilier-Arbeitslast um Wrapper und Anteilswert ergänzt.
+- **Engine:** `simulation()` rechnet je Wrapper-Asset den Anteilswert aus den inneren Spalten (`_sim_phases._sim_check_inputs`) und hängt ihn als Kursspalte an; der Anteilswert splittet nicht (`cfg["no_split"]`), mit `details=True` kommt `result.wrappers` dazu. Die normalisierten Daten gehen als `_Frame` an die innere Rechnung (`simulation()` nimmt intern auch ein `_Frame`); `Cfg` hat die Felder `no_split` und `wrappers`.
+- **Paketzustand:** Den Zustand der Ordergebühren (R `.fee_env`) hält Julia je Lauf (`Run.fee_current`, `Run.fee_paid`); die innere Rechnung ist ein eigener Lauf und lässt den äußeren unverändert, zu sichern ist nichts (Test: äußere Gebühren gleich wie mit dem Anteilswert als Kursspalte).
+- **Meldungen:** Hinweise der inneren Rechnung gehen über `RParallel.with_message_stream` (neu: Meldungen von `r_stderr()` in der laufenden Aufgabe an einen Strom, der sie umformt) und erscheinen als „Hinweis: Wrapper '<Name>' (innere Rechnung): …“ (in `wrapper_nav()` „wrapper_nav (innere Rechnung)“), Warnungen (über einen Logger, der an den äußeren weitergibt) und Fehler als „simulation: Wrapper '<Name>' (innere Rechnung): …“. Bei Handelstagsdaten steht der Auffüll-Hinweis daher wie in R zweimal.
+- **Aufrufer:** `strategy_validate()` (Spaltenkollision, innere Spalten und Signale), `strategy_update_asset(...; wrapper = …)` (auch `nothing` zum Entfernen), `planning_lumpsum_vs_dca()` (Kurs des Wrappers = Anteilswert im Fenster) und `withdrawal_simulation(wrapper_nav(...))`; `bootstrap_study`, `param_search`, `sensitivity_*` und `overfit_*` gehen unverändert über `simulation()`. Kursspalten einer Strategie liefert `_strategy_columns` in `config.jl` (R `.strategy_columns`).
+- **Tests:** `test/wrapper_tests.jl` (Port von `test-wrapper.R`: Plausibilität, Handbeispiel, Startkosten, NA-Tage, Fehler, Hinweise, Gebührenzustand, Splits, Aufrufer, Druck).
+
+### Standard-Spread 0 und alter Fondsmodus entfernt (Etappe 6.5c, Teil A und B)
+
+Entscheidung des Nutzers vom 26.10.2026 (Begründung in [`r/NEWS.md`](../r/NEWS.md)); die Schnittstelle ist neu eingefroren (`tools/api_snapshot/CHANGES.md`).
+
+- **Standard-Spread jetzt 0:** `asset_config(spread = 0)` statt `0.1`; wer Spreads abbilden will, gibt sie an. Ausdrücklich gesetzte Werte bleiben. Ohne Angabe rechnen damit `asset_config()`, Listen an `create_strategy()`, `strategy_from_weights()`, `portfolio_template()`, die `asset_args` von `tactical_simulation()` und die Standardstrategie von `sensitivity_leverage()` ohne Spread (bisher 0,1 %). Die Referenzfälle bleiben gleich: Ihre Generatoren schreiben `spread = 0.1` jetzt aus.
+- **Alter Fondsmodus entfernt:** `simulation()` hat kein Argument `funds` mehr; `simulation(...; funds = funds_costs())` ergibt den üblichen Fehler für ein unbekanntes Schlüsselwort (`MethodError`: `got unsupported keyword argument "funds"`), ohne Sonderbehandlung. Entfallen sind der Engine-Weg `tax_mode = "funds"` (Fondskosten am 31.12. und anteilig am letzten Tag mit Teilverkauf, Performancegebühr gegen den Höchststand des Depots, Steuer auf den Gesamtgewinn bei Liquidation) sowie der Baustein `funds` in `sim_args`, Rastern und Suchräumen (Pfade `"funds.*"`); die flachen Namen `funds_fee` und `bonus_fee` sind jetzt unbekannte Argumente. Die geteilten C/C++-Kerne enthielten keinen Fondscode. `result.trades` hat keinen Eintrag `fees` mehr (er enthielt nur die Fondskosten); entfernt sind auch `FeeEntry`, `Totals.total_value`, `Flags.flag_fund_fee`, `_calculate_fund_fees` und `_raise_cash!`.
+- **Umstellung:** Nachfolger ist der Fonds-Wrapper `wrapper_config()` (siehe oben, Etappe 6.5c Teil C/D) mit `funds_costs()` als Kostenbaustein: Der Wrapper wird als eigene Kursreihe (Anteilswert) gerechnet und außen wie ein Einzelpapier gehandelt und besteuert. Unterschiede zum alten Modus: Die Fondskosten werden täglich vom Anteilswert abgezogen (bisher am 31.12. aus der Summe der Tageswerte bzw. anteilig am letzten Tag), und die Performancegebühr bemisst sich am Höchststand je Anteil (bisher am Höchststand des Depots, der mit jeder Einzahlung stieg). `funds_costs()` bleibt mit Prüfung und Druckausgabe exportiert; `simulation()` nimmt es nicht an.
+- **Referenzfälle:** Entfernt sind die 39 Referenzfälle des Fondsmodus: 13 in `golden/cases` (`f07_funds_liq`, `f08_funds_1231`, `f28_details_split_funds`, `r018`, `r035`, `r052`, `r086`, `r171`, `r222`, `r358`, `r443`, `r460`, `r477`), 2 in `golden/extra` (`x02_30y_funds_split_int`, `x16_funds_fee_high`) und 24 im Modul `engine` (`bk01`, `bk18`, `bk19`, `ch12`, `fee05`, `fu01`–`fu11`, `fu14`, `fu16`, `gp05`, `hv15`, `zz02`, `zz08`, `zz13`, `zz20`); Engine-Fälle jetzt 90 (55 + 35), Modul-Fälle 4.659. Alle übrigen Fälle rechnen unverändert (Nachweis und Liste in [`golden/README.md`](../golden/README.md)); acht Fehlerfälle in `bootstrap`, `param_search` und `sensitivity` nennen `funds` nicht mehr in der Liste der Bausteine.
 
 ### Eingefrorene Schnittstelle (Etappe 6.6)
 
@@ -138,7 +177,7 @@ Interne Helfer der Engine (nicht exportiert) folgen dem Namensschema: in R mit P
 
 ### Aufrufer von `simulation()`, Argumentordnung (Etappe 6.4, 6.5)
 
-- **Fondsmodus mit eigenen Steuern** (Korrektur zu 6.3): `simulation(funds = funds_costs(...), tax = tax_profile(...))` ist wieder erlaubt; der Fondsmodus steht für einen eigenen Wrapper (etwa ein Zertifikat) mit eigenen Kosten und eigener Steuer. Aus `tax_profile()` wirken dort wie früher mit `tax_mode = "funds"` der Satz `rate` bzw. die Kirchensteuer `church_tax` (Satz nach § 32d Abs. 1 EStG) für die Steuer auf den Gesamtgewinn bei Liquidation; `harvest` und `income_tariff()` wirken nicht (Warnung), die übrigen Angaben still nicht. Ohne `tax` gilt wie bisher 26,375 %. Referenzfall `ch12` rechnet wieder wie vor 6.3.
+- **Fondsmodus mit eigenen Steuern** (Korrektur zu 6.3; seit 6.5c samt Fondsmodus entfernt, siehe oben): `simulation(funds = funds_costs(...), tax = tax_profile(...))` ist wieder erlaubt; der Fondsmodus steht für einen eigenen Wrapper (etwa ein Zertifikat) mit eigenen Kosten und eigener Steuer. Aus `tax_profile()` wirken dort wie früher mit `tax_mode = "funds"` der Satz `rate` bzw. die Kirchensteuer `church_tax` (Satz nach § 32d Abs. 1 EStG) für die Steuer auf den Gesamtgewinn bei Liquidation; `harvest` und `income_tariff()` wirken nicht (Warnung), die übrigen Angaben still nicht. Ohne `tax` gilt wie bisher 26,375 %. Referenzfall `ch12` rechnet wieder wie vor 6.3.
 - **`sim_args` mit Bausteinen** in `bootstrap_study()`, `param_search()`, `param_bootstrap()`, `sensitivity_grid()`, `sensitivity_leverage()`, `sensitivity_rebalancing()`, `planning_lumpsum_vs_dca()` und den Zusatzargumenten von `tactical_simulation()`: Argumente von `simulation()`, z. B. `sim_args = list(start_value = 1000, tax = tax_profile(), dca = dca_plan(100, 1))`. Die Aufrufer gehen über `simulation()`. Alte flache Namen sind ein Fehler, der den Baustein nennt: `sensitivity_grid: dca_value gibt es nicht mehr; bitte dca = dca_plan(value = …) (Pfad "dca.value").`; unbekannte Namen ebenso (`unbekanntes Argument … für simulation()`).
 - **Pfade zu Bausteinparametern** (F1) in Rastern (`sensitivity_grid(grid = )`), Suchräumen (`param_space()` ohne `builder`), den `args` einer Spezifikation und in `sim_args`: `"dca.value"`, `"rebalance.thresh"`, `"tax.rate"`, `"tax.church_tax"`, für Teilbausteine `"tax.income.marginal_rate"`, `"tax.harvest.day"`. Ein Pfad baut den Baustein für jeden Lauf neu, Grundwerte aus dem Baustein in `sim_args` (ohne ihn die Standardwerte des Konstruktors). Ergebnisspalten heißen wie der Pfad (bisher wie das flache Argument, z. B. `balance_unit` → `rebalance.unit`). Unbekannte Pfade nennen die möglichen Bausteine und Parameter. `sensitivity_rebalancing()` setzt Frequenz, Versatz und Band über diese Pfade, die übrigen Angaben eines `rebalance_plan()` aus `sim_args` bleiben erhalten.
 - **`withdrawal_simulation(tax = tax_profile())`** (F2) statt `tax_mode`, `tax_rate`, `sparer_pauschbetrag`: ausgewertet werden `rate` und `sparer_pauschbetrag`; was die Entnahmephase nicht abbildet (`church_tax`, `private_sale_threshold`, `base_rate`, `guenstigerpruefung`, `income`, `harvest`), ist ein Fehler. `partial_exemption`, `vorabpauschale`, `cost_basis`, `loss_carryforward`, `sale_cost` und der Basiszins `base_rate` (auch als Matrix) bleiben eigene Argumente; das Ergebniselement `tax_mode` bleibt (`"person"`/`"none"`).
@@ -149,7 +188,7 @@ Interne Helfer der Engine (nicht exportiert) folgen dem Namensschema: in R mit P
 
 `simulation()` nimmt die Einstellungen jetzt als Bausteine (Anhang C):
 
-`simulation(data, strategy; start_value = 10000, costs = sim_costs(), dca = nothing, rebalance = nothing, splits = nothing, tax = nothing, funds = nothing, risk_free = 0, fractions = true, liquidate = false, details = false, io = stdout)`
+`simulation(data, strategy; start_value = 10000, costs = sim_costs(), dca = nothing, rebalance = nothing, splits = nothing, tax = nothing, risk_free = 0, fractions = true, liquidate = false, details = false, io = stdout)`
 
 `nothing` heißt aus. Die flachen Argumente bis 6.2 gibt es nicht mehr (keine Aliasse); die Engine rechnet unverändert, alle Referenzfälle sind nach der Übersetzung bitgleich (Nachweis mit `golden/tools/blocks_from_flat.py`). Jeder Baustein prüft seine Argumente selbst und hat eine Druckausgabe.
 
@@ -164,7 +203,7 @@ Interne Helfer der Engine (nicht exportiert) folgen dem Namensschema: in R mit P
 | `marginal_tax_rate`, `include_soli_on_income_tax`, `soli_rate_income_tax` | `income = income_rate(marginal_rate, soli_rate)` (`soli_rate = 0` heißt ohne Soli) |
 | `taxable_income`, `tax_tariff` | `income = income_tariff(taxable_income, tariff)` |
 | `harvest_mode = true`, `harvest_day`, `harvest_loss_pot` | `harvest = harvest_rule(day, loss_pot)` |
-| `tax_mode = "funds"`, `funds_fee`, `bonus_fee` | `funds = funds_costs(fee, performance_fee)` |
+| `tax_mode = "funds"`, `funds_fee`, `bonus_fee` | `funds = funds_costs(fee, performance_fee)`, seit 6.5c entfernt (siehe oben) |
 | `spread` (ohne Wirkung, nur Warnung) | entfällt; der Spread gilt je Asset (`asset_config(spread = )`) |
 
 Neue Regeln: `tax_profile()` mit `rate` und `church_tax` > 0 ist ein Fehler (mit Kirchensteuer gilt der Satz nach § 32d Abs. 1 EStG); `income` nimmt entweder `income_rate()` oder `income_tariff()`. Freibetrag-Ausschöpfung ohne persönliche Besteuerung lässt sich nicht mehr angeben (bisher wirkungslos); die Warnungen zu wirkungslosen flachen Argumenten entfallen. Fehlermeldungen der Prüfungen nennen den Baustein (z. B. `dca_plan: 'value' muss …`, `tax_profile: church_tax …`). Mit `sparer_pauschbetrag = 0` steht in `tax_report$sparer_pauschbetrag_annual` 0 (bisher der angegebene Betrag neben `use_sparer_pauschbetrag = false`).
@@ -329,8 +368,8 @@ Weitere Änderungen: `plot(<SimLevWeights>, main = "Zielgewichte")` hat den Tite
 ### Prüfwerkzeuge
 
 * `tools/compare_golden.jl` prüft die Engine-Fälle eines Ordners
-  (`golden/cases`, 68 Fälle; `golden/extra`, 37 Fälle) strikt mit NA ≠ NaN,
-  einschließlich `print` und `details = true`; alle 105 Fälle sind
+  (`golden/cases`, 55 Fälle; `golden/extra`, 35 Fälle, seit Etappe 6.5c) strikt mit NA ≠ NaN,
+  einschließlich `print` und `details = true`; alle 90 Fälle sind
   bitgleich, ebenso 469 frisch erzeugte Zufalls- und Stressfälle.
 * Neu: `tools/compare_reference.jl` und `test/reftree.jl` vergleichen die
   Erweiterungen, die Engine (Modul `engine`, 249 Fälle zu den Argumenten

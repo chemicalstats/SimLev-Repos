@@ -170,41 +170,6 @@ test_that("A6: Kauf 29.02.: Fristende 28.02., Verkauf am 01.03. steuerfrei; Norm
 })
 
 # ---------------------------------------------------------------------------
-# B7-B9: Fondsmodus
-# ---------------------------------------------------------------------------
-test_that("B7: funds_fee linear: ein volles Kalenderjahr kostet genau funds_fee Prozent", {
-  run <- function(from, to) {
-    dd <- .tl_days(from, to)
-    r <- .tl_sim(data.frame(date = dd, A = 100), create_strategy(A = asset_config("etf", share = 1, spread = 0)), funds = funds_costs(fee = 1, performance_fee = 0))
-    10000 - r$worth[length(r$worth)]
-  }
-  # Wert konstant 10000: Kosten = Tage x 10000 x 0,01 / Tage_im_Jahr
-  expect_equal(run("2021-01-01", "2021-12-31"), 100, tolerance = 1e-9)   # vorher 10000 x ln(1,01) ~ 99,50
-  expect_equal(run("2020-01-01", "2020-12-31"), 100, tolerance = 1e-9)   # Schaltjahr: 366 / 366
-  expect_equal(run("2021-07-01", "2021-12-31"), 184 * 100 / 365, tolerance = 1e-9)   # Rumpfjahr anteilig
-})
-
-test_that("B8: High-Watermark nach Abzug der Geb\u00fchren", {
-  dd <- .tl_days("2021-01-01", "2022-12-31")
-  d <- data.frame(date = dd, A = .tl_step(dd, c("2021-01-01", "2021-12-31", "2022-12-31"), c(100, 120, 123)))
-  r <- .tl_sim(d, create_strategy(A = asset_config("etf", share = 1, spread = 0)), funds = funds_costs(fee = 0, performance_fee = 10))
-  # 2021: Wert 12000, Gebuehr (12000 - 10000) x 10 % = 200 -> 100 - 200/120 = 98,3333 Stueck, Marke 11800.
-  # 2022: Wert 98,3333 x 123 = 12095, Gebuehr (12095 - 11800) x 10 % = 29,5 -> Endwert 12065,5
-  # (vorher Marke 12000 vor Gebuehr: Gebuehr 9,5, Endwert 12085,5).
-  expect_equal(r$worth[length(dd)], 12095 - 29.5, tolerance = 1e-8)
-})
-
-test_that("B9: Teilverkauf f\u00fcr Fondskosten ohne Ordergeb\u00fchr und Spread", {
-  dd <- .tl_days("2021-01-01", "2021-12-31")
-  r <- .tl_sim(data.frame(date = dd, A = 100), create_strategy(A = asset_config("etf", share = 1, spread = 1)), costs = sim_costs(order_fee = 5), funds = funds_costs(fee = 1, performance_fee = 0))
-  # Kauf: (10000 - 5) / 100,5 = 99,45274 Stueck, Wert 9945,274; Kosten 1 % = 99,45274 EUR, Verkauf zu 100
-  # ohne Gebuehr -> Endwert 9945,274 x 0,99 (vorher zusaetzlich 5 EUR Gebuehr und halber Spread)
-  n0 <- 9995 / 100.5
-  expect_equal(r$worth[length(dd)], n0 * 100 * 0.99, tolerance = 1e-8)
-  expect_equal(r$fees_paid, 5)
-})
-
-# ---------------------------------------------------------------------------
 # C10: Spaeter startende Assets
 # ---------------------------------------------------------------------------
 test_that("C10: Am Aktivierungstag wird auch ohne balance_mode auf die Zielgewichte umgeschichtet", {

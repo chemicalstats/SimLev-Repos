@@ -22,10 +22,10 @@ library(SimLev)
 
 test_that("simulation() hat die Signatur mit Bausteinen (Anhang C)", {
   f <- formals(simulation)
-  expect_identical(names(f), c("data", "strategy", "start_value", "costs", "dca", "rebalance", "splits", "tax", "funds",
+  expect_identical(names(f), c("data", "strategy", "start_value", "costs", "dca", "rebalance", "splits", "tax",
                                "risk_free", "fractions", "liquidate", "details"))
   expect_identical(f$costs, quote(sim_costs()))
-  for (a in c("dca", "rebalance", "splits", "tax", "funds")) expect_null(f[[a]])
+  for (a in c("dca", "rebalance", "splits", "tax")) expect_null(f[[a]])
   expect_identical(f$start_value, 10000); expect_identical(f$risk_free, 0)
   expect_identical(f$fractions, TRUE); expect_identical(f$liquidate, FALSE); expect_identical(f$details, FALSE)
   g <- formals(tax_profile)
@@ -98,10 +98,6 @@ test_that("Rueckgabe sichtbar; Gebuehrenzustand nach Lauf und nach Abbruch in de
 test_that("Argumente der Engine werden erst bei Gebrauch ausgewertet", {
   d <- .rf_data(); s <- .rf_strategy()
   expect_silent(r <- .simulation_flat(d, s, split_thresh = stop("nicht auswerten")))      # ohne split_mode
-  expect_s3_class(r, "SimLevResult")
-  w <- .rf_warnings(r <- .simulation_flat(d, s, funds_fee = stop("nicht auswerten")))
-  expect_length(w, 1L)
-  expect_match(conditionMessage(w[[1]]), "funds_fee wirkt nur bei tax_mode = \"funds\"", fixed = TRUE)
   expect_s3_class(r, "SimLevResult")
 })
 

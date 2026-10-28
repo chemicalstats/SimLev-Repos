@@ -21,7 +21,6 @@ from ._sim_base import (
     _apply_spread,
     _calculate_buy_signal,
     _calculate_flat_rate,
-    _calculate_fund_fees,
     _calculate_sell_count,
     _calculate_sell_signal,
     _cat,
@@ -71,9 +70,9 @@ class _Actions:
             _FEE.current = cfg["fee_order"]
         return sim
 
-    def _sell(self, sim, name, time, reason, spread, count=None, price=None, tax_mode=None):
+    def _sell(self, sim, name, time, reason, spread, count=None, price=None):
         cfg = self.cfg
-        return _perform_trade_sell(sim, name, time, cfg["tax_mode"] if tax_mode is None else tax_mode,
+        return _perform_trade_sell(sim, name, time, cfg["tax_mode"],
                                    cfg["tax_rate"], cfg["effective_tax_rate"], cfg["marginal_tax_rate"],
                                    cfg["private_sale_threshold"], cfg["use_sparer_pauschbetrag"],
                                    self.fl["tax_regimes"][name], reason, spread, self.details, count=count, price=price)
@@ -97,29 +96,6 @@ class _Actions:
             res = {"sell_count": _rmin(sim["status"][name]["count"], float(math.ceil(res["sell_count"] - 1e-9))),
                    "fifo_price": None}
         return res
-
-    # ── Bargeld für Fondskosten ────────────────────────────────────────────
-    def raise_cash(self, sim: dict, name: str, need: float, time: int, reason: str) -> dict:
-        cfg = self.cfg
-        short = need - sim["status"][name]["money"]
-        if short <= 0 or sim["status"][name]["count"] <= 0:
-            return sim
-        fee_keep = _FEE.current
-        _FEE.current = None
-        try:
-            if cfg["tax_mode"] != "person":
-                px = float(sim["market"][name]["asset_price"][time - 1])
-                n_sell = _rmin(sim["status"][name]["count"],
-                               short / px if cfg["fractions"] else float(math.ceil(short / px - 1e-9)))
-            else:
-                n_sell = _calculate_sell_count(sim, name, short, time, 0.0, cfg["fractions"], cfg["tax_mode"],
-                                               cfg["effective_tax_rate"], self.fl["tax_regimes"][name])["sell_count"]
-            sim = self._sell(sim, name, time, reason, 0.0, count=n_sell)
-            if not cfg["fractions"] and sim["status"][name]["money"] < need - 1e-9 and sim["status"][name]["count"] > 0:
-                sim = self._sell(sim, name, time, reason, 0.0, count=_rmin(1.0, sim["status"][name]["count"]))
-        finally:
-            _FEE.current = fee_keep
-        return sim
 
     # ── Zahlung aus einem Asset ────────────────────────────────────────────
     def pay_one(self, sim: dict, name: str, amount: float, time: int, label: str) -> tuple[dict, float]:
@@ -304,8 +280,7 @@ class _Actions:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _sim_run_days(sim: dict, fl: dict, cfg: dict, act: _Actions, fr: _Frame, strategy: dict, liquidate,
-                  event_weight, split_thresh, funds_fee, bonus_fee, balance_dca, harvest_loss_pot,
-                  details: bool) -> dict:
+                  event_weight, split_thresh, balance_dca, harvest_loss_pot, details: bool) -> dict:
     flag_date, flag_assets = fl["flag_date"], fl["flag_assets"]
     flag_rebalance = fl["flag_rebalance"].copy()
     flag_trade = fl["flag_trade"].copy()
@@ -367,9 +342,6 @@ def _sim_run_days(sim: dict, fl: dict, cfg: dict, act: _Actions, fr: _Frame, str
         if fl["flag_taxes"][t0]:
             sim = _sim_day_assess_vp(sim, time, fl, cfg, liquidate, details)
             flag_fast_report = False
-        if fl["flag_fund_fee"][t0]:
-            sim = _sim_day_fund_fee(sim, time, fl, act, funds_fee, bonus_fee, details)
-            flag_fast_report = False
         if fl["flag_liquidate"][t0]:
             sim = _sim_day_liquidate(sim, time, fl, cfg, act, details)
             flag_fast_report = False
@@ -412,7 +384,8 @@ def _sim_day_split(sim, time, active_assets, fl, cfg, act, split_thresh, details
     t0 = time - 1
     lo, hi = float(split_thresh[0]), float(split_thresh[1])
     held = [nm for nm in active_assets if sim["status"][nm]["count"] > 0]
-    for nm in [x for x in flag_assets if x not in held]:
+    no_split = cfg["no_split"]   # Fonds-Wrapper: der Anteilswert splittet nicht
+    for nm in [x for x in flag_assets if x not in held and x not in no_split]:
         px0 = float(sim["market"][nm]["asset_price"][t0])
         if px0 > hi or px0 < lo:
             sim["market"][nm]["asset_price"] = sim["market"][nm]["asset_price"] / (px0 / 100)
@@ -420,7 +393,7 @@ def _sim_day_split(sim, time, active_assets, fl, cfg, act, split_thresh, details
                 _cat("Split-Ereignis:\t%s ohne Bestand: Kursreihe %s %s am %s\n"
                      % (nm, "1 :" if px0 > hi else ": 1",
                         r_format1(px0 / 100 if px0 > hi else 100 / px0, digits=5), fmt_date(int(flag_date[t0]))))
-    for nm in active_assets:
+    for nm in [x for x in active_assets if x not in no_split]:
         if sim["status"][nm]["count"] > 0:
             split_price = float(sim["market"][nm]["asset_price"][t0])
             if split_price > hi:
@@ -636,56 +609,14 @@ def _sim_day_assess_vp(sim, time, fl, cfg, liquidate, details):
     return sim
 
 
-def _sim_day_fund_fee(sim, time, fl, act, funds_fee, bonus_fee, details):
-    flag_assets, flag_date = fl["flag_assets"], fl["flag_date"]
-    core.calculate_total_report(sim, flag_assets, time)
-    result_fees = _calculate_fund_fees(sim, time, flag_date, flag_assets, funds_fee, bonus_fee, details)
-    sim["totals"]["total_value"] = result_fees["total_value"]
-    for nm in flag_assets:
-        fee_i = result_fees["asset_fees"][nm]
-        if not math.isfinite(fee_i) or fee_i <= 0:
-            continue
-        if sim["status"][nm]["money"] < fee_i:
-            sim = act.raise_cash(sim, nm, fee_i, time, "Fondskosten:")
-        paid = _rmin(fee_i, _rmax(0.0, sim["status"][nm]["money"]))
-        sim["status"][nm]["money"] = sim["status"][nm]["money"] - paid
-        if details:
-            _cat(_sp("\t\t=> %.2f EUR Geb\u00fchren von %s abgezogen\n", paid, nm))
-        tr = sim["trades"][nm]
-        tr["fee_count"] += 1
-        tr["fees"].append({"event_date": int(flag_date[time - 1]), "event_type": "Fees", "fees_paid": paid})
-    core.calculate_total_report(sim, flag_assets, time)
-    return sim
-
-
 def _sim_day_liquidate(sim, time, fl, cfg, act, details):
-    flag_assets, flag_date = fl["flag_assets"], fl["flag_date"]
-    tax_mode = cfg["tax_mode"]
+    flag_assets = fl["flag_assets"]
     for nm in flag_assets:
         if sim["status"][nm]["count"] > 0:
-            tax_type = "person" if tax_mode == "person" else "none"
-            sim = act._sell(sim, nm, time, "Liquidation:", fl["spread_rates"][nm], tax_mode=tax_type)
+            sim = act._sell(sim, nm, time, "Liquidation:", fl["spread_rates"][nm])
             if sim["status"][nm]["count"] > 0:
                 _warn(_sp("simulation: liquidate = TRUE: Position '%s' (Wert %.2f EUR) wurde nicht verkauft, weil die "
                           "Ordergeb\u00fchr den Erl\u00f6s \u00fcbersteigt.", nm, sim["status"][nm]["worth"]))
-    if tax_mode == "funds":
-        core.calculate_total_report(sim, flag_assets, time)
-        final_value = r_sum([sim["status"][x]["total"] for x in flag_assets], na_rm=True)
-        deposits = r_sum([r_sum(sim["report"][x]["flows"][:time]) for x in flag_assets])
-        total_gains = final_value - cfg["start_value"] - deposits
-        if total_gains > 0:
-            total_taxes = total_gains * cfg["tax_rate"]
-            cash = {x: _rmax(0.0, sim["status"][x]["money"]) for x in flag_assets}
-            sc = r_sum(list(cash.values()))
-            tax_weights = {x: cash[x] / sc for x in flag_assets} if sc > 0 else \
-                {x: 1 / len(flag_assets) for x in flag_assets}
-            for nm in flag_assets:
-                tpa = _rmin(total_taxes * tax_weights[nm], cash[nm])
-                sim["status"][nm]["money"] = sim["status"][nm]["money"] - tpa
-                sim["totals"]["total_taxes"] = sim["totals"]["total_taxes"] + tpa
-            if details:
-                _cat(_sp("Liquidation:\tSteuern %.2f EUR auf den Gesamtgewinn von %.2f EUR am %s\n", total_taxes,
-                         total_gains, fmt_date(int(flag_date[time - 1]))))
     core.calculate_total_report(sim, flag_assets, time)
     return sim
 

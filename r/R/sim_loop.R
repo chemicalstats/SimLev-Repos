@@ -6,7 +6,7 @@
 # (.sim_market_update_batch_cpp), Jahreswechsel (.handle_year_change) und Abrechnung der Vorabpauschale des
 # Vorjahres direkt, die uebrigen Ereignisse in den Tagesschritten .sim_day_*() in fester
 # Reihenfolge: Aktivierung, Split, Sparplan, Handel, Rebalancing, Gewinnrealisierung, Vorabpauschale
-# (31.12.), Fondskosten, Liquidation. Jeder Schritt gibt sim_mem zurueck (C++-Funktionen aendern
+# (31.12.), Liquidation. Jeder Schritt gibt sim_mem zurueck (C++-Funktionen aendern
 # sim_mem zusaetzlich an Ort und Stelle).
 
 #' Phase 4 von simulation(): Tagesschleife
@@ -15,19 +15,19 @@
 #' Tagesschritte .sim_day_*()), danach die Tage nach dem letzten Ereignistag fortschreiben.
 #' Eingabe: sim_mem, fl (Flags aus .sim_build_schedule), cfg (aus .sim_check_inputs), act (Helfer aus
 #' .sim_make_actions), data, strategy und die erst hier benoetigten Argumente von simulation()
-#' (liquidate, event_weight, split_thresh, funds_fee, bonus_fee, balance_dca, harvest_loss_pot, details).
+#' (liquidate, event_weight, split_thresh, balance_dca, harvest_loss_pot, details).
 #' Ausgabe: sim_mem am Ende des letzten Tages.
 #' @keywords internal
 #' @noRd
 .sim_run_days <- function(sim_mem, fl, cfg, act, data, strategy, liquidate, event_weight, split_thresh,
-                          funds_fee, bonus_fee, balance_dca, harvest_loss_pot, details) {
+                          balance_dca, harvest_loss_pot, details) {
   flag_date <- fl$flag_date; flag_assets <- fl$flag_assets; n_total_days <- fl$n_total_days
   individual_days <- fl$individual_days; flag_year_change <- fl$flag_year_change
   flag_slow_path <- fl$flag_slow_path; flag_vp_settle <- fl$flag_vp_settle
   flag_active <- fl$flag_active; asset_start_indices <- fl$asset_start_indices
   flag_split <- fl$flag_split; flag_dca <- fl$flag_dca; flag_trade <- fl$flag_trade
   flag_rebalance <- fl$flag_rebalance; flag_harvest <- fl$flag_harvest; flag_taxes <- fl$flag_taxes
-  flag_fund_fee <- fl$flag_fund_fee; flag_liquidate <- fl$flag_liquidate
+  flag_liquidate <- fl$flag_liquidate
   tax_mode <- cfg$tax_mode; fees_on <- cfg$fees_on; fee_order <- cfg$fee_order
   marginal_tax_rate <- cfg$marginal_tax_rate; private_sale_threshold <- cfg$private_sale_threshold
   sparer_pauschbetrag <- cfg$sparer_pauschbetrag; use_sparer_pauschbetrag <- cfg$use_sparer_pauschbetrag
@@ -159,14 +159,6 @@
       flag_fast_report <- FALSE
     }
 
-    #--------> Fondskosten (tax_mode = "funds"): am 31.12. und anteilig am letzten Tag
-    # R1-01: fehlendes Bargeld per Teilverkauf beschaffen (wie bei der Vorabpauschale)
-    # Tagesschritt .sim_day_fund_fee()
-    if (flag_fund_fee[time]) {
-      sim_mem <- .sim_day_fund_fee(sim_mem, time, fl, act, funds_fee, bonus_fee, details)
-      flag_fast_report <- FALSE
-    }
-
     #--------> Implementierung von Liquidierung (.sim_day_liquidate):
     if(flag_liquidate[time]){
       sim_mem <- .sim_day_liquidate(sim_mem, time, fl, cfg, details)
@@ -246,7 +238,9 @@
   # A7-07: Ein Asset ohne Bestand (spaeterer Start, Signal-Asset in Cash) splittet trotzdem: seine Kursreihe
   # wird wie in .calculate_split_flags umgerechnet, sonst entfiele der Split endgueltig und spaetere Kaeufe
   # erfolgten zu Kursen ueber der oberen Schwelle (die vorab bestimmten Split-Termine passten nicht mehr)
-  for(name in setdiff(flag_assets, active_assets[vapply(active_assets, function(nm) sim_mem[["status"]][[nm]][["count"]] > 0, logical(1))])){
+  # Fonds-Wrapper (cfg$no_split): der Anteilswert splittet nicht
+  for(name in setdiff(flag_assets, c(active_assets[vapply(active_assets, function(nm) sim_mem[["status"]][[nm]][["count"]] > 0, logical(1))],
+                                     cfg$no_split))){
     px0 <- sim_mem[["market"]][[name]][["asset_price"]][time]
     if (px0 > split_thresh[[2]] || px0 < split_thresh[[1]]) {
       sim_mem[["market"]][[name]][["asset_price"]] <- sim_mem[["market"]][[name]][["asset_price"]] / (px0 / 100)
@@ -255,7 +249,7 @@
                                format(if (px0 > split_thresh[[2]]) px0 / 100 else 100 / px0, digits = 5), flag_date[time]))
     }
   }
-  for(name in active_assets){
+  for(name in setdiff(active_assets, cfg$no_split)){
     if(sim_mem[["status"]][[name]][["count"]] > 0){
       split_price <- sim_mem[["market"]][[name]][["asset_price"]][time]
 
@@ -717,59 +711,23 @@ current_date = flag_date[time]
   sim_mem
 }
 
-#' Tagesschritt: Fondskosten (tax_mode = "funds")
-#'
-#' Zweck: laufende Fondskosten und Bonusgebuehr berechnen und je Asset aus dem Bargeld (fehlender
-#' Betrag per Teilverkauf) abziehen.
-#' Eingabe: sim_mem, time, fl, act, funds_fee, bonus_fee, details.
-#' Ausgabe: sim_mem.
-#' @keywords internal
-#' @noRd
-.sim_day_fund_fee <- function(sim_mem, time, fl, act, funds_fee, bonus_fee, details) {
-  flag_assets <- fl$flag_assets; flag_date <- fl$flag_date
-  .raise_cash <- act$.raise_cash
-  .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)   # Tageswerte
-  result_fees <- .calculate_fund_fees(
-    input = sim_mem, index = time, dates = flag_date, assets = flag_assets,
-    funds_fee = funds_fee, bonus_fee = bonus_fee, details = details)
-  sim_mem[["totals"]][["total_value"]] <- result_fees[["total_value"]]
-  for (name in flag_assets) {
-    fee_i <- result_fees[["asset_fees"]][[name]]
-    if (!is.finite(fee_i) || fee_i <= 0) next
-    if (sim_mem[["status"]][[name]][["money"]] < fee_i)
-      sim_mem <- .raise_cash(sim_mem, name, fee_i, time, "Fondskosten:")
-    paid <- min(fee_i, max(0, sim_mem[["status"]][[name]][["money"]]))
-    sim_mem[["status"]][[name]][["money"]] <- sim_mem[["status"]][[name]][["money"]] - paid
-    if (details) {
-      cat(sprintf("\t\t=> %.2f EUR Geb\u00fchren von %s abgezogen\n", paid, name))
-    }
-    sim_mem[["trades"]][[name]][["fee_count"]] <- sim_mem[["trades"]][[name]][["fee_count"]] + 1
-    sim_mem[["trades"]][[name]][["fees"]][[sim_mem[["trades"]][[name]][["fee_count"]]]] <-
-      list(event_date = flag_date[time], event_type = "Fees", fees_paid = paid)
-  }
-  .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
-
-  sim_mem
-}
-
 #' Tagesschritt: Liquidation
 #'
-#' Zweck: alle Positionen verkaufen; bei tax_mode = "funds" die Steuer auf den Gesamtgewinn abziehen.
+#' Zweck: alle Positionen verkaufen.
 #' Eingabe: sim_mem, time, fl, cfg, details.
 #' Ausgabe: sim_mem.
 #' @keywords internal
 #' @noRd
 .sim_day_liquidate <- function(sim_mem, time, fl, cfg, details) {
-  flag_assets <- fl$flag_assets; flag_date <- fl$flag_date; tax_regimes <- fl$tax_regimes
-  spread_rates <- fl$spread_rates; start_value <- cfg$start_value
+  flag_assets <- fl$flag_assets; tax_regimes <- fl$tax_regimes
+  spread_rates <- fl$spread_rates
   tax_mode <- cfg$tax_mode; tax_rate <- cfg$tax_rate; effective_tax_rate <- cfg$effective_tax_rate
   marginal_tax_rate <- cfg$marginal_tax_rate; private_sale_threshold <- cfg$private_sale_threshold
   use_sparer_pauschbetrag <- cfg$use_sparer_pauschbetrag
   for(name in flag_assets){
     if(sim_mem[["status"]][[name]][["count"]] > 0){
-      tax_type <- ifelse(tax_mode == "person", "person", "none")
       sim_mem <- .perform_trade_sell(input = sim_mem, name = name, index = time, 
-        tax_mode = tax_type, tax_rate = tax_rate, 
+        tax_mode = tax_mode, tax_rate = tax_rate, 
         effective_tax_rate = effective_tax_rate,
         marginal_tax_rate = marginal_tax_rate,
         private_sale_threshold = private_sale_threshold,
@@ -782,32 +740,6 @@ current_date = flag_date[time]
     }
   }
   
-  if (tax_mode == "funds") {
-    # R1-02/R1-03: Steuer auf den Gesamtgewinn an jedem Liquidationstag (auch am 31.12.;
-    # die Fondskosten sind oben bereits belastet). Gewinn = Endwert - Startkapital - Einzahlungen
-    .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
-    final_value <- sum(vapply(flag_assets, function(x) sim_mem[["status"]][[x]][["total"]], numeric(1)), na.rm = TRUE)
-    deposits <- sum(vapply(flag_assets, function(x) sum(sim_mem[["report"]][[x]][["flows"]][seq_len(time)]), numeric(1)))
-    total_gains <- final_value - start_value - deposits
-
-    if(total_gains > 0){
-      total_taxes <- total_gains * tax_rate
-      cash <- vapply(flag_assets, function(x) max(0, sim_mem[["status"]][[x]][["money"]]), numeric(1))
-      tax_weights <- if (sum(cash) > 0) cash / sum(cash) else rep(1 / length(flag_assets), length(flag_assets))
-      names(tax_weights) <- flag_assets
-
-      for(name in flag_assets){
-        tax_per_asset <- min(total_taxes * tax_weights[[name]], cash[[name]])
-        sim_mem[["status"]][[name]][["money"]] <- sim_mem[["status"]][[name]][["money"]] - tax_per_asset
-        sim_mem[["totals"]][["total_taxes"]] <- sim_mem[["totals"]][["total_taxes"]] + tax_per_asset
-      }
-
-      if(details){
-        cat(sprintf("Liquidation:\tSteuern %.2f EUR auf den Gesamtgewinn von %.2f EUR am %s\n", total_taxes, total_gains, flag_date[time]))
-      }
-    }
-  }
-
   .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
 
   sim_mem

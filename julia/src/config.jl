@@ -11,7 +11,7 @@ const ASSET_CLASSES = ("etf", "etn", "etc", "certificate", "etn_standard", "etn_
 const ACTION_TYPES = ("bnh", "signal")
 const VALID_REGIMES = ("investment_fund", "capital_gains", "private_sale")
 const _FIELDS = ("asset_class", "trading", "share", "spread", "partial_exemption",
-                 "deliverable", "start", "tax_regime", "signal_buy", "signal_sell")
+                 "deliverable", "start", "tax_regime", "signal_buy", "signal_sell", "wrapper")
 
 "Gemeinsame Methoden der RList-Hüllen (`T` hat das Feld `data::RList`)."
 macro _rlist_wrapper(T, classes)
@@ -123,16 +123,70 @@ _kvpairs(x::AbstractDict) = [String(string(k)) => v for (k, v) in x]
 
 _to_date_or_nothing(x) = (z = _as_date(x); z === nothing ? nothing : from_days(z))
 
+# ── Fonds-Wrapper (Etappe 6.5c): Hilfen der Strategie (R: wrapper.R) ─────────
+
+"`inherits(x, \"SimLevWrapperConfig\")` (Fonds-Wrapper aus `wrapper_config()`)."
+_is_wrapper(@nospecialize(x)) = inherits(x, "SimLevWrapperConfig")
+
+"Feld `k` eines Assets (asset_config, Dict, RList, NamedTuple) oder `nothing`."
+function _aget(@nospecialize(a), k::String)
+    a isa NamedTuple && return get(a, Symbol(k), nothing)
+    a isa AbstractDict && return get(a, k, nothing)
+    a isa AbstractVector{<:Pair} && (i = findfirst(p -> String(string(p.first)) == k, a); return i === nothing ? nothing : a[i].second)
+    return nothing
+end
+
+"Assets einer Strategie als Paare (Name => Asset)."
+_strategy_pairs(@nospecialize(st)) = st isa AbstractVector{<:Pair} ? [String(string(p.first)) => p.second for p in st] :
+                                     _kvpairs(st isa Union{Strategy,AssetConfig} ? collect(st) : st)
+
+"""
+Kursspalten einer Strategie (R: `.strategy_columns`): je Asset sein Name, für Wrapper-Assets die Spalten
+der inneren Strategie; Reihenfolge wie in der Strategie, ohne Doppelte.
+"""
+function _strategy_columns(@nospecialize(strategy))
+    cols = String[]
+    for (nm, a) in _strategy_pairs(strategy)
+        w = _aget(a, "wrapper")
+        for c in (_is_wrapper(w) ? _strategy_columns(w["strategy"]) : [nm])
+            c in cols || push!(cols, c)
+        end
+    end
+    return cols
+end
+
+"Namen der Wrapper-Assets einer Strategie (R: `.strategy_wrappers`)."
+_strategy_wrappers(@nospecialize(strategy)) = String[nm for (nm, a) in _strategy_pairs(strategy)
+                                                     if _is_mapping(a) && _aget(a, "wrapper") !== nothing]
+
+"`.wrapper_assets_text`: `\"A 60 %, B 40 %\"`."
+_wrapper_assets_text(@nospecialize(strategy)) =
+    join(("$nm $(r_format1(Float64(100 * a["share"]); digits = 15)) %" for (nm, a) in _strategy_pairs(strategy)), ", ")
+
+"Klasse wie `paste(class(x), collapse = \"/\")` (für Meldungen)."
+# Meldung von asset_config() für wrapper mit trading = "signal" (strategy_from_weights() erkennt sie und nennt das Asset)
+const _AC_MSG_WRAPPER_SIGNAL = "asset_config: mit wrapper ist nur trading = \"bnh\" möglich (keine Signale auf den Anteilswert; Signale gehen in der inneren Strategie)."
+
+function _cls_all(@nospecialize(x))
+    c = r_class(x)
+    isempty(c) || return join(c, "/")
+    x isa Integer && !(x isa Bool) && return "numeric"
+    return _r_class1(x)
+end
+
 """
     asset_config(asset_class = "etf", trading = "bnh", share = 1.0,
-                 spread = 0.1, partial_exemption = 0.0, deliverable = false,
+                 spread = 0.0, partial_exemption = 0.0, deliverable = false,
                  start = nothing, tax_regime = nothing, signal_buy = nothing,
-                 signal_sell = nothing)
+                 signal_sell = nothing, wrapper = nothing)
 
 Asset-Konfiguration erstellen und prüfen (R: `asset_config()`). Alle Argumente
 dürfen positionell (Reihenfolge wie in R) oder als Schlüsselwort angegeben
-werden. Raten in Prozent: `spread = 0.1` = 0,1 % voller Bid-Ask-Spread,
-`partial_exemption = 30` = 30 % Teilfreistellung; `share` ist ein Anteil in (0, 1].
+werden. Raten in Prozent: `spread = 0.1` = 0,1 % voller Bid-Ask-Spread (Standard 0:
+ohne Spread; wer Spreads abbilden will, gibt sie an), `partial_exemption = 30` = 30 % Teilfreistellung; `share` ist ein Anteil in (0, 1].
+`wrapper`: `nothing` oder ein Objekt aus `wrapper_config()` (Etappe 6.5c); das Asset ist dann ein
+Fonds-Wrapper, sein Name keine Kursspalte, die Kurse der Anteilswert der inneren Strategie
+(`wrapper_nav()`); nur mit `trading = "bnh"`. Das Feld `wrapper` gibt es nur mit Wrapper.
 """
 function asset_config(args...; kw...)
     length(args) > length(_FIELDS) && error("unused argument ($(r_deparse(args[length(_FIELDS)+1])))")
@@ -153,13 +207,14 @@ function _asset_config(vals::Dict{String,Any})
     asset_class = match_arg(get(vals, "asset_class", ASSET_CLASSES), ASSET_CLASSES, "asset_class")
     trading = match_arg(get(vals, "trading", ACTION_TYPES), ACTION_TYPES, "trading")
     share = get(vals, "share", 1.0)
-    spread = get(vals, "spread", 0.1)
+    spread = get(vals, "spread", 0.0)
     partial_exemption = get(vals, "partial_exemption", 0.0)
     deliverable = get(vals, "deliverable", false)
     start = get(vals, "start", nothing)
     tax_regime = get(vals, "tax_regime", nothing)
     signal_buy = get(vals, "signal_buy", nothing)
     signal_sell = get(vals, "signal_sell", nothing)
+    wrapper = get(vals, "wrapper", nothing)
     if asset_class == "etn_standard"
         @warn "asset_config: asset_class = \"etn_standard\" ist veraltet; stattdessen asset_class = \"etn\" mit deliverable = FALSE verwenden."
         asset_class = "etn"; deliverable = false
@@ -191,6 +246,10 @@ function _asset_config(vals::Dict{String,Any})
     if trading == "signal" && (signal_buy === nothing || signal_sell === nothing)
         error("asset_config: bei trading = \"signal\" müssen signal_buy und signal_sell angegeben werden (Namen der Signalspalten in data).")
     end
+    if wrapper !== nothing   # Fonds-Wrapper (Etappe 6.5c): keine Signale auf den Anteilswert (E5)
+        _is_wrapper(wrapper) || error("asset_config: wrapper muss NULL oder ein Objekt aus wrapper_config() sein, nicht $(_cls_all(wrapper)).")
+        trading == "signal" && error(_AC_MSG_WRAPPER_SIGNAL)
+    end
     if tax_regime === nothing
         tax_regime = asset_class == "etf" ? "investment_fund" :
                      asset_class in ("etn", "etc") ? (_isTRUE(deliverable) ? "private_sale" : "capital_gains") :
@@ -203,6 +262,7 @@ function _asset_config(vals::Dict{String,Any})
               "start" => start, "tax_regime" => String(tax_regime),
               "signal_buy" => signal_buy === nothing ? nothing : String(string(signal_buy)),
               "signal_sell" => signal_sell === nothing ? nothing : String(string(signal_sell)))
+    wrapper === nothing || (d["wrapper"] = wrapper)   # nur mit Wrapper ein Feld (sonst Objekt wie bisher)
     return AssetConfig(d)
 end
 
@@ -228,6 +288,11 @@ function _print_asset_config(io::IO, x)
     print(io, r_sprintf("  Steuerregime: %s\n", x["tax_regime"]))
     x["asset_class"] == "etf" && print(io, r_sprintf("  Teilfrei.:    %.0f%%\n", x["partial_exemption"]))
     x["asset_class"] in ("etn", "etc") && print(io, r_sprintf("  Lieferbar:    %s\n", x["deliverable"]))
+    w = get(x, "wrapper", nothing)
+    if _is_wrapper(w)
+        println(io, "  Wrapper:      $(_wrapper_assets_text(w["strategy"])); Fondskosten $(r_format1(Float64(w["costs"]["fee"]); digits = 15)) % p. a., " *
+                    "Performancegebühr $(r_format1(Float64(w["costs"]["performance_fee"]); digits = 15)) %")
+    end
 end
 
 """
@@ -297,10 +362,17 @@ function strategy_validate(strategy, data_pos = nothing; data = data_pos)
     end
     if data !== nothing
         cols = _colnames(data)
-        miss = [n for n in keys(strategy) if !(n in cols)]
+        # Fonds-Wrapper: der Asset-Name ist keine Kursspalte, geprüft werden die Spalten der inneren Strategie
+        coll = [w for w in _strategy_wrappers(strategy) if w in cols]
+        isempty(coll) || error("strategy_validate: Asset '$(coll[1])' ist ein Fonds-Wrapper (asset_config(wrapper = )); data darf keine Spalte gleichen Namens enthalten (der Anteilswert wird aus den inneren Spalten gerechnet).")
+        miss = [n for n in _strategy_columns(strategy) if !(n in cols)]
         isempty(miss) || error("strategy_validate: Kursspalte(n) " * join(("'$m'" for m in miss), ", ") *
                                " fehlen in data (je Asset eine Spalte gleichen Namens; vorhanden: $(join(cols, ", "))).")
         for (name, a) in strategy
+            if _is_wrapper(get(a, "wrapper", nothing))   # innere Signale
+                strategy_validate(a["wrapper"]["strategy"], data)
+                continue
+            end
             if a["trading"] == "signal"
                 a["signal_buy"] in cols || error("strategy_validate: signal_buy-Spalte '$(a["signal_buy"])' fehlt in data (Asset '$name').")
                 a["signal_sell"] in cols || error("strategy_validate: signal_sell-Spalte '$(a["signal_sell"])' fehlt in data (Asset '$name').")
@@ -345,7 +417,7 @@ function strategy_update_asset(strategy, name::AbstractString; updates...)
         derived == get(asset, "tax_regime", nothing) && (asset["tax_regime"] = nothing)
     end
     for (param, value) in upd
-        if !haskey(asset, param)
+        if !haskey(asset, param) && param != "wrapper"   # wrapper: Feld nur bei Wrapper-Assets vorhanden
             @warn "strategy_update_asset: unbekannter Parameter '$param' wird ignoriert (möglich: $(join(keys(asset), ", ")))."
             continue
         end
@@ -373,7 +445,9 @@ function _print_strategy(io::IO, x)
     println(io, "================================\n")
     for (name, a) in x
         println(io, name, ":")
-        print(io, r_sprintf("  Klasse: %s | Anteil: %.0f%% | Steuer: %s\n", a["asset_class"], a["share"] * 100, a["tax_regime"]))
+        w = get(a, "wrapper", nothing)
+        print(io, r_sprintf("  Klasse: %s | Anteil: %.0f%% | Steuer: %s%s\n", a["asset_class"], a["share"] * 100, a["tax_regime"],
+                            _is_wrapper(w) ? " | Wrapper: " * join(keys(w["strategy"]), ", ") : ""))
     end
 end
 

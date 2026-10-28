@@ -240,13 +240,14 @@ planning_lumpsum_vs_dca <- function(data, strategy, amount = 10000, months = 12,
   data$date <- .to_date(data$date, "planning_lumpsum_vs_dca: data$date")
   data <- data[order(data$date), , drop = FALSE]
   d <- data$date
-  if (!is.null(sim_args$tax) && is.null(sim_args$funds))
+  if (!is.null(sim_args$tax))
     warning("Mit Steuern ist die Fortschreibung des DCA-Depots nach der Einstiegsphase eine N\u00e4herung (Index der Einmalanlage).")
   firsts <- d[format(d, "%d") == "01"]
   last_ok <- seq.Date(max(d), by = paste0("-", horizon, " years"), length.out = 2)[2]
   starts <- firsts[firsts <= last_ok]
   starts <- starts[seq(1, length(starts), by = step)]
   if (!length(starts)) stop("Historie zu kurz f\u00fcr den Horizont.")
+  wraps <- .strategy_wrappers(strategy)   # Fonds-Wrapper: Asset-Name ist keine Kursspalte (.strategy_columns)
   run <- function(s) {
     e <- seq.Date(s, by = paste(horizon, "years"), length.out = 2)[2] - 1
     e_dca <- seq.Date(s, by = paste(months, "months"), length.out = 2)[2] - 1
@@ -259,7 +260,15 @@ planning_lumpsum_vs_dca <- function(data, strategy, amount = 10000, months = 12,
     k <- match(max(wd$date), ix$date)
     # Kurse der Assets an den Ergebnistagen (letzter Datenwert bis zum Tag), Stueck = Wert / Kurs
     assets <- names(dca$report)
+    # Fonds-Wrapper: Kurs = Anteilswert im Fenster der Einmalanlage (wie in simulation() aus den inneren Spalten)
+    navs <- lapply(stats::setNames(wraps, wraps), function(a) suppressWarnings(suppressMessages(
+      .wrapper_nav_calc(w, strategy[[a]][["wrapper"]], sim_args$splits, tag = sprintf("Wrapper '%s'", a),
+                        who = sprintf("planning_lumpsum_vs_dca: Wrapper '%s'", a)))))
     px <- function(a, dates) {
+      if (a %in% wraps) {
+        i <- findInterval(as.numeric(dates), as.numeric(navs[[a]]$date)); i[i == 0L] <- 1L
+        return(navs[[a]]$nav[i])
+      }
       v <- .fill_na(as.numeric(data[[a]]), "locf"); v[findInterval(as.numeric(dates), as.numeric(d))] }
     rows <- k:nrow(ix)
     const <- all(vapply(assets, function(a) {

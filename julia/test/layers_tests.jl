@@ -26,6 +26,7 @@ const _LLAYERS = Dict(
     # 2 Engine
     "core.jl" => 2, "result.jl" => 2, "engine.jl" => 2, "sim_phases.jl" => 2, "sim_loop.jl" => 2,
     "sim_evaluate.jl" => 2, "sim_blocks.jl" => 2,   # Bausteine: Eingaben der Engine, übersetzt in deren Argumente
+    "wrapper.jl" => 2,   # Fonds-Wrapper (Etappe 6.5c): Anteilswert über simulation()
     # 3 Analysen (je eine Datei, Kerne bei ihrem Modul)
     "bootstrap_core.jl" => 3, "bootstrap.jl" => 3, "withdrawal_core.jl" => 3, "withdrawal.jl" => 3,
     "dependence_core.jl" => 3, "dependence.jl" => 3, "regimes.jl" => 3, "ms_garch.jl" => 3,

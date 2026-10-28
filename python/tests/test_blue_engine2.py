@@ -11,7 +11,7 @@ import pytest
 from simlev import asset_config, create_strategy, simulation
 from simlev.data_prep import series_align
 
-from _helpers import days, sim, sim_out, sim_warn
+from _helpers import days, sim, sim_warn
 from simlev import dca_plan, funds_costs, rebalance_plan, sim_costs, split_rule, tax_profile  # Bausteine (Etappe 6.3)
 
 approx = pytest.approx
@@ -76,37 +76,21 @@ def test_r2_03_filled_falsche_zeilenzahl():
     assert w0 == [] and r0.filled.sum() > 0
 
 
-def test_r2_04_funds_fee_bonus_fee_bereich():
-    d = mk_day(400, lambda n: np.full(n, 100.0))
+def test_r2_04_funds_costs_bereich():
     for v in (-1, math.nan, 150, None, "1"):
         with pytest.raises(ValueError, match="funds_costs: fee muss eine Zahl in Prozent"):
             funds_costs(fee=v)
     for v in (-20, 150, math.nan):
         with pytest.raises(ValueError, match="funds_costs: performance_fee muss eine Zahl in Prozent"):
             funds_costs(performance_fee=v)
-    simulation(d, st1(), funds=funds_costs(fee=0.95, performance_fee=0))
-    simulation(d, st1(), funds=funds_costs(fee=100, performance_fee=100))
-    sim(d, st1())
-
-
-def test_r2_06_fondskosten_vor_steuer_am_aufgefuellten_ende():
-    c = days("2021-01-01", "2022-01-31")
-    d = pd.DataFrame({"date": c, "A": 100 * 1.0015 ** np.arange(len(c))})
-    wd = d[d.date.dt.dayofweek < 5]
-    with contextlib.redirect_stderr(io.StringIO()):
-        al = series_align(A=wd, end="2021-12-25")
-    r, o = sim_out(al, st1(), funds=funds_costs(), liquidate=True)
-    assert any(re.search(r"^Fondskosten:\tFondsgebühren .* am 2021-12-24", ln) for ln in o)
-    assert not any(re.search(r"Fondsgebühren .* am 2021-12-25", ln) for ln in o)
-    E_, T_ = r.worth[-1], r.tax_report["total_taxes_paid"]
-    assert T_ == approx(0.26375 * (E_ + T_ - 1e4), rel=1e-9)
+    funds_costs(fee=0.95, performance_fee=0)
+    funds_costs(fee=100, performance_fee=100)
 
 
 def test_r2_07_marginal_tax_rate_warnung():
     d = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=400), "A": 100.0, "G": 50.0})
     st = create_strategy(A=asset_config(asset_class="etf", share=.8), G=asset_config(asset_class="etc", share=.2, deliverable=True))
     assert sim_warn(d, st)[1] == []
-    assert sim_warn(d, st, funds=funds_costs())[1] == []
     assert any("income_rate(marginal_rate)" in w for w in sim_warn(d, st, tax=tax_profile())[1])
 
 

@@ -48,7 +48,8 @@ strategy_remove_asset(strategy, name)
     \code{strategy_validate} ob alle Asset-Spalten und Signal-Spalten
     in \code{data} vorhanden sind.
   }
-  \item{name}{Character. Name des Assets (muss Spalte in \code{data} entsprechen).}
+  \item{name}{Character. Name des Assets (muss Spalte in \code{data} entsprechen, außer bei
+    Fonds-Wrappern).}
   \item{asset}{Ein \code{\link{asset_config}}-Objekt.}
   \item{x, object}{Ein \code{"strategy"}-Objekt.}
 }
@@ -75,11 +76,14 @@ strategy_remove_asset(strategy, name)
   Klasse \code{"strategy"} hat und jedes Element ein
   \code{asset_config}-Objekt ist (Wertebereiche prüft bereits
   \code{asset_config}). Mit \code{data}: zusätzlich, ob jede Asset-Spalte und
-  bei \code{trading = "signal"} die Signalspalten vorhanden sind.
+  bei \code{trading = "signal"} die Signalspalten vorhanden sind. Für Fonds-Wrapper
+  (\code{asset_config(wrapper = )}) werden statt des Asset-Namens die Spalten der inneren
+  Strategie geprüft (auch deren Signalspalten); eine Spalte mit dem Namen des
+  Wrapper-Assets ist ein Fehler.
 
   \code{strategy_update_asset} akzeptiert Felder als \code{name = wert}-Paare; nur
-  Felder, die das Asset bereits hat, werden übernommen (unbekannte mit
-  Warnung ignoriert). Das Asset wird danach mit \code{asset_config} neu
+  Felder, die das Asset bereits hat, sowie \code{wrapper} werden übernommen
+  (unbekannte mit Warnung ignoriert; \code{wrapper = NULL} entfernt einen Wrapper). Das Asset wird danach mit \code{asset_config} neu
   geprüft; nicht angegebene Felder bleiben unverändert. Ändert sich
   \code{asset_class} oder \code{deliverable} und wird \code{tax_regime}
   nicht mit angegeben, wird ein bisher automatisch abgeleitetes

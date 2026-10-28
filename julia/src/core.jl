@@ -41,12 +41,6 @@ struct TaxEntry
     taxes_paid::Float64
 end
 
-"Eine Gebührenbuchung (Fondsmodus)."
-struct FeeEntry
-    event_date::Int
-    fees_paid::Float64
-end
-
 mutable struct Status
     count::Float64
     price::Float64
@@ -85,7 +79,6 @@ mutable struct Trades
     buys::Vector{Lot}
     sells::Vector{SellEntry}
     taxes::Vector{TaxEntry}
-    fees::Vector{FeeEntry}
     fifo_front::Int
 end
 
@@ -106,7 +99,6 @@ struct VPPending
 end
 
 mutable struct Totals
-    total_value::Float64
     total_taxes::Float64
     loss_capital_gains::Float64
     loss_private_sales::Float64
@@ -139,13 +131,19 @@ end
 # simulation_core.cpp
 # ═══════════════════════════════════════════════════════════════════════════
 
+# NaN-Nutzlast (Etappe 8.0): Treffen in einer Addition oder Multiplikation zwei NaN
+# aufeinander (etwa NA und NaN), behält R das NaN des ersten Operanden der
+# Maschinenanweisung, die gcc gewählt hat; die Ports schreiben diese Operationen mit
+# nan_add/nan_mul (r/rnum.jl) in der Operandenfolge des R-Baus (objdump von SimLev.so),
+# gleich wie python/simlev/_core.py. Subtraktion und Division brauchen das nicht.
+
 function dca_flows_allocation!(sim::Sim, a::Int, flows::Float64, index::Int)
     st = sim.status[a]; rp = sim.report[a]
     rp.flows[index] = flows
-    money = st.money + flows
+    money = nan_add(flows, st.money)                 # R: flows + money
     st.money = money
     rp.money[index] = money
-    total = money + st.worth
+    total = nan_add(money, st.worth)
     st.total = total
     rp.total[index] = total
     return nothing
@@ -154,14 +152,14 @@ end
 function calculate_buy_report!(sim::Sim, a::Int, index::Int, trade_count::Float64,
                                trade_price::Float64, market_price::Float64)
     st = sim.status[a]; rp = sim.report[a]
-    count = st.count + trade_count
+    count = nan_add(st.count, trade_count)
     st.count = count
     st.price = market_price
-    worth = count * market_price
+    worth = nan_mul(count, market_price)
     st.worth = worth
-    money = st.money - (trade_count * trade_price)
+    money = st.money - nan_mul(trade_count, trade_price)
     st.money = money
-    total = worth + money
+    total = nan_add(worth, money)
     st.total = total
     rp.worth[index] = worth
     rp.money[index] = money
@@ -175,11 +173,11 @@ function calculate_sell_report!(sim::Sim, a::Int, index::Int, trade_count::Float
     count = st.count - trade_count
     st.count = count
     st.price = market_price
-    worth = count * market_price
+    worth = nan_mul(market_price, count)             # R: market_price * count
     st.worth = worth
-    money = st.money + ((trade_count * trade_price) - capital_gains_tax)
+    money = nan_add(nan_mul(trade_count, trade_price) - capital_gains_tax, st.money)
     st.money = money
-    total = worth + money
+    total = nan_add(worth, money)
     st.total = total
     rp.worth[index] = worth
     rp.money[index] = money
@@ -193,18 +191,18 @@ function calculate_total_report!(sim::Sim, index::Int)
         st = sim.status[a]; rp = sim.report[a]
         price = sim.market[a].asset_price[index]
         st.price = price
-        worth = price * st.count
+        worth = nan_mul(price, st.count)
         st.worth = worth
         rp.worth[index] = worth
         money = st.money
         rp.money[index] = money
-        total = money + worth
+        total = nan_add(worth, money)                # R: worth + money
         st.total = total
         rp.total[index] = total
     end
     total_worth = 0.0
     @inbounds for a in 1:n
-        total_worth += sim.status[a].total
+        total_worth = nan_add(total_worth, sim.status[a].total)
     end
     @inbounds for a in 1:n
         st = sim.status[a]
@@ -230,9 +228,9 @@ function perform_market_update!(sim::Sim, index::Int)
         st = sim.status[a]; rp = sim.report[a]
         price = sim.market[a].asset_price[index]
         money = st.money
-        worth = st.count * price
-        total = worth + money
-        total_portfolio += total
+        worth = nan_mul(st.count, price)
+        total = nan_add(worth, money)
+        total_portfolio = nan_add(total_portfolio, total)
         rp.worth[index] = worth
         rp.money[index] = money
         rp.flows[index] = 0.0
@@ -263,13 +261,13 @@ function batch_market_update!(sim::Sim, start_idx::Int, end_idx::Int, portfolio:
         prices = sim.market[a].asset_price
         for k in 1:nd
             i = start_idx + k - 1
-            worth = count * prices[i]
-            total = worth + money
+            worth = nan_mul(prices[i], count)        # R: price * count
+            total = nan_add(worth, money)
             rp.worth[i] = worth
             rp.money[i] = money
             rp.flows[i] = 0.0
             rp.total[i] = total
-            portfolio[k] += total
+            portfolio[k] = nan_add(portfolio[k], total)
         end
         st.price = prices[end_idx]
         st.worth = rp.worth[end_idx]
@@ -303,7 +301,7 @@ function _calculate_fifo_price(buys::Vector{Lot}, units::Float64, front::Int)
         rem = b.remaining
         if rem > 0
             sell = cpp_min(rem, units_trade)
-            total_price += sell * b.price
+            total_price = nan_add(nan_mul(b.price, sell), total_price)   # R: price * sell + total
             units_trade -= sell
         end
         i += 1
@@ -350,17 +348,18 @@ function _calculate_private_sale_tax(buys::Vector{Lot}, front::Int, trade_count:
                              days_from_civil(y + 1, m, d)
             is_exempt = current_date > one_year_later
             lot_gain = sell * (sell_price - b.price)
+            # R: Gewinn als lot_gain + Summe, Verlust als Summe - lot_gain (NaN-Vorzeichen bleibt)
             if is_exempt
-                lot_gain >= 0 ? (eg += lot_gain) : (el += -lot_gain)
+                lot_gain >= 0 ? (eg = nan_add(lot_gain, eg)) : (el = el - lot_gain)
             else
-                lot_gain >= 0 ? (tg += lot_gain) : (tl += -lot_gain)
+                lot_gain >= 0 ? (tg = nan_add(lot_gain, tg)) : (tl = tl - lot_gain)
             end
             units_remaining -= sell
         end
         i += 1
     end
     return (exempt_gain = eg, exempt_loss = el, taxable_gain = tg, taxable_loss = tl,
-            total_gain = eg - el + tg - tl)
+            total_gain = nan_add(eg - el, tg) - tl)
 end
 
 function fifo_consume!(sim::Sim, a::Int, trade_count::Float64)
@@ -439,7 +438,7 @@ function flat_rate(buys::Vector{Lot}, front::Int, base_rate::Float64, year_start
 end
 
 function p20_tax!(trade_gain::Float64, bonus::Float64, t::Totals, tax_rate::Float64, use_spb::Bool)
-    adjusted_gain = trade_gain * (1.0 - bonus)
+    adjusted_gain = nan_mul(1.0 - bonus, trade_gain)
     if adjusted_gain < 0
         t.loss_capital_gains = t.loss_capital_gains - adjusted_gain
         t.cgt_loss_added_ytd = t.cgt_loss_added_ytd - adjusted_gain
@@ -448,38 +447,38 @@ function p20_tax!(trade_gain::Float64, bonus::Float64, t::Totals, tax_rate::Floa
     pool = t.loss_capital_gains
     loss_offset = cpp_min(adjusted_gain, pool)
     t.loss_capital_gains = pool - loss_offset
-    t.cgt_loss_used_ytd = t.cgt_loss_used_ytd + loss_offset
+    t.cgt_loss_used_ytd = nan_add(t.cgt_loss_used_ytd, loss_offset)
     gain_after_loss = adjusted_gain - loss_offset
     spb_offset = 0.0
     spb_rem = t.sparer_pauschbetrag_remaining
     if use_spb && spb_rem > 0
         spb_offset = cpp_min(gain_after_loss, spb_rem)
         t.sparer_pauschbetrag_remaining = spb_rem - spb_offset
-        t.sparer_pauschbetrag_used_total = t.sparer_pauschbetrag_used_total + spb_offset
+        t.sparer_pauschbetrag_used_total = nan_add(spb_offset, t.sparer_pauschbetrag_used_total)
     end
     taxable_gain = gain_after_loss - spb_offset
-    t.cgt_base_taxed_ytd = t.cgt_base_taxed_ytd + taxable_gain
-    tax = taxable_gain * tax_rate
-    t.total_taxes = t.total_taxes + tax
+    t.cgt_base_taxed_ytd = nan_add(t.cgt_base_taxed_ytd, taxable_gain)
+    tax = nan_mul(tax_rate, taxable_gain)
+    t.total_taxes = nan_add(tax, t.total_taxes)
     return (tax = tax, spb_used = spb_offset)
 end
 
 function vp_tax!(flat_rate_value::Float64, bonus::Float64, t::Totals, tax_rate::Float64, use_spb::Bool)
-    taxable_flat_rate = flat_rate_value * (1.0 - bonus)
+    taxable_flat_rate = nan_mul(1.0 - bonus, flat_rate_value)
     pool = t.loss_capital_gains
     loss_offset = cpp_min(taxable_flat_rate, pool)
     t.loss_capital_gains = pool - loss_offset
-    t.cgt_loss_used_ytd = t.cgt_loss_used_ytd + loss_offset
+    t.cgt_loss_used_ytd = nan_add(t.cgt_loss_used_ytd, loss_offset)
     vp_after_loss = taxable_flat_rate - loss_offset
     spb_offset = 0.0
     spb_rem = t.sparer_pauschbetrag_remaining
     if use_spb && spb_rem > 0
         spb_offset = cpp_min(vp_after_loss, spb_rem)
         t.sparer_pauschbetrag_remaining = spb_rem - spb_offset
-        t.sparer_pauschbetrag_used_total = t.sparer_pauschbetrag_used_total + spb_offset
+        t.sparer_pauschbetrag_used_total = nan_add(spb_offset, t.sparer_pauschbetrag_used_total)
     end
     taxable_gain = vp_after_loss - spb_offset
-    t.cgt_base_taxed_ytd = t.cgt_base_taxed_ytd + cpp_max(0.0, taxable_gain)
+    t.cgt_base_taxed_ytd = nan_add(cpp_max(0.0, taxable_gain), t.cgt_base_taxed_ytd)
     tax = cpp_max(0.0, taxable_gain * tax_rate)
     return (tax = tax, spb_used = spb_offset, taxable_amount = taxable_flat_rate)
 end
@@ -497,7 +496,7 @@ end
     prev_cost = cc[lot_idx-1]
     prev_units = cu[lot_idx-1]
     rem = units - prev_units
-    return (prev_cost + rem * prices[lot_idx]) / units
+    return nan_add(rem * prices[lot_idx], prev_cost) / units     # R: rem * price + prev_cost
 end
 
 const REGIME_CODE = Dict("none" => 0, "investment_fund" => 1, "capital_gains" => 2, "private_sale" => 3)

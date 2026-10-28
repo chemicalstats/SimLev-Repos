@@ -135,10 +135,10 @@ Hinweise zu den Kennzahlen: Für die Strategie mit Sparplan (`bh_dca`) ist
 auf dem zeitgewichteten Wertindex gemessen; `summary()` beschriftet die
 CAGR entsprechend. Für den Vergleich von Strategien mit und ohne Sparplan
 eignet sich `ttwror`. Das ursprüngliche Projektskript übergab zusätzlich
-`funds_fee = 1, bonus_fee = 5`. Diese Kosten gehören zum Fondsmodus
+`funds_fee = 1, bonus_fee = 5`. Diese Kosten gehörten zum früheren Fondsmodus
 und blieben dort ohne ihn ohne Wirkung. Sie sind deshalb oben weggelassen; das
-Ergebnis ist dasselbe. Für eine Studie mit Fondskosten
-`sim_args = list(funds = funds_costs(fee = 1, performance_fee = 5))` angeben.
+Ergebnis ist dasselbe. Den Fondsmodus gibt es nicht mehr; Fondskosten bildet
+künftig der Fonds-Wrapper `wrapper_config()` mit `funds_costs()` ab (folgt).
 
 Die Pfade werden nach der Auswertung verworfen. Der Speicherbedarf hängt daher
 nicht von `n` ab, anders als bei der Zwischenspeicherung von 100.000 Pfaden im

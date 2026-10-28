@@ -141,7 +141,12 @@ die Python- und Julia-Fassung entsprechend nachziehen.
 
 ```
 R/
-  simulation.R               simulation(), Ablaufsteuerung
+  simulation.R               simulation(), Ablaufsteuerung, print/summary
+  sim_base.R                 Steuer-, Termin-, Handels-, Split- und Gebührenfunktionen,
+                             Tarifweg, Jahreswechsel, Kennzahlen
+  sim_validate.R, sim_prepare.R, sim_actions.R, sim_loop.R, sim_evaluate.R
+                             Phasen von simulation(): Eingabeprüfung, Vorbereitung,
+                             Zahlungshelfer, Tagesschleife, Auswertung
   tax_tariff.R               read_tax_tariff(): Einkommensteuertarif aus
                              inst/extdata/steuertarif.csv
   asset_config.R, strategy.R asset_config(), create_strategy() & Co.

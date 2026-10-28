@@ -212,9 +212,12 @@ Besonderheiten der Python-Fassung:
   Vorabpauschalen, Gebühren je Asset); in R gibt es kein Gegenstück.
 - `bootstrap_study(chunk_dir=...)` schreibt die Zwischenstände als Pickle
   statt als RDS.
-- `cores > 1` rechnet sequenziell, aber mit derselben Zufallssemantik wie
-  `mclapply(mc.set.seed = FALSE)` in R; bei gleichem `cores` stimmen die
-  Ergebnisse also mit R überein.
+- `cores > 1` rechnet wie R mit Fork-Prozessen (`multiprocessing`, Kontext
+  `"fork"`) und derselben Zufallssemantik wie `mclapply(mc.set.seed = FALSE)`:
+  bei gleichem `cores` stimmen die Ergebnisse mit R überein. Wo es keinen Fork
+  gibt (Windows, macOS mit dem Standard `spawn`), rechnet Python nacheinander,
+  mit denselben Ergebnissen. Ausgaben und Meldungen der Einheiten erscheinen in
+  deren Reihenfolge (R: in der Reihenfolge der Fertigstellung).
 - Hinweise wie die Meldung über aufgefüllte Kalendertage erscheinen, wie
   R's `message()`, auf `stderr`; Warnungen sind `UserWarning`, Fehler
   `ValueError`, jeweils mit dem deutschen Wortlaut des R-Pakets.
@@ -309,7 +312,7 @@ Geprüft wurde:
   `details = TRUE`; zusätzlich 669 frisch erzeugte Zufalls- und Stressfälle
   und 750 Fälle mit den neuen Argumenten (`order_fee`, `dca_fee`,
   `church_tax`, `harvest_*`, `taxable_income`, `tax_tariff`).
-- **Alle Funktionen:** 4.563 Referenzfälle in 30 Modulen unter
+- **Alle Funktionen:** 4.578 Referenzfälle in 30 Modulen unter
   `golden/modules/`, darunter die R-Interna (`r_fmt`, `r_linalg`,
   `r_nmath`, `r_rng`, `r_stats`); alle bitgleich in Ergebnis,
   Konsolen- und Druckausgabe, Warnungen und Fehlermeldungen.
@@ -331,13 +334,13 @@ Bekannte Grenzen:
 
 ``` bash
 pip install ".[test]"
-pytest                                        # 5.840 Tests, Laufzeit rund 7 Minuten
+pytest                                        # 5.020 Tests, Laufzeit rund 12 Minuten
 python tools/compare_golden.py                # Engine: golden/cases und golden/extra
 python tools/compare_reference.py             # Erweiterungen: alle Module unter golden/modules
 python tools/compare_reference.py optimize -k cov_ -v      # ein Modul, ausgewählte Fälle, ausführlich
 ```
 
-Die Test-Suite enthält 4.563 Modul-Referenzfälle
+Die Test-Suite enthält 4.578 Modul-Referenzfälle
 (`tests/test_module_reference.py`) und die 105 Golden-Master-Fälle der
 Engine (`tests/test_golden_master.py`, dazu ein Test, dass die Fälle
 gefunden werden). Die übrigen 1.120 Tests prüfen die Engine (überwiegend
@@ -359,7 +362,12 @@ Weiterentwicklung in [DEVELOPING.md](DEVELOPING.md).
 ```
 simlev/
   __init__.py        öffentliche Funktionen (alle 104 Exporte des R-Pakets)
-  engine.py          simulation(), Ablaufsteuerung (simulation.R, sim_*.R, utils.R)
+  engine.py          simulation(), Ablaufsteuerung (simulation.R, utils.R)
+  _sim_base.py       Hilfen, Gebühren, Termine, Handels- und Steuerfunktionen, Tarifweg,
+                     Jahreswechsel, Kennzahlen (sim_base.R)
+  _sim_phases.py     Phasen 1–2: Eingabeprüfung, Datenvorbereitung (sim_validate.R, sim_prepare.R)
+  _sim_loop.py       Phasen 3–5: Zahlungshelfer, Tagesschleife, Jahresabschluss (sim_actions.R, sim_loop.R)
+  _sim_evaluate.py   Phase 6: Renditen, Kennzahlen, Ergebnisobjekt (sim_evaluate.R)
   _core.py           Rechenkerne der Engine (simulation_core.cpp, fifo_core.cpp, tax_core.cpp)
   _dates.py          Datumshelfer (Tage seit 1970, strptime wie R)
   config.py          asset_config(), create_strategy() & Co. (asset_config.R, strategy.R)
@@ -392,7 +400,11 @@ simlev/
     rformat.py       Rundung und Textausgabe der Engine (round, signif, format, sprintf)
     rng.py           Zufallszahlen wie R
     nmath.py         Verteilungsfunktionen (mit _toms708.py, _cmath.py)
-    stats.py         stats-Interna (mit _optim.py, _lbfgsb.py, _sbart.py, _fft.py, port.py)
+    stats.py         stats-Interna, sammelt die Themenmodule stats_sort.py (Sortieren, Quantile),
+                     stats_cor.py (cor, cov, scale), stats_smooth.py (approx, filter, fft, density,
+                     smooth.spline), stats_optim.py (optimize, uniroot, optim, nlminb),
+                     stats_models.py (lm, glm, p.adjust, t.test …), stats_cluster.py (dist, hclust);
+                     dazu _optim.py, _lbfgsb.py, _sbart.py, _fft.py, port.py
     linalg.py        lineare Algebra (mit _blas.py, _linpack.py, _lapack.py)
     base.py, libm.py base-Funktionen mit long double, libm-Funktionen
     fmt.py           format, sprintf, print wie R

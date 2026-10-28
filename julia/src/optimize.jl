@@ -200,22 +200,16 @@ _q(v) = join(("'" * string(s) * "'" for s in v), ", ")
 _warn(msg) = (@warn msg; nothing)
 _errmsg(e) = e isa ErrorException ? e.msg : hasproperty(e, :msg) ? string(getproperty(e, :msg)) : sprint(showerror, e)
 
-# Warnung SimLevBoundsPercent: Aufrufer können sie abfangen (R: withCallingHandlers)
-const _BOUNDS_HANDLER = Ref{Any}(nothing)
+# Warnung SimLevBoundsPercent: Aufrufer können sie abfangen (R: withCallingHandlers);
+# der Handler gilt je Aufgabe (task-lokal, thread-sicher für RParallel)
+const _BOUNDS_KEY = :SimLev_Optimize_bounds_handler
 function _warn_bounds(msg)
-    h = _BOUNDS_HANDLER[]
+    tls = current_task().storage
+    h = tls === nothing ? nothing : get(tls, _BOUNDS_KEY, nothing)
     (h === nothing || h(msg)) && _warn(msg)
     nothing
 end
-function _with_bounds_handler(f, h)
-    old = _BOUNDS_HANDLER[]
-    _BOUNDS_HANDLER[] = h
-    try
-        f()
-    finally
-        _BOUNDS_HANDLER[] = old
-    end
-end
+_with_bounds_handler(f, h) = task_local_storage(f, _BOUNDS_KEY, h)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Renditen, Prüfungen

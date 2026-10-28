@@ -195,4 +195,16 @@ ref_case("summary_print", "sm <- structure(list(top = data.frame(id = 1L, n = 50
   py("result = PS.SummarySimLevParamSearch(top=pd.DataFrame({'id': [1], 'n': [50.0], 'cagr': [0.05], 'sharpe': [0.4], 'plateau': [0.4]}),
   best=pd.DataFrame({'id': [1], 'n': [50.0], 'sharpe': [0.4]}), best_plateau=pd.DataFrame({'id': [1], 'n': [50.0], 'sharpe': [0.4], 'plateau': [0.4]}),
   n=1, n_failed=0, objective='sharpe', method='grid', params=['n'], elapsed=0.0)"), jl = jl('result = RList("top" => RFrame("id" => [1], "n" => [50.0], "cagr" => [0.05], "sharpe" => [0.4], "plateau" => [0.4]), "best" => RFrame("id" => [1], "n" => [50.0], "sharpe" => [0.4]), "best_plateau" => RFrame("id" => [1], "n" => [50.0], "sharpe" => [0.4], "plateau" => [0.4]), "n" => 1, "n_failed" => 0, "objective" => "sharpe", "method" => "grid", "params" => "n", "elapsed" => 0.0; class = "summary.SimLevParamSearch")'))
+# ── cores = 2 (Etappe 5) ────────────────────────────────────────────────────
+ps_case("ps_cores2", "z(param_search(d, b, param_space(n = c(10, 20, 40), band = c(0, 2)), burn_in = 50, cores = 2))",
+        "result = z(PS.param_search(d, b, PS.param_space(n=[10.0, 20.0, 40.0], band=[0.0, 2.0]), burn_in=50, cores=2))",
+        'result = z(PS.param_search(d, b, PS.param_space(n = [10.0, 20.0, 40.0], band = [0.0, 2.0]); burn_in = 50, cores = 2))')
+ps_case("ps_cores2_random", "set.seed(3); x <- z(param_search(d, b, param_space(n = param_range(5, 60, integer = TRUE), band = param_range(0, 2)), method = 'random', n = 5, seed = 11, burn_in = 60, cores = 2)); list(x, runif(1))",
+        "rng.set_seed(3); x = z(PS.param_search(d, b, PS.param_space(n=PS.param_range(5, 60, integer=True), band=PS.param_range(0, 2)), method='random', n=5, seed=11, burn_in=60, cores=2)); result = [x, rng.runif(1)]",
+        'SL.RRng.set_seed(3); x = z(PS.param_search(d, b, PS.param_space(n = PS.param_range(5, 60; integer = true), band = PS.param_range(0, 2)); method = "random", n = 5, seed = 11, burn_in = 60, cores = 2)); result = [x, SL.RRng.runif(1)]')
+ps_case("ps_cores2_err", "z(param_search(d, function(p) if (p$n > 15) stop('kaputt') else b(p), param_space(n = c(10, 20, 30), band = 0), burn_in = 50, cores = 2))",
+        "def bb(p):\n    if p['n'] > 15:\n        raise ValueError('kaputt')\n    return b(p)\nresult = z(PS.param_search(d, bb, PS.param_space(n=[10.0, 20.0, 30.0], band=0.0), burn_in=50, cores=2))",
+        'bb(p) = p["n"] > 15 ? error("kaputt") : b(p)
+result = z(PS.param_search(d, bb, PS.param_space(n = [10.0, 20.0, 30.0], band = 0.0); burn_in = 50, cores = 2))')
+
 ref_done()

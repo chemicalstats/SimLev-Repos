@@ -7,7 +7,7 @@ using Logging
 include("golden_tools.jl")
 include("reftree.jl")
 const _MODDIR = joinpath(@__DIR__, "..", "..", "golden", "modules")
-const _FULL = get(ENV, "SIMLEV_FULL_TESTS", "0") == "1"
+const _FULL = SimLev.REnv.full_tests()
 const _QUICK_PER_MODULE = 4
 
 function _quick_pick(files)
@@ -89,18 +89,26 @@ include("api_tests.jl")
 include("ms_garch_tests.jl")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# par_lapply: Fork-Semantik, Threads, Ausgaben je Aufgabe (Etappe 5)
+include("parallel_tests.jl")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Schichten 0–4: keine Zugriffe auf eine höhere Schicht (Etappe 4.4)
+include("layers_tests.jl")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Referenzfälle der Module (golden/modules): standardmäßig eine schnelle
 # Auswahl (je Modul bis zu `_QUICK_PER_MODULE` gleichmäßig verteilte Fälle),
 # vollständig mit SIMLEV_FULL_TESTS=1.
 if isdir(_MODDIR)
     @testset "Referenzfälle golden/modules$(_FULL ? "" : " (Auswahl)")" begin
         for m in sort([d for d in readdir(_MODDIR) if isdir(joinpath(_MODDIR, d))])
-            files = sort(filter(f -> endswith(f, ".json.gz") || endswith(f, ".json"), readdir(joinpath(_MODDIR, m))))
+            files = list_ref_cases(joinpath(_MODDIR, m))
             _FULL || (files = _quick_pick(files))
             @testset "$m" begin
                 for f in files
                     errs = try
-                        run_ref_case(read_case(joinpath(_MODDIR, m, f)))
+                        run_ref_case(read_ref_case(joinpath(_MODDIR, m, f)))
                     catch e
                         ["Werkzeugfehler: " * sprint(showerror, e)]
                     end

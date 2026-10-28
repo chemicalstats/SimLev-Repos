@@ -235,9 +235,7 @@ _cond_msg(e) = e isa ErrorException ? e.msg : e isa KeyError ? string(e.key) :
 "`suppressWarnings(suppressMessages(f()))`."
 function _quiet(f)
     with_logger(NullLogger()) do
-        redirect_stderr(devnull) do
-            f()
-        end
+        SL.RParallel.suppress_messages(f)
     end
 end
 
@@ -843,16 +841,17 @@ end
 # Attribut `param_ids` (R: attr(st, "param_ids")): RList kennt keine Attribute;
 # daher eine Tabelle nach Objektidentität. Abfrage über `param_ids(st)`.
 const _PARAM_IDS = IdDict{Any,Any}()
+const _PARAM_IDS_LOCK = ReentrantLock()
 function _set_param_ids!(st, pid)
     if st isa SL.RFrame || st isa SL.RVector
         SL.attrs(st)["param_ids"] = pid
     else
-        _PARAM_IDS[st] = pid
+        lock(() -> (_PARAM_IDS[st] = pid), _PARAM_IDS_LOCK)
     end
     st
 end
 "Attribut `param_ids` eines Ergebnisses von [`param_bootstrap`](@ref) (Strategiename → id)."
-param_ids(st) = (st isa SL.RFrame || st isa SL.RVector) ? get(SL.attrs(st), "param_ids", nothing) : get(_PARAM_IDS, st, nothing)
+param_ids(st) = (st isa SL.RFrame || st isa SL.RVector) ? get(SL.attrs(st), "param_ids", nothing) : lock(() -> get(_PARAM_IDS, st, nothing), _PARAM_IDS_LOCK)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Haircut

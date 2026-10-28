@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Backtest-Engine (Port von simulation() aus SimLev 0.5.0)
 #
-# Die Struktur folgt den Phasen des R-Pakets (simulation.R, sim_validate.R,
+# Die Struktur folgt den Phasen des R-Pakets (simulation.R, sim_base.R, sim_validate.R,
 # sim_prepare.R, sim_actions.R, sim_loop.R, sim_evaluate.R), damit beide
 # Implementierungen Zeile für Zeile vergleichbar bleiben und bitgleich rechnen:
 #
@@ -14,7 +14,7 @@
 #   6. _sim_returns, _sim_risk_stats, _sim_undefined_metrics, _sim_result
 #
 # Tagesindizes (`time`) sind wie in R 1-basiert. Hier stehen die Handels- und
-# Steuerfunktionen aus simulation.R; die Phasen in sim_*.jl.
+# Steuerfunktionen aus sim_base.R (Python: _sim_base.py); die Phasen in sim_*.jl.
 # ─────────────────────────────────────────────────────────────────────────────
 
 include("tax_tariff.jl")
@@ -401,10 +401,10 @@ mutable struct Run
 end
 
 @inline _cat(R::Run, s::AbstractString) = print(R.io, s)
-_message(s::AbstractString) = println(stderr, s)
+_message(s::AbstractString) = println(SimLev.RParallel.r_stderr(), s)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Handels- und Steuerfunktionen (simulation.R)
+# Handels- und Steuerfunktionen (sim_base.R, früher simulation.R)
 # ═══════════════════════════════════════════════════════════════════════════
 
 "`apply_spread(price, spread, direction)`: Kauf- bzw. Verkaufskurs mit halbem Spread."

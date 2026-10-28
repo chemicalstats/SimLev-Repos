@@ -2,12 +2,11 @@
 
 Die vollständige Bitgleichheit prüfen die Referenzfälle in
 ``golden/modules/r_stats`` (Generator ``golden/modules/gen_r_stats.R``,
-``tools/compare_reference.py r_stats``); sie laufen hier ebenfalls mit.
+``tools/compare_reference.py r_stats``) in ``test_module_reference.py``.
 Zusätzlich: bekannte R-Werte (Hex aus R 4.3.3), Form der Ergebnisse,
 Warnungen/Fehler und die R-NaN-Markierung.
 """
 import math
-import os
 import warnings
 
 import numpy as np
@@ -17,11 +16,8 @@ import pytest
 import simlev._r.base as rb
 import simlev._r.fmt as fm
 import simlev._r.stats as st
-from simlev._r.reftree import load_case, run_case
 
 EXACT = np.finfo(np.longdouble).nmant >= 63
-DIR = os.path.join(os.path.dirname(__file__), "..", "..", "golden", "modules", "r_stats")
-CASES = sorted(f for f in os.listdir(DIR) if f.endswith(".json.gz")) if os.path.isdir(DIR) else []
 
 X = np.array([3.1, -0.4, 2.2, 5.9, 1.05, 0.3, 4.4])
 
@@ -128,10 +124,3 @@ def test_base_helpers():
     assert list(rb.cumprod([1, 2, np.nan, 3])[:2]) == [1.0, 2.0]
     assert list(rb.range([3, np.nan, 1], na_rm=True)) == [1.0, 3.0]
     assert list(rb.diff([1, 4, 9, 16], differences=2)) == [2.0, 2.0]
-
-
-@pytest.mark.skipif(not EXACT, reason="Bitgleichheit setzt 80-Bit-long-double voraus")
-@pytest.mark.parametrize("case", CASES)
-def test_reference_case(case):
-    errs = run_case(load_case(os.path.join(DIR, case)))
-    assert not errs, "\n".join(errs)

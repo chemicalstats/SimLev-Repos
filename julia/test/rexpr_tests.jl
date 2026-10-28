@@ -29,28 +29,20 @@ end
 @testset "RExpr" begin
     d = SimLev.RFrame("a" => [1.0, _NA_, 3.0, NaN], "b" => [2.0, 2.0, _NA_, 1.0], "s" => ["x", "y", "z", "x"])
     ev(s) = _E.eval_r(s, d)
+    # Ausdrücke ohne Daten, die ein Referenzfall golden/modules/rexpr wörtlich prüft (z. B. "-2^2",
+    # "NA & TRUE", "xor(TRUE, NA)", "log(8, 2)"), stehen nur dort (Etappe 4.1).
     cases = [
         # Vorrang (R: einstelliges ! bindet schwächer als Vergleich und Arithmetik)
         "!a > 1"                     => [true, missing, false, missing],
         "!a + 1"                     => [false, missing, false, missing],
         "a == !b"                    => [false, missing, missing, missing],
         "1 + !0 > 0"                 => [2.0],
-        "!TRUE & FALSE"              => [false],
-        "-2^2"                       => [-4.0],
-        "2^-1"                       => [0.5],
-        "-1:3"                       => [-1, 0, 1, 2, 3],
-        "2 * 3 %% 4"                 => [6.0],
         "1 | 0 & 0"                  => [true],
         # dreiwertige NA-Logik
-        "NA & FALSE"                 => [false],
-        "NA | TRUE"                  => [true],
-        "NA & TRUE"                  => [missing],
         "a > b | is.na(a)"           => [false, true, missing, true],
-        "xor(TRUE, NA)"              => [missing],
         "a > 2 & b < 3"              => [false, missing, missing, missing],
         # %in%, %%, %/%, Zeichen
         "a %in% c(NaN)"              => [false, false, false, true],
-        "NA %in% NaN"                => [false],
         "-0 %in% 0"                  => [true],
         "s %in% c(\"x\")"            => [true, false, false, true],
         "c(1,2) == \"1\""            => [true, false],
@@ -63,7 +55,6 @@ end
         "pmin(a, b)"                 => [1.0, _NA_, _NA_, NaN],
         "round(2.5) + signif(123456, 2)" => [120002.0],
         "max(a, na.rm = TRUE)"       => [3.0],
-        "log(8, 2)"                  => [3.0],
         "T & !F"                     => [true],
         "pi > 3.14159 & Inf > 1e308" => [true],
     ]

@@ -26,7 +26,7 @@ const _EPOCH = Date(1970, 1, 1)
 # ═══════════════════════════════════════════════════════════════════════════
 
 "`message()`: Hinweis auf stderr."
-_message(text::AbstractString) = (println(stderr, text); nothing)
+_message(text::AbstractString) = (println(SimLev.RParallel.r_stderr(), text); nothing)
 
 "R-Fehler (`stop(text)`)."
 _stop(text::AbstractString) = error(text)

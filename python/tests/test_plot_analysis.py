@@ -17,9 +17,10 @@ import pandas as pd
 import pytest
 
 import simlev
+from simlev._r import env as _env
 from simlev._r.reftree import decode, load_case
 
-ROOT = os.environ.get("SIMLEV_MODULE_DIR") or os.path.join(
+ROOT = _env.module_dir() or os.path.join(
     os.path.dirname(__file__), "..", "..", "golden", "modules")
 pytestmark = pytest.mark.skipif(not os.path.isdir(ROOT), reason="Referenzfälle golden/modules fehlen")
 

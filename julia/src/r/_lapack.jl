@@ -1262,12 +1262,17 @@ end
 
 const _SYSLAPACK = Ref{Any}(false)
 const _LAPACK_WARNED = Ref(false)
+const _LAPACK_LOCK = ReentrantLock()     # einmaliges Laden, auch aus RParallel-Aufgaben
 
 "Lädt die Referenz-LAPACK des Systems (Handle oder `nothing`)."
 function system_lapack()
     _SYSLAPACK[] === false || return _SYSLAPACK[]
+    return lock(_system_lapack!, _LAPACK_LOCK)
+end
+function _system_lapack!()
+    _SYSLAPACK[] === false || return _SYSLAPACK[]
     cands = String[]
-    env = get(ENV, "SIMLEV_LAPACK", "")
+    env = SimLev.REnv.lapack_path()
     isempty(env) || push!(cands, env)
     append!(cands, ["/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3",
                     "/usr/lib/aarch64-linux-gnu/lapack/liblapack.so.3",
@@ -1313,8 +1318,7 @@ function _sys_dsyevr(lib, A0::AbstractMatrix, jobz::Char)
 end
 
 function _warn_fallback(name)
-    if !_LAPACK_WARNED[]
-        _LAPACK_WARNED[] = true
+    if lock(() -> (w = _LAPACK_WARNED[]; _LAPACK_WARNED[] = true; !w), _LAPACK_LOCK)
         @warn "eigen(): keine System-LAPACK gefunden, Eigenvektoren über $name berechnet (nicht bitgleich zu R; Pfad zur Referenz-LAPACK über SIMLEV_LAPACK setzen)."
     end
 end

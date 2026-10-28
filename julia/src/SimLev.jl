@@ -19,6 +19,7 @@ export simulation, SimLevResult, format_result,
        r_summary, r_plot
 
 # R-Interna (R 4.3.3 und optionale R-Pakete), in Abhängigkeitsreihenfolge
+include("r/env.jl")          # Umgebungsschalter SIMLEV_* (einzige Lesestelle)
 include("r/types.jl")
 include("r/ld80.jl")
 include("r/rnum.jl")
@@ -26,6 +27,7 @@ include("r/rformat.jl")
 include("r/libm.jl")
 include("r/base.jl")
 include("r/rng.jl")
+include("r/parallel.jl")     # .par_lapply (Threads), Ausgaben je Aufgabe
 include("r/nmath.jl")
 include("r/fmt.jl")
 include("r/stats.jl")

@@ -309,7 +309,7 @@ end
 end
 
 @testset "Bitgleichheit zu R (Golden Master, strikt)" begin
-    root = get(ENV, "SIMLEV_GOLDEN_DIR", joinpath(@__DIR__, "..", "..", "golden"))
+    root = SimLev.REnv.golden_dir(joinpath(@__DIR__, "..", "..", "golden"))
     @test isdir(joinpath(root, "cases"))
     for dir in ("cases", "extra")
         path = joinpath(root, dir)

@@ -1,5 +1,5 @@
 # Vergleicht die Julia-Fassung bitgenau mit den R-Referenzfällen der
-# Erweiterungsmodule (golden/modules/<modul>/*.json.gz).
+# Erweiterungsmodule (golden/modules/<modul>/*.json.gz, Format 1 und 2).
 #
 # Aufruf:  julia --project=. tools/compare_reference.jl [modul ...] [-k muster] [-v] [--dir pfad]
 
@@ -21,11 +21,11 @@ function main(args)
     isempty(mods) && (mods = sort([d for d in readdir(dir) if isdir(joinpath(dir, d))]))
     tot = 0; tot_ok = 0
     for m in mods
-        files = sort(filter(f -> endswith(f, ".json.gz") || endswith(f, ".json"), readdir(joinpath(dir, m))))
+        files = list_ref_cases(joinpath(dir, m))
         k === nothing || (files = filter(f -> occursin(k, f), files))
         ok = 0
         for f in files
-            case = read_case(joinpath(dir, m, f))
+            case = read_ref_case(joinpath(dir, m, f))
             errs = try
                 run_ref_case(case)
             catch e

@@ -301,7 +301,7 @@ mit `rseed = NULL`). Ist die Umgebungsvariable `SIMLEV_R_SYS_TIME` gesetzt
 Uhrzeit (Prüfschalter für Tests und Referenzfälle).
 """
 function sys_time()
-    v = get(ENV, "SIMLEV_R_SYS_TIME", "")
+    v = SimLev.REnv.r_sys_time()
     isempty(strip(v)) || return parse(Float64, strip(v))
     return time()
 end

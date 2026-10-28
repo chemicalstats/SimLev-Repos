@@ -27,7 +27,7 @@ export align_series, check_series, align_macro, convert_currency, total_return_i
 # ═══════════════════════════════════════════════════════════════════════════
 
 "R-`message()`: Text mit Zeilenumbruch auf `stderr`."
-message(text) = (println(stderr, text); flush(stderr); nothing)
+message(text) = (io = SimLev.RParallel.r_stderr(); println(io, text); flush(io); nothing)
 
 """
     _match_arg(arg, choices)

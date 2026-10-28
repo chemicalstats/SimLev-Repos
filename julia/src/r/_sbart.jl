@@ -24,10 +24,11 @@ mutable struct _Bsplvb
     deltal::Vector{Float64}
     deltar::Vector{Float64}
 end
-const _BSPLVB = _Bsplvb(1, zeros(21), zeros(21))
+_Bsplvb() = _Bsplvb(1, zeros(21), zeros(21))
 
-function _bsplvb!(t, jhigh, index, x, left, biatx)
-    S = _BSPLVB
+# Der gespeicherte Zustand gilt nur innerhalb eines bsplvd-Aufrufs (index 1, dann 2);
+# er liegt deshalb beim Aufrufer statt global (thread-sicher für RParallel).
+function _bsplvb!(t, jhigh, index, x, left, biatx, S::_Bsplvb)
     if index != 2
         S.j = 1
         biatx[1] = 1.0
@@ -61,7 +62,8 @@ function bsplvd(t, k::Int, x::Float64, left::Int, nderiv::Int)
     kp1 = k + 1
     db = zeros(k * max(nderiv, 1) + 1)
     col1 = zeros(k + 2)
-    _bsplvb!(t, kp1 - mhigh, 1, x, left, col1)
+    S = _Bsplvb()
+    _bsplvb!(t, kp1 - mhigh, 1, x, left, col1, S)
     for i in 1:k
         db[i] = col1[i]
     end
@@ -74,7 +76,7 @@ function bsplvd(t, k::Int, x::Float64, left::Int, nderiv::Int)
             jp1mid += 1
         end
         ideriv -= 1
-        _bsplvb!(t, kp1 - ideriv, 2, x, left, col1)
+        _bsplvb!(t, kp1 - ideriv, 2, x, left, col1, S)
     end
     for i in 1:k
         db[_Dk(k, i, 1)] = col1[i]
@@ -595,7 +597,7 @@ function sbart(penalt, dofoff, xs, ys, ws0, ssw, n, knot, nk, icrit, spar, ispar
         fu = critv
         tracing && _cprint("%11g %12g\n", lsp, CRIT(fu))
         if !isfinite(fu)
-            print(stderr, SimLev.r_sprintf("spar-finding: non-finite value %g; using BIG value\n", fu))
+            print(SimLev.RParallel.r_stderr(), SimLev.r_sprintf("spar-finding: non-finite value %g; using BIG value\n", fu))
             fu = 2.0 * _BIG_f
         end
         if fu <= fx

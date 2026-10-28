@@ -2,9 +2,10 @@
 # (die Engine simulation() zusätzlich über golden/cases und golden/extra) und die
 # nachgebauten R-Interna.
 #
-# Ein Fall ist eine gzip-komprimierte JSON-Datei mit
+# Ein Fall ist eine gzip-komprimierte JSON-Datei <modul>/<id>.json.gz mit
 #   id, module          Kennung
-#   inputs              benannte Eingabeobjekte (als Baum, s. enc())
+#   inputs              benannte Eingabeobjekte (als Baum, s. enc(), oder als Verweis
+#                       {"t": "ref", "k": <schlüssel>} auf den Eingabespeicher)
 #   r                   R-Code, der das Ergebnis liefert (letzter Ausdruck)
 #   py                  Python-Code, der `result = ...` setzt
 #   jl                  Julia-Code, der `result = ...` setzt (optional)
@@ -16,6 +17,15 @@
 #   sys_time            (optional) feste Uhrzeit as.numeric(Sys.time()) während des
 #                       Aufrufs, als Text ("%.17g"); die Harnesses setzen dann
 #                       SIMLEV_R_SYS_TIME (z. B. für Rsolnp::gosolnp mit rseed = NULL)
+#
+# Eingabespeicher (Format 2): Eingaben, deren kanonische JSON-Form (der Text, den
+# toJSON() unten für sie schreibt: kompakt, UTF-8) mindestens .REF_INLINE_MAX Bytes
+# lang ist, stehen einmal je Modul in <modul>/_inputs.json.gz:
+#   {"format": 2, "module": <modul>, "inputs": {<schlüssel>: <baum>, ...}}
+# Schlüssel = MD5-Prüfsumme (hex) der kanonischen Form, sortiert. Kleinere Eingaben
+# bleiben im Fall. ref_done() (oder das nächste ref_init()) schreibt den Speicher.
+# golden/tools/convert_format.py stellt Fälle im Format 1 (Eingaben vollständig im
+# Fall) mit demselben Ergebnis um.
 #
 # Baumformat (enc): jedes Objekt ist eine Liste mit Typ `t`:
 #   null | num | int | lgl | chr | date | list | df | mat | skip
@@ -32,12 +42,47 @@ suppressMessages({ library(SimLev); library(jsonlite) })
 
 .ref <- new.env()
 
+.REF_INLINE_MAX <- 256L    # kürzere Eingaben bleiben im Fall
+
 ref_init <- function(module, outdir = file.path("golden", "modules", module)) {
+  .ref_flush()
   dir.create(outdir, showWarnings = FALSE, recursive = TRUE)
-  old <- list.files(outdir, "\\.json\\.gz$", full.names = TRUE)
+  old <- list.files(outdir, "\\.json\\.gz$", full.names = TRUE)   # auch _inputs.json.gz
   if (length(old)) file.remove(old)
-  .ref$module <- module; .ref$outdir <- outdir; .ref$n <- 0L
+  .ref$module <- module; .ref$outdir <- outdir; .ref$n <- 0L; .ref$store <- list()
   invisible(outdir)
+}
+
+.ref_json <- function(x)
+  toJSON(x, digits = NA, auto_unbox = TRUE, null = "null", na = "null", always_decimal = FALSE)
+
+.ref_gz_write <- function(txt, f) {
+  writeLines(txt, f)
+  system2("gzip", c("-9", "-f", "-n", shQuote(f)))
+}
+
+# Eingabe (Baum) in den Speicher legen, falls groß genug; liefert Baum oder Verweis
+.ref_input <- function(tree) {
+  s <- enc2utf8(as.character(.ref_json(tree)))
+  if (nchar(s, type = "bytes") < .REF_INLINE_MAX) return(tree)
+  f <- tempfile(); on.exit(unlink(f))
+  writeBin(charToRaw(s), f)
+  k <- unname(tools::md5sum(f))
+  .ref$store[[k]] <- s
+  list(t = "ref", k = k)
+}
+
+# Eingabespeicher des laufenden Moduls schreiben (_inputs.json.gz)
+.ref_flush <- function() {
+  st <- .ref$store
+  if (length(st)) {
+    k <- sort(names(st), method = "radix")
+    txt <- paste0('{"format":2,"module":', .ref_json(.ref$module), ',"inputs":{',
+                  paste0('"', k, '":', unlist(st[k], use.names = FALSE), collapse = ","), "}}")
+    .ref_gz_write(txt, file.path(.ref$outdir, "_inputs.json"))
+  }
+  .ref$store <- list()
+  invisible(length(st))
 }
 
 .hx <- function(x) {
@@ -128,7 +173,7 @@ ref_case <- function(id, r, py, inputs = list(), print = NA, note = NULL, jl = N
                                         message = function(m) invokeRestart("muffleMessage")),
                     error = function(e) { err <<- conditionMessage(e); NULL }))
   case <- list(id = id, module = .ref$module, note = note,
-               inputs = lapply(inputs, enc), r = r, py = py)
+               inputs = lapply(inputs, function(x) .ref_input(enc(x))), r = r, py = py)
   if (!is.null(jl)) case$jl <- jl
   if (!is.null(sys_time)) case$sys_time <- sprintf("%.17g", sys_time)
   if (!is.null(err)) case$error <- err
@@ -143,11 +188,12 @@ ref_case <- function(id, r, py, inputs = list(), print = NA, note = NULL, jl = N
     }
   }
   case$warnings <- unique(warns)
-  f <- file.path(.ref$outdir, sprintf("%s.json", id))
-  writeLines(toJSON(case, digits = NA, auto_unbox = TRUE, null = "null", na = "null", always_decimal = FALSE), f)
-  system2("gzip", c("-9", "-f", "-n", shQuote(f)))
+  .ref_gz_write(.ref_json(case), file.path(.ref$outdir, sprintf("%s.json", id)))
   .ref$n <- .ref$n + 1L
   invisible(res)
 }
 
-ref_done <- function() cat(sprintf("%s: %d Fälle in %s\n", .ref$module, .ref$n, .ref$outdir))
+ref_done <- function() {
+  ns <- .ref_flush()
+  cat(sprintf("%s: %d Fälle, %d Eingaben im Speicher, in %s\n", .ref$module, .ref$n, ns, .ref$outdir))
+}

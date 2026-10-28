@@ -2,7 +2,9 @@
 
 Aufruf: python compare_reference.py [modul ...] [-k muster] [-v]
 
-Ohne Modulnamen werden alle Ordner unter ``golden/modules/`` geprüft.
+Ohne Modulnamen werden alle Ordner unter ``golden/modules/`` geprüft. Gelesen
+werden beide Formate der Fälle (Format 2 mit Eingabespeicher ``_inputs.json.gz``,
+s. ``golden/README.md``).
 """
 from __future__ import annotations
 
@@ -12,7 +14,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
-from simlev._r.reftree import load_case, run_case  # noqa: E402
+from simlev._r.reftree import list_cases, load_case, run_case  # noqa: E402
 
 ROOT = os.path.join(HERE, "..", "..", "golden", "modules")
 
@@ -28,7 +30,7 @@ def main(argv=None):
     tot_ok = tot = 0
     for m in mods:
         d = os.path.join(a.dir, m)
-        files = sorted(f for f in os.listdir(d) if f.endswith(".json.gz") or f.endswith(".json"))
+        files = list_cases(d)
         if a.k:
             files = [f for f in files if a.k in f]
         ok = 0

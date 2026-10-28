@@ -3,6 +3,9 @@
 # Der Zustand ist global wie `.Random.seed` in R: `set_seed` entspricht
 # `set.seed()`, `get_random_seed`/`set_random_seed`/`rm_random_seed` dem
 # Lesen, Zuweisen und Löschen von `.Random.seed` im globalen Environment.
+# Eine Aufgabe von `RParallel.par_lapply` rechnet mit einer eigenen Kopie
+# (`TaskState` im task-lokalen Speicher, `with_state`); alle Zugriffe gehen
+# deshalb über `_st()`, `_rg()` und `_rp()`.
 # Unterstützt: Generatoren "Mersenne-Twister" (Voreinstellung) und
 # "L'Ecuyer-CMRG", Normalverteilung "Inversion", Stichprobenarten "Rejection"
 # (Voreinstellung) und "Rounding"; Funktionen runif, rnorm, rexp, rgamma,
@@ -53,7 +56,7 @@ mutable struct RandomState
 end
 RandomState() = RandomState(MERSENNE_TWISTER, INVERSION, REJECTION, false, zeros(UInt32, _N), _N + 1, zeros(Int64, 6))
 
-const _S = RandomState()
+const _S = RandomState()          # Zustand außerhalb von par_lapply-Aufgaben
 
 # Zustand beim Laden zurücksetzen (wie ein frischer R-Prozess ohne
 # .Random.seed), auch wenn beim Vorkompilieren Zufallszahlen gezogen wurden.
@@ -67,7 +70,7 @@ end
 
 # ── Mersenne-Twister ───────────────────────────────────────────────────────
 
-function _mt_sgenrand(seed::UInt32)
+function _mt_sgenrand(seed::UInt32, _S::RandomState = _st())
     mt = _S.mt
     @inbounds for i in 1:_N
         v = seed & 0xffff0000
@@ -79,7 +82,7 @@ function _mt_sgenrand(seed::UInt32)
     _S.mti = _N
 end
 
-function _mt_twist()
+function _mt_twist(_S::RandomState = _st())
     mt = _S.mt
     @inbounds begin
         for kk in 1:(_N-_MM)
@@ -97,10 +100,10 @@ function _mt_twist()
 end
 
 "`fixup(MT_genrand())`."
-@inline function _mt_one()
+@inline function _mt_one(_S::RandomState = _st())
     if _S.mti >= _N
-        _S.mti == _N + 1 && _mt_sgenrand(UInt32(4357))
-        _mt_twist()
+        _S.mti == _N + 1 && _mt_sgenrand(UInt32(4357), _S)
+        _mt_twist(_S)
     end
     @inbounds y = _S.mt[_S.mti+1]
     _S.mti += 1
@@ -114,7 +117,7 @@ end
 
 # ── L'Ecuyer-CMRG ──────────────────────────────────────────────────────────
 
-@inline function _lec_one()
+@inline function _lec_one(_S::RandomState = _st())
     s = _S.lec
     @inbounds begin
         p1 = 1403580 * s[2] - 810728 * s[1]
@@ -146,6 +149,7 @@ end
 _lcg(s::UInt32) = 0x00010dcd * s + 0x00000001
 
 function _rng_init(kind::Int, seed::UInt32)
+    _S = _st()
     for _ in 1:50
         seed = _lcg(seed)
     end
@@ -175,6 +179,7 @@ _randomize(kind) = _rng_init(kind, _time_seed())
 
 "GetRNGstate(): ohne .Random.seed zufällig initialisieren."
 function _get_state()
+    _S = _st()
     if !_S.exists
         _randomize(_S.kind)
         _S.exists = true
@@ -187,10 +192,11 @@ end
 _to_int32(u::Integer) = reinterpret(Int32, UInt32(u & 0xFFFFFFFF))
 
 "`exists(\".Random.seed\", globalenv())`."
-has_random_seed() = _S.exists
+has_random_seed() = _st().exists
 
 "Kopie von `.Random.seed` (`Vector{Int32}`) oder `nothing`."
 function get_random_seed()
+    _S = _st()
     _S.exists || return nothing
     code = _S.kind + 100 * _S.n01 + 10000 * _S.sample
     if _S.kind == MERSENNE_TWISTER
@@ -213,6 +219,7 @@ function set_random_seed(seed)
     n01 = Int(tmp % 10000 ÷ 100)
     smp = Int(tmp ÷ 10000)
     kind in (MERSENNE_TWISTER, LECUYER_CMRG) || error("RNG-Art $kind ist nicht portiert")
+    _S = _st()
     _S.kind, _S.n01, _S.sample = kind, n01, smp
     _S.exists = true
     if length(s) == 1
@@ -239,7 +246,7 @@ function set_random_seed(seed)
 end
 
 "`rm(\".Random.seed\", envir = globalenv())`."
-rm_random_seed() = (_S.exists = false; nothing)
+rm_random_seed() = (_st().exists = false; nothing)
 
 # ── set.seed / RNGkind ───────────────────────────────────────────────────
 
@@ -265,20 +272,20 @@ function _set_kind(newkind::Int)
     else
         _rng_init(newkind, UInt32(trunc(UInt64, u * 4294967295.0) & 0xFFFFFFFF))
     end
-    _S.kind = newkind
+    _st().kind = newkind
 end
 
 function _set_n01(kind::Int)
     kind == -1 && (kind = INVERSION)
     kind == INVERSION || error("Normalverteilungsart $(_N01_NAMES[kind+1]) ist nicht portiert")
     _get_state()
-    _S.n01 = kind
+    _st().n01 = kind
 end
 
 function _set_sample(kind::Int)
     kind == -1 && (kind = REJECTION)
     _get_state()
-    _S.sample = kind
+    _st().sample = kind
 end
 
 function _apply_kinds(kind, normal_kind, sample_kind)
@@ -295,6 +302,7 @@ end
 function rng_kind(kind_ = nothing, normal_kind_ = nothing, sample_kind_ = nothing;
                   kind = kind_, normal_kind = normal_kind_, sample_kind = sample_kind_)
     _get_state()
+    _S = _st()
     old = [_KIND_NAMES[_S.kind+1], _N01_NAMES[_S.n01+1], _SAMPLE_NAMES[_S.sample+1]]
     _apply_kinds(kind, normal_kind, sample_kind)
     return old
@@ -317,6 +325,7 @@ function set_seed(seed, kind_ = nothing, normal_kind_ = nothing, sample_kind_ = 
         sd = UInt32(si & 0xFFFFFFFF)
     end
     _apply_kinds(kind, normal_kind, sample_kind)
+    _S = _st()
     _rng_init(_S.kind, sd)
     _S.exists = true
     nothing
@@ -363,7 +372,7 @@ next_rng_substream(seed) = _advance(seed, _A1p76, _A2p76)
 # ── Grundgeneratoren ─────────────────────────────────────────────────────
 
 "`unif_rand()` (ohne GetRNGstate – Aufrufer sorgt für Zustand)."
-@inline unif_rand() = _S.kind == MERSENNE_TWISTER ? _mt_one() : _lec_one()
+@inline unif_rand() = (S = _st(); S.kind == MERSENNE_TWISTER ? _mt_one(S) : _lec_one(S))
 
 "`norm_rand()` mit N01_kind = Inversion."
 @inline function norm_rand()
@@ -420,7 +429,7 @@ end
 "`R_unif_index(dn)`: ganze Zahl in [0, dn) (als Float64)."
 function unif_index(dn::Real)
     dn = Float64(dn)
-    _S.sample == ROUNDING && return floor(dn * unif_rand())
+    _st().sample == ROUNDING && return floor(dn * unif_rand())
     dn <= 0 && return 0.0
     bits = unsafe_trunc(Int, ceil(SimLev.RLibm.c_log2(dn)))
     while true
@@ -477,7 +486,7 @@ function rgamma1(a::Real, scale::Real)
     exp_m1 = 0.36787944117144232159
     q1, q2, q3, q4, q5, q6, q7 = 0.04166669, 0.02083148, 0.00801191, 0.00144121, -7.388e-5, 2.4511e-4, 2.424e-4
     a1, a2, a3, a4, a5, a6, a7 = 0.3333333, -0.250003, 0.2000062, -0.1662921, 0.1423657, -0.1367177, 0.1233795
-    st = _RG
+    st = _rg()
     (isnan(a) || isnan(scale)) && return NaN
     if a <= 0.0 || scale <= 0.0
         (scale == 0.0 || a == 0.0) && return 0.0
@@ -594,7 +603,7 @@ function rpois1(mu::Real)
     mu = Float64(mu)
     a0, a1, a2, a3, a4, a5, a6, a7 = -0.5, 0.3333333, -0.2500068, 0.2000118, -0.1661269, 0.1421878, -0.1384794, 0.1250060
     one_7, one_12, one_24 = 0.1428571428571428571, 0.0833333333333333333, 0.0416666666666666667
-    st = _RP
+    st = _rp()
     pp = st.pp                     # pp[k] in C ↔ pp[k+1] hier
     difmuk = 0.0; E = 0.0; fk = 0.0; u = 0.0; pois = -1.0
     new_big_mu = false
@@ -784,9 +793,10 @@ function runif(n, min_ = 0.0, max_ = 1.0; min = min_, max = max_)
             _get_state()
             out = Vector{Float64}(undef, nn)
             d = hi - lo
-            if _S.kind == MERSENNE_TWISTER
+            S = _st()
+            if S.kind == MERSENNE_TWISTER
                 @inbounds for i in 1:nn
-                    out[i] = lo + d * _mt_one()     # MT: stets 0 < u < 1
+                    out[i] = lo + d * _mt_one(S)    # MT: stets 0 < u < 1
                 end
             else
                 @inbounds for i in 1:nn
@@ -1031,7 +1041,7 @@ function _walker(n::Int, p::Vector{Float64}, nans::Int)
     end
     out = Vector{Int}(undef, nans)
     for t in 1:nans
-        if _S.sample == ROUNDING
+        if _st().sample == ROUNDING
             rU = unif_rand() * n
             k = unsafe_trunc(Int, rU)
         else
@@ -1057,5 +1067,37 @@ function sample(x, size_ = nothing, replace_ = false, prob_ = nothing;
     idx = sample_int(length(xa); size = size, replace = replace, prob = prob)
     return xa[idx]
 end
+
+# ── Zustand je Aufgabe (RParallel) ──────────────────────────────────────
+
+"Zufallszustand einer Aufgabe: Generator samt den statischen Werten von rgamma und rpois."
+struct TaskState
+    S::RandomState
+    RG::_RGState
+    RP::_RPState
+end
+
+const _TLS_KEY = :SimLev_RRng_state
+
+@inline function _task_state()
+    tls = current_task().storage
+    tls === nothing && return nothing
+    return get(tls::IdDict{Any,Any}, _TLS_KEY, nothing)
+end
+"Aktueller Generatorzustand: der der Aufgabe (`with_state`), sonst der globale."
+@inline _st() = (t = _task_state(); t === nothing ? _S : (t::TaskState).S)
+@inline _rg() = (t = _task_state(); t === nothing ? _RG : (t::TaskState).RG)
+@inline _rp() = (t = _task_state(); t === nothing ? _RP : (t::TaskState).RP)
+
+_copy(s::RandomState) = RandomState(s.kind, s.n01, s.sample, s.exists, copy(s.mt), s.mti, copy(s.lec))
+_copy(g::_RGState) = _RGState(g.aa, g.aaa, g.s, g.s2, g.d, g.q0, g.b, g.si, g.c)
+_copy(r::_RPState) = _RPState(r.l, r.m, r.b1, r.b2, r.c, r.c0, r.c1, r.c2, r.c3, copy(r.pp), r.p0, r.p, r.q, r.s,
+                              r.d, r.omega, r.big_l, r.muprev, r.muprev2)
+
+"Unabhängige Kopie des aktuellen Zustands (`.Random.seed`, RNGkind, rgamma/rpois)."
+copy_state() = TaskState(_copy(_st()), _copy(_rg()), _copy(_rp()))
+
+"`f()` mit dem Zustand `st` als Zufallszustand der laufenden Aufgabe."
+with_state(f, st::TaskState) = task_local_storage(f, _TLS_KEY, st)
 
 end # module

@@ -31,9 +31,12 @@ mutable struct _CollState
 end
 
 const _COLL = _CollState(false, :bytes, C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, false)
+# Einmalige Einrichtung unter Sperre: Aufgaben von RParallel.par_lapply dürfen
+# erst vergleichen, wenn der Zustand vollständig ist (`init` wird zuletzt gesetzt).
+const _COLL_LOCK = ReentrantLock()
 
 function _env_collate_locale()
-    sc = get(ENV, "SIMLEV_COLLATE", "")
+    sc = SimLev.REnv.collate()
     # ICU mit festem Locale, unabhängig von LC_ALL (z. B. "icu:root" wie R unter C.UTF-8)
     startswith(lowercase(sc), "icu:") && return false, (length(sc) > 4 ? sc[5:end] : "root")
     envl = get(ENV, "LC_ALL", "")
@@ -51,7 +54,7 @@ end
 
 function _icu_candidates()
     cands = String[]
-    env = get(ENV, "SIMLEV_ICU", "")
+    env = SimLev.REnv.icu_path()
     isempty(env) || push!(cands, env)
     for d in ("/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu",
               "/usr/lib64", "/usr/lib", "/usr/local/lib", "/opt/homebrew/opt/icu4c/lib", "/usr/local/opt/icu4c/lib")
@@ -86,9 +89,17 @@ _sym(h, nm, suf) = something(Libc.Libdl.dlsym(h, Symbol(nm * suf); throw_error =
 function _collate_init!()
     S = _COLL
     S.init && return S
-    S.init = true
+    return lock(_COLL_LOCK) do
+        S.init && return S
+        _collate_setup!(S)
+        S.init = true
+        S
+    end
+end
+
+function _collate_setup!(S::_CollState)
     S.mode = :bytes
-    sc = uppercase(get(ENV, "SIMLEV_COLLATE", ""))
+    sc = uppercase(SimLev.REnv.collate())
     sc in ("C", "POSIX", "BYTES") && return S
     use_c, loc = _env_collate_locale()
     (use_c || loc in ("C", "POSIX")) && return S
@@ -128,11 +139,13 @@ end
 "Liest SIMLEV_COLLATE/SIMLEV_ICU/Locale-Variablen beim nächsten Vergleich neu ein."
 function collate_reset()
     S = _COLL
+    lock(_COLL_LOCK)
     if S.init && S.coll != C_NULL && S.f_close != C_NULL
         ccall(S.f_close, Cvoid, (Ptr{Cvoid},), S.coll)
     end
     S.init = false; S.mode = :bytes; S.coll = C_NULL; S.warned = false
     S.f_cmp8 = S.f_cmp16 = S.f_key = S.f_loc = S.f_close = C_NULL
+    unlock(_COLL_LOCK)
     return nothing
 end
 

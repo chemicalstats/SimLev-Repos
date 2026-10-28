@@ -255,7 +255,7 @@ end
 @isdefined(read_case) || include(joinpath(@__DIR__, "golden_tools.jl"))
 @isdefined(decode) || include(joinpath(@__DIR__, "reftree.jl"))
 function _plot_case_obj(case, var = "result")
-    c = Base.invokelatest(read_case, joinpath(@__DIR__, "..", "..", "golden", "modules", case * ".json.gz"))
+    c = Base.invokelatest(read_ref_case, joinpath(@__DIR__, "..", "..", "golden", "modules", case * ".json.gz"))
     m = Module(:PlotCase)
     Core.eval(m, :(using SimLev, Dates))
     Core.eval(m, :(const SL = SimLev))

@@ -26,11 +26,11 @@ import ctypes
 import warnings
 import ctypes.util
 import math
-import os
 
 import numpy as np
 
 from . import _blas as B
+from . import env as _env
 
 __all__ = ["dlamch", "dpotrf", "dpotrf2", "dgetrf", "dgetrf2", "dlaswp", "dgetrs", "dgesv",
            "dlange", "dgecon", "dlatrs", "dpotri", "dtrtri", "dlauum", "dlansy", "dsytrd",
@@ -1278,7 +1278,7 @@ def system_lapack():
     if _SYS["lib"] is not False:
         return _SYS["lib"]
     cands = []
-    env = os.environ.get("SIMLEV_LAPACK")
+    env = _env.lapack_path()
     if env:
         cands.append(env)
     cands += ["/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3",

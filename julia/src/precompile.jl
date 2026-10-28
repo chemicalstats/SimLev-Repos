@@ -1,11 +1,19 @@
 # Kleine Arbeitslast beim Vorkompilieren: Maschinencode für die Engine und die
-# wichtigsten Erweiterungsfunktionen – für die hier benutzten Argumenttypen –
+# häufigen Wege der Erweiterungen – für die hier benutzten Argumenttypen –
 # landet im Paket-Cache. Das verkürzt den ersten Aufruf von simulation(),
-# bootstrap(), withdrawal_simulation(), portfolio_optimize(), deep_analysis(),
-# param_search() usw. deutlich, macht ihn aber nicht so schnell wie spätere
+# bootstrap() (stationär, GARCH über den rugarch-Weg), bootstrap_study(),
+# der MS-GARCH-Schätzung, withdrawal_simulation(), portfolio_optimize() und
+# deep_analysis() deutlich, macht ihn aber nicht so schnell wie spätere
 # Aufrufe: Laden des Caches, Laufzeit-Dispatch und Methoden für andere
 # Argumenttypen (oder Pfade, die die Arbeitslast nicht berührt) kosten beim
 # ersten Aufruf weiterhin Übersetzungszeit.
+#
+# Auswahl (Etappe 4.8): Jeder Baustein kostet bei jeder Änderung am Paket
+# Vorkompilierzeit. Seltene Wege (param_search/Überanpassung,
+# dependence_analysis, Szenarien, Sensitivitäten, Taktik, Planung,
+# align_series) übersetzt erst ihr erster Aufruf; dafür sind rugarch
+# (bootstrap "garch") und MS-GARCH (_ms_garch_fit) aufgenommen, deren erster
+# Lauf sonst 10 bzw. 6 s dauerte.
 #
 # Die Arbeitslast verändert den Laufzeitzustand nicht: Der Zufallszustand
 # (`RRng`) wird am Ende auf den Ausgangszustand zurückgesetzt (wie in
@@ -52,6 +60,14 @@ function _precompile_ext(; strict::Bool = false)
             sh(stv); sh(r_summary(stv))
             sh(Bootstrap.bootstrap_probability(stv, "cagr > 0 & max_drawdown < 0.5"))
         end
+        # GARCH über den rugarch-Weg (bootstrap "garch") und MS-GARCH-Schätzung
+        step("garch") do
+            cfg = Bootstrap.bootstrap_config((akt = "A",); input = "prices")
+            sh(Bootstrap.bootstrap(d, cfg, "garch"; n = 2, path_length = 200, seed = 1, progress = false))
+        end
+        step("ms_garch") do
+            MsGarch._ms_garch_fit(rb[1:300], 2, "gjrGARCH")
+        end
         # Withdrawal
         step("withdrawal") do
             R = reshape([1.0 + 0.05 * sin(i) for i in 1:60], 20, 3)
@@ -72,41 +88,6 @@ function _precompile_ext(; strict::Bool = false)
             x1 = RFrame("date" => dates, "value" => A)
             sh(DeepAnalysis.deep_analysis(RList("X" => x1, "Y" => RFrame("date" => dates, "value" => B));
                                           benchmark = "X", rolling_years = 1))
-        end
-        # Parametersuche, Overfitting
-        step("param_search") do
-            sts = create_strategy("A" => asset_config("etf", "signal"; signal_buy = "buy", signal_sell = "sell"))
-            b(p) = RList("strategy" => sts, "signal" => df -> Signals.signal_sma(df["A"]; n = p["n"], band = p["band"]))
-            ps = ParamSearch.param_search(d, b, ParamSearch.param_space(n = [10.0, 40.0], band = [0.0, 2.0]); burn_in = 50)
-            sh(ps)
-            sh(Overfitting.deflated_sharpe(ps))
-            sh(Overfitting.pbo(ps; S = 4))
-        end
-        # Abhängigkeiten, Szenarien, Regime
-        step("dependence") do
-            sh(Dependence.dependence_analysis(d, ["A", "B", "C"]; conditions = ["infl"], B = 9, seed = 1, dcc = false))
-            sh(Dependence.regime_subset(d, "infl > 2 & !zins > 1"))
-        end
-        step("scenarios") do
-            sh(Scenarios.entropy_pooling(d, ["A", "B"], [Scenarios.view_mean("A", -0.3), Scenarios.view_prob("A < -1 & B > 0", 0.2)]))
-        end
-        # Sensitivität, Taktik, Planung
-        step("sensitivity") do
-            sh(Sensitivity.leverage_sensitivity(d, "A"; leverages = [1, 2], rate = 2))
-        end
-        step("tactical") do
-            w = Tactical.tactical_rules(d, [RList("when" => "A > B", "weights" => named("A" => 1))], named("C" => 1))
-            sh(w)
-            res = Tactical.tactical_simulation(d, w)
-            sh(res)
-            sh(Tactical.tactical_rotation(d, ["A", "B"]; top = 1, safe = "C"))
-        end
-        step("planning") do
-            sh(Planning.goal_optimize(hcat(ra, rb, rc)[1:30, :] .+ 1, 100, 110, 1; n_grid = 4, n_sim = 20, seed = 6))
-        end
-        step("data_prep") do
-            DataPrep.align_series(us = RFrame("date" => dates[1:50], "value" => A[1:50]),
-                                  eu = RFrame("date" => dates[10:60], "value" => B[10:60]))
         end
     finally
         # Zufallszustand und Zwischenspeicher wie vorher
@@ -169,14 +150,14 @@ function _precompile_reset()
     return nothing
 end
 
-if ccall(:jl_generating_output, Cint, ()) == 1 && get(ENV, "SIMLEV_SKIP_PRECOMPILE", "0") != "1"
+if ccall(:jl_generating_output, Cint, ()) == 1 && !REnv.skip_precompile()
     try
         Base.CoreLogging.with_logger(Base.CoreLogging.NullLogger()) do; redirect_stderr(devnull) do
             try
                 _precompile_engine()
             catch
             end
-            get(ENV, "SIMLEV_SKIP_PRECOMPILE_EXT", "0") == "1" || _precompile_ext()
+            REnv.skip_precompile_ext() || _precompile_ext()
         end; end
     catch
         # Fehler in der Arbeitslast (auch beim Umleiten von stderr) verhindern das Laden nie

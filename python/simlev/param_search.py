@@ -29,6 +29,7 @@ from ._r import fmt as _fmt
 from ._r import libm as _libm
 from ._r.rlist import RList
 from ._r.rnum import r_mean
+from ._r.parallel import par_lapply as _par_lapply
 from .svg import (_res_fig, _res_finish, _res_line, _res_panel, _res_points, _res_ramp, _res_range, _res_rect,
                   _res_text, _res_tx, _res_ty)
 
@@ -571,8 +572,7 @@ def param_search(data, builder=None, space=None, strategy=None, method=("grid", 
             out["date"] = np.asarray(ix["date"]).astype("datetime64[D]")
             out["ret"] = v[1:] / v[:-1] - 1
         return out
-    par_lapply = _ext("bootstrap", "_par_lapply")
-    out = list(par_lapply(list(range(len(design))), run, cores))
+    out = list(_par_lapply(list(range(len(design))), run, cores))
     okm = [o for o in out if o["m"] is not None]
     if not okm:
         raise ValueError("param_search: alle Punkte fehlgeschlagen, z. B.: %s" % out[0]["err"])
@@ -939,3 +939,21 @@ SimLevParamSearch.plot = _plot_method(_plot_param_search, "SimLevParamSearch")
 from ._r.base import quiet_fp  # noqa: E402
 
 quiet_fp(globals(), list(__all__) + ["_as_spec", "_ps_design", "_ps_levels", "_ps_map", "_ps_neighbours"])
+
+
+def _make_callable():
+    """Macht dieses Modul aufrufbar wie die gleichnamige Funktion (``simlev.param_search(...)`` wie in R;
+    ``simlev.param_search.<name>`` und ``import simlev.param_search`` erreichen weiter das Modul). Steht hier statt
+    in ``__init__.py``, weil das Modul erst bei Bedarf geladen wird (PEP 562)."""
+    import sys
+    import types
+
+    class _CallableModule(types.ModuleType):
+        def __call__(self, *args, **kwargs):
+            return getattr(self, "param_search")(*args, **kwargs)
+
+    sys.modules[__name__].__class__ = _CallableModule
+
+
+_make_callable()
+del _make_callable

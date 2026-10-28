@@ -29,6 +29,8 @@ import os
 import re
 import warnings
 
+from . import env as _env
+
 __all__ = ["str_collate", "collate_key", "collate_mode", "collate_reset", "r_key"]
 
 _ST = {"init": False, "mode": None, "coll": None, "lib": None, "f": {}, "warned": False}
@@ -36,7 +38,7 @@ _ST = {"init": False, "mode": None, "coll": None, "lib": None, "f": {}, "warned"
 
 def _env_collate_locale():
     """(useC, locale) wie R's ``Scollate``/``getLocale`` auf Unix."""
-    sc = os.environ.get("SIMLEV_COLLATE", "")
+    sc = _env.collate()
     if sc.lower().startswith("icu:"):          # ICU mit festem Locale, unabhängig von LC_ALL
         return False, sc[4:] or "root"
     envl = os.environ.get("LC_ALL") or os.environ.get("LC_COLLATE") or ""
@@ -51,7 +53,7 @@ def _env_collate_locale():
 
 def _icu_candidates():
     cands = []
-    env = os.environ.get("SIMLEV_ICU")
+    env = _env.icu_path()
     if env:
         cands.append(env)
     for d in ("/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu",
@@ -136,7 +138,7 @@ def _init():
     if _ST["init"]:
         return
     _ST["init"] = True
-    sc = os.environ.get("SIMLEV_COLLATE", "")
+    sc = _env.collate()
     if sc.upper() in ("C", "POSIX", "BYTES"):
         _ST["mode"] = "bytes"
         return

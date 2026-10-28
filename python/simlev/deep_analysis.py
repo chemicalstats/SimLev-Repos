@@ -1170,3 +1170,21 @@ SimLevAnalysis.plot = _plot_method(_plot_analysis, "SimLevAnalysis")
 from ._r.base import quiet_fp  # noqa: E402
 
 quiet_fp(globals(), __all__ + ["_da_drawdowns", "_da_rf", "_without_filled"])
+
+
+def _make_callable():
+    """Macht dieses Modul aufrufbar wie die gleichnamige Funktion (``simlev.deep_analysis(...)`` wie in R;
+    ``simlev.deep_analysis.<name>`` und ``import simlev.deep_analysis`` erreichen weiter das Modul). Steht hier statt
+    in ``__init__.py``, weil das Modul erst bei Bedarf geladen wird (PEP 562)."""
+    import sys
+    import types
+
+    class _CallableModule(types.ModuleType):
+        def __call__(self, *args, **kwargs):
+            return getattr(self, "deep_analysis")(*args, **kwargs)
+
+    sys.modules[__name__].__class__ = _CallableModule
+
+
+_make_callable()
+del _make_callable

@@ -41,6 +41,7 @@ from . import _bootstrap_core as _core
 from ._r import fmt as _fmt
 from ._r.base import env_from_caller
 from ._r import libm as _libm
+from ._r import parallel as _par
 from ._r import rng as _rng
 from ._r.rlist import RList
 from ._r.rnum import r_cumprod, r_mean, r_median, r_pow, r_sd, r_sum, r_var
@@ -272,7 +273,7 @@ def _to_date(x, what="date"):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# RNG-Hilfen (.with_rng_restore, .make_streams, .par_lapply)
+# RNG-Hilfen (.with_rng_restore, .make_streams; .par_lapply in _r.parallel)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _with_rng_restore(fn, seed=_MISSING):
@@ -324,42 +325,8 @@ def _make_streams(seed, n):
                 _rng.rm_random_seed()
 
 
-def _rng_snapshot():
-    has = _rng.has_random_seed()
-    return (has, _rng.get_random_seed() if has else None, _rng._S.kind, _rng._S.n01, _rng._S.sample)
-
-
-def _rng_reset(snap):
-    has, seed, kind, n01, smp = snap
-    if has:
-        _rng.set_random_seed(seed)
-    else:
-        _rng._S.kind, _rng._S.n01, _rng._S.sample = kind, n01, smp
-        _rng.rm_random_seed()
-
-
-def _par_lapply(X, FUN, cores=1):
-    """Port von ``.par_lapply``: sequentiell, mit der Fork-Semantik von ``mclapply``.
-
-    Bei ``cores > 1`` und mehr als einem Element startet jedes Element mit dem
-    Zufallszustand des Aufrufers (``mc.set.seed = FALSE``); danach ist der
-    Zustand des Aufrufers unverändert. Warnungen aus den Elementen gehen dabei
-    wie in Kindprozessen verloren.
-    """
-    X = list(X)
-    if cores is None or cores <= 1 or len(X) <= 1:
-        return [FUN(x) for x in X]
-    snap = _rng_snapshot()
-    out = []
-    try:
-        for x in X:
-            _rng_reset(snap)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                out.append(FUN(x))
-    finally:
-        _rng_reset(snap)
-    return out
+# ``.par_lapply`` steht in Schicht 0 (``simlev._r.parallel``); dieser Name leitet weiter.
+_par_lapply = _par.par_lapply
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1500,7 +1467,7 @@ def bootstrap(data, config, method="raw", n=1000, params=None, ess=False, ess_gr
         progress: Fortschrittsmeldung (stderr).
         path_length: Pfadlänge in Zeilen (``None`` = Länge der Historie).
         seed: Startwert (``None`` = aus dem globalen Zufallsstrom gezogen).
-        cores: Anzahl Prozesse (Python rechnet sequentiell, Ergebnis identisch).
+        cores: Anzahl Prozesse (Fork wie R; ohne Fork sequentiell, Ergebnis identisch).
         max_tries: Versuche je Pfad (Standard 10).
 
     Returns:
@@ -2406,3 +2373,21 @@ SimLevBootstrapStudy.plot = _plot_method(_plot_study, "SimLevBootstrapStudy")
 from ._r.base import quiet_fp  # noqa: E402
 
 quiet_fp(globals(), list(__all__) + ["_calculate_ess", "_ess_design", "_extract_returns", "_fit_garch11", "_fit_tail", "_get_base_params", "_get_ess_grid", "_letf_returns", "_make_streams", "_prepare_regime_info", "_pw_block", "_wquantile"])  # bootstrap_probability: env aus dem Aufrufer (env_from_caller)
+
+
+def _make_callable():
+    """Macht dieses Modul aufrufbar wie die gleichnamige Funktion (``simlev.bootstrap(...)`` wie in R;
+    ``simlev.bootstrap.<name>`` und ``import simlev.bootstrap`` erreichen weiter das Modul). Steht hier statt
+    in ``__init__.py``, weil das Modul erst bei Bedarf geladen wird (PEP 562)."""
+    import sys
+    import types
+
+    class _CallableModule(types.ModuleType):
+        def __call__(self, *args, **kwargs):
+            return getattr(self, "bootstrap")(*args, **kwargs)
+
+    sys.modules[__name__].__class__ = _CallableModule
+
+
+_make_callable()
+del _make_callable

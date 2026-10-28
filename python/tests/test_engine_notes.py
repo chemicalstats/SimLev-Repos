@@ -304,61 +304,13 @@ def test_e_details_tarifrechnung():
 
 
 # ── B undefined_metrics ─────────────────────────────────────────────────────
-def r405(**kw):
-    d = days("2020-01-01", "2021-06-30")
-    df = pd.DataFrame({"date": d, "G": np.where(d < D("2020-06-01"), 100.0, 150.0),
-                       "H": np.where(d < D("2020-10-01"), 50.0, 1.0)})
-    df["ev"] = d == D("2020-07-01")
-    df["wG"] = 0.0
-    df["wH"] = 1.0
-    st = create_strategy(G=asset_config("etc", "bnh", asset_share=0.5, asset_spread=0, deliverable=True),
-                         H=asset_config("certificate", "bnh", asset_share=0.5, asset_spread=0))
-    return sim_warn(df, st, start_value=1e4, tax_mode="person", marginal_tax_rate=42, event_col="ev",
-                    event_mode="replace", event_weight={"G": "wG", "H": "wH"}, **kw)
-
-
+# Negativer Endwert mit offener Steuerschuld (R: "B negative_end_value"), nonpositive_twr_index
+# mit no_recovery und no_irr_solution prüfen die Referenzfälle golden/modules/engine/um01–um04
+# (gleiche Daten, Strategie und Argumente; Ergebnis, Warnungen, print und summary bitgleich).
 def um(r, m, field="reason"):
     u = r.undefined_metrics
     v = u.loc[u.metric == m, field]
     return v.iloc[0] if len(v) else None
-
-
-def test_b_negative_end_value():
-    r, w = r405()
-    assert r.worth[-1] == E(-800)
-    assert np.isnan(r.cagr) and np.isnan(r.ttwror)
-    assert r.tax_report["open_tax_debt"] == E(800)
-    assert um(r, "cagr") == "negative_end_value"
-    assert um(r, "cagr", "detail") == "Endwert -800.00 EUR negativ: offene Steuerschuld 800.00 EUR"
-    assert um(r, "ttwror") == "negative_end_value" and um(r, "calmar") == "negative_end_value"
-    assert um(r, "calmar", "detail").startswith("cagr nicht definiert: Endwert -800.00 EUR")
-    assert any("Endwert negativ (-800.00 EUR, offene Steuerschuld 800.00 EUR)" in x for x in w)
-    out = str(r).splitlines()
-    assert any("CAGR:             nicht definiert (Endwert -800.00 EUR negativ: offene Steuerschuld 800.00 EUR)" in ln
-               for ln in out)
-    assert any("  Steuerschuld:     800.00 EUR (offen, nicht gedeckt)" in ln for ln in out)
-    assert not any("NA" in ln for ln in out)
-    out_s = str(simlev.summary(r)).splitlines()
-    assert any("TTWROR:           nicht definiert (Endwert -800.00 EUR negativ" in ln for ln in out_s)
-
-
-def test_b_nonpositive_twr_und_no_recovery():
-    r, _ = r405(dca_mode=True, dca_value=1000, dca_span=1, dca_start="2021-03-01")
-    assert r.worth[-1] > 0 and np.isnan(r.ttwror)
-    assert um(r, "ttwror") == "nonpositive_twr_index"
-    assert "Wertindex am 2021-01-01 nicht positiv" in um(r, "ttwror", "detail")
-    assert um(r, "avg_recovery_time") == "no_recovery"
-    assert "nicht aufgeholt" in um(r, "avg_recovery_time", "detail")
-
-
-def test_b_no_irr_solution():
-    r, w = r405(dca_mode=True, dca_value=1000, dca_span=1, dca_days=30, dca_start="2021-06-01")
-    assert r.worth[-1] == E(200) and np.isnan(r.cagr)
-    assert um(r, "cagr") == "no_irr_solution"
-    assert um(r, "cagr", "detail") == ("kein interner Zinsfuß: Startwert 10000.00 EUR, Einzahlungen 1000.00 EUR, "
-                                       "Endwert 200.00 EUR")
-    assert any("kein interner Zinsfuß gefunden" in x for x in w)
-    assert any("CAGR:             nicht definiert (kein interner Zinsfuß" in ln for ln in str(r).splitlines())
 
 
 def test_b_too_short():

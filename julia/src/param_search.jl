@@ -301,11 +301,8 @@ function _run_spec(df, sp, sim_args, burn_in)
     return OF._quiet(() -> SL.simulation(df, st; kw...))
 end
 
-"`.par_lapply(X, FUN, cores)`."
-function _par_lapply(X, f, cores)
-    (cores <= 1 || length(X) <= 1) && return Any[f(x) for x in X]
-    return collect(Any, SL.Bootstrap._par_lapply(collect(X), f, cores))
-end
+"`.par_lapply(X, FUN, cores)` (Schicht 0: `SimLev.RParallel.par_lapply`)."
+_par_lapply(X, f, cores) = SL.RParallel.par_lapply(X, f, cores)
 
 "`.with_rng_restore(expr, seed = seed)` mit explizit übergebenem `seed`."
 _with_rng(f, seed) = seed === nothing ? f() : SL.Bootstrap._with_rng_restore(f; seed = seed)

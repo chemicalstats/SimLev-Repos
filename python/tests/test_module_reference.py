@@ -1,24 +1,26 @@
 """Bitgleichheit der Erweiterungsmodule zu R.
 
 Liest die Referenzfälle aus ``golden/modules/<modul>/`` (erzeugt mit den
-Generatoren ``golden/modules/gen_*.R``) und vergleicht Ergebnis, Konsolen-
-und Druckausgabe sowie Warnungen und Fehlermeldungen.
+Generatoren ``golden/modules/gen_*.R``; Format 1 und 2, s. ``golden/README.md``)
+und vergleicht Ergebnis, Konsolen- und Druckausgabe sowie Warnungen und
+Fehlermeldungen.
 """
 import os
 
 import numpy as np
 import pytest
 
-from simlev._r.reftree import load_case, run_case
+from simlev._r import env as _env
+from simlev._r.reftree import list_cases, load_case, run_case
 
-ROOT = os.environ.get("SIMLEV_MODULE_DIR") or os.path.join(
+ROOT = _env.module_dir() or os.path.join(
     os.path.dirname(__file__), "..", "..", "golden", "modules")
 CASES = []
 if os.path.isdir(ROOT):
     for m in sorted(os.listdir(ROOT)):
         d = os.path.join(ROOT, m)
         if os.path.isdir(d):
-            CASES += [os.path.join(m, f) for f in sorted(os.listdir(d)) if f.endswith(".json.gz")]
+            CASES += [os.path.join(m, f) for f in list_cases(d) if f.endswith(".json.gz")]
 
 EXACT = np.finfo(np.longdouble).nmant >= 63
 

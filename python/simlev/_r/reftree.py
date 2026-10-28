@@ -6,6 +6,13 @@ den passenden Python-Code und das R-Ergebnis als Baum (siehe dort). Dieses
 Modul dekodiert die Eingaben in Python-Objekte, führt den Python-Code aus
 und vergleicht das Ergebnis Bit für Bit mit dem Baum.
 
+Format 2: Größere Eingaben stehen je Modul einmal im Eingabespeicher
+``<modul>/_inputs.json.gz``; der Fall trägt dafür den Verweis
+``{"t": "ref", "k": <schlüssel>}``. :func:`load_case` löst die Verweise auf
+und liefert denselben Baum wie im Format 1 (Eingaben vollständig im Fall);
+beide Formen werden gelesen. :func:`list_cases` listet die Fälle eines
+Ordners (ohne den Speicher).
+
 Abbildung R → Python (beim Dekodieren der Eingaben):
 
 ==========================  =============================================
@@ -43,20 +50,22 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
-__all__ = ["load_case", "decode", "compare", "run_case"]
+from . import env as _env
+
+__all__ = ["load_case", "list_cases", "resolve_inputs", "decode", "compare", "run_case"]
 
 _EPOCH = np.datetime64("1970-01-01", "D")
 # Die Referenzen entstanden mit R unter LC_ALL=C.UTF-8, d. h. ICU-Kollation "root".
 # Für den Vergleich dieselbe Kollation erzwingen, unabhängig vom Locale des Rechners.
-__import__("os").environ.setdefault("SIMLEV_COLLATE", "icu:root")
-_STRICT_ZERO = __import__("os").environ.get("SIMLEV_STRICT_ZERO", "1") != "0"
+_env.set_collate_default("icu:root")
+_STRICT_ZERO = _env.strict_zero()
 
 
 # ── Dekodieren ─────────────────────────────────────────────────────────────
 
 _NA_BITS_LO = 1954
 _NA_REAL = __import__("struct").unpack("<d", __import__("struct").pack("<Q", 0x7FF00000000007A2))[0]
-_STRICT_NA = __import__("os").environ.get("SIMLEV_LAX_NA", "0") != "1"
+_STRICT_NA = not _env.lax_na()
 
 
 def _isna(x):
@@ -125,6 +134,9 @@ def decode(node):
     t = node["t"]
     if t in ("null", "skip"):
         return None
+    if t == "ref":
+        raise ValueError("Verweis auf den Eingabespeicher (%s) nicht aufgelöst; Fall mit load_case() laden"
+                         % node.get("k"))
     if t in ("num", "int", "lgl", "chr", "date"):
         a = _vec(node)
         names = node.get("names")
@@ -452,10 +464,61 @@ def _flat_ref_dates(ref):
 
 # ── Ausführen ─────────────────────────────────────────────────────────────
 
-def load_case(path):
+INPUTS_FILE = "_inputs.json.gz"   # Eingabespeicher je Modul (Format 2)
+
+
+def _read_json(path):
     op = gzip.open if str(path).endswith(".gz") else open
     with op(path, "rt", encoding="utf-8") as fh:
         return json.load(fh)
+
+
+_store_cache = {}
+
+
+def _store(d):
+    """Eingaben aus ``<d>/_inputs.json.gz`` (zwischengespeichert, zuletzt genutzter Ordner)."""
+    p = os.path.abspath(os.path.join(d, INPUTS_FILE))
+    try:
+        st = os.stat(p)
+    except FileNotFoundError:
+        raise FileNotFoundError("Eingabespeicher %s fehlt" % p) from None
+    tag = (p, st.st_mtime_ns, st.st_size)
+    if _store_cache.get("tag") != tag:
+        _store_cache.clear()
+        _store_cache.update(tag=tag, inputs=_read_json(p)["inputs"])
+    return _store_cache["inputs"]
+
+
+def resolve_inputs(case, d):
+    """Ersetzt Verweise ``{"t": "ref", "k": …}`` in ``case["inputs"]`` durch die
+    Bäume aus dem Eingabespeicher des Ordners ``d`` (Format 2); Fälle im Format 1
+    bleiben unverändert."""
+    inp = case.get("inputs")
+    if not isinstance(inp, dict) or not any(isinstance(v, dict) and v.get("t") == "ref" for v in inp.values()):
+        return case
+    store = _store(d)
+    out = {}
+    for k, v in inp.items():
+        if isinstance(v, dict) and v.get("t") == "ref":
+            if v.get("k") not in store:
+                raise KeyError("Eingabe %s (Schlüssel %s) fehlt in %s" % (k, v.get("k"), os.path.join(d, INPUTS_FILE)))
+            v = store[v["k"]]
+        out[k] = v
+    case["inputs"] = out
+    return case
+
+
+def load_case(path, resolve=True):
+    """Liest einen Fall; mit ``resolve`` (Standard) samt aufgelösten Eingaben."""
+    case = _read_json(path)
+    return resolve_inputs(case, os.path.dirname(os.path.abspath(path))) if resolve else case
+
+
+def list_cases(d):
+    """Dateinamen der Fälle im Ordner ``d`` (sortiert, ohne ``_inputs.json.gz``)."""
+    return sorted(f for f in os.listdir(d)
+                  if (f.endswith(".json.gz") or f.endswith(".json")) and not f.startswith("_"))
 
 
 def _uniq(seq):
@@ -472,20 +535,15 @@ def run_case(case, check_print=True, check_output=True, check_warnings=True):
     Hat der Fall eine feste Uhrzeit (Feld ``sys_time``), gilt sie während des
     Falls über ``SIMLEV_R_SYS_TIME`` (:func:`simlev._r.base.sys_time`).
     """
-    env = {}
-    st = case.get("sys_time")
-    if st is not None:
-        env["SIMLEV_R_SYS_TIME"] = st if isinstance(st, str) else repr(float(st))
-    old = {k: os.environ.get(k) for k in env}
-    os.environ.update(env)
-    try:
+    with _fixed_sys_time(case.get("sys_time")):
         return _run_case(case, check_print, check_output, check_warnings)
-    finally:
-        for k, v in old.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
+
+
+@contextlib.contextmanager
+def _fixed_sys_time(st):
+    """Setzt ``SIMLEV_R_SYS_TIME`` auf die Uhrzeit ``st`` des Falls und danach zurück."""
+    with _env.fixed_r_sys_time(st):
+        yield
 
 
 def _run_case(case, check_print, check_output, check_warnings):

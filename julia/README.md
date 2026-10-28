@@ -191,9 +191,12 @@ Besonderheiten der Julia-Fassung:
   ausgibt, erscheinen auf `stderr`; R-Warnungen sind `@warn`-Meldungen,
   R-Fehler `ErrorException`, jeweils mit dem deutschen Wortlaut des
   R-Pakets.
-- `cores > 1` rechnet sequenziell, aber mit derselben Zufallssemantik wie
-  `mclapply(mc.set.seed = FALSE)` in R; bei gleichem `cores` stimmen die
-  Ergebnisse also mit R überein. `bootstrap_study(chunk_dir = …)` schreibt
+- `cores > 1` rechnet mit Threads (`Threads.@spawn`), wenn Julia mit mehreren
+  Threads gestartet ist (`julia -t auto`, `julia -t 2` oder
+  `JULIA_NUM_THREADS`), sonst nacheinander; in beiden Fällen mit derselben
+  Zufallssemantik wie `mclapply(mc.set.seed = FALSE)` in R, bei gleichem
+  `cores` stimmen die Ergebnisse also mit R überein. Meldungen der Einheiten
+  erscheinen in deren Reihenfolge. `bootstrap_study(chunk_dir = …)` schreibt
   die Zwischenstände in einem eigenen Textformat (Dateinamen wie in R auf
   `.rds`, aber nicht mit R lesbar).
 - **Grafiken** zeichnet die Julia-Fassung als SVG ohne externe Pakete.
@@ -319,7 +322,7 @@ werden außerdem Druck- und Konsolenausgabe, Warnungen und Fehlermeldungen.
 | Engine: gezielte Fälle für jeden Steuer- und Sonderpfad plus Zufallsfälle (`golden/cases/`) | 68 | alle bitgleich, einschließlich `print` und `details = true` |
 | Engine: Stressfälle (`golden/extra/`) | 37 | alle bitgleich, einschließlich `print` und `details = true` |
 | Engine: frisch erzeugte Zufalls- und Stressfälle beider Generatoren | 469 | alle bitgleich |
-| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS und die R-Interna (30 Module in `golden/modules/`) | 4.563 | alle bitgleich |
+| Alle Funktionen, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS und die R-Interna (30 Module in `golden/modules/`) | 4.578 | alle bitgleich |
 
 **Plattformen:** Die Referenz ist R unter Linux x86-64 (die Modul-Fälle
 entstanden mit R 4.3.3); dort ist die Julia-Fassung geprüft. Die
@@ -354,9 +357,9 @@ Gradient bzw. Hesse-Matrix ändern kann.
 ## Tests
 
 ``` bash
-julia --project -e 'using Pkg; Pkg.test()'               # 1.211 Tests: Engine, R-Interna, Referenzfälle (Auswahl)
-SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()'   # dazu alle 4.563 Modul-Referenzfälle
-julia --project tools/compare_golden.jl ../golden/cases   # Engine-Fälle eines Ordners (auch ../golden/extra)
+julia --project -e 'using Pkg; Pkg.test()'               # 1.221 Tests: Engine, R-Interna, Referenzfälle (Auswahl)
+SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()'   # dazu alle 4.578 Modul-Referenzfälle
+julia --project tools/compare_golden.jl                  # Engine: golden/cases und golden/extra; auch [ordner …] [-k fall …]
 julia --project tools/compare_reference.jl [modul …] [-k muster] [-v]   # Modul-Referenzfälle
 ```
 
@@ -380,7 +383,9 @@ src/
   r/                R-Interna: Datenstrukturen (types.jl), F80: x87-long double (ld80.jl),
                     R-kompatible Numerik und Textausgabe der Engine (rnum.jl, rformat.jl),
                     libm, long-double-Summen (base.jl), Zufallszahlen (rng.jl),
-                    Verteilungen (nmath.jl), stats, lineare Algebra (linalg.jl, _blas.jl,
+                    Verteilungen (nmath.jl), stats (stats.jl mit den Themen stats_sort.jl,
+                    stats_cor.jl, stats_smooth.jl, stats_optim.jl, stats_models.jl,
+                    stats_cluster.jl), lineare Algebra (linalg.jl, _blas.jl,
                     _lapack.jl, _linpack.jl), Formatierung (fmt.jl), Bedingungen in
                     R-Syntax (rexpr.jl)
   dates.jl          Datumslogik

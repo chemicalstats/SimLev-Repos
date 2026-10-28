@@ -1,5 +1,13 @@
 # simlev (Python) – Änderungen je Version
 
+## simlev (Python) 0.8.0
+
+Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Prüfwerkzeuge: Abgleich der Schnittstelle der drei Sprachen (tools/api_snapshot), Referenzfälle in kompaktem Format mit gemeinsamen Eingaben, Laufzeitmessung (tools/bench).
+- Verschlankung: entfernt sind interaktive Grafiken, create_config, migrate_strategy, as_list sowie scipy und TTR; Engine in Teilmodule aufgeteilt, Schichtentest, Schalter SIMLEV_* an einer Stelle.
+- Parallelität: cores in Python (Fork-Prozesse) und Julia (Threads) mit denselben Ergebnissen wie R.
+
 ## simlev (Python) 0.7.0
 
 Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -299,6 +307,27 @@ Innerer Aufbau (ohne Änderung der öffentlichen Namen und Ergebnisse):
   `sprintf()`, Summen und Kumulationen folgen R's Regeln für beide.
 * Die Test-Suite umfasst 5.755 Tests; die Tests der R-Engine aus
   `r/tests/testthat` sind übertragen.
+* Tests, die nur wiederholen, was ein Referenzfall bitgleich prüft, sind
+  entfallen: Die Fälle `r_fmt`, `r_linalg` und `r_stats` liefen in
+  `test_r_fmt.py`, `test_r_linalg.py` und `test_r_stats.py` ein zweites Mal
+  (sie laufen weiter in `test_module_reference.py`), drei Tests in
+  `test_engine_notes.py` rechneten dasselbe wie die Fälle
+  `engine/um01`–`um04`.
+* Neu: `tests/test_layers.py` prüft die Schichten der Module (0 R-Interna,
+  1 Daten und Strategie, 2 Engine, 3 Analysen, 4 Ausgabe; kein Import in
+  eine höhere Schicht, bekannte Ausnahmen begründet), dass die Schalter
+  `SIMLEV_*` nur in `simlev._r.env` gelesen werden, und das verzögerte
+  Laden der Analysemodule.
+* Alle Umgebungsschalter `SIMLEV_*` liest jetzt `simlev._r.env` (Tabelle in
+  `DEVELOPING.md`); Wirkung, Standardwerte und Meldungen sind unverändert.
+
+### Laden
+
+* `import simlev` lädt die Analysemodule (Bootstrap, Entnahme,
+  Abhängigkeiten, Regime, Szenarien, Optimierung, Taktik, Tiefenanalyse,
+  Planung, Analyse-Tests, Überanpassung, Parametersuche, Sensitivität) erst
+  beim ersten Zugriff auf einen ihrer Namen (PEP 562). `from simlev import
+  X`, `simlev.X`, `dir(simlev)` und `__all__` wirken wie zuvor.
 
 ### Bekannte Grenzen
 
@@ -319,7 +348,17 @@ Innerer Aufbau (ohne Änderung der öffentlichen Namen und Ergebnisse):
   (`simlev._r.rexpr`, wie in der Julia-Fassung); Funktionsdefinitionen,
   Schleifen und benannte Vektoren unterstützt der Auswerter nicht.
 * `bootstrap_study()` schreibt Zwischenstände als Pickle statt RDS.
-* `cores > 1` rechnet sequenziell, mit derselben Zufallssemantik wie
-  `mclapply(mc.set.seed = FALSE)`.
+* `cores > 1` rechnet wie R parallel mit Fork-Prozessen
+  (`simlev._r.parallel.par_lapply`, Nachbildung von `.par_lapply`; nur
+  Standardbibliothek) und derselben Zufallssemantik wie
+  `mclapply(mc.set.seed = FALSE)`: jede Einheit startet mit dem
+  Zufallszustand des Aufrufers, der danach unverändert ist; Ergebnisse in
+  Eingangsreihenfolge, bitgleich zu R bei gleichem `cores`. Ausgaben und
+  Meldungen der Einheiten erscheinen in deren Reihenfolge (R: in der
+  Reihenfolge der Fertigstellung), Warnungen gehen wie in R verloren. Ein
+  Fehler in einer Einheit bricht wie bei `cores = 1` ab (R liefert dort ein
+  `try-error`-Element mit Warnung). Ohne Fork (Windows, macOS) rechnet
+  Python nacheinander mit denselben Ergebnissen. `cores` zwischen 1 und 2
+  rechnet wie in R als `lapply`.
 * Nichtzentrale Verteilungen (`ncp`) und einige selten genutzte
   stats-Optionen sind nicht portiert, weil das Paket sie nicht nutzt.

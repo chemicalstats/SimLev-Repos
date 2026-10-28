@@ -16,8 +16,9 @@ import pytest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "tools"))
 import compare_golden  # noqa: E402
+from simlev._r import env as _env  # noqa: E402
 
-DIRS = (os.environ["SIMLEV_GOLDEN_DIR"].split(os.pathsep) if os.environ.get("SIMLEV_GOLDEN_DIR")
+DIRS = (_env.golden_dir().split(os.pathsep) if _env.golden_dir()
         else compare_golden.DEFAULT_DIRS)
 CASES = [os.path.join(d, f) for d in DIRS if os.path.isdir(d) for f in sorted(os.listdir(d))
          if f.endswith(".json.gz")]
@@ -28,7 +29,7 @@ EXACT = np.finfo(np.longdouble).nmant >= 63
 
 def test_golden_cases_present():
     # Ohne diesen Test würden die Bitgleichheits-Tests bei falschem Pfad still entfallen.
-    assert len(CASES) >= 105 or os.environ.get("SIMLEV_GOLDEN_DIR"), "Golden-Fälle fehlen in %s" % (DIRS,)
+    assert len(CASES) >= 105 or _env.golden_dir(), "Golden-Fälle fehlen in %s" % (DIRS,)
 
 
 @pytest.mark.skipif(not EXACT, reason="Bitgleichheit nur mit 80-Bit-long-double (Linux/x86-64)")

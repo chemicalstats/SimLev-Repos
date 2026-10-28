@@ -77,7 +77,7 @@ function sensitivity_grid(data, strategy, grid; sim_args = nothing, metrics = no
         end
         return (m = OF._metric_pairs(metrics(res)), err = missing, res = keep_results ? res : nothing)
     end
-    out = PS._par_lapply(1:SL.nrow(design), run, cores)
+    out = SL.RParallel.par_lapply(1:SL.nrow(design), run, cores)
     okm = [o.m for o in out if o.m !== nothing]
     isempty(okm) && error("sensitivity_grid: Alle $(length(out)) Läufe fehlgeschlagen: $(_table_msg([o.err for o in out]))")
     mnames = okm[1][1]
@@ -154,7 +154,7 @@ function rebalancing_sensitivity(data, strategy; frequencies = nothing, offsets 
         end
         return OF._metric_pairs(metrics(res))
     end
-    out = PS._par_lapply(1:length(rows), run, cores)
+    out = SL.RParallel.par_lapply(1:length(rows), run, cores)
     ok = [!(o isa AbstractString) for o in out]
     any(ok) || error("rebalancing_sensitivity: Alle $(length(out)) Läufe fehlgeschlagen: $(_table_msg(out))")
     good = out[ok]; lab = [r.label for r in rows[ok]]
@@ -257,7 +257,7 @@ function lumpsum_vs_dca(data, strategy; amount = 10000, months = 12, horizon = 1
         end
         return (Float64(ls.worth[end]), Float64(dca_end), const_)
     end
-    res = PS._par_lapply(starts, run, cores)
+    res = SL.RParallel.par_lapply(starts, run, cores)
     lump = Float64[r[1] for r in res]; dcav = Float64[r[2] for r in res]
     adv = lump ./ dcav .- 1
     tab = SL.RFrame("start" => starts, "lump_sum" => lump, "dca" => dcav, "advantage" => adv,
@@ -345,7 +345,7 @@ function leverage_sensitivity(data, index; leverages = nothing, rate = 0, expens
         end
         return OF._metric_pairs(metrics(res))
     end
-    out = PS._par_lapply(leverages, run, cores)
+    out = SL.RParallel.par_lapply(leverages, run, cores)
     ok = [o !== nothing for o in out]
     good = out[ok]
     tab = SL.RFrame("leverage" => leverages[ok]; class = ["SimLevSensitivity", "data.frame"], nrow = count(ok))

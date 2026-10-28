@@ -11,6 +11,11 @@
 #
 # Lockerungen über Umgebungsvariablen: SIMLEV_LAX_NA=1 (NA = NaN),
 # SIMLEV_STRICT_ZERO=0 (-0 = +0).
+#
+# Format 2: Größere Eingaben stehen je Modul einmal im Eingabespeicher
+# <modul>/_inputs.json.gz; der Fall trägt dafür den Verweis {"t": "ref", "k": …}.
+# `read_ref_case` liest einen Fall und löst die Verweise auf (gleicher Baum wie im
+# Format 1); `list_ref_cases` listet die Fälle eines Ordners ohne den Speicher.
 
 using Dates
 using Logging
@@ -18,14 +23,51 @@ isdefined(@__MODULE__, :parse_json) || include(joinpath(@__DIR__, "golden_tools.
 
 # Die Referenzen entstanden mit R unter LC_ALL=C.UTF-8 (ICU-Kollation "root"); für den
 # Vergleich dieselbe Kollation erzwingen, unabhängig vom Locale des Rechners.
-haskey(ENV, "SIMLEV_COLLATE") || (ENV["SIMLEV_COLLATE"] = "icu:root"; SimLev.RStats.collate_reset())
-const _LAX_NA = get(ENV, "SIMLEV_LAX_NA", "0") == "1"
-const _STRICT_ZERO = get(ENV, "SIMLEV_STRICT_ZERO", "1") != "0"
+SimLev.REnv.set_collate_default!("icu:root") && SimLev.RStats.collate_reset()
+const _LAX_NA = SimLev.REnv.lax_na()
+const _STRICT_ZERO = SimLev.REnv.strict_zero()
 
 _aslist(v) = v === nothing ? Any[] : v isa AbstractVector ? v : Any[v]
 _vals(node) = (v = get(node, "v", nothing); v === nothing ? Any[nothing] : v isa AbstractVector ? v : Any[v])
 
 const _EPOCH = Date(1970, 1, 1)
+
+# ── Laden (Format 1 und 2) ──────────────────────────────────────────────────
+const REF_INPUTS_FILE = "_inputs.json.gz"
+const _STORE_CACHE = Ref{Any}(nothing)     # (Pfad, mtime, Größe) => Eingaben des zuletzt genutzten Speichers
+
+_isref(v) = v isa JObj && get(v, "t", nothing) == "ref"
+
+function _ref_store(dir)
+    p = abspath(joinpath(dir, REF_INPUTS_FILE))
+    isfile(p) || error("Eingabespeicher $p fehlt")
+    tag = (p, mtime(p), filesize(p))
+    c = _STORE_CACHE[]
+    c !== nothing && c[1] == tag && return c[2]
+    st = read_case(p)["inputs"]
+    _STORE_CACHE[] = (tag, st)
+    st
+end
+
+"Ersetzt Verweise in `case[\"inputs\"]` durch die Bäume aus dem Eingabespeicher von `dir`."
+function resolve_ref_inputs!(case, dir)
+    inp = get(case, "inputs", nothing)
+    (inp isa JObj && any(_isref, inp.vals)) || return case
+    st = _ref_store(dir)
+    for i in eachindex(inp.vals)
+        v = inp.vals[i]
+        _isref(v) || continue
+        haskey(st, v["k"]) || error("Eingabe $(inp.keys[i]) (Schlüssel $(v["k"])) fehlt in $(joinpath(dir, REF_INPUTS_FILE))")
+        inp.vals[i] = st[v["k"]]
+    end
+    case
+end
+
+"Liest einen Referenzfall (Format 1 oder 2) samt aufgelösten Eingaben."
+read_ref_case(path) = resolve_ref_inputs!(read_case(path), dirname(abspath(path)))
+
+"Dateinamen der Referenzfälle in `dir` (sortiert, ohne den Eingabespeicher)."
+list_ref_cases(dir) = sort(filter(f -> (endswith(f, ".json.gz") || endswith(f, ".json")) && !startswith(f, "_"), readdir(dir)))
 
 function _dvec(node)
     t = node["t"]
@@ -52,6 +94,7 @@ end
 function decode(node)
     t = node["t"]
     t in ("null", "skip") && return nothing
+    t == "ref" && error("Verweis auf den Eingabespeicher ($(get(node, "k", "?"))) nicht aufgelöst; Fall mit read_ref_case laden")
     if t in ("num", "int", "lgl", "chr", "date")
         a = _dvec(node)
         nms = get(node, "names", nothing)
@@ -295,11 +338,10 @@ end
 
 "Führt einen Fall aus; Rückgabe: Liste der Abweichungen (leer = bitgleich)."
 function run_ref_case(case; kw...)
-    envs = Pair{String,Union{Nothing,String}}[]
-    # feste Uhrzeit des Falls (Feld sys_time) für SimLev.RBase.sys_time
+    # feste Uhrzeit des Falls (Feld sys_time) für SimLev.RBase.sys_time; setzt danach zurück
     st = get(case, "sys_time", nothing)
-    st === nothing || push!(envs, "SIMLEV_R_SYS_TIME" => (st isa AbstractString ? String(st) : string(Float64(st))))
-    withenv(envs...) do
+    st === nothing && return _run_ref_case(case; kw...)
+    SimLev.REnv.with_r_sys_time(st isa AbstractString ? String(st) : string(Float64(st))) do
         _run_ref_case(case; kw...)
     end
 end

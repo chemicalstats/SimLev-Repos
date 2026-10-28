@@ -142,4 +142,27 @@ case("lvs_none", "x <- leverage_sensitivity(d, 'A', leverages = c(1, 2), strateg
 case("lvs_nocagr", "x <- leverage_sensitivity(d, 'A', leverages = c(1, 2), metrics = function(r) c(max_drawdown = r$statistics$max_drawdown)); list(x, attr(x, 'optimal'))",
      "x = SE.leverage_sensitivity(d, 'A', leverages=[1, 2], metrics=lambda r: pd.Series({'max_drawdown': r.statistics['max_drawdown']})); result = [x, x.attrs['optimal']]",
      'x = SE.leverage_sensitivity(d, "A"; leverages = [1, 2], metrics = r -> named("max_drawdown" => r.statistics.max_drawdown)); result = [x, attrs(x)["optimal"]]')
+# ── cores > 1 (Etappe 5): jede Einheit mit dem Zufallszustand des Aufrufers ─
+case("sg_cores2_rng", "set.seed(7); g <- sensitivity_grid(d, st, list(balance_unit = c('month', 'quarter', 'year')), sim_args = list(balance_mode = TRUE, balance_span = 1), metrics = function(r) c(u = runif(1), cagr = r$cagr), cores = 2); list(g, runif(1))",
+     "from simlev._r import rng as RNG\nRNG.set_seed(7); g = SE.sensitivity_grid(d, st, {'balance_unit': ['month', 'quarter', 'year']}, sim_args={'balance_mode': True, 'balance_span': 1}, metrics=lambda r: pd.Series({'u': RNG.runif(1)[0], 'cagr': r.cagr}), cores=2); result = [g, RNG.runif(1)]",
+     'SL.RRng.set_seed(7); g = SE.sensitivity_grid(d, st, RList("balance_unit" => ["month", "quarter", "year"]); sim_args = RList("balance_mode" => true, "balance_span" => 1), metrics = r -> named("u" => SL.RRng.runif(1)[1], "cagr" => r.cagr), cores = 2); result = [g, SL.RRng.runif(1)]')
+case("sg_cores1_rng", "set.seed(7); g <- sensitivity_grid(d, st, list(balance_unit = c('month', 'quarter', 'year')), sim_args = list(balance_mode = TRUE, balance_span = 1), metrics = function(r) c(u = runif(1), cagr = r$cagr), cores = 1); list(g, runif(1))",
+     "from simlev._r import rng as RNG\nRNG.set_seed(7); g = SE.sensitivity_grid(d, st, {'balance_unit': ['month', 'quarter', 'year']}, sim_args={'balance_mode': True, 'balance_span': 1}, metrics=lambda r: pd.Series({'u': RNG.runif(1)[0], 'cagr': r.cagr}), cores=1); result = [g, RNG.runif(1)]",
+     'SL.RRng.set_seed(7); g = SE.sensitivity_grid(d, st, RList("balance_unit" => ["month", "quarter", "year"]); sim_args = RList("balance_mode" => true, "balance_span" => 1), metrics = r -> named("u" => SL.RRng.runif(1)[1], "cagr" => r.cagr), cores = 1); result = [g, SL.RRng.runif(1)]')
+case("sg_cores3_keep", "g <- sensitivity_grid(d, st, list(balance_span = c(1, 3, 6, 12)), sim_args = list(balance_mode = TRUE), keep_results = TRUE, cores = 3); r <- attr(g, 'results'); list(g, length(r), r[[4]]$cagr, r[[1]]$worth[100])",
+     "g = SE.sensitivity_grid(d, st, {'balance_span': [1, 3, 6, 12]}, sim_args={'balance_mode': True}, keep_results=True, cores=3); r = g.attrs['results']; result = [g, len(r), r[3].cagr, r[0].worth[99]]",
+     'g = SE.sensitivity_grid(d, st, RList("balance_span" => [1.0, 3.0, 6.0, 12.0]); sim_args = RList("balance_mode" => true), keep_results = true, cores = 3); r = attrs(g)["results"]; result = [g, length(r), r[4].cagr, r[1].worth[100]]')
+case("sg_cores2_err", "sensitivity_grid(d, st, list(balance_unit = c('month', 'monat', 'year')), sim_args = list(balance_mode = TRUE, balance_span = 1), cores = 2)",
+     "result = SE.sensitivity_grid(d, st, {'balance_unit': ['month', 'monat', 'year']}, sim_args={'balance_mode': True, 'balance_span': 1}, cores=2)",
+     'result = SE.sensitivity_grid(d, st, RList("balance_unit" => ["month", "monat", "year"]); sim_args = RList("balance_mode" => true, "balance_span" => 1), cores = 2)')
+case("rs_cores2", "rebalancing_sensitivity(d, st, frequencies = list(monthly = c('month', 1), yearly = c('year', 1)), bands = c(NA, 5), cores = 2)",
+     "result = SE.rebalancing_sensitivity(d, st, frequencies={'monthly': ('month', 1), 'yearly': ('year', 1)}, bands=[None, 5], cores=2)",
+     'result = SE.rebalancing_sensitivity(d, st; frequencies = ["monthly" => ("month", 1), "yearly" => ("year", 1)], bands = [NA, 5.0], cores = 2)')
+case("ls_cores2", "x <- lumpsum_vs_dca(d5, st1, amount = 12000, months = 12, horizon = 3, step = 6, cores = 2); list(x, attr(x, 'summary'))",
+     "x = SE.lumpsum_vs_dca(d5, st1, amount=12000, months=12, horizon=3, step=6, cores=2); result = [x, x.attrs['summary']]",
+     'x = SE.lumpsum_vs_dca(d5, st1; amount = 12000, months = 12, horizon = 3, step = 6, cores = 2); result = [x, attrs(x)["summary"]]')
+case("lvs_cores2", "x <- leverage_sensitivity(d, 'A', leverages = c(1, 1.5, 2, 3), rate = 2, expense = 0.5, cores = 2); list(x, attr(x, 'optimal'))",
+     "x = SE.leverage_sensitivity(d, 'A', leverages=[1, 1.5, 2, 3], rate=2, expense=0.5, cores=2); result = [x, x.attrs['optimal']]",
+     'x = SE.leverage_sensitivity(d, "A"; leverages = [1, 1.5, 2, 3], rate = 2, expense = 0.5, cores = 2); result = [x, attrs(x)["optimal"]]')
+
 ref_done()

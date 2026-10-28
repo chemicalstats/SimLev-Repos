@@ -7,7 +7,7 @@ und die Julia-Fassung ihre Bitgleichheit zum R-Paket prüfen.
 |---|---|---|---|
 | `cases/` | 68 | Python, Julia | Engine: 38 gezielte Fälle für jeden Steuer- und Sonderpfad (`f01`–`f38`) und 30 Zufallsfälle (`r…`) |
 | `extra/` | 37 | Python, Julia | Engine: Stressfälle mit 30 Jahren, Totalverlust-Hebel, mehreren Signal-Assets, konstanten Preisen, Kalender-Randfällen, Extremwerten, Fehlerpfaden (`x…`, `y…`) |
-| `modules/` | 4.563 | Python, Julia | alle übrigen Funktionen des R-Pakets, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS und die nachgebauten R-Interna, je Modul ein Unterordner (30 Module, siehe unten) |
+| `modules/` | 4.578 | Python, Julia | alle übrigen Funktionen des R-Pakets, die Engine mit den Argumenten und Ergebniselementen von 0.5.0 (Modul `engine`), die Nachbildung von evd, rugarch und imputeTS und die nachgebauten R-Interna, je Modul ein Unterordner (30 Module, siehe unten) |
 
 ## Engine-Fälle (`cases/`, `extra/`)
 
@@ -48,7 +48,8 @@ Abgleich mit den Ports:
 
 ``` bash
 python python/tools/compare_golden.py /tmp/golden          # ohne Pfad: golden/cases und golden/extra
-julia --project=julia julia/tools/compare_golden.jl /tmp/golden     # ein Ordner; --lax: NA = NaN
+julia --project=julia julia/tools/compare_golden.jl /tmp/golden     # ohne Pfad ebenso; --lax: NA = NaN
+julia --project=julia julia/tools/compare_golden.jl golden/cases golden/extra   # mehrere Ordner, mit Gesamtsumme
 ```
 
 ## Modul-Fälle (`modules/`)
@@ -62,13 +63,13 @@ Je Modul gibt es einen Unterordner mit Fällen und einen Generator
 | `backcast` | 88 | `backcast.R` |
 | `signals` | 56 | `signals.R` mit den Rollkernen |
 | `bootstrap_core` | 18 | Kerne aus `bootstrap_core.cpp`, MS-GARCH-Filter aus `ms_garch.c` (`.ms_garch_filter`) |
-| `bootstrap` | 190 | `bootstrap.R` |
+| `bootstrap` | 194 | `bootstrap.R` (darunter `cores = 2`: `bs_rawcores2pathlength50`, `bs_cores2_*`, `study_returns`, `study_cores2*`) |
 | `ms_garch` | 17 | eigene MS-GARCH-Schätzung `ms_garch.R` (`.ms_garch_fit`: K = 2/3, sGARCH/gjrGARCH, drei simulierte Datensätze, Fehlerwege der Prüfung; `simlev/ms_garch.py`, `src/ms_garch.jl`) |
 | `withdrawal` | 313 | `withdrawal.R`, `withdrawal_core.cpp` |
 | `deep_analysis` | 54 | `deep_analysis.R` |
-| `sensitivity` | 37 | `sensitivity.R` |
-| `param_search` | 52 | `param_search.R` |
-| `overfitting` | 72 | `overfitting.R` |
+| `sensitivity` | 44 | `sensitivity.R` (darunter `cores = 2`/`3`: `*_cores2*`, `sg_cores3_keep`; `sg_cores1_rng` als Gegenstück) |
+| `param_search` | 55 | `param_search.R` (darunter `cores = 2`: `ps_cores2*`) |
+| `overfitting` | 73 | `overfitting.R` (darunter `cores = 2`: `pb_cores2`) |
 | `dependence` | 136 | `dependence.R`, `dependence_core.cpp` |
 | `regimes` | 20 | `regimes.R` |
 | `scenarios` | 65 | `scenarios.R` |
@@ -89,8 +90,10 @@ Je Modul gibt es einen Unterordner mit Fällen und einen Generator
 | `imputets` | 203 | aus imputeTS 3.4 und stinepack 1.5 übernommen (`SimLev:::.imputets_na_interpolation`, `.imputets_na_locf`, `.stinepack_stinterp`): `na_interpolation` (stine), `na_locf`, stinepack `stinterp`, `.fill_na(…, "stine")`, `backcast_fit`/`backcast` mit `"stine"` (`simlev/_r/imputets.py`, `stinepack.py`, `src/r/imputets.jl`, `stinepack.jl`) |
 | `rugarch` | 173 | aus rugarch 1.5-6, Rsolnp 1.16 und truncnorm 1.0-9 übernommen (`SimLev:::.rugarch_ugarchfit`, `.rugarch_coef`, `.rsolnp_solnp`, `.rsolnp_gosolnp`, `.truncnorm_rtruncnorm`), Ableitungen eigenständig (`.sl_richardson_hessian`, `.sl_richardson_jacobian`, gegen numDeriv 2016.8-1.1 geprüft): `ugarchfit`→`coef` (auch mit den Ausweichwegen nlminb und gosolnp, Zufallszustand danach), `solnp`, `gosolnp`, `rtruncnorm`, `.fit_garch11`, Bootstrap `garch`/`gjr_garch`, `dcc_fit`, `dependence_analysis` (`simlev/_r/rugarch.py`, `solnp.py`, `truncnorm.py`, `src/r/rugarch.jl`, `solnp.jl`, `truncnorm.jl`) |
 
-Python 0.5.0 und Julia 0.5.0 sind zu allen 4.563 Fällen bitgleich, bei strenger
-Unterscheidung von `NA` und `NaN` und mit dem Vorzeichen der Null.
+Python 0.5.0 und Julia 0.5.0 sind zu allen 4.578 Fällen bitgleich, bei strenger
+Unterscheidung von `NA` und `NaN` und mit dem Vorzeichen der Null. Die Fälle mit
+`cores > 1` rechnen in Python mit Fork und in Julia unter `julia -t 2` mit Threads
+echt parallel; Julia prüft sie zusätzlich mit einem Thread.
 
 ### Format
 
@@ -99,7 +102,7 @@ Ein Fall ist eine gzip-komprimierte JSON-Datei `<modul>/<id>.json.gz` mit
 | Feld | Inhalt |
 |---|---|
 | `id`, `module`, `note` | Kennung, Modul, optionale Bemerkung |
-| `inputs` | benannte Eingabeobjekte als Baum |
+| `inputs` | benannte Eingabeobjekte als Baum oder als Verweis auf den Eingabespeicher (Format 2, siehe unten) |
 | `r` | R-Code, dessen letzter Ausdruck das Ergebnis liefert |
 | `py` | Python-Code, der `result = ...` setzt |
 | `jl` | Julia-Code, der `result = ...` setzt (in `ref_tools.R` optional, in allen Fällen vorhanden) |
@@ -108,13 +111,69 @@ Ein Fall ist eine gzip-komprimierte JSON-Datei `<modul>/<id>.json.gz` mit
 | `print` | `print(result)` für Objekte mit eigener print-Methode in SimLev |
 | `warnings` | Warnungen während des Aufrufs |
 | `error` | Fehlermeldung, falls R mit einem Fehler abbricht (statt `result`) |
-| `sys_time` | feste Uhrzeit (Sekunden seit 1970, als Text) für Fälle, deren Ergebnis von `Sys.time()` abhängt; die Harnesses setzen `SIMLEV_R_SYS_TIME` |
+| `sys_time` | feste Uhrzeit (Sekunden seit 1970, als Text `%.17g`) für Fälle, deren Ergebnis von `Sys.time()` abhängt (gosolnp); je eine Stelle setzt und eine setzt zurück: in R `.ref_fix_time()` in `ref_case()` (ersetzt `Sys.time` in `baseenv()`, `on.exit` stellt es wieder her), in Python `_fixed_sys_time()` in `run_case()` und in Julia `withenv` in `run_ref_case()` (beide über `SIMLEV_R_SYS_TIME`) |
 
 Im Baum hat jedes Objekt einen Typ `t` (`null`, `num`, `int`, `lgl`,
 `chr`, `date`, `list`, `df`, `mat`, `skip`). Zahlen stehen als Hex-Literale
 (`sprintf("%a")`), `NA` und `NaN` getrennt; die Attribute `names`, `dim`,
 `dimnames` und `class` werden mitgeschrieben. Funktionen und Formeln
 werden als `skip` übergangen.
+
+#### Eingabespeicher (Format 2)
+
+Viele Fälle eines Moduls rechnen auf denselben Eingabedaten. Bis Format 1
+stand jede Eingabe vollständig in jedem Fall (93 MB für `golden/`). Seit
+Format 2 liegt jede größere Eingabe nur einmal je Modul im
+**Eingabespeicher** `<modul>/_inputs.json.gz`:
+
+``` json
+{"format":2,"module":"evd","inputs":{"0a1b…":{"t":"df",…},"…":…}}
+```
+
+Im Fall steht an ihrer Stelle ein Verweis, ein Baumknoten vom Typ `ref`:
+
+``` json
+"inputs":{"d":{"t":"ref","k":"0a1b…"},"n":{"t":"num","v":"0x1.4p+3"}}
+```
+
+- **Schlüssel** `k`: MD5-Prüfsumme (hex) der kanonischen JSON-Form der
+  Eingabe, d. h. des kompakten JSON-Texts ohne Leerzeichen (UTF-8, Felder in
+  der Reihenfolge des Baums), den `ref_tools.R` mit jsonlite für sie schreibt.
+  Gleiche Eingaben ergeben denselben Schlüssel und werden so nur einmal
+  gespeichert; im Speicher sind die Schlüssel sortiert.
+- **Klein bleibt im Fall:** Eingaben mit weniger als 256 Bytes kanonischer
+  Form (Skalare, kurze Vektoren) stehen weiter direkt im Fall – ein Verweis
+  spart dort nichts, und der Fall bleibt lesbar. Größere Eingaben gehen
+  immer in den Speicher, auch wenn nur ein Fall sie nutzt: So entscheidet
+  `ref_case()` beim Schreiben jedes Falls allein, ohne die späteren Fälle zu
+  kennen, und R und Konverter kommen ohne Zählung zum selben Ergebnis.
+- **gzip statt xz**, wie bisher (`gzip -9 -n`): Julia liest über Zlib, eine
+  weitere Abhängigkeit entfällt.
+
+Einen Fall lesen: Datei entpacken, jeden Eingabeknoten mit `"t": "ref"`
+durch `inputs[k]` aus `_inputs.json.gz` desselben Ordners ersetzen; das
+Ergebnis ist genau der Baum des Formats 1. Die Harnesses machen das selbst
+und lesen beide Formen: Python `simlev._r.reftree.load_case(pfad)` (dazu
+`list_cases(ordner)`, das den Speicher auslässt), Julia `read_ref_case(pfad)`
+und `list_ref_cases(ordner)` aus `julia/test/reftree.jl`. Von Hand, z. B.:
+
+``` python
+import gzip, json
+rd = lambda p: json.load(gzip.open(p, "rt", encoding="utf-8"))
+case, store = rd("golden/modules/evd/fpot_cg.json.gz"), rd("golden/modules/evd/_inputs.json.gz")["inputs"]
+inputs = {k: store[v["k"]] if v.get("t") == "ref" else v for k, v in case["inputs"].items()}
+```
+
+`ref_tools.R` schreibt Format 2 direkt (den Speicher in `ref_done()`).
+Vorhandene Fälle im Format 1 stellt `golden/tools/convert_format.py` (nur
+Python-Standardbibliothek) um, ohne R erneut laufen zu lassen; es ist
+wiederholbar und lässt Dateien mit unverändertem Inhalt unberührt. Es
+schreibt Text und gzip-Bytes wie `ref_tools.R`, sodass ein neu erzeugtes
+Modul mit unveränderten Ergebnissen dieselben Dateien ergibt.
+
+``` bash
+python3 golden/tools/convert_format.py            # alle Module; -n: nur zählen
+```
 
 ### Neu erzeugen
 
@@ -188,6 +247,26 @@ Druckausgabe (`print`), Warnungen und Fehlermeldungen. Zur Fehlersuche
 lockern `SIMLEV_LAX_NA=1` (NA = NaN) und `SIMLEV_STRICT_ZERO=0` (−0 = +0)
 den Vergleich. Ohne `SIMLEV_FULL_TESTS=1` prüft `Pkg.test()` nur bis zu
 vier Fälle je Modul.
+
+## Schalter `SIMLEV_*`
+
+Für die Referenzfälle relevant (die Ports lesen sie nur in
+`python/simlev/_r/env.py` bzw. `julia/src/r/env.jl`; vollständige Liste in
+`python/DEVELOPING.md` und `julia/DEVELOPING.md`):
+
+| Schalter | Zweck | Art |
+|---|---|---|
+| `SIMLEV_R_SYS_TIME` | feste Uhr für gosolnp; die Harnesses setzen sie aus dem Feld `sys_time` eines Falls | Prüfung |
+| `SIMLEV_LAX_NA` | `1`: NA = NaN im Vergleich (Python und Julia) | Prüfung |
+| `SIMLEV_STRICT_ZERO` | `0`: −0 = +0 im Vergleich (Python und Julia) | Prüfung |
+| `SIMLEV_FULL_TESTS` | `1`: `Pkg.test()` prüft alle Modul-Fälle statt bis zu vier je Modul | Prüfung |
+| `SIMLEV_GOLDEN_DIR` | andere Ordner der Engine-Fälle (pytest: Ordnerliste; Julia: Wurzel mit `cases/`, `extra/`) | Prüfung |
+| `SIMLEV_MODULE_DIR` | anderer Ordner der Modul-Fälle für pytest | Prüfung |
+| `SIMLEV_COLLATE` | Sortierung; die Harnesses setzen `icu:root` (wie R unter C.UTF-8), falls nicht gesetzt | Nutzer |
+| `SIMLEV_R_NMATH_SRC` | Pfad zu `src/nmath` der R-4.3.3-Quellen für `gen_r_nmath.R` | Generator |
+| `SIMLEV_ALLOW_PARTIAL` | `1`: `gen_r_nmath.R` erzeugt ohne nmath-Quellen die übrigen 55 Fälle | Generator |
+
+Das R-Paket selbst liest keine `SIMLEV_*`-Schalter.
 
 ## Änderungen an diesem Ordner
 

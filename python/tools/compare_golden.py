@@ -28,13 +28,14 @@ import pandas as pd
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 import simlev  # noqa: E402
+from simlev._r import env as _env  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 DEFAULT_DIRS = [os.path.join(ROOT, "golden", "cases"), os.path.join(ROOT, "golden", "extra")]
 
 
 _NA_REAL = np.array([0x7FF00000000007A2], dtype=np.uint64).view(np.float64)[0]
-STRICT_NA = os.environ.get("SIMLEV_LAX_NA", "0") != "1"   # NA und NaN unterscheiden wie R
+STRICT_NA = not _env.lax_na()   # NA und NaN unterscheiden wie R (SIMLEV_LAX_NA=1: NA = NaN)
 
 
 def _isna_arr(a):

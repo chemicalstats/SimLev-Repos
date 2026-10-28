@@ -17,6 +17,7 @@ import pandas as pd
 
 from ._r import fmt as _fmt
 from ._r.rnum import r_cumprod, r_mean, r_mean_int, r_median, r_sum
+from ._r.parallel import par_lapply as _par_lapply
 from .param_search import (_expand_grid, _isna, _match_arg, _modify_list, _py, _quiet, _seq_by,
                            _cond_msg, _which_max_py)
 from .svg import _res_fig, _res_finish, _res_line, _res_panel, _res_points, _res_range, _res_rect, _res_vline
@@ -167,7 +168,7 @@ def sensitivity_grid(data, strategy, grid, sim_args=None, metrics=None, cores=1,
         except Exception as e:  # noqa: BLE001
             return {"m": None, "err": _cond_msg(e), "res": None}
         return {"m": _as_series(metrics(res)), "err": None, "res": res if keep_results else None}
-    out = list(_ext("bootstrap", "_par_lapply")(list(range(len(design))), run, cores))
+    out = list(_par_lapply(list(range(len(design))), run, cores))
     okm = [o["m"] for o in out if o["m"] is not None]
     if not okm:
         raise ValueError("sensitivity_grid: Alle %d Läufe fehlgeschlagen: %s" % (len(out), _table_msg([o["err"] for o in out])))
@@ -415,7 +416,7 @@ def rebalancing_sensitivity(data, strategy, frequencies=None, offsets=None, band
         except Exception as e:  # noqa: BLE001
             return _cond_msg(e)
         return _as_series(metrics(res))
-    out = list(_ext("bootstrap", "_par_lapply")(list(range(len(rows))), run, cores))
+    out = list(_par_lapply(list(range(len(rows))), run, cores))
     ok = [not isinstance(o, str) for o in out]
     if not any(ok):
         raise ValueError("rebalancing_sensitivity: Alle %d Läufe fehlgeschlagen: %s" % (len(out), _table_msg(out)))
@@ -560,7 +561,7 @@ def lumpsum_vs_dca(data, strategy, amount=10000, months=12, horizon=10, step=1, 
         else:
             dca_end = float(np.asarray(dca["worth"], dtype=np.float64)[-1]) * ixv[-1] / ixv[k]
         return (float(np.asarray(ls["worth"], dtype=np.float64)[-1]), float(dca_end), bool(const))
-    res = list(_ext("bootstrap", "_par_lapply")(list(starts), run, cores))
+    res = list(_par_lapply(list(starts), run, cores))
     lump = np.array([r[0] for r in res], dtype=np.float64)
     dcav = np.array([r[1] for r in res], dtype=np.float64)
     exact = np.array([r[2] for r in res], dtype=bool)
@@ -652,7 +653,7 @@ def leverage_sensitivity(data, index, leverages=None, rate=0, expense=0, spread=
         except Exception:  # noqa: BLE001
             return None
         return _as_series(metrics(res))
-    out = list(_ext("bootstrap", "_par_lapply")(list(leverages), run, cores))
+    out = list(_par_lapply(list(leverages), run, cores))
     ok = np.array([o is not None for o in out], dtype=bool)
     good = [o for o in out if o is not None]
     cols = {"leverage": leverages[ok]}

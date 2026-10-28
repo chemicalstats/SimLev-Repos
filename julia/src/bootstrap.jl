@@ -43,7 +43,7 @@ const _MISSING = _Missing()
 _stop(msg) = error(msg)
 _warn(msg) = (@warn String(msg); nothing)
 function _message(msg)
-    println(stderr, msg)
+    println(SimLev.RParallel.r_stderr(), msg)
     nothing
 end
 
@@ -299,16 +299,14 @@ end
 _collect_warnings(f, msgs::Vector{String}) = Base.CoreLogging.with_logger(f, _CollectLogger(msgs))
 "`suppressWarnings(f())`."
 _quiet(f) = Base.CoreLogging.with_logger(f, Base.CoreLogging.NullLogger())
-"`suppressMessages(f())`: stderr verwerfen."
-function _no_messages(f)
-    return redirect_stderr(f, devnull)
-end
+"`suppressMessages(f())`: Meldungen verwerfen (nur die laufende Aufgabe, siehe `RParallel`)."
+_no_messages(f) = SimLev.RParallel.suppress_messages(f)
 
 _errmsg(e) = e isa ErrorException ? e.msg : e isa ArgumentError ? e.msg :
              (hasproperty(e, :msg) ? string(getproperty(e, :msg)) : sprint(showerror, e))
 
 # ═══════════════════════════════════════════════════════════════════════════
-# RNG-Hilfen (.with_rng_restore, .make_streams, .par_lapply)
+# RNG-Hilfen (.with_rng_restore, .make_streams; .par_lapply in RParallel)
 # ═══════════════════════════════════════════════════════════════════════════
 
 _R() = SimLev.RRng
@@ -366,47 +364,8 @@ function _make_streams(seed, n)
     end
 end
 
-function _rng_snapshot()
-    has = _R().has_random_seed()
-    seed = has ? _R().get_random_seed() : nothing
-    kind = _rng_kind_get()
-    has || (_R().has_random_seed() && _R().rm_random_seed())
-    return (has, seed, kind)
-end
-function _rng_reset(snap)
-    has, seed, kind = snap
-    if has
-        _R().set_random_seed(seed)
-    else
-        _rng_kind_set(kind)
-        _R().has_random_seed() && _R().rm_random_seed()
-    end
-end
-
-"""
-    _par_lapply(X, FUN, cores = 1)
-
-Port von `.par_lapply`: sequentiell, mit der Fork-Semantik von `mclapply`.
-Bei `cores > 1` und mehr als einem Element startet jedes Element mit dem
-Zufallszustand des Aufrufers (`mc.set.seed = FALSE`); danach ist der Zustand
-des Aufrufers unverändert. Warnungen aus den Elementen gehen wie in
-Kindprozessen verloren.
-"""
-function _par_lapply(X, FUN, cores = 1)
-    xs = collect(X)
-    (cores === nothing || cores <= 1 || length(xs) <= 1) && return Any[FUN(x) for x in xs]
-    snap = _rng_snapshot()
-    out = Any[]
-    try
-        for x in xs
-            _rng_reset(snap)
-            push!(out, _quiet(() -> FUN(x)))
-        end
-    finally
-        _rng_reset(snap)
-    end
-    return out
-end
+"`.par_lapply(X, FUN, cores)`: steht in Schicht 0 (`SimLev.RParallel.par_lapply`)."
+_par_lapply(X, FUN, cores = 1) = SimLev.RParallel.par_lapply(X, FUN, cores)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Konfiguration

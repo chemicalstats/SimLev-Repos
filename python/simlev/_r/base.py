@@ -29,12 +29,13 @@ import builtins as _bi
 import functools as _functools
 import inspect as _inspect
 import math as _math
-import os as _os
 import sys as _sys
 import time as _time
 
 import numpy as _np
 import pandas as _pd
+
+from . import env as _env
 
 _LD = _np.longdouble
 
@@ -268,7 +269,7 @@ def sys_time():
     gesetzt (eine Zahl, Sekunden seit 1970), liefert die Funktion diesen
     Wert statt der Uhrzeit (Prüfschalter für Tests und Referenzfälle).
     """
-    v = _os.environ.get("SIMLEV_R_SYS_TIME")
+    v = _env.r_sys_time()
     if v is not None and v.strip() != "":
         return float(v)
     return _time.time()

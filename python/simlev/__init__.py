@@ -4,6 +4,8 @@ Investmentbesteuerung.
 Python-Portierung des gleichnamigen R-Pakets. Die Engine ``simulation()`` rechnet
 bitgleich zur R-Version 0.5.0 (getestet unter Linux x86-64).
 """
+import importlib as _importlib
+
 from .config import (
     AssetConfig,
     Strategy,
@@ -56,138 +58,45 @@ from .signals import (  # noqa: E402
     signal_volatility,
     signal_combine,
 )
-from .bootstrap import (  # noqa: E402
-    bootstrap_config,
-    BootstrapConfig,
-    block_length,
-    bootstrap,
-    BootstrapResult,
-    validate_bootstrap,
-    bootstrap_data,
-    study_metrics,
-    bootstrap_study,
-    SimLevBootstrapStudy,
-    SummarySimLevBootstrapStudy,
-    bootstrap_probability,
-)
-from .withdrawal import (  # noqa: E402
-    withdrawal_rule,
-    WithdrawalRule,
-    withdrawal_cohorts,
-    WithdrawalPaths,
-    result_index,
-    withdrawal_paths,
-    perfect_withdrawal_rate,
-    withdrawal_simulation,
-    SimLevWithdrawal,
-    SummarySimLevWithdrawal,
-    withdrawal_max_rate,
-    horizon_model,
-    SimLevHorizon,
-)
-from .dependence import (  # noqa: E402
-    fit_copula,
-    tail_dependence,
-    dcc_fit,
-    dependence_analysis,
-    quantile_reg,
-    tail_regression,
-    covar_analysis,
-    validate_dependence,
-    regime_subset,
-    SimLevDependence,
-    SimLevTailRegression,
-    SimLevCoVaR,
-)
-from .regimes import (  # noqa: E402
-    regime_hmm,
-    regime_states,
-    SimLevHMM,
-)
-from .scenarios import (  # noqa: E402
-    view_mean,
-    view_prob,
-    view_vol,
-    entropy_pooling,
-    copula_scenarios,
-    scenario_risk,
-    crisis_replay,
-    SimLevScenarios,
-)
-from .optimize import (  # noqa: E402
-    portfolio_optimize,
-    efficient_frontier,
-    rolling_optimization,
-    risk_contributions,
-    cpcv_portfolio,
-    SimLevOptimization,
-    SimLevFrontier,
-    SimLevCPCV,
-    SimLevBoundsPercent,
-)
-from .tactical import (  # noqa: E402
-    SimLevWeights,
-    signal_state,
-    momentum_score,
-    tactical_rules,
-    tactical_rotation,
-    target_volatility,
-    conditional_volatility,
-    glidepath,
-    blend_weights,
-    tactical_simulation,
-)
-from .deep_analysis import (  # noqa: E402
-    SimLevAnalysis,
-)
-from .planning import (  # noqa: E402
-    set_expected_return,
-    pooled_bootstrap,
-    portfolio_returns,
-    goal_optimize,
-    SimLevGoalPlan,
-)
-from .analysis_tests import (  # noqa: E402
-    signal_analysis,
-    sharpe_test,
-    reality_check,
-    min_track_record,
-    return_heatmap,
-    SimLevSignalAnalysis,
-    SimLevRealityCheck,
-    SimLevHeatmap,
-)
-from .overfitting import (  # noqa: E402
-    pbo,
-    probabilistic_sharpe,
-    deflated_sharpe,
-    walk_forward,
-    param_bootstrap,
-    sharpe_haircut,
-    SimLevPBO,
-    SimLevDSR,
-    SimLevWalkForward,
-)
-from .param_search import (  # noqa: E402
-    param_space,
-    param_range,
-    plateau,
-    SimLevParamSpace,
-    SimLevParamRange,
-    SimLevParamSearch,
-    SummarySimLevParamSearch,
-)
-from .sensitivity import (  # noqa: E402
-    sensitivity_grid,
-    rebalancing_sensitivity,
-    lumpsum_vs_dca,
-    leveraged_series,
-    leverage_sensitivity,
-    SimLevSensitivity,
-    SimLevLumpSum,
-)
 from ._r.rng import rng_kind, set_seed  # noqa: E402
 from ._r.rnum import NA_REAL as NA  # noqa: E402,F401  R's NA_real_ (NaN mit Nutzlast 1954)
+
+# Analysemodule (Schicht 3) werden erst beim ersten Zugriff auf einen ihrer Namen geladen
+# (PEP 562: __getattr__ und __dir__ unten); `from simlev import X`, `simlev.X`, `dir(simlev)`
+# und __all__ wirken wie beim sofortigen Laden. Der Name des Moduls selbst (bootstrap,
+# deep_analysis, param_search) ist das aufrufbare Modul.
+_LAZY = {
+    "bootstrap": ("bootstrap_config", "BootstrapConfig", "block_length", "bootstrap", "BootstrapResult",
+                  "validate_bootstrap", "bootstrap_data", "study_metrics", "bootstrap_study",
+                  "SimLevBootstrapStudy", "SummarySimLevBootstrapStudy", "bootstrap_probability"),
+    "withdrawal": ("withdrawal_rule", "WithdrawalRule", "withdrawal_cohorts", "WithdrawalPaths",
+                   "result_index", "withdrawal_paths", "perfect_withdrawal_rate", "withdrawal_simulation",
+                   "SimLevWithdrawal", "SummarySimLevWithdrawal", "withdrawal_max_rate", "horizon_model",
+                   "SimLevHorizon"),
+    "dependence": ("fit_copula", "tail_dependence", "dcc_fit", "dependence_analysis", "quantile_reg",
+                   "tail_regression", "covar_analysis", "validate_dependence", "regime_subset",
+                   "SimLevDependence", "SimLevTailRegression", "SimLevCoVaR"),
+    "regimes": ("regime_hmm", "regime_states", "SimLevHMM"),
+    "scenarios": ("view_mean", "view_prob", "view_vol", "entropy_pooling", "copula_scenarios",
+                  "scenario_risk", "crisis_replay", "SimLevScenarios"),
+    "optimize": ("portfolio_optimize", "efficient_frontier", "rolling_optimization", "risk_contributions",
+                 "cpcv_portfolio", "SimLevOptimization", "SimLevFrontier", "SimLevCPCV",
+                 "SimLevBoundsPercent"),
+    "tactical": ("SimLevWeights", "signal_state", "momentum_score", "tactical_rules", "tactical_rotation",
+                 "target_volatility", "conditional_volatility", "glidepath", "blend_weights",
+                 "tactical_simulation"),
+    "deep_analysis": ("deep_analysis", "SimLevAnalysis"),
+    "planning": ("set_expected_return", "pooled_bootstrap", "portfolio_returns", "goal_optimize",
+                 "SimLevGoalPlan"),
+    "analysis_tests": ("signal_analysis", "sharpe_test", "reality_check", "min_track_record",
+                       "return_heatmap", "SimLevSignalAnalysis", "SimLevRealityCheck", "SimLevHeatmap"),
+    "overfitting": ("pbo", "probabilistic_sharpe", "deflated_sharpe", "walk_forward", "param_bootstrap",
+                    "sharpe_haircut", "SimLevPBO", "SimLevDSR", "SimLevWalkForward"),
+    "param_search": ("param_search", "param_space", "param_range", "plateau", "SimLevParamSpace",
+                     "SimLevParamRange", "SimLevParamSearch", "SummarySimLevParamSearch"),
+    "sensitivity": ("sensitivity_grid", "rebalancing_sensitivity", "lumpsum_vs_dca", "leveraged_series",
+                    "leverage_sensitivity", "SimLevSensitivity", "SimLevLumpSum"),
+}
 
 
 def isna_strict(x):
@@ -203,8 +112,10 @@ def isna_strict(x):
 def _callable_module(name):
     """Macht das Untermodul ``simlev.<name>`` aufrufbar wie die gleichnamige Funktion.
 
-    So gilt ``simlev.bootstrap(...)`` wie in R, und ``simlev.bootstrap.bootstrap_config``
-    bzw. ``import simlev.bootstrap`` erreichen weiter das Modul."""
+    So gilt ``simlev.backcast(...)`` wie in R, und ``simlev.backcast.backcast_fit``
+    bzw. ``import simlev.backcast`` erreichen weiter das Modul. Die erst bei Bedarf geladenen
+    Module ``bootstrap``, ``deep_analysis`` und ``param_search`` machen sich am Ende ihrer
+    Datei selbst aufrufbar (``_make_callable``)."""
     import sys
     import types
 
@@ -219,11 +130,34 @@ def _callable_module(name):
 
 
 backcast = _callable_module("backcast")
-bootstrap = _callable_module("bootstrap")
-deep_analysis = _callable_module("deep_analysis")
-param_search = _callable_module("param_search")
 
-__version__ = "0.7.0"
+_LAZY_NAMES = {name: mod for mod, names in _LAZY.items() for name in names}
+# Untermodule, die beim sofortigen Laden als Attribute von simlev entstanden (für dir(simlev))
+_LAZY_SUBMODULES = tuple(_LAZY) + ("_bootstrap_core", "_dependence_core", "_optimize_core", "_withdrawal_core")
+
+
+def __getattr__(name):
+    """Lädt das Analysemodul zu ``name`` beim ersten Zugriff (PEP 562)."""
+    mod = _LAZY_NAMES.get(name)
+    if mod is None:
+        if name in _LAZY_SUBMODULES:
+            return _importlib.import_module(__name__ + "." + name)
+        raise AttributeError("module %r has no attribute %r" % (__name__, name))
+    m = _importlib.import_module(__name__ + "." + mod)
+    value = m if name == mod else getattr(m, name)
+    globals()[name] = value
+    return value
+
+
+# Hilfsnamen des verzögerten Ladens erscheinen nicht in dir(simlev) (wie vorher)
+_LAZY_HIDDEN = frozenset({"_importlib", "_LAZY", "_LAZY_NAMES", "_LAZY_SUBMODULES", "_LAZY_HIDDEN",
+                          "__getattr__", "__dir__"})
+
+
+def __dir__():
+    return sorted((set(globals()) - _LAZY_HIDDEN) | set(_LAZY_NAMES) | set(_LAZY_SUBMODULES))
+
+__version__ = "0.8.0"
 
 __all__ = [
     "AssetConfig",

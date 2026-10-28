@@ -1,0 +1,119 @@
+# Bekannte Abweichungen der Schnittstelle (tools/api_snapshot/compare_api.py)
+#
+# Eine Zeile je bekannter Abweichung, Spalten durch Tabulator getrennt:
+#   schluessel  Zuordnungsschlüssel wie in api.json (Funktion oder <generic>.<Klasse>); * und ? als Platzhalter
+#   sprache     R, Python, Julia oder *
+#   art         fehlt, argument_fehlt, argument_extra, reihenfolge, standardwert
+#   detail      Detail wie im Bericht (Argumentname bzw. "arg: R=… | Sprache=…"); Platzhalter erlaubt
+#   status      bewusst (wird nicht gemeldet) oder unklar (wird gemeldet und eigens aufgelistet)
+#   begruendung nur aus Doku oder Code; sonst status unklar
+#   quelle      Fundstelle (Datei, Abschnitt, Zeile)
+# Die erste passende Zeile gilt. Stand: 25.10.2026 (Etappe 3).
+schluessel	sprache	art	detail	status	begruendung	quelle
+print.*	*	argument_fehlt	... (in R ungenutzt)	bewusst	R-Methoden müssen die Argumente der Generik print(x, ...) übernehmen; der R-Rumpf wertet `...` nicht aus, also ist das Verhalten gleich	R-Doku „Writing R Extensions“ 7.1; api_r.R dots_used = FALSE
+summary.*	*	argument_fehlt	... (in R ungenutzt)	bewusst	wie print: `...` gehört zur Generik summary(object, ...), der R-Rumpf wertet es nicht aus	R-Doku „Writing R Extensions“ 7.1; api_r.R dots_used = FALSE
+plot.*	*	argument_fehlt	... (in R *)	bewusst	plot-Methoden der Ports nehmen nur die Schlüsselwörter der Zeichenfunktion; unbekannte ergeben eine Warnung, Positionsargumente nach x werden mit Warnung ignoriert (R reicht `...` an die Basisgrafik weiter)	julia/DEVELOPING.md Regel 13; python/simlev/svg.py, julia/src/svg.jl `_plot_method`
+print.SimLevBackcast	Julia	argument_fehlt	... (in R genutzt)	unklar	R reicht `...` an print weiter; die Julia-Druckmethode (show) nimmt keine Optionen. Kein Hinweis in Doku oder Code, ob gewollt	r/R/backcast.R print.SimLevBackcast
+print.SimLevParamSearch	Julia	argument_fehlt	... (in R genutzt)	unklar	R reicht `...` weiter (Python hat **kwargs); Julia-show nimmt keine Optionen. Gewollt oder Lücke ist nicht dokumentiert	r/R/param_search.R print.SimLevParamSearch
+print.SimLevWithdrawal	*	argument_fehlt	... (in R genutzt)	unklar	R wertet `...` in print.SimLevWithdrawal aus; Python/Julia nehmen keine Optionen. Nicht dokumentiert	r/R/withdrawal.R print.SimLevWithdrawal
+plot.*	*	argument_extra	file	bewusst	Ports zeichnen ohne Zusatzpaket SVG und schreiben nur mit file = "….svg"; R zeichnet auf das aktive Grafikgerät	julia/DEVELOPING.md Regel 13 und „Grafik“; python/DEVELOPING.md „Grafik“
+plot.*	*	argument_extra	width	bewusst	Breite des SVG in Pixeln (Schlüsselwort der Zeichenfunktion); in R bestimmt das Grafikgerät die Größe	Code: Zeichenfunktionen _plot_*/plot_SimLev* in python/simlev/*.py und julia/src/*.jl
+plot.*	*	argument_extra	height	bewusst	Höhe des SVG in Pixeln (wie width)	Code: Zeichenfunktionen _plot_*/plot_SimLev* in python/simlev/*.py und julia/src/*.jl
+plot.SimLevWeights	*	argument_extra	main	unklar	Ports haben main als eigenes Schlüsselwort (Standard "Zielgewichte"); in R kommt ein Titel nur über `...`. Ob gewollt, sagt weder Doku noch Code	python/simlev/tactical.py, julia/src/tactical.jl plot_SimLevWeights
+plot.SimLevHMM	*	argument_fehlt	data	unklar	R plot.SimLevHMM hat ein Argument data; die Ports haben es nicht. Nicht dokumentiert	r/R/regimes.R plot.SimLevHMM
+plot.SimLevResult	*	standardwert	panels: *	bewusst	Ports: None/nothing heißt „nicht angegeben“ (R prüft missing(panels)); die Panels setzt der Rumpf	Code: python/simlev/dashboard.py:734, julia/src/dashboard.jl:566 (panels_given)
+plot.SimLevParamSearch	*	standardwert	metric: R=x$objective *	bewusst	R-Standardwert ist ein Ausdruck aus x (verzögerte Auswertung); die Ports setzen ihn im Rumpf	Code: python/simlev/param_search.py:858, julia/src/param_search.jl:565
+plot.SimLevParamSearch	*	standardwert	params: R=utils::head(x$params, 2) *	bewusst	R-Standardwert ist ein Ausdruck aus x; die Ports setzen ihn im Rumpf	Code: python/simlev/param_search.py:860, julia/src/param_search.jl:566
+print.SimLevDataCheck	Julia	argument_fehlt	max_issues	unklar	Julia-show druckt mit festem max_issues; die Option gibt es nur in print_SimLevDataCheck(x; max_issues, io), nicht in der registrierten Druckmethode	julia/src/data_prep.jl:816, :1211
+print.SimLevParamRange	R	fehlt	*	bewusst	R hat keine print-Methode (print.default); Python braucht format(), damit die Ausgabe der R-Ausgabe gleicht	python/DEVELOPING.md „Datenstrukturen“ (format() liefert exakt die R-Druckausgabe)
+print.SimLevParamRange	Julia	fehlt	*	bewusst	keine R-Methode; Julia druckt über die R-genaue Standarddruckausgabe	julia/src/r/types.jl (_DEFAULT_PRINT)
+print.withdrawal_paths	R	fehlt	*	bewusst	R hat keine print-Methode (print.default); Python braucht format() für die R-gleiche Ausgabe	python/DEVELOPING.md „Datenstrukturen“
+print.withdrawal_paths	Julia	fehlt	*	bewusst	keine R-Methode; Julia druckt über die R-genaue Standarddruckausgabe	julia/src/r/types.jl (_DEFAULT_PRINT)
+summary.SimLevResult	Python	argument_extra	verbose	bewusst	summary(res) druckt in Python nicht, sondern gibt SimLevSummary zurück; verbose=True druckt zusätzlich	python/DEVELOPING.md „Abbildung der Engine-Objekte“; python/simlev/result.py:133
+summary.*	Julia	argument_extra	io	bewusst	Julia: Ausgabestrom für den Text, den R auf die Konsole schreibt	Code: io::IO = stdout in julia/src/backcast.jl:778, deep_analysis.jl:990, config.jl:409-410
+simulation	Julia	argument_extra	io	bewusst	Julia: Strom für die details-Ausgabe	Docstring julia/src/sim_evaluate.jl ("Die details-Ausgabe geht nach io")
+withdrawal_rule	Julia	argument_extra	...	bewusst	kwargs... fängt nur unbekannte Namen ab, um R's Fehlermeldung "unused argument (…)" wortgleich zu geben	Code: julia/src/withdrawal.jl:97-101
+bootstrap_probability	*	argument_extra	env	bewusst	Bedingungen sind in den Ports Text in R-Syntax; freie Variablen kommen aus env, sonst aus dem Namensraum des Aufrufers (R: Ausdruck mit parent.frame())	python/DEVELOPING.md „Datenstrukturen“; julia/DEVELOPING.md Tabelle src/r/rexpr.jl
+entropy_pooling	*	argument_extra	env	bewusst	Bedingungen sind in den Ports Text in R-Syntax; freie Variablen kommen aus env, sonst aus dem Namensraum des Aufrufers (R: Ausdruck mit parent.frame())	python/DEVELOPING.md „Datenstrukturen“; julia/DEVELOPING.md Tabelle src/r/rexpr.jl
+regime_subset	*	argument_extra	env	bewusst	Bedingungen sind in den Ports Text in R-Syntax; freie Variablen kommen aus env, sonst aus dem Namensraum des Aufrufers (R: Ausdruck mit parent.frame())	python/DEVELOPING.md „Datenstrukturen“; julia/DEVELOPING.md Tabelle src/r/rexpr.jl
+tactical_rules	*	argument_extra	env	bewusst	Bedingungen sind in den Ports Text in R-Syntax; freie Variablen kommen aus env, sonst aus dem Namensraum des Aufrufers (R: Ausdruck mit parent.frame())	python/DEVELOPING.md „Datenstrukturen“; julia/DEVELOPING.md Tabelle src/r/rexpr.jl
+summary	R	fehlt	*	bewusst	generisches summary() der Ports; in R die Basis-Generik	python/DEVELOPING.md „Datenstrukturen“; julia/DEVELOPING.md „Datenstrukturen“ (r_summary)
+plot	R	fehlt	*	bewusst	generisches plot() der Ports; in R die Basis-Generik	python/DEVELOPING.md „Datenstrukturen“; julia/DEVELOPING.md „Datenstrukturen“ (r_plot)
+summary	Julia	argument_fehlt	object	unklar	Julia r_summary(x, …), Python summary(object, …) wie R; Name des Objektarguments verschieden, nicht begründet	julia/src/r/types.jl:339; python/simlev/__init__.py:393
+summary	Julia	argument_extra	x	unklar	siehe Zeile davor (Gegenstück)	julia/src/r/types.jl:339
+set_seed	R	fehlt	*	bewusst	Gegenstück der R-Basisfunktion set.seed()	python/DEVELOPING.md Regel 4 und „Referenzfälle“; julia/src/exports.jl
+rng_kind	R	fehlt	*	bewusst	Gegenstück der R-Basisfunktion RNGkind()	Docstrings python/simlev/_r/rng.py:343, julia/src/r/rng.jl:294
+isna_strict	R	fehlt	*	bewusst	unterscheidet R's NA von NaN (in R is.na/is.nan)	julia/DEVELOPING.md „Datenstrukturen“; python/simlev/_r/rexpr.py:107
+attrs	R	fehlt	*	bewusst	Julia-Hilfe für die R-Datenstrukturen (RList, RFrame, RVector); in R Basisfunktionen	julia/DEVELOPING.md „Datenstrukturen“; Kopf von julia/src/r/types.jl
+attrs	Python	fehlt	*	bewusst	Python nutzt dafür dict/pandas (RList, DataFrame, Series)	python/DEVELOPING.md „Datenstrukturen“
+named	R	fehlt	*	bewusst	Julia-Hilfe für die R-Datenstrukturen (RList, RFrame, RVector); in R Basisfunktionen	julia/DEVELOPING.md „Datenstrukturen“; Kopf von julia/src/r/types.jl
+named	Python	fehlt	*	bewusst	Python nutzt dafür dict/pandas (RList, DataFrame, Series)	python/DEVELOPING.md „Datenstrukturen“
+ncol	R	fehlt	*	bewusst	Julia-Hilfe für die R-Datenstrukturen (RList, RFrame, RVector); in R Basisfunktionen	julia/DEVELOPING.md „Datenstrukturen“; Kopf von julia/src/r/types.jl
+ncol	Python	fehlt	*	bewusst	Python nutzt dafür dict/pandas (RList, DataFrame, Series)	python/DEVELOPING.md „Datenstrukturen“
+nrow	R	fehlt	*	bewusst	Julia-Hilfe für die R-Datenstrukturen (RList, RFrame, RVector); in R Basisfunktionen	julia/DEVELOPING.md „Datenstrukturen“; Kopf von julia/src/r/types.jl
+nrow	Python	fehlt	*	bewusst	Python nutzt dafür dict/pandas (RList, DataFrame, Series)	python/DEVELOPING.md „Datenstrukturen“
+rows	R	fehlt	*	bewusst	Julia-Hilfe für die R-Datenstrukturen (RList, RFrame, RVector); in R Basisfunktionen	julia/DEVELOPING.md „Datenstrukturen“; Kopf von julia/src/r/types.jl
+rows	Python	fehlt	*	bewusst	Python nutzt dafür dict/pandas (RList, DataFrame, Series)	python/DEVELOPING.md „Datenstrukturen“
+r_class	R	fehlt	*	bewusst	Julia-Hilfe für die R-Datenstrukturen (RList, RFrame, RVector); in R Basisfunktionen	julia/DEVELOPING.md „Datenstrukturen“; Kopf von julia/src/r/types.jl
+r_class	Python	fehlt	*	bewusst	Python nutzt dafür dict/pandas (RList, DataFrame, Series)	python/DEVELOPING.md „Datenstrukturen“
+inherits	R	fehlt	*	bewusst	Julia-Hilfe für die R-Datenstrukturen (RList, RFrame, RVector); in R Basisfunktionen	julia/DEVELOPING.md „Datenstrukturen“; Kopf von julia/src/r/types.jl
+inherits	Python	fehlt	*	bewusst	Python nutzt dafür dict/pandas (RList, DataFrame, Series)	python/DEVELOPING.md „Datenstrukturen“
+format_result	R	fehlt	*	bewusst	Julia: Text der R-Druckausgabe von print(result) bzw. print(summary(result))	Docstrings julia/src/result.jl:79, :175
+format_result	Python	fehlt	*	unklar	Python hat dafür SimLevResult.format()/SimLevSummary.format(), aber keine exportierte Funktion; nicht dokumentiert	python/simlev/result.py
+format_summary	R	fehlt	*	bewusst	Julia: Text der R-Druckausgabe von print(result) bzw. print(summary(result))	Docstrings julia/src/result.jl:79, :175
+format_summary	Python	fehlt	*	unklar	Python hat dafür SimLevResult.format()/SimLevSummary.format(), aber keine exportierte Funktion; nicht dokumentiert	python/simlev/result.py
+plot_dashboard	R	fehlt	*	unklar	R zeichnet das Dashboard über plot.SimLevResult (r/R/plot_dashboard.R), Julia exportiert plot_dashboard zusätzlich; nicht begründet	julia/src/SimLev.jl export; julia/DEVELOPING.md „Grafik“
+plot_dashboard	Python	fehlt	*	unklar	Python hat simlev.dashboard.plot_dashboard, aber nicht in __all__; Julia exportiert es	python/DEVELOPING.md „Grafik“
+export_dashboard	*	standardwert	filename: *	bewusst	Ports schreiben nur SVG (andere Endung ist ein Fehler); R schreibt PDF	Docstrings python/simlev/__init__.py export_dashboard, julia/src/dashboard.jl:645-649
+bond_index_from_yields	Python	standardwert	yield: *	bewusst	yield ist in Python ein Schlüsselwort: yield_=None, damit `yield` auch über **kw kommen kann	python/DEVELOPING.md „Ziel“; Code python/simlev/bonds.py (kw.pop("yield"))
+glidepath	Python	standardwert	from: *	bewusst	from ist in Python ein Schlüsselwort: from_=None, damit `from` auch über **kwargs kommen kann	python/DEVELOPING.md „Ziel“; Code python/simlev/tactical.py:1007
+glidepath	Python	standardwert	to: *	unklar	R verlangt to, Python hat to=None; nicht begründet	python/simlev/tactical.py:988
+bootstrap_study	*	standardwert	strategies: *	unklar	R verlangt strategies, die Ports haben None/nothing; nicht begründet	python/simlev/bootstrap.py:1757, julia/src/bootstrap.jl:1820
+param_search	Python	standardwert	space: *	unklar	R verlangt space, Python hat space=None; nicht begründet	python/simlev/param_search.py:500
+param_search	Julia	standardwert	builder: *	unklar	R hat builder = NULL, Julia verlangt builder (Positionsargument); nicht begründet	julia/src/param_search.jl:332
+backcast_fit	Python	standardwert	grid: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/backcast.py:511
+backcast_fit	Julia	standardwert	grid: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: julia/src/backcast.jl:424
+backcast_fit	Python	standardwert	bounds: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/backcast.py:515
+backcast_fit	Julia	standardwert	bounds: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: julia/src/backcast.jl:428
+backcast_fit	Python	standardwert	fixed: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/backcast.py:510 (dict(fixed or {}))
+backcast_fit	Julia	standardwert	fixed: *	unklar	R list(), Julia nothing; Ersetzung im Rumpf nicht belegt	julia/src/backcast.jl:411
+bootstrap	Python	standardwert	params: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/bootstrap.py:659, :819 (dict(params or {}))
+bootstrap_study	Python	standardwert	params: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/bootstrap.py:659, :819 (dict(params or {}))
+bootstrap_study	Python	standardwert	sim_args: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/bootstrap.py:1795
+bootstrap	Julia	standardwert	params: *	unklar	R list(), Julia nothing; Ersetzung im Rumpf nicht belegt	julia/src/bootstrap.jl
+bootstrap_study	Julia	standardwert	params: *	unklar	R list(), Julia nothing; Ersetzung im Rumpf nicht belegt	julia/src/bootstrap.jl
+bootstrap_study	Julia	standardwert	sim_args: *	unklar	R list(), Julia nothing; julia/src/bootstrap.jl:1847 ruft _as_rlist(sim_args), dass nothing eine leere Liste ergibt, ist nicht belegt	julia/src/bootstrap.jl:1847
+leverage_sensitivity	Python	standardwert	leverages: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/sensitivity.py:637
+leverage_sensitivity	Julia	standardwert	leverages: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: julia/src/sensitivity.jl:331
+leverage_sensitivity	Python	standardwert	sim_args: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/sensitivity.py:638
+leverage_sensitivity	Julia	standardwert	sim_args: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: julia/src/sensitivity.jl:332
+rebalancing_sensitivity	Python	standardwert	sim_args: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/sensitivity.py:389
+rebalancing_sensitivity	Julia	standardwert	sim_args: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: julia/src/sensitivity.jl:129
+sensitivity_grid	Python	standardwert	sim_args: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/sensitivity.py:152
+sensitivity_grid	Julia	standardwert	sim_args: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: julia/src/sensitivity.jl:61
+lumpsum_vs_dca	Python	standardwert	sim_args: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/sensitivity.py:495
+lumpsum_vs_dca	Julia	standardwert	sim_args: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: julia/src/sensitivity.jl:210
+leverage_sensitivity	Python	standardwert	metrics: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/sensitivity.py:639 (_metrics_default)
+leverage_sensitivity	Julia	standardwert	metrics: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: julia/src/sensitivity.jl:333 (_metrics)
+rebalancing_sensitivity	Python	standardwert	metrics: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/sensitivity.py:390 (_metrics_default)
+rebalancing_sensitivity	Julia	standardwert	metrics: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: julia/src/sensitivity.jl:130 (_metrics)
+sensitivity_grid	Python	standardwert	metrics: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/sensitivity.py:153 (_metrics_default)
+sensitivity_grid	Julia	standardwert	metrics: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: julia/src/sensitivity.jl:62 (_metrics)
+rebalancing_sensitivity	Python	standardwert	frequencies: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/sensitivity.py:388
+rebalancing_sensitivity	Julia	standardwert	frequencies: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: julia/src/sensitivity.jl:128
+param_bootstrap	Python	standardwert	include: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/overfitting.py:880
+param_bootstrap	Julia	standardwert	include: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: julia/src/overfitting.jl:832 mit _kv(::Nothing) = [] (:185)
+param_search	Python	standardwert	sim_args: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/param_search.py:537
+param_search	Julia	standardwert	sim_args: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: julia/src/param_search.jl:337
+param_search	Python	standardwert	metrics: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/param_search.py:538
+param_search	Julia	standardwert	metrics: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: julia/src/param_search.jl:338
+plateau	Python	standardwert	metric: *	bewusst	R-Standardwert ist ein Ausdruck aus anderen Argumenten (verzögerte Auswertung); der Rumpf setzt ihn ein	Code: python/simlev/param_search.py:719
+plateau	Julia	standardwert	metric: *	bewusst	R-Standardwert ist ein Ausdruck aus anderen Argumenten (verzögerte Auswertung); der Rumpf setzt ihn ein	Code: julia/src/param_search.jl:494
+regime_states	Python	standardwert	state_prob: *	bewusst	R-Standardwert ist ein Ausdruck aus anderen Argumenten (verzögerte Auswertung); der Rumpf setzt ihn ein	Code: python/simlev/regimes.py:337
+regime_states	Julia	standardwert	state_prob: *	bewusst	R-Standardwert ist ein Ausdruck aus anderen Argumenten (verzögerte Auswertung); der Rumpf setzt ihn ein	Code: julia/src/regimes.jl:356
+walk_forward	Python	standardwert	step: *	bewusst	R-Standardwert ist ein Ausdruck aus anderen Argumenten (verzögerte Auswertung); der Rumpf setzt ihn ein	Code: python/simlev/overfitting.py:759
+walk_forward	Julia	standardwert	step: *	bewusst	R-Standardwert ist ein Ausdruck aus anderen Argumenten (verzögerte Auswertung); der Rumpf setzt ihn ein	Code: julia/src/overfitting.jl:672
+tactical_simulation	Python	standardwert	asset_args: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/tactical.py:1207
+withdrawal_simulation	Python	standardwert	rule: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/withdrawal.py:992
+withdrawal_max_rate	Python	standardwert	rule: *	bewusst	None/nothing steht für den R-Standardwert; der Rumpf setzt ihn ein	Code: python/simlev/withdrawal.py:1406
+withdrawal_simulation	Julia	standardwert	frequency: *	bewusst	match.arg-Auswahl; Julia nothing wird über freq_arg an _match_arg gegeben (nothing → erstes Element)	Code: julia/src/withdrawal.jl:763, :948-960 (freq_arg über _match_arg)

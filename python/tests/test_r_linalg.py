@@ -2,20 +2,13 @@
 
 Die vollständige Bitgleichheit prüfen die Referenzfälle in
 ``golden/modules/r_linalg`` (Generator ``golden/modules/gen_r_linalg.R``,
-``tools/compare_reference.py r_linalg``); sie laufen hier ebenfalls mit.
+``tools/compare_reference.py r_linalg``) in ``test_module_reference.py``.
 """
-import os
-
 import numpy as np
 import pytest
 
 import simlev._r.linalg as la
 from simlev._r import _lapack
-from simlev._r.reftree import load_case, run_case
-
-EXACT = np.finfo(np.longdouble).nmant >= 63
-DIR = os.path.join(os.path.dirname(__file__), "..", "..", "golden", "modules", "r_linalg")
-CASES = sorted(f for f in os.listdir(DIR) if f.endswith(".json.gz")) if os.path.isdir(DIR) else []
 
 A3 = np.array([[2, 3, 4], [1, 0.5, 2], [1, 1, 7.0]])
 S2 = np.array([[2, 1], [1, 3.0]])
@@ -77,10 +70,3 @@ def test_matprod_shapes():
     assert la.crossprod(np.ones((4, 2))).shape == (2, 2)
     with pytest.raises(ValueError, match="non-conformable arguments"):
         la.matprod(np.ones((2, 3)), np.ones((2, 3)))
-
-
-@pytest.mark.skipif(not EXACT, reason="Bitgleichheit setzt 80-Bit-long-double voraus")
-@pytest.mark.parametrize("case", CASES)
-def test_reference_case(case):
-    errs = run_case(load_case(os.path.join(DIR, case)))
-    assert not errs, "\n".join(errs)

@@ -73,7 +73,7 @@ _pw_block_stationary(x) = Float64(_el(SimLev.Bootstrap._pw_block(x), "stationary
 _errmsg(e) = e isa ErrorException ? e.msg : sprint(showerror, e)
 
 "R-`message()`: Text mit Zeilenumbruch auf `stderr`."
-message(text) = (println(stderr, text); flush(stderr); nothing)
+message(text) = (io = SimLev.RParallel.r_stderr(); println(io, text); flush(io); nothing)
 
 "Warnungen unterdrücken (`suppressWarnings`)."
 _quietly(f) = Base.CoreLogging.with_logger(f, Base.CoreLogging.NullLogger())

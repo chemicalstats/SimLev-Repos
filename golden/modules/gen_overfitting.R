@@ -158,4 +158,9 @@ bcase("pb_err", "param_bootstrap(list(a = 1), h, cfg)", "result = OF.param_boots
 bcase("ps_real_checks", "list(pbo(ps, S = 2, frequency = 'week'), deflated_sharpe(ps, frequency = 'day')$psr, sharpe_haircut(ps, frequency = 'month'), walk_forward(ps, train = 0.5, test = 0.25)$summary)",
       "result = [OF.pbo(ps, S=2, frequency='week'), OF.deflated_sharpe(ps, frequency='day')['psr'], OF.sharpe_haircut(ps, frequency='month'), OF.walk_forward(ps, train=0.5, test=0.25)['summary']]",
       'result = [OF.pbo(ps; S = 2, frequency = "week"), OF.deflated_sharpe(ps; frequency = "day")["psr"], OF.sharpe_haircut(ps; frequency = "month"), OF.walk_forward(ps; train = 0.5, test = 0.25)["summary"]]')
+# ── cores = 2 (Etappe 5): param_bootstrap reicht cores an bootstrap_study ──
+bcase("pb_cores2", "bs <- param_bootstrap(ps, h, cfg, top = 2, method = 'stationary', n = 3, params = list(L = 50), seed = 1, progress = FALSE, chunk_size = 1, cores = 2); list(attr(bs, 'param_ids'), bs$results)",
+      "bs = OF.param_bootstrap(ps, h, cfg, top=2, method='stationary', n=3, params={'L': 50}, seed=1, progress=False, chunk_size=1, cores=2); result = [bs.attrs['param_ids'], bs['results']]",
+      'bs = OF.param_bootstrap(ps, h, cfg; top = 2, method = "stationary", n = 3, params = RList("L" => 50), seed = 1, progress = false, chunk_size = 1, cores = 2); result = [OF.param_ids(bs), bs["results"]]')
+
 ref_done()

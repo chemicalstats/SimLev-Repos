@@ -569,4 +569,19 @@ case("study_print_paired", paste0(SB_R, "st <- bootstrap_study(ds, cfgb, 'statio
      paste0(SB_P, "st = bootstrap_study(ds, cfgb, 'stationary', n=3, params={'L': 20}, path_length=150, seed=6, progress=False, benchmark='a', strategies={'a': bnh, 'h': simlev.create_strategy(akt=simlev.asset_config('etf', 'bnh', asset_share=0.5))}); st['elapsed'] = 2.25; result = st"), Is,
      jl = paste0(SB_J, 'st = bootstrap_study(ds, cfgb, "stationary"; n = 3, params = (L = 20,), path_length = 150, seed = 6, progress = false, benchmark = "a", strategies = (a = bnh, h = create_strategy(akt = asset_config("etf", "bnh", asset_share = 0.5)))); st["elapsed"] = 2.25; result = st'))
 
+# ── cores = 2 (Etappe 5): Ergebnis und Zufallszustand danach wie bei Fork ───
+case("bs_cores2_rng", paste0(CFG_R, "set.seed(4); b <- bootstrap(d, cfg, 'stationary', n = 5, seed = 1, progress = FALSE, cores = 2, path_length = 120); list(b, runif(1))"),
+     paste0(CFG_P, "RNG.set_seed(4); b = bootstrap(d, cfg, 'stationary', n=5, seed=1, progress=False, cores=2, path_length=120); result = [b, RNG.runif(1)]"), I,
+     jl = paste0(CFG_J, 'RNG.set_seed(4); b = bootstrap(d, cfg, "stationary"; n = 5, seed = 1, progress = false, cores = 2, path_length = 120); result = [b, RNG.runif(1)]'))
+case("bs_cores2_garch", "bootstrap(d, bootstrap_config(c(us = 'us', eu = 'eu')), 'gjr_garch', n = 3, seed = 6, progress = FALSE, path_length = 80, cores = 2)",
+     "result = bootstrap(d, bootstrap_config({'us': 'us', 'eu': 'eu'}), 'gjr_garch', n=3, seed=6, progress=False, path_length=80, cores=2)", I,
+     jl = 'result = bootstrap(d, bootstrap_config((us = "us", eu = "eu")), "gjr_garch"; n = 3, seed = 6, progress = false, path_length = 80, cores = 2)')
+case("study_cores2", paste0(STR_R, "set.seed(8); st <- bootstrap_study(ds, cfgs, 'stationary', n = 4, params = list(L = 30), path_length = 400, burn_in = 35, seed = 1, progress = FALSE, benchmark = 'bnh', strategies = strats, chunk_size = 1, cores = 2); st$elapsed <- 0; list(st, runif(1))"),
+     paste0(STR_P, "RNG.set_seed(8); st = bootstrap_study(ds, cfgs, 'stationary', n=4, params={'L': 30}, path_length=400, burn_in=35, seed=1, progress=False, benchmark='bnh', strategies=strats, chunk_size=1, cores=2); st['elapsed'] = 0; result = [st, RNG.runif(1)]"), Is,
+     jl = paste0(STR_J, 'RNG.set_seed(8); st = bootstrap_study(ds, cfgs, "stationary"; n = 4, params = (L = 30,), path_length = 400, burn_in = 35, seed = 1, progress = false, benchmark = "bnh", strategies = strats, chunk_size = 1, cores = 2); st["elapsed"] = 0; result = [st, RNG.runif(1)]'))
+case("study_cores2_warn", paste0(SB_R, "mk <- function(k) function(df) { for (j in seq_len(k)) warning(paste('W', j)); list(x = 1) }; st <- bootstrap_study(ds, cfgb, 'raw', n = 3, path_length = 100, seed = 1, progress = FALSE, chunk_size = 1, cores = 2, strategies = list(a = list(strategy = bnh, signal = mk(3)), b = list(strategy = bnh, signal = mk(2)))); list(st$results, st$warnings)"),
+     paste0(SB_P, "def mk(k):\n    def f(df):\n        for j in range(1, k + 1):\n            warnings.warn('W %d' % j)\n        return {'x': 1}\n    return f\nimport warnings\nst = bootstrap_study(ds, cfgb, 'raw', n=3, path_length=100, seed=1, progress=False, chunk_size=1, cores=2, strategies={'a': {'strategy': bnh, 'signal': mk(3)}, 'b': {'strategy': bnh, 'signal': mk(2)}}); result = [st['results'], st['warnings']]"), Is,
+     jl = paste0(SB_J, 'mk(k) = df -> (for j in 1:k; @warn "W $j"; end; (x = 1,))
+st = bootstrap_study(ds, cfgb, "raw"; n = 3, path_length = 100, seed = 1, progress = false, chunk_size = 1, cores = 2, strategies = (a = (strategy = bnh, signal = mk(3)), b = (strategy = bnh, signal = mk(2)))); result = [st["results"], st["warnings"]]'))
+
 ref_done()

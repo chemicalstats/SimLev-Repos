@@ -1,5 +1,13 @@
 # SimLev.jl (Julia) – Änderungen je Version
 
+## SimLev.jl 0.8.0
+
+Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Prüfwerkzeuge: Abgleich der Schnittstelle der drei Sprachen (tools/api_snapshot), Referenzfälle in kompaktem Format mit gemeinsamen Eingaben, Laufzeitmessung (tools/bench).
+- Verschlankung: entfernt sind interaktive Grafiken, create_config, migrate_strategy, as_list sowie scipy und TTR; Engine in Teilmodule aufgeteilt, Schichtentest, Schalter SIMLEV_* an einer Stelle.
+- Parallelität: cores in Python (Fork-Prozesse) und Julia (Threads) mit denselben Ergebnissen wie R.
+
 ## SimLev.jl 0.7.0
 
 Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -90,8 +98,21 @@ weiterhin nur die Standardbibliothek (`Dates`, `Printf`, `Logging`;
   `regime_subset()`, `view_prob()`) wertet ein gemeinsamer Auswerter in
   R-Syntax aus (`SimLev.RExpr`), mit R's Vorrangregeln, NA-Logik, `%in%`
   und `%%`. Die Python-Fassung nutzt dafür Python- bzw. pandas-Ausdrücke.
-* `cores > 1` rechnet sequenziell mit der Zufallssemantik von
-  `mclapply(mc.set.seed = FALSE)`, also mit denselben Ergebnissen wie R.
+* `cores > 1` rechnet parallel mit `Threads.@spawn`, wenn Julia mit
+  mehreren Threads läuft (`julia -t auto`, `JULIA_NUM_THREADS`), sonst
+  nacheinander; in beiden Fällen mit der Zufallssemantik von
+  `mclapply(mc.set.seed = FALSE)`, also mit denselben Ergebnissen wie R
+  (`SimLev.RParallel.par_lapply`, Nachbildung von `.par_lapply`). Jede
+  Aufgabe rechnet mit einer eigenen Kopie des Zufallszustands
+  (`RRng.with_state`); Meldungen gehen über `RParallel.r_stderr()` und
+  erscheinen in der Reihenfolge der Einheiten, Warnungen gehen wie in R
+  verloren, ein Fehler bricht wie bei `cores = 1` ab. Dafür sind die
+  veränderlichen globalen Zustände thread-sicher: `suppressMessages`
+  (`_no_messages`, `Overfitting._quiet`) wirkt je Aufgabe statt über
+  `redirect_stderr`, der Abfang-Handler von `portfolio_optimize` ist
+  task-lokal, Kollation, System-LAPACK und `param_ids` richten sich unter
+  einer Sperre ein, `bsplvb` (smooth.spline) hält seinen Zustand je Aufruf.
+  `cores` zwischen 1 und 2 rechnet wie in R als `lapply`.
 * MS-GARCH ohne MSGARCH, eigene Schätzung wie R: Die Verfahren
   `"ms_garch"`, `"ms_ar_garch_m"` und `"tvtp_ms_garch"` von `bootstrap()`
   und `bootstrap_study()` laufen jetzt auch in Julia, bitgleich zu R. Das
@@ -194,6 +215,23 @@ weiterhin nur die Standardbibliothek (`Dates`, `Printf`, `Logging`;
 * `Pkg.test()` umfasst 929 Tests: alle Engine-Fälle, von den Modul-Fällen
   eine Auswahl (alle mit `SIMLEV_FULL_TESTS=1`) sowie Tests für `F80`,
   Engine, Ausgabe und den Auswerter für Bedingungen.
+* `tools/compare_golden.jl` prüft ohne Pfad `golden/cases` und
+  `golden/extra` und nimmt mehrere Ordner (mit Gesamtsumme).
+* Neu: `test/layers_tests.jl` prüft die Schichten der Dateien in `src/`
+  (0 R-Interna, 1 Daten und Strategie, 2 Engine, 3 Analysen, 4 Ausgabe; kein
+  Zugriff auf eine höhere Schicht, bekannte Ausnahmen begründet) und dass
+  die Schalter `SIMLEV_*` nur in `src/r/env.jl` gelesen werden.
+* Alle Umgebungsschalter `SIMLEV_*` liest jetzt `SimLev.REnv`
+  (`src/r/env.jl`, Tabelle in `DEVELOPING.md`); Wirkung, Standardwerte und
+  Meldungen sind unverändert.
+* Ausdrücke in `test/rexpr_tests.jl`, die ein Referenzfall
+  (`golden/modules/rexpr`) wörtlich prüft, stehen nur noch dort.
+* Vorkompilierung: Die Arbeitslast deckt nur noch die häufigen Wege ab
+  (Engine, `bootstrap` stationär und GARCH über den rugarch-Weg,
+  `bootstrap_study`, MS-GARCH-Schätzung, Entnahme, Optimierung,
+  `deep_analysis`); Parametersuche, Abhängigkeiten, Szenarien,
+  Sensitivitäten, Taktik, Planung und `align_series` übersetzt erst ihr
+  erster Aufruf.
 
 ### Bekannte Grenzen
 

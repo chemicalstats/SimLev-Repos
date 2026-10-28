@@ -1,28 +1,16 @@
 """Tests für simlev._r.fmt (Formatierung und Druckausgabe wie R 4.3.3).
 
-Die Referenzfälle stammen aus ``golden/modules/gen_r_fmt.R``; zusätzlich
-einige feste Erwartungswerte (in R 4.3.3 ermittelt).
+Die Bitgleichheit prüfen die Referenzfälle ``golden/modules/r_fmt`` (Generator
+``golden/modules/gen_r_fmt.R``) in ``test_module_reference.py``; hier nur einige feste
+Erwartungswerte (in R 4.3.3 ermittelt).
 """
 import math
-import os
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from simlev._r import fmt as F
-from simlev._r.reftree import load_case, run_case
-
-ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "golden", "modules", "r_fmt")
-CASES = sorted(f for f in os.listdir(ROOT) if f.endswith(".json.gz")) if os.path.isdir(ROOT) else []
-EXACT = np.finfo(np.longdouble).nmant >= 63
-
-
-@pytest.mark.skipif(not EXACT, reason="formatReal nutzt 80-Bit-long-double (Linux/x86-64)")
-@pytest.mark.parametrize("case", CASES)
-def test_reference(case):
-    errs = run_case(load_case(os.path.join(ROOT, case)))
-    assert not errs, "\n".join(errs)
 
 
 def test_as_character():

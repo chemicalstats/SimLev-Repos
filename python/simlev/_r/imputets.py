@@ -37,6 +37,7 @@ import math
 import numpy as np
 import pandas as pd
 
+from . import env as _env
 from . import stats as _stats
 from . import stinepack as _sp
 from .linalg import RError
@@ -87,8 +88,14 @@ def _maxgap_mask(na, maxgap):
 
 
 def _locf_core(z, reverse):
-    """C++-Kern ``locf(x, reverse)`` aus imputeTS ``src/locf.cpp``."""
+    """C++-Kern ``locf(x, reverse)`` aus imputeTS ``src/locf.cpp`` (mit gebauter Erweiterung der
+    gemeinsame Kern ``r/src/vendor_imputets_impl.h``, Etappe 7.3a)."""
     z = np.array(z, dtype=np.float64)
+    ext = _env.ext()
+    if ext is not None and z.ndim == 1:
+        out = np.empty(z.size)
+        ext.imputets_locf(z, bool(reverse), out)
+        return out
     n = z.size
     if not reverse:
         for i in range(1, n):

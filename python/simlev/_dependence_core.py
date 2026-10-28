@@ -3,7 +3,10 @@
 Port von ``r/src/dependence_core.cpp`` (``.dcc_filter``, ``chol_small``) und
 aus ``r/src/research_core.cpp`` von ``.kendall_tau_core``,
 ``.quantile_reg_core`` (mit allen Hilfsroutinen) und
-``.hmm_forward_backward``. Rechenreihenfolge 1:1 aus dem C++-Code;
+``.hmm_forward_backward``. Mit gebauter Erweiterung rechnen die gemeinsamen
+Kerne von R und Python (``r/src/research_core_impl.cpp`` und
+``dependence_core_impl.cpp`` über ``simlev._ext``, Etappe 7.3a); sonst und mit
+``SIMLEV_NO_EXT=1`` die Python-Ports (bitgleich). Rechenreihenfolge 1:1 aus dem C++-Code;
 Summen über Beobachtungen werden streng sequenziell gebildet
 (``numpy.cumsum``), elementweise Operationen dürfen vektorisiert sein.
 
@@ -20,6 +23,7 @@ import numpy as np
 __all__ = ["dcc_filter", "chol_small", "kendall_tau_core", "quantile_reg_core",
            "hmm_forward_backward", "QuantileRegError"]
 
+from ._r import env as _env
 from ._r.fmt import NA_REAL as _NA   # R's NA_real_ (NA_REAL in research_core.cpp)
 
 
@@ -227,6 +231,15 @@ def dcc_filter(Z, a, b, Qbar, keep):
         Zm = Zm.reshape(-1, 1)
     n, k = Zm.shape
     np_ = k * (k - 1) // 2
+    ext = _env.ext()
+    if ext is not None:
+        Qm = np.asarray(Qbar, dtype=np.float64)
+        if Qm.ndim == 2 and Qm.shape[0] >= k and Qm.shape[1] >= k:
+            keep = bool(keep)
+            out = np.empty((np_, n) if keep else (0, 0))
+            nll, ok = ext.dcc_filter(np.ravel(Zm, order="F"), n, k, float(a), float(b), np.ravel(Qm, order="F"),
+                                     Qm.shape[0], keep, out)
+            return {"nll": nll, "R": np.ascontiguousarray(out.T), "ok": ok}
     Qb = np.asarray(Qbar, dtype=np.float64).tolist()
     Zl = Zm.tolist()
     a = float(a)
@@ -324,6 +337,9 @@ def kendall_tau_core(x, y):
     x = np.asarray(x, dtype=np.float64).ravel()
     y = np.asarray(y, dtype=np.float64).ravel()
     n = x.size
+    ext = _env.ext()
+    if ext is not None and y.size == n:
+        return ext.kendall_tau_core(np.ascontiguousarray(x), np.ascontiguousarray(y))
     if n < 2:
         return _NA
     o = np.lexsort((y, x))          # Gleichstände in (x, y) sind für ys gleichwertig
@@ -807,6 +823,16 @@ def quantile_reg_core(y, X, tau, beta0, sc, tol, maxit):
     tol = float(tol)
     maxit = int(maxit)
     beta = [float(v) for v in np.asarray(beta0, dtype=np.float64).ravel()]
+    ext = _env.ext()
+    if ext is not None and y.size >= n and len(beta) >= p and -2147483648 <= maxit <= 2147483647:
+        try:
+            b, opt = ext.quantile_reg_core(np.ascontiguousarray(y), np.ravel(X, order="F"), n, p, tau,
+                                           np.array(beta, dtype=np.float64), sc, tol, maxit)
+        except ValueError as e:                 # Fehler des Kerns (stop) wie im Python-Port
+            raise QuantileRegError(str(e)) from None
+        if b is None:
+            return np.zeros(0), None
+        return np.frombuffer(b, dtype=np.float64), opt
     if p == 0:
         return np.zeros(0), None
     Xl = X.tolist()
@@ -874,6 +900,18 @@ def hmm_forward_backward(B, A, p0):
     """``.hmm_forward_backward(B, A, p0)`` → dict filtered, smoothed, xi, scale."""
     Bm = np.asarray(B, dtype=np.float64)
     T, K = Bm.shape
+    ext = _env.ext()
+    if ext is not None:
+        Am = np.asarray(A, dtype=np.float64)
+        p0a = np.ascontiguousarray(np.asarray(p0, dtype=np.float64).ravel())
+        if T >= 1 and Am.ndim == 2 and Am.shape[0] >= K and Am.shape[1] >= K and p0a.size >= K:
+            out = [np.empty((K, T)) for _ in range(3)]
+            xi = np.empty((K, K))
+            cs = np.empty(T)
+            ext.hmm_forward_backward(np.ravel(Bm, order="F"), T, K, np.ravel(Am, order="F"), Am.shape[0], p0a,
+                                     *out, xi, cs)
+            al, ga = (np.ascontiguousarray(a.T) for a in (out[0], out[2]))
+            return {"filtered": al, "smoothed": ga, "xi": np.ascontiguousarray(xi.T), "scale": cs}
     Al = np.asarray(A, dtype=np.float64).tolist()
     p0 = [float(v) for v in np.asarray(p0, dtype=np.float64).ravel()]
     Bl = Bm.tolist()

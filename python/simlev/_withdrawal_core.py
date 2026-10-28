@@ -2,13 +2,18 @@
 
 Rechenreihenfolge 1:1 aus dem C++-Code (IEEE-Doubles, ``std::pow`` = libm
 ``pow`` über :func:`math.pow`). ``std::min``/``std::max`` werden mit ihrer
-exakten Semantik bei NaN nachgebildet.
+exakten Semantik bei NaN nachgebildet. Mit gebauter Erweiterung rechnet der
+gemeinsame Kern von R und Python (``r/src/withdrawal_core_impl.cpp`` über
+``simlev._ext``, Etappe 7.3a); sonst und mit ``SIMLEV_NO_EXT=1`` der Python-Port
+(bitgleich).
 """
 from __future__ import annotations
 
 import math
 
 import numpy as np
+
+from ._r import env as _env
 
 __all__ = ["wd_simulate", "rule_amount", "pmt_due"]
 
@@ -44,8 +49,9 @@ def _pow(x, y):
         return _INF if (x > 0 or y != math.floor(y) or int(y) % 2 == 0) else -_INF
 
 
-def _isfinite(x):
-    return not (math.isinf(x) or math.isnan(x))
+# std::isfinite (Etappe 7.1: math.isfinite direkt, gleiche Wahrheitswerte wie
+# not (isinf(x) or isnan(x)), ohne zusätzlichen Python-Aufruf)
+_isfinite = math.isfinite
 
 
 class WdError(ValueError):
@@ -299,6 +305,46 @@ def _mat(x, nr=None):
     return a
 
 
+_I32 = (-2147483648, 2147483647)
+
+
+def _f64(x):
+    return np.ascontiguousarray(np.asarray(x, dtype=np.float64).ravel())
+
+
+def _wd_simulate_ext(ext, R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real,
+                     tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep,
+                     lot_n, lot_basis, lot_vp, lot_group, spb_first, horizon_end):
+    """:func:`wd_simulate` mit dem gemeinsamen Kern; ``None``, wenn eine Eingabe nicht in die
+    C-Typen passt (dann rechnet der Python-Port)."""
+    lg = np.asarray(lot_group).ravel()
+    lgi = [int(v) for v in lg]
+    ppy, rule = int(ppy), int(rule)
+    if any(not (_I32[0] <= v <= _I32[1]) for v in lgi + [ppy, rule]):
+        return None
+    mats = []
+    for M in (R, INF, CAPE, BASE):
+        mats += [np.ravel(M, order="F"), M.shape[0], M.shape[1]]
+    try:
+        out = ext.wd_simulate(*mats, ppy, rule, _f64(rp), bool(start_timing), float(start_value), _f64(income_real),
+                              bool(tax_on), float(tax_rate), float(tfs), float(spb_annual), bool(vp_on), float(cost),
+                              float(basis_ratio), float(loss0), bool(keep), _f64(lot_n), _f64(lot_basis),
+                              _f64(lot_vp), np.array(lgi, dtype=np.int32), float(spb_first), bool(horizon_end))
+    except ValueError as e:                    # Fehler des Kerns (stop) wie im Python-Port
+        raise WdError(str(e)) from None
+    (ny, paths, wnr, wnc, enr, enc), arrs = out[0], out[1:]
+
+    def mat(ba, nr, nc):
+        return np.ascontiguousarray(np.frombuffer(ba, dtype=np.float64).reshape(nc, nr).T)
+
+    def vec(ba):
+        return np.frombuffer(ba, dtype=np.float64)
+    return {"wealth": mat(arrs[0], wnr, wnc), "spending": mat(arrs[1], ny, paths), "planned": mat(arrs[2], ny, paths),
+            "terminal_real": vec(arrs[3]), "terminal_nominal": vec(arrs[4]), "taxes_real": vec(arrs[5]),
+            "failed": vec(arrs[7]), "depletion_period": vec(arrs[6]),
+            "wealth_end": mat(arrs[8], enr, enc), "taxes_end": mat(arrs[9], enr, enc)}
+
+
 def wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real,
                 tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep,
                 lot_n=(), lot_basis=(), lot_vp=(), lot_group=(), spb_first=-1.0, horizon_end=False):
@@ -308,6 +354,13 @@ def wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, in
     CAPE = _mat(CAPE, R.shape[0])
     BASE = _mat(BASE)
     np_, paths = R.shape
+    ext = _env.ext()
+    if ext is not None:
+        res = _wd_simulate_ext(ext, R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real,
+                               tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep,
+                               lot_n, lot_basis, lot_vp, lot_group, spb_first, horizon_end)
+        if res is not None:
+            return res
     lot_n = [float(v) for v in np.asarray(lot_n, dtype=np.float64).ravel()]
     lot_basis = [float(v) for v in np.asarray(lot_basis, dtype=np.float64).ravel()]
     lot_vp = [float(v) for v in np.asarray(lot_vp, dtype=np.float64).ravel()]
@@ -459,6 +512,26 @@ def wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, in
                         add += diff
             return add
 
+        def withdraw(y, p, inc, need):
+            """Entnahme einer Periode (Etappe 7.1: einmal je Pfad definiert statt je Periode)."""
+            target = need + S["vp_due"]
+            paid_vp = 0.0
+            paid = 0.0
+            V = S["n"] * S["u"]
+            if target > 0 and V > 0:
+                G, tax, _a = sale(target, V)
+                net = G * (1.0 - cost) - tax
+                S["tax_sum"] += (tax + S["vp_due"]) / S["cpi"]
+                paid_vp = _min(net, S["vp_due"])
+                paid = net - paid_vp
+                S["tax_sum"] -= (S["vp_due"] - paid_vp) / S["cpi"]
+            S["vp_due"] = 0.0
+            spend[y, k] += (paid + inc) / S["cpi"]
+            if paid < need - 1e-8 * _max(1.0, need) and not (plan_all and S["n"] <= 0.0):
+                if not S["failed"]:
+                    S["failed"] = True
+                    S["depl_p"] = float(p + 1)
+
         V_ys = 0.0
         plan_all = False
         if horizon_end:
@@ -490,35 +563,15 @@ def wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, in
                     (W >= V_ys * (1.0 - 1e-12) or y == ny - 1)
             inc = income_real[_min(y, inc_n - 1)] * S["cpi"] / ppy
             need = _max(0.0, W / ppy - inc)
-
-            def withdraw(y=y, p=p, inc=inc, need=need):
-                target = need + S["vp_due"]
-                paid_vp = 0.0
-                paid = 0.0
-                V = S["n"] * S["u"]
-                if target > 0 and V > 0:
-                    G, tax, _a = sale(target, V)
-                    net = G * (1.0 - cost) - tax
-                    S["tax_sum"] += (tax + S["vp_due"]) / S["cpi"]
-                    paid_vp = _min(net, S["vp_due"])
-                    paid = net - paid_vp
-                    S["tax_sum"] -= (S["vp_due"] - paid_vp) / S["cpi"]
-                S["vp_due"] = 0.0
-                spend[y, k] += (paid + inc) / S["cpi"]
-                if paid < need - 1e-8 * _max(1.0, need) and not (plan_all and S["n"] <= 0.0):
-                    if not S["failed"]:
-                        S["failed"] = True
-                        S["depl_p"] = float(p + 1)
-
             if start_timing:
-                withdraw()
+                withdraw(y, p, inc, need)
             S["u"] *= Rk[p]
             if S["u"] < 0:
                 S["u"] = 0.0
             S["cpi"] *= Ik[p]
             yr_ret *= Rk[p]
             if not start_timing:
-                withdraw()
+                withdraw(y, p, inc, need)
             if ypos == ppy - 1 and tax_on and vp_on and S["n"] > 0:
                 br = _max(0.0, Bc[k][p]) / 100.0
                 vp_ps = _max(0.0, _min(u0 * 0.7 * br, S["u"] - u0))

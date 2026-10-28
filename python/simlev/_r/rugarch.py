@@ -66,6 +66,7 @@ import warnings
 import numpy as np
 import pandas as pd
 
+from . import env as _env
 from . import rnum as _rn
 from . import libm as _libm
 from . import linalg as _la
@@ -86,6 +87,16 @@ _EPS13 = _rn.r_pow(_EPS, 1.0 / 3.0)   # eps^(1/3)
 # in R 4.3.3); der Wert hängt nicht von den Parametern ab und ist hier als Konstante aus R
 # übernommen (sprintf("%a", rugarch:::pneg(0, 0, 0, "norm"))).
 KAPPA_NORM = float.fromhex("0x1.fffffffe3b5ap-2")
+
+# Gemeinsamer Kern (Etappe 7.3a): sgarchfilterC/gjrgarchfilterC aus
+# r/src/vendor_rugarch_impl.c über simlev._ext, mit den Argumenten, die R für
+# ARMA(0,0) mit Mittelwert, GARCH(1,1) und Normalverteilung an .C übergibt
+# (modelinc[1:21], idx[, 1] - 1, ipars[, 1] mit 19 Einträgen, m = 1). Ohne
+# Erweiterung oder mit SIMLEV_NO_EXT=1 rechnet die Python-Schleife unten.
+_MODEL = {False: np.array([1, 0, 0, 0, 0, 0, 1, 1, 1, 0] + [0] * 10 + [1], dtype=np.int32),
+          True: np.array([1, 0, 0, 0, 0, 0, 1, 1, 1, 1] + [0] * 10 + [1], dtype=np.int32)}
+_IDX = np.arange(19, dtype=np.int32)
+_ONE0 = np.zeros(1)
 
 
 class UGARCHfit(RList):
@@ -165,6 +176,35 @@ class _LLH:
             self.env.csol = 1
             return self._penalty()
         self.env.csol = 0
+        ext = _env.ext() if T >= 1 else None
+        if ext is not None:
+            lk, h, r, z, LHT = self._filter_ext(ext, x, T, mu, om, al, be, ga, hEst)
+        else:
+            lk, h, r, z, LHT = self._filter(x, T, mu, om, al, be, ga, hEst)
+        llh = lk
+        if _finite(llh):
+            self.env.llh = llh
+        else:
+            llh = self._penalty()
+        if returnType == "llh":
+            return llh
+        if returnType == "LHT":
+            return -LHT
+        return {"llh": llh, "h": h, "epsx": r, "z": z, "LHT": -LHT, "persistence": persist}
+
+    def _filter_ext(self, ext, x, T, mu, om, al, be, ga, hEst):
+        """sgarchfilterC/gjrgarchfilterC als gemeinsamer Kern (``simlev._ext``), Argumente wie .C in R."""
+        pars_c = np.zeros(19)
+        pars_c[0], pars_c[6], pars_c[7], pars_c[8] = mu, om, al, be
+        if self.gjr:
+            pars_c[9] = ga
+        r, nres_c, e, cmv, cdv, h, z, LHT = (np.zeros(T) for _ in range(8))
+        lk = ext.rugarch_filter(self.gjr, _MODEL[self.gjr], pars_c, _IDX, float(hEst), np.ascontiguousarray(x), r,
+                                nres_c, e, _ONE0, _ONE0, np.zeros(T), cmv, cdv, 1, h, z, LHT)
+        return lk, h, r, z, LHT
+
+    def _filter(self, x, T, mu, om, al, be, ga, hEst):
+        """Python-Port von sgarchfilterC/gjrgarchfilterC für ARMA(0,0) mit Mittelwert."""
         with np.errstate(all="ignore"):
             cm = 0.0 + mu                     # condm[i] += constm[i]
             r = x - cm                        # res[i] = x[i] - condm[i]
@@ -191,16 +231,7 @@ class _LLH:
             pdf[pdf == 0.0] = 0.0 + _PDF_FLOOR
             LHT = np.asarray(_libm.log(pdf / sh), dtype=np.float64)
             lk = float(np.cumsum(np.concatenate([[0.0], -LHT]))[-1]) if T else 0.0
-        llh = lk
-        if _finite(llh):
-            self.env.llh = llh
-        else:
-            llh = self._penalty()
-        if returnType == "llh":
-            return llh
-        if returnType == "LHT":
-            return -LHT
-        return {"llh": llh, "h": h, "epsx": r, "z": z, "LHT": -LHT, "persistence": persist}
+        return lk, h, r, z, LHT
 
 
 # ── numerische Ableitungen (Richardson-Extrapolation, eigenständig) ─────────

@@ -9,7 +9,8 @@
 # Rueckgabewert liefern unsichtbar NULL. Die Engine-Kerne aendern sim_mem bzw.
 # die uebergebenen Listen an Ort und Stelle.
 #
-# Der MS-GARCH-Filter (src/ms_garch.c) ist ein C-Kern mit eigener .Call-Huelle.
+# Der MS-GARCH-Filter (src/ms_garch.c) ist ein C-Kern mit eigener .Call-Huelle;
+# die Rechnung steht in src/ms_garch_impl.c, die auch Python nutzt (Etappe 7.2).
 #
 # Die C-Uebernahmen haben ihre Huellen bei der R-Uebernahme:
 # C_evd_nlgpd (R/vendor_evd.R), C_rugarch_sgarchfilterC und

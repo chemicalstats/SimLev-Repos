@@ -28,6 +28,7 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
+from . import env as _env
 from . import libm as _libm
 from . import linalg as _la
 from . import stats as _stats
@@ -69,6 +70,10 @@ def nlgpd(exceed, loc, scale, shape):
     shape = float(shape)
     loc = float(loc)
     _c_check([exceed, len(exceed) * 0.0, loc, scale, shape])
+    ext = _env.ext()
+    if ext is not None:
+        # gemeinsamer Kern (r/src/vendor_evd_impl.h, Etappe 7.3a); data wird ueberschrieben
+        return ext.evd_nlgpd(np.array(exceed, dtype=np.float64), loc, scale, shape)
     if scale <= 0:
         return 1e6
     lsc = _libm.log(1 / scale)

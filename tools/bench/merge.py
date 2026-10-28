@@ -16,8 +16,8 @@ import argparse
 import csv
 import os
 
-ORDER = ["Laden", "S30", "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "P1c1", "P1c2"]
-LANGS = ["R", "Python", "Julia"]
+ORDER = ["Laden", "S30", "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T3c2", "P1c1", "P1c2"]
+LANGS = ["R", "Python", "Python ohne C", "Julia"]   # "Python ohne C": reiner Python-Kern (Etappe 7.2)
 COLS = ["aufgabe", "sprache", "median_s", "min_s", "max_s", "erster_lauf_s"]
 
 
@@ -56,15 +56,17 @@ def main():
     if a.alt:
         old = {(r["aufgabe"], r["sprache"]): r for r in read(a.alt)}
     tasks = [t for t in ORDER if any((t, l) in new for l in LANGS)]
-    hdr = ["Aufgabe"] + ["%s neu" % l for l in LANGS] + ["Julia erster Lauf"]
+    ln = [l for l in LANGS if any(k[1] == l for k in new)]
+    lo = [l for l in LANGS if any(k[1] == l for k in old)]
+    hdr = ["Aufgabe"] + ["%s neu" % l for l in ln] + ["Julia erster Lauf"]
     if old:
-        hdr += ["%s alt" % l for l in LANGS] + ["Julia erster alt"]
+        hdr += ["%s alt" % l for l in lo] + ["Julia erster alt"]
     table = []
     for t in tasks:
-        line = [t] + [fmt(new.get((t, l), {}).get("median_s")) for l in LANGS]
+        line = [t] + [fmt(new.get((t, l), {}).get("median_s")) for l in ln]
         line.append(fmt(new.get((t, "Julia"), {}).get("erster_lauf_s")))
         if old:
-            line += [fmt(old.get((t, l), {}).get("median_s")) for l in LANGS]
+            line += [fmt(old.get((t, l), {}).get("median_s")) for l in lo]
             line.append(fmt(old.get((t, "Julia"), {}).get("erster_lauf_s")))
         table.append(line)
     if a.md:

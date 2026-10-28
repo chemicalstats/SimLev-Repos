@@ -383,9 +383,35 @@ def r_pow(x: float, y: float) -> float:
 
 
 def r_pow_vec(x, y: float) -> np.ndarray:
-    """Elementweises ``x ^ y`` mit R-Semantik (libm, keine SIMD-Varianten)."""
+    """Elementweises ``x ^ y`` mit R-Semantik (libm, keine SIMD-Varianten).
+
+    Gleiche Bits wie ``r_pow`` je Element. Schneller Weg (Etappe 7.1): ``y = 2``
+    ist ``x * x`` (numpy multipliziert exakt gerundet wie C), ``y = 0`` ist 1;
+    sonst bei endlichem ``y`` ``math.pow`` direkt auf alle Elemente (das ist
+    ``r_pow`` für endliche ``x`` ungleich 0 und 1); die übrigen Elemente
+    (0, 1, nicht endlich) rechnet ``r_pow``. Wirft ``math.pow`` eine Ausnahme
+    (Überlauf, negative Basis), rechnet ``r_pow`` alle Elemente.
+    """
     a = _as_f64(x)
-    return np.fromiter((r_pow(v, y) for v in a), dtype=np.float64, count=a.size)
+    y = float(y)
+    if y == 2.0:
+        with np.errstate(all="ignore"):
+            return a * a
+    if y == 0.0:
+        return np.ones(a.size)
+    xs = a.tolist()
+    if math.isfinite(y):
+        try:
+            out = np.fromiter(map(math.pow, xs, [y] * len(xs)), dtype=np.float64, count=len(xs))
+        except (ValueError, OverflowError):
+            out = None
+        if out is not None:
+            with np.errstate(invalid="ignore"):
+                special = np.flatnonzero(~np.isfinite(a) | (a == 0.0) | (a == 1.0))
+            for i in special.tolist():
+                out[i] = r_pow(xs[i], y)
+            return out
+    return np.fromiter((r_pow(v, y) for v in xs), dtype=np.float64, count=a.size)
 
 
 def r_exp_vec(x) -> np.ndarray:

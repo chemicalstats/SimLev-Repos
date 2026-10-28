@@ -933,17 +933,95 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 }
 
 #' Parallele Ausfuehrung (fork auf Unix, PSOCK auf Windows)
+#'
+#' Unix: [.par_lapply_fork()] (Einheiten in Pakete gebuendelt, ein Fork je Paket).
 #' @keywords internal
 #' @noRd
 .par_lapply <- function(X, FUN, cores) {
   if (cores <= 1 || length(X) <= 1) return(lapply(X, FUN))
-  if (.Platform$OS.type == "unix") {
-    return(parallel::mclapply(X, FUN, mc.cores = cores, mc.preschedule = FALSE, mc.set.seed = FALSE))
-  }
+  if (.Platform$OS.type == "unix") return(.par_lapply_fork(X, FUN, cores))
   cl <- parallel::makePSOCKcluster(cores)
   on.exit(parallel::stopCluster(cl))
   parallel::clusterEvalQ(cl, suppressPackageStartupMessages(library(SimLev)))
   parallel::parLapplyLB(cl, X, FUN)
+}
+
+#' Fork mit gebuendelten Einheiten (Unix)
+#'
+#' Ergebnis wie bisher \code{parallel::mclapply(X, FUN, mc.cores = cores,
+#' mc.preschedule = FALSE, mc.set.seed = FALSE)} mit einem Fork je Einheit
+#' (Verhalten in Etappe 5 ermittelt), aber mit einem Fork je Paket:
+#' \itemize{
+#'   \item P = min(Einheiten, 4 * cores) Pakete aufeinanderfolgender Einheiten,
+#'     Groessen um hoechstens 1 verschieden; \code{mclapply} verteilt die Pakete
+#'     dynamisch, jedes Paket rechnet seine Einheiten der Reihe nach.
+#'   \item Zufall: vor jeder Einheit \code{.Random.seed} auf den Zustand beim
+#'     Aufruf (bisher: Fork-Abbild); ohne \code{.Random.seed} wird er entfernt
+#'     (Generatorart wie beim Aufruf), die Einheit saet dann selbst aus Uhrzeit
+#'     und PID wie bisher das Kind. Der Elternprozess bleibt unveraendert.
+#'   \item Fehler: je Einheit \code{try}, \code{try-error} mit derselben Meldung
+#'     und Bedingung wie bisher (Aufruf \code{FUN(X[[i]], ...)} fuer die ersten
+#'     \code{cores} Einheiten, danach \code{FUN(X[[nexti]], ...)}, wie in
+#'     \code{mclapply}); Warnung "k function calls resulted in an error" mit
+#'     demselben k und demselben Aufruf wie bisher.
+#'   \item Absturz eines Kinds: alle Einheiten des Pakets \code{NULL}; die
+#'     Warnung von \code{mclapply} ("... did not deliver ...") zaehlt Pakete.
+#'   \item Ausgaben, Meldungen und Warnungen der Einheiten werden nicht
+#'     eingefangen (wie bisher); innerhalb eines Pakets erscheinen sie in
+#'     Einheitenreihenfolge. Aenderungen globaler Zustaende sehen die folgenden
+#'     Einheiten desselben Pakets (keine Arbeitsfunktion haengt davon ab).
+#' }
+#' \code{1 < cores < 2} (und ungueltiges \code{cores}): wie bisher \code{mclapply}
+#' selbst (also \code{lapply} bzw. dessen Fehler). Ebenso ungebuendelt bei
+#' Normalverteilung "Box-Muller" oder eigenem Generator ("user-supplied"):
+#' deren Zustand liegt nicht (nur) in \code{.Random.seed}.
+#' @keywords internal
+#' @noRd
+.par_lapply_fork <- function(X, FUN, cores) {
+  nc <- suppressWarnings(as.integer(cores))
+  # Box-Muller und eigene Generatoren haben Zustand ausserhalb von .Random.seed, den nur ein
+  # frischer Fork je Einheit wie bisher uebernimmt: dann ungebuendelt wie bisher
+  kind <- RNGkind()
+  if (is.na(nc) || nc < 2L || kind[1] == "user-supplied" || kind[2] %in% c("Box-Muller", "user-supplied"))
+    return(parallel::mclapply(X, FUN, mc.cores = cores, mc.preschedule = FALSE, mc.set.seed = FALSE))
+  if (!is.vector(X) || is.object(X)) X <- as.list(X)          # wie mclapply
+  FUN <- match.fun(FUN)
+  n <- length(X)
+  ce <- min(nc, n)                                            # Kinder beim Start (mclapply)
+  n_pk <- min(n, 4L * nc)
+  packs <- unname(split(seq_len(n), ((seq_len(n) - 1) * n_pk) %/% n))
+  genv <- globalenv()
+  has_seed <- exists(".Random.seed", envir = genv, inherits = FALSE)
+  seed0 <- if (has_seed) get(".Random.seed", envir = genv, inherits = FALSE) else NULL
+  run_pack <- function(idx, ...) {
+    kind0 <- if (!has_seed) RNGkind() else NULL
+    out <- vector("list", length(idx)); err <- logical(length(idx))
+    for (k in seq_along(idx)) {
+      if (has_seed) assign(".Random.seed", seed0, envir = genv)
+      else {
+        if (!identical(RNGkind(), kind0)) suppressWarnings(RNGkind(kind0[1], kind0[2], kind0[3]))
+        if (exists(".Random.seed", envir = genv, inherits = FALSE)) rm(".Random.seed", envir = genv)
+      }
+      # Aufruf wortgleich wie in mclapply (Meldung und Bedingung des try-error)
+      i <- nexti <- idx[[k]]
+      r <- if (i <= ce) try(list(FUN(X[[i]], ...)), silent = TRUE) else try(list(FUN(X[[nexti]], ...)), silent = TRUE)
+      if (inherits(r, "try-error")) { err[k] <- TRUE; out[k] <- list(r) } else out[k] <- r
+    }
+    list(out, err)
+  }
+  rp <- parallel::mclapply(packs, run_pack, mc.cores = cores, mc.preschedule = FALSE, mc.set.seed = FALSE)
+  res <- vector("list", n); errs <- logical(n)
+  for (p in seq_along(packs)) {
+    if (!is.list(rp[[p]]) || length(rp[[p]]) != 2L) next      # Kind ohne Ergebnis: Einheiten NULL
+    res[packs[[p]]] <- rp[[p]][[1L]]; errs[packs[[p]]] <- rp[[p]][[2L]]
+  }
+  names(res) <- names(X)
+  # mclapply zaehlt bei n <= cores alle try-error-Ergebnisse, sonst die Einheiten mit Fehler
+  n_err <- if (n <= nc) sum(vapply(res, inherits, NA, "try-error")) else sum(errs)
+  if (n_err)
+    warning(simpleWarning(gettextf("%d function calls resulted in an error", n_err, domain = "R-parallel"),
+                          quote(parallel::mclapply(X, FUN, mc.cores = cores, mc.preschedule = FALSE, mc.set.seed = FALSE))))
+  res
 }
 
 

@@ -882,6 +882,66 @@ def rgeom1(p: float) -> float:
     return rpois1(exp_rand() * ((1 - p) / p))
 
 
+# ── Zustand für die C-Nachbildung (python/src/_rng_r.c, Etappe 7.3b) ─────
+#
+# Die gemeinsamen Kerne mit Zufallszahlen (Bootstrap, truncnorm) ziehen in der
+# C-Erweiterung simlev._ext über eine C-Nachbildung von R's RNG. Sie arbeitet auf diesem
+# Zustand: c_state() übergibt ihn als drei Puffer, der Kern zieht, c_state_put() schreibt
+# ihn zurück. Danach ist der Zustand derselbe, als hätten die Funktionen oben gezogen.
+# Nachgebildet sind die Arten, die dieses Modul kennt (Mersenne-Twister und
+# L'Ecuyer-CMRG mit Inversion); sonst liefert c_state() None, und der Aufrufer rechnet
+# mit dem reinen Python-Kern.
+
+_RP_DOUBLES = ("b1", "b2", "c", "c0", "c1", "c2", "c3", "p0", "p", "q", "s", "d", "omega",
+               "big_l", "muprev", "muprev2")
+
+
+def c_state(rpois: bool = False):
+    """Zustand für die C-Nachbildung als ``(ist, mt, pst)`` oder ``None`` (Art nicht nachgebildet).
+
+    ``ist``: int32[12] mit kind, n01, mti, twisted, lec[0..5], rpois ``l``, ``m``; ``mt``:
+    die 624 Wörter des Mersenne-Twisters als int32-Sicht auf ``_S.mt`` (die C-Seite ändert
+    sie an Ort und Stelle); ``pst``: mit ``rpois`` float64[52] mit dem Zustand von
+    :func:`rpois1` (``_RP``), sonst ``None``. Der Aufrufer hat vorher wie der reine
+    Python-Kern ``_get_state()`` gerufen und gibt das Tupel nach dem Kern (auch nach einem
+    Fehler) an :func:`c_state_put`.
+    """
+    S = _S
+    if S.kind not in (MERSENNE_TWISTER, LECUYER_CMRG) or S.n01 != INVERSION:
+        return None
+    mt = S.mt
+    if (not isinstance(mt, np.ndarray) or mt.dtype != np.uint32 or mt.shape != (_N,)
+            or not mt.flags.c_contiguous or not mt.flags.writeable):
+        return None
+    if not (-2147483648 <= S.mti <= 2147483647) or len(S.lec) != 6:
+        return None
+    rp = _RP
+    ist = np.array([S.kind, S.n01, S.mti, 0] + [_to_int32(v) for v in S.lec]
+                   + [rp["l"], rp["m"]], dtype=np.int32)
+    pst = None
+    if rpois:
+        pst = np.array([rp[k] for k in _RP_DOUBLES] + rp["pp"], dtype=np.float64)
+    return ist, mt.view(np.int32), pst
+
+
+def c_state_put(st) -> None:
+    """Zustand aus :func:`c_state` nach dem C-Kern zurückschreiben."""
+    ist, _mt, pst = st
+    S = _S
+    v = ist.tolist()
+    S.mti = v[2]
+    if v[3]:
+        S._buf = np.empty(0)           # neu erzeugte Wörter: Ausgabepuffer neu berechnen
+    S.lec = [x & _M32 for x in v[4:10]]
+    if pst is not None:
+        rp = _RP
+        rp["l"], rp["m"] = v[10], v[11]
+        w = pst.tolist()
+        for k, x in zip(_RP_DOUBLES, w):
+            rp[k] = x
+        rp["pp"] = w[16:]
+
+
 # ── R-Funktionen (vektorisiert, mit Recycling) ───────────────────────────
 
 def _n_of(n):

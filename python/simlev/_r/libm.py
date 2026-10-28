@@ -121,13 +121,33 @@ def _atanh(x):
         return math.nan
 
 
+def _apply_math(fast, slow, x):
+    """Wie ``apply1(slow, x)``, zuerst aber mit der ``math``-Funktion ``fast`` direkt.
+
+    Gilt nur, wenn ``slow(v)`` für jedes ``v``, bei dem ``fast(v)`` keine
+    Ausnahme wirft, genau ``fast(v)`` ist (``_exp``, ``_log``): Dann ergibt ein
+    Durchlauf ohne Ausnahme dieselben Bits. Bei einer Ausnahme (Überlauf,
+    ``log(0)``, ``log(<0)``) rechnet ``apply1`` das ganze Feld neu.
+    Etappe 7.1: spart den Python-Aufruf von ``slow`` je Element.
+    """
+    if np.isscalar(x) or (isinstance(x, np.ndarray) and x.ndim == 0):
+        return slow(float(x))
+    a = np.asarray(x, dtype=np.float64)
+    flat = a.ravel().tolist()
+    try:
+        out = np.fromiter(map(fast, flat), dtype=np.float64, count=len(flat))
+    except (ValueError, OverflowError):
+        return apply1(slow, a)
+    return out.reshape(a.shape)
+
+
 def exp(x):
-    return apply1(_exp, x)
+    return _apply_math(math.exp, _exp, x)
 
 
 def log(x, base=None):
     if base is None:
-        return apply1(_log, x)
+        return _apply_math(math.log, _log, x)
     # R: log(x, base) = R_log(x) / R_log(base) (arithmetic.c logbase)
     if base == 10:
         return apply1(_log10, x)

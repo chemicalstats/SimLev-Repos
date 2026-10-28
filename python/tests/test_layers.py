@@ -21,6 +21,9 @@ TOP = 5   # Paketschnittstelle simlev/__init__.py
 
 # Modul (ohne "simlev.") -> Schicht; alle Module unter simlev._r sind Schicht 0.
 LAYERS = {
+    # 0 R-Interna: dazu die C-Erweiterung mit den gemeinsamen Kernen von R und Python
+    # (Etappe 7.3a, gebaut aus python/src/; importiert nichts, geladen von _r.env.ext())
+    "_ext": 0,
     # 1 Daten und Strategie: Eingaben der Simulation (Reihen, Strategie, Signale, Tarif)
     "config": 1, "data_prep": 1, "backcast": 1, "bonds": 1, "signals": 1, "_signals_core": 1,
     "trigger": 1, "_tax_tariff": 1, "_dates": 1,
@@ -53,8 +56,12 @@ KNOWN = {
 }
 
 
+# C-Erweiterungen (ohne Python-Quelle; ob gebaut oder nicht): zählen als Module ohne eigene Importe
+EXTENSIONS = ("_ext",)
+
+
 def _modules():
-    out = {}
+    out = {m: None for m in EXTENSIONS}
     for dp, dn, fn in os.walk(PKG):
         dn[:] = [d for d in dn if d != "__pycache__"]
         for f in fn:
@@ -109,6 +116,8 @@ def _violations():
     mods = _modules()
     found = {}
     for mod, path in sorted(mods.items()):
+        if path is None:                         # C-Erweiterung
+            continue
         for dep, line in _deps(mod, path, mods):
             if _layer(dep) > _layer(mod):
                 found.setdefault((mod, dep), []).append(line)

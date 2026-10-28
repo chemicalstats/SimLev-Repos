@@ -9,6 +9,10 @@
 - :func:`min_cdar_core`     minimaler CDaR (projizierter Subgradient),
   ``.min_cdar_core``
 
+Mit gebauter Erweiterung rechnen die gemeinsamen Kerne von R und Python
+(``r/src/research_core_impl.cpp`` über ``simlev._ext``, Etappe 7.3a); sonst und
+mit ``SIMLEV_NO_EXT=1`` die Python-Ports darunter (bitgleich).
+
 Rechenreihenfolge 1:1 aus dem C++-Code (double-Akkumulation, keine FMA,
 libm ``exp``/``log1p`` ueber :mod:`math`). ``std::sort`` (libstdc++-Introsort,
 nicht stabil) wird exakt nachgebildet, wenn das Ergebnis von der Reihenfolge
@@ -20,6 +24,8 @@ from __future__ import annotations
 import math
 
 import numpy as np
+
+from ._r import env as _env
 
 __all__ = ["proj_box_simplex", "qp_box_simplex", "min_cvar_core", "min_cdar_core", "quantile7"]
 
@@ -223,8 +229,25 @@ def _fl(x):
     return [float(e) for e in np.asarray(x, dtype=np.float64).ravel()]
 
 
+def _c1(x):
+    """Zahlenvektor als zusammenhängendes float64-Feld für den gemeinsamen Kern."""
+    return np.ascontiguousarray(np.asarray(x, dtype=np.float64).ravel())
+
+
+def _cint(v):
+    """Ganzzahl im Bereich von C ``int`` (sonst rechnet der Python-Port)."""
+    return -2147483648 <= v <= 2147483647
+
+
 def proj_box_simplex(v, lo, hi):
     """``.proj_box_simplex(v, lo, hi)``: Projektion auf den beschraenkten Simplex."""
+    ext = _env.ext()
+    if ext is not None:
+        va, la, ha = _c1(v), _c1(lo), _c1(hi)
+        if la.size == va.size == ha.size:
+            out = np.empty(va.size)
+            ext.proj_box_simplex(va, la, ha, out)
+            return out
     v = _fl(v)
     lo = _fl(lo)
     hi = _fl(hi)
@@ -237,6 +260,14 @@ def qp_box_simplex(Q, cvec, lo, hi, w0, L, maxit, tol):
     """``.qp_box_simplex``: FISTA mit adaptivem Neustart fuer min 0.5 w'Qw + c'w."""
     Q = np.asarray(Q, dtype=np.float64)
     n = Q.shape[1]
+    ext = _env.ext()
+    if ext is not None and Q.ndim == 2 and Q.shape[0] >= n and _cint(int(maxit)):
+        ca, la, ha, wa = _c1(cvec), _c1(lo), _c1(hi), _c1(w0)
+        if min(ca.size, la.size, ha.size, wa.size) >= n:
+            out = np.empty(n)
+            ext.qp_box_simplex(np.ravel(Q, order="F"), Q.shape[0], n, ca, la, ha, wa, float(L), int(maxit),
+                               float(tol), out)
+            return out
     Qr = [[float(Q[i, j]) for j in range(n)] for i in range(n)]
     c = _fl(cvec)
     lo = _fl(lo)
@@ -319,6 +350,14 @@ def min_cvar_core(R, alpha, lo, hi, w0, zeta0, scales, maxit):
     if R.ndim == 1:
         R = R.reshape(-1, 1)
     T, N = R.shape
+    ext = _env.ext()
+    if ext is not None and _cint(int(maxit)):
+        la, ha, wa = _c1(lo), _c1(hi), _c1(w0)
+        if min(la.size, ha.size, wa.size) >= N:
+            out = np.empty(N)
+            ext.min_cvar_core(np.ravel(R, order="F"), T, N, float(alpha), la, ha, wa, float(zeta0), _c1(scales),
+                              int(maxit), out)
+            return out
     alpha = float(alpha)
     aT = alpha * T
     lo = _fl(lo)
@@ -438,6 +477,13 @@ def min_cdar_core(R, alpha, lo, hi, iters):
     if R.ndim == 1:
         R = R.reshape(-1, 1)
     T, N = R.shape
+    ext = _env.ext()
+    if ext is not None and _cint(int(iters)):
+        la, ha = _c1(lo), _c1(hi)
+        if min(la.size, ha.size) >= N:
+            out = np.empty(N)
+            ext.min_cdar_core(np.ravel(R, order="F"), T, N, float(alpha), la, ha, int(iters), out)
+            return out
     alpha = float(alpha)
     lo = _fl(lo)
     hi = _fl(hi)

@@ -111,7 +111,36 @@ def _ms_garch_stat(P):
     pi_ = [1 / K] * K
     fin = bool(np.isfinite(P).all())
     Pc = [[float(P[i, j]) for i in range(K)] for j in range(K)]   # Spalten
-    for _ in range(1000):
+    start = 0
+    if K == 2 and fin:
+        # Etappe 7.1: dieselbe Rechnung für zwei Regime mit lokalen Variablen
+        # (s = 0.0 + P[0, j] * pi[0], dann s + P[1, j] * pi[1]); wird pi nicht
+        # endlich, geht es im allgemeinen Weg mit demselben Schritt weiter
+        (c00, c01), (c10, c11) = Pc
+        p0 = p1 = pi_[0]
+        isf = math.isfinite
+        for it in range(1000):
+            if not (isf(p0) and isf(p1)):
+                start = it
+                break
+            q0 = 0.0 + c00 * p0
+            q0 = q0 + c01 * p1
+            q1 = 0.0 + c10 * p0
+            q1 = q1 + c11 * p1
+            d0 = abs(q0 - p0)
+            if d0 != d0:
+                raise ValueError("missing value where TRUE/FALSE needed")
+            d1 = abs(q1 - p1)
+            if d1 != d1:
+                raise ValueError("missing value where TRUE/FALSE needed")
+            if (d1 if d1 > d0 else d0) < 1e-12:
+                return np.array([p0, p1], dtype=np.float64)
+            p0 = q0
+            p1 = q1
+        else:
+            return np.array([p0, p1], dtype=np.float64)
+        pi_ = [p0, p1]
+    for _ in range(start, 1000):
         if fin and all(math.isfinite(v) for v in pi_):
             p2 = []
             for col in Pc:

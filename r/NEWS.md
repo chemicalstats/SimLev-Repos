@@ -14,6 +14,14 @@ Recht um, gibt alle Ausgaben auf Deutsch aus und erzeugt alle 105 Fälle
 neu (siehe unten). Python 0.5.0 und Julia 0.5.0 sind zu allen 105 Fällen
 bitgleich.
 
+## SimLev 0.9.1
+
+Patch-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Python: C-Erweiterung mit denselben Kernen wie R (Engine, FIFO, Steuer, Research, Entnahme, Abhängigkeit, Bootstrap, MS-GARCH-Filter), Zufallszahlen bitgleich zu R; reines Python bleibt als Rückfall.
+- R: Parallelität gebündelt (wenige Forks statt einer je Einheit), z. B. bootstrap mit 2 Kernen 2,2 s -> 0,2 s.
+- Ergebnisse in allen drei Sprachen unverändert.
+
 ## SimLev 0.9.0
 
 Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -945,6 +953,35 @@ in `DESCRIPTION`); die Pakete selbst sind nicht mehr nötig und aus den
   `tvtp_garch_model`) sind nur noch `"sGARCH"` und `"gjrGARCH"` erlaubt,
   als Regimezahl ganze Zahlen ab 2; andere Werte sind ein Fehler mit
   deutscher Meldung.
+
+### Parallelität gebündelt
+
+* Mit `cores > 1` verteilt R die Arbeit unter Unix jetzt gebündelt: die
+  Einheiten (Pfade, Chunks, Parameterkombinationen, Startdaten, Hebel) von
+  `bootstrap()`, `bootstrap_study()`, `param_search()`,
+  `sensitivity_grid()`, `sensitivity_rebalancing()`,
+  `planning_lumpsum_vs_dca()` und `sensitivity_leverage()` (auch über
+  `param_bootstrap()` und `overfit_walk_forward()`) gehen in höchstens
+  `4 × cores` Pakete aufeinanderfolgender Einheiten, ein Fork je Paket statt
+  je Einheit. Bei vielen kleinen Einheiten entfällt damit der größte Teil
+  des Aufwands für die Forks (`bootstrap()` mit 400 Pfaden, `cores = 2`:
+  2,18 s → 0,21 s; mit `cores = 1` 0,08 s, der Rest ist vor allem die
+  Rückgabe der Pfade an den Elternprozess; `tools/bench/ergebnis_2026-10-26_rpar.csv`).
+* Ergebnisse sind unverändert: jede Einheit startet wie bisher mit dem
+  Zufallszustand des Aufrufers, der danach unverändert ist; Fehler einer
+  Einheit ergeben dasselbe `try-error`-Element und dieselbe Warnung
+  „k function calls resulted in an error“ wie bisher. Alle Referenzfälle
+  sind bitgleich.
+* Ausgaben und Meldungen der Einheiten werden wie bisher nicht eingefangen;
+  innerhalb eines Pakets erscheinen sie jetzt in Einheitenreihenfolge
+  (bisher in der Reihenfolge der Fertigstellung).
+* Stürzt ein Kindprozess ab, sind alle Einheiten seines Pakets `NULL`
+  (bisher nur die eine Einheit); die Warnung von `mclapply` zählt dann
+  Pakete.
+* Unverändert bleiben: ein Fork je Einheit mit der Normalverteilung
+  `"Box-Muller"` oder einem eigenen Generator (`"user-supplied"`), deren
+  Zustand nicht nur in `.Random.seed` liegt; `lapply` bei `cores < 2` oder
+  einer Einheit; unter Windows der PSOCK-Cluster.
 
 ## SimLev 0.4.0
 

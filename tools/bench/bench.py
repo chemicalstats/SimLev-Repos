@@ -35,6 +35,20 @@ import pandas as pd  # noqa: E402
 from simlev._r import rng  # noqa: E402
 from simlev._r.rnum import r_cumprod, r_sum  # noqa: E402
 from simlev.ms_garch import _ms_garch_fit  # noqa: E402
+from simlev import _bootstrap_core  # noqa: E402
+
+# Sprache in der CSV: "Python" mit C-Erweiterung (seit Etappe 7.3a simlev._ext mit allen gemeinsamen
+# Kernen, Etappe 7.2 simlev._ext_msgarch), "Python ohne C" mit reinen Python-Kernen (nicht gebaut oder
+# SIMLEV_NO_EXT=1); getattr: auch für ältere Stände
+def _ext_active():
+    from simlev._r import env as _env
+    if hasattr(_env, "ext"):
+        return _env.ext() is not None
+    return getattr(_bootstrap_core, "_ext_msgarch", lambda: None)() is not None
+
+
+LANG = "Python" if _ext_active() else "Python ohne C"
+print("C-Erweiterung simlev._ext: %s (Sprache %s)" % ("aktiv" if LANG == "Python" else "aus", LANG))
 
 
 def dates(start, n):
@@ -112,11 +126,11 @@ def el(f):
         return time.perf_counter() - t
 
 
-rows = [("Laden", "Python", T_LOAD, T_LOAD, T_LOAD, T_LOAD)]
+rows = [("Laden", LANG, T_LOAD, T_LOAD, T_LOAD, T_LOAD)]
 for k, f in TASKS.items():
     first = el(f)
     ts = [el(f) for _ in range(RUNS)]
-    rows.append((k, "Python", statistics.median(ts), min(ts), max(ts), first))
+    rows.append((k, LANG, statistics.median(ts), min(ts), max(ts), first))
     print("%-4s median %.3f s (min %.3f, max %.3f; erster Lauf %.3f)" % (k, rows[-1][2], min(ts), max(ts), first), flush=True)
 os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)
 with open(OUT, "w", encoding="utf-8") as fh:

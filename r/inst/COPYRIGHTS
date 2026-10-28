@@ -231,11 +231,16 @@ Quelle:    https://CRAN.R-project.org/package=truncnorm
 Dateien in SimLev:
   R/vendor_truncnorm.R    rtruncnorm() aus R/truncnorm.R als interne
                           Funktion .truncnorm_rtruncnorm()
-  src/vendor_truncnorm.c  do_rtruncnorm() und die Sampler aus
-                          src/rtruncnorm.c (Rümpfe unverändert) sowie die
+  src/vendor_truncnorm.c  do_rtruncnorm() aus src/rtruncnorm.c mit den
                           benötigten Makros aus src/sexp_macros.h;
-                          do_rtruncnorm heißt C_truncnorm_rtruncnorm, die
-                          Sampler sind statisch mit dem Präfix truncnorm_
+                          do_rtruncnorm heißt C_truncnorm_rtruncnorm
+  src/vendor_truncnorm_impl.h
+                          die Sampler aus src/rtruncnorm.c (Rümpfe
+                          unverändert, statisch mit dem Präfix truncnorm_)
+                          und die Schleife von do_rtruncnorm
+                          (truncnorm_rtruncnorm_loop); seit Etappe 7.3b
+                          gemeinsam mit der Python-Fassung (Kopie in
+                          python/src/), eingebunden von vendor_truncnorm.c
 
 Angepasst für SimLev:
   * Übernommen ist nur der Zufallszahlengenerator, den gosolnp für die

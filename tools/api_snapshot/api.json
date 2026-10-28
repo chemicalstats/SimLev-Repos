@@ -958,7 +958,7 @@
     ],
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 202,
+    "line": 204,
     "bases": [
      "RList",
      "OrderedDict",
@@ -972,7 +972,7 @@
     ],
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 401,
+    "line": 403,
     "bases": [
      "RList",
      "OrderedDict",
@@ -986,7 +986,7 @@
     ],
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 942,
+    "line": 944,
     "bases": [
      "RList",
      "OrderedDict",
@@ -1000,7 +1000,7 @@
     ],
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 962,
+    "line": 964,
     "bases": [
      "RList",
      "OrderedDict",
@@ -1014,7 +1014,7 @@
     ],
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1663,
+    "line": 1665,
     "bases": [
      "RList",
      "OrderedDict",
@@ -2453,7 +2453,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/bootstrap.R",
-    "line": 1143,
+    "line": 1221,
     "args": [
      {
       "name": "data",
@@ -2990,7 +2990,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/bootstrap.R",
-    "line": 1269,
+    "line": 1347,
     "args": [
      {
       "name": "result",
@@ -3356,7 +3356,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/bootstrap.R",
-    "line": 1753,
+    "line": 1831,
     "args": [
      {
       "name": "study",
@@ -3494,7 +3494,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/bootstrap.R",
-    "line": 1513,
+    "line": 1591,
     "args": [
      {
       "name": "data",
@@ -4007,7 +4007,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/bootstrap.R",
-    "line": 1324,
+    "line": 1402,
     "args": [
      {
       "name": "res",
@@ -4069,7 +4069,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/bootstrap.R",
-    "line": 1206,
+    "line": 1284,
     "args": [
      {
       "name": "result",
@@ -9124,7 +9124,7 @@
     "generic": "plot",
     "class": "SimLevBootstrapStudy",
     "file": "r/R/bootstrap.R",
-    "line": 1904,
+    "line": 1982,
     "args": [
      {
       "name": "x",
@@ -11698,7 +11698,7 @@
     "class": "SimLevWithdrawal",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1598,
+    "line": 1600,
     "args": [
      {
       "name": "x",
@@ -13430,7 +13430,7 @@
     "generic": "print",
     "class": "SimLevBootstrapStudy",
     "file": "r/R/bootstrap.R",
-    "line": 1895,
+    "line": 1973,
     "args": [
      {
       "name": "x",
@@ -14578,7 +14578,7 @@
     "class": "SimLevHorizon",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1668,
+    "line": 1670,
     "args": [
      {
       "name": "self",
@@ -16402,7 +16402,7 @@
     "class": "SimLevWithdrawal",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 957,
+    "line": 959,
     "args": [
      {
       "name": "self",
@@ -16628,7 +16628,7 @@
     "generic": "print",
     "class": "bootstrap_result",
     "file": "r/R/bootstrap.R",
-    "line": 1172,
+    "line": 1250,
     "args": [
      {
       "name": "x",
@@ -16798,7 +16798,7 @@
     "generic": "print",
     "class": "summary.SimLevBootstrapStudy",
     "file": "r/R/bootstrap.R",
-    "line": 1862,
+    "line": 1940,
     "args": [
      {
       "name": "x",
@@ -17079,7 +17079,7 @@
     "class": "summary.SimLevWithdrawal",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 967,
+    "line": 969,
     "args": [
      {
       "name": "self",
@@ -17206,7 +17206,7 @@
     "class": "withdrawal_rule",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 207,
+    "line": 209,
     "args": [
      {
       "name": "self",
@@ -18684,7 +18684,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 557,
+    "line": 559,
     "args": [
      {
       "name": "x",
@@ -24670,7 +24670,7 @@
     "generic": "summary",
     "class": "SimLevBootstrapStudy",
     "file": "r/R/bootstrap.R",
-    "line": 1824,
+    "line": 1902,
     "args": [
      {
       "name": "object",
@@ -25023,7 +25023,7 @@
     "class": "SimLevWithdrawal",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 947,
+    "line": 949,
     "args": [
      {
       "name": "self",
@@ -27760,7 +27760,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 427,
+    "line": 429,
     "args": [
      {
       "name": "data",
@@ -27984,7 +27984,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1679,
+    "line": 1681,
     "args": [
      {
       "name": "type",
@@ -28192,7 +28192,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1427,
+    "line": 1429,
     "args": [
      {
       "name": "x",
@@ -28394,7 +28394,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 639,
+    "line": 641,
     "args": [
      {
       "name": "x",
@@ -28562,7 +28562,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 823,
+    "line": 825,
     "args": [
      {
       "name": "real_returns",
@@ -28776,7 +28776,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 263,
+    "line": 265,
     "args": [
      {
       "name": "type",
@@ -29259,7 +29259,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1005,
+    "line": 1007,
     "args": [
      {
       "name": "x",

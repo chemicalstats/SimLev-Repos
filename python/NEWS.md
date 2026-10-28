@@ -1,5 +1,13 @@
 # simlev (Python) – Änderungen je Version
 
+## simlev (Python) 0.9.1
+
+Patch-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Python: C-Erweiterung mit denselben Kernen wie R (Engine, FIFO, Steuer, Research, Entnahme, Abhängigkeit, Bootstrap, MS-GARCH-Filter), Zufallszahlen bitgleich zu R; reines Python bleibt als Rückfall.
+- R: Parallelität gebündelt (wenige Forks statt einer je Einheit), z. B. bootstrap mit 2 Kernen 2,2 s -> 0,2 s.
+- Ergebnisse in allen drei Sprachen unverändert.
+
 ## simlev (Python) 0.9.0
 
 Minor-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -51,6 +59,15 @@ R-Pakets vor den Korrekturen (Commit 54b5b4f). Zwischenversionen 0.2 bis
 0.4 der Python-Fassung gibt es nicht; alle Änderungen sind in 0.5.0
 zusammengefasst. Die Begründungen der fachlichen Änderungen stehen in
 [`r/NEWS.md`](../r/NEWS.md), Abschnitt „SimLev 0.5.0“.
+
+### Geschwindigkeit (Etappe 7.1 bis 7.3b)
+
+Schneller bei gleichen Ergebnissen (alle Referenz- und Golden-Fälle bitgleich, Schnittstelle unverändert):
+
+- **Reines Python (7.1):** `libm.exp`/`log` auf Feldern ohne Python-Hülle je Element, `r_pow_vec` und `_pow_vec` mit schnellem Weg für endliche Basen, `sell_count` mit fortlaufenden long-double-Summen über `np.cumsum`, Probelauf der Vorabpauschale kopiert nur `totals` und `status`, Datumsspalten auf dem ganzen Feld, `dgemm` mit langem k als fortlaufende Summe, MS-GARCH-Filter und stationäre Verteilung für zwei Regime mit lokalen Variablen, Entnahme-Kern ohne Neudefinition je Periode. Rechenfolge und libm-Aufrufe sind dieselben.
+- **Optionale C-Erweiterung (7.2):** `simlev._ext_msgarch` nutzt denselben MS-GARCH-Filterkern wie das R-Paket (`r/src/ms_garch_core.c`, Kopie in `python/src/`). `pip install` baut sie, wenn ein C-Compiler vorhanden ist; sonst rechnet wie bisher der reine Python-Kern. `SIMLEV_NO_EXT=1` erzwingt den Python-Kern. Eine MS-GARCH-Schätzung (2 Regime, n = 2.000) braucht damit etwa 0,4 s statt 4,5 s.
+- **Gemeinsame Kerne (7.3a):** Die Erweiterung heißt jetzt `simlev._ext` und enthält alle nativen Kerne des R-Pakets ohne Zufallszahlen, aus denselben Quellen wie R (`r/src/*_impl.h`, `ms_garch_impl.c`; Kopien in `python/src/`): MS-GARCH-Filter, die Forschungskerne (`proj_box_simplex`, `qp_box_simplex`, `min_cvar_core`, `min_cdar_core`, `roll_mean_core`, `roll_cov_core`, `kendall_tau_core`, `quantile_reg_core`, `hmm_forward_backward`, `garch_filter`), den Entnahme-Kern, den DCC-Filter, die rugarch-Filter, `nlgpd` (evd), `locf` (imputeTS) und die Engine-Kerne (`_core.py`: Report, Kauf, Markt-Update, FIFO, Steuer). Der R-Bau ist dabei unverändert (gleicher Maschinencode). Ohne Compiler oder mit `SIMLEV_NO_EXT=1` rechnen die reinen Python-Kerne wie bisher. Ob die Erweiterung aktiv ist, zeigt `simlev._r.env.ext() is not None`. Der reine MS-GARCH-Filter liefert jetzt auch bei NA/NaN in den Daten dieselben NaN-Bits wie R. Messbasis (`tools/bench/ergebnis_2026-10-26_kerne.csv`, Median, mit gegen ohne Erweiterung): `portfolio_optimize` `min_cvar` 0,17 s statt 0,87 s, `dependence_analysis` mit DCC 0,50 s statt 1,01 s, `withdrawal_simulation` 0,12 s statt 0,30 s, `bootstrap` GARCH 0,51 s statt 0,62 s, Simulation 30 Jahre 0,083 s statt 0,094 s.
+- **Kerne mit Zufallszahlen (7.3b):** Auch die Bootstrap-Kerne (`_bootstrap_core`: Index-Ziehungen IID, Block, stationär, Regime, Tails, dazu Wild, Reset, EVT, GARCH, MS-GARCH sowie `rolling_vol`, `assign_regimes`, `estimate_trans_mat`) und `rtruncnorm` (truncnorm, Startwerte von gosolnp) rechnen in `simlev._ext` mit denselben Quellen wie R (`r/src/bootstrap_core_impl.h`, `r/src/vendor_truncnorm_impl.h`). Die Zufallszahlen zieht dort eine C-Nachbildung von R's Generatoren (`src/_rng_r.c`, aus R 4.3.3: Mersenne-Twister und L'Ecuyer-CMRG, Normalverteilung per Inversion, `exp_rand`, `rgeom`/`rpois`, `dnorm`) auf dem Zustand von `simlev._r.rng`; danach ist der Zustand derselbe wie nach dem reinen Python-Kern, `set_seed`, `.Random.seed` und L'Ecuyer-Streams (`cores`) wirken unverändert. Andere Zufallsarten und Eingaben außerhalb des gültigen Bereichs rechnet still der reine Python-Kern. Der R-Bau ist unverändert (gleicher Maschinencode). Messbasis (`tools/bench/ergebnis_2026-10-26_rng.csv`, Median, mit gegen ohne Erweiterung): `bootstrap` stationär 200 Pfade 0,048 s statt 0,35 s, `bootstrap_study` 0,50 s statt 0,59 s, `bootstrap` 400 Pfade mit `cores = 1` 0,11 s statt 0,81 s, mit `cores = 2` 0,29 s statt 0,59 s.
 
 ### Eingefrorene Schnittstelle (Etappe 6.6)
 

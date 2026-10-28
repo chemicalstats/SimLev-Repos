@@ -14,12 +14,14 @@ Funktion liest die Umgebung bei jedem Aufruf neu; wann gelesen wird, bestimmt de
 | ``SIMLEV_STRICT_ZERO`` | ``0``: −0 = +0 im Vergleich mit den Referenzfällen | Prüfung |
 | ``SIMLEV_GOLDEN_DIR`` | andere Ordner der Engine-Fälle für pytest (mit ``os.pathsep`` getrennt) | Prüfung |
 | ``SIMLEV_MODULE_DIR`` | anderer Ordner der Modul-Fälle für pytest | Prüfung |
+| ``SIMLEV_NO_EXT`` | ``1``: C-Erweiterung nicht nutzen, reiner Python-Kern (Rückfall prüfen) | Prüfung |
 """
 import contextlib
 import os
 
 __all__ = ["SWITCHES", "collate", "icu_path", "lapack_path", "r_sys_time", "fixed_r_sys_time",
-           "lax_na", "strict_zero", "set_collate_default", "golden_dir", "module_dir"]
+           "lax_na", "strict_zero", "set_collate_default", "golden_dir", "module_dir", "no_ext",
+           "use_ext", "ext"]
 
 # Name -> (Zweck, Art); Art: Nutzer, Prüfung (Julia zusätzlich: Entwicklung; R-Generatoren: Generator)
 SWITCHES = {
@@ -31,6 +33,7 @@ SWITCHES = {
     "SIMLEV_STRICT_ZERO": ("0: -0 = +0 im Vergleich mit den Referenzfällen", "Prüfung"),
     "SIMLEV_GOLDEN_DIR": ("andere Ordner der Engine-Fälle für pytest (os.pathsep-getrennt)", "Prüfung"),
     "SIMLEV_MODULE_DIR": ("anderer Ordner der Modul-Fälle für pytest", "Prüfung"),
+    "SIMLEV_NO_EXT": ("1: C-Erweiterung nicht nutzen, reiner Python-Kern (Rückfall prüfen)", "Prüfung"),
 }
 
 
@@ -99,3 +102,46 @@ def golden_dir():
 def module_dir():
     """``SIMLEV_MODULE_DIR`` als Text oder ``None``."""
     return os.environ.get("SIMLEV_MODULE_DIR")
+
+
+def no_ext():
+    """``SIMLEV_NO_EXT=1``: die C/C++-Erweiterung (``simlev._ext``) nicht nutzen, sondern die
+    reinen Python-Kerne (Rückfall, bitgleich); gelesen bei jedem Aufruf von :func:`ext` (Etappe 7.2)."""
+    return os.environ.get("SIMLEV_NO_EXT", "0") == "1"
+
+
+# None = noch nicht geladen, False = nicht gebaut
+_EXT = None
+
+
+def ext():
+    """Das Erweiterungsmodul ``simlev._ext`` mit den gemeinsamen Kernen von R und Python oder
+    ``None`` (nicht gebaut oder ``SIMLEV_NO_EXT=1``; dann rechnen die reinen Python-Kerne).
+
+    Geladen beim ersten Aufruf; ``SIMLEV_NO_EXT`` wird bei jedem Aufruf gelesen (Etappe 7.3a).
+    """
+    global _EXT
+    if no_ext():
+        return None
+    if _EXT is None:
+        try:
+            from .. import _ext as m
+        except ImportError:
+            m = False
+        _EXT = m
+    return _EXT or None
+
+
+@contextlib.contextmanager
+def use_ext(flag):
+    """Setzt ``SIMLEV_NO_EXT`` für die Dauer des Blocks (``flag`` falsch: ``1``, wahr: ``0``), danach zurück."""
+    name = "SIMLEV_NO_EXT"
+    old = os.environ.get(name)
+    os.environ[name] = "0" if flag else "1"
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = old

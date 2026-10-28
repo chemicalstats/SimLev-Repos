@@ -37,8 +37,14 @@ betrifft.
 
 ## Installation
 
-SimLev ist reines Python ab Version 3.10 (geprüft ab Python 3.10, zuletzt
-mit Python 3.13, numpy 2.5, pandas 3.0). Ein Compiler wird nicht benötigt.
+SimLev läuft ab Python 3.10 (geprüft ab Python 3.10, zuletzt mit Python
+3.13, numpy 2.5, pandas 3.0). Ein Compiler wird nicht benötigt; ist einer
+vorhanden, baut `pip` zusätzlich eine C/C++-Erweiterung mit den nativen
+Kernen des R-Pakets (Engine, MS-GARCH-Filter, Entnahme, DCC, Optimierung,
+rugarch-Filter, Bootstrap-Ziehungen, truncnorm u. a.), die etwa die
+MS-GARCH-Schätzung (Bootstrap-Verfahren `ms_garch`, `ms_ar_garch_m`,
+`tvtp_ms_garch`), die Bootstrap-Ziehungen und die Simulation deutlich
+schneller macht.
 
 ``` bash
 pip install "simlev @ git+https://github.com/chemicalstats/SimLev-Repos#subdirectory=python"
@@ -50,9 +56,25 @@ Aus einem lokalen Klon (im Ordner `python/`):
 pip install .                 # Engine, alle Erweiterungen und Grafiken (numpy, pandas)
 ```
 
+- **Mit C-Compiler** (unter Linux `gcc` bzw. `build-essential` und die
+  Python-Header, z. B. `python3-dev`; unter macOS die Xcode Command Line
+  Tools; unter Windows die Build Tools für Visual Studio): `pip install`
+  baut `simlev._ext` aus `src/` mit. Das Modul nutzt dieselben Kerne wie
+  das R-Paket (`r/src/*_impl.h`, `r/src/ms_garch_impl.c`) und rechnet
+  bitgleich zu den reinen Python-Kernen; die Kerne mit Zufallszahlen ziehen
+  dabei über eine C-Nachbildung von R's Zufallszahlen (`src/_rng_r.c`) auf
+  demselben Zustand wie `simlev._r.rng`. Für einen Klon, aus dem ohne
+  Installation gearbeitet wird: `python setup.py build_ext --inplace`.
+- **Ohne Compiler** (oder wenn der Bau scheitert): `pip install` meldet
+  das und installiert das Paket trotzdem; SimLev rechnet dann wie bisher
+  rein in Python, mit denselben Ergebnissen, nur langsamer. Ob die
+  Erweiterung aktiv ist, zeigt
+  `simlev._r.env.ext() is not None`.
+
 | Paket | Wofür | Pflicht? |
 |---|---|---|
 | `numpy`, `pandas` | Rechenkern und Datenaufnahme | ja |
+| C/C++-Compiler (C++17) | schnellere Kerne (`simlev._ext`) | optional |
 | `pytest` | Ausführen der Test-Suite | optional |
 
 ## Kurzbeispiel
@@ -285,7 +307,9 @@ Voraussetzungen der Bitgleichheit:
   nach Stineman wie R, das beide Pakete übernommen hat
   (`.imputets_na_interpolation`; Herkunft in `COPYRIGHTS.md`). Die
   MS-GARCH-Verfahren schätzen ihr Modell wie R selbst, ohne `MSGARCH`
-  (`simlev.ms_garch`, Port von `.ms_garch_fit` und dem Kern `src/ms_garch.c`).
+  (`simlev.ms_garch`, Port von `.ms_garch_fit`; den Filterkern
+  `src/ms_garch_impl.c` nutzt Python als C-Erweiterung mit, sonst rechnet
+  der Python-Port in `_bootstrap_core.py`).
   Einen Schalter für optionale R-Pakete gibt es nicht mehr.
 - **nlminb:** Die PORT-Bibliothek liest an drei Stellen nicht gesetzte
   lokale Variablen (in R zufällige Stapelreste); Python setzt dort 0. Das
@@ -348,6 +372,9 @@ aus den testthat-Tests des R-Pakets übertragen) und die R-Interna in
 `simlev/_r/`. `compare_golden.py` nimmt
 Ordner oder Dateien sowie `-k fall …`, `-v` und `-q`;
 `compare_reference.py` nimmt Modulnamen sowie `-k muster` und `-v`.
+Ist die C-Erweiterung gebaut, laufen Tests und Vergleiche mit ihr;
+`SIMLEV_NO_EXT=1` erzwingt die reinen Python-Kerne (beide Wege müssen
+bitgleich sein).
 
 Die Referenzfälle liegen im gemeinsamen Ordner `golden/` im Hauptverzeichnis
 des Repositorys. Die Tests finden ihn automatisch, solange Sie im
@@ -412,6 +439,11 @@ simlev/
     fmt.py           format, sprintf, print wie R
     rlist.py         Basisklasse RList der Ergebnisobjekte
     reftree.py       Laden und Vergleichen der Referenzfälle
+src/                 optionale C/C++-Erweiterung simlev._ext: _ext*.cpp/.c (Hüllen),
+                     _rng_r.c/.h (C-Nachbildung von R's Zufallszahlen) und
+                     simlev_core.h, *_impl.h, ms_garch_impl.c/.h (Kopien der gemeinsamen
+                     Kerne aus r/src/)
+setup.py             Bau der Erweiterung (optional, setuptools Extension)
 tests/               pytest-Suite
 tools/               compare_golden.py, compare_reference.py
 examples/            lauffähige Beispiele

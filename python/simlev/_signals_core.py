@@ -1,13 +1,16 @@
 """Rollierende Kerne aus ``r/src/research_core.cpp`` (``.roll_mean_core``, ``.roll_cov_core``).
 
 Bitgleiche Nachbildung der C++-Fassungen (double-Arithmetik in derselben
-Reihenfolge).
+Reihenfolge). Mit gebauter Erweiterung rechnen die gemeinsamen Kerne von R und
+Python (``r/src/research_core_impl.cpp`` über ``simlev._ext``, Etappe 7.3a);
+sonst und mit ``SIMLEV_NO_EXT=1`` die Python-Ports (bitgleich).
 """
 from __future__ import annotations
 
 
 import numpy as np
 
+from ._r import env as _env
 from ._r.fmt import NA_REAL
 
 __all__ = ["roll_mean_core", "roll_cov_core"]
@@ -25,6 +28,11 @@ def roll_mean_core(x, n):
     x = np.asarray(x, dtype=np.float64).ravel()
     m = x.size
     n = int(n)
+    ext = _env.ext()
+    if ext is not None and -2147483648 <= n <= 2147483647:
+        out = np.empty(m)
+        ext.roll_mean_core(np.ascontiguousarray(x), n, out)
+        return out
     out = np.full(m, _NAN)
     if n < 1 or n > m:
         return out
@@ -92,6 +100,11 @@ def roll_cov_core(x, y, n):
     y = np.asarray(y, dtype=np.float64).ravel()
     m = x.size
     n = int(n)
+    ext = _env.ext()
+    if ext is not None and -2147483648 <= n <= 2147483647:
+        out = np.empty(m)
+        ext.roll_cov_core(np.ascontiguousarray(x), np.ascontiguousarray(y), n, out)
+        return out
     out = np.full(m, _NAN)
     if n < 1 or n > m or y.size != m:
         return out

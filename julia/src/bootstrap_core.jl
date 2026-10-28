@@ -642,6 +642,95 @@ function ms_garch_filter(y, omega, alpha, beta, gamma, P, xi0, h1)
             end
         end
     end
+    if any(isnan, h) || any(isnan, pred) || any(isnan, filt) || any(isnan, lB)
+        # NaN im Ergebnis: Nutzlast und Vorzeichen wie im R-Bau (siehe _ms_garch_filter_nan)
+        return _ms_garch_filter_nan(yv, om, al, be, ga, Pv, xi, h1v, n, K)
+    end
+    return SimLev.RList("loglik" => (ok ? ll : -Inf), "h" => h, "pred" => pred, "filt" => filt, "lB" => lB)
+end
+
+# ── NaN-genauer Weg (Etappe 7.3a) ───────────────────────────────────────────
+#
+# Treffen in einer Operation zwei NaN aufeinander (etwa NA in y auf einen schon
+# ungültigen Filterzustand), behält x86-64/SSE die Nutzlast des ersten Operanden
+# der Maschinenanweisung; welcher das ist, legt der Compiler fest (gcc im R-Bau,
+# LLVM in Julia), bei kommutativen Operationen auch entgegen der Quelltextfolge.
+# Ungültige Operationen (0/0, log oder sqrt einer negativen Zahl) liefern in C
+# das Standard-NaN von x86 (Vorzeichen gesetzt, 0xFFF8000000000000), Julias NaN
+# ist +NaN. Der schnelle Weg oben ist ohne NaN exakt; enthält ein Ergebnis NaN,
+# rechnet _ms_garch_filter_nan den Filter noch einmal und wählt bei zwei
+# NaN-Operanden den Operanden, den der R-Bau (gcc -O2, x86-64) behält
+# (Operandenfolge aus dem Maschinencode von simlev_ms_garch_filter, je Zeile
+# vermerkt; gleiche Regeln wie im Python-Port _bootstrap_core.py).
+
+const _X86_NAN = reinterpret(Float64, 0xFFF8000000000000)
+@inline _nquiet(x::Float64) = reinterpret(Float64, reinterpret(UInt64, x) | 0x0008000000000000)
+"Ergebnis `r` mit bevorzugtem Operanden `a`: sind `a` und `b` NaN, gilt `a` (still)."
+@inline _nn(r::Float64, a::Float64, b::Float64) = (isnan(a) && isnan(b)) ? _nquiet(a) : r
+@inline _n_add(a::Float64, b::Float64) = _nn(a + b, a, b)
+@inline _n_mul(a::Float64, b::Float64) = _nn(a * b, a, b)
+@inline _n_sub(a::Float64, b::Float64) = _nn(a - b, a, b)
+@inline _n_div(a::Float64, b::Float64) = _nn(a / b, a, b)
+@inline _n_exp(x::Float64) = isnan(x) ? _nquiet(x) : SimLev.RLibm.c_exp(x)
+@inline _n_log(x::Float64) = x > 0.0 ? SimLev.RLibm.c_log(x) : x == 0.0 ? -Inf : isnan(x) ? _nquiet(x) : _X86_NAN
+@inline _n_sqrt(x::Float64) = x >= 0.0 ? sqrt(x) : isnan(x) ? _nquiet(x) : _X86_NAN
+
+"`ms_garch_filter` Schritt für Schritt mit der NaN-Wahl des R-Baus (siehe oben)."
+function _ms_garch_filter_nan(yv, om, al, be, ga, Pv, xi, h1v, n, K)
+    two_pi = 2.0 * Float64(pi)
+    h = Matrix{Float64}(undef, n, K)
+    pred = Matrix{Float64}(undef, n, K)
+    filt = Matrix{Float64}(undef, n, K)
+    lB = Matrix{Float64}(undef, n, K)
+    ll = 0.0
+    ok = true
+    @inbounds for k in 1:K
+        pred[1, k] = xi[k]
+    end
+    @inbounds for t in 1:n
+        if t == 1
+            for k in 1:K
+                h[1, k] = h1v
+            end
+        else
+            e = yv[t-1]
+            e2 = e * e
+            ind = e < 0.0 ? 1.0 : 0.0
+            for k in 1:K
+                a = _n_add(ga[k] * ind, al[k])                          # alpha + gamma * ind: gamma * ind bleibt
+                c = _n_add(_n_mul(a, e2), om[k])                        # omega + a * e2: a * e2 bleibt
+                h[t, k] = _n_add(c, _n_mul(be[k], h[t-1, k]))          # ... + beta * h[t-1]: linker Teil, beta bleibt
+            end
+        end
+        y2 = yv[t] * yv[t]
+        f = 0.0
+        for k in 1:K
+            hk = h[t, k]
+            q = _n_div(y2 * -0.5, hk)                                   # (-0.5 * y2) / hk: Zähler bleibt
+            th = hk * two_pi
+            phi = _n_div(_n_exp(q), _n_sqrt(th))                        # exp(q) / sqrt(2 pi hk): exp(q) bleibt
+            lB[t, k] = _n_sub(q, 0.5 * _n_log(th))                      # q - 0.5 * log(2 pi hk): q bleibt
+            filt[t, k] = _n_mul(phi, pred[t, k])                        # pred * phi: phi bleibt
+            f = _n_add(filt[t, k], f)                                   # f + filt: filt bleibt
+        end
+        if !isfinite(f) || f <= 0.0
+            ok = false
+        else
+            ll = ll + SimLev.RLibm.c_log(f)
+        end
+        for k in 1:K
+            filt[t, k] = _n_div(filt[t, k], f)                          # filt / f: filt bleibt
+        end
+        if t < n
+            for j in 1:K
+                s = 0.0
+                for i in 1:K
+                    s = _n_add(s, _n_mul(Pv[i+K*(j-1)], filt[t, i]))  # s + P * filt: s bleibt, P bleibt
+                end
+                pred[t+1, j] = s
+            end
+        end
+    end
     return SimLev.RList("loglik" => (ok ? ll : -Inf), "h" => h, "pred" => pred, "filt" => filt, "lB" => lB)
 end
 

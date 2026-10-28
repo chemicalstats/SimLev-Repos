@@ -381,6 +381,12 @@ def dgemm(transa, transb, alpha, A, B, beta, C):
         # Spalte j: Beta-Skalierung, dann C(:,j) += (alpha*B(l,j)) * A(:,l), l = 1..k
         _beta_scale(C, beta)
         Bk = B if notb else B.T          # Bk[l, j]
+        if k > 16 and (k + 1) * m * n <= 1 << 20:
+            # Etappe 7.1: dieselbe Folge C + p_1 + p_2 + ... mit p_l = A(:,l) * (alpha*B(l,:)),
+            # als fortlaufende Summe (add.accumulate rechnet out[l] = out[l-1] + in[l])
+            Tl = A.T[:, :, None] * (alpha * Bk)[:, None, :]
+            C[...] = np.add.accumulate(np.concatenate((C[None, :, :], Tl)), axis=0)[-1]
+            return
         for l in range(k):
             temp = alpha * Bk[l, :]
             C += A[:, l][:, None] * temp[None, :]

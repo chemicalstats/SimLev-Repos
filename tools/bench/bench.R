@@ -2,8 +2,9 @@
 #
 # Aufruf aus der Repo-Wurzel (SimLev installiert, z. B. R CMD INSTALL -l <lib> r):
 #   LC_ALL=C.UTF-8 R_LIBS=<lib> Rscript tools/bench/bench.R [ausgabe.csv] [aufgaben]
-# aufgaben: kommagetrennt (z. B. T1,T8), Voreinstellung alle außer P1. P1 (= P1c1, P1c2) misst
-# bootstrap mit cores = 1 und 2 (Fork) und wird nur auf Anforderung gemessen (run.sh P1).
+# aufgaben: kommagetrennt (z. B. T1,T8), Voreinstellung alle außer P1 und T3c2. P1 (= P1c1, P1c2)
+# misst bootstrap mit cores = 1 und 2 (Fork), T3c2 die Aufgabe T3 mit cores = 2; beide nur auf
+# Anforderung (run.sh P1 bzw. bench.R <csv> T3,T3c2; nur R).
 # Je Aufgabe 1 Aufwärmlauf (erster_lauf_s), dann 3 gemessene Läufe (Median, Min, Max).
 # Ein Kern: cores = 1, wo die Funktion es kennt; BLAS-Threads setzt run.sh.
 
@@ -59,10 +60,13 @@ tasks <- list(
   T7 = function() portfolio_optimize(d, A4, method = "hrp"),
   T8 = function() SimLev:::.ms_garch_fit(y8, 2, "gjrGARCH"),
   P1c1 = function() bootstrap(d, cfg, "stationary", n = 400, seed = 1, progress = FALSE, path_length = 2520, cores = 1),
-  P1c2 = function() bootstrap(d, cfg, "stationary", n = 400, seed = 1, progress = FALSE, path_length = 2520, cores = 2)
+  P1c2 = function() bootstrap(d, cfg, "stationary", n = 400, seed = 1, progress = FALSE, path_length = 2520, cores = 2),
+  T3c2 = function() bootstrap_study(d, cfg, "stationary", n = 50, path_length = 2520, seed = 1, progress = FALSE,
+                                    strategies = list(a = st), cores = 2)
 )
+opt_in <- c("P1c1", "P1c2", "T3c2")    # nur auf Anforderung (mehrere Kerne)
 if (!is.null(only)) only <- unlist(lapply(only, function(a) if (a == "P1") c("P1c1", "P1c2") else a))
-tasks <- if (is.null(only)) tasks[!startsWith(names(tasks), "P")] else tasks[intersect(names(tasks), only)]
+tasks <- if (is.null(only)) tasks[setdiff(names(tasks), opt_in)] else tasks[intersect(names(tasks), only)]
 
 el <- function(f) {
   t0 <- proc.time()[["elapsed"]]

@@ -42,6 +42,14 @@
 //   * Ergebnisse: neue Vektoren mit 0 bzw. dem Fuellwert, Matrizen mit
 //     ganzzahligem dim-Attribut, Skalare als neue Vektoren der Laenge 1,
 //     benannte Listen mit names-Attribut.
+//
+// Seit Etappe 7.3a stehen die Kerne in src/*_impl.h bzw. ms_garch_impl.c (gemeinsam
+// mit Python, siehe simlev_core.h; seit 7.3b auch die Bootstrap-Kerne mit
+// Zufallszahlen). Diese Datei ist ihr R-Host: der Abschnitt "R als Host der
+// gemeinsamen Kerne" am Ende bindet die Namen simlev_host::* und SIMLEV_* an genau die
+// Aufrufe von sl:: bzw. R's nmath (Rf_runif, Rf_rnorm, Rf_rgeom), die vor der Teilung
+// im Kern standen (gleicher Maschinencode). Eine .Call-Huelle bindet erst diese Datei,
+// dann den Kern ein.
 #ifndef SIMLEV_CAPI_H
 #define SIMLEV_CAPI_H
 
@@ -282,6 +290,7 @@ inline void check_interrupt_fn(void*) { R_CheckUserInterrupt(); }
 inline void check_interrupt() {
   if (R_ToplevelExec(&detail::check_interrupt_fn, nullptr) == FALSE) throw interrupted();
 }
+
 
 // ---------------------------------------------------------------------------
 // Umwandlungen (wie Rcpp r_cast<> / as<>)
@@ -599,5 +608,62 @@ inline void put(SEXP list, R_xlen_t i, SEXP value) {
 }
 
 }  // namespace sl
+
+// ---------------------------------------------------------------------------
+// R als Host der gemeinsamen Kerne (Etappe 7.3a, Schnittstelle in simlev_core.h)
+// ---------------------------------------------------------------------------
+//
+// Die Kerne in src/*_impl.h sind gewoehnliche statische Funktionen ueber den Typen
+// simlev_host::NumVec/IntVec/NumMat und den Makros SIMLEV_*. Fuer R stehen dort
+// genau die Typen und Aufrufe, die frueher direkt im Kern standen; der Compiler
+// uebersetzt die Kerne daher in der .Call-Huelle wie vor der Teilung (gleicher
+// Maschinencode, geprueft per Disassemblierung). Python bindet dieselben Namen an
+// seine Sichten (python/src/_ext_common.h).
+namespace simlev_host {
+typedef sl::NumVec NumVec;
+typedef sl::IntVec IntVec;
+typedef sl::NumMat NumMat;
+// Engine-Kerne (simulation_core_impl.h, fifo_core_impl.h, tax_core_impl.h): Objekte
+// des Simulationszustands sind SEXP; Zugriffe as_list, at, get, set, put, has,
+// as_double, as_int, num_vec, named_list, new_num, new_int, Date aus sl.
+typedef SEXP Obj;
+using namespace sl;
+// Kerne mit Zufallszahlen (Etappe 7.3b, bootstrap_core_impl.h): logische Vektoren, Listen
+// von Ganzzahlvektoren (R: die Liste selbst, Zugriff ueber SIMLEV_LIST_INT) und genau die
+// Zufallsfunktionen aus R's nmath, die der Kern vor der Teilung aufrief.
+typedef sl::LglVec LglVec;
+typedef SEXP IntList;
+inline double runif(double a, double b) { return Rf_runif(a, b); }
+inline double rnorm(double mu, double sigma) { return Rf_rnorm(mu, sigma); }
+inline double rgeom(double p) { return Rf_rgeom(p); }
+}  // namespace simlev_host
+
+#define SIMLEV_RNG 1                                            // Host stellt runif/rnorm/rgeom (R's RNG)
+#define SIMLEV_INT(...) sl::new_int(__VA_ARGS__)                // Ganzzahlvektor (0)
+#define SIMLEV_LIST_INT(l, i) sl::int_vec(sl::at(l, i))         // i-tes Element einer Liste als Ganzzahlvektor
+
+#define SIMLEV_NA NA_REAL                                       // R's NA_real_
+#define SIMLEV_FAIL sl::stop                                    // Fehler: stop() mit dem Text
+#define SIMLEV_CHECK_INTERRUPT() sl::check_interrupt()          // Benutzerabbruch
+#define SIMLEV_WARN(msg) Rf_warning("%s", msg)                  // Warnung
+#define SIMLEV_NUM(...) sl::new_num(__VA_ARGS__)                // Zahlenvektor (0 bzw. Fuellwert)
+#define SIMLEV_MATRIX(...) sl::new_mat(__VA_ARGS__)             // Matrix (0)
+#define SIMLEV_COPY(...) sl::num_copy(__VA_ARGS__).sexp         // Ergebnis: Kopie eines Bereichs
+#define SIMLEV_COPY_VEC(...) sl::num_copy(__VA_ARGS__)          // Kopie eines Bereichs als Vektor
+#define SIMLEV_SET_FLAG(v, name, flag) sl::set_attr((v).sexp, name, sl::wrap(flag))
+#define SIMLEV_DONE(v) (v).sexp                                 // Ergebnis: Vektor
+#define SIMLEV_LIST(...) sl::named_list(__VA_ARGS__)            // Ergebnis: benannte Liste
+#define SIMLEV_CLONE(v) sl::clone(v)                            // Kopie mit Attributen (Rf_duplicate)
+#define SIMLEV_R_FINITE(x) R_finite(x)                          // R_finite
+#define SIMLEV_XLENGTH(x) Rf_xlength(x)                         // Laenge eines Objekts
+#define SIMLEV_LENGTH(x) Rf_length(x)
+#define SIMLEV_IS_NULL(x) Rf_isNull(x)                          // NULL bzw. None
+#define SIMLEV_STRING_AT(v, i) CHAR(STRING_ELT(v, i))           // i-te Zeichenkette (UTF-8)
+#define SIMLEV_MARK_DATE(v)                                     /* Klasse "Date" am Vektor */ \
+  {                                                                                          \
+    SEXP date_class = PROTECT(Rf_mkString("Date"));                                          \
+    Rf_setAttrib((v).sexp, R_ClassSymbol, date_class);                                       \
+    UNPROTECT(1);                                                                            \
+  }
 
 #endif

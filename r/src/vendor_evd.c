@@ -1,12 +1,14 @@
 /*
- * vendor_evd.c  --  uebernommener C-Code des R-Pakets evd
+ * vendor_evd.c  --  .Call-Huelle fuer den uebernommenen C-Code des R-Pakets evd
  *
  * Paket:    evd 2.3-7.1 (CRAN, 2024-09-21), Datei src/pot.c (Funktion nlgpd)
  * Autoren:  Alec Stephenson. Function fbvpot by Chris Ferro.
  * Lizenz:   GPL-3
  * Angepasst fuer SimLev (siehe inst/COPYRIGHTS):
- *   - nlgpd heisst hier evd_nlgpd (static); der Funktionsrumpf ist
- *     unveraendert. Kopfdateien R.h/Rmath.h direkt statt evd's header.h.
+ *   - nlgpd heisst hier evd_nlgpd (static); der Funktionsrumpf steht seit
+ *     Etappe 7.3a in src/vendor_evd_impl.h (gemeinsam mit Python, Einzelheiten
+ *     dort) und wird hier eingebunden. Kopfdateien R.h/Rmath.h direkt statt
+ *     evd's header.h.
  *   - evd ruft nlgpd ueber .C auf. SimLev registriert in init.c nur
  *     .Call-Routinen (frueher erzeugte Rcpp::compileAttributes die
  *     Registrierung), deshalb ruft R/vendor_evd.R die Huelle C_evd_nlgpd
@@ -20,37 +22,10 @@
 #include <Rinternals.h>
 #include <Rmath.h>
 
-static void evd_nlgpd(double *data, int *n, double *loc, double *scale,
-    double *shape, double *dns)
-{
-  int i;
-  double *dvec, eps;
-
-  dvec = (double *)R_alloc(*n, sizeof(double));
-  eps = R_pow(DBL_EPSILON, 0.3);
-
-  if(*scale <= 0) {
-     *dns = 1e6;
-     return;
-  }
-
-  for(i=0;i<*n;i++)  {
-    data[i] = (data[i] - *loc) / *scale;
-    if(fabs(*shape) <= eps)
-      dvec[i] = log(1 / *scale) - data[i];
-    else {
-      data[i] = 1 + *shape * data[i];
-      if(data[i] <= 0) {
-        *dns = 1e6;
-        return;
-      }
-      dvec[i] = log(1 / *scale) - (1 / *shape + 1) * log(data[i]);
-    }
-  }
-
-  for(i=0;i<*n;i++)
-    *dns = *dns - dvec[i];
-}
+/* Host des gemeinsamen Kerns (vendor_evd_impl.h): die frueheren R-Aufrufe */
+#define SIMLEV_EVD_ALLOC(n) (double *)R_alloc(n, sizeof(double))
+#define SIMLEV_EVD_POW(x, y) R_pow(x, y)
+#include "vendor_evd_impl.h"
 
 /* .C-Argument (double) kopieren und wie .C mit NAOK = FALSE pruefen */
 static double *evd_c_real(SEXP x, int argno)

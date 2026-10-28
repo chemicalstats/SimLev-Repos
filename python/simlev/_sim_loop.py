@@ -708,7 +708,11 @@ def _sim_close_years(sim: dict, fl: dict, cfg: dict, act: _Actions, stopp_date: 
             vp_year = year_of(sim["totals"]["vp_pending"][0]["assessment_date"])
             prepaid = None
             if sim["totals"]["current_year"] <= vp_year:
-                dry = copy.deepcopy(sim)
+                # Probelauf: Jahreswechsel ohne Tarif und vp_taxes ändern nur
+                # sim["totals"] und sim["status"] (Etappe 7.1: nur diese tief kopieren,
+                # market/trades/report/assets werden nur gelesen und bleiben geteilt)
+                dry = dict(sim)
+                dry.update(copy.deepcopy({"totals": sim["totals"], "status": sim["status"]}))
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
                     dry = final_year_change(dry, None, False)

@@ -24,8 +24,10 @@ Was speziell die Engine (`simulation()`) betrifft, steht im Abschnitt
   geschrieben (`.sl_richardson_hessian`, `.sl_richardson_jacobian`), `gen_evd.R`, `gen_imputets.R` und
   `gen_rugarch.R` prüfen diese Fassungen. MSGARCH braucht SimLev nicht mehr:
   Das MS-GARCH-Modell schätzt R selbst (`r/R/ms_garch.R`, Kern
-  `r/src/ms_garch.c`), Python bildet das in `simlev/ms_garch.py` und
-  `_bootstrap_core.ms_garch_filter` nach.
+  `r/src/ms_garch_impl.c` mit `.Call`-Hülle `r/src/ms_garch.c`), Python bildet
+  das in `simlev/ms_garch.py` und `_bootstrap_core.ms_garch_filter` nach; den
+  Filterkern nutzt Python wie alle nativen Kerne ohne Zufallszahlen als
+  C-Erweiterung mit (siehe [C-Erweiterung](#c-erweiterung)).
 - Bitgleichheit setzt Linux x86-64 (80-Bit-`long double`), glibc-libm und
   für Eigenvektoren die Referenz-LAPACK des Systems voraus.
 - Immer mit `LC_ALL=C.UTF-8` arbeiten; unter dem C-Locale schlagen die
@@ -167,7 +169,10 @@ rechnet; `bootstrap`, `bootstrap_study`, `param_search` (auch über
 `overfit_walk_forward`/`param_bootstrap`), `sensitivity_grid`,
 `sensitivity_rebalancing`, `planning_lumpsum_vs_dca` und `sensitivity_leverage` rufen
 sie auf. Sie bildet `parallel::mclapply(mc.preschedule = FALSE, mc.set.seed =
-FALSE)` nach (Verhalten in R 4.3.3 ermittelt in Etappe 5):
+FALSE)` nach (Verhalten in R 4.3.3 ermittelt in Etappe 5). R bündelt die
+Einheiten seit dem 26.10.2026 in höchstens `4 × cores` Pakete (ein Fork je Paket)
+mit denselben Ergebnissen, demselben Zufallszustand und denselben Fehlern;
+innerhalb eines Pakets erscheinen Ausgaben dort in Einheitenreihenfolge.
 
 - `cores` wird wie in `mclapply` ganzzahlig abgeschnitten; unter zwei Kernen
   oder mit höchstens einem Element ist es `lapply` (fortlaufender
@@ -195,7 +200,8 @@ FALSE)` nach (Verhalten in R 4.3.3 ermittelt in Etappe 5):
 2. Eine Einheit darf sich nicht auf Änderungen verlassen, die eine andere
    Einheit oder der Elternprozess während der Rechnung macht: Globale Zustände,
    Caches und Closures sind im Kind Kopien; was eine Einheit dort ändert, geht
-   verloren (wie im Fork in R). Ergebnisse gehören in den Rückgabewert.
+   verloren (wie im Fork in R; dort sehen es seit dem Bündeln höchstens die
+   folgenden Einheiten desselben Pakets). Ergebnisse gehören in den Rückgabewert.
 3. Rückgabewerte müssen pickelbar sein, wenn es schnell gehen soll (sonst
    rechnet der Elternprozess die Einheit nach). numpy-, pandas- und
    `RList`-Objekte kommen bitgleich zurück (NA mit Nutzlast 1954, -0).
@@ -217,7 +223,7 @@ FALSE)` nach (Verhalten in R 4.3.3 ermittelt in Etappe 5):
 | `sim_validate.R`, `sim_prepare.R` | `_sim_phases.py` |
 | `sim_actions.R`, `sim_loop.R` | `_sim_loop.py` |
 | `sim_evaluate.R` | `_sim_evaluate.py` |
-| `simulation_core.cpp`, `fifo_core.cpp`, `tax_core.cpp` | `_core.py` |
+| `simulation_core.cpp`, `fifo_core.cpp`, `tax_core.cpp` (Kerne in `*_core_impl.h`) | `_core.py` (mit gebauter Erweiterung die gemeinsamen Kerne, siehe [C-Erweiterung](#c-erweiterung)) |
 | `asset_config.R`, `strategy.R` | `config.py` |
 | `compute_rebal_trigger.R` | `trigger.py` |
 | `tax_tariff.R`, `inst/extdata/steuertarif.csv` | `_tax_tariff.py`, `data/steuertarif.csv` |
@@ -229,7 +235,7 @@ FALSE)` nach (Verhalten in R 4.3.3 ermittelt in Etappe 5):
 | `bonds.R` | `bonds.py` |
 | `signals.R`; `.roll_mean_core`, `.roll_cov_core` aus `research_core.cpp` | `signals.py`, `_signals_core.py` |
 | `bootstrap.R`, `bootstrap_core.cpp`; `.garch_filter` aus `research_core.cpp` | `bootstrap.py`, `_bootstrap_core.py` |
-| `ms_garch.R`, `ms_garch.c` | `ms_garch.py`, `_bootstrap_core.py` (`ms_garch_filter`) |
+| `ms_garch.R`, `ms_garch.c`, `ms_garch_impl.c` | `ms_garch.py`, `_bootstrap_core.py` (`ms_garch_filter`; mit gebauter Erweiterung über `simlev._ext`, siehe [C-Erweiterung](#c-erweiterung)) |
 | `withdrawal.R`, `withdrawal_core.cpp` | `withdrawal.py`, `_withdrawal_core.py` |
 | `dependence.R`, `dependence_core.cpp`; `.kendall_tau_core`, `.quantile_reg_core`, `.hmm_forward_backward` aus `research_core.cpp` | `dependence.py`, `_dependence_core.py` |
 | `regimes.R` | `regimes.py` |
@@ -530,11 +536,212 @@ nach `collate_reset()`), `_lapack` beim ersten Laden der Bibliothek,
 | `SIMLEV_STRICT_ZERO` | `0`: −0 = +0 im Vergleich (`reftree`) | Prüfung |
 | `SIMLEV_GOLDEN_DIR` | andere Ordner der Engine-Fälle für `test_golden_master.py` (mit `os.pathsep` getrennt) | Prüfung |
 | `SIMLEV_MODULE_DIR` | anderer Ordner der Modul-Fälle für `test_module_reference.py` und die Grafiktests | Prüfung |
+| `SIMLEV_NO_EXT` | `1`: C-Erweiterung `simlev._ext` nicht nutzen, reine Python-Kerne (Rückfall prüfen); gelesen bei jedem Aufruf von `env.ext()`, in Tests über `env.use_ext(flag)` | Prüfung |
 
 `reftree` setzt `SIMLEV_COLLATE=icu:root`, falls nicht gesetzt (die
 Referenzen entstanden unter C.UTF-8). Die Generatoren in `golden/modules/`
 lesen eigene Schalter (`SIMLEV_R_NMATH_SRC`, `SIMLEV_ALLOW_PARTIAL`, siehe
 `golden/README.md`).
+
+## C-Erweiterung
+
+R und Python teilen sich alle nativen Kerne des R-Pakets (Etappe 7.2 Pilot
+MS-GARCH, Etappe 7.3a die Kerne ohne Zufallszahlen, Etappe 7.3b die Kerne mit
+Zufallszahlen: Bootstrap und truncnorm). Das ist eine reine Beschleunigung:
+Schnittstelle und Ergebnisse ändern sich nicht, die reinen Python-Kerne
+bleiben der Rückfall (`SIMLEV_NO_EXT=1` oder ohne Compiler). Julia behält
+seine eigenen Ports.
+
+**Geteilte Kerne** (kanonische Datei in `r/src/` → R-Hülle → Python):
+
+| Kerndatei (`r/src/`) | R-Hülle (`.Call`) | Python-Hülle (`python/src/`) | Python-Aufrufer |
+|---|---|---|---|
+| `ms_garch_impl.c`, `ms_garch_impl.h` | `ms_garch.c` | `_ext_ms_garch.cpp` | `_bootstrap_core.ms_garch_filter` |
+| `research_core_impl.h` | `research_core.cpp` | `_ext_research.cpp` | `_optimize_core` (`proj_box_simplex`, `qp_box_simplex`, `min_cvar_core`, `min_cdar_core`), `_signals_core` (`roll_mean_core`, `roll_cov_core`), `_dependence_core` (`kendall_tau_core`, `quantile_reg_core`, `hmm_forward_backward`), `_bootstrap_core.garch_filter` |
+| `withdrawal_core_impl.h` | `withdrawal_core.cpp` | `_ext_withdrawal.cpp` | `_withdrawal_core.wd_simulate` |
+| `dependence_core_impl.h` | `dependence_core.cpp` | `_ext_dependence.cpp` | `_dependence_core.dcc_filter` |
+| `vendor_rugarch_impl.h` | `vendor_rugarch.c` | `_ext_rugarch.cpp`, `_ext_rugarch_c.c` | `_r/rugarch.py` (`_LLH`) |
+| `vendor_evd_impl.h` | `vendor_evd.c` | `_ext_evd.cpp`, `_ext_evd_c.c` | `_r/evd.py` (`nlgpd`) |
+| `vendor_imputets_impl.h` | `vendor_imputets.cpp` | `_ext_imputets.cpp` | `_r/imputets.py` (`_locf_core`) |
+| `simulation_core_impl.h`, `fifo_core_impl.h`, `tax_core_impl.h` | `simulation_core.cpp`, `fifo_core.cpp`, `tax_core.cpp` | `_ext_engine.cpp` | `_core.py` (alle Funktionen außer `_update_fifo_front`) |
+| `bootstrap_core_impl.h` (mit Zufallszahlen) | `bootstrap_core.cpp` | `_ext_bootstrap.cpp` | `_bootstrap_core` (`boot_idx_iid`, `boot_idx_block`, `boot_idx_stationary`, `boot_idx_regime`, `boot_idx_tails`, `boot_wild`, `boot_reset`, `boot_evt`, `boot_garch`, `boot_ms_garch`, `rolling_vol`, `assign_regimes`, `estimate_trans_mat`) |
+| `vendor_truncnorm_impl.h` (mit Zufallszahlen) | `vendor_truncnorm.c` | `_ext_truncnorm.cpp`, `_ext_truncnorm_c.c` | `_r/truncnorm.py` (`rtruncnorm`) |
+
+Dazu `simlev_core.h` (Aufbau, Host-Schnittstelle, `simlev_na_real()`) und nur
+auf der Python-Seite `_rng_r.c`/`_rng_r.h` (C-Nachbildung von R's
+Zufallszahlen) mit dem Prüfzugang `_ext_rng.cpp` (`rng_draw`, `rng_qnorm`,
+`rng_dnorm`, für Tests).
+
+- **Aufbau:** Die Rechnung steht in `r/src/<datei>_impl.h` (C++-Kerne: nur
+  Header, `static`-Funktionen im Namensraum `simlev`; C-Kerne: `static`
+  C-Funktionen, `ms_garch_impl.c` als eigene Übersetzungseinheit) und
+  enthält keine R- oder Python-Header. Die Kerne sprechen ihren Host nur über
+  die Typen `simlev_host::NumVec`, `IntVec`, `NumMat` (Engine: `Obj` und die
+  Zugriffe `as_list`, `at`, `get`, `set`, `put`, `has`, `as_double`,
+  `as_int`, `num_vec`, `named_list`, `new_num`, `new_int`, `Date`) und die
+  Makros `SIMLEV_*` an. Den Host stellt die einbindende Hülle: R in
+  `r/src/simlev_capi.h` (Abschnitt „R als Host der gemeinsamen Kerne“),
+  Python in `python/src/_ext_common.h` bzw. für die Engine in
+  `_ext_engine.cpp`. Für R stehen hinter den Namen genau die Aufrufe, die
+  vor der Teilung im Kern standen; der R-Bau erzeugt daher **denselben
+  Maschinencode** wie zuvor (geprüft mit `objdump` Funktion für Funktion für
+  alle Objektdateien, dazu Byte-Gleichheit aller Generatoren und der
+  Engine-Fälle). Die R-Datei `<datei>.cpp/.c` ist nur noch die
+  `.Call`-Hülle (Umwandlung der Argumente wie bisher).
+- **Python-Modul:** eine Erweiterung `simlev._ext` (`_ext.cpp` fügt die
+  Methodentabellen der Hüllen `_ext_<kern>.cpp` zusammen). Die Hüllen
+  nehmen Felder über das Buffer-Protokoll (numpy-Arrays `float64` bzw.
+  `int32`, zusammenhängend; keine numpy-Header), prüfen Typ, Länge und
+  Beschreibbarkeit der Puffer und geben Ergebnisse als `bytearray`/`float`
+  bzw. für die Engine als dict/list zurück. Fachliche Prüfungen und
+  Umwandlungen wie in R macht die aufrufende Python-Funktion vorher, mit
+  denselben Meldungen wie der reine Python-Kern. Geladen wird das Modul über
+  `simlev._r.env.ext()` (beim ersten Aufruf; `None`, wenn nicht gebaut oder
+  `SIMLEV_NO_EXT=1`).
+- **Rückmeldeschnittstelle** (`simlev_core.h`): `SIMLEV_FAIL(fmt, ...)`
+  (Fehler mit Text, kehrt nicht zurück; R: `stop()` mit genau diesem Text,
+  Python: `ValueError` mit dem Text, den die Python-Seite in die
+  Fehlerklasse des reinen Python-Kerns umsetzt, etwa `WdError`,
+  `QuantileRegError`), `SIMLEV_WARN(msg)` (R: `Rf_warning`, Python:
+  `warnings.warn`; derzeit ungenutzt), `SIMLEV_CHECK_INTERRUPT()`
+  (Benutzerabbruch), `SIMLEV_NA` (R's `NA_real_`), Ergebnisfelder
+  `SIMLEV_NUM`, `SIMLEV_MATRIX`, `SIMLEV_COPY`, `SIMLEV_LIST`,
+  `SIMLEV_SET_FLAG`. Python legt Ergebnisfelder in einem Speicher je Thread
+  an (`ext::Alloc`) und kopiert sie nach dem Kern in Python-Objekte.
+  Fehler der Engine-Zugriffe sind die Python-Ausnahmen des reinen Kerns
+  (`KeyError`, `IndexError`, `TypeError`).
+- **Benutzerabbruch:** wie in R. Von den geteilten Kernen prüfen
+  `vendor_imputets` (`locf`, alle 1024 Werte) und `vendor_truncnorm` (je
+  Wert): R über `R_CheckUserInterrupt`, Python über `PyErr_CheckSignals()`
+  (`KeyboardInterrupt`; der Kern läuft dazu mit gehaltener GIL). `locf`
+  bricht sofort ab; `rtruncnorm` rechnet nach einem Signal die Schleife zu
+  Ende und meldet dann `KeyboardInterrupt` (kein `longjmp` aus dem Kern). Die
+  übrigen Kerne prüfen in beiden Sprachen nicht; Python gibt bei den Kernen
+  ohne Zufallszahlen die GIL während der Rechnung frei (Strg-C wirkt nach dem
+  Kern), die Engine-Kerne und die Kerne mit Zufallszahlen laufen mit
+  gehaltener GIL (Python-Objekte bzw. der Zustand von `simlev._r.rng`).
+- **Zufallszahlen in geteilten Kernen** (Etappe 7.3b): Ein Kern zieht nur
+  über den Host, `simlev_host::runif`, `rnorm` und `rgeom` (C++), bzw. über
+  die Namen aus R's `Rmath.h` (`runif`, `rnorm`, `rexp`, `dnorm` im C-Kern
+  von truncnorm). R stellt dafür genau R's Funktionen (`Rf_runif`, …;
+  `GetRNGstate`/`PutRNGstate` setzt die `.Call`-Hülle), der Maschinencode
+  ist derselbe wie vor der Teilung. Python stellt eine **C-Nachbildung von
+  R's Zufallszahlen** (`python/src/_rng_r.c`, Funktionsrümpfe aus R 4.3.3
+  `src/main/RNG.c`, `src/nmath/snorm.c`, `qnorm.c`, `sexp.c`, `runif.c`,
+  `rnorm.c`, `rexp.c`, `rgeom.c`, `rpois.c`, `dnorm.c`). Sie arbeitet auf dem
+  Zustand der Python-Nachbildung `simlev._r.rng`: Die Python-Seite ruft wie
+  der reine Kern erst `_get_state()`, dann `rng.c_state(rpois)` und übergibt
+  drei Puffer (`ist` int32[12]: Art, Normalverteilung, `mti`, Merker für neu
+  erzeugte Wörter, L'Ecuyer-Zustand, `rpois` `l`/`m`; `mt`: Sicht auf die 624
+  Wörter des Mersenne-Twisters, an Ort und Stelle geändert; `pst`: der
+  statische Zustand von `rpois`, nur für Kerne, die `rgeom` ziehen). Der
+  Kern zieht, `rng.c_state_put()` schreibt den Zustand zurück (auch nach
+  einem Fehler des Kerns, wie R's `PutRNGstate`; der Ausgabepuffer des
+  Mersenne-Twisters wird nach neu erzeugten Wörtern verworfen). Danach ist
+  der Zustand derselbe, als hätte der reine Python-Kern gezogen
+  (`tests/test_shared_c.py`).
+  - **Unterstützte Arten:** genau die von `simlev._r.rng`: Generator
+    „Mersenne-Twister“ (Voreinstellung) und „L'Ecuyer-CMRG“ (Parallelität),
+    Normalverteilung „Inversion“ (mit `qnorm5`, auch dem Zweig `r > 27` aus
+    R 4.3). Die Stichprobenart spielt für diese Kerne keine Rolle.
+  - **Rückfall:** Liefert `c_state()` `None` (andere Art, ungewöhnlicher
+    Zustand), rechnet still der reine Python-Kern (bitgleich). Ebenso bei
+    Eingaben, die der C-Kern in R nicht sicher rechnet (Indizes außerhalb
+    der Felder, zu kurze Felder, keine Beobachtung in den Regimen, negative
+    Längen, Werte außerhalb von int32, `L` nicht endlich oder über 1e7 im
+    stationären Bootstrap): Die Python-Seite prüft das vorher und lässt dann
+    den reinen Kern rechnen.
+  - **Parallelität:** Der Zustand liegt nur in Python-Objekten, die
+    Erweiterung hat keinen eigenen. Die Kinder von `par_lapply` (Fork)
+    ziehen daher mit ihren eigenen Zuständen; Referenzfälle mit `cores = 2`
+    (`bs_cores2_*`, `sg_cores2_rng`, …) und
+    `test_rng_kerne_in_kindprozessen`.
+  - **NaN-Nutzlast:** Welche Nutzlast bei zwei NaN-Operanden bleibt, hängt
+    von der Registerwahl des Compilers ab. Damit der Kern in der
+    Python-Hülle so übersetzt wird wie in der R-Hülle, markieren die Hüllen
+    ihre Prüfungen als unwahrscheinlich (`EXT_FAIL_IF`; sonst gilt der Kern
+    als selten und wird auf Größe optimiert), und `_ext_truncnorm_c.c` stellt
+    `NA_REAL`, `R_PosInf`, `R_NegInf`, `R_FINITE` wie R als Variablen bzw.
+    Aufruf aus einer anderen Übersetzungseinheit. Im Zufallsvergleich gegen
+    R (Etappe 7.3b) ist die Erweiterung auch mit NA/NaN in den Daten
+    bitgleich; die reinen Python-Kerne `boot_wild`, `boot_garch`,
+    `boot_ms_garch` und `rtruncnorm` liefern in solchen Fällen teils NaN
+    statt NA bzw. umgekehrt (Wert in beiden Fällen fehlend).
+- **Gemeinsame Quelle:** Das Python-Quellpaket braucht die Dateien in
+  seinem eigenen Baum, deshalb liegen **Byte-für-Byte-Kopien** in
+  `python/src/`; `tests/test_shared_c.py` prüft Gleichheit und
+  Vollständigkeit der Liste (übersprungen, wenn `r/` nicht daneben liegt).
+  Geändert wird nur `r/src/`, danach
+  `cp r/src/simlev_core.h r/src/*_impl.[ch] python/src/`. Nur in
+  `python/src/` (keine Kopie) liegen die Hüllen `_ext*` und die
+  C-Nachbildung von R's Zufallszahlen `_rng_r.c`/`_rng_r.h` (`PY_ONLY` im
+  Test).
+- **Bau:** `setup.py` (setuptools `Extension`, `optional=True`; übrige
+  Angaben in `pyproject.toml`, `MANIFEST.in` nimmt `src/` ins Quellpaket).
+  `pip install .` baut mit, wenn ein C/C++-Compiler da ist; im Klon ohne
+  Installation `python setup.py build_ext --inplace` (legt
+  `simlev/_ext*.so` ab, von `.gitignore` ausgenommen). Scheitert der Bau,
+  warnt setuptools und installiert ohne Erweiterung.
+- **Gleitkomma:** dieselben Einstellungen wie R (`R CMD config CXXFLAGS`:
+  `-O2`, kein `-ffast-math`, kein `-march`). `setup.py` setzt `-O2
+  -fno-fast-math -ffp-contract=off` (MSVC `/O2 /fp:precise`), C++ mit
+  `-std=gnu++17`, und `-fstrict-overflow`, sofern der Compiler es kennt
+  (Python übersetzt sonst mit `-fwrapv`, R nicht; das ändert die Schleifen
+  der Engine-Kerne). Jede Kerndatei bricht bei `-ffast-math` ab (`#error`)
+  und schaltet das Zusammenziehen zu fma per Pragma ab, unter GCC aber nur,
+  wo fma überhaupt erzeugt werden kann (`__FP_FAST_FMA`): auf x86-64 ist
+  `-ffp-contract=off` wirkungslos, das Pragma `GCC optimize` verändert dort
+  aber die Codeerzeugung der ganzen Datei. Python setzt
+  `SIMLEV_FP_CONTRACT_BY_FLAG` und lässt das Pragma weg. `long double` hat
+  wie in R 80 Bit (x86-64); `exp`, `log`, `pow`, `sqrt` kommen aus der
+  glibc-libm.
+- **NaN-Nutzlast:** Treffen in einer Operation zwei NaN mit verschiedener
+  Nutzlast aufeinander (`NA` und `NaN`), behält x86-64 die des ersten
+  Operanden; welcher das ist, wählt der Compiler. Für die Array-Kerne rechnet
+  die Erweiterung wie R (Zufallsvergleich ohne Abweichung). Die Engine-Kerne
+  arbeiten in Python auf anderen Objekten als in R; `_ext_engine.cpp` ist
+  wie der R-Host aufgebaut, damit der Compiler den Kern gleich übersetzt,
+  in seltenen Fällen mit NA und NaN in derselben Operation (etwa `NA` als
+  Kontostand und `NaN` als Zufluss) kann Python aber `NaN` statt `NA`
+  liefern (Wert in beiden Fällen fehlend; wie beim reinen Python-Kern). Der
+  reine MS-GARCH-Filter rechnet seit 7.3a in diesem Fall eigens wie R
+  (`_ms_garch_filter_nan`: Operandenfolge aus dem R-Maschinencode, NaN der
+  glibc für `log`/`sqrt` negativer Zahlen); er wird nur genutzt, wenn ein
+  Ergebnis NaN ist.
+- **Prüfen** in beiden Fällen:
+
+  ``` bash
+  python python/tools/compare_reference.py && SIMLEV_NO_EXT=1 python python/tools/compare_reference.py
+  python python/tools/compare_golden.py && SIMLEV_NO_EXT=1 python python/tools/compare_golden.py
+  cd python && python -m pytest -q tests && SIMLEV_NO_EXT=1 python -m pytest -q tests
+  ```
+
+- **Neuen Kern hinzufügen:** (1) Rechnung aus der R-Datei nach
+  `r/src/<datei>_impl.h` verschieben, `sl::`/R-Typen durch
+  `simlev_host::`/`SIMLEV_*` ersetzen (fehlende Namen in beiden Hosts
+  ergänzen: R in `simlev_capi.h` als genau den bisherigen Aufruf, Python in
+  `_ext_common.h`), Kopf mit Gleitkomma-Block und Host-Prüfung wie in den
+  vorhandenen Kerndateien; (2) R-Datei auf `#include "simlev_capi.h"`,
+  `#include "<datei>_impl.h"` und die `.Call`-Hüllen kürzen; (3) prüfen,
+  dass der R-Maschinencode gleich bleibt (`objdump -d` der alten und neuen
+  Objektdatei, Funktion für Funktion), sonst an der Stelle anhalten;
+  (4) Kopie nach `python/src/`, Datei in `SHARED` (`tests/test_shared_c.py`)
+  und `SHARED_HEADERS`/`CORES` (`setup.py`); (5) Hülle
+  `python/src/_ext_<kern>.cpp` mit Methodentabelle
+  `simlev_ext_<kern>_methods` (in `_ext_common.h` deklarieren, in
+  `_ext.cpp` eintragen, in `WRAPPERS` aufnehmen); (6) im Python-Kern
+  `ext = _env.ext()` und bei `ext is not None` die Hülle rufen, sonst wie
+  bisher; (7) Referenzfälle mit und ohne Erweiterung, Zufallsvergleich
+  gegen R mit NA, NaN, Inf, −0 und leeren Eingaben. Zieht der Kern
+  Zufallszahlen: nur über `simlev_host::` (fehlende Funktionen in beiden
+  Hosts ergänzen, in Python in `_rng_r.c` nur für die Arten von
+  `simlev._r.rng`); die Hülle bindet den Zustand mit `ext::Rng` und läuft
+  mit GIL, die Python-Seite ruft nach `_get_state()` `rng.c_state()` und
+  danach immer `rng.c_state_put()` (`_bootstrap_core._call`); Prüfungen der
+  Hülle mit `EXT_FAIL_IF`; Zufallsvergleich zusätzlich mit beiden Arten,
+  verschiedenen Positionen im Strom und `.Random.seed` danach.
+- **Schichten:** `_ext` gehört zu Schicht 0 (geladen von `_r.env`) und
+  steht in `tests/test_layers.py` unter `EXTENSIONS`.
 
 ## Schichten und Laden
 
@@ -562,4 +769,5 @@ selbst aufrufbar (`_make_callable`).
   kurzer Beschreibung und Argumentliste (aus `r/man/*.Rd` übernommen).
 - Keine Abhängigkeiten außer numpy und pandas (auch nicht für Grafiken);
   ohne System-LAPACK rechnet numpy die Eigenvektoren
-  (mit Warnung, nicht bitgleich).
+  (mit Warnung, nicht bitgleich). Die C-Erweiterung ist optional und braucht
+  zum Bau nur einen C/C++-Compiler (C++17) und die Python-Header (keine numpy-Header).

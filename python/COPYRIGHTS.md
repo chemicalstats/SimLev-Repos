@@ -3,7 +3,8 @@
 SimLev für Python steht unter der GNU General Public License, Version 3
 (GPL-3, siehe `LICENSE.md`). Copyright ChemicalStats von der Mauerstrasse,
 ausgenommen die unten aufgeführten Teile: Sie bilden Code anderer R-Pakete
-unter der GPL bitgleich nach (Übertragung nach Python, angepasst für SimLev).
+und von R selbst unter der GPL bitgleich nach (Übertragung nach Python bzw.
+C, angepasst für SimLev).
 Das Urheberrecht am Original liegt bei den genannten Autoren; es gelten die
 Lizenzbedingungen des Originals. Das R-Paket enthält die übernommenen Teile
 selbst, siehe `r/inst/COPYRIGHTS`.
@@ -112,4 +113,37 @@ im R-Paket `r/R/richardson.R`; kein Code aus numDeriv übernommen).
 Nachgebildet ist `rtruncnorm` aus `R/truncnorm.R` mit `do_rtruncnorm` und
 den Samplern aus `src/rtruncnorm.c`. Im R-Paket entsprechen dem
 `.truncnorm_rtruncnorm` (`r/R/vendor_truncnorm.R`) und
-`C_truncnorm_rtruncnorm` (`r/src/vendor_truncnorm.c`).
+`C_truncnorm_rtruncnorm` (`r/src/vendor_truncnorm.c`). Die C-Erweiterung
+`simlev._ext` übersetzt die Sampler und die Schleife von `do_rtruncnorm`
+selbst (`src/vendor_truncnorm_impl.h`, Byte-für-Byte-Kopie von
+`r/src/vendor_truncnorm_impl.h`, eingebunden in `src/_ext_truncnorm_c.c`).
+
+## R (Zufallszahlen)
+
+| | |
+|---|---|
+| Programm | R 4.3.3 (2024-02-29), *The R Project for Statistical Computing* |
+| Autoren | R Core Team; Ross Ihaka und Robert Gentleman; The R Foundation (laut den Dateiköpfen) |
+| Lizenz | GPL (>= 2), in SimLev unter GPL-3 |
+| Quelle | <https://www.R-project.org/>, `src/main/RNG.c`, `src/nmath/snorm.c`, `qnorm.c`, `sexp.c`, `runif.c`, `rnorm.c`, `rexp.c`, `rgeom.c`, `rpois.c`, `fsign.c`, `dnorm.c` |
+| Dateien in SimLev | `simlev/_r/rng.py` (Python), `src/_rng_r.c` und `src/_rng_r.h` (C, Etappe 7.3b) |
+
+Nachgebildet sind R's Zufallszahlen (`unif_rand` mit den Generatoren
+Mersenne-Twister und L'Ecuyer-CMRG, `norm_rand` mit Inversion über
+`qnorm5`, `exp_rand`) und die Verteilungen, die SimLev zieht. Die
+C-Nachbildung in `src/_rng_r.c` übernimmt die Funktionsrümpfe aus R; statt
+R's statischer Variablen arbeitet sie auf dem Zustand von `simlev/_r/rng.py`.
+
+Der Mersenne-Twister trägt in R (`src/main/RNG.c`) diesen Vermerk, der hier
+übernommen ist:
+
+> A C-program for MT19937: Real number version ([0,1)-interval) (1999/10/28).
+> Coded by Takuji Nishimura, considering the suggestions by Topher Cooper and
+> Marc Rieffel in July-Aug. 1997.
+> Copyright (C) 1997, 1999 Makoto Matsumoto and Takuji Nishimura.
+> When you use this, send an email to: matumoto@math.keio.ac.jp with an
+> appropriate reference to your work.
+> REFERENCE: M. Matsumoto and T. Nishimura, "Mersenne Twister: A
+> 623-Dimensionally Equidistributed Uniform Pseudo-Random Number Generator",
+> ACM Transactions on Modeling and Computer Simulation, Vol. 8, No. 1,
+> January 1998, pp 3--30.

@@ -349,8 +349,12 @@ def _column(v: Any) -> tuple[str, np.ndarray]:
             norm = s.dt.normalize()
             if not (norm.isna() | (norm == s)).all():
                 midnight = False
-            days = np.array([NA if _isna(x) else float(x.to_pydatetime().date().toordinal() - _EPOCH_ORD)
-                             for x in norm], dtype=np.float64)
+            # Tage seit 1970 des (auf Mitternacht gesetzten) Zeitpunkts, NaT -> NA;
+            # Etappe 7.1: auf dem ganzen Feld statt je Element über to_pydatetime()
+            na = norm.isna().to_numpy()
+            days = norm.to_numpy().astype("datetime64[D]").astype(np.int64).astype(np.float64)
+            if na.any():
+                days[na] = NA
             return ("date" if midnight else "posixct"), days
         if pd.api.types.is_numeric_dtype(dt):
             return "numeric", v.to_numpy(dtype=np.float64, na_value=np.nan)

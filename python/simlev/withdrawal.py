@@ -32,7 +32,7 @@ from . import _withdrawal_core as _wcore
 from ._r import fmt as _fmt
 from ._r import rng as _rng
 from ._r.rlist import RList
-from ._r.rnum import r_cummax, r_cumprod, r_mean, r_mean_int, r_median, r_pow, r_prod, r_sum
+from ._r.rnum import r_cummax, r_cumprod, r_mean, r_mean_int, r_median, r_pow, r_pow_vec, r_prod, r_sum
 from .bootstrap import (_quiet, _get, _is_boot_result, _is_num, _is_study, _message, _names, _num1, _num_vec,
                         _quantile7, _r_round0, _show, _sp, _stop, _strip1, _values, _warn, _weighted_mean,
                         _with_rng_restore, _wquantile, summary, plot)
@@ -159,6 +159,8 @@ def _pow_vec(x, y):
     x = np.atleast_1d(np.asarray(x, dtype=np.float64)).ravel()
     y = np.atleast_1d(np.asarray(y, dtype=np.float64)).ravel()
     n = max(len(x), len(y)) if len(x) and len(y) else 0
+    if n and len(y) == 1:
+        return r_pow_vec(x, float(y[0]))      # gleiche Bits, schneller Weg (Etappe 7.1)
     x = np.resize(x, n)
     y = np.resize(y, n)
     return np.array([r_pow(a, b) for a, b in zip(x.tolist(), y.tolist())], dtype=np.float64)

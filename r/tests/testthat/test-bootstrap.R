@@ -160,3 +160,23 @@ test_that("evt: GPD-Fit ueber die aus evd uebernommene Fassung (ohne evd)", {
   expect_error(SimLev:::.evd_fpot(exc, 0, mper = 10), "nicht uebernommen")
   expect_error(SimLev:::.evd_fpot(c(exc, Inf), 0, std.err = FALSE), "NA/NaN/Inf in foreign function call \\(arg 1\\)")
 })
+
+test_that(".par_lapply buendelt Einheiten, Ergebnis wie ein Fork je Einheit", {
+  skip_on_os("windows"); skip_on_cran()
+  # 30 Einheiten, cores = 2: 8 Pakete; jede Einheit startet mit dem Zustand des Aufrufers
+  f <- function(i) { if (i %% 7 == 0) stop("kaputt ", i); if (i == 3) RNGkind("L'Ecuyer-CMRG"); runif(1) }
+  set.seed(9); s0 <- .Random.seed; u <- runif(1); set.seed(9)
+  w <- NULL
+  r <- withCallingHandlers(SimLev:::.par_lapply(1:30, f, 2),
+                           warning = function(c) { w <<- c; invokeRestart("muffleWarning") })
+  expect_identical(.Random.seed, s0)
+  ok <- setdiff(1:30, c(3, 7, 14, 21, 28))          # 3 wechselt den Generator, 4 rechnet danach im selben Paket
+  expect_identical(unlist(r[ok]), rep(u, length(ok)))
+  expect_s3_class(r[[7]], "try-error")
+  expect_identical(as.character(r[[7]]), "Error in FUN(X[[nexti]], ...) : kaputt 7\n")
+  expect_identical(conditionMessage(w), "4 function calls resulted in an error")
+  # ohne Fehler und mit NULL-Ergebnissen; Namen bleiben
+  x <- stats::setNames(as.list(1:12), letters[1:12])
+  expect_identical(SimLev:::.par_lapply(x, function(i) if (i %% 2) NULL else i, 2),
+                   lapply(x, function(i) if (i %% 2) NULL else i))
+})

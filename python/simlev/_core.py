@@ -5,6 +5,11 @@ Reine Python-Ports der C++-Funktionen aus ``simulation_core.cpp``,
 1:1 übernommen, damit Ergebnisse bitgleich zum R-Paket sind (IEEE-754-
 Doubles, ``long double`` nur dort, wo auch der C++-Code ihn nutzt).
 
+Seit Etappe 7.3a rechnen die Funktionen über die C-Erweiterung ``simlev._ext``
+mit denselben Kernen wie R (``r/src/simulation_core_impl.h``, ``fifo_core_impl.h``,
+``tax_core_impl.h``), sofern sie gebaut ist; die Python-Ports bleiben der Rückfall
+(``SIMLEV_NO_EXT=1``).
+
 Der Simulationszustand ``sim`` ist ein ``dict`` mit den Teilen ``assets``,
 ``status``, ``market``, ``trades``, ``report`` und ``totals`` – analog zu
 ``sim_mem`` im R-Paket. Lots werden als ``dict`` in ``trades[name]["buys"]``
@@ -17,6 +22,7 @@ import math
 import numpy as np
 
 from ._dates import days_from_civil, is_leap, ymd
+from ._r import env as _env
 
 LD = np.longdouble
 
@@ -36,6 +42,10 @@ def _max(a: float, b: float) -> float:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def dca_flows_allocation(sim: dict, name: str, flows: float, index: int) -> None:
+    ext = _env.ext()
+    if ext is not None:
+        ext.sim_dca_flows(sim, name, flows, index)
+        return
     st = sim["status"][name]
     rp = sim["report"][name]
     i = index - 1
@@ -50,6 +60,10 @@ def dca_flows_allocation(sim: dict, name: str, flows: float, index: int) -> None
 
 def calculate_buy_report(sim: dict, name: str, index: int, trade_count: float,
                          trade_price: float, market_price: float) -> None:
+    ext = _env.ext()
+    if ext is not None:
+        ext.sim_buy_report(sim, name, index, trade_count, trade_price, market_price)
+        return
     st = sim["status"][name]
     rp = sim["report"][name]
     count = st["count"] + trade_count
@@ -70,6 +84,10 @@ def calculate_buy_report(sim: dict, name: str, index: int, trade_count: float,
 def calculate_sell_report(sim: dict, name: str, index: int, trade_count: float,
                           trade_price: float, market_price: float,
                           capital_gains_tax: float) -> None:
+    ext = _env.ext()
+    if ext is not None:
+        ext.sim_sell_report(sim, name, index, trade_count, trade_price, market_price, capital_gains_tax)
+        return
     st = sim["status"][name]
     rp = sim["report"][name]
     count = st["count"] - trade_count
@@ -88,6 +106,10 @@ def calculate_sell_report(sim: dict, name: str, index: int, trade_count: float,
 
 
 def calculate_total_report(sim: dict, assets: list[str], index: int) -> None:
+    ext = _env.ext()
+    if ext is not None:
+        ext.sim_total_report(sim, assets, index)
+        return
     i = index - 1
     status, market, report = sim["status"], sim["market"], sim["report"]
     for name in assets:
@@ -115,6 +137,10 @@ def calculate_total_report(sim: dict, assets: list[str], index: int) -> None:
 
 def perform_trade_buy_cpp(sim: dict, name: str, index: int, trade_count: float,
                           trade_price: float, market_price: float) -> None:
+    ext = _env.ext()
+    if ext is not None:
+        ext.sim_buy(sim, name, index, trade_count, trade_price, market_price)
+        return
     calculate_buy_report(sim, name, index, trade_count, trade_price, market_price)
     tr = sim["trades"][name]
     event_date = int(sim["market"][name]["asset_day"][index - 1])
@@ -131,6 +157,10 @@ def perform_trade_buy_cpp(sim: dict, name: str, index: int, trade_count: float,
 
 
 def perform_market_update(sim: dict, assets: list[str], index: int) -> None:
+    ext = _env.ext()
+    if ext is not None:
+        ext.sim_market_update(sim, assets, index)
+        return
     i = index - 1
     status, market, report = sim["status"], sim["market"], sim["report"]
     totals = []
@@ -158,6 +188,10 @@ def perform_market_update(sim: dict, assets: list[str], index: int) -> None:
 
 
 def batch_market_update(sim: dict, assets: list[str], start_idx: int, end_idx: int) -> None:
+    ext = _env.ext()
+    if ext is not None:
+        ext.sim_market_update_batch(sim, assets, start_idx, end_idx)
+        return
     n_days = end_idx - start_idx + 1
     if n_days <= 0:
         return
@@ -196,6 +230,9 @@ def batch_market_update(sim: dict, assets: list[str], start_idx: int, end_idx: i
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _calculate_fifo_price(buys: list, units: float, front_index: int) -> float:
+    ext = _env.ext()
+    if ext is not None:
+        return ext.sim_fifo_price(buys, units, front_index)
     units_trade = units
     total_price = 0.0
     i = front_index
@@ -214,6 +251,9 @@ def _calculate_fifo_price(buys: list, units: float, front_index: int) -> float:
 
 
 def _calculate_fifo_vorabpauschale(buys: list, units: float, front_index: int) -> float:
+    ext = _env.ext()
+    if ext is not None:
+        return ext.sim_fifo_vp(buys, units, front_index)
     units_trade = units
     total_vp = 0.0
     i = front_index
@@ -235,6 +275,9 @@ def _calculate_fifo_vorabpauschale(buys: list, units: float, front_index: int) -
 
 def _calculate_private_sale_tax(buys: list, front_index: int, trade_count: float,
                                sell_price: float, current_date: int) -> dict:
+    ext = _env.ext()
+    if ext is not None:
+        return ext.sim_private_sale_tax(buys, front_index, trade_count, sell_price, current_date)
     units_remaining = trade_count
     i = front_index
     n = len(buys)
@@ -279,6 +322,10 @@ def _calculate_private_sale_tax(buys: list, front_index: int, trade_count: float
 
 
 def fifo_consume(sim: dict, name: str, trade_count: float) -> None:
+    ext = _env.ext()
+    if ext is not None:
+        ext.sim_fifo_consume(sim, name, trade_count)
+        return
     tr = sim["trades"][name]
     buys = tr["buys"]
     buy_count = tr["buy_count"]
@@ -326,6 +373,9 @@ def _update_fifo_front(buys: list, front_index: int) -> int:
 def flat_rate(buys: list, front_index: int, base_rate: float, year_start_price: float,
               market_price: float, soy_days: int, eoy_days: int) -> dict:
     """Vorabpauschale je Lot (``flat_rate_rcpp``): Bezug Jahresanfangskurs, Deckel, Zwölftelung."""
+    ext = _env.ext()
+    if ext is not None:
+        return ext.sim_flat_rate(buys, front_index, base_rate, year_start_price, market_price, soy_days, eoy_days)
     n = len(buys)
     empty = {"total_vp": 0.0, "lot_indices": [], "lot_vps": []}
     if front_index > n:
@@ -365,6 +415,9 @@ def _tget(t: dict, fld: str) -> float:
 
 
 def p20_tax(trade_gain: float, bonus: float, totals: dict, tax_rate: float, use_spb: bool) -> dict:
+    ext = _env.ext()
+    if ext is not None:
+        return ext.sim_p20_tax(trade_gain, bonus, totals, tax_rate, use_spb)
     adjusted_gain = trade_gain * (1.0 - bonus)
     if adjusted_gain < 0:
         totals["loss_capital_gains"] = totals["loss_capital_gains"] - adjusted_gain
@@ -389,6 +442,9 @@ def p20_tax(trade_gain: float, bonus: float, totals: dict, tax_rate: float, use_
 
 
 def vp_tax(flat_rate_value: float, bonus: float, totals: dict, tax_rate: float, use_spb: bool) -> dict:
+    ext = _env.ext()
+    if ext is not None:
+        return ext.sim_vp_tax(flat_rate_value, bonus, totals, tax_rate, use_spb)
     taxable_flat_rate = flat_rate_value * (1.0 - bonus)
     pool = totals["loss_capital_gains"]
     loss_offset = _min(taxable_flat_rate, pool)
@@ -429,6 +485,10 @@ def sell_count(buys: list, front_index: int, target: float, trade_price: float,
                total_shares: float, fractions: bool, regime: int, bonus: float,
                loss_pool: float, tax_rate: float) -> dict:
     """Verkaufsstückzahl für einen Ziel-Nettoerlös (``sell_count_rcpp``)."""
+    ext = _env.ext()
+    if ext is not None:
+        return ext.sim_sell_count(buys, front_index, target, trade_price, total_shares, fractions, regime, bonus,
+                                  loss_pool, tax_rate)
     zero = {"sell_count": 0.0, "fifo_price": 0.0}
     n = len(buys)
     if front_index > n:
@@ -453,19 +513,31 @@ def sell_count(buys: list, front_index: int, target: float, trade_price: float,
     if not units:
         return zero
     nl = len(units)
-    cu: list[float] = []
-    cc: list[float] = []
-    cv: list[float] = []
-    su = LD(0)
-    sc = LD(0)
-    sv = LD(0)
-    for u, p, v in zip(units, prices, vpu):
-        su += LD(u)
-        cu.append(float(su))
-        sc += LD(u * p)
-        cc.append(float(sc))
-        sv += LD(u * v)
-        cv.append(float(sv))
+    cu: list[float]
+    cc: list[float]
+    cv: list[float]
+    if nl >= 16:
+        # Etappe 7.1: dieselben long-double-Summen ab 0 (np.cumsum mit dtype=LD läuft
+        # fortlaufend wie die Schleife darunter; Produkte u * p in double wie dort)
+        ua = np.array(units)
+        z = np.zeros(1)
+        cu = np.cumsum(np.concatenate((z, ua)), dtype=LD)[1:].astype(np.float64).tolist()
+        cc = np.cumsum(np.concatenate((z, ua * np.array(prices))), dtype=LD)[1:].astype(np.float64).tolist()
+        cv = np.cumsum(np.concatenate((z, ua * np.array(vpu))), dtype=LD)[1:].astype(np.float64).tolist()
+    else:
+        cu = []
+        cc = []
+        cv = []
+        su = LD(0)
+        sc = LD(0)
+        sv = LD(0)
+        for u, p, v in zip(units, prices, vpu):
+            su += LD(u)
+            cu.append(float(su))
+            sc += LD(u * p)
+            cc.append(float(sc))
+            sv += LD(u * v)
+            cv.append(float(sv))
 
     def fifo_vp(sell: float) -> float:
         if not any_vp or sell <= 0:

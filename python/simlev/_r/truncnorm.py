@@ -20,6 +20,13 @@ Nachgebildet ist der R-Wrapper (``stopifnot`` der Längen, ``n`` als Länge
 bzw. ``as.integer(n)``, ``NULL`` bei ``n == 0``) und ``do_rtruncnorm``
 (Recycling der Argumente auf die größte Länge, ``NA`` bei ``b <= a`` und
 bei ``NA``/``NaN``-Schranken).
+
+Gemeinsamer C-Kern (Etappe 7.3b): Mit gebauter Erweiterung rechnet ``do_rtruncnorm`` mit
+derselben Quelle wie R (``r/src/vendor_truncnorm_impl.h``, Hülle
+``python/src/_ext_truncnorm.cpp``); die Zufallszahlen und ``dnorm`` kommen dort aus der
+C-Nachbildung von R (``python/src/_rng_r.c``) auf dem Zustand von :mod:`simlev._r.rng`.
+Ohne Erweiterung, mit ``SIMLEV_NO_EXT=1`` oder bei einer nicht nachgebildeten Zufallsart
+rechnet der Python-Port unten (bitgleich).
 """
 from __future__ import annotations
 
@@ -31,6 +38,7 @@ import numpy as np
 from . import rnum as _rn
 from . import libm as _libm
 from . import nmath as _nm
+from . import env as _env
 from . import rng as _rng
 from .linalg import RError
 
@@ -189,6 +197,16 @@ def rtruncnorm(n, a=-math.inf, b=math.inf, mean=0.0, sd=1.0):
     nn = max(nn_, max(max(av.size, bv.size), max(mv.size, sv.size)))
     out = np.empty(max(nn, 0))
     _rng._get_state()                                   # GetRNGstate()
+    ext = _env.ext()
+    st = _rng.c_state() if ext is not None else None
+    if st is not None:
+        try:
+            ext.truncnorm_rtruncnorm(*st, nn, np.ascontiguousarray(av), np.ascontiguousarray(bv),
+                                     np.ascontiguousarray(mv), np.ascontiguousarray(sv), out)
+        finally:
+            _rng.c_state_put(st)
+        _rng._S.exists = True                           # PutRNGstate()
+        return out
     for i in range(nn):
         ca = float(av[i % av.size])
         cb = float(bv[i % bv.size])

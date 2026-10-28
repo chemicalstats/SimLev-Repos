@@ -141,7 +141,10 @@ zwei Kernen oder mit höchstens einem Element `lapply`; sonst startet jede
 Einheit mit dem Zufallszustand des Aufrufers, der danach unverändert ist;
 Ergebnisse in Eingangsreihenfolge; Warnungen gehen verloren; Meldungen und
 Ausgaben erscheinen in Einheitenreihenfolge; beim ersten Fehler (in
-Einheitenreihenfolge) erscheinen die Ausgaben davor, dann der Fehler.
+Einheitenreihenfolge) erscheinen die Ausgaben davor, dann der Fehler. R
+bündelt die Einheiten seit dem 26.10.2026 in höchstens `4 × cores` Pakete (ein
+Fork je Paket) mit denselben Ergebnissen, demselben Zufallszustand und
+denselben Fehlern.
 
 Mit `Threads.nthreads() > 1` (`julia -t auto`, `julia -t 2`,
 `JULIA_NUM_THREADS`) startet `par_lapply` `min(cores, nthreads)` Aufgaben

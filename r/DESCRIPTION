@@ -1,7 +1,7 @@
 Package: SimLev
 Type: Package
 Title: Simulation and Backtesting with German Investment Taxation
-Version: 0.5.0
+Version: 0.5.1
 Authors@R: person("ChemicalStats", "von der Mauerstrasse",
                   role = c("aut", "cre", "cph"),
                   email = "chemicalstatsy@protonmail.com")
@@ -30,14 +30,18 @@ Description: A fast/slow-path backtesting engine for leveraged and unleveraged E
     multiple-testing haircuts, Sharpe ratio and reality-check tests, signal
     analysis, hidden Markov regimes, multi-country bootstraps, user-defined
     retirement horizons and goal-based dynamic programming. Performance-critical
-    parts are implemented in C++ via 'Rcpp'.
+    parts are implemented in C++ and C.
 License: GPL-3
+Copyright: Teile übernommen aus evd (Alec Stephenson), imputeTS (Steffen
+    Moritz, Sebastian Gatscha, Earo Wang, Ron Hause), stinepack (Tomas
+    Johannesson, Halldor Bjornsson, Gabor Grothendieck), rugarch (Alexios
+    Galanos, Tobias Kley), Rsolnp (Alexios Ghalanos, Stefan Theussl) und
+    truncnorm (Olaf Mersmann, Heike Trautmann, Detlef Steuer, Björn
+    Bornkamp), siehe inst/COPYRIGHTS.
 Encoding: UTF-8
 Depends: R (>= 4.0)
-Imports: Rcpp, stats, graphics, grDevices, utils, parallel
-LinkingTo: Rcpp
-Suggests: testthat (>= 3.0.0), knitr, rmarkdown, plotly, TTR, imputeTS, rugarch,
-    MSGARCH, evd
+Imports: stats, graphics, grDevices, utils, parallel, methods
+Suggests: testthat (>= 3.0.0), knitr, rmarkdown, MSGARCH
 VignetteBuilder: knitr
 Config/testthat/edition: 3
 RoxygenNote: 7.3.1

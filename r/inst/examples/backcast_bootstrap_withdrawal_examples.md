@@ -89,7 +89,9 @@ cfg <- bootstrap_config(
   letfs = list(list(base = "eu", leverage = 2, finance = "rate", expense = 0.5))
 )
 
-# Signale bekommen den Pfad als data.frame mit den Spalten us, eu, eu_l2, rate
+# Signale bekommen den Pfad als data.frame mit den Spalten us, eu, eu_l2, rate;
+# TTR::SMA() aus dem separat zu installierenden Paket TTR (keine Abhängigkeit
+# von SimLev; install.packages("TTR"))
 sma_eur <- function(df, n = 310) {
   s <- TTR::SMA(df$eu, n = n)
   list(buy = df$eu >= s, sell = df$eu < s)

@@ -176,7 +176,7 @@ test_that("currency, total return, deflation, splicing and portfolios", {
   expect_error(strategy_from_weights(c(a = 0.7, b = 0.5)), "summieren")
   pt <- portfolio_template("permanent", map = c(stocks = "W"))
   expect_equal(names(pt), c("W", "long_bonds", "cash", "gold"))
-  expect_true(all(abs(tapply(portfolio_templates()$weight, portfolio_templates()$template, sum) - 1) < 1e-12))
+  expect_true(all(abs(tapply(portfolio_template()$weight, portfolio_template()$template, sum) - 1) < 1e-12))
 })
 
 test_that("copula densities, fits and tail dependence", {

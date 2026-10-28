@@ -1,26 +1,34 @@
-"""Nachbildung des optionalen R-Pakets imputeTS 3.4 (Teil: Interpolation).
+"""Nachbildung von imputeTS 3.4 (Teil: Interpolation), im R-Paket übernommen als ``.imputets_na_interpolation``.
 
-Nachgebildet sind ``na_interpolation(x, option, maxgap, ...)`` für die
-Optionen ``"stine"`` (stinepack ``stinterp``, siehe
+Herkunft: R-Paket imputeTS 3.4 (CRAN, 2025-08-25), ``R/na_interpolation.R``,
+``R/na_locf.R`` und ``src/locf.cpp``; Autoren: Steffen Moritz, Sebastian
+Gatscha, Earo Wang, Ron Hause. Lizenz: GPL-3. Nach Python übertragen und
+angepasst für SimLev (siehe ``python/COPYRIGHTS.md``).
+
+Nachgebildet ist, was das R-Paket übernommen hat (``r/R/vendor_imputets.R``,
+``r/src/vendor_imputets.cpp``): ``na_interpolation(x, option, maxgap, ...)``
+für die Optionen ``"stine"`` (stinepack ``stinterp``, siehe
 :mod:`simlev._r.stinepack`) und ``"linear"`` (``approx`` mit ``rule = 2``)
 sowie ``na_locf(x, option, na_remaining, maxgap)``, das
 ``na_interpolation`` für NA am Rand der Stineman-Interpolation braucht (mit
 dem C++-Kern ``locf`` aus ``src/locf.cpp``, der auch über ``Inf`` hinweg
-fortschreibt). Eingabeprüfungen, Sonderfälle (keine NA, weniger als zwei
+fortschreibt). ``option = "spline"`` und ``na_remaining = "rm"``/``"mean"``
+brechen wie in der Übernahme mit deren Meldung ab (nicht übernommen);
+weitere Argumente für ``approx`` (in R über ``...``) sind nicht nachgebildet.
+Eingabeprüfungen, Sonderfälle (keine NA, weniger als zwei
 Werte, nicht numerisch), ``maxgap`` und alle Meldungen wie in imputeTS;
 Vektoren (auch benannt, ``pandas.Series``) und numerische Matrizen
 (spaltenweise, mit der Warnung von imputeTS für Spalten, die scheitern).
 
-Nicht nachgebildet: ``option = "spline"``, ``na_remaining = "rm"``/``"mean"``
-und Eingaben als data.frame, tibble oder ts (Fehler mit deutscher Meldung);
+Nicht nachgebildet: Eingaben als data.frame, tibble oder ts (Fehler mit
+deutscher Meldung);
 die unendliche Rekursion von ``na_locf`` für Reihen ohne einen endlichen Wert
 (R bricht mit „C stack usage … is too close to the limit“ ab) endet mit
 einem eigenen Fehler.
 
 SimLev nutzt ``na_interpolation(…, option = "stine")`` in ``.fill_na``
-(``backcast``, ``backcast_fit``, ``leveraged_series`` mit
-``fill``/``index_fill = "stine"``), wenn ``simlev._r.suggests.has("imputeTS")``
-gilt.
+(``backcast``, ``backcast_fit`` mit ``fill``/``index_fill = "stine"``); R nutzt
+dafür die übernommene Fassung, imputeTS selbst ist nicht mehr nötig.
 """
 from __future__ import annotations
 
@@ -32,7 +40,7 @@ import pandas as pd
 from . import stats as _stats
 from . import stinepack as _sp
 from .linalg import RError
-from .._rnum import NA_REAL
+from .rnum import NA_REAL
 
 __all__ = ["na_interpolation", "na_locf"]
 
@@ -169,8 +177,10 @@ def _na_locf(x, option, na_remaining, maxgap, depth):
             data = np.asarray(_na_locf(data, "nocb", "rev", math.inf, depth + 1), dtype=np.float64)
         elif _if_str_eq(option, "nocb"):
             data = np.asarray(_na_locf(data, "locf", "rev", math.inf, depth + 1), dtype=np.float64)
-    elif _if_str_eq(na_remaining, "rm") or _if_str_eq(na_remaining, "mean"):
-        raise RError("imputeTS-Nachbildung: na_remaining = 'rm'/'mean' ist nicht nachgebildet.")
+    elif _if_str_eq(na_remaining, "rm"):
+        raise RError('imputeTS-Uebernahme: na_locf mit na_remaining = "rm" (na_remove) nicht uebernommen')
+    elif _if_str_eq(na_remaining, "mean"):
+        raise RError('imputeTS-Uebernahme: na_locf mit na_remaining = "mean" (na_mean) nicht uebernommen')
     else:
         raise RError("Wrong parameter 'na_remaining' given. Value must be either 'keep', 'rm', 'mean' or 'rev'.")
     if _maxgap_active(maxgap):
@@ -189,8 +199,8 @@ def na_interpolation(x, option="linear", maxgap=math.inf, yp=_MISSING, method=_M
         x: numerischer Vektor (auch ``Series``) oder numerische Matrix
             (spaltenweise; jede Spalte ohne ``yp``/``method``).
         option: ``"linear"`` (Standard, ``approx`` mit ``rule = 2``) oder
-            ``"stine"`` (Stineman, stinepack ``stinterp``); ``"spline"`` ist
-            nicht nachgebildet.
+            ``"stine"`` (Stineman, stinepack ``stinterp``); ``"spline"``
+            bricht wie die Übernahme in R ab (nicht übernommen).
         maxgap: Lücken mit mehr als ``maxgap`` NA bleiben NA (Standard: ``Inf``).
         yp, method: an ``stinterp`` weitergereicht (nur ``option = "stine"``).
 
@@ -229,7 +239,7 @@ def na_interpolation(x, option="linear", maxgap=math.inf, yp=_MISSING, method=_M
         interp = np.asarray(_stats.approx(indx.astype(np.float64), data_vec[indx - 1], xout=allx, rule=2)["y"],
                             dtype=np.float64)
     elif _if_str_eq(option, "spline"):
-        raise RError("imputeTS-Nachbildung: option = 'spline' ist nicht nachgebildet.")
+        raise RError('imputeTS-Uebernahme: na_interpolation mit option = "spline" nicht uebernommen')
     elif _if_str_eq(option, "stine"):
         interp = np.asarray(_sp.stinterp(indx.astype(np.float64), data_vec[indx - 1], allx, yp=yp, method=method)["y"],
                             dtype=np.float64)
@@ -248,7 +258,7 @@ def na_interpolation(x, option="linear", maxgap=math.inf, yp=_MISSING, method=_M
     return _wrap(x, data)
 
 
-from .base import quiet_fp as _quiet_fp  # noqa: E402
+from .base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), ["na_interpolation", "na_locf"])
+quiet_fp(globals(), ["na_interpolation", "na_locf"])
 _sp._quiet_all(globals(), ["na_interpolation", "na_locf"])

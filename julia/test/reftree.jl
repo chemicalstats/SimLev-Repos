@@ -295,11 +295,7 @@ end
 
 "Führt einen Fall aus; Rückgabe: Liste der Abweichungen (leer = bitgleich)."
 function run_ref_case(case; kw...)
-    # optionale R-Pakete, die R bei dem Fall installiert hatte (Feld suggests;
-    # fehlt es: keines), gelten während des Falls als installiert
-    sug = get(case, "suggests", nothing)
-    sug = sug === nothing ? String[] : sug isa AbstractString ? [sug] : String[string(x) for x in sug]
-    envs = Pair{String,Union{Nothing,String}}["SIMLEV_R_SUGGESTS" => (isempty(sug) ? "none" : join(sug, ","))]
+    envs = Pair{String,Union{Nothing,String}}[]
     # feste Uhrzeit des Falls (Feld sys_time) für SimLev.RBase.sys_time
     st = get(case, "sys_time", nothing)
     st === nothing || push!(envs, "SIMLEV_R_SYS_TIME" => (st isa AbstractString ? String(st) : string(Float64(st))))

@@ -10,13 +10,14 @@ from __future__ import annotations
 import math
 import sys
 import warnings
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 
-from ._rnum import NA_REAL, LD, r_cumprod, r_cumsum, r_deparse, r_format, r_mean, r_pow, r_prod, r_round, r_sd, r_sprintf
+from ._r.rformat import r_deparse, r_format, r_round, r_sprintf
+from ._r.rnum import NA_REAL, LD, r_cumprod, r_cumsum, r_mean, r_pow, r_prod, r_sd
 
-__all__ = ["plot_dashboard", "export_dashboard", "export_html_dashboard", "r_pretty"]
+__all__ = ["plot_dashboard", "export_dashboard", "r_pretty"]
 
 DEFAULT_COLORS = {
     "primary": "#2E86AB",      # Blau
@@ -865,17 +866,4 @@ def export_dashboard(x, filename: str = "dashboard.pdf", width: float = 14, heig
     finally:
         plt.close(fig)
     sys.stderr.write("export_dashboard: Dashboard gespeichert in %s\n" % filename)
-    return None
-
-
-def export_html_dashboard(x, filename: str = "dashboard.html"):
-    """Platzhalter wie in R: ohne ``plotly`` ein Fehler, mit ``plotly`` nur eine Meldung (es wird keine
-    Datei geschrieben). Für ein interaktives Dashboard siehe :func:`simlev.plot_interactive`."""
-    try:
-        import plotly  # noqa: F401
-    except ImportError:
-        _stop("export_html_dashboard: Das Paket 'plotly' wird für HTML-Dashboards benötigt; "
-              "installieren mit install.packages(\"plotly\").")
-    sys.stderr.write("export_html_dashboard: Der Export als interaktives HTML-Dashboard ist noch nicht umgesetzt; "
-                     "es wird keine Datei geschrieben (siehe plot_interactive()).\n")
     return None

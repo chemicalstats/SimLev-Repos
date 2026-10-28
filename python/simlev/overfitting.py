@@ -29,7 +29,7 @@ from ._r import libm as _libm
 from ._r import nmath as _nmath
 from ._r import fmt as _fmt
 from ._r.rlist import RList
-from ._rnum import LD, r_mean, r_mean_int, r_median, r_pow, r_prod, r_cumprod, r_sum, r_var, r_sd
+from ._r.rnum import LD, r_mean, r_mean_int, r_median, r_pow, r_prod, r_cumprod, r_sum, r_var, r_sd
 
 __all__ = ["pbo", "probabilistic_sharpe", "deflated_sharpe", "walk_forward", "param_bootstrap",
            "sharpe_haircut", "SimLevPBO", "SimLevDSR", "SimLevWalkForward"]
@@ -946,6 +946,6 @@ def _order(v, decreasing=False, na_last=True):
 
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
-from .data_prep import _quiet_fp  # noqa: E402
+from ._r.base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), list(__all__) + ["_of_col_metric", "_of_metric", "_of_returns"])
+quiet_fp(globals(), list(__all__) + ["_of_col_metric", "_of_metric", "_of_returns"])

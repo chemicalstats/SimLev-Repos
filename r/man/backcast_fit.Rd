@@ -136,7 +136,8 @@ TER * T / 365, Fondsbuchhaltung) oder \code{"geometric"}
 ((1 + TER)^(T/365) - 1, wie in den Skripten).}
 
 \item{index_fill}{Fuellmethode fuer Indexluecken: "locf" (Standard),
-"linear" oder "stine" (Stineman, benoetigt imputeTS, sonst linear).
+"linear" oder "stine" (Stineman wie imputeTS 3.4, dessen Interpolation
+in SimLev uebernommen ist).
 Fuehrende Luecken bleiben \code{NA}.}
 
 \item{validate}{Logisch (Standard \code{TRUE}): Out-of-Sample-Pruefung

@@ -79,8 +79,10 @@
 #' Fehlende Werte fuellen
 #'
 #' @param v numerischer Vektor.
-#' @param method "none", "locf", "linear" oder "stine" (Stineman, benoetigt
-#'   imputeTS; sonst Rueckfall auf "linear" mit Hinweis).
+#' @param method "none", "locf", "linear" oder "stine" (Stineman ueber die
+#'   aus imputeTS 3.4 und stinepack 1.5 uebernommene Fassung von
+#'   na_interpolation, .imputets_na_interpolation in R/vendor_imputets.R;
+#'   imputeTS muss nicht installiert sein).
 #' @param keep_leading Fuehrende NAs beibehalten (TRUE) oder rueckwaerts fuellen.
 #' @keywords internal
 #' @noRd
@@ -89,10 +91,6 @@
   ok <- which(!is.na(v))
   if (method == "none" || length(ok) == 0L || length(ok) == length(v)) return(v)
   first <- ok[1]; last <- ok[length(ok)]
-  if (method == "stine" && !requireNamespace("imputeTS", quietly = TRUE)) {
-    message("Hinweis: Paket 'imputeTS' nicht installiert, verwende lineare Interpolation statt Stineman.")
-    method <- "linear"
-  }
   if (method == "locf") {
     idx <- integer(length(v)); idx[ok] <- ok; idx <- cummax(idx)
     idx[idx == 0L] <- first
@@ -106,7 +104,7 @@
   } else {
     out <- v
     inner <- first:last
-    out[inner] <- as.numeric(imputeTS::na_interpolation(v[inner], option = "stine"))
+    out[inner] <- as.numeric(.imputets_na_interpolation(v[inner], option = "stine"))
     if (last < length(v)) out[(last + 1L):length(v)] <- v[last]
     if (first > 1L) out[1:(first - 1L)] <- v[first]
   }
@@ -377,7 +375,8 @@
 #'   TER * T / 365, Fondsbuchhaltung) oder \code{"geometric"}
 #'   ((1 + TER)^(T/365) - 1, wie in den Skripten).
 #' @param index_fill Fuellmethode fuer Indexluecken: "locf" (Standard),
-#'   "linear" oder "stine" (Stineman, benoetigt imputeTS, sonst linear).
+#'   "linear" oder "stine" (Stineman wie imputeTS 3.4, dessen Interpolation
+#'   in SimLev uebernommen ist).
 #'   Fuehrende Luecken bleiben \code{NA}.
 #' @param validate Logisch (Standard \code{TRUE}): Out-of-Sample-Pruefung
 #'   (Fit auf der juengeren Haelfte der Produktbeobachtungen, Test auf der
@@ -622,7 +621,7 @@ backcast_fit <- function(data, product, index,
 #'   Renditen ab dem ersten Produktkurs an oder nach diesem Datum (Fehler,
 #'   wenn danach kein Produktkurs vorliegt).
 #' @param fill Fuellmethode fuer Produktluecken nach der Verkettung:
-#'   "locf" (Standard, wie die Engine), "linear", "stine" (imputeTS) oder "model"
+#'   "locf" (Standard, wie die Engine), "linear", "stine" (Stineman wie imputeTS) oder "model"
 #'   (Lueckentage mit Modellrenditen, Endpunkte aus echten Kursen; erhaelt die
 #'   echten Kurse an allen Beobachtungstagen).
 #' @param rebase \code{NULL} (Standard; Produkteinheiten, echte Kurse bleiben

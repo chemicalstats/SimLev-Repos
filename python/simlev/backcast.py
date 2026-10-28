@@ -26,14 +26,14 @@ import pandas as pd
 
 from ._r import imputets as _imputets
 from ._r import libm as _libm
-from ._r import suggests as _suggests
+from ._r.base import quiet_fp
 from ._r.fmt import NA_REAL
 from ._r.rlist import RList
-from ._rnum import r_cumsum, r_isna, r_mean, r_median, r_pow, r_sd, r_sum
+from ._r.rnum import r_cumsum, r_isna, r_mean, r_median, r_pow, r_sd, r_sum
 from .data_prep import (
     _as_dates, _as_date_any, _as_frame, _as_numeric, _col, _date_str, _days, _is_named_numeric,
     _is_number, _match_arg, _named_parts, _names, _names_as_dates_optional, _nrow, _to_date,
-    _quiet_fp, _which_min, message,
+    _which_min,
 )
 
 __all__ = ["backcast_fit", "backcast", "SimLevBackcastFit", "SimLevBackcast",
@@ -149,8 +149,8 @@ def _fill_na(v, method=("locf", "linear", "stine", "none"), keep_leading=False):
     Args:
         v: numerischer Vektor.
         method: ``"locf"`` (Standard), ``"linear"``, ``"stine"`` (Stineman über
-            die imputeTS-Nachbildung ``simlev._r.imputets``; gilt imputeTS
-            als nicht installiert, wie in R Rückfall auf "linear" mit Hinweis)
+            die imputeTS-Nachbildung ``simlev._r.imputets``, wie R mit der aus
+            imputeTS 3.4 übernommenen Fassung ``.imputets_na_interpolation``)
             oder ``"none"``.
         keep_leading: Führende NAs beibehalten (True) oder rückwärts füllen.
 
@@ -163,9 +163,6 @@ def _fill_na(v, method=("locf", "linear", "stine", "none"), keep_leading=False):
     if method == "none" or len(ok) == 0 or len(ok) == len(v):
         return v
     first, last = int(ok[0]), int(ok[-1])
-    if method == "stine" and not _suggests.has("imputeTS"):
-        message("Hinweis: Paket 'imputeTS' nicht installiert, verwende lineare Interpolation statt Stineman.")
-        method = "linear"
     if method == "locf":
         idx = np.zeros(len(v), dtype=np.int64)
         idx[ok] = ok + 1
@@ -1010,4 +1007,4 @@ def summary(object, *args, **kwargs):  # noqa: A002
     raise TypeError("kein summary() für %s" % type(object).__name__)
 
 
-_quiet_fp(globals(), __all__ + ["summary"])
+quiet_fp(globals(), __all__ + ["summary"])

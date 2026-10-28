@@ -11,7 +11,7 @@
 ---
 
 Dieses Paket ist die Python-Fassung des R-Pakets SimLev. Version 0.5.0 ist
-ein vollständiger Port der aktuellen R-Fassung 0.5.0: Alle 110 Exporte des
+ein vollständiger Port der aktuellen R-Fassung 0.5.0: Alle 104 Exporte des
 R-Pakets gibt es hier mit gleichem Namen, gleichen Argumenten und gleichen
 Voreinstellungen. Das Paket läuft **eigenständig ohne R** und benötigt nur
 `numpy` und `pandas`.
@@ -37,8 +37,8 @@ betrifft.
 
 ## Installation
 
-SimLev ist reines Python ab Version 3.9 (getestet mit Python 3.13, numpy
-2.5, pandas 3.0). Ein Compiler wird nicht benötigt.
+SimLev ist reines Python ab Version 3.10 (geprüft ab Python 3.10, zuletzt
+mit Python 3.13, numpy 2.5, pandas 3.0). Ein Compiler wird nicht benötigt.
 
 ``` bash
 pip install "simlev @ git+https://github.com/chemicalstats/SimLev-Repos#subdirectory=python"
@@ -50,15 +50,12 @@ Aus einem lokalen Klon (im Ordner `python/`):
 ``` bash
 pip install .                 # Engine und alle Erweiterungen (numpy, pandas)
 pip install ".[plot]"         # zusätzlich matplotlib für Grafiken
-pip install ".[all]"          # zusätzlich plotly und scipy
 ```
 
 | Paket | Wofür | Pflicht? |
 |---|---|---|
 | `numpy`, `pandas` | Rechenkern und Datenaufnahme | ja |
 | `matplotlib` | Grafiken: Dashboard (`result.plot()`, `export_dashboard`) und die `plot()`-Methoden der Erweiterungen | optional |
-| `plotly` | Interaktives Dashboard als plotly-Figur (ohne plotly schreibt SimLev ein eigenes, abhängigkeitsfreies HTML) | optional |
-| `scipy` | Ersatzweg für Eigenvektoren, falls keine System-LAPACK gefunden wird (ohne Bitgleichheitsgarantie, siehe unten) | optional |
 | `pytest` | Ausführen der Test-Suite | optional |
 
 ## Kurzbeispiel
@@ -187,7 +184,6 @@ R-Paket:
 | `print(x)` | `print(x)` |
 | `summary(x)` | `simlev.summary(x)` oder `x.summary()` |
 | `plot(x)` | `simlev.plot(x)` oder `x.plot()` |
-| `plot_interactive(result)` | `simlev.plot_interactive(result)` oder `result.plot_interactive()` |
 | `set.seed(42)` | `simlev.set_seed(42)` |
 | `bootstrap_probability(st, cagr > 0.05)` | `simlev.bootstrap_probability(st, "cagr > 0.05")` |
 | `function(df) signal_sma(df$INDEX, 200)` | `lambda df: simlev.signal_sma(df["INDEX"], 200)` |
@@ -222,11 +218,6 @@ Besonderheiten der Python-Fassung:
 - `cores > 1` rechnet sequenziell, aber mit derselben Zufallssemantik wie
   `mclapply(mc.set.seed = FALSE)` in R; bei gleichem `cores` stimmen die
   Ergebnisse also mit R überein.
-- `plot_interactive(..., engine="plotly")` liefert eine plotly-Figur, zum
-  Beispiel für Jupyter. Ohne plotly schreibt SimLev dasselbe HTML wie R.
-- `export_html_dashboard()` ist wie in R nur ein Platzhalter (ohne plotly
-  ein Fehler, sonst eine Meldung); das interaktive Dashboard schreibt
-  `plot_interactive()`.
 - Hinweise wie die Meldung über aufgefüllte Kalendertage erscheinen, wie
   R's `message()`, auf `stderr`; Warnungen sind `UserWarning`, Fehler
   `ValueError`, jeweils mit dem deutschen Wortlaut des R-Pakets.
@@ -262,8 +253,8 @@ Voraussetzungen der Bitgleichheit:
   Referenz-LAPACK des Systems (unter Debian/Ubuntu
   `/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3`); ein anderer Pfad lässt
   sich über die Umgebungsvariable `SIMLEV_LAPACK` setzen. Fehlt sie,
-  rechnen scipy bzw. numpy, dann ohne Bitgleichheitsgarantie; SimLev warnt
-  in diesem Fall einmal.
+  rechnet numpy, dann ohne Bitgleichheitsgarantie; SimLev warnt in diesem
+  Fall einmal.
 - **Zeichenketten-Reihenfolge wie R.** Sortieren und Vergleichen von
   Zeichenketten folgt R's ICU-Kollation (unter `C.UTF-8` „root“: `a A ä b
   B`) über die System-ICU (`libicui18n`, Pfad über `SIMLEV_ICU`);
@@ -273,24 +264,28 @@ Voraussetzungen der Bitgleichheit:
 - **Optionale R-Pakete.** `evd` (2.3-7.1, `fpot`) und `rugarch` (1.5-6,
   `ugarchfit` mit Rsolnp 1.16 `solnp` und `stats::nlminb`) sind
   nachgebildet (`simlev._r.evd`, `simlev._r.rugarch`, `simlev._r.solnp`,
-  `simlev._r.stats.nlminb`); standardmäßig verhält sich Python wie R mit
-  beiden Paketen: Tail-Modell per GPD-ML ab 30 Überschreitungen, GARCH-
-  Schätzung per rugarch (Bootstrap `garch`/`gjr_garch`, Kopplung,
-  `dcc_fit()`, `dependence_analysis()`), einschließlich der Warnungen von
-  rugarch. `SIMLEV_R_SUGGESTS=none` bildet R ohne die Pakete nach (`optim`
-  bzw. Momente), `evd` oder `rugarch` nur eines davon. Auch rugarchs
+  `simlev._r.stats.nlminb`). Das Tail-Modell schätzt ab 30
+  Überschreitungen immer per GPD-ML wie R, das `evd::fpot` übernommen hat
+  (`.evd_fpot`; Herkunft in `COPYRIGHTS.md`). Die GARCH-Schätzung
+  (Bootstrap `garch`/`gjr_garch`, Kopplung, `dcc_fit()`,
+  `dependence_analysis()`) läuft immer per rugarch-Nachbildung,
+  einschließlich der Warnungen von rugarch, wie R, das `ugarchfit` mit
+  Rsolnp und truncnorm übernommen hat (`.rugarch_ugarchfit`;
+  Herkunft in `COPYRIGHTS.md`); `optim` und die Momente bleiben nur der
+  Rückfall, wenn der Fit mit einem Fehler scheitert. Auch rugarchs
   letzter Ausweichweg gosolnp (`simlev._r.solnp.gosolnp`, mit
   `simlev._r.truncnorm.rtruncnorm`) ist nachgebildet; ihn erreicht die
   Solver-Kette in R bei etwa 1 % zufälliger Reihen. Wie in R setzt er den
   globalen Zufallszustand aus der Uhrzeit (`set.seed` mit den
   Unix-Sekunden), das Ergebnis hängt dann von der Sekunde des Aufrufs ab;
   `SIMLEV_R_SYS_TIME` (Sekunden seit 1970) stellt die Uhr fest. `imputeTS`
-  (3.4, `na_interpolation(option = "stine")` mit stinepack 1.5 `stinterp`;
+  (3.4, `na_interpolation` mit `option = "stine"` und `"linear"`, stinepack 1.5 `stinterp`;
   `simlev._r.imputets`, `simlev._r.stinepack`) ist ebenfalls nachgebildet:
-  `fill = "stine"`/`index_fill = "stine"` im Backcast interpolieren nach
-  Stineman statt linear mit Hinweis. `MSGARCH`, `plotly`
-  und `TTR` gelten als nicht installiert; die MS-GARCH-Verfahren melden wie
-  R, dass das Paket fehlt.
+  `fill = "stine"`/`index_fill = "stine"` im Backcast interpolieren immer
+  nach Stineman wie R, das beide Pakete übernommen hat
+  (`.imputets_na_interpolation`; Herkunft in `COPYRIGHTS.md`). `MSGARCH` gilt als nicht
+  installiert; die MS-GARCH-Verfahren melden wie R, dass das Paket fehlt.
+  Einen Schalter für optionale R-Pakete gibt es nicht mehr.
 - **nlminb:** Die PORT-Bibliothek liest an drei Stellen nicht gesetzte
   lokale Variablen (in R zufällige Stapelreste); Python setzt dort 0. Das
   kann nur in Sonderfällen abweichen: die Meldung „X-convergence (3)“
@@ -299,8 +294,7 @@ Voraussetzungen der Bitgleichheit:
   Gradient oder Hesse-Matrix.
 - **Grafiken** (matplotlib) zeigen dasselbe wie in R, sind aber nicht
   bitgleich; die zugrunde liegenden Daten (Monatsrenditen, rollierende
-  Kennzahlen, Korrelationen …) schon. `plot_interactive()` erzeugt dasselbe
-  HTML wie R.
+  Kennzahlen, Korrelationen …) schon.
 
 Geprüft wurde:
 
@@ -331,7 +325,7 @@ Bekannte Grenzen:
 
 ``` bash
 pip install ".[test]"
-pytest                                        # 5.762 Tests, Laufzeit rund 7 Minuten
+pytest                                        # 5.755 Tests, Laufzeit rund 7 Minuten
 python tools/compare_golden.py                # Engine: golden/cases und golden/extra
 python tools/compare_reference.py             # Erweiterungen: alle Module unter golden/modules
 python tools/compare_reference.py optimize -k cov_ -v      # ein Modul, ausgewählte Fälle, ausführlich
@@ -358,17 +352,15 @@ Weiterentwicklung in [DEVELOPING.md](DEVELOPING.md).
 
 ```
 simlev/
-  __init__.py        öffentliche Funktionen (alle 110 Exporte des R-Pakets)
+  __init__.py        öffentliche Funktionen (alle 104 Exporte des R-Pakets)
   engine.py          simulation(), Ablaufsteuerung (simulation.R, sim_*.R, utils.R)
-  _core.py           Rechenkerne der Engine (simulation_core.cpp, fifo_core_RCpp.cpp, tax_core_RCpp.cpp)
-  _rnum.py           R-kompatible Numerik der Engine (long double, pow, Rundung, Formatierung)
+  _core.py           Rechenkerne der Engine (simulation_core.cpp, fifo_core.cpp, tax_core.cpp)
   _dates.py          Datumshelfer (Tage seit 1970, strptime wie R)
   config.py          asset_config(), create_strategy() & Co. (asset_config.R, strategy.R)
   trigger.py         compute_rebal_trigger()
   tax_tariff.py      read_tax_tariff(), Einkommensteuertarif
   result.py          SimLevResult mit print/summary/plot
   dashboard.py       Dashboard (matplotlib)
-  interactive.py     interaktives HTML-Dashboard
   data_prep.py       Datenaufbereitung, Portfolio-Vorlagen
   backcast.py        backcast_fit(), backcast()
   bonds.py           Anleihe-, Geldmarkt- und gesicherte Reihen
@@ -388,11 +380,13 @@ simlev/
   analysis_tests.py  statistische Prüfungen
   data/              steuertarif.csv (Tarif ab VZ 2026), r_colors.csv (R-Farbnamen)
   _r/                R-Kompatibilitätsschicht
+    rnum.py          NA, Summen mit long double, pow, uniroot (unterste Schicht)
+    rformat.py       Rundung und Textausgabe der Engine (round, signif, format, sprintf)
     rng.py           Zufallszahlen wie R
     nmath.py         Verteilungsfunktionen (mit _toms708.py, _cmath.py)
-    stats.py         stats-Interna (mit _optim.py, _lbfgsb.py, _sbart.py, _fft.py)
+    stats.py         stats-Interna (mit _optim.py, _lbfgsb.py, _sbart.py, _fft.py, port.py)
     linalg.py        lineare Algebra (mit _blas.py, _linpack.py, _lapack.py)
-    base.py, libm.py Summen mit long double, libm-Funktionen
+    base.py, libm.py base-Funktionen mit long double, libm-Funktionen
     fmt.py           format, sprintf, print wie R
     rlist.py         Basisklasse RList der Ergebnisobjekte
     reftree.py       Laden und Vergleichen der Referenzfälle

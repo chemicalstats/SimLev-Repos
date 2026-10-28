@@ -192,7 +192,7 @@ ref_case("fitcop_na", "fit_copula(xna, round(yna, 1), 'gaussian')", paste0(P, "r
          inputs = list(xna = xna, yna = yna), jl = paste0(J, 'result = D.fit_copula(xna, SL.RFmt.r_round.(yna, 1), "gaussian")'))
 ref_case("fitcop_err_len", "fit_copula(1:30, 1:29)", paste0(P, "result = D.fit_copula(np.arange(1, 31), np.arange(1, 30))"),
          jl = paste0(J, "result = D.fit_copula(1:30, 1:29)"))
-ref_case("fitcop_err_n", "fit_copula(c(1:19, NA), 1:20)", paste0(P, "result = D.fit_copula(np.r_[np.arange(1., 20), np.nan], np.arange(1, 21))"),
+ref_case("fitcop_err_n", "fit_copula(c(1:19, NA), 1:20)", paste0(P, "result = D.fit_copula(np.r_[np.arange(1., 20), simlev._r.fmt.NA_REAL], np.arange(1, 21))"),
          jl = paste0(J, "result = D.fit_copula(vcat(1.0:19.0, SL.NA), 1:20)"))
 ref_case("fitcop_err_fam", "fit_copula(x, y, c('t', 'gaussian_90', 'joe', 'gumbel_45'))",
          paste0(P, "result = D.fit_copula(x, y, ['t', 'gaussian_90', 'joe', 'gumbel_45'])"), inputs = CX[c("x", "y")],
@@ -219,7 +219,7 @@ ref_case("tail_err_q3", "tail_dependence(tx, ty, 'a')", paste0(P, "result = D.ta
          jl = paste0(J, 'result = D.tail_dependence(tx, ty, "a")'))
 ref_case("tail_err_len", "tail_dependence(1:3, 1:4)", paste0(P, "result = D.tail_dependence(np.arange(1, 4), np.arange(1, 5))"),
          jl = paste0(J, "result = D.tail_dependence(1:3, 1:4)"))
-ref_case("tail_err_n", "tail_dependence(c(1, NA), c(2, 3))", paste0(P, "result = D.tail_dependence(np.array([1, np.nan]), np.array([2., 3]))"),
+ref_case("tail_err_n", "tail_dependence(c(1, NA), c(2, 3))", paste0(P, "result = D.tail_dependence(np.array([1, simlev._r.fmt.NA_REAL]), np.array([2., 3]))"),
          jl = paste0(J, "result = D.tail_dependence([1, SL.NA], [2.0, 3])"))
 
 # DCC
@@ -304,7 +304,7 @@ ref_case("qreg_basic", "list(quantile_reg(y, x, 0.9), quantile_reg(y, NULL, 0.3)
          paste0(P, "result = [D.quantile_reg(y, x, 0.9), D.quantile_reg(y, None, 0.3), D.quantile_reg(y, pd.DataFrame({'a': x, 'b': x2}), 0.5), D.quantile_reg(y, pd.DataFrame({'u': x}), 0.1, intercept=False)]"), inputs = QI,
          jl = paste0(J, 'result = [D.quantile_reg(y, x, 0.9), D.quantile_reg(y, nothing, 0.3), D.quantile_reg(y, SL.NamedMat(hcat(x, x2); colnames = ["a", "b"]), 0.5), D.quantile_reg(y, SL.RFrame("u" => x), 0.1; intercept = false)]'))
 ref_case("qreg_na", "y2 <- y; y2[3] <- NA; x3 <- x; x3[7] <- Inf; quantile_reg(y2, cbind(x3, x2), 0.25, tol = 1e-8, maxit = 50L)",
-         paste0(P, "y2 = y.copy(); y2[2] = np.nan; x3 = x.copy(); x3[6] = np.inf; result = D.quantile_reg(y2, pd.DataFrame({'x3': x3, 'x2': x2}), 0.25, tol=1e-8, maxit=50)"), inputs = QI,
+         paste0(P, "y2 = y.copy(); y2[2] = simlev._r.fmt.NA_REAL; x3 = x.copy(); x3[6] = np.inf; result = D.quantile_reg(y2, pd.DataFrame({'x3': x3, 'x2': x2}), 0.25, tol=1e-8, maxit=50)"), inputs = QI,
          jl = paste0(J, 'y2 = copy(y); y2[3] = SL.NA; x3 = copy(x); x3[7] = Inf; result = D.quantile_reg(y2, SL.NamedMat(hcat(x3, x2); colnames = ["x3", "x2"]), 0.25; tol = 1e-8, maxit = 50)'))
 for (tv in list("0", "1", "c(0.1, 0.2)", "NA", "'a'"))
   ref_case(sprintf("qreg_err_tau_%s", gsub("[^a-z0-9]", "", tv)), sprintf("quantile_reg(y, x, %s)", tv),

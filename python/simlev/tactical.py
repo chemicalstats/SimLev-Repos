@@ -21,7 +21,6 @@ Attribute der R-Objekte (``attr(w, "regime")`` usw.) stehen in ``w.attrs``.
 """
 from __future__ import annotations
 
-import inspect
 import math
 import warnings
 from collections.abc import Mapping
@@ -30,6 +29,7 @@ import numpy as np
 import pandas as pd
 
 from ._r import fmt as _fmt
+from ._r.base import env_from_caller
 from ._r import libm as _libm
 
 __all__ = ["SimLevWeights", "signal_state", "momentum_score", "tactical_rules", "tactical_rotation",
@@ -561,6 +561,7 @@ def _as_logical(v, n):
     return out
 
 
+@env_from_caller
 def tactical_rules(data, rules, default, env=None):
     """Regelbasierte taktische Allokation.
 
@@ -585,11 +586,6 @@ def tactical_rules(data, rules, default, env=None):
         0 = ``default``) und ``attrs["source"]``.
     """
     n = _nrow(data)
-    if env is None:
-        fr = inspect.currentframe().f_back
-        env = dict(fr.f_globals)
-        env.update(fr.f_locals)
-        del fr
     rules = list(rules) if rules is not None else []
 
     def wget(r):
@@ -1256,6 +1252,6 @@ def tactical_simulation(data, weights, rebalance=("switch", "month", "quarter", 
 
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
-from .data_prep import _quiet_fp  # noqa: E402
+from ._r.base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), [_n for _n in __all__ if _n != "tactical_rules"] + ["_as_weights", "_hold_rows", "_period_last", "_rowsums", "_rowmeans", "_colmeans", "_ldsum"])  # ohne tactical_rules: liest den Aufrufer-Frame (env)
+quiet_fp(globals(), list(__all__) + ["_as_weights", "_hold_rows", "_period_last", "_rowsums", "_rowmeans", "_colmeans", "_ldsum"])  # tactical_rules: env aus dem Aufrufer (env_from_caller)

@@ -175,15 +175,6 @@ test_that("R1-19/R1-22: Dashboard-Kennzahlen wie statistics, kurze Reihen und PD
   expect_equal(length(dev.list()), nd)
 })
 
-test_that("R1-20: plot_interactive zeigt CAGR und Sharpe", {
-  set.seed(12); n <- 400
-  d <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = n), A = 100 * cumprod(1 + rnorm(n, 4e-4, 0.01)))
-  r <- simulation(d, .bt_st1())
-  h <- readLines(plot_interactive(r, file = tempfile(fileext = ".html"), engine = "html", open = FALSE))
-  expect_true(any(grepl(sprintf("CAGR %.2f%%", 100 * r$cagr), h, fixed = TRUE)))
-  expect_true(any(grepl(sprintf("Sharpe %.2f", r$statistics$sharpe), h, fixed = TRUE)))
-})
-
 test_that("R1-21: compute_rebal_trigger mit fuehrendem NA", {
   df <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 6),
                    target_leverage = c(NA, 2, 2.3, 2.3, 1.9, 2), sigma_ewma = c(NA, NA, .1, .2, .1, .1))

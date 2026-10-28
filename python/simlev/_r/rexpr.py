@@ -31,7 +31,7 @@ Zeichenkettenvergleiche über :func:`simlev._r.stats.str_collate` (ICU wie R).
 
 Ergebnis von :func:`eval_r`: logisch → ``ndarray`` (``object``: ``True``,
 ``False``, ``None``), ganzzahlig → ``int64`` (mit NA: ``float64`` und
-``nan``), numerisch → ``float64`` (NA = ``nan``, NaN = ``fmt.R_NAN``),
+``NA_REAL``), numerisch → ``float64`` (NA = ``NA_REAL``, NaN = ``nan``),
 Zeichen → ``ndarray`` (``object``, NA = ``None``), Datum →
 ``datetime64[D]``.
 """
@@ -53,12 +53,12 @@ from . import base as _base
 from . import fmt as _fmt
 from . import libm as _libm
 from . import stats as _stats
+from .rnum import NA_REAL
 
 __all__ = ["parse_r", "eval_r", "r_strtod", "from_python", "to_python", "as_numeric", "as_logical"]
 
 LD = np.longdouble
 _IMAX = 2147483647
-NA_REAL = _fmt.NA_REAL
 _DEFAULT_NAN = struct.unpack("<d", struct.pack("<Q", 0xFFF8000000000000))[0]
 _EPOCH = _dt.date(1970, 1, 1)
 _EPOCH_ORD = _EPOCH.toordinal()
@@ -1347,7 +1347,7 @@ def _int_ok(x):
 
 
 def _f2na(x):
-    """Python-Konvention → R: ``nan`` ist NA, ``fmt.R_NAN`` ist NaN."""
+    """Python-Zahl → R-double: ``NA_REAL`` bleibt NA, jedes andere ``nan`` ist NaN."""
     x = float(x)
     if x != x and not _fmt._is_rnan(x):
         return NA_REAL
@@ -1470,7 +1470,7 @@ def to_python(v):
             return np.array([NA_REAL if x is None else float(x) for x in v], dtype=np.float64)
         return np.array(list(v), dtype=np.int64)
     if isinstance(v, NUM):
-        return np.array([_fmt.R_NAN if (x != x and not isna_strict(x)) else x for x in v], dtype=np.float64)
+        return np.array([math.nan if (x != x and not isna_strict(x)) else x for x in v], dtype=np.float64)
     if isinstance(v, CHR):
         a = np.empty(len(v), dtype=object)
         a[:] = list(v)
@@ -1561,7 +1561,7 @@ def _as_chr(v):
     if isinstance(v, NUM):
         if not v:
             return CHR()
-        a = np.array([_fmt.R_NAN if (x != x and not isna_strict(x)) else x for x in v], dtype=np.float64)
+        a = np.array([math.nan if (x != x and not isna_strict(x)) else x for x in v], dtype=np.float64)
         r = _fmt.as_character(a)
         if not isinstance(r, np.ndarray):
             r = [r]
@@ -3230,9 +3230,7 @@ def _caller_env(depth=2):
     try:
         for _ in range(depth):
             fr = fr.f_back
-        env = dict(fr.f_globals)
-        env.update(fr.f_locals)
-        return env
+        return _base.caller_env(fr)
     finally:
         del fr
 

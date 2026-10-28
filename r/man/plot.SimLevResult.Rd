@@ -5,7 +5,6 @@
 \alias{summary.SimLevResult}
 \alias{print.summary.SimLevResult}
 \alias{export_dashboard}
-\alias{export_html_dashboard}
 \alias{SimLevResult}
 \title{Ergebnisse visualisieren und exportieren}
 \description{
@@ -18,12 +17,6 @@
   Korrelation und Strategievergleich gibt es nur mit \code{compare}.
 
   \code{export_dashboard} speichert das Dashboard als PDF.
-
-  \code{export_html_dashboard} ist ein Platzhalter für ein interaktives
-  HTML-Dashboard mit \pkg{plotly} und derzeit nicht umgesetzt: Ohne
-  \pkg{plotly} bricht es mit Fehler ab, mit \pkg{plotly} gibt es nur eine
-  Meldung aus und schreibt keine Datei. Für ein interaktives Dashboard siehe
-  \code{\link{plot_interactive}}.
 
   \code{print} gibt die wichtigsten Kennzahlen und ggf. die
   Steuerzusammenfassung auf der Konsole aus. \code{summary} liefert eine
@@ -56,8 +49,6 @@ export_dashboard(
   height   = 10,
   ...
 )
-
-export_html_dashboard(x, filename = "dashboard.html")
 }
 \arguments{
   \item{x, object}{Ein \code{"SimLevResult"}-Objekt (bei
@@ -114,7 +105,7 @@ export_html_dashboard(x, filename = "dashboard.html")
     \code{NULL} = Standard-Farbschema.
   }
   \item{filename}{Character. Pfad der Ausgabedatei. Standard:
-    \code{"dashboard.pdf"} bzw. \code{"dashboard.html"}.}
+    \code{"dashboard.pdf"}.}
   \item{width}{Numerisch. Breite in Zoll. Standard: \code{14}.}
   \item{height}{Numerisch. Höhe in Zoll. Standard: \code{10}.}
   \item{...}{
@@ -154,7 +145,6 @@ export_html_dashboard(x, filename = "dashboard.html")
     \dQuote{nicht definiert (Ursache)}).}
   \item{\code{export_dashboard}}{Unsichtbar \code{NULL} (PDF-Datei wird geschrieben;
     das PDF-Gerät wird auch bei einem Fehler wieder geschlossen).}
-  \item{\code{export_html_dashboard}}{Unsichtbar \code{NULL} (es wird keine Datei geschrieben).}
 }
 \details{
   Die Kennzahlen des Dashboards entsprechen \code{x$statistics}: Die Sharpe
@@ -232,9 +222,6 @@ plot(result, colors = list(
 
 # Als PDF exportieren
 export_dashboard(result, "bericht.pdf", width = 16, height = 10)
-
-# Als HTML exportieren (benötigt plotly)
-export_html_dashboard(result, "bericht.html")
 
 # Zwei Strategien vergleichen
 result2 <- simulation(data, strategy, start_value = 10000,

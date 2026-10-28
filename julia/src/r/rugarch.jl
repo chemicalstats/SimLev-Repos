@@ -2,6 +2,17 @@
 # RRugarch – Nachbildung von rugarch::ugarchfit (rugarch 1.5-6) für die
 # Spezifikation aus .fit_garch11 (r/R/bootstrap.R), bitgleich
 #
+# Herkunft: R-Paket rugarch 1.5-6 (CRAN, 2026-07-18), R/rugarch-*.R und
+# src/garchmodels.c, src/filters.c, src/distributions.c; Autoren: Alexios
+# Galanos [aut, cre, cph], Tobias Kley [ctb]. Lizenz: GPL-3. Nach Julia
+# übertragen und angepasst für SimLev (siehe julia/COPYRIGHTS.md); im R-Paket
+# übernommen als .rugarch_ugarchfit (r/R/vendor_rugarch.R,
+# r/src/vendor_rugarch.c). Hesse-Matrix und Scores rechnet statt numDeriv die
+# eigenständig geschriebene Richardson-Extrapolation (_richardson_hessian,
+# _richardson_jacobian; im R-Paket .sl_richardson_hessian/
+# .sl_richardson_jacobian in r/R/richardson.R, gegen numDeriv als
+# Prüf-Orakel bitgleich).
+#
 #   spec <- ugarchspec(variance.model = list(model = "sGARCH" | "gjrGARCH", garchOrder = c(1, 1)),
 #                      mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
 #                      distribution.model = "norm")
@@ -22,11 +33,11 @@
 #   n.restarts = 1, n.sim = 500, gestutzter Normalverteilung um die
 #   Startwerte, rseed = NULL: Startwert aus der Uhr SimLev.RBase.sys_time,
 #   set.seed überschreibt wie in R den globalen Zufallszustand);
-# * .makefitmodel: numDeriv::hessian (Richardson), Prüfung durch eigen (nur
+# * .makefitmodel: Hesse-Matrix per Richardson (_richardson_hessian), Prüfung durch eigen (nur
 #   der Fehler bei nicht endlichen Werten), solve mit Ersatzweg .hessian2sided
 #   und Warnung "failed to invert hessian", der Aufruf mit returnType = "all",
 #   robustvcv mit neweywestcv und die Warnung von sqrt bei negativen
-#   Diagonalelementen; numDeriv::jacobian (Scores) nur mit full = true;
+#   Diagonalelementen; Scores (_richardson_jacobian) nur mit full = true;
 # * die Konvergenzprüfung: bei convergence != 0 ist coef(fit) leer (nothing).
 # Die Daten werden wie ein unbenannter Vektor behandelt.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -135,95 +146,101 @@ function (f::_LLH)(pars, returnType::Symbol = :llh)
                             "LHT" => Float64[-v for v in LHT], "persistence" => persist)
 end
 
-# ── numDeriv / rugarch-numderiv.R ───────────────────────────────────────────
+# ── numerische Ableitungen (Richardson-Extrapolation, eigenständig) ─────────
+#
+# Eigenständig geschrieben nach dem veröffentlichten Verfahren (zentrale
+# Differenzen, Schrittweite |d x| bzw. zusätzlich eps nahe null, r Stufen mit
+# Faktor v, Richardson-Extrapolation; Beschreibung in der Dokumentation von
+# numDeriv, Linfield & Penny 1989). Kein Code aus numDeriv; wie im R-Paket
+# (.sl_richardson_hessian/.sl_richardson_jacobian in r/R/richardson.R), dort
+# gegen numDeriv als Prüf-Orakel bitgleich. Auswertungsfolge und Klammerung
+# sind fest: die Likelihood merkt sich ihren letzten endlichen Wert
+# (Strafwert), jede andere Folge ändert das Ergebnis.
 
-_unit(n, i) = Float64[k == i ? 1.0 : 0.0 for k in 1:n]
-_h0(x, d, eps, zero_tol) = Float64[abs(d * v) + eps * (abs(v) < zero_tol ? 1.0 : 0.0) for v in x]
+"Anfangsschritt je Koordinate: `|d x|`, nahe null zusätzlich `eps`."
+_richardson_steps(x, d, eps, zero_tol) =
+    Float64[abs(d * xi) + eps * (abs(xi) < zero_tol ? 1.0 : 0.0) for xi in x]
 
-"`numDeriv::hessian(func, x, method = \"Richardson\", method.args)` (über genD)."
-function _hessian_numderiv(f, x::Vector{Float64}; eps = 1e-4, d = 0.1, zero_tol = _ZERO_TOL, r = 4, v = 2)
-    f(x)                                            # hessian.default: Längenprüfung
-    n = length(x)
-    f0 = f(x)
-    h0 = _h0(x, d, eps, zero_tol)
-    D = zeros(div(n * (n + 3), 2))
-    Hdiag = zeros(n)
-    Da = zeros(r); Ha = zeros(r)
-    for i in 1:n
-        h = copy(h0)
-        ei = _unit(n, i)
-        for k in 1:r
-            f1 = f(x .+ ei .* h)
-            f2 = f(x .- ei .* h)
-            Da[k] = (f1 - f2) / (2 * h[i])
-            Ha[k] = (f1 - 2 * f0 + f2) / (h[i] * h[i])
-            h = h ./ v
-        end
-        for m in 1:r-1
-            q = SimLev.r_pow(4.0, Float64(m))
-            for k in 1:r-m
-                Da[k] = (Da[k+1] * q - Da[k]) / (q - 1)
-                Ha[k] = (Ha[k+1] * q - Ha[k]) / (q - 1)
-            end
-        end
-        D[i] = Da[1]
-        Hdiag[i] = Ha[1]
+"Einheitsvektoren als Spalten (wie `diag(p)` in R)."
+_richardson_axes(p) = Float64[i == j ? 1.0 : 0.0 for i in 1:p, j in 1:p]
+
+"""
+Tableau (letzte Dimension = Stufen, grob zuerst) auf den extrapolierten Wert
+falten: Schritt `m` tilgt den Fehlerterm `h^(2m)` mit dem Gewicht `w = v^(2m)`,
+`neu_k = (alt_(k+1) * w - alt_k) / (w - 1)`.
+"""
+function _richardson_collapse(tab::Array{Float64}, v)
+    lvl = 0
+    nd = ndims(tab)
+    while size(tab, nd) > 1
+        lvl += 1
+        w = SimLev.r_pow(Float64(v), 2.0 * lvl)
+        k = size(tab, nd)
+        tab = (selectdim(tab, nd, 2:k) .* w .- selectdim(tab, nd, 1:k-1)) ./ (w - 1)
     end
-    u = n
-    for i in 1:n, j in 1:i
-        u += 1
-        if i == j
-            D[u] = Hdiag[i]
-        else
-            h = copy(h0)
-            ei = _unit(n, i); ej = _unit(n, j)
-            for k in 1:r
-                f1 = f((x .+ ei .* h) .+ ej .* h)
-                f2 = f((x .- ei .* h) .- ej .* h)
-                Da[k] = ((((f1 - 2 * f0) + f2) - Hdiag[i] * (h[i] * h[i])) - Hdiag[j] * (h[j] * h[j])) / (2 * h[i] * h[j])
-                h = h ./ v
-            end
-            for m in 1:r-1
-                q = SimLev.r_pow(4.0, Float64(m))
-                for k in 1:r-m
-                    Da[k] = (Da[k+1] * q - Da[k]) / (q - 1)
-                end
-            end
-            D[u] = Da[1]
-        end
-    end
-    H = zeros(n, n)
-    u = n
-    for i in 1:n, j in 1:i
-        u += 1
-        H[i, j] = D[u]
-    end
-    H = H .+ permutedims(H)
-    for i in 1:n
-        H[i, i] = H[i, i] / 2
-    end
-    H
+    dropdims(selectdim(tab, nd, 1:1); dims = nd)
 end
 
-"`numDeriv::jacobian(func, x, method = \"Richardson\", method.args)`."
-function _jacobian_numderiv(f, x::Vector{Float64}; eps = 1e-4, d = 1e-4, zero_tol = _ZERO_TOL, r = 4, v = 2)
-    f0 = f(x)
-    n = length(x)
-    a = fill(NaN, length(f0), r, n)
-    h = _h0(x, d, eps, zero_tol)
-    for k in 1:r
-        ph = copy(h); mh = copy(h)
-        for i in 1:n
-            ei = _unit(n, i)
-            a[:, k, i] = (f(x .+ ph .* ei) .- f(x .- mh .* ei)) ./ (2 * h[i])
+"Hesse-Matrix einer skalaren Funktion (`.sl_richardson_hessian`)."
+function _richardson_hessian(f, x::Vector{Float64}; eps = 1e-4, d = 0.1, zero_tol = _ZERO_TOL, r = 4, v = 2)
+    p = length(x)
+    f(x)                              # Prüfauswertung (skalar), wie in R
+    centre = f(x)
+    start = _richardson_steps(x, d, eps, zero_tol)
+    axis = _richardson_axes(p)
+    tab = zeros(r)
+    pure = zeros(p)
+    # reine zweite Ableitungen, Achse für Achse
+    for a in 1:p
+        h = start
+        for s in 1:r
+            fwd = f(x .+ h .* axis[:, a])
+            bwd = f(x .- h .* axis[:, a])
+            tab[s] = ((fwd - 2 * centre) + bwd) / (h[a] * h[a])
+            h = h ./ v
+        end
+        pure[a] = _richardson_collapse(tab, v)[]
+    end
+    # gemischte Ableitungen im unteren Dreieck (a > b), zeilenweise
+    low = zeros(p, p)
+    for a in 1:p
+        low[a, a] = pure[a]
+        for b in 1:a-1
+            h = start
+            for s in 1:r
+                fwd = f(x .+ h .* axis[:, a] .+ h .* axis[:, b])
+                bwd = f(x .- h .* axis[:, a] .- h .* axis[:, b])
+                tab[s] = ((((fwd - 2 * centre) + bwd) - pure[a] * (h[a] * h[a])) - pure[b] * (h[b] * h[b])) /
+                         (2 * h[a] * h[b])
+                h = h ./ v
+            end
+            low[a, b] = _richardson_collapse(tab, v)[]
+        end
+    end
+    # symmetrisch ergänzen, verdoppelte Diagonale halbieren
+    hess = low .+ permutedims(low)
+    for a in 1:p
+        hess[a, a] = hess[a, a] / 2
+    end
+    hess
+end
+
+"Jacobi-Matrix `length(f(x))` x `length(x)` (`.sl_richardson_jacobian`)."
+function _richardson_jacobian(f, x::Vector{Float64}; eps = 1e-4, d = 1e-4, zero_tol = _ZERO_TOL, r = 4, v = 2)
+    p = length(x)
+    q = length(f(x))
+    h = _richardson_steps(x, d, eps, zero_tol)
+    axis = _richardson_axes(p)
+    tab = fill(NaN, q, p, r)          # Einträge x Stufen
+    for s in 1:r
+        for a in 1:p
+            fwd = f(x .+ h .* axis[:, a])
+            bwd = f(x .- h .* axis[:, a])
+            tab[:, a, s] = (fwd .- bwd) ./ (2 * h[a])
         end
         h = h ./ v
     end
-    for m in 1:r-1
-        q = SimLev.r_pow(4.0, Float64(m))
-        a = (a[:, 2:r+1-m, :] .* q .- a[:, 1:r-m, :]) ./ (q - 1)
-    end
-    a[:, 1, :]
+    _richardson_collapse(tab, v)
 end
 
 "`.hessian2sided(f, x, ...)` (rugarch-numderiv.R)."
@@ -386,7 +403,7 @@ end
 `ugarchfit(spec, data, solver = "hybrid")` mit der Spezifikation aus
 `.fit_garch11` (GARCH(1,1) bzw. GJR-GARCH(1,1), ARMA(0,0) mit Mittelwert,
 Normalverteilung). `full = true` berechnet zusätzlich die Scores
-(`numDeriv::jacobian`).
+(`_richardson_jacobian`).
 
 Ergebnis: `RList` mit `coef` (benannter `RVector` oder `nothing` wie
 `coef(fit)`), `convergence`, `message`, `solver_path`, `LLH`, `hessian`,
@@ -439,7 +456,7 @@ end
 ".makefitmodel (ohne feste Parameter): Hesse-Matrix, Kovarianzen, Prüfungen."
 function _makefitmodel(llh::_LLH, par::Vector{Float64}, T::Integer, full::Bool)
     f = p -> llh(p, :llh)
-    H = _hessian_numderiv(f, par; eps = 1e-4, d = 0.1, zero_tol = _ZERO_TOL, r = 4, v = 2)
+    H = _richardson_hessian(f, par; eps = 1e-4, d = 0.1, zero_tol = _ZERO_TOL, r = 4, v = 2)
     all(isfinite, H) || _rerr("infinite or missing values in 'x'")     # eigen()
     cvar = try
         SimLev.RSolnp._asmat(SimLev.RLinalg.solve(H))
@@ -462,7 +479,7 @@ function _makefitmodel(llh::_LLH, par::Vector{Float64}, T::Integer, full::Bool)
         flht = p -> llh(p, :LHT)
         rv = _robustvcv(flht, par, nlag, H, T)
         out["robust_cvar"] = rv.vcv
-        full && (out["scores"] = _jacobian_numderiv(flht, par; eps = 1e-4, d = 1e-4, zero_tol = _ZERO_TOL, r = 4, v = 2))
+        full && (out["scores"] = _richardson_jacobian(flht, par; eps = 1e-4, d = 1e-4, zero_tol = _ZERO_TOL, r = 4, v = 2))
         any(i -> rv.vcv[i, i] < 0, 1:size(rv.vcv, 1)) && _warn("NaNs produced")
     end
     out

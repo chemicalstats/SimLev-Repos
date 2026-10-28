@@ -15,7 +15,6 @@ const _R_OPTIONAL = Dict{Symbol,Tuple}(
     :add_asset => (),
     :align_macro => (:name, :lag, :lag_unit, :transform, :periods,),
     :align_series => (:calendar, :range, :fill, :max_gap, :start, :end_,),
-    :as_list => (),
     :asset_config => (:asset_class, :action_type, :asset_share, :asset_spread, :asset_bonus, :deliverable, :asset_start, :tax_regime, :signal_buy, :signal_sell,),
     :backcast => (:fit, :data, :params, :splice, :fill, :rebase,),
     :backcast_fit => (:ter, :leverage, :rate, :fx, :model, :fit, :fixed, :objective, :loss, :horizon, :hybrid_weight, :lag, :rate_lag, :start, :end_, :method, :grid, :bounds, :ter_basis, :rate_basis, :accrual, :index_fill, :validate,),
@@ -34,7 +33,6 @@ const _R_OPTIONAL = Dict{Symbol,Tuple}(
     :copula_scenarios => (:n, :family, :stress, :frequency, :seed,),
     :covar_analysis => (:state, :q, :frequency,),
     :cpcv_portfolio => (:assets, :methods, :n_groups, :test_groups, :purge, :embargo, :frequency,),
-    :create_config => (:letfs, :regime_index, :aux, :aux_type, :cross, :input,),
     :create_strategy => (:assets,),
     :crisis_replay => (:crises, :rebalance,),
     :currency_hedged_index => (:cost, :basis, :start,),
@@ -46,7 +44,6 @@ const _R_OPTIONAL = Dict{Symbol,Tuple}(
     :efficient_frontier => (:assets, :n, :lower, :upper, :cov, :risk_free, :frequency,),
     :entropy_pooling => (:states, :frequency, :prior,),
     :export_dashboard => (:filename, :width, :height,),
-    :export_html_dashboard => (:filename,),
     :fit_copula => (:families,),
     :glidepath => (:start, :end_, :every,),
     :goal_optimize => (:contributions, :n_grid, :n_sim, :seed,),
@@ -54,7 +51,6 @@ const _R_OPTIONAL = Dict{Symbol,Tuple}(
     :leverage_sensitivity => (:leverages, :rate, :expense, :spread, :strategy, :sim_args, :metrics, :cores,),
     :leveraged_series => (:leverage, :rate, :expense, :spread, :start,),
     :lumpsum_vs_dca => (:amount, :months, :horizon, :step, :sim_args, :cores,),
-    :migrate_strategy => (:verbose,),
     :min_track_record => (:target, :prob, :frequency, :ppy,),
     :momentum_score => (:lookbacks, :type,),
     :money_market_index => (:spread, :basis, :start,),
@@ -68,8 +64,7 @@ const _R_OPTIONAL = Dict{Symbol,Tuple}(
     :pooled_bootstrap => (:weights, :inflation, :frequency, :n, :years, :L, :country_weights, :target, :seed,),
     :portfolio_optimize => (:assets, :method, :lower, :upper, :cov, :mu, :risk_free, :risk_aversion, :budget, :alpha, :frequency, :resample, :block, :seed,),
     :portfolio_returns => (:frequency,),
-    :portfolio_template => (:map,),
-    :portfolio_templates => (),
+    :portfolio_template => (:name, :map,),
     :probabilistic_sharpe => (:benchmark, :ppy,),
     :quantile_reg => (:X, :tau, :intercept, :tol, :maxit,),
     :read_tax_tariff => (:file,),
@@ -140,7 +135,7 @@ _api_err(f) = try f(); "" catch e; e isa ErrorException ? e.msg : sprint(showerr
 
 @testset "Schlüsselwörter wie R (alle Exporte)" begin
     # nur über `kw...` angenommen (Prüfung gegen die Feldliste bzw. Weitergabe)
-    via_splat = (:asset_config, :create_config)
+    via_splat = (:asset_config,)
     for (f, opt) in _R_OPTIONAL
         @test isdefined(_SL, f)
         isdefined(_SL, f) || continue
@@ -155,8 +150,6 @@ _api_err(f) = try f(); "" catch e; e isa ErrorException ? e.msg : sprint(showerr
     end
     @test asset_config(asset_class = "etf", action_type = "bnh", asset_share = 0.5).asset_share ==
           asset_config("etf", "bnh", 0.5).asset_share
-    cfg1 = _SL.create_config((A = "A",); input = "prices"); cfg2 = _SL.bootstrap_config((A = "A",); input = "prices")
-    @test cfg1["input"] == cfg2["input"]
 end
 
 @testset "Schlüsselwortformen (Befunde)" begin
@@ -189,7 +182,6 @@ end
     @test _SL.view_mean("A", 1.0, "<=") == _SL.view_mean("A", 1.0; op = "<=")
     @test _SL.view_prob("A > 0", 0.4; op = ">=")["op"] == ">="
     @test _SL.view_vol("A", 2.0; op = "=")["op"] == "="
-    @test occursin("plotly", _api_err(() -> export_html_dashboard(nothing; filename = "x.html")))
 end
 
 @testset "Grafik-API" begin

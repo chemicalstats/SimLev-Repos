@@ -29,9 +29,10 @@ import pandas as pd
 
 from . import _dependence_core as _core
 from ._r import fmt as _fmt
+from ._r.base import env_from_caller
 from ._r import libm as _libm
 from ._r.rlist import RList
-from ._rnum import LD, r_mean, r_pow, r_pow_vec, r_rowsums, r_sd, r_sum, r_var
+from ._r.rnum import LD, r_mean, r_pow, r_pow_vec, r_sd, r_sum
 
 __all__ = ["fit_copula", "tail_dependence", "dcc_fit", "dependence_analysis", "quantile_reg",
            "tail_regression", "covar_analysis", "validate_dependence", "regime_subset",
@@ -1725,6 +1726,7 @@ def _eval_condition(expr, data, env=None):
     return _rexpr.eval_r(expr, df, env={} if env is None else env)
 
 
+@env_from_caller
 def regime_subset(data, condition, min_run=1, env=None):
     """Zeilen eines Regimes für Stress-Bootstraps.
 
@@ -1742,12 +1744,6 @@ def regime_subset(data, condition, min_run=1, env=None):
         ``end``, ``length`` und ggf. ``start_date``, ``end_date``).
     """
     if isinstance(condition, str) or callable(condition):
-        if env is None:
-            import inspect
-            fr = inspect.currentframe().f_back
-            env = dict(fr.f_globals)
-            env.update(fr.f_locals)
-            del fr
         cond = _eval_condition(condition, data, env)
         if isinstance(condition, str):
             from ._r import rexpr as _rexpr
@@ -1786,6 +1782,6 @@ def regime_subset(data, condition, min_run=1, env=None):
 
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
-from .data_prep import _quiet_fp  # noqa: E402
+from ._r.base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), [_n for _n in __all__ if _n != "regime_subset"] + ["_cop_lambda", "_cop_ll", "_dep_check_prices", "_dep_reg_cor", "_dep_regimes", "_dep_returns", "_dep_sort_dates", "_kendall", "_pobs", "_roll_mean"])  # ohne regime_subset: liest den Aufrufer-Frame (env)
+quiet_fp(globals(), list(__all__) + ["_cop_lambda", "_cop_ll", "_dep_check_prices", "_dep_reg_cor", "_dep_regimes", "_dep_returns", "_dep_sort_dates", "_kendall", "_pobs", "_roll_mean"])  # regime_subset: env aus dem Aufrufer (env_from_caller)

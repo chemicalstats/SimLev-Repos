@@ -25,7 +25,7 @@ from ._r import libm as _libm
 from ._r import nmath as _nm
 from ._r import rng as _rng
 from ._r.rlist import RList
-from ._rnum import r_mean, r_sd, r_sum
+from ._r.rnum import r_mean, r_sd, r_sum
 from .deep_analysis import (
     _ext, _fill_na, _is_num_scalar, _key_month, _key_year, _last_of_key, _match_arg, _mean_lgl,
     _row_means, _sp, _stats, _to_date_days,
@@ -578,6 +578,6 @@ class SimLevGoalPlan(RList):
         return self
 
 
-from .data_prep import _quiet_fp  # noqa: E402
+from ._r.base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), __all__ + ["_period_gross"])
+quiet_fp(globals(), __all__ + ["_period_gross"])

@@ -1,7 +1,4 @@
-"""Tests für Trigger, Dashboards und HTML-Export."""
-import os
-import re
-
+"""Tests für Trigger und Dashboards."""
 import numpy as np
 import pandas as pd
 import pytest
@@ -48,26 +45,6 @@ def _result(n=120):
     return simulation(d, s)
 
 
-def test_plot_interactive_html(tmp_path):
-    r = _result()
-    f = str(tmp_path / "d.html")
-    out = simlev.plot_interactive(r, file=f, open=False, engine="html")
-    assert out == f and os.path.exists(f)
-    txt = open(f, encoding="utf-8").read()
-    for token in ("makePanel", "Gesamt", "2022-01", "hover", "weights"):
-        assert token in txt
-
-
-def test_plot_interactive_panels_and_thinning(tmp_path):
-    d = pd.DataFrame({"date": pd.date_range("2022-01-03", periods=500), "A": np.linspace(100, 150, 500)})
-    r = simulation(d, create_strategy(A=asset_config("etf", "bnh", 1, 0, 0)))
-    f = str(tmp_path / "d.html")
-    simlev.plot_interactive(r, file=f, open=False, engine="html", panels="drawdown", max_points=100)
-    txt = open(f, encoding="utf-8").read()
-    assert '"drawdown"' in txt and 'id="performance"' not in txt
-    assert len(re.findall(r"\d{4}-\d{2}-\d{2}", txt)) <= 110
-
-
 def test_dashboard_and_exports(tmp_path):
     pytest.importorskip("matplotlib")
     import matplotlib
@@ -81,14 +58,5 @@ def test_dashboard_and_exports(tmp_path):
     pdf = tmp_path / "x.pdf"
     simlev.export_dashboard(r, str(pdf))
     assert pdf.exists() and pdf.stat().st_size > 1000
-    # wie R 0.5.0: Platzhalter (ohne plotly ein Fehler, sonst nur eine Meldung; keine Datei)
-    html = tmp_path / "x.html"
-    try:
-        import plotly  # noqa: F401
-        simlev.export_html_dashboard(r, str(html))
-    except ImportError:
-        with pytest.raises(ValueError, match="Das Paket 'plotly' wird für HTML-Dashboards benötigt"):
-            simlev.export_html_dashboard(r, str(html))
-    assert not html.exists()
     import matplotlib.pyplot as plt
     plt.close("all")

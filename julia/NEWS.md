@@ -1,9 +1,18 @@
 # SimLev.jl (Julia) – Änderungen je Version
 
+## SimLev.jl 0.5.1
+
+Patch-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Abhängigkeiten: evd (GPD-Anpassung), imputeTS/stinepack (Interpolation), rugarch mit Rsolnp und truncnorm (GARCH-Schätzung) als interne Teile eingebaut; R braucht zur Laufzeit nur Basis-R.
+- Ableitungen: eigene Richardson-Extrapolation für Hesse- und Jacobi-Matrix statt numDeriv.
+- C/C++-Kerne: Anbindung über R's C-Schnittstelle statt Rcpp, Fehlertexte unverändert.
+- Ports: Python und Julia bilden die eingebauten Teile bitgleich nach; kleinere Korrekturen in Simulation und linearer Algebra.
+
 ## SimLev.jl 0.5.0
 
 Die Julia-Fassung ist jetzt ein vollständiger Port des R-Pakets SimLev
-0.5.0: alle 110 Exporte aus `r/NAMESPACE`, bitgleich zu R. Die Vorversion
+0.5.0: alle 104 Exporte aus `r/NAMESPACE`, bitgleich zu R. Die Vorversion
 0.1.0 enthielt nur die Engine und entsprach dem früheren Stand des
 R-Pakets vor den Korrekturen (Commit 54b5b4f). Zwischenversionen 0.2 bis
 0.4 der Julia-Fassung gibt es nicht; alle Änderungen sind in 0.5.0
@@ -81,6 +90,10 @@ weiterhin nur die Standardbibliothek (`Dates`, `Printf`, `Logging`;
   bitgleich).
 * Zeichenketten werden wie in R mit der ICU-Kollation sortiert und verglichen
   (System-ICU per `ccall`, `SIMLEV_ICU`, `SIMLEV_COLLATE`).
+* Innerer Aufbau: `ld80.jl`, `rnum.jl` und `rformat.jl` liegen bei den
+  übrigen R-Interna in `src/r/`; `src/SimLev.jl` bindet erst die R-Interna,
+  dann die Engine und dann die Module ein (C++-Kerne jeweils vor ihrem
+  Modul). Das ungenutzte `RFmt.R_NAN` entfällt (R's NaN ist `NaN`).
 
 ### Änderungen der Julia-API
 
@@ -112,11 +125,12 @@ weiterhin nur die Standardbibliothek (`Dates`, `Printf`, `Logging`;
   anderen Dateiendungen (früher `.html` direkt sowie `.pdf` und `.png`
   über `rsvg-convert`); die Meldung erscheint wie in R auf `stderr`, die
   Rückgabe ist `nothing` statt des Dateinamens.
-* `export_html_dashboard()` ist jetzt wie in R nur ein Platzhalter und
-  bricht mit der Meldung ab, die R ohne plotly ausgibt (früher schrieb die
-  Funktion das interaktive Dashboard). Das interaktive Dashboard schreibt
-  `plot_interactive()`, jetzt mit dem Argument `engine`; das HTML ist
-  byte-identisch zu R.
+* Entfernt wie in R: das interaktive HTML-Dashboard (`plot_interactive()`,
+  `export_html_dashboard()`; Dateien `src/interactive.jl` und
+  `src/html_templates.jl`) sowie `create_config()`, `migrate_strategy()`,
+  `as_list()` und `portfolio_templates()` (jetzt `portfolio_template()`
+  ohne `name`; `name` geht auch als Schlüsselwort). Das statische
+  SVG-Dashboard (`plot_dashboard()`, `export_dashboard()`) bleibt.
 * `simulation()` bricht nicht mehr mit „subscript out of bounds“ ab, wenn
   `funds_fee` oder `bonus_fee` außerhalb des Fondsmodus zusammen mit
   `church_tax`/`tax_rate` oder `taxable_income` angegeben ist (Korrektur in
@@ -136,7 +150,7 @@ weiterhin nur die Standardbibliothek (`Dates`, `Printf`, `Logging`;
   Julia-Code (Feld `jl`). Verglichen werden Ergebnis (NA ≠ NaN, Vorzeichen
   der Null), Konsolen- und Druckausgabe, Warnungen und Fehlermeldungen;
   alle 4.536 Fälle sind bitgleich.
-* `Pkg.test()` umfasst 946 Tests: alle Engine-Fälle, von den Modul-Fällen
+* `Pkg.test()` umfasst 929 Tests: alle Engine-Fälle, von den Modul-Fällen
   eine Auswahl (alle mit `SIMLEV_FULL_TESTS=1`) sowie Tests für `F80`,
   Engine, Ausgabe und den Auswerter für Bedingungen.
 
@@ -148,13 +162,34 @@ weiterhin nur die Standardbibliothek (`Dates`, `Printf`, `Logging`;
 * evd (2.3-7.1, `fpot`) und rugarch (1.5-6, `ugarchfit` mit Rsolnp 1.16
   `solnp`, `nlminb` und `gosolnp` mit `rtruncnorm` aus truncnorm 1.0-9) sind
   nachgebildet (`SimLev.REvd`, `RRugarch`, `RSolnp`, `RTruncnorm`,
-  `RStats.nlminb` mit `RPort`); standardmäßig wie R mit beiden Paketen,
-  `ENV["SIMLEV_R_SUGGESTS"] = "none"` wie R ohne sie. gosolnp setzt wie in R
+  `RStats.nlminb` mit `RPort`). evd gilt immer, weil das R-Paket
+  `evd::fpot` übernommen hat (`.evd_fpot`, siehe `r/NEWS.md`, „Optionale
+  Pakete eingebaut“), ebenso `_fit_tail`; Herkunft und Lizenz
+  in `COPYRIGHTS.md`. Ebenso gilt rugarch immer, weil das R-Paket
+  `rugarch::ugarchfit` mit Rsolnp `solnp`/`gosolnp` und truncnorm
+  `rtruncnorm` übernommen hat (`.rugarch_ugarchfit`), ebenso `_fit_garch11`
+  (`optim` und die Momente nur noch als Rückfall bei einem Fehler); Herkunft und Lizenz der Nachbildungen
+  (rugarch, Rsolnp, truncnorm) in `COPYRIGHTS.md`. Numerische Ableitungen
+  (Richardson-Extrapolation) eigenständig implementiert: Hesse-Matrix und
+  Scores rechnen `RRugarch._richardson_hessian`/`_richardson_jacobian` wie
+  `.sl_richardson_hessian`/`.sl_richardson_jacobian` im R-Paket statt einer
+  Nachbildung von numDeriv; Ergebnisse gegen numDeriv geprüft und bitgleich.
+  gosolnp setzt wie in R
   den Zufallszustand aus der Uhrzeit; `ENV["SIMLEV_R_SYS_TIME"]` stellt die
   Uhr fest. imputeTS 3.4 mit stinepack 1.5 ist nachgebildet (`RImputeTS`,
-  `RStinepack`; `fill = "stine"` im Backcast nach Stineman). MSGARCH,
-  plotly und TTR gelten als nicht installiert (die
-  MS-GARCH-Verfahren melden wie R, dass `MSGARCH` fehlt).
+  `RStinepack`; `fill = "stine"` im Backcast nach Stineman) und gilt immer,
+  weil das R-Paket `na_interpolation(option = "stine")` mit `na_locf` und
+  `stinterp` übernommen hat (`.imputets_na_interpolation`), ebenso
+  `_fill_na` (kein Rückfall auf linear mit Hinweis).
+  `RImputeTS.na_interpolation` mit `option = "linear"` interpoliert wie
+  imputeTS (auch in R übernommen); wie die Übernahme brechen `option =
+  "spline"` und `na_locf` mit `na_remaining = "rm"`/`"mean"` mit deren
+  Meldung ab. Da R evd, imputeTS und rugarch übernommen hat, entfallen das
+  Untermodul `RSuggests` (`src/r/suggests.jl`) und die Umgebungsvariable
+  `SIMLEV_R_SUGGESTS`; die Referenzfälle haben kein Feld `suggests` mehr.
+  MSGARCH gilt
+  als nicht installiert (die MS-GARCH-Verfahren melden wie R, dass
+  `MSGARCH` fehlt).
 * `nlminb`: An drei Stellen liest die PORT-Bibliothek nicht gesetzte
   Variablen (in R Stapelreste); Julia setzt 0. Das kann nur in
   Sonderfällen die Meldung (Code 3 statt 5) oder Läufe mit Inf/NaN in

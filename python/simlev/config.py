@@ -7,14 +7,14 @@ liefern die Ausgabe der R-``print``-Methode.
 from __future__ import annotations
 
 import datetime as _dt
-import sys
 import warnings
 from typing import Any, Iterable, Mapping
 
 import numpy as np
 
 from ._r.rlist import RList
-from ._rnum import r_deparse, r_format1, r_sprintf, r_sum
+from ._r.rformat import r_deparse, r_format1, r_sprintf
+from ._r.rnum import r_sum
 
 __all__ = [
     "AssetConfig",
@@ -25,8 +25,6 @@ __all__ = [
     "add_asset",
     "update_asset",
     "remove_asset",
-    "migrate_strategy",
-    "as_list",
 ]
 
 _ASSET_CLASSES = ("etf", "etn", "etc", "certificate", "etn_standard", "etn_deliverable")
@@ -376,33 +374,3 @@ def remove_asset(strategy: Strategy, name: str) -> Strategy:
                       stacklevel=2)
     return out
 
-
-def migrate_strategy(old_strategy: Mapping[str, Mapping[str, Any]], verbose: bool = True) -> Strategy:
-    """Strategien mit veralteten Assetklassen (etn_deliverable, etn_standard) umwandeln.
-
-    Meldungen (R: ``message()``) gehen nach ``sys.stderr``.
-    """
-    out = Strategy()
-    for name, asset in old_strategy.items():
-        asset = dict(asset)
-        if asset.get("asset_class") == "etn_deliverable":
-            if verbose:
-                sys.stderr.write("migrate_strategy: %s: etn_deliverable -> etn mit deliverable = TRUE\n" % name)
-            asset["asset_class"] = "etn"
-            asset["deliverable"] = True
-        elif asset.get("asset_class") == "etn_standard":
-            if verbose:
-                sys.stderr.write("migrate_strategy: %s: etn_standard -> etn mit deliverable = FALSE\n" % name)
-            asset["asset_class"] = "etn"
-            asset["deliverable"] = False
-        out[name] = _call_asset_config(asset)
-    return out
-
-
-def as_list(x: Any) -> Any:
-    """Klassen-Hülle entfernen (Strategie -> einfaches ``dict`` aus ``dict``)."""
-    if isinstance(x, Strategy):
-        return {k: dict(v) for k, v in x.items()}
-    if isinstance(x, Mapping):
-        return dict(x)
-    return list(x)

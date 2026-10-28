@@ -2,7 +2,7 @@
 # RPort – PORT-Bibliothek für nlminb (R 4.3.3: src/library/stats/src/port.c
 # und die benötigten Routinen aus portsrc.f), bitgleich.
 #
-# Vorlage: python/simlev/_r/_port.py. Konventionen:
+# Vorlage: python/simlev/_r/port.py. Konventionen:
 # * Felder 1-basiert wie in Fortran; ein Aktualparameter `V(L)` wird als Sicht
 #   `_at(v, L)` übergeben (Schreibzugriffe wirken auf das Grundfeld).
 # * Sprungmarken als @goto/@label.

@@ -32,8 +32,8 @@ from . import _withdrawal_core as _wcore
 from ._r import fmt as _fmt
 from ._r import rng as _rng
 from ._r.rlist import RList
-from ._rnum import r_cummax, r_cumprod, r_mean, r_mean_int, r_median, r_pow, r_prod, r_sum
-from .bootstrap import (_MISSING, _quiet, _get, _is_boot_result, _is_num, _is_study, _message, _names, _num1, _num_vec,
+from ._r.rnum import r_cummax, r_cumprod, r_mean, r_mean_int, r_median, r_pow, r_prod, r_sum
+from .bootstrap import (_quiet, _get, _is_boot_result, _is_num, _is_study, _message, _names, _num1, _num_vec,
                         _quantile7, _r_round0, _show, _sp, _stop, _strip1, _values, _warn, _weighted_mean,
                         _with_rng_restore, _wquantile, summary, plot)
 
@@ -105,7 +105,7 @@ def _fmt1(x, **kw) -> str:
 def _fmt_nan(x, **kw) -> str:
     """``format()`` eines Rechenergebnisses: ``nan`` ist hier R's ``NaN`` (nicht NA)."""
     x = float(x)
-    return _fmt1(_fmt.R_NAN if math.isnan(x) else x, **kw)
+    return _fmt1(math.nan if math.isnan(x) else x, **kw)
 
 
 def _fmtv(x):
@@ -350,7 +350,7 @@ def withdrawal_rule(type=tuple(_WD_RULES), rate=4, ceiling=None, floor=None, cut
 
 
 def _deparse(v) -> str:
-    from ._rnum import r_deparse
+    from ._r.rformat import r_deparse
     return r_deparse(v)
 
 
@@ -1697,6 +1697,6 @@ def _draw_horizon(h, n):
 
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
-from .data_prep import _quiet_fp  # noqa: E402
+from ._r.base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), list(__all__) + ["_anniv_ends", "_annual_real", "_draw_horizon", "_period_ends", "_wd_fee_set", "_wd_held", "_wd_lots", "_wd_param_vector", "_wd_ppy"])
+quiet_fp(globals(), list(__all__) + ["_anniv_ends", "_annual_real", "_draw_horizon", "_period_ends", "_wd_fee_set", "_wd_held", "_wd_lots", "_wd_param_vector", "_wd_ppy"])

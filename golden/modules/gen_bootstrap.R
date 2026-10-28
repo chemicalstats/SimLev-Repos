@@ -27,9 +27,6 @@ I <- list(d = d, dp = dp, dv = dv)
 # ── bootstrap_config ────────────────────────────────────────────────────────
 case("cfg_basic", paste0(CFG_R, "cfg"), paste0(CFG_P, "result = cfg"), I,
      jl = paste0(CFG_J, 'result = cfg'))
-case("cfg_create", "create_config(c(akt = 'aktien'), input = 'prices', letfs = list(list(base = 'akt', leverage = -1, finance = 2, expense = 0.6), list(base = 'akt', leverage = 1.5, name = 'x15', spread = 0.3, days = 3, rate_basis = 365, ter_basis = 360)))",
-     "result = create_config({'akt': 'aktien'}, input='prices', letfs=[{'base': 'akt', 'leverage': -1, 'finance': 2, 'expense': 0.6}, {'base': 'akt', 'leverage': 1.5, 'name': 'x15', 'spread': 0.3, 'days': 3, 'rate_basis': 365, 'ter_basis': 360}])",
-     jl = 'result = create_config((akt = "aktien",), input = "prices", letfs = [(base = "akt", leverage = -1, finance = 2, expense = 0.6), (base = "akt", leverage = 1.5, name = "x15", spread = 0.3, days = 3, rate_basis = 365, ter_basis = 360)])')
 case("cfg_auxtype", "bootstrap_config(c(us = 'us_ret'), aux = c(cpi = 'us_cpi', zins = 'us_rate', z = 'z'), aux_type = c(cpi = 'level', zins = 'rate'), cross = 'joint')",
      "result = bootstrap_config({'us': 'us_ret'}, aux={'cpi': 'us_cpi', 'zins': 'us_rate', 'z': 'z'}, aux_type={'cpi': 'level', 'zins': 'rate'}, cross='joint')",
      jl = 'result = bootstrap_config((us = "us_ret",), aux = (cpi = "us_cpi", zins = "us_rate", z = "z"), aux_type = (cpi = "level", zins = "rate"), cross = "joint")')
@@ -106,7 +103,7 @@ case("bl_short", "block_length(xa[1:15])", "result = block_length(xa[:15])", Ib,
 case("bl_const", "block_length(rep(1, 50))", "result = block_length(np.ones(50))",
      jl = 'result = block_length(ones(50))')
 case("bl_nonfinite", "x <- xa[1:300]; x[c(5, 50)] <- c(NA, Inf); block_length(cbind(x, y = xi[1:300]))",
-     "x = xa[:300].copy(); x[[4, 49]] = [np.nan, np.inf]; result = block_length(pd.DataFrame({'x': x, 'y': xi[:300]}))", Ib,
+     "x = xa[:300].copy(); x[[4, 49]] = [simlev._r.fmt.NA_REAL, np.inf]; result = block_length(pd.DataFrame({'x': x, 'y': xi[:300]}))", Ib,
      jl = 'x = xa[1:300]; x[[5, 50]] = [SL.NA, Inf]; result = block_length(SL.NamedMat(hcat(x, xi[1:300]); colnames = ["x", "y"]))')
 case("bl_trend", "block_length(cumsum(xi))", "result = block_length(np.cumsum(xi))", Ib,
      jl = 'result = block_length(SL.r_cumsum(xi))')
@@ -187,10 +184,10 @@ case("aux_rate_zero_ok", "dd <- dp[1:60, ]; dd$cpi[40] <- 0; bootstrap(dd, boots
      "dd = dp.iloc[:60].copy(); dd.loc[39, 'cpi'] = 0; result = bootstrap(dd, bootstrap_config({'us': 'us'}, aux={'cpi': 'cpi'}, input='prices', aux_type={'cpi': 'rate'}), 'raw', n=1, seed=1, progress=False)['paths']", I,
      jl = 'dd = SL.rows(dp, 1:60); dd.cpi[40] = 0; result = bootstrap(dd, bootstrap_config((us = "us",), aux = (cpi = "cpi",), input = "prices", aux_type = (cpi = "rate",)), "raw"; n = 1, seed = 1, progress = false)["paths"]')
 case("na_rows", "dd <- d[1:100, ]; dd$us[c(3, 50)] <- NA; dd$rate[10] <- NA; b <- bootstrap(dd, bootstrap_config(c(us = 'us'), aux = c(rate = 'rate')), 'raw', n = 1, seed = 1, progress = FALSE); list(b$paths[[1]], attr(b$paths[[1]], 'aux_level'))",
-     "dd = d.iloc[:100].copy(); dd.loc[[2, 49], 'us'] = np.nan; dd.loc[9, 'rate'] = np.nan; b = bootstrap(dd, bootstrap_config({'us': 'us'}, aux={'rate': 'rate'}), 'raw', n=1, seed=1, progress=False); result = [b['paths'][0], b['paths'][0].attrs['aux_level']]", I,
+     "dd = d.iloc[:100].copy(); dd.loc[[2, 49], 'us'] = simlev._r.fmt.NA_REAL; dd.loc[9, 'rate'] = simlev._r.fmt.NA_REAL; b = bootstrap(dd, bootstrap_config({'us': 'us'}, aux={'rate': 'rate'}), 'raw', n=1, seed=1, progress=False); result = [b['paths'][0], b['paths'][0].attrs['aux_level']]", I,
      jl = 'dd = SL.rows(d, 1:100); dd.us[[3, 50]] .= SL.NA; dd.rate[10] = SL.NA; b = bootstrap(dd, bootstrap_config((us = "us",), aux = (rate = "rate",)), "raw"; n = 1, seed = 1, progress = false); result = [b["paths"][1], b["paths"][1].attrs["aux_level"]]')
 case("na_prices_first", "dd <- dp[1:80, ]; dd$us[2] <- NA; dd$cpi[1] <- NA; b <- bootstrap(dd, bootstrap_config(c(us = 'us'), aux = c(cpi = 'cpi', zins = 'zins'), input = 'prices'), 'stationary', params = list(L = 5), n = 1, seed = 3, progress = FALSE); list(b$paths[[1]], attr(b$paths[[1]], 'aux_level'))",
-     "dd = dp.iloc[:80].copy(); dd.loc[1, 'us'] = np.nan; dd.loc[0, 'cpi'] = np.nan; b = bootstrap(dd, bootstrap_config({'us': 'us'}, aux={'cpi': 'cpi', 'zins': 'zins'}, input='prices'), 'stationary', params={'L': 5}, n=1, seed=3, progress=False); result = [b['paths'][0], b['paths'][0].attrs['aux_level']]", I,
+     "dd = dp.iloc[:80].copy(); dd.loc[1, 'us'] = simlev._r.fmt.NA_REAL; dd.loc[0, 'cpi'] = simlev._r.fmt.NA_REAL; b = bootstrap(dd, bootstrap_config({'us': 'us'}, aux={'cpi': 'cpi', 'zins': 'zins'}, input='prices'), 'stationary', params={'L': 5}, n=1, seed=3, progress=False); result = [b['paths'][0], b['paths'][0].attrs['aux_level']]", I,
      jl = 'dd = SL.rows(dp, 1:80); dd.us[2] = SL.NA; dd.cpi[1] = SL.NA; b = bootstrap(dd, bootstrap_config((us = "us",), aux = (cpi = "cpi", zins = "zins"), input = "prices"), "stationary"; params = (L = 5,), n = 1, seed = 3, progress = false); result = [b["paths"][1], b["paths"][1].attrs["aux_level"]]')
 case("letf_knockout", "dd <- d[1:200, ]; dd$us[100] <- 0.7; b <- bootstrap(dd, bootstrap_config(c(us = 'us'), letfs = list(list(base = 'us', leverage = 4, finance = 1))), 'block', params = list(block_length = 199), n = 1, seed = 2, progress = FALSE); b$paths",
      "dd = d.iloc[:200].copy(); dd.loc[99, 'us'] = 0.7; b = bootstrap(dd, bootstrap_config({'us': 'us'}, letfs=[{'base': 'us', 'leverage': 4, 'finance': 1}]), 'block', params={'block_length': 199}, n=1, seed=2, progress=False); result = b['paths']", I,
@@ -273,7 +270,7 @@ E <- list(
     'bootstrap(SL.rows(d, Int[]), cfg; n = 1)'),
   col = c("bootstrap(d[, c('us', 'rate')], cfg, n = 1)", "bootstrap(d[['us', 'rate']], cfg, n=1)",
     'bootstrap(SL.RFrame("us" => d.us, "rate" => d.rate), cfg; n = 1)'),
-  allna = c("dd <- d[1:5, ]; dd$us <- NA; bootstrap(dd, cfg, n = 1)", "dd = d.iloc[:5].copy(); dd['us'] = np.nan; bootstrap(dd, cfg, n=1)",
+  allna = c("dd <- d[1:5, ]; dd$us <- NA; bootstrap(dd, cfg, n = 1)", "dd = d.iloc[:5].copy(); dd['us'] = simlev._r.fmt.NA_REAL; bootstrap(dd, cfg, n=1)",
     '(dd = SL.rows(d, 1:5); dd.us .= SL.NA; bootstrap(dd, cfg; n = 1))'),
   inf = c("dd <- d[1:50, ]; dd$eu[c(7, 9)] <- Inf; dd$us[30] <- -Inf; bootstrap(dd, cfg, n = 1)", "dd = d.iloc[:50].copy(); dd.loc[[6, 8], 'eu'] = np.inf; dd.loc[29, 'us'] = -np.inf; bootstrap(dd, cfg, n=1)",
     '(dd = SL.rows(d, 1:50); dd.eu[[7, 9]] .= Inf; dd.us[30] = -Inf; bootstrap(dd, cfg; n = 1))'),
@@ -331,7 +328,7 @@ VB_R <- "b <- bootstrap(d, bootstrap_config(c(us = 'us')), 'stationary', n = 4, 
 VB_P <- "b = bootstrap(d, bootstrap_config({'us': 'us'}), 'stationary', n=4, params={'L': 20}, seed=1, progress=False, path_length=20)\n"
 VB_J <- 'b = bootstrap(d, bootstrap_config((us = "us",)), "stationary"; n = 4, params = (L = 20,), seed = 1, progress = false, path_length = 20)\n'
 case("vb_na", paste0(VB_R, "b$paths[[2]][10, 1] <- NA; b$weights <- c(1, 2, 3, 4); validate_bootstrap(b)"),
-     paste0(VB_P, "b['paths'][1].iloc[9, 0] = np.nan; b['weights'] = np.array([1., 2, 3, 4]); result = validate_bootstrap(b)"), I,
+     paste0(VB_P, "b['paths'][1].iloc[9, 0] = simlev._r.fmt.NA_REAL; b['weights'] = np.array([1., 2, 3, 4]); result = validate_bootstrap(b)"), I,
      jl = paste0(VB_J, 'b["paths"][2][10, 1] = SL.NA; b["weights"] = [1.0, 2, 3, 4]; result = validate_bootstrap(b)'))
 case("vb_len", paste0(VB_R, "b$paths[[3]] <- b$paths[[3]][1:5, , drop = FALSE]; b$paths[[1]] <- b$paths[[1]][1:5, , drop = FALSE]; b$paths[[4]] <- b$paths[[4]][1:7, , drop = FALSE]; validate_bootstrap(b)$paths"),
      paste0(VB_P, "b['paths'][2] = b['paths'][2].iloc[:5]; b['paths'][0] = b['paths'][0].iloc[:5]; b['paths'][3] = b['paths'][3].iloc[:7]; result = validate_bootstrap(b)['paths']"), I,
@@ -388,7 +385,7 @@ case("wq_weights", "SimLev:::.wquantile(wx, ww, c(0, 0.05, 0.25, 0.5, 0.75, 0.95
 case("wq_nearly", "SimLev:::.wquantile(c(1, 2, 3, 4), c(1, 1, 1, 1 + 1e-12), c(0.5, 0.05))", "result = B._wquantile([1, 2, 3, 4], [1, 1, 1, 1 + 1e-12], [0.5, 0.05])",
      jl = 'result = B._wquantile([1, 2, 3, 4], [1, 1, 1, 1 + 1e-12], [0.5, 0.05])')
 case("wq_zero", "list(SimLev:::.wquantile(c(1, 2, 3, 4), c(1, 0, 1, 1), c(0, 0.5, 1)), SimLev:::.wquantile(c(1, NA, 3, Inf, 2), c(1, 2, NA, 1, 3), 0.5), SimLev:::.wquantile(c(NA, NA), c(1, 1), c(.1, .2)), SimLev:::.wquantile(c(1, 2), c(0, 0), 0.5), SimLev:::.wquantile(c(3, 1, 3, 2), c(1, 3, 1, 3), 0.5))",
-     "result = [B._wquantile([1, 2, 3, 4], [1, 0, 1, 1], [0, 0.5, 1]), B._wquantile([1, np.nan, 3, np.inf, 2], [1, 2, np.nan, 1, 3], 0.5), B._wquantile([np.nan, np.nan], [1, 1], [.1, .2]), B._wquantile([1, 2], [0, 0], 0.5), B._wquantile([3, 1, 3, 2], [1, 3, 1, 3], 0.5)]",
+     "result = [B._wquantile([1, 2, 3, 4], [1, 0, 1, 1], [0, 0.5, 1]), B._wquantile([1, simlev._r.fmt.NA_REAL, 3, np.inf, 2], [1, 2, simlev._r.fmt.NA_REAL, 1, 3], 0.5), B._wquantile([simlev._r.fmt.NA_REAL, simlev._r.fmt.NA_REAL], [1, 1], [.1, .2]), B._wquantile([1, 2], [0, 0], 0.5), B._wquantile([3, 1, 3, 2], [1, 3, 1, 3], 0.5)]",
      jl = 'result = [B._wquantile([1, 2, 3, 4], [1, 0, 1, 1], [0, 0.5, 1]), B._wquantile([1, SL.NA, 3, Inf, 2], [1, 2, SL.NA, 1, 3], 0.5), B._wquantile([SL.NA, SL.NA], [1, 1], [.1, .2]), B._wquantile([1, 2], [0, 0], 0.5), B._wquantile([3, 1, 3, 2], [1, 3, 1, 3], 0.5)]')
 
 # ── simulation-basierte Teile: study_metrics, bootstrap_study, probability ──
@@ -408,7 +405,7 @@ strats <- list(bnh = create_strategy(akt_l2 = asset_config('etf', 'bnh', asset_b
   sma = list(strategy = create_strategy(letf = asset_config('etf', 'signal', asset_bonus = 30, signal_buy = 'buy', signal_sell = 'sell')), signal = sma, map = c(letf = 'akt_l2')))\n"
 STR_P <- "cfgs = bootstrap_config({'akt': 'aktien'}, aux={'zins': 'zins'}, input='prices', letfs=[{'base': 'akt', 'leverage': 2, 'finance': 'zins', 'expense': 0.6}])
 def _filt(x, k):
-    x = np.asarray(x, dtype=float); f = 1.0 / k; out = np.full(len(x), np.nan)
+    x = np.asarray(x, dtype=float); f = 1.0 / k; out = np.full(len(x), simlev._r.fmt.NA_REAL)
     for i in range(k - 1, len(x)):
         z = 0.0
         for j in range(k):

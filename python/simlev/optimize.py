@@ -30,7 +30,7 @@ from ._r import fmt as _fmt
 from ._r import libm as _libm
 from ._r import linalg as _la
 from ._r.rlist import RList
-from ._rnum import r_mean, r_pow, r_sd
+from ._r.rnum import r_mean, r_pow, r_sd
 from .tactical import (
     _as_dates, _as_weights_m, _colmeans, _days, _fmt1, _hold_rows_m, _ldsum, _mean_int,
     _period_last, _rowsums, _setdiff, _unique,
@@ -1292,6 +1292,6 @@ def print_SimLevCPCV(x, _return=False):  # noqa: N802 - R-Name
 
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
-from .data_prep import _quiet_fp  # noqa: E402
+from ._r.base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), list(__all__) + ["_cdar_hist", "_col_means", "_cov", "_cvar_hist", "_hrp", "_mat_vec", "_opt_cov", "_qp_simplex", "_risk_parity", "_opt_summary"])
+quiet_fp(globals(), list(__all__) + ["_cdar_hist", "_col_means", "_cov", "_cvar_hist", "_hrp", "_mat_vec", "_opt_cov", "_qp_simplex", "_risk_parity", "_opt_summary"])

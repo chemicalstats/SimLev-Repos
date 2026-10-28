@@ -115,8 +115,6 @@ end
     s2 = update_asset(s, "A"; asset_class = "etc", deliverable = true)
     @test s2.A.tax_regime == "private_sale"
     @test length(remove_asset(s, "A")) == 1
-    m = quiet(() -> migrate_strategy(["X" => (asset_class = "etn_standard", action_type = "bnh", asset_share = 1)]))
-    @test m.X.asset_class == "etn" && m.X.deliverable == false
 end
 
 @testset "Engine: Grundfunktionen und Ergebnisobjekt" begin
@@ -255,12 +253,6 @@ end
     n = 400
     d = (date = days("2022-01-03", "2023-02-06"), A = collect(range(100, 130; length = n)), B = collect(range(100, 110; length = n)))
     r = simulation(d, create_strategy(A = asset_config("etf", "bnh", 0.6, 0, 30), B = asset_config("etf", "bnh", 0.4, 0, 0)))
-    f = tempname() * ".html"
-    @test plot_interactive(r; file = f, open = false) == f
-    txt = read(f, String)
-    @test startswith(txt, "<!DOCTYPE html>") && occursin("makePanel(\"performance\",\"Wertentwicklung des Depots\"", txt)
-    plot_interactive(r; file = f, panels = "drawdown", max_points = 100, open = false)
-    @test !occursin("id=\"performance\"", read(f, String))
     dsh = plot_dashboard(r)
     @test dsh isa SimLevDashboard && occursin("Monatsrenditen (%)", dsh.svg) && occursin("Kennzahlen", dsh.svg)
     @test occursin("Strategievergleich", plot_dashboard(r; compare = r).svg)
@@ -273,7 +265,6 @@ end
     g = tempname() * ".svg"
     quiet(() -> export_dashboard(r, g))
     @test filesize(g) > 1000
-    @test occursin("plotly", errmsg(() -> export_html_dashboard(r)))
 end
 
 @testset "Bitgleichheit zu R (Golden Master, strikt)" begin

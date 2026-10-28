@@ -1,8 +1,7 @@
 """Port der Dashboard-Tests (test-review7-stats.R C7-08, R8-06, Layout, R9-04, R9-05;
-test-blue-engine.R R1-19/R1-20/R1-22; test-flow-metrics.R Punkt 2; test-simulation.R plot_interactive)."""
+test-blue-engine.R R1-19/R1-22; test-flow-metrics.R Punkt 2)."""
 import contextlib
 import io
-import re
 import warnings
 
 import matplotlib
@@ -15,11 +14,11 @@ import pytest  # noqa: E402
 from matplotlib.text import Text  # noqa: E402
 
 import simlev  # noqa: E402
-from simlev import asset_config, create_strategy, plot_interactive  # noqa: E402
-from simlev._rnum import r_sprintf  # noqa: E402
+from simlev import asset_config, create_strategy  # noqa: E402
+from simlev._r.rformat import r_sprintf  # noqa: E402
 from simlev.dashboard import (  # noqa: E402
     _correlation, _comparison_rows, _dash_custom_layout, _dashboard_returns, _format_amount, _r_cor,
-    _stats_sections, export_dashboard, export_html_dashboard, plot_dashboard)
+    _stats_sections, export_dashboard, plot_dashboard)
 
 from _helpers import sim  # noqa: E402
 from test_tax_law import _dca  # noqa: E402
@@ -248,65 +247,9 @@ def test_r1_19_r1_22_kurze_reihen_und_export(tmp_path):
     assert plt.get_fignums() == []
 
 
-def test_r1_20_plot_interactive_cagr_sharpe(tmp_path):
-    d = _series(12, 400, start="2020-01-01", A=(100, 4e-4, 0.01))
-    r = sim(d, create_strategy(A=asset_config("etf", asset_share=1, asset_spread=0)))
-    h = open(plot_interactive(r, file=str(tmp_path / "a.html"), engine="html", open=False), encoding="utf-8").read()
-    assert r_sprintf("CAGR %.2f%%", 100 * r.cagr) in h
-    assert r_sprintf("Sharpe %.2f", r.statistics["sharpe"]) in h
-
-
-def test_flow_metrics_beschriftung(tmp_path):
+def test_flow_metrics_beschriftung():
     r = _dca()
-    f = str(tmp_path / "f.html")
-    plot_interactive(r, file=f, engine="html", open=False)
-    h = open(f, encoding="utf-8").read().replace("\n", "")
-    assert "CAGR (geldgewichtet) 40.46%" in h
-    assert "Max. Drawdown (zeitgewichtet) 20.0%" in h
-    assert "Drawdown (zeitgewichtet)" in h and "Einzahlungen (inkl. Start, brutto)" in h
     silent(r)
     silent(r, compare=r)
     sec = _stats_sections(r)
     assert sec["Rendite"][0].startswith("CAGR (geldgew.): ") and sec["Risiko"][0].startswith("Max. Drawdown (TWR): ")
-
-
-def test_plot_interactive_eigenstaendig(tmp_path):
-    d = pd.DataFrame({"date": pd.date_range("2022-01-03", periods=120), "A": np.linspace(100, 130, 120),
-                      "B": np.linspace(100, 110, 120)})
-    s = create_strategy(A=asset_config("etf", "bnh", asset_share=0.6, asset_spread=0, asset_bonus=30),
-                        B=asset_config("etf", "bnh", asset_share=0.4, asset_spread=0, asset_bonus=0))
-    r = sim(d, s, start_value=10000)
-    f = str(tmp_path / "x.html")
-    assert plot_interactive(r, file=f, open=False, engine="html") == f
-    txt = open(f, encoding="utf-8").read()
-    for s_ in ("makePanel", "Gesamt", "2022-01", "hover", "weights", "Wertentwicklung des Depots"):
-        assert s_ in txt
-
-
-def test_plot_interactive_panels_und_max_points(tmp_path):
-    d = pd.DataFrame({"date": pd.date_range("2022-01-03", periods=500), "A": np.linspace(100, 150, 500)})
-    r = sim(d, create_strategy(A=asset_config("etf", "bnh", asset_share=1, asset_spread=0, asset_bonus=0)),
-            start_value=10000)
-    f = str(tmp_path / "y.html")
-    plot_interactive(r, file=f, open=False, engine="html", panels="drawdown", max_points=100)
-    txt = open(f, encoding="utf-8").read()
-    assert '"drawdown"' in txt and 'id="performance"' not in txt
-    assert len(re.findall(r"\d{4}-\d{2}-\d{2}", txt)) <= 110
-    with pytest.raises(ValueError, match="'arg' should be one of “performance”, “drawdown”, “weights”"):
-        plot_interactive(r, file=f, open=False, engine="html", panels="xyz")
-
-
-def test_export_html_dashboard_platzhalter():
-    try:
-        import plotly  # noqa: F401
-        has = True
-    except ImportError:
-        has = False
-    if has:
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            assert export_html_dashboard(None) is None
-        assert "noch nicht umgesetzt" in err.getvalue()
-    else:
-        with pytest.raises(ValueError, match="Das Paket 'plotly' wird für HTML-Dashboards benötigt"):
-            export_html_dashboard(None)

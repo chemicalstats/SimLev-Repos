@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Simulationszustand und Rechenkerne
 #
-# Ports von simulation_core.cpp, fifo_core_RCpp.cpp und tax_core_RCpp.cpp
+# Ports von simulation_core.cpp, fifo_core.cpp und tax_core.cpp
 # (SimLev 0.5.0). Die Rechenreihenfolge ist 1:1 übernommen (IEEE-754-Doubles;
 # long double nur dort, wo auch der C++-Code ihn nutzt). Assets werden über
 # ihren Index (Reihenfolge der Strategie) angesprochen.
@@ -290,7 +290,7 @@ function batch_market_update!(sim::Sim, start_idx::Int, end_idx::Int, portfolio:
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# fifo_core_RCpp.cpp
+# fifo_core.cpp
 # ═══════════════════════════════════════════════════════════════════════════
 
 function calculate_fifo_price(buys::Vector{Lot}, units::Float64, front::Int)
@@ -401,7 +401,7 @@ function update_fifo_front(buys::Vector{Lot}, front::Int)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
-# tax_core_RCpp.cpp
+# tax_core.cpp
 # ═══════════════════════════════════════════════════════════════════════════
 
 "Vorabpauschale je Lot (`flat_rate_rcpp`): Bezug Jahresanfangskurs, Deckel, Zwölftelung."

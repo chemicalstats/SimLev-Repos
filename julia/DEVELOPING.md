@@ -8,28 +8,32 @@ nachbildet und sich als Vorlage für die Übersetzung eignet.
 
 ## Aufbau
 
-Alles liegt im Modul `SimLev`; die Bausteine sind Untermodule:
+Alles liegt im Modul `SimLev`; die Bausteine sind Untermodule. Die Tabelle
+folgt der Reihenfolge der `include`s in `src/SimLev.jl`: erst die R-Interna
+(`src/r/`), dann die Engine, dann die Module (C++-Kerne jeweils vor ihrem
+Modul), zuletzt `exports.jl` und `precompile.jl`.
 
 | Datei | Untermodul | Inhalt (R-Vorlage → Python-Vorlage) |
 |---|---|---|
 | `src/r/types.jl` | – | R-Datenstrukturen (`RList`, `RFrame`, `RVector`, `NamedMat`), Druck-/summary-/plot-Registrierung |
-| `src/ld80.jl` | – | `F80`: 80-Bit-`long double` (x86-64: x87-Hardware über `llvmcall`, sonst Software-Nachbau `F80Soft`) |
+| `src/r/ld80.jl` | – | `F80`: 80-Bit-`long double` (x86-64: x87-Hardware über `llvmcall`, sonst Software-Nachbau `F80Soft`) |
+| `src/r/rnum.jl` | – | `NA`, `isna_strict`, Summen/Mittel/Varianz in `long double` (`r_sum`, `r_mean`, …), `r_pow` (`R_POW`), `r_uniroot`, zentrale Auswahl der C-Bibliotheken (`_LIBM`, `_LIBC`, `_SNPRINTF`) → `_r/rnum.py` |
+| `src/r/rformat.jl` | – | Textausgabe der Engine: `r_sprintf` (NA/NaN/Inf wie R), `r_format`, `r_as_character`, `r_deparse`, `r_round`, `r_signif` → `_r/rformat.py` |
 | `src/r/libm.jl` | `RLibm` | glibc-libm (`exp`, `log`, `log1p`, `expm1`, `pow`, `tanh`, …) → `_r/libm.py` |
-| `src/r/base.jl` | `RBase` | Summen, Mittel, `cumsum`, `cumprod`, `rowSums`, … mit `long double` → `_r/base.py`, `_rnum.py` |
+| `src/r/base.jl` | `RBase` | Summen, Mittel, `cumsum`, `cumprod`, `rowSums`, … mit `long double` → `_r/base.py` |
 | `src/r/rng.jl` | `RRng` | Zufallszahlen (`set_seed`, `runif`, `rnorm`, `sample_int`, L'Ecuyer-Streams) → `_r/rng.py` |
 | `src/r/nmath.jl` | `RNmath` | Verteilungen (`qnorm`, `pt`, `qt`, `pbeta`/toms708, `lgamma` …) → `_r/nmath.py`, `_r/_toms708.py`, `_r/_cmath.py` |
 | `src/r/fmt.jl` | `RFmt` | `format`, `formatC`, `sprintf`, `round`, `signif`, `print` von Vektoren/Matrizen/data.frames → `_r/fmt.py` |
 | `src/r/stats.jl` | `RStats` | `quantile`, `cor`, `optim`, `optimize`, `uniroot`, `lm`, `glm`, `smooth_spline`, `density`, `fft`, `hclust`, … → `_r/stats.py` und Hilfsmodule |
 | `src/r/linalg.jl` | `RLinalg` | `matprod`, `crossprod`, `solve`, `chol`, `qr` (LINPACK), `determinant`, `eigen` → `_r/linalg.py`, `_r/_blas.py`, `_r/_lapack.py`, `_r/_linpack.py` |
 | `src/r/rexpr.jl` | `RExpr` | Ausdrücke in R-Syntax als Text (`eval(parse(text = …), data, env)`): ein gemeinsamer Auswerter für Bedingungen in `bootstrap_probability`, `regime_subset`, `view_prob`/`entropy_pooling` und `tactical_rules` (R-Vorrang inkl. schwach bindendem `!`, NA-Logik, `%in%`, `%%`, Funktionen über `RLibm`/`RFmt`) |
-| `src/r/port.jl` | `RPort` | PORT-Bibliothek für `RStats.nlminb` (stats `port.c`, `portsrc.f`, `nlminb.R`) → `_r/_port.py` |
-| `src/r/suggests.jl` | `RSuggests` | Schalter `SIMLEV_R_SUGGESTS`: welche optionalen R-Pakete als installiert gelten → `_r/suggests.py` |
-| `src/r/evd.jl` | `REvd` | evd 2.3-7.1 `fpot`, `nlgpd` (`src/pot.c`) → `_r/evd.py` |
-| `src/r/truncnorm.jl` | `RTruncnorm` | truncnorm 1.0-9 `rtruncnorm` → `_r/truncnorm.py` |
-| `src/r/solnp.jl` | `RSolnp` | Rsolnp 1.16 `solnp`, `gosolnp` → `_r/solnp.py` |
-| `src/r/stinepack.jl` | `RStinepack` | stinepack 1.5 `stinterp`, `stinemanSlopes`, `parabolaSlopes` → `_r/stinepack.py` |
-| `src/r/imputets.jl` | `RImputeTS` | imputeTS 3.4 `na_interpolation` (stine/linear), `na_locf` → `_r/imputets.py` |
-| `src/r/rugarch.jl` | `RRugarch` | rugarch 1.5-6 `ugarchfit`/`coef` für sGARCH/gjrGARCH(1,1), Solver „hybrid“ (solnp → nlminb → gosolnp), Filter aus `src/filters.c`, numDeriv-Hesse-Matrix → `_r/rugarch.py` |
+| `src/r/port.jl` | `RPort` | PORT-Bibliothek für `RStats.nlminb` (stats `port.c`, `portsrc.f`, `nlminb.R`) → `_r/port.py` |
+| `src/r/evd.jl` | `REvd` | evd 2.3-7.1 `fpot`, `nlgpd` (`src/pot.c`; in R übernommen als `.evd_fpot`, immer aktiv) → `_r/evd.py` |
+| `src/r/truncnorm.jl` | `RTruncnorm` | truncnorm 1.0-9 `rtruncnorm` (in R übernommen als `.truncnorm_rtruncnorm`) → `_r/truncnorm.py` |
+| `src/r/solnp.jl` | `RSolnp` | Rsolnp 1.16 `solnp`, `gosolnp` (in R übernommen als `.rsolnp_solnp`, `.rsolnp_gosolnp`) → `_r/solnp.py` |
+| `src/r/rugarch.jl` | `RRugarch` | rugarch 1.5-6 `ugarchfit`/`coef` für sGARCH/gjrGARCH(1,1), Solver „hybrid“ (solnp → nlminb → gosolnp), Filter aus `src/filters.c`, eigene Richardson-Hesse-Matrix `_richardson_hessian` (in R übernommen als `.rugarch_ugarchfit`, Ableitungen `.sl_richardson_hessian` in `r/R/richardson.R`, immer aktiv) → `_r/rugarch.py` |
+| `src/r/stinepack.jl` | `RStinepack` | stinepack 1.5 `stinterp`, `stinemanSlopes`, `parabolaSlopes` (in R übernommen als `.stinepack_stinterp`) → `_r/stinepack.py` |
+| `src/r/imputets.jl` | `RImputeTS` | imputeTS 3.4 `na_interpolation` (stine, linear), `na_locf` (`src/locf.cpp`; in R übernommen als `.imputets_na_interpolation`, immer aktiv) → `_r/imputets.py` |
 | `src/engine.jl` u. a. | – | `simulation()` und Strategie/Config (r/R/simulation.R, sim_*.R, …) |
 | `src/<modul>.jl` | `DataPrep`, `Backcast`, `Bonds`, `Signals`, `Bootstrap`, `Withdrawal`, `Dependence`, `Regimes`, `Scenarios`, `Optimize`, `Tactical`, `DeepAnalysis`, `Planning`, `AnalysisTests`, `Overfitting`, `ParamSearch`, `Sensitivity` | je eine R-Datei `r/R/<modul>.R` → `python/simlev/<modul>.py` |
 | `src/<name>_core.jl` | `BootstrapCore`, `SignalsCore`, `WithdrawalCore`, `DependenceCore`, `OptimizeCore` | C++-Kerne aus `r/src/` → `python/simlev/_<name>_core.py` |
@@ -73,7 +77,7 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
 3. **Nie `exp`, `log`, `log1p`, `expm1`, `^`, `tanh`, `sin`, … aus Base** auf
    Float64: Julia rechnet sie selbst, R nutzt glibc-libm. Immer `RLibm.*`
    (auch beim Broadcasting: `RLibm.exp.(x)`); `x^2` ist in R `x*x`, sonst
-   `RLibm.pow` (R's `R_POW`-Regeln, siehe `rnum.jl`). `sqrt`, `abs`, `floor`,
+   `RLibm.pow` (R's `R_POW`-Regeln, siehe `src/r/rnum.jl`). `sqrt`, `abs`, `floor`,
    `ceil`, `+ - * /` sind exakt. Kein `muladd`/`fma`, kein `@fastmath`.
 4. **Keine Matrixprodukte mit `*`** (OpenBLAS): `RLinalg.matprod`,
    `crossprod` usw. bilden die Referenz-BLAS-Reihenfolge nach. Eigenvektoren
@@ -92,7 +96,7 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
 9. Grafiken (SVG, ohne externe Pakete) müssen nicht bitgleich sein, aber
    dasselbe zeigen; berechnete Daten schon.
 
-10. C-Bibliotheken nur über die zentrale Auswahl in `rnum.jl` (`_LIBM`,
+10. C-Bibliotheken nur über die zentrale Auswahl in `src/r/rnum.jl` (`_LIBM`,
     `_LIBC`, `_SNPRINTF`); nie Bibliotheksnamen fest eintragen.
 11. Zeichenketten sortieren/vergleichen nur über `RStats.order`, `r_sort`,
     `r_rank`, `str_collate` (ICU-Kollation wie R, siehe `src/r/_collate.jl`).
@@ -104,9 +108,11 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
 14. long-double-Summen laufen auf x86-64 über die x87-Hardware; ist das
     Ergebnis NaN, rechnen `r_sum` & Co. mit `F80Soft` nach, weil R's
     NA/NaN-Vorrang sonst vom erzeugten Maschinencode abhinge.
-15. `requireNamespace("evd"/"rugarch"/"imputeTS", quietly = TRUE)` → bei jedem Aufruf
-    `RSuggests.has(...)`. `Sys.time()` → `RBase.sys_time()` (Prüfschalter
-    `SIMLEV_R_SYS_TIME`).
+15. `requireNamespace(pkg, quietly = TRUE)` für ein optionales Paket: R
+    fragt nur noch MSGARCH ab (evd, imputeTS und rugarch sind übernommen,
+    ihr Weg gilt immer); MSGARCH ist nicht nachgebildet, die Ports werfen
+    wie R ohne das Paket dessen Fehlermeldung, ohne Schalter. `Sys.time()` →
+    `RBase.sys_time()` (Prüfschalter `SIMLEV_R_SYS_TIME`).
 
 Keine externen Pakete; erlaubt ist nur die Standardbibliothek (`Dates`,
 `Printf`, `Logging`; `LinearAlgebra` nur als Ersatzweg für Eigenvektoren).

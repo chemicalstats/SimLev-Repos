@@ -1,6 +1,13 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # RTruncnorm – Nachbildung von truncnorm::rtruncnorm (truncnorm 1.0-9), bitgleich
 #
+# Herkunft: R-Paket truncnorm 1.0-9 (CRAN, 2023-03-20), R/truncnorm.R
+# (rtruncnorm) und src/rtruncnorm.c; Autoren: Olaf Mersmann [aut, cre], Heike
+# Trautmann [aut], Detlef Steuer [aut], Björn Bornkamp [aut]. Lizenz: GPL (>=
+# 2), in SimLev unter GPL-3. Nach Julia übertragen und angepasst für SimLev
+# (siehe julia/COPYRIGHTS.md); im R-Paket übernommen als .truncnorm_rtruncnorm
+# (r/R/vendor_truncnorm.R, r/src/vendor_truncnorm.c).
+#
 # Gestutzte Normalverteilung nach src/rtruncnorm.c (Bornkamp, Mersmann): je
 # nach Lage der Schranken Normal-, Halbnormal-, Gleichverteilungs- oder
 # Exponential-Verwerfungsverfahren (Robert 1995, Schwellen t1 bis t4). Die

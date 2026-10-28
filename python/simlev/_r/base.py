@@ -1,11 +1,16 @@
 """Basis-Numerik wie in R (long-double-Akkumulation).
 
-Re-exportiert die Engine-Hilfen aus ``simlev._rnum`` und ergänzt weitere
-Vektor-/Matrixfunktionen von R's base.
+Re-exportiert die Summenhilfen aus :mod:`simlev._r.rnum` (unterste Schicht:
+``NA_REAL``, skalare und eindimensionale ``r_``-Hilfen; Rundung und
+Textausgabe der Engine in :mod:`simlev._r.rformat`) und ergänzt
+Funktionen von R's base mit R-Namen für Vektoren, Matrizen und DataFrames
+(``colSums``, ``rowMeans``, ``cumprod``, ``cummax``, ``diff``, ``pmin``,
+``range`` …), ``sys_time`` sowie ``quiet_fp``/``env_from_caller`` für die
+öffentlichen Funktionen der Module.
 """
 from __future__ import annotations
 
-from .._rnum import (  # noqa: F401
+from .rnum import (  # noqa: F401
     r_cumsum,
     r_mean,
     r_mean_int,
@@ -18,12 +23,14 @@ from .._rnum import (  # noqa: F401
     r_sum,
     r_var,
 )
-from .._rnum import NA_REAL, _handle_nan, _x87_nan, r_isna_arr  # noqa: F401
+from .rnum import NA_REAL, _handle_nan, _x87_nan, r_isna_arr  # noqa: F401
 
 import builtins as _bi
+import functools as _functools
 import inspect as _inspect
 import math as _math
 import os as _os
+import sys as _sys
 import time as _time
 
 import numpy as _np
@@ -175,7 +182,7 @@ def mean(x, na_rm=False):
     else:
         a = _np.asarray(x)
         if a.dtype.kind in "iub":
-            from .._rnum import r_mean_int
+            from .rnum import r_mean_int
             return r_mean_int(a.ravel(order="F"))
         a = a.astype(_np.float64).ravel(order="F")
     return r_mean(a, na_rm=na_rm)
@@ -267,6 +274,55 @@ def sys_time():
     return _time.time()
 
 
+def caller_env(frame):
+    """Namensraum eines Frames wie ``parent.frame()``: globale Namen, überlagert von den lokalen."""
+    env = dict(frame.f_globals)
+    env.update(frame.f_locals)
+    return env
+
+
+def env_from_caller(f):
+    """Markiert eine Funktion, deren Argument ``env`` wie in R ``parent.frame()`` voreingestellt ist.
+
+    :func:`quiet_fp` hüllt so markierte Funktionen so, dass ``env=None``
+    (bzw. ein fehlendes ``env``) durch den Namensraum des Aufrufers
+    (:func:`caller_env`) ersetzt wird, bevor die Funktion läuft. Die Funktion
+    selbst liest keinen Frame; ein ausdrücklich übergebenes ``env`` bleibt
+    unverändert.
+    """
+    f._simlev_env_from_caller = True
+    return f
+
+
+def _quiet(f):
+    g = _np.errstate(invalid="ignore")(f)
+    if getattr(f, "_simlev_env_from_caller", False):
+        sig = _inspect.signature(f)
+        par = sig.parameters["env"]
+        pos = (list(sig.parameters).index("env")
+               if par.kind is _inspect.Parameter.POSITIONAL_OR_KEYWORD else None)
+        inner = g
+
+        @_functools.wraps(f)
+        def g(*args, **kwargs):
+            if pos is not None and len(args) > pos:
+                if args[pos] is None:
+                    fr = _sys._getframe(1)
+                    try:
+                        args = args[:pos] + (caller_env(fr),) + args[pos + 1:]
+                    finally:
+                        del fr
+            elif kwargs.get("env") is None:
+                fr = _sys._getframe(1)
+                try:
+                    kwargs["env"] = caller_env(fr)
+                finally:
+                    del fr
+            return inner(*args, **kwargs)
+    g._simlev_quiet_fp = True
+    return g
+
+
 def quiet_fp(ns, names):
     """Öffentliche Funktionen ``names`` im Namensraum ``ns`` in ``np.errstate(invalid="ignore")`` hüllen.
 
@@ -274,6 +330,10 @@ def quiet_fp(ns, names):
     Rechnung damit "invalid value encountered". R kennt diese Warnung nicht,
     darum werden Gleitkomma-Ausnahmen der Klasse *invalid* in den
     öffentlichen Funktionen unterdrückt (wie in R).
+
+    Funktionen mit :func:`env_from_caller` (Bedingungen in R-Syntax mit
+    ``env = parent.frame()``) bekommen zusätzlich den Namensraum ihres
+    Aufrufers als ``env``, wenn keiner übergeben wird.
     """
     for nm in names:
         f = ns.get(nm)
@@ -281,14 +341,10 @@ def quiet_fp(ns, names):
             for mn, m in list(vars(f).items()):
                 if (not mn.startswith("_") and _inspect.isfunction(m)
                         and not getattr(m, "_simlev_quiet_fp", False)):
-                    g = _np.errstate(invalid="ignore")(m)
-                    g._simlev_quiet_fp = True
-                    setattr(f, mn, g)
+                    setattr(f, mn, _quiet(m))
             continue
         if callable(f) and not getattr(f, "_simlev_quiet_fp", False):
-            g = _np.errstate(invalid="ignore")(f)
-            g._simlev_quiet_fp = True
-            ns[nm] = g
+            ns[nm] = _quiet(f)
 
 
 quiet_fp(globals(), __all__)

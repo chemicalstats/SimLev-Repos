@@ -698,31 +698,3 @@ export_dashboard <- function(x, filename = "dashboard.pdf",
   plot(x, ...)
   message(sprintf("export_dashboard: Dashboard gespeichert in %s", filename))
 }
-
-
-#' Interaktives HTML-Dashboard erstellen (benoetigt plotly; noch nicht umgesetzt)
-#'
-#' Derzeit nur ein Platzhalter: Ohne plotly bricht die Funktion mit Fehler ab,
-#' mit plotly gibt sie nur eine Meldung aus und schreibt keine Datei. Fuer ein
-#' interaktives Dashboard siehe \code{plot_interactive()}.
-#'
-#' @param x Ein SimLevResult-Objekt
-#' @param filename Zeichenkette: Pfad der HTML-Ausgabedatei (derzeit ungenutzt)
-#'
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' result <- simulation(data, strategy)
-#' export_html_dashboard(result, "portfolio_dashboard.html")
-#' }
-#' @noRd
-export_html_dashboard <- function(x, filename = "dashboard.html") {
-  if (!requireNamespace("plotly", quietly = TRUE)) {
-    stop("export_html_dashboard: Das Paket 'plotly' wird f\u00fcr HTML-Dashboards ben\u00f6tigt; installieren mit install.packages(\"plotly\").")
-  }
-  
-  # Hier wuerde ein interaktives plotly-Dashboard entstehen
-  # (noch nicht umgesetzt; geplant mit plotly fuer interaktive Grafiken)
-  message("export_html_dashboard: Der Export als interaktives HTML-Dashboard ist noch nicht umgesetzt; es wird keine Datei geschrieben (siehe plot_interactive()).")
-}

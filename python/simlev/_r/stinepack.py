@@ -1,4 +1,10 @@
-"""Nachbildung des R-Pakets stinepack 1.5 (Stineman-Interpolation).
+"""Nachbildung von stinepack 1.5 (Stineman-Interpolation), im R-Paket übernommen als ``.stinepack_stinterp``.
+
+Herkunft: R-Paket stinepack 1.5 (CRAN, 2024-03-07), ``R/stinterp.R``,
+``R/stinemanSlopes.R`` und ``R/parabolaSlopes.R``; Autoren: Tomas Johannesson
+& Halldor Bjornsson, Icelandic Met. Office; Gabor Grothendieck. Lizenz:
+GPL (>= 2), in SimLev unter GPL-3. Nach Python übertragen und angepasst für
+SimLev (siehe ``python/COPYRIGHTS.md``).
 
 Nachgebildet sind ``stinterp(x, y, xout, yp, method)`` mit allen
 Eingabeprüfungen und Meldungen sowie die Steigungen ``stinemanSlopes``
@@ -15,7 +21,8 @@ folgt dem R-Code Zeile für Zeile, auch in den Eigenheiten von stinepack:
   "missing value where TRUE/FALSE needed".
 
 imputeTS nutzt ``stinterp`` in ``na_interpolation(option = "stine")``
-(siehe :mod:`simlev._r.imputets`).
+(siehe :mod:`simlev._r.imputets`); R nutzt die übernommene Fassung
+(``r/R/vendor_stinepack.R``), stinepack selbst ist nicht mehr nötig.
 """
 from __future__ import annotations
 
@@ -26,7 +33,7 @@ import pandas as pd
 
 from .linalg import RError
 from .rlist import RList
-from .._rnum import NA_REAL
+from .rnum import NA_REAL
 
 __all__ = ["stinterp", "stinemanSlopes", "parabolaSlopes"]
 
@@ -353,9 +360,9 @@ def stinterp(x=MISSING, y=MISSING, xout=MISSING, yp=MISSING, method=MISSING):
     return res
 
 
-from .base import quiet_fp as _quiet_fp  # noqa: E402
+from .base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), ["stinterp", "stinemanSlopes", "parabolaSlopes"])
+quiet_fp(globals(), ["stinterp", "stinemanSlopes", "parabolaSlopes"])
 
 
 def _quiet_all(ns, names):

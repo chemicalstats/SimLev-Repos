@@ -18,7 +18,8 @@ from typing import Any
 
 import pandas as pd
 
-from ._rnum import NA_REAL, r_format1, r_round, r_signif, r_sprintf
+from ._r.rformat import r_format1, r_round, r_signif, r_sprintf
+from ._r.rnum import NA_REAL
 
 __all__ = ["SimLevTaxTariff", "read_tax_tariff", "default_tariff_file"]
 

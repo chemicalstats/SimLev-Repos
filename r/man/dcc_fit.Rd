@@ -27,7 +27,8 @@ standardisierten Residuen) und \code{Qbar}.
 \description{
 Schaetzt zeitvariable Korrelationen zwischen mehreren Renditereihen.
 Zweistufige Schaetzung: univariate GARCH(1,1) mit Konstante je Reihe (wie
-im Bootstrap: rugarch falls installiert, sonst optim, notfalls
+im Bootstrap: mit der aus rugarch 1.5-6 uebernommenen Fassung von
+\code{ugarchfit}, wenn diese scheitert mit optim, notfalls
 Momentschaetzer), danach die Korrelationsdynamik der standardisierten
 Residuen \eqn{z_t}
 \deqn{Q_t = (1 - a - b)\bar Q + a z_{t-1} z_{t-1}' + b Q_{t-1}}

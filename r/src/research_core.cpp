@@ -19,12 +19,12 @@
 // Alle Kerne rechnen dieselben Formeln wie die frueheren R-Fassungen; sie
 // ziehen keine Zufallszahlen.
 
-#include <Rcpp.h>
+#include "simlev_capi.h"
 #include <vector>
 #include <cmath>
 #include <algorithm>
 #include <numeric>
-using namespace Rcpp;
+using sl::stop;
 
 // ---------------------------------------------------------------------------
 // Hilfen
@@ -73,17 +73,15 @@ static double quantile7(std::vector<double> x, double p) {
 // Projektion und quadratisches Programm
 // ---------------------------------------------------------------------------
 
-// [[Rcpp::export(name = ".proj_box_simplex")]]
-NumericVector proj_box_simplex_r(NumericVector v, NumericVector lo, NumericVector hi) {
+static SEXP proj_box_simplex_r(sl::NumVec v, sl::NumVec lo, sl::NumVec hi) {
   const int n = v.size();
-  NumericVector out(n);
+  sl::NumVec out = sl::new_num(n);
   proj_box_simplex(v.begin(), lo.begin(), hi.begin(), n, out.begin());
-  return out;
+  return out.sexp;
 }
 
-// [[Rcpp::export(name = ".qp_box_simplex")]]
-NumericVector qp_box_simplex(NumericMatrix Q, NumericVector cvec, NumericVector lo, NumericVector hi,
-                             NumericVector w0, double L, int maxit, double tol) {
+static SEXP qp_box_simplex(sl::NumMat Q, sl::NumVec cvec, sl::NumVec lo, sl::NumVec hi,
+                           sl::NumVec w0, double L, int maxit, double tol) {
   const int n = Q.ncol();
   std::vector<double> w(n), y(n), wn(n), g(n), tmp(n);
   proj_box_simplex(w0.begin(), lo.begin(), hi.begin(), n, w.data());
@@ -106,7 +104,7 @@ NumericVector qp_box_simplex(NumericMatrix Q, NumericVector cvec, NumericVector 
     for (int i = 0; i < n; ++i) y[i] = wn[i] + mom * (wn[i] - w[i]);
     w = wn; t = tn;
   }
-  return NumericVector(w.begin(), w.end());
+  return sl::num_copy(w.begin(), w.end()).sexp;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,9 +114,8 @@ NumericVector qp_box_simplex(NumericMatrix Q, NumericVector cvec, NumericVector 
 static inline double softplus(double z) { return z > 30.0 ? z : std::log1p(std::exp(z)); }
 static inline double logistic(double z) { return z >= 0.0 ? 1.0 / (1.0 + std::exp(-z)) : std::exp(z) / (1.0 + std::exp(z)); }
 
-// [[Rcpp::export(name = ".min_cvar_core")]]
-NumericVector min_cvar_core(NumericMatrix R, double alpha, NumericVector lo, NumericVector hi,
-                            NumericVector w0, double zeta0, NumericVector scales, int maxit) {
+static SEXP min_cvar_core(sl::NumMat R, double alpha, sl::NumVec lo, sl::NumVec hi,
+                          sl::NumVec w0, double zeta0, sl::NumVec scales, int maxit) {
   const int T = R.nrow(), N = R.ncol();
   const double aT = alpha * T;
   std::vector<double> x(N + 1), yv(N + 1), xn(N + 1), g(N + 1), tmp(N + 1), loss(T);
@@ -162,7 +159,7 @@ NumericVector min_cvar_core(NumericMatrix R, double alpha, NumericVector lo, Num
       x = xn; t = tn;
     }
   }
-  return NumericVector(x.begin(), x.begin() + N);
+  return sl::num_copy(x.begin(), x.begin() + N).sexp;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,8 +178,7 @@ static double cdar_of(const std::vector<double>& r, double alpha, std::vector<do
   return m ? acc / m : 0.0;
 }
 
-// [[Rcpp::export(name = ".min_cdar_core")]]
-NumericVector min_cdar_core(NumericMatrix R, double alpha, NumericVector lo, NumericVector hi, int iters) {
+static SEXP min_cdar_core(sl::NumMat R, double alpha, sl::NumVec lo, sl::NumVec hi, int iters) {
   const int T = R.nrow(), N = R.ncol();
   // kumulierte Renditen je Anlage, Zeile 0 = 0
   std::vector<double> CR((T + 1) * N, 0.0);
@@ -222,7 +218,7 @@ NumericVector min_cdar_core(NumericMatrix R, double alpha, NumericVector lo, Num
     port(w); const double f = cdar_of(r, alpha, D);
     if (f < fbest) { fbest = f; best = w; }
   }
-  return NumericVector(best.begin(), best.end());
+  return sl::num_copy(best.begin(), best.end()).sexp;
 }
 
 // ---------------------------------------------------------------------------
@@ -260,7 +256,7 @@ static bool solve_spd(std::vector<double> A, std::vector<double>& b, int p) {
 }
 
 // Zielfunktion sum rho_tau(y - X b)
-static double qr_objective(const NumericVector& y, const NumericMatrix& X, const std::vector<double>& b, double tau) {
+static double qr_objective(const sl::NumVec& y, const sl::NumMat& X, const std::vector<double>& b, double tau) {
   const int n = X.nrow(), p = X.ncol();
   double acc = 0.0;
   for (int i = 0; i < n; ++i) { double fit = 0.0; for (int j = 0; j < p; ++j) fit += X(i, j) * b[j];
@@ -286,7 +282,7 @@ static bool solve_general(std::vector<double> A, std::vector<double>& b, int p) 
 
 // Basis einer Ecke: p linear unabhaengige Beobachtungen mit den kleinsten
 // Residuen |y_i - x_i'beta| (Gram-Schmidt fuer die Unabhaengigkeit).
-static std::vector<int> qr_pick(const NumericVector& y, const NumericMatrix& X, const std::vector<double>& beta) {
+static std::vector<int> qr_pick(const sl::NumVec& y, const sl::NumMat& X, const std::vector<double>& beta) {
   const int n = X.nrow(), p = X.ncol();
   std::vector<double> r(n);
   for (int i = 0; i < n; ++i) { double fit = 0.0; for (int j = 0; j < p; ++j) fit += X(i, j) * beta[j]; r[i] = std::fabs(y[i] - fit); }
@@ -333,7 +329,7 @@ static bool invert_small(std::vector<double> A, std::vector<double>& Inv, int p)
 // Variablen mu = lambda - k (tau - 1) in [0, k] und p Hilfsvariablen (Auswahl
 // nach Dantzig, bei Stillstand Bland-Regel gegen Kreisen). Zulaessig, wenn die Summe der Hilfsvariablen auf 0 faellt
 // (relativ 1e-9 zur Groessenordnung von v und der Erzeugenden).
-static bool qr_subgrad_lp(const NumericMatrix& X, const std::vector<int>& G, const std::vector<double>& v, double tau) {
+static bool qr_subgrad_lp(const sl::NumMat& X, const std::vector<int>& G, const std::vector<double>& v, double tau) {
   const int p = X.ncol();
   std::vector<int> o(G);
   std::sort(o.begin(), o.end(), [&](int a, int b) { for (int j = 0; j < p; ++j) { if (X(a, j) != X(b, j)) return X(a, j) < X(b, j); } return a < b; });
@@ -407,7 +403,7 @@ static bool qr_subgrad_lp(const NumericMatrix& X, const std::vector<int>& G, con
 // bedingung: X_h' lambda = -sum_{i nicht in h} psi_tau(r_i) x_i mit
 // lambda in [tau - 1, tau], Koenker 2005, Abschnitt 2.2; bei weiteren
 // Nullresiduen ueber qr_subgrad_lp()).
-static int qr_polish(const NumericVector& y, const NumericMatrix& X, const std::vector<double>& beta,
+static int qr_polish(const sl::NumVec& y, const sl::NumMat& X, const std::vector<double>& beta,
                      double tau, std::vector<double>& out) {
   const int n = X.nrow(), p = X.ncol();
   std::vector<int> pick = qr_pick(y, X, beta);
@@ -457,7 +453,7 @@ static int qr_polish(const NumericVector& y, const NumericMatrix& X, const std::
 // ueber lambda, sonst ueber qr_subgrad_lp()), 1 = keine Abstiegskante,
 // Nachweis gescheitert (entartete Ecke), 0 = Abbruch (Rundung, singulaere
 // Basis). out = letzte Ecke.
-static int qr_exchange(const NumericVector& y, const NumericMatrix& X, double tau, std::vector<int> h,
+static int qr_exchange(const sl::NumVec& y, const sl::NumMat& X, double tau, std::vector<int> h,
                        std::vector<double>& out) {
   const int n = X.nrow(), p = X.ncol();
   if ((int) h.size() != p) return 0;
@@ -523,12 +519,11 @@ static int qr_exchange(const NumericVector& y, const NumericMatrix& X, double ta
   return 0;
 }
 
-// [[Rcpp::export(name = ".quantile_reg_core")]]
-NumericVector quantile_reg_core(NumericVector y, NumericMatrix X, double tau, NumericVector beta0,
-                                double sc, double tol, int maxit) {
+static SEXP quantile_reg_core(sl::NumVec y, sl::NumMat X, double tau, sl::NumVec beta0,
+                              double sc, double tol, int maxit) {
   const int n = X.nrow(), p = X.ncol();
   std::vector<double> beta(beta0.begin(), beta0.end()), nb(p), A(p * p), c1(p, 0.0), r(n), w(n);
-  if (p == 0) return NumericVector(0);
+  if (p == 0) return sl::new_num(0).sexp;
   bool proven = false;
   for (int j = 0; j < p; ++j) { double s = 0.0; for (int i = 0; i < n; ++i) s += X(i, j); c1[j] = s * (tau - 0.5); }
   const double epss[4] = {1e-2, 1e-4, 1e-6, 1e-8};
@@ -574,9 +569,9 @@ NumericVector quantile_reg_core(NumericVector y, NumericMatrix X, double tau, Nu
       else if (st == 1) beta = vb;
     }
   }
-  NumericVector out(beta.begin(), beta.end());
-  out.attr("optimal") = proven;
-  return out;
+  sl::NumVec out = sl::num_copy(beta.begin(), beta.end());
+  sl::set_attr(out.sexp, "optimal", sl::wrap(proven));
+  return out.sexp;
 }
 
 // ---------------------------------------------------------------------------
@@ -584,11 +579,10 @@ NumericVector quantile_reg_core(NumericVector y, NumericMatrix X, double tau, Nu
 // ---------------------------------------------------------------------------
 
 // B: Emissionsdichten (T x K, je Zeile skaliert), A: Uebergangsmatrix, p0: Start.
-// [[Rcpp::export(name = ".hmm_forward_backward")]]
-List hmm_forward_backward(NumericMatrix B, NumericMatrix A, NumericVector p0) {
+static SEXP hmm_forward_backward(sl::NumMat B, sl::NumMat A, sl::NumVec p0) {
   const int T = B.nrow(), K = B.ncol();
-  NumericMatrix al(T, K), be(T, K), ga(T, K), xi(K, K);
-  NumericVector cs(T);
+  sl::NumMat al = sl::new_mat(T, K), be = sl::new_mat(T, K), ga = sl::new_mat(T, K), xi = sl::new_mat(K, K);
+  sl::NumVec cs = sl::new_num(T);
   std::vector<double> a(K), tmp(K);
   double s = 0.0;
   for (int j = 0; j < K; ++j) { a[j] = p0[j] * B(0, j); s += a[j]; }
@@ -611,7 +605,7 @@ List hmm_forward_backward(NumericMatrix B, NumericMatrix A, NumericVector p0) {
     for (int j = 0; j < K; ++j) tmp[j] = B(t + 1, j) * be(t + 1, j);
     for (int i = 0; i < K; ++i) for (int j = 0; j < K; ++j) xi(i, j) += al(t, i) * tmp[j] * A(i, j) / cs[t + 1];
   }
-  return List::create(_["filtered"] = al, _["smoothed"] = ga, _["xi"] = xi, _["scale"] = cs);
+  return sl::named_list("filtered", al, "smoothed", ga, "xi", xi, "scale", cs);
 }
 
 // ---------------------------------------------------------------------------
@@ -619,17 +613,16 @@ List hmm_forward_backward(NumericMatrix B, NumericMatrix A, NumericVector p0) {
 // ---------------------------------------------------------------------------
 
 // s2[t] = v_t, v_{t+1} = om + (al + ga * 1{ep_t < 0}) ep_t^2 + be v_t, Untergrenze 1e-14.
-// [[Rcpp::export(name = ".garch_filter")]]
-NumericVector garch_filter(NumericVector ep, double om, double al, double be, double ga, double v0) {
+static SEXP garch_filter(sl::NumVec ep, double om, double al, double be, double ga, double v0) {
   const int n = ep.size();
-  NumericVector s2(n);
+  sl::NumVec s2 = sl::new_num(n);
   double v = v0;
   for (int t = 0; t < n; ++t) {
     s2[t] = v;
     v = om + (al + ga * (ep[t] < 0.0 ? 1.0 : 0.0)) * (ep[t] * ep[t]) + be * v;
     if (v < 1e-14) v = 1e-14;
   }
-  return s2;
+  return s2.sexp;
 }
 
 // ---------------------------------------------------------------------------
@@ -639,11 +632,10 @@ NumericVector garch_filter(NumericVector ep, double om, double al, double be, do
 // Gleitende Summe mit Neumaier-Kompensation; alle 4096 Schritte wird die
 // Fenstersumme neu aufgebaut, damit sich keine Rundungsfehler ansammeln.
 // NA/NaN im Fenster ergeben NA (wie die kumulierte Summe in R).
-// [[Rcpp::export(name = ".roll_mean_core")]]
-NumericVector roll_mean_core(NumericVector x, int n) {
+static SEXP roll_mean_core(sl::NumVec x, int n) {
   const int m = x.size();
-  NumericVector out(m, NA_REAL);
-  if (n < 1 || n > m) return out;
+  sl::NumVec out = sl::new_num(m, NA_REAL);
+  if (n < 1 || n > m) return out.sexp;
   int bad = 0;                                   // Anzahl nicht endlicher Werte im Fenster
   double sum = 0.0, comp = 0.0;
   auto add = [&](double v) { const double t = sum + v;
@@ -660,7 +652,7 @@ NumericVector roll_mean_core(NumericVector x, int n) {
     }
     out[i] = bad ? NA_REAL : (sum + comp) / n;
   }
-  return out;
+  return out.sexp;
 }
 
 // ---------------------------------------------------------------------------
@@ -683,8 +675,7 @@ static long long merge_count(std::vector<double>& y, std::vector<double>& buf, i
   return s;
 }
 
-// [[Rcpp::export(name = ".kendall_tau_core")]]
-double kendall_tau_core(NumericVector x, NumericVector y) {
+static double kendall_tau_core(sl::NumVec x, sl::NumVec y) {
   const int n = x.size();
   if (n < 2) return NA_REAL;
   std::vector<int> o(n); std::iota(o.begin(), o.end(), 0);
@@ -715,11 +706,10 @@ double kendall_tau_core(NumericVector x, NumericVector y) {
 // Zwei Durchgaenge je Fenster (erst Mittelwerte, dann zentrierte Produkte):
 // vermeidet die Ausloeschung von E[xy] - E[x]E[y]. Aufwand O(n * Fenster).
 // Fenster mit nicht endlichen Werten ergeben NA.
-// [[Rcpp::export(name = ".roll_cov_core")]]
-NumericVector roll_cov_core(NumericVector x, NumericVector y, int n) {
+static SEXP roll_cov_core(sl::NumVec x, sl::NumVec y, int n) {
   const int m = x.size();
-  NumericVector out(m, NA_REAL);
-  if (n < 1 || n > m || y.size() != m) return out;
+  sl::NumVec out = sl::new_num(m, NA_REAL);
+  if (n < 1 || n > m || y.size() != m) return out.sexp;
   for (int i = n - 1; i < m; ++i) {
     double sx = 0.0, sy = 0.0; bool ok = true;
     for (int k = i - n + 1; k <= i; ++k) { if (!std::isfinite(x[k]) || !std::isfinite(y[k])) { ok = false; break; } sx += x[k]; sy += y[k]; }
@@ -729,5 +719,119 @@ NumericVector roll_cov_core(NumericVector x, NumericVector y, int n) {
     for (int k = i - n + 1; k <= i; ++k) { const double dx = x[k] - mx, dy = y[k] - my; c += dx * dy; cx += dx; cy += dy; }
     out[i] = (c - cx * cy / n) / n;                 // Korrektur fuer Rundung im Mittelwert
   }
-  return out;
+  return out.sexp;
+}
+
+// ---------------------------------------------------------------------------
+// .Call-Huellen (registriert in init.c; R-Seite in R/cores.R)
+// ---------------------------------------------------------------------------
+
+extern "C" SEXP C_proj_box_simplex(SEXP s_v, SEXP s_lo, SEXP s_hi) {
+  return sl::call([&]() {
+    sl::NumVec v = sl::num_vec(s_v);
+    sl::NumVec lo = sl::num_vec(s_lo);
+    sl::NumVec hi = sl::num_vec(s_hi);
+    return proj_box_simplex_r(v, lo, hi);
+  });
+}
+
+extern "C" SEXP C_qp_box_simplex(SEXP s_Q, SEXP s_cvec, SEXP s_lo, SEXP s_hi, SEXP s_w0, SEXP s_L,
+                                 SEXP s_maxit, SEXP s_tol) {
+  return sl::call([&]() {
+    sl::NumMat Q = sl::num_mat(s_Q);
+    sl::NumVec cvec = sl::num_vec(s_cvec);
+    sl::NumVec lo = sl::num_vec(s_lo);
+    sl::NumVec hi = sl::num_vec(s_hi);
+    sl::NumVec w0 = sl::num_vec(s_w0);
+    double L = sl::as_double(s_L);
+    int maxit = sl::as_int(s_maxit);
+    double tol = sl::as_double(s_tol);
+    return qp_box_simplex(Q, cvec, lo, hi, w0, L, maxit, tol);
+  });
+}
+
+extern "C" SEXP C_min_cvar_core(SEXP s_R, SEXP s_alpha, SEXP s_lo, SEXP s_hi, SEXP s_w0, SEXP s_zeta0,
+                                SEXP s_scales, SEXP s_maxit) {
+  return sl::call([&]() {
+    sl::NumMat R = sl::num_mat(s_R);
+    double alpha = sl::as_double(s_alpha);
+    sl::NumVec lo = sl::num_vec(s_lo);
+    sl::NumVec hi = sl::num_vec(s_hi);
+    sl::NumVec w0 = sl::num_vec(s_w0);
+    double zeta0 = sl::as_double(s_zeta0);
+    sl::NumVec scales = sl::num_vec(s_scales);
+    int maxit = sl::as_int(s_maxit);
+    return min_cvar_core(R, alpha, lo, hi, w0, zeta0, scales, maxit);
+  });
+}
+
+extern "C" SEXP C_min_cdar_core(SEXP s_R, SEXP s_alpha, SEXP s_lo, SEXP s_hi, SEXP s_iters) {
+  return sl::call([&]() {
+    sl::NumMat R = sl::num_mat(s_R);
+    double alpha = sl::as_double(s_alpha);
+    sl::NumVec lo = sl::num_vec(s_lo);
+    sl::NumVec hi = sl::num_vec(s_hi);
+    int iters = sl::as_int(s_iters);
+    return min_cdar_core(R, alpha, lo, hi, iters);
+  });
+}
+
+extern "C" SEXP C_quantile_reg_core(SEXP s_y, SEXP s_X, SEXP s_tau, SEXP s_beta0, SEXP s_sc, SEXP s_tol,
+                                    SEXP s_maxit) {
+  return sl::call([&]() {
+    sl::NumVec y = sl::num_vec(s_y);
+    sl::NumMat X = sl::num_mat(s_X);
+    double tau = sl::as_double(s_tau);
+    sl::NumVec beta0 = sl::num_vec(s_beta0);
+    double sc = sl::as_double(s_sc);
+    double tol = sl::as_double(s_tol);
+    int maxit = sl::as_int(s_maxit);
+    return quantile_reg_core(y, X, tau, beta0, sc, tol, maxit);
+  });
+}
+
+extern "C" SEXP C_hmm_forward_backward(SEXP s_B, SEXP s_A, SEXP s_p0) {
+  return sl::call([&]() {
+    sl::NumMat B = sl::num_mat(s_B);
+    sl::NumMat A = sl::num_mat(s_A);
+    sl::NumVec p0 = sl::num_vec(s_p0);
+    return hmm_forward_backward(B, A, p0);
+  });
+}
+
+extern "C" SEXP C_garch_filter(SEXP s_ep, SEXP s_om, SEXP s_al, SEXP s_be, SEXP s_ga, SEXP s_v0) {
+  return sl::call([&]() {
+    sl::NumVec ep = sl::num_vec(s_ep);
+    double om = sl::as_double(s_om);
+    double al = sl::as_double(s_al);
+    double be = sl::as_double(s_be);
+    double ga = sl::as_double(s_ga);
+    double v0 = sl::as_double(s_v0);
+    return garch_filter(ep, om, al, be, ga, v0);
+  });
+}
+
+extern "C" SEXP C_roll_mean_core(SEXP s_x, SEXP s_n) {
+  return sl::call([&]() {
+    sl::NumVec x = sl::num_vec(s_x);
+    int n = sl::as_int(s_n);
+    return roll_mean_core(x, n);
+  });
+}
+
+extern "C" SEXP C_kendall_tau_core(SEXP s_x, SEXP s_y) {
+  return sl::call([&]() {
+    sl::NumVec x = sl::num_vec(s_x);
+    sl::NumVec y = sl::num_vec(s_y);
+    return sl::wrap(kendall_tau_core(x, y));
+  });
+}
+
+extern "C" SEXP C_roll_cov_core(SEXP s_x, SEXP s_y, SEXP s_n) {
+  return sl::call([&]() {
+    sl::NumVec x = sl::num_vec(s_x);
+    sl::NumVec y = sl::num_vec(s_y);
+    int n = sl::as_int(s_n);
+    return roll_cov_core(x, y, n);
+  });
 }

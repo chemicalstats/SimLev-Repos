@@ -367,30 +367,6 @@ function remove_asset(strategy, name::AbstractString)
     return out
 end
 
-"Strategien mit veralteten Assetklassen (etn_deliverable, etn_standard) umwandeln."
-function migrate_strategy(old_strategy; verbose::Bool = true)
-    out = RList()
-    for (name, asset) in _kvpairs(old_strategy isa Strategy ? collect(old_strategy) : old_strategy)
-        a = RList(_kvpairs(asset isa AssetConfig ? collect(asset) : asset)...)
-        cls = get(a, "asset_class", nothing)
-        if cls == "etn_deliverable"
-            verbose && println(stderr, "migrate_strategy: $name: etn_deliverable -> etn mit deliverable = TRUE")
-            a["asset_class"] = "etn"; a["deliverable"] = true
-        elseif cls == "etn_standard"
-            verbose && println(stderr, "migrate_strategy: $name: etn_standard -> etn mit deliverable = FALSE")
-            a["asset_class"] = "etn"; a["deliverable"] = false
-        end
-        out[name] = _config_from_mapping(collect(a))
-    end
-    return Strategy(out)
-end
-
-"Klassen-Hülle entfernen (R: `as_list()`): Strategie → RList ohne Klasse."
-as_list(s::Strategy) = RList(collect(s)...)
-as_list(a::AssetConfig) = RList(collect(a)...)
-as_list(x::RList) = (y = copy(x); y.class = String[]; y)
-as_list(x) = collect(x)
-
 function _print_strategy(io::IO, x)
     n = length(x)
     println(io, r_sprintf("Anlagestrategie (%d %s)", n, n == 1 ? "Asset" : "Assets"))

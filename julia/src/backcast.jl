@@ -109,8 +109,8 @@ _getel(r, k) = r isa AbstractDict ? r[k] : r isa NamedTuple ? getfield(r, Symbol
     _fill_na(v, method = "locf"; keep_leading = false)
 
 Fehlende Werte füllen (Port von `.fill_na`): `"locf"`, `"linear"`,
-`"stine"` (Stineman über `RImputeTS.na_interpolation`; gilt imputeTS als nicht
-installiert, wie in R lineare Interpolation mit Hinweis) oder
+`"stine"` (Stineman über `RImputeTS.na_interpolation`, wie R mit der aus
+imputeTS 3.4 übernommenen Fassung `.imputets_na_interpolation`) oder
 `"none"`. Mit `keep_leading = true` bleiben führende NA erhalten, sonst wird
 rückwärts gefüllt. Liefert eine Float64-Kopie.
 """
@@ -120,10 +120,6 @@ function _fill_na(v, method = ("locf", "linear", "stine", "none"); keep_leading:
     ok = findall(!isnan, v)
     (method == "none" || isempty(ok) || length(ok) == length(v)) && return v
     first_, last_ = ok[1], ok[end]
-    if method == "stine" && !SimLev.RSuggests.has("imputeTS")
-        DP.message("Hinweis: Paket 'imputeTS' nicht installiert, verwende lineare Interpolation statt Stineman.")
-        method = "linear"
-    end
     if method == "locf"
         idx = zeros(Int, length(v))
         idx[ok] .= ok

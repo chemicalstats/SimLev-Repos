@@ -1,24 +1,35 @@
 """
-Nachbildung des optionalen R-Pakets imputeTS 3.4 (Teil: Interpolation).
+Nachbildung von imputeTS 3.4 (Teil: Interpolation), im R-Paket übernommen als `.imputets_na_interpolation`.
 
-Nachgebildet sind `na_interpolation(x; option, maxgap, yp, method)` für die
-Optionen `"stine"` (stinepack `stinterp`, siehe `RStinepack`) und
-`"linear"` (`approx` mit `rule = 2`) sowie `na_locf(x; option, na_remaining,
-maxgap)`, das `na_interpolation` für NA am Rand der Stineman-Interpolation
-braucht (mit dem C++-Kern `locf` aus `src/locf.cpp`, der auch über `Inf`
-hinweg fortschreibt). Eingabeprüfungen, Sonderfälle (keine NA, weniger als
+Herkunft: R-Paket imputeTS 3.4 (CRAN, 2025-08-25), `R/na_interpolation.R`,
+`R/na_locf.R` und `src/locf.cpp`; Autoren: Steffen Moritz, Sebastian
+Gatscha, Earo Wang, Ron Hause. Lizenz: GPL-3. Nach Julia übertragen und
+angepasst für SimLev (siehe `julia/COPYRIGHTS.md`).
+
+Nachgebildet ist, was das R-Paket übernommen hat (`r/R/vendor_imputets.R`,
+`r/src/vendor_imputets.cpp`): `na_interpolation(x; option, maxgap, yp,
+method)` für die Optionen `"stine"` (stinepack `stinterp`, siehe
+`RStinepack`) und `"linear"` (`approx` mit `rule = 2`) sowie `na_locf(x;
+option, na_remaining, maxgap)`, das `na_interpolation` für NA am Rand der
+Stineman-Interpolation braucht (mit dem C++-Kern `locf` aus `src/locf.cpp`,
+der auch über `Inf` hinweg fortschreibt). `option = "spline"` und
+`na_remaining = "rm"`/`"mean"` brechen wie in der Übernahme mit deren
+Meldung ab (nicht übernommen); weitere Argumente für `approx` (in R über
+`...`) sind nicht nachgebildet.
+Eingabeprüfungen, Sonderfälle (keine NA, weniger als
 zwei Werte, nicht numerisch), `maxgap` und alle Meldungen wie in imputeTS;
 Vektoren (auch `RVector` mit Namen) und numerische Matrizen (spaltenweise,
 mit der Warnung von imputeTS für Spalten, die scheitern).
 
-Nicht nachgebildet: `option = "spline"`, `na_remaining = "rm"`/`"mean"` und
-Eingaben als data.frame, tibble oder ts (Fehler mit deutscher Meldung); die
+Nicht nachgebildet: Eingaben als data.frame, tibble oder ts (Fehler mit
+deutscher Meldung); die
 unendliche Rekursion von `na_locf` für Reihen ohne einen endlichen Wert (R
 bricht mit „C stack usage … is too close to the limit“ ab) endet mit einem
 eigenen Fehler.
 
-SimLev nutzt `na_interpolation(…; option = "stine")` in `.fill_na`, wenn
-`SimLev.RSuggests.has("imputeTS")` gilt. Vorlage: `python/simlev/_r/imputets.py`.
+SimLev nutzt `na_interpolation(…; option = "stine")` in `.fill_na`; R nutzt
+dafür die übernommene Fassung, imputeTS selbst ist nicht mehr nötig.
+Vorlage: `python/simlev/_r/imputets.py`.
 """
 module RImputeTS
 
@@ -144,8 +155,10 @@ function _na_locf(x, option, na_remaining, maxgap, depth::Int)
         elseif _if_str_eq(option, "nocb")
             data = _na_locf(data, "locf", "rev", Inf, depth + 1)
         end
-    elseif _if_str_eq(na_remaining, "rm") || _if_str_eq(na_remaining, "mean")
-        error("imputeTS-Nachbildung: na_remaining = 'rm'/'mean' ist nicht nachgebildet.")
+    elseif _if_str_eq(na_remaining, "rm")
+        error("imputeTS-Uebernahme: na_locf mit na_remaining = \"rm\" (na_remove) nicht uebernommen")
+    elseif _if_str_eq(na_remaining, "mean")
+        error("imputeTS-Uebernahme: na_locf mit na_remaining = \"mean\" (na_mean) nicht uebernommen")
     else
         error("Wrong parameter 'na_remaining' given. Value must be either 'keep', 'rm', 'mean' or 'rev'.")
     end
@@ -162,8 +175,8 @@ end
 
 Fehlende Werte interpolieren (imputeTS `na_interpolation`): `option =
 "linear"` (`approx` mit `rule = 2`) oder `"stine"` (Stineman, stinepack
-`stinterp`; `yp` und `method` werden durchgereicht); `"spline"` ist nicht
-nachgebildet. Lücken mit mehr als `maxgap` NA bleiben NA. Numerische
+`stinterp`; `yp` und `method` werden durchgereicht); `"spline"` bricht wie
+die Übernahme in R ab (nicht übernommen). Lücken mit mehr als `maxgap` NA bleiben NA. Numerische
 Matrizen spaltenweise (jede Spalte ohne `yp`/`method`, wie R).
 """
 function na_interpolation(x; option = "linear", maxgap = Inf, yp = _SP.MISSING, method = _SP.MISSING)
@@ -197,7 +210,7 @@ function na_interpolation(x; option = "linear", maxgap = Inf, yp = _SP.MISSING, 
         r = SimLev.RStats.approx(Float64.(indx), vals[indx]; xout = allx, rule = 2)
         Float64.(r["y"])
     elseif _if_str_eq(option, "spline")
-        error("imputeTS-Nachbildung: option = 'spline' ist nicht nachgebildet.")
+        error("imputeTS-Uebernahme: na_interpolation mit option = \"spline\" nicht uebernommen")
     elseif _if_str_eq(option, "stine")
         ip = Float64.(_SP.stinterp(Float64.(indx), vals[indx], allx; yp = yp, method = method)["y"])
         any(isnan, ip) && (ip = Float64.(na_locf(ip; na_remaining = "rev")))

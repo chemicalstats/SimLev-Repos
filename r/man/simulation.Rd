@@ -1065,7 +1065,6 @@ summary(result_tax)
 \seealso{
   \code{\link{asset_config}}, \code{\link{create_strategy}},
   \code{\link{compute_rebal_trigger}}, \code{\link{plot.SimLevResult}},
-  \code{\link{read_tax_tariff}},
-  \code{\link{plot_interactive}}; Weiterverarbeitung des Ergebnisses mit
+  \code{\link{read_tax_tariff}}; Weiterverarbeitung des Ergebnisses mit
   \code{\link{deep_analysis}} und \code{\link{withdrawal_paths}}
 }

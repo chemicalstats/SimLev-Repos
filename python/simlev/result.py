@@ -7,7 +7,8 @@ from typing import Any
 import numpy as np
 
 from ._r.rlist import RList
-from ._rnum import NA_REAL, r_round, r_sprintf, r_sum
+from ._r.rformat import r_round, r_sprintf
+from ._r.rnum import NA_REAL, r_sum
 
 __all__ = ["SimLevResult", "SimLevSummary"]
 
@@ -142,13 +143,6 @@ class SimLevResult(RList):
         """Dashboard (matplotlib); siehe :func:`simlev.dashboard.plot_dashboard`."""
         from .dashboard import plot_dashboard
         return plot_dashboard(self, style=style, panels=panels, compare=compare, colors=colors, **kwargs)
-
-    def plot_interactive(self, file: str | None = None, panels=("performance", "drawdown", "weights"),
-                         max_points: int = 6000, open: bool | None = None, engine: str = "auto"):
-        """Interaktives HTML-Dashboard; siehe :func:`simlev.interactive.plot_interactive`."""
-        from .interactive import plot_interactive
-        return plot_interactive(self, file=file, panels=panels, max_points=max_points, open=open, engine=engine)
-
 
 class SimLevSummary(RList):
     """Ergebnis von ``summary(<SimLevResult>)`` (R-Klasse ``summary.SimLevResult``)."""

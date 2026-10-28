@@ -13,7 +13,6 @@
 #   print               capture.output(print(result)) oder NULL
 #   warnings            Warnungen (Texte) während des Aufrufs
 #   error               Fehlermeldung, falls R mit Fehler abbricht
-#   suggests            optionale Pakete (evd, rugarch, imputeTS), die R installiert hatte
 #   sys_time            (optional) feste Uhrzeit as.numeric(Sys.time()) während des
 #                       Aufrufs, als Text ("%.17g"); die Harnesses setzen dann
 #                       SIMLEV_R_SYS_TIME (z. B. für Rsolnp::gosolnp mit rseed = NULL)
@@ -131,9 +130,6 @@ ref_case <- function(id, r, py, inputs = list(), print = NA, note = NULL, jl = N
   case <- list(id = id, module = .ref$module, note = note,
                inputs = lapply(inputs, enc), r = r, py = py)
   if (!is.null(jl)) case$jl <- jl
-  # optionale Pakete, die R bei diesem Fall installiert hatte (die Ports setzen
-  # SIMLEV_R_SUGGESTS entsprechend; Fälle ohne das Feld: keines)
-  case$suggests <- I(Filter(function(p) requireNamespace(p, quietly = TRUE), c("evd", "rugarch", "imputeTS")))
   if (!is.null(sys_time)) case$sys_time <- sprintf("%.17g", sys_time)
   if (!is.null(err)) case$error <- err
   else {

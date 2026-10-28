@@ -156,25 +156,6 @@ test_that("update_asset rejects unknown asset", {
 })
 
 
-test_that("migrate_strategy converts old format", {
-  old <- list(
-    Gold = list(
-      asset_class = "etn_deliverable",
-      action_type = "bnh",
-      asset_share = 1.0,
-      asset_spread = 0.1,
-      asset_bonus = 0
-    )
-  )
-  
-  new <- migrate_strategy(old, verbose = FALSE)
-  
-  expect_equal(new$Gold$asset_class, "etn")
-  expect_true(new$Gold$deliverable)
-  expect_equal(new$Gold$tax_regime, "private_sale")
-})
-
-
 test_that("print.strategy works", {
   strat <- create_strategy(
     ETF = asset_config(asset_class = "etf"),

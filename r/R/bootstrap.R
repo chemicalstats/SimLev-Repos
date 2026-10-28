@@ -145,10 +145,6 @@
 #'   im Original) oder \code{"prices"} (Kursniveaus; Renditen werden intern als
 #'   Verhaeltnis aufeinanderfolgender Zeilen gebildet, die erste Zeile entfaellt).
 #'
-#' @details \code{create_config()} ist ein Alias von \code{bootstrap_config()}
-#'   mit identischen Argumenten und identischem Ergebnis, fuer Skripte, die die
-#'   urspruengliche Hilfsfunktion aus '00 Bootstraps' verwenden.
-#'
 #' @return Objekt der Klasse \code{bootstrap_config} (Liste mit
 #'   \code{indices}, \code{letfs} (mit allen Standardwerten ergaenzt),
 #'   \code{regime_index}, \code{aux}, \code{aux_type} (Art je Zusatzreihe,
@@ -164,7 +160,7 @@
 #'   aux = c(rate = "eu_rate"))
 #' cfg
 #' # Kursniveaus als Eingabe, Short-Produkt mit festem Zins:
-#' cfg2 <- create_config(c(akt = "aktien"), input = "prices",
+#' cfg2 <- bootstrap_config(c(akt = "aktien"), input = "prices",
 #'   letfs = list(list(base = "akt", leverage = -1, finance = 2, expense = 0.6)))
 #' cfg2$letf_names
 #' # Preisindex als Niveau (Pfad enthaelt den kumulierten CPI), Zins als Rate:
@@ -232,14 +228,6 @@ bootstrap_config <- function(indices, letfs = list(), regime_index = NULL, aux =
     n_indices = length(index_names), n_letfs = length(letf_list), n_aux = length(aux_names),
     index_names = index_names, letf_names = letf_names, aux_names = aux_names
   ), class = "bootstrap_config")
-}
-
-#' @rdname bootstrap_config
-#' @export
-create_config <- function(indices, letfs = list(), regime_index = NULL, aux = NULL, aux_type = NULL,
-                          cross = c("ratio", "joint"), input = c("returns", "prices")) {
-  bootstrap_config(indices, letfs = letfs, regime_index = regime_index, aux = aux, aux_type = aux_type,
-                   cross = cross, input = input)
 }
 
 #' @rdname SimLevBootstrap-methods
@@ -490,6 +478,12 @@ block_length <- function(x, transform = c("none", "abs", "squared")) {
 # ─────────────────────────────────────────────────────────────────────────────
 
 #' GARCH(1,1) / GJR-GARCH(1,1) schaetzen (rugarch -> optim -> Momente)
+#'
+#' Der Fit nutzt die aus rugarch 1.5-6 uebernommene Fassung von ugarchspec,
+#' ugarchfit und coef (.rugarch_ugarchspec, .rugarch_ugarchfit, .rugarch_coef
+#' in R/vendor_rugarch.R, mit Rsolnp und truncnorm; die numerischen
+#' Ableitungen rechnet R/richardson.R); rugarch muss nicht installiert sein. Scheitert der Fit mit einem Fehler, folgen optim
+#' und die Momente.
 #' @keywords internal
 #' @noRd
 .fit_garch11 <- function(e, gjr = FALSE, quiet = FALSE) {
@@ -499,12 +493,12 @@ block_length <- function(x, transform = c("none", "abs", "squared")) {
     return(list(mu = mu, omega = 1e-20, alpha = 0, beta = 0, gamma = 0, s2 = rep(1e-20, n),
                 z = rep(0, n), method = "konstant", s2_init = 1e-20))
   }
-  if (requireNamespace("rugarch", quietly = TRUE)) tryCatch({
-    spec <- rugarch::ugarchspec(variance.model = list(model = if (gjr) "gjrGARCH" else "sGARCH", garchOrder = c(1, 1)),
+  tryCatch({
+    spec <- .rugarch_ugarchspec(variance.model = list(model = if (gjr) "gjrGARCH" else "sGARCH", garchOrder = c(1, 1)),
                                 mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
                                 distribution.model = "norm")
-    fit <- rugarch::ugarchfit(spec = spec, data = e, solver = "hybrid")
-    cf <- rugarch::coef(fit)
+    fit <- .rugarch_ugarchfit(spec = spec, data = e, solver = "hybrid")
+    cf <- .rugarch_coef(fit)
     mu <- unname(cf["mu"]); omega <- unname(cf["omega"]); alpha <- unname(cf["alpha1"]); beta <- unname(cf["beta1"])
     if (gjr) gamma <- unname(cf["gamma1"])
     method <- "rugarch"
@@ -567,7 +561,10 @@ block_length <- function(x, transform = c("none", "abs", "squared")) {
        z = do.call(cbind, lapply(fits, `[[`, "z")))
 }
 
-#' Tail-Schaetzung (GPD via evd -> Momente -> empirisch -> Default)
+#' Tail-Schaetzung (GPD via evd::fpot -> Momente -> empirisch -> Default)
+#'
+#' Der GPD-Fit nutzt die aus evd 2.3-7.1 uebernommene Fassung von fpot
+#' (.evd_fpot, R/vendor_evd.R); evd muss nicht installiert sein.
 #' @keywords internal
 #' @noRd
 .fit_tail <- function(base_ret, prob, side) {
@@ -575,8 +572,8 @@ block_length <- function(x, transform = c("none", "abs", "squared")) {
   mask <- if (side == "left") base_ret < thr else base_ret > thr
   exc <- if (side == "left") thr - base_ret[mask] else base_ret[mask] - thr
   ne <- length(exc); scale <- shape <- NULL; method <- "none"
-  if (ne >= 30 && requireNamespace("evd", quietly = TRUE)) tryCatch({
-    f <- evd::fpot(exc, threshold = 0, std.err = FALSE)
+  if (ne >= 30) tryCatch({
+    f <- .evd_fpot(exc, threshold = 0, std.err = FALSE)
     scale <- unname(f$estimate["scale"]); shape <- unname(f$estimate["shape"]); method <- "MLE"
   }, error = function(e) NULL)
   if (is.null(scale) && ne >= 20) {

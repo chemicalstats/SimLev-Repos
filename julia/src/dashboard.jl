@@ -16,6 +16,52 @@ const _DEFAULT_PANELS = ("performance", "drawdown", "distribution", "rolling", "
 const _MONATE_KURZ = ("Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez")
 const _R_PALETTE = ("black", "#DF536B", "#61D04F", "#2297E6", "#28E2E5", "#CD0BBC", "#F5C710", "gray62")
 
+_xget(x, name::AbstractString) = (x isa AbstractDict || x isa RList) ? get(x, name, nothing) : nothing
+_xlen(v) = v === nothing ? 0 : v isa AbstractVector ? length(v) : 1
+
+"""
+Tagesrenditen fürs Dashboard wie in `simulation()` (R: `.dashboard_returns`):
+einzahlungsbereinigt (aus `twr_index`), aufgefüllte Tage ausgeschlossen,
+Beobachtungen je Jahr, Sparplan-Kennung, Einzahlungssumme und zeitgewichteter
+Index (ältere Ergebnisse: aus `report\$flows`).
+"""
+function _dashboard_returns(x)
+    w = collect(Float64, _xget(x, "worth"))
+    n = length(w)
+    report = _xget(x, "report")
+    flows = zeros(n)
+    if report !== nothing && length(report) > 0
+        first_ = true
+        for (_, a) in report
+            f = collect(Float64, a["flows"])
+            if first_
+                flows = f; first_ = false
+            else
+                flows = flows .+ f
+            end
+        end
+    end
+    length(flows) != n && (flows = zeros(n))
+    twr_x = _xget(x, "twr_index")
+    has_twr = _xlen(twr_x) == n
+    all_r = n < 2 ? Float64[] :
+            has_twr ? Float64[twr_x[i+1] / twr_x[i] - 1 for i in 1:n-1] :
+            Float64[(w[i+1] - w[i] - flows[i+1]) / w[i] for i in 1:n-1]
+    all_r = Float64[isfinite(v) ? v : 0.0 for v in all_r]
+    fx = _xget(x, "filled")
+    filled = _xlen(fx) == n ? Vector{Bool}(fx) : falses(n)
+    r = n >= 1 ? all_r[.!filled[2:end]] : all_r
+    dates = _xget(x, "dates")
+    years = (dates !== nothing && n >= 2) ? Dates.value(dates[n] - dates[1]) / 365.25 : 0.0
+    ef = _xget(x, "external_flows")
+    ext = ef !== nothing ? _is_true(ef) : (n >= 2 && any(v -> !isnan(v) && v != 0, flows[2:end]))
+    inv = _xget(x, "invested")
+    invested = _xlen(inv) == n ? collect(Float64, inv) : n > 0 ? w[1] .+ r_cumsum([0.0; flows[2:end]]) : Float64[]
+    twr = has_twr ? collect(Float64, twr_x) : n > 0 ? r_cumprod([1.0; 1 .+ all_r]) : Float64[]
+    ppy = (years > 0 && !isempty(r)) ? length(r) / years : 365.25
+    return (all_returns = all_r, returns = r, ppy = ppy, external_flows = ext, invested = invested, twr_index = twr)
+end
+
 """
     SimLevDashboard
 
@@ -907,10 +953,6 @@ function export_dashboard(x, filename_pos::AbstractString = "dashboard.svg"; fil
     _message("export_dashboard: Dashboard gespeichert in $filename")
     return nothing
 end
-
-"Platzhalter wie in R ohne plotly: Fehler (für ein interaktives Dashboard siehe `plot_interactive`)."
-export_html_dashboard(x, filename_pos::AbstractString = "dashboard.html"; filename::AbstractString = filename_pos) =
-    error("export_html_dashboard: Das Paket 'plotly' wird für HTML-Dashboards benötigt; installieren mit install.packages(\"plotly\").")
 
 const _PLOT_RESULT = _plot_method(plot_dashboard, "SimLevResult")
 

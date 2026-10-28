@@ -26,9 +26,9 @@ end
 "`getOption(name)` für digits, scipen, width, OutDec."
 get_option(name) = _OPT[Symbol(name)]
 
-#: R's `NA_real_` und eine R-NaN (Julia unterscheidet beide über `isna_strict`).
+#: R's `NA_real_` (= `SimLev.NA`); R's NaN ist ein gewöhnliches `NaN`
+#: (Julia unterscheidet beide über `isna_strict`).
 const NA_REAL = SimLev.NA
-const R_NAN = NaN
 
 # ── glibc: snprintf, log10, pow ────────────────────────────────────────────
 

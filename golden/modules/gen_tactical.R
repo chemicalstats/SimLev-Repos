@@ -127,7 +127,7 @@ for (k in seq_along(TRX)) trx(sprintf("tr_rx_%02d", k), TRX[[k]])
 trx("tr_rx_env", "if (thr > 100) A > thr else B > thr", "thr <- 101; ", "thr = 101\n", "thr = 101; ")
 trx("tr_rx_fun", "up(A) & !up(B)", "up <- function(x) x > 100; ", "def up(x):\n    return x > 100\n", "up(x) = x .> 100; ")
 trx("tr_rx_fun2", "lag1(A) > A", "lag1 <- function(x) c(NA, x[-length(x)]); ",
-    "def lag1(x):\n    return np.concatenate([[np.nan], np.asarray(x)[:-1]])\n", "lag1(x) = vcat(SL.NA, x[1:end-1]); ")
+    "def lag1(x):\n    return np.concatenate([[simlev._r.fmt.NA_REAL], np.asarray(x)[:-1]])\n", "lag1(x) = vcat(SL.NA, x[1:end-1]); ")
 
 # ── tactical_rotation ────────────────────────────────────────────────────────
 cs("rot_basic", "tactical_rotation(d, c('A', 'B'), top = 1, safe = c('C', 'CASH'))", "result = T.tactical_rotation(d, ['A', 'B'], top=1, safe=['C', 'CASH'])",

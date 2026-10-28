@@ -5,10 +5,6 @@
 \alias{add_asset}
 \alias{update_asset}
 \alias{remove_asset}
-\alias{migrate_strategy}
-\alias{as_list}
-\alias{as_list.strategy}
-\alias{as_list.default}
 \alias{print.strategy}
 \alias{summary.strategy}
 \title{Strategie-Objekte erstellen und verwalten}
@@ -29,10 +25,6 @@ update_asset(strategy, name, ...)
 
 remove_asset(strategy, name)
 
-migrate_strategy(old_strategy, verbose = TRUE)
-
-as_list(x, ...)
-
 \method{print}{strategy}(x, ...)
 \method{summary}{strategy}(object, ...)
 }
@@ -43,7 +35,7 @@ as_list(x, ...)
     \code{asset_config} umgewandelt und geprüft. Jeder Name darf nur einmal
     vorkommen (sonst Fehler).
     Für \code{update_asset}: benannte Felder, die im Asset aktualisiert werden.
-    Für \code{as_list}, \code{print}, \code{summary}: ignoriert.
+    Für \code{print}, \code{summary}: ignoriert.
   }
   \item{assets}{
     Benannte Liste von \code{asset_config}-Objekten oder \code{NULL}. Alternative
@@ -58,10 +50,6 @@ as_list(x, ...)
   }
   \item{name}{Character. Name des Assets (muss Spalte in \code{data} entsprechen).}
   \item{asset}{Ein \code{\link{asset_config}}-Objekt.}
-  \item{old_strategy}{
-    Alte Listen-Strategie (vor S3-Klassen-Einführung) zur Migration.
-  }
-  \item{verbose}{Logisch. Migrations-Meldungen ausgeben? Standard: \code{TRUE}.}
   \item{x, object}{Ein \code{"strategy"}-Objekt.}
 }
 \value{
@@ -71,12 +59,6 @@ as_list(x, ...)
   }
   \item{\code{add_asset}, \code{update_asset}, \code{remove_asset}}{
     Aktualisiertes \code{"strategy"}-Objekt.
-  }
-  \item{\code{migrate_strategy}}{
-    Konvertiertes \code{"strategy"}-Objekt.
-  }
-  \item{\code{as_list}}{
-    Unklassifizierte benannte Liste (für Legacy-Schnittstellen).
   }
   \item{\code{print}, \code{summary}}{
     Ausgabe auf der Konsole; \code{x} bzw. \code{object} unsichtbar.
@@ -105,12 +87,12 @@ as_list(x, ...)
   \code{"etf"}: \code{"investment_fund"}); ein abweichend gesetztes
   (explizites) \code{tax_regime} bleibt erhalten.
 
-  \code{migrate_strategy} setzt die veralteten Klassen
-  \code{"etn_deliverable"}/\code{"etn_standard"} in \code{"etn"} mit
+  Die veralteten Klassen \code{"etn_deliverable"}/\code{"etn_standard"}
+  setzt bereits \code{\link{asset_config}} mit Warnung in \code{"etn"} mit
   \code{deliverable = TRUE}/\code{FALSE} um.
 
-  \code{as_list} entfernt das \code{"strategy"}-Klassenattribut und gibt eine
-  einfache Liste zurück — nützlich für Systeme, die keine S3-Objekte erwarten.
+  Eine einfache benannte Liste ohne Klasse liefert \code{unclass(strategy)}
+  — nützlich für Systeme, die keine S3-Objekte erwarten.
 }
 \examples{
 # Zwei-Asset-Strategie
@@ -141,8 +123,8 @@ data <- data.frame(
 )
 validate_strategy(strategy, data)
 
-# Als plain list (Legacy)
-lst <- as_list(strategy)
+# Als einfache Liste ohne Klasse
+lst <- unclass(strategy)
 }
 \seealso{
   \code{\link{asset_config}}, \code{\link{simulation}}

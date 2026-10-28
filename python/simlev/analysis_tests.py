@@ -21,7 +21,7 @@ from ._r import fmt as _fmt
 from ._r.fmt import NA_REAL
 from ._r import nmath as _nm
 from ._r.rlist import RList
-from ._rnum import LD, r_mean, r_median, r_pow, r_sd
+from ._r.rnum import LD, r_mean, r_median, r_pow, r_sd
 from .deep_analysis import (
     _col_means, _da_deflate, _da_series, _dates, _days, _ext, _fill_na, _is_num_scalar, _key_isoweek,
     _key_month, _key_year, _last_of_key, _match_arg, _mean_lgl, _message, _quantile, _sp, _stats,
@@ -783,6 +783,6 @@ class SimLevHeatmap(RList):
         return self
 
 
-from .data_prep import _quiet_fp  # noqa: E402
+from ._r.base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), __all__ + ["_hac_cov", "_ret_from"])
+quiet_fp(globals(), __all__ + ["_hac_cov", "_ret_from"])

@@ -171,7 +171,7 @@ def test_a7_10_argumentpruefung():
         f(base_rate=[2.29, 0])
     for a in ("use_guenstigerpruefung", "include_soli_on_income_tax", "fractions", "use_sparer_pauschbetrag"):
         with pytest.raises(ValueError, match="'%s' muss TRUE oder FALSE sein, nicht NA" % a):
-            f(**{a: simlev._rnum.NA_REAL})     # R: NA
+            f(**{a: simlev._r.rnum.NA_REAL})     # R: NA
     assert any("base_rate = 0.0229 wird als 0.0229 % gelesen" in w for w in f(base_rate=0.0229)[1])
     assert f(base_rate=0.07)[1] == [] and f(base_rate=-0.5)[1] == []
     assert any("marginal_tax_rate = 0.42 wird als 0.42 %" in w for w in f(marginal_tax_rate=0.42)[1])

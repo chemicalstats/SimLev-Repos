@@ -1,4 +1,9 @@
-"""Nachbildung des optionalen R-Pakets evd 2.3-7.1 (Teil: ``fpot``).
+"""Nachbildung von evd 2.3-7.1 (Teil: ``fpot``), im R-Paket übernommen als ``.evd_fpot``.
+
+Herkunft: R-Paket evd 2.3-7.1 (CRAN, 2024-09-21), ``R/uvfit.R`` (``fpot``,
+``fpot.norm``) und ``src/pot.c`` (``nlgpd``); Autoren: Alec Stephenson.
+Function fbvpot by Chris Ferro. Lizenz: GPL-3. Nach Python übertragen und
+angepasst für SimLev (siehe ``python/COPYRIGHTS.md``).
 
 Nachgebildet ist ``fpot(x, threshold, model = "gpd", ...)`` mit
 ``fpot.norm`` (``cmax = FALSE``, ``mper = NULL``): Startwerte, die negative
@@ -10,8 +15,10 @@ Standardfehler über ``qr``/``solve.qr`` und alle Meldungen von evd.
 Nicht nachgebildet sind ``model = "pp"``, ``cmax = TRUE`` (Cluster) und
 ``mper`` (Quantil-Parametrisierung); sie werfen einen Fehler.
 
-SimLev nutzt ``fpot`` in ``.fit_tail`` (``bootstrap``, Verfahren ``"evt"``),
-wenn ``simlev._r.suggests.has("evd")`` gilt.
+SimLev nutzt ``fpot`` in ``.fit_tail`` (``bootstrap``, Verfahren ``"evt"``)
+bei mindestens 30 Überschreitungen; R nutzt dafür die übernommene Fassung
+``.evd_fpot`` (``r/R/vendor_evd.R``, ``r/src/vendor_evd.c``), evd selbst ist
+nicht mehr nötig.
 """
 from __future__ import annotations
 
@@ -26,7 +33,7 @@ from . import linalg as _la
 from . import stats as _stats
 from .linalg import RError
 from .rlist import RList
-from .._rnum import r_mean
+from .rnum import r_mean
 
 __all__ = ["fpot", "nlgpd", "Pot"]
 
@@ -260,6 +267,6 @@ def fpot(x, threshold, model="gpd", start=None, npp=None, cmax=False, r=1, ulow=
     return res
 
 
-from .base import quiet_fp as _quiet_fp  # noqa: E402
+from .base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), ["fpot", "nlgpd"])
+quiet_fp(globals(), ["fpot", "nlgpd"])

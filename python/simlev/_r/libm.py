@@ -12,7 +12,7 @@ import math
 
 import numpy as np
 
-from .._rnum import r_pow as _r_pow
+from .rnum import r_pow as _r_pow
 
 __all__ = ["exp", "log", "log1p", "expm1", "log2", "log10", "pow", "sin", "cos", "tan",
            "tanh", "atanh", "atan", "atan2", "asin", "acos", "sinh", "cosh", "lgamma_c",

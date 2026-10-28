@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import importlib
-import math
 import warnings
 from collections.abc import Mapping
 
@@ -17,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from ._r import fmt as _fmt
-from ._rnum import LD, r_cumprod, r_mean, r_mean_int, r_median, r_sum
+from ._r.rnum import r_cumprod, r_mean, r_mean_int, r_median, r_sum
 from .param_search import (_expand_grid, _isna, _match_arg, _modify_list, _py, _quiet, _seq_by,
                            _cond_msg, _which_max_py)
 
@@ -657,6 +656,6 @@ def leverage_sensitivity(data, index, leverages=None, rate=0, expense=0, spread=
 
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
-from .data_prep import _quiet_fp  # noqa: E402
+from ._r.base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), list(__all__))
+quiet_fp(globals(), list(__all__))

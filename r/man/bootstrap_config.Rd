@@ -2,20 +2,9 @@
 % Please edit documentation in R/bootstrap.R
 \name{bootstrap_config}
 \alias{bootstrap_config}
-\alias{create_config}
 \title{Bootstrap-Konfiguration erstellen}
 \usage{
 bootstrap_config(
-  indices,
-  letfs = list(),
-  regime_index = NULL,
-  aux = NULL,
-  aux_type = NULL,
-  cross = c("ratio", "joint"),
-  input = c("returns", "prices")
-)
-
-create_config(
   indices,
   letfs = list(),
   regime_index = NULL,
@@ -154,10 +143,6 @@ Index-Spalten Brutto-Renditen je Zeile (z. B. 1.002 fuer +0,2 Prozent), mit
 \code{input = "prices"} Kursniveaus. Eine Datumsspalte wird nicht benoetigt
 und nicht ausgewertet; Zeilen mit fehlenden Werten in den verwendeten
 Spalten werden entfernt.
-
-\code{create_config()} ist ein Alias von \code{bootstrap_config()}
-mit identischen Argumenten und identischem Ergebnis, fuer Skripte, die die
-urspruengliche Hilfsfunktion aus '00 Bootstraps' verwenden.
 }
 \examples{
 # Spalten mit Brutto-Tagesrenditen (us_ret, eu_ret) und einem Zins in
@@ -168,7 +153,7 @@ cfg <- bootstrap_config(
   aux = c(rate = "eu_rate"))
 cfg
 # Kursniveaus als Eingabe, Short-Produkt mit festem Zins:
-cfg2 <- create_config(c(akt = "aktien"), input = "prices",
+cfg2 <- bootstrap_config(c(akt = "aktien"), input = "prices",
   letfs = list(list(base = "akt", leverage = -1, finance = 2, expense = 0.6)))
 cfg2$letf_names
 # Preisindex als Niveau (Pfad enthaelt den kumulierten CPI), Zins als Rate:

@@ -19,9 +19,10 @@ import pandas as pd
 
 from . import dependence as _dep
 from ._r import fmt as _fmt
+from ._r.base import env_from_caller
 from ._r import libm as _libm
 from ._r.rlist import RList
-from ._rnum import LD, r_colsums, r_cumprod, r_rowsums, r_sd, r_sum
+from ._r.rnum import LD, r_colsums, r_cumprod, r_rowsums, r_sd, r_sum
 
 __all__ = ["view_mean", "view_prob", "view_vol", "entropy_pooling", "copula_scenarios", "scenario_risk",
            "crisis_replay", "SimLevScenarios"]
@@ -142,6 +143,7 @@ class SimLevScenarios(RList):
         return "\n".join(lines)
 
 
+@env_from_caller
 def entropy_pooling(x, assets, views, states=None, frequency=("week", "day", "month"), prior=None, env=None):
     """Entropy Pooling: Szenarien auf eigene Annahmen umgewichten.
 
@@ -159,12 +161,6 @@ def entropy_pooling(x, assets, views, states=None, frequency=("week", "day", "mo
         :class:`SimLevScenarios`.
     """
     frequency = _match_arg(frequency, ("week", "day", "month"))
-    if env is None:
-        import inspect
-        fr = inspect.currentframe().f_back
-        env = dict(fr.f_globals)
-        env.update(fr.f_locals)
-        del fr
     assets = _dep._as_names(assets)
     states_l = _dep._as_names(states)
     S = _scen_frame(x, assets, states, frequency)
@@ -261,7 +257,7 @@ def entropy_pooling(x, assets, views, states=None, frequency=("week", "day", "mo
     mu = r_colsums(Xa * q.reshape(-1, 1))
     C = np.asarray(la.crossprod((Xa - mu.reshape(1, -1)) * np.sqrt(q).reshape(-1, 1)), dtype=np.float64)
     Cc = np.asarray(_dep._stats().cov2cor(C), dtype=np.float64)
-    Cc[np.isnan(Cc)] = _fmt.R_NAN            # arithmetisch entstanden: NaN (nicht NA) wie in R
+    Cc[np.isnan(Cc)] = np.nan               # arithmetisch entstanden: NaN (nicht NA) wie in R
     qp = q[q > 0]
     out = SimLevScenarios()
     out["scenarios"] = S
@@ -610,11 +606,11 @@ def crisis_replay(data, weights, crises=None, rebalance=False):
 
 
 def _cummax_nan(x):
-    from ._rnum import r_cummax
+    from ._r.rnum import r_cummax
     return r_cummax(x)
 
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
-from .data_prep import _quiet_fp  # noqa: E402
+from ._r.base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), [_n for _n in __all__ if _n != "entropy_pooling"])  # ohne entropy_pooling: liest den Aufrufer-Frame (env)
+quiet_fp(globals(), __all__)  # entropy_pooling: env aus dem Aufrufer (env_from_caller)

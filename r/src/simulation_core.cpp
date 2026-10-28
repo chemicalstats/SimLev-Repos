@@ -11,9 +11,11 @@
 // input[3] trades, input[4] report, input[5] totals. Die Reihenfolge legt R zentral in
 // .SIM_MEM_LAYOUT (R/sim_prepare.R) fest; simulation() prueft sie mit .sim_check_layout()
 // vor dem ersten Aufruf einer C++-Funktion. Wer die Feldfolge in R aendert, muss alle
-// input[k] hier und in fifo_core_RCpp.cpp anpassen.
+// input[k] hier und in fifo_core.cpp anpassen.
 //
-// In-place-Semantik: Rcpp::List ist ein Verweis auf das R-Objekt, keine Kopie. Die
+// In-place-Semantik: Die Kerne arbeiten auf den R-Objekten selbst (SEXP), nicht auf
+// Kopien; Listen und Zahlenvektoren werden wie frueher mit Rcpp::List/NumericVector nur
+// umgewandelt, wenn ihr Typ nicht passt (sl::as_list, sl::num_vec). Die
 // Funktionen aendern sim_mem an Ort und Stelle (vorhandene Listenelemente und
 // Zahlenvektoren werden ueberschrieben, Unterlisten per status[name] = ... bzw.
 // input[k] = ... zurueckgeschrieben). Die void-Funktionen geben nichts zurueck: Der
@@ -39,13 +41,11 @@
 // Market-Felder (R-Namen):
 //   asset_day, base_rates, asset_price, signal_buy, signal_sell, spread_rate
 
-#include <Rcpp.h>
+#include "simlev_capi.h"
 #include <vector>
 #include <string>
 #include <algorithm>
 #include <cmath>
-
-using namespace Rcpp;
 
 // ===========================================================================
 // HILFSFUNKTIONEN
@@ -64,225 +64,217 @@ int days_in_month(int year, int month) {
 }
 
 // ===========================================================================
-// EXPORTIERTE FUNKTIONEN
+// KERNE (R-Huellen in R/cores.R)
 // ===========================================================================
 
-//' DCA-Zufluss einem Asset zuordnen
-//'
-//' Bucht die Sparplan-Einzahlung in den Simulationszustand (flows, money, total).
-//'
-//' @param input Liste des Simulationszustands (sim_mem)
-//' @param name Asset-Name
-//' @param flows Einzuzahlender Betrag in EUR
-//' @param index Tagesindex (1-basiert)
-//' @noRd
-// [[Rcpp::export]]
-void dca_flows_allocation(List input, String name, double flows, int index) {
-  List status = input[1];
-  List report = input[4];
+// DCA-Zufluss einem Asset zuordnen (.sim_dca_flows_cpp)
+//
+// Bucht die Sparplan-Einzahlung in den Simulationszustand (flows, money, total).
+//
+// input  Liste des Simulationszustands (sim_mem)
+// name   Asset-Name
+// flows  Einzuzahlender Betrag in EUR
+// index  Tagesindex (1-basiert)
+static void dca_flows_allocation(SEXP input, const char* name, double flows, int index) {
+  SEXP status = sl::as_list(sl::at(input, 1));
+  SEXP report = sl::as_list(sl::at(input, 4));
   
-  List status_name = as<List>(status[name]);
-  List report_name = as<List>(report[name]);
+  SEXP status_name = sl::as_list(sl::get(status, name));
+  SEXP report_name = sl::as_list(sl::get(report, name));
   
   // flows im Report aktualisieren
-  NumericVector report_flows = as<NumericVector>(report_name["flows"]);
+  sl::NumVec report_flows = sl::num_vec(sl::get(report_name, "flows"));
   report_flows[index - 1] = flows;
-  report_name["flows"] = report_flows;
+  sl::set(report_name, "flows", report_flows);
   
   // money (Cash) aktualisieren
-  double money = as<double>(status_name["money"]);
+  double money = sl::as_double(sl::get(status_name, "money"));
   money += flows;
-  status_name["money"] = money;
+  sl::set(status_name, "money", money);
   
-  NumericVector report_money = as<NumericVector>(report_name["money"]);
+  sl::NumVec report_money = sl::num_vec(sl::get(report_name, "money"));
   report_money[index - 1] = money;
-  report_name["money"] = report_money;
+  sl::set(report_name, "money", report_money);
   
   // total aktualisieren
-  double worth = as<double>(status_name["worth"]);
+  double worth = sl::as_double(sl::get(status_name, "worth"));
   double total = money + worth;
-  status_name["total"] = total;
+  sl::set(status_name, "total", total);
   
-  NumericVector report_total = as<NumericVector>(report_name["total"]);
+  sl::NumVec report_total = sl::num_vec(sl::get(report_name, "total"));
   report_total[index - 1] = total;
-  report_name["total"] = report_total;
+  sl::set(report_name, "total", report_total);
   
   // Zurueckschreiben
-  report[name] = report_name;
-  status[name] = status_name;
-  input[4] = report;
-  input[1] = status;
+  sl::set(report, name, report_name);
+  sl::set(status, name, status_name);
+  sl::put(input, 4, report);
+  sl::put(input, 1, status);
 }
 
 
-//' Report nach einem Kauf aktualisieren
-//'
-//' @param input Liste des Simulationszustands (sim_mem)
-//' @param name Asset-Name
-//' @param index Tagesindex (1-basiert)
-//' @param trade_count Anzahl gekaufter Anteile
-//' @param trade_price Gezahlter Preis je Anteil
-//' @param market_price Aktueller Marktkurs
-//' @noRd
-// [[Rcpp::export]]
-void calculate_buy_report(List input, String name, int index, 
-                          double trade_count, double trade_price, 
-                          double market_price) {
-  List status = input[1];
-  List report = input[4];
+// Report nach einem Kauf aktualisieren (.sim_buy_report_cpp)
+//
+// input        Liste des Simulationszustands (sim_mem)
+// name         Asset-Name
+// index        Tagesindex (1-basiert)
+// trade_count  Anzahl gekaufter Anteile
+// trade_price  Gezahlter Preis je Anteil
+// market_price Aktueller Marktkurs
+static void calculate_buy_report(SEXP input, const char* name, int index, 
+                                 double trade_count, double trade_price, 
+                                 double market_price) {
+  SEXP status = sl::as_list(sl::at(input, 1));
+  SEXP report = sl::as_list(sl::at(input, 4));
   
-  List status_name = status[name];
-  List report_name = report[name];
+  SEXP status_name = sl::as_list(sl::get(status, name));
+  SEXP report_name = sl::as_list(sl::get(report, name));
   
-  double count = as<double>(status_name["count"]);
-  double money = as<double>(status_name["money"]);
+  double count = sl::as_double(sl::get(status_name, "count"));
+  double money = sl::as_double(sl::get(status_name, "money"));
   
   count += trade_count;
-  status_name["count"] = count;
-  status_name["price"] = market_price;
+  sl::set(status_name, "count", count);
+  sl::set(status_name, "price", market_price);
   
   double worth = count * market_price;
-  status_name["worth"] = worth;
+  sl::set(status_name, "worth", worth);
   
   money -= (trade_count * trade_price);
-  status_name["money"] = money;
+  sl::set(status_name, "money", money);
   
   double total = worth + money;
-  status_name["total"] = total;
+  sl::set(status_name, "total", total);
   
-  status[name] = status_name;
-  input[1] = status;
+  sl::set(status, name, status_name);
+  sl::put(input, 1, status);
   
-  NumericVector worth_vec = report_name["worth"];
+  sl::NumVec worth_vec = sl::num_vec(sl::get(report_name, "worth"));
   worth_vec[index - 1] = worth;
-  report_name["worth"] = worth_vec;
+  sl::set(report_name, "worth", worth_vec);
   
-  NumericVector money_vec = report_name["money"];
+  sl::NumVec money_vec = sl::num_vec(sl::get(report_name, "money"));
   money_vec[index - 1] = money;
-  report_name["money"] = money_vec;
+  sl::set(report_name, "money", money_vec);
   
-  NumericVector total_vec = report_name["total"];
+  sl::NumVec total_vec = sl::num_vec(sl::get(report_name, "total"));
   total_vec[index - 1] = total;
-  report_name["total"] = total_vec;
+  sl::set(report_name, "total", total_vec);
   
-  report[name] = report_name;
-  input[4] = report;
+  sl::set(report, name, report_name);
+  sl::put(input, 4, report);
 }
 
 
-//' Report nach einem Verkauf aktualisieren
-//'
-//' @param input Liste des Simulationszustands (sim_mem)
-//' @param name Asset-Name
-//' @param index Tagesindex (1-basiert)
-//' @param trade_count Anzahl verkaufter Anteile
-//' @param trade_price Erhaltener Preis je Anteil
-//' @param market_price Aktueller Marktkurs
-//' @param capital_gains_tax Gezahlte Steuer auf den Gewinn
-//' @noRd
-// [[Rcpp::export]]
-void calculate_sell_report(List input, String name, int index,
-                           double trade_count, double trade_price,
-                           double market_price, double capital_gains_tax) {
-  List status = input[1];
-  List report = input[4];
+// Report nach einem Verkauf aktualisieren (.sim_sell_report_cpp)
+//
+// input             Liste des Simulationszustands (sim_mem)
+// name              Asset-Name
+// index             Tagesindex (1-basiert)
+// trade_count       Anzahl verkaufter Anteile
+// trade_price       Erhaltener Preis je Anteil
+// market_price      Aktueller Marktkurs
+// capital_gains_tax Gezahlte Steuer auf den Gewinn
+static void calculate_sell_report(SEXP input, const char* name, int index,
+                                  double trade_count, double trade_price,
+                                  double market_price, double capital_gains_tax) {
+  SEXP status = sl::as_list(sl::at(input, 1));
+  SEXP report = sl::as_list(sl::at(input, 4));
   
-  List status_name = status[name];
-  List report_name = report[name];
+  SEXP status_name = sl::as_list(sl::get(status, name));
+  SEXP report_name = sl::as_list(sl::get(report, name));
   
-  double count = as<double>(status_name["count"]);
-  double money = as<double>(status_name["money"]);
+  double count = sl::as_double(sl::get(status_name, "count"));
+  double money = sl::as_double(sl::get(status_name, "money"));
   
   count -= trade_count;
-  status_name["count"] = count;
-  status_name["price"] = market_price;
+  sl::set(status_name, "count", count);
+  sl::set(status_name, "price", market_price);
   
   double worth = count * market_price;
-  status_name["worth"] = worth;
+  sl::set(status_name, "worth", worth);
   
   money += (trade_count * trade_price) - capital_gains_tax;
-  status_name["money"] = money;
+  sl::set(status_name, "money", money);
   
   double total = worth + money;
-  status_name["total"] = total;
+  sl::set(status_name, "total", total);
   
-  status[name] = status_name;
-  input[1] = status;
+  sl::set(status, name, status_name);
+  sl::put(input, 1, status);
   
-  NumericVector worth_vec = report_name["worth"];
+  sl::NumVec worth_vec = sl::num_vec(sl::get(report_name, "worth"));
   worth_vec[index - 1] = worth;
-  report_name["worth"] = worth_vec;
+  sl::set(report_name, "worth", worth_vec);
   
-  NumericVector money_vec = report_name["money"];
+  sl::NumVec money_vec = sl::num_vec(sl::get(report_name, "money"));
   money_vec[index - 1] = money;
-  report_name["money"] = money_vec;
+  sl::set(report_name, "money", money_vec);
   
-  NumericVector total_vec = report_name["total"];
+  sl::NumVec total_vec = sl::num_vec(sl::get(report_name, "total"));
   total_vec[index - 1] = total;
-  report_name["total"] = total_vec;
+  sl::set(report_name, "total", total_vec);
   
-  report[name] = report_name;
-  input[4] = report;
+  sl::set(report, name, report_name);
+  sl::put(input, 4, report);
 }
 
 
-//' Gesamtreport fuer alle Assets berechnen
-//'
-//' Aktualisiert Status und Report aller Assets an einem Tag.
-//' Berechnet die Portfolio-Gewichte neu (gespeichert im Status-Feld "differ")
-//' auf Basis der aktuellen Marktwerte.
-//'
-//' @param input Liste des Simulationszustands (sim_mem)
-//' @param assets Zeichenvektor der Asset-Namen
-//' @param index Tagesindex (1-basiert)
-//' @noRd
-// [[Rcpp::export]]
-void calculate_total_report(List input, CharacterVector assets, int index) {
-  List status = input[1];
-  List market = input[2];
-  List report = input[4];
+// Gesamtreport fuer alle Assets berechnen (.sim_total_report_cpp)
+//
+// Aktualisiert Status und Report aller Assets an einem Tag.
+// Berechnet die Portfolio-Gewichte neu (gespeichert im Status-Feld "differ")
+// auf Basis der aktuellen Marktwerte.
+//
+// input  Liste des Simulationszustands (sim_mem)
+// assets Zeichenvektor der Asset-Namen
+// index  Tagesindex (1-basiert)
+static void calculate_total_report(SEXP input, SEXP assets, int index) {
+  SEXP status = sl::as_list(sl::at(input, 1));
+  SEXP market = sl::as_list(sl::at(input, 2));
+  SEXP report = sl::as_list(sl::at(input, 4));
   
   // Erster Durchlauf: Kurse aktualisieren und Summen berechnen
-  for (int i = 0; i < assets.size(); i++) {
-    String name = assets[i];
+  for (int i = 0; i < Rf_xlength(assets); i++) {
+    const char* name = CHAR(STRING_ELT(assets, i));
     
-    List status_name = as<List>(status[name]);
-    List market_name = as<List>(market[name]);
-    List report_name = as<List>(report[name]);
+    SEXP status_name = sl::as_list(sl::get(status, name));
+    SEXP market_name = sl::as_list(sl::get(market, name));
+    SEXP report_name = sl::as_list(sl::get(report, name));
     
-    NumericVector asset_price = as<NumericVector>(market_name["asset_price"]);
+    sl::NumVec asset_price = sl::num_vec(sl::get(market_name, "asset_price"));
     double price = asset_price[index - 1];
-    status_name["price"] = price;
+    sl::set(status_name, "price", price);
     
-    double count = as<double>(status_name["count"]);
+    double count = sl::as_double(sl::get(status_name, "count"));
     double worth = price * count;
-    status_name["worth"] = worth;
+    sl::set(status_name, "worth", worth);
     
-    NumericVector report_worth = as<NumericVector>(report_name["worth"]);
+    sl::NumVec report_worth = sl::num_vec(sl::get(report_name, "worth"));
     report_worth[index - 1] = worth;
-    report_name["worth"] = report_worth;
+    sl::set(report_name, "worth", report_worth);
     
-    double money = as<double>(status_name["money"]);
-    NumericVector report_money = as<NumericVector>(report_name["money"]);
+    double money = sl::as_double(sl::get(status_name, "money"));
+    sl::NumVec report_money = sl::num_vec(sl::get(report_name, "money"));
     report_money[index - 1] = money;
-    report_name["money"] = report_money;
+    sl::set(report_name, "money", report_money);
     
     double total = money + worth;
-    status_name["total"] = total;
-    NumericVector report_total = as<NumericVector>(report_name["total"]);
+    sl::set(status_name, "total", total);
+    sl::NumVec report_total = sl::num_vec(sl::get(report_name, "total"));
     report_total[index - 1] = total;
-    report_name["total"] = report_total;
+    sl::set(report_name, "total", report_total);
     
-    status[name] = status_name;
-    report[name] = report_name;
+    sl::set(status, name, status_name);
+    sl::set(report, name, report_name);
   }
   
   // Gesamtwert des Portfolios berechnen
   double total_worth = 0.0;
-  for (int i = 0; i < assets.size(); i++) {
-    String name = assets[i];
-    List status_name = as<List>(status[name]);
-    total_worth += as<double>(status_name["total"]);
+  for (int i = 0; i < Rf_xlength(assets); i++) {
+    const char* name = CHAR(STRING_ELT(assets, i));
+    SEXP status_name = sl::as_list(sl::get(status, name));
+    total_worth += sl::as_double(sl::get(status_name, "total"));
   }
   
   // Zweiter Durchlauf: Portfolio-Gewichte berechnen und speichern
@@ -291,118 +283,120 @@ void calculate_total_report(List input, CharacterVector assets, int index) {
   //   status["actual"] = normalisiertes Zielgewicht (wird hier NICHT ueberschrieben)
   //   status["differ"] = aktuelles Portfolio-Gewicht (wird hier aktualisiert)
   //
-  for (int i = 0; i < assets.size(); i++) {
-    String name = assets[i];
+  for (int i = 0; i < Rf_xlength(assets); i++) {
+    const char* name = CHAR(STRING_ELT(assets, i));
     
-    List status_name = as<List>(status[name]);
-    List report_name = as<List>(report[name]);
+    SEXP status_name = sl::as_list(sl::get(status, name));
+    SEXP report_name = sl::as_list(sl::get(report, name));
     
-    double total = as<double>(status_name["total"]);
+    double total = sl::as_double(sl::get(status_name, "total"));
     double current_weight = (total_worth > 0) ? total / total_worth : 0.0;
     
     // Aktuelles Portfolio-Gewicht in "differ" speichern
     // (R-Code liest dies als sim_mem[[2]][[name]][[8]] fuer DCA/Rebalancing)
-    status_name["differ"] = current_weight;
+    sl::set(status_name, "differ", current_weight);
     
     // Report: share-Vektor aktualisieren
-    NumericVector report_share = as<NumericVector>(report_name["share"]);
+    sl::NumVec report_share = sl::num_vec(sl::get(report_name, "share"));
     report_share[index - 1] = current_weight;
-    report_name["share"] = report_share;
+    sl::set(report_name, "share", report_share);
     
-    status[name] = status_name;
-    report[name] = report_name;
+    sl::set(status, name, status_name);
+    sl::set(report, name, report_name);
   }
   
-  input[1] = status;
-  input[4] = report;
+  sl::put(input, 1, status);
+  sl::put(input, 4, report);
 }
 
 
-//' Kauf ausfuehren (C++-Kern)
-//'
-//' Fuehrt die Kern-Kauflogik aus: ruft calculate_buy_report auf (Report- und Status-Update),
-//' legt einen FIFO-Lot-Eintrag an und erhoeht buy_count. Alles per Referenz.
-//'
-//' Der R-Wrapper uebernimmt: Berechnung von trade_count (Spread, Bruchteile), Detailausgabe.
-//'
-//' @param input Liste des Simulationszustands (wird direkt veraendert)
-//' @param name Asset-Name
-//' @param index Tagesindex (1-basiert)
-//' @param trade_count Anzahl zu kaufender Anteile
-//' @param trade_price Preis je Anteil (nach Spread)
-//' @param market_price Marktkurs (vor Spread)
-//' @noRd
-// [[Rcpp::export]]
-void perform_trade_buy_cpp(List input, String name, int index,
-                           double trade_count, double trade_price,
-                           double market_price) {
+// Kauf ausfuehren (.sim_buy_cpp)
+//
+// Fuehrt die Kern-Kauflogik aus: ruft calculate_buy_report auf (Report- und Status-Update),
+// legt einen FIFO-Lot-Eintrag an und erhoeht buy_count. Alles per Referenz.
+//
+// Der R-Wrapper uebernimmt: Berechnung von trade_count (Spread, Bruchteile), Detailausgabe.
+//
+// input        Liste des Simulationszustands (wird direkt veraendert)
+// name         Asset-Name
+// index        Tagesindex (1-basiert)
+// trade_count  Anzahl zu kaufender Anteile
+// trade_price  Preis je Anteil (nach Spread)
+// market_price Marktkurs (vor Spread)
+static void perform_trade_buy_cpp(SEXP input, const char* name, int index,
+                                  double trade_count, double trade_price,
+                                  double market_price) {
   
   // 1. Report- und Status-Update (ueber vorhandene C++-Funktion)
   calculate_buy_report(input, name, index, trade_count, trade_price, market_price);
   
   // 2. FIFO-Lot erstellen
-  List trades = input[3];  // trades
-  List trades_name = as<List>(trades[name]);
+  SEXP trades = sl::as_list(sl::at(input, 3));  // trades
+  SEXP trades_name = sl::as_list(sl::get(trades, name));
   
-  // Kaufdatum aus market[[name]][["asset_day"]]
-  List market = input[2];
-  List market_name = as<List>(market[name]);
-  DateVector asset_days = as<DateVector>(market_name["asset_day"]);
-  Date event_date = asset_days[index - 1];
+  // Kaufdatum aus market[[name]][["asset_day"]] (wie Rcpp::DateVector: Zahlenvektor,
+  // dessen class-Attribut an Ort und Stelle auf "Date" gesetzt wird)
+  SEXP market = sl::as_list(sl::at(input, 2));
+  SEXP market_name = sl::as_list(sl::get(market, name));
+  sl::NumVec asset_days = sl::num_vec(sl::get(market_name, "asset_day"));
+  {
+    SEXP date_class = PROTECT(Rf_mkString("Date"));
+    Rf_setAttrib(asset_days.sexp, R_ClassSymbol, date_class);
+    UNPROTECT(1);
+  }
+  sl::Date event_date = {asset_days[index - 1]};
   
   // Lot-Felder: Zugriff ueber Namen, konsistent mit dem R-Code
   // buy[["date"]], buy[["type"]], buy[["count"]], buy[["price"]],
   // buy[["remaining"]], buy[["original"]], (buy[["vp"]] wird später am 31.12. ergänzt)
-  List lot = List::create(
-    Named("date") = Date(event_date),
-    Named("type") = "Buy",
-    Named("count") = trade_count,
-    Named("price") = trade_price,
-    Named("remaining") = trade_count,
-    Named("original") = trade_count
+  SEXP lot = sl::named_list(
+    "date", event_date,
+    "type", "Buy",
+    "count", trade_count,
+    "price", trade_price,
+    "remaining", trade_count,
+    "original", trade_count
   );
   
   // 3. Lot an buys-Liste anhängen
-  int buy_count = as<int>(trades_name["buy_count"]) + 1;
-  trades_name["buy_count"] = buy_count;
+  int buy_count = sl::as_int(sl::get(trades_name, "buy_count")) + 1;
+  sl::set(trades_name, "buy_count", buy_count);
   
-  List buys = as<List>(trades_name["buys"]);
-  buys[buy_count - 1] = lot;  // 0-basierter Index
-  trades_name["buys"] = buys;
+  SEXP buys = sl::as_list(sl::get(trades_name, "buys"));
+  sl::put(buys, buy_count - 1, lot);  // 0-basierter Index
+  sl::set(trades_name, "buys", buys);
   
-  trades[name] = trades_name;
-  input[3] = trades;
+  sl::set(trades, name, trades_name);
+  sl::put(input, 3, trades);
 }
 
 
-//' Markt-Update fuer einen einzelnen Tag (Fast Path)
-//'
-//' Aktualisiert Kurse, worth, total und Portfolio-Gewichte aller Assets
-//' an einem Tag. Ersetzt das fruehere perform_market_update in R.
-//'
-//' @param input Liste des Simulationszustands (wird direkt veraendert)
-//' @param assets Zeichenvektor der Asset-Namen
-//' @param index Tagesindex (1-basiert)
-//' @noRd
-// [[Rcpp::export]]
-void perform_market_update(List input, CharacterVector assets, int index) {
-  List status = input[1];
-  List market = input[2];
-  List report = input[4];
+// Markt-Update fuer einen einzelnen Tag, Fast Path (.sim_market_update_cpp)
+//
+// Aktualisiert Kurse, worth, total und Portfolio-Gewichte aller Assets
+// an einem Tag. Ersetzt das fruehere perform_market_update in R.
+//
+// input  Liste des Simulationszustands (wird direkt veraendert)
+// assets Zeichenvektor der Asset-Namen
+// index  Tagesindex (1-basiert)
+static void perform_market_update(SEXP input, SEXP assets, int index) {
+  SEXP status = sl::as_list(sl::at(input, 1));
+  SEXP market = sl::as_list(sl::at(input, 2));
+  SEXP report = sl::as_list(sl::at(input, 4));
   
-  int n_assets = assets.size();
+  int n_assets = Rf_xlength(assets);
   double total_portfolio = 0.0;
   std::vector<double> asset_totals(n_assets);
   
   for (int i = 0; i < n_assets; i++) {
-    String name = assets[i];
-    List status_name = as<List>(status[name]);
-    List market_name = as<List>(market[name]);
-    List report_name = as<List>(report[name]);
+    const char* name = CHAR(STRING_ELT(assets, i));
+    SEXP status_name = sl::as_list(sl::get(status, name));
+    SEXP market_name = sl::as_list(sl::get(market, name));
+    SEXP report_name = sl::as_list(sl::get(report, name));
     
-    NumericVector prices = as<NumericVector>(market_name["asset_price"]);
-    double count = as<double>(status_name["count"]);
-    double money = as<double>(status_name["money"]);
+    sl::NumVec prices = sl::num_vec(sl::get(market_name, "asset_price"));
+    double count = sl::as_double(sl::get(status_name, "count"));
+    double money = sl::as_double(sl::get(status_name, "money"));
     double worth = count * prices[index - 1];
     double total = worth + money;
     
@@ -410,64 +404,63 @@ void perform_market_update(List input, CharacterVector assets, int index) {
     total_portfolio += total;
     
     // Report-Vektoren in-place aktualisieren
-    NumericVector rw = as<NumericVector>(report_name["worth"]);
-    NumericVector rm = as<NumericVector>(report_name["money"]);
-    NumericVector rf = as<NumericVector>(report_name["flows"]);
-    NumericVector rt = as<NumericVector>(report_name["total"]);
+    sl::NumVec rw = sl::num_vec(sl::get(report_name, "worth"));
+    sl::NumVec rm = sl::num_vec(sl::get(report_name, "money"));
+    sl::NumVec rf = sl::num_vec(sl::get(report_name, "flows"));
+    sl::NumVec rt = sl::num_vec(sl::get(report_name, "total"));
     rw[index - 1] = worth;
     rm[index - 1] = money;
     rf[index - 1] = 0.0;
     rt[index - 1] = total;
     
     // Status aktualisieren
-    status_name["price"] = prices[index - 1];
-    status_name["worth"] = worth;
-    status_name["total"] = total;
+    sl::set(status_name, "price", prices[index - 1]);
+    sl::set(status_name, "worth", worth);
+    sl::set(status_name, "total", total);
     
-    status[name] = status_name;
+    sl::set(status, name, status_name);
   }
   
   // Gewichte berechnen und schreiben
   for (int i = 0; i < n_assets; i++) {
-    String name = assets[i];
-    List status_name = as<List>(status[name]);
-    List report_name = as<List>(report[name]);
+    const char* name = CHAR(STRING_ELT(assets, i));
+    SEXP status_name = sl::as_list(sl::get(status, name));
+    SEXP report_name = sl::as_list(sl::get(report, name));
     
     double weight = (total_portfolio > 0) ? asset_totals[i] / total_portfolio : 0.0;
-    NumericVector rs = as<NumericVector>(report_name["share"]);
+    sl::NumVec rs = sl::num_vec(sl::get(report_name, "share"));
     rs[index - 1] = weight;
-    status_name["differ"] = weight;
+    sl::set(status_name, "differ", weight);
     
-    status[name] = status_name;
+    sl::set(status, name, status_name);
   }
   
-  input[1] = status;
-  input[4] = report;
+  sl::put(input, 1, status);
+  sl::put(input, 4, report);
 }
 
 
-//' Gebuendeltes Markt-Update fuer zusammenhaengende Fast-Path-Tage
-//'
-//' Vektorisiertes Update fuer einen Tagesbereich ohne Trades, DCA, Rebalancing,
-//' Jahreswechsel oder "Staking"-Ereignisse. An diesen Tagen sind count und money
-//' je Asset konstant; worth und total sind daher einfach mit dem Kurs skalierte Vektoren.
-//'
-//' Das ersetzt Hunderte einzelner Aufrufe von perform_market_update() durch
-//' eine einzige kompakte C++-Schleife ueber die Kursvektoren.
-//'
-//' @param input Liste des Simulationszustands (wird direkt veraendert)
-//' @param assets Zeichenvektor der Asset-Namen
-//' @param start_idx Erster Tagesindex (1-basiert, einschliesslich)
-//' @param end_idx Letzter Tagesindex (1-basiert, einschliesslich)
-//' @noRd
-// [[Rcpp::export]]
-void batch_market_update(List input, CharacterVector assets, 
-                         int start_idx, int end_idx) {
-  List status = input[1];
-  List market = input[2];
-  List report = input[4];
+// Gebuendeltes Markt-Update fuer zusammenhaengende Fast-Path-Tage
+// (.sim_market_update_batch_cpp)
+//
+// Vektorisiertes Update fuer einen Tagesbereich ohne Trades, DCA, Rebalancing,
+// Jahreswechsel oder "Staking"-Ereignisse. An diesen Tagen sind count und money
+// je Asset konstant; worth und total sind daher einfach mit dem Kurs skalierte Vektoren.
+//
+// Das ersetzt Hunderte einzelner Aufrufe von .sim_market_update_cpp() durch
+// eine einzige kompakte C++-Schleife ueber die Kursvektoren.
+//
+// input     Liste des Simulationszustands (wird direkt veraendert)
+// assets    Zeichenvektor der Asset-Namen
+// start_idx Erster Tagesindex (1-basiert, einschliesslich)
+// end_idx   Letzter Tagesindex (1-basiert, einschliesslich)
+static void batch_market_update(SEXP input, SEXP assets, 
+                                int start_idx, int end_idx) {
+  SEXP status = sl::as_list(sl::at(input, 1));
+  SEXP market = sl::as_list(sl::at(input, 2));
+  SEXP report = sl::as_list(sl::at(input, 4));
   
-  int n_assets = assets.size();
+  int n_assets = Rf_xlength(assets);
   int n_days = end_idx - start_idx + 1;
   if (n_days <= 0) return;
   
@@ -477,19 +470,19 @@ void batch_market_update(List input, CharacterVector assets,
   // === PASS 1: Preise, Worth, Total berechnen und Report schreiben ===
   // Pro Asset: Ein Durchlauf ueber den Preisvektor (cache-freundlich)
   for (int a = 0; a < n_assets; a++) {
-    String name = assets[a];
-    List status_name = as<List>(status[name]);
-    List market_name = as<List>(market[name]);
-    List report_name = as<List>(report[name]);
+    const char* name = CHAR(STRING_ELT(assets, a));
+    SEXP status_name = sl::as_list(sl::get(status, name));
+    SEXP market_name = sl::as_list(sl::get(market, name));
+    SEXP report_name = sl::as_list(sl::get(report, name));
     
-    double count = as<double>(status_name["count"]);
-    double money = as<double>(status_name["money"]);
+    double count = sl::as_double(sl::get(status_name, "count"));
+    double money = sl::as_double(sl::get(status_name, "money"));
     
-    NumericVector prices = as<NumericVector>(market_name["asset_price"]);
-    NumericVector rw = as<NumericVector>(report_name["worth"]);
-    NumericVector rm = as<NumericVector>(report_name["money"]);
-    NumericVector rf = as<NumericVector>(report_name["flows"]);
-    NumericVector rt = as<NumericVector>(report_name["total"]);
+    sl::NumVec prices = sl::num_vec(sl::get(market_name, "asset_price"));
+    sl::NumVec rw = sl::num_vec(sl::get(report_name, "worth"));
+    sl::NumVec rm = sl::num_vec(sl::get(report_name, "money"));
+    sl::NumVec rf = sl::num_vec(sl::get(report_name, "flows"));
+    sl::NumVec rt = sl::num_vec(sl::get(report_name, "total"));
     
     double last_worth = 0.0, last_total = 0.0, last_price = 0.0;
     
@@ -511,21 +504,21 @@ void batch_market_update(List input, CharacterVector assets,
     }
     
     // Status auf letzten Tag des Blocks setzen
-    status_name["price"] = last_price;
-    status_name["worth"] = last_worth;
-    status_name["total"] = last_total;
+    sl::set(status_name, "price", last_price);
+    sl::set(status_name, "worth", last_worth);
+    sl::set(status_name, "total", last_total);
     
-    status[name] = status_name;
+    sl::set(status, name, status_name);
   }
   
   // === PASS 2: Portfolio-Gewichte berechnen ===
   for (int a = 0; a < n_assets; a++) {
-    String name = assets[a];
-    List status_name = as<List>(status[name]);
-    List report_name = as<List>(report[name]);
+    const char* name = CHAR(STRING_ELT(assets, a));
+    SEXP status_name = sl::as_list(sl::get(status, name));
+    SEXP report_name = sl::as_list(sl::get(report, name));
     
-    NumericVector rs = as<NumericVector>(report_name["share"]);
-    NumericVector rt = as<NumericVector>(report_name["total"]);
+    sl::NumVec rs = sl::num_vec(sl::get(report_name, "share"));
+    sl::NumVec rt = sl::num_vec(sl::get(report_name, "total"));
     
     double last_weight = 0.0;
     for (int d = 0; d < n_days; d++) {
@@ -538,10 +531,101 @@ void batch_market_update(List input, CharacterVector assets,
     }
     
     // Status-Gewicht auf letzten Tag des Blocks setzen
-    status_name["differ"] = last_weight;
-    status[name] = status_name;
+    sl::set(status_name, "differ", last_weight);
+    sl::set(status, name, status_name);
   }
   
-  input[1] = status;
-  input[4] = report;
+  sl::put(input, 1, status);
+  sl::put(input, 4, report);
+}
+
+// ===========================================================================
+// .CALL-HUELLEN (registriert in init.c). Argumente wie die frueheren
+// Rcpp-Huellen: input als Liste, name als Rcpp::String (erstes Element eines
+// Zeichenvektors), assets als Zeichenvektor; Rueckgabe NULL (R: invisible()).
+// ===========================================================================
+
+extern "C" SEXP C_sim_dca_flows(SEXP s_input, SEXP s_name, SEXP s_flows, SEXP s_index) {
+  return sl::call([&]() {
+    SEXP input = sl::as_list(s_input);
+    const char* name = sl::as_rstring(s_name);
+    double flows = sl::as_double(s_flows);
+    int index = sl::as_int(s_index);
+    dca_flows_allocation(input, name, flows, index);
+    return R_NilValue;
+  });
+}
+
+extern "C" SEXP C_sim_buy_report(SEXP s_input, SEXP s_name, SEXP s_index, SEXP s_trade_count,
+                                 SEXP s_trade_price, SEXP s_market_price) {
+  return sl::call([&]() {
+    SEXP input = sl::as_list(s_input);
+    const char* name = sl::as_rstring(s_name);
+    int index = sl::as_int(s_index);
+    double trade_count = sl::as_double(s_trade_count);
+    double trade_price = sl::as_double(s_trade_price);
+    double market_price = sl::as_double(s_market_price);
+    calculate_buy_report(input, name, index, trade_count, trade_price, market_price);
+    return R_NilValue;
+  });
+}
+
+extern "C" SEXP C_sim_sell_report(SEXP s_input, SEXP s_name, SEXP s_index, SEXP s_trade_count,
+                                  SEXP s_trade_price, SEXP s_market_price, SEXP s_capital_gains_tax) {
+  return sl::call([&]() {
+    SEXP input = sl::as_list(s_input);
+    const char* name = sl::as_rstring(s_name);
+    int index = sl::as_int(s_index);
+    double trade_count = sl::as_double(s_trade_count);
+    double trade_price = sl::as_double(s_trade_price);
+    double market_price = sl::as_double(s_market_price);
+    double capital_gains_tax = sl::as_double(s_capital_gains_tax);
+    calculate_sell_report(input, name, index, trade_count, trade_price, market_price, capital_gains_tax);
+    return R_NilValue;
+  });
+}
+
+extern "C" SEXP C_sim_total_report(SEXP s_input, SEXP s_assets, SEXP s_index) {
+  return sl::call([&]() {
+    SEXP input = sl::as_list(s_input);
+    SEXP assets = sl::as_character(s_assets);
+    int index = sl::as_int(s_index);
+    calculate_total_report(input, assets, index);
+    return R_NilValue;
+  });
+}
+
+extern "C" SEXP C_sim_buy(SEXP s_input, SEXP s_name, SEXP s_index, SEXP s_trade_count,
+                          SEXP s_trade_price, SEXP s_market_price) {
+  return sl::call([&]() {
+    SEXP input = sl::as_list(s_input);
+    const char* name = sl::as_rstring(s_name);
+    int index = sl::as_int(s_index);
+    double trade_count = sl::as_double(s_trade_count);
+    double trade_price = sl::as_double(s_trade_price);
+    double market_price = sl::as_double(s_market_price);
+    perform_trade_buy_cpp(input, name, index, trade_count, trade_price, market_price);
+    return R_NilValue;
+  });
+}
+
+extern "C" SEXP C_sim_market_update(SEXP s_input, SEXP s_assets, SEXP s_index) {
+  return sl::call([&]() {
+    SEXP input = sl::as_list(s_input);
+    SEXP assets = sl::as_character(s_assets);
+    int index = sl::as_int(s_index);
+    perform_market_update(input, assets, index);
+    return R_NilValue;
+  });
+}
+
+extern "C" SEXP C_sim_market_update_batch(SEXP s_input, SEXP s_assets, SEXP s_start_idx, SEXP s_end_idx) {
+  return sl::call([&]() {
+    SEXP input = sl::as_list(s_input);
+    SEXP assets = sl::as_character(s_assets);
+    int start_idx = sl::as_int(s_start_idx);
+    int end_idx = sl::as_int(s_end_idx);
+    batch_market_update(input, assets, start_idx, end_idx);
+    return R_NilValue;
+  });
 }

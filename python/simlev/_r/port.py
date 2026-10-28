@@ -29,7 +29,7 @@ import pandas as pd
 from . import libm as _libm
 from ._blas import dnrm2 as _dnrm2_blas
 from .linalg import RError
-from .._rnum import NA_REAL
+from .rnum import NA_REAL
 
 __all__ = ["divset", "port_nlminb"]
 

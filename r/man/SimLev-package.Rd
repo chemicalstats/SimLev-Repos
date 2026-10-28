@@ -62,8 +62,7 @@
   \code{\link{bootstrap_probability}}, \code{\link{pbo}},
   \code{\link{deflated_sharpe}}, \code{\link{reality_check}} und
   \code{\link{sharpe_haircut}} aus. Grafiken: \code{plot()},
-  \code{\link{export_dashboard}} (PDF), \code{\link{plot_interactive}}
-  (HTML).
+  \code{\link{export_dashboard}} (PDF).
 }
 \section{Glossar: Einheiten und Argumentnamen}{
   Die Argumentnamen sind über die Funktionen gewachsen und nicht überall

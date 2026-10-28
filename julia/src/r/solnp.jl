@@ -1,6 +1,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # RSolnp – Nachbildung von Rsolnp::solnp (Rsolnp 1.16), bitgleich
 #
+# Herkunft: R-Paket Rsolnp 1.16 (CRAN, 2015-12-28), solnp, gosolnp und Hilfen;
+# Autoren: Alexios Ghalanos and Stefan Theussl. Lizenz: GPL (laut
+# inst/COPYRIGHTS von Rsolnp GPL-3). Nach Julia übertragen und angepasst für
+# SimLev (siehe julia/COPYRIGHTS.md); im R-Paket übernommen als .rsolnp_solnp
+# und .rsolnp_gosolnp (r/R/vendor_rsolnp.R).
+#
 # SQP-Verfahren nach Y. Ye (1989) mit erweiterter Lagrange-Funktion für
 # Gleichungs- und Ungleichungsnebenbedingungen und Parameterschranken. Die
 # Rechenschritte folgen dem R-Code von solnp, .subnp und den Hilfen

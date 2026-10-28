@@ -1,21 +1,32 @@
 # SimLev (R) – Änderungen je Version
 
-Die Python- und die Julia-Fassung stehen weiterhin auf 0.1.0. Alle
-Erweiterungen ab 0.2.0 gibt es nur im R-Paket. Die Ports entsprechen dem
-früheren Stand des R-Pakets vor den Korrekturen (Commit 54b5b4f, damals
-ebenfalls als 0.5.0 bezeichnet; im Folgenden „Stand 54b5b4f“). Bis zu
-diesem Stand blieben die 105 Golden-Master-Fälle der Engine bitgleich; die
-aktuelle Fassung 0.5.0 korrigiert Rechenfehler der Engine, setzt die
-Besteuerung nach geltendem Recht um, gibt alle Ausgaben auf Deutsch aus und
-erzeugt alle 105 Fälle neu (siehe unten). Python und Julia sind noch nicht
-nachgezogen: Python trifft keinen der 68 Fälle in `golden/cases/`
-vollständig (die Druckausgabe weicht überall ab); nur in `f18` und `f19`
-sind alle Zahlenfelder noch bitgleich.
+Die Python- und die Julia-Fassung sind seit ihrer Version 0.5.0
+vollständige Ports dieser R-Fassung 0.5.0 (alle Exporte, alle
+Erweiterungen) und bitgleich zu ihr; ihre Änderungen stehen in
+[`python/NEWS.md`](../python/NEWS.md) und
+[`julia/NEWS.md`](../julia/NEWS.md). Ihre Vorversionen 0.1.0 enthielten nur
+die Engine und entsprachen dem früheren Stand des R-Pakets vor den
+Korrekturen (Commit 54b5b4f, damals ebenfalls als 0.5.0 bezeichnet; im
+Folgenden „Stand 54b5b4f“). Bis zu diesem Stand blieben die 105
+Golden-Master-Fälle der Engine bitgleich; die aktuelle Fassung 0.5.0
+korrigiert Rechenfehler der Engine, setzt die Besteuerung nach geltendem
+Recht um, gibt alle Ausgaben auf Deutsch aus und erzeugt alle 105 Fälle
+neu (siehe unten). Python 0.5.0 und Julia 0.5.0 sind zu allen 105 Fällen
+bitgleich.
+
+## SimLev 0.5.1
+
+Patch-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Abhängigkeiten: evd (GPD-Anpassung), imputeTS/stinepack (Interpolation), rugarch mit Rsolnp und truncnorm (GARCH-Schätzung) als interne Teile eingebaut; R braucht zur Laufzeit nur Basis-R.
+- Ableitungen: eigene Richardson-Extrapolation für Hesse- und Jacobi-Matrix statt numDeriv.
+- C/C++-Kerne: Anbindung über R's C-Schnittstelle statt Rcpp, Fehlertexte unverändert.
+- Ports: Python und Julia bilden die eingebauten Teile bitgleich nach; kleinere Korrekturen in Simulation und linearer Algebra.
 
 ## SimLev 0.5.0
 
 Diese Fassung fasst den zunächst als 0.5.0 veröffentlichten Stand (Commit
-54b5b4f, Grundlage der Python- und Julia-Fassung) und alle danach
+54b5b4f, Grundlage der Python- und Julia-Fassung 0.1.0) und alle danach
 vorgenommenen Korrekturen und Erweiterungen zusammen; eine eigene
 Zwischenversion dafür gibt es nicht. Neue Funktionen sind unten aufgeführt, darunter
 `read_tax_tariff()` (Einkommensteuertarif aus einer austauschbaren Datei).
@@ -23,7 +34,9 @@ Neue Argumente: `order_fee`, `dca_fee`, `church_tax`, `harvest_mode`,
 `harvest_day`, `harvest_loss_pot`, `taxable_income` und `tax_tariff` von
 `simulation()`, `aux_type` von `bootstrap_config()` und `inflation_type` von
 `withdrawal_cohorts()`. Entfernt wurde das Argument `horizon` von
-`withdrawal_rule()` (es hatte keine Wirkung, siehe unten). Neu sind einige
+`withdrawal_rule()` (es hatte keine Wirkung, siehe unten), ebenso die
+interaktiven Grafiken und einige Aliasse (siehe „Bereinigung der
+Schnittstelle“ unten). Neu sind einige
 Ergebniselemente (z. B. `fees_paid`, `harvest_days`, `twr_index`,
 `invested`, `external_flows`, `undefined_metrics`, `open_lots`,
 `tax_report$open_tax_debt`, `tax_report$tariff_years` und
@@ -166,8 +179,7 @@ Gebühren, Signale) waren nach dieser Runde bitgleich zum Stand 54b5b4f. Die
   `asset_bonus`, `church_tax`, unbekannte Felder in `order_fee`, ungeeignete
   `split_thresh`, `spread` ohne Wirkung u. a.).
 * Dashboard (`plot()`): Sharpe, Volatilität, rollierende und monatliche
-  Renditen stimmen jetzt mit `x$statistics` überein (zuflussbereinigt);
-  `plot_interactive()` zeigt CAGR und Sharpe statt NA.
+  Renditen stimmen jetzt mit `x$statistics` überein (zuflussbereinigt).
 * Neu erzeugte Golden-Fälle nach Ursache:
 
   | Ursache | Fälle |
@@ -317,7 +329,7 @@ Stand 54b5b4f (geprüft mit der Python-Fassung).
   der Zahlung (vorher z. B. −23 % Tagesrendite bei 1 EUR Vorbestand).
 * Neue Ergebniselemente `twr_index`, `invested` (Startwert plus
   Einzahlungen, brutto vor Kaufkosten) und `external_flows`. `print()`,
-  `summary()`, Dashboard und `plot_interactive()` beschriften die CAGR mit
+  `summary()` und Dashboard beschriften die CAGR mit
   Sparplan als geldgewichtet, den Drawdown als zeitgewichtet; ebenso die
   Ausgaben von `bootstrap_study()`, `sensitivity_grid()`,
   `rebalancing_sensitivity()`, `leverage_sensitivity()` und
@@ -380,7 +392,8 @@ Stand 54b5b4f (geprüft mit der Python-Fassung).
     Kirchensteuer ungerundet und ohne Kinderfreibeträge (§ 51a EStG),
     keine Vorauszahlungen, kein Verlustrücktrag.
 * Ohne `taxable_income` rechnet die Engine unverändert (Weg über
-  `marginal_tax_rate`). Python und Julia kennen beides nicht.
+  `marginal_tax_rate`). Python 0.5.0 und Julia 0.5.0 rechnen beides
+  bitgleich nach.
 
 **Nicht definierte Kennzahlen**
 
@@ -629,6 +642,147 @@ Stand 54b5b4f (geprüft mit der Python-Fassung).
 * README: falsche Pfade und verwaiste CI-Badges korrigiert.
 * Neue Tests für die C++-Kerne (`tests/testthat/test-cores.R`) und für jeden
   Befund des Stresstests (`tests/testthat/test-blue-*.R`).
+
+### Nachtrag
+
+* `simulation()` brach mit „subscript out of bounds“ ab, wenn `funds_fee`
+  oder `bonus_fee` außerhalb des Fondsmodus angegeben war und zugleich ein
+  Argument, das später geprüft wird (`church_tax` > 0 mit `tax_rate`,
+  `taxable_income`): Die Warnung über die ignorierten Fondskosten
+  überschrieb die interne Liste der angegebenen Argumente. Jetzt folgt nur
+  die Warnung, die Simulation läuft weiter.
+
+### Bereinigung der Schnittstelle
+
+* Entfernt: die interaktiven Grafiken `plot_interactive()` (beide Wege,
+  plotly und eigenes HTML) und der Platzhalter `export_html_dashboard()`.
+  Die statischen Grafiken (`plot()`, `export_dashboard()`) bleiben.
+* Entfernt: `create_config()` (Alias von `bootstrap_config()`),
+  `migrate_strategy()` (die veralteten Klassen `"etn_standard"` und
+  `"etn_deliverable"` setzt `asset_config()` schon mit Warnung um) und
+  `as_list()` mit seinen Methoden (eine klassenlose Liste liefert
+  `unclass()`).
+* `portfolio_templates()` ist in `portfolio_template()` aufgegangen: Ohne
+  `name` (neuer Standard `NULL`) liefert `portfolio_template()` die
+  Vorlagenliste wie bisher `portfolio_templates()`; `map` und weitere
+  Argumente sind dann ein Fehler.
+* `Suggests`: `plotly` und `TTR` gestrichen. `TTR` bleibt in den Beispielen
+  eine bequeme Möglichkeit, Indikatoren für Signale zu berechnen; es ist
+  keine Abhängigkeit von SimLev und wird bei Bedarf separat installiert.
+* Referenzfälle: `bootstrap/cfg_create` entfällt; `data_prep/pt_list`
+  ruft `portfolio_template()` auf (Ergebnis unverändert); neu
+  `data_prep/pt_err5`.
+
+### Optionale Pakete eingebaut
+
+Funktionen, die bisher mit einem installierten optionalen Paket einen
+anderen Weg nahmen als ohne, nehmen jetzt immer den Paket-Weg. Die dafür
+nötigen Teile der Pakete sind lizenzkonform (GPL) in SimLev übernommen
+(Herkunft, Autoren und Anpassungen in `inst/COPYRIGHTS`, Feld `Copyright`
+in `DESCRIPTION`); die Pakete selbst sind nicht mehr nötig und aus den
+`Suggests` gestrichen.
+
+* evd: `fpot()` und `fpot.norm()` aus evd 2.3-7.1 (Alec Stephenson) als
+  interne Funktion `.evd_fpot()` (`R/vendor_evd.R`, nur `model = "gpd"`
+  ohne `cmax`/`mper`), die negative Log-Likelihood `nlgpd` aus evd
+  `src/pot.c` mit unverändertem Rumpf in `src/vendor_evd.c` (gerufen über
+  eine `.Call`-Hülle, die die Argumente wie `.C` prüft). Die Ergebnisse
+  sind bitgleich zu evd (alle 129 Referenzfälle des Moduls `evd`
+  unverändert). Sichtbare Änderung für Nutzer ohne evd: `bootstrap()`,
+  `bootstrap_study()` u. a. mit Verfahren `"evt"` schätzen die GPD der
+  Tails bei mindestens 30 Überschreitungen jetzt per Maximum-Likelihood
+  (`method = "MLE"`) statt mit dem Momenten-Schätzer; bei weniger
+  Überschreitungen oder wenn der Fit scheitert, bleibt es beim
+  Momenten-Schätzer. Referenzfall `bootstrap/bs_evtparamslisttailprob01bothtails`
+  (40 Überschreitungen) neu erzeugt.
+* imputeTS mit stinepack: `na_interpolation()` und `na_locf()` aus
+  imputeTS 3.4 (Steffen Moritz, Sebastian Gatscha, Earo Wang, Ron Hause)
+  als interne Funktionen `.imputets_na_interpolation()` und
+  `.imputets_na_locf()` (`R/vendor_imputets.R`, `option = "stine"` und
+  `"linear"` – diese wie im Original mit `stats::approx`, `rule = 2`, sofern
+  `rule` nicht über `...` gesetzt ist (`methods::hasArg`; `methods` ist
+  dafür in den `Imports`); `"spline"` und `na_remaining = "rm"`/`"mean"`
+  sind nicht übernommen und brechen ab), der C++-Kern `locf` aus imputeTS
+  `src/locf.cpp` mit unverändertem Rumpf in `src/vendor_imputets.cpp`
+  (`.imputets_locf()`), dazu `stinterp()`, `stinemanSlopes()` und
+  `parabolaSlopes()` aus stinepack 1.5 (Tomas Johannesson, Halldor
+  Bjornsson, Gabor Grothendieck; GPL (>= 2)) als
+  `.stinepack_stinterp()` u. a. (`R/vendor_stinepack.R`). Die Ergebnisse
+  sind bitgleich zu imputeTS/stinepack (alle 203 Referenzfälle des
+  Moduls `imputets` unverändert, einschließlich der drei Fälle `ni_lin_*`
+  mit `option = "linear"`). Sichtbare Änderung für Nutzer ohne imputeTS:
+  `backcast_fit(index_fill = "stine")` und `backcast(fill = "stine",
+  index_fill = "stine")` interpolieren jetzt nach Stineman statt linear,
+  der Hinweis „Paket 'imputeTS' nicht installiert, verwende lineare
+  Interpolation statt Stineman.“ entfällt. Referenzfälle
+  `backcast/fill_stine_0`, `fill_stine_1`, `bf_stine` und `bc_stine` neu
+  erzeugt.
+* rugarch mit Rsolnp und truncnorm: `ugarchspec()`,
+  `ugarchfit()` und `coef()` aus rugarch 1.5-6 (Alexios Galanos, Tobias
+  Kley) für den Weg von `.fit_garch11()` (sGARCH bzw. gjrGARCH(1,1),
+  ARMA(0,0) mit Mittelwert, Normalverteilung, Solver `"hybrid"`) als
+  interne Funktionen `.rugarch_ugarchspec()`, `.rugarch_ugarchfit()` und
+  `.rugarch_coef()` mit Startwerten, Schranken, Solver-Kette (solnp →
+  nlminb → zweimal gosolnp), `.makefitmodel` (Hesse-Matrix, `robustvcv`)
+  und Warnungen (`R/vendor_rugarch.R`; andere Modelle, Verteilungen,
+  ARMA-Terme, Regressoren u. a. sind nicht übernommen und brechen ab), der
+  C-Filter `sgarchfilterC`/`gjrgarchfilterC` aus rugarch `src/` mit
+  unverändertem Rumpf in `src/vendor_rugarch.c` (über `.Call`-Hüllen, die
+  die Argumente wie `.C` prüfen), dazu `solnp()` und `gosolnp()` aus
+  Rsolnp 1.16 (Alexios Ghalanos, Stefan Theussl) als `.rsolnp_solnp()`,
+  `.rsolnp_gosolnp()` (`R/vendor_rsolnp.R`, ohne `cluster`) und
+  `rtruncnorm()` aus
+  truncnorm 1.0-9 (Olaf Mersmann, Heike Trautmann, Detlef Steuer, Björn
+  Bornkamp; GPL (>= 2)) als `.truncnorm_rtruncnorm()`
+  (`R/vendor_truncnorm.R`, `src/vendor_truncnorm.c`). gosolnp setzt wie
+  im Original den globalen Zufallszustand mit
+  `set.seed(as.numeric(Sys.time()))`. Die Ergebnisse sind bitgleich zu
+  den Paketen (alle 173 Referenzfälle des Moduls `rugarch` unverändert,
+  einschließlich der gosolnp-Fälle mit fester Uhr). Sichtbare Änderung für
+  Nutzer ohne rugarch: `bootstrap()` mit den Verfahren `"garch"` und
+  `"gjr_garch"` (auch die Kopplung weiterer Reihen), `dcc_fit()` und
+  `dependence_analysis()` schätzen die GARCH-Stufe jetzt per rugarch
+  (`method = "rugarch"` in der Meldung bzw. in `dcc_fit()$garch`) statt
+  per `optim` (Nelder-Mead); andere Parameter und damit andere Pfade bzw.
+  Korrelationen. `optim` und die Momente bleiben der Rückfall, wenn der
+  Fit mit einem Fehler scheitert. Bei weniger als 100 Beobachtungen
+  erscheint die Warnung von rugarch („ugarchfit-->waring: using less than
+  100 data points for estimation“). Referenzfälle `bootstrap/fit_garch`,
+  `fit_gjr`, `fit_garch_short`, `bs_garch`, `bs_gjr_garch`,
+  `bs_garch_joint`, `bs_garch_regime_eu`, `bs_garch_single`,
+  `bs_cross_const`, `aux_level_garch` und `dependence/dcc_fit2`,
+  `dcc_fit3`, `da_basic`, `da_breaks`, `da_day` neu erzeugt.
+* Numerische Ableitungen (Richardson-Extrapolation) eigenständig
+  implementiert: Hesse-Matrix und Scores in `.makefitmodel` rechnen
+  `.sl_richardson_hessian()` und `.sl_richardson_jacobian()`
+  (`R/richardson.R`) statt der Funktionen von numDeriv; die Ergebnisse
+  sind gegen numDeriv geprüft und bitgleich (alle 173 Referenzfälle des
+  Moduls `rugarch` unverändert).
+* Referenzfälle: Das Feld `suggests` (welche optionalen Pakete R beim
+  Erzeugen installiert hatte) entfällt in allen Fällen und in
+  `golden/modules/ref_tools.R`; Python und Julia brauchen ohne nachgebildete
+  optionale Pakete keinen Schalter mehr (`SIMLEV_R_SUGGESTS` entfällt).
+  Inhaltlich sind die Fälle unverändert. MSGARCH bleibt in den `Suggests`:
+  Ohne das Paket brechen die MS-GARCH-Verfahren wie bisher mit einer
+  Meldung ab.
+
+### Ohne Rcpp
+
+* Die C++-Kerne sind jetzt über R's eigene C-Schnittstelle angebunden
+  (`.Call`, Registrierung in `src/init.c`, `GetRNGstate`/`PutRNGstate`;
+  Hilfen in `src/simlev_capi.h`) statt über Rcpp. `Imports` und `LinkingTo`
+  enthalten damit keine Drittpakete mehr; zum Bauen genügen R und ein C-
+  und C++-Compiler. `RcppExports.R`/`RcppExports.cpp` entfallen, die
+  `.Call`-Hüllen stehen in `R/cores.R`.
+* Ergebnisse, Ausgaben, Warnungen, Fehlermeldungen und der Zufallszustand
+  (`.Random.seed`, auch nach Fehlern) sind unverändert; alle Referenzfälle
+  sind bitgleich. Fehler aus den Kernen sind jetzt Bedingungen der Klasse
+  `simpleError` (bisher `Rcpp::exception` bzw. `C++Error`), Text und
+  (leerer) Aufruf wie bisher.
+* Interne Hüllen der Engine-Kerne mit Punkt und ohne Rcpp-Bezug, z. B.
+  `.sim_buy_cpp()` statt `perform_trade_buy_cpp()`, `.sim_p20_tax_cpp()`
+  statt `p20_tax_rcpp()`, `.sim_market_update_batch_cpp()` statt
+  `batch_market_update()`.
 
 ## SimLev 0.4.0
 

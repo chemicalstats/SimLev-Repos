@@ -138,11 +138,12 @@ JL <- list(
   sw_err_cfg = 'result = DP.strategy_from_weights(named("a" => 0.5, "b" => 0.5); asset_bonus = named("a" => 130.0))',
   pt_perm = 'result = DP.portfolio_template("permanent"; map = named("stocks" => "msci_world", "long_bonds" => "bund_10y", "cash" => "geldmarkt", "gold" => "gold_eur"))',
   pt_partial = 'result = DP.portfolio_template("permanent"; map = named("stocks" => "W"), asset_spread = 0)',
-  pt_list = 'result = DP.portfolio_templates()',
+  pt_list = 'result = DP.portfolio_template()',
   pt_err1 = 'result = DP.portfolio_template("xyz")',
   pt_err2 = 'result = DP.portfolio_template("60_40"; map = named("stock" => "A", "bonds" => "B"))',
   pt_err3 = 'result = DP.portfolio_template("60_40"; map = named("stocks" => "A", "bonds" => "A"))',
   pt_err4 = 'result = DP.portfolio_template("60_40"; map = ["A", "B"])',
+  pt_err5 = 'result = DP.portfolio_template(; map = named("stocks" => "A"))',
   bond_small = BIJ('BO.bond_index_from_yields(d, "y"; maturity = 10, coupon_frequency = 1)'),
   bond_doc = BIJ('BO.bond_index_from_yields(d, "y10"; maturity = 10, coupon_frequency = 1)'),
   bond_dur = BIJ('BO.bond_index_from_yields(d, "y10"; method = "duration", maturity = 7, coupon_frequency = 2, start = 1)'),
@@ -456,11 +457,12 @@ rc("pt_partial", "portfolio_template('permanent', map = c(stocks = 'W'), asset_s
    "result = DP.portfolio_template('permanent', map={'stocks': 'W'}, asset_spread=0)")
 for (tn in names(SimLev:::.portfolio_templates))
   rc(paste0("pt_", tn), sprintf("portfolio_template('%s')", tn), sprintf("result = DP.portfolio_template('%s')", tn))
-rc("pt_list", "portfolio_templates()", "result = DP.portfolio_templates()")
+rc("pt_list", "portfolio_template()", "result = DP.portfolio_template()")
 rc("pt_err1", "portfolio_template('xyz')", "result = DP.portfolio_template('xyz')")
 rc("pt_err2", "portfolio_template('60_40', map = c(stock = 'A', bonds = 'B'))", "result = DP.portfolio_template('60_40', map={'stock': 'A', 'bonds': 'B'})")
 rc("pt_err3", "portfolio_template('60_40', map = c(stocks = 'A', bonds = 'A'))", "result = DP.portfolio_template('60_40', map={'stocks': 'A', 'bonds': 'A'})")
 rc("pt_err4", "portfolio_template('60_40', map = c('A', 'B'))", "result = DP.portfolio_template('60_40', map=['A', 'B'])")
+rc("pt_err5", "portfolio_template(map = c(stocks = 'A'))", "result = DP.portfolio_template(map={'stocks': 'A'})")
 
 # ── bonds ──────────────────────────────────────────────────────────────────
 db <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 3), y = c(2, 2, 3))

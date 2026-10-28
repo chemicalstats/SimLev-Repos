@@ -83,10 +83,10 @@ Je Modul gibt es einen Unterordner mit Fällen und einen Generator
 | `r_fmt` | 355 | Formatierung und Druckausgabe (`simlev/_r/fmt.py`, `src/r/fmt.jl`) |
 | `r_nana` | 25 | NA/NaN in Summen und Kumulationen mit long double (`simlev/_r/base.py`, `src/r/base.jl`) |
 | `rexpr` | 1016 | Bedingungen als Text in R-Syntax (`simlev/_r/rexpr.py`, `src/r/rexpr.jl`) gegen R's `eval(parse(text = …))` |
-| `r_nlminb` | 104 | `stats::nlminb` mit allen PORT-Varianten (`simlev/_r/_port.py`, `src/r/port.jl`) |
-| `evd` | 129 | mit evd 2.3-7.1: `fpot`, `nlgpd`, `.fit_tail`, `bootstrap(…, "evt")` (`simlev/_r/evd.py`, `src/r/evd.jl`) |
-| `imputets` | 203 | mit imputeTS 3.4: `na_interpolation` (stine), `na_locf`, stinepack `stinterp`, `.fill_na(…, "stine")`, `backcast_fit`/`backcast` mit `"stine"` (`simlev/_r/imputets.py`, `stinepack.py`, `src/r/imputets.jl`, `stinepack.jl`) |
-| `rugarch` | 173 | mit rugarch 1.5-6: `ugarchfit`→`coef` (auch mit den Ausweichwegen nlminb und gosolnp, Zufallszustand danach), `solnp`, `gosolnp`, `rtruncnorm`, `.fit_garch11`, Bootstrap `garch`/`gjr_garch`, `dcc_fit`, `dependence_analysis` (`simlev/_r/rugarch.py`, `solnp.py`, `src/r/rugarch.jl`, `solnp.jl`) |
+| `r_nlminb` | 104 | `stats::nlminb` mit allen PORT-Varianten (`simlev/_r/port.py`, `src/r/port.jl`) |
+| `evd` | 129 | aus evd 2.3-7.1 übernommen (`SimLev:::.evd_fpot`, `C_evd_nlgpd`): `fpot`, `nlgpd`, `.fit_tail`, `bootstrap(…, "evt")` (`simlev/_r/evd.py`, `src/r/evd.jl`) |
+| `imputets` | 203 | aus imputeTS 3.4 und stinepack 1.5 übernommen (`SimLev:::.imputets_na_interpolation`, `.imputets_na_locf`, `.stinepack_stinterp`): `na_interpolation` (stine), `na_locf`, stinepack `stinterp`, `.fill_na(…, "stine")`, `backcast_fit`/`backcast` mit `"stine"` (`simlev/_r/imputets.py`, `stinepack.py`, `src/r/imputets.jl`, `stinepack.jl`) |
+| `rugarch` | 173 | aus rugarch 1.5-6, Rsolnp 1.16 und truncnorm 1.0-9 übernommen (`SimLev:::.rugarch_ugarchfit`, `.rugarch_coef`, `.rsolnp_solnp`, `.rsolnp_gosolnp`, `.truncnorm_rtruncnorm`), Ableitungen eigenständig (`.sl_richardson_hessian`, `.sl_richardson_jacobian`, gegen numDeriv 2016.8-1.1 geprüft): `ugarchfit`→`coef` (auch mit den Ausweichwegen nlminb und gosolnp, Zufallszustand danach), `solnp`, `gosolnp`, `rtruncnorm`, `.fit_garch11`, Bootstrap `garch`/`gjr_garch`, `dcc_fit`, `dependence_analysis` (`simlev/_r/rugarch.py`, `solnp.py`, `truncnorm.py`, `src/r/rugarch.jl`, `solnp.jl`, `truncnorm.jl`) |
 
 Python 0.5.0 und Julia 0.5.0 sind zu allen 4.536 Fällen bitgleich, bei strenger
 Unterscheidung von `NA` und `NaN` und mit dem Vorzeichen der Null.
@@ -107,7 +107,6 @@ Ein Fall ist eine gzip-komprimierte JSON-Datei `<modul>/<id>.json.gz` mit
 | `print` | `print(result)` für Objekte mit eigener print-Methode in SimLev |
 | `warnings` | Warnungen während des Aufrufs |
 | `error` | Fehlermeldung, falls R mit einem Fehler abbricht (statt `result`) |
-| `suggests` | optionale Pakete (evd, rugarch, imputeTS), die R beim Erzeugen installiert hatte; die Harnesses setzen `SIMLEV_R_SUGGESTS` danach (fehlt das Feld: keines) |
 | `sys_time` | feste Uhrzeit (Sekunden seit 1970, als Text) für Fälle, deren Ergebnis von `Sys.time()` abhängt; die Harnesses setzen `SIMLEV_R_SYS_TIME` |
 
 Im Baum hat jedes Objekt einen Typ `t` (`null`, `num`, `int`, `lgl`,
@@ -119,17 +118,24 @@ werden als `skip` übergangen.
 ### Neu erzeugen
 
 Benötigt werden R (die Referenzen entstanden mit R 4.3.3), das installierte
-R-Paket SimLev 0.5.0 und `jsonlite`, aber **nicht** die optionalen Pakete
-rugarch, MSGARCH, evd, imputeTS und plotly: Die Fälle beschreiben die
-Ersatzwege, die R ohne diese Pakete nimmt. Ausnahme sind `gen_evd.R`,
-`gen_rugarch.R` und `gen_imputets.R`: Sie stellen eine eigene R-Bibliothek
-mit evd 2.3-7.1, rugarch 1.5-6 bzw. imputeTS 3.4 und stinepack 1.5
-(imputeTS braucht dafür forecast, ggtext und TTR; rugarch die Pakete spd, SkewHyperbolic,
-GeneralizedHyperbolic, DistributionUtils; Rsolnp 1.16 und numDeriv
-2016.8-1.1 aus der System-Bibliothek) an den Anfang des Suchpfads
-(`SIMLEV_R_SUGGESTS_LIB`) und brechen ab, wenn die Pakete fehlen. So
-bleiben alle übrigen Fälle beim Weg ohne die Pakete. Für gosolnp braucht
-`gen_rugarch.R` außerdem truncnorm 1.0-9; diese Fälle laufen mit fester Uhr
+R-Paket SimLev 0.5.0 und `jsonlite`, aber **nicht** das optionale Paket
+MSGARCH: Die MS-GARCH-Fälle beschreiben die Fehlermeldung, mit der R ohne
+dieses Paket abbricht (so melden es auch die Ports). evd ist ins R-Paket übernommen
+(`.evd_fpot`); `gen_evd.R` braucht evd nicht mehr, seine Fälle (zuvor mit
+evd 2.3-7.1 erzeugt) sind mit der Übernahme bitgleich. Ebenso sind imputeTS
+und stinepack übernommen (`.imputets_na_interpolation`,
+`.stinepack_stinterp`); `gen_imputets.R` braucht die Pakete nicht mehr,
+seine Fälle (zuvor mit imputeTS 3.4 und stinepack 1.5 erzeugt) sind mit der
+Übernahme bitgleich, einschließlich der drei Fälle `ni_lin_*` mit
+`option = "linear"`. Ebenso sind
+rugarch, Rsolnp und truncnorm übernommen (`.rugarch_ugarchfit`,
+`.rsolnp_solnp`, `.rsolnp_gosolnp`, `.truncnorm_rtruncnorm`), Hesse-Matrix
+und Scores rechnet die eigenständige Richardson-Extrapolation
+(`.sl_richardson_hessian`, `.sl_richardson_jacobian`; Direktvergleich mit
+numDeriv als Orakel: `check_richardson.R`); `gen_rugarch.R` braucht die
+Pakete nicht mehr, seine Fälle (zuvor mit rugarch 1.5-6, Rsolnp
+1.16, numDeriv 2016.8-1.1 und truncnorm 1.0-9 erzeugt) sind mit der
+Übernahme und der eigenen Richardson-Extrapolation bitgleich. Die gosolnp-Fälle laufen mit fester Uhr
 (`ref_case(…, sys_time = t)`), weil gosolnp den Zufallszustand aus
 `Sys.time()` setzt. Aufruf aus der Repo-Wurzel:
 

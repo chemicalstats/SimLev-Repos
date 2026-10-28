@@ -281,7 +281,7 @@ def test_fm2_ohne_zufluesse_unveraendert():
     w = r.worth
     yrs = (n - 1) / 365.25
     assert r.external_flows is False
-    assert r.cagr == simlev._rnum.r_pow(w[-1] / w[0], 1 / yrs) - 1
+    assert r.cagr == simlev._r.rnum.r_pow(w[-1] / w[0], 1 / yrs) - 1
     rm = np.maximum.accumulate(w)
     assert np.array_equal(r.drawdowns, np.where(rm > 0, (rm - w) / rm, 0))
     assert list(np.unique(r.invested)) == [10000]

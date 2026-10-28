@@ -1,5 +1,11 @@
 """
-Nachbildung des R-Pakets stinepack 1.5 (Stineman-Interpolation).
+Nachbildung von stinepack 1.5 (Stineman-Interpolation), im R-Paket übernommen als `.stinepack_stinterp`.
+
+Herkunft: R-Paket stinepack 1.5 (CRAN, 2024-03-07), `R/stinterp.R`,
+`R/stinemanSlopes.R` und `R/parabolaSlopes.R`; Autoren: Tomas Johannesson &
+Halldor Bjornsson, Icelandic Met. Office; Gabor Grothendieck. Lizenz:
+GPL (>= 2), in SimLev unter GPL-3. Nach Julia übertragen und angepasst für
+SimLev (siehe `julia/COPYRIGHTS.md`).
 
 Nachgebildet sind `stinterp(x, y, xout; yp, method)` mit allen
 Eingabeprüfungen und Meldungen sowie die Steigungen `stinemanSlopes` (mit
@@ -13,7 +19,9 @@ Element ausgewählt ist, `if` mit `NA` mit "missing value where TRUE/FALSE
 needed".
 
 imputeTS nutzt `stinterp` in `na_interpolation(option = "stine")` (siehe
-`src/r/imputets.jl`). Vorlage: `python/simlev/_r/stinepack.py`.
+`src/r/imputets.jl`); R nutzt die übernommene Fassung
+(`r/R/vendor_stinepack.R`), stinepack selbst ist nicht mehr nötig.
+Vorlage: `python/simlev/_r/stinepack.py`.
 """
 module RStinepack
 

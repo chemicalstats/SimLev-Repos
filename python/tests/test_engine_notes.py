@@ -425,7 +425,7 @@ def test_c_summary_renditen():
     end = r.worth[-1]
     assert s.return_on_invested == E((end - 2000) / 2000)
     assert any("Gesamtrendite (zeitgewichtet): +50.00 %" in ln for ln in out)
-    want = simlev._rnum.r_sprintf("Gewinn je eingezahltem EUR:    %+.2f %% (Endwert %.2f EUR / Eingezahlt 2000.00 EUR - 1)",
+    want = simlev._r.rformat.r_sprintf("Gewinn je eingezahltem EUR:    %+.2f %% (Endwert %.2f EUR / Eingezahlt 2000.00 EUR - 1)",
                                   100 * (end - 2000) / 2000, end)
     assert any(want in ln for ln in out)
     dd = days("2020-01-01", "2021-12-31")

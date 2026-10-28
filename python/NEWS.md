@@ -1,9 +1,18 @@
 # simlev (Python) – Änderungen je Version
 
+## simlev (Python) 0.5.1
+
+Patch-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Abhängigkeiten: evd (GPD-Anpassung), imputeTS/stinepack (Interpolation), rugarch mit Rsolnp und truncnorm (GARCH-Schätzung) als interne Teile eingebaut; R braucht zur Laufzeit nur Basis-R.
+- Ableitungen: eigene Richardson-Extrapolation für Hesse- und Jacobi-Matrix statt numDeriv.
+- C/C++-Kerne: Anbindung über R's C-Schnittstelle statt Rcpp, Fehlertexte unverändert.
+- Ports: Python und Julia bilden die eingebauten Teile bitgleich nach; kleinere Korrekturen in Simulation und linearer Algebra.
+
 ## simlev (Python) 0.5.0
 
 Die Python-Fassung ist jetzt ein vollständiger Port des R-Pakets SimLev
-0.5.0: alle 110 Exporte aus `r/NAMESPACE`, bitgleich zu R. Die Vorversion
+0.5.0: alle 104 Exporte aus `r/NAMESPACE`, bitgleich zu R. Die Vorversion
 0.1.0 enthielt nur die Engine und entsprach dem früheren Stand des
 R-Pakets vor den Korrekturen (Commit 54b5b4f). Zwischenversionen 0.2 bis
 0.4 der Python-Fassung gibt es nicht; alle Änderungen sind in 0.5.0
@@ -54,14 +63,14 @@ Python-Modul:
 * Datenaufbereitung (`data_prep`): `align_series()`, `check_series()`,
   `align_macro()`, `convert_currency()`, `total_return_index()`,
   `deflate()`, `splice_series()`, `strategy_from_weights()`,
-  `portfolio_template()`, `portfolio_templates()`.
+  `portfolio_template()` (ohne `name` die Liste der Vorlagen).
 * Backcast (`backcast`): `backcast_fit()`, `backcast()`.
 * Anleihen und Geldmarkt (`bonds`): `bond_index_from_yields()`,
   `money_market_index()`, `currency_hedged_index()`.
 * Signale (`signals`): `signal_sma()`, `signal_ema()`, `signal_crossover()`,
   `signal_momentum()`, `signal_drawdown()`, `signal_volatility()`,
   `signal_combine()`.
-* Bootstrap (`bootstrap`): `bootstrap_config()`, `create_config()`,
+* Bootstrap (`bootstrap`): `bootstrap_config()`,
   `block_length()`, `bootstrap()`, `validate_bootstrap()`,
   `bootstrap_data()`, `study_metrics()`, `bootstrap_study()`,
   `bootstrap_probability()` mit allen Verfahren.
@@ -113,10 +122,28 @@ Nelder-Mead, BFGS, CG und L-BFGS-B, `optimize`, `uniroot`, `lm`, `glm`,
 Formatierung und Druck (`format`, `formatC`, `sprintf`, `round`, `print`
 von Vektoren, Matrizen und data.frames). Eigenvektoren von `eigen()`
 kommen über ctypes aus der Referenz-LAPACK des Systems (Pfad über
-`SIMLEV_LAPACK` wählbar); fehlt sie, rechnen scipy bzw. numpy ohne
+`SIMLEV_LAPACK` wählbar); fehlt sie, rechnet numpy ohne
 Bitgleichheitsgarantie und mit einer Warnung.
 Zeichenketten sortiert und vergleicht SimLev wie R mit der ICU-Kollation
 (System-ICU, `SIMLEV_ICU`, `SIMLEV_COLLATE`).
+
+Innerer Aufbau (ohne Änderung der öffentlichen Namen und Ergebnisse):
+
+* Die R-Numerik der Engine liegt unter `simlev/_r/`: `rnum.py` (früher
+  `simlev/_rnum.py`; `NA_REAL`, long-double-Summen, `r_pow`, `r_uniroot`)
+  und `rformat.py` (`r_round`, `r_signif`, `r_format`, `r_sprintf` …),
+  wie `rnum.jl` und `rformat.jl` der Julia-Fassung. `NA_REAL` ist nur noch
+  in `rnum.py` definiert, alle anderen Module importieren es; das
+  gleichbedeutende Alias `fmt.R_NAN` für R's NaN entfällt (`math.nan`).
+  Die PORT-Bibliothek für `nlminb` heißt `simlev/_r/port.py` (wie
+  `port.jl`).
+* `quiet_fp` (`simlev/_r/base.py`) hüllt jetzt alle öffentlichen
+  Funktionen, auch `tactical_rules()`, `regime_subset()`,
+  `entropy_pooling()` und `bootstrap_probability()`: Für diese setzt es
+  bei fehlendem `env` den Namensraum des Aufrufers ein (`env_from_caller`),
+  statt dass die Funktionen selbst den Aufrufer-Frame lesen.
+* Die Engine-Notiz `PORTING_ENGINE.md` ist in `DEVELOPING.md`
+  aufgegangen.
 
 ### Änderungen der Schnittstelle
 
@@ -129,9 +156,17 @@ Zeichenketten sortiert und vergleicht SimLev wie R mit der ICU-Kollation
   `dict` ein `SimLevSummary`, das wie in R druckt (`verbose=True` druckt
   zusätzlich). Neu sind die generischen Funktionen `simlev.summary(x)` und
   `simlev.plot(x)`, die die Methode des Objekts aufrufen.
-* `export_html_dashboard()` ist wie in R nur noch ein Platzhalter (ohne
-  plotly ein Fehler, sonst eine Meldung, keine Datei); das interaktive
-  Dashboard schreibt `plot_interactive()`.
+* Entfernt wie in R: `plot_interactive()` (Funktion und Methode
+  `result.plot_interactive()`, eigenes HTML und plotly-Figur; Modul
+  `simlev.interactive`), `export_html_dashboard()`, `create_config()`,
+  `migrate_strategy()`, `as_list()` und `portfolio_templates()` (jetzt
+  `portfolio_template()` ohne `name`). Das statische Dashboard
+  (`result.plot()`, `export_dashboard()`) bleibt. In `pyproject.toml`
+  entfällt das Extra `plotly`.
+* scipy entfällt: Der Ersatzweg für Eigenvektoren ohne System-LAPACK
+  rechnet jetzt immer mit numpy (wie die Julia-Fassung mit LinearAlgebra,
+  mit Warnung, nicht bitgleich); das Extra `scipy` entfällt.
+* Benötigt wird Python ab 3.10 (`requires-python = ">=3.10"`, vorher 3.9).
 * Das Argument `currency` des Dashboards entfällt; die Achse ist wie in R
   in EUR beschriftet.
 * Neu: `simlev.set_seed()` (wie `set.seed()`) und `simlev.rng_kind()`.
@@ -176,14 +211,46 @@ Zeichenketten sortiert und vergleicht SimLev wie R mit der ICU-Kollation
   `simlev._r.stats.nlminb` (PORT, alle sechs Varianten). Standardmäßig wie
   R mit beiden Paketen: `.fit_tail` schätzt den Tail ab 30 Überschreitungen
   per ML (`method = "MLE"`), `.fit_garch11` per rugarch (`method =
-  "rugarch"`) mit dessen Warnungen. Schalter `SIMLEV_R_SUGGESTS` (`none`,
-  `evd`, `rugarch`, `all`). Neue Referenzmodule `evd` (129 Fälle),
+  "rugarch"`) mit dessen Warnungen. Neue Referenzmodule `evd` (129 Fälle),
   `r_nlminb` (104) und `rugarch` (173).
+* evd ist kein Schalter mehr: Das R-Paket hat `evd::fpot` übernommen
+  (`.evd_fpot`, siehe `r/NEWS.md`, „Optionale Pakete eingebaut“) und
+  schätzt den Tail ab 30 Überschreitungen immer per ML; `_fit_tail` ebenso.
+  Herkunft und Lizenz der Nachbildung in `COPYRIGHTS.md`.
+* imputeTS ist kein Schalter mehr: Das R-Paket hat
+  `imputeTS::na_interpolation(option = "stine")` mit `na_locf` und
+  stinepack `stinterp` übernommen (`.imputets_na_interpolation`, siehe
+  `r/NEWS.md`, „Optionale Pakete eingebaut“) und interpoliert mit
+  `fill`/`index_fill = "stine"` immer nach Stineman; `_fill_na` ebenso
+  (kein Rückfall auf linear mit Hinweis). `simlev._r.imputets.na_interpolation`
+  mit `option = "linear"` interpoliert wie imputeTS (auch in R übernommen);
+  wie die Übernahme brechen `option = "spline"` und `na_locf` mit
+  `na_remaining = "rm"`/`"mean"` mit deren Meldung ab (bisher eigene
+  Meldung).
+  Herkunft und Lizenz der Nachbildung in `COPYRIGHTS.md`.
+* rugarch ist kein Schalter mehr: Das R-Paket hat `rugarch::ugarchfit`
+  mit Rsolnp `solnp`/`gosolnp` und truncnorm `rtruncnorm` übernommen
+  (`.rugarch_ugarchfit`, siehe
+  `r/NEWS.md`, „Optionale Pakete eingebaut“) und schätzt GARCH in
+  Bootstrap (`garch`/`gjr_garch`, Kopplung), `dcc_fit()` und
+  `dependence_analysis()` immer per rugarch; `_fit_garch11` ebenso (`optim`
+  und die Momente nur noch als Rückfall bei einem Fehler). Herkunft und Lizenz der
+  Nachbildungen (rugarch, Rsolnp, truncnorm) in `COPYRIGHTS.md`.
+* Numerische Ableitungen (Richardson-Extrapolation) eigenständig
+  implementiert: Hesse-Matrix und Scores der GARCH-Schätzung rechnen
+  `simlev._r.rugarch._richardson_hessian` und `_richardson_jacobian` wie
+  `.sl_richardson_hessian`/`.sl_richardson_jacobian` im R-Paket statt einer
+  Nachbildung von numDeriv; Ergebnisse gegen numDeriv geprüft und bitgleich.
+* Kein Schalter für optionale R-Pakete: Da R evd, imputeTS und rugarch
+  übernommen hat, entfallen `simlev._r.suggests` (`has`, `EMULATED`) und
+  die Umgebungsvariable `SIMLEV_R_SUGGESTS`; die Referenzfälle haben kein
+  Feld `suggests` mehr. Die MS-GARCH-Verfahren melden weiterhin wie R
+  ohne MSGARCH, dass das Paket fehlt.
 * Neu: `NA` und `NaN` werden wie in R unterschieden. `simlev.NA` ist R's
   `NA_real_` (NaN mit Nutzlast 1954), ein gewöhnliches `nan` ist R's `NaN`;
   `simlev.isna_strict(x)` erkennt nur `NA`. Druckausgabe, `format()`,
   `sprintf()`, Summen und Kumulationen folgen R's Regeln für beide.
-* Die Test-Suite umfasst 5.762 Tests; die Tests der R-Engine aus
+* Die Test-Suite umfasst 5.755 Tests; die Tests der R-Engine aus
   `r/tests/testthat` sind übertragen.
 
 ### Bekannte Grenzen
@@ -191,11 +258,11 @@ Zeichenketten sortiert und vergleicht SimLev wie R mit der ICU-Kollation
 * Bitgleichheit gilt unter Linux x86-64 (80-Bit-`long double`) mit
   glibc-libm und, für Eigenvektoren, mit der Referenz-LAPACK des Systems.
 * Die Referenzen entstanden mit R 4.3.3. evd, rugarch und imputeTS sind
-  nachgebildet (standardmäßig wie R mit den Paketen; `SIMLEV_R_SUGGESTS=none`
-  wie R ohne sie). gosolnp setzt wie in R den Zufallszustand aus der
-  Uhrzeit; reproduzierbar mit `SIMLEV_R_SYS_TIME`. MSGARCH, plotly und TTR
-  gelten als nicht installiert; die MS-GARCH-Verfahren melden wie R ohne
-  MSGARCH, dass das Paket fehlt.
+  nachgebildet und gelten immer, wie das R-Paket mit seinen übernommenen
+  Fassungen. gosolnp setzt wie in R den Zufallszustand aus der
+  Uhrzeit; reproduzierbar mit `SIMLEV_R_SYS_TIME`. MSGARCH gilt als nicht
+  installiert; die MS-GARCH-Verfahren melden wie R ohne MSGARCH, dass das
+  Paket fehlt.
 * `nlminb`: An drei Stellen liest die PORT-Bibliothek nicht gesetzte
   Variablen (in R Stapelreste); Python setzt 0. Das kann nur in
   Sonderfällen die Meldung (Code 3 statt 5, `convergence` 0) oder Läufe mit

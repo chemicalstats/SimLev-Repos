@@ -13,9 +13,9 @@ Zwei Wege:
   ``dstemr``/``dormtr`` sind zu groß für einen Port). Gesucht wird
   ``$SIMLEV_LAPACK``, dann die Referenz-LAPACK des Systems
   (``/usr/lib/x86_64-linux-gnu/lapack/liblapack.so.3``), dann
-  ``ctypes.util.find_library("lapack")``. Fehlt sie, wird auf
-  ``scipy.linalg.lapack.dsyevr`` bzw. ``numpy.linalg.eigh`` ausgewichen –
-  dann ist Bitgleichheit mit R **nicht** garantiert (andere LAPACK-Fassung).
+  ``ctypes.util.find_library("lapack")``. Fehlt sie, wird mit Warnung auf
+  ``numpy.linalg.eigh`` ausgewichen (wie die Julia-Fassung auf
+  LinearAlgebra) – dann ist Bitgleichheit mit R **nicht** garantiert.
 
 Bitgleichheit der ctypes-Ergebnisse gilt genau dann, wenn dieselbe
 Referenz-LAPACK/BLAS geladen wird, die auch R nutzt.
@@ -1361,10 +1361,9 @@ def dsyevr(A, only_values=False, backend="auto"):
 
     Liefert ``(values_aufsteigend, vectors_or_None, info, backend_name)``.
     ``backend``: ``"auto"`` (Werte: reiner Port; Vektoren: System-LAPACK,
-    sonst scipy/numpy), ``"port"``, ``"system"``, ``"fallback"``.
+    sonst numpy), ``"port"``, ``"system"``, ``"fallback"``.
     """
     A = np.asarray(A, dtype=np.float64)
-    n = A.shape[0]
     if backend in ("auto", "port") and only_values:
         w, info = dsyevr_values(A)
         if info == 0 or backend == "port":
@@ -1377,17 +1376,9 @@ def dsyevr(A, only_values=False, backend="auto"):
         if backend == "system":
             raise RuntimeError("System-LAPACK nicht gefunden")
     # Ersatzweg: nicht bitgleich garantiert
-    try:
-        from scipy.linalg import lapack as sl  # type: ignore
-        a = np.array(A, dtype=np.float64, order="F", copy=True)
-        res = sl.dsyevr(a, compute_v=0 if only_values else 1, range="A", lower=1)
-        w, z, info = res[0], res[1], res[-1]
-        _warn_fallback("scipy")
-        return np.asarray(w[:n]), (None if only_values else np.asarray(z)[:, :n]), int(info), "scipy"
-    except ImportError:
-        L = np.tril(A) + np.tril(A, -1).T
-        _warn_fallback("numpy")
-        if only_values:
-            return np.linalg.eigvalsh(L), None, 0, "numpy"
-        w, z = np.linalg.eigh(L)
-        return w, z, 0, "numpy"
+    L = np.tril(A) + np.tril(A, -1).T
+    _warn_fallback("numpy")
+    if only_values:
+        return np.linalg.eigvalsh(L), None, 0, "numpy"
+    w, z = np.linalg.eigh(L)
+    return w, z, 0, "numpy"

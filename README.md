@@ -33,8 +33,8 @@ bezeichnet; im Folgenden „Stand 54b5b4f“).
 
 | Fassung | Ordner | Benötigt | Besonderheit |
 |---|---|---|---|
-| **R** | [`r/`](r/) | R ≥ 4.0, C++-Compiler (Rcpp) | Referenzimplementierung |
-| **Python** | [`python/`](python/) | Python ≥ 3.9, `numpy`, `pandas` | vollständiger Port von R 0.5.0 einschließlich aller Erweiterungen, bitgleich unter Linux x86-64; reines Python, kein Compiler nötig |
+| **R** | [`r/`](r/) | R ≥ 4.0, C- und C++-Compiler, keine externen Pakete | Referenzimplementierung |
+| **Python** | [`python/`](python/) | Python ≥ 3.10, `numpy`, `pandas` | vollständiger Port von R 0.5.0 einschließlich aller Erweiterungen, bitgleich unter Linux x86-64; reines Python, kein Compiler nötig |
 | **Julia** | [`julia/`](julia/) | Julia ≥ 1.10, keine externen Pakete | vollständiger Port von R 0.5.0 einschließlich aller Erweiterungen, bitgleich unter Linux x86-64; nur Standardbibliothek, Engine etwa 5- bis 30-mal so schnell wie R |
 
 > **Sprachspezifische Beispiele sind aufklappbar.** Klicken Sie in den
@@ -91,7 +91,7 @@ bezeichnet; im Folgenden „Stand 54b5b4f“).
 | **Kosten** | Bid-Ask-Spread je Asset, optional laufende Fondskosten und Performancegebühr |
 | **Steuern** | InvStG-Fondsbesteuerung, Abgeltungsteuer nach § 20 EStG, private Veräußerungsgeschäfte nach § 23 EStG |
 | **Kennzahlen** | CAGR, TTWROR, Volatilität, Sharpe, Sortino, Calmar, Omega, Ulcer Index, Drawdown-Dauer u. v. m. |
-| **Visualisierung** | Statisches Dashboard (R: Base-Grafik, Python: matplotlib, Julia: SVG) und interaktives, offline lauffähiges HTML-Dashboard |
+| **Visualisierung** | Statisches Dashboard (R: Base-Grafik, Python: matplotlib, Julia: SVG) |
 | **Backcast** | Rückrechnung von ETF/ETP-Historien aus Basisindex, TER-Reihe, Hebel und Tagesgeld; Fit der Abweichung mit Out-of-Sample-Test |
 | **Bootstrap** | 14 Verfahren (Block, stationär, Regime, EVT, (GJR-)GARCH, MS-GARCH …), Hebelprodukte, Strategie-Studien über Hunderttausende Pfade |
 | **Entnahmephase** | 14 Entnahmeregeln (4-%-Regel, Vanguard, Guyton-Klinger …) auf Kohorten, Bootstrap-Pfaden oder gespeicherten Simulationsergebnissen, mit vereinfachter deutscher Steuer |
@@ -135,17 +135,18 @@ Aus einem lokalen Quellarchiv:
 install.packages("SimLev_0.5.0.tar.gz", repos = NULL, type = "source")
 ```
 
-Optionale Pakete: `plotly` (interaktives Dashboard über plotly; ohne plotly
-schreibt SimLev ein eigenes, abhängigkeitsfreies HTML), `TTR` (technische
-Indikatoren für Signalstrategien), `testthat` (Tests), `knitr` und
-`rmarkdown` (Vignette).
+Optionale Pakete: `testthat` (Tests), `knitr` und `rmarkdown` (Vignette).
+Technische Indikatoren für Signalstrategien lassen sich bequem mit dem
+Paket `TTR` berechnen (z. B. `TTR::SMA()`); es ist keine Abhängigkeit von
+SimLev und wird bei Bedarf separat installiert.
 
 </details>
 
 <details>
 <summary><b>Python</b></summary>
 
-SimLev ist reines Python ab Version 3.9. Ein Compiler wird nicht benötigt.
+SimLev ist reines Python ab Version 3.10 (geprüft ab Python 3.10). Ein
+Compiler wird nicht benötigt.
 
 ``` bash
 pip install "simlev @ git+https://github.com/chemicalstats/SimLev-Repos#subdirectory=python"
@@ -158,15 +159,12 @@ Aus einem lokalen Klon:
 cd python
 pip install .                 # Engine und alle Erweiterungen (numpy, pandas)
 pip install ".[plot]"         # zusätzlich matplotlib für Grafiken
-pip install ".[all]"          # zusätzlich plotly und scipy
 ```
 
 | Paket | Wofür | Pflicht? |
 |---|---|---|
 | `numpy`, `pandas` | Rechenkern und Datenaufnahme | ja |
 | `matplotlib` | Grafiken: Dashboard (`result.plot()`, `export_dashboard`) und `plot()` der Erweiterungen | optional |
-| `plotly` | Interaktives Dashboard als plotly-Figur | optional |
-| `scipy` | Ersatzweg für Eigenvektoren ohne System-LAPACK (nicht bitgleich) | optional |
 | `pytest` | Test-Suite | optional |
 
 </details>
@@ -174,7 +172,8 @@ pip install ".[all]"          # zusätzlich plotly und scipy
 <details>
 <summary><b>Julia</b></summary>
 
-Benötigt wird **Julia ab Version 1.10** (geprüft mit Julia 1.13.2). Weitere
+Benötigt wird **Julia ab Version 1.10** (geprüft ab Julia 1.10, zuletzt mit
+Julia 1.13.2). Weitere
 Pakete sind nicht nötig, nur die Standardbibliothek.
 
 ``` julia
@@ -412,7 +411,7 @@ synthetischen Kurse mit ihrem eigenen Zufallsgenerator, die Preisreihen sind
 also verschieden. Mit identischen Eingabedaten liefern alle drei Fassungen
 exakt dasselbe Ergebnis: Mit den Kursen des R-Beispiels (in Python erzeugt
 mit `simlev.set_seed(42)`, `simlev._r.rng.rnorm()` und
-`simlev._rnum.r_cumprod()`, in Julia mit `set_seed(42)`,
+`simlev._r.rnum.r_cumprod()`, in Julia mit `set_seed(42)`,
 `SimLev.RRng.rnorm()` und `SimLev.RBase.r_cumprod()`) zeigen auch Python und
 Julia 17.765,20 EUR Endwert und 1.368,47 EUR Steuern. Ebenso liefern R und
 Julia mit den Kursen des Python-Beispiels 19.193,75 EUR und R und Python mit
@@ -566,8 +565,9 @@ explizit.
 
 Bestehende Strategien verändern Sie mit `add_asset()`, `update_asset()` und
 `remove_asset()`, die jeweils eine neue Strategie zurückgeben. Ältere,
-als einfache Listen definierte Strategien wandelt `migrate_strategy()` in
-das aktuelle Format um; `simulation()` akzeptiert sie auch direkt.
+als einfache Listen definierte Strategien akzeptiert `simulation()` direkt;
+die veralteten Klassen `"etn_standard"` und `"etn_deliverable"` setzt
+`asset_config()` mit einer Warnung in `"etn"` mit `deliverable` um.
 
 ### Buy-and-Hold und Signalstrategien
 
@@ -585,7 +585,9 @@ und ein `asset_start` nach dem letzten Datentag ist ein Fehler.
 Mit `action_type = "signal"` steigt das Asset ein und aus, wann immer Ihre
 Signalspalten es vorgeben. Die Signale berechnen Sie vorab selbst; SimLev
 macht keine Annahmen über Ihre Handelsregel. Ein klassisches Beispiel ist
-der Kreuzungspunkt zweier gleitender Durchschnitte:
+der Kreuzungspunkt zweier gleitender Durchschnitte. In R berechnet sie hier
+bequem das Paket `TTR` (`TTR::SMA()`); es ist keine Abhängigkeit von
+SimLev und wird bei Bedarf separat installiert (`install.packages("TTR")`):
 
 <details>
 <summary><b>R</b></summary>
@@ -1351,7 +1353,8 @@ Total-Return- bzw. reale Reihen um, `splice_series()` verkettet Reihen
 renditebasiert mit Vorrang der ersten, `strategy_from_weights()` und
 `portfolio_template()` bauen Strategien aus Gewichten bzw. bekannten
 Allokationen (60/40, Permanent, All Weather, Golden Butterfly, Three Fund,
-HFEA, Aktien/Gold).
+HFEA, Aktien/Gold); ohne Vorlagennamen listet `portfolio_template()` alle
+Vorlagen mit ihren Gewichten.
 
 ### Abhängigkeiten, Tail-Risiko und Drittvariablen
 
@@ -1590,7 +1593,6 @@ plot(result, style = "custom", panels = c("performance", "drawdown", "monthly"))
 plot(result, compare = result_ohne_steuer)     # zwei Strategien nebeneinander
 
 export_dashboard(result, "backtest.pdf", width = 16, height = 10)
-plot_interactive(result, file = "backtest.html")
 ```
 
 </details>
@@ -1612,7 +1614,6 @@ result.plot(style="custom", panels=["performance", "drawdown", "monthly"])
 result.plot(compare=result_ohne_steuer)
 
 simlev.export_dashboard(result, "backtest.pdf", width=16, height=10)
-simlev.plot_interactive(result, file="backtest.html")   # engine="plotly" für eine plotly-Figur
 ```
 
 </details>
@@ -1631,7 +1632,6 @@ plot_dashboard(result; style = "custom", panels = ["performance", "drawdown", "m
 plot_dashboard(result; compare = result_ohne_steuer)
 
 export_dashboard(result, "backtest.svg"; width = 16, height = 10)   # immer SVG; PDF/PNG z. B. mit rsvg-convert
-plot_interactive(result; file = "backtest.html")
 ```
 
 </details>
@@ -1639,12 +1639,6 @@ plot_interactive(result; file = "backtest.html")
 Verfügbare Panels sind `"performance"`, `"drawdown"`, `"distribution"`,
 `"rolling"`, `"monthly"`, `"stats"`, `"correlation"` und `"comparison"`.
 Über `colors` passen Sie das Farbschema an ein Corporate Design an.
-
-`plot_interactive()` erzeugt ein HTML-Dashboard mit Tooltips, einem
-synchronen Fadenkreuz über alle Panels und ein- und ausblendbaren Serien.
-Ohne plotly schreibt SimLev eine vollständig eigenständige HTML-Datei, die
-offline in jedem Browser funktioniert und sich problemlos per E-Mail
-verschicken lässt.
 
 ## Unterschiede zwischen den Sprachen
 
@@ -1688,13 +1682,6 @@ R-Fassung; die Unterschiede betreffen nur Schreibweisen und Komfort (siehe
   z. B. `end_`.
 - **Zwischenstände** von `bootstrap_study(chunk_dir = …)` speichert Python
   als Pickle, Julia in einem eigenen Textformat statt RDS.
-- Die **Kopfzeile des interaktiven Dashboards** zeigt in allen drei
-  Fassungen CAGR, Sharpe und Max. Drawdown, mit Sparplan als „CAGR
-  (geldgewichtet)“ und „Max. Drawdown (zeitgewichtet)“ (in R beim Stand
-  54b5b4f wegen eines Fehlers „CAGR NA% · Sharpe NA“). Das HTML von Python
-  und Julia ist byte-identisch zu R.
-- `export_html_dashboard()` ist in allen drei Fassungen nur ein
-  Platzhalter; das interaktive Dashboard schreibt `plot_interactive()`.
 - **Doppelte Datumswerte** führen in allen drei Fassungen zu einer
   Fehlermeldung (in R erst nach dem Stand 54b5b4f; vorher rechnete R
   stillschweigend mit einem verschobenen Kalender weiter).
@@ -1777,27 +1764,37 @@ Engine-Fälle in `golden/cases/` und `golden/extra/` vollständig und die
 4.536 Modul-Fälle in Python vollständig, in Julia standardmäßig in einer
 Auswahl und mit `SIMLEV_FULL_TESTS=1` vollständig.
 
-**Optionale R-Pakete.** Ist evd, rugarch bzw. imputeTS installiert, nimmt
-R einen anderen Weg: `.fit_tail` (Tail-Modell im Bootstrap, Verfahren
-`"evt"`) schätzt die GPD per `evd::fpot`; `.fit_garch11`
-(Bootstrap-Verfahren `garch` und `gjr_garch`, Kopplung weiterer Reihen,
-`dcc_fit()`, `dependence_analysis()`) schätzt per `rugarch::ugarchfit`;
-`.fill_na` (Backcast mit `fill = "stine"` bzw. `index_fill = "stine"`)
-interpoliert per `imputeTS::na_interpolation(option = "stine")` nach
-Stineman statt linear mit Hinweis. Python und Julia bilden die drei
+**Optionale R-Pakete.** `.fit_tail` (Tail-Modell im Bootstrap, Verfahren
+`"evt"`) schätzt die GPD ab 30 Überschreitungen immer per `fpot` aus evd
+2.3-7.1, das ins R-Paket übernommen ist (`.evd_fpot`, `r/R/vendor_evd.R`,
+`r/src/vendor_evd.c`, Lizenz und Autoren in `r/inst/COPYRIGHTS`); evd muss
+dafür nicht installiert sein. `.fill_na` (Backcast mit `fill = "stine"`
+bzw. `index_fill = "stine"`) interpoliert immer nach Stineman per
+`na_interpolation(option = "stine")` aus imputeTS 3.4 mit `stinterp` aus
+stinepack 1.5, beide ins R-Paket übernommen (`.imputets_na_interpolation`,
+`r/R/vendor_imputets.R`, `r/src/vendor_imputets.cpp`,
+`r/R/vendor_stinepack.R`); imputeTS muss dafür nicht installiert sein.
+`.fit_garch11` (Bootstrap-Verfahren `garch` und `gjr_garch`, Kopplung
+weiterer Reihen, `dcc_fit()`, `dependence_analysis()`) schätzt immer per
+`ugarchfit` aus rugarch 1.5-6 mit Rsolnp 1.16 `solnp`/`gosolnp` und
+truncnorm 1.0-9 `rtruncnorm`, alle ins R-Paket übernommen
+(`.rugarch_ugarchfit`, `r/R/vendor_rugarch.R`, `r/src/vendor_rugarch.c`,
+`r/R/vendor_rsolnp.R`, `r/R/vendor_truncnorm.R`,
+`r/src/vendor_truncnorm.c`); die Hesse-Matrix rechnet eine eigenständige
+Richardson-Extrapolation (`r/R/richardson.R`, gegen numDeriv geprüft);
+rugarch muss dafür
+nicht installiert sein, `optim` und die Momente bleiben nur der Rückfall,
+wenn der Fit mit einem Fehler scheitert. Python und Julia bilden die
 Pakete bitgleich nach – evd 2.3-7.1 `fpot`; rugarch 1.5-6 `ugarchfit` mit
-Rsolnp 1.16 `solnp`, numDeriv-Hesse-Matrix, `stats::nlminb` und `gosolnp`
+Rsolnp 1.16 `solnp`, Richardson-Hesse-Matrix, `stats::nlminb` und `gosolnp`
 (mit truncnorm 1.0-9) als Ausweichwegen; imputeTS 3.4 mit stinepack 1.5 –
-und verhalten sich standardmäßig wie R mit allen drei Paketen.
-`SIMLEV_R_SUGGESTS=none` bildet R ohne die Pakete nach (`optim`, Momente
-bzw. lineare Interpolation), eine Liste wie `SIMLEV_R_SUGGESTS=evd,imputeTS`
-nur die genannten. gosolnp (zufällige Neustarts) erreicht die
+und nehmen wie R immer den Paket-Weg. gosolnp (zufällige Neustarts) erreicht die
 Solver-Kette in R bei etwa 1 % zufälliger Reihen; wie R setzt er dabei den
 globalen Zufallszustand aus der Uhrzeit (`set.seed` mit den
 Unix-Sekunden), das Ergebnis hängt dann in R wie in den Ports von der
 Sekunde des Aufrufs ab. `SIMLEV_R_SYS_TIME` (Sekunden seit 1970) stellt
-die Uhr der Ports fest. MSGARCH, plotly und TTR gelten als nicht
-installiert; die MS-GARCH-Verfahren melden wie R, dass das Paket fehlt.
+die Uhr der Ports fest. MSGARCH gilt als nicht installiert; die
+MS-GARCH-Verfahren melden wie R, dass das Paket fehlt.
 
 **Aktuelle R-Fassung 0.5.0:** Nach dem Stand 54b5b4f korrigiert das
 R-Paket Rechenfehler der Engine (Fondsmodus, Splits mit ganzen Anteilen,
@@ -1820,8 +1817,8 @@ mathematischen Funktionen aus glibc-libm kommen; numpy-Transzendental-
 funktionen verwendet SimLev bewusst nicht, weil sie auf Rechnern mit
 AVX-512 abweichen. Eigenvektoren (`eigen()`, u. a. in
 `portfolio_optimize()`) holt Python wie R aus der Referenz-LAPACK des
-Systems (Pfad über `SIMLEV_LAPACK` wählbar); fehlt sie, rechnen scipy bzw.
-numpy ohne Bitgleichheitsgarantie (mit einer Warnung). Auf Plattformen mit 64-Bit-`long
+Systems (Pfad über `SIMLEV_LAPACK` wählbar); fehlt sie, rechnet numpy ohne
+Bitgleichheitsgarantie (mit einer Warnung). Auf Plattformen mit 64-Bit-`long
 double` wie macOS auf Apple Silicon überspringt die Python-Suite die
 Bitgleichheits-Tests. Grafiken sind in den
 Ports nicht bitgleich, die berechneten Daten schon. Julia ist unter Linux
@@ -1944,7 +1941,7 @@ rcmdcheck::rcmdcheck("r")
 ``` bash
 cd python
 pip install ".[test]"
-pytest                                  # 5.762 Tests, alle bestanden
+pytest                                  # 5.755 Tests, alle bestanden
 python tools/compare_golden.py          # Engine: golden/cases und golden/extra (105 Fälle)
 python tools/compare_reference.py       # alle Funktionen: golden/modules (4.536 Fälle)
 ```
@@ -1963,7 +1960,7 @@ Plattformen ohne 80-Bit-`long double` werden die Bitgleichheits-Tests
 
 ``` bash
 cd julia
-julia --project -e 'using Pkg; Pkg.test()'                     # 946 Tests, alle bestanden
+julia --project -e 'using Pkg; Pkg.test()'                     # 929 Tests, alle bestanden
 SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()' # dazu alle 4.536 Modul-Referenzfälle
 julia --project tools/compare_golden.jl ../golden/cases        # Engine: ein Ordner (auch ../golden/extra)
 julia --project tools/compare_reference.jl                     # alle Funktionen: golden/modules (4.536 Fälle)

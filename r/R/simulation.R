@@ -312,8 +312,8 @@
 #' @keywords internal
 #' @noRd
 calculate_paragraph_20_tax <- function(trade_gain, bonus, totals, tax_rate, use_spb) {
-  # RCpp-Port (tax_core_RCpp.cpp); totals wird IN PLACE mutiert
-  res <- p20_tax_rcpp(trade_gain, bonus, totals, tax_rate, use_spb)
+  # C++-Port (tax_core.cpp); totals wird IN PLACE mutiert
+  res <- .sim_p20_tax_cpp(trade_gain, bonus, totals, tax_rate, use_spb)
   return(list(tax = res$tax, totals = totals, spb_used = res$spb_used))
 }
 
@@ -336,8 +336,8 @@ calculate_paragraph_20_tax <- function(trade_gain, bonus, totals, tax_rate, use_
 #' @keywords internal
 #' @noRd
 calculate_vorabpauschale_tax <- function(flat_rate, bonus, totals, tax_rate, use_spb) {
-  # RCpp-Port (tax_core_RCpp.cpp, R-2: Verlusttopf vor SPB); totals in place
-  res <- vp_tax_rcpp(flat_rate, bonus, totals, tax_rate, use_spb)
+  # C++-Port (tax_core.cpp, R-2: Verlusttopf vor SPB); totals in place
+  res <- .sim_vp_tax_cpp(flat_rate, bonus, totals, tax_rate, use_spb)
   return(list(tax = res$tax, totals = totals, spb_used = res$spb_used,
               taxable_amount = res$taxable_amount))
 }
@@ -567,8 +567,8 @@ calculate_sell_signal <- function(input, name, index){
 
 #--------> Hilfsfunktion zur Berechnung des FIFO-Kaufpreises:
 calculate_fifo_price <- function(trades, units, front_index = 1){
-  # RCpp-Port (fifo_core_RCpp.cpp)
-  calculate_fifo_price_rcpp(trades, units, as.integer(front_index))
+  # C++-Port (fifo_core.cpp)
+  .sim_fifo_price_cpp(trades, units, as.integer(front_index))
 }
 
 
@@ -583,14 +583,14 @@ calculate_fifo_price <- function(trades, units, front_index = 1){
 #' @keywords internal
 #' @noRd
 calculate_fifo_vorabpauschale <- function(trades, units, front_index = 1) {
-  # RCpp-Port (fifo_core_RCpp.cpp)
-  calculate_fifo_vp_rcpp(trades, units, as.integer(front_index))
+  # C++-Port (fifo_core.cpp)
+  .sim_fifo_vp_cpp(trades, units, as.integer(front_index))
 }
   
 #--------> Hilfsfunktion zur lot-weisen Steuerberechnung für § 23 EStG:
 calculate_private_sale_tax <- function(input, name, trade_count, sell_price, current_date) {
-  # RCpp-Port (fifo_core_RCpp.cpp), Par.-23-Jahresfrist kalendergenau in C++
-  calculate_private_sale_tax_rcpp(
+  # C++-Port (fifo_core.cpp), Par.-23-Jahresfrist kalendergenau in C++
+  .sim_private_sale_tax_cpp(
     input[["trades"]][[name]][["buys"]],
     as.integer(input[["trades"]][[name]][["fifo_front"]]),
     trade_count, sell_price, as.integer(current_date))
@@ -1169,9 +1169,9 @@ calculate_flat_rate <- function(input, name, index, dates, tax_regime = NULL, fi
   # ══════════════════════════════════════════════════════════════════════
   # M4: Nur Lots die am Jahresende noch gehalten werden
   # ══════════════════════════════════════════════════════════════════════
-  # RCpp-Port des Lot-Loops (tax_core_RCpp.cpp): M4/T-1/Growth-Cap,
+  # C++-Port des Lot-Loops (tax_core.cpp): M4/T-1/Growth-Cap,
   # Datumsvergleiche als Integer (frueher geplante Option A inklusive)
-  res <- flat_rate_rcpp(
+  res <- .sim_flat_rate_cpp(
     input[["trades"]][[name]][["buys"]],
     as.integer(input[["trades"]][[name]][["fifo_front"]]),
     base_rate, year_start_price, market_price,
@@ -1277,17 +1277,17 @@ calculate_sell_count <- function(input, name, target, index, spread, fractions,
   trades <- input[["trades"]][[name]][["buys"]]
   front_index <- input[["trades"]][[name]][["fifo_front"]]
   
-  # RCpp-Port (tax_core_RCpp.cpp): Extraktion + kum. FIFO + Bisektion in C++
+  # C++-Port (tax_core.cpp): Extraktion + kum. FIFO + Bisektion in C++
   if (is.null(tax_regime)) tax_regime <- input[["assets"]][[name]][["tax_regime"]]
   tax_regime <- if (tax_mode == "person") tax_regime else "none"
   bonus <- if (tax_regime == "investment_fund") input[["assets"]][[name]][["bonus"]] else 0
   # R3a-04: wie calculate_paragraph_20_tax erst Verlusttopf, dann freier Sparer-Pauschbetrag
-  # (ohne Pauschbetrag ist der Rest 0); die § 19-Anrechnung der Lot-VP rechnet sell_count_rcpp
+  # (ohne Pauschbetrag ist der Rest 0); die § 19-Anrechnung der Lot-VP rechnet .sim_sell_count_cpp
   loss_pool <- input[["totals"]][["loss_capital_gains"]] +
     max(0, input[["totals"]][["sparer_pauschbetrag_remaining"]] %||% 0)
   regime_code <- switch(tax_regime, none = 0L, investment_fund = 1L,
                         capital_gains = 2L, private_sale = 3L, 0L)
-  res <- sell_count_rcpp(trades, as.integer(front_index), target, trade_price,
+  res <- .sim_sell_count_cpp(trades, as.integer(front_index), target, trade_price,
                          total_shares, isTRUE(fractions), regime_code,
                          bonus, loss_pool, tax_rate)
   return(res)
@@ -1702,7 +1702,7 @@ perform_asset_split <- function(input, name, ratio, index, type,
 }
 
 #--------> Hilfsfunktion zur Realisierung von Käufen:
-#' P7: Kernlogik (Report-Update + Lot-Erstellung) in C++ perform_trade_buy_cpp.
+#' P7: Kernlogik (Report-Update + Lot-Erstellung) in C++ .sim_buy_cpp.
 #' R-Wrapper berechnet trade_count (Spread, Fractions-Logik) und gibt Details aus.
 #' @noRd
 perform_trade_buy <- function(input, count = NULL, name, index, reason = "", spread, fractions, details, current_date = NULL){
@@ -1748,7 +1748,7 @@ perform_trade_buy <- function(input, count = NULL, name, index, reason = "", spr
     input[["trades"]][[name]][["buys"]] <- c(input[["trades"]][[name]][["buys"]], vector("list", max(16L, n_alloc)))
 
   # C++ by-reference: Report-Update + Status-Update + Lot-Erstellung
-  perform_trade_buy_cpp(input = input, name = name, index = index,
+  .sim_buy_cpp(input = input, name = name, index = index,
                         trade_count = trade_count, trade_price = trade_price,
                         market_price = market_price)
 
@@ -1957,7 +1957,7 @@ if (trade_count <= 0) {
   }
   
   # Report aktualisieren
-  calculate_sell_report(
+  .sim_sell_report_cpp(
     input = input, name = name, index = index,
     trade_count = trade_count, trade_price = trade_price,
     market_price = market_price, capital_gains_tax = capital_gains_tax
@@ -1965,9 +1965,9 @@ if (trade_count <= 0) {
   
   # FIFO-Lots aktualisieren
   if (tax_mode == "person") {
-    # RCpp-Port: FIFO-Verbrauch (VP proportional VOR remaining, F9) und
-    # fifo_front-Update in place (fifo_core_RCpp.cpp)
-    fifo_consume_rcpp(input, name, trade_count)
+    # C++-Port: FIFO-Verbrauch (VP proportional VOR remaining, F9) und
+    # fifo_front-Update in place (fifo_core.cpp)
+    .sim_fifo_consume_cpp(input, name, trade_count)
   }
 
   # Details ausgeben
@@ -2005,24 +2005,24 @@ if (trade_count <= 0) {
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# C++ FUNKTIONEN (Rcpp PFLICHT)
+# C++ FUNKTIONEN (PFLICHT)
 # ═══════════════════════════════════════════════════════════════════════════════
 # Die folgenden Funktionen sind ausschließlich in simulation_core.cpp
-# implementiert und werden über Rcpp exportiert:
+# implementiert; die R-Hüllen (.Call über R's C-Schnittstelle) stehen in cores.R:
 #
-#   - dca_flows_allocation(input, name, flows, index)
-#   - calculate_buy_report(input, name, index, trade_count, trade_price, market_price)
-#   - calculate_sell_report(input, name, index, trade_count, trade_price,
-#                           market_price, capital_gains_tax)
-#   - calculate_total_report(input, assets, index)
-#   - perform_market_update(input, assets, index)
-#   - batch_market_update(input, assets, start_idx, end_idx)
-#   - perform_trade_buy_cpp(input, name, index, trade_count, trade_price, market_price)
+#   - .sim_dca_flows_cpp(input, name, flows, index)
+#   - .sim_buy_report_cpp(input, name, index, trade_count, trade_price, market_price)
+#   - .sim_sell_report_cpp(input, name, index, trade_count, trade_price,
+#                          market_price, capital_gains_tax)
+#   - .sim_total_report_cpp(input, assets, index)
+#   - .sim_market_update_cpp(input, assets, index)
+#   - .sim_market_update_batch_cpp(input, assets, start_idx, end_idx)
+#   - .sim_buy_cpp(input, name, index, trade_count, trade_price, market_price)
 #
 # Alle Funktionen modifizieren sim_mem per Referenz (C++ pass-by-reference).
 # Kein Rückgabewert nötig – Aufrufe OHNE Zuweisung: func(sim_mem, ...)
 #
-# Bei Fehler "could not find function ..." → Paket mit Rcpp neu kompilieren:
+# Bei Fehler "could not find function ..." → Paket neu kompilieren:
 #   R CMD INSTALL --preclean SimLev
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2298,10 +2298,10 @@ perform_gain_harvest <- function(input, name, index, tax_regime, spread, fractio
 #' \code{\link{deep_analysis}} zur weiteren Auswertung
 #'
 #' @export
-#' @useDynLib SimLev, .registration = TRUE
-#' @importFrom Rcpp evalCpp
+#' @useDynLib SimLev, .registration = TRUE, .fixes = "C_"
 #' @import stats graphics grDevices
 #' @importFrom utils head tail modifyList
+#' @importFrom methods hasArg
 #' @noRd
 
 simulation <- function(

@@ -34,7 +34,7 @@ Alle Kernroutinen (BLAS, ``dpotrf``, ``dgetrf``, ``dgecon``, ``dpotri``,
 LINPACK, Eigenwerte ohne Vektoren) sind reine numpy-Ports und unabhängig von
 einer System-Bibliothek bitgleich. Nur ``eigen(..., only_values=False)`` ruft
 ``dsyevr`` der System-Referenz-LAPACK über ``ctypes`` auf (siehe
-:mod:`simlev._r._lapack`); fehlt sie, wird scipy/numpy genutzt und
+:mod:`simlev._r._lapack`); fehlt sie, rechnet numpy (mit Warnung) und
 Bitgleichheit ist nicht garantiert.
 """
 from __future__ import annotations
@@ -418,7 +418,7 @@ def outer(X, Y, FUN="*"):
             elif FUN == "/":
                 flat = xx / yy
             elif FUN == "^":
-                from .._rnum import r_pow
+                from .rnum import r_pow
                 flat = np.array([r_pow(a, b) for a, b in zip(xx.tolist(), yy.tolist())])
             elif callable(FUN):
                 flat = np.asarray(FUN(xx, yy), dtype=np.float64)
@@ -658,7 +658,7 @@ def det(x):
 
 def all_equal_numeric(target, current, tolerance=1.4901161193847656e-08):
     """Kern von ``all.equal.numeric`` (ohne Attribute); ``True`` oder Text."""
-    from .._rnum import r_sum
+    from .rnum import r_sum
     t = np.asarray(target, dtype=np.float64).ravel(order="F")
     c = np.asarray(current, dtype=np.float64).ravel(order="F")
     if t.size != c.size:
@@ -954,6 +954,6 @@ def diag(x=1, nrow=None, ncol=None, names=True):
     return out
 
 
-from .base import quiet_fp as _quiet_fp  # noqa: E402
+from .base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), __all__)
+quiet_fp(globals(), __all__)

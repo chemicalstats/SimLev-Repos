@@ -90,3 +90,28 @@ test_that("input validation", {
   expect_error(backcast_fit(df2, "etf", "idx"), "Zu wenige")
   expect_warning(backcast_fit(s$df, "etf", "idx", ter = 0.5, fit = c("drag", "spread")), "nicht identifizierbar")
 })
+
+test_that("stine: Stineman ueber die aus imputeTS/stinepack uebernommene Fassung (ohne imputeTS)", {
+  v <- c(NA, 1, NA, NA, 4, 5, NA, 2, NA)
+  expect_silent(f <- SimLev:::.fill_na(v, "stine"))
+  inner <- 2:8
+  expect_identical(f[inner], as.numeric(SimLev:::.imputets_na_interpolation(v[inner], option = "stine")))
+  expect_identical(f[c(1, 9)], c(1, 2))
+  expect_false(isTRUE(all.equal(f, SimLev:::.fill_na(v, "linear"))))
+  expect_true(is.na(SimLev:::.fill_na(v, "stine", keep_leading = TRUE)[1]))
+  # stinterp direkt: Stuetzstellen bleiben, Mittelpunkt einer Geraden ist linear
+  s <- SimLev:::.stinepack_stinterp(c(1, 2, 4), c(1, 2, 4), c(1, 3, 4))
+  expect_identical(s$y, c(1, 3, 4))
+  # NA am Rand (Ueberlauf) ueber na_locf und den C++-Kern locf
+  # (der Kern schreibt auch ueber nicht endliche Werte wie Inf fort)
+  expect_identical(SimLev:::.imputets_locf(c(NA, 1, Inf, NA, 3), FALSE), c(NA, 1, 1, 1, 3))
+  expect_identical(SimLev:::.imputets_na_locf(c(NA, 1, NA, 3)), c(1, 1, 1, 3))
+  # option = "linear" (Standard): approx mit rule = 2, rule und weitere Argumente ueber ...
+  expect_identical(SimLev:::.imputets_na_interpolation(c(1, NA, 3)), c(1, 2, 3))
+  expect_identical(SimLev:::.imputets_na_interpolation(c(NA, 1, NA, 3)), c(1, 1, 2, 3))
+  expect_identical(SimLev:::.imputets_na_interpolation(c(NA, 1, NA, 3), rule = 1), c(NA, 1, 2, 3))
+  expect_identical(SimLev:::.imputets_na_interpolation(c(1, NA, 3), method = "constant"), c(1, 1, 3))
+  # nicht uebernommene Wege von imputeTS
+  expect_error(SimLev:::.imputets_na_interpolation(c(1, NA, 3), option = "spline"), "nicht uebernommen")
+  expect_error(SimLev:::.imputets_na_locf(c(NA, 1, NA), na_remaining = "mean"), "nicht uebernommen")
+})

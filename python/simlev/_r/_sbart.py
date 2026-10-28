@@ -459,7 +459,7 @@ def sbart(penalt, dofoff, xs, ys, ws, ssw, n, knot, nk, icrit, spar, ispar, iter
     """``sbart`` (Eingabefelder 1-basiert). Liefert dict mit coef, sz, lev,
     crit, spar, lspar (= lambda), ratio, iter, ier."""
     from ._lbfgsb import _p  # Ausgabehilfe
-    from .._rnum import r_pow
+    from .rnum import r_pow
     ld4 = 4
     coef = [0.0] * (nk + 1)
     sz = [0.0] * (n + 1)

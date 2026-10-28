@@ -23,7 +23,7 @@ import warnings
 
 import numpy as np
 
-from .._rnum import NA_REAL as _NA_REAL
+from .rnum import NA_REAL as _NA_REAL
 
 __all__ = [
     "set_seed", "rng_kind", "get_random_seed", "set_random_seed", "rm_random_seed",

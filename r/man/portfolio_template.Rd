@@ -2,16 +2,15 @@
 % Please edit documentation in R/data_prep.R
 \name{portfolio_template}
 \alias{portfolio_template}
-\alias{portfolio_templates}
 \title{Portfolio-Vorlagen}
 \usage{
-portfolio_template(name, map = NULL, ...)
-
-portfolio_templates()
+portfolio_template(name = NULL, map = NULL, ...)
 }
 \arguments{
-\item{name}{Name der Vorlage als Zeichenkette (siehe Tabelle);
-\code{portfolio_templates()} listet alle.}
+\item{name}{Name der Vorlage als Zeichenkette (siehe Tabelle). Ohne
+\code{name} (Standard \code{NULL}) liefert \code{portfolio_template()}
+die Liste aller Vorlagen; \code{map} und \code{...} sind dann nicht
+erlaubt.}
 
 \item{map}{Benannter Zeichenvektor Rolle -> Spaltenname im Datensatz,
 z. B. \code{c(stocks = "msci_world")}. Standard \code{NULL}; Rollen ohne
@@ -23,9 +22,9 @@ Fehler.}
 \code{\link[=asset_config]{asset_config()}} (z. B. \code{asset_spread}, \code{asset_bonus}).}
 }
 \value{
-\code{portfolio_template()}: Objekt der Klasse \code{strategy}
-fuer \code{\link[=simulation]{simulation()}}; \code{portfolio_templates()}: data.frame mit
-\code{template}, \code{role} und \code{weight} (Anteil, 0.6 = 60 \%).
+Mit \code{name}: Objekt der Klasse \code{strategy}
+fuer \code{\link[=simulation]{simulation()}}; ohne \code{name}: data.frame aller
+Vorlagen mit \code{template}, \code{role} und \code{weight} (Anteil, 0.6 = 60 \%).
 }
 \description{
 Bekannte statische Allokationen mit Rollen-Namen (z. B. \code{stocks},
@@ -49,7 +48,7 @@ Gewichte in der Tabelle in Prozent; in der Strategie als Anteile.
 \examples{
 portfolio_template("permanent", map = c(stocks = "msci_world", long_bonds = "bund_10y",
                                         cash = "geldmarkt", gold = "gold_eur"))
-head(portfolio_templates())
+head(portfolio_template())
 }
 \seealso{
 \code{\link[=strategy_from_weights]{strategy_from_weights()}}, \code{\link[=simulation]{simulation()}}

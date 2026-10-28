@@ -3,7 +3,7 @@
 # =============================================================================
 
 # C7-11: Feldfolge der obersten Ebene von sim_mem. Die C++-Kerne (simulation_core.cpp,
-# fifo_core_RCpp.cpp) lesen und schreiben diese Ebene ueber die Position (input[1] = status,
+# fifo_core.cpp) lesen und schreiben diese Ebene ueber die Position (input[1] = status,
 # input[2] = market, input[3] = trades, input[4] = report; C++ zaehlt ab 0), alles darunter ueber
 # Namen. Die Reihenfolge wird hier festgelegt und vor dem ersten C++-Aufruf geprueft.
 .SIM_MEM_LAYOUT <- c("assets", "status", "market", "trades", "report", "totals")
@@ -210,7 +210,7 @@
       money = c(sim_mem[["status"]][[name]][["money"]], numeric(nrow(data)-1)),
       flows = numeric(nrow(data)),
       total = c(sim_mem[["status"]][[name]][["total"]], numeric(nrow(data)-1)),
-      share = numeric(nrow(data))  # Wird durch calculate_total_report am Tag 1 korrekt gesetzt
+      share = numeric(nrow(data))  # Wird durch .sim_total_report_cpp am Tag 1 korrekt gesetzt
     )
   }
 
@@ -506,7 +506,7 @@
   # ═══════════════════════════════════════════════════════════════════════════════
   # Statt jeden Tag einzeln zu durchlaufen, identifizieren wir Tage die 
   # individuelle Verarbeitung brauchen (Slow-Path, Jahreswechsel).
-  # Zusammenhängende Blöcke dazwischen werden per batch_market_update() in C++
+  # Zusammenhängende Blöcke dazwischen werden per .sim_market_update_batch_cpp() in C++
   # vektorisiert verarbeitet (~10-50x schneller als einzelne R-Aufrufe).
   
   # Jahreswechsel-Flag vorberechnen (statt format() auf jedem Tag)

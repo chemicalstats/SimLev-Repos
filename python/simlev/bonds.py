@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from ._rnum import r_cumprod, r_pow_vec
+from ._r.rnum import r_cumprod, r_pow_vec
 from .backcast import _fill_na, _resolve_series
-from .data_prep import _as_frame, _as_numeric, _col, _days, _quiet_fp, _to_date
+from ._r.base import quiet_fp
+from .data_prep import _as_frame, _as_numeric, _col, _days, _to_date
 
 __all__ = ["bond_index_from_yields", "money_market_index", "currency_hedged_index", "RVector"]
 
@@ -156,4 +157,4 @@ def currency_hedged_index(data, local, domestic_rate, foreign_rate, cost=0, basi
     return s * r_cumprod(1 + r)
 
 
-_quiet_fp(globals(), ["bond_index_from_yields", "money_market_index", "currency_hedged_index"])
+quiet_fp(globals(), ["bond_index_from_yields", "money_market_index", "currency_hedged_index"])

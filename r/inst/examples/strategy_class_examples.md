@@ -47,6 +47,10 @@ summary(strategy)
 
 ### 3. Signal-basierte Strategy (SMA)
 
+Die gleitenden Durchschnitte berechnet hier das Paket `TTR`. Es ist keine
+Abhängigkeit von SimLev und wird bei Bedarf separat installiert
+(`install.packages("TTR")`); jede andere Berechnung der Signale geht ebenso.
+
 ```r
 # Erst Signals in Daten erstellen
 data$sma_short <- TTR::SMA(data$SPY, n = 50)
@@ -236,8 +240,8 @@ Nach Steuerregime:
 Strategie lässt sich bei Bedarf in eine Liste umwandeln:
 
 ```r
-# Konvertiere zu alter Liste
-old_format <- as_list(strategy)
+# Konvertiere zu alter Liste (Klasse entfernen)
+old_format <- unclass(strategy)
 
 # Dann verwenden
 result <- simulation(data = data, strategy = old_format)

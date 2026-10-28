@@ -1,5 +1,13 @@
 """Nachbildung von ``truncnorm::rtruncnorm`` (truncnorm 1.0-9).
 
+Herkunft: R-Paket truncnorm 1.0-9 (CRAN, 2023-03-20), ``R/truncnorm.R``
+(``rtruncnorm``) und ``src/rtruncnorm.c``; Autoren: Olaf Mersmann [aut,
+cre], Heike Trautmann [aut], Detlef Steuer [aut], Björn Bornkamp [aut].
+Lizenz: GPL (>= 2), in SimLev unter GPL-3. Nach Python übertragen und
+angepasst für SimLev (siehe ``python/COPYRIGHTS.md``); im R-Paket übernommen
+als ``.truncnorm_rtruncnorm`` (``r/R/vendor_truncnorm.R``,
+``r/src/vendor_truncnorm.c``).
+
 Gestutzte Normalverteilung nach ``src/rtruncnorm.c`` (Bornkamp, Mersmann):
 je nach Lage der Schranken Normal-, Halbnormal-, Gleichverteilungs- oder
 Exponential-Verwerfungsverfahren (Robert 1995, Schwellen ``t1`` bis
@@ -20,7 +28,7 @@ import warnings
 
 import numpy as np
 
-from .. import _rnum as _rn
+from . import rnum as _rn
 from . import libm as _libm
 from . import nmath as _nm
 from . import rng as _rng
@@ -202,6 +210,6 @@ def rtruncnorm(n, a=-math.inf, b=math.inf, mean=0.0, sd=1.0):
     return out
 
 
-from .base import quiet_fp as _quiet_fp  # noqa: E402
+from .base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), ["rtruncnorm"])
+quiet_fp(globals(), ["rtruncnorm"])

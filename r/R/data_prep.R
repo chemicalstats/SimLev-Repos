@@ -779,8 +779,9 @@ strategy_from_weights <- function(weights, ...) {
 #'
 #' Gewichte in der Tabelle in Prozent; in der Strategie als Anteile.
 #'
-#' @param name Name der Vorlage als Zeichenkette (siehe Tabelle);
-#'   \code{portfolio_templates()} listet alle.
+#' @param name Name der Vorlage als Zeichenkette (siehe Tabelle). Ohne
+#'   \code{name} (Standard \code{NULL}) liefert \code{portfolio_template()}
+#'   die Liste aller Vorlagen.
 #' @param map Benannter Zeichenvektor Rolle -> Spaltenname im Datensatz,
 #'   z. B. \code{c(stocks = "msci_world")}. Standard \code{NULL}; Rollen ohne
 #'   Eintrag behalten ihren Namen und muessen dann als Spalte vorliegen.
@@ -788,16 +789,21 @@ strategy_from_weights <- function(weights, ...) {
 #'   Fehler.
 #' @param ... Weitere Argumente fuer [strategy_from_weights()] bzw.
 #'   [asset_config()] (z. B. \code{asset_spread}, \code{asset_bonus}).
-#' @return \code{portfolio_template()}: Objekt der Klasse \code{strategy}
-#'   fuer [simulation()]; \code{portfolio_templates()}: data.frame mit
+#' @return Mit \code{name}: Objekt der Klasse \code{strategy} fuer
+#'   [simulation()]; ohne \code{name}: data.frame aller Vorlagen mit
 #'   \code{template}, \code{role} und \code{weight} (Anteil, 0.6 = 60 %).
 #' @seealso [strategy_from_weights()], [simulation()]
 #' @examples
 #' portfolio_template("permanent", map = c(stocks = "msci_world", long_bonds = "bund_10y",
 #'                                         cash = "geldmarkt", gold = "gold_eur"))
-#' head(portfolio_templates())
+#' head(portfolio_template())
 #' @export
-portfolio_template <- function(name, map = NULL, ...) {
+portfolio_template <- function(name = NULL, map = NULL, ...) {
+  if (is.null(name)) {
+    if (!is.null(map) || ...length()) stop("portfolio_template: map und weitere Argumente nur zusammen mit name; ohne name liefert portfolio_template() die Liste der Vorlagen.")
+    return(do.call(rbind, lapply(names(.portfolio_templates), function(n)
+      data.frame(template = n, role = names(.portfolio_templates[[n]]), weight = unname(.portfolio_templates[[n]])))))
+  }
   w <- .portfolio_templates[[name]]
   if (is.null(w)) stop(sprintf("Unbekannte Vorlage '%s'. Verf\u00fcgbar: %s", name, paste(names(.portfolio_templates), collapse = ", ")))
   if (!is.null(map)) {
@@ -813,11 +819,4 @@ portfolio_template <- function(name, map = NULL, ...) {
     }
   }
   strategy_from_weights(w, ...)
-}
-
-#' @rdname portfolio_template
-#' @export
-portfolio_templates <- function() {
-  do.call(rbind, lapply(names(.portfolio_templates), function(n)
-    data.frame(template = n, role = names(.portfolio_templates[[n]]), weight = unname(.portfolio_templates[[n]]))))
 }

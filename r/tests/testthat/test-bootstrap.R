@@ -19,7 +19,6 @@ test_that("bootstrap_config validates and names products", {
   expect_error(bootstrap_config(c(a = "a"), letfs = list(list(base = "x"))), "nicht in indices")
   expect_error(bootstrap_config(c(a = "a"), letfs = list(list(base = "a", leverage = 0))), "nicht 0")
   expect_error(bootstrap_config(c(a = "a"), letfs = list(list(base = "a", finance = "rate"))), "nicht in aux")
-  expect_s3_class(create_config(c(a = "a")), "bootstrap_config")
 })
 
 test_that("all non-MSGARCH methods produce valid paths with aux and products", {
@@ -142,4 +141,22 @@ test_that("bootstrap_study resumes from chunk files", {
   b <- bootstrap_study(d, cfg, "raw", n = 4, strategies = strats, path_length = 300, seed = 2,
                        chunk_size = 2, chunk_dir = td, progress = FALSE)
   expect_equal(a$results, b$results)
+})
+
+test_that("evt: GPD-Fit ueber die aus evd uebernommene Fassung (ohne evd)", {
+  set.seed(5); us <- 1 + rnorm(400, 3e-4, 0.011)
+  # 40 Ueberschreitungen: Maximum-Likelihood ueber .evd_fpot
+  f <- SimLev:::.fit_tail(us, 0.1, "left")
+  expect_equal(f$method, "MLE")
+  exc <- f$thresh - us[f$pool]
+  g <- SimLev:::.evd_fpot(exc, threshold = 0, std.err = FALSE)
+  expect_s3_class(g, "pot")
+  expect_identical(c(f$scale, f$shape), unname(g$estimate[c("scale", "shape")]))
+  # 20 Ueberschreitungen: Momenten-Schaetzer wie bisher
+  expect_equal(SimLev:::.fit_tail(us, 0.05, "left")$method, "Momente")
+  # nicht uebernommene Wege von evd::fpot
+  expect_error(SimLev:::.evd_fpot(exc, 0, model = "pp"), "nicht uebernommen")
+  expect_error(SimLev:::.evd_fpot(exc, 0, cmax = TRUE), "nicht uebernommen")
+  expect_error(SimLev:::.evd_fpot(exc, 0, mper = 10), "nicht uebernommen")
+  expect_error(SimLev:::.evd_fpot(c(exc, Inf), 0, std.err = FALSE), "NA/NaN/Inf in foreign function call \\(arg 1\\)")
 })

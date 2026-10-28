@@ -31,25 +31,20 @@ import pandas as pd
 
 from . import _core as core
 from ._dates import days_from_civil, fmt_date, from_days, is_leap, year_of
-from ._rnum import (
-    r_as_character,
+from ._r.rformat import r_as_character, r_deparse, r_format, r_format1, r_round, r_sprintf
+from ._r.rnum import (
     r_colsums,
     r_cummax,
     r_cumprod,
     r_cumsum,
-    r_deparse,
-    r_format,
-    r_format1,
     r_mean,
     r_mean_int,
     r_median,
     r_pow,
     r_pow_vec,
     r_prod,
-    r_round,
     r_rowsums,
     r_sd,
-    r_sprintf,
     r_sum,
     r_uniroot,
 )
@@ -59,8 +54,7 @@ from .tax_tariff import SimLevTaxTariff, read_tax_tariff, tariff_income_tax, tar
 __all__ = ["simulation", "calculate_skewness", "calculate_kurtosis", "calculate_partials",
            "calculate_dates_flags", "xirr_rate", "apply_spread"]
 
-from ._rnum import NA_REAL as NA, r_isna as _r_isna  # noqa: E402  R's NA_real_ (Nutzlast 1954)
-R_NAN = float("nan")    # R's NaN (arithmetisch entstanden)
+from ._r.rnum import NA_REAL as NA  # noqa: E402  R's NA_real_ (Nutzlast 1954)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3546,6 +3540,6 @@ def simulation(
 
 # R rechnet mit NA (signalisierendes NaN) ohne Gleitkomma-Warnungen; numpy meldete sonst
 # "invalid value encountered" bei jeder Rechnung mit NA.
-from ._r.base import quiet_fp as _quiet_fp  # noqa: E402
+from ._r.base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), __all__)
+quiet_fp(globals(), __all__)

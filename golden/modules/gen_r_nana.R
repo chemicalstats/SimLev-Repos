@@ -4,7 +4,7 @@
 # x87-Regel für zwei NaN (ruhiges NaN schlägt signalisierendes Speicher-NA,
 # sonst größere Mantisse), ob NA oder NaN herauskommt; cumsum/cumprod/cummax/
 # cummin setzen das Ergebnis über handleNaN (cum.c).
-# Python bildet die x87-Regel in simlev._rnum._x87_nan bzw. handleNaN nach (NA = NA_REAL).
+# Python bildet die x87-Regel in simlev._r.rnum._x87_nan bzw. handleNaN nach (NA = NA_REAL).
 source("golden/modules/ref_tools.R"); ref_init("r_nana")
 
 v5 <- c(2, NA_real_, NaN, Inf, -Inf)
@@ -37,7 +37,7 @@ vf("prod", "prod", "B.r_prod(x)", "B.r_prod(x)")
 vf("prod_narm", "prod, na.rm = TRUE", "B.r_prod(x, na_rm=True)", "B.r_prod(x; na_rm = true)")
 vf("cumsum", "cumsum", "B.r_cumsum(x)", "B.r_cumsum(x)")
 vf("cumprod", "cumprod", "B.cumprod(x)", "B.r_cumprod(x)")
-vf("cumprod_engine", "cumprod", "simlev._rnum.r_cumprod(x)", "SL.r_cumprod(x)")
+vf("cumprod_engine", "cumprod", "simlev._r.rnum.r_cumprod(x)", "SL.r_cumprod(x)")
 vf("cummax", "cummax", "B.cummax(x)", "B.r_cummax(x)")
 vf("cummin", "cummin", "B.cummin(x)", "B.r_cummin(x)")
 vf("var", "var", "B.r_var(x)", "B.r_var(x)")
@@ -59,7 +59,7 @@ for (f in c("colSums", "rowSums", "colMeans", "rowMeans")) {
   mf(paste0(f, "_narm"), f, TRUE)
 }
 ref_case("rowsums_engine", "lapply(ms, function(m) rowSums(m))",
-         paste0(P, "result = [simlev._rnum.r_rowsums(np.asarray(m, dtype=float)) for m in ms]"),
+         paste0(P, "result = [simlev._r.rnum.r_rowsums(np.asarray(m, dtype=float)) for m in ms]"),
          inputs = list(ms = ms),
          jl = paste0(J, "result = Any[SL.r_rowsums([m[:, j] for j in 1:size(m, 2)]) for m in ms]"))
 ref_done()

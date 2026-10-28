@@ -1,7 +1,7 @@
 # Bootstrap – r/R/bootstrap.R (Vorlage python/simlev/bootstrap.py)
 #
 # Bootstrap-Pfade für Indizes, Hebelprodukte und Signale:
-#   bootstrap_config / create_config  Spezifikation (Indizes, Hebelprodukte, Zusatzreihen)
+#   bootstrap_config  Spezifikation (Indizes, Hebelprodukte, Zusatzreihen)
 #   bootstrap                         Preis-Pfade im Speicher (Klasse bootstrap_result)
 #   validate_bootstrap, bootstrap_data, study_metrics, bootstrap_study,
 #   bootstrap_probability, block_length
@@ -23,7 +23,7 @@ import ..SimLev
 using Dates
 using Printf
 
-export bootstrap_config, create_config, block_length, bootstrap, validate_bootstrap, bootstrap_data,
+export bootstrap_config, block_length, bootstrap, validate_bootstrap, bootstrap_data,
        study_metrics, bootstrap_study, bootstrap_probability
 
 const RList = SimLev.RList
@@ -522,9 +522,6 @@ function bootstrap_config(indices; letfs = Any[], regime_index = nothing, aux = 
                  class = "bootstrap_config")
 end
 
-"Alias von [`bootstrap_config`](@ref) (identische Argumente und Ergebnis)."
-create_config(indices; kw...) = bootstrap_config(indices; kw...)
-
 _cfg_list(x, k) = (v = _get(x, k); v === nothing ? String[] : v isa AbstractString ? [String(v)] : collect(String, _values(v)))
 
 function _print_config(io::IO, x)
@@ -837,8 +834,8 @@ _core() = SimLev.BootstrapCore
 
 """
 GARCH(1,1) / GJR-GARCH(1,1) schätzen (rugarch → optim → Momente), Port von `.fit_garch11`.
-Gilt rugarch als installiert (`SimLev.RSuggests.has("rugarch")`), schätzt zuerst
-die Nachbildung von `rugarch::ugarchfit` (`SimLev.RRugarch`, Solver "hybrid");
+Schätzt wie R (das rugarch übernommen hat, `.rugarch_ugarchfit`) zuerst mit der
+Nachbildung von `rugarch::ugarchfit` (`SimLev.RRugarch`, Solver "hybrid");
 scheitert sie mit einem R-Fehler, folgen wie in R der optim-Pfad (Nelder-Mead)
 und die Momente. Warnungen von rugarch erscheinen wie in R auch bei
 `quiet = true`. Erreicht rugarch den Solver gosolnp, setzt dieser wie in R
@@ -855,27 +852,25 @@ function _fit_garch11(e; gjr = false, quiet = false)
     omega = alpha = beta = nothing
     gamma = 0.0
     method = "none"
-    if SimLev.RSuggests.has("rugarch")
-        ok = nothing
-        cf = nothing
-        try
-            fit = SimLev.RRugarch.ugarchfit(e; model = gjr ? "gjrGARCH" : "sGARCH", solver = "hybrid")
-            cf = SimLev.RRugarch.coef(fit)
-            ok = cf !== nothing
-        catch err
-            err isa UndefVarError && rethrow()       # sonst: tryCatch(..., error = function(err) NULL)
-            err isa MethodError && rethrow()
-        end
-        # coef(fit) ist NULL (keine Konvergenz): in R werden mu, omega, ... NULL, der optim-Weg
-        # filtert eine leere Reihe und `if (stats::sd(z) > 0)` bricht ab (in R mit erzwungener
-        # Nicht-Konvergenz geprüft)
-        ok === false && error("missing value where TRUE/FALSE needed")
-        if ok === true
-            cv = Dict(zip(cf.names, Float64.(cf.values)))
-            mu = cv["mu"]; omega = cv["omega"]; alpha = cv["alpha1"]; beta = cv["beta1"]
-            gjr && (gamma = cv["gamma1"])
-            method = "rugarch"
-        end
+    ok = nothing
+    cf = nothing
+    try
+        fit = SimLev.RRugarch.ugarchfit(e; model = gjr ? "gjrGARCH" : "sGARCH", solver = "hybrid")
+        cf = SimLev.RRugarch.coef(fit)
+        ok = cf !== nothing
+    catch err
+        err isa UndefVarError && rethrow()       # sonst: tryCatch(..., error = function(err) NULL)
+        err isa MethodError && rethrow()
+    end
+    # coef(fit) ist NULL (keine Konvergenz): in R werden mu, omega, ... NULL, der optim-Weg
+    # filtert eine leere Reihe und `if (stats::sd(z) > 0)` bricht ab (in R mit erzwungener
+    # Nicht-Konvergenz geprüft)
+    ok === false && error("missing value where TRUE/FALSE needed")
+    if ok === true
+        cv = Dict(zip(cf.names, Float64.(cf.values)))
+        mu = cv["mu"]; omega = cv["omega"]; alpha = cv["alpha1"]; beta = cv["beta1"]
+        gjr && (gamma = cv["gamma1"])
+        method = "rugarch"
     end
     filt(om, al, be, ga, m) = _core().garch_filter(e .- m, om, al, be, ga, om / max(1e-6, 1 - al - be - ga / 2))
     omega === nothing && try
@@ -962,10 +957,10 @@ end
 """
 Tail-Schätzung (GPD via evd → Momente → empirisch → Default), Port von `.fit_tail`.
 
-Den GPD-Fit (`evd::fpot(exc, threshold = 0, std.err = FALSE)`, nachgebildet in
-`SimLev.REvd.fpot`) nimmt R nur, wenn evd installiert ist
-(`SimLev.RSuggests.has("evd")`) und mindestens 30 Überschreitungen vorliegen;
-Fehler darin führen wie das `tryCatch` in R zum Momenten-Schätzer.
+Den GPD-Fit (`.evd_fpot(exc, threshold = 0, std.err = FALSE)`, aus evd 2.3-7.1
+ins R-Paket übernommen, nachgebildet in `SimLev.REvd.fpot`) nimmt R bei
+mindestens 30 Überschreitungen; Fehler darin führen wie das `tryCatch` in R
+zum Momenten-Schätzer.
 """
 function _fit_tail(base_ret, prob, side)
     base_ret = _dvec(base_ret)
@@ -976,7 +971,7 @@ function _fit_tail(base_ret, prob, side)
     ne = length(exc)
     scale = shape = nothing
     method = "none"
-    if ne >= 30 && SimLev.RSuggests.has("evd")
+    if ne >= 30
         try
             f = SimLev.REvd.fpot(exc, 0; std_err = false)
             sc = f["estimate"]["scale"]; sh = f["estimate"]["shape"]

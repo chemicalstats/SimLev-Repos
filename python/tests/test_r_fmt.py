@@ -68,7 +68,7 @@ def test_formatC_prettyNum():
 
 def test_sprintf():
     assert F.sprintf("%5s|%-6s|", "ä", "äb") == "   ä|äb   |"          # Breite in Bytes wie C
-    assert F.sprintf("%5.1f|%+.2f|% .1f|%05.1f", F.NA_REAL, math.inf, F.R_NAN, -math.inf) == "   NA|+Inf| NaN| -Inf"
+    assert F.sprintf("%5.1f|%+.2f|% .1f|%05.1f", F.NA_REAL, math.inf, math.nan, -math.inf) == "   NA|+Inf| NaN| -Inf"
     assert F.sprintf("%s", 1e5) == "1e+05"
     assert F.sprintf("%d", 3.0) == "3"
     assert F.sprintf("%#.3g", 999.5) == "1.e+03"                     # glibc

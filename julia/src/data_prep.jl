@@ -7,7 +7,7 @@
 #   total_return_index  Kurs- zu Total-Return-Index
 #   deflate             reale Werte über einen Preisindex
 #   splice_series       Ketten aus mehreren Reihen
-#   strategy_from_weights, portfolio_template, portfolio_templates
+#   strategy_from_weights, portfolio_template
 #
 # Datumswerte: R-`Date`-Vektoren entsprechen `Vector{Date}` (mit NA:
 # `Vector{Union{Missing,Date}}`). Intern wird mit Tagen seit 1970-01-01 als
@@ -20,7 +20,7 @@ using ..SimLev: RList, RFrame, RVector, NamedMat, nrow, ncol, attrs, NA, isna_st
 using Dates
 
 export align_series, check_series, align_macro, convert_currency, total_return_index, deflate,
-       splice_series, strategy_from_weights, portfolio_template, portfolio_templates
+       splice_series, strategy_from_weights, portfolio_template
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Allgemeine Hilfen (R-Semantik)
@@ -1163,13 +1163,20 @@ const _PORTFOLIO_TEMPLATES = [
 ]
 
 """
-    portfolio_template(name; map = nothing, kwargs...)
+    portfolio_template(name = nothing; map = nothing, kwargs...)
 
 Bekannte statische Allokationen mit Rollen-Namen; `map` (benannter Vektor
 Rolle → Spaltenname) ordnet die Rollen den Spalten zu. Weitere Argumente
-gehen an [`strategy_from_weights`](@ref).
+gehen an [`strategy_from_weights`](@ref). Ohne `name` (Standard `nothing`)
+liefert die Funktion alle Vorlagen als `RFrame(template, role, weight)`;
+`map` und weitere Argumente sind dann nicht erlaubt.
 """
-function portfolio_template(name; map = nothing, kwargs...)
+function portfolio_template(name_pos = nothing; name = name_pos, map = nothing, kwargs...)
+    if name === nothing
+        (map !== nothing || !isempty(kwargs)) &&
+            error("portfolio_template: map und weitere Argumente nur zusammen mit name; ohne name liefert portfolio_template() die Liste der Vorlagen.")
+        return _template_list()
+    end
     i = findfirst(p -> p.first == name, _PORTFOLIO_TEMPLATES)
     i === nothing && error("Unbekannte Vorlage '$(name)'. Verfügbar: $(join(first.(_PORTFOLIO_TEMPLATES), ", "))")
     w = _PORTFOLIO_TEMPLATES[i].second
@@ -1192,7 +1199,7 @@ function portfolio_template(name; map = nothing, kwargs...)
 end
 
 "Alle Portfolio-Vorlagen als `RFrame(template, role, weight)`."
-function portfolio_templates()
+function _template_list()
     t = String[]; r = String[]; w = Float64[]
     for (n, d) in _PORTFOLIO_TEMPLATES, (k, v) in d
         push!(t, n); push!(r, k); push!(w, v)

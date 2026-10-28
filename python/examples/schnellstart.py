@@ -32,4 +32,3 @@ result = simlev.simulation(
 print(result)
 fig = result.plot()                      # Dashboard (matplotlib)
 fig.savefig("dashboard.png", dpi=110)
-simlev.plot_interactive(result, file="dashboard.html", open=False)

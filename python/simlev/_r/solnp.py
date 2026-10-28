@@ -1,5 +1,11 @@
 """Nachbildung von ``Rsolnp::solnp`` (Rsolnp 1.16, Ghalanos & Theussl).
 
+Herkunft: R-Paket Rsolnp 1.16 (CRAN, 2015-12-28), ``solnp``, ``gosolnp`` und
+Hilfen; Autoren: Alexios Ghalanos and Stefan Theussl. Lizenz: GPL (laut
+``inst/COPYRIGHTS`` von Rsolnp GPL-3). Nach Python übertragen und angepasst
+für SimLev (siehe ``python/COPYRIGHTS.md``); im R-Paket übernommen als
+``.rsolnp_solnp`` und ``.rsolnp_gosolnp`` (``r/R/vendor_rsolnp.R``).
+
 SQP-Verfahren nach Y. Ye (1989) mit erweiterter Lagrange-Funktion für
 Gleichungs- und Ungleichungsnebenbedingungen und Parameterschranken. Die
 Rechenschritte folgen dem R-Code von ``solnp``, ``.subnp`` und den Hilfen
@@ -24,7 +30,8 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
-from .. import _rnum as _rn
+from . import rformat as _rf
+from . import rnum as _rn
 from . import linalg as _la
 from .linalg import RError
 from .rlist import RList
@@ -228,7 +235,7 @@ def _r_str(v):
         return "Inf"
     if v == -math.inf:
         return "-Inf"
-    return _rn.r_as_character(v)
+    return _rf.r_as_character(v)
 
 
 # ── Steuerung ───────────────────────────────────────────────────────────────
@@ -1169,6 +1176,6 @@ def gosolnp(pars=None, fixed=None, fun=None, *args, eqfun=None, eqB=None, ineqfu
         return sol
 
 
-from .base import quiet_fp as _quiet_fp  # noqa: E402
+from .base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), ["solnp", "gosolnp"])
+quiet_fp(globals(), ["solnp", "gosolnp"])

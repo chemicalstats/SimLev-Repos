@@ -8,10 +8,8 @@ from .config import (
     AssetConfig,
     Strategy,
     add_asset,
-    as_list,
     asset_config,
     create_strategy,
-    migrate_strategy,
     remove_asset,
     update_asset,
     validate_strategy,
@@ -35,7 +33,6 @@ from .data_prep import (  # noqa: E402
     splice_series,
     strategy_from_weights,
     portfolio_template,
-    portfolio_templates,
 )
 from .backcast import (  # noqa: E402
     backcast_fit,
@@ -60,7 +57,6 @@ from .signals import (  # noqa: E402
 )
 from .bootstrap import (  # noqa: E402
     bootstrap_config,
-    create_config,
     BootstrapConfig,
     block_length,
     bootstrap,
@@ -190,13 +186,13 @@ from .sensitivity import (  # noqa: E402
     SimLevLumpSum,
 )
 from ._r.rng import rng_kind, set_seed  # noqa: E402
-from ._rnum import NA_REAL as NA  # noqa: E402,F401  R's NA_real_ (NaN mit Nutzlast 1954)
+from ._r.rnum import NA_REAL as NA  # noqa: E402,F401  R's NA_real_ (NaN mit Nutzlast 1954)
 
 
 def isna_strict(x):
     """True nur für R's ``NA`` (nicht für ``NaN``); Skalar oder elementweise für Arrays."""
     import numpy as _np
-    from ._rnum import r_isna, r_isna_arr
+    from ._r.rnum import r_isna, r_isna_arr
     if _np.ndim(x) == 0:
         return r_isna(x)
     return r_isna_arr(x)
@@ -226,7 +222,7 @@ bootstrap = _callable_module("bootstrap")
 deep_analysis = _callable_module("deep_analysis")
 param_search = _callable_module("param_search")
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 __all__ = [
     "AssetConfig",
@@ -235,14 +231,10 @@ __all__ = [
     "SimLevTaxTariff",
     "Strategy",
     "add_asset",
-    "as_list",
     "asset_config",
     "compute_rebal_trigger",
     "create_strategy",
     "export_dashboard",
-    "export_html_dashboard",
-    "migrate_strategy",
-    "plot_interactive",
     "read_tax_tariff",
     "remove_asset",
     "simulation",
@@ -262,7 +254,6 @@ __all__ = [
     "splice_series",
     "strategy_from_weights",
     "portfolio_template",
-    "portfolio_templates",
     "backcast_fit",
     "backcast",
     "SimLevBackcastFit",
@@ -279,7 +270,6 @@ __all__ = [
     "signal_volatility",
     "signal_combine",
     "bootstrap_config",
-    "create_config",
     "BootstrapConfig",
     "block_length",
     "bootstrap",
@@ -394,19 +384,6 @@ def export_dashboard(x, filename: str = "dashboard.pdf", width: float = 14, heig
     """Speichert das Dashboard als PDF (oder anderes von matplotlib unterstütztes Format)."""
     from .dashboard import export_dashboard as _impl
     return _impl(x, filename=filename, width=width, height=height, **kwargs)
-
-
-def export_html_dashboard(x, filename: str = "dashboard.html"):
-    """Platzhalter wie in R (ohne plotly ein Fehler, sonst nur eine Meldung); siehe plot_interactive()."""
-    from .dashboard import export_html_dashboard as _impl
-    return _impl(x, filename=filename)
-
-
-def plot_interactive(x, file=None, panels=("performance", "drawdown", "weights"), max_points=6000,
-                     open=None, engine="auto"):
-    """Interaktives HTML-Dashboard mit Tooltips (eigenständig oder über plotly)."""
-    from .interactive import plot_interactive as _impl
-    return _impl(x, file=file, panels=panels, max_points=max_points, open=open, engine=engine)
 
 
 def summary(object, *args, **kwargs):  # noqa: A002 - R-Name

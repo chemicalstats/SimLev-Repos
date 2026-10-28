@@ -2,7 +2,7 @@
 
 Öffentliche Funktionen:
 
-- :func:`bootstrap_config` / :func:`create_config` – Spezifikation (Indizes,
+- :func:`bootstrap_config` – Spezifikation (Indizes,
   Hebelprodukte, Zusatzreihen)
 - :func:`bootstrap` – erzeugt Preis-Pfade im Speicher
 - :func:`validate_bootstrap` – bereinigt ein Bootstrap-Ergebnis
@@ -39,19 +39,20 @@ import pandas as pd
 
 from . import _bootstrap_core as _core
 from ._r import fmt as _fmt
+from ._r.base import env_from_caller
 from ._r import libm as _libm
 from ._r import rng as _rng
 from ._r.rlist import RList
-from ._rnum import r_cumprod, r_mean, r_median, r_pow, r_sd, r_sum, r_var
+from ._r.rnum import r_cumprod, r_mean, r_median, r_pow, r_sd, r_sum, r_var
 
 __all__ = [
-    "bootstrap_config", "create_config", "BootstrapConfig", "block_length", "bootstrap",
+    "bootstrap_config", "BootstrapConfig", "block_length", "bootstrap",
     "BootstrapResult", "validate_bootstrap", "bootstrap_data", "study_metrics", "bootstrap_study",
     "SimLevBootstrapStudy", "SummarySimLevBootstrapStudy", "bootstrap_probability", "summary",
     "plot",
 ]
 
-_NAN = _fmt.NA_REAL      # R's NA_real_ (alle Verwendungen hier sind NA; NaN: _fmt.R_NAN)
+_NAN = _fmt.NA_REAL      # R's NA_real_ (alle Verwendungen hier sind NA; NaN: math.nan)
 LD = np.longdouble
 
 
@@ -532,13 +533,6 @@ def bootstrap_config(indices, letfs=(), regime_index=None, aux=None, aux_type=No
     ])
 
 
-def create_config(indices, letfs=(), regime_index=None, aux=None, aux_type=None,
-                  cross=("ratio", "joint"), input=("returns", "prices")):  # noqa: A002
-    """Alias von :func:`bootstrap_config` (identische Argumente und Ergebnis)."""
-    return bootstrap_config(indices, letfs=letfs, regime_index=regime_index, aux=aux, aux_type=aux_type,
-                            cross=cross, input=input)
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Interne Daten- und Parameterhelfer
 # ═══════════════════════════════════════════════════════════════════════════
@@ -846,8 +840,8 @@ def _xp(v) -> float:
 def _fit_garch11(e, gjr=False, quiet=False):
     """GARCH(1,1) / GJR-GARCH(1,1) schätzen (rugarch -> optim -> Momente), Port von ``.fit_garch11``.
 
-    Gilt rugarch als installiert (:func:`simlev._r.suggests.has`), schätzt
-    zuerst die Nachbildung von ``rugarch::ugarchfit`` (:mod:`simlev._r.rugarch`,
+    Schätzt wie R (das rugarch übernommen hat, ``.rugarch_ugarchfit``) zuerst
+    mit der Nachbildung von ``rugarch::ugarchfit`` (:mod:`simlev._r.rugarch`,
     Solver ``"hybrid"``); scheitert sie mit einem R-Fehler, folgen wie in R
     der optim-Pfad (Nelder-Mead) und die Momente. Warnungen von rugarch
     erscheinen wie in R auch bei ``quiet = True``. Erreicht rugarch den
@@ -863,31 +857,29 @@ def _fit_garch11(e, gjr=False, quiet=False):
     omega = alpha = beta = None
     gamma = 0.0
     method = "none"
-    from ._r import suggests as _suggests
-    if _suggests.has("rugarch"):
-        from ._r import rugarch as _rugarch
-        try:
-            fit = _rugarch.ugarchfit(e, model="gjrGARCH" if gjr else "sGARCH", solver="hybrid")
-            cf = _rugarch.coef(fit)
-            ok = cf is not None
-        except (ImportError, NotImplementedError):
-            raise
-        except Exception:  # noqa: BLE001 - tryCatch(..., error = function(err) NULL)
-            ok = None
-        if ok is False:
-            # coef(fit) ist NULL (keine Konvergenz): in R werden mu, omega, ... NULL, der
-            # optim-Weg filtert eine leere Reihe und `if (stats::sd(z) > 0)` bricht ab (in R
-            # mit erzwungener Nicht-Konvergenz geprüft)
-            from ._r.linalg import RError as _RError
-            raise _RError("missing value where TRUE/FALSE needed")
-        if ok:
-            mu = float(cf["mu"])
-            omega = float(cf["omega"])
-            alpha = float(cf["alpha1"])
-            beta = float(cf["beta1"])
-            if gjr:
-                gamma = float(cf["gamma1"])
-            method = "rugarch"
+    from ._r import rugarch as _rugarch
+    try:
+        fit = _rugarch.ugarchfit(e, model="gjrGARCH" if gjr else "sGARCH", solver="hybrid")
+        cf = _rugarch.coef(fit)
+        ok = cf is not None
+    except (ImportError, NotImplementedError):
+        raise
+    except Exception:  # noqa: BLE001 - tryCatch(..., error = function(err) NULL)
+        ok = None
+    if ok is False:
+        # coef(fit) ist NULL (keine Konvergenz): in R werden mu, omega, ... NULL, der
+        # optim-Weg filtert eine leere Reihe und `if (stats::sd(z) > 0)` bricht ab (in R
+        # mit erzwungener Nicht-Konvergenz geprüft)
+        from ._r.linalg import RError as _RError
+        raise _RError("missing value where TRUE/FALSE needed")
+    if ok:
+        mu = float(cf["mu"])
+        omega = float(cf["omega"])
+        alpha = float(cf["alpha1"])
+        beta = float(cf["beta1"])
+        if gjr:
+            gamma = float(cf["gamma1"])
+        method = "rugarch"
 
     def filt(om, al, be, ga, m):
         return _core.garch_filter(e - m, om, al, be, ga, om / max(1e-6, 1 - al - be - ga / 2))
@@ -981,12 +973,12 @@ def _fit_cross(returns, config, base):
 def _fit_tail(base_ret, prob, side):
     """Tail-Schätzung (GPD via evd -> Momente -> empirisch -> Default), Port von ``.fit_tail``.
 
-    Den GPD-Fit (``evd::fpot(exc, threshold = 0, std.err = FALSE)``) nimmt R
-    nur, wenn evd installiert ist (``simlev._r.suggests.has("evd")``) und
-    mindestens 30 Überschreitungen vorliegen; Fehler darin führen wie das
+    Den GPD-Fit (``.evd_fpot(exc, threshold = 0, std.err = FALSE)``, aus evd
+    2.3-7.1 ins R-Paket übernommen, nachgebildet in ``simlev._r.evd``) nimmt R
+    bei mindestens 30 Überschreitungen; Fehler darin führen wie das
     ``tryCatch`` in R zum Momenten-Schätzer.
     """
-    from ._r import suggests as _suggests
+    from ._r import evd as _evd
     base_ret = np.asarray(base_ret, dtype=np.float64)
     thr = float(_quantile7(base_ret, prob if side == "left" else 1 - prob)[0])
     mask = base_ret < thr if side == "left" else base_ret > thr
@@ -994,8 +986,7 @@ def _fit_tail(base_ret, prob, side):
     ne = len(exc)
     scale = shape = None
     method = "none"
-    if ne >= 30 and _suggests.has("evd"):
-        from ._r import evd as _evd
+    if ne >= 30:
         try:
             f = _evd.fpot(exc, threshold=0, std_err=False)
             scale = float(f["estimate"]["scale"])
@@ -1638,7 +1629,7 @@ def _is_strategy(s) -> bool:
 
 
 def _deparse(v) -> str:
-    from ._rnum import r_deparse
+    from ._r.rformat import r_deparse
     return r_deparse(v)
 
 
@@ -1983,7 +1974,7 @@ def _div(a: float, b: float) -> float:
         if math.isnan(a):
             return a
         if a == 0.0:
-            return _fmt.R_NAN
+            return math.nan
         return math.copysign(math.inf, a) * math.copysign(1.0, b)
     return a / b
 
@@ -1991,7 +1982,7 @@ def _div(a: float, b: float) -> float:
 def _sqrt(v: float) -> float:
     if math.isnan(v):
         return v
-    return math.sqrt(v) if v >= 0 else _fmt.R_NAN
+    return math.sqrt(v) if v >= 0 else math.nan
 
 
 def _uniq(seq):
@@ -2085,6 +2076,7 @@ def _eval_condition(cond, d, env):
     return out
 
 
+@env_from_caller
 def bootstrap_probability(study, *args, thresholds=None, env=None, **kwargs):
     """Wahrscheinlichkeiten aus einer Bootstrap-Studie.
 
@@ -2107,11 +2099,6 @@ def bootstrap_probability(study, *args, thresholds=None, env=None, **kwargs):
     """
     if not _is_study(study):
         _stop("study muss ein SimLevBootstrapStudy-Objekt sein.")
-    if env is None:
-        fr = inspect.currentframe().f_back
-        env = dict(fr.f_globals)
-        env.update(fr.f_locals)
-        del fr
     with np.errstate(all="ignore"):
         return _bootstrap_probability(study, args, kwargs, thresholds, env)
 
@@ -2279,6 +2266,6 @@ def plot(x, *args, **kwargs):
 
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
-from .data_prep import _quiet_fp  # noqa: E402
+from ._r.base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), [_n for _n in __all__ if _n != "bootstrap_probability"] + ["_calculate_ess", "_ess_design", "_extract_returns", "_fit_garch11", "_fit_tail", "_get_base_params", "_get_ess_grid", "_letf_returns", "_make_streams", "_prepare_regime_info", "_pw_block", "_wquantile"])  # ohne bootstrap_probability: liest den Aufrufer-Frame (env)
+quiet_fp(globals(), list(__all__) + ["_calculate_ess", "_ess_design", "_extract_returns", "_fit_garch11", "_fit_tail", "_get_base_params", "_get_ess_grid", "_letf_returns", "_make_streams", "_prepare_regime_info", "_pw_block", "_wquantile"])  # bootstrap_probability: env aus dem Aufrufer (env_from_caller)

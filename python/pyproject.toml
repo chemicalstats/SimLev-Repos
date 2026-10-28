@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "simlev"
-version = "0.5.0"
+version = "0.5.1"
 description = "Backtesting für ETF-, Hebel- und Multi-Asset-Strategien mit deutscher Investmentbesteuerung: vollständige, bitgleiche Portierung des R-Pakets SimLev 0.5.0 (Engine, Bootstrap, Entnahmephase, Analyse, Optimierung u. a.)"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "GPL-3.0-only" }
 authors = [{ name = "ChemicalStats von der Mauerstrasse", email = "chemicalstatsy@protonmail.com" }]
 keywords = ["backtesting", "portfolio", "etf", "leverage", "steuern", "vorabpauschale", "investmentsteuergesetz"]
@@ -22,10 +22,8 @@ dependencies = ["numpy>=1.22", "pandas>=1.4"]
 
 [project.optional-dependencies]
 plot = ["matplotlib>=3.5"]
-plotly = ["plotly>=5"]
-scipy = ["scipy"]
 test = ["pytest>=7", "matplotlib>=3.5"]
-all = ["matplotlib>=3.5", "plotly>=5", "scipy"]
+all = ["matplotlib>=3.5"]
 
 [tool.setuptools]
 packages = ["simlev", "simlev._r"]

@@ -1,15 +1,19 @@
-# Referenzfälle für die Nachbildung von rugarch::ugarchfit (Python: simlev/_r/rugarch.py,
-# Julia: src/r/rugarch.jl), Rsolnp::solnp (simlev/_r/solnp.py, src/r/solnp.jl) und den
-# Weg mit rugarch in .fit_garch11 (bootstrap(…, "garch"/"gjr_garch"), dcc_fit,
-# dependence_analysis).
-# Benötigt rugarch 1.5-6 und Rsolnp 1.16 (rugarch am besten in einer eigenen
-# R-Bibliothek, die SIMLEV_R_SUGGESTS_LIB nennt; sie kommt an den Anfang des Suchpfads).
+# Referenzfälle für die aus rugarch 1.5-6 übernommene Fassung von ugarchspec/ugarchfit/coef
+# (R: SimLev:::.rugarch_ugarchspec, .rugarch_ugarchfit, .rugarch_coef in r/R/vendor_rugarch.R,
+# C-Filter in r/src/vendor_rugarch.c; Python: simlev/_r/rugarch.py, Julia: src/r/rugarch.jl),
+# Rsolnp 1.16 solnp/gosolnp (SimLev:::.rsolnp_solnp, .rsolnp_gosolnp in r/R/vendor_rsolnp.R;
+# simlev/_r/solnp.py, src/r/solnp.jl), truncnorm 1.0-9 rtruncnorm
+# (SimLev:::.truncnorm_rtruncnorm, r/R/vendor_truncnorm.R, r/src/vendor_truncnorm.c;
+# simlev/_r/truncnorm.py, src/r/truncnorm.jl) und den Weg über rugarch in .fit_garch11
+# (bootstrap(…, "garch"/"gjr_garch"), dcc_fit, dependence_analysis). Hesse-Matrix und Scores
+# rechnet die eigenständige Richardson-Extrapolation (SimLev:::.sl_richardson_hessian,
+# .sl_richardson_jacobian in r/R/richardson.R; Direktvergleich mit numDeriv als Orakel:
+# golden/modules/check_richardson.R). rugarch, Rsolnp, numDeriv und truncnorm selbst werden
+# nicht benötigt; die Fälle waren zuvor mit den echten Paketen erzeugt (rugarch 1.5-6,
+# Rsolnp 1.16, numDeriv 2016.8-1.1, truncnorm 1.0-9) und sind mit der Übernahme bzw. der
+# eigenen Richardson-Extrapolation bitgleich.
 # Aufruf aus der Repo-Wurzel:
-#   LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> SIMLEV_R_SUGGESTS_LIB=<Bibliothek mit den Paketen> Rscript golden/modules/gen_rugarch.R
-if (nzchar(Sys.getenv("SIMLEV_R_SUGGESTS_LIB"))) .libPaths(c(Sys.getenv("SIMLEV_R_SUGGESTS_LIB"), .libPaths()))
-if (!requireNamespace("rugarch", quietly = TRUE)) stop("gen_rugarch.R benötigt das Paket rugarch")
-if (as.character(utils::packageVersion("rugarch")) != "1.5.6") stop("gen_rugarch.R erwartet rugarch 1.5-6")
-if (as.character(utils::packageVersion("Rsolnp")) != "1.16") stop("gen_rugarch.R erwartet Rsolnp 1.16")
+#   LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> Rscript golden/modules/gen_rugarch.R
 source("golden/modules/ref_tools.R"); ref_init("rugarch")
 
 P <- paste0("import numpy as np\nimport pandas as pd\nfrom simlev._r import rugarch as RG\nfrom simlev._r import solnp as SN\n",
@@ -24,12 +28,12 @@ JP <- paste0("const RG = SL.RRugarch\nconst SN = SL.RSolnp\nconst B = SL.Bootstr
              "    SL.RList(\"coef\" => f[\"coef\"], \"LLH\" => f[\"LLH\"], \"hessian\" => f[\"hessian\"], \"cvar\" => f[\"cvar\"], \"robust\" => f[\"robust_cvar\"], \"scores\" => f[\"scores\"])\nend\n",
              "S(a) = SL.RList([k => a[k] for k in [\"pars\", \"convergence\", \"values\", \"lagrange\", \"hessian\", \"ineqx0\", \"nfuneval\", \"outer.iter\", \"vscale\"]]...)\n")
 UG_R <- paste0("UG <- function(e, m = 'sGARCH', full = FALSE) {\n",
-               "  spec <- rugarch::ugarchspec(variance.model = list(model = m, garchOrder = c(1, 1)),\n",
+               "  spec <- SimLev:::.rugarch_ugarchspec(variance.model = list(model = m, garchOrder = c(1, 1)),\n",
                "    mean.model = list(armaOrder = c(0, 0), include.mean = TRUE), distribution.model = 'norm')\n",
-               "  fit <- rugarch::ugarchfit(spec = spec, data = e, solver = 'hybrid')\n",
-               "  if (!full) return(rugarch::coef(fit))\n",
-               "  list(coef = rugarch::coef(fit), LLH = fit@fit$LLH, hessian = fit@fit$hessian, cvar = fit@fit$cvar,\n",
-               "       robust = fit@fit$robust.cvar, scores = unname(fit@fit$scores))\n}\n")
+               "  fit <- SimLev:::.rugarch_ugarchfit(spec = spec, data = e, solver = 'hybrid')\n",
+               "  if (!full) return(SimLev:::.rugarch_coef(fit))\n",
+               "  list(coef = SimLev:::.rugarch_coef(fit), LLH = fit$fit$LLH, hessian = fit$fit$hessian, cvar = fit$fit$cvar,\n",
+               "       robust = fit$fit$robust.cvar, scores = unname(fit$fit$scores))\n}\n")
 S_R <- paste0("S <- function(a) list(pars = a$pars, convergence = a$convergence, values = a$values, lagrange = as.numeric(a$lagrange),\n",
               "  hessian = a$hessian, ineqx0 = a$ineqx0, nfuneval = a$nfuneval, outer.iter = a$outer.iter, vscale = a$vscale)\n")
 case <- function(id, r, py, inputs = list(), jl = NULL, ...)
@@ -77,12 +81,12 @@ set.seed(4);  E$short6  <- rnorm(6, 0, 0.01)
 # ── ugarchfit -> coef direkt ────────────────────────────────────────────────
 # Reihen, bei denen R den Solver gosolnp erreicht, folgen am Ende mit fester Uhr (Abschnitt gosolnp)
 uses_gosolnp <- function(e, m) {
-  ns <- asNamespace("rugarch"); f0 <- get(".gosolnpsolver", ns)
-  unlockBinding(".gosolnpsolver", ns); assign(".gosolnpsolver", function(...) stop("<gosolnp>"), ns)
-  on.exit({ assign(".gosolnpsolver", f0, ns); lockBinding(".gosolnpsolver", ns) })
-  spec <- rugarch::ugarchspec(variance.model = list(model = m, garchOrder = c(1, 1)),
+  ns <- asNamespace("SimLev"); f0 <- get(".rugarch_gosolnpsolver", ns)
+  unlockBinding(".rugarch_gosolnpsolver", ns); assign(".rugarch_gosolnpsolver", function(...) stop("<gosolnp>"), ns)
+  on.exit({ assign(".rugarch_gosolnpsolver", f0, ns); lockBinding(".rugarch_gosolnpsolver", ns) })
+  spec <- SimLev:::.rugarch_ugarchspec(variance.model = list(model = m, garchOrder = c(1, 1)),
     mean.model = list(armaOrder = c(0, 0), include.mean = TRUE), distribution.model = "norm")
-  r <- tryCatch(suppressWarnings(rugarch::ugarchfit(spec = spec, data = e, solver = "hybrid")), error = function(err) conditionMessage(err))
+  r <- tryCatch(suppressWarnings(SimLev:::.rugarch_ugarchfit(spec = spec, data = e, solver = "hybrid")), error = function(err) conditionMessage(err))
   identical(r, "<gosolnp>")
 }
 U <- function(id, v, m, full = FALSE) {
@@ -101,52 +105,52 @@ SOLNP <- function(id, rdef, rcall, pdef, pcall, jdef, jcall, inputs = list())
 POW_R <- "fn <- function(x) exp(x[1] * x[2] * x[3] * x[4] * x[5])\neq <- function(x) c(x[1]*x[1]+x[2]*x[2]+x[3]*x[3]+x[4]*x[4]+x[5]*x[5], x[2]*x[3]-5*x[4]*x[5], x[1]*x[1]*x[1]+x[2]*x[2]*x[2])\n"
 POW_P <- "import math\nfn = lambda x: math.exp(x[0]*x[1]*x[2]*x[3]*x[4])\neq = lambda x: [x[0]*x[0]+x[1]*x[1]+x[2]*x[2]+x[3]*x[3]+x[4]*x[4], x[1]*x[2]-5*x[3]*x[4], x[0]*x[0]*x[0]+x[1]*x[1]*x[1]]\n"
 POW_J <- "fn(x) = SL.RLibm.exp(x[1] * x[2] * x[3] * x[4] * x[5])\neq(x) = [x[1]*x[1]+x[2]*x[2]+x[3]*x[3]+x[4]*x[4]+x[5]*x[5], x[2]*x[3]-5*x[4]*x[5], x[1]*x[1]*x[1]+x[2]*x[2]*x[2]]\n"
-SOLNP("powell", POW_R, "S(Rsolnp::solnp(c(-2, 2, 2, -1, -1), fun = fn, eqfun = eq, eqB = c(10, 0, -1), control = list(trace = 0)))",
+SOLNP("powell", POW_R, "S(SimLev:::.rsolnp_solnp(c(-2, 2, 2, -1, -1), fun = fn, eqfun = eq, eqB = c(10, 0, -1), control = list(trace = 0)))",
       POW_P, "result = S(SN.solnp(np.array([-2., 2, 2, -1, -1]), fn, eqfun=eq, eqB=[10, 0, -1], control={'trace': 0}))",
       POW_J, "result = S(SN.solnp([-2.0, 2, 2, -1, -1], fn; eqfun = eq, eqB = [10, 0, -1], control = Dict(\"trace\" => 0)))")
 RS_R <- "fn <- function(x) x[1]*x[1]+x[2]*x[2]+2*x[3]*x[3]+x[4]*x[4]-5*x[1]-5*x[2]-21*x[3]+7*x[4]\nineq <- function(x) c(8-x[1]*x[1]-x[2]*x[2]-x[3]*x[3]-x[4]*x[4]-x[1]+x[2]-x[3]+x[4], 10-x[1]*x[1]-2*x[2]*x[2]-x[3]*x[3]-2*x[4]*x[4]+x[1]+x[4], 5-2*x[1]*x[1]-x[2]*x[2]-x[3]*x[3]-2*x[1]+x[2]+x[4])\n"
 RS_P <- "fn = lambda x: x[0]*x[0]+x[1]*x[1]+2*x[2]*x[2]+x[3]*x[3]-5*x[0]-5*x[1]-21*x[2]+7*x[3]\nineq = lambda x: [8-x[0]*x[0]-x[1]*x[1]-x[2]*x[2]-x[3]*x[3]-x[0]+x[1]-x[2]+x[3], 10-x[0]*x[0]-2*x[1]*x[1]-x[2]*x[2]-2*x[3]*x[3]+x[0]+x[3], 5-2*x[0]*x[0]-x[1]*x[1]-x[2]*x[2]-2*x[0]+x[1]+x[3]]\n"
 RS_J <- "fn(x) = x[1]*x[1]+x[2]*x[2]+2*x[3]*x[3]+x[4]*x[4]-5*x[1]-5*x[2]-21*x[3]+7*x[4]\nineq(x) = [8-x[1]*x[1]-x[2]*x[2]-x[3]*x[3]-x[4]*x[4]-x[1]+x[2]-x[3]+x[4], 10-x[1]*x[1]-2*x[2]*x[2]-x[3]*x[3]-2*x[4]*x[4]+x[1]+x[4], 5-2*x[1]*x[1]-x[2]*x[2]-x[3]*x[3]-2*x[1]+x[2]+x[4]]\n"
-SOLNP("rosensuzuki", RS_R, "S(Rsolnp::solnp(c(1, 1, 1, 1), fun = fn, ineqfun = ineq, ineqLB = rep(0, 3), ineqUB = rep(1000, 3), control = list(trace = 0)))",
+SOLNP("rosensuzuki", RS_R, "S(SimLev:::.rsolnp_solnp(c(1, 1, 1, 1), fun = fn, ineqfun = ineq, ineqLB = rep(0, 3), ineqUB = rep(1000, 3), control = list(trace = 0)))",
       RS_P, "result = S(SN.solnp(np.array([1., 1, 1, 1]), fn, ineqfun=ineq, ineqLB=[0, 0, 0], ineqUB=[1000, 1000, 1000], control={'trace': 0}))",
       RS_J, "result = S(SN.solnp([1.0, 1, 1, 1], fn; ineqfun = ineq, ineqLB = zeros(3), ineqUB = fill(1000.0, 3), control = Dict(\"trace\" => 0)))")
-SOLNP("rosensuzuki_trace", RS_R, "S(Rsolnp::solnp(c(1, 1, 1, 1), fun = fn, ineqfun = ineq, ineqLB = rep(0, 3), ineqUB = rep(1000, 3), control = list(outer.iter = 3)))",
+SOLNP("rosensuzuki_trace", RS_R, "S(SimLev:::.rsolnp_solnp(c(1, 1, 1, 1), fun = fn, ineqfun = ineq, ineqLB = rep(0, 3), ineqUB = rep(1000, 3), control = list(outer.iter = 3)))",
       RS_P, "result = S(SN.solnp(np.array([1., 1, 1, 1]), fn, ineqfun=ineq, ineqLB=[0, 0, 0], ineqUB=[1000, 1000, 1000], control={'outer.iter': 3}))",
       RS_J, "result = S(SN.solnp([1.0, 1, 1, 1], fn; ineqfun = ineq, ineqLB = zeros(3), ineqUB = fill(1000.0, 3), control = Dict(\"outer.iter\" => 3)))")
 ROS_R <- "fn <- function(x) 100 * (x[2] - x[1] * x[1])^2 + (1 - x[1])^2\n"
 ROS_P <- "fn = lambda x: 100 * (x[1] - x[0] * x[0]) ** 2 + (1 - x[0]) ** 2\n"
 ROS_J <- "fn(x) = 100 * ((x[2] - x[1] * x[1]) * (x[2] - x[1] * x[1])) + (1 - x[1]) * (1 - x[1])\n"
-SOLNP("rosen_free", ROS_R, "S(Rsolnp::solnp(c(-1.2, 1), fun = fn, control = list(trace = 0)))",
+SOLNP("rosen_free", ROS_R, "S(SimLev:::.rsolnp_solnp(c(-1.2, 1), fun = fn, control = list(trace = 0)))",
       ROS_P, "result = S(SN.solnp(np.array([-1.2, 1]), fn, control={'trace': 0}))",
       ROS_J, "result = S(SN.solnp([-1.2, 1], fn; control = Dict(\"trace\" => 0)))")
-SOLNP("rosen_box", ROS_R, "S(Rsolnp::solnp(c(a = -1.2, b = 1), fun = fn, LB = c(-2, -2), UB = c(2, 0.5)))",
+SOLNP("rosen_box", ROS_R, "S(SimLev:::.rsolnp_solnp(c(a = -1.2, b = 1), fun = fn, LB = c(-2, -2), UB = c(2, 0.5)))",
       ROS_P, "result = S(SN.solnp(pd.Series([-1.2, 1], index=['a', 'b']), lambda x: fn(np.asarray(x)), LB=[-2, -2], UB=[2, 0.5]))",
       ROS_J, "result = S(SN.solnp(SL.RVector([-1.2, 1.0]; names = [\"a\", \"b\"]), fn; LB = [-2, -2], UB = [2, 0.5]))")
-SOLNP("rosen_box2", ROS_R, "S(Rsolnp::solnp(c(0.5, 0.2), fun = fn, LB = c(-2, -1), UB = c(0.8, 3), control = list(trace = 0, tol = 1e-10, delta = 1e-6, rho = 2)))",
+SOLNP("rosen_box2", ROS_R, "S(SimLev:::.rsolnp_solnp(c(0.5, 0.2), fun = fn, LB = c(-2, -1), UB = c(0.8, 3), control = list(trace = 0, tol = 1e-10, delta = 1e-6, rho = 2)))",
       ROS_P, "result = S(SN.solnp(np.array([0.5, 0.2]), fn, LB=[-2, -1], UB=[0.8, 3], control={'trace': 0, 'tol': 1e-10, 'delta': 1e-6, 'rho': 2}))",
       ROS_J, "result = S(SN.solnp([0.5, 0.2], fn; LB = [-2, -1], UB = [0.8, 3], control = Dict(\"trace\" => 0, \"tol\" => 1e-10, \"delta\" => 1e-6, \"rho\" => 2)))")
-SOLNP("ineq_viol", ROS_R, "S(Rsolnp::solnp(c(1.5, 2), fun = fn, ineqfun = function(x) x[1] + x[2], ineqLB = 0, ineqUB = 1, LB = c(-3, -3), UB = c(3, 3), control = list(trace = 0)))",
+SOLNP("ineq_viol", ROS_R, "S(SimLev:::.rsolnp_solnp(c(1.5, 2), fun = fn, ineqfun = function(x) x[1] + x[2], ineqLB = 0, ineqUB = 1, LB = c(-3, -3), UB = c(3, 3), control = list(trace = 0)))",
       ROS_P, "result = S(SN.solnp(np.array([1.5, 2]), fn, ineqfun=lambda x: [x[0] + x[1]], ineqLB=[0], ineqUB=[1], LB=[-3, -3], UB=[3, 3], control={'trace': 0}))",
       ROS_J, "result = S(SN.solnp([1.5, 2], fn; ineqfun = x -> [x[1] + x[2]], ineqLB = [0], ineqUB = [1], LB = [-3, -3], UB = [3, 3], control = Dict(\"trace\" => 0)))")
-SOLNP("eq_ineq_box", ROS_R, "S(Rsolnp::solnp(c(0.3, 0.4, 0.3), fun = function(x) (x[1] - 1)^2 + (x[2] - 2)^2 + x[3] * x[3], eqfun = function(x) x[1] + x[2] + x[3], eqB = 1, ineqfun = function(x) x[1] - x[2], ineqLB = -0.5, ineqUB = 0.5, LB = c(0, 0, 0), UB = c(1, 1, 1), control = list(trace = 0)))",
+SOLNP("eq_ineq_box", ROS_R, "S(SimLev:::.rsolnp_solnp(c(0.3, 0.4, 0.3), fun = function(x) (x[1] - 1)^2 + (x[2] - 2)^2 + x[3] * x[3], eqfun = function(x) x[1] + x[2] + x[3], eqB = 1, ineqfun = function(x) x[1] - x[2], ineqLB = -0.5, ineqUB = 0.5, LB = c(0, 0, 0), UB = c(1, 1, 1), control = list(trace = 0)))",
       "", "result = S(SN.solnp(np.array([0.3, 0.4, 0.3]), lambda x: (x[0] - 1) ** 2 + (x[1] - 2) ** 2 + x[2] * x[2], eqfun=lambda x: [x[0] + x[1] + x[2]], eqB=[1], ineqfun=lambda x: [x[0] - x[1]], ineqLB=[-0.5], ineqUB=[0.5], LB=[0, 0, 0], UB=[1, 1, 1], control={'trace': 0}))",
       "", "result = S(SN.solnp([0.3, 0.4, 0.3], x -> (x[1] - 1) * (x[1] - 1) + (x[2] - 2) * (x[2] - 2) + x[3] * x[3]; eqfun = x -> [x[1] + x[2] + x[3]], eqB = [1], ineqfun = x -> [x[1] - x[2]], ineqLB = [-0.5], ineqUB = [0.5], LB = [0, 0, 0], UB = [1, 1, 1], control = Dict(\"trace\" => 0)))")
-SOLNP("nonfinite", "", "S(Rsolnp::solnp(c(1, 1), fun = function(x) if (x[1] > 1.0000001) NaN else (x[1] - 3)^2 + x[2]^2, control = list(trace = 0, outer.iter = 5)))",
+SOLNP("nonfinite", "", "S(SimLev:::.rsolnp_solnp(c(1, 1), fun = function(x) if (x[1] > 1.0000001) NaN else (x[1] - 3)^2 + x[2]^2, control = list(trace = 0, outer.iter = 5)))",
       "", "import math\nresult = S(SN.solnp(np.array([1., 1]), lambda x: math.nan if x[0] > 1.0000001 else (x[0] - 3) ** 2 + x[1] ** 2, control={'trace': 0, 'outer.iter': 5}))",
       "", "result = S(SN.solnp([1.0, 1], x -> x[1] > 1.0000001 ? NaN : (x[1] - 3) * (x[1] - 3) + x[2] * x[2]; control = Dict(\"trace\" => 0, \"outer.iter\" => 5)))")
-SOLNP("eqbounds", ROS_R, "S(Rsolnp::solnp(c(-1.2, 1), fun = fn, LB = c(-2, 1), UB = c(2, 1), control = list(trace = 0)))",
+SOLNP("eqbounds", ROS_R, "S(SimLev:::.rsolnp_solnp(c(-1.2, 1), fun = fn, LB = c(-2, 1), UB = c(2, 1), control = list(trace = 0)))",
       ROS_P, "result = S(SN.solnp(np.array([-1.2, 1]), fn, LB=[-2, 1], UB=[2, 1], control={'trace': 0}))",
       ROS_J, "result = S(SN.solnp([-1.2, 1], fn; LB = [-2, 1], UB = [2, 1], control = Dict(\"trace\" => 0)))")
-SOLNP("err_lb", ROS_R, "Rsolnp::solnp(c(-1.2, 1), fun = fn, LB = c(-2, -2, -2))",
+SOLNP("err_lb", ROS_R, "SimLev:::.rsolnp_solnp(c(-1.2, 1), fun = fn, LB = c(-2, -2, -2))",
       ROS_P, "result = SN.solnp(np.array([-1.2, 1]), fn, LB=[-2, -2, -2])",
       ROS_J, "result = SN.solnp([-1.2, 1], fn; LB = [-2, -2, -2])")
-SOLNP("err_ublb", ROS_R, "Rsolnp::solnp(c(-1.2, 1), fun = fn, LB = c(-2, 2), UB = c(2, 1))",
+SOLNP("err_ublb", ROS_R, "SimLev:::.rsolnp_solnp(c(-1.2, 1), fun = fn, LB = c(-2, 2), UB = c(2, 1))",
       ROS_P, "result = SN.solnp(np.array([-1.2, 1]), fn, LB=[-2, 2], UB=[2, 1])",
       ROS_J, "result = SN.solnp([-1.2, 1], fn; LB = [-2, 2], UB = [2, 1])")
-SOLNP("err_len", "", "Rsolnp::solnp(c(-1.2, 1), fun = function(x) x)",
+SOLNP("err_len", "", "SimLev:::.rsolnp_solnp(c(-1.2, 1), fun = function(x) x)",
       "", "result = SN.solnp(np.array([-1.2, 1]), lambda x: x)",
       "", "result = SN.solnp([-1.2, 1], x -> x)")
-SOLNP("err_ineq", ROS_R, "Rsolnp::solnp(c(-1.2, 1), fun = fn, ineqfun = function(x) x[1], ineqLB = 0)",
+SOLNP("err_ineq", ROS_R, "SimLev:::.rsolnp_solnp(c(-1.2, 1), fun = fn, ineqfun = function(x) x[1], ineqLB = 0)",
       ROS_P, "result = SN.solnp(np.array([-1.2, 1]), fn, ineqfun=lambda x: [x[0]], ineqLB=[0])",
       ROS_J, "result = SN.solnp([-1.2, 1], fn; ineqfun = x -> [x[1]], ineqLB = [0])")
 
@@ -285,12 +289,12 @@ CLK <- 1760870000.5
 case2 <- function(id, r, py, inputs = list(), jl = NULL, sys_time = CLK, ...)
   ref_case(id, r = r, py = paste0(P2, py), inputs = inputs, jl = if (is.null(jl)) NULL else paste0(JP2, jl),
            sys_time = sys_time, ...)
-# Anzahl der Aufrufe von .gosolnpsolver beim Auswerten von `code` (zur Kontrolle im Protokoll)
+# Anzahl der Aufrufe von .rugarch_gosolnpsolver beim Auswerten von `code` (zur Kontrolle im Protokoll)
 gos_calls <- function(code, inputs = list(), clk = CLK) {
-  ns <- asNamespace("rugarch"); f0 <- get(".gosolnpsolver", ns); k <- 0L
-  unlockBinding(".gosolnpsolver", ns); assign(".gosolnpsolver", function(...) { k <<- k + 1L; f0(...) }, ns)
+  ns <- asNamespace("SimLev"); f0 <- get(".rugarch_gosolnpsolver", ns); k <- 0L
+  unlockBinding(".rugarch_gosolnpsolver", ns); assign(".rugarch_gosolnpsolver", function(...) { k <<- k + 1L; f0(...) }, ns)
   undo <- .ref_fix_time(clk); seed0 <- get0(".Random.seed", globalenv())
-  on.exit({ assign(".gosolnpsolver", f0, ns); lockBinding(".gosolnpsolver", ns); undo()
+  on.exit({ assign(".rugarch_gosolnpsolver", f0, ns); lockBinding(".rugarch_gosolnpsolver", ns); undo()
             if (!is.null(seed0)) assign(".Random.seed", seed0, globalenv()) })
   env <- new.env(parent = globalenv()); for (nm in names(inputs)) assign(nm, inputs[[nm]], envir = env)
   try(suppressWarnings(eval(parse(text = code), envir = env)), silent = TRUE)
@@ -404,47 +408,47 @@ GO <- function(id, rcall, pcall, jcall, sys_time = NULL, wrap = TRUE)
   case2(paste0("gosolnp_", id), paste0(GS_R, FN_R, if (wrap) sprintf("GS(%s)", rcall) else rcall),
         paste0(FN_P, if (wrap) sprintf("result = GS(%s)", pcall) else paste0("result = ", pcall)), list(),
         jl = paste0(FN_J, if (wrap) sprintf("result = GS(%s)", jcall) else paste0("result = ", jcall)), sys_time = sys_time)
-GO("unif", "Rsolnp::gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 200, rseed = 7, control = list(trace = 0))",
+GO("unif", "SimLev:::.rsolnp_gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 200, rseed = 7, control = list(trace = 0))",
    "SN.gosolnp(fun=fn, LB=[-3, -3], UB=[3, 3], n_sim=200, rseed=7, control={'trace': 0})",
    "SN.gosolnp(nothing, nothing, fn; LB = [-3, -3], UB = [3, 3], n_sim = 200, rseed = 7, control = Dict(\"trace\" => 0))")
-GO("clock", "Rsolnp::gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 100, control = list(trace = 0))",
+GO("clock", "SimLev:::.rsolnp_gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 100, control = list(trace = 0))",
    "SN.gosolnp(fun=fn, LB=[-3, -3], UB=[3, 3], n_sim=100, control={'trace': 0})",
    "SN.gosolnp(nothing, nothing, fn; LB = [-3, -3], UB = [3, 3], n_sim = 100, control = Dict(\"trace\" => 0))", sys_time = 1760870123.75)
-GO("clock2", "{ a <- Rsolnp::gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 30, control = list(trace = 0)); u <- runif(1); b <- Rsolnp::gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 30, control = list(trace = 0)); list(a = GS(a), b = GS(b), u = u) }",
+GO("clock2", "{ a <- SimLev:::.rsolnp_gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 30, control = list(trace = 0)); u <- runif(1); b <- SimLev:::.rsolnp_gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 30, control = list(trace = 0)); list(a = GS(a), b = GS(b), u = u) }",
    "None\na = SN.gosolnp(fun=fn, LB=[-3, -3], UB=[3, 3], n_sim=30, control={'trace': 0}); u = RNG.runif(1); b = SN.gosolnp(fun=fn, LB=[-3, -3], UB=[3, 3], n_sim=30, control={'trace': 0})\nresult = {'a': GS(a), 'b': GS(b), 'u': u}",
    "nothing\na = SN.gosolnp(nothing, nothing, fn; LB = [-3, -3], UB = [3, 3], n_sim = 30, control = Dict(\"trace\" => 0)); u = RNG.runif(1); b = SN.gosolnp(nothing, nothing, fn; LB = [-3, -3], UB = [3, 3], n_sim = 30, control = Dict(\"trace\" => 0))\nresult = SL.RList(\"a\" => GS(a), \"b\" => GS(b), \"u\" => u)",
    sys_time = 1760870555.5, wrap = FALSE)
-GO("restarts", "Rsolnp::gosolnp(pars = c(a = 0.5, b = 0.5), fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 100, n.restarts = 3, rseed = 11.7, distr = c(2, 3), distr.opt = list(list(mean = 0.5, sd = 1), list(mean = 0, sd = 2)), ineqfun = function(x) x[1] + x[2], ineqLB = -1, ineqUB = 1, control = list(trace = 0))",
+GO("restarts", "SimLev:::.rsolnp_gosolnp(pars = c(a = 0.5, b = 0.5), fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 100, n.restarts = 3, rseed = 11.7, distr = c(2, 3), distr.opt = list(list(mean = 0.5, sd = 1), list(mean = 0, sd = 2)), ineqfun = function(x) x[1] + x[2], ineqLB = -1, ineqUB = 1, control = list(trace = 0))",
    "SN.gosolnp(pars=pd.Series([0.5, 0.5], index=['a', 'b']), fun=fn, LB=[-3, -3], UB=[3, 3], n_sim=100, n_restarts=3, rseed=11.7, distr=[2, 3], distr_opt=[{'mean': 0.5, 'sd': 1}, {'mean': 0, 'sd': 2}], ineqfun=lambda x: [x.iloc[0] + x.iloc[1]], ineqLB=[-1], ineqUB=[1], control={'trace': 0})",
    "SN.gosolnp(SL.RVector([0.5, 0.5]; names = [\"a\", \"b\"]), nothing, fn; LB = [-3, -3], UB = [3, 3], n_sim = 100, n_restarts = 3, rseed = 11.7, distr = [2, 3], distr_opt = [Dict(\"mean\" => 0.5, \"sd\" => 1), Dict(\"mean\" => 0, \"sd\" => 2)], ineqfun = x -> [x[1] + x[2]], ineqLB = [-1], ineqUB = [1], control = Dict(\"trace\" => 0))")
-GO("ineq2", "Rsolnp::gosolnp(fun = fn, LB = c(-3, -3, -3), UB = c(3, 3, 3), n.sim = 50, rseed = 3, distr = c(2, 2, 2), distr.opt = list(list(mean = 0, sd = 1), list(mean = 1, sd = 0.1), list(mean = -2.9, sd = 0.05)), ineqfun = function(x) c(x[1] + x[2], x[3]), ineqLB = c(-1, -3), ineqUB = c(1, 0), control = list(trace = 0))",
+GO("ineq2", "SimLev:::.rsolnp_gosolnp(fun = fn, LB = c(-3, -3, -3), UB = c(3, 3, 3), n.sim = 50, rseed = 3, distr = c(2, 2, 2), distr.opt = list(list(mean = 0, sd = 1), list(mean = 1, sd = 0.1), list(mean = -2.9, sd = 0.05)), ineqfun = function(x) c(x[1] + x[2], x[3]), ineqLB = c(-1, -3), ineqUB = c(1, 0), control = list(trace = 0))",
    "SN.gosolnp(fun=fn, LB=[-3, -3, -3], UB=[3, 3, 3], n_sim=50, rseed=3, distr=[2, 2, 2], distr_opt=[{'mean': 0, 'sd': 1}, {'mean': 1, 'sd': 0.1}, {'mean': -2.9, 'sd': 0.05}], ineqfun=lambda x: [x[0] + x[1], x[2]], ineqLB=[-1, -3], ineqUB=[1, 0], control={'trace': 0})",
    "SN.gosolnp(nothing, nothing, fn; LB = fill(-3, 3), UB = fill(3, 3), n_sim = 50, rseed = 3, distr = [2, 2, 2], distr_opt = [Dict(\"mean\" => 0, \"sd\" => 1), Dict(\"mean\" => 1, \"sd\" => 0.1), Dict(\"mean\" => -2.9, \"sd\" => 0.05)], ineqfun = x -> [x[1] + x[2], x[3]], ineqLB = [-1, -3], ineqUB = [1, 0], control = Dict(\"trace\" => 0))")
-GO("fixed_normal", "Rsolnp::gosolnp(pars = c(0.5, 1), fixed = 2, fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 60, rseed = 5, distr = c(3, 1), distr.opt = list(list(mean = 1, sd = 0.5), list()), control = list(trace = 0))",
+GO("fixed_normal", "SimLev:::.rsolnp_gosolnp(pars = c(0.5, 1), fixed = 2, fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 60, rseed = 5, distr = c(3, 1), distr.opt = list(list(mean = 1, sd = 0.5), list()), control = list(trace = 0))",
    "SN.gosolnp(pars=np.array([0.5, 1]), fixed=2, fun=fn, LB=[-3, -3], UB=[3, 3], n_sim=60, rseed=5, distr=[3, 1], distr_opt=[{'mean': 1, 'sd': 0.5}, {}], control={'trace': 0})",
    "SN.gosolnp([0.5, 1.0], 2, fn; LB = [-3, -3], UB = [3, 3], n_sim = 60, rseed = 5, distr = [3, 1], distr_opt = [Dict(\"mean\" => 1, \"sd\" => 0.5), Dict()], control = Dict(\"trace\" => 0))")
-GO("infeasible", "Rsolnp::gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 50, rseed = 1, ineqfun = function(x) x[1] + x[2], ineqLB = 10, ineqUB = 11, control = list(trace = 0))",
+GO("infeasible", "SimLev:::.rsolnp_gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 50, rseed = 1, ineqfun = function(x) x[1] + x[2], ineqLB = 10, ineqUB = 11, control = list(trace = 0))",
    "SN.gosolnp(fun=fn, LB=[-3, -3], UB=[3, 3], n_sim=50, rseed=1, ineqfun=lambda x: [x[0] + x[1]], ineqLB=[10], ineqUB=[11], control={'trace': 0})",
    "SN.gosolnp(nothing, nothing, fn; LB = [-3, -3], UB = [3, 3], n_sim = 50, rseed = 1, ineqfun = x -> [x[1] + x[2]], ineqLB = [10], ineqUB = [11], control = Dict(\"trace\" => 0))")
-GO("nonfinite", "Rsolnp::gosolnp(fun = function(x) if (x[1] > 2) NaN else fn(x), LB = c(-3, -3), UB = c(3, 3), n.sim = 30, rseed = 2, control = list(trace = 0))",
+GO("nonfinite", "SimLev:::.rsolnp_gosolnp(fun = function(x) if (x[1] > 2) NaN else fn(x), LB = c(-3, -3), UB = c(3, 3), n.sim = 30, rseed = 2, control = list(trace = 0))",
    "SN.gosolnp(fun=lambda x: float('nan') if x[0] > 2 else fn(x), LB=[-3, -3], UB=[3, 3], n_sim=30, rseed=2, control={'trace': 0})",
    "SN.gosolnp(nothing, nothing, x -> x[1] > 2 ? NaN : fn(x); LB = [-3, -3], UB = [3, 3], n_sim = 30, rseed = 2, control = Dict(\"trace\" => 0))")
-GO("err_nofeas", "Rsolnp::gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 50, n.restarts = 2, rseed = 1, control = list(trace = 0, outer.iter = 1))",
+GO("err_nofeas", "SimLev:::.rsolnp_gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), n.sim = 50, n.restarts = 2, rseed = 1, control = list(trace = 0, outer.iter = 1))",
    "SN.gosolnp(fun=fn, LB=[-3, -3], UB=[3, 3], n_sim=50, n_restarts=2, rseed=1, control={'trace': 0, 'outer.iter': 1})",
    "SN.gosolnp(nothing, nothing, fn; LB = [-3, -3], UB = [3, 3], n_sim = 50, n_restarts = 2, rseed = 1, control = Dict(\"trace\" => 0, \"outer.iter\" => 1))")
-GO("err_lb", "Rsolnp::gosolnp(fun = fn, UB = c(3, 3))", "SN.gosolnp(fun=fn, UB=[3, 3])", "SN.gosolnp(nothing, nothing, fn; UB = [3, 3])")
-GO("err_ub", "Rsolnp::gosolnp(fun = fn, LB = c(3, 3))", "SN.gosolnp(fun=fn, LB=[3, 3])", "SN.gosolnp(nothing, nothing, fn; LB = [3, 3])")
-GO("err_fixed", "Rsolnp::gosolnp(fixed = 1, fun = fn, LB = c(-3, -3), UB = c(3, 3))", "SN.gosolnp(fixed=1, fun=fn, LB=[-3, -3], UB=[3, 3])",
+GO("err_lb", "SimLev:::.rsolnp_gosolnp(fun = fn, UB = c(3, 3))", "SN.gosolnp(fun=fn, UB=[3, 3])", "SN.gosolnp(nothing, nothing, fn; UB = [3, 3])")
+GO("err_ub", "SimLev:::.rsolnp_gosolnp(fun = fn, LB = c(3, 3))", "SN.gosolnp(fun=fn, LB=[3, 3])", "SN.gosolnp(nothing, nothing, fn; LB = [3, 3])")
+GO("err_fixed", "SimLev:::.rsolnp_gosolnp(fixed = 1, fun = fn, LB = c(-3, -3), UB = c(3, 3))", "SN.gosolnp(fixed=1, fun=fn, LB=[-3, -3], UB=[3, 3])",
    "SN.gosolnp(nothing, 1, fn; LB = [-3, -3], UB = [3, 3])")
-GO("err_fixed_oob", "Rsolnp::gosolnp(pars = c(1, 1), fixed = 3, fun = fn, LB = c(-3, -3), UB = c(3, 3))",
+GO("err_fixed_oob", "SimLev:::.rsolnp_gosolnp(pars = c(1, 1), fixed = 3, fun = fn, LB = c(-3, -3), UB = c(3, 3))",
    "SN.gosolnp(pars=np.array([1., 1.]), fixed=3, fun=fn, LB=[-3, -3], UB=[3, 3])", "SN.gosolnp([1.0, 1.0], 3, fn; LB = [-3, -3], UB = [3, 3])")
-GO("err_mean", "Rsolnp::gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), distr = c(1, 2), distr.opt = list(list(), list(sd = 1)))",
+GO("err_mean", "SimLev:::.rsolnp_gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), distr = c(1, 2), distr.opt = list(list(), list(sd = 1)))",
    "SN.gosolnp(fun=fn, LB=[-3, -3], UB=[3, 3], distr=[1, 2], distr_opt=[{}, {'sd': 1}])",
    "SN.gosolnp(nothing, nothing, fn; LB = [-3, -3], UB = [3, 3], distr = [1, 2], distr_opt = [Dict(), Dict(\"sd\" => 1)])")
-GO("err_sd", "Rsolnp::gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), distr = c(3, 3), distr.opt = list(list(mean = 0, sd = 1), list(mean = 1)))",
+GO("err_sd", "SimLev:::.rsolnp_gosolnp(fun = fn, LB = c(-3, -3), UB = c(3, 3), distr = c(3, 3), distr.opt = list(list(mean = 0, sd = 1), list(mean = 1)))",
    "SN.gosolnp(fun=fn, LB=[-3, -3], UB=[3, 3], distr=[3, 3], distr_opt=[{'mean': 0, 'sd': 1}, {'mean': 1}])",
    "SN.gosolnp(nothing, nothing, fn; LB = [-3, -3], UB = [3, 3], distr = [3, 3], distr_opt = [Dict(\"mean\" => 0, \"sd\" => 1), Dict(\"mean\" => 1)])")
-GO("err_fun", "Rsolnp::gosolnp(fun = function(x) if (x[1] > 2.5) stop('boom') else fn(x), LB = c(-3, -3), UB = c(3, 3), n.sim = 40, rseed = 2)",
+GO("err_fun", "SimLev:::.rsolnp_gosolnp(fun = function(x) if (x[1] > 2.5) stop('boom') else fn(x), LB = c(-3, -3), UB = c(3, 3), n.sim = 40, rseed = 2)",
    "SN.gosolnp(fun=lambda x: (_ for _ in ()).throw(SN.RError('boom')) if x[0] > 2.5 else fn(x), LB=[-3, -3], UB=[3, 3], n_sim=40, rseed=2)",
    "SN.gosolnp(nothing, nothing, x -> x[1] > 2.5 ? error(\"boom\") : fn(x); LB = [-3, -3], UB = [3, 3], n_sim = 40, rseed = 2)")
 
@@ -454,13 +458,13 @@ TNC <- rbind(c(0, 1, 0, 1), c(-1, 1, 0, 1), c(-0.5, 0.5, 0, 1), c(-3, 3, 0, 1), 
              c(-10, -0.3, 0, 1), c(-Inf, 1, 0, 1), c(-Inf, -2, 0, 1), c(0.2, Inf, 0, 1), c(2, Inf, 0, 1), c(-Inf, Inf, 1, 2),
              c(1, 1, 0, 1), c(NaN, 1, 0, 1), c(2.220446049250313e-16, 1 - 1e-8, 0.05, 0.1), c(0, 1 - 1e-8, 0.9, 1.8),
              c(-0.03, 0.03, 3e-4, 6e-4), c(1, 2, 1.5, 0))
-case2("tn_branches", "set.seed(42); c(unlist(lapply(seq_len(nrow(TNC)), function(i) truncnorm::rtruncnorm(7, TNC[i, 1], TNC[i, 2], TNC[i, 3], TNC[i, 4]))), runif(2))",
+case2("tn_branches", "set.seed(42); c(unlist(lapply(seq_len(nrow(TNC)), function(i) SimLev:::.truncnorm_rtruncnorm(7, TNC[i, 1], TNC[i, 2], TNC[i, 3], TNC[i, 4]))), runif(2))",
       "RNG.set_seed(42); result = np.concatenate([TN.rtruncnorm(7, *TNC[i, :]) for i in range(TNC.shape[0])] + [RNG.runif(2)])",
       list(TNC = TNC), jl = "RNG.set_seed(42); result = vcat([TN.rtruncnorm(7, TNC[i, :]...) for i in 1:size(TNC, 1)]..., RNG.runif(2))", sys_time = NULL)
-case2("tn_recycle", "set.seed(3); list(truncnorm::rtruncnorm(5, c(0, 1), c(2, 3, 4), 0, c(1, 2)), truncnorm::rtruncnorm(c(9, 9, 9), -1, 1), truncnorm::rtruncnorm(2.9, 0, 1, c(0, 1, 2)))",
+case2("tn_recycle", "set.seed(3); list(SimLev:::.truncnorm_rtruncnorm(5, c(0, 1), c(2, 3, 4), 0, c(1, 2)), SimLev:::.truncnorm_rtruncnorm(c(9, 9, 9), -1, 1), SimLev:::.truncnorm_rtruncnorm(2.9, 0, 1, c(0, 1, 2)))",
       "RNG.set_seed(3); result = [TN.rtruncnorm(5, [0, 1], [2, 3, 4], 0, [1, 2]), TN.rtruncnorm([9, 9, 9], -1, 1), TN.rtruncnorm(2.9, 0, 1, [0, 1, 2])]",
       jl = "RNG.set_seed(3); result = Any[TN.rtruncnorm(5, [0, 1], [2, 3, 4], 0, [1, 2]), TN.rtruncnorm([9, 9, 9], -1, 1), TN.rtruncnorm(2.9, 0, 1, [0, 1, 2])]", sys_time = NULL)
-case2("tn_zero", "truncnorm::rtruncnorm(0, 0, 1)", "result = TN.rtruncnorm(0, 0, 1)", jl = "result = TN.rtruncnorm(0, 0, 1)", sys_time = NULL)
-case2("tn_err_len", "truncnorm::rtruncnorm(3, numeric(0), 1)", "result = TN.rtruncnorm(3, [], 1)", jl = "result = TN.rtruncnorm(3, Float64[], 1)", sys_time = NULL)
-case2("tn_err_n", "truncnorm::rtruncnorm('a', 0, 1)", "result = TN.rtruncnorm('a', 0, 1)", jl = "result = TN.rtruncnorm(\"a\", 0, 1)", sys_time = NULL)
+case2("tn_zero", "SimLev:::.truncnorm_rtruncnorm(0, 0, 1)", "result = TN.rtruncnorm(0, 0, 1)", jl = "result = TN.rtruncnorm(0, 0, 1)", sys_time = NULL)
+case2("tn_err_len", "SimLev:::.truncnorm_rtruncnorm(3, numeric(0), 1)", "result = TN.rtruncnorm(3, [], 1)", jl = "result = TN.rtruncnorm(3, Float64[], 1)", sys_time = NULL)
+case2("tn_err_n", "SimLev:::.truncnorm_rtruncnorm('a', 0, 1)", "result = TN.rtruncnorm('a', 0, 1)", jl = "result = TN.rtruncnorm(\"a\", 0, 1)", sys_time = NULL)
 ref_done()

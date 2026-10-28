@@ -45,11 +45,12 @@ from . import _cmath as _c
 from ._cmath import (
     DBL_EPSILON, DBL_MANT_DIG, DBL_MAX, DBL_MIN, DBL_MIN_EXP, INF, M_1_PI, M_1_SQRT_2PI, M_2PI,
     M_LN2, M_LN_SQRT_2PI, M_LN_SQRT_PId2, M_PI, M_PI_2, M_SQRT2, M_SQRT_32, NAN, NINF,
-    R_Log1_Exp, R_forceint, R_nonint, R_pow, R_pow_di, c_int, c_lgamma, dv, exp, expm1, fmax2,
-    fmin2, fmod, fsign, imax2, imin2, ldexp, log, log1p, ml_warning, pow, sqrt, trunc,
+    R_Log1_Exp, R_forceint, R_nonint, c_int, c_lgamma, dv, exp, expm1, fmax2,
+    fmin2, fmod, ldexp, log, log1p, ml_warning, pow, sqrt, trunc,
 )
 from ._cmath import logspace_add as _logspace_add, logspace_sub as _logspace_sub
 from ._toms708 import bratio
+from .rnum import NA_REAL  # R's NA_real_ (NaN mit Nutzlast 1954)
 
 __all__ = [
     "dnorm", "pnorm", "qnorm", "dt", "pt", "qt", "pbeta", "lgamma", "gamma", "lbeta", "beta",
@@ -60,8 +61,6 @@ __all__ = [
 _isnan = math.isnan
 _pack_d = __import__("struct").Struct("<d").pack
 _unpack_Q = __import__("struct").Struct("<Q").unpack
-#: R's ``NA_real_`` (NaN mit Nutzlast 1954, signalisierend wie in R)
-NA_REAL = __import__("struct").unpack("<d", (0x7FF00000000007A2).to_bytes(8, "little"))[0]
 
 
 def _isna(x):

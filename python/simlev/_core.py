@@ -1,7 +1,7 @@
 """Rechenkerne der Engine.
 
 Reine Python-Ports der C++-Funktionen aus ``simulation_core.cpp``,
-``fifo_core_RCpp.cpp`` und ``tax_core_RCpp.cpp``. Die Rechenreihenfolge ist
+``fifo_core.cpp`` und ``tax_core.cpp``. Die Rechenreihenfolge ist
 1:1 übernommen, damit Ergebnisse bitgleich zum R-Paket sind (IEEE-754-
 Doubles, ``long double`` nur dort, wo auch der C++-Code ihn nutzt).
 
@@ -192,7 +192,7 @@ def batch_market_update(sim: dict, assets: list[str], start_idx: int, end_idx: i
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# fifo_core_RCpp.cpp
+# fifo_core.cpp
 # ═══════════════════════════════════════════════════════════════════════════
 
 def calculate_fifo_price(buys: list, units: float, front_index: int) -> float:
@@ -320,7 +320,7 @@ def update_fifo_front(buys: list, front_index: int) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# tax_core_RCpp.cpp
+# tax_core.cpp
 # ═══════════════════════════════════════════════════════════════════════════
 
 def flat_rate(buys: list, front_index: int, base_rate: float, year_start_price: float,

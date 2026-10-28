@@ -29,8 +29,8 @@ import pandas as pd
 
 from .linalg import RError, _as_r, _as_matrix, _out, _vec_out
 from .rlist import RList
-from .. import _rnum as _rn
-from .._rnum import NA_REAL, na_or_nan as _na_or_nan, r_isna as _isna, r_isna_arr as _isna_arr
+from . import rnum as _rn
+from .rnum import NA_REAL
 from ._collate import str_collate, collate_key
 
 LD = np.longdouble
@@ -908,11 +908,10 @@ def weighted_mean(x, w=None, na_rm=False):
 
 
 def _arith_nan(r, *operands):
-    """Arithmetisch entstandenes NaN (keine NA in den Operanden) → ``fmt.R_NAN``."""
+    """Arithmetisch entstandenes NaN (keine NA in den Operanden) → R's ``NaN`` (``math.nan``)."""
     if r == r or any(np.isnan(o).any() for o in operands):
         return r
-    from .fmt import R_NAN
-    return R_NAN
+    return math.nan
 
 
 # ── cov / cor (cov.c) ────────────────────────────────────────────────────
@@ -1454,7 +1453,7 @@ def cov2cor(V):
     p = m.dim[0]
     A = m.mat()
     D = np.diag(A).copy()
-    from .fmt import R_NAN, _nan_mask
+    from .fmt import _nan_mask
     with np.errstate(all="ignore"):
         pos = ~np.isnan(D) & (D > 0)
         Is = D.copy()
@@ -1467,7 +1466,7 @@ def cov2cor(V):
     # durch, `* rep(Is, each = p)` (gleiche Länge) den linken. Ergebnis ist also
     # genau dann NA, wenn V[i,j] NA ist; jedes andere NaN ist R-NaN.
     na_v = np.isnan(A) & ~_nan_mask(A)
-    r[np.isnan(r) & ~na_v] = R_NAN
+    r[np.isnan(r) & ~na_v] = np.nan
     r[na_v] = NA_REAL
     if p:
         r[np.arange(p), np.arange(p)] = 1.0
@@ -2429,7 +2428,7 @@ def nlminb(start, objective, gradient=None, hessian=None, *args, scale=1, contro
     ``iterations``, ``evaluations`` (``Series`` ``function``/``gradient``) und
     ``message``.
     """
-    from . import _port
+    from . import port as _port
     if isinstance(start, pd.Series):
         names = None if isinstance(start.index, pd.RangeIndex) else [str(i) for i in start.index]
         pv = start.to_numpy(dtype=np.float64).copy()
@@ -2631,7 +2630,7 @@ def poly(x, degree=1, coefs=None, raw=False, simple=False):
     Ergebnis: n×degree-Matrix (``ndarray``) mit Attribut ``coefs``
     (``dict`` mit ``alpha``, ``norm2``) als Eigenschaft ``.coefs``.
     """
-    from .._rnum import r_pow
+    from .rnum import r_pow
     from . import linalg as LA
     xv, _ = _vec(x)
     degree = int(degree)
@@ -3076,7 +3075,6 @@ def glm(formula, family=None, data=None, weights=None, control=None, env=None, *
     deviance, aic, null.deviance, iter, weights, prior.weights,
     df.residual, df.null, y, converged, boundary.
     """
-    from . import linalg as LA
     if family is None:
         family = binomial()
     if callable(family) and not isinstance(family, dict):
@@ -3353,7 +3351,7 @@ def _cmul_conj(ar, ai, br, bi):
 
 def bw_nrd0(x):
     """``bw.nrd0(x)``."""
-    from .._rnum import r_pow
+    from .rnum import r_pow
     xv, _ = _vec(x)
     if xv.size < 2:
         raise RError("need at least 2 data points")
@@ -3384,7 +3382,7 @@ def density(x, bw="nrd0", adjust=1, kernel="gaussian", weights=None, n=512, from
     Ergebnis ``RList`` (Klasse ``density``) mit ``x``, ``y``, ``bw``, ``n``.
     """
     from . import nmath as NM
-    from .._rnum import r_pow
+    from .rnum import r_pow
     if "from" in kw:
         from_ = kw.pop("from")
     kernels = ["gaussian", "epanechnikov", "rectangular", "triangular", "biweight", "cosine", "optcosine"]
@@ -3563,7 +3561,7 @@ _DIST_METHODS = ["euclidean", "maximum", "manhattan", "canberra", "binary", "min
 
 def dist(x, method="euclidean", diag=False, upper=False, p=2):
     """``dist(x, method, diag, upper, p)``; Ergebnis :class:`RDist`."""
-    from .._rnum import r_pow
+    from .rnum import r_pow
     if "euclidian".startswith(method):
         method = "euclidean"
     hits = [i for i, m in enumerate(_DIST_METHODS) if m.startswith(method)]
@@ -4108,7 +4106,7 @@ def t_test(x, y=None, alternative="two.sided", mu=0, paired=False, var_equal=Fal
     conf.int, estimate, null.value, stderr, alternative, method, data.name.
     """
     from . import nmath as NM
-    from .._rnum import r_pow
+    from .rnum import r_pow
     alts = ["two.sided", "less", "greater"]
     am = [a for a in alts if a.startswith(alternative)]
     if len(am) != 1:
@@ -4222,7 +4220,7 @@ class _SmoothSplineFit(RList):
 
 
 def _nknots_smspl(n):
-    from .._rnum import r_pow
+    from .rnum import r_pow
     if n < 50:
         return n
     a1 = math.log2(50)
@@ -4451,7 +4449,7 @@ def smooth_spline(x, y=None, w=None, df=None, spar=None, lambda_=None, cv=False,
 
 def _predict_ssfit(obj, x=None, deriv=0):
     from ._sbart import bvalus
-    from .._rnum import r_pow
+    from .rnum import r_pow
     if x is None:
         x = seq_len_out(obj["min"], obj["min"] + obj["range"], len(obj["coef"]) - 4)
     xv, _ = _vec(x)
@@ -4515,6 +4513,6 @@ def predict(object, *args, **kwargs):
     raise NotImplementedError("predict() für dieses Objekt ist nicht portiert")
 
 
-from .base import quiet_fp as _quiet_fp  # noqa: E402
+from .base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), __all__)
+quiet_fp(globals(), __all__)

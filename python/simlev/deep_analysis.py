@@ -24,7 +24,7 @@ from ._r import fmt as _fmt
 from ._r import libm as _libm
 from ._r.fmt import NA_REAL
 from ._r.rlist import RList
-from ._rnum import LD, r_cummax, r_cumsum, r_mean, r_mean_int, r_pow, r_prod, r_sd, r_var
+from ._r.rnum import LD, r_cummax, r_cumsum, r_mean, r_mean_int, r_pow, r_prod, r_sd, r_var
 
 __all__ = ["deep_analysis", "SimLevAnalysis"]
 
@@ -1078,6 +1078,6 @@ def _plot_analysis(x, type, series, metric, **kwargs):  # noqa: A002
     return x
 
 
-from .data_prep import _quiet_fp  # noqa: E402
+from ._r.base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), __all__ + ["_da_drawdowns", "_da_rf", "_without_filled"])
+quiet_fp(globals(), __all__ + ["_da_drawdowns", "_da_rf", "_without_filled"])

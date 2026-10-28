@@ -57,6 +57,7 @@ test_that("Phasenliste ist vollst\u00e4ndig", {
   ph <- .SIM_PHASES
   expect_true(all(vapply(ph, function(f) is.function(get0(f, envir = ns, inherits = FALSE)), NA)))
   defined <- grep("^\\.sim_", ls(ns, all.names = TRUE), value = TRUE)
+  defined <- grep("_cpp$", defined, value = TRUE, invert = TRUE)   # .Call-Huellen (R/cores.R)
   expect_setequal(setdiff(defined, ".sim_restore_call"), ph)
 })
 

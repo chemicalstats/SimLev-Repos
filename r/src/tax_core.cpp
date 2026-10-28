@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// tax_core_RCpp.cpp — Rcpp-Ports der Steuer-Kerne (Vollmigration Rechen-Engine)
+// tax_core.cpp — C++-Ports der Steuer-Kerne (Vollmigration Rechen-Engine)
+// (Dateiname aus der Rcpp-Zeit; seit 0.5.0 ueber R's C-Schnittstelle angebunden, simlev_capi.h)
 // 1:1-Semantik zu den R-Originalen:
 //   calculate_flat_rate (VP je Lot nach § 18 Abs. 1-2 InvStG: Jahresanfangskurs als
 //   Bezug, Deckel = Wertzuwachs im Jahr, Zwoelftelung nach dem Deckel, M4),
@@ -8,22 +9,24 @@
 //   calculate_sell_count (kum. FIFO + Bisektion + Rundung auf ganze Stueck; Steuerschaetzung
 //   mit § 19-Anrechnung der Lot-VP, Verlusttopf + freiem Sparer-Pauschbetrag, R3a-04).
 // totals-Listen werden direkt (IN PLACE) veraendert (bewaehrtes Muster per Referenz).
-// p20_tax_rcpp/vp_tax_rcpp erhalten sim_mem$totals (Zugriff ueber Namen, nur vorhandene Felder;
+// .sim_p20_tax_cpp/.sim_vp_tax_cpp erhalten sim_mem$totals (Zugriff ueber Namen, nur vorhandene Felder;
 // R legt alle Felder in .sim_build_state an) und aendern die Zahlen in dieser Liste: Jedes
 // R-Objekt, das dieselbe totals-Liste teilt, sieht die Aenderung. Probelaeufe auf einer Kopie
 // brauchen daher eine tiefe Kopie (unserialize(serialize(...))), keine einfache Zuweisung.
 // sim_mem selbst (Position der Felder) wird hier nicht verwendet.
 // ═══════════════════════════════════════════════════════════════════════════
-#include <Rcpp.h>
-using namespace Rcpp;
+#include "simlev_capi.h"
+#include <algorithm>
+#include <cmath>
+#include <vector>
 
 static inline bool lot_is_null2(SEXP b) {
   return Rf_isNull(b) || Rf_length(b) == 0;
 }
-static inline double tget(List& t, const char* fld) {          // %||% 0
-  if (!t.containsElementNamed(fld)) return 0.0;
-  SEXP v = t[fld];
-  return Rf_isNull(v) ? 0.0 : as<double>(v);
+static inline double tget(SEXP t, const char* fld) {           // %||% 0
+  if (!sl::has(t, fld)) return 0.0;
+  SEXP v = sl::get(t, fld);
+  return Rf_isNull(v) ? 0.0 : sl::as_double(v);
 }
 static inline void civil_from_days2(long z, int& y, int& m, int& d) {
   z += 719468L;
@@ -38,17 +41,15 @@ static inline void civil_from_days2(long z, int& y, int& m, int& d) {
   y = static_cast<int>(yy + (m <= 2));
 }
 
-//' Vorabpauschale je Lot (Port des Kerns von calculate_flat_rate)
-//' base_rate bereits dezimal (>0), Datums-Args als Tage seit Epoch.
-//' @noRd
-// [[Rcpp::export]]
-List flat_rate_rcpp(List buys, int front_index, double base_rate,
-                    double year_start_price, double market_price,
-                    int soy_days, int eoy_days) {
-  const int n = buys.size();
-  List empty = List::create(Named("total_vp") = 0.0,
-                            Named("lot_indices") = IntegerVector(0),
-                            Named("lot_vps") = NumericVector(0));
+// Vorabpauschale je Lot (Port des Kerns von calculate_flat_rate; .sim_flat_rate_cpp)
+// base_rate bereits dezimal (>0), Datums-Args als Tage seit Epoch.
+static SEXP flat_rate(SEXP buys, int front_index, double base_rate,
+                      double year_start_price, double market_price,
+                      int soy_days, int eoy_days) {
+  const int n = Rf_xlength(buys);
+  SEXP empty = sl::named_list("total_vp", 0.0,
+                              "lot_indices", sl::new_int(0),
+                              "lot_vps", sl::new_num(0));
   if (front_index > n) return empty;
 
   // M4: aktive Lots (remaining > 0) sammeln; NULL-Lot = Ende der Liste
@@ -58,13 +59,13 @@ List flat_rate_rcpp(List buys, int front_index, double base_rate,
   vps.reserve(n - front_index + 1);
 
   for (int i = front_index; i <= n; ++i) {
-    SEXP bs = buys[i - 1];
+    SEXP bs = sl::at(buys, i - 1);
     if (lot_is_null2(bs)) break;                 // Endmarke wie in R (first_null)
-    List b(bs);
-    double rem = as<double>(b["remaining"]);
+    SEXP b = sl::as_list(bs);
+    double rem = sl::as_double(sl::get(b, "remaining"));
     if (rem <= 0) continue;                      // nur aktive Lots
 
-    int buy_days = static_cast<int>(as<double>(b["date"]));
+    int buy_days = static_cast<int>(sl::as_double(sl::get(b, "date")));
     double vp = 0.0;
     if (buy_days <= eoy_days) {
       // § 18 Abs. 1-2 InvStG: Basisertrag und Deckel (Wertzuwachs im Kalenderjahr)
@@ -89,77 +90,73 @@ List flat_rate_rcpp(List buys, int front_index, double base_rate,
   long double total_ld = 0.0L;              // wie R sum(): long-double-Akkumulator
   for (double v : vps) total_ld += v;
   double total = static_cast<double>(total_ld);
-  return List::create(Named("total_vp") = total,
-                      Named("lot_indices") = wrap(idx),
-                      Named("lot_vps") = wrap(vps));
+  return sl::named_list("total_vp", total,
+                        "lot_indices", idx,
+                        "lot_vps", vps);
 }
 
-//' § 20-Steuerkern (Port von calculate_paragraph_20_tax); mutiert totals in place
-//' @noRd
-// [[Rcpp::export]]
-List p20_tax_rcpp(double trade_gain, double bonus, List totals,
-                  double tax_rate, bool use_spb) {
+// § 20-Steuerkern (Port von calculate_paragraph_20_tax; .sim_p20_tax_cpp); mutiert totals in place
+static SEXP p20_tax(double trade_gain, double bonus, SEXP totals,
+                    double tax_rate, bool use_spb) {
   double adjusted_gain = trade_gain * (1.0 - bonus);
 
   if (adjusted_gain < 0) {
-    totals["loss_capital_gains"] = as<double>(totals["loss_capital_gains"]) - adjusted_gain;
-    totals["cgt_loss_added_ytd"] = tget(totals, "cgt_loss_added_ytd") - adjusted_gain;
-    return List::create(Named("tax") = 0.0, Named("spb_used") = 0.0);
+    sl::set(totals, "loss_capital_gains", sl::as_double(sl::get(totals, "loss_capital_gains")) - adjusted_gain);
+    sl::set(totals, "cgt_loss_added_ytd", tget(totals, "cgt_loss_added_ytd") - adjusted_gain);
+    return sl::named_list("tax", 0.0, "spb_used", 0.0);
   }
 
-  double pool = as<double>(totals["loss_capital_gains"]);
+  double pool = sl::as_double(sl::get(totals, "loss_capital_gains"));
   double loss_offset = std::min(adjusted_gain, pool);
-  totals["loss_capital_gains"] = pool - loss_offset;
-  totals["cgt_loss_used_ytd"]  = tget(totals, "cgt_loss_used_ytd") + loss_offset;
+  sl::set(totals, "loss_capital_gains", pool - loss_offset);
+  sl::set(totals, "cgt_loss_used_ytd",  tget(totals, "cgt_loss_used_ytd") + loss_offset);
   double gain_after_loss = adjusted_gain - loss_offset;
 
   double spb_offset = 0.0;
-  double spb_rem = as<double>(totals["sparer_pauschbetrag_remaining"]);
+  double spb_rem = sl::as_double(sl::get(totals, "sparer_pauschbetrag_remaining"));
   if (use_spb && spb_rem > 0) {
     spb_offset = std::min(gain_after_loss, spb_rem);
-    totals["sparer_pauschbetrag_remaining"]  = spb_rem - spb_offset;
-    totals["sparer_pauschbetrag_used_total"] =
-      as<double>(totals["sparer_pauschbetrag_used_total"]) + spb_offset;
+    sl::set(totals, "sparer_pauschbetrag_remaining",  spb_rem - spb_offset);
+    sl::set(totals, "sparer_pauschbetrag_used_total",
+            sl::as_double(sl::get(totals, "sparer_pauschbetrag_used_total")) + spb_offset);
   }
 
   double taxable_gain = gain_after_loss - spb_offset;
-  totals["cgt_base_taxed_ytd"] = tget(totals, "cgt_base_taxed_ytd") + taxable_gain;
+  sl::set(totals, "cgt_base_taxed_ytd", tget(totals, "cgt_base_taxed_ytd") + taxable_gain);
   double tax = taxable_gain * tax_rate;
-  totals["total_taxes"] = as<double>(totals["total_taxes"]) + tax;
+  sl::set(totals, "total_taxes", sl::as_double(sl::get(totals, "total_taxes")) + tax);
 
-  return List::create(Named("tax") = tax, Named("spb_used") = spb_offset);
+  return sl::named_list("tax", tax, "spb_used", spb_offset);
 }
 
-//' VP-Steuerkern (Port von calculate_vorabpauschale_tax, R-2); mutiert totals
-//' @noRd
-// [[Rcpp::export]]
-List vp_tax_rcpp(double flat_rate, double bonus, List totals,
-                 double tax_rate, bool use_spb) {
+// VP-Steuerkern (Port von calculate_vorabpauschale_tax, R-2; .sim_vp_tax_cpp); mutiert totals
+static SEXP vp_tax(double flat_rate, double bonus, SEXP totals,
+                   double tax_rate, bool use_spb) {
   double taxable_flat_rate = flat_rate * (1.0 - bonus);
 
-  double pool = as<double>(totals["loss_capital_gains"]);
+  double pool = sl::as_double(sl::get(totals, "loss_capital_gains"));
   double loss_offset = std::min(taxable_flat_rate, pool);
-  totals["loss_capital_gains"] = pool - loss_offset;
-  totals["cgt_loss_used_ytd"]  = tget(totals, "cgt_loss_used_ytd") + loss_offset;
+  sl::set(totals, "loss_capital_gains", pool - loss_offset);
+  sl::set(totals, "cgt_loss_used_ytd",  tget(totals, "cgt_loss_used_ytd") + loss_offset);
   double vp_after_loss = taxable_flat_rate - loss_offset;
 
   double spb_offset = 0.0;
-  double spb_rem = as<double>(totals["sparer_pauschbetrag_remaining"]);
+  double spb_rem = sl::as_double(sl::get(totals, "sparer_pauschbetrag_remaining"));
   if (use_spb && spb_rem > 0) {
     spb_offset = std::min(vp_after_loss, spb_rem);
-    totals["sparer_pauschbetrag_remaining"]  = spb_rem - spb_offset;
-    totals["sparer_pauschbetrag_used_total"] =
-      as<double>(totals["sparer_pauschbetrag_used_total"]) + spb_offset;
+    sl::set(totals, "sparer_pauschbetrag_remaining",  spb_rem - spb_offset);
+    sl::set(totals, "sparer_pauschbetrag_used_total",
+            sl::as_double(sl::get(totals, "sparer_pauschbetrag_used_total")) + spb_offset);
   }
 
   double taxable_gain = vp_after_loss - spb_offset;
-  totals["cgt_base_taxed_ytd"] = tget(totals, "cgt_base_taxed_ytd") +
-                                 std::max(0.0, taxable_gain);
+  sl::set(totals, "cgt_base_taxed_ytd", tget(totals, "cgt_base_taxed_ytd") +
+                                        std::max(0.0, taxable_gain));
   double tax = std::max(0.0, taxable_gain * tax_rate);
 
-  return List::create(Named("tax") = tax,
-                      Named("spb_used") = spb_offset,
-                      Named("taxable_amount") = taxable_flat_rate);
+  return sl::named_list("tax", tax,
+                        "spb_used", spb_offset,
+                        "taxable_amount", taxable_flat_rate);
 }
 
 // ── interner schneller FIFO-Preis auf kumulierten Vektoren (wie R) ──
@@ -180,15 +177,13 @@ static inline double fifo_fast(double units, const std::vector<double>& cu,
   return (prev_cost + rem * prices[lot_idx - 1]) / units;
 }
 
-//' Verkaufsstueckzahl fuer Ziel-Nettoerloes (Port von calculate_sell_count)
-//' regime: 0=none, 1=investment_fund, 2=capital_gains, 3=private_sale
-//' @noRd
-// [[Rcpp::export]]
-List sell_count_rcpp(List buys, int front_index, double target,
-                     double trade_price, double total_shares, bool fractions,
-                     int regime, double bonus, double loss_pool, double tax_rate) {
-  List zero = List::create(Named("sell_count") = 0.0, Named("fifo_price") = 0.0);
-  const int n = buys.size();
+// Verkaufsstueckzahl fuer Ziel-Nettoerloes (Port von calculate_sell_count; .sim_sell_count_cpp)
+// regime: 0=none, 1=investment_fund, 2=capital_gains, 3=private_sale
+static SEXP sell_count(SEXP buys, int front_index, double target,
+                       double trade_price, double total_shares, bool fractions,
+                       int regime, double bonus, double loss_pool, double tax_rate) {
+  SEXP zero = sl::named_list("sell_count", 0.0, "fifo_price", 0.0);
+  const int n = Rf_xlength(buys);
   if (front_index > n) return zero;
 
   std::vector<double> units, prices, vpu;
@@ -197,15 +192,15 @@ List sell_count_rcpp(List buys, int front_index, double target,
   vpu.reserve(n - front_index + 1);
   bool any_vp = false;
   for (int i = front_index; i <= n; ++i) {
-    SEXP bs = buys[i - 1];
+    SEXP bs = sl::at(buys, i - 1);
     if (lot_is_null2(bs)) break;                 // Abbruch bei NULL-Lots
-    List b(bs);
-    double rem = as<double>(b["remaining"]);
+    SEXP b = sl::as_list(bs);
+    double rem = sl::as_double(sl::get(b, "remaining"));
     if (rem > 0) {
       units.push_back(rem);
-      prices.push_back(as<double>(b["price"]));
+      prices.push_back(sl::as_double(sl::get(b, "price")));
       // § 19 InvStG: bereits versteuerte Vorabpauschale je Stueck (F9: Basis = remaining)
-      double lot_vp = b.containsElementNamed("vp") ? as<double>(b["vp"]) : 0.0;
+      double lot_vp = sl::has(b, "vp") ? sl::as_double(sl::get(b, "vp")) : 0.0;
       double v = (regime == 1 && lot_vp > 0) ? lot_vp / rem : 0.0;
       if (v > 0) any_vp = true;
       vpu.push_back(v);
@@ -221,7 +216,7 @@ List sell_count_rcpp(List buys, int front_index, double target,
     sc += units[i] * prices[i];  cc[i] = static_cast<double>(sc);
     sv += units[i] * vpu[i];     cv[i] = static_cast<double>(sv);
   }
-  // VP-Anrechnung der ersten 'sell' Stueck (FIFO), wie calculate_fifo_vp_rcpp
+  // VP-Anrechnung der ersten 'sell' Stueck (FIFO), wie .sim_fifo_vp_cpp
   auto fifo_vp = [&](double sell) -> double {
     if (!any_vp || sell <= 0) return 0.0;
     if (sell >= cu[nl - 1]) return cv[nl - 1];
@@ -289,5 +284,66 @@ List sell_count_rcpp(List buys, int front_index, double target,
 
   double final_fp = fifo_fast(sell, cu, cc, prices);
   double out = std::max(0.0, std::min(sell, total_shares));
-  return List::create(Named("sell_count") = out, Named("fifo_price") = final_fp);
+  return sl::named_list("sell_count", out, "fifo_price", final_fp);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// .Call-Huellen (registriert in init.c; R-Seite in R/cores.R)
+// ═══════════════════════════════════════════════════════════════════════════
+
+extern "C" SEXP C_sim_flat_rate(SEXP s_buys, SEXP s_front_index, SEXP s_base_rate, SEXP s_year_start_price,
+                                SEXP s_market_price, SEXP s_soy_days, SEXP s_eoy_days) {
+  return sl::call([&]() {
+    SEXP buys = sl::as_list(s_buys);
+    int front_index = sl::as_int(s_front_index);
+    double base_rate = sl::as_double(s_base_rate);
+    double year_start_price = sl::as_double(s_year_start_price);
+    double market_price = sl::as_double(s_market_price);
+    int soy_days = sl::as_int(s_soy_days);
+    int eoy_days = sl::as_int(s_eoy_days);
+    return flat_rate(buys, front_index, base_rate, year_start_price, market_price, soy_days, eoy_days);
+  });
+}
+
+extern "C" SEXP C_sim_p20_tax(SEXP s_trade_gain, SEXP s_bonus, SEXP s_totals, SEXP s_tax_rate,
+                              SEXP s_use_spb) {
+  return sl::call([&]() {
+    double trade_gain = sl::as_double(s_trade_gain);
+    double bonus = sl::as_double(s_bonus);
+    SEXP totals = sl::as_list(s_totals);
+    double tax_rate = sl::as_double(s_tax_rate);
+    bool use_spb = sl::as_bool(s_use_spb);
+    return p20_tax(trade_gain, bonus, totals, tax_rate, use_spb);
+  });
+}
+
+extern "C" SEXP C_sim_vp_tax(SEXP s_flat_rate, SEXP s_bonus, SEXP s_totals, SEXP s_tax_rate,
+                             SEXP s_use_spb) {
+  return sl::call([&]() {
+    double flat_rate = sl::as_double(s_flat_rate);
+    double bonus = sl::as_double(s_bonus);
+    SEXP totals = sl::as_list(s_totals);
+    double tax_rate = sl::as_double(s_tax_rate);
+    bool use_spb = sl::as_bool(s_use_spb);
+    return vp_tax(flat_rate, bonus, totals, tax_rate, use_spb);
+  });
+}
+
+extern "C" SEXP C_sim_sell_count(SEXP s_buys, SEXP s_front_index, SEXP s_target, SEXP s_trade_price,
+                                 SEXP s_total_shares, SEXP s_fractions, SEXP s_regime, SEXP s_bonus,
+                                 SEXP s_loss_pool, SEXP s_tax_rate) {
+  return sl::call([&]() {
+    SEXP buys = sl::as_list(s_buys);
+    int front_index = sl::as_int(s_front_index);
+    double target = sl::as_double(s_target);
+    double trade_price = sl::as_double(s_trade_price);
+    double total_shares = sl::as_double(s_total_shares);
+    bool fractions = sl::as_bool(s_fractions);
+    int regime = sl::as_int(s_regime);
+    double bonus = sl::as_double(s_bonus);
+    double loss_pool = sl::as_double(s_loss_pool);
+    double tax_rate = sl::as_double(s_tax_rate);
+    return sell_count(buys, front_index, target, trade_price, total_shares, fractions, regime,
+                      bonus, loss_pool, tax_rate);
+  });
 }

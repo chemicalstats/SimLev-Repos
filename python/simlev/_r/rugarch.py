@@ -1,7 +1,18 @@
 """Nachbildung von ``rugarch::ugarchfit`` für die Spezifikation aus ``.fit_garch11``.
 
+Herkunft: R-Paket rugarch 1.5-6 (CRAN, 2026-07-18), ``R/rugarch-*.R`` und
+``src/garchmodels.c``, ``src/filters.c``, ``src/distributions.c``; Autoren:
+Alexios Galanos [aut, cre, cph], Tobias Kley [ctb]. Lizenz: GPL-3. Nach
+Python übertragen und angepasst für SimLev (siehe ``python/COPYRIGHTS.md``);
+im R-Paket übernommen als ``.rugarch_ugarchfit`` (``r/R/vendor_rugarch.R``,
+``r/src/vendor_rugarch.c``). Hesse-Matrix und Scores rechnet statt numDeriv
+die eigenständig geschriebene Richardson-Extrapolation
+(``_richardson_hessian``, ``_richardson_jacobian``; im R-Paket
+``.sl_richardson_hessian``/``.sl_richardson_jacobian`` in
+``r/R/richardson.R``, gegen numDeriv als Prüf-Orakel bitgleich).
+
 R (``r/R/bootstrap.R``, ``.fit_garch11``) schätzt GARCH(1,1) bzw.
-GJR-GARCH(1,1) mit rugarch 1.5-6, wenn das Paket installiert ist::
+GJR-GARCH(1,1) mit der aus rugarch 1.5-6 übernommenen Fassung::
 
     spec <- ugarchspec(variance.model = list(model = "sGARCH" | "gjrGARCH", garchOrder = c(1, 1)),
                        mean.model = list(armaOrder = c(0, 0), include.mean = TRUE),
@@ -29,14 +40,14 @@ Nachgebildet sind genau die Schritte dieses Aufrufs:
   Startwerte, ``rseed = NULL``: der Startwert ist die Uhrzeit,
   :func:`simlev._r.base.sys_time`, und ``set.seed`` überschreibt wie in R
   den globalen Zufallszustand);
-* ``.makefitmodel`` (``rugarch-helperfn.R``): Hesse-Matrix mit
-  ``numDeriv::hessian`` (Richardson), Prüfung durch ``eigen`` (nur die
+* ``.makefitmodel`` (``rugarch-helperfn.R``): Hesse-Matrix per
+  Richardson-Extrapolation (``_richardson_hessian``), Prüfung durch ``eigen`` (nur die
   Fehlerprüfung auf nicht endliche Werte, die Eigenwerte gehen nur in
   ``condH`` ein), ``solve`` mit Ersatzweg ``.hessian2sided`` und der
   Warnung „failed to invert hessian“, der Aufruf mit ``returnType = "all"``,
   ``robustvcv`` mit ``neweywestcv`` und die Warnung von ``sqrt`` bei
-  negativen Diagonalelementen der robusten Kovarianz; ``numDeriv::jacobian``
-  (Scores) nur mit ``full = True`` (das Ergebnis geht nicht in ``coef`` ein
+  negativen Diagonalelementen der robusten Kovarianz; die Scores
+  (``_richardson_jacobian``) nur mit ``full = True`` (das Ergebnis geht nicht in ``coef`` ein
   und kann weder warnen noch scheitern);
 * die Konvergenzprüfung: bei ``convergence != 0`` ist ``coef(fit)`` leer
   (``None``).
@@ -55,7 +66,7 @@ import warnings
 import numpy as np
 import pandas as pd
 
-from .. import _rnum as _rn
+from . import rnum as _rn
 from . import libm as _libm
 from . import linalg as _la
 from . import solnp as _solnp_mod
@@ -192,90 +203,93 @@ class _LLH:
         return {"llh": llh, "h": h, "epsx": r, "z": z, "LHT": -LHT, "persistence": persist}
 
 
-# ── numDeriv / rugarch-numderiv.R ───────────────────────────────────────────
+# ── numerische Ableitungen (Richardson-Extrapolation, eigenständig) ─────────
+#
+# Eigenständig geschrieben nach dem veröffentlichten Verfahren (zentrale
+# Differenzen, Schrittweite |d x| bzw. zusätzlich eps nahe null, r Stufen mit
+# Faktor v, Richardson-Extrapolation; Beschreibung in der Dokumentation von
+# numDeriv, Linfield & Penny 1989). Kein Code aus numDeriv; wie im R-Paket
+# (``.sl_richardson_hessian``/``.sl_richardson_jacobian`` in
+# ``r/R/richardson.R``), dort gegen numDeriv als Prüf-Orakel bitgleich.
+# Auswertungsfolge und Klammerung sind fest: die Likelihood merkt sich ihren
+# letzten endlichen Wert (Strafwert), jede andere Folge ändert das Ergebnis.
 
-def _hessian_numderiv(f, x, eps=1e-4, d=0.1, zero_tol=_ZERO_TOL, r=4, v=2):
-    """``numDeriv::hessian(func, x, method = "Richardson", method.args)`` (über ``genD``)."""
+def _richardson_steps(x, d, eps, zero_tol):
+    """Anfangsschritt je Koordinate: ``|d x|``, nahe null zusätzlich ``eps``."""
+    with np.errstate(all="ignore"):
+        return np.abs(d * x) + eps * (np.abs(x) < zero_tol)
+
+
+def _richardson_collapse(tab, v):
+    """Tableau (letzte Achse = Stufen, grob zuerst) auf den extrapolierten Wert falten.
+
+    Schritt ``m`` tilgt den Fehlerterm ``h^(2m)`` mit dem Gewicht ``w = v^(2m)``:
+    ``neu_k = (alt_(k+1) * w - alt_k) / (w - 1)``.
+    """
+    lvl = 0
+    with np.errstate(all="ignore"):
+        while tab.shape[-1] > 1:
+            lvl += 1
+            w = _rn.r_pow(float(v), 2.0 * lvl)
+            tab = (tab[..., 1:] * w - tab[..., :-1]) / (w - 1)
+    return tab[..., 0]
+
+
+def _richardson_hessian(f, x, eps=1e-4, d=0.1, zero_tol=_ZERO_TOL, r=4, v=2):
+    """Hesse-Matrix einer skalaren Funktion (``.sl_richardson_hessian``)."""
     x = np.asarray(x, dtype=np.float64)
-    f(x)                                            # hessian.default: Längenprüfung
-    n = x.size
-    f0 = f(x)
+    p = x.size
+    f(x)                              # Prüfauswertung (skalar), wie in R
+    centre = f(x)
+    start = _richardson_steps(x, d, eps, zero_tol)
+    axis = np.eye(p)
+    tab = np.zeros(r)
+    pure = np.zeros(p)
     with np.errstate(all="ignore"):
-        h0 = np.abs(d * x) + eps * (np.abs(x) < zero_tol)
-    D = np.zeros(n * (n + 3) // 2)
-    Hdiag = np.zeros(n)
-    Da = np.zeros(r)
-    Ha = np.zeros(r)
-    with np.errstate(all="ignore"):
-        for i in range(n):
-            h = h0.copy()
-            ei = (np.arange(n) == i).astype(np.float64)
-            for k in range(r):
-                f1 = f(x + ei * h)
-                f2 = f(x - ei * h)
-                Da[k] = (f1 - f2) / (2 * h[i])
-                Ha[k] = (f1 - 2 * f0 + f2) / (h[i] * h[i])
+        # reine zweite Ableitungen, Achse für Achse
+        for a in range(p):
+            h = start
+            for s in range(r):
+                fwd = f(x + h * axis[:, a])
+                bwd = f(x - h * axis[:, a])
+                tab[s] = ((fwd - 2 * centre) + bwd) / (h[a] * h[a])
                 h = h / v
-            for m in range(1, r):
-                q = _rn.r_pow(4.0, float(m))
-                for k in range(r - m):
-                    Da[k] = (Da[k + 1] * q - Da[k]) / (q - 1)
-                    Ha[k] = (Ha[k + 1] * q - Ha[k]) / (q - 1)
-            D[i] = Da[0]
-            Hdiag[i] = Ha[0]
-        u = n
-        for i in range(n):
-            for j in range(i + 1):
-                if i == j:
-                    D[u] = Hdiag[i]
-                else:
-                    h = h0.copy()
-                    ei = (np.arange(n) == i).astype(np.float64)
-                    ej = (np.arange(n) == j).astype(np.float64)
-                    for k in range(r):
-                        f1 = f(x + ei * h + ej * h)
-                        f2 = f(x - ei * h - ej * h)
-                        Da[k] = ((((f1 - 2 * f0) + f2) - Hdiag[i] * (h[i] * h[i]))
-                                 - Hdiag[j] * (h[j] * h[j])) / (2 * h[i] * h[j])
-                        h = h / v
-                    for m in range(1, r):
-                        q = _rn.r_pow(4.0, float(m))
-                        for k in range(r - m):
-                            Da[k] = (Da[k + 1] * q - Da[k]) / (q - 1)
-                    D[u] = Da[0]
-                u += 1
-        H = np.zeros((n, n))
-        u = n
-        for i in range(n):
-            for j in range(i + 1):
-                H[i, j] = D[u]
-                u += 1
-        H = H + H.T
-        dg = np.diag(H) / 2
-        H[np.diag_indices(n)] = dg
-    return H
+            pure[a] = _richardson_collapse(tab, v)
+        # gemischte Ableitungen im unteren Dreieck (a > b), zeilenweise
+        low = np.zeros((p, p))
+        for a in range(p):
+            low[a, a] = pure[a]
+            for b in range(a):
+                h = start
+                for s in range(r):
+                    fwd = f(x + h * axis[:, a] + h * axis[:, b])
+                    bwd = f(x - h * axis[:, a] - h * axis[:, b])
+                    tab[s] = ((((fwd - 2 * centre) + bwd) - pure[a] * (h[a] * h[a]))
+                              - pure[b] * (h[b] * h[b])) / (2 * h[a] * h[b])
+                    h = h / v
+                low[a, b] = _richardson_collapse(tab, v)
+        # symmetrisch ergänzen, verdoppelte Diagonale halbieren
+        hess = low + low.T
+        hess[np.diag_indices(p)] = np.diag(hess) / 2
+    return hess
 
 
-def _jacobian_numderiv(f, x, eps=1e-4, d=1e-4, zero_tol=_ZERO_TOL, r=4, v=2):
-    """``numDeriv::jacobian(func, x, method = "Richardson", method.args)``."""
+def _richardson_jacobian(f, x, eps=1e-4, d=1e-4, zero_tol=_ZERO_TOL, r=4, v=2):
+    """Jacobi-Matrix ``len(f(x))`` x ``len(x)`` (``.sl_richardson_jacobian``)."""
     x = np.asarray(x, dtype=np.float64)
-    f0 = np.asarray(f(x), dtype=np.float64)
-    n = x.size
-    a = np.full((f0.size, r, n), np.nan)
+    p = x.size
+    q = np.asarray(f(x), dtype=np.float64).size
+    h = _richardson_steps(x, d, eps, zero_tol)
+    axis = np.eye(p)
+    tab = np.full((q, p, r), np.nan)  # Einträge x Stufen
     with np.errstate(all="ignore"):
-        h = np.abs(d * x) + eps * (np.abs(x) < zero_tol)
-        for k in range(r):
-            ph = h.copy()
-            mh = h.copy()
-            for i in range(n):
-                ei = (np.arange(n) == i).astype(np.float64)
-                a[:, k, i] = (np.asarray(f(x + ph * ei), dtype=np.float64)
-                              - np.asarray(f(x - mh * ei), dtype=np.float64)) / (2 * h[i])
+        for s in range(r):
+            for a in range(p):
+                fwd = np.asarray(f(x + h * axis[:, a]), dtype=np.float64)
+                bwd = np.asarray(f(x - h * axis[:, a]), dtype=np.float64)
+                tab[:, a, s] = (fwd - bwd) / (2 * h[a])
             h = h / v
-        for m in range(1, r):
-            q = _rn.r_pow(4.0, float(m))
-            a = (a[:, 1:r + 1 - m, :] * q - a[:, 0:r - m, :]) / (q - 1)
-    return a[:, 0, :].copy()
+    return _richardson_collapse(tab, v).copy()
 
 
 def _hessian2sided(f, x):
@@ -460,7 +474,7 @@ def ugarchfit(data, model="sGARCH", solver="hybrid", full=False):
         model: ``"sGARCH"`` oder ``"gjrGARCH"`` (GARCH(1,1), ARMA(0,0) mit
             Mittelwert, Normalverteilung).
         solver: nur ``"hybrid"`` (wie in ``.fit_garch11``).
-        full: zusätzlich die Scores (``numDeriv::jacobian``) berechnen.
+        full: zusätzlich die Scores (``_richardson_jacobian``) berechnen.
 
     Ergebnis: :class:`UGARCHfit` mit ``coef`` (benannte ``Series`` oder
     ``None`` wie ``coef(fit)``), ``convergence``, ``message``,
@@ -544,7 +558,7 @@ def _makefitmodel(llh, par, T, full):
     def f(p):
         return llh(p, "llh")
 
-    H = _hessian_numderiv(f, par, eps=1e-4, d=0.1, zero_tol=_ZERO_TOL, r=4, v=2)
+    H = _richardson_hessian(f, par, eps=1e-4, d=0.1, zero_tol=_ZERO_TOL, r=4, v=2)
     if not np.isfinite(H).all():                      # eigen(): Prüfung der Eingabe
         raise RError("infinite or missing values in 'x'")
     try:
@@ -569,7 +583,7 @@ def _makefitmodel(llh, par, T, full):
         rv = _robustvcv(flht, par, nlag, H, T)
         out["robust_cvar"] = rv["vcv"]
         if full:
-            out["scores"] = _jacobian_numderiv(flht, par, eps=1e-4, d=1e-4, zero_tol=_ZERO_TOL,
+            out["scores"] = _richardson_jacobian(flht, par, eps=1e-4, d=1e-4, zero_tol=_ZERO_TOL,
                                                r=4, v=2)
         dg = np.diag(rv["vcv"])
         if np.any(dg < 0):                           # sqrt(diag(fit$robust.cvar))
@@ -582,6 +596,6 @@ def coef(fit):
     return fit["coef"]
 
 
-from .base import quiet_fp as _quiet_fp  # noqa: E402
+from .base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), ["ugarchfit", "coef"])
+quiet_fp(globals(), ["ugarchfit", "coef"])

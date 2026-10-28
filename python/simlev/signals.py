@@ -18,9 +18,10 @@ import numpy as np
 
 from ._r import libm as _libm
 from ._r.fmt import NA_REAL
-from ._rnum import r_mean
+from ._r.rnum import r_mean
 from ._signals_core import roll_cov_core, roll_mean_core
-from .data_prep import _as_numeric, _match_arg, _quiet_fp
+from ._r.base import quiet_fp
+from .data_prep import _as_numeric, _match_arg
 
 __all__ = ["signal_sma", "signal_ema", "signal_crossover", "signal_momentum", "signal_drawdown",
            "signal_volatility", "signal_combine"]
@@ -223,4 +224,4 @@ def signal_combine(*signals, op=("and", "or")):
     return {"buy": B.any(axis=1), "sell": S.all(axis=1)}
 
 
-_quiet_fp(globals(), __all__ + ["_roll_mean", "_roll_var", "_roll_cov", "_ema", "_sig_out"])
+quiet_fp(globals(), __all__ + ["_roll_mean", "_roll_var", "_roll_cov", "_ema", "_sig_out"])

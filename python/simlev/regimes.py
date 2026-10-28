@@ -18,7 +18,7 @@ from . import dependence as _dep
 from ._r import fmt as _fmt
 from ._r import libm as _libm
 from ._r.rlist import RList
-from ._rnum import r_colsums, r_mean, r_rowsums, r_sd, r_sum, r_var
+from ._r.rnum import r_colsums, r_mean, r_rowsums, r_sd, r_sum, r_var
 
 __all__ = ["regime_hmm", "regime_states", "SimLevHMM"]
 
@@ -307,6 +307,6 @@ def regime_states(x, dates, type=("filtered", "smoothed", "viterbi"), output=("s
 
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
-from .data_prep import _quiet_fp  # noqa: E402
+from ._r.base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), list(__all__) + ["_hmm_viterbi", "_ldmvn"])
+quiet_fp(globals(), list(__all__) + ["_hmm_viterbi", "_ldmvn"])

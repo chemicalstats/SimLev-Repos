@@ -4,8 +4,8 @@ import datetime as dt
 import pandas as pd
 import pytest
 
-from simlev import (AssetConfig, Strategy, add_asset, as_list, asset_config, compute_rebal_trigger, create_strategy,
-                    migrate_strategy, remove_asset, update_asset, validate_strategy)
+from simlev import (AssetConfig, Strategy, add_asset, asset_config, compute_rebal_trigger, create_strategy,
+                    remove_asset, update_asset, validate_strategy)
 
 
 # ── asset_config ──────────────────────────────────────────────────────────
@@ -128,15 +128,6 @@ def test_update_asset_rederives_regime():
     assert update_asset(s2, "G", deliverable=False).G.tax_regime == "investment_fund"
 
 
-def test_migrate_strategy(capsys):
-    old = {"Gold": {"asset_class": "etn_deliverable", "action_type": "bnh", "asset_share": 1.0, "asset_spread": 0.1,
-                    "asset_bonus": 0}}
-    new = migrate_strategy(old, verbose=False)
-    assert new.Gold.asset_class == "etn" and new.Gold.deliverable is True and new.Gold.tax_regime == "private_sale"
-    migrate_strategy(old)
-    assert "migrate_strategy: Gold: etn_deliverable -> etn mit deliverable = TRUE" in capsys.readouterr().err
-
-
 def test_print_and_summary(capsys):
     s = create_strategy(ETF=asset_config(asset_share=0.7), Gold=asset_config(asset_share=0.3, asset_class="etc"))
     assert str(s) == ("Anlagestrategie (2 Assets)\n================================\n\nETF:\n"
@@ -146,7 +137,6 @@ def test_print_and_summary(capsys):
     out = capsys.readouterr().out
     assert "Strategie-Übersicht: 2 Assets" in out and "Gesamtgewicht: 100.0%" in out
     assert "  investment_fund: 1 Asset" in out
-    assert as_list(s) == {"ETF": dict(s.ETF), "Gold": dict(s.Gold)}
 
 
 # ── compute_rebal_trigger ─────────────────────────────────────────────────

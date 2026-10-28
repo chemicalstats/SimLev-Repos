@@ -1,12 +1,11 @@
-# Referenzfälle für die Nachbildung von evd::fpot (Python: simlev/_r/evd.py,
-# Julia: src/r/evd.jl) und den Weg mit evd in .fit_tail / bootstrap(…, "evt").
-# Benötigt evd 2.3-7.1, am besten in einer eigenen R-Bibliothek, die
-# SIMLEV_R_SUGGESTS_LIB nennt (sie kommt an den Anfang des Suchpfads).
+# Referenzfälle für die aus evd 2.3-7.1 übernommene Fassung von fpot
+# (R: SimLev:::.evd_fpot in r/R/vendor_evd.R, nlgpd in r/src/vendor_evd.c;
+# Python: simlev/_r/evd.py, Julia: src/r/evd.jl) und den GPD-Weg in
+# .fit_tail / bootstrap(…, "evt"). evd selbst wird nicht benötigt; die Fälle
+# waren zuvor mit dem echten Paket erzeugt und sind mit der Übernahme
+# bitgleich.
 # Aufruf aus der Repo-Wurzel:
-#   LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> SIMLEV_R_SUGGESTS_LIB=<Bibliothek mit den Paketen> Rscript golden/modules/gen_evd.R
-if (nzchar(Sys.getenv("SIMLEV_R_SUGGESTS_LIB"))) .libPaths(c(Sys.getenv("SIMLEV_R_SUGGESTS_LIB"), .libPaths()))
-if (!requireNamespace("evd", quietly = TRUE)) stop("gen_evd.R benötigt das Paket evd")
-if (as.character(utils::packageVersion("evd")) != "2.3.7.1") stop("gen_evd.R erwartet evd 2.3-7.1")
+#   LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> Rscript golden/modules/gen_evd.R
 source("golden/modules/ref_tools.R"); ref_init("evd")
 
 P <- "import numpy as np\nimport pandas as pd\nfrom simlev._r import evd as E\nimport simlev.bootstrap as B\nfrom simlev.bootstrap import *\n"
@@ -27,7 +26,7 @@ xi <- c(3L, 1L, 4L, 1L, 5L, 9L, 2L, 6L, 5L, 3L, 5L, 8L, 9L, 7L, 9L)
 I <- list(xe = xe, xs = xs, xh = xh, xp = xp, xb = xb, xu = xu, xc = xc, xn = xn, xi = xi)
 
 F <- function(id, args, pargs = args, jargs = args, inputs = I)
-  case(paste0("fpot_", id), paste0("evd::fpot(", args, ")"), paste0("result = E.fpot(", pargs, ")"), inputs,
+  case(paste0("fpot_", id), paste0("SimLev:::.evd_fpot(", args, ")"), paste0("result = E.fpot(", pargs, ")"), inputs,
        jl = paste0("result = E.fpot(", jargs, ")"))
 
 # ── fpot direkt: Lagen ──────────────────────────────────────────────────────
@@ -81,7 +80,7 @@ F("err_chr", "'a', 0", "['a'], 0", '["a"], 0')
 F("err_thr_len", "xe, c(0, 1)", "xe, [0, 1]", "xe, [0, 1]")
 F("err_thr_chr", "xe, 'a'", "xe, 'a'", 'xe, "a"')
 F("err_nodata", "-xe, 0", "-xe, 0", "-xe, 0")
-F("err_thr_na", "xe, NA_real_", "xe, np.nan", "xe, SL.NA")
+F("err_thr_na", "xe, NA_real_", "xe, simlev._r.fmt.NA_REAL", "xe, SL.NA")
 F("err_inf", "c(xe, Inf), 0, std.err = FALSE", "np.append(xe, np.inf), 0, std_err=False", "vcat(xe, Inf), 0; std_err = false")
 F("err_inf_mean", "c(xe, 1.7e308, 1.7e308), 0, std.err = FALSE", "np.append(xe, [1.7e308, 1.7e308]), 0, std_err=False",
   "vcat(xe, [1.7e308, 1.7e308]), 0; std_err = false")
@@ -105,14 +104,14 @@ for (sh in c(-0.45, -0.2, -1e-6, 0, 0.05, 0.2, 0.45, 0.9)) for (nn in c(30, 100,
   k <- k + 1; set.seed(100 + k); u <- runif(nn); sc <- 0.006 * k / 4
   GP[[k]] <- if (sh == 0) -sc * log(u) else sc * (u^(-sh) - 1) / sh
   se <- k %% 2 == 0
-  case(sprintf("fpot_gpd%02d", k), sprintf("evd::fpot(g, 0, std.err = %s)", se),
+  case(sprintf("fpot_gpd%02d", k), sprintf("SimLev:::.evd_fpot(g, 0, std.err = %s)", se),
        sprintf("result = E.fpot(g, 0, std_err=%s)", if (se) "True" else "False"), list(g = GP[[k]]),
        jl = sprintf("result = E.fpot(g, 0; std_err = %s)", if (se) "true" else "false"))
 }
 
 # nlgpd direkt (Grenzfall |shape| <= DBL_EPSILON^0.3, Strafwert)
 NL <- function(id, sc, sh, thr = "0")
-  case(paste0("nlgpd_", id), sprintf(".C(evd:::C_nlgpd, as.double(xs), length(xs), %s, %s, %s, dns = double(1))$dns", thr, sc, sh),
+  case(paste0("nlgpd_", id), sprintf(".Call(SimLev:::C_evd_nlgpd, as.double(xs), length(xs), %s, %s, %s)", thr, sc, sh),
        sprintf("result = E.nlgpd(xs.tolist(), %s, %s, %s)", thr, sc, sh), I,
        jl = sprintf("result = E.nlgpd(xs, %s, %s, %s)", thr, sc, sh))
 NL("exp", "0.007", "0")
@@ -126,7 +125,7 @@ NL("scale0", "0", "0.1")
 NL("scale_neg", "-1", "0.1")
 NL("thr", "0.004", "0.1", thr = "0.001")
 
-# ── .fit_tail (mit evd) ─────────────────────────────────────────────────────
+# ── .fit_tail (GPD-Weg) ─────────────────────────────────────────────────────
 set.seed(11); br1 <- 1 + rnorm(1000, 3e-4, 0.011)
 set.seed(12); br2 <- 1 + 0.008 * rt(1500, 3)
 set.seed(13); br3 <- 1 + rnorm(250, 0, 0.01)                 # ne < 30: Momente

@@ -3,8 +3,8 @@
 Diese Notiz gilt für alle Änderungen an `python/simlev/`. Sie beschreibt die
 Konventionen der bitgleichen Portierung des R-Pakets SimLev 0.5.0, das
 Referenzwerkzeug und die Zuordnung der R-Dateien zu den Python-Modulen.
-Was speziell die Engine (`simulation()`) betrifft, steht in
-[PORTING_ENGINE.md](PORTING_ENGINE.md).
+Was speziell die Engine (`simulation()`) betrifft, steht im Abschnitt
+[Engine](#engine-simulation).
 
 ## Voraussetzungen
 
@@ -14,13 +14,15 @@ Was speziell die Engine (`simulation()`) betrifft, steht in
   (`src/main`, `src/nmath`, `src/appl`, `src/library/stats`,
   `src/library/base`, `src/modules/lapack`, `src/extra/blas`).
 - Referenzfälle erzeugt R 4.3.3 mit dem installierten R-Paket SimLev 0.5.0
-  und `jsonlite`. Die Generatoren `gen_evd.R` und `gen_rugarch.R` brauchen
-  zusätzlich evd 2.3-7.1 bzw. rugarch 1.5-6 (mit Rsolnp 1.16, numDeriv,
-  truncnorm 1.0-9), `gen_imputets.R` imputeTS 3.4 und stinepack 1.5, jeweils in
-  einer eigenen R-Bibliothek (`SIMLEV_R_SUGGESTS_LIB`); alle anderen laufen
-  **ohne** die optionalen Pakete. Jeder Fall vermerkt im Feld `suggests`,
-  welche davon R hatte, und die Harnesses setzen `SIMLEV_R_SUGGESTS` je
-  Fall. MSGARCH, plotly und TTR sind nie installiert; Funktionen,
+  und `jsonlite`; alle Generatoren laufen **ohne** die optionalen Pakete. evd,
+  imputeTS, stinepack, rugarch, Rsolnp, numDeriv und truncnorm braucht kein
+  Generator mehr: R hat `fpot` (`.evd_fpot`),
+  `na_interpolation`/`na_locf`/`stinterp` (`.imputets_na_interpolation`,
+  `.stinepack_stinterp`) bzw. `ugarchfit` mit `solnp`/`gosolnp`,
+  `rtruncnorm` (`.rugarch_ugarchfit`, `.rsolnp_solnp`, `.rsolnp_gosolnp`,
+  `.truncnorm_rtruncnorm`) übernommen und `hessian`/`jacobian` eigenständig
+  geschrieben (`.sl_richardson_hessian`, `.sl_richardson_jacobian`), `gen_evd.R`, `gen_imputets.R` und
+  `gen_rugarch.R` prüfen diese Fassungen. MSGARCH ist nie installiert; Funktionen,
   die in R ein fehlendes Paket verlangen, werfen dieselbe Meldung.
 - Bitgleichheit setzt Linux x86-64 (80-Bit-`long double`), glibc-libm und
   für Eigenvektoren die Referenz-LAPACK des Systems voraus.
@@ -49,15 +51,17 @@ sind, heißen `yield_`, `raise_` und `from_`.
 - Benannter Vektor → `pandas.Series` (Index = Namen); unbenannter Vektor →
   `numpy.ndarray`; Länge-1-Werte dürfen Python-Skalare sein.
 - Matrix → 2-D-`numpy.ndarray`, mit dimnames → `pandas.DataFrame`.
-- `NULL` → `None`, numerisches `NA` → `simlev.NA` (= `simlev._rnum.NA_REAL`,
-  `simlev._r.fmt.NA_REAL`; NaN mit R's Nutzlast 1954), sonst `None`. R's
-  `NaN` ist ein gewöhnliches `nan`. Wo R `NA_real_` setzt, `NA_REAL`
-  setzen; Arithmetik erhält die Nutzlast wie in R. Erkennen mit
-  `_rnum.r_isna`/`r_isna_arr` (wie `R_IsNA`). numpy-Funktionen, die NaN neu
-  erzeugen (`np.full(n, np.nan)`, `reindex`, `shift`, `np.nanmean`), nicht
-  für R-NA verwenden. `NA_REAL` ist signalisierend; öffentliche
-  Funktionen eines Moduls laufen deshalb unter `quiet_fp`
-  (`simlev/_r/base.py`), das numpys „invalid value“-Warnungen unterdrückt.
+- `NULL` → `None`, numerisches `NA` → `simlev.NA` (NaN mit R's Nutzlast
+  1954), sonst `None`. Definiert ist es einmal als `simlev._r.rnum.NA_REAL`;
+  `simlev._r.fmt.NA_REAL` und die übrigen Module importieren es von dort.
+  R's `NaN` ist ein gewöhnliches `nan` (`math.nan`, `np.nan`). Wo R
+  `NA_real_` setzt, `NA_REAL` setzen; Arithmetik erhält die Nutzlast wie in
+  R. Erkennen mit `_r.rnum.r_isna`/`r_isna_arr` (wie `R_IsNA`).
+  numpy-Funktionen, die NaN neu erzeugen (`np.full(n, np.nan)`, `reindex`,
+  `shift`, `np.nanmean`), nicht für R-NA verwenden. `NA_REAL` ist
+  signalisierend; öffentliche Funktionen eines Moduls laufen deshalb unter
+  `quiet_fp` (`simlev/_r/base.py`, am Modulende `quiet_fp(globals(),
+  __all__ + [...])`), das numpys „invalid value“-Warnungen unterdrückt.
 - Funktionsargumente akzeptieren dieselben Formen (`Series`, `dict`,
   Array, `DataFrame`).
 - Bedingungen, die R als Ausdruck erhält (`tactical_rules()`,
@@ -65,7 +69,10 @@ sind, heißen `yield_`, `raise_` und `from_`.
   Python Text in R-Syntax und werden wie in Julia mit `simlev._r.rexpr`
   ausgewertet (R-Vorrang, NA-Logik, `%in%`, `!`, Indizierung, if/else;
   freie Variablen aus `env`, sonst aus dem Namensraum des Aufrufers).
-  Python-Funktionen sind als Bedingung ebenfalls erlaubt.
+  Python-Funktionen sind als Bedingung ebenfalls erlaubt. Funktionen mit
+  `env = parent.frame()` in R tragen den Dekorator `env_from_caller`
+  (`simlev/_r/base.py`); `quiet_fp` setzt dann bei fehlendem `env` den
+  Namensraum des Aufrufers ein, die Funktion selbst liest keinen Frame.
 - Meldungen: `stop()` → `ValueError`, `warning()` → `warnings.warn`
   (`UserWarning`), `message()` → `sys.stderr`; `cat()` und `print()` gehen
   nach `stdout`.
@@ -76,7 +83,7 @@ sind, heißen `yield_`, `raise_` und `from_`.
    keine mathematisch gleichwertigen.
 2. R akkumuliert `sum`, `mean`, `cumsum`, `prod`, `rowSums`, `colSums`,
    `var`/`cov` in 80-Bit-`long double` (`numpy.longdouble`). Dafür gibt es
-   `simlev._rnum` bzw. `simlev._r.base` (`r_sum`, `r_mean`, …); `np.sum`
+   `simlev._r.rnum` bzw. `simlev._r.base` (`r_sum`, `r_mean`, …); `np.sum`
    und `np.cumsum` ergeben andere Bits. `cumprod` nutzt in R `LDOUBLE`,
    `cummax`/`cummin` nicht.
 3. **Keine numpy-Transzendentalfunktionen** (`np.exp`, `np.log`,
@@ -85,7 +92,7 @@ sind, heißen `yield_`, `raise_` und `from_`.
    Stattdessen `simlev._r.libm` (`exp`, `log`, `log1p`, `expm1`, `pow`,
    `tanh`, … elementweise über `math`). `+ - * / sqrt abs floor` von numpy
    sind exakt gerundet. `x^2` ist in R `x*x`, `x^y` sonst libm-`pow` (siehe
-   `_rnum.r_pow`).
+   `_r.rnum.r_pow`, vektoriell `r_pow_vec`, `r_exp_vec`).
 4. Zufallszahlen ausschließlich über `simlev._r.rng` (Mersenne-Twister wie
    R, `set_seed`, `runif`, `rnorm`, `rchisq`, `rgeom`, `sample_int`,
    L'Ecuyer-Streams). Der Zustand ist global wie `.Random.seed`; die
@@ -111,10 +118,11 @@ sind, heißen `yield_`, `raise_` und `from_`.
    (`order`, `sort`, `rank`, `str_collate`; ICU-Kollation wie R), nie über
    `sorted`, `np.sort`, `np.unique` oder `pd.Categorical` mit Standardordnung.
 10. Bedingungen als Text nur über `simlev._r.rexpr.eval_r` (R-Syntax).
-11. `requireNamespace("evd"/"rugarch"/"imputeTS", quietly = TRUE)` → bei jedem Aufruf
-    `simlev._r.suggests.has(...)` (Schalter `SIMLEV_R_SUGGESTS`).
-    `Sys.time()` → `simlev._r.base.sys_time()` (Prüfschalter
-    `SIMLEV_R_SYS_TIME`).
+11. `requireNamespace(pkg, quietly = TRUE)` für ein optionales Paket: R
+    fragt nur noch MSGARCH ab (evd, imputeTS und rugarch sind übernommen,
+    ihr Weg gilt immer); MSGARCH ist nicht nachgebildet, die Ports werfen
+    wie R ohne das Paket dessen Fehlermeldung, ohne Schalter. `Sys.time()` →
+    `simlev._r.base.sys_time()` (Prüfschalter `SIMLEV_R_SYS_TIME`).
 
 ## Gemeinsam genutzte Helfer
 
@@ -146,14 +154,13 @@ unverändert bleibt).
 
 | R-Quelle | Python |
 |---|---|
-| `simulation.R`, `sim_prepare.R`, `sim_validate.R`, `sim_loop.R`, `sim_actions.R`, `sim_evaluate.R`, `utils.R` | `engine.py`, `_rnum.py`, `_dates.py` |
-| `simulation_core.cpp`, `fifo_core_RCpp.cpp`, `tax_core_RCpp.cpp` | `_core.py` |
+| `simulation.R`, `sim_prepare.R`, `sim_validate.R`, `sim_loop.R`, `sim_actions.R`, `sim_evaluate.R`, `utils.R` | `engine.py`, `_dates.py` (Numerik aus `_r/rnum.py`) |
+| `simulation_core.cpp`, `fifo_core.cpp`, `tax_core.cpp` | `_core.py` |
 | `asset_config.R`, `strategy.R` | `config.py` |
 | `compute_rebal_trigger.R` | `trigger.py` |
 | `tax_tariff.R`, `inst/extdata/steuertarif.csv` | `tax_tariff.py`, `data/steuertarif.csv` |
 | `print`/`summary` von `SimLevResult` | `result.py` |
 | `plot_dashboard.R` | `dashboard.py` (R-Farbnamen in `data/r_colors.csv`) |
-| `plot_interactive.R` | `interactive.py` |
 | `data_prep.R` | `data_prep.py` |
 | `backcast.R` | `backcast.py` |
 | `bonds.R` | `bonds.py` |
@@ -171,21 +178,115 @@ unverändert bleibt).
 | `overfitting.R` | `overfitting.py` |
 | `param_search.R` | `param_search.py` |
 | `sensitivity.R` | `sensitivity.py` |
-| R-Interna (R 4.3.3) | `_r/`: `rng.py` (RNG.c, `nmath/r*.c`), `nmath.py`, `_toms708.py`, `_cmath.py` (nmath), `stats.py`, `_optim.py`, `_lbfgsb.py`, `_sbart.py`, `_fft.py` (stats, appl), `linalg.py`, `_blas.py`, `_linpack.py`, `_lapack.py` (BLAS, LINPACK, LAPACK), `base.py`, `libm.py`, `fmt.py`, `rlist.py`, `reftree.py`; `_port.py` (stats `port.c`, `portsrc.f`: `nlminb`) |
-| optionale R-Pakete | `_r/`: `suggests.py` (Schalter), `imputets.py` (imputeTS 3.4 `na_interpolation` stine/linear, `na_locf` mit `src/locf.cpp`), `stinepack.py` (stinepack 1.5 `stinterp`, `stinemanSlopes`, `parabolaSlopes`), `evd.py` (evd 2.3-7.1 `fpot`, `src/pot.c`), `solnp.py` (Rsolnp 1.16 `solnp`, `gosolnp`), `truncnorm.py` (truncnorm 1.0-9 `rtruncnorm`), `rugarch.py` (rugarch 1.5-6 `ugarchfit` sGARCH/gjrGARCH, `src/filters.c`, `garchmodels.c`, numDeriv) |
+| R-Interna (R 4.3.3) | `_r/`: `rnum.py` (unterste Schicht: `NA_REAL`, long-double-Summen, `R_pow`, `R_zeroin2`), `rformat.py` (`fround.c`, `fprec.c`, `formatReal`, `sprintf` für die Engine), `rng.py` (RNG.c, `nmath/r*.c`), `nmath.py`, `_toms708.py`, `_cmath.py` (nmath), `stats.py`, `_optim.py`, `_lbfgsb.py`, `_sbart.py`, `_fft.py` (stats, appl), `linalg.py`, `_blas.py`, `_linpack.py`, `_lapack.py` (BLAS, LINPACK, LAPACK), `base.py`, `libm.py`, `fmt.py`, `rlist.py`, `reftree.py`; `port.py` (stats `port.c`, `portsrc.f`: `nlminb`) |
+| übernommene R-Pakete | `_r/`: `imputets.py` (imputeTS 3.4 `na_interpolation` stine und linear, `na_locf` mit `src/locf.cpp`; in R übernommen als `.imputets_na_interpolation`, immer aktiv), `stinepack.py` (stinepack 1.5 `stinterp`, `stinemanSlopes`, `parabolaSlopes`; in R übernommen als `.stinepack_stinterp`), `evd.py` (evd 2.3-7.1 `fpot`, `src/pot.c`; in R übernommen als `.evd_fpot`, immer aktiv), `solnp.py` (Rsolnp 1.16 `solnp`, `gosolnp`; in R übernommen als `.rsolnp_solnp`, `.rsolnp_gosolnp`), `truncnorm.py` (truncnorm 1.0-9 `rtruncnorm`; in R übernommen als `.truncnorm_rtruncnorm`), `rugarch.py` (rugarch 1.5-6 `ugarchfit` sGARCH/gjrGARCH, `src/filters.c`, `garchmodels.c`, eigene Richardson-Ableitungen `_richardson_hessian`/`_richardson_jacobian`; in R übernommen als `.rugarch_ugarchfit`, Ableitungen `.sl_richardson_hessian` in `r/R/richardson.R`, immer aktiv) |
 
-`RcppExports.R` und `RcppExports.cpp` haben kein Gegenstück. Ein
+Die `.Call`-Hüllen (`r/R/cores.R`, `r/src/init.c`, `r/src/simlev_capi.h`)
+haben kein Gegenstück. Ein
 Python-Modul je R-Datei; C++-Kerne stehen in `simlev/_<name>_core.py`.
 Öffentliche Funktionen stehen in `__all__` des Moduls und werden in
 `simlev/__init__.py` exportiert. `bootstrap`, `backcast`, `deep_analysis`
 und `param_search` sind dort zugleich Modul und aufrufbare Funktion
 (`_callable_module`).
 
+## Engine (`simulation()`)
+
+Dieser Abschnitt gilt für `simulation()` und alles, was daran hängt
+(`engine.py`, `_core.py`, `_dates.py`, `config.py`, `trigger.py`,
+`result.py`, `tax_tariff.py`, `dashboard.py`), und für Module, die die
+Engine aufrufen oder ihre Helfer verwenden.
+
+### Stand
+
+- `golden/cases` 68/68 und `golden/extra` 37/37 sind bitgleich,
+  einschließlich Druckausgabe und `details = TRUE`
+  (`python tools/compare_golden.py [Pfade] [-k ids] [-v] [-q]`).
+- Zusätzlich frisch erzeugte Fälle (300 Zufallsfälle, Seed 777 bzw. 999,
+  jeweils mit den festen Fällen des Generators): `golden_cases.R` und
+  `stress_cases.R` ergeben 669/669. Die neuen Argumente (order_fee, dca_fee,
+  church_tax, harvest_*, taxable_income, tax_tariff) wurden zusätzlich in
+  750 Fällen voll verglichen.
+- Die R-Tests der Engine sind nach `tests/test_*engine*.py`, `test_tax*.py`,
+  `test_simulation.py`, `test_config.py` und `test_dashboard.py` portiert.
+
+### Abbildung der Engine-Objekte
+
+| R | Python |
+|---|---|
+| `SimLevResult` (benannte Liste) | `simlev.SimLevResult(RList)`: `res["worth"]` und `res.worth`; Elemente in R-Reihenfolge |
+| numerischer Vektor | `numpy.ndarray` (float64) |
+| `Date`-Vektor | `numpy.ndarray` `datetime64[D]` |
+| benannter Vektor (`buys`, `sells`) | `pandas.Series` mit Assetnamen als Index |
+| Liste ohne Klasse (`statistics`, `tax_report`, `report$A`, `next_year`) | `dict` |
+| `data.frame` (`undefined_metrics`, `tariff_years`, `open_lots$A$lots`) | `pandas.DataFrame` |
+| `NULL` (z. B. `open_lots` ohne Steuern, `order_fee` nicht gesetzt) | `None`; ein Element, das R weglässt, fehlt auch im dict |
+| `asset_config`, `strategy`, `SimLevTaxTariff`, `summary.SimLevResult` | `AssetConfig`, `Strategy`, `SimLevTaxTariff`, `SimLevSummary` (alle `RList`; `format()` liefert genau die R-Druckausgabe) |
+| `attr(data, "filled")` | `data.attrs["filled"]`: bool-`DataFrame`, eine Spalte je Kursreihe (wie in `align_series`) |
+
+- Python-`int` zählt als R-`double`. `_r_class_name()` in `engine.py`
+  liefert für Meldungen den Klassennamen wie `class(x)[1]`.
+- `res.trades` gibt es nur in Python (Lots, Verkäufe, Steuer- und
+  Gebührenbuchungen je Asset). In R gibt es kein Gegenstück, die
+  Golden-Vergleiche lassen es aus.
+- `match.arg` mit typografischen Anführungszeichen:
+  `config._match_arg(value, choices, argname)`; `pmatch` liegt in
+  `config._pmatch`.
+- `summary(res)` druckt nicht, sondern gibt `SimLevSummary` zurück.
+  `print(res)` bzw. `res.print()` druckt.
+
+### Argumente: angegeben oder nicht
+
+R prüft an mehreren Stellen `missing(arg)`. In der Engine haben solche
+Argumente als Standardwert `_Default(wert)`. `_unwrap()` liefert den Wert,
+und `given` hält fest, welche Argumente ausdrücklich angegeben wurden.
+
+### R-Numerik der Engine: `simlev/_r/rnum.py`, `simlev/_r/rformat.py`
+
+Die Engine nutzt bewusst `_r.rnum` und `_r.rformat` direkt (nicht die
+R-Namen aus `_r.base` bzw. `_r.fmt`). In `rnum.py` stehen die Summen
+(`r_sum`, `r_mean` mit Korrekturdurchlauf, `r_mean_int`, `r_cumsum`,
+`r_prod`, `r_cumprod`, `r_cummax`, `r_var`, `r_sd`, `r_median`,
+`r_rowsums`, `r_colsums`; `LD = np.longdouble`), `r_pow`, `r_mod1` und die
+Nullstellensuche, in `rformat.py` Runden und Textausgabe:
+
+- Runden: `r_round` (fround.c, R ≥ 4), `r_signif` (fprec.c).
+- Formatieren: `r_format(x, digits, nsmall, big_mark, scientific, width)`
+  (formatReal, gibt eine Liste zurück), `r_format1`, `r_as_character`
+  (15 Stellen, Drop0), `r_deparse`, `r_sprintf(fmt, *args)`. Die letzte
+  Funktion unterstützt `%*.*f`; NA, Inf und -Inf werden wie in R als `%s`
+  mit `"NA"`, `"Inf"` bzw. `"-Inf"` ausgegeben.
+- Nullstellen (`rnum.py`): `r_uniroot(f, interval, f_lower, f_upper, tol, maxiter)`,
+  gestützt auf `r_zeroin2` (Brent wie in R, Inf und NA werden wie in fcn2
+  ersetzt).
+
+`_dates.py` enthält Tageszahlen ab 1970 und R-`strptime` für `"%Y-%m-%d"`
+(Semantik von get_number).
+
+### Öffentliche Engine-Helfer für andere Module
+
+`simulation`, `xirr_rate` / `_xirr_rate`, `calculate_skewness`,
+`calculate_kurtosis`, `calculate_partials`, `calculate_dates_flags`,
+`apply_spread`, `create_strategy`, `asset_config` (sowie `add_asset`,
+`update_asset`, `remove_asset`, `validate_strategy`),
+`compute_rebal_trigger` und `read_tax_tariff`. Dazu kommen die
+Dashboard-Daten `dashboard._dashboard_returns(res)` (wie
+`.dashboard_returns`).
+
+### Grafik
+
+`plot_dashboard` bzw. `res.plot()` zeichnet mit matplotlib und gibt die
+Figure zurück (R: invisible NULL). Gleich wie in R sind Prüfungen,
+Meldungen, alle Beschriftungstexte, Monatsrenditen, rollierende Renditen
+und Korrelationen sowie die Farben der Vergleichstabelle. Abgeglichen wurde
+das über einen `trace()`-Mitschnitt in R. Schriftgrößen und Ränder sind
+dagegen nur angenähert. R-Farbnamen stehen in `simlev/data/r_colors.csv`
+(`grDevices::colors()`).
+
 ## Referenzfälle und Prüfung
 
 Die Engine prüfen die Golden-Fälle in `golden/cases/` und `golden/extra/`
 (`tools/compare_golden.py`, `tests/test_golden_master.py`; siehe
-[PORTING_ENGINE.md](PORTING_ENGINE.md)). Alle übrigen Funktionen und die
+[Engine](#engine-simulation)). Alle übrigen Funktionen und die
 R-Interna prüfen Referenzfälle unter `golden/modules/<modul>/`.
 
 - Je Modul gibt es einen Generator `golden/modules/gen_<modul>.R`, der
@@ -225,6 +326,11 @@ R-Interna prüfen Referenzfälle unter `golden/modules/<modul>/`.
 
   `simlev._r.reftree` lädt einen Fall, führt den Python-Code aus und
   vergleicht Ergebnis, Ausgaben, Warnungen und Fehlermeldung bitgenau.
+- Engine: `tools/compare_golden.py` vergleicht Golden-Fälle (`.json`/`.json.gz`)
+  in einem oder mehreren Ordnern. Frische Fälle erzeugen
+  `Rscript golden/golden_cases.R <ziel> N SEED` bzw. `stress_cases.R`; das
+  Ziel liegt **außerhalb des Repos** (z. B. in einem temporären Ordner),
+  danach `compare_golden.py <ziel>` aufrufen.
 
 Nach jeder Änderung an der Rechenlogik laufen `compare_golden.py`,
 `compare_reference.py` und die ganze Test-Suite; alle Fälle müssen
@@ -236,6 +342,6 @@ Julia-Fassung (`julia/tools/compare_reference.jl`, siehe
 
 - Deutsch in Docstrings und Meldungen wie im R-Paket; Docstrings mit
   kurzer Beschreibung und Argumentliste (aus `r/man/*.Rd` übernommen).
-- Keine neuen Pflichtabhängigkeiten außer numpy und pandas; matplotlib und
-  plotly bleiben optional, scipy dient nur als Ersatzweg für
-  Eigenvektoren ohne System-LAPACK.
+- Keine neuen Pflichtabhängigkeiten außer numpy und pandas; matplotlib
+  bleibt optional; ohne System-LAPACK rechnet numpy die Eigenvektoren
+  (mit Warnung, nicht bitgleich).

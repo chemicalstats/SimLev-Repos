@@ -3,12 +3,12 @@
 
 const _MODULE_EXPORTS = (
     (:DataPrep, (:align_series, :check_series, :align_macro, :convert_currency, :total_return_index, :deflate,
-                 :splice_series, :strategy_from_weights, :portfolio_template, :portfolio_templates)),
+                 :splice_series, :strategy_from_weights, :portfolio_template)),
     (:Backcast, (:backcast_fit, :backcast)),
     (:Bonds, (:bond_index_from_yields, :money_market_index, :currency_hedged_index)),
     (:Signals, (:signal_sma, :signal_ema, :signal_crossover, :signal_momentum, :signal_drawdown,
                 :signal_volatility, :signal_combine)),
-    (:Bootstrap, (:bootstrap_config, :create_config, :block_length, :bootstrap, :validate_bootstrap,
+    (:Bootstrap, (:bootstrap_config, :block_length, :bootstrap, :validate_bootstrap,
                   :bootstrap_data, :study_metrics, :bootstrap_study, :bootstrap_probability)),
     (:Withdrawal, (:withdrawal_rule, :withdrawal_cohorts, :result_index, :withdrawal_paths,
                    :perfect_withdrawal_rate, :withdrawal_simulation, :withdrawal_max_rate, :horizon_model)),

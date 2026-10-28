@@ -128,19 +128,6 @@ export_dashboard(result, "analysis.pdf", width = 16, height = 12)
 export_dashboard(result, "compact.pdf", style = "compact")
 ```
 
-### Als HTML speichern (interaktiv)
-
-```r
-# Eigenständige HTML-Datei (ohne plotly abhängigkeitsfrei, offline lauffähig)
-plot_interactive(result, file = "portfolio.html")
-```
-
-`export_html_dashboard()` ist im R-Paket nur ein Platzhalter: Ohne plotly
-bricht es mit einem Fehler ab, mit plotly gibt es nur eine Meldung aus und
-schreibt keine Datei. Für ein interaktives Dashboard `plot_interactive()`
-verwenden. Dessen Kopfzeile zeigt CAGR, Sharpe und Max. Drawdown, mit
-Sparplan als „CAGR (geldgewichtet)“ und „Max. Drawdown (zeitgewichtet)“.
-
 ---
 
 ## Beispiele für verschiedene Szenarien
@@ -479,7 +466,6 @@ for (i in seq_along(results)) {
 ### 4. Export-Formate
 - **PDF:** `export_dashboard(result, "datei.pdf")` (schreibt immer PDF,
   auch bei anderer Dateiendung); beste Qualität, für Archivierung
-- **HTML:** `plot_interactive(result, file = "datei.html")`, interaktiv
 - **PNG/SVG:** keine eigene Exportfunktion; mit einem Grafikgerät von R
   selbst schreiben, z. B.
   `png("dashboard.png", width = 1600, height = 1000, res = 110); plot(result); dev.off()`
@@ -521,8 +507,7 @@ export_dashboard(result, "large.pdf", width = 20, height = 14)
 
 ## Zukünftige Erweiterungen
 
-Mögliche Ergänzungen (ein interaktives HTML-Dashboard gibt es bereits mit
-`plot_interactive()`):
+Mögliche Ergänzungen:
 - Shiny app integration
 - Custom metric definitions
 - Benchmark comparison

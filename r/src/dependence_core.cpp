@@ -11,10 +11,9 @@
 // positiv definit, bricht der Filter ab: nll = 1e10, ok = false, die
 // Korrelationen ab dieser Zeile sind NA.
 
-#include <Rcpp.h>
+#include "simlev_capi.h"
 #include <vector>
 #include <cmath>
-using namespace Rcpp;
 
 // Cholesky-Zerlegung einer kleinen symmetrischen Matrix (zeilenweise, k x k).
 // Liefert false, wenn die Matrix nicht positiv definit ist.
@@ -35,13 +34,12 @@ static bool chol_small(const std::vector<double>& A, std::vector<double>& L, int
   return true;
 }
 
-// [[Rcpp::export(name = ".dcc_filter")]]
-List dcc_filter(NumericMatrix Z, double a, double b, NumericMatrix Qbar, bool keep) {
+static SEXP dcc_filter(sl::NumMat Z, double a, double b, sl::NumMat Qbar, bool keep) {
   const int n = Z.nrow(), k = Z.ncol();
   const int np = k * (k - 1) / 2;
   std::vector<double> Q(k * k), R(k * k), L(k * k), y(k);
   for (int i = 0; i < k; ++i) for (int j = 0; j < k; ++j) Q[i * k + j] = Qbar(i, j);
-  NumericMatrix out(keep ? n : 0, keep ? np : 0);
+  sl::NumMat out = sl::new_mat(keep ? n : 0, keep ? np : 0);
   if (keep) std::fill(out.begin(), out.end(), NA_REAL);  // nicht berechnete Zeilen bleiben NA
   double nll = 0.0;
   bool ok = true;
@@ -69,5 +67,20 @@ List dcc_filter(NumericMatrix Z, double a, double b, NumericMatrix Qbar, bool ke
     }
   }
   if (!ok) nll = 1e10;
-  return List::create(_["nll"] = nll, _["R"] = out, _["ok"] = ok);
+  return sl::named_list("nll", nll, "R", out, "ok", ok);
+}
+
+// ===========================================================================
+// .CALL-HUELLE (registriert in init.c; R-Seite in R/cores.R)
+// ===========================================================================
+
+extern "C" SEXP C_dcc_filter(SEXP s_Z, SEXP s_a, SEXP s_b, SEXP s_Qbar, SEXP s_keep) {
+  return sl::call([&]() {
+    sl::NumMat Z = sl::num_mat(s_Z);
+    double a = sl::as_double(s_a);
+    double b = sl::as_double(s_b);
+    sl::NumMat Qbar = sl::num_mat(s_Qbar);
+    bool keep = sl::as_bool(s_keep);
+    return dcc_filter(Z, a, b, Qbar, keep);
+  });
 }

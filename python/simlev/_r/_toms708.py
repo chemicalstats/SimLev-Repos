@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 
 from ._cmath import (
-    DBL_EPSILON, DBL_MIN, INF, NAN, NINF, INT_MAX, M_LN_SQRT_2PI, M_LN2, M_SQRT_PI,
+    DBL_EPSILON, DBL_MIN, NAN, NINF, INT_MAX, M_LN_SQRT_2PI, M_LN2, M_SQRT_PI,
     c_int, cos, dv, exp, expm1, log, log1p, logspace_add, ml_warning, pow, sin, sqrt,
 )
 

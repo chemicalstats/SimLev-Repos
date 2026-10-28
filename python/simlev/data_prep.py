@@ -9,8 +9,8 @@
 - :func:`total_return_index`  Kurs- zu Total-Return-Index
 - :func:`deflate`             reale Werte über einen Preisindex
 - :func:`splice_series`       Ketten aus mehreren Reihen (Proxy -> Index -> Fonds)
-- :func:`strategy_from_weights`, :func:`portfolio_template`,
-  :func:`portfolio_templates`  Portfolios aus Gewichten bzw. Vorlagen
+- :func:`strategy_from_weights`, :func:`portfolio_template`
+                              Portfolios aus Gewichten bzw. Vorlagen
 
 Datumswerte: R-``Date``-Vektoren entsprechen ``numpy.ndarray`` mit dtype
 ``datetime64[D]`` (``NaT`` = ``NA``). Interne Helfer (``_to_date``,
@@ -32,20 +32,16 @@ from ._r import libm as _libm
 from ._r.base import quiet_fp
 from ._r.fmt import NA_REAL
 from ._r.rlist import RList
-from ._rnum import r_cumprod, r_isna, r_mean, r_median, r_sum
+from ._r.rnum import r_cumprod, r_isna, r_mean, r_median, r_sum
 
 __all__ = [
     "align_series", "check_series", "SimLevDataCheck", "align_macro", "convert_currency",
     "total_return_index", "deflate", "splice_series", "strategy_from_weights",
-    "portfolio_template", "portfolio_templates",
+    "portfolio_template",
 ]
 
 _NAN = NA_REAL   # R-NA_real_ (alle fehlenden Werte in data_prep.R sind NA)
 _EPOCH = np.datetime64("1970-01-01", "D")
-
-
-# Gleitkomma-Warnungen bei Rechnungen mit NA unterdrücken: gemeinsamer Helfer in _r/base.py
-_quiet_fp = quiet_fp
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1421,20 +1417,28 @@ _PORTFOLIO_TEMPLATES = {
 }
 
 
-def portfolio_template(name, map=None, **kwargs):  # noqa: A002 - R-Argumentname
+def portfolio_template(name=None, map=None, **kwargs):  # noqa: A002 - R-Argumentname
     """Portfolio-Vorlagen.
 
     Bekannte statische Allokationen mit Rollen-Namen; über ``map`` werden die
     Rollen den Spalten des Datensatzes zugeordnet.
 
     Args:
-        name: Name der Vorlage (siehe :func:`portfolio_templates`).
+        name: Name der Vorlage. Ohne ``name`` (Standard ``None``) liefert die
+            Funktion die Liste aller Vorlagen; ``map`` und weitere Argumente
+            sind dann nicht erlaubt.
         map: Benannter Vektor Rolle -> Spaltenname (``dict``/``Series``).
         **kwargs: Weitere Argumente für :func:`strategy_from_weights`.
 
     Returns:
-        ``Strategy`` für :func:`simulation`.
+        Mit ``name``: ``Strategy`` für :func:`simulation`; ohne ``name``:
+        ``DataFrame`` aller Vorlagen mit ``template``, ``role`` und ``weight``.
     """
+    if name is None:
+        if map is not None or kwargs:
+            raise ValueError("portfolio_template: map und weitere Argumente nur zusammen mit name; ohne name "
+                             "liefert portfolio_template() die Liste der Vorlagen.")
+        return _template_list()
     w = _PORTFOLIO_TEMPLATES.get(name)
     if w is None:
         raise ValueError("Unbekannte Vorlage '%s'. Verf\u00fcgbar: %s" % (name, ", ".join(_PORTFOLIO_TEMPLATES)))
@@ -1467,7 +1471,7 @@ def portfolio_template(name, map=None, **kwargs):  # noqa: A002 - R-Argumentname
     return strategy_from_weights(pd.Series(vals, index=roles, dtype=np.float64), **kwargs)
 
 
-def portfolio_templates():
+def _template_list():
     """Alle Portfolio-Vorlagen als ``DataFrame`` mit ``template``, ``role`` und ``weight``."""
     t, r, w = [], [], []
     for n, d in _PORTFOLIO_TEMPLATES.items():
@@ -1479,4 +1483,4 @@ def portfolio_templates():
                          "weight": np.array(w, dtype=np.float64)})
 
 
-_quiet_fp(globals(), __all__)
+quiet_fp(globals(), __all__)

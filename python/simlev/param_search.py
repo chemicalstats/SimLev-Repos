@@ -28,7 +28,7 @@ import pandas as pd
 from ._r import fmt as _fmt
 from ._r import libm as _libm
 from ._r.rlist import RList
-from ._rnum import LD, r_mean
+from ._r.rnum import r_mean
 
 __all__ = ["param_space", "param_range", "param_search", "plateau",
            "SimLevParamSpace", "SimLevParamRange", "SimLevParamSearch", "SummarySimLevParamSearch"]
@@ -875,6 +875,6 @@ def _plot_param_search(x, metric=None, params=None, fun=max, **kwargs):
 
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
-from .data_prep import _quiet_fp  # noqa: E402
+from ._r.base import quiet_fp  # noqa: E402
 
-_quiet_fp(globals(), list(__all__) + ["_as_spec", "_ps_design", "_ps_levels", "_ps_map", "_ps_neighbours"])
+quiet_fp(globals(), list(__all__) + ["_as_spec", "_ps_design", "_ps_levels", "_ps_map", "_ps_neighbours"])

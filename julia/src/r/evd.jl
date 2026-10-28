@@ -1,5 +1,10 @@
 """
-Nachbildung des optionalen R-Pakets evd 2.3-7.1 (Teil: `fpot`).
+Nachbildung von evd 2.3-7.1 (Teil: `fpot`), im R-Paket übernommen als `.evd_fpot`.
+
+Herkunft: R-Paket evd 2.3-7.1 (CRAN, 2024-09-21), `R/uvfit.R` (`fpot`,
+`fpot.norm`) und `src/pot.c` (`nlgpd`); Autoren: Alec Stephenson. Function
+fbvpot by Chris Ferro. Lizenz: GPL-3. Nach Julia übertragen und angepasst für
+SimLev (siehe `julia/COPYRIGHTS.md`).
 
 Nachgebildet ist `fpot(x, threshold, model = "gpd", ...)` mit `fpot.norm`
 (`cmax = FALSE`, `mper = NULL`): Startwerte, die negative Log-Likelihood
@@ -10,8 +15,10 @@ Argumente, der `optim`-Aufruf mit `hessian = TRUE`, feste Parameter
 von evd. Nicht nachgebildet sind `model = "pp"`, `cmax = TRUE` (Cluster) und
 `mper` (Quantil-Parametrisierung); sie werfen einen Fehler.
 
-SimLev nutzt `fpot` in `.fit_tail` (`bootstrap`, Verfahren `"evt"`), wenn
-`SimLev.RSuggests.has("evd")` gilt. Vorlage: `python/simlev/_r/evd.py`.
+SimLev nutzt `fpot` in `.fit_tail` (`bootstrap`, Verfahren `"evt"`) bei
+mindestens 30 Überschreitungen; R nutzt dafür die übernommene Fassung
+`.evd_fpot` (`r/R/vendor_evd.R`, `r/src/vendor_evd.c`), evd selbst ist nicht
+mehr nötig. Vorlage: `python/simlev/_r/evd.py`.
 """
 module REvd
 

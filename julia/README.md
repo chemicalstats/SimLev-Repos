@@ -12,7 +12,7 @@
 
 Dieses Paket ist die Julia-Fassung 0.5.0 des R-Pakets SimLev. Sie ist ein
 **vollständiger Port** der aktuellen R-Fassung 0.5.0: die Engine
-`simulation()` und alle Erweiterungen, insgesamt alle 110 Exporte aus
+`simulation()` und alle Erweiterungen, insgesamt alle 104 Exporte aus
 `r/NAMESPACE`. Sie läuft **eigenständig ohne R** und braucht **keine
 externen Julia-Pakete**, nur die Standardbibliothek (`Dates`, `Printf`,
 `Logging`; `LinearAlgebra` nur als Ersatzweg für Eigenvektoren).
@@ -38,7 +38,7 @@ Julia-Fassung betrifft.
 ## Installation
 
 Benötigt wird **Julia ab Version 1.10** (laut `Project.toml`; geprüft ist
-die Fassung mit Julia 1.13.2).
+die Fassung ab Julia 1.10, zuletzt mit Julia 1.13.2).
 
 ``` julia
 using Pkg
@@ -147,7 +147,6 @@ Einige Funktionen nehmen wie in R weitere Argumente auch positionell, etwa
 | `print(x)` | `display(x)` |
 | `summary(result)` | `summary(result)`; für alle Objekte `r_summary(x)` |
 | `plot(result)` | `plot_dashboard(result)`; für alle Objekte `r_plot(x)` |
-| `plot_interactive(result)` | `plot_interactive(result)` |
 | `set.seed(42)` | `set_seed(42)` |
 | `bootstrap_probability(st, cagr > 0.05)` | `bootstrap_probability(st, "cagr > 0.05")` |
 | `function(df) signal_sma(df$INDEX, 200)` | `df -> signal_sma(df["INDEX"], 200)` |
@@ -211,13 +210,6 @@ Besonderheiten der Julia-Fassung:
   SVG-Datei (Größe in Zoll wie in R, 100 Pixel je Zoll), unabhängig von
   der Dateiendung; für PDF oder PNG wandeln Sie die SVG-Datei mit einem
   Werkzeug wie `rsvg-convert` oder CairoSVG um.
-- `plot_interactive(result; file = "backtest.html")` schreibt dasselbe
-  eigenständige HTML-Dashboard wie R ohne plotly (byte-identisch);
-  `engine = "plotly"` fällt wie in R ohne plotly mit einer Warnung auf
-  diesen Weg zurück.
-- `export_html_dashboard()` ist wie in R nur ein Platzhalter: Die Funktion
-  bricht mit der Fehlermeldung ab, die R ohne plotly ausgibt. Das
-  interaktive Dashboard schreibt `plot_interactive()`.
 - Eigenvektoren (`eigen()`, u. a. in `portfolio_optimize()`) holt SimLev
   wie R aus der Referenz-LAPACK des Systems (Pfad über die
   Umgebungsvariable `SIMLEV_LAPACK` wählbar). Fehlt sie, rechnet SimLev mit
@@ -332,20 +324,25 @@ mathematischen Funktionen der R-Interna lädt sie aus `libm.so.6`, also aus
 glibc; unter macOS und Windows ist die Fassung nicht geprüft.
 
 **Optionale R-Pakete:** evd (2.3-7.1, `fpot`) und rugarch (1.5-6,
-`ugarchfit` mit Rsolnp 1.16 `solnp`, numDeriv-Hesse-Matrix und `nlminb`)
-sind nachgebildet; standardmäßig verhält sich Julia wie R mit beiden
-Paketen (Tail-Modell per GPD-ML, GARCH per rugarch in Bootstrap,
-`dcc_fit` und `dependence_analysis`). `ENV["SIMLEV_R_SUGGESTS"] = "none"`
-bildet R ohne die Pakete nach, `"evd"` oder `"rugarch"` nur eines davon.
+`ugarchfit` mit Rsolnp 1.16 `solnp`, Richardson-Hesse-Matrix und `nlminb`)
+sind nachgebildet. Das Tail-Modell schätzt ab 30 Überschreitungen immer
+per GPD-ML wie R, das `evd::fpot` übernommen hat (`.evd_fpot`; Herkunft in
+`COPYRIGHTS.md`). Die GARCH-Schätzung in Bootstrap, `dcc_fit` und
+`dependence_analysis` läuft immer per rugarch-Nachbildung wie R, das
+`ugarchfit` mit Rsolnp und truncnorm übernommen hat
+(`.rugarch_ugarchfit`; Herkunft in `COPYRIGHTS.md`); `optim` und die
+Momente bleiben nur der Rückfall, wenn der Fit mit einem Fehler scheitert.
 Auch rugarchs letzter Ausweichweg gosolnp (mit `truncnorm::rtruncnorm`)
 ist nachgebildet; ihn erreicht die Solver-Kette in R bei etwa 1 %
 zufälliger Reihen. Wie in R setzt er den globalen Zufallszustand aus der
 Uhrzeit, das Ergebnis hängt dann von der Sekunde des Aufrufs ab;
 `ENV["SIMLEV_R_SYS_TIME"]` (Sekunden seit 1970) stellt die Uhr fest.
-imputeTS 3.4 (`na_interpolation(option = "stine")` mit stinepack 1.5) ist
+imputeTS 3.4 (`na_interpolation` mit `option = "stine"` und `"linear"`, stinepack 1.5) ist
 ebenfalls nachgebildet (`RImputeTS`, `RStinepack`): `fill = "stine"` im
-Backcast interpoliert nach Stineman. MSGARCH, plotly und TTR
-gelten als nicht installiert. `nlminb` (PORT) liest an drei Stellen nicht
+Backcast interpoliert immer nach Stineman wie R, das beide Pakete
+übernommen hat (`.imputets_na_interpolation`; Herkunft in `COPYRIGHTS.md`). MSGARCH gilt als nicht
+installiert (die MS-GARCH-Verfahren melden wie R, dass das Paket fehlt);
+einen Schalter für optionale R-Pakete gibt es nicht mehr. `nlminb` (PORT) liest an drei Stellen nicht
 gesetzte Variablen (in R Stapelreste); Julia setzt 0, was nur in
 Sonderfällen die Meldung (Code 3 statt 5) oder Läufe mit Inf/NaN in
 Gradient bzw. Hesse-Matrix ändern kann.
@@ -353,7 +350,7 @@ Gradient bzw. Hesse-Matrix ändern kann.
 ## Tests
 
 ``` bash
-julia --project -e 'using Pkg; Pkg.test()'               # 946 Tests: Engine, R-Interna, Referenzfälle (Auswahl)
+julia --project -e 'using Pkg; Pkg.test()'               # 929 Tests: Engine, R-Interna, Referenzfälle (Auswahl)
 SIMLEV_FULL_TESTS=1 julia --project -e 'using Pkg; Pkg.test()'   # dazu alle 4.536 Modul-Referenzfälle
 julia --project tools/compare_golden.jl ../golden/cases   # Engine-Fälle eines Ordners (auch ../golden/extra)
 julia --project tools/compare_reference.jl [modul …] [-k muster] [-v]   # Modul-Referenzfälle
@@ -376,13 +373,12 @@ Vergleich der Modul-Fälle.
 Project.toml        Paketbeschreibung (Version, nur Standardbibliothek)
 src/
   SimLev.jl         Modul, Exporte, Reihenfolge der Dateien
-  r/                R-Interna: Datenstrukturen (types.jl), libm, long-double-Summen (base.jl),
-                    Zufallszahlen (rng.jl), Verteilungen (nmath.jl), stats, lineare Algebra
-                    (linalg.jl, _blas.jl, _lapack.jl, _linpack.jl), Formatierung (fmt.jl),
-                    Bedingungen in R-Syntax (rexpr.jl)
-  ld80.jl           F80: x87-long double (Hardware über llvmcall, sonst F80Soft)
-  rnum.jl           R-kompatible Numerik der Engine (Summen, pow, …)
-  rformat.jl        R-kompatible Textausgabe der Engine (sprintf, format, round)
+  r/                R-Interna: Datenstrukturen (types.jl), F80: x87-long double (ld80.jl),
+                    R-kompatible Numerik und Textausgabe der Engine (rnum.jl, rformat.jl),
+                    libm, long-double-Summen (base.jl), Zufallszahlen (rng.jl),
+                    Verteilungen (nmath.jl), stats, lineare Algebra (linalg.jl, _blas.jl,
+                    _lapack.jl, _linpack.jl), Formatierung (fmt.jl), Bedingungen in
+                    R-Syntax (rexpr.jl)
   dates.jl          Datumslogik
   config.jl         asset_config, Strategien
   trigger.jl        compute_rebal_trigger
@@ -391,7 +387,6 @@ src/
   engine.jl         simulation() mit sim_phases.jl, sim_loop.jl, sim_evaluate.jl
   tax_tariff.jl     Einkommensteuertarif, read_tax_tariff
   result.jl         SimLevResult, print/summary
-  interactive.jl    interaktives HTML-Dashboard (mit html_templates.jl)
   dashboard.jl      statisches SVG-Dashboard
   <modul>.jl        Erweiterungen, je eine R-Datei (data_prep, backcast, bonds, signals,
                     bootstrap, withdrawal, dependence, regimes, scenarios, optimize,

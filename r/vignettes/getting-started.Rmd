@@ -105,9 +105,7 @@ plot(result)
 ```
 
 `plot(result, style = "compact")` zeigt nur vier Panels;
-`export_dashboard(result, "backtest.pdf")` schreibt das Dashboard als PDF,
-`plot_interactive(result, file = "backtest.html")` eine interaktive
-HTML-Datei.
+`export_dashboard(result, "backtest.pdf")` schreibt das Dashboard als PDF.
 
 ## Sparplan
 

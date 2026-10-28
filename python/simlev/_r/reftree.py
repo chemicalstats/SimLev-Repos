@@ -469,15 +469,10 @@ def _uniq(seq):
 def run_case(case, check_print=True, check_output=True, check_warnings=True):
     """Führt einen Fall aus; liefert Liste der Abweichungen (leer = bitgleich).
 
-    Die optionalen R-Pakete, die R bei dem Fall installiert hatte (Feld
-    ``suggests``; fehlt es: keines), gelten während des Falls als installiert.
     Hat der Fall eine feste Uhrzeit (Feld ``sys_time``), gilt sie während des
     Falls über ``SIMLEV_R_SYS_TIME`` (:func:`simlev._r.base.sys_time`).
     """
-    sug = case.get("suggests") or []
-    if isinstance(sug, str):
-        sug = [sug]
-    env = {"SIMLEV_R_SUGGESTS": ",".join(sug) if sug else "none"}
+    env = {}
     st = case.get("sys_time")
     if st is not None:
         env["SIMLEV_R_SYS_TIME"] = st if isinstance(st, str) else repr(float(st))

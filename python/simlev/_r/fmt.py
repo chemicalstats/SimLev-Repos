@@ -16,8 +16,8 @@ Abbildung der Python-Eingaben auf R-Typen
 ==============================  ======================================
 Python                          R
 ==============================  ======================================
-``float``, float-Array          double (``nan`` = ``NA``; R's ``NaN``
-                                über :data:`R_NAN`)
+``float``, float-Array          double (:data:`NA_REAL` = ``NA``,
+                                jedes andere ``nan`` = ``NaN``)
 ``int``, Ganzzahl-Array         integer
 ``bool``, bool-Array,           logical (``None`` = ``NA``)
 object-Array aus bool/None
@@ -55,7 +55,7 @@ import numpy as np
 import pandas as pd
 
 __all__ = [
-    "R_NAN", "NA_REAL", "set_options", "get_option",
+    "NA_REAL", "set_options", "get_option",
     "r_round", "signif", "fround", "fprec",
     "as_character", "paste", "paste0", "to_string",
     "format", "format_date", "format_info", "formatC", "prettyNum", "sprintf",
@@ -88,14 +88,10 @@ def get_option(name):
 
 # ── NA / NaN ────────────────────────────────────────────────────────────────
 
-def _bits2d(b):
-    return struct.unpack("<d", struct.pack("<Q", b))[0]
-
-
-#: R's ``NA_real_`` (Bitmuster wie in R: NaN mit der Nutzlast 1954 im unteren Wort).
-NA_REAL = _bits2d(0x7FF00000000007A2)
-#: R's ``NaN`` (gewöhnliches NaN). Wie in R gilt jedes NaN ohne die NA-Nutzlast als NaN.
-R_NAN = _bits2d(0x7FF8000000000000)
+# R's ``NA_real_`` (NaN mit der Nutzlast 1954) ist zentral in ``rnum`` definiert.
+# R's ``NaN`` ist ein gewöhnliches ``nan``: wie in R gilt jedes NaN ohne die
+# NA-Nutzlast als NaN.
+from .rnum import NA_REAL  # noqa: E402
 
 
 def _is_rnan(x):

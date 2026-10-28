@@ -219,45 +219,6 @@ remove_asset <- function(strategy, name) {
 }
 
 
-#' Altes Strategieformat umwandeln
-#'
-#' Wandelt Strategien mit veralteten asset_class-Werten ("etn_deliverable",
-#' "etn_standard") in das neue Format um ("etn" mit deliverable = TRUE/FALSE).
-#'
-#' @param old_strategy Liste mit Asset-Konfigurationen im alten Format
-#' @param verbose Logisch. Meldungen zur Umwandlung ausgeben. Standard: TRUE
-#'
-#' @return strategy-Objekt im aktuellen Format
-#' @export
-#' @noRd
-migrate_strategy <- function(old_strategy, verbose = TRUE) {
-  new_strategy <- list()
-  
-  for (name in names(old_strategy)) {
-    asset <- old_strategy[[name]]
-    
-    if (asset$asset_class == "etn_deliverable") {
-      if (verbose) {
-        message(sprintf("migrate_strategy: %s: etn_deliverable -> etn mit deliverable = TRUE", name))
-      }
-      asset$asset_class <- "etn"
-      asset$deliverable <- TRUE
-    } else if (asset$asset_class == "etn_standard") {
-      if (verbose) {
-        message(sprintf("migrate_strategy: %s: etn_standard -> etn mit deliverable = FALSE", name))
-      }
-      asset$asset_class <- "etn"
-      asset$deliverable <- FALSE
-    }
-    
-    new_strategy[[name]] <- do.call(asset_config, asset)
-  }
-  
-  class(new_strategy) <- c("strategy", "list")
-  return(new_strategy)
-}
-
-
 #' Strategie ausgeben
 #' @param x Ein strategy-Objekt
 #' @param ... Weitere Argumente (ignoriert)
@@ -304,23 +265,3 @@ summary.strategy <- function(object, ...) {
   
   invisible(object)
 }
-
-
-#' Strategie-Objekt in eine einfache Liste umwandeln
-#'
-#' @param x Ein \code{strategy}-Objekt (oder anderes Objekt).
-#' @param ... Ignoriert.
-#' @return Einfache benannte Liste ohne Klasse, geeignet fuer die alte
-#'   Listen-Schnittstelle von \code{simulation()}.
-#' @export
-#' @noRd
-as_list <- function(x, ...) UseMethod("as_list")
-
-#' @export
-as_list.strategy <- function(x, ...) {
-  attr(x, "class") <- NULL
-  x
-}
-
-#' @export
-as_list.default <- function(x, ...) as.list(x)

@@ -1,16 +1,13 @@
-# Referenzfälle für die Nachbildung von imputeTS::na_interpolation (option = "stine",
-# dazu "linear" und na_locf) und stinepack::stinterp (Python: simlev/_r/imputets.py,
-# simlev/_r/stinepack.py; Julia: src/r/imputets.jl, src/r/stinepack.jl) sowie den Weg
-# mit imputeTS in .fill_na / backcast_fit(index_fill = "stine") / backcast(fill = "stine").
-# Benötigt imputeTS 3.4 und stinepack 1.5, am besten in einer eigenen R-Bibliothek,
-# die SIMLEV_R_SUGGESTS_LIB nennt (sie kommt an den Anfang des Suchpfads).
+# Referenzfälle für die aus imputeTS 3.4 und stinepack 1.5 übernommene Fassung von
+# na_interpolation (option = "stine" und "linear"), na_locf und stinterp (R: SimLev:::.imputets_na_interpolation,
+# .imputets_na_locf in r/R/vendor_imputets.R mit dem C++-Kern locf in r/src/vendor_imputets.cpp,
+# SimLev:::.stinepack_stinterp in r/R/vendor_stinepack.R; Python: simlev/_r/imputets.py,
+# simlev/_r/stinepack.py; Julia: src/r/imputets.jl, src/r/stinepack.jl) sowie den Stineman-Weg
+# in .fill_na / backcast_fit(index_fill = "stine") / backcast(fill = "stine"). imputeTS und
+# stinepack selbst werden nicht benötigt; die Fälle waren zuvor mit den echten Paketen erzeugt
+# und sind mit der Übernahme bitgleich.
 # Aufruf aus der Repo-Wurzel:
-#   LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> SIMLEV_R_SUGGESTS_LIB=<Bibliothek mit den Paketen> Rscript golden/modules/gen_imputets.R
-if (nzchar(Sys.getenv("SIMLEV_R_SUGGESTS_LIB"))) .libPaths(c(Sys.getenv("SIMLEV_R_SUGGESTS_LIB"), .libPaths()))
-if (!requireNamespace("imputeTS", quietly = TRUE)) stop("gen_imputets.R benötigt das Paket imputeTS")
-if (!requireNamespace("stinepack", quietly = TRUE)) stop("gen_imputets.R benötigt das Paket stinepack")
-if (as.character(utils::packageVersion("imputeTS")) != "3.4") stop("gen_imputets.R erwartet imputeTS 3.4")
-if (as.character(utils::packageVersion("stinepack")) != "1.5") stop("gen_imputets.R erwartet stinepack 1.5")
+#   LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> Rscript golden/modules/gen_imputets.R
 source("golden/modules/ref_tools.R"); ref_init("imputets")
 
 P <- "import numpy as np\nimport pandas as pd\nfrom simlev._r import imputets as I\nfrom simlev._r import stinepack as S\nfrom simlev import backcast as BC\nNA = simlev.NA\n"
@@ -46,14 +43,14 @@ fargs <- function(a, lang) {
 # na_interpolation(v, ...) mit v als Eingabe
 NI <- function(id, v, args = list(option = "stine"), inputs = list(v = v)) {
   ra <- fargs(args, "r"); pa <- fargs(args, "py"); ja <- fargs(args, "jl")
-  case(paste0("ni_", id), paste0("imputeTS::na_interpolation(v", ra, ")"),
+  case(paste0("ni_", id), paste0("SimLev:::.imputets_na_interpolation(v", ra, ")"),
        paste0("result = I.na_interpolation(v", pa, ")"),
        paste0("result = I.na_interpolation(v; ", substring(ja, 3), ")"), inputs)
 }
 # stinterp(x, y, xout, ...)
 ST <- function(id, x, y, xout, args = list()) {
   ra <- fargs(args, "r"); pa <- fargs(args, "py"); ja <- fargs(args, "jl")
-  case(paste0("st_", id), paste0("stinepack::stinterp(x, y, xo", ra, ")"),
+  case(paste0("st_", id), paste0("SimLev:::.stinepack_stinterp(x, y, xo", ra, ")"),
        paste0("result = S.stinterp(x, y, xo", pa, ")"),
        paste0("result = S.stinterp(x, y, xo", if (nzchar(ja)) paste0("; ", substring(ja, 3)) else "", ")"),
        list(x = x, y = y, xo = xout))
@@ -173,7 +170,7 @@ NI("mat_one_err", matrix(c(NA, NA, NA, 1, 2, 3), 3))
 # ── na_locf direkt ──────────────────────────────────────────────────────────
 NL <- function(id, v, args = list()) {
   ra <- fargs(args, "r"); pa <- fargs(args, "py"); ja <- fargs(args, "jl")
-  case(paste0("nl_", id), paste0("imputeTS::na_locf(v", ra, ")"), paste0("result = I.na_locf(v", pa, ")"),
+  case(paste0("nl_", id), paste0("SimLev:::.imputets_na_locf(v", ra, ")"), paste0("result = I.na_locf(v", pa, ")"),
        paste0("result = I.na_locf(v", if (nzchar(ja)) paste0("; ", substring(ja, 3)) else "", ")"), list(v = v))
 }
 NL("basic", c(NA, 1, NA, NA, 3, NA))
@@ -224,18 +221,18 @@ ST("err_yp_method", c(1, 2), c(1, 2), 1.5, list(yp = c(0, 0), method = "stineman
 ST("err_method", c(1, 2, 3), c(1, 2, 5), 1.5, list(method = "foo"))
 ST("err_inf_x", c(-Inf, 2, 3), c(1, 2, 5), 1.5)
 ST("err_inf_x2", c(Inf, Inf), c(1, 2), 1.5)
-case("st_err_mat", "stinepack::stinterp(matrix(1:2), c(1, 2), 1.5)", "result = S.stinterp(np.array([[1.0], [2.0]]), [1.0, 2.0], 1.5)",
+case("st_err_mat", "SimLev:::.stinepack_stinterp(matrix(1:2), c(1, 2), 1.5)", "result = S.stinterp(np.array([[1.0], [2.0]]), [1.0, 2.0], 1.5)",
      "result = S.stinterp([1.0; 2.0;;], [1.0, 2.0], 1.5)")
-case("st_err_missing", "stinepack::stinterp(c(1, 2), c(1, 2))", "result = S.stinterp([1.0, 2.0], [1.0, 2.0])",
+case("st_err_missing", "SimLev:::.stinepack_stinterp(c(1, 2), c(1, 2))", "result = S.stinterp([1.0, 2.0], [1.0, 2.0])",
      "result = S.stinterp([1.0, 2.0], [1.0, 2.0])")
 SL <- function(id, r, py, jl, inputs = list(x = xs, y = ys)) case(paste0("slope_", id), r, py, jl, inputs)
-SL("stine", "stinepack::stinemanSlopes(x, y)", "result = S.stinemanSlopes(x, y)", "result = S.stinemanSlopes(x, y)")
-SL("stine_scaled", "stinepack::stinemanSlopes(x, y, scale = TRUE)", "result = S.stinemanSlopes(x, y, scale=True)",
+SL("stine", "SimLev:::.stinepack_stinemanSlopes(x, y)", "result = S.stinemanSlopes(x, y)", "result = S.stinemanSlopes(x, y)")
+SL("stine_scaled", "SimLev:::.stinepack_stinemanSlopes(x, y, scale = TRUE)", "result = S.stinemanSlopes(x, y, scale=True)",
    "result = S.stinemanSlopes(x, y; scale = true)")
-SL("parabola", "stinepack::parabolaSlopes(x, y)", "result = S.parabolaSlopes(x, y)", "result = S.parabolaSlopes(x, y)")
-SL("stine_const", "stinepack::stinemanSlopes(x, y, scale = TRUE)", "result = S.stinemanSlopes(x, y, scale=True)",
+SL("parabola", "SimLev:::.stinepack_parabolaSlopes(x, y)", "result = S.parabolaSlopes(x, y)", "result = S.parabolaSlopes(x, y)")
+SL("stine_const", "SimLev:::.stinepack_stinemanSlopes(x, y, scale = TRUE)", "result = S.stinemanSlopes(x, y, scale=True)",
    "result = S.stinemanSlopes(x, y; scale = true)", list(x = 1:4, y = rep(2, 4)))
-SL("stine2", "stinepack::stinemanSlopes(x, y)", "result = S.stinemanSlopes(x, y)", "result = S.stinemanSlopes(x, y)",
+SL("stine2", "SimLev:::.stinepack_stinemanSlopes(x, y)", "result = S.stinemanSlopes(x, y)", "result = S.stinemanSlopes(x, y)",
    list(x = c(1, 4), y = c(2, -1)))
 
 # ── .fill_na(…, "stine") ────────────────────────────────────────────────────

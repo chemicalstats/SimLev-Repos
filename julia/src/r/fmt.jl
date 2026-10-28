@@ -31,7 +31,7 @@ module RFmt
 import ..SimLev
 using Dates: Dates, Date, DateTime, @dateformat_str
 
-export set_options, get_option, NA_REAL, R_NAN,
+export set_options, get_option, NA_REAL,
        r_round, signif, fround, fprec,
        as_character, paste, paste0, to_string,
        r_format, format_date, format_info, formatC, prettyNum, r_sprintf,

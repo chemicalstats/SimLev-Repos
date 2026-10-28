@@ -22,9 +22,11 @@ R-Paket betrifft.
 
 ## Installation
 
-SimLev enthält C++-Code (Marktupdates, FIFO-Lotverwaltung, Steuerkern über
-[Rcpp](https://www.rcpp.org/)) und wird aus dem Quellcode kompiliert. Neben
-**R ≥ 4.0** brauchen Sie einen funktionierenden Compiler:
+SimLev enthält C++- und C-Code (Marktupdates, FIFO-Lotverwaltung, Steuerkern,
+Bootstrap- und Entnahme-Kerne; angebunden über R's eigene C-Schnittstelle,
+ohne Rcpp) und wird aus dem Quellcode kompiliert. Zum Installieren braucht es
+außer Basis-R keine weiteren Pakete. Neben **R ≥ 4.0** brauchen Sie einen
+funktionierenden Compiler:
 
 | Betriebssystem | Was Sie benötigen |
 |---|---|
@@ -46,10 +48,13 @@ install.packages("SimLev_0.5.0.tar.gz", repos = NULL, type = "source")
 
 | Paket | Wofür |
 |---|---|
-| `plotly` | Interaktives HTML-Dashboard über plotly (ohne plotly schreibt SimLev ein eigenes, abhängigkeitsfreies HTML) |
-| `TTR` | Bequeme Berechnung technischer Indikatoren (z. B. gleitende Durchschnitte) für Signalstrategien |
 | `testthat` | Ausführen der Test-Suite |
 | `knitr`, `rmarkdown` | Bauen der Vignette |
+
+Technische Indikatoren für Signalstrategien (z. B. gleitende Durchschnitte)
+lassen sich bequem mit dem Paket `TTR` berechnen (`TTR::SMA()` u. a.). `TTR`
+ist keine Abhängigkeit von SimLev und wird bei Bedarf separat installiert
+(`install.packages("TTR")`).
 
 ## Kurzbeispiel
 
@@ -91,7 +96,7 @@ plot(result)
 - `?read_tax_tariff` – Einkommensteuertarif (§ 32a EStG, Soli) aus einer
   austauschbaren Datei für `simulation(..., taxable_income =)`
 - `?compute_rebal_trigger` – ereignisbasierte Trigger
-- `?plot.SimLevResult`, `?plot_interactive` – Visualisierung und Export
+- `?plot.SimLevResult` – Visualisierung und Export
 - `vignette("getting-started", package = "SimLev")` – Einführung Schritt
   für Schritt
 - [`inst/examples/rebal_trigger_cookbook.R`](inst/examples/rebal_trigger_cookbook.R) –
@@ -142,7 +147,6 @@ R/
   asset_config.R, strategy.R asset_config(), create_strategy() & Co.
   compute_rebal_trigger.R    ereignisbasierte Trigger
   plot_dashboard.R           statisches Dashboard (Base-Grafik)
-  plot_interactive.R         interaktives HTML-Dashboard
   backcast.R                 backcast_fit(), backcast()
   bootstrap.R                bootstrap_config(), bootstrap(), bootstrap_study(), block_length()
   withdrawal.R               withdrawal_rule(), withdrawal_simulation() & Co.
@@ -171,9 +175,12 @@ R/
   analysis_tests.R           signal_analysis(), sharpe_test(), reality_check(),
                              min_track_record(), return_heatmap()
   regimes.R                  regime_hmm(), regime_states()
-  RcppExports.R, utils.R
+  cores.R                    .Call-Hüllen der C++-Kerne
+  utils.R
 src/                         C++-Kerne (FIFO, Steuern, Markt-Updates,
-                             Bootstrap-Verfahren, Entnahmeregeln, DCC)
+                             Bootstrap-Verfahren, Entnahmeregeln, DCC),
+                             init.c (Registrierung), simlev_capi.h
+                             (Anbindung an R's C-Schnittstelle)
 man/                         Hilfeseiten
 tests/testthat/              Test-Suite
 vignettes/                   Einführung

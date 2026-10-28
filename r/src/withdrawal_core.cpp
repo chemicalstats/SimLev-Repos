@@ -33,11 +33,12 @@
 //  13 sensible        Basis (rate * P1 real) + e * realer Vorjahresgewinn
 //  14 hebeler         Autopilot II: lambda * W_vj * Infl + (1 - lambda) * PMT(r, Restjahre) * P
 
-#include <Rcpp.h>
+#include "simlev_capi.h"
 #include <cmath>
 #include <algorithm>
 #include <limits>
-using namespace Rcpp;
+#include <vector>
+using sl::stop;
 
 // Parameter-Slots (siehe R: .wd_param_vector)
 // Restjahre kommen aus der Zahl der Planjahre (years_rem), nicht aus der Regel.
@@ -251,18 +252,15 @@ struct FifoLots {
   }
 };
 
-//' Schneller Entnahme-Kern
-//' @keywords internal
-//' @noRd
-// [[Rcpp::export(name = ".wd_simulate")]]
-List wd_simulate(NumericMatrix R, NumericMatrix INF, NumericMatrix CAPE, NumericMatrix BASE,
-                 int ppy, int rule, NumericVector rp, bool start_timing,
-                 double start_value, NumericVector income_real,
-                 bool tax_on, double tax_rate, double tfs, double spb_annual, bool vp_on,
-                 double cost, double basis_ratio, double loss0, bool keep,
-                 NumericVector lot_n = NumericVector::create(), NumericVector lot_basis = NumericVector::create(),
-                 NumericVector lot_vp = NumericVector::create(), IntegerVector lot_group = IntegerVector::create(),
-                 double spb_first = -1.0, bool horizon_end = false) {
+// Schneller Entnahme-Kern (.wd_simulate)
+static SEXP wd_simulate(sl::NumMat R, sl::NumMat INF, sl::NumMat CAPE, sl::NumMat BASE,
+                        int ppy, int rule, sl::NumVec rp, bool start_timing,
+                        double start_value, sl::NumVec income_real,
+                        bool tax_on, double tax_rate, double tfs, double spb_annual, bool vp_on,
+                        double cost, double basis_ratio, double loss0, bool keep,
+                        sl::NumVec lot_n, sl::NumVec lot_basis,
+                        sl::NumVec lot_vp, sl::IntVec lot_group,
+                        double spb_first, bool horizon_end) {
   const int np = R.nrow(), paths = R.ncol();
   // FIFO-Lots (nur mit Steuern; ohne Lots unveraendert das Durchschnittsmodell mit basis_ratio)
   const int nlot = lot_n.size();
@@ -298,14 +296,16 @@ List wd_simulate(NumericMatrix R, NumericMatrix INF, NumericMatrix CAPE, Numeric
     stop("Basiszins-Matrix %d x %d passt nicht zu den Renditen %d x %d", BASE.nrow(), BASE.ncol(), np, paths);
   if (np > 0 && income_real.size() < 1) stop("income_real darf nicht leer sein");
   const int ny = (np + ppy - 1) / ppy;
-  NumericMatrix wealth(keep ? ny + 1 : 0, keep ? paths : 0);    // real, Jahresanfang
-  NumericMatrix spend(ny, paths);                                 // real, Konsum je Planjahr
-  NumericMatrix planned(ny, paths);                               // real, geplante Entnahme
-  NumericVector terminal(paths), terminal_nom(paths), taxes(paths), depl(paths), fail(paths);
+  sl::NumMat wealth = sl::new_mat(keep ? ny + 1 : 0, keep ? paths : 0);    // real, Jahresanfang
+  sl::NumMat spend = sl::new_mat(ny, paths);                                 // real, Konsum je Planjahr
+  sl::NumMat planned = sl::new_mat(ny, paths);                               // real, geplante Entnahme
+  sl::NumVec terminal = sl::new_num(paths), terminal_nom = sl::new_num(paths), taxes = sl::new_num(paths),
+             depl = sl::new_num(paths), fail = sl::new_num(paths);
   // horizon_end: je Jahresende Endvermoegen und Steuern, als ende der Pfad dort (mit Abrechnung der offenen
   // Vorabpauschale wie am Pfadende); Zeile y + 1 = nach Planjahr y, Zeile 1 = Start
-  NumericMatrix wealth_end(horizon_end ? ny + 1 : 0, horizon_end ? paths : 0), taxes_end(horizon_end ? ny + 1 : 0, horizon_end ? paths : 0);
-  NumericVector st(S_N);
+  sl::NumMat wealth_end = sl::new_mat(horizon_end ? ny + 1 : 0, horizon_end ? paths : 0),
+             taxes_end = sl::new_mat(horizon_end ? ny + 1 : 0, horizon_end ? paths : 0);
+  sl::NumVec st = sl::new_num(S_N);
 
   for (int k = 0; k < paths; k++) {
     std::fill(st.begin(), st.end(), 0.0);
@@ -455,8 +455,50 @@ List wd_simulate(NumericMatrix R, NumericMatrix INF, NumericMatrix CAPE, Numeric
     terminal[k] = Vend / cpi; terminal_nom[k] = Vend; taxes[k] = tax_sum;
     fail[k] = failed ? 1.0 : 0.0; depl[k] = depl_p;
   }
-  return List::create(Named("wealth") = wealth, Named("spending") = spend, Named("planned") = planned,
-                      Named("terminal_real") = terminal, Named("terminal_nominal") = terminal_nom,
-                      Named("taxes_real") = taxes, Named("failed") = fail, Named("depletion_period") = depl,
-                      Named("wealth_end") = wealth_end, Named("taxes_end") = taxes_end);
+  return sl::named_list("wealth", wealth, "spending", spend, "planned", planned,
+                        "terminal_real", terminal, "terminal_nominal", terminal_nom,
+                        "taxes_real", taxes, "failed", fail, "depletion_period", depl,
+                        "wealth_end", wealth_end, "taxes_end", taxes_end);
+}
+
+// ---------------------------------------------------------------------------
+// .Call-Huelle (registriert in init.c; R-Seite mit den Standardwerten in R/cores.R)
+// ---------------------------------------------------------------------------
+
+extern "C" SEXP C_wd_simulate(SEXP s_R, SEXP s_INF, SEXP s_CAPE, SEXP s_BASE, SEXP s_ppy, SEXP s_rule,
+                              SEXP s_rp, SEXP s_start_timing, SEXP s_start_value, SEXP s_income_real,
+                              SEXP s_tax_on, SEXP s_tax_rate, SEXP s_tfs, SEXP s_spb_annual, SEXP s_vp_on,
+                              SEXP s_cost, SEXP s_basis_ratio, SEXP s_loss0, SEXP s_keep, SEXP s_lot_n,
+                              SEXP s_lot_basis, SEXP s_lot_vp, SEXP s_lot_group, SEXP s_spb_first,
+                              SEXP s_horizon_end) {
+  return sl::call([&]() {
+    sl::NumMat R = sl::num_mat(s_R);
+    sl::NumMat INF = sl::num_mat(s_INF);
+    sl::NumMat CAPE = sl::num_mat(s_CAPE);
+    sl::NumMat BASE = sl::num_mat(s_BASE);
+    int ppy = sl::as_int(s_ppy);
+    int rule = sl::as_int(s_rule);
+    sl::NumVec rp = sl::num_vec(s_rp);
+    bool start_timing = sl::as_bool(s_start_timing);
+    double start_value = sl::as_double(s_start_value);
+    sl::NumVec income_real = sl::num_vec(s_income_real);
+    bool tax_on = sl::as_bool(s_tax_on);
+    double tax_rate = sl::as_double(s_tax_rate);
+    double tfs = sl::as_double(s_tfs);
+    double spb_annual = sl::as_double(s_spb_annual);
+    bool vp_on = sl::as_bool(s_vp_on);
+    double cost = sl::as_double(s_cost);
+    double basis_ratio = sl::as_double(s_basis_ratio);
+    double loss0 = sl::as_double(s_loss0);
+    bool keep = sl::as_bool(s_keep);
+    sl::NumVec lot_n = sl::num_vec(s_lot_n);
+    sl::NumVec lot_basis = sl::num_vec(s_lot_basis);
+    sl::NumVec lot_vp = sl::num_vec(s_lot_vp);
+    sl::IntVec lot_group = sl::int_vec(s_lot_group);
+    double spb_first = sl::as_double(s_spb_first);
+    bool horizon_end = sl::as_bool(s_horizon_end);
+    return wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real,
+                       tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep,
+                       lot_n, lot_basis, lot_vp, lot_group, spb_first, horizon_end);
+  });
 }

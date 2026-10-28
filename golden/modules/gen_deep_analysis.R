@@ -139,7 +139,7 @@ ref_case("da_drawdowns", "v <- c(1, 2, 1.5, 1.8, 2.5, 2.4, 2.6, 2, 1); dt <- as.
          jl = paste0(JH, 'v = [1, 2, 1.5, 1.8, 2.5, 2.4, 2.6, 2, 1]; dt = Date(2020, 1, 1) .+ Day.([0, 1, 2, 3, 4, 5, 8, 9, 30])
 result = Any[DA._da_drawdowns(dt, v), DA._da_drawdowns(dt, v, 2), DA._da_drawdowns(dt, cumsum(1.0:9.0))]'))
 ref_case("da_rf", "dt <- as.Date('2020-01-01') + c(0, 1, 3, 4, 10, 40); list(SimLev:::.da_rf(dt, c(1, 1, 2, 2, 3, 3), c(1L, 3L, 6L)), SimLev:::.da_rf(dt, rep(2, 6), 1:6, defl = 1.001^(0:5)))",
-         paste0(P, "dt = np.datetime64('2020-01-01') + np.array([0, 1, 3, 4, 10, 40])\nresult = [DA._da_rf(dt, np.array([1, 1, 2, 2, 3, 3.0]), np.array([0, 2, 5])), DA._da_rf(dt, np.repeat(2.0, 6), np.arange(6), defl=np.array([simlev._rnum.r_pow(1.001, k) for k in range(6)]))]"),
+         paste0(P, "dt = np.datetime64('2020-01-01') + np.array([0, 1, 3, 4, 10, 40])\nresult = [DA._da_rf(dt, np.array([1, 1, 2, 2, 3, 3.0]), np.array([0, 2, 5])), DA._da_rf(dt, np.repeat(2.0, 6), np.arange(6), defl=np.array([simlev._r.rnum.r_pow(1.001, k) for k in range(6)]))]"),
          jl = paste0(JH, 'dt = Date(2020, 1, 1) .+ Day.([0, 1, 3, 4, 10, 40])
 result = Any[DA._da_rf(dt, [1, 1, 2, 2, 3, 3.0], [1, 3, 6]), DA._da_rf(dt, fill(2.0, 6), 1:6, [SL.r_pow(1.001, k) for k in 0:5])]'))
 # Fehler

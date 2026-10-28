@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # .sim_run_days() steuert die Tage: zusammenhaengende Tage ohne Ereignis in einem C++-Aufruf
-# (batch_market_update), Jahreswechsel (handle_year_change) und Abrechnung der Vorabpauschale des
+# (.sim_market_update_batch_cpp), Jahreswechsel (handle_year_change) und Abrechnung der Vorabpauschale des
 # Vorjahres direkt, die uebrigen Ereignisse in den Tagesschritten .sim_day_*() in fester
 # Reihenfolge: Aktivierung, Split, Sparplan, Handel, Rebalancing, Gewinnrealisierung, Vorabpauschale
 # (31.12.), Fondskosten, Liquidation. Jeder Schritt gibt sim_mem zurueck (C++-Funktionen aendern
@@ -51,7 +51,7 @@
     # → Ein einzelner C++ Aufruf statt hunderte R-Iterationen
     # ─────────────────────────────────────────────────────────────────────────
     if (time > prev_end + 1L) {
-      batch_market_update(sim_mem, flag_assets, prev_end + 1L, time - 1L)
+      .sim_market_update_batch_cpp(sim_mem, flag_assets, prev_end + 1L, time - 1L)
     }
     
     # ─────────────────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@
     
     # === Wenn kein Slow-Path → nur Market-Update (C++) ===
     if (!flag_slow_path[time]) {
-      perform_market_update(sim_mem, flag_assets, time)
+      .sim_market_update_cpp(sim_mem, flag_assets, time)
       prev_end <- time
       next
     }
@@ -99,7 +99,7 @@
       if (length(sim_mem[["totals"]][["vp_pending"]])) sim_mem <- .settle_vp(sim_mem, time)
       if (length(sim_mem[["totals"]][["p23_due"]])) sim_mem <- .settle_p23(sim_mem, time)
       if (.gp_pending()) sim_mem <- .settle_gp(sim_mem, time)
-      calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
+      .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
       flag_fast_report <- FALSE
     }
 
@@ -175,7 +175,7 @@
 
     # Fallback: Wenn kein Slow-Path-Event den Report aktualisiert hat
     if(flag_fast_report){
-      perform_market_update(sim_mem, flag_assets, time)
+      .sim_market_update_cpp(sim_mem, flag_assets, time)
     }
 
     prev_end <- time
@@ -185,7 +185,7 @@
   # TRAILING BATCH: Fast-Path-Tage nach dem letzten Individual-Tag
   # ─────────────────────────────────────────────────────────────────────────
   if (prev_end < n_total_days) {
-    batch_market_update(sim_mem, flag_assets, prev_end + 1L, n_total_days)
+    .sim_market_update_batch_cpp(sim_mem, flag_assets, prev_end + 1L, n_total_days)
   }
 
   sim_mem
@@ -225,7 +225,7 @@
     rebalance_now <- TRUE   # Aufrufer: flag_rebalance[time] <- TRUE, flag_trade[time] <- FALSE
   }
 
-  calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
+  .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
 
   list(sim_mem = sim_mem, rebalance_now = rebalance_now)
 }
@@ -293,7 +293,7 @@ current_date = flag_date[time]
     }
   }
 
-  calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
+  .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
 
   sim_mem
 }
@@ -319,7 +319,7 @@ current_date = flag_date[time]
 
   if(balance_dca && length(active_assets) > 1){
     # A7-06: Wert-Defizite zum Tageskurs (nicht mit den Vortageswerten) bestimmen
-    calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
+    .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
     # R-1 (balance_dca): Rate schliesst zuerst die WERT-Defizite zu den
     # Strategie-Zielen (Rebalancing-Wirkung); ein etwaiger Rest wird nach
     # Strategie-Gewichten verteilt.
@@ -333,11 +333,11 @@ current_date = flag_date[time]
     }
     alloc <- setNames(as.numeric(alloc), active_assets)
     for(name in active_assets){
-      dca_flows_allocation(input = sim_mem, name = name, flows = alloc[[name]], index = time)
+      .sim_dca_flows_cpp(input = sim_mem, name = name, flows = alloc[[name]], index = time)
     }
   } else {
     for(name in active_assets){
-      dca_flows_allocation(input = sim_mem, name = name, flows = strat_w[[name]] * dca_amount, index = time)
+      .sim_dca_flows_cpp(input = sim_mem, name = name, flows = strat_w[[name]] * dca_amount, index = time)
     }
   }
   if(details){
@@ -347,7 +347,7 @@ current_date = flag_date[time]
     cat(do.call(sprintf, c(list(format_text, dca_amount), list(flag_date[time]), as.list(flow_values))))
   }
 
-  calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
+  .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
 
   sim_mem
 }
@@ -390,7 +390,7 @@ current_date = flag_date[time]
   }
 
   if(trade_event){
-    calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
+    .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
   }
 
   list(sim_mem = sim_mem, traded = trade_event)
@@ -464,7 +464,7 @@ current_date = flag_date[time]
   # Gleichbehandlung: Ist-Gewichte total-basiert (worth+money) fuer ALLE
   # A7-06: Ist-Gewichte, Abweichung und Depotwert zum Tageskurs vor dem Handel (nach Sparrate und
   # Signal-Ein-/Ausstieg des Tages); vorher galten die Werte des Vortags, gehandelt wurde zum Tageskurs
-  calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
+  .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
   actual_weights <- sapply(active_assets, function(name){sim_mem[["status"]][[name]][["differ"]]})
 
   new_asset <- any(asset_starts == flag_date[time])
@@ -625,7 +625,7 @@ current_date = flag_date[time]
     }
   }
 
-  calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
+  .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
 
   sim_mem
 }
@@ -650,7 +650,7 @@ current_date = flag_date[time]
                                     tax_mode, tax_rate, effective_tax_rate, marginal_tax_rate,
                                     private_sale_threshold, details)
   }
-  calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
+  .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
 
   sim_mem
 }
@@ -712,7 +712,7 @@ current_date = flag_date[time]
     }
   }
   
-  calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
+  .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
 
   sim_mem
 }
@@ -728,7 +728,7 @@ current_date = flag_date[time]
 .sim_day_fund_fee <- function(sim_mem, time, fl, act, funds_fee, bonus_fee, details) {
   flag_assets <- fl$flag_assets; flag_date <- fl$flag_date
   .raise_cash <- act$.raise_cash
-  calculate_total_report(input = sim_mem, assets = flag_assets, index = time)   # Tageswerte
+  .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)   # Tageswerte
   result_fees <- calculate_fund_fees(
     input = sim_mem, index = time, dates = flag_date, assets = flag_assets,
     funds_fee = funds_fee, bonus_fee = bonus_fee, details = details)
@@ -747,7 +747,7 @@ current_date = flag_date[time]
     sim_mem[["trades"]][[name]][["fees"]][[sim_mem[["trades"]][[name]][["fee_count"]]]] <-
       list(event_date = flag_date[time], event_type = "Fees", fees_paid = paid)
   }
-  calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
+  .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
 
   sim_mem
 }
@@ -785,7 +785,7 @@ current_date = flag_date[time]
   if (tax_mode == "funds") {
     # R1-02/R1-03: Steuer auf den Gesamtgewinn an jedem Liquidationstag (auch am 31.12.;
     # die Fondskosten sind oben bereits belastet). Gewinn = Endwert - Startkapital - Einzahlungen
-    calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
+    .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
     final_value <- sum(vapply(flag_assets, function(x) sim_mem[["status"]][[x]][["total"]], numeric(1)), na.rm = TRUE)
     deposits <- sum(vapply(flag_assets, function(x) sum(sim_mem[["report"]][[x]][["flows"]][seq_len(time)]), numeric(1)))
     total_gains <- final_value - start_value - deposits
@@ -808,7 +808,7 @@ current_date = flag_date[time]
     }
   }
 
-  calculate_total_report(input = sim_mem, assets = flag_assets, index = time)
+  .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = time)
 
   sim_mem
 }
@@ -889,7 +889,7 @@ current_date = flag_date[time]
     }
     if (length(sim_mem[["totals"]][["p23_due"]])) sim_mem <- .settle_p23(sim_mem, n_total_days)
     if (!is.null(tariff_env) && .gp_pending()) sim_mem <- .settle_gp(sim_mem, n_total_days)
-    calculate_total_report(input = sim_mem, assets = flag_assets, index = n_total_days)
+    .sim_total_report_cpp(input = sim_mem, assets = flag_assets, index = n_total_days)
   }
   # === Ende neu ===
 

@@ -15,7 +15,7 @@ jll <- function(x) if (x) "true" else "false"
 nanpre <- function(nm, x) {
   i <- which(is.nan(x))
   if (!length(i)) return("")
-  sprintf("%s = np.atleast_1d(np.array(%s, dtype=float)).copy(); %s[[%s]] = F.R_NAN\n", nm, nm, nm, paste(i - 1L, collapse = ", "))
+  sprintf("%s = np.atleast_1d(np.array(%s, dtype=float)).copy(); %s[[%s]] = np.nan\n", nm, nm, nm, paste(i - 1L, collapse = ", "))
 }
 pyl <- function(x) if (is.null(x)) "None" else if (is.logical(x)) (if (x) "True" else "False") else if (is.character(x)) sprintf("'%s'", x) else format(x)
 # Typangaben integer-Spalten (mit NA kommen sie in Python als float an)
@@ -122,7 +122,7 @@ case("fmt_scalars", "c(format(3.14159), format(1e-15), format(100000), format(12
 case("fmt_digits_hi", "lapply(16:22, function(d) format(x, digits = d))", "[F.format(x, digits=d) for d in range(16, 23)]",
      list(x = c(0.1, 1/3, 123456.789, 1e-10 / 3, 2^70)), jl = "[F.format(x, digits=d) for d in 16:22]")
 case("fmt_int", "list(format(c(1L, -20L, 300L, NA)), format(100000L), format(c(5L, 12L), width = 6), format(1:3, trim = TRUE), format(123456789L, big.mark = ','))",
-     "[F.format(np.array([1, -20, 300, np.nan]), type='integer'), F.format(100000), F.format(np.array([5, 12]), width=6), F.format(np.arange(1, 4), trim=True), F.format(123456789, big_mark=',')]",
+     "[F.format(np.array([1, -20, 300, F.NA_REAL]), type='integer'), F.format(100000), F.format(np.array([5, 12]), width=6), F.format(np.arange(1, 4), trim=True), F.format(123456789, big_mark=',')]",
      jl = '[F.format(Union{Missing,Int}[1, -20, 300, missing]), F.format(100000), F.format([5, 12], width=6), F.format(1:3, trim=true), F.format(123456789, big_mark=",")]')
 case("fmt_lgl", "list(format(c(TRUE, FALSE, NA)), format(TRUE), format(c(TRUE, NA)), format(NA))",
      "[F.format(np.array([True, False, None], dtype=object)), F.format(True), F.format(np.array([True, None], dtype=object)), F.format(None, type='logical')]",
@@ -212,7 +212,7 @@ for (i in seq_along(sfm))
   case(sprintf("spf_%02d", i), sprintf("sprintf('%s', x)", sfm[i]), sprintf("F.sprintf('%s', x)", sfm[i]),
        list(x = x_s), nanpre("x", x_s), jl = sprintf('F.r_sprintf("%s", x)', sfm[i]))
 case("spf_int", "c(sprintf('%d', c(1L, -20L, NA)), sprintf('%5d|%-5d|%05d', 42L, 7L, 3L), sprintf('%02d', 1:3), sprintf('%d', 3), sprintf('%x %X %o', 255L, 255L, 8L), sprintf('%i', TRUE), sprintf('%3d', NA))",
-     "np.concatenate([F.sprintf('%d', F._as_v(np.array([1, -20, np.nan]), 'integer')), [F.sprintf('%5d|%-5d|%05d', 42, 7, 3)], F.sprintf('%02d', np.arange(1, 4)), [F.sprintf('%d', 3.0)], [F.sprintf('%x %X %o', 255, 255, 8)], [F.sprintf('%i', True)], [F.sprintf('%3d', F._as_v(None, 'integer'))]])",
+     "np.concatenate([F.sprintf('%d', F._as_v(np.array([1, -20, F.NA_REAL]), 'integer')), [F.sprintf('%5d|%-5d|%05d', 42, 7, 3)], F.sprintf('%02d', np.arange(1, 4)), [F.sprintf('%d', 3.0)], [F.sprintf('%x %X %o', 255, 255, 8)], [F.sprintf('%i', True)], [F.sprintf('%3d', F._as_v(None, 'integer'))]])",
      jl = 'vcat(F.r_sprintf("%d", Union{Missing,Int}[1, -20, missing]), [F.r_sprintf("%5d|%-5d|%05d", 42, 7, 3)], F.r_sprintf("%02d", 1:3), [F.r_sprintf("%d", 3.0)], [F.r_sprintf("%x %X %o", 255, 255, 8)], [F.r_sprintf("%i", true)], [F.r_sprintf("%3d", missing)])')
 case("spf_str", "c(sprintf('%s = %s', c('a', 'bb'), c(1.5, 1e5)), sprintf('%-26s|', 'Endvermögen'), sprintf('%10s|', 'Öl'), sprintf('%s', NA), sprintf('%s', c(TRUE, NA)), sprintf('%s', 1e-20), sprintf('%s', 123456789012), sprintf('%5s', NA))",
      "np.concatenate([F.sprintf('%s = %s', np.array(['a', 'bb'], dtype=object), np.array([1.5, 1e5])), [F.sprintf('%-26s|', 'Endvermögen'), F.sprintf('%10s|', 'Öl'), F.sprintf('%s', F._as_v(None, 'character'))], F.sprintf('%s', np.array([True, None], dtype=object)), [F.sprintf('%s', 1e-20), F.sprintf('%s', 123456789012.0)], F.sprintf('%5s', np.array([None], dtype=object))])",
@@ -360,7 +360,7 @@ case("plist3", cap("print(l)"), "F.print_list(l)", list(l = list(settings = c(ju
 case("plist_empty", "c(paste(capture.output(print(list())), collapse = '\\n'), paste(capture.output(print(setNames(list(), character(0)))), collapse = '\\n'))",
      "[F.print_list([]), F.print_list({})]", jl = "[F.print_list(Any[]), F.print_list(SL.RList())]")
 case("cat1", "capture.output(cat(1/3, 1e5, 123456.7, 1e-20, NA, NaN, TRUE, 3L, Inf, -0.5, 1e15, 100000.1, 0.1 + 0.2, '\\n'))",
-     "F.cat_str(1/3, 1e5, 123456.7, 1e-20, F.NA_REAL, F.R_NAN, True, 3, np.inf, -0.5, 1e15, 100000.1, 0.1 + 0.2, '\\n').rstrip('\\n')",
+     "F.cat_str(1/3, 1e5, 123456.7, 1e-20, F.NA_REAL, np.nan, True, 3, np.inf, -0.5, 1e15, 100000.1, 0.1 + 0.2, '\\n').rstrip('\\n')",
      jl = 'String(rstrip(F.cat_str(1/3, 1e5, 123456.7, 1e-20, SL.NA, NaN, true, 3, Inf, -0.5, 1e15, 100000.1, 0.1 + 0.2, "\\n"), \'\\n\'))')
 case("cat2", "paste(capture.output(cat('a', character(0), 'b', NULL, c(1, 2), c('x', 'y'), sep = c('-', '+'))), collapse = '\\n')",
      "F.cat_str('a', np.array([], dtype=object), 'b', None, np.array([1.0, 2.0]), np.array(['x', 'y'], dtype=object), sep=['-', '+'])",

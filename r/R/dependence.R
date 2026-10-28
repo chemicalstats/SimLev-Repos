@@ -20,8 +20,8 @@
 #                          Abhaengigkeitsstruktur?
 #  regime_subset()         Zeilen eines Regimes fuer Stress-Bootstraps
 #
-#  Alles ohne Zusatzpakete; rugarch wird fuer die univariaten GARCH-Fits der
-#  DCC-Stufe genutzt, falls installiert (sonst optim, wie im Bootstrap).
+#  Alles ohne Zusatzpakete; die univariaten GARCH-Fits der DCC-Stufe nutzen
+#  wie der Bootstrap die aus rugarch uebernommene Fassung (R/vendor_rugarch.R).
 #  Drittvariablen gehen immer verzoegert ein: Die Rendite der Periode t wird
 #  dem Zustand zugeordnet, der am Ende der Periode t - 1 bekannt war. Fuer
 #  Makrodaten mit Veroeffentlichungsverzug vorher align_macro() verwenden.
@@ -319,7 +319,8 @@ tail_dependence <- function(x, y, q = c(0.01, 0.025, 0.05, 0.10, 0.20)) {
 #'
 #' Schaetzt zeitvariable Korrelationen zwischen mehreren Renditereihen.
 #' Zweistufige Schaetzung: univariate GARCH(1,1) mit Konstante je Reihe (wie
-#' im Bootstrap: rugarch falls installiert, sonst optim, notfalls
+#' im Bootstrap: mit der aus rugarch 1.5-6 uebernommenen Fassung von
+#' \code{ugarchfit}, wenn diese scheitert mit optim, notfalls
 #' Momentschaetzer), danach die Korrelationsdynamik der standardisierten
 #' Residuen \eqn{z_t}
 #' \deqn{Q_t = (1 - a - b)\bar Q + a z_{t-1} z_{t-1}' + b Q_{t-1}}

@@ -138,11 +138,7 @@ class SimLevResult(RList):
         return res
 
     # ── Grafik ───────────────────────────────────────────────────────────
-    def plot(self, style: str = "full", panels=None, compare: "SimLevResult | None" = None,
-             colors: dict | None = None, **kwargs: Any):
-        """Dashboard (matplotlib); siehe :func:`simlev.dashboard.plot_dashboard`."""
-        from .dashboard import plot_dashboard
-        return plot_dashboard(self, style=style, panels=panels, compare=compare, colors=colors, **kwargs)
+    # ``plot`` (Dashboard als SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
 class SimLevSummary(RList):
     """Ergebnis von ``summary(<SimLevResult>)`` (R-Klasse ``summary.SimLevResult``)."""
@@ -235,3 +231,10 @@ def summary(object: SimLevResult) -> SimLevSummary:
     res["total_return"] = res["total_return_twr"]
     res["return_on_invested"] = (res["end_value"] - res["invested"]) / res["invested"]
     return res
+
+
+# plot.SimLevResult: Dashboard als SVG (wie Julias `_plot_method(plot_dashboard, "SimLevResult")`)
+from .dashboard import plot_dashboard as _plot_dashboard  # noqa: E402
+from .svg import _plot_method  # noqa: E402
+
+SimLevResult.plot = _plot_method(_plot_dashboard, "SimLevResult")

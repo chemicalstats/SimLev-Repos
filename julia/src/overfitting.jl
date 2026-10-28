@@ -12,6 +12,8 @@
 module Overfitting
 
 import ..SimLev
+using ..SimLev: _res_abline!, _res_fig, _res_finish, _res_hline!, _res_legend!, _res_line!, _res_panel, _res_points!,
+                _res_range, _res_rect!, _res_vline!
 using Dates
 using Logging
 
@@ -259,130 +261,7 @@ function _dates(x, what)
 end
 _days(d::Date) = Dates.value(d - Date(1970, 1, 1))
 
-# ── SVG-Grafik (nicht bitgleich zu R, zeigt dasselbe) ──────────────────────
-
-mutable struct _Fig
-    io::IOBuffer
-    w::Float64
-    h::Float64
-end
-struct _Pan
-    x0::Float64; y0::Float64; w::Float64; h::Float64
-    xlo::Float64; xhi::Float64; ylo::Float64; yhi::Float64
-    logy::Bool
-end
-_c(x) = string(round(Float64(x); digits = 1))
-_esc(s) = replace(String(s), "&" => "&amp;", "<" => "&lt;", ">" => "&gt;", "\"" => "&quot;")
-function _fig(w = 720, h = 420)
-    f = _Fig(IOBuffer(), w, h)
-    print(f.io, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$w\" height=\"$h\" viewBox=\"0 0 $w $h\" ",
-          "font-family=\"Helvetica, Arial, sans-serif\">\n<rect width=\"$w\" height=\"$h\" fill=\"white\"/>\n")
-    f
-end
-function _finish(f::_Fig; file = nothing)
-    print(f.io, "</svg>\n")
-    d = SL.SimLevDashboard(String(take!(f.io)))
-    file === nothing || write(String(file), d.svg)
-    d
-end
-_svg!(f::_Fig, s) = print(f.io, s, "\n")
-_text!(f, x, y, s; size = 11, anchor = "middle", color = "#222", rot = 0, weight = "normal") =
-    _svg!(f, "<text x=\"$(_c(x))\" y=\"$(_c(y))\" font-size=\"$size\" text-anchor=\"$anchor\" fill=\"$color\" font-weight=\"$weight\"" *
-             (rot != 0 ? " transform=\"rotate($rot $(_c(x)) $(_c(y)))\"" : "") * ">$(_esc(s))</text>")
-_tx(p::_Pan, x) = p.x0 + (x - p.xlo) / (p.xhi == p.xlo ? 1.0 : p.xhi - p.xlo) * p.w
-_yv(p::_Pan, y) = p.logy ? log10(y) : y
-_ty(p::_Pan, y) = p.y0 + p.h - (_yv(p, y) - p.ylo) / (p.yhi == p.ylo ? 1.0 : p.yhi - p.ylo) * p.h
-function _nice_ticks(lo, hi; n = 5)
-    (isfinite(lo) && isfinite(hi)) || return Float64[]
-    hi == lo && return [lo]
-    raw = (hi - lo) / n
-    mag = 10.0^floor(log10(raw))
-    st = raw / mag
-    step = (st < 1.5 ? 1 : st < 3 ? 2 : st < 7 ? 5 : 10) * mag
-    t0 = ceil(lo / step) * step
-    return [t for t in t0:step:hi + step * 1e-9]
-end
-_lab(v) = (a = abs(v); a == 0 ? "0" : a >= 1e4 || a < 1e-3 ? string(round(v; sigdigits = 3)) : string(round(v; sigdigits = 4)))
-function _range(v)
-    w = filter(isfinite, Float64.(collect(v)))
-    isempty(w) && return (0.0, 1.0)
-    lo, hi = extrema(w)
-    lo == hi && return (lo - 0.5, hi + 0.5)
-    pad = 0.04 * (hi - lo)
-    return (lo - pad, hi + pad)
-end
-"Panel mit Achsen, Titel und Beschriftungen."
-function _panel(f::_Fig, x0, y0, w, h, xlim, ylim; title = "", xlab = "", ylab = "", logy = false,
-                xticks = nothing, xticklabels = nothing, yticks = nothing, yticklabels = nothing, grid = true)
-    ylo, yhi = logy ? (log10(ylim[1]), log10(ylim[2])) : ylim
-    p = _Pan(x0, y0, w, h, xlim[1], xlim[2], ylo, yhi, logy)
-    _svg!(f, "<rect x=\"$(_c(x0))\" y=\"$(_c(y0))\" width=\"$(_c(w))\" height=\"$(_c(h))\" fill=\"none\" stroke=\"#555\"/>")
-    xt = xticks === nothing ? _nice_ticks(xlim...) : xticks
-    for (i, t) in enumerate(xt)
-        X = _tx(p, t)
-        grid && _svg!(f, "<line x1=\"$(_c(X))\" y1=\"$(_c(y0))\" x2=\"$(_c(X))\" y2=\"$(_c(y0 + h))\" stroke=\"#e6e6e6\"/>")
-        _text!(f, X, y0 + h + 14, xticklabels === nothing ? _lab(t) : xticklabels[i]; size = 9)
-    end
-    yt = yticks === nothing ? (logy ? [10.0^k for k in floor(ylo):ceil(yhi) if ylo <= k <= yhi] : _nice_ticks(ylim...)) : yticks
-    logy && length(yt) < 2 && (yt = [ylim[1], ylim[2]])
-    for (i, t) in enumerate(yt)
-        Y = _ty(p, t)
-        grid && _svg!(f, "<line x1=\"$(_c(x0))\" y1=\"$(_c(Y))\" x2=\"$(_c(x0 + w))\" y2=\"$(_c(Y))\" stroke=\"#e6e6e6\"/>")
-        _text!(f, x0 - 5, Y + 3, yticklabels === nothing ? _lab(t) : yticklabels[i]; size = 9, anchor = "end")
-    end
-    isempty(title) || _text!(f, x0 + w / 2, y0 - 10, title; size = 13, weight = "bold")
-    isempty(xlab) || _text!(f, x0 + w / 2, y0 + h + 32, xlab; size = 11)
-    isempty(ylab) || _text!(f, x0 - 42, y0 + h / 2, ylab; size = 11, rot = -90)
-    p
-end
-function _pline!(f, p::_Pan, xs, ys; color = "#2C6E9B", width = 1.5, dash = "")
-    io = IOBuffer(); first = true
-    for (x, y) in zip(xs, ys)
-        ok = isfinite(x) && isfinite(y) && (!p.logy || y > 0)
-        ok || (first = true; continue)
-        print(io, first ? "M" : "L", _c(_tx(p, x)), " ", _c(_ty(p, y)))
-        first = false
-    end
-    s = String(take!(io))
-    isempty(s) || _svg!(f, "<path d=\"$s\" fill=\"none\" stroke=\"$color\" stroke-width=\"$width\"" *
-                         (isempty(dash) ? "" : " stroke-dasharray=\"$dash\"") * "/>")
-end
-function _ppoints!(f, p::_Pan, xs, ys; color = "#2C6E9B", r = 3, opacity = 1.0)
-    for (i, (x, y)) in enumerate(zip(xs, ys))
-        (isfinite(x) && isfinite(y)) || continue
-        col = color isa AbstractVector ? color[i] : color
-        _svg!(f, "<circle cx=\"$(_c(_tx(p, x)))\" cy=\"$(_c(_ty(p, y)))\" r=\"$r\" fill=\"$col\" fill-opacity=\"$opacity\"/>")
-    end
-end
-_pvline!(f, p::_Pan, x; color = "#B5562B", width = 2, dash = "") = isfinite(x) &&
-    _svg!(f, "<line x1=\"$(_c(_tx(p, x)))\" y1=\"$(_c(p.y0))\" x2=\"$(_c(_tx(p, x)))\" y2=\"$(_c(p.y0 + p.h))\" stroke=\"$color\" stroke-width=\"$width\"" *
-             (isempty(dash) ? "" : " stroke-dasharray=\"$dash\"") * "/>")
-_phline!(f, p::_Pan, y; color = "grey", width = 1, dash = "2,3") = isfinite(y) &&
-    _svg!(f, "<line x1=\"$(_c(p.x0))\" y1=\"$(_c(_ty(p, y)))\" x2=\"$(_c(p.x0 + p.w))\" y2=\"$(_c(_ty(p, y)))\" stroke=\"$color\" stroke-width=\"$width\"" *
-             (isempty(dash) ? "" : " stroke-dasharray=\"$dash\"") * "/>")
-function _pabline!(f, p::_Pan, a, b; color = "#B5562B", width = 2)
-    (isfinite(a) && isfinite(b)) || return
-    _pline!(f, p, [p.xlo, p.xhi], [a + b * p.xlo, a + b * p.xhi]; color = color, width = width)
-end
-function _prect!(f, p::_Pan, x1, y1, x2, y2; fill = "#2C6E9B", stroke = "none")
-    X1, X2 = minmax(_tx(p, x1), _tx(p, x2)); Y1, Y2 = minmax(_ty(p, y1), _ty(p, y2))
-    _svg!(f, "<rect x=\"$(_c(X1))\" y=\"$(_c(Y1))\" width=\"$(_c(X2 - X1))\" height=\"$(_c(Y2 - Y1))\" fill=\"$fill\" stroke=\"$stroke\"/>")
-end
-function _legend!(f, x, y, labels, colors)
-    for (i, (l, c)) in enumerate(zip(labels, colors))
-        Y = y + (i - 1) * 15
-        _svg!(f, "<line x1=\"$(_c(x))\" y1=\"$(_c(Y))\" x2=\"$(_c(x + 18))\" y2=\"$(_c(Y))\" stroke=\"$c\" stroke-width=\"2\"/>")
-        _text!(f, x + 24, Y + 4, l; size = 10, anchor = "start")
-    end
-end
-"Farbverlauf wie `colorRampPalette(c(\"#B5562B\", \"#F2E9DC\", \"#2C6E9B\"))(64)`."
-function _ramp(t)
-    a = (0xB5, 0x56, 0x2B); b = (0xF2, 0xE9, 0xDC); c = (0x2C, 0x6E, 0x9B)
-    t = clamp(t, 0.0, 1.0)
-    u, v, s = t < 0.5 ? (a, b, 2t) : (b, c, 2t - 1)
-    rgb = [round(Int, u[i] + (v[i] - u[i]) * s) for i in 1:3]
-    return "#" * join(string.(rgb; base = 16, pad = 2))
-end
+# ── SVG-Grafik: Bausteine `_res_*` (Stil Ergebnisgrafiken) in svg.jl ──────────
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Renditematrix
@@ -656,26 +535,29 @@ function _print_pbo(io::IO, x)
 end
 
 function _plot_pbo(x; file = nothing, kw...)
-    f = _fig(900, 400)
+    f = _res_fig(900, 400)
     lam = filter(isfinite, Float64.(collect(x["lambda"])))
     lo, hi = isempty(lam) ? (-1.0, 1.0) : extrema(lam)
     lo == hi && (lo -= 0.5; hi += 0.5)
     nb = 40; bw = (hi - lo) / nb
     cnt = zeros(Int, nb)
     for v in lam; cnt[clamp(floor(Int, (v - lo) / bw) + 1, 1, nb)] += 1; end
-    p = _panel(f, 60, 40, 360, 300, (lo, hi), (0.0, max(1, maximum(cnt; init = 0)) * 1.05);
-               title = "Logits (PBO " * _spf("%.0f", 100 * x["pbo"]) * " %)", xlab = "λ", ylab = "Häufigkeit")
+    p = _res_panel(f, 60, 40, 360, 300, (lo, hi), (0.0, max(1, maximum(cnt; init = 0)) * 1.05);
+                   title = "Logits (PBO " * _spf("%.0f", 100 * x["pbo"]) * " %)", xlab = "λ", ylab = "Häufigkeit")
     for i in 1:nb
-        cnt[i] > 0 && _prect!(f, p, lo + (i - 1) * bw, 0.0, lo + i * bw, cnt[i]; fill = "#2C6E9B", stroke = "white")
+        cnt[i] > 0 && _res_rect!(f, p, lo + (i - 1) * bw, 0.0, lo + i * bw, cnt[i]; fill = "#2C6E9B", stroke = "white")
     end
-    _pvline!(f, p, 0.0)
+    _res_vline!(f, p, 0.0)
     xb = Float64.(collect(x["is_best"])); yb = Float64.(collect(x["oos_best"]))
-    q = _panel(f, 520, 40, 360, 300, _range(xb), _range(yb); title = "Leistungsabfall",
-               xlab = "$(x["metric"]) In-Sample (bester Punkt)", ylab = "Out-of-Sample")
-    _ppoints!(f, q, xb, yb; r = 2, opacity = 0.4)
-    _pabline!(f, q, Float64(x["intercept"]), Float64(x["slope"]))
-    _phline!(f, q, 0.0)
-    _finish(f; file = file)
+    q = _res_panel(f, 520, 40, 360, 300, _res_range(xb), _res_range(yb); title = "Leistungsabfall",
+                   xlab = "$(x["metric"]) In-Sample (bester Punkt)", ylab = "Out-of-Sample")
+    _res_points!(f, q, xb, yb; r = 2, opacity = 0.4)
+    _res_abline!(f, q, Float64(x["intercept"]), Float64(x["slope"]))
+    _res_hline!(f, q, 0.0)
+    # dargestellte Werte: endliche Logits (Histogramm), Punkte In-/Out-of-Sample
+    data = SL.RList("logits" => SL.RFrame("lambda" => lam),
+                    "degradation" => SL.RFrame("is_best" => xb, "oos_best" => yb))
+    return (_res_finish(f; file = file), data)
 end
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -894,16 +776,18 @@ function _plot_wf(x; file = nothing, kw...)
     allv = filter(v -> isfinite(v) && v > 0, vcat(ys...))
     lo, hi = isempty(allv) ? (0.5, 2.0) : extrema(allv)
     lo == hi && (lo /= 1.1; hi *= 1.1)
-    f = _fig(760, 420)
+    f = _res_fig(760, 420)
     yrs = unique(Dates.year.(s["date"]))
     xt = Float64[_days(Date(y, 1, 1)) for y in yrs if dd[1] <= _days(Date(y, 1, 1)) <= dd[end]]
-    p = _panel(f, 70, 40, 660, 320, (dd[1], dd[end] == dd[1] ? dd[1] + 1 : dd[end]), (lo, hi); logy = true,
-               title = "Walk-Forward Out-of-Sample", ylab = "Wachstum (log)", xticks = xt,
-               xticklabels = [string(Dates.year(SL.from_days(Int(t)))) for t in xt])
+    p = _res_panel(f, 70, 40, 660, 320, (dd[1], dd[end] == dd[1] ? dd[1] + 1 : dd[end]), (lo, hi); logy = true,
+                   title = "Walk-Forward Out-of-Sample", ylab = "Wachstum (log)", xticks = xt,
+                   xticklabels = [string(Dates.year(SL.from_days(Int(t)))) for t in xt])
     cols = ["#2C6E9B", "#B5562B", "#737373"]
-    for (v, c, w) in zip(ys, cols, (2, 1.3, 1.3)); _pline!(f, p, dd, v; color = c, width = w); end
-    _legend!(f, 85, 60, ["Walk-Forward", "Rückschau-Bester", "Durchschnitt"], cols)
-    _finish(f; file = file)
+    for (v, c, w) in zip(ys, cols, (2, 1.3, 1.3)); _res_line!(f, p, dd, v; color = c, width = w); end
+    _res_legend!(f, 85, 60, ["Walk-Forward", "Rückschau-Bester", "Durchschnitt"], cols)
+    data = SL.RList("growth" => SL.RFrame("date" => collect(Date, s["date"]), "walk_forward" => _tofloat(s["walk_forward"]),
+                                          "hindsight" => _tofloat(s["hindsight"]), "average" => _tofloat(s["average"])))
+    return (_res_finish(f; file = file), data)
 end
 
 # ═════════════════════════════════════════════════════════════════════════════

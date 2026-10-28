@@ -112,8 +112,9 @@ sind, heißen `yield_`, `raise_` und `from_`.
    andere aus LAPACK, BLAS und LINPACK ist rein portiert.
 7. Nichts erfinden: Maßgeblich sind R-Code und R-Ergebnis. Bei Unklarheit
    in R nachrechnen.
-8. Grafiken (matplotlib) müssen nicht bitgleich sein, aber dasselbe zeigen;
-   die berechneten Daten dahinter sind bitgleich.
+8. Grafiken (SVG über `simlev/svg.py`, wie in Julia) müssen nicht bitgleich
+   sein, aber dasselbe zeigen; die berechneten Daten dahinter und
+   `SimLevPlot.data` sind bitgleich.
 9. Zeichenketten sortieren und vergleichen nur über `simlev._r.stats`
    (`order`, `sort`, `rank`, `str_collate`; ICU-Kollation wie R), nie über
    `sorted`, `np.sort`, `np.unique` oder `pd.Categorical` mit Standardordnung.
@@ -160,7 +161,8 @@ unverändert bleibt).
 | `compute_rebal_trigger.R` | `trigger.py` |
 | `tax_tariff.R`, `inst/extdata/steuertarif.csv` | `tax_tariff.py`, `data/steuertarif.csv` |
 | `print`/`summary` von `SimLevResult` | `result.py` |
-| `plot_dashboard.R` | `dashboard.py` (R-Farbnamen in `data/r_colors.csv`) |
+| `plot_dashboard.R` | `dashboard.py` (Daten und Panels; R-Farbnamen in `data/r_colors.csv`) |
+| Grafik (ohne R-Datei; R zeichnet mit Basisgrafik) | `svg.py` (`SimLevPlot`, plot-API, alle SVG-Zeichenbausteine) |
 | `data_prep.R` | `data_prep.py` |
 | `backcast.R` | `backcast.py` |
 | `bonds.R` | `bonds.py` |
@@ -274,13 +276,53 @@ Dashboard-Daten `dashboard._dashboard_returns(res)` (wie
 
 ### Grafik
 
-`plot_dashboard` bzw. `res.plot()` zeichnet mit matplotlib und gibt die
-Figure zurück (R: invisible NULL). Gleich wie in R sind Prüfungen,
-Meldungen, alle Beschriftungstexte, Monatsrenditen, rollierende Renditen
-und Korrelationen sowie die Farben der Vergleichstabelle. Abgeglichen wurde
-das über einen `trace()`-Mitschnitt in R. Schriftgrößen und Ränder sind
-dagegen nur angenähert. R-Farbnamen stehen in `simlev/data/r_colors.csv`
+`plot_dashboard` bzw. `res.plot()` zeichnet wie die Julia-Fassung ohne
+Zusatzpaket als SVG und gibt ein `simlev.SimLevPlot` zurück (R: invisible
+NULL): Felder `svg`, `data` (`dict[str, DataFrame]`, die dargestellten
+Werte je Panel, nicht ausgedünnt und unskaliert), `source` (das
+Eingabeobjekt) und `kind` (dessen Klasse). Python und Julia schreiben
+dasselbe SVG und dieselben `data`. Gleich wie in R sind Prüfungen,
+Meldungen, alle Beschriftungstexte, Monatsrenditen, rollierende Renditen und
+Korrelationen sowie die Farben der Vergleichstabelle. Abgeglichen wurde das über einen
+`trace()`-Mitschnitt in R. Schriftgrößen und Ränder sind dagegen nur
+angenähert. R-Farbnamen stehen in `simlev/data/r_colors.csv`
 (`grDevices::colors()`).
+
+Alle Zeichenbausteine stehen im Grafikmodul `simlev/svg.py`, dem
+Gegenstück zu `julia/src/svg.jl`: gleiche Gliederung, gleiche Namen
+(Julias `name!` heißt in Python `name`). Die Module enthalten nur ihre
+Zeichenfunktionen (`_plot_*`, `plot_SimLev*`) mit der Datenaufbereitung
+und holen die Bausteine mit `from .svg import …`; `dashboard.py` hat die
+Dashboard-Daten und die Panels. Abschnitte von `svg.py`:
+
+1. Grafikobjekt `SimLevPlot`.
+2. Einheitliche Grafik-API: `_plot_method`, `_check_svg_file`,
+   `_write_svg`, `_warn_unknown_kw`.
+3. Gemeinsame Hilfen: `_esc` (Textschutz aller Stile), `r_pretty`,
+   Farben (`_col2rgba`, `_svgcol`, `_alpha` …), Datumshilfen
+   (`_MONATE_KURZ`, `_ym`, `_days_from_civil`, `_to_days`, `_fmt_day`).
+4. bis 9. je ein Grafikstil; ein Präfix je Stil, damit gleichnamige
+   Bausteine mit anderem Aussehen nicht verwechselt werden:
+
+| Abschnitt | Präfix | Bausteine (Auswahl) | Grafiken |
+|---|---|---|---|
+| 4. Stil Dashboard | – | `_Canvas`, `_Panel`, `_text`, `_line`, `_rect`, `_polyline`, `_area`, `_frame`, `_date_ticks`, `_yaxis` | `plot_dashboard`, `plot(<SimLevResult>)` |
+| 5. Stil Analysegrafiken | `_ana_` | `_AnaSvg`, `_AnaPanel`, `_ana_panel`, `_ana_lines`, `_ana_hline`, `_ana_rect`, `_ana_text`, `_ana_points`, `_ana_legend`, `_ana_ramp`, `_ana_svg_done`, `_ana_year_ticks` | deep_analysis, analysis_tests (Signal, Heatmap), planning |
+| 6. Stil Rastergrafiken | `_grid_` | `_GridBox`, `_grid_svg`, `_grid_axes`, `_grid_lines`, `_grid_bars`, `_grid_scatter`, `_grid_hline`, `_grid_legend`, `_grid_ticks` | dependence (Abhängigkeit, Tail-Regression, CoVaR), regimes |
+| 7. Stil Ergebnisgrafiken | `_res_` | `_ResFig`, `_ResPanel`, `_res_fig`, `_res_panel`, `_res_line`, `_res_points`, `_res_rect`, `_res_vline`, `_res_hline`, `_res_abline`, `_res_legend`, `_res_ramp`, `_res_finish` | overfitting (PBO, Walk-Forward), param_search, sensitivity |
+| 8. Stil Rückrechnung | `_bc_` | `_bc_doc`, `_bc_panel`, `_bc_esc` (ohne `"`) | backcast |
+| 9. Stil Allokationsgrafiken | `_alloc_` | `_alloc_ticks`, `_alloc_c`, `_alloc_ramp` | optimize (Gewichte, Effizienzgrenze), tactical (Zielgewichte) |
+
+10. Zahlen wie in Julia (nur Python): `_jl_str`, `_jl_round`,
+    `_jl_round_sig`, `_jl_pow`, `_jl_log10`, `_jl_range`, `_jl_min`/
+    `_jl_max`, `_jl_minimum`/`_jl_maximum`, `_jl_fmt`, `_jl_unique`,
+    `_jl_sort_levels` …, die Julias Base-Funktionen beim Schreiben der
+    Zahlen genau nachbilden.
+
+Die Grafiken von withdrawal und bootstrap entstehen direkt in der
+Zeichenfunktion.
+Ein neuer Baustein kommt in den Abschnitt seines Stils (mit dessen Präfix)
+und zugleich nach `julia/src/svg.jl`.
 
 ## Referenzfälle und Prüfung
 
@@ -342,6 +384,6 @@ Julia-Fassung (`julia/tools/compare_reference.jl`, siehe
 
 - Deutsch in Docstrings und Meldungen wie im R-Paket; Docstrings mit
   kurzer Beschreibung und Argumentliste (aus `r/man/*.Rd` übernommen).
-- Keine neuen Pflichtabhängigkeiten außer numpy und pandas; matplotlib
-  bleibt optional; ohne System-LAPACK rechnet numpy die Eigenvektoren
+- Keine Abhängigkeiten außer numpy und pandas (auch nicht für Grafiken);
+  ohne System-LAPACK rechnet numpy die Eigenvektoren
   (mit Warnung, nicht bitgleich).

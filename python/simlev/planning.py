@@ -30,6 +30,7 @@ from .deep_analysis import (
     _ext, _fill_na, _is_num_scalar, _key_month, _key_year, _last_of_key, _match_arg, _mean_lgl,
     _row_means, _sp, _stats, _to_date_days,
 )
+from .svg import _AnaSvg, _ana_hline, _ana_legend, _ana_panel, _ana_ramp, _ana_rect, _ana_svg_done
 
 __all__ = ["set_expected_return", "pooled_bootstrap", "portfolio_returns", "goal_optimize", "SimLevGoalPlan"]
 
@@ -561,21 +562,57 @@ class SimLevGoalPlan(RList):
         out.append("\nWahl im ersten Schritt: %s" % cands[int(np.argmax(cnt))])
         return "".join(out)
 
-    def plot(self, **kwargs):
-        """Optimale Kandidatenwahl je Periode und Vermögen (Vermögen log10)."""
-        import matplotlib.pyplot as plt
-        g = np.asarray(self["grid"])
-        keep = (g >= self["goal"] / 20) & (g <= self["goal"] * 3)
-        P = np.asarray(self["policy"])[:, keep]
-        fig, ax = plt.subplots(figsize=(9, 5))
-        ax.pcolormesh(np.arange(1, self["horizon"] + 1), np.log10(g[keep]), P.T, cmap="coolwarm",
-                      vmin=1, vmax=len(self["candidates"]), shading="nearest", **kwargs)
-        if self["goal"] > 0:
-            ax.axhline(math.log10(self["goal"]), ls="--", color="k")
-        ax.set_xlabel("Periode")
-        ax.set_ylabel("Vermögen (log10)")
-        ax.set_title("Optimale Wahl je Zeit und Vermögen")
-        return self
+    # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
+
+
+def _plot_goalplan(x):
+    """``plot.SimLevGoalPlan`` (SVG): optimale Kandidatenwahl je Periode und Vermögen (log10).
+
+    Zeichnet wie Julia mit den Bausteinen der Analysegrafiken aus svg.py (``_AnaSvg``, ``_ana_panel``,
+    ``_ana_rect``, …).
+    Liefert ``(svg, data)``: ``policy`` mit den gezeichneten Zellen (``period``, ``wealth`` = Gitterwert,
+    ``choice`` = Nummer des Kandidaten, ``candidate`` = sein Name).
+    """
+    g = np.asarray(_goal_grid(x), dtype=np.float64)
+    goal = float(x["goal"])
+    keep = [i for i, v in enumerate(g.tolist()) if v >= goal / 20 and v <= goal * 3]
+    P = np.asarray(x["policy"])[:, keep]
+    cands = [str(c) for c in np.atleast_1d(x["candidates"])]
+    K = len(cands)
+    H = int(x["horizon"])
+    pal = _ana_ramp(["#2C6E9B", "#F2E9DC", "#B5562B"], max(K, 1))
+    gk = g[keep]
+    lg = [math.log10(v) for v in gk.tolist()]
+    s = _AnaSvg(900, 520)
+    yr = (0.0, 1.0) if not lg else (min(lg), max(lg))
+    p = _ana_panel(s, 0, 0, 800, 520, (0.5, H + 0.5), yr, title="Optimale Wahl je Zeit und Vermögen",
+                   xlab="Periode", ylab="Vermögen (log10)", xticks=list(range(1, H + 1)))
+    nq = len(lg)
+    for t in range(1, H + 1):
+        for q, y in enumerate(lg):
+            lo = y if q == 0 else (lg[q - 1] + y) / 2
+            hi = y if q == nq - 1 else (lg[q + 1] + y) / 2
+            _ana_rect(s, p, t - 0.5, lo, t + 0.5, hi, fill=pal[min(max(int(P[t - 1, q]), 1), len(pal)) - 1])
+    if goal > 0:
+        _ana_hline(s, p, math.log10(goal), col="#000", dash="5,4")
+    _ana_legend(s, p, cands, pal, x=800.0, y=50.0, box=True)
+    ch = [int(P[t, q]) for t in range(H) for q in range(nq)]
+    data = {"policy": pd.DataFrame({"period": np.array([t + 1 for t in range(H) for _ in range(nq)], dtype=np.int64),
+                                    "wealth": np.array([gk[q] for _ in range(H) for q in range(nq)], dtype=np.float64),
+                                    "choice": np.array(ch, dtype=np.int64),
+                                    "candidate": [cands[min(max(c, 1), K) - 1] for c in ch]})}
+    return _ana_svg_done(s), data
+
+
+def _goal_grid(x):
+    """Vermögensgitter als Zahlen (``DA._f64(x$grid)``)."""
+    return [NA_REAL if v is None else float(v) for v in np.atleast_1d(x["grid"]).tolist()]
+
+
+# plot.SimLevGoalPlan (SVG, ``SimLevPlot``) wie Julias ``_plot_method(_plot_goalplan, "SimLevGoalPlan")``
+from .svg import _plot_method  # noqa: E402
+
+SimLevGoalPlan.plot = _plot_method(_plot_goalplan, "SimLevGoalPlan")
 
 
 from ._r.base import quiet_fp  # noqa: E402

@@ -19,6 +19,7 @@ from ._r import fmt as _fmt
 from ._r.rnum import r_cumprod, r_mean, r_mean_int, r_median, r_sum
 from .param_search import (_expand_grid, _isna, _match_arg, _modify_list, _py, _quiet, _seq_by,
                            _cond_msg, _which_max_py)
+from .svg import _res_fig, _res_finish, _res_line, _res_panel, _res_points, _res_range, _res_rect, _res_vline
 
 __all__ = ["sensitivity_grid", "rebalancing_sensitivity", "lumpsum_vs_dca", "leveraged_series",
            "leverage_sensitivity", "SimLevSensitivity", "SimLevLumpSum"]
@@ -280,27 +281,50 @@ class SimLevSensitivity(_RFrame):
             out.append(_fmt.sprintf("Optimaler Hebel: CAGR %.2f, Sharpe %.2f\n", oi[0], oi[1]))
         return "".join(out)[:-1]
 
-    def plot(self, metric="cagr", **kwargs):
-        import matplotlib.pyplot as plt
-        kind = self.attrs.get("kind", "grid")
-        y = self[metric].to_numpy(dtype=np.float64) * (100 if metric in ("cagr", "ttwror", "max_drawdown", "avg_drawdown") else 1)
-        fig, ax = plt.subplots()
-        if kind == "leverage":
-            ax.plot(self["leverage"], y, "o-", color="#2C6E9B")
-            ax.axvline(self["leverage"].iloc[int(np.nanargmax(self[metric].to_numpy(dtype=float)))], ls=":", color="#B5562B")
-            ax.set_xlabel("Hebel")
-            ax.set_ylabel(metric)
-            ax.set_title("%s nach Hebel" % metric)
-        else:
-            band = self["band"].to_numpy(dtype=float)
-            off = self["offset"].to_numpy(dtype=float)
-            lab = ["%s %s %s" % (f, "" if np.isnan(b) else "±%s" % _fmt.paste(b), "" if np.isnan(o) else "-%sd" % _fmt.paste(o))
-                   for f, b, o in zip(self["frequency"], band, off)]
-            ax.barh(range(len(y)), y[::-1], color="#2C6E9B")
-            ax.set_yticks(range(len(y)), lab[::-1], fontsize=7)
-            ax.set_xlabel(metric)
-            ax.set_title("Rebalancing-Varianten: %s" % metric)
-        return self
+    # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
+
+
+def _plot_sens(x, metric="cagr"):
+    """``plot.SimLevSensitivity`` (SVG): Kennzahl nach Hebel (Linie) bzw. je Rebalancing-Variante (Balken).
+
+    Liefert ``(svg, data)``: ``leverage`` (``leverage``, ``value``) bzw. ``variants`` (``label``, ``value``);
+    ``value`` ist die Kennzahl unskaliert wie im Ergebnis (Anteile, nicht ×100).
+    """
+    from . import overfitting as OF
+    kind = x.attrs.get("kind", "grid")
+    sc = 100 if metric in ("cagr", "ttwror", "max_drawdown", "avg_drawdown") else 1
+    raw = np.array([_num1(v) for v in x[metric].tolist()], dtype=np.float64)
+    y = sc * raw
+    f = _res_fig(720, 460)
+    if kind == "leverage":
+        lv = np.array([_num1(v) for v in x["leverage"].tolist()], dtype=np.float64)
+        p = _res_panel(f, 70, 40, 620, 360, _res_range(lv), _res_range(y), title="%s nach Hebel" % metric,
+                       xlab="Hebel", ylab=metric)
+        _res_line(f, p, lv, y)
+        _res_points(f, p, lv, y)
+        j = OF._which_max(raw)
+        if j is not None:
+            _res_vline(f, p, float(lv[j]), width=1, dash="2,3")
+        data = {"leverage": pd.DataFrame({"leverage": lv, "value": raw})}
+    else:
+        n = len(y)
+        lab = []
+        for fr, b, o in zip(x["frequency"].tolist(), x["band"].tolist(), x["offset"].tolist()):
+            lab.append(" ".join([str(fr), "" if _isna(b) else "±" + _fmt.as_character(_py(b)),
+                                 "" if _isna(o) else "-" + _fmt.as_character(_py(o)) + "d"]))
+        lo, hi = _res_range(np.concatenate([[0.0], y]))
+        p = _res_panel(f, 160, 40, 530, 380, (lo, hi), (0.5, n + 0.5), title="Rebalancing-Varianten: %s" % metric,
+                       xlab=metric, yticks=[float(i) for i in range(1, n + 1)], yticklabels=lab[::-1], grid=False)
+        for i, v in enumerate(y[::-1].tolist(), start=1):
+            if np.isfinite(v):
+                _res_rect(f, p, 0.0, i - 0.35, v, i + 0.35)
+        data = {"variants": pd.DataFrame({"label": lab, "value": raw})}
+    return _res_finish(f), data
+
+
+def _num1(v):
+    v = _py(v)
+    return _NA if v is None else float(v)
 
 
 class SimLevLumpSum(_RFrame):
@@ -654,6 +678,11 @@ def leverage_sensitivity(data, index, leverages=None, rate=0, expense=0, spread=
     tab.attrs["optimal"] = pd.Series(opt, dtype=np.float64)
     return tab
 
+
+# plot.SimLevSensitivity (SVG, ``SimLevPlot``) wie Julias ``_plot_method(_plot_sens, "SimLevSensitivity")``
+from .svg import _plot_method  # noqa: E402
+
+SimLevSensitivity.plot = _plot_method(_plot_sens, "SimLevSensitivity")
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
 from ._r.base import quiet_fp  # noqa: E402

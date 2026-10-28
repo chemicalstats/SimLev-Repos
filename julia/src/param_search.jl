@@ -8,6 +8,8 @@
 module ParamSearch
 
 import ..SimLev
+using ..SimLev: _res_fig, _res_finish, _res_line!, _res_panel, _res_points!, _res_ramp, _res_range, _res_rect!,
+                _res_text!, _res_tx, _res_ty
 using Dates
 
 const SL = SimLev
@@ -564,25 +566,25 @@ function _plot_ps(x; metric = nothing, params = nothing, fun = maximum, file = n
     params = params === nothing ? OF._strs(x["params"])[1:min(2, end)] : OF._strs(params)
     agg(v) = (w = filter(isfinite, v); isempty(w) ? NA : fun(w))
     vals = OF._tofloat(tab[metric])
-    f = OF._fig(700, 460)
+    f = _res_fig(700, 460)
     if length(params) == 1
         g = tab[params[1]]
         lev = sort(unique(collect(g)); alg = MergeSort, lt = SimLev.RStats.r_isless)
         a = Float64[agg(vals[[_same(e, l) for e in g]]) for l in lev]
         xs = Float64[_is_num(l) ? Float64(l) : i for (i, l) in enumerate(lev)]
-        p = OF._panel(f, 70, 40, 600, 360, OF._range(xs), OF._range(a); title = "$metric nach $(params[1])",
-                      xlab = params[1], ylab = metric)
-        OF._pline!(f, p, xs, a); OF._ppoints!(f, p, xs, a)
-        return OF._finish(f; file = file)
+        p = _res_panel(f, 70, 40, 600, 360, _res_range(xs), _res_range(a); title = "$metric nach $(params[1])",
+                       xlab = params[1], ylab = metric)
+        _res_line!(f, p, xs, a); _res_points!(f, p, xs, a)
+        return (_res_finish(f; file = file), SL.RList("profile" => SL.RFrame("x" => lev, "value" => a)))
     end
     if x["method"] != "grid"
         xs = OF._tofloat(tab[params[1]]); ys = OF._tofloat(tab[params[2]])
         lo, hi = extrema(filter(!isnan, vals); init = (0.0, 1.0))
-        cols = [isnan(v) ? "#cccccc" : OF._ramp((v - lo) / max(hi - lo, 1e-12)) for v in vals]
-        p = OF._panel(f, 70, 40, 600, 360, OF._range(xs), OF._range(ys); title = "$metric (Farbe; blau = hoch)",
-                      xlab = params[1], ylab = params[2])
-        OF._ppoints!(f, p, xs, ys; color = cols, r = 5)
-        return OF._finish(f; file = file)
+        cols = [isnan(v) ? "#cccccc" : _res_ramp((v - lo) / max(hi - lo, 1e-12)) for v in vals]
+        p = _res_panel(f, 70, 40, 600, 360, _res_range(xs), _res_range(ys); title = "$metric (Farbe; blau = hoch)",
+                       xlab = params[1], ylab = params[2])
+        _res_points!(f, p, xs, ys; color = cols, r = 5)
+        return (_res_finish(f; file = file), SL.RList("scatter" => SL.RFrame("x" => xs, "y" => ys, "value" => vals)))
     end
     g1 = tab[params[1]]; g2 = tab[params[2]]
     l1 = sort(unique(collect(g1)); alg = MergeSort, lt = SimLev.RStats.r_isless)
@@ -594,17 +596,21 @@ function _plot_ps(x; metric = nothing, params = nothing, fun = maximum, file = n
     end
     fin = filter(!isnan, vec(M))
     lo, hi = isempty(fin) ? (0.0, 1.0) : extrema(fin)
-    p = OF._panel(f, 70, 40, 600, 360, (0.5, length(l1) + 0.5), (0.5, length(l2) + 0.5); title = "$metric (blau = hoch)",
-                  xlab = params[1], ylab = params[2], xticks = collect(1.0:length(l1)), xticklabels = OF._formatv(l1),
-                  yticks = collect(1.0:length(l2)), yticklabels = OF._formatv(l2), grid = false)
+    p = _res_panel(f, 70, 40, 600, 360, (0.5, length(l1) + 0.5), (0.5, length(l2) + 0.5); title = "$metric (blau = hoch)",
+                   xlab = params[1], ylab = params[2], xticks = collect(1.0:length(l1)), xticklabels = OF._formatv(l1),
+                   yticks = collect(1.0:length(l2)), yticklabels = OF._formatv(l2), grid = false)
     sc = metric in ("cagr", "ttwror", "max_drawdown", "avg_drawdown") ? 100 : 1
+    ci = Int[]; cj = Int[]
     for i in eachindex(l1), j in eachindex(l2)
         v = M[i, j]
         isnan(v) && continue
-        OF._prect!(f, p, i - 0.5, j - 0.5, i + 0.5, j + 0.5; fill = OF._ramp((v - lo) / max(hi - lo, 1e-12)))
-        length(M) <= 300 && OF._text!(f, OF._tx(p, i), OF._ty(p, j) + 4, OF._spf(sc == 100 ? "%.1f" : "%.2f", sc * v); size = 9)
+        push!(ci, i); push!(cj, j)
+        _res_rect!(f, p, i - 0.5, j - 0.5, i + 0.5, j + 0.5; fill = _res_ramp((v - lo) / max(hi - lo, 1e-12)))
+        length(M) <= 300 && _res_text!(f, _res_tx(p, i), _res_ty(p, j) + 4, OF._spf(sc == 100 ? "%.1f" : "%.2f", sc * v); size = 9)
     end
-    return OF._finish(f; file = file)
+    # gezeichnete Zellen (Zielgröße unskaliert): x = Stufe von params[1], y = Stufe von params[2]
+    data = SL.RList("heatmap" => SL.RFrame("x" => l1[ci], "y" => l2[cj], "value" => Float64[M[i, j] for (i, j) in zip(ci, cj)]))
+    return (_res_finish(f; file = file), data)
 end
 
 function __init__()

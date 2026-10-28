@@ -30,5 +30,5 @@ result = simlev.simulation(
 )
 
 print(result)
-fig = result.plot()                      # Dashboard (matplotlib)
-fig.savefig("dashboard.png", dpi=110)
+p = result.plot()                        # Dashboard als SVG (SimLevPlot; Werte je Panel in p.data)
+p.save("dashboard.svg")

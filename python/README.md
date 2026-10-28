@@ -42,20 +42,17 @@ mit Python 3.13, numpy 2.5, pandas 3.0). Ein Compiler wird nicht benötigt.
 
 ``` bash
 pip install "simlev @ git+https://github.com/chemicalstats/SimLev-Repos#subdirectory=python"
-pip install "simlev[plot] @ git+https://github.com/chemicalstats/SimLev-Repos#subdirectory=python"   # mit matplotlib
 ```
 
 Aus einem lokalen Klon (im Ordner `python/`):
 
 ``` bash
-pip install .                 # Engine und alle Erweiterungen (numpy, pandas)
-pip install ".[plot]"         # zusätzlich matplotlib für Grafiken
+pip install .                 # Engine, alle Erweiterungen und Grafiken (numpy, pandas)
 ```
 
 | Paket | Wofür | Pflicht? |
 |---|---|---|
 | `numpy`, `pandas` | Rechenkern und Datenaufnahme | ja |
-| `matplotlib` | Grafiken: Dashboard (`result.plot()`, `export_dashboard`) und die `plot()`-Methoden der Erweiterungen | optional |
 | `pytest` | Ausführen der Test-Suite | optional |
 
 ## Kurzbeispiel
@@ -292,9 +289,17 @@ Voraussetzungen der Bitgleichheit:
   statt „both X-convergence and relative convergence (5)“ (`convergence`
   ist in beiden Fällen 0) bzw. Läufe mit Hesse-Funktion und Inf/NaN in
   Gradient oder Hesse-Matrix.
-- **Grafiken** (matplotlib) zeigen dasselbe wie in R, sind aber nicht
-  bitgleich; die zugrunde liegenden Daten (Monatsrenditen, rollierende
-  Kennzahlen, Korrelationen …) schon.
+- **Grafiken** entstehen wie in der Julia-Fassung ohne Zusatzpaket als
+  SVG. `result.plot()` und alle `plot()`-Methoden liefern ein
+  `simlev.SimLevPlot` (in Jupyter direkt sichtbar; `p.save("x.svg")`
+  bzw. `file="x.svg"` speichert). Es enthält neben `svg` die
+  dargestellten Werte je Panel als pandas-Tabellen (`p.data`), das
+  Eingabeobjekt (`p.source`) und dessen Klasse (`p.kind`); daraus lassen
+  sich eigene Grafiken bauen, z. B. mit matplotlib:
+  `p.data["performance"].plot(x="date", y="strategy")`. Die Grafiken
+  zeigen dasselbe wie in R, sind aber nicht bitgleich; die Werte in
+  `p.data` schon. Gespeichert wird nur als SVG; für PDF oder PNG die
+  Datei z. B. mit `rsvg-convert` oder CairoSVG umwandeln.
 
 Geprüft wurde:
 
@@ -360,7 +365,8 @@ simlev/
   trigger.py         compute_rebal_trigger()
   tax_tariff.py      read_tax_tariff(), Einkommensteuertarif
   result.py          SimLevResult mit print/summary/plot
-  dashboard.py       Dashboard (matplotlib)
+  svg.py             Grafikmodul: SimLevPlot, plot-API und alle SVG-Zeichenbausteine
+  dashboard.py       Dashboard: Daten und Panels (SVG)
   data_prep.py       Datenaufbereitung, Portfolio-Vorlagen
   backcast.py        backcast_fit(), backcast()
   bonds.py           Anleihe-, Geldmarkt- und gesicherte Reihen

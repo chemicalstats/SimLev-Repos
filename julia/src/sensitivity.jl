@@ -8,6 +8,7 @@
 module Sensitivity
 
 import ..SimLev
+using ..SimLev: _res_fig, _res_finish, _res_line!, _res_panel, _res_points!, _res_range, _res_rect!, _res_vline!
 using Dates
 
 const SL = SimLev
@@ -413,13 +414,14 @@ function _plot_sens(x; metric = "cagr", file = nothing, kw...)
     kind = get(SL.attrs(x), "kind", "grid")
     sc = metric in ("cagr", "ttwror", "max_drawdown", "avg_drawdown") ? 100 : 1
     y = sc .* OF._tofloat(x[metric])
-    f = OF._fig(720, 460)
+    f = _res_fig(720, 460)
     if kind == "leverage"
         lv = OF._tofloat(x["leverage"])
-        p = OF._panel(f, 70, 40, 620, 360, OF._range(lv), OF._range(y); title = "$metric nach Hebel", xlab = "Hebel", ylab = metric)
-        OF._pline!(f, p, lv, y); OF._ppoints!(f, p, lv, y)
+        p = _res_panel(f, 70, 40, 620, 360, _res_range(lv), _res_range(y); title = "$metric nach Hebel", xlab = "Hebel", ylab = metric)
+        _res_line!(f, p, lv, y); _res_points!(f, p, lv, y)
         j = OF._which_max(x[metric])
-        j === nothing || OF._pvline!(f, p, lv[j]; width = 1, dash = "2,3")
+        j === nothing || _res_vline!(f, p, lv[j]; width = 1, dash = "2,3")
+        data = SL.RList("leverage" => SL.RFrame("leverage" => lv, "value" => OF._tofloat(x[metric])))
     else
         n = length(y)
         lab = String[]
@@ -427,14 +429,16 @@ function _plot_sens(x; metric = "cagr", file = nothing, kw...)
             b = x["band"][i]; o = x["offset"][i]
             push!(lab, join([x["frequency"][i], OF._isna(b) ? "" : "±" * OF._as_chr(b), OF._isna(o) ? "" : "-" * OF._as_chr(o) * "d"], " "))
         end
-        lo, hi = OF._range(vcat(0.0, y))
-        p = OF._panel(f, 160, 40, 530, 380, (lo, hi), (0.5, n + 0.5); title = "Rebalancing-Varianten: $metric", xlab = metric,
-                      yticks = collect(1.0:n), yticklabels = reverse(lab), grid = false)
+        lo, hi = _res_range(vcat(0.0, y))
+        p = _res_panel(f, 160, 40, 530, 380, (lo, hi), (0.5, n + 0.5); title = "Rebalancing-Varianten: $metric", xlab = metric,
+                       yticks = collect(1.0:n), yticklabels = reverse(lab), grid = false)
         for (i, v) in enumerate(reverse(y))
-            isfinite(v) && OF._prect!(f, p, 0.0, i - 0.35, v, i + 0.35)
+            isfinite(v) && _res_rect!(f, p, 0.0, i - 0.35, v, i + 0.35)
         end
+        data = SL.RList("variants" => SL.RFrame("label" => lab, "value" => OF._tofloat(x[metric])))
     end
-    OF._finish(f; file = file)
+    # Werte unskaliert wie im Ergebnis (Anteile, nicht ×100)
+    return (_res_finish(f; file = file), data)
 end
 
 function __init__()

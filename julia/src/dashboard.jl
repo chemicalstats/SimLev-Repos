@@ -6,6 +6,10 @@
 # Renditen und Korrelationen, Vergleichstabelle mit Farben) entsprechen SimLev
 # 0.5.0. Nur das Zeichnen (Basisgrafik in R) ist als SVG nachgebaut;
 # Schriftgrößen und Ränder sind angenähert.
+#
+# Hier stehen die Datenfunktionen und Panels; `SimLevPlot`, die plot-API und
+# die Zeichenhilfen (`_Canvas`, `_text!`, `_frame!`, `r_pretty`, Farben, …)
+# kommen aus svg.jl (Abschnitt „Stil Dashboard“).
 # ─────────────────────────────────────────────────────────────────────────────
 
 const DEFAULT_COLORS = ["primary" => "#2E86AB", "secondary" => "#A23B72", "positive" => "#06A77D",
@@ -13,8 +17,6 @@ const DEFAULT_COLORS = ["primary" => "#2E86AB", "secondary" => "#A23B72", "posit
                         "grid" => "#E9ECEF"]
 const _ALL_PANELS = ("performance", "drawdown", "distribution", "rolling", "monthly", "stats", "correlation", "comparison")
 const _DEFAULT_PANELS = ("performance", "drawdown", "distribution", "rolling", "monthly", "stats")
-const _MONATE_KURZ = ("Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez")
-const _R_PALETTE = ("black", "#DF536B", "#61D04F", "#2297E6", "#28E2E5", "#CD0BBC", "#F5C710", "gray62")
 
 _xget(x, name::AbstractString) = (x isa AbstractDict || x isa RList) ? get(x, name, nothing) : nothing
 _xlen(v) = v === nothing ? 0 : v isa AbstractVector ? length(v) : 1
@@ -62,146 +64,6 @@ function _dashboard_returns(x)
     return (all_returns = all_r, returns = r, ppy = ppy, external_flows = ext, invested = invested, twr_index = twr)
 end
 
-"""
-    SimLevDashboard
-
-Ein gerendertes Dashboard (SVG). Wird in Jupyter, Pluto und VS Code direkt
-angezeigt; `write(path, d)` bzw. [`export_dashboard`](@ref) speichern es.
-"""
-struct SimLevDashboard
-    svg::String
-end
-Base.show(io::IO, ::MIME"image/svg+xml", d::SimLevDashboard) = print(io, d.svg)
-Base.show(io::IO, d::SimLevDashboard) = print(io, "SimLevDashboard(SVG, ", sizeof(d.svg), " Bytes)")
-Base.write(io::IO, d::SimLevDashboard) = write(io, d.svg)
-
-# ── Einheitliche Grafik-API ─────────────────────────────────────────────────
-# `r_plot(x; …)`, `plot_dashboard` und alle plot-Methoden der Erweiterungen
-# liefern ein `SimLevDashboard` (SVG) und schreiben nur, wenn `file = "….svg"`
-# angegeben ist (kein stilles `Rplots.svg`). Andere Dateiendungen brechen mit
-# einer Meldung ab (es gibt nur SVG; keine stille Umbenennung). Unbekannte
-# Schlüsselwörter ergeben eine Warnung statt stillem Übergehen (R ignoriert
-# `...`; hier soll ein Tippfehler auffallen).
-
-"Prüft, dass `file` auf `.svg` endet (Grafiken entstehen nur als SVG); liefert den Pfad."
-function _check_svg_file(file, who::AbstractString)
-    file isa AbstractString || error("$who: file muss ein Dateiname (Zeichenkette) sein, nicht $(typeof(file)).")
-    f = String(file)
-    ext = splitext(f)[2]
-    lowercase(ext) == ".svg" ||
-        error("$who: Grafiken werden nur als SVG gespeichert; '$f' hat " *
-              (isempty(ext) ? "keine Dateiendung" : "die Endung '$ext'") *
-              ". Bitte einen Dateinamen auf .svg angeben (z. B. \"dashboard.svg\").")
-    return f
-end
-
-"SVG von `d` nach `file` schreiben (nur `.svg`)."
-function _write_svg(file, d::SimLevDashboard, who::AbstractString)
-    f = _check_svg_file(file, who)
-    open(io -> write(io, d.svg), f, "w")
-    return d
-end
-
-"Warnung für unbekannte Schlüsselwörter (deutsch, alle in einer Meldung)."
-function _warn_unknown_kw(who::AbstractString, bad)
-    isempty(bad) && return nothing
-    nm = join(("'$k'" for k in bad), ", ")
-    @warn length(bad) == 1 ? "$who: unbekanntes Argument $nm wird ignoriert (Tippfehler?)." :
-                             "$who: unbekannte Argumente $nm werden ignoriert (Tippfehler?)."
-    return nothing
-end
-
-"Deklarierte Schlüsselwörter aller Methoden von `f` (ohne `kw...`)."
-function _kwnames(f)
-    out = Set{Symbol}()
-    for m in methods(f), k in Base.kwarg_decl(m)
-        endswith(String(k), "...") || push!(out, k)
-    end
-    return out
-end
-
-_as_dashboard(d::SimLevDashboard, who) = d
-_as_dashboard(s::AbstractString, who) = SimLevDashboard(String(s))
-_as_dashboard(x, who) = error("$who: die Grafikmethode lieferte kein SVG (sondern $(typeof(x))).")
-
-"""
-    _plot_method(f, cls) -> Funktion `(x, args...; file = nothing, kw...)`
-
-Macht aus einer Zeichenfunktion `f(x; kw...)` die plot-Methode für die
-S3-Klasse `cls` (für `register_plot!`): nur die von `f` deklarierten
-Schlüsselwörter werden weitergegeben, unbekannte ergeben eine Warnung;
-Ergebnis immer `SimLevDashboard`; geschrieben wird nur mit `file = "….svg"`.
-"""
-function _plot_method(f, cls::AbstractString)
-    who = "plot.$cls"
-    known = _kwnames(f)
-    takes_file = :file in known
-    return function (x, args...; file = nothing, kw...)
-        isempty(args) || @warn "$who: $(length(args)) zusätzliche(s) Positionsargument(e) wird/werden ignoriert; Optionen bitte als Schlüsselwort angeben."
-        _warn_unknown_kw(who, [k for k in keys(kw) if !(k in known)])
-        file === nothing || _check_svg_file(file, who)
-        good = (k => v for (k, v) in kw if k in known)
-        res = takes_file ? f(x; good..., file = nothing) : f(x; good...)
-        d = _as_dashboard(res, who)
-        file === nothing || _write_svg(file, d, who)
-        return d
-    end
-end
-
-"Nachbildung von R's `pretty()` (R_pretty aus src/appl/pretty.c)."
-function r_pretty(lo::Real, hi::Real, n::Int = 5; min_n::Int = n ÷ 3)
-    lo = Float64(lo); hi = Float64(hi)
-    (isfinite(lo) && isfinite(hi)) || return [0.0]
-    hi < lo && ((lo, hi) = (hi, lo))
-    h = 1.5; h5 = 0.5 + 1.5 * h
-    epsv = 1e-10
-    dx = hi - lo
-    local cell::Float64
-    if dx == 0 && hi == 0
-        cell = 1.0; i_small = true
-    else
-        cell = max(abs(lo), abs(hi))
-        u = 1 + (h5 >= 1.5 * h + 0.5 ? 1 / (1 + h) : 1.5 / (1 + h5))
-        u *= max(1, n) * eps(Float64)
-        i_small = dx < cell * u * 3
-    end
-    if i_small
-        cell > 10 && (cell = 9 + cell / 10)
-        cell *= 0.75
-        min_n > 1 && (cell /= min_n)
-    else
-        cell = dx
-        n > 1 && (cell /= n)
-    end
-    base = 10.0^floor(_libm_log10(cell))
-    unit = base
-    if 2 * base - cell < h * (cell - unit)
-        unit = 2 * base
-        if 5 * base - cell < h5 * (cell - unit)
-            unit = 5 * base
-            10 * base - cell < h * (cell - unit) && (unit = 10 * base)
-        end
-    end
-    ns = floor(lo / unit + epsv)
-    nu = ceil(hi / unit - epsv)
-    while ns * unit > lo + epsv * unit
-        ns -= 1
-    end
-    while nu * unit < hi - epsv * unit
-        nu += 1
-    end
-    k = Int(floor(0.5 + nu - ns))
-    if k < min_n
-        k = min_n - k
-        if ns >= 0
-            nu += k ÷ 2; ns -= k ÷ 2 + k % 2
-        else
-            ns -= k ÷ 2; nu += k ÷ 2 + k % 2
-        end
-    end
-    return [i * unit for i in ns:nu]
-end
-
 "`.dash_custom_layout`: 1–2 Panels in einer Zeile, sonst 2 Spalten mit bis zu 4 Zeilen."
 function _dash_custom_layout(n::Int)
     nr = (1, 1, 2, 2, 3, 3, 4, 4)[n]
@@ -209,56 +71,6 @@ function _dash_custom_layout(n::Int)
     v = [collect(1:n); zeros(Int, nr * nc - n)]
     return permutedims(reshape(v, nc, nr))
 end
-
-# ── Farben (grDevices::col2rgb / adjustcolor) ───────────────────────────────
-
-const _COLOR_TABLE = Ref{Union{Nothing,Dict{String,String}}}(nothing)
-function _color_table()
-    if _COLOR_TABLE[] === nothing
-        tab = Dict{String,String}()
-        for ln in readlines(joinpath(@__DIR__, "..", "data", "r_colors.csv"))[2:end]
-            isempty(ln) && continue
-            nm, hx = split(ln, ",")
-            tab[String(nm)] = String(hx)
-        end
-        _COLOR_TABLE[] = tab
-    end
-    return _COLOR_TABLE[]
-end
-
-"`col2rgb(v, alpha = TRUE) / 255` für einen Wert; Fehler wie in R."
-function _col2rgba(v)
-    v isa Bool && error("invalid color name '$(v ? "TRUE" : "FALSE")'")
-    if v isa Real
-        f = Float64(v)
-        isnan(f) && return (1.0, 1.0, 1.0, 0.0)
-        f < 0 && error("numerical color values must be >= 0, found $(Int(trunc(f)))")
-        i = Int(trunc(f))
-        i == 0 && error("numerical color values must be positive")
-        return _col2rgba(_R_PALETTE[(i-1)%length(_R_PALETTE)+1])
-    end
-    v isa AbstractString || error("invalid color specification")
-    if startswith(v, "#")
-        length(v) in (7, 9) || error("invalid RGB specification")
-        vals = try
-            [parse(Int, v[i:i+1]; base = 16) for i in 2:2:length(v)]
-        catch
-            error("invalid hex digit in 'color' or 'lty'")
-        end
-        length(vals) == 3 && push!(vals, 255)
-        return Tuple(c / 255 for c in vals)
-    end
-    v in ("NA", "transparent") && return (1.0, 1.0, 1.0, 0.0)
-    isdigit(first(v * " ")) && return _col2rgba(all(isdigit, v) ? Float64(parse(Int, v)) : NaN)
-    hx = get(_color_table(), lowercase(replace(v, " " => "")), nothing)
-    hx === nothing && error("invalid color name '$v'")
-    return _col2rgba(hx)
-end
-
-_svgcol(rgba) = r_sprintf("#%02X%02X%02X", round(Int, rgba[1] * 255), round(Int, rgba[2] * 255), round(Int, rgba[3] * 255))
-_svgop(rgba) = r_sprintf("%.3f", rgba[4])
-_col(c) = _svgcol(_col2rgba(c))
-_alpha(c, a::Integer) = (r = _col2rgba(c); (r[1], r[2], r[3], r[4] * a / 255))
 
 function _check_colors(colors)
     colors === nothing && return Dict{String,Any}(DEFAULT_COLORS)
@@ -477,148 +289,7 @@ function _correlation(x, compare)
     return (k = k, rho = rho, dates = rho_dates, rho_all = rho_all)
 end
 
-# ── Minimaler SVG-Zeichenkontext ────────────────────────────────────────────
-
-_esc(s) = replace(String(s), "&" => "&amp;", "<" => "&lt;", ">" => "&gt;", "\"" => "&quot;")
-_c(x) = r_sprintf("%.1f", x)
-mutable struct _Canvas
-    io::IOBuffer
-    col::Dict{String,Any}
-end
-_svg!(c::_Canvas, s::AbstractString) = (print(c.io, s, "\n"); nothing)
-function _text!(c, x, y, s; size = 11, color = "#333333", anchor = "start", weight = "normal", baseline = "middle", rot = 0, bg = nothing)
-    if bg !== nothing
-        w = 0.58 * size * length(s); h = 1.25 * size
-        x0 = anchor == "start" ? x : anchor == "end" ? x - w : x - w / 2
-        _svg!(c, "<rect x=\"$(_c(x0 - 2))\" y=\"$(_c(y - h / 2))\" width=\"$(_c(w + 4))\" height=\"$(_c(h))\" fill=\"$(_svgcol(bg))\" fill-opacity=\"$(_svgop(bg))\"/>")
-    end
-    _svg!(c, "<text x=\"$(_c(x))\" y=\"$(_c(y))\" font-size=\"$size\" fill=\"$color\" text-anchor=\"$anchor\" " *
-             "font-weight=\"$weight\" dominant-baseline=\"$baseline\"" *
-             (rot != 0 ? " transform=\"rotate($rot $(_c(x)) $(_c(y)))\"" : "") * ">$(_esc(s))</text>")
-end
-_line!(c, x1, y1, x2, y2; color = "#999999", width = 1, dash = "") =
-    _svg!(c, "<line x1=\"$(_c(x1))\" y1=\"$(_c(y1))\" x2=\"$(_c(x2))\" y2=\"$(_c(y2))\" stroke=\"$color\" " *
-             "stroke-width=\"$width\"" * (isempty(dash) ? "" : " stroke-dasharray=\"$dash\"") * "/>")
-_rect!(c, x, y, w, h; fill = "none", stroke = "none", sw = 1, opacity = 1.0) =
-    _svg!(c, "<rect x=\"$(_c(x))\" y=\"$(_c(y))\" width=\"$(_c(w))\" height=\"$(_c(h))\" fill=\"$fill\" " *
-             "stroke=\"$stroke\" stroke-width=\"$sw\"" * (opacity < 1 ? " fill-opacity=\"$(r_sprintf("%.3f", opacity))\"" : "") * "/>")
-
-struct _Panel
-    x0::Float64; y0::Float64; w::Float64; h::Float64
-    xlo::Float64; xhi::Float64; ylo::Float64; yhi::Float64
-end
-_px(p::_Panel, x) = p.x0 + (x - p.xlo) / (p.xhi == p.xlo ? 1.0 : p.xhi - p.xlo) * p.w
-_py(p::_Panel, y) = p.y0 + p.h - (y - p.ylo) / (p.yhi == p.ylo ? 1.0 : p.yhi - p.ylo) * p.h
-
-function _decimate(xs::Vector{Float64}, ys::Vector{Float64}, maxn::Int = 1600)
-    n = length(xs)
-    n <= maxn && return xs, ys
-    bucket = ceil(Int, n / (maxn ÷ 2))
-    ox = Float64[]; oy = Float64[]
-    for s in 1:bucket:n
-        seg = s:min(n, s + bucket - 1)
-        good = [i for i in seg if isfinite(ys[i])]
-        isempty(good) && continue
-        imin = good[argmin(ys[good])]; imax = good[argmax(ys[good])]
-        for i in sort(unique([imin, imax]))
-            push!(ox, xs[i]); push!(oy, ys[i])
-        end
-    end
-    return ox, oy
-end
-function _path(p::_Panel, xs, ys; step::Bool = false)
-    io = IOBuffer(); first = true; prev = 0.0
-    for (x, y) in zip(xs, ys)
-        if !isfinite(y)
-            first = true; continue
-        end
-        if step && !first
-            print(io, "L", _c(_px(p, x)), " ", _c(_py(p, prev)))
-        end
-        print(io, first ? "M" : "L", _c(_px(p, x)), " ", _c(_py(p, y)))
-        first = false; prev = y
-    end
-    return String(take!(io))
-end
-_polyline!(c, p, xs, ys; color, width = 1.5, dash = "", step = false) =
-    _svg!(c, "<path d=\"$(_path(p, xs, ys; step = step))\" fill=\"none\" stroke=\"$color\" stroke-width=\"$width\" stroke-linejoin=\"round\"" *
-             (isempty(dash) ? "" : " stroke-dasharray=\"$dash\"") * "/>")
-function _area!(c, p, xs, ys, base, fill)
-    d = _path(p, xs, ys)
-    isempty(d) && return
-    _svg!(c, "<path d=\"$d L$(_c(_px(p, xs[end]))) $(_c(_py(p, base))) L$(_c(_px(p, xs[1]))) $(_c(_py(p, base))) Z\" " *
-             "fill=\"$(_svgcol(fill))\" fill-opacity=\"$(_svgop(fill))\" stroke=\"none\"/>")
-end
-
-function _date_ticks(z0::Float64, z1::Float64)
-    d0 = from_days(Int(floor(z0))); d1 = from_days(Int(ceil(z1)))
-    years = Dates.year(d1) - Dates.year(d0)
-    ticks = Tuple{Float64,String}[]
-    if years >= 2
-        step = years <= 8 ? 1 : years <= 16 ? 2 : years <= 40 ? 5 : 10
-        for y in Dates.year(d0):Dates.year(d1)
-            y % step == 0 || continue
-            z = Float64(days_from_civil(y, 1, 1))
-            z0 <= z <= z1 && push!(ticks, (z, string(y)))
-        end
-    else
-        months = 12 * years + Dates.month(d1) - Dates.month(d0)
-        step = months <= 8 ? 1 : months <= 16 ? 2 : months <= 30 ? 3 : 6
-        y, m = Dates.year(d0), Dates.month(d0)
-        while true
-            z = Float64(days_from_civil(y, m, 1))
-            z > z1 && break
-            ((m - 1) % step == 0 && z >= z0) && push!(ticks, (z, string(_MONATE_KURZ[m], " ", y)))
-            m += 1; m > 12 && (m = 1; y += 1)
-        end
-    end
-    return ticks
-end
-
-function _frame!(c, p::_Panel; title = "", xlabel = "", ylabel = "", yticks = Float64[], ylabels = String[],
-                 xticks = Tuple{Float64,String}[], grid = true)
-    col = c.col
-    _rect!(c, p.x0, p.y0, p.w, p.h; fill = "white", stroke = "#CED4DA", sw = 0.8)
-    if grid
-        for t in yticks
-            p.ylo <= t <= p.yhi && _line!(c, p.x0, _py(p, t), p.x0 + p.w, _py(p, t); color = _col(col["grid"]), width = 0.8)
-        end
-        for (t, _) in xticks
-            _line!(c, _px(p, t), p.y0, _px(p, t), p.y0 + p.h; color = _col(col["grid"]), width = 0.8)
-        end
-    end
-    for (t, l) in zip(yticks, ylabels)
-        p.ylo <= t <= p.yhi && _text!(c, p.x0 - 6, _py(p, t), l; size = 10, color = "#495057", anchor = "end")
-    end
-    for (t, l) in xticks
-        _text!(c, _px(p, t), p.y0 + p.h + 14, l; size = 10, color = "#495057", anchor = "middle")
-    end
-    _title!(c, p, title)
-    isempty(xlabel) || _text!(c, p.x0 + p.w / 2, p.y0 + p.h + 32, xlabel; size = 11, color = "#495057", anchor = "middle")
-    isempty(ylabel) || _text!(c, p.x0 - 58, p.y0 + p.h / 2, ylabel; size = 11, color = "#495057", anchor = "middle", rot = -90)
-end
-_title!(c, p, title) = isempty(title) || _text!(c, p.x0 + p.w / 2, p.y0 - 16, title; size = 15, color = _col(c.col["primary"]),
-                                               anchor = "middle", weight = "bold")
-
-function _r_range(lo, hi)     # yaxs = "r": 4 % Rand
-    if lo == hi
-        return lo == 0 ? (lo - 1, hi + 1) : (lo - 0.4 * abs(lo), hi + 0.4 * abs(hi))
-    end
-    d = (hi - lo) * 0.04
-    return (lo - d, hi + d)
-end
-
-function _empty_panel!(c, p, title)
-    _title!(c, p, title)
-    _text!(c, p.x0 + p.w / 2, p.y0 + p.h / 2, "Zu wenige Daten"; size = 12, color = _col(c.col["neutral"]), anchor = "middle")
-end
-
 # ── Panels ──────────────────────────────────────────────────────────────────
-
-function _yaxis(lo, hi)
-    t = r_pretty(lo, hi)
-    return t, [r_format1(v) for v in t]
-end
 
 function _panel_performance(c, cell, x, compare, dash)
     col = c.col
@@ -654,6 +325,10 @@ function _panel_performance(c, cell, x, compare, dash)
     end
     _text!(c, p.x0 + p.w + 4, _py(p, worth[end]), _format_amount(worth[end]; signif3 = true)[1]; size = 9,
            color = _col(col["primary"]), weight = "bold", bg = _alpha(col["background"], 0xD9))
+    cols = Pair{String,Any}["date" => collect(Date, x["dates"]), "strategy" => collect(Float64, worth)]
+    compare === nothing || push!(cols, "compare" => collect(Float64, compare["worth"]))
+    ext && push!(cols, "invested" => collect(Float64, dash.invested))
+    return RFrame(cols...)
 end
 
 function _panel_drawdown(c, cell, x, dash)
@@ -672,13 +347,15 @@ function _panel_drawdown(c, cell, x, dash)
     _line!(c, p.x0, _py(p, -max_dd), p.x0 + p.w, _py(p, -max_dd); color = _col(col["negative"]), width = 1.5, dash = "6,4")
     _text!(c, p.x0 + 4, _py(p, -max_dd) - 9, r_sprintf("Max.: %.1f%%", max_dd); color = _col(col["negative"]), weight = "bold",
            bg = _alpha(col["background"], 0xD9))
+    return RFrame("date" => collect(Date, x["dates"]), "drawdown" => collect(Float64, x["drawdowns"]))
 end
 
 function _panel_distribution(c, cell, x, dash)
     col = c.col
     if length(dash.returns) < 3
         p = _Panel(cell..., 0, 1, 0, 1)
-        return _empty_panel!(c, p, "Verteilung der Tagesrenditen")
+        _empty_panel!(c, p, "Verteilung der Tagesrenditen")
+        return RFrame("return" => Float64[])
     end
     rets = dash.returns .* 100
     lo, hi = minimum(rets), maximum(rets)
@@ -717,13 +394,15 @@ function _panel_distribution(c, cell, x, dash)
         _text!(c, p.x0 + p.w - 6, p.y0 + 12 + 14 * (i - 1), t; size = 10, color = _col(col["primary"]), anchor = "end",
                bg = _alpha(col["background"], 0xD9))
     end
+    return RFrame("return" => collect(Float64, dash.returns))
 end
 
 function _panel_rolling(c, cell, x, dash)
     col = c.col
     rr = _rolling_returns(x)
     if rr.values === nothing
-        return _empty_panel!(c, _Panel(cell..., 0, 1, 0, 1), "Rollierende Renditen (annualisiert)")
+        _empty_panel!(c, _Panel(cell..., 0, 1, 0, 1), "Rollierende Renditen (annualisiert)")
+        return RFrame("date" => Date[], "return_pct" => Float64[])
     end
     xs = Float64[to_days(d) for d in x["dates"]]
     rd = xs[rr.idx]; vals = rr.values
@@ -744,6 +423,7 @@ function _panel_rolling(c, cell, x, dash)
         _text!(c, p.x0 + 4, _py(p, cagr_pct) - 9, r_sprintf(ext ? "TTWROR: %.1f%%" : "CAGR: %.1f%%", cagr_pct); size = 10,
                color = _col(col["primary"]), weight = "bold", bg = _alpha(col["background"], 0xD9))
     end
+    return RFrame("date" => collect(Date, x["dates"][rr.idx]), "return_pct" => collect(Float64, vals))
 end
 
 function _panel_monthly(c, cell, x)
@@ -760,9 +440,11 @@ function _panel_monthly(c, cell, x)
         return _svgcol((a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u, a[3] + (b[3] - a[3]) * u, 1.0))
     end
     cw = p.w / 12; ch = p.h / max(ny, 1)
+    ry = Int[]; rm = Int[]; rv = Float64[]
     for i in 1:ny, j in 1:12
         v = mat[i, j]
         isnan(v) && continue
+        push!(ry, parse(Int, years[i])); push!(rm, j); push!(rv, v)
         x0 = p.x0 + (j - 1) * cw; y0 = p.y0 + p.h - i * ch
         _rect!(c, x0, y0, cw, ch; fill = heat(v))
         ch >= 9 && _text!(c, x0 + cw / 2, y0 + ch / 2, r_sprintf("%.1f", v); size = min(9, ch * 0.7), anchor = "middle",
@@ -778,6 +460,7 @@ function _panel_monthly(c, cell, x)
     end
     _text!(c, p.x0 + p.w / 2, p.y0 + p.h + 40, "Monat"; size = 11, color = "#495057", anchor = "middle")
     _text!(c, p.x0 - 44, p.y0 + p.h / 2, "Jahr"; size = 11, color = "#495057", anchor = "middle", rot = -90)
+    return RFrame("year" => ry, "month" => rm, "return_pct" => rv)
 end
 
 function _panel_stats(c, cell, x, compare)
@@ -802,12 +485,23 @@ function _panel_stats(c, cell, x, compare)
         end
     end
     _rect!(c, p.x0 + 0.02 * p.w, p.y0 + 0.02 * p.h, 0.96 * p.w, 0.96 * p.h; stroke = _col(col["grid"]), sw = 2)
+    sec = String[]; lab = String[]; val = String[]
+    for (s, ls) in secs, v in ls
+        k = findfirst(": ", v)
+        push!(sec, s)
+        push!(lab, k === nothing ? v : v[1:prevind(v, first(k))])
+        push!(val, k === nothing ? "" : v[nextind(v, last(k)):end])
+    end
+    return RFrame("section" => sec, "label" => lab, "value" => val)
 end
 
 function _panel_correlation(c, cell, x, compare)
     col = c.col
     r = _correlation(x, compare)
-    r === nothing && return _empty_panel!(c, _Panel(cell..., 0, 1, 0, 1), "Rollierende Korrelation")
+    if r === nothing
+        _empty_panel!(c, _Panel(cell..., 0, 1, 0, 1), "Rollierende Korrelation")
+        return RFrame("date" => Date[], "correlation" => Float64[])
+    end
     xs = Float64[to_days(d) for d in x["dates"]]
     lo, hi = _r_range(-1.0, 1.0)
     p = _Panel(cell..., xs[1], xs[end], lo, hi)
@@ -822,6 +516,7 @@ function _panel_correlation(c, cell, x, compare)
         _text!(c, p.x0 + 4, _py(p, ra) + (ra > 0.8 ? 9 : -9), r_sprintf("Gesamt: %.2f", ra); size = 10,
                color = _col(col["secondary"]), weight = "bold", bg = _alpha(col["background"], 0xD9))
     end
+    return RFrame("date" => collect(Date, r.dates), "correlation" => collect(Float64, r.rho))
 end
 
 function _panel_comparison(c, cell, x, compare)
@@ -841,19 +536,27 @@ function _panel_comparison(c, cell, x, compare)
         _text!(c, X(0.95), Y(yy), r.diff; color = _col(r.diff_col), weight = "bold", anchor = "end")
     end
     _rect!(c, X(0.02), Y(0.98), 0.96 * p.w, 0.96 * p.h; stroke = _col(col["grid"]), sw = 2)
+    return RFrame("label" => String[r.metric for r in rows], "value" => String[r.v1 for r in rows],
+                  "compare" => String[r.v2 for r in rows], "diff" => String[r.diff for r in rows])
 end
 
 """
     plot_dashboard(x; style = ("full", "compact", "custom"), panels = nothing, compare = nothing,
                    colors = nothing, width = 1400, height = nothing, file = nothing)
 
-Mehrteiliges Dashboard wie R's `plot.SimLevResult` als SVG ([`SimLevDashboard`](@ref)).
+Mehrteiliges Dashboard wie R's `plot.SimLevResult` als SVG ([`SimLevPlot`](@ref)).
 `style`: `"full"` (alle Panels), `"compact"` (4 Kern-Panels) oder `"custom"`
 (Panels aus `panels`, eindeutige Abkürzungen erlaubt). `compare`: zweites
 Ergebnis über dieselben Tage. `colors`: benannte Liste eigener Farben
 (R-Farbname oder Hex-Code). `file`: zusätzlich als SVG-Datei speichern (nur
 Endung `.svg`); ohne `file` wird nichts geschrieben. Unbekannte Schlüsselwörter
 ergeben eine Warnung. Auch über `r_plot(x; ...)`.
+
+`data` des Ergebnisses enthält je gezeichnetem Panel (Zeichenreihenfolge) ein `RFrame`:
+`performance` (`date`, `strategy`, ggf. `compare`, `invested`), `drawdown` (`date`,
+`drawdown`), `distribution` (`return`), `rolling` (`date`, `return_pct`), `monthly`
+(`year`, `month`, `return_pct`), `stats` (`section`, `label`, `value`), `correlation`
+(`date`, `correlation`), `comparison` (`label`, `value`, `compare`, `diff`).
 """
 function plot_dashboard(x; style = ("full", "compact", "custom"), panels = nothing, compare = nothing,
                         colors = nothing, width::Real = 1400, height = nothing, file = nothing, kwargs...)
@@ -912,6 +615,7 @@ function plot_dashboard(x; style = ("full", "compact", "custom"), panels = nothi
         c0 = minimum(i[2] for i in idx); c1 = maximum(i[2] for i in idx)
         return ((c0 - 1) * cw + 80, (r0 - 1) * chh + 40, (c1 - c0 + 1) * cw - 130, (r1 - r0 + 1) * chh - 95)
     end
+    data = RList()
     if isempty(selected)
         _text!(c, W / 2, H / 2 - 8, "Keine zeichenbaren Panels:"; size = 13, color = _col(col["neutral"]), anchor = "middle")
         _text!(c, W / 2, H / 2 + 10, "$(join(skipped, ", ")) ohne Vergleichsergebnis (compare)"; size = 13,
@@ -921,18 +625,18 @@ function plot_dashboard(x; style = ("full", "compact", "custom"), panels = nothi
         order = [p for p in ("performance", "drawdown", "distribution", "rolling", "monthly", "stats", "correlation", "comparison") if p in selected]
         for (slot, pn) in enumerate(order)
             cell = cell_of(slot)
-            pn == "performance" && _panel_performance(c, cell, x, compare, dash)
-            pn == "drawdown" && _panel_drawdown(c, cell, x, dash)
-            pn == "distribution" && _panel_distribution(c, cell, x, dash)
-            pn == "rolling" && _panel_rolling(c, cell, x, dash)
-            pn == "monthly" && _panel_monthly(c, cell, x)
-            pn == "stats" && _panel_stats(c, cell, x, compare)
-            pn == "correlation" && compare !== nothing && _panel_correlation(c, cell, x, compare)
-            pn == "comparison" && compare !== nothing && _panel_comparison(c, cell, x, compare)
+            pn == "performance" && (data[pn] = _panel_performance(c, cell, x, compare, dash))
+            pn == "drawdown" && (data[pn] = _panel_drawdown(c, cell, x, dash))
+            pn == "distribution" && (data[pn] = _panel_distribution(c, cell, x, dash))
+            pn == "rolling" && (data[pn] = _panel_rolling(c, cell, x, dash))
+            pn == "monthly" && (data[pn] = _panel_monthly(c, cell, x))
+            pn == "stats" && (data[pn] = _panel_stats(c, cell, x, compare))
+            pn == "correlation" && compare !== nothing && (data[pn] = _panel_correlation(c, cell, x, compare))
+            pn == "comparison" && compare !== nothing && (data[pn] = _panel_comparison(c, cell, x, compare))
         end
     end
     print(io, "</svg>\n")
-    d = SimLevDashboard(String(take!(io)))
+    d = SimLevPlot(String(take!(io)), data, x, "SimLevResult")
     file === nothing || _write_svg(file, d, "plot_dashboard")
     return d
 end
@@ -956,7 +660,7 @@ end
 
 const _PLOT_RESULT = _plot_method(plot_dashboard, "SimLevResult")
 
-"Wie R's `plot(<SimLevResult>)` (= `r_plot(x; …)`): `SimLevDashboard`, Datei nur mit `file`."
+"Wie R's `plot(<SimLevResult>)` (= `r_plot(x; …)`): `SimLevPlot`, Datei nur mit `file`."
 plot(x::SimLevResult, args...; kwargs...) = _PLOT_RESULT(x, args...; kwargs...)
 
 register_plot!("SimLevResult", _PLOT_RESULT)

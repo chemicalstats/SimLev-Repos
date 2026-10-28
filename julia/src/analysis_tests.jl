@@ -8,6 +8,8 @@
 module AnalysisTests
 
 import ..SimLev
+using ..SimLev: _AnaSvg, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_points, _ana_ramp, _ana_rect,
+                _ana_svg_done
 using Dates
 
 export signal_analysis, sharpe_test, reality_check, min_track_record, return_heatmap
@@ -265,31 +267,42 @@ function _print_signal(io::IO, x)
     nothing
 end
 
-"`plot.SimLevSignalAnalysis` (SVG): Balken je Bereich (± 2 Standardfehler) und Streudiagramm."
+"""
+`plot.SimLevSignalAnalysis` (SVG): Balken je Bereich (± 2 Standardfehler) und Streudiagramm.
+
+Liefert `(svg, data)`; `data`: `bins` (`bin`, `mean`, `lower`, `upper`: Mittel und Mittel ± 2
+Standardfehler als Anteil) und `scatter` (`signal`, `forward` und mit Polynom-Glättung `fitted`).
+"""
 function _plot_signal(x; file = nothing)
     b = x["bins"]; nb = SimLev.nrow(b)
     m = 100 .* DA._f64(b["mean"]); se = 100 .* DA._f64(b["sd"]) ./ sqrt.(DA._f64(b["n"]))
     lo = m .- 2 .* se; hi = m .+ 2 .* se
     fin = filter(isfinite, vcat(lo, hi, 0.0))
-    s = DA._Svg(1000, 460)
-    p = DA._panel(s, 0, 0, 500, 460, (0.5, nb + 0.5), (minimum(fin), maximum(fin)); title = "Je Signalbereich",
-                  xlab = "Signalbereich (niedrig -> hoch)", ylab = "Mittlere Vorwärtsrendite (%)", xticks = collect(1:nb))
+    s = _AnaSvg(1000, 460)
+    p = _ana_panel(s, 0, 0, 500, 460, (0.5, nb + 0.5), (minimum(fin), maximum(fin)); title = "Je Signalbereich",
+                   xlab = "Signalbereich (niedrig -> hoch)", ylab = "Mittlere Vorwärtsrendite (%)", xticks = collect(1:nb))
     for i in 1:nb
-        DA._rect(s, p, i - 0.35, 0.0, i + 0.35, m[i]; fill = "#2C6E9B")
-        DA._lines(s, p, [i, i], [lo[i], hi[i]]; col = "#000", lwd = 1)
+        _ana_rect(s, p, i - 0.35, 0.0, i + 0.35, m[i]; fill = "#2C6E9B")
+        _ana_lines(s, p, [i, i], [lo[i], hi[i]]; col = "#000", lwd = 1)
     end
-    DA._hline(s, p, 100 * x["overall"]["mean"]; col = "#B5562B", dash = "5,4")
+    _ana_hline(s, p, 100 * x["overall"]["mean"]; col = "#B5562B", dash = "5,4")
     dd = x["data"]; sv = DA._f64(dd["signal"]); fv = 100 .* DA._f64(dd["forward"])
-    q = DA._panel(s, 500, 0, 500, 460, (DA._rmin(sv), DA._rmax(sv)), (DA._rmin(fv), DA._rmax(fv)); title = "Streudiagramm",
-                  xlab = x["signal_name"], ylab = "Vorwärtsrendite (%)")
-    DA._points(s, q, sv, fv)
+    q = _ana_panel(s, 500, 0, 500, 460, (DA._rmin(sv), DA._rmax(sv)), (DA._rmin(fv), DA._rmax(fv)); title = "Streudiagramm",
+                   xlab = x["signal_name"], ylab = "Vorwärtsrendite (%)")
+    _ana_points(s, q, sv, fv)
+    sc = SimLev.RFrame("signal" => copy(sv), "forward" => DA._f64(dd["forward"]))
     if get(x, "fit", nothing) !== nothing
         fitted = DA._vecf(DA._rget(x["fit"]["model"], "fitted.values"))
         o = sortperm(sv; alg = MergeSort)
-        DA._lines(s, q, sv[o], 100 .* fitted[o]; col = "#B5562B", lwd = 2)
+        _ana_lines(s, q, sv[o], 100 .* fitted[o]; col = "#B5562B", lwd = 2)
+        sc["fitted"] = copy(fitted)
     end
-    DA._hline(s, q, 0.0)
-    SimLev.SimLevDashboard(DA._svg_done(s, file))
+    _ana_hline(s, q, 0.0)
+    m0 = DA._f64(b["mean"]); se1 = DA._f64(b["sd"]) ./ sqrt.(DA._f64(b["n"]))
+    data = SimLev.RList("bins" => SimLev.RFrame("bin" => String[string(v) for v in b["bin"]], "mean" => m0,
+                                                "lower" => m0 .- 2 .* se1, "upper" => m0 .+ 2 .* se1),
+                        "scatter" => sc)
+    return (_ana_svg_done(s, nothing), data)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -569,27 +582,35 @@ function _print_heatmap(io::IO, x)
     nothing
 end
 
-"`plot.SimLevHeatmap` (SVG): Heatmap Startjahr x Haltedauer (Farbskala bei ± 25 % begrenzt)."
+"""
+`plot.SimLevHeatmap` (SVG): Heatmap Startjahr x Haltedauer (Farbskala bei ± 25 % begrenzt).
+
+Liefert `(svg, data)`; `data`: `heatmap` (`start_year`, `years`, `value`: gezeichnete Zellen,
+annualisierte Rendite als Anteil wie in `matrix`).
+"""
 function _plot_heatmap(x; file = nothing)
     Mm = x["matrix"]; M = 100 .* Mm.data
     fin = filter(isfinite, M); lim = min(isempty(fin) ? 1.0 : maximum(abs.(fin)), 25.0)
-    pal = DA._ramp(["#B5562B", "#F2E9DC", "#2C6E9B"], 51)
+    pal = _ana_ramp(["#B5562B", "#F2E9DC", "#2C6E9B"], 51)
     yrs = parse.(Int, Mm.rownames); H = size(M, 2)
-    s = DA._Svg(900, 520)
-    p = DA._panel(s, 0, 0, 820, 520, (yrs[1] - 0.5, yrs[end] + 0.5), (0.5, H + 0.5);
-                  title = "Annualisierte $(x["real"] ? "reale" : "nominale") Rendite", xlab = "Startjahr",
-                  ylab = "Haltedauer (Jahre)", xticks = Float64.(yrs[1:max(1, cld(length(yrs), 12)):end]),
-                  xlabels = string.(yrs[1:max(1, cld(length(yrs), 12)):end]))
+    s = _AnaSvg(900, 520)
+    p = _ana_panel(s, 0, 0, 820, 520, (yrs[1] - 0.5, yrs[end] + 0.5), (0.5, H + 0.5);
+                   title = "Annualisierte $(x["real"] ? "reale" : "nominale") Rendite", xlab = "Startjahr",
+                   ylab = "Haltedauer (Jahre)", xticks = Float64.(yrs[1:max(1, cld(length(yrs), 12)):end]),
+                   xlabels = string.(yrs[1:max(1, cld(length(yrs), 12)):end]))
+    sy = Int[]; hy = Int[]; vv = Float64[]
     for i in eachindex(yrs), h in 1:H
         v = M[i, h]; isfinite(v) || continue
         v = clamp(v, -lim, lim)
         c = pal[clamp(round(Int, (v + lim) / (2 * lim) * 50) + 1, 1, 51)]
-        DA._rect(s, p, yrs[i] - 0.5, h - 0.5, yrs[i] + 0.5, h + 0.5; fill = c)
+        _ana_rect(s, p, yrs[i] - 0.5, h - 0.5, yrs[i] + 0.5, h + 0.5; fill = c)
+        push!(sy, yrs[i]); push!(hy, h); push!(vv, Mm.data[i, h])
     end
     for (k, t) in enumerate((-lim, 0.0, lim))
-        DA._legend(s, p, [DA._sp("%+.0f %%", t)], [pal[[1, 26, 51][k]]]; x = 830.0, y = 60.0 + 20 * (k - 1), box = true)
+        _ana_legend(s, p, [DA._sp("%+.0f %%", t)], [pal[[1, 26, 51][k]]]; x = 830.0, y = 60.0 + 20 * (k - 1), box = true)
     end
-    SimLev.SimLevDashboard(DA._svg_done(s, file))
+    return (_ana_svg_done(s, nothing),
+            SimLev.RList("heatmap" => SimLev.RFrame("start_year" => sy, "years" => hy, "value" => vv)))
 end
 
 function __init__()

@@ -91,7 +91,7 @@ bezeichnet; im Folgenden „Stand 54b5b4f“).
 | **Kosten** | Bid-Ask-Spread je Asset, optional laufende Fondskosten und Performancegebühr |
 | **Steuern** | InvStG-Fondsbesteuerung, Abgeltungsteuer nach § 20 EStG, private Veräußerungsgeschäfte nach § 23 EStG |
 | **Kennzahlen** | CAGR, TTWROR, Volatilität, Sharpe, Sortino, Calmar, Omega, Ulcer Index, Drawdown-Dauer u. v. m. |
-| **Visualisierung** | Statisches Dashboard (R: Base-Grafik, Python: matplotlib, Julia: SVG) |
+| **Visualisierung** | Statisches Dashboard (R: Base-Grafik, Python und Julia: SVG ohne Zusatzpaket, mit den dargestellten Daten für eigene Grafiken) |
 | **Backcast** | Rückrechnung von ETF/ETP-Historien aus Basisindex, TER-Reihe, Hebel und Tagesgeld; Fit der Abweichung mit Out-of-Sample-Test |
 | **Bootstrap** | 14 Verfahren (Block, stationär, Regime, EVT, (GJR-)GARCH, MS-GARCH …), Hebelprodukte, Strategie-Studien über Hunderttausende Pfade |
 | **Entnahmephase** | 14 Entnahmeregeln (4-%-Regel, Vanguard, Guyton-Klinger …) auf Kohorten, Bootstrap-Pfaden oder gespeicherten Simulationsergebnissen, mit vereinfachter deutscher Steuer |
@@ -150,7 +150,6 @@ Compiler wird nicht benötigt.
 
 ``` bash
 pip install "simlev @ git+https://github.com/chemicalstats/SimLev-Repos#subdirectory=python"
-pip install "simlev[plot] @ git+https://github.com/chemicalstats/SimLev-Repos#subdirectory=python"   # mit matplotlib
 ```
 
 Aus einem lokalen Klon:
@@ -158,13 +157,11 @@ Aus einem lokalen Klon:
 ``` bash
 cd python
 pip install .                 # Engine und alle Erweiterungen (numpy, pandas)
-pip install ".[plot]"         # zusätzlich matplotlib für Grafiken
 ```
 
 | Paket | Wofür | Pflicht? |
 |---|---|---|
 | `numpy`, `pandas` | Rechenkern und Datenaufnahme | ja |
-| `matplotlib` | Grafiken: Dashboard (`result.plot()`, `export_dashboard`) und `plot()` der Erweiterungen | optional |
 | `pytest` | Test-Suite | optional |
 
 </details>
@@ -1608,12 +1605,13 @@ result.report["WORLD"]["total"]
 # Tagesverlauf als Tabelle
 df = pd.DataFrame({"worth": result.worth, "drawdown": result.drawdowns}, index=result.dates)
 
-fig = result.plot()                                    # alle Standard-Panels (matplotlib-Figure)
+p = result.plot()                                      # alle Standard-Panels (SimLevPlot, SVG)
+p.data["drawdown"]                                     # dargestellte Werte als Tabelle
 result.plot(style="compact")
 result.plot(style="custom", panels=["performance", "drawdown", "monthly"])
 result.plot(compare=result_ohne_steuer)
 
-simlev.export_dashboard(result, "backtest.pdf", width=16, height=10)
+simlev.export_dashboard(result, "backtest.svg", width=16, height=10)
 ```
 
 </details>
@@ -1686,11 +1684,13 @@ R-Fassung; die Unterschiede betreffen nur Schreibweisen und Komfort (siehe
   Fehlermeldung (in R erst nach dem Stand 54b5b4f; vorher rechnete R
   stillschweigend mit einem verschobenen Kalender weiter).
 - Das **statische Dashboard** zeichnet jede Sprache mit eigenen Mitteln
-  (R: Base-Grafik, Python: matplotlib, Julia: SVG). Python und Julia zeigen
+  (R: Base-Grafik, Python und Julia: SVG). Python und Julia zeigen
   dieselben Panels, deutschen Beschriftungen und Kennzahlen wie R (die
   Grafik selbst ist nicht bitgleich, die dargestellten Daten schon). Die
-  `plot()`-Methoden der übrigen Ergebnisobjekte zeichnen in Python mit
-  matplotlib, in Julia als SVG.
+  `plot()`-Methoden der übrigen Ergebnisobjekte zeichnen ebenfalls als
+  SVG. In Python und Julia liefern alle Grafiken ein `SimLevPlot` mit
+  `svg`, `data` (dargestellte Werte je Panel als Tabelle), `source`
+  (Eingabeobjekt) und `kind`, damit sich eigene Grafiken bauen lassen.
 - **Sprache der Ausgaben:** Alle drei Fassungen geben alle Meldungen,
   `print()`, `summary()` und das Dashboard auf Deutsch aus („SimLev
   Simulationsergebnisse“, „Wertentwicklung“, „Endwert“, „Risiko“ …).

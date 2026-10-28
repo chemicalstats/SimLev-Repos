@@ -14,6 +14,7 @@
 module Backcast
 
 import ..SimLev
+using ..SimLev: _bc_doc, _bc_panel
 using ..SimLev: RList, RFrame, RVector, NamedMat, nrow, ncol, attrs, NA, isna_strict, rows,
                 register_print!, register_summary!, register_plot!, r_class, inherits
 using Dates
@@ -801,107 +802,40 @@ end
 "`print.SimLevBackcast`."
 print_SimLevBackcast(x; io::IO = stdout) = (println(io, format_SimLevBackcast(x)); x)
 
-# ── Grafiken (SVG ohne externe Pakete) ─────────────────────────────────────
-
-_svgesc(s) = replace(string(s), "&" => "&amp;", "<" => "&lt;", ">" => "&gt;")
+# ── Grafiken (SVG ohne externe Pakete; Bausteine `_bc_*` in svg.jl) ───────────
 
 """
-    _svg_panel(io, series; x0, y0, w, h, title, xlab, ylab, logy = false, hlines = [], vlines = [])
+    plot_SimLevBackcastFit(x; file = nothing, width = 720, height = 360)
 
-Ein Liniendiagramm in ein SVG schreiben. `series`: Vektor aus
-`(x::Vector{Float64}, y::Vector{Float64}, farbe, linienbreite, strich)`.
-"""
-function _svg_panel(io, series; x0 = 0, y0 = 0, w = 720, h = 360, title = "", xlab = "", ylab = "",
-                    logy = false, hlines = Float64[], vlines = Float64[], xdate = false, legend = Tuple{String,String}[])
-    ml, mr, mt, mb = 70, 15, 30, 45
-    xs = Float64[]; ys = Float64[]
-    for s in series
-        for (a, b) in zip(s[1], s[2])
-            (isfinite(a) && isfinite(b) && (!logy || b > 0)) && (push!(xs, a); push!(ys, logy ? log10(b) : b))
-        end
-    end
-    isempty(xs) && (xs = [0.0, 1.0]; ys = [0.0, 1.0])
-    xlo, xhi = extrema(xs); ylo, yhi = extrema(ys)
-    for v in hlines
-        yv = logy ? log10(v) : v
-        ylo = min(ylo, yv); yhi = max(yhi, yv)
-    end
-    xhi == xlo && (xhi = xlo + 1); yhi == ylo && (yhi = ylo + 1)
-    pad = 0.04 * (yhi - ylo); ylo -= pad; yhi += pad
-    px(a) = x0 + ml + (a - xlo) / (xhi - xlo) * (w - ml - mr)
-    py(b) = y0 + mt + (yhi - b) / (yhi - ylo) * (h - mt - mb)
-    print(io, "<rect x=\"$(x0 + ml)\" y=\"$(y0 + mt)\" width=\"$(w - ml - mr)\" height=\"$(h - mt - mb)\" fill=\"none\" stroke=\"#333\"/>\n")
-    print(io, "<text x=\"$(x0 + w / 2)\" y=\"$(y0 + 18)\" text-anchor=\"middle\" font-size=\"14\" font-weight=\"bold\">$(_svgesc(title))</text>\n")
-    print(io, "<text x=\"$(x0 + w / 2)\" y=\"$(y0 + h - 8)\" text-anchor=\"middle\" font-size=\"12\">$(_svgesc(xlab))</text>\n")
-    print(io, "<text x=\"$(x0 + 14)\" y=\"$(y0 + h / 2)\" text-anchor=\"middle\" font-size=\"12\" transform=\"rotate(-90 $(x0 + 14) $(y0 + h / 2))\">$(_svgesc(ylab))</text>\n")
-    for k in 0:4
-        yv = ylo + k / 4 * (yhi - ylo)
-        lab = logy ? DP._sprintf("%g", 10.0^yv) : DP._sprintf("%g", yv)
-        print(io, "<text x=\"$(x0 + ml - 4)\" y=\"$(py(yv) + 4)\" text-anchor=\"end\" font-size=\"10\">$(lab)</text>\n")
-        xv = xlo + k / 4 * (xhi - xlo)
-        xl = xdate ? DP._date_str(xv) : DP._sprintf("%g", xv)
-        print(io, "<text x=\"$(px(xv))\" y=\"$(y0 + h - mb + 14)\" text-anchor=\"middle\" font-size=\"10\">$(xl)</text>\n")
-    end
-    for v in hlines
-        yv = logy ? log10(v) : v
-        print(io, "<line x1=\"$(px(xlo))\" x2=\"$(px(xhi))\" y1=\"$(py(yv))\" y2=\"$(py(yv))\" stroke=\"#7f7f7f\" stroke-dasharray=\"5,4\"/>\n")
-    end
-    for v in vlines
-        print(io, "<line x1=\"$(px(v))\" x2=\"$(px(v))\" y1=\"$(y0 + mt)\" y2=\"$(y0 + h - mb)\" stroke=\"#666\" stroke-dasharray=\"2,3\"/>\n")
-    end
-    for (sx, sy, col, lw) in series
-        pts = String[]
-        for (a, b) in zip(sx, sy)
-            if isfinite(a) && isfinite(b) && (!logy || b > 0)
-                push!(pts, string(round(px(a); digits = 2), ",", round(py(logy ? log10(b) : b); digits = 2)))
-            end
-        end
-        isempty(pts) || print(io, "<polyline fill=\"none\" stroke=\"$(col)\" stroke-width=\"$(lw)\" points=\"$(join(pts, " "))\"/>\n")
-    end
-    for (i, (lab, col)) in enumerate(legend)
-        yy = y0 + mt + 14 * i
-        print(io, "<line x1=\"$(x0 + ml + 8)\" x2=\"$(x0 + ml + 28)\" y1=\"$(yy - 4)\" y2=\"$(yy - 4)\" stroke=\"$(col)\" stroke-width=\"1.5\"/>\n")
-        print(io, "<text x=\"$(x0 + ml + 32)\" y=\"$(yy)\" font-size=\"11\">$(_svgesc(lab))</text>\n")
-    end
-end
-
-function _svg_doc(f, w, h, file)
-    io = IOBuffer()
-    print(io, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$(w)\" height=\"$(h)\" viewBox=\"0 0 $(w) $(h)\" font-family=\"sans-serif\">\n")
-    print(io, "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n")
-    f(io)
-    print(io, "</svg>\n")
-    svg = String(take!(io))
-    file === nothing || write(file, svg)
-    return svg
-end
-
-"""
-    plot_SimLevBackcastFit(x; file = nothing)
-
-Pfadabweichung im Fit-Fenster (und Verlustkurve der Gittersuche) als SVG
-(Text; mit `file` zusätzlich in die Datei geschrieben).
+Pfadabweichung im Fit-Fenster (und Verlustkurve der Gittersuche) als SVG.
+Liefert `(svg, data)`; `data`: `deviation` (`date`, `deviation` als Anteil,
+gezeichnet in %) und mit Gittersuche `grid` (`value`, `loss`).
 """
 function plot_SimLevBackcastFit(x; file = nothing, width = 720, height = 360)
     dev = x["diagnostics"]["deviation"]
     ng = x["grid"] === nothing ? 1 : 2
-    return _svg_doc(width, height * ng, file) do io
-        _svg_panel(io, [(DP._days(dev["date"]), dev["deviation"] .* 100, "#2C6E9B", 1)];
-                   w = width, h = height, title = "Pfadabweichung im Fit-Fenster", xlab = "Datum",
-                   ylab = "1 - Sim/Produkt (%)", hlines = [0.0], xdate = true)
+    data = SimLev.RList("deviation" => RFrame("date" => collect(dev["date"]), "deviation" => collect(Float64, dev["deviation"])))
+    ng == 2 && (data["grid"] = RFrame("value" => Float64.(x["grid"]["value"]), "loss" => Float64.(x["grid"]["loss"])))
+    svg = _bc_doc(width, height * ng, nothing) do io
+        _bc_panel(io, [(DP._days(dev["date"]), dev["deviation"] .* 100, "#2C6E9B", 1)];
+                  w = width, h = height, title = "Pfadabweichung im Fit-Fenster", xlab = "Datum",
+                  ylab = "1 - Sim/Produkt (%)", hlines = [0.0], xdate = true)
         if ng == 2
             g = x["grid"]
-            _svg_panel(io, [(Float64.(g["value"]), Float64.(g["loss"]), "#B5562B", 1)]; y0 = height, w = width, h = height,
-                       title = "Gittersuche", xlab = DP._sprintf("%s (%% p. a.)", x["fitted"][1]), ylab = x["loss"],
-                       vlines = [_par(x["params"], x["fitted"][1])])
+            _bc_panel(io, [(Float64.(g["value"]), Float64.(g["loss"]), "#B5562B", 1)]; y0 = height, w = width, h = height,
+                      title = "Gittersuche", xlab = DP._sprintf("%s (%% p. a.)", x["fitted"][1]), ylab = x["loss"],
+                      vlines = [_par(x["params"], x["fitted"][1])])
         end
     end
+    return (svg, data)
 end
 
 """
-    plot_SimLevBackcast(x; log = true, file = nothing)
+    plot_SimLevBackcast(x; log = true, file = nothing, width = 720, height = 450)
 
 Verkettete Reihe (Backcast/Produkt), Modellreihe und Verkettungsdatum als SVG.
+Liefert `(svg, data)`; `data`: `backcast` (`date`, `value`, `model`, `source`
+der gezeichneten Zeilen, d. h. mit endlichem `value`).
 """
 function plot_SimLevBackcast(x; log = true, file = nothing, width = 720, height = 450)
     val = x["value"]; mdl = x["model"]
@@ -911,12 +845,15 @@ function plot_SimLevBackcast(x; log = true, file = nothing, width = 720, height 
     nb = [!bc[i] && ok[i] for i in eachindex(val)]
     sd0 = get(attrs(x), "splice_date", missing)
     vl = sd0 === missing || sd0 === nothing ? Float64[] : DP._days(sd0)
-    return _svg_doc(width, height, file) do io
-        _svg_panel(io, [(d[ok], mdl[ok], "#A6A6A6", 1), (d[bc], val[bc], "#B5562B", 1.2), (d[nb], val[nb], "#2C6E9B", 1.2)];
-                   w = width, h = height, title = "Backcast und Produkt", xlab = "Datum",
-                   ylab = log ? "Wert (log. Skala)" : "Wert", logy = log, vlines = vl, xdate = true,
-                   legend = [("Backcast", "#B5562B"), ("Produkt", "#2C6E9B"), ("Modell durchgehend", "#A6A6A6")])
+    data = SimLev.RList("backcast" => RFrame("date" => collect(x["date"])[ok], "value" => val[ok], "model" => mdl[ok],
+                                            "source" => String[string(v) for v in x["source"][ok]]))
+    svg = _bc_doc(width, height, nothing) do io
+        _bc_panel(io, [(d[ok], mdl[ok], "#A6A6A6", 1), (d[bc], val[bc], "#B5562B", 1.2), (d[nb], val[nb], "#2C6E9B", 1.2)];
+                  w = width, h = height, title = "Backcast und Produkt", xlab = "Datum",
+                  ylab = log ? "Wert (log. Skala)" : "Wert", logy = log, vlines = vl, xdate = true,
+                  legend = [("Backcast", "#B5562B"), ("Produkt", "#2C6E9B"), ("Modell durchgehend", "#A6A6A6")])
     end
+    return (svg, data)
 end
 
 function __init__()

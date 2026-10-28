@@ -11,13 +11,14 @@
 module DeepAnalysis
 
 import ..SimLev
+using ..SimLev: _AnaSvg, _MONATE_KURZ, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_ramp, _ana_rect,
+                _ana_svg_done, _ana_text, _ana_year_ticks
 using Dates
 
 export deep_analysis
 
 const _NA = SimLev.NA
 const _MONTH_ABB = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-const _MONATE_KURZ = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
 const _EPOCH = Date(1970, 1, 1)
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -352,123 +353,6 @@ function _rround(M::SimLev.NamedMat, d = 0)
     SimLev.NamedMat(map(v -> _rround(v, d), M.data); rownames = M.rownames, colnames = M.colnames)
 end
 _rround(M::AbstractArray, d = 0) = map(v -> _rround(v, d), M)
-
-# ── Grafik (SVG ohne externe Pakete) ────────────────────────────────────────
-
-const _COLS = ["#2C6E9B", "#B5562B", "#3E8E5A", "#8A5BA8", "#C49A2C", "#4A4A4A"]
-
-"Einfache SVG-Zeichenfläche mit Feldern (Panels) in Benutzerkoordinaten."
-mutable struct _Svg
-    w::Float64
-    h::Float64
-    buf::IOBuffer
-end
-_Svg(w = 900, h = 560) = (s = _Svg(Float64(w), Float64(h), IOBuffer());
-    print(s.buf, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$(Int(w))\" height=\"$(Int(h))\" viewBox=\"0 0 $(Int(w)) $(Int(h))\" font-family=\"sans-serif\">\n<rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n");
-    s)
-_esc(t) = replace(string(t), "&" => "&amp;", "<" => "&lt;", ">" => "&gt;", "\"" => "&quot;")
-_n(v) = isfinite(v) ? string(round(v; digits = 2)) : "0"
-
-"Feld: Pixelrechteck (x0, y0, w, h) und Wertebereiche; `logy` = logarithmische y-Achse."
-struct _Panel
-    x0::Float64; y0::Float64; w::Float64; h::Float64
-    xr::Tuple{Float64,Float64}; yr::Tuple{Float64,Float64}
-    logy::Bool
-end
-function _panel(s::_Svg, x0, y0, w, h, xr, yr; logy = false, title = "", xlab = "", ylab = "",
-                xticks = nothing, xlabels = nothing, yticks = nothing, ylabels = nothing, box = true)
-    xr = _fixr(xr); yr = logy ? (log10(max(yr[1], 1e-300)), log10(max(yr[2], 1e-300))) : yr
-    yr = _fixr(yr)
-    p = _Panel(x0 + 60, y0 + 30, w - 75, h - 70, xr, yr, logy)
-    box && print(s.buf, "<rect x=\"$(_n(p.x0))\" y=\"$(_n(p.y0))\" width=\"$(_n(p.w))\" height=\"$(_n(p.h))\" fill=\"none\" stroke=\"#333\"/>\n")
-    isempty(title) || print(s.buf, "<text x=\"$(_n(p.x0 + p.w / 2))\" y=\"$(_n(y0 + 18))\" text-anchor=\"middle\" font-size=\"14\" font-weight=\"bold\">$(_esc(title))</text>\n")
-    isempty(xlab) || print(s.buf, "<text x=\"$(_n(p.x0 + p.w / 2))\" y=\"$(_n(p.y0 + p.h + 34))\" text-anchor=\"middle\" font-size=\"11\">$(_esc(xlab))</text>\n")
-    isempty(ylab) || print(s.buf, "<text x=\"$(_n(x0 + 12))\" y=\"$(_n(p.y0 + p.h / 2))\" text-anchor=\"middle\" font-size=\"11\" transform=\"rotate(-90 $(_n(x0 + 12)) $(_n(p.y0 + p.h / 2)))\">$(_esc(ylab))</text>\n")
-    xt = xticks === nothing ? _pretty(xr) : xticks
-    xl = xlabels === nothing ? [_tick_lab(v) for v in xt] : xlabels
-    for (v, l) in zip(xt, xl)
-        px = _px(p, v)
-        print(s.buf, "<text x=\"$(_n(px))\" y=\"$(_n(p.y0 + p.h + 14))\" text-anchor=\"middle\" font-size=\"9\">$(_esc(l))</text>\n")
-    end
-    yt = yticks === nothing ? _pretty(yr) : yticks
-    yl = ylabels === nothing ? [_tick_lab(logy ? 10.0^v : v) for v in yt] : ylabels
-    for (v, l) in zip(yt, yl)
-        py = p.y0 + p.h - (v - p.yr[1]) / (p.yr[2] - p.yr[1]) * p.h
-        print(s.buf, "<text x=\"$(_n(p.x0 - 4))\" y=\"$(_n(py + 3))\" text-anchor=\"end\" font-size=\"9\">$(_esc(l))</text>\n")
-    end
-    p
-end
-_fixr(r) = (a = Float64(r[1]); b = Float64(r[2]); (!isfinite(a) || !isfinite(b)) ? (0.0, 1.0) : a == b ? (a - 0.5, b + 0.5) : (a, b))
-function _pretty(r; n = 5)
-    a, b = r
-    d = (b - a) / n
-    m = 10.0^floor(log10(d)); f = d / m
-    st = (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * m
-    collect(ceil(a / st) * st:st:b)
-end
-_tick_lab(v) = abs(v) >= 1e5 || (abs(v) < 1e-3 && v != 0) ? string(round(v; sigdigits = 3)) :
-               (v == round(v) ? string(Int(round(v))) : string(round(v; sigdigits = 4)))
-_px(p::_Panel, x) = p.x0 + (x - p.xr[1]) / (p.xr[2] - p.xr[1]) * p.w
-_py(p::_Panel, y) = (yy = p.logy ? log10(max(y, 1e-300)) : y; p.y0 + p.h - (yy - p.yr[1]) / (p.yr[2] - p.yr[1]) * p.h)
-function _lines(s::_Svg, p::_Panel, x, y; col = "#000", lwd = 1.2, dash = "")
-    pts = String[]
-    for (a, b) in zip(x, y)
-        if isfinite(a) && isfinite(b)
-            push!(pts, _n(_px(p, a)) * "," * _n(_py(p, b)))
-        elseif !isempty(pts)
-            print(s.buf, "<polyline fill=\"none\" stroke=\"$col\" stroke-width=\"$lwd\"$(isempty(dash) ? "" : " stroke-dasharray=\"$dash\"") points=\"$(join(pts, " "))\"/>\n")
-            empty!(pts)
-        end
-    end
-    isempty(pts) || print(s.buf, "<polyline fill=\"none\" stroke=\"$col\" stroke-width=\"$lwd\"$(isempty(dash) ? "" : " stroke-dasharray=\"$dash\"") points=\"$(join(pts, " "))\"/>\n")
-end
-_hline(s::_Svg, p::_Panel, y; col = "grey", dash = "3,3") = _lines(s, p, [p.xr[1], p.xr[2]], [y, y]; col = col, lwd = 1, dash = dash)
-function _rect(s::_Svg, p::_Panel, x1, y1, x2, y2; fill = "#2C6E9B")
-    a = _px(p, x1); b = _px(p, x2); c = _py(p, y1); d = _py(p, y2)
-    print(s.buf, "<rect x=\"$(_n(min(a, b)))\" y=\"$(_n(min(c, d)))\" width=\"$(_n(abs(b - a)))\" height=\"$(_n(abs(d - c)))\" fill=\"$fill\"/>\n")
-end
-function _text(s::_Svg, p::_Panel, x, y, t; size = 8, anchor = "middle")
-    print(s.buf, "<text x=\"$(_n(_px(p, x)))\" y=\"$(_n(_py(p, y) + size / 3))\" text-anchor=\"$anchor\" font-size=\"$size\">$(_esc(t))</text>\n")
-end
-function _points(s::_Svg, p::_Panel, x, y; col = "#2C6E9B", r = 1.5, opacity = 0.4)
-    for (a, b) in zip(x, y)
-        (isfinite(a) && isfinite(b)) || continue
-        print(s.buf, "<circle cx=\"$(_n(_px(p, a)))\" cy=\"$(_n(_py(p, b)))\" r=\"$r\" fill=\"$col\" fill-opacity=\"$opacity\"/>\n")
-    end
-end
-function _legend(s::_Svg, p::_Panel, labels, cols; x = nothing, y = nothing, box = false)
-    lx = x === nothing ? p.x0 + 8 : x; ly = y === nothing ? p.y0 + 14 : y
-    for (i, (l, c)) in enumerate(zip(labels, cols))
-        yy = ly + (i - 1) * 13
-        if box
-            print(s.buf, "<rect x=\"$(_n(lx))\" y=\"$(_n(yy - 8))\" width=\"10\" height=\"10\" fill=\"$c\"/>\n")
-        else
-            print(s.buf, "<line x1=\"$(_n(lx))\" y1=\"$(_n(yy - 3))\" x2=\"$(_n(lx + 16))\" y2=\"$(_n(yy - 3))\" stroke=\"$c\" stroke-width=\"2\"/>\n")
-        end
-        print(s.buf, "<text x=\"$(_n(lx + 20))\" y=\"$(_n(yy))\" font-size=\"10\">$(_esc(l))</text>\n")
-    end
-end
-"Farbverlauf wie `colorRampPalette(cols)(n)`."
-function _ramp(cols::Vector{String}, n::Int)
-    rgb = [(parse(Int, c[2:3]; base = 16), parse(Int, c[4:5]; base = 16), parse(Int, c[6:7]; base = 16)) for c in cols]
-    n == 1 && return [cols[1]]
-    out = String[]
-    for i in 0:n-1
-        t = i / (n - 1) * (length(cols) - 1)
-        k = min(Int(floor(t)) + 1, length(cols) - 1); f = t - (k - 1)
-        c = ntuple(j -> round(Int, rgb[k][j] + f * (rgb[k+1][j] - rgb[k][j])), 3)
-        push!(out, "#" * join(string.(c; base = 16, pad = 2)))
-    end
-    out
-end
-"SVG abschließen; Text zurück, mit `file` zusätzlich in die Datei geschrieben."
-function _svg_done(s::_Svg, file)
-    print(s.buf, "</svg>\n")
-    txt = String(take!(s.buf))
-    file === nothing && return txt
-    write(file, txt)
-    txt
-end
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Reihen aufbereiten
@@ -1118,7 +1002,18 @@ function _summary_analysis(object; io::IO = stdout)
                  "annual" => object["annual"], "drawdowns" => object["drawdowns"])
 end
 
-"`plot.SimLevAnalysis` (SVG): Wertentwicklung, Drawdowns, rollierend, Jahresrenditen oder Monats-Heatmap."
+# ── Grafik (SVG ohne externe Pakete; Bausteine `_ana_*` in svg.jl) ─────────────
+
+const _COLS = ["#2C6E9B", "#B5562B", "#3E8E5A", "#8A5BA8", "#C49A2C", "#4A4A4A"]
+
+"""
+`plot.SimLevAnalysis` (SVG): Wertentwicklung, Drawdowns, rollierend, Jahresrenditen oder Monats-Heatmap.
+
+Liefert `(svg, data)`; `data` je gezeichnetem Panel: `growth` (`series`, `date`, `growth` = Wert /
+Startwert), `drawdown` (`series`, `date`, `drawdown` als Anteil), `rolling` (`series`, `date`,
+`<metric>`), `annual` (`year` und je Reihe eine Spalte, Anteile) bzw. `monthly` (`year`, `month`,
+`return`; gezeichnete Zellen).
+"""
 function _plot_analysis(x; type = ["overview", "growth", "drawdown", "rolling", "annual", "monthly"], series = 1,
                         metric = "cagr", file = nothing)
     type = _match_arg(type, ["overview", "growth", "drawdown", "rolling", "annual", "monthly"])
@@ -1135,73 +1030,92 @@ function _plot_analysis(x; type = ["overview", "growth", "drawdown", "rolling", 
     snames = collect(keys(x["series"]))
     cols = [_COLS[mod1(i, 6)] for i in eachindex(snames)]
     pct = !(metric in ("beta", "sharpe"))
+    data = SimLev.RList()
+    _rep(ks, vs) = String[k for (k, v) in zip(ks, vs) for _ in eachindex(v)]
+    _cdates(fr) = vcat([collect(Date, f["date"]) for f in fr]...)
     function p_growth(s, x0, y0, w, h)
         ys = [x["series"][k]["value"] ./ x["series"][k]["value"][1] for k in snames]
         ds = [_days(x["series"][k]["date"]) for k in snames]
         allv = filter(isfinite, vcat(ys...)); alld = vcat(ds...)
-        p = _panel(s, x0, y0, w, h, (minimum(alld), maximum(alld)), (minimum(allv), maximum(allv)); logy = true,
-                   title = "Wertentwicklung (TWR, Start = 1)", ylab = "Wachstum (log)", xticks = _year_ticks(alld)[1],
-                   xlabels = _year_ticks(alld)[2])
+        p = _ana_panel(s, x0, y0, w, h, (minimum(alld), maximum(alld)), (minimum(allv), maximum(allv)); logy = true,
+                       title = "Wertentwicklung (TWR, Start = 1)", ylab = "Wachstum (log)", xticks = _ana_year_ticks(alld)[1],
+                       xlabels = _ana_year_ticks(alld)[2])
         for i in eachindex(snames)
-            _lines(s, p, ds[i], ys[i]; col = cols[i], lwd = 1.3)
+            _ana_lines(s, p, ds[i], ys[i]; col = cols[i], lwd = 1.3)
         end
-        _legend(s, p, snames, cols)
+        _ana_legend(s, p, snames, cols)
+        data["growth"] = SimLev.RFrame("series" => _rep(snames, ys), "date" => _cdates([x["series"][k] for k in snames]),
+                                       "growth" => vcat(ys...))
     end
     function p_dd(s, x0, y0, w, h)
-        ys = [(v = x["series"][k]["value"]; 100 .* (v ./ _cummax(v) .- 1)) for k in snames]
+        dd = [(v = x["series"][k]["value"]; v ./ _cummax(v) .- 1) for k in snames]
+        ys = [100 .* d for d in dd]
         ds = [_days(x["series"][k]["date"]) for k in snames]
         alld = vcat(ds...)
-        p = _panel(s, x0, y0, w, h, (minimum(alld), maximum(alld)), (minimum(vcat(ys...)), 0.0);
-                   title = "Drawdowns", ylab = "Drawdown (%)", xticks = _year_ticks(alld)[1], xlabels = _year_ticks(alld)[2])
+        p = _ana_panel(s, x0, y0, w, h, (minimum(alld), maximum(alld)), (minimum(vcat(ys...)), 0.0);
+                       title = "Drawdowns", ylab = "Drawdown (%)", xticks = _ana_year_ticks(alld)[1], xlabels = _ana_year_ticks(alld)[2])
         for i in eachindex(snames)
-            _lines(s, p, ds[i], ys[i]; col = cols[i], lwd = 1)
+            _ana_lines(s, p, ds[i], ys[i]; col = cols[i], lwd = 1)
         end
+        data["drawdown"] = SimLev.RFrame("series" => _rep(snames, dd), "date" => _cdates([x["series"][k] for k in snames]),
+                                         "drawdown" => vcat(dd...))
     end
     function p_roll(s, x0, y0, w, h)
         rl = [(k, r) for (k, r) in x["rolling"] if r !== nothing]
         if isempty(rl)
-            _panel(s, x0, y0, w, h, (0, 1), (0, 1); title = "Rollierend: Zeitraum zu kurz", box = false, xticks = [], yticks = [])
+            _ana_panel(s, x0, y0, w, h, (0, 1), (0, 1); title = "Rollierend: Zeitraum zu kurz", box = false, xticks = [], yticks = [])
+            data["rolling"] = SimLev.RFrame("series" => String[], "date" => Date[], metric => Float64[])
             return
         end
         f = pct ? 100 : 1
-        ys = [f .* r[metric] for (_, r) in rl]; ds = [_days(r["date"]) for (_, r) in rl]
+        raw = [collect(Float64, r[metric]) for (_, r) in rl]
+        ys = [f .* v for v in raw]; ds = [_days(r["date"]) for (_, r) in rl]
         allv = filter(isfinite, vcat(ys...)); alld = vcat(ds...)
-        p = _panel(s, x0, y0, w, h, (minimum(alld), maximum(alld)), isempty(allv) ? (0.0, 1.0) : (minimum(allv), maximum(allv));
-                   title = _sp("Rollierend %g J.: %s", Float64(_first(x["rolling_years"])), metric),
-                   ylab = pct ? metric * " (%)" : metric, xticks = _year_ticks(alld)[1], xlabels = _year_ticks(alld)[2])
+        p = _ana_panel(s, x0, y0, w, h, (minimum(alld), maximum(alld)), isempty(allv) ? (0.0, 1.0) : (minimum(allv), maximum(allv));
+                       title = _sp("Rollierend %g J.: %s", Float64(_first(x["rolling_years"])), metric),
+                       ylab = pct ? metric * " (%)" : metric, xticks = _ana_year_ticks(alld)[1], xlabels = _ana_year_ticks(alld)[2])
         for (i, (k, _)) in enumerate(rl)
-            _lines(s, p, ds[i], ys[i]; col = cols[findfirst(==(k), snames)], lwd = 1.2)
+            _ana_lines(s, p, ds[i], ys[i]; col = cols[findfirst(==(k), snames)], lwd = 1.2)
         end
-        _hline(s, p, 0.0)
+        _ana_hline(s, p, 0.0)
+        data["rolling"] = SimLev.RFrame("series" => _rep([k for (k, _) in rl], raw), "date" => _cdates([r for (_, r) in rl]),
+                                        metric => vcat(raw...))
     end
     function p_annual(s, x0, y0, w, h)
         A = 100 .* x["annual"].data; A[isnan.(A)] .= 0
         ny, k = size(A)
-        p = _panel(s, x0, y0, w, h, (0.5, ny + 0.5), (min(0.0, minimum(A)), max(0.0, maximum(A)));
-                   title = "Jahresrenditen", ylab = "Rendite (%)", xticks = collect(1:ny), xlabels = x["annual"].rownames)
+        p = _ana_panel(s, x0, y0, w, h, (0.5, ny + 0.5), (min(0.0, minimum(A)), max(0.0, maximum(A)));
+                       title = "Jahresrenditen", ylab = "Rendite (%)", xticks = collect(1:ny), xlabels = x["annual"].rownames)
         bw = 0.8 / k
         for i in 1:ny, j in 1:k
             xl = i - 0.4 + (j - 1) * bw
-            _rect(s, p, xl, 0.0, xl + bw, A[i, j]; fill = cols[j])
+            _ana_rect(s, p, xl, 0.0, xl + bw, A[i, j]; fill = cols[j])
         end
-        _hline(s, p, 0.0; col = "grey", dash = "")
+        _ana_hline(s, p, 0.0; col = "grey", dash = "")
+        An = x["annual"]
+        data["annual"] = SimLev.RFrame("year" => Int[parse(Int, r) for r in An.rownames],
+                                       (String(c) => An.data[:, j] for (j, c) in enumerate(An.colnames))...)
     end
     function p_monthly(s, x0, y0, w, h)
         nm = series isa AbstractString ? series : nms[Int(series)]
         M = 100 .* x["monthly"][nm].data[:, 1:12]
         fin = filter(isfinite, M); lim = isempty(fin) ? 1.0 : maximum(abs.(fin))
-        pal = _ramp(["#B5562B", "#F7F3EE", "#2C6E9B"], 41)
+        pal = _ana_ramp(["#B5562B", "#F7F3EE", "#2C6E9B"], 41)
         ny = size(M, 1)
-        p = _panel(s, x0, y0, w, h, (0.5, 12.5), (0.5, ny + 0.5); title = "Monatsrenditen: $nm",
-                   xticks = collect(1:12), xlabels = _MONATE_KURZ, yticks = collect(1:ny), ylabels = x["monthly"][nm].rownames)
+        raw = x["monthly"][nm].data[:, 1:12]; rn = x["monthly"][nm].rownames
+        yy = Int[]; mm = Int[]; vv = Float64[]
+        p = _ana_panel(s, x0, y0, w, h, (0.5, 12.5), (0.5, ny + 0.5); title = "Monatsrenditen: $nm",
+                       xticks = collect(1:12), xlabels = _MONATE_KURZ, yticks = collect(1:ny), ylabels = x["monthly"][nm].rownames)
         for i in 1:ny, j in 1:12
             v = M[i, j]; isfinite(v) || continue
             c = pal[clamp(round(Int, (v + lim) / (2 * lim) * 40) + 1, 1, 41)]
-            _rect(s, p, j - 0.5, i - 0.5, j + 0.5, i + 0.5; fill = c)
-            ny <= 30 && _text(s, p, j, i, _sp("%.1f", v); size = 7)
+            _ana_rect(s, p, j - 0.5, i - 0.5, j + 0.5, i + 0.5; fill = c)
+            ny <= 30 && _ana_text(s, p, j, i, _sp("%.1f", v); size = 7)
+            push!(yy, parse(Int, rn[i])); push!(mm, j); push!(vv, raw[i, j])
         end
+        data["monthly"] = SimLev.RFrame("year" => yy, "month" => mm, "return" => vv)
     end
-    s = _Svg(type == "overview" ? 1100 : 900, type == "overview" ? 760 : 520)
+    s = _AnaSvg(type == "overview" ? 1100 : 900, type == "overview" ? 760 : 520)
     if type == "overview"
         p_growth(s, 0, 0, 550, 380); p_dd(s, 550, 0, 550, 380)
         p_roll(s, 0, 380, 550, 380); p_annual(s, 550, 380, 550, 380)
@@ -1209,23 +1123,7 @@ function _plot_analysis(x; type = ["overview", "growth", "drawdown", "rolling", 
         Dict("growth" => p_growth, "drawdown" => p_dd, "rolling" => p_roll, "annual" => p_annual,
              "monthly" => p_monthly)[type](s, 0, 0, 900, 520)
     end
-    SimLev.SimLevDashboard(_svg_done(s, file))
-end
-
-"Jahresmarken für eine Zeitachse (Tage seit 1970)."
-function _year_ticks(days)
-    a = _date1(minimum(days)); b = _date1(maximum(days))
-    ys = Dates.year(a):Dates.year(b)
-    step = max(1, ceil(Int, length(ys) / 8))
-    t = Float64[]; l = String[]
-    for y in ys[1]:step:ys[end]
-        d = _day1(Date(y, 1, 1))
-        d >= _day1(a) && d <= _day1(b) && (push!(t, d); push!(l, string(y)))
-    end
-    if isempty(t)
-        t = [_day1(a)]; l = [_fmt_ymd(a)]
-    end
-    t, l
+    return (_ana_svg_done(s, nothing), data)
 end
 
 function __init__()

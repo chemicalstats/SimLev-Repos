@@ -1241,13 +1241,19 @@ function _plot_wd(x; probs = [0.05, 0.25, 0.5, 0.75, 0.95], file = nothing, widt
     push!(panels, (_mat(x["spending"]), "Realer Konsum je Jahr", 1))
     np = length(panels)
     pw = width / np
+    data = SimLev.RList()
+    # Spaltennamen der Quantile: q05, q25, q50, … (100·p mit %g, einstellig mit führender Null)
+    qn = String[(t = SimLev.r_sprintf("%g", 100 * p); length(t) == 1 ? "q0" * t : "q" * t) for p in probs]
     io = IOBuffer()
     print(io, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$width\" height=\"$height\" viewBox=\"0 0 $width $height\" font-family=\"sans-serif\" font-size=\"12\">\n")
     print(io, "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n")
     k = length(probs)
     for (pi_, (M, main, x0)) in enumerate(panels)
-        Q = reduce(hcat, [_wquantile(M[i, :], w, probs) for i in 1:size(M, 1)]) ./ 1000
+        Qr = reduce(hcat, [_wquantile(M[i, :], w, probs) for i in 1:size(M, 1)])
+        Q = Qr ./ 1000
         xs = collect(x0:x0+size(M, 1)-1)
+        # dargestellte Werte unskaliert (gezeichnet in Tausend)
+        data[x0 == 0 ? "wealth" : "spending"] = SimLev.RFrame("year" => xs, (qn[i] => Float64[Qr[i, j] for j in eachindex(xs)] for i in eachindex(qn))...)
         fin = filter(isfinite, vec(Q))
         ylo, yhi = isempty(fin) ? (0.0, 1.0) : (minimum(fin), maximum(fin))
         yhi == ylo && (yhi = ylo + 1)
@@ -1272,7 +1278,7 @@ function _plot_wd(x; probs = [0.05, 0.25, 0.5, 0.75, 0.95], file = nothing, widt
     print(io, "</svg>\n")
     svg = String(take!(io))
     file === nothing || write(file, svg)
-    return svg
+    return (svg, data)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -16,6 +16,7 @@ from .config import (
 )
 from .engine import simulation
 from .result import SimLevResult, SimLevSummary
+from .svg import SimLevPlot
 from .result import summary as _summary_result
 from .tax_tariff import SimLevTaxTariff, read_tax_tariff
 from .trigger import compute_rebal_trigger
@@ -222,11 +223,12 @@ bootstrap = _callable_module("bootstrap")
 deep_analysis = _callable_module("deep_analysis")
 param_search = _callable_module("param_search")
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 __all__ = [
     "AssetConfig",
     "SimLevResult",
+    "SimLevPlot",
     "SimLevSummary",
     "SimLevTaxTariff",
     "Strategy",
@@ -380,8 +382,10 @@ __all__ = [
 ]
 
 
-def export_dashboard(x, filename: str = "dashboard.pdf", width: float = 14, height: float = 10, **kwargs):
-    """Speichert das Dashboard als PDF (oder anderes von matplotlib unterstütztes Format)."""
+def export_dashboard(x, filename: str = "dashboard.svg", width: float = 14, height: float = 10, **kwargs):
+    """Speichert das Dashboard als SVG-Datei (Größe in Zoll, 100 px je Zoll; nur Endung ``.svg``).
+
+    Weitere Argumente gehen an :func:`simlev.dashboard.plot_dashboard`."""
     from .dashboard import export_dashboard as _impl
     return _impl(x, filename=filename, width=width, height=height, **kwargs)
 
@@ -397,7 +401,10 @@ def summary(object, *args, **kwargs):  # noqa: A002 - R-Name
 
 
 def plot(x, *args, **kwargs):
-    """Generisches ``plot()`` wie in R: ruft die Methode ``x.plot()`` auf (matplotlib)."""
+    """Generisches ``plot()`` wie in R: ruft die Methode ``x.plot()`` auf.
+
+    Ergebnis ist ein :class:`simlev.SimLevPlot` (SVG in ``svg``, dargestellte Werte je Panel in
+    ``data``); geschrieben wird nur mit ``file="….svg"``."""
     meth = getattr(type(x), "plot", None)
     if callable(meth):
         return meth(x, *args, **kwargs)

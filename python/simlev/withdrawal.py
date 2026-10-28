@@ -947,8 +947,7 @@ class SimLevWithdrawal(RList):
     def summary(self, probs=(0.05, 0.25, 0.5, 0.75, 0.95)):
         return _summary_wd(self, probs=probs)
 
-    def plot(self, probs=(0.05, 0.25, 0.5, 0.75, 0.95), **kwargs):
-        return _plot_wd(self, probs=probs, **kwargs)
+    # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
     def format(self) -> str:
         return self.summary().format()
@@ -1567,33 +1566,65 @@ def _cat_summary_wd(x) -> str:
     return "".join(out)
 
 
-def _plot_wd(x, probs=(0.05, 0.25, 0.5, 0.75, 0.95), **kwargs):
-    """Fächer des realen Vermögens und des realen Jahreskonsums (matplotlib)."""
-    import matplotlib.pyplot as plt
-    probs = np.asarray(probs, dtype=np.float64)
-    panels = 1 if x.get("wealth") is None else 2
-    fig, axes = plt.subplots(1, panels, figsize=(5 * panels, 4))
-    axes = np.atleast_1d(axes)
+def _plot_wd(x, probs=(0.05, 0.25, 0.5, 0.75, 0.95), width=900, height=380):
+    """Fächer des realen Vermögens und des realen Jahreskonsums als SVG (R: ``plot.SimLevWithdrawal``).
+
+    Liefert ``(svg, data)``: ``wealth`` (nur mit Vermögenspfaden) und ``spending``, je ``year`` und eine
+    Spalte je Quantil (``q05``, ``q25``, ``q50``, …), unskaliert (gezeichnet in Tausend).
+    """
+    from ._r.rformat import r_sprintf
+    from .svg import _jl_str
+    probs = np.atleast_1d(np.asarray(probs, dtype=np.float64))
     w = np.asarray(x["weights"], dtype=np.float64)
-
-    def fan(ax, M, main, xs):
-        Q = np.column_stack([_wquantile(M[i, :], w, probs) for i in range(M.shape[0])]) / 1000
-        k = len(probs)
-        for i in range(k // 2):
-            ax.fill_between(xs, Q[i, :], Q[k - 1 - i, :], color="#2C6E9B", alpha=0.18, lw=0)
-        ax.plot(xs, Q[math.ceil(k / 2) - 1, :], color="#2C6E9B", lw=2)
-        ax.set_xlabel("Jahr")
-        ax.set_ylabel("Tsd. (Startkaufkraft)")
-        ax.set_title(main)
-
-    i = 0
+    panels = []
     if x.get("wealth") is not None:
-        Wm = np.asarray(x["wealth"], dtype=np.float64)
-        fan(axes[0], Wm, "Reales Vermögen", np.arange(Wm.shape[0]))
-        i = 1
-    S = np.asarray(x["spending"], dtype=np.float64)
-    fan(axes[i], S, "Realer Konsum je Jahr", np.arange(1, S.shape[0] + 1))
-    return x
+        panels.append((np.asarray(x["wealth"], dtype=np.float64), "Reales Vermögen", 0))
+    panels.append((np.asarray(x["spending"], dtype=np.float64), "Realer Konsum je Jahr", 1))
+    npn = len(panels)
+    pw = width / npn
+    qn = []
+    for pr in probs:
+        t = r_sprintf("%g", 100 * float(pr))
+        qn.append("q0" + t if len(t) == 1 else "q" + t)
+    data = {}
+    out = ["<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%s\" height=\"%s\" viewBox=\"0 0 %s %s\" "
+           "font-family=\"sans-serif\" font-size=\"12\">\n" % (_jl_str(width), _jl_str(height), _jl_str(width), _jl_str(height)),
+           "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n"]
+    k = len(probs)
+    for pi_, (M, main, x0) in enumerate(panels):
+        Qr = np.column_stack([np.asarray(_wquantile(M[i, :], w, probs), dtype=np.float64) for i in range(M.shape[0])])
+        Q = Qr / 1000
+        xs = list(range(x0, x0 + M.shape[0]))
+        data["wealth" if x0 == 0 else "spending"] = pd.DataFrame(
+            {"year": np.array(xs, dtype=np.int64), **{qn[i]: Qr[i, :].copy() for i in range(len(qn))}})
+        fin = Q.ravel(order="F")
+        fin = fin[np.isfinite(fin)]
+        ylo, yhi = (0.0, 1.0) if fin.size == 0 else (float(fin.min()), float(fin.max()))
+        if yhi == ylo:
+            yhi = ylo + 1
+        xlo, xhi = xs[0], max(xs[-1], xs[0] + 1)
+        ox = pi_ * pw
+        ml, mr, mt, mb = 60, 15, 35, 45
+        aw, ah = pw - ml - mr, height - mt - mb
+
+        def sx(v, ox=ox, xlo=xlo, xhi=xhi, aw=aw):
+            return ox + ml + (v - xlo) / (xhi - xlo) * aw
+
+        def sy(v, ylo=ylo, yhi=yhi, ah=ah):
+            return mt + ah - (v - ylo) / (yhi - ylo) * ah
+        out.append("<text x=\"%s\" y=\"20\" text-anchor=\"middle\" font-weight=\"bold\">%s</text>\n" % (_jl_str(ox + pw / 2), main))
+        out.append("<rect x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\" fill=\"none\" stroke=\"black\"/>\n"
+                   % (_jl_str(ox + ml), _jl_str(mt), _jl_str(aw), _jl_str(ah)))
+        out.append("<text x=\"%s\" y=\"%s\" text-anchor=\"middle\">Jahr</text>\n" % (_jl_str(ox + ml + aw / 2), _jl_str(height - 10)))
+        for i in range(k // 2):
+            up = ["%.2f,%.2f" % (sx(xs[j]), sy(Q[i, j])) for j in range(len(xs)) if math.isfinite(Q[i, j])]
+            dn = ["%.2f,%.2f" % (sx(xs[j]), sy(Q[k - 1 - i, j])) for j in reversed(range(len(xs))) if math.isfinite(Q[k - 1 - i, j])]
+            out.append("<polygon fill=\"#2C6E9B\" fill-opacity=\"0.18\" stroke=\"none\" points=\"%s\"/>\n" % " ".join(up + dn))
+        mid = -(-k // 2) - 1
+        pts = ["%.2f,%.2f" % (sx(xs[j]), sy(Q[mid, j])) for j in range(len(xs)) if math.isfinite(Q[mid, j])]
+        out.append("<polyline fill=\"none\" stroke=\"#2C6E9B\" stroke-width=\"2\" points=\"%s\"/>\n" % " ".join(pts))
+    out.append("</svg>\n")
+    return "".join(out), data
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1695,6 +1726,11 @@ def _draw_horizon(h, n):
     out = np.maximum(1.0, np.asarray(out, dtype=np.float64))
     return np.trunc(out).astype(np.int64)
 
+
+# plot.SimLevWithdrawal (SVG, ``SimLevPlot``) wie Julias ``_plot_method(_plot_wd, "SimLevWithdrawal")``
+from .svg import _plot_method  # noqa: E402
+
+SimLevWithdrawal.plot = _plot_method(_plot_wd, "SimLevWithdrawal")
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
 from ._r.base import quiet_fp  # noqa: E402

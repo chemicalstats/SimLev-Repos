@@ -1596,9 +1596,6 @@ class SimLevBootstrapStudy(RList):
                 probs=(0.05, 0.25, 0.5, 0.75, 0.95)):
         return _summary_study(self, metrics=metrics, probs=probs)
 
-    def plot(self, metric="cagr", **kwargs):
-        return _plot_study(self, metric=metric, **kwargs)
-
     def format(self) -> str:
         head = _sp("SimLev Bootstrap-Studie '%s': %d Pfade, Strategien: %s, %d Ergebniszeilen, %.1f s\n",
                    self["method"], int(self["n_paths"]), ", ".join(self["strategies"]), len(self["results"]),
@@ -2222,33 +2219,77 @@ def _cat_summary_study(x) -> str:
     return "".join(out)
 
 
-def _plot_study(x, metric="cagr", **kwargs):
-    """Ungewichtete Dichten einer Kennzahl je Strategie (matplotlib)."""
-    import matplotlib.pyplot as plt
+_DARK3 = ["#E16A86", "#50A315", "#009ADE", "#B88A00", "#00AD9A", "#C86DD7"]
+
+
+def _plot_study(x, metric="cagr", width=640, height=420):
+    """Ungewichtete Dichten einer Kennzahl je Strategie als SVG (R: ``plot.SimLevBootstrapStudy``).
+
+    Args:
+        metric: Spalte von ``results`` (z. B. ``"cagr"``).
+        width, height: Größe in Pixeln.
+        file: Dateiname auf ``.svg`` (sonst wird nichts geschrieben).
+
+    Returns:
+        :class:`simlev.SimLevPlot`; ``data``: ``density`` (``strategy``, ``x``, ``density``: die gezeichneten
+        Punkte von ``density()`` je Strategie im Wertebereich der Kennzahl).
+    """
+    from .svg import _jl_fmt, _jl_max, _jl_maximum, _jl_minimum, _jl_str as J
     tab = x["results"]
-    dl = [tab.loc[tab["strategy"] == s, metric].to_numpy(dtype=np.float64) for s in x["strategies"]]
-    allv = np.concatenate(dl)
+    strats = [str(v) for v in x["strategies"]]
+    mv = tab[metric].to_numpy(dtype=np.float64)
+    sv = tab["strategy"].to_numpy()
+    dl = [mv[sv == st] for st in strats]
+    allv = np.concatenate(dl) if dl else np.array([], dtype=np.float64)
     allv = allv[np.isfinite(allv)]
-    fig, ax = plt.subplots()
-    cols = plt.get_cmap("Dark2")(np.linspace(0, 1, max(len(dl), 1)))
-    for v, s, c in zip(dl, x["strategies"], cols):
+    dens = []
+    for v in dl:
         v = v[np.isfinite(v)]
-        try:
-            dens = _stats().density(v)
-            gx, gy = np.asarray(_get(dens, "x")), np.asarray(_get(dens, "y"))
-        except Exception:  # noqa: BLE001
-            sd = float(np.std(v, ddof=1)) if len(v) > 1 else 1.0
-            bw = 0.9 * min(sd, (np.subtract(*np.percentile(v, [75, 25])) / 1.34) or sd) * len(v) ** -0.2
-            bw = bw or 1.0
-            gx = np.linspace(v.min() - 3 * bw, v.max() + 3 * bw, 512)
-            gy = np.exp(-0.5 * ((gx[:, None] - v[None, :]) / bw) ** 2).sum(1) / (len(v) * bw * math.sqrt(2 * math.pi))
-        ax.plot(gx, gy, color=c, lw=1.5, label=s)
-    ax.set_xlim(allv.min(), allv.max())
-    ax.set_xlabel(metric)
-    ax.set_ylabel("Dichte")
-    ax.set_title("Verteilung %s (%s, %d Pfade)" % (metric, x["method"], int(x["n_paths"])))
-    ax.legend(frameon=False, loc="upper right")
-    return x
+        if v.size < 2:   # R's density(): vor nx / N prüfen (_r.stats.density teilt sonst durch 0)
+            raise ValueError("need at least 2 points to select a bandwidth automatically")
+        dd = _stats().density(v)
+        dens.append((np.asarray(_get(dd, "x"), dtype=np.float64), np.asarray(_get(dd, "y"), dtype=np.float64)))
+    x0, x1 = (0.0, 1.0) if allv.size == 0 else (_jl_minimum(allv), _jl_maximum(allv))
+    if x1 == x0:
+        x1 = x0 + 1
+    y1 = 1e-12
+    for d in dens:
+        y1 = _jl_max(y1, 0.0 if d[1].size == 0 else _jl_maximum(d[1]))
+    ml, mr, mt, mb = 60, 20, 40, 50
+    pw, ph = width - ml - mr, height - mt - mb
+
+    def sx(v):
+        return ml + (v - x0) / (x1 - x0) * pw
+
+    def sy(v):
+        return mt + ph - v / y1 * ph
+
+    out = ["<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%s\" height=\"%s\" viewBox=\"0 0 %s %s\" "
+           "font-family=\"sans-serif\" font-size=\"12\">\n" % (J(width), J(height), J(width), J(height)),
+           "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n",
+           "<text x=\"%s\" y=\"22\" text-anchor=\"middle\" font-size=\"14\" font-weight=\"bold\">%s</text>\n"
+           % (J(width / 2), "Verteilung %s (%s, %d Pfade)" % (metric, x["method"], int(x["n_paths"]))),
+           "<rect x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\" fill=\"none\" stroke=\"black\"/>\n"
+           % (J(ml), J(mt), J(pw), J(ph)),
+           "<text x=\"%s\" y=\"%s\" text-anchor=\"middle\">%s</text>\n" % (J(ml + pw / 2), J(height - 12), metric),
+           "<text x=\"16\" y=\"%s\" text-anchor=\"middle\" transform=\"rotate(-90 16 %s)\">Dichte</text>\n"
+           % (J(mt + ph / 2), J(mt + ph / 2))]
+    rs, rx, ry = [], [], []
+    for i, (gx, gy) in enumerate(dens, start=1):
+        col = _DARK3[(i - 1) % len(_DARK3)]
+        keep = [(a, b) for a, b in zip(gx.tolist(), gy.tolist()) if x0 <= a <= x1]
+        pts = " ".join(_jl_fmt("%.2f", sx(a)) + "," + _jl_fmt("%.2f", sy(b)) for a, b in keep)
+        out.append("<polyline fill=\"none\" stroke=\"%s\" stroke-width=\"1.5\" points=\"%s\"/>\n" % (col, pts))
+        out.append("<line x1=\"%s\" y1=\"%s\" x2=\"%s\" y2=\"%s\" stroke=\"%s\" stroke-width=\"1.5\"/><text x=\"%s\" "
+                   "y=\"%s\">%s</text>\n" % (J(width - mr - 120), J(mt + 16 * i), J(width - mr - 100), J(mt + 16 * i), col,
+                                            J(width - mr - 95), J(mt + 16 * i + 4), strats[i - 1]))
+        rs += [strats[i - 1]] * len(keep)
+        rx += [a for a, _ in keep]
+        ry += [b for _, b in keep]
+    out.append("</svg>\n")
+    data = {"density": pd.DataFrame({"strategy": np.array(rs, dtype=object), "x": np.array(rx, dtype=np.float64),
+                                     "density": np.array(ry, dtype=np.float64)})}
+    return "".join(out), data
 
 
 def summary(object, *args, **kwargs):  # noqa: A002
@@ -2259,11 +2300,18 @@ def summary(object, *args, **kwargs):  # noqa: A002
 
 
 def plot(x, *args, **kwargs):
-    """``plot()`` für Bootstrap-Studien und Entnahme-Ergebnisse (matplotlib)."""
+    """``plot()`` für Bootstrap-Studien und Entnahme-Ergebnisse: ruft die Methode ``x.plot()`` auf.
+
+    Ergebnis ist ein :class:`simlev.SimLevPlot` (SVG in ``svg``, dargestellte Werte in ``data``);
+    geschrieben wird nur mit ``file="….svg"``."""
     if hasattr(x, "plot"):
         return x.plot(*args, **kwargs)
     raise TypeError("keine plot-Methode für %s" % type(x).__name__)
 
+
+from .svg import _plot_method  # noqa: E402
+
+SimLevBootstrapStudy.plot = _plot_method(_plot_study, "SimLevBootstrapStudy")
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
 from ._r.base import quiet_fp  # noqa: E402

@@ -11,6 +11,7 @@
 module Planning
 
 import ..SimLev
+using ..SimLev: _AnaSvg, _ana_hline, _ana_legend, _ana_panel, _ana_ramp, _ana_rect, _ana_svg_done
 using Dates
 
 export set_expected_return, pooled_bootstrap, portfolio_returns, goal_optimize
@@ -481,19 +482,26 @@ function _plot_goalplan(x; file = nothing)
     keep = findall(v -> v >= goal / 20 && v <= goal * 3, g)
     P = x["policy"][:, keep]
     K = length(DA._strs(x["candidates"])); H = Int(x["horizon"])
-    pal = DA._ramp(["#2C6E9B", "#F2E9DC", "#B5562B"], max(K, 1))
+    pal = _ana_ramp(["#2C6E9B", "#F2E9DC", "#B5562B"], max(K, 1))
     lg = log10.(g[keep])
-    s = DA._Svg(900, 520)
+    s = _AnaSvg(900, 520)
     yr = isempty(lg) ? (0.0, 1.0) : (minimum(lg), maximum(lg))
-    p = DA._panel(s, 0, 0, 800, 520, (0.5, H + 0.5), yr; title = "Optimale Wahl je Zeit und Vermögen",
-                  xlab = "Periode", ylab = "Vermögen (log10)", xticks = collect(1:H))
+    p = _ana_panel(s, 0, 0, 800, 520, (0.5, H + 0.5), yr; title = "Optimale Wahl je Zeit und Vermögen",
+                   xlab = "Periode", ylab = "Vermögen (log10)", xticks = collect(1:H))
     for t in 1:H, (q, y) in enumerate(lg)
         lo = q == 1 ? y : (lg[q-1] + y) / 2; hi = q == length(lg) ? y : (lg[q+1] + y) / 2
-        DA._rect(s, p, t - 0.5, lo, t + 0.5, hi; fill = pal[clamp(P[t, q], 1, length(pal))])
+        _ana_rect(s, p, t - 0.5, lo, t + 0.5, hi; fill = pal[clamp(P[t, q], 1, length(pal))])
     end
-    goal > 0 && DA._hline(s, p, log10(goal); col = "#000", dash = "5,4")
-    DA._legend(s, p, DA._strs(x["candidates"]), pal; x = 800.0, y = 50.0, box = true)
-    SimLev.SimLevDashboard(DA._svg_done(s, file))
+    goal > 0 && _ana_hline(s, p, log10(goal); col = "#000", dash = "5,4")
+    _ana_legend(s, p, DA._strs(x["candidates"]), pal; x = 800.0, y = 50.0, box = true)
+    # gezeichnete Zellen: Periode, Vermögen (Gitterwert, nicht log10), gewählter Kandidat (Nummer und Name)
+    cands = DA._strs(x["candidates"])
+    nq = length(keep)
+    per = Int[t for t in 1:H for _ in 1:nq]
+    ch = Int[Int(P[t, q]) for t in 1:H for q in 1:nq]
+    data = SimLev.RList("policy" => SimLev.RFrame("period" => per, "wealth" => Float64[g[keep][q] for _ in 1:H for q in 1:nq],
+                                                  "choice" => ch, "candidate" => String[cands[clamp(c, 1, K)] for c in ch]))
+    return (_ana_svg_done(s, file), data)
 end
 
 function __init__()

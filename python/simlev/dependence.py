@@ -923,9 +923,6 @@ class SimLevDependence(RList):
     def format(self):
         return _print_dependence(self)
 
-    def plot(self, type="overview", pair=1, condition=1, **kw):
-        return _plot_dependence(self, type=type, pair=pair, condition=condition, **kw)
-
 
 def dependence_analysis(data, assets, conditions=None, frequency=("week", "day", "month"),
                         quantiles=(0.05, 0.10), breaks=None, n_regimes=3, window=None,
@@ -1227,84 +1224,173 @@ def _print_dependence(x):
     return "\n".join(lines)
 
 
-def _plot_dependence(x, type="overview", pair=1, condition=1, **kw):
-    import matplotlib.pyplot as plt
-    type = _match_arg(type, ("overview", "rolling", "tail", "conditional", "scatter"), "type")
-    pn = list(x["pairs"]["pair"])
+# ═════════════════════════════════════════════════════════════════════════════
+# Grafiken (SVG wie julia/src/dependence.jl; Bausteine `_grid_*` in svg.py)
+# ═════════════════════════════════════════════════════════════════════════════
+# Nicht bitgleich zu R's Grafik, zeigen aber dieselben Daten.
+
+def _plot_dependence(x, type=("overview", "rolling", "tail", "conditional", "scatter"), pair=1, condition=1,  # noqa: A002
+                     width=900, height=650):
+    """``plot.SimLevDependence`` (SVG): rollierende/DCC-Korrelation, Tail-Abhängigkeit, Korrelation je Regime
+    und Pseudo-Beobachtungen.
+
+    Args:
+        type: ``"overview"`` (alle vier im 2 x 2-Raster), ``"rolling"``, ``"tail"``, ``"conditional"`` oder
+            ``"scatter"``.
+        pair: Paar (Name ``"A ~ B"`` oder Nummer).
+        condition: Drittvariable (Name oder Nummer) für ``"conditional"``.
+        width, height: Größe in Pixeln.
+        file: Dateiname auf ``.svg`` (sonst wird nichts geschrieben).
+
+    Returns:
+        :class:`simlev.SimLevPlot`; ``data`` je Panel: ``rolling`` (``date``, ``rolling`` und mit DCC ``dcc``),
+        ``tail`` (``q``, ``lower``, ``upper``, ``independence``), ``conditional`` (``regime``, ``pearson``,
+        gegebenenfalls ``pearson_lo``, ``pearson_hi``, und ``lambda_lower``), ``scatter`` (``u``, ``v``).
+        Ohne rollierende Korrelation bzw. Drittvariable sind ``rolling`` bzw. ``conditional`` leer.
+    """
+    from .svg import _jl_log10
+    type = _match_arg(type, ("overview", "rolling", "tail", "conditional", "scatter"), "type")  # noqa: A001
+    pn = [str(v) for v in x["pairs"]["pair"]]
     i = pn.index(pair) if isinstance(pair, str) else int(pair) - 1
     ab = pn[i].split(" ~ ")
     X = x["returns"]
+    data = {}
 
-    def p_roll(ax):
+    def p_roll(c, box):
         if x["rolling"] is None:
-            ax.axis("off")
+            data["rolling"] = pd.DataFrame({"date": np.array([], dtype="datetime64[s]"),
+                                            "rolling": np.array([], dtype=np.float64)})
             return
-        ax.plot(x["rolling"]["date"], x["rolling"][pn[i]], color="#2C6E9B", label="rollierend")
+        rl = x["rolling"]
+        rv = rl[pn[i]].to_numpy(dtype=np.float64)
+        series = [(_days(rl["date"].to_numpy()), rv, "#2C6E9B", "rollierend")]
+        d = {"date": rl["date"].to_numpy(), "rolling": rv.copy()}
         if x["dcc"] is not None:
-            ax.plot(X["date"], x["dcc"]["correlation"][pn[i]], color="#B5562B", label="DCC")
-        ax.axhline(0, color="grey", ls=":")
-        ax.set_ylim(-1, 1)
-        ax.set_ylabel("Korrelation")
-        ax.set_title("%s: rollierend (%d) und DCC" % (pn[i], int(x["window"])))
-        ax.legend(loc="lower left", frameon=False, fontsize=7)
+            cv = x["dcc"]["correlation"][pn[i]].to_numpy(dtype=np.float64)
+            series.append((_days(X["date"].to_numpy()), cv, "#B5562B", "DCC"))
+            d["dcc"] = cv.copy()
+        _grid_lines(c, box, series, ylim=(-1.0, 1.0), hline=[(0.0, "grey")], dates=True,
+                    title="%s: rollierend (%d) und DCC" % (pn[i], int(x["window"])), ylabel="Korrelation")
+        data["rolling"] = pd.DataFrame(d)
 
-    def p_tail(ax):
+    def p_tail(c, box):
         qg = [0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5]
         td = tail_dependence(X[ab[0]], X[ab[1]], qg)
-        ax.semilogx(qg, td["lower"], "o-", color="#B5562B", label="unten (gemeinsame Verluste)")
-        ax.semilogx(qg, td["upper"], "^-", color="#2C6E9B", label="oben (gemeinsame Gewinne)")
-        ax.semilogx(qg, qg, ":", color="grey", label="Unabhängigkeit")
+        lq = [_jl_log10(v) for v in qg]
+        lo = np.asarray(td["lower"], dtype=np.float64)
+        up = np.asarray(td["upper"], dtype=np.float64)
+        series = [(lq, lo, "#B5562B", "unten (gemeinsame Verluste)"),
+                  (lq, up, "#2C6E9B", "oben (gemeinsame Gewinne)"),
+                  (lq, qg, "#666666", "Unabhängigkeit")]
+        hl = []
         if x["copulas"] is not None:
-            cp = x["copulas"][pn[i]].iloc[0]
-            ax.axhline(cp["lambda_lower"], color="#B5562B", ls="--")
-            ax.axhline(cp["lambda_upper"], color="#2C6E9B", ls="--", label="Copula: %s" % cp["family"])
-        ax.set_ylim(0, 1)
-        ax.set_xlabel("Quantil q")
-        ax.set_title("%s: Tail-Abhängigkeit" % pn[i])
-        ax.legend(loc="upper right", frameon=False, fontsize=7)
+            cp = x["copulas"][pn[i]]
+            hl.append((float(cp["lambda_lower"].iloc[0]), "#B5562B"))
+            hl.append((float(cp["lambda_upper"].iloc[0]), "#2C6E9B"))
+        _grid_lines(c, box, series, ylim=(0.0, 1.0), hline=hl, points=True, xlabel="Quantil q (log)",
+                    title="%s: Tail-Abhängigkeit" % pn[i],
+                    xticks=[(_jl_log10(v), _sprintf("%g", v)) for v in (0.01, 0.05, 0.1, 0.5)])
+        data["tail"] = pd.DataFrame({"q": np.array(qg, dtype=np.float64), "lower": lo.copy(), "upper": up.copy(),
+                                     "independence": np.array(qg, dtype=np.float64)})
 
-    def p_cond(ax):
+    def p_cond(c, box):
         if not x["conditional"]:
-            ax.axis("off")
+            data["conditional"] = pd.DataFrame({"regime": np.array([], dtype=object),
+                                                "pearson": np.array([], dtype=np.float64),
+                                                "lambda_lower": np.array([], dtype=np.float64)})
             return
-        names = list(x["conditional"].keys())
-        cn = condition if isinstance(condition, str) else names[int(condition) - 1]
+        cn = condition if isinstance(condition, str) else list(x["conditional"].keys())[int(condition) - 1]
         ct = x["conditional"][cn]
-        ct = ct[ct["pair"] == pn[i]]
-        pos = np.arange(len(ct))
-        ax.bar(pos, ct["pearson"], color="#2C6E9B")
-        if "pearson_lo" in ct.columns:
-            ax.errorbar(pos, ct["pearson"], yerr=[ct["pearson"] - ct["pearson_lo"], ct["pearson_hi"] - ct["pearson"]],
-                        fmt="none", color="black")
-        ax.plot(pos, ct["lambda_lower"], "o", color="#B5562B")
-        ax.set_xticks(pos, ct["regime"], fontsize=7)
-        ax.axhline(0, color="grey")
-        ax.set_ylim(-1, 1)
-        ax.set_title("%s nach '%s'" % (pn[i], cn))
+        sel = np.flatnonzero(ct["pair"].to_numpy() == pn[i])
+        lo = ct["pearson_lo"].to_numpy(dtype=np.float64)[sel] if "pearson_lo" in ct.columns else None
+        hi = ct["pearson_hi"].to_numpy(dtype=np.float64)[sel] if "pearson_hi" in ct.columns else None
+        reg = [str(v) for v in ct["regime"].to_numpy()[sel]]
+        pe = ct["pearson"].to_numpy(dtype=np.float64)[sel]
+        ll = ct["lambda_lower"].to_numpy(dtype=np.float64)[sel]
+        _grid_bars(c, box, reg, pe, lo=lo, hi=hi, pts=ll, ylim=(-1.0, 1.0), title="%s nach '%s'" % (pn[i], cn),
+                   ylabel="Korrelation")
+        d = {"regime": np.array(reg, dtype=object), "pearson": pe.copy()}
+        if lo is not None:
+            d["pearson_lo"] = lo.copy()
+        if hi is not None:
+            d["pearson_hi"] = hi.copy()
+        d["lambda_lower"] = ll.copy()
+        data["conditional"] = pd.DataFrame(d)
 
-    def p_scatter(ax):
-        u = _pobs(X[ab[0]])
-        v = _pobs(X[ab[1]])
-        q = x["tail_q"]
-        lo = (u <= q) & (v <= q)
-        hi = (u > 1 - q) & (v > 1 - q)
-        col = np.where(lo, "#B5562B", np.where(hi, "#2C6E9B", "#A6A6A6"))
-        ax.scatter(u, v, s=4, c=col)
-        ax.add_patch(plt.Rectangle((0, 0), q, q, fill=False, color="#B5562B"))
-        ax.add_patch(plt.Rectangle((1 - q, 1 - q), q, q, fill=False, color="#2C6E9B"))
-        ax.set_xlabel("Rang " + ab[0])
-        ax.set_ylabel("Rang " + ab[1])
-        ax.set_title("Pseudo-Beobachtungen")
+    def p_scatter(c, box):
+        u = np.asarray(_pobs(X[ab[0]]), dtype=np.float64)
+        v = np.asarray(_pobs(X[ab[1]]), dtype=np.float64)
+        q = float(x["tail_q"])
+        col = ["#B5562B" if (a <= q and bb <= q) else ("#2C6E9B" if (a > 1 - q and bb > 1 - q) else "#A6A6A6")
+               for a, bb in zip(u.tolist(), v.tolist())]
+        _grid_scatter(c, box, u, v, col, rects=[(0.0, 0.0, q, q, "#B5562B"), (1 - q, 1 - q, 1.0, 1.0, "#2C6E9B")],
+                      xlabel="Rang %s" % ab[0], ylabel="Rang %s" % ab[1], title="Pseudo-Beobachtungen")
+        data["scatter"] = pd.DataFrame({"u": u.copy(), "v": v.copy()})
+
     fns = {"rolling": p_roll, "tail": p_tail, "conditional": p_cond, "scatter": p_scatter}
-    if type == "overview":
-        fig, axs = plt.subplots(2, 2, figsize=(11, 8))
-        for ax, k in zip(axs.ravel(), ["rolling", "tail", "conditional", "scatter"]):
-            fns[k](ax)
-    else:
-        fig, ax = plt.subplots(figsize=(8, 5))
-        fns[type](ax)
-    fig.tight_layout()
-    return x
+    ks = ["rolling", "tail", "conditional", "scatter"] if type == "overview" else [type]
+    svg = _grid_svg(ks, lambda k: fns[k], width=width, height=height).svg
+    return svg, data
+
+
+def _plot_tail_regression(x, width=900, height=400):
+    """``plot.SimLevTailRegression`` (SVG): Koeffizient je Quantil mit Band, OLS-Koeffizient und Null.
+
+    Args:
+        width, height: Größe in Pixeln (je Treiber ein Feld nebeneinander).
+        file: Dateiname auf ``.svg`` (sonst wird nichts geschrieben).
+
+    Returns:
+        :class:`simlev.SimLevPlot`; ``data`` je Treiber (Schlüssel = Name des Treibers): ``quantile``,
+        ``estimate``, ``lower``, ``upper``.
+    """
+    drv = [str(v) for v in x["drivers"]]
+    cf = x["coefficients"]
+    data = {}
+
+    def make(dv):
+        def f(c, box):
+            sel = np.flatnonzero(cf["term"].to_numpy() == dv)
+            qv = cf["quantile"].to_numpy(dtype=np.float64)[sel]
+            est = cf["estimate"].to_numpy(dtype=np.float64)[sel]
+            lo = cf["lower"].to_numpy(dtype=np.float64)[sel]
+            hi = cf["upper"].to_numpy(dtype=np.float64)[sel]
+            _grid_lines(c, box, [(qv, est, "#2C6E9B", "Quantilsregression")],
+                        band=None if bool(np.all(np.isnan(lo))) else (qv, lo, hi),
+                        hline=[(float(x["ols"][dv]), "#B5562B"), (0.0, "grey")], points=True, xlabel="Quantil",
+                        ylabel="Koeffizient", title="%s: Effekt von %s" % (x["asset"], dv))
+            data[dv] = pd.DataFrame({"quantile": qv, "estimate": est, "lower": lo, "upper": hi})
+        return f
+
+    svg = _grid_svg(drv, make, ncol=len(drv), width=width, height=height).svg
+    return svg, data
+
+
+def _plot_covar(x, width=800, height=450):
+    """``plot.SimLevCoVaR`` (SVG): Delta-CoVaR je Anlage über die Zeit.
+
+    Args:
+        width, height: Größe in Pixeln.
+        file: Dateiname auf ``.svg`` (sonst wird nichts geschrieben).
+
+    Returns:
+        :class:`simlev.SimLevPlot`; ``data``: ``delta_covar`` (``asset``, ``date``, ``delta_covar`` in % je
+        Periode wie in ``series``; Zeilen je Anlage in Zeichenreihenfolge).
+    """
+    s = x["series"]
+    cols = ["#2C6E9B", "#B5562B", "#3E8E5A", "#8A5BA8", "#C49A2C"]
+    av = np.array([str(v) for v in s["asset"]], dtype=object)
+    dts = s["date"].to_numpy()
+    dc = s["delta_covar"].to_numpy(dtype=np.float64)
+    a = list(dict.fromkeys(av.tolist()))
+    series = [(_days(dts[av == aj]), dc[av == aj], cols[j % 5], aj) for j, aj in enumerate(a)]
+    svg = _grid_svg(["x"], lambda _: (lambda c, box: _grid_lines(
+        c, box, series, dates=True, ylabel="Delta-CoVaR (%)",
+        title=_sprintf("Delta-CoVaR für '%s' (q = %g)", x["system"], x["q"]))), width=width, height=height).svg
+    data = {"delta_covar": pd.DataFrame({"asset": np.concatenate([av[av == aj] for aj in a]) if a else av,
+                                         "date": np.concatenate([dts[av == aj] for aj in a]) if a else dts,
+                                         "delta_covar": np.concatenate([dc[av == aj] for aj in a]) if a else dc})}
+    return svg, data
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1417,24 +1503,6 @@ class SimLevTailRegression(RList):
         lines.append("\nOLS (Mittelwert): %s" % ", ".join(_sprintf_vec("%s %.4f", [str(k) for k in ols.index],
                                                                        ols.to_numpy(dtype=np.float64))))
         return "\n".join(lines)
-
-    def plot(self, **kw):
-        import matplotlib.pyplot as plt
-        x = self
-        k = len(x["drivers"])
-        fig, axs = plt.subplots(1, k, figsize=(5 * k, 4), squeeze=False)
-        for ax, dv in zip(axs[0], x["drivers"]):
-            cf = x["coefficients"][x["coefficients"]["term"] == dv]
-            ax.plot(cf["quantile"], cf["estimate"], "o-", color="#2C6E9B")
-            if not cf["lower"].isna().all():
-                ax.fill_between(cf["quantile"], cf["lower"], cf["upper"], color="#2C6E9B", alpha=0.15)
-            ax.axhline(x["ols"][dv], color="#B5562B", ls="--")
-            ax.axhline(0, color="grey", ls=":")
-            ax.set_xlabel("Quantil")
-            ax.set_ylabel("Koeffizient")
-            ax.set_title("%s: Effekt von %s" % (x["asset"], dv))
-        fig.tight_layout()
-        return x
 
 
 def _lm_coef(y, X1):
@@ -1557,19 +1625,6 @@ class SimLevCoVaR(RList):
                           "Delta-CoVaR min": _sprintf_vec("%.2f", s["delta_covar_min"].to_numpy(dtype=np.float64))})
         lines.append(_fmt.print_data_frame(y, row_names=False))
         return "\n".join(lines)
-
-    def plot(self, **kw):
-        import matplotlib.pyplot as plt
-        s = self["series"]
-        cols = ["#2C6E9B", "#B5562B", "#3E8E5A", "#8A5BA8", "#C49A2C"]
-        fig, ax = plt.subplots(figsize=(9, 5))
-        for j, a in enumerate(dict.fromkeys(s["asset"])):
-            m = s["asset"] == a
-            ax.plot(s["date"][m], s["delta_covar"][m], color=cols[j % len(cols)], label=a)
-        ax.set_ylabel("Delta-CoVaR (%)")
-        ax.set_title("Delta-CoVaR für '%s' (q = %g)" % (self["system"], self["q"]))
-        ax.legend(loc="lower left", frameon=False)
-        return self
 
 
 def _matvec(M, b):
@@ -1782,6 +1837,12 @@ def regime_subset(data, condition, min_run=1, env=None):
 
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
+from .svg import _grid_bars, _grid_lines, _grid_scatter, _grid_svg, _plot_method  # noqa: E402
+
+SimLevDependence.plot = _plot_method(_plot_dependence, "SimLevDependence")
+SimLevTailRegression.plot = _plot_method(_plot_tail_regression, "SimLevTailRegression")
+SimLevCoVaR.plot = _plot_method(_plot_covar, "SimLevCoVaR")
+
 from ._r.base import quiet_fp  # noqa: E402
 
 quiet_fp(globals(), list(__all__) + ["_cop_lambda", "_cop_ll", "_dep_check_prices", "_dep_reg_cor", "_dep_regimes", "_dep_returns", "_dep_sort_dates", "_kendall", "_pobs", "_roll_mean"])  # regime_subset: env aus dem Aufrufer (env_from_caller)

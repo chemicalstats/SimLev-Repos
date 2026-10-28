@@ -25,6 +25,9 @@ from ._r import libm as _libm
 from ._r.fmt import NA_REAL
 from ._r.rlist import RList
 from ._r.rnum import LD, r_cummax, r_cumsum, r_mean, r_mean_int, r_pow, r_prod, r_sd, r_var
+# Grafik: Bausteine des Stils Analysegrafiken und Zahlen wie in Julia aus svg.py
+from .svg import (_MONATE_KURZ, _AnaSvg, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_ramp, _ana_rect,
+                  _ana_svg_done, _ana_text, _ana_year_ticks, _jl_max, _jl_maximum, _jl_min, _jl_minimum)
 
 __all__ = ["deep_analysis", "SimLevAnalysis"]
 
@@ -32,7 +35,6 @@ _NAN = float("nan")   # R-NaN (z. B. mean() leerer Vektoren)
 _NA = NA_REAL         # R-NA_real_
 _EPOCH = np.datetime64("1970-01-01", "D")
 _MONTH_ABB = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-_MONATE_KURZ = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -935,7 +937,7 @@ class SimLevAnalysis(RList):
     """Ergebnis von :func:`deep_analysis` (R-Klasse ``SimLevAnalysis``).
 
     ``print(x)`` zeigt die wichtigsten Kennzahlen, :meth:`summary` zusätzlich
-    Jahresrenditen und die größten Drawdowns, :meth:`plot` Grafiken.
+    Jahresrenditen und die größten Drawdowns, ``plot`` Grafiken (SVG, :class:`simlev.SimLevPlot`).
     """
 
     r_class = ("SimLevAnalysis",)
@@ -983,99 +985,186 @@ class SimLevAnalysis(RList):
         return {"metrics": self["metrics"], "benchmark": self.get("benchmark_metrics"), "annual": self["annual"],
                 "drawdowns": self["drawdowns"]}
 
-    def plot(self, type=("overview", "growth", "drawdown", "rolling", "annual", "monthly"), series=1,  # noqa: A002
-             metric="cagr", **kwargs):
-        """Grafiken: Wertentwicklung, Drawdowns, rollierend, Jahresrenditen oder Monats-Heatmap (matplotlib)."""
-        type = _match_arg(type, ("overview", "growth", "drawdown", "rolling", "annual", "monthly"))  # noqa: A001
-        names = list(self["monthly"].keys())
-        if type == "monthly":
-            bad = False
-            if isinstance(series, (list, tuple, np.ndarray)) and len(series) != 1:
-                bad = True
-            elif isinstance(series, str):
-                bad = series not in names
-            elif _is_num_scalar(series):
-                bad = not (series >= 1 and series <= len(names))
-            if bad:
-                raise ValueError("series: Name oder Nummer einer Reihe (%s)." % ", ".join(names))
-        if type in ("overview", "rolling") and metric not in _ROLL_COLS:
-            raise ValueError("metric: 'cagr', 'volatility', 'sharpe', 'max_drawdown', 'beta' oder 'excess_cagr'.")
-        return _plot_analysis(self, type, series, metric, **kwargs)
-
 
 def summary(object):  # noqa: A002 - R-Name
     """``summary(<SimLevAnalysis>)``."""
     return object.summary()
 
 
-def _plot_analysis(x, type, series, metric, **kwargs):  # noqa: A002
-    import matplotlib.pyplot as plt
-    cols = ["#2C6E9B", "#B5562B", "#3E8E5A", "#8A5BA8", "#C49A2C", "#4A4A4A"]
-    nms = list(x["series"].keys())
+# ═══════════════════════════════════════════════════════════════════════════
+# Grafik (SVG wie julia/src/deep_analysis.jl; Bausteine `_ana_*` in svg.py)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_COLS = ["#2C6E9B", "#B5562B", "#3E8E5A", "#8A5BA8", "#C49A2C", "#4A4A4A"]
+
+
+def _plot_analysis(x, type=("overview", "growth", "drawdown", "rolling", "annual", "monthly"), series=1,  # noqa: A002
+                   metric="cagr"):
+    """Grafiken (SVG): Wertentwicklung, Drawdowns, rollierend, Jahresrenditen oder Monats-Heatmap.
+
+    Args:
+        type: ``"overview"`` (2 x 2: Wertentwicklung, Drawdowns, rollierend, Jahresrenditen),
+            ``"growth"``, ``"drawdown"``, ``"rolling"``, ``"annual"`` oder ``"monthly"``.
+        series: Reihe (Name oder Nummer) für ``type = "monthly"``.
+        metric: rollierende Kennzahl (``"cagr"``, ``"volatility"``, ``"sharpe"``, ``"max_drawdown"``,
+            ``"beta"``, ``"excess_cagr"``).
+        file: Dateiname auf ``.svg`` (sonst wird nichts geschrieben).
+
+    Returns:
+        :class:`simlev.SimLevPlot`; ``data`` je gezeichnetem Panel: ``growth`` (``series``, ``date``,
+        ``growth`` = Wert / Startwert), ``drawdown`` (``series``, ``date``, ``drawdown`` als Anteil),
+        ``rolling`` (``series``, ``date``, ``<metric>``), ``annual`` (``year`` und je Reihe eine Spalte,
+        Anteile) bzw. ``monthly`` (``year``, ``month``, ``return``; gezeichnete Zellen).
+    """
+    type = _match_arg(type, ("overview", "growth", "drawdown", "rolling", "annual", "monthly"))  # noqa: A001
+    nms = list(x["monthly"].keys())
+    if type == "monthly":
+        bad = False
+        if isinstance(series, (list, tuple, np.ndarray)) and len(series) != 1:
+            bad = True
+        elif isinstance(series, str):
+            bad = series not in nms
+        elif _is_num_scalar(series):
+            bad = not (series >= 1 and series <= len(nms))
+        if bad:
+            raise ValueError("series: Name oder Nummer einer Reihe (%s)." % ", ".join(nms))
+    if type in ("overview", "rolling") and metric not in _ROLL_COLS:
+        raise ValueError("metric: 'cagr', 'volatility', 'sharpe', 'max_drawdown', 'beta' oder 'excess_cagr'.")
+    sers = x["series"]
+    snames = list(sers.keys())
+    cols = [_COLS[i % 6] for i in range(len(snames))]
     pct = metric not in ("beta", "sharpe")
+    data = {}
 
-    def p_growth(ax):
-        for i, (nm, s) in enumerate(x["series"].items()):
-            v = s["value"].to_numpy(dtype=float)
-            ax.plot(s["date"], v / v[0], color=cols[i % 6], lw=1.3, label=nm)
-        ax.set_yscale("log")
-        ax.set_ylabel("Wachstum (log)")
-        ax.set_title("Wertentwicklung (TWR, Start = 1)")
-        ax.legend(loc="upper left", frameon=False, fontsize=8)
+    def p_growth(s, x0, y0, w, h):
+        vs = [sers[k]["value"].to_numpy(dtype=np.float64) for k in snames]
+        ys = [v / v[0] for v in vs]
+        ds = [_days(sers[k]["date"].to_numpy()) for k in snames]
+        allv = np.concatenate(ys)
+        allv = allv[np.isfinite(allv)]
+        alld = np.concatenate(ds)
+        yt = _ana_year_ticks(alld)
+        p = _ana_panel(s, x0, y0, w, h, (_jl_minimum(alld), _jl_maximum(alld)), (_jl_minimum(allv), _jl_maximum(allv)),
+                       logy=True, title="Wertentwicklung (TWR, Start = 1)", ylab="Wachstum (log)", xticks=yt[0],
+                       xlabels=yt[1])
+        for i in range(len(snames)):
+            _ana_lines(s, p, ds[i], ys[i], col=cols[i], lwd=1.3)
+        _ana_legend(s, p, snames, cols)
+        data["growth"] = pd.DataFrame({
+            "series": np.array([k for k, v in zip(snames, ys) for _ in range(len(v))], dtype=object),
+            "date": np.concatenate([sers[k]["date"].to_numpy() for k in snames]),
+            "growth": np.concatenate(ys)})
 
-    def p_dd(ax):
-        for i, (nm, s) in enumerate(x["series"].items()):
-            v = s["value"].to_numpy(dtype=float)
-            ax.plot(s["date"], 100 * (v / r_cummax(v) - 1), color=cols[i % 6], lw=1)
-        ax.set_ylabel("Drawdown (%)")
-        ax.set_title("Drawdowns")
+    def p_dd(s, x0, y0, w, h):
+        dd = []
+        for k in snames:
+            v = sers[k]["value"].to_numpy(dtype=np.float64)
+            dd.append(v / r_cummax(v) - 1)
+        ys = [100 * d for d in dd]
+        ds = [_days(sers[k]["date"].to_numpy()) for k in snames]
+        alld = np.concatenate(ds)
+        yt = _ana_year_ticks(alld)
+        p = _ana_panel(s, x0, y0, w, h, (_jl_minimum(alld), _jl_maximum(alld)), (_jl_minimum(np.concatenate(ys)), 0.0),
+                       title="Drawdowns", ylab="Drawdown (%)", xticks=yt[0], xlabels=yt[1])
+        for i in range(len(snames)):
+            _ana_lines(s, p, ds[i], ys[i], col=cols[i], lwd=1)
+        data["drawdown"] = pd.DataFrame({
+            "series": np.array([k for k, v in zip(snames, dd) for _ in range(len(v))], dtype=object),
+            "date": np.concatenate([sers[k]["date"].to_numpy() for k in snames]),
+            "drawdown": np.concatenate(dd)})
 
-    def p_roll(ax):
-        rl = {k: v for k, v in x["rolling"].items() if v is not None}
+    def p_roll(s, x0, y0, w, h):
+        rl = [(k, r) for k, r in x["rolling"].items() if r is not None]
         if not rl:
-            ax.set_title("Rollierend: Zeitraum zu kurz")
-            ax.axis("off")
+            _ana_panel(s, x0, y0, w, h, (0, 1), (0, 1), title="Rollierend: Zeitraum zu kurz", box=False, xticks=[],
+                       yticks=[])
+            data["rolling"] = pd.DataFrame({"series": np.array([], dtype=object),
+                                            "date": np.array([], dtype="datetime64[s]"),
+                                            metric: np.array([], dtype=np.float64)})
             return
-        for nm, r in rl.items():
-            ax.plot(r["date"], r[metric] * (100 if pct else 1), color=cols[nms.index(nm) % 6], lw=1.2)
-        ax.axhline(0, color="grey", ls=":")
-        ax.set_ylabel(metric if not pct else "%s (%%)" % metric)
-        ax.set_title("Rollierend %g J.: %s" % (x["rolling_years"], metric))
+        f = 100 if pct else 1
+        raw = [r[metric].to_numpy(dtype=np.float64) for _, r in rl]
+        ys = [f * v for v in raw]
+        ds = [_days(r["date"].to_numpy()) for _, r in rl]
+        allv = np.concatenate(ys)
+        allv = allv[np.isfinite(allv)]
+        alld = np.concatenate(ds)
+        yt = _ana_year_ticks(alld)
+        p = _ana_panel(s, x0, y0, w, h, (_jl_minimum(alld), _jl_maximum(alld)),
+                       (0.0, 1.0) if allv.size == 0 else (_jl_minimum(allv), _jl_maximum(allv)),
+                       title=_sp("Rollierend %g J.: %s", float(np.ravel(x["rolling_years"])[0]), metric),
+                       ylab=metric + " (%)" if pct else metric, xticks=yt[0], xlabels=yt[1])
+        for i, (k, _) in enumerate(rl):
+            _ana_lines(s, p, ds[i], ys[i], col=cols[snames.index(k)], lwd=1.2)
+        _ana_hline(s, p, 0.0)
+        data["rolling"] = pd.DataFrame({
+            "series": np.array([k for (k, _), v in zip(rl, raw) for _ in range(len(v))], dtype=object),
+            "date": np.concatenate([r["date"].to_numpy() for _, r in rl]),
+            metric: np.concatenate(raw)})
 
-    def p_annual(ax):
-        A = (100 * x["annual"]).fillna(0)
-        k = A.shape[1]
-        pos = np.arange(A.shape[0])
-        for j, c in enumerate(A.columns):
-            ax.bar(pos + j / (k + 1), A[c], width=1 / (k + 1), color=cols[j % 6])
-        ax.set_xticks(pos + (k - 1) / (2 * (k + 1)))
-        ax.set_xticklabels(A.index, fontsize=7, rotation=90)
-        ax.axhline(0, color="grey")
-        ax.set_ylabel("Rendite (%)")
-        ax.set_title("Jahresrenditen")
+    def p_annual(s, x0, y0, w, h):
+        An = x["annual"]
+        raw = An.to_numpy(dtype=np.float64)
+        A = 100 * raw
+        A[np.isnan(A)] = 0
+        ny, k = A.shape
+        p = _ana_panel(s, x0, y0, w, h, (0.5, ny + 0.5), (_jl_min(0.0, _jl_minimum(A)), _jl_max(0.0, _jl_maximum(A))),
+                       title="Jahresrenditen", ylab="Rendite (%)", xticks=list(range(1, ny + 1)),
+                       xlabels=[str(r) for r in An.index])
+        bw = 0.8 / k
+        for i in range(1, ny + 1):
+            for j in range(1, k + 1):
+                xl = i - 0.4 + (j - 1) * bw
+                _ana_rect(s, p, xl, 0.0, xl + bw, A[i - 1, j - 1], fill=cols[j - 1])
+        _ana_hline(s, p, 0.0, col="grey", dash="")
+        d = {"year": np.array([int(r) for r in An.index], dtype=np.int64)}
+        for j, c in enumerate(An.columns):
+            d[str(c)] = raw[:, j].copy()
+        data["annual"] = pd.DataFrame(d)
 
-    def p_monthly(ax):
-        nm = series if isinstance(series, str) else nms[int(series) - 1]
-        M = 100 * x["monthly"][nm].iloc[:, :12]
-        lim = float(np.nanmax(np.abs(M.to_numpy(dtype=float))))
-        ax.imshow(M.to_numpy(dtype=float), cmap="RdBu", vmin=-lim, vmax=lim, aspect="auto")
-        ax.set_xticks(range(12))
-        ax.set_xticklabels(_MONATE_KURZ, fontsize=7)
-        ax.set_yticks(range(M.shape[0]))
-        ax.set_yticklabels(M.index, fontsize=6)
-        ax.set_title("Monatsrenditen: %s" % nm)
+    def p_monthly(s, x0, y0, w, h):
+        nm = series if isinstance(series, str) else nms[int(np.ravel(series)[0]) - 1]
+        Mf = x["monthly"][nm]
+        raw = Mf.to_numpy(dtype=np.float64)[:, :12]
+        M = 100 * raw
+        fin = M[np.isfinite(M)]
+        lim = 1.0 if fin.size == 0 else _jl_maximum(np.abs(fin))
+        pal = _ana_ramp(["#B5562B", "#F7F3EE", "#2C6E9B"], 41)
+        ny = M.shape[0]
+        p = _ana_panel(s, x0, y0, w, h, (0.5, 12.5), (0.5, ny + 0.5), title="Monatsrenditen: %s" % nm,
+                       xticks=list(range(1, 13)), xlabels=_MONATE_KURZ, yticks=list(range(1, ny + 1)),
+                       ylabels=[str(r) for r in Mf.index])
+        yy, mm, vv = [], [], []
+        for i in range(1, ny + 1):
+            for j in range(1, 13):
+                v = float(M[i - 1, j - 1])
+                if not math.isfinite(v):
+                    continue
+                c = pal[min(max(int(round((v + lim) / (2 * lim) * 40)) + 1, 1), 41) - 1]
+                _ana_rect(s, p, j - 0.5, i - 0.5, j + 0.5, i + 0.5, fill=c)
+                if ny <= 30:
+                    _ana_text(s, p, j, i, _sp("%.1f", v), size=7)
+                yy.append(int(Mf.index[i - 1]))
+                mm.append(j)
+                vv.append(float(raw[i - 1, j - 1]))
+        data["monthly"] = pd.DataFrame({"year": np.array(yy, dtype=np.int64), "month": np.array(mm, dtype=np.int64),
+                                        "return": np.array(vv, dtype=np.float64)})
 
+    s = _AnaSvg(1100 if type == "overview" else 900, 760 if type == "overview" else 520)
     if type == "overview":
-        fig, axs = plt.subplots(2, 2, figsize=(12, 8))
-        p_growth(axs[0, 0])
-        p_dd(axs[0, 1])
-        p_roll(axs[1, 0])
-        p_annual(axs[1, 1])
+        p_growth(s, 0, 0, 550, 380)
+        p_dd(s, 550, 0, 550, 380)
+        p_roll(s, 0, 380, 550, 380)
+        p_annual(s, 550, 380, 550, 380)
     else:
-        fig, ax = plt.subplots(figsize=(9, 5))
-        {"growth": p_growth, "drawdown": p_dd, "rolling": p_roll, "annual": p_annual, "monthly": p_monthly}[type](ax)
-    fig.tight_layout()
-    return x
+        {"growth": p_growth, "drawdown": p_dd, "rolling": p_roll, "annual": p_annual,
+         "monthly": p_monthly}[type](s, 0, 0, 900, 520)
+    return _ana_svg_done(s), data
+
+
+from .svg import _plot_method  # noqa: E402
+
+SimLevAnalysis.plot = _plot_method(_plot_analysis, "SimLevAnalysis")
 
 
 from ._r.base import quiet_fp  # noqa: E402

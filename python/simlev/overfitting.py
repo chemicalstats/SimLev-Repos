@@ -30,6 +30,9 @@ from ._r import nmath as _nmath
 from ._r import fmt as _fmt
 from ._r.rlist import RList
 from ._r.rnum import LD, r_mean, r_mean_int, r_median, r_pow, r_prod, r_cumprod, r_sum, r_var, r_sd
+# Grafik: Bausteine des Stils Ergebnisgrafiken und Zahlen wie in Julia aus svg.py
+from .svg import (_jl_unique, _res_abline, _res_fig, _res_finish, _res_hline, _res_legend, _res_line, _res_panel,
+                  _res_points, _res_range, _res_rect, _res_vline)
 
 __all__ = ["pbo", "probabilistic_sharpe", "deflated_sharpe", "walk_forward", "param_bootstrap",
            "sharpe_haircut", "SimLevPBO", "SimLevDSR", "SimLevWalkForward"]
@@ -362,6 +365,12 @@ def _of_drop_flat(rr, what):
     return rr
 
 
+# Grafik: Bausteine `_res_*` (Stil Ergebnisgrafiken, auch für param_search, sensitivity) in svg.py
+
+def _frame_data(**cols):
+    return pd.DataFrame(cols)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PBO
 # ─────────────────────────────────────────────────────────────────────────────
@@ -392,8 +401,7 @@ class SimLevPBO(RList):
         print(self.format())
         return self
 
-    def plot(self, **kwargs):
-        return _plot_pbo(self, **kwargs)
+    # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
 
 def _mean_lgl(v, na=None):
@@ -495,23 +503,39 @@ def pbo(x, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
                      metric=metric, frequency=frequency, ppy=rr.ppy)
 
 
-def _plot_pbo(x, **kwargs):
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(1, 2, figsize=(10, 4))
-    lam = np.asarray(x["lambda"], float)
-    ax[0].hist(lam[np.isfinite(lam)], bins=40, color="#2C6E9B", edgecolor="white")
-    ax[0].axvline(0, color="#B5562B", lw=2)
-    ax[0].set_title("Logits (PBO %.0f %%)" % (100 * x["pbo"]))
-    ax[0].set_xlabel("λ")
-    ax[0].set_ylabel("Häufigkeit")
-    ax[1].scatter(x["is_best"], x["oos_best"], s=4, color="#2C6E9B", alpha=0.4)
-    xs = np.array([np.nanmin(x["is_best"]), np.nanmax(x["is_best"])])
-    ax[1].plot(xs, x["intercept"] + x["slope"] * xs, color="#B5562B", lw=2)
-    ax[1].axhline(0, color="grey", ls=":")
-    ax[1].set_xlabel("%s In-Sample (bester Punkt)" % x["metric"])
-    ax[1].set_ylabel("Out-of-Sample")
-    ax[1].set_title("Leistungsabfall")
-    return x
+def _plot_pbo(x):
+    """``plot.SimLevPBO`` (SVG): Histogramm der Logits und Leistungsabfall In-/Out-of-Sample.
+
+    Liefert ``(svg, data)``: ``logits`` (``lambda``, endliche Logits) und ``degradation``
+    (``is_best``, ``oos_best``).
+    """
+    f = _res_fig(900, 400)
+    lam = [float(v) for v in np.asarray(x["lambda"], dtype=np.float64).ravel() if math.isfinite(v)]
+    lo, hi = (-1.0, 1.0) if not lam else (min(lam), max(lam))
+    if lo == hi:
+        lo -= 0.5
+        hi += 0.5
+    nb = 40
+    bw = (hi - lo) / nb
+    cnt = [0] * nb
+    for v in lam:
+        cnt[min(max(math.floor((v - lo) / bw), 0), nb - 1)] += 1
+    p = _res_panel(f, 60, 40, 360, 300, (lo, hi), (0.0, max(1, max(cnt, default=0)) * 1.05),
+                   title="Logits (PBO " + _sprintf("%.0f", 100 * x["pbo"]) + " %)", xlab="λ", ylab="Häufigkeit")
+    for i in range(nb):
+        if cnt[i] > 0:
+            _res_rect(f, p, lo + i * bw, 0.0, lo + (i + 1) * bw, cnt[i], fill="#2C6E9B", stroke="white")
+    _res_vline(f, p, 0.0)
+    xb = np.asarray(x["is_best"], dtype=np.float64).ravel()
+    yb = np.asarray(x["oos_best"], dtype=np.float64).ravel()
+    q = _res_panel(f, 520, 40, 360, 300, _res_range(xb), _res_range(yb), title="Leistungsabfall",
+                   xlab="%s In-Sample (bester Punkt)" % x["metric"], ylab="Out-of-Sample")
+    _res_points(f, q, xb, yb, r=2, opacity=0.4)
+    _res_abline(f, q, float(x["intercept"]), float(x["slope"]))
+    _res_hline(f, q, 0.0)
+    data = {"logits": _frame_data(**{"lambda": np.array(lam, dtype=np.float64)}),
+            "degradation": _frame_data(is_best=xb, oos_best=yb)}
+    return _res_finish(f), data
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -666,18 +690,37 @@ class SimLevWalkForward(RList):
         print(self.format())
         return self
 
-    def plot(self, **kwargs):
-        import matplotlib.pyplot as plt
-        s = self["series"]
-        fig, ax = plt.subplots(figsize=(9, 4.5))
-        ax.plot(s["date"], s["walk_forward"], color="#2C6E9B", lw=2, label="Walk-Forward")
-        ax.plot(s["date"], s["hindsight"], color="#B5562B", lw=1.3, label="Rückschau-Bester")
-        ax.plot(s["date"], s["average"], color="0.45", lw=1.3, label="Durchschnitt")
-        ax.set_yscale("log")
-        ax.set_ylabel("Wachstum (log)")
-        ax.set_title("Walk-Forward Out-of-Sample")
-        ax.legend(loc="upper left", frameon=False, fontsize=8)
-        return self
+    # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
+
+
+def _plot_wf(x):
+    """``plot.SimLevWalkForward`` (SVG): Wachstum Walk-Forward, Rückschau-Bester und Durchschnitt (log).
+
+    Liefert ``(svg, data)``: ``growth`` (``date``, ``walk_forward``, ``hindsight``, ``average``).
+    """
+    s = x["series"]
+    dates = np.asarray(s["date"]).astype("datetime64[D]")
+    dd = _days(dates)
+    ys = [np.asarray(s[k], dtype=np.float64) for k in ("walk_forward", "hindsight", "average")]
+    allv = [float(v) for y in ys for v in y if math.isfinite(v) and v > 0]
+    lo, hi = (0.5, 2.0) if not allv else (min(allv), max(allv))
+    if lo == hi:
+        lo /= 1.1
+        hi *= 1.1
+    f = _res_fig(760, 420)
+    yrs = _jl_unique((dates.astype("datetime64[Y]").astype(np.int64) + 1970).tolist())
+    jan1 = [float(np.datetime64(y - 1970, "Y").astype("datetime64[D]").astype(np.int64)) for y in yrs]
+    xt = [z for z in jan1 if dd[0] <= z <= dd[-1]]
+    p = _res_panel(f, 70, 40, 660, 320, (dd[0], dd[0] + 1 if dd[-1] == dd[0] else dd[-1]), (lo, hi), logy=True,
+                   title="Walk-Forward Out-of-Sample", ylab="Wachstum (log)", xticks=xt,
+                   xticklabels=[str(int(np.datetime64(int(t), "D").astype("datetime64[Y]").astype(np.int64)) + 1970)
+                            for t in xt])
+    cols = ["#2C6E9B", "#B5562B", "#737373"]
+    for v, c, w in zip(ys, cols, (2, 1.3, 1.3)):
+        _res_line(f, p, dd, v, color=c, width=w)
+    _res_legend(f, 85, 60, ["Walk-Forward", "Rückschau-Bester", "Durchschnitt"], cols)
+    data = {"growth": _frame_data(date=dates, walk_forward=ys[0], hindsight=ys[1], average=ys[2])}
+    return _res_finish(f), data
 
 
 def _fmt_vec(f, v):
@@ -944,6 +987,12 @@ def _order(v, decreasing=False, na_last=True):
     from .param_search import _order as o
     return o(v, decreasing=decreasing, na_last=na_last)
 
+
+# plot-Methoden (SVG, ``SimLevPlot``) wie Julias ``_plot_method(_plot_pbo, "SimLevPBO")``
+from .svg import _plot_method  # noqa: E402
+
+SimLevPBO.plot = _plot_method(_plot_pbo, "SimLevPBO")
+SimLevWalkForward.plot = _plot_method(_plot_wf, "SimLevWalkForward")
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
 from ._r.base import quiet_fp  # noqa: E402

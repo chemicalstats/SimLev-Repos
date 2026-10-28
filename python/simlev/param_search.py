@@ -29,6 +29,8 @@ from ._r import fmt as _fmt
 from ._r import libm as _libm
 from ._r.rlist import RList
 from ._r.rnum import r_mean
+from .svg import (_res_fig, _res_finish, _res_line, _res_panel, _res_points, _res_ramp, _res_range, _res_rect,
+                  _res_text, _res_tx, _res_ty)
 
 __all__ = ["param_space", "param_range", "param_search", "plateau",
            "SimLevParamSpace", "SimLevParamRange", "SimLevParamSearch", "SummarySimLevParamSearch"]
@@ -492,8 +494,7 @@ class SimLevParamSearch(RList):
         print(self.summary(**kwargs).format())
         return self
 
-    def plot(self, metric=None, params=None, fun=max, **kwargs):
-        return _plot_param_search(self, metric=metric, params=params, fun=fun, **kwargs)
+    # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
 
 def param_search(data, builder=None, space=None, strategy=None, method=("grid", "random", "lhs"), n=50,
@@ -820,58 +821,118 @@ def summary(object, top=10, **kwargs):  # noqa: A002 - R-Argumentname
     raise TypeError("summary: kein passendes Objekt")
 
 
-def _plot_param_search(x, metric=None, params=None, fun=max, **kwargs):
-    import matplotlib.pyplot as plt
+def _ps_same(a, b):
+    """Julias ``_same``: NA gleich NA, NaN gleich NaN, sonst ``==``."""
+    na_a, na_b = a is None, b is None
+    if na_a or na_b:
+        return na_a and na_b
+    fa = isinstance(a, (float, np.floating))
+    fb = isinstance(b, (float, np.floating))
+    if fa and fb and math.isnan(a) and math.isnan(b):
+        return True
+    if fa and math.isnan(a):
+        return False
+    return bool(a == b)
+
+
+def _ps_formatv(vals):
+    """``format(x)`` (R) eines Stufenvektors → Liste von Texten."""
+    arr = (np.array(vals, dtype=object) if any(isinstance(v, str) for v in vals) else np.array(vals))
+    return [str(t) for t in np.atleast_1d(_fmt.format(arr))]
+
+
+def _ps_col(tab, name):
+    return [_py(v) for v in tab[name].tolist()]
+
+
+def _plot_param_search(x, metric=None, params=None, fun=max):
+    """``plot.SimLevParamSearch`` (SVG): Zielgröße nach einem Parameter (Linie), als Punktwolke
+    (Zufalls-/LHS-Suche) oder als Heatmap über zwei Parameter (Raster).
+
+    Liefert ``(svg, data)``: ``profile`` (``x``, ``value``), ``scatter`` (``x``, ``y``, ``value``)
+    bzw. ``heatmap`` (gezeichnete Zellen ``x``, ``y``, ``value``); ``value`` unskaliert.
+    """
+    from . import overfitting as OF
+    from .svg import _jl_max, _jl_min, _jl_sort_levels
     tab = x["results"]
-    metric = metric or x["objective"]
-    params = list(params) if params is not None else list(x["params"])[:2]
-    if isinstance(params, str):
-        params = [params]
+    if metric is None:
+        metric = x["objective"]
+    if params is None:
+        params = [str(v) for v in np.atleast_1d(x["params"])][:2]
+    else:
+        params = [params] if isinstance(params, str) else [str(v) for v in params]
 
     def agg(v):
-        v = np.asarray(v, float)
-        v = v[np.isfinite(v)]
-        return fun(v) if v.size else _NAN
+        w = v[np.isfinite(v)]
+        return _NAN if w.size == 0 else float(fun(w))
+    vals = np.array([_num(v) for v in tab[metric].tolist()], dtype=np.float64)
+    f = _res_fig(700, 460)
     if len(params) == 1:
-        a = tab.groupby(params[0])[metric].agg(agg).reset_index()
-        from ._r._collate import r_key   # Gruppen wie aggregate(): R's Kollation
-        a = a.iloc[sorted(range(len(a)), key=lambda i: r_key(a[params[0]].iloc[i]))].reset_index(drop=True)
-        fig, ax = plt.subplots()
-        ax.plot(a[params[0]], a[metric], "o-", color="#2C6E9B")
-        ax.set_xlabel(params[0])
-        ax.set_ylabel(metric)
-        ax.set_title("%s nach %s" % (metric, params[0]))
-        ax.grid(color="0.88")
-        return a
+        g = _ps_col(tab, params[0])
+        lev = _jl_sort_levels(g)
+        a = [agg(vals[np.array([_ps_same(e, lv) for e in g], dtype=bool)]) for lv in lev]
+        xs = [float(lv) if _is_numeric_scalar(lv) else float(i + 1) for i, lv in enumerate(lev)]
+        p = _res_panel(f, 70, 40, 600, 360, _res_range(xs), _res_range(a), title="%s nach %s" % (metric, params[0]),
+                       xlab=params[0], ylab=metric)
+        _res_line(f, p, xs, a)
+        _res_points(f, p, xs, a)
+        return _res_finish(f), {"profile": pd.DataFrame({"x": lev, "value": np.array(a, dtype=np.float64)})}
     if x["method"] != "grid":
-        fig, ax = plt.subplots()
-        sc = ax.scatter(tab[params[0]], tab[params[1]], c=tab[metric], cmap="RdBu")
-        ax.set_xlabel(params[0])
-        ax.set_ylabel(params[1])
-        ax.set_title("%s (Farbe; blau = hoch)" % metric)
-        fig.colorbar(sc)
-        return None
-    a = tab.groupby([params[0], params[1]])[metric].agg(agg).reset_index()
-    from ._r._collate import r_key
-    l1 = sorted(a[params[0]].unique(), key=r_key)
-    l2 = sorted(a[params[1]].unique(), key=r_key)
+        xs = np.array([_num(v) for v in tab[params[0]].tolist()], dtype=np.float64)
+        ys = np.array([_num(v) for v in tab[params[1]].tolist()], dtype=np.float64)
+        lo, hi = 0.0, 1.0                        # Julia: extrema(…; init = (0.0, 1.0))
+        for v in vals:
+            if not math.isnan(v):
+                lo, hi = _jl_min(lo, float(v)), _jl_max(hi, float(v))
+        cols = ["#cccccc" if math.isnan(v) else _res_ramp((v - lo) / _jl_max(hi - lo, 1e-12)) for v in vals]
+        p = _res_panel(f, 70, 40, 600, 360, _res_range(xs), _res_range(ys), title="%s (Farbe; blau = hoch)" % metric,
+                       xlab=params[0], ylab=params[1])
+        _res_points(f, p, xs, ys, color=cols, r=5)
+        return _res_finish(f), {"scatter": pd.DataFrame({"x": xs, "y": ys, "value": vals})}
+    g1 = _ps_col(tab, params[0])
+    g2 = _ps_col(tab, params[1])
+    l1 = _jl_sort_levels(g1)
+    l2 = _jl_sort_levels(g2)
     M = np.full((len(l1), len(l2)), _NAN)
-    for _, r in a.iterrows():
-        M[l1.index(r[params[0]]), l2.index(r[params[1]])] = r[metric]
-    fig, ax = plt.subplots()
-    ax.imshow(M.T, origin="lower", cmap="RdBu", aspect="auto")
-    ax.set_xticks(range(len(l1)), [str(v) for v in l1])
-    ax.set_yticks(range(len(l2)), [str(v) for v in l2])
-    ax.set_xlabel(params[0])
-    ax.set_ylabel(params[1])
-    ax.set_title("%s (blau = hoch)" % metric)
-    if M.size <= 300:
-        sc_ = 100 if metric in ("cagr", "ttwror", "max_drawdown", "avg_drawdown") else 1
-        for i in range(len(l1)):
-            for j in range(len(l2)):
-                if not math.isnan(M[i, j]):
-                    ax.text(i, j, ("%.1f" if sc_ == 100 else "%.2f") % (sc_ * M[i, j]), ha="center", va="center", fontsize=7)
-    return M
+    for i, a in enumerate(l1):
+        for j, b in enumerate(l2):
+            sel = np.array([_ps_same(u, a) and _ps_same(w, b) for u, w in zip(g1, g2)], dtype=bool)
+            if sel.any():
+                M[i, j] = agg(vals[sel])
+    fin = [float(v) for v in M.ravel(order="F") if not math.isnan(v)]
+    if fin:
+        lo = hi = fin[0]
+        for v in fin[1:]:
+            lo, hi = _jl_min(lo, v), _jl_max(hi, v)
+    else:
+        lo, hi = 0.0, 1.0
+    p = _res_panel(f, 70, 40, 600, 360, (0.5, len(l1) + 0.5), (0.5, len(l2) + 0.5), title="%s (blau = hoch)" % metric,
+                   xlab=params[0], ylab=params[1], xticks=[float(i) for i in range(1, len(l1) + 1)],
+                   xticklabels=_ps_formatv(l1), yticks=[float(j) for j in range(1, len(l2) + 1)],
+                   yticklabels=_ps_formatv(l2), grid=False)
+    sc = 100 if metric in ("cagr", "ttwror", "max_drawdown", "avg_drawdown") else 1
+    ci, cj = [], []
+    for i in range(len(l1)):
+        for j in range(len(l2)):
+            v = M[i, j]
+            if math.isnan(v):
+                continue
+            ci.append(i)
+            cj.append(j)
+            _res_rect(f, p, i + 1 - 0.5, j + 1 - 0.5, i + 1 + 0.5, j + 1 + 0.5,
+                      fill=_res_ramp((v - lo) / _jl_max(hi - lo, 1e-12)))
+            if M.size <= 300:
+                _res_text(f, _res_tx(p, i + 1), _res_ty(p, j + 1) + 4,
+                          OF._sprintf("%.1f" if sc == 100 else "%.2f", sc * v), size=9)
+    data = {"heatmap": pd.DataFrame({"x": [l1[i] for i in ci], "y": [l2[j] for j in cj],
+                                     "value": np.array([M[i, j] for i, j in zip(ci, cj)], dtype=np.float64)})}
+    return _res_finish(f), data
+
+
+# plot.SimLevParamSearch (SVG, ``SimLevPlot``) wie Julias ``_plot_method(_plot_ps, "SimLevParamSearch")``
+from .svg import _plot_method  # noqa: E402
+
+SimLevParamSearch.plot = _plot_method(_plot_param_search, "SimLevParamSearch")
 
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)

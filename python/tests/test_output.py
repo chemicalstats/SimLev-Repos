@@ -46,17 +46,17 @@ def _result(n=120):
 
 
 def test_dashboard_and_exports(tmp_path):
-    pytest.importorskip("matplotlib")
-    import matplotlib
-    matplotlib.use("Agg")
+    import contextlib
+    import io
     r = _result(400)
-    fig = r.plot()
-    assert len(fig.axes) == 6
-    assert len(r.plot(style="compact").axes) == 4
-    assert len(r.plot(style="custom", panels=["performance", "stats"]).axes) == 2
-    assert len(r.plot(compare=r).axes) == 8
-    pdf = tmp_path / "x.pdf"
-    simlev.export_dashboard(r, str(pdf))
-    assert pdf.exists() and pdf.stat().st_size > 1000
-    import matplotlib.pyplot as plt
-    plt.close("all")
+    p = r.plot()
+    assert isinstance(p, simlev.SimLevPlot) and p.svg.startswith("<svg") and len(p.data) == 6
+    assert len(r.plot(style="compact").data) == 4
+    assert list(r.plot(style="custom", panels=["performance", "stats"]).data) == ["performance", "stats"]
+    assert len(r.plot(compare=r).data) == 8
+    svg = tmp_path / "x.svg"
+    with contextlib.redirect_stderr(io.StringIO()):
+        simlev.export_dashboard(r, str(svg))
+    assert svg.exists() and svg.stat().st_size > 1000
+    with pytest.raises(ValueError, match="nur als SVG"):
+        simlev.export_dashboard(r, str(tmp_path / "x.pdf"))

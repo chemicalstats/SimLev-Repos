@@ -10,8 +10,9 @@ nachbildet und sich als Vorlage für die Übersetzung eignet.
 
 Alles liegt im Modul `SimLev`; die Bausteine sind Untermodule. Die Tabelle
 folgt der Reihenfolge der `include`s in `src/SimLev.jl`: erst die R-Interna
-(`src/r/`), dann die Engine, dann die Module (C++-Kerne jeweils vor ihrem
-Modul), zuletzt `exports.jl` und `precompile.jl`.
+(`src/r/`), dann die Engine, das Grafikmodul `svg.jl` und das Dashboard,
+dann die Module (C++-Kerne jeweils vor ihrem Modul), zuletzt `exports.jl`
+und `precompile.jl`.
 
 | Datei | Untermodul | Inhalt (R-Vorlage → Python-Vorlage) |
 |---|---|---|
@@ -35,6 +36,8 @@ Modul), zuletzt `exports.jl` und `precompile.jl`.
 | `src/r/stinepack.jl` | `RStinepack` | stinepack 1.5 `stinterp`, `stinemanSlopes`, `parabolaSlopes` (in R übernommen als `.stinepack_stinterp`) → `_r/stinepack.py` |
 | `src/r/imputets.jl` | `RImputeTS` | imputeTS 3.4 `na_interpolation` (stine, linear), `na_locf` (`src/locf.cpp`; in R übernommen als `.imputets_na_interpolation`, immer aktiv) → `_r/imputets.py` |
 | `src/engine.jl` u. a. | – | `simulation()` und Strategie/Config (r/R/simulation.R, sim_*.R, …) |
+| `src/svg.jl` | – | Grafikmodul: `SimLevPlot`, `_plot_method` & Co., alle SVG-Zeichenbausteine (siehe [Grafik](#grafik)) → `simlev/svg.py` |
+| `src/dashboard.jl` | – | Dashboard-Daten und Panels, `plot_dashboard`, `export_dashboard` (r/R/plot_dashboard.R) → `dashboard.py` |
 | `src/<modul>.jl` | `DataPrep`, `Backcast`, `Bonds`, `Signals`, `Bootstrap`, `Withdrawal`, `Dependence`, `Regimes`, `Scenarios`, `Optimize`, `Tactical`, `DeepAnalysis`, `Planning`, `AnalysisTests`, `Overfitting`, `ParamSearch`, `Sensitivity` | je eine R-Datei `r/R/<modul>.R` → `python/simlev/<modul>.py` |
 | `src/<name>_core.jl` | `BootstrapCore`, `SignalsCore`, `WithdrawalCore`, `DependenceCore`, `OptimizeCore` | C++-Kerne aus `r/src/` → `python/simlev/_<name>_core.py` |
 | `src/exports.jl` | – | sammelt die öffentlichen Funktionen der Untermodule für `using SimLev` |
@@ -103,8 +106,12 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
 12. Bedingungen als Text immer über `RExpr.eval_r` (R-Syntax), nie über
     Julia-`Meta.parse`.
 13. data.frame-artige Eingaben am Funktionseingang mit `as_rframe`
-    vereinheitlichen; plot-Methoden über `_plot_method` registrieren (liefern
-    `SimLevDashboard`, schreiben nur mit `file = "….svg"`).
+    vereinheitlichen; plot-Methoden über `_plot_method` registrieren. Die
+    Zeichenfunktion liefert `(svg, data)` (`data`: `RList` mit einem `RFrame`
+    je Panel, dargestellte Werte nicht ausgedünnt und unskaliert); daraus wird
+    `SimLevPlot(svg, data, x, klasse)`. Geschrieben wird nur mit
+    `file = "….svg"`, unbekannte Schlüsselwörter ergeben eine Warnung.
+    Zeichenbausteine nur aus `src/svg.jl` (siehe [Grafik](#grafik)).
 14. long-double-Summen laufen auf x86-64 über die x87-Hardware; ist das
     Ergebnis NaN, rechnen `r_sum` & Co. mit `F80Soft` nach, weil R's
     NA/NaN-Vorrang sonst vom erzeugten Maschinencode abhinge.
@@ -116,6 +123,44 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
 
 Keine externen Pakete; erlaubt ist nur die Standardbibliothek (`Dates`,
 `Printf`, `Logging`; `LinearAlgebra` nur als Ersatzweg für Eigenvektoren).
+
+## Grafik
+
+Alle Grafiken entstehen ohne externe Pakete als SVG. Alle Zeichenbausteine
+stehen im Grafikmodul `src/svg.jl` (im Modul `SimLev`, eingebunden vor
+`dashboard.jl` und den Untermodulen), dem Gegenstück zu
+`python/simlev/svg.py`: gleiche Gliederung, gleiche Namen (Julias `name!`
+heißt in Python `name`). Die Untermodule enthalten nur ihre
+Zeichenfunktionen (`_plot_*`, `plot_SimLev*`) mit der Datenaufbereitung und
+holen die Bausteine mit `using ..SimLev: …`; `dashboard.jl` hat die
+Dashboard-Daten und die Panels. Abschnitte von `svg.jl`:
+
+1. Grafikobjekt `SimLevPlot`.
+2. Einheitliche Grafik-API: `_plot_method`, `_check_svg_file`,
+   `_write_svg`, `_warn_unknown_kw`.
+3. Gemeinsame Hilfen: `_esc` (Textschutz aller Stile), `r_pretty`,
+   Farben (`_col2rgba`, `_svgcol`, `_alpha` …), Datumshilfen
+   (`_MONATE_KURZ`, `_fmt_day`; `from_days`, `to_days`, `days_from_civil`
+   aus `dates.jl`).
+4. bis 9. je ein Grafikstil; ein Präfix je Stil, damit gleichnamige
+   Bausteine mit anderem Aussehen nicht verwechselt werden:
+
+| Abschnitt | Präfix | Bausteine (Auswahl) | Grafiken |
+|---|---|---|---|
+| 4. Stil Dashboard | – | `_Canvas`, `_Panel`, `_text!`, `_line!`, `_rect!`, `_polyline!`, `_area!`, `_frame!`, `_date_ticks`, `_yaxis` | `plot_dashboard`, `r_plot(<SimLevResult>)` |
+| 5. Stil Analysegrafiken | `_ana_` | `_AnaSvg`, `_AnaPanel`, `_ana_panel`, `_ana_lines`, `_ana_hline`, `_ana_rect`, `_ana_text`, `_ana_points`, `_ana_legend`, `_ana_ramp`, `_ana_svg_done`, `_ana_year_ticks` | DeepAnalysis, AnalysisTests (Signal, Heatmap), Planning |
+| 6. Stil Rastergrafiken | `_grid_` | `_GridBox`, `_grid_svg`, `_grid_axes!`, `_grid_lines!`, `_grid_bars!`, `_grid_scatter!`, `_grid_hline!`, `_grid_legend!`, `_grid_ticks` | Dependence (Abhängigkeit, Tail-Regression, CoVaR), Regimes |
+| 7. Stil Ergebnisgrafiken | `_res_` | `_ResFig`, `_ResPanel`, `_res_fig`, `_res_panel`, `_res_line!`, `_res_points!`, `_res_rect!`, `_res_vline!`, `_res_hline!`, `_res_abline!`, `_res_legend!`, `_res_ramp`, `_res_finish` | Overfitting (PBO, Walk-Forward), ParamSearch, Sensitivity |
+| 8. Stil Rückrechnung | `_bc_` | `_bc_doc`, `_bc_panel`, `_bc_esc` (ohne `"`) | Backcast |
+| 9. Stil Allokationsgrafiken | `_alloc_` | `_alloc_ticks`, `_alloc_c`, `_alloc_ramp` | Optimize (Gewichte, Effizienzgrenze), Tactical (Zielgewichte) |
+
+10. Zahlen wie in Julia: nur in Python nötig (Nachbildung von `string`,
+    `round`, `@sprintf`, `10.0^k`, `log10` …); hier nur ein Verweis.
+
+Die Grafiken von Withdrawal und Bootstrap entstehen direkt in der
+Zeichenfunktion.
+Ein neuer Baustein kommt in den Abschnitt seines Stils (mit dessen Präfix)
+und zugleich nach `python/simlev/svg.py`.
 
 ## Referenzfälle und Prüfung
 

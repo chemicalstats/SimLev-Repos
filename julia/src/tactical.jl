@@ -24,6 +24,7 @@
 module Tactical
 
 import ..SimLev
+using ..SimLev: _alloc_c, _alloc_ramp, _esc
 using ..SimLev: RList, RFrame, RVector, NamedMat, NA, isna_strict, F80
 using Dates
 
@@ -850,28 +851,14 @@ function print_SimLevWeights(io::IO, x)
 end
 print_SimLevWeights(x) = print_SimLevWeights(stdout, x)
 
-# Farbverlauf wie colorRampPalette(c(...))(n)
-function _ramp(n)
-    base = [(0x2C, 0x6E, 0x9B), (0x3E, 0x8E, 0x5A), (0xC4, 0x9A, 0x2C), (0xB5, 0x56, 0x2B), (0x8A, 0x5B, 0xA8), (0x4A, 0x4A, 0x4A)]
-    n == 1 && return ["#2C6E9B"]
-    out = String[]
-    for i in 0:(n-1)
-        p = i / (n - 1) * (length(base) - 1)
-        k = min(Int(floor(p)), length(base) - 2)
-        f = p - k
-        c = [round(Int, (1 - f) * base[k+1][j] + f * base[k+2][j]) for j in 1:3]
-        push!(out, "#" * join(string(v; base = 16, pad = 2) for v in c))
-    end
-    out
-end
-_c(v) = string(round(v; digits = 2))
-_xml(s) = replace(string(s), "&" => "&amp;", "<" => "&lt;", ">" => "&gt;", "\"" => "&quot;")
+# Grafik: Bausteine `_alloc_*` (Stil Allokationsgrafiken) in svg.jl.
 
 """
     plot_SimLevWeights(x; file = nothing, width = 900, height = 420, main = "Zielgewichte")
 
-`plot.SimLevWeights`: Zielgewichte als gestapelte Flächen über der Zeit (SVG,
-`SimLevDashboard`). Mit `file` wird das SVG gespeichert.
+`plot.SimLevWeights`: Zielgewichte als gestapelte Flächen über der Zeit (SVG).
+Liefert `(svg, data)` mit `data["weights"]` (`date` und je Anlage eine Spalte);
+über `r_plot` entsteht daraus ein `SimLevPlot`.
 """
 function plot_SimLevWeights(x; file = nothing, width = 900, height = 420, main = "Zielgewichte")
     cols = names(x)[2:end]
@@ -884,38 +871,41 @@ function plot_SimLevWeights(x; file = nothing, width = 900, height = 420, main =
     t1 == t0 && (t1 = t0 + 1)
     px(v) = L + pw * (v - t0) / (t1 - t0)
     py(v) = T + ph * (1 - v)
-    cl = _ramp(length(cols))
+    cl = _alloc_ramp(length(cols))
     io = IOBuffer()
     println(io, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$width\" height=\"$height\" viewBox=\"0 0 $width $height\" font-family=\"sans-serif\">")
     println(io, "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>")
-    println(io, "<text x=\"$(L+pw/2)\" y=\"22\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"bold\">$(_xml(main))</text>")
+    println(io, "<text x=\"$(L+pw/2)\" y=\"22\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"bold\">$(_esc(main))</text>")
     cum = zeros(length(t))
     for j in eachindex(cols)
         lo = copy(cum)
         cum .+= Float64[isfinite(v) ? v : 0.0 for v in W[:, j]]
-        up = join(("$(_c(px(t[i]))),$(_c(py(cum[i])))" for i in eachindex(t)), " ")
-        dn = join(("$(_c(px(t[i]))),$(_c(py(lo[i])))" for i in reverse(eachindex(t))), " ")
+        up = join(("$(_alloc_c(px(t[i]))),$(_alloc_c(py(cum[i])))" for i in eachindex(t)), " ")
+        dn = join(("$(_alloc_c(px(t[i]))),$(_alloc_c(py(lo[i])))" for i in reverse(eachindex(t))), " ")
         println(io, "<polygon points=\"$up $dn\" fill=\"$(cl[j])\" stroke=\"none\"/>")
     end
     for v in 0:0.25:1
-        println(io, "<text x=\"$(L-6)\" y=\"$(_c(py(v)+4))\" text-anchor=\"end\" font-size=\"11\">$v</text>")
+        println(io, "<text x=\"$(L-6)\" y=\"$(_alloc_c(py(v)+4))\" text-anchor=\"end\" font-size=\"11\">$v</text>")
     end
     years = unique(Dates.year.(d))
     for y in years
         z = _dnum(Date(y, 1, 1))
         (z < t0 || z > t1) && continue
-        println(io, "<text x=\"$(_c(px(z)))\" y=\"$(T+ph+16)\" text-anchor=\"middle\" font-size=\"11\">$y</text>")
+        println(io, "<text x=\"$(_alloc_c(px(z)))\" y=\"$(T+ph+16)\" text-anchor=\"middle\" font-size=\"11\">$y</text>")
     end
     println(io, "<text x=\"16\" y=\"$(T+ph/2)\" font-size=\"12\" transform=\"rotate(-90 16 $(T+ph/2))\" text-anchor=\"middle\">Gewicht</text>")
     for (j, c) in enumerate(cols)
         yy = T + (j - 1) * 18
         println(io, "<rect x=\"$(L+pw+12)\" y=\"$yy\" width=\"12\" height=\"12\" fill=\"$(cl[j])\"/>")
-        println(io, "<text x=\"$(L+pw+30)\" y=\"$(yy+10)\" font-size=\"11\">$(_xml(c))</text>")
+        println(io, "<text x=\"$(L+pw+30)\" y=\"$(yy+10)\" font-size=\"11\">$(_esc(c))</text>")
     end
     println(io, "</svg>")
     svg = String(take!(io))
     file === nothing || write(String(file), svg)
-    SimLev.SimLevDashboard(svg)
+    # dargestellte Werte: Zielgewichte je Anlage (vor dem Stapeln, NA unverändert)
+    data = SimLev.RList("weights" => SimLev.RFrame("date" => collect(Date, d),
+                                                   (String(c) => W[:, j] for (j, c) in enumerate(cols))...))
+    return (svg, data)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════

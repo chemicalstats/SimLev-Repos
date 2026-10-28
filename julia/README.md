@@ -196,20 +196,23 @@ Besonderheiten der Julia-Fassung:
   Ergebnisse also mit R überein. `bootstrap_study(chunk_dir = …)` schreibt
   die Zwischenstände in einem eigenen Textformat (Dateinamen wie in R auf
   `.rds`, aber nicht mit R lesbar).
-- **Grafiken** zeichnet die Julia-Fassung als SVG ohne externe Pakete
-  (`SimLevDashboard`, in Jupyter, Pluto und VS Code direkt sichtbar).
-  `plot_dashboard(result)` zeigt dieselben Panels, deutschen
-  Beschriftungen und Kennzahlen wie R; die Grafik ist nicht bitgleich, die
-  dargestellten Daten schon. Die `plot`-Methoden der übrigen
-  Ergebnisobjekte (`r_plot(x)`) zeichnen ebenfalls SVG; je nach Klasse
-  geben sie ein `SimLevDashboard` oder den SVG-Text zurück, mit
-  `file = "…"` schreiben sie in eine Datei (`r_plot` eines
-  `deep_analysis()`-Ergebnisses schreibt ohne `file` wie R's
-  Standardgerät nach `Rplots.svg`). `export_dashboard(result,
+- **Grafiken** zeichnet die Julia-Fassung als SVG ohne externe Pakete.
+  `plot_dashboard(result)` und alle `plot`-Methoden der Ergebnisobjekte
+  (`r_plot(x)`) liefern ein `SimLevPlot` (in Jupyter, Pluto und VS Code
+  direkt sichtbar) mit den Feldern `svg` (die Grafik), `data` (die
+  dargestellten Werte je Panel als `RFrame` in einer `RList`, nicht
+  ausgedünnt und unskaliert), `source` (das Eingabeobjekt) und `kind`
+  (dessen Klasse). `plot_dashboard(result)` zeigt dieselben Panels,
+  deutschen Beschriftungen und Kennzahlen wie R; die Grafik ist nicht
+  bitgleich, die dargestellten Daten schon. Geschrieben wird nur mit
+  `file = "….svg"` (andere Endungen brechen mit einer Meldung ab),
+  unbekannte Schlüsselwörter ergeben eine Warnung. `export_dashboard(result,
   "backtest.svg"; width = 14, height = 10)` speichert das Dashboard als
-  SVG-Datei (Größe in Zoll wie in R, 100 Pixel je Zoll), unabhängig von
-  der Dateiendung; für PDF oder PNG wandeln Sie die SVG-Datei mit einem
-  Werkzeug wie `rsvg-convert` oder CairoSVG um.
+  SVG-Datei (Größe in Zoll wie in R, 100 Pixel je Zoll); für PDF oder PNG
+  wandeln Sie die SVG-Datei mit einem Werkzeug wie `rsvg-convert` oder
+  CairoSVG um. Eigene Grafiken (etwa mit Plots.jl oder Makie) bauen Sie aus
+  `data`, z. B. `p = r_plot(result); df = p.data["performance"]` mit den
+  Spalten `date` und `strategy`.
 - Eigenvektoren (`eigen()`, u. a. in `portfolio_optimize()`) holt SimLev
   wie R aus der Referenz-LAPACK des Systems (Pfad über die
   Umgebungsvariable `SIMLEV_LAPACK` wählbar). Fehlt sie, rechnet SimLev mit
@@ -387,7 +390,8 @@ src/
   engine.jl         simulation() mit sim_phases.jl, sim_loop.jl, sim_evaluate.jl
   tax_tariff.jl     Einkommensteuertarif, read_tax_tariff
   result.jl         SimLevResult, print/summary
-  dashboard.jl      statisches SVG-Dashboard
+  svg.jl            Grafikmodul: SimLevPlot, plot-API und alle SVG-Zeichenbausteine
+  dashboard.jl      statisches SVG-Dashboard (Daten und Panels)
   <modul>.jl        Erweiterungen, je eine R-Datei (data_prep, backcast, bonds, signals,
                     bootstrap, withdrawal, dependence, regimes, scenarios, optimize,
                     tactical, deep_analysis, planning, analysis_tests, overfitting,

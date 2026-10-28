@@ -9,6 +9,7 @@
 module Regimes
 
 import ..SimLev
+using ..SimLev: _grid_lines!, _grid_svg
 using Dates
 
 export regime_hmm, regime_states
@@ -285,11 +286,13 @@ function _plot_hmm(x; file = nothing, width = 900, height = 380)
     D = _D()
     k = Int(x["k"])
     top = _fmat(x["filtered"])[:, k]
-    D._svg_grid(["p"], _ -> ((c, box) -> D._svg_lines!(c, box, [(D._days(x["dates"]), top, "#B5562B", "P(Z$k | bis t)")];
+    data = SimLev.RList("filtered" => SimLev.RFrame("date" => collect(Date, x["dates"]), "probability" => top))
+    p = _grid_svg(["p"], _ -> ((c, box) -> _grid_lines!(c, box, [(D._days(x["dates"]), top, "#B5562B", "P(Z$k | bis t)")];
                                                        ylim = (0.0, 1.0), hline = [(0.5, "grey")], dates = true,
                                                        ylabel = "P(Z$k | bis t)",
                                                        title = "Gefilterte Wahrscheinlichkeit des unruhigsten Zustands (Z$k)"));
                 file = file, width = width, height = height)
+    return (p.svg, data)
 end
 
 """

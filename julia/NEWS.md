@@ -1,5 +1,13 @@
 # SimLev.jl (Julia) – Änderungen je Version
 
+## SimLev.jl 0.6.0
+
+Minor-Update (Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Grafik: Python zeichnet wie Julia eigenes SVG statt matplotlib; Dashboard, Analyse-, Abhängigkeits- und Überanpassungsgrafiken in einem Grafikmodul je Sprache.
+- Datenobjekt: Grafiken liefern SimLevPlot mit svg, data, source und kind, damit eigene Darstellungen aus den Daten möglich sind.
+- Optionen der Grafikfunktionen nur noch als Schlüsselwort.
+
 ## SimLev.jl 0.5.1
 
 Patch-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -93,7 +101,10 @@ weiterhin nur die Standardbibliothek (`Dates`, `Printf`, `Logging`;
 * Innerer Aufbau: `ld80.jl`, `rnum.jl` und `rformat.jl` liegen bei den
   übrigen R-Interna in `src/r/`; `src/SimLev.jl` bindet erst die R-Interna,
   dann die Engine und dann die Module ein (C++-Kerne jeweils vor ihrem
-  Modul). Das ungenutzte `RFmt.R_NAN` entfällt (R's NaN ist `NaN`).
+  Modul). Das ungenutzte `RFmt.R_NAN` entfällt (R's NaN ist `NaN`). Alle
+  SVG-Zeichenbausteine stehen im Grafikmodul `src/svg.jl` (vor
+  `dashboard.jl` und den Modulen; Abschnitte und Namen wie
+  `python/simlev/svg.py`, ein Präfix je Grafikstil).
 
 ### Änderungen der Julia-API
 
@@ -118,13 +129,23 @@ weiterhin nur die Standardbibliothek (`Dates`, `Printf`, `Logging`;
   standardmäßig).
 * `plot_dashboard()`: `width` und `height` sind jetzt Pixel (Standard
   1400 × automatisch) statt Zoll; die Argumente `currency` und `file` gibt
-  es nicht mehr (wie in R). Unbekannte Schlüsselwörter werden wie R's `...`
-  stillschweigend übergangen. Das Statistik-Panel zeigt die Sharpe Ratio
+  es nicht mehr (wie in R). Das Statistik-Panel zeigt die Sharpe Ratio
   aus `statistics` statt einer vereinfachten Formel.
-* `export_dashboard()` schreibt wie bisher SVG, jetzt aber immer, auch bei
-  anderen Dateiendungen (früher `.html` direkt sowie `.pdf` und `.png`
-  über `rsvg-convert`); die Meldung erscheint wie in R auf `stderr`, die
-  Rückgabe ist `nothing` statt des Dateinamens.
+* `export_dashboard()` schreibt nur noch SVG (früher `.html` direkt sowie
+  `.pdf` und `.png` über `rsvg-convert`); andere Dateiendungen ergeben
+  einen Fehler. Die Meldung erscheint wie in R auf `stderr`, die Rückgabe
+  ist `nothing` statt des Dateinamens.
+* Grafikobjekt: `SimLevDashboard` heißt jetzt `SimLevPlot` (ohne Alias).
+  Dashboard und alle `plot`-Methoden liefern es mit den Feldern `svg`,
+  `data` (die dargestellten Werte je Panel als `RFrame` in einer `RList`,
+  unskaliert und nicht ausgedünnt; für eigene Grafiken), `source` (das
+  Eingabeobjekt) und `kind` (dessen Klasse); Python liefert dasselbe
+  Objekt mit denselben Daten. Geschrieben wird nur mit `file = "….svg"`;
+  unbekannte Schlüsselwörter ergeben eine Warnung statt stillem
+  Übergehen.
+  Behoben: ungültige Farben in `plot.SimLevParamSearch` (Überlauf im
+  Farbverlauf) und Achsenmarken des Dashboards, die wegen `10.0^k` aus
+  Base minimal von R abwichen (jetzt libm wie R).
 * Entfernt wie in R: das interaktive HTML-Dashboard (`plot_interactive()`,
   `export_html_dashboard()`; Dateien `src/interactive.jl` und
   `src/html_templates.jl`) sowie `create_config()`, `migrate_strategy()`,

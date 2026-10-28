@@ -476,10 +476,6 @@ class SimLevBackcastFit(RList):
     def summary(self):
         return summary_SimLevBackcastFit(self)
 
-    def plot(self, **kwargs):
-        return plot_SimLevBackcastFit(self, **kwargs)
-
-
 def _as_char_vec(x):
     if x is None:
         return []
@@ -723,10 +719,6 @@ class SimLevBackcast(pd.DataFrame):
 
     __str__ = __repr__
 
-    def plot(self, log=True, **kwargs):  # noqa: A003
-        return plot_SimLevBackcast(self, log=log, **kwargs)
-
-
 def backcast(fit=None, data=None, params=None, splice="inception", fill=("locf", "linear", "stine", "model"),
              rebase=None, **kwargs):
     """Produkt-Kursreihe zurückrechnen und verketten.
@@ -927,57 +919,73 @@ def summary_SimLevBackcastFit(object):  # noqa: A002,N802
     return RList(params=object["params"], diagnostics=diag, validation=object["validation"])
 
 
-def plot_SimLevBackcastFit(x, **kwargs):  # noqa: N802
-    """``plot.SimLevBackcastFit``: Pfadabweichung im Fit-Fenster (und Verlustkurve der Gittersuche)."""
-    import matplotlib.pyplot as plt
+# ── Grafiken (SVG wie julia/src/backcast.jl; Bausteine `_bc_*` in svg.py) ──────
+
+def _plot_fit(x, width=720, height=360):
+    """``plot.SimLevBackcastFit``: Pfadabweichung im Fit-Fenster (und Verlustkurve der Gittersuche) als SVG.
+
+    Args:
+        width, height: Größe je Teilgrafik in Pixeln (mit Gittersuche zwei Teilgrafiken untereinander).
+        file: Dateiname auf ``.svg`` (sonst wird nichts geschrieben).
+
+    Returns:
+        :class:`simlev.SimLevPlot`; ``data``: ``deviation`` (``date``, ``deviation`` als Anteil, gezeichnet
+        in %) und mit Gittersuche ``grid`` (``value``, ``loss``).
+    """
     dev = x["diagnostics"]["deviation"]
-    nplot = 1 if x["grid"] is None else 2
-    fig, axes = plt.subplots(nplot, 1, squeeze=False, figsize=kwargs.pop("figsize", (8, 4 * nplot)))
-    ax = axes[0][0]
-    ax.plot(pd.to_datetime(dev["date"]), dev["deviation"].to_numpy() * 100, color="#2C6E9B", lw=1, **kwargs)
-    ax.axhline(0, color="grey", ls="--")
-    ax.set_xlabel("Datum")
-    ax.set_ylabel("1 - Sim/Produkt (%)")
-    ax.set_title("Pfadabweichung im Fit-Fenster")
-    if x["grid"] is not None:
-        ax2 = axes[1][0]
-        ax2.plot(x["grid"]["value"], x["grid"]["loss"], color="#B5562B")
-        ax2.set_xlabel("%s (%% p. a.)" % x["fitted"][0])
-        ax2.set_ylabel(x["loss"])
-        ax2.set_title("Gittersuche")
-        ax2.axvline(x["params"][x["fitted"][0]], color="grey", ls=":")
-    return x
+    ng = 1 if x["grid"] is None else 2
+    dd = _days(dev["date"].to_numpy())
+    dv = dev["deviation"].to_numpy(dtype=np.float64)
+
+    def body(out):
+        _bc_panel(out, [(dd, dv * 100, "#2C6E9B", 1)], w=width, h=height, title="Pfadabweichung im Fit-Fenster",
+                  xlab="Datum", ylab="1 - Sim/Produkt (%)", hlines=[0.0], xdate=True)
+        if ng == 2:
+            g = x["grid"]
+            _bc_panel(out, [(g["value"].to_numpy(dtype=np.float64), g["loss"].to_numpy(dtype=np.float64),
+                             "#B5562B", 1)],
+                      y0=height, w=width, h=height, title="Gittersuche", xlab="%s (%% p. a.)" % x["fitted"][0],
+                      ylab=x["loss"], vlines=[float(x["params"][x["fitted"][0]])])
+
+    data = {"deviation": pd.DataFrame({"date": dev["date"].to_numpy(), "deviation": dv.copy()})}
+    if ng == 2:
+        data["grid"] = pd.DataFrame({"value": x["grid"]["value"].to_numpy(dtype=np.float64),
+                                     "loss": x["grid"]["loss"].to_numpy(dtype=np.float64)})
+    return _bc_doc(body, width, height * ng), data
 
 
-def plot_SimLevBackcast(x, log=True, **kwargs):  # noqa: N802
-    """``plot.SimLevBackcast``: verkettete Reihe, Modellreihe und Verkettungsdatum."""
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(figsize=kwargs.pop("figsize", (8, 5)))
+def _plot_backcast(x, log=True, width=720, height=450):
+    """``plot.SimLevBackcast``: verkettete Reihe (Backcast/Produkt), Modellreihe und Verkettungsdatum als SVG.
+
+    Args:
+        log: logarithmische y-Achse.
+        width, height: Größe in Pixeln.
+        file: Dateiname auf ``.svg`` (sonst wird nichts geschrieben).
+
+    Returns:
+        :class:`simlev.SimLevPlot`; ``data``: ``backcast`` (``date``, ``value``, ``model``, ``source`` der
+        gezeichneten Zeilen, d. h. mit endlichem ``value``).
+    """
     val = x["value"].to_numpy(dtype=np.float64)
+    mdl = x["model"].to_numpy(dtype=np.float64)
+    d = _days(x["date"].to_numpy())
     ok = np.isfinite(val)
-    dts = pd.to_datetime(x["date"])
-    bc = (x["source"].to_numpy() == "backcast") & ok
-    ax.plot(dts[ok], x["model"].to_numpy()[ok], color="#A6A6A6", lw=1, label="Modell durchgehend")
-    ax.plot(dts[bc], val[bc], color="#B5562B", lw=1.2, label="Backcast")
-    ax.plot(dts[~bc & ok], val[~bc & ok], color="#2C6E9B", lw=1.2, label="Produkt")
-    if log:
-        ax.set_yscale("log")
-    import matplotlib.dates as mdates
-    import matplotlib.ticker as mticker
-    loc = mdates.AutoDateLocator()
-    ax.xaxis.set_major_locator(loc)
-    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(loc))
-    fmt_y = mticker.FuncFormatter(lambda v, _: ("%g" % v) if abs(v) < 1e4 else "{:,.0f}".format(v).replace(",", " "))
-    ax.yaxis.set_major_formatter(fmt_y)
-    ax.yaxis.set_minor_formatter(mticker.NullFormatter())
+    src = np.array([str(v) for v in x["source"]], dtype=object)
+    bc = (src == "backcast") & ok
+    nb = ~bc & ok
     sd0 = x.attrs.get("splice_date")
-    if sd0 is not None and not pd.isna(sd0):
-        ax.axvline(pd.Timestamp(sd0), ls=":", color="#666666")
-    ax.set_xlabel("Datum")
-    ax.set_ylabel("Wert (log. Skala)" if log else "Wert")
-    ax.set_title("Backcast und Produkt")
-    ax.legend(loc="upper left", frameon=False)
-    return x
+    vl = [] if sd0 is None or pd.isna(sd0) else [float(_days(np.array([sd0], dtype="datetime64[D]"))[0])]
+
+    def body(out):
+        _bc_panel(out, [(d[ok], mdl[ok], "#A6A6A6", 1), (d[bc], val[bc], "#B5562B", 1.2),
+                        (d[nb], val[nb], "#2C6E9B", 1.2)],
+                  w=width, h=height, title="Backcast und Produkt", xlab="Datum",
+                  ylab="Wert (log. Skala)" if log else "Wert", logy=log, vlines=vl, xdate=True,
+                  legend=[("Backcast", "#B5562B"), ("Produkt", "#2C6E9B"), ("Modell durchgehend", "#A6A6A6")])
+
+    data = {"backcast": pd.DataFrame({"date": x["date"].to_numpy()[ok], "value": val[ok], "model": mdl[ok],
+                                      "source": src[ok]})}
+    return _bc_doc(body, width, height), data
 
 
 def _format_backcast(x, **kwargs) -> str:
@@ -1006,5 +1014,14 @@ def summary(object, *args, **kwargs):  # noqa: A002
         return summary_SimLevBackcastFit(object)
     raise TypeError("kein summary() für %s" % type(object).__name__)
 
+
+from .svg import _bc_doc, _bc_panel, _plot_method  # noqa: E402
+
+plot_SimLevBackcastFit = _plot_method(_plot_fit, "SimLevBackcastFit")
+plot_SimLevBackcastFit.__name__ = "plot_SimLevBackcastFit"
+plot_SimLevBackcast = _plot_method(_plot_backcast, "SimLevBackcast")
+plot_SimLevBackcast.__name__ = "plot_SimLevBackcast"
+SimLevBackcastFit.plot = plot_SimLevBackcastFit
+SimLevBackcast.plot = plot_SimLevBackcast
 
 quiet_fp(globals(), __all__ + ["summary"])

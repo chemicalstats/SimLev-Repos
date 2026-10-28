@@ -14,6 +14,14 @@ Recht um, gibt alle Ausgaben auf Deutsch aus und erzeugt alle 105 Fälle
 neu (siehe unten). Python 0.5.0 und Julia 0.5.0 sind zu allen 105 Fällen
 bitgleich.
 
+## SimLev 0.6.0
+
+Minor-Update (Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Grafik: Python zeichnet wie Julia eigenes SVG statt matplotlib; Dashboard, Analyse-, Abhängigkeits- und Überanpassungsgrafiken in einem Grafikmodul je Sprache.
+- Datenobjekt: Grafiken liefern SimLevPlot mit svg, data, source und kind, damit eigene Darstellungen aus den Daten möglich sind.
+- Optionen der Grafikfunktionen nur noch als Schlüsselwort.
+
 ## SimLev 0.5.1
 
 Patch-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.

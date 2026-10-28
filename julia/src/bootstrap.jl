@@ -2198,7 +2198,12 @@ end
 const _DARK3 = ["#E16A86", "#50A315", "#009ADE", "#B88A00", "#00AD9A", "#C86DD7"]
 _svgnum(v) = @sprintf("%.2f", v)
 
-"Ungewichtete Dichten einer Kennzahl je Strategie als SVG (R: `plot.SimLevBootstrapStudy`)."
+"""
+Ungewichtete Dichten einer Kennzahl je Strategie als SVG (R: `plot.SimLevBootstrapStudy`).
+
+Liefert `(svg, data)`; `data`: `density` (`strategy`, `x`, `density`: die gezeichneten Punkte von
+`density()` je Strategie im Wertebereich der Kennzahl).
+"""
 function _plot_study(x; metric = "cagr", file = nothing, width = 640, height = 420)
     tab = x["results"]
     strats = collect(String, _values(x["strategies"]))
@@ -2225,17 +2230,19 @@ function _plot_study(x; metric = "cagr", file = nothing, width = 640, height = 4
     print(io, "<rect x=\"$ml\" y=\"$mt\" width=\"$pw\" height=\"$ph\" fill=\"none\" stroke=\"black\"/>\n")
     print(io, "<text x=\"", ml + pw / 2, "\" y=\"", height - 12, "\" text-anchor=\"middle\">", metric, "</text>\n")
     print(io, "<text x=\"16\" y=\"", mt + ph / 2, "\" text-anchor=\"middle\" transform=\"rotate(-90 16 ", mt + ph / 2, ")\">Dichte</text>\n")
+    rs = String[]; rx = Float64[]; ry = Float64[]
     for (i, (gx, gy)) in enumerate(dens)
         col = _DARK3[(i-1)%length(_DARK3)+1]
-        pts = join([string(_svgnum(sx(a)), ",", _svgnum(sy(b))) for (a, b) in zip(gx, gy) if x0 <= a <= x1], " ")
+        keep = [(a, b) for (a, b) in zip(gx, gy) if x0 <= a <= x1]
+        pts = join([string(_svgnum(sx(a)), ",", _svgnum(sy(b))) for (a, b) in keep], " ")
+        append!(rs, fill(strats[i], length(keep))); append!(rx, first.(keep)); append!(ry, last.(keep))
         print(io, "<polyline fill=\"none\" stroke=\"$col\" stroke-width=\"1.5\" points=\"$pts\"/>\n")
         print(io, "<line x1=\"", width - mr - 120, "\" y1=\"", mt + 16 * i, "\" x2=\"", width - mr - 100, "\" y2=\"", mt + 16 * i,
               "\" stroke=\"$col\" stroke-width=\"1.5\"/><text x=\"", width - mr - 95, "\" y=\"", mt + 16 * i + 4, "\">", strats[i], "</text>\n")
     end
     print(io, "</svg>\n")
     svg = String(take!(io))
-    file === nothing || write(file, svg)
-    return svg
+    return (svg, SimLev.RList("density" => SimLev.RFrame("strategy" => rs, "x" => rx, "density" => ry)))
 end
 
 # ── Registrierung der S3-Methoden ─────────────────────────────────────────

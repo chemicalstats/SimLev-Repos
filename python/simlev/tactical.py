@@ -31,6 +31,7 @@ import pandas as pd
 from ._r import fmt as _fmt
 from ._r.base import env_from_caller
 from ._r import libm as _libm
+from .svg import _alloc_c, _alloc_ramp, _esc, _jl_str, _jl_unique
 
 __all__ = ["SimLevWeights", "signal_state", "momentum_score", "tactical_rules", "tactical_rotation",
            "target_volatility", "conditional_volatility", "glidepath", "blend_weights",
@@ -323,8 +324,7 @@ class SimLevWeights(pd.DataFrame):
     def _repr_html_(self):  # pragma: no cover - Jupyter
         return "<pre>%s</pre>" % self.format()
 
-    def plot(self, *args, **kwargs):  # noqa: D102
-        return plot_SimLevWeights(self, *args, **kwargs)
+    # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
 
 def _is_weights(x):
@@ -1105,23 +1105,62 @@ def print_SimLevWeights(x, _return=False):  # noqa: N802 - R-Name
     return x
 
 
-def plot_SimLevWeights(x, ax=None, **kwargs):  # noqa: N802 - R-Name
-    """``plot.SimLevWeights``: Zielgewichte als gestapelte Flächen (matplotlib)."""
-    import matplotlib.pyplot as plt
+def plot_SimLevWeights(x, width=900, height=420, main="Zielgewichte"):  # noqa: N802 - R-Name
+    """``plot.SimLevWeights``: Zielgewichte als gestapelte Flächen über der Zeit (SVG).
+
+    Liefert ``(svg, data)`` mit ``data["weights"]`` (``date`` und je Anlage eine Spalte, Anteile);
+    über ``x.plot()`` bzw. ``simlev.plot(x)`` entsteht daraus ein ``SimLevPlot``.
+    """
     cols = [str(c) for c in x.columns[1:]]
     W = _wmat(x, cols)
-    base = ["#2C6E9B", "#3E8E5A", "#C49A2C", "#B5562B", "#8A5BA8", "#4A4A4A"]
-    from matplotlib.colors import LinearSegmentedColormap
-    cmap = LinearSegmentedColormap.from_list("simlev", base)
-    colors = [cmap(i / max(1, len(cols) - 1)) for i in range(len(cols))]
-    if ax is None:
-        _, ax = plt.subplots(figsize=kwargs.pop("figsize", (9, 4)))
-    ax.stackplot(np.asarray(x["date"]), W.T, colors=colors, labels=cols)
-    ax.set_ylim(0, 1)
-    ax.set_ylabel("Gewicht")
-    ax.set_title(kwargs.pop("main", "Zielgewichte"))
-    ax.legend(loc="upper left", bbox_to_anchor=(1.0, 1.0), frameon=False, fontsize=8)
-    return x
+    d = np.atleast_1d(np.asarray(_to_date(x["date"], "date"))).astype("datetime64[D]")
+    t = _days(d)
+    L, R, T, B = 60.0, 140.0, 40.0, 40.0
+    pw = width - L - R
+    ph = height - T - B
+    t0, t1 = float(np.min(t)), float(np.max(t))
+    if t1 == t0:
+        t1 = t0 + 1
+
+    def px(v):
+        return L + pw * (v - t0) / (t1 - t0)
+
+    def py(v):
+        return T + ph * (1 - v)
+    cl = _alloc_ramp(len(cols))
+    out = ["<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%s\" height=\"%s\" viewBox=\"0 0 %s %s\" "
+           "font-family=\"sans-serif\">" % (_jl_str(width), _jl_str(height), _jl_str(width), _jl_str(height)),
+           "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>",
+           "<text x=\"%s\" y=\"22\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"bold\">%s</text>"
+           % (_jl_str(L + pw / 2), _esc(main))]
+    cum = np.zeros(len(t))
+    for j in range(len(cols)):
+        lo = cum.copy()
+        w = W[:, j]
+        cum = cum + np.where(np.isfinite(w), w, 0.0)
+        up = " ".join("%s,%s" % (_alloc_c(px(t[i])), _alloc_c(py(cum[i]))) for i in range(len(t)))
+        dn = " ".join("%s,%s" % (_alloc_c(px(t[i])), _alloc_c(py(lo[i]))) for i in reversed(range(len(t))))
+        out.append("<polygon points=\"%s %s\" fill=\"%s\" stroke=\"none\"/>" % (up, dn, cl[j]))
+    for v in (0.0, 0.25, 0.5, 0.75, 1.0):
+        out.append("<text x=\"%s\" y=\"%s\" text-anchor=\"end\" font-size=\"11\">%s</text>"
+                   % (_jl_str(L - 6), _alloc_c(py(v) + 4), _jl_str(v)))
+    for y in _jl_unique((d.astype("datetime64[Y]").astype(np.int64) + 1970).tolist()):
+        z = float(np.datetime64(y - 1970, "Y").astype("datetime64[D]").astype(np.int64))
+        if z < t0 or z > t1:
+            continue
+        out.append("<text x=\"%s\" y=\"%s\" text-anchor=\"middle\" font-size=\"11\">%d</text>"
+                   % (_alloc_c(px(z)), _jl_str(T + ph + 16), y))
+    out.append("<text x=\"16\" y=\"%s\" font-size=\"12\" transform=\"rotate(-90 16 %s)\" text-anchor=\"middle\">"
+               "Gewicht</text>" % (_jl_str(T + ph / 2), _jl_str(T + ph / 2)))
+    for j, c in enumerate(cols):
+        yy = T + j * 18
+        out.append("<rect x=\"%s\" y=\"%s\" width=\"12\" height=\"12\" fill=\"%s\"/>" % (_jl_str(L + pw + 12), _jl_str(yy), cl[j]))
+        out.append("<text x=\"%s\" y=\"%s\" font-size=\"11\">%s</text>"
+                   % (_jl_str(L + pw + 30), _jl_str(yy + 10), _esc(c)))
+    out.append("</svg>")
+    svg = "\n".join(out) + "\n"
+    data = {"weights": pd.DataFrame({"date": d, **{c: W[:, j] for j, c in enumerate(cols)}})}
+    return svg, data
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1250,6 +1289,11 @@ def tactical_simulation(data, weights, rebalance=("switch", "month", "quarter", 
                        "rebalance": rebalance}
     return res
 
+
+# plot.SimLevWeights (SVG, ``SimLevPlot``) wie Julias ``_plot_method(plot_SimLevWeights, "SimLevWeights")``
+from .svg import _plot_method  # noqa: E402
+
+SimLevWeights.plot = _plot_method(plot_SimLevWeights, "SimLevWeights")
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
 from ._r.base import quiet_fp  # noqa: E402

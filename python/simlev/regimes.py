@@ -114,18 +114,25 @@ class SimLevHMM(RList):
         lines.append(_fmt.sprintf("\nAktueller Zustand (gefiltert): Z%d mit %.0f %%", w + 1, 100 * _dep._rmax(last)))
         return "\n".join(lines)
 
-    def plot(self, data=None, **kw):
-        import matplotlib.pyplot as plt
-        x = self
-        top = np.asarray(x["filtered"], dtype=np.float64)[:, int(x["k"]) - 1]
-        fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(x["dates"], top, color="#B5562B", **kw)
-        ax.fill_between(x["dates"], top, 0, color="#B5562B", alpha=0.25)
-        ax.axhline(0.5, ls=":", color="grey")
-        ax.set_ylim(0, 1)
-        ax.set_ylabel("P(Z%d | bis t)" % int(x["k"]))
-        ax.set_title("Gefilterte Wahrscheinlichkeit des unruhigsten Zustands (Z%d)" % int(x["k"]))
-        return x
+    # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
+
+
+def _plot_hmm(x, width=900, height=380):
+    """``plot.SimLevHMM`` (SVG): gefilterte Wahrscheinlichkeit des unruhigsten Zustands über der Zeit.
+
+    Zeichnet wie Julia mit den Bausteinen der Rastergrafiken (``_grid_svg``, ``_grid_lines`` aus svg.py).
+    Liefert ``(svg, data)``: ``filtered`` (``date``, ``probability``).
+    """
+    k = int(x["k"])
+    top = np.asarray(x["filtered"], dtype=np.float64)[:, k - 1].copy()
+    dates = np.asarray(x["dates"]).astype("datetime64[D]")
+    data = {"filtered": pd.DataFrame({"date": dates, "probability": top})}
+    lab = "P(Z%d | bis t)" % k
+    p = _grid_svg(["p"], lambda _: (lambda c, box: _grid_lines(
+        c, box, [(_dep._days(x["dates"]), top, "#B5562B", lab)], ylim=(0.0, 1.0), hline=[(0.5, "grey")], dates=True,
+        ylabel=lab, title="Gefilterte Wahrscheinlichkeit des unruhigsten Zustands (Z%d)" % k)),
+        width=width, height=height)
+    return p.svg, data
 
 
 def regime_hmm(data, columns, k=2, frequency=("week", "day", "month"), n_start=5, max_iter=300, tol=1e-7, seed=1):
@@ -305,6 +312,11 @@ def regime_states(x, dates, type=("filtered", "smoothed", "viterbi"), output=("s
     out[np.isnan(dv)] = _NA
     return out
 
+
+# plot.SimLevHMM (SVG, ``SimLevPlot``) wie Julias ``_plot_method(_plot_hmm, "SimLevHMM")``
+from .svg import _grid_lines, _grid_svg, _plot_method  # noqa: E402
+
+SimLevHMM.plot = _plot_method(_plot_hmm, "SimLevHMM")
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
 from ._r.base import quiet_fp  # noqa: E402

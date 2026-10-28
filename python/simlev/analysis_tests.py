@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -21,12 +22,14 @@ from ._r import fmt as _fmt
 from ._r.fmt import NA_REAL
 from ._r import nmath as _nm
 from ._r.rlist import RList
-from ._r.rnum import LD, r_mean, r_median, r_pow, r_sd
+from ._r.rnum import LD, r_isna, r_mean, r_median, r_pow, r_sd
 from .deep_analysis import (
     _col_means, _da_deflate, _da_series, _dates, _days, _ext, _fill_na, _is_num_scalar, _key_isoweek,
     _key_month, _key_year, _last_of_key, _match_arg, _mean_lgl, _message, _quantile, _sp, _stats,
     _to_date_days,
 )
+from .svg import (_AnaSvg, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_points, _ana_ramp, _ana_rect,
+                  _ana_svg_done)
 
 __all__ = ["signal_analysis", "sharpe_test", "reality_check", "min_track_record", "return_heatmap",
            "SimLevSignalAnalysis", "SimLevRealityCheck", "SimLevHeatmap"]
@@ -374,31 +377,6 @@ class SimLevSignalAnalysis(RList):
             out.append(_fmt.print_matrix(_fmt.r_round(100 * self["table2d"]["mean"], 2)) + "\n")
         txt = "".join(out)
         return txt[:-1] if txt.endswith("\n") else txt
-
-    def plot(self, **kwargs):
-        """Balken je Bereich (± 2 Standardfehler) und Streudiagramm Signal gegen Vorwärtsrendite."""
-        import matplotlib.pyplot as plt
-        b = self["bins"]
-        se = b["sd"] / np.sqrt(b["n"])
-        fig, (a1, a2) = plt.subplots(1, 2, figsize=(11, 4.5))
-        pos = np.arange(1, len(b) + 1)
-        a1.bar(pos, 100 * b["mean"], color="#2C6E9B", yerr=200 * se, capsize=3)
-        a1.axhline(100 * self["overall"]["mean"], ls="--", color="#B5562B")
-        a1.set_xlabel("Signalbereich (niedrig -> hoch)")
-        a1.set_ylabel("Mittlere Vorwärtsrendite (%)")
-        a1.set_title("Je Signalbereich")
-        dd = self["data"]
-        a2.scatter(dd["signal"], 100 * dd["forward"], s=4, color="#2C6E9B", alpha=0.4)
-        if self.get("fit") is not None:
-            o = np.argsort(dd["signal"].to_numpy(), kind="stable")
-            fv = np.asarray(self["fit"]["model"]["fitted.values"], dtype=float)
-            a2.plot(dd["signal"].to_numpy()[o], 100 * fv[o], color="#B5562B", lw=2)
-        a2.axhline(0, color="grey", ls=":")
-        a2.set_xlabel(self["signal_name"])
-        a2.set_ylabel("Vorwärtsrendite (%)")
-        a2.set_title("Streudiagramm")
-        fig.tight_layout()
-        return self
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -768,19 +746,122 @@ class SimLevHeatmap(RList):
         out.append(_fmt.print_data_frame(tab, row_names=False))
         return "".join(out)
 
-    def plot(self, **kwargs):
-        """Heatmap Startjahr x Haltedauer (Farbskala bei ± 25 % begrenzt)."""
-        import matplotlib.pyplot as plt
-        M = 100 * self["matrix"]
-        lim = min(float(np.nanmax(np.abs(M.to_numpy(dtype=float)))), 25.0)
-        fig, ax = plt.subplots(figsize=(9, 5))
-        im = ax.imshow(M.to_numpy(dtype=float).T, origin="lower", cmap="RdBu", vmin=-lim, vmax=lim, aspect="auto",
-                       extent=[int(M.index[0]) - 0.5, int(M.index[-1]) + 0.5, 0.5, M.shape[1] + 0.5], **kwargs)
-        ax.set_xlabel("Startjahr")
-        ax.set_ylabel("Haltedauer (Jahre)")
-        ax.set_title("Annualisierte %s Rendite" % ("reale" if self["real"] else "nominale"))
-        fig.colorbar(im, ax=ax, format="%+.0f %%")
-        return self
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Grafiken (SVG wie julia/src/analysis_tests.jl; Bausteine `_ana_*` in svg.py)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _r_minmax(x, op):
+    """R's ``min()``/``max()`` für Doubles (NA vor NaN; leer: Warnung, ±Inf) wie Julias ``_rmin``/``_rmax``."""
+    s = math.inf if op == "min" else -math.inf
+    upd = False
+    for v in np.asarray(x, dtype=np.float64).tolist():
+        if math.isnan(v):
+            if not upd or not r_isna(s):
+                s = v
+            upd = True
+        elif not upd or (v < s if op == "min" else v > s):
+            s = v
+            upd = True
+    if not upd:
+        warnings.warn("no non-missing arguments to %s; returning %s" % (op, "Inf" if op == "min" else "-Inf"))
+    return s
+
+
+def _plot_signal(x):
+    """``plot.SimLevSignalAnalysis`` (SVG): Balken je Bereich (± 2 Standardfehler) und Streudiagramm.
+
+    Returns:
+        :class:`simlev.SimLevPlot`; ``data``: ``bins`` (``bin``, ``mean``, ``lower``, ``upper``: Mittel und
+        Mittel ± 2 Standardfehler als Anteil) und ``scatter`` (``signal``, ``forward`` und mit
+        Polynom-Glättung ``fitted``).
+    """
+    from .svg import _jl_maximum, _jl_minimum
+    b = x["bins"]
+    nb = len(b)
+    mean = b["mean"].to_numpy(dtype=np.float64)
+    sd = b["sd"].to_numpy(dtype=np.float64)
+    nn = b["n"].to_numpy(dtype=np.float64)
+    m = 100 * mean
+    se = 100 * sd / np.sqrt(nn)
+    lo = m - 2 * se
+    hi = m + 2 * se
+    fin = np.concatenate([lo, hi, [0.0]])
+    fin = fin[np.isfinite(fin)]
+    s = _AnaSvg(1000, 460)
+    p = _ana_panel(s, 0, 0, 500, 460, (0.5, nb + 0.5), (_jl_minimum(fin), _jl_maximum(fin)),
+                   title="Je Signalbereich", xlab="Signalbereich (niedrig -> hoch)",
+                   ylab="Mittlere Vorwärtsrendite (%)", xticks=list(range(1, nb + 1)))
+    for i in range(1, nb + 1):
+        _ana_rect(s, p, i - 0.35, 0.0, i + 0.35, m[i - 1], fill="#2C6E9B")
+        _ana_lines(s, p, [i, i], [lo[i - 1], hi[i - 1]], col="#000", lwd=1)
+    _ana_hline(s, p, 100 * x["overall"]["mean"], col="#B5562B", dash="5,4")
+    dd = x["data"]
+    sv = dd["signal"].to_numpy(dtype=np.float64)
+    fw = dd["forward"].to_numpy(dtype=np.float64)
+    fv = 100 * fw
+    q = _ana_panel(s, 500, 0, 500, 460, (_r_minmax(sv, "min"), _r_minmax(sv, "max")),
+                   (_r_minmax(fv, "min"), _r_minmax(fv, "max")), title="Streudiagramm", xlab=x["signal_name"],
+                   ylab="Vorwärtsrendite (%)")
+    _ana_points(s, q, sv, fv)
+    sc = {"signal": sv.copy(), "forward": fw.copy()}
+    if x.get("fit") is not None:
+        fitted = np.asarray(x["fit"]["model"]["fitted.values"], dtype=np.float64).ravel()
+        o = np.argsort(sv, kind="stable")
+        _ana_lines(s, q, sv[o], 100 * fitted[o], col="#B5562B", lwd=2)
+        sc["fitted"] = fitted.copy()
+    _ana_hline(s, q, 0.0)
+    se1 = sd / np.sqrt(nn)
+    data = {"bins": pd.DataFrame({"bin": np.array([str(v) for v in b["bin"]], dtype=object), "mean": mean.copy(),
+                                  "lower": mean - 2 * se1, "upper": mean + 2 * se1}),
+            "scatter": pd.DataFrame(sc)}
+    return _ana_svg_done(s), data
+
+
+def _plot_heatmap(x):
+    """``plot.SimLevHeatmap`` (SVG): Heatmap Startjahr x Haltedauer (Farbskala bei ± 25 % begrenzt).
+
+    Returns:
+        :class:`simlev.SimLevPlot`; ``data``: ``heatmap`` (``start_year``, ``years``, ``value``: gezeichnete
+        Zellen, annualisierte Rendite als Anteil wie in ``matrix``).
+    """
+    from .svg import _jl_maximum, _jl_min
+    Mm = x["matrix"]
+    raw = Mm.to_numpy(dtype=np.float64)
+    M = 100 * raw
+    fin = M[np.isfinite(M)]
+    lim = _jl_min(1.0 if fin.size == 0 else _jl_maximum(np.abs(fin)), 25.0)
+    pal = _ana_ramp(["#B5562B", "#F2E9DC", "#2C6E9B"], 51)
+    yrs = [int(r) for r in Mm.index]
+    H = M.shape[1]
+    s = _AnaSvg(900, 520)
+    by = max(1, -(-len(yrs) // 12))
+    p = _ana_panel(s, 0, 0, 820, 520, (yrs[0] - 0.5, yrs[-1] + 0.5), (0.5, H + 0.5),
+                   title="Annualisierte %s Rendite" % ("reale" if x["real"] else "nominale"), xlab="Startjahr",
+                   ylab="Haltedauer (Jahre)", xticks=[float(v) for v in yrs[::by]], xlabels=[str(v) for v in yrs[::by]])
+    sy, hy, vv = [], [], []
+    for i in range(len(yrs)):
+        for h in range(1, H + 1):
+            v = float(M[i, h - 1])
+            if not math.isfinite(v):
+                continue
+            v = -lim if v < -lim else (lim if v > lim else v)
+            c = pal[min(max(int(round((v + lim) / (2 * lim) * 50)) + 1, 1), 51) - 1]
+            _ana_rect(s, p, yrs[i] - 0.5, h - 0.5, yrs[i] + 0.5, h + 0.5, fill=c)
+            sy.append(yrs[i])
+            hy.append(h)
+            vv.append(float(raw[i, h - 1]))
+    for k, t in enumerate((-lim, 0.0, lim)):
+        _ana_legend(s, p, [_sp("%+.0f %%", t)], [pal[(0, 25, 50)[k]]], x=830.0, y=60.0 + 20 * k, box=True)
+    data = {"heatmap": pd.DataFrame({"start_year": np.array(sy, dtype=np.int64), "years": np.array(hy, dtype=np.int64),
+                                     "value": np.array(vv, dtype=np.float64)})}
+    return _ana_svg_done(s), data
+
+
+from .svg import _plot_method  # noqa: E402
+
+SimLevSignalAnalysis.plot = _plot_method(_plot_signal, "SimLevSignalAnalysis")
+SimLevHeatmap.plot = _plot_method(_plot_heatmap, "SimLevHeatmap")
 
 
 from ._r.base import quiet_fp  # noqa: E402

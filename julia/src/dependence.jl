@@ -22,6 +22,7 @@
 module Dependence
 
 import ..SimLev
+using ..SimLev: _grid_bars!, _grid_lines!, _grid_scatter!, _grid_svg
 using Dates
 using Printf
 
@@ -1492,174 +1493,15 @@ end
 # Grafiken (SVG)
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Kleine SVG-Bausteine für die plot-Methoden (nicht bitgleich zu R's Grafik,
-# zeigen aber dieselben Daten). Ergebnis ist ein `SimLev.SimLevDashboard`.
+# Bausteine `_grid_*` (Stil Rastergrafiken) in svg.jl; nicht bitgleich zu R's Grafik,
+# zeigen aber dieselben Daten. Die Zeichenfunktionen liefern `(svg, data)`.
 
-_sv(x) = @sprintf("%.1f", x)
-_sesc(s) = replace(String(s), "&" => "&amp;", "<" => "&lt;", ">" => "&gt;", "\"" => "&quot;")
-
-struct _Box
-    x0::Float64; y0::Float64; w::Float64; h::Float64
-end
-
-function _svg_grid(keys, makefn; ncol = 2, file = nothing, width = 900, height = 650)
-    n = length(keys)
-    nc = n == 1 ? 1 : min(ncol, n)
-    nr = cld(n, nc)
-    io = IOBuffer()
-    println(io, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$width\" height=\"$height\" viewBox=\"0 0 $width $height\" ",
-            "font-family=\"Helvetica, Arial, sans-serif\">")
-    println(io, "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>")
-    cw = width / nc; ch = height / nr
-    for (k, key) in enumerate(keys)
-        r = div(k - 1, nc); cidx = (k - 1) % nc
-        box = _Box(cidx * cw + 60, r * ch + 40, cw - 85, ch - 85)
-        makefn(key)(io, box)
-    end
-    println(io, "</svg>")
-    d = SimLev.SimLevDashboard(String(take!(io)))
-    file === nothing || write(String(file), d.svg)
-    d
-end
-
-function _rng(vals, lim)
-    lim !== nothing && return Float64(lim[1]), Float64(lim[2])
-    v = filter(isfinite, vals)
-    isempty(v) && return 0.0, 1.0
-    lo, hi = minimum(v), maximum(v)
-    lo == hi && (lo -= 0.5; hi += 0.5)
-    pad = (hi - lo) * 0.04
-    lo - pad, hi + pad
-end
-
-_tx(b::_Box, x, lo, hi) = b.x0 + (x - lo) / (hi - lo) * b.w
-_ty(b::_Box, y, lo, hi) = b.y0 + b.h - (y - lo) / (hi - lo) * b.h
-
-function _ticks(lo, hi; n = 5)
-    span = hi - lo
-    span <= 0 && return [lo]
-    step = 10.0^floor(log10(span / n))
-    for m in (1, 2, 5, 10)
-        span / (m * step) <= n && (step *= m; break)
-    end
-    t0 = ceil(lo / step) * step
-    collect(t0:step:hi)
-end
-
-function _axes!(io, b::_Box, xlo, xhi, ylo, yhi; title = "", xlabel = "", ylabel = "", dates = false, xticks = nothing)
-    println(io, "<rect x=\"$(_sv(b.x0))\" y=\"$(_sv(b.y0))\" width=\"$(_sv(b.w))\" height=\"$(_sv(b.h))\" fill=\"none\" stroke=\"#444\"/>")
-    for t in _ticks(ylo, yhi)
-        y = _ty(b, t, ylo, yhi)
-        println(io, "<line x1=\"$(_sv(b.x0 - 4))\" y1=\"$(_sv(y))\" x2=\"$(_sv(b.x0))\" y2=\"$(_sv(y))\" stroke=\"#444\"/>")
-        println(io, "<text x=\"$(_sv(b.x0 - 6))\" y=\"$(_sv(y + 3))\" font-size=\"10\" text-anchor=\"end\">$(_sesc(@sprintf("%g", round(t; sigdigits = 6))))</text>")
-    end
-    xt = if xticks !== nothing
-        xticks
-    elseif dates
-        y0 = Dates.year(SimLev.from_days(Int(floor(xlo)))); y1 = Dates.year(SimLev.from_days(Int(floor(xhi))))
-        st = max(1, cld(y1 - y0 + 1, 8))
-        [(Float64(SimLev.days_from_civil(y, 1, 1)), string(y)) for y in y0:st:(y1+1) if xlo <= SimLev.days_from_civil(y, 1, 1) <= xhi]
-    else
-        [(t, @sprintf("%g", round(t; sigdigits = 6))) for t in _ticks(xlo, xhi)]
-    end
-    for (t, l) in xt
-        x = _tx(b, t, xlo, xhi)
-        println(io, "<line x1=\"$(_sv(x))\" y1=\"$(_sv(b.y0 + b.h))\" x2=\"$(_sv(x))\" y2=\"$(_sv(b.y0 + b.h + 4))\" stroke=\"#444\"/>")
-        println(io, "<text x=\"$(_sv(x))\" y=\"$(_sv(b.y0 + b.h + 15))\" font-size=\"10\" text-anchor=\"middle\">$(_sesc(l))</text>")
-    end
-    isempty(title) || println(io, "<text x=\"$(_sv(b.x0 + b.w / 2))\" y=\"$(_sv(b.y0 - 10))\" font-size=\"13\" font-weight=\"bold\" text-anchor=\"middle\">$(_sesc(title))</text>")
-    isempty(xlabel) || println(io, "<text x=\"$(_sv(b.x0 + b.w / 2))\" y=\"$(_sv(b.y0 + b.h + 32))\" font-size=\"11\" text-anchor=\"middle\">$(_sesc(xlabel))</text>")
-    isempty(ylabel) || println(io, "<text x=\"$(_sv(b.x0 - 45))\" y=\"$(_sv(b.y0 + b.h / 2))\" font-size=\"11\" text-anchor=\"middle\" " *
-                               "transform=\"rotate(-90 $(_sv(b.x0 - 45)) $(_sv(b.y0 + b.h / 2)))\">$(_sesc(ylabel))</text>")
-end
-
-function _hline!(io, b, y, xlo, xhi, ylo, yhi, col)
-    (isfinite(y) && ylo <= y <= yhi) || return
-    yy = _ty(b, y, ylo, yhi)
-    println(io, "<line x1=\"$(_sv(b.x0))\" y1=\"$(_sv(yy))\" x2=\"$(_sv(b.x0 + b.w))\" y2=\"$(_sv(yy))\" stroke=\"$col\" stroke-dasharray=\"4 3\"/>")
-end
-
-function _legend!(io, b, items)
-    for (k, (lab, col)) in enumerate(items)
-        y = b.y0 + 12 + 13 * (k - 1)
-        println(io, "<line x1=\"$(_sv(b.x0 + 8))\" y1=\"$(_sv(y))\" x2=\"$(_sv(b.x0 + 24))\" y2=\"$(_sv(y))\" stroke=\"$col\" stroke-width=\"2\"/>")
-        println(io, "<text x=\"$(_sv(b.x0 + 28))\" y=\"$(_sv(y + 3))\" font-size=\"9\">$(_sesc(lab))</text>")
-    end
-end
-
-"Linien (Reihen `(x, y, Farbe, Name)`), optional Band `(x, lo, hi)`, Punkte und waagrechte Linien."
-function _svg_lines!(io, b::_Box, series; ylim = nothing, hline = Tuple{Float64,String}[], dates = false, title = "",
-                     xlabel = "", ylabel = "", points = false, band = nothing, xticks = nothing)
-    allx = reduce(vcat, [Float64.(s[1]) for s in series]; init = Float64[])
-    ally = reduce(vcat, [Float64.(s[2]) for s in series]; init = Float64[])
-    band !== nothing && (ally = vcat(ally, band[2], band[3]))
-    ally = vcat(ally, Float64[h[1] for h in hline])
-    xlo, xhi = _rng(allx, nothing); ylo, yhi = _rng(ally, ylim)
-    _axes!(io, b, xlo, xhi, ylo, yhi; title = title, xlabel = xlabel, ylabel = ylabel, dates = dates, xticks = xticks)
-    if band !== nothing
-        bx, blo, bhi = band
-        pts = vcat([(_tx(b, bx[i], xlo, xhi), _ty(b, blo[i], ylo, yhi)) for i in eachindex(bx) if isfinite(blo[i])],
-                   reverse([(_tx(b, bx[i], xlo, xhi), _ty(b, bhi[i], ylo, yhi)) for i in eachindex(bx) if isfinite(bhi[i])]))
-        isempty(pts) || println(io, "<polygon points=\"$(join(["$(_sv(p[1])),$(_sv(p[2]))" for p in pts], " "))\" fill=\"#2C6E9B\" fill-opacity=\"0.15\"/>")
-    end
-    for h in hline
-        _hline!(io, b, h[1], xlo, xhi, ylo, yhi, h[2])
-    end
-    for (xs, ys, col, _) in series
-        d = IOBuffer(); first = true
-        for (x, y) in zip(xs, ys)
-            if !isfinite(y)
-                first = true; continue
-            end
-            print(d, first ? "M" : "L", _sv(_tx(b, x, xlo, xhi)), " ", _sv(_ty(b, clamp(y, ylo, yhi), ylo, yhi)))
-            first = false
-        end
-        println(io, "<path d=\"$(String(take!(d)))\" fill=\"none\" stroke=\"$col\" stroke-width=\"1.4\"/>")
-        if points
-            for (x, y) in zip(xs, ys)
-                isfinite(y) && println(io, "<circle cx=\"$(_sv(_tx(b, x, xlo, xhi)))\" cy=\"$(_sv(_ty(b, y, ylo, yhi)))\" r=\"2.5\" fill=\"$col\"/>")
-            end
-        end
-    end
-    _legend!(io, b, [(s[4], s[3]) for s in series])
-end
-
-"Balken mit optionalen Intervallen `lo`/`hi` und Punkten `pts`."
-function _svg_bars!(io, b::_Box, labels, vals; lo = nothing, hi = nothing, pts = nothing, ylim = nothing, title = "", ylabel = "")
-    n = length(vals)
-    ylo, yhi = _rng(vals, ylim)
-    _axes!(io, b, 0.0, Float64(n), ylo, yhi; title = title, ylabel = ylabel, xticks = [(k - 0.5, String(labels[k])) for k in 1:n])
-    _hline!(io, b, 0.0, 0.0, n, ylo, yhi, "#666")
-    z = _ty(b, clamp(0.0, ylo, yhi), ylo, yhi)
-    for k in 1:n
-        isfinite(vals[k]) || continue
-        x = _tx(b, k - 0.8, 0.0, n); w = _tx(b, k - 0.2, 0.0, n) - x
-        y = _ty(b, clamp(vals[k], ylo, yhi), ylo, yhi)
-        println(io, "<rect x=\"$(_sv(x))\" y=\"$(_sv(min(y, z)))\" width=\"$(_sv(w))\" height=\"$(_sv(abs(z - y)))\" fill=\"#2C6E9B\"/>")
-        if lo !== nothing && isfinite(lo[k]) && isfinite(hi[k])
-            xm = _tx(b, k - 0.5, 0.0, n)
-            println(io, "<line x1=\"$(_sv(xm))\" y1=\"$(_sv(_ty(b, lo[k], ylo, yhi)))\" x2=\"$(_sv(xm))\" y2=\"$(_sv(_ty(b, hi[k], ylo, yhi)))\" stroke=\"black\"/>")
-        end
-        if pts !== nothing && isfinite(pts[k])
-            println(io, "<circle cx=\"$(_sv(_tx(b, k - 0.5, 0.0, n)))\" cy=\"$(_sv(_ty(b, pts[k], ylo, yhi)))\" r=\"3\" fill=\"#B5562B\"/>")
-        end
-    end
-end
-
-"Streudiagramm mit Farben je Punkt und Rechtecken `(x0, y0, x1, y1, Farbe)`."
-function _svg_scatter!(io, b::_Box, x, y, cols; rects = (), xlabel = "", ylabel = "", title = "")
-    xlo, xhi = _rng(x, nothing); ylo, yhi = _rng(y, nothing)
-    _axes!(io, b, xlo, xhi, ylo, yhi; title = title, xlabel = xlabel, ylabel = ylabel)
-    for i in eachindex(x)
-        (isfinite(x[i]) && isfinite(y[i])) || continue
-        println(io, "<circle cx=\"$(_sv(_tx(b, x[i], xlo, xhi)))\" cy=\"$(_sv(_ty(b, y[i], ylo, yhi)))\" r=\"1.6\" fill=\"$(cols[i])\"/>")
-    end
-    for (a0, b0, a1, b1, col) in rects
-        X0 = _tx(b, a0, xlo, xhi); X1 = _tx(b, a1, xlo, xhi); Y0 = _ty(b, b1, ylo, yhi); Y1 = _ty(b, b0, ylo, yhi)
-        println(io, "<rect x=\"$(_sv(X0))\" y=\"$(_sv(Y0))\" width=\"$(_sv(X1 - X0))\" height=\"$(_sv(Y1 - Y0))\" fill=\"none\" stroke=\"$col\"/>")
-    end
-end
-
+"""
+`plot.SimLevDependence` (SVG). Liefert `(svg, data)`; `data` je Panel: `rolling` (`date`, `rolling`
+und mit DCC `dcc`), `tail` (`q`, `lower`, `upper`, `independence`), `conditional` (`regime`,
+`pearson`, gegebenenfalls `pearson_lo`, `pearson_hi`, und `lambda_lower`), `scatter` (`u`, `v`).
+Ohne rollierende Korrelation bzw. Drittvariable sind `rolling` bzw. `conditional` leer.
+"""
 function _plot_dependence(x; type = ("overview", "rolling", "tail", "conditional", "scatter"), pair = 1, condition = 1,
                           file = nothing, width = 900, height = 650)
     type = _match_arg(type, ("overview", "rolling", "tail", "conditional", "scatter"))
@@ -1667,16 +1509,23 @@ function _plot_dependence(x; type = ("overview", "rolling", "tail", "conditional
     i = pair isa AbstractString ? findfirst(==(pair), pn) : Int(pair)
     ab = split(pn[i], " ~ ")
     X = x["returns"]
+    data = SimLev.RList()
     function p_roll(c, box)
-        x["rolling"] === nothing && return
+        if x["rolling"] === nothing
+            data["rolling"] = SimLev.RFrame("date" => Date[], "rolling" => Float64[])
+            return
+        end
         rl = x["rolling"]
         series = [(_days(rl["date"]), _fvec(rl[pn[i]]), "#2C6E9B", "rollierend")]
+        d = SimLev.RFrame("date" => collect(Date, rl["date"]), "rolling" => copy(_fvec(rl[pn[i]])))
         if x["dcc"] !== nothing
             C = x["dcc"]["correlation"]
             push!(series, (_days(X["date"]), _fvec(C[:, pn[i]]), "#B5562B", "DCC"))
+            d["dcc"] = copy(_fvec(C[:, pn[i]]))
         end
-        _svg_lines!(c, box, series; ylim = (-1.0, 1.0), hline = [(0.0, "grey")], dates = true,
-                    title = "$(pn[i]): rollierend ($(Int(x["window"]))) und DCC", ylabel = "Korrelation")
+        data["rolling"] = d
+        _grid_lines!(c, box, series; ylim = (-1.0, 1.0), hline = [(0.0, "grey")], dates = true,
+                     title = "$(pn[i]): rollierend ($(Int(x["window"]))) und DCC", ylabel = "Korrelation")
     end
     function p_tail(c, box)
         qg = [0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5]
@@ -1690,52 +1539,81 @@ function _plot_dependence(x; type = ("overview", "rolling", "tail", "conditional
             cp = x["copulas"][pn[i]]
             push!(hl, (cp["lambda_lower"][1], "#B5562B")); push!(hl, (cp["lambda_upper"][1], "#2C6E9B"))
         end
-        _svg_lines!(c, box, series; ylim = (0.0, 1.0), hline = hl, points = true, xlabel = "Quantil q (log)",
-                    title = "$(pn[i]): Tail-Abhängigkeit", xticks = [(log10(v), _sprintf("%g", v)) for v in (0.01, 0.05, 0.1, 0.5)])
+        _grid_lines!(c, box, series; ylim = (0.0, 1.0), hline = hl, points = true, xlabel = "Quantil q (log)",
+                     title = "$(pn[i]): Tail-Abhängigkeit", xticks = [(log10(v), _sprintf("%g", v)) for v in (0.01, 0.05, 0.1, 0.5)])
+        data["tail"] = SimLev.RFrame("q" => copy(qg), "lower" => copy(_fvec(td["lower"])), "upper" => copy(_fvec(td["upper"])),
+                                     "independence" => copy(qg))
     end
     function p_cond(c, box)
-        (x["conditional"] === nothing || length(x["conditional"]) == 0) && return
+        if x["conditional"] === nothing || length(x["conditional"]) == 0
+            data["conditional"] = SimLev.RFrame("regime" => String[], "pearson" => Float64[], "lambda_lower" => Float64[])
+            return
+        end
         cn = condition isa AbstractString ? condition : collect(keys(x["conditional"]))[Int(condition)]
         ct = x["conditional"][cn]
         sel = findall(==(pn[i]), ct["pair"])
         lo = haskey(ct, "pearson_lo") ? _fvec(ct["pearson_lo"])[sel] : nothing
         hi = haskey(ct, "pearson_hi") ? _fvec(ct["pearson_hi"])[sel] : nothing
-        _svg_bars!(c, box, collect(ct["regime"])[sel], _fvec(ct["pearson"])[sel]; lo = lo, hi = hi,
-                   pts = _fvec(ct["lambda_lower"])[sel], ylim = (-1.0, 1.0), title = "$(pn[i]) nach '$cn'", ylabel = "Korrelation")
+        _grid_bars!(c, box, collect(ct["regime"])[sel], _fvec(ct["pearson"])[sel]; lo = lo, hi = hi,
+                    pts = _fvec(ct["lambda_lower"])[sel], ylim = (-1.0, 1.0), title = "$(pn[i]) nach '$cn'", ylabel = "Korrelation")
+        d = SimLev.RFrame("regime" => String[string(v) for v in collect(ct["regime"])[sel]], "pearson" => _fvec(ct["pearson"])[sel])
+        lo === nothing || (d["pearson_lo"] = lo)
+        hi === nothing || (d["pearson_hi"] = hi)
+        d["lambda_lower"] = _fvec(ct["lambda_lower"])[sel]
+        data["conditional"] = d
     end
     function p_scatter(c, box)
         u = _pobs(X[ab[1]]); v = _pobs(X[ab[2]]); q = Float64(x["tail_q"])
         col = [(a <= q && b <= q) ? "#B5562B" : (a > 1 - q && b > 1 - q) ? "#2C6E9B" : "#A6A6A6" for (a, b) in zip(u, v)]
-        _svg_scatter!(c, box, u, v, col; rects = [(0.0, 0.0, q, q, "#B5562B"), (1 - q, 1 - q, 1.0, 1.0, "#2C6E9B")],
-                      xlabel = "Rang $(ab[1])", ylabel = "Rang $(ab[2])", title = "Pseudo-Beobachtungen")
+        _grid_scatter!(c, box, u, v, col; rects = [(0.0, 0.0, q, q, "#B5562B"), (1 - q, 1 - q, 1.0, 1.0, "#2C6E9B")],
+                       xlabel = "Rang $(ab[1])", ylabel = "Rang $(ab[2])", title = "Pseudo-Beobachtungen")
+        data["scatter"] = SimLev.RFrame("u" => collect(Float64, u), "v" => collect(Float64, v))
     end
     fns = Dict("rolling" => p_roll, "tail" => p_tail, "conditional" => p_cond, "scatter" => p_scatter)
     ks = type == "overview" ? ["rolling", "tail", "conditional", "scatter"] : [type]
-    _svg_grid(ks, k -> ((c, box) -> fns[k](c, box)); file = file, width = width, height = height)
+    svg = _grid_svg(ks, k -> ((c, box) -> fns[k](c, box)); width = width, height = height).svg
+    return (svg, data)
 end
 
+"""
+`plot.SimLevTailRegression` (SVG). Liefert `(svg, data)`; `data` je Treiber (Schlüssel = Name des
+Treibers): `quantile`, `estimate`, `lower`, `upper`.
+"""
 function _plot_tail_regression(x; file = nothing, width = 900, height = 400)
     drv = x["drivers"]
-    _svg_grid(collect(drv), dv -> function (c, box)
+    data = SimLev.RList()
+    svg = _grid_svg(collect(drv), dv -> function (c, box)
         cf = x["coefficients"]
         sel = findall(==(dv), cf["term"])
         qv = _fvec(cf["quantile"])[sel]; est = _fvec(cf["estimate"])[sel]
         lo = _fvec(cf["lower"])[sel]; hi = _fvec(cf["upper"])[sel]
-        _svg_lines!(c, box, [(qv, est, "#2C6E9B", "Quantilsregression")]; band = all(isnan, lo) ? nothing : (qv, lo, hi),
-                    hline = [(x["ols"][dv], "#B5562B"), (0.0, "grey")], points = true, xlabel = "Quantil",
-                    ylabel = "Koeffizient", title = "$(x["asset"]): Effekt von $dv")
-    end; ncol = length(drv), file = file, width = width, height = height)
+        _grid_lines!(c, box, [(qv, est, "#2C6E9B", "Quantilsregression")]; band = all(isnan, lo) ? nothing : (qv, lo, hi),
+                     hline = [(x["ols"][dv], "#B5562B"), (0.0, "grey")], points = true, xlabel = "Quantil",
+                     ylabel = "Koeffizient", title = "$(x["asset"]): Effekt von $dv")
+        data[String(dv)] = SimLev.RFrame("quantile" => qv, "estimate" => est, "lower" => lo, "upper" => hi)
+    end; ncol = length(drv), width = width, height = height).svg
+    return (svg, data)
 end
 
+"""
+`plot.SimLevCoVaR` (SVG). Liefert `(svg, data)`; `data`: `delta_covar` (`asset`, `date`,
+`delta_covar` in % je Periode wie in `series`; Zeilen je Anlage in Zeichenreihenfolge).
+"""
 function _plot_covar(x; file = nothing, width = 800, height = 450)
     s = x["series"]
     cols = ["#2C6E9B", "#B5562B", "#3E8E5A", "#8A5BA8", "#C49A2C"]
     a = unique(s["asset"])
     series = [(_days(s["date"][s["asset"] .== aj]), _fvec(s["delta_covar"])[s["asset"] .== aj], cols[(j-1)%5+1], aj)
               for (j, aj) in enumerate(a)]
-    _svg_grid(["x"], _ -> ((c, box) -> _svg_lines!(c, box, series; dates = true, ylabel = "Delta-CoVaR (%)",
-                                                    title = _sprintf("Delta-CoVaR für '%s' (q = %g)", x["system"], x["q"])));
-              file = file, width = width, height = height)
+    svg = _grid_svg(["x"], _ -> ((c, box) -> _grid_lines!(c, box, series; dates = true, ylabel = "Delta-CoVaR (%)",
+                                                          title = _sprintf("Delta-CoVaR für '%s' (q = %g)", x["system"], x["q"])));
+                    width = width, height = height).svg
+    sa = String[string(v) for v in s["asset"]]
+    data = SimLev.RList("delta_covar" => SimLev.RFrame(
+        "asset" => vcat([sa[sa .== aj] for aj in a]...),
+        "date" => vcat([collect(Date, s["date"])[sa .== aj] for aj in a]...),
+        "delta_covar" => vcat([_fvec(s["delta_covar"])[sa .== aj] for aj in a]...)))
+    return (svg, data)
 end
 
 function __init__()

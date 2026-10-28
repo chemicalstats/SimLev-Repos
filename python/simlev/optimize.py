@@ -35,6 +35,7 @@ from .tactical import (
     _as_dates, _as_weights_m, _colmeans, _days, _fmt1, _hold_rows_m, _ldsum, _mean_int,
     _period_last, _rowsums, _setdiff, _unique,
 )
+from .svg import _alloc_c, _alloc_ticks, _esc, _jl_max, _jl_min, _jl_str
 
 __all__ = ["portfolio_optimize", "efficient_frontier", "rolling_optimization", "risk_contributions",
            "cpcv_portfolio", "SimLevOptimization", "SimLevFrontier", "SimLevCPCV", "SimLevBoundsPercent",
@@ -680,8 +681,7 @@ class SimLevOptimization(RList):
     def format(self):
         return print_SimLevOptimization(self, _return=True)
 
-    def plot(self, **kwargs):
-        return plot_SimLevOptimization(self, **kwargs)
+    # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
 
 def portfolio_optimize(x, assets=None, method=_METHODS, lower=0, upper=1, cov=_COVS, mu=None, risk_free=0,
@@ -823,20 +823,60 @@ def print_SimLevOptimization(x, _return=False):  # noqa: N802 - R-Name
     return x
 
 
-def plot_SimLevOptimization(x, ax=None, **kwargs):  # noqa: N802 - R-Name
-    """``plot.SimLevOptimization``: Gewichte und Risikoanteile als Balken (matplotlib)."""
-    import matplotlib.pyplot as plt
+def plot_SimLevOptimization(x, width=700, height=420):  # noqa: N802 - R-Name
+    """``plot.SimLevOptimization``: Gewichte und Risikoanteile je Anlage als gruppierte Balken (SVG).
+
+    Liefert ``(svg, data)``; ``data["weights"]``: ``asset``, ``weight``, ``risk_share`` (Anteile).
+    Über ``x.plot()`` bzw. ``simlev.plot(x)`` entsteht daraus ein ``SimLevPlot``.
+    """
     r = x["risk"]
-    if ax is None:
-        _, ax = plt.subplots(figsize=kwargs.pop("figsize", (7, 4)))
-    pos = np.arange(len(r))
-    ax.bar(pos - 0.2, 100 * r["weight"], 0.4, color="#2C6E9B", label="Gewicht")
-    ax.bar(pos + 0.2, 100 * r["risk_share"], 0.4, color="#B5562B", label="Risikoanteil")
-    ax.set_xticks(pos, list(r["asset"]))
-    ax.set_ylabel("%")
-    ax.set_title("Gewichte und Risikoanteile (%s)" % x["method"])
-    ax.legend(frameon=False, fontsize=8)
-    return x
+    a = [str(v) for v in r["asset"]]
+    wr = np.asarray(r["weight"], dtype=np.float64).ravel()
+    sr = np.asarray(r["risk_share"], dtype=np.float64).ravel()
+    w = 100 * wr
+    s_ = 100 * sr
+    vals = [float(v) for v in np.concatenate([w, s_, [0.0]]) if math.isfinite(v)]
+    ymax = max(vals) * 1.08
+    ymin = _jl_min(0.0, min(vals))
+    L, R, T, B = 60.0, 20.0, 40.0, 50.0
+    pw = width - L - R
+    ph = height - T - B
+
+    def py(v):
+        return T + ph * (1 - (v - ymin) / (ymax - ymin))
+    out = ["<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%s\" height=\"%s\" viewBox=\"0 0 %s %s\" "
+           "font-family=\"sans-serif\">" % (_jl_str(width), _jl_str(height), _jl_str(width), _jl_str(height)),
+           "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>",
+           "<text x=\"%s\" y=\"22\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"bold\">%s</text>"
+           % (_jl_str(width / 2), _esc("Gewichte und Risikoanteile (%s)" % x["method"]))]
+    for t in _alloc_ticks(ymin, ymax):
+        out.append("<line x1=\"%s\" x2=\"%s\" y1=\"%s\" y2=\"%s\" stroke=\"#e5e5e5\"/>"
+                   % (_jl_str(L), _jl_str(L + pw), _alloc_c(py(t)), _alloc_c(py(t))))
+        out.append("<text x=\"%s\" y=\"%s\" text-anchor=\"end\" font-size=\"11\">%s</text>"
+                   % (_jl_str(L - 6), _alloc_c(py(t) + 4), _alloc_c(t)))
+    out.append("<text x=\"16\" y=\"%s\" font-size=\"12\" transform=\"rotate(-90 16 %s)\" text-anchor=\"middle\">%%</text>"
+               % (_jl_str(T + ph / 2), _jl_str(T + ph / 2)))
+    K = len(a)
+    gw = pw / max(K, 1)
+    for k in range(K):
+        x0 = L + k * gw + gw * 0.15
+        bw = gw * 0.35
+        for j, (v, col) in enumerate(((float(w[k]), "#2C6E9B"), (float(s_[k]), "#B5562B"))):
+            if not math.isfinite(v):
+                continue
+            y1 = py(_jl_max(v, 0.0))
+            y0 = py(_jl_min(v, 0.0))
+            out.append("<rect x=\"%s\" y=\"%s\" width=\"%s\" height=\"%s\" fill=\"%s\"/>"
+                       % (_alloc_c(x0 + j * bw), _alloc_c(y1), _alloc_c(bw), _alloc_c(y0 - y1), col))
+        out.append("<text x=\"%s\" y=\"%s\" text-anchor=\"middle\" font-size=\"11\">%s</text>"
+                   % (_alloc_c(L + (k + 1 - 0.5) * gw), _jl_str(T + ph + 18), _esc(a[k])))
+    for j, (lab, col) in enumerate((("Gewicht", "#2C6E9B"), ("Risikoanteil", "#B5562B"))):
+        yy = T + 6 + j * 16
+        out.append("<rect x=\"%s\" y=\"%s\" width=\"10\" height=\"10\" fill=\"%s\"/>" % (_jl_str(L + pw - 110), _jl_str(yy), col))
+        out.append("<text x=\"%s\" y=\"%s\" font-size=\"11\">%s</text>" % (_jl_str(L + pw - 95), _jl_str(yy + 9), lab))
+    out.append("</svg>")
+    data = {"weights": pd.DataFrame({"asset": a, "weight": wr, "risk_share": sr})}
+    return "\n".join(out) + "\n", data
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -851,8 +891,7 @@ class SimLevFrontier(RList):
     def format(self):
         return print_SimLevFrontier(self, _return=True)
 
-    def plot(self, **kwargs):
-        return plot_SimLevFrontier(self, **kwargs)
+    # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
 
 def _dup_key(v):
@@ -924,27 +963,73 @@ def print_SimLevFrontier(x, _return=False):  # noqa: N802 - R-Name
     return x
 
 
-def plot_SimLevFrontier(x, ax=None, **kwargs):  # noqa: N802 - R-Name
-    """``plot.SimLevFrontier``: Effizienzgrenze mit Einzelanlagen (matplotlib)."""
-    import matplotlib.pyplot as plt
+def plot_SimLevFrontier(x, width=700, height=480):  # noqa: N802 - R-Name
+    """``plot.SimLevFrontier``: Effizienzgrenze (Linie) mit Einzelanlagen und dem Punkt mit der
+    höchsten Sharpe Ratio (SVG).
+
+    Liefert ``(svg, data)`` mit ``frontier`` (``volatility``, ``expected_return``), ``assets``
+    (``asset``, ``volatility``, ``expected_return``) und ``max_sharpe`` (Anteile p. a.).
+    """
     f = x["frontier"]
     a = x["assets"]
-    if ax is None:
-        _, ax = plt.subplots(figsize=kwargs.pop("figsize", (7, 5)))
-    ax.plot(100 * f["volatility"], 100 * f["expected_return"], lw=2, color="#2C6E9B")
-    ax.scatter(100 * a["volatility"], 100 * a["expected_return"], color="#B5562B")
-    for _, row in a.iterrows():
-        ax.annotate(row["asset"], (100 * row["volatility"], 100 * row["expected_return"]), fontsize=8)
-    sh = f["sharpe"].to_numpy(dtype=np.float64)
-    if not np.isnan(sh).all():
-        k = _which_max(sh)
-        ax.scatter([100 * f["volatility"].iloc[k]], [100 * f["expected_return"].iloc[k]], marker="^", s=60,
-                   color="#3E8E5A")
-    ax.set_xlabel("Volatilität (% p. a.)")
-    ax.set_ylabel("Rendite (% p. a., historisch)")
-    ax.set_title("Effizienzgrenze")
-    ax.grid(color="0.9")
-    return x
+    fvol = np.asarray(f["volatility"], dtype=np.float64).ravel()
+    fret = np.asarray(f["expected_return"], dtype=np.float64).ravel()
+    avol = np.asarray(a["volatility"], dtype=np.float64).ravel()
+    aret = np.asarray(a["expected_return"], dtype=np.float64).ravel()
+    fv, fr, av, ar = 100 * fvol, 100 * fret, 100 * avol, 100 * aret
+    xmax = 1.18 * max(float(v) for v in np.concatenate([fv, av, [1e-9]]) if math.isfinite(v))
+    ys = [float(v) for v in np.concatenate([fr, ar]) if math.isfinite(v)]
+    ymin = min(ys) - 0.3
+    ymax = max(ys) + 0.3
+    L, R, T, B = 60.0, 20.0, 40.0, 50.0
+    pw = width - L - R
+    ph = height - T - B
+
+    def px(v):
+        return L + pw * v / xmax
+
+    def py(v):
+        return T + ph * (1 - (v - ymin) / (ymax - ymin))
+    out = ["<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%s\" height=\"%s\" viewBox=\"0 0 %s %s\" "
+           "font-family=\"sans-serif\">" % (_jl_str(width), _jl_str(height), _jl_str(width), _jl_str(height)),
+           "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>",
+           "<text x=\"%s\" y=\"22\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"bold\">Effizienzgrenze</text>"
+           % _jl_str(width / 2)]
+    for t in _alloc_ticks(0.0, xmax):
+        out.append("<line x1=\"%s\" x2=\"%s\" y1=\"%s\" y2=\"%s\" stroke=\"#e5e5e5\"/>"
+                   % (_alloc_c(px(t)), _alloc_c(px(t)), _jl_str(T), _jl_str(T + ph)))
+        out.append("<text x=\"%s\" y=\"%s\" text-anchor=\"middle\" font-size=\"11\">%s</text>"
+                   % (_alloc_c(px(t)), _jl_str(T + ph + 16), _alloc_c(t)))
+    for t in _alloc_ticks(ymin, ymax):
+        out.append("<line x1=\"%s\" x2=\"%s\" y1=\"%s\" y2=\"%s\" stroke=\"#e5e5e5\"/>"
+                   % (_jl_str(L), _jl_str(L + pw), _alloc_c(py(t)), _alloc_c(py(t))))
+        out.append("<text x=\"%s\" y=\"%s\" text-anchor=\"end\" font-size=\"11\">%s</text>"
+                   % (_jl_str(L - 6), _alloc_c(py(t) + 4), _alloc_c(t)))
+    out.append("<text x=\"%s\" y=\"%s\" text-anchor=\"middle\" font-size=\"12\">Volatilität (%% p. a.)</text>"
+               % (_jl_str(L + pw / 2), _jl_str(height - 10)))
+    out.append("<text x=\"16\" y=\"%s\" font-size=\"12\" transform=\"rotate(-90 16 %s)\" text-anchor=\"middle\">"
+               "Rendite (%% p. a., historisch)</text>" % (_jl_str(T + ph / 2), _jl_str(T + ph / 2)))
+    pts = " ".join("%s,%s" % (_alloc_c(px(v)), _alloc_c(py(r_))) for v, r_ in zip(fv.tolist(), fr.tolist())
+                   if math.isfinite(v) and math.isfinite(r_))
+    out.append("<polyline points=\"%s\" fill=\"none\" stroke=\"#2C6E9B\" stroke-width=\"2\"/>" % pts)
+    for k, nm in enumerate(a["asset"]):
+        out.append("<circle cx=\"%s\" cy=\"%s\" r=\"4\" fill=\"#B5562B\"/>"
+                   % (_alloc_c(px(av[k])), _alloc_c(py(ar[k]))))
+        out.append("<text x=\"%s\" y=\"%s\" text-anchor=\"middle\" font-size=\"10\">%s</text>"
+                   % (_alloc_c(px(av[k])), _alloc_c(py(ar[k]) - 8), _esc(nm)))
+    sh = np.asarray(f["sharpe"], dtype=np.float64).ravel()
+    k = None if np.isnan(sh).all() else _which_max(sh)
+    if k is not None:
+        cx, cy = px(fv[k]), py(fr[k])
+        out.append("<polygon points=\"%s,%s %s,%s %s,%s\" fill=\"#3E8E5A\"/>"
+                   % (_alloc_c(cx), _alloc_c(cy - 6), _alloc_c(cx - 5), _alloc_c(cy + 4), _alloc_c(cx + 5),
+                      _alloc_c(cy + 4)))
+    out.append("</svg>")
+    ks = [] if k is None else [k]
+    data = {"frontier": pd.DataFrame({"volatility": fvol, "expected_return": fret}),
+            "assets": pd.DataFrame({"asset": [str(v) for v in a["asset"]], "volatility": avol, "expected_return": aret}),
+            "max_sharpe": pd.DataFrame({"volatility": fvol[ks], "expected_return": fret[ks]})}
+    return "\n".join(out) + "\n", data
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1290,6 +1375,12 @@ def print_SimLevCPCV(x, _return=False):  # noqa: N802 - R-Name
     print(txt)
     return x
 
+
+# plot-Methoden (SVG, ``SimLevPlot``) wie Julias ``_plot_method(plot_SimLevOptimization, …)``
+from .svg import _plot_method  # noqa: E402
+
+SimLevOptimization.plot = _plot_method(plot_SimLevOptimization, "SimLevOptimization")
+SimLevFrontier.plot = _plot_method(plot_SimLevFrontier, "SimLevFrontier")
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
 from ._r.base import quiet_fp  # noqa: E402

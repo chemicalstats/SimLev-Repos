@@ -25,6 +25,7 @@
 module Optimize
 
 import ..SimLev
+using ..SimLev: _alloc_c, _alloc_ticks, _esc
 using ..SimLev: RList, RFrame, RVector, NamedMat, NA, isna_strict, F80
 using Dates
 
@@ -1238,24 +1239,14 @@ print_SimLevCPCV(x) = print_SimLevCPCV(stdout, x)
 # Grafiken (SVG)
 # ═══════════════════════════════════════════════════════════════════════════
 
-_xml(s) = replace(string(s), "&" => "&amp;", "<" => "&lt;", ">" => "&gt;", "\"" => "&quot;")
-_c(v) = string(round(v; digits = 2))
-
-"Achsenteilung wie `pretty()` (vereinfacht)."
-function _ticks(lo, hi; n = 5)
-    (isfinite(lo) && isfinite(hi)) || return Float64[]
-    hi <= lo && (hi = lo + 1)
-    raw = (hi - lo) / n
-    p = 10.0^floor(log10(raw))
-    step = minimum(s for s in (1, 2, 5, 10) .* p if s >= raw)
-    collect((ceil(lo / step) * step):step:(hi+1e-12))
-end
+# Bausteine `_alloc_*` (Stil Allokationsgrafiken) in svg.jl.
 
 """
     plot_SimLevOptimization(x; file = nothing, width = 700, height = 420)
 
 `plot.SimLevOptimization`: Gewichte und Risikoanteile je Anlage als gruppierte
-Balken (SVG, `SimLevDashboard`). Mit `file` wird das SVG gespeichert.
+Balken (SVG). Liefert `(svg, data)`; `data["weights"]`: `asset`, `weight`,
+`risk_share` (Anteile). Über `r_plot` entsteht daraus ein `SimLevPlot`.
 """
 function plot_SimLevOptimization(x; file = nothing, width = 700, height = 420)
     r = x["risk"]
@@ -1269,10 +1260,10 @@ function plot_SimLevOptimization(x; file = nothing, width = 700, height = 420)
     io = IOBuffer()
     println(io, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$width\" height=\"$height\" viewBox=\"0 0 $width $height\" font-family=\"sans-serif\">")
     println(io, "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>")
-    println(io, "<text x=\"$(width/2)\" y=\"22\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"bold\">$(_xml("Gewichte und Risikoanteile ($(x["method"]))"))</text>")
-    for t in _ticks(ymin, ymax)
-        println(io, "<line x1=\"$L\" x2=\"$(L+pw)\" y1=\"$(_c(py(t)))\" y2=\"$(_c(py(t)))\" stroke=\"#e5e5e5\"/>")
-        println(io, "<text x=\"$(L-6)\" y=\"$(_c(py(t)+4))\" text-anchor=\"end\" font-size=\"11\">$(_c(t))</text>")
+    println(io, "<text x=\"$(width/2)\" y=\"22\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"bold\">$(_esc("Gewichte und Risikoanteile ($(x["method"]))"))</text>")
+    for t in _alloc_ticks(ymin, ymax)
+        println(io, "<line x1=\"$L\" x2=\"$(L+pw)\" y1=\"$(_alloc_c(py(t)))\" y2=\"$(_alloc_c(py(t)))\" stroke=\"#e5e5e5\"/>")
+        println(io, "<text x=\"$(L-6)\" y=\"$(_alloc_c(py(t)+4))\" text-anchor=\"end\" font-size=\"11\">$(_alloc_c(t))</text>")
     end
     println(io, "<text x=\"16\" y=\"$(T+ph/2)\" font-size=\"12\" transform=\"rotate(-90 16 $(T+ph/2))\" text-anchor=\"middle\">%</text>")
     K = length(a)
@@ -1283,9 +1274,9 @@ function plot_SimLevOptimization(x; file = nothing, width = 700, height = 420)
         for (j, (v, col)) in enumerate(((w[k], "#2C6E9B"), (s[k], "#B5562B")))
             isfinite(v) || continue
             y1 = py(max(v, 0.0)); y0 = py(min(v, 0.0))
-            println(io, "<rect x=\"$(_c(x0 + (j-1)*bw))\" y=\"$(_c(y1))\" width=\"$(_c(bw))\" height=\"$(_c(y0-y1))\" fill=\"$col\"/>")
+            println(io, "<rect x=\"$(_alloc_c(x0 + (j-1)*bw))\" y=\"$(_alloc_c(y1))\" width=\"$(_alloc_c(bw))\" height=\"$(_alloc_c(y0-y1))\" fill=\"$col\"/>")
         end
-        println(io, "<text x=\"$(_c(L + (k-0.5)*gw))\" y=\"$(T+ph+18)\" text-anchor=\"middle\" font-size=\"11\">$(_xml(a[k]))</text>")
+        println(io, "<text x=\"$(_alloc_c(L + (k-0.5)*gw))\" y=\"$(T+ph+18)\" text-anchor=\"middle\" font-size=\"11\">$(_esc(a[k]))</text>")
     end
     for (j, (lab, col)) in enumerate((("Gewicht", "#2C6E9B"), ("Risikoanteil", "#B5562B")))
         yy = T + 6 + (j - 1) * 16
@@ -1295,14 +1286,19 @@ function plot_SimLevOptimization(x; file = nothing, width = 700, height = 420)
     println(io, "</svg>")
     svg = String(take!(io))
     file === nothing || write(String(file), svg)
-    SimLev.SimLevDashboard(svg)
+    # dargestellte Werte (Anteile wie im Ergebnis, nicht ×100)
+    data = SimLev.RList("weights" => SimLev.RFrame("asset" => String[string(v) for v in a],
+                                                   "weight" => _asvec(r["weight"]), "risk_share" => _asvec(r["risk_share"])))
+    return (svg, data)
 end
 
 """
     plot_SimLevFrontier(x; file = nothing, width = 700, height = 480)
 
 `plot.SimLevFrontier`: Effizienzgrenze (Linie) mit Einzelanlagen und dem
-Punkt mit der höchsten Sharpe Ratio (SVG, `SimLevDashboard`).
+Punkt mit der höchsten Sharpe Ratio (SVG). Liefert `(svg, data)` mit
+`frontier`, `assets` (`asset`, `volatility`, `expected_return`, Anteile p. a.)
+und `max_sharpe`; über `r_plot` entsteht daraus ein `SimLevPlot`.
 """
 function plot_SimLevFrontier(x; file = nothing, width = 700, height = 480)
     f = x["frontier"]; a = x["assets"]
@@ -1319,31 +1315,39 @@ function plot_SimLevFrontier(x; file = nothing, width = 700, height = 480)
     println(io, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$width\" height=\"$height\" viewBox=\"0 0 $width $height\" font-family=\"sans-serif\">")
     println(io, "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>")
     println(io, "<text x=\"$(width/2)\" y=\"22\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"bold\">Effizienzgrenze</text>")
-    for t in _ticks(0.0, xmax)
-        println(io, "<line x1=\"$(_c(px(t)))\" x2=\"$(_c(px(t)))\" y1=\"$T\" y2=\"$(T+ph)\" stroke=\"#e5e5e5\"/>")
-        println(io, "<text x=\"$(_c(px(t)))\" y=\"$(T+ph+16)\" text-anchor=\"middle\" font-size=\"11\">$(_c(t))</text>")
+    for t in _alloc_ticks(0.0, xmax)
+        println(io, "<line x1=\"$(_alloc_c(px(t)))\" x2=\"$(_alloc_c(px(t)))\" y1=\"$T\" y2=\"$(T+ph)\" stroke=\"#e5e5e5\"/>")
+        println(io, "<text x=\"$(_alloc_c(px(t)))\" y=\"$(T+ph+16)\" text-anchor=\"middle\" font-size=\"11\">$(_alloc_c(t))</text>")
     end
-    for t in _ticks(ymin, ymax)
-        println(io, "<line x1=\"$L\" x2=\"$(L+pw)\" y1=\"$(_c(py(t)))\" y2=\"$(_c(py(t)))\" stroke=\"#e5e5e5\"/>")
-        println(io, "<text x=\"$(L-6)\" y=\"$(_c(py(t)+4))\" text-anchor=\"end\" font-size=\"11\">$(_c(t))</text>")
+    for t in _alloc_ticks(ymin, ymax)
+        println(io, "<line x1=\"$L\" x2=\"$(L+pw)\" y1=\"$(_alloc_c(py(t)))\" y2=\"$(_alloc_c(py(t)))\" stroke=\"#e5e5e5\"/>")
+        println(io, "<text x=\"$(L-6)\" y=\"$(_alloc_c(py(t)+4))\" text-anchor=\"end\" font-size=\"11\">$(_alloc_c(t))</text>")
     end
     println(io, "<text x=\"$(L+pw/2)\" y=\"$(height-10)\" text-anchor=\"middle\" font-size=\"12\">Volatilität (% p. a.)</text>")
     println(io, "<text x=\"16\" y=\"$(T+ph/2)\" font-size=\"12\" transform=\"rotate(-90 16 $(T+ph/2))\" text-anchor=\"middle\">Rendite (% p. a., historisch)</text>")
-    pts = join(("$(_c(px(v))),$(_c(py(r)))" for (v, r) in zip(fv, fr) if isfinite(v) && isfinite(r)), " ")
+    pts = join(("$(_alloc_c(px(v))),$(_alloc_c(py(r)))" for (v, r) in zip(fv, fr) if isfinite(v) && isfinite(r)), " ")
     println(io, "<polyline points=\"$pts\" fill=\"none\" stroke=\"#2C6E9B\" stroke-width=\"2\"/>")
     for (k, nm) in enumerate(a["asset"])
-        println(io, "<circle cx=\"$(_c(px(av[k])))\" cy=\"$(_c(py(ar[k])))\" r=\"4\" fill=\"#B5562B\"/>")
-        println(io, "<text x=\"$(_c(px(av[k])))\" y=\"$(_c(py(ar[k]) - 8))\" text-anchor=\"middle\" font-size=\"10\">$(_xml(nm))</text>")
+        println(io, "<circle cx=\"$(_alloc_c(px(av[k])))\" cy=\"$(_alloc_c(py(ar[k])))\" r=\"4\" fill=\"#B5562B\"/>")
+        println(io, "<text x=\"$(_alloc_c(px(av[k])))\" y=\"$(_alloc_c(py(ar[k]) - 8))\" text-anchor=\"middle\" font-size=\"10\">$(_esc(nm))</text>")
     end
     k = _which_max(_asvec(f["sharpe"]))
     if k > 0
         cx = px(fv[k]); cy = py(fr[k])
-        println(io, "<polygon points=\"$(_c(cx)),$(_c(cy-6)) $(_c(cx-5)),$(_c(cy+4)) $(_c(cx+5)),$(_c(cy+4))\" fill=\"#3E8E5A\"/>")
+        println(io, "<polygon points=\"$(_alloc_c(cx)),$(_alloc_c(cy-6)) $(_alloc_c(cx-5)),$(_alloc_c(cy+4)) $(_alloc_c(cx+5)),$(_alloc_c(cy+4))\" fill=\"#3E8E5A\"/>")
     end
     println(io, "</svg>")
     svg = String(take!(io))
     file === nothing || write(String(file), svg)
-    SimLev.SimLevDashboard(svg)
+    # dargestellte Werte (Anteile wie im Ergebnis, nicht ×100); max_sharpe: Punkt mit der höchsten Sharpe Ratio
+    fvol = _asvec(f["volatility"]); fret = _asvec(f["expected_return"])
+    data = SimLev.RList("frontier" => SimLev.RFrame("volatility" => fvol, "expected_return" => fret),
+                        "assets" => SimLev.RFrame("asset" => String[string(v) for v in a["asset"]],
+                                                  "volatility" => _asvec(a["volatility"]),
+                                                  "expected_return" => _asvec(a["expected_return"])),
+                        "max_sharpe" => SimLev.RFrame("volatility" => k > 0 ? [fvol[k]] : Float64[],
+                                                      "expected_return" => k > 0 ? [fret[k]] : Float64[]))
+    return (svg, data)
 end
 
 function __init__()

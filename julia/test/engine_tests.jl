@@ -254,12 +254,53 @@ end
     d = (date = days("2022-01-03", "2023-02-06"), A = collect(range(100, 130; length = n)), B = collect(range(100, 110; length = n)))
     r = simulation(d, create_strategy(A = asset_config("etf", "bnh", 0.6, 0, 30), B = asset_config("etf", "bnh", 0.4, 0, 0)))
     dsh = plot_dashboard(r)
-    @test dsh isa SimLevDashboard && occursin("Monatsrenditen (%)", dsh.svg) && occursin("Kennzahlen", dsh.svg)
+    @test dsh isa SimLevPlot && occursin("Monatsrenditen (%)", dsh.svg) && occursin("Kennzahlen", dsh.svg)
     @test occursin("Strategievergleich", plot_dashboard(r; compare = r).svg)
     @test !occursin("Rollierende", plot_dashboard(r; style = "compact").svg)
     @test occursin("unbekannte(s) Panel(s) \"xy\"", errmsg(() -> plot_dashboard(r; style = "custom", panels = ["xy"])))
     @test occursin("unbekannte Farbe(n) 'foo'", errmsg(() -> plot_dashboard(r; colors = (foo = "red",))))
-    @test r_plot(r; style = "compact") isa SimLevDashboard
+    @test r_plot(r; style = "compact") isa SimLevPlot
+    # data: Schlüssel, Spalten und Werte wie die Datenfunktionen (Python liefert dieselben)
+    cols = Dict("performance" => ["date", "strategy"], "drawdown" => ["date", "drawdown"], "distribution" => ["return"],
+                "rolling" => ["date", "return_pct"], "monthly" => ["year", "month", "return_pct"],
+                "stats" => ["section", "label", "value"], "correlation" => ["date", "correlation"],
+                "comparison" => ["label", "value", "compare", "diff"])
+    @test collect(keys(dsh.data)) == ["performance", "drawdown", "distribution", "rolling", "monthly", "stats"]
+    @test dsh.kind == "SimLevResult" && dsh.source === r
+    @test sprint(show, dsh) == "SimLevPlot(SimLevResult, SVG, $(sizeof(dsh.svg)) Bytes, Panels: performance, drawdown, distribution, rolling, monthly, stats)"
+    @test sprint(show, MIME"image/svg+xml"(), dsh) == dsh.svg && startswith(dsh.svg, "<svg")
+    pc = plot_dashboard(r; compare = r)
+    @test collect(keys(pc.data)) == ["performance", "drawdown", "distribution", "rolling", "monthly", "stats", "correlation", "comparison"]
+    for (k, df) in pc.data
+        @test df isa RFrame && names(df) == (k == "performance" ? [cols[k]; "compare"] : cols[k])
+    end
+    bits(v) = reinterpret(UInt64, collect(Float64, v))
+    D = pc.data
+    @test D["performance"]["date"] == r.dates && bits(D["performance"]["strategy"]) == bits(r.worth)
+    @test bits(D["drawdown"]["drawdown"]) == bits(r.drawdowns)
+    @test bits(D["distribution"]["return"]) == bits(SL._dashboard_returns(r).returns)
+    rr = SL._rolling_returns(r)
+    @test bits(D["rolling"]["return_pct"]) == bits(rr.values) && D["rolling"]["date"] == r.dates[rr.idx]
+    yrs, mat = SL._monthly_matrix(r)
+    cells = [(i, j) for i in 1:length(yrs), j in 1:12 if !isnan(mat[i, j])]
+    sort!(cells)
+    @test D["monthly"]["year"] == [parse(Int, yrs[i]) for (i, _) in cells] && D["monthly"]["month"] == [j for (_, j) in cells]
+    @test bits(D["monthly"]["return_pct"]) == bits([mat[i, j] for (i, j) in cells])
+    secs = SL._stats_sections(r, r)
+    @test D["stats"]["section"] == [s for (s, ls) in secs for _ in ls]
+    @test [a * ": " * b for (a, b) in zip(D["stats"]["label"], D["stats"]["value"])] == [v for (_, ls) in secs for v in ls]
+    cr = SL._correlation(r, r)
+    @test D["correlation"]["date"] == cr.dates && bits(D["correlation"]["correlation"]) == bits(cr.rho)
+    rows = SL._comparison_rows(r, r)
+    @test D["comparison"]["label"] == [z.metric for z in rows] && D["comparison"]["diff"] == [z.diff for z in rows]
+    @test D["comparison"]["value"] == [z.v1 for z in rows] && D["comparison"]["compare"] == [z.v2 for z in rows]
+    rs = simulation((date = d.date[1:3], A = d.A[1:3], B = d.B[1:3]), create_strategy(A = asset_config("etf", "bnh", 1, 0, 0)); io = devnull)
+    ps = plot_dashboard(rs)
+    @test occursin("Zu wenige Daten", ps.svg) && names(ps.data["distribution"]) == ["return"] && nrow(ps.data["distribution"]) == 0
+    pn = with_logger(NullLogger()) do
+        plot_dashboard(r; style = "custom", panels = "comparison")
+    end
+    @test isempty(pn.data) && occursin("Keine zeichenbaren Panels:", pn.svg)
     secs = SL._stats_sections(r)
     @test secs[1].first == "Rendite" && startswith(secs[1].second[1], "CAGR: +")
     g = tempname() * ".svg"

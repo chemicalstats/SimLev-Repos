@@ -1,5 +1,13 @@
 # simlev (Python) – Änderungen je Version
 
+## simlev (Python) 0.6.0
+
+Minor-Update (Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
+
+- Grafik: Python zeichnet wie Julia eigenes SVG statt matplotlib; Dashboard, Analyse-, Abhängigkeits- und Überanpassungsgrafiken in einem Grafikmodul je Sprache.
+- Datenobjekt: Grafiken liefern SimLevPlot mit svg, data, source und kind, damit eigene Darstellungen aus den Daten möglich sind.
+- Optionen der Grafikfunktionen nur noch als Schlüsselwort.
+
 ## simlev (Python) 0.5.1
 
 Patch-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der während der Entwicklung bis 1.0.0 fortgeschrieben wurde.
@@ -105,8 +113,8 @@ Python-Modul:
 
 Die C++-Kerne des R-Pakets stehen in `_bootstrap_core.py`,
 `_withdrawal_core.py`, `_dependence_core.py`, `_optimize_core.py` und
-`_signals_core.py`. Die `plot()`-Methoden der Ergebnisobjekte zeichnen mit
-matplotlib.
+`_signals_core.py`. Die `plot()`-Methoden der Ergebnisobjekte zeichnen wie
+die Julia-Fassung als SVG (siehe unten, „Grafiken ohne matplotlib“).
 
 ### R-Kompatibilitätsschicht `simlev._r` (neu)
 
@@ -144,6 +152,8 @@ Innerer Aufbau (ohne Änderung der öffentlichen Namen und Ergebnisse):
   statt dass die Funktionen selbst den Aufrufer-Frame lesen.
 * Die Engine-Notiz `PORTING_ENGINE.md` ist in `DEVELOPING.md`
   aufgegangen.
+* Alle SVG-Zeichenbausteine stehen im Grafikmodul `simlev/svg.py`
+  (Abschnitte und Namen wie `julia/src/svg.jl`, ein Präfix je Grafikstil).
 
 ### Änderungen der Schnittstelle
 
@@ -166,6 +176,25 @@ Innerer Aufbau (ohne Änderung der öffentlichen Namen und Ergebnisse):
 * scipy entfällt: Der Ersatzweg für Eigenvektoren ohne System-LAPACK
   rechnet jetzt immer mit numpy (wie die Julia-Fassung mit LinearAlgebra,
   mit Warnung, nicht bitgleich); das Extra `scipy` entfällt.
+* Grafiken ohne matplotlib: Dashboard und alle `plot()`-Methoden zeichnen
+  wie die Julia-Fassung ohne Zusatzpaket als SVG (`simlev/svg.py`) und
+  liefern ein `simlev.SimLevPlot` statt einer matplotlib-Figure. Es hat
+  die Felder `svg`, `data` (die dargestellten Werte je Panel als
+  pandas-Tabellen, unskaliert und nicht ausgedünnt; für eigene Grafiken),
+  `source` (das Eingabeobjekt) und `kind` (dessen Klasse), wird in
+  Jupyter direkt angezeigt und mit `save("….svg")` gespeichert. Die
+  Argumente `ax`, `fig`, `figsize` und `show` entfallen; die Größe
+  steuern `width` und `height` in Pixeln wie in Julia, geschrieben wird
+  nur mit `file="….svg"` (andere Endungen ergeben einen Fehler).
+  Optionen gibt es wie in Julia nur als Schlüsselwort: Positionsargumente
+  nach dem Objekt und unbekannte Schlüsselwörter ergeben eine Warnung und
+  werden ignoriert. `export_dashboard()`
+  schreibt nur noch SVG (Standard `"dashboard.svg"`). Die Extras `plot`
+  und `all` entfallen, `test` braucht nur noch pytest.
+  Die Grafik einer Bootstrap-Studie mit weniger als zwei Werten bricht
+  jetzt wie R und Julia mit „need at least 2 points to select a bandwidth
+  automatically“ ab (früher numpy-Ersatz). Die rollierende Korrelation des
+  Dashboards setzt für ungültige Fenster NA statt NaN (wie R).
 * Benötigt wird Python ab 3.10 (`requires-python = ">=3.10"`, vorher 3.9).
 * Das Argument `currency` des Dashboards entfällt; die Achse ist wie in R
   in EUR beschriftet.

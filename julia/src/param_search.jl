@@ -313,13 +313,15 @@ _par_lapply(X, f, cores) = SL.RParallel.par_lapply(X, f, cores)
     param_search(data, builder, space; strategy = nothing, method = "grid", n = 50,
                  constraint = nothing, sim_args = nothing, burn_in = 0,
                  metrics = nothing, objective = "sharpe", maximize = true,
-                 keep_returns = true, seed = nothing, cores = 1)
+                 keep_returns = "day", seed = nothing, cores = 1)
     param_search(data; builder = nothing, space, strategy, ...)
 
 `builder` und `space` gehen positionell oder als Schlüsselwort. `builder`
 hat wie in R den Standardwert `nothing`; `space` ist wie in R Pflicht (ohne
 `space` die Meldung von R `argument "space" is missing, with no default`).
 `sim_args = nothing` steht für R `list()`, `metrics = nothing` für `bootstrap_study_metrics`.
+`keep_returns`: `"day"` (Standard; `nothing` wie R `c("day", "none")`) speichert die täglichen Renditen, `"none"`
+keine; `true`/`false` (bis 6.5b) ergeben einen Fehler.
 
 Wertet eine Strategie für jeden Punkt eines Parameterraums mit `simulation()`
 aus. `builder(p)` erhält eine benannte Liste `p` (`RList`) und liefert eine
@@ -331,9 +333,13 @@ Klasse `SimLevParamSearch` (`results`, `returns`, `dates`, …).
 function param_search(data, builder_pos = nothing, space_pos = _MISSING; builder = builder_pos, space = space_pos,
                       strategy = nothing, method = nothing, n = 50, constraint = nothing,
                       sim_args = nothing, burn_in = 0, metrics = nothing, objective = "sharpe", maximize = true,
-                      keep_returns::Bool = true, seed = nothing, cores = 1)
+                      keep_returns = nothing, seed = nothing, cores = 1)
     data = SimLev.as_rframe(data)
     method = OF._match_arg(method, ("grid", "random", "lhs"))
+    # 6.5b (C.1): Text statt Logisch, ohne Alias (E1); logisch vor dem Text prüfen
+    keep_returns isa Bool && error("param_search: keep_returns ist \"day\" oder \"none\" (früher TRUE/FALSE).")
+    keep_returns = OF._match_arg(keep_returns, ("day", "none"))
+    keep_ret = keep_returns == "day"
     sim_args = sim_args === nothing ? SL.RList() : OF._as_rlist(sim_args)
     metrics === nothing && (metrics = SL.Bootstrap.bootstrap_study_metrics)
     space === _MISSING && error("argument \"space\" is missing, with no default")
@@ -364,7 +370,7 @@ function param_search(data, builder_pos = nothing, space_pos = _MISSING; builder
         end
         m === nothing && return (m = nothing, err = "metrics() fehlgeschlagen", date = nothing, ret = nothing)
         mp = OF._metric_pairs(m)
-        if keep_returns
+        if keep_ret
             ix = SL.Withdrawal.result_index(res)
             v = Float64[Float64(e) for e in ix["value"]]
             return (m = mp, err = missing, date = collect(Date, ix["date"]), ret = v[2:end] ./ v[1:end-1] .- 1)
@@ -390,7 +396,7 @@ function param_search(data, builder_pos = nothing, space_pos = _MISSING; builder
     for (j, k) in enumerate(mnames); tab[k] = M[:, j]; end
     tab["error"] = Union{Missing,String}[o.err for o in out]
     R = nothing; dates = nothing
-    if keep_returns
+    if keep_ret
         ref = okm[1].date
         dates = ref[2:end]
         Rm = fill(NA, length(dates), np)

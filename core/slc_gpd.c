@@ -8,8 +8,9 @@
  *             daher für jedes xi != 0 ohne Auslöschung; für |xi| < 1e-8 und |xi y| < 1e-4 wird
  *             log1p(t)/xi über die Reihe y (1 - t/2 + t^2/3 - t^3/4) mit t = xi y gerechnet
  *             (Grenzfall exponentiell bei xi = 0, Fehler < t^4/5).
- *             ML in theta = (log sigma, xi) mit dem projizierten BFGS (slc_opt.c) und numerischem
- *             Gradienten, xi in [-0.999, 10], log sigma frei. Für xi < -1 ist die Likelihood
+ *             ML in theta = (log sigma, xi) mit dem projizierten BFGS (slc_opt.c), xi in
+ *             [-0.999, 10], log sigma frei. N5: analytischer Gradient (geschlossen, gpd_fg; f und g
+ *             in einem Durchlauf, Grenzfall xi -> 0 über eine Reihe) statt zentraler Differenzen. Für xi < -1 ist die Likelihood
  *             unbeschränkt; endet die Suche an der Grenze -0.999 (oder 10), ist das SL_ECONV und
  *             der Aufrufer fällt zurück (.fit_tail: Momente).
  *             Startwerte in dieser Reihenfolge (der erste mit endlicher NLL im Kasten):
@@ -131,12 +132,68 @@ int sl_gpd_pwm(sl_ctx *cx, int n, const double *x, double *scale, double *shape)
     return SL_OK;
 }
 
-typedef struct { int n; const double *x; } gpd_data;
+/* N5: NLL und analytischer Gradient in theta = (log sigma, xi) in einem Durchlauf. Der Wert ist
+ * Operation für Operation der von gpd_nll_raw (bitgleich). Mit u_i = y_i / (1 + t_i):
+ *   d NLL / d log sigma = n - (1 + xi) sum u_i,
+ *   d NLL / d xi        = sum [u_i + y_i^2 H(t_i)],  H(t) = (t / (1 + t) - log1p(t)) / t^2,
+ * aus d/dxi [(1 + 1/xi) log1p(t)] = (1 + 1/xi) y / (1 + t) - log1p(t) / xi^2
+ * = u + (xi u - log1p(t)) / xi^2 mit xi u = t / (1 + t). Für |t| < 1e-3 (auch xi = 0)
+ * wird H über die Reihe H(t) = sum_j (-1)^(j+1) (j+1)/(j+2) t^j = -1/2 + 2t/3 - 3t^2/4 + 4t^3/5 - 5t^4/6
+ * gerechnet (Abbruchfehler < t^5, relativ < 2e-15), sonst direkt (Auslöschung relativ <= 2 eps / |t|
+ * <= 5e-13). Ausserhalb des Trägers (1 + t <= 0) oder bei nicht endlichem Wert: f = +Inf, g = NaN. */
+static double gpd_fg(int n, const double *x, const double *th, double *g)
+{
+    const double sigma = exp(th[0]), xi = th[1];
+    slc_acc a, su, sh;
+    int i;
+    double tot;
+    if (!(sigma > 0.0) || !isfinite(sigma) || !isfinite(xi)) goto bad;
+    slc_acc_init(&a, 0.0); slc_acc_init(&su, 0.0); slc_acc_init(&sh, 0.0);
+    for (i = 0; i < n; i++) {
+        const double y = x[i] / sigma, t = xi * y;
+        double l1, q, u, hh;
+        if (!(1.0 + t > 0.0)) goto bad;
+        l1 = log1p(t);
+        if (xi == 0.0 || (fabs(xi) < 1e-8 && fabs(t) < 1e-4))
+            q = y * (1.0 - t * (1.0 / 2.0 - t * (1.0 / 3.0 - t / 4.0)));
+        else
+            q = l1 / xi;
+        slc_acc_add(&a, l1 + q);
+        u = y / (1.0 + t);
+        if (fabs(t) < 1e-3)
+            hh = y * y * (-1.0 / 2.0 + t * (2.0 / 3.0 - t * (3.0 / 4.0 - t * (4.0 / 5.0 - t * (5.0 / 6.0)))));
+        else
+            hh = (xi * u - l1) / (xi * xi);
+        slc_acc_add(&su, u);
+        slc_acc_add(&sh, u + hh);
+    }
+    tot = (double) n * log(sigma) + slc_acc_val(&a);
+    if (!isfinite(tot)) goto bad;
+    g[0] = (double) n - (1.0 + xi) * slc_acc_val(&su);
+    g[1] = slc_acc_val(&sh);
+    return tot;
+bad:
+    g[0] = g[1] = NAN;
+    return INFINITY;
+}
 
+typedef struct { int n; const double *x; double xc[2], gc[2]; int have; } gpd_data;
+
+/* f und g aus einem Durchlauf; der Gradient zum zuletzt bewerteten Punkt kommt aus dem Speicher */
 static double gpd_obj(const double *th, void *data)
 {
-    const gpd_data *d = (const gpd_data *) data;
-    return gpd_nll_raw(d->n, d->x, exp(th[0]), th[1]);
+    gpd_data *d = (gpd_data *) data;
+    double f = gpd_fg(d->n, d->x, th, d->gc);
+    d->xc[0] = th[0]; d->xc[1] = th[1];
+    d->have = 1;
+    return f;
+}
+
+static void gpd_gr(const double *th, double *g, void *data)
+{
+    gpd_data *d = (gpd_data *) data;
+    if (d->have && memcmp(d->xc, th, 2 * sizeof(double)) == 0) { g[0] = d->gc[0]; g[1] = d->gc[1]; }
+    else (void) gpd_fg(d->n, d->x, th, g);
 }
 
 static int start_ok(int n, const double *x, double sigma, double xi)
@@ -183,13 +240,13 @@ int sl_gpd_fit(sl_ctx *cx, int n, const double *x, const sl_opt_ctrl *ctrl, doub
         if (start_ok(n, x, sg, xs)) found = 1;
     }
     if (!found) return sl_fail(cx, SL_ENONFINITE, "GPD: Log-Likelihood an allen Startwerten nicht endlich");
-    d.n = n; d.x = x;
+    d.n = n; d.x = x; d.have = 0;
     th[0] = log(sg); th[1] = xs;
     lo[0] = -INFINITY; lo[1] = GPD_XI_LO;
     hi[0] = INFINITY; hi[1] = GPD_XI_HI;
     if (ctrl) c = *ctrl;
     else { sl_opt_ctrl_default(&c, SL_OPT_PBFGS); c.maxit = 500; c.reltol = 1e-12; }
-    st = sl_minimize(cx, SL_OPT_PBFGS, 2, th, lo, hi, &c, gpd_obj, NULL, &d, &fmin, code, &iter, &nfev);
+    st = sl_minimize(cx, SL_OPT_PBFGS, 2, th, lo, hi, &c, gpd_obj, gpd_gr, &d, &fmin, code, &iter, &nfev);
     if (st != SL_OK) return st;
     if (!isfinite(fmin)) return sl_fail(cx, SL_ECONV, "GPD: Log-Likelihood nicht endlich (Code %d)", *code);
     *scale = exp(th[0]);

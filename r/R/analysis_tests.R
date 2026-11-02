@@ -409,7 +409,7 @@ sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c(
 #' @param x Renditequelle:
 #'   \itemize{
 #'     \item \code{SimLevParamSearch} aus [param_search()] mit gespeicherten
-#'       Renditen (\code{keep_returns = TRUE}); verwendet werden
+#'       Renditen (\code{keep_returns = "day"}); verwendet werden
 #'       \code{x$returns} (taegliche Renditen je Punkt, Spalten \code{p<id>})
 #'       und \code{x$dates};
 #'     \item numerische Matrix oder data.frame nur aus numerischen Spalten

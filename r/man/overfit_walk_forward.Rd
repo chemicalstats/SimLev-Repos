@@ -23,7 +23,7 @@ overfit_walk_forward(
 }
 \arguments{
 \item{x}{\code{SimLevParamSearch} aus \code{\link[=param_search]{param_search()}} mit gespeicherten
-Renditen (\code{keep_returns = TRUE}). Renditematrizen oder Listen von
+Renditen (\code{keep_returns = "day"}). Renditematrizen oder Listen von
 Ergebnissen werden nicht angenommen, weil Parameterwerte (und bei
 \code{select = "plateau"} der Suchraum) gebraucht werden. Bei
 \code{print()}/\code{plot()}: Objekt der Klasse \code{SimLevWalkForward}.}

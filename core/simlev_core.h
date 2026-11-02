@@ -53,8 +53,9 @@
  * Gleitkomma: jede Kerndatei bricht bei -ffast-math ab und schaltet das
  * Zusammenziehen von a * b + c zu fma ab (Pragma; unter GCC nur, wo fma ueberhaupt
  * erzeugt werden kann, siehe dort; Python setzt SIMLEV_FP_CONTRACT_BY_FLAG und
- * uebersetzt mit -ffp-contract=off). long double wie in R (x86-64: 80 Bit). exp,
- * log, pow, sqrt aus der libm des Systems.
+ * uebersetzt mit -ffp-contract=off). Kein long double (seit N5: kompensierte Summen in
+ * tax_core, ganzzahlig und double-double in kendall_tau_core; vorher wie R 80 Bit auf
+ * x86-64, 128 Bit auf aarch64). exp, log, pow, sqrt aus der libm des Systems.
  *
  * Diese Datei ist reines C99 und auch aus C++ nutzbar.
  */

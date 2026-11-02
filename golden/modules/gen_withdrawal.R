@@ -309,15 +309,72 @@ wcase("ws_hz_tri", "withdrawal_simulation(R, withdrawal_rule('constant'), inflat
 wcase("ws_hz_sample", "withdrawal_simulation(Rq, withdrawal_rule('constant'), frequency = 'quarter', horizon = withdrawal_horizon('sample', years = c(3, 5, 8)))",
       "withdrawal_simulation(Rq, rule=withdrawal_rule(type='constant'), frequency='quarter', horizon=withdrawal_horizon(type='sample', years=[3, 5, 8]))", I,
      jl = 'withdrawal_simulation(Rq, withdrawal_rule("constant"); frequency = "quarter", horizon = withdrawal_horizon("sample"; years = [3, 5, 8]))')
+# 6.5b (B): Kirchensteuer und Günstigerprüfung in der Entnahme (Satz wie simulation(), .tax_rates)
+TXA <- "withdrawal_simulation(R[, 1:4], withdrawal_rule('guyton_klinger', rate = 5), start_value = 5e5, inflation = 2, cost_basis = 60, base_rate = 2.5, tax = tax_profile(%s))"
+TXP <- "withdrawal_simulation(R[:, :4], rule=withdrawal_rule(type='guyton_klinger', rate=5), start_value=5e5, inflation=2, cost_basis=60, base_rate=2.5, tax=simlev.tax_profile(%s))"
+TXJ <- 'withdrawal_simulation(R[:, 1:4], withdrawal_rule("guyton_klinger"; rate = 5); start_value = 5e5, inflation = 2, cost_basis = 60, base_rate = 2.5, tax = SL.tax_profile(; %s))'
+TXC <- list(
+  church = c("church_tax = 9", "church_tax=9", "church_tax = 9"),
+  church8 = c("church_tax = 8, sparer_pauschbetrag = 2000", "church_tax=8, sparer_pauschbetrag=2000", "church_tax = 8, sparer_pauschbetrag = 2000"),
+  gp_yes = c("guenstigerpruefung = TRUE, income = income_rate(20)", "guenstigerpruefung=True, income=simlev.income_rate(20)",
+             "guenstigerpruefung = true, income = SL.income_rate(20)"),
+  gp_church_soli = c("church_tax = 8, guenstigerpruefung = TRUE, income = income_rate(24, soli_rate = 5.5)",
+                     "church_tax=8, guenstigerpruefung=True, income=simlev.income_rate(24, soli_rate=5.5)",
+                     "church_tax = 8, guenstigerpruefung = true, income = SL.income_rate(24; soli_rate = 5.5)"),
+  gp_no = c("guenstigerpruefung = TRUE, income = income_rate(42)", "guenstigerpruefung=True, income=simlev.income_rate(42)",
+            "guenstigerpruefung = true, income = SL.income_rate(42)"),
+  gp_church_no = c("church_tax = 9, guenstigerpruefung = TRUE, income = income_rate(26)", "church_tax=9, guenstigerpruefung=True, income=simlev.income_rate(26)",
+                   "church_tax = 9, guenstigerpruefung = true, income = SL.income_rate(26)"),
+  gp_nomr = c("church_tax = 9, guenstigerpruefung = TRUE", "church_tax=9, guenstigerpruefung=True", "church_tax = 9, guenstigerpruefung = true"),
+  mr_only = c("income = income_rate(20)", "income=simlev.income_rate(20)", "income = SL.income_rate(20)"),
+  rate_gp = c("rate = 30, guenstigerpruefung = TRUE, income = income_rate(28)", "rate=30, guenstigerpruefung=True, income=simlev.income_rate(28)",
+              "rate = 30, guenstigerpruefung = true, income = SL.income_rate(28)"))
+for (k in names(TXC)) wcase(paste0("ws_tax_", k), sprintf(TXA, TXC[[k]][1]), sprintf(TXP, TXC[[k]][2]), I, jl = sprintf(TXJ, TXC[[k]][3]))
+wcase("ws_tax_gp_month", "withdrawal_simulation(Rm, withdrawal_rule('percent', rate = 5), frequency = 'month', tax = tax_profile(church_tax = 8, guenstigerpruefung = TRUE, income = income_rate(14)), base_rate = matrix(seq(0, 5, length.out = 480), 120, 4), cost_basis = 60, partial_exemption = 15, inflation = 1)",
+      "withdrawal_simulation(Rm, rule=withdrawal_rule(type='percent', rate=5), frequency='month', tax=simlev.tax_profile(church_tax=8, guenstigerpruefung=True, income=simlev.income_rate(14)), base_rate=np.linspace(0, 5, 480).reshape((120, 4), order='F'), cost_basis=60, partial_exemption=15, inflation=1)", I,
+     jl = 'withdrawal_simulation(Rm, withdrawal_rule("percent"; rate = 5); frequency = "month", tax = SL.tax_profile(; church_tax = 8, guenstigerpruefung = true, income = SL.income_rate(14)), base_rate = reshape(vcat(0.0, [0.0 + i * (5 / 479) for i in 1:478], 5.0), 120, 4), cost_basis = 60, partial_exemption = 15, inflation = 1)')
+case("ws_tax_church_summary", "summary(withdrawal_simulation(R, withdrawal_rule('vanguard', rate = 4.5), inflation = 2, tax = tax_profile(church_tax = 9), cost_basis = 40))",
+     "result = summary(withdrawal_simulation(R, rule=withdrawal_rule(type='vanguard', rate=4.5), inflation=2, tax=simlev.tax_profile(church_tax=9), cost_basis=40))", I,
+     jl = 'result = r_summary(withdrawal_simulation(R, withdrawal_rule("vanguard"; rate = 4.5); inflation = 2, tax = SL.tax_profile(; church_tax = 9), cost_basis = 40))')
+# 6.5b (C.2): keep_paths als Anzahl (TRUE = alle, FALSE/0 = keine, k = die ersten k Spalten)
+KP <- list(k2 = c("2", "2", "2"), k100 = c("100", "100", "100"), k0 = c("0", "0", "0"), k1f = c("1.0", "1.0", "1.0"),
+           true = c("TRUE", "True", "true"))
+for (k in names(KP)) wcase(paste0("ws_keep_", k),
+  sprintf("withdrawal_simulation(R[, 1:5], withdrawal_rule('percent', rate = 5), inflation = 2, tax = tax_profile(), keep_paths = %s)", KP[[k]][1]),
+  sprintf("withdrawal_simulation(R[:, :5], rule=withdrawal_rule(type='percent', rate=5), inflation=2, tax=simlev.tax_profile(), keep_paths=%s)", KP[[k]][2]), I,
+  jl = sprintf('withdrawal_simulation(R[:, 1:5], withdrawal_rule("percent"; rate = 5); inflation = 2, tax = SL.tax_profile(), keep_paths = %s)', KP[[k]][3]))
+wcase("ws_keep_hz", "withdrawal_simulation(Rm, withdrawal_rule('percent', rate = 5), frequency = 'month', tax = tax_profile(), base_rate = 2.5, cost_basis = 60, horizon = withdrawal_horizon('uniform', min = 3, max = 9), keep_paths = 3)",
+      "withdrawal_simulation(Rm, rule=withdrawal_rule(type='percent', rate=5), frequency='month', tax=simlev.tax_profile(), base_rate=2.5, cost_basis=60, horizon=withdrawal_horizon(type='uniform', min=3, max=9), keep_paths=3)", I,
+     jl = 'withdrawal_simulation(Rm, withdrawal_rule("percent"; rate = 5); frequency = "month", tax = SL.tax_profile(), base_rate = 2.5, cost_basis = 60, horizon = withdrawal_horizon("uniform"; min = 3, max = 9), keep_paths = 3)')
+wcase("ws_keep_coh", "withdrawal_simulation(withdrawal_cohorts(m, price = 'depot', inflation = 'cpi', years = 12, step = 'year'), withdrawal_rule('constant', rate = 5), keep_paths = 3)",
+      "withdrawal_simulation(withdrawal_cohorts(m, price='depot', inflation='cpi', years=12, step='year'), rule=withdrawal_rule(type='constant', rate=5), keep_paths=3)", I,
+     jl = 'withdrawal_simulation(withdrawal_cohorts(m; price = "depot", inflation = "cpi", years = 12, step = "year"), withdrawal_rule("constant"; rate = 5); keep_paths = 3)')
+# Grafik mit k < n: R zeichnet (Titel und Medianlinien aus der Aufzeichnung), Python/Julia liefern data des SimLevPlot
+PL_R <- paste0("{ws <- withdrawal_simulation(R, withdrawal_rule('percent'), inflation = 2, keep_paths = 2); ",
+  "grDevices::pdf(NULL); grDevices::dev.control('enable'); plot(ws); rp <- grDevices::recordPlot(); grDevices::dev.off(); dl <- rp[[1]]; ",
+  "nm <- vapply(dl, function(e) { f <- e[[2]][[1]]; if (is.list(f) && is.character(f$name)) f$name else '' }, ''); ",
+  "ti <- unlist(lapply(dl[nm == 'C_title'], function(e) e[[2]][[2]])); ",
+  "ln <- Filter(function(v) is.null(v$xlab), lapply(dl[nm == 'C_plotXY'], function(e) e[[2]][[2]])); pr <- c(0.05, 0.25, 0.5, 0.75, 0.95); ",
+  "tab <- function(M, w, x0) { Q <- apply(M, 1, function(r) SimLev:::.wquantile(r, w, pr)); d <- data.frame(year = x0 + seq_len(nrow(M)) - 1L); ",
+  "for (i in seq_along(pr)) d[[sprintf('q%02.0f', 100 * pr[i])]] <- Q[i, ]; d }; ",
+  "list(wealth = tab(ws$wealth, ws$weights[1:2], 0L), spending = tab(ws$spending, ws$weights, 1L), title = ti[1], ",
+  "mid_wealth = ln[[1]]$y, mid_spending = ln[[2]]$y, ncol = ncol(ws$wealth))}")
+case("ws_plot_keep2", PL_R,
+     paste0("ws = withdrawal_simulation(R, rule=withdrawal_rule(type='percent'), inflation=2, keep_paths=2); p = ws.plot(); d = p.data; ",
+            "result = {'wealth': d['wealth'], 'spending': d['spending'], 'title': d['wealth'].attrs['title'], ",
+            "'mid_wealth': d['wealth']['q50'].to_numpy() / 1000, 'mid_spending': d['spending']['q50'].to_numpy() / 1000, 'ncol': ws['wealth'].shape[1]}"), I,
+     jl = paste0('ws = withdrawal_simulation(R, withdrawal_rule("percent"); inflation = 2, keep_paths = 2); p = SL.r_plot(ws; file = nothing); d = p.data; ',
+                 'result = SL.RList("wealth" => d["wealth"], "spending" => d["spending"], "title" => SL.attrs(d["wealth"])["title"], ',
+                 '"mid_wealth" => d["wealth"]["q50"] ./ 1000, "mid_spending" => d["spending"]["q50"] ./ 1000, "ncol" => size(ws["wealth"], 2))'))
 # Fehler und Warnungen
 WE <- list(
   rule = c("withdrawal_simulation(R, list())", "withdrawal_simulation(R, rule={})",
     'withdrawal_simulation(R, (;))'),
   taxcls = c("withdrawal_simulation(R, tax = 'person')", "withdrawal_simulation(R, tax='person')",
     'withdrawal_simulation(R; tax = "person")'),
-  taxchurch = c("withdrawal_simulation(R, tax = tax_profile(church_tax = 9, guenstigerpruefung = TRUE))",
-    "withdrawal_simulation(R, tax=simlev.tax_profile(church_tax=9, guenstigerpruefung=True))",
-    'withdrawal_simulation(R; tax = SL.tax_profile(; church_tax = 9, guenstigerpruefung = true))'),
+  taxtariff = c("withdrawal_simulation(R, tax = tax_profile(guenstigerpruefung = TRUE, income = income_tariff(40000)))",
+    "withdrawal_simulation(R, tax=simlev.tax_profile(guenstigerpruefung=True, income=simlev.income_tariff(40000)))",
+    'withdrawal_simulation(R; tax = SL.tax_profile(; guenstigerpruefung = true, income = SL.income_tariff(40000)))'),
   taxinc = c("withdrawal_simulation(R, tax = tax_profile(base_rate = 2, income = income_rate(42), harvest = harvest_rule(), private_sale_threshold = 600))",
     "withdrawal_simulation(R, tax=simlev.tax_profile(base_rate=2, income=simlev.income_rate(42), harvest=simlev.harvest_rule(), private_sale_threshold=600))",
     'withdrawal_simulation(R; tax = SL.tax_profile(; base_rate = 2, income = SL.income_rate(42), harvest = SL.harvest_rule(), private_sale_threshold = 600))'),
@@ -337,6 +394,14 @@ WE <- list(
     'withdrawal_simulation(R; sale_cost = 100)'),
   keep = c("withdrawal_simulation(R, keep_paths = NA)", "withdrawal_simulation(R, keep_paths=simlev._r.fmt.NA_REAL)",
     'withdrawal_simulation(R; keep_paths = SL.NA)'),
+  keepneg = c("withdrawal_simulation(R, keep_paths = -1)", "withdrawal_simulation(R, keep_paths=-1)",
+    'withdrawal_simulation(R; keep_paths = -1)'),
+  keepfrac = c("withdrawal_simulation(R, keep_paths = 1.5)", "withdrawal_simulation(R, keep_paths=1.5)",
+    'withdrawal_simulation(R; keep_paths = 1.5)'),
+  keepchr = c("withdrawal_simulation(R, keep_paths = 'a')", "withdrawal_simulation(R, keep_paths='a')",
+    'withdrawal_simulation(R; keep_paths = "a")'),
+  keepvec = c("withdrawal_simulation(R, keep_paths = c(1, 2))", "withdrawal_simulation(R, keep_paths=[1, 2])",
+    'withdrawal_simulation(R; keep_paths = [1, 2])'),
   vp = c("withdrawal_simulation(R, vorabpauschale = 'ja')", "withdrawal_simulation(R, vorabpauschale='ja')",
     'withdrawal_simulation(R; vorabpauschale = "ja")'),
   infl = c("withdrawal_simulation(R, inflation = -100)", "withdrawal_simulation(R, inflation=-100)",
@@ -415,6 +480,9 @@ case("mr_basic", "r <- withdrawal_max_rate(R, success = 0.75, inflation = 2, tol
 case("mr_gk", "r <- withdrawal_max_rate(R[, 1:6], withdrawal_rule('guyton_klinger'), success = 1, lower = 1, upper = 10, tol = 0.05, inflation = 2, tax = tax_profile()); list(as.numeric(r), attr(r, 'success'))",
      "r = withdrawal_max_rate(R[:, :6], rule=withdrawal_rule(type='guyton_klinger'), success=1, lower=1, upper=10, tol=0.05, inflation=2, tax=simlev.tax_profile()); result = [float(r), r.success]", I,
      jl = 'r = withdrawal_max_rate(R[:, 1:6], withdrawal_rule("guyton_klinger"); success = 1, lower = 1, upper = 10, tol = 0.05, inflation = 2, tax = SL.tax_profile()); result = [r[1], SL.attrs(r)["success"]]')
+case("mr_church_gp", "r <- withdrawal_max_rate(R[, 1:6], withdrawal_rule('guyton_klinger'), success = 1, lower = 1, upper = 10, tol = 0.05, inflation = 2, tax = tax_profile(church_tax = 9, guenstigerpruefung = TRUE, income = income_rate(24))); list(as.numeric(r), attr(r, 'success'))",
+     "r = withdrawal_max_rate(R[:, :6], rule=withdrawal_rule(type='guyton_klinger'), success=1, lower=1, upper=10, tol=0.05, inflation=2, tax=simlev.tax_profile(church_tax=9, guenstigerpruefung=True, income=simlev.income_rate(24))); result = [float(r), r.success]", I,
+     jl = 'r = withdrawal_max_rate(R[:, 1:6], withdrawal_rule("guyton_klinger"); success = 1, lower = 1, upper = 10, tol = 0.05, inflation = 2, tax = SL.tax_profile(; church_tax = 9, guenstigerpruefung = true, income = SL.income_rate(24))); result = [r[1], SL.attrs(r)["success"]]')
 case("mr_na", "r <- withdrawal_max_rate(matrix(0.5, 10, 3), success = 0.9, lower = 15); list(as.numeric(r), attr(r, 'success'))",
      "r = withdrawal_max_rate(np.full((10, 3), 0.5), success=0.9, lower=15); result = [float(r), r.success]",
      jl = 'r = withdrawal_max_rate(fill(0.5, 10, 3); success = 0.9, lower = 15); result = [r[1], SL.attrs(r)["success"]]')
@@ -576,6 +644,13 @@ wcase("ws_sv_result", paste0("{", TAX_R, "withdrawal_simulation(R[, 1:3], withdr
 wcase("ws_sv_result_cb", paste0("{", TAX_R, "withdrawal_simulation(R[, 1:3], withdrawal_rule('percent', rate = 5), start_value = rt, tax = tax_profile(), cost_basis = 55, partial_exemption = 15)}"),
       paste0("None\n", TAX_P, "ws = withdrawal_simulation(R[:, :3], rule=withdrawal_rule(type='percent', rate=5), start_value=rt, tax=simlev.tax_profile(), cost_basis=55, partial_exemption=15)"), Is,
      jl = paste0("nothing\n", TAX_J, 'ws = withdrawal_simulation(R[:, 1:3], withdrawal_rule("percent"; rate = 5); start_value = rt, tax = SL.tax_profile(), cost_basis = 55, partial_exemption = 15)'))
+# 6.5b: Bestände aus der Ansparphase, Kirchensteuer und Günstigerprüfung ausdrücklich in tax_profile()
+wcase("ws_sv_result_church", paste0("{", TAX_R, "withdrawal_simulation(R[, 1:3], withdrawal_rule('percent', rate = 5), start_value = rt, tax = tax_profile(church_tax = 8, guenstigerpruefung = TRUE, income = income_rate(22)))}"),
+      paste0("None\n", TAX_P, "ws = withdrawal_simulation(R[:, :3], rule=withdrawal_rule(type='percent', rate=5), start_value=rt, tax=simlev.tax_profile(church_tax=8, guenstigerpruefung=True, income=simlev.income_rate(22)))"), Is,
+     jl = paste0("nothing\n", TAX_J, 'ws = withdrawal_simulation(R[:, 1:3], withdrawal_rule("percent"; rate = 5); start_value = rt, tax = SL.tax_profile(; church_tax = 8, guenstigerpruefung = true, income = SL.income_rate(22)))'))
+wcase("ws_sv_result_church9", paste0("{", TAX_R, "withdrawal_simulation(R[, 1:3], withdrawal_rule('percent', rate = 5), start_value = rt, tax = tax_profile(church_tax = 9), keep_paths = 2)}"),
+      paste0("None\n", TAX_P, "ws = withdrawal_simulation(R[:, :3], rule=withdrawal_rule(type='percent', rate=5), start_value=rt, tax=simlev.tax_profile(church_tax=9), keep_paths=2)"), Is,
+     jl = paste0("nothing\n", TAX_J, 'ws = withdrawal_simulation(R[:, 1:3], withdrawal_rule("percent"; rate = 5); start_value = rt, tax = SL.tax_profile(; church_tax = 9), keep_paths = 2)'))
 wcase("ws_sv_result_none", paste0("{", SIM_R, "withdrawal_simulation(R[, 1:3], withdrawal_rule('percent', rate = 5), start_value = r2, tax = tax_profile())}"),
       paste0("None\n", SIM_P, "ws = withdrawal_simulation(R[:, :3], rule=withdrawal_rule(type='percent', rate=5), start_value=r2, tax=simlev.tax_profile())"), Is,
      jl = paste0("nothing\n", SIM_J, 'ws = withdrawal_simulation(R[:, 1:3], withdrawal_rule("percent"; rate = 5); start_value = r2, tax = SL.tax_profile())'))

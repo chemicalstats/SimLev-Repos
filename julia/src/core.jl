@@ -3,7 +3,7 @@
 #
 # Ports von simulation_core.cpp, fifo_core.cpp und tax_core.cpp
 # (SimLev 0.5.0). Die Rechenreihenfolge ist 1:1 übernommen (IEEE-754-Doubles;
-# long double nur dort, wo auch der C++-Code ihn nutzt). Assets werden über
+# N5: kein long double mehr, kompensierte Summen wie der C++-Code). Assets werden über
 # ihren Index (Reihenfolge der Strategie) angesprochen.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -403,6 +403,24 @@ end
 # tax_core.cpp
 # ═══════════════════════════════════════════════════════════════════════════
 
+"Kompensierte Summe nach Neumaier (1974), wie `neumaier_sum` in core/tax_core_impl.h (N5)."
+mutable struct _Neumaier
+    s::Float64
+    c::Float64
+end
+_Neumaier() = _Neumaier(0.0, 0.0)
+@inline function _nadd!(a::_Neumaier, v::Float64)
+    t = a.s + v
+    if abs(a.s) >= abs(v)
+        a.c += (a.s - t) + v
+    else
+        a.c += (v - t) + a.s
+    end
+    a.s = t
+    return a
+end
+@inline _nval(a::_Neumaier) = a.s + a.c
+
 "Vorabpauschale je Lot (`flat_rate_rcpp`): Bezug Jahresanfangskurs, Deckel, Zwölftelung."
 function flat_rate(buys::Vector{Lot}, front::Int, base_rate::Float64, year_start_price::Float64,
                    market_price::Float64, soy::Int, eoy::Int)
@@ -430,11 +448,12 @@ function flat_rate(buys::Vector{Lot}, front::Int, base_rate::Float64, year_start
         push!(idx, i)
         push!(vps, vp)
     end
-    total = _LD0
+    # N5: kompensierte Summe (Neumaier) wie tax_core_impl.h (statt long double)
+    total = _Neumaier()
     for v in vps
-        total = total + F80(v)
+        _nadd!(total, v)
     end
-    return (total_vp = Float64(total), lot_indices = idx, lot_vps = vps)
+    return (total_vp = _nval(total), lot_indices = idx, lot_vps = vps)
 end
 
 function p20_tax!(trade_gain::Float64, bonus::Float64, t::Totals, tax_rate::Float64, use_spb::Bool)
@@ -524,11 +543,11 @@ function sell_count(buys::Vector{Lot}, front::Int, target::Float64, trade_price:
     isempty(units) && return zero_
     nl = length(units)
     cu = similar(units); cc = similar(units); cv = similar(units)
-    su = _LD0; sc = _LD0; sv = _LD0
+    su = _Neumaier(); sc = _Neumaier(); sv = _Neumaier()     # N5: kompensiert wie tax_core_impl.h
     @inbounds for k in 1:nl
-        su = su + F80(units[k]); cu[k] = Float64(su)
-        sc = sc + F80(units[k] * prices[k]); cc[k] = Float64(sc)
-        sv = sv + F80(units[k] * vpu[k]); cv[k] = Float64(sv)
+        _nadd!(su, units[k]); cu[k] = _nval(su)
+        _nadd!(sc, units[k] * prices[k]); cc[k] = _nval(sc)
+        _nadd!(sv, units[k] * vpu[k]); cv[k] = _nval(sv)
     end
     function fifo_vp(sell::Float64)
         (!any_vp || sell <= 0) && return 0.0

@@ -63,6 +63,10 @@ Kapitalerhalt, Quantile von Endvermoegen, Konsum, Konsumrueckgang, Steuern
 und PWR sowie die SWR (historisch: minimale PWR, sonst 5-\%-Quantil der
 PWR); \code{print()} eines Ergebnisses gibt diese Zusammenfassung aus.
 \code{plot()} zeichnet Faecher des realen Vermoegens (falls gespeichert)
-und des realen Jahreskonsums in Tausend (Startkaufkraft).
+und des realen Jahreskonsums in Tausend (Startkaufkraft). Hat
+\code{withdrawal_simulation(keep_paths = k)} nur die ersten k von n Pfaden
+behalten, zeigt der Vermoegensfaecher diese k Pfade mit ihren Gewichten
+(Titel \dQuote{Reales Vermoegen (erste k von n Pfaden)}); der Konsumfaecher
+nutzt immer alle Pfade.
 }
 \keyword{internal}

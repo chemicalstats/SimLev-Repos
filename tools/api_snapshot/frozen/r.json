@@ -1,6 +1,6 @@
 {
  "language": "R",
- "stand": "2026-10-27 – Etappe 9: SimLev eigenständig",
+ "stand": "2026-11-01 – Etappe 6.5b: Entnahmesteuer, keep_returns, keep_paths",
  "hinweis": "Erzeugt von tools/api_snapshot/run.sh --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
@@ -309,7 +309,7 @@
    {"name": "metrics", "kind": "arg", "default": "bootstrap_study_metrics"},
    {"name": "objective", "kind": "arg", "default": "\"sharpe\""},
    {"name": "maximize", "kind": "arg", "default": "TRUE"},
-   {"name": "keep_returns", "kind": "arg", "default": "TRUE"},
+   {"name": "keep_returns", "kind": "arg", "default": "c(\"day\", \"none\")", "match_arg": true},
    {"name": "seed", "kind": "arg", "default": "NULL"},
    {"name": "cores", "kind": "arg", "default": "1L"}
   ],

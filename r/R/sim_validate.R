@@ -23,7 +23,7 @@
                  ".sim_build_calendar", ".sim_init_weights", ".sim_build_schedule", ".sim_make_actions",
                  ".sim_run_days", ".sim_day_activate", ".sim_day_split", ".sim_day_dca", ".sim_day_trade",
                  ".sim_day_rebalance", ".sim_day_harvest", ".sim_day_assess_vp", ".sim_day_liquidate", ".sim_close_years", ".sim_compact_trades", ".sim_returns",
-                 ".sim_risk_stats", ".sim_undefined_metrics", ".sim_result")
+                 ".sim_risk_stats", ".sim_undefined_metrics", ".sim_result", ".tax_rates")
 
 #' Aufruf von simulation() in Bedingungen aus den Phasen wiederherstellen
 #'
@@ -62,6 +62,110 @@
     warning(sprintf("simulation: %s-Spalte '%s' hat den Median %s und wird als %s %% gelesen (Prozent-Konvention); gemeint waren vermutlich Werte x 100 (Median %s).",
                     arg, col, format(m), format(m), format(m * 100)), call. = FALSE)
   invisible(NULL)
+}
+
+#' Steuersaetze aus Abgeltungsteuer, Kirchensteuer und Guenstigerpruefung (6.5b)
+#'
+#' Zweck: gemeinsamer Helfer von simulation() (.sim_check_inputs) und withdrawal_simulation(): Satz der
+#' Abgeltungsteuer mit Kirchensteuer (§ 32d Abs. 1 EStG), Umrechnung der Prozentangaben in Anteile und
+#' effektiver Satz der Guenstigerpruefung (§ 32d Abs. 6 EStG, einmal je Lauf mit dem Grenzsteuersatz aus
+#' income_rate()). Rechenfolge, Warnungen und Druck (details) wie bis 6.5b in .sim_check_inputs; Meldungen
+#' beginnen mit who.
+#' Eingabe: rate (Abgeltungsteuer in Prozent), church_tax (Prozent oder NULL), guenstigerpruefung (logisch),
+#' marginal_rate (Grenzsteuersatz in Prozent oder NULL), include_soli (logisch), soli_rate (Prozent), who
+#' (Name des Aufrufers), details (Druck der Guenstigerpruefung), blocks (Meldungen nennen die Bausteine),
+#' rate_given (rate ausdruecklich angegeben: Warnung, wenn church_tax es ueberschreibt), tariff_on (Tarifweg:
+#' die Guenstigerpruefung folgt im Jahresabschluss, hier nicht).
+#' Ausgabe: Liste tax_rate, marginal_tax_rate, soli_rate_income_tax (Anteile), effective_tax_rate,
+#' church_k, soli_factor_income.
+#' @keywords internal
+#' @noRd
+.tax_rates <- function(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli, soli_rate, who,
+                       details = FALSE, blocks = TRUE, rate_given = FALSE, tariff_on = FALSE) {
+  tax_rate <- rate; marginal_tax_rate <- marginal_rate; soli_rate_income_tax <- soli_rate
+  use_guenstigerpruefung <- guenstigerpruefung; include_soli_on_income_tax <- include_soli
+  # Kirchensteuer (§ 32d Abs. 1 EStG): ESt = 25 % / (1 + 0,25 k), dazu Soli 5,5 % und KiSt k
+  if (!is.null(church_tax) && church_tax > 0) {
+    if (rate_given && abs(tax_rate - 26.375) > 1e-9)
+      warning("church_tax \u00fcberschreibt das angegebene tax_rate.")
+    k <- church_tax / 100
+    tax_rate <- 100 * 0.25 / (1 + 0.25 * k) * (1 + 0.055 + k)
+  }
+  # R3a-06: Kirchensteuer auf die Einkommensteuer (§ 23 mit marginal_tax_rate, persoenlicher Satz der
+  # Guenstigerpruefung): church_tax Prozent der ESt; der Sonderausgabenabzug der KiSt (§ 10 Abs. 1
+  # Nr. 4 EStG) wird bei der ESt nicht abgebildet. Die Abgeltungsteuer-Formel oben bleibt unveraendert.
+  church_k <- if (!is.null(church_tax) && church_tax > 0) church_tax / 100 else 0
+  # PROZENT-KONVENTION: prozentuale Nutzerangaben -> intern dezimal (/100)
+  tax_rate <- tax_rate / 100
+  if (!is.null(marginal_tax_rate)) marginal_tax_rate <- marginal_tax_rate / 100
+  soli_rate_income_tax <- soli_rate_income_tax / 100
+  # ══════════════════════════════════════════════════════════════════════════
+  # I3: GÜNSTIGERPRÜFUNG - Effektiven Steuersatz berechnen
+  # ══════════════════════════════════════════════════════════════════════════
+  # 
+  # Die Günstigerprüfung (§ 32d Abs. 6 EStG) erlaubt es Steuerpflichtigen mit
+  # niedrigem Einkommen, ihre Kapitalerträge zum persönlichen Steuersatz zu
+  # versteuern statt zur Abgeltungsteuer (25%).
+  #
+  # Voraussetzung (R4-01): Die Belastung mit dem persoenlichen Satz einschliesslich Soli und KiSt
+  # muss niedriger sein als die Abgeltungsteuer einschliesslich Zuschlagsteuern.
+  # 
+  # Berechnung des effektiven Steuersatzes:
+  # - Bei Günstigerprüfung: marginal_tax_rate * (1 + Soli-Satz + KiSt-Satz), wenn kleiner als tax_rate (R4-01)
+  # - Ohne Günstigerprüfung: tax_rate / 100, Standard 0.26375 (25% + 5.5% Soli)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  effective_tax_rate <- tax_rate  # Default: 26.375%
+
+  # Tarifweg: unterjaehrig Abgeltungsteuer wie bei einer Bank (auch in der Verkaufsschaetzung),
+  # Guenstigerpruefung im Jahresabschluss (.handle_year_change -> .tariff_close)
+  if (use_guenstigerpruefung && !tariff_on) {
+    if (is.null(marginal_tax_rate)) {
+      if (blocks)
+      warning(
+        sprintf("%s: G\u00fcnstigerpr\u00fcfung aktiviert (tax_profile(guenstigerpruefung = TRUE)), aber der Grenzsteuersatz (income_rate(marginal_rate)) ist nicht gesetzt.\n", who),
+        "Verwendet wird die Abgeltungsteuer (", round(tax_rate * 100, 2), " %).\n",
+        "F\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung tax_profile(income = income_rate(marginal_rate)) in Prozent angeben (z. B. 42).",
+        call. = FALSE
+      )
+      else
+      warning(
+        sprintf("%s: G\u00fcnstigerpr\u00fcfung aktiviert (use_guenstigerpruefung = TRUE), aber 'marginal_tax_rate' ist nicht gesetzt.\n", who),
+        "Verwendet wird die Abgeltungsteuer (", round(tax_rate * 100, 2), " %).\n",
+        "F\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung marginal_tax_rate in Prozent angeben (z. B. 42).",
+        call. = FALSE
+      )
+    } else if ((personal_rate <- marginal_tax_rate *
+                ((if (include_soli_on_income_tax) (1 + soli_rate_income_tax) else 1.0) + church_k)) < tax_rate) {
+      # R4-01: § 32d Abs. 6 Satz 1 EStG: Tarif nur, wenn die Einkommensteuer EINSCHLIESSLICH
+      # Zuschlagsteuern niedriger ist -> Gesamtbelastung persoenlicher Satz x (1 + Soli + KiSt)
+      # gegen den effektiven Abgeltungsteuersatz (tax_rate, bei church_tax nach § 32d Abs. 1)
+      effective_tax_rate <- personal_rate   # ESt + Soli + KiSt (R3a-06)
+      
+      if (details) {
+        cat(sprintf(
+          "\u2550\u2550\u2550 G\u00fcnstigerpr\u00fcfung aktiv \u2550\u2550\u2550\n  Pers\u00f6nlicher Steuersatz: %.2f%%\n  Effektiver Steuersatz: %.2f%% (statt %.2f%% Abgeltungsteuer)\n  Ersparnis: %.2f Prozentpunkte\n\n",
+          marginal_tax_rate * 100, effective_tax_rate * 100, tax_rate * 100,
+          (tax_rate - effective_tax_rate) * 100
+        ))
+      }
+    } else {
+      # Belastung mit persoenlichem Satz nicht niedriger: Abgeltungsteuer bleibt
+      if (details) {
+        cat(sprintf(
+          "\u2550\u2550\u2550 G\u00fcnstigerpr\u00fcfung gepr\u00fcft \u2550\u2550\u2550\n  Pers\u00f6nlicher Steuersatz: %.2f%%\n  Abgeltungsteuer: %.2f%% \u2192 bleibt g\u00fcnstiger\n\n",
+          personal_rate * 100, tax_rate * 100
+        ))
+      }
+    }
+  }
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # F4: Soli-Faktor für ESt-Berechnungen (§ 23, Günstigerprüfung)
+  soli_factor_income <- if (include_soli_on_income_tax) (1 + soli_rate_income_tax) else 1.0
+
+  list(tax_rate = tax_rate, marginal_tax_rate = marginal_tax_rate, soli_rate_income_tax = soli_rate_income_tax,
+       effective_tax_rate = effective_tax_rate, church_k = church_k, soli_factor_income = soli_factor_income)
 }
 
 #' Phase 1 von simulation(): Eingabepruefung
@@ -388,21 +492,7 @@
                  paste(deparse(marginal_tax_rate), collapse = "")))
   }
 
-  # Kirchensteuer (§ 32d Abs. 1 EStG): ESt = 25 % / (1 + 0,25 k), dazu Soli 5,5 % und KiSt k
-  if (!is.null(church_tax) && church_tax > 0) {
-    if (given[["tax_rate"]] && abs(tax_rate - 26.375) > 1e-9)
-      warning("church_tax \u00fcberschreibt das angegebene tax_rate.")
-    k <- church_tax / 100
-    tax_rate <- 100 * 0.25 / (1 + 0.25 * k) * (1 + 0.055 + k)
-  }
-  # R3a-06: Kirchensteuer auf die Einkommensteuer (§ 23 mit marginal_tax_rate, persoenlicher Satz der
-  # Guenstigerpruefung): church_tax Prozent der ESt; der Sonderausgabenabzug der KiSt (§ 10 Abs. 1
-  # Nr. 4 EStG) wird bei der ESt nicht abgebildet. Die Abgeltungsteuer-Formel oben bleibt unveraendert.
-  church_k <- if (!is.null(church_tax) && church_tax > 0) church_tax / 100 else 0
-  # PROZENT-KONVENTION: prozentuale Nutzerangaben -> intern dezimal (/100)
-  tax_rate <- tax_rate / 100
-  if (!is.null(marginal_tax_rate)) marginal_tax_rate <- marginal_tax_rate / 100
-  soli_rate_income_tax <- soli_rate_income_tax / 100
+  # Kirchensteuer, Prozent-Konvention und Guenstigerpruefung: .tax_rates() (unten, nach der Gewichtssumme)
   if (!is.null(balance_thresh)) balance_thresh <- balance_thresh / 100  # Prozent
   # Toleranzband: "absolute" = Prozentpunkte des Gewichts (Standard, wie bisher),
   # "relative" = Prozent des Zielgewichts (z. B. 25 -> Ziel 40 % darf 30-50 % sein)
@@ -441,70 +531,13 @@
     ))
   }
 
-  # ══════════════════════════════════════════════════════════════════════════
-  # I3: GÜNSTIGERPRÜFUNG - Effektiven Steuersatz berechnen
-  # ══════════════════════════════════════════════════════════════════════════
-  # 
-  # Die Günstigerprüfung (§ 32d Abs. 6 EStG) erlaubt es Steuerpflichtigen mit
-  # niedrigem Einkommen, ihre Kapitalerträge zum persönlichen Steuersatz zu
-  # versteuern statt zur Abgeltungsteuer (25%).
-  #
-  # Voraussetzung (R4-01): Die Belastung mit dem persoenlichen Satz einschliesslich Soli und KiSt
-  # muss niedriger sein als die Abgeltungsteuer einschliesslich Zuschlagsteuern.
-  # 
-  # Berechnung des effektiven Steuersatzes:
-  # - Bei Günstigerprüfung: marginal_tax_rate * (1 + Soli-Satz + KiSt-Satz), wenn kleiner als tax_rate (R4-01)
-  # - Ohne Günstigerprüfung: tax_rate / 100, Standard 0.26375 (25% + 5.5% Soli)
-  # ══════════════════════════════════════════════════════════════════════════
-
-  effective_tax_rate <- tax_rate  # Default: 26.375%
-
-  # Tarifweg: unterjaehrig Abgeltungsteuer wie bei einer Bank (auch in der Verkaufsschaetzung),
-  # Guenstigerpruefung im Jahresabschluss (.handle_year_change -> .tariff_close)
-  if (use_guenstigerpruefung && !tariff_on) {
-    if (is.null(marginal_tax_rate)) {
-      if (blocks)
-      warning(
-        "simulation: G\u00fcnstigerpr\u00fcfung aktiviert (tax_profile(guenstigerpruefung = TRUE)), aber der Grenzsteuersatz (income_rate(marginal_rate)) ist nicht gesetzt.\n",
-        "Verwendet wird die Abgeltungsteuer (", round(tax_rate * 100, 2), " %).\n",
-        "F\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung tax_profile(income = income_rate(marginal_rate)) in Prozent angeben (z. B. 42).",
-        call. = FALSE
-      )
-      else
-      warning(
-        "simulation: G\u00fcnstigerpr\u00fcfung aktiviert (use_guenstigerpruefung = TRUE), aber 'marginal_tax_rate' ist nicht gesetzt.\n",
-        "Verwendet wird die Abgeltungsteuer (", round(tax_rate * 100, 2), " %).\n",
-        "F\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung marginal_tax_rate in Prozent angeben (z. B. 42).",
-        call. = FALSE
-      )
-    } else if ((personal_rate <- marginal_tax_rate *
-                ((if (include_soli_on_income_tax) (1 + soli_rate_income_tax) else 1.0) + church_k)) < tax_rate) {
-      # R4-01: § 32d Abs. 6 Satz 1 EStG: Tarif nur, wenn die Einkommensteuer EINSCHLIESSLICH
-      # Zuschlagsteuern niedriger ist -> Gesamtbelastung persoenlicher Satz x (1 + Soli + KiSt)
-      # gegen den effektiven Abgeltungsteuersatz (tax_rate, bei church_tax nach § 32d Abs. 1)
-      effective_tax_rate <- personal_rate   # ESt + Soli + KiSt (R3a-06)
-      
-      if (details) {
-        cat(sprintf(
-          "\u2550\u2550\u2550 G\u00fcnstigerpr\u00fcfung aktiv \u2550\u2550\u2550\n  Pers\u00f6nlicher Steuersatz: %.2f%%\n  Effektiver Steuersatz: %.2f%% (statt %.2f%% Abgeltungsteuer)\n  Ersparnis: %.2f Prozentpunkte\n\n",
-          marginal_tax_rate * 100, effective_tax_rate * 100, tax_rate * 100,
-          (tax_rate - effective_tax_rate) * 100
-        ))
-      }
-    } else {
-      # Belastung mit persoenlichem Satz nicht niedriger: Abgeltungsteuer bleibt
-      if (details) {
-        cat(sprintf(
-          "\u2550\u2550\u2550 G\u00fcnstigerpr\u00fcfung gepr\u00fcft \u2550\u2550\u2550\n  Pers\u00f6nlicher Steuersatz: %.2f%%\n  Abgeltungsteuer: %.2f%% \u2192 bleibt g\u00fcnstiger\n\n",
-          personal_rate * 100, tax_rate * 100
-        ))
-      }
-    }
-  }
-  # ══════════════════════════════════════════════════════════════════════════
-
-  # F4: Soli-Faktor für ESt-Berechnungen (§ 23, Günstigerprüfung)
-  soli_factor_income <- if (include_soli_on_income_tax) (1 + soli_rate_income_tax) else 1.0
+  # Steuersaetze (Kirchensteuer, Prozent -> Anteil, Guenstigerpruefung) im gemeinsamen Helfer (6.5b,
+  # auch fuer withdrawal_simulation()); Rechenfolge, Warnungen und Druck wie bisher an dieser Stelle
+  tr <- .tax_rates(tax_rate, church_tax, use_guenstigerpruefung, marginal_tax_rate, include_soli_on_income_tax,
+                   soli_rate_income_tax, who = "simulation", details = details, blocks = blocks,
+                   rate_given = given[["tax_rate"]], tariff_on = tariff_on)
+  tax_rate <- tr$tax_rate; marginal_tax_rate <- tr$marginal_tax_rate; effective_tax_rate <- tr$effective_tax_rate
+  soli_factor_income <- tr$soli_factor_income; church_k <- tr$church_k
 
   list(data = data, strategy = strategy, tax_mode = tax_mode, start_value = start_value,
        tax_rate = tax_rate, marginal_tax_rate = marginal_tax_rate, effective_tax_rate = effective_tax_rate,

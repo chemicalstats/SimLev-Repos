@@ -23,6 +23,60 @@ end
 
 _show_arg(x) = x === nothing ? "NULL" : r_deparse(x)
 
+"""
+    _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli, soli_rate, who;
+               details = false, blocks = true, rate_given = false, tariff_on = false, io = stdout)
+
+Steuersätze aus Abgeltungsteuer, Kirchensteuer und Günstigerprüfung (R: `.tax_rates`, 6.5b). Gemeinsamer
+Helfer von `simulation()` (`_sim_check_inputs`) und `withdrawal_simulation()`: Satz der Abgeltungsteuer mit
+Kirchensteuer (§ 32d Abs. 1 EStG), Prozentangaben als Anteile und effektiver Satz der Günstigerprüfung (einmal
+je Lauf mit dem Grenzsteuersatz aus `income_rate()`). Rechenfolge, Warnungen und Druck wie in R; Meldungen
+beginnen mit `who`. Ergebnis: NamedTuple `tax_rate`, `marginal_tax_rate`, `soli_rate_income_tax` (Anteile),
+`effective_tax_rate`, `church_k`, `soli_factor_income`.
+"""
+function _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli, soli_rate, who::AbstractString;
+                    details::Bool = false, blocks::Bool = true, rate_given::Bool = false, tariff_on::Bool = false,
+                    io::IO = stdout)
+    tax_rate = Float64(rate)
+    church_tax = church_tax === nothing ? nothing : Float64(church_tax)
+    marginal_tax_rate = marginal_rate
+    use_guenstigerpruefung = guenstigerpruefung === true
+    include_soli_on_income_tax = include_soli === true
+    soli_rate_income_tax = soli_rate
+    if church_tax !== nothing && church_tax > 0
+        rate_given && abs(tax_rate - 26.375) > 1e-9 && @warn "church_tax überschreibt das angegebene tax_rate."
+        k = church_tax / 100
+        tax_rate = 100 * 0.25 / (1 + 0.25 * k) * (1 + 0.055 + k)
+    end
+    church_k = (church_tax !== nothing && church_tax > 0) ? church_tax / 100 : 0.0
+    tax_rate = tax_rate / 100
+    mtr = marginal_tax_rate === nothing ? nothing : Float64(marginal_tax_rate) / 100
+    soli_rate = Float64(soli_rate_income_tax) / 100
+    effective_tax_rate = tax_rate
+    if use_guenstigerpruefung && !tariff_on
+        if mtr === nothing && blocks
+            @warn who * ": Günstigerprüfung aktiviert (tax_profile(guenstigerpruefung = TRUE)), aber der Grenzsteuersatz (income_rate(marginal_rate)) ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer (" *
+                  r_as_character(r_round(tax_rate * 100, 2)) * " %).\nFür eine korrekte Günstigerprüfung tax_profile(income = income_rate(marginal_rate)) in Prozent angeben (z. B. 42)."
+        elseif mtr === nothing
+            @warn who * ": Günstigerprüfung aktiviert (use_guenstigerpruefung = TRUE), aber 'marginal_tax_rate' ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer (" *
+                  r_as_character(r_round(tax_rate * 100, 2)) * " %).\nFür eine korrekte Günstigerprüfung marginal_tax_rate in Prozent angeben (z. B. 42)."
+        else
+            personal_rate = mtr * ((include_soli_on_income_tax ? (1 + soli_rate) : 1.0) + church_k)
+            if personal_rate < tax_rate
+                effective_tax_rate = personal_rate
+                details && print(io, r_sprintf("═══ Günstigerprüfung aktiv ═══\n  Persönlicher Steuersatz: %.2f%%\n  Effektiver Steuersatz: %.2f%% (statt %.2f%% Abgeltungsteuer)\n  Ersparnis: %.2f Prozentpunkte\n\n",
+                                                       mtr * 100, effective_tax_rate * 100, tax_rate * 100, (tax_rate - effective_tax_rate) * 100))
+            else
+                details && print(io, r_sprintf("═══ Günstigerprüfung geprüft ═══\n  Persönlicher Steuersatz: %.2f%%\n  Abgeltungsteuer: %.2f%% → bleibt günstiger\n\n",
+                                                       personal_rate * 100, tax_rate * 100))
+            end
+        end
+    end
+    soli_factor_income = include_soli_on_income_tax ? (1 + soli_rate) : 1.0
+    return (tax_rate = tax_rate, marginal_tax_rate = mtr, soli_rate_income_tax = soli_rate,
+            effective_tax_rate = effective_tax_rate, church_k = church_k, soli_factor_income = soli_factor_income)
+end
+
 function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_span, dca_days,
                            balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
                            marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
@@ -334,15 +388,7 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     if !blocks && marginal_tax_rate !== nothing && (marginal_tax_rate < 0 || marginal_tax_rate > 50)
         error("simulation: marginal_tax_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 für 42 %), nicht $(r_deparse(marginal_tax_rate)).")
     end
-    if church_tax !== nothing && church_tax > 0
-        _g(given, "tax_rate") && abs(tax_rate - 26.375) > 1e-9 && @warn "church_tax überschreibt das angegebene tax_rate."
-        k = church_tax / 100
-        tax_rate = 100 * 0.25 / (1 + 0.25 * k) * (1 + 0.055 + k)
-    end
-    church_k = (church_tax !== nothing && church_tax > 0) ? church_tax / 100 : 0.0
-    tax_rate = tax_rate / 100
-    mtr = marginal_tax_rate === nothing ? nothing : Float64(marginal_tax_rate) / 100
-    soli_rate = Float64(soli_rate_income_tax) / 100
+    # Kirchensteuer, Prozent-Konvention und Günstigerprüfung: _tax_rates() (unten, nach der Gewichtssumme)
     bth = balance_thresh === nothing ? nothing : Float64(balance_thresh) / 100
     balance_thresh_type = match_arg(balance_thresh_type, ("absolute", "relative"), "balance_thresh_type")
     fee_order = _fee_spec(order_fee)
@@ -367,27 +413,13 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         error(r_sprintf("simulation: Asset-Gewichte (share) summieren sich auf %.4f, müssen aber exakt 1.0 ergeben (Anteile, z. B. 0.6 und 0.4).\n  Aktuelle Gewichte: %s",
                         total_weight, join((r_sprintf("%s=%.3f", k, (s = get(v, "share", nothing); s === nothing ? NA : Float64(s))) for (k, v) in strat), ", ")))
     end
-    effective_tax_rate = tax_rate
-    if use_guenstigerpruefung && !tariff_on
-        if mtr === nothing && blocks
-            @warn "simulation: Günstigerprüfung aktiviert (tax_profile(guenstigerpruefung = TRUE)), aber der Grenzsteuersatz (income_rate(marginal_rate)) ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer (" *
-                  r_as_character(r_round(tax_rate * 100, 2)) * " %).\nFür eine korrekte Günstigerprüfung tax_profile(income = income_rate(marginal_rate)) in Prozent angeben (z. B. 42)."
-        elseif mtr === nothing
-            @warn "simulation: Günstigerprüfung aktiviert (use_guenstigerpruefung = TRUE), aber 'marginal_tax_rate' ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer (" *
-                  r_as_character(r_round(tax_rate * 100, 2)) * " %).\nFür eine korrekte Günstigerprüfung marginal_tax_rate in Prozent angeben (z. B. 42)."
-        else
-            personal_rate = mtr * ((include_soli_on_income_tax ? (1 + soli_rate) : 1.0) + church_k)
-            if personal_rate < tax_rate
-                effective_tax_rate = personal_rate
-                details == true && print(io, r_sprintf("═══ Günstigerprüfung aktiv ═══\n  Persönlicher Steuersatz: %.2f%%\n  Effektiver Steuersatz: %.2f%% (statt %.2f%% Abgeltungsteuer)\n  Ersparnis: %.2f Prozentpunkte\n\n",
-                                                       mtr * 100, effective_tax_rate * 100, tax_rate * 100, (tax_rate - effective_tax_rate) * 100))
-            else
-                details == true && print(io, r_sprintf("═══ Günstigerprüfung geprüft ═══\n  Persönlicher Steuersatz: %.2f%%\n  Abgeltungsteuer: %.2f%% → bleibt günstiger\n\n",
-                                                       personal_rate * 100, tax_rate * 100))
-            end
-        end
-    end
-    soli_factor_income = include_soli_on_income_tax ? (1 + soli_rate) : 1.0
+    # Steuersätze (Kirchensteuer, Prozent -> Anteil, Günstigerprüfung) im gemeinsamen Helfer (6.5b, auch für
+    # withdrawal_simulation()); Rechenfolge, Warnungen und Druck wie bisher an dieser Stelle
+    tr = _tax_rates(tax_rate, church_tax, use_guenstigerpruefung, marginal_tax_rate, include_soli_on_income_tax,
+                    soli_rate_income_tax, "simulation"; details = details == true, blocks = blocks,
+                    rate_given = _g(given, "tax_rate"), tariff_on = tariff_on, io = io)
+    tax_rate = tr.tax_rate; mtr = tr.marginal_tax_rate; effective_tax_rate = tr.effective_tax_rate
+    soli_factor_income = tr.soli_factor_income; church_k = tr.church_k
     cfg = Cfg(tax_mode, start_value, tax_rate, mtr, effective_tax_rate, soli_factor_income, church_k, tariff_env,
               private_sale_threshold, sparer_pauschbetrag, use_sparer_pauschbetrag, fractions, fee_order, fee_dca, fees_on,
               order_fee, dca_mode, dca_value, dca_days, balance_mode, balance_days, bth, balance_thresh_type, base_rate,

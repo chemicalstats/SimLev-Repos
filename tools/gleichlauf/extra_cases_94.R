@@ -155,6 +155,31 @@ case3("n1_ms_fitstarts_gjr", "sl$.sl_ms_garch_fitstarts(msneg, 2, 'gjrGARCH', cb
       "L.ms_garch_fitstarts(msneg, 2, 'gjrGARCH', np.array([[-12, -3, -2.5, 2, -11, -2, -1.5, 1.5, -4, -3]], dtype=float).T)",
       "L.ms_garch_fitstarts(msneg, 2, \"gjrGARCH\", reshape([-12.0, -3, -2.5, 2, -11, -2, -1.5, 1.5, -4, -3], :, 1))", "msneg")
 
+# ── N3: analytischer Gradient der GJR-NLL (wie im GJR-Fit) ──────────────────────────────────────
+I$gflat <- c(rep(3e-4, 40), I$g1[1:100])
+case3("n3_garch_grad", "list(sl$.sl_garch11_grad(c(3e-4, -13.1, -3.2, -4.5, 2), gneg), sl$.sl_garch11_grad(c(1e-4, -12.7, -4, -2.5, 2.2), g2, TRUE, 1e-4), sl$.sl_garch11_grad(c(1e-3, -11.5, 1, 1.5, -3), g1))",
+      "[L.garch11_grad([3e-4, -13.1, -3.2, -4.5, 2], gneg), L.garch11_grad([1e-4, -12.7, -4, -2.5, 2.2], g2, True, 1e-4), L.garch11_grad([1e-3, -11.5, 1, 1.5, -3], g1)]",
+      "Any[L.garch11_grad([3e-4, -13.1, -3.2, -4.5, 2], gneg), L.garch11_grad([1e-4, -12.7, -4, -2.5, 2.2], g2; gjr = true, s2_init = 1e-4), L.garch11_grad([1e-3, -11.5, 1, 1.5, -3], g1)]", c("gneg", "g2", "g1"))
+case3("n3_garch_grad_untergrenze", "sl$.sl_garch11_grad(c(3e-4, -40, -6, -5, -4), gflat, TRUE, 1e-13)",
+      "L.garch11_grad([3e-4, -40, -6, -5, -4], gflat, True, 1e-13)", "L.garch11_grad([3e-4, -40, -6, -5, -4], gflat; gjr = true, s2_init = 1e-13)", "gflat")
+case3("n3_garch_grad_inf", "sl$.sl_garch11_grad(c(3e-4, 800, -3, -4, 2), gneg)", "L.garch11_grad([3e-4, 800, -3, -4, 2], gneg)",
+      "L.garch11_grad([3e-4, 800, -3, -4, 2], gneg)", "gneg")
+case3("n3_garch_grad_err_nan", "sl$.sl_garch11_grad(c(3e-4, -13, -3, -4, 2), c(g1[1:20], NaN))", "L.garch11_grad([3e-4, -13, -3, -4, 2], np.append(g1[:20], math.nan))",
+      "L.garch11_grad([3e-4, -13, -3, -4, 2], vcat(g1[1:20], NaN))", "g1")
+
+# ── N4: derselbe Gradient für sGARCH (theta = (mu, log omega, a, b)); bis N3 Fehler (Fall n3_garch_grad_err_sgarch entfällt)
+case3("n4_garch_grad_s", "list(sl$.sl_garch11_grad(c(3e-4, -13.1, -2.6, 2.3), gneg, FALSE), sl$.sl_garch11_grad(c(1e-4, -12.7, -4, 2.2), g2, FALSE, 1e-4), sl$.sl_garch11_grad(c(1e-3, -11.5, 1, -3), g1, FALSE))",
+      "[L.garch11_grad([3e-4, -13.1, -2.6, 2.3], gneg, False), L.garch11_grad([1e-4, -12.7, -4, 2.2], g2, False, 1e-4), L.garch11_grad([1e-3, -11.5, 1, -3], g1, False)]",
+      "Any[L.garch11_grad([3e-4, -13.1, -2.6, 2.3], gneg; gjr = false), L.garch11_grad([1e-4, -12.7, -4, 2.2], g2; gjr = false, s2_init = 1e-4), L.garch11_grad([1e-3, -11.5, 1, -3], g1; gjr = false)]", c("gneg", "g2", "g1"))
+case3("n4_garch_grad_s_untergrenze", "sl$.sl_garch11_grad(c(3e-4, -40, -6, -4), gflat, FALSE, 1e-13)",
+      "L.garch11_grad([3e-4, -40, -6, -4], gflat, False, 1e-13)", "L.garch11_grad([3e-4, -40, -6, -4], gflat; gjr = false, s2_init = 1e-13)", "gflat")
+case3("n4_garch_grad_s_inf", "sl$.sl_garch11_grad(c(3e-4, 800, -3, 2), gneg, FALSE)", "L.garch11_grad([3e-4, 800, -3, 2], gneg, False)",
+      "L.garch11_grad([3e-4, 800, -3, 2], gneg; gjr = false)", "gneg")
+case3("n4_garch_grad_s_err_nan", "sl$.sl_garch11_grad(c(3e-4, -13, -3, 2), c(g1[1:20], NaN), FALSE)", "L.garch11_grad([3e-4, -13, -3, 2], np.append(g1[:20], math.nan), False)",
+      "L.garch11_grad([3e-4, -13, -3, 2], vcat(g1[1:20], NaN); gjr = false)", "g1")
+case3("n4_garch_fit_gflat_s", "sl$.sl_garch11_fit(gflat, FALSE)", "L.garch11_fit(gflat, False)", "L.garch11_fit(gflat; gjr = false)", "gflat")
+case3("n4_fit_garch11_gneg_s", "sl$.sl_fit_garch11(gneg, FALSE)", "L.fit_garch11(gneg, False)", "L.fit_garch11(gneg; gjr = false)", "gneg")
+
 # ── Bootstrap-Kerne (Strom aus Seed; danach Zustand als Hex) ──────────────────
 bc <- function(id, seed, r, py, jl, inp = character(0))
   cs(id, r = sprintf("s <- sl$.sl_stream(%d); list(%s, sl$.sl_state_hex(s))", seed, r),
@@ -205,5 +230,45 @@ case3("boot_helfer", "v <- sl$.sl_rolling_vol(X[, 1], 21L); list(v, sl$.sl_rolli
       "[L.rolling_vol(X[:, 0], 21), L.rolling_vol(X[:5, 1], 10), L.assign_regimes(L.rolling_vol(X[:, 0], 21), [0.0, 0.009, 0.0115, math.inf]), L.estimate_trans_mat(reg, 3, 0.1)]",
       "Any[L.rolling_vol(X[:, 1], 21), L.rolling_vol(X[1:5, 2], 10), L.assign_regimes(L.rolling_vol(X[:, 1], 21), [0.0, 0.009, 0.0115, Inf]), L.estimate_trans_mat(reg, 3, 0.1)]",
       c("X", "reg"))
+
+# ── N5: GPD und DCC mit analytischem Gradienten, Backcast-Zielfunktion in C, Kendall ganzzahlig ─────
+set.seed(55)
+I$xe <- 0.01 * rexp(200)                                 # xi nahe 0
+I$bx <- rnorm(240, 3e-4, 0.01); I$bx[c(1, 50)] <- NA
+I$bc1 <- -2 / 100 / 360 * rep(1, 240); I$bc2 <- 0.5 / 100 / 365 * rep(1, 240)
+I$bsp <- rep(1 / 100 / 360, 240); I$bdr <- rep(1 / 100 / 365, 240)
+I$bpos <- sort(sample(240, 180)); I$bpos[1] <- 1L
+I$blogp <- (log(50) + cumsum(log1p(2.02 * ifelse(is.na(I$bx), 0, I$bx) - 3e-5 + rnorm(240, 0, 3e-4))))[I$bpos]
+I$breg <- I$bc1 + 2 * I$bx                               # Basis eines Regressionsmodells (NA bleibt)
+I$kx <- c(1, 2, 2, 3, 3, 3, 4, 5, 5, 6); I$ky <- c(2, 1, 2, 5, 3, 3, 4, 6, 5, 5)
+case3("n5_gpd_fit_xi0", "list(sl$.sl_gpd_fit(xe), sl$.sl_gpd_fit(xn))", "[L.gpd_fit(xe), L.gpd_fit(xn)]", "Any[L.gpd_fit(xe), L.gpd_fit(xn)]", c("xe", "xn"))
+case3("n5_dcc_fit_rueckfall", "sl$.sl_dcc_fit(Z, Qbad)", "L.dcc_fit(Z, Qbad)", "L.dcc_fit(Z, Qbad)", c("Z", "Qbad"))
+bcp <- function(o, l, h, lang) {
+  tup <- if (lang == "r") "list(bx, bc1, bc2, 2, bsp, bdr, bpos, blogp, c(%dL, %dL, %dL), 0.4)" else "(bx, bc1, bc2, 2.0, bsp, bdr, bpos, blogp, (%d, %d, %d), 0.4)"
+  sprintf(tup, o, l, h)
+}
+bin <- c("bx", "bc1", "bc2", "bsp", "bdr", "bpos", "blogp")
+for (v in list(c(1, 1, 1), c(1, 2, 1), c(2, 1, 5), c(3, 1, 2), c(1, 3, 1), c(2, 4, 1), c(1, 5, 1))) {
+  nm <- sprintf("n5_backcast_obj_%d%d%d", v[1], v[2], v[3])
+  case3(nm, sprintf("list(sl$.sl_backcast_obj(%s, c(0.5, 0.2, 1.01), 1:3, TRUE), sl$.sl_backcast_obj(%s, c(-1, 0, 1), c(2L, 1L), TRUE))", bcp(v[1], v[2], v[3], "r"), bcp(v[1], v[2], v[3], "r")),
+        sprintf("[L.backcast_obj(%s, [0.5, 0.2, 1.01], [1, 2, 3], True), L.backcast_obj(%s, [-1.0, 0.0, 1.0], [2, 1], True)]", bcp(v[1], v[2], v[3], "py"), bcp(v[1], v[2], v[3], "py")),
+        sprintf("Any[L.backcast_obj(%s, [0.5, 0.2, 1.01], [1, 2, 3]; grad = true), L.backcast_obj(%s, [-1.0, 0.0, 1.0], [2, 1]; grad = true)]", bcp(v[1], v[2], v[3], "jl"), bcp(v[1], v[2], v[3], "jl")), bin)
+}
+for (v in list(c(1, 1, 1), c(2, 2, 3), c(3, 1, 1))) {
+  nm <- sprintf("n5_backcast_fit_%d%d%d", v[1], v[2], v[3])
+  case3(nm, sprintf("list(sl$.sl_backcast_fit(%s, c(0, 0, 1), 1:3, c(-10, -5, 0.5), c(10, 10, 1.5)), sl$.sl_backcast_fit(%s, c(0, 0.4, 1), c(1L, 3L), c(-10, 0.5), c(10, 1.5)))", bcp(v[1], v[2], v[3], "r"), bcp(v[1], v[2], v[3], "r")),
+        sprintf("[L.backcast_fit(%s, [0.0, 0.0, 1.0], [1, 2, 3], [-10.0, -5.0, 0.5], [10.0, 10.0, 1.5]), L.backcast_fit(%s, [0.0, 0.4, 1.0], [1, 3], [-10.0, 0.5], [10.0, 1.5])]", bcp(v[1], v[2], v[3], "py"), bcp(v[1], v[2], v[3], "py")),
+        sprintf("Any[L.backcast_fit(%s, [0.0, 0.0, 1.0], [1, 2, 3], [-10.0, -5.0, 0.5], [10.0, 10.0, 1.5]), L.backcast_fit(%s, [0.0, 0.4, 1.0], [1, 3], [-10.0, 0.5], [10.0, 1.5])]", bcp(v[1], v[2], v[3], "jl"), bcp(v[1], v[2], v[3], "jl")), bin)
+}
+case3("n5_backcast_fit_regression", "sl$.sl_backcast_fit(list(NULL, breg, NULL, 2, bsp, bdr, bpos, blogp, c(1L, 1L, 1L), 0.5), c(0, 0, 1), 1:2, c(-10, -5), c(10, 10))",
+      "L.backcast_fit((None, breg, None, 2.0, bsp, bdr, bpos, blogp, (1, 1, 1), 0.5), [0.0, 0.0, 1.0], [1, 2], [-10.0, -5.0], [10.0, 10.0])",
+      "L.backcast_fit((nothing, breg, nothing, 2.0, bsp, bdr, bpos, blogp, (1, 1, 1), 0.5), [0.0, 0.0, 1.0], [1, 2], [-10.0, -5.0], [10.0, 10.0])", c(bin, "breg"))
+case3("n5_backcast_err_pos", "sl$.sl_backcast_obj(list(bx, bc1, bc2, 2, bsp, bdr, rev(bpos), blogp, c(1L, 1L, 1L), 0.5), c(0, 0, 1), 1L, TRUE)",
+      "L.backcast_obj((bx, bc1, bc2, 2.0, bsp, bdr, bpos[::-1], blogp, (1, 1, 1), 0.5), [0.0, 0.0, 1.0], [1], True)",
+      "L.backcast_obj((bx, bc1, bc2, 2.0, bsp, bdr, reverse(bpos), blogp, (1, 1, 1), 0.5), [0.0, 0.0, 1.0], [1]; grad = true)", bin)
+cs("n5_kendall", r = "c(sl$.kendall_tau_core(kx, ky), sl$.kendall_tau_core(kx, rev(ky)), sl$.kendall_tau_core(c(1, 1, 1), c(1, 2, 3)), sl$.kendall_tau_core(1:2 + 0, c(2, 1)), sl$.kendall_tau_core(xg[1:200], xg[51:250]))",
+   py = "import simlev._dependence_core as DC\nresult = [DC.kendall_tau_core(kx, ky), DC.kendall_tau_core(kx, ky[::-1]), DC.kendall_tau_core(np.array([1.0, 1, 1]), np.array([1.0, 2, 3])), DC.kendall_tau_core(np.array([1.0, 2]), np.array([2.0, 1])), DC.kendall_tau_core(xg[:200], xg[50:250])]",
+   jl = "DC = SL.DependenceCore\nresult = Any[DC.kendall_tau_core(kx, ky), DC.kendall_tau_core(kx, reverse(ky)), DC.kendall_tau_core([1.0, 1, 1], [1.0, 2, 3]), DC.kendall_tau_core([1.0, 2], [2.0, 1]), DC.kendall_tau_core(xg[1:200], xg[51:250])]",
+   inputs = I[c("kx", "ky", "xg")])
 
 ref_done()

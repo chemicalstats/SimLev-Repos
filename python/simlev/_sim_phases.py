@@ -66,6 +66,64 @@ def _frac_warn_col(fr: _Frame, col: str, arg: str, hi: float) -> None:
               "waren vermutlich Werte x 100 (Median %s)." % (arg, col, r_format1(m), r_format1(m), r_format1(m * 100)))
 
 
+def _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli, soli_rate, who, *, details=False,
+               blocks=True, rate_given=False, tariff_on=False):
+    """Steuersätze aus Abgeltungsteuer, Kirchensteuer und Günstigerprüfung (R: ``.tax_rates``, 6.5b).
+
+    Gemeinsamer Helfer von ``simulation()`` (``_sim_check_inputs``) und ``withdrawal_simulation()``: Satz der
+    Abgeltungsteuer mit Kirchensteuer (§ 32d Abs. 1 EStG), Prozentangaben als Anteile und effektiver Satz der
+    Günstigerprüfung (einmal je Lauf mit dem Grenzsteuersatz aus ``income_rate()``). Rechenfolge, Warnungen und
+    Druck wie in R; Meldungen beginnen mit ``who``. Ergebnis: dict ``tax_rate``, ``marginal_tax_rate``,
+    ``soli_rate_income_tax`` (Anteile), ``effective_tax_rate``, ``church_k``, ``soli_factor_income``.
+    """
+    tax_rate = float(rate)
+    marginal_tax_rate = marginal_rate
+    soli_rate_income_tax = soli_rate
+    use_guenstigerpruefung = bool(guenstigerpruefung)
+    include_soli_on_income_tax = bool(include_soli)
+    if church_tax is not None:
+        church_tax = float(church_tax)
+    if church_tax is not None and church_tax > 0:
+        if rate_given and abs(tax_rate - 26.375) > 1e-9:
+            _warn("church_tax \u00fcberschreibt das angegebene tax_rate.")
+        k = church_tax / 100
+        tax_rate = 100 * 0.25 / (1 + 0.25 * k) * (1 + 0.055 + k)
+    church_k = church_tax / 100 if (church_tax is not None and church_tax > 0) else 0.0
+    tax_rate = tax_rate / 100
+    if marginal_tax_rate is not None:
+        marginal_tax_rate = float(marginal_tax_rate) / 100
+    soli_rate_income_tax = float(soli_rate_income_tax) / 100
+    effective_tax_rate = tax_rate
+    if use_guenstigerpruefung and not tariff_on:
+        if marginal_tax_rate is None and blocks:
+            _warn(who + ": G\u00fcnstigerpr\u00fcfung aktiviert (tax_profile(guenstigerpruefung = TRUE)), aber der "
+                  "Grenzsteuersatz (income_rate(marginal_rate)) ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer ("
+                  + r_as_character(r_round(tax_rate * 100, 2)) + " %).\nF\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung "
+                  "tax_profile(income = income_rate(marginal_rate)) in Prozent angeben (z. B. 42).")
+        elif marginal_tax_rate is None:
+            _warn(who + ": G\u00fcnstigerpr\u00fcfung aktiviert (use_guenstigerpruefung = TRUE), aber 'marginal_tax_rate' "
+                  "ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer (" + r_as_character(r_round(tax_rate * 100, 2)) +
+                  " %).\nF\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung marginal_tax_rate in Prozent angeben (z. B. 42).")
+        else:
+            personal_rate = marginal_tax_rate * (((1 + soli_rate_income_tax) if include_soli_on_income_tax else 1.0)
+                                                 + church_k)
+            if personal_rate < tax_rate:
+                effective_tax_rate = personal_rate
+                if details:
+                    _cat(_sp("\u2550\u2550\u2550 G\u00fcnstigerpr\u00fcfung aktiv \u2550\u2550\u2550\n  Pers\u00f6nlicher Steuersatz: "
+                             "%.2f%%\n  Effektiver Steuersatz: %.2f%% (statt %.2f%% Abgeltungsteuer)\n  Ersparnis: %.2f "
+                             "Prozentpunkte\n\n", marginal_tax_rate * 100, effective_tax_rate * 100, tax_rate * 100,
+                             (tax_rate - effective_tax_rate) * 100))
+            else:
+                if details:
+                    _cat(_sp("\u2550\u2550\u2550 G\u00fcnstigerpr\u00fcfung gepr\u00fcft \u2550\u2550\u2550\n  Pers\u00f6nlicher "
+                             "Steuersatz: %.2f%%\n  Abgeltungsteuer: %.2f%% \u2192 bleibt g\u00fcnstiger\n\n",
+                             personal_rate * 100, tax_rate * 100))
+    soli_factor_income = (1 + soli_rate_income_tax) if include_soli_on_income_tax else 1.0
+    return {"tax_rate": tax_rate, "marginal_tax_rate": marginal_tax_rate, "soli_rate_income_tax": soli_rate_income_tax,
+            "effective_tax_rate": effective_tax_rate, "church_k": church_k, "soli_factor_income": soli_factor_income}
+
+
 def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_span, dca_days,
                       balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
                       marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
@@ -426,16 +484,7 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     if not blocks and marginal_tax_rate is not None and (marginal_tax_rate < 0 or marginal_tax_rate > 50):
         _stop("simulation: marginal_tax_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 f\u00fcr "
               "42 %%), nicht %s." % r_deparse(marginal_tax_rate))
-    if church_tax is not None and church_tax > 0:
-        if given["tax_rate"] and abs(tax_rate - 26.375) > 1e-9:
-            _warn("church_tax \u00fcberschreibt das angegebene tax_rate.")
-        k = church_tax / 100
-        tax_rate = 100 * 0.25 / (1 + 0.25 * k) * (1 + 0.055 + k)
-    church_k = church_tax / 100 if (church_tax is not None and church_tax > 0) else 0.0
-    tax_rate = tax_rate / 100
-    if marginal_tax_rate is not None:
-        marginal_tax_rate = float(marginal_tax_rate) / 100
-    soli_rate_income_tax = float(soli_rate_income_tax) / 100
+    # Kirchensteuer, Prozent-Konvention und Günstigerprüfung: _tax_rates() (unten, nach der Gewichtssumme)
     if balance_thresh is not None:
         balance_thresh = float(balance_thresh) / 100
     balance_thresh_type = _match_arg(balance_thresh_type, ("absolute", "relative"), "balance_thresh_type")
@@ -464,33 +513,16 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
                   "(Anteile, z. B. 0.6 und 0.4).\n  Aktuelle Gewichte: %s", total_weight,
                   ", ".join(_sp("%s=%.3f", k, NA if v.get("share") is None else float(v.get("share")))
                             for k, v in strat.items())))
-    effective_tax_rate = tax_rate
-    if use_guenstigerpruefung and not tariff_on:
-        if marginal_tax_rate is None and blocks:
-            _warn("simulation: G\u00fcnstigerpr\u00fcfung aktiviert (tax_profile(guenstigerpruefung = TRUE)), aber der "
-                  "Grenzsteuersatz (income_rate(marginal_rate)) ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer ("
-                  + r_as_character(r_round(tax_rate * 100, 2)) + " %).\nF\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung "
-                  "tax_profile(income = income_rate(marginal_rate)) in Prozent angeben (z. B. 42).")
-        elif marginal_tax_rate is None:
-            _warn("simulation: G\u00fcnstigerpr\u00fcfung aktiviert (use_guenstigerpruefung = TRUE), aber 'marginal_tax_rate' "
-                  "ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer (" + r_as_character(r_round(tax_rate * 100, 2)) +
-                  " %).\nF\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung marginal_tax_rate in Prozent angeben (z. B. 42).")
-        else:
-            personal_rate = marginal_tax_rate * (((1 + soli_rate_income_tax) if include_soli_on_income_tax else 1.0)
-                                                 + church_k)
-            if personal_rate < tax_rate:
-                effective_tax_rate = personal_rate
-                if details:
-                    _cat(_sp("\u2550\u2550\u2550 G\u00fcnstigerpr\u00fcfung aktiv \u2550\u2550\u2550\n  Pers\u00f6nlicher Steuersatz: "
-                             "%.2f%%\n  Effektiver Steuersatz: %.2f%% (statt %.2f%% Abgeltungsteuer)\n  Ersparnis: %.2f "
-                             "Prozentpunkte\n\n", marginal_tax_rate * 100, effective_tax_rate * 100, tax_rate * 100,
-                             (tax_rate - effective_tax_rate) * 100))
-            else:
-                if details:
-                    _cat(_sp("\u2550\u2550\u2550 G\u00fcnstigerpr\u00fcfung gepr\u00fcft \u2550\u2550\u2550\n  Pers\u00f6nlicher "
-                             "Steuersatz: %.2f%%\n  Abgeltungsteuer: %.2f%% \u2192 bleibt g\u00fcnstiger\n\n",
-                             personal_rate * 100, tax_rate * 100))
-    soli_factor_income = (1 + soli_rate_income_tax) if include_soli_on_income_tax else 1.0
+    # Steuersätze (Kirchensteuer, Prozent -> Anteil, Günstigerprüfung) im gemeinsamen Helfer (6.5b, auch für
+    # withdrawal_simulation()); Rechenfolge, Warnungen und Druck wie bisher an dieser Stelle
+    tr = _tax_rates(tax_rate, church_tax, use_guenstigerpruefung, marginal_tax_rate, include_soli_on_income_tax,
+                    soli_rate_income_tax, "simulation", details=details, blocks=blocks, rate_given=given["tax_rate"],
+                    tariff_on=tariff_on)
+    tax_rate = tr["tax_rate"]
+    marginal_tax_rate = tr["marginal_tax_rate"]
+    effective_tax_rate = tr["effective_tax_rate"]
+    soli_factor_income = tr["soli_factor_income"]
+    church_k = tr["church_k"]
     return {"data": fr, "strategy": strat, "tax_mode": tax_mode, "start_value": start_value,
             "tax_rate": tax_rate, "marginal_tax_rate": marginal_tax_rate, "effective_tax_rate": effective_tax_rate,
             "soli_factor_income": soli_factor_income, "church_k": church_k, "tariff_env": tariff_env,

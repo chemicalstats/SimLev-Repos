@@ -1602,6 +1602,22 @@ function _load_chunk(f)
 end
 
 """
+    _keep_count(x, n, who)
+
+Anzahl behaltener Pfade aus `keep_paths` (R: `.keep_count`, 6.5b, Variante A): `true` = alle Pfade, `false` oder 0 =
+keine, ganze Zahl k ≥ 1 = die ersten k Pfade (k > n: still alle). Logisch wird vor der Ganzzahl geprüft (`Bool` ist
+in Julia eine Ganzzahl). Fehler bei NA, Text, Vektor, negativen oder nicht ganzen Zahlen. Ergebnis: Anzahl in `0..n`
+(Float64; `n` darf `Inf` sein).
+"""
+function _keep_count(x, n, who)
+    x isa Bool && return x ? Float64(n) : 0.0
+    ok = x isa Real && !(x isa Bool) && isfinite(Float64(x)) && Float64(x) >= 0 && Float64(x) == _round0(Float64(x))
+    ok || _stop(@sprintf("%s: keep_paths muss TRUE (alle Pfade), FALSE/0 (keine) oder eine ganze Zahl k >= 1 (die ersten k Pfade) sein, nicht %s.",
+                         who, _show(x)))
+    return min(Float64(x), Float64(n))
+end
+
+"""
     bootstrap_study(data, config; method = "stationary", n = 1000, strategies, params = RList(),
                     ess = false, ess_grid = nothing, path_length = nothing, dates = nothing,
                     start = "2000-01-01", burn_in = 0, sim_args = RList(), metrics = bootstrap_study_metrics,
@@ -1614,6 +1630,9 @@ Spezifikation `(strategy = …, signal = df -> …, args = (…), map = (alias =
 die Signal-Funktion bekommt ein RFrame und liefert ein RFrame oder benannte Spalten.
 `strategies` ist Pflicht wie in R; der Standardwert `nothing` ist das Gegenstück zu
 R's `missing(strategies)` und ergibt dieselbe Meldung.
+`keep_paths`: `true` = alle Pfadmatrizen behalten, `false`/0 (Standard) = keine, ganze Zahl k ≥ 1 = die ersten k
+(6.5b; Speicherbedarf etwa Pfade × (Pfadlänge + 1) × Reihen × 8 Byte). Mit `chunk_dir` und k > 0 tragen die
+Chunk-Dateien den Zusatz `_keep<k>`.
 """
 function bootstrap_study(data, config, method_pos = nothing; method = "stationary", n = 1000, strategies = nothing,
                          params = RList(), ess = false, ess_grid = nothing, path_length = nothing, dates = nothing,
@@ -1646,6 +1665,7 @@ function bootstrap_study(data, config, method_pos = nothing; method = "stationar
     sim_args = SimLev._sim_args_set(RList(), sim_args, "bootstrap_study")
     spec_sim = Dict{String,Any}(k => SimLev._sim_args_set(sim_args, _get(specs[k], "args"), "bootstrap_study") for k in snames)
     setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
+    keep_paths = _keep_count(keep_paths, setup["n_paths"], "bootstrap_study")   # 6.5b: true = alle Pfade
     n_out = setup["n_out"]
     dates === nothing && (dates = _seq_dates(_todate(start, "start")[1], n_out + 1))
     _len(dates) != n_out + 1 && _stop(@sprintf("dates braucht Länge %d (Pfadlänge + 1).", n_out + 1))
@@ -1747,7 +1767,8 @@ function bootstrap_study(data, config, method_pos = nothing; method = "stationar
     function run_chunk(ci)
         f = nothing
         if chunk_dir !== nothing
-            f = joinpath(chunk_dir, @sprintf("chunk_%05d_seed%d%s.rds", ci, Int(seed), keep_returns != "none" ? "_" * keep_returns : ""))
+            f = joinpath(chunk_dir, @sprintf("chunk_%05d_seed%d%s%s.rds", ci, Int(seed), keep_returns != "none" ? "_" * keep_returns : "",
+                                             keep_paths > 0 ? @sprintf("_keep%d", Int(keep_paths)) : ""))
         end
         f !== nothing && isfile(f) && return _load_chunk(f)
         out = Any[eval_path(i) for i in chunks[ci]]

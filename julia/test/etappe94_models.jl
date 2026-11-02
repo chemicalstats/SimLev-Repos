@@ -40,8 +40,40 @@ const LM = SimLev.SLib
     end
     @test gr["value"] == LM.ms_garch_nll(th, e[1:600], 2, "gjrGARCH")
     @test maximum(abs.(gr["gradient"] .- gn)) < 1e-5 * max(maximum(abs.(gn)), 1.0)
+    # N3: analytischer GJR-Gradient gegen zentrale Differenzen (Schritt 1e-5 max(|x|, 1), mu in Einheiten von sd(e))
+    tg = [3e-4, -13.1, -3.2, -4.5, 2.0]
+    sc = [sqrt(sum((e .- sum(e) / length(e)) .^ 2) / (length(e) - 1)), 1, 1, 1, 1]
+    gg = LM.garch11_grad(tg, e)
+    gq = map(1:5) do i
+        h = 1e-5 * max(abs(tg[i] / sc[i]), 1.0) * sc[i]; a = copy(tg); b = copy(tg); a[i] += h; b[i] -= h
+        (LM.garch11_grad(a, e)["value"] - LM.garch11_grad(b, e)["value"]) / (2h)
+    end
+    @test maximum(abs.(gg["gradient"] .- gq) .* sc) < 1e-5 * max(maximum(abs.(gq .* sc)), 1.0)
+    # N4: dasselbe für sGARCH (theta = (mu, log omega, a, b))
+    ts = [3e-4, -13.1, -2.6, 2.3]; ss = sc[1:4]
+    gs = LM.garch11_grad(ts, e; gjr = false)
+    gq = map(1:4) do i
+        h = 1e-5 * max(abs(ts[i] / ss[i]), 1.0) * ss[i]; a = copy(ts); b = copy(ts); a[i] += h; b[i] -= h
+        (LM.garch11_grad(a, e; gjr = false)["value"] - LM.garch11_grad(b, e; gjr = false)["value"]) / (2h)
+    end
+    @test length(gs["gradient"]) == 4
+    @test maximum(abs.(gs["gradient"] .- gq) .* ss) < 1e-5 * max(maximum(abs.(gq .* ss)), 1.0)
     i1 = LM.boot_idx_stationary(300, 50, 10; stream = LM.Stream(1))
     i2 = LM.boot_idx_stationary(300, 50, 10; stream = LM.Stream(1))
     @test i1 == i2 && all(1 .<= i1 .<= 300)
     @test_throws ErrorException LM.boot_idx_block(10, 5, 20, false; stream = s)
+    # N5: Backcast-Zielfunktion in C mit analytischem Gradienten, Fit, Kendall ganzzahlig/double-double
+    bx = [3e-4 + 0.01 * sin(1.7 * i) for i in 1:300]; bpos = Int[1; 3:2:300]
+    bl = (log(50) .+ cumsum(log1p.(2.01 .* bx .- 4e-5)))[bpos]
+    pr = (bx, fill(-1 / 36000, 300), fill(0.5 / 36500, 300), 2.0, fill(1 / 36000, 300), fill(1 / 36500, 300), bpos, bl, (3, 1, 2), 0.3)
+    th = [0.7, 0.3, 1.01]
+    gb = LM.backcast_obj(pr, th, [1, 2, 3]; grad = true)
+    gq = map(1:3) do i
+        h = 1e-6 * max(abs(th[i]), 1.0); a = copy(th); b = copy(th); a[i] += h; b[i] -= h
+        (LM.backcast_obj(pr, a, [1, 2, 3])["value"] - LM.backcast_obj(pr, b, [1, 2, 3])["value"]) / (2h)
+    end
+    @test maximum(abs.(gb["gradient"] .- gq)) < 1e-6 * maximum(abs.(gq))
+    fb = LM.backcast_fit(pr, [0.0, 0.0, 1.0], [1, 2, 3], [-10.0, -5.0, 0.5], [10.0, 10.0, 1.5])
+    @test fb["convergence"] == 0 && fb["value"] <= gb["value"]
+    @test SimLev.DependenceCore.kendall_tau_core([1.0, 2, 2, 3], [1.0, 3, 2, 3]) == 0.8   # 4 / sqrt(5 * 5), korrekt gerundet
 end

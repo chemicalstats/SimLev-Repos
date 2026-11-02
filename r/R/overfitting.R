@@ -23,7 +23,7 @@
 #' @noRd
 .of_returns <- function(x, frequency, dates = NULL, risk_free = 0) {
   if (inherits(x, "SimLevParamSearch")) {
-    if (is.null(x$returns)) stop("Suche ohne gespeicherte Renditen (keep_returns = FALSE).")
+    if (is.null(x$returns)) stop("Suche ohne gespeicherte Renditen (keep_returns = \"none\").")
     R <- x$returns; dates <- x$dates
   } else {
     R <- as.matrix(x)
@@ -112,7 +112,7 @@
 #' @param x Renditequelle:
 #'   \itemize{
 #'     \item \code{SimLevParamSearch} aus [param_search()] mit gespeicherten
-#'       Renditen (\code{keep_returns = TRUE}); verwendet werden
+#'       Renditen (\code{keep_returns = "day"}); verwendet werden
 #'       \code{x$returns} (taegliche Renditen je Punkt) und \code{x$dates};
 #'     \item numerische Matrix oder data.frame nur aus numerischen Spalten
 #'       (ohne Datumsspalte): Zeilen = Perioden, Spalten = Punkte bzw.
@@ -409,7 +409,7 @@ print.SimLevDSR <- function(x, ...) {
 #' Testfenster kann kuerzer als \code{test} sein.
 #'
 #' @param x \code{SimLevParamSearch} aus [param_search()] mit gespeicherten
-#'   Renditen (\code{keep_returns = TRUE}). Renditematrizen oder Listen von
+#'   Renditen (\code{keep_returns = "day"}). Renditematrizen oder Listen von
 #'   Ergebnissen werden nicht angenommen, weil Parameterwerte (und bei
 #'   \code{select = "plateau"} der Suchraum) gebraucht werden. Bei
 #'   \code{print()}/\code{plot()}: Objekt der Klasse \code{SimLevWalkForward}.

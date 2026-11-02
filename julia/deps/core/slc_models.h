@@ -2,7 +2,7 @@
  * verallgemeinerte Pareto-Verteilung, DCC(1,1), MS-GARCH mit HMM-Starts, Bootstrap-Kerne
  *
  * Verfahren:  siehe die Kerndateien slc_garch.c (B.10), slc_gpd.c (B.12), slc_dcc.c (B.11),
- *             slc_msgarch.c (B.13), slc_boot.c (B.17); jede nennt ihre Quellen.
+ *             slc_msgarch.c (B.13), slc_boot.c (B.17), slc_backcast.c (N5); jede nennt ihre Quellen.
  * Quellen:    Entwurf SPEZ-9, Abschnitte B.10–B.13, B.17; Literatur je Kerndatei.
  * Konstanten: keine.
  * Reinraum:   geschrieben nur nach den genannten Quellen und dem eigenen SimLev-Code; kein Code und
@@ -52,8 +52,15 @@ int sl_garch11_pack(sl_ctx *cx, int gjr, const double *par, double *theta);
  * wird bei gjr = 0 nicht gelesen); s2_init = NaN: Stichprobenvarianz von e. Nicht endlich -> +Inf. */
 int sl_garch11_nll(sl_ctx *cx, int n, const double *e, int gjr, const double *par, double s2_init,
                    double *nll);
-/* ML-Punktschätzer (Raster-Startwerte, BFGS mit numerischem Gradienten, ctrl NULL: maxit 500,
- * reltol 1e-10; sGARCH vom besten Rasterpunkt, GJR seit N1 von allen sieben Rasterpunkten);
+/* N3: GJR-NLL (wie im Fit; mit sl_garch11_nll gleich bis auf Rundung, relativ <= 1e-15) und ihr
+ * analytischer Gradient nach theta (Vorwärtsrekursion der Ableitungen von s2, siehe slc_garch.c);
+ * N4: auch sGARCH (gjr = 0). theta und grad haben sl_garch11_npar(gjr) Werte (4 bzw. 5);
+ * s2_init = NaN: Stichprobenvarianz. Nicht endlich: nll = +Inf, grad = NaN. */
+int sl_garch11_grad(sl_ctx *cx, int n, const double *e, int gjr, const double *theta, double s2_init,
+                    double *nll, double *grad);
+/* ML-Punktschätzer (Raster-Startwerte, BFGS, ctrl NULL: maxit 500, reltol 1e-10; sGARCH vom besten
+ * Rasterpunkt, GJR seit N1 von allen sieben Rasterpunkten; mit analytischem Gradienten, GJR seit N3,
+ * sGARCH seit N4);
  * par = (mu, omega, alpha, beta, gamma), loglik, code (wie optim$convergence).
  * Fehler: n < 10 SL_ESMALL, nicht endliche Werte SL_ENONFINITE, Varianz 0 SL_EARG. */
 int sl_garch11_fit(sl_ctx *cx, int n, const double *e, int gjr, const struct sl_opt_ctrl *ctrl,
@@ -74,8 +81,8 @@ int sl_garch11_estimate(sl_ctx *cx, int n, const double *e, int gjr, double *par
 int sl_gpd_nll(sl_ctx *cx, int n, const double *x, double scale, double shape, double *nll);
 /* Startwerte aus wahrscheinlichkeitsgewichteten Momenten (Hosking, Wallis 1987) */
 int sl_gpd_pwm(sl_ctx *cx, int n, const double *x, double *scale, double *shape);
-/* ML in (log scale, shape), shape in [-0.999, 10], projizierter BFGS (ctrl NULL: maxit 500,
- * reltol 1e-12). Fehler: n < 10 SL_ESMALL; shape an einer Schranke SL_ECONV. */
+/* ML in (log scale, shape), shape in [-0.999, 10], projizierter BFGS mit analytischem Gradienten
+ * (N5; ctrl NULL: maxit 500, reltol 1e-12). Fehler: n < 10 SL_ESMALL; shape an einer Schranke SL_ECONV. */
 int sl_gpd_fit(sl_ctx *cx, int n, const double *x, const struct sl_opt_ctrl *ctrl, double *scale,
                double *shape, double *loglik, int *code);
 
@@ -85,11 +92,36 @@ int sl_gpd_fit(sl_ctx *cx, int n, const double *x, const struct sl_opt_ctrl *ctr
  * nur bei keep). Nicht positiv definit: nll = 1e10, ok = 0, Rt ab dieser Zeile NA. */
 int sl_dcc_filter(sl_ctx *cx, int n, int k, const double *Z, double a, double b, const double *Qbar,
                   int keep, double *nll, double *Rt, int *ok);
-/* Nelder-Mead über s = 0.999 plogis(th1), a = s plogis(th2), b = s - a, Start
- * (qlogis(0.98/0.999), qlogis(0.03/0.98)); ctrl NULL: maxfev 2000, reltol 1e-10.
- * theta (NULL oder 2 Werte) = bester Punkt. */
+/* über s = 0.999 plogis(th1), a = s plogis(th2), b = s - a, Start (qlogis(0.98/0.999),
+ * qlogis(0.03/0.98)). N5: BFGS mit analytischem Gradienten vom Start
+ * (ctrl NULL: maxit 500, reltol 1e-12, gtol 1e-8; ctrl gilt nur
+ * für BFGS); scheitert BFGS, Nelder-Mead wie bis 1.1.0 (maxfev 2000, reltol 1e-10).
+ * theta (NULL oder 2 Werte) = bester Punkt; code: Ergebnis des letzten Verfahrens. */
 int sl_dcc_fit(sl_ctx *cx, int n, int k, const double *Z, const double *Qbar, const struct sl_opt_ctrl *ctrl,
                double *a, double *b, double *nll, int *code, double *theta);
+
+/* ── Backcast (slc_backcast.c, N5) ──────────────────────────────────────────── */
+
+/* Zielfunktion von backcast_fit (r/R/backcast.R) über m Zeilen des Fit-Fensters:
+ * r_t = ((beta lev) x_t + c1_t) - c2_t - spread sp_t - drag dr_t (x == NULL: Regression, r_t = c1_t
+ * - spread sp_t - drag dr_t; c2 darf NULL sein), Beobachtungen an pos (nobs Werte, 1-basiert,
+ * aufsteigend) mit Log-Kursen logp. objective 1 level, 2 return, 3 hybrid (Gewicht hw des
+ * Renditeterms); loss 1 rmse, 2 mse, 3 mae, 4 median, 5 max; horizon >= 1.
+ * par = (drag, spread, beta); fit: nfit Indizes (1 drag, 2 spread, 3 beta).
+ * sl_backcast_obj: Wert f (nicht endlich wie in R: +Inf bzw. NaN) und, wenn g != NULL, der
+ * analytische Gradient nach den nfit gefitteten Parametern (für mae, median, max der aktive Zweig). */
+int sl_backcast_obj(sl_ctx *cx, int m, const double *x, const double *c1, const double *c2, double lev,
+                    const double *sp, const double *dr, int nobs, const int32_t *pos, const double *logp,
+                    int objective, int loss, int horizon, double hw, const double *par, int nfit,
+                    const int32_t *fit, double *f, double *g);
+/* Fit wie .sl_optim(method = "L-BFGS-B") in backcast_fit: projizierter BFGS in [lo, hi] (nfit Werte)
+ * vom Start par0[fit]; Gradient analytisch für rmse, mse, hybrid, sonst zentrale Differenzen; ctrl
+ * NULL: maxit 100, reltol 1e7 eps, gtol 1e-8, xtol eps. Ergebnis: par (nfit Werte), value, code. */
+int sl_backcast_fit(sl_ctx *cx, int m, const double *x, const double *c1, const double *c2, double lev,
+                    const double *sp, const double *dr, int nobs, const int32_t *pos, const double *logp,
+                    int objective, int loss, int horizon, double hw, const double *par0, int nfit,
+                    const int32_t *fit, const double *lo, const double *hi, const struct sl_opt_ctrl *ctrl,
+                    double *par, double *value, int *code);
 
 /* ── MS-GARCH und HMM (slc_msgarch.c, B.13) ───────────────────────────────── */
 

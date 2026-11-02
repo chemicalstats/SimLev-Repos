@@ -131,6 +131,29 @@ static PyObject *slc_garch11_nll(PyObject *self, PyObject *args)
     return PyFloat_FromDouble(v);
 }
 
+/* N3: (e, theta5, gjr, s2_init, out5) -> nll; out = analytischer Gradient; N4: sGARCH mit theta4, out4 */
+static PyObject *slc_garch11_grad(PyObject *self, PyObject *args)
+{
+    PyObject *e, *th, *o;
+    int gjr, st;
+    double s0, v = 0.0;
+    Py_ssize_t n;
+    bufs B = {.nb = 0};
+    const double *ep, *tp;
+    double *op;
+    sl_ctx cx;
+    (void) self;
+    if (!PyArg_ParseTuple(args, "OOpdO", &e, &th, &gjr, &s0, &o)) return NULL;
+    ep = (const double *) buf(&B, e, 0, 'd', -1, &n, "e"); FAIL_IF(!ep);
+    tp = D(th, sl_garch11_npar(gjr), "theta"); FAIL_IF(!tp);
+    op = DW(o, sl_garch11_npar(gjr), "gradient"); FAIL_IF(!op);
+    ctx_init(&cx);
+    st = sl_garch11_grad(&cx, (int) n, ep, gjr, tp, s0, &v, op);
+    bufs_free(&B);
+    if (finish(&cx, st) < 0) return NULL;
+    return PyFloat_FromDouble(v);
+}
+
 /* (e, gjr, par_out5) -> (loglik, code) */
 static PyObject *slc_garch11_fit(PyObject *self, PyObject *args)
 {
@@ -278,6 +301,92 @@ static PyObject *slc_dcc_fit(PyObject *self, PyObject *args)
     bufs_free(&B);
     if (finish(&cx, st) < 0) return NULL;
     return Py_BuildValue("(dddidd)", a, b, nll, code, th[0], th[1]);
+}
+
+/* ── Backcast (N5) ── */
+
+/* Daten der Zielfunktion: x (None: Regression), c1, c2 (None erlaubt), sp, dr, pos (int32, 1-basiert), logp */
+typedef struct { int m, nobs; const double *x, *c1, *c2, *sp, *dr, *logp; const int32_t *pos; } bc_in;
+
+static int bc_get(bufs *Bp, PyObject *x, PyObject *c1, PyObject *c2, PyObject *sp, PyObject *dr, PyObject *pos,
+                  PyObject *logp, bc_in *a)
+{
+#define B (*Bp)
+    Py_ssize_t m, no;
+    a->c1 = (const double *) buf(Bp, c1, 0, 'd', -1, &m, "c1"); if (!a->c1) return -1;
+    a->m = (int) m;
+    a->x = (x == Py_None) ? NULL : D(x, m, "x"); if (x != Py_None && !a->x) return -1;
+    a->c2 = (c2 == Py_None) ? NULL : D(c2, m, "c2"); if (c2 != Py_None && !a->c2) return -1;
+    a->sp = D(sp, m, "sp"); if (!a->sp) return -1;
+    a->dr = D(dr, m, "dr"); if (!a->dr) return -1;
+    a->pos = (const int32_t *) buf(Bp, pos, 0, 'i', -1, &no, "pos"); if (!a->pos) return -1;
+    a->nobs = (int) no;
+    a->logp = D(logp, no, "logp"); if (!a->logp) return -1;
+    return 0;
+#undef B
+}
+
+/* (x, c1, c2, lev, sp, dr, pos, logp, objective, loss, horizon, hw, par, fit, grad) -> (f, g oder None) */
+static PyObject *slc_backcast_obj(PyObject *self, PyObject *args)
+{
+    PyObject *x, *c1, *c2, *sp, *dr, *pos, *logp, *par, *fit, *gl;
+    int obj, loss, hor, grad, st, k;
+    Py_ssize_t nf;
+    double lev, hw, f = 0.0, g[3] = {0.0, 0.0, 0.0};
+    const double *pp;
+    const int32_t *fp;
+    bc_in a;
+    bufs B = {.nb = 0};
+    sl_ctx cx;
+    (void) self;
+    if (!PyArg_ParseTuple(args, "OOOdOOOOiiidOOp", &x, &c1, &c2, &lev, &sp, &dr, &pos, &logp, &obj, &loss, &hor, &hw,
+                          &par, &fit, &grad)) return NULL;
+    FAIL_IF(bc_get(&B, x, c1, c2, sp, dr, pos, logp, &a) < 0);
+    pp = D(par, 3, "par"); FAIL_IF(!pp);
+    fp = (const int32_t *) buf(&B, fit, 0, 'i', -1, &nf, "fit"); FAIL_IF(!fp);
+    if (nf > 3) { bufs_free(&B); PyErr_SetString(PyExc_ValueError, "interner Fehler: hoechstens 3 Parameter"); return NULL; }
+    ctx_init(&cx);
+    st = sl_backcast_obj(&cx, a.m, a.x, a.c1, a.c2, lev, a.sp, a.dr, a.nobs, a.pos, a.logp, obj, loss, hor, hw, pp,
+                         (int) nf, fp, &f, grad ? g : NULL);
+    bufs_free(&B);
+    if (finish(&cx, st) < 0) return NULL;
+    if (!grad) return Py_BuildValue("(dO)", f, Py_None);
+    gl = PyTuple_New(nf);
+    if (!gl) return NULL;
+    for (k = 0; k < nf; k++) PyTuple_SET_ITEM(gl, k, PyFloat_FromDouble(g[k]));
+    return Py_BuildValue("(dN)", f, gl);
+}
+
+/* (x, c1, c2, lev, sp, dr, pos, logp, objective, loss, horizon, hw, par0, fit, lo, hi) -> (par, value, code) */
+static PyObject *slc_backcast_fit(PyObject *self, PyObject *args)
+{
+    PyObject *x, *c1, *c2, *sp, *dr, *pos, *logp, *par0, *fit, *lo, *hi, *pl;
+    int obj, loss, hor, st, k, code = 0;
+    Py_ssize_t nf;
+    double lev, hw, v = 0.0, p[3] = {0.0, 0.0, 0.0};
+    const double *pp, *lp, *hp;
+    const int32_t *fp;
+    bc_in a;
+    bufs B = {.nb = 0};
+    sl_ctx cx;
+    (void) self;
+    if (!PyArg_ParseTuple(args, "OOOdOOOOiiidOOOO", &x, &c1, &c2, &lev, &sp, &dr, &pos, &logp, &obj, &loss, &hor, &hw,
+                          &par0, &fit, &lo, &hi)) return NULL;
+    FAIL_IF(bc_get(&B, x, c1, c2, sp, dr, pos, logp, &a) < 0);
+    pp = D(par0, 3, "par0"); FAIL_IF(!pp);
+    fp = (const int32_t *) buf(&B, fit, 0, 'i', -1, &nf, "fit"); FAIL_IF(!fp);
+    if (nf < 1 || nf > 3) { bufs_free(&B); PyErr_SetString(PyExc_ValueError, "interner Fehler: 1 bis 3 Parameter"); return NULL; }
+    lp = D(lo, nf, "lower"); FAIL_IF(!lp);
+    hp = D(hi, nf, "upper"); FAIL_IF(!hp);
+    ctx_init(&cx);
+    st = sl_backcast_fit(&cx, a.m, a.x, a.c1, a.c2, lev, a.sp, a.dr, a.nobs, a.pos, a.logp, obj, loss, hor, hw, pp,
+                         (int) nf, fp, lp, hp, NULL, p, &v, &code);
+    bufs_free(&B);
+    if (finish(&cx, st) < 0) return NULL;
+    pl = PyTuple_New(nf);
+    if (!pl) return NULL;
+    for (k = 0; k < nf; k++) PyTuple_SET_ITEM(pl, k, PyFloat_FromDouble(p[k]));
+    return Py_BuildValue("(Ndi)", pl, v, code);
 }
 
 /* ── MS-GARCH, HMM ── */
@@ -802,12 +911,15 @@ PyMethodDef simlev_ext_slc_models_methods[] = {
     {"slc_garch11_filter", slc_garch11_filter, METH_VARARGS, "9.4: GARCH-Filter"},
     {"slc_garch11_nll", slc_garch11_nll, METH_VARARGS, "9.4: GARCH-NLL"},
     {"slc_garch11_fit", slc_garch11_fit, METH_VARARGS, "9.4: GARCH-ML"},
+    {"slc_garch11_grad", slc_garch11_grad, METH_VARARGS, "N3/N4: GARCH-NLL mit analytischem Gradienten"},
     {"slc_garch11_estimate", slc_garch11_estimate, METH_VARARGS, "9.4: GARCH-Stufe wie .fit_garch11"},
     {"slc_gpd_nll", slc_gpd_nll, METH_VARARGS, "9.4: GPD-NLL"},
     {"slc_gpd_pwm", slc_gpd_pwm, METH_VARARGS, "9.4: GPD-PWM"},
     {"slc_gpd_fit", slc_gpd_fit, METH_VARARGS, "9.4: GPD-ML"},
     {"slc_dcc_filter", slc_dcc_filter, METH_VARARGS, "9.4: DCC-Filter"},
     {"slc_dcc_fit", slc_dcc_fit, METH_VARARGS, "9.4: DCC-Schätzung"},
+    {"slc_backcast_obj", slc_backcast_obj, METH_VARARGS, "N5: Zielfunktion von backcast_fit"},
+    {"slc_backcast_fit", slc_backcast_fit, METH_VARARGS, "N5: Fit mehrerer Parameter von backcast_fit"},
     {"slc_ms_garch_filter", slc_ms_garch_filter, METH_VARARGS, "9.4: MS-GARCH-Filter"},
     {"slc_ms_garch_npar", slc_ms_garch_npar, METH_VARARGS, "9.4: Zahl der MS-GARCH-Parameter"},
     {"slc_ms_garch_maxstart", slc_ms_garch_maxstart, METH_NOARGS, "9.4: höchste Zahl der MS-GARCH-Startpunkte"},

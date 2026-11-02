@@ -42,6 +42,20 @@ function garch11_nll(e, par; gjr = false, s2_init = nothing)
     v[]
 end
 
+"""N3: GJR-NLL und analytischer Gradient an `theta` = (mu, log omega, a, g, b) (Vorwärtsrekursion der Ableitungen
+von s2, wie im Fit); RList(value, gradient), nicht endlich: value = Inf, gradient = NaN.
+N4: auch sGARCH (`gjr = false`, `theta` = (mu, log omega, a, b))."""
+function garch11_grad(theta, e; gjr = true, s2_init = nothing)
+    ev = _fv(e); th = _fv(theta); v = Ref{Float64}(0.0); np = gjr ? 5 : 4
+    length(th) == np || error("interner Fehler: theta hat die falsche Länge")
+    gr = Vector{Float64}(undef, np)
+    cx = _ctx()
+    st = ccall((:sl_garch11_grad, LIBSLC), Cint, (Ptr{Cvoid}, Cint, Ptr{Float64}, Cint, Ptr{Float64}, Float64, Ref{Float64}, Ptr{Float64}),
+               cx, Cint(length(ev)), ev, Cint(gjr), th, s2_init === nothing ? NaN : Float64(s2_init), v, gr)
+    _finish(cx, st)
+    _P.RList("value" => v[], "gradient" => gr)
+end
+
 "ML-Punktschätzer; RList(mu, omega, alpha, beta, gamma, loglik, convergence, method)."
 function garch11_fit(e; gjr = false)
     ev = _fv(e); p = zeros(5); ll = Ref{Float64}(0.0); code = Ref{Cint}(0)
@@ -130,6 +144,47 @@ function dcc_fit(Z, Qbar)
                cx, Cint(n), Cint(k), z, q, C_NULL, a, b, nll, code, th)
     _finish(cx, st)
     _P.RList("a" => a[], "b" => b[], "nll" => nll[], "convergence" => Int(code[]), "par" => th)
+end
+
+# ── Backcast (N5) ───────────────────────────────────────────────────────────
+
+# prob = (x oder nothing, c1, c2 oder nothing, lev, sp, dr, pos (1-basiert), logp, (objective, loss, horizon), hw)
+function _bc_args(prob)
+    x, c1, c2, lev, sp, dr, pos, logp, opt, hw = prob
+    c1v = _fv(c1)
+    (x === nothing ? nothing : _fv(x), c1v, c2 === nothing ? nothing : _fv(c2), Float64(lev), _fv(sp), _fv(dr),
+     Int32[Int32(p) for p in pos], _fv(logp), Cint(opt[1]), Cint(opt[2]), Cint(opt[3]), Float64(hw))
+end
+_bcptr(v) = v === nothing ? Ptr{Float64}(C_NULL) : pointer(v)
+
+"Zielfunktion von backcast_fit in C (`.sl_backcast_obj`); RList(value, gradient)."
+function backcast_obj(prob, par, fit; grad = false)
+    x, c1, c2, lev, sp, dr, pos, logp, ob, lo, ho, hw = _bc_args(prob)
+    pv = _fv(par); fv = Int32[Int32(k) for k in fit]; f = Ref{Float64}(0.0); g = zeros(length(fv))
+    cx = _ctx()
+    st = GC.@preserve x c2 ccall((:sl_backcast_obj, LIBSLC), Cint,
+               (Ptr{Cvoid}, Cint, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Float64, Ptr{Float64}, Ptr{Float64}, Cint, Ptr{Int32}, Ptr{Float64},
+                Cint, Cint, Cint, Float64, Ptr{Float64}, Cint, Ptr{Int32}, Ref{Float64}, Ptr{Float64}),
+               cx, Cint(length(c1)), _bcptr(x), c1, _bcptr(c2), lev, sp, dr, Cint(length(pos)), pos, logp,
+               ob, lo, ho, hw, pv, Cint(length(fv)), fv, f, grad ? pointer(g) : Ptr{Float64}(C_NULL))
+    _finish(cx, st)
+    _P.RList("value" => f[], "gradient" => grad ? g : nothing)
+end
+
+"Fit mehrerer Parameter von backcast_fit ganz in C (`.sl_backcast_fit`); RList(par, value, convergence)."
+function backcast_fit(prob, par0, fit, lower, upper)
+    x, c1, c2, lev, sp, dr, pos, logp, ob, lo, ho, hw = _bc_args(prob)
+    pv = _fv(par0); fv = Int32[Int32(k) for k in fit]; lw = _fv(lower); up = _fv(upper)
+    out = zeros(length(fv)); v = Ref{Float64}(0.0); code = Ref{Cint}(0)
+    cx = _ctx()
+    st = GC.@preserve x c2 ccall((:sl_backcast_fit, LIBSLC), Cint,
+               (Ptr{Cvoid}, Cint, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Float64, Ptr{Float64}, Ptr{Float64}, Cint, Ptr{Int32}, Ptr{Float64},
+                Cint, Cint, Cint, Float64, Ptr{Float64}, Cint, Ptr{Int32}, Ptr{Float64}, Ptr{Float64}, Ptr{Cvoid},
+                Ptr{Float64}, Ref{Float64}, Ref{Cint}),
+               cx, Cint(length(c1)), _bcptr(x), c1, _bcptr(c2), lev, sp, dr, Cint(length(pos)), pos, logp,
+               ob, lo, ho, hw, pv, Cint(length(fv)), fv, lw, up, C_NULL, out, v, code)
+    _finish(cx, st)
+    _P.RList("par" => out, "value" => v[], "convergence" => Int(code[]))
 end
 
 # ── MS-GARCH und HMM ────────────────────────────────────────────────────────

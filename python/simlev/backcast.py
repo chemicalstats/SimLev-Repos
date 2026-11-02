@@ -351,6 +351,23 @@ def _bc_errors(r, win, obs, objective, horizon):
     return {"level": e_lvl, "ret": e_ret}
 
 
+def _bc_cprob(prep, model, reg, rows, obs, objective, loss, horizon, hybrid_weight):
+    """Daten der Zielfunktion für die C-Bibliothek (Port von ``.bc_cprob``, N5); ``rows`` 0-basiert."""
+    rows = np.asarray(rows)
+    if model == "structural":
+        x = np.asarray(prep.x, dtype=np.float64)[rows]
+        c1 = np.asarray(prep.fin, dtype=np.float64)[rows]
+        c2 = np.asarray(prep.ter_cost, dtype=np.float64)[rows]
+    else:
+        x = None
+        c2 = None
+        c1 = np.asarray(_bc_model_returns(prep, {"drag": 0.0, "spread": 0.0, "beta": 1.0}, model, reg), dtype=np.float64)[rows]
+    return (x, c1, c2, float(prep.leverage), np.asarray(prep.sp_unit, dtype=np.float64)[rows],
+            np.asarray(prep.dr_unit, dtype=np.float64)[rows], np.asarray(obs["pos"]) + 1, np.asarray(obs["logp"], dtype=np.float64),
+            (("level", "return", "hybrid").index(objective) + 1, ("rmse", "mse", "mae", "median", "max").index(loss) + 1,
+             max(1, int(horizon))), float(hybrid_weight))
+
+
 def _bc_objective(r, win, obs, objective, horizon, loss, hybrid_weight):
     """Zielfunktion (Port von ``.bc_objective``)."""
     e = _bc_errors(r, win, obs, objective, horizon)
@@ -621,10 +638,18 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
             p = dict(par0)
             p[fit[0]] = mn
             return {"par": p, "value": ov, "grid": None}
-        st = np.array([par0[k] for k in fit], dtype=np.float64)
-        lo = np.array([bounds[k][0] for k in fit])
-        hi = np.array([bounds[k][1] for k in fit])
-        opar, oval, conv = _optim_lbfgsb(st, lambda t: obj_fun(t, rows, ob, rg), lo, hi)
+        lo = np.array([bounds[k][0] for k in fit], dtype=np.float64)
+        hi = np.array([bounds[k][1] for k in fit], dtype=np.float64)
+        # N5: glatte Zielfunktion (rmse, mse, hybrid) mit analytischem Gradienten ganz in C (wie .sl_backcast_fit
+        # in R); mae, median, max wie bis 1.1.0 über .sl_optim mit numerischem Gradienten
+        if objective == "hybrid" or loss in ("rmse", "mse"):
+            o = _lib.backcast_fit(_bc_cprob(prep, model, rg, rows, ob, objective, loss, horizon, hybrid_weight),
+                                  np.array([par0["drag"], par0["spread"], par0["beta"]], dtype=np.float64),
+                                  np.array([("drag", "spread", "beta").index(k) + 1 for k in fit], dtype=np.int32), lo, hi)
+            opar, oval, conv = o["par"], float(o["value"]), int(o["convergence"])
+        else:
+            st = np.array([par0[k] for k in fit], dtype=np.float64)
+            opar, oval, conv = _optim_lbfgsb(st, lambda t: obj_fun(t, rows, ob, rg), lo, hi)
         p = dict(par0)
         for k, t in zip(fit, opar):
             p[k] = float(t)

@@ -64,6 +64,19 @@
 
 namespace simlev {
 
+// N5: kompensierte Summe in double (ersetzt die long-double-Akkumulatoren; gleiche Ergebnisse auf allen
+// Plattformen). Wert = s + c nach jedem Schritt. Quelle: Neumaier, A. (1974). Rundungsfehleranalyse einiger
+// Verfahren zur Summation endlicher Summen. ZAMM 54(1), 39-51. Eigene Umsetzung (wie slc_acc in der slc).
+struct neumaier_sum {
+  double s = 0.0, c = 0.0;
+  void add(double v) {
+    const double t = s + v;
+    if (std::fabs(s) >= std::fabs(v)) c += (s - t) + v; else c += (v - t) + s;
+    s = t;
+  }
+  double value() const { return s + c; }
+};
+
 static inline bool lot_is_null2(simlev_host::Obj b) {
   return SIMLEV_IS_NULL(b) || SIMLEV_LENGTH(b) == 0;
 }
@@ -131,9 +144,11 @@ static simlev_host::Obj flat_rate(simlev_host::Obj buys, int front_index, double
     vps.push_back(vp);
   }
 
-  long double total_ld = 0.0L;              // wie R sum(): long-double-Akkumulator
-  for (double v : vps) total_ld += v;
-  double total = static_cast<double>(total_ld);
+  // N5: kompensierte Summe (Neumaier) in double statt des long-double-Akkumulators von R sum():
+  // plattformunabhaengig (x86-64: 80 Bit, aarch64: 128 Bit long double), Fehler <= eps |S| + O(n eps^2)
+  neumaier_sum acc;
+  for (double v : vps) acc.add(v);
+  double total = acc.value();
   return simlev_host::named_list("total_vp", total,
                         "lot_indices", idx,
                         "lot_vps", vps);
@@ -254,11 +269,12 @@ static simlev_host::Obj sell_count(simlev_host::Obj buys, int front_index, doubl
 
   const int nl = static_cast<int>(units.size());
   std::vector<double> cu(nl), cc(nl), cv(nl);
-  long double su = 0.0L, sc = 0.0L, sv = 0.0L;   // wie R cumsum(): long-double-Akkumulator
+  // N5: kumulierte Summen kompensiert (Neumaier) statt mit dem long-double-Akkumulator von R cumsum()
+  neumaier_sum su, sc, sv;
   for (int i = 0; i < nl; ++i) {
-    su += units[i];              cu[i] = static_cast<double>(su);
-    sc += units[i] * prices[i];  cc[i] = static_cast<double>(sc);
-    sv += units[i] * vpu[i];     cv[i] = static_cast<double>(sv);
+    su.add(units[i]);              cu[i] = su.value();
+    sc.add(units[i] * prices[i]);  cc[i] = sc.value();
+    sv.add(units[i] * vpu[i]);     cv[i] = sv.value();
   }
   // VP-Anrechnung der ersten 'sell' Stueck (FIFO), wie .sim_fifo_vp_cpp
   auto fifo_vp = [&](double sell) -> double {

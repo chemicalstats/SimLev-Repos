@@ -33,7 +33,7 @@ from ._r import fmt as _fmt
 from . import _lib as _sl
 from ._r.rlist import RList
 from ._r.rnum import r_cummax, r_cumprod, r_mean, r_mean_int, r_median, r_pow, r_pow_vec, r_prod, r_sum
-from .bootstrap import (_quiet, _get, _is_boot_result, _is_num, _is_study, _message, _names, _num1, _num_vec,
+from .bootstrap import (_quiet, _get, _is_boot_result, _is_num, _is_study, _keep_count, _message, _names, _num1, _num_vec,
                         _quantile7, _r_round0, _show, _sp, _stop, _strip1, _values, _warn, _weighted_mean,
                         _wquantile, summary, plot)
 
@@ -983,24 +983,28 @@ def _is_logical1(v) -> bool:
 
 @_quiet
 def _wd_tax_mode(tax):
-    """Steuerangaben der Person prüfen (R: ``.wd_tax_mode``, F2): ``None`` → ``"none"``, ``tax_profile()`` →
-    ``"person"``; Angaben, die die Entnahmephase nicht abbildet, ergeben einen Fehler."""
+    """Steuerangaben der Person prüfen (R: ``.wd_tax_mode``, F2, 6.5b): ``None`` → ``"none"``, ``tax_profile()`` →
+    ``"person"``. Ausgewertet werden ``rate``, ``church_tax``, ``sparer_pauschbetrag``, ``guenstigerpruefung`` und
+    ``income_rate()``; ``private_sale_threshold`` ≠ 1000, ``base_rate``, ``harvest`` und ``income_tariff()`` (mit
+    Verweis auf ``income_rate()``) ergeben einen Fehler."""
     if tax is None:
         return "none"
-    from ._sim_blocks import SimLevTaxProfile
+    from ._sim_blocks import SimLevTaxProfile, SimLevIncomeTariff
     if not isinstance(tax, SimLevTaxProfile):
         from ._sim_blocks import _cls
         _stop("withdrawal_simulation: tax muss NULL oder ein Objekt aus tax_profile() sein, nicht %s." % _cls(tax))
-    ct = tax["church_tax"]
     pst = tax["private_sale_threshold"]
-    un = [("church_tax", ct is not None and _num1(ct) and float(ct) > 0),
-          ("private_sale_threshold", not (_num1(pst) and float(pst) == 1000)),
-          ("base_rate", tax["base_rate"] is not None), ("guenstigerpruefung", tax["guenstigerpruefung"] is True),
-          ("income", tax["income"] is not None), ("harvest", tax["harvest"] is not None)]
+    un = [("private_sale_threshold", not (_num1(pst) and float(pst) == 1000)),
+          ("base_rate", tax["base_rate"] is not None), ("harvest", tax["harvest"] is not None)]
     bad = [k for k, v in un if v]
     if bad:
-        _stop("withdrawal_simulation: tax_profile(%s) bildet die Entnahmephase nicht ab; ausgewertet werden rate und "
-              "sparer_pauschbetrag (Basiszins über base_rate von withdrawal_simulation())." % ", ".join(bad))
+        _stop("withdrawal_simulation: tax_profile(%s) bildet die Entnahmephase nicht ab; ausgewertet werden rate, "
+              "church_tax, sparer_pauschbetrag, guenstigerpruefung und income = income_rate() (Basiszins über base_rate "
+              "von withdrawal_simulation())." % ", ".join(bad))
+    if isinstance(tax["income"], SimLevIncomeTariff):
+        _stop("withdrawal_simulation: tax_profile(income = income_tariff()) bildet die Entnahmephase noch nicht ab (keine "
+              "Veranlagung je Planjahr); für die Günstigerprüfung income = income_rate(marginal_rate) verwenden "
+              "(Grenzsteuersatz in Prozent, z. B. 42).")
     return "person"
 
 
@@ -1015,8 +1019,14 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
         x: :class:`WithdrawalPaths`, Renditematrix (Perioden x Pfade),
             ``SimLevResult``, Liste von ``SimLevResult`` oder Bootstrap-Studie.
         rule: :func:`withdrawal_rule` (Standard: konstante Regel mit 4 %).
-        tax: ``None`` (ohne Steuern) oder :func:`simlev.tax_profile` (F2: ausgewertet werden ``rate`` und
-            ``sparer_pauschbetrag``); die Bestandsmerkmale bleiben eigene Argumente.
+        tax: ``None`` (ohne Steuern) oder :func:`simlev.tax_profile` (F2, 6.5b: ausgewertet werden ``rate``,
+            ``church_tax``, ``sparer_pauschbetrag``, ``guenstigerpruefung`` und ``income = income_rate()``, Satz wie in
+            ``simulation()``; ``private_sale_threshold`` ≠ 1000, ``base_rate``, ``harvest`` und ``income_tariff()``
+            ergeben einen Fehler). Kirchensteuer und Günstigerprüfung werden nicht aus der Ansparphase übernommen,
+            sondern hier ausdrücklich angegeben. Die Bestandsmerkmale bleiben eigene Argumente.
+        keep_paths: ``True`` (Standard) = Vermögensmatrix ``wealth`` aller Pfade, ``False``/0 = keine, ganze Zahl
+            k >= 1 = die ersten k Spalten (gerechnet werden alle Pfade; ``plot()`` zeichnet den Vermögensfächer dann
+            aus k Pfaden mit Titelzusatz „(erste k von n Pfaden)“, auch als ``data["wealth"].attrs["title"]``).
 
     Returns:
         :class:`SimLevWithdrawal`.
@@ -1037,7 +1047,16 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
     freq_arg = frequency
     timing = _match_arg(timing, ("start", "end"))
     tax_mode = _wd_tax_mode(tax)
-    tax_rate = 26.375 if tax is None else tax["rate"]
+    # 6.5b: Satz wie in simulation() (_tax_rates: Kirchensteuer, Günstigerprüfung einmal je Lauf); die Angaben stehen
+    # ausdrücklich in tax_profile(), aus der Ansparphase wird nichts übernommen
+    if tax is None:
+        tax_rate = 26.375 / 100
+    else:
+        from ._sim_phases import _tax_rates
+        ti = tax["income"]
+        tax_rate = _tax_rates(tax["rate"], tax["church_tax"], tax["guenstigerpruefung"],
+                              None if ti is None else ti["marginal_rate"], ti is not None and ti["soli_rate"] != 0,
+                              5.5 if ti is None else ti["soli_rate"], "withdrawal_simulation")["effective_tax_rate"]
     sparer_pauschbetrag = 1000 if tax is None else tax["sparer_pauschbetrag"]
     if horizon is not None and not _is_horizon(horizon):
         if not _num1(horizon) or float(horizon) <= 0:
@@ -1065,9 +1084,9 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
     frac(cost_basis, "cost_basis")
     chk(loss_carryforward, "loss_carryforward", "eine Zahl >= 0 (EUR)")
     chk(gamma, "gamma", "eine Zahl >= 0 (relative Risikoaversion, z. B. 2)")
-    for a, v in (("vorabpauschale", vorabpauschale), ("keep_paths", keep_paths)):
-        if not _is_logical1(v):
-            _stop("withdrawal_simulation: '%s' muss TRUE oder FALSE sein, nicht %s." % (a, _wshow(v)))
+    if not _is_logical1(vorabpauschale):
+        _stop("withdrawal_simulation: '%s' muss TRUE oder FALSE sein, nicht %s." % ("vorabpauschale", _wshow(vorabpauschale)))
+    kp = _keep_count(keep_paths, math.inf, "withdrawal_simulation")   # Anzahl behaltener Pfade, begrenzt nach ncol(R)
     infl_is_mat = isinstance(inflation, (np.ndarray, pd.DataFrame)) and np.ndim(inflation) == 2
     if _is_num(inflation) or (isinstance(inflation, np.ndarray) and inflation.ndim < 2 and inflation.size == 1):
         chk(inflation, "inflation", "eine Zahl in Prozent p. a. über -100 (z. B. 2) oder eine Matrix", -99.999)
@@ -1333,12 +1352,13 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
         if s1 <= e1:
             inc[s1 - 1:e1] = inc[s1 - 1:e1] + float(e["amount"])
     rp = _wd_param_vector(rule)
+    kp = min(kp, R.shape[1])
     t0 = time.time()
     core = _wcore.wd_simulate(
         R, I, CAPE, BASE, int(ppy), _WD_RULES[rule["type"]], rp, timing == "start", start_value, inc,
-        tax_mode == "person", float(tax_rate) / 100, float(partial_exemption) / 100, float(sparer_pauschbetrag),
+        tax_mode == "person", tax_rate, float(partial_exemption) / 100, float(sparer_pauschbetrag),
         vorabpauschale is True, float(sale_cost) / 100, float(cost_basis) / 100, float(loss_carryforward),
-        keep_paths is True or horizon is not None,
+        kp > 0 or horizon is not None,
         lots["n"] if lots is not None else np.zeros(0), lots["basis"] if lots is not None else np.zeros(0),
         lots["vp"] if lots is not None else np.zeros(0),
         lots["group"] if lots is not None else np.zeros(0, dtype=np.int64),
@@ -1422,13 +1442,13 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
             paths["pwr"] = np.array([withdrawal_perfect_rate(AR[:int(H[i]), i:i + 1])[0] for i in range(len(H))])
         else:
             paths["pwr"] = _NA
-        if keep_paths is not True:
+        if kp == 0:
             wealth = None
     w = x.get("weights")
     w = np.ones(R.shape[1]) if w is None else np.asarray(w, dtype=np.float64)
     return SimLevWithdrawal([
         ("paths", paths), ("spending", sp), ("planned", core["planned"]),
-        ("wealth", wealth if keep_paths is True else None), ("rule", rule), ("start_value", start_value),
+        ("wealth", None if kp == 0 else (wealth[:, :int(kp)].copy() if kp < wealth.shape[1] else wealth)), ("rule", rule), ("start_value", start_value),
         ("frequency", x["frequency"]), ("years", ny), ("full_years", nfy), ("horizon", horizon),
         ("historical", x.get("historical") is True), ("weights", w), ("tax_mode", tax_mode), ("gamma", gamma),
         ("timing", timing), ("source", x.get("source")), ("adopted", adopted if adopted else None),
@@ -1624,9 +1644,16 @@ def _plot_wd(x, probs=(0.05, 0.25, 0.5, 0.75, 0.95), width=900, height=380):
     probs = np.atleast_1d(np.asarray(probs, dtype=np.float64))
     w = np.asarray(x["weights"], dtype=np.float64)
     panels = []
+    # keep_paths = k < Pfade (6.5b): Vermögensfächer mit den Gewichten der behaltenen Spalten, Konsum mit allen;
+    # Titel mit Zusatz, ebenso als Attribut ``title`` der Tabelle ``wealth`` in ``data``
+    sp_m = np.asarray(x["spending"], dtype=np.float64)
+    title = None
     if x.get("wealth") is not None:
-        panels.append((np.asarray(x["wealth"], dtype=np.float64), "Reales Vermögen", 0))
-    panels.append((np.asarray(x["spending"], dtype=np.float64), "Realer Konsum je Jahr", 1))
+        wm = np.asarray(x["wealth"], dtype=np.float64)
+        kk, nn = wm.shape[1], sp_m.shape[1]
+        title = _sp("Reales Vermögen (erste %d von %d Pfaden)", kk, nn) if kk < nn else None
+        panels.append((wm, "Reales Vermögen" if title is None else title, 0, w[:kk]))
+    panels.append((sp_m, "Realer Konsum je Jahr", 1, w))
     npn = len(panels)
     pw = width / npn
     qn = []
@@ -1638,12 +1665,14 @@ def _plot_wd(x, probs=(0.05, 0.25, 0.5, 0.75, 0.95), width=900, height=380):
            "font-family=\"sans-serif\" font-size=\"12\">\n" % (_jl_str(width), _jl_str(height), _jl_str(width), _jl_str(height)),
            "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n"]
     k = len(probs)
-    for pi_, (M, main, x0) in enumerate(panels):
-        Qr = np.column_stack([np.asarray(_wquantile(M[i, :], w, probs), dtype=np.float64) for i in range(M.shape[0])])
+    for pi_, (M, main, x0, wp) in enumerate(panels):
+        Qr = np.column_stack([np.asarray(_wquantile(M[i, :], wp, probs), dtype=np.float64) for i in range(M.shape[0])])
         Q = Qr / 1000
         xs = list(range(x0, x0 + M.shape[0]))
         data["wealth" if x0 == 0 else "spending"] = pd.DataFrame(
             {"year": np.array(xs, dtype=np.int64), **{qn[i]: Qr[i, :].copy() for i in range(len(qn))}})
+        if x0 == 0 and title is not None:
+            data["wealth"].attrs["title"] = title
         fin = Q.ravel(order="F")
         fin = fin[np.isfinite(fin)]
         ylo, yhi = (0.0, 1.0) if fin.size == 0 else (float(fin.min()), float(fin.max()))

@@ -7,9 +7,9 @@
 # Die Rechenreihenfolge folgt 1:1 dem C++-Code (einfache Schleifen in double).
 # `std::sort` (libstdc++-Introsort, nicht stabil) ist in `_std_sort!` exakt
 # nachgebildet, weil die Auswahl der Basisbeobachtungen in `qr_pick` bei
-# gleichen Residuen von der Reihenfolge abhängt. Die `long double`-Rechnung in
-# Kendalls Tau läuft über `BigFloat` mit 64 Bit Mantisse (x87-Genauigkeit,
-# korrekt gerundet wie `fsqrt`/`fdiv`).
+# gleichen Residuen von der Reihenfolge abhängt. Kendalls Tau rechnet seit N5 wie der
+# C++-Kern ganzzahlig und in double-double (vorher long double über `BigFloat` mit
+# 64 Bit Mantisse).
 module DependenceCore
 
 import ..SimLev
@@ -252,15 +252,34 @@ function kendall_tau_core(x, y)
     end
     n2 += div(ty * (ty - 1), 2)
     n0 = div(Int64(n) * (n - 1), 2)
-    # long double: (long double) n0 - n1 - n2 + n3 - 2.0L * swaps, sqrtl, Division
-    setprecision(BigFloat, 64) do
-        ld(v) = BigFloat(v; precision = 64)
-        num = ((ld(n0) - ld(n1)) - ld(n2)) + ld(n3)
-        num = num - ld(2) * ld(swaps)
-        den = sqrt(ld(n0 - n1) * ld(n0 - n2))
-        iszero(den) && return SimLev.NA
-        Float64(num / den)
-    end
+    # N5 (wie der C++-Kern): Zähler und Faktoren des Nenners ganzzahlig, Wurzel und Division double-double
+    num = (n0 - n1) - n2 + n3 - 2 * swaps
+    A = n0 - n1; B = n0 - n2
+    (A <= 0 || B <= 0) && return SimLev.NA
+    return _kt_ratio(num, A, B)
+end
+
+# double-double-Hilfen (Dekker 1971; Shewchuk 1997), Operation für Operation wie kt_* in research_core_impl.h
+_kt_two_sum(a::Float64, b::Float64) = (s = a + b; bb = s - a; (s, (a - (s - bb)) + (b - bb)))
+_kt_fast_two_sum(a::Float64, b::Float64) = (s = a + b; (s, b - (s - a)))
+_kt_split(a::Float64) = (c = 134217729.0 * a; hi = c - (c - a); (hi, a - hi))
+function _kt_two_prod(a::Float64, b::Float64)
+    p = a * b
+    ah, al = _kt_split(a); bh, bl = _kt_split(b)
+    return (p, ((ah * bh - p) + ah * bl + al * bh) + al * bl)
+end
+_kt_from_ll(v::Int64) = (hi = Float64(v); (hi, Float64(v - unsafe_trunc(Int64, hi))))
+function _kt_ratio(num::Int64, A::Int64, B::Int64)
+    ah, al = _kt_from_ll(A); bh, bl = _kt_from_ll(B); zh, zl = _kt_from_ll(num)
+    ph, pl = _kt_two_prod(ah, bh)
+    ph, pl = _kt_fast_two_sum(ph, pl + ((ah * bl + al * bh) + al * bl))
+    s0 = sqrt(ph)
+    qh, ql = _kt_two_prod(s0, s0)
+    sh, sl = _kt_fast_two_sum(s0, (((ph - qh) - ql) + pl) / (2.0 * s0))
+    t0 = zh / sh
+    th, tl = _kt_two_prod(t0, sh)
+    rem = (((zh - th) - tl) - t0 * sl) + zl
+    return t0 + rem / sh
 end
 
 # ─────────────────────────────────────────────────────────────────────────────

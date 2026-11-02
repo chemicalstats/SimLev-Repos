@@ -20,8 +20,8 @@ import numpy as np
 
 from . import _ext
 
-__all__ = ["garch11_filter", "garch11_nll", "garch11_fit", "fit_garch11", "gpd_nll", "gpd_pwm", "gpd_fit",
-           "dcc_filter", "dcc_fit", "ms_garch_filter", "ms_garch_nll", "ms_garch_grad", "ms_garch_starts", "ms_garch_fitstarts",
+__all__ = ["garch11_filter", "garch11_nll", "garch11_grad", "garch11_fit", "fit_garch11", "gpd_nll", "gpd_pwm", "gpd_fit",
+           "dcc_filter", "dcc_fit", "backcast_obj", "backcast_fit", "ms_garch_filter", "ms_garch_nll", "ms_garch_grad", "ms_garch_starts", "ms_garch_fitstarts",
            "ms_garch_fit", "hmm_em_univ", "hmm_viterbi", "boot_idx_iid", "boot_idx_block", "boot_idx_stationary",
            "boot_idx_regime", "boot_idx_tails", "boot_wild", "boot_reset", "boot_evt", "boot_garch",
            "boot_ms_garch", "rolling_vol", "assign_regimes", "estimate_trans_mat"]
@@ -77,6 +77,15 @@ def garch11_nll(e, par, gjr=False, s2_init=None):
     pv = _vec(par)
     p[:min(5, pv.size)] = pv[:5]
     return _ext.slc_garch11_nll(_vec(e), p, bool(gjr), math.nan if s2_init is None else float(s2_init))
+
+
+def garch11_grad(theta, e, gjr=True, s2_init=None):
+    """N3: GJR-NLL und analytischer Gradient an ``theta`` = (mu, log omega, a, g, b) (Vorwärtsrekursion der
+    Ableitungen von s2, wie im Fit); ``{"value", "gradient"}``, nicht endlich: value = inf, gradient = nan.
+    N4: auch sGARCH (``gjr=False``, ``theta`` = (mu, log omega, a, b))."""
+    out = np.empty(5 if gjr else 4)
+    v = _ext.slc_garch11_grad(_vec(e), _vec(theta), bool(gjr), math.nan if s2_init is None else float(s2_init), out)
+    return {"value": v, "gradient": out}
 
 
 def garch11_fit(e, gjr=False):
@@ -142,6 +151,27 @@ def dcc_fit(Z, Qbar):
         raise ValueError("interner Fehler: Qbar muss k x k sein")
     a, b, nll, code, t1, t2 = _ext.slc_dcc_fit(z, n, k, q)
     return {"a": a, "b": b, "nll": nll, "convergence": code, "par": np.array([t1, t2])}
+
+
+# ── Backcast (N5) ────────────────────────────────────────────────────────────
+
+def _bc_prob(prob):
+    """prob = (x oder None, c1, c2 oder None, lev, sp, dr, pos (1-basiert), logp, (objective, loss, horizon), hw)."""
+    x, c1, c2, lev, sp, dr, pos, logp, opt, hw = prob
+    return ((None if x is None else _vec(x)), _vec(c1), (None if c2 is None else _vec(c2)), float(lev), _vec(sp), _vec(dr),
+            _ivec(pos), _vec(logp), int(opt[0]), int(opt[1]), int(opt[2]), float(hw))
+
+
+def backcast_obj(prob, par, fit, grad=False):
+    """Zielfunktion von backcast_fit in C (``.sl_backcast_obj``); dict(value, gradient)."""
+    f, g = _ext.slc_backcast_obj(*_bc_prob(prob), _vec(par), _ivec(fit), bool(grad))
+    return {"value": f, "gradient": (np.array(g, dtype=np.float64) if grad else None)}
+
+
+def backcast_fit(prob, par0, fit, lower, upper):
+    """Fit mehrerer Parameter von backcast_fit ganz in C (``.sl_backcast_fit``); dict(par, value, convergence)."""
+    p, v, code = _ext.slc_backcast_fit(*_bc_prob(prob), _vec(par0), _ivec(fit), _vec(lower), _vec(upper))
+    return {"par": np.array(p, dtype=np.float64), "value": v, "convergence": code}
 
 
 # ── MS-GARCH und HMM ─────────────────────────────────────────────────────────

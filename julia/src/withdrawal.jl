@@ -29,7 +29,7 @@ const NA = SimLev.NA
 const B = SimLev.Bootstrap
 const _MISSING = B._MISSING
 const _Missing = B._Missing
-import ..Bootstrap: _stop, _warn, _message, _sp, _fmt1, _fmtstrs, _show, _as_char, _round0, _isnum, _numvec, _num1, _f1,
+import ..Bootstrap: _stop, _warn, _message, _sp, _keep_count, _fmt1, _fmtstrs, _show, _as_char, _round0, _isnum, _numvec, _num1, _f1,
                     _dvec, _ivec, _mat, _get, _names, _values, _len, _rval, _rsum, _rmean, _rprod, _rpow, _rlog, _rexp,
                     _cumprod, _cummax, _median, _quantile7, _weighted_mean, _wquantile, _uniq,
                     _match_arg, _todate, _seq_dates, _days, _is_boot_result, _is_study, _is_result, _deparse,
@@ -739,13 +739,16 @@ function _wd_tax_mode(tax)
     tax === nothing && return "none"
     (tax isa RList && SimLev.inherits(tax, "SimLevTaxProfile")) ||
         _stop("withdrawal_simulation: tax muss NULL oder ein Objekt aus tax_profile() sein, nicht $(SimLev._blk_cls(tax)).")
-    ct = tax["church_tax"]; pst = tax["private_sale_threshold"]
-    un = ["church_tax" => (ct isa Real && ct > 0), "private_sale_threshold" => !(pst isa Real && pst == 1000),
-          "base_rate" => tax["base_rate"] !== nothing, "guenstigerpruefung" => tax["guenstigerpruefung"] === true,
-          "income" => tax["income"] !== nothing, "harvest" => tax["harvest"] !== nothing]
+    pst = tax["private_sale_threshold"]
+    un = ["private_sale_threshold" => !(pst isa Real && pst == 1000),
+          "base_rate" => tax["base_rate"] !== nothing, "harvest" => tax["harvest"] !== nothing]
     bad = [p.first for p in un if p.second]
     isempty(bad) || _stop("withdrawal_simulation: tax_profile($(join(bad, ", "))) bildet die Entnahmephase nicht ab; " *
-                          "ausgewertet werden rate und sparer_pauschbetrag (Basiszins über base_rate von withdrawal_simulation()).")
+                          "ausgewertet werden rate, church_tax, sparer_pauschbetrag, guenstigerpruefung und income = income_rate() (Basiszins über base_rate von withdrawal_simulation()).")
+    ti = tax["income"]
+    ti isa RList && SimLev.inherits(ti, "SimLevIncomeTariff") &&
+        _stop("withdrawal_simulation: tax_profile(income = income_tariff()) bildet die Entnahmephase noch nicht ab (keine Veranlagung je Planjahr); " *
+              "für die Günstigerprüfung income = income_rate(marginal_rate) verwenden (Grenzsteuersatz in Prozent, z. B. 42).")
     return "person"
 end
 
@@ -759,8 +762,13 @@ end
 Entnahme-Simulation über viele Pfade (Port von `withdrawal_simulation()`).
 `x`: withdrawal_paths, Renditematrix (Perioden × Pfade), SimLevResult,
 Liste von SimLevResult oder Bootstrap-Studie. `tax`: `nothing` (ohne Steuern) oder
-`tax_profile()` (F2: ausgewertet werden `rate` und `sparer_pauschbetrag`). Ergebnis: RList der Klasse
-`SimLevWithdrawal`.
+`tax_profile()` (F2, 6.5b: ausgewertet werden `rate`, `church_tax`, `sparer_pauschbetrag`, `guenstigerpruefung` und
+`income = income_rate()`, Satz wie in `simulation()`; `private_sale_threshold` ≠ 1000, `base_rate`, `harvest` und
+`income_tariff()` ergeben einen Fehler). Kirchensteuer und Günstigerprüfung werden nicht aus der Ansparphase
+übernommen, sondern hier ausdrücklich angegeben. `keep_paths`: `true` (Standard) = Vermögensmatrix `wealth` aller
+Pfade, `false`/0 = keine, ganze Zahl k ≥ 1 = die ersten k Spalten (gerechnet werden alle Pfade; `plot` zeichnet den
+Vermögensfächer dann aus k Pfaden mit Titelzusatz „(erste k von n Pfaden)“, auch als Attribut `title` der Tabelle
+`data["wealth"]`). Ergebnis: RList der Klasse `SimLevWithdrawal`.
 """
 function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_value = 1e6, inflation = 0,
                                frequency = nothing, strategy = nothing, years = nothing, timing = nothing,
@@ -779,7 +787,16 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     freq_arg = frequency
     timing = _match_arg(timing, ("start", "end"))
     tax_mode = _wd_tax_mode(tax)
-    tax_rate = tax === nothing ? 26.375 : tax["rate"]
+    # 6.5b: Satz wie in simulation() (_tax_rates: Kirchensteuer, Günstigerprüfung einmal je Lauf); die Angaben stehen
+    # ausdrücklich in tax_profile(), aus der Ansparphase wird nichts übernommen
+    tax_rate = if tax === nothing
+        26.375 / 100
+    else
+        ti = tax["income"]
+        SimLev._tax_rates(tax["rate"], tax["church_tax"], tax["guenstigerpruefung"], ti === nothing ? nothing : ti["marginal_rate"],
+                          ti !== nothing && ti["soli_rate"] != 0, ti === nothing ? 5.5 : ti["soli_rate"],
+                          "withdrawal_simulation").effective_tax_rate
+    end
     sparer_pauschbetrag = tax === nothing ? 1000 : tax["sparer_pauschbetrag"]
     if horizon !== nothing && !_is_horizon(horizon)
         if !_num1(horizon) || _f1(horizon) <= 0
@@ -806,9 +823,8 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     chk(cost_basis, "cost_basis", "eine Zahl >= 0 in Prozent des Startwerts (z. B. 100)"); frac(cost_basis, "cost_basis")
     chk(loss_carryforward, "loss_carryforward", "eine Zahl >= 0 (EUR)")
     chk(gamma, "gamma", "eine Zahl >= 0 (relative Risikoaversion, z. B. 2)")
-    for (a, v) in (("vorabpauschale", vorabpauschale), ("keep_paths", keep_paths))
-        v isa Bool || _stop(@sprintf("withdrawal_simulation: '%s' muss TRUE oder FALSE sein, nicht %s.", a, _rshow(v)))
-    end
+    vorabpauschale isa Bool || _stop(@sprintf("withdrawal_simulation: '%s' muss TRUE oder FALSE sein, nicht %s.", "vorabpauschale", _rshow(vorabpauschale)))
+    kp = _keep_count(keep_paths, Inf, "withdrawal_simulation")   # Anzahl behaltener Pfade, begrenzt nach ncol(R)
     infl_is_mat = inflation isa AbstractMatrix
     if (_isnum(inflation)) || (inflation isa AbstractVector && length(inflation) == 1 && _numvec(inflation) !== nothing)
         chk(inflation, "inflation", "eine Zahl in Prozent p. a. über -100 (z. B. 2) oder eine Matrix"; lo = -99.999)
@@ -1043,11 +1059,12 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
         end
     end
     rp = _wd_param_vector(rule)
+    kp = min(kp, Float64(size(R, 2)))
     t0 = time()
     core = _wcore().wd_simulate(R, I, CAPE, BASE, ppy, _rule_code(rule["type"]), rp, timing == "start", start_value, inc,
-                                tax_mode == "person", Float64(tax_rate) / 100, Float64(partial_exemption) / 100, Float64(sparer_pauschbetrag),
+                                tax_mode == "person", Float64(tax_rate), Float64(partial_exemption) / 100, Float64(sparer_pauschbetrag),
                                 _istrue(vorabpauschale), Float64(sale_cost) / 100, Float64(cost_basis) / 100, Float64(loss_carryforward),
-                                _istrue(keep_paths) || horizon !== nothing,
+                                kp > 0 || horizon !== nothing,
                                 lots === nothing ? Float64[] : lots["n"], lots === nothing ? Float64[] : lots["basis"],
                                 lots === nothing ? Float64[] : lots["vp"], lots === nothing ? Int[] : lots["group"],
                                 spb_used1 > 0 ? max(0.0, Float64(sparer_pauschbetrag) - spb_used1) : -1.0, horizon !== nothing)
@@ -1100,12 +1117,12 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
         else
             paths["pwr"] = fill(NA, length(H))
         end
-        _istrue(keep_paths) || (wealth = nothing)
+        kp == 0 && (wealth = nothing)
     end
     w = _get(x, "weights")
     w = w === nothing ? ones(size(R, 2)) : _dvec(w)
     return RList("paths" => paths, "spending" => sp, "planned" => core["planned"],
-                 "wealth" => _istrue(keep_paths) ? wealth : nothing, "rule" => rule, "start_value" => start_value,
+                 "wealth" => kp == 0 ? nothing : (kp < size(wealth, 2) ? wealth[:, 1:Int(kp)] : wealth), "rule" => rule, "start_value" => start_value,
                  "frequency" => x["frequency"], "years" => ny, "full_years" => nfy, "horizon" => horizon,
                  "historical" => _istrue(_get(x, "historical")), "weights" => w, "tax_mode" => tax_mode, "gamma" => gamma,
                  "timing" => timing, "source" => _get(x, "source"), "adopted" => length(adopted) > 0 ? adopted : nothing,
@@ -1273,8 +1290,17 @@ function _plot_wd(x; probs = [0.05, 0.25, 0.5, 0.75, 0.95], file = nothing, widt
     probs = _dvec(probs)
     w = _dvec(x["weights"])
     panels = Any[]
-    _get(x, "wealth") === nothing || push!(panels, (_mat(x["wealth"]), "Reales Vermögen", 0))
-    push!(panels, (_mat(x["spending"]), "Realer Konsum je Jahr", 1))
+    # keep_paths = k < Pfade (6.5b): Vermögensfächer mit den Gewichten der behaltenen Spalten, Konsum mit allen;
+    # Titel mit Zusatz, ebenso als Attribut `title` der Tabelle `wealth` in `data`
+    spm = _mat(x["spending"])
+    title = nothing
+    if _get(x, "wealth") !== nothing
+        wm = _mat(x["wealth"])
+        kk, nn = size(wm, 2), size(spm, 2)
+        kk < nn && (title = _sp("Reales Vermögen (erste %d von %d Pfaden)", kk, nn))
+        push!(panels, (wm, title === nothing ? "Reales Vermögen" : title, 0, w[1:kk]))
+    end
+    push!(panels, (spm, "Realer Konsum je Jahr", 1, w))
     np = length(panels)
     pw = width / np
     data = SimLev.RList()
@@ -1284,12 +1310,13 @@ function _plot_wd(x; probs = [0.05, 0.25, 0.5, 0.75, 0.95], file = nothing, widt
     print(io, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$width\" height=\"$height\" viewBox=\"0 0 $width $height\" font-family=\"sans-serif\" font-size=\"12\">\n")
     print(io, "<rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n")
     k = length(probs)
-    for (pi_, (M, main, x0)) in enumerate(panels)
-        Qr = reduce(hcat, [_wquantile(M[i, :], w, probs) for i in 1:size(M, 1)])
+    for (pi_, (M, main, x0, wp)) in enumerate(panels)
+        Qr = reduce(hcat, [_wquantile(M[i, :], wp, probs) for i in 1:size(M, 1)])
         Q = Qr ./ 1000
         xs = collect(x0:x0+size(M, 1)-1)
         # dargestellte Werte unskaliert (gezeichnet in Tausend)
         data[x0 == 0 ? "wealth" : "spending"] = SimLev.RFrame("year" => xs, (qn[i] => Float64[Qr[i, j] for j in eachindex(xs)] for i in eachindex(qn))...)
+        x0 == 0 && title !== nothing && (SimLev.attrs(data["wealth"])["title"] = title)
         fin = filter(isfinite, vec(Q))
         ylo, yhi = isempty(fin) ? (0.0, 1.0) : (minimum(fin), maximum(fin))
         yhi == ylo && (yhi = ylo + 1)

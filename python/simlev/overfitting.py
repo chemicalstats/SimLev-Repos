@@ -236,7 +236,7 @@ def _of_returns_np(x, frequency, dates=None, risk_free=0):
     """Wie ``.of_returns``; liefert ``(R, Spaltennamen, Zeilennamen, dates, ppy, cols)`` mit numpy."""
     if _is_param_search(x):
         if x.get("returns") is None:
-            raise ValueError("Suche ohne gespeicherte Renditen (keep_returns = FALSE).")
+            raise ValueError("Suche ohne gespeicherte Renditen (keep_returns = \"none\").")
         ret = x["returns"]
         if isinstance(ret, pd.DataFrame):
             R = ret.to_numpy(dtype=np.float64, na_value=_NA)

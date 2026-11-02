@@ -389,7 +389,8 @@ tail_dependence <- function(x, y, q = c(0.01, 0.025, 0.05, 0.10, 0.20)) {
 #' \deqn{Q_t = (1 - a - b)\bar Q + a z_{t-1} z_{t-1}' + b Q_{t-1}}
 #' mit \eqn{Q_1 = \bar Q} (Stichproben-Korrelation der \eqn{z_t}) und
 #' \eqn{a, b > 0}, \eqn{a + b < 0.999}, per Quasi-Maximum-Likelihood
-#' (Nelder-Mead, ganz in der C-Bibliothek von SimLev). Die bedingte Korrelation ist
+#' (BFGS mit analytischem Gradienten, ganz in der
+#' C-Bibliothek von SimLev). Die bedingte Korrelation ist
 #' \eqn{R_t = \mathrm{diag}(Q_t)^{-1/2} Q_t \mathrm{diag}(Q_t)^{-1/2}}.
 #' Die Schaetzung ist deterministisch: Den frueheren zufaelligen Rueckfall der
 #' GARCH-Stufe (gosolnp mit Startwert aus der Uhrzeit) gibt es nicht mehr; die
@@ -441,7 +442,8 @@ dependence_dcc <- function(R) {
                  nm[ij[1]], nm[ij[2]], Qb[ij[1], ij[2]]))
   }
   # Stufe 2 ganz in C (Entwurf B.11): s = 0.999 plogis(th1), a = s plogis(th2), b = s - a; Start
-  # (qlogis(0.98/0.999), qlogis(0.03/0.98)), Nelder-Mead (maxit 2000, reltol 1e-10); deterministisch
+  # (qlogis(0.98/0.999), qlogis(0.03/0.98)); N5: BFGS mit analytischem
+  # Gradienten (bis 1.1.0 Nelder-Mead, maxit 2000, reltol 1e-10); deterministisch
   o <- .sl_dcc_fit(Z, Qb)
   p <- c(o$a, o$b)
   fl <- .sl_dcc_filter(Z, p[1], p[2], Qb, TRUE)

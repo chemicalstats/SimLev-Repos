@@ -189,18 +189,25 @@ unveraendert; mit \code{seed = NULL} liefern wiederholte Aufrufe verschiedene Pf
 
 \item{chunk_dir}{Optional (Standard \code{NULL}) Verzeichnis fuer
 Zwischenergebnisse je Chunk (Dateien \code{chunk_<Nr>_seed<Seed>.rds},
-bei \code{keep_returns} mit Frequenz-Suffix). Vorhandene Dateien werden
+bei \code{keep_returns} mit Frequenz-Suffix, bei \code{keep_paths} > 0 mit
+Suffix \code{_keep<k>}). Vorhandene Dateien werden
 gelesen statt neu gerechnet; so wird ein abgebrochener Lauf mit
 gleichem Seed fortgesetzt. Die Dateien werden nur ueber Chunk-Nummer,
-Seed und \code{keep_returns} zugeordnet: bei geaenderten Strategien,
-Daten oder Parametern ein neues Verzeichnis verwenden.}
+Seed, \code{keep_returns} und \code{keep_paths} zugeordnet: bei geaenderten
+Strategien, Daten oder Parametern ein neues Verzeichnis verwenden.}
 
 \item{max_tries}{Versuche je Pfad (Standard 10), falls ein Pfad ungueltig
 ist (Indexrendite <= 0 oder nicht endlich). Ein Totalverlust eines
 Hebelprodukts macht den Pfad nicht ungueltig.}
 
-\item{keep_paths}{Anzahl k: die Pfadmatrizen der ersten k Pfade zusaetzlich
-zurueckgeben (Diagnose; Standard 0).}
+\item{keep_paths}{Pfadmatrizen zusaetzlich zurueckgeben (Diagnose):
+\code{TRUE} = alle Pfade, \code{FALSE} oder 0 (Standard) = keine, ganze
+Zahl k >= 1 = die ersten k Pfade (k groesser als die Pfadzahl: alle);
+\code{NA}, Text, Vektoren, negative oder nicht ganze Zahlen ergeben einen
+Fehler. Speicherbedarf: Alle behaltenen Pfadmatrizen bleiben im Ergebnis
+und gehen bei \code{cores > 1} auch durch die Prozessgrenze, ungefaehr
+Pfade x (Pfadlaenge + 1) x Reihen x 8 Byte (z. B. 10 000 Pfade x 7 300
+Tage x 3 Reihen x 8 Byte = 1,75 GB).}
 
 \item{keep_returns}{\code{"none"} (Standard) oder \code{"year"},
 \code{"quarter"}, \code{"month"}: speichert je Strategie und Pfad die

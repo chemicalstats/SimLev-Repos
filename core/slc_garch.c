@@ -19,8 +19,12 @@
  *             zwei mit kleinem beta), omega über Varianz-Targeting. sGARCH: genommen wird der
  *             Rasterpunkt mit der kleinsten NLL, bei Gleichstand der erste. GJR (N1): BFGS von
  *             jedem Rasterpunkt, der beste Lauf gewinnt, bei Gleichstand der erste. Optimierung mit
- *             BFGS (slc_opt.c, sl_minimize) und numerischem Gradienten; mu in Einheiten der
- *             Standardabweichung (parscale), damit die Hesse-Matrix gut skaliert ist.
+ *             BFGS (slc_opt.c, sl_minimize), GJR seit N3 und sGARCH seit N4 (bis N3 numerischer
+ *             Gradient) mit dem analytischen Gradienten aus einer Vorwärtsrekursion der Ableitungen
+ *             von sigma_t^2 (garch_fg: f und g in einem Durchlauf, Logarithmen über ein laufendes
+ *             Produkt);
+ *             mu in Einheiten der Standardabweichung (parscale), damit die Hesse-Matrix gut
+ *             skaliert ist.
  *             Filter: wie der frühere eigene Kern garch_filter (bis 1.0.0): s2[0] =
  *             s2_init, Rekursion wie oben, Untergrenze 1e-14.
  *             Ganze Stufe sl_garch11_estimate wie die eigene R-Funktion .fit_garch11
@@ -36,6 +40,11 @@
  *               Summen. ZAMM 54(1), 39–51.
  *             Nocedal, J., Wright, S. J. (2006). Numerical Optimization, 2. Aufl., Springer
  *               (BFGS, über slc_opt.c).
+ *             Fiorentini, G., Calzolari, G., Panattoni, L. (1996). Analytic derivatives and the
+ *               computation of GARCH estimates. Journal of Applied Econometrics 11(4), 399–417
+ *               (N3/N4: Rekursion der Ableitungen der bedingten Varianz).
+ *             Griewank, A., Walther, A. (2008). Evaluating Derivatives, 2. Aufl., SIAM
+ *               (N3/N4: Vorwärtsmodus, von Hand geschrieben).
  *             Eigener SimLev-Code: .ms_garch_unpack/.ms_garch_pack und das Raster aus
  *               r/R/ms_garch.R, .fit_garch11 aus r/R/bootstrap.R (bis zur Grenze des
  *               rugarch-Aufrufs), früher garch_filter (bis 1.0.0).
@@ -45,7 +54,8 @@
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen (rugarch,
  *             Rsolnp nicht gelesen).
- * Prüforakel: rugarch 1.5-6 ugarchfit (nur Plausibilität, scratchpad/e94/, N1: scratchpad/en1/).
+ * Prüforakel: rugarch 1.5-6 ugarchfit (nur Plausibilität, scratchpad/e94/, N1: scratchpad/en1/,
+ *             N3: scratchpad/en3/, N4: scratchpad/en4/).
  */
 #include "slc_internal.h"
 #include "slc_la_internal.h"
@@ -194,18 +204,149 @@ static double garch_obj(const double *th, void *data)
     return nll_par(d->n, d->e, par, d->s2_init);
 }
 
+/* N3: GJR-Zielfunktion und ihr analytischer Gradient nach theta = (mu, log omega, a, g, b) in einem
+ * Durchlauf (Vorwärtsmodus, Griewank/Walther 2008; Ableitungen der GARCH-Likelihood wie bei
+ * Fiorentini/Calzolari/Panattoni 1996, hier für die Umparametrisierung und GJR). Mit
+ * c+ = alpha, c- = alpha + gamma (Koeffizient von eps^2 bei eps >= 0 bzw. eps < 0) gilt
+ * s2_{t+1} = omega + c_t eps_t^2 + beta s2_t; die Ableitungen D = d s2_t / d(mu, omega, c+, c-, beta)
+ * laufen mit derselben Rekursion mit (s2_1 fest, also D_1 = 0; an der Untergrenze D = 0):
+ *   D_mu' = beta D_mu - 2 c_t eps_t,  D_omega' = 1 + beta D_omega,  D_c+' = 1{eps_t >= 0} eps_t^2 + beta D_c+,
+ *   D_c-' = 1{eps_t < 0} eps_t^2 + beta D_c-,  D_beta' = s2_t + beta D_beta,
+ * und dNLL = 1/2 sum q_t D_t mit q_t = (1 - eps_t^2/s2_t)/s2_t, für mu zusätzlich -eps_t/s2_t. Zum Schluss die
+ * Kettenregel über omega = exp(theta_omega) und (c+/2, c-/2, beta) = softmax: d s_i / d th_j = s_i (1{i=j} - s_j).
+ * N4: sGARCH (gjr = 0, theta = (mu, log omega, a, b)) mit demselben Durchlauf ohne den Asymmetrie-Term:
+ * c_t = alpha für beide Vorzeichen, D_alpha' = eps_t^2 + beta D_alpha (an der Stelle von D_c+, D_c- entfällt),
+ * Kettenregel über (alpha, beta) = softmax.
+ * Je Zeitpunkt eine Division und kein Logarithmus: sum log s2_t läuft über ein Produkt, das bei Verlassen von
+ * [2^-600, 2^600] logarithmiert und neu begonnen wird (s2_t >= 1e-14 > 2^-47; s2_t > 2^400 geht einzeln in
+ * die Summe, damit das Produkt endlich bleibt). Der Indikator 1{eps < 0} wird je Zeitpunkt einmal bestimmt.
+ * NLL: eps_t^2/s2_t in Teilsummen über je 32 Zeitpunkte, diese und die Logarithmen kompensiert (Neumaier);
+ * Summen des Gradienten einfach. Gemessen (scratchpad/en3/): relativer Fehler von f gegen eine Rechnung in
+ * long double höchstens 7e-16 wie bei sl_garch11_nll (Logarithmus je Zeitpunkt, alles kompensiert).
+ * gjr ist in beiden Aufrufen (gjr_fg, sg_fg) eine Konstante; mit GARCH_FG_INLINE (GCC, Clang) wird die
+ * Schleife je Modell eigens übersetzt (gemessen, scratchpad/en4/: GJR sonst bis 14 % langsamer als in N3,
+ * sGARCH 15 %). Die Ergebnisse hängen davon nicht ab. Nicht endlich: +Inf, g = NaN (4 bzw. 5 Werte). */
+#if defined(__GNUC__)
+#define GARCH_FG_INLINE inline __attribute__((always_inline))
+#else
+#define GARCH_FG_INLINE inline
+#endif
+static GARCH_FG_INLINE double garch_fg(int n, const double *e, const double *th, double s2_init, double *g, const int gjr)
+{
+    const int np = gjr ? 5 : 4;
+    const double e1 = exp(th[2]), e2 = exp(th[3]), e3 = gjr ? exp(th[4]) : 0.0;
+    const double d = gjr ? 1.0 + ((e1 + e2) + e3) : 1.0 + (e1 + e2);
+    const double mu = th[0], om = exp(th[1]), al = gjr ? 2.0 * e1 / d : e1 / d, ga = gjr ? 2.0 * (e2 - e1) / d : 0.0,
+                 be = gjr ? e3 / d : e2 / d;
+    const double cp = al + ga * 0.0, cn = al + ga * 1.0;   /* wie (alpha + gamma 1{eps < 0}) in nll_par */
+    double v = s2_init, P = 1.0, tot, bs = 0.0;
+    double Dm = 0.0, Do = 0.0, Dp = 0.0, Dn = 0.0, Db = 0.0, Gm = 0.0, Go = 0.0, Gp = 0.0, Gn = 0.0, Gb = 0.0;
+    slc_acc a;
+    int t;
+    if (!isfinite(mu) || !isfinite(om) || !isfinite(al) || !isfinite(be) || !isfinite(ga)) goto bad;
+    slc_acc_init(&a, 0.0);
+    for (t = 0; t < n; t++) {
+        const double ep = e[t] - mu, ep2 = ep * ep, iv = 1.0 / v, r = ep2 * iv, q = (1.0 - r) * iv, m2ep = -2.0 * ep;
+        const int neg = gjr && ep < 0.0;
+        const double c = neg ? cn : cp, pn = neg ? ep2 : 0.0;
+        double vn;
+        if (v > 0x1p400) slc_acc_add(&a, log(v)); else P *= v;
+        if (P < 0x1p-600 || P > 0x1p600) { slc_acc_add(&a, log(P)); P = 1.0; }
+        bs += r;
+        if ((t & 31) == 31) { slc_acc_add(&a, bs); bs = 0.0; }
+        Gm += q * Dm + m2ep * iv; Go += q * Do; Gp += q * Dp; Gb += q * Db;
+        if (gjr) Gn += q * Dn;
+        vn = om + c * ep2 + be * v;
+        if (vn < GARCH_FLOOR) { vn = GARCH_FLOOR; Dm = Do = Dp = Dn = Db = 0.0; }
+        else {
+            Dm = be * Dm + c * m2ep; Do = 1.0 + be * Do;
+            Dp = (ep2 - pn) + be * Dp; Db = v + be * Db;   /* sGARCH: Dp = D_alpha (pn = 0) */
+            if (gjr) Dn = pn + be * Dn;
+        }
+        v = vn;
+    }
+    slc_acc_add(&a, bs);
+    slc_acc_add(&a, log(P));
+    tot = 0.5 * ((double) n * SLC_LN_2PI + slc_acc_val(&a));
+    if (!isfinite(tot)) goto bad;
+    g[0] = 0.5 * Gm; g[1] = 0.5 * Go * om;
+    if (gjr) {
+        const double s1 = e1 / d, s2 = e2 / d, s3 = e3 / d;
+        const double A = Gp * s1, B = Gn * s2, C = 0.5 * Gb * s3, T = (A + B) + C;   /* c+ = 2 s1, c- = 2 s2 */
+        g[2] = A - s1 * T; g[3] = B - s2 * T; g[4] = C - s3 * T;
+    } else {
+        const double s1 = e1 / d, s2 = e2 / d;
+        const double A = 0.5 * Gp * s1, C = 0.5 * Gb * s2, T = A + C;   /* alpha = s1, beta = s2 */
+        g[2] = A - s1 * T; g[3] = C - s2 * T;
+    }
+    for (t = 0; t < np; t++) if (!isfinite(g[t])) goto bad;
+    return tot;
+bad:
+    for (t = 0; t < np; t++) g[t] = NAN;
+    return INFINITY;
+}
+
+static double gjr_fg(int n, const double *e, const double *th, double s2_init, double *g)
+{
+    return garch_fg(n, e, th, s2_init, g, 1);
+}
+
+/* N4: sGARCH, theta = (mu, log omega, a, b) */
+static double sg_fg(int n, const double *e, const double *th, double s2_init, double *g)
+{
+    return garch_fg(n, e, th, s2_init, g, 0);
+}
+
+int sl_garch11_grad(sl_ctx *cx, int n, const double *e, int gjr, const double *theta, double s2_init,
+                    double *nll, double *grad)
+{
+    int st = check_series(cx, n, e, 1, "garch11_grad");
+    if (st != SL_OK) return st;
+    if (isnan(s2_init)) s2_init = var_c(n, e, mean_c(n, e));
+    *nll = gjr ? gjr_fg(n, e, theta, s2_init, grad) : sg_fg(n, e, theta, s2_init, grad);   /* N4: auch sGARCH */
+    return SL_OK;
+}
+
 /* ── ML-Schätzung ── */
 
-/* N1: GJR – BFGS von jedem Rasterpunkt mit endlicher NLL (Varianz-Targeting wie bei sGARCH), der beste
- * Lauf gewinnt, bei Gleichstand der erste. Von nur einem Start (dem besten Rasterpunkt) blieb BFGS im
- * erweiterten Bereich (gamma < 0) auf fast unabhängigen Reihen an der Grenze beta -> 1 hängen, während
- * das Optimum bei beta -> 0 lag (scratchpad/en1/). */
+/* N3: GJR – BFGS mit analytischem Gradienten (gjr_fg) über sl_minimize von jedem Rasterpunkt mit endlicher
+ * NLL (Varianz-Targeting wie bei sGARCH), der beste Lauf gewinnt, bei Gleichstand der erste. f und g kommen
+ * aus einem Durchlauf: Bei jeder Anfrage nach f wird g mitgerechnet und aufbewahrt; die Anfrage nach g am
+ * selben Punkt (BFGS fragt sie nach erfüllter Abnahmebedingung, in den Messungen bei 92 % der Punkte) liest
+ * nur den Speicher. Alle sieben Starts laufen bis zum Ende: Ein kurzer Vorlauf mit Fortsetzung nur der besten
+ * Starts sparte 13–35 %, traf aber auf neuen Reihen nicht immer das Optimum (scratchpad/en3/). (N1: von nur
+ * einem Start blieb BFGS auf fast unabhängigen Reihen an der Grenze beta -> 1 hängen, scratchpad/en1/.)
+ * N4: sGARCH ebenso mit sg_fg und demselben Speicher, Start wie bisher nur vom besten Rasterpunkt. */
+typedef struct { const garch_data *d; double xc[5], gc[5]; int have; } fg_cache;
+
+static double fg_obj(const double *th, void *data)
+{
+    fg_cache *k = (fg_cache *) data;
+    const garch_data *d = k->d;
+    const size_t sz = (size_t) sl_garch11_npar(d->gjr) * sizeof(double);
+    double f = d->gjr ? gjr_fg(d->n, d->e, th, d->s2_init, k->gc) : sg_fg(d->n, d->e, th, d->s2_init, k->gc);
+    memcpy(k->xc, th, sz);
+    k->have = 1;
+    return f;
+}
+
+static void fg_gr(const double *th, double *g, void *data)
+{
+    fg_cache *k = (fg_cache *) data;
+    const garch_data *d = k->d;
+    const size_t sz = (size_t) sl_garch11_npar(d->gjr) * sizeof(double);
+    if (k->have && memcmp(k->xc, th, sz) == 0) memcpy(g, k->gc, sz);
+    else if (d->gjr) gjr_fg(d->n, d->e, th, d->s2_init, g);
+    else sg_fg(d->n, d->e, th, d->s2_init, g);
+}
+
 static int fit_gjr(sl_ctx *cx, garch_data *d, double m, double v, const sl_opt_ctrl *ctrl, double *par,
                    double *loglik, int *code)
 {
     sl_opt_ctrl c;
     double ths[GRID_NG][5], fs[GRID_NG], th[5], best_th[5], best = INFINITY, ps[5], fmin;
     int i, st, iter, nfev, cd, have = 0, any = 0;
+    fg_cache k;
     for (i = 0; i < GRID_NG; i++) {
         double p[5];
         p[0] = m;
@@ -223,11 +364,13 @@ static int fit_gjr(sl_ctx *cx, garch_data *d, double m, double v, const sl_opt_c
         for (i = 1; i < 5; i++) ps[i] = 1.0;
         c.parscale = ps;
     }
+    k.d = d;
     *code = -1;
     for (i = 0; i < GRID_NG; i++) {
         if (!isfinite(fs[i])) continue;
         memcpy(th, ths[i], sizeof th);
-        st = sl_minimize(cx, SL_OPT_BFGS, 5, th, NULL, NULL, &c, garch_obj, NULL, d, &fmin, &cd, &iter, &nfev);
+        k.have = 0;
+        st = sl_minimize(cx, SL_OPT_BFGS, 5, th, NULL, NULL, &c, fg_obj, fg_gr, &k, &fmin, &cd, &iter, &nfev);   /* N3 */
         if (st != SL_OK) return st;
         if (!have || fmin < best) { memcpy(best_th, th, sizeof th); best = fmin; *code = cd; have = 1; }
     }
@@ -245,6 +388,7 @@ int sl_garch11_fit(sl_ctx *cx, int n, const double *e, int gjr, const sl_opt_ctr
     double m, v, th[5], best_th[5], best = INFINITY, ps[5], fmin, g[5];
     int i, np = sl_garch11_npar(gjr), st, iter, nfev, have = 0;
     const double (*grid)[3] = gjr ? grid_g : grid_s;
+    fg_cache k;
     st = check_series(cx, n, e, 10, "GARCH");
     if (st != SL_OK) return st;
     m = mean_c(n, e);
@@ -270,8 +414,9 @@ int sl_garch11_fit(sl_ctx *cx, int n, const double *e, int gjr, const sl_opt_ctr
         for (i = 1; i < np; i++) ps[i] = 1.0;
         c.parscale = ps;
     }
-    st = sl_minimize(cx, SL_OPT_BFGS, np, best_th, NULL, NULL, &c, garch_obj, NULL, &d,
-                     &fmin, code, &iter, &nfev);
+    k.d = &d; k.have = 0;
+    st = sl_minimize(cx, SL_OPT_BFGS, np, best_th, NULL, NULL, &c, fg_obj, fg_gr, &k,
+                     &fmin, code, &iter, &nfev);   /* N4: analytischer Gradient (sg_fg) */
     if (st != SL_OK) return st;
     if (!isfinite(fmin)) return sl_fail(cx, SL_ECONV, "GARCH: Log-Likelihood nicht endlich (Code %d)", *code);
     sl_garch11_unpack(gjr, best_th, g);

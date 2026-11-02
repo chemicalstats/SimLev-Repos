@@ -229,6 +229,26 @@
   list(level = e_lvl, ret = e_ret)
 }
 
+#' Daten der Zielfunktion fuer die C-Bibliothek (N5, .sl_backcast_fit, slc_backcast.c)
+#'
+#' Zeilen \code{rows} des Fit-Fensters: im Strukturmodell x, fin und ter_cost (r = beta L x + fin -
+#' ter_cost - ...), sonst die Basis der Regression als c1 (wie .bc_model_returns ohne spread und drag).
+#' @keywords internal
+#' @noRd
+.bc_cprob <- function(prep, model, reg, rows, obs, objective, loss, horizon, hybrid_weight) {
+  if (model == "structural") {
+    x <- as.double(prep$x[rows]); c1 <- as.double(prep$fin[rows]); c2 <- as.double(prep$ter_cost[rows])
+  } else {
+    x <- NULL; c2 <- NULL
+    c1 <- as.double(.bc_model_returns(prep, list(drag = 0, spread = 0, beta = 1), model, reg)[rows])
+  }
+  list(x, c1, c2, as.double(prep$leverage), as.double(prep$sp_unit[rows]), as.double(prep$dr_unit[rows]),
+       as.integer(obs$pos), as.double(obs$logp),
+       c(match(objective, c("level", "return", "hybrid")), match(loss, c("rmse", "mse", "mae", "median", "max")),
+         max(1L, as.integer(horizon))),
+       as.double(hybrid_weight))
+}
+
 #' Zielfunktion
 #' @keywords internal
 #' @noRd
@@ -548,9 +568,14 @@ backcast_fit <- function(data, product, index,
       p <- par0; p[[fit]] <- o$minimum
       return(list(par = p, value = o$objective, grid = NULL))
     }
-    st <- unlist(par0[fit])
     lo <- vapply(fit, function(k) bounds[[k]][1], 0); hi <- vapply(fit, function(k) bounds[[k]][2], 0)
-    o <- .sl_optim(st, function(t) obj_fun(t, rows, ob, rg), method = "L-BFGS-B", lower = lo, upper = hi)
+    # N5: glatte Zielfunktion (rmse, mse, hybrid): Wert und analytischer Gradient ganz in C (projizierter
+    # BFGS mit den Steuerwerten von .sl_optim "L-BFGS-B"). mae, median und max sind nicht differenzierbar;
+    # dort bleibt .sl_optim mit Rueckfragen an obj_fun und numerischem Gradienten (wie bis 1.1.0).
+    o <- if (objective == "hybrid" || loss %in% c("rmse", "mse"))
+      .sl_backcast_fit(.bc_cprob(prep, model, rg, rows, ob, objective, loss, horizon, hybrid_weight),
+                       unlist(par0[c("drag", "spread", "beta")]), match(fit, c("drag", "spread", "beta")), lo, hi)
+    else .sl_optim(unlist(par0[fit]), function(t) obj_fun(t, rows, ob, rg), method = "L-BFGS-B", lower = lo, upper = hi)
     p <- par0; p[fit] <- as.list(o$par)
     list(par = p, value = o$value, grid = NULL, convergence = o$convergence)
   }

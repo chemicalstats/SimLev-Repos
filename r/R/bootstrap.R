@@ -1379,13 +1379,19 @@ bootstrap_study_metrics <- function(res) {
 #'   Parallelisierung und der Zwischenspeicherung.
 #' @param chunk_dir Optional (Standard \code{NULL}) Verzeichnis fuer
 #'   Zwischenergebnisse je Chunk (Dateien \code{chunk_<Nr>_seed<Seed>.rds},
-#'   bei \code{keep_returns} mit Frequenz-Suffix). Vorhandene Dateien werden
+#'   bei \code{keep_returns} mit Frequenz-Suffix, bei \code{keep_paths} > 0
+#'   mit Suffix \code{_keep<k>}). Vorhandene Dateien werden
 #'   gelesen statt neu gerechnet; so wird ein abgebrochener Lauf mit
 #'   gleichem Seed fortgesetzt. Die Dateien werden nur ueber Chunk-Nummer,
-#'   Seed und \code{keep_returns} zugeordnet: bei geaenderten Strategien,
+#'   Seed, \code{keep_returns} und \code{keep_paths} zugeordnet: bei geaenderten Strategien,
 #'   Daten oder Parametern ein neues Verzeichnis verwenden.
-#' @param keep_paths Anzahl k: die Pfadmatrizen der ersten k Pfade zusaetzlich
-#'   zurueckgeben (Diagnose; Standard 0).
+#' @param keep_paths Pfadmatrizen zusaetzlich zurueckgeben (Diagnose):
+#'   \code{TRUE} = alle Pfade, \code{FALSE} oder 0 (Standard) = keine, ganze
+#'   Zahl k >= 1 = die ersten k Pfade (k groesser als die Pfadzahl: alle).
+#'   Speicherbedarf: alle Pfadmatrizen bleiben im Ergebnis und gehen bei
+#'   \code{cores > 1} auch durch die Prozessgrenze, ungefaehr Pfade x
+#'   (Pfadlaenge + 1) x Reihen x 8 Byte (z. B. 10 000 x 7 300 x 3 x 8 Byte =
+#'   1,75 GB).
 #' @param keep_returns \code{"none"} (Standard) oder \code{"year"},
 #'   \code{"quarter"}, \code{"month"}: speichert je Strategie und Pfad die
 #'   zeitgewichteten Brutto-Periodenrenditen (aus [result_index()], Perioden
@@ -1514,6 +1520,7 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
   sim_args <- .sim_args_set(list(), sim_args, "bootstrap_study")
   for (nm in names(specs)) specs[[nm]]$sim <- .sim_args_set(sim_args, specs[[nm]]$args, "bootstrap_study")
   setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
+  keep_paths <- .keep_count(keep_paths, setup$n_paths, "bootstrap_study")   # 6.5b: TRUE = alle Pfade
   if (is.null(dates)) dates <- seq.Date(.to_date(start, "start"), by = "day", length.out = setup$n_out + 1L)
   if (length(dates) != setup$n_out + 1L) stop(sprintf("dates braucht L\u00e4nge %d (Pfadl\u00e4nge + 1).", setup$n_out + 1L))
   dates <- .to_date(dates, "dates")
@@ -1568,8 +1575,9 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
     list(id = i, rows = rows, aux = aux_ret, path = if (i <= keep_paths) dp$path else NULL)
   }
   run_chunk <- function(ci) {
-    f <- if (!is.null(chunk_dir)) file.path(chunk_dir, sprintf("chunk_%05d_seed%.0f%s.rds", ci, seed,
-                                                           if (keep_returns != "none") paste0("_", keep_returns) else "")) else NULL
+    f <- if (!is.null(chunk_dir)) file.path(chunk_dir, sprintf("chunk_%05d_seed%.0f%s%s.rds", ci, seed,
+                                                           if (keep_returns != "none") paste0("_", keep_returns) else "",
+                                                           if (keep_paths > 0) sprintf("_keep%.0f", keep_paths) else "")) else NULL
     if (!is.null(f) && file.exists(f)) return(readRDS(f))
     out <- lapply(chunks[[ci]], eval_path)
     if (!is.null(f)) saveRDS(out, f)
@@ -1646,6 +1654,22 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
     returns_dates = if (!is.null(ret_ends)) dates[sim_rows][ret_ends] else NULL,
     path_weights = setup$weights, errors = errs, warnings = warns
   ), class = "SimLevBootstrapStudy")
+}
+
+#' Anzahl behaltener Pfade aus keep_paths (6.5b, Variante A)
+#'
+#' Zweck: gemeinsame Pruefung von keep_paths in bootstrap_study() und withdrawal_simulation(): TRUE = alle
+#' Pfade, FALSE oder 0 = keine, ganze Zahl k >= 1 = die ersten k Pfade; k > n still alle.
+#' Eingabe: x (keep_paths), n (Anzahl Pfade; Inf, wenn noch unbekannt), who (Aufrufer fuer die Meldung).
+#' Ausgabe: Anzahl in 0..n (Zahl). Fehler bei NA, Text, Vektor, negativen oder nicht ganzen Zahlen.
+#' @keywords internal
+#' @noRd
+.keep_count <- function(x, n, who) {
+  if (is.logical(x) && length(x) == 1L && !is.na(x)) return(if (x) n else 0)
+  if (!is.numeric(x) || length(x) != 1L || !is.finite(x) || x < 0 || x != round(x))
+    stop(sprintf("%s: keep_paths muss TRUE (alle Pfade), FALSE/0 (keine) oder eine ganze Zahl k >= 1 (die ersten k Pfade) sein, nicht %s.",
+                 who, paste(format(x), collapse = ", ")), call. = FALSE)
+  min(as.numeric(x), n)
 }
 
 #' Gewichtete Quantile (gewichteter Typ 7)

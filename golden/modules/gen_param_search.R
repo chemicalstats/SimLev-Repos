@@ -134,9 +134,22 @@ ps_case("ps_random", "simlev_seed(9); x <- z(param_search(d, b, param_space(n = 
 ps_case("ps_lhs", "simlev_seed(9); x <- z(param_search(d, b, param_space(n = param_range(5, 60, integer = TRUE, log = TRUE), band = c(0, 1)), method = 'lhs', n = 4, burn_in = 60)); list(x, SimLev:::.sl_runif(1), dropE(summary(x)))",
         "simlev.simlev_seed(9); x = z(PS.param_search(d, b, PS.param_space(n=PS.param_range(5, 60, integer=True, log=True), band=[0.0, 1.0]), method='lhs', n=4, burn_in=60)); result = [x, simlev._lib.runif(1), dropE(PS.summary(x))]",
         'SL.simlev_seed(9); x = z(PS.param_search(d, b, PS.param_space(n = PS.param_range(5, 60; integer = true, log = true), band = [0.0, 1.0]); method = "lhs", n = 4, burn_in = 60)); result = [x, SL.SLib.runif(1), dropE(r_summary(x))]')
-ps_case("ps_noret", "z(param_search(d, b, param_space(n = c(10, 20), band = 0), keep_returns = FALSE, burn_in = 30))",
-        "result = z(PS.param_search(d, b, PS.param_space(n=[10.0, 20.0], band=0.0), keep_returns=False, burn_in=30))",
-        'result = z(PS.param_search(d, b, PS.param_space(n = [10.0, 20.0], band = 0.0); keep_returns = false, burn_in = 30))')
+ps_case("ps_noret", "z(param_search(d, b, param_space(n = c(10, 20), band = 0), keep_returns = 'none', burn_in = 30))",
+        "result = z(PS.param_search(d, b, PS.param_space(n=[10.0, 20.0], band=0.0), keep_returns='none', burn_in=30))",
+        'result = z(PS.param_search(d, b, PS.param_space(n = [10.0, 20.0], band = 0.0); keep_returns = "none", burn_in = 30))')
+# 6.5b (C.1): keep_returns = "day"/"none"; TRUE/FALSE ohne Alias ein Fehler
+ps_case("ps_ret_day", "z(param_search(d, b, param_space(n = c(10, 20), band = 0), keep_returns = 'day', burn_in = 30))",
+        "result = z(PS.param_search(d, b, PS.param_space(n=[10.0, 20.0], band=0.0), keep_returns='day', burn_in=30))",
+        'result = z(PS.param_search(d, b, PS.param_space(n = [10.0, 20.0], band = 0.0); keep_returns = "day", burn_in = 30))')
+ps_case("ps_err_keepret_true", "param_search(d, b, param_space(n = c(10, 20), band = 0), keep_returns = TRUE)",
+        "result = PS.param_search(d, b, PS.param_space(n=[10.0, 20.0], band=0.0), keep_returns=True)",
+        'result = PS.param_search(d, b, PS.param_space(n = [10.0, 20.0], band = 0.0); keep_returns = true)')
+ps_case("ps_err_keepret_false", "param_search(d, b, param_space(n = c(10, 20), band = 0), keep_returns = FALSE)",
+        "result = PS.param_search(d, b, PS.param_space(n=[10.0, 20.0], band=0.0), keep_returns=False)",
+        'result = PS.param_search(d, b, PS.param_space(n = [10.0, 20.0], band = 0.0); keep_returns = false)')
+ps_case("ps_err_keepret_chr", "param_search(d, b, param_space(n = c(10, 20), band = 0), keep_returns = 'week')",
+        "result = PS.param_search(d, b, PS.param_space(n=[10.0, 20.0], band=0.0), keep_returns='week')",
+        'result = PS.param_search(d, b, PS.param_space(n = [10.0, 20.0], band = 0.0); keep_returns = "week")')
 ps_case("ps_metrics", "z(param_search(d, b, param_space(n = c(10, 20, 30), band = 0), metrics = function(r) if (r$cagr > 0.5) stop('x') else c(sharpe = r$statistics$sharpe, cagr = r$cagr), burn_in = 30))",
         "def mt(r):\n    if r.cagr > 0.5:\n        raise ValueError('x')\n    return pd.Series({'sharpe': r.statistics['sharpe'], 'cagr': r.cagr})\nresult = z(PS.param_search(d, b, PS.param_space(n=[10.0, 20.0, 30.0], band=0.0), metrics=mt, burn_in=30))",
         'mt(r) = r.cagr > 0.5 ? error("x") : named("sharpe" => r.statistics.sharpe, "cagr" => r.cagr)

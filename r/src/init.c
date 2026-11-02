@@ -102,12 +102,15 @@ extern SEXP C_sl_numgrad_test(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_garch11_filter(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_garch11_nll(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_garch11_fit(SEXP, SEXP);
+extern SEXP C_sl_garch11_grad(SEXP, SEXP, SEXP, SEXP);   /* N3 */
 extern SEXP C_sl_garch11_estimate(SEXP, SEXP);
 extern SEXP C_sl_gpd_nll(SEXP, SEXP, SEXP);
 extern SEXP C_sl_gpd_pwm(SEXP);
 extern SEXP C_sl_gpd_fit(SEXP);
 extern SEXP C_sl_dcc_filter(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_dcc_fit(SEXP, SEXP);
+extern SEXP C_sl_backcast_obj(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_backcast_fit(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_ms_garch_filter(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_ms_garch_nll(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_ms_garch_grad(SEXP, SEXP, SEXP, SEXP, SEXP);   /* N1 */
@@ -211,12 +214,15 @@ static const R_CallMethodDef CallEntries[] = {
     {"sl_garch11_filter", (DL_FUNC) &C_sl_garch11_filter, 6},
     {"sl_garch11_nll", (DL_FUNC) &C_sl_garch11_nll, 4},
     {"sl_garch11_fit", (DL_FUNC) &C_sl_garch11_fit, 2},
+    {"sl_garch11_grad", (DL_FUNC) &C_sl_garch11_grad, 4},   /* N3 */
     {"sl_garch11_estimate", (DL_FUNC) &C_sl_garch11_estimate, 2},
     {"sl_gpd_nll", (DL_FUNC) &C_sl_gpd_nll, 3},
     {"sl_gpd_pwm", (DL_FUNC) &C_sl_gpd_pwm, 1},
     {"sl_gpd_fit", (DL_FUNC) &C_sl_gpd_fit, 1},
     {"sl_dcc_filter", (DL_FUNC) &C_sl_dcc_filter, 5},
     {"sl_dcc_fit", (DL_FUNC) &C_sl_dcc_fit, 2},
+    {"sl_backcast_obj", (DL_FUNC) &C_sl_backcast_obj, 4},
+    {"sl_backcast_fit", (DL_FUNC) &C_sl_backcast_fit, 5},
     {"sl_ms_garch_filter", (DL_FUNC) &C_sl_ms_garch_filter, 8},
     {"sl_ms_garch_nll", (DL_FUNC) &C_sl_ms_garch_nll, 5},
     {"sl_ms_garch_grad", (DL_FUNC) &C_sl_ms_garch_grad, 5},   /* N1 */

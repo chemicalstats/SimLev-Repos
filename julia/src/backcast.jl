@@ -294,6 +294,20 @@ function _bc_errors(r, win, obs, objective, horizon)
     return (level = e_lvl, ret = e_ret)
 end
 
+"Daten der Zielfunktion für die C-Bibliothek (Port von `.bc_cprob`, N5)."
+function _bc_cprob(prep, model, reg, rws, obs, objective, loss, horizon, hybrid_weight)
+    if model == "structural"
+        x = Float64.(prep.x[rws]); c1 = Float64.(prep.fin[rws]); c2 = Float64.(prep.ter_cost[rws])
+    else
+        x = nothing; c2 = nothing
+        c1 = Float64.(_bc_model_returns(prep, RList("drag" => 0.0, "spread" => 0.0, "beta" => 1.0), model, reg)[rws])
+    end
+    return (x, c1, c2, Float64(prep.leverage), Float64.(prep.sp_unit[rws]), Float64.(prep.dr_unit[rws]), collect(obs.pos),
+            Float64.(obs.logp), (findfirst(==(objective), ("level", "return", "hybrid")),
+                                 findfirst(==(loss), ("rmse", "mse", "mae", "median", "max")), max(1, Int(trunc(horizon)))),
+            Float64(hybrid_weight))
+end
+
 "Zielfunktion (Port von `.bc_objective`)."
 function _bc_objective(r, win, obs, objective, horizon, loss, hybrid_weight)
     e = _bc_errors(r, win, obs, objective, horizon)
@@ -533,9 +547,16 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
             p = copy(par0); p[fit[1]] = Float64(_getel(o, "minimum"))
             return (par = p, value = Float64(_getel(o, "objective")), grid = nothing, metrics = nothing)
         end
-        st = Float64[_par(par0, k) for k in fit]
         lo = Float64[bounds[k][1] for k in fit]; hi = Float64[bounds[k][2] for k in fit]
-        o = SimLev.SLib.optim(st, t -> obj_fun(t, rws, ob, rg); method = "L-BFGS-B", lower = lo, upper = hi)
+        # N5: glatte Zielfunktion (rmse, mse, hybrid) mit analytischem Gradienten ganz in C (wie .sl_backcast_fit
+        # in R); mae, median, max wie bis 1.1.0 über .sl_optim mit numerischem Gradienten
+        o = if objective == "hybrid" || loss in ("rmse", "mse")
+            SimLev.SLib.backcast_fit(_bc_cprob(prep, model, rg, rws, ob, objective, loss, horizon, hybrid_weight),
+                                     Float64[_par(par0, "drag"), _par(par0, "spread"), _par(par0, "beta")],
+                                     Int[findfirst(==(k), ("drag", "spread", "beta")) for k in fit], lo, hi)
+        else
+            SimLev.SLib.optim(Float64[_par(par0, k) for k in fit], t -> obj_fun(t, rws, ob, rg); method = "L-BFGS-B", lower = lo, upper = hi)
+        end
         p = copy(par0)
         for (k, t) in zip(fit, _getel(o, "par"))
             p[k] = Float64(t)

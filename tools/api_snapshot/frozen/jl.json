@@ -1,6 +1,6 @@
 {
  "language": "Julia",
- "stand": "2026-10-27 – Etappe 9: SimLev eigenständig",
+ "stand": "2026-11-01 – Etappe 6.5b: Entnahmesteuer, keep_returns, keep_paths",
  "hinweis": "Erzeugt von tools/api_snapshot/run.sh --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
@@ -358,7 +358,7 @@
    {"name": "metrics", "kind": "keyword", "default": "nothing"},
    {"name": "objective", "kind": "keyword", "default": "\"sharpe\""},
    {"name": "maximize", "kind": "keyword", "default": "true"},
-   {"name": "keep_returns", "kind": "keyword", "default": "true"},
+   {"name": "keep_returns", "kind": "keyword", "default": "nothing", "match_arg": true},
    {"name": "seed", "kind": "keyword", "default": "nothing"},
    {"name": "cores", "kind": "keyword", "default": "1"}
   ],

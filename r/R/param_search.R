@@ -232,9 +232,10 @@ print.SimLevParamSpace <- function(x, ...) {
 #'   Startwert aus dem Zufallszustand von SimLev gezogen (siehe [simlev_seed()]), wiederholte
 #'   Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
 #'   Die Auswertung der Punkte ist deterministisch, das Ergebnis haengt nicht von \code{cores} ab.
-#' @param keep_returns Logisch (Standard \code{TRUE}): taegliche Renditen je
+#' @param keep_returns \code{"day"} (Standard): taegliche Renditen je
 #'   Punkt speichern (noetig fuer [overfit_pbo()], [sharpe_deflated()],
-#'   [overfit_walk_forward()], [overfit_reality_check()], [sharpe_haircut()]).
+#'   [overfit_walk_forward()], [overfit_reality_check()], [sharpe_haircut()]);
+#'   \code{"none"}: keine. \code{TRUE}/\code{FALSE} (bis 6.5b) ergeben einen Fehler.
 #' @return Objekt der Klasse \code{SimLevParamSearch}, eine Liste mit
 #'   \describe{
 #'     \item{\code{results}}{data.frame je Punkt: \code{id}, eine Spalte je
@@ -244,7 +245,7 @@ print.SimLevParamSpace <- function(x, ...) {
 #'       zeitgewichteten Renditen als Anteil (aus [result_index()]); Zeilen =
 #'       Tage nach \code{burn_in} ohne den ersten, Spalten \code{p1},
 #'       \code{p2}, ... (Nummer = \code{id}); \code{NA} fuer fehlgeschlagene
-#'       Punkte. \code{NULL} bei \code{keep_returns = FALSE}.}
+#'       Punkte. \code{NULL} bei \code{keep_returns = "none"}.}
 #'     \item{\code{dates}}{Datum je Zeile von \code{returns} (Kalender des
 #'       ersten erfolgreichen Punkts).}
 #'     \item{\code{space}, \code{params}, \code{method}, \code{objective},
@@ -274,9 +275,14 @@ print.SimLevParamSpace <- function(x, ...) {
 param_search <- function(data, builder = NULL, space, strategy = NULL,
                          method = c("grid", "random", "lhs"), n = 50L, constraint = NULL,
                          sim_args = list(), burn_in = 0L, metrics = bootstrap_study_metrics,
-                         objective = "sharpe", maximize = TRUE, keep_returns = TRUE, seed = NULL,
+                         objective = "sharpe", maximize = TRUE, keep_returns = c("day", "none"), seed = NULL,
                          cores = 1L) {
   method <- match.arg(method)
+  # 6.5b (C.1): Text statt Logisch, ohne Alias (E1)
+  if (is.logical(keep_returns))
+    stop("param_search: keep_returns ist \"day\" oder \"none\" (fr\u00fcher TRUE/FALSE).", call. = FALSE)
+  keep_returns <- match.arg(keep_returns)
+  keep_ret <- keep_returns == "day"
   if (!inherits(space, "SimLevParamSpace")) space <- do.call(param_space, as.list(space))
   if (is.null(builder)) {
     if (is.null(strategy)) stop("param_search: 'builder' oder 'strategy' angeben.")
@@ -293,9 +299,9 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
     if (inherits(res, "error")) return(list(m = NULL, err = conditionMessage(res)))
     m <- tryCatch(metrics(res), error = function(e) NULL)
     if (is.null(m)) return(list(m = NULL, err = "metrics() fehlgeschlagen"))
-    ix <- if (keep_returns) result_index(res) else NULL
-    list(m = m, err = NA_character_, date = if (keep_returns) ix$date else NULL,
-         ret = if (keep_returns) ix$value[-1] / ix$value[-nrow(ix)] - 1 else NULL)
+    ix <- if (keep_ret) result_index(res) else NULL
+    list(m = m, err = NA_character_, date = if (keep_ret) ix$date else NULL,
+         ret = if (keep_ret) ix$value[-1] / ix$value[-nrow(ix)] - 1 else NULL)
   }
   out <- .par_lapply(seq_len(nrow(design)), run, cores)
   okm <- Filter(function(o) !is.null(o$m), out)
@@ -309,7 +315,7 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
   tab <- data.frame(id = seq_len(nrow(design)), design, M, error = vapply(out, `[[`, "", "err"),
                     check.names = FALSE, stringsAsFactors = FALSE)
   R <- dates <- NULL
-  if (keep_returns) {
+  if (keep_ret) {
     ref <- okm[[1]]$date; dates <- ref[-1]
     R <- matrix(NA_real_, length(dates), nrow(design))
     for (i in seq_along(out)) if (!is.null(out[[i]]$ret)) {

@@ -79,5 +79,9 @@ slc_msgarch.o: slc_msgarch.c $(SLC94_DEPS)
 slc_boot.o: slc_boot.c $(SLC94_DEPS)
 	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_boot.c -o slc_boot.o
 
+# N5: Zielfunktion und Fit von backcast_fit
+slc_backcast.o: slc_backcast.c $(SLC94_DEPS)
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_backcast.c -o slc_backcast.o
+
 slc_r_models.o: slc_r_models.c slc.h slc_models.h slc_opt.h
 	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_r_models.c -o slc_r_models.o

@@ -153,6 +153,24 @@ SEXP C_sl_garch11_nll(SEXP e, SEXP par, SEXP gjr, SEXP s2i)
     return Rf_ScalarReal(v);
 }
 
+/* N3: GJR-NLL und analytischer Gradient an theta (5 Werte) -> list(value, gradient); N4: auch sGARCH (4 Werte) */
+SEXP C_sl_garch11_grad(SEXP e, SEXP theta, SEXP gjr, SEXP s2i)
+{
+    static const char *nm[] = {"value", "gradient"};
+    sl_ctx cx;
+    double v = 0.0;
+    int st, g = l1(gjr, "gjr"), np = sl_garch11_npar(g);
+    SEXP gr = PROTECT(Rf_allocVector(REALSXP, np)), el[2], out;
+    ctx_init(&cx);
+    st = sl_garch11_grad(&cx, len_int(e), dvec(e, -1, "e"), g, dvec(theta, np, "theta"), d1(s2i, "s2_init"),
+                         &v, REAL(gr));
+    finish(&cx, st, 1);
+    el[0] = PROTECT(Rf_ScalarReal(v)); el[1] = gr;
+    out = named(2, nm, el);
+    UNPROTECT(2);
+    return out;
+}
+
 SEXP C_sl_garch11_fit(SEXP e, SEXP gjr)
 {
     static const char *nm[] = {"mu", "omega", "alpha", "beta", "gamma", "loglik", "convergence"};
@@ -278,6 +296,72 @@ SEXP C_sl_dcc_fit(SEXP Z, SEXP Qbar)
     el[3] = PROTECT(Rf_ScalarInteger(code)); el[4] = PROTECT(rvec(2, th));
     out = named(5, nm, el);
     UNPROTECT(5);
+    return out;
+}
+
+/* ── Backcast (N5) ── */
+
+/* prob: list(x, c1, c2, lev, sp, dr, pos, logp, opt = c(objective, loss, horizon), hw); x, c2 NULL erlaubt */
+typedef struct { int m, nobs, opt[3]; const double *x, *c1, *c2, *sp, *dr, *logp; const int32_t *pos; double lev, hw; } bc_args;
+
+static void bc_args_get(SEXP prob, bc_args *a)
+{
+    SEXP x, c2, op;
+    if (TYPEOF(prob) != VECSXP || XLENGTH(prob) != 10) Rf_errorcall(R_NilValue, "interner Fehler: prob muss eine Liste mit 10 Eintraegen sein");
+    a->c1 = dvec(VECTOR_ELT(prob, 1), -1, "c1");
+    a->m = len_int(VECTOR_ELT(prob, 1));
+    x = VECTOR_ELT(prob, 0); c2 = VECTOR_ELT(prob, 2);
+    a->x = Rf_isNull(x) ? NULL : dvec(x, a->m, "x");
+    a->c2 = Rf_isNull(c2) ? NULL : dvec(c2, a->m, "c2");
+    a->lev = d1(VECTOR_ELT(prob, 3), "lev");
+    a->sp = dvec(VECTOR_ELT(prob, 4), a->m, "sp");
+    a->dr = dvec(VECTOR_ELT(prob, 5), a->m, "dr");
+    a->nobs = len_int(VECTOR_ELT(prob, 6));
+    a->pos = ivec(VECTOR_ELT(prob, 6), -1, "pos");
+    a->logp = dvec(VECTOR_ELT(prob, 7), a->nobs, "logp");
+    op = VECTOR_ELT(prob, 8);
+    memcpy(a->opt, ivec(op, 3, "opt"), 3 * sizeof(int));
+    a->hw = d1(VECTOR_ELT(prob, 9), "hw");
+}
+
+SEXP C_sl_backcast_obj(SEXP prob, SEXP par, SEXP fit, SEXP grad)
+{
+    static const char *nm[] = {"value", "gradient"};
+    sl_ctx cx;
+    bc_args a;
+    int st, nf = len_int(fit), wg = l1(grad, "grad");
+    double f = 0.0, g[3] = {0.0, 0.0, 0.0};
+    SEXP el[2], out;
+    bc_args_get(prob, &a);
+    if (nf > 3) Rf_errorcall(R_NilValue, "interner Fehler: hoechstens 3 Parameter");
+    ctx_init(&cx);
+    st = sl_backcast_obj(&cx, a.m, a.x, a.c1, a.c2, a.lev, a.sp, a.dr, a.nobs, a.pos, a.logp, a.opt[0], a.opt[1],
+                         a.opt[2], a.hw, dvec(par, 3, "par"), nf, ivec(fit, -1, "fit"), &f, wg ? g : NULL);
+    finish(&cx, st, 0);
+    el[0] = PROTECT(Rf_ScalarReal(f)); el[1] = PROTECT(wg ? rvec(nf, g) : R_NilValue);
+    out = named(2, nm, el);
+    UNPROTECT(2);
+    return out;
+}
+
+SEXP C_sl_backcast_fit(SEXP prob, SEXP par0, SEXP fit, SEXP lo, SEXP hi)
+{
+    static const char *nm[] = {"par", "value", "convergence"};
+    sl_ctx cx;
+    bc_args a;
+    int st, nf = len_int(fit), code = 0;
+    double v = 0.0, p[3] = {0.0, 0.0, 0.0};
+    SEXP el[3], out;
+    bc_args_get(prob, &a);
+    if (nf < 1 || nf > 3) Rf_errorcall(R_NilValue, "interner Fehler: 1 bis 3 Parameter");
+    ctx_init(&cx);
+    st = sl_backcast_fit(&cx, a.m, a.x, a.c1, a.c2, a.lev, a.sp, a.dr, a.nobs, a.pos, a.logp, a.opt[0], a.opt[1],
+                         a.opt[2], a.hw, dvec(par0, 3, "par0"), nf, ivec(fit, -1, "fit"), dvec(lo, nf, "lower"),
+                         dvec(hi, nf, "upper"), NULL, p, &v, &code);
+    finish(&cx, st, 0);
+    el[0] = PROTECT(rvec(nf, p)); el[1] = PROTECT(Rf_ScalarReal(v)); el[2] = PROTECT(Rf_ScalarInteger(code));
+    out = named(3, nm, el);
+    UNPROTECT(3);
     return out;
 }
 

@@ -1564,6 +1564,23 @@ def _year_month(d):
     return y, m
 
 
+def _keep_count(x, n, who):
+    """Anzahl behaltener Pfade aus ``keep_paths`` (R: ``.keep_count``, 6.5b, Variante A).
+
+    ``True`` = alle Pfade, ``False`` oder 0 = keine, ganze Zahl k >= 1 = die ersten k Pfade (k > n: still alle).
+    Logisch wird vor der Ganzzahl geprüft (``True`` ist in Python eine Ganzzahl). Fehler bei NA, Text, Vektor,
+    negativen oder nicht ganzen Zahlen. Ergebnis: Anzahl in ``0..n`` (float; ``n`` darf ``inf`` sein).
+    """
+    if isinstance(x, (bool, np.bool_)):
+        return float(n) if x else 0.0
+    ok = isinstance(x, (int, float, np.integer, np.floating)) and math.isfinite(float(x)) and float(x) >= 0 and \
+        float(x) == _r_round0(float(x))
+    if not ok:
+        _stop("%s: keep_paths muss TRUE (alle Pfade), FALSE/0 (keine) oder eine ganze Zahl k >= 1 (die ersten k Pfade) "
+              "sein, nicht %s." % (who, _show(x)))
+    return min(float(x), float(n))
+
+
 @_quiet
 def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, *, params=None, ess=False,
                     ess_grid=None, path_length=None, dates=None, start="2000-01-01", burn_in=0,
@@ -1583,6 +1600,9 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
         seed: wie in :func:`bootstrap` (``None`` = genau einmal aus dem Zufallszustand von SimLev
             gezogen und unter ``seed`` abgelegt); jeder Pfad hat einen eigenen Strom, das Ergebnis
             hängt nicht von ``cores`` oder ``chunk_size`` ab.
+        keep_paths: ``True`` = alle Pfadmatrizen behalten, ``False``/0 (Standard) = keine, ganze Zahl k >= 1 = die
+            ersten k (6.5b; Speicherbedarf etwa Pfade x (Pfadlänge + 1) x Reihen x 8 Byte). Mit ``chunk_dir`` und
+            k > 0 tragen die Chunk-Dateien den Zusatz ``_keep<k>``.
         Übrige Argumente wie in R.
 
     Returns:
@@ -1612,6 +1632,7 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
     for nm0 in snames:
         specs[nm0]["sim"] = _sim_args_set(sim_args, specs[nm0].get("args"), "bootstrap_study")
     setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
+    keep_paths = _keep_count(keep_paths, setup["n_paths"], "bootstrap_study")   # 6.5b: True = alle Pfade
     n_out = setup["n_out"]
     if dates is None:
         dates = _seq_dates(_to_date(start, "start"), n_out + 1)
@@ -1735,8 +1756,9 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
     def run_chunk(ci):
         f = None
         if chunk_dir is not None:
-            f = os.path.join(chunk_dir, "chunk_%05d_seed%d%s.rds" % (
-                ci, int(seed), ("_" + keep_returns) if keep_returns != "none" else ""))
+            f = os.path.join(chunk_dir, "chunk_%05d_seed%d%s%s.rds" % (
+                ci, int(seed), ("_" + keep_returns) if keep_returns != "none" else "",
+                ("_keep%d" % int(keep_paths)) if keep_paths > 0 else ""))
         if f is not None and os.path.exists(f):
             with open(f, "rb") as fh:
                 return pickle.load(fh)

@@ -112,7 +112,16 @@ Konsum (\code{spending}) mit.}
 \item{tax}{Steuerdaten der Person: \code{NULL} (Standard; keine Steuern)
 oder ein Objekt aus \code{\link[=tax_profile]{tax_profile()}} (vereinfachte deutsche Besteuerung,
 siehe Details). Ausgewertet werden \code{rate} (Abgeltungsteuer inkl.
-Solidaritaetszuschlag in Prozent, Standard 26.375) und
+Solidaritaetszuschlag in Prozent, Standard 26.375), \code{church_tax}
+(Kirchensteuer in Prozent; der Satz der Abgeltungsteuer folgt dann
+§ 32d Abs. 1 EStG wie in \code{\link[=simulation]{simulation()}}),
+\code{guenstigerpruefung} mit \code{income = \link[=income_rate]{income_rate()}}
+(Guenstigerpruefung wie in \code{\link[=simulation]{simulation()}}: einmal je
+Lauf; ist der Grenzsteuersatz einschliesslich Soli und Kirchensteuer
+niedriger als die Abgeltungsteuer, gilt er fuer alle Verkaeufe und
+Vorabpauschalen aller Pfade und Planjahre; ohne \code{income} Warnung und
+Abgeltungsteuer; \code{income_rate()} ohne \code{guenstigerpruefung = TRUE}
+wirkt nicht) und
 \code{sparer_pauschbetrag} (Sparer-Pauschbetrag je Planjahr als nominaler
 Geldbetrag, Standard 1000; 2000 bei Zusammenveranlagung; 0 = ohne). Bei
 \code{start_value} = \code{SimLevResult} mit \code{tax_report$next_year}
@@ -120,9 +129,14 @@ steht im ersten Planjahr nur dieser Betrag minus
 \code{next_year$sparer_pauschbetrag_used} zur Verfuegung (siehe Details,
 Kalender; bei gleichem Pauschbetrag wie in der Ansparphase
 \code{next_year$sparer_pauschbetrag_remaining}). Angaben, die die
-Entnahmephase nicht abbildet (\code{church_tax}, \code{private_sale_threshold},
-\code{base_rate}, \code{guenstigerpruefung}, \code{income}, \code{harvest}),
-ergeben einen Fehler; der Basiszins kommt aus \code{base_rate} dieser Funktion.
+Entnahmephase nicht abbildet (\code{private_sale_threshold} ungleich 1000,
+\code{base_rate}, \code{harvest}), ergeben einen Fehler; der Basiszins kommt
+aus \code{base_rate} dieser Funktion. Der Tarifweg
+(\code{income = \link[=income_tariff]{income_tariff()}}) ist in der
+Entnahmephase noch nicht abgebildet und ergibt einen Fehler mit Verweis auf
+\code{income_rate()}. Kirchensteuer und Guenstigerpruefung werden nicht aus
+der Ansparphase (\code{start_value} = \code{SimLevResult}) uebernommen,
+sondern hier ausdruecklich in \code{tax_profile()} angegeben.
 Die Bestandsmerkmale (\code{partial_exemption}, \code{vorabpauschale},
 \code{cost_basis}, \code{loss_carryforward}, \code{sale_cost}) sind eigene
 Argumente. Wie in \code{\link[=simulation]{simulation()}} sind \code{partial_exemption},
@@ -207,8 +221,12 @@ private Veraeusserungsgeschaefte wird nicht uebernommen.}
 Sicherheitsaequivalent der realen jaehrlichen Konsumreihe
 (\code{gamma = 1}: geometrisches Mittel).}
 
-\item{keep_paths}{Logisch: Vermoegensmatrix \code{wealth} zurueckgeben
-(Standard \code{TRUE}).}
+\item{keep_paths}{Vermoegensmatrix \code{wealth} zurueckgeben: \code{TRUE}
+(Standard) = alle Pfade, \code{FALSE} oder 0 = keine, ganze Zahl k >= 1 =
+die ersten k Pfade (Spalten; k groesser als die Pfadzahl: alle). Gerechnet
+werden immer alle Pfade; \code{plot()} zeichnet den Vermoegensfaecher dann
+nur aus den behaltenen Pfaden (Titel mit \dQuote{erste k von n Pfaden}).
+Bei historischen Kohorten sind das die fruehesten Starts.}
 
 \item{horizon}{Optional Laufzeit je Pfad: Objekt aus \code{\link[=withdrawal_horizon]{withdrawal_horizon()}}
 (zufaellige Laufzeit in Jahren je Pfad) oder eine Zahl > 0 = feste Laufzeit in
@@ -251,8 +269,8 @@ Withdrawal Rate in Prozent); bei Kohorten zusaetzlich \code{start}
 \item{\code{planned}}{Matrix Planjahre x Pfade: von der Regel geplante
 Jahresentnahme (real, vor Abzug von \code{income}).}
 \item{\code{wealth}}{Matrix (Planjahre + 1) x Pfade: reales Vermoegen zu
-Beginn jedes Planjahres, letzte Zeile am Ende; \code{NULL} bei
-\code{keep_paths = FALSE}.}
+Beginn jedes Planjahres, letzte Zeile am Ende; mit \code{keep_paths = k}
+nur die ersten k Spalten, \code{NULL} bei \code{keep_paths = FALSE}.}
 \item{\code{rule}, \code{start_value}, \code{frequency}, \code{horizon},
 \code{tax_mode} (\code{"person"} mit \code{tax}, sonst \code{"none"}), \code{gamma}, \code{timing}}{Eingaben.}
 \item{\code{years}, \code{full_years}}{Anzahl Planjahre (einschliesslich
@@ -365,11 +383,14 @@ besteuert jeden Verkauf eines Assets einzeln und erstattet zum Jahresende
 Steuer auf im Jahr versteuerte Ertraege, wenn spaeter im Jahr Verluste
 entstehen (unterjaehrige Verlustverrechnung, mit Freigabe des
 Pauschbetrags). Gleich sind beide, solange in einem Planjahr alle Verkaeufe
-Gewinne ergeben. (2) Steuersatz: die Entnahmephase rechnet mit dem festen
-Satz \code{rate} aus \code{tax_profile()}; Kirchensteuer (\code{church_tax}), Tarifweg und
-Guenstigerpruefung (\code{income_tariff()}, \code{guenstigerpruefung}) der
-Ansparphase werden nicht uebernommen (gegebenenfalls \code{rate}
-anpassen). (3) Ordergebuehren beim Verkauf bildet die Entnahmephase nicht
+Gewinne ergeben. (2) Steuersatz: die Entnahmephase rechnet mit einem festen
+Satz aus \code{tax_profile()} (\code{rate} bzw. mit \code{church_tax} der
+Satz nach § 32d Abs. 1 EStG, mit \code{guenstigerpruefung} und
+\code{income_rate()} gegebenenfalls der persoenliche Satz). Kirchensteuer und
+Guenstigerpruefung der Ansparphase werden nicht uebernommen; sie sind in
+\code{tax} ausdruecklich anzugeben. Den Tarifweg (\code{income_tariff()},
+Veranlagung je Jahr mit Saldo im Folgejahr) bildet die Entnahmephase nicht
+ab (Fehler). (3) Ordergebuehren beim Verkauf bildet die Entnahmephase nicht
 ab (Warnung, wenn sie in der Ansparphase gesetzt waren). (4) Verschiedene
 Teilfreistellungen, Regime \code{"capital_gains"} neben Fonds und
 \code{"private_sale"} (§ 23 EStG) werden nicht getrennt besteuert

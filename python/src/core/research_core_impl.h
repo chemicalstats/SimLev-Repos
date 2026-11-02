@@ -33,7 +33,7 @@
 //   hmm_forward_backward  skalierter Vorwaerts-Rueckwaerts-Schritt (Baum-Welch)
 //   (garch_filter: in N2 entfernt; seit 9.6b ohne Aufrufer, ersetzt durch sl_garch11_filter)
 //   roll_mean_core     rollierender Mittelwert mit kompensierter Summe
-//   kendall_tau_core   Kendalls Tau-b (long double, auf x86-64 80 Bit)
+//   kendall_tau_core   Kendalls Tau-b (N5: ganzzahlig und double-double statt long double)
 //   roll_cov_core      rollierende Kovarianz
 //
 // Alle Kerne rechnen dieselben Formeln wie die frueheren R-Fassungen; sie
@@ -693,6 +693,48 @@ static long long merge_count(std::vector<double>& y, std::vector<double>& buf, i
   return s;
 }
 
+// N5: double-double-Hilfen fuer kendall_tau_core. Kein fma (fp-contract off). Quellen: Dekker, T. J. (1971).
+// A floating-point technique for extending the available precision. Numerische Mathematik 18(3), 224-242
+// (exakte Summe und Produkt mit Aufspaltung 2^27 + 1); Shewchuk, J. R. (1997). Adaptive precision
+// floating-point arithmetic and fast robust geometric predicates. Discrete & Computational Geometry 18(3),
+// 305-363 (Two-Sum, Fast-Two-Sum). Eigene Umsetzung.
+struct kt_dd { double hi, lo; };
+static inline kt_dd kt_two_sum(double a, double b) {
+  const double s = a + b, bb = s - a;
+  return {s, (a - (s - bb)) + (b - bb)};
+}
+static inline kt_dd kt_fast_two_sum(double a, double b) {   // |a| >= |b|
+  const double s = a + b;
+  return {s, b - (s - a)};
+}
+static inline void kt_split(double a, double& hi, double& lo) {
+  const double c = 134217729.0 * a;                        // 2^27 + 1
+  hi = c - (c - a); lo = a - hi;
+}
+static inline kt_dd kt_two_prod(double a, double b) {
+  double ah, al, bh, bl;
+  const double p = a * b;
+  kt_split(a, ah, al); kt_split(b, bh, bl);
+  return {p, ((ah * bh - p) + ah * bl + al * bh) + al * bl};
+}
+static inline kt_dd kt_from_ll(long long v) {               // exakt fuer |v| < 2^62
+  const double hi = (double) v;
+  return {hi, (double) (v - (long long) hi)};
+}
+// num / sqrt(A B) fuer ganze Zahlen A, B > 0, |num| <= max(A, B) < 2^62, auf double gerundet
+static double kt_ratio(long long num, long long A, long long B) {
+  const kt_dd a = kt_from_ll(A), b = kt_from_ll(B), z = kt_from_ll(num);
+  kt_dd p = kt_two_prod(a.hi, b.hi);                       // P = A B
+  p = kt_fast_two_sum(p.hi, p.lo + ((a.hi * b.lo + a.lo * b.hi) + a.lo * b.lo));
+  const double s0 = std::sqrt(p.hi);                       // S = sqrt(P), ein Newton-Schritt
+  const kt_dd q = kt_two_prod(s0, s0);
+  const kt_dd sq = kt_fast_two_sum(s0, (((p.hi - q.hi) - q.lo) + p.lo) / (2.0 * s0));
+  const double t0 = z.hi / sq.hi;                          // num / S, eine Korrektur
+  const kt_dd t = kt_two_prod(t0, sq.hi);
+  const double rem = (((z.hi - t.hi) - t.lo) - t0 * sq.lo) + z.lo;
+  return t0 + rem / sq.hi;
+}
+
 static double kendall_tau_core(simlev_host::NumVec x, simlev_host::NumVec y) {
   const int n = x.size();
   if (n < 2) return SIMLEV_NA;
@@ -711,10 +753,14 @@ static double kendall_tau_core(simlev_host::NumVec x, simlev_host::NumVec y) {
   for (int i = 1; i < n; ++i) { if (ys[i] == ys[i - 1]) ++ty; else { n2 += ty * (ty - 1) / 2; ty = 1; } }
   n2 += ty * (ty - 1) / 2;
   const long long n0 = (long long) n * (n - 1) / 2;
-  const long double num = (long double) n0 - n1 - n2 + n3 - 2.0L * swaps;
-  const long double den = std::sqrt((long double) (n0 - n1) * (long double) (n0 - n2));
-  if (den == 0.0L) return SIMLEV_NA;
-  return (double) (num / den);
+  // N5: Zaehler und die Faktoren des Nenners exakt ganzzahlig; Wurzel und Division in doppelter
+  // double-Genauigkeit (Dekker 1971: Summe und Produkt ohne Rundungsfehler, ein Newton-Schritt fuer die
+  // Wurzel, eine Korrektur fuer den Quotienten; relativer Fehler vor dem Runden < 1e-30), erst das
+  // Ergebnis wird auf double gerundet. Ersetzt long double (x86-64 80 Bit, aarch64 128 Bit): gleiche
+  // Ergebnisse auf allen Plattformen, korrekt gerundet ausser im Abstand < 1e-30 zu einer Rundungsgrenze.
+  const long long num = (n0 - n1) - n2 + n3 - 2 * swaps, A = n0 - n1, B = n0 - n2;
+  if (A <= 0 || B <= 0) return SIMLEV_NA;
+  return kt_ratio(num, A, B);
 }
 
 // ---------------------------------------------------------------------------

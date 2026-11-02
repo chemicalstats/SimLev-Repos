@@ -510,7 +510,7 @@ class SimLevParamSearch(RList):
 
 def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("grid", "random", "lhs"), n=50,
                  constraint=None, sim_args=None, burn_in=0, metrics=None, objective="sharpe", maximize=True,
-                 keep_returns=True, seed=None, cores=1):
+                 keep_returns=("day", "none"), seed=None, cores=1):
     """Parametersuche über Strategie- und Simulationsparameter.
 
     Wertet eine Strategie für jeden Punkt eines Parameterraums mit
@@ -539,12 +539,18 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
         maximize: Zielgröße maximieren (Standard ``True``).
         cores: Anzahl Prozesse (Standard 1).
         seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`) für den Versuchsplan; die Auswertung ist deterministisch und unabhängig von ``cores``.
-        keep_returns: tägliche Renditen speichern (Standard ``True``).
+        keep_returns: ``"day"`` (Standard): tägliche Renditen speichern; ``"none"``: keine. ``True``/``False``
+            (bis 6.5b) ergeben einen Fehler.
 
     Returns:
         :class:`SimLevParamSearch`.
     """
     method = _match_arg(method, ("grid", "random", "lhs"), "method")
+    # 6.5b (C.1): Text statt Logisch, ohne Alias (E1); logisch vor dem Text prüfen
+    if isinstance(keep_returns, (bool, np.bool_)):
+        raise ValueError("param_search: keep_returns ist \"day\" oder \"none\" (früher TRUE/FALSE).")
+    keep_returns = _match_arg(keep_returns, ("day", "none"), "keep_returns")
+    keep_ret = keep_returns == "day"
     sim_args = {} if sim_args is None else dict(sim_args)
     if metrics is None:
         metrics = _ext("bootstrap", "bootstrap_study_metrics")
@@ -583,7 +589,7 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
         if not isinstance(m, pd.Series):
             m = pd.Series(dict(m)) if isinstance(m, Mapping) else pd.Series(m)
         out = {"m": m, "err": None, "date": None, "ret": None}
-        if keep_returns:
+        if keep_ret:
             ix = _ext("withdrawal", "result_index")(res)
             v = ix["value"].to_numpy(dtype=np.float64)
             out["date"] = np.asarray(ix["date"]).astype("datetime64[D]")
@@ -606,7 +612,7 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
     cols["error"] = np.array([o["err"] for o in out], dtype=object)
     tab = pd.DataFrame(cols)
     R = dates = None
-    if keep_returns:
+    if keep_ret:
         ref = okm[0]["date"]
         dates = ref[1:]
         Rm = np.full((len(dates), len(design)), _NAN)

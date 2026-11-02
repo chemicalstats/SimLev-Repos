@@ -10,6 +10,7 @@
 #   .sl_fit_garch11(e, gjr, quiet)  wie .fit_garch11 (Methode "ml" statt "rugarch"/"optim", F10)
 #   .sl_gpd_fit(exc)                ersetzt .evd_fpot(exc, threshold = 0, std.err = FALSE)
 #   .sl_dcc_fit(Z, Qbar)            ersetzt optim(Nelder-Mead) in dependence_dcc
+#   .sl_backcast_fit(prob, ...)     N5: Fit mehrerer Parameter in backcast_fit ganz in C
 #   .sl_ms_garch_fit(y, K, model)   wie .ms_garch_fit (ganz in C)
 #   .sl_boot_*(..., stream)         wie .boot_* mit Zug aus einem SimLev-Strom (Entwurf C.5)
 
@@ -25,6 +26,13 @@
 # NLL an par = c(mu, omega, alpha, beta, gamma); s2_init = NULL: Stichprobenvarianz
 .sl_garch11_nll <- function(e, par, gjr = FALSE, s2_init = NULL)
   .Call(C_sl_garch11_nll, as.double(e), as.double(rep_len(c(par, 0), 5)), as.logical(gjr),
+        if (is.null(s2_init)) NaN else as.double(s2_init))
+
+# N3: GJR-NLL und analytischer Gradient an theta = c(mu, log omega, a, g, b) (Vorwaertsrekursion der
+# Ableitungen von s2, wie im Fit); list(value, gradient), nicht endlich: value = Inf, gradient = NaN.
+# N4: auch sGARCH (gjr = FALSE, theta = c(mu, log omega, a, b)).
+.sl_garch11_grad <- function(theta, e, gjr = TRUE, s2_init = NULL)
+  .Call(C_sl_garch11_grad, as.double(e), as.double(theta), as.logical(gjr),
         if (is.null(s2_init)) NaN else as.double(s2_init))
 
 # ML-Punktschaetzer (Fehler, wenn die Schaetzung scheitert)
@@ -65,8 +73,21 @@
 .sl_dcc_filter <- function(Z, a, b, Qbar, keep)
   .Call(C_sl_dcc_filter, .sl_mmat(Z), as.double(a), as.double(b), .sl_mmat(Qbar), as.logical(keep))
 
-# Schaetzung von (a, b) ganz in C (Nelder-Mead wie dependence_dcc); list(a, b, nll, convergence, par)
+# Schaetzung von (a, b) ganz in C; list(a, b, nll, convergence, par). N5: BFGS mit analytischem
+# Gradienten nach grobem Nelder-Mead-Vorlauf (bis 1.1.0 Nelder-Mead wie dependence_dcc)
 .sl_dcc_fit <- function(Z, Qbar) .Call(C_sl_dcc_fit, .sl_mmat(Z), .sl_mmat(Qbar))
+
+# ── Backcast (N5) ────────────────────────────────────────────────────────────
+
+# Zielfunktion von backcast_fit in C: prob = .bc_cprob(...) (r/R/backcast.R), par = c(drag, spread,
+# beta), fit = Indizes 1 drag, 2 spread, 3 beta; list(value, gradient) (gradient nur bei grad = TRUE)
+.sl_backcast_obj <- function(prob, par, fit, grad = FALSE)
+  .Call(C_sl_backcast_obj, prob, as.double(par), as.integer(fit), as.logical(grad))
+
+# Fit wie .sl_optim(method = "L-BFGS-B") ganz in C (projizierter BFGS, analytischer Gradient fuer
+# rmse, mse und hybrid); list(par, value, convergence)
+.sl_backcast_fit <- function(prob, par0, fit, lower, upper)
+  .Call(C_sl_backcast_fit, prob, as.double(par0), as.integer(fit), as.double(lower), as.double(upper))
 
 # ── MS-GARCH und HMM ─────────────────────────────────────────────────────────
 

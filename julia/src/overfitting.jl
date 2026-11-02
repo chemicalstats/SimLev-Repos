@@ -316,7 +316,7 @@ _ymkey(d::Date) = lpad(string(Dates.year(d)), 4, '0') * "-" * lpad(string(Dates.
 function _rr(x, frequency, dates = nothing, risk_free = 0)
     if _is_ps(x)
         ret = get(x, "returns", nothing)
-        ret === nothing && error("Suche ohne gespeicherte Renditen (keep_returns = FALSE).")
+        ret === nothing && error("Suche ohne gespeicherte Renditen (keep_returns = \"none\").")
         R, cn, rn = _as_return_matrix(ret)
         dates = get(x, "dates", nothing)
     else

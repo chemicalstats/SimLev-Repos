@@ -20,7 +20,7 @@ param_search(
   metrics = bootstrap_study_metrics,
   objective = "sharpe",
   maximize = TRUE,
-  keep_returns = TRUE,
+  keep_returns = c("day", "none"),
   seed = NULL,
   cores = 1L
 )
@@ -110,9 +110,10 @@ Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_s
 Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
 Die Auswertung der Punkte ist deterministisch, das Ergebnis haengt nicht von \code{cores} ab.}
 
-\item{keep_returns}{Logisch (Standard \code{TRUE}): taegliche Renditen je
+\item{keep_returns}{\code{"day"} (Standard): taegliche Renditen je
 Punkt speichern (noetig fuer \code{\link[=overfit_pbo]{overfit_pbo()}}, \code{\link[=sharpe_deflated]{sharpe_deflated()}},
-\code{\link[=overfit_walk_forward]{overfit_walk_forward()}}, \code{\link[=overfit_reality_check]{overfit_reality_check()}}, \code{\link[=sharpe_haircut]{sharpe_haircut()}}).}
+\code{\link[=overfit_walk_forward]{overfit_walk_forward()}}, \code{\link[=overfit_reality_check]{overfit_reality_check()}}, \code{\link[=sharpe_haircut]{sharpe_haircut()}}));
+\code{"none"}: keine. \code{TRUE}/\code{FALSE} (bis 6.5b) ergeben einen Fehler.}
 
 \item{object, x}{Objekt der Klasse \code{SimLevParamSearch}.}
 
@@ -152,7 +153,7 @@ und \code{error} (Fehlermeldung oder \code{NA}).}
 zeitgewichteten Renditen als Anteil (aus \code{\link[=result_index]{result_index()}}); Zeilen =
 Tage nach \code{burn_in} ohne den ersten, Spalten \code{p1},
 \code{p2}, ... (Nummer = \code{id}); \code{NA} fuer fehlgeschlagene
-Punkte. \code{NULL} bei \code{keep_returns = FALSE}.}
+Punkte. \code{NULL} bei \code{keep_returns = "none"}.}
 \item{\code{dates}}{Datum je Zeile von \code{returns} (Kalender des
 ersten erfolgreichen Punkts).}
 \item{\code{space}, \code{params}, \code{method}, \code{objective},

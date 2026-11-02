@@ -56,8 +56,56 @@ def test_gpd_dcc_ms_boot():
         gn[i] = (L.ms_garch_nll(a, e[:600], 2, "gjrGARCH") - L.ms_garch_nll(b, e[:600], 2, "gjrGARCH")) / (2 * h)
     assert gr["value"] == L.ms_garch_nll(th, e[:600], 2, "gjrGARCH")
     assert np.max(np.abs(gr["gradient"] - gn)) < 1e-5 * max(np.max(np.abs(gn)), 1.0)
+    # N3: analytischer GJR-Gradient gegen zentrale Differenzen (Schritt 1e-5 max(|x|, 1), mu in Einheiten von sd(e))
+    tg = np.array([3e-4, -13.1, -3.2, -4.5, 2.0])
+    sc = np.array([np.std(e, ddof=1), 1, 1, 1, 1])
+    gg = L.garch11_grad(tg, e)
+    gq = np.empty(5)
+    for i in range(5):
+        h = 1e-5 * max(abs(tg[i] / sc[i]), 1.0) * sc[i]
+        a, b = tg.copy(), tg.copy()
+        a[i] += h
+        b[i] -= h
+        gq[i] = (L.garch11_grad(a, e)["value"] - L.garch11_grad(b, e)["value"]) / (2 * h)
+    assert np.max(np.abs(gg["gradient"] - gq) * sc) < 1e-5 * max(np.max(np.abs(gq * sc)), 1.0)
+    # N4: dasselbe für sGARCH (theta = (mu, log omega, a, b))
+    ts = np.array([3e-4, -13.1, -2.6, 2.3])
+    ss = sc[:4]
+    gs = L.garch11_grad(ts, e, False)
+    gq = np.empty(4)
+    for i in range(4):
+        h = 1e-5 * max(abs(ts[i] / ss[i]), 1.0) * ss[i]
+        a, b = ts.copy(), ts.copy()
+        a[i] += h
+        b[i] -= h
+        gq[i] = (L.garch11_grad(a, e, False)["value"] - L.garch11_grad(b, e, False)["value"]) / (2 * h)
+    assert len(gs["gradient"]) == 4
+    assert np.max(np.abs(gs["gradient"] - gq) * ss) < 1e-5 * max(np.max(np.abs(gq * ss)), 1.0)
     i1 = L.boot_idx_stationary(300, 50, 10, stream=L.Stream(1))
     i2 = L.boot_idx_stationary(300, 50, 10, stream=L.Stream(1))
     assert np.array_equal(i1, i2) and i1.min() >= 1 and i1.max() <= 300
     with pytest.raises(ValueError, match="block_length"):
         L.boot_idx_block(10, 5, 20, False, stream=s)
+
+
+def test_n5_backcast_obj_grad_fit():
+    """N5: Backcast-Zielfunktion in C mit analytischem Gradienten, Fit (wie r/tests/etappe94-models.R)."""
+    rng = np.random.default_rng(3)
+    bx = rng.normal(3e-4, 0.01, 300)
+    bpos = np.sort(rng.choice(np.arange(1, 301), 250, replace=False)).astype(np.int32)
+    bpos[0] = 1
+    bl = (np.log(50) + np.cumsum(np.log1p(2.01 * bx - 4e-5 + rng.normal(0, 2e-4, 300))))[bpos - 1]
+    pr = (bx, np.full(300, -1 / 36000), np.full(300, 0.5 / 36500), 2.0, np.full(300, 1 / 36000), np.full(300, 1 / 36500),
+          bpos, bl, (3, 1, 2), 0.3)
+    th = np.array([0.7, 0.3, 1.01])
+    gb = L.backcast_obj(pr, th, [1, 2, 3], True)
+    gq = np.zeros(3)
+    for i in range(3):
+        h = 1e-6 * max(abs(th[i]), 1.0)
+        a, b = th.copy(), th.copy()
+        a[i] += h
+        b[i] -= h
+        gq[i] = (L.backcast_obj(pr, a, [1, 2, 3])["value"] - L.backcast_obj(pr, b, [1, 2, 3])["value"]) / (2 * h)
+    assert np.max(np.abs(gb["gradient"] - gq)) < 1e-6 * np.max(np.abs(gq))
+    fb = L.backcast_fit(pr, [0.0, 0.0, 1.0], [1, 2, 3], [-10.0, -5.0, 0.5], [10.0, 10.0, 1.5])
+    assert fb["convergence"] == 0 and fb["value"] <= gb["value"]

@@ -76,6 +76,20 @@ Kopien (Pakete bauen nur aus ihrem Teilbaum): `r/src/` (flach), `python/src/core
   BFGS von sieben Rasterpunkten; MS-GARCH mit analytischem Gradienten (Vorwärtsmodus, Griewank/Walther
   2008; LU nach Golub/Van Loan 2013 für die Ableitung der stationären Verteilung), `sl_msgarch_grad`,
   GJR mit 20 Starts (`SL_MSGARCH_MAXSTART` 20). Reinraum wie 9.4; rugarch und MSGARCH nur als Orakel.
+- **N3.** GJR-GARCH in `slc_garch.c` mit analytischem Gradienten (Vorwärtsrekursion der Ableitungen der
+  bedingten Varianz, Fiorentini/Calzolari/Panattoni 1996, Griewank/Walther 2008), f und g in einem
+  Durchlauf, Logarithmen über ein laufendes Produkt, `sl_garch11_grad`; sGARCH unverändert.
+- **N4.** sGARCH in `slc_garch.c` mit demselben analytischen Gradienten (ohne den Asymmetrie-Term),
+  Start wie bisher vom besten Rasterpunkt; `sl_garch11_grad` auch für sGARCH (theta mit 4 Werten).
+- **N5.** GPD-Fit (`slc_gpd.c`) mit geschlossenem Gradienten (Grenzfall ξ → 0 über eine Reihe); DCC-Fit
+  (`slc_dcc.c`) mit BFGS und analytischem Gradienten (Vorwärtsrekursion von ∂Q_t/∂(a, b)) nach einem
+  groben Nelder-Mead-Vorlauf, der das Becken wie bisher wählt, Nelder-Mead wie bisher als Rückfall;
+  neu `slc_backcast.c`: Zielfunktion von `backcast_fit` mit analytischem Gradienten und Fit über
+  `sl_minimize` (glatte Verluste rmse, mse, hybrid; mae, median, max bleiben bei `.sl_optim` des Hosts).
+  Kein `long double` mehr: Summen in `tax_core_impl.h` kompensiert (Neumaier), Kendalls Tau in
+  `research_core_impl.h` ganzzahlig und in double-double (gleiche Ergebnisse auf x86-64 und aarch64);
+  der Julia-Port (`core.jl`, `dependence_core.jl`) rechnet Operation für Operation gleich. Quellen:
+  Griewank/Walther (2008), Magnus/Neudecker (2019), Neumaier (1974), Dekker (1971), Shewchuk (1997).
 
 Prüfung: Plausibilität gegen R und eine eigene decimal-Referenz (Arbeitsordner der Etappe),
 Gleichlauf der Sprachen mit `tools/gleichlauf/run.sh --quick`.

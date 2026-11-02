@@ -958,11 +958,14 @@ withdrawal_perfect_rate <- function(real_returns, legacy = 0) {
 #' Steuer auf im Jahr versteuerte Ertraege, wenn spaeter im Jahr Verluste
 #' entstehen (unterjaehrige Verlustverrechnung, mit Freigabe des
 #' Pauschbetrags). Gleich sind beide, solange in einem Planjahr alle Verkaeufe
-#' Gewinne ergeben. (2) Steuersatz: die Entnahmephase rechnet mit dem festen
-#' Satz \code{tax_rate}; Kirchensteuer (\code{church_tax}), Tarifweg und
-#' Guenstigerpruefung (\code{taxable_income}, \code{tax_tariff}) der
-#' Ansparphase werden nicht uebernommen (gegebenenfalls \code{tax_rate}
-#' anpassen). (3) Ordergebuehren beim Verkauf bildet die Entnahmephase nicht
+#' Gewinne ergeben. (2) Steuersatz: die Entnahmephase rechnet mit einem festen
+#' Satz aus \code{tax_profile()} (\code{rate} bzw. mit \code{church_tax} der
+#' Satz nach § 32d Abs. 1 EStG, mit \code{guenstigerpruefung} und
+#' \code{income_rate()} gegebenenfalls der persoenliche Satz, wie in
+#' [simulation()]); Kirchensteuer und Guenstigerpruefung der Ansparphase werden
+#' nicht uebernommen, sondern in \code{tax} ausdruecklich angegeben; den
+#' Tarifweg (\code{income_tariff()}) bildet die Entnahmephase nicht ab
+#' (Fehler). (3) Ordergebuehren beim Verkauf bildet die Entnahmephase nicht
 #' ab (Warnung, wenn sie in der Ansparphase gesetzt waren). (4) Verschiedene
 #' Teilfreistellungen, Regime \code{"capital_gains"} neben Fonds und
 #' \code{"private_sale"} (§ 23 EStG) werden nicht getrennt besteuert
@@ -1138,8 +1141,11 @@ withdrawal_perfect_rate <- function(real_returns, legacy = 0) {
 #' @param gamma Relative Risikoaversion (CRRA, Zahl, Standard 2) fuer das
 #'   Sicherheitsaequivalent der realen jaehrlichen Konsumreihe
 #'   (\code{gamma = 1}: geometrisches Mittel).
-#' @param keep_paths Logisch: Vermoegensmatrix \code{wealth} zurueckgeben
-#'   (Standard \code{TRUE}).
+#' @param keep_paths Vermoegensmatrix \code{wealth} zurueckgeben: \code{TRUE}
+#'   (Standard) = alle Pfade, \code{FALSE} oder 0 = keine, ganze Zahl k >= 1 =
+#'   die ersten k Pfade (k groesser als die Pfadzahl: alle). Gerechnet werden
+#'   immer alle Pfade; \code{plot()} zeichnet den Vermoegensfaecher dann aus
+#'   den behaltenen Pfaden (Titel mit "erste k von n Pfaden").
 #' @param horizon Optional Laufzeit je Pfad: Objekt aus [withdrawal_horizon()]
 #'   (zufaellige Laufzeit in Jahren je Pfad) oder eine Zahl > 0 = feste Laufzeit in
 #'   Jahren. \code{NULL} (Standard) = volle Pfadlaenge. Dann gilt ein Pfad als
@@ -1227,11 +1233,18 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
                                   vorabpauschale = TRUE, sale_cost = 0, cost_basis = 100,
                                   loss_carryforward = 0, gamma = 2, keep_paths = TRUE, horizon = NULL) {
   timing <- match.arg(timing)
-  # F2 (Etappe 6.4): Steuerdaten der Person aus tax_profile() (rate, sparer_pauschbetrag); NULL = ohne Steuern.
-  # Die Bestandsmerkmale (partial_exemption, vorabpauschale, cost_basis, loss_carryforward, sale_cost) und der
-  # Basiszins (base_rate, auch Matrix) bleiben eigene Argumente.
+  # F2 (Etappe 6.4): Steuerdaten der Person aus tax_profile() (rate, church_tax, sparer_pauschbetrag,
+  # guenstigerpruefung, income_rate()); NULL = ohne Steuern. Die Bestandsmerkmale (partial_exemption,
+  # vorabpauschale, cost_basis, loss_carryforward, sale_cost) und der Basiszins (base_rate, auch Matrix) bleiben
+  # eigene Argumente.
   tax_mode <- .wd_tax_mode(tax)
-  tax_rate <- if (is.null(tax)) 26.375 else tax$rate
+  # 6.5b: Satz wie in simulation() (.tax_rates: Kirchensteuer, Guenstigerpruefung einmal je Lauf); die Angaben
+  # stehen ausdruecklich in tax_profile(), aus der Ansparphase wird nichts uebernommen
+  tax_rate <- if (is.null(tax)) 26.375 / 100 else {
+    ti <- tax$income
+    .tax_rates(tax$rate, tax$church_tax, tax$guenstigerpruefung, ti$marginal_rate, !is.null(ti) && ti$soli_rate != 0,
+               if (is.null(ti)) 5.5 else ti$soli_rate, who = "withdrawal_simulation")$effective_tax_rate
+  }
   sparer_pauschbetrag <- if (is.null(tax)) 1000 else tax$sparer_pauschbetrag
   if (!is.null(horizon) && !inherits(horizon, "SimLevHorizon")) {
     if (!is.numeric(horizon) || length(horizon) != 1L || !is.finite(horizon) || horizon <= 0)
@@ -1257,9 +1270,9 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
   .chk(cost_basis, "cost_basis", "eine Zahl >= 0 in Prozent des Startwerts (z. B. 100)"); .frac(cost_basis, "cost_basis")
   .chk(loss_carryforward, "loss_carryforward", "eine Zahl >= 0 (EUR)")
   .chk(gamma, "gamma", "eine Zahl >= 0 (relative Risikoaversion, z. B. 2)")
-  for (a in c("vorabpauschale", "keep_paths")) { v <- get(a)
-    if (!is.logical(v) || length(v) != 1L || is.na(v))
-      stop(sprintf("withdrawal_simulation: '%s' muss TRUE oder FALSE sein, nicht %s.", a, .show(v)), call. = FALSE) }
+  if (!is.logical(vorabpauschale) || length(vorabpauschale) != 1L || is.na(vorabpauschale))
+    stop(sprintf("withdrawal_simulation: '%s' muss TRUE oder FALSE sein, nicht %s.", "vorabpauschale", .show(vorabpauschale)), call. = FALSE)
+  kp <- .keep_count(keep_paths, Inf, "withdrawal_simulation")   # Anzahl behaltener Pfade, begrenzt nach ncol(R)
   if (is.numeric(inflation) && !is.matrix(inflation) && length(inflation) == 1L) {
     .chk(inflation, "inflation", "eine Zahl in Prozent p. a. \u00fcber -100 (z. B. 2) oder eine Matrix", -99.999)
     .frac(inflation, "inflation", hi = 0.05, unit = "% p. a.")
@@ -1456,11 +1469,12 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
     if (s1 <= e1) inc[s1:e1] <- inc[s1:e1] + e$amount      # Einkommen nach Pfadende wirkt nicht
   }
   rp <- .wd_param_vector(rule)
+  kp <- min(kp, ncol(R))
   t0 <- Sys.time()
   core <- .wd_simulate(R, I, CAPE, BASE, as.integer(ppy), .wd_rules[[rule$type]], rp, timing == "start",
-                       start_value, inc, tax_mode == "person", tax_rate / 100, partial_exemption / 100,
+                       start_value, inc, tax_mode == "person", tax_rate, partial_exemption / 100,
                        sparer_pauschbetrag, isTRUE(vorabpauschale), sale_cost / 100, cost_basis / 100,
-                       loss_carryforward, isTRUE(keep_paths) || !is.null(horizon),
+                       loss_carryforward, kp > 0 || !is.null(horizon),
                        lots$n %||% numeric(0), lots$basis %||% numeric(0), lots$vp %||% numeric(0), lots$group %||% integer(0),
                        if (spb_used1 > 0) max(0, sparer_pauschbetrag - spb_used1) else -1, !is.null(horizon))
   sp <- core$spending
@@ -1508,11 +1522,11 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
       AR <- .annual_real(list(returns = R, inflation = I, frequency = x$frequency))
       paths$pwr <- vapply(seq_along(H), function(i) withdrawal_perfect_rate(AR[seq_len(H[i]), i, drop = FALSE]), 0)
     } else paths$pwr <- NA_real_
-    if (!keep_paths) core$wealth <- NULL
+    if (kp == 0) core$wealth <- NULL
   }
   w <- x$weights %||% rep(1, ncol(R))
   out <- list(paths = paths, spending = sp, planned = core$planned,
-              wealth = if (keep_paths) core$wealth else NULL,
+              wealth = if (kp == 0) NULL else if (kp < ncol(core$wealth)) core$wealth[, seq_len(kp), drop = FALSE] else core$wealth,
               rule = rule, start_value = start_value, frequency = x$frequency, years = ny, full_years = nfy, horizon = horizon,
               historical = isTRUE(x$historical), weights = w, tax_mode = tax_mode, gamma = gamma,
               timing = timing, source = x$source, adopted = if (length(adopted)) adopted else NULL,
@@ -1715,8 +1729,9 @@ plot.SimLevWithdrawal <- function(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95), ...
   old <- graphics::par(no.readonly = TRUE); on.exit(graphics::par(old))
   graphics::par(mfrow = c(1, if (is.null(x$wealth)) 1 else 2), mar = c(4, 4.6, 2.5, 1),
                 mgp = c(2.9, 0.7, 0), las = 1)
-  fan <- function(M, main, xs) {
-    Q <- apply(M, 1, function(r) .wquantile(r, x$weights, probs)) / 1000
+  # keep_paths = k < Pfade (6.5b): Vermoegensfaecher mit den Gewichten der behaltenen Spalten, Konsum mit allen
+  fan <- function(M, main, xs, w = x$weights) {
+    Q <- apply(M, 1, function(r) .wquantile(r, w, probs)) / 1000
     plot(range(xs), range(Q, finite = TRUE), type = "n", xlab = "Jahr",
          ylab = "Tsd. (Startkaufkraft)", main = main, ...)
     k <- length(probs)
@@ -1724,7 +1739,11 @@ plot.SimLevWithdrawal <- function(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95), ...
     for (i in seq_len(floor(k / 2))) graphics::polygon(c(xs, rev(xs)), c(Q[i, ], rev(Q[k + 1 - i, ])), col = cols, border = NA)
     graphics::lines(xs, Q[ceiling(k / 2), ], col = "#2C6E9B", lwd = 2)
   }
-  if (!is.null(x$wealth)) fan(x$wealth, "Reales Verm\u00f6gen", 0:(nrow(x$wealth) - 1))
+  if (!is.null(x$wealth)) {
+    k <- ncol(x$wealth); n <- ncol(x$spending)
+    fan(x$wealth, if (k < n) sprintf("Reales Verm\u00f6gen (erste %d von %d Pfaden)", k, n) else "Reales Verm\u00f6gen",
+        0:(nrow(x$wealth) - 1), x$weights[seq_len(k)])
+  }
   fan(x$spending, "Realer Konsum je Jahr", seq_len(nrow(x$spending)))
   invisible(x)
 }
@@ -1844,11 +1863,12 @@ print.SimLevHorizon <- function(x, ...) {
   invisible(x)
 }
 
-#' Steuerangaben der Person fuer withdrawal_simulation() pruefen (F2)
+#' Steuerangaben der Person fuer withdrawal_simulation() pruefen (F2, 6.5b)
 #'
-#' Zweck: tax = NULL (ohne Steuern) oder tax_profile(); die Entnahmephase wertet daraus rate und
-#' sparer_pauschbetrag aus. Abweichende Angaben, die sie nicht abbildet (church_tax, private_sale_threshold,
-#' base_rate, guenstigerpruefung, income, harvest), ergeben einen Fehler.
+#' Zweck: tax = NULL (ohne Steuern) oder tax_profile(); die Entnahmephase wertet daraus rate, church_tax,
+#' sparer_pauschbetrag, guenstigerpruefung und income = income_rate() aus (Satz ueber .tax_rates). Angaben,
+#' die sie nicht abbildet (private_sale_threshold, base_rate, harvest), ergeben einen Fehler, ebenso
+#' income_tariff() (Tarifweg, Entscheidung T3 vom 01.11.2026) mit Verweis auf income_rate().
 #' Ausgabe: "none" oder "person".
 #' @keywords internal
 #' @noRd
@@ -1857,11 +1877,13 @@ print.SimLevHorizon <- function(x, ...) {
   if (!inherits(tax, "SimLevTaxProfile"))
     stop(sprintf("withdrawal_simulation: tax muss NULL oder ein Objekt aus tax_profile() sein, nicht %s.",
                  paste(class(tax), collapse = "/")), call. = FALSE)
-  un <- c(church_tax = isTRUE(tax$church_tax > 0), private_sale_threshold = !identical(as.numeric(tax$private_sale_threshold), 1000),
-          base_rate = !is.null(tax$base_rate), guenstigerpruefung = isTRUE(tax$guenstigerpruefung),
-          income = !is.null(tax$income), harvest = !is.null(tax$harvest))
+  un <- c(private_sale_threshold = !identical(as.numeric(tax$private_sale_threshold), 1000),
+          base_rate = !is.null(tax$base_rate), harvest = !is.null(tax$harvest))
   if (any(un))
-    stop(sprintf("withdrawal_simulation: tax_profile(%s) bildet die Entnahmephase nicht ab; ausgewertet werden rate und sparer_pauschbetrag (Basiszins \u00fcber base_rate von withdrawal_simulation()).",
+    stop(sprintf("withdrawal_simulation: tax_profile(%s) bildet die Entnahmephase nicht ab; ausgewertet werden rate, church_tax, sparer_pauschbetrag, guenstigerpruefung und income = income_rate() (Basiszins \u00fcber base_rate von withdrawal_simulation()).",
                  paste(names(un)[un], collapse = ", ")), call. = FALSE)
+  if (inherits(tax$income, "SimLevIncomeTariff"))
+    stop("withdrawal_simulation: tax_profile(income = income_tariff()) bildet die Entnahmephase noch nicht ab (keine Veranlagung je Planjahr); f\u00fcr die G\u00fcnstigerpr\u00fcfung income = income_rate(marginal_rate) verwenden (Grenzsteuersatz in Prozent, z. B. 42).",
+         call. = FALSE)
   "person"
 }

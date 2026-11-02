@@ -11,7 +11,7 @@
 #   .sl_gpd_fit(exc)                ersetzt .evd_fpot(exc, threshold = 0, std.err = FALSE)
 #   .sl_dcc_fit(Z, Qbar)            ersetzt optim(Nelder-Mead) in dependence_dcc
 #   .sl_backcast_fit(prob, ...)     N5: Fit mehrerer Parameter in backcast_fit ganz in C
-#   .sl_ms_garch_fit(y, K, model)   wie .ms_garch_fit (ganz in C)
+#   .sl_ms_garch_fit(y, K, model, cores = 1)   wie .ms_garch_fit (ganz in C; N6: cores Threads)
 #   .sl_boot_*(..., stream)         wie .boot_* mit Zug aus einem SimLev-Strom (Entwurf C.5)
 
 # ── GARCH(1,1) / GJR-GARCH(1,1) ──────────────────────────────────────────────
@@ -126,12 +126,19 @@
 
 #' MS-GARCH-Modell wie .ms_garch_fit, ganz in C (Starts, BFGS, Sortierung, Viterbi); BFGS laeuft von
 #' allen Rasterpunkten der beiden Startfamilien (die zwei bisherigen zuerst; sGARCH 12, gjrGARCH seit
-#' N1 20), seit N1 mit analytischem Gradienten
+#' N1 20), seit N1 mit analytischem Gradienten; N6: die Starts auf bis zu \code{cores} Threads verteilt
+#' (Ergebnis unabhaengig davon; ungueltig oder < 1: 1)
 #' @keywords internal
 #' @noRd
-.sl_ms_garch_fit <- function(y, K, model) {
+.sl_ms_garch_fit <- function(y, K, model, cores = 1L) {
   .ms_garch_check(K, model)
-  .Call(C_sl_ms_garch_estimate, as.double(y), as.integer(K), model == "gjrGARCH")
+  .Call(C_sl_ms_garch_estimate, as.double(y), as.integer(K), model == "gjrGARCH", .sl_threads(cores))
+}
+
+# N6: Zahl der Threads aus cores (wie bootstrap(): ganze Zahl; NA, ungueltig oder < 1 -> 1)
+.sl_threads <- function(cores) {
+  nt <- suppressWarnings(as.integer(cores[1L]))
+  if (length(nt) != 1L || is.na(nt) || nt < 1L) 1L else nt
 }
 
 # univariates Gauss-HMM wie .hmm_em(X, K, .hmm_init_rank(X, K, win, ridge), max_iter, tol, ridge)

@@ -1,4 +1,4 @@
-# RBase – Basis-Numerik wie in R (long-double-Akkumulation über F80)
+# RBase – Basis-Numerik wie in R (long-double-Akkumulation; seit N8 über die C-Kerne core/slc_rbase*.c)
 #
 # Re-exportiert die Engine-Hilfen aus `rnum.jl` (`r_sum`, `r_mean`, `r_var`,
 # `r_sd`, `r_cumsum`, `r_prod`, `r_rowsums`, `r_pow`, `r_pow_vec`, `r_mod1`,
@@ -13,12 +13,10 @@
 module RBase
 
 import ..SimLev
-using ..SimLev: F80, RVector, NamedMat, RFrame, NA, isna_strict, _ldq
+using ..SimLev: RVector, NamedMat, RFrame, NA, isna_strict
 using ..SimLev: r_sum, r_mean, r_mean_int, r_var, r_sd, r_cumsum, r_prod, r_rowsums,
                 r_pow, r_pow_vec, r_mod1
 
-const _LD0 = F80(0.0)
-const _LD1 = F80(1.0)
 
 # ── Matrizen ────────────────────────────────────────────────────────────────
 
@@ -46,44 +44,8 @@ _fmat(m::AbstractMatrix) = Float64[v === missing ? NA : Float64(v) for v in m]
 
 _named(v::Vector{Float64}, nms) = nms === nothing ? v : RVector(v; names = nms)
 
-# Hardware-Schleife; NaN-Ergebnisse werden mit F80Soft wiederholt (feste x87-
-# Regel für zwei NaN, siehe `_HW80` in rnum.jl).
-function _col_sums(a::Matrix{Float64}, na_rm::Bool, mean::Bool)
-    out = _col_sums(F80, a, na_rm, mean)
-    if SimLev._HW80 && any(isnan, out)
-        soft = _col_sums(SimLev.F80Soft, a, na_rm, mean)
-        @inbounds for j in eachindex(out)
-            isnan(out[j]) && (out[j] = soft[j])
-        end
-    end
-    return out
-end
-
-function _col_sums(::Type{T}, a::Matrix{Float64}, na_rm::Bool, mean::Bool) where {T}
-    n, p = size(a)
-    out = Vector{Float64}(undef, p)
-    @inbounds for j in 1:p
-        s = T(0.0)
-        cnt = n
-        if na_rm
-            cnt = 0
-            for i in 1:n
-                v = a[i, j]
-                if !isnan(v)
-                    cnt += 1
-                    s = s + T(v)
-                end
-            end
-        else
-            for i in 1:n
-                s = s + T(a[i, j])
-            end
-        end
-        mean && (s = s / T(cnt))
-        out[j] = Float64(s)
-    end
-    return out
-end
+# N8: Spalten- und Zeilensummen über den C-Kern (core/slc_rbase.c, long double wie R)
+_col_sums(a::Matrix{Float64}, na_rm::Bool, mean::Bool) = SimLev._rb_margsums(vec(a), size(a, 1), size(a, 2), na_rm, mean, false)
 
 "`colSums(x, na.rm)` (long double je Spalte)."
 function colSums(x; na_rm::Bool = false)
@@ -97,39 +59,7 @@ function colMeans(x; na_rm::Bool = false)
     return _named(_col_sums(a, na_rm, true), cn)
 end
 
-function _row_sums(a::Matrix{Float64}, na_rm::Bool, mean::Bool)
-    out = _row_sums(F80, a, na_rm, mean)
-    if SimLev._HW80 && any(isnan, out)
-        soft = _row_sums(SimLev.F80Soft, a, na_rm, mean)
-        @inbounds for i in eachindex(out)
-            isnan(out[i]) && (out[i] = soft[i])
-        end
-    end
-    return out
-end
-
-function _row_sums(::Type{T}, a::Matrix{Float64}, na_rm::Bool, mean::Bool) where {T}
-    n, p = size(a)
-    acc = fill(T(0.0), n)
-    cnt = zeros(Int, n)
-    @inbounds for j in 1:p
-        for i in 1:n
-            v = a[i, j]
-            if na_rm
-                isnan(v) && continue
-                cnt[i] += 1
-            end
-            acc[i] = acc[i] + T(v)
-        end
-    end
-    out = Vector{Float64}(undef, n)
-    @inbounds for i in 1:n
-        s = acc[i]
-        mean && (s = s / T(na_rm ? cnt[i] : p))
-        out[i] = Float64(s)
-    end
-    return out
-end
+_row_sums(a::Matrix{Float64}, na_rm::Bool, mean::Bool) = SimLev._rb_margsums(vec(a), size(a, 1), size(a, 2), na_rm, mean, true)
 
 "`rowSums(x, na.rm)` (spaltenweise in long double akkumuliert)."
 function rowSums(x; na_rm::Bool = false)
@@ -155,42 +85,13 @@ _vec(::Missing) = (Float64[NA], nothing)
 _vec(::Nothing) = (Float64[], nothing)
 _vec(x::Tuple) = _vec(collect(x))
 
-# R's `handleNaN` (cum.c): gemeinsam mit `r_cumsum` in rnum.jl
-const _handle_nan! = SimLev._handle_nan!
+"`cumprod(x)` (long-double-Produkt wie R, NA/NaN über `handleNaN`; C-Kern)."
+r_cumprod(x) = ((v, nm) = _vec(x); _named(SimLev._rb_cumprod(v), nm))
 
-"`cumprod(x)` (long-double-Produkt wie R's `cum.c`, NA/NaN über `handleNaN`)."
-function r_cumprod(x)
-    v, nm = _vec(x)
-    out = similar(v)
-    s = _LD1
-    @inbounds for i in eachindex(v)
-        s = s * F80(v[i])
-        out[i] = Float64(s)
-    end
-    isnan(Float64(s)) && _handle_nan!(out, v)
-    return _named(out, nm)
-end
-
-function _cumext(x, greater::Bool)
-    v, nm = _vec(x)
-    out = similar(v)
-    m = greater ? -Inf : Inf
-    @inbounds for i in eachindex(v)
-        t = v[i]
-        if isnan(t)
-            _handle_nan!(out, v)
-            break
-        end
-        m = greater ? (m > t ? m : t) : (m < t ? m : t)
-        out[i] = m
-    end
-    return _named(out, nm)
-end
-
-"`cummax(x)` (double, `(max > x) ? max : x`; NA/NaN über `handleNaN`)."
-r_cummax(x) = _cumext(x, true)
-"`cummin(x)`."
-r_cummin(x) = _cumext(x, false)
+"`cummax(x)` (double, `(max > x) ? max : x`; NA/NaN über `handleNaN`; C-Kern)."
+r_cummax(x) = ((v, nm) = _vec(x); _named(SimLev._rb_cummax(v), nm))
+"`cummin(x)` (C-Kern)."
+r_cummin(x) = ((v, nm) = _vec(x); _named(SimLev._rb_cummin(v), nm))
 const cummax = r_cummax
 const cummin = r_cummin
 

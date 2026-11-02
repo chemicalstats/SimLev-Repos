@@ -4,6 +4,10 @@
 # PKG_CFLAGS, damit die uebrigen C-Dateien unveraendert uebersetzt werden). Die Kerndateien brechen
 # bei __FAST_MATH__ ab (slc_internal.h).
 SLC_CFLAGS = -std=c99 -ffp-contract=off -fno-fast-math
+# N6: parallele Starts des MS-GARCH-Fits mit POSIX-Threads (nur slc_msgarch.c; Makevars.win ohne, dort
+# laufen die Starts nacheinander, Ergebnis gleich)
+SLC_THREADS = -DSLC_THREADS -pthread
+PKG_LIBS = -pthread
 
 # erstes Ziel: die Bibliothek (sonst wuerde die erste Regel unten das Standardziel)
 all: $(SHLIB)
@@ -74,7 +78,7 @@ slc_dcc.o: slc_dcc.c $(SLC94_DEPS)
 	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_dcc.c -o slc_dcc.o
 
 slc_msgarch.o: slc_msgarch.c $(SLC94_DEPS)
-	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_msgarch.c -o slc_msgarch.o
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) $(SLC_THREADS) -c slc_msgarch.c -o slc_msgarch.o
 
 slc_boot.o: slc_boot.c $(SLC94_DEPS)
 	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_boot.c -o slc_boot.o

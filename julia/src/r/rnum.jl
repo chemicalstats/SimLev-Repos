@@ -1,8 +1,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # R-kompatible Numerik
 #
-# Die Funktionen bilden die Akkumulationsreihenfolge und -genauigkeit von R
-# exakt nach (long double über F80). NA wird wie in R als NaN mit der
+# Summen, Mittel, Varianz, Kumulationen und Potenz rechnen seit N8 die C-Kerne
+# core/slc_rbase*.c (r/rbase_c.jl); übrige Hilfen in long double über F80. NA wird wie in R als NaN mit der
 # Nutzlast 1954 dargestellt, sodass NA und NaN unterscheidbar bleiben.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -15,175 +15,37 @@ isna_strict(x::Float64) = isnan(x) && (reinterpret(UInt64, x) & 0x00000000FFFFFF
 const _LD0 = F80(0.0)
 const _LD1 = F80(1.0)
 
-# ── NA/NaN in long-double-Summen ───────────────────────────────────────────
-# Treffen in einer x87-Operation zwei NaN aufeinander (z. B. `sum(c(NaN, NA))`),
-# entscheidet die FPU: ein ruhiges NaN schlägt ein signalisierendes (R's NA
-# liegt im Speicher signalisierend vor und wird bei `fadd m64` unverändert
-# verglichen), bei zwei ruhigen gewinnt die größere Mantisse. Ob LLVM die
-# Hardware-F80 als `fadd m64` (wie gcc in R) oder als `fld` + `faddp` (das NA
-# vorher quietet) übersetzt, hängt von der Codeerzeugung ab. Deshalb rechnet
-# die schnelle Hardware-Schleife nur, solange kein NaN herauskommt; ist das
-# Ergebnis NaN, wird mit der Software-Nachbildung `F80Soft` wiederholt, die die
-# Regel für Speicheroperanden fest nachbildet (`F80Soft(x)` lässt NA
-# signalisierend, `_ldq_soft` quietet wie `fld`). Kosten: ein `isnan` je Aufruf.
-const _HW80 = F80 !== F80Soft
-
-function _r_sum(::Type{T}, x, na_rm::Bool) where {T}
-    s = T(0.0)
-    @inbounds for v in x
-        fv = Float64(v)
-        if !na_rm || !isnan(fv)
-            s = s + T(fv)
-        end
-    end
-    _gt_dblmax(s) && return Inf
-    _lt_negdblmax(s) && return -Inf
-    return Float64(s)
-end
+# ── Summen, Mittel, Varianz, Kumulationen (N8: C-Kerne core/slc_rbase.c) ─────
+# R akkumuliert in long double; die C-Kerne tun dasselbe (x87 auf x86-64, gegen R bitgleich geprüft)
+# und sind dieselbe Implementierung wie in Python. Die frühere Nachbildung über F80/F80Soft mit der
+# x87-Regel für zwei NaN-Operanden entfällt hier.
 
 "`sum(x)` / `sum(x, na.rm = TRUE)` wie in R."
-function r_sum(x; na_rm::Bool = false)
-    r = _r_sum(F80, x, na_rm)
-    (_HW80 && isnan(r)) ? _r_sum(F80Soft, x, na_rm) : r
-end
-
-"""
-R's `handleNaN` (cum.c): ab dem ersten NaN/NA wird das Ergebnis neu gesetzt –
-NA, sobald ein NA vorkam, sonst NaN. R ruft das nach `cumsum`/`cumprod` auf,
-wenn die Summe NaN ist; so hängt die Unterscheidung NA/NaN nicht von der
-x87-Regel für zwei NaN-Operanden ab (die bei `fadd m64` das ruhige NaN der
-Summe gegen ein signalisierendes NA aus dem Speicher gewinnen lässt, nach
-einem `fld` dagegen die größere Mantisse – je nach Codeerzeugung).
-"""
-function _handle_nan!(out::AbstractVector{Float64}, v::AbstractVector{Float64})
-    hasNA = false
-    hasNaN = false
-    @inbounds for i in eachindex(v, out)
-        hasNaN = hasNaN || isnan(v[i])
-        hasNA = hasNA || (hasNaN && isna_strict(v[i]))
-        if hasNA
-            out[i] = NA
-        elseif hasNaN
-            out[i] = NaN
-        end
-    end
-    return out
-end
+r_sum(x; na_rm::Bool = false) = _rb_sum(_rbv(x), na_rm)
 
 "`cumsum(x)` wie in R (long double; NA/NaN über `handleNaN`)."
-function r_cumsum(x)
-    out = Vector{Float64}(undef, length(x))
-    s = _LD0
-    @inbounds for (i, v) in enumerate(x)
-        s = s + _ldq(Float64(v))
-        out[i] = Float64(s)
-    end
-    isnan(Float64(s)) && _handle_nan!(out, Float64[Float64(v) for v in x])
-    return out
-end
-
-function _r_prod(::Type{T}, x, na_rm::Bool) where {T}
-    s = T(1.0)
-    @inbounds for v in x
-        fv = Float64(v)
-        if !na_rm || !isnan(fv)
-            s = s * T(fv)
-        end
-    end
-    _gt_dblmax(s) && return Inf
-    _lt_negdblmax(s) && return -Inf
-    return Float64(s)
-end
+r_cumsum(x) = _rb_cumsum(_rbv(x))
 
 "`prod(x)` wie in R."
-function r_prod(x; na_rm::Bool = false)
-    r = _r_prod(F80, x, na_rm)
-    (_HW80 && isnan(r)) ? _r_prod(F80Soft, x, na_rm) : r
-end
+r_prod(x; na_rm::Bool = false) = _rb_prod(_rbv(x), na_rm)
 
 _dropnan(x) = Float64[v for v in x if !isnan(Float64(v))]
 
 "`mean(x)` für Doubles wie R's `real_mean` (Summe/n plus Korrekturdurchlauf)."
-function r_mean(x; na_rm::Bool = false)
-    a = na_rm ? _dropnan(x) : collect(Float64, x)
-    r = _r_mean(F80, a)
-    (_HW80 && isnan(r)) ? _r_mean(F80Soft, a) : r
-end
-
-function _r_mean(::Type{T}, a::Vector{Float64}) where {T}
-    n = length(a)
-    n == 0 && return NaN
-    ln = T(n)
-    s = T(0.0)
-    @inbounds for v in a
-        s = s + T(v)
-    end
-    finite_s = isfinite(Float64(s))
-    if finite_s
-        s = s / ln
-    else
-        s = T(0.0)
-        @inbounds for v in a
-            s = s + T(v / n)
-        end
-    end
-    if finite_s && isfinite(Float64(s))
-        t = T(0.0)
-        @inbounds for v in a
-            t = t + (T(v) - s)
-        end
-        s = s + t / ln
-    elseif isfinite(Float64(s))
-        t = T(0.0)
-        @inbounds for v in a
-            t = t + (T(v) - s) / ln
-        end
-        s = s + t
-    end
-    return Float64(s)
-end
+r_mean(x; na_rm::Bool = false) = _rb_mean(na_rm ? _dropnan(x) : _rbv(x))
 
 "`mean(x)` für Integer-Vektoren wie in R."
-function r_mean_int(x)
-    n = length(x)
-    n == 0 && return NaN
-    s = _LD0
-    for v in x
-        s = s + F80(Int(v))
-    end
-    return Float64(s / F80(n))
-end
+r_mean_int(x) = _rb_mean_int(Int64[Int64(v) for v in x])
 
-"`var(x)` wie R's `cov_complete1` (long double, Mittelwert als double gespeichert)."
+"`var(x)` wie R (long double, Mittelwert als double gespeichert)."
 function r_var(x; na_rm::Bool = false)
-    a = collect(Float64, x)
+    a = _rbv(x)
     if na_rm
         a = _dropnan(a)
     elseif any(isnan, a)
         return NA
     end
-    n = length(a)
-    n <= 1 && return NA
-    ln = F80(n)
-    s = _LD0
-    @inbounds for v in a
-        s = s + F80(v)
-    end
-    tmp = s / ln
-    if isfinite(Float64(tmp))
-        s = _LD0
-        @inbounds for v in a
-            s = s + (F80(v) - tmp)
-        end
-        tmp = tmp + s / ln
-    end
-    xm = F80(Float64(tmp))
-    s = _LD0
-    @inbounds for v in a
-        d = F80(v) - xm
-        s = s + d * d
-    end
-    return Float64(s / F80(n - 1))
+    return _rb_var(a)
 end
 
 "`sd(x)` wie in R: `sqrt(var(x))`."
@@ -194,29 +56,15 @@ r_sqrt(x::Float64) = x < 0 ? NaN : sqrt(x)
 
 "`rowSums(m, na.rm)` für eine Liste gleich langer Spalten (long double je Zeile)."
 function r_rowsums(cols::AbstractVector; na_rm::Bool = false)
-    out = _r_rowsums(F80, cols, na_rm)
-    if _HW80 && any(isnan, out)
-        soft = _r_rowsums(F80Soft, cols, na_rm)
-        @inbounds for i in eachindex(out)
-            isnan(out[i]) && (out[i] = soft[i])
+    nr = isempty(cols) ? 0 : length(cols[1])
+    x = Vector{Float64}(undef, nr * length(cols))
+    for (j, c) in enumerate(cols)
+        length(c) == nr || error("interner Fehler: Spalten ungleich lang")
+        @inbounds for i in 1:nr
+            x[(j - 1) * nr + i] = Float64(c[i])
         end
     end
-    return out
-end
-
-function _r_rowsums(::Type{T}, cols::AbstractVector, na_rm::Bool) where {T}
-    n = isempty(cols) ? 0 : length(cols[1])
-    acc = fill(T(0.0), n)
-    for c in cols
-        @inbounds for i in 1:n
-            v = Float64(c[i])
-            if na_rm && isnan(v)
-                v = 0.0
-            end
-            acc[i] = acc[i] + T(v)
-        end
-    end
-    return Float64[Float64(a) for a in acc]
+    return _rb_margsums(x, nr, length(cols), na_rm, false, true)
 end
 
 # ── C-Bibliotheken je Betriebssystem (einzige Stelle; RLibm, RFmt nutzen sie) ─
@@ -271,45 +119,11 @@ end
 
 @inline _libm_pow(x::Float64, y::Float64) = ccall((:pow, _LIBM), Float64, (Float64, Float64), x, y)
 
-"Skalares `x ^ y` wie in R (`x^2` als `x*x`, sonst `pow()` der C-Bibliothek)."
-function r_pow(x::Real, y::Real)
-    x = Float64(x); y = Float64(y)
-    y == 2.0 && return x * x
-    (x == 1.0 || y == 0.0) && return 1.0
-    if x == 0.0
-        y > 0.0 && return 0.0
-        y < 0.0 && return Inf
-        return y
-    end
-    if isfinite(x) && isfinite(y)
-        return _libm_pow(x, y)
-    end
-    (isnan(x) || isnan(y)) && return x + y
-    if !isfinite(x)
-        if x > 0
-            return y < 0.0 ? 0.0 : Inf
-        else
-            if isfinite(y) && y == floor(y)
-                return y < 0.0 ? 0.0 : (_isodd_float(y) ? x : -x)
-            end
-        end
-    end
-    if !isfinite(y)
-        if x >= 0
-            if y > 0
-                return x >= 1 ? Inf : 0.0
-            else
-                return x < 1 ? Inf : 0.0
-            end
-        end
-    end
-    return NaN
-end
+"Skalares `x ^ y` wie in R (`x^2` als `x*x`, sonst `pow()` der C-Bibliothek; C-Kern `sl_r_pow1`)."
+r_pow(x::Real, y::Real) = _rb_pow1(Float64(x), Float64(y))
 
-_isodd_float(y::Float64) = abs(y) < 2.0^53 && isodd(Int64(y))
-
-"Elementweises `x ^ y` mit R-Semantik."
-r_pow_vec(x, y::Real) = Float64[r_pow(v, y) for v in x]
+"Elementweises `x ^ y` mit R-Semantik (C-Kern `sl_r_pow`)."
+r_pow_vec(x, y::Real) = _rb_pow(_rbv(x), Float64(y))
 
 "`x %% 1` für Doubles wie R's `myfmod(x, 1)`."
 function r_mod1(x::Float64)
@@ -328,30 +142,8 @@ end
 "R's `max(a, b)` für zwei Skalare."
 @inline r_max2(a::Float64, b::Float64) = (isnan(a) || isnan(b)) ? _r_nan2(a, b) : (b > a ? b : a)
 
-"`std::min(a, b)` aus C++ (`b < a ? b : a`)."
-@inline cpp_min(a::Float64, b::Float64) = b < a ? b : a
-"`std::max(a, b)` aus C++ (`a < b ? b : a`)."
-@inline cpp_max(a::Float64, b::Float64) = a < b ? b : a
-
-# ── NaN-genaue Einzeloperationen (Etappe 8.0) ───────────────────────────────
-# Treffen in einer Operation zwei NaN aufeinander (etwa NA und NaN), behält
-# x86-64/SSE die Nutzlast des ersten Operanden der Maschinenanweisung; welcher
-# das ist, legt der Compiler fest (gcc im R-Bau, LLVM in Julia), bei
-# kommutativen Operationen auch entgegen der Quelltextfolge. `nan_add(a, b)`
-# usw. rechnen wie die SSE-Anweisung mit `a` als erstem Operanden; die Ports
-# nutzen sie mit der Operandenfolge aus dem Maschinencode des R-Baus (objdump
-# von SimLev.so, gcc -O2), ohne NaN rechnen sie wie bisher. Ungültige
-# Operationen (0/0, Inf - Inf, log/sqrt einer negativen Zahl) liefern das
-# Standard-NaN von x86 (`X86_NAN`, Vorzeichen gesetzt). Gleiche Regeln wie
-# `simlev._r.rnum` (Python).
-const X86_NAN = reinterpret(Float64, 0xFFF8000000000000)
-@inline nan_quiet(x::Float64) = reinterpret(Float64, reinterpret(UInt64, x) | 0x0008000000000000)
-@inline _nan2(r::Float64, a::Float64, b::Float64) = (isnan(a) && isnan(b)) ? nan_quiet(a) : r
-@inline nan_add(a::Float64, b::Float64) = _nan2(a + b, a, b)
-@inline nan_sub(a::Float64, b::Float64) = _nan2(a - b, a, b)
-@inline nan_mul(a::Float64, b::Float64) = _nan2(a * b, a, b)
-@inline nan_div(a::Float64, b::Float64) = _nan2(a / b, a, b)
-@inline nan_sqrt(x::Float64) = x >= 0.0 ? sqrt(x) : isnan(x) ? nan_quiet(x) : X86_NAN
+# (N7: cpp_min/cpp_max und die NaN-genauen Einzeloperationen nan_add, nan_mul … der Etappe 8.0 sind mit
+# den Julia-Ports der geteilten Kerne entfallen; diese rechnen jetzt die C++-Kerne selbst.)
 
 # ── Ergänzungen für die Engine 0.5.0 ────────────────────────────────────────
 
@@ -359,33 +151,11 @@ const X86_NAN = reinterpret(Float64, 0xFFF8000000000000)
 @inline _libm_expm1(x::Float64) = ccall((:expm1, _LIBM), Float64, (Float64,), x)
 @inline _libm_log(x::Float64) = ccall((:log, _LIBM), Float64, (Float64,), x)
 
-"`cumprod(x)` wie in R (long double; NA/NaN über `handleNaN`)."
-function r_cumprod(x)
-    out = Vector{Float64}(undef, length(x))
-    s = _LD1
-    @inbounds for (i, v) in enumerate(x)
-        s = s * _ldq(Float64(v))
-        out[i] = Float64(s)
-    end
-    isnan(Float64(s)) && _handle_nan!(out, Float64[Float64(v) for v in x])
-    return out
-end
+"`cumprod(x)` wie in R (long double; NA/NaN über `handleNaN`; C-Kern)."
+r_cumprod(x) = _rb_cumprod(_rbv(x))
 
-"`cummax(x)` wie in R (NA/NaN pflanzt sich über `max + x` fort)."
-function r_cummax(x)
-    out = Vector{Float64}(undef, length(x))
-    m = -Inf
-    @inbounds for (i, v) in enumerate(x)
-        fv = Float64(v)
-        if isnan(fv) || isnan(m)
-            m = m + fv
-        else
-            m = m > fv ? m : fv
-        end
-        out[i] = m
-    end
-    return out
-end
+"`cummax(x)` wie in R (ab dem ersten NA/NaN über `handleNaN`; C-Kern)."
+r_cummax(x) = _rb_cummax(_rbv(x))
 
 "`stats::median(x)` für Zahlen (über `RStats.median`: R's Teilsortierung, Mittel in long double)."
 r_median(x; na_rm::Bool = false) = Float64(RStats.median(collect(Float64, x); na_rm = na_rm))

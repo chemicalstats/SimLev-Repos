@@ -136,7 +136,7 @@ def _ms_garch_stat(P):
     return np.array(pi_, dtype=np.float64)
 
 
-def _ms_garch_fit(y, K, model):
+def _ms_garch_fit(y, K, model, cores=1):
     """MS-GARCH-Modell per Maximum Likelihood schätzen (``.ms_garch_fit``, eigene Fassung).
 
     Args:
@@ -156,9 +156,9 @@ def _ms_garch_fit(y, K, model):
     Seit Etappe 9.6b wie R ganz in der C-Bibliothek slc (``_lib.ms_garch_fit``, Entwurf B.13):
     Starts aus HMM-EM und Rangeinteilung, BFGS von allen Rasterpunkten beider Familien (sGARCH 12,
     gjrGARCH seit N1 20), seit N1 mit analytischem Gradienten; GJR je Regime mit alpha + gamma >= 0,
-    also auch gamma < 0.
+    also auch gamma < 0. N6: ``cores`` Threads für die Starts (Ergebnis unabhängig davon; Standard 1).
     """
-    return _slm.ms_garch_fit(y, K, model)
+    return _slm.ms_garch_fit(y, K, model, cores)
 
 
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)

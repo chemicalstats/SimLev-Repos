@@ -10,9 +10,12 @@ Teilbaum und bekommen daher Byte-für-Byte-Kopien:
       python/src/core/
       julia/deps/core/
 
-* geteilte Kerne von R und Python (seit Etappe 9.6c: ``core/simlev_core.h`` und
-  ``core/*_core_impl.h``: Engine, FIFO, Steuer, Research, Entnahme) nur nach ``r/src/`` und
-  ``python/src/core/``; Julia hat eigene Ports dieser Kerne (F2).
+* geteilte Kerne (seit Etappe 9.6c: ``core/simlev_core.h`` und ``core/*_core_impl.h``: Engine, FIFO,
+  Steuer, Research, Entnahme) nach ``r/src/``, ``python/src/core/`` und (seit N7) ``julia/deps/core/``;
+* die C-ABI-Hülle der geteilten Kerne für Julia (N7: ``core/simlev_cabi.cpp``) nur nach
+  ``julia/deps/core/``;
+* die Grundfunktionen mit R-Regeln (N8: ``core/slc_rbase*``) nur nach ``python/src/core/`` und
+  ``julia/deps/core/`` (R rechnet sie selbst).
 
 Aufruf::
 
@@ -35,8 +38,10 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 CORE = os.path.join(ROOT, "core")
 TARGETS = [os.path.join(ROOT, "r", "src"), os.path.join(ROOT, "python", "src", "core"),
            os.path.join(ROOT, "julia", "deps", "core")]
-# geteilte Kerne (9.6c, F16): nur R und Python
-SHARED_TARGETS = TARGETS[:2]
+# geteilte Kerne (9.6c, F16): R und Python, seit N7 auch Julia
+SHARED_TARGETS = TARGETS
+# C-ABI-Hülle der geteilten Kerne (N7): nur Julia
+CABI_TARGETS = TARGETS[2:]
 # frühere Orte der Python-Kopien der geteilten Kerne (bis 9.6c python/src/): dort darf keine mehr liegen
 OLD_SHARED = [os.path.join(ROOT, "python", "src")]
 
@@ -45,18 +50,30 @@ def is_slc(f: str) -> bool:
     return f.startswith("slc") and f.endswith((".c", ".h"))
 
 
+def is_rbase(f: str) -> bool:
+    """N8: Grundfunktionen mit R-Regeln (slc_rbase*) nur für Python und Julia; R rechnet sie selbst."""
+    return f.startswith("slc_rbase")
+
+
 def is_shared(f: str) -> bool:
-    """Geteilter Kern von R und Python (simlev_core.h, *_core_impl.h)."""
+    """Geteilter Kern (simlev_core.h, *_core_impl.h)."""
     return f == "simlev_core.h" or f.endswith("_core_impl.h")
+
+
+def is_cabi(f: str) -> bool:
+    """C-ABI-Hülle der geteilten Kerne (N7, nur Julia)."""
+    return f == "simlev_cabi.cpp"
 
 
 def canonical() -> list[str]:
     return sorted(f for f in os.listdir(CORE)
-                  if (is_slc(f) or is_shared(f)) and os.path.isfile(os.path.join(CORE, f)))
+                  if (is_slc(f) or is_shared(f) or is_cabi(f)) and os.path.isfile(os.path.join(CORE, f)))
 
 
 def files_for(target: str, files: list[str]) -> list[str]:
-    return [f for f in files if is_slc(f) or (is_shared(f) and target in SHARED_TARGETS)]
+    return [f for f in files if (is_slc(f) and not (is_rbase(f) and target == TARGETS[0]))
+            or (is_shared(f) and target in SHARED_TARGETS)
+            or (is_cabi(f) and target in CABI_TARGETS)]
 
 
 def sha(path: str) -> str:
@@ -77,7 +94,7 @@ def stale(target: str, files: list[str]) -> list[str]:
     keep |= {"slc_r_opt.c"}   # 9.3: R-Hülle der Optimierer (nur in r/src/)
     keep |= {"slc_r_models.c"}   # 9.4: R-Hülle der Modelle (nur in r/src/)
     return sorted(f for f in os.listdir(target)
-                  if (is_slc(f) or is_shared(f)) and f not in keep)
+                  if (is_slc(f) or is_shared(f) or is_cabi(f)) and f not in keep)
 
 
 def main(argv=None) -> int:

@@ -29,6 +29,7 @@ f1 <- sl$.sl_dcc_filter(Z, 0.03, 0.95, Q, TRUE); f0 <- sl$.sl_dcc_filter(Z, 0.03
 stopifnot(identical(f1$nll, f0$nll), isTRUE(f1$ok))   # 9.6c: frueherer Vergleich mit .dcc_filter (entfallen)
 m <- sl$.sl_ms_garch_fit(e[1:600], 2, "sGARCH")
 stopifnot(is.finite(m$loglik), all(m$regimes %in% 1:2), abs(rowSums(m$P) - 1) < 1e-12)
+stopifnot(identical(sl$.sl_ms_garch_fit(e[1:600], 2, "sGARCH", cores = 3), m))   # N6: Threads, Ergebnis gleich
 stopifnot(grepl("Anzahl Regime", err(sl$.sl_ms_garch_fit(e, 1, "sGARCH"))))
 # N1: analytischer Gradient gegen zentrale Differenzen (Schritt 1e-5 max(|x|, 1))
 th <- sl$.sl_ms_garch_starts(e[1:600], 2, "gjrGARCH", all = TRUE)[, 3]

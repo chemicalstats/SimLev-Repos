@@ -19,9 +19,11 @@ long double, ``r_pow`` (``R_POW``), ``r_mod1`` und ``r_uniroot``
   ``print``).
 
 R akkumuliert Summen, Mittelwerte, Varianzen und Produkte intern mit
-``long double`` (auf x86-64 Linux: 80-Bit-Extended-Precision). Damit die
-Python-Portierung bitgleich zum R-Paket rechnet, bilden die Funktionen in
-diesem Modul exakt diese Akkumulationsreihenfolge und -genauigkeit nach.
+``long double`` (auf x86-64 Linux: 80-Bit-Extended-Precision). Seit N8 rechnen
+``r_sum``, ``r_prod``, ``r_mean``, ``r_var``, die Kumulationen, ``r_rowsums``/
+``r_colsums`` und ``r_pow_vec`` mit den C-Kernen ``core/slc_rbase.c`` (über
+:mod:`simlev._ext`), die Julia ebenso nutzt; sie akkumulieren in long double
+wie R und sind gegen R bitgleich geprüft.
 
 Transzendente Funktionen: immer ``math.*`` (glibc-libm wie R), nie die
 SIMD-Varianten von numpy (``np.exp``, ``np.log``, ``np.power`` …), die auf
@@ -41,13 +43,16 @@ from typing import Callable, Sequence
 
 import numpy as np
 
+from .. import _ext   # C-Erweiterung (N8: Kerne core/slc_rbase*.c)
+
 LD = np.longdouble
 _NAN = float("nan")
 
 __all__ = [
     "LD", "NA_REAL", "r_isna", "r_isna_arr", "na_or_nan", "r_sum", "r_cumsum", "r_prod", "r_cumprod", "r_mean", "r_mean_int", "r_var", "r_sd",
-    "r_rowsums", "r_colsums", "r_pow", "r_pow_vec", "r_exp_vec", "r_mod1",
-    "r_median", "r_cummax", "r_uniroot", "r_zeroin2",
+    "r_rowsums", "r_colsums", "r_cummin", "r_pow", "r_pow_vec", "r_exp_vec", "r_mod1",
+    "r_median", "r_cummax", "r_uniroot", "r_zeroin2", "c_div",
+    "X86_NAN", "nan_quiet", "n_add", "n_sub", "n_mul", "n_div", "n_sqrt", "n_log", "n_exp",
 ]
 
 
@@ -82,6 +87,104 @@ def _from_bits(b: int) -> float:
     return _PACK_D.unpack(_PACK_Q.pack(b))[0]
 
 
+def c_div(a: float, b: float) -> float:
+    """``a / b`` wie C bzw. R auf x86-64 (IEEE, kein ``ZeroDivisionError``).
+
+    Für ``b != 0`` ist das Pythons Division (dieselbe Maschinenoperation). Für
+    ``b == 0`` rechnet die Maschine: ``±Inf`` mit dem Vorzeichen aus beiden
+    Operanden, ``0/0`` das Standard-NaN ``0xfff8…`` (negatives Vorzeichen), ein
+    NaN-Zähler bleibt mit seiner Nutzlast erhalten (NA bleibt NA).
+    """
+    try:
+        return a / b
+    except ZeroDivisionError:
+        with np.errstate(all="ignore"):
+            return float(np.float64(a) / np.float64(b))
+
+
+# ── NaN-genaue Einzeloperationen ─────────────────────────────────────────────
+#
+# Treffen in einer Operation zwei NaN aufeinander (etwa NA und NaN), behält
+# x86-64/SSE die Nutzlast des ersten Operanden der Maschinenanweisung
+# (``addsd src, dst``: dst). Welcher Operand das ist, legt der C-Compiler fest,
+# bei kommutativen Operationen auch entgegen der Quelltextfolge; CPython wählt
+# wieder anders (``a + b`` behält b, ``a * b`` behält a). Ungültige Operationen
+# (0/0, Inf - Inf, log oder sqrt einer negativen Zahl) liefern in C das
+# Standard-NaN von x86 (Vorzeichen gesetzt, 0xFFF8000000000000), Python
+# ``math.nan`` ist +NaN. Die Funktionen ``n_*`` rechnen eine Operation wie die
+# SSE-Anweisung mit ``a`` als erstem Operanden; die reinen Python-Kerne nutzen
+# sie auf ihrem NaN-genauen Weg mit der Operandenfolge aus dem Maschinencode des
+# R-Baus (gcc -O2, x86-64).
+
+_QUIET = 0x0008000000000000
+X86_NAN = _PACK_D.unpack(_PACK_Q.pack(0xFFF8000000000000))[0]   # Standard-NaN (0/0) auf x86-64
+
+
+def nan_quiet(x: float) -> float:
+    """``x`` als stilles NaN (wie jede Gleitkomma-Operation es zurückgibt)."""
+    return _PACK_D.unpack(_PACK_Q.pack(_PACK_Q.unpack(_PACK_D.pack(x))[0] | _QUIET))[0]
+
+
+def _nn(r: float, a: float, b: float) -> float:
+    if a != a and b != b:
+        return nan_quiet(a)
+    return r
+
+
+def n_add(a: float, b: float) -> float:
+    """``a + b`` (SSE, ``a`` erster Operand)."""
+    return _nn(a + b, a, b)
+
+
+def n_sub(a: float, b: float) -> float:
+    """``a - b`` (SSE)."""
+    return _nn(a - b, a, b)
+
+
+def n_mul(a: float, b: float) -> float:
+    """``a * b`` (SSE, ``a`` erster Operand)."""
+    return _nn(a * b, a, b)
+
+
+def n_div(a: float, b: float) -> float:
+    """``a / b`` (SSE), auch für ``b == 0``."""
+    if b == 0.0 or b != b or a != a:
+        with np.errstate(all="ignore"):
+            r = float(np.float64(a) / np.float64(b))
+        return _nn(r, a, b)
+    return a / b
+
+
+def n_sqrt(x: float) -> float:
+    """``sqrtsd`` bzw. glibc ``sqrt``: sqrt(NaN) = NaN (still), sqrt(<0) = Standard-NaN von x86."""
+    if x >= 0.0:
+        return math.sqrt(x)
+    if x != x:
+        return nan_quiet(x)
+    return X86_NAN
+
+
+def n_log(x: float) -> float:
+    """glibc ``log``: log(NaN) = NaN (still), log(<0) und log(-Inf) = Standard-NaN von x86."""
+    if x > 0.0:
+        return math.log(x)
+    if x == 0.0:
+        return -math.inf
+    if x != x:
+        return nan_quiet(x)
+    return X86_NAN
+
+
+def n_exp(x: float) -> float:
+    """glibc ``exp`` (NaN still, Überlauf Inf)."""
+    if x != x:
+        return nan_quiet(x)
+    try:
+        return math.exp(x)
+    except OverflowError:
+        return math.inf
+
+
 def r_isna(x) -> bool:
     """``R_IsNA(x)``: True nur für R's NA (NaN mit Nutzlast 1954), nicht für NaN."""
     x = float(x)
@@ -102,36 +205,6 @@ def na_or_nan(*vals) -> float:
     return _NAN
 
 
-def _x87_nan(vals, mul: bool = False, init: float = 0.0):
-    """NaN-Ergebnis einer sequenziellen ``long double``-Kumulation ``acc op= x[i]``.
-
-    Bildet die x87-Regel nach, die R's ``s += x[i]`` (``fadd m64``) trifft: Ist
-    der Akkumulator schon NaN, gewinnt ein signalisierendes NaN aus dem Speicher
-    (R's NA) nie, ein ruhiges nur mit größerer Mantisse (bei Gleichstand das
-    positive). Liefert das Ergebnis als ``float`` (Bits wie in R) oder ``None``,
-    wenn kein NaN entsteht.
-    """
-    acc = LD(init)
-    nb = None
-    for v in vals:
-        v = float(v)
-        if nb is None:
-            if v != v:
-                nb = _bits(v) | _QUIET
-            else:
-                with np.errstate(invalid="ignore"):
-                    acc = acc * LD(v) if mul else acc + LD(v)
-                if acc != acc:
-                    nb = _INDEF
-        elif v != v:
-            b = _bits(v)
-            if b & _QUIET:
-                fa, fb = nb & _FRAC, b & _FRAC
-                if fb > fa or (fb == fa and (nb >> 63)):
-                    nb = b
-    return None if nb is None else _from_bits(nb)
-
-
 def _handle_nan(x: np.ndarray, out: np.ndarray) -> np.ndarray:
     """R's ``handleNaN`` (cum.c): ab dem ersten NaN NA (sobald ein NA vorkam) bzw. NaN."""
     has_nan = has_na = False
@@ -148,142 +221,77 @@ def _handle_nan(x: np.ndarray, out: np.ndarray) -> np.ndarray:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Summen, Mittelwerte, Varianzen (long double wie R)
+# Summen, Mittelwerte, Varianzen (N8: C-Kerne core/slc_rbase.c, long double wie R)
 # ═══════════════════════════════════════════════════════════════════════════
+
+def _c64(x) -> np.ndarray:
+    """Zusammenhängendes float64-Feld (eindimensional) für die C-Kerne."""
+    return np.ascontiguousarray(np.asarray(x, dtype=np.float64).ravel())
+
 
 def r_sum(x, na_rm: bool = False) -> float:
     """``sum(x)`` wie in R (long-double-Akkumulator, sequenziell)."""
-    a = _as_f64(x)
-    if na_rm:
-        a = _drop_na(a)
-    if a.size == 0:
-        return 0.0
-    with np.errstate(invalid="ignore"):
-        r = float(np.cumsum(a, dtype=LD)[-1])
-    if r != r:
-        return _x87_nan(a)
-    return r
+    return _ext.slc_r_sum(_c64(x), 0, bool(na_rm))
 
 
 def r_cumsum(x) -> np.ndarray:
     """``cumsum(x)`` wie in R (long-double-Akkumulator; NA/NaN über ``handleNaN``)."""
-    a = _as_f64(x)
-    if a.size == 0:
-        return a.copy()
-    with np.errstate(invalid="ignore"):
-        out = np.cumsum(a, dtype=LD).astype(np.float64)
-    if out[-1] != out[-1]:
-        _handle_nan(a, out)
+    a = _c64(x)
+    out = np.empty(a.size)
+    _ext.slc_r_cum(0, a, out)
     return out
 
 
 def r_prod(x, na_rm: bool = False) -> float:
     """``prod(x)`` wie in R (long-double-Akkumulator)."""
-    a = _as_f64(x)
-    if na_rm:
-        a = _drop_na(a)
-    if a.size == 0:
-        return 1.0
-    with np.errstate(invalid="ignore"):
-        r = float(np.cumprod(a, dtype=LD)[-1])
-    if r != r:
-        return _x87_nan(a, mul=True, init=1.0)
-    return r
+    return _ext.slc_r_sum(_c64(x), 1, bool(na_rm))
 
 
 def r_cumprod(x) -> np.ndarray:
     """``cumprod(x)`` wie in R (long-double-Akkumulator; NA/NaN über ``handleNaN``)."""
-    a = _as_f64(x)
-    if a.size == 0:
-        return a.copy()
-    with np.errstate(invalid="ignore"):
-        out = np.cumprod(a, dtype=LD).astype(np.float64)
-    if out[-1] != out[-1]:
-        _handle_nan(a, out)
+    a = _c64(x)
+    out = np.empty(a.size)
+    _ext.slc_r_cum(1, a, out)
     return out
 
 
 def r_cummax(x) -> np.ndarray:
     """``cummax(x)`` wie in R (ab dem ersten NA/NaN über ``handleNaN``)."""
-    a = _as_f64(x)
-    out = np.empty_like(a)
-    m = -math.inf
-    for i, v in enumerate(a.tolist()):
-        if v != v:
-            return _handle_nan(a, out)
-        if not (m > v):
-            m = v
-        out[i] = m
+    a = _c64(x)
+    out = np.empty(a.size)
+    _ext.slc_r_cum(2, a, out)
+    return out
+
+
+def r_cummin(x) -> np.ndarray:
+    """``cummin(x)`` wie in R."""
+    a = _c64(x)
+    out = np.empty(a.size)
+    _ext.slc_r_cum(3, a, out)
     return out
 
 
 def r_mean(x, na_rm: bool = False) -> float:
-    """``mean(x)`` für Doubles wie R's ``real_mean`` (Summe/n plus Korrekturdurchlauf)."""
-    a = _as_f64(x)
+    """``mean(x)`` für Doubles wie R (Summe/n in long double plus Korrekturdurchlauf)."""
+    a = _c64(x)
     if na_rm:
         a = _drop_na(a)
-    n = a.size
-    if n == 0:
-        return _NAN
-    with np.errstate(invalid="ignore", over="ignore"):
-        al = a.astype(LD)
-        ln = LD(n)
-        s = np.cumsum(al)[-1]
-        finite_s = math.isfinite(float(s))
-        if finite_s:
-            s = s / ln
-        else:
-            q = a / float(n)                       # double-Division wie dx[k]/n
-            s = np.cumsum(q, dtype=LD)[-1]
-            if s != s:
-                return _x87_nan(q)
-        if finite_s and math.isfinite(float(s)):
-            t = np.cumsum(al - s)[-1]
-            s = s + t / ln
-        elif math.isfinite(float(s)):
-            t = np.cumsum((al - s) / ln)[-1]
-            s = s + t
-    return float(s)
+    return _ext.slc_r_sum(a, 2, False)
 
 
 def r_mean_int(x) -> float:
     """``mean(x)`` für Integer-Vektoren wie in R (long-double Summe / n)."""
-    a = np.asarray(x, dtype=np.int64).ravel()
-    n = a.size
-    if n == 0:
-        return _NAN
-    s = LD(0)
-    for v in a:
-        s += LD(int(v))
-    return float(s / LD(n))
-
-
-def _r_mean_ld(al: np.ndarray) -> float:
-    """MEAN-Makro aus R's cov.c; liefert den auf double gerundeten Mittelwert."""
-    n = al.size
-    s = np.cumsum(al)[-1]
-    tmp = s / LD(n)
-    if math.isfinite(float(tmp)):
-        s2 = np.cumsum(al - tmp)[-1]
-        tmp = tmp + s2 / LD(n)
-    return float(tmp)
+    return _ext.slc_r_mean_int(np.ascontiguousarray(np.asarray(x, dtype=np.int64).ravel()))
 
 
 def r_var(x, na_rm: bool = False) -> float:
-    """``var(x)`` (Pearson) wie R's ``cov_complete1`` (NA bei fehlenden Werten oder n < 2)."""
-    a = _as_f64(x)
+    """``var(x)`` (Pearson) wie R (NA bei fehlenden Werten oder n < 2)."""
+    a = _c64(x)
     if na_rm:
         a = _drop_na(a)
     elif np.isnan(a).any():
         return NA_REAL
-    n = a.size
-    if n <= 1:
-        return NA_REAL
-    al = a.astype(LD)
-    xm = LD(_r_mean_ld(al))          # Mittelwert wird in R als double gespeichert
-    d = al - xm
-    s = np.cumsum(d * d)[-1]
-    return float(s / LD(n - 1))
+    return _ext.slc_r_sum(a, 3, False)
 
 
 def r_sd(x, na_rm: bool = False) -> float:
@@ -311,32 +319,24 @@ def r_median(x, na_rm: bool = False) -> float:
     return r_mean(s[half - 1:half + 1])
 
 
-def r_rowsums(m: np.ndarray, na_rm: bool = False) -> np.ndarray:
-    """``rowSums(m)`` wie in R (long-double-Akkumulator, spaltenweise)."""
+def _margsums(m, na_rm: bool, mean: bool, rows: bool) -> np.ndarray:
     m = np.asarray(m, dtype=np.float64)
     if m.ndim == 1:
         m = m.reshape(-1, 1)
-    acc = np.zeros(m.shape[0], dtype=LD)
-    with np.errstate(invalid="ignore"):
-        for j in range(m.shape[1]):
-            col = m[:, j]
-            if na_rm:
-                acc = acc + np.where(np.isnan(col), 0.0, col).astype(LD)
-            else:
-                acc = acc + col.astype(LD)
-    out = acc.astype(np.float64)
-    if not na_rm:
-        for i in np.flatnonzero(np.isnan(out)):
-            out[i] = _x87_nan(m[i, :])
+    nr, nc = m.shape
+    out = np.empty(nr if rows else nc)
+    _ext.slc_r_margsums(np.ascontiguousarray(m.ravel(order="F")), nr, nc, bool(na_rm), bool(mean), bool(rows), out)
     return out
+
+
+def r_rowsums(m: np.ndarray, na_rm: bool = False) -> np.ndarray:
+    """``rowSums(m)`` wie in R (long-double-Akkumulator je Zeile, spaltenweise)."""
+    return _margsums(m, na_rm, False, True)
 
 
 def r_colsums(m: np.ndarray, na_rm: bool = False) -> np.ndarray:
     """``colSums(m)`` wie in R (long-double-Akkumulator je Spalte)."""
-    m = np.asarray(m, dtype=np.float64)
-    if m.ndim == 1:
-        m = m.reshape(-1, 1)
-    return np.array([r_sum(m[:, j], na_rm=na_rm) for j in range(m.shape[1])], dtype=np.float64)
+    return _margsums(m, na_rm, False, False)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -344,74 +344,16 @@ def r_colsums(m: np.ndarray, na_rm: bool = False) -> np.ndarray:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def r_pow(x: float, y: float) -> float:
-    """Skalares ``x ^ y`` wie R's ``R_POW``/``R_pow`` (Linux: libm ``pow``)."""
-    x = float(x)
-    y = float(y)
-    if y == 2.0:
-        return x * x
-    if x == 1.0 or y == 0.0:
-        return 1.0
-    if x == 0.0:
-        if y > 0.0:
-            return 0.0
-        if y < 0.0:
-            return math.inf
-        return y
-    if math.isfinite(x) and math.isfinite(y):
-        try:
-            return math.pow(x, y)
-        except ValueError:          # negative Basis, nicht-ganzzahliger Exponent
-            return _NAN
-        except OverflowError:
-            if x < 0 and y == math.floor(y) and int(y) % 2 == 1:
-                return -math.inf
-            return math.inf
-    if math.isnan(x) or math.isnan(y):
-        return x + y
-    # Unendlichkeiten: wie R_pow
-    if not math.isfinite(x):
-        if x > 0:
-            return 0.0 if y < 0.0 else math.inf
-        if math.isfinite(y) and y == math.floor(y):
-            return (0.0 if y < 0 else (x if math.fmod(y, 2.0) != 0 else -x))
-    if not math.isfinite(y):
-        if x >= 0:
-            if y > 0:
-                return math.inf if x >= 1 else 0.0
-            return math.inf if x < 1 else 0.0
-    return _NAN
+    """Skalares ``x ^ y`` wie R's ``R_POW``/``R_pow`` (C-Kern ``sl_r_pow1``, libm ``pow``)."""
+    return _ext.slc_r_pow1(float(x), float(y))
 
 
 def r_pow_vec(x, y: float) -> np.ndarray:
-    """Elementweises ``x ^ y`` mit R-Semantik (libm, keine SIMD-Varianten).
-
-    Gleiche Bits wie ``r_pow`` je Element. Schneller Weg (Etappe 7.1): ``y = 2``
-    ist ``x * x`` (numpy multipliziert exakt gerundet wie C), ``y = 0`` ist 1;
-    sonst bei endlichem ``y`` ``math.pow`` direkt auf alle Elemente (das ist
-    ``r_pow`` für endliche ``x`` ungleich 0 und 1); die übrigen Elemente
-    (0, 1, nicht endlich) rechnet ``r_pow``. Wirft ``math.pow`` eine Ausnahme
-    (Überlauf, negative Basis), rechnet ``r_pow`` alle Elemente.
-    """
-    a = _as_f64(x)
-    y = float(y)
-    if y == 2.0:
-        with np.errstate(all="ignore"):
-            return a * a
-    if y == 0.0:
-        return np.ones(a.size)
-    xs = a.tolist()
-    if math.isfinite(y):
-        try:
-            out = np.fromiter(map(math.pow, xs, [y] * len(xs)), dtype=np.float64, count=len(xs))
-        except (ValueError, OverflowError):
-            out = None
-        if out is not None:
-            with np.errstate(invalid="ignore"):
-                special = np.flatnonzero(~np.isfinite(a) | (a == 0.0) | (a == 1.0))
-            for i in special.tolist():
-                out[i] = r_pow(xs[i], y)
-            return out
-    return np.fromiter((r_pow(v, y) for v in xs), dtype=np.float64, count=a.size)
+    """Elementweises ``x ^ y`` mit R-Semantik (C-Kern ``sl_r_pow``, libm ``pow``)."""
+    a = _c64(x)
+    out = np.empty(a.size)
+    _ext.slc_r_pow(a, float(y), out)
+    return out
 
 
 def r_exp_vec(x) -> np.ndarray:

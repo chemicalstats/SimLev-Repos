@@ -554,10 +554,10 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' MS-GARCH-Familie vorbereiten (eigene ML-Schaetzung, .ms_garch_fit in R/ms_garch.R)
 #' @keywords internal
 #' @noRd
-.prepare_ms_info <- function(returns, config, base, K, garch_model, ar_gm, tvtp) {
+.prepare_ms_info <- function(returns, config, base, K, garch_model, ar_gm, tvtp, cores = 1L) {
   .ms_garch_check(K, garch_model)
   ex <- returns[, base] - 1; n <- length(ex)
-  fit <- tryCatch(.ms_garch_fit(ex, K, garch_model),
+  fit <- tryCatch(.ms_garch_fit(ex, K, garch_model, cores),   # N6: cores Threads fuer die Starts
                   error = function(e) stop(sprintf("MS-GARCH(%d, %s) Fit fehlgeschlagen: %s", K, garch_model, e$message)))
   om <- fit$omega; al <- fit$alpha; be <- fit$beta; ga <- fit$gamma
   P <- fit$P
@@ -602,7 +602,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' Verfahrensspezifische Vorberechnung
 #' @keywords internal
 #' @noRd
-.prepare_method_info <- function(returns, config, method, params) {
+.prepare_method_info <- function(returns, config, method, params, cores = 1L) {
   p <- .get_base_params(method, params, nrow(returns))
   base <- which(config$index_names == config$regime_index)
   br <- returns[, base]
@@ -629,9 +629,9 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
     info$garch <- f
     info$cross <- .fit_cross(returns, config, base)
   }
-  if (method == "ms_garch") info$ms <- .prepare_ms_info(returns, config, base, p$ms_n_regimes, p$ms_garch_model, FALSE, FALSE)
-  if (method == "ms_ar_garch_m") info$ms <- .prepare_ms_info(returns, config, base, p$ms_ar_n_regimes, p$ms_ar_garch_model, TRUE, FALSE)
-  if (method == "tvtp_ms_garch") info$ms <- .prepare_ms_info(returns, config, base, p$tvtp_n_regimes, p$tvtp_garch_model, TRUE, TRUE)
+  if (method == "ms_garch") info$ms <- .prepare_ms_info(returns, config, base, p$ms_n_regimes, p$ms_garch_model, FALSE, FALSE, cores)
+  if (method == "ms_ar_garch_m") info$ms <- .prepare_ms_info(returns, config, base, p$ms_ar_n_regimes, p$ms_ar_garch_model, TRUE, FALSE, cores)
+  if (method == "tvtp_ms_garch") info$ms <- .prepare_ms_info(returns, config, base, p$tvtp_n_regimes, p$tvtp_garch_model, TRUE, TRUE, cores)
   info
 }
 
@@ -793,7 +793,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' Gemeinsame Vorbereitung fuer bootstrap() und bootstrap_study()
 #' @keywords internal
 #' @noRd
-.boot_setup <- function(data, config, method, n, params, ess, ess_grid, path_length) {
+.boot_setup <- function(data, config, method, n, params, ess, ess_grid, path_length, cores = 1L) {
   if (!inherits(config, "bootstrap_config")) stop("config muss mit bootstrap_config() erstellt werden")
   if (!method %in% .boot_methods) stop("Unbekannte Methode '", method, "'. Verf\u00fcgbar: ", paste(.boot_methods, collapse = ", "))
   if (!is.numeric(n) || length(n) != 1 || n < 1) stop("n muss eine positive Zahl sein")
@@ -814,7 +814,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   })
   combo_of_path <- if (is.null(design)) rep(1L, n) else rep(seq_len(nrow(design)), design$n_sims)
   n_paths <- length(combo_of_path)
-  infos <- lapply(combos, function(cp) tryCatch(.prepare_method_info(ex$ret, config, method, cp),
+  infos <- lapply(combos, function(cp) tryCatch(.prepare_method_info(ex$ret, config, method, cp, cores),   # N6
                                                error = function(e) stop(sprintf("Vorberechnung fehlgeschlagen: %s", e$message))))
   base_p <- lapply(combos, function(cp) .get_base_params(method, cp, n_obs))
   for (bp in base_p) .check_boot_params(method, bp, n_obs)
@@ -1039,7 +1039,9 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   unveraendert; mit \code{seed = NULL} liefern wiederholte Aufrufe verschiedene Pfade.
 #'   \code{set.seed()} wirkt nicht.
 #' @param cores Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK-Cluster auf
-#'   Windows).
+#'   Windows). Bei den MS-GARCH-Verfahren (\code{ms_garch}, \code{ms_ar_garch_m},
+#'   \code{tvtp_ms_garch}) rechnet der Fit seine Startpunkte zudem auf so vielen
+#'   Threads; das Ergebnis haengt davon nicht ab.
 #' @param max_tries Versuche je Pfad (Standard 10), falls ein Pfad ungueltig
 #'   ist (Indexrendite <= 0 oder nicht endlich). Ein Totalverlust eines
 #'   Hebelprodukts macht den Pfad nicht ungueltig.
@@ -1127,7 +1129,7 @@ bootstrap <- function(data, config, method = "raw", n = 1000, params = list(), e
                       ess_grid = NULL, path_length = NULL, max_tries = 10L, seed = NULL,
                       cores = 1L, progress = TRUE) {
   t0 <- Sys.time()
-  setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
+  setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
   if (is.null(seed)) seed <- .sl_next_seed() else .sl_check_seed(seed)   # Regel 3/4: NULL -> einmal k aus G
   streams <- .sl_streams(seed, setup$n_paths)                 # Regel 6: U_i = J^i(S_0) je Pfad
   res <- .par_lapply(seq_len(setup$n_paths), function(i)
@@ -1418,6 +1420,8 @@ bootstrap_study_metrics <- function(res) {
 #'   Vorzeichenwechsel), warnt die Funktion, und [withdrawal_paths()] bricht
 #'   mit dieser Reihe als Inflation ab. Standard \code{NULL}.
 #' @param cores Anzahl Prozesse (Standard 1); parallelisiert wird ueber Chunks.
+#'   Der MS-GARCH-Fit der Vorberechnung nutzt ebenso viele Threads (Ergebnis
+#'   unabhaengig davon).
 #' @param progress Logisch: Fortschrittsmeldungen per \code{message()}
 #'   (Standard \code{TRUE}; Meldung je Chunk nur bei \code{cores = 1}).
 #'
@@ -1519,7 +1523,7 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
   # Argumente fuer simulation() je Strategie einmal aufloesen (Bausteine, Pfade; alte flache Namen: Fehler)
   sim_args <- .sim_args_set(list(), sim_args, "bootstrap_study")
   for (nm in names(specs)) specs[[nm]]$sim <- .sim_args_set(sim_args, specs[[nm]]$args, "bootstrap_study")
-  setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
+  setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
   keep_paths <- .keep_count(keep_paths, setup$n_paths, "bootstrap_study")   # 6.5b: TRUE = alle Pfade
   if (is.null(dates)) dates <- seq.Date(.to_date(start, "start"), by = "day", length.out = setup$n_out + 1L)
   if (length(dates) != setup$n_out + 1L) stop(sprintf("dates braucht L\u00e4nge %d (Pfadl\u00e4nge + 1).", setup$n_out + 1L))

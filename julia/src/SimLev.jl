@@ -23,6 +23,9 @@ export simulation, SimLevResult, format_result,
 # truncnorm, stinepack, imputeTS; diese Aufgaben rechnet die C-Bibliothek slc, SLib)
 include("r/env.jl")          # Umgebungsschalter SIMLEV_* (einzige Lesestelle)
 include("slib.jl")           # C-Bibliothek slc (Etappe 9.1): Zufall, Verteilungen; deps/build.jl
+include("cabi.jl")           # N7: geteilte C++-Kerne über die C-ABI-Hülle (in libslc)
+using .SLib: LIBSLC
+include("r/rbase_c.jl")       # N8: Grundfunktionen mit R-Regeln aus libslc (core/slc_rbase*.c)
 include("r/types.jl")
 include("r/ld80.jl")
 include("r/rnum.jl")

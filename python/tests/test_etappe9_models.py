@@ -44,6 +44,8 @@ def test_gpd_dcc_ms_boot():
     assert d["a"] >= 0 and d["b"] >= 0 and d["a"] + d["b"] < 0.999
     m = L.ms_garch_fit(e[:600], 2, "sGARCH")
     assert np.isfinite(m["loglik"]) and set(np.unique(m["regimes"])) <= {1, 2}
+    m3 = L.ms_garch_fit(e[:600], 2, "sGARCH", cores=3)   # N6: Threads, Ergebnis gleich
+    assert all(np.array_equal(np.asarray(m[k]), np.asarray(m3[k])) for k in m)
     # N1: analytischer Gradient gegen zentrale Differenzen (Schritt 1e-5 max(|x|, 1))
     th = L.ms_garch_starts(e[:600], 2, "gjrGARCH", all=True)[:, 2]
     gr = L.ms_garch_grad(th, e[:600], 2, "gjrGARCH")

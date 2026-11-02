@@ -15,6 +15,7 @@ from .linalg import RError
 from .rlist import RList
 from . import rnum as _rn
 from .rnum import NA_REAL
+from .. import _ext   # N8: C-Kerne core/slc_rbase_sort.c
 from ._collate import collate_key
 
 __all__ = [
@@ -57,14 +58,6 @@ def _is_int_like(x):
     return np.issubdtype(a.dtype, np.integer) or a.dtype == bool
 
 
-def _ldsum(a):
-    """``sum`` in long double (sequenziell); Rückgabe ``np.longdouble``."""
-    a = np.asarray(a)
-    if a.size == 0:
-        return LD(0)
-    return np.cumsum(a.astype(LD))[-1]
-
-
 def _rsum(a):
     """``sum`` für Doubles (long double; NA/NaN nach der x87-Regel wie R)."""
     return _rn.r_sum(a)
@@ -76,14 +69,7 @@ def _rmean(a):
 
 
 def _rmean_int(a):
-    a = np.asarray(a)
-    n = a.size
-    if n == 0:
-        return _NAN
-    s = LD(0)
-    for v in a.tolist():
-        s += LD(v)
-    return float(s / LD(n))
+    return _rn.r_mean_int(a)
 
 
 def _scalar_or(v, names=None):
@@ -146,17 +132,11 @@ def _keys(x):
 
 
 def _stable_argsort(v, isstr, decreasing):
+    """Stabile Ordnung von Zeichenketten (R's orderVector1 mit Scollate; Zahlen: C-Kern)."""
     n = len(v)
-    idx = np.arange(n)
     if n == 0:
-        return idx
-    if not isstr:
-        vv = np.where(v == 0.0, 0.0, v)          # -0 == 0
-        if decreasing:
-            return np.argsort(-vv, kind="stable")
-        return np.argsort(vv, kind="stable")
-    # R's orderVector1 mit Scollate: stabil (Gleichstand → Index aufsteigend),
-    # auch absteigend (sorted(reverse=True) bleibt stabil)
+        return np.arange(0)
+    # stabil (Gleichstand → Index aufsteigend), auch absteigend (sorted(reverse=True) bleibt stabil)
     ks = [collate_key(str(t)) for t in v]
     return np.array(sorted(range(n), key=ks.__getitem__, reverse=bool(decreasing)), dtype=np.int64)
 
@@ -205,6 +185,13 @@ def order(*args, na_last=True, decreasing=False):
     dec = list(decreasing) if isinstance(decreasing, (list, tuple, np.ndarray)) else [bool(decreasing)] * len(keys)
     if len(dec) == 1:
         dec = dec * len(keys)
+    if not any(k[2] for k in keys):
+        # N8: nur Zahlenschlüssel -> C-Kern sl_r_order (stabil, -0 == 0, NA/NaN fehlend)
+        kk = np.ascontiguousarray(np.concatenate([np.asarray(k[0], dtype=np.float64) for k in keys]) if keys else np.zeros(0))
+        out = np.empty(n, dtype=np.int64)
+        nl = -1 if na_last is None else (1 if na_last else 0)
+        m = _ext.slc_r_order(kk, n, len(keys), np.ascontiguousarray([bool(d) for d in dec], dtype=np.int32), nl, out)
+        return out[:m]
     idx = np.arange(n)
     # Lexikographisch: von hinten stabil sortieren
     for (v, na, isstr), d in reversed(list(zip(keys, dec))):
@@ -214,8 +201,8 @@ def order(*args, na_last=True, decreasing=False):
         bad = np.where(nn)[0]
         if isstr:
             sub = _stable_argsort(vv[ok], True, d)
-        else:
-            sub = _stable_argsort(vv[ok].astype(np.float64), False, d)
+        else:   # gemischt Zahlen und Zeichenketten: Zahlenschlüssel über den C-Kern
+            sub = order(vv[ok].astype(np.float64), decreasing=d) - 1
         okp = ok[sub]
         if na_last is None:
             new = okp
@@ -267,6 +254,9 @@ def sort(x, decreasing=False, na_last=None):
     return out
 
 
+_TIES = {"average": 0, "first": 1, "last": 2, "min": 3, "max": 4}
+
+
 def rank(x, na_last=True, ties_method="average"):
     """``rank(x, na.last, ties.method)``.
 
@@ -281,8 +271,13 @@ def rank(x, na_last=True, ties_method="average"):
     nas = na
     xs = v[~nas]
     m = len(xs)
-    if ties_method in ("average", "min", "max"):
-        o = _stable_argsort(xs if isstr else xs.astype(np.float64), isstr, False)
+    if not isstr and ties_method in _TIES:
+        # N8: C-Kern sl_r_rank (Zahlen ohne NA)
+        yd = np.empty(m)
+        _ext.slc_r_rank(np.ascontiguousarray(xs, dtype=np.float64), _TIES[ties_method], yd)
+        y = yd if ties_method == "average" else yd.astype(np.int64)
+    elif ties_method in ("average", "min", "max"):
+        o = _stable_argsort(xs, isstr, False)
         if ties_method == "average":
             y = np.empty(m, dtype=np.float64)
         else:
@@ -359,51 +354,28 @@ class _RLE(RList):
 
 
 def tabulate(bin, nbins=None):
-    """``tabulate(bin, nbins = max(1, bin, na.rm = TRUE))``."""
+    """``tabulate(bin, nbins = max(1, bin, na.rm = TRUE))`` (C-Kern ``sl_r_tabulate``)."""
     b, _ = _vec(bin)
-    with np.errstate(invalid="ignore"):
-        b = np.where(np.isnan(b), np.nan, np.trunc(b))
+    b = np.ascontiguousarray(b, dtype=np.float64)
     if nbins is None:
-        bb = b[~np.isnan(b)]
+        with np.errstate(invalid="ignore"):
+            bb = np.trunc(b[~np.isnan(b)])
         nbins = int(max([1.0] + ([float(bb.max())] if bb.size else [])))
-    nbins = int(nbins)
-    out = np.zeros(nbins, dtype=np.int64)
-    ok = ~np.isnan(b)
-    bi = b[ok].astype(np.int64)
-    bi = bi[(bi >= 1) & (bi <= nbins)]
-    np.add.at(out, bi - 1, 1)
+    out = np.zeros(max(int(nbins), 0), dtype=np.int64)
+    _ext.slc_r_tabulate(b, out)
     return out
 
 
-def _bisect_right(vec, x):
-    """Index ``lo`` (0-basiert) mit vec[lo] <= x < vec[lo+1] (Bisektion wie R)."""
-    return np.searchsorted(vec, x, side="right") - 1
-
-
 def findInterval(x, vec, rightmost_closed=False, all_inside=False, left_open=False):
-    """``findInterval(x, vec, rightmost.closed, all.inside, left.open)``."""
+    """``findInterval(x, vec, rightmost.closed, all.inside, left.open)`` (C-Kern ``sl_r_findinterval``)."""
     v, _ = _vec(vec)
     xx, _ = _vec(x)
     if np.isnan(v).any() or (v.size > 1 and (np.diff(v) < 0).any()):
         raise RError("'vec' must be sorted non-decreasingly and not contain NAs")
-    n = v.size
-    out = np.full(xx.size, -1, dtype=np.int64)
-    nas = np.isnan(xx)
-    xv = xx[~nas]
-    if left_open:
-        r = np.searchsorted(v, xv, side="left")
-        if rightmost_closed and n > 0:
-            r = np.where(xv == v[0], 1, r)
-    else:
-        r = np.searchsorted(v, xv, side="right")
-        if rightmost_closed and n > 0:
-            r = np.where(xv == v[n - 1], n - 1, r)
-    if all_inside and n > 0:
-        r = np.clip(r, 1, max(1, n - 1))
-    res = np.empty(xx.size, dtype=np.float64)
-    res[~nas] = r
-    res[nas] = NA_REAL
-    if nas.any():
+    res = np.empty(xx.size)
+    _ext.slc_r_findinterval(np.ascontiguousarray(v), np.ascontiguousarray(xx), bool(rightmost_closed),
+                            bool(all_inside), bool(left_open), res)
+    if np.isnan(xx).any():
         return res
     return res.astype(np.int64)
 
@@ -545,183 +517,16 @@ def _format_perc(probs, digits=7):
 
 # ── R's partielle Sortierung (sort.default(x, partial =)) ─────────────────
 # Für Werte, die sich nur im Vorzeichen der Null unterscheiden (-0/+0), hängt
-# das Ergebnis von quantile()/median() vom Sortierverfahren ab; daher exakt
-# wie R: bis 10 Indizes psort (rPsort2/Psort0), sonst R_qsort (Singleton).
-
-def _rcmp(a, b):
-    if a < b:
-        return -1
-    if a > b:
-        return 1
-    return 0
-
-
-def _rpsort2(x, lo, hi, k):
-    L, R = lo, hi
-    while L < R:
-        v = x[k]
-        i, j = L, R
-        while i <= j:
-            while _rcmp(x[i], v) < 0:
-                i += 1
-            while _rcmp(v, x[j]) < 0:
-                j -= 1
-            if i <= j:
-                x[i], x[j] = x[j], x[i]
-                i += 1
-                j -= 1
-        if j < k:
-            L = i
-        if k < i:
-            R = j
-
-
-def _psort0(x, lo, hi, ind):
-    nind = len(ind)
-    if nind < 1 or hi - lo < 1:
-        return
-    if nind <= 1:
-        _rpsort2(x, lo, hi, ind[0] - 1)
-        return
-    this = 0
-    mid = (lo + hi) // 2
-    for i in range(nind):
-        if ind[i] - 1 <= mid:
-            this = i
-    z = ind[this] - 1
-    _rpsort2(x, lo, hi, z)
-    _psort0(x, lo, z - 1, ind[:this])
-    _psort0(x, z + 1, hi, ind[this + 1:])
-
-
-def _r_qsort(v):
-    """R_qsort(v, 1, n) (Singleton 1969, R's qsort-body.c), in place."""
-    n = len(v)
-    if n < 2:
-        return
-    v.insert(0, 0.0)            # 1-basiert
-    il = [0] * 40
-    iu = [0] * 40
-    R = 0.375
-    i, j = 1, n
-    ii = i
-    m = 1
-    state = "L10"
-    while True:
-        if state == "L10":
-            if i < j:
-                if R < 0.5898437:
-                    R += 0.0390625
-                else:
-                    R -= 0.21875
-                state = "L20"
-            else:
-                state = "L80"
-            continue
-        if state == "L20":
-            k = i
-            ij = int(i + int((j - i) * R))
-            vt = v[ij]
-            if v[i] > vt:
-                v[ij] = v[i]
-                v[i] = vt
-                vt = v[ij]
-            l = j
-            if v[j] < vt:
-                v[ij] = v[j]
-                v[j] = vt
-                vt = v[ij]
-                if v[i] > vt:
-                    v[ij] = v[i]
-                    v[i] = vt
-                    vt = v[ij]
-            while True:
-                l -= 1
-                while v[l] > vt:
-                    l -= 1
-                vtt = v[l]
-                k += 1
-                while v[k] < vt:
-                    k += 1
-                if k > l:
-                    break
-                v[l] = v[k]
-                v[k] = vtt
-            m += 1
-            if l - i <= j - k:
-                il[m] = k
-                iu[m] = j
-                j = l
-            else:
-                il[m] = i
-                iu[m] = l
-                i = k
-            state = "L90"
-            continue
-        if state == "L80":
-            if m == 1:
-                break
-            i = il[m]
-            j = iu[m]
-            m -= 1
-            state = "L90"
-            continue
-        if state == "L90":
-            if j - i > 10:
-                state = "L20"
-                continue
-            if i == ii:
-                state = "L10"
-                continue
-            i -= 1
-            state = "L100"
-            continue
-        if state == "L100":
-            while True:
-                i += 1
-                if i == j:
-                    break
-                vt = v[i + 1]
-                if not (v[i] <= vt):
-                    break
-            if i == j:
-                state = "L80"
-                continue
-            k = i
-            while True:
-                v[k + 1] = v[k]
-                k -= 1
-                if not (vt < v[k]):
-                    break
-            v[k + 1] = vt
-            state = "L100"
-            continue
-    del v[0]
-
+# das Ergebnis von quantile()/median() vom Sortierverfahren ab; der C-Kern
+# sl_r_psort sortiert wie R (bis 10 Indizes Auswahl, sonst Quicksort).
 
 def sort_partial(x, partial):
     """``sort(x, partial = partial)`` für Doubles ohne NA wie R (1-basierte Indizes)."""
-    v = [float(t) for t in np.asarray(x, dtype=np.float64).ravel()]
-    part = sorted({int(t) for t in np.asarray(partial).ravel()}) if np.size(partial) else []
-    praw = list(np.asarray(partial).ravel()) if np.size(partial) else []
-    if len(praw) <= 10:
-        _psort0(v, 0, len(v) - 1, sorted(int(t) for t in praw))
-    else:
-        _r_qsort(v)
-    del part
-    return np.array(v, dtype=np.float64)
+    v = np.array(np.asarray(x, dtype=np.float64).ravel(), dtype=np.float64)
+    k = np.ascontiguousarray(np.asarray(partial).ravel(), dtype=np.int64) if np.size(partial) else np.zeros(0, dtype=np.int64)
+    _ext.slc_r_psort(v, k)
+    return v
 
-
-def _r_unique(a):
-    """``unique()`` für Doubles (Reihenfolge des ersten Auftretens)."""
-    out = []
-    seen = set()
-    for t in np.asarray(a, dtype=np.float64).ravel().tolist():
-        key = t if t == t else "nan"
-        if key not in seen:
-            seen.add(key)
-            out.append(t)
-    return np.array(out, dtype=np.float64)
 
 def quantile(x, probs=(0.0, 0.25, 0.5, 0.75, 1.0), na_rm=False, names=True, type=7, digits=7):
     """``quantile.default(x, probs, na.rm, names, type)`` (Typen 1–9).
@@ -741,95 +546,11 @@ def quantile(x, probs=(0.0, 0.25, 0.5, 0.75, 1.0), na_rm=False, names=True, type
     with np.errstate(invalid="ignore"):
         if (pok & ((p < -eps) | (p > 1 + eps))).any():
             raise RError("'probs' outside [0,1]")
-    n = xv.size
     pp = np.where(np.isnan(p), p, np.maximum(0.0, np.minimum(1.0, p)))
     np_ = pp.size
-    if n == 0:
-        xs = xv.copy()
-    elif int(type) == 7:
-        with np.errstate(invalid="ignore"):
-            _idx = 1 + max(n - 1, 0) * pp
-            _part = _r_unique(np.concatenate([np.floor(_idx), np.ceil(_idx)])[np.concatenate([pok, pok])])
-        xs = sort_partial(xv, _part)
-    else:
-        _t = int(type)
-        with np.errstate(invalid="ignore"):
-            if _t <= 3:
-                _nppm = n * pp - 0.5 if _t == 3 else n * pp
-                _j = np.floor(_nppm)
-            else:
-                _a, _b = {4: (0.0, 1.0), 5: (0.5, 0.5), 6: (0.0, 0.0), 8: (1.0 / 3, 1.0 / 3),
-                          9: (3.0 / 8, 3.0 / 8)}[_t]
-                _j = np.floor(_a + pp * (n + 1 - _a - _b) + 4 * _DBL_EPS)
-            _m1 = pok & (_j > 0) & (_j <= n)
-            _m2 = pok & (_j > 0) & (_j < n)
-            _part = _r_unique(np.concatenate([[1.0], _j[_m1], (_j + 1)[_m2], [float(n)]]))
-        xs = sort_partial(xv, _part)
-    qs = np.full(np_, NA_REAL)
-    type = int(type)
-    with np.errstate(invalid="ignore"):
-        if type == 7:
-            index = 1 + max(n - 1, 0) * pp
-            lo = np.floor(index)
-            hi = np.ceil(index)
-            for k in range(np_):
-                if not pok[k]:
-                    continue
-                l = int(lo[k])
-                h = int(hi[k])
-                xl = xs[l - 1] if 1 <= l <= n else NA_REAL      # x[lo] außerhalb: NA
-                xh = xs[h - 1] if 1 <= h <= n else NA_REAL
-                q = xl
-                if index[k] > lo[k] and xh == xh and q == q and xh != q:
-                    hh = (index - lo)[k]
-                    q = (1 - hh) * q + hh * xh
-                qs[k] = q
-        else:
-            if type <= 3:
-                nppm = n * pp - 0.5 if type == 3 else n * pp
-                j = np.floor(nppm)
-                if type == 1:
-                    h = ((~pok) | (nppm > j)).astype(np.float64)
-                elif type == 2:
-                    h = ((nppm > j).astype(np.float64) + 1) / 2
-                else:
-                    h = ((~pok) | (nppm != j) | (np.mod(j, 2.0) == 1.0)).astype(np.float64)
-            else:
-                a, b = {4: (0.0, 1.0), 5: (0.5, 0.5), 6: (0.0, 0.0), 7: (1.0, 1.0),
-                        8: (1.0 / 3, 1.0 / 3), 9: (3.0 / 8, 3.0 / 8)}[type]
-                fuzz = 4 * _DBL_EPS
-                nppm = a + pp * (n + 1 - a - b)
-                j = np.floor(nppm + fuzz)
-                h = nppm - j
-                sml = np.abs(h) < fuzz
-                h = np.where(sml & ~np.isnan(h), 0.0, h)
-            if n > 0:
-                xx = np.concatenate([[xs[0], xs[0]], xs, [xs[n - 1], xs[n - 1]]])
-            else:
-                xx = np.full(2, NA_REAL)            # c(x[1], x[1], x, x[0], x[0])
-            for k in range(np_):
-                jk = j[k]
-                if jk != jk:
-                    continue
-                jj = int(jk)
-                i2 = jj + 2
-                i3 = jj + 3
-                x2 = xx[i2 - 1] if 1 <= i2 <= xx.size else NA_REAL
-                x3 = xx[i3 - 1] if 1 <= i3 <= xx.size else NA_REAL
-                hk = h[k]
-                q = x2
-                if hk == hk and hk == 1:
-                    q = x3
-                a = None if hk != hk else bool(0 < hk)
-                b = None if hk != hk else bool(hk < 1)
-                c = None if (x2 != x2 or x3 != x3) else bool(x2 != x3)
-                if a is False or b is False or c is False:
-                    other = False
-                else:
-                    other = True
-                if other:
-                    q = (1 - hk) * x2 + hk * x3
-                qs[k] = q
+    # N8: C-Kern sl_r_quantile (partielle Sortierung wie R, Typen 1–9)
+    qs = np.empty(np_)
+    _ext.slc_r_quantile(np.ascontiguousarray(xv, dtype=np.float64), np.ascontiguousarray(pp), int(type), qs)
     qs = np.where(pok, qs, p)
     if names and np_ > 0:
         return pd.Series(qs, index=_format_perc(pp, digits))

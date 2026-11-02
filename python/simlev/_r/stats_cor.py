@@ -1,5 +1,9 @@
 """Kovarianz und Korrelation (``cor``, ``cov``, ``var``, ``sd``, ``cov2cor``) sowie ``scale``, nachgebildet aus
 R 4.3.3 ``src/library/stats/src/cov.c``, ``stats/R/cor.R`` und ``base/R/scale.R``.
+
+Seit N8 rechnet der Kern von ``cov``/``cor`` (pearson, kendall; alle ``use``) in C
+(``core/slc_rbase_cov.c``, gemeinsam mit Julia); hier bleiben Argumentprüfung, Ränge für
+spearman und die Ergebnisform.
 """
 from __future__ import annotations
 
@@ -9,8 +13,9 @@ import numpy as np
 import pandas as pd
 
 from .linalg import RError, _as_r, _as_matrix, _out
-from .rnum import NA_REAL
-from .stats_sort import LD, _NAN, _rsum, _warn, rank
+from .rnum import NA_REAL, _margsums
+from .stats_sort import _NAN, _rsum, _warn, rank
+from .. import _ext   # N8: C-Kern core/slc_rbase_cov.c
 
 __all__ = [
     "var", "sd", "cov", "cor", "cov2cor", "scale",
@@ -48,45 +53,8 @@ def _as_cov_input(x):
     return a.reshape(-1, 1), False, None
 
 
-def _mean_ind(col, ind, nobs):
-    """MEAN-Makro: zwei Durchläufe in long double; Ergebnis double."""
-    xl = col[ind].astype(LD)
-    s = np.cumsum(xl)[-1] if xl.size else LD(0)
-    tmp = s / LD(nobs)
-    if math.isfinite(float(tmp)):
-        s2 = np.cumsum(xl - tmp)[-1] if xl.size else LD(0)
-        tmp = tmp + s2 / LD(nobs)
-    return float(tmp)
-
-
-def _sign(a):
-    return np.sign(a)
-
-
-def _kendall_sum(xx, yy):
-    """sum_k sum_n1 sign(xx[k]-xx[n1]) * sign(yy[k]-yy[n1]) (exakt, ganzzahlig)."""
-    n = xx.size
-    tot = 0
-    step = max(1, 4000000 // max(1, n))
-    for s in range(0, n, step):
-        e = min(n, s + step)
-        sx = np.sign(xx[s:e, None] - xx[None, :])
-        sy = np.sign(yy[s:e, None] - yy[None, :])
-        tot += int(np.sum(sx * sy, dtype=np.int64)) if True else 0
-    return float(tot)
-
-
-def _kendall_count_ne(xx):
-    n = xx.size
-    tot = 0
-    step = max(1, 4000000 // max(1, n))
-    for s in range(0, n, step):
-        e = min(n, s + step)
-        tot += int(np.count_nonzero(xx[s:e, None] != xx[None, :]))
-    return float(tot)
-
-
 def _corcov(x, y, method_na, kendall, cor):
+    """R's ``cor``/``cov`` mit ``use`` als Zahl 1–5 (C-Kern ``sl_r_cov``, N8)."""
     X, xmat, xcn = _as_cov_input(x)
     n, ncx = X.shape
     ansmat = xmat
@@ -96,62 +64,27 @@ def _corcov(x, y, method_na, kendall, cor):
         ycn = None
     else:
         Y, ymat, ycn = _as_cov_input(y)
+        if Y.shape[0] != n:
+            raise RError("incompatible dimensions")
         if ymat:
-            if Y.shape[0] != n:
-                raise RError("incompatible dimensions")
             ansmat = True
-        else:
-            if Y.shape[0] != n:
-                raise RError("incompatible dimensions")
         ncy = Y.shape[1]
-    na_fail = False
-    everything = False
-    empty_err = True
-    pair = False
-    if method_na == 1:
-        na_fail = True
-    elif method_na == 2:
-        if X.size == 0:
-            raise RError("no complete element pairs")
-    elif method_na == 3:
-        pair = True
-    elif method_na == 4:
-        everything = True
-        empty_err = False
-    elif method_na == 5:
-        empty_err = False
-    else:
+    if method_na not in (1, 2, 3, 4, 5):
         raise RError("invalid 'use' (computational method)")
-    if empty_err and X.size == 0:
+    if method_na == 2 and X.size == 0:
+        raise RError("no complete element pairs")
+    if method_na in (1, 2, 3) and X.size == 0:
         raise RError("'x' is empty")
-    ans = np.full((ncx, ncy), NA_REAL)
-    sd0 = [False]
-    with np.errstate(all="ignore"):
-        if Y is None:
-            if everything:
-                has_na = np.isnan(X).any(axis=0) if n else np.zeros(ncx, dtype=bool)
-                _cov_na_1(X, has_na, ans, sd0, cor, kendall)
-            elif not pair:
-                ind = _complete(X, None, na_fail)
-                _cov_complete1(X, ind, ans, sd0, cor, kendall)
-                if empty_err and not ind.any():
-                    raise RError("no complete element pairs")
-            else:
-                _cov_pairwise(X, X, ans, sd0, cor, kendall, sym=True)
-        else:
-            if everything:
-                hx = np.isnan(X).any(axis=0) if n else np.zeros(ncx, dtype=bool)
-                hy = np.isnan(Y).any(axis=0) if n else np.zeros(ncy, dtype=bool)
-                _cov_na_2(X, Y, hx, hy, ans, sd0, cor, kendall)
-            elif not pair:
-                ind = _complete(X, Y, na_fail)
-                _cov_complete2(X, Y, ind, ans, sd0, cor, kendall)
-                if empty_err and not ind.any():
-                    raise RError("no complete element pairs")
-            else:
-                _cov_pairwise(X, Y, ans, sd0, cor, kendall, sym=False)
-    if sd0[0]:
+    ans = np.empty(ncx * ncy)
+    try:
+        sd0 = _ext.slc_r_cov(np.ascontiguousarray(X.ravel(order="F")), n, ncx,
+                             None if Y is None else np.ascontiguousarray(Y.ravel(order="F")), ncy,
+                             method_na, int(bool(kendall)), int(bool(cor)), ans)
+    except ValueError as e:
+        raise RError(str(e)) from None
+    if sd0:
         _warn("the standard deviation is zero")
+    ans = ans.reshape((ncx, ncy), order="F")
     if ansmat:
         if y is None:
             rn = cn = xcn
@@ -162,257 +95,6 @@ def _corcov(x, y, method_na, kendall, cor):
     if v.size == 1:
         return float(v[0])
     return v
-
-
-def _complete(X, Y, na_fail):
-    ind = ~np.isnan(X).any(axis=1)
-    if Y is not None:
-        ind &= ~np.isnan(Y).any(axis=1)
-    if na_fail and not ind.all():
-        raise RError("missing observations in cov/cor")
-    return ind
-
-
-def _ld_cross(a, am, b, bm):
-    """sum (LD)(a - am) * (b - bm) mit am, bm als long double."""
-    if a.size == 0:
-        return LD(0)
-    d1 = a.astype(LD) - LD(am)
-    d2 = b.astype(LD) - LD(bm)
-    return np.cumsum(d1 * d2)[-1]
-
-
-def _clamp(v):
-    return 1.0 if v >= 1.0 else (-1.0 if v <= -1.0 else v)
-
-
-def _cov_complete1(X, ind, ans, sd0, cor, kendall):
-    n, ncx = X.shape
-    nobs = int(ind.sum())
-    if nobs <= 1:
-        ans[:, :] = NA_REAL
-        return
-    xm = np.zeros(ncx)
-    if not kendall:
-        for i in range(ncx):
-            xm[i] = _mean_ind(X[:, i], ind, nobs)
-        n1 = nobs - 1
-    Xi = X[ind]
-    for i in range(ncx):
-        if not kendall:
-            for j in range(i + 1):
-                s = _ld_cross(Xi[:, i], xm[i], Xi[:, j], xm[j])
-                ans[i, j] = ans[j, i] = float(s / LD(n1))
-        else:
-            for j in range(i + 1):
-                s = _kendall_sum(Xi[:, i], Xi[:, j])
-                ans[i, j] = ans[j, i] = s
-    if cor:
-        for i in range(ncx):
-            xm[i] = math.sqrt(ans[i, i]) if ans[i, i] >= 0 else _NAN
-        for i in range(ncx):
-            for j in range(i):
-                if xm[i] == 0 or xm[j] == 0:
-                    sd0[0] = True
-                    ans[i, j] = ans[j, i] = NA_REAL
-                else:
-                    s = ans[i, j] / (xm[i] * xm[j])
-                    ans[i, j] = ans[j, i] = _clamp(s)
-            ans[i, i] = 1.0
-
-
-def _mean_all(col):
-    n = col.size
-    xl = col.astype(LD)
-    s = np.cumsum(xl)[-1]
-    tmp = s / LD(n)
-    if math.isfinite(float(tmp)):
-        s2 = np.cumsum(xl - tmp)[-1]
-        tmp = tmp + s2 / LD(n)
-    return float(tmp)
-
-
-def _cov_na_1(X, has_na, ans, sd0, cor, kendall):
-    n, ncx = X.shape
-    if n <= 1:
-        ans[:, :] = NA_REAL
-        return
-    # kendall: R lässt xm[] für NA-Spalten uninitialisiert (kein sd_0-Treffer)
-    xm = np.full(ncx, _NAN)
-    if not kendall:
-        for i in range(ncx):
-            xm[i] = NA_REAL if has_na[i] else _mean_all(X[:, i])
-        n1 = n - 1
-    for i in range(ncx):
-        if has_na[i]:
-            ans[i, :i + 1] = NA_REAL
-            ans[:i + 1, i] = NA_REAL
-            continue
-        for j in range(i + 1):
-            if has_na[j]:
-                ans[i, j] = ans[j, i] = NA_REAL
-            elif not kendall:
-                s = _ld_cross(X[:, i], xm[i], X[:, j], xm[j])
-                ans[i, j] = ans[j, i] = float(s / LD(n1))
-            else:
-                ans[i, j] = ans[j, i] = _kendall_sum(X[:, i], X[:, j])
-    if cor:
-        for i in range(ncx):
-            if not has_na[i]:
-                xm[i] = math.sqrt(ans[i, i]) if ans[i, i] >= 0 else _NAN
-        for i in range(ncx):
-            if not has_na[i]:
-                for j in range(i):
-                    if xm[i] == 0 or xm[j] == 0:
-                        sd0[0] = True
-                        ans[i, j] = ans[j, i] = NA_REAL
-                    else:
-                        s = ans[i, j] / (xm[i] * xm[j])
-                        ans[i, j] = ans[j, i] = _clamp(s)
-            ans[i, i] = 1.0
-
-
-def _sdev2(col, m, n1, kendall):
-    """COV_SDEV aus cov_complete2/cov_na_2: (double) SQRTL(sum)."""
-    if not kendall:
-        s = _ld_cross(col, m, col, m) / LD(n1)
-    else:
-        s = LD(_kendall_count_ne(col))
-    return float(np.sqrt(s))
-
-
-def _cov_complete2(X, Y, ind, ans, sd0, cor, kendall):
-    n, ncx = X.shape
-    ncy = Y.shape[1]
-    nobs = int(ind.sum())
-    if nobs <= 1:
-        ans[:, :] = NA_REAL
-        return
-    xm = np.zeros(ncx)
-    ym = np.zeros(ncy)
-    n1 = nobs - 1
-    if not kendall:
-        for i in range(ncx):
-            xm[i] = _mean_ind(X[:, i], ind, nobs)
-        for i in range(ncy):
-            ym[i] = _mean_ind(Y[:, i], ind, nobs)
-    Xi = X[ind]
-    Yi = Y[ind]
-    for i in range(ncx):
-        for j in range(ncy):
-            if not kendall:
-                s = _ld_cross(Xi[:, i], xm[i], Yi[:, j], ym[j])
-                ans[i, j] = float(s / LD(n1))
-            else:
-                ans[i, j] = _kendall_sum(Xi[:, i], Yi[:, j])
-    if cor:
-        xs = np.array([_sdev2(Xi[:, i], xm[i], n1, kendall) for i in range(ncx)])
-        ys = np.array([_sdev2(Yi[:, j], ym[j], n1, kendall) for j in range(ncy)])
-        for i in range(ncx):
-            for j in range(ncy):
-                if xs[i] == 0.0 or ys[j] == 0.0:
-                    sd0[0] = True
-                    ans[i, j] = NA_REAL
-                else:
-                    ans[i, j] = _clamp(ans[i, j] / (xs[i] * ys[j]))
-
-
-def _cov_na_2(X, Y, hx, hy, ans, sd0, cor, kendall):
-    n, ncx = X.shape
-    ncy = Y.shape[1]
-    if n <= 1:
-        ans[:, :] = NA_REAL
-        return
-    xm = np.zeros(ncx)
-    ym = np.zeros(ncy)
-    n1 = n - 1
-    if not kendall:
-        for i in range(ncx):
-            xm[i] = NA_REAL if hx[i] else _mean_all(X[:, i])
-        for i in range(ncy):
-            ym[i] = NA_REAL if hy[i] else _mean_all(Y[:, i])
-    for i in range(ncx):
-        if hx[i]:
-            ans[i, :] = NA_REAL
-            continue
-        for j in range(ncy):
-            if hy[j]:
-                ans[i, j] = NA_REAL
-            elif not kendall:
-                ans[i, j] = float(_ld_cross(X[:, i], xm[i], Y[:, j], ym[j]) / LD(n1))
-            else:
-                ans[i, j] = _kendall_sum(X[:, i], Y[:, j])
-    if cor:
-        xs = np.array([NA_REAL if hx[i] else _sdev2(X[:, i], xm[i], n1, kendall) for i in range(ncx)])
-        ys = np.array([NA_REAL if hy[j] else _sdev2(Y[:, j], ym[j], n1, kendall) for j in range(ncy)])
-        for i in range(ncx):
-            if hx[i]:
-                continue
-            for j in range(ncy):
-                if hy[j]:
-                    continue
-                if xs[i] == 0.0 or ys[j] == 0.0:
-                    sd0[0] = True
-                    ans[i, j] = NA_REAL
-                else:
-                    ans[i, j] = _clamp(ans[i, j] / (xs[i] * ys[j]))
-
-
-def _cov_pairwise(X, Y, ans, sd0, cor, kendall, sym):
-    n, ncx = X.shape
-    ncy = Y.shape[1]
-    for i in range(ncx):
-        jr = range(i + 1) if sym else range(ncy)
-        for j in jr:
-            xx = X[:, i]
-            yy = Y[:, j]
-            ok = ~(np.isnan(xx) | np.isnan(yy))
-            nobs = int(ok.sum())
-            if nobs >= 2:
-                xo = xx[ok]
-                yo = yy[ok]
-                if not kendall:
-                    xmean = np.cumsum(xo.astype(LD))[-1] / LD(nobs)
-                    ymean = np.cumsum(yo.astype(LD))[-1] / LD(nobs)
-                    n1 = nobs - 1
-                    xmd = xo.astype(LD) - xmean
-                    ymd = yo.astype(LD) - ymean
-                    s = np.cumsum(xmd * ymd)[-1]
-                    xsd = np.cumsum(xmd * xmd)[-1]
-                    ysd = np.cumsum(ymd * ymd)[-1]
-                else:
-                    # sum over k, n1 < k (je Paar einmal)
-                    s = LD(0)
-                    xsd = LD(0)
-                    ysd = LD(0)
-                    m = xo.size
-                    for k in range(m):
-                        sx = np.sign(xo[k] - xo[:k])
-                        sy = np.sign(yo[k] - yo[:k])
-                        s += LD(float(np.sum(sx * sy)))
-                        xsd += LD(float(np.sum(sx * sx)))
-                        ysd += LD(float(np.sum(sy * sy)))
-                if cor:
-                    if xsd == 0 or ysd == 0:
-                        sd0[0] = True
-                        val = NA_REAL
-                    else:
-                        if not kendall:
-                            xsd = xsd / LD(n1)
-                            ysd = ysd / LD(n1)
-                            s = s / LD(n1)
-                        s = s / (np.sqrt(xsd) * np.sqrt(ysd))
-                        s = LD(1) if s >= 1 else (LD(-1) if s <= -1 else s)
-                        val = float(s)
-                elif not kendall:
-                    val = float(s / LD(n1))
-                else:
-                    val = float(s)
-                ans[i, j] = val
-            else:
-                ans[i, j] = NA_REAL
-            if sym:
-                ans[j, i] = ans[i, j]
 
 
 def _rank_cols(u):
@@ -629,10 +311,8 @@ class _ScaledArray(np.ndarray):
 
 
 def _colmean_narm(col):
-    ok = col[~np.isnan(col)]
-    if ok.size == 0:
-        return _NAN
-    return float(np.cumsum(ok.astype(LD))[-1] / LD(ok.size))
+    """``colMeans(x, na.rm = TRUE)`` einer Spalte (long-double-Summe / Anzahl, C-Kern)."""
+    return float(_margsums(col, True, True, False)[0])
 
 
 from .base import quiet_fp  # noqa: E402

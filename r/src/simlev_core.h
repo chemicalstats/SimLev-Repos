@@ -7,14 +7,16 @@
  * r/src/<datei>.cpp mit den .Call-Funktionen; Python: python/src/_ext_<kern>.cpp im Modul
  * simlev._ext). Kanonisch sind die Dateien seit Etappe 9.6c (F16) in core/; R und Python
  * bauen aus Byte-fuer-Byte-Kopien in r/src/ bzw. python/src/core/ (tools/core_sync.py
- * --write/--check). Aenderungen nur in core/, danach kopieren. Julia hat eigene Ports
- * dieser Kerne (F2). Zufallszahlen zieht seit Etappe 9.6c keiner der geteilten Kerne mehr;
+ * --write/--check). Aenderungen nur in core/, danach kopieren. Seit N7 ist Julia der dritte
+ * Host (C-ABI-Huelle core/simlev_cabi.cpp, Kopie in julia/deps/core/; vorher eigene Ports, F2).
+ * Zufallszahlen zieht seit Etappe 9.6c keiner der geteilten Kerne mehr;
  * die frueheren Bootstrap-, DCC- und MS-GARCH-Kerne rechnet die C-Bibliothek slc
  * (core/slc_*.c).
  *
  * Host-Schnittstelle. Ein Kern sieht seinen Host nur ueber diese Namen; die
  * einbindende Huelle definiert sie vorher (R: simlev_capi.h, Abschnitt "R als Host der
- * gemeinsamen Kerne"; Python: python/src/_ext_common.h, Engine _ext_engine.cpp):
+ * gemeinsamen Kerne"; Python: python/src/_ext_common.h, Engine _ext_engine.cpp; Julia:
+ * core/simlev_cabi.cpp, Fehler als C++-Ausnahme, die die Huelle in einen Rueckgabecode umsetzt):
  *
  *   simlev_host::NumVec, IntVec   Sicht auf einen Vektor (sexp, ptr, len; v[i], size(),
  *                                 begin(), end())

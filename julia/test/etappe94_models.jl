@@ -31,6 +31,8 @@ const LM = SimLev.SLib
     @test d["a"] >= 0 && d["b"] >= 0 && d["a"] + d["b"] < 0.999
     m = LM.ms_garch_fit(e[1:600], 2, "sGARCH")
     @test isfinite(m["loglik"]) && all(r -> r in (1, 2), m["regimes"])
+    m3 = LM.ms_garch_fit(e[1:600], 2, "sGARCH"; cores = 3)   # N6: Threads, Ergebnis gleich
+    @test all(k -> isequal(m[k], m3[k]), keys(m))
     # N1: analytischer Gradient gegen zentrale Differenzen (Schritt 1e-5 max(|x|, 1))
     th = LM.ms_garch_starts(e[1:600], 2, "gjrGARCH"; all = true)[:, 3]
     gr = LM.ms_garch_grad(th, e[1:600], 2, "gjrGARCH")

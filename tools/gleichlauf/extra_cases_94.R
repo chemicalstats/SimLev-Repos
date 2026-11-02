@@ -179,6 +179,17 @@ case3("n4_garch_grad_s_err_nan", "sl$.sl_garch11_grad(c(3e-4, -13, -3, 2), c(g1[
       "L.garch11_grad([3e-4, -13, -3, 2], vcat(g1[1:20], NaN); gjr = false)", "g1")
 case3("n4_garch_fit_gflat_s", "sl$.sl_garch11_fit(gflat, FALSE)", "L.garch11_fit(gflat, False)", "L.garch11_fit(gflat; gjr = false)", "gflat")
 case3("n4_fit_garch11_gneg_s", "sl$.sl_fit_garch11(gneg, FALSE)", "L.fit_garch11(gneg, False)", "L.fit_garch11(gneg; gjr = false)", "gneg")
+# ── N6: sGARCH-Fit mit zweitem Start bei Randlösung alpha < 0.01 (bis 1.1.0 am Rand beta -> 1, LL um 1,29 kleiner);
+#        MS-GARCH mit mehreren Threads (Ergebnis gleich dem Lauf mit einem Thread, ms_ms2_K2_*_fit)
+I$grand <- sim_garch(600, 3e-4, 2e-5, 0.03, 0, 0.6, 4)
+case3("n6_garch_fit_rand_s", "sl$.sl_garch11_fit(grand, FALSE)", "L.garch11_fit(grand, False)", "L.garch11_fit(grand; gjr = false)", "grand")
+case3("n6_fit_garch11_rand_s", "sl$.sl_fit_garch11(grand, FALSE)", "L.fit_garch11(grand, False)", "L.fit_garch11(grand; gjr = false)", "grand")
+case3("n6_ms_fit_threads", "list(sl$.sl_ms_garch_fit(ms2, 2, 'sGARCH', cores = 3), sl$.sl_ms_garch_fit(ms2, 2, 'gjrGARCH', cores = 2), sl$.sl_ms_garch_fit(ms3, 3, 'sGARCH', cores = 64))",
+      "[L.ms_garch_fit(ms2, 2, 'sGARCH', cores=3), L.ms_garch_fit(ms2, 2, 'gjrGARCH', cores=2), L.ms_garch_fit(ms3, 3, 'sGARCH', cores=64)]",
+      "Any[L.ms_garch_fit(ms2, 2, \"sGARCH\"; cores = 3), L.ms_garch_fit(ms2, 2, \"gjrGARCH\"; cores = 2), L.ms_garch_fit(ms3, 3, \"sGARCH\"; cores = 64)]", c("ms2", "ms3"))
+case3("n6_ms_fit_threads_ungueltig", "list(sl$.sl_ms_garch_fit(ms2, 2, 'sGARCH', cores = 0), sl$.sl_ms_garch_fit(ms2, 2, 'sGARCH', cores = NA), sl$.sl_ms_garch_fit(ms2, 2, 'sGARCH', cores = 2.7))",
+      "[L.ms_garch_fit(ms2, 2, 'sGARCH', cores=0), L.ms_garch_fit(ms2, 2, 'sGARCH', cores=math.nan), L.ms_garch_fit(ms2, 2, 'sGARCH', cores=2.7)]",
+      "Any[L.ms_garch_fit(ms2, 2, \"sGARCH\"; cores = 0), L.ms_garch_fit(ms2, 2, \"sGARCH\"; cores = NaN), L.ms_garch_fit(ms2, 2, \"sGARCH\"; cores = 2.7)]", "ms2")
 
 # ── Bootstrap-Kerne (Strom aus Seed; danach Zustand als Hex) ──────────────────
 bc <- function(id, seed, r, py, jl, inp = character(0))

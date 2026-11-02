@@ -24,6 +24,7 @@ static PyMethodDef* const tables[] = {
     simlev_ext_slc_linalg_methods,  /* 9.2: _ext_slc_linalg.c */
     simlev_ext_slc_opt_methods, /* 9.3: Optimierer der C-Bibliothek slc (_ext_slc_opt.c) */
     simlev_ext_slc_models_methods, /* 9.4: Modelle der C-Bibliothek slc (_ext_slc_models.c) */
+    simlev_ext_slc_rbase_methods, /* N8: Grundfunktionen mit R-Regeln (_ext_slc_rbase.c) */
 };
 
 static std::vector<PyMethodDef> all_methods;

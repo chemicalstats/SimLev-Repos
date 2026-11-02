@@ -843,7 +843,7 @@ end
 MS-GARCH-Familie vorbereiten (Port von `.prepare_ms_info`; eigene ML-Schätzung
 `SimLev.MsGarch._ms_garch_fit`); `base` 1-basiert.
 """
-function _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp)
+function _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp, cores = 1)
     MG = SimLev.MsGarch
     MG._ms_garch_check(K, garch_model)
     R = _mat(returns)
@@ -851,7 +851,7 @@ function _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp)
     Ki = Int(Float64(K isa AbstractVector || K isa Tuple ? first(K) : K))
     gm = String(garch_model isa AbstractVector || garch_model isa Tuple ? first(garch_model) : garch_model)
     fit = try
-        MG._ms_garch_fit(ex, K, garch_model)
+        MG._ms_garch_fit(ex, K, garch_model; cores = cores)   # N6: cores Threads für die Starts
     catch e
         e isa InterruptException && rethrow()
         _stop(_sp("MS-GARCH(%d, %s) Fit fehlgeschlagen: %s", Ki, gm, _errmsg(e)))
@@ -942,7 +942,7 @@ end
 _istrue(x) = x === true || (x isa AbstractVector && length(x) == 1 && x[1] === true)
 
 "Verfahrensspezifische Vorberechnung (Port von `.prepare_method_info`)."
-function _prepare_method_info(returns, config, method, params)
+function _prepare_method_info(returns, config, method, params, cores = 1)
     R = _mat(returns)
     p = _get_base_params(method, params, size(R, 1))
     base = findfirst(==(config["regime_index"]), _cfg_list(config, "index_names"))
@@ -982,9 +982,9 @@ function _prepare_method_info(returns, config, method, params)
         info["garch"] = f
         info["cross"] = _fit_cross(R, config, base)
     end
-    method == "ms_garch" && (info["ms"] = _prepare_ms_info(R, config, base, p["ms_n_regimes"], p["ms_garch_model"], false, false))
-    method == "ms_ar_garch_m" && (info["ms"] = _prepare_ms_info(R, config, base, p["ms_ar_n_regimes"], p["ms_ar_garch_model"], true, false))
-    method == "tvtp_ms_garch" && (info["ms"] = _prepare_ms_info(R, config, base, p["tvtp_n_regimes"], p["tvtp_garch_model"], true, true))
+    method == "ms_garch" && (info["ms"] = _prepare_ms_info(R, config, base, p["ms_n_regimes"], p["ms_garch_model"], false, false, cores))
+    method == "ms_ar_garch_m" && (info["ms"] = _prepare_ms_info(R, config, base, p["ms_ar_n_regimes"], p["ms_ar_garch_model"], true, false, cores))
+    method == "tvtp_ms_garch" && (info["ms"] = _prepare_ms_info(R, config, base, p["tvtp_n_regimes"], p["tvtp_garch_model"], true, true, cores))
     return info
 end
 
@@ -1212,7 +1212,7 @@ function _check_boot_params(method, p, n_obs)
 end
 
 "Gemeinsame Vorbereitung für bootstrap() und bootstrap_study() (Port von `.boot_setup`)."
-function _boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
+function _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores = 1)
     _is_config(config) || _stop("config muss mit bootstrap_config() erstellt werden")
     method in _BOOT_METHODS || _stop("Unbekannte Methode '" * string(method) * "'. Verfügbar: " * join(_BOOT_METHODS, ", "))
     (!_isnum(n) || n < 1) && _stop("n muss eine positive Zahl sein")
@@ -1240,7 +1240,7 @@ function _boot_setup(data, config, method, n, params, ess, ess_grid, path_length
     infos = RList[]
     for cp in combos
         info = try
-            _prepare_method_info(ex["ret"], config, method, cp)
+            _prepare_method_info(ex["ret"], config, method, cp, cores)   # N6
         catch err
             (err isa UndefVarError || err isa MethodError) && rethrow()
             _stop(@sprintf("Vorberechnung fehlgeschlagen: %s", _errmsg(err)))
@@ -1303,7 +1303,7 @@ function bootstrap(data, config, method_pos = nothing; method = "raw", n = 1000,
     data = SimLev.as_rframe(data)
     method_pos === nothing || (method = method_pos)
     t0 = time()
-    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
+    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
     seed = _seed_or_draw(seed)
     streams = _SL().streams(seed, setup["n_paths"])            # Regel 6: U_i = J^i(S_0)
     res = _par_lapply(1:setup["n_paths"],
@@ -1664,7 +1664,7 @@ function bootstrap_study(data, config, method_pos = nothing; method = "stationar
     # Argumente für simulation() je Strategie einmal auflösen (Bausteine, Pfade; alte flache Namen: Fehler)
     sim_args = SimLev._sim_args_set(RList(), sim_args, "bootstrap_study")
     spec_sim = Dict{String,Any}(k => SimLev._sim_args_set(sim_args, _get(specs[k], "args"), "bootstrap_study") for k in snames)
-    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
+    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
     keep_paths = _keep_count(keep_paths, setup["n_paths"], "bootstrap_study")   # 6.5b: true = alle Pfade
     n_out = setup["n_out"]
     dates === nothing && (dates = _seq_dates(_todate(start, "start")[1], n_out + 1))

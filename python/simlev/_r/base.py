@@ -23,7 +23,8 @@ from .rnum import (  # noqa: F401
     r_sum,
     r_var,
 )
-from .rnum import NA_REAL, _handle_nan, _x87_nan, r_isna_arr  # noqa: F401
+from .rnum import NA_REAL, _handle_nan, _margsums, r_cummax, r_cummin, r_isna_arr  # noqa: F401
+from .rnum import r_cumprod as _r_cumprod
 
 import builtins as _bi
 import functools as _functools
@@ -35,7 +36,6 @@ import numpy as _np
 import pandas as _pd
 
 
-_LD = _np.longdouble
 
 __all__ = ["r_cumsum", "r_mean", "r_mean_int", "r_mod1", "r_pow", "r_pow_vec", "r_prod",
            "r_rowsums", "r_sd", "r_sum", "r_var", "colSums", "colMeans", "rowSums", "rowMeans",
@@ -62,25 +62,7 @@ def _named(v, names):
 
 
 def _col_sums(a, na_rm, mean):
-    n, p = a.shape
-    out = _np.empty(p)
-    for j in _bi.range(p):
-        c = a[:, j]
-        if na_rm:
-            c = c[~_np.isnan(c)]
-            cnt = c.size
-        else:
-            cnt = n
-        with _np.errstate(invalid="ignore"):
-            s = _np.cumsum(c.astype(_LD))[-1] if c.size else _LD(0)
-        if s != s:
-            out[j] = _x87_nan(c)            # NA/NaN nach der x87-Regel wie R
-            continue
-        if mean:
-            with _np.errstate(all="ignore"):
-                s = s / _LD(cnt)
-        out[j] = float(s)
-    return out
+    return _margsums(a, na_rm, mean, False)
 
 
 def colSums(x, na_rm=False):
@@ -96,28 +78,7 @@ def colMeans(x, na_rm=False):
 
 
 def _row_sums(a, na_rm, mean):
-    n, p = a.shape
-    acc = _np.zeros(n, dtype=_LD)
-    cnt = _np.zeros(n, dtype=_np.int64)
-    for j in _bi.range(p):
-        c = a[:, j]
-        if na_rm:
-            ok = ~_np.isnan(c)
-            acc[ok] += c[ok].astype(_LD)
-            cnt += ok
-        else:
-            with _np.errstate(invalid="ignore"):
-                acc += c.astype(_LD)
-    if mean:
-        with _np.errstate(all="ignore"):
-            acc = acc / (cnt.astype(_LD) if na_rm else _LD(p))
-    out = acc.astype(_np.float64)
-    if not na_rm:
-        for i in _np.flatnonzero(_np.isnan(out)):
-            r = _x87_nan(a[i, :])           # NA/NaN nach der x87-Regel wie R
-            if r is not None:
-                out[i] = r
-    return out
+    return _margsums(a, na_rm, mean, True)
 
 
 def rowSums(x, na_rm=False):
@@ -140,38 +101,21 @@ def _vec(x):
 
 
 def cumprod(x):
-    """``cumprod(x)`` (``LDOUBLE``-Produkt, NA/NaN ab dem ersten Auftreten)."""
+    """``cumprod(x)`` (``LDOUBLE``-Produkt, NA/NaN ab dem ersten Auftreten; C-Kern)."""
     v, nm = _vec(x)
-    if v.size == 0:
-        return v
-    with _np.errstate(invalid="ignore"):
-        out = _np.cumprod(v.astype(_LD)).astype(_np.float64)
-    if out[-1] != out[-1]:
-        _handle_nan(v, out)
-    return _named(out, nm)
-
-
-def _cumext(x, fn):
-    v, nm = _vec(x)
-    out = _np.empty(v.size)
-    m = None
-    for i, t in enumerate(v.tolist()):
-        if t != t:
-            _handle_nan(v, out)
-            break
-        m = t if m is None else fn(m, t)
-        out[i] = m
-    return _named(out, nm)
+    return _named(_r_cumprod(v), nm)
 
 
 def cummax(x):
-    """``cummax(x)`` (double, ``(max > x) ? max : x``)."""
-    return _cumext(x, lambda m, t: m if m > t else t)
+    """``cummax(x)`` (double, ``(max > x) ? max : x``; C-Kern)."""
+    v, nm = _vec(x)
+    return _named(r_cummax(v), nm)
 
 
 def cummin(x):
-    """``cummin(x)``."""
-    return _cumext(x, lambda m, t: m if m < t else t)
+    """``cummin(x)`` (C-Kern)."""
+    v, nm = _vec(x)
+    return _named(r_cummin(v), nm)
 
 
 def mean(x, na_rm=False):

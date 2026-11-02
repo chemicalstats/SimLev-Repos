@@ -52,6 +52,7 @@
 #' von allen Rasterpunkten beider Familien (die zwei bisherigen zuerst; sGARCH
 #' 12, gjrGARCH seit N1 20 mit zwei Rasterpunkten gamma < 0), der beste Lauf
 #' gewinnt. GJR je Regime seit N1 mit alpha + gamma >= 0, also auch gamma < 0.
+#' N6: \code{cores} Threads fuer die Starts (Ergebnis unabhaengig davon; Standard 1).
 #' @keywords internal
 #' @noRd
-.ms_garch_fit <- function(y, K, model) .sl_ms_garch_fit(y, K, model)
+.ms_garch_fit <- function(y, K, model, cores = 1L) .sl_ms_garch_fit(y, K, model, cores)

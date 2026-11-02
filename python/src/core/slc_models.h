@@ -154,6 +154,11 @@ int sl_msgarch_grad(sl_ctx *cx, int n, const double *y, int K, int gjr, const do
 int sl_msgarch_fit(sl_ctx *cx, int n, const double *y, int K, int gjr, int nstart,
                    const double *starts, double h1, const struct sl_opt_ctrl *ctrl, double *theta,
                    double *nll, int *code);
+/* N6: wie sl_msgarch_fit, die Starts auf bis zu nthreads Threads verteilt (nur mit SLC_THREADS übersetzt, sonst
+ * und bei nthreads <= 1 nacheinander); Auswahl in fester Reihenfolge, Ergebnis unabhängig von nthreads. */
+int sl_msgarch_fit_mt(sl_ctx *cx, int n, const double *y, int K, int gjr, int nstart,
+                      const double *starts, double h1, const struct sl_opt_ctrl *ctrl, double *theta,
+                      double *nll, int *code, int nthreads);
 /* Startpunkte wie .ms_garch_fit: Familie 1 aus dem HMM-EM (falls es gelingt), Familie 2 aus der
  * Rangeinteilung der rollierenden Volatilität; je bester Rasterpunkt (all_pts = 0: höchstens 2
  * Spalten). all_pts = 1: danach die übrigen Rasterpunkte je Familie (sGARCH 5, GJR seit N1 9 mit
@@ -168,6 +173,10 @@ int sl_msgarch_starts(sl_ctx *cx, int n, const double *y, int K, int gjr, double
 int sl_msgarch_estimate(sl_ctx *cx, int n, const double *y, int K, int gjr, double *omega,
                         double *alpha, double *beta, double *gamma, double *P, int32_t *regimes,
                         double *s2, double *loglik, int *code);
+/* N6: wie sl_msgarch_estimate mit sl_msgarch_fit_mt (nthreads Threads; Ergebnis unabhängig davon) */
+int sl_msgarch_estimate_mt(sl_ctx *cx, int n, const double *y, int K, int gjr, double *omega,
+                           double *alpha, double *beta, double *gamma, double *P, int32_t *regimes,
+                           double *s2, double *loglik, int *code, int nthreads);
 /* Baum-Welch-EM des univariaten Gauß-HMM wie .hmm_em mit Start .hmm_init_rank (Fenster win,
  * ridge = 1e-10 + 1e-6 var(x)); mu, S (Varianzen) je K, A K x K, ll, iter. */
 int sl_hmm_em_univ(sl_ctx *cx, int n, const double *x, int K, int win, int max_iter, double tol,

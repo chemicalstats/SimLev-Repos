@@ -89,7 +89,7 @@ end
 
 
 """
-    _ms_garch_fit(y, K, model)
+    _ms_garch_fit(y, K, model; cores = 1)
 
 MS-GARCH-Modell per Maximum Likelihood schätzen (`.ms_garch_fit`, eigene
 Fassung). `y`: Tagesrenditen als Anteil (Mittelwert 0 angenommen); `K`: Anzahl
@@ -101,13 +101,14 @@ sortiert; γ = 0 bei "sGARCH"), Übergangsmatrix P (Zeile = von), Viterbi-Pfad
 Log-Likelihood und Konvergenzcode des besten BFGS-Laufs. Seit Etappe 9.6b wie R ganz in der
 C-Bibliothek slc (`SLib.ms_garch_fit`): Starts aus HMM-EM und Rangeinteilung, BFGS von allen
 Rasterpunkten beider Familien (sGARCH 12, gjrGARCH seit N1 20), seit N1 mit analytischem
-Gradienten; GJR je Regime mit α + γ ≥ 0, also auch γ < 0.
+Gradienten; GJR je Regime mit α + γ ≥ 0, also auch γ < 0. N6: `cores` Threads für die Starts
+(Ergebnis unabhängig davon; Standard 1).
 """
-function _ms_garch_fit(y, K, model)
+function _ms_garch_fit(y, K, model; cores = 1)
     _ms_garch_check(K, model)
     K = Int(Float64(K isa AbstractVector || K isa Tuple ? first(K) : K))
     model = String(model isa AbstractVector || model isa Tuple ? first(model) : model)
-    SimLev.SLib.ms_garch_fit(Float64.(vec(collect(y))), K, model)   # ganz in C (slc, Entwurf B.13; seit Etappe 9.6b)
+    SimLev.SLib.ms_garch_fit(Float64.(vec(collect(y))), K, model; cores = cores)   # ganz in C (slc, Entwurf B.13; seit Etappe 9.6b)
 end
 
 end # module

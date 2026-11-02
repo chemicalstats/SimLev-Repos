@@ -116,7 +116,7 @@ extern SEXP C_sl_ms_garch_nll(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_ms_garch_grad(SEXP, SEXP, SEXP, SEXP, SEXP);   /* N1 */
 extern SEXP C_sl_ms_garch_starts(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_ms_garch_fitstarts(SEXP, SEXP, SEXP, SEXP, SEXP);
-extern SEXP C_sl_ms_garch_estimate(SEXP, SEXP, SEXP);
+extern SEXP C_sl_ms_garch_estimate(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_hmm_em_univ(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_hmm_viterbi(SEXP, SEXP, SEXP);
 extern SEXP C_sl_boot_idx_iid(SEXP, SEXP, SEXP);
@@ -228,7 +228,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"sl_ms_garch_grad", (DL_FUNC) &C_sl_ms_garch_grad, 5},   /* N1 */
     {"sl_ms_garch_starts", (DL_FUNC) &C_sl_ms_garch_starts, 5},
     {"sl_ms_garch_fitstarts", (DL_FUNC) &C_sl_ms_garch_fitstarts, 5},
-    {"sl_ms_garch_estimate", (DL_FUNC) &C_sl_ms_garch_estimate, 3},
+    {"sl_ms_garch_estimate", (DL_FUNC) &C_sl_ms_garch_estimate, 4},
     {"sl_hmm_em_univ", (DL_FUNC) &C_sl_hmm_em_univ, 5},
     {"sl_hmm_viterbi", (DL_FUNC) &C_sl_hmm_viterbi, 3},
     {"sl_boot_idx_iid", (DL_FUNC) &C_sl_boot_idx_iid, 3},

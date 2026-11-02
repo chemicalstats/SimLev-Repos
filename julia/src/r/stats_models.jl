@@ -23,19 +23,8 @@ _vals(x) = x isa RVector ? Float64[_fl(v) for v in x.values] : x isa AbstractArr
 
 const _PADJ = ["holm", "hochberg", "hommel", "bonferroni", "BH", "BY", "fdr", "none"]
 
-function _cumext(x, greater::Bool)
-    out = similar(x)
-    m = greater ? -Inf : Inf
-    for (k, v) in enumerate(x)
-        if isnan(v)
-            out[k:end] .= NA
-            return out
-        end
-        m = greater ? (m > v ? m : v) : (m < v ? m : v)
-        out[k] = m
-    end
-    out
-end
+# cummax/cummin wie R (N8: C-Kerne)
+_cumext(x, greater::Bool) = greater ? SimLev._rb_cummax(SimLev._rbv(x)) : SimLev._rb_cummin(SimLev._rbv(x))
 _pmin1(x) = Float64[isnan(t) ? t : (t < 1.0 ? t : 1.0) for t in x]
 
 "`p.adjust(p, method, n)`."

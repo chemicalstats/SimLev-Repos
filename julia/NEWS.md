@@ -1,5 +1,14 @@
 # SimLev.jl (Julia) – Änderungen je Version
 
+## SimLev.jl 1.2.0
+
+Minor-Update (R/Python/Julia).
+
+- sGARCH-Schätzung: Endet der Fit am Rand (alpha < 0,01), folgt ein zweiter BFGS-Lauf von einem Start mit kleinerem beta; das bessere Ergebnis gilt. Auf 160 Prüfreihen in 33 Fällen deutlich höhere Likelihood (bis +10,5), nie niedrigere. Fits ohne Randlage sind 12–23 % schneller, Fits mit Randlage etwa doppelt so teuer. sGARCH-abhängige Ergebnisse (GARCH-Bootstrap, DCC) ändern sich; die IGARCH-Warnung entfällt teils.
+- MS-GARCH: Likelihood und Gradient in einem Durchlauf, eigene Fassung für 2 und 3 Regime; etwa 1,6- bis 1,8-mal schneller bei gleichen Ergebnissen. Die Starts laufen mit cores > 1 parallel (POSIX-Threads, unter Windows nacheinander); das Ergebnis hängt nicht von der Thread-Zahl ab.
+- Eine Bibliothek für alle Sprachen: Julia rechnet die Kerne von Engine, Steuer, FIFO, Entnahme und Research über dieselben C++-Kerne wie R und Python (C-Schnittstelle core/simlev_cabi.cpp); die eigenen Julia-Nachbauten entfallen. Julia braucht dafür einen C++-Compiler.
+- Python und Julia rechnen die Nachbildungen der R-Grundfunktionen (Summen, Kumulationen, Sortierung, Rang, Quantile, tabulate, findInterval, cov/cor) über einen gemeinsamen C-Kern (core/slc_rbase*); Python bis zu 3-mal, Julia bis zu 1,5-mal schneller in den betroffenen Aufgaben. Kleine Randfälle (x^NA, findInterval mit einem Stützpunkt, Kendall mit Inf) verhalten sich jetzt wie in R.
+
 ## SimLev.jl 1.1.0
 
 Minor-Update (R/Python/Julia).

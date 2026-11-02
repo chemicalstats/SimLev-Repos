@@ -171,7 +171,9 @@ Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
 fuer die gepaarte Auswertung in \code{summary()}; \code{NULL} (Standard)
 = keine.}
 
-\item{cores}{Anzahl Prozesse (Standard 1); parallelisiert wird ueber Chunks.}
+\item{cores}{Anzahl Prozesse (Standard 1); parallelisiert wird ueber Chunks.
+Der MS-GARCH-Fit der Vorberechnung nutzt ebenso viele Threads (Ergebnis
+unabhaengig davon).}
 
 \item{chunk_size}{Pfade je Arbeitspaket (Standard 25); Einheit der
 Parallelisierung und der Zwischenspeicherung.}

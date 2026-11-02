@@ -25,6 +25,7 @@ und `precompile.jl`.
 |---|---|---|
 | `src/r/env.jl` | `REnv` | Umgebungsschalter `SIMLEV_*`: einzige Stelle, die sie liest oder setzt (siehe [Schalter](#schalter-simlev_)) → `_r/env.py` |
 | `src/slib.jl` (+ `slib_linalg.jl`, `slib_opt.jl`, `slib_models.jl`) | `SLib` | Hüllen der C-Bibliothek slc per `ccall` (Zufall, Verteilungen, lineare Algebra, Optimierer, Modelle, Bootstrap-Kerne); Bibliothek aus `deps/build.jl` (siehe [C-Bibliothek](#c-bibliothek-pflicht)) → `simlev/_lib*.py` |
+| `src/cabi.jl` | `CAbi` | N7: Rückgabecodes, Fehlertexte und Feldlagen der C-ABI-Hülle `core/simlev_cabi.cpp` der geteilten C++-Kerne (in `libslc`) → `python/src/_ext_common.h` |
 | `src/r/types.jl` | – | R-Datenstrukturen (`RList`, `RFrame`, `RVector`, `NamedMat`), Druck-/summary-/plot-Registrierung |
 | `src/r/ld80.jl` | – | `F80`: 80-Bit-`long double` (x86-64: x87-Hardware über `llvmcall`, sonst Software-Nachbau `F80Soft`) |
 | `src/r/rnum.jl` | – | `NA`, `isna_strict`, Summen/Mittel/Varianz in `long double` (`r_sum`, `r_mean`, …), `r_pow` (`R_POW`), `r_uniroot`, zentrale Auswahl der C-Bibliotheken (`_LIBM`, `_LIBC`, `_SNPRINTF`) → `_r/rnum.py` |
@@ -40,7 +41,7 @@ und `precompile.jl`.
 | `src/svg.jl` | – | Grafikmodul: `SimLevPlot`, `_plot_method` & Co., alle SVG-Zeichenbausteine (siehe [Grafik](#grafik)) → `simlev/svg.py` |
 | `src/dashboard.jl` | – | Dashboard-Daten und Panels, `plot_dashboard`, `export_dashboard` (r/R/plot_dashboard.R) → `dashboard.py` |
 | `src/<modul>.jl` | `DataPrep`, `Backcast`, `Bonds`, `Signals`, `Bootstrap`, `Withdrawal`, `Dependence`, `Regimes`, `MsGarch`, `Scenarios`, `Optimize`, `Tactical`, `DeepAnalysis`, `Planning`, `AnalysisTests`, `Overfitting`, `ParamSearch`, `Sensitivity` | je eine R-Datei `r/R/<modul>.R` → `python/simlev/<modul>.py` |
-| `src/<name>_core.jl` | `SignalsCore`, `WithdrawalCore`, `DependenceCore`, `OptimizeCore` | eigene Ports der geteilten C++-Kerne aus `core/` (F2; Python ruft sie als C-Erweiterung) → `python/simlev/_<name>_core.py`; `BootstrapCore` und der Port des DCC-Filters sind mit 9.6c entfallen |
+| `src/<name>_core.jl` | `SignalsCore`, `WithdrawalCore`, `DependenceCore`, `OptimizeCore` | Hüllen der geteilten C++-Kerne aus `core/` über `ccall` (N7, `src/cabi.jl`; vorher eigene Ports, F2) → `python/simlev/_<name>_core.py`; `BootstrapCore` und der Port des DCC-Filters sind mit 9.6c entfallen |
 | `src/exports.jl` | – | sammelt die öffentlichen Funktionen der Untermodule für `using SimLev` |
 
 Funktionen anderer Untermodule werden **im Funktionsrumpf qualifiziert**
@@ -334,10 +335,13 @@ Hüllen stehen in `src/slib*.jl` (`SimLev.SLib`, `ccall`, Fehler über den Konte
 
 **Ort der Quellen (`core/`, Entwurf C.1, F16):** kanonisch in `core/` (nur dort ändern); Kopien
 der slc-Dateien liegen in `julia/deps/core/`, `r/src/` und `python/src/core/`. Die geteilten
-C++-Kerne von R und Python (`core/simlev_core.h`, `core/*_core_impl.h`: Engine, FIFO, Steuer,
-Research, Entnahme) liegen seit 9.6c ebenfalls in `core/`, werden aber nur nach `r/src/` und
-`python/src/core/` kopiert: Julia behält seine eigenen Ports dieser Kerne (F2; `core.jl`,
-`signals_core.jl`, `withdrawal_core.jl`, `dependence_core.jl`, `optimize_core.jl`).
+C++-Kerne (`core/simlev_core.h`, `core/*_core_impl.h`: Engine, FIFO, Steuer, Research, Entnahme)
+liegen seit 9.6c ebenfalls in `core/` und werden seit N7 auch nach `julia/deps/core/` kopiert, dazu
+ihre C-ABI-Hülle `core/simlev_cabi.cpp` (nur Julia). `deps/build.jl` übersetzt sie mit dem
+C++-Compiler (Schalter wie Python: `-O2 -std=gnu++17 -ffp-contract=off -fno-fast-math`,
+`SIMLEV_FP_CONTRACT_BY_FLAG`) in `libslc`; `src/cabi.jl` (Modul `CAbi`) wertet die Rückgabecodes aus,
+die Aufrufe stehen in `core.jl`, `signals_core.jl`, `withdrawal_core.jl`, `dependence_core.jl` und
+`optimize_core.jl` (die früheren eigenen Ports, F2, sind entfallen).
 `tools/core_sync.py --write` kopiert, `--check` vergleicht alle Kopien per SHA-256 (Ende 1 bei
 Abweichung) und läuft in jeder Gleichlaufprüfung.
 

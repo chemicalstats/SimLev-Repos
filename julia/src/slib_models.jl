@@ -261,18 +261,27 @@ function ms_garch_fitstarts(y, K, model, starts; h1 = nothing)
     _P.RList("par" => th, "value" => v[], "convergence" => Int(code[]))
 end
 
-"MS-GARCH-Modell wie `_ms_garch_fit`, ganz in C (Starts, BFGS, Sortierung, Viterbi)."
-function ms_garch_fit(y, K, model)
+# N6: Zahl der Threads aus cores wie `.sl_threads` (ganze Zahl; ungültig oder < 1 -> 1)
+function _threads(cores)
+    c = cores isa AbstractVector || cores isa Tuple ? (isempty(cores) ? NaN : first(cores)) : cores
+    v = try Float64(c) catch; NaN end
+    (isfinite(v) && abs(v) < 2.0^31) || return 1
+    nt = trunc(Int, v)
+    nt >= 1 ? nt : 1
+end
+
+"MS-GARCH-Modell wie `_ms_garch_fit`, ganz in C (Starts, BFGS, Sortierung, Viterbi); N6: Starts auf bis zu `cores` Threads (Ergebnis unabhängig davon)."
+function ms_garch_fit(y, K, model; cores = 1)
     _P.MsGarch._ms_garch_check(K, model)
     K = Int(K); yv = _fv(y); n = length(yv)
     om = Vector{Float64}(undef, K); al = similar(om); be = similar(om); ga = similar(om)
     P = Matrix{Float64}(undef, K, K); reg = Vector{Int32}(undef, n); s2 = Vector{Float64}(undef, n)
     ll = Ref{Float64}(0.0); code = Ref{Cint}(0)
     cx = _ctx()
-    st = ccall((:sl_msgarch_estimate, LIBSLC), Cint,
+    st = ccall((:sl_msgarch_estimate_mt, LIBSLC), Cint,
                (Ptr{Cvoid}, Cint, Ptr{Float64}, Cint, Cint, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64},
-                Ptr{Int32}, Ptr{Float64}, Ref{Float64}, Ref{Cint}),
-               cx, Cint(n), yv, Cint(K), Cint(model == "gjrGARCH"), om, al, be, ga, P, reg, s2, ll, code)
+                Ptr{Int32}, Ptr{Float64}, Ref{Float64}, Ref{Cint}, Cint),
+               cx, Cint(n), yv, Cint(K), Cint(model == "gjrGARCH"), om, al, be, ga, P, reg, s2, ll, code, Cint(_threads(cores)))
     _finish(cx, st)
     _P.RList("omega" => om, "alpha" => al, "beta" => be, "gamma" => ga, "P" => P, "regimes" => reg, "s2" => s2,
              "loglik" => ll[], "convergence" => Int(code[]))

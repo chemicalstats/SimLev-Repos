@@ -8,7 +8,6 @@ r² und den Welch-Test selbst (C-Bibliothek slc, :mod:`simlev._lib`; Entwurf B.7
 """
 from __future__ import annotations
 
-import math
 
 import numpy as np
 import pandas as pd
@@ -115,25 +114,11 @@ def p_adjust(p, method="holm", n=None):
 
 
 def _cummax(x):
-    out = np.empty(x.size)
-    m = -math.inf
-    for k, v in enumerate(x.tolist()):
-        if v != v:
-            return _rn._handle_nan(np.asarray(x, dtype=np.float64), out)
-        m = m if m > v else v
-        out[k] = m
-    return out
+    return _rn.r_cummax(x)          # N8: C-Kern
 
 
 def _cummin(x):
-    out = np.empty(x.size)
-    m = math.inf
-    for k, v in enumerate(x.tolist()):
-        if v != v:
-            return _rn._handle_nan(np.asarray(x, dtype=np.float64), out)
-        m = m if m < v else v
-        out[k] = m
-    return out
+    return _rn.r_cummin(x)          # N8: C-Kern
 
 
 def ecdf(x):

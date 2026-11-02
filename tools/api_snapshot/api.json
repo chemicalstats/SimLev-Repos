@@ -962,7 +962,7 @@
     ],
     "module": "simlev.bootstrap",
     "file": "python/simlev/bootstrap.py",
-    "line": 1501,
+    "line": 1502,
     "bases": [
      "RList",
      "OrderedDict",
@@ -976,7 +976,7 @@
     ],
     "module": "simlev.bootstrap",
     "file": "python/simlev/bootstrap.py",
-    "line": 1517,
+    "line": 1518,
     "bases": [
      "RList",
      "OrderedDict",
@@ -2551,7 +2551,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/bootstrap.R",
-    "line": 1126,
+    "line": 1128,
     "args": [
      {
       "name": "data",
@@ -3088,7 +3088,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/bootstrap.R",
-    "line": 1252,
+    "line": 1254,
     "args": [
      {
       "name": "result",
@@ -3125,7 +3125,7 @@
     "class": null,
     "module": "simlev.bootstrap",
     "file": "python/simlev/bootstrap.py",
-    "line": 1414,
+    "line": 1415,
     "args": [
      {
       "name": "result",
@@ -3454,7 +3454,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/bootstrap.R",
-    "line": 1760,
+    "line": 1764,
     "args": [
      {
       "name": "study",
@@ -3486,7 +3486,7 @@
     "class": null,
     "module": "simlev.bootstrap",
     "file": "python/simlev/bootstrap.py",
-    "line": 2007,
+    "line": 2008,
     "args": [
      {
       "name": "study",
@@ -3592,7 +3592,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/bootstrap.R",
-    "line": 1502,
+    "line": 1506,
     "args": [
      {
       "name": "data",
@@ -3750,7 +3750,7 @@
     "class": null,
     "module": "simlev.bootstrap",
     "file": "python/simlev/bootstrap.py",
-    "line": 1584,
+    "line": 1585,
     "args": [
      {
       "name": "data",
@@ -4105,7 +4105,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/bootstrap.R",
-    "line": 1307,
+    "line": 1309,
     "args": [
      {
       "name": "res",
@@ -4124,7 +4124,7 @@
     "class": null,
     "module": "simlev.bootstrap",
     "file": "python/simlev/bootstrap.py",
-    "line": 1467,
+    "line": 1468,
     "args": [
      {
       "name": "res",
@@ -4167,7 +4167,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/bootstrap.R",
-    "line": 1189,
+    "line": 1191,
     "args": [
      {
       "name": "result",
@@ -4198,7 +4198,7 @@
     "class": null,
     "module": "simlev.bootstrap",
     "file": "python/simlev/bootstrap.py",
-    "line": 1367,
+    "line": 1368,
     "args": [
      {
       "name": "result",
@@ -9224,7 +9224,7 @@
     "generic": "plot",
     "class": "SimLevBootstrapStudy",
     "file": "r/R/bootstrap.R",
-    "line": 1913,
+    "line": 1917,
     "args": [
      {
       "name": "x",
@@ -9256,7 +9256,7 @@
     "class": "SimLevBootstrapStudy",
     "module": "simlev.bootstrap",
     "file": "python/simlev/bootstrap.py",
-    "line": 2156,
+    "line": 2157,
     "args": [
      {
       "name": "x",
@@ -13530,7 +13530,7 @@
     "generic": "print",
     "class": "SimLevBootstrapStudy",
     "file": "r/R/bootstrap.R",
-    "line": 1904,
+    "line": 1908,
     "args": [
      {
       "name": "x",
@@ -13556,7 +13556,7 @@
     "class": "SimLevBootstrapStudy",
     "module": "simlev.bootstrap",
     "file": "python/simlev/bootstrap.py",
-    "line": 1510,
+    "line": 1511,
     "args": [
      {
       "name": "self",
@@ -16898,7 +16898,7 @@
     "generic": "print",
     "class": "bootstrap_result",
     "file": "r/R/bootstrap.R",
-    "line": 1155,
+    "line": 1157,
     "args": [
      {
       "name": "x",
@@ -17068,7 +17068,7 @@
     "generic": "print",
     "class": "summary.SimLevBootstrapStudy",
     "file": "r/R/bootstrap.R",
-    "line": 1871,
+    "line": 1875,
     "args": [
      {
       "name": "x",
@@ -17094,7 +17094,7 @@
     "class": "summary.SimLevBootstrapStudy",
     "module": "simlev.bootstrap",
     "file": "python/simlev/bootstrap.py",
-    "line": 1522,
+    "line": 1523,
     "args": [
      {
       "name": "self",
@@ -24782,7 +24782,7 @@
     "generic": "summary",
     "class": "SimLevBootstrapStudy",
     "file": "r/R/bootstrap.R",
-    "line": 1833,
+    "line": 1837,
     "args": [
      {
       "name": "object",
@@ -24820,7 +24820,7 @@
     "class": "SimLevBootstrapStudy",
     "module": "simlev.bootstrap",
     "file": "python/simlev/bootstrap.py",
-    "line": 1506,
+    "line": 1507,
     "args": [
      {
       "name": "self",

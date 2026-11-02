@@ -37,6 +37,9 @@
  *             breite Intervalle der Ränge mit um 0.1 % der Spannweite erweiterten Rändern
  *             (dokumentiertes Verhalten von cut); Median als Mittel der beiden mittleren Werte.
  *             Summen über die Zeit kompensiert (Neumaier 1974), außer im überführten Filter.
+ *             N6: f und g in einem Durchlauf (ms_fc/ms_gc), Starts auf Wunsch parallel
+ *             (sl_msgarch_fit_mt, POSIX-Threads mit SLC_THREADS), Auswahl in fester Reihenfolge;
+ *             Ergebnisse bitgleich zu 1.1.0 und unabhängig von der Zahl der Threads.
  * Quellen:    Haas, M., Mittnik, S., Paolella, M. S. (2004). A new approach to Markov-switching
  *               GARCH models. Journal of Financial Econometrics 2(4), 493–530.
  *             Hamilton, J. D. (1989). A new approach to the economic analysis of nonstationary
@@ -68,7 +71,7 @@
  *             gelesen).
  * Prüforakel: der bisherige eigene Fit .ms_garch_fit (optim-BFGS) und MSGARCH 2.51 (nur
  *             Plausibilität, scratchpad/e94/); N1: SimLev 1.0.0 und die MSGARCH-Werte aus M2,
- *             Gradient gegen zentrale Differenzen (scratchpad/en1/).
+ *             Gradient gegen zentrale Differenzen (scratchpad/en1/); N6: SimLev 1.1.0 (scratchpad/en6/).
  */
 #include "slc_internal.h"
 #include "slc_la_internal.h"
@@ -77,6 +80,9 @@
 
 #include <stdlib.h>
 #include <string.h>
+#ifdef SLC_THREADS
+#include <pthread.h>
+#endif
 
 #define TWO_PI (2.0 * SLC_PI)
 
@@ -273,8 +279,6 @@ static double ms_nll_w(const ms_data *d, const double *th)
     return isfinite(ll) ? -ll : INFINITY;
 }
 
-static double ms_obj(const double *th, void *data) { return ms_nll_w((const ms_data *) data, th); }
-
 /* N1: Länge des Arbeitsfelds des analytischen Gradienten (ms_grad_w) */
 static size_t ms_gw_len(int K, int gjr)
 {
@@ -297,10 +301,19 @@ static size_t ms_gw_len(int K, int gjr)
  *   f = sum_k pr_k phi_k, d log f = sum_k [(phi_k / f) dpr_k + post_k c_k dh_k] mit post_k = pr_k phi_k / f;
  *   dpost_k = (phi_k / f) dpr_k + post_k c_k dh_k - post_k d log f;
  *   pr_{t+1,j} = sum_i P_ij post_i, dpr_{t+1,j} = sum_i (P_ij dpost_i + dP_ij post_i).
- * Rückgabe 0; bei nicht endlicher Likelihood -1 (g = NaN). gw: ms_gw_len(K, gjr) double. */
-static int ms_grad_w(const ms_data *d, const double *th, double *g, double *gw)
+ * Rückgabe 0; bei nicht endlicher Likelihood -1 (g = NaN). gw: ms_gw_len(K, gjr) double.
+ * N6: nll (darf NULL sein) erhält dieselbe negative Log-Likelihood wie ms_nll_w (dieselben Rechenschritte in
+ * derselben Reihenfolge, die Summe der log f_t läuft mit; bitgleich geprüft, scratchpad/en6/); NaN, wenn der
+ * Gradient nicht berechnet wurde (dann gilt ms_nll_w). */
+#if defined(__GNUC__)
+#define MS_INLINE inline __attribute__((always_inline))
+#else
+#define MS_INLINE inline
+#endif
+static MS_INLINE int ms_grad_core(const ms_data *d, const double *th, double *g, double *gw, double *nll, const int K,
+                                  const int gjr)
 {
-    const int K = d->K, gjr = d->gjr, np = gjr ? 4 : 3, G = sl_msgarch_npar(K, gjr), nP = K * (K - 1), off = K * np;
+    const int np = gjr ? 4 : 3, G = K * np + K * (K - 1), nP = K * (K - 1), off = K * np;
     const int n = d->n;
     const double *y = d->y;
     const double two_pi = TWO_PI;
@@ -309,7 +322,8 @@ static int ms_grad_w(const ms_data *d, const double *th, double *g, double *gw)
            *dfl = dpn + (size_t) K * G, *dll = dfl + (size_t) K * G, *dlf = dll + G, *dpi = dlf + G,
            *dq = dpi + (size_t) K * nP, *h = dq + (size_t) K * nP, *pr = h + K, *post = pr + K, *wk = post + K,
            *pi = wk + K, *q = pi + K, *ck = q + K, *pn = ck + K, *phi = pn + K, *Pm = phi + K;
-    int t, k, i, j, m, a, it;
+    double ll = 0.0, dsa[64][2][3], dsb[64][3];   /* N6: Ableitungen der Anteile, je Regime fest */
+    int t, k, i, j, m, a, it, conv;
     sl_msgarch_unpack(K, gjr, th, om, al, be, ga, P);
     for (k = 0; k < K; k++)
         if (!isfinite(om[k]) || !isfinite(al[k]) || !isfinite(be[k]) || !isfinite(ga[k])) goto bad;
@@ -327,6 +341,22 @@ static int ms_grad_w(const ms_data *d, const double *th, double *g, double *gw)
             S[3 * k] = e1 / dd; S[3 * k + 1] = e2 / dd; S[3 * k + 2] = 0.0;
         }
     }
+    /* N6: d a_t / d theta und d beta / d theta je Regime vor der Zeitschleife (dieselben Ausdrücke wie bisher in
+     * der Schleife, also dieselben Werte): GJR a = 2 s1 (y >= 0) bzw. 2 s2 (y < 0), beta = s3; sGARCH a = s1,
+     * beta = s2 */
+    for (k = 0; k < K; k++) {
+        const double *sk = S + 3 * k;
+        int ia;
+        if (gjr) {
+            for (ia = 0; ia < 2; ia++) for (j = 0; j < 3; j++) dsa[k][ia][j] = 2.0 * sk[ia] * ((ia == j ? 1.0 : 0.0) - sk[j]);
+            for (j = 0; j < 3; j++) dsb[k][j] = sk[2] * ((j == 2 ? 1.0 : 0.0) - sk[j]);
+        } else {
+            for (j = 0; j < 2; j++) {
+                dsa[k][0][j] = sk[0] * ((j == 0 ? 1.0 : 0.0) - sk[j]);
+                dsb[k][j] = sk[1] * ((j == 1 ? 1.0 : 0.0) - sk[j]);
+            }
+        }
+    }
     /* stationäre Verteilung wie sl_msgarch_stat (dieselben Schritte, also derselbe Wert wie in ms_nll_w),
      * mit Ableitung nach den P-Parametern. Erreicht die Potenziteration die Grenze von 1000 Schritten
      * (fast zerlegbares P, Eigenwert nahe 1), ist die gerechnete Näherung noch merklich von der exakten
@@ -334,10 +364,25 @@ static int ms_grad_w(const ms_data *d, const double *th, double *g, double *gw)
      * Bricht sie vorher ab (konvergiert), gilt die exakte Ableitung aus dpi (I - P) = pi dP mit
      * sum dpi = 0 (letzte Spalte von I - P durch Einsen ersetzt, LU mit Spaltenpivotsuche; Golub, Van
      * Loan 2013, Alg. 3.4.1): Die mitgeführte Ableitung ist dort unbrauchbar, weil die Iteration je nach
-     * Startpunkt schon nach 0 Schritten endet (z. B. symmetrisches P). */
+     * Startpunkt schon nach 0 Schritten endet (z. B. symmetrisches P).
+     * N6: zuerst nur pi (wie sl_msgarch_stat); die mitgeführte Ableitung läuft nur, wenn die Grenze erreicht
+     * wird, dann mit derselben Iteration von vorn (gleiche pi, gleiche Ableitung wie bisher). */
     for (k = 0; k < K; k++) pi[k] = 1.0 / K;
-    for (k = 0; k < K * nP; k++) dpi[k] = 0.0;
     for (it = 0; it < 1000; it++) {
+        double mx = 0.0;
+        for (j = 0; j < K; j++) {
+            double s2 = 0.0;
+            for (i = 0; i < K; i++) s2 += pi[i] * P[i + K * j];
+            q[j] = s2;
+        }
+        for (j = 0; j < K; j++) { double dd = fabs(q[j] - pi[j]); if (!(dd <= mx)) mx = dd; }
+        if (mx < 1e-12) break;
+        memcpy(pi, q, (size_t) K * sizeof(double));
+    }
+    conv = it < 1000;
+    for (k = 0; k < K * nP; k++) dpi[k] = 0.0;
+    if (!conv) for (k = 0; k < K; k++) pi[k] = 1.0 / K;
+    for (it = conv ? 1000 : 0; it < 1000; it++) {
         double mx = 0.0;
         for (j = 0; j < K; j++) {
             double s2 = 0.0;
@@ -358,7 +403,7 @@ static int ms_grad_w(const ms_data *d, const double *th, double *g, double *gw)
         memcpy(pi, q, (size_t) K * sizeof(double));
         memcpy(dpi, dq, (size_t) K * nP * sizeof(double));
     }
-    if (nP > 0 && it < 1000) {
+    if (nP > 0 && conv) {
         double *A = Pm;
         int *piv = (int *) (void *) q;   /* K int passen in K double */
         for (j = 0; j < K; j++) for (i = 0; i < K; i++)      /* A = (I - P)' mit letzter Zeile 1 */
@@ -405,22 +450,13 @@ static int ms_grad_w(const ms_data *d, const double *th, double *g, double *gw)
             for (k = 0; k < K; k++) {
                 const double ak = al[k] + ga[k] * ind, hp = h[k], bk = be[k];
                 double *D = dh + 4 * k;
-                const double *sk = S + 3 * k;
                 D[0] = om[k] + bk * D[0];
                 if (gjr) {
                     /* a = 2 s1 (y >= 0) bzw. 2 s2 (y < 0), beta = s3 */
                     const int ia = ind > 0.0 ? 1 : 0;
-                    for (j = 0; j < 3; j++) {
-                        const double ds_a = 2.0 * sk[ia] * ((ia == j ? 1.0 : 0.0) - sk[j]);
-                        const double ds_b = sk[2] * ((j == 2 ? 1.0 : 0.0) - sk[j]);
-                        D[1 + j] = ds_a * e2 + ds_b * hp + bk * D[1 + j];
-                    }
+                    for (j = 0; j < 3; j++) D[1 + j] = dsa[k][ia][j] * e2 + dsb[k][j] * hp + bk * D[1 + j];
                 } else {
-                    for (j = 0; j < 2; j++) {
-                        const double ds_a = sk[0] * ((j == 0 ? 1.0 : 0.0) - sk[j]);
-                        const double ds_b = sk[1] * ((j == 1 ? 1.0 : 0.0) - sk[j]);
-                        D[1 + j] = ds_a * e2 + ds_b * hp + bk * D[1 + j];
-                    }
+                    for (j = 0; j < 2; j++) D[1 + j] = dsa[k][0][j] * e2 + dsb[k][j] * hp + bk * D[1 + j];
                 }
                 h[k] = om[k] + ak * e2 + bk * hp;
             }
@@ -437,6 +473,7 @@ static int ms_grad_w(const ms_data *d, const double *th, double *g, double *gw)
                 ck[k] = (y2 / hk - 1.0) / (2.0 * hk);
             }
             if (!isfinite(f) || f <= 0.0) goto bad;
+            ll = ll + log(f);   /* N6: wie ms_loglik */
             for (k = 0; k < K; k++) { wk[k] = phi[k] / f; post[k] = post[k] / f; }
             for (a = 0; a < G; a++) dlf[a] = 0.0;
             for (k = 0; k < K; k++) {
@@ -479,16 +516,46 @@ static int ms_grad_w(const ms_data *d, const double *th, double *g, double *gw)
         }
     }
     for (a = 0; a < G; a++) g[a] = -dll[a];
+    if (nll) *nll = isfinite(ll) ? -ll : INFINITY;
     return 0;
 bad:
     for (a = 0; a < G; a++) g[a] = NAN;
+    if (nll) *nll = NAN;
     return -1;
 }
 
-static void ms_gr(const double *th, double *g, void *data)
+/* N6: eigene Übersetzung für die häufigen Fälle K = 2, 3 (sGARCH, GJR), damit der Übersetzer die kurzen
+ * Schleifen über Regime und Parameter auflöst; dieselbe Rechnung in derselben Reihenfolge (bitgleich). */
+static int ms_grad_w(const ms_data *d, const double *th, double *g, double *gw, double *nll)
 {
-    const ms_data *d = (const ms_data *) data;
-    ms_grad_w(d, th, g, d->gw);
+    if (d->K == 2) return d->gjr ? ms_grad_core(d, th, g, gw, nll, 2, 1) : ms_grad_core(d, th, g, gw, nll, 2, 0);
+    if (d->K == 3) return d->gjr ? ms_grad_core(d, th, g, gw, nll, 3, 1) : ms_grad_core(d, th, g, gw, nll, 3, 0);
+    return ms_grad_core(d, th, g, gw, nll, d->K, d->gjr);
+}
+
+/* N6: f und g in einem Durchlauf für BFGS (wie fg_cache in slc_garch.c): Jede Anfrage nach f rechnet mit
+ * ms_grad_w auch g und bewahrt beides auf; die Anfrage nach g am selben Punkt (BFGS fragt sie nach erfüllter
+ * Abnahmebedingung, gemessen bei 92 % der Punkte) und eine zweite nach f lesen nur den Speicher. f ist
+ * bitgleich zu ms_nll_w (siehe ms_grad_w), g zu ms_gr; nur die Zahl der Durchläufe sinkt. */
+typedef struct { ms_data *d; double *xc, *gc, fc; int np, have; } ms_cache;
+
+static double ms_fc(const double *th, void *data)
+{
+    ms_cache *k = (ms_cache *) data;
+    double f;
+    if (k->have && memcmp(k->xc, th, (size_t) k->np * sizeof(double)) == 0) return k->fc;
+    ms_grad_w(k->d, th, k->gc, k->d->gw, &f);
+    if (isnan(f)) f = ms_nll_w(k->d, th);
+    memcpy(k->xc, th, (size_t) k->np * sizeof(double));
+    k->fc = f; k->have = 1;
+    return f;
+}
+
+static void ms_gc(const double *th, double *g, void *data)
+{
+    ms_cache *k = (ms_cache *) data;
+    if (k->have && memcmp(k->xc, th, (size_t) k->np * sizeof(double)) == 0) memcpy(g, k->gc, (size_t) k->np * sizeof(double));
+    else ms_grad_w(k->d, th, g, k->d->gw, NULL);
 }
 
 static int ms_data_init(sl_ctx *cx, ms_data *d, int n, const double *y, int K, int gjr, double h1)
@@ -545,20 +612,116 @@ int sl_msgarch_grad(sl_ctx *cx, int n, const double *y, int K, int gjr, const do
     st = ms_data_grad(cx, &d);
     if (st != SL_OK) return st;
     *nll = ms_nll_w(&d, theta);
-    ms_grad_w(&d, theta, grad, d.gw);
+    ms_grad_w(&d, theta, grad, d.gw, NULL);
     ms_data_free(&d);
     return SL_OK;
 }
 
-int sl_msgarch_fit(sl_ctx *cx, int n, const double *y, int K, int gjr, int nstart,
-                   const double *starts, double h1, const sl_opt_ctrl *ctrl, double *theta,
-                   double *nll, int *code)
+/* N6: BFGS von den Startpunkten, auf Wunsch parallel (Threads, Schalter SLC_THREADS beim Übersetzen; ohne ihn
+ * und bei nthreads <= 1 nacheinander wie bisher). Jeder Start läuft unabhängig mit eigenem Arbeitsfeld und
+ * liefert dasselbe Ergebnis wie nacheinander; ausgewählt wird danach in der festen Reihenfolge der Starts (der
+ * beste gewinnt, bei Gleichstand der erste), Fehler und Warnungen gelten in derselben Reihenfolge. Damit hängt
+ * das Ergebnis nicht von der Zahl der Threads ab (bitgleich geprüft, scratchpad/en6/). Benutzerabbruch fragt nur
+ * der aufrufende Thread ab (die Hüllen von R und Python dürfen nur dort zurückrufen); er hält die übrigen über
+ * eine gemeinsame Marke an. */
+typedef struct {
+    int n, K, gjr, np, nstart;
+    const double *y, *starts;
+    double h1;
+    const sl_opt_ctrl *c;
+    sl_ctx *main_cx;          /* Abbruchabfrage des aufrufenden Threads */
+    double *xs, *fs;          /* je Start: Ergebnis (np Werte) und NLL */
+    int *cds, *sts, *run;     /* je Start: Code, Status, 0 = nicht gelaufen, 1 = ausgelassen, 2 = gelaufen */
+    sl_ctx *cxs;              /* je Start: Fehlertext und Warnungen */
+    int next, stop_at, intr;  /* nächster Start; Starts ab stop_at nicht mehr nehmen (Fehler davor); Abbruch */
+#ifdef SLC_THREADS
+    pthread_mutex_t mu;
+#endif
+} ms_pool;
+
+static void pool_lock(ms_pool *p)
+{
+#ifdef SLC_THREADS
+    pthread_mutex_lock(&p->mu);
+#else
+    (void) p;
+#endif
+}
+
+static void pool_unlock(ms_pool *p)
+{
+#ifdef SLC_THREADS
+    pthread_mutex_unlock(&p->mu);
+#else
+    (void) p;
+#endif
+}
+
+static int pool_stopped(void *host)
+{
+    ms_pool *p = (ms_pool *) host;
+    int r;
+    pool_lock(p); r = p->intr; pool_unlock(p);
+    return r;
+}
+
+static int pool_interrupted_main(void *host)
+{
+    ms_pool *p = (ms_pool *) host;
+    sl_ctx *mc = p->main_cx;
+    if (mc->interrupted != NULL && mc->interrupted(mc->host)) { pool_lock(p); p->intr = 1; pool_unlock(p); return 1; }
+    return pool_stopped(host);
+}
+
+/* ein Arbeiter: holt Starts, bis keiner mehr da ist; is_main: aufrufender Thread */
+static void pool_work(ms_pool *p, int is_main)
 {
     ms_data d;
+    ms_cache k;
+    sl_ctx tmp;
+    double *buf;
+    sl_ctx_init(&tmp);
+    if (ms_data_init(&tmp, &d, p->n, p->y, p->K, p->gjr, p->h1) != SL_OK) return;
+    if (ms_data_grad(&tmp, &d) != SL_OK) return;
+    buf = (double *) malloc(2 * (size_t) p->np * sizeof(double));
+    if (buf == NULL) { ms_data_free(&d); return; }
+    k.d = &d; k.xc = buf; k.gc = buf + p->np; k.np = p->np;
+    for (;;) {
+        int s, iter, nfev;
+        double *x;
+        sl_ctx *cx;
+        pool_lock(p);
+        s = p->intr ? p->nstart : p->next++;
+        if (s >= p->stop_at) s = p->nstart;
+        pool_unlock(p);
+        if (s >= p->nstart) break;
+        x = p->xs + (size_t) p->np * s;
+        cx = p->cxs + s;
+        sl_ctx_init(cx);
+        cx->interrupted = is_main ? pool_interrupted_main : pool_stopped; cx->host = p;
+        memcpy(x, p->starts + (size_t) p->np * s, (size_t) p->np * sizeof(double));
+        k.have = 0;
+        if (!isfinite(ms_fc(x, &k))) { p->run[s] = 1; continue; }   /* Start ohne endliche Likelihood auslassen */
+        p->sts[s] = sl_minimize(cx, SL_OPT_BFGS, p->np, x, NULL, NULL, p->c, ms_fc, ms_gc, &k, p->fs + s, p->cds + s, &iter, &nfev);
+        p->run[s] = 2;
+        if (p->sts[s] != SL_OK) { pool_lock(p); if (s + 1 < p->stop_at) p->stop_at = s + 1; pool_unlock(p); }   /* wie bisher: kein späterer Start */
+    }
+    free(buf); ms_data_free(&d);
+}
+
+#ifdef SLC_THREADS
+static void *pool_thread(void *arg) { pool_work((ms_pool *) arg, 0); return NULL; }
+#endif
+
+int sl_msgarch_fit_mt(sl_ctx *cx, int n, const double *y, int K, int gjr, int nstart,
+                      const double *starts, double h1, const sl_opt_ctrl *ctrl, double *theta,
+                      double *nll, int *code, int nthreads)
+{
     sl_opt_ctrl c;
+    ms_pool p;
     const int np = sl_msgarch_npar(K, gjr);
-    double *x, best = INFINITY, fmin;
-    int st, s, cd, iter, nfev, have = 0;
+    double best = INFINITY;
+    int st = SL_OK, s, i, have = 0, nt;
     st = check_ms(cx, n, y, K, 1);
     if (st != SL_OK) return st;
     if (isnan(h1)) h1 = var_c(n, y);              /* h1 = NaN: Stichprobenvarianz */
@@ -566,25 +729,53 @@ int sl_msgarch_fit(sl_ctx *cx, int n, const double *y, int K, int gjr, int nstar
     if (ctrl) c = *ctrl;
     else { sl_opt_ctrl_default(&c, SL_OPT_BFGS); c.maxit = 500; c.reltol = 1e-10; }
     if (K > 64) return sl_fail(cx, SL_EARG, "MS-GARCH: höchstens 64 Regime");    /* N1: Gradient */
-    st = ms_data_init(cx, &d, n, y, K, gjr, h1);
-    if (st != SL_OK) return st;
-    st = ms_data_grad(cx, &d);
-    if (st != SL_OK) return st;
-    x = (double *) malloc((size_t) np * sizeof(double));
-    if (x == NULL) { ms_data_free(&d); return sl_fail(cx, SL_ENOMEM, "MS-GARCH: kein Speicher"); }
+    memset(&p, 0, sizeof p);
+    p.n = n; p.K = K; p.gjr = gjr; p.np = np; p.nstart = nstart; p.y = y; p.starts = starts; p.h1 = h1; p.c = &c;
+    p.main_cx = cx; p.stop_at = nstart;
+    p.xs = (double *) malloc((size_t) np * nstart * sizeof(double) + (size_t) nstart * sizeof(double));
+    p.cds = (int *) calloc(3 * (size_t) nstart, sizeof(int));
+    p.cxs = (sl_ctx *) malloc((size_t) nstart * sizeof(sl_ctx));
+    if (p.xs == NULL || p.cds == NULL || p.cxs == NULL) { free(p.xs); free(p.cds); free(p.cxs); return sl_fail(cx, SL_ENOMEM, "MS-GARCH: kein Speicher"); }
+    p.fs = p.xs + (size_t) np * nstart; p.sts = p.cds + nstart; p.run = p.sts + nstart;
+    nt = nthreads < 1 ? 1 : nthreads;
+    if (nt > nstart) nt = nstart;
+#ifdef SLC_THREADS
+    if (nt > 1) {
+        pthread_t th[64];
+        int nw = 0;
+        if (nt > 64) nt = 64;
+        pthread_mutex_init(&p.mu, NULL);
+        for (i = 0; i < nt - 1; i++) if (pthread_create(&th[nw], NULL, pool_thread, &p) == 0) nw++;
+        pool_work(&p, 1);
+        for (i = 0; i < nw; i++) pthread_join(th[i], NULL);
+        pthread_mutex_destroy(&p.mu);
+    } else
+#endif
+        pool_work(&p, 1);
+    /* Auswahl in fester Reihenfolge; Fehler und Warnungen wie nacheinander */
     *code = -1;
     for (s = 0; s < nstart; s++) {
-        memcpy(x, starts + (size_t) np * s, (size_t) np * sizeof(double));
-        if (!isfinite(ms_obj(x, &d))) continue;        /* Start ohne endliche Likelihood auslassen */
-        st = sl_minimize(cx, SL_OPT_BFGS, np, x, NULL, NULL, &c, ms_obj, ms_gr, &d, &fmin, &cd, &iter, &nfev);   /* N1: analytischer Gradient */
-        if (st != SL_OK) break;
-        if (!have || fmin < best) { memcpy(theta, x, (size_t) np * sizeof(double)); best = fmin; *code = cd; have = 1; }
+        for (i = 0; i < p.cxs[s].n_warn && p.run[s] != 0; i++) sl_warn(cx, "%s", p.cxs[s].warn[i]);
+        if (p.run[s] == 0) {   /* nicht gelaufen: Benutzerabbruch oder kein Speicher für ein Arbeitsfeld */
+            st = p.intr ? sl_fail(cx, SL_EINTR, "Benutzerabbruch") : sl_fail(cx, SL_ENOMEM, "MS-GARCH: kein Speicher");
+            break;
+        }
+        if (p.run[s] == 1) continue;
+        if (p.sts[s] != SL_OK) { st = sl_fail(cx, p.sts[s], "%s", p.cxs[s].msg); break; }
+        if (!have || p.fs[s] < best) { memcpy(theta, p.xs + (size_t) np * s, (size_t) np * sizeof(double)); best = p.fs[s]; *code = p.cds[s]; have = 1; }
     }
-    free(x); ms_data_free(&d);
+    free(p.xs); free(p.cds); free(p.cxs);
     if (st != SL_OK) return st;
     if (!have) return sl_fail(cx, SL_ENONFINITE, "MS-GARCH: Log-Likelihood an allen Startpunkten nicht endlich");
     *nll = best;
     return SL_OK;
+}
+
+int sl_msgarch_fit(sl_ctx *cx, int n, const double *y, int K, int gjr, int nstart,
+                   const double *starts, double h1, const sl_opt_ctrl *ctrl, double *theta,
+                   double *nll, int *code)
+{
+    return sl_msgarch_fit_mt(cx, n, y, K, gjr, nstart, starts, h1, ctrl, theta, nll, code, 1);
 }
 
 /* ── kleine Hilfen ───────────────────────────────────────────────────────── */
@@ -1031,6 +1222,13 @@ int sl_msgarch_estimate(sl_ctx *cx, int n, const double *y, int K, int gjr, doub
                         double *alpha, double *beta, double *gamma, double *P, int32_t *regimes,
                         double *s2, double *loglik, int *code)
 {
+    return sl_msgarch_estimate_mt(cx, n, y, K, gjr, omega, alpha, beta, gamma, P, regimes, s2, loglik, code, 1);
+}
+
+int sl_msgarch_estimate_mt(sl_ctx *cx, int n, const double *y, int K, int gjr, double *omega,
+                           double *alpha, double *beta, double *gamma, double *P, int32_t *regimes,
+                           double *s2, double *loglik, int *code, int nthreads)
+{
     const int np = sl_msgarch_npar(K, gjr);
     double *starts = NULL, *theta = NULL, *buf = NULL, h1, nll, om[64], al[64], be[64], ga[64], Pu[64 * 64],
            unc[64] = {0}, xi0[64], lA[64 * 64], lp0[64], ll;
@@ -1044,7 +1242,7 @@ int sl_msgarch_estimate(sl_ctx *cx, int n, const double *y, int K, int gjr, doub
     theta = starts + (size_t) SL_MSGARCH_MAXSTART * np;
     st = sl_msgarch_starts(cx, n, y, K, gjr, h1, 1, &ns, starts);
     if (st != SL_OK) goto out;
-    st = sl_msgarch_fit(cx, n, y, K, gjr, ns, starts, h1, NULL, theta, &nll, code);
+    st = sl_msgarch_fit_mt(cx, n, y, K, gjr, ns, starts, h1, NULL, theta, &nll, code, nthreads);   /* N6 */
     if (st != SL_OK) goto out;
     if (!isfinite(nll) || !slc_all_finite(np, theta)) {
         st = sl_fail(cx, SL_ECONV, "Log-Likelihood nicht endlich (Optimierer-Code %d).", *code);

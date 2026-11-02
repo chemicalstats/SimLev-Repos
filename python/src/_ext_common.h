@@ -329,5 +329,6 @@ extern "C" PyMethodDef simlev_ext_slc_linalg_methods[];
 extern "C" PyMethodDef simlev_ext_slc_opt_methods[];
 /* 9.4: _ext_slc_models.c (C): Huellen der Modelle der C-Bibliothek slc */
 extern "C" PyMethodDef simlev_ext_slc_models_methods[];
+extern "C" PyMethodDef simlev_ext_slc_rbase_methods[];   /* N8: _ext_slc_rbase.c */
 
 #endif

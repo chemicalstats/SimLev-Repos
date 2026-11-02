@@ -24,6 +24,7 @@ Kanonische Quellen der C-Bibliothek, die R, Python und Julia gemeinsam nutzen (E
 | `slc_kde.c` | 9.2: Gauß-Kerndichte, Bandbreite nach Silverman |
 | `slc_opt.h`, `slc_opt.c`, `slc_opt_test.c` | (9.3) Optimierer BFGS (Wolfe-Liniensuche), projizierter BFGS, Nelder-Mead, numerischer Gradient; Rückfrage an den Host und `sl_minimize`; Prüffunktionen (Quellen: Nocedal/Wright, Bertsekas, Kelley, Nelder/Mead, Lagarias u. a., Gill/Murray/Wright, Moré/Garbow/Hillstrom) |
 | `slc_models.h`, `slc_garch.c`, `slc_gpd.c`, `slc_dcc.c`, `slc_msgarch.c`, `slc_boot.c` | (9.4) Modelle: GARCH/GJR(1,1) (ML, Umparametrisierung, Rückfall Momente), GPD (ML, Startwerte nach Hosking/Wallis), DCC(1,1) (Filter, Nelder-Mead), MS-GARCH (Filter, Starts aus HMM-EM und Rangeinteilung, BFGS, Viterbi), Bootstrap-Kerne mit Strom `sl_rng` (Quellen: Bollerslev, Glosten/Jagannathan/Runkle, Pickands, Davison/Smith, Hosking/Wallis, Engle, Haas/Mittnik/Paolella, Hamilton, Baum u. a., Viterbi, Efron, Künsch, Politis/Romano, Wu, Liu, Mammen, Barone-Adesi u. a.; eigener SimLev-Code) |
+| `slc_rbase.h`, `slc_rbase.c`, `slc_rbase_sort.c`, `slc_rbase_cov.c` | (N8) Grundfunktionen mit R-Regeln **nur für Python und Julia** (R rechnet sie selbst, Entscheidung 9.0 (4); nicht nach `r/src/`, nicht in `slc.h`): `sum`, `prod`, `mean`, `var`, `cumsum`/`cumprod`/`cummax`/`cummin`, `rowSums`/`colSums` (long double wie R), `^`, `order`, `rank`, `sort(partial =)`, `quantile` Typ 1–9, `tabulate`, `findInterval`, `cov`/`cor` (pearson, kendall; alle `use`). Anders als die SimLev-eigenen Kerne (seit N5 ohne long double) akkumulieren sie absichtlich in long double, damit sie auf derselben Plattform bitgleich zu R sind (Prüfung gegen R 4.3.3, ≥ 10.000 Zufallsfälle je Kern). Hüllen: `python/src/_ext_slc_rbase.c`, `julia/src/r/rbase_c.jl` |
 | `tools/gen_constants.py` | Konstanten, Bernoulli-Zahlen, zeta(k), Stützwerte und Taylor-Polynome, Sprungpolynom, N2: selbst angepasste rationale Näherungen für `qnorm` (nur Standardbibliothek) |
 
 **Geteilte Kerne von R und Python (seit Etappe 9.6c, F16):** Auch die früher in `r/src/`
@@ -32,11 +33,13 @@ kanonischen C++-Kerne liegen hier: `simlev_core.h` (Aufbau, Host-Schnittstelle, 
 (Optimierung, Quantilsregression, HMM, rollierende Kennzahlen, Kendalls Tau) und
 `withdrawal_core_impl.h` (Entnahme). Sie folgen nicht den slc-Regeln unten (eigener SimLev-Code seit
 Etappe 7.3a, C++17, Host-Makros `SIMLEV_*`) und werden nur nach `r/src/` und `python/src/core/`
-kopiert; Julia hat eigene Ports (F2). Beim Verschieben blieb ihr Maschinencode in R gleich
+kopiert, seit N7 auch nach `julia/deps/core/`: Julia ruft sie über die C-ABI-Hülle `simlev_cabi.cpp`
+(nur `julia/deps/core/`; `extern "C"`, Zeiger, Längen, Skalare, Fehler als Rückgabecode mit Text) per `ccall`
+aus `libslc` auf (vorher eigene Ports, F2). Beim Verschieben blieb ihr Maschinencode in R gleich
 (Vergleich der Objektdateien Funktion für Funktion, Bericht 9.6c).
 
 Kopien (Pakete bauen nur aus ihrem Teilbaum): `r/src/` (flach), `python/src/core/`,
-`julia/deps/core/` (nur slc). Die Hüllen gibt es nur je Sprache: `r/src/slc_r.c` (+ `r/R/slc.R`),
+`julia/deps/core/` (slc, seit N7 auch die geteilten Kerne und `simlev_cabi.cpp`). Die Hüllen gibt es nur je Sprache: `r/src/slc_r.c` (+ `r/R/slc.R`),
 `python/src/_ext_slc.c` (+ `python/simlev/_lib.py`), `julia/src/slib.jl` (`ccall`, gebaut von
 `julia/deps/build.jl`).
 
@@ -90,6 +93,15 @@ Kopien (Pakete bauen nur aus ihrem Teilbaum): `r/src/` (flach), `python/src/core
   `research_core_impl.h` ganzzahlig und in double-double (gleiche Ergebnisse auf x86-64 und aarch64);
   der Julia-Port (`core.jl`, `dependence_core.jl`) rechnet Operation für Operation gleich. Quellen:
   Griewank/Walther (2008), Magnus/Neudecker (2019), Neumaier (1974), Dekker (1971), Shewchuk (1997).
+- **N6.** sGARCH-Fit (`slc_garch.c`): die NLL der Rasterpunkte in einem Durchlauf ohne Logarithmus je
+  Zeitpunkt (`nll_screen`); liegt das Ergebnis am Rand α < 0,01, läuft BFGS ein zweites Mal vom besten
+  Punkt einer zweiten Startfamilie mit kleinerem β, das bessere Ergebnis gilt (ohne Randlage bitgleich wie
+  bisher, mit Randlage nie schlechter). MS-GARCH (`slc_msgarch.c`): f und g in einem Durchlauf mit Speicher
+  wie beim GARCH-Fit, Ableitungen der Anteile vor der Zeitschleife, mitgeführte Ableitung der stationären
+  Verteilung nur bei 1000 Schritten, eigene Übersetzung für K = 2, 3 (alles bitgleich);
+  `sl_msgarch_fit_mt`/`sl_msgarch_estimate_mt`: Starts auf mehreren POSIX-Threads (Schalter `SLC_THREADS`,
+  gesetzt in `r/src/Makevars`, `python/setup.py` und `julia/deps/build.jl`, nicht unter Windows), Auswahl
+  in fester Reihenfolge, Ergebnis unabhängig von der Zahl der Threads; die Hüllen reichen `cores` durch.
 
 Prüfung: Plausibilität gegen R und eine eigene decimal-Referenz (Arbeitsordner der Etappe),
 Gleichlauf der Sprachen mit `tools/gleichlauf/run.sh --quick`.

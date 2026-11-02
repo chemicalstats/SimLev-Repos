@@ -460,7 +460,7 @@ SEXP C_sl_ms_garch_fitstarts(SEXP y, SEXP K, SEXP gjr, SEXP starts, SEXP h1)
     return out;
 }
 
-SEXP C_sl_ms_garch_estimate(SEXP y, SEXP K, SEXP gjr)
+SEXP C_sl_ms_garch_estimate(SEXP y, SEXP K, SEXP gjr, SEXP threads)
 {
     static const char *nm[] = {"omega", "alpha", "beta", "gamma", "P", "regimes", "s2", "loglik", "convergence"};
     sl_ctx cx;
@@ -473,8 +473,9 @@ SEXP C_sl_ms_garch_estimate(SEXP y, SEXP K, SEXP gjr)
     el[4] = PROTECT(Rf_allocMatrix(REALSXP, k, k)); el[5] = PROTECT(Rf_allocVector(INTSXP, n));
     el[6] = PROTECT(Rf_allocVector(REALSXP, n));
     ctx_init(&cx);
-    st = sl_msgarch_estimate(&cx, n, dvec(y, -1, "y"), k, g, REAL(el[0]), REAL(el[1]), REAL(el[2]), REAL(el[3]),
-                             REAL(el[4]), (int32_t *) INTEGER(el[5]), REAL(el[6]), &ll, &code);
+    /* N6: Starts auf bis zu threads Threads (Ergebnis unabhängig davon) */
+    st = sl_msgarch_estimate_mt(&cx, n, dvec(y, -1, "y"), k, g, REAL(el[0]), REAL(el[1]), REAL(el[2]), REAL(el[3]),
+                                REAL(el[4]), (int32_t *) INTEGER(el[5]), REAL(el[6]), &ll, &code, i1(threads, "threads"));
     finish(&cx, st, 7);
     el[7] = PROTECT(Rf_ScalarReal(ll)); el[8] = PROTECT(Rf_ScalarInteger(code));
     out = named(9, nm, el);

@@ -859,7 +859,7 @@ def _prepare_regime_info(base_ret, vol_window, n_regimes):
 
 
 @_quiet
-def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp):
+def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp, cores=1):
     """MS-GARCH-Familie vorbereiten (Port von ``.prepare_ms_info``; eigene ML-Schätzung
     :func:`simlev.ms_garch._ms_garch_fit`); ``base`` 1-basiert."""
     from . import ms_garch as _msg
@@ -867,7 +867,7 @@ def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp):
     ex = returns[:, base - 1] - 1
     n = len(ex)
     try:
-        fit = _msg._ms_garch_fit(ex, K, garch_model)
+        fit = _msg._ms_garch_fit(ex, K, garch_model, cores)   # N6: cores Threads für die Starts
     except Exception as e:  # noqa: BLE001 - tryCatch(..., error = function(e) stop(...))
         _stop(_sp("MS-GARCH(%d, %s) Fit fehlgeschlagen: %s", int(float(np.asarray(K).ravel()[0])), garch_model, str(e)))
     K = int(float(np.asarray(K).ravel()[0]))
@@ -944,7 +944,7 @@ def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp):
             "cross": _fit_cross(returns, config, base)}
 
 
-def _prepare_method_info(returns, config, method, params):
+def _prepare_method_info(returns, config, method, params, cores=1):
     """Verfahrensspezifische Vorberechnung (Port von ``.prepare_method_info``)."""
     p = _get_base_params(method, params, returns.shape[0])
     base = config["index_names"].index(config["regime_index"]) + 1
@@ -984,11 +984,11 @@ def _prepare_method_info(returns, config, method, params):
         info["garch"] = f
         info["cross"] = _fit_cross(returns, config, base)
     if method == "ms_garch":
-        info["ms"] = _prepare_ms_info(returns, config, base, p["ms_n_regimes"], p["ms_garch_model"], False, False)
+        info["ms"] = _prepare_ms_info(returns, config, base, p["ms_n_regimes"], p["ms_garch_model"], False, False, cores)
     if method == "ms_ar_garch_m":
-        info["ms"] = _prepare_ms_info(returns, config, base, p["ms_ar_n_regimes"], p["ms_ar_garch_model"], True, False)
+        info["ms"] = _prepare_ms_info(returns, config, base, p["ms_ar_n_regimes"], p["ms_ar_garch_model"], True, False, cores)
     if method == "tvtp_ms_garch":
-        info["ms"] = _prepare_ms_info(returns, config, base, p["tvtp_n_regimes"], p["tvtp_garch_model"], True, True)
+        info["ms"] = _prepare_ms_info(returns, config, base, p["tvtp_n_regimes"], p["tvtp_garch_model"], True, True, cores)
     return info
 
 
@@ -1210,7 +1210,7 @@ def _modify_list(base, val):
 
 
 @_quiet
-def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length):
+def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores=1):
     """Gemeinsame Vorbereitung für bootstrap() und bootstrap_study() (Port von ``.boot_setup``)."""
     if not _is_config(config):
         _stop("config muss mit bootstrap_config() erstellt werden")
@@ -1241,7 +1241,7 @@ def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length):
     infos = []
     for cp in combos:
         try:
-            infos.append(_prepare_method_info(ex["ret"], config, method, cp))
+            infos.append(_prepare_method_info(ex["ret"], config, method, cp, cores))   # N6
         except (ImportError, ModuleNotFoundError, NotImplementedError):
             raise
         except Exception as err:  # noqa: BLE001
@@ -1320,14 +1320,15 @@ def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess
         path_length: Pfadlänge in Zeilen (``None`` = Länge der Historie).
         seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand
             von SimLev gezogen, siehe :func:`simlev_seed`, und unter ``seed`` abgelegt).
-        cores: Anzahl Prozesse (Fork wie R; ohne Fork sequentiell, Ergebnis identisch).
+        cores: Anzahl Prozesse (Fork wie R; ohne Fork sequentiell, Ergebnis identisch); bei den MS-GARCH-Verfahren
+            rechnet der Fit seine Startpunkte zudem auf so vielen Threads (Ergebnis unabhängig davon).
         max_tries: Versuche je Pfad (Standard 10).
 
     Returns:
         :class:`BootstrapResult`.
     """
     t0 = time.time()
-    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
+    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
     if seed is None:                    # Regel 3/4: None -> einmal k aus G
         seed = _sl.next_seed()
     else:
@@ -1631,7 +1632,7 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
     sim_args = _sim_args_set({}, sim_args, "bootstrap_study")
     for nm0 in snames:
         specs[nm0]["sim"] = _sim_args_set(sim_args, specs[nm0].get("args"), "bootstrap_study")
-    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length)
+    setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
     keep_paths = _keep_count(keep_paths, setup["n_paths"], "bootstrap_study")   # 6.5b: True = alle Pfade
     n_out = setup["n_out"]
     if dates is None:

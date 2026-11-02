@@ -61,6 +61,7 @@ SLC_WRAPPERS = ["_ext_slc.c"]
 SLC_WRAPPERS += ["_ext_slc_linalg.c"]
 SLC_WRAPPERS += ["_ext_slc_opt.c"]   # 9.3: Hülle der Optimierer
 SLC_WRAPPERS += ["_ext_slc_models.c"]   # 9.4: Hülle der Modelle (GARCH/GJR, GPD, DCC, MS-GARCH, Bootstrap)
+SLC_WRAPPERS += ["_ext_slc_rbase.c"]   # N8: Hülle der Grundfunktionen mit R-Regeln (core/slc_rbase*)
 HEADERS = SHARED_HEADERS + ["_ext_common.h"] + SLC_HEADERS
 
 
@@ -87,7 +88,8 @@ def _is_slc(src):
     """Quellen der C-Bibliothek slc (Kopien in src/core/ und die Hülle _ext_slc.c)."""
     p = src.replace(os.sep, "/")
     return ("/core/slc" in p or p.endswith("_ext_slc.c") or p.endswith("_ext_slc_linalg.c")
-            or p.endswith("_ext_slc_opt.c") or p.endswith("_ext_slc_models.c"))  # 9.1-9.4
+            or p.endswith("_ext_slc_opt.c") or p.endswith("_ext_slc_models.c")  # 9.1-9.4
+            or p.endswith("_ext_slc_rbase.c"))  # N8
 
 
 class BuildExt(build_ext):
@@ -126,9 +128,10 @@ setup(
             depends=["src/" + f for f in HEADERS],
             include_dirs=["src"],
             # Gleitkomma ueber die Flags (-ffp-contract=off); das Pragma der Kerndateien entfaellt
-            define_macros=[("SIMLEV_FP_CONTRACT_BY_FLAG", "1")],
+            # N6: außer unter Windows mit Threads für die parallelen Starts des MS-GARCH-Fits (wie r/src/Makevars)
+            define_macros=[("SIMLEV_FP_CONTRACT_BY_FLAG", "1")] + ([] if sys.platform == "win32" else [("SLC_THREADS", "1")]),
             language="c++",
-            libraries=[] if sys.platform == "win32" else ["m"],   # exp, log aus der libm
+            libraries=[] if sys.platform == "win32" else ["m", "pthread"],   # exp, log aus der libm; N6: pthread
             optional=False,     # Pflicht seit Etappe 9.1 (C-Bibliothek slc)
         )
     ],

@@ -125,7 +125,9 @@ unveraendert; mit \code{seed = NULL} liefern wiederholte Aufrufe verschiedene Pf
 \code{set.seed()} wirkt nicht.}
 
 \item{cores}{Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK-Cluster auf
-Windows).}
+Windows). Bei den MS-GARCH-Verfahren (\code{ms_garch}, \code{ms_ar_garch_m},
+\code{tvtp_ms_garch}) rechnet der Fit seine Startpunkte zudem auf so vielen
+Threads; das Ergebnis haengt davon nicht ab.}
 
 \item{max_tries}{Versuche je Pfad (Standard 10), falls ein Pfad ungueltig
 ist (Indexrendite <= 0 oder nicht endlich). Ein Totalverlust eines

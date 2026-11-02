@@ -534,7 +534,7 @@ static PyObject *slc_ms_garch_fitstarts(PyObject *self, PyObject *args)
 static PyObject *slc_ms_garch_estimate(PyObject *self, PyObject *args)
 {
     PyObject *y, *om, *al, *be, *ga, *P, *rg, *s2;
-    int K, gjr, st, code = 0;
+    int K, gjr, st, code = 0, nt = 1;
     double ll = 0.0;
     Py_ssize_t n;
     bufs B = {.nb = 0};
@@ -543,7 +543,8 @@ static PyObject *slc_ms_garch_estimate(PyObject *self, PyObject *args)
     int32_t *o6;
     sl_ctx cx;
     (void) self;
-    if (!PyArg_ParseTuple(args, "OipOOOOOOO", &y, &K, &gjr, &om, &al, &be, &ga, &P, &rg, &s2)) return NULL;
+    /* N6: letztes Argument (optional) Zahl der Threads */
+    if (!PyArg_ParseTuple(args, "OipOOOOOOO|i", &y, &K, &gjr, &om, &al, &be, &ga, &P, &rg, &s2, &nt)) return NULL;
     if (K < 2 || K > 64) { PyErr_Format(PyExc_ValueError, "MS-GARCH: Anzahl Regime muss zwischen 2 und 64 liegen (erhalten: %d)", K); return NULL; }
     yp = (const double *) buf(&B, y, 0, 'd', -1, &n, "y"); FAIL_IF(!yp);
     o1 = DW(om, K, "omega"); FAIL_IF(!o1);
@@ -554,7 +555,7 @@ static PyObject *slc_ms_garch_estimate(PyObject *self, PyObject *args)
     o6 = IW(rg, n, "regimes"); FAIL_IF(!o6);
     o7 = DW(s2, n, "s2"); FAIL_IF(!o7);
     ctx_init(&cx);
-    st = sl_msgarch_estimate(&cx, (int) n, yp, K, gjr, o1, o2, o3, o4, o5, o6, o7, &ll, &code);
+    st = sl_msgarch_estimate_mt(&cx, (int) n, yp, K, gjr, o1, o2, o3, o4, o5, o6, o7, &ll, &code, nt);   /* N6 */
     bufs_free(&B);
     if (finish(&cx, st) < 0) return NULL;
     return Py_BuildValue("(di)", ll, code);

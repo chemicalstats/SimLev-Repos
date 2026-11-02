@@ -560,8 +560,8 @@ FIFO, Steuer, Research und Entnahme. `setup.py` baut sie mit `optional=False`: O
 scheitert die Installation mit der Meldung von setuptools. Reine Python-Kerne als Rückfall gibt es
 nicht mehr (`SIMLEV_NO_EXT` entfällt); `_core.py`, `_dependence_core.py`, `_optimize_core.py`,
 `_signals_core.py` und `_withdrawal_core.py` sind dünne Hüllen, die die Argumente wie R umwandeln
-und `simlev._ext` rufen. Julia hat eigene Ports der geteilten Kerne (F2) und bindet nur slc per
-`ccall` an.
+und `simlev._ext` rufen. Julia ruft seit N7 dieselben Kerne über die C-ABI-Hülle `core/simlev_cabi.cpp` per `ccall` auf
+(vorher eigene Ports, F2).
 
 **Ort der Quellen (`core/`, Entwurf C.1, F16):** Kanonisch sind alle C-Quellen in `core/` (nur dort
 ändern):

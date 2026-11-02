@@ -41,55 +41,14 @@ _out(Z, rn = nothing, cn = nothing) = (rn === nothing && cn === nothing) ? Z : N
 "Warnung nur einmal je Aufruf (R zählt sie, die Referenz vergleicht eindeutige Texte)."
 _warn1!(seen::Set{String}, msg::String) = (msg in seen || (push!(seen, msg); @warn msg); nothing)
 
-# ── long double (F80) ────────────────────────────────────────────────────
-
-const _LD0 = F80(0.0)
-_ld(x::Float64) = F80(x)
-_ld(x::Integer) = F80(x)
-_ldsum(a) = (s = _LD0; for v in a; s = s + F80(Float64(v)); end; s)
-_ldisnan(a::F80) = isnan(Float64(a))
-_ldiszero(a::F80) = SimLev._iszero80(a)
-
-"Vergleich zweier F80: -1, 0, 1 (2 bei NaN)."
-function _ldcmp(a::F80, b::F80)
-    (_ldisnan(a) || _ldisnan(b)) && return 2
-    SimLev._lt80(a, b) && return -1
-    SimLev._lt80(b, a) && return 1
-    return 0
-end
-
-"sqrtl() für F80 (korrekt gerundet auf 64 Mantissenbits wie x87 fsqrt; über ld80.jl)."
-_ldsqrt(a::F80) = sqrt(a)
-
-"sum() wie R (long double)."
+"sum() wie R (long double; C-Kern)."
 _rsum(a) = SimLev.r_sum(a)
 
-"mean() für Doubles (long double, zweiter Korrekturdurchlauf)."
-function _rmean(a)
-    n = length(a)
-    n == 0 && return NaN
-    ln = F80(n)
-    s = _ldsum(a) / ln
-    if isfinite(Float64(s))
-        t = _LD0
-        for v in a
-            t = t + (F80(Float64(v)) - s)
-        end
-        s = s + t / ln
-    end
-    return Float64(s)
-end
+"mean() für Doubles (long double, zweiter Korrekturdurchlauf; C-Kern)."
+_rmean(a) = SimLev._rb_mean(SimLev._rbv(a))
 
-"mean() für ganzzahlige Vektoren."
-function _rmean_int(a)
-    n = length(a)
-    n == 0 && return NaN
-    s = _LD0
-    for v in a
-        s = s + F80(Int(v))
-    end
-    return Float64(s / F80(n))
-end
+"mean() für ganzzahlige Vektoren (C-Kern)."
+_rmean_int(a) = SimLev._rb_mean_int(Int64[Int64(v) for v in a])
 
 "`seq.int(from, to, length.out = n)` (Werte wie R)."
 function seq_len_out(frm, to, length_out)
@@ -137,16 +96,14 @@ function _keys(x)
     return v, isnan.(v), false
 end
 
+"−0 als +0 (Schlüssel für Gleichheit wie R)."
 _z0(v::Float64) = v == 0.0 ? 0.0 : v
 
 "Stabile Sortierpermutation (−0 = +0; absteigend: Gleichstände in Eingabereihenfolge)."
 function _stable_argsort(v::AbstractVector, isstr::Bool, decreasing::Bool)
     n = length(v)
     n == 0 && return Int[]
-    if !isstr
-        vv = Float64[_z0(Float64(t)) for t in v]
-        return decreasing ? sortperm(-vv; alg = MergeSort, lt = <) : sortperm(vv; alg = MergeSort, lt = <)
-    end
+    isstr || return SimLev._rb_order([Float64[Float64(t) for t in v]], [decreasing], 1)   # N8: C-Kern
     # R's orderVector1 mit Scollate: stabil (Gleichstand → Index aufsteigend), auch absteigend
     lst = [String(t) for t in v]
     return sortperm(lst; alg = MergeSort, lt = str_lt, rev = decreasing)
@@ -199,6 +156,10 @@ function order(args...; na_last = true, decreasing = false)
     end
     dec = decreasing isa AbstractVector || decreasing isa Tuple ? collect(Bool, decreasing) : fill(Bool(decreasing), length(keys))
     length(dec) == 1 && (dec = fill(dec[1], length(keys)))
+    if !any(k -> k[3], keys)       # N8: nur Zahlenschlüssel -> C-Kern sl_r_order
+        nl = na_last === nothing ? -1 : (na_last === true ? 1 : 0)
+        return SimLev._rb_order(Vector{Float64}[Vector{Float64}(k[1]) for k in keys], dec, nl)
+    end
     idx = collect(1:n)
     for kk in length(keys):-1:1
         v, na, isstr = keys[kk]
@@ -253,7 +214,10 @@ function r_rank(x; na_last = true, ties_method::AbstractString = "average")
     v, nas, isstr = _keys(x)
     xs = v[.!nas]
     m = length(xs)
-    if ties_method in ("average", "min", "max")
+    if !isstr && haskey(SimLev._RB_TIES, ties_method)    # N8: C-Kern sl_r_rank
+        yd = SimLev._rb_rank(Float64[Float64(t) for t in xs], ties_method)
+        y = ties_method == "average" ? yd : Int[Int(t) for t in yd]
+    elseif ties_method in ("average", "min", "max")
         o = _stable_argsort(xs, isstr, false)
         y = ties_method == "average" ? Vector{Float64}(undef, m) : Vector{Int}(undef, m)
         sv = xs[o]
@@ -333,49 +297,26 @@ function rle(x)
 end
 diff_int(v) = [v[i+1] - v[i] for i in 1:length(v)-1]
 
-"`tabulate(bin, nbins = max(1, bin, na.rm = TRUE))`."
+"`tabulate(bin, nbins = max(1, bin, na.rm = TRUE))` (C-Kern)."
 function tabulate(bin; nbins = nothing)
-    b = [isnan(t) ? t : trunc(t) for t in _v(bin)]
+    b = _v(bin)
     if nbins === nothing
-        bb = filter(!isnan, b)
+        bb = Float64[trunc(t) for t in b if !isnan(t)]
         nbins = trunc(Int, max(1.0, isempty(bb) ? 1.0 : maximum(bb)))
     end
-    nbins = Int(nbins)
-    out = zeros(Int, nbins)
-    for t in b
-        isnan(t) && continue
-        i = trunc(Int, t)
-        (1 <= i <= nbins) && (out[i] += 1)
-    end
-    return _vec_out(out)
+    return _vec_out(SimLev._rb_tabulate(b, Int(nbins)))
 end
 
-_cnt_le(v, x) = searchsortedlast(v, x; lt = <)          # #{v .<= x}
-_cnt_lt(v, x) = searchsortedfirst(v, x; lt = <) - 1     # #{v .< x}
-
-"`findInterval(x, vec, rightmost.closed, all.inside, left.open)`."
+"`findInterval(x, vec, rightmost.closed, all.inside, left.open)` (C-Kern)."
 function findInterval(x, vec; rightmost_closed::Bool = false, all_inside::Bool = false, left_open::Bool = false)
     v = _v(vec)
     xx = _v(x)
     if any(isnan, v) || any(i -> v[i+1] < v[i], 1:length(v)-1)
         error("'vec' must be sorted non-decreasingly and not contain NAs")
     end
-    n = length(v)
-    res = Vector{Union{Missing,Int}}(missing, length(xx))
-    for (k, t) in enumerate(xx)
-        isnan(t) && continue
-        if left_open
-            r = _cnt_lt(v, t)
-            (rightmost_closed && n > 0 && t == v[1]) && (r = 1)
-        else
-            r = _cnt_le(v, t)
-            (rightmost_closed && n > 0 && t == v[n]) && (r = n - 1)
-        end
-        all_inside && n > 0 && (r = clamp(r, 1, max(1, n - 1)))
-        res[k] = r
-    end
-    any(ismissing, res) && return _vec_out(res)
-    return _vec_out(Int[r for r in res])
+    r = SimLev._rb_findinterval(v, xx, rightmost_closed, all_inside, left_open)
+    any(isnan, r) && return _vec_out(Union{Missing,Int}[isnan(t) ? missing : Int(t) for t in r])
+    return _vec_out(Int[Int(t) for t in r])
 end
 
 function _bincode(x::Vector{Float64}, B::Vector{Float64}, right::Bool, include_lowest::Bool)
@@ -520,186 +461,12 @@ function _format_perc(probs::Vector{Float64}, digits::Int = 7)
     return [isnan(xi) ? "" : string(si) * "%" for (si, xi) in zip(s, x)]
 end
 
-# R's partielle Sortierung (sort.default(x, partial =)): bis 10 Indizes
-# psort (rPsort2/Psort0), sonst R_qsort (Singleton). Für Werte, die sich nur im
-# Vorzeichen der Null unterscheiden, hängt das Ergebnis vom Verfahren ab.
-
-@inline _rcmp(a::Float64, b::Float64) = a < b ? -1 : a > b ? 1 : 0
-
-"Feld mit verschobenem Index: `z[i]` greift auf `z.v[i + z.o]` zu (bis 9.6c in `_fft.jl`)."
-struct _Off{T,V<:AbstractVector{T}}
-    v::V
-    o::Int
-end
-@inline Base.getindex(z::_Off, i::Int) = @inbounds z.v[i+z.o]
-@inline Base.setindex!(z::_Off, x, i::Int) = @inbounds (z.v[i+z.o] = x)
-
-function _rpsort2!(x, lo::Int, hi::Int, k::Int)       # 0-basierte Indizes über _Off
-    L, R = lo, hi
-    while L < R
-        v = x[k]
-        i, j = L, R
-        while i <= j
-            while _rcmp(x[i], v) < 0
-                i += 1
-            end
-            while _rcmp(v, x[j]) < 0
-                j -= 1
-            end
-            if i <= j
-                t = x[i]; x[i] = x[j]; x[j] = t
-                i += 1
-                j -= 1
-            end
-        end
-        j < k && (L = i)
-        k < i && (R = j)
-    end
-    nothing
-end
-
-function _psort0!(x, lo::Int, hi::Int, ind::AbstractVector{Int})
-    nind = length(ind)
-    (nind < 1 || hi - lo < 1) && return nothing
-    if nind <= 1
-        _rpsort2!(x, lo, hi, ind[1] - 1)
-        return nothing
-    end
-    this = 1
-    mid = (lo + hi) ÷ 2
-    for i in 1:nind
-        ind[i] - 1 <= mid && (this = i)
-    end
-    z = ind[this] - 1
-    _rpsort2!(x, lo, hi, z)
-    _psort0!(x, lo, z - 1, view(ind, 1:this-1))
-    _psort0!(x, z + 1, hi, view(ind, this+1:nind))
-    nothing
-end
-
-"R_qsort(v, 1, n) (Singleton 1969, R's qsort-body.c), in place (1-basiert)."
-function _r_qsort!(v::Vector{Float64})
-    n = length(v)
-    n < 2 && return nothing
-    il = zeros(Int, 40); iu = zeros(Int, 40)
-    R = 0.375
-    i, j = 1, n
-    ii = i
-    m = 1
-    k = 0; l = 0; ij = 0
-    vt = 0.0; vtt = 0.0
-    state = :L10
-    while true
-        if state === :L10
-            if i < j
-                if R < 0.5898437
-                    R += 0.0390625
-                else
-                    R -= 0.21875
-                end
-                state = :L20
-            else
-                state = :L80
-            end
-        elseif state === :L20
-            k = i
-            ij = trunc(Int, i + trunc(Int, (j - i) * R))
-            vt = v[ij]
-            if v[i] > vt
-                v[ij] = v[i]; v[i] = vt; vt = v[ij]
-            end
-            l = j
-            if v[j] < vt
-                v[ij] = v[j]; v[j] = vt; vt = v[ij]
-                if v[i] > vt
-                    v[ij] = v[i]; v[i] = vt; vt = v[ij]
-                end
-            end
-            while true
-                l -= 1
-                while v[l] > vt
-                    l -= 1
-                end
-                vtt = v[l]
-                k += 1
-                while v[k] < vt
-                    k += 1
-                end
-                k > l && break
-                v[l] = v[k]
-                v[k] = vtt
-            end
-            m += 1
-            if l - i <= j - k
-                il[m] = k; iu[m] = j; j = l
-            else
-                il[m] = i; iu[m] = l; i = k
-            end
-            state = :L90
-        elseif state === :L80
-            m == 1 && break
-            i = il[m]; j = iu[m]; m -= 1
-            state = :L90
-        elseif state === :L90
-            if j - i > 10
-                state = :L20
-            elseif i == ii
-                state = :L10
-            else
-                i -= 1
-                state = :L100
-            end
-        elseif state === :L100
-            while true
-                i += 1
-                i == j && break
-                vt = v[i+1]
-                v[i] <= vt || break
-            end
-            if i == j
-                state = :L80
-                continue
-            end
-            k = i
-            while true
-                v[k+1] = v[k]
-                k -= 1
-                vt < v[k] || break
-            end
-            v[k+1] = vt
-            state = :L100
-        end
-    end
-    nothing
-end
+# R's partielle Sortierung (sort.default(x, partial =)): C-Kern sl_r_psort (bis 10 Indizes Auswahl,
+# sonst Quicksort wie R). Für Werte, die sich nur im Vorzeichen der Null unterscheiden, hängt das
+# Ergebnis vom Verfahren ab.
 
 "`sort(x, partial = partial)` für Doubles ohne NA wie R (1-basierte Indizes)."
-function sort_partial(x, partial)
-    v = collect(Float64, _v(x))
-    praw = Int[trunc(Int, t) for t in _v(partial)]
-    if length(praw) <= 10
-        _psort0!(_Off(v, 1), 0, length(v) - 1, sort(praw))
-    else
-        _r_qsort!(v)
-    end
-    return v
-end
-
-"unique() für Doubles (Reihenfolge des ersten Auftretens; −0 = +0)."
-function _r_unique(a)
-    out = Float64[]
-    for t in a
-        if isnan(t)
-            any(isnan, out) || push!(out, t)
-        else
-            any(u -> u == t, out) || push!(out, t)
-        end
-    end
-    out
-end
-
-const _QAB = Dict(4 => (0.0, 1.0), 5 => (0.5, 0.5), 6 => (0.0, 0.0), 7 => (1.0, 1.0),
-                  8 => (1.0 / 3, 1.0 / 3), 9 => (3.0 / 8, 3.0 / 8))
+sort_partial(x, partial) = SimLev._rb_psort(collect(Float64, _v(x)), Int64[trunc(Int64, t) for t in _v(partial)])
 
 """
     quantile(x, probs = [0, .25, .5, .75, 1]; na_rm = false, names = true, type = 7, digits = 7)
@@ -719,84 +486,9 @@ function quantile(x, probs = [0.0, 0.25, 0.5, 0.75, 1.0]; na_rm::Bool = false, n
     eps = 100 * _DBL_EPS
     pok = .!isnan.(p)
     any(i -> pok[i] && (p[i] < -eps || p[i] > 1 + eps), eachindex(p)) && error("'probs' outside [0,1]")
-    n = length(xv)
     pp = Float64[isnan(t) ? t : max(0.0, min(1.0, t)) for t in p]
     np_ = length(pp)
-    type = Int(type)
-    if n == 0
-        xs = copy(xv)
-    elseif type == 7
-        idx = 1 .+ max(n - 1, 0) .* pp
-        cand = vcat(floor.(idx), ceil.(idx))[vcat(pok, pok)]
-        xs = sort_partial(xv, _r_unique(cand))
-    else
-        if type <= 3
-            nppm = type == 3 ? n .* pp .- 0.5 : n .* pp
-            jv = floor.(nppm)
-        else
-            a, b = _QAB[type]
-            jv = floor.(a .+ pp .* (n + 1 - a - b) .+ 4 * _DBL_EPS)
-        end
-        m1 = [pok[i] && jv[i] > 0 && jv[i] <= n for i in eachindex(jv)]
-        m2 = [pok[i] && jv[i] > 0 && jv[i] < n for i in eachindex(jv)]
-        part = _r_unique(vcat([1.0], jv[m1], (jv .+ 1)[m2], [Float64(n)]))
-        xs = sort_partial(xv, part)
-    end
-    qs = fill(NA, np_)
-    if n == 0
-    elseif type == 7
-        index = 1 .+ max(n - 1, 0) .* pp
-        for k in 1:np_
-            pok[k] || continue
-            lo = floor(index[k]); hi = ceil(index[k])
-            l = trunc(Int, lo); h = trunc(Int, hi)
-            xl = 1 <= l <= n ? xs[l] : NaN
-            xh = 1 <= h <= n ? xs[h] : NaN
-            q = xl
-            if index[k] > lo && xh != q
-                hh = index[k] - lo
-                q = (1 - hh) * q + hh * xh
-            end
-            qs[k] = q
-        end
-    else
-        if type <= 3
-            nppm = type == 3 ? n .* pp .- 0.5 : n .* pp
-            j = floor.(nppm)
-            if type == 1
-                h = Float64[(!pok[i] || nppm[i] > j[i]) ? 1.0 : 0.0 for i in eachindex(j)]
-            elseif type == 2
-                h = Float64[((nppm[i] > j[i]) ? 1.0 : 0.0) + 1 for i in eachindex(j)] ./ 2
-            else
-                h = Float64[(!pok[i] || nppm[i] != j[i] || mod(j[i], 2.0) == 1.0) ? 1.0 : 0.0 for i in eachindex(j)]
-            end
-        else
-            a, b = _QAB[type]
-            fuzz = 4 * _DBL_EPS
-            nppm = a .+ pp .* (n + 1 - a - b)
-            j = floor.(nppm .+ fuzz)
-            h = nppm .- j
-            h = Float64[(abs(t) < fuzz && !isnan(t)) ? 0.0 : t for t in h]
-        end
-        xx = n > 0 ? vcat(xs[1], xs[1], xs, xs[n], xs[n]) : fill(NaN, 4)
-        for k in 1:np_
-            jk = j[k]
-            isnan(jk) && continue
-            jj = trunc(Int, jk)
-            i2 = jj + 2; i3 = jj + 3
-            x2 = 1 <= i2 <= length(xx) ? xx[i2] : NaN
-            x3 = 1 <= i3 <= length(xx) ? xx[i3] : NaN
-            hk = h[k]
-            q = x2
-            (!isnan(hk) && hk == 1) && (q = x3)
-            ca = isnan(hk) ? nothing : (0 < hk)
-            cb = isnan(hk) ? nothing : (hk < 1)
-            cc = (isnan(x2) || isnan(x3)) ? nothing : (x2 != x3)
-            other = !(ca === false || cb === false || cc === false)
-            other && (q = (1 - hk) * x2 + hk * x3)
-            qs[k] = q
-        end
-    end
+    qs = SimLev._rb_quantile(xv, pp, Int(type))      # N8: C-Kern sl_r_quantile (Typen 1–9)
     qs = Float64[pok[i] ? qs[i] : p[i] for i in eachindex(qs)]
     (names && np_ > 0) && return RVector(qs; names = _format_perc(pp, Int(digits)))
     return _vec_out(qs)

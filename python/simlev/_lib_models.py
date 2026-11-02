@@ -235,10 +235,20 @@ def ms_garch_fitstarts(y, K, model, starts, h1=None):
     return {"par": th, "value": v, "convergence": code}
 
 
-def ms_garch_fit(y, K, model):
+def _threads(cores):
+    """N6: Zahl der Threads aus ``cores`` wie ``.sl_threads`` (ganze Zahl; ungültig oder < 1 -> 1)."""
+    try:
+        nt = int(float(np.asarray(cores, dtype=float).ravel()[0]))
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return 1
+    return nt if nt >= 1 else 1
+
+
+def ms_garch_fit(y, K, model, cores=1):
     """MS-GARCH-Modell wie ``_ms_garch_fit``, ganz in C (Starts, BFGS, Sortierung, Viterbi); BFGS läuft von
     allen Rasterpunkten der beiden Startfamilien (die zwei bisherigen zuerst; sGARCH 12, gjrGARCH seit N1
-    20), seit N1 mit analytischem Gradienten."""
+    20), seit N1 mit analytischem Gradienten; N6: die Starts auf bis zu ``cores`` Threads verteilt (Ergebnis
+    unabhängig davon)."""
     from .ms_garch import _ms_garch_check
     _ms_garch_check(K, model)
     K = int(K)
@@ -246,7 +256,7 @@ def ms_garch_fit(y, K, model):
     n = yv.size
     om, al, be, ga = (np.empty(K) for _ in range(4))
     P, reg, s2 = np.empty(K * K), np.empty(n, dtype=np.int32), np.empty(n)
-    ll, code = _ext.slc_ms_garch_estimate(yv, K, model == "gjrGARCH", om, al, be, ga, P, reg, s2)
+    ll, code = _ext.slc_ms_garch_estimate(yv, K, model == "gjrGARCH", om, al, be, ga, P, reg, s2, _threads(cores))
     return {"omega": om, "alpha": al, "beta": be, "gamma": ga, "P": _mat(P, K, K), "regimes": reg, "s2": s2,
             "loglik": ll, "convergence": code}
 

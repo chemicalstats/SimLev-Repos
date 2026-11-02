@@ -1,10 +1,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Simulationszustand und Rechenkerne
 #
-# Ports von simulation_core.cpp, fifo_core.cpp und tax_core.cpp
-# (SimLev 0.5.0). Die Rechenreihenfolge ist 1:1 übernommen (IEEE-754-Doubles;
-# N5: kein long double mehr, kompensierte Summen wie der C++-Code). Assets werden über
-# ihren Index (Reihenfolge der Strategie) angesprochen.
+# Die Engine-Kerne (core/simulation_core_impl.h, fifo_core_impl.h, tax_core_impl.h) rechnen seit N7
+# als geteilte C++-Kerne wie in R und Python (C-ABI-Hülle core/simlev_cabi.cpp, CAbi); vorher
+# Julia-Ports (F2). Assets werden über ihren Index (Reihenfolge der Strategie) angesprochen.
 # ─────────────────────────────────────────────────────────────────────────────
 
 "Ein Kauf-Lot (FIFO)."
@@ -127,267 +126,183 @@ struct Sim
     totals::Totals
 end
 
-# ═══════════════════════════════════════════════════════════════════════════
-# simulation_core.cpp
-# ═══════════════════════════════════════════════════════════════════════════
 
-# NaN-Nutzlast (Etappe 8.0): Treffen in einer Addition oder Multiplikation zwei NaN
-# aufeinander (etwa NA und NaN), behält R das NaN des ersten Operanden der
-# Maschinenanweisung, die gcc gewählt hat; die Ports schreiben diese Operationen mit
-# nan_add/nan_mul (r/rnum.jl) in der Operandenfolge des R-Baus (objdump von SimLev.so),
-# gleich wie python/simlev/_core.py. Subtraktion und Division brauchen das nicht.
+# ═══════════════════════════════════════════════════════════════════════════
+# Engine-Kerne: geteilte C++-Kerne (N7)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# simulation_core_impl.h, fifo_core_impl.h und tax_core_impl.h rechnen über die C-ABI-Hülle
+# core/simlev_cabi.cpp (CAbi, ccall) direkt auf diesem Zustand: Status, Lot, Trades und Totals sind
+# veränderliche Strukturen, deren Felder die Hülle über ihre Adresse liest und schreibt (Feldlagen unten
+# geprüft); Report- und Marktvektoren über ihre Datenzeiger. Ein neues Lot (Kauf) hängt Julia nach dem
+# Aufruf an. Die früheren Julia-Ports (mit nan_add/nan_mul in der Operandenfolge des R-Baus) sind
+# entfallen; treffen in einer Operation zwei NaN mit verschiedener Nutzlast zusammen (NA und NaN), kann
+# das Ergebnis wie in Python die Nutzlast des anderen Operanden tragen (Wert NA bzw. NaN wie zuvor).
+
+const _CA = CAbi.Asset
+
+# Feldlagen der Strukturen wie in der Hülle (simlev_c_layout); sonst schreibt der Kern daneben
+let L = CAbi.layout(), fo(T, i) = Int64(fieldoffset(T, i))
+    want = Int64[sizeof(Float64) * 8,
+                 fo(Lot, 6) + 8, fo(Lot, 1), fo(Lot, 2), fo(Lot, 3), fo(Lot, 4), fo(Lot, 5), fo(Lot, 6),
+                 fo(Trades, 4),
+                 fo(Totals, 16) + 8, fo(Totals, 9), fo(Totals, 13), fo(Totals, 14),
+                 sizeof(_CA), fo(_CA, 11)]
+    all(isbitstype, fieldtypes(Status)) && fieldtypes(Status) == ntuple(_ -> Float64, 8) ||
+        error("SimLev: Status passt nicht zur C-Hülle")
+    fieldtypes(Lot) == (Int, Float64, Float64, Float64, Float64, Float64) || error("SimLev: Lot passt nicht zur C-Hülle")
+    fieldtype(Trades, 4) === Int && fieldtype(Totals, 9) === Int || error("SimLev: Trades/Totals passen nicht zur C-Hülle")
+    L == want || error("SimLev: Feldlagen der C-Hülle weichen ab: $L statt $want")
+end
+
+# Zeile eines Assets; n_days = kürzester der Report- und Kursvektoren
+@inline function _casset(sim::Sim, a::Int)
+    st = sim.status[a]; rp = sim.report[a]; mk = sim.market[a]; tr = sim.trades[a]
+    _CA(pointer_from_objref(st), pointer(rp.worth), pointer(rp.money), pointer(rp.flows), pointer(rp.total),
+        pointer(rp.share), pointer(mk.asset_price), pointer(mk.asset_day), pointer_from_objref(tr),
+        Ptr{Ptr{Cvoid}}(pointer(tr.buys)), length(tr.buys))
+end
+@inline function _ndays(sim::Sim, a::Int)
+    rp = sim.report[a]; mk = sim.market[a]
+    min(length(rp.worth), length(rp.money), length(rp.flows), length(rp.total), length(rp.share),
+        length(mk.asset_price), length(mk.asset_day))
+end
+@inline _need(i::Int, n::Int) = (1 <= i <= n) || throw(BoundsError(1:n, i))
+
+const _CA0 = _CA(C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, 0)
+const _NTAB = 8   # bis zu so vielen Assets liegt die Tabelle ohne Heap-Anlage in einem Ref{NTuple}
+
+# Tabelle aller Assets für die Kerne über alle Assets; f(Zeiger, n, n_days) innerhalb von GC.@preserve
+@inline function _with_ctab(f, sim::Sim)
+    n = length(sim.names)
+    nd = typemax(Int)
+    @inbounds for a in 1:n
+        nd = min(nd, _ndays(sim, a))
+    end
+    nd = n == 0 ? 0 : nd
+    GC.@preserve sim begin
+        if n <= _NTAB
+            tab = Ref(ntuple(a -> a <= n ? _casset(sim, a) : _CA0, Val(_NTAB)))
+            GC.@preserve tab f(Ptr{_CA}(pointer_from_objref(tab)), n, nd)
+        else
+            tv = _CA[_casset(sim, a) for a in 1:n]
+            GC.@preserve tv f(pointer(tv), n, nd)
+        end
+    end
+end
+
+_bptr(buys::Vector{Lot}) = Ptr{Ptr{Cvoid}}(pointer(buys))
 
 function dca_flows_allocation!(sim::Sim, a::Int, flows::Float64, index::Int)
-    st = sim.status[a]; rp = sim.report[a]
-    rp.flows[index] = flows
-    money = nan_add(flows, st.money)                 # R: flows + money
-    st.money = money
-    rp.money[index] = money
-    total = nan_add(money, st.worth)
-    st.total = total
-    rp.total[index] = total
+    nd = _ndays(sim, a); _need(index, nd)
+    GC.@preserve sim begin
+        row = Ref(_casset(sim, a))
+        CAbi.check(ccall((:simlev_c_sim_dca_flows, LIBSLC), Cint, (Ref{_CA}, Int64, Int64, Int64, Float64, Int64),
+                         row, 1, nd, 0, flows, index))
+    end
     return nothing
 end
 
 function calculate_buy_report!(sim::Sim, a::Int, index::Int, trade_count::Float64,
                                trade_price::Float64, market_price::Float64)
-    st = sim.status[a]; rp = sim.report[a]
-    count = nan_add(st.count, trade_count)
-    st.count = count
-    st.price = market_price
-    worth = nan_mul(count, market_price)
-    st.worth = worth
-    money = st.money - nan_mul(trade_count, trade_price)
-    st.money = money
-    total = nan_add(worth, money)
-    st.total = total
-    rp.worth[index] = worth
-    rp.money[index] = money
-    rp.total[index] = total
+    nd = _ndays(sim, a); _need(index, nd)
+    GC.@preserve sim begin
+        row = Ref(_casset(sim, a))
+        CAbi.check(ccall((:simlev_c_sim_buy_report, LIBSLC), Cint,
+                         (Ref{_CA}, Int64, Int64, Int64, Int64, Float64, Float64, Float64),
+                         row, 1, nd, 0, index, trade_count, trade_price, market_price))
+    end
     return nothing
 end
 
 function calculate_sell_report!(sim::Sim, a::Int, index::Int, trade_count::Float64,
                                 trade_price::Float64, market_price::Float64, capital_gains_tax::Float64)
-    st = sim.status[a]; rp = sim.report[a]
-    count = st.count - trade_count
-    st.count = count
-    st.price = market_price
-    worth = nan_mul(market_price, count)             # R: market_price * count
-    st.worth = worth
-    money = nan_add(nan_mul(trade_count, trade_price) - capital_gains_tax, st.money)
-    st.money = money
-    total = nan_add(worth, money)
-    st.total = total
-    rp.worth[index] = worth
-    rp.money[index] = money
-    rp.total[index] = total
+    nd = _ndays(sim, a); _need(index, nd)
+    GC.@preserve sim begin
+        row = Ref(_casset(sim, a))
+        CAbi.check(ccall((:simlev_c_sim_sell_report, LIBSLC), Cint,
+                         (Ref{_CA}, Int64, Int64, Int64, Int64, Float64, Float64, Float64, Float64),
+                         row, 1, nd, 0, index, trade_count, trade_price, market_price, capital_gains_tax))
+    end
     return nothing
 end
 
 function calculate_total_report!(sim::Sim, index::Int)
-    n = length(sim.names)
-    @inbounds for a in 1:n
-        st = sim.status[a]; rp = sim.report[a]
-        price = sim.market[a].asset_price[index]
-        st.price = price
-        worth = nan_mul(price, st.count)
-        st.worth = worth
-        rp.worth[index] = worth
-        money = st.money
-        rp.money[index] = money
-        total = nan_add(worth, money)                # R: worth + money
-        st.total = total
-        rp.total[index] = total
-    end
-    total_worth = 0.0
-    @inbounds for a in 1:n
-        total_worth = nan_add(total_worth, sim.status[a].total)
-    end
-    @inbounds for a in 1:n
-        st = sim.status[a]
-        w = total_worth > 0 ? st.total / total_worth : 0.0
-        st.differ = w
-        sim.report[a].share[index] = w
+    _with_ctab(sim) do tab, n, nd
+        n == 0 || _need(index, nd)
+        CAbi.check(ccall((:simlev_c_sim_total_report, LIBSLC), Cint, (Ptr{_CA}, Int64, Int64, Int64),
+                         tab, n, nd, index))
     end
     return nothing
 end
 
 function perform_trade_buy_cpp!(sim::Sim, a::Int, index::Int, trade_count::Float64,
                                 trade_price::Float64, market_price::Float64)
-    calculate_buy_report!(sim, a, index, trade_count, trade_price, market_price)
-    d = sim.market[a].asset_day[index]
-    push!(sim.trades[a].buys, Lot(d, trade_count, trade_price, trade_count, trade_count, 0.0))
+    nd = _ndays(sim, a); _need(index, nd)
+    lot = Ref{NTuple{5,Float64}}()
+    GC.@preserve sim begin
+        row = Ref(_casset(sim, a))
+        CAbi.check(ccall((:simlev_c_sim_buy, LIBSLC), Cint,
+                         (Ref{_CA}, Int64, Int64, Int64, Int64, Float64, Float64, Float64, Ref{NTuple{5,Float64}}),
+                         row, 1, nd, 0, index, trade_count, trade_price, market_price, lot))
+    end
+    d, c, p, r, o = lot[]
+    push!(sim.trades[a].buys, Lot(Int(d), c, p, r, o, 0.0))
     return nothing
 end
 
 function perform_market_update!(sim::Sim, index::Int)
-    n = length(sim.names)
-    total_portfolio = 0.0
-    @inbounds for a in 1:n
-        st = sim.status[a]; rp = sim.report[a]
-        price = sim.market[a].asset_price[index]
-        money = st.money
-        worth = nan_mul(st.count, price)
-        total = nan_add(worth, money)
-        total_portfolio = nan_add(total_portfolio, total)
-        rp.worth[index] = worth
-        rp.money[index] = money
-        rp.flows[index] = 0.0
-        rp.total[index] = total
-        st.price = price
-        st.worth = worth
-        st.total = total
-    end
-    @inbounds for a in 1:n
-        w = total_portfolio > 0 ? sim.report[a].total[index] / total_portfolio : 0.0
-        sim.report[a].share[index] = w
-        sim.status[a].differ = w
+    _with_ctab(sim) do tab, n, nd
+        n == 0 || _need(index, nd)
+        CAbi.check(ccall((:simlev_c_sim_market_update, LIBSLC), Cint, (Ptr{_CA}, Int64, Int64, Int64),
+                         tab, n, nd, index))
     end
     return nothing
 end
 
+# `portfolio`: früher Arbeitsfeld des Ports (bleibt für die Aufrufer, der Kern hat sein eigenes)
 function batch_market_update!(sim::Sim, start_idx::Int, end_idx::Int, portfolio::Vector{Float64})
-    nd = end_idx - start_idx + 1
-    nd <= 0 && return nothing
-    n = length(sim.names)
-    length(portfolio) < nd && resize!(portfolio, nd)
-    @inbounds for k in 1:nd
-        portfolio[k] = 0.0
-    end
-    @inbounds for a in 1:n
-        st = sim.status[a]; rp = sim.report[a]
-        count = st.count; money = st.money
-        prices = sim.market[a].asset_price
-        for k in 1:nd
-            i = start_idx + k - 1
-            worth = nan_mul(prices[i], count)        # R: price * count
-            total = nan_add(worth, money)
-            rp.worth[i] = worth
-            rp.money[i] = money
-            rp.flows[i] = 0.0
-            rp.total[i] = total
-            portfolio[k] = nan_add(portfolio[k], total)
-        end
-        st.price = prices[end_idx]
-        st.worth = rp.worth[end_idx]
-        st.total = rp.total[end_idx]
-    end
-    @inbounds for a in 1:n
-        rp = sim.report[a]
-        w = 0.0
-        for k in 1:nd
-            i = start_idx + k - 1
-            p = portfolio[k]
-            w = p > 0.0 ? rp.total[i] / p : 0.0
-            rp.share[i] = w
-        end
-        sim.status[a].differ = w
+    end_idx - start_idx + 1 <= 0 && return nothing
+    _with_ctab(sim) do tab, n, nd
+        n == 0 || (_need(start_idx, nd); _need(end_idx, nd))
+        CAbi.check(ccall((:simlev_c_sim_market_update_batch, LIBSLC), Cint, (Ptr{_CA}, Int64, Int64, Int64, Int64),
+                         tab, n, nd, start_idx, end_idx))
     end
     return nothing
 end
-
-# ═══════════════════════════════════════════════════════════════════════════
-# fifo_core.cpp
-# ═══════════════════════════════════════════════════════════════════════════
 
 function _calculate_fifo_price(buys::Vector{Lot}, units::Float64, front::Int)
-    units_trade = units
-    total_price = 0.0
-    i = front
-    n = length(buys)
-    @inbounds while units_trade > 0 && i <= n
-        b = buys[i]
-        rem = b.remaining
-        if rem > 0
-            sell = cpp_min(rem, units_trade)
-            total_price = nan_add(nan_mul(b.price, sell), total_price)   # R: price * sell + total
-            units_trade -= sell
-        end
-        i += 1
-    end
-    return units > 0 ? total_price / units : 0.0
+    out = Ref(0.0)
+    GC.@preserve buys CAbi.check(ccall((:simlev_c_sim_fifo_price, LIBSLC), Cint,
+                                       (Ptr{Ptr{Cvoid}}, Int64, Float64, Int64, Ref{Float64}),
+                                       _bptr(buys), length(buys), units, front, out))
+    return out[]
 end
 
 function _calculate_fifo_vorabpauschale(buys::Vector{Lot}, units::Float64, front::Int)
-    units_trade = units
-    total_vp = 0.0
-    i = front
-    n = length(buys)
-    @inbounds while units_trade > 0 && i <= n
-        b = buys[i]
-        rem = b.remaining
-        if rem > 0
-            sell = cpp_min(rem, units_trade)
-            lot_vp = b.vp
-            if rem > 0 && lot_vp > 0
-                total_vp += sell * (lot_vp / rem)
-            end
-            units_trade -= sell
-        end
-        i += 1
-    end
-    return total_vp
+    out = Ref(0.0)
+    GC.@preserve buys CAbi.check(ccall((:simlev_c_sim_fifo_vp, LIBSLC), Cint,
+                                       (Ptr{Ptr{Cvoid}}, Int64, Float64, Int64, Ref{Float64}),
+                                       _bptr(buys), length(buys), units, front, out))
+    return out[]
 end
 
 function _calculate_private_sale_tax(buys::Vector{Lot}, front::Int, trade_count::Float64,
                                     sell_price::Float64, current_date::Int)
-    units_remaining = trade_count
-    i = front
-    n = length(buys)
-    eg = el = tg = tl = 0.0
-    @inbounds while units_remaining > 0 && i <= n
-        b = buys[i]
-        avail = b.remaining
-        if avail > 0
-            sell = cpp_min(avail, units_remaining)
-            y, m, d = ymd(b.date)
-            # Fristende am gleichnamigen Tag des Folgejahres (§§ 187, 188 Abs. 2 BGB);
-            # Kauf am 29.02.: Fristende 28.02. (§ 188 Abs. 3 BGB), ab 01.03. steuerfrei
-            one_year_later = (m == 2 && d == 29 && !is_leap(y + 1)) ? days_from_civil(y + 1, 2, 28) :
-                             days_from_civil(y + 1, m, d)
-            is_exempt = current_date > one_year_later
-            lot_gain = sell * (sell_price - b.price)
-            # R: Gewinn als lot_gain + Summe, Verlust als Summe - lot_gain (NaN-Vorzeichen bleibt)
-            if is_exempt
-                lot_gain >= 0 ? (eg = nan_add(lot_gain, eg)) : (el = el - lot_gain)
-            else
-                lot_gain >= 0 ? (tg = nan_add(lot_gain, tg)) : (tl = tl - lot_gain)
-            end
-            units_remaining -= sell
-        end
-        i += 1
-    end
-    return (exempt_gain = eg, exempt_loss = el, taxable_gain = tg, taxable_loss = tl,
-            total_gain = nan_add(eg - el, tg) - tl)
+    out = Ref{NTuple{5,Float64}}()
+    GC.@preserve buys CAbi.check(ccall((:simlev_c_sim_private_sale_tax, LIBSLC), Cint,
+                                       (Ptr{Ptr{Cvoid}}, Int64, Int64, Float64, Float64, Int64, Ref{NTuple{5,Float64}}),
+                                       _bptr(buys), length(buys), front, trade_count, sell_price, current_date, out))
+    eg, el, tg, tl, tot = out[]
+    return (exempt_gain = eg, exempt_loss = el, taxable_gain = tg, taxable_loss = tl, total_gain = tot)
 end
 
 function fifo_consume!(sim::Sim, a::Int, trade_count::Float64)
-    tr = sim.trades[a]
-    buys = tr.buys
-    n = length(buys)
-    front = tr.fifo_front
-    units_remaining = trade_count
-    i = front
-    @inbounds while units_remaining > 0 && i <= n
-        b = buys[i]
-        rem = b.remaining
-        if rem > 0
-            red = cpp_min(rem, units_remaining)
-            vp = b.vp
-            if vp > 0 && rem > 0
-                b.vp = vp * (1.0 - red / rem)
-            end
-            b.remaining = rem - red
-            units_remaining -= red
-        end
-        i += 1
+    GC.@preserve sim begin
+        row = Ref(_casset(sim, a))
+        CAbi.check(ccall((:simlev_c_sim_fifo_consume, LIBSLC), Cint, (Ref{_CA}, Int64, Int64, Float64),
+                         row, 1, 0, trade_count))
     end
-    @inbounds while front <= n
-        buys[front].remaining > 0 && break
-        front += 1
-    end
-    tr.fifo_front = front
     return nothing
 end
 
@@ -399,123 +314,37 @@ function _update_fifo_front(buys::Vector{Lot}, front::Int)
     return front
 end
 
-# ═══════════════════════════════════════════════════════════════════════════
-# tax_core.cpp
-# ═══════════════════════════════════════════════════════════════════════════
-
-"Kompensierte Summe nach Neumaier (1974), wie `neumaier_sum` in core/tax_core_impl.h (N5)."
-mutable struct _Neumaier
-    s::Float64
-    c::Float64
-end
-_Neumaier() = _Neumaier(0.0, 0.0)
-@inline function _nadd!(a::_Neumaier, v::Float64)
-    t = a.s + v
-    if abs(a.s) >= abs(v)
-        a.c += (a.s - t) + v
-    else
-        a.c += (v - t) + a.s
-    end
-    a.s = t
-    return a
-end
-@inline _nval(a::_Neumaier) = a.s + a.c
-
 "Vorabpauschale je Lot (`flat_rate_rcpp`): Bezug Jahresanfangskurs, Deckel, Zwölftelung."
 function flat_rate(buys::Vector{Lot}, front::Int, base_rate::Float64, year_start_price::Float64,
                    market_price::Float64, soy::Int, eoy::Int)
-    n = length(buys)
-    idx = Int[]
-    vps = Float64[]
-    front > n && return (total_vp = 0.0, lot_indices = idx, lot_vps = vps)
-    @inbounds for i in front:n
-        b = buys[i]
-        rem = b.remaining
-        rem <= 0 && continue
-        vp = 0.0
-        if b.date <= eoy
-            months_factor = 1.0
-            if b.date >= soy
-                _, m, _ = ymd(b.date)
-                months_factor = (12.0 - (m - 1)) / 12.0
-            end
-            reference_value = rem * year_start_price
-            base_worth = reference_value * base_rate * 0.7
-            market_worth = rem * market_price
-            growth = cpp_max(0.0, market_worth - reference_value)
-            vp = cpp_max(0.0, cpp_min(base_worth, growth)) * months_factor
-        end
-        push!(idx, i)
-        push!(vps, vp)
-    end
-    # N5: kompensierte Summe (Neumaier) wie tax_core_impl.h (statt long double)
-    total = _Neumaier()
-    for v in vps
-        _nadd!(total, v)
-    end
-    return (total_vp = _nval(total), lot_indices = idx, lot_vps = vps)
+    cap = max(0, length(buys) - front + 1)
+    idx = Vector{Int}(undef, cap); vps = Vector{Float64}(undef, cap)
+    total = Ref(0.0); nact = Ref(0)
+    GC.@preserve buys CAbi.check(ccall((:simlev_c_sim_flat_rate, LIBSLC), Cint,
+                                       (Ptr{Ptr{Cvoid}}, Int64, Int64, Float64, Float64, Float64, Int64, Int64,
+                                        Ref{Float64}, Ptr{Int64}, Ptr{Float64}, Int64, Ref{Int64}),
+                                       _bptr(buys), length(buys), front, base_rate, year_start_price, market_price,
+                                       soy, eoy, total, idx, vps, cap, nact))
+    resize!(idx, nact[]); resize!(vps, nact[])
+    return (total_vp = total[], lot_indices = idx, lot_vps = vps)
 end
 
 function p20_tax!(trade_gain::Float64, bonus::Float64, t::Totals, tax_rate::Float64, use_spb::Bool)
-    adjusted_gain = nan_mul(1.0 - bonus, trade_gain)
-    if adjusted_gain < 0
-        t.loss_capital_gains = t.loss_capital_gains - adjusted_gain
-        t.cgt_loss_added_ytd = t.cgt_loss_added_ytd - adjusted_gain
-        return (tax = 0.0, spb_used = 0.0)
-    end
-    pool = t.loss_capital_gains
-    loss_offset = cpp_min(adjusted_gain, pool)
-    t.loss_capital_gains = pool - loss_offset
-    t.cgt_loss_used_ytd = nan_add(t.cgt_loss_used_ytd, loss_offset)
-    gain_after_loss = adjusted_gain - loss_offset
-    spb_offset = 0.0
-    spb_rem = t.sparer_pauschbetrag_remaining
-    if use_spb && spb_rem > 0
-        spb_offset = cpp_min(gain_after_loss, spb_rem)
-        t.sparer_pauschbetrag_remaining = spb_rem - spb_offset
-        t.sparer_pauschbetrag_used_total = nan_add(spb_offset, t.sparer_pauschbetrag_used_total)
-    end
-    taxable_gain = gain_after_loss - spb_offset
-    t.cgt_base_taxed_ytd = nan_add(t.cgt_base_taxed_ytd, taxable_gain)
-    tax = nan_mul(tax_rate, taxable_gain)
-    t.total_taxes = nan_add(tax, t.total_taxes)
-    return (tax = tax, spb_used = spb_offset)
+    out = Ref{NTuple{2,Float64}}()
+    GC.@preserve t CAbi.check(ccall((:simlev_c_sim_p20_tax, LIBSLC), Cint,
+                                    (Float64, Float64, Ptr{Cvoid}, Float64, Cint, Ref{NTuple{2,Float64}}),
+                                    trade_gain, bonus, pointer_from_objref(t), tax_rate, use_spb, out))
+    tax, spb = out[]
+    return (tax = tax, spb_used = spb)
 end
 
 function vp_tax!(flat_rate_value::Float64, bonus::Float64, t::Totals, tax_rate::Float64, use_spb::Bool)
-    taxable_flat_rate = nan_mul(1.0 - bonus, flat_rate_value)
-    pool = t.loss_capital_gains
-    loss_offset = cpp_min(taxable_flat_rate, pool)
-    t.loss_capital_gains = pool - loss_offset
-    t.cgt_loss_used_ytd = nan_add(t.cgt_loss_used_ytd, loss_offset)
-    vp_after_loss = taxable_flat_rate - loss_offset
-    spb_offset = 0.0
-    spb_rem = t.sparer_pauschbetrag_remaining
-    if use_spb && spb_rem > 0
-        spb_offset = cpp_min(vp_after_loss, spb_rem)
-        t.sparer_pauschbetrag_remaining = spb_rem - spb_offset
-        t.sparer_pauschbetrag_used_total = nan_add(spb_offset, t.sparer_pauschbetrag_used_total)
-    end
-    taxable_gain = vp_after_loss - spb_offset
-    t.cgt_base_taxed_ytd = nan_add(cpp_max(0.0, taxable_gain), t.cgt_base_taxed_ytd)
-    tax = cpp_max(0.0, taxable_gain * tax_rate)
-    return (tax = tax, spb_used = spb_offset, taxable_amount = taxable_flat_rate)
-end
-
-@inline function _fifo_fast(units::Float64, cu::Vector{Float64}, cc::Vector{Float64}, prices::Vector{Float64})
-    n = length(cu)
-    units <= 0 && return 0.0
-    units >= cu[n] && return cc[n] / cu[n]
-    lot = 0
-    @inbounds while lot < n && cu[lot+1] < units
-        lot += 1
-    end
-    lot_idx = min(lot + 1, n)
-    lot_idx == 1 && return prices[1]
-    prev_cost = cc[lot_idx-1]
-    prev_units = cu[lot_idx-1]
-    rem = units - prev_units
-    return nan_add(rem * prices[lot_idx], prev_cost) / units     # R: rem * price + prev_cost
+    out = Ref{NTuple{3,Float64}}()
+    GC.@preserve t CAbi.check(ccall((:simlev_c_sim_vp_tax, LIBSLC), Cint,
+                                    (Float64, Float64, Ptr{Cvoid}, Float64, Cint, Ref{NTuple{3,Float64}}),
+                                    flat_rate_value, bonus, pointer_from_objref(t), tax_rate, use_spb, out))
+    tax, spb, ta = out[]
+    return (tax = tax, spb_used = spb, taxable_amount = ta)
 end
 
 const REGIME_CODE = Dict("none" => 0, "investment_fund" => 1, "capital_gains" => 2, "private_sale" => 3)
@@ -524,97 +353,12 @@ const REGIME_CODE = Dict("none" => 0, "investment_fund" => 1, "capital_gains" =>
 function sell_count(buys::Vector{Lot}, front::Int, target::Float64, trade_price::Float64,
                     total_shares::Float64, fractions::Bool, regime::Int, bonus::Float64,
                     loss_pool::Float64, tax_rate::Float64)
-    zero_ = (sell_count = 0.0, fifo_price = 0.0)
-    n = length(buys)
-    front > n && return zero_
-    units = Float64[]; prices = Float64[]; vpu = Float64[]
-    any_vp = false
-    @inbounds for i in front:n
-        b = buys[i]
-        rem = b.remaining
-        if rem > 0
-            push!(units, rem); push!(prices, b.price)
-            lot_vp = b.vp
-            v = (regime == 1 && lot_vp > 0) ? lot_vp / rem : 0.0
-            v > 0 && (any_vp = true)
-            push!(vpu, v)
-        end
-    end
-    isempty(units) && return zero_
-    nl = length(units)
-    cu = similar(units); cc = similar(units); cv = similar(units)
-    su = _Neumaier(); sc = _Neumaier(); sv = _Neumaier()     # N5: kompensiert wie tax_core_impl.h
-    @inbounds for k in 1:nl
-        _nadd!(su, units[k]); cu[k] = _nval(su)
-        _nadd!(sc, units[k] * prices[k]); cc[k] = _nval(sc)
-        _nadd!(sv, units[k] * vpu[k]); cv[k] = _nval(sv)
-    end
-    function fifo_vp(sell::Float64)
-        (!any_vp || sell <= 0) && return 0.0
-        sell >= cu[nl] && return cv[nl]
-        lot = 0
-        while lot < nl && cu[lot+1] < sell
-            lot += 1
-        end
-        lot >= nl && (lot = nl - 1)
-        prev_u = lot > 0 ? cu[lot] : 0.0
-        prev_v = lot > 0 ? cv[lot] : 0.0
-        return prev_v + (sell - prev_u) * vpu[lot+1]
-    end
-    function objective(sell::Float64)
-        sell <= 0 && return -target
-        sell > total_shares && (sell = total_shares)
-        fp = _fifo_fast(sell, cu, cc, prices)
-        gain = (trade_price - fp) * sell
-        tax = 0.0
-        if regime == 1
-            adj = (gain - fifo_vp(sell)) * (1.0 - bonus)
-            tax = cpp_max(adj - loss_pool, 0.0) * tax_rate
-        elseif regime == 2
-            tax = cpp_max(gain - loss_pool, 0.0) * tax_rate
-        end
-        return sell * trade_price - tax - target
-    end
-    initial = target / trade_price
-    lower = cpp_max(1e-6, initial * 0.1)
-    upper = cpp_min(initial * 3.0, total_shares)
-    f_lower = objective(lower)
-    f_upper = objective(upper)
-    tol = fractions ? 1e-6 : 0.5
-    local sell::Float64
-    if f_lower >= 0
-        sell = lower
-    elseif f_upper <= 0
-        sell = upper
-    elseif abs(f_lower) < tol
-        sell = lower
-    elseif abs(f_upper) < tol
-        sell = upper
-    else
-        sell = (lower + upper) * 0.5
-        for _ in 1:30
-            mid = (lower + upper) * 0.5
-            fm = objective(mid)
-            if abs(fm) < tol || (upper - lower) < tol
-                sell = mid
-                break
-            end
-            if fm * f_lower < 0
-                upper = mid; f_upper = fm
-            else
-                lower = mid; f_lower = fm
-            end
-            sell = (lower + upper) * 0.5
-        end
-    end
-    if !fractions
-        tl = floor(sell)
-        tu = ceil(sell)
-        tl < 1 && (tl = 1.0)
-        tu > total_shares && (tu = total_shares)
-        sell = abs(objective(tl)) <= abs(objective(tu)) ? tl : tu
-    end
-    final_fp = _fifo_fast(sell, cu, cc, prices)
-    out = cpp_max(0.0, cpp_min(sell, total_shares))
-    return (sell_count = out, fifo_price = final_fp)
+    out = Ref{NTuple{2,Float64}}()
+    GC.@preserve buys CAbi.check(ccall((:simlev_c_sim_sell_count, LIBSLC), Cint,
+                                       (Ptr{Ptr{Cvoid}}, Int64, Int64, Float64, Float64, Float64, Cint, Int64,
+                                        Float64, Float64, Float64, Ref{NTuple{2,Float64}}),
+                                       _bptr(buys), length(buys), front, target, trade_price, total_shares,
+                                       fractions, regime, bonus, loss_pool, tax_rate, out))
+    sc, fp = out[]
+    return (sell_count = sc, fifo_price = fp)
 end

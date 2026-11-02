@@ -1,3 +1,10 @@
+# Herkunft:           nachgebildet nach R 4.3.3, src/library/parallel/R/unix/mclapply.R (nur das
+#                     Verhalten: Reihenfolge, Fehler, Ausgaben)
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle)
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang.
 # RParallel – Nachbildung von SimLev's `.par_lapply` (r/R/bootstrap.R):
 # `parallel::mclapply(X, FUN, mc.cores = cores, mc.preschedule = FALSE,
 # mc.set.seed = FALSE)`. Vorlage: python/simlev/_r/parallel.py.

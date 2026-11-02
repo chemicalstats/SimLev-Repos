@@ -26,7 +26,7 @@ module Optimize
 
 import ..SimLev
 using ..SimLev: _alloc_c, _alloc_ticks, _esc
-using ..SimLev: RList, RFrame, RVector, NamedMat, NA, isna_strict, F80
+using ..SimLev: RList, RFrame, RVector, NamedMat, NA, isna_strict
 using Dates
 
 export portfolio_optimize, portfolio_frontier, portfolio_rolling, portfolio_risk_contributions, portfolio_cpcv,
@@ -58,36 +58,10 @@ end
 _ldsum(x) = SimLev.r_sum(x)
 
 "`colMeans` (long double, Division in long double)."
-function _colmeans(A::AbstractMatrix{Float64})
-    n, p = size(A)
-    out = Vector{Float64}(undef, p)
-    for j in 1:p
-        if n == 0
-            out[j] = NaN
-            continue
-        end
-        s = F80(0.0)
-        @inbounds for i in 1:n
-            s = s + SimLev._ldq(A[i, j])
-        end
-        out[j] = Float64(s / F80(n))
-    end
-    out
-end
+_colmeans(A::AbstractMatrix{Float64}) = size(A, 1) == 0 ? fill(NaN, size(A, 2)) : SimLev._ld_colsums(A; mean = true)
 
-"`rowSums` (long double)."
-function _rowsums(A::AbstractMatrix{Float64})
-    n, p = size(A)
-    out = Vector{Float64}(undef, n)
-    @inbounds for i in 1:n
-        s = F80(0.0)
-        for j in 1:p
-            s = s + SimLev._ldq(A[i, j])
-        end
-        out[i] = Float64(s)
-    end
-    out
-end
+"`rowSums` (long double; C-Kern, N10)."
+_rowsums(A::AbstractMatrix{Float64}) = SimLev._ld_rowsums(A)
 
 "`mean` eines logischen Vektors."
 _mean_lgl(x) = SimLev.r_mean_int(Int[v ? 1 : 0 for v in x])

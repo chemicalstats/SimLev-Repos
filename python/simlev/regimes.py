@@ -244,6 +244,39 @@ def regime_hmm(data, columns, *, k=2, frequency=("week", "day", "month"), n_star
 
     Returns:
         :class:`SimLevHMM`.
+
+    Quellen und Abweichungen:
+        Angelehnt an Hamilton (1989): gefilterte Wahrscheinlichkeiten wie im
+        Hamilton-Filter; abweichend: Gauß'sches HMM ohne autoregressiven Teil
+        (eigener Mittelwert und eigene Kovarianzmatrix je Zustand), geschätzt
+        mit dem EM-Verfahren nach Baum u. a. (1970) statt durch numerische
+        Maximierung der Likelihood. Vorwärts-Rückwärts-Rekursion mit
+        Skalierung, Neuschätzung der Startverteilung und Viterbi-Pfad nach
+        Rabiner (1989) bzw. Viterbi (1967); BIC nach Schwarz (1978) mit
+        k - 1 + k(k - 1) + kd + kd(d + 1)/2 Parametern. Eigene Festlegungen
+        von SimLev: Ridge-Zuschlag auf die Kovarianzmatrizen, Startwerte aus einer
+        Rangeinteilung der rollierenden Volatilität und zufälligen Zuordnungen,
+        Sortierung der Zustände nach Volatilität. Anwendung auf
+        Regime-Allokation wie bei Nystrup u. a. (2015); abweichend werden die
+        Parameter einmal auf der ganzen Historie geschätzt (dort adaptiv), die
+        gefilterten Wahrscheinlichkeiten sind also nur bei gegebenen Parametern
+        frei von Zukunftsinformation.
+
+    Literatur:
+        Hamilton, J. D. (1989), A new approach to the economic analysis of
+        nonstationary time series and the business cycle, Econometrica 57(2),
+        357-384, doi:10.2307/1912559; Baum, L. E., Petrie, T., Soules, G. &
+        Weiss, N. (1970), Annals of Mathematical Statistics 41(1), 164-171,
+        doi:10.1214/aoms/1177697196; Rabiner, L. R. (1989), A tutorial on hidden
+        Markov models and selected applications in speech recognition,
+        Proceedings of the IEEE 77(2), 257-286, doi:10.1109/5.18626; Viterbi,
+        A. J. (1967), IEEE Transactions on Information Theory 13(2), 260-269,
+        doi:10.1109/TIT.1967.1054010; Schwarz, G. (1978), Estimating the
+        dimension of a model, Annals of Statistics 6(2), 461-464,
+        doi:10.1214/aos/1176344136; Nystrup, P., Hansen, B. W., Madsen, H. &
+        Lindström, E. (2015), Regime-based versus static asset allocation:
+        Letting the data speak, Journal of Portfolio Management 42(1), 103-109,
+        doi:10.3905/jpm.2015.42.1.103.
     """
     frequency = _dep._match_arg(frequency, ("week", "day", "month"))
     kv = np.atleast_1d(np.asarray(k, dtype=object))

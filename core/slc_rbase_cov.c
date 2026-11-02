@@ -19,8 +19,14 @@
  *             vom Speicherinhalt ab. Der Kern teilt wie bei pearson (stilles NA, Logik der Ports).
  * Konstanten: keine.
  * long double: absichtlich (siehe slc_rbase.h): nur so gleich zu R auf derselben Plattform.
- * Reinraum:   wie slc_rbase.h; Vorlage ist die Logik der bisherigen Port-Funktionen
- *             (python/simlev/_r/stats_cor.py, julia/src/r/stats_cor.jl).
+ * Herkunft:           übersetzt aus R 4.3.3, src/library/stats/src/cov.c, über die Port-Funktionen
+ *                     python/simlev/_r/stats_cor.py und julia/src/r/stats_cor.jl
+ * Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation
+ *                     (laut Kopf der jeweiligen R-Quelle)
+ * Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+ * Änderungen:         C99 ohne R-Datenstrukturen, gemeinsamer Kern für Python und Julia (nicht Teil
+ *                     des R-Pakets); bei use = "everything" mit NA-Spalte stilles NA statt des
+ *                     speicherabhängigen Ergebnisses von R (siehe Quellen).
  * Prüforakel: R 4.3.3 (tools/gleichlauf/rbase_fuzz.R).
  */
 #include "slc_internal.h"

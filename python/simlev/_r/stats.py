@@ -2,8 +2,8 @@
 
 Portiert aus ``src/library/stats/R/*.R`` und ``src/library/stats/src/*.c``
 bzw. ``*.f`` (sowie Teilen von ``src/main/sort.c``, ``seq.c``, ``cum.c``).
-Rechenreihenfolge, ``long double``-Akkumulation (``numpy.longdouble``) und
-libm-Aufrufe (``math``) wie in R.
+Rechenreihenfolge, ``long double``-Akkumulation (seit N8/N11 über die C-Kerne
+``core/slc_rbase*.c`` in :mod:`simlev._ext`) und libm-Aufrufe (``math``) wie in R.
 
 Konventionen
 ------------

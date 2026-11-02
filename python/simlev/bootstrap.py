@@ -44,7 +44,7 @@ from ._r import parallel as _par
 from . import _lib as _sl
 from . import _lib_models as _slm
 from ._r.rlist import RList
-from ._r.rnum import r_cumprod, r_mean, r_median, r_pow, r_sd, r_sum, r_var
+from ._r.rnum import r_cumprod, r_cumsum, r_mean, r_median, r_pow, r_sd, r_sum, r_var
 
 __all__ = [
     "bootstrap_config", "BootstrapConfig", "bootstrap_block_length", "bootstrap",
@@ -54,7 +54,6 @@ __all__ = [
 ]
 
 _NAN = _fmt.NA_REAL      # R's NA_real_ (alle Verwendungen hier sind NA; NaN: math.nan)
-LD = np.longdouble
 
 
 class _Missing:
@@ -1964,7 +1963,7 @@ def _wquantile(x, w, probs):
     o = np.argsort(x, kind="stable")
     x = x[o]
     w = w[o] / sw
-    r = np.cumsum(w.astype(LD)).astype(np.float64)
+    r = r_cumsum(w)   # N11: C-Kern (cumsum in long double wie R)
     r[-1] = 1.0
     lft = np.concatenate([[0.0], r[:-1]])
     ne = 1 / r_sum(w * w)

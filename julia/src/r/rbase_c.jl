@@ -115,3 +115,62 @@ function _rb_cov(x::Vector{Float64}, n::Int, ncx::Int, y::Union{Nothing,Vector{F
     SLib._finish(cx, st)
     return reshape(ans, ncx, ncy), sd0[] != 0
 end
+
+# ── N10: Datum (core/slc_rbase_date.c) ───────────────────────────────────────
+# format.Date/strftime in der C-Locale für einen Tag (Tage seit 1970-01-01) und as.Date(s, format =
+# "%Y<sep>%m<sep>%d"); dieselbe Implementierung wie Python (_ext.slc_r_format_date/slc_r_strptime_ymd).
+
+"""
+strftime(fmt) für den Tag `z`; `digits_secs` = getOption("digits.secs") für %OS ohne Ziffer (N11).
+`nothing` bei |z| >= 1e14 (wie die Python-Hülle); Ergebnis über 2048 Bytes ist wie in R ein Fehler. `buf`
+(mindestens 2048 Bytes) kann über mehrere Aufrufe wiederverwendet werden.
+"""
+function _rb_strftime(z::Int64, fmt::String, digits_secs::Integer = 0, buf::Vector{UInt8} = Vector{UInt8}(undef, 2048))
+    length(buf) < 2048 && resize!(buf, 2048)
+    n = GC.@preserve buf ccall((:sl_r_strftime, LIBSLC), Int64, (Int64, Ptr{UInt8}, Int64, Cint, Ptr{UInt8}, Int64),
+                               z, fmt, sizeof(fmt), Cint(clamp(digits_secs, -1, 7)), buf, length(buf))
+    n == -2 && error("output string exceeded 2048 bytes")
+    n == -3 && throw(OutOfMemoryError())
+    n < 0 && return nothing
+    return GC.@preserve buf unsafe_string(pointer(buf), n)   # Puffer bleibt für weitere Aufrufe nutzbar
+end
+
+"as.Date(s, format = \"%Y<sep>%m<sep>%d\") → Tage oder `nothing` (NA)."
+function _rb_strptime_ymd(s::AbstractString, sep::Char)
+    str = String(s)
+    z = Ref{Int64}(0)
+    ok = ccall((:sl_r_strptime_ymd, LIBSLC), Cint, (Ptr{UInt8}, Int64, Cint, Ref{Int64}),
+               str, sizeof(str), Cint(sep), z)
+    return ok == 0 ? nothing : z[]
+end
+
+# ── N10: Summen und Mittel im Fachcode, weitere long-double-Wege (core/slc_rbase.c, slc_rbase_num.c) ──
+# Ersetzen die Nachbildung von long double (früher r/ld80.jl, F80) an allen Stellen außerhalb von src/r/.
+
+_mat64(M) = M isa Matrix{Float64} ? M : Float64[Float64(v) for v in M]
+"colSums (mean = false) bzw. colMeans (mean = true) einer Matrix wie R (long double)."
+_ld_colsums(M; mean::Bool = false, na_rm::Bool = false) =
+    (A = _mat64(M); _rb_margsums(vec(A), size(A, 1), size(A, 2), na_rm, mean, false))
+"rowSums bzw. rowMeans einer Matrix wie R (long double, spaltenweise akkumuliert)."
+_ld_rowsums(M; mean::Bool = false, na_rm::Bool = false) =
+    (A = _mat64(M); _rb_margsums(vec(A), size(A, 1), size(A, 2), na_rm, mean, true))
+
+"Zahlteil von R_strtod ab Byte `i` von `s` → (Wert ≥ 0, gelesene Bytes oder -1 ohne Ziffer, Betrag > DBL_MAX)."
+function _rb_strtod_num(s::String, i::Int)
+    used = Ref{Int64}(0)
+    gt = Ref{Cint}(0)
+    v = GC.@preserve s ccall((:sl_r_strtod_num, LIBSLC), Float64, (Ptr{UInt8}, Int64, Ref{Int64}, Ref{Cint}),
+                             pointer(s) + (i - 1), sizeof(s) - i + 1, used, gt)
+    return v, Int(used[]), gt[] != 0
+end
+"Long-double-Teil von R's `x1 %% x2` (myfmod) für endliche Operanden."
+_rb_fmod_ld(x1::Float64, x2::Float64) = ccall((:sl_r_fmod_ld, LIBSLC), Float64, (Float64, Float64), x1, x2)
+"Long-double-Teil von R's `x1 %/% x2` (myfloor)."
+_rb_idiv_ld(x1::Float64, x2::Float64) = ccall((:sl_r_idiv_ld, LIBSLC), Float64, (Float64, Float64), x1, x2)
+"`scientific()` von formatReal für r > 0 (endlich), 1 ≤ digits ≤ 15 → (kpower, nsig, roundingwidens)."
+function _rb_scientific(r::Float64, digits::Int)
+    kp = Ref{Cint}(0)
+    ns = Ref{Cint}(0)
+    rw = ccall((:sl_r_scientific, LIBSLC), Cint, (Float64, Cint, Ref{Cint}, Ref{Cint}), r, digits, kp, ns)
+    return Int(kp[]), Int(ns[]), rw != 0
+end

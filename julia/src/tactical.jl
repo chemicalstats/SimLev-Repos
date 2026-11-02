@@ -25,7 +25,7 @@ module Tactical
 
 import ..SimLev
 using ..SimLev: _alloc_c, _alloc_ramp, _esc
-using ..SimLev: RList, RFrame, RVector, NamedMat, NA, isna_strict, F80
+using ..SimLev: RList, RFrame, RVector, NamedMat, NA, isna_strict
 using Dates
 
 export signal_state, momentum_score, tactical_rules, tactical_rotation, tactical_target_volatility, tactical_conditional_volatility,
@@ -59,42 +59,10 @@ _setdiff(a, b) = _unique([x for x in a if !(x in b)])
 "`findInterval(x, vec)` für aufsteigendes `vec`: Anzahl der Elemente von vec <= x."
 _find_interval(x::AbstractVector, v::AbstractVector) = Int[searchsortedlast(v, xi) for xi in x]
 
-function _rowsums(A::AbstractMatrix{Float64})
-    n, p = size(A)
-    out = Vector{Float64}(undef, n)
-    @inbounds for i in 1:n
-        s = F80(0.0)
-        for j in 1:p
-            s = s + SimLev._ldq(A[i, j])
-        end
-        out[i] = Float64(s)
-    end
-    out
-end
-function _rowmeans(A::AbstractMatrix{Float64})
-    n, p = size(A)
-    out = Vector{Float64}(undef, n)
-    @inbounds for i in 1:n
-        s = F80(0.0)
-        for j in 1:p
-            s = s + SimLev._ldq(A[i, j])
-        end
-        out[i] = Float64(s / F80(p))
-    end
-    out
-end
-function _colmeans(A::AbstractMatrix{Float64})
-    n, p = size(A)
-    out = Vector{Float64}(undef, p)
-    for j in 1:p
-        s = F80(0.0)
-        @inbounds for i in 1:n
-            s = s + SimLev._ldq(A[i, j])
-        end
-        out[j] = n == 0 ? NaN : Float64(s / F80(n))
-    end
-    out
-end
+# N10: Zeilen- und Spaltensummen/-mittel wie R in long double über die C-Kerne (core/slc_rbase.c)
+_rowsums(A::AbstractMatrix{Float64}) = SimLev._ld_rowsums(A)
+_rowmeans(A::AbstractMatrix{Float64}) = SimLev._ld_rowsums(A; mean = true)
+_colmeans(A::AbstractMatrix{Float64}) = size(A, 1) == 0 ? fill(NaN, size(A, 2)) : SimLev._ld_colsums(A; mean = true)
 _mean_lgl(x) = SimLev.r_mean_int(Int[v ? 1 : 0 for v in x])
 
 # R's pmin/pmax mit NA-Weitergabe (Skalar a, Vektorwert b)

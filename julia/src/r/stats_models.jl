@@ -1,3 +1,10 @@
+# Herkunft:           nachgebildet nach R 4.3.3, src/library/stats/R/lm.R (Zugriffe), p.adjust.R,
+#                     ecdf.R, ave.R, aggregate.R
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle)
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang.
 # Generische Zugriffe coef, fitted, residuals sowie p_adjust, ecdf, ave und aggregate aus R 4.3.3
 # stats/R/lm.R (Zugriffe), p.adjust.R, ecdf.R, ave.R und aggregate.R; Python: _r/stats_models.py.
 # Teil des Untermoduls RStats (eingebunden in stats.jl).

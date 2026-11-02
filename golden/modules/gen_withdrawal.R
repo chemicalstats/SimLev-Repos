@@ -336,6 +336,83 @@ wcase("ws_tax_gp_month", "withdrawal_simulation(Rm, withdrawal_rule('percent', r
 case("ws_tax_church_summary", "summary(withdrawal_simulation(R, withdrawal_rule('vanguard', rate = 4.5), inflation = 2, tax = tax_profile(church_tax = 9), cost_basis = 40))",
      "result = summary(withdrawal_simulation(R, rule=withdrawal_rule(type='vanguard', rate=4.5), inflation=2, tax=simlev.tax_profile(church_tax=9), cost_basis=40))", I,
      jl = 'result = r_summary(withdrawal_simulation(R, withdrawal_rule("vanguard"; rate = 4.5); inflation = 2, tax = SL.tax_profile(; church_tax = 9), cost_basis = 40))')
+# T14: Tarifweg T1 (income_tariff()) in der Entnahme: Veranlagung je Planjahr und Pfad im Kern, Saldo mit der ersten
+# Entnahme des Folgejahres; zvE nominal je Planjahr (Zahl, Vektor ohne Namen, benannt nur mit SimLevResult)
+TTC <- list(
+  num = c("guenstigerpruefung = TRUE, income = income_tariff(30000)", "guenstigerpruefung=True, income=simlev.income_tariff(30000)",
+          "guenstigerpruefung = true, income = SL.income_tariff(30000)"),
+  vec = c("church_tax = 9, guenstigerpruefung = TRUE, income = income_tariff(c(rep(6000, 10), rep(40000, 10), rep(90000, 10)))",
+          "church_tax=9, guenstigerpruefung=True, income=simlev.income_tariff([6000] * 10 + [40000] * 10 + [90000] * 10)",
+          "church_tax = 9, guenstigerpruefung = true, income = SL.income_tariff(vcat(fill(6000.0, 10), fill(40000.0, 10), fill(90000.0, 10)))"),
+  church = c("church_tax = 9, income = income_tariff(50000)", "church_tax=9, income=simlev.income_tariff(50000)",
+             "church_tax = 9, income = SL.income_tariff(50000)"),
+  church8_gp = c("church_tax = 8, guenstigerpruefung = TRUE, income = income_tariff(12000)",
+                 "church_tax=8, guenstigerpruefung=True, income=simlev.income_tariff(12000)",
+                 "church_tax = 8, guenstigerpruefung = true, income = SL.income_tariff(12000)"),
+  gp_yes = c("guenstigerpruefung = TRUE, income = income_tariff(4000)", "guenstigerpruefung=True, income=simlev.income_tariff(4000)",
+             "guenstigerpruefung = true, income = SL.income_tariff(4000)"),
+  gp_no = c("guenstigerpruefung = TRUE, income = income_tariff(150000)", "guenstigerpruefung=True, income=simlev.income_tariff(150000)",
+            "guenstigerpruefung = true, income = SL.income_tariff(150000)"),
+  nogp = c("income = income_tariff(30000)", "income=simlev.income_tariff(30000)", "income = SL.income_tariff(30000)"),
+  own = c("church_tax = 9, guenstigerpruefung = TRUE, income = income_tariff(25000, tariff = tax_tariff())",
+          "church_tax=9, guenstigerpruefung=True, income=simlev.income_tariff(25000, tariff=simlev.tax_tariff())",
+          "church_tax = 9, guenstigerpruefung = true, income = SL.income_tariff(25000; tariff = SL.tax_tariff())"))
+for (k in names(TTC)) wcase(paste0("ws_tt_", k), sprintf(TXA, TTC[[k]][1]), sprintf(TXP, TTC[[k]][2]), I, jl = sprintf(TXJ, TTC[[k]][3]))
+TT2 <- list(
+  # Erstattung über der Monatsentnahme (Rest ins Depot), Entnahme am Periodenende
+  refund_month = c("withdrawal_simulation(Rm, withdrawal_rule('percent', rate = 5), frequency = 'month', start_value = 3e5, timing = 'end', base_rate = 2.5, cost_basis = 40, inflation = 1, tax = tax_profile(church_tax = 9, guenstigerpruefung = TRUE, income = income_tariff(2000)))",
+                   "withdrawal_simulation(Rm, rule=withdrawal_rule(type='percent', rate=5), frequency='month', start_value=3e5, timing='end', base_rate=2.5, cost_basis=40, inflation=1, tax=simlev.tax_profile(church_tax=9, guenstigerpruefung=True, income=simlev.income_tariff(2000)))",
+                   'withdrawal_simulation(Rm, withdrawal_rule("percent"; rate = 5); frequency = "month", start_value = 3e5, timing = "end", base_rate = 2.5, cost_basis = 40, inflation = 1, tax = SL.tax_profile(; church_tax = 9, guenstigerpruefung = true, income = SL.income_tariff(2000)))'),
+  # Quartale mit Rumpfjahr (42 Quartale = 11 Planjahre), Vektor je Planjahr
+  quarter = c("withdrawal_simulation(Rq, withdrawal_rule('vanguard', rate = 5), frequency = 'quarter', start_value = 4e5, base_rate = 2, cost_basis = 50, tax = tax_profile(church_tax = 8, guenstigerpruefung = TRUE, income = income_tariff(seq(3000, 23000, by = 2000))))",
+              "withdrawal_simulation(Rq, rule=withdrawal_rule(type='vanguard', rate=5), frequency='quarter', start_value=4e5, base_rate=2, cost_basis=50, tax=simlev.tax_profile(church_tax=8, guenstigerpruefung=True, income=simlev.income_tariff(list(range(3000, 23001, 2000)))))",
+              'withdrawal_simulation(Rq, withdrawal_rule("vanguard"; rate = 5); frequency = "quarter", start_value = 4e5, base_rate = 2, cost_basis = 50, tax = SL.tax_profile(; church_tax = 8, guenstigerpruefung = true, income = SL.income_tariff(collect(3000.0:2000.0:23000.0))))'),
+  # letztes Jahr: Vektor (kein zvE für das Folgejahr) und Zahl (Folgejahr veranlagt)
+  last_vec = c("withdrawal_simulation(R[1:3, 1:4], withdrawal_rule('percent', rate = 6), start_value = 4e5, base_rate = 3, cost_basis = 30, tax = tax_profile(church_tax = 9, guenstigerpruefung = TRUE, income = income_tariff(c(5000, 5000, 5000))))",
+               "withdrawal_simulation(R[:3, :4], rule=withdrawal_rule(type='percent', rate=6), start_value=4e5, base_rate=3, cost_basis=30, tax=simlev.tax_profile(church_tax=9, guenstigerpruefung=True, income=simlev.income_tariff([5000, 5000, 5000])))",
+               'withdrawal_simulation(R[1:3, 1:4], withdrawal_rule("percent"; rate = 6); start_value = 4e5, base_rate = 3, cost_basis = 30, tax = SL.tax_profile(; church_tax = 9, guenstigerpruefung = true, income = SL.income_tariff([5000.0, 5000.0, 5000.0])))'),
+  last_num = c("withdrawal_simulation(R[1:3, 1:4], withdrawal_rule('percent', rate = 6), start_value = 4e5, base_rate = 3, cost_basis = 30, tax = tax_profile(church_tax = 9, guenstigerpruefung = TRUE, income = income_tariff(5000)))",
+               "withdrawal_simulation(R[:3, :4], rule=withdrawal_rule(type='percent', rate=6), start_value=4e5, base_rate=3, cost_basis=30, tax=simlev.tax_profile(church_tax=9, guenstigerpruefung=True, income=simlev.income_tariff(5000)))",
+               'withdrawal_simulation(R[1:3, 1:4], withdrawal_rule("percent"; rate = 6); start_value = 4e5, base_rate = 3, cost_basis = 30, tax = SL.tax_profile(; church_tax = 9, guenstigerpruefung = true, income = SL.income_tariff(5000)))'),
+  # Horizont (probehalber Abrechnung je Jahresende)
+  hz = c("withdrawal_simulation(Rm, withdrawal_rule('percent', rate = 5), frequency = 'month', base_rate = 2.5, cost_basis = 60, horizon = withdrawal_horizon('uniform', min = 3, max = 9, seed = 7), keep_paths = 2, tax = tax_profile(church_tax = 8, guenstigerpruefung = TRUE, income = income_tariff(7000)))",
+         "withdrawal_simulation(Rm, rule=withdrawal_rule(type='percent', rate=5), frequency='month', base_rate=2.5, cost_basis=60, horizon=withdrawal_horizon(type='uniform', min=3, max=9, seed=7), keep_paths=2, tax=simlev.tax_profile(church_tax=8, guenstigerpruefung=True, income=simlev.income_tariff(7000)))",
+         'withdrawal_simulation(Rm, withdrawal_rule("percent"; rate = 5); frequency = "month", base_rate = 2.5, cost_basis = 60, horizon = withdrawal_horizon("uniform"; min = 3, max = 9, seed = 7), keep_paths = 2, tax = SL.tax_profile(; church_tax = 8, guenstigerpruefung = true, income = SL.income_tariff(7000)))'),
+  # Liquidation: Verzehrregel leert das Depot planmäßig; Erschöpfung bei hoher Rate
+  plan = c("withdrawal_simulation(R[1:8, 1:4], withdrawal_rule('one_over_n'), start_value = 5e5, cost_basis = 50, tax = tax_profile(church_tax = 9, guenstigerpruefung = TRUE, income = income_tariff(10000)))",
+           "withdrawal_simulation(R[:8, :4], rule=withdrawal_rule(type='one_over_n'), start_value=5e5, cost_basis=50, tax=simlev.tax_profile(church_tax=9, guenstigerpruefung=True, income=simlev.income_tariff(10000)))",
+           'withdrawal_simulation(R[1:8, 1:4], withdrawal_rule("one_over_n"); start_value = 5e5, cost_basis = 50, tax = SL.tax_profile(; church_tax = 9, guenstigerpruefung = true, income = SL.income_tariff(10000)))'),
+  deplete = c("withdrawal_simulation(R[, 1:4], withdrawal_rule('constant', rate = 12), inflation = 2, cost_basis = 50, tax = tax_profile(church_tax = 8, guenstigerpruefung = TRUE, income = income_tariff(20000)))",
+              "withdrawal_simulation(R[:, :4], rule=withdrawal_rule(type='constant', rate=12), inflation=2, cost_basis=50, tax=simlev.tax_profile(church_tax=8, guenstigerpruefung=True, income=simlev.income_tariff(20000)))",
+              'withdrawal_simulation(R[:, 1:4], withdrawal_rule("constant"; rate = 12); inflation = 2, cost_basis = 50, tax = SL.tax_profile(; church_tax = 8, guenstigerpruefung = true, income = SL.income_tariff(20000)))'),
+  # Einkommen zählt nicht zum zvE (Entscheidung 3)
+  income = c("withdrawal_simulation(R[, 1:4], withdrawal_rule('constant', rate = 5), inflation = 2, cost_basis = 50, income = list(start = 3, amount = 12000), tax = tax_profile(guenstigerpruefung = TRUE, income = income_tariff(9000)))",
+             "withdrawal_simulation(R[:, :4], rule=withdrawal_rule(type='constant', rate=5), inflation=2, cost_basis=50, income={'start': 3, 'amount': 12000}, tax=simlev.tax_profile(guenstigerpruefung=True, income=simlev.income_tariff(9000)))",
+             'withdrawal_simulation(R[:, 1:4], withdrawal_rule("constant"; rate = 5); inflation = 2, cost_basis = 50, income = [Dict("start" => 3, "amount" => 12000)], tax = SL.tax_profile(; guenstigerpruefung = true, income = SL.income_tariff(9000)))'),
+  # historische Kohorten (keine Kalenderzuordnung: Zahl)
+  coh = c("withdrawal_simulation(withdrawal_cohorts(m, price = 'depot', inflation = 2, years = 5, step = 'year'), withdrawal_rule('percent', rate = 6), tax = tax_profile(guenstigerpruefung = TRUE, income = income_tariff(9000)))",
+          "withdrawal_simulation(withdrawal_cohorts(m, price='depot', inflation=2, years=5, step='year'), rule=withdrawal_rule(type='percent', rate=6), tax=simlev.tax_profile(guenstigerpruefung=True, income=simlev.income_tariff(9000)))",
+          'withdrawal_simulation(withdrawal_cohorts(m; price = "depot", inflation = 2, years = 5, step = "year"), withdrawal_rule("percent"; rate = 6); tax = SL.tax_profile(; guenstigerpruefung = true, income = SL.income_tariff(9000)))'))
+for (k in names(TT2)) wcase(paste0("ws_tt_", k), TT2[[k]][1], TT2[[k]][2], I, jl = TT2[[k]][3])
+case("mr_tariff", "r <- withdrawal_max_rate(R[, 1:6], withdrawal_rule('constant'), success = 1, lower = 1, upper = 10, tol = 0.05, inflation = 2, cost_basis = 50, tax = tax_profile(church_tax = 9, guenstigerpruefung = TRUE, income = income_tariff(8000))); list(as.numeric(r), attr(r, 'success'))",
+     "r = withdrawal_max_rate(R[:, :6], rule=withdrawal_rule(type='constant'), success=1, lower=1, upper=10, tol=0.05, inflation=2, cost_basis=50, tax=simlev.tax_profile(church_tax=9, guenstigerpruefung=True, income=simlev.income_tariff(8000))); result = [float(r), r.success]", I,
+     jl = 'r = withdrawal_max_rate(R[:, 1:6], withdrawal_rule("constant"); success = 1, lower = 1, upper = 10, tol = 0.05, inflation = 2, cost_basis = 50, tax = SL.tax_profile(; church_tax = 9, guenstigerpruefung = true, income = SL.income_tariff(8000))); result = [r[1], SL.attrs(r)["success"]]')
+case("it_plan", "income_tariff(c(40000, 52000))", "result = simlev.income_tariff([40000, 52000])", jl = 'result = SL.income_tariff([40000.0, 52000.0])')
+TTE <- list(
+  len = c("withdrawal_simulation(R[, 1:2], tax = tax_profile(income = income_tariff(c(1e4, 2e4, 3e4))))",
+          "withdrawal_simulation(R[:, :2], tax=simlev.tax_profile(income=simlev.income_tariff([1e4, 2e4, 3e4])))",
+          'withdrawal_simulation(R[:, 1:2]; tax = SL.tax_profile(; income = SL.income_tariff([1e4, 2e4, 3e4])))'),
+  named = c("withdrawal_simulation(R[, 1:2], tax = tax_profile(income = income_tariff(c('2030' = 1e4, '2031' = 2e4))))",
+            "withdrawal_simulation(R[:, :2], tax=simlev.tax_profile(income=simlev.income_tariff({'2030': 1e4, '2031': 2e4})))",
+            'withdrawal_simulation(R[:, 1:2]; tax = SL.tax_profile(; income = SL.income_tariff(["2030" => 1e4, "2031" => 2e4])))'),
+  df = c("withdrawal_simulation(R[, 1:2], tax = tax_profile(income = income_tariff(data.frame(year = 2030:2031, taxable_income = 1e4))))",
+         "withdrawal_simulation(R[:, :2], tax=simlev.tax_profile(income=simlev.income_tariff(pd.DataFrame({'year': [2030, 2031], 'taxable_income': [1e4, 1e4]}))))",
+         'withdrawal_simulation(R[:, 1:2]; tax = SL.tax_profile(; income = SL.income_tariff(SL.RFrame("year" => [2030, 2031], "taxable_income" => [1e4, 1e4]))))'),
+  sim_plan = c("simulation(data.frame(date = as.Date('2020-01-01') + 0:30, ETF = 100 + 0:30), create_strategy(ETF = asset_config('etf', 'bnh')), tax = tax_profile(income = income_tariff(c(1e4, 2e4))))",
+               "simlev.simulation(pd.DataFrame({'date': pd.date_range('2020-01-01', periods=31), 'ETF': 100.0 + np.arange(31)}), simlev.create_strategy(ETF=simlev.asset_config(asset_class='etf', trading='bnh')), tax=simlev.tax_profile(income=simlev.income_tariff([1e4, 2e4])))",
+               'SL.simulation(SL.RFrame("date" => Date(2020, 1, 1) .+ Day.(0:30), "ETF" => 100.0 .+ (0:30)), SL.create_strategy(ETF = SL.asset_config("etf", "bnh")); tax = SL.tax_profile(; income = SL.income_tariff([1e4, 2e4])))'))
+for (k in names(TTE)) case(paste0("ws_tt_err_", k), TTE[[k]][1], paste0("result = ", TTE[[k]][2]), I, jl = paste0("result = ", TTE[[k]][3]))
+
 # 6.5b (C.2): keep_paths als Anzahl (TRUE = alle, FALSE/0 = keine, k = die ersten k Spalten)
 KP <- list(k2 = c("2", "2", "2"), k100 = c("100", "100", "100"), k0 = c("0", "0", "0"), k1f = c("1.0", "1.0", "1.0"),
            true = c("TRUE", "True", "true"))
@@ -372,9 +449,6 @@ WE <- list(
     'withdrawal_simulation(R, (;))'),
   taxcls = c("withdrawal_simulation(R, tax = 'person')", "withdrawal_simulation(R, tax='person')",
     'withdrawal_simulation(R; tax = "person")'),
-  taxtariff = c("withdrawal_simulation(R, tax = tax_profile(guenstigerpruefung = TRUE, income = income_tariff(40000)))",
-    "withdrawal_simulation(R, tax=simlev.tax_profile(guenstigerpruefung=True, income=simlev.income_tariff(40000)))",
-    'withdrawal_simulation(R; tax = SL.tax_profile(; guenstigerpruefung = true, income = SL.income_tariff(40000)))'),
   taxinc = c("withdrawal_simulation(R, tax = tax_profile(base_rate = 2, income = income_rate(42), harvest = harvest_rule(), private_sale_threshold = 600))",
     "withdrawal_simulation(R, tax=simlev.tax_profile(base_rate=2, income=simlev.income_rate(42), harvest=simlev.harvest_rule(), private_sale_threshold=600))",
     'withdrawal_simulation(R; tax = SL.tax_profile(; base_rate = 2, income = SL.income_rate(42), harvest = SL.harvest_rule(), private_sale_threshold = 600))'),
@@ -651,6 +725,22 @@ wcase("ws_sv_result_church", paste0("{", TAX_R, "withdrawal_simulation(R[, 1:3],
 wcase("ws_sv_result_church9", paste0("{", TAX_R, "withdrawal_simulation(R[, 1:3], withdrawal_rule('percent', rate = 5), start_value = rt, tax = tax_profile(church_tax = 9), keep_paths = 2)}"),
       paste0("None\n", TAX_P, "ws = withdrawal_simulation(R[:, :3], rule=withdrawal_rule(type='percent', rate=5), start_value=rt, tax=simlev.tax_profile(church_tax=9), keep_paths=2)"), Is,
      jl = paste0("nothing\n", TAX_J, 'ws = withdrawal_simulation(R[:, 1:3], withdrawal_rule("percent"; rate = 5); start_value = rt, tax = SL.tax_profile(; church_tax = 9), keep_paths = 2)'))
+# T14: Tarifweg mit Lots aus der Ansparphase; nach Kalenderjahren benannt (Planjahr 1 = tax_report$next_year$year)
+TTS <- list(
+  named = c("y1 <- rt$tax_report$next_year$year; withdrawal_simulation(R[, 1:3], withdrawal_rule('percent', rate = 5), start_value = rt, tax = tax_profile(church_tax = 8, guenstigerpruefung = TRUE, income = income_tariff(setNames(20000 - 500 * (0:30), y1 + 0:30))))",
+            "y1 = rt['tax_report']['next_year']['year']\nws = withdrawal_simulation(R[:, :3], rule=withdrawal_rule(type='percent', rate=5), start_value=rt, tax=simlev.tax_profile(church_tax=8, guenstigerpruefung=True, income=simlev.income_tariff({str(y1 + i): 20000.0 - 500 * i for i in range(31)})))",
+            'y1 = Int(rt["tax_report"]["next_year"]["year"])\nws = withdrawal_simulation(R[:, 1:3], withdrawal_rule("percent"; rate = 5); start_value = rt, tax = SL.tax_profile(; church_tax = 8, guenstigerpruefung = true, income = SL.income_tariff([string(y1 + i) => 20000.0 - 500 * i for i in 0:30])))'),
+  df = c("y1 <- rt$tax_report$next_year$year; withdrawal_simulation(R[, 1:3], withdrawal_rule('percent', rate = 5), start_value = rt, tax = tax_profile(guenstigerpruefung = TRUE, income = income_tariff(data.frame(year = y1 + 0:29, taxable_income = 9000))))",
+         "y1 = rt['tax_report']['next_year']['year']\nws = withdrawal_simulation(R[:, :3], rule=withdrawal_rule(type='percent', rate=5), start_value=rt, tax=simlev.tax_profile(guenstigerpruefung=True, income=simlev.income_tariff(pd.DataFrame({'year': [y1 + i for i in range(30)], 'taxable_income': [9000.0] * 30}))))",
+         'y1 = Int(rt["tax_report"]["next_year"]["year"])\nws = withdrawal_simulation(R[:, 1:3], withdrawal_rule("percent"; rate = 5); start_value = rt, tax = SL.tax_profile(; guenstigerpruefung = true, income = SL.income_tariff(SL.RFrame("year" => collect(y1:(y1 + 29)), "taxable_income" => fill(9000.0, 30)))))'),
+  num = c("withdrawal_simulation(R[, 1:3], withdrawal_rule('percent', rate = 5), start_value = rt, tax = tax_profile(church_tax = 9, income = income_tariff(60000)))",
+          "ws = withdrawal_simulation(R[:, :3], rule=withdrawal_rule(type='percent', rate=5), start_value=rt, tax=simlev.tax_profile(church_tax=9, income=simlev.income_tariff(60000)))",
+          'ws = withdrawal_simulation(R[:, 1:3], withdrawal_rule("percent"; rate = 5); start_value = rt, tax = SL.tax_profile(; church_tax = 9, income = SL.income_tariff(60000)))'))
+for (k in names(TTS)) wcase(paste0("ws_tt_sv_", k), paste0("{", TAX_R, TTS[[k]][1], "}"), paste0("None\n", TAX_P, TTS[[k]][2]), Is,
+                            jl = paste0("nothing\n", TAX_J, TTS[[k]][3]))
+case("ws_tt_err_svmiss", paste0(TAX_R, "y1 <- rt$tax_report$next_year$year; withdrawal_simulation(R[, 1:3], start_value = rt, tax = tax_profile(income = income_tariff(setNames(c(1e4, 1e4), y1 + c(0, 2)))))"),
+     paste0(TAX_P, "y1 = rt['tax_report']['next_year']['year']\nresult = withdrawal_simulation(R[:, :3], start_value=rt, tax=simlev.tax_profile(income=simlev.income_tariff({str(y1): 1e4, str(y1 + 2): 1e4})))"), Is,
+     jl = paste0(TAX_J, 'y1 = Int(rt["tax_report"]["next_year"]["year"])\nresult = withdrawal_simulation(R[:, 1:3]; start_value = rt, tax = SL.tax_profile(; income = SL.income_tariff([string(y1) => 1e4, string(y1 + 2) => 1e4])))'))
 wcase("ws_sv_result_none", paste0("{", SIM_R, "withdrawal_simulation(R[, 1:3], withdrawal_rule('percent', rate = 5), start_value = r2, tax = tax_profile())}"),
       paste0("None\n", SIM_P, "ws = withdrawal_simulation(R[:, :3], rule=withdrawal_rule(type='percent', rate=5), start_value=r2, tax=simlev.tax_profile())"), Is,
      jl = paste0("nothing\n", SIM_J, 'ws = withdrawal_simulation(R[:, 1:3], withdrawal_rule("percent"; rate = 5); start_value = r2, tax = SL.tax_profile())'))

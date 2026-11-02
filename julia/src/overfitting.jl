@@ -74,46 +74,17 @@ function _print_df(df; row_names = false)
     return sprint(io -> SL.RFmt.print_data_frame(io, df; row_names = row_names))
 end
 
-_colsum1(M, j) = (s = SL.F80(0.0); @inbounds for i in axes(M, 1); s = s + SL.F80(M[i, j]); end; s)
+# N10: Summen, Mittel und Kumulationen wie R in long double über die C-Kerne (core/slc_rbase.c)
 "`colSums` (long double, sequenziell)."
-_colsums(M::AbstractMatrix) = Float64[Float64(_colsum1(M, j)) for j in axes(M, 2)]
+_colsums(M::AbstractMatrix) = SL._ld_colsums(M)
 "`colMeans`: long-double-Summe / n."
-function _colmeans(M::AbstractMatrix)
-    n = size(M, 1)
-    n == 0 && return fill(NaN, size(M, 2))
-    return Float64[Float64(_colsum1(M, j) / SL.F80(n)) for j in axes(M, 2)]
-end
+_colmeans(M::AbstractMatrix) = size(M, 1) == 0 ? fill(NaN, size(M, 2)) : SL._ld_colsums(M; mean = true)
 "`rowSums` (long double je Zeile)."
-function _rowsums(M::AbstractMatrix)
-    out = Vector{Float64}(undef, size(M, 1))
-    for i in axes(M, 1)
-        s = SL.F80(0.0)
-        for j in axes(M, 2); s = s + SL.F80(M[i, j]); end
-        out[i] = Float64(s)
-    end
-    out
-end
+_rowsums(M::AbstractMatrix) = SL._ld_rowsums(M)
 "`rowMeans` (long double je Zeile / p)."
-function _rowmeans(M::AbstractMatrix)
-    p = size(M, 2)
-    out = Vector{Float64}(undef, size(M, 1))
-    for i in axes(M, 1)
-        s = SL.F80(0.0)
-        for j in axes(M, 2); s = s + SL.F80(M[i, j]); end
-        out[i] = Float64(s / SL.F80(p))
-    end
-    out
-end
+_rowmeans(M::AbstractMatrix) = SL._ld_rowsums(M; mean = true)
 "`cumprod` (long double)."
-function _cumprod(x)
-    out = Vector{Float64}(undef, length(x))
-    s = SL.F80(1.0)
-    for (i, v) in enumerate(x)
-        s = s * SL.F80(Float64(v))
-        out[i] = Float64(s)
-    end
-    out
-end
+_cumprod(x) = SL._rb_cumprod(Float64[Float64(v) for v in x])
 "`rowsum(M, g, reorder = FALSE)`: double-Akkumulation in Zeilenreihenfolge."
 function _rowsum(M::AbstractMatrix, codes::Vector{Int}, ng::Int)
     out = zeros(ng, size(M, 2))

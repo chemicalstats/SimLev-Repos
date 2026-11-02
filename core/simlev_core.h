@@ -48,9 +48,24 @@
  * SIMLEV_MARK_DATE.
  *
  * Fuer R stehen hinter allen Namen genau die Aufrufe, die vor der Teilung im Kern
- * standen; der R-Bau erzeugt daher denselben Maschinencode wie zuvor (geprueft per
- * Disassemblierung, Funktion fuer Funktion). Auch das Ergebnis bei zwei NaN in einer
- * Operation (welche Nutzlast bleibt) haengt davon ab.
+ * standen (seit 7.3a geprueft per Disassemblierung).
+ *
+ * NA vor NaN (N10): Treffen in einer Operation zwei NaN zusammen, haengt die Nutzlast des
+ * Ergebnisses in der Hardware davon ab, welcher Operand im Register liegt; das waehlt der
+ * Compiler (Operandenreihenfolge, Registerwahl), R, Python und Julia konnten daher
+ * verschiedene NaN liefern. Die Engine-Kerne rechnen jede Operation, deren beide
+ * Operanden aus Eingaben stammen (also beide NaN sein koennen), ueber simlev_add,
+ * simlev_sub, simlev_mul und simlev_div mit der festen Regel:
+ *   1. Ist das Ergebnis keine NaN, bleibt es unveraendert (normale Zahlen bitgleich).
+ *   2. Sonst hat NA Vorrang: ist ein Operand NA (Nutzlast 1954), ist das Ergebnis dieses
+ *      NA, still gemacht (0x7FF80000000007A2; Vorzeichen des Operanden); bei zwei NA das
+ *      linke.
+ *   3. Sonst das NaN des linken, dann des rechten Operanden (still gemacht), wie die
+ *      Hardware bei einem NaN-Operanden.
+ *   4. Entsteht die NaN erst in der Operation (Inf - Inf, 0 * Inf, 0 / 0), bleibt die
+ *      der Hardware (x86-64: 0xFFF8000000000000).
+ * Operationen mit einer Konstanten oder einem stets endlichen Wert brauchen die Regel
+ * nicht (bei nur einem NaN-Operanden ist das Ergebnis eindeutig).
  *
  * Gleitkomma: jede Kerndatei bricht bei -ffast-math ab und schaltet das
  * Zusammenziehen von a * b + c zu fma ab (Pragma; unter GCC nur, wo fma ueberhaupt
@@ -82,6 +97,38 @@ static inline double simlev_na_real(void)
 }
 #define SIMLEV_NA_REAL (simlev_na_real())
 #define SIMLEV_NA_INTEGER INT_MIN
+
+/* NA vor NaN (N10, Regel oben): Hilfen der Engine-Kerne */
+static inline uint64_t simlev_bits_(double x)
+{
+    uint64_t b;
+    memcpy(&b, &x, sizeof b);
+    return b;
+}
+static inline double simlev_quiet_(double x)              /* NaN still machen (Bit 51) */
+{
+    const uint64_t b = simlev_bits_(x) | UINT64_C(0x0008000000000000);
+    double y;
+    memcpy(&y, &b, sizeof y);
+    return y;
+}
+static inline int simlev_is_na(double x)                  /* wie R_IsNA: NaN mit Nutzlast 1954 */
+{
+    return x != x && (uint32_t) simlev_bits_(x) == 1954u;
+}
+static inline double simlev_nan2_(double r, double a, double b)
+{
+    if (r == r) return r;
+    if (simlev_is_na(a)) return simlev_quiet_(a);
+    if (simlev_is_na(b)) return simlev_quiet_(b);
+    if (a != a) return simlev_quiet_(a);
+    if (b != b) return simlev_quiet_(b);
+    return r;
+}
+static inline double simlev_add(double a, double b) { return simlev_nan2_(a + b, a, b); }
+static inline double simlev_sub(double a, double b) { return simlev_nan2_(a - b, a, b); }
+static inline double simlev_mul(double a, double b) { return simlev_nan2_(a * b, a, b); }
+static inline double simlev_div(double a, double b) { return simlev_nan2_(a / b, a, b); }
 
 #ifdef __cplusplus
 }

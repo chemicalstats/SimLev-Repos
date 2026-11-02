@@ -285,7 +285,12 @@ end
 Einkommen mit Einkommensteuertarif für `tax_profile(; income = …)` (R:
 `income_tariff()`): `taxable_income` (zvE ohne die Erträge der Simulation; Zahl,
 nach Jahren benannte Liste oder RFrame(year, taxable_income)), `tariff`
-(`nothing`: mitgelieferte Tarifdatei, Dateipfad oder `tax_tariff()`).
+(`nothing`: mitgelieferte Tarifdatei, Dateipfad oder `tax_tariff()`). Für
+`withdrawal_simulation()` gilt das zvE je Planjahr, nominal wie angegeben: eine Zahl
+für alle Planjahre oder ein Vektor ohne Namen mit einem Wert je Planjahr (in
+`simulation()` ein Fehler); nach Kalenderjahren benannt nur mit einem `SimLevResult`
+als `start_value`. Das `income` von `withdrawal_simulation()` zählt nicht zum zvE;
+einen steuerpflichtigen Teil (etwa einer Rente) selbst in `taxable_income` einrechnen.
 Ergebnis: `RList` der Klasse `SimLevIncomeTariff`.
 """
 function income_tariff(taxable_income_pos = _UNSET, tariff_pos = nothing; taxable_income = taxable_income_pos,
@@ -294,7 +299,7 @@ function income_tariff(taxable_income_pos = _UNSET, tariff_pos = nothing; taxabl
     if taxable_income isa _Unset || taxable_income === nothing
         error("income_tariff: taxable_income (zu versteuerndes Einkommen in EUR je Kalenderjahr ohne die Erträge der Simulation) fehlt.")
     end
-    _check_taxable_income(taxable_income, Int[], "income_tariff")
+    _check_taxable_income(taxable_income, Int[], "income_tariff"; plan_ok = true)   # T14: auch je Planjahr
     if tariff !== nothing && !inherits(tariff, "SimLevTaxTariff")
         tariff isa AbstractString ||
             error("income_tariff: tariff muss NULL (mitgelieferte Tarifdatei), ein Dateipfad oder ein Objekt aus tax_tariff() sein.")

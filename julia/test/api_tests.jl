@@ -486,15 +486,6 @@ end
     @test isNaN(B.r_sum([NaN, N])) && isNA(B.r_sum([N, NaN]))         # x87: ruhiges NaN schlägt Speicher-NA
     @test isNaN(B.r_prod([NaN, N])) && isNA(B.r_mean([NaN, N]))
     @test isNaN(B.colSums([NaN N; N NaN])[1]) && isNA(B.colSums([NaN N; N NaN])[2])
-    # Hardware- und Software-F80 stimmen bei NaN-Ergebnissen überein
-    v5 = [2.0, N, NaN, Inf, -Inf]
-    for t in Iterators.product(v5, v5, v5)
-        x = collect(t)
-        for f in (_SL._r_sum, _SL._r_prod)
-            h = f(_SL.F80, x, false); s = f(_SL.F80Soft, x, false)
-            @test isna_strict(h) == isna_strict(s) && isnan(h) == isnan(s)
-        end
-    end
 end
 
 @testset "Plattform-Bibliotheken" begin

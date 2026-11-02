@@ -1,3 +1,10 @@
+# Herkunft:           nachgebildet nach R 4.3.3, src/main/gram.y (Grammatik und Vorrang) und der
+#                     Semantik der Grundoperatoren
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle); gram.y: zusätzlich Romain Francois (2009-2011)
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang.
 """Ausdrücke in R-Syntax als Text auswerten (wie ``eval(parse(text = s), data, env)``).
 
 Gemeinsamer Auswerter für Bedingungen als Text in
@@ -24,7 +31,8 @@ Werte sind intern Vektoren wie in R (Listen-Unterklassen ``LGL``, ``INT``,
 logischer Vektor); alle Operationen elementweise mit Recycling und
 dreiwertiger NA-Logik, Ganzzahlarithmetik mit Überlauf → NA und Warnung,
 Zahlen wie R (``^`` über ``R_POW``, ``%%``/``%/%`` wie ``myfmod``/``myfloor``,
-Literale und ``as.numeric`` über R_strtod mit long double, Summen/Mittel über
+Literale und ``as.numeric`` über R_strtod mit long double (N11: long-double-Teile im
+C-Kern ``core/slc_rbase_num.c`` über :mod:`simlev._ext`), Summen/Mittel über
 :mod:`simlev._r.base`, ``median``, ``var``, ``sd``, ``quantile`` über
 :mod:`simlev._r.stats`, Funktionen über :mod:`simlev._r.libm`),
 Zeichenkettenvergleiche über :func:`simlev._r.stats.str_collate` (ICU wie R).
@@ -49,17 +57,19 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
+from .. import _ext
 from . import base as _base
 from . import fmt as _fmt
 from . import libm as _libm
 from . import stats as _stats
+from . import rnum as _rnum
 from .rnum import NA_REAL
 
 __all__ = ["parse_r", "eval_r", "r_strtod", "from_python", "to_python", "as_numeric", "as_logical"]
 
-LD = np.longdouble
 _IMAX = 2147483647
 _DEFAULT_NAN = struct.unpack("<d", struct.pack("<Q", 0xFFF8000000000000))[0]
+_R_NAN = struct.unpack("<d", struct.pack("<Q", 0x7FF8000000000000))[0]   # R_NaN
 _EPOCH = _dt.date(1970, 1, 1)
 _EPOCH_ORD = _EPOCH.toordinal()
 
@@ -125,173 +135,9 @@ def _isspace_c(c):
     return c in " \t\n\v\f\r"
 
 
-def r_strtod(cs, i0=0):
-    """R's ``R_strtod`` auf den Zeichen von ``cs`` ab Index ``i0`` (0-basiert).
-
-    Rückgabe ``(Wert, Endindex)``; bei ungültiger Eingabe ``(NA, i0)``.
-    """
-    n = len(cs)
-
-    def at(k):
-        return cs[k] if k < n else "\0"
-
-    p = i0
-    while _isspace_c(at(p)):
-        p += 1
-    sign = 1.0
-    if at(p) == "-":
-        sign = -1.0
-        p += 1
-    elif at(p) == "+":
-        p += 1
-
-    def low(k, m):
-        return "".join(cs[k:min(n, k + m)]).lower()
-
-    if low(p, 3) == "nan":
-        return (math.nan, p + 3)
-    if low(p, 8) == "infinity":
-        return (sign * math.inf, p + 8)
-    if low(p, 3) == "inf":
-        return (sign * math.inf, p + 3)
-    ans = LD(0.0)
-    expn = 0
-    if n - p > 2 and at(p) == "0" and at(p + 1) in "xX":
-        exph = -1
-        p += 2
-        while True:
-            c = at(p)
-            if _isdig(c):
-                ans = LD(16.0) * ans + LD(float(ord(c) - 48))
-            elif "a" <= c <= "f":
-                ans = LD(16.0) * ans + LD(float(ord(c) - 97 + 10))
-            elif "A" <= c <= "F":
-                ans = LD(16.0) * ans + LD(float(ord(c) - 65 + 10))
-            elif c == ".":
-                exph = 0
-                p += 1
-                continue
-            else:
-                break
-            if exph >= 0:
-                exph += 4
-            p += 1
-        if at(p) in "pP" and at(p) != "\0":
-            expsign = 1
-            p += 1
-            if at(p) == "-":
-                expsign = -1
-                p += 1
-            elif at(p) == "+":
-                p += 1
-            m = 0
-            while _isdig(at(p)):
-                m = m * 10 + (ord(at(p)) - 48) if m < 9999 else m
-                p += 1
-            if ans != LD(0.0):
-                expn += expsign * m
-                p2 = LD(2.0)
-                if exph > 0:
-                    if expn - exph < -122:
-                        fac = LD(1.0)
-                        k = exph
-                        while k != 0:
-                            if k & 1:
-                                fac *= p2
-                            k >>= 1
-                            p2 *= p2
-                        ans /= fac
-                        p2 = LD(2.0)
-                    else:
-                        expn -= exph
-                fac = LD(1.0)
-                k = abs(expn)
-                while k != 0:
-                    if k & 1:
-                        fac *= p2
-                    k >>= 1
-                    p2 *= p2
-                ans = ans / fac if expn < 0 else ans * fac
-        return (sign * float(ans), p)
-    nd = 0
-    while _isdig(at(p)):
-        ans = LD(10.0) * ans + LD(float(ord(at(p)) - 48))
-        p += 1
-        nd += 1
-    if at(p) == ".":
-        p += 1
-        while _isdig(at(p)):
-            ans = LD(10.0) * ans + LD(float(ord(at(p)) - 48))
-            p += 1
-            nd += 1
-            expn -= 1
-    if nd == 0:
-        return (NA_REAL, i0)
-    if at(p) in "eE" and at(p) != "\0":
-        expsign = 1
-        p += 1
-        if at(p) == "-":
-            expsign = -1
-            p += 1
-        elif at(p) == "+":
-            p += 1
-        m = 0
-        while _isdig(at(p)):
-            m = m * 10 + (ord(at(p)) - 48) if m < 9999 else m
-            p += 1
-        expn += expsign * m
-    if expn + nd < -300:
-        for _ in range(nd):
-            ans /= LD(10.0)
-        expn += nd
-    p10 = LD(10.0)
-    fac = LD(1.0)
-    with np.errstate(all="ignore"):
-        if expn < -307:
-            k = -expn
-            while k != 0:
-                if k & 1:
-                    fac /= p10
-                k >>= 1
-                p10 *= p10
-            ans *= fac
-        elif expn < 0:
-            k = -expn
-            while k != 0:
-                if k & 1:
-                    fac *= p10
-                k >>= 1
-                p10 *= p10
-            ans /= fac
-        elif ans != LD(0.0):
-            k = expn
-            while k != 0:
-                if k & 1:
-                    fac *= p10
-                k >>= 1
-                p10 *= p10
-            ans *= fac
-        v = float(ans)
-    if v > 1.7976931348623157e308:
-        return (math.inf if sign > 0 else -math.inf, p)
-    return (sign * v, p)
-
-
-def _isblank_str(cs, i):
-    return all(_isspace_c(c) for c in cs[i:])
-
-
-def _str2num(s):
-    """``String_to_real``: (Wert, ungültig?) – leere Zeichenkette und NA ohne Warnung."""
-    if s is None:
-        return (NA_REAL, False)
-    cs = list(s)
-    if _isblank_str(cs, 0):
-        return (NA_REAL, False)
-    v, e = r_strtod(cs, 0)
-    if _isblank_str(cs, e):
-        return (v, False)
-    return (NA_REAL, True)
+# N11: R_strtod und String_to_real stehen in simlev._r.rnum (gemeinsam mit fmt; Zahlteil im C-Kern)
+r_strtod = _rnum.r_strtod
+_str2num = _rnum.r_string_to_real
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1727,7 +1573,7 @@ def _floor(x):
 def r_fmod(x1, x2):
     """R's ``myfmod(x1, x2)`` (``x1 %% x2``)."""
     if x2 == 0.0:
-        return _DEFAULT_NAN
+        return _R_NAN   # R_NaN (positiv), auch bei NA in x1 (N11)
     if abs(x2) * _LDBL_EPS > 1 and math.isfinite(x1) and abs(x1) <= abs(x2):
         if abs(x1) == abs(x2):
             return 0.0
@@ -1735,12 +1581,8 @@ def r_fmod(x1, x2):
     q = _fdiv(x1, x2)
     if math.isfinite(q) and abs(q) * _LDBL_EPS > 1:
         _warn("probable complete loss of accuracy in modulus")
-    # NaN-Operanden: x87 liefert die NaN mit der größeren Mantisse, NA schlägt also NaN
-    if x1 != x1 or x2 != x2:
-        return NA_REAL if (isna_strict(x1) or isna_strict(x2)) else _DEFAULT_NAN
-    with np.errstate(all="ignore"):
-        tmp = LD(x1) - LD(_floor(q)) * LD(x2)
-        return float(tmp - np.floor(tmp / LD(x2)) * LD(x2))
+    # long-double-Teil im C-Kern core/slc_rbase_num.c; NaN-Operanden nach der dort beschriebenen Regel (N11)
+    return _ext.slc_r_fmod_ld(x1, x2)
 
 
 def r_idiv(x1, x2):
@@ -1752,9 +1594,7 @@ def r_idiv(x1, x2):
         if q < 0:
             return -1.0
         return -1.0 if ((x1 < 0 and x2 > 0) or (x1 > 0 and x2 < 0)) else 0.0
-    with np.errstate(all="ignore"):
-        tmp = LD(x1) - LD(_floor(q)) * LD(x2)
-        return float(LD(_floor(q)) + np.floor(tmp / LD(x2)))
+    return _ext.slc_r_idiv_ld(x1, x2)   # N11: long-double-Teil im C-Kern core/slc_rbase_num.c
 
 
 def _iop(op, x, y, of):

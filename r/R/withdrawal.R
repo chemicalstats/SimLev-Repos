@@ -169,11 +169,68 @@
 #'   \code{ceiling}, \code{floor}, \code{smoothing} und \code{exp_return}
 #'   bereits mit den Standardwerten gefuellt sind (\code{stock_share} wird
 #'   nicht gespeichert). Ausgabe mit \code{print()}.
+#' @section Quellen und Abweichungen:
+#' \describe{
+#'   \item{\code{clyatt}}{Nach Clyatt (2005): jedes Jahr \code{rate} des
+#'     aktuellen Depots, mindestens \code{floor95} Prozent der
+#'     Vorjahresentnahme, nominal; Kuerzungen in Folgejahren verketten sich
+#'     (95 % von 95 %). Keine Abweichung.}
+#'   \item{\code{endowment}}{Angelehnt an die Yale-Regel (Swensen 2009,
+#'     Kap. 3, mit Verweis auf Tobin 1974): Gewicht mal Vorjahresentnahme plus
+#'     (1 - Gewicht) mal Zielrate mal Vermoegen; Yale frueher 70 %, heute
+#'     80 %. Abweichend: Yale wendet die Zielrate auf den Wert zum Ende des
+#'     vorigen Geschaeftsjahres an und schreibt die Summe beider Teile mit
+#'     der Inflation fort; SimLev nimmt das Depot zu Beginn des Planjahres und
+#'     inflationiert nur die Vorjahresentnahme.}
+#'   \item{\code{one_over_n}}{Nach Bogleheads Wiki, Withdrawal methods
+#'     (1/N): Depot geteilt durch die Restjahre. Abweichend: das Wiki
+#'     empfiehlt 1/N eher als Hoechstbetrag; SimLev entnimmt genau 1/N.}
+#'   \item{\code{abw}}{Angelehnt an die jaehrlich neu berechnete virtuelle
+#'     Annuitaet (ARVA) von Waring & Siegel (2015): Rate einer
+#'     vorschuessigen Annuitaet mit dem aktuellen Depot ueber die Restjahre.
+#'     Abweichend: feste erwartete Realrendite \code{exp_return} statt der
+#'     aktuellen Marktzinsen; reales Zielvermoegen \code{fv} als eigene
+#'     Ergaenzung.}
+#'   \item{\code{cape}}{Nach Jeske (2017): Rate = a + b / CAPE auf das
+#'     aktuelle Depot; 1,75 % und 0,5 sind eine der dort gerechneten
+#'     Varianten. Abweichend: dort monatlich mit den Werten vom Ende des
+#'     Vormonats, in SimLev jaehrlich mit dem CAPE zu Beginn des
+#'     Planjahres; CAPE <= 0 ergibt nur a (eigene Festlegung).}
+#'   \item{\code{sensible}}{Angelehnt an Ponzo (o. J.), Sensible
+#'     Withdrawals: Grundentnahme plus ein Anteil (dort Beispiele 10 und
+#'     25 %) des Zuwachses, wenn das Depot nach der Grundentnahme staerker
+#'     als die Inflation gewachsen ist. Abweichend bzw. dort offen: SimLev
+#'     setzt die Grundentnahme als inflationierte Erstentnahme
+#'     \eqn{rate \cdot P_1}, misst den Zuwachs als reales Depot vor der Entnahme minus
+#'     reales Depot nach der Vorjahresentnahme und begrenzt den Zusatz nicht.}
+#'   \item{\code{hebeler}}{Angelehnt an Hebelers Retirement Autopilot
+#'     (Hebeler 2001); Gewichtung 75 % inflationierte Vorjahresentnahme plus
+#'     25 % Annuitaet nach Steiner (2015). Abweichend: Hebeler rechnet die
+#'     Annuitaet ueber die Lebenserwartung (IRS-Tabellen) mit einem niedrigen
+#'     Realzins, SimLev ueber die Restjahre der Simulation mit
+#'     \code{exp_return}.}
+#' }
 #' @references Bengen (1994, 2001); Cooley, Hubbard & Walz (1998);
 #'   Guyton & Klinger (2006), Journal of Financial Planning 19(3);
 #'   Vanguard (2021), Sustainable spending rates in turbulent markets;
 #'   Bogleheads Wiki, Variable percentage withdrawal; Kitces (2015);
-#'   Suarez, Suarez & Walz (2015), Financial Services Review 24.
+#'   Suarez, Suarez & Walz (2015), Financial Services Review 24;
+#'   Clyatt, B. (2005), Work Less, Live More: The New Way to Retire Early,
+#'   Nolo, Berkeley; Swensen, D. F. (2009), Pioneering Portfolio Management,
+#'   Fully Revised and Updated, Free Press, Kap. 3; Tobin, J. (1974), What
+#'   is permanent endowment income?, American Economic Review 64(2),
+#'   427-432; Bogleheads Wiki, Withdrawal methods,
+#'   \url{https://www.bogleheads.org/wiki/Withdrawal_methods}; Waring, M. B.
+#'   & Siegel, L. B. (2015), The only spending rule article you will ever
+#'   need, Financial Analysts Journal 71(1), 91-107,
+#'   \doi{10.2469/faj.v71.n1.2}; Jeske, K. (2017), The ultimate guide to safe
+#'   withdrawal rates - Part 18: Flexibility and the mechanics of CAPE-based
+#'   rules, earlyretirementnow.com, 30.08.2017; Ponzo, P. (o. J.), Sensible
+#'   withdrawals, gummy-stuff,
+#'   \url{https://www.financialwisdomforum.org/gummy-stuff/sensible_withdrawals.htm};
+#'   Hebeler, H. K. (2001), J.K. Lasser's Your Winning Retirement Plan,
+#'   Wiley; Steiner, K. (2015), Bud Hebeler's Autopilot withdrawal rule,
+#'   Blog How much can I afford to spend in retirement?, 22.01.2015.
 #' @seealso [withdrawal_simulation()], [withdrawal_max_rate()], [withdrawal_horizon()]
 #' @examples
 #' withdrawal_rule("constant", rate = 4)
@@ -940,6 +997,29 @@ withdrawal_perfect_rate <- function(real_returns, legacy = 0) {
 #' Entnahme, Umschichtungen gibt es in der Entnahmephase nicht; die Lots
 #' werden also nur durch Verkaeufe und Vorabpauschalen fortgeschrieben.
 #'
+#' Tarifweg (\code{tax = tax_profile(income = income_tariff())}): Verkaeufe und
+#' Vorabpauschalen werden unterjaehrig mit der Abgeltungsteuer belastet. Nach
+#' jedem Planjahr folgt je Pfad eine Veranlagung wie der Jahresabschluss von
+#' [simulation()] mit einem festen Tarif aus [tax_tariff()]:
+#' Kapitalertraege K = mit Abgeltungsteuer belastete Bemessungsgrundlage des
+#' Planjahres (nach Teilfreistellung, Verlusttopf und Sparer-Pauschbetrag; die
+#' Vorabpauschale zaehlt im Jahr ihres Zuflusses), Kirchensteuer als
+#' Sonderausgabe im Zahlungsjahr (Saldo des Bescheids des Vorjahres; im ersten
+#' Planjahr 0), mit \code{guenstigerpruefung = TRUE} der Vergleich mit dem
+#' Tarif auf zvE + K. Der Saldo (Nachzahlung bzw. Erstattung) wird mit der
+#' ersten Entnahme des Folgejahres gezahlt bzw. mindert sie (wie die Steuer auf
+#' die Vorabpauschale); eine Erstattung ueber diese Entnahme hinaus fliesst als
+#' Geld ins Depot. Am Pfadende und am Horizont wird das letzte Planjahr sofort
+#' veranlagt und abgerechnet wie in \code{simulation()} am letzten Tag (der
+#' Zwangsverkauf fuer die Vorabpauschale zaehlt zu diesem Jahr); mit
+#' Guenstigerpruefung wird die Vorabpauschale des letzten Planjahres (Zufluss im
+#' Folgejahr) zusaetzlich fuer das Folgejahr veranlagt, sofern dafuer ein zvE
+#' vorliegt (eine Zahl fuer alle Jahre bzw. ein benannter Wert fuer dieses
+#' Kalenderjahr). Nachzahlungen werden per Verkauf, Erstattungen als Geld ins
+#' Depot abgerechnet; alle Salden zaehlen in \code{taxes}. Ohne Kirchensteuer
+#' und ohne Guenstigerpruefung ist der Saldo stets 0. Die Jahreszeilen stehen
+#' im Ergebnis unter \code{tariff_years}.
+#'
 #' Kalender: Die Entnahmephase kennt keine Kalenderjahre; ihr erstes Planjahr
 #' gilt als das Jahr nach dem letzten Datentag der Ansparphase
 #' (\code{tax_report$next_year$year}), jedes weitere Planjahr als ein neues
@@ -963,9 +1043,11 @@ withdrawal_perfect_rate <- function(real_returns, legacy = 0) {
 #' Satz nach § 32d Abs. 1 EStG, mit \code{guenstigerpruefung} und
 #' \code{income_rate()} gegebenenfalls der persoenliche Satz, wie in
 #' [simulation()]); Kirchensteuer und Guenstigerpruefung der Ansparphase werden
-#' nicht uebernommen, sondern in \code{tax} ausdruecklich angegeben; den
-#' Tarifweg (\code{income_tariff()}) bildet die Entnahmephase nicht ab
-#' (Fehler). (3) Ordergebuehren beim Verkauf bildet die Entnahmephase nicht
+#' nicht uebernommen, sondern in \code{tax} ausdruecklich angegeben. Mit dem
+#' Tarifweg (\code{income_tariff()}) gilt unterjaehrig die Abgeltungsteuer und
+#' je Planjahr eine Veranlagung (siehe Tarifweg); das zvE gilt fuer alle Pfade
+#' gleich, wird nicht mit der Inflation fortgeschrieben, und \code{income}
+#' zaehlt nicht dazu. (3) Ordergebuehren beim Verkauf bildet die Entnahmephase nicht
 #' ab (Warnung, wenn sie in der Ansparphase gesetzt waren). (4) Verschiedene
 #' Teilfreistellungen, Regime \code{"capital_gains"} neben Fonds und
 #' \code{"private_sale"} (§ 23 EStG) werden nicht getrennt besteuert
@@ -1054,16 +1136,50 @@ withdrawal_perfect_rate <- function(real_returns, legacy = 0) {
 #'   Jahresbetrag in Kaufkraft des Startzeitpunkts. Einkommen mindern die
 #'   Depotentnahme (Entnahme = max(0, Regelbetrag - Einkommen)) und zaehlen im
 #'   Konsum (\code{spending}) mit.
-#' @param tax_mode \code{"none"} (Standard; keine Steuern) oder
-#'   \code{"person"} (vereinfachte deutsche Besteuerung, siehe Details).
-#' @param tax_rate Abgeltungsteuer inkl. Solidaritaetszuschlag in Prozent
-#'   (Standard 26.375; 0 bis 100). Wie in [simulation()] sind
-#'   \code{tax_rate}, \code{partial_exemption}, \code{sale_cost},
-#'   \code{cost_basis}, \code{sparer_pauschbetrag},
-#'   \code{loss_carryforward} und \code{gamma} einzelne endliche Zahlen im
-#'   zulaessigen Bereich (sonst Fehler); Werte zwischen 0 und 1 bei
-#'   \code{tax_rate}, \code{partial_exemption} und \code{cost_basis} sowie
-#'   zwischen 0 und 0,05 bei \code{inflation} (Zahl) und \code{base_rate}
+#' @param tax Steuerdaten der Person: \code{NULL} (Standard; keine Steuern)
+#'   oder ein Objekt aus [tax_profile()] (vereinfachte deutsche Besteuerung,
+#'   siehe Details). Ausgewertet werden \code{rate} (Abgeltungsteuer inkl.
+#'   Solidaritaetszuschlag in Prozent, Standard 26.375), \code{church_tax}
+#'   (Kirchensteuer in Prozent; der Satz der Abgeltungsteuer folgt dann
+#'   § 32d Abs. 1 EStG wie in [simulation()]),
+#'   \code{guenstigerpruefung} mit \code{income = income_rate()}
+#'   (Guenstigerpruefung wie in [simulation()]: einmal je
+#'   Lauf; ist der Grenzsteuersatz einschliesslich Soli und Kirchensteuer
+#'   niedriger als die Abgeltungsteuer, gilt er fuer alle Verkaeufe und
+#'   Vorabpauschalen aller Pfade und Planjahre; ohne \code{income} Warnung und
+#'   Abgeltungsteuer; \code{income_rate()} ohne \code{guenstigerpruefung = TRUE}
+#'   wirkt nicht) und
+#'   \code{sparer_pauschbetrag} (Sparer-Pauschbetrag je Planjahr als nominaler
+#'   Geldbetrag, Standard 1000; 2000 bei Zusammenveranlagung; 0 = ohne). Bei
+#'   \code{start_value} = \code{SimLevResult} mit \code{tax_report$next_year}
+#'   steht im ersten Planjahr nur dieser Betrag minus
+#'   \code{next_year$sparer_pauschbetrag_used} zur Verfuegung (siehe Details,
+#'   Kalender; bei gleichem Pauschbetrag wie in der Ansparphase
+#'   \code{next_year$sparer_pauschbetrag_remaining}). Angaben, die die
+#'   Entnahmephase nicht abbildet (\code{private_sale_threshold} ungleich 1000,
+#'   \code{base_rate}, \code{harvest}), ergeben einen Fehler; der Basiszins kommt
+#'   aus \code{base_rate} dieser Funktion. Mit
+#'   \code{income = income_tariff(taxable_income, tariff)}
+#'   rechnet die Entnahmephase den Tarifweg wie [simulation()]:
+#'   unterjaehrig Abgeltungsteuer, nach jedem Planjahr je Pfad eine Veranlagung
+#'   (siehe Details, Tarifweg). \code{taxable_income} ist das zu versteuernde
+#'   Einkommen ohne die Ertraege der Entnahme, nominal in EUR genau wie angegeben
+#'   (ohne Fortschreibung mit der Inflation): eine Zahl gilt fuer alle Planjahre,
+#'   ein Vektor ohne Namen braucht einen Wert je Planjahr; nach Kalenderjahren
+#'   benannt (Vektor oder data.frame wie in \code{simulation()}) nur mit einem
+#'   \code{SimLevResult} als \code{start_value} (Planjahr 1 =
+#'   \code{tax_report$next_year$year}), sonst Fehler. \code{income} dieser Funktion
+#'   zaehlt nicht zum zvE; einen steuerpflichtigen Teil (etwa einer Rente) selbst
+#'   in \code{taxable_income} einrechnen. Kirchensteuer und Guenstigerpruefung
+#'   werden nicht aus der Ansparphase (\code{start_value} = \code{SimLevResult})
+#'   uebernommen, sondern hier ausdruecklich in \code{tax_profile()} angegeben.
+#'   Die Bestandsmerkmale (\code{partial_exemption}, \code{vorabpauschale},
+#'   \code{cost_basis}, \code{loss_carryforward}, \code{sale_cost}) sind eigene
+#'   Argumente. Wie in [simulation()] sind \code{partial_exemption},
+#'   \code{sale_cost}, \code{cost_basis}, \code{loss_carryforward} und
+#'   \code{gamma} einzelne endliche Zahlen im zulaessigen Bereich (sonst Fehler);
+#'   Werte zwischen 0 und 1 bei \code{partial_exemption} und \code{cost_basis}
+#'   sowie zwischen 0 und 0,05 bei \code{inflation} (Zahl) und \code{base_rate}
 #'   (Zahl) loesen eine Warnung aus (vermutlich Anteil statt Prozent).
 #' @param partial_exemption Teilfreistellung in Prozent (Standard 30 fuer
 #'   Aktienfonds; 15 fuer Mischfonds). Nicht angegeben und \code{start_value}
@@ -1204,6 +1320,15 @@ withdrawal_perfect_rate <- function(real_returns, legacy = 0) {
 #'     \item{\code{weights}}{Pfadgewichte (Standard 1 je Pfad).}
 #'     \item{\code{source}}{Herkunft der Renditen.}
 #'     \item{\code{elapsed}}{Rechenzeit in Sekunden (ab Start des Kerns).}
+#'     \item{\code{tariff_years}}{Nur mit dem Tarifweg (\code{income_tariff()}):
+#'       data.frame mit einer Zeile je Pfad und veranlagtem Planjahr, nach Pfad und
+#'       Jahr: \code{path}, \code{year} (Planjahr; Planjahre + 1 = Folgejahr am
+#'       Pfadende) und dieselben Spalten wie \code{tax_report$tariff_years} in
+#'       [simulation()] (zvE, Kirchensteuer-Sonderausgaben und ihre Wirkung,
+#'       § 23-Spalten, in der Entnahme 0, \code{capital_income} = K, Abgeltungsteuer,
+#'       Tarif auf K, Belastung ohne und mit Guenstigerpruefung, \code{guenstiger},
+#'       \code{settlement} > 0 Nachzahlung bzw. < 0 Erstattung, \code{refund},
+#'       \code{church_tax_settlement_next_year}); Betraege nominal in EUR.}
 #'   }
 #'   Auswertung mit \code{print()}, \code{summary()} und \code{plot()}
 #'   (siehe [SimLevWithdrawal-methods]).
@@ -1240,10 +1365,13 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
   tax_mode <- .wd_tax_mode(tax)
   # 6.5b: Satz wie in simulation() (.tax_rates: Kirchensteuer, Guenstigerpruefung einmal je Lauf); die Angaben
   # stehen ausdruecklich in tax_profile(), aus der Ansparphase wird nichts uebernommen
+  # T14: Tarifweg (income_tariff()): unterjaehrig Abgeltungsteuer, Veranlagung je Planjahr und Pfad im Kern
+  tariff_on <- !is.null(tax) && inherits(tax$income, "SimLevIncomeTariff")
   tax_rate <- if (is.null(tax)) 26.375 / 100 else {
     ti <- tax$income
-    .tax_rates(tax$rate, tax$church_tax, tax$guenstigerpruefung, ti$marginal_rate, !is.null(ti) && ti$soli_rate != 0,
-               if (is.null(ti)) 5.5 else ti$soli_rate, who = "withdrawal_simulation")$effective_tax_rate
+    ir <- inherits(ti, "SimLevIncomeRate")
+    .tax_rates(tax$rate, tax$church_tax, tax$guenstigerpruefung, if (ir) ti$marginal_rate, ir && ti$soli_rate != 0,
+               if (ir) ti$soli_rate else 5.5, who = "withdrawal_simulation", tariff_on = tariff_on)$effective_tax_rate
   }
   sparer_pauschbetrag <- if (is.null(tax)) 1000 else tax$sparer_pauschbetrag
   if (!is.null(horizon) && !inherits(horizon, "SimLevHorizon")) {
@@ -1288,8 +1416,10 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
                                                            length(e$amount) == 1L && is.finite(e$amount), TRUE))))
     stop("income muss eine Liste von list(start = Jahr, end = Jahr, amount = Betrag) sein (amount: realer Jahresbetrag).")
   # Startvermoegen aus einer Ansparphase uebernehmen
-  lots <- NULL; adopted <- list(); spb_used1 <- 0
+  lots <- NULL; adopted <- list(); spb_used1 <- 0; year1 <- NULL
   if (inherits(start_value, "SimLevResult")) {
+    y1 <- start_value$tax_report$next_year$year             # Kalenderjahr des ersten Planjahres (Tarifweg)
+    if (is.numeric(y1) && length(y1) == 1L && is.finite(y1)) year1 <- as.integer(y1)
     acc <- result_index(start_value)
     sv <- utils::tail(acc$worth, 1)
     if (!is.finite(sv) || sv <= 0) {
@@ -1470,13 +1600,22 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
   }
   rp <- .wd_param_vector(rule)
   kp <- min(kp, ncol(R))
+  # T14: Tarifweg: zvE je Planjahr (nominal wie angegeben; income zaehlt nicht dazu) und Tarif wie in simulation()
+  tariff_par <- zve <- numeric(0)
+  if (tariff_on) {
+    zve <- .wd_zve(tax$income$taxable_income, ny, year1)
+    tt <- tax$income$tariff %||% tax_tariff()
+    ck <- if (!is.null(tax$church_tax) && tax$church_tax > 0) tax$church_tax / 100 else 0
+    tariff_par <- .wd_tariff_par(tt, ck, tax$guenstigerpruefung)
+  }
   t0 <- Sys.time()
   core <- .wd_simulate(R, I, CAPE, BASE, as.integer(ppy), .wd_rules[[rule$type]], rp, timing == "start",
                        start_value, inc, tax_mode == "person", tax_rate, partial_exemption / 100,
                        sparer_pauschbetrag, isTRUE(vorabpauschale), sale_cost / 100, cost_basis / 100,
                        loss_carryforward, kp > 0 || !is.null(horizon),
                        lots$n %||% numeric(0), lots$basis %||% numeric(0), lots$vp %||% numeric(0), lots$group %||% integer(0),
-                       if (spb_used1 > 0) max(0, sparer_pauschbetrag - spb_used1) else -1, !is.null(horizon))
+                       if (spb_used1 > 0) max(0, sparer_pauschbetrag - spb_used1) else -1, !is.null(horizon),
+                       tariff_par, zve)
   sp <- core$spending
   w0 <- sp[1, ]
   ce_fun <- function(c) { c <- pmax(c, 1e-9 * start_value)
@@ -1531,6 +1670,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
               historical = isTRUE(x$historical), weights = w, tax_mode = tax_mode, gamma = gamma,
               timing = timing, source = x$source, adopted = if (length(adopted)) adopted else NULL,
               elapsed = as.numeric(difftime(Sys.time(), t0, units = "secs")))
+  if (tariff_on) out$tariff_years <- .wd_tariff_years(core$tariff_years, ncol(R), ny)
   class(out) <- "SimLevWithdrawal"
   out
 }
@@ -1863,12 +2003,12 @@ print.SimLevHorizon <- function(x, ...) {
   invisible(x)
 }
 
-#' Steuerangaben der Person fuer withdrawal_simulation() pruefen (F2, 6.5b)
+#' Steuerangaben der Person fuer withdrawal_simulation() pruefen (F2, 6.5b, T14)
 #'
 #' Zweck: tax = NULL (ohne Steuern) oder tax_profile(); die Entnahmephase wertet daraus rate, church_tax,
-#' sparer_pauschbetrag, guenstigerpruefung und income = income_rate() aus (Satz ueber .tax_rates). Angaben,
-#' die sie nicht abbildet (private_sale_threshold, base_rate, harvest), ergeben einen Fehler, ebenso
-#' income_tariff() (Tarifweg, Entscheidung T3 vom 01.11.2026) mit Verweis auf income_rate().
+#' sparer_pauschbetrag, guenstigerpruefung und income = income_rate() (Satz ueber .tax_rates) bzw.
+#' income_tariff() (Tarifweg T1: Veranlagung je Planjahr und Pfad im Kern, T14) aus. Angaben, die sie nicht
+#' abbildet (private_sale_threshold, base_rate, harvest), ergeben einen Fehler.
 #' Ausgabe: "none" oder "person".
 #' @keywords internal
 #' @noRd
@@ -1880,10 +2020,69 @@ print.SimLevHorizon <- function(x, ...) {
   un <- c(private_sale_threshold = !identical(as.numeric(tax$private_sale_threshold), 1000),
           base_rate = !is.null(tax$base_rate), harvest = !is.null(tax$harvest))
   if (any(un))
-    stop(sprintf("withdrawal_simulation: tax_profile(%s) bildet die Entnahmephase nicht ab; ausgewertet werden rate, church_tax, sparer_pauschbetrag, guenstigerpruefung und income = income_rate() (Basiszins \u00fcber base_rate von withdrawal_simulation()).",
+    stop(sprintf("withdrawal_simulation: tax_profile(%s) bildet die Entnahmephase nicht ab; ausgewertet werden rate, church_tax, sparer_pauschbetrag, guenstigerpruefung und income = income_rate() oder income_tariff() (Basiszins \u00fcber base_rate von withdrawal_simulation()).",
                  paste(names(un)[un], collapse = ", ")), call. = FALSE)
-  if (inherits(tax$income, "SimLevIncomeTariff"))
-    stop("withdrawal_simulation: tax_profile(income = income_tariff()) bildet die Entnahmephase noch nicht ab (keine Veranlagung je Planjahr); f\u00fcr die G\u00fcnstigerpr\u00fcfung income = income_rate(marginal_rate) verwenden (Grenzsteuersatz in Prozent, z. B. 42).",
-         call. = FALSE)
   "person"
+}
+
+#' Jahreszeilen des Tarifwegs (T14) aus dem Kern als data.frame
+#'
+#' Eingabe: M (Matrix 25 x (ny + 1) Pfade: Zeilen wie die Spalten von tax_report$tariff_years in simulation(); Spalte
+#' (Pfad - 1) (ny + 1) + Planjahr, Jahr NA = keine Veranlagung), paths, ny.
+#' Ausgabe: data.frame mit path, year (Planjahr) und den Spalten von tax_report$tariff_years, nach Pfad und Jahr.
+#' @keywords internal
+#' @noRd
+.wd_tariff_years <- function(M, paths, ny) {
+  cols <- c("year", "taxable_income", "church_tax_paid_deductible", "church_tax_refunded", "church_tax_net_deduction",
+            "taxable_income_net", "deduction_effect", "gain_p23", "income_tax_p23", "soli_p23", "church_tax_p23", "tax_p23",
+            "capital_income", "abgeltung_burden", "church_tax_withheld_k", "tariff_income_tax_k", "tariff_soli_k",
+            "tariff_church_tax_k", "tariff_burden", "burden_without_gp", "burden_with_gp", "guenstiger", "settlement",
+            "refund", "church_tax_settlement_next_year")
+  keep <- which(!is.na(M[1L, ]))
+  d <- data.frame(path = as.integer((keep - 1L) %/% (ny + 1L) + 1L))
+  for (j in seq_along(cols)) d[[cols[j]]] <- M[j, keep]
+  d$year <- as.integer(d$year); d$guenstiger <- d$guenstiger != 0
+  rownames(d) <- NULL
+  d
+}
+
+#' Tarifparameter fuer den Kern (T14, core/tariff_core_impl.h)
+#'
+#' Eingabe: tt (Objekt aus tax_tariff()), church_k (church_tax / 100), use_gp (Guenstigerpruefung).
+#' Ausgabe: Zahlenvektor use_gp, church_k, KapESt-Satz 0.25 / (1 + 0.25 k) (wie simulation()), Soli-Freigrenze,
+#' -Satz, -Milderung, Zahl der Zonen, dann je Zone ab, bezug, teiler, a, b, c.
+#' @keywords internal
+#' @noRd
+.wd_tariff_par <- function(tt, church_k, use_gp) {
+  z <- tt$zones; s <- tt$soli
+  c(as.numeric(isTRUE(use_gp)), church_k, 0.25 / (1 + 0.25 * church_k), s$freigrenze, s$satz, s$milderung,
+    nrow(z), z$ab, z$bezug, z$teiler, z$a, z$b, z$c)
+}
+
+#' zvE je Planjahr fuer den Tarifweg der Entnahme (T14)
+#'
+#' Eingabe: x (taxable_income aus income_tariff()), ny (Planjahre), year1 (Kalenderjahr des ersten Planjahres
+#' aus tax_report$next_year$year eines SimLevResult als start_value, sonst NULL).
+#' Formen: eine Zahl gilt fuer alle Planjahre, ein Vektor ohne Namen braucht die Laenge ny; nach Kalenderjahren
+#' benannt (Vektor, data.frame) nur mit year1 (Planjahr i = year1 + i - 1). Nominal wie angegeben.
+#' Ausgabe: Zahlenvektor der Laenge ny + 1 (Planjahre und Folgejahr fuer die Abrechnung am Pfadende; NA = kein
+#' zvE fuer das Folgejahr, dort dann keine Veranlagung, wie simulation()).
+#' @keywords internal
+#' @noRd
+.wd_zve <- function(x, ny, year1 = NULL) {
+  who <- "withdrawal_simulation"
+  form <- sprintf("eine Zahl (zvE in EUR f\u00fcr alle Planjahre), ein Vektor ohne Namen mit einem Wert je Planjahr (L\u00e4nge %d)%s",
+                  ny, if (is.null(year1)) "" else
+                    sprintf(" oder nach Kalenderjahren benannt (Vektor bzw. data.frame mit den Spalten year und taxable_income; Planjahr 1 = %d)", year1))
+  if (is.numeric(x) && !is.data.frame(x) && is.null(names(x))) {
+    if (length(x) == 1L) return(rep(as.numeric(x), ny + 1L))
+    if (length(x) == ny) return(c(as.numeric(x), NA_real_))
+    stop(sprintf("%s: taxable_income (income_tariff()) hat %d Werte, die Entnahme %d Planjahre; erwartet wird %s.",
+                 who, length(x), ny, form), call. = FALSE)
+  }
+  if (is.null(year1))
+    stop(sprintf("%s: taxable_income (income_tariff()) nach Kalenderjahren l\u00e4sst sich nur mit einem SimLevResult als start_value auf Planjahre abbilden (Planjahr 1 = tax_report$next_year$year); erwartet wird %s.",
+                 who, form), call. = FALSE)
+  zv <- .check_taxable_income(x, seq.int(year1, length.out = ny), who = who)
+  unname(zv$by_year[as.character(seq.int(year1, length.out = ny + 1L))])
 }

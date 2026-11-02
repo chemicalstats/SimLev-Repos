@@ -700,17 +700,18 @@ SIMLEV_C_EXPORT int simlev_c_kendall_tau_core(const double* x, const double* y, 
 }
 
 /* ---- withdrawal_core_impl.h ----
- * mats: R, INF, CAPE, BASE (Zeiger) mit dims[8] (nr, nc je Matrix). Ergebnis in out[10] (Felder in der
+ * mats: R, INF, CAPE, BASE (Zeiger) mit dims[8] (nr, nc je Matrix). Ergebnis in out[11] (Felder in der
  * Reihenfolge wealth, spending, planned, terminal_real, terminal_nominal, taxes_real, depletion_period,
- * failed, wealth_end, taxes_end) mit den Laengen outlen[10]; odims[6]: ny, paths, wealth (nr, nc),
- * wealth_end (nr, nc). */
+ * failed, wealth_end, taxes_end, tariff_years (25 x (ny + 1) Pfade)) mit den Laengen outlen[11]; odims[8]: ny, paths, wealth
+ * (nr, nc), wealth_end (nr, nc), tariff_years (nr, nc). T14: tariff_par/zve wie in R (leer = ohne Tarifweg). */
 SIMLEV_C_EXPORT int simlev_c_wd_simulate(const double* const* mats, const int64_t* dims, int64_t ppy, int64_t rule,
                                          const double* rp, int64_t nrp, int start_timing, double start_value,
                                          const double* income, int64_t ninc, int tax_on, double tax_rate, double tfs,
                                          double spb_annual, int vp_on, double cost, double basis_ratio, double loss0,
                                          int keep, const double* lot_n, int64_t nln, const double* lot_basis,
                                          int64_t nlb, const double* lot_vp, int64_t nlv, const int* lot_group,
-                                         int64_t nlg, double spb_first, int horizon_end, double* const* out,
+                                         int64_t nlg, double spb_first, int horizon_end, const double* tariff_par,
+                                         int64_t ntp, const double* zve, int64_t nzv, double* const* out,
                                          const int64_t* outlen, int64_t* odims) {
     return cabi::run([&] {
         auto r = simlev::wd_simulate(
@@ -719,19 +720,21 @@ SIMLEV_C_EXPORT int simlev_c_wd_simulate(const double* const* mats, const int64_
             (int) ppy, (int) rule, cabi::vec(rp, nrp), start_timing != 0, start_value, cabi::vec(income, ninc),
             tax_on != 0, tax_rate, tfs, spb_annual, vp_on != 0, cost, basis_ratio, loss0, keep != 0,
             cabi::vec(lot_n, nln), cabi::vec(lot_basis, nlb), cabi::vec(lot_vp, nlv), cabi::ivec(lot_group, nlg),
-            spb_first, horizon_end != 0);
+            spb_first, horizon_end != 0, cabi::vec(tariff_par, ntp), cabi::vec(zve, nzv));
         const cabi::Mat& wealth = std::get<1>(r);
         const cabi::Mat& spending = std::get<3>(r);
         const cabi::Mat& wealth_end = std::get<17>(r);
+        const cabi::Mat& tariff_years = std::get<21>(r);
         odims[0] = spending.nr; odims[1] = spending.nc; odims[2] = wealth.nr; odims[3] = wealth.nc;
-        odims[4] = wealth_end.nr; odims[5] = wealth_end.nc;
+        odims[4] = wealth_end.nr; odims[5] = wealth_end.nc; odims[6] = tariff_years.nr; odims[7] = tariff_years.nc;
         /* Speicher in der Reihenfolge der Anlage: wealth, spending, planned, terminal, terminal_nom, taxes,
-         * depl, fail, wealth_end, taxes_end (st danach) */
+         * depl, fail, wealth_end, taxes_end, st, tariff_years (st ausgelassen) */
         std::deque<std::vector<double>>& st = cabi::alloc().store;
-        if (st.size() < 10) cabi::badcall("wd_simulate: unerwartete Ergebnisse");
-        for (int k = 0; k < 10; k++)
-            cabi::put(out[k], outlen[k], st[(std::size_t) k].data(), (cabi::idx_t) st[(std::size_t) k].size(),
-                      "wd_simulate", "Ergebnis");
+        if (st.size() < 12) cabi::badcall("wd_simulate: unerwartete Ergebnisse");
+        for (int k = 0; k < 11; k++) {
+            const std::size_t sk = (std::size_t) (k < 10 ? k : 11);
+            cabi::put(out[k], outlen[k], st[sk].data(), (cabi::idx_t) st[sk].size(), "wd_simulate", "Ergebnis");
+        }
     });
 }
 

@@ -4,7 +4,7 @@
 # Portiert aus src/library/stats/R/*.R und src/library/stats/src/*.c bzw. *.f
 # (sowie Teilen von src/main/sort.c, qsort-body.c, seq.c, cum.c) über die
 # Vorlage python/simlev/_r/stats.py. Rechenreihenfolge, long-double-
-# Akkumulation (SimLev.F80) und libm-Aufrufe (SimLev.RLibm) wie in R.
+# Akkumulation (C-Kerne core/slc_rbase*.c) und libm-Aufrufe (SimLev.RLibm) wie in R.
 #
 # Konventionen
 # * Namen wie in R bzw. der Python-Fassung, `.` → `_` (weighted.mean →
@@ -24,7 +24,7 @@
 module RStats
 
 import ..SimLev
-import ..SimLev: RList, RVector, NamedMat, RFrame, NA, isna_strict, F80
+import ..SimLev: RList, RVector, NamedMat, RFrame, NA, isna_strict
 using Dates
 
 export quantile, median, var, sd, cov, cor, cov2cor, weighted_mean, scale, approx, approxfun,

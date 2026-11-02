@@ -1,3 +1,10 @@
+# Herkunft:           nachgebildet nach R 4.3.3, src/library/stats/R/lm.R (Zugriffe), p.adjust.R,
+#                     ecdf.R, ave.R, aggregate.R
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle)
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang.
 """Generische Zugriffe ``coef``, ``fitted``, ``residuals`` sowie ``p.adjust``, ``ecdf``, ``ave`` und
 ``aggregate``, nachgebildet aus R 4.3.3 ``stats/R/lm.R`` (Zugriffe), ``p.adjust.R``, ``ecdf.R``,
 ``ave.R`` und ``aggregate.R``.
@@ -14,7 +21,7 @@ import pandas as pd
 
 from .linalg import RError, _vec_out
 from . import rnum as _rn
-from .stats_sort import LD, _rmean, _rsum, _vec, order, sort, tabulate
+from .stats_sort import _rmean, _rsum, _vec, order, sort, tabulate
 from .stats_smooth import approxfun
 
 __all__ = ["p_adjust", "ave", "aggregate", "ecdf", "fitted", "coef", "residuals"]
@@ -131,7 +138,7 @@ def ecdf(x):
     vals = pd.unique(xs)
     idx = np.searchsorted(vals, xs) + 1
     counts = tabulate(idx, nbins=vals.size)
-    yv = np.cumsum(counts.astype(LD)).astype(np.float64) / n
+    yv = np.cumsum(counts.astype(np.int64)).astype(np.float64) / n   # N11: ganzzahlig wie R (und Julia)
     f = approxfun(vals, yv, method="constant", yleft=0.0, yright=1.0, f=0, ties="ordered")
     f.nobs = n
     f.knots = vals

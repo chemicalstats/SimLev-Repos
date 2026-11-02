@@ -27,7 +27,6 @@ include("cabi.jl")           # N7: geteilte C++-Kerne über die C-ABI-Hülle (in
 using .SLib: LIBSLC
 include("r/rbase_c.jl")       # N8: Grundfunktionen mit R-Regeln aus libslc (core/slc_rbase*.c)
 include("r/types.jl")
-include("r/ld80.jl")
 include("r/rnum.jl")
 include("r/rformat.jl")
 include("r/libm.jl")

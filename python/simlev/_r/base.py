@@ -1,3 +1,15 @@
+# Herkunft:           übersetzt aus R 4.3.3, src/main/summary.c, cum.c, array.c, arithmetic.c;
+#                     src/library/stats/src/zeroin.c (R_zeroin2); nachgebildet nach R 4.3.3,
+#                     src/library/stats/R/nlm.R (uniroot)
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle); Verfahren R. P. Brent, Algorithms for
+#                     Minimization without Derivatives (1973), über Netlib go/fmin.f (ohne Urheber-
+#                     und Lizenzvermerk) bzw. c/brent.shar (Kopf nicht geprüft); zeroin.c:
+#                     Ergänzungen von Peter Dalgaard
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang: Summen und Kumulationen rechnen seit N8 die C-Kerne
+#                     core/slc_rbase*.
 """Basis-Numerik wie in R (long-double-Akkumulation).
 
 Re-exportiert die Summenhilfen aus :mod:`simlev._r.rnum` (unterste Schicht:

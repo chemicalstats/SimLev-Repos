@@ -1,3 +1,11 @@
+# Herkunft:           übersetzt aus R 4.3.3, src/library/stats/src/cov.c; nachgebildet nach R 4.3.3,
+#                     src/library/stats/R/cor.R; src/library/base/R/scale.R
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle)
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang: Kovarianz und Korrelation rechnet seit N8 der C-Kern
+#                     core/slc_rbase_cov.c.
 """Kovarianz und Korrelation (``cor``, ``cov``, ``var``, ``sd``, ``cov2cor``) sowie ``scale``, nachgebildet aus
 R 4.3.3 ``src/library/stats/src/cov.c``, ``stats/R/cor.R`` und ``base/R/scale.R``.
 

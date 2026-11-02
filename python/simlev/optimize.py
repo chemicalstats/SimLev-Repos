@@ -31,7 +31,7 @@ from ._r import libm as _libm
 from . import _lib
 from ._r import linalg as _la          # bleibende Hilfen diag, outer (Inventar A.3.2)
 from ._r.rlist import RList
-from ._r.rnum import r_mean, r_pow, r_sd
+from ._r.rnum import r_cumsum, r_mean, r_pow, r_sd
 from .tactical import (
     _as_dates, _as_weights_m, _colmeans, _days, _fmt1, _hold_rows_m, _ldsum, _mean_int,
     _period_last, _rowsums, _setdiff, _unique,
@@ -43,7 +43,6 @@ __all__ = ["portfolio_optimize", "portfolio_frontier", "portfolio_rolling", "por
            "print_SimLevOptimization", "print_SimLevFrontier", "print_SimLevCPCV",
            "plot_SimLevOptimization", "plot_SimLevFrontier"]
 
-LD = np.longdouble
 _NAN = float("nan")      # R's NaN
 _NA = _fmt.NA_REAL       # R's NA_real_
 
@@ -512,7 +511,7 @@ def _min_cvar(R, alpha, lo, hi):
 def _cdar_hist(r, alpha):
     """``.cdar_hist``: CDaR der kumulierten, nicht aufgezinsten Rendite."""
     r = np.asarray(r, dtype=np.float64).ravel()
-    C = np.concatenate(([0.0], np.cumsum(r.astype(LD)).astype(np.float64)))
+    C = np.concatenate(([0.0], r_cumsum(r)))   # N11: C-Kern (cumsum in long double wie R)
     D = (np.maximum.accumulate(C) - C)[1:]
     v = _quantile(D, 1 - alpha)
     return r_mean(D[D >= v])

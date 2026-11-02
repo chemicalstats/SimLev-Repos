@@ -31,6 +31,7 @@ import pandas as pd
 from ._r import fmt as _fmt
 from ._r.base import env_from_caller
 from ._r import libm as _libm
+from ._r.rnum import r_colmeans, r_cumsum, r_mean_int, r_rowmeans, r_rowsums, r_sum
 from .svg import _alloc_c, _alloc_ramp, _esc, _jl_str, _jl_unique
 
 
@@ -47,7 +48,6 @@ __all__ = ["SimLevWeights", "signal_state", "momentum_score", "tactical_rules", 
            "tactical_target_volatility", "tactical_conditional_volatility", "tactical_glidepath", "tactical_blend",
            "tactical_simulation", "print_SimLevWeights", "plot_SimLevWeights"]
 
-LD = np.longdouble
 _NAN = float("nan")      # R's NaN
 _NA = _fmt.NA_REAL       # R's NA_real_
 
@@ -103,39 +103,29 @@ def _find_interval(x, vec):
     return np.searchsorted(np.asarray(vec, dtype=np.float64), np.asarray(x, dtype=np.float64), side="right")
 
 
+# N11: Summen und Mittel über die C-Kerne core/slc_rbase.c (long double wie R; wie Julia seit N10)
 def _rowsums(M):
     """``rowSums`` (long double, spaltenweise)."""
-    M = np.asarray(M, dtype=np.float64)
-    if M.ndim == 1:
-        M = M.reshape(-1, 1)
-    acc = np.zeros(M.shape[0], dtype=LD)
-    for j in range(M.shape[1]):
-        acc = acc + M[:, j].astype(LD)
-    return acc.astype(np.float64)
+    return r_rowsums(M)
 
 
 def _rowmeans(M):
     M = np.asarray(M, dtype=np.float64)
-    acc = np.zeros(M.shape[0], dtype=LD)
-    for j in range(M.shape[1]):
-        acc = acc + M[:, j].astype(LD)
-    return (acc / LD(M.shape[1])).astype(np.float64)
+    if M.ndim == 1:
+        M = M.reshape(-1, 1)
+    return r_rowmeans(M)
 
 
 def _colmeans(M):
     M = np.asarray(M, dtype=np.float64)
     if M.shape[0] == 0:
         return np.full(M.shape[1], _NAN)
-    s = np.cumsum(M.astype(LD), axis=0)[-1]
-    return (s / LD(M.shape[0])).astype(np.float64)
+    return r_colmeans(M)
 
 
 def _ldsum(x):
     """``sum(x)`` (long double, sequenziell)."""
-    a = np.asarray(x, dtype=np.float64).ravel()
-    if a.size == 0:
-        return 0.0
-    return float(np.cumsum(a.astype(LD))[-1])
+    return r_sum(np.asarray(x, dtype=np.float64).ravel())
 
 
 def _mean_int(x):
@@ -143,7 +133,7 @@ def _mean_int(x):
     a = np.asarray(x).ravel().astype(np.int64)
     if a.size == 0:
         return _NAN
-    return float(LD(int(a.sum())) / LD(a.size))
+    return r_mean_int(a)
 
 
 def _is_null(x):
@@ -285,6 +275,13 @@ def _ymd(days):
     return y, m, dd
 
 
+# Teil:               _civil
+# Herkunft:           übersetzt aus H. Hinnant, chrono-Compatible Low-Level Date Algorithms,
+#                     https://howardhinnant.github.io/date_algorithms.html
+# Rechte:             gemeinfrei ("Consider these donated to the public domain.")
+# Lizenz der Vorlage: keine (gemeinfrei)
+# Änderungen:         vektorisiert mit numpy (int64, floor_divide); Monatsverschiebung als (m + 9) %
+#                     12; Ergebnis als float64.
 def _civil(y, m, d):
     """(Jahr, Monat, Tag) -> Tage seit 1970-01-01 (Arrays)."""
     y = np.asarray(y, dtype=np.int64)
@@ -937,7 +934,7 @@ def tactical_conditional_volatility(data, weights, safe, *, base=1, upper=0.8, l
     fin = np.isfinite(vm)
     ok = np.flatnonzero(fin) + 1
     first_ok = d[ok[0] - 1] if len(ok) else d[n - 1] + 1
-    cs = np.cumsum(np.where(fin, vm, 0.0).astype(LD)).astype(np.float64) if n else np.zeros(0)
+    cs = r_cumsum(np.where(fin, vm, 0.0)) if n else np.zeros(0)
     cn = np.cumsum(fin.astype(np.int64))
     th = np.full((len(grid), 3), _NA)
     for gi, g in enumerate(grid):

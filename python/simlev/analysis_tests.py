@@ -22,7 +22,7 @@ from ._r import fmt as _fmt
 from ._r.fmt import NA_REAL
 from . import _lib
 from ._r.rlist import RList
-from ._r.rnum import LD, r_isna, r_mean, r_median, r_pow, r_sd, r_sum, r_var
+from ._r.rnum import r_isna, r_mean, r_median, r_pow, r_sd, r_sum, r_var
 from .deep_analysis import (
     _col_means, _da_deflate, _da_series, _dates, _days, _ext, _fill_na, _is_num_scalar, _key_isoweek,
     _key_month, _key_year, _last_of_key, _match_arg, _mean_lgl, _message, _quantile, _sp, _stats,
@@ -189,8 +189,7 @@ def _stats_mod():
 
 
 def _sum_ld(x):
-    x = np.asarray(x, dtype=np.float64)
-    return float(np.cumsum(x.astype(LD))[-1]) if x.size else 0.0
+    return r_sum(np.asarray(x, dtype=np.float64).ravel())   # N11: C-Kern core/slc_rbase.c
 
 
 def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, breaks=None,

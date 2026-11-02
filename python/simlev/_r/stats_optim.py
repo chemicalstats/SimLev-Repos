@@ -1,3 +1,14 @@
+# Herkunft:           übersetzt aus R 4.3.3, src/library/stats/src/optimize.c (Brent_fmin), zeroin.c
+#                     (R_zeroin2); nachgebildet nach R 4.3.3, src/library/stats/R/optimize.R, nlm.R
+#                     (uniroot)
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle); Verfahren R. P. Brent, Algorithms for
+#                     Minimization without Derivatives (1973), über Netlib go/fmin.f (ohne Urheber-
+#                     und Lizenzvermerk) bzw. c/brent.shar (Kopf nicht geprüft); zeroin.c:
+#                     Ergänzungen von Peter Dalgaard
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang.
 """Eindimensionale Verfahren ``optimize`` und ``uniroot``, nachgebildet aus R 4.3.3
 ``stats/R/optimize.R`` und ``stats/src/optimize.c``.
 

@@ -386,6 +386,15 @@ case("date_flags", "format(d, '%C|%g|%10Y|%_d|%-m|%^b|%#A|%_3j|%-e|%0e|%6C|%s|%r
      jl = 'F.format_date(d, "%C|%g|%10Y|%_d|%-m|%^b|%#A|%_3j|%-e|%0e|%6C|%s|%r|%R|%T|%p|%P|%Z|%z|%h|%n|%t|%%|%q|%k|%l|%I|%Ey|%Od|%-V")')
 case("date_numeric", "format(as.Date(c(0, 19000.7, -1)), '%d.%m.%Y')", "F.format_date(np.array([0, 19000.7, -1]), '%d.%m.%Y')",
      jl = 'F.format_date([0, 19000.7, -1], "%d.%m.%Y")')
+# N11: Schalter, Breiten und E/O wie glibc unter Linux; %OS mit options(digits.secs)
+case("date_flags_glibc", "format(d, '%-5d|%5q|%Ob|%#p|%^#Z|%08s|%-3C|%5z|%#Eb|%2n|%^P|%_-4Y|%EA|%5')",
+     "F.format_date(d, '%-5d|%5q|%Ob|%#p|%^#Z|%08s|%-3C|%5z|%#Eb|%2n|%^P|%_-4Y|%EA|%5')",
+     list(d = as.Date(c("2024-03-05", "0999-12-31", "1969-12-31", "0000-01-01"))),
+     jl = 'F.format_date(d, "%-5d|%5q|%Ob|%#p|%^#Z|%08s|%-3C|%5z|%#Eb|%2n|%^P|%_-4Y|%EA|%5")')
+case("opt_digits_secs", "local({ op <- options(digits.secs = 3); on.exit(options(op)); format(as.Date(c('2020-03-04', '1999-12-31', '2000-01-01', '1970-01-01')), c('%OS', '%H:%M:%OS', '%OS1|%OS', '%%OS')) })",
+     "_r", pre = "_old = F.set_options(digits_secs=3)\ntry:\n    _r = F.format_date(np.array(['2020-03-04', '1999-12-31', '2000-01-01', '1970-01-01'], dtype='datetime64[D]'), ['%OS', '%H:%M:%OS', '%OS1|%OS', '%%OS'])\nfinally:\n    F.set_options(**_old)\n",
+     jlpre = "_old = F.set_options(digits_secs=3)\n",
+     jl = 'try F.format_date([Date(2020, 3, 4), Date(1999, 12, 31), Date(2000, 1, 1), Date(1970, 1, 1)], ["%OS", "%H:%M:%OS", "%OS1|%OS", "%%OS"]) finally F.set_options(; _old...) end')
 case("misc_null", "c(format(NULL), as.character(c(a = 1.5)), sprintf('%s', as.Date('2024-01-31')), paste(factor(c('x', 'y')), as.Date('2020-02-02')))",
      "[F.format(None), *F.as_character(pd.Series([1.5], index=['a'])), F.sprintf('%s', np.datetime64('2024-01-31')), *F.paste(pd.Categorical(['x', 'y']), np.datetime64('2020-02-02'))]",
      jl = '[F.format(nothing), F.as_character(SL.RVector([1.5]; names=["a"]))..., F.r_sprintf("%s", Date(2024, 1, 31)), F.paste(F.r_factor(["x", "y"]), Date(2020, 2, 2))...]')

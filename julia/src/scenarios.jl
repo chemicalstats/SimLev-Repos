@@ -459,15 +459,7 @@ const _DEFAULT_CRISES = RFrame(
     "end" => Date.(["1974-10-03", "1987-12-04", "2002-10-09", "2009-03-09", "2011-10-03", "2020-03-23", "2022-10-12"]))
 
 "`cumprod` (long double)."
-function _cumprod(x)
-    out = similar(x, Float64)
-    s = SimLev.F80(1.0)
-    for i in eachindex(x)
-        s = s * SimLev._ldq(Float64(x[i]))
-        out[i] = Float64(s)
-    end
-    out
-end
+_cumprod(x) = SimLev._rb_cumprod(Float64[Float64(v) for v in x])   # N10: C-Kern
 "`cummax` (NA/NaN pflanzt sich fort)."
 function _cummax(x)
     out = similar(x, Float64)

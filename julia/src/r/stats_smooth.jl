@@ -1,3 +1,10 @@
+# Herkunft:           übersetzt aus R 4.3.3, src/library/stats/src/approx.c, filter.c; nachgebildet
+#                     nach R 4.3.3, src/library/stats/R/approx.R, filter.R
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle)
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang.
 # Interpolation und Filter (approx, approxfun, r_filter) aus R 4.3.3 stats/R/approx.R, filter.R und
 # stats/src/approx.c, filter.c; Python: _r/stats_smooth.py.
 # Teil des Untermoduls RStats (eingebunden in stats.jl).

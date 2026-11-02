@@ -18,7 +18,8 @@ from typing import Any
 import numpy as np
 
 from ._r.rformat import r_deparse, r_format, r_round, r_sprintf
-from ._r.rnum import NA_REAL, LD, r_cumprod, r_cumsum, r_mean, r_pow, r_prod, r_sd
+from . import _ext
+from ._r.rnum import NA_REAL, r_cumprod, r_cumsum, r_mean, r_pow, r_prod, r_sd
 from .svg import (SimLevPlot, _MONATE_KURZ, _Canvas, _Panel, _alpha, _area, _check_svg_file, _col, _col2rgba,
                   _date_ticks, _decimate, _empty_panel, _frame, _line, _polyline, _px, _py, _r_range, _rect,
                   _c, _svg, _svg_close, _svg_open, _svgcol, _svgop, _text, _title, _to_days, _warn_unknown_kw,
@@ -221,38 +222,13 @@ def _format_amount(x: Any, signif3: bool = False) -> list[str]:
 
 
 def _r_cor(x: np.ndarray, y: np.ndarray) -> float:
-    """``stats::cor(x, y)`` für zwei vollständige Vektoren (``cov_complete2`` in ``cov.c``)."""
-    n = x.size
-
-    def mean(v):
-        s = LD(0)
-        for a in v:
-            s += LD(a)
-        t = s / LD(n)
-        if math.isfinite(float(t)):
-            s = LD(0)
-            for a in v:
-                s += LD(a) - t
-            t = t + s / LD(n)
-        return float(t)
-    xm, ym = mean(x), mean(y)
-    n1 = n - 1
-    s = LD(0)
-    for a, b in zip(x, y):
-        s += LD(a - xm) * LD(b - ym)
-    ans = float(s / LD(n1))
-
-    def sdev(v, m):
-        s = LD(0)
-        for a in v:
-            s += LD(a - m) * LD(a - m)
-        s /= LD(n1)
-        return float(np.sqrt(s))
-    sx, sy = sdev(x, xm), sdev(y, ym)
-    if sx == 0 or sy == 0:
-        return math.nan
-    ans /= (sx * sy)
-    return min(max(ans, -1.0), 1.0)
+    """``stats::cor(x, y)`` für zwei vollständige Vektoren (N11: C-Kern ``sl_r_cov``, long double wie R;
+    wie Julia seit N10)."""
+    x = np.ascontiguousarray(x, dtype=np.float64).ravel()
+    y = np.ascontiguousarray(y, dtype=np.float64).ravel()
+    ans = np.empty(1)
+    _ext.slc_r_cov(x, x.size, 1, y, 1, 4, 0, 1, ans)
+    return float(ans[0])
 
 
 def _dates_of(x: Any, n: int) -> np.ndarray:

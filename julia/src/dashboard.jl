@@ -133,38 +133,10 @@ function _format_amount(x; signif3::Bool = false)
     return out
 end
 
-"`stats::cor(x, y)` für zwei vollständige Vektoren (cov_complete2 in R's cov.c)."
+"`stats::cor(x, y)` für zwei vollständige Vektoren (N10: C-Kern `sl_r_cov`, long double wie R)."
 function _r_cor(x::Vector{Float64}, y::Vector{Float64})
-    n = length(x)
-    function mean_(v)
-        s = _LD0
-        for a in v; s = s + F80(a); end
-        t = s / F80(n)
-        if isfinite(Float64(t))
-            s = _LD0
-            for a in v; s = s + (F80(a) - t); end
-            t = t + s / F80(n)
-        end
-        return Float64(t)
-    end
-    xm, ym = mean_(x), mean_(y)
-    n1 = n - 1
-    s = _LD0
-    for (a, b) in zip(x, y)
-        s = s + F80(a - xm) * F80(b - ym)
-    end
-    ans = Float64(s / F80(n1))
-    function sdev(v, m)
-        s = _LD0
-        for a in v
-            d = F80(a - m); s = s + d * d
-        end
-        return Float64(sqrt(s / F80(n1)))
-    end
-    sx, sy = sdev(x, xm), sdev(y, ym)
-    (sx == 0 || sy == 0) && return NA
-    ans /= (sx * sy)
-    return r_min2(r_max2(ans, -1.0), 1.0)
+    ans, _ = SimLev._rb_cov(copy(x), length(x), 1, copy(y), 1, 4, false, true)
+    return ans[1]
 end
 
 function _tot_ret(r)

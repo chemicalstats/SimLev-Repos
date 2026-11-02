@@ -136,8 +136,8 @@ end
 # veränderliche Strukturen, deren Felder die Hülle über ihre Adresse liest und schreibt (Feldlagen unten
 # geprüft); Report- und Marktvektoren über ihre Datenzeiger. Ein neues Lot (Kauf) hängt Julia nach dem
 # Aufruf an. Die früheren Julia-Ports (mit nan_add/nan_mul in der Operandenfolge des R-Baus) sind
-# entfallen; treffen in einer Operation zwei NaN mit verschiedener Nutzlast zusammen (NA und NaN), kann
-# das Ergebnis wie in Python die Nutzlast des anderen Operanden tragen (Wert NA bzw. NaN wie zuvor).
+# entfallen; treffen in einer Operation zwei NaN zusammen, gilt seit N10 in allen drei Sprachen die Regel
+# „NA vor NaN“ der Kerne (core/simlev_core.h), unabhängig vom Compiler.
 
 const _CA = CAbi.Asset
 

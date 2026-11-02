@@ -29,7 +29,7 @@ from ._r import libm as _libm
 from . import _lib
 from ._r import fmt as _fmt
 from ._r.rlist import RList
-from ._r.rnum import LD, r_mean, r_mean_int, r_median, r_pow, r_prod, r_cumprod, r_sum, r_var, r_sd
+from ._r.rnum import r_colmeans, r_colsums, r_rowmeans, r_rowsums, r_mean, r_mean_int, r_median, r_pow, r_prod, r_cumprod, r_sum, r_var, r_sd
 # Grafik: Bausteine des Stils Ergebnisgrafiken und Zahlen wie in Julia aus svg.py
 from .svg import (_jl_unique, _res_abline, _res_fig, _res_finish, _res_hline, _res_legend, _res_line, _res_panel,
                   _res_points, _res_range, _res_rect, _res_vline)
@@ -76,12 +76,10 @@ def _days(d):
     return (d.astype("datetime64[D]") - _EPOCH).astype(np.int64).astype(np.float64)
 
 
+# N11: colSums/colMeans/rowSums/rowMeans über den C-Kern core/slc_rbase.c (long double wie R; wie Julia)
 def _colsums(M):
     """``colSums`` (long-double-Akkumulator, sequenziell)."""
-    n, p = M.shape
-    if n == 0:
-        return np.zeros(p)
-    return np.cumsum(M.astype(LD), axis=0)[-1].astype(np.float64)
+    return r_colsums(M)
 
 
 def _colmeans(M):
@@ -89,23 +87,15 @@ def _colmeans(M):
     n, p = M.shape
     if n == 0:
         return np.full(p, _NAN)
-    return (np.cumsum(M.astype(LD), axis=0)[-1] / LD(n)).astype(np.float64)
+    return r_colmeans(M)
 
 
 def _rowsums(M):
-    n, p = M.shape
-    acc = np.zeros(n, dtype=LD)
-    for j in range(p):
-        acc = acc + M[:, j].astype(LD)
-    return acc.astype(np.float64)
+    return r_rowsums(M)
 
 
 def _rowmeans(M):
-    n, p = M.shape
-    acc = np.zeros(n, dtype=LD)
-    for j in range(p):
-        acc = acc + M[:, j].astype(LD)
-    return (acc / LD(p)).astype(np.float64)
+    return r_rowmeans(M)
 
 
 def _rowsum(M, codes, ng):

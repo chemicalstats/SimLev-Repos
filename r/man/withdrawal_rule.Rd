@@ -183,6 +183,50 @@ aendert nur die Auswertung (Erfolg, Konsum und Endvermoegen bis zum
 Horizont); die Regel rechnet weiter mit den Restjahren der vollen
 Pfadlaenge.
 }
+\section{Quellen und Abweichungen}{
+
+\describe{
+\item{\code{clyatt}}{Nach Clyatt (2005): jedes Jahr \code{rate} des
+aktuellen Depots, mindestens \code{floor95} Prozent der
+Vorjahresentnahme, nominal; Kuerzungen in Folgejahren verketten sich
+(95 \% von 95 \%). Keine Abweichung.}
+\item{\code{endowment}}{Angelehnt an die Yale-Regel (Swensen 2009,
+Kap. 3, mit Verweis auf Tobin 1974): Gewicht mal Vorjahresentnahme plus
+(1 - Gewicht) mal Zielrate mal Vermoegen; Yale frueher 70 \%, heute
+80 \%. Abweichend: Yale wendet die Zielrate auf den Wert zum Ende des
+vorigen Geschaeftsjahres an und schreibt die Summe beider Teile mit
+der Inflation fort; SimLev nimmt das Depot zu Beginn des Planjahres und
+inflationiert nur die Vorjahresentnahme.}
+\item{\code{one_over_n}}{Nach Bogleheads Wiki, Withdrawal methods
+(1/N): Depot geteilt durch die Restjahre. Abweichend: das Wiki
+empfiehlt 1/N eher als Hoechstbetrag; SimLev entnimmt genau 1/N.}
+\item{\code{abw}}{Angelehnt an die jaehrlich neu berechnete virtuelle
+Annuitaet (ARVA) von Waring & Siegel (2015): Rate einer
+vorschuessigen Annuitaet mit dem aktuellen Depot ueber die Restjahre.
+Abweichend: feste erwartete Realrendite \code{exp_return} statt der
+aktuellen Marktzinsen; reales Zielvermoegen \code{fv} als eigene
+Ergaenzung.}
+\item{\code{cape}}{Nach Jeske (2017): Rate = a + b / CAPE auf das
+aktuelle Depot; 1,75 \% und 0,5 sind eine der dort gerechneten
+Varianten. Abweichend: dort monatlich mit den Werten vom Ende des
+Vormonats, in SimLev jaehrlich mit dem CAPE zu Beginn des
+Planjahres; CAPE <= 0 ergibt nur a (eigene Festlegung).}
+\item{\code{sensible}}{Angelehnt an Ponzo (o. J.), Sensible
+Withdrawals: Grundentnahme plus ein Anteil (dort Beispiele 10 und
+25 \%) des Zuwachses, wenn das Depot nach der Grundentnahme staerker
+als die Inflation gewachsen ist. Abweichend bzw. dort offen: SimLev
+setzt die Grundentnahme als inflationierte Erstentnahme
+\eqn{rate \cdot P_1}, misst den Zuwachs als reales Depot vor der Entnahme minus
+reales Depot nach der Vorjahresentnahme und begrenzt den Zusatz nicht.}
+\item{\code{hebeler}}{Angelehnt an Hebelers Retirement Autopilot
+(Hebeler 2001); Gewichtung 75 \% inflationierte Vorjahresentnahme plus
+25 \% Annuitaet nach Steiner (2015). Abweichend: Hebeler rechnet die
+Annuitaet ueber die Lebenserwartung (IRS-Tabellen) mit einem niedrigen
+Realzins, SimLev ueber die Restjahre der Simulation mit
+\code{exp_return}.}
+}
+}
+
 \examples{
 withdrawal_rule("constant", rate = 4)
 withdrawal_rule("guyton_klinger", rate = 5.2)
@@ -193,7 +237,23 @@ Bengen (1994, 2001); Cooley, Hubbard & Walz (1998);
 Guyton & Klinger (2006), Journal of Financial Planning 19(3);
 Vanguard (2021), Sustainable spending rates in turbulent markets;
 Bogleheads Wiki, Variable percentage withdrawal; Kitces (2015);
-Suarez, Suarez & Walz (2015), Financial Services Review 24.
+Suarez, Suarez & Walz (2015), Financial Services Review 24;
+Clyatt, B. (2005), Work Less, Live More: The New Way to Retire Early,
+Nolo, Berkeley; Swensen, D. F. (2009), Pioneering Portfolio Management,
+Fully Revised and Updated, Free Press, Kap. 3; Tobin, J. (1974), What
+is permanent endowment income?, American Economic Review 64(2),
+427-432; Bogleheads Wiki, Withdrawal methods,
+\url{https://www.bogleheads.org/wiki/Withdrawal_methods}; Waring, M. B.
+& Siegel, L. B. (2015), The only spending rule article you will ever
+need, Financial Analysts Journal 71(1), 91-107,
+\doi{10.2469/faj.v71.n1.2}; Jeske, K. (2017), The ultimate guide to safe
+withdrawal rates - Part 18: Flexibility and the mechanics of CAPE-based
+rules, earlyretirementnow.com, 30.08.2017; Ponzo, P. (o. J.), Sensible
+withdrawals, gummy-stuff,
+\url{https://www.financialwisdomforum.org/gummy-stuff/sensible_withdrawals.htm};
+Hebeler, H. K. (2001), J.K. Lasser's Your Winning Retirement Plan,
+Wiley; Steiner, K. (2015), Bud Hebeler's Autopilot withdrawal rule,
+Blog How much can I afford to spend in retirement?, 22.01.2015.
 }
 \seealso{
 \code{\link[=withdrawal_simulation]{withdrawal_simulation()}}, \code{\link[=withdrawal_max_rate]{withdrawal_max_rate()}}, \code{\link[=withdrawal_horizon]{withdrawal_horizon()}}

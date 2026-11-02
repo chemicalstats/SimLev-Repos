@@ -54,6 +54,8 @@
 #endif
 
 #include "simlev_core.h"
+// N10: Operationen, deren beide Operanden aus Eingaben stammen, rechnen ueber simlev_add/_sub/_mul/_div
+// (NA vor NaN, Regel in simlev_core.h); die Rechnung ist sonst unveraendert. Hosts: R, Python, Julia (C-ABI).
 #if !defined(SIMLEV_XLENGTH) || !defined(SIMLEV_STRING_AT)
 #error "Vor diesem Kern den Host einbinden: R simlev_capi.h, Python _ext_common.h (siehe simlev_core.h)."
 #endif
@@ -70,11 +72,12 @@ namespace simlev {
 struct neumaier_sum {
   double s = 0.0, c = 0.0;
   void add(double v) {
-    const double t = s + v;
-    if (std::fabs(s) >= std::fabs(v)) c += (s - t) + v; else c += (v - t) + s;
+    const double t = simlev_add(s, v);
+    if (std::fabs(s) >= std::fabs(v)) c = simlev_add(c, simlev_add(simlev_sub(s, t), v));
+    else c = simlev_add(c, simlev_add(simlev_sub(v, t), s));
     s = t;
   }
-  double value() const { return s + c; }
+  double value() const { return simlev_add(s, c); }
 };
 
 static inline bool lot_is_null2(simlev_host::Obj b) {
@@ -85,6 +88,13 @@ static inline double tget(simlev_host::Obj t, const char* fld) {           // %|
   simlev_host::Obj v = simlev_host::get(t, fld);
   return SIMLEV_IS_NULL(v) ? 0.0 : simlev_host::as_double(v);
 }
+// Teil:               civil_from_days2
+// Herkunft:           übersetzt aus H. Hinnant, chrono-Compatible Low-Level Date Algorithms,
+//                     https://howardhinnant.github.io/date_algorithms.html
+// Rechte:             gemeinfrei ("Consider these donated to the public domain.")
+// Lizenz der Vorlage: keine (gemeinfrei)
+// Änderungen:         nur civil_from_days; feste Ganzzahltypen long/int/unsigned statt
+//                     Template-Parameter; Rückgabe über Referenzen.
 static inline void civil_from_days2(long z, int& y, int& m, int& d) {
   z += 719468L;
   const long era = (z >= 0 ? z : z - 146096L) / 146097L;
@@ -134,10 +144,10 @@ static simlev_host::Obj flat_rate(simlev_host::Obj buys, int front_index, double
         int y, m, d; civil_from_days2(buy_days, y, m, d);
         months_factor = (12.0 - (m - 1)) / 12.0;
       }
-      double reference_value = rem * year_start_price;
-      double base_worth   = reference_value * base_rate * 0.7;
-      double market_worth = rem * market_price;
-      double growth       = std::max(0.0, market_worth - reference_value);
+      double reference_value = simlev_mul(rem, year_start_price);
+      double base_worth   = simlev_mul(reference_value, base_rate) * 0.7;
+      double market_worth = simlev_mul(rem, market_price);
+      double growth       = std::max(0.0, simlev_sub(market_worth, reference_value));
       vp = std::max(0.0, std::min(base_worth, growth)) * months_factor;
     }
     idx.push_back(i);
@@ -157,33 +167,33 @@ static simlev_host::Obj flat_rate(simlev_host::Obj buys, int front_index, double
 // § 20-Steuerkern (Port von calculate_paragraph_20_tax; .sim_p20_tax_cpp); mutiert totals in place
 static simlev_host::Obj p20_tax(double trade_gain, double bonus, simlev_host::Obj totals,
                     double tax_rate, bool use_spb) {
-  double adjusted_gain = trade_gain * (1.0 - bonus);
+  double adjusted_gain = simlev_mul(trade_gain, 1.0 - bonus);
 
   if (adjusted_gain < 0) {
-    simlev_host::set(totals, "loss_capital_gains", simlev_host::as_double(simlev_host::get(totals, "loss_capital_gains")) - adjusted_gain);
-    simlev_host::set(totals, "cgt_loss_added_ytd", tget(totals, "cgt_loss_added_ytd") - adjusted_gain);
+    simlev_host::set(totals, "loss_capital_gains", simlev_sub(simlev_host::as_double(simlev_host::get(totals, "loss_capital_gains")), adjusted_gain));
+    simlev_host::set(totals, "cgt_loss_added_ytd", simlev_sub(tget(totals, "cgt_loss_added_ytd"), adjusted_gain));
     return simlev_host::named_list("tax", 0.0, "spb_used", 0.0);
   }
 
   double pool = simlev_host::as_double(simlev_host::get(totals, "loss_capital_gains"));
   double loss_offset = std::min(adjusted_gain, pool);
-  simlev_host::set(totals, "loss_capital_gains", pool - loss_offset);
-  simlev_host::set(totals, "cgt_loss_used_ytd",  tget(totals, "cgt_loss_used_ytd") + loss_offset);
-  double gain_after_loss = adjusted_gain - loss_offset;
+  simlev_host::set(totals, "loss_capital_gains", simlev_sub(pool, loss_offset));
+  simlev_host::set(totals, "cgt_loss_used_ytd",  simlev_add(tget(totals, "cgt_loss_used_ytd"), loss_offset));
+  double gain_after_loss = simlev_sub(adjusted_gain, loss_offset);
 
   double spb_offset = 0.0;
   double spb_rem = simlev_host::as_double(simlev_host::get(totals, "sparer_pauschbetrag_remaining"));
   if (use_spb && spb_rem > 0) {
     spb_offset = std::min(gain_after_loss, spb_rem);
-    simlev_host::set(totals, "sparer_pauschbetrag_remaining",  spb_rem - spb_offset);
+    simlev_host::set(totals, "sparer_pauschbetrag_remaining",  simlev_sub(spb_rem, spb_offset));
     simlev_host::set(totals, "sparer_pauschbetrag_used_total",
-            simlev_host::as_double(simlev_host::get(totals, "sparer_pauschbetrag_used_total")) + spb_offset);
+            simlev_add(simlev_host::as_double(simlev_host::get(totals, "sparer_pauschbetrag_used_total")), spb_offset));
   }
 
-  double taxable_gain = gain_after_loss - spb_offset;
-  simlev_host::set(totals, "cgt_base_taxed_ytd", tget(totals, "cgt_base_taxed_ytd") + taxable_gain);
-  double tax = taxable_gain * tax_rate;
-  simlev_host::set(totals, "total_taxes", simlev_host::as_double(simlev_host::get(totals, "total_taxes")) + tax);
+  double taxable_gain = simlev_sub(gain_after_loss, spb_offset);
+  simlev_host::set(totals, "cgt_base_taxed_ytd", simlev_add(tget(totals, "cgt_base_taxed_ytd"), taxable_gain));
+  double tax = simlev_mul(taxable_gain, tax_rate);
+  simlev_host::set(totals, "total_taxes", simlev_add(simlev_host::as_double(simlev_host::get(totals, "total_taxes")), tax));
 
   return simlev_host::named_list("tax", tax, "spb_used", spb_offset);
 }
@@ -191,27 +201,27 @@ static simlev_host::Obj p20_tax(double trade_gain, double bonus, simlev_host::Ob
 // VP-Steuerkern (Port von calculate_vorabpauschale_tax, R-2; .sim_vp_tax_cpp); mutiert totals
 static simlev_host::Obj vp_tax(double flat_rate, double bonus, simlev_host::Obj totals,
                    double tax_rate, bool use_spb) {
-  double taxable_flat_rate = flat_rate * (1.0 - bonus);
+  double taxable_flat_rate = simlev_mul(flat_rate, 1.0 - bonus);
 
   double pool = simlev_host::as_double(simlev_host::get(totals, "loss_capital_gains"));
   double loss_offset = std::min(taxable_flat_rate, pool);
-  simlev_host::set(totals, "loss_capital_gains", pool - loss_offset);
-  simlev_host::set(totals, "cgt_loss_used_ytd",  tget(totals, "cgt_loss_used_ytd") + loss_offset);
-  double vp_after_loss = taxable_flat_rate - loss_offset;
+  simlev_host::set(totals, "loss_capital_gains", simlev_sub(pool, loss_offset));
+  simlev_host::set(totals, "cgt_loss_used_ytd",  simlev_add(tget(totals, "cgt_loss_used_ytd"), loss_offset));
+  double vp_after_loss = simlev_sub(taxable_flat_rate, loss_offset);
 
   double spb_offset = 0.0;
   double spb_rem = simlev_host::as_double(simlev_host::get(totals, "sparer_pauschbetrag_remaining"));
   if (use_spb && spb_rem > 0) {
     spb_offset = std::min(vp_after_loss, spb_rem);
-    simlev_host::set(totals, "sparer_pauschbetrag_remaining",  spb_rem - spb_offset);
+    simlev_host::set(totals, "sparer_pauschbetrag_remaining",  simlev_sub(spb_rem, spb_offset));
     simlev_host::set(totals, "sparer_pauschbetrag_used_total",
-            simlev_host::as_double(simlev_host::get(totals, "sparer_pauschbetrag_used_total")) + spb_offset);
+            simlev_add(simlev_host::as_double(simlev_host::get(totals, "sparer_pauschbetrag_used_total")), spb_offset));
   }
 
-  double taxable_gain = vp_after_loss - spb_offset;
-  simlev_host::set(totals, "cgt_base_taxed_ytd", tget(totals, "cgt_base_taxed_ytd") +
-                                        std::max(0.0, taxable_gain));
-  double tax = std::max(0.0, taxable_gain * tax_rate);
+  double taxable_gain = simlev_sub(vp_after_loss, spb_offset);
+  simlev_host::set(totals, "cgt_base_taxed_ytd", simlev_add(tget(totals, "cgt_base_taxed_ytd"),
+                                                   std::max(0.0, taxable_gain)));
+  double tax = std::max(0.0, simlev_mul(taxable_gain, tax_rate));
 
   return simlev_host::named_list("tax", tax,
                         "spb_used", spb_offset,
@@ -224,7 +234,7 @@ static inline double fifo_fast(double units, const std::vector<double>& cu,
                                const std::vector<double>& prices) {
   const int n = static_cast<int>(cu.size());
   if (units <= 0) return 0.0;
-  if (units >= cu[n - 1]) return cc[n - 1] / cu[n - 1];
+  if (units >= cu[n - 1]) return simlev_div(cc[n - 1], cu[n - 1]);
   // findInterval(units, c(0, cum)): erstes Lot mit cum >= units
   int lot = 0;
   while (lot < n && cu[lot] < units) ++lot;      // 0-basiert
@@ -232,8 +242,8 @@ static inline double fifo_fast(double units, const std::vector<double>& cu,
   if (lot_idx == 1) return prices[0];
   double prev_cost  = cc[lot_idx - 2];
   double prev_units = cu[lot_idx - 2];
-  double rem = units - prev_units;
-  return (prev_cost + rem * prices[lot_idx - 1]) / units;
+  double rem = simlev_sub(units, prev_units);
+  return simlev_div(simlev_add(prev_cost, simlev_mul(rem, prices[lot_idx - 1])), units);
 }
 
 // Verkaufsstueckzahl fuer Ziel-Nettoerloes (Port von calculate_sell_count; .sim_sell_count_cpp)
@@ -260,7 +270,7 @@ static simlev_host::Obj sell_count(simlev_host::Obj buys, int front_index, doubl
       prices.push_back(simlev_host::as_double(simlev_host::get(b, "price")));
       // § 19 InvStG: bereits versteuerte Vorabpauschale je Stueck (F9: Basis = remaining)
       double lot_vp = simlev_host::has(b, "vp") ? simlev_host::as_double(simlev_host::get(b, "vp")) : 0.0;
-      double v = (regime == 1 && lot_vp > 0) ? lot_vp / rem : 0.0;
+      double v = (regime == 1 && lot_vp > 0) ? simlev_div(lot_vp, rem) : 0.0;
       if (v > 0) any_vp = true;
       vpu.push_back(v);
     }
@@ -273,8 +283,8 @@ static simlev_host::Obj sell_count(simlev_host::Obj buys, int front_index, doubl
   neumaier_sum su, sc, sv;
   for (int i = 0; i < nl; ++i) {
     su.add(units[i]);              cu[i] = su.value();
-    sc.add(units[i] * prices[i]);  cc[i] = sc.value();
-    sv.add(units[i] * vpu[i]);     cv[i] = sv.value();
+    sc.add(simlev_mul(units[i], prices[i]));  cc[i] = sc.value();
+    sv.add(simlev_mul(units[i], vpu[i]));     cv[i] = sv.value();
   }
   // VP-Anrechnung der ersten 'sell' Stueck (FIFO), wie .sim_fifo_vp_cpp
   auto fifo_vp = [&](double sell) -> double {
@@ -284,7 +294,7 @@ static simlev_host::Obj sell_count(simlev_host::Obj buys, int front_index, doubl
     while (lot < nl && cu[lot] < sell) ++lot;
     if (lot >= nl) lot = nl - 1;
     double prev_u = lot > 0 ? cu[lot - 1] : 0.0, prev_v = lot > 0 ? cv[lot - 1] : 0.0;
-    return prev_v + (sell - prev_u) * vpu[lot];
+    return simlev_add(prev_v, simlev_mul(simlev_sub(sell, prev_u), vpu[lot]));
   };
 
   // R3a-04: loss_pool = freier Verlusttopf + freier Sparer-Pauschbetrag (Aufrufer), damit die
@@ -293,18 +303,18 @@ static simlev_host::Obj sell_count(simlev_host::Obj buys, int front_index, doubl
     if (sell <= 0) return -target;
     if (sell > total_shares) sell = total_shares;
     double fp = fifo_fast(sell, cu, cc, prices);
-    double gain = (trade_price - fp) * sell;
+    double gain = simlev_mul(simlev_sub(trade_price, fp), sell);
     double tax = 0.0;
     if (regime == 1) {                                    // investment_fund
-      double adj = (gain - fifo_vp(sell)) * (1.0 - bonus);  // § 19 InvStG vor Teilfreistellung
-      tax = std::max(adj - loss_pool, 0.0) * tax_rate;
+      double adj = simlev_mul(simlev_sub(gain, fifo_vp(sell)), 1.0 - bonus);  // § 19 InvStG vor Teilfreistellung
+      tax = simlev_mul(std::max(simlev_sub(adj, loss_pool), 0.0), tax_rate);
     } else if (regime == 2) {                             // capital_gains
-      tax = std::max(gain - loss_pool, 0.0) * tax_rate;
+      tax = simlev_mul(std::max(simlev_sub(gain, loss_pool), 0.0), tax_rate);
     }                                                     // 3/private_sale: 0
-    return sell * trade_price - tax - target;
+    return simlev_sub(simlev_sub(simlev_mul(sell, trade_price), tax), target);
   };
 
-  double initial = target / trade_price;
+  double initial = simlev_div(target, trade_price);
   double lower = std::max(1e-6, initial * 0.1);
   double upper = std::min(initial * 3.0, total_shares);
   double f_lower = objective(lower);
@@ -322,14 +332,14 @@ static simlev_host::Obj sell_count(simlev_host::Obj buys, int front_index, doubl
     sell = upper;
   } else {
     // Bisektion (Intervallhalbierung mit Abbruch bei |f| < tol oder Intervall < tol, max 30)
-    sell = (lower + upper) * 0.5;
+    sell = simlev_add(lower, upper) * 0.5;
     for (int it = 0; it < 30; ++it) {
-      double mid = (lower + upper) * 0.5;
+      double mid = simlev_add(lower, upper) * 0.5;
       double fm = objective(mid);
-      if (std::fabs(fm) < tol || (upper - lower) < tol) { sell = mid; break; }
-      if (fm * f_lower < 0) { upper = mid; f_upper = fm; }
+      if (std::fabs(fm) < tol || simlev_sub(upper, lower) < tol) { sell = mid; break; }
+      if (simlev_mul(fm, f_lower) < 0) { upper = mid; f_upper = fm; }
       else                  { lower = mid; f_lower = fm; }
-      sell = (lower + upper) * 0.5;
+      sell = simlev_add(lower, upper) * 0.5;
     }
   }
 

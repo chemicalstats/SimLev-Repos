@@ -89,8 +89,9 @@ strategies, *, …)`, `param_search(data, builder, space, *, …)`,
 1. Rechenreihenfolge 1:1 aus R/C++ übernehmen; keine Umformungen, auch
    keine mathematisch gleichwertigen.
 2. R akkumuliert `sum`, `mean`, `cumsum`, `prod`, `rowSums`, `colSums`,
-   `var`/`cov` in 80-Bit-`long double` (`numpy.longdouble`). Dafür gibt es
-   `simlev._r.rnum` bzw. `simlev._r.base` (`r_sum`, `r_mean`, …); `np.sum`
+   `var`/`cov` in 80-Bit-`long double`. Dafür gibt es die C-Kerne
+   `core/slc_rbase*.c` hinter `simlev._r.rnum` bzw. `simlev._r.base` (`r_sum`,
+   `r_mean`, `r_colmeans`, …; seit N11 kein `numpy.longdouble` mehr); `np.sum`
    und `np.cumsum` ergeben andere Bits. `cumprod` nutzt in R `LDOUBLE`,
    `cummax`/`cummin` nicht.
 3. **Keine numpy-Transzendentalfunktionen** (`np.exp`, `np.log`,
@@ -262,7 +263,7 @@ Julia-Dateien heißen gleich und gehören alle zum Untermodul `RStats`.
 | Python (`simlev/_r/`) | Julia (`julia/src/r/`) | Inhalt |
 |---|---|---|
 | `stats.py` | `stats.jl` | Sammelmodul bzw. Modulkopf `RStats` mit Exporten und `include`s |
-| `stats_sort.py` | `stats_sort.jl` | Hilfen (long double), `order`, `sort`, `rank`, `rle`, `tabulate`, `findInterval`, `cut`, `complete_cases`, partielle Sortierung, `quantile`, `median`, `weighted_mean` |
+| `stats_sort.py` | `stats_sort.jl` | Hilfen, `order`, `sort`, `rank`, `rle`, `tabulate`, `findInterval`, `cut`, `complete_cases`, partielle Sortierung, `quantile`, `median`, `weighted_mean` |
 | `stats_cor.py` | `stats_cor.jl` | `cor`, `cov`, `var`, `sd`, `cov2cor`, `scale` (cov.c) |
 | `stats_smooth.py` | `stats_smooth.jl` | `approx`, `approxfun`, `filter` (seit 9.6c ohne `fft`, `bw_nrd0`, `density`, `smooth_spline`) |
 | `stats_optim.py` | `stats_optim.jl` | `optimize`, `uniroot` (seit 9.6c ohne `optim`, `optimhess`, `nlminb`) |
@@ -364,7 +365,8 @@ Die Engine nutzt bewusst `_r.rnum` und `_r.rformat` direkt (nicht die
 R-Namen aus `_r.base` bzw. `_r.fmt`). In `rnum.py` stehen die Summen
 (`r_sum`, `r_mean` mit Korrekturdurchlauf, `r_mean_int`, `r_cumsum`,
 `r_prod`, `r_cumprod`, `r_cummax`, `r_var`, `r_sd`, `r_median`,
-`r_rowsums`, `r_colsums`; `LD = np.longdouble`), `r_pow`, `r_mod1` und die
+`r_rowsums`, `r_colsums`, `r_rowmeans`, `r_colmeans`; alle über die C-Kerne
+`core/slc_rbase*.c`), `r_pow`, `r_mod1` (`core/slc_rbase_num.c`, N11) und die
 Nullstellensuche, in `rformat.py` Runden und Textausgabe:
 
 - Runden: `r_round` (fround.c, R ≥ 4), `r_signif` (fprec.c).

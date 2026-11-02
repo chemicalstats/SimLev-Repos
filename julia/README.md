@@ -308,11 +308,11 @@ in [`DEVELOPING.md`](DEVELOPING.md), Herkunft in
 
 - **80-Bit-`long double`.** R summiert bei `sum()`, `mean()`, `var()`,
   `cumsum()`, `prod()` und `rowSums()` intern mit dem 80-Bit-Format der
-  x87-FPU. Julia kennt diesen Typ nicht. SimLev.jl enthält deshalb den Typ
-  `F80`: Auf x86-64 rechnet er direkt mit dem x87-Format der Hardware (über
-  `llvmcall`), auf anderen Prozessoren mit dem Software-Nachbau `F80Soft`,
-  der Rundung, Über- und Unterlauf und die NaN-Regeln der x87-FPU bitgenau
-  nachbildet.
+  x87-FPU. Julia kennt diesen Typ nicht. SimLev.jl rechnet diese Stellen
+  (Summen, Mittel, Kumulationen, `%%`, `as.numeric(<Text>)`, `scientific()`
+  von `format()`) seit N10 ausschließlich mit den C-Kernen `core/slc_rbase*.c`
+  der Bibliothek libslc, die `long double` wie R nutzen (dieselbe
+  Implementierung wie in Python).
 - **Mathematische Funktionen** (`exp`, `log`, `log1p`, `pow`, `tanh` …)
   ruft SimLev wie R aus glibc-libm auf (per `ccall`); Julias eigene
   Funktionen weichen in den letzten Bits ab. Potenzen folgen R's
@@ -365,7 +365,7 @@ src/
   SimLev.jl         Modul, Exporte, Reihenfolge der Dateien
   slib*.jl          Hüllen der C-Bibliothek per ccall (Zufall, simlev_seed, Verteilungen,
                     lineare Algebra, Optimierer, Modelle, Bootstrap-Kerne)
-  r/                R-Grundfunktionen: Datenstrukturen (types.jl), F80: x87-long double (ld80.jl),
+  r/                R-Grundfunktionen: Datenstrukturen (types.jl), Hüllen der C-Kerne (rbase_c.jl),
                     R-kompatible Numerik und Textausgabe der Engine (rnum.jl, rformat.jl),
                     libm, long-double-Summen (base.jl), stats (stats.jl mit den Themen
                     stats_sort.jl, stats_cor.jl, stats_smooth.jl, stats_optim.jl,

@@ -1,3 +1,14 @@
+# Herkunft:           übersetzt aus R 4.3.3, src/main/format.c, printutils.c, printvector.c,
+#                     printarray.c, print.c, paste.c, sprintf.c, util.c; src/nmath/fround.c,
+#                     fprec.c; nachgebildet nach R 4.3.3, src/library/base/R/format.R, dataframe.R,
+#                     factor.R, dates.R
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle); fprec.c: Übersetzung einer Fortran-Routine von
+#                     W. Fullerton (Los Alamos); sprintf.c: ursprünglich Jonathan Rougier
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet seit N10 der C-Kern
+#                     core/slc_rbase_date.c.
 """R-kompatible Textausgabe und Rundung (Engine).
 
 Gegenstück zu ``julia/src/r/rformat.jl``. Nachbildungen von R-Funktionen,
@@ -18,7 +29,8 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from .rnum import LD, NA_REAL, r_isna, r_pow
+from .. import _ext
+from .rnum import NA_REAL, r_isna, r_pow
 
 __all__ = ["r_round", "r_signif", "r_format", "r_format1", "r_as_character", "r_deparse", "r_sprintf"]
 
@@ -152,12 +164,14 @@ def r_signif(x: float, digits: float = 6) -> float:
 # Zahlenformatierung wie R (format.c, printutils.c)
 # ═══════════════════════════════════════════════════════════════════════════
 
-_TBL = [LD("1e%d" % k) for k in range(28)]
 _KP_MAX = 27
 
 
 def _scientific(x: float, digits: int):
-    """``scientific()`` aus R's format.c: (neg, kpower, nsig, roundingwidens)."""
+    """``scientific()`` aus R's format.c: (neg, kpower, nsig, roundingwidens).
+
+    N11: für digits <= 15 im C-Kern ``sl_r_scientific`` (core/slc_rbase_num.c, long double wie R; dieselbe
+    Rechnung wie :func:`simlev._r.fmt._scientific` und Julia)."""
     if x == 0.0:
         return 0, 0, 1, False
     if x < 0.0:
@@ -173,35 +187,8 @@ def _scientific(x: float, digits: int):
         while i >= 2 and digs[i - 1] == "0":
             i -= 1
         return neg, kpower, i, False
-    kp = int(math.floor(math.log10(r))) - digits + 1
-    r_prec = LD(r)
-    if abs(kp) <= _KP_MAX:
-        if kp > 0:
-            r_prec = r_prec / _TBL[kp]
-        elif kp < 0:
-            r_prec = r_prec * _TBL[-kp]
-    else:
-        r_prec = r_prec / np.power(LD(10.0), LD(kp))
-    if r_prec < _TBL[digits - 1]:
-        r_prec = r_prec * LD(10.0)
-        kp -= 1
-    alpha = float(np.rint(r_prec))
-    nsig = digits
-    for _ in range(1, digits + 1):
-        alpha /= 10.0
-        if alpha == math.floor(alpha):
-            nsig -= 1
-        else:
-            break
-    if nsig == 0 and digits > 0:
-        nsig = 1
-        kp += 1
-    kpower = kp + digits - 1
-    rgt = digits - kpower
-    rgt = 0 if rgt < 0 else (_KP_MAX if rgt > _KP_MAX else rgt)
-    fuzz = 0.5 / float(_TBL[rgt])
-    rw = 0 < kpower <= _KP_MAX and LD(r) < _TBL[kpower] - LD(fuzz)
-    return neg, kpower, nsig, bool(rw)
+    kpower, nsig, rw = _ext.slc_r_scientific(r, digits)
+    return neg, kpower, nsig, rw
 
 
 def _format_real(xs: Sequence[float], digits: int = 7, nsmall: int = 0, scipen: int = 0):

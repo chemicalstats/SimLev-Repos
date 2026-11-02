@@ -58,9 +58,10 @@ int sl_garch11_nll(sl_ctx *cx, int n, const double *e, int gjr, const double *pa
  * s2_init = NaN: Stichprobenvarianz. Nicht endlich: nll = +Inf, grad = NaN. */
 int sl_garch11_grad(sl_ctx *cx, int n, const double *e, int gjr, const double *theta, double s2_init,
                     double *nll, double *grad);
-/* ML-Punktschätzer (Raster-Startwerte, BFGS, ctrl NULL: maxit 500, reltol 1e-10; sGARCH vom besten
- * Rasterpunkt, GJR seit N1 von allen sieben Rasterpunkten; mit analytischem Gradienten, GJR seit N3,
- * sGARCH seit N4);
+/* ML-Punktschätzer. GJR: Raster-Startwerte, BFGS von allen sieben Rasterpunkten (seit N1) mit analytischem
+ * Gradienten (seit N3), ctrl NULL: maxit 500, reltol 1e-10. sGARCH (N9): ein Lauf Trust-Region-Newton mit
+ * exakter Hesse-Matrix und Schranken (omega, alpha, beta >= 0, alpha + beta <= 1 - 2^-50) vom besten von
+ * 20 ausgewerteten Startpunkten; von ctrl gilt nur maxit (> 0; sonst 200), code 0 konvergiert, 1 maxit;
  * par = (mu, omega, alpha, beta, gamma), loglik, code (wie optim$convergence).
  * Fehler: n < 10 SL_ESMALL, nicht endliche Werte SL_ENONFINITE, Varianz 0 SL_EARG. */
 int sl_garch11_fit(sl_ctx *cx, int n, const double *e, int gjr, const struct sl_opt_ctrl *ctrl,

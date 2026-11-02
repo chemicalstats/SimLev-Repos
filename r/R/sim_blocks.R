@@ -272,7 +272,7 @@ income_tariff <- function(taxable_income, tariff = NULL) {
   if (missing(taxable_income) || is.null(taxable_income))
     stop("income_tariff: taxable_income (zu versteuerndes Einkommen in EUR je Kalenderjahr ohne die Ertr\u00e4ge der Simulation) fehlt.",
          call. = FALSE)
-  .check_taxable_income(taxable_income, integer(0), who = "income_tariff")
+  .check_taxable_income(taxable_income, integer(0), who = "income_tariff", plan_ok = TRUE)   # T14: auch je Planjahr
   if (!is.null(tariff) && !inherits(tariff, "SimLevTaxTariff")) {
     if (is.character(tariff) && length(tariff) == 1L && !is.na(tariff)) tariff <- tax_tariff(tariff)
     else stop("income_tariff: tariff muss NULL (mitgelieferte Tarifdatei), ein Dateipfad oder ein Objekt aus tax_tariff() sein.",

@@ -267,7 +267,8 @@ steht in [`COPYRIGHTS.md`](COPYRIGHTS.md).
 Voraussetzungen des Gleichlaufs:
 
 - **Linux auf x86-64.** R summiert intern mit 80-Bit-`long double`; die
-  Python-Fassung nutzt dafür `numpy.longdouble` in derselben Reihenfolge.
+  Python-Fassung rechnet diese Stellen in denselben C-Kernen wie Julia
+  (`core/slc_rbase*.c`, `long double` in derselben Reihenfolge).
   Auf Plattformen mit 64-Bit-`long double` (z. B. macOS auf Apple Silicon)
   rechnet auch R anders; dort können die letzten Bits abweichen.
 - **glibc-libm.** Exponential-, Logarithmus- und Potenzfunktionen kommen

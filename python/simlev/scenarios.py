@@ -22,7 +22,7 @@ from ._r import fmt as _fmt
 from ._r.base import env_from_caller
 from ._r import libm as _libm
 from ._r.rlist import RList
-from ._r.rnum import LD, r_colsums, r_cumprod, r_rowsums, r_sd, r_sum
+from ._r.rnum import r_colsums, r_cumsum, r_cumprod, r_rowsums, r_sd, r_sum
 
 __all__ = ["view_mean", "view_prob", "view_vol", "scenario_entropy_pooling", "scenario_copula", "scenario_risk",
            "scenario_crisis", "SimLevScenarios"]
@@ -506,7 +506,7 @@ def scenario_risk(x, weights, *, alpha=0.05):
     o = np.concatenate([o[~nan], o[nan]])
     qo = q[o]
     ro = r[o]
-    cw = np.cumsum(qo.astype(LD)).astype(np.float64)
+    cw = r_cumsum(qo)   # N11: C-Kern (cumsum in long double wie R)
 
     def qf(a):
         h = np.nonzero(cw >= a)[0]

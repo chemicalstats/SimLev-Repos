@@ -49,6 +49,12 @@
 //  12 cape            (a + b / CAPE) * P
 //  13 sensible        Basis (rate * P1 real) + e * realer Vorjahresgewinn
 //  14 hebeler         Autopilot II: lambda * W_vj * Infl + (1 - lambda) * PMT(r, Restjahre) * P
+//
+// Tarifweg (T14, Variante T1; tax_profile(income = income_tariff())): Veranlagung je Planjahr und Pfad mit
+// tariff_core_impl.h wie der Jahresabschluss von simulation() (.tariff_close): K = mit Abgeltungsteuer
+// belastete Bemessungsgrundlage des Planjahres (nach Teilfreistellung, Verlusttopf und Pauschbetrag; die VP
+// zaehlt im Jahr ihres Zuflusses), zvE je Planjahr nominal wie angegeben. Der Saldo wird mit der ersten
+// Entnahme des Folgejahres gezahlt bzw. mindert sie (wie vp_due); am Pfadende sofort (wie simulation()).
 
 #ifndef SIMLEV_WITHDRAWAL_CORE_IMPL_H
 #define SIMLEV_WITHDRAWAL_CORE_IMPL_H
@@ -80,6 +86,8 @@
 #include <algorithm>
 #include <limits>
 #include <vector>
+
+#include "tariff_core_impl.h"
 
 namespace simlev {
 
@@ -183,12 +191,14 @@ static double rule_amount(int rule, const double* rp, double* st, double P, doub
 // ---------------------------------------------------------------------------
 struct TaxState { double loss, spb; };
 
-// Steuer auf einen Verkaufserloes-Gewinn 'gain' (vor Teilfreistellung); mutiert Toepfe
-static double tax_on_gain(double gain, double tfs, double rate, TaxState& ts) {
+// Steuer auf einen Verkaufserloes-Gewinn 'gain' (vor Teilfreistellung); mutiert Toepfe. Tarifweg: kacc
+// sammelt die belastete Bemessungsgrundlage K des Jahres (nullptr ohne Tarifweg).
+static double tax_on_gain(double gain, double tfs, double rate, TaxState& ts, double* kacc = nullptr) {
   double taxable = gain * (1.0 - tfs);
   if (taxable <= 0) { ts.loss += -taxable; return 0.0; }
   double use = std::min(ts.loss, taxable); ts.loss -= use; taxable -= use;
   use = std::min(ts.spb, taxable); ts.spb -= use; taxable -= use;
+  if (kacc) *kacc += taxable;
   return taxable * rate;
 }
 
@@ -307,7 +317,8 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
                         double cost, double basis_ratio, double loss0, bool keep,
                         simlev_host::NumVec lot_n, simlev_host::NumVec lot_basis,
                         simlev_host::NumVec lot_vp, simlev_host::IntVec lot_group,
-                        double spb_first, bool horizon_end) {
+                        double spb_first, bool horizon_end,
+                        simlev_host::NumVec tariff_par, simlev_host::NumVec zve) {
   const int np = R.nrow(), paths = R.ncol();
   // FIFO-Lots (nur mit Steuern; ohne Lots unveraendert das Durchschnittsmodell mit basis_ratio)
   const int nlot = lot_n.size();
@@ -353,6 +364,16 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
   auto wealth_end = SIMLEV_MATRIX(horizon_end ? ny + 1 : 0, horizon_end ? paths : 0),
        taxes_end = SIMLEV_MATRIX(horizon_end ? ny + 1 : 0, horizon_end ? paths : 0);
   auto st = SIMLEV_NUM(S_N);
+  // Tarifweg (tariff_par leer = aus): Jahreszeilen je Pfad und Planjahr als Spalten einer Matrix TR_N x (ny + 1) Pfade
+  // (Spalte k (ny + 1) + y, Planjahre und Folgejahr; Zeilen wie tariff_core_impl.h, Jahr NA = keine Veranlagung)
+  TariffCore TC;
+  if (!TC.init(tariff_par)) SIMLEV_FAIL("Tarifparameter: falsche L\u00e4nge (%d)", (int) tariff_par.size());
+  const bool tariff_on = tax_on && TC.on;
+  if (tariff_on && (int) zve.size() != ny + 1)
+    SIMLEV_FAIL("zvE braucht %d Werte (Planjahre und Folgejahr), hat %d", ny + 1, (int) zve.size());
+  auto tyears = SIMLEV_MATRIX(tariff_on ? (int) TR_N : 0, tariff_on ? (ny + 1) * paths : 0);
+  for (int r = 0; r < (tariff_on ? (ny + 1) * paths : 0); r++) tyears(TR_YEAR, r) = SIMLEV_NA;
+  double trow[TR_N];
 
   for (int k = 0; k < paths; k++) {
     std::fill(st.begin(), st.end(), 0.0);
@@ -360,6 +381,23 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
     double yr_ret = 1.0, W = 0.0, vp_due = 0.0, vp_pending = 0.0, u0 = 1.0, tax_sum = 0.0;
     TaxState ts{loss0, spb_annual};
     if (use_lots) FL.reset();
+    // Tarifweg: K des laufenden Planjahres (k_cur) bzw. des Folgejahres am Pfadende (k_next), KiSt-Saldo aus dem
+    // Bescheid des Vorjahres (ks_prev), faelliger Tarif-Saldo (td, > 0 Nachzahlung, < 0 Erstattung)
+    double k_cur = 0.0, k_next = 0.0, k_void = 0.0, ks_prev = 0.0, td = 0.0;
+    double* kacc = tariff_on ? &k_cur : nullptr;
+    // Veranlagung des Planjahres yi (0-basiert) mit K; rec: Jahreszeile speichern. Ohne zvE keine Veranlagung.
+    auto close_year = [&](int yi, double K, bool rec) -> double {
+      double ksn = 0.0;
+      double D = TC.close(zve[yi], ks_prev, 0.0, K, tax_rate, SIMLEV_NA, rec ? trow : nullptr, ksn);
+      if (std::isnan(D)) { ks_prev = 0.0; return 0.0; }
+      ks_prev = ksn;
+      if (rec) {
+        const int r = k * (ny + 1) + yi;
+        trow[TR_YEAR] = (double) (yi + 1);
+        for (int c = 0; c < TR_N; c++) tyears(c, r) = trow[c];
+      }
+      return D;
+    };
     bool failed = false; double depl_p = SIMLEV_NA;
     // Verkauf fuer Netto-Ziel target (FIFO-Lots oder Durchschnittskosten); setzt G, tax, all, mindert n
     auto sale = [&](double target, double V, double& G, double& tax, bool& all) {
@@ -368,12 +406,12 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
         double gain = 0.0;
         G = FL.sell(target, u, 1.0 - cost, tfs, tax_rate, ts, gain, all);
         if (all) G = V;
-        tax = tax_on_gain(gain, tfs, tax_rate, ts);
+        tax = tax_on_gain(gain, tfs, tax_rate, ts, kacc);
       } else {                                                    // Durchschnittskosten (eine Basis)
         G = gross_for_net(target, V, basis, tfs, tax_rate, cost, ts, tax_on);
         if (G >= V) { G = V; all = true; }
         double bpart = basis * G / V;
-        tax = tax_on ? tax_on_gain(G * (1.0 - cost) - bpart, tfs, tax_rate, ts) : 0.0;
+        tax = tax_on ? tax_on_gain(G * (1.0 - cost) - bpart, tfs, tax_rate, ts, kacc) : 0.0;
         basis -= bpart;
       }
       n -= G / u; if (all) { n = 0.0; basis = 0.0; }
@@ -384,8 +422,15 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
     // 2. endgueltige VP-Steuer mit dem Verlusttopf nach diesem Verkauf; Differenz wie .pay_vp(prepaid):
     //    Nachzahlung per Verkauf im Folgejahr (dessen Toepfe nach der VP) bzw. Erstattung ins Depot.
     // Gibt die Steuern (nominal) zurueck; ts steht danach auf den Toepfen des Folgejahres.
-    auto settle_end = [&](void) -> double {
+    // Tarifweg (wie simulation() am letzten Tag): der Zwangsverkauf zaehlt zu K des Planjahres yc, dann dessen
+    // Veranlagung; VP und Nachzahlungsverkauf zaehlen zu K des Folgejahres, das mit Guenstigerpruefung und zvE
+    // (Zahl fuer alle Jahre bzw. Wert fuer Planjahr yc + 2) ebenfalls veranlagt wird; beide Salden werden sofort
+    // abgerechnet (Nachzahlung per Verkauf, danach Erstattung ins Depot). rec: Jahreszeilen speichern.
+    auto settle_end = [&](int yc, bool rec) -> double {
       double add = 0.0;
+      bool vp_booked = false, ts_next = false;
+      TaxState tn_vp{ts.loss, spb_annual};
+      k_next = 0.0;
       if (vp_pending > 0) {
         TaxState t0{ts.loss, spb_annual};
         double vtax0 = tax_on_gain(vp_pending, tfs, tax_rate, t0);   // Vorauszahlung (Kopie der Toepfe)
@@ -399,11 +444,14 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
           paid_all = net >= vtax0 * (1.0 - 1e-12);
         }
         TaxState tn{ts.loss, spb_annual};                         // Folgejahr: Verlusttopf nach dem Verkauf
-        double vtax1 = tax_on_gain(vp_pending, tfs, tax_rate, tn);
+        double kv = 0.0;
+        double vtax1 = tax_on_gain(vp_pending, tfs, tax_rate, tn, kacc ? &kv : nullptr);
         vp_pending = 0.0;
+        if (tariff_on && paid_all) { k_next += kv; vp_booked = true; tn_vp = tn; }
+        if (tariff_on) kacc = &k_next;                            // Verkaeufe ab hier im Folgejahr
         double diff = vtax1 - vtax0;
         if (paid_all && vtax0 > 0 && diff != 0.0) {
-          ts = tn;                                                // Toepfe des Folgejahres nach der VP
+          ts = tn; ts_next = true;                                // Toepfe des Folgejahres nach der VP
           if (diff > 0) {
             V = n * u;
             if (V > 0) {
@@ -418,6 +466,27 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
           }
         }
       }
+      if (tariff_on) {
+        double D1 = close_year(yc, k_cur, rec), D2 = 0.0;
+        if (TC.use_gp && k_next > 0) D2 = close_year(yc + 1, k_next, rec);
+        if (!ts_next) ts = vp_booked ? tn_vp : TaxState{ts.loss, spb_annual};   // Toepfe des Folgejahres
+        kacc = &k_void;                                           // Abrechnungsverkauf: keine weitere Veranlagung
+        const double pos = std::max(0.0, D1) + std::max(0.0, D2), neg = std::min(0.0, D1) + std::min(0.0, D2);
+        if (pos > 0) {
+          double V = n * u;
+          if (V > 0) {
+            double G, tax; bool all;
+            sale(pos, V, G, tax, all);
+            double net = G * (1.0 - cost) - tax;
+            add += tax + std::min(net, pos);                      // nicht beglichene Nachzahlung nicht zaehlen
+          }
+        }
+        if (neg < 0) {                                            // Erstattung als Geld ins Depot (Basis = Betrag)
+          if (u > 0) { n += -neg / u; basis += -neg; }
+          add += neg;
+        }
+        kacc = &k_cur;
+      }
       return add;
     };
     double V_ys = 0.0; bool plan_all = false;
@@ -427,10 +496,12 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
       double V = n * u;
       if (ypos == 0) {
         if (keep) wealth(y, k) = V / cpi;
+        // Tarifweg: Veranlagung des Vorjahres (Jahreswechsel wie in simulation()); Saldo mit der ersten Entnahme
+        if (tariff_on && y > 0) { td += close_year(y - 1, k_cur, true); k_cur = 0.0; }
         ts.spb = (y == 0 && spb_first >= 0.0) ? spb_first : spb_annual;   // neues Steuerjahr (Jahr 1: ggf. Rest)
         // § 18 Abs. 3 InvStG: Vorabpauschale des Vorjahres gilt am ersten Werktag als zugeflossen,
         // Steuer mit Verlusttopf und Pauschbetrag dieses Jahres (wie simulation())
-        if (vp_pending > 0) { vp_due += tax_on_gain(vp_pending, tfs, tax_rate, ts); vp_pending = 0.0; }
+        if (vp_pending > 0) { vp_due += tax_on_gain(vp_pending, tfs, tax_rate, ts, kacc); vp_pending = 0.0; }
         double infl_prev = (y == 0) ? 1.0 : cpi / cpi_dec;
         double cp = has_cape ? CAPE(p, k) : 0.0;
         W = rule_amount(rule, rp.begin(), st.begin(), V, infl_prev, cpi, yr_ret - 1.0, cp, (double)(ny - y));
@@ -446,6 +517,30 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
       double need = std::max(0.0, W / ppy - inc);
       // Entnahme (Beginn oder Ende der Periode)
       auto withdraw = [&](void) {
+        if (td != 0.0) {                                          // Tarifweg: Saldo des Vorjahres faellig
+          // faellig: VP-Steuer und Nachzahlung (obl), verfuegbar: Erstattung (rf); der Verkauf deckt den Rest
+          const double obl = vp_due + std::max(0.0, td), rf = std::max(0.0, -td);
+          double target = need + vp_due + td, net = 0.0, tax = 0.0;
+          V = n * u;
+          if (target > 0 && V > 0) {
+            double G; bool all;
+            sale(target, V, G, tax, all);
+            net = G * (1.0 - cost) - tax;
+          }
+          const double cash = net + rf, paid_due = std::min(cash, obl);
+          double paid = cash - paid_due;
+          tax_sum += (tax + paid_due - rf) / cpi;                 // nicht beglichene Steuern zaehlen nicht
+          if (target <= 0 && paid > need) {                       // Erstattung ueber der Entnahme: Rest ins Depot
+            const double rest = paid - need;
+            if (u > 0) { n += rest / u; basis += rest; paid = need; }
+          }
+          vp_due = 0.0; td = 0.0;
+          spend(y, k) += (paid + inc) / cpi;
+          if (paid < need - 1e-8 * std::max(1.0, need) && !(plan_all && n <= 0.0)) {
+            if (!failed) { failed = true; depl_p = p + 1; }
+          }
+          return;
+        }
         double target = need + vp_due;
         double paid_vp = 0.0, paid = 0.0;
         V = n * u;
@@ -485,17 +580,19 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
       // Horizont nach Planjahr y (nicht am Pfadende, das folgt unten): Abrechnung probehalber, Zustand zuruecksetzen
       if (horizon_end && ypos == ppy - 1 && p < np - 1) {
         const double n_s = n, b_s = basis, vpp_s = vp_pending; const TaxState ts_s = ts;
+        const double kc_s = k_cur, ksp_s = ks_prev;
         std::vector<int> ptr_s; std::vector<double> nf_s; const double acc_s = use_lots ? FL.vp_acc : 0.0;
         if (use_lots) { ptr_s = FL.ptr; nf_s = FL.nf; }
-        double add = settle_end();
+        double add = settle_end(y, false);
         wealth_end(y + 1, k) = n * u / cpi; taxes_end(y + 1, k) = tax_sum + add / cpi;
         n = n_s; basis = b_s; vp_pending = vpp_s; ts = ts_s;
+        if (tariff_on) { k_cur = kc_s; ks_prev = ksp_s; kacc = &k_cur; }
         if (use_lots) { FL.ptr = ptr_s; FL.nf = nf_s; FL.vp_acc = acc_s; }
       }
     }
     // Pfadende: Vorabpauschale des letzten Planjahres (Steuer mit den Toepfen des Folgejahres, Zwangsverkauf im
     // ablaufenden Jahr wie simulation() am letzten Tag); die Steuer dieses Verkaufs zaehlt mit, das Endvermoegen sinkt
-    tax_sum += settle_end() / cpi;
+    tax_sum += settle_end(ny - 1, true) / cpi;
     double Vend = n * u;
     if (keep) wealth(ny, k) = Vend / cpi;
     if (horizon_end) { wealth_end(ny, k) = Vend / cpi; taxes_end(ny, k) = tax_sum; }
@@ -505,7 +602,7 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
   return SIMLEV_LIST("wealth", wealth, "spending", spend, "planned", planned,
                     "terminal_real", terminal, "terminal_nominal", terminal_nom,
                     "taxes_real", taxes, "failed", fail, "depletion_period", depl,
-                    "wealth_end", wealth_end, "taxes_end", taxes_end);
+                    "wealth_end", wealth_end, "taxes_end", taxes_end, "tariff_years", tyears);
 }
 
 }  // namespace simlev

@@ -25,6 +25,7 @@ Kanonische Quellen der C-Bibliothek, die R, Python und Julia gemeinsam nutzen (E
 | `slc_opt.h`, `slc_opt.c`, `slc_opt_test.c` | (9.3) Optimierer BFGS (Wolfe-Liniensuche), projizierter BFGS, Nelder-Mead, numerischer Gradient; Rückfrage an den Host und `sl_minimize`; Prüffunktionen (Quellen: Nocedal/Wright, Bertsekas, Kelley, Nelder/Mead, Lagarias u. a., Gill/Murray/Wright, Moré/Garbow/Hillstrom) |
 | `slc_models.h`, `slc_garch.c`, `slc_gpd.c`, `slc_dcc.c`, `slc_msgarch.c`, `slc_boot.c` | (9.4) Modelle: GARCH/GJR(1,1) (ML, Umparametrisierung, Rückfall Momente), GPD (ML, Startwerte nach Hosking/Wallis), DCC(1,1) (Filter, Nelder-Mead), MS-GARCH (Filter, Starts aus HMM-EM und Rangeinteilung, BFGS, Viterbi), Bootstrap-Kerne mit Strom `sl_rng` (Quellen: Bollerslev, Glosten/Jagannathan/Runkle, Pickands, Davison/Smith, Hosking/Wallis, Engle, Haas/Mittnik/Paolella, Hamilton, Baum u. a., Viterbi, Efron, Künsch, Politis/Romano, Wu, Liu, Mammen, Barone-Adesi u. a.; eigener SimLev-Code) |
 | `slc_rbase.h`, `slc_rbase.c`, `slc_rbase_sort.c`, `slc_rbase_cov.c` | (N8) Grundfunktionen mit R-Regeln **nur für Python und Julia** (R rechnet sie selbst, Entscheidung 9.0 (4); nicht nach `r/src/`, nicht in `slc.h`): `sum`, `prod`, `mean`, `var`, `cumsum`/`cumprod`/`cummax`/`cummin`, `rowSums`/`colSums` (long double wie R), `^`, `order`, `rank`, `sort(partial =)`, `quantile` Typ 1–9, `tabulate`, `findInterval`, `cov`/`cor` (pearson, kendall; alle `use`). Anders als die SimLev-eigenen Kerne (seit N5 ohne long double) akkumulieren sie absichtlich in long double, damit sie auf derselben Plattform bitgleich zu R sind (Prüfung gegen R 4.3.3, ≥ 10.000 Zufallsfälle je Kern). Hüllen: `python/src/_ext_slc_rbase.c`, `julia/src/r/rbase_c.jl` |
+| `slc_rbase_date.c`, `slc_rbase_num.c` | (N10) wie `slc_rbase*` nur für Python und Julia: Datumsformat und -lesen (`format.Date`/`strftime` in der C-Locale, `as.Date(x, "%Y-%m-%d")`, proleptisch gregorianisch; dokumentierte Umwandlungen aus `?strptime` textgleich zu R) und weitere long-double-Wege von R (`R_strtod`, `%%`, `%/%`, `scientific()` von `formatReal`), mit denen Julia die Nachbildung `ld80.jl` (N10) und Python `numpy.longdouble` (N11) ablöst. Seit N11 Schalter, Breiten und E/O im Datumsformat wie glibc unter Linux, `digits.secs` für `%OS`. Prüfung: `tools/gleichlauf/date_fuzz*`, `rbase_fuzz*` |
 | `tools/gen_constants.py` | Konstanten, Bernoulli-Zahlen, zeta(k), Stützwerte und Taylor-Polynome, Sprungpolynom, N2: selbst angepasste rationale Näherungen für `qnorm` (nur Standardbibliothek) |
 
 **Geteilte Kerne von R und Python (seit Etappe 9.6c, F16):** Auch die früher in `r/src/`
@@ -36,7 +37,10 @@ Etappe 7.3a, C++17, Host-Makros `SIMLEV_*`) und werden nur nach `r/src/` und `py
 kopiert, seit N7 auch nach `julia/deps/core/`: Julia ruft sie über die C-ABI-Hülle `simlev_cabi.cpp`
 (nur `julia/deps/core/`; `extern "C"`, Zeiger, Längen, Skalare, Fehler als Rückgabecode mit Text) per `ccall`
 aus `libslc` auf (vorher eigene Ports, F2). Beim Verschieben blieb ihr Maschinencode in R gleich
-(Vergleich der Objektdateien Funktion für Funktion, Bericht 9.6c).
+(Vergleich der Objektdateien Funktion für Funktion, Bericht 9.6c). Seit N10 rechnen die Engine-Kerne Operationen mit zwei
+Eingabeoperanden über `simlev_add`/`_sub`/`_mul`/`_div` (Regel „NA vor NaN“ in `simlev_core.h`), damit R, Python
+und Julia auch bei NA und NaN in einer Operation unabhängig vom Compiler dasselbe Bitmuster liefern (Prüfung:
+`tools/gleichlauf/engine_nan_fuzz.*`).
 
 Kopien (Pakete bauen nur aus ihrem Teilbaum): `r/src/` (flach), `python/src/core/`,
 `julia/deps/core/` (slc, seit N7 auch die geteilten Kerne und `simlev_cabi.cpp`). Die Hüllen gibt es nur je Sprache: `r/src/slc_r.c` (+ `r/R/slc.R`),
@@ -58,6 +62,10 @@ Kopien (Pakete bauen nur aus ihrem Teilbaum): `r/src/` (flach), `python/src/core
   und R dienen nur als Black-Box-Orakel.
 - **Dateikopf.** Jede Kerndatei nennt Verfahren, Quellen (vollständige Angabe, bei DLMF die
   Gleichungsnummer), Herkunft der Konstanten, die Reinraum-Erklärung und das Prüforakel.
+  Ausnahme: `slc_rbase*` (N8, N10) sind keine Reinraum-Kerne, sondern über die Ports aus
+  R-Quellen übersetzt; sie tragen statt der Reinraum-Erklärung den Herkunftsblock (Felder
+  „Herkunft“, „Rechte“, „Lizenz der Vorlage“, „Änderungen“; Schema in den COPYRIGHTS-Dateien).
+  Ebenso tragen übernommene gemeinfreie Teile (Kalender nach Hinnant) einen Herkunftsblock mit „Teil“.
 - **Konstanten** werden in `tools/gen_constants.py` hergeleitet (Herleitung im Kopf des Skripts);
   Verfahrensparameter aus einem Aufsatz stehen mit Fundstelle im Dateikopf.
 - **Schnittstelle.** Kein `exit`, kein `longjmp`, keine Ausgabe; Status als Rückgabewert, Text im
@@ -102,6 +110,12 @@ Kopien (Pakete bauen nur aus ihrem Teilbaum): `r/src/` (flach), `python/src/core
   `sl_msgarch_fit_mt`/`sl_msgarch_estimate_mt`: Starts auf mehreren POSIX-Threads (Schalter `SLC_THREADS`,
   gesetzt in `r/src/Makevars`, `python/setup.py` und `julia/deps/build.jl`, nicht unter Windows), Auswahl
   in fester Reihenfolge, Ergebnis unabhängig von der Zahl der Threads; die Hüllen reichen `cores` durch.
+- **N9.** sGARCH-Fit (`slc_garch.c`) in einem Optimierungslauf statt BFGS (N6: zweiter Lauf bei
+  Randlage): Trust-Region-Newton mit exakter Hesse-Matrix (`sg_fgh`: f, g und H in einem Durchlauf,
+  Vorwärtsmodus) in den natürlichen Parametern mit den Schranken ω ≥ 0, α ≥ 0, β ≥ 0, α + β ≤ 1 − 2⁻⁵⁰
+  (aktive Menge; Teilproblem über die Eigenzerlegung, Moré/Sorensen 1983). Startpunkt: kleinste NLL unter
+  12 Punkten mit Varianz-Targeting und 8 Momentenschätzern je β (kleinste Quadrate, `sg_ls`), nur
+  ausgewertet. α und β können jetzt genau 0 sein, ω ebenso. GJR unverändert.
 
 Prüfung: Plausibilität gegen R und eine eigene decimal-Referenz (Arbeitsordner der Etappe),
 Gleichlauf der Sprachen mit `tools/gleichlauf/run.sh --quick`.

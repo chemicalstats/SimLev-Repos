@@ -1,7 +1,18 @@
+# Herkunft:           übersetzt aus R 4.3.3, src/main/format.c, printutils.c, printvector.c,
+#                     printarray.c, print.c, paste.c, sprintf.c, util.c; src/nmath/fround.c,
+#                     fprec.c; nachgebildet nach R 4.3.3, src/library/base/R/format.R, dataframe.R,
+#                     factor.R, dates.R
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle); fprec.c: Übersetzung einer Fortran-Routine von
+#                     W. Fullerton (Los Alamos); sprintf.c: ursprünglich Jonathan Rougier
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet seit N10 der C-Kern
+#                     core/slc_rbase_date.c.
 # ─────────────────────────────────────────────────────────────────────────────
 # Textausgabe wie R (Engine): sprintf() mit NA/NaN/Inf-Regeln, format() und
 # as.character() für Zahlen (formatReal/scientific aus R's format.c, long
-# double über F80), deparse() für einfache Werte, round()/signif().
+# double im C-Kern sl_r_scientific, N10), deparse() für einfache Werte, round()/signif().
 # ─────────────────────────────────────────────────────────────────────────────
 
 const _FMT_CACHE = Dict{String,Printf.Format}()
@@ -124,28 +135,6 @@ const rsprintf = r_sprintf
 
 # ── formatReal / scientific (R's format.c) ──────────────────────────────────
 
-# Zehnerpotenzen 1e0 … 1e27 exakt in long double (5^k < 2^63)
-const _TBL80 = [F80(Int64(5)^k) * F80(2.0^k) for k in 0:27]
-const _KP_MAX = 27
-
-@inline _f80_lt(a::F80, b::F80) = _lt80(a, b)
-
-"`nearbyintl` (Rundung zur nächsten ganzen Zahl, bei .5 zur geraden) für F80."
-function _rintl(a::F80)
-    isfinite(Float64(a)) || return a
-    f = floor(a)
-    d = a - f
-    h = F80(0.5)
-    if _f80_lt(h, d)
-        return f + F80(1.0)
-    elseif _f80_lt(d, h)
-        return f
-    end
-    # genau .5: gerade wählen
-    ff = Float64(f)
-    return iseven(Int64(ff)) || abs(ff) >= 2.0^62 ? f : f + F80(1.0)
-end
-
 _libm_log10(x::Float64) = ccall((:log10, _LIBM), Float64, (Float64,), x)
 
 "`scientific()`: (neg, kpower, nsig, roundingwidens) für |x| mit `digits` Stellen."
@@ -163,41 +152,8 @@ function _scientific(x::Float64, digits::Int)
         end
         return (neg, kpower, i, false)
     end
-    kp = Int(floor(_libm_log10(r))) - digits + 1
-    r_prec = F80(r)
-    if abs(kp) <= _KP_MAX
-        if kp > 0
-            r_prec = r_prec / _TBL80[kp+1]
-        elseif kp < 0
-            r_prec = r_prec * _TBL80[-kp+1]
-        end
-    else
-        # powl(10, kp): außerhalb des Tabellenbereichs (sehr große/kleine Zahlen) über Doubles
-        r_prec = kp > 0 ? r_prec / F80(exp10(Float64(kp))) : r_prec * F80(exp10(Float64(-kp)))
-    end
-    if _f80_lt(r_prec, _TBL80[digits])
-        r_prec = r_prec * F80(10.0)
-        kp -= 1
-    end
-    alpha = Float64(_rintl(r_prec))
-    nsig = digits
-    for _ in 1:digits
-        alpha /= 10.0
-        if alpha == floor(alpha)
-            nsig -= 1
-        else
-            break
-        end
-    end
-    if nsig == 0 && digits > 0
-        nsig = 1
-        kp += 1
-    end
-    kpower = kp + digits - 1
-    rgt = digits - kpower
-    rgt = rgt < 0 ? 0 : rgt > _KP_MAX ? _KP_MAX : rgt
-    fuzz = 0.5 / Float64(_TBL80[rgt+1])
-    rw = kpower > 0 && kpower <= _KP_MAX && _f80_lt(F80(r), _TBL80[kpower+1] - F80(fuzz))
+    # N10: long-double-Teil von scientific() über den C-Kern (core/slc_rbase_num.c)
+    kpower, nsig, rw = _rb_scientific(r, digits)
     return (neg, kpower, nsig, rw)
 end
 

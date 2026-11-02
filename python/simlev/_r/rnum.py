@@ -1,3 +1,15 @@
+# Herkunft:           übersetzt aus R 4.3.3, src/main/summary.c, cum.c, array.c, arithmetic.c;
+#                     src/library/stats/src/zeroin.c (R_zeroin2); nachgebildet nach R 4.3.3,
+#                     src/library/stats/R/nlm.R (uniroot)
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle); Verfahren R. P. Brent, Algorithms for
+#                     Minimization without Derivatives (1973), über Netlib go/fmin.f (ohne Urheber-
+#                     und Lizenzvermerk) bzw. c/brent.shar (Kopf nicht geprüft); zeroin.c:
+#                     Ergänzungen von Peter Dalgaard
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang: Summen und Kumulationen rechnen seit N8 die C-Kerne
+#                     core/slc_rbase*.
 """R-kompatible Numerik (Kern der R-Nachbildung, Gegenstück zu ``julia/src/r/rnum.jl``).
 
 Aufgabenteilung in ``simlev._r``: Dieses Modul ist die unterste Schicht und
@@ -29,10 +41,13 @@ Transzendente Funktionen: immer ``math.*`` (glibc-libm wie R), nie die
 SIMD-Varianten von numpy (``np.exp``, ``np.log``, ``np.power`` …), die auf
 Rechnern mit AVX-512 in den letzten Bits abweichen können.
 
-Auf Plattformen, auf denen ``numpy.longdouble`` nur 64 Bit breit ist
-(z. B. macOS auf Apple Silicon, Windows), verhält sich R dort ebenfalls mit
-64-Bit-``long double`` bzw. weicht in den letzten Bits ab; die Funktionen
-bleiben korrekt, die Bitgleichheit ist dann plattformabhängig.
+Seit N11 rechnet Python nirgends mehr mit ``numpy.longdouble``: auch ``r_mod1``
+(``%%``), ``R_strtod`` (:mod:`simlev._r.rexpr`) und ``scientific()``
+(:mod:`simlev._r.fmt`, :mod:`simlev._r.rformat`) nutzen die C-Kerne
+``core/slc_rbase_num.c``, wie Julia seit N10. Auf Plattformen, deren
+C-``long double`` nur 64 Bit breit ist (z. B. macOS auf Apple Silicon,
+Windows), verhält sich R dort ebenso; die Bitgleichheit ist dann
+plattformabhängig.
 """
 from __future__ import annotations
 
@@ -45,14 +60,13 @@ import numpy as np
 
 from .. import _ext   # C-Erweiterung (N8: Kerne core/slc_rbase*.c)
 
-LD = np.longdouble
 _NAN = float("nan")
 
 __all__ = [
-    "LD", "NA_REAL", "r_isna", "r_isna_arr", "na_or_nan", "r_sum", "r_cumsum", "r_prod", "r_cumprod", "r_mean", "r_mean_int", "r_var", "r_sd",
-    "r_rowsums", "r_colsums", "r_cummin", "r_pow", "r_pow_vec", "r_exp_vec", "r_mod1",
+    "NA_REAL", "r_isna", "r_isna_arr", "na_or_nan", "r_sum", "r_cumsum", "r_prod", "r_cumprod", "r_mean", "r_mean_int", "r_var", "r_sd",
+    "r_rowsums", "r_colsums", "r_rowmeans", "r_colmeans", "r_cummin", "r_pow", "r_pow_vec", "r_exp_vec", "r_mod1",
     "r_median", "r_cummax", "r_uniroot", "r_zeroin2", "c_div",
-    "X86_NAN", "nan_quiet", "n_add", "n_sub", "n_mul", "n_div", "n_sqrt", "n_log", "n_exp",
+    "r_strtod", "r_string_to_real", "X86_NAN", "nan_quiet", "n_add", "n_sub", "n_mul", "n_div", "n_sqrt", "n_log", "n_exp",
 ]
 
 
@@ -339,6 +353,16 @@ def r_colsums(m: np.ndarray, na_rm: bool = False) -> np.ndarray:
     return _margsums(m, na_rm, False, False)
 
 
+def r_rowmeans(m: np.ndarray, na_rm: bool = False) -> np.ndarray:
+    """``rowMeans(m)`` wie in R (N11; Kern wie ``r_rowsums``, Summe / Anzahl in long double)."""
+    return _margsums(m, na_rm, True, True)
+
+
+def r_colmeans(m: np.ndarray, na_rm: bool = False) -> np.ndarray:
+    """``colMeans(m)`` wie in R (N11; Kern wie ``r_colsums``, Summe / Anzahl in long double)."""
+    return _margsums(m, na_rm, True, False)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Potenz, Exponentialfunktion, Rest
 # ═══════════════════════════════════════════════════════════════════════════
@@ -368,14 +392,77 @@ def r_exp_vec(x) -> np.ndarray:
     return out
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# R_strtod und String_to_real (N11; vorher in rexpr.py bzw. mit float() in fmt.py)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_SPACE_C = frozenset(" \t\n\v\f\r")
+_NUMCHARS = frozenset("0123456789abcdefABCDEF.xXpPeE+-")
+
+
+def r_strtod(cs, i0: int = 0):
+    """R's ``R_strtod`` (NA = FALSE) auf ``cs`` (Text oder Zeichenliste) ab Index ``i0`` (0-basiert).
+
+    Rückgabe ``(Wert, Endindex)``; ohne Ziffer ``(NA, i0)``. Leerraum, Vorzeichen, ``NaN``/``Inf``/``infinity``
+    (Groß-/Kleinschreibung egal) prüft der Host; der Zahlteil (dezimal mit Exponent, hexadezimal mit Punkt und
+    p-Exponent) rechnet der C-Kern ``sl_r_strtod_num`` (core/slc_rbase_num.c) in long double. Betrag über
+    DBL_MAX (in long double) ergibt ±Inf wie R (N11)."""
+    n = len(cs)
+
+    def at(k):
+        return cs[k] if k < n else "\0"
+
+    p = i0
+    while at(p) in _SPACE_C:
+        p += 1
+    sign = 1.0
+    if at(p) == "-":
+        sign = -1.0
+        p += 1
+    elif at(p) == "+":
+        p += 1
+
+    def low(k, m):
+        return "".join(cs[k:min(n, k + m)]).lower()
+
+    if low(p, 3) == "nan":
+        return (math.nan, p + 3)              # R: NaN ohne Vorzeichen (0x7FF8000000000000)
+    if low(p, 8) == "infinity":
+        return (sign * math.inf, p + 8)
+    if low(p, 3) == "inf":
+        return (sign * math.inf, p + 3)
+    # Übergeben werden die Zeichen, die der Kern lesen kann (ASCII, gelesene Bytes = Zeichen), und ein weiteres:
+    # "0x" gilt wie in R nur, wenn danach noch etwas folgt.
+    q = p
+    while q < n and cs[q] in _NUMCHARS:
+        q += 1
+    v, used, gt = _ext.slc_r_strtod_num("".join(cs[p:q + 1]).encode("utf-8", "surrogatepass"))
+    if used < 0:
+        return (NA_REAL, i0)
+    if gt:
+        v = math.inf
+    return (sign * v, p + used)
+
+
+def r_string_to_real(s):
+    """``String_to_real`` (``as.numeric(<Text>)``): (Wert, ungültig?). NA und leere bzw. nur aus Leerraum
+    bestehende Texte ergeben NA ohne Warnung, ungültige Texte (auch "NA" als Text) NA mit Warnung (ungültig)."""
+    if s is None:
+        return (NA_REAL, False)
+    if all(c in _SPACE_C for c in s):
+        return (NA_REAL, False)
+    v, e = r_strtod(s, 0)
+    if all(c in _SPACE_C for c in s[e:]):
+        return (v, False)
+    return (NA_REAL, True)
+
+
 def r_mod1(x: float) -> float:
     """``x %% 1`` für endliche Doubles wie R's ``myfmod(x, 1)``."""
     x = float(x)
     if not math.isfinite(x):
         return _NAN
-    q = x
-    tmp = LD(x) - LD(math.floor(q)) * LD(1.0)
-    return float(tmp - LD(math.floor(float(tmp))) * LD(1.0))
+    return _ext.slc_r_fmod_ld(x, 1.0)   # N11: long-double-Teil von myfmod im C-Kern core/slc_rbase_num.c
 
 
 # ═══════════════════════════════════════════════════════════════════════════

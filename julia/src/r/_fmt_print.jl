@@ -1,3 +1,14 @@
+# Herkunft:           übersetzt aus R 4.3.3, src/main/format.c, printutils.c, printvector.c,
+#                     printarray.c, print.c, paste.c, sprintf.c, util.c; src/nmath/fround.c,
+#                     fprec.c; nachgebildet nach R 4.3.3, src/library/base/R/format.R, dataframe.R,
+#                     factor.R, dates.R
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle); fprec.c: Übersetzung einer Fortran-Routine von
+#                     W. Fullerton (Los Alamos); sprintf.c: ursprünglich Jonathan Rougier
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet seit N10 der C-Kern
+#                     core/slc_rbase_date.c.
 # RFmt – Druckausgabe: Vektoren, Faktoren, Matrizen, data.frames, Listen, cat.
 # Vorlage: python/simlev/_r/fmt.py; R 4.3.3 printvector.c, printmatrix.c,
 # printutils.c, print.c, factor.R, dataframe.R.

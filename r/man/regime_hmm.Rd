@@ -107,6 +107,25 @@ danach mit \code{\link[=regime_states]{regime_states()}} auf einen Tageskalender
 Signal oder als Bedingung fuer \code{\link[=regime_subset]{regime_subset()}} und
 \code{\link[=dependence_analysis]{dependence_analysis()}}.
 }
+\section{Quellen und Abweichungen}{
+
+Angelehnt an Hamilton (1989): gefilterte Wahrscheinlichkeiten wie im
+Hamilton-Filter; abweichend: Gauss'sches HMM ohne autoregressiven Teil
+(eigener Mittelwert und eigene Kovarianzmatrix je Zustand), geschaetzt
+mit dem EM-Verfahren nach Baum u. a. (1970) statt durch numerische
+Maximierung der Likelihood. Vorwaerts-Rueckwaerts-Rekursion mit
+Skalierung, Neuschaetzung der Startverteilung und Viterbi-Pfad nach
+Rabiner (1989) bzw. Viterbi (1967); BIC nach Schwarz (1978) mit
+\eqn{k - 1 + k(k - 1) + kd + kd(d + 1)/2} Parametern. Eigene Festlegungen
+von SimLev: Ridge-Zuschlag auf die Kovarianzmatrizen, Startwerte aus einer
+Rangeinteilung der rollierenden Volatilitaet und zufaelligen Zuordnungen,
+Sortierung der Zustaende nach Volatilitaet. Anwendung auf
+Regime-Allokation wie bei Nystrup u. a. (2015); abweichend werden die
+Parameter einmal auf der ganzen Historie geschaetzt (dort adaptiv), die
+gefilterten Wahrscheinlichkeiten sind also nur bei gegebenen Parametern
+frei von Zukunftsinformation.
+}
+
 \examples{
 set.seed(1); n <- 8 * 365
 d <- data.frame(date = seq.Date(as.Date("2010-01-01"), by = "day", length.out = n))
@@ -118,9 +137,20 @@ hmm$volatility          # Prozent p. a. je Zustand
 plot(hmm)
 }
 \references{
-Hamilton, J. D. (1989), Econometrica 57(2); Nystrup, P.,
-Madsen, H. & Lindstroem, E. (2015), Regime-based asset allocation: Do
-profitable strategies exist?, Journal of Portfolio Management 42(1).
+Hamilton, J. D. (1989), A new approach to the economic analysis
+of nonstationary time series and the business cycle, Econometrica 57(2),
+357-384, \doi{10.2307/1912559}; Baum, L. E., Petrie, T., Soules, G. &
+Weiss, N. (1970), Annals of Mathematical Statistics 41(1), 164-171,
+\doi{10.1214/aoms/1177697196}; Rabiner, L. R. (1989), A tutorial on
+hidden Markov models and selected applications in speech recognition,
+Proceedings of the IEEE 77(2), 257-286, \doi{10.1109/5.18626}; Viterbi,
+A. J. (1967), IEEE Transactions on Information Theory 13(2), 260-269,
+\doi{10.1109/TIT.1967.1054010}; Schwarz, G. (1978), Estimating the
+dimension of a model, Annals of Statistics 6(2), 461-464,
+\doi{10.1214/aos/1176344136}; Nystrup, P., Hansen, B. W., Madsen, H. &
+Lindstroem, E. (2015), Regime-based versus static asset allocation:
+Letting the data speak, Journal of Portfolio Management 42(1), 103-109,
+\doi{10.3905/jpm.2015.42.1.103}.
 }
 \seealso{
 \code{\link[=regime_states]{regime_states()}}, \code{\link[=regime_subset]{regime_subset()}}, \code{\link[=dependence_analysis]{dependence_analysis()}}

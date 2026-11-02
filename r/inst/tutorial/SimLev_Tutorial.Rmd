@@ -1520,7 +1520,13 @@ plot(hm)
 Cooley, Hubbard & Walz (1998), *AAII Journal*; Guyton & Klinger (2006),
 *Journal of Financial Planning* 19(3); Vanguard (2021), *Sustainable spending
 rates in turbulent markets*; Suarez, Suarez & Walz (2015), *Financial Services
-Review* 24; Politis & Romano (1994), *JASA* 89; Politis & White (2004),
+Review* 24; Clyatt (2005), *Work Less, Live More*; Swensen (2009), *Pioneering
+Portfolio Management*; Tobin (1974), *American Economic Review* 64(2);
+Bogleheads Wiki, *Withdrawal methods*; Waring & Siegel (2015), *Financial
+Analysts Journal* 71(1); Jeske (2017), *Early Retirement Now*, SWR-Serie
+Teil 18; Ponzo (o. J.), *Sensible withdrawals*; Hebeler (2001), *J.K.
+Lasser's Your Winning Retirement Plan*; Steiner (2015), *Bud Hebeler's
+Autopilot withdrawal rule*; Politis & Romano (1994), *JASA* 89; Politis & White (2004),
 *Econometric Reviews* 23, mit Korrektur Patton, Politis & White (2009);
 Barone-Adesi, Giannopoulos & Vosper (1999), *Journal of Futures Markets* 19;
 MSCI (2021), *Short and Leveraged Daily Indexes Methodology*; Bailey,
@@ -1544,7 +1550,9 @@ Ostrov, Radhakrishnan & Srivastav (2020), *Computational Management Science*
 *Econometrica* 68(5); Hansen (2005), *Journal of Business & Economic
 Statistics* 23(4); Harvey & Liu (2015), *Journal of Portfolio Management*
 42(1); Chekhlov, Uryasev & Zabarankin (2005), *International Journal of
-Theoretical and Applied Finance* 8(1); Hamilton (1989), *Econometrica* 57(2); Bongaerts, Kang & van Dijk (2020),
+Theoretical and Applied Finance* 8(1); Hamilton (1989), *Econometrica* 57(2); Rabiner (1989), *Proceedings of the
+IEEE* 77(2); Nystrup, Hansen, Madsen & Lindström (2015), *Journal of
+Portfolio Management* 42(1); Bongaerts, Kang & van Dijk (2020),
 *Financial Analysts Journal* 76(4).
 
 <p class="small">Keine Steuer- oder Anlageberatung. Ergebnisse auf

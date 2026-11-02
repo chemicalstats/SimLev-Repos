@@ -27,7 +27,6 @@ und `precompile.jl`.
 | `src/slib.jl` (+ `slib_linalg.jl`, `slib_opt.jl`, `slib_models.jl`) | `SLib` | Hüllen der C-Bibliothek slc per `ccall` (Zufall, Verteilungen, lineare Algebra, Optimierer, Modelle, Bootstrap-Kerne); Bibliothek aus `deps/build.jl` (siehe [C-Bibliothek](#c-bibliothek-pflicht)) → `simlev/_lib*.py` |
 | `src/cabi.jl` | `CAbi` | N7: Rückgabecodes, Fehlertexte und Feldlagen der C-ABI-Hülle `core/simlev_cabi.cpp` der geteilten C++-Kerne (in `libslc`) → `python/src/_ext_common.h` |
 | `src/r/types.jl` | – | R-Datenstrukturen (`RList`, `RFrame`, `RVector`, `NamedMat`), Druck-/summary-/plot-Registrierung |
-| `src/r/ld80.jl` | – | `F80`: 80-Bit-`long double` (x86-64: x87-Hardware über `llvmcall`, sonst Software-Nachbau `F80Soft`) |
 | `src/r/rnum.jl` | – | `NA`, `isna_strict`, Summen/Mittel/Varianz in `long double` (`r_sum`, `r_mean`, …), `r_pow` (`R_POW`), `r_uniroot`, zentrale Auswahl der C-Bibliotheken (`_LIBM`, `_LIBC`, `_SNPRINTF`) → `_r/rnum.py` |
 | `src/r/rformat.jl` | – | Textausgabe der Engine: `r_sprintf` (NA/NaN/Inf wie R), `r_format`, `r_as_character`, `r_deparse`, `r_round`, `r_signif` → `_r/rformat.py` |
 | `src/r/libm.jl` | `RLibm` | glibc-libm (`exp`, `log`, `log1p`, `expm1`, `pow`, `tanh`, …) → `_r/libm.py` |
@@ -77,7 +76,8 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
 1. Rechenreihenfolge 1:1 aus R/C++ (bzw. der Python-Fassung) übernehmen.
 2. **Nie `sum`, `prod`, `mean` aus Base auf Gleitkommavektoren**: Julia
    summiert paarweise. R summiert sequenziell in `long double` – dafür
-   `RBase.r_sum`, `r_mean`, `r_cumsum`, `r_prod`, `r_var` usw. (über `F80`).
+   `RBase.r_sum`, `r_mean`, `r_cumsum`, `r_prod`, `r_var` usw., im Fachcode
+   `SimLev._ld_colsums`/`_ld_rowsums` (alle über die C-Kerne `core/slc_rbase*.c`).
    Wo C++ mit `double` sequenziell summiert, eine einfache Schleife.
 3. **Nie `exp`, `log`, `log1p`, `expm1`, `^`, `tanh`, `sin`, … aus Base** auf
    Float64: Julia rechnet sie selbst, R nutzt glibc-libm. Immer `RLibm.*`
@@ -116,10 +116,9 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
     `SimLevPlot(svg, data, x, klasse)`. Geschrieben wird nur mit
     `file = "….svg"`, unbekannte Schlüsselwörter ergeben eine Warnung.
     Zeichenbausteine nur aus `src/svg.jl` (siehe [Grafik](#grafik)).
-14. long-double-Summen laufen auf x86-64 über die x87-Hardware; ist das
-    Ergebnis NaN, rechnen `r_sum` & Co. mit `F80Soft` nach, weil R's
-    NA/NaN-Vorrang sonst vom erzeugten Maschinencode abhinge.
-    Dasselbe gilt für double: treffen in `a + b` oder `a * b` zwei NaN
+14. long-double-Summen rechnen seit N8/N10 die C-Kerne `core/slc_rbase*.c` (x87 wie R, kein Nachbau in
+    Julia). In den geteilten Engine-Kernen gilt seit N10 die Regel „NA vor NaN“ (`core/simlev_core.h`).
+    Zur Geschichte: treffen in `a + b` oder `a * b` zwei NaN
     aufeinander (NA und NaN), behält x86 den ersten Operanden der Anweisung,
     und LLVM darf die Operanden tauschen. Die Ports der nativen Kerne
     (Engine `core.jl`, `DependenceCore`, `OptimizeCore.quantile7`; bis 9.6c auch

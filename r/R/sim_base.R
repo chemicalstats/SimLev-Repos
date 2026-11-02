@@ -313,10 +313,13 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
 #' taxable_income pruefen: eine Zahl (alle Jahre), nach Jahr benannter Vektor oder data.frame (Jahr, Betrag)
 #' @param x Eingabe taxable_income
 #' @param years Ganzzahlen. Kalenderjahre der Simulation (jedes muss vorkommen)
-#' @return Liste all (Zahl fuer alle Jahre oder NULL) und by_year (benannter Vektor oder NULL)
+#' @param plan_ok Logisch. T14: ein Vektor ohne Namen (ein Wert je Planjahr von withdrawal_simulation()) ist
+#'   zulaessig (income_tariff()); simulation() prueft ohne (Fehler: nach Kalenderjahren benennen)
+#' @return Liste all (Zahl fuer alle Jahre oder NULL) und by_year (benannter Vektor oder NULL); mit plan_ok
+#'   und einem Vektor ohne Namen beide NULL
 #' @keywords internal
 #' @noRd
-.check_taxable_income <- function(x, years, who = "simulation") {
+.check_taxable_income <- function(x, years, who = "simulation", plan_ok = FALSE) {
   form <- "eine Zahl (zvE in EUR f\u00fcr alle Jahre), ein nach Kalenderjahren benannter Zahlenvektor (z. B. c(\"2024\" = 50000, \"2025\" = 52000)) oder ein data.frame mit den Spalten year und taxable_income"
   if (is.data.frame(x)) {
     nm <- tolower(names(x))
@@ -338,8 +341,11 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
                  format(x[i]), if (!is.null(names(x))) sprintf(" f\u00fcr %s", names(x)[i]) else ""), call. = FALSE)
   }
   if (length(x) == 1L && is.null(names(x))) return(list(all = unname(as.numeric(x)), by_year = NULL))
+  if (plan_ok && is.null(names(x))) return(list(all = NULL, by_year = NULL))
   if (is.null(names(x)) || any(is.na(names(x)) | names(x) == ""))
-    stop(sprintf("%s: taxable_income mit %d Werten muss nach Kalenderjahren benannt sein; erwartet wird %s.", who, length(x), form), call. = FALSE)
+    stop(sprintf("%s: taxable_income mit %d Werten muss nach Kalenderjahren benannt sein; erwartet wird %s%s.", who, length(x), form,
+                 if (is.null(names(x))) " (ein Vektor ohne Namen, ein Wert je Planjahr, gilt nur in withdrawal_simulation())" else ""),
+         call. = FALSE)
   yy <- suppressWarnings(as.integer(trimws(names(x))))
   if (anyNA(yy) || any(as.character(yy) != trimws(names(x))))
     stop(sprintf("%s: taxable_income: Name '%s' ist kein Kalenderjahr (erwartet z. B. \"2024\").", who,

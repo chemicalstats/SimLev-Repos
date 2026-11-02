@@ -69,13 +69,6 @@ def is_leap(y: int) -> bool:
     return (y % 4 == 0 and y % 100 != 0) or (y % 400 == 0)
 
 
-def valid_civil(y: int, m: int, d: int) -> int | None:
-    try:
-        return days_from_civil(y, m, d)
-    except ValueError:
-        return None
-
-
 def r_num_str(x: Any) -> str:
     """``as.character(x)``/``paste()`` für Zahlen wie R (15 signifikante Stellen)."""
     if isinstance(x, (bool, np.bool_)):
@@ -104,17 +97,8 @@ def r_strptime_ymd(y: Any, m: Any, d: Any) -> int | None:
     R liest ``%m`` und ``%d`` mit höchstens zwei Ziffern und ignoriert
     nachfolgende Zeichen; ungültige Kalenderdaten ergeben ``NA`` (``None``).
     """
-    ys, ms, ds = r_num_str(y), r_num_str(m), r_num_str(d)
-    my = re.match(r"^(\d{1,4})$", ys)
-    if not my:
-        return None
-    mm = re.match(r"^(\d{1,2})$", ms)
-    if not mm:
-        return None
-    md = re.match(r"^(\d{1,2})", ds)
-    if not md:
-        return None
-    return valid_civil(int(my.group(1)), int(mm.group(1)), int(md.group(1)))
+    from . import _ext   # N10: Kern core/slc_rbase_date.c
+    return _ext.slc_r_strptime_ymd("%s-%s-%s" % (r_num_str(y), r_num_str(m), r_num_str(d)), "-")
 
 
 def first_of_month(z: int) -> int:

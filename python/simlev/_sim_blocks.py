@@ -424,11 +424,17 @@ def income_rate(marginal_rate: Any = _MISSING, *, soli_rate: Any = 0) -> SimLevI
 
 
 def income_tariff(taxable_income: Any = _MISSING, *, tariff: Any = None) -> SimLevIncomeTariff:
-    """Einkommen mit Einkommensteuertarif (für ``tax_profile(income=)``); siehe R ``?income_tariff``."""
+    """Einkommen mit Einkommensteuertarif (für ``tax_profile(income=)``); siehe R ``?income_tariff``.
+
+    Für ``withdrawal_simulation()`` gilt das zvE je Planjahr, nominal wie angegeben: eine Zahl für alle Planjahre oder
+    ein Vektor ohne Namen mit einem Wert je Planjahr (in ``simulation()`` ein Fehler); nach Kalenderjahren benannt nur
+    mit einem ``SimLevResult`` als ``start_value``. Das ``income`` von ``withdrawal_simulation()`` zählt nicht zum zvE;
+    einen steuerpflichtigen Teil (etwa einer Rente) selbst in ``taxable_income`` einrechnen.
+    """
     if isinstance(taxable_income, _Missing) or taxable_income is None:
         _stop("income_tariff: taxable_income (zu versteuerndes Einkommen in EUR je Kalenderjahr ohne die Erträge der "
               "Simulation) fehlt.")
-    _check_taxable_income(taxable_income, [], who="income_tariff")
+    _check_taxable_income(taxable_income, [], who="income_tariff", plan_ok=True)  # T14: auch je Planjahr
     if tariff is not None and not isinstance(tariff, SimLevTaxTariff):
         if isinstance(tariff, str):
             tariff = tax_tariff(file=tariff)

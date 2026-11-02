@@ -152,34 +152,17 @@ _mean_lgl(b) = isempty(b) ? NaN : SimLev.r_mean_int(Int[x ? 1 : 0 for x in b])
 
 "`colMeans(M, na.rm)`: long-double-Summe je Spalte / Anzahl."
 function _col_means(M::AbstractMatrix; na_rm::Bool = false)
-    out = Vector{Float64}(undef, size(M, 2))
-    for j in 1:size(M, 2)
-        s = SimLev.F80(0.0); c = 0
-        for i in 1:size(M, 1)
-            v = Float64(M[i, j])
-            if na_rm && isnan(v)
-                continue
-            end
-            s = s + SimLev.F80(v); c += 1
-        end
-        out[j] = c == 0 ? NaN : Float64(s / SimLev.F80(c))
+    A = SimLev._mat64(M)
+    out = SimLev._ld_colsums(A; mean = true, na_rm = na_rm)   # N10: C-Kern (long double wie R)
+    # keine Werte: NaN wie bisher (der Kern liefert 0/0 in long double)
+    @inbounds for j in 1:size(A, 2)
+        (size(A, 1) == 0 || (na_rm && all(isnan, view(A, :, j)))) && (out[j] = NaN)
     end
     out
 end
 
 "`rowMeans(M)`: long-double-Summe über Spalten / p."
-function _row_means(M::AbstractMatrix)
-    n, p = size(M)
-    out = Vector{Float64}(undef, n)
-    for i in 1:n
-        s = SimLev.F80(0.0)
-        for j in 1:p
-            s = s + SimLev.F80(Float64(M[i, j]))
-        end
-        out[i] = Float64(s / SimLev.F80(p))
-    end
-    out
-end
+_row_means(M::AbstractMatrix) = SimLev._ld_rowsums(M; mean = true)   # N10: C-Kern
 
 # ── Datum ───────────────────────────────────────────────────────────────────
 

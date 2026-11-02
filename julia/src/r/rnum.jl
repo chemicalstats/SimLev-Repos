@@ -1,8 +1,20 @@
+# Herkunft:           übersetzt aus R 4.3.3, src/main/summary.c, cum.c, array.c, arithmetic.c;
+#                     src/library/stats/src/zeroin.c (R_zeroin2); nachgebildet nach R 4.3.3,
+#                     src/library/stats/R/nlm.R (uniroot)
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle); Verfahren R. P. Brent, Algorithms for
+#                     Minimization without Derivatives (1973), über Netlib go/fmin.f (ohne Urheber-
+#                     und Lizenzvermerk) bzw. c/brent.shar (Kopf nicht geprüft); zeroin.c:
+#                     Ergänzungen von Peter Dalgaard
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang: Summen und Kumulationen rechnen seit N8 die C-Kerne
+#                     core/slc_rbase*.
 # ─────────────────────────────────────────────────────────────────────────────
 # R-kompatible Numerik
 #
 # Summen, Mittel, Varianz, Kumulationen und Potenz rechnen seit N8 die C-Kerne
-# core/slc_rbase*.c (r/rbase_c.jl); übrige Hilfen in long double über F80. NA wird wie in R als NaN mit der
+# core/slc_rbase*.c (r/rbase_c.jl), seit N10 auch %% und R_strtod (slc_rbase_num.c). NA wird wie in R als NaN mit der
 # Nutzlast 1954 dargestellt, sodass NA und NaN unterscheidbar bleiben.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -12,8 +24,6 @@ const NA = reinterpret(Float64, 0x7FF00000000007A2)
 "TRUE nur für R's NA (nicht für NaN) – entspricht `R_IsNA`."
 isna_strict(x::Float64) = isnan(x) && (reinterpret(UInt64, x) & 0x00000000FFFFFFFF) == 0x00000000000007A2
 
-const _LD0 = F80(0.0)
-const _LD1 = F80(1.0)
 
 # ── Summen, Mittel, Varianz, Kumulationen (N8: C-Kerne core/slc_rbase.c) ─────
 # R akkumuliert in long double; die C-Kerne tun dasselbe (x87 auf x86-64, gegen R bitgleich geprüft)
@@ -126,11 +136,7 @@ r_pow(x::Real, y::Real) = _rb_pow1(Float64(x), Float64(y))
 r_pow_vec(x, y::Real) = _rb_pow(_rbv(x), Float64(y))
 
 "`x %% 1` für Doubles wie R's `myfmod(x, 1)`."
-function r_mod1(x::Float64)
-    q = x / 1.0
-    tmp = _ldq(x) - F80(floor(q)) * _LD1
-    return Float64(tmp - floor(tmp / _LD1) * _LD1)
-end
+r_mod1(x::Float64) = _rb_fmod_ld(x, 1.0)   # N10: C-Kern (core/slc_rbase_num.c)
 
 @inline function _r_nan2(a::Float64, b::Float64)
     isnan(a) && isna_strict(a) && return a      # NA schlägt NaN
@@ -269,74 +275,9 @@ function r_as_numeric(s::AbstractString)
     if startswith(strip(String(SubString(str, 1))), "NA") && strip(str) == "NA"
         return NA
     end
-    if length(tail) > 2 && tail[1] == '0' && tail[2] in ('x', 'X')
-        q = p + 2
-        ans = _LD0
-        while q <= n && (isdigit(str[q]) || str[q] in 'a':'f' || str[q] in 'A':'F')
-            ans = F80(16.0) * ans + F80(Float64(parse(Int, str[q]; base = 16)))
-            q += 1
-        end
-        rest(q) || return NA
-        return sign * Float64(ans)
-    end
-    ans = _LD0
-    nd = 0
-    expn = 0
-    q = p
-    ten = F80(10.0)
-    while q <= n && isdigit(str[q])
-        ans = ten * ans + F80(Float64(str[q] - '0')); q += 1; nd += 1
-    end
-    if q <= n && str[q] == '.'
-        q += 1
-        while q <= n && isdigit(str[q])
-            ans = ten * ans + F80(Float64(str[q] - '0')); q += 1; nd += 1; expn -= 1
-        end
-    end
-    nd == 0 && return NA
-    if q <= n && str[q] in ('e', 'E')
-        q += 1
-        es = 1
-        if q <= n && str[q] in ('-', '+')
-            str[q] == '-' && (es = -1)
-            q += 1
-        end
-        k = 0
-        while q <= n && isdigit(str[q])
-            k = k < 9999 ? 10k + (str[q] - '0') : k; q += 1
-        end
-        expn += es * k
-    end
-    rest(q) || return NA
-    if expn + nd < -300
-        for _ in 1:nd
-            ans = ans / ten
-        end
-        expn += nd
-    end
-    p10 = ten; fac = _LD1
-    if expn < -307
-        k = -expn
-        while k != 0
-            (k & 1) != 0 && (fac = fac / p10)
-            k >>= 1; p10 = p10 * p10
-        end
-        ans = ans * fac
-    elseif expn < 0
-        k = -expn
-        while k != 0
-            (k & 1) != 0 && (fac = fac * p10)
-            k >>= 1; p10 = p10 * p10
-        end
-        ans = ans / fac
-    elseif !_iszero80(ans)
-        k = expn
-        while k != 0
-            (k & 1) != 0 && (fac = fac * p10)
-            k >>= 1; p10 = p10 * p10
-        end
-        ans = ans * fac
-    end
-    _gt_dblmax(ans) && return sign * Inf
-    return sign * Float64(ans)
+    # N10: Zahlteil (dezimal, hexadezimal) in long double über den C-Kern (core/slc_rbase_num.c)
+    v, used, gt = _rb_strtod_num(str, p)
+    (used < 0 || !rest(p + used)) && return NA
+    gt && return sign * Inf
+    return sign * v
 end

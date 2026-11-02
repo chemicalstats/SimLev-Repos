@@ -32,7 +32,7 @@ from ._r import fmt as _fmt
 from ._r.base import env_from_caller
 from ._r import libm as _libm
 from ._r.rlist import RList
-from ._r.rnum import LD, r_mean, r_pow, r_pow_vec, r_sd, r_sum
+from ._r.rnum import r_colmeans, r_mean, r_pow, r_pow_vec, r_sd, r_sum
 
 __all__ = ["copula_fit", "tail_dependence", "dependence_dcc", "dependence_analysis", "quantile_regression",
            "tail_regression", "tail_covar", "dependence_validate", "regime_subset",
@@ -194,8 +194,7 @@ def _colmeans(X):
     n = X.shape[0]
     if n == 0:
         return np.full(X.shape[1], _RNAN)
-    s = np.cumsum(X.astype(LD), axis=0)[-1]
-    return (s / LD(n)).astype(np.float64)
+    return r_colmeans(X)   # N11: C-Kern core/slc_rbase.c (long double wie R; wie Julia)
 
 
 def _scale1(x):

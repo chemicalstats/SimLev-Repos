@@ -131,12 +131,21 @@ Kalender; bei gleichem Pauschbetrag wie in der Ansparphase
 \code{next_year$sparer_pauschbetrag_remaining}). Angaben, die die
 Entnahmephase nicht abbildet (\code{private_sale_threshold} ungleich 1000,
 \code{base_rate}, \code{harvest}), ergeben einen Fehler; der Basiszins kommt
-aus \code{base_rate} dieser Funktion. Der Tarifweg
-(\code{income = \link[=income_tariff]{income_tariff()}}) ist in der
-Entnahmephase noch nicht abgebildet und ergibt einen Fehler mit Verweis auf
-\code{income_rate()}. Kirchensteuer und Guenstigerpruefung werden nicht aus
-der Ansparphase (\code{start_value} = \code{SimLevResult}) uebernommen,
-sondern hier ausdruecklich in \code{tax_profile()} angegeben.
+aus \code{base_rate} dieser Funktion. Mit
+\code{income = \link[=income_tariff]{income_tariff(taxable_income, tariff)}}
+rechnet die Entnahmephase den Tarifweg wie \code{\link[=simulation]{simulation()}}:
+unterjaehrig Abgeltungsteuer, nach jedem Planjahr je Pfad eine Veranlagung
+(siehe Details, Tarifweg). \code{taxable_income} ist das zu versteuernde
+Einkommen ohne die Ertraege der Entnahme, nominal in EUR genau wie angegeben
+(ohne Fortschreibung mit der Inflation): eine Zahl gilt fuer alle Planjahre,
+ein Vektor ohne Namen braucht einen Wert je Planjahr; nach Kalenderjahren
+benannt (Vektor oder data.frame wie in \code{simulation()}) nur mit einem
+\code{SimLevResult} als \code{start_value} (Planjahr 1 =
+\code{tax_report$next_year$year}), sonst Fehler. \code{income} dieser Funktion
+zaehlt nicht zum zvE; einen steuerpflichtigen Teil (etwa einer Rente) selbst
+in \code{taxable_income} einrechnen. Kirchensteuer und Guenstigerpruefung
+werden nicht aus der Ansparphase (\code{start_value} = \code{SimLevResult})
+uebernommen, sondern hier ausdruecklich in \code{tax_profile()} angegeben.
 Die Bestandsmerkmale (\code{partial_exemption}, \code{vorabpauschale},
 \code{cost_basis}, \code{loss_carryforward}, \code{sale_cost}) sind eigene
 Argumente. Wie in \code{\link[=simulation]{simulation()}} sind \code{partial_exemption},
@@ -287,6 +296,15 @@ Planjahr bereits verbrauchter Pauschbetrag, \code{vorabpauschale} =
 \item{\code{weights}}{Pfadgewichte (Standard 1 je Pfad).}
 \item{\code{source}}{Herkunft der Renditen.}
 \item{\code{elapsed}}{Rechenzeit in Sekunden (ab Start des Kerns).}
+\item{\code{tariff_years}}{Nur mit dem Tarifweg (\code{income_tariff()}):
+data.frame mit einer Zeile je Pfad und veranlagtem Planjahr, nach Pfad und
+Jahr: \code{path}, \code{year} (Planjahr; Planjahre + 1 = Folgejahr am
+Pfadende) und dieselben Spalten wie \code{tax_report$tariff_years} in
+\code{\link[=simulation]{simulation()}} (zvE, Kirchensteuer-Sonderausgaben und ihre Wirkung,
+§ 23-Spalten, in der Entnahme 0, \code{capital_income} = K, Abgeltungsteuer,
+Tarif auf K, Belastung ohne und mit Guenstigerpruefung, \code{guenstiger},
+\code{settlement} > 0 Nachzahlung bzw. < 0 Erstattung, \code{refund},
+\code{church_tax_settlement_next_year}); Betraege nominal in EUR.}
 }
 Auswertung mit \code{print()}, \code{summary()} und \code{plot()}
 (siehe \link{SimLevWithdrawal-methods}).
@@ -365,6 +383,29 @@ Kursverlauf des Jahres und der Haltedauer ab). Einkommen mindern nur die
 Entnahme, Umschichtungen gibt es in der Entnahmephase nicht; die Lots
 werden also nur durch Verkaeufe und Vorabpauschalen fortgeschrieben.
 
+Tarifweg (\code{tax = tax_profile(income = income_tariff())}): Verkaeufe und
+Vorabpauschalen werden unterjaehrig mit der Abgeltungsteuer belastet. Nach
+jedem Planjahr folgt je Pfad eine Veranlagung wie der Jahresabschluss von
+\code{\link[=simulation]{simulation()}} mit einem festen Tarif aus \code{\link[=tax_tariff]{tax_tariff()}}:
+Kapitalertraege K = mit Abgeltungsteuer belastete Bemessungsgrundlage des
+Planjahres (nach Teilfreistellung, Verlusttopf und Sparer-Pauschbetrag; die
+Vorabpauschale zaehlt im Jahr ihres Zuflusses), Kirchensteuer als
+Sonderausgabe im Zahlungsjahr (Saldo des Bescheids des Vorjahres; im ersten
+Planjahr 0), mit \code{guenstigerpruefung = TRUE} der Vergleich mit dem
+Tarif auf zvE + K. Der Saldo (Nachzahlung bzw. Erstattung) wird mit der
+ersten Entnahme des Folgejahres gezahlt bzw. mindert sie (wie die Steuer auf
+die Vorabpauschale); eine Erstattung ueber diese Entnahme hinaus fliesst als
+Geld ins Depot. Am Pfadende und am Horizont wird das letzte Planjahr sofort
+veranlagt und abgerechnet wie in \code{simulation()} am letzten Tag (der
+Zwangsverkauf fuer die Vorabpauschale zaehlt zu diesem Jahr); mit
+Guenstigerpruefung wird die Vorabpauschale des letzten Planjahres (Zufluss im
+Folgejahr) zusaetzlich fuer das Folgejahr veranlagt, sofern dafuer ein zvE
+vorliegt (eine Zahl fuer alle Jahre bzw. ein benannter Wert fuer dieses
+Kalenderjahr). Nachzahlungen werden per Verkauf, Erstattungen als Geld ins
+Depot abgerechnet; alle Salden zaehlen in \code{taxes}. Ohne Kirchensteuer
+und ohne Guenstigerpruefung ist der Saldo stets 0. Die Jahreszeilen stehen
+im Ergebnis unter \code{tariff_years}.
+
 Kalender: Die Entnahmephase kennt keine Kalenderjahre; ihr erstes Planjahr
 gilt als das Jahr nach dem letzten Datentag der Ansparphase
 (\code{tax_report$next_year$year}), jedes weitere Planjahr als ein neues
@@ -388,9 +429,10 @@ Satz aus \code{tax_profile()} (\code{rate} bzw. mit \code{church_tax} der
 Satz nach § 32d Abs. 1 EStG, mit \code{guenstigerpruefung} und
 \code{income_rate()} gegebenenfalls der persoenliche Satz). Kirchensteuer und
 Guenstigerpruefung der Ansparphase werden nicht uebernommen; sie sind in
-\code{tax} ausdruecklich anzugeben. Den Tarifweg (\code{income_tariff()},
-Veranlagung je Jahr mit Saldo im Folgejahr) bildet die Entnahmephase nicht
-ab (Fehler). (3) Ordergebuehren beim Verkauf bildet die Entnahmephase nicht
+\code{tax} ausdruecklich anzugeben. Mit dem Tarifweg (\code{income_tariff()})
+gilt unterjaehrig die Abgeltungsteuer und je Planjahr eine Veranlagung (siehe
+Tarifweg); das zvE gilt fuer alle Pfade gleich, wird nicht mit der Inflation
+fortgeschrieben, und \code{income} zaehlt nicht dazu. (3) Ordergebuehren beim Verkauf bildet die Entnahmephase nicht
 ab (Warnung, wenn sie in der Ansparphase gesetzt waren). (4) Verschiedene
 Teilfreistellungen, Regime \code{"capital_gains"} neben Fonds und
 \code{"private_sale"} (§ 23 EStG) werden nicht getrennt besteuert

@@ -1,3 +1,9 @@
+# Herkunft:           nachgebildet nach R 4.3.3, src/main/util.c (Scollate)
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle)
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang: Kollation über die System-ICU.
 """Zeichenketten-Kollation wie R 4.3.3 (``Scollate`` in ``src/main/util.c``).
 
 R vergleicht und sortiert Zeichenketten (``sort``, ``order``, ``rank``,

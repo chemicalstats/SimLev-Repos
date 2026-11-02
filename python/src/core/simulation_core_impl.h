@@ -79,6 +79,8 @@
 #endif
 
 #include "simlev_core.h"
+// N10: Operationen, deren beide Operanden aus Eingaben stammen, rechnen ueber simlev_add/_sub/_mul/_div
+// (NA vor NaN, Regel in simlev_core.h); die Rechnung ist sonst unveraendert. Hosts: R, Python, Julia (C-ABI).
 #if !defined(SIMLEV_XLENGTH) || !defined(SIMLEV_STRING_AT)
 #error "Vor diesem Kern den Host einbinden: R simlev_capi.h, Python _ext_common.h (siehe simlev_core.h)."
 #endif
@@ -132,7 +134,7 @@ static void dca_flows_allocation(simlev_host::Obj input, const char* name, doubl
   
   // money (Cash) aktualisieren
   double money = simlev_host::as_double(simlev_host::get(status_name, "money"));
-  money += flows;
+  money = simlev_add(money, flows);
   simlev_host::set(status_name, "money", money);
   
   simlev_host::NumVec report_money = simlev_host::num_vec(simlev_host::get(report_name, "money"));
@@ -141,7 +143,7 @@ static void dca_flows_allocation(simlev_host::Obj input, const char* name, doubl
   
   // total aktualisieren
   double worth = simlev_host::as_double(simlev_host::get(status_name, "worth"));
-  double total = money + worth;
+  double total = simlev_add(money, worth);
   simlev_host::set(status_name, "total", total);
   
   simlev_host::NumVec report_total = simlev_host::num_vec(simlev_host::get(report_name, "total"));
@@ -176,17 +178,17 @@ static void calculate_buy_report(simlev_host::Obj input, const char* name, int i
   double count = simlev_host::as_double(simlev_host::get(status_name, "count"));
   double money = simlev_host::as_double(simlev_host::get(status_name, "money"));
   
-  count += trade_count;
+  count = simlev_add(count, trade_count);
   simlev_host::set(status_name, "count", count);
   simlev_host::set(status_name, "price", market_price);
   
-  double worth = count * market_price;
+  double worth = simlev_mul(count, market_price);
   simlev_host::set(status_name, "worth", worth);
   
-  money -= (trade_count * trade_price);
+  money = simlev_sub(money, simlev_mul(trade_count, trade_price));
   simlev_host::set(status_name, "money", money);
   
-  double total = worth + money;
+  double total = simlev_add(worth, money);
   simlev_host::set(status_name, "total", total);
   
   simlev_host::set(status, name, status_name);
@@ -230,17 +232,17 @@ static void calculate_sell_report(simlev_host::Obj input, const char* name, int 
   double count = simlev_host::as_double(simlev_host::get(status_name, "count"));
   double money = simlev_host::as_double(simlev_host::get(status_name, "money"));
   
-  count -= trade_count;
+  count = simlev_sub(count, trade_count);
   simlev_host::set(status_name, "count", count);
   simlev_host::set(status_name, "price", market_price);
   
-  double worth = count * market_price;
+  double worth = simlev_mul(count, market_price);
   simlev_host::set(status_name, "worth", worth);
   
-  money += (trade_count * trade_price) - capital_gains_tax;
+  money = simlev_add(money, simlev_sub(simlev_mul(trade_count, trade_price), capital_gains_tax));
   simlev_host::set(status_name, "money", money);
   
-  double total = worth + money;
+  double total = simlev_add(worth, money);
   simlev_host::set(status_name, "total", total);
   
   simlev_host::set(status, name, status_name);
@@ -290,7 +292,7 @@ static void calculate_total_report(simlev_host::Obj input, simlev_host::Obj asse
     simlev_host::set(status_name, "price", price);
     
     double count = simlev_host::as_double(simlev_host::get(status_name, "count"));
-    double worth = price * count;
+    double worth = simlev_mul(price, count);
     simlev_host::set(status_name, "worth", worth);
     
     simlev_host::NumVec report_worth = simlev_host::num_vec(simlev_host::get(report_name, "worth"));
@@ -302,7 +304,7 @@ static void calculate_total_report(simlev_host::Obj input, simlev_host::Obj asse
     report_money[index - 1] = money;
     simlev_host::set(report_name, "money", report_money);
     
-    double total = money + worth;
+    double total = simlev_add(money, worth);
     simlev_host::set(status_name, "total", total);
     simlev_host::NumVec report_total = simlev_host::num_vec(simlev_host::get(report_name, "total"));
     report_total[index - 1] = total;
@@ -317,7 +319,7 @@ static void calculate_total_report(simlev_host::Obj input, simlev_host::Obj asse
   for (int i = 0; i < SIMLEV_XLENGTH(assets); i++) {
     const char* name = SIMLEV_STRING_AT(assets, i);
     simlev_host::Obj status_name = simlev_host::as_list(simlev_host::get(status, name));
-    total_worth += simlev_host::as_double(simlev_host::get(status_name, "total"));
+    total_worth = simlev_add(total_worth, simlev_host::as_double(simlev_host::get(status_name, "total")));
   }
   
   // Zweiter Durchlauf: Portfolio-Gewichte berechnen und speichern
@@ -333,7 +335,7 @@ static void calculate_total_report(simlev_host::Obj input, simlev_host::Obj asse
     simlev_host::Obj report_name = simlev_host::as_list(simlev_host::get(report, name));
     
     double total = simlev_host::as_double(simlev_host::get(status_name, "total"));
-    double current_weight = (total_worth > 0) ? total / total_worth : 0.0;
+    double current_weight = (total_worth > 0) ? simlev_div(total, total_worth) : 0.0;
     
     // Aktuelles Portfolio-Gewicht in "differ" speichern
     // (R-Code liest dies als sim_mem[[2]][[name]][[8]] fuer DCA/Rebalancing)
@@ -436,11 +438,11 @@ static void perform_market_update(simlev_host::Obj input, simlev_host::Obj asset
     simlev_host::NumVec prices = simlev_host::num_vec(simlev_host::get(market_name, "asset_price"));
     double count = simlev_host::as_double(simlev_host::get(status_name, "count"));
     double money = simlev_host::as_double(simlev_host::get(status_name, "money"));
-    double worth = count * prices[index - 1];
-    double total = worth + money;
+    double worth = simlev_mul(count, prices[index - 1]);
+    double total = simlev_add(worth, money);
     
     asset_totals[i] = total;
-    total_portfolio += total;
+    total_portfolio = simlev_add(total_portfolio, total);
     
     // Report-Vektoren in-place aktualisieren
     simlev_host::NumVec rw = simlev_host::num_vec(simlev_host::get(report_name, "worth"));
@@ -466,7 +468,7 @@ static void perform_market_update(simlev_host::Obj input, simlev_host::Obj asset
     simlev_host::Obj status_name = simlev_host::as_list(simlev_host::get(status, name));
     simlev_host::Obj report_name = simlev_host::as_list(simlev_host::get(report, name));
     
-    double weight = (total_portfolio > 0) ? asset_totals[i] / total_portfolio : 0.0;
+    double weight = (total_portfolio > 0) ? simlev_div(asset_totals[i], total_portfolio) : 0.0;
     simlev_host::NumVec rs = simlev_host::num_vec(simlev_host::get(report_name, "share"));
     rs[index - 1] = weight;
     simlev_host::set(status_name, "differ", weight);
@@ -528,15 +530,15 @@ static void batch_market_update(simlev_host::Obj input, simlev_host::Obj assets,
     for (int d = 0; d < n_days; d++) {
       int idx = start_idx - 1 + d;  // 0-basierter Index
       double price = prices[idx];
-      double worth = count * price;
-      double total = worth + money;
+      double worth = simlev_mul(count, price);
+      double total = simlev_add(worth, money);
       
       rw[idx] = worth;
       rm[idx] = money;
       rf[idx] = 0.0;
       rt[idx] = total;
       
-      portfolio_totals[d] += total;
+      portfolio_totals[d] = simlev_add(portfolio_totals[d], total);
       last_price = price;
       last_worth = worth;
       last_total = total;
@@ -563,7 +565,7 @@ static void batch_market_update(simlev_host::Obj input, simlev_host::Obj assets,
     for (int d = 0; d < n_days; d++) {
       int idx = start_idx - 1 + d;
       double weight = (portfolio_totals[d] > 0.0) 
-                        ? rt[idx] / portfolio_totals[d] 
+                        ? simlev_div(rt[idx], portfolio_totals[d]) 
                         : 0.0;
       rs[idx] = weight;
       last_weight = weight;

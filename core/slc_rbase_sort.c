@@ -25,12 +25,21 @@
  *             Hyndman, R. J., Fan, Y. (1996). Sample quantiles in statistical packages. The American
  *             Statistician 50(4), 361–365; Hoare, C. A. R. (1961). Algorithm 65: FIND. CACM 4(7), 321;
  *             Singleton, R. C. (1969). Algorithm 347: An efficient algorithm for sorting with
- *             minimal storage. CACM 12(3), 185–187; Knuth, D. E. (1998). The Art of Computer
+ *             minimal storage. CACM 12(3), 185–186; Knuth, D. E. (1998). The Art of Computer
  *             Programming, Bd. 3, 2. Aufl.
  * Konstanten: DBL_EPSILON aus <float.h>; Schrittfaktoren des Quicksort (0.375, +0.0390625,
  *             −0.21875, Grenze 0.5898437) nach Singleton (1969).
- * Reinraum:   wie slc_rbase.h; Vorlage ist die Logik der bisherigen Port-Funktionen
- *             (python/simlev/_r/stats_sort.py, julia/src/r/stats_sort.jl).
+ * Herkunft:           übersetzt aus R 4.3.3, src/main/sort.c (psort_body, Psort0) und qsort-body.c
+ *                     (Quicksort qsort_singleton Schritt für Schritt), über die Port-Funktionen
+ *                     python/simlev/_r/stats_sort.py und julia/src/r/stats_sort.jl; order, rank,
+ *                     quantile, tabulate, findInterval nachgebildet nach den R-Hilfeseiten
+ * Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation
+ *                     (laut Kopf der jeweiligen R-Quelle); qsort-body.c nach R. C. Singleton,
+ *                     CACM-Algorithmus 347 (1969)
+ * Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+ * Änderungen:         C99 ohne R-Datenstrukturen, gemeinsamer Kern für Python und Julia (nicht Teil
+ *                     des R-Pakets); nur double-Werte und int64_t-Indizes; order als stabiles
+ *                     Mischsortieren.
  * Prüforakel: R 4.3.3 (tools/gleichlauf/rbase_fuzz.R).
  */
 #include "slc_internal.h"

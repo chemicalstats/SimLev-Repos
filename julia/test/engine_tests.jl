@@ -61,16 +61,6 @@ gbm(rng, n, s0, mu, sig) = s0 .* cumprod(1 .+ mu .+ sig .* randn(rng, n))
 st1(; kw...) = create_strategy(A = asset_config("etf"; share = 1, spread = 0, kw...))
 
 @testset "R-Numerik und Formatierung" begin
-    # Software-Nachbildung (andere Plattformen) und Hardware-long-double rechnen gleich
-    rng = MersenneTwister(5); nbad = 0
-    for _ in 1:3000
-        x, y = (rand(rng) - 0.5) * 10.0^rand(rng, -30:30), (rand(rng) - 0.5) * 10.0^rand(rng, -30:30)
-        for op in (+, -, *, /)
-            nbad += Float64(op(SL.F80Soft(x), SL.F80Soft(y))) !== Float64(op(SL.F80(x), SL.F80(y)))
-        end
-        nbad += Float64(sqrt(SL.F80Soft(abs(x)))) !== Float64(sqrt(SL.F80(abs(x))))
-    end
-    @test nbad == 0
     @test isna_strict(SL.r_sum([1.0, NA]))
     @test isna_strict(SL.r_var([1.0]))
     @test isnan(SL.r_mean(Float64[]))

@@ -2088,6 +2088,23 @@ Hyperparameter.
   [doi:10.1109/TIT.1967.1054010](https://doi.org/10.1109/TIT.1967.1054010)
   – wahrscheinlichste Regimefolge in `regime_hmm()` und den
   MS-GARCH-Verfahren.
+- Rabiner, L. R. (1989). A tutorial on hidden Markov models and selected
+  applications in speech recognition. *Proceedings of the IEEE* 77(2),
+  257–286. [doi:10.1109/5.18626](https://doi.org/10.1109/5.18626) –
+  skalierte Vorwärts-Rückwärts-Rekursion, Neuschätzung der
+  Startverteilung und Viterbi-Pfad in `regime_hmm()`.
+- Schwarz, G. (1978). Estimating the dimension of a model. *The Annals of
+  Statistics* 6(2), 461–464.
+  [doi:10.1214/aos/1176344136](https://doi.org/10.1214/aos/1176344136) –
+  BIC in `regime_hmm()`.
+- Nystrup, P., Hansen, B. W., Madsen, H., Lindström, E. (2015).
+  Regime-based versus static asset allocation: Letting the data speak.
+  *The Journal of Portfolio Management* 42(1), 103–109.
+  [doi:10.3905/jpm.2015.42.1.103](https://doi.org/10.3905/jpm.2015.42.1.103)
+  – Regime-Allokation mit einem Hidden-Markov-Modell als Vorbild für
+  `regime_hmm()` und `regime_states()`; dort adaptiv geschätzt, in SimLev
+  einmal auf der ganzen Historie (Gauß-HMM ohne autoregressiven Teil, EM
+  statt der numerischen Likelihood-Maximierung bei Hamilton 1989).
 
 ### Extremwerte
 
@@ -2288,6 +2305,48 @@ Hyperparameter.
   version of the 4% rule? *Nerd's Eye View*, kitces.com, 3. Juni 2015.
   [kitces.com](https://www.kitces.com/blog/the-ratcheting-safe-withdrawal-rate-a-more-dominant-version-of-the-4-rule/)
   – `withdrawal_rule("ratchet")`.
+- Clyatt, B. (2005). *Work Less, Live More: The New Way to Retire Early*.
+  Nolo, Berkeley. – `withdrawal_rule("clyatt")` (95-%-Regel: Rate × Depot,
+  mindestens 95 % der Vorjahresentnahme, nominal).
+- Swensen, D. F. (2009). *Pioneering Portfolio Management: An
+  Unconventional Approach to Institutional Investment*, Fully Revised and
+  Updated. Free Press, Kap. 3. – Yale-Regel als Vorbild für
+  `withdrawal_rule("endowment")`; abweichend nimmt SimLev das Depot zu
+  Beginn des Planjahres statt des Werts zum Ende des vorigen
+  Geschäftsjahres und inflationiert nur die Vorjahresentnahme.
+- Tobin, J. (1974). What is permanent endowment income? *American
+  Economic Review* 64(2), 427–432.
+  [ideas.repec.org](https://ideas.repec.org/a/aea/aecrev/v64y1974i2p427-32.html)
+  – von Swensen (2009) zitierte Grundlage der Yale-Regel,
+  `withdrawal_rule("endowment")`.
+- Bogleheads Wiki: Withdrawal methods, Abschnitt 1/N.
+  [bogleheads.org/wiki/Withdrawal_methods](https://www.bogleheads.org/wiki/Withdrawal_methods)
+  – `withdrawal_rule("one_over_n")`.
+- Waring, M. B., Siegel, L. B. (2015). The only spending rule article you
+  will ever need. *Financial Analysts Journal* 71(1), 91–107.
+  [doi:10.2469/faj.v71.n1.2](https://doi.org/10.2469/faj.v71.n1.2) –
+  jährlich neu berechnete virtuelle Annuität als Vorbild für
+  `withdrawal_rule("abw")`; abweichend mit fester erwarteter Realrendite
+  statt aktueller Marktzinsen und mit optionalem Zielvermögen.
+- Jeske, K. (2017). The ultimate guide to safe withdrawal rates – Part 18:
+  Flexibility and the mechanics of CAPE-based rules. *Early Retirement
+  Now*, earlyretirementnow.com, 30. August 2017.
+  [earlyretirementnow.com](https://earlyretirementnow.com/2017/08/30/the-ultimate-guide-to-safe-withdrawal-rates-part-18-flexibility-cape-based-rules/)
+  – `withdrawal_rule("cape")` (Rate = a + b / CAPE, Standard 1,75 % und
+  0,5; dort monatlich, in SimLev jährlich).
+- Ponzo, P. (o. J.). Sensible withdrawals. *Gummy-stuff*.
+  [financialwisdomforum.org](https://www.financialwisdomforum.org/gummy-stuff/sensible_withdrawals.htm)
+  – Vorbild für `withdrawal_rule("sensible")`; Bemessung von Grundentnahme
+  und Zuwachs in SimLev eigene Festlegung.
+- Hebeler, H. K. (2001). *J.K. Lasser's Your Winning Retirement Plan*.
+  Wiley. – Retirement Autopilot als Vorbild für
+  `withdrawal_rule("hebeler")`.
+- Steiner, K. (2015). Bud Hebeler's Autopilot withdrawal rule. *How much
+  can I afford to spend in retirement?* (Blog), 22. Januar 2015.
+  [howmuchcaniaffordtospendinretirement.blogspot.com](https://howmuchcaniaffordtospendinretirement.blogspot.com/2015/01/bud-hebelers-autopilot-withdrawal-rule.html)
+  – Gewichtung 75 % inflationierte Vorjahresentnahme und 25 % Annuität in
+  `withdrawal_rule("hebeler")`; abweichend rechnet SimLev die Annuität
+  über die Restjahre statt über die Lebenserwartung.
 - Suarez, E. D., Suarez, A., Walz, D. T. (2015). The perfect withdrawal
   amount: A methodology for creating retirement account distribution
   strategies. *Financial Services Review* 24(4), 331–357. –
@@ -2482,6 +2541,22 @@ MS-GARCH-Schätzungen):
 - Wand, M. P., Jones, M. C. (1995). *Kernel Smoothing*. Chapman & Hall,
   London (Monographs on Statistics and Applied Probability 60). –
   lineares Binning bei großen Stichproben.
+- Hinnant, H. (o. J.). chrono-Compatible Low-Level Date Algorithms.
+  Webseite, gemeinfrei („Consider these donated to the public domain.“).
+  [howardhinnant.github.io](https://howardhinnant.github.io/date_algorithms.html)
+  – Umrechnung Tage ↔ Kalenderdatum (`days_from_civil`, `civil_from_days`)
+  in den Engine-Kernen, `slc_rbase_date.c` und den Ports; siehe COPYRIGHTS.
+- Brent, R. P. (1973). *Algorithms for Minimization without Derivatives*.
+  Prentice-Hall. – Verfahren von `optimize` und `uniroot` (Netlib `fmin`,
+  `zeroin`), die Python und Julia aus R nachbilden; siehe COPYRIGHTS.
+- Singleton, R. C. (1969). Algorithm 347: An efficient algorithm for sorting
+  with minimal storage. *Communications of the ACM* 12(3), 185–186.
+  [doi:10.1145/362875.362901](https://doi.org/10.1145/362875.362901) –
+  Quicksort in `qsort-body.c` von R, übersetzt in `slc_rbase_sort.c`;
+  siehe COPYRIGHTS.
+- Hoare, C. A. R. (1961). Algorithm 63: Partition; Algorithm 64:
+  Quicksort; Algorithm 65: Find. *Communications of the ACM* 4(7),
+  321–322. – Auswahl für die partielle Sortierung in `slc_rbase_sort.c`.
 
 ### Pakete als Vorbild bzw. Prüforakel
 

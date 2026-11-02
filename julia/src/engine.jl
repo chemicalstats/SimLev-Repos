@@ -56,34 +56,8 @@ end
 # Datumswerte
 # ═══════════════════════════════════════════════════════════════════════════
 
-"`as.Date(s, format = \"%Y-%m-%d\")` wie R's strptime (Ziffernfelder, Rest ignoriert)."
-function _r_strptime_ymd(s::AbstractString)
-    cs = collect(s)
-    rp = 1
-    function get_number(lo, hi, n)
-        while rp <= length(cs) && cs[rp] == ' '
-            rp += 1
-        end
-        (rp > length(cs) || !isdigit(cs[rp])) && return nothing
-        val = 0; k = n
-        while true
-            val = val * 10 + (cs[rp] - '0')
-            rp += 1; k -= 1
-            (k > 0 && rp <= length(cs) && isdigit(cs[rp])) || break
-        end
-        (val < lo || val > hi) && return nothing
-        return val
-    end
-    y = get_number(0, 9999, 4)
-    (y === nothing || rp > length(cs) || cs[rp] != '-') && return nothing
-    rp += 1
-    m = get_number(1, 12, 2)
-    (m === nothing || rp > length(cs) || cs[rp] != '-') && return nothing
-    rp += 1
-    d = get_number(1, 31, 2)
-    d === nothing && return nothing
-    return valid_civil(y, m, d)
-end
+"`as.Date(s, format = \"%Y-%m-%d\")` wie R's strptime (Ziffernfelder, Rest ignoriert; N10: core/slc_rbase_date.c)."
+_r_strptime_ymd(s::AbstractString) = _rb_strptime_ymd(s, '-')
 
 "`as.Date(x)` für einen Wert (Text JJJJ-MM-TT bzw. JJJJ/MM/TT, Datum, Zahl); nothing = NA."
 function _as_date(x)
@@ -737,7 +711,9 @@ end
 # Tarifweg (taxable_income, tax_tariff)
 # ═══════════════════════════════════════════════════════════════════════════
 
-function _check_taxable_income(x, years::Vector{Int}, who::String = "simulation")
+# plan_ok (T14, income_tariff()): ein Vektor ohne Namen (ein Wert je Planjahr von withdrawal_simulation()) ist zulässig;
+# Ergebnis dann mit plan (Werte)
+function _check_taxable_income(x, years::Vector{Int}, who::String = "simulation"; plan_ok::Bool = false)
     @nospecialize
     form = "eine Zahl (zvE in EUR für alle Jahre), ein nach Kalenderjahren benannter Zahlenvektor (z. B. c(\"2024\" = 50000, \"2025\" = 52000)) oder ein data.frame mit den Spalten year und taxable_income"
     nms = nothing
@@ -781,8 +757,10 @@ function _check_taxable_income(x, years::Vector{Int}, who::String = "simulation"
                              (nms !== nothing ? " für $(nms[i])" : "") * "); erwartet werden endliche Beträge in EUR.")
     end
     length(vals) == 1 && nms === nothing && return (all = vals[1], by_year = nothing)
+    plan_ok && nms === nothing && return (all = nothing, by_year = nothing, plan = vals)
     if nms === nothing || any(isempty, nms)
-        error("$who: taxable_income mit $(length(vals)) Werten muss nach Kalenderjahren benannt sein; erwartet wird $form.")
+        error("$who: taxable_income mit $(length(vals)) Werten muss nach Kalenderjahren benannt sein; erwartet wird $form" *
+              (nms === nothing ? " (ein Vektor ohne Namen, ein Wert je Planjahr, gilt nur in withdrawal_simulation())" : "") * ".")
     end
     yy = Int[]
     for nm in nms

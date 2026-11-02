@@ -89,6 +89,65 @@ _num(x) = x isa Bool ? x : x isa Integer ? Float64(x) : x
                     min_real = 0, max_real = Inf, max_rate = 100)
 
 Entnahmeregel definieren (Port von `withdrawal_rule()`).
+
+Quellen und Abweichungen:
+    clyatt: Nach Clyatt (2005): jedes Jahr rate des aktuellen Depots,
+        mindestens floor95 Prozent der Vorjahresentnahme, nominal;
+        Kürzungen in Folgejahren verketten sich (95 % von 95 %). Keine
+        Abweichung.
+    endowment: Angelehnt an die Yale-Regel (Swensen 2009, Kap. 3, mit Verweis auf
+        Tobin 1974): Gewicht mal Vorjahresentnahme plus
+        (1 - Gewicht) mal Zielrate mal Vermögen; Yale früher 70 %, heute
+        80 %. Abweichend: Yale wendet die Zielrate auf den Wert zum Ende des
+        vorigen Geschäftsjahres an und schreibt die Summe beider Teile mit
+        der Inflation fort; SimLev nimmt das Depot zu Beginn des Planjahres
+        und inflationiert nur die Vorjahresentnahme.
+    one_over_n: Nach Bogleheads Wiki, Withdrawal methods (1/N): Depot
+        geteilt durch die Restjahre. Abweichend: das Wiki empfiehlt 1/N eher
+        als Höchstbetrag; SimLev entnimmt genau 1/N.
+    abw: Angelehnt an die jährlich neu berechnete virtuelle Annuität (ARVA)
+        von Waring & Siegel (2015): Rate einer vorschüssigen Annuität mit dem
+        aktuellen Depot über die Restjahre. Abweichend: feste erwartete
+        Realrendite exp_return statt der aktuellen Marktzinsen; reales
+        Zielvermögen fv als eigene Ergänzung.
+    cape: Nach Jeske (2017): Rate = a + b / CAPE auf das aktuelle Depot;
+        1,75 % und 0,5 sind eine der dort gerechneten Varianten. Abweichend:
+        dort monatlich mit den Werten vom Ende des Vormonats, in SimLev
+        jährlich mit dem CAPE zu Beginn des Planjahres; CAPE <= 0 ergibt nur
+        a (eigene Festlegung).
+    sensible: Angelehnt an Ponzo (o. J.), Sensible Withdrawals:
+        Grundentnahme plus ein Anteil (dort Beispiele 10 und 25 %) des
+        Zuwachses, wenn das Depot nach der Grundentnahme stärker als die
+        Inflation gewachsen ist. Abweichend bzw. dort offen: SimLev setzt die
+        Grundentnahme als inflationierte Erstentnahme rate · P_1, misst den
+        Zuwachs als reales Depot vor der Entnahme minus reales Depot nach der
+        Vorjahresentnahme und begrenzt den Zusatz nicht.
+    hebeler: Angelehnt an Hebelers Retirement Autopilot (Hebeler 2001);
+        Gewichtung 75 % inflationierte Vorjahresentnahme plus 25 % Annuität
+        nach Steiner (2015). Abweichend: Hebeler rechnet die Annuität über
+        die Lebenserwartung (IRS-Tabellen) mit einem niedrigen Realzins,
+        SimLev über die Restjahre der Simulation mit exp_return.
+
+Literatur:
+    Bengen (1994, 2001); Cooley, Hubbard & Walz (1998); Guyton & Klinger
+    (2006), Journal of Financial Planning 19(3); Vanguard (2021), Sustainable
+    spending rates in turbulent markets; Bogleheads Wiki, Variable percentage
+    withdrawal; Kitces (2015); Suarez, Suarez & Walz (2015), Financial
+    Services Review 24; Clyatt, B. (2005), Work Less, Live More: The New Way
+    to Retire Early, Nolo, Berkeley; Swensen, D. F. (2009), Pioneering
+    Portfolio Management, Fully Revised and Updated, Free Press, Kap. 3, mit Verweis auf
+    Tobin, J. (1974), What is permanent endowment income?, American Economic
+    Review 64(2), 427-432; Bogleheads Wiki, Withdrawal methods,
+    https://www.bogleheads.org/wiki/Withdrawal_methods; Waring, M. B. &
+    Siegel, L. B. (2015), The only spending rule article you will ever need,
+    Financial Analysts Journal 71(1), 91-107, doi:10.2469/faj.v71.n1.2;
+    Jeske, K. (2017), The ultimate guide to safe withdrawal rates - Part 18:
+    Flexibility and the mechanics of CAPE-based rules, earlyretirementnow.com,
+    30.08.2017; Ponzo, P. (o. J.), Sensible withdrawals, gummy-stuff,
+    https://www.financialwisdomforum.org/gummy-stuff/sensible_withdrawals.htm;
+    Hebeler, H. K. (2001), J.K. Lasser's Your Winning Retirement Plan, Wiley;
+    Steiner, K. (2015), Bud Hebeler's Autopilot withdrawal rule, Blog How much
+    can I afford to spend in retirement?, 22.01.2015.
 """
 function withdrawal_rule(type_pos = nothing; type = type_pos, type_ = type, rate = 4, ceiling = nothing, floor = nothing, cut = 10, raise = 10,
                          cpr_years = 15, inflation_cap = Inf, skip_inflation = true, smoothing = nothing,
@@ -720,21 +779,10 @@ end
 _dflt(x, d) = x === _MISSING ? d : x
 _sv_get(r, path...) = (v = r; for k in path; v = _get(v, k); end; v)
 
-"Mittel bzw. Summe je Spalte in long double (colMeans/colSums)."
-function _col_ld(M::Matrix{Float64}, mean::Bool)
-    out = Vector{Float64}(undef, size(M, 2))
-    for j in 1:size(M, 2)
-        s = SimLev.F80(0.0)
-        for i in 1:size(M, 1)
-            s = s + SimLev.F80(M[i, j])
-        end
-        mean && (s = s / SimLev.F80(size(M, 1)))
-        out[j] = Float64(s)
-    end
-    return out
-end
+"Mittel bzw. Summe je Spalte in long double (colMeans/colSums; C-Kern, N10)."
+_col_ld(M::Matrix{Float64}, mean::Bool) = SimLev._ld_colsums(M; mean = mean)
 
-"Steuerangaben der Person prüfen (R: `.wd_tax_mode`, F2): `nothing` → \"none\", `tax_profile()` → \"person\"."
+"Steuerangaben der Person prüfen (R: `.wd_tax_mode`, F2, 6.5b, T14): `nothing` → \"none\", `tax_profile()` → \"person\"."
 function _wd_tax_mode(tax)
     tax === nothing && return "none"
     (tax isa RList && SimLev.inherits(tax, "SimLevTaxProfile")) ||
@@ -744,12 +792,56 @@ function _wd_tax_mode(tax)
           "base_rate" => tax["base_rate"] !== nothing, "harvest" => tax["harvest"] !== nothing]
     bad = [p.first for p in un if p.second]
     isempty(bad) || _stop("withdrawal_simulation: tax_profile($(join(bad, ", "))) bildet die Entnahmephase nicht ab; " *
-                          "ausgewertet werden rate, church_tax, sparer_pauschbetrag, guenstigerpruefung und income = income_rate() (Basiszins über base_rate von withdrawal_simulation()).")
-    ti = tax["income"]
-    ti isa RList && SimLev.inherits(ti, "SimLevIncomeTariff") &&
-        _stop("withdrawal_simulation: tax_profile(income = income_tariff()) bildet die Entnahmephase noch nicht ab (keine Veranlagung je Planjahr); " *
-              "für die Günstigerprüfung income = income_rate(marginal_rate) verwenden (Grenzsteuersatz in Prozent, z. B. 42).")
+                          "ausgewertet werden rate, church_tax, sparer_pauschbetrag, guenstigerpruefung und income = income_rate() oder income_tariff() (Basiszins über base_rate von withdrawal_simulation()).")
     return "person"
+end
+
+const _WD_TARIFF_COLS = ("year", "taxable_income", "church_tax_paid_deductible", "church_tax_refunded",
+                         "church_tax_net_deduction", "taxable_income_net", "deduction_effect", "gain_p23", "income_tax_p23",
+                         "soli_p23", "church_tax_p23", "tax_p23", "capital_income", "abgeltung_burden", "church_tax_withheld_k",
+                         "tariff_income_tax_k", "tariff_soli_k", "tariff_church_tax_k", "tariff_burden", "burden_without_gp",
+                         "burden_with_gp", "guenstiger", "settlement", "refund", "church_tax_settlement_next_year")
+
+"Tarifparameter für den Kern (R: `.wd_tariff_par`, T14, `core/tariff_core_impl.h`)."
+function _wd_tariff_par(tt, church_k::Float64, use_gp)
+    z = tt["zones"]; so = tt["soli"]
+    out = Float64[use_gp === true ? 1.0 : 0.0, church_k, 0.25 / (1 + 0.25 * church_k), Float64(so["freigrenze"]),
+                  Float64(so["satz"]), Float64(so["milderung"]), Float64(length(z["ab"]))]
+    for c in ("ab", "bezug", "teiler", "a", "b", "c")
+        append!(out, Float64[Float64(v) for v in z[c]])
+    end
+    return out
+end
+
+"""zvE je Planjahr für den Tarifweg der Entnahme (R: `.wd_zve`, T14): Zahl für alle Planjahre, Vektor ohne Namen der
+Länge `ny`, nach Kalenderjahren benannt nur mit `year1`; Länge `ny + 1` (Folgejahr ggf. NA)."""
+function _wd_zve(x, ny::Int, year1)
+    who = "withdrawal_simulation"
+    form = "eine Zahl (zvE in EUR für alle Planjahre), ein Vektor ohne Namen mit einem Wert je Planjahr (Länge $ny)" *
+           (year1 === nothing ? "" : " oder nach Kalenderjahren benannt (Vektor bzw. data.frame mit den Spalten year und taxable_income; Planjahr 1 = $year1)")
+    zv = SimLev._check_taxable_income(x, Int[], "income_tariff"; plan_ok = true)
+    zv.all !== nothing && return fill(Float64(zv.all), ny + 1)
+    if haskey(zv, :plan)
+        v = zv.plan
+        length(v) == ny && return vcat(Float64.(v), NA)
+        _stop("$who: taxable_income (income_tariff()) hat $(length(v)) Werte, die Entnahme $ny Planjahre; erwartet wird $form.")
+    end
+    year1 === nothing &&
+        _stop("$who: taxable_income (income_tariff()) nach Kalenderjahren lässt sich nur mit einem SimLevResult als start_value auf Planjahre abbilden (Planjahr 1 = tax_report\$next_year\$year); erwartet wird $form.")
+    zv = SimLev._check_taxable_income(x, collect(year1:(year1 + ny - 1)), who)
+    return Float64[get(zv.by_year, string(y), NA) for y in year1:(year1 + ny)]
+end
+
+"""Jahreszeilen des Tarifwegs als RFrame (R: `.wd_tariff_years`, T14): `path`, `year` (Planjahr) und die Spalten von
+`tax_report["tariff_years"]` aus `simulation()`, nach Pfad und Jahr."""
+function _wd_tariff_years(M::Matrix{Float64}, ny::Int)
+    keep = findall(!isnan, M[1, :])
+    cols = Pair{String,Any}["path" => Int[(k - 1) ÷ (ny + 1) + 1 for k in keep]]
+    for (j, c) in enumerate(_WD_TARIFF_COLS)
+        col = M[j, keep]
+        push!(cols, c => (c == "year" ? Int[Int(v) for v in col] : c == "guenstiger" ? Bool[v != 0 for v in col] : col))
+    end
+    return RFrame(cols...; class = ["data.frame"])
 end
 
 """
@@ -762,10 +854,23 @@ end
 Entnahme-Simulation über viele Pfade (Port von `withdrawal_simulation()`).
 `x`: withdrawal_paths, Renditematrix (Perioden × Pfade), SimLevResult,
 Liste von SimLevResult oder Bootstrap-Studie. `tax`: `nothing` (ohne Steuern) oder
-`tax_profile()` (F2, 6.5b: ausgewertet werden `rate`, `church_tax`, `sparer_pauschbetrag`, `guenstigerpruefung` und
-`income = income_rate()`, Satz wie in `simulation()`; `private_sale_threshold` ≠ 1000, `base_rate`, `harvest` und
-`income_tariff()` ergeben einen Fehler). Kirchensteuer und Günstigerprüfung werden nicht aus der Ansparphase
-übernommen, sondern hier ausdrücklich angegeben. `keep_paths`: `true` (Standard) = Vermögensmatrix `wealth` aller
+`tax_profile()` (F2, 6.5b, T14: ausgewertet werden `rate`, `church_tax`, `sparer_pauschbetrag`, `guenstigerpruefung` und
+`income = income_rate()`, Satz wie in `simulation()`, oder `income = income_tariff()`; `private_sale_threshold` ≠ 1000,
+`base_rate` und `harvest` ergeben einen Fehler). Kirchensteuer und Günstigerprüfung werden nicht aus der Ansparphase
+übernommen, sondern hier ausdrücklich angegeben. Tarifweg (`income_tariff(taxable_income, tariff)`) wie `simulation()`:
+unterjährig Abgeltungsteuer, nach jedem Planjahr je Pfad eine Veranlagung mit festem Tarif aus `tax_tariff()` (K = mit
+Abgeltungsteuer belastete Bemessungsgrundlage des Planjahres, die VP im Jahr ihres Zuflusses; Kirchensteuer als
+Sonderausgabe im Zahlungsjahr, im ersten Planjahr 0; mit `guenstigerpruefung` der Vergleich mit dem Tarif auf zvE + K).
+Der Saldo wird mit der ersten Entnahme des Folgejahres gezahlt bzw. mindert sie (wie die VP-Steuer; eine Erstattung
+darüber hinaus fließt als Geld ins Depot); am Pfadende und am Horizont sofort wie `simulation()` am letzten Tag (mit
+Günstigerprüfung auch die VP des letzten Planjahres im Folgejahr, sofern dafür ein zvE vorliegt). `taxable_income` =
+zvE ohne die Erträge der Entnahme, nominal in EUR genau wie angegeben (ohne Inflation): eine Zahl für alle Planjahre
+oder ein Vektor ohne Namen mit einem Wert je Planjahr; nach Kalenderjahren benannt nur mit einem `SimLevResult` als
+`start_value` (Planjahr 1 = `tax_report["next_year"]["year"]`). `income` dieser Funktion zählt nicht zum zvE; einen
+steuerpflichtigen Teil (etwa einer Rente) selbst in `taxable_income` einrechnen. Mit dem Tarifweg enthält das
+Ergebnis zusätzlich `tariff_years` (RFrame je Pfad und veranlagtem Planjahr: `path`, `year` = Planjahr bzw.
+Planjahre + 1 für das Folgejahr, dazu die Spalten von `tax_report["tariff_years"]` aus `simulation()`; Beträge nominal
+in EUR). `keep_paths`: `true` (Standard) = Vermögensmatrix `wealth` aller
 Pfade, `false`/0 = keine, ganze Zahl k ≥ 1 = die ersten k Spalten (gerechnet werden alle Pfade; `plot` zeichnet den
 Vermögensfächer dann aus k Pfaden mit Titelzusatz „(erste k von n Pfaden)“, auch als Attribut `title` der Tabelle
 `data["wealth"]`). Ergebnis: RList der Klasse `SimLevWithdrawal`.
@@ -789,13 +894,16 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     tax_mode = _wd_tax_mode(tax)
     # 6.5b: Satz wie in simulation() (_tax_rates: Kirchensteuer, Günstigerprüfung einmal je Lauf); die Angaben stehen
     # ausdrücklich in tax_profile(), aus der Ansparphase wird nichts übernommen
+    # T14: Tarifweg (income_tariff()): unterjährig Abgeltungsteuer, Veranlagung je Planjahr und Pfad im Kern
+    tariff_on = tax !== nothing && tax["income"] isa RList && SimLev.inherits(tax["income"], "SimLevIncomeTariff")
     tax_rate = if tax === nothing
         26.375 / 100
     else
         ti = tax["income"]
-        SimLev._tax_rates(tax["rate"], tax["church_tax"], tax["guenstigerpruefung"], ti === nothing ? nothing : ti["marginal_rate"],
-                          ti !== nothing && ti["soli_rate"] != 0, ti === nothing ? 5.5 : ti["soli_rate"],
-                          "withdrawal_simulation").effective_tax_rate
+        ir = ti isa RList && SimLev.inherits(ti, "SimLevIncomeRate")
+        SimLev._tax_rates(tax["rate"], tax["church_tax"], tax["guenstigerpruefung"], ir ? ti["marginal_rate"] : nothing,
+                          ir && ti["soli_rate"] != 0, ir ? ti["soli_rate"] : 5.5,
+                          "withdrawal_simulation"; tariff_on = tariff_on).effective_tax_rate
     end
     sparer_pauschbetrag = tax === nothing ? 1000 : tax["sparer_pauschbetrag"]
     if horizon !== nothing && !_is_horizon(horizon)
@@ -847,8 +955,12 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     lots = nothing
     adopted = RList()
     spb_used1 = 0.0
+    year1 = nothing
     if _is_result(start_value)
         sres = start_value
+        ny1_ = _get(_get(sres, "tax_report"), "next_year")
+        y1_ = ny1_ isa Union{RList,NamedTuple,AbstractDict} ? _get(ny1_, "year") : nothing
+        _num1(y1_) && isfinite(_f1(y1_)) && (year1 = Int(_f1(y1_)))   # Kalenderjahr des ersten Planjahres (Tarifweg)
         acc = result_index(sres)
         sv = acc["worth"][end]
         if !isfinite(sv) || sv <= 0
@@ -1060,6 +1172,15 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     end
     rp = _wd_param_vector(rule)
     kp = min(kp, Float64(size(R, 2)))
+    # T14: Tarifweg: zvE je Planjahr (nominal wie angegeben; income zählt nicht dazu) und Tarif wie in simulation()
+    tariff_par = Float64[]; zve = Float64[]
+    if tariff_on
+        zve = _wd_zve(tax["income"]["taxable_income"], Int(ny), year1)
+        tt = tax["income"]["tariff"] === nothing ? SimLev.tax_tariff() : tax["income"]["tariff"]
+        ct = tax["church_tax"]
+        ck = ct !== nothing && Float64(ct) > 0 ? Float64(ct) / 100 : 0.0
+        tariff_par = _wd_tariff_par(tt, ck, tax["guenstigerpruefung"])
+    end
     t0 = time()
     core = _wcore().wd_simulate(R, I, CAPE, BASE, ppy, _rule_code(rule["type"]), rp, timing == "start", start_value, inc,
                                 tax_mode == "person", Float64(tax_rate), Float64(partial_exemption) / 100, Float64(sparer_pauschbetrag),
@@ -1067,7 +1188,8 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
                                 kp > 0 || horizon !== nothing,
                                 lots === nothing ? Float64[] : lots["n"], lots === nothing ? Float64[] : lots["basis"],
                                 lots === nothing ? Float64[] : lots["vp"], lots === nothing ? Int[] : lots["group"],
-                                spb_used1 > 0 ? max(0.0, Float64(sparer_pauschbetrag) - spb_used1) : -1.0, horizon !== nothing)
+                                spb_used1 > 0 ? max(0.0, Float64(sparer_pauschbetrag) - spb_used1) : -1.0, horizon !== nothing,
+                                tariff_par, zve)
     sp = core["spending"]
     w0 = sp[1, :]
     gamma = Float64(gamma)
@@ -1121,12 +1243,14 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     end
     w = _get(x, "weights")
     w = w === nothing ? ones(size(R, 2)) : _dvec(w)
-    return RList("paths" => paths, "spending" => sp, "planned" => core["planned"],
+    out = RList("paths" => paths, "spending" => sp, "planned" => core["planned"],
                  "wealth" => kp == 0 ? nothing : (kp < size(wealth, 2) ? wealth[:, 1:Int(kp)] : wealth), "rule" => rule, "start_value" => start_value,
                  "frequency" => x["frequency"], "years" => ny, "full_years" => nfy, "horizon" => horizon,
                  "historical" => _istrue(_get(x, "historical")), "weights" => w, "tax_mode" => tax_mode, "gamma" => gamma,
                  "timing" => timing, "source" => _get(x, "source"), "adopted" => length(adopted) > 0 ? adopted : nothing,
                  "elapsed" => time() - t0; class = "SimLevWithdrawal")
+    tariff_on && (out["tariff_years"] = _wd_tariff_years(core["tariff_years"], Int(ny)))
+    return out
 end
 
 """

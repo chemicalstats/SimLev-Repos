@@ -21,14 +21,15 @@ _iv(x) = x === nothing ? Int[] : x isa Number ? [Int(x)] : Int[Int(v) for v in v
 """
     wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real,
                 tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep,
-                lot_n = [], lot_basis = [], lot_vp = [], lot_group = [], spb_first = -1, horizon_end = false)
+                lot_n = [], lot_basis = [], lot_vp = [], lot_group = [], spb_first = -1, horizon_end = false,
+                tariff_par = [], zve = [])
 
 Schneller Entnahme-Kern (`.wd_simulate`); Rückgabe RList wie die R-Liste.
 """
 function wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real,
                      tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep,
                      lot_n = Float64[], lot_basis = Float64[], lot_vp = Float64[], lot_group = Int[],
-                     spb_first = -1.0, horizon_end = false)
+                     spb_first = -1.0, horizon_end = false, tariff_par = Float64[], zve = Float64[])
     R = _mat(R)
     INF = _mat(INF)
     CAPE = _mat(CAPE, size(R, 1))
@@ -39,6 +40,7 @@ function wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_valu
     ppy = Int(clamp(Int128(ppy), typemin(Cint), typemax(Cint)))
     rp = _dv(rp); income_real = _dv(income_real)
     keep = Bool(keep); horizon_end = Bool(horizon_end)
+    tariff_par = _dv(tariff_par); zve = _dv(zve)
     # Abmessungen der Ergebnisse wie im Kern (bei ppy < 1 meldet der Kern den Fehler vorher)
     ny = ppy >= 1 ? cld(np_, ppy) : 0
     wd = keep ? (ny + 1, paths) : (0, 0)
@@ -48,11 +50,14 @@ function wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_valu
     terminal = Vector{Float64}(undef, paths); terminal_nom = Vector{Float64}(undef, paths)
     taxes = Vector{Float64}(undef, paths); depl = Vector{Float64}(undef, paths); fail = Vector{Float64}(undef, paths)
     wealth_end = Matrix{Float64}(undef, ed); taxes_end = Matrix{Float64}(undef, ed)
-    outs = (wealth, spend, planned, terminal, terminal_nom, taxes, depl, fail, wealth_end, taxes_end)
+    # T14: Jahreszeilen des Tarifwegs (25 Zeilen, (ny + 1) x Pfade Spalten; ohne Tarifweg leer)
+    td = Bool(tax_on) && !isempty(tariff_par) ? (25, (ny + 1) * paths) : (0, 0)
+    tariff_years = Matrix{Float64}(undef, td)
+    outs = (wealth, spend, planned, terminal, terminal_nom, taxes, depl, fail, wealth_end, taxes_end, tariff_years)
     mats = (R, INF, CAPE, BASE)
     dims = Int64[size(R, 1), size(R, 2), size(INF, 1), size(INF, 2), size(CAPE, 1), size(CAPE, 2),
                  size(BASE, 1), size(BASE, 2)]
-    odims = zeros(Int64, 6)
+    odims = zeros(Int64, 8)
     GC.@preserve mats outs begin
         mp = Ptr{Float64}[pointer(m) for m in mats]
         op = Ptr{Float64}[pointer(o) for o in outs]
@@ -61,16 +66,20 @@ function wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_valu
                          (Ptr{Ptr{Float64}}, Ptr{Int64}, Int64, Int64, Ptr{Float64}, Int64, Cint, Float64,
                           Ptr{Float64}, Int64, Cint, Float64, Float64, Float64, Cint, Float64, Float64, Float64,
                           Cint, Ptr{Float64}, Int64, Ptr{Float64}, Int64, Ptr{Float64}, Int64, Ptr{Cint}, Int64,
-                          Float64, Cint, Ptr{Ptr{Float64}}, Ptr{Int64}, Ptr{Int64}),
+                          Float64, Cint, Ptr{Float64}, Int64, Ptr{Float64}, Int64, Ptr{Ptr{Float64}}, Ptr{Int64},
+                          Ptr{Int64}),
                          mp, dims, ppy, Int(rule), rp, length(rp), Bool(start_timing), Float64(start_value),
                          income_real, length(income_real), Bool(tax_on), Float64(tax_rate), Float64(tfs),
                          Float64(spb_annual), Bool(vp_on), Float64(cost), Float64(basis_ratio), Float64(loss0),
                          keep, lot_n, length(lot_n), lot_basis, length(lot_basis), lot_vp, length(lot_vp),
-                         lot_group, length(lot_group), Float64(spb_first), horizon_end, op, ol, odims))
+                         lot_group, length(lot_group), Float64(spb_first), horizon_end, tariff_par, length(tariff_par),
+                         zve, length(zve), op, ol, odims))
     end
-    return SimLev.RList("wealth" => wealth, "spending" => spend, "planned" => planned, "terminal_real" => terminal,
-                        "terminal_nominal" => terminal_nom, "taxes_real" => taxes, "failed" => fail,
-                        "depletion_period" => depl, "wealth_end" => wealth_end, "taxes_end" => taxes_end)
+    out = SimLev.RList("wealth" => wealth, "spending" => spend, "planned" => planned, "terminal_real" => terminal,
+                       "terminal_nominal" => terminal_nom, "taxes_real" => taxes, "failed" => fail,
+                       "depletion_period" => depl, "wealth_end" => wealth_end, "taxes_end" => taxes_end)
+    isempty(tariff_par) || (out["tariff_years"] = tariff_years)   # T14: Jahreszeilen nur mit Tarifweg
+    return out
 end
 
 end # module

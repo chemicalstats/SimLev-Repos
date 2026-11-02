@@ -4,7 +4,9 @@
 # Julia-Port vor Etappe 8.0 in Zufallsvergleichen gegen R im NaN-Bitmuster abwich
 # (cdar, hmm, dcc, garch_filter, rolling_vol, Engine-Kerne, boot_wild, boot_garch,
 # boot_ms_garch, rtruncnorm). Erwartete Werte aus R 4.3.3 mit SimLev als Bitmuster
-# (dieselben Fälle wie python/tests/test_reine_kerne_nan.py).
+# (dieselben Fälle wie python/tests/test_reine_kerne_nan.py). N10: Engine-Fälle mit der Regel NA vor NaN
+# (core/simlev_core.h); R, Python und Julia liefern seit N10 dieselben Bitmuster (geändert: sell_report,
+# market_update_batch, fifo_price, private_sale_tax, p20_tax, vp_tax).
 
 const _NA = SimLev.NA
 const _NAN = NaN
@@ -175,8 +177,8 @@ const EXPECTED = Dict{String,Vector{Pair{String,Vector{UInt64}}}}(
         "/sim/status/b/count" => UInt64[0x7ff8000000000000],
         "/sim/status/b/price" => UInt64[0x7ff8000000000000],
         "/sim/status/b/worth" => UInt64[0x7ff8000000000000],
-        "/sim/status/b/money" => UInt64[0x7ff8000000000000],
-        "/sim/status/b/total" => UInt64[0x7ff8000000000000],
+        "/sim/status/b/money" => UInt64[0x7ff80000000007a2],
+        "/sim/status/b/total" => UInt64[0x7ff80000000007a2],
         "/sim/status/b/differ" => UInt64[0x3fe0000000000000],
         "/sim/report/a/worth" => UInt64[0x0, 0x0, 0x0],
         "/sim/report/a/money" => UInt64[0x0, 0x0, 0x0],
@@ -184,9 +186,9 @@ const EXPECTED = Dict{String,Vector{Pair{String,Vector{UInt64}}}}(
         "/sim/report/a/total" => UInt64[0x0, 0x0, 0x0],
         "/sim/report/a/share" => UInt64[0x0, 0x0, 0x0],
         "/sim/report/b/worth" => UInt64[0x0, 0x7ff8000000000000, 0x0],
-        "/sim/report/b/money" => UInt64[0x0, 0x7ff8000000000000, 0x0],
+        "/sim/report/b/money" => UInt64[0x0, 0x7ff80000000007a2, 0x0],
         "/sim/report/b/flows" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/total" => UInt64[0x0, 0x7ff8000000000000, 0x0],
+        "/sim/report/b/total" => UInt64[0x0, 0x7ff80000000007a2, 0x0],
         "/sim/report/b/share" => UInt64[0x0, 0x0, 0x0],
     ],
     "total_report" => [
@@ -258,18 +260,18 @@ const EXPECTED = Dict{String,Vector{Pair{String,Vector{UInt64}}}}(
         "/sim/report/b/worth" => UInt64[0x7ff8000000000000, 0x7ff80000000007a2, 0x4018000000000000],
         "/sim/report/b/money" => UInt64[0x7ff00000000007a2, 0x7ff00000000007a2, 0x7ff00000000007a2],
         "/sim/report/b/flows" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/total" => UInt64[0x7ff8000000000000, 0x7ff80000000007a2, 0x7ff80000000007a2],
+        "/sim/report/b/total" => UInt64[0x7ff80000000007a2, 0x7ff80000000007a2, 0x7ff80000000007a2],
         "/sim/report/b/share" => UInt64[0x0, 0x0, 0x0],
     ],
     "fifo_price" => [
-        "/res" => UInt64[0x7ff8000000000000],
+        "/res" => UInt64[0x7ff80000000007a2],
     ],
     "private_sale_tax" => [
         "/res/exempt_gain" => UInt64[0x0],
-        "/res/exempt_loss" => UInt64[0x7ff8000000000000],
+        "/res/exempt_loss" => UInt64[0xfff80000000007a2],
         "/res/taxable_gain" => UInt64[0x0],
         "/res/taxable_loss" => UInt64[0x0],
-        "/res/total_gain" => UInt64[0x7ff8000000000000],
+        "/res/total_gain" => UInt64[0xfff80000000007a2],
     ],
     "sell_count_tp0" => [
         "/res/sell_count" => UInt64[0x4014000000000000],
@@ -284,7 +286,7 @@ const EXPECTED = Dict{String,Vector{Pair{String,Vector{UInt64}}}}(
         "/res/spb_used" => UInt64[0x7ff80000000007a2],
         "/totals/loss_capital_gains" => UInt64[0x7ff80000000007a2],
         "/totals/cgt_loss_added_ytd" => UInt64[0x0],
-        "/totals/cgt_loss_used_ytd" => UInt64[0x7ff8000000000000],
+        "/totals/cgt_loss_used_ytd" => UInt64[0x7ff80000000007a2],
         "/totals/cgt_base_taxed_ytd" => UInt64[0x7ff80000000007a2],
         "/totals/sparer_pauschbetrag_remaining" => UInt64[0x7ff80000000007a2],
         "/totals/sparer_pauschbetrag_used_total" => UInt64[0x7ff80000000007a2],
@@ -299,7 +301,7 @@ const EXPECTED = Dict{String,Vector{Pair{String,Vector{UInt64}}}}(
         "/totals/cgt_loss_used_ytd" => UInt64[0x7ff8000000000000],
         "/totals/cgt_base_taxed_ytd" => UInt64[0x7ff80000000007a2],
         "/totals/sparer_pauschbetrag_remaining" => UInt64[0x7ff8000000000000],
-        "/totals/sparer_pauschbetrag_used_total" => UInt64[0x7ff8000000000000],
+        "/totals/sparer_pauschbetrag_used_total" => UInt64[0x7ff80000000007a2],
         "/totals/total_taxes" => UInt64[0x7ff00000000007a2],
     ],
     "boot_wild" => [

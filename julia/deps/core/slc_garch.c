@@ -4,7 +4,8 @@
  *             (Bollerslev 1986; GJR: Glosten, Jagannathan, Runkle 1993), Start sigma_1^2 =
  *             Stichprobenvarianz von e (eigene Wahl wie h1 im eigenen MS-GARCH, SPEZ-9 B.10).
  *             Punktschätzer per Maximum Likelihood, NLL = 1/2 sum (log 2 pi + log sigma_t^2 +
- *             eps_t^2 / sigma_t^2), kompensiert summiert (Neumaier 1974). Parameter ohne
+ *             eps_t^2 / sigma_t^2), kompensiert summiert (Neumaier 1974). Parameter (GJR-Fit,
+ *             sl_garch11_pack/unpack/grad; der sGARCH-Fit seit N9 siehe unten) ohne
  *             Nebenbedingungen über die Umparametrisierung des eigenen MS-GARCH mit einem Regime
  *             (SimLev r/R/ms_garch.R, .ms_garch_unpack): mu frei, omega = exp(theta_omega),
  *             sGARCH (alpha, beta) = exp(a, b) / (1 + Summe); GJR (N1) (alpha/2, (alpha + gamma)/2,
@@ -14,19 +15,25 @@
  *             Innere des Bereichs, in dem die bedingte Varianz für jedes Vorzeichen von eps
  *             positiv bleibt und das Modell unter der Normalverteilung (E 1{eps < 0} = 1/2)
  *             stationär ist (Glosten, Jagannathan, Runkle 1993).
- *             Startwerte: mu = Mittelwert, festes Raster (alpha, gamma, beta) wie in .ms_garch_fit
- *             (sGARCH drei Punkte; GJR seit N1 sieben: die drei bisherigen, zwei mit gamma < 0,
- *             zwei mit kleinem beta), omega über Varianz-Targeting. sGARCH: genommen wird der
- *             Rasterpunkt mit der kleinsten NLL, bei Gleichstand der erste; N6: endet BFGS am Rand
- *             alpha < 0.01, zweiter Lauf vom besten Punkt einer zweiten Familie mit kleinerem beta,
- *             das bessere Ergebnis gilt. GJR (N1): BFGS von
- *             jedem Rasterpunkt, der beste Lauf gewinnt, bei Gleichstand der erste. Optimierung mit
- *             BFGS (slc_opt.c, sl_minimize), GJR seit N3 und sGARCH seit N4 (bis N3 numerischer
- *             Gradient) mit dem analytischen Gradienten aus einer Vorwärtsrekursion der Ableitungen
- *             von sigma_t^2 (garch_fg: f und g in einem Durchlauf, Logarithmen über ein laufendes
- *             Produkt);
+ *             Startwerte GJR: mu = Mittelwert, festes Raster (alpha, gamma, beta) wie in .ms_garch_fit
+ *             (seit N1 sieben Punkte: die drei sGARCH-Punkte mit gamma, zwei mit gamma < 0, zwei mit kleinem
+ *             beta), omega über Varianz-Targeting; BFGS (slc_opt.c, sl_minimize) von jedem Rasterpunkt, der
+ *             beste Lauf gewinnt, bei Gleichstand der erste; seit N3 mit dem analytischen Gradienten aus einer
+ *             Vorwärtsrekursion der Ableitungen von sigma_t^2 (garch_fg: f und g in einem Durchlauf,
+ *             Logarithmen über ein laufendes Produkt);
  *             mu in Einheiten der Standardabweichung (parscale), damit die Hesse-Matrix gut
  *             skaliert ist.
+ *             sGARCH (N9, bis 1.2.0 BFGS in der Umparametrisierung, N6 mit zweitem Lauf bei Randlage): ein
+ *             Optimierungslauf, Trust-Region-Newton mit exakter Hesse-Matrix (sg_fgh: f, g, H in einem
+ *             Durchlauf) in den natürlichen Parametern ((mu - m)/sd, omega/v, alpha, beta) mit den
+ *             Schranken omega >= 0, alpha >= 0, beta >= 0, alpha + beta <= 1 - 2^-50 über eine aktive
+ *             Menge (der Abschluss des bisherigen Bereichs; an seinem Rand verschwindet der Gradient nicht wie
+ *             unter exp/softmax). Startpunkt: kleinste NLL unter 12 Punkten mit Varianz-Targeting (die drei
+ *             bisherigen, drei ARCH-Punkte mit großem alpha, sechs im Inneren) und 8 Momentenschätzern
+ *             (kleinste Quadrate von eps_t^2 auf die GARCH-Regressoren je beta, sg_ls), nur ausgewertet,
+ *             ohne Optimierung. Die Likelihood mit festem s2_1 hat echte lokale Optima am Rand (alpha = 0
+ *             mit beta -> 1: dort ist dNLL/dalpha proportional zu -sum_k beta^k gamma_k(eps^2) > 0) und
+ *             im Inneren; die Startwahl entscheidet, welches der Lauf erreicht (scratchpad/en9s/).
  *             Filter: wie der frühere eigene Kern garch_filter (bis 1.0.0): s2[0] =
  *             s2_init, Rekursion wie oben, Untergrenze 1e-14.
  *             Ganze Stufe sl_garch11_estimate wie die eigene R-Funktion .fit_garch11
@@ -41,24 +48,31 @@
  *             Neumaier, A. (1974). Rundungsfehleranalyse einiger Verfahren zur Summation endlicher
  *               Summen. ZAMM 54(1), 39–51.
  *             Nocedal, J., Wright, S. J. (2006). Numerical Optimization, 2. Aufl., Springer
- *               (BFGS, über slc_opt.c).
+ *               (BFGS, über slc_opt.c; N9: Trust-Region-Verfahren Kap. 4, aktive Menge Kap. 16).
+ *             Moré, J. J., Sorensen, D. C. (1983). Computing a trust region step. SIAM Journal on
+ *               Scientific and Statistical Computing 4(3), 553–572 (N9: Teilproblem, harter Fall).
+ *             Golub, G. H., Van Loan, C. F. (2013). Matrix Computations, 4. Aufl., Johns Hopkins
+ *               (N9: Jacobi-Verfahren für die Eigenzerlegung, 8.5).
+ *             Kristensen, D., Linton, O. (2006). A closed-form estimator for the GARCH(1,1) model.
+ *               Econometric Theory 22(2), 323–337 (N9: Momente der quadrierten Renditen als Startwahl).
  *             Fiorentini, G., Calzolari, G., Panattoni, L. (1996). Analytic derivatives and the
  *               computation of GARCH estimates. Journal of Applied Econometrics 11(4), 399–417
- *               (N3/N4: Rekursion der Ableitungen der bedingten Varianz).
+ *               (N3/N4: Rekursion der Ableitungen der bedingten Varianz; N9: zweite Ableitungen).
  *             Griewank, A., Walther, A. (2008). Evaluating Derivatives, 2. Aufl., SIAM
- *               (N3/N4: Vorwärtsmodus, von Hand geschrieben).
+ *               (N3/N4/N9: Vorwärtsmodus, von Hand geschrieben).
  *             Eigener SimLev-Code: .ms_garch_unpack/.ms_garch_pack und das Raster aus
  *               r/R/ms_garch.R, .fit_garch11 aus r/R/bootstrap.R (bis zur Grenze des
  *               rugarch-Aufrufs), früher garch_filter (bis 1.0.0).
  * Konstanten: ln(2 pi) aus slc_constants.h (gen_constants.py). Verfahrensparameter (eigene Wahl,
- *             SPEZ-9 B.10): Raster wie .ms_garch_fit (GJR ergänzt in N1; zweite sGARCH-Familie und
- *             Schwelle alpha < 0.01 N6), maxit 500, reltol 1e-10,
+ *             SPEZ-9 B.10): Raster wie .ms_garch_fit (GJR ergänzt in N1), maxit 500, reltol 1e-10 (GJR);
+ *             sGARCH (N9) Startpunkte sg_vt, sg_beta, Trust-Region-Radius 1 am Start, maxit 200, Ende bei
+ *             pred <= 1e-8 |f| nach innerem Newton-Schritt bzw. pred <= 1e-15 |f|,
  *             Momente alpha 0.08, beta 0.88, gamma 0.04 wie .fit_garch11.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen (rugarch,
  *             Rsolnp nicht gelesen).
  * Prüforakel: rugarch 1.5-6 ugarchfit (nur Plausibilität, scratchpad/e94/, N1: scratchpad/en1/,
- *             N3: scratchpad/en3/, N4: scratchpad/en4/, N6: scratchpad/en6/).
+ *             N3: scratchpad/en3/, N4: scratchpad/en4/, N6: scratchpad/en6/, N9: scratchpad/en9s/).
  */
 #include "slc_internal.h"
 #include "slc_la_internal.h"
@@ -70,8 +84,6 @@
 
 #define GARCH_FLOOR 1e-14
 
-/* Raster (alpha, gamma, beta) wie in .ms_garch_fit */
-static const double grid_s[3][3] = {{0.05, 0.0, 0.90}, {0.10, 0.0, 0.85}, {0.03, 0.0, 0.95}};
 /* N1: GJR zusätzlich mit gamma < 0 (alpha + gamma > 0) und mit kleinem beta (fast unabhängige Reihen:
  * dort liegt das Optimum oft bei beta -> 0); die drei bisherigen Punkte zuerst. BFGS läuft bei GJR von
  * jedem Rasterpunkt (siehe sl_garch11_fit). */
@@ -336,12 +348,6 @@ static GARCH_FG_INLINE void nll_screen(int n, const double *e, double mu, const 
     }
 }
 
-/* N6: zweite Startfamilie des sGARCH-Fits (alpha, beta) mit kleinerem beta, für Ergebnisse am Rand alpha -> 0
- * (siehe sl_garch11_fit) */
-#define SG2_N 6
-#define SG2_ALPHA 0.01
-static const double grid_s2[SG2_N][2] = {{0.05, 0.50}, {0.10, 0.10}, {0.01, 0.70}, {0.02, 0.50}, {0.20, 0.10}, {0.10, 0.30}};
-
 int sl_garch11_grad(sl_ctx *cx, int n, const double *e, int gjr, const double *theta, double s2_init,
                     double *nll, double *grad)
 {
@@ -349,6 +355,377 @@ int sl_garch11_grad(sl_ctx *cx, int n, const double *e, int gjr, const double *t
     if (st != SL_OK) return st;
     if (isnan(s2_init)) s2_init = var_c(n, e, mean_c(n, e));
     *nll = gjr ? gjr_fg(n, e, theta, s2_init, grad) : sg_fg(n, e, theta, s2_init, grad);   /* N4: auch sGARCH */
+    return SL_OK;
+}
+
+/* ── N9: sGARCH-Fit in einem Lauf (Trust-Region-Newton mit Schranken) ── */
+
+/* N9: f, Gradient und Hesse-Matrix der sGARCH-NLL nach den natürlichen Parametern u = (mu, omega, alpha, beta)
+ * in einem Durchlauf (Vorwärtsmodus, Griewank/Walther 2008; Fiorentini/Calzolari/Panattoni 1996). Mit
+ * eps_t = e_t - mu, s_{t+1} = omega + alpha eps_t^2 + beta s_t, D = ds/du, H = d^2 s/du^2 (s_1 fest):
+ *   D' = beta D + (-2 alpha eps, 1, eps^2, s),
+ *   H' = beta H + e_beta D' + D e_beta' + C,  C_mu,mu = 2 alpha, C_mu,alpha = -2 eps
+ * (nur mu-mu, mu-alpha und die Zeile beta sind besetzt: s ist linear in omega und alpha). Mit r = eps^2/s,
+ * q = (1 - r)/s, c = (2r - 1)/s^2, w = 2 eps/s^2 ist 2 d^2 l_t = q H + c D D' + w (D e_mu' + e_mu D') + 2/s e_mu e_mu'
+ * und 2 dl_t = q D - 2 eps/s e_mu. f wie in garch_fg (Produkt statt Logarithmus je Zeitpunkt, Teilsummen,
+ * Neumaier), daher dieselbe Zahl wie sg_fg an demselben Punkt bis auf die Rundung in den Parametern.
+ * An der Untergrenze GARCH_FLOOR sind D und H null. want = 0: nur f (g, h werden nicht geschrieben).
+ * h: 4 x 4 voll, zeilenweise. Nicht endlich: +Inf. */
+static GARCH_FG_INLINE double sg_fgh(int n, const double *e, const double *u, double s2_init, double *g, double *h,
+                                      const int want)
+{
+    const double mu = u[0], om = u[1], al = u[2], be = u[3];
+    double v = s2_init, P = 1.0, tot, bs = 0.0;
+    double D0 = 0.0, D1 = 0.0, D2 = 0.0, D3 = 0.0, G0 = 0.0, G1 = 0.0, G2 = 0.0, G3 = 0.0;
+    double Hmm = 0.0, Hma = 0.0, Hmb = 0.0, Hob = 0.0, Hab = 0.0, Hbb = 0.0;
+    double A00 = 0.0, A01 = 0.0, A02 = 0.0, A03 = 0.0, A11 = 0.0, A12 = 0.0, A13 = 0.0, A22 = 0.0, A23 = 0.0, A33 = 0.0;
+    double Qmm = 0.0, Qma = 0.0, Qmb = 0.0, Qob = 0.0, Qab = 0.0, Qbb = 0.0, E0 = 0.0, E1 = 0.0, E2 = 0.0, E3 = 0.0, Emm = 0.0;
+    slc_acc a;
+    int t;
+    if (!isfinite(mu) || !isfinite(om) || !isfinite(al) || !isfinite(be)) return INFINITY;
+    slc_acc_init(&a, 0.0);
+    for (t = 0; t < n; t++) {
+        const double ep = e[t] - mu, ep2 = ep * ep, iv = 1.0 / v, r = ep2 * iv;
+        double vn;
+        if (v > 0x1p400) slc_acc_add(&a, log(v)); else P *= v;
+        if (P < 0x1p-600 || P > 0x1p600) { slc_acc_add(&a, log(P)); P = 1.0; }
+        bs += r;
+        if ((t & 31) == 31) { slc_acc_add(&a, bs); bs = 0.0; }
+        if (want) {
+            const double iv2 = iv * iv, q = (1.0 - r) * iv, c = (2.0 * r - 1.0) * iv2, w = 2.0 * ep * iv2;
+            const double c0 = c * D0, c1 = c * D1, c2 = c * D2, c3 = c * D3;
+            G0 += q * D0 - 2.0 * ep * iv; G1 += q * D1; G2 += q * D2; G3 += q * D3;
+            A00 += c0 * D0; A01 += c0 * D1; A02 += c0 * D2; A03 += c0 * D3;
+            A11 += c1 * D1; A12 += c1 * D2; A13 += c1 * D3; A22 += c2 * D2; A23 += c2 * D3; A33 += c3 * D3;
+            Qmm += q * Hmm; Qma += q * Hma; Qmb += q * Hmb; Qob += q * Hob; Qab += q * Hab; Qbb += q * Hbb;
+            E0 += w * D0; E1 += w * D1; E2 += w * D2; E3 += w * D3; Emm += iv;
+        }
+        vn = om + al * ep2 + be * v;
+        if (vn < GARCH_FLOOR) {
+            vn = GARCH_FLOOR;
+            D0 = D1 = D2 = D3 = 0.0; Hmm = Hma = Hmb = Hob = Hab = Hbb = 0.0;
+        } else if (want) {
+            Hmm = be * Hmm + 2.0 * al; Hma = be * Hma - 2.0 * ep; Hmb = be * Hmb + D0;
+            Hob = be * Hob + D1; Hab = be * Hab + D2; Hbb = be * Hbb + 2.0 * D3;
+            D0 = be * D0 - 2.0 * al * ep; D1 = 1.0 + be * D1; D2 = ep2 + be * D2; D3 = v + be * D3;
+        }
+        v = vn;
+    }
+    slc_acc_add(&a, bs);
+    slc_acc_add(&a, log(P));
+    tot = 0.5 * ((double) n * SLC_LN_2PI + slc_acc_val(&a));
+    if (!isfinite(tot)) return INFINITY;
+    if (want) {
+        g[0] = 0.5 * G0; g[1] = 0.5 * G1; g[2] = 0.5 * G2; g[3] = 0.5 * G3;
+        h[0] = 0.5 * (((A00 + Qmm) + 2.0 * E0) + 2.0 * Emm);
+        h[1] = 0.5 * (A01 + E1); h[2] = 0.5 * ((A02 + Qma) + E2); h[3] = 0.5 * ((A03 + Qmb) + E3);
+        h[5] = 0.5 * A11; h[6] = 0.5 * A12; h[7] = 0.5 * (A13 + Qob);
+        h[10] = 0.5 * A22; h[11] = 0.5 * (A23 + Qab); h[15] = 0.5 * (A33 + Qbb);
+        h[4] = h[1]; h[8] = h[2]; h[12] = h[3]; h[9] = h[6]; h[13] = h[7]; h[14] = h[11];
+        for (t = 0; t < 4; t++) if (!isfinite(g[t])) return INFINITY;
+        for (t = 0; t < 16; t++) if (!isfinite(h[t])) return INFINITY;
+    }
+    return tot;
+}
+
+/* Arbeitsvariablen x = ((mu - m)/sd, omega/v, alpha, beta) mit m, v = Mittelwert und Varianz der Reihe, sd = sqrt(v):
+ * alle Größen von der Ordnung 1, die Hesse-Matrix ist nur skaliert (keine Krümmung durch eine Abbildung). */
+typedef struct { int n; const double *e; double m, sd, v; } sg_prob;
+
+static double sg_eval(const sg_prob *p, const double *x, double *g, double *h, int want)
+{
+    const double sc[4] = {p->sd, p->v, 1.0, 1.0};
+    double u[4], f;
+    int i, j;
+    u[0] = p->m + p->sd * x[0]; u[1] = p->v * x[1]; u[2] = x[2]; u[3] = x[3];
+    f = want ? sg_fgh(p->n, p->e, u, p->v, g, h, 1) : sg_fgh(p->n, p->e, u, p->v, g, h, 0);   /* je eigens übersetzt */
+    if (want && isfinite(f)) {
+        for (i = 0; i < 4; i++) {
+            g[i] *= sc[i];
+            for (j = i; j < 4; j++) h[4 * i + j] = h[4 * j + i] = sc[i] * h[4 * i + j] * sc[j];
+        }
+    }
+    return f;
+}
+
+/* Jacobi-Verfahren für eine symmetrische k x k-Matrix (k <= 4; Golub/Van Loan 2013, 8.5): A wird zerstört,
+ * lam die Eigenwerte, V (zeilenweise k x k) die Eigenvektoren als Spalten. */
+static void sym_eig(int k, double *A, double *lam, double *V)
+{
+    int i, j, p, q, sw;
+    for (i = 0; i < k * k; i++) V[i] = 0.0;
+    for (i = 0; i < k; i++) V[i * k + i] = 1.0;
+    for (sw = 0; sw < 60; sw++) {
+        double off = 0.0, nrm = 0.0;
+        for (i = 0; i < k; i++)
+            for (j = 0; j < k; j++) { nrm += A[i * k + j] * A[i * k + j]; if (i != j) off += A[i * k + j] * A[i * k + j]; }
+        if (!(off > 1e-30 * nrm)) break;
+        for (p = 0; p < k; p++)
+            for (q = p + 1; q < k; q++) {
+                const double apq = A[p * k + q];
+                double th, t, c, s;
+                if (apq == 0.0) continue;
+                th = (A[q * k + q] - A[p * k + p]) / (2.0 * apq);
+                t = (th >= 0.0 ? 1.0 : -1.0) / (fabs(th) + sqrt(th * th + 1.0));
+                c = 1.0 / sqrt(t * t + 1.0); s = t * c;
+                for (i = 0; i < k; i++) { const double x = A[i * k + p], y = A[i * k + q]; A[i * k + p] = c * x - s * y; A[i * k + q] = s * x + c * y; }
+                for (i = 0; i < k; i++) { const double x = A[p * k + i], y = A[q * k + i]; A[p * k + i] = c * x - s * y; A[q * k + i] = s * x + c * y; }
+                for (i = 0; i < k; i++) { const double x = V[i * k + p], y = V[i * k + q]; V[i * k + p] = c * x - s * y; V[i * k + q] = s * x + c * y; }
+            }
+    }
+    for (i = 0; i < k; i++) lam[i] = A[i * k + i];
+}
+
+/* Trust-Region-Teilproblem min g'd + d'Hd/2 unter |d| <= del (k <= 4) über die Eigenzerlegung (Moré/Sorensen
+ * 1983; Nocedal/Wright 2006, 4.3): d = -(H + lambda I)^{-1} g mit lambda >= max(0, -lambda_min) und |d| = del,
+ * sonst der Newton-Schritt; harter Fall mit Anteil längs des kleinsten Eigenvektors. Rückgabe 1, wenn d der
+ * Newton-Schritt im Inneren ist. */
+static int tr_sub(int k, const double *H, const double *g, double del, double *d)
+{
+    double A[16], lam[4], V[16], gt[4], lmin, lo, hi, gn = 0.0, l;
+    int i, j, imin = 0, it;
+    memcpy(A, H, (size_t) (k * k) * sizeof(double));
+    sym_eig(k, A, lam, V);
+    for (i = 0; i < k; i++) {
+        gt[i] = 0.0;
+        for (j = 0; j < k; j++) gt[i] += V[j * k + i] * g[j];
+        gn += g[i] * g[i];
+    }
+    gn = sqrt(gn);
+    for (i = 1; i < k; i++) if (lam[i] < lam[imin]) imin = i;
+    lmin = lam[imin];
+    if (lmin > 0.0) {
+        double s = 0.0;
+        for (i = 0; i < k; i++) s += (gt[i] / lam[i]) * (gt[i] / lam[i]);
+        if (sqrt(s) <= del) {
+            for (j = 0; j < k; j++) { d[j] = 0.0; for (i = 0; i < k; i++) d[j] -= V[j * k + i] * gt[i] / lam[i]; }
+            return 1;
+        }
+    }
+    lo = lmin > 0.0 ? 0.0 : -lmin;
+    if (lmin <= 0.0 && fabs(gt[imin]) <= 1e-12 * gn) {   /* harter Fall */
+        double s = 0.0;
+        for (i = 0; i < k; i++) if (i != imin && lam[i] > lmin) s += (gt[i] / (lam[i] - lmin)) * (gt[i] / (lam[i] - lmin));
+        if (sqrt(s) <= del) {
+            const double tau = sqrt(del * del - s);
+            for (j = 0; j < k; j++) {
+                d[j] = tau * V[j * k + imin];
+                for (i = 0; i < k; i++) if (i != imin && lam[i] > lmin) d[j] -= V[j * k + i] * gt[i] / (lam[i] - lmin);
+            }
+            return 0;
+        }
+    }
+    hi = lo + gn / del;
+    l = lo + 0.5 * (hi - lo);
+    for (it = 0; it < 100; it++) {   /* Newton für 1/|d(lambda)| = 1/del, mit Einschluss [lo, hi] */
+        double s = 0.0, s3 = 0.0, nd, ln;
+        for (i = 0; i < k; i++) { const double den = lam[i] + l, a2 = gt[i] * gt[i]; s += a2 / (den * den); s3 += a2 / (den * den * den); }
+        nd = sqrt(s);
+        if (fabs(nd - del) <= 1e-10 * del) break;
+        if (nd > del) lo = l; else hi = l;
+        ln = l - (1.0 / nd - 1.0 / del) / (s3 / (s * nd));
+        if (!(ln > lo && ln < hi)) ln = 0.5 * (lo + hi);
+        if (hi - lo <= 1e-15 * hi) break;
+        l = ln;
+    }
+    for (j = 0; j < k; j++) { d[j] = 0.0; for (i = 0; i < k; i++) d[j] -= V[j * k + i] * gt[i] / (lam[i] + l); }
+    return 0;
+}
+
+/* Nebenbedingungen a_j'x >= b_j: omega >= 0, alpha >= 0, beta >= 0, alpha + beta <= SG_PMAX (das Bild der
+ * Abbildung von bis N8 ist das Innere dieses Bereichs, Grenzwerte inklusive) */
+#define SG_PMAX (1.0 - 0x1p-50)
+#define SG_TOL1 1e-8   /* Ende nach innerem Newton-Schritt mit pred <= SG_TOL1 |f| (gemessen: LL wie mit 1e-10 bis 3e-12 relativ) */
+static const double sg_a[4][4] = {{0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}, {0, 0, -1, -1}};
+static double sg_slack(int j, const double *x) { return j < 3 ? x[j + 1] : SG_PMAX - (x[2] + x[3]); }
+
+/* orthonormale Basis Z (4 x k, zeilenweise mit Zeilenlänge 4) des Nullraums der aktiven Normalen */
+static int sg_null(const int *act, double *Z)
+{
+    double N[4][4], C[4][4];
+    int m = 0, k = 0, i, j, l;
+    for (j = 0; j < 4; j++) {
+        double nr = 0.0;
+        if (!act[j]) continue;
+        for (i = 0; i < 4; i++) N[m][i] = sg_a[j][i];
+        for (l = 0; l < m; l++) { double dp = 0.0; for (i = 0; i < 4; i++) dp += N[l][i] * N[m][i]; for (i = 0; i < 4; i++) N[m][i] -= dp * N[l][i]; }
+        for (i = 0; i < 4; i++) nr += N[m][i] * N[m][i];
+        nr = sqrt(nr);
+        if (nr < 1e-12) continue;
+        for (i = 0; i < 4; i++) N[m][i] /= nr;
+        m++;
+    }
+    for (j = 0; j < 4 && k < 4 - m; j++) {
+        double w[4] = {0.0, 0.0, 0.0, 0.0}, nr = 0.0;
+        w[j] = 1.0;
+        for (l = 0; l < m; l++) { const double dp = N[l][j]; for (i = 0; i < 4; i++) w[i] -= dp * N[l][i]; }
+        for (l = 0; l < k; l++) { double dp = 0.0; for (i = 0; i < 4; i++) dp += C[l][i] * w[i]; for (i = 0; i < 4; i++) w[i] -= dp * C[l][i]; }
+        for (i = 0; i < 4; i++) nr += w[i] * w[i];
+        nr = sqrt(nr);
+        if (nr < 1e-8) continue;
+        for (i = 0; i < 4; i++) C[k][i] = w[i] / nr;
+        k++;
+    }
+    for (l = 0; l < k; l++) for (i = 0; i < 4; i++) Z[i * 4 + l] = C[l][i];
+    return k;
+}
+
+/* N9: Trust-Region-Newton mit aktiver Menge (Nocedal/Wright 2006, Kap. 4 und 16.5) ab zulässigem x.
+ * Je Schritt: aktive Menge = Nebenbedingungen auf der Grenze, außer denen mit negativem Multiplikator
+ * (g = sum lambda_j a_j, kleinste Quadrate); Teilproblem im Nullraum; der Schritt endet an der ersten
+ * verletzten Nebenbedingung (diese wird dort genau erfüllt); zeigt er sofort hinaus, wird sie aktiv und der
+ * Schritt neu bestimmt. Annahme bei rho = (f - f_neu)/pred > 1e-4, Radius wie Nocedal/Wright Alg. 4.1.
+ * Ende: pred <= 1e-15 |f|; angenommener innerer Newton-Schritt mit pred <= 1e-10 |f| (danach ist der Rest
+ * quadratisch klein; an diesem Punkt nur f); Radius < 1e-14; code 1 bei maxit. */
+static int sg_newton(sl_ctx *cx, const sg_prob *p, double *x, int maxit, double *fmin, int *code, int *nit)
+{
+    double g[4], H[16], f, del = 1.0;
+    int it;
+    f = sg_eval(p, x, g, H, 1);
+    *code = 1;
+    if (!isfinite(f)) { *fmin = f; *nit = 0; return SL_OK; }
+    for (it = 0; it < maxit; it++) {
+        int act[4], at[4], i, j, l, k = 0, inter = 0, rep, hit = -1, last;
+        double Z[16], gz[4], Hz[16], dz[4], dd[4], xt[4], gt[4], Ht[16], ft, pred, rho, sn = 0.0, t = 1.0, gd = 0.0, dHd = 0.0;
+        if (sl_interrupted(cx)) return SL_EINTR;
+        for (j = 0; j < 4; j++) at[j] = act[j] = sg_slack(j, x) <= (j == 3 ? 4e-16 : 0.0);
+        {   /* Multiplikatoren der Nebenbedingungen auf der Grenze */
+            int idx[4], m = 0, r, c;
+            double M[9], rhs[3], lam[3];
+            for (j = 0; j < 4; j++) if (act[j]) idx[m++] = j;
+            if (m > 3) m = 3;   /* nicht möglich: höchstens omega und zwei der übrigen */
+            for (r = 0; r < m; r++) {
+                rhs[r] = 0.0;
+                for (i = 0; i < 4; i++) rhs[r] += sg_a[idx[r]][i] * g[i];
+                for (c = 0; c < m; c++) { M[r * m + c] = 0.0; for (i = 0; i < 4; i++) M[r * m + c] += sg_a[idx[r]][i] * sg_a[idx[c]][i]; }
+            }
+            for (c = 0; c < m; c++)
+                for (r = c + 1; r < m; r++) {
+                    const double fc = M[r * m + c] / M[c * m + c];
+                    for (l = c; l < m; l++) M[r * m + l] -= fc * M[c * m + l];
+                    rhs[r] -= fc * rhs[c];
+                }
+            for (r = m - 1; r >= 0; r--) { double s = rhs[r]; for (l = r + 1; l < m; l++) s -= M[r * m + l] * lam[l]; lam[r] = s / M[r * m + r]; }
+            for (r = 0; r < m; r++) if (lam[r] < 0.0) act[idx[r]] = 0;
+        }
+        for (rep = 0; rep < 5; rep++) {
+            k = sg_null(act, Z);
+            for (i = 0; i < k; i++) { gz[i] = 0.0; for (l = 0; l < 4; l++) gz[i] += Z[l * 4 + i] * g[l]; }
+            for (i = 0; i < k; i++)
+                for (j = 0; j < k; j++) {
+                    double s = 0.0;
+                    int a, b;
+                    for (a = 0; a < 4; a++) for (b = 0; b < 4; b++) s += Z[a * 4 + i] * H[a * 4 + b] * Z[b * 4 + j];
+                    Hz[i * k + j] = s;
+                }
+            for (i = 0; i < k; i++) for (j = 0; j < i; j++) Hz[i * k + j] = Hz[j * k + i] = 0.5 * (Hz[i * k + j] + Hz[j * k + i]);
+            inter = tr_sub(k, Hz, gz, del, dz);
+            for (l = 0; l < 4; l++) { dd[l] = 0.0; for (i = 0; i < k; i++) dd[l] += Z[l * 4 + i] * dz[i]; }
+            t = 1.0; hit = -1;
+            for (j = 0; j < 4; j++) {
+                double ad = 0.0, sl;
+                if (act[j]) continue;
+                sl = sg_slack(j, x);
+                for (i = 0; i < 4; i++) ad += sg_a[j][i] * dd[i];
+                if (ad < 0.0 && sl + ad < 0.0) { const double tj = sl / (-ad); if (tj < t) { t = tj; hit = j; } }
+            }
+            if (hit >= 0 && t < 1e-8 && (at[hit] || t < 1e-12)) { act[hit] = 1; continue; }
+            break;
+        }
+        if (t < 0.0) t = 0.0;
+        for (i = 0; i < 4; i++) xt[i] = x[i] + t * dd[i];
+        if (hit == 3) xt[3] = SG_PMAX - xt[2]; else if (hit >= 0) xt[hit + 1] = 0.0;
+        for (i = 1; i < 4; i++) if (xt[i] < 0.0) xt[i] = 0.0;
+        if (xt[2] + xt[3] > SG_PMAX) xt[3] = SG_PMAX - xt[2];
+        for (i = 0; i < 4; i++) { gd += g[i] * dd[i]; for (j = 0; j < 4; j++) dHd += dd[i] * H[4 * i + j] * dd[j]; }
+        pred = -(t * gd + 0.5 * t * t * dHd);
+        if (!(pred > 1e-15 * fabs(f))) { *code = 0; break; }
+        for (i = 0; i < 4; i++) sn += (xt[i] - x[i]) * (xt[i] - x[i]);
+        sn = sqrt(sn);
+        last = inter && t == 1.0 && pred <= SG_TOL1 * fabs(f);
+        ft = sg_eval(p, xt, gt, Ht, !last);
+        rho = isfinite(ft) ? (f - ft) / pred : -1.0;
+        if (rho < 0.25) del = 0.25 * sn; else if (rho > 0.75 && sn > 0.99 * del) del *= 2.0;
+        if (rho > 1e-4) {
+            memcpy(x, xt, sizeof xt); f = ft;
+            if (last) { *code = 0; it++; break; }
+            memcpy(g, gt, sizeof g); memcpy(H, Ht, sizeof H);
+        }
+        if (del < 1e-14) { *code = 0; break; }
+    }
+    *fmin = f; *nit = it;
+    return SL_OK;
+}
+
+/* N9: Kleinste Quadrate je beta (Momente, ohne Optimierung): eps_t^2 - beta^(t-1) s_1 ~ omega A_t + alpha B_t
+ * (t >= 2) mit A_t = sum_{j < t-1} beta^j, B_t = sum_j beta^j eps_{t-1-j}^2, also E(eps_t^2 | Vergangenheit) = s_t
+ * (vgl. Kristensen/Linton 2006 für Momentenschätzer des GARCH(1,1)). Lösung der 2 x 2-Normalgleichungen;
+ * negative Werte: die bessere der beiden Einparameter-Lösungen; alpha <= SG_PMAX - beta. K <= 6 Werte von beta in
+ * einem Durchlauf (unabhängige Ketten). Ergebnis q[j] = (omega, alpha, beta). */
+static void sg_ls(int n, const double *e, double mu, double s1, const double *be, int K, double (*q)[3])
+{
+    double A[SCR_MAX], B[SCR_MAX], C[SCR_MAX], saa[SCR_MAX], sab[SCR_MAX], sbb[SCR_MAX], say[SCR_MAX], sby[SCR_MAX];
+    int t, j;
+    for (j = 0; j < K; j++) { A[j] = B[j] = 0.0; C[j] = s1; saa[j] = sab[j] = sbb[j] = say[j] = sby[j] = 0.0; }
+    for (t = 0; t < n; t++) {
+        const double ep = e[t] - mu, y = ep * ep;
+        for (j = 0; j < K; j++) {
+            if (t > 0) {
+                const double yy = y - C[j];
+                saa[j] += A[j] * A[j]; sab[j] += A[j] * B[j]; sbb[j] += B[j] * B[j]; say[j] += A[j] * yy; sby[j] += B[j] * yy;
+            }
+            A[j] = 1.0 + be[j] * A[j]; B[j] = y + be[j] * B[j]; C[j] *= be[j];
+            if (C[j] < 1e-290) C[j] = 0.0;   /* keine subnormalen Zahlen */
+        }
+    }
+    for (j = 0; j < K; j++) {
+        const double det = saa[j] * sbb[j] - sab[j] * sab[j], amax = SG_PMAX - be[j] > 0.0 ? SG_PMAX - be[j] : 0.0;
+        double om = -1.0, al = -1.0;
+        if (det > 1e-12 * (saa[j] * sbb[j])) { om = (sbb[j] * say[j] - sab[j] * sby[j]) / det; al = (saa[j] * sby[j] - sab[j] * say[j]) / det; }
+        if (!(om >= 0.0) || !(al >= 0.0)) {
+            double o1 = saa[j] > 0.0 ? say[j] / saa[j] : 0.0, a1 = sbb[j] > 0.0 ? sby[j] / sbb[j] : 0.0;
+            if (!(o1 > 0.0)) o1 = 0.0;
+            if (!(a1 > 0.0)) a1 = 0.0;
+            if (o1 * say[j] >= a1 * sby[j]) { om = o1; al = 0.0; } else { om = 0.0; al = a1; }   /* kleinere Restsumme */
+        }
+        if (al > amax) al = amax;
+        q[j][0] = om; q[j][1] = al; q[j][2] = be[j];
+    }
+}
+
+/* N9: Startpunkte des sGARCH-Fits (alpha, beta), omega über Varianz-Targeting: das bisherige Raster, ARCH-Punkte
+ * mit großem alpha (große Ausreißer) und Punkte im Inneren; dazu die Momentenschätzer sg_ls für ein Raster in beta.
+ * Gewählt nach Messung auf 211 bekannten und 480 neuen simulierten Reihen (scratchpad/en9s/). */
+#define SG_NV 12
+static const double sg_vt[SG_NV][2] = {{0.05, 0.90}, {0.10, 0.85}, {0.03, 0.95}, {0.30, 0.0}, {0.60, 0.0}, {0.90, 0.0},
+                                       {0.20, 0.50}, {0.35, 0.50}, {0.10, 0.70}, {0.35, 0.10}, {0.50, 0.10}, {0.20, 0.30}};
+#define SG_NB 8
+static const double sg_beta[SG_NB] = {0.0, 0.4, 0.7, 0.85, 0.92, 0.97, 0.995, 0.9999};
+
+/* N9: sGARCH-Fit in einem Optimierungslauf. Startpunkt: kleinste NLL (nll_screen, mu = Mittelwert, bei Gleichstand
+ * der erste) unter den SG_NV + SG_NB Punkten oben; ausgewertet wird nur die NLL, ohne Optimierung. Von dort ein
+ * Lauf sg_newton in den natürlichen Parametern mit den Schranken des Modells (omega >= 0, alpha, beta >= 0,
+ * alpha + beta <= SG_PMAX). */
+static int fit_sgarch(sl_ctx *cx, int n, const double *e, double m, double v, const sl_opt_ctrl *ctrl, double *par,
+                      double *loglik, int *code)
+{
+    sg_prob p;
+    double q[SG_NV + SG_NB][3], fs[SG_NV + SG_NB], x[4], f, best;
+    int i, ib = 0, nit, st, maxit = (ctrl != NULL && ctrl->maxit > 0) ? ctrl->maxit : 200;
+    for (i = 0; i < SG_NV; i++) { q[i][0] = v * (1.0 - sg_vt[i][0] - sg_vt[i][1]); q[i][1] = sg_vt[i][0]; q[i][2] = sg_vt[i][1]; }
+    for (i = 0; i < SG_NB; i += SCR_MAX) sg_ls(n, e, m, v, sg_beta + i, SG_NB - i < SCR_MAX ? SG_NB - i : SCR_MAX, q + SG_NV + i);
+    for (i = 0; i < SG_NV + SG_NB; i += SCR_MAX)
+        nll_screen(n, e, m, (const double (*)[3]) (q + i), v, fs + i, SG_NV + SG_NB - i < SCR_MAX ? SG_NV + SG_NB - i : SCR_MAX);
+    best = fs[0];
+    for (i = 1; i < SG_NV + SG_NB; i++) if (fs[i] < best) { best = fs[i]; ib = i; }
+    if (!isfinite(best)) return sl_fail(cx, SL_ENONFINITE, "GARCH: Log-Likelihood an allen Startwerten nicht endlich");
+    p.n = n; p.e = e; p.m = m; p.v = v; p.sd = sqrt(v);
+    x[0] = 0.0; x[1] = q[ib][0] / v; x[2] = q[ib][1]; x[3] = q[ib][2];
+    st = sg_newton(cx, &p, x, maxit, &f, code, &nit);
+    if (st != SL_OK) return st;
+    if (!isfinite(f)) return sl_fail(cx, SL_ECONV, "GARCH: Log-Likelihood nicht endlich (Code %d)", *code);
+    par[0] = m + p.sd * x[0]; par[1] = v * x[1]; par[2] = x[2]; par[3] = x[3]; par[4] = 0.0;
+    *loglik = -f;
     return SL_OK;
 }
 
@@ -361,7 +738,7 @@ int sl_garch11_grad(sl_ctx *cx, int n, const double *e, int gjr, const double *t
  * nur den Speicher. Alle sieben Starts laufen bis zum Ende: Ein kurzer Vorlauf mit Fortsetzung nur der besten
  * Starts sparte 13–35 %, traf aber auf neuen Reihen nicht immer das Optimum (scratchpad/en3/). (N1: von nur
  * einem Start blieb BFGS auf fast unabhängigen Reihen an der Grenze beta -> 1 hängen, scratchpad/en1/.)
- * N4: sGARCH ebenso mit sg_fg und demselben Speicher, Start wie bisher nur vom besten Rasterpunkt. */
+ * N4–N8: sGARCH ebenso mit sg_fg und demselben Speicher (seit N9 eigener Löser, fit_sgarch). */
 typedef struct { const garch_data *d; double xc[5], gc[5]; int have; } fg_cache;
 
 static double fg_obj(const double *th, void *data)
@@ -429,75 +806,15 @@ int sl_garch11_fit(sl_ctx *cx, int n, const double *e, int gjr, const sl_opt_ctr
                    double *par, double *loglik, int *code)
 {
     garch_data d;
-    sl_opt_ctrl c;
-    double m, v, ths[3][5], q[SCR_MAX][3], fs[SCR_MAX], best_th[5], best = INFINITY, ps[5], fmin, g[5];
-    int i, np = sl_garch11_npar(gjr), st, iter, nfev, ib = 0;
-    fg_cache k;
-    st = check_series(cx, n, e, 10, "GARCH");
+    double m, v;
+    int st = check_series(cx, n, e, 10, "GARCH");
     if (st != SL_OK) return st;
     m = mean_c(n, e);
     v = var_c(n, e, m);
     if (!(v > 0.0) || !isfinite(v)) return sl_fail(cx, SL_EARG, "GARCH: Varianz der Reihe ist 0");
     d.n = n; d.gjr = gjr; d.e = e; d.s2_init = v;
     if (gjr) return fit_gjr(cx, &d, m, v, ctrl, par, loglik, code);   /* N1 */
-    /* Raster mit Varianz-Targeting; kleinste NLL, bei Gleichstand der erste Punkt (N6: die drei NLL in einem
-     * Durchlauf, nll_screen) */
-    for (i = 0; i < 3; i++) {
-        double p[5];
-        p[0] = m;
-        p[1] = v * (1.0 - grid_s[i][0] - grid_s[i][1] / 2.0 - grid_s[i][2]);
-        p[2] = grid_s[i][0]; p[3] = grid_s[i][2]; p[4] = grid_s[i][1];
-        if (sl_garch11_pack(cx, gjr, p, ths[i]) != SL_OK) return cx->status;
-        q[i][0] = p[1]; q[i][1] = p[2]; q[i][2] = p[3];
-    }
-    nll_screen(n, e, m, (const double (*)[3]) q, v, fs, 3);
-    for (i = 0; i < 3; i++) if (i == 0 || fs[i] < best) { best = fs[i]; ib = i; }
-    memcpy(best_th, ths[ib], (size_t) np * sizeof(double));
-    if (!isfinite(best)) return sl_fail(cx, SL_ENONFINITE, "GARCH: Log-Likelihood an allen Startwerten nicht endlich");
-    if (ctrl) c = *ctrl;
-    else { sl_opt_ctrl_default(&c, SL_OPT_BFGS); c.maxit = 500; c.reltol = 1e-10; }
-    if (c.parscale == NULL) {
-        ps[0] = sqrt(v);
-        for (i = 1; i < np; i++) ps[i] = 1.0;
-        c.parscale = ps;
-    }
-    k.d = &d; k.have = 0;
-    st = sl_minimize(cx, SL_OPT_BFGS, np, best_th, NULL, NULL, &c, fg_obj, fg_gr, &k,
-                     &fmin, code, &iter, &nfev);   /* N4: analytischer Gradient (sg_fg) */
-    if (st != SL_OK) return st;
-    /* N6: Liegt das Ergebnis am Rand alpha < 0.01, läuft BFGS ein zweites Mal, vom besten Punkt (kleinste NLL,
-     * bei Gleichstand der erste) der zweiten Familie grid_s2 mit kleinerem beta; das bessere Ergebnis gilt
-     * (bei Gleichstand das erste). Von den drei Rasterpunkten mit beta >= 0.85 endet BFGS auf schwach
-     * heteroskedastischen Reihen oft am Rand alpha -> 0 (beta -> 1 oder langer Grat in beta), obwohl ein
-     * inneres Maximum mit kleinerem beta höher liegt (scratchpad/en6/: auf 160 Prüfreihen 37 Fälle um bis
-     * 10,5 in der LL; ein Neustart am Ergebnis fand nur 2 davon, und nicht das Optimum). Ohne Randlage
-     * bleibt alles wie bisher (bitgleich), mit Randlage ist das Ergebnis nie schlechter als bisher. */
-    sl_garch11_unpack(gjr, best_th, g);
-    if (g[2] < SG2_ALPHA) {
-        double ths2[SG2_N][4], th2[4], f2;
-        int cd2;
-        for (i = 0; i < SG2_N; i++) {
-            double p[5];
-            p[0] = m; p[1] = v * (1.0 - grid_s2[i][0] - grid_s2[i][1]); p[2] = grid_s2[i][0]; p[3] = grid_s2[i][1]; p[4] = 0.0;
-            if (sl_garch11_pack(cx, 0, p, ths2[i]) != SL_OK) return cx->status;
-            q[i][0] = p[1]; q[i][1] = p[2]; q[i][2] = p[3];
-        }
-        nll_screen(n, e, m, (const double (*)[3]) q, v, fs, SG2_N);
-        ib = 0;
-        for (i = 1; i < SG2_N; i++) if (fs[i] < fs[ib]) ib = i;
-        if (isfinite(fs[ib])) {
-            memcpy(th2, ths2[ib], sizeof th2);
-            k.have = 0;
-            st = sl_minimize(cx, SL_OPT_BFGS, np, th2, NULL, NULL, &c, fg_obj, fg_gr, &k, &f2, &cd2, &iter, &nfev);
-            if (st != SL_OK) return st;
-            if (f2 < fmin) { memcpy(best_th, th2, sizeof th2); fmin = f2; *code = cd2; }
-        }
-    }
-    if (!isfinite(fmin)) return sl_fail(cx, SL_ECONV, "GARCH: Log-Likelihood nicht endlich (Code %d)", *code);
-    sl_garch11_unpack(gjr, best_th, g);
-    memcpy(par, g, 5 * sizeof(double));
-    *loglik = -fmin;
-    return SL_OK;
+    return fit_sgarch(cx, n, e, m, v, ctrl, par, loglik, code);       /* N9 */
 }
 
 /* ── ganze Stufe wie .fit_garch11 ── */

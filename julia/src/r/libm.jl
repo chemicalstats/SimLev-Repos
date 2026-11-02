@@ -1,3 +1,10 @@
+# Herkunft:           nachgebildet nach R 4.3.3, Randregeln von src/main/arithmetic.c um die
+#                     libm-Funktionen
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle)
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang.
 # RLibm – libm-Funktionen von glibc (statt Julias eigener exp/log/pow), elementweise
 #
 # Julia rechnet exp, log, log1p, expm1, ^, tanh, sin, … selbst (bzw. über

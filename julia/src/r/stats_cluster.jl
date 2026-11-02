@@ -1,3 +1,11 @@
+# Herkunft:           übersetzt aus R 4.3.3, src/library/stats/src/distance.c, hclust.f;
+#                     nachgebildet nach R 4.3.3, src/library/stats/R/dist.R, hclust.R
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle); hclust.f: F. Murtagh (1986), Änderungen Ross
+#                     Ihaka, Fritz Leisch, Martin Maechler (ohne eigenen Lizenzvermerk)
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang.
 # Distanzen und hierarchische Clusteranalyse (dist, as_dist, dist_as_matrix, hclust) aus R 4.3.3
 # stats/R/dist.R, hclust.R und stats/src/distance.c, hclust.f; Python: _r/stats_cluster.py.
 # Teil des Untermoduls RStats (eingebunden in stats.jl).

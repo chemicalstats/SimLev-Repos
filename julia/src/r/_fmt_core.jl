@@ -1,3 +1,14 @@
+# Herkunft:           übersetzt aus R 4.3.3, src/main/format.c, printutils.c, printvector.c,
+#                     printarray.c, print.c, paste.c, sprintf.c, util.c; src/nmath/fround.c,
+#                     fprec.c; nachgebildet nach R 4.3.3, src/library/base/R/format.R, dataframe.R,
+#                     factor.R, dates.R
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle); fprec.c: Übersetzung einer Fortran-Routine von
+#                     W. Fullerton (Los Alamos); sprintf.c: ursprünglich Jonathan Rougier
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet seit N10 der C-Kern
+#                     core/slc_rbase_date.c.
 # RFmt – Kern: Optionen, interne Vektordarstellung, C-printf, round/signif,
 # formatReal/scientific, Kodierung von Zahlen und Zeichenketten.
 # Vorlage: python/simlev/_r/fmt.py; Quellen R 4.3.3 (format.c, printutils.c,
@@ -5,26 +16,38 @@
 
 # ── Optionen ────────────────────────────────────────────────────────────────
 
-const _OPT = Dict{Symbol,Any}(:digits => 7, :scipen => 0, :width => 80, :OutDec => ".")
+const _OPT = Dict{Symbol,Any}(:digits => 7, :scipen => 0, :width => 80, :OutDec => ".", :digits_secs => nothing)
 
 """
-    set_options(; digits, scipen, width, OutDec)
+    set_options(; digits, scipen, width, OutDec, digits_secs)
 
-Wie `options()`; liefert die alten Werte als `Dict` (zurücksetzen mit
-`set_options(; alt...)`).
+Wie `options()`; `digits_secs` ist R's `digits.secs` (Ziffern für `%OS` ohne Ziffer in
+`format_date`; `nothing` = nicht gesetzt wie in R). Liefert die alten Werte als `Dict`
+(zurücksetzen mit `set_options(; alt...)`).
 """
 function set_options(; kw...)
     old = Dict{Symbol,Any}()
     for (k, v) in kw
         haskey(_OPT, k) || throw(KeyError(k))
+        k === :digits_secs && !(v === nothing || v isa Real) && throw(ArgumentError("digits_secs: nothing oder eine Zahl"))
         old[k] = _OPT[k]
         _OPT[k] = v
     end
     return old
 end
 
-"`getOption(name)` für digits, scipen, width, OutDec."
-get_option(name) = _OPT[Symbol(name)]
+"`getOption(name)` für digits, scipen, width, OutDec, digits_secs (auch \"digits.secs\")."
+get_option(name) = _OPT[String(name) == "digits.secs" ? :digits_secs : Symbol(name)]
+
+# getOption("digits.secs") wie bei R's %OS: ganzzahlig (zur Null hin); nicht gesetzt, NA, NaN oder außerhalb
+# des int-Bereichs 0; die Begrenzung auf 0..6 macht der Kern (wie Python fmt._digits_secs).
+function _digits_secs()
+    v = _OPT[:digits_secs]
+    v === nothing && return 0
+    x = Float64(v)
+    abs(x) < 2147483648.0 || return 0
+    return Int(trunc(x))
+end
 
 #: R's `NA_real_` (= `SimLev.NA`); R's NaN ist ein gewöhnliches `NaN`
 #: (Julia unterscheidet beide über `isna_strict`).
@@ -294,24 +317,20 @@ function _as_v0(x, type)
     return _from_seq(Any[x]; scalar = true)
 end
 
-const _NUM_RE = r"^[ \t\n\r\f\v]*([+-]?)(?:(0[xX][0-9a-fA-F]*\.?[0-9a-fA-F]*(?:[pP][+-]?[0-9]+)?)|((?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)|(Inf|inf|infinity|Infinity|INF)|(NaN))[ \t\n\r\f\v]*$"
-
-"String → double wie `String2Real`: (Wert, NA, NaN, Warnung)."
+"""
+String → double wie `String2Real`: (Wert, NA, NaN, Warnung). N11: über `SimLev.RExpr._str2num` (R_strtod mit dem
+C-Kern `sl_r_strtod_num`, long double wie R; vorher `parse`, korrekt gerundet und damit bei mehr als 17 Ziffern
+teils anders als R). Wie Python `fmt._r_strtod`.
+"""
 function _r_strtod(s)
-    (s === nothing || s == "NA") && return (SimLev.NA, true, false, false)
-    m = match(_NUM_RE, s)
-    m === nothing && return (SimLev.NA, true, false, true)
-    sgn = m.captures[1] == "-" ? -1.0 : 1.0
-    if m.captures[2] !== nothing
-        h = String(m.captures[2])
-        occursin(r"[pP]", h) || (h *= "p0")
-        z = tryparse(Float64, h)
-        z === nothing && return (SimLev.NA, true, false, true)
-        return (sgn * z, false, false, false)
+    s === nothing && return (SimLev.NA, true, false, false)
+    v, bad = SimLev.RExpr._str2num(String(s))
+    bad && return (SimLev.NA, true, false, true)
+    if isnan(v)
+        SimLev.isna_strict(v) && return (SimLev.NA, true, false, false)
+        return (v, false, true, false)
     end
-    m.captures[3] !== nothing && return (sgn * parse(Float64, m.captures[3]), false, false, false)
-    m.captures[4] !== nothing && return (sgn * Inf, false, false, false)
-    return (NaN, false, true, false)
+    return (v, false, false, false)
 end
 
 function _coerce(v::_V, type::Symbol)
@@ -557,50 +576,6 @@ r_round(x, d = 0; digits = d) = _math2(fround, x, digits)
 "`signif(x, digits = 6)` wie R (`fprec.c`)."
 signif(x, d = 6; digits = d) = _math2(fprec, x, digits)
 
-# ── long double (F80) für scientific() ─────────────────────────────────────
-
-const F80 = SimLev.F80
-include("_fmt_powl.jl")
-
-_f80(m::UInt64, e::Int32) = F80(m, e, false, SimLev._FIN)
-const _TBL80 = F80[F80(parse(Float64, "1e$k")) for k in 0:27]
-const _TBLD = Float64[parse(Float64, "1e$k") for k in 0:27]
-const _KP_MAX = 27
-
-function _powl10(k::Int)
-    -350 <= k <= 350 || error("powl(10, $k) außerhalb der Tabelle")
-    m, e = _POWL10[k + 351]
-    return _f80(m, e)
-end
-
-# Vergleich a < b für endliche Werte oder Null
-function _f80_lt(a::F80, b::F80)
-    sa = a.cls == SimLev._ZERO ? 0 : a.neg ? -1 : 1
-    sb = b.cls == SimLev._ZERO ? 0 : b.neg ? -1 : 1
-    sa != sb && return sa < sb
-    sa == 0 && return false
-    lt = a.e != b.e ? a.e < b.e : a.m < b.m
-    eq = a.e == b.e && a.m == b.m
-    return sa > 0 ? lt : (!lt && !eq)
-end
-
-# nearbyintl (gerade Rundung), Ergebnis als double
-function _f80_nearbyint(a::F80)
-    a.cls == SimLev._ZERO && return a.neg ? -0.0 : 0.0
-    a.cls != SimLev._FIN && return Float64(a)
-    e = Int(a.e)
-    e >= 63 && return Float64(a)
-    e < -1 && return a.neg ? -0.0 : 0.0
-    sh = 63 - e                      # 1 … 64
-    m = UInt128(a.m)
-    ip = m >> sh
-    r = m & ((UInt128(1) << sh) - 1)
-    half = UInt128(1) << (sh - 1)
-    (r > half || (r == half && isodd(ip))) && (ip += 1)
-    z = Float64(ip)
-    return a.neg ? -z : z
-end
-
 # ── formatReal ─────────────────────────────────────────────────────────────
 
 "`scientific()` aus format.c für r = |x| > 0 (endlich): (kpower, nsig, roundingwidens)."
@@ -615,39 +590,8 @@ function _scientific(r::Float64, digits::Int)
         end
         return kpw, j, false
     end
-    kp = floor(Int, _log10(r)) - digits + 1
-    rp = F80(r)
-    if abs(kp) <= _KP_MAX
-        if kp > 0
-            rp = rp / _TBL80[kp+1]
-        elseif kp < 0
-            rp = rp * _TBL80[-kp+1]
-        end
-    else
-        rp = rp / _powl10(kp)
-    end
-    if _f80_lt(rp, _TBL80[digits])
-        rp = rp * F80(10.0)
-        kp -= 1
-    end
-    alpha = _f80_nearbyint(rp)
-    nsig = digits
-    for _ in 1:digits
-        alpha /= 10.0
-        if alpha == floor(alpha)
-            nsig -= 1
-        else
-            break
-        end
-    end
-    if nsig == 0 && digits > 0
-        nsig = 1
-        kp += 1
-    end
-    kpower = kp + digits - 1
-    rgt = clamp(digits - kpower, 0, _KP_MAX)
-    fuzz = 0.5 / _TBLD[rgt+1]
-    rw = kpower > 0 && kpower <= _KP_MAX && _f80_lt(F80(r), _TBL80[kpower+1] - F80(fuzz))
+    # N10: long-double-Teil von scientific() über den C-Kern (core/slc_rbase_num.c)
+    kpower, nsig, rw = SimLev._rb_scientific(r, digits)
     return kpower, nsig, rw
 end
 

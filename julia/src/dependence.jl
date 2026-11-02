@@ -203,20 +203,8 @@ _pobs(x) = (v = _fvec(x); _rank_avg(v) ./ (length(v) + 1))
 "`combn(k, 2)` als Liste von (i, j) in R-Reihenfolge."
 _combn2(k::Integer) = [(i, j) for i in 1:k for j in (i+1):k]
 
-"`colMeans` (long-double-Summe / n)."
-function _colmeans(X)
-    X = _fmat(X)
-    n = size(X, 1)
-    out = zeros(size(X, 2))
-    for j in 1:size(X, 2)
-        s = SimLev.F80(0.0)
-        for i in 1:n
-            s = s + SimLev._ldq(X[i, j])
-        end
-        out[j] = Float64(s / SimLev.F80(n))
-    end
-    out
-end
+"`colMeans` (long-double-Summe / n; C-Kern, N10)."
+_colmeans(X) = (A = _fmat(X); SimLev._ld_colsums(A; mean = true))
 
 "`colSums` (long double)."
 function _colsums(X)

@@ -9,7 +9,9 @@ garch_filter, die Engine-Kerne (``_core``), ``boot_wild``, ``boot_garch``,
 
 Die erwarteten Werte stammen aus R 4.3.3 mit SimLev (Bitmuster als Hex-Literale; NA =
 ``0x7ff00000000007a2`` bzw. still ``0x7ff80000000007a2``, R's NaN ``0x7ff8000000000000``,
-das Standard-NaN von x86 ``0xfff8000000000000``). Jeder Fall wird zweimal gerechnet,
+das Standard-NaN von x86 ``0xfff8000000000000``). N10: Die Engine-Kerne folgen der Regel „NA vor NaN“
+(``core/simlev_core.h``); R, Python und Julia liefern dort seither dieselben Bitmuster (geändert:
+``sell_report``, ``market_update_batch``, ``fifo_price``, ``private_sale_tax``, ``p20_tax``, ``vp_tax``). Jeder Fall wird zweimal gerechnet,
 damit auch der spezialisierte Bytecode von CPython (andere NaN-Wahl bei ``a + b``)
 geprüft ist.
 """
@@ -262,8 +264,8 @@ EXPECTED = {
         ('/sim/status/b/count', ['0x7ff8000000000000']),
         ('/sim/status/b/price', ['0x7ff8000000000000']),
         ('/sim/status/b/worth', ['0x7ff8000000000000']),
-        ('/sim/status/b/money', ['0x7ff8000000000000']),
-        ('/sim/status/b/total', ['0x7ff8000000000000']),
+        ('/sim/status/b/money', ['0x7ff80000000007a2']),
+        ('/sim/status/b/total', ['0x7ff80000000007a2']),
         ('/sim/status/b/actual', ['0x3fe0000000000000']),
         ('/sim/status/b/differ', ['0x3fe0000000000000']),
         ('/sim/market/a/asset_day', ['0x40cf400000000000', '0x40cf408000000000', '0x40cf410000000000']),
@@ -280,9 +282,9 @@ EXPECTED = {
         ('/sim/report/a/total', ['0x0', '0x0', '0x0']),
         ('/sim/report/a/share', ['0x0', '0x0', '0x0']),
         ('/sim/report/b/worth', ['0x0', '0x7ff8000000000000', '0x0']),
-        ('/sim/report/b/money', ['0x0', '0x7ff8000000000000', '0x0']),
+        ('/sim/report/b/money', ['0x0', '0x7ff80000000007a2', '0x0']),
         ('/sim/report/b/flows', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/total', ['0x0', '0x7ff8000000000000', '0x0']),
+        ('/sim/report/b/total', ['0x0', '0x7ff80000000007a2', '0x0']),
         ('/sim/report/b/share', ['0x0', '0x0', '0x0']),
         ('/sim/totals/loss_capital_gains', ['0x0']),
     ],
@@ -393,20 +395,20 @@ EXPECTED = {
         ('/sim/report/b/worth', ['0x7ff8000000000000', '0x7ff80000000007a2', '0x4018000000000000']),
         ('/sim/report/b/money', ['0x7ff00000000007a2', '0x7ff00000000007a2', '0x7ff00000000007a2']),
         ('/sim/report/b/flows', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/total', ['0x7ff8000000000000', '0x7ff80000000007a2', '0x7ff80000000007a2']),
+        ('/sim/report/b/total', ['0x7ff80000000007a2', '0x7ff80000000007a2', '0x7ff80000000007a2']),
         ('/sim/report/b/share', ['0x0', '0x0', '0x0']),
         ('/sim/totals/loss_capital_gains', ['0x0']),
     ],
     'fifo_price': [
-        ('/res', ['0x7ff8000000000000']),
+        ('/res', ['0x7ff80000000007a2']),
         ('/totals', None),
     ],
     'private_sale_tax': [
         ('/res/exempt_gain', ['0x0']),
-        ('/res/exempt_loss', ['0x7ff8000000000000']),
+        ('/res/exempt_loss', ['0xfff80000000007a2']),
         ('/res/taxable_gain', ['0x0']),
         ('/res/taxable_loss', ['0x0']),
-        ('/res/total_gain', ['0x7ff8000000000000']),
+        ('/res/total_gain', ['0xfff80000000007a2']),
         ('/totals', None),
     ],
     'sell_count_tp0': [
@@ -424,7 +426,7 @@ EXPECTED = {
         ('/res/spb_used', ['0x7ff80000000007a2']),
         ('/totals/loss_capital_gains', ['0x7ff80000000007a2']),
         ('/totals/cgt_loss_added_ytd', ['0x0']),
-        ('/totals/cgt_loss_used_ytd', ['0x7ff8000000000000']),
+        ('/totals/cgt_loss_used_ytd', ['0x7ff80000000007a2']),
         ('/totals/cgt_base_taxed_ytd', ['0x7ff80000000007a2']),
         ('/totals/sparer_pauschbetrag_remaining', ['0x7ff80000000007a2']),
         ('/totals/sparer_pauschbetrag_used_total', ['0x7ff80000000007a2']),
@@ -439,7 +441,7 @@ EXPECTED = {
         ('/totals/cgt_loss_used_ytd', ['0x7ff8000000000000']),
         ('/totals/cgt_base_taxed_ytd', ['0x7ff80000000007a2']),
         ('/totals/sparer_pauschbetrag_remaining', ['0x7ff8000000000000']),
-        ('/totals/sparer_pauschbetrag_used_total', ['0x7ff8000000000000']),
+        ('/totals/sparer_pauschbetrag_used_total', ['0x7ff80000000007a2']),
         ('/totals/total_taxes', ['0x7ff00000000007a2']),
     ],
     'boot_wild': [

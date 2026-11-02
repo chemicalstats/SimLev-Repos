@@ -86,6 +86,12 @@ _sprintf_g(x) = _sprintf("%g", Float64(x))
 
 const _UTD0 = 719163   # Dates.value(Date(1970, 1, 1))
 
+# Teil:               _civil_to_days, _days_to_civil
+# Herkunft:           übersetzt aus H. Hinnant, chrono-Compatible Low-Level Date Algorithms,
+#                     https://howardhinnant.github.io/date_algorithms.html
+# Rechte:             gemeinfrei ("Consider these donated to the public domain.")
+# Lizenz der Vorlage: keine (gemeinfrei)
+# Änderungen:         Int64 mit fld/div/mod; Monatsverschiebung als mod(m + 9, 12).
 "(Jahr, Monat, Tag) → Tage seit 1970-01-01."
 function _civil_to_days(y::Integer, m::Integer, d::Integer)
     y = Int64(y) - (m <= 2)
@@ -111,7 +117,6 @@ function _days_to_civil(z::Integer)
     return (y + (m <= 2), m, d)
 end
 
-_days_in_month(y, m) = _civil_to_days(m == 12 ? y + 1 : y, m == 12 ? 1 : m + 1, 1) - _civil_to_days(y, m, 1)
 
 _date_of(z::Real) = Date(Dates.UTD(_UTD0 + Int64(floor(z))))
 _day_of(d::Date) = Float64(Dates.value(d) - _UTD0)
@@ -155,39 +160,11 @@ function _date_str(day)
     return string(lpad(y, 4, '0'), "-", lpad(m, 2, '0'), "-", lpad(d, 2, '0'))
 end
 
-# R's strptime: get_number(from, to, n) – überspringt Leerzeichen, liest
-# höchstens n Ziffern, solange val * 10 <= to.
-function _get_number(s::Vector{UInt8}, p::Int, from::Int, to::Int, n::Int)
-    while p <= length(s) && s[p] == UInt8(' ')
-        p += 1
-    end
-    (p > length(s) || !(UInt8('0') <= s[p] <= UInt8('9'))) && return (nothing, p)
-    val = 0
-    k = n
-    while true
-        val = val * 10 + Int(s[p] - UInt8('0'))
-        p += 1
-        k -= 1
-        (k > 0 && val * 10 <= to && p <= length(s) && UInt8('0') <= s[p] <= UInt8('9')) || break
-    end
-    (val < from || val > to) && return (nothing, p)
-    return (val, p)
-end
-
-"`as.Date(s, format = \"%Y-%m-%d\")` (bzw. `/`) für einen Text; NA = `SimLev.NA`."
+"`as.Date(s, format = \"%Y-%m-%d\")` (bzw. `/`) für einen Text; NA = `SimLev.NA` (N10: core/slc_rbase_date.c)."
 function _strptime_ymd(s, sep::Char = '-')
     (s === nothing || s === missing) && return NA
-    b = Vector{UInt8}(codeunits(String(s)))
-    y, p = _get_number(b, 1, 0, 9999, 4)
-    y === nothing && return NA
-    (p <= length(b) && b[p] == UInt8(sep)) || return NA
-    m, p = _get_number(b, p + 1, 1, 12, 2)
-    m === nothing && return NA
-    (p <= length(b) && b[p] == UInt8(sep)) || return NA
-    d, p = _get_number(b, p + 1, 1, 31, 2)
-    d === nothing && return NA
-    d > _days_in_month(y, m) && return NA
-    return Float64(_civil_to_days(y, m, d))
+    z = SimLev._rb_strptime_ymd(s, sep)
+    return z === nothing ? NA : Float64(z)
 end
 
 "`as.Date(<character>)` mit `tryFormats` (Format nach dem ersten Wert); `nothing`, wenn keines passt."

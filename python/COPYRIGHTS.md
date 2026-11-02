@@ -3,80 +3,134 @@
 SimLev für Python steht unter der GNU General Public License, Version 3
 (GPL-3, siehe `LICENSE.md`). Copyright ChemicalStats von der Mauerstrasse.
 
-SimLev enthält **keinen Code aus anderen Paketen**. Bis Etappe 9 bildete
-die Python-Fassung Teile von evd, imputeTS, stinepack, rugarch, Rsolnp und
-truncnorm sowie R's Zufallszahlen, Verteilungsfunktionen (nmath), lineare
-Algebra (BLAS, LAPACK, LINPACK) und Optimierer (`optim`, `nlminb`) nach;
-diese Teile sind entfernt. Zufall und Numerik rechnet jetzt die eigene
-C-Bibliothek von SimLev (siehe unten). Die Pakete dienten nur als Vorbild
-und Prüforakel; ihre Angaben stehen im Abschnitt
-[Literatur](../README.md#literatur) der Haupt-README.
+SimLev enthält **keinen Code aus anderen Paketen**. Die Python-Fassung
+enthält Nachbildungen von **Grundfunktionen von R** (Abschnitt 2.1–2.3),
+damit sie zeichengleich zu R rechnet und ausgibt, und gemeinfreie
+Kalenderalgorithmen (Abschnitt 2.4). Die gleiche Gliederung haben
+`r/inst/COPYRIGHTS` und `julia/COPYRIGHTS.md` im Repository.
 
-Es bleiben Nachbildungen von **Grundfunktionen von R** (Abschnitt 2). Sie
-sind nötig, damit die Python-Fassung zeichengleich zu R rechnet und ausgibt.
+## Herkunftsschema
+
+Jede Datei oder jeder Dateiteil mit fremder Vorlage trägt im Kopf (bei einem
+Teil: direkt davor) einen Herkunftsblock mit diesen Feldern in dieser
+Reihenfolge; C und C++ im Kopfkommentar (`/* … */` bzw. `//`), Python,
+Julia und R als `#`-Zeilen:
+
+| Feld | Inhalt |
+|---|---|
+| `Teil:` | nur wenn der Block einen Teil der Datei betrifft: die Funktionen |
+| `Herkunft:` | `eigen` (ohne fremde Vorlage, nach Veröffentlichungen und Mathematik) · `nachgebildet nach <Vorlage>` (Verhalten bzw. Aufbau nach der Vorlage, nicht Zeile für Zeile) · `übersetzt aus <Vorlage, Datei>` (Code Schritt für Schritt in eine andere Sprache oder Form übertragen) |
+| `Rechte:` | Rechteinhaber bzw. Urheber laut Vorlage |
+| `Lizenz der Vorlage:` | Lizenz laut Vorlage; bei GPL (≥ 2): „in SimLev unter GPL-3“ |
+| `Änderungen:` | was SimLev gegenüber der Vorlage geändert hat |
+
+Dateien ohne Herkunftsblock sind eigener Code. Die Einträge in Abschnitt 2
+haben dieselben Felder, dazu `Dateien:`.
 
 ## 1. Eigener Code
 
 | Teil | Inhalt |
 |---|---|
-| `simlev/*.py` | alle Funktionen von SimLev |
-| `src/core/` | Kopien der kanonischen C-Quellen aus `core/` (Repo-Wurzel, `tools/core_sync.py`): die C-Bibliothek `slc*.c`, `slc*.h` (Zufall, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, Bootstrap-Kerne, Stineman, Glättungsspline, Kerndichte) und die gemeinsamen C++-Kerne `simlev_core.h`, `*_core_impl.h` (Engine, FIFO, Steuer, Research, Entnahme) |
+| `simlev/*.py` | alle Funktionen von SimLev (Ausnahme: Kalenderteile, Abschnitt 2.4) |
+| `src/core/` | Kopien der kanonischen C-Quellen aus `core/` (Repo-Wurzel, `tools/core_sync.py`): die C-Bibliothek `slc*.c`, `slc*.h` **ohne `slc_rbase*`** (Zufall, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, Bootstrap-Kerne, Stineman, Glättungsspline, Kerndichte) und die gemeinsamen C++-Kerne `simlev_core.h`, `*_core_impl.h` (Engine, FIFO, Steuer, Research, Entnahme) |
 | `src/_ext*.c`, `src/_ext*.cpp`, `src/_ext_common.h` | Hüllen der C-Erweiterung `simlev._ext` |
 | `simlev/_lib*.py` | Python-Hüllen der C-Bibliothek |
-| `simlev/_r/rlist.py`, `reftree.py`, `env.py` | Ergebnisobjekte, Vergleich mit den Referenzfällen, Umgebungsschalter |
+| `simlev/_r/rlist.py`, `reftree.py`, `env.py`, `stats.py`, `__init__.py` | Ergebnisobjekte, Vergleich mit den Referenzfällen, Umgebungsschalter, Sammelmodule |
 
-Die C-Bibliothek ist nach Veröffentlichungen geschrieben, nicht nach fremdem
-Code. Der Kopf jeder Datei in `core/` nennt ihre Quellen; die vollständigen
-Angaben stehen im Abschnitt [Literatur](../README.md#literatur).
+Die C-Bibliothek (ohne `slc_rbase*`) ist nach Veröffentlichungen
+geschrieben, nicht nach fremdem Code. Der Kopf jeder Datei in `core/` nennt
+ihre Quellen; die vollständigen Angaben stehen im Abschnitt
+[Literatur](../README.md#literatur).
 
-## 2. Nachbildungen von R-Grundfunktionen
+## 2. Fremde Vorlagen
+
+### 2.1 R-Grundfunktionen in den Port-Modulen
 
 | | |
 |---|---|
-| Programm | R 4.3.3 (2024-02-29), *The R Project for Statistical Computing*, <https://www.R-project.org/> |
-| Rechteinhaber | laut den Dateiköpfen der genannten R-Quellen: The R Core Team; Robert Gentleman und Ross Ihaka; The R Foundation; einzelne Dateien nennen weitere Personen (siehe Abschnitt 3) |
-| Lizenz | GPL (≥ 2) laut den Dateiköpfen; in SimLev unter GPL-3 weitergegeben |
+| Dateien | `simlev/_r/`: `rnum.py`, `base.py`, `libm.py`, `rformat.py`, `fmt.py`, `_collate.py`, `stats_sort.py`, `stats_cor.py`, `stats_smooth.py`, `stats_optim.py`, `_optim.py`, `stats_models.py`, `stats_cluster.py`, `linalg.py`, `rexpr.py`, `parallel.py` |
+| Herkunft | übersetzt aus bzw. nachgebildet nach R 4.3.3 (*The R Project for Statistical Computing*, <https://www.R-project.org/>), je Datei siehe Tabelle und Kopf der Datei |
+| Rechte | The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut Kopf der jeweiligen R-Quelle); weitere Personen siehe 2.3 |
+| Lizenz der Vorlage | GPL (≥ 2) laut Kopf der R-Quellen; in SimLev unter GPL-3 |
+| Änderungen | Übertragung nach Python im von SimLev genutzten Umfang; Teile rechnen seit N8/N10 die C-Kerne aus 2.2 |
 
-Die Module in `simlev/_r/` übertragen die Rechenweise dieser R-Funktionen
-nach Python (gleiche Rechenreihenfolge, `long double`-Summen, gleiche Texte):
-
-| Modul | R-Funktionen | R-Quellen (R 4.3.3) |
+| Datei | Herkunft | R-Funktionen |
 |---|---|---|
-| `rnum.py`, `base.py` | `sum`, `mean`, `var`, `sd`, `prod`, `cumsum`, `cumprod`, `cummax`, `cummin`, `rowSums`, `colSums`, `rowMeans`, `colMeans`, `pmin`, `pmax`, `range`, `diff`, Potenz `R_POW`, `%%`, Nullstelle `R_zeroin2` | `src/main/summary.c`, `cum.c`, `array.c`, `arithmetic.c`; `src/library/stats/src/zeroin.c` |
-| `libm.py` | Randregeln von R um die libm-Funktionen (`log(0) = -Inf` u. a.) | `src/main/arithmetic.c` |
-| `rformat.py`, `fmt.py` | `round`, `signif`, `format`, `formatC`, `prettyNum`, `sprintf`, `as.character`, `paste`, `print` von Vektoren, Matrizen, data.frames, Faktoren und Listen, Datumsformate | `src/main/format.c`, `printutils.c`, `printvector.c`, `printarray.c`, `print.c`, `paste.c`, `sprintf.c`, `util.c`; `src/nmath/fround.c`, `fprec.c`; `src/library/base/R/format.R`, `dataframe.R`, `factor.R`, `dates.R` |
-| `_collate.py` | Vergleich und Sortierung von Zeichenketten (`Scollate`) | `src/main/util.c` |
-| `stats_sort.py` | `order`, `sort`, `rank`, partielle Sortierung, `rle`, `tabulate`, `findInterval`, `cut`, `complete.cases`, `quantile`, `median`, `weighted.mean` | `src/main/sort.c`, `qsort-body.c`, `seq.c`; `src/library/base/R/sort.R`, `rle.R`, `cut.R`, `findInt.R`; `src/library/stats/R/quantile.R`, `median.R`, `weighted.mean.R` |
-| `stats_cor.py` | `cor` (Pearson, Kendall, Spearman), `cov`, `var`, `sd`, `cov2cor`, `scale` | `src/library/stats/src/cov.c`, `stats/R/cor.R`; `src/library/base/R/scale.R` |
-| `stats_smooth.py` | `approx`, `approxfun`, `filter` | `src/library/stats/R/approx.R`, `filter.R`; `stats/src/approx.c`, `filter.c` |
-| `stats_optim.py`, `_optim.py` | `optimize`, `uniroot` | `src/library/stats/R/optimize.R`; `stats/src/optimize.c`, `zeroin.c` |
-| `stats_models.py` | `coef`, `fitted`, `residuals`, `p.adjust`, `ecdf`, `ave`, `aggregate` | `src/library/stats/R/lm.R` (Zugriffe), `p.adjust.R`, `ecdf.R`, `ave.R`, `aggregate.R` |
-| `stats_cluster.py` | `dist`, `as.dist`, `hclust` | `src/library/stats/R/dist.R`, `hclust.R`; `stats/src/distance.c`, `hclust.f` |
-| `linalg.py` | `outer`, `diag`, `isSymmetric`, `all.equal` (numerisch) | `src/library/base/R/outer.R`, `diag.R`, `all.equal.R` |
-| `rexpr.py` | Zerlegen und Auswerten von Bedingungen in R-Syntax (Lexer, Grammatik und Vorrang, NA-Logik, Indizierung) | `src/main/gram.y` und die Semantik der Grundoperatoren |
-| `parallel.py` | Verhalten von `parallel::mclapply(mc.preschedule = FALSE)` für SimLev's `.par_lapply` (nur das Verhalten: Reihenfolge, Fehler, Ausgaben) | `src/library/parallel/R/unix/mclapply.R` |
+| `rnum.py`, `base.py` | übersetzt aus `src/main/summary.c`, `cum.c`, `array.c`, `arithmetic.c`; `src/library/stats/src/zeroin.c`; nachgebildet nach `stats/R/nlm.R` | `sum`, `mean`, `var`, `sd`, `prod`, `cumsum`, `cumprod`, `cummax`, `cummin`, `rowSums`, `colSums`, `rowMeans`, `colMeans`, `pmin`, `pmax`, `range`, `diff`, `R_POW`, `%%`, `R_zeroin2`/`uniroot` |
+| `libm.py` | nachgebildet nach `src/main/arithmetic.c` | Randregeln um die libm-Funktionen |
+| `rformat.py`, `fmt.py` | übersetzt aus `src/main/format.c`, `printutils.c`, `printvector.c`, `printarray.c`, `print.c`, `paste.c`, `sprintf.c`, `util.c`, `src/nmath/fround.c`, `fprec.c`; nachgebildet nach `base/R/format.R`, `dataframe.R`, `factor.R`, `dates.R` | `round`, `signif`, `format`, `formatC`, `prettyNum`, `sprintf`, `as.character`, `paste`, `print`, Datumsformate |
+| `_collate.py` | nachgebildet nach `src/main/util.c` | `Scollate` |
+| `stats_sort.py` | übersetzt aus `src/main/sort.c`, `qsort-body.c`, `seq.c`; nachgebildet nach `base/R/sort.R`, `rle.R`, `cut.R`, `findInt.R`, `stats/R/quantile.R`, `median.R`, `weighted.mean.R` | `order`, `sort`, `rank`, partielle Sortierung, `rle`, `tabulate`, `findInterval`, `cut`, `complete.cases`, `quantile`, `median`, `weighted.mean` |
+| `stats_cor.py` | übersetzt aus `stats/src/cov.c`; nachgebildet nach `stats/R/cor.R`, `base/R/scale.R` | `cor`, `cov`, `var`, `sd`, `cov2cor`, `scale` |
+| `stats_smooth.py` | übersetzt aus `stats/src/approx.c`, `filter.c`; nachgebildet nach `stats/R/approx.R`, `filter.R` | `approx`, `approxfun`, `filter` |
+| `stats_optim.py`, `_optim.py` | übersetzt aus `stats/src/optimize.c`, `zeroin.c`; nachgebildet nach `stats/R/optimize.R`, `nlm.R` | `optimize`, `uniroot` |
+| `stats_models.py` | nachgebildet nach `stats/R/lm.R` (Zugriffe), `p.adjust.R`, `ecdf.R`, `ave.R`, `aggregate.R` | `coef`, `fitted`, `residuals`, `p.adjust`, `ecdf`, `ave`, `aggregate` |
+| `stats_cluster.py` | übersetzt aus `stats/src/distance.c`, `hclust.f`; nachgebildet nach `stats/R/dist.R`, `hclust.R` | `dist`, `as.dist`, `hclust` |
+| `linalg.py` | nachgebildet nach `base/R/outer.R`, `diag.R`, `all.equal.R` | `outer`, `diag`, `isSymmetric`, `all.equal` (numerisch) |
+| `rexpr.py` | nachgebildet nach `src/main/gram.y` und der Semantik der Grundoperatoren | Bedingungen in R-Syntax |
+| `parallel.py` | nachgebildet nach `parallel/R/unix/mclapply.R` (nur Verhalten) | `mclapply(mc.preschedule = FALSE)` für `.par_lapply` |
 
-## 3. Teile, die in R selbst Übersetzungen älteren Codes sind
+### 2.2 C-Kerne mit R-Regeln (`slc_rbase*`)
 
-Die Dateiköpfe bzw. Kommentare der R-Quellen nennen für einige der
-nachgebildeten Funktionen eine ältere Herkunft:
-
-| Funktion | Herkunft laut R-Quelle |
+| | |
 |---|---|
-| `optimize` (`Brent_fmin`) | `optimize.c`: „fmin.f -- translated by f2c“, Brents Verfahren `fmin` (Netlib) |
-| `uniroot` (`R_zeroin2`, auch `r_uniroot` der Engine) | `zeroin.c`: „from NETLIB c/brent.shar with max.iter, add'l info and convergence details hacked in by Peter Dalgaard“ |
-| `hclust` | `hclust.f`: „F. Murtagh, ESA/ESO/STECF, Garching, February 1986. Modifications for R: Ross Ihaka, Dec 1996“ |
-| Sortierung (`qsort-body.c`) | „Based on CACM algorithm #347 by R. C. Singleton (1969)“ |
-| `signif` (`fprec.c`) | „a translation into C of a Fortran subroutine by W. Fullerton of Los Alamos Scientific Laboratory“ |
-| `sprintf` (`sprintf.c`) | „Originally written by Jonathan Rougier“ |
-| Parser (`gram.y`) | Rechteinhaber zusätzlich Romain Francois (2009–2011) |
+| Dateien | `src/core/slc_rbase.h`, `slc_rbase.c`, `slc_rbase_sort.c`, `slc_rbase_cov.c`, `slc_rbase_num.c`, `slc_rbase_date.c` (Hülle `src/_ext_slc_rbase.c`; nicht Teil des R-Pakets) |
+| Herkunft | übersetzt aus R 4.3.3 über die Port-Module aus 2.1: `slc_rbase.c` aus `summary.c`, `cum.c`, `array.c`, `arithmetic.c`; `slc_rbase_sort.c` aus `sort.c` (`psort_body`, `Psort0`) und `qsort-body.c` (Schritt für Schritt); `slc_rbase_cov.c` aus `stats/src/cov.c`; `slc_rbase_num.c` aus `util.c` (`R_strtod`), `arithmetic.c` (`myfmod`), `format.c` (`scientific`). `slc_rbase_date.c`: nachgebildet nach den R-Hilfeseiten `?strptime`, `?format.Date`, `?as.Date`, Kalender nach 2.4 |
+| Rechte | wie 2.1; Quicksort nach R. C. Singleton (siehe 2.3) |
+| Lizenz der Vorlage | GPL (≥ 2) laut Kopf der R-Quellen; in SimLev unter GPL-3 |
+| Änderungen | C99 ohne R-Datenstrukturen, gemeinsamer Kern für Python und Julia; je Datei im Kopf genannt |
 
-## 4. Zur Laufzeit genutzt, nicht enthalten
+### 2.3 Ältere Herkunft innerhalb der R-Vorlagen
+
+| | |
+|---|---|
+| Dateien | wie in der Tabelle; jeweils im Herkunftsblock der Datei genannt |
+| Herkunft | laut Kopf bzw. Kommentar der R-Quelle, siehe Tabelle |
+| Rechte | siehe Tabelle |
+| Lizenz der Vorlage | in R unter GPL (≥ 2); die älteren Vorlagen selbst wie in der Tabelle |
+| Änderungen | wie 2.1 bzw. 2.2 |
+
+| Funktion (Dateien) | Herkunft laut R-Quelle | Lizenzvermerk der älteren Vorlage |
+|---|---|---|
+| `optimize` (`_optim.py`, `stats_optim.py`) | `optimize.c`: „fmin.f -- translated by f2c“; Netlib `go/fmin.f`: Übersetzung von Brents ALGOL-60-Prozedur `localmin` (R. P. Brent, *Algorithms for Minimization without Derivatives*, Prentice-Hall 1973) | keiner (Netlib-Datei ohne Urheber- und Lizenzvermerk) |
+| `uniroot` (`_optim.py`, `stats_optim.py`, `rnum.py`, auch `.xirr_rate` der Engine) | `zeroin.c`: „from NETLIB c/brent.shar with max.iter, add'l info and convergence details hacked in by Peter Dalgaard“; Netlib `go/zeroin.f`: Übersetzung von Brents Prozedur `zero` (Brent 1973) | `go/zeroin.f`: keiner; `c/brent.shar`: nicht geprüft (Abruf nicht möglich) |
+| `hclust` (`stats_cluster.py`) | `hclust.f`: „F. Murtagh, ESA/ESO/STECF, Garching, February 1986. Modifications for R: Ross Ihaka, Dec 1996“, weitere Änderungen Fritz Leisch, Martin Maechler | keiner in `hclust.f` |
+| Sortierung (`stats_sort.py`, `slc_rbase_sort.c`) | `qsort-body.c`: „Based on CACM algorithm #347 by R. C. Singleton (1969)“ | ACM-Software-Hinweis (Nutzung „solely for academic, research and other similar noncommercial uses“), Anwendbarkeit auf R's Umarbeitung nicht belegt |
+| `signif` (`rformat.py`, `fmt.py`) | `fprec.c`: „a translation into C of a Fortran subroutine by W. Fullerton of Los Alamos Scientific Laboratory“ | keiner genannt |
+| `sprintf` (`rformat.py`, `fmt.py`) | `sprintf.c`: „Originally written by Jonathan Rougier“ | GPL (≥ 2) wie die Datei |
+| Parser (`rexpr.py`) | `gram.y`: Rechteinhaber zusätzlich Romain Francois (2009–2011) | GPL (≥ 2) wie die Datei |
+
+### 2.4 Kalenderrechnung nach Hinnant
+
+| | |
+|---|---|
+| Dateien | `src/core/fifo_core_impl.h` (`days_from_civil`, `civil_from_days`), `src/core/tax_core_impl.h` (`civil_from_days2`), `src/core/slc_rbase_date.c` (`sl_r_civil_from_days`, `sl_r_days_from_civil`), `simlev/data_prep.py` (`_civil_to_days`, `_days_to_civil`), `simlev/tactical.py` (`_civil`) |
+| Herkunft | übersetzt aus H. Hinnant, *chrono-Compatible Low-Level Date Algorithms*, <https://howardhinnant.github.io/date_algorithms.html> |
+| Rechte | gemeinfrei: „Consider these donated to the public domain.“ |
+| Lizenz der Vorlage | keine (gemeinfrei) |
+| Änderungen | feste Ganzzahltypen bzw. numpy-Vektorisierung; je Stelle im Herkunftsblock genannt |
+
+## 3. Zur Laufzeit oder beim Bau genutzt, nicht enthalten
 
 - glibc-libm (mathematische Funktionen über das Modul `math`),
 - die System-ICU (`libicui18n`, Kollation über ctypes),
-- numpy und pandas (Datenhaltung).
+- numpy und pandas (Datenhaltung),
+- beim Bau ein C/C++-Compiler; die C++-Kerne nutzen `std::sort` und
+  `std::nth_element` über die Header der Standardbibliothek des Compilers
+  (bei GCC libstdc++: GPL-3 mit GCC Runtime Library Exception 3.1).
 
 Die Pakete evd, imputeTS, stinepack, rugarch, Rsolnp, truncnorm, MSGARCH und
 numDeriv sind weder enthalten noch eine Abhängigkeit (siehe
 [Literatur](../README.md#literatur)).
+
+## 4. Früher enthaltene Teile (entfernt)
+
+Bis Etappe 9 bildete die Python-Fassung Teile von evd, imputeTS, stinepack,
+rugarch, Rsolnp und truncnorm sowie R's Zufallszahlen, Verteilungsfunktionen
+(nmath), lineare Algebra (BLAS, LAPACK, LINPACK) und Optimierer (`optim`,
+`nlminb`) nach; diese Teile sind entfernt (9.6c), ebenso die Nachbildung von
+libstdc++ `std::sort`/`std::nth_element` in den Python-Ports der C++-Kerne
+(`_dependence_core.py`, `_optimize_core.py`). Zufall und Numerik rechnet die
+eigene C-Bibliothek von SimLev. Die Pakete dienten nur als Vorbild und
+Prüforakel; ihre Angaben stehen im Abschnitt
+[Literatur](../README.md#literatur) der Haupt-README.

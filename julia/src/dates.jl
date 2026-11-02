@@ -11,12 +11,6 @@ year_of(z::Integer) = Dates.year(from_days(z))
 fmt_date(z::Integer) = Dates.format(from_days(z), dateformat"yyyy-mm-dd")
 is_leap(y::Integer) = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
 
-function valid_civil(y::Integer, m::Integer, d::Integer)
-    (1 <= m <= 12) || return nothing
-    (1 <= d <= Dates.daysinmonth(y, m)) || return nothing
-    return days_from_civil(y, m, d)
-end
-
 "Konvertiert Date/DateTime/String/Integer in Tage seit 1970-01-01."
 to_days(d::Date) = Dates.value(d) - _EPOCH
 to_days(d::DateTime) = to_days(Date(d))

@@ -1,7 +1,8 @@
 /*
  * python/src/_ext_slc_rbase.c -- Python-Huellen der Grundfunktionen mit R-Regeln (N8) im Modul
  * simlev._ext: Summen, Mittel, Varianz, Kumulationen, Potenz, Ordnung, Rang, partielle Sortierung,
- * Quantile, tabulate, findInterval, cov/cor
+ * Quantile, tabulate, findInterval, cov/cor; seit N10 Datumsformat und -lesen (slc_rbase_date.c), seit N11
+ * R_strtod, %%, %/% und scientific() in long double (slc_rbase_num.c)
  *
  * Die Kerne src/core/slc_rbase*.c sind Byte-fuer-Byte-Kopien der kanonischen Quellen in core/
  * (tools/core_sync.py); nur diese Huelle gibt es nur hier. Die Python-Seite (simlev/_r/rnum.py,
@@ -12,6 +13,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#include <math.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -260,6 +262,140 @@ static PyObject *slc_r_cov(PyObject *self, PyObject *args)
     return PyBool_FromLong(sd0);
 }
 
+/* N10: format.Date für einen Vektor: (days float64, fmts list[str | None][, digits_secs int]) -> list[str | None]
+ * wie fmt._format_date_list (Länge max(n, nf) mit Wiederholung; NA, NaN, ±Inf, None und |Tage| >= 1e14 -> None).
+ * N11: digits_secs = getOption("digits.secs") für %OS ohne Ziffer (0..6); Ergebnis über 2048 Bytes ist wie in R
+ * ein Fehler (ValueError "output string exceeded 2048 bytes"). */
+static PyObject *slc_r_format_date(PyObject *self, PyObject *args)
+{
+    (void) self;
+    PyObject *od, *of;
+    int ds = 0;
+    Py_buffer d = {0};
+    if (!PyArg_ParseTuple(args, "OO!|i", &od, &PyList_Type, &of, &ds)) return NULL;
+    if (DBUF(od, &d, 0, -1, "days") < 0) return NULL;
+    const double *z = (const double *) d.buf;
+    const Py_ssize_t n = NITEMS(d), nf = PyList_GET_SIZE(of);
+    const Py_ssize_t nout = n == 0 ? 0 : (n > nf ? n : nf);
+    PyObject *out = PyList_New(nout);
+    if (!out) { rel(&d); return NULL; }
+    char sbuf[2048];
+    for (Py_ssize_t i = 0; i < nout; i++) {
+        const double zi = z[i % n];
+        PyObject *f = nf ? PyList_GET_ITEM(of, i % nf) : Py_None;
+        PyObject *r = NULL;
+        if (zi != zi || f == Py_None || zi >= 1e14 || zi <= -1e14) {
+            r = Py_None;
+            Py_INCREF(r);
+        } else {
+            Py_ssize_t fl;
+            const char *fs = PyUnicode_AsUTF8AndSize(f, &fl);
+            if (!fs) { Py_DECREF(out); rel(&d); return NULL; }
+            const int64_t len = sl_r_strftime((int64_t) floor(zi), fs, (int64_t) fl, ds, sbuf, (int64_t) sizeof sbuf);
+            if (len == -2) {
+                Py_DECREF(out);
+                rel(&d);
+                PyErr_SetString(PyExc_ValueError, "output string exceeded 2048 bytes");
+                return NULL;
+            }
+            if (len == -3) { Py_DECREF(out); rel(&d); return nomem(); }
+            if (len < 0) {
+                r = Py_None;
+                Py_INCREF(r);
+            } else {
+                r = PyUnicode_DecodeUTF8(sbuf, (Py_ssize_t) len, "strict");
+            }
+            if (!r) { Py_DECREF(out); rel(&d); return NULL; }
+        }
+        PyList_SET_ITEM(out, i, r);
+    }
+    rel(&d);
+    return out;
+}
+
+/* N10: as.Date(s, format = "%Y<sep>%m<sep>%d"): (s str, sep str) -> int | None */
+static PyObject *slc_r_strptime_ymd(PyObject *self, PyObject *args)
+{
+    (void) self;
+    const char *s, *sep;
+    Py_ssize_t ls, lsep;
+    if (!PyArg_ParseTuple(args, "s#s#", &s, &ls, &sep, &lsep)) return NULL;
+    int64_t z;
+    if (lsep != 1 || !sl_r_strptime_ymd(s, (int64_t) ls, sep[0], &z)) Py_RETURN_NONE;
+    return PyLong_FromLongLong((long long) z);
+}
+
+/* N11: weitere long-double-Wege (slc_rbase_num.c), wie Julia seit N10 */
+
+/* Zahlteil von R_strtod: (s bytes) -> (Wert, gelesene Bytes oder -1, Betrag > DBL_MAX) */
+static PyObject *slc_r_strtod_num(PyObject *self, PyObject *args)
+{
+    (void) self;
+    const char *s;
+    Py_ssize_t ls;
+    if (!PyArg_ParseTuple(args, "y#", &s, &ls)) return NULL;
+    int64_t used = 0;
+    int gt = 0;
+    const double v = sl_r_strtod_num(s, (int64_t) ls, &used, &gt);
+    return Py_BuildValue("dLO", v, (long long) used, gt ? Py_True : Py_False);
+}
+
+/* long-double-Teil von x1 %% x2 bzw. x1 %/% x2 (endliche Operanden) */
+static PyObject *slc_r_fmod_ld(PyObject *self, PyObject *args)
+{
+    double x1, x2;
+    (void) self;
+    if (!PyArg_ParseTuple(args, "dd", &x1, &x2)) return NULL;
+    return PyFloat_FromDouble(sl_r_fmod_ld(x1, x2));
+}
+
+static PyObject *slc_r_idiv_ld(PyObject *self, PyObject *args)
+{
+    double x1, x2;
+    (void) self;
+    if (!PyArg_ParseTuple(args, "dd", &x1, &x2)) return NULL;
+    return PyFloat_FromDouble(sl_r_idiv_ld(x1, x2));
+}
+
+/* scientific() für r > 0 endlich, 1 <= digits <= 15: (r, digits) -> (kpower, nsig, roundingwidens) */
+static PyObject *slc_r_scientific(PyObject *self, PyObject *args)
+{
+    double r;
+    int digits, kp = 0, ns = 0;
+    (void) self;
+    if (!PyArg_ParseTuple(args, "di", &r, &digits)) return NULL;
+    if (digits < 1 || digits > 15) { PyErr_SetString(PyExc_ValueError, "interner Fehler: digits"); return NULL; }
+    const int rw = sl_r_scientific(r, digits, &kp, &ns);
+    return Py_BuildValue("iiO", kp, ns, rw ? Py_True : Py_False);
+}
+
+/* dasselbe für ein Feld: (r float64, digits, kpower int64 out, nsig int64 out, rw int64 out) */
+static PyObject *slc_r_scientific_vec(PyObject *self, PyObject *args)
+{
+    PyObject *o_r, *o_k, *o_n, *o_w;
+    int digits;
+    Py_buffer vr = {0}, vk = {0}, vn = {0}, vw = {0};
+    (void) self;
+    if (!PyArg_ParseTuple(args, "OiOOO", &o_r, &digits, &o_k, &o_n, &o_w)) return NULL;
+    if (digits < 1 || digits > 15) { PyErr_SetString(PyExc_ValueError, "interner Fehler: digits"); return NULL; }
+    if (DBUF(o_r, &vr, 0, -1, "r") < 0) return NULL;
+    const Py_ssize_t n = NITEMS(vr);
+    if (LBUF(o_k, &vk, 1, n, "kpower") < 0 || LBUF(o_n, &vn, 1, n, "nsig") < 0 || LBUF(o_w, &vw, 1, n, "rw") < 0) {
+        rel(&vr); rel(&vk); rel(&vn);
+        return NULL;
+    }
+    const double *r = (const double *) vr.buf;
+    int64_t *k = (int64_t *) vk.buf, *ns = (int64_t *) vn.buf, *w = (int64_t *) vw.buf;
+    for (Py_ssize_t i = 0; i < n; i++) {
+        int kp = 0, nsg = 0;
+        w[i] = sl_r_scientific(r[i], digits, &kp, &nsg);
+        k[i] = kp;
+        ns[i] = nsg;
+    }
+    rel(&vr); rel(&vk); rel(&vn); rel(&vw);
+    Py_RETURN_NONE;
+}
+
 PyMethodDef simlev_ext_slc_rbase_methods[] = {
     {"slc_r_sum", slc_r_sum, METH_VARARGS, "slc_r_sum(x, kind, narm) -> float (kind 0 sum, 1 prod, 2 mean, 3 var)"},
     {"slc_r_mean_int", slc_r_mean_int, METH_VARARGS, "slc_r_mean_int(x int64) -> float"},
@@ -274,5 +410,12 @@ PyMethodDef simlev_ext_slc_rbase_methods[] = {
     {"slc_r_tabulate", slc_r_tabulate, METH_VARARGS, "slc_r_tabulate(bin, out)"},
     {"slc_r_findinterval", slc_r_findinterval, METH_VARARGS, "slc_r_findinterval(vec, x, rc, ai, lo, out)"},
     {"slc_r_cov", slc_r_cov, METH_VARARGS, "slc_r_cov(x, n, ncx, y, ncy, use, kendall, cor, ans) -> sd0"},
+    {"slc_r_format_date", slc_r_format_date, METH_VARARGS, "slc_r_format_date(days, fmts[, digits_secs]) -> list (format.Date, N10/N11)"},
+    {"slc_r_strptime_ymd", slc_r_strptime_ymd, METH_VARARGS, "slc_r_strptime_ymd(s, sep) -> Tage | None (as.Date, N10)"},
+    {"slc_r_strtod_num", slc_r_strtod_num, METH_VARARGS, "slc_r_strtod_num(s bytes) -> (Wert, Bytes, > DBL_MAX) (R_strtod, N11)"},
+    {"slc_r_fmod_ld", slc_r_fmod_ld, METH_VARARGS, "slc_r_fmod_ld(x1, x2) -> long-double-Teil von %% (N11)"},
+    {"slc_r_idiv_ld", slc_r_idiv_ld, METH_VARARGS, "slc_r_idiv_ld(x1, x2) -> long-double-Teil von %/% (N11)"},
+    {"slc_r_scientific", slc_r_scientific, METH_VARARGS, "slc_r_scientific(r, digits) -> (kpower, nsig, rw) (N11)"},
+    {"slc_r_scientific_vec", slc_r_scientific_vec, METH_VARARGS, "slc_r_scientific_vec(r, digits, kp, nsig, rw) (N11)"},
     {NULL, NULL, 0, NULL}
 };

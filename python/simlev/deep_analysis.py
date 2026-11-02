@@ -24,7 +24,7 @@ from ._r import fmt as _fmt
 from ._r import libm as _libm
 from ._r.fmt import NA_REAL
 from ._r.rlist import RList
-from ._r.rnum import LD, r_cummax, r_cumsum, r_mean, r_mean_int, r_pow, r_prod, r_sd, r_var
+from ._r.rnum import r_colmeans, r_rowmeans, r_cummax, r_cumsum, r_mean, r_mean_int, r_pow, r_prod, r_sd, r_var
 # Grafik: Bausteine des Stils Analysegrafiken und Zahlen wie in Julia aus svg.py
 from .svg import (_MONATE_KURZ, _AnaSvg, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_ramp, _ana_rect,
                   _ana_svg_done, _ana_text, _ana_year_ticks, _jl_max, _jl_maximum, _jl_min, _jl_minimum)
@@ -148,27 +148,12 @@ def _cov(x, y):
 def _col_means(M, na_rm=False):
     """``colMeans(M, na.rm)``: long-double-Summe je Spalte / Anzahl, dann double."""
     M = np.asarray(M, dtype=np.float64)
-    out = np.empty(M.shape[1])
-    for j in range(M.shape[1]):
-        c = M[:, j]
-        if na_rm:
-            c = c[~np.isnan(c)]
-        if c.size == 0:
-            out[j] = _NAN
-            continue
-        s = np.cumsum(c.astype(LD))[-1]
-        out[j] = float(s / LD(c.size))
-    return out
+    return r_colmeans(M, na_rm=na_rm)   # N11: C-Kern core/slc_rbase.c (long double wie R; wie Julia)
 
 
 def _row_means(M):
     """``rowMeans(M)``: long-double-Summe über Spalten / p, dann double."""
-    M = np.asarray(M, dtype=np.float64)
-    n, p = M.shape
-    acc = np.zeros(n, dtype=LD)
-    for j in range(p):
-        acc = acc + M[:, j].astype(LD)
-    return (acc / LD(p)).astype(np.float64)
+    return r_rowmeans(np.asarray(M, dtype=np.float64))   # N11: C-Kern
 
 
 def _mean_lgl(b):

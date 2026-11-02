@@ -241,13 +241,7 @@ _rexp(x::Real) = SimLev.RLibm.exp(Float64(x))
 
 "`cumprod(x)` wie in R (long double)."
 function _cumprod(x)
-    out = Vector{Float64}(undef, length(x))
-    s = SimLev.F80(1.0)
-    for (i, v) in enumerate(x)
-        s = s * SimLev._ldq(Float64(v))
-        out[i] = Float64(s)
-    end
-    return out
+    return SimLev._rb_cumprod(Float64[Float64(v) for v in x])   # N10: C-Kern
 end
 "`cumsum(x)` wie in R (long double)."
 _cumsum(x) = SimLev.r_cumsum(x)

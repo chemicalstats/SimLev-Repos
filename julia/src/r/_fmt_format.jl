@@ -1,3 +1,14 @@
+# Herkunft:           übersetzt aus R 4.3.3, src/main/format.c, printutils.c, printvector.c,
+#                     printarray.c, print.c, paste.c, sprintf.c, util.c; src/nmath/fround.c,
+#                     fprec.c; nachgebildet nach R 4.3.3, src/library/base/R/format.R, dataframe.R,
+#                     factor.R, dates.R
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle); fprec.c: Übersetzung einer Fortran-Routine von
+#                     W. Fullerton (Los Alamos); sprintf.c: ursprünglich Jonathan Rougier
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet seit N10 der C-Kern
+#                     core/slc_rbase_date.c.
 # RFmt – format(), prettyNum(), formatC(), sprintf(), Datumsformate.
 # Vorlage: python/simlev/_r/fmt.py; R 4.3.3 format.c, format.R, sprintf.c,
 # util.c (str_signif), dates.R.
@@ -768,188 +779,24 @@ end
 const sprintf = r_sprintf
 
 # ── Datum ──────────────────────────────────────────────────────────────────
-
-const _MON = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
-              "November", "December"]
-const _WDAY = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-
-"Tage seit 1970-01-01 → (Jahr, Monat, Tag), proleptisch gregorianisch."
-function _civil(z::Int)
-    z += 719468
-    era = fld(z, 146097)
-    doe = z - era * 146097
-    yoe = fld(doe - fld(doe, 1460) + fld(doe, 36524) - fld(doe, 146096), 365)
-    y = yoe + era * 400
-    doy = doe - (365 * yoe + fld(yoe, 4) - fld(yoe, 100))
-    mp = fld(5 * doy + 2, 153)
-    d = doy - fld(153 * mp + 2, 5) + 1
-    m = mp < 10 ? mp + 3 : mp - 9
-    return (y + (m <= 2 ? 1 : 0), m, d)
-end
-
-function _days_from_civil(y::Int, m::Int, d::Int)
-    y -= m <= 2 ? 1 : 0
-    era = fld(y, 400)
-    yoe = y - era * 400
-    doy = fld(153 * (m + (m > 2 ? -3 : 9)) + 2, 5) + d - 1
-    doe = yoe * 365 + fld(yoe, 4) - fld(yoe, 100) + doy
-    return era * 146097 + doe - 719468
-end
-
-function _iso_week(z::Int, wday::Int)
-    wd = mod(wday + 6, 7)
-    th = z - wd + 3
-    ty, _, _ = _civil(th)
-    jan1 = _days_from_civil(ty, 1, 1)
-    return ty, fld(th - jan1, 7) + 1
-end
-
-const _COMPOSITE = Dict('F' => "%Y-%m-%d", 'D' => "%m/%d/%y", 'x' => "%m/%d/%y", 'T' => "%H:%M:%S", 'X' => "%H:%M:%S",
-                        'R' => "%H:%M", 'r' => "%I:%M:%S %p", 'c' => "%a %b %e %H:%M:%S %Y")
-
-"glibc-`strftime` (C-Locale) für ein Datum (Tage seit 1970-01-01, 00:00 UTC)."
-function _strftime1(z::Int, fmt::String)
-    y, m, d = _civil(z)
-    wday = mod(z + 4, 7)
-    yday = z - _days_from_civil(y, 1, 1)
-    out = IOBuffer()
-    cs = collect(fmt)
-    n = length(cs)
-    i = 1
-    while i <= n
-        c = cs[i]
-        if c != '%'
-            print(out, c)
-            i += 1
-            continue
-        end
-        start = i
-        i += 1
-        pad = nothing
-        upcase = swcase = false
-        while i <= n && cs[i] in "-_0^#"
-            if cs[i] == '^'
-                upcase = true
-            elseif cs[i] == '#'
-                swcase = true
-            else
-                pad = cs[i]
-            end
-            i += 1
-        end
-        width = 0
-        while i <= n && isdigit(cs[i])
-            width = width * 10 + (cs[i] - '0')
-            i += 1
-        end
-        i <= n && cs[i] in "EO" && (i += 1)
-        if i > n
-            print(out, String(cs[start:end]))
-            break
-        end
-        k = cs[i]
-        i += 1
-        function num(v, digits, fill = '0')
-            neg = v < 0
-            s = string(abs(v))
-            pad == '-' && return (neg ? "-" : "") * s
-            if pad == '_'
-                fill = ' '
-            elseif pad == '0'
-                fill = '0'
-            end
-            tw = max(width, digits) - (neg ? 1 : 0)
-            fill == '0' && return (neg ? "-" : "") * lpad(s, tw, '0')
-            return lpad((neg ? "-" : "") * s, tw + (neg ? 1 : 0))
-        end
-        yearish(v) = (pad == '-' || width == 0) ? string(v) : num(v, 1)
-        function text(t, swap_lower = false)
-            if upcase
-                t = uppercase(t)
-            elseif swcase
-                t = swap_lower ? lowercase(t) : uppercase(t)
-            end
-            width > length(t) && (t = string(pad == '0' ? '0' : ' ')^(width - length(t)) * t)
-            return t
-        end
-        if k == 'Y'
-            print(out, yearish(y))
-        elseif k == 'C'
-            print(out, yearish(fld(y, 100)))
-        elseif k == 'G' || k == 'g' || k == 'V'
-            gy, gw = _iso_week(z, wday)
-            print(out, k == 'G' ? yearish(gy) : num(k == 'g' ? mod(gy, 100) : gw, 2))
-        elseif k == 'y'
-            print(out, num(mod(y, 100), 2))
-        elseif k == 'm'
-            print(out, num(m, 2))
-        elseif k == 'd'
-            print(out, num(d, 2))
-        elseif k == 'e'
-            print(out, num(d, 2, ' '))
-        elseif k == 'j'
-            print(out, num(yday + 1, 3))
-        elseif k == 'u'
-            print(out, num(wday == 0 ? 7 : wday, 1))
-        elseif k == 'w'
-            print(out, num(wday, 1))
-        elseif k == 'U'
-            print(out, num(fld(yday + 7 - wday, 7), 2))
-        elseif k == 'W'
-            print(out, num(fld(yday + 7 - mod(wday + 6, 7), 7), 2))
-        elseif k in "HMS"
-            print(out, num(0, 2))
-        elseif k == 'I'
-            print(out, num(12, 2))
-        elseif k == 'k'
-            print(out, num(0, 2, ' '))
-        elseif k == 'l'
-            print(out, num(12, 2, ' '))
-        elseif k == 's'
-            print(out, num(z * 86400, 1))
-        elseif k == 'b' || k == 'h'
-            print(out, text(_MON[m][1:3]))
-        elseif k == 'B'
-            print(out, text(_MON[m]))
-        elseif k == 'a'
-            print(out, text(_WDAY[wday+1][1:3]))
-        elseif k == 'A'
-            print(out, text(_WDAY[wday+1]))
-        elseif k == 'p'
-            print(out, text("AM", true))
-        elseif k == 'P'
-            print(out, text("am"))
-        elseif k == 'Z'
-            print(out, text("UTC", true))
-        elseif k == 'z'
-            print(out, "+0000")
-        elseif haskey(_COMPOSITE, k)
-            print(out, text(_strftime1(z, _COMPOSITE[k])))
-        elseif k == 'n'
-            print(out, '\n')
-        elseif k == 't'
-            print(out, '\t')
-        elseif k == '%'
-            print(out, '%')
-        else
-            print(out, String(cs[start:i-1]))
-        end
-    end
-    return String(take!(out))
-end
+# N10: format.Date/strftime (C-Locale) rechnet der gemeinsame Kern core/slc_rbase_date.c (wie Python).
+# N11: %OS ohne Ziffer nach digits_secs (set_options); Ergebnis über 2048 Bytes ist ein Fehler wie in R.
 
 function _format_date_list(days::AbstractVector{Float64}, fmts::AbstractVector)
     n = length(days)
     n == 0 && return _Str[]
     nf = length(fmts)
     out = _Str[]
+    sizehint!(out, max(n, nf))
+    ds = _digits_secs()
+    buf = Vector{UInt8}(undef, 2048)
     for i in 1:max(n, nf)
         z = days[mod1(i, n)]
         f = fmts[mod1(i, nf)]
-        if isnan(z) || f === nothing || f === missing || !isfinite(z)
+        if isnan(z) || f === nothing || f === missing || !(abs(z) < 1e14)
             push!(out, nothing)
         else
-            push!(out, _strftime1(floor(Int, z), String(f)))
+            push!(out, SimLev._rb_strftime(floor(Int64, z), String(f), ds, buf))
         end
     end
     return out

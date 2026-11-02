@@ -28,6 +28,7 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
+from . import _ext
 from ._r import libm as _libm
 from ._r.base import quiet_fp
 from ._r.fmt import NA_REAL
@@ -111,6 +112,13 @@ def _sprintf_g(x) -> str:
 
 # ── Kalender (proleptisch gregorianisch, beliebige Jahre wie R) ─────────────
 
+# Teil:               _civil_to_days, _days_to_civil
+# Herkunft:           übersetzt aus H. Hinnant, chrono-Compatible Low-Level Date Algorithms,
+#                     https://howardhinnant.github.io/date_algorithms.html
+# Rechte:             gemeinfrei ("Consider these donated to the public domain.")
+# Lizenz der Vorlage: keine (gemeinfrei)
+# Änderungen:         vektorisiert mit numpy (int64, floor_divide); Monatsverschiebung als (m + 9) %
+#                     12.
 def _civil_to_days(y, m, d):
     """(Jahr, Monat, Tag) -> Tage seit 1970-01-01 (vektorisiert, int64)."""
     y = np.asarray(y, dtype=np.int64)
@@ -138,14 +146,6 @@ def _days_to_civil(z):
     m = np.where(mp < 10, mp + 3, mp - 9)
     y = y + (m <= 2)
     return y, m, d
-
-
-def _days_in_month(y, m):
-    y = np.asarray(y, dtype=np.int64)
-    m = np.asarray(m, dtype=np.int64)
-    y2 = y + (m == 12)
-    m2 = np.where(m == 12, 1, m + 1)
-    return _civil_to_days(y2, m2, 1) - _civil_to_days(y, m, 1)
 
 
 def _days(x) -> np.ndarray:
@@ -191,23 +191,12 @@ def _date_str(day) -> str:
     return "%04d-%02d-%02d" % (y, m, d)
 
 
-_RX_YMD = {sep: re.compile(r"^ *([0-9]{1,4})" + re.escape(sep) + r" *([0-9]{1,2})" + re.escape(sep) +
-                           r" *([0-9]{1,2})") for sep in "-/"}
-
-
 def _strptime_ymd(s, sep="-") -> float:
-    """``as.Date(s, format = "%Y-%m-%d")`` (bzw. ``/``) für einen Text; NA = nan."""
+    """``as.Date(s, format = "%Y-%m-%d")`` (bzw. ``/``) für einen Text; NA = nan (N10: Kern core/slc_rbase_date.c)."""
     if s is None:
         return _NAN
-    m = _RX_YMD[sep].match(s)
-    if not m:
-        return _NAN
-    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-    if not (1 <= mo <= 12 and 1 <= d <= 31):
-        return _NAN
-    if d > int(_days_in_month(y, mo)):
-        return _NAN
-    return float(_civil_to_days(y, mo, d))
+    z = _ext.slc_r_strptime_ymd(s, sep)
+    return _NAN if z is None else float(z)
 
 
 def _as_date_chr(strs) -> np.ndarray:

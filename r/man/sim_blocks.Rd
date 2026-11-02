@@ -268,7 +268,12 @@ funds_costs(fee = 0.95, performance_fee = 5)
     \code{year} und \code{taxable_income} (oder genau zwei Spalten Jahr, Betrag). Fehlt ein
     Kalenderjahr der Simulation, bricht \code{simulation()} mit Fehler ab. Die Engine rechnet
     dann mit dem Einkommensteuertarif (Abschnitt \dQuote{Einkommensteuertarif} in
-    \code{\link{simulation}}).
+    \code{\link{simulation}}). Für \code{\link{withdrawal_simulation}} gilt das zvE je
+    \strong{Planjahr}, nominal wie angegeben: eine Zahl für alle Planjahre oder ein Vektor
+    \strong{ohne} Namen mit einem Wert je Planjahr (in \code{simulation()} ein Fehler); nach
+    Kalenderjahren benannt nur mit einem \code{SimLevResult} als \code{start_value}. Das
+    \code{income} von \code{withdrawal_simulation()} zählt nicht zum zvE; einen steuerpflichtigen
+    Teil (etwa einer Rente) selbst in \code{taxable_income} einrechnen.
   }
   \item{tariff}{
     \code{income_tariff}: \code{NULL} (Standard: mitgelieferte Datei

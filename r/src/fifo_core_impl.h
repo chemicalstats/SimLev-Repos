@@ -51,6 +51,8 @@
 #endif
 
 #include "simlev_core.h"
+// N10: Operationen, deren beide Operanden aus Eingaben stammen, rechnen ueber simlev_add/_sub/_mul/_div
+// (NA vor NaN, Regel in simlev_core.h); die Rechnung ist sonst unveraendert. Hosts: R, Python, Julia (C-ABI).
 #if !defined(SIMLEV_XLENGTH) || !defined(SIMLEV_STRING_AT)
 #error "Vor diesem Kern den Host einbinden: R simlev_capi.h, Python _ext_common.h (siehe simlev_core.h)."
 #endif
@@ -66,6 +68,13 @@ static inline double lot_num(simlev_host::Obj b, const char* fld) {
   return simlev_host::as_double(simlev_host::get(b, fld));
 }
 
+// Teil:               days_from_civil, civil_from_days
+// Herkunft:           übersetzt aus H. Hinnant, chrono-Compatible Low-Level Date Algorithms,
+//                     https://howardhinnant.github.io/date_algorithms.html
+// Rechte:             gemeinfrei ("Consider these donated to the public domain.")
+// Lizenz der Vorlage: keine (gemeinfrei)
+// Änderungen:         feste Ganzzahltypen long/int/unsigned statt Template-Parameter; Rückgabe über
+//                     Referenzen.
 // ── Kalender-Hilfsfunktionen (Howard Hinnant, exakt fuer den proleptischen gregorianischen Kalender)
 static inline long days_from_civil(int y, int m, int d) {
   y -= m <= 2;
@@ -105,12 +114,12 @@ static double calculate_fifo_price(simlev_host::Obj buys, double units, int fron
     double rem = lot_num(b, "remaining");
     if (rem > 0) {
       double sell = std::min(rem, units_trade);
-      total_price += sell * lot_num(b, "price");
-      units_trade -= sell;
+      total_price = simlev_add(total_price, simlev_mul(sell, lot_num(b, "price")));
+      units_trade = simlev_sub(units_trade, sell);
     }
     ++i;
   }
-  return (units > 0) ? total_price / units : 0.0;
+  return (units > 0) ? simlev_div(total_price, units) : 0.0;
 }
 
 // Anteilige Vorabpauschale fuer FIFO-Verkauf (Port von calculate_fifo_vorabpauschale;
@@ -130,9 +139,9 @@ static double calculate_fifo_vp(simlev_host::Obj buys, double units, int front_i
       double sell = std::min(rem, units_trade);
       double lot_vp = simlev_host::has(b, "vp") ? simlev_host::as_double(simlev_host::get(b, "vp")) : 0.0;
       if (rem > 0 && lot_vp > 0) {
-        total_vp += sell * (lot_vp / rem);   // F9: Basis = remaining
+        total_vp = simlev_add(total_vp, simlev_mul(sell, simlev_div(lot_vp, rem)));   // F9: Basis = remaining
       }
-      units_trade -= sell;
+      units_trade = simlev_sub(units_trade, sell);
     }
     ++i;
   }
@@ -172,13 +181,13 @@ static simlev_host::Obj calculate_private_sale_tax(simlev_host::Obj buys, int fr
       }
       bool is_exempt = current_date > one_year_later;
 
-      double lot_gain = sell * (sell_price - buy_price);
+      double lot_gain = simlev_mul(sell, simlev_sub(sell_price, buy_price));
       if (is_exempt) {
-        if (lot_gain >= 0) exempt_gain += lot_gain; else exempt_loss += -lot_gain;
+        if (lot_gain >= 0) exempt_gain = simlev_add(exempt_gain, lot_gain); else exempt_loss = simlev_add(exempt_loss, -lot_gain);
       } else {
-        if (lot_gain >= 0) taxable_gain += lot_gain; else taxable_loss += -lot_gain;
+        if (lot_gain >= 0) taxable_gain = simlev_add(taxable_gain, lot_gain); else taxable_loss = simlev_add(taxable_loss, -lot_gain);
       }
-      units_remaining -= sell;
+      units_remaining = simlev_sub(units_remaining, sell);
     }
     ++i;
   }
@@ -187,7 +196,7 @@ static simlev_host::Obj calculate_private_sale_tax(simlev_host::Obj buys, int fr
     "exempt_loss",  exempt_loss,
     "taxable_gain", taxable_gain,
     "taxable_loss", taxable_loss,
-    "total_gain",   exempt_gain - exempt_loss + taxable_gain - taxable_loss
+    "total_gain",   simlev_sub(simlev_add(simlev_sub(exempt_gain, exempt_loss), taxable_gain), taxable_loss)
   );
 }
 
@@ -213,10 +222,10 @@ static void fifo_consume(simlev_host::Obj input, const char* name, double trade_
         // F9: VP proportional VOR remaining reduzieren
         if (simlev_host::has(b, "vp")) {
           double vp = simlev_host::as_double(simlev_host::get(b, "vp"));
-          if (vp > 0 && rem > 0) simlev_host::set(b, "vp", vp * (1.0 - red / rem));
+          if (vp > 0 && rem > 0) simlev_host::set(b, "vp", simlev_mul(vp, 1.0 - simlev_div(red, rem)));
         }
-        simlev_host::set(b, "remaining", rem - red);
-        units_remaining -= red;
+        simlev_host::set(b, "remaining", simlev_sub(rem, red));
+        units_remaining = simlev_sub(units_remaining, red);
       }
     }
     ++i;

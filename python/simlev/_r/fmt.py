@@ -1,3 +1,14 @@
+# Herkunft:           übersetzt aus R 4.3.3, src/main/format.c, printutils.c, printvector.c,
+#                     printarray.c, print.c, paste.c, sprintf.c, util.c; src/nmath/fround.c,
+#                     fprec.c; nachgebildet nach R 4.3.3, src/library/base/R/format.R, dataframe.R,
+#                     factor.R, dates.R
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle); fprec.c: Übersetzung einer Fortran-Routine von
+#                     W. Fullerton (Los Alamos); sprintf.c: ursprünglich Jonathan Rougier
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet seit N10 der C-Kern
+#                     core/slc_rbase_date.c.
 """Formatierung und Druckausgabe wie R 4.3.3.
 
 Zeichengenaue Nachbildung von R's ``format``, ``formatC``, ``prettyNum``,
@@ -9,7 +20,8 @@ Zeichengenaue Nachbildung von R's ``format``, ``formatC``, ``prettyNum``,
 ``dataframe.R``, ``factor.R``, ``dates.R``).
 
 Voreinstellungen wie ``options(digits = 7, scipen = 0, width = 80,
-OutDec = ".")``; änderbar über :func:`set_options`.
+OutDec = ".")``, ``digits.secs`` nicht gesetzt (N11, für ``%OS`` in
+:func:`format_date`); änderbar über :func:`set_options`.
 
 Abbildung der Python-Eingaben auf R-Typen
 -----------------------------------------
@@ -66,24 +78,40 @@ __all__ = [
 
 # ── Optionen ────────────────────────────────────────────────────────────────
 
-_OPT = {"digits": 7, "scipen": 0, "width": 80, "OutDec": "."}
+_OPT = {"digits": 7, "scipen": 0, "width": 80, "OutDec": ".", "digits.secs": None}
 
 
 def set_options(**kw):
-    """Wie ``options()``: ``digits``, ``scipen``, ``width``, ``OutDec``.
+    """Wie ``options()``: ``digits``, ``scipen``, ``width``, ``OutDec``, ``digits_secs`` (R: ``digits.secs``,
+    Ziffern für ``%OS`` ohne Ziffer in :func:`format_date`; ``None`` = nicht gesetzt wie in R).
 
     Liefert die alten Werte (für ``set_options(**alt)``)."""
     old = {}
     for k, v in kw.items():
+        k = "digits.secs" if k == "digits_secs" else k
         if k not in _OPT:
             raise KeyError(k)
+        if k == "digits.secs" and not (v is None or isinstance(v, (bool, int, float, np.integer, np.floating))):
+            raise TypeError("digits_secs: None oder eine Zahl")
         old[k] = _OPT[k]
         _OPT[k] = v
     return old
 
 
 def get_option(name):
-    return _OPT[name]
+    return _OPT["digits.secs" if name == "digits_secs" else name]
+
+
+def _digits_secs():
+    """``getOption("digits.secs")`` wie bei R's ``%OS``: ganzzahlig (zur Null hin), nicht gesetzt, NA, NaN oder
+    außerhalb des int-Bereichs 0, dann auf 0..6 begrenzt (die Begrenzung macht der Kern)."""
+    v = _OPT["digits.secs"]
+    if v is None:
+        return 0
+    v = float(v)
+    if not (abs(v) < 2147483648.0):
+        return 0
+    return int(v)
 
 
 # ── NA / NaN ────────────────────────────────────────────────────────────────
@@ -91,7 +119,8 @@ def get_option(name):
 # R's ``NA_real_`` (NaN mit der Nutzlast 1954) ist zentral in ``rnum`` definiert.
 # R's ``NaN`` ist ein gewöhnliches ``nan``: wie in R gilt jedes NaN ohne die
 # NA-Nutzlast als NaN.
-from .rnum import NA_REAL  # noqa: E402
+from .rnum import NA_REAL, r_string_to_real  # noqa: E402
+from .. import _ext  # noqa: E402
 
 
 def _is_rnan(x):
@@ -316,32 +345,20 @@ def _from_array(a, names, dtype=None):
     return _from_seq(list(a), names)
 
 
-_NUM_RE = re.compile(r"^[ \t\n\r\f\v]*([+-]?)(?:(0[xX][0-9a-fA-F]*\.?[0-9a-fA-F]*(?:[pP][+-]?[0-9]+)?)|"
-                     r"((?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)|(Inf|inf|infinity|Infinity|INF)|(NaN))"
-                     r"[ \t\n\r\f\v]*$")
-
-
 def _r_strtod(s):
-    """String -> double wie ``String2Real``: (Wert, NA, NaN, Warnung)."""
-    if s is None or s == "NA":
+    """String -> double wie ``String2Real``: (Wert, NA, NaN, Warnung). N11: über
+    :func:`simlev._r.rnum.r_string_to_real` (R_strtod mit dem C-Kern ``sl_r_strtod_num``, long double wie R;
+    vorher Python-``float``, korrekt gerundet und damit bei mehr als 17 Ziffern teils anders als R)."""
+    if s is None:
         return math.nan, True, False, False
-    m = _NUM_RE.match(s)
-    if not m:
+    v, bad = r_string_to_real(s)
+    if bad:
         return math.nan, True, False, True
-    sign = -1.0 if m.group(1) == "-" else 1.0
-    if m.group(2):
-        h = m.group(2)
-        if "p" not in h.lower():
-            h += "p0"
-        try:
-            return sign * float.fromhex(h), False, False, False
-        except (ValueError, OverflowError):
-            return math.nan, True, False, True
-    if m.group(3):
-        return sign * float(m.group(3)), False, False, False
-    if m.group(4):
-        return sign * math.inf, False, False, False
-    return math.nan, False, True, False
+    if v != v:
+        if _is_rnan(v):
+            return v, False, True, False
+        return math.nan, True, False, False
+    return v, False, False, False
 
 
 def _coerce(v, type):
@@ -598,18 +615,11 @@ def signif(x, digits=6):
 
 # ── formatReal / scientific ────────────────────────────────────────────────
 
-# Die Tabelle in format.c besteht aus double-Literalen (1e23 … 1e27 sind
-# daher nicht exakt), die nach long double gewandelt werden.
-_TBL = [np.longdouble(float("1e%d" % _k)) for _k in range(28)]
-_TBL_ARR = np.array(_TBL, dtype=np.longdouble)
-_TBL_D = [float(t) for t in _TBL]
-_KP_MAX = 27
-
-
 def _scientific(r, digits):
     """``scientific()`` aus format.c, vektorisiert für |x| > 0 (endlich).
 
-    r: float64-Array (Beträge, > 0). Liefert (kpower, nsig, roundingwidens)."""
+    r: float64-Array (Beträge, > 0). Liefert (kpower, nsig, roundingwidens). N11: für digits <= 15 im
+    C-Kern ``sl_r_scientific`` (core/slc_rbase_num.c, long double wie R; wie Julia seit N10)."""
     n = len(r)
     if n == 0:
         z = np.zeros(0, np.int64)
@@ -627,48 +637,11 @@ def _scientific(r, digits):
                 j -= 1
             nsg[i] = j
         return kpw, nsg, np.zeros(n, bool)
-    kp = np.array([math.floor(math.log10(v)) for v in r.tolist()], dtype=np.int64) - digits + 1
-    rp = r.astype(np.longdouble)
-    small = np.abs(kp) <= _KP_MAX
-    m = small & (kp > 0)
-    if m.any():
-        rp[m] = rp[m] / _TBL_ARR[kp[m]]
-    m = small & (kp < 0)
-    if m.any():
-        rp[m] = rp[m] * _TBL_ARR[-kp[m]]
-    m = ~small
-    if m.any():
-        rp[m] = rp[m] / np.power(np.longdouble(10), kp[m].astype(np.longdouble))
-    m = rp < _TBL[digits - 1]
-    if m.any():
-        rp[m] = rp[m] * np.longdouble(10)
-        kp[m] -= 1
-    alpha = np.rint(rp).astype(np.float64)
-    nsig = np.full(n, digits, np.int64)
-    active = np.ones(n, bool)
-    for _ in range(digits):
-        alpha = alpha / 10.0
-        isint = alpha == np.floor(alpha)
-        dec = active & isint
-        nsig[dec] -= 1
-        active &= isint
-        if not active.any():
-            break
-    m = nsig == 0
-    if m.any() and digits > 0:
-        nsig[m] = 1
-        kp[m] += 1
-    kpower = kp + digits - 1
-    rgt = np.clip(digits - kpower, 0, _KP_MAX)
-    fuzz = np.array([0.5 / _TBL_D[g] for g in rgt.tolist()], dtype=np.float64)
-    rw = np.zeros(n, bool)
-    cand = (kpower > 0) & (kpower <= _KP_MAX)
-    if cand.any():
-        idx = np.nonzero(cand)[0]
-        lhs = r[idx].astype(np.longdouble)
-        rhs = _TBL_ARR[kpower[idx]] - fuzz[idx].astype(np.longdouble)
-        rw[idx] = lhs < rhs
-    return kpower, nsig, rw
+    kpower = np.empty(n, np.int64)
+    nsig = np.empty(n, np.int64)
+    rw = np.empty(n, np.int64)
+    _ext.slc_r_scientific_vec(np.ascontiguousarray(r, dtype=np.float64), int(digits), kpower, nsig, rw)
+    return kpower, nsig, rw.astype(bool)
 
 
 def _format_real(x, na, nan, digits=None, nsmall=0, scipen=None):
@@ -1839,199 +1812,13 @@ def sprintf(fmt, *args):
 
 
 # ── Datum ──────────────────────────────────────────────────────────────────
-
-_MON = ["January", "February", "March", "April", "May", "June", "July", "August",
-        "September", "October", "November", "December"]
-_WDAY = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-
-
-def _civil(z):
-    """Tage seit 1970-01-01 -> (Jahr, Monat, Tag) (proleptisch gregorianisch)."""
-    z += 719468
-    era = z // 146097
-    doe = z - era * 146097
-    yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
-    y = yoe + era * 400
-    doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
-    mp = (5 * doy + 2) // 153
-    d = doy - (153 * mp + 2) // 5 + 1
-    m = mp + 3 if mp < 10 else mp - 9
-    return (y + (m <= 2), m, d)
-
-
-def _days_from_civil(y, m, d):
-    y -= m <= 2
-    era = y // 400
-    yoe = y - era * 400
-    doy = (153 * (m + (-3 if m > 2 else 9)) + 2) // 5 + d - 1
-    doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
-    return era * 146097 + doe - 719468
-
-
-def _isleap(y):
-    return y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
-
-
-def _iso_week(z, y, yday, wday):
-    """(ISO-Jahr, ISO-Woche) wie glibc %G/%V."""
-    # Montag = 0
-    wd = (wday + 6) % 7
-    # Donnerstag derselben Woche
-    th = z - wd + 3
-    ty, _, _ = _civil(th)
-    jan1 = _days_from_civil(ty, 1, 1)
-    week = (th - jan1) // 7 + 1
-    return ty, week
-
-
-_COMPOSITE = {"F": "%Y-%m-%d", "D": "%m/%d/%y", "x": "%m/%d/%y", "T": "%H:%M:%S", "X": "%H:%M:%S",
-              "R": "%H:%M", "r": "%I:%M:%S %p", "c": "%a %b %e %H:%M:%S %Y"}
-
-
-def _strftime1(z, fmt):
-    """glibc-``strftime`` (C-Locale) für ein Datum (Tage seit 1970-01-01, 00:00 UTC)."""
-    y, m, d = _civil(z)
-    wday = (z + 4) % 7  # 0 = Sonntag
-    yday = z - _days_from_civil(y, 1, 1)  # 0-basiert
-    out = []
-    i = 0
-    n = len(fmt)
-    while i < n:
-        c = fmt[i]
-        if c != "%":
-            out.append(c)
-            i += 1
-            continue
-        start = i
-        i += 1
-        pad = None
-        upcase = swcase = False
-        while i < n and fmt[i] in "-_0^#":
-            if fmt[i] == "^":
-                upcase = True
-            elif fmt[i] == "#":
-                swcase = True
-            else:
-                pad = fmt[i]
-            i += 1
-        width = 0
-        while i < n and fmt[i].isdigit():
-            width = width * 10 + int(fmt[i])
-            i += 1
-        if i < n and fmt[i] in "EO":
-            i += 1
-        if i >= n:
-            out.append(fmt[start:])
-            break
-        k = fmt[i]
-        i += 1
-
-        def num(v, digits, fill="0"):
-            neg = v < 0
-            s = "%d" % abs(v)
-            if pad == "-":
-                return ("-" if neg else "") + s
-            if pad == "_":
-                fill = " "
-            elif pad == "0":
-                fill = "0"
-            tw = max(width, digits) - (1 if neg else 0)
-            if fill == "0":
-                return ("-" if neg else "") + s.rjust(tw, "0")
-            return (("-" if neg else "") + s).rjust(tw + (1 if neg else 0))
-
-        def yearish(v):
-            if pad == "-" or width == 0:
-                return "%d" % v
-            return num(v, 1)
-
-        def text(t, swap_lower=False):
-            if upcase:
-                t = t.upper()
-            elif swcase:
-                t = t.lower() if swap_lower else t.upper()
-            if width > len(t):
-                t = ("0" if pad == "0" else " ") * (width - len(t)) + t
-            return t
-        if k == "Y":
-            out.append(yearish(y))
-        elif k == "C":
-            out.append(yearish(y // 100))
-        elif k == "G" or k == "g" or k == "V":
-            gy, gw = _iso_week(z, y, yday, wday)
-            out.append(yearish(gy) if k == "G" else num(gy % 100 if k == "g" else gw, 2))
-        elif k == "y":
-            out.append(num(y % 100, 2))
-        elif k == "m":
-            out.append(num(m, 2))
-        elif k == "d":
-            out.append(num(d, 2))
-        elif k == "e":
-            out.append(num(d, 2, " "))
-        elif k == "j":
-            out.append(num(yday + 1, 3))
-        elif k == "u":
-            out.append(num(7 if wday == 0 else wday, 1))
-        elif k == "w":
-            out.append(num(wday, 1))
-        elif k == "U":
-            out.append(num((yday + 7 - wday) // 7, 2))
-        elif k == "W":
-            out.append(num((yday + 7 - (wday + 6) % 7) // 7, 2))
-        elif k in "HMS":
-            out.append(num(0, 2))
-        elif k == "I":
-            out.append(num(12, 2))
-        elif k == "k":
-            out.append(num(0, 2, " "))
-        elif k == "l":
-            out.append(num(12, 2, " "))
-        elif k == "s":
-            out.append(num(z * 86400, 1))
-        elif k in "bh":
-            out.append(text(_MON[m - 1][:3]))
-        elif k == "B":
-            out.append(text(_MON[m - 1]))
-        elif k == "a":
-            out.append(text(_WDAY[wday][:3]))
-        elif k == "A":
-            out.append(text(_WDAY[wday]))
-        elif k == "p":
-            out.append(text("AM", swap_lower=True))
-        elif k == "P":
-            out.append(text("am"))
-        elif k == "Z":
-            out.append(text("UTC", swap_lower=True))
-        elif k == "z":
-            out.append("+0000")
-        elif k in _COMPOSITE:
-            out.append(text(_strftime1(z, _COMPOSITE[k])))
-        elif k == "n":
-            out.append("\n")
-        elif k == "t":
-            out.append("\t")
-        elif k == "%":
-            out.append("%")
-        else:
-            out.append(fmt[start:i])
-    return "".join(out)
+# N10: format.Date/strftime (C-Locale) rechnet der gemeinsame Kern core/slc_rbase_date.c (wie Julia).
 
 
 def _format_date_list(days, fmts):
-    days = np.asarray(days, dtype=np.float64)
-    n = len(days)
-    if n == 0:
-        return []
-    out = []
-    nf = len(fmts)
-    for i in range(max(n, nf)):
-        z = days[i % n]
-        f = fmts[i % nf]
-        if z != z or f is None or not math.isfinite(z):
-            out.append(None)
-        else:
-            out.append(_strftime1(int(math.floor(z)), f))
-    return out
+    """format.Date für Tage seit 1970-01-01 (Länge max(n, nf) mit Wiederholung); NA/NaN/±Inf, ``None`` -> ``None``.
+    ``%OS`` ohne Ziffer nach ``digits.secs`` (:func:`set_options`); Ergebnis über 2048 Bytes: ValueError wie R."""
+    return _ext.slc_r_format_date(np.ascontiguousarray(days, dtype=np.float64), list(fmts), _digits_secs())
 
 
 def format_date(x, fmt="%Y-%m-%d"):

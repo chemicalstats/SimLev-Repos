@@ -24,8 +24,14 @@
  *             Intel 64 and IA-32 Architectures Software Developer's Manual, Vol. 1, Kap. 8 (x87).
  * Konstanten: DBL_MAX aus <float.h>; NA und NaN als Bitmuster (slc_rbase.h).
  * long double: absichtlich (siehe slc_rbase.h): nur so gleich zu R auf derselben Plattform.
- * Reinraum:   wie slc_rbase.h; Vorlage ist die Logik der bisherigen Port-Funktionen
- *             (python/simlev/_r/rnum.py, base.py; julia/src/r/rnum.jl, base.jl, ld80.jl).
+ * Herkunft:           übersetzt aus R 4.3.3, src/main/summary.c, cum.c (handleNaN), array.c,
+ *                     arithmetic.c (R_POW), über die Port-Funktionen python/simlev/_r/rnum.py,
+ *                     base.py und julia/src/r/rnum.jl, base.jl, ld80.jl
+ * Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation
+ *                     (laut Kopf der jeweiligen R-Quelle)
+ * Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+ * Änderungen:         C99 ohne R-Datenstrukturen, gemeinsamer Kern für Python und Julia (nicht Teil
+ *                     des R-Pakets); long double nur dort, wo R es nutzt.
  * Prüforakel: R 4.3.3 (tools/gleichlauf/rbase_fuzz.R).
  */
 #include "slc_internal.h"

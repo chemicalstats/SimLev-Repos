@@ -1,3 +1,10 @@
+# Herkunft:           nachgebildet nach R 4.3.3, src/main/gram.y (Grammatik und Vorrang) und der
+#                     Semantik der Grundoperatoren
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle); gram.y: zusätzlich Romain Francois (2009-2011)
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang.
 # RExpr – Ausdrücke in R-Syntax als Text auswerten (wie `eval(parse(text = s), data, env)`)
 #
 # Ein gemeinsamer Auswerter für Bedingungen als Text in
@@ -74,7 +81,6 @@ des Index hinter dem gelesenen Teil (wie `endptr`; bei ungültiger Eingabe der
 Anfangsindex und NA).
 """
 function r_strtod(cs::Vector{Char}, i0::Int = 1)
-    L = SimLev.F80
     n = length(cs)
     at(k) = k <= n ? cs[k] : '\0'
     p = i0
@@ -87,129 +93,23 @@ function r_strtod(cs::Vector{Char}, i0::Int = 1)
     end
     low(k, m) = lowercase(String(cs[k:min(n, k + m - 1)]))
     if low(p, 3) == "nan"
-        return (sign * NaN, p + 3)
+        return (NaN, p + 3)                  # N11: R gibt NaN ohne Vorzeichen (0x7FF8000000000000)
     elseif low(p, 8) == "infinity"
         return (sign * Inf, p + 8)
     elseif low(p, 3) == "inf"
         return (sign * Inf, p + 3)
     end
-    ans = L(0.0)
-    expn = 0
-    if n - p + 1 > 2 && at(p) == '0' && (at(p + 1) == 'x' || at(p + 1) == 'X')
-        exph = -1
-        p += 2
-        while true
-            c = at(p)
-            if _isdig(c)
-                ans = L(16.0) * ans + L(Float64(c - '0'))
-            elseif 'a' <= c <= 'f'
-                ans = L(16.0) * ans + L(Float64(c - 'a' + 10))
-            elseif 'A' <= c <= 'F'
-                ans = L(16.0) * ans + L(Float64(c - 'A' + 10))
-            elseif c == '.'
-                exph = 0; p += 1; continue
-            else
-                break
-            end
-            exph >= 0 && (exph += 4)
-            p += 1
-        end
-        if at(p) == 'p' || at(p) == 'P'
-            expsign = 1
-            p += 1
-            if at(p) == '-'
-                expsign = -1; p += 1
-            elseif at(p) == '+'
-                p += 1
-            end
-            m = 0
-            while _isdig(at(p))
-                m = m < 9999 ? m * 10 + (at(p) - '0') : m; p += 1
-            end
-            if ans != L(0.0)
-                expn += expsign * m
-                p2 = L(2.0)
-                if exph > 0
-                    if expn - exph < -122
-                        fac = L(1.0); k = exph
-                        while k != 0
-                            (k & 1) == 1 && (fac *= p2)
-                            k >>= 1; p2 *= p2
-                        end
-                        ans /= fac
-                        p2 = L(2.0)
-                    else
-                        expn -= exph
-                    end
-                end
-                fac = L(1.0)
-                k = abs(expn)
-                while k != 0
-                    (k & 1) == 1 && (fac *= p2)
-                    k >>= 1; p2 *= p2
-                end
-                ans = expn < 0 ? ans / fac : ans * fac
-            end
-        end
-        return (sign * Float64(ans), p)
+    # N10: Zahlteil (dezimal mit Exponent, hexadezimal mit Punkt und p-Exponent) in long double über den
+    # C-Kern core/slc_rbase_num.c; gelesen werden nur ASCII-Zeichen, Bytes = Zeichen
+    q = p
+    while q <= n && isascii(cs[q]) && (isxdigit(cs[q]) || cs[q] in ".xXpPeE+-")
+        q += 1
     end
-    nd = 0
-    while _isdig(at(p))
-        ans = L(10.0) * ans + L(Float64(at(p) - '0')); p += 1; nd += 1
-    end
-    if at(p) == '.'
-        p += 1
-        while _isdig(at(p))
-            ans = L(10.0) * ans + L(Float64(at(p) - '0')); p += 1; nd += 1; expn -= 1
-        end
-    end
-    nd == 0 && return (_NA, i0)
-    if at(p) == 'e' || at(p) == 'E'
-        expsign = 1
-        p += 1
-        if at(p) == '-'
-            expsign = -1; p += 1
-        elseif at(p) == '+'
-            p += 1
-        end
-        m = 0
-        while _isdig(at(p))
-            m = m < 9999 ? m * 10 + (at(p) - '0') : m; p += 1
-        end
-        expn += expsign * m
-    end
-    if expn + nd < -300
-        for _ in 1:nd
-            ans /= L(10.0)
-        end
-        expn += nd
-    end
-    p10 = L(10.0); fac = L(1.0)
-    if expn < -307
-        k = -expn
-        while k != 0
-            (k & 1) == 1 && (fac /= p10)
-            k >>= 1; p10 *= p10
-        end
-        ans *= fac
-    elseif expn < 0
-        k = -expn
-        while k != 0
-            (k & 1) == 1 && (fac *= p10)
-            k >>= 1; p10 *= p10
-        end
-        ans /= fac
-    elseif ans != L(0.0)
-        k = expn
-        while k != 0
-            (k & 1) == 1 && (fac *= p10)
-            k >>= 1; p10 *= p10
-        end
-        ans *= fac
-    end
-    Float64(ans) > floatmax(Float64) && return (sign > 0 ? Inf : -Inf, p)
-    isinf(Float64(ans)) && return (sign * Float64(ans), p)
-    return (sign * Float64(ans), p)
+    # N11: ein Zeichen mehr übergeben – "0x" gilt wie in R (und Python) nur, wenn danach noch etwas folgt
+    v, used, gt = SimLev._rb_strtod_num(String(cs[p:min(q, n)]), 1)
+    used < 0 && return (_NA, i0)
+    gt && (v = Inf)                          # N11: Betrag über DBL_MAX (long double) → ±Inf wie R
+    return (sign * v, p + used)
 end
 r_strtod(s::AbstractString, i0::Int = 1) = r_strtod(collect(String(s)), i0)
 
@@ -1347,17 +1247,14 @@ end
 
 "R's `myfmod(x1, x2)` (`x1 %% x2`)."
 function r_fmod(x1::Float64, x2::Float64)
-    x2 == 0.0 && return NaN
+    x2 == 0.0 && return reinterpret(Float64, 0x7ff8000000000000)   # R_NaN (positiv), auch bei NA in x1
     if abs(x2) * _LDBL_EPS > 1 && isfinite(x1) && abs(x1) <= abs(x2)
         return abs(x1) == abs(x2) ? 0.0 : ((x1 < 0 && x2 > 0) || (x2 < 0 && x1 > 0)) ? x1 + x2 : x1
     end
     q = x1 / x2
     (isfinite(q) && abs(q) * _LDBL_EPS > 1) && _warn("probable complete loss of accuracy in modulus")
-    # NaN-Operanden: x87 liefert die NaN mit der größeren Mantisse, NA schlägt also NaN
-    (isnan(x1) || isnan(x2)) && return (SimLev.isna_strict(x1) || SimLev.isna_strict(x2)) ? _NA : NaN
-    L = SimLev.F80
-    tmp = L(x1) - L(floor(q)) * L(x2)
-    return Float64(tmp - floor(tmp / L(x2)) * L(x2))
+    # C-Kern (long double wie R); NaN-Operanden nach der Regel in core/slc_rbase_num.c (N11)
+    return SimLev._rb_fmod_ld(x1, x2)
 end
 
 "R's `myfloor(x1, x2)` (`x1 %/% x2`)."
@@ -1365,9 +1262,7 @@ function r_idiv(x1::Float64, x2::Float64)
     q = x1 / x2
     (x2 == 0.0 || abs(q) * _LDBL_EPS > 1 || !isfinite(q)) && return q
     abs(q) < 1 && return q < 0 ? -1.0 : (((x1 < 0 && x2 > 0) || (x1 > 0 && x2 < 0)) ? -1.0 : 0.0)
-    L = SimLev.F80
-    tmp = L(x1) - L(floor(q)) * L(x2)
-    return Float64(L(floor(q)) + floor(tmp / L(x2)))
+    return SimLev._rb_idiv_ld(x1, x2)   # N10: C-Kern (long double wie R)
 end
 
 function _iop(op::String, x::Union{Missing,Int}, y::Union{Missing,Int}, of::Ref{Bool})

@@ -153,8 +153,15 @@
                          tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep,
                          lot_n = as.numeric(c()), lot_basis = as.numeric(c()),
                          lot_vp = as.numeric(c()), lot_group = as.integer(c()),
-                         spb_first = -1.0, horizon_end = FALSE) {
-  .Call(C_wd_simulate, R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real,
-        tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep,
-        lot_n, lot_basis, lot_vp, lot_group, spb_first, horizon_end)
+                         spb_first = -1.0, horizon_end = FALSE, tariff_par = as.numeric(c()),
+                         zve = as.numeric(c())) {
+  r <- .Call(C_wd_simulate, R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, income_real,
+             tax_on, tax_rate, tfs, spb_annual, vp_on, cost, basis_ratio, loss0, keep,
+             lot_n, lot_basis, lot_vp, lot_group, spb_first, horizon_end, tariff_par, zve)
+  if (!length(tariff_par)) r$tariff_years <- NULL   # T14: Jahreszeilen nur mit Tarifweg (sonst Liste wie bisher)
+  r
 }
+
+# T14: Pruefzugang zum Tarifkern (core/tariff_core_impl.h) fuer den Zufallsvergleich mit .tariff_income_tax,
+# .tariff_soli und .tariff_close (tools/gleichlauf/tariff_fuzz.R); mode 1 ESt, 2 Soli, 3 Jahresabschluss
+.wd_tariff_check <- function(par, x, mode) .Call(C_wd_tariff_check, as.numeric(par), x, as.integer(mode))

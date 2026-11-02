@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from . import _core as core
+from . import _ext
 from ._dates import days_from_civil, fmt_date, from_days, year_of
 from ._r.rformat import r_as_character, r_deparse, r_format, r_format1, r_sprintf
 from ._r.rnum import r_mean, r_pow, r_pow_vec, r_sd, r_sum, r_uniroot
@@ -157,41 +158,9 @@ def _unwrap(x: Any) -> Any:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _r_strptime_ymd(s: str) -> int | None:
-    """``as.Date(s, format = "%Y-%m-%d")`` wie R's strptime (Ziffernfelder, Rest ignoriert)."""
-    rp = 0
-
-    def get_number(lo, hi, n):
-        nonlocal rp
-        while rp < len(s) and s[rp] == " ":
-            rp += 1
-        if rp >= len(s) or not ("0" <= s[rp] <= "9"):
-            return None
-        val = 0
-        k = n
-        while True:
-            val = val * 10 + (ord(s[rp]) - 48)
-            rp += 1
-            k -= 1
-            if not (k > 0 and rp < len(s) and "0" <= s[rp] <= "9"):
-                break
-        if val < lo or val > hi:
-            return None
-        return val
-    y = get_number(0, 9999, 4)
-    if y is None or rp >= len(s) or s[rp] != "-":
-        return None
-    rp += 1
-    m = get_number(1, 12, 2)
-    if m is None or rp >= len(s) or s[rp] != "-":
-        return None
-    rp += 1
-    d = get_number(1, 31, 2)
-    if d is None:
-        return None
-    try:
-        return days_from_civil(y, m, d)
-    except ValueError:
-        return None
+    """``as.Date(s, format = "%Y-%m-%d")`` wie R's strptime (Ziffernfelder, Rest ignoriert; N10: Kern
+    core/slc_rbase_date.c)."""
+    return _ext.slc_r_strptime_ymd(s, "-")
 
 
 def _as_date(x: Any) -> int | None:
@@ -966,7 +935,9 @@ def _perform_gain_harvest(sim: dict, name: str, index: int, tax_regime: str, spr
 # Tarifweg (taxable_income, tax_tariff)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _check_taxable_income(x: Any, years: list[int], who: str = "simulation") -> dict:
+def _check_taxable_income(x: Any, years: list[int], who: str = "simulation", plan_ok: bool = False) -> dict:
+    """zvE prüfen (R: ``.check_taxable_income``). ``plan_ok`` (T14, ``income_tariff()``): ein Vektor ohne Namen
+    (ein Wert je Planjahr von ``withdrawal_simulation()``) ist zulässig; Ergebnis dann mit ``plan`` (Werte)."""
     form = ("eine Zahl (zvE in EUR f\u00fcr alle Jahre), ein nach Kalenderjahren benannter Zahlenvektor "
             "(z. B. c(\"2024\" = 50000, \"2025\" = 52000)) oder ein data.frame mit den Spalten year und taxable_income")
     names: list | None = None
@@ -1010,9 +981,12 @@ def _check_taxable_income(x: Any, years: list[int], who: str = "simulation") -> 
                   "Betr\u00e4ge in EUR." % (r_format1(v), (" f\u00fcr %s" % names[i]) if names is not None else ""))
     if len(vals) == 1 and names is None:
         return {"all": vals[0], "by_year": None}
+    if plan_ok and names is None:
+        return {"all": None, "by_year": None, "plan": vals}
     if names is None or any(nm is None or nm == "" for nm in names):
-        _stop(who + ": taxable_income mit %d Werten muss nach Kalenderjahren benannt sein; erwartet wird %s."
-              % (len(vals), form))
+        _stop(who + ": taxable_income mit %d Werten muss nach Kalenderjahren benannt sein; erwartet wird %s%s."
+              % (len(vals), form, " (ein Vektor ohne Namen, ein Wert je Planjahr, gilt nur in withdrawal_simulation())"
+                 if names is None else ""))
     yy = []
     for nm in names:
         t = nm.strip()

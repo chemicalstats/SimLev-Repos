@@ -2,7 +2,8 @@
  * Verfahren:  siehe slc_rbase.c (Summen, Mittel, Varianz, Kumulationen, Potenz in long double bzw.
  *             double wie R), slc_rbase_sort.c (Ordnung, Rang, partielle Sortierung, Quantile Typ 1–9,
  *             tabulate, findInterval) und slc_rbase_cov.c (cov/cor: pearson, kendall; spearman über
- *             die Ränge im Host).
+ *             die Ränge im Host), slc_rbase_date.c (Datumsformat und -lesen, N10),
+ *             slc_rbase_num.c (R_strtod, %%, %/%, scientific() in long double, N10).
  * Zweck:      Python (simlev._ext) und Julia (ccall auf libslc) bildeten diese Grundfunktionen von R
  *             je für sich nach (python/simlev/_r/, julia/src/r/); seit N8 rechnen beide mit diesen
  *             Kernen. R selbst behält seine Grundfunktionen (Entscheidung 9.0 (4)); diese Dateien
@@ -17,11 +18,19 @@
  *             folgt dann aus demselben Typ.
  * NA:         R's NA_real_ ist das NaN mit Nutzlast 1954 (0x7FF00000000007A2), R's NaN das ruhige
  *             0x7FF8000000000000. Die Kerne unterscheiden beide wie R.
- * Reinraum:   nach dem dokumentierten Verhalten von R (Hilfeseiten ?sum, ?mean, ?cumsum, ?quantile,
- *             ?order, ?rank, ?sort, ?cor, ?tabulate, ?findInterval, ?Arithmetic) und der Logik der
- *             bisherigen Nachbildungen in den Ports (python/simlev/_r/{rnum,base,stats_sort,
- *             stats_cor}.py, julia/src/r/{rnum,base,stats_sort,stats_cor}.jl); kein Code aus den
- *             Quellen von R. R 4.3.3 diente nur als Black-Box-Orakel.
+ * Herkunft:           übersetzt aus R 4.3.3 über die Port-Funktionen
+ *                     python/simlev/_r/{rnum,base,stats_sort,stats_cor}.py und
+ *                     julia/src/r/{rnum,base,stats_sort,stats_cor}.jl (diese nach
+ *                     src/main/summary.c, cum.c, array.c, arithmetic.c, sort.c, qsort-body.c,
+ *                     util.c, format.c und src/library/stats/src/cov.c); Verhalten laut
+ *                     R-Hilfeseiten (?sum, ?mean, ?cumsum, ?quantile, ?order, ?rank, ?sort, ?cor,
+ *                     ?tabulate, ?findInterval, ?Arithmetic); Einzelheiten in den Köpfen der
+ *                     .c-Dateien
+ * Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation
+ *                     (laut Kopf der jeweiligen R-Quelle)
+ * Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+ * Änderungen:         C99 ohne R-Datenstrukturen, gemeinsamer Kern für Python und Julia (nicht Teil
+ *                     des R-Pakets).
  * Prüforakel: R 4.3.3 (tools/gleichlauf/rbase_fuzz.R, ≥ 10.000 Fälle je Kern).
  */
 #ifndef SLC_RBASE_H
@@ -81,6 +90,28 @@ void   sl_r_findinterval(int64_t nv, const double *vec, int64_t nx, const double
  * wie R ("missing observations in cov/cor", "no complete element pairs") mit SL_EARG. */
 int    sl_r_cov(sl_ctx *cx, int64_t n, int64_t ncx, const double *x, int64_t ncy, const double *y,
                 int use, int kendall, int cor, double *ans, int *sd0);
+
+/* ── slc_rbase_num.c: weitere long-double-Rechenwege (N10) ──────────────────
+ * sl_r_strtod_num: Zahlteil von R_strtod ab s (nach Vorzeichen): *used = gelesene Bytes (-1: keine
+ * Ziffer, NA), *gt_max = Betrag > DBL_MAX in long double. sl_r_fmod_ld/sl_r_idiv_ld: long-double-Teil
+ * von %% und %/% (endliche Operanden). sl_r_scientific: scientific() von formatReal für r > 0 endlich,
+ * 1 <= digits <= 15; Rückgabe "roundingwidens". */
+double  sl_r_strtod_num(const char *s, int64_t len, int64_t *used, int *gt_max);
+double  sl_r_fmod_ld(double x1, double x2);
+double  sl_r_idiv_ld(double x1, double x2);
+int     sl_r_scientific(double r, int digits, int *kpower, int *nsig);
+
+/* ── slc_rbase_date.c: Datum (N10) ───────────────────────────────────────────
+ * Tage seit 1970-01-01, proleptisch gregorianisch. sl_r_strftime: format.Date(z, fmt) in der C-Locale
+ * (Schalter, Breiten, E/O wie glibc unter Linux; digits_secs = getOption("digits.secs") für %OS ohne Ziffer,
+ * nicht gesetzt 0) nach buf (höchstens cap Bytes, ohne abschließende 0); Rückgabe die volle Länge (höchstens
+ * 2048; cap >= 2048 genügt immer), -1 bei |z| >= 1e14 (NA), -2 bei mehr als 2048 Bytes (Fehler wie R:
+ * "output string exceeded 2048 bytes"), -3 ohne Speicher. sl_r_strptime_ymd: as.Date(s, format =
+ * "%Y<sep>%m<sep>%d"); 1 = gelesen (*z), 0 = NA. */
+void    sl_r_civil_from_days(int64_t z, int64_t *y, int *m, int *d);
+int64_t sl_r_days_from_civil(int64_t y, int m, int d);
+int64_t sl_r_strftime(int64_t z, const char *fmt, int64_t flen, int digits_secs, char *buf, int64_t cap);
+int     sl_r_strptime_ymd(const char *s, int64_t len, int sep, int64_t *z);
 
 #ifdef __cplusplus
 }

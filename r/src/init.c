@@ -90,7 +90,8 @@ extern SEXP C_sim_p20_tax(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sim_vp_tax(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sim_sell_count(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 /* withdrawal_core.cpp */
-extern SEXP C_wd_simulate(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_wd_simulate(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_wd_tariff_check(SEXP, SEXP, SEXP);
 /* 9.3: slc_r_opt.c (Optimierer der C-Bibliothek slc) */
 extern SEXP C_sl_opt_init(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_opt_next(SEXP, SEXP);
@@ -250,7 +251,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"sim_vp_tax", (DL_FUNC) &C_sim_vp_tax, 5},
     {"sim_sell_count", (DL_FUNC) &C_sim_sell_count, 10},
     /* withdrawal_core.cpp */
-    {"wd_simulate", (DL_FUNC) &C_wd_simulate, 25},
+    {"wd_simulate", (DL_FUNC) &C_wd_simulate, 27},
+    {"wd_tariff_check", (DL_FUNC) &C_wd_tariff_check, 3},
     {NULL, NULL, 0}
 };
 

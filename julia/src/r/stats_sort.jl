@@ -1,4 +1,14 @@
-# Gemeinsame Hilfen (long double F80), Sortieren, Ränge, Einteilen und Lagemaße (order, r_sort, r_rank, rle,
+# Herkunft:           übersetzt aus R 4.3.3, src/main/sort.c, qsort-body.c, seq.c; nachgebildet nach
+#                     R 4.3.3, src/library/base/R/sort.R, rle.R, cut.R, findInt.R;
+#                     src/library/stats/R/quantile.R, median.R, weighted.mean.R
+# Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
+#                     Kopf der jeweiligen R-Quelle); qsort-body.c nach R. C. Singleton,
+#                     CACM-Algorithmus 347 (1969)
+# Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+# Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
+#                     SimLev genutzten Umfang: Ordnung, Rang, partielle Sortierung und Quantile
+#                     rechnet seit N8 der C-Kern core/slc_rbase_sort.c.
+# Gemeinsame Hilfen, Sortieren, Ränge, Einteilen und Lagemaße (order, r_sort, r_rank, rle,
 # tabulate, findInterval, cut, complete_cases, quantile, median, weighted_mean) aus R 4.3.3 (src/main/sort.c,
 # qsort-body.c, seq.c; base/R/sort.R, rle.R, cut.R, findInt.R; stats/R/quantile.R, median.R, weighted.mean.R);
 # Python: _r/stats_sort.py.

@@ -1,22 +1,53 @@
+Urheberrecht und Lizenzen
+=========================
+
 SimLev steht unter der GNU General Public License, Version 3 (GPL-3).
 Copyright ChemicalStats von der Mauerstrasse.
 
-Das Paket enthält keinen Code aus anderen R-Paketen oder Programmen.
+SimLev enthält keinen Code aus anderen Paketen. Das R-Paket nutzt die
+Grundfunktionen von R selbst und bildet davon nichts nach (Abschnitte
+2.1-2.3 entfallen); fremde Vorlage sind nur gemeinfreie
+Kalenderalgorithmen (Abschnitt 2.4). Die gleiche Gliederung haben
+python/COPYRIGHTS.md und julia/COPYRIGHTS.md im Repository.
 
 
-Eigener Code
-============
+Herkunftsschema
+===============
+
+Jede Datei oder jeder Dateiteil mit fremder Vorlage trägt im Kopf (bei
+einem Teil: direkt davor) einen Herkunftsblock mit diesen Feldern in dieser
+Reihenfolge; C und C++ im Kopfkommentar (/* ... */ bzw. //), Python, Julia
+und R als #-Zeilen:
+
+Teil:               nur wenn der Block einen Teil der Datei betrifft: die
+                    Funktionen
+Herkunft:           eigen (ohne fremde Vorlage, nach Veröffentlichungen und
+                    Mathematik) | nachgebildet nach <Vorlage> (Verhalten bzw.
+                    Aufbau nach der Vorlage, nicht Zeile für Zeile) |
+                    übersetzt aus <Vorlage, Datei> (Code Schritt für Schritt
+                    in eine andere Sprache oder Form übertragen)
+Rechte:             Rechteinhaber bzw. Urheber laut Vorlage
+Lizenz der Vorlage: Lizenz laut Vorlage; bei GPL (>= 2): "in SimLev unter
+                    GPL-3"
+Änderungen:         was SimLev gegenüber der Vorlage geändert hat
+
+Dateien ohne Herkunftsblock sind eigener Code. Die Einträge in Abschnitt 2
+haben dieselben Felder, dazu "Dateien:".
+
+
+1. Eigener Code
+===============
 
 R/          R-Code des Pakets.
 
 src/        C++-Kerne der Engine (Markt-Updates, FIFO-Lotverwaltung,
             Steuer), der Research-, Optimierungs- und Abhängigkeitsrechnungen
             und der Entnahme (*_core.cpp, *_core_impl.h, simlev_core.h,
-            simlev_capi.h, init.c) sowie die C-Bibliothek von SimLev
-            (slc*.c, slc*.h: Zufall, Verteilungen, lineare Algebra,
-            Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, Bootstrap-Kerne,
-            Stineman-Interpolation, Glättungsspline, Kerndichte) und ihre
-            R-Hüllen (slc_r*.c).
+            simlev_capi.h, init.c; Ausnahme: Kalenderteile, Abschnitt 2.4)
+            sowie die C-Bibliothek von SimLev (slc*.c, slc*.h: Zufall,
+            Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD, DCC,
+            MS-GARCH, Bootstrap-Kerne, Stineman-Interpolation,
+            Glättungsspline, Kerndichte) und ihre R-Hüllen (slc_r*.c).
 
             Die C-Quellen sind Kopien der kanonischen Dateien im Ordner
             core/ des Repositorys (tools/core_sync.py). Die C-Bibliothek ist
@@ -28,6 +59,8 @@ src/        C++-Kerne der Engine (Markt-Updates, FIFO-Lotverwaltung,
             (core/tools/gen_constants.py, nicht Teil des R-Pakets);
             Verfahrenskonstanten aus den Veröffentlichungen (etwa die
             Parameter von xoshiro256** und SplitMix64) nennen die Dateiköpfe.
+            Die Kerne core/slc_rbase* (Abschnitt 2.2 der Python- und
+            Julia-Fassung) gehören nicht zum R-Paket.
 
 inst/extdata/steuertarif.csv
             Tarifdatei für tax_tariff(), von SimLev zusammengestellt; die
@@ -35,20 +68,51 @@ inst/extdata/steuertarif.csv
             EStG, §§ 3, 4 SolZG 1995).
 
 
-Genutzte, aber nicht enthaltene Software
-========================================
+2. Fremde Vorlagen
+==================
+
+2.1 R-Grundfunktionen in den Port-Modulen
+-----------------------------------------
+Entfällt im R-Paket (nur Python und Julia).
+
+2.2 C-Kerne mit R-Regeln (slc_rbase*)
+-------------------------------------
+Entfällt im R-Paket (nur Python und Julia).
+
+2.3 Ältere Herkunft innerhalb der R-Vorlagen
+--------------------------------------------
+Entfällt im R-Paket (nur Python und Julia).
+
+2.4 Kalenderrechnung nach Hinnant
+---------------------------------
+Dateien:            src/fifo_core_impl.h (days_from_civil, civil_from_days),
+                    src/tax_core_impl.h (civil_from_days2)
+Herkunft:           übersetzt aus H. Hinnant, "chrono-Compatible Low-Level
+                    Date Algorithms",
+                    https://howardhinnant.github.io/date_algorithms.html
+Rechte:             gemeinfrei: "Consider these donated to the public
+                    domain."
+Lizenz der Vorlage: keine (gemeinfrei)
+Änderungen:         feste Ganzzahltypen statt Template-Parameter; je Stelle
+                    im Herkunftsblock genannt
+
+
+3. Zur Laufzeit oder beim Bau genutzt, nicht enthalten
+======================================================
 
 R selbst (Grundfunktionen aus base, stats, graphics, grDevices, utils,
 parallel, methods) wird zur Laufzeit genutzt; das R-Paket bildet davon
-nichts nach.
+nichts nach. Beim Bau nutzen die C++-Kerne std::sort und std::nth_element
+über die Header der Standardbibliothek des Compilers (bei GCC libstdc++:
+GPL-3 mit GCC Runtime Library Exception 3.1).
 
-Die Python- und die Julia-Fassung von SimLev bilden einige R-Grundfunktionen
-nach; Herkunft und Lizenz dieser Teile stehen in python/COPYRIGHTS.md und
-julia/COPYRIGHTS.md des Repositorys.
+Die Pakete evd, imputeTS, stinepack, rugarch, Rsolnp, truncnorm, MSGARCH
+und numDeriv sind weder enthalten noch eine Abhängigkeit (siehe Abschnitt
+"Literatur" der README im Wurzelverzeichnis des Repositorys).
 
 
-Früher übernommene Teile (bis Etappe 9, entfernt)
-=================================================
+4. Früher enthaltene Teile (entfernt)
+=====================================
 
 Bis Etappe 9 enthielt das Paket Teile von evd 2.3-7.1, imputeTS 3.4,
 stinepack 1.5, rugarch 1.5-6, Rsolnp 1.16 und truncnorm 1.0-9 (Dateien

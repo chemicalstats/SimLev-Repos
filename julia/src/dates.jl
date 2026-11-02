@@ -22,15 +22,3 @@ function to_days(d::AbstractString)
     return to_days(Date(s[1:10], dateformat"yyyy-mm-dd"))
 end
 to_days(d) = throw(ArgumentError("Kann $(repr(d)) nicht als Datum interpretieren"))
-
-function add_months_first(z_first::Integer, k::Integer)
-    y, m, _ = ymd(z_first)
-    tot = (y * 12 + (m - 1)) + k
-    return days_from_civil(fld(tot, 12), mod(tot, 12) + 1, 1)
-end
-
-function ym_key(z::Integer)
-    y, m, _ = ymd(z)
-    return y * 12 + m
-end
-

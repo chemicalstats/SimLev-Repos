@@ -1,8 +1,8 @@
 // core/research_core_impl.h
 // Rechenkerne fuer Optimierung, Regression, Regime und Zeitreihen-Hilfen, reine
-// Rechnung ohne R und Python.
+// Rechnung ohne R, Python und Julia.
 //
-// GEMEINSAME QUELLE FUER R UND PYTHON (Etappe 7.3a): R ruft die Kerne ueber die
+// GEMEINSAME QUELLE FUER R, PYTHON UND JULIA (Etappe 7.3a, Julia seit N7): R ruft die Kerne ueber die
 // .Call-Huellen in r/src/research_core.cpp auf (sie wandeln nur die R-Objekte um),
 // Python ueber das Erweiterungsmodul simlev._ext (python/src/_ext_research.cpp).
 // Kanonisch in core/ (seit Etappe 9.6c, F16); R und Python bauen aus
@@ -10,11 +10,14 @@
 // --write/--check); Aenderungen nur in core/ vornehmen und danach kopieren.
 // Die Python-Huellen (simlev/_optimize_core.py, _dependence_core.py, _signals_core.py)
 // rufen nur noch diese Kerne; die reinen Python-Kerne als Rueckfall sind seit 9.6c entfallen.
+// Julia (seit N7) ruft die Kerne ueber die C-ABI-Huelle core/simlev_cabi.cpp auf (simlev_c_*; ccall aus
+// julia/src/optimize_core.jl, dependence_core.jl, signals_core.jl) und baut aus der Byte-fuer-Byte-Kopie
+// in julia/deps/core/ (libslc, julia/deps/build.jl); die frueheren Julia-Ports (F2) sind entfallen.
 //
 // Aufbau wie alle C++-Kerne (simlev_core.h): statische Funktionen ueber den Sichten
 // simlev_host::NumVec/IntVec/NumMat und den Host-Makros SIMLEV_* (Fehler, NA,
 // Anlegen der Ergebnisse), die die einbindende Huelle festlegt (R: simlev_capi.h,
-// Python: _ext_common.h). Die Rechnung ist Zeile fuer Zeile die fruehere aus
+// Python: _ext_common.h, Julia: simlev_cabi.cpp). Die Rechnung ist Zeile fuer Zeile die fruehere aus
 // research_core.cpp; fuer R setzen die Makros genau die frueheren Aufrufe ein, der
 // Compiler erzeugt daher denselben Maschinencode wie vor der Teilung (geprueft per
 // Disassemblierung).
@@ -47,7 +50,8 @@
 // x86-64 ohne FMA ist -ffp-contract=off wirkungslos, das GCC-Pragma optimize
 // veraendert dort aber die Codeerzeugung der ganzen Datei (geprueft), und R soll
 // denselben Maschinencode wie vor der Teilung ausfuehren. Python baut immer mit
-// -ffp-contract=off (setup.py) und setzt SIMLEV_FP_CONTRACT_BY_FLAG.
+// -ffp-contract=off (setup.py) und setzt SIMLEV_FP_CONTRACT_BY_FLAG; Julia ebenso
+// (julia/deps/build.jl, C-ABI-Huelle in libslc).
 #if defined(__FAST_MATH__)
 #error "Gemeinsame Kerne duerfen nicht mit -ffast-math uebersetzt werden (Bitgleichheit)."
 #endif

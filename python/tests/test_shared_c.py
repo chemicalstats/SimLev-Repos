@@ -28,10 +28,7 @@ METHODS = {
                              "roll_mean_core", "roll_cov_core", "kendall_tau_core", "quantile_reg_core",
                              "hmm_forward_backward"],          # N2: garch_filter entfernt
     "withdrawal_core_impl.h": ["wd_simulate"],
-    "simulation_core_impl.h": ["sim_dca_flows", "sim_buy_report", "sim_sell_report", "sim_total_report", "sim_buy",
-                               "sim_market_update", "sim_market_update_batch"],
-    "fifo_core_impl.h": ["sim_fifo_price", "sim_fifo_vp", "sim_private_sale_tax", "sim_fifo_consume"],
-    "tax_core_impl.h": ["sim_flat_rate", "sim_p20_tax", "sim_vp_tax", "sim_sell_count"],
+    "engine_core_impl.h": ["sim_engine_run"],      # E17 (Stufe 1c: ohne simulation/fifo/tax_core_impl.h)
 }
 
 

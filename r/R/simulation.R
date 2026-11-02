@@ -93,7 +93,7 @@
 # getrennt gefuehrt:
 # \itemize{
 #   \item Verluste werden NICHT sofort bei jedem Verkauf verrechnet
-#   \item Jahresabrechnung in \code{.handle_year_change()}
+#   \item Jahresabrechnung beim Jahreswechsel (Tagesengine, core/engine_core_impl.h)
 #   \item Verlustvortrag nur mit kuenftigen § 23-Gewinnen verrechenbar
 #   \item Jahressaldo unter 1.000 EUR (Freigrenze) ist steuerfrei, der Vortrag bleibt
 #   \item Ab Erreichen ist der GESAMTE Saldo abzueglich Verlustvortrag steuerpflichtig
@@ -290,8 +290,7 @@
 #'   \item \code{\link{asset_config}}, \code{\link{create_strategy}} zum Aufbau der Strategie
 #'   \item \code{\link{rebalance_trigger}} fuer ereignisbasiertes Rebalancing
 #'   \item \code{\link{result_analysis}}, \code{\link{withdrawal_paths}} zur Weiterverarbeitung des Ergebnisses
-#'   \item Interne Steuerfunktionen: .calculate_paragraph_20_tax(), .calculate_vorabpauschale_tax(),
-#'     .calculate_private_sale_tax(), .handle_year_change()
+#'   \item Steuerrechnung der Tagesschleife: gemeinsamer C++-Kern core/engine_core_impl.h (.sim_engine_run)
 #' }
 #'
 
@@ -589,8 +588,6 @@ simulation <- function(data, strategy, start_value = 10000,
       split_thresh = split_thresh, event_col = event_col, church_tax = church_tax, order_fee = order_fee,
       dca_fee = dca_fee, harvest_mode = harvest_mode, harvest_day = harvest_day,
       taxable_income = taxable_income, tariff = tax_tariff, given = given, blocks = .blocks)
-    # Ordergebuehren laufen ueber .fee_env an perform_trade_buy/sell; beim Verlassen zuruecksetzen
-    if (cfg$fees_on) on.exit({ .fee_env$current <- NULL }, add = TRUE)
 
     # 2. Daten, Zentralstruktur sim_mem, Termine und Flags
     prep <- .sim_prepare_data(cfg$data, cfg$pre_filled, base_rate_flex, base_rate_data, blocks = .blocks)
@@ -605,29 +602,23 @@ simulation <- function(data, strategy, start_value = 10000,
       dca_start = dca_start, dca_skip = dca_skip, balance_mode = cfg$balance_mode, balance_span = balance_span,
       balance_unit = balance_unit, balance_days = cfg$balance_days, balance_anchor = balance_anchor,
       balance_start = balance_start, balance_skip = balance_skip, event_col = cfg$event_col,
-      event_mode = event_mode, event_weight = event_weight, split_mode = cfg$split_mode,
-      split_thresh = split_thresh, blocks = .blocks, no_split = cfg$no_split)
+      event_mode = event_mode, event_weight = event_weight, blocks = .blocks)
     data <- cal$data
     fl <- cal$flags
     if (!is.null(cfg$event_col)) event_weight <- cal$event_weight
-    init <- .sim_init_weights(sim_mem, fl$flag_assets, fl$flag_date, cfg$start_value)
-    sim_mem <- init$sim_mem
-    fl$initial_assets <- init$initial_assets
-    fl <- .sim_build_schedule(sim_mem, fl, data, cfg$tax_mode, cfg$harvest_mode, harvest_day)
 
-    # 3.-5. Helfer, Tagesschleife, Abschluss des letzten Jahres
-    act <- .sim_make_actions(cfg, fl, details)
-    sim_mem <- .sim_run_days(sim_mem, fl, cfg, act, data, cfg$strategy, liquidate, event_weight, split_thresh,
-                             balance_dca, harvest_loss_pot, details)
-    sim_mem <- .sim_close_years(sim_mem, fl, cfg, act, prep$stopp_date, details)
+    # 3.-5. Termine, Tages-Flags und Startgewichte (E17 Stufe 2), Tagesschleife und Abschluss des letzten
+    # Jahres im C++-Kern (sim_engine.R)
+    eng <- .sim_engine_run(sim_mem, fl, cfg, data, event_weight, split_thresh, balance_dca, harvest_loss_pot,
+                           liquidate, prep$stopp_date, details, harvest_day)
+    sim_mem <- eng$sim_mem
+    tax_unpaid <- eng$tax_unpaid
+    fl$flag_harvest <- eng$flag_harvest
+    fl$tax_regimes <- eng$tax_regimes
 
-    # 6. Auswertung und Ergebnisobjekt
-    sim_mem <- .sim_compact_trades(sim_mem, fl$flag_assets)
-    ret <- .sim_returns(sim_mem, fl$flag_date, fl$flag_assets, fl$flag_filled, prep$start_date,
-                        prep$stopp_date, cfg$start_value, act$tax_unpaid())
-    risk <- .sim_risk_stats(ret, cfg$risk_free, data)
-    undef <- .sim_undefined_metrics(ret, risk, sim_mem, fl$flag_assets)
-    .sim_result(sim_mem, fl, cfg, ret, risk, undef)
+    # 6. Auswertung im C++-Kern (E17 Stufe 3, sim_evaluate.R) und Ergebnisobjekt
+    ev <- .sim_evaluate(sim_mem, fl, cfg, data, prep, tax_unpaid)
+    .sim_result(sim_mem, fl, cfg, ev)
   },
   warning = function(w) .sim_restore_call(w, sim_call),
   error = function(e) .sim_restore_call(e, sim_call))

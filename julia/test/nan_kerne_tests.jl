@@ -6,49 +6,14 @@
 # boot_ms_garch, rtruncnorm). Erwartete Werte aus R 4.3.3 mit SimLev als Bitmuster
 # (dieselben Fälle wie python/tests/test_reine_kerne_nan.py). N10: Engine-Fälle mit der Regel NA vor NaN
 # (core/simlev_core.h); R, Python und Julia liefern seit N10 dieselben Bitmuster (geändert: sell_report,
-# market_update_batch, fifo_price, private_sale_tax, p20_tax, vp_tax).
+# market_update_batch, fifo_price, private_sale_tax, p20_tax, vp_tax); die Engine-Fälle sind mit E17 Stufe 1c
+# entfallen (Kerne entfernt, Prüfung über tools/gleichlauf/sim_fuzz.R).
 
 const _NA = SimLev.NA
 const _NAN = NaN
 _hx(v) = UInt64[reinterpret(UInt64, Float64(x)) for x in vec(collect(v))]
 
-function _jsim()
-    S = SimLev
-    sig = S.Signal(false, Float64[])
-    st = [S.Status(_NAN, 1.0, _NA, _NAN, 0.0, 0.0, 0.5, 0.5), S.Status(2.0, _NA, _NAN, _NA, 1.0, 0.0, 0.5, 0.5)]
-    mk = [S.Market(collect(16000:16002), Float64[], [_NA, 2.0, _NAN], sig, sig, 0.0),
-          S.Market(collect(16000:16002), Float64[], [_NAN, _NA, 3.0], sig, sig, 0.0)]
-    tr = [S.Trades(S.Lot[], S.SellEntry[], S.TaxEntry[], 1) for _ in 1:2]
-    rp = [S.Report(zeros(3), zeros(3), zeros(3), zeros(3), zeros(3)) for _ in 1:2]
-    tot = S.Totals(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0.0, 0.0, 0.0, 0.0, S.VPPending[], Pair{Int,Float64}[],
-                   Pair{Int,Float64}[])
-    S.Sim(["a", "b"], [S.AssetInfo("", "", 0, "none", 0.0, nothing) for _ in 1:2], st, mk, tr, rp, tot)
-end
 
-function _jeng(f!)
-    sim = _jsim()
-    f!(sim)
-    out = Pair{String,Vector{UInt64}}[]
-    for (a, nm) in enumerate(sim.names), f in (:count, :price, :worth, :money, :total, :differ)
-        push!(out, "/sim/status/$nm/$f" => _hx([getfield(sim.status[a], f)]))
-    end
-    for (a, nm) in enumerate(sim.names), f in (:worth, :money, :flows, :total, :share)
-        push!(out, "/sim/report/$nm/$f" => _hx(getfield(sim.report[a], f)))
-    end
-    out
-end
-
-_jlots() = [SimLev.Lot(16000, 3.0, _NA, 2.0, 3.0, 0.0), SimLev.Lot(16100, 1.0, _NAN, 1.0, 1.0, 0.0),
-            SimLev.Lot(18321, 2.0, 5.0, 2.0, 2.0, 0.5)]
-_nt(prefix, r) = [prefix * String(k) => _hx([v]) for (k, v) in pairs(r)]
-function _jtax(f, x, bonus, usedtot)
-    T = SimLev.Totals(_NA, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, usedtot, 0, _NA, 0.0, _NAN, 0.0, SimLev.VPPending[],
-                      Pair{Int,Float64}[], Pair{Int,Float64}[])
-    r = f(x, bonus, T, 0.26375, true)
-    vcat(_nt("/res/", r), ["/totals/$k" => _hx([getfield(T, Symbol(k))]) for k in
-         ("loss_capital_gains", "cgt_loss_added_ytd", "cgt_loss_used_ytd", "cgt_base_taxed_ytd",
-          "sparer_pauschbetrag_remaining", "sparer_pauschbetrag_used_total", "total_taxes")])
-end
 function _jrng(seed, f, args...)
     SimLev.RRng.set_seed(seed)
     r = f(args...)
@@ -73,18 +38,6 @@ const CASES = Dict{String,Function}(
     end,
     "garch_filter_nan" => () -> ["" => _hx(SimLev.BootstrapCore.garch_filter([0.01, _NA, -0.02, _NAN, 0.005, _NA, _NAN],
                                                                               1e-6, 0.05, 0.9, 0.1, 1e-4))],
-    "dca" => () -> _jeng(s -> SimLev.dca_flows_allocation!(s, 1, _NA, 1)),
-    "buy_report" => () -> _jeng(s -> SimLev.calculate_buy_report!(s, 2, 2, _NA, _NAN, _NA)),
-    "sell_report" => () -> _jeng(s -> SimLev.calculate_sell_report!(s, 2, 2, _NAN, _NA, _NAN, 1.0)),
-    "total_report" => () -> _jeng(s -> SimLev.calculate_total_report!(s, 2)),
-    "market_update" => () -> _jeng(s -> SimLev.perform_market_update!(s, 3)),
-    "market_update_batch" => () -> _jeng(s -> SimLev.batch_market_update!(s, 1, 3, Float64[])),
-    "fifo_price" => () -> ["/res" => _hx([SimLev._calculate_fifo_price(_jlots(), 4.0, 1)])],
-    "private_sale_tax" => () -> _nt("/res/", SimLev._calculate_private_sale_tax(_jlots(), 1, 5.0, _NAN, 18700)),
-    "sell_count_tp0" => () -> _nt("/res/", SimLev.sell_count(_jlots(), 1, 10.0, 0.0, 5.0, false, 2, 0.0, 0.0, 0.25)),
-    "sell_count_nan" => () -> _nt("/res/", SimLev.sell_count(_jlots(), 3, _NAN, 2.0, 5.0, false, 1, 0.3, 0.0, 0.25)),
-    "p20_tax" => () -> _jtax(SimLev.p20_tax!, _NA, 0.0, _NAN),
-    "vp_tax" => () -> _jtax(SimLev.vp_tax!, _NAN, 0.3, _NA),
     "boot_wild" => () -> _jrng(7, SimLev.BootstrapCore.boot_wild, [1.01 0.99; _NA 1.02; _NAN _NAN; 1.0 _NA; 0.98 1.01], 2),
     "boot_garch" => () -> _jrng(11, SimLev.BootstrapCore.boot_garch, 12, 0, 2, 0.0003, 2e-6, 0.08, 0.9, 0.05, 1e-4, _ZB,
                                 [1, 2, 3, 4, 5, 6], [1], [0.0002], [1e-6], [0.05], [0.9], [true], [1e-4], _ZC),
@@ -118,191 +71,6 @@ const EXPECTED = Dict{String,Vector{Pair{String,Vector{UInt64}}}}(
     ],
     "garch_filter_nan" => [
         "" => UInt64[0x3f1a36e2eb1c432d, 0x3f192a737110e454, 0x7ff80000000007a2, 0x7ff80000000007a2, 0x7ff8000000000000, 0x7ff8000000000000, 0x7ff80000000007a2],
-    ],
-    "dca" => [
-        "/sim/status/a/count" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/price" => UInt64[0x3ff0000000000000],
-        "/sim/status/a/worth" => UInt64[0x7ff00000000007a2],
-        "/sim/status/a/money" => UInt64[0x7ff80000000007a2],
-        "/sim/status/a/total" => UInt64[0x7ff80000000007a2],
-        "/sim/status/a/differ" => UInt64[0x3fe0000000000000],
-        "/sim/status/b/count" => UInt64[0x4000000000000000],
-        "/sim/status/b/price" => UInt64[0x7ff00000000007a2],
-        "/sim/status/b/worth" => UInt64[0x7ff8000000000000],
-        "/sim/status/b/money" => UInt64[0x7ff00000000007a2],
-        "/sim/status/b/total" => UInt64[0x3ff0000000000000],
-        "/sim/status/b/differ" => UInt64[0x3fe0000000000000],
-        "/sim/report/a/worth" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/a/money" => UInt64[0x7ff80000000007a2, 0x0, 0x0],
-        "/sim/report/a/flows" => UInt64[0x7ff00000000007a2, 0x0, 0x0],
-        "/sim/report/a/total" => UInt64[0x7ff80000000007a2, 0x0, 0x0],
-        "/sim/report/a/share" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/worth" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/money" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/flows" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/total" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/share" => UInt64[0x0, 0x0, 0x0],
-    ],
-    "buy_report" => [
-        "/sim/status/a/count" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/price" => UInt64[0x3ff0000000000000],
-        "/sim/status/a/worth" => UInt64[0x7ff00000000007a2],
-        "/sim/status/a/money" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/total" => UInt64[0x0],
-        "/sim/status/a/differ" => UInt64[0x3fe0000000000000],
-        "/sim/status/b/count" => UInt64[0x7ff80000000007a2],
-        "/sim/status/b/price" => UInt64[0x7ff00000000007a2],
-        "/sim/status/b/worth" => UInt64[0x7ff80000000007a2],
-        "/sim/status/b/money" => UInt64[0x7ff80000000007a2],
-        "/sim/status/b/total" => UInt64[0x7ff80000000007a2],
-        "/sim/status/b/differ" => UInt64[0x3fe0000000000000],
-        "/sim/report/a/worth" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/a/money" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/a/flows" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/a/total" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/a/share" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/worth" => UInt64[0x0, 0x7ff80000000007a2, 0x0],
-        "/sim/report/b/money" => UInt64[0x0, 0x7ff80000000007a2, 0x0],
-        "/sim/report/b/flows" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/total" => UInt64[0x0, 0x7ff80000000007a2, 0x0],
-        "/sim/report/b/share" => UInt64[0x0, 0x0, 0x0],
-    ],
-    "sell_report" => [
-        "/sim/status/a/count" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/price" => UInt64[0x3ff0000000000000],
-        "/sim/status/a/worth" => UInt64[0x7ff00000000007a2],
-        "/sim/status/a/money" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/total" => UInt64[0x0],
-        "/sim/status/a/differ" => UInt64[0x3fe0000000000000],
-        "/sim/status/b/count" => UInt64[0x7ff8000000000000],
-        "/sim/status/b/price" => UInt64[0x7ff8000000000000],
-        "/sim/status/b/worth" => UInt64[0x7ff8000000000000],
-        "/sim/status/b/money" => UInt64[0x7ff80000000007a2],
-        "/sim/status/b/total" => UInt64[0x7ff80000000007a2],
-        "/sim/status/b/differ" => UInt64[0x3fe0000000000000],
-        "/sim/report/a/worth" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/a/money" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/a/flows" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/a/total" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/a/share" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/worth" => UInt64[0x0, 0x7ff8000000000000, 0x0],
-        "/sim/report/b/money" => UInt64[0x0, 0x7ff80000000007a2, 0x0],
-        "/sim/report/b/flows" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/total" => UInt64[0x0, 0x7ff80000000007a2, 0x0],
-        "/sim/report/b/share" => UInt64[0x0, 0x0, 0x0],
-    ],
-    "total_report" => [
-        "/sim/status/a/count" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/price" => UInt64[0x4000000000000000],
-        "/sim/status/a/worth" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/money" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/total" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/differ" => UInt64[0x0],
-        "/sim/status/b/count" => UInt64[0x4000000000000000],
-        "/sim/status/b/price" => UInt64[0x7ff00000000007a2],
-        "/sim/status/b/worth" => UInt64[0x7ff80000000007a2],
-        "/sim/status/b/money" => UInt64[0x7ff00000000007a2],
-        "/sim/status/b/total" => UInt64[0x7ff80000000007a2],
-        "/sim/status/b/differ" => UInt64[0x0],
-        "/sim/report/a/worth" => UInt64[0x0, 0x7ff8000000000000, 0x0],
-        "/sim/report/a/money" => UInt64[0x0, 0x7ff8000000000000, 0x0],
-        "/sim/report/a/flows" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/a/total" => UInt64[0x0, 0x7ff8000000000000, 0x0],
-        "/sim/report/a/share" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/worth" => UInt64[0x0, 0x7ff80000000007a2, 0x0],
-        "/sim/report/b/money" => UInt64[0x0, 0x7ff00000000007a2, 0x0],
-        "/sim/report/b/flows" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/total" => UInt64[0x0, 0x7ff80000000007a2, 0x0],
-        "/sim/report/b/share" => UInt64[0x0, 0x0, 0x0],
-    ],
-    "market_update" => [
-        "/sim/status/a/count" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/price" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/worth" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/money" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/total" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/differ" => UInt64[0x0],
-        "/sim/status/b/count" => UInt64[0x4000000000000000],
-        "/sim/status/b/price" => UInt64[0x4008000000000000],
-        "/sim/status/b/worth" => UInt64[0x4018000000000000],
-        "/sim/status/b/money" => UInt64[0x7ff00000000007a2],
-        "/sim/status/b/total" => UInt64[0x7ff80000000007a2],
-        "/sim/status/b/differ" => UInt64[0x0],
-        "/sim/report/a/worth" => UInt64[0x0, 0x0, 0x7ff8000000000000],
-        "/sim/report/a/money" => UInt64[0x0, 0x0, 0x7ff8000000000000],
-        "/sim/report/a/flows" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/a/total" => UInt64[0x0, 0x0, 0x7ff8000000000000],
-        "/sim/report/a/share" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/worth" => UInt64[0x0, 0x0, 0x4018000000000000],
-        "/sim/report/b/money" => UInt64[0x0, 0x0, 0x7ff00000000007a2],
-        "/sim/report/b/flows" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/total" => UInt64[0x0, 0x0, 0x7ff80000000007a2],
-        "/sim/report/b/share" => UInt64[0x0, 0x0, 0x0],
-    ],
-    "market_update_batch" => [
-        "/sim/status/a/count" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/price" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/worth" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/money" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/total" => UInt64[0x7ff8000000000000],
-        "/sim/status/a/differ" => UInt64[0x0],
-        "/sim/status/b/count" => UInt64[0x4000000000000000],
-        "/sim/status/b/price" => UInt64[0x4008000000000000],
-        "/sim/status/b/worth" => UInt64[0x4018000000000000],
-        "/sim/status/b/money" => UInt64[0x7ff00000000007a2],
-        "/sim/status/b/total" => UInt64[0x7ff80000000007a2],
-        "/sim/status/b/differ" => UInt64[0x0],
-        "/sim/report/a/worth" => UInt64[0x7ff80000000007a2, 0x7ff8000000000000, 0x7ff8000000000000],
-        "/sim/report/a/money" => UInt64[0x7ff8000000000000, 0x7ff8000000000000, 0x7ff8000000000000],
-        "/sim/report/a/flows" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/a/total" => UInt64[0x7ff80000000007a2, 0x7ff8000000000000, 0x7ff8000000000000],
-        "/sim/report/a/share" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/worth" => UInt64[0x7ff8000000000000, 0x7ff80000000007a2, 0x4018000000000000],
-        "/sim/report/b/money" => UInt64[0x7ff00000000007a2, 0x7ff00000000007a2, 0x7ff00000000007a2],
-        "/sim/report/b/flows" => UInt64[0x0, 0x0, 0x0],
-        "/sim/report/b/total" => UInt64[0x7ff80000000007a2, 0x7ff80000000007a2, 0x7ff80000000007a2],
-        "/sim/report/b/share" => UInt64[0x0, 0x0, 0x0],
-    ],
-    "fifo_price" => [
-        "/res" => UInt64[0x7ff80000000007a2],
-    ],
-    "private_sale_tax" => [
-        "/res/exempt_gain" => UInt64[0x0],
-        "/res/exempt_loss" => UInt64[0xfff80000000007a2],
-        "/res/taxable_gain" => UInt64[0x0],
-        "/res/taxable_loss" => UInt64[0x0],
-        "/res/total_gain" => UInt64[0xfff80000000007a2],
-    ],
-    "sell_count_tp0" => [
-        "/res/sell_count" => UInt64[0x4014000000000000],
-        "/res/fifo_price" => UInt64[0x7ff80000000007a2],
-    ],
-    "sell_count_nan" => [
-        "/res/sell_count" => UInt64[0x0],
-        "/res/fifo_price" => UInt64[0x4014000000000000],
-    ],
-    "p20_tax" => [
-        "/res/tax" => UInt64[0x7ff80000000007a2],
-        "/res/spb_used" => UInt64[0x7ff80000000007a2],
-        "/totals/loss_capital_gains" => UInt64[0x7ff80000000007a2],
-        "/totals/cgt_loss_added_ytd" => UInt64[0x0],
-        "/totals/cgt_loss_used_ytd" => UInt64[0x7ff80000000007a2],
-        "/totals/cgt_base_taxed_ytd" => UInt64[0x7ff80000000007a2],
-        "/totals/sparer_pauschbetrag_remaining" => UInt64[0x7ff80000000007a2],
-        "/totals/sparer_pauschbetrag_used_total" => UInt64[0x7ff80000000007a2],
-        "/totals/total_taxes" => UInt64[0x7ff80000000007a2],
-    ],
-    "vp_tax" => [
-        "/res/tax" => UInt64[0x0],
-        "/res/spb_used" => UInt64[0x7ff8000000000000],
-        "/res/taxable_amount" => UInt64[0x7ff8000000000000],
-        "/totals/loss_capital_gains" => UInt64[0x7ff8000000000000],
-        "/totals/cgt_loss_added_ytd" => UInt64[0x0],
-        "/totals/cgt_loss_used_ytd" => UInt64[0x7ff8000000000000],
-        "/totals/cgt_base_taxed_ytd" => UInt64[0x7ff80000000007a2],
-        "/totals/sparer_pauschbetrag_remaining" => UInt64[0x7ff8000000000000],
-        "/totals/sparer_pauschbetrag_used_total" => UInt64[0x7ff80000000007a2],
-        "/totals/total_taxes" => UInt64[0x7ff00000000007a2],
     ],
     "boot_wild" => [
         "/" => UInt64[0x7ff80000000007a2, 0x7ff80000000007a2, 0x7ff8000000000000, 0x7ff80000000007a2, 0x7ff80000000007a2, 0x7ff8000000000000, 0x7ff8000000000000, 0x7ff8000000000000, 0x7ff80000000007a2, 0x7ff8000000000000],

@@ -6,24 +6,22 @@
 #   sim_validate.R  .sim_check_inputs()            Eingabepruefung, Steuer- und Gebuehreneinstellungen
 #   sim_prepare.R   .sim_prepare_data()            Kalenderraster, LOCF
 #                   .sim_build_state()             Zentralstruktur sim_mem (Feldfolge .SIM_MEM_LAYOUT)
-#                   .sim_build_calendar()          Termine und Tages-Flags
-#                   .sim_init_weights()            Startgewichte
-#                   .sim_build_schedule()          Ereignis- und Verarbeitungstage
-#   sim_actions.R   .sim_make_actions()            Zahlungs- und Abrechnungshelfer (Steuern, Gebuehren)
-#   sim_loop.R      .sim_run_days()                Tagesschleife mit den Tagesschritten .sim_day_*()
-#                   .sim_close_years()             Abschluss des letzten Jahres
-#   sim_evaluate.R  .sim_compact_trades(), .sim_returns(), .sim_risk_stats(),
-#                   .sim_undefined_metrics(), .sim_result()   Auswertung und Ergebnisobjekt
+#                   .sim_build_calendar()          Angaben der Termine, Ereignis-Spalte, Pruefungen
+#   sim_engine.R    .sim_engine_run()              Termine, Tages-Flags und Startgewichte (core/prepare_core_impl.h;
+#                                                  E17 Stufe 2, bis dahin .sim_build_calendar(), .sim_init_weights(),
+#                                                  .sim_build_schedule()), Tagesschleife und Abschluss des letzten
+#                                                  Jahres im C++-Kern (core/engine_core_impl.h; E17, bis 1.3.0
+#                                                  .sim_make_actions(), .sim_run_days() mit .sim_day_*() und
+#                                                  .sim_close_years())
+#   sim_evaluate.R  .sim_evaluate() (Kern core/evaluate_core_impl.h, E17 Stufe 3), .sim_risk_free(),
+#                   .sim_result()   Auswertung und Ergebnisobjekt
 # Die Phasen geben ihre Ergebnisse als Werte zurueck; Argumente von simulation() werden unausgewertet
 # durchgereicht und erst beim ersten Gebrauch ausgewertet (wie vorher in einem Funktionskoerper).
 
 # Namen der Phasenfunktionen: Bedingungen, die direkt in einer Phase entstehen (stop()/warning() ohne
 # call. = FALSE, R-Fehler im Phasencode), tragen den Aufruf von simulation() (.sim_restore_call)
 .SIM_PHASES <- c(".sim_check_inputs", ".sim_prepare_data", ".sim_build_state", ".sim_check_layout",
-                 ".sim_build_calendar", ".sim_init_weights", ".sim_build_schedule", ".sim_make_actions",
-                 ".sim_run_days", ".sim_day_activate", ".sim_day_split", ".sim_day_dca", ".sim_day_trade",
-                 ".sim_day_rebalance", ".sim_day_harvest", ".sim_day_assess_vp", ".sim_day_liquidate", ".sim_close_years", ".sim_compact_trades", ".sim_returns",
-                 ".sim_risk_stats", ".sim_undefined_metrics", ".sim_result", ".tax_rates")
+                 ".sim_build_calendar", ".sim_evaluate", ".sim_risk_free", ".sim_result", ".tax_rates")
 
 #' Aufruf von simulation() in Bedingungen aus den Phasen wiederherstellen
 #'
@@ -118,7 +116,7 @@
   effective_tax_rate <- tax_rate  # Default: 26.375%
 
   # Tarifweg: unterjaehrig Abgeltungsteuer wie bei einer Bank (auch in der Verkaufsschaetzung),
-  # Guenstigerpruefung im Jahresabschluss (.handle_year_change -> .tariff_close)
+  # Guenstigerpruefung im Jahresabschluss (Tagesengine, Tarifkern core/tariff_core_impl.h)
   if (use_guenstigerpruefung && !tariff_on) {
     if (is.null(marginal_tax_rate)) {
       if (blocks)
@@ -497,11 +495,10 @@
   # Toleranzband: "absolute" = Prozentpunkte des Gewichts (Standard, wie bisher),
   # "relative" = Prozent des Zielgewichts (z. B. 25 -> Ziel 40 % darf 30-50 % sein)
   balance_thresh_type <- match.arg(balance_thresh_type)
-  # Ordergebuehren: ueber eine Paket-Umgebung an perform_trade_buy/sell (ohne Aufrufaenderungen)
+  # Ordergebuehren: Angaben fuer die Tagesengine (sim_engine.R); .fee_env$paid summiert die gezahlten Gebuehren
   fee_order <- .fee_spec(order_fee); fee_dca <- if (is.null(dca_fee)) fee_order else .fee_spec(dca_fee)
   fees_on <- !is.null(fee_order) || !is.null(fee_dca)
-  .fee_env$current <- NULL; .fee_env$paid <- 0
-  # (simulation() setzt .fee_env$current beim Verlassen zurueck, wenn fees_on)
+  .fee_env$paid <- 0
   if (isTRUE(harvest_mode) && !blocks) {
     if (!grepl("^\\d{2}-\\d{2}$", harvest_day) || harvest_day >= "12-31")
       stop("harvest_day im Format 'MM-TT' und vor dem 31.12. angeben (z. B. '12-15').")

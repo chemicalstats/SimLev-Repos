@@ -1,21 +1,19 @@
 """Backtest-Engine (Port von ``simulation()`` aus SimLev 0.5.0): Einstieg ``simulation()``.
 
 Die Struktur folgt den Phasen des R-Pakets (``simulation.R``, ``sim_base.R``, ``sim_validate.R``,
-``sim_prepare.R``, ``sim_actions.R``, ``sim_loop.R``, ``sim_evaluate.R``) und der Julia-Engine
-(``engine.jl``, ``sim_phases.jl``, ``sim_loop.jl``, ``sim_evaluate.jl``), damit die
-Implementierungen Zeile für Zeile vergleichbar bleiben und bitgleich rechnen:
+``sim_prepare.R``, ``sim_engine.R``, ``sim_evaluate.R``) und der Julia-Engine (``engine.jl``,
+``sim_phases.jl``, ``sim_engine.jl``, ``sim_evaluate.jl``), damit die Implementierungen Zeile für Zeile
+vergleichbar bleiben und bitgleich rechnen:
 
 1. ``_sim_check_inputs``   Eingabeprüfung, Steuer- und Gebühreneinstellungen
 2. ``_sim_prepare_data``   Kalenderraster, LOCF; ``_sim_build_state`` (``sim_mem``);
-   ``_sim_build_calendar`` (Termine und Flags); ``_sim_init_weights``; ``_sim_build_schedule``
-3. ``_Actions``            Zahlungs- und Abrechnungshelfer
-4. ``_sim_run_days``       Tagesschleife mit den Tagesschritten ``_sim_day_*``
-5. ``_sim_close_years``    Abschluss des letzten Jahres
-6. ``_sim_returns``, ``_sim_risk_stats``, ``_sim_undefined_metrics``, ``_sim_result``
+   ``_sim_build_calendar`` (Angaben der Termine, Ereignis-Spalte, Prüfungen)
+3.-5. ``_sim_engine_run``  Termine, Tages-Flags und Startgewichte (``core/prepare_core_impl.h``, E17 Stufe 2),
+   Tagesschleife und Abschluss des letzten Jahres im gemeinsamen C++-Kern (``core/engine_core_impl.h``, E17)
+6. ``_sim_evaluate`` (Kern ``core/evaluate_core_impl.h``, E17 Stufe 3), ``_sim_result``
 
-Module: ``engine.py`` (dieser Einstieg), ``_sim_base.py`` (Hilfen, Handels- und Steuerfunktionen,
-Kennzahlen), ``_sim_phases.py`` (Phasen 1 und 2), ``_sim_loop.py`` (Phasen 3 bis 5),
-``_sim_evaluate.py`` (Phase 6). Die öffentlichen Helfer (``calculate_skewness`` …) und die von
+Module: ``engine.py`` (dieser Einstieg), ``_sim_base.py`` (Hilfen und Kennzahlen), ``_sim_phases.py``
+(Phasen 1 und 2), ``_sim_engine.py`` (Phasen 3 bis 5), ``_sim_evaluate.py`` (Phase 6). Die öffentlichen Helfer (``calculate_skewness`` …) und die von
 anderen Modulen genutzten internen Namen (``_as_date``, ``_r_class_name``) bietet dieses Modul
 weiter an.
 
@@ -30,10 +28,8 @@ from typing import Any, Mapping, Sequence
 from . import _sim_base as _base
 from ._sim_base import (
     _Default,
-    _FEE,
     _num_vec,
     _unwrap,
-    _apply_spread,
     calculate_dates_flags,
     calculate_kurtosis,
     calculate_partials,
@@ -42,24 +38,20 @@ from ._sim_base import (
 )
 from ._sim_phases import (
     _sim_build_calendar,
-    _sim_build_schedule,
     _sim_build_state,
     _sim_check_inputs,
-    _sim_init_weights,
     _sim_prepare_data,
 )
-from ._sim_loop import _Actions, _sim_close_years, _sim_run_days
+from ._sim_engine import _sim_engine_run
 from . import _sim_blocks as _blocks
 from ._sim_evaluate import (
     _sim_compact_trades,
+    _sim_evaluate,
     _sim_result,
-    _sim_returns,
-    _sim_risk_stats,
-    _sim_undefined_metrics,
 )
 
 __all__ = ["simulation", "_simulation_flat", "calculate_skewness", "calculate_kurtosis", "calculate_partials",
-           "calculate_dates_flags", "xirr_rate", "_apply_spread"]
+           "calculate_dates_flags", "xirr_rate"]
 
 # Wiederausgabe interner Namen, die andere Module über ``engine`` nutzen
 # (``config.py``: ``_as_date``, ``dashboard.py``: ``_r_class_name``)
@@ -219,51 +211,41 @@ def _simulation_flat(
     tax_rate, marginal_tax_rate = _unwrap(tax_rate), _unwrap(marginal_tax_rate)
     include_soli_on_income_tax, soli_rate_income_tax = _unwrap(include_soli_on_income_tax), _unwrap(soli_rate_income_tax)
     event_mode = _unwrap(event_mode)
-    try:
-        cfg = _sim_check_inputs(
-            data=data, strategy=strategy, start_value=start_value, spread=spread, details=details,
-            dca_mode=dca_mode, dca_value=dca_value, dca_span=dca_span, dca_days=dca_days, balance_mode=balance_mode,
-            balance_days=balance_days, balance_thresh=balance_thresh, balance_thresh_type=balance_thresh_type,
-            tax_mode=tax_mode, tax_rate=tax_rate, marginal_tax_rate=marginal_tax_rate,
-            use_guenstigerpruefung=use_guenstigerpruefung, private_sale_threshold=private_sale_threshold,
-            sparer_pauschbetrag=sparer_pauschbetrag, use_sparer_pauschbetrag=use_sparer_pauschbetrag,
-            include_soli_on_income_tax=include_soli_on_income_tax, soli_rate_income_tax=soli_rate_income_tax,
-            base_rate=base_rate, fractions=fractions, risk_free=risk_free,
-            split_mode=split_mode, split_thresh=split_thresh, event_col=event_col, church_tax=church_tax,
-            order_fee=order_fee, dca_fee=dca_fee, harvest_mode=harvest_mode, harvest_day=harvest_day,
-            taxable_income=taxable_income, tariff=tax_tariff, given=given, blocks=_blocks)
-        if split_thresh is not None:
-            split_thresh = _num_vec(split_thresh)
-        prep = _sim_prepare_data(cfg["data"], cfg["pre_filled"], base_rate_flex, base_rate_data, blocks=_blocks)
-        sim = _sim_build_state(prep["data"], cfg["strategy"], cfg["start_value"], prep["start_date"],
-                               prep["stopp_date"], cfg["sparer_pauschbetrag"], cfg["use_sparer_pauschbetrag"],
-                               cfg["base_rate"], base_rate_flex, base_rate_data, blocks=_blocks)
-        cal = _sim_build_calendar(prep["data"], sim, cfg["strategy"], prep["start_date"], prep["stopp_date"],
-                                  liquidate, cfg["dca_mode"], dca_span, dca_unit, cfg["dca_days"], cfg["dca_value"],
-                                  dca_anchor, dca_start, dca_skip, cfg["balance_mode"], balance_span, balance_unit,
-                                  cfg["balance_days"], balance_anchor, balance_start, balance_skip, cfg["event_col"],
-                                  event_mode, event_weight, cfg["split_mode"], split_thresh, blocks=_blocks,
-                                  no_split=cfg["no_split"])
-        fr = cal["data"]
-        fl = cal["flags"]
-        if cfg["event_col"] is not None:
-            event_weight = cal["event_weight"]
-        init = _sim_init_weights(sim, fl["flag_assets"], fl["flag_date"], cfg["start_value"])
-        sim = init["sim"]
-        fl["initial_assets"] = init["initial_assets"]
-        fl = _sim_build_schedule(sim, fl, cfg["tax_mode"], cfg["harvest_mode"], harvest_day)
-        act = _Actions(cfg, fl, bool(details))
-        sim = _sim_run_days(sim, fl, cfg, act, fr, cfg["strategy"], liquidate, event_weight, split_thresh,
-                            balance_dca, harvest_loss_pot, bool(details))
-        sim = _sim_close_years(sim, fl, cfg, act, prep["stopp_date"], bool(details))
-        trades = _sim_compact_trades(sim, fl["flag_assets"])
-        ret = _sim_returns(sim, fl["flag_date"], fl["flag_assets"], fl["flag_filled"], prep["start_date"],
-                           prep["stopp_date"], cfg["start_value"], act.tax_unpaid_total)
-        risk = _sim_risk_stats(ret, cfg["risk_free"], fr)
-        undef = _sim_undefined_metrics(ret, risk, trades, fl["flag_assets"])
-        return _sim_result(sim, trades, fl, cfg, ret, risk, undef)
-    finally:
-        _FEE.current = None
+    cfg = _sim_check_inputs(
+        data=data, strategy=strategy, start_value=start_value, spread=spread, details=details,
+        dca_mode=dca_mode, dca_value=dca_value, dca_span=dca_span, dca_days=dca_days, balance_mode=balance_mode,
+        balance_days=balance_days, balance_thresh=balance_thresh, balance_thresh_type=balance_thresh_type,
+        tax_mode=tax_mode, tax_rate=tax_rate, marginal_tax_rate=marginal_tax_rate,
+        use_guenstigerpruefung=use_guenstigerpruefung, private_sale_threshold=private_sale_threshold,
+        sparer_pauschbetrag=sparer_pauschbetrag, use_sparer_pauschbetrag=use_sparer_pauschbetrag,
+        include_soli_on_income_tax=include_soli_on_income_tax, soli_rate_income_tax=soli_rate_income_tax,
+        base_rate=base_rate, fractions=fractions, risk_free=risk_free,
+        split_mode=split_mode, split_thresh=split_thresh, event_col=event_col, church_tax=church_tax,
+        order_fee=order_fee, dca_fee=dca_fee, harvest_mode=harvest_mode, harvest_day=harvest_day,
+        taxable_income=taxable_income, tariff=tax_tariff, given=given, blocks=_blocks)
+    if split_thresh is not None:
+        split_thresh = _num_vec(split_thresh)
+    prep = _sim_prepare_data(cfg["data"], cfg["pre_filled"], base_rate_flex, base_rate_data, blocks=_blocks)
+    sim = _sim_build_state(prep["data"], cfg["strategy"], cfg["start_value"], prep["start_date"],
+                           prep["stopp_date"], cfg["sparer_pauschbetrag"], cfg["use_sparer_pauschbetrag"],
+                           cfg["base_rate"], base_rate_flex, base_rate_data, blocks=_blocks)
+    cal = _sim_build_calendar(prep["data"], sim, cfg["strategy"], prep["start_date"], prep["stopp_date"],
+                              liquidate, cfg["dca_mode"], dca_span, dca_unit, cfg["dca_days"], cfg["dca_value"],
+                              dca_anchor, dca_start, dca_skip, cfg["balance_mode"], balance_span, balance_unit,
+                              cfg["balance_days"], balance_anchor, balance_start, balance_skip, cfg["event_col"],
+                              event_mode, event_weight, blocks=_blocks)
+    fr = cal["data"]
+    fl = cal["flags"]
+    if cfg["event_col"] is not None:
+        event_weight = cal["event_weight"]
+    # 3.-5. Termine, Flags, Startgewichte (E17 Stufe 2), Tagesschleife und Abschluss des letzten Jahres im
+    # C++-Kern (_sim_engine.py)
+    sim, tax_unpaid = _sim_engine_run(sim, fl, cfg, fr, event_weight, split_thresh, balance_dca, harvest_loss_pot,
+                                      liquidate, prep["stopp_date"], bool(details), harvest_day)
+    trades = _sim_compact_trades(sim, fl["flag_assets"])
+    # 6. Auswertung im C++-Kern (E17 Stufe 3, _sim_evaluate.py) und Ergebnisobjekt
+    ev = _sim_evaluate(sim, trades, fl, cfg, fr, prep["start_date"], prep["stopp_date"], tax_unpaid)
+    return _sim_result(sim, trades, fl, cfg, ev["r"], ev["rs"], ev["um"])
 
 
 # R rechnet mit NA (signalisierendes NaN) ohne Gleitkomma-Warnungen; numpy meldete sonst

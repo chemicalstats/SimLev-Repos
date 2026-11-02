@@ -41,11 +41,10 @@
  *
  *   simlev_host::LglVec           logischer Vektor (R: sl::LglVec)
  *
- * Engine-Kerne (simulation_core_impl.h, fifo_core_impl.h, tax_core_impl.h) arbeiten auf
- * dem Simulationszustand des Hosts: simlev_host::Obj (R: SEXP, Python: PyObject*) mit
- * as_list, at, put, get, set, has, as_double, as_int, num_vec, named_list, new_num,
- * new_int, Date und SIMLEV_XLENGTH, SIMLEV_LENGTH, SIMLEV_IS_NULL, SIMLEV_STRING_AT,
- * SIMLEV_MARK_DATE.
+ * Die Tagesengine (engine_core_impl.h, E17) und der Tarifkern (tariff_core_impl.h) haben
+ * eigenen Zustand und brauchen vom Host nur die Gleitkomma-Regeln dieser Datei. Die
+ * frueheren Engine-Kerne (simulation_core_impl.h, fifo_core_impl.h, tax_core_impl.h) auf
+ * dem Simulationszustand des Hosts (simlev_host::Obj) sind mit E17 Stufe 1c entfallen.
  *
  * Fuer R stehen hinter allen Namen genau die Aufrufe, die vor der Teilung im Kern
  * standen (seit 7.3a geprueft per Disassemblierung).

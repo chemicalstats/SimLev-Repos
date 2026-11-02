@@ -28,7 +28,7 @@ LAYERS = {
     "config": 1, "data_prep": 1, "backcast": 1, "bonds": 1, "signals": 1, "_signals_core": 1,
     "trigger": 1, "_tax_tariff": 1, "_dates": 1,
     # 2 Engine
-    "engine": 2, "_sim_base": 2, "_sim_phases": 2, "_sim_loop": 2, "_sim_evaluate": 2, "_core": 2,
+    "engine": 2, "_sim_base": 2, "_sim_phases": 2, "_sim_engine": 2, "_sim_evaluate": 2,
     "_sim_blocks": 2,   # Bausteine von simulation(): nutzen Engine-Helfer (_sim_base) und Daten-Schicht (config, _tax_tariff)
     "result": 2,
     "wrapper": 2,   # Fonds-Wrapper (Etappe 6.5c): rechnet den Anteilswert mit simulation()

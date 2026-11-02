@@ -24,7 +24,7 @@
  * noch die C-Bibliothek slc (_ext_slc*.c).
  *
  * Ohne Abbruchpruefung geben die Huellen die GIL waehrend der Rechnung frei. Die
- * Engine-Kerne bringen ihren eigenen Host mit (_ext_engine.cpp, SIMLEV_EXT_ENGINE).
+ * Tagesengine (_ext_engine.cpp, core/engine_core_impl.h) hat eigenen Zustand und braucht nur diese Makros.
  *
  * Die Huellen pruefen Typ, Laenge und Beschreibbarkeit der Puffer (Schutz vor
  * Fehlaufrufen); fachliche Pruefungen und Umwandlungen wie in R macht die
@@ -292,7 +292,6 @@ inline PyObject* from_vector(const std::vector<double>& v) {
 
 /* Python als Host der gemeinsamen Kerne (Schnittstelle in simlev_core.h; Gegenstueck
  * zum Abschnitt "R als Host der gemeinsamen Kerne" in r/src/simlev_capi.h) */
-#ifndef SIMLEV_EXT_ENGINE   /* die Engine-Kerne bringen ihren Host mit (_ext_engine.cpp) */
 namespace simlev_host {
 typedef ext::Vec NumVec;
 typedef ext::IVec IntVec;
@@ -300,7 +299,6 @@ typedef ext::Mat NumMat;
 typedef ext::IVec LglVec;   /* logische Vektoren als int32 */
 }  // namespace simlev_host
 #define SIMLEV_INT(...) ext::alloc().ivec(__VA_ARGS__)
-#endif
 
 #define SIMLEV_NA (simlev_na_real())
 #define SIMLEV_FAIL ext::fail

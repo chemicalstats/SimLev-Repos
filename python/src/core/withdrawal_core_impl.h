@@ -1,7 +1,7 @@
 // core/withdrawal_core_impl.h
-// Entnahme-Simulationen (Decumulation) fuer SimLev, reine Rechnung ohne R und Python
+// Entnahme-Simulationen (Decumulation) fuer SimLev, reine Rechnung ohne R, Python und Julia
 //
-// GEMEINSAME QUELLE FUER R UND PYTHON (Etappe 7.3a): R ruft den Kern ueber die
+// GEMEINSAME QUELLE FUER R, PYTHON UND JULIA (Etappe 7.3a, Julia seit N7): R ruft den Kern ueber die
 // .Call-Huelle in r/src/withdrawal_core.cpp auf (sie wandelt nur die R-Objekte um),
 // Python ueber das Erweiterungsmodul simlev._ext (python/src/_ext_withdrawal.cpp).
 // Kanonisch in core/ (seit Etappe 9.6c, F16); R und Python bauen aus
@@ -9,11 +9,14 @@
 // --write/--check); Aenderungen nur in core/ vornehmen und danach kopieren.
 // Die Python-Huelle (simlev/_withdrawal_core.py) ruft nur noch diesen Kern; der reine
 // Python-Kern als Rueckfall ist seit 9.6c entfallen.
+// Julia (seit N7) ruft den Kern ueber die C-ABI-Huelle core/simlev_cabi.cpp auf (simlev_c_wd_simulate;
+// ccall aus julia/src/withdrawal_core.jl) und baut aus der Byte-fuer-Byte-Kopie in julia/deps/core/
+// (libslc, julia/deps/build.jl); der fruehere Julia-Port (F2) ist entfallen.
 //
 // Aufbau wie alle C++-Kerne (simlev_core.h): statische Funktionen ueber den Sichten
 // simlev_host::NumVec/IntVec/NumMat und den Host-Makros SIMLEV_* (Fehler, NA,
 // Anlegen der Ergebnisse), die die einbindende Huelle festlegt (R: simlev_capi.h,
-// Python: _ext_common.h). Die Rechnung ist Zeile fuer Zeile die fruehere aus
+// Python: _ext_common.h, Julia: simlev_cabi.cpp). Die Rechnung ist Zeile fuer Zeile die fruehere aus
 // withdrawal_core.cpp; fuer R setzen die Makros genau die frueheren Aufrufe ein, der
 // Compiler erzeugt daher denselben Maschinencode wie vor der Teilung (geprueft per
 // Disassemblierung).
@@ -65,7 +68,8 @@
 // x86-64 ohne FMA ist -ffp-contract=off wirkungslos, das GCC-Pragma optimize
 // veraendert dort aber die Codeerzeugung der ganzen Datei (geprueft), und R soll
 // denselben Maschinencode wie vor der Teilung ausfuehren. Python baut immer mit
-// -ffp-contract=off (setup.py) und setzt SIMLEV_FP_CONTRACT_BY_FLAG.
+// -ffp-contract=off (setup.py) und setzt SIMLEV_FP_CONTRACT_BY_FLAG; Julia ebenso
+// (julia/deps/build.jl, C-ABI-Huelle in libslc).
 #if defined(__FAST_MATH__)
 #error "Gemeinsame Kerne duerfen nicht mit -ffast-math uebersetzt werden (Bitgleichheit)."
 #endif

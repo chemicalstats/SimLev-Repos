@@ -546,8 +546,7 @@ function _sim_build_state(fr::_Frame, strategy, start_value::Float64, start_date
             (ss === nothing || !haskey(fr, ss)) &&
                 error("simulation: signal_sell-Spalte '$(ss === nothing ? "NULL" : ss)' fehlt im Datensatz (Asset '$name').")
         end
-        share = Float64(a["share"])
-        push!(status, Status(0.0, 0.0, 0.0, share * start_value, share * start_value, share, share, 0.0))
+        push!(status, Status(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))   # setzt der Kern (E17 Stufe 2)
         local br::Vector{Float64}
         if _truthy_mode(base_rate_flex)
             if base_rate_data === nothing || !haskey(fr, base_rate_data)
@@ -565,40 +564,35 @@ function _sim_build_state(fr::_Frame, strategy, start_value::Float64, start_date
                              _signal_col(fr, get(a, "signal_sell", nothing), n),
                              (spread_a === nothing ? 0.0 : Float64(spread_a)) / 100))
         push!(trades, Trades(Lot[], SellEntry[], TaxEntry[], 1))
-        st = status[end]
-        worth0 = zeros(n); money0 = zeros(n); total0 = zeros(n)
-        worth0[1], money0[1], total0[1] = st.worth, st.money, st.total
-        push!(report, Report(worth0, money0, zeros(n), total0, zeros(n)))
+        push!(report, Report(zeros(n), zeros(n), zeros(n), zeros(n), zeros(n)))
     end
     return Sim(names_, assets, status, market, trades, report, totals)
 end
 
+"""Angaben der Termine und Tages-Flags (wie `.sim_build_calendar` in R): Kalender, Terminpläne (`_sched_spec`),
+Ereignis-Spalte und die Prüfungen; Termine, Splits, Flags, Aktivierung, Freibetrag und Startgewichte rechnet seit E17
+Stufe 2 der Kern (core/prepare_core_impl.h, über `_sim_engine_run!`)."""
 function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, stopp_date::Int, liquidate,
                              dca_mode, dca_span, dca_unit, dca_days, dca_value, dca_anchor, dca_start, dca_skip,
                              balance_mode, balance_span, balance_unit, balance_days, balance_anchor, balance_start,
-                             balance_skip, event_col, event_mode, event_weight, split_mode, split_thresh,
-                             blocks::Bool = false, no_split::Vector{String} = String[])
+                             balance_skip, event_col, event_mode, event_weight, blocks::Bool = false)
     @nospecialize
     flag_date = collect(start_date:stopp_date)
     n = length(flag_date)
     flag_filled = haskey(fr, ".filled") ? BitVector(fr.cols[".filled"]) : falses(n)
     _fdrop!(fr, ".filled")
     flag_assets = [p.first for p in strategy]
-    liq = liquidate == true
-    flag_liquidate = BitVector(liq .& (flag_date .== stopp_date))
     for (a, sd0, mode) in (("dca", dca_start, dca_mode), ("balance", balance_start, balance_mode))
         (!_is_true(mode) || sd0 === nothing) && continue
         sd1 = _as_date(sd0)
         sd1 === nothing && error("simulation: $(a)_start = '$(sd0 isa AbstractString ? sd0 : r_format1(sd0))' ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
         sd1 > stopp_date && error("simulation: $(blocks ? "start von " * (a == "dca" ? "dca_plan()" : "rebalance_plan()") : a * "_start") ($(fmt_date(sd1))) liegt nach dem letzten Datentag ($(fmt_date(stopp_date))); es gäbe keine Termine.")
     end
-    flag_rebalance = _calculate_dates_flags(balance_mode, balance_span, balance_unit, balance_days, flag_date, nothing,
-                                            balance_anchor, balance_start, balance_skip, liq)
-    flag_dca = _calculate_dates_flags(dca_mode, dca_span, dca_unit, dca_days, flag_date, dca_value, dca_anchor,
-                                      dca_start, dca_skip, liq)
-    flag_taxes = BitVector([(md = Dates.monthday(from_days(z)); md == (12, 31)) for z in flag_date])
+    balance = _sched_spec(balance_mode, balance_span, balance_unit, balance_days, flag_date, nothing, balance_anchor,
+                         balance_start, balance_skip)
+    dca = _sched_spec(dca_mode, dca_span, dca_unit, dca_days, flag_date, dca_value, dca_anchor, dca_start, dca_skip)
     event_mode = match_arg(event_mode, ("additional", "replace"), "event_mode")
-    flag_event = falses(n)
+    flag_event = nothing
     ew = nothing
     if event_col !== nothing
         haskey(fr, event_col) || error("simulation: event_col '$event_col' nicht im Datensatz gefunden.")
@@ -620,144 +614,14 @@ function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, st
             fehlt = [nm for nm in flag_assets if !any(p -> p.first == nm, ew)]
             isempty(fehlt) || @warn "simulation: event_weight nennt nicht alle Assets (es fehlt: $(join(fehlt, ", "))); an Event-Tagen gelten dann die Strategie-Gewichte."
         end
-        guard = (flag_date .!= flag_date[1]) .& ((!liq) .| (flag_date .!= stopp_date))
-        flag_event = BitVector(flag_event .& guard)
-        flag_rebalance = event_mode == "additional" ? BitVector(flag_rebalance .| flag_event) : copy(flag_event)
-    end
-    flag_trade = BitVector(.!flag_rebalance .& (flag_date .!= stopp_date) .& .!flag_filled)
-    flag_split = _calculate_split_flags(sim, 100.0, split_mode, n, split_thresh;
-                                        skip = no_split)   # Fonds-Wrapper: keine Splits auf den Anteilswert
-    flag_dca_n = Float64.(flag_dca)
-    if any(flag_filled)
-        mon = [ym_key(z) for z in flag_date]
-        flag_rebalance = _shift_off_filled(flag_rebalance, flag_filled, mon)
-        flag_dca_n = _shift_off_filled(flag_dca_n, flag_filled, mon)
-        flag_dca = BitVector(flag_dca_n .> 0)
-        flag_split = _shift_off_filled(flag_split, flag_filled, mon)
-        flag_liquidate = _shift_off_filled(flag_liquidate, flag_filled, mon)
-        if any(flag_liquidate)
-            flag_rebalance = BitVector(flag_rebalance .& .!flag_liquidate)
-            flag_dca_n = [flag_liquidate[i] ? 0.0 : flag_dca_n[i] for i in 1:n]
-            flag_dca = BitVector(flag_dca_n .> 0)
-        end
-        flag_trade = BitVector(.!flag_rebalance .& (flag_date .!= stopp_date) .& .!flag_filled)
     end
     for (a, name) in enumerate(flag_assets)
         st_a = sim.assets[a].start
         st_a > stopp_date && error("simulation: start von '$name' ($(fmt_date(st_a))) liegt nach dem letzten Datentag ($(fmt_date(stopp_date))); das Asset wäre nie handelbar. start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie entfernen.")
     end
-    fl = Flags(flag_date, flag_filled, flag_assets, BitVector(flag_liquidate), BitVector(flag_rebalance), BitVector(flag_dca),
-               flag_dca_n, flag_taxes, flag_event, flag_trade, BitVector(flag_split), Int[], Int[], falses(n), Int[],
-               falses(n), String[], String[], Float64[], falses(n), falses(n), falses(n), Int[], n)
+    # bis E17 Stufe 1c _sim_init_weights!: mindestens ein Asset ab dem ersten Tag handelbar
+    any(a -> sim.assets[a].start <= flag_date[1], eachindex(flag_assets)) ||
+        error("simulation: Kein Asset ist am ersten Datentag ($(fmt_date(flag_date[1]))) handelbar (start bzw. erste Kurse später); mindestens ein Asset muss ab Beginn handelbar sein.")
+    fl = Flags(flag_date, flag_filled, flag_assets, dca, balance, flag_event, event_mode == "replace", falses(n), String[])
     return fl, ew
-end
-
-function _sim_init_weights!(sim::Sim, fl::Flags, start_value::Float64)
-    initial = [a for a in eachindex(fl.flag_assets) if sim.assets[a].start <= fl.flag_date[1]]
-    isempty(initial) && error("simulation: Kein Asset ist am ersten Datentag ($(fmt_date(fl.flag_date[1]))) handelbar (start bzw. erste Kurse später); mindestens ein Asset muss ab Beginn handelbar sein.")
-    initial_weights_sum = r_sum([sim.status[a].actual for a in initial])
-    all_weights_sum = r_sum([sim.status[a].actual for a in eachindex(fl.flag_assets)])
-    for a in eachindex(fl.flag_assets)
-        st = sim.status[a]
-        target_weight = st.actual / all_weights_sum
-        if a in initial
-            normalized_weight = st.actual / initial_weights_sum
-            st.actual = target_weight
-            st.money = start_value * normalized_weight
-            st.total = start_value * normalized_weight
-        else
-            st.actual = target_weight
-            st.differ = 0.0
-            st.money = 0.0
-            st.total = 0.0
-        end
-    end
-    fl.initial_assets = initial
-    return nothing
-end
-
-function _sim_build_schedule!(sim::Sim, fl::Flags, tax_mode::String, harvest_mode, harvest_day)
-    @nospecialize
-    flag_date, flag_filled = fl.flag_date, fl.flag_filled
-    n = length(flag_date)
-    na = length(fl.flag_assets)
-    asset_starts = Int[sim.assets[a].start for a in 1:na]
-    d0 = flag_date[1]
-    if any(flag_filled)
-        mon = [ym_key(z) for z in flag_date]
-        shifted = Int[]
-        for dz in asset_starts
-            i = dz - d0 + 1
-            if !(1 <= i <= n) || !flag_filled[i]
-                push!(shifted, dz); continue
-            end
-            j = _shift_target(i, flag_filled, mon, n)
-            push!(shifted, flag_date[max(min(j, n), 1)])
-        end
-        asset_starts = shifted
-    end
-    start_set = Set(asset_starts)
-    flag_active = BitVector([z in start_set for z in flag_date])
-    asset_start_indices = Int[(1 <= z - d0 + 1 <= n) ? z - d0 + 1 : 1 for z in asset_starts]
-    flag_harvest = falses(n)
-    if _is_true(harvest_mode) && tax_mode == "person"
-        yrs = [year_of(z) for z in flag_date]
-        md_s = [(d = from_days(z); string(lpad(Dates.month(d), 2, '0'), "-", lpad(Dates.day(d), 2, '0'))) for z in flag_date]
-        for y in unique(yrs)
-            j = findfirst(i -> yrs[i] == y && md_s[i] >= harvest_day && md_s[i] < "12-31" && !flag_filled[i], 1:n)
-            j === nothing || (flag_harvest[j] = true)
-        end
-    end
-    flag_definite = flag_active .| fl.flag_split .| fl.flag_dca .| fl.flag_rebalance .| fl.flag_taxes .|
-                    fl.flag_liquidate .| flag_harvest
-    strategy_types = String[sim.assets[a].style for a in 1:na]
-    has_bnh = any(==("bnh"), strategy_types)
-    has_signal = any(==("signal"), strategy_types)
-    tax_regimes = String[sim.assets[a].tax_regime for a in 1:na]
-    spread_rates = Float64[sim.market[a].spread_rate for a in 1:na]
-    flag_signal = falses(n)
-    if has_signal
-        for a in 1:na
-            if sim.assets[a].style == "signal"
-                b = sim.market[a].signal_buy; s = sim.market[a].signal_sell
-                for i in 1:n
-                    (_sig_truthy(b, i) | _sig_truthy(s, i)) && (flag_signal[i] = true)
-                end
-            end
-        end
-    end
-    flag_bnh_potential = falses(n)
-    has_bnh && (flag_bnh_potential[1] = true)
-    flag_slow_path = flag_definite .| flag_signal .| flag_bnh_potential
-    flag_year_change = falses(n)
-    flag_vp_settle = falses(n)
-    if tax_mode == "person"
-        years = [year_of(z) for z in flag_date]
-        for i in 2:n
-            years[i] > years[i-1] && (flag_year_change[i] = true)
-        end
-        for ys in findall(flag_year_change)
-            j = ys
-            while j <= n && flag_filled[j] && years[j] == years[ys]
-                j += 1
-            end
-            (j > n || years[j] != years[ys]) && (j = ys)
-            flag_vp_settle[j] = true
-        end
-    end
-    flag_slow_path = flag_slow_path .| flag_vp_settle
-    flag_individual = flag_slow_path .| flag_year_change
-    fl.asset_starts = asset_starts
-    fl.flag_active = flag_active
-    fl.asset_start_indices = asset_start_indices
-    fl.flag_harvest = flag_harvest
-    fl.strategy_types = strategy_types
-    fl.tax_regimes = tax_regimes
-    fl.spread_rates = spread_rates
-    fl.flag_slow_path = BitVector(flag_slow_path)
-    fl.flag_year_change = flag_year_change
-    fl.flag_vp_settle = flag_vp_settle
-    fl.individual_days = findall(flag_individual)
-    fl.n_total_days = n
-    return nothing
 end

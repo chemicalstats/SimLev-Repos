@@ -1,5 +1,6 @@
-"""Grundfunktionen der Engine: Ausgabe- und Datumshilfen, Spaltendaten, Gebühren, Termine, Handels- und
-Steuerfunktionen, Tarifweg, Jahreswechsel und Kennzahlen (nachgebildet aus ``r/R/sim_base.R``; Julia: ``engine.jl``).
+"""Grundfunktionen der Engine: Ausgabe- und Datumshilfen, Spaltendaten, Gebühren, Termine, Tarifweg (Prüfung,
+``_TariffEnv``) und Kennzahlen (nachgebildet aus ``r/R/sim_base.R``; Julia: ``engine.jl``). Die Handels- und
+Steuerfunktionen der Tagesschleife rechnet seit E17 Stufe 1c der gemeinsame C++-Kern (``_sim_engine.py``).
 """
 from __future__ import annotations
 
@@ -13,18 +14,17 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
-from . import _core as core
 from . import _ext
-from ._dates import days_from_civil, fmt_date, from_days, year_of
-from ._r.rformat import r_as_character, r_deparse, r_format, r_format1, r_sprintf
-from ._r.rnum import r_mean, r_pow, r_pow_vec, r_sd, r_sum, r_uniroot
+from ._dates import days_from_civil, from_days
+from ._r.rformat import r_as_character, r_format, r_format1, r_sprintf
+from ._r.rnum import r_mean, r_pow, r_pow_vec, r_sd, r_sum
 from .config import _match_arg
-from ._tax_tariff import SimLevTaxTariff, tariff_income_tax, tariff_soli
+from ._tax_tariff import SimLevTaxTariff
 from ._r.rnum import NA_REAL as NA  # R's NA_real_ (Nutzlast 1954)
 
 __all__ = [
     "calculate_skewness", "calculate_kurtosis", "calculate_partials", "calculate_dates_flags",
-    "xirr_rate", "_apply_spread",
+    "xirr_rate",
 ]
 
 
@@ -92,13 +92,6 @@ def _is_bool(x: Any) -> bool:
 def _is_true(x: Any) -> bool:
     """R ``isTRUE()``: nur ein echtes logisches TRUE zählt."""
     return isinstance(x, (bool, np.bool_)) and bool(x)
-
-
-def _truthy(x: Any) -> bool:
-    """Wert eines Signals in ``&&``-Ausdrücken (Zahl ungleich 0 = TRUE; NA ist ein Fehler)."""
-    if _isna(x):
-        raise ValueError("missing value where TRUE/FALSE needed")
-    return bool(x)
 
 
 def _num_vec(x: Any) -> list | None:
@@ -395,10 +388,9 @@ def _filled_matrix(fa: Any) -> tuple[np.ndarray | None, list | None, int]:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class _FeeEnv:
-    """Paket-Umgebung ``.fee_env``: aktuelle Gebührenangabe und Summe der Gebühren."""
+    """Paket-Umgebung ``.fee_env``: Summe der gezahlten Gebühren (die Gebühren je Order rechnet der Kern)."""
 
     def __init__(self):
-        self.current: dict | None = None
         self.paid = 0.0
 
 
@@ -429,511 +421,48 @@ def _fee_spec(x: Any) -> dict | None:
     return s
 
 
-def _fee_amount(f: dict, volume: float) -> float:
-    return _rmin(_rmax(f["fixed"] + f["percent"] * volume, f["min"]), f["max"])
-
-
-def _fee_volume(f: dict, money: float) -> float:
-    v = (money - f["fixed"]) / (1 + f["percent"])
-    fee = f["fixed"] + f["percent"] * v
-    if fee < f["min"]:
-        v = money - f["min"]
-    elif fee > f["max"]:
-        v = money - f["max"]
-    return _rmax(0.0, v)
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Termine und Flags
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _add_months_first(z_first: int, k: int) -> int:
-    d = from_days(z_first)
-    tot = (d.year * 12 + (d.month - 1)) + k
-    return days_from_civil(tot // 12, tot % 12 + 1, 1)
-
-
-def _calculate_dates_flags(mode, span, unit, days, dates: np.ndarray, value, anchor, start_date,
-                           skip_start, liquidate) -> np.ndarray:
-    n = dates.size
+def _sched_spec(mode, span, unit, days, dates: np.ndarray, value, anchor, start_date, skip_start) -> tuple:
+    """Angaben eines Terminplans für den Kern (E17 Stufe 2, core/prepare_core_impl.h): (si, start, days, dcode)
+    wie ``.sched_spec`` in R; den Schritt liest R aus ``"<span> months"`` (``as.integer``), den Tag von ``days`` für
+    anchor = "start" aus ``as.Date("2000-1-<days>")`` (0 = NA)."""
     if not mode or unit is None or (value is not None and value <= 0):
-        return np.zeros(n, dtype=bool)
+        return np.zeros(7, dtype=np.int32), 0.0, None, None
     if span is None:
         span = 1
     unit = _match_arg(unit, ("month", "quarter", "year"), "unit")
     anchor = _match_arg(anchor, ("start", "end"), "anchor")
-    dmin, dmax = int(dates.min()), int(dates.max())
-    start = dmin if start_date is None else _date_or_fail(start_date)
-    day_list = None
+    dmax = int(dates.max())
+    start = int(dates.min()) if start_date is None else _date_or_fail(start_date)
+    step = int(float(r_as_character(span * 3 if unit == "quarter" else span)))
+    sd, td = from_days(start), from_days(dmax)
+    first = days_from_civil(sd.year, 1 if unit == "year" else sd.month, 1)
+    on = 1
+    if step < 1 or first > dmax:   # wie seq(): Fehler, sonst hoechstens first (= letzter Tag)
+        same = (sd.year, 1 if unit == "year" else sd.month) == (td.year, 1 if unit == "year" else td.month)
+        if not same:
+            _stop("invalid '(to - from)/by'" if step == 0 else "wrong sign in 'by' argument")
+        on, step = int(first == dmax), 1
+    dd = dcode = None
     if days is not None:
-        day_list = [float(v) for v in np.atleast_1d(np.asarray(days, dtype=np.float64))]
-    schedule: list[float] = []
-    sdt = from_days(start)
-    if unit in ("month", "quarter"):
-        step = int(span) * (3 if unit == "quarter" else 1)
-        f = days_from_civil(sdt.year, sdt.month, 1)
-        base_seq = []
-        k = 0
-        while True:
-            z = _add_months_first(f, k * step)
-            if z > dmax:
-                break
-            base_seq.append(z)
-            k += 1
-        if day_list is None:
-            schedule = [float(z) for z in base_seq]
-        else:
-            for m0 in base_seq:
-                dd0 = from_days(m0)
-                yr, mon = dd0.year, dd0.month
-                for dd in day_list:
-                    if anchor == "start":
-                        r = _r_strptime_ymd("%s-%s-%s" % (yr, mon, r_as_character(dd)))
-                        schedule.append(NA if r is None else float(r))
-                    elif unit == "month":
-                        if mon == 12:
-                            month_end = days_from_civil(yr + 1, 1, 1) - 1
-                        else:
-                            month_end = days_from_civil(yr, mon + 1, 1) - 1
-                        d_end = float(month_end) - (dd - 1)
-                        schedule.append(NA if d_end < m0 else d_end)
-                    else:
-                        end_mon, end_yr = mon + 3, yr
-                        if end_mon > 12:
-                            end_mon -= 12
-                            end_yr = yr + 1
-                        quarter_end = days_from_civil(end_yr, end_mon, 1) - 1
-                        schedule.append(float(quarter_end) - (dd - 1))
-    else:
-        base_years = []
-        y = sdt.year
-        while days_from_civil(y, 1, 1) <= dmax:
-            base_years.append(y)
-            y += int(span)
-        if day_list is None:
-            schedule = [float(days_from_civil(y, 1, 1)) for y in base_years]
-        else:
-            for y in base_years:
-                for dd in day_list:
-                    if anchor == "start":
-                        r = _r_strptime_ymd("%s-1-%s" % (y, r_as_character(dd)))
-                        schedule.append(NA if r is None else float(r))
-                    else:
-                        schedule.append(float(days_from_civil(y, 12, 31)) - (dd - 1))
-    date_set = set(int(z) for z in dates)
-    sched = [s for s in schedule if not math.isnan(s) and s == int(s) and int(s) in date_set]
-    if skip_start:
-        sched = [s for s in sched if s != dmin]
-    if liquidate:
-        sched = [s for s in sched if s != dmax]
-    sset = set(int(s) for s in sched)
-    return np.array([int(z) in sset for z in dates], dtype=bool)
+        dd = np.ascontiguousarray(np.atleast_1d(np.asarray(days, dtype=np.float64)))
+        dcode = np.array([0 if (z := _r_strptime_ymd("2000-1-" + r_as_character(v))) is None else z - 10956
+                          for v in dd], dtype=np.int32)
+    si = np.array([on, unit == "year", unit == "quarter", anchor == "end", bool(skip_start), days is not None,
+                   min(step, 2 ** 31 - 1)], dtype=np.int32)
+    return si, float(start), dd, dcode
 
 
-def _calculate_split_flags(sim: dict, base: float, mode: bool, dates: np.ndarray, split_thresh,
-                           skip=()) -> np.ndarray:
-    n = dates.size
-    if not mode or split_thresh is None:
-        return np.zeros(n, dtype=bool)
-    lo, hi = float(split_thresh[0]), float(split_thresh[1])
-    flag = np.zeros(n, dtype=bool)
-    for name in sim["market"]:
-        if name in skip:   # skip: Assets ohne Splits (Fonds-Wrapper)
-            continue
-        prices = np.array(sim["market"][name]["asset_price"], dtype=np.float64)
-        for i in range(n):
-            cp = float(prices[i])
-            if cp > hi:
-                flag[i] = True
-                ratio = cp / base
-                prices[i:] = prices[i:] / ratio
-            elif cp < lo:
-                flag[i] = True
-                ratio = base / cp
-                prices[i:] = prices[i:] * ratio
-    return flag
+def _calculate_dates_flags(mode, span, unit, days, dates: np.ndarray, value, anchor, start_date,
+                           skip_start, liquidate) -> np.ndarray:
+    si, start, dd, dcode = _sched_spec(mode, span, unit, days, dates, value, anchor, start_date, skip_start)
+    out = _ext.sim_dates_flags(np.ascontiguousarray(dates, dtype=np.float64), si, start, dd, dcode,
+                               int(bool(si[0]) and bool(liquidate)))
+    return np.frombuffer(out, dtype=np.int32).astype(bool)
 
-
-def _ym(z: int) -> int:
-    d = from_days(z)
-    return d.year * 12 + d.month
-
-
-def _shift_off_filled(flags: np.ndarray, filled: np.ndarray, mon: list) -> np.ndarray:
-    hit = np.flatnonzero(flags.astype(bool) & filled)
-    if hit.size == 0:
-        return flags
-    flags = flags.copy()
-    n = flags.size
-    logical = flags.dtype == bool
-    for i in hit:
-        j = i + 1
-        while j < n and filled[j]:
-            j += 1
-        if j >= n or mon[j] != mon[i]:
-            j = i - 1
-            while j >= 0 and filled[j]:
-                j -= 1
-        if logical:
-            flags[i] = False
-            if 0 <= j < n:
-                flags[j] = True
-        else:
-            if 0 <= j < n:
-                flags[j] = flags[j] + flags[i]
-            flags[i] = 0
-    return flags
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Handels- und Steuerfunktionen (sim_base.R, früher simulation.R)
-# ═══════════════════════════════════════════════════════════════════════════
-
-def _apply_spread(price: float, spread: float, direction: str) -> float:
-    if direction == "buy":
-        return price * (1 + spread / 2)
-    return price * (1 - spread / 2)
-
-
-def _calculate_buy_signal(sim: dict, name: str, index: int) -> bool:
-    a = sim["assets"][name]
-    st = sim["status"][name]
-    mk = sim["market"][name]
-    sig = False
-    if a["style"] == "signal" and _truthy(mk["signal_buy"][index - 1]) and st["money"] > 0 and st["count"] == 0:
-        sig = True
-    if a["style"] == "signal" and st["count"] > 0 and st["money"] > 0 and not _is_true(mk["signal_sell"][index - 1]):
-        sig = True
-    if a["style"] == "bnh" and st["money"] > 0:
-        sig = True
-    return sig
-
-
-def _calculate_sell_signal(sim: dict, name: str, index: int) -> bool:
-    a = sim["assets"][name]
-    sig = False
-    if a["style"] == "signal" and _truthy(sim["market"][name]["signal_sell"][index - 1]) \
-            and sim["status"][name]["count"] > 0:
-        sig = True
-    if a["style"] == "bnh":
-        sig = False
-    return sig
-
-
-def _perform_trade_buy(sim: dict, name: str, index: int, reason: str, spread: float, fractions: bool,
-                       details: bool, count: float | None = None) -> dict:
-    market_price = float(sim["market"][name]["asset_price"][index - 1])
-    if math.isnan(market_price) or market_price <= 0:
-        _warn(_sp("perform_trade_buy: ung\u00fcltiger Kurs (%.4f) f\u00fcr %s am %s; der Kauf wird \u00fcbersprungen.",
-                  market_price, name, fmt_date(sim["market"][name]["asset_day"][index - 1])))
-        return sim
-    trade_price = _apply_spread(market_price, spread, "buy")
-    if count is None:
-        money = sim["status"][name]["money"]
-        trade_count = money / trade_price if fractions else float(math.floor(money / trade_price))
-    else:
-        trade_count = count
-    fee = _FEE.current
-    if fee is not None:
-        money = sim["status"][name]["money"]
-        if count is None or trade_count * trade_price + _fee_amount(fee, trade_count * trade_price) > money + 1e-9:
-            vol = _fee_volume(fee, money)
-            trade_count = vol / trade_price if fractions else float(math.floor(vol / trade_price))
-        if trade_count <= 0:
-            return sim
-        fee_paid = _fee_amount(fee, trade_count * trade_price)
-        trade_price = trade_price + fee_paid / trade_count
-        _FEE.paid = _FEE.paid + fee_paid
-    if trade_count <= 0:
-        return sim
-    core.perform_trade_buy_cpp(sim, name, index, trade_count, trade_price, market_price)
-    if details:
-        _cat(_sp("%s\tKauf %.2fx %s zu %.2f EUR je Anteil am %s\n", reason, trade_count, name, trade_price,
-                 fmt_date(sim["market"][name]["asset_day"][index - 1])))
-    return sim
-
-
-def _perform_trade_sell(sim: dict, name: str, index: int, tax_mode: str, tax_rate: float,
-                        effective_tax_rate: float | None, marginal_tax_rate, private_sale_threshold,
-                        use_sparer_pauschbetrag: bool, tax_regime: str | None, reason: str,
-                        spread: float, details: bool, count: float | None = None,
-                        price: float | None = None) -> dict:
-    if effective_tax_rate is None:
-        effective_tax_rate = tax_rate
-    market_price = float(sim["market"][name]["asset_price"][index - 1])
-    trade_price = _apply_spread(market_price, spread, "sell")
-    current_date = int(sim["market"][name]["asset_day"][index - 1])
-    available = sim["status"][name]["count"]
-    if count is None:
-        trade_count = available
-    else:
-        if count > available:
-            _warn(_sp("perform_trade_sell: angeforderte Verkaufsmenge %.4f \u00fcbersteigt den Bestand %.4f von %s; "
-                      "verkauft wird der gesamte Bestand.", count, available, name))
-        trade_count = _rmin(count, available)
-    if trade_count <= 0:
-        return sim
-    fee = _FEE.current
-    if fee is not None:
-        fee_paid = _fee_amount(fee, trade_count * trade_price)
-        if trade_count * trade_price - fee_paid <= 0:
-            return sim
-        trade_price = trade_price - fee_paid / trade_count
-        _FEE.paid = _FEE.paid + fee_paid
-    tr = sim["trades"][name]
-    if price is None and tax_mode == "person":
-        fifo_price = core._calculate_fifo_price(tr["buys"], trade_count, int(tr["fifo_front"]))
-    else:
-        fifo_price = 0.0 if price is None else price
-    trade_gain = (trade_price - fifo_price) * trade_count
-    capital_gains_tax = 0.0
-    if tax_regime is None:
-        tax_regime = "none"
-    lot_result = None
-    if tax_mode == "person":
-        if tax_regime == "none":
-            tax_regime = sim["assets"][name]["tax_regime"]
-        totals = sim["totals"]
-        if tax_regime == "investment_fund":
-            bonus = sim["assets"][name]["bonus"]
-            vp_paid = core._calculate_fifo_vorabpauschale(tr["buys"], trade_count, int(tr["fifo_front"]))
-            adjusted = trade_gain - vp_paid
-            res = core.p20_tax(adjusted, bonus, totals, effective_tax_rate, use_sparer_pauschbetrag)
-            capital_gains_tax = res["tax"]
-            if details:
-                if vp_paid > 0:
-                    _cat(_sp("\t\t=> Vorabpauschale-Anrechnung (\u00a7 19 InvStG): %.2f EUR\n", vp_paid))
-                if res["spb_used"] > 0:
-                    _cat(_sp("\t\t=> Sparerpauschbetrag: %.2f EUR (verbleibend: %.2f EUR)\n",
-                             res["spb_used"], totals["sparer_pauschbetrag_remaining"]))
-        elif tax_regime == "capital_gains":
-            res = core.p20_tax(trade_gain, 0.0, totals, effective_tax_rate, use_sparer_pauschbetrag)
-            capital_gains_tax = res["tax"]
-        elif tax_regime == "private_sale":
-            lot_result = core._calculate_private_sale_tax(tr["buys"], int(tr["fifo_front"]), trade_count,
-                                                         trade_price, current_date)
-            if details:
-                if lot_result["exempt_gain"] > 0:
-                    _cat(_sp("\t\t=> Steuerfreier Gewinn (Haltedauer > 1 Jahr): %.2f EUR\n", lot_result["exempt_gain"]))
-                if lot_result["exempt_loss"] > 0:
-                    _cat(_sp("\t\t=> Nicht verrechenbarer Verlust (Haltedauer > 1 Jahr): %.2f EUR\n",
-                             lot_result["exempt_loss"]))
-            net_by = lot_result["taxable_gain"] - lot_result["taxable_loss"]
-            if net_by != 0:
-                by = totals.get("private_sale_net_ytd_by")
-                if by is None:
-                    by = {}
-                    totals["private_sale_net_ytd_by"] = by
-                by[name] = by.get(name, 0.0) + net_by
-            if lot_result["taxable_gain"] > 0:
-                totals["private_sale_gains_ytd"] = totals["private_sale_gains_ytd"] + lot_result["taxable_gain"]
-                if details:
-                    _cat(_sp("\t\t=> Steuerpflichtiger Gewinn (Haltedauer < 1 Jahr): %.2f EUR (seit Jahresbeginn: "
-                             "%.2f EUR)\n", lot_result["taxable_gain"], totals["private_sale_gains_ytd"]))
-            if lot_result["taxable_loss"] > 0:
-                totals["private_sale_losses_ytd"] = totals["private_sale_losses_ytd"] + lot_result["taxable_loss"]
-                if details:
-                    _cat(_sp("\t\t=> Verrechenbarer Verlust (Haltedauer < 1 Jahr): %.2f EUR (seit Jahresbeginn: "
-                             "%.2f EUR)\n", lot_result["taxable_loss"], totals["private_sale_losses_ytd"]))
-            capital_gains_tax = 0.0
-    core.calculate_sell_report(sim, name, index, trade_count, trade_price, market_price, capital_gains_tax)
-    if tax_mode == "person":
-        core.fifo_consume(sim, name, trade_count)
-    if details:
-        _cat(_sp("%s\tVerkauf %.2fx %s zu %.2f EUR je Anteil am %s\n", reason, trade_count, name, trade_price,
-                 fmt_date(current_date)))
-        if tax_mode == "person" and tax_regime not in ("none", "private_sale"):
-            _cat(_sp("\t\t=> %s: %.2f EUR; Steuer: %.2f EUR\n", "Verlust" if trade_gain < 0 else "Gewinn",
-                     trade_gain, capital_gains_tax))
-    person = tax_mode == "person"
-    entry = {
-        "event_date": current_date,
-        "event_type": "Sell",
-        "asset_count": trade_count,
-        "asset_price": trade_price,
-        "event_gain": trade_gain if person else NA,
-        "event_taxes": capital_gains_tax if person else NA,
-        "tax_regime": tax_regime if person else None,
-        "tax_deferred": (tax_regime == "private_sale") if person else False,
-        "holding_exempt": (lot_result["exempt_gain"]
-                           if person and tax_regime == "private_sale" and lot_result is not None else NA),
-    }
-    tr["sell_count"] += 1
-    tr["sells"].append(entry)
-    return sim
-
-
-def _calculate_sell_count(sim: dict, name: str, target: float, index: int, spread: float, fractions: bool,
-                          tax_mode: str, tax_rate: float, tax_regime: str | None = None) -> dict:
-    market_price = float(sim["market"][name]["asset_price"][index - 1])
-    trade_price = _apply_spread(market_price, spread, "sell")
-    total_shares = sim["status"][name]["count"]
-    if total_shares <= 0:
-        return {"sell_count": 0.0, "fifo_price": 0.0}
-    if target <= 0:
-        return {"sell_count": 0.0, "fifo_price": 0.0}
-    tr = sim["trades"][name]
-    if tax_regime is None:
-        tax_regime = sim["assets"][name]["tax_regime"]
-    tax_regime = tax_regime if tax_mode == "person" else "none"
-    bonus = sim["assets"][name]["bonus"] if tax_regime == "investment_fund" else 0.0
-    spb_rem = sim["totals"].get("sparer_pauschbetrag_remaining")
-    loss_pool = sim["totals"]["loss_capital_gains"] + _rmax(0.0, 0.0 if spb_rem is None else spb_rem)
-    regime_code = {"none": 0, "investment_fund": 1, "capital_gains": 2, "private_sale": 3}.get(tax_regime, 0)
-    return core.sell_count(tr["buys"], int(tr["fifo_front"]), target, trade_price, total_shares, bool(fractions),
-                           regime_code, bonus, loss_pool, tax_rate)
-
-
-def _calculate_flat_rate(sim: dict, name: str, index: int, dates: np.ndarray, tax_regime: str | None = None,
-                         filled: np.ndarray | None = None) -> dict:
-    if tax_regime is None:
-        tax_regime = sim["assets"][name]["tax_regime"]
-    empty = {"total_vp": 0.0, "lot_indices": [], "lot_vps": []}
-    if tax_regime != "investment_fund":
-        return empty
-    date_index = int(dates[index - 1])
-    yr = year_of(date_index)
-    start_of_year = days_from_civil(yr, 1, 1)
-    end_of_year = days_from_civil(yr, 12, 31)
-    year_start_index = max(1, int(start_of_year - int(dates[0])) + 1)
-    rate_index = year_start_index
-    if filled is not None:
-        while rate_index < index and bool(filled[rate_index - 1]):
-            rate_index += 1
-        if bool(filled[rate_index - 1]):
-            rate_index = year_start_index
-    prices = sim["market"][name]["asset_price"]
-    year_start_price = float(prices[rate_index - 1])
-    raw = float(sim["market"][name]["base_rates"][rate_index - 1]) / 100
-    base_rate = _rmax(0.0, raw)
-    if base_rate <= 0:
-        return empty
-    market_price = float(prices[index - 1])
-    tr = sim["trades"][name]
-    return core.flat_rate(tr["buys"], int(tr["fifo_front"]), base_rate, year_start_price, market_price,
-                          start_of_year, end_of_year)
-
-
-def _split(sim: dict, name: str, ratio: float, forward: bool) -> dict:
-    st = sim["status"][name]
-    current_count, current_price, current_worth = st["count"], st["price"], st["worth"]
-    if forward:
-        split_count = current_count * ratio
-        split_price = current_price / ratio
-    else:
-        split_count = current_count / ratio
-        split_price = current_price * ratio
-    tr = sim["trades"][name]
-    n_lots = tr["buy_count"]
-    for k in range(n_lots):
-        buy = tr["buys"][k]
-        if not buy or buy["remaining"] <= 0:
-            continue
-        orig = buy.get("original")
-        if orig is None:
-            orig = buy["remaining"]
-        nb = dict(buy)
-        if forward:
-            nb["count"] = buy["count"] * ratio
-            nb["price"] = buy["price"] / ratio
-            nb["remaining"] = buy["remaining"] * ratio
-            nb["original"] = orig * ratio
-        else:
-            nb["count"] = buy["count"] / ratio
-            nb["price"] = buy["price"] * ratio
-            nb["remaining"] = buy["remaining"] / ratio
-            nb["original"] = orig / ratio
-        tr["buys"][k] = nb
-    tr["fifo_front"] = core._update_fifo_front(tr["buys"], 1)
-    st["count"] = split_count
-    st["price"] = split_price
-    st["worth"] = current_worth
-    mk = sim["market"][name]
-    if forward:
-        mk["asset_price"] = mk["asset_price"] / ratio
-    else:
-        mk["asset_price"] = mk["asset_price"] * ratio
-    return sim
-
-
-def _perform_asset_split(sim: dict, name: str, ratio: float, index: int, type_: str, fractions: bool = True,
-                         details: bool = False, current_date: int | None = None) -> dict:
-    if type_ not in ("forward", "reverse"):
-        _stop("perform_asset_split: type muss \"forward\" oder \"reverse\" sein, nicht %s." % r_deparse(type_))
-    if ratio <= 0:
-        _stop("perform_asset_split: ratio muss > 0 sein (Split-Verh\u00e4ltnis), nicht %s." % r_format1(ratio))
-    sim = _split(sim, name, ratio, forward=(type_ == "forward"))
-    if details:
-        desc = ("1 : " + r_format1(ratio, digits=5)) if type_ == "forward" else (r_format1(ratio, digits=5) + " : 1")
-        action = "Split" if type_ == "forward" else "Reverse-Split"
-        ds = fmt_date(current_date) if current_date is not None else "(ohne Datum)"
-        _cat("Split-Ereignis:\t%s %s im Verh\u00e4ltnis %s am %s\n" % (action, name, desc, ds))
-    return sim
-
-
-def _perform_gain_harvest(sim: dict, name: str, index: int, tax_regime: str, spread: float, fractions: bool,
-                          use_loss_pot: bool, use_spb: bool, tax_mode: str, tax_rate: float,
-                          effective_tax_rate: float, marginal_tax_rate, private_sale_threshold, details: bool) -> dict:
-    if tax_regime not in ("investment_fund", "capital_gains"):
-        return sim
-    total = sim["status"][name]["count"]
-    if total <= 0:
-        return sim
-    room = (sim["totals"]["sparer_pauschbetrag_remaining"] if use_spb else 0.0) + \
-        (sim["totals"]["loss_capital_gains"] if use_loss_pot else 0.0)
-    if room <= 0.01:
-        return sim
-    market_price = float(sim["market"][name]["asset_price"][index - 1])
-    if math.isnan(market_price) or market_price <= 0:
-        return sim
-    sell_price = _apply_spread(market_price, spread, "sell")
-    trades = sim["trades"][name]["buys"]
-    front = int(sim["trades"][name]["fifo_front"])
-    bonus = sim["assets"][name]["bonus"] if tax_regime == "investment_fund" else 0.0
-    fee = _FEE.current
-
-    def taxable(n: float, with_fee: bool = True) -> float:
-        if n <= 0:
-            return 0.0
-        px = sell_price
-        if with_fee and fee is not None:
-            px = px - _fee_amount(fee, n * sell_price) / n
-        g = (px - core._calculate_fifo_price(trades, n, front)) * n
-        if tax_regime == "investment_fund":
-            g = g - core._calculate_fifo_vorabpauschale(trades, n, front)
-        return (1 - bonus) * g
-    first_lot = _rmin(total, _rmax(1e-9, total * 1e-6))
-    if taxable(first_lot, False) <= 0:
-        return sim
-    if taxable(total) <= room:
-        n = total
-    else:
-        lo, hi = 0.0, total
-        for _ in range(60):
-            mid = (lo + hi) / 2
-            if taxable(mid) > room:
-                hi = mid
-            else:
-                lo = mid
-            if hi - lo < total * 1e-10:
-                break
-        n = lo
-    if not fractions:
-        n = float(math.floor(n))
-    if n <= 0 or taxable(n) <= 0:
-        return sim
-    if details:
-        _cat(_sp("Freibetrag:\tRealisierung von Gewinnen %.2f EUR mit %.4fx %s (freier Sparer-Pauschbetrag/"
-                 "Verlusttopf %.2f EUR)\n", taxable(n), n, name, room))
-    sim = _perform_trade_sell(sim, name, index, tax_mode, tax_rate, effective_tax_rate, marginal_tax_rate,
-                              private_sale_threshold, use_spb, tax_regime, "Freibetrag:", spread, details, count=n)
-    sim = _perform_trade_buy(sim, name, index, "Freibetrag:", spread, fractions, details)
-    return sim
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Tarifweg (taxable_income, tax_tariff)
-# ═══════════════════════════════════════════════════════════════════════════
 
 def _check_taxable_income(x: Any, years: list[int], who: str = "simulation", plan_ok: bool = False) -> dict:
     """zvE prüfen (R: ``.check_taxable_income``). ``plan_ok`` (T14, ``income_tariff()``): ein Vektor ohne Namen
@@ -1026,336 +555,27 @@ class _TariffEnv:
         self.due_info: list | None = None
 
 
-def _tariff_base(env: _TariffEnv, year: int) -> dict:
-    if env.zve_all is not None:
-        zv = env.zve_all
-    else:
-        zv = env.zve.get(str(year), NA) if env.zve is not None else NA
-    ks = env.ks.get(str(year))
-    if ks is None or (isinstance(ks, float) and math.isnan(ks)):
-        ks = 0.0
-    return {"zve": zv, "ks_prev": ks}
-
-
-def _tariff_full(env: _TariffEnv, x: float) -> dict:
-    e = tariff_income_tax(env.tariff, x)
-    so = tariff_soli(env.tariff, e)
-    ki = env.church_k * e
-    return {"est": e, "soli": so, "kist": ki, "total": e + so + ki}
-
-
-def _tariff_diff(env: _TariffEnv, x1: float, x0: float) -> dict:
-    if math.isnan(x1) or math.isnan(x0):
-        return {"est": 0.0, "soli": 0.0, "kist": 0.0, "total": 0.0}
-    a = _tariff_full(env, x1)
-    b = _tariff_full(env, x0)
-    return {k: a[k] - b[k] for k in ("est", "soli", "kist", "total")}
-
-
-def _tariff_close(env: _TariffEnv, year: int, g23: float, k_base: float, abg_rate: float, details: bool = False):
-    b = _tariff_base(env, year)
-    if math.isnan(b["zve"]):
-        return NA
-    k = _rmax(0.0, k_base)
-    abg = k * abg_rate
-    kabg = k * env.kapest_rate * env.church_k
-    gp_on = bool(env.use_gp) and k > 0
-    B0 = b["zve"] - b["ks_prev"]
-    B1 = B0 - kabg
-    X0 = _tariff_diff(env, B0 + g23, b["zve"])["total"] + abg
-    X1 = _tariff_diff(env, B1 + g23 + k, b["zve"])["total"] if gp_on else NA
-    fav = gp_on and X1 < X0
-    Bx = B1 if fav else B0
-    ded = _tariff_diff(env, Bx, b["zve"])
-    p23 = _tariff_diff(env, Bx + g23, Bx)
-    if env.use_gp:
-        tk = _tariff_diff(env, B1 + g23 + k, B1 + g23)
-    else:
-        tk = {"est": NA, "soli": NA, "kist": NA, "total": NA}
-    tot = _tariff_diff(env, Bx + g23 + (k if fav else 0.0), b["zve"])
-    D = (X1 if fav else X0) - abg
-    ks = tot["kist"] - (kabg if fav else 0.0)
-    env.ks[str(year + 1)] = ks
-    paid = _rmax(0.0, b["ks_prev"]) + (kabg if fav else 0.0)
-    refunded = _rmax(0.0, -b["ks_prev"])
-    env.rows.append({
-        "year": int(year), "taxable_income": b["zve"],
-        "church_tax_paid_deductible": paid, "church_tax_refunded": refunded,
-        "church_tax_net_deduction": paid - refunded,
-        "taxable_income_net": Bx, "deduction_effect": ded["total"],
-        "gain_p23": g23, "income_tax_p23": p23["est"], "soli_p23": p23["soli"], "church_tax_p23": p23["kist"],
-        "tax_p23": p23["total"],
-        "capital_income": k, "abgeltung_burden": abg, "church_tax_withheld_k": kabg,
-        "tariff_income_tax_k": tk["est"], "tariff_soli_k": tk["soli"], "tariff_church_tax_k": tk["kist"],
-        "tariff_burden": tk["total"],
-        "burden_without_gp": X0, "burden_with_gp": X1, "guenstiger": bool(fav),
-        "settlement": D, "refund": _rmax(0.0, -D), "church_tax_settlement_next_year": ks})
-    if details:
-        _cat(_sp("  Tarif %d: zvE %.2f EUR - KiSt-Sonderausgaben %.2f EUR (gezahlt %.2f, erstattet %.2f) = %.2f EUR "
-                 "(Wirkung %.2f EUR)\n", year, b["zve"], paid - refunded, paid, refunded, Bx, ded["total"]))
-        if g23 > 0:
-            _cat(_sp("    \u00a7 23: Gewinn %.2f EUR -> Steuerlast ESt %.2f + Soli %.2f + KiSt %.2f = %.2f EUR\n",
-                     g23, p23["est"], p23["soli"], p23["kist"], p23["total"]))
-        if env.use_gp:
-            _cat(_sp("    G\u00fcnstigerpr\u00fcfung: K %.2f EUR, Abgeltungsteuer %.2f EUR (KiSt %.2f), Tarif auf K %.2f EUR "
-                     "(ESt %.2f + Soli %.2f + KiSt %.2f); Belastung ohne %.2f / mit %s EUR -> %s\n",
-                     k, abg, kabg, tk["total"], tk["est"], tk["soli"], tk["kist"], X0,
-                     "-" if math.isnan(X1) else _sp("%.2f", X1), "Tarif" if fav else "Abgeltungsteuer bleibt"))
-        _cat(_sp("    Abrechnung: %s %.2f EUR; KiSt-Bescheid %+.2f EUR (Sonderausgabe %d)\n",
-                 "Nachzahlung" if D >= 0 else "Erstattung", abs(D), ks, year + 1))
-    return D
-
-
-def _positive_by(sim: dict) -> dict:
-    by = sim["totals"].get("private_sale_net_ytd_by")
-    if not by:
-        return {}
-    return {k: _rmax(v, 0.0) for k, v in by.items() if math.isfinite(v)}
-
-
-def _book_tax_due(sim: dict, tax_due: float) -> dict:
-    by = _positive_by(sim)
-    if not by or r_sum(list(by.values())) <= 0:
-        by = {nm: 1.0 for nm in sim["status"]}
-    s = r_sum(list(by.values()))
-    due = {k: tax_due * v / s for k, v in by.items()}
-    old = sim["totals"].get("p23_due")
-    if old:
-        merged = dict(old)
-        for k, v in due.items():
-            merged[k] = merged.get(k, 0.0) + v
-        due = merged
-    sim["totals"]["p23_due"] = due
-    return sim
-
-
-def _tariff_book(sim: dict, env: _TariffEnv, D: float) -> dict:
-    if math.isnan(D) or D == 0:
-        return sim
-    sim["totals"]["total_taxes"] = sim["totals"]["total_taxes"] + D
-    if D > 0:
-        rw = env.rows[-1]
-        by = _positive_by(sim)
-        info = {"year": rw["year"], "D": D, "p23": rw["tax_p23"], "ded": rw["deduction_effect"],
-                "by_p23": len(by) > 0 and r_sum(list(by.values())) > 0}
-        env.due_info = (env.due_info or []) + [info]
-        sim = _book_tax_due(sim, D)
-    else:
-        env.refund_due = env.refund_due - D
-        if abs(sim["totals"]["total_taxes"]) < 1e-9:
-            sim["totals"]["total_taxes"] = 0.0
-    return sim
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Jahreswechsel (_handle_year_change)
 # ═══════════════════════════════════════════════════════════════════════════
-
-def _handle_year_change(sim: dict, current_date: int, marginal_tax_rate, private_sale_threshold,
-                        sparer_pauschbetrag, use_sparer_pauschbetrag, soli_factor_income=1.0,
-                        effective_tax_rate=None, details=False, church_factor=0.0,
-                        tariff_env: _TariffEnv | None = None) -> dict:
-    totals = sim["totals"]
-    current_year = year_of(current_date)
-    stored_year = totals["current_year"]
-    if current_year == stored_year:
-        return sim
-    if details:
-        _cat("\n" + _DOUBLE_LINE + "\n")
-        _cat("  JAHRESWECHSEL: %d -> %d\n" % (stored_year, current_year))
-        _cat(_DOUBLE_LINE + "\n")
-    ytd_gains = totals["private_sale_gains_ytd"]
-    ytd_losses = totals["private_sale_losses_ytd"]
-    net_saldo = ytd_gains - ytd_losses
-    internal_offset = _rmin(ytd_gains, ytd_losses)
-    net_ytd_losses = _rmax(0.0, -net_saldo)
-    carryforward_offset = 0.0
-    net_gain = 0.0
-    if net_saldo >= private_sale_threshold and net_saldo > 0:
-        carryforward_offset = _rmin(net_saldo, totals["loss_private_sales"])
-        totals["loss_private_sales"] = totals["loss_private_sales"] - carryforward_offset
-        net_gain = net_saldo - carryforward_offset
-        if details and carryforward_offset > 0:
-            _cat(_sp("  \u00a7 23 EStG: Verlustvortrag verwendet: %.2f EUR\n", carryforward_offset))
-            _cat(_sp("             Verbleibender Vortrag: %.2f EUR\n", totals["loss_private_sales"]))
-    if details:
-        _cat("  \u00a7 23 EStG Jahres\u00fcbersicht %d:\n" % stored_year)
-        _cat(_sp("    Bruttogewinne (< 1 Jahr):    %10.2f EUR\n", ytd_gains))
-        _cat(_sp("    Bruttoverluste (< 1 Jahr):   %10.2f EUR\n", ytd_losses))
-        _cat(_sp("    Interne Verrechnung:         %10.2f EUR\n", internal_offset))
-        _cat(_sp("    Verlustvortrag-Verrechnung:  %10.2f EUR\n", carryforward_offset))
-        _cat("    " + "\u2500" * 41 + "\n")
-        _cat(_sp("    Netto-Ergebnis:              %10.2f EUR\n", net_saldo - carryforward_offset))
-    if net_gain > 0:
-        tax_due = None
-        if tariff_env is None:
-            if marginal_tax_rate is None:
-                _warn(_sp("simulation: Paragraf 23 EStG: Gewinne (%.2f EUR) erreichen die Freigrenze (%.2f EUR), ",
-                          net_saldo, private_sale_threshold) +
-                      "aber 'marginal_tax_rate' ist nicht gesetzt.\n" +
-                      "Verwendet wird 42 % (Spitzensteuersatz); marginal_tax_rate in Prozent angeben (z. B. 42).")
-                marginal_tax_rate = 0.42
-            tax_due = net_gain * marginal_tax_rate * (soli_factor_income + church_factor)
-            totals["total_taxes"] = totals["total_taxes"] + tax_due
-            sim = _book_tax_due(sim, tax_due)
-        if details:
-            _cat("\n  \u26a0 FREIGRENZE ERREICHT!\n")
-            _cat(_sp("    Jahressaldo %.2f EUR >= Freigrenze %.2f EUR\n", net_saldo, private_sale_threshold))
-            _cat(_sp("    \u2192 GESAMTER Gewinn nach Verlustvortrag steuerpflichtig: %.2f EUR (Freigrenze, kein "
-                     "Freibetrag!)\n", net_gain))
-            if tariff_env is not None:
-                _cat("    \u2192 Steuer nach dem Einkommensteuertarif (ESt + Soli + KiSt des \u00a7 23-Zuwachses): siehe "
-                     "Jahresveranlagung unten (Zeile \u00a7 23)\n")
-            else:
-                _cat(_sp("    \u2192 Steuersatz: %.1f%%%s%s\n", marginal_tax_rate * 100,
-                         _sp(" + %.1f%%%% Soli", (soli_factor_income - 1) * 100) if soli_factor_income > 1 else "",
-                         _sp(" + %.1f%% KiSt", church_factor * 100) if church_factor > 0 else ""))
-                _cat(_sp("    \u2192 Steuerlast: %.2f EUR\n", tax_due))
-    elif net_ytd_losses > 0:
-        totals["loss_private_sales"] = totals["loss_private_sales"] + net_ytd_losses
-        if details:
-            _cat(_sp("\n  Nettoverlust %.2f EUR \u2192 Vortrag ins n\u00e4chste Jahr\n", net_ytd_losses))
-            _cat(_sp("  Gesamter Verlustvortrag: %.2f EUR\n", totals["loss_private_sales"]))
-    elif 0 < net_saldo < private_sale_threshold:
-        if details:
-            _cat(_sp("\n  \u2713 Jahressaldo %.2f EUR < Freigrenze %.2f EUR \u2192 STEUERFREI (Verlustvortrag "
-                     "unver\u00e4ndert)\n", net_saldo, private_sale_threshold))
-    else:
-        if details:
-            _cat("\n  Keine steuerpflichtigen \u00a7 23 Vorg\u00e4nge in %d\n" % stored_year)
-
-    if details and use_sparer_pauschbetrag:
-        spb_annual = totals["sparer_pauschbetrag_annual"]
-        spb_remaining = totals["sparer_pauschbetrag_remaining"]
-        _cat("\n  Sparerpauschbetrag %d:\n" % stored_year)
-        _cat(_sp("    Jahresbetrag:    %10.2f EUR\n", spb_annual))
-        _cat(_sp("    Verwendet:       %10.2f EUR\n", spb_annual - spb_remaining))
-        _cat(_sp("    Verfallen:       %10.2f EUR\n", spb_remaining))
-
-    def g0(k):
-        v = totals.get(k)
-        return 0.0 if v is None else v
-    cgt_loss_added = g0("cgt_loss_added_ytd")
-    cgt_loss_used = g0("cgt_loss_used_ytd")
-    cgt_base_taxed = g0("cgt_base_taxed_ytd")
-    carry_start = g0("cgt_pool_start_ytd")
-    carry_used = 0.0
-    if carry_start > 0:
-        spb_used_ytd = _rmax(0.0, totals["sparer_pauschbetrag_annual"] - totals["sparer_pauschbetrag_remaining"]) \
-            if use_sparer_pauschbetrag else 0.0
-        carry_used = _rmin(carry_start, _rmax(0.0, cgt_loss_used + spb_used_ytd + cgt_base_taxed - cgt_loss_added))
-    unused_loss = _rmax(0.0, cgt_loss_added - (cgt_loss_used - carry_used))
-    unused_loss = _rmin(unused_loss, totals["loss_capital_gains"])
-    refund_base = _rmin(unused_loss, cgt_base_taxed)
-    refund_done = refund_base > 0 and effective_tax_rate is not None and effective_tax_rate > 0
-    if refund_done:
-        refund = refund_base * effective_tax_rate
-        names = list(sim["status"].keys())
-        w = [float(sim["status"][nm].get("actual") if sim["status"][nm].get("actual") is not None else 0.0)
-             for nm in names]
-        sw = r_sum(w)
-        w = [x / sw for x in w] if sw > 0 else [1 / len(names)] * len(names)
-        for nm, wi in zip(names, w):
-            sim["status"][nm]["money"] = sim["status"][nm]["money"] + refund * wi
-        totals["total_taxes"] = totals["total_taxes"] - refund
-        totals["loss_capital_gains"] = totals["loss_capital_gains"] - refund_base
-        if details:
-            _cat(_sp("  \u00a7 20 EStG: Unterj\u00e4hrige Verlustverrechnung -> Erstattung %.2f EUR in den Geldbestand\n",
-                     refund))
-    if use_sparer_pauschbetrag:
-        spb_used_year = _rmax(0.0, totals["sparer_pauschbetrag_annual"] - totals["sparer_pauschbetrag_remaining"])
-        taxed_left = cgt_base_taxed - (refund_base if refund_done else 0.0)
-        release = _rmax(0.0, _rmin(spb_used_year, totals["loss_capital_gains"] - taxed_left))
-        if release > 0:
-            totals["loss_capital_gains"] = totals["loss_capital_gains"] - release
-            totals["sparer_pauschbetrag_remaining"] = totals["sparer_pauschbetrag_remaining"] + release
-            totals["sparer_pauschbetrag_used_total"] = totals["sparer_pauschbetrag_used_total"] - release
-            if details:
-                _cat(_sp("  \u00a7 20 EStG: Verlust gibt Sparer-Pauschbetrag frei: %.2f EUR (genutzt %d: %.2f EUR, "
-                         "Verlusttopf %.2f EUR)\n", release, stored_year, spb_used_year - release,
-                         totals["loss_capital_gains"]))
-    any_refund = refund_done
-    if tariff_env is not None:
-        k_base = _rmax(0.0, cgt_base_taxed - (refund_base if refund_done else 0.0))
-        D = _tariff_close(tariff_env, stored_year, net_gain, k_base,
-                          effective_tax_rate if effective_tax_rate is not None else 0.0, details)
-        sim = _tariff_book(sim, tariff_env, D)
-        if not math.isnan(D) and D < 0:
-            any_refund = True
-    if any_refund and abs(totals["total_taxes"]) < 1e-9:
-        totals["total_taxes"] = 0.0
-    totals["private_sale_gains_ytd"] = 0.0
-    totals["private_sale_losses_ytd"] = 0.0
-    if totals.get("private_sale_net_ytd_by"):
-        for k in totals["private_sale_net_ytd_by"]:
-            totals["private_sale_net_ytd_by"][k] = 0.0
-    totals["cgt_base_taxed_ytd"] = 0.0
-    totals["cgt_loss_added_ytd"] = 0.0
-    totals["cgt_loss_used_ytd"] = 0.0
-    totals["cgt_pool_start_ytd"] = totals["loss_capital_gains"]
-    if use_sparer_pauschbetrag:
-        totals["sparer_pauschbetrag_remaining"] = sparer_pauschbetrag
-    totals["current_year"] = current_year
-    if details:
-        _cat("\n  Tracker zur\u00fcckgesetzt f\u00fcr Jahr %d\n" % current_year)
-        _cat(_DOUBLE_LINE + "\n\n")
-    return sim
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Kennzahlen
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _xirr_rate(t: np.ndarray, amount: np.ndarray, end_value: float, horizon: float) -> float:
-    """``.xirr_rate()``: interner Zinsfuß p. a. (Brent über u = T log(1 + r))."""
-    t = np.asarray(t, dtype=np.float64)
-    amount = np.asarray(amount, dtype=np.float64)
-    keep = np.isfinite(amount) & (amount != 0)
-    t = t[keep]
-    amount = amount[keep]
-    if amount.size == 0 or not (horizon > 0) or not math.isfinite(end_value):
-        return NA
-    if end_value == 0 and np.all(amount >= 0):
-        return -1.0
-    e = (horizon - t) / horizon
+_XIRR_WARN = {1: "-Inf replaced by maximally negative value", 2: "NA/Inf replaced by maximum positive value",
+              3: "_NOT_ converged in 1000 iterations"}
 
-    def g(u: float) -> float:
-        ex = np.empty(e.size)
-        for i, v in enumerate(e):
-            try:
-                ex[i] = math.exp(u * v)
-            except OverflowError:
-                ex[i] = math.inf
-        return r_sum(amount * ex) - end_value
-    grid = [-200.0 + 5.0 * i for i in range(81)]
-    gv = [g(u) for u in grid]
-    k = None
-    for i in range(80):
-        if gv[i + 1] * gv[i] <= 0:
-            k = i
-            break
-    if k is not None:
-        br = [grid[k], grid[k + 1]]
-        fb = [gv[k], gv[k + 1]]
-    else:
-        if not (gv[0] > 0) or not np.any(e > 0):
-            return NA
-        lo_lim = -800 / float(np.min(e[e > 0]))
-        hi = grid[0]
-        ghi = gv[0]
-        lo = hi
-        glo = ghi
-        while glo > 0 and lo > lo_lim:
-            hi = lo
-            ghi = glo
-            lo = _rmax(2 * lo, lo_lim)
-            glo = g(lo)
-        if glo > 0:
-            return NA
-        br = [lo, hi]
-        fb = [glo, ghi]
-    u = r_uniroot(g, br, f_lower=fb[0], f_upper=fb[1], tol=1e-14, maxiter=1000)["root"]
-    return math.expm1(u / horizon)
+
+def _xirr_rate(t: np.ndarray, amount: np.ndarray, end_value: float, horizon: float) -> float:
+    """``.xirr_rate()``: interner Zinsfuß p. a. (Brent über u = T log(1 + r)); seit E17 Stufe 3 im Kern
+    (``core/evaluate_core_impl.h``, ``_ext.sim_xirr``), Warnungen von ``uniroot`` mit den Texten von R."""
+    v, msgs = _ext.sim_xirr(np.ascontiguousarray(t, dtype=np.float64), np.ascontiguousarray(amount, dtype=np.float64),
+                            float(end_value), float(horizon))
+    for m in msgs:
+        _warn(_XIRR_WARN[m[0]])
+    return v
 
 
 def _calculate_skewness(x: np.ndarray) -> float:
@@ -1435,7 +655,6 @@ def xirr_rate(t, amount, end_value: float, horizon: float) -> float:
     """``.xirr_rate()``: geldgewichtete Rendite p. a. (interner Zinsfuß) wie in ``simulation()``."""
     return _xirr_rate(np.asarray(t, dtype=np.float64), np.asarray(amount, dtype=np.float64), float(end_value),
                       float(horizon))
-
 
 
 # R rechnet mit NA (signalisierendes NaN) ohne Gleitkomma-Warnungen; numpy meldete sonst

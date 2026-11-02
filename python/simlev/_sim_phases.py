@@ -10,7 +10,7 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
-from ._dates import fmt_date, from_days, year_of
+from ._dates import fmt_date, year_of
 from ._r.rformat import r_as_character, r_deparse, r_format, r_format1, r_round
 from ._r.rnum import r_median, r_sum
 from .config import _match_arg
@@ -24,8 +24,6 @@ from ._sim_base import (
     _Frame,
     _TariffEnv,
     _as_date,
-    _calculate_dates_flags,
-    _calculate_split_flags,
     _cat,
     _check_taxable_income,
     _date_or_fail,
@@ -39,13 +37,11 @@ from ._sim_base import (
     _num_vec,
     _r_class_name,
     _r_strptime_ymd,
-    _shift_off_filled,
+    _sched_spec,
     _sp,
     _stop,
     _to_frame,
-    _truthy,
     _warn,
-    _ym,
 )
 
 
@@ -491,7 +487,6 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     fee_order = _fee_spec(order_fee)
     fee_dca = fee_order if dca_fee is None else _fee_spec(dca_fee)
     fees_on = fee_order is not None or fee_dca is not None
-    _FEE.current = None
     _FEE.paid = 0.0
     if _is_true(harvest_mode) and not blocks:
         if not isinstance(harvest_day, str) or not re.match(r"^\d{2}-\d{2}$", harvest_day) or harvest_day >= "12-31":
@@ -653,9 +648,6 @@ def _sim_build_state(fr: _Frame, strategy: dict, start_value: float, start_date:
             if ss is None or ss not in fr:
                 _stop("simulation: signal_sell-Spalte '%s' fehlt im Datensatz (Asset '%s')." % (ss if ss is not None
                                                                                              else "NULL", name))
-        share = float(a.get("share"))
-        sim["status"][name] = {"count": 0.0, "price": 0.0, "worth": 0.0, "money": share * start_value,
-                               "total": share * start_value, "target": share, "actual": share, "differ": 0.0}
         if base_rate_flex:
             if base_rate_data is None or base_rate_data not in fr:
                 if base_rate_data is None:
@@ -682,12 +674,7 @@ def _sim_build_state(fr: _Frame, strategy: dict, start_value: float, start_date:
         }
         sim["trades"][name] = {"buys": [], "buy_count": 0, "sells": [], "sell_count": 0, "taxes": [],
                                "tax_count": 0, "fifo_front": 1}
-        st = sim["status"][name]
-        worth0, money0, total0 = np.zeros(n), np.zeros(n), np.zeros(n)
-        worth0[0], money0[0], total0[0] = st["worth"], st["money"], st["total"]
-        sim["report"][name] = {"worth": worth0, "money": money0, "flows": np.zeros(n), "total": total0,
-                               "share": np.zeros(n)}
-    return sim
+    return sim   # status und report setzt der Kern (E17 Stufe 2: Startgewichte, Anfangszustand)
 
 
 def _as_logical_col(fr: _Frame, col: str) -> np.ndarray:
@@ -709,8 +696,10 @@ def _as_logical_col(fr: _Frame, col: str) -> np.ndarray:
 def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, stopp_date: int, liquidate,
                         dca_mode, dca_span, dca_unit, dca_days, dca_value, dca_anchor, dca_start, dca_skip,
                         balance_mode, balance_span, balance_unit, balance_days, balance_anchor, balance_start,
-                        balance_skip, event_col, event_mode, event_weight, split_mode, split_thresh, blocks=False,
-                        no_split=()) -> dict:
+                        balance_skip, event_col, event_mode, event_weight, blocks=False) -> dict:
+    """Angaben der Termine und Tages-Flags (wie ``.sim_build_calendar`` in R): Kalender, Terminpläne
+    (``_sched_spec``), Ereignis-Spalte und die Prüfungen; Termine, Splits, Flags, Aktivierung, Freibetrag und
+    Startgewichte rechnet seit E17 Stufe 2 der Kern (core/prepare_core_impl.h, über ``_sim_engine_run``)."""
     flag_date = np.arange(start_date, stopp_date + 1, dtype=np.int64)
     n = flag_date.size
     if ".filled" in fr:
@@ -719,8 +708,6 @@ def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, 
         flag_filled = np.zeros(n, dtype=bool)
     fr.drop(".filled")
     flag_assets = list(strategy.keys())
-    liquidate = bool(liquidate)
-    flag_liquidate = liquidate & (flag_date == stopp_date)
     for a, sd0, mode in (("dca", dca_start, dca_mode), ("balance", balance_start, balance_mode)):
         if not _is_true(mode) or sd0 is None:
             continue
@@ -732,14 +719,11 @@ def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, 
             _stop("simulation: %s (%s) liegt nach dem letzten Datentag (%s); es g\u00e4be keine Termine."
                   % (("start von %s" % ("dca_plan()" if a == "dca" else "rebalance_plan()")) if blocks else a + "_start",
                      fmt_date(sd1), fmt_date(stopp_date)))
-    flag_rebalance = _calculate_dates_flags(balance_mode, balance_span, balance_unit, balance_days, flag_date, None,
-                                            balance_anchor, balance_start, balance_skip, liquidate)
-    flag_dca = _calculate_dates_flags(dca_mode, dca_span, dca_unit, dca_days, flag_date, dca_value, dca_anchor,
-                                      dca_start, dca_skip, liquidate)
-    md = [from_days(int(z)) for z in flag_date]
-    flag_taxes = np.array([x.month == 12 and x.day == 31 for x in md], dtype=bool)
+    balance = _sched_spec(balance_mode, balance_span, balance_unit, balance_days, flag_date, None, balance_anchor,
+                         balance_start, balance_skip)
+    dca = _sched_spec(dca_mode, dca_span, dca_unit, dca_days, flag_date, dca_value, dca_anchor, dca_start, dca_skip)
     event_mode = _match_arg(event_mode, ("additional", "replace"), "event_mode")
-    flag_event = np.zeros(n, dtype=bool)
+    flag_event = None
     if event_col is not None:
         if event_col not in fr:
             _stop("simulation: event_col '%s' nicht im Datensatz gefunden." % event_col)
@@ -764,145 +748,20 @@ def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, 
             if fehlt:
                 _warn("simulation: event_weight nennt nicht alle Assets (es fehlt: %s); an Event-Tagen gelten dann die "
                       "Strategie-Gewichte." % ", ".join(fehlt))
-        guard = (flag_date != flag_date[0]) & ((not liquidate) | (flag_date != stopp_date))
-        flag_event = flag_event & guard
-        if event_mode == "additional":
-            flag_rebalance = flag_rebalance | flag_event
-        else:
-            flag_rebalance = flag_event.copy()
-    flag_trade = ~flag_rebalance & (flag_date != stopp_date) & ~flag_filled
-    flag_split = _calculate_split_flags(sim, 100.0, split_mode, flag_date, split_thresh,
-                                        skip=no_split)   # Fonds-Wrapper: keine Splits auf den Anteilswert
-    flag_dca_n = flag_dca.astype(np.float64)
-    if flag_filled.any():
-        mon = [_ym(int(z)) for z in flag_date]
-        flag_rebalance = _shift_off_filled(flag_rebalance, flag_filled, mon)
-        flag_dca_n = _shift_off_filled(flag_dca_n, flag_filled, mon)
-        flag_dca = flag_dca_n > 0
-        flag_split = _shift_off_filled(flag_split, flag_filled, mon)
-        flag_liquidate = _shift_off_filled(flag_liquidate, flag_filled, mon)
-        if flag_liquidate.any():
-            flag_rebalance = flag_rebalance & ~flag_liquidate
-            flag_dca_n = np.where(flag_liquidate, 0.0, flag_dca_n)
-            flag_dca = flag_dca_n > 0
-        flag_trade = ~flag_rebalance & (flag_date != stopp_date) & ~flag_filled
     for name in flag_assets:
         st_a = sim["assets"][name]["start"]
         if st_a is not None and st_a > stopp_date:
             _stop("simulation: start von '%s' (%s) liegt nach dem letzten Datentag (%s); das Asset w\u00e4re nie "
                   "handelbar. start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie "
                   "entfernen." % (name, fmt_date(st_a), fmt_date(stopp_date)))
-    return {"data": fr,
-            "flags": {"flag_date": flag_date, "flag_filled": flag_filled, "flag_assets": flag_assets,
-                      "flag_liquidate": flag_liquidate, "flag_rebalance": flag_rebalance, "flag_dca": flag_dca,
-                      "flag_dca_n": flag_dca_n, "flag_taxes": flag_taxes, "flag_event": flag_event,
-                      "flag_trade": flag_trade, "flag_split": flag_split},
-            "event_weight": event_weight if event_col is not None else None}
-
-
-def _sim_init_weights(sim: dict, flag_assets: list, flag_date: np.ndarray, start_value: float) -> dict:
-    initial_assets = [nm for nm in flag_assets if sim["assets"][nm]["start"] <= int(flag_date[0])]
-    if not initial_assets:
+    # bis E17 Stufe 1c _sim_init_weights: mindestens ein Asset ab dem ersten Tag handelbar
+    if not any(sim["assets"][nm]["start"] <= int(flag_date[0]) for nm in flag_assets):
         _stop("simulation: Kein Asset ist am ersten Datentag (%s) handelbar (start bzw. erste Kurse sp\u00e4ter); "
               "mindestens ein Asset muss ab Beginn handelbar sein." % fmt_date(int(flag_date[0])))
-    initial_weights_sum = r_sum([sim["status"][nm]["actual"] for nm in initial_assets])
-    all_weights_sum = r_sum([sim["status"][nm]["actual"] for nm in flag_assets])
-    for nm in flag_assets:
-        st = sim["status"][nm]
-        target_weight = st["actual"] / all_weights_sum
-        if nm in initial_assets:
-            normalized_weight = st["actual"] / initial_weights_sum
-            st["actual"] = target_weight
-            st["money"] = start_value * normalized_weight
-            st["total"] = start_value * normalized_weight
-        else:
-            st["actual"] = target_weight
-            st["differ"] = 0.0
-            st["money"] = 0.0
-            st["total"] = 0.0
-    return {"sim": sim, "initial_assets": initial_assets}
-
-
-def _sim_build_schedule(sim: dict, fl: dict, tax_mode: str, harvest_mode, harvest_day) -> dict:
-    flag_date, flag_filled, flag_assets = fl["flag_date"], fl["flag_filled"], fl["flag_assets"]
-    n = flag_date.size
-    asset_starts = [int(sim["assets"][nm]["start"]) for nm in flag_assets]
-    if flag_filled.any():
-        mon = [_ym(int(z)) for z in flag_date]
-        pos = {int(z): i for i, z in enumerate(flag_date)}
-        shifted = []
-        for dz in asset_starts:
-            i = pos.get(dz)
-            if i is None or not flag_filled[i]:
-                shifted.append(dz)
-                continue
-            j = i + 1
-            while j < n and flag_filled[j]:
-                j += 1
-            if j >= n or mon[j] != mon[i]:
-                j = i - 1
-                while j >= 0 and flag_filled[j]:
-                    j -= 1
-            shifted.append(int(flag_date[max(min(j, n - 1), 0)]))
-        asset_starts = shifted
-    start_set = set(asset_starts)
-    flag_active = np.array([int(z) in start_set for z in flag_date], dtype=bool)
-    pos_all = {int(z): i + 1 for i, z in enumerate(flag_date)}
-    asset_start_indices = [pos_all.get(z, 1) for z in asset_starts]
-    flag_harvest = np.zeros(n, dtype=bool)
-    if _is_true(harvest_mode) and tax_mode == "person":
-        mds = [from_days(int(z)) for z in flag_date]
-        md_s = ["%02d-%02d" % (d.month, d.day) for d in mds]
-        yrs = [d.year for d in mds]
-        seen_years = []
-        for y in yrs:
-            if y not in seen_years:
-                seen_years.append(y)
-        for y in seen_years:
-            js = [i for i in range(n) if yrs[i] == y and md_s[i] >= harvest_day and md_s[i] < "12-31"
-                  and not flag_filled[i]]
-            if js:
-                flag_harvest[js[0]] = True
-    flag_definite = flag_active | fl["flag_split"] | fl["flag_dca"] | fl["flag_rebalance"] | fl["flag_taxes"] | \
-        fl["flag_liquidate"] | flag_harvest
-    strategy_types = {nm: sim["assets"][nm]["style"] for nm in flag_assets}
-    has_bnh = any(t == "bnh" for t in strategy_types.values())
-    has_signal = any(t == "signal" for t in strategy_types.values())
-    tax_regimes = {nm: sim["assets"][nm]["tax_regime"] for nm in flag_assets}
-    spread_rates = {nm: sim["market"][nm]["spread_rate"] for nm in flag_assets}
-    flag_signal = np.zeros(n, dtype=bool)
-    if has_signal:
-        for nm in flag_assets:
-            if sim["assets"][nm]["style"] == "signal":
-                b = np.array([_truthy(x) for x in sim["market"][nm]["signal_buy"]], dtype=bool)
-                s = np.array([_truthy(x) for x in sim["market"][nm]["signal_sell"]], dtype=bool)
-                flag_signal = flag_signal | b | s
-    flag_bnh_potential = np.zeros(n, dtype=bool)
-    if has_bnh:
-        flag_bnh_potential[0] = True
-    flag_slow_path = flag_definite | flag_signal | flag_bnh_potential
-    flag_year_change = np.zeros(n, dtype=bool)
-    flag_vp_settle = np.zeros(n, dtype=bool)
-    if tax_mode == "person":
-        years = np.array([year_of(int(z)) for z in flag_date], dtype=np.int64)
-        if n > 1:
-            flag_year_change[1:] = np.diff(years) > 0
-        for ys in np.flatnonzero(flag_year_change):
-            j = ys
-            while j < n and flag_filled[j] and years[j] == years[ys]:
-                j += 1
-            if j >= n or years[j] != years[ys]:
-                j = ys
-            flag_vp_settle[j] = True
-    flag_slow_path = flag_slow_path | flag_vp_settle
-    flag_individual = flag_slow_path | flag_year_change
-    out = dict(fl)
-    out.update({"asset_starts": asset_starts, "flag_active": flag_active, "asset_start_indices": asset_start_indices,
-                "flag_harvest": flag_harvest, "strategy_types": strategy_types,
-                "tax_regimes": tax_regimes, "spread_rates": spread_rates, "flag_slow_path": flag_slow_path,
-                "flag_year_change": flag_year_change, "flag_vp_settle": flag_vp_settle,
-                "individual_days": [int(i) + 1 for i in np.flatnonzero(flag_individual)], "n_total_days": n})
-    return out
+    return {"data": fr,
+            "flags": {"flag_date": flag_date, "flag_filled": flag_filled, "flag_assets": flag_assets, "dca": dca,
+                      "balance": balance, "flag_event": flag_event, "event_replace": event_mode == "replace"},
+            "event_weight": event_weight if event_col is not None else None}
 
 
 # ═══════════════════════════════════════════════════════════════════════════

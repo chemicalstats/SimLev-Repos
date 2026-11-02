@@ -604,10 +604,6 @@ namespace simlev_host {
 typedef sl::NumVec NumVec;
 typedef sl::IntVec IntVec;
 typedef sl::NumMat NumMat;
-// Engine-Kerne (simulation_core_impl.h, fifo_core_impl.h, tax_core_impl.h): Objekte
-// des Simulationszustands sind SEXP; Zugriffe as_list, at, get, set, put, has,
-// as_double, as_int, num_vec, named_list, new_num, new_int, Date aus sl.
-typedef SEXP Obj;
 using namespace sl;
 // logische Vektoren (die Kerne mit Zufallszahlen, die dazu auch Listen von
 // Ganzzahlvektoren und R's runif/rnorm/rgeom brauchten, sind mit Etappe 9.6c entfallen)
@@ -629,15 +625,5 @@ typedef sl::LglVec LglVec;
 #define SIMLEV_LIST(...) sl::named_list(__VA_ARGS__)            // Ergebnis: benannte Liste
 #define SIMLEV_CLONE(v) sl::clone(v)                            // Kopie mit Attributen (Rf_duplicate)
 #define SIMLEV_R_FINITE(x) R_finite(x)                          // R_finite
-#define SIMLEV_XLENGTH(x) Rf_xlength(x)                         // Laenge eines Objekts
-#define SIMLEV_LENGTH(x) Rf_length(x)
-#define SIMLEV_IS_NULL(x) Rf_isNull(x)                          // NULL bzw. None
-#define SIMLEV_STRING_AT(v, i) CHAR(STRING_ELT(v, i))           // i-te Zeichenkette (UTF-8)
-#define SIMLEV_MARK_DATE(v)                                     /* Klasse "Date" am Vektor */ \
-  {                                                                                          \
-    SEXP date_class = PROTECT(Rf_mkString("Date"));                                          \
-    Rf_setAttrib((v).sexp, R_ClassSymbol, date_class);                                       \
-    UNPROTECT(1);                                                                            \
-  }
 
 #endif

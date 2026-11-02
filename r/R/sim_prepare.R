@@ -2,10 +2,10 @@
 # simulation(), Phase 2: Datenvorbereitung, Zentralstruktur sim_mem, Termine und Flags
 # =============================================================================
 
-# C7-11: Feldfolge der obersten Ebene von sim_mem. Die C++-Kerne (simulation_core.cpp,
-# fifo_core.cpp) lesen und schreiben diese Ebene ueber die Position (input[1] = status,
-# input[2] = market, input[3] = trades, input[4] = report; C++ zaehlt ab 0), alles darunter ueber
-# Namen. Die Reihenfolge wird hier festgelegt und vor dem ersten C++-Aufruf geprueft.
+# C7-11: Feldfolge der obersten Ebene von sim_mem. Bis E17 Stufe 1c lasen die Engine-Kerne
+# (simulation_core.cpp, fifo_core.cpp) diese Ebene ueber die Position; seit der Tagesengine im Kern
+# (sim_engine.R) liest .sim_engine_run die Felder ueber Namen. Die Reihenfolge wird weiter hier
+# festgelegt und geprueft (Aufbau des Ergebnisses).
 .SIM_MEM_LAYOUT <- c("assets", "status", "market", "trades", "report", "totals")
 
 #' Feldfolge von sim_mem pruefen (C7-11)
@@ -85,7 +85,8 @@
 #' Phase 2b von simulation(): Zentralstruktur sim_mem anlegen
 #'
 #' Zweck: sim_mem mit den Feldern aus .SIM_MEM_LAYOUT (assets, status, market, trades, report,
-#' totals) je Asset vorbelegen; prueft die Signal- und Basiszinsspalten.
+#' totals) je Asset vorbelegen (status und report setzt seit E17 Stufe 2 der Kern: Startgewichte und
+#' Anfangszustand in core/prepare_core_impl.h); prueft die Signal- und Basiszinsspalten.
 #' Eingabe: data und strategy (vorbereitet), start_value, start_date, stopp_date, sparer_pauschbetrag,
 #' use_sparer_pauschbetrag, base_rate, base_rate_flex, base_rate_data, blocks (Meldungen mit Bausteinen).
 #' Ausgabe: sim_mem.
@@ -153,18 +154,6 @@
         stop(sprintf("simulation: signal_sell-Spalte '%s' fehlt im Datensatz (Asset '%s').", ss %||% "NULL", name))
     }
 
-    #---> Initialisierung des Status-Objekts: (Das war mal ein Vektor!!!!)
-    sim_mem[["status"]][[name]] <- list(
-      count = 0,
-      price = 0,
-      worth = 0,
-      money = strategy[[name]][["share"]] * start_value,
-      total = strategy[[name]][["share"]] * start_value,
-      target = strategy[[name]][["share"]],
-      actual = strategy[[name]][["share"]],
-      differ = 0
-    )
-
     #---> Initialisierung des Market-Objekts:
     sim_mem[["market"]][[name]] <- list(
       asset_day = seq.Date(
@@ -192,49 +181,33 @@
       spread_rate = (strategy[[name]][["spread"]] %||% 0) / 100   # PROZENT-KONVENTION
     )
 
-    #---> Initialisierung des Trade-Objekts:
-    max_trades <- nrow(data)
-    sim_mem[["trades"]][[name]] <- list(
-      buys = vector("list", max_trades),
-      buy_count = 0,
-      sells = vector("list", max_trades),
-      sell_count = 0,
-      taxes = vector("list", max_trades),
-      tax_count = 0,
-      fifo_front = 1
-    )
-
-    #---> Initialisierung des Report-Objekts:
-    sim_mem[["report"]][[name]] <- list(
-      worth = c(sim_mem[["status"]][[name]][["worth"]], numeric(nrow(data)-1)),
-      money = c(sim_mem[["status"]][[name]][["money"]], numeric(nrow(data)-1)),
-      flows = numeric(nrow(data)),
-      total = c(sim_mem[["status"]][[name]][["total"]], numeric(nrow(data)-1)),
-      share = numeric(nrow(data))  # Wird durch .sim_total_report_cpp am Tag 1 korrekt gesetzt
-    )
+    #---> Trade-Objekt (Listen setzt die Tagesengine, E17)
+    sim_mem[["trades"]][[name]] <- list(buys = list(), sells = list(), taxes = list())
   }
 
   sim_mem
 }
 
-#' Phase 2c von simulation(): Termine und Tages-Flags
+#' Phase 2c von simulation(): Angaben fuer Termine und Tages-Flags
 #'
-#' Zweck: Kalender (flag_date, aufgefuellte Tage), Termine fuer Liquidation, Rebalancing, Sparplan
-#' und Splits, Ereignis-Rebalancing (event_col, event_weight) und das Verschieben von Terminen auf
-#' aufgefuellten Tagen; prueft dca_start, balance_start, event_col, event_weight und start.
+#' Zweck: Kalender (flag_date, aufgefuellte Tage), Angaben der Termine fuer Sparplan und Rebalancing
+#' (.sched_spec), Ereignis-Rebalancing (event_col, event_weight); prueft dca_start, balance_start, event_col,
+#' event_weight und start sowie, dass ein Asset am ersten Tag handelbar ist. Termine, Splits, das Verschieben
+#' von Terminen auf aufgefuellten Tagen, Aktivierung, Freibetrag, Jahreswechsel und Startgewichte rechnet seit
+#' E17 Stufe 2 der Kern (core/prepare_core_impl.h, ueber .sim_engine_run); bis dahin .sim_build_calendar,
+#' .sim_init_weights und .sim_build_schedule.
 #' Eingabe: data, sim_mem, strategy, start_date, stopp_date und die Termin-Argumente von .simulation_flat()
 #' (dca_days und balance_days aus .sim_check_inputs); blocks (Meldungen mit Bausteinen).
-#' Ausgabe: list(data = data ohne Spalte .filled, flags = Liste der Flags, event_weight = geprueftes
-#' event_weight bzw. NULL ohne event_col).
+#' Ausgabe: list(data = data ohne Spalte .filled, flags = list(flag_date, flag_filled, flag_assets, dca, balance
+#' (Angaben aus .sched_spec), flag_event (event_col als TRUE/FALSE bzw. NULL), event_replace), event_weight =
+#' geprueftes event_weight bzw. NULL ohne event_col).
 #' @keywords internal
 #' @noRd
 .sim_build_calendar <- function(data, sim_mem, strategy, start_date, stopp_date, liquidate,
                                 dca_mode, dca_span, dca_unit, dca_days, dca_value, dca_anchor, dca_start,
                                 dca_skip, balance_mode, balance_span, balance_unit, balance_days,
                                 balance_anchor, balance_start, balance_skip, event_col,
-                                event_mode = c("additional", "replace"), event_weight, split_mode,
-                                split_thresh, blocks = FALSE, no_split = character(0)) {
-  #--------> Initialisierung der Flag-Objekte:
+                                event_mode = c("additional", "replace"), event_weight, blocks = FALSE) {
   flag_date <- seq.Date(from = as.Date(start_date), to = as.Date(stopp_date), by = "days")
   # A-2: Markierung aufgefuellter (LOCF) Tage, aligned zu flag_date
   flag_filled <- if (".filled" %in% names(data)) {
@@ -242,7 +215,6 @@
   } else rep(FALSE, length(flag_date))
   data[[".filled"]] <- NULL
   flag_assets <- names(strategy)
-  flag_liquidate <- liquidate & (flag_date == stopp_date)
   for (a in c("dca", "balance")) {   # R1-22: Bezugsdatum pruefen (sonst kryptischer seq()-Fehler)
     sd0 <- get(paste0(a, "_start"))
     if (!isTRUE(get(paste0(a, "_mode"))) || is.null(sd0)) next
@@ -252,15 +224,13 @@
                                        if (blocks) sprintf("start von %s", if (a == "dca") "dca_plan()" else "rebalance_plan()")
                                        else paste0(a, "_start"), format(sd1), format(stopp_date)))
   }
-  flag_rebalance <- calculate_dates_flags(mode = balance_mode, span = balance_span, unit = balance_unit, days = balance_days, dates = flag_date, anchor = balance_anchor, start_date = balance_start, skip_start = balance_skip, liquidate = liquidate)
-  flag_dca <- calculate_dates_flags(mode = dca_mode, span = dca_span, unit = dca_unit, days = dca_days, dates = flag_date, value = dca_value, anchor = dca_anchor, start_date = dca_start, skip_start = dca_skip, liquidate = liquidate)
-  flag_taxes <- (format(flag_date, "%m-%d") == "12-31")
-  # === NEU: Ereignisbasiertes Rebalancing-Flag aus vorberechneter Spalte ===
-  # Default (event_col = NULL): Verhalten unveraendert datumsgetrieben.
-  # Da flag_rebalance in flag_definite -> flag_slow_path einfliesst, werden
-  # Event-Tage automatisch zu Slow-Path-Tagen (volle Event-Verarbeitung).
+  balance <- .sched_spec(balance_mode, balance_span, balance_unit, balance_days, flag_date, NULL, balance_anchor,
+                        balance_start, balance_skip)
+  dca <- .sched_spec(dca_mode, dca_span, dca_unit, dca_days, flag_date, dca_value, dca_anchor, dca_start, dca_skip)
+  # Ereignisbasiertes Rebalancing aus vorberechneter Spalte (Event-Tage werden im Kern Rebalancing-Tage, mit
+  # denselben Schutzregeln wie der Kalender: nicht am Einstiegs- und Liquidationstag)
   event_mode <- match.arg(event_mode)
-  flag_event <- rep(FALSE, length(flag_date))
+  flag_event <- NULL
   if (!is.null(event_col)) {
     if (is.null(data[[event_col]]))
       stop(sprintf("simulation: event_col '%s' nicht im Datensatz gefunden.", event_col))
@@ -285,247 +255,23 @@
         warning(sprintf("simulation: event_weight nennt nicht alle Assets (es fehlt: %s); an Event-Tagen gelten dann die Strategie-Gewichte.",
                         paste(fehlt, collapse = ", ")), call. = FALSE)
     }
-    # gleiche Schutzregeln wie der Kalender-Trigger: kein Rebalancing am
-    # Einstiegstag und (bei liquidate) nicht am Liquidationstag.
-    guard <- (flag_date != flag_date[1]) & (!liquidate | flag_date != stopp_date)
-    flag_event <- flag_event & guard
-    if (event_mode == "additional") {
-      flag_rebalance <- flag_rebalance | flag_event   # zusaetzlich (OR)
-    } else {
-      flag_rebalance <- flag_event                    # anstelle
-    }
-  }
-
-  flag_trade <- !flag_rebalance & (flag_date != stopp_date) & !flag_filled
-  flag_split <- .calculate_split_flags(input = sim_mem, base = 100, mode = split_mode, dates = flag_date, split_thresh = split_thresh,
-                                       skip = no_split)   # Fonds-Wrapper: keine Splits auf den Anteilswert
-
-  # V-1b: Verschiebe-Helfer (naechster Handelstag; am Monatsende vorziehen)
-  .shift_off_filled <- function(flags, filled, dates){
-    hit <- which(flags & filled)
-    if(!length(hit)) return(flags)
-    n <- length(flags); mon <- format(dates, "%Y-%m")
-    for(i in hit){
-      j <- i + 1L
-      while(j <= n && filled[j]) j <- j + 1L
-      if(j > n || mon[j] != mon[i]){          # Monatsende: vorziehen
-        j <- i - 1L
-        while(j >= 1L && filled[j]) j <- j - 1L
-      }
-      if(is.logical(flags)){
-        flags[i] <- FALSE
-        if(j >= 1L && j <= n) flags[j] <- TRUE
-      } else {                                 # R1-16: Anzahl (Sparplantermine) mitnehmen
-        if(j >= 1L && j <= n) flags[j] <- flags[j] + flags[i]
-        flags[i] <- 0
-      }
-    }
-    flags
-  }
-  flag_dca_n <- as.numeric(flag_dca)           # Anzahl Sparplantermine je Tag
-  if(any(flag_filled)){
-    flag_rebalance <- .shift_off_filled(flag_rebalance, flag_filled, flag_date)
-    flag_dca_n     <- .shift_off_filled(flag_dca_n,     flag_filled, flag_date)
-    flag_dca       <- flag_dca_n > 0
-    flag_split     <- .shift_off_filled(flag_split,     flag_filled, flag_date)
-    flag_liquidate <- .shift_off_filled(flag_liquidate, flag_filled, flag_date)
-    # A7-02: Liquidationsschutz auch nach dem Verschieben (verschobene Termine auf dem Liquidationstag
-    # entfallen wie Termine am letzten Tag): kein Rebalancing, keine Sparrate
-    if (any(flag_liquidate)) {
-      flag_rebalance[flag_liquidate] <- FALSE
-      flag_dca_n[flag_liquidate] <- 0
-      flag_dca <- flag_dca_n > 0
-    }
-    flag_trade     <- !flag_rebalance & (flag_date != stopp_date) & !flag_filled   # neu ableiten
   }
 
   # R3a-05: start nach dem letzten Datentag waere nie handelbar (frueher still auf Tag 1 gesetzt)
-  for (name in flag_assets) {
-    st_a <- sim_mem[["assets"]][[name]][["start"]]
+  starts <- lapply(flag_assets, function(name) sim_mem[["assets"]][[name]][["start"]])
+  for (k in seq_along(flag_assets)) {
+    st_a <- starts[[k]]
     if (length(st_a) == 1L && !is.na(st_a) && st_a > stopp_date)
       stop(sprintf("simulation: start von '%s' (%s) liegt nach dem letzten Datentag (%s); das Asset w\u00e4re nie handelbar. start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie entfernen.",
-                   name, format(st_a), format(stopp_date)))
+                   flag_assets[k], format(st_a), format(stopp_date)))
   }
-
-  list(data = data,
-       flags = list(flag_date = flag_date, flag_filled = flag_filled, flag_assets = flag_assets,
-                    flag_liquidate = flag_liquidate, flag_rebalance = flag_rebalance, flag_dca = flag_dca,
-                    flag_dca_n = flag_dca_n, flag_taxes = flag_taxes, flag_event = flag_event,
-                    flag_trade = flag_trade, flag_split = flag_split),
-       event_weight = if (!is.null(event_col)) event_weight)
-}
-
-#' Phase 2d von simulation(): Startgewichte
-#'
-#' Zweck: Zielgewichte auf alle Assets beziehen und das Startkapital auf die am ersten Tag
-#' handelbaren Assets verteilen.
-#' Eingabe: sim_mem, flag_assets, flag_date, start_value.
-#' Ausgabe: list(sim_mem, initial_assets = Namen der ab dem ersten Tag handelbaren Assets).
-#' @keywords internal
-#' @noRd
-.sim_init_weights <- function(sim_mem, flag_assets, flag_date, start_value) {
-  #--------> Initialisierung der Startgewichte bei Non-Tradeble Assets:
-  initial_assets <- flag_assets[sapply(flag_assets, function(name){
-    trade_start <- sim_mem[["assets"]][[name]][["start"]] 
-    (trade_start %||% flag_date[1]) <= flag_date[1]
-  })]
-
-  if (!length(initial_assets))   # R1-22
+  # bis E17 Stufe 1c .sim_init_weights: mindestens ein Asset ab dem ersten Tag handelbar
+  if (!length(flag_assets[vapply(starts, function(st) (st %||% flag_date[1]) <= flag_date[1], NA)]))   # R1-22
     stop(sprintf("simulation: Kein Asset ist am ersten Datentag (%s) handelbar (start bzw. erste Kurse sp\u00e4ter); mindestens ein Asset muss ab Beginn handelbar sein.",
                  format(flag_date[1])))
 
-  initial_weights_sum <- sum(sapply(initial_assets, function(name) sim_mem[["status"]][[name]][["actual"]]))
-  all_weights_sum <- sum(sapply(flag_assets, function(name) sim_mem[["status"]][[name]][["actual"]]))
-
-  for(name in flag_assets){
-    # R1-12: Zielgewicht ('actual') bezogen auf ALLE Assets (nicht nur die Start-Assets),
-    # damit spaeter startende Assets ihr Strategie-Gewicht erhalten; das Startkapital
-    # verteilt sich auf die Start-Assets.
-    target_weight <- sim_mem[["status"]][[name]][["actual"]] / all_weights_sum
-    if(name %in% initial_assets){
-      normalized_weight <- sim_mem[["status"]][[name]][["actual"]] / initial_weights_sum
-      sim_mem[["status"]][[name]][["actual"]] <- target_weight
-      sim_mem[["status"]][[name]][["money"]]  <- start_value * normalized_weight
-      sim_mem[["status"]][[name]][["total"]]  <- start_value * normalized_weight
-    } else {
-      sim_mem[["status"]][[name]][["actual"]] <- target_weight
-      sim_mem[["status"]][[name]][["differ"]] <- 0
-      sim_mem[["status"]][[name]][["money"]]  <- 0
-      sim_mem[["status"]][[name]][["total"]]  <- 0
-    }
-  }
-
-  list(sim_mem = sim_mem, initial_assets = initial_assets)
-}
-
-#' Phase 2e von simulation(): Ereignis- und Verarbeitungstage
-#'
-#' Zweck: Aktivierungstage spaeter startender Assets, Termine fuer Gewinnrealisierung,
-#' statische Asset-Eigenschaften (Stil, Steuerregime, Spread) sowie die Tage mit
-#' voller Verarbeitung (Slow-Path), Jahreswechsel und Abrechnungstage der Vorabpauschale.
-#' Eingabe: sim_mem, fl (Flags aus .sim_build_calendar mit initial_assets), data,
-#' tax_mode, harvest_mode, harvest_day.
-#' Ausgabe: fl, ergaenzt um asset_starts, flag_active, asset_start_indices, flag_harvest,
-#' strategy_types, tax_regimes, spread_rates, flag_slow_path, flag_year_change,
-#' flag_vp_settle, individual_days und n_total_days.
-#' @keywords internal
-#' @noRd
-.sim_build_schedule <- function(sim_mem, fl, data, tax_mode, harvest_mode, harvest_day) {
-  flag_date <- fl$flag_date; flag_filled <- fl$flag_filled; flag_assets <- fl$flag_assets
-  flag_split <- fl$flag_split; flag_dca <- fl$flag_dca; flag_rebalance <- fl$flag_rebalance
-  flag_taxes <- fl$flag_taxes; flag_liquidate <- fl$flag_liquidate
-
-  asset_starts <- as.Date(vapply(flag_assets, function(name) as.numeric(sim_mem[["assets"]][[name]][["start"]] %||% flag_date[1]), numeric(1)), origin = "1970-01-01")
-  if(any(flag_filled)){
-    asset_starts <- as.Date(vapply(asset_starts, function(d){
-      i <- match(d, flag_date)
-      if(is.na(i) || !flag_filled[i]) return(as.numeric(d))
-      n <- length(flag_date); mon <- format(flag_date, "%Y-%m")
-      j <- i + 1L
-      while(j <= n && flag_filled[j]) j <- j + 1L
-      if(j > n || mon[j] != mon[i]){
-        j <- i - 1L
-        while(j >= 1L && flag_filled[j]) j <- j - 1L
-      }
-      as.numeric(flag_date[max(min(j, n), 1L)])
-    }, numeric(1)), origin = "1970-01-01")
-  }
-  flag_active <- flag_date %in% asset_starts
-
-  # P1: Statt 1826 identische Kopien vorallokieren, Startindizes speichern
-  # und active_assets im Slow-Path inline berechnen
-  asset_start_indices <- match(asset_starts, flag_date)
-  asset_start_indices[is.na(asset_start_indices)] <- 1L   # nur start vor dem ersten Datentag (spaeter: Fehler oben)
-
-
-
-
-
-
-  # 1. Definitive Events (kalenderbasiert, unabhängig von Strategie)
-  flag_harvest <- rep(FALSE, length(flag_date))
-  if (isTRUE(harvest_mode) && tax_mode == "person") {
-    md <- format(flag_date, "%m-%d"); yr <- format(flag_date, "%Y")
-    for (y in unique(yr)) {                              # erster Handelstag ab harvest_day im Jahr
-      j <- which(yr == y & md >= harvest_day & md < "12-31" & !flag_filled)
-      if (length(j)) flag_harvest[j[1]] <- TRUE
-    }
-  }
-  flag_definite <- flag_active | flag_split | flag_dca | flag_rebalance | flag_taxes | flag_liquidate | flag_harvest
-
-  # 2. Strategie-Typen identifizieren
-  strategy_types <- sapply(flag_assets, function(name) sim_mem[["assets"]][[name]][["style"]])
-  has_bnh <- any(strategy_types == "bnh")
-  has_signal <- any(strategy_types == "signal")
-
-  # P6: Tax-Regime einmal pro Asset vorberechnen (statisch, ändert sich nie)
-  tax_regimes <- sapply(flag_assets, function(name) sim_mem[["assets"]][[name]][["tax_regime"]])
-  # O-2: Spread-Raten einmalig vorberechnen (statt wiederholter Lookups)
-  spread_rates <- sapply(flag_assets, function(name) sim_mem[["market"]][[name]][["spread_rate"]])
-
-  # 3. Signale aus Daten extrahieren (statisch, vorberechnet)
-  flag_signal <- rep(FALSE, length(flag_date))
-
-  if(has_signal){
-    for(name in flag_assets){
-      if(sim_mem[["assets"]][[name]][["style"]] == "signal"){
-        # Asset-spezifische Signale
-        buy_signal <- sim_mem[["market"]][[name]][["signal_buy"]]
-        sell_signal <- sim_mem[["market"]][[name]][["signal_sell"]]
-      
-        # Kombinieren (TRUE wenn eines der Signale TRUE)
-        flag_signal <- flag_signal | buy_signal | sell_signal
-      }
-    }
-  }
-
-  # 4. BnH-Potenzial (nur Tag 1, danach übernimmt DCA)
-  #    Bei BnH OHNE DCA: Nur Tag 1 ist relevant (danach immer investiert)
-  #    Bei BnH MIT DCA: Tag 1 + DCA-Tage (in flag_definite bereits enthalten)
-  flag_bnh_potential <- rep(FALSE, length(flag_date))
-
-  if(has_bnh){
-    flag_bnh_potential[1] <- TRUE
-  # Weitere Tage nicht nötig! DCA-Tage sind bereits in flag_definite
-  }
-
-  # 5. Kombiniertes Slow-Path Flag
-  flag_slow_path <- flag_definite | flag_signal | flag_bnh_potential
-  
-
-  # ═══════════════════════════════════════════════════════════════════════════════
-  # 7. PERFORMANCE-OPTIMIERUNG: Vorberechnung der Individual-Processing-Tage
-  # ═══════════════════════════════════════════════════════════════════════════════
-  # Statt jeden Tag einzeln zu durchlaufen, identifizieren wir Tage die 
-  # individuelle Verarbeitung brauchen (Slow-Path, Jahreswechsel).
-  # Zusammenhängende Blöcke dazwischen werden per .sim_market_update_batch_cpp() in C++
-  # vektorisiert verarbeitet (~10-50x schneller als einzelne R-Aufrufe).
-  
-  # Jahreswechsel-Flag vorberechnen (statt format() auf jedem Tag)
-  flag_year_change <- rep(FALSE, length(flag_date))
-  flag_vp_settle   <- rep(FALSE, length(flag_date))   # erster Handelstag je neuen Jahres
-  if (tax_mode == "person") {
-    date_years <- as.integer(format(flag_date, "%Y"))
-    flag_year_change <- c(FALSE, diff(date_years) > 0L)
-    for (ys in which(flag_year_change)) {
-      j <- ys
-      while (j <= length(flag_date) && flag_filled[j] && date_years[j] == date_years[ys]) j <- j + 1L
-      # R3a-01: ohne Handelstag im Folgejahr (in den Daten) am 1.1. des Folgejahres abrechnen
-      # (Toepfe des Folgejahres), nicht erst im uebernaechsten Jahr bzw. am letzten Tag
-      if (j > length(flag_date) || date_years[j] != date_years[ys]) j <- ys
-      flag_vp_settle[j] <- TRUE
-    }
-  }
-  
-  # Kombiniertes Flag: Alle Tage die individuelle Verarbeitung brauchen
-  flag_slow_path  <- flag_slow_path | flag_vp_settle   # Faelligkeitstage voll verarbeiten (kein Fast-Path-next)
-  flag_individual <- flag_slow_path | flag_year_change
-  individual_days <- which(flag_individual)
-  n_total_days <- nrow(data)
-
-  c(fl, list(asset_starts = asset_starts, flag_active = flag_active, asset_start_indices = asset_start_indices,
-             flag_harvest = flag_harvest, strategy_types = strategy_types,
-             tax_regimes = tax_regimes, spread_rates = spread_rates, flag_slow_path = flag_slow_path,
-             flag_year_change = flag_year_change, flag_vp_settle = flag_vp_settle,
-             individual_days = individual_days, n_total_days = n_total_days))
+  list(data = data,
+       flags = list(flag_date = flag_date, flag_filled = flag_filled, flag_assets = flag_assets, dca = dca,
+                    balance = balance, flag_event = flag_event, event_replace = event_mode == "replace"),
+       event_weight = if (!is.null(event_col)) event_weight)
 }

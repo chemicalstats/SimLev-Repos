@@ -247,27 +247,41 @@ Verglichen wird ohne Toleranz: NA ≠ NaN, Vorzeichen der Null, Druck- und
 Konsolenausgabe, Warnungen und Fehlermeldungen. Bei der Entwicklung spart
 `SIMLEV_SKIP_PRECOMPILE=1` die Vorkompilier-Arbeitslast.
 
-Die Arbeitslast in `src/precompile.jl` deckt nur häufige Wege ab: Engine,
-`bootstrap` (stationär und `"garch"`, seit 9.6b über die ML-Schätzung in slc),
-`bootstrap_study`, `_ms_garch_fit`, Entnahme, Optimierung und
-`result_analysis` (Etappe 4.8; gemessen auf zwei Kernen, Julia 1.13.2):
+Die Arbeitslast in `src/precompile.jl` deckt die Engine (`simulation()` über
+den C++-Kern mit und ohne `details`, Ausgabe, Dashboard, Fonds-Wrapper,
+`calculate_dates_flags`, `xirr_rate`) und je Erweiterungsmodul die
+öffentlichen Hauptfunktionen mit kleinen Daten ab, Daten wie beim Aufrufer
+(NamedTuple mit `date` und Kursen). Methoden, die die Arbeitslast nur über
+Laufzeit-Dispatch erreicht und deren Signatur nur Typen aus Base, Core,
+Dates oder Printf enthält, übernimmt Julia nicht in den Cache;
+`src/precompile_statements.jl` nennt sie ausdrücklich (aus
+`--trace-compile` der ersten Aufrufe, ohne die Typen der Daten des
+Aufrufers, ohne Closures). Bis 1.3.0 deckte die Arbeitslast nur Engine,
+`bootstrap`, `bootstrap_study`, `_ms_garch_fit`, Entnahme ohne Steuer,
+Optimierung auf Renditematrizen und `result_analysis` ab (Etappe 4.8).
+Gemessen auf zwei Kernen, Julia 1.13.2, eigenes Depot; erster Aufruf je
+Aufgabe in einem frischen Prozess (die Bench-Aufgaben aus `tools/bench`
+und je Modul eine weitere Hauptfunktion, 30 Aufgaben; J15b):
 
-| | vorher | nachher |
+| | vorher (E17, `abd5ff46`) | J15b |
 |---|---|---|
-| `using SimLev` nach einer Codeänderung (mit Vorkompilieren) | 316 s | 279 s |
-| ohne Arbeitslast (`SIMLEV_SKIP_PRECOMPILE=1`) | 21 s | 21 s |
-| Cache (`.so`) | 130,0 MB | 107,9 MB |
-| erster Lauf S30 / T2 / T8 (`tools/bench`) | 1,6 / 10,6 / 6,0 s | 1,5 / 0,4 / 0,4 s |
-| erster Lauf T5 (`dependence_analysis` mit DCC) | 2,1 s | 7,9 s |
-| Summe Vorkompilieren + erste Läufe aller Aufgaben | 340 s | 292 s |
+| Vorkompilieren (`Base.compilecache`) | 145 s | 240 s |
+| Cache (`.so` / `.ji`) | 78,0 / 1,6 MB | 118,1 / 1,6 MB |
+| `using SimLev` | 0,41 s | 0,60 s |
+| erster Aufruf S30 / T3 / T5 / T4s (`tools/bench`) | 0,8 / 1,7 / 5,0 / 3,0 s | 0,24 / 0,82 / 0,47 / 0,18 s |
+| erster Aufruf, höchster Übersetzungsanteil | 5,7 s (`regime_hmm`) | 0,7 s (`bootstrap_study`) |
+| Summe der ersten Aufrufe (30 Aufgaben) | 84 s | 12 s |
 
-Seltene Wege (Parametersuche, Abhängigkeiten, Szenarien, Sensitivitäten,
-Taktik, Planung, `series_align`) übersetzt ihr erster Aufruf; deshalb
-braucht der Testteil von `Pkg.test()`, der alle Module berührt, rund 50 s
-mehr (315 statt 265 s), sodass Vorkompilieren plus `Pkg.test()` nach einer
-Änderung etwa gleich lang bleibt (594 statt 581 s). Ein neuer
-Baustein lohnt sich nur, wenn sein Weg häufig ist: Jeder kostet bei jeder
-Änderung am Paket Vorkompilierzeit.
+Jede Hauptfunktion braucht beim ersten Aufruf damit höchstens etwa 1 s; was
+bleibt, übersetzt Julia für die Typen des Aufrufers (die Eingangsfunktion
+für eine NamedTuple mit anderen Spaltennamen, die Schlüsselwörter jenseits
+der ersten 32 Argumente des Rumpfs von `_simulation_flat`, die
+`@nospecialize` nicht mehr erfasst) und für Closures. Der Preis: rund 95 s
+mehr Vorkompilieren nach jeder Änderung am Paket und 40 MB mehr Cache; bei
+der Entwicklung spart `SIMLEV_SKIP_PRECOMPILE_EXT=1` den Teil der
+Erweiterungen. Neue Hauptfunktionen gehören in die Arbeitslast; fehlen nach
+einer Änderung Methoden im Cache, zeigt `julia --trace-compile=stderr
+--trace-compile-timing` beim ersten Aufruf, welche.
 
 Was ein Referenzfall bitgleich prüft, steht nicht noch einmal als Test in
 `test/` (Etappe 4.1); so stehen die konstanten Ausdrücke, die

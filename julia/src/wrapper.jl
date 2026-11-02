@@ -22,8 +22,8 @@
 #      NAV-Tag eines Kalenderjahres (nicht am letzten insgesamt) paid_t = acc_t, U = nav_t,
 #      H = max(H, U); gross_t = 100 * G_t / S; hwm_t = H.
 #
-# Paketzustand: Die Ordergebühren (R: `.fee_env`) hält Julia je Lauf im Feld `Run.fee_current`
-# bzw. `Run.fee_paid` (engine.jl), nicht im Paket; die innere Rechnung ist ein eigener Lauf und
+# Paketzustand: Die gezahlten Ordergebühren (R: `.fee_env$paid`) hält Julia je Lauf im Feld
+# `Run.fee_paid` (engine.jl), nicht im Paket; die innere Rechnung ist ein eigener Lauf und
 # lässt den äußeren daher unverändert (nichts zu sichern). Meldungen der inneren Rechnung
 # erscheinen als "Hinweis: <tag> (innere Rechnung): …" (`RParallel.with_message_stream`),
 # Warnungen und Fehler als "<who> (innere Rechnung): …" (Logger `_WrapperWarnLogger`).

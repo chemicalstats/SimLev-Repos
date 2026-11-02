@@ -47,8 +47,8 @@ C_FLAGS = {"unix": ["-std=c99"], "mingw32": ["-std=c99"], "msvc": []}
 # Gemeinsame Kerne von R und Python (Kopien aus core/ in src/core/, nur Header; die Huellen
 # binden sie ein, siehe core/simlev_core.h)
 SHARED_HEADERS = ["core/simlev_core.h", "core/research_core_impl.h", "core/withdrawal_core_impl.h",
-                  "core/simulation_core_impl.h", "core/fifo_core_impl.h", "core/tax_core_impl.h",
-                  "core/tariff_core_impl.h"]
+                  "core/tariff_core_impl.h", "core/engine_core_impl.h",
+                  "core/prepare_core_impl.h", "core/evaluate_core_impl.h"]
 # Python-Huellen (nur hier)
 WRAPPERS = ["_ext.cpp", "_ext_research.cpp", "_ext_withdrawal.cpp", "_ext_engine.cpp"]
 # C-Bibliothek slc (Etappe 9.1): Kopien aus core/ und die Hülle _ext_slc.c

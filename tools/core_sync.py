@@ -15,7 +15,8 @@ Teilbaum und bekommen daher Byte-für-Byte-Kopien:
 * die C-ABI-Hülle der geteilten Kerne für Julia (N7: ``core/simlev_cabi.cpp``) nur nach
   ``julia/deps/core/``;
 * die Grundfunktionen mit R-Regeln (N8: ``core/slc_rbase*``) nur nach ``python/src/core/`` und
-  ``julia/deps/core/`` (R rechnet sie selbst).
+  ``julia/deps/core/`` (R rechnet sie selbst); seit E17 ``slc_rbase.c`` und ``slc_rbase.h`` auch nach
+  ``r/src/`` (``sl_r_sum`` für die Tagesengine ``core/engine_core_impl.h``).
 
 Aufruf::
 
@@ -51,8 +52,10 @@ def is_slc(f: str) -> bool:
 
 
 def is_rbase(f: str) -> bool:
-    """N8: Grundfunktionen mit R-Regeln (slc_rbase*) nur für Python und Julia; R rechnet sie selbst."""
-    return f.startswith("slc_rbase")
+    """N8: Grundfunktionen mit R-Regeln (slc_rbase*) nur für Python und Julia; R rechnet sie selbst.
+    Ausnahme E17: slc_rbase.c/.h (sl_r_sum für die Summen der Tagesengine, core/engine_core_impl.h)
+    gehen auch nach r/src/."""
+    return f.startswith("slc_rbase") and f not in ("slc_rbase.c", "slc_rbase.h")
 
 
 def is_shared(f: str) -> bool:

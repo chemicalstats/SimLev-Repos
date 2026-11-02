@@ -5,9 +5,11 @@ SimLev steht unter der GNU General Public License, Version 3 (GPL-3).
 Copyright ChemicalStats von der Mauerstrasse.
 
 SimLev enthält keinen Code aus anderen Paketen. Das R-Paket nutzt die
-Grundfunktionen von R selbst und bildet davon nichts nach (Abschnitte
-2.1-2.3 entfallen); fremde Vorlage sind nur gemeinfreie
-Kalenderalgorithmen (Abschnitt 2.4). Die gleiche Gliederung haben
+Grundfunktionen von R selbst; nachgebildet sind sie nur in den Kernen
+src/slc_rbase.c und src/slc_rbase.h, die die gemeinsamen C++-Kerne der
+Tagesengine und der Auswertung von simulation() brauchen (seit E17,
+Abschnitte 2.2 und 2.3; 2.1 entfällt). Sonst sind fremde Vorlage nur
+gemeinfreie Kalenderalgorithmen (Abschnitt 2.4). Die gleiche Gliederung haben
 python/COPYRIGHTS.md und julia/COPYRIGHTS.md im Repository.
 
 
@@ -59,8 +61,12 @@ src/        C++-Kerne der Engine (Markt-Updates, FIFO-Lotverwaltung,
             (core/tools/gen_constants.py, nicht Teil des R-Pakets);
             Verfahrenskonstanten aus den Veröffentlichungen (etwa die
             Parameter von xoshiro256** und SplitMix64) nennen die Dateiköpfe.
-            Die Kerne core/slc_rbase* (Abschnitt 2.2 der Python- und
-            Julia-Fassung) gehören nicht zum R-Paket.
+            Von den Kernen core/slc_rbase* gehören seit E17 nur
+            src/slc_rbase.c und src/slc_rbase.h zum R-Paket (Abschnitt 2.2:
+            Summen in long double für die Tagesengine engine_core_impl.h,
+            seit E17 Stufe 3 auch Summen, Mittel, Varianz, Kumulationen,
+            Potenz und die Nullstellensuche nach Brent für die Auswertung
+            evaluate_core_impl.h).
 
 inst/extdata/steuertarif.csv
             Tarifdatei für tax_tariff(), von SimLev zusammengestellt; die
@@ -77,16 +83,41 @@ Entfällt im R-Paket (nur Python und Julia).
 
 2.2 C-Kerne mit R-Regeln (slc_rbase*)
 -------------------------------------
-Entfällt im R-Paket (nur Python und Julia).
+Dateien:            src/slc_rbase.c, src/slc_rbase.h (seit E17; die übrigen
+                    slc_rbase*-Dateien nur in Python und Julia)
+Herkunft:           übersetzt aus R 4.3.3 (src/main/summary.c, cum.c,
+                    array.c, arithmetic.c, src/library/stats/src/zeroin.c)
+                    über die Port-Module der Python- und Julia-Fassung
+Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka,
+                    The R Foundation (laut Kopf der jeweiligen R-Quelle)
+Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
+Änderungen:         C99 ohne R-Datenstrukturen, gemeinsamer Kern für R, Python
+                    und Julia; das R-Paket nutzt daraus sl_r_sum für die
+                    Summen der Tagesengine (src/engine_core_impl.h), wie R
+                    in long double, seit E17 Stufe 3 für die Auswertung
+                    (src/evaluate_core_impl.h) auch sl_r_rowsums, sl_r_prod,
+                    sl_r_mean, sl_r_var, sl_r_cumsum, sl_r_cumprod,
+                    sl_r_cummax, sl_r_pow und sl_r_zeroin2 (Brent wie
+                    stats::uniroot, für den internen Zinsfuß .xirr_rate)
 
 2.3 Ältere Herkunft innerhalb der R-Vorlagen
 --------------------------------------------
-Entfällt im R-Paket (nur Python und Julia).
+Dateien:            src/slc_rbase.c (sl_r_zeroin2, seit E17 Stufe 3)
+Herkunft:           zeroin.c von R: "from NETLIB c/brent.shar with
+                    max.iter, add'l info and convergence details hacked in
+                    by Peter Dalgaard"; Netlib go/zeroin.f: Übersetzung von
+                    Brents Prozedur zero (R. P. Brent, Algorithms for
+                    Minimization without Derivatives, Prentice-Hall 1973)
+Rechte:             laut R-Quelle wie oben
+Lizenz der Vorlage: go/zeroin.f: keiner; c/brent.shar: nicht geprüft (Abruf
+                    nicht möglich)
+Änderungen:         C99 mit Rückruf (sl_r_fn1), Rechenfolge unverändert
 
 2.4 Kalenderrechnung nach Hinnant
 ---------------------------------
-Dateien:            src/fifo_core_impl.h (days_from_civil, civil_from_days),
-                    src/tax_core_impl.h (civil_from_days2)
+Dateien:            src/prepare_core_impl.h (eng_civil, eng_days; bis E17 Stufe 1c
+                    src/engine_core_impl.h, davor src/fifo_core_impl.h und
+                    src/tax_core_impl.h)
 Herkunft:           übersetzt aus H. Hinnant, "chrono-Compatible Low-Level
                     Date Algorithms",
                     https://howardhinnant.github.io/date_algorithms.html

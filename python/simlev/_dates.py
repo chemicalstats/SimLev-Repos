@@ -104,14 +104,3 @@ def r_strptime_ymd(y: Any, m: Any, d: Any) -> int | None:
 def first_of_month(z: int) -> int:
     y, m, _ = ymd(z)
     return days_from_civil(y, m, 1)
-
-
-def add_months_first(z_first: int, k: int) -> int:
-    y, m, _ = ymd(z_first)
-    tot = (y * 12 + (m - 1)) + k
-    return days_from_civil(tot // 12, tot % 12 + 1, 1)
-
-
-def ym_key(z: int) -> int:
-    y, m, _ = ymd(z)
-    return y * 12 + m

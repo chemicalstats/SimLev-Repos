@@ -1,0 +1,402 @@
+"""simulation(), Phasen 4 und 5 über den gemeinsamen C++-Kern (E17): Tagesengine ``core/engine_core_impl.h``.
+
+Der Kern rechnet die Tagesschleife (Batch- und Marktupdate, Aktivierung, Splits, Sparplan, Handel, Rebalancing,
+Freibetrag, Vorabpauschale, Liquidation, Jahreswechsel und Abrechnungen mit Steuer) und den Abschluss des letzten
+Jahres (bis E17 Stufe 1c die Phasen ``_sim_run_days``, ``_Actions`` und ``_sim_close_years``). Warnungen,
+``details``-Ausgaben und Abbrüche meldet der Kern als Codes mit Werten; die Texte setzt ``_sim_engine_signal``
+wortgleich zu R 1.3.0, in derselben Reihenfolge (Ausgabe und Warnungen verzahnt). Gegenstücke:
+``r/R/sim_engine.R``, ``julia/src/sim_engine.jl``.
+"""
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from . import _ext
+import math
+import re
+import sys
+
+from ._dates import fmt_date, year_of
+from ._r.rformat import r_format1, r_sprintf
+from ._r.rnum import NA_REAL as NA
+from ._sim_base import _FEE, _is_true, _stop, _warn
+
+# Zeilen der Jahreszeile des Tarifwegs (core/tariff_core_impl.h, enum TR_*; wie _tariff_close)
+_ROW_FIELDS = ("year", "taxable_income", "church_tax_paid_deductible", "church_tax_refunded",
+               "church_tax_net_deduction", "taxable_income_net", "deduction_effect", "gain_p23", "income_tax_p23",
+               "soli_p23", "church_tax_p23", "tax_p23", "capital_income", "abgeltung_burden", "church_tax_withheld_k",
+               "tariff_income_tax_k", "tariff_soli_k", "tariff_church_tax_k", "tariff_burden", "burden_without_gp",
+               "burden_with_gp", "guenstiger", "settlement", "refund", "church_tax_settlement_next_year")
+_TOT_FIELDS = ("total_taxes", "loss_capital_gains", "loss_private_sales", "private_sale_gains_ytd",
+               "private_sale_losses_ytd", "sparer_pauschbetrag_annual", "sparer_pauschbetrag_remaining",
+               "sparer_pauschbetrag_used_total", "current_year", "cgt_base_taxed_ytd", "cgt_loss_added_ytd",
+               "cgt_loss_used_ytd", "cgt_pool_start_ytd")
+_REGIMES = (None, "investment_fund", "capital_gains", "private_sale")
+
+
+def _signal(v) -> tuple[np.ndarray, int]:
+    """Signalspalte als float64 (logisch: 0/1, NA als NaN) und Merker 'logisch' (isTRUE nur für TRUE)."""
+    if isinstance(v, np.ndarray) and v.dtype == np.float64:
+        return v, 0
+    a = np.asarray(v)
+    if a.dtype == bool:
+        return a.astype(np.float64), 1
+    na = pd.isna(a)   # vektorisiert (None, NaN, pd.NA); sonst wie _isna je Wert
+    out = np.zeros(a.size, dtype=np.float64)
+    ok = ~na
+    out[ok] = a[ok].astype(bool)   # Wahrheitswert je Wert wie bool(x)
+    out[na] = np.nan
+    return out, 1
+
+
+def _fee(f) -> list:
+    return [0.0] * 5 if f is None else [1.0, float(f["fixed"]), float(f["percent"]), float(f["min"]), float(f["max"])]
+
+
+def _num(x, default=0.0) -> float:
+    return default if x is None else float(x)
+
+
+def _harvest_md(harvest_day) -> int:
+    """Freibetrag ab harvest_day ("MM-TT"): erster Monat * 100 + Tag, den der Zeichenvergleich zulässt (wie R)."""
+    if isinstance(harvest_day, str) and re.fullmatch(r"[0-9]{2}-[0-9]{2}", harvest_day):
+        return int(harvest_day[:2]) * 100 + int(harvest_day[3:])
+    ok = [m * 100 + d for m in range(1, 13) for d in range(1, 32) if "%02d-%02d" % (m, d) >= harvest_day]
+    return min(ok) if ok else 9999
+
+
+def _sim_engine_run(sim: dict, fl: dict, cfg: dict, fr, event_weight, split_thresh, balance_dca, harvest_loss_pot,
+                    liquidate, stopp_date: int, details: bool, harvest_day) -> tuple[dict, float]:
+    """Vorbereitung (E17 Stufe 2), Phasen 4 und 5 über den C++-Kern (Termine, Flags, Startgewichte, Tagesschleife
+    und Abschluss des letzten Jahres); Rückgabe (sim, nicht gedeckte Steuerzahlungen in EUR). Setzt
+    fl["flag_harvest"] und fl["tax_regimes"]."""
+    nm = list(fl["flag_assets"])
+    flag_date = np.asarray(fl["flag_date"], dtype=np.int64)
+    n = int(flag_date.size)
+    person = cfg["tax_mode"] == "person"
+    mk = sim["market"]
+    prices, sb, ss, sig_logical = [], [], [], []
+    for a in nm:
+        prices.append(np.ascontiguousarray(mk[a]["asset_price"], dtype=np.float64))
+        v, lb = _signal(mk[a]["signal_buy"])
+        w, ls = _signal(mk[a]["signal_sell"])
+        sb.append(v)
+        ss.append(w)
+        sig_logical.append((lb, ls))
+    ew = None
+    if event_weight is not None:
+        ew = [None if event_weight.get(a) is None else np.asarray(fr.get(event_weight[a]), dtype=np.float64)
+              for a in nm]
+    br = [np.ascontiguousarray(mk[a]["base_rates"], dtype=np.float64) for a in nm] if person else None
+    regime_code = {"investment_fund": 1, "capital_gains": 2, "private_sale": 3}
+    no_split = set(cfg.get("no_split") or [])
+    tax_regimes = {a: sim["assets"][a]["tax_regime"] for a in nm}
+    ai, ad = [], []
+    for k, a in enumerate(nm):   # Startindizes und Start-Assets setzt die Vorbereitung
+        ai += [1 if sim["assets"][a]["style"] == "signal" else 0, 0, 0, 0, regime_code.get(tax_regimes[a], 0),
+               1 if a in no_split else 0, sig_logical[k][0], sig_logical[k][1]]
+        bonus = sim["assets"][a].get("bonus")
+        ad += [float(mk[a]["spread_rate"]), float(cfg["strategy"][a]["share"]), _num(bonus)]
+    fields = ("count", "price", "worth", "money", "total", "target", "actual", "differ")
+    reports = []
+    for a in nm:
+        new = {k: np.zeros(n) for k in ("worth", "money", "flows", "total", "share")}
+        sim["report"][a] = new
+        reports += [new["worth"], new["money"], new["flows"], new["total"], new["share"]]
+    harvest_on = _is_true(cfg.get("harvest_mode")) and person
+    split_on = _is_true(cfg.get("split_mode")) and split_thresh is not None
+    lo = float(split_thresh[0]) if split_on else 0.0
+    hi = float(split_thresh[1]) if split_on else 0.0
+    dca, bal = fl["dca"], fl["balance"]
+    pi = np.concatenate([np.array([bool(liquidate), bool(fl["event_replace"]), split_on, person, harvest_on,
+                                   _harvest_md(harvest_day) if harvest_on else 0], dtype=np.int32),
+                         dca[0], bal[0]]).astype(np.int32)
+    pd_ = np.array([float(stopp_date), lo, hi, float(cfg["start_value"]), dca[1], bal[1]], dtype=np.float64)
+    filled = np.asarray(fl["flag_filled"], dtype=bool)
+    ev = fl["flag_event"]
+    prep = (pi, pd_, np.array([float(sim["assets"][a]["start"]) for a in nm], dtype=np.float64),
+            filled.astype(np.int32) if filled.any() else None, None if ev is None else np.asarray(ev, dtype=np.int32),
+            dca[2], dca[3], bal[2], bal[3])
+    tt = sim["totals"]
+    tot0 = [_num(tt.get(f)) for f in _TOT_FIELDS]
+    env = cfg.get("tariff_env") if person else None
+    tariff_par = np.zeros(0)
+    zve = []
+    if env is not None:
+        from .withdrawal import _wd_tariff_par
+        tariff_par = _wd_tariff_par(env.tariff, env.church_k, env.use_gp)
+        if env.zve_all is None and env.zve:
+            for y, v in env.zve.items():
+                zve += [float(int(y)), float(v)]
+    bt = cfg.get("balance_thresh")
+    ci = [int(bool(cfg.get("fractions"))), int(bool(cfg.get("fees_on"))), int(bool(cfg.get("balance_mode"))),
+          int(bool(balance_dca)), int(bt is not None), int(cfg.get("balance_thresh_type") == "relative"), int(person),
+          int(bool(cfg.get("use_sparer_pauschbetrag"))), int(bool(harvest_loss_pot)), int(bool(liquidate)),
+          int(cfg.get("marginal_tax_rate") is not None), year_of(int(stopp_date)),
+          int(env is not None and env.zve_all is not None), int(bool(details))]
+    cd = [_num(bt), _num(cfg.get("dca_value")), float(_FEE.paid), _num(cfg.get("effective_tax_rate")),
+          _num(cfg.get("marginal_tax_rate")), _num(cfg.get("private_sale_threshold")),
+          _num(cfg.get("sparer_pauschbetrag")), _num(cfg.get("soli_factor_income"), 1.0), _num(cfg.get("church_k")),
+          lo, hi,
+          float(env.zve_all) if env is not None and env.zve_all is not None else 0.0]
+    (status, totals, lots, sells, taxes, px, fee_paid, tax_unpaid, rows, ks, refund_due, events,
+     err, flags) = _ext.sim_engine_run(
+        prep, flag_date.astype(np.float64), prices, sb, ss, ew, br, np.array(ai, dtype=np.int32),
+        np.array(ad, dtype=np.float64), np.array(ci, dtype=np.int32), np.array(cd, dtype=np.float64),
+        np.array(_fee(cfg.get("fee_order")) + _fee(cfg.get("fee_dca")), dtype=np.float64),
+        np.array(tot0, dtype=np.float64), np.asarray(tariff_par, dtype=np.float64), np.array(zve, dtype=np.float64),
+        reports)
+    stv = np.frombuffer(status, dtype=np.float64)
+    fl["flag_harvest"] = (np.frombuffer(flags, dtype=np.int32) & 128) != 0
+    fl["tax_regimes"] = tax_regimes
+    for k, a in enumerate(nm):
+        sim["status"][a] = {f: float(stv[8 * k + j]) for j, f in enumerate(fields)}
+        tr = sim["trades"][a]
+        lv = np.frombuffer(lots[k], dtype=np.float64).reshape(-1, 7)
+        buys = []
+        for x in lv:
+            lot = {"date": int(x[0]), "type": "Buy", "count": float(x[1]), "price": float(x[2]),
+                   "remaining": float(x[3]), "original": float(x[4])}
+            if x[6] != 0:
+                lot["vp"] = float(x[5])
+            buys.append(lot)
+        tr["buys"] = buys
+        tr["buy_count"] = len(buys)
+        sv = np.frombuffer(sells[k], dtype=np.float64).reshape(-1, 8)
+        sl = []
+        for x in sv:
+            rg = int(x[5])
+            sl.append({"event_date": int(x[0]), "event_type": "Sell", "asset_count": float(x[1]),
+                       "asset_price": float(x[2]), "event_gain": float(x[3]) if rg else NA,
+                       "event_taxes": float(x[4]) if rg else NA, "tax_regime": _REGIMES[rg],
+                       "tax_deferred": rg == 3, "holding_exempt": float(x[6]) if x[7] != 0 else NA})
+        tr["sells"] = sl
+        tr["sell_count"] = len(sl)
+        tv = np.frombuffer(taxes[k], dtype=np.float64).reshape(-1, 8)
+        tl = []
+        for x in tv:
+            if int(x[0]) == 1:
+                tl.append({"event_date": int(x[1]), "assessment_date": int(x[2]), "event_type": "Vorabpauschale",
+                           "flat_rate_gross": float(x[3]), "bonus_applied": float(x[4]),
+                           "flat_rate_taxable": float(x[5]), "spb_used": float(x[6]), "taxes_paid": float(x[7])})
+            else:
+                tl.append({"event_date": int(x[1]), "event_type": "Private sale tax", "taxes_paid": float(x[7])})
+        tr["taxes"] = tl
+        tr["tax_count"] = len(tl)
+        if px[k] is not None:
+            mk[a]["asset_price"] = np.frombuffer(px[k], dtype=np.float64).copy()
+    tv = np.frombuffer(totals, dtype=np.float64)
+    for j, f in enumerate(_TOT_FIELDS):
+        tt[f] = int(tv[j]) if f == "current_year" else float(tv[j])
+    if env is not None:   # Tarifweg: Jahreszeilen (wie _tariff_close), KiSt-Salden, Erstattung
+        rv = np.frombuffer(rows, dtype=np.float64).reshape(-1, len(_ROW_FIELDS))
+        for x in rv:
+            row = {f: float(v) for f, v in zip(_ROW_FIELDS, x)}
+            row["year"] = int(x[0])
+            row["guenstiger"] = bool(x[21] != 0)
+            env.rows.append(row)
+        kv = np.frombuffer(ks, dtype=np.float64).reshape(-1, 2)
+        for y, v in kv:
+            env.ks[str(int(y))] = float(v)
+        env.refund_due = refund_due
+        env.due_info = None
+    _FEE.paid = fee_paid
+    _sim_engine_signal(events, err, nm, flag_date)
+    return sim, tax_unpaid
+
+
+_LABELS = ("Vorabpauschale", "§ 23-Steuer")
+# Anlass der Käufe und Verkäufe (enum Reason in engine_core_impl.h)
+_REASONS = ("Handelssignal:", "Rebalancing:", "Rebalancing/Signal-Einstieg:", "Rebalancing/Signal-Ausstieg:",
+            "Liquidation:", "Steuerereignis:", "Split:", "Freibetrag:")
+_DOUBLE_LINE = "\u2550" * 62
+
+
+def _label(aux: int, ints) -> str:
+    """Bezeichnung einer Steuerzahlung (.pay_tax label)."""
+    return _LABELS[aux] if aux < 2 else "Steuer aus der Veranlagung %s" % "/".join(str(y) for y in ints)
+
+
+def _sim_engine_signal(events, err, nm, flag_date) -> None:
+    """Warnungen, details-Ausgaben und Abbruch des Kerns mit den Texten von R 1.3.0 auslösen (Reihenfolge des
+    Protokolls)."""
+    for code, site, day, asset, aux, ints, d0, d1, v in events:
+        a = nm[asset] if asset >= 0 else None
+        if code >= 200:
+            _sim_engine_detail(code, a, aux, v, ints, nm, fmt_date(int(flag_date[day - 1])))
+        elif code == 1:
+            _warn(r_sprintf("perform_trade_buy: ungültiger Kurs (%.4f) für %s am %s; der Kauf wird "
+                            "übersprungen.", d0, a, fmt_date(int(flag_date[day - 1]))))
+        elif code == 2:
+            _warn(r_sprintf("perform_trade_sell: angeforderte Verkaufsmenge %.4f übersteigt den Bestand %.4f von "
+                            "%s; verkauft wird der gesamte Bestand.", d0, d1, a))
+        elif code == 3:
+            _warn(r_sprintf("simulation: liquidate = TRUE: Position '%s' (Wert %.2f EUR) wurde nicht verkauft, weil die "
+                            "Ordergebühr den Erlös übersteigt.", a, d0))
+        elif code == 4:
+            _warn("no non-missing arguments to max; returning -Inf")
+        elif code == 5:
+            _warn(r_sprintf("simulation: %s von %.2f EUR am %s: das Depot reicht nicht aus; %.2f EUR bleiben als negativer "
+                            "Geldbestand (Steuerschuld) bei '%s'.", _label(aux, ints), d0, fmt_date(int(flag_date[day - 1])),
+                            d1, a))
+        elif code == 6:
+            _warn(r_sprintf("simulation: Paragraf 23 EStG: Gewinne (%.2f EUR) erreichen die Freigrenze (%.2f EUR), ",
+                            d0, d1) + "aber 'marginal_tax_rate' ist nicht gesetzt.\n"
+                  "Verwendet wird 42 % (Spitzensteuersatz); marginal_tax_rate in Prozent angeben (z. B. 42).")
+        else:
+            _stop("simulation: interner Fehler: unbekannter Ereigniscode %d der Tagesengine." % code)
+    if err is not None:
+        if err[3] == 101:
+            _stop("perform_asset_split: ratio muss > 0 sein (Split-Verhältnis), nicht %s." % r_format1(err[4]))
+        _stop("missing value where TRUE/FALSE needed")
+
+
+def _sim_engine_detail(code: int, name, aux: int, v, ints, nm, ds: str) -> None:
+    """details-Ausgabe eines Ereignisses (DT_* in engine_core_impl.h), wortgleich zu R 1.3.0."""
+    sp = r_sprintf
+    out = sys.stdout.write
+    if code == 201:
+        out(sp("%s\tKauf %.2fx %s zu %.2f EUR je Anteil am %s\n", _REASONS[aux], v[0], name, v[1], ds))
+    elif code == 202:
+        out(sp("\t\t=> Vorabpauschale-Anrechnung (\u00a7 19 InvStG): %.2f EUR\n", v[0]))
+    elif code == 203:
+        out(sp("\t\t=> Sparerpauschbetrag: %.2f EUR (verbleibend: %.2f EUR)\n", v[0], v[1]))
+    elif code == 204:
+        out(sp("\t\t=> Steuerfreier Gewinn (Haltedauer > 1 Jahr): %.2f EUR\n", v[0]))
+    elif code == 205:
+        out(sp("\t\t=> Nicht verrechenbarer Verlust (Haltedauer > 1 Jahr): %.2f EUR\n", v[0]))
+    elif code == 206:
+        out(sp("\t\t=> Steuerpflichtiger Gewinn (Haltedauer < 1 Jahr): %.2f EUR (seit Jahresbeginn: %.2f EUR)\n",
+               v[0], v[1]))
+    elif code == 207:
+        out(sp("\t\t=> Verrechenbarer Verlust (Haltedauer < 1 Jahr): %.2f EUR (seit Jahresbeginn: %.2f EUR)\n",
+               v[0], v[1]))
+    elif code == 208:
+        out(sp("%s\tVerkauf %.2fx %s zu %.2f EUR je Anteil am %s\n", _REASONS[aux], v[0], name, v[1], ds))
+    elif code == 209:   # ifelse(gain < 0, ...) mit NA: "NA" wie R
+        out(sp("\t\t=> %s: %.2f EUR; Steuer: %.2f EUR\n",
+               "NA" if math.isnan(v[0]) else ("Verlust" if v[0] < 0 else "Gewinn"), v[0], v[1]))
+    elif code == 210:
+        out(sp("Freibetrag:\tRealisierung von Gewinnen %.2f EUR mit %.4fx %s (freier Sparer-Pauschbetrag/"
+               "Verlusttopf %.2f EUR)\n", v[0], v[1], name, v[2]))
+    elif code == 211:
+        desc = ("1 : " + r_format1(v[0], digits=5)) if aux == 1 else (r_format1(v[0], digits=5) + " : 1")
+        out("Split-Ereignis:\t%s %s im Verh\u00e4ltnis %s am %s\n" % ("Split" if aux == 1 else "Reverse-Split", name,
+                                                                       desc, ds))
+    elif code == 212:
+        out("Split-Ereignis:\t%s ohne Bestand: Kursreihe %s %s am %s\n"
+            % (name, "1 :" if aux == 1 else ": 1", r_format1(v[0], digits=5), ds))
+    elif code == 213:
+        out("Marktereignis:\tHandel mit %s ab jetzt m\u00f6glich.\n" % ", ".join(nm[k] for k in ints))
+    elif code == 214:
+        parts = "; ".join(sp("%s %.2f EUR", nm[k], x) for k, x in zip(ints, v[1:]))
+        out(sp("Einzahlung:\t%.2f EUR in das Depot am %s\n\t\t=> ", v[0], ds) + parts + "\n")
+    elif code == 215:
+        out("Rebalancing:\tErzwungenes Rebalancing am %s wegen neu handelbarer Assets: %s\n"
+            % (ds, ", ".join(nm[k] for k in ints)))
+    elif code == 216:
+        out(sp("Rebalancing:\tRebalancing am %s (max. Abweichung: %.2f%% > Schwelle: %.2f%%)\n", ds, v[0], v[1]))
+    elif code == 217:
+        out(sp("\t\t=> %s: Ziel=%.1f%%, Ist=%.1f%%, Abweichung=%.2f%%\n", name, v[0], v[1], v[2]))
+    elif code == 218:
+        out(sp("Rebalancing:\tKein Rebalancing am %s (max. Abweichung: %.2f%% < Schwelle: %.2f%%)\n", ds, v[0], v[1]))
+    elif code == 219:
+        out(sp("\t\t%.2f EUR von %s in den Rebalancing-Topf\n", v[0], name))
+    elif code == 220:
+        out(sp("Rebalancing:\t%.2f EUR aus dem Rebalancing-Topf an %s\n", v[0], name))
+    elif code == 221:
+        out(sp("\t\t=> %s h\u00e4lt %.2f EUR als Cash-Reserve (Signal inaktiv)\n", name, v[0]))
+    elif code == 222:
+        out(sp("\t\tRestverteilung von %.2f EUR aus dem Rebalancing-Topf\n", v[0]))
+    elif code == 223:
+        out(sp("\t\t=> %.2f EUR an %s\n", v[0], name))
+    elif code == 224:
+        out(sp("Steuerereignis:\tVorabpauschale %s: %.2f EUR festgesetzt am %s (Zufluss und Steuer am ersten "
+               "Handelstag des Folgejahres)\n", name, v[0], ds))
+    elif code == 225:
+        out(sp("Steuerereignis:\tZahlung %s %.2f EUR f\u00fcr %s aus dem Geldbestand am %s\n", _label(aux, ints), v[0],
+               name, ds))
+    elif code == 226:
+        out(sp("Steuerereignis:\tTeilzahlung %s %.2f EUR aus dem Geldbestand am %s\n", _label(aux, ints), v[0], ds))
+    elif code == 227:
+        out(sp("\t\t=> Anteile verkauft f\u00fcr den Rest von %.2f EUR (%s)\n", v[0], _label(aux, ints)))
+    elif code == 228:
+        out(sp("Steuerereignis:\tVeranlagung %d: Nachzahlung %.2f EUR (davon \u00a7 23 %.2f EUR, "
+               "Kirchensteuer-Sonderausgaben %.2f EUR%s) am %s, aufgeteilt %s\n", int(v[0]), v[1], v[2], v[3],
+               sp(", G\u00fcnstigerpr\u00fcfung %.2f EUR", v[4]) if aux & 1 else "", ds,
+               "nach dem \u00a7 23-Jahressaldo je Asset" if aux & 2 else "zu gleichen Teilen auf die Assets"))
+    elif code == 229:
+        out(sp("\t\t=> Anteil %s: %.2f EUR\n", name, v[0]))
+    elif code == 230:
+        out(sp("Steuerereignis:\t\u00a7 23 EStG: Steuer %.2f EUR (%s) am %s\n", v[0], name, ds))
+    elif code == 231:
+        out(sp("Steuerereignis:\tG\u00fcnstigerpr\u00fcfung: Erstattung %.2f EUR in den Geldbestand am %s\n", v[0], ds))
+    elif code == 232:
+        out(sp("Steuerereignis:\tVorabpauschale %s (festgesetzt %s): %.2f EUR, nach TFS %.2f EUR, SPB %.2f EUR, "
+               "Steuer %.2f EUR am %s\n", name, fmt_date(int(v[0])), v[1], v[2], v[3], v[4], ds))
+    elif code == 240:
+        out("\n" + _DOUBLE_LINE + "\n")
+        out("  JAHRESWECHSEL: %d -> %d\n" % (int(v[0]), int(v[1])))
+        out(_DOUBLE_LINE + "\n")
+    elif code == 241:
+        out(sp("  \u00a7 23 EStG: Verlustvortrag verwendet: %.2f EUR\n", v[0]))
+        out(sp("             Verbleibender Vortrag: %.2f EUR\n", v[1]))
+    elif code == 242:
+        out("  \u00a7 23 EStG Jahres\u00fcbersicht %d:\n" % int(v[0]))
+        out(sp("    Bruttogewinne (< 1 Jahr):    %10.2f EUR\n", v[1]))
+        out(sp("    Bruttoverluste (< 1 Jahr):   %10.2f EUR\n", v[2]))
+        out(sp("    Interne Verrechnung:         %10.2f EUR\n", v[3]))
+        out(sp("    Verlustvortrag-Verrechnung:  %10.2f EUR\n", v[4]))
+        out("    " + "\u2500" * 41 + "\n")
+        out(sp("    Netto-Ergebnis:              %10.2f EUR\n", v[5]))
+    elif code == 243:
+        out("\n  \u26a0 FREIGRENZE ERREICHT!\n")
+        out(sp("    Jahressaldo %.2f EUR >= Freigrenze %.2f EUR\n", v[0], v[1]))
+        out(sp("    \u2192 GESAMTER Gewinn nach Verlustvortrag steuerpflichtig: %.2f EUR (Freigrenze, kein "
+               "Freibetrag!)\n", v[2]))
+        if aux == 1:
+            out("    \u2192 Steuer nach dem Einkommensteuertarif (ESt + Soli + KiSt des \u00a7 23-Zuwachses): siehe "
+                "Jahresveranlagung unten (Zeile \u00a7 23)\n")
+        else:
+            out(sp("    \u2192 Steuersatz: %.1f%%%s%s\n", v[3] * 100,
+                   sp(" + %.1f%%%% Soli", (v[4] - 1) * 100) if v[4] > 1 else "",
+                   sp(" + %.1f%% KiSt", v[5] * 100) if v[5] > 0 else ""))
+            out(sp("    \u2192 Steuerlast: %.2f EUR\n", v[6]))
+    elif code == 244:
+        out(sp("\n  Nettoverlust %.2f EUR \u2192 Vortrag ins n\u00e4chste Jahr\n", v[0]))
+        out(sp("  Gesamter Verlustvortrag: %.2f EUR\n", v[1]))
+    elif code == 245:
+        out(sp("\n  \u2713 Jahressaldo %.2f EUR < Freigrenze %.2f EUR \u2192 STEUERFREI (Verlustvortrag "
+               "unver\u00e4ndert)\n", v[0], v[1]))
+    elif code == 246:
+        out("\n  Keine steuerpflichtigen \u00a7 23 Vorg\u00e4nge in %d\n" % int(v[0]))
+    elif code == 247:
+        out("\n  Sparerpauschbetrag %d:\n" % int(v[0]))
+        out(sp("    Jahresbetrag:    %10.2f EUR\n", v[1]))
+        out(sp("    Verwendet:       %10.2f EUR\n", v[2]))
+        out(sp("    Verfallen:       %10.2f EUR\n", v[3]))
+    elif code == 248:
+        out(sp("  \u00a7 20 EStG: Unterj\u00e4hrige Verlustverrechnung -> Erstattung %.2f EUR in den Geldbestand\n", v[0]))
+    elif code == 249:
+        out(sp("  \u00a7 20 EStG: Verlust gibt Sparer-Pauschbetrag frei: %.2f EUR (genutzt %d: %.2f EUR, "
+               "Verlusttopf %.2f EUR)\n", v[0], int(v[1]), v[2], v[3]))
+    elif code == 250:   # Jahreszeile in der Reihenfolge TR_* (tariff_core_impl.h)
+        year, X1, D = int(v[0]), v[20], v[22]
+        out(sp("  Tarif %d: zvE %.2f EUR - KiSt-Sonderausgaben %.2f EUR (gezahlt %.2f, erstattet %.2f) = %.2f EUR "
+               "(Wirkung %.2f EUR)\n", year, v[1], v[4], v[2], v[3], v[5], v[6]))
+        if aux & 2:
+            out(sp("    \u00a7 23: Gewinn %.2f EUR -> Steuerlast ESt %.2f + Soli %.2f + KiSt %.2f = %.2f EUR\n",
+                   v[7], v[8], v[9], v[10], v[11]))
+        if aux & 1:
+            out(sp("    G\u00fcnstigerpr\u00fcfung: K %.2f EUR, Abgeltungsteuer %.2f EUR (KiSt %.2f), Tarif auf K %.2f EUR "
+                   "(ESt %.2f + Soli %.2f + KiSt %.2f); Belastung ohne %.2f / mit %s EUR -> %s\n",
+                   v[12], v[13], v[14], v[18], v[15], v[16], v[17], v[19],
+                   "-" if math.isnan(X1) else sp("%.2f", X1), "Tarif" if v[21] != 0 else "Abgeltungsteuer bleibt"))
+        out(sp("    Abrechnung: %s %.2f EUR; KiSt-Bescheid %+.2f EUR (Sonderausgabe %d)\n",
+               "Nachzahlung" if D >= 0 else "Erstattung", abs(D), v[24], year + 1))
+    elif code == 251:
+        out("\n  Tracker zur\u00fcckgesetzt f\u00fcr Jahr %d\n" % int(v[0]))
+        out(_DOUBLE_LINE + "\n\n")
+    else:
+        _stop("simulation: interner Fehler: unbekannter Ereigniscode %d der Tagesengine." % code)

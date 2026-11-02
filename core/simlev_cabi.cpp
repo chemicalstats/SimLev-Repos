@@ -1,8 +1,8 @@
 /*
  * core/simlev_cabi.cpp -- C-ABI-Huelle der geteilten C++-Kerne (dritter Host: Julia; N7, 01.11.2026)
  *
- * Die geteilten Kerne (simlev_core.h, research_core_impl.h, withdrawal_core_impl.h,
- * simulation_core_impl.h, fifo_core_impl.h, tax_core_impl.h) rechnen in R (Huellen r/src/<kern>.cpp) und Python
+ * Die geteilten Kerne (simlev_core.h, research_core_impl.h, withdrawal_core_impl.h, tariff_core_impl.h,
+ * engine_core_impl.h) rechnen in R (Huellen r/src/<kern>.cpp) und Python
  * (python/src/_ext_<kern>.cpp) seit Etappe 7.3a aus derselben Quelle. Diese Datei stellt sie hinter einer
  * reinen C-Schnittstelle bereit (extern "C"; nur Zeiger, Laengen und Skalare), ueber die Julia sie
  * per ccall aufruft (julia/src/cabi.jl). Gebaut von julia/deps/build.jl in die Bibliothek libslc
@@ -27,16 +27,14 @@
  *                                         kopiert die Ergebnisse in die Felder des Aufrufers
  *   SIMLEV_LIST, DONE, SET_FLAG           Tupel bzw. Merker wie in Python
  *
- * Engine-Kerne: simlev_host::Obj ist ein kleiner Knoten, der direkt auf den Simulationszustand
- * von Julia zeigt (julia/src/core.jl: Status, Lot, Trades, Totals als veraenderliche Strukturen;
- * Report- und Marktvektoren). Julia uebergibt je Asset eine Zeile simlev_c_asset (Zeiger auf
- * Status und Trades, Datenzeiger der Vektoren, Lots als Feld von Objektzeigern) und haelt die
- * Objekte waehrend des Aufrufs fest (GC.@preserve). Die Feldlagen prueft Julia beim Laden gegen
- * simlev_c_layout(). Zugriffe ueber Namen wie in R; Unterlisten zurueckschreiben (set, put) ist
- * hier nichts, weil der Kern auf dem Zustand selbst arbeitet. Neue Lots (perform_trade_buy_cpp)
- * haengt Julia nach dem Aufruf an (Feld new_lot), named_list-Ergebnisse kopiert die Huelle in die
- * Ausgabefelder. Asset-Namen sind fuer den Kern Marken (Zeiger auf die Zeile der Tabelle), Text
- * ueberqueren die Grenze nicht.
+ * Auswertung (E17 Stufe 3, evaluate_core_impl.h): simlev_c_eval_* (Ergebnisobjekt je Aufrufer) und simlev_c_xirr.
+ *
+ * Tagesengine (E17, engine_core_impl.h): eigener Zustand im Kern, flache Eingabe (struct Input); Julia
+ * uebergibt Zeiger, Laengen und Skalare und holt die Ergebnisse ueber simlev_c_engine_* (julia/src/sim_engine.jl).
+ * Die frueheren Engine-Kerne (simulation_core_impl.h, fifo_core_impl.h, tax_core_impl.h) mit ihrem Host auf
+ * dem Simulationszustand von Julia (simlev_host::Obj, simlev_c_asset, simlev_c_layout) sind mit E17 Stufe 1c
+ * entfallen. Geblieben sind feste Groessen und Schrittweiten der flachen Felder; simlev_c_flat_layout meldet sie,
+ * Julia prueft sie beim Vorkompilieren (J15b).
  *
  * Rueckgabecodes: 0 in Ordnung, 1 Fehler des Kerns (Text), 2 Benutzerabbruch, 3 kein Speicher,
  * 4 unbekannte Ausnahme, 5 Fehlaufruf der Huelle (Laengen; Text).
@@ -210,162 +208,6 @@ inline void put(double* out, idx_t want, const double* p, idx_t n, const char* f
     for (idx_t k = 0; k < n; k++) out[k] = p[k];
 }
 
-/* ---------------------------------------------------------------------------
- * Engine: Simulationszustand von Julia (Feldlagen wie julia/src/core.jl)
- * ------------------------------------------------------------------------- */
-struct JStatus {
-    double count, price, worth, money, total, target, actual, differ;
-};
-struct JLot {
-    int64_t date;
-    double count, price, remaining, original, vp;
-};
-struct JTrades {
-    void* buys;
-    void* sells;
-    void* taxes;
-    int64_t fifo_front;
-};
-struct JTotals {
-    double total_taxes, loss_capital_gains, loss_private_sales, private_sale_gains_ytd, private_sale_losses_ytd,
-        sparer_pauschbetrag_annual, sparer_pauschbetrag_remaining, sparer_pauschbetrag_used_total;
-    int64_t current_year;
-    double cgt_base_taxed_ytd, cgt_loss_added_ytd, cgt_loss_used_ytd, cgt_pool_start_ytd;
-    void* vp_pending;
-    void* p23_due;
-    void* private_sale_net_ytd_by;
-};
-
-}  // namespace cabi
-
-/* Zeile je Asset (Julia: struct _CAsset in julia/src/cabi.jl, gleiche Feldfolge) */
-extern "C" typedef struct simlev_c_asset {
-    void* status;          /* Status (veraenderliche Struktur, 8 double) */
-    double* worth;         /* Report-Vektoren (Laenge n_days) */
-    double* money;
-    double* flows;
-    double* total;
-    double* share;
-    double* price;         /* market.asset_price */
-    int64_t* day;          /* market.asset_day (Tage seit 1970-01-01) */
-    void* trades;          /* Trades (veraenderliche Struktur) */
-    void** buys;           /* trades.buys: Feld von Zeigern auf Lot */
-    int64_t nbuys;
-} simlev_c_asset;
-
-namespace cabi {
-
-enum Kind {
-    K_NULL, K_ROOT, K_STATUS_L, K_MARKET_L, K_TRADES_L, K_REPORT_L, K_NAMES,
-    K_STATUS, K_MARKET, K_TRADES, K_REPORT,
-    K_DNUM, K_INUM, K_IVAL, K_DVEC, K_I64VEC, K_BUYS, K_LOT, K_TOTALS, K_RESULT
-};
-
-struct Ctx;
-/* Knoten: Art, Zahl bzw. Index, Zeiger, Zustand des Aufrufs (ohne Zugriff auf thread_local je Knoten) */
-struct Obj {
-    int kind;
-    idx_t i;
-    void* p;
-    Ctx* c;
-};
-
-/* Ergebnis von named_list: Zahlen der Reihe nach, dazu bis zu zwei Vektoren */
-struct Result {
-    double num[8];
-    int nnum = 0;
-    std::vector<int> ivec;
-    std::vector<double> dvec;
-    void clear() {
-        nnum = 0;
-        ivec.clear();
-        dvec.clear();
-    }
-};
-
-struct Ctx {
-    simlev_c_asset* tab = nullptr;   /* Zeilen je Asset */
-    idx_t n = 0;                      /* Zahl der Zeilen */
-    idx_t n_days = 0;                 /* Laenge der Report- und Marktvektoren */
-    JTotals* totals = nullptr;
-    JLot** buys = nullptr;            /* Lots fuer die Kerne mit buys-Argument */
-    idx_t nbuys = 0;
-    double new_lot[5] = {0, 0, 0, 0, 0};   /* date, count, price, remaining, original */
-    bool has_new_lot = false;
-    Result res;
-    std::vector<double> days;               /* asset_day als double (Puffer je Thread, bleibt stehen) */
-    idx_t day_only = -1;                    /* >= 0: nur dieser Tag wird umgewandelt (sim_buy) */
-};
-/* Zustand des laufenden Engine-Aufrufs: Speicher je Thread */
-inline Ctx& ctx_store() {
-    static thread_local Ctx c;
-    return c;
-}
-
-inline Obj mk(Ctx* c, int kind, idx_t i = 0, void* p = nullptr) { Obj o = {kind, i, p, c}; return o; }
-
-inline idx_t asset_of(const Ctx& c, const char* name) {
-    const simlev_c_asset* a = reinterpret_cast<const simlev_c_asset*>(name);
-    const idx_t i = a - c.tab;
-    if (i < 0 || i >= c.n) badcall("Engine: unbekanntes Asset");
-    return i;
-}
-inline const char* asset_name(const Ctx& c, idx_t i) { return reinterpret_cast<const char*>(c.tab + i); }
-
-inline bool eq(const char* a, const char* b) { return std::strcmp(a, b) == 0; }
-
-inline double* status_field(JStatus* s, const char* f) {
-    switch (f[0]) {
-    case 'c': if (eq(f, "count")) return &s->count; break;
-    case 'p': if (eq(f, "price")) return &s->price; break;
-    case 'w': if (eq(f, "worth")) return &s->worth; break;
-    case 'm': if (eq(f, "money")) return &s->money; break;
-    case 't': if (eq(f, "total")) return &s->total; if (eq(f, "target")) return &s->target; break;
-    case 'a': if (eq(f, "actual")) return &s->actual; break;
-    case 'd': if (eq(f, "differ")) return &s->differ; break;
-    }
-    badcall("Engine: unbekanntes Status-Feld '%s'", f);
-}
-inline double* report_field(const simlev_c_asset& a, const char* f) {
-    switch (f[0]) {
-    case 'w': if (eq(f, "worth")) return a.worth; break;
-    case 'm': if (eq(f, "money")) return a.money; break;
-    case 'f': if (eq(f, "flows")) return a.flows; break;
-    case 't': if (eq(f, "total")) return a.total; break;
-    case 's': if (eq(f, "share")) return a.share; break;
-    }
-    badcall("Engine: unbekanntes Report-Feld '%s'", f);
-}
-inline Obj lot_field(Ctx* c, JLot* b, const char* f) {
-    switch (f[0]) {
-    case 'd': if (eq(f, "date")) return mk(c, K_INUM, 0, &b->date); break;
-    case 'c': if (eq(f, "count")) return mk(c, K_DNUM, 0, &b->count); break;
-    case 'p': if (eq(f, "price")) return mk(c, K_DNUM, 0, &b->price); break;
-    case 'r': if (eq(f, "remaining")) return mk(c, K_DNUM, 0, &b->remaining); break;
-    case 'o': if (eq(f, "original")) return mk(c, K_DNUM, 0, &b->original); break;
-    case 'v': if (eq(f, "vp")) return mk(c, K_DNUM, 0, &b->vp); break;
-    }
-    badcall("Engine: unbekanntes Lot-Feld '%s'", f);
-}
-inline Obj totals_field(Ctx* c, JTotals* t, const char* f, bool must) {
-    struct E { const char* n; std::size_t len; std::size_t off; bool isint; };
-#define CABI_T(name, isint) {#name, sizeof(#name) - 1, offsetof(JTotals, name), isint}
-    static const E tab[] = {
-        CABI_T(total_taxes, false), CABI_T(loss_capital_gains, false), CABI_T(loss_private_sales, false),
-        CABI_T(private_sale_gains_ytd, false), CABI_T(private_sale_losses_ytd, false),
-        CABI_T(sparer_pauschbetrag_annual, false), CABI_T(sparer_pauschbetrag_remaining, false),
-        CABI_T(sparer_pauschbetrag_used_total, false), CABI_T(current_year, true), CABI_T(cgt_base_taxed_ytd, false),
-        CABI_T(cgt_loss_added_ytd, false), CABI_T(cgt_loss_used_ytd, false), CABI_T(cgt_pool_start_ytd, false),
-    };
-#undef CABI_T
-    const std::size_t len = std::strlen(f);
-    for (const E& e : tab)
-        if (e.len == len && e.n[0] == f[0] && std::memcmp(f, e.n, len) == 0)
-            return mk(c, e.isint ? K_INUM : K_DNUM, 0, reinterpret_cast<char*>(t) + e.off);
-    if (must) badcall("Engine: unbekanntes Feld von totals '%s'", f);
-    return mk(c, K_NULL);
-}
-
 }  // namespace cabi
 
 /* ---------------------------------------------------------------------------
@@ -377,188 +219,6 @@ typedef cabi::Vec NumVec;
 typedef cabi::IVec IntVec;
 typedef cabi::Mat NumMat;
 typedef cabi::IVec LglVec;
-typedef cabi::Obj Obj;
-struct Date { double day; };
-
-using cabi::K_NULL; using cabi::K_ROOT; using cabi::K_STATUS_L; using cabi::K_MARKET_L; using cabi::K_TRADES_L;
-using cabi::K_REPORT_L; using cabi::K_NAMES; using cabi::K_STATUS; using cabi::K_MARKET; using cabi::K_TRADES;
-using cabi::K_REPORT; using cabi::K_DNUM; using cabi::K_INUM; using cabi::K_IVAL; using cabi::K_DVEC;
-using cabi::K_I64VEC; using cabi::K_BUYS; using cabi::K_LOT; using cabi::K_TOTALS; using cabi::K_RESULT;
-using cabi::mk; using cabi::eq;
-
-inline Obj as_list(Obj x) { return x; }
-
-inline cabi::idx_t length(Obj x) {
-    switch (x.kind) {
-    case K_NAMES: return x.c->n;
-    case K_BUYS: return x.i;
-    case K_LOT: return 6;
-    case K_NULL: return 0;
-    default: return 1;
-    }
-}
-
-/* oberste Ebene: Position wie .SIM_MEM_LAYOUT (1 status, 2 market, 3 trades, 4 report); Lots */
-inline Obj at(Obj x, cabi::idx_t i) {
-    if (x.kind == K_ROOT) {
-        switch (i) {
-        case 1: return mk(x.c, K_STATUS_L);
-        case 2: return mk(x.c, K_MARKET_L);
-        case 3: return mk(x.c, K_TRADES_L);
-        case 4: return mk(x.c, K_REPORT_L);
-        }
-        cabi::badcall("Engine: Position %td von sim nicht belegt", i);
-    }
-    if (x.kind == K_BUYS) {
-        if (i < 0 || i >= x.i) return mk(x.c, K_NULL);
-        return mk(x.c, K_LOT, 0, static_cast<cabi::JLot**>(x.p)[i]);
-    }
-    cabi::badcall("Engine: at() auf Knoten %d", x.kind);
-}
-
-/* Zurueckschreiben einer Unterliste: der Kern arbeitet auf dem Zustand selbst; neues Lot merken */
-inline void put(Obj x, cabi::idx_t i, Obj value) {
-    if (x.kind == K_BUYS) {
-        if (value.kind != K_RESULT || i != x.i) cabi::badcall("Engine: Lot nur am Ende anhaengen");
-        cabi::Ctx& c = *x.c;
-        if (c.res.nnum != 5) cabi::badcall("Engine: Lot unvollstaendig");
-        for (int k = 0; k < 5; k++) c.new_lot[k] = c.res.num[k];
-        c.has_new_lot = true;
-        return;
-    }
-    (void) i;
-}
-
-inline bool has(Obj d, const char* name) {
-    if (d.kind == K_LOT) return eq(name, "date") || eq(name, "count") || eq(name, "price") ||
-                                eq(name, "remaining") || eq(name, "original") || eq(name, "vp");
-    if (d.kind == K_TOTALS) return cabi::totals_field(d.c, static_cast<cabi::JTotals*>(d.p), name, false).kind != K_NULL;
-    return true;
-}
-
-inline Obj get(Obj d, const char* name) {
-    cabi::Ctx& c = *d.c;
-    switch (d.kind) {
-    case K_STATUS_L: return mk(d.c, K_STATUS, cabi::asset_of(c, name));
-    case K_MARKET_L: return mk(d.c, K_MARKET, cabi::asset_of(c, name));
-    case K_TRADES_L: return mk(d.c, K_TRADES, cabi::asset_of(c, name));
-    case K_REPORT_L: return mk(d.c, K_REPORT, cabi::asset_of(c, name));
-    case K_STATUS:
-        return mk(d.c, K_DNUM, 0, cabi::status_field(static_cast<cabi::JStatus*>(c.tab[d.i].status), name));
-    case K_REPORT: return mk(d.c, K_DVEC, c.n_days, cabi::report_field(c.tab[d.i], name));
-    case K_MARKET:
-        if (eq(name, "asset_price")) return mk(d.c, K_DVEC, c.n_days, c.tab[d.i].price);
-        if (eq(name, "asset_day")) return mk(d.c, K_I64VEC, c.n_days, c.tab[d.i].day);
-        cabi::badcall("Engine: unbekanntes Markt-Feld '%s'", name);
-    case K_TRADES: {
-        cabi::JTrades* t = static_cast<cabi::JTrades*>(c.tab[d.i].trades);
-        if (eq(name, "buys")) return mk(d.c, K_BUYS, c.tab[d.i].nbuys, c.tab[d.i].buys);
-        if (eq(name, "buy_count")) return mk(d.c, K_IVAL, c.tab[d.i].nbuys);
-        if (eq(name, "fifo_front")) return mk(d.c, K_INUM, 0, &t->fifo_front);
-        cabi::badcall("Engine: unbekanntes Trades-Feld '%s'", name);
-    }
-    case K_LOT: return cabi::lot_field(d.c, static_cast<cabi::JLot*>(d.p), name);
-    case K_TOTALS: return cabi::totals_field(d.c, static_cast<cabi::JTotals*>(d.p), name, true);
-    }
-    cabi::badcall("Engine: get('%s') auf Knoten %d", name, d.kind);
-}
-
-inline double as_double(Obj x) {
-    switch (x.kind) {
-    case K_DNUM: return *static_cast<double*>(x.p);
-    case K_INUM: return (double) *static_cast<int64_t*>(x.p);
-    case K_IVAL: return (double) x.i;
-    }
-    cabi::badcall("Engine: as_double auf Knoten %d", x.kind);
-}
-inline int as_int(Obj x) {
-    switch (x.kind) {
-    case K_INUM: return (int) *static_cast<int64_t*>(x.p);
-    case K_IVAL: return (int) x.i;
-    case K_DNUM: return (int) *static_cast<double*>(x.p);
-    }
-    cabi::badcall("Engine: as_int auf Knoten %d", x.kind);
-}
-
-/* Datenvektor als Sicht (double) bzw. Kopie (asset_day, Int64 -> double wie Python) */
-inline NumVec num_vec(Obj x) {
-    if (x.kind == K_DVEC) {
-        NumVec v = {nullptr, static_cast<double*>(x.p), x.i};
-        return v;
-    }
-    if (x.kind == K_I64VEC) {
-        /* Kopie wie Python (Int64 -> double), aber in einem Puffer je Thread; perform_trade_buy_cpp liest
-         * nur den Tag index - 1, die Huelle sim_buy wandelt daher nur diesen um (sonst O(Tage) je Kauf) */
-        cabi::Ctx& c = *x.c;
-        const int64_t* s = static_cast<const int64_t*>(x.p);
-        if ((cabi::idx_t) c.days.size() < x.i) c.days.resize((std::size_t) x.i);
-        if (c.day_only >= 0 && c.day_only < x.i) c.days[(std::size_t) c.day_only] = (double) s[c.day_only];
-        else for (cabi::idx_t k = 0; k < x.i; k++) c.days[(std::size_t) k] = (double) s[k];
-        NumVec v = {nullptr, c.days.data(), x.i};
-        return v;
-    }
-    cabi::badcall("Engine: num_vec auf Knoten %d", x.kind);
-}
-inline NumVec new_num(cabi::idx_t n, double fill = 0.0) { return cabi::alloc().num(n, fill); }
-inline IntVec new_int(cabi::idx_t n, int fill = 0) { return cabi::alloc().ivec(n, fill); }
-
-/* Werte setzen: Felder des Zustands schreiben; Vektoren und Unterlisten sind schon an Ort und Stelle */
-inline void set(Obj&, const char*, const Obj&) {}
-inline void set(Obj&, const char*, const NumVec&) {}
-inline void set(Obj& d, const char* name, double v) {
-    cabi::Ctx& c = *d.c;
-    switch (d.kind) {
-    case K_STATUS: *cabi::status_field(static_cast<cabi::JStatus*>(c.tab[d.i].status), name) = v; return;
-    case K_LOT: {
-        Obj f = cabi::lot_field(d.c, static_cast<cabi::JLot*>(d.p), name);
-        if (f.kind != K_DNUM) cabi::badcall("Engine: Lot-Feld '%s' ist keine Zahl", name);
-        *static_cast<double*>(f.p) = v;
-        return;
-    }
-    case K_TOTALS: {
-        Obj f = cabi::totals_field(d.c, static_cast<cabi::JTotals*>(d.p), name, true);
-        if (f.kind == K_DNUM) *static_cast<double*>(f.p) = v;
-        else *static_cast<int64_t*>(f.p) = (int64_t) v;
-        return;
-    }
-    }
-    cabi::badcall("Engine: set('%s', Zahl) auf Knoten %d", name, d.kind);
-}
-inline void set(Obj& d, const char* name, int v) {
-    cabi::Ctx& c = *d.c;
-    if (d.kind == K_TRADES) {
-        if (eq(name, "fifo_front")) {
-            static_cast<cabi::JTrades*>(c.tab[d.i].trades)->fifo_front = v;
-            return;
-        }
-        if (eq(name, "buy_count")) return;   /* Julia: Zahl der Lots = length(buys) */
-    }
-    set(d, name, (double) v);
-}
-
-/* named_list: Ergebnis in den Speicher des Aufrufs (Zahlen der Reihe nach, Vektoren gesondert) */
-inline void add(cabi::Result& r, double v) {
-    if (r.nnum >= 8) cabi::badcall("Engine: zu viele Werte in named_list");
-    r.num[r.nnum++] = v;
-}
-inline void add(cabi::Result& r, int v) { add(r, (double) v); }
-inline void add(cabi::Result& r, const Date& d) { add(r, d.day); }
-inline void add(cabi::Result&, const char*) {}
-inline void add(cabi::Result& r, const std::vector<int>& v) { r.ivec = v; }
-inline void add(cabi::Result& r, const std::vector<double>& v) { r.dvec = v; }
-inline void add(cabi::Result& r, const IntVec& v) { r.ivec.assign(v.begin(), v.end()); }
-inline void add(cabi::Result& r, const NumVec& v) { r.dvec.assign(v.begin(), v.end()); }
-inline void fill(cabi::Result&) {}
-template <class T, class... Rest> void fill(cabi::Result& r, const char*, const T& value, const Rest&... rest) {
-    add(r, value);
-    fill(r, rest...);
-}
-template <class... Args> Obj named_list(const Args&... args) {
-    cabi::Ctx& c = cabi::ctx_store();
-    c.res.clear();
-    fill(c.res, args...);
-    return mk(&c, K_RESULT);
-}
 
 }  // namespace simlev_host
 
@@ -576,39 +236,15 @@ template <class... Args> Obj named_list(const Args&... args) {
 #define SIMLEV_LIST(...) std::make_tuple(__VA_ARGS__)
 #define SIMLEV_CLONE(v) cabi::alloc().copy((v).begin(), (v).end())
 #define SIMLEV_R_FINITE(x) std::isfinite(x)
-#define SIMLEV_XLENGTH(x) simlev_host::length(x)
-#define SIMLEV_LENGTH(x) simlev_host::length(x)
-#define SIMLEV_IS_NULL(x) ((x).kind == cabi::K_NULL)
-#define SIMLEV_STRING_AT(v, i) cabi::asset_name(*(v).c, i)
-#define SIMLEV_MARK_DATE(v) ((void) 0)
 
 #include "research_core_impl.h"
 #include "withdrawal_core_impl.h"
-#include "simulation_core_impl.h"
-#include "fifo_core_impl.h"
-#include "tax_core_impl.h"
+#include "engine_core_impl.h"   /* E17: Tagesengine (eigener Zustand, ohne Host-Objekte) */
+#include "evaluate_core_impl.h" /* E17 Stufe 3: Auswertung von simulation(), xirr */
 
 /* ===========================================================================
  * Exportierte Funktionen (Praefix simlev_c_). Laengen als int64_t, Matrizen spaltenweise.
  * ========================================================================= */
-
-/* Feldlagen der Julia-Strukturen (Bytes): Status (8), Lot (6), Trades (4), Totals (16),
- * simlev_c_asset (11), jeweils Groesse zuerst; Julia vergleicht beim Laden. Rueckgabe: Anzahl. */
-SIMLEV_C_EXPORT int64_t simlev_c_layout(int64_t* out, int64_t n) {
-    using namespace cabi;
-    const int64_t v[] = {
-        (int64_t) sizeof(JStatus),
-        (int64_t) sizeof(JLot), (int64_t) offsetof(JLot, date), (int64_t) offsetof(JLot, count),
-        (int64_t) offsetof(JLot, price), (int64_t) offsetof(JLot, remaining), (int64_t) offsetof(JLot, original),
-        (int64_t) offsetof(JLot, vp),
-        (int64_t) offsetof(JTrades, fifo_front),
-        (int64_t) sizeof(JTotals), (int64_t) offsetof(JTotals, current_year),
-        (int64_t) offsetof(JTotals, cgt_pool_start_ytd), (int64_t) offsetof(JTotals, vp_pending),
-        (int64_t) sizeof(simlev_c_asset), (int64_t) offsetof(simlev_c_asset, nbuys)};
-    const int64_t m = (int64_t) (sizeof v / sizeof v[0]);
-    for (int64_t k = 0; k < n && k < m; k++) out[k] = v[k];
-    return m;
-}
 
 SIMLEV_C_EXPORT const char* simlev_c_last_error(void) { return cabi::last_error(); }
 SIMLEV_C_EXPORT void simlev_c_interrupt(int on) { cabi::interrupt_flag().store(on ? 1 : 0); }
@@ -738,168 +374,200 @@ SIMLEV_C_EXPORT int simlev_c_wd_simulate(const double* const* mats, const int64_
     });
 }
 
-/* ---- Engine: simulation_core_impl.h, fifo_core_impl.h, tax_core_impl.h ----
- * tab: Zeilen je Asset (n), n_days: Laenge der Vektoren; a: Asset (0-basiert); index 1-basiert. */
-namespace cabi {
-template <class F> int engine(simlev_c_asset* tab, int64_t n, int64_t n_days, F f) {
-    Ctx& c = ctx_store();
-    c.tab = tab;
-    c.n = n;
-    c.n_days = n_days;
-    c.totals = nullptr;
-    c.has_new_lot = false;
-    c.day_only = -1;
-    c.res.clear();
-    const int rc = run(f);
-    c.tab = nullptr;
-    c.n = 0;
-    c.day_only = -1;
-    return rc;
-}
-inline simlev_host::Obj root() { return mk(&ctx_store(), K_ROOT); }
-inline simlev_host::Obj names() { return mk(&ctx_store(), K_NAMES); }
-inline simlev_host::Obj buys_obj(void** b, int64_t nb) { return mk(&ctx_store(), K_BUYS, nb, b); }
-inline const char* asset_name(idx_t i) { return asset_name(ctx_store(), i); }
-}  // namespace cabi
+/* ---- E17: Tagesengine (engine_core_impl.h, flache Eingabe struct Input) ----
+ * Ablauf in Julia (julia/src/sim_engine.jl): h = simlev_c_engine_new(); simlev_c_engine_run(h, ...) rechnet und
+ * schreibt die Report-Vektoren (Zeiger reports, 5 je Asset: worth, money, flows, total, share) an Ort und Stelle;
+ * simlev_c_engine_counts und _lots/_sells/_taxes/_prices/_events/_rows holen die uebrigen Ergebnisse;
+ * simlev_c_engine_free(h). Das Engine-Objekt gehoert dem Aufrufer (kein globaler Zustand; je Thread eigene
+ * Objekte). Eingaben wie python/src/_ext_engine.cpp (sim_engine_run): ai[AI_N na], ad[AD_N na], ci[CI_N],
+ * cd[CD_N], fees[10], tot0[TT_N], tariff_par[n_tariff_par], zve[2 n_zve] (Jahr, zvE); event_w und base_rates:
+ * nullptr oder je Asset ein Zeiger (nullptr ohne Spalte). Seit E17 Stufe 2 rechnet der Kern vorher die
+ * Vorbereitung (prepare_core_impl.h): pi[PI_N], pd[PD_N], start[na], filled[n] bzw. nullptr, event[n] bzw.
+ * nullptr, Tage der Plaene (d_*, b_*); flags_out[n] erhaelt die Tagesflags (Freibetragstage fuer das Ergebnis).
+ * Rueckgabe von simlev_c_engine_run: 0 in Ordnung, 6 Abbruch (NA in einer Bedingung bzw. Split-Verhaeltnis;
+ * Angaben ueber simlev_c_engine_counts), sonst wie die uebrigen Exporte. */
+SIMLEV_C_EXPORT void* simlev_c_engine_new(void) { return new (std::nothrow) simlev_engine::Engine(); }
+SIMLEV_C_EXPORT void simlev_c_engine_free(void* h) { delete static_cast<simlev_engine::Engine*>(h); }
 
-SIMLEV_C_EXPORT int simlev_c_sim_dca_flows(simlev_c_asset* tab, int64_t n, int64_t n_days, int64_t a, double flows,
-                                           int64_t index) {
-    return cabi::engine(tab, n, n_days, [&] {
-        simlev::dca_flows_allocation(cabi::root(), cabi::asset_name(a), flows, (int) index);
+SIMLEV_C_EXPORT int simlev_c_engine_run(void* h, int64_t n, int64_t na, const double* day,
+                                        const double* const* prices, const double* const* sig_buy,
+                                        const double* const* sig_sell, const double* const* event_w,
+                                        const double* const* base_rates, const int32_t* ai, const double* ad,
+                                        const int32_t* ci, const double* cd, const double* fees,
+                                        const double* tot0, const double* tariff_par, int64_t n_tariff_par,
+                                        const double* zve, int64_t n_zve, double* const* reports,
+                                        const int32_t* pi, const double* pd, const double* start, const int32_t* filled,
+                                        const int32_t* event, int64_t d_nd, const double* d_days,
+                                        const int32_t* d_dcode, int64_t b_nd, const double* b_days,
+                                        const int32_t* b_dcode, int32_t* flags_out) {
+    int rcode = 0;
+    const int rc = cabi::run([&] {
+        simlev_engine::Engine& E = *static_cast<simlev_engine::Engine*>(h);
+        simlev_engine::Input I;
+        I.n = n; I.na = na; I.day = day;
+        I.price = prices; I.sig_buy = sig_buy; I.sig_sell = sig_sell; I.event_w = event_w; I.base_rates = base_rates;
+        I.ai = ai; I.ad = ad; I.ci = ci; I.cd = cd; I.fees = fees; I.tot0 = tot0;
+        I.tariff_par = tariff_par; I.n_tariff_par = n_tariff_par; I.zve = zve; I.n_zve = n_zve; I.reports = reports;
+        simlev_prepare::PrepFlat F;
+        F.pi = pi; F.pd = pd; F.start = start; F.filled = filled; F.event = event;
+        F.d_nd = d_nd; F.d_days = d_days; F.d_dcode = d_dcode; F.b_nd = b_nd; F.b_days = b_days; F.b_dcode = b_dcode;
+        const int bad = E.setup_prepared(I, F);
+        if (bad) cabi::badcall("simlev_c_engine_run: Eingabe passt nicht (%d).", bad);
+        for (int64_t i = 0; i < n; i++) flags_out[i] = E.prep_flags[(std::size_t) i];
+        rcode = E.run();
+    });
+    if (rc != SIMLEV_C_OK) return rc;
+    return rcode != 0 ? 6 : SIMLEV_C_OK;
+}
+
+/* E17 Stufe 2: calculate_dates_flags() ueber den Kern (prepare_core_impl.h, dates_flags): si[SI_N] (on, years,
+ * quarter, end, skip, has_days, step), start, days/dcode (nd Werte, nullptr ohne days), out[n] 0/1 */
+SIMLEV_C_EXPORT int simlev_c_dates_flags(int64_t n, const double* dates, const int32_t* si, double start, int64_t nd,
+                                         const double* days, const int32_t* dcode, int32_t liquidate, int32_t* out) {
+    return cabi::run([&] {
+        simlev_prepare::dates_flags(n, dates, simlev_prepare::sched_of(si, start, nd, days, dcode), liquidate, out);
     });
 }
 
-SIMLEV_C_EXPORT int simlev_c_sim_buy_report(simlev_c_asset* tab, int64_t n, int64_t n_days, int64_t a, int64_t index,
-                                            double trade_count, double trade_price, double market_price) {
-    return cabi::engine(tab, n, n_days, [&] {
-        simlev::calculate_buy_report(cabi::root(), cabi::asset_name(a), (int) index, trade_count, trade_price,
-                                     market_price);
+/* status[8 na], totals[TT_N]; je Asset nlots, nsells, ntaxes, px_changed; cnt[5] Ereignisse, Ganzzahlen der
+ * Ereignisse (Jahre, Assets), Jahreszeilen, KiSt-Salden, Werte der details-Ereignisse; scal[3] fee_paid, tax_unpaid, refund_due; err[4] Stelle, Tag, Asset (0-basiert),
+ * Code; *err_d0 Wert zum Code (ohne Abbruch alles 0) */
+SIMLEV_C_EXPORT void simlev_c_engine_counts(void* h, double* status, double* totals, int64_t* nlots, int64_t* nsells,
+                                            int64_t* ntaxes, int32_t* px_changed, int64_t* cnt, double* scal,
+                                            int32_t* err, double* err_d0) {
+    const simlev_engine::Engine& E = *static_cast<simlev_engine::Engine*>(h);
+    E.status_out(status);
+    E.totals_out(totals);
+    for (int k = 0; k < E.na; k++) {
+        nlots[k] = (int64_t) E.buys[(std::size_t) k].size();
+        nsells[k] = (int64_t) E.sells[(std::size_t) k].size();
+        ntaxes[k] = (int64_t) E.taxes[(std::size_t) k].size();
+        px_changed[k] = E.px_changed[(std::size_t) k];
+    }
+    cnt[0] = (int64_t) E.events.size(); cnt[1] = (int64_t) E.ev_ints.size();
+    cnt[2] = (int64_t) E.rows.size(); cnt[3] = (int64_t) E.ks.size(); cnt[4] = (int64_t) E.ev_vals.size();
+    scal[0] = E.fee_paid; scal[1] = E.tax_unpaid; scal[2] = E.refund_due;
+    err[0] = E.err.site; err[1] = E.err.day; err[2] = E.err.asset; err[3] = E.err.code;
+    *err_d0 = E.err.d0;
+}
+
+/* Lots von Asset a (0-basiert): je Lot date, count, price, remaining, original, vp, has_vp */
+SIMLEV_C_EXPORT void simlev_c_engine_lots(void* h, int64_t a, double* out) {
+    static_cast<simlev_engine::Engine*>(h)->lots_out((int) a, out);
+}
+/* Verkaeufe von Asset a: je Verkauf date, count, price, gain, taxes, regime, exempt, has_exempt */
+SIMLEV_C_EXPORT void simlev_c_engine_sells(void* h, int64_t a, double* out) {
+    static_cast<simlev_engine::Engine*>(h)->sells_out((int) a, out);
+}
+/* Steuerbuchungen von Asset a: je Eintrag kind, event_date, assessment_date, gross, bonus, taxable, spb_used, paid */
+SIMLEV_C_EXPORT void simlev_c_engine_taxes(void* h, int64_t a, double* out) {
+    static_cast<simlev_engine::Engine*>(h)->taxes_out((int) a, out);
+}
+/* Kursreihe von Asset a (n Werte; nach Splits umgerechnet) */
+SIMLEV_C_EXPORT void simlev_c_engine_prices(void* h, int64_t a, double* out) {
+    const std::vector<double>& x = static_cast<simlev_engine::Engine*>(h)->px[(std::size_t) a];
+    for (std::size_t i = 0; i < x.size(); i++) out[i] = x[i];
+}
+/* Ereignisse: ints[9 k] code, site, day, asset (0-basiert, -1 ohne), aux, y_off, ny, v_off, nv; dbls[2 k] d0, d1;
+ * years[cnt[1]] Ganzzahlen (Jahre der Bezeichnungen, Assets); vals[cnt[4]] Werte der details-Ereignisse */
+SIMLEV_C_EXPORT void simlev_c_engine_events(void* h, int32_t* ints, double* dbls, int32_t* years, double* vals) {
+    const simlev_engine::Engine& E = *static_cast<simlev_engine::Engine*>(h);
+    E.events_out(ints, dbls);
+    for (std::size_t j = 0; j < E.ev_ints.size(); j++) years[j] = E.ev_ints[j];
+    for (std::size_t j = 0; j < E.ev_vals.size(); j++) vals[j] = E.ev_vals[j];
+}
+/* Jahreszeilen des Tarifwegs (TR_N je Zeile) und KiSt-Salden (Jahr, Betrag) */
+SIMLEV_C_EXPORT void simlev_c_engine_rows(void* h, double* rows, double* ks) {
+    const simlev_engine::Engine& E = *static_cast<simlev_engine::Engine*>(h);
+    E.rows_out(rows);
+    E.ks_out(ks);
+}
+
+/* ── Auswertung von simulation() (E17 Stufe 3, evaluate_core_impl.h; Julia: src/sim_evaluate.jl) ─────────────────
+ * h = simlev_c_eval_new(); simlev_c_eval_run(h, ...) rechnet; cnt[2] = Zeilen von undefined_metrics, Warnungen;
+ * simlev_c_eval_get holt die Ergebnisse; simlev_c_eval_free(h). Eingaben wie python/src/_ext_engine.cpp
+ * (sim_evaluate): je Asset Zeiger auf total, flows, worth, money, price (n); filled nullptr oder n Werte 0/1;
+ * sc[4] start_date, stopp_date, start_value, tax_unpaid; rf nullptr oder n_rf Werte. Rueckgabe 0 (auch bei einem
+ * Abbruch des Kerns, err in simlev_c_eval_get), 5 bei fehlerhafter Eingabe. */
+SIMLEV_C_EXPORT void* simlev_c_eval_new(void) { return new (std::nothrow) simlev_eval::Result(); }
+SIMLEV_C_EXPORT void simlev_c_eval_free(void* h) { delete static_cast<simlev_eval::Result*>(h); }
+SIMLEV_C_EXPORT int simlev_c_eval_run(void* h, int64_t n, int64_t na, const double* const* total,
+                                      const double* const* flows, const double* const* worth,
+                                      const double* const* money, const double* const* price, const double* day,
+                                      const int32_t* filled, const double* sc, const double* status_money,
+                                      const double* n_buys, const double* n_sells, const double* rf, int64_t n_rf,
+                                      int32_t rf_ok, int64_t* cnt) {
+    return cabi::run([&] {
+        simlev_eval::Result& R = *static_cast<simlev_eval::Result*>(h);
+        R = simlev_eval::Result();
+        simlev_eval::In I;
+        I.n = n; I.na = na; I.total = total; I.flows = flows; I.worth = worth; I.money = money; I.price = price;
+        I.day = day; I.filled = filled;
+        I.start_date = sc[0]; I.stopp_date = sc[1]; I.start_value = sc[2]; I.tax_unpaid = sc[3];
+        I.status_money = status_money; I.n_buys = n_buys; I.n_sells = n_sells; I.rf = rf; I.n_rf = n_rf; I.rf_ok = rf_ok;
+        if (simlev_eval::evaluate(I, R) == 2) cabi::badcall("simlev_c_eval_run: Eingabe passt nicht.");
+        cnt[0] = (int64_t) R.um.size();
+        cnt[1] = (int64_t) R.msgs.size();
+    });
+}
+/* tw, twr, inv, dd [n]; scal[3] cagr, ttwror, open_tax_debt; ints[4] has_ext_flows, skew_lgl, kurt_lgl, longest_dd;
+ * stats[20]; buys, sells [na]; why_i[6], why_v[6] (je cagr/ttwror: gesetzt, reason, detail bzw. v0..v2);
+ * um_i[3 k] metric, reason, detail; um_v[3 k]; msg_c[m], msg_v[4 m]; err[2] Stelle, Phase */
+SIMLEV_C_EXPORT void simlev_c_eval_get(void* h, double* tw, double* twr, double* inv, double* dd, double* scal,
+                                       int32_t* ints, double* stats, double* buys, double* sells, int32_t* why_i,
+                                       double* why_v, int32_t* um_i, double* um_v, int32_t* msg_c, double* msg_v,
+                                       int32_t* err) {
+    const simlev_eval::Result& R = *static_cast<simlev_eval::Result*>(h);
+    std::copy(R.total_worth.begin(), R.total_worth.end(), tw);
+    std::copy(R.twr_index.begin(), R.twr_index.end(), twr);
+    std::copy(R.invested.begin(), R.invested.end(), inv);
+    std::copy(R.drawdowns.begin(), R.drawdowns.end(), dd);
+    scal[0] = R.cagr; scal[1] = R.ttwror; scal[2] = R.open_tax_debt;
+    ints[0] = R.has_ext_flows; ints[1] = R.skew_lgl; ints[2] = R.kurt_lgl; ints[3] = R.longest_dd;
+    std::copy(R.stats, R.stats + simlev_eval::ST_N, stats);
+    std::copy(R.buys.begin(), R.buys.end(), buys);
+    std::copy(R.sells.begin(), R.sells.end(), sells);
+    for (int k = 0; k < 2; k++) {
+        why_i[3 * k] = R.why_set[k]; why_i[3 * k + 1] = R.why[k].reason; why_i[3 * k + 2] = R.why[k].detail;
+        for (int j = 0; j < 3; j++) why_v[3 * k + j] = R.why[k].v[j];
+    }
+    for (std::size_t i = 0; i < R.um.size(); i++) {
+        um_i[3 * i] = R.um[i].metric; um_i[3 * i + 1] = R.um[i].reason; um_i[3 * i + 2] = R.um[i].detail;
+        for (int j = 0; j < 3; j++) um_v[3 * i + j] = R.um[i].v[j];
+    }
+    for (std::size_t i = 0; i < R.msgs.size(); i++) {
+        msg_c[i] = R.msgs[i].code;
+        for (int j = 0; j < 4; j++) msg_v[4 * i + j] = R.msgs[i].v[j];
+    }
+    err[0] = R.err_site; err[1] = R.err_phase;
+}
+
+/* xirr (.xirr_rate): *value; Warnungen von uniroot als Codes in wcodes (hoechstens cap, *nw ihre Zahl) */
+SIMLEV_C_EXPORT int simlev_c_xirr(int64_t n, const double* t, const double* amount, double end_value, double horizon,
+                                  double* value, int32_t* wcodes, int64_t cap, int64_t* nw) {
+    return cabi::run([&] {
+        std::vector<simlev_eval::Msg> m;
+        *value = simlev_eval::xirr(n, t, amount, end_value, horizon, &m);
+        *nw = (int64_t) m.size();
+        for (std::size_t i = 0; i < m.size() && (int64_t) i < cap; i++) wcodes[i] = m[i].code;
     });
 }
 
-SIMLEV_C_EXPORT int simlev_c_sim_sell_report(simlev_c_asset* tab, int64_t n, int64_t n_days, int64_t a,
-                                             int64_t index, double trade_count, double trade_price,
-                                             double market_price, double capital_gains_tax) {
-    return cabi::engine(tab, n, n_days, [&] {
-        simlev::calculate_sell_report(cabi::root(), cabi::asset_name(a), (int) index, trade_count, trade_price,
-                                      market_price, capital_gains_tax);
-    });
-}
-
-SIMLEV_C_EXPORT int simlev_c_sim_total_report(simlev_c_asset* tab, int64_t n, int64_t n_days, int64_t index) {
-    return cabi::engine(tab, n, n_days, [&] {
-        simlev::calculate_total_report(cabi::root(), cabi::names(), (int) index);
-    });
-}
-
-/* new_lot[5]: date, count, price, remaining, original des neuen Lots (Julia haengt es an) */
-SIMLEV_C_EXPORT int simlev_c_sim_buy(simlev_c_asset* tab, int64_t n, int64_t n_days, int64_t a, int64_t index,
-                                     double trade_count, double trade_price, double market_price, double* new_lot) {
-    return cabi::engine(tab, n, n_days, [&] {
-        cabi::ctx_store().day_only = (cabi::idx_t) index - 1;
-        simlev::perform_trade_buy_cpp(cabi::root(), cabi::asset_name(a), (int) index, trade_count, trade_price,
-                                      market_price);
-        if (!cabi::ctx_store().has_new_lot) cabi::badcall("sim_buy: kein Lot angelegt");
-        for (int k = 0; k < 5; k++) new_lot[k] = cabi::ctx_store().new_lot[k];
-    });
-}
-
-SIMLEV_C_EXPORT int simlev_c_sim_market_update(simlev_c_asset* tab, int64_t n, int64_t n_days, int64_t index) {
-    return cabi::engine(tab, n, n_days, [&] {
-        simlev::perform_market_update(cabi::root(), cabi::names(), (int) index);
-    });
-}
-
-SIMLEV_C_EXPORT int simlev_c_sim_market_update_batch(simlev_c_asset* tab, int64_t n, int64_t n_days,
-                                                     int64_t start_idx, int64_t end_idx) {
-    return cabi::engine(tab, n, n_days, [&] {
-        simlev::batch_market_update(cabi::root(), cabi::names(), (int) start_idx, (int) end_idx);
-    });
-}
-
-SIMLEV_C_EXPORT int simlev_c_sim_fifo_price(void** buys, int64_t nbuys, double units, int64_t front, double* out) {
-    return cabi::engine(nullptr, 0, 0, [&] {
-        *out = simlev::calculate_fifo_price(cabi::buys_obj(buys, nbuys), units, (int) front);
-    });
-}
-
-SIMLEV_C_EXPORT int simlev_c_sim_fifo_vp(void** buys, int64_t nbuys, double units, int64_t front, double* out) {
-    return cabi::engine(nullptr, 0, 0, [&] {
-        *out = simlev::calculate_fifo_vp(cabi::buys_obj(buys, nbuys), units, (int) front);
-    });
-}
-
-/* out[5]: exempt_gain, exempt_loss, taxable_gain, taxable_loss, total_gain */
-SIMLEV_C_EXPORT int simlev_c_sim_private_sale_tax(void** buys, int64_t nbuys, int64_t front, double trade_count,
-                                                  double sell_price, int64_t current_date, double* out) {
-    return cabi::engine(nullptr, 0, 0, [&] {
-        simlev::calculate_private_sale_tax(cabi::buys_obj(buys, nbuys), (int) front, trade_count, sell_price,
-                                           (int) current_date);
-        const cabi::Result& r = cabi::ctx_store().res;
-        if (r.nnum != 5) cabi::badcall("sim_private_sale_tax: unerwartetes Ergebnis");
-        for (int k = 0; k < 5; k++) out[k] = r.num[k];
-    });
-}
-
-SIMLEV_C_EXPORT int simlev_c_sim_fifo_consume(simlev_c_asset* tab, int64_t n, int64_t a, double trade_count) {
-    return cabi::engine(tab, n, 0, [&] {
-        simlev::fifo_consume(cabi::root(), cabi::asset_name(a), trade_count);
-    });
-}
-
-/* Ergebnis: *total; Indizes (1-basiert) und Betraege der aktiven Lots in idx/vps (Platz fuer
- * nbuys - front + 1 Werte), *nact Anzahl */
-SIMLEV_C_EXPORT int simlev_c_sim_flat_rate(void** buys, int64_t nbuys, int64_t front, double base_rate,
-                                           double year_start_price, double market_price, int64_t soy, int64_t eoy,
-                                           double* total, int64_t* idx, double* vps, int64_t cap, int64_t* nact) {
-    return cabi::engine(nullptr, 0, 0, [&] {
-        simlev::flat_rate(cabi::buys_obj(buys, nbuys), (int) front, base_rate, year_start_price, market_price,
-                          (int) soy, (int) eoy);
-        const cabi::Result& r = cabi::ctx_store().res;
-        const cabi::idx_t k = (cabi::idx_t) r.ivec.size();
-        if (r.nnum != 1 || (cabi::idx_t) r.dvec.size() != k || k > cap) cabi::badcall("sim_flat_rate: unerwartetes Ergebnis");
-        *total = r.num[0];
-        for (cabi::idx_t j = 0; j < k; j++) {
-            idx[j] = r.ivec[(std::size_t) j];
-            vps[j] = r.dvec[(std::size_t) j];
-        }
-        *nact = k;
-    });
-}
-
-/* out: tax, spb_used */
-SIMLEV_C_EXPORT int simlev_c_sim_p20_tax(double trade_gain, double bonus, void* totals, double tax_rate, int use_spb,
-                                         double* out) {
-    return cabi::engine(nullptr, 0, 0, [&] {
-        simlev::p20_tax(trade_gain, bonus, cabi::mk(&cabi::ctx_store(), cabi::K_TOTALS, 0, totals), tax_rate, use_spb != 0);
-        const cabi::Result& r = cabi::ctx_store().res;
-        if (r.nnum != 2) cabi::badcall("sim_p20_tax: unerwartetes Ergebnis");
-        out[0] = r.num[0];
-        out[1] = r.num[1];
-    });
-}
-
-/* out: tax, spb_used, taxable_amount */
-SIMLEV_C_EXPORT int simlev_c_sim_vp_tax(double flat_rate, double bonus, void* totals, double tax_rate, int use_spb,
-                                        double* out) {
-    return cabi::engine(nullptr, 0, 0, [&] {
-        simlev::vp_tax(flat_rate, bonus, cabi::mk(&cabi::ctx_store(), cabi::K_TOTALS, 0, totals), tax_rate, use_spb != 0);
-        const cabi::Result& r = cabi::ctx_store().res;
-        if (r.nnum != 3) cabi::badcall("sim_vp_tax: unerwartetes Ergebnis");
-        for (int k = 0; k < 3; k++) out[k] = r.num[k];
-    });
-}
-
-/* out: sell_count, fifo_price */
-SIMLEV_C_EXPORT int simlev_c_sim_sell_count(void** buys, int64_t nbuys, int64_t front, double target,
-                                            double trade_price, double total_shares, int fractions, int64_t regime,
-                                            double bonus, double loss_pool, double tax_rate, double* out) {
-    return cabi::engine(nullptr, 0, 0, [&] {
-        simlev::sell_count(cabi::buys_obj(buys, nbuys), (int) front, target, trade_price, total_shares,
-                           fractions != 0, (int) regime, bonus, loss_pool, tax_rate);
-        const cabi::Result& r = cabi::ctx_store().res;
-        if (r.nnum != 2) cabi::badcall("sim_sell_count: unerwartetes Ergebnis");
-        out[0] = r.num[0];
-        out[1] = r.num[1];
-    });
+/* Feldlagen der flachen Felder (J15b): Seit E17 teilen Julia und die Kerne keine Strukturen mehr, wohl aber feste
+ * Groessen und Schrittweiten der flachen Ein- und Ausgaben, die julia/src/sim_engine.jl und sim_evaluate.jl als
+ * Zahlen annehmen (_CABI_LAYOUT). Julia vergleicht sie beim Vorkompilieren mit diesen Werten; eine Abweichung
+ * (der Kern liest oder schreibt sonst neben die Felder von Julia) bricht mit Namen und Werten ab. Wert k:
+ * 0 AI_N, 1 AD_N, 2 CI_N, 3 CD_N, 4 TT_N, 5 PI_N, 6 PD_N, 7 SI_N, 8 TR_N, 9 ST_N, dann die Werte je Eintrag von
+ * 10 status_out, 11 lots_out, 12 sells_out, 13 taxes_out und 14, 15 events_out (Ganzzahlen, Zahlen); die
+ * letzten sechs stehen dort als Zahlen und sind hier mitzufuehren. Danach -1. Als switch ohne Feld und Schleife:
+ * So bleibt der Maschinencode der uebrigen Funktionen dieser Einheit unveraendert (geprueft; eine Fassung mit
+ * lokalem Feld aenderte die Codeerzeugung anderer Funktionen). */
+SIMLEV_C_EXPORT int64_t simlev_c_flat_layout(int64_t k) {
+    switch (k) {
+    case 0: return simlev_engine::AI_N; case 1: return simlev_engine::AD_N; case 2: return simlev_engine::CI_N;
+    case 3: return simlev_engine::CD_N; case 4: return simlev_engine::TT_N; case 5: return simlev_prepare::PI_N;
+    case 6: return simlev_prepare::PD_N; case 7: return simlev_prepare::SI_N; case 8: return simlev::TR_N;
+    case 9: return simlev_eval::ST_N; case 10: return 8; case 11: return 7; case 12: return 8; case 13: return 8;
+    case 14: return 9; case 15: return 2; default: return -1;
+    }
 }

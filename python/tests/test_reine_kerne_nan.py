@@ -11,18 +11,18 @@ Die erwarteten Werte stammen aus R 4.3.3 mit SimLev (Bitmuster als Hex-Literale;
 ``0x7ff00000000007a2`` bzw. still ``0x7ff80000000007a2``, R's NaN ``0x7ff8000000000000``,
 das Standard-NaN von x86 ``0xfff8000000000000``). N10: Die Engine-Kerne folgen der Regel „NA vor NaN“
 (``core/simlev_core.h``); R, Python und Julia liefern dort seither dieselben Bitmuster (geändert:
-``sell_report``, ``market_update_batch``, ``fifo_price``, ``private_sale_tax``, ``p20_tax``, ``vp_tax``). Jeder Fall wird zweimal gerechnet,
+``sell_report``, ``market_update_batch``, ``fifo_price``, ``private_sale_tax``, ``p20_tax``, ``vp_tax``); die Fälle
+der Engine-Kerne sind mit E17 Stufe 1c entfallen (Kerne entfernt, Prüfung über ``tools/gleichlauf/sim_fuzz.R``).
+Jeder Fall wird zweimal gerechnet,
 damit auch der spezialisierte Bytecode von CPython (andere NaN-Wahl bei ``a + b``)
 geprüft ist.
 """
-import copy
 import math
 
 import numpy as np
 import pytest
 
 from simlev import _bootstrap_core as BC
-from simlev import _core as C
 from simlev import _dependence_core as D
 from simlev import _optimize_core as O
 from simlev._r import env, rng, truncnorm
@@ -64,50 +64,6 @@ def _leaves(t, path=""):
     return [(path, [_hex(v) for v in np.asarray(a, dtype=np.float64).ravel(order="F")])]
 
 
-def _sim0():
-    st = {"a": {"count": NAN, "price": 1.0, "worth": NA, "money": NAN, "total": 0.0, "actual": 0.5, "differ": 0.5},
-          "b": {"count": 2.0, "price": NA, "worth": NAN, "money": NA, "total": 1.0, "actual": 0.5, "differ": 0.5}}
-    mk = {"a": {"asset_day": np.arange(16000, 16003, dtype=np.int64), "asset_price": np.array([NA, 2.0, NAN])},
-          "b": {"asset_day": np.arange(16000, 16003, dtype=np.int64), "asset_price": np.array([NAN, NA, 3.0])}}
-    tr = {nm: {"buys": [], "buy_count": 0, "fifo_front": 1} for nm in "ab"}
-    rp = {nm: {f: np.zeros(3) for f in ("worth", "money", "flows", "total", "share")} for nm in "ab"}
-    return {"assets": ["a", "b"], "status": st, "market": mk, "trades": tr, "report": rp,
-            "totals": {"loss_capital_gains": 0.0}}
-
-
-def _canon_sim(s):
-    """Zustand wie die R-Seite (.cmp_canon): Zahlen als double, asset_day als double."""
-    s = copy.deepcopy(s)
-    for nm in s["market"]:
-        s["market"][nm]["asset_day"] = s["market"][nm]["asset_day"].astype(np.float64)
-    for nm in s["trades"]:
-        t = s["trades"][nm]
-        t["buy_count"] = float(t["buy_count"])
-        t["fifo_front"] = float(t["fifo_front"])
-    return s
-
-
-def _eng(f, *args):
-    s = _sim0()
-    f(s, *args)
-    return {"res": None, "sim": _canon_sim(s)}
-
-
-_LOTS = [{"date": 16000, "type": "Buy", "count": 3.0, "price": NA, "remaining": 2.0, "original": 3.0},
-         {"date": 16100, "type": "Buy", "count": 1.0, "price": NAN, "remaining": 1.0, "original": 1.0},
-         {"date": 18321, "type": "Buy", "count": 2.0, "price": 5.0, "remaining": 2.0, "original": 2.0, "vp": 0.5}]
-_T = {"loss_capital_gains": 0.0, "cgt_loss_added_ytd": 0.0, "cgt_loss_used_ytd": NAN, "cgt_base_taxed_ytd": NA,
-      "sparer_pauschbetrag_remaining": 100.0, "sparer_pauschbetrag_used_total": NAN, "total_taxes": NA}
-
-
-def _buys(f, *args, totals=None):
-    t = copy.deepcopy(totals)
-    r = f(copy.deepcopy(_LOTS), *args) if t is None else f(args[0], args[1], t, *args[2:])
-    if isinstance(r, dict):
-        r = {k: float(v) for k, v in r.items()}
-    return {"res": r, "totals": t}
-
-
 def _rng(seed, f, *args):
     rng.set_seed(seed)
     r = f(*args)
@@ -128,18 +84,6 @@ CASES = {
         D.dcc_filter(np.array([[0.5, 0.8], [NA, NAN], [1.2, 0.1], [-0.3, -1.0], [NAN, NA]]), 0.05, 0.9,
                      np.array([[1, 0.3], [0.3, 1]]), True)),
     "garch_filter_nan": lambda: BC.garch_filter([0.01, NA, -0.02, NAN, 0.005, NA, NAN], 1e-6, 0.05, 0.9, 0.1, 1e-4),
-    "dca": lambda: _eng(C.dca_flows_allocation, "a", NA, 1),
-    "buy_report": lambda: _eng(C.calculate_buy_report, "b", 2, NA, NAN, NA),
-    "sell_report": lambda: _eng(C.calculate_sell_report, "b", 2, NAN, NA, NAN, 1.0),
-    "total_report": lambda: _eng(C.calculate_total_report, ["a", "b"], 2),
-    "market_update": lambda: _eng(C.perform_market_update, ["a", "b"], 3),
-    "market_update_batch": lambda: _eng(C.batch_market_update, ["a", "b"], 1, 3),
-    "fifo_price": lambda: _buys(C._calculate_fifo_price, 4.0, 1),
-    "private_sale_tax": lambda: _buys(C._calculate_private_sale_tax, 1, 5.0, NAN, 18700),
-    "sell_count_tp0": lambda: _buys(C.sell_count, 1, 10.0, 0.0, 5.0, False, 2, 0.0, 0.0, 0.25),
-    "sell_count_nan": lambda: _buys(C.sell_count, 3, NAN, 2.0, 5.0, False, 1, 0.3, 0.0, 0.25),
-    "p20_tax": lambda: _buys(C.p20_tax, NA, 0.0, 0.26375, True, totals=_T),
-    "vp_tax": lambda: _buys(C.vp_tax, NAN, 0.3, 0.26375, True, totals=dict(_T, sparer_pauschbetrag_used_total=NA)),
     "boot_wild": lambda: _rng(7, BC.boot_wild, np.array([[1.01, 0.99], [NA, 1.02], [NAN, NAN], [1.0, NA], [0.98, 1.01]]), 2),
     "boot_garch": lambda: _rng(11, BC.boot_garch, 12, 0, 2, 0.0003, 2e-6, 0.08, 0.9, 0.05, 1e-4, _ZB, [1, 2, 3, 4, 5, 6],
                                [1], [0.0002], [1e-6], [0.05], [0.9], [True], [1e-4], _ZC),
@@ -176,273 +120,6 @@ EXPECTED = {
     ],
     'garch_filter_nan': [
         ('', ['0x3f1a36e2eb1c432d', '0x3f192a737110e454', '0x7ff80000000007a2', '0x7ff80000000007a2', '0x7ff8000000000000', '0x7ff8000000000000', '0x7ff80000000007a2']),
-    ],
-    'dca': [
-        ('/res', None),
-        ('/sim/assets', ['a', 'b']),
-        ('/sim/status/a/count', ['0x7ff8000000000000']),
-        ('/sim/status/a/price', ['0x3ff0000000000000']),
-        ('/sim/status/a/worth', ['0x7ff00000000007a2']),
-        ('/sim/status/a/money', ['0x7ff80000000007a2']),
-        ('/sim/status/a/total', ['0x7ff80000000007a2']),
-        ('/sim/status/a/actual', ['0x3fe0000000000000']),
-        ('/sim/status/a/differ', ['0x3fe0000000000000']),
-        ('/sim/status/b/count', ['0x4000000000000000']),
-        ('/sim/status/b/price', ['0x7ff00000000007a2']),
-        ('/sim/status/b/worth', ['0x7ff8000000000000']),
-        ('/sim/status/b/money', ['0x7ff00000000007a2']),
-        ('/sim/status/b/total', ['0x3ff0000000000000']),
-        ('/sim/status/b/actual', ['0x3fe0000000000000']),
-        ('/sim/status/b/differ', ['0x3fe0000000000000']),
-        ('/sim/market/a/asset_day', ['0x40cf400000000000', '0x40cf408000000000', '0x40cf410000000000']),
-        ('/sim/market/a/asset_price', ['0x7ff00000000007a2', '0x4000000000000000', '0x7ff8000000000000']),
-        ('/sim/market/b/asset_day', ['0x40cf400000000000', '0x40cf408000000000', '0x40cf410000000000']),
-        ('/sim/market/b/asset_price', ['0x7ff8000000000000', '0x7ff00000000007a2', '0x4008000000000000']),
-        ('/sim/trades/a/buy_count', ['0x0']),
-        ('/sim/trades/a/fifo_front', ['0x3ff0000000000000']),
-        ('/sim/trades/b/buy_count', ['0x0']),
-        ('/sim/trades/b/fifo_front', ['0x3ff0000000000000']),
-        ('/sim/report/a/worth', ['0x0', '0x0', '0x0']),
-        ('/sim/report/a/money', ['0x7ff80000000007a2', '0x0', '0x0']),
-        ('/sim/report/a/flows', ['0x7ff00000000007a2', '0x0', '0x0']),
-        ('/sim/report/a/total', ['0x7ff80000000007a2', '0x0', '0x0']),
-        ('/sim/report/a/share', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/worth', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/money', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/flows', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/total', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/share', ['0x0', '0x0', '0x0']),
-        ('/sim/totals/loss_capital_gains', ['0x0']),
-    ],
-    'buy_report': [
-        ('/res', None),
-        ('/sim/assets', ['a', 'b']),
-        ('/sim/status/a/count', ['0x7ff8000000000000']),
-        ('/sim/status/a/price', ['0x3ff0000000000000']),
-        ('/sim/status/a/worth', ['0x7ff00000000007a2']),
-        ('/sim/status/a/money', ['0x7ff8000000000000']),
-        ('/sim/status/a/total', ['0x0']),
-        ('/sim/status/a/actual', ['0x3fe0000000000000']),
-        ('/sim/status/a/differ', ['0x3fe0000000000000']),
-        ('/sim/status/b/count', ['0x7ff80000000007a2']),
-        ('/sim/status/b/price', ['0x7ff00000000007a2']),
-        ('/sim/status/b/worth', ['0x7ff80000000007a2']),
-        ('/sim/status/b/money', ['0x7ff80000000007a2']),
-        ('/sim/status/b/total', ['0x7ff80000000007a2']),
-        ('/sim/status/b/actual', ['0x3fe0000000000000']),
-        ('/sim/status/b/differ', ['0x3fe0000000000000']),
-        ('/sim/market/a/asset_day', ['0x40cf400000000000', '0x40cf408000000000', '0x40cf410000000000']),
-        ('/sim/market/a/asset_price', ['0x7ff00000000007a2', '0x4000000000000000', '0x7ff8000000000000']),
-        ('/sim/market/b/asset_day', ['0x40cf400000000000', '0x40cf408000000000', '0x40cf410000000000']),
-        ('/sim/market/b/asset_price', ['0x7ff8000000000000', '0x7ff00000000007a2', '0x4008000000000000']),
-        ('/sim/trades/a/buy_count', ['0x0']),
-        ('/sim/trades/a/fifo_front', ['0x3ff0000000000000']),
-        ('/sim/trades/b/buy_count', ['0x0']),
-        ('/sim/trades/b/fifo_front', ['0x3ff0000000000000']),
-        ('/sim/report/a/worth', ['0x0', '0x0', '0x0']),
-        ('/sim/report/a/money', ['0x0', '0x0', '0x0']),
-        ('/sim/report/a/flows', ['0x0', '0x0', '0x0']),
-        ('/sim/report/a/total', ['0x0', '0x0', '0x0']),
-        ('/sim/report/a/share', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/worth', ['0x0', '0x7ff80000000007a2', '0x0']),
-        ('/sim/report/b/money', ['0x0', '0x7ff80000000007a2', '0x0']),
-        ('/sim/report/b/flows', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/total', ['0x0', '0x7ff80000000007a2', '0x0']),
-        ('/sim/report/b/share', ['0x0', '0x0', '0x0']),
-        ('/sim/totals/loss_capital_gains', ['0x0']),
-    ],
-    'sell_report': [
-        ('/res', None),
-        ('/sim/assets', ['a', 'b']),
-        ('/sim/status/a/count', ['0x7ff8000000000000']),
-        ('/sim/status/a/price', ['0x3ff0000000000000']),
-        ('/sim/status/a/worth', ['0x7ff00000000007a2']),
-        ('/sim/status/a/money', ['0x7ff8000000000000']),
-        ('/sim/status/a/total', ['0x0']),
-        ('/sim/status/a/actual', ['0x3fe0000000000000']),
-        ('/sim/status/a/differ', ['0x3fe0000000000000']),
-        ('/sim/status/b/count', ['0x7ff8000000000000']),
-        ('/sim/status/b/price', ['0x7ff8000000000000']),
-        ('/sim/status/b/worth', ['0x7ff8000000000000']),
-        ('/sim/status/b/money', ['0x7ff80000000007a2']),
-        ('/sim/status/b/total', ['0x7ff80000000007a2']),
-        ('/sim/status/b/actual', ['0x3fe0000000000000']),
-        ('/sim/status/b/differ', ['0x3fe0000000000000']),
-        ('/sim/market/a/asset_day', ['0x40cf400000000000', '0x40cf408000000000', '0x40cf410000000000']),
-        ('/sim/market/a/asset_price', ['0x7ff00000000007a2', '0x4000000000000000', '0x7ff8000000000000']),
-        ('/sim/market/b/asset_day', ['0x40cf400000000000', '0x40cf408000000000', '0x40cf410000000000']),
-        ('/sim/market/b/asset_price', ['0x7ff8000000000000', '0x7ff00000000007a2', '0x4008000000000000']),
-        ('/sim/trades/a/buy_count', ['0x0']),
-        ('/sim/trades/a/fifo_front', ['0x3ff0000000000000']),
-        ('/sim/trades/b/buy_count', ['0x0']),
-        ('/sim/trades/b/fifo_front', ['0x3ff0000000000000']),
-        ('/sim/report/a/worth', ['0x0', '0x0', '0x0']),
-        ('/sim/report/a/money', ['0x0', '0x0', '0x0']),
-        ('/sim/report/a/flows', ['0x0', '0x0', '0x0']),
-        ('/sim/report/a/total', ['0x0', '0x0', '0x0']),
-        ('/sim/report/a/share', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/worth', ['0x0', '0x7ff8000000000000', '0x0']),
-        ('/sim/report/b/money', ['0x0', '0x7ff80000000007a2', '0x0']),
-        ('/sim/report/b/flows', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/total', ['0x0', '0x7ff80000000007a2', '0x0']),
-        ('/sim/report/b/share', ['0x0', '0x0', '0x0']),
-        ('/sim/totals/loss_capital_gains', ['0x0']),
-    ],
-    'total_report': [
-        ('/res', None),
-        ('/sim/assets', ['a', 'b']),
-        ('/sim/status/a/count', ['0x7ff8000000000000']),
-        ('/sim/status/a/price', ['0x4000000000000000']),
-        ('/sim/status/a/worth', ['0x7ff8000000000000']),
-        ('/sim/status/a/money', ['0x7ff8000000000000']),
-        ('/sim/status/a/total', ['0x7ff8000000000000']),
-        ('/sim/status/a/actual', ['0x3fe0000000000000']),
-        ('/sim/status/a/differ', ['0x0']),
-        ('/sim/status/b/count', ['0x4000000000000000']),
-        ('/sim/status/b/price', ['0x7ff00000000007a2']),
-        ('/sim/status/b/worth', ['0x7ff80000000007a2']),
-        ('/sim/status/b/money', ['0x7ff00000000007a2']),
-        ('/sim/status/b/total', ['0x7ff80000000007a2']),
-        ('/sim/status/b/actual', ['0x3fe0000000000000']),
-        ('/sim/status/b/differ', ['0x0']),
-        ('/sim/market/a/asset_day', ['0x40cf400000000000', '0x40cf408000000000', '0x40cf410000000000']),
-        ('/sim/market/a/asset_price', ['0x7ff00000000007a2', '0x4000000000000000', '0x7ff8000000000000']),
-        ('/sim/market/b/asset_day', ['0x40cf400000000000', '0x40cf408000000000', '0x40cf410000000000']),
-        ('/sim/market/b/asset_price', ['0x7ff8000000000000', '0x7ff00000000007a2', '0x4008000000000000']),
-        ('/sim/trades/a/buy_count', ['0x0']),
-        ('/sim/trades/a/fifo_front', ['0x3ff0000000000000']),
-        ('/sim/trades/b/buy_count', ['0x0']),
-        ('/sim/trades/b/fifo_front', ['0x3ff0000000000000']),
-        ('/sim/report/a/worth', ['0x0', '0x7ff8000000000000', '0x0']),
-        ('/sim/report/a/money', ['0x0', '0x7ff8000000000000', '0x0']),
-        ('/sim/report/a/flows', ['0x0', '0x0', '0x0']),
-        ('/sim/report/a/total', ['0x0', '0x7ff8000000000000', '0x0']),
-        ('/sim/report/a/share', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/worth', ['0x0', '0x7ff80000000007a2', '0x0']),
-        ('/sim/report/b/money', ['0x0', '0x7ff00000000007a2', '0x0']),
-        ('/sim/report/b/flows', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/total', ['0x0', '0x7ff80000000007a2', '0x0']),
-        ('/sim/report/b/share', ['0x0', '0x0', '0x0']),
-        ('/sim/totals/loss_capital_gains', ['0x0']),
-    ],
-    'market_update': [
-        ('/res', None),
-        ('/sim/assets', ['a', 'b']),
-        ('/sim/status/a/count', ['0x7ff8000000000000']),
-        ('/sim/status/a/price', ['0x7ff8000000000000']),
-        ('/sim/status/a/worth', ['0x7ff8000000000000']),
-        ('/sim/status/a/money', ['0x7ff8000000000000']),
-        ('/sim/status/a/total', ['0x7ff8000000000000']),
-        ('/sim/status/a/actual', ['0x3fe0000000000000']),
-        ('/sim/status/a/differ', ['0x0']),
-        ('/sim/status/b/count', ['0x4000000000000000']),
-        ('/sim/status/b/price', ['0x4008000000000000']),
-        ('/sim/status/b/worth', ['0x4018000000000000']),
-        ('/sim/status/b/money', ['0x7ff00000000007a2']),
-        ('/sim/status/b/total', ['0x7ff80000000007a2']),
-        ('/sim/status/b/actual', ['0x3fe0000000000000']),
-        ('/sim/status/b/differ', ['0x0']),
-        ('/sim/market/a/asset_day', ['0x40cf400000000000', '0x40cf408000000000', '0x40cf410000000000']),
-        ('/sim/market/a/asset_price', ['0x7ff00000000007a2', '0x4000000000000000', '0x7ff8000000000000']),
-        ('/sim/market/b/asset_day', ['0x40cf400000000000', '0x40cf408000000000', '0x40cf410000000000']),
-        ('/sim/market/b/asset_price', ['0x7ff8000000000000', '0x7ff00000000007a2', '0x4008000000000000']),
-        ('/sim/trades/a/buy_count', ['0x0']),
-        ('/sim/trades/a/fifo_front', ['0x3ff0000000000000']),
-        ('/sim/trades/b/buy_count', ['0x0']),
-        ('/sim/trades/b/fifo_front', ['0x3ff0000000000000']),
-        ('/sim/report/a/worth', ['0x0', '0x0', '0x7ff8000000000000']),
-        ('/sim/report/a/money', ['0x0', '0x0', '0x7ff8000000000000']),
-        ('/sim/report/a/flows', ['0x0', '0x0', '0x0']),
-        ('/sim/report/a/total', ['0x0', '0x0', '0x7ff8000000000000']),
-        ('/sim/report/a/share', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/worth', ['0x0', '0x0', '0x4018000000000000']),
-        ('/sim/report/b/money', ['0x0', '0x0', '0x7ff00000000007a2']),
-        ('/sim/report/b/flows', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/total', ['0x0', '0x0', '0x7ff80000000007a2']),
-        ('/sim/report/b/share', ['0x0', '0x0', '0x0']),
-        ('/sim/totals/loss_capital_gains', ['0x0']),
-    ],
-    'market_update_batch': [
-        ('/res', None),
-        ('/sim/assets', ['a', 'b']),
-        ('/sim/status/a/count', ['0x7ff8000000000000']),
-        ('/sim/status/a/price', ['0x7ff8000000000000']),
-        ('/sim/status/a/worth', ['0x7ff8000000000000']),
-        ('/sim/status/a/money', ['0x7ff8000000000000']),
-        ('/sim/status/a/total', ['0x7ff8000000000000']),
-        ('/sim/status/a/actual', ['0x3fe0000000000000']),
-        ('/sim/status/a/differ', ['0x0']),
-        ('/sim/status/b/count', ['0x4000000000000000']),
-        ('/sim/status/b/price', ['0x4008000000000000']),
-        ('/sim/status/b/worth', ['0x4018000000000000']),
-        ('/sim/status/b/money', ['0x7ff00000000007a2']),
-        ('/sim/status/b/total', ['0x7ff80000000007a2']),
-        ('/sim/status/b/actual', ['0x3fe0000000000000']),
-        ('/sim/status/b/differ', ['0x0']),
-        ('/sim/market/a/asset_day', ['0x40cf400000000000', '0x40cf408000000000', '0x40cf410000000000']),
-        ('/sim/market/a/asset_price', ['0x7ff00000000007a2', '0x4000000000000000', '0x7ff8000000000000']),
-        ('/sim/market/b/asset_day', ['0x40cf400000000000', '0x40cf408000000000', '0x40cf410000000000']),
-        ('/sim/market/b/asset_price', ['0x7ff8000000000000', '0x7ff00000000007a2', '0x4008000000000000']),
-        ('/sim/trades/a/buy_count', ['0x0']),
-        ('/sim/trades/a/fifo_front', ['0x3ff0000000000000']),
-        ('/sim/trades/b/buy_count', ['0x0']),
-        ('/sim/trades/b/fifo_front', ['0x3ff0000000000000']),
-        ('/sim/report/a/worth', ['0x7ff80000000007a2', '0x7ff8000000000000', '0x7ff8000000000000']),
-        ('/sim/report/a/money', ['0x7ff8000000000000', '0x7ff8000000000000', '0x7ff8000000000000']),
-        ('/sim/report/a/flows', ['0x0', '0x0', '0x0']),
-        ('/sim/report/a/total', ['0x7ff80000000007a2', '0x7ff8000000000000', '0x7ff8000000000000']),
-        ('/sim/report/a/share', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/worth', ['0x7ff8000000000000', '0x7ff80000000007a2', '0x4018000000000000']),
-        ('/sim/report/b/money', ['0x7ff00000000007a2', '0x7ff00000000007a2', '0x7ff00000000007a2']),
-        ('/sim/report/b/flows', ['0x0', '0x0', '0x0']),
-        ('/sim/report/b/total', ['0x7ff80000000007a2', '0x7ff80000000007a2', '0x7ff80000000007a2']),
-        ('/sim/report/b/share', ['0x0', '0x0', '0x0']),
-        ('/sim/totals/loss_capital_gains', ['0x0']),
-    ],
-    'fifo_price': [
-        ('/res', ['0x7ff80000000007a2']),
-        ('/totals', None),
-    ],
-    'private_sale_tax': [
-        ('/res/exempt_gain', ['0x0']),
-        ('/res/exempt_loss', ['0xfff80000000007a2']),
-        ('/res/taxable_gain', ['0x0']),
-        ('/res/taxable_loss', ['0x0']),
-        ('/res/total_gain', ['0xfff80000000007a2']),
-        ('/totals', None),
-    ],
-    'sell_count_tp0': [
-        ('/res/sell_count', ['0x4014000000000000']),
-        ('/res/fifo_price', ['0x7ff80000000007a2']),
-        ('/totals', None),
-    ],
-    'sell_count_nan': [
-        ('/res/sell_count', ['0x0']),
-        ('/res/fifo_price', ['0x4014000000000000']),
-        ('/totals', None),
-    ],
-    'p20_tax': [
-        ('/res/tax', ['0x7ff80000000007a2']),
-        ('/res/spb_used', ['0x7ff80000000007a2']),
-        ('/totals/loss_capital_gains', ['0x7ff80000000007a2']),
-        ('/totals/cgt_loss_added_ytd', ['0x0']),
-        ('/totals/cgt_loss_used_ytd', ['0x7ff80000000007a2']),
-        ('/totals/cgt_base_taxed_ytd', ['0x7ff80000000007a2']),
-        ('/totals/sparer_pauschbetrag_remaining', ['0x7ff80000000007a2']),
-        ('/totals/sparer_pauschbetrag_used_total', ['0x7ff80000000007a2']),
-        ('/totals/total_taxes', ['0x7ff80000000007a2']),
-    ],
-    'vp_tax': [
-        ('/res/tax', ['0x0']),
-        ('/res/spb_used', ['0x7ff8000000000000']),
-        ('/res/taxable_amount', ['0x7ff8000000000000']),
-        ('/totals/loss_capital_gains', ['0x7ff8000000000000']),
-        ('/totals/cgt_loss_added_ytd', ['0x0']),
-        ('/totals/cgt_loss_used_ytd', ['0x7ff8000000000000']),
-        ('/totals/cgt_base_taxed_ytd', ['0x7ff80000000007a2']),
-        ('/totals/sparer_pauschbetrag_remaining', ['0x7ff8000000000000']),
-        ('/totals/sparer_pauschbetrag_used_total', ['0x7ff80000000007a2']),
-        ('/totals/total_taxes', ['0x7ff00000000007a2']),
     ],
     'boot_wild': [
         ('/', ['0x7ff80000000007a2', '0x7ff80000000007a2', '0x7ff8000000000000', '0x7ff80000000007a2', '0x7ff80000000007a2', '0x7ff8000000000000', '0x7ff8000000000000', '0x7ff8000000000000', '0x7ff80000000007a2', '0x7ff8000000000000']),

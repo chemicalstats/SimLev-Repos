@@ -3,7 +3,7 @@
 Diese Datei ist erzeugt; nicht von Hand ändern.
 
 - **Erzeugt** mit `tools/api_snapshot/run.sh` (Auszüge `api_r.R`, `api_py.py`, `api_jl.jl`, Vergleich `compare_api.py`, diese Datei `make_struktur.py`) aus `tools/api_snapshot/api.json`.
-- **Stand:** 2026-11-01.
+- **Stand:** 2026-11-02.
 - **Umfang:** R 116 Exporte und 78 S3-Methoden, Python 119 Funktionen und 79 Methoden, Julia 129 Funktionen und 77 Methoden.
 - **Zuordnung:** R `a.b` → `a_b`; S3-Methode `<generic>.<Klasse>` → Python `<Klasse>.<generic>` (print über `.print` bzw. `.format`), Julia registrierte Methode (`show`, `r_summary`, `r_plot`). Regeln: `python/DEVELOPING.md`, `julia/DEVELOPING.md`.
 - **Abweichungen** der Argumente und Standardwerte meldet `compare_api.py`; bekannte stehen in `tools/api_snapshot/known_differences.tsv`.

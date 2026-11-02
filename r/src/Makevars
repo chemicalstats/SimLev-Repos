@@ -87,5 +87,9 @@ slc_boot.o: slc_boot.c $(SLC94_DEPS)
 slc_backcast.o: slc_backcast.c $(SLC94_DEPS)
 	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_backcast.c -o slc_backcast.o
 
+# E17: Grundfunktionen mit R-Regeln (sl_r_sum fuer die Summen der Tagesengine, engine_core_impl.h)
+slc_rbase.o: slc_rbase.c slc_rbase.h slc.h slc_internal.h
+	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_rbase.c -o slc_rbase.o
+
 slc_r_models.o: slc_r_models.c slc.h slc_models.h slc_opt.h
 	$(CC) $(ALL_CPPFLAGS) $(ALL_CFLAGS) $(SLC_CFLAGS) -c slc_r_models.c -o slc_r_models.o

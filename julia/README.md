@@ -60,10 +60,12 @@ Arbeitslast für Engine und Erweiterungen, die bei der Entwicklung
 `SIMLEV_SKIP_PRECOMPILE_EXT=1` (ohne Erweiterungen) bzw.
 `SIMLEV_SKIP_PRECOMPILE=1` (ganz) abschaltet. Danach lädt das Paket in
 unter einer Sekunde. Der
-erste Aufruf einer Funktion in einer Sitzung kompiliert noch nach: Auf der
-Prüfmaschine dauerte der erste `simulation()`-Aufruf etwa 2 Sekunden, das
-erste Dashboard etwa 5 Sekunden und die erste Bootstrap-Studie einige
-Sekunden; jeder weitere Aufruf läuft ohne diese Verzögerung.
+erste Aufruf einer Funktion in einer Sitzung kompiliert noch etwas nach: Auf
+der Prüfmaschine brauchte jede Hauptfunktion beim ersten Aufruf höchstens
+etwa eine Sekunde (der erste `simulation()`-Aufruf etwa 0,3 Sekunden, das
+erste Dashboard samt Simulation etwa 0,7 Sekunden, die erste
+Bootstrap-Studie etwa 0,8 Sekunden); jeder weitere Aufruf läuft ohne diese
+Verzögerung.
 
 ## Kurzbeispiel
 
@@ -390,6 +392,7 @@ src/
   <name>_core.jl    Ports der C++-Kerne der Erweiterungen (signals, withdrawal, dependence, optimize)
   exports.jl        öffentliche Funktionen der Untermodule für `using SimLev`
   precompile.jl     Arbeitslast für die Vorkompilierung
+  precompile_statements.jl  ausdrückliche Übersetzungsanweisungen (aus Traces der ersten Aufrufe)
 data/               Tarifdatei steuertarif.csv, R-Farbnamen r_colors.csv
 test/               Rauchproben „Etappe 9“; frühere Suite ausgesetzt; reftree.jl liest Referenzfälle
 tools/              compare_golden.jl (Engine), compare_reference.jl (Module)

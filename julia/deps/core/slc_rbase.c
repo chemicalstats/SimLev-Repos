@@ -17,6 +17,9 @@
  *               je Zeile, spaltenweise aufaddiert; Mittel durch die Anzahl (bei narm je Zeile).
  *             - pow: R's ^ für Doubles: y == 2 → x·x, x == 1 oder y == 0 → 1, sonst libm pow mit
  *               R's Randfällen (?Arithmetic: 1^y und y^0 sind 1, auch für NA/NaN).
+ *             - zeroin2 (E17 Stufe 3): Brent-Verfahren (inverse quadratische bzw. lineare Interpolation mit
+ *               Bisektion als Rückfall) wie R_zeroin2 hinter stats::uniroot, Schritt für Schritt in derselben
+ *               Rechenfolge.
  *             Leere Eingabe: mean ist 0/0 in long double (NaN mit gesetztem Vorzeichenbit wie in R).
  *             NaN-Ergebnisse (welche Nutzlast bei zwei NaN-Operanden gewinnt) folgen der Hardware
  *             (x87 bei long double), genau wie in R; die Ports bildeten dafür die x87-Regel nach.
@@ -25,8 +28,10 @@
  * Konstanten: DBL_MAX aus <float.h>; NA und NaN als Bitmuster (slc_rbase.h).
  * long double: absichtlich (siehe slc_rbase.h): nur so gleich zu R auf derselben Plattform.
  * Herkunft:           übersetzt aus R 4.3.3, src/main/summary.c, cum.c (handleNaN), array.c,
- *                     arithmetic.c (R_POW), über die Port-Funktionen python/simlev/_r/rnum.py,
- *                     base.py und julia/src/r/rnum.jl, base.jl, ld80.jl
+ *                     arithmetic.c (R_POW), src/library/stats/src/zeroin.c (R_zeroin2; dort: aus Netlib
+ *                     c/brent.shar, Brents Prozedur zero, R. P. Brent, Algorithms for Minimization without
+ *                     Derivatives, 1973), über die Port-Funktionen python/simlev/_r/rnum.py,
+ *                     base.py und julia/src/r/rnum.jl (r_zeroin2), base.jl, ld80.jl
  * Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation
  *                     (laut Kopf der jeweiligen R-Quelle)
  * Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
@@ -270,4 +275,60 @@ void sl_r_pow(int64_t n, const double *x, double y, double *out)
         return;
     }
     for (i = 0; i < n; i++) out[i] = r_pow1(x[i], y);
+}
+
+/* R_zeroin2 (stats/src/zeroin.c) über den Port julia/src/r/rnum.jl (r_zeroin2): a, b Klammer, c Gegenpunkt
+ * mit f(c) von anderem Vorzeichen als f(b); je Schritt inverse quadratische (a != c) bzw. lineare
+ * Interpolation, wenn sie innerhalb von 3/4 der Klammer und unter der Hälfte des vorletzten Schritts bleibt,
+ * sonst Bisektion; Schritte mindestens tol_act = 2 eps |b| + tol/2. Rechenfolge wie R (-ffp-contract=off). */
+double sl_r_zeroin2(sl_r_fn1 f, void *info, double ax, double bx, double fa, double fb, double tol, int maxit,
+                    int *iter)
+{
+    double a = ax, b = bx, c = a, fc = fa;
+    int maxit_c = maxit + 1;
+    if (fa == 0.0) { *iter = 0; return a; }
+    if (fb == 0.0) { *iter = 0; return b; }
+    while (maxit_c != 0) {
+        double prev_step, tol_act, new_step, p, q;
+        maxit_c--;
+        prev_step = b - a;
+        if (fabs(fc) < fabs(fb)) {
+            a = b; b = c; c = a;
+            fa = fb; fb = fc; fc = fa;
+        }
+        tol_act = 2 * DBL_EPSILON * fabs(b) + tol / 2;
+        new_step = (c - b) / 2;
+        if (fabs(new_step) <= tol_act || fb == 0.0) {
+            *iter = maxit - maxit_c;
+            return b;
+        }
+        if (fabs(prev_step) >= tol_act && fabs(fa) > fabs(fb)) {
+            double t1, cb, t2;
+            cb = c - b;
+            if (a == c) {
+                t1 = fb / fa;
+                p = cb * t1;
+                q = 1.0 - t1;
+            } else {
+                q = fa / fc;
+                t1 = fb / fc;
+                t2 = fb / fa;
+                p = t2 * (cb * q * (q - t1) - (b - a) * (t1 - 1.0));
+                q = (q - 1.0) * (t1 - 1.0) * (t2 - 1.0);
+            }
+            if (p > 0.0) q = -q;
+            else p = -p;
+            if (p < (0.75 * cb * q - fabs(tol_act * q) / 2) && p < fabs(prev_step * q / 2))
+                new_step = p / q;
+        }
+        if (fabs(new_step) < tol_act) new_step = new_step > 0.0 ? tol_act : -tol_act;
+        a = b; fa = fb;
+        b += new_step;
+        fb = f(b, info);
+        if ((fb > 0 && fc > 0) || (fb < 0 && fc < 0)) {
+            c = a; fc = fa;
+        }
+    }
+    *iter = -1;
+    return b;
 }

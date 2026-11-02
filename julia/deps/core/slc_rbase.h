@@ -6,9 +6,9 @@
  *             slc_rbase_num.c (R_strtod, %%, %/%, scientific() in long double, N10).
  * Zweck:      Python (simlev._ext) und Julia (ccall auf libslc) bildeten diese Grundfunktionen von R
  *             je für sich nach (python/simlev/_r/, julia/src/r/); seit N8 rechnen beide mit diesen
- *             Kernen. R selbst behält seine Grundfunktionen (Entscheidung 9.0 (4)); diese Dateien
- *             werden daher nicht nach r/src/ kopiert (tools/core_sync.py) und nicht von slc.h
- *             eingebunden.
+ *             Kernen. R selbst behält seine Grundfunktionen (Entscheidung 9.0 (4)); nur slc_rbase.c und
+ *             diese Datei gehen seit E17 auch nach r/src/ (Summen der Tagesengine, seit Stufe 3 die
+ *             Auswertung evaluate_core_impl.h mit sl_r_zeroin2); nicht von slc.h eingebunden.
  * long double: Anders als die SimLev-eigenen Kerne (seit N5 ohne long double) akkumulieren diese
  *             Kerne dort in long double, wo R es tut (sum, prod, mean, var, cumsum, cumprod,
  *             rowSums/colSums, cov/cor). Bitgleich zu R sind sie damit nur auf derselben Plattform mit
@@ -22,7 +22,7 @@
  *                     python/simlev/_r/{rnum,base,stats_sort,stats_cor}.py und
  *                     julia/src/r/{rnum,base,stats_sort,stats_cor}.jl (diese nach
  *                     src/main/summary.c, cum.c, array.c, arithmetic.c, sort.c, qsort-body.c,
- *                     util.c, format.c und src/library/stats/src/cov.c); Verhalten laut
+ *                     util.c, format.c und src/library/stats/src/cov.c, zeroin.c); Verhalten laut
  *                     R-Hilfeseiten (?sum, ?mean, ?cumsum, ?quantile, ?order, ?rank, ?sort, ?cor,
  *                     ?tabulate, ?findInterval, ?Arithmetic); Einzelheiten in den Köpfen der
  *                     .c-Dateien
@@ -61,6 +61,13 @@ int    sl_r_rowsums(int64_t nr, int64_t nc, const double *x, int narm, int mean,
 /* x ^ y elementweise (R's Operator ^ für Doubles); y mit Länge 1 */
 void   sl_r_pow(int64_t n, const double *x, double y, double *out);
 double sl_r_pow1(double x, double y);
+/* Nullstelle nach Brent wie R_zeroin2 (stats::uniroot, E17 Stufe 3): f im Intervall [ax, bx] mit den
+ * Funktionswerten fa, fb (Vorzeichenwechsel vom Aufrufer geprüft), Toleranz tol, höchstens maxit Schritte.
+ * Rückgabe die Näherung; *iter die Zahl der Schritte, -1 ohne Konvergenz. f rechnet der Aufrufer (bei
+ * uniroot mit der Ersetzung nicht endlicher Werte durch ±DBL_MAX und deren Warnungen). */
+typedef double (*sl_r_fn1)(double x, void *info);
+double sl_r_zeroin2(sl_r_fn1 f, void *info, double ax, double bx, double fa, double fb, double tol, int maxit,
+                    int *iter);
 
 /* ── slc_rbase_sort.c: Ordnung, Rang, Quantile ───────────────────────────────
  * Rückgabe 0 oder SL_ENOMEM. Indizes 1-basiert wie R. */

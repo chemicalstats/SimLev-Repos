@@ -1,16 +1,16 @@
 # Herkunft:           übersetzt aus R 4.3.3, src/main/summary.c, cum.c, array.c, arithmetic.c
-#                     (R_zeroin2/uniroot aus zeroin.c bzw. nlm.R seit C19 entfallen, XIRR im Kern)
+#                     (R_zeroin2/uniroot aus zeroin.c bzw. nlm.R entfallen, XIRR im Kern)
 # Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
 #                     Kopf der jeweiligen R-Quelle)
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang: Summen und Kumulationen rechnen seit N8 die C-Kerne
+#                     SimLev genutzten Umfang: Summen und Kumulationen rechnen die C-Kerne
 #                     core/slc_rbase*.
 # ─────────────────────────────────────────────────────────────────────────────
 # R-kompatible Numerik
 #
-# Summen, Mittel, Varianz, Kumulationen und Potenz rechnen seit N8 die C-Kerne
-# core/slc_rbase*.c (r/rbase_c.jl), seit N10 auch %% und R_strtod (slc_rbase_num.c). NA wird wie in R als NaN mit der
+# Summen, Mittel, Varianz, Kumulationen und Potenz rechnen die C-Kerne
+# core/slc_rbase*.c (r/rbase_c.jl), auch %% und R_strtod (slc_rbase_num.c). NA wird wie in R als NaN mit der
 # Nutzlast 1954 dargestellt, sodass NA und NaN unterscheidbar bleiben.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -20,7 +20,7 @@ const NA = reinterpret(Float64, 0x7FF00000000007A2)
 "TRUE nur für R's NA (nicht für NaN) – entspricht `R_IsNA`."
 isna_strict(x::Float64) = isnan(x) && (reinterpret(UInt64, x) & 0x00000000FFFFFFFF) == 0x00000000000007A2
 
-# ── Summen, Mittel, Varianz, Kumulationen (N8: C-Kerne core/slc_rbase.c) ─────
+# ── Summen, Mittel, Varianz, Kumulationen (C-Kerne core/slc_rbase.c) ─────
 # R akkumuliert in long double; die C-Kerne tun dasselbe (x87 auf x86-64, gegen R bitgleich geprüft)
 # und sind dieselbe Implementierung wie in Python. Die frühere Nachbildung über F80/F80Soft mit der
 # x87-Regel für zwei NaN-Operanden entfällt hier.
@@ -131,7 +131,7 @@ r_pow(x::Real, y::Real) = _rb_pow1(Float64(x), Float64(y))
 r_pow_vec(x, y::Real) = _rb_pow(_rbv(x), Float64(y))
 
 "`x %% 1` für Doubles wie R's `myfmod(x, 1)`."
-r_mod1(x::Float64) = _rb_fmod_ld(x, 1.0)   # N10: C-Kern (core/slc_rbase_num.c)
+r_mod1(x::Float64) = _rb_fmod_ld(x, 1.0)   # C-Kern (core/slc_rbase_num.c)
 
 @inline function _r_nan2(a::Float64, b::Float64)
     isnan(a) && isna_strict(a) && return a      # NA schlägt NaN
@@ -143,7 +143,7 @@ end
 "R's `max(a, b)` für zwei Skalare."
 @inline r_max2(a::Float64, b::Float64) = (isnan(a) || isnan(b)) ? _r_nan2(a, b) : (b > a ? b : a)
 
-# (N7: cpp_min/cpp_max und die NaN-genauen Einzeloperationen nan_add, nan_mul … der Etappe 8.0 sind mit
+# (cpp_min/cpp_max und die NaN-genauen Einzeloperationen nan_add, nan_mul … (0.10.0) sind mit
 # den Julia-Ports der geteilten Kerne entfallen; diese rechnen jetzt die C++-Kerne selbst.)
 
 # ── Ergänzungen für die Engine 0.5.0 ────────────────────────────────────────
@@ -186,7 +186,7 @@ function r_as_numeric(s::AbstractString)
     if startswith(strip(String(SubString(str, 1))), "NA") && strip(str) == "NA"
         return NA
     end
-    # N10: Zahlteil (dezimal, hexadezimal) in long double über den C-Kern (core/slc_rbase_num.c)
+    # Zahlteil (dezimal, hexadezimal) in long double über den C-Kern (core/slc_rbase_num.c)
     v, used, gt = _rb_strtod_num(str, p)
     (used < 0 || !rest(p + used)) && return NA
     gt && return sign * Inf

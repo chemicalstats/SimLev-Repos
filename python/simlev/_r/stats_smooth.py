@@ -8,9 +8,9 @@
 """Interpolation und Filter (``approx``, ``approxfun``, ``filter``), nachgebildet aus R 4.3.3
 ``stats/R/approx.R``, ``filter.R`` und ``stats/src/approx.c``, ``filter.c``.
 
-Seit Etappe 9.6c entfallen ``fft``, ``bw.nrd0``, ``density``, ``smooth.spline`` und
+Seit 1.0.0 entfallen ``fft``, ``bw.nrd0``, ``density``, ``smooth.spline`` und
 ``predict.smooth.spline``: SimLev nutzt die eigene Gauß-Kerndichte und den eigenen
-Glättungsspline der C-Bibliothek slc (:mod:`simlev._lib`, Entwurf B.15, B.16).
+Glättungsspline der C-Bibliothek slc (:mod:`simlev._lib`).
 """
 from __future__ import annotations
 

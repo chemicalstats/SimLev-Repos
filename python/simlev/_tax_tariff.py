@@ -1,8 +1,8 @@
-"""Einkommensteuertarif und Solidaritätszuschlag als Datei (Port von ``tax_tariff.R``).
+"""Einkommensteuertarif und Solidaritätszuschlag als Datei (Gegenstück zu ``tax_tariff.R``).
 
 * :func:`tax_tariff` liest und prüft eine Tarifdatei (Standard: mitgelieferte
   ``simlev/data/steuertarif.csv``, ab VZ 2026, wie ``inst/extdata/steuertarif.csv`` in R).
-* Tarifliche Einkommensteuer und Soli rechnet der Tarifkern ``core/tariff_core_impl.h`` (C19: die
+* Tarifliche Einkommensteuer und Soli rechnet der Tarifkern ``core/tariff_core_impl.h`` (die
   Python-Fassungen ``tariff_income_tax``/``tariff_soli`` sind als ungenutzt entfallen).
 
 Verwendet von ``simulation(tax=tax_profile(income=income_tariff(taxable_income, tariff)))``.
@@ -133,10 +133,61 @@ class SimLevTaxTariff:
 def tax_tariff(*, file: str | None = None) -> SimLevTaxTariff:
     """Einkommensteuertarif (§ 32a Abs. 1 EStG) und Soli (§§ 3, 4 SolZG) aus einer CSV-Datei lesen.
 
-    ``file=None`` liest die mitgelieferte Datei (Rechtslage ab VZ 2026, Einzelveranlagung).
-    Format und Prüfungen wie ``tax_tariff()`` im R-Paket (Komma als Trennzeichen, Punkt
-    als Dezimalzeichen, Zeilen mit ``#`` sind Kommentare; Spalten ``art, ab, bezug, teiler,
-    a, b, c``).
+    Liest den Einkommensteuertarif (§ 32a Abs. 1 EStG) und den Solidaritätszuschlag (§§ 3, 4 SolZG) aus einer
+    CSV-Datei, prüft sie und liefert ein Objekt für ``simulation(tax = tax_profile(income =
+    income_tariff(taxable_income, tariff)))``. Mitgeliefert wird die Rechtslage ab VZ 2026 (Einzelveranlagung,
+    Grundtarif; kein Splitting). Für eine künftige Rechtslage genügt es, die Datei auszutauschen bzw. eine eigene
+    Datei anzugeben; der Code bleibt unverändert.
+
+    Args:
+        file: Zeichenkette oder None. Pfad der Tarifdatei; None = mitgelieferte Datei ``system.file("extdata",
+            "steuertarif.csv", package = "SimLev")``.
+
+    Returns:
+        Objekt der Klasse "SimLevTaxTariff" (Liste) mit ``zones`` (DataFrame ab, bezug, teiler, a, b, c), ``soli``
+        (Liste freigrenze, satz, milderung; Sätze in Prozent), ``geltung`` (Text aus der Datei) und ``file``
+        (Pfad). print() zeigt Geltung, Zonen und Soli.
+
+    Details:
+        Dateiformat (Basis-R lesbar mit ``read.csv(file, comment.char = "#")``; Komma als Trennzeichen, Punkt als
+        Dezimalzeichen; Zeilen mit ``#`` sind Kommentare, eine Kommentarzeile ``# Geltung: ...`` wird als Geltung
+        angezeigt). Spalten ``art, ab, bezug, teiler, a, b, c``:
+
+        - art = "zone": Tarifzone: gilt für x ≥ ``ab`` (x = zu versteuerndes Einkommen, auf volle Euro
+          abgerundet); Steuer (a u + b) u + c mit u = (x - bezug) / teiler, danach auf volle Euro abgerundet.
+          Lineare Zonen: ``a = 0, bezug = 0, teiler = 1``, ``b`` = Satz als Anteil, ``c`` = Abzugsbetrag.
+        - art = "soli": genau eine Zeile: ``ab`` = Freigrenze in EUR Einkommensteuer, ``a`` = Zuschlagsatz in
+          Prozent, ``b`` = Milderungssatz in Prozent.
+
+        Einheiten: ``ab``, ``bezug``, ``teiler`` und ``c`` in EUR; bei Progressionszonen (``teiler = 10000``, u
+        dimensionslos) auch ``a``, ``b`` in EUR; bei linearen Zonen (``a = 0, bezug = 0, teiler = 1``) ist ``b``
+        der Grenzsteuersatz als Anteil (``0.42`` für 42 %, nicht 42); die Soli-Sätze dagegen in Prozent (``5.5``
+        für 5,5 %).
+
+        Geprüft wird: Komma als Trennzeichen (wird nur eine Spalte gelesen, z. B. Semikolon-CSV, bzw. hat eine
+        Zeile mehr Felder als die Kopfzeile, z. B. Dezimalkomma: Fehler mit Hinweis), Pflichtspalten vorhanden,
+        ``art`` nur "zone" oder "soli", alle benötigten Werte numerisch und endlich, ``teiler > 0``, Zonen streng
+        aufsteigend mit erster Zone ab 0, genau eine soli-Zeile mit Sätzen von 0 bis 100. Plausibilität: Der
+        Grenzsteuersatz jeder Zone (Ableitung (2 a u + b) / teiler) muss an beiden Rändern (Zonenbeginn und
+        letzter Euro der Zone; letzte Zone: bei 10 Mio. EUR) zwischen 0 und 1 liegen, und die Steuer darf an
+        diesen Stellen das Einkommen nicht übersteigen (T(x) ≤ x); sonst Fehler mit Zeile, Wert und Hinweis auf
+        die Einheiten. Springt der Tarif an einer Zonengrenze um mehr als 1 EUR (Formel der vorigen und der neuen
+        Zone an der Grenze), wird gewarnt.
+
+        Rechenregeln (intern): tarifliche ESt T(x): x auf volle Euro abrunden (negativ: 0), Formel der Zone mit
+        dem größten ``ab <= x``, Ergebnis auf volle Euro abrunden. Soli S(E) auf die ESt E: 0, wenn E die
+        Freigrenze nicht übersteigt, sonst min(a / 100 · E, b / 100 · (E - Freigrenze)) (Milderungszone),
+        Bruchteile eines Cents bleiben außer Ansatz.
+
+        Mitgelieferter Tarif (ab VZ 2026): bis 12 348 EUR 0; 12 349 bis 17 799: (914,51 y + 1 400) y; 17 800 bis
+        69 878: (173,10 z + 2 397) z + 1 034,87; 69 879 bis 277 825: 0,42 x - 11 135,63; ab 277 826: 0,45 x - 19
+        470,38 mit y = (x - 12 348) / 10 000, z = (x - 17 799) / 10 000. Soli 5,5 % über der Freigrenze 20 350
+        EUR, höchstens 11,9 % des Mehrbetrags.
+
+    Beispiel::
+
+        import simlev
+        print(simlev.tax_tariff())
     """
     if file is None:
         file = default_tariff_file()

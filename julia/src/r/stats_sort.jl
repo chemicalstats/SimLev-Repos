@@ -7,7 +7,7 @@
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang: Ordnung, Rang, partielle Sortierung und Quantile
-#                     rechnet seit N8 der C-Kern core/slc_rbase_sort.c.
+#                     rechnet der C-Kern core/slc_rbase_sort.c.
 # Gemeinsame Hilfen, Sortieren, Ränge, Einteilen und Lagemaße (order, r_sort, r_rank, rle,
 # tabulate, findInterval, cut, complete_cases, quantile, median, weighted_mean) aus R 4.3.3 (src/main/sort.c,
 # qsort-body.c, seq.c; base/R/sort.R, rle.R, cut.R, findInt.R; stats/R/quantile.R, median.R, weighted.mean.R);
@@ -113,7 +113,7 @@ _z0(v::Float64) = v == 0.0 ? 0.0 : v
 function _stable_argsort(v::AbstractVector, isstr::Bool, decreasing::Bool)
     n = length(v)
     n == 0 && return Int[]
-    isstr || return SimLev._rb_order([Float64[Float64(t) for t in v]], [decreasing], 1)   # N8: C-Kern
+    isstr || return SimLev._rb_order([Float64[Float64(t) for t in v]], [decreasing], 1)   # C-Kern
     # R's orderVector1 mit Scollate: stabil (Gleichstand → Index aufsteigend), auch absteigend
     lst = [String(t) for t in v]
     return sortperm(lst; alg = MergeSort, lt = str_lt, rev = decreasing)
@@ -166,7 +166,7 @@ function order(args...; na_last = true, decreasing = false)
     end
     dec = decreasing isa AbstractVector || decreasing isa Tuple ? collect(Bool, decreasing) : fill(Bool(decreasing), length(keys))
     length(dec) == 1 && (dec = fill(dec[1], length(keys)))
-    if !any(k -> k[3], keys)       # N8: nur Zahlenschlüssel -> C-Kern sl_r_order
+    if !any(k -> k[3], keys)       # nur Zahlenschlüssel -> C-Kern sl_r_order
         nl = na_last === nothing ? -1 : (na_last === true ? 1 : 0)
         return SimLev._rb_order(Vector{Float64}[Vector{Float64}(k[1]) for k in keys], dec, nl)
     end
@@ -224,7 +224,7 @@ function r_rank(x; na_last = true, ties_method::AbstractString = "average")
     v, nas, isstr = _keys(x)
     xs = v[.!nas]
     m = length(xs)
-    if !isstr && haskey(SimLev._RB_TIES, ties_method)    # N8: C-Kern sl_r_rank
+    if !isstr && haskey(SimLev._RB_TIES, ties_method)    # C-Kern sl_r_rank
         yd = SimLev._rb_rank(Float64[Float64(t) for t in xs], ties_method)
         y = ties_method == "average" ? yd : Int[Int(t) for t in yd]
     elseif ties_method in ("average", "min", "max")
@@ -498,7 +498,7 @@ function quantile(x, probs = [0.0, 0.25, 0.5, 0.75, 1.0]; na_rm::Bool = false, n
     any(i -> pok[i] && (p[i] < -eps || p[i] > 1 + eps), eachindex(p)) && error("'probs' outside [0,1]")
     pp = Float64[isnan(t) ? t : max(0.0, min(1.0, t)) for t in p]
     np_ = length(pp)
-    qs = SimLev._rb_quantile(xv, pp, Int(type))      # N8: C-Kern sl_r_quantile (Typen 1–9)
+    qs = SimLev._rb_quantile(xv, pp, Int(type))      # C-Kern sl_r_quantile (Typen 1–9)
     qs = Float64[pok[i] ? qs[i] : p[i] for i in eachindex(qs)]
     (names && np_ > 0) && return RVector(qs; names = _format_perc(pp, Int(digits)))
     return _vec_out(qs)

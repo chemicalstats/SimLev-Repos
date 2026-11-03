@@ -1,11 +1,11 @@
 /*
- * src/slc_r.c -- R-Huellen (.Call) der C-Bibliothek slc (SimLev core, Etappe 9.1)
+ * src/slc_r.c -- R-Huellen (.Call) der C-Bibliothek slc (SimLev core)
  *
  * Die Kerne (slc*.c, slc*.h) sind Kopien der kanonischen Quellen in core/ (core/sync.py);
  * nur diese Huelle gibt es nur hier. Registrierung in init.c (Namen sl_*, in R C_sl_*), die
  * R-Seite steht in R/slc.R (interne Funktionen .sl_*).
  *
- * Rueckmeldungen (Entwurf C.4): der Kern springt nie; nach dem Aufruf gibt die Huelle die
+ * Rueckmeldungen: der Kern springt nie; nach dem Aufruf gibt die Huelle die
  * gesammelten Warnungen in Reihenfolge mit Rf_warningcall(R_NilValue, ...) aus (wie
  * warning(call. = FALSE)) und einen Fehler mit Rf_errorcall(R_NilValue, ...) (wie
  * stop(call. = FALSE)); das longjmp entsteht also nur hier. Benutzerabbruch: Rueckruf ueber

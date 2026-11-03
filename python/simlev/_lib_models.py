@@ -1,4 +1,4 @@
-"""Hüllen der Modelle der C-Bibliothek slc (SimLev core, Etappe 9.4): GARCH/GJR(1,1), GPD,
+"""Hüllen der Modelle der C-Bibliothek slc (SimLev core): GARCH/GJR(1,1), GPD,
 DCC(1,1), MS-GARCH und univariates HMM, Bootstrap-Kerne.
 
 Gegenstück zu ``r/R/slc_models.R`` (R) und ``julia/src/slib_models.jl`` (Julia). Die Rechnung
@@ -6,10 +6,10 @@ steht in ``src/core/slc_{garch,gpd,dcc,msgarch,boot}.c`` (Kopien von ``core/``),
 ``src/_ext_slc_models.c`` (Modul ``simlev._ext``). Fehlertexte und Warnungen kommen aus dem Kern
 (Fehler: ``ValueError``; Warnung: ``warnings.warn``). Erreichbar über ``simlev._lib``.
 
-Seit Etappe 9.6a/b rufen die Ports diese Hüllen an denselben Stellen wie R. Die Hüllen liefern
+Seit 1.0.0/b rufen die Ports diese Hüllen an denselben Stellen wie R. Die Hüllen liefern
 dieselben Strukturen wie die bisherigen Wege (``fit_garch11`` wie ``_fit_garch11``,
-``ms_garch_fit`` wie ``_ms_garch_fit``, ``boot_*`` wie die bis 9.6c vorhandenen Kerne in ``_bootstrap_core``), gezogen
-wird aus einem :class:`simlev._lib.Stream` bzw. dem globalen Zustand (Entwurf C.5).
+``ms_garch_fit`` wie ``_ms_garch_fit``, ``boot_*`` wie die bis 0.10.0 vorhandenen Kerne in ``_bootstrap_core``), gezogen
+wird aus einem :class:`simlev._lib.Stream` bzw. dem globalen Zustand.
 """
 from __future__ import annotations
 
@@ -80,9 +80,9 @@ def garch11_nll(e, par, gjr=False, s2_init=None):
 
 
 def garch11_grad(theta, e, gjr=True, s2_init=None):
-    """N3: GJR-NLL und analytischer Gradient an ``theta`` = (mu, log omega, a, g, b) (Vorwärtsrekursion der
+    """GJR-NLL und analytischer Gradient an ``theta`` = (mu, log omega, a, g, b) (Vorwärtsrekursion der
     Ableitungen von s2, wie im Fit); ``{"value", "gradient"}``, nicht endlich: value = inf, gradient = nan.
-    N4: auch sGARCH (``gjr=False``, ``theta`` = (mu, log omega, a, b))."""
+    auch sGARCH (``gjr=False``, ``theta`` = (mu, log omega, a, b))."""
     out = np.empty(5 if gjr else 4)
     v = _ext.slc_garch11_grad(_vec(e), _vec(theta), bool(gjr), math.nan if s2_init is None else float(s2_init), out)
     return {"value": v, "gradient": out}
@@ -97,7 +97,7 @@ def garch11_fit(e, gjr=False):
 
 
 def fit_garch11(e, gjr=False, quiet=False):
-    """GARCH(1,1) / GJR-GARCH(1,1) wie ``_fit_garch11`` (ML -> Momente, F10)."""
+    """GARCH(1,1) / GJR-GARCH(1,1) wie ``_fit_garch11`` (ML -> Momente)."""
     ev = _vec(e)
     p, s2, z = np.empty(5), np.empty(ev.size), np.empty(ev.size)
     ll, code, meth, s2i, pers = _ext.slc_garch11_estimate(ev, bool(gjr), p, s2, z)
@@ -153,7 +153,7 @@ def dcc_fit(Z, Qbar):
     return {"a": a, "b": b, "nll": nll, "convergence": code, "par": np.array([t1, t2])}
 
 
-# ── Backcast (N5) ────────────────────────────────────────────────────────────
+# ── Backcast ────────────────────────────────────────────────────────────
 
 def _bc_prob(prob):
     """prob = (x oder None, c1, c2 oder None, lev, sp, dr, pos (1-basiert), logp, (objective, loss, horizon), hw)."""
@@ -206,7 +206,7 @@ def ms_garch_nll(theta, y, K, model, h1=None):
 
 
 def ms_garch_grad(theta, y, K, model, h1=None):
-    """N1: NLL und analytischer Gradient an ``theta`` (vorwärts mitdifferenzierter Hamilton-Filter);
+    """NLL und analytischer Gradient an ``theta`` (vorwärts mitdifferenzierter Hamilton-Filter);
     ``{"value", "gradient"}``, nicht endliche Likelihood: value = inf, gradient = nan."""
     g = _gjr(model)
     out = np.empty(_ext.slc_ms_garch_npar(int(K), g))
@@ -236,7 +236,7 @@ def ms_garch_fitstarts(y, K, model, starts, h1=None):
 
 
 def _threads(cores):
-    """N6: Zahl der Threads aus ``cores`` wie ``.sl_threads`` (ganze Zahl; ungültig oder < 1 -> 1)."""
+    """Zahl der Threads aus ``cores`` wie ``.sl_threads`` (ganze Zahl; ungültig oder < 1 -> 1)."""
     try:
         nt = int(float(np.asarray(cores, dtype=float).ravel()[0]))
     except (TypeError, ValueError, IndexError, OverflowError):
@@ -246,8 +246,8 @@ def _threads(cores):
 
 def ms_garch_fit(y, K, model, cores=1):
     """MS-GARCH-Modell wie ``_ms_garch_fit``, ganz in C (Starts, BFGS, Sortierung, Viterbi); BFGS läuft von
-    allen Rasterpunkten der beiden Startfamilien (die zwei bisherigen zuerst; sGARCH 12, gjrGARCH seit N1
-    20), seit N1 mit analytischem Gradienten; N6: die Starts auf bis zu ``cores`` Threads verteilt (Ergebnis
+    allen Rasterpunkten der beiden Startfamilien (die zwei bisherigen zuerst; sGARCH 12, gjrGARCH
+    20), mit analytischem Gradienten; die Starts auf bis zu ``cores`` Threads verteilt (Ergebnis
     unabhängig davon)."""
     from .ms_garch import _ms_garch_check
     _ms_garch_check(K, model)

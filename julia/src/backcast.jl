@@ -1,4 +1,4 @@
-# Backcast – r/R/backcast.R (Vorlage python/simlev/backcast.py)
+# Backcast – Gegenstück zu r/R/backcast.R und python/simlev/backcast.py
 #
 # Verlängert die Historie eines ETF/ETP (auch gehebelt oder invers) über
 # dessen Auflegung hinaus:
@@ -36,7 +36,7 @@ _isnumval(x) = (x isa Real && !(x isa Bool)) ||
 """
     _resolve_series(x, data, what; default = 0)
 
-Zeitreihe aus flexibler Nutzerangabe auflösen (Port von `.resolve_series`):
+Zeitreihe aus flexibler Nutzerangabe auflösen (R: `.resolve_series`):
 `nothing` (→ `default`), Skalar, Vektor der Länge `nrow(data)`, Spaltenname
 in `data`, `RFrame(date, value)` als Stufenfunktion oder benannter Vektor mit
 Datumsnamen (Wert gilt ab diesem Datum). Liefert einen Float64-Vektor der
@@ -109,9 +109,9 @@ _getel(r, k) = r isa AbstractDict ? r[k] : r isa NamedTuple ? getfield(r, Symbol
 """
     _fill_na(v, method = "locf"; keep_leading = false)
 
-Fehlende Werte füllen (Port von `.fill_na`): `"locf"`, `"linear"`,
+Fehlende Werte füllen (R: `.fill_na`): `"locf"`, `"linear"`,
 `"stine"` (Stineman-Interpolation der inneren Lücken mit der C-Bibliothek slc,
-`SLib.stineman`, seit Etappe 9.6b; Stützstellen sind die Positionen der
+`SLib.stineman`, seit 1.0.0; Stützstellen sind die Positionen der
 vorhandenen Werte) oder `"none"`. Mit `keep_leading = true` bleiben führende NA erhalten, sonst wird
 rückwärts gefüllt. Liefert eine Float64-Kopie.
 """
@@ -139,7 +139,7 @@ function _fill_na(v, method = ("locf", "linear", "stine", "none"); keep_leading:
     else
         out = copy(v)
         gap = setdiff(first_:last_, ok)                       # innere Lücken; Stützstellen = Positionen der Werte
-        out[gap] .= SimLev.SLib.stineman(Float64.(ok), v[ok], Float64.(gap))   # Stineman (slc, Entwurf B.14)
+        out[gap] .= SimLev.SLib.stineman(Float64.(ok), v[ok], Float64.(gap))   # Stineman (slc)
         last_ < length(v) && (out[last_+1:end] .= v[last_])
         first_ > 1 && (out[1:first_-1] .= v[first_])
     end
@@ -147,7 +147,7 @@ function _fill_na(v, method = ("locf", "linear", "stine", "none"); keep_leading:
     return out
 end
 
-"Vektor um `k` Zeilen verschieben (k > 0: Verzögerung). Port von `.shift`."
+"Vektor um `k` Zeilen verschieben (k > 0: Verzögerung). R: `.shift`."
 function _shift(v, k)
     v = Float64.(v)
     n = length(v)
@@ -159,7 +159,7 @@ end
 
 _sq(e) = [x * x for x in e]
 
-"Verlustfunktionen für den Fit (Port von `.bc_loss`)."
+"Verlustfunktionen für den Fit (R: `.bc_loss`)."
 function _bc_loss(e, loss)
     e = [x for x in e if isfinite(x)]
     isempty(e) && return Inf
@@ -171,7 +171,7 @@ function _bc_loss(e, loss)
     error("Unbekannte loss-Funktion '$(loss)'.")
 end
 
-"Grid-Search-Metriken (Port von `.bc_metric_table`): bestes Gitterelement je Metrik."
+"Grid-Search-Metriken (R: `.bc_metric_table`): bestes Gitterelement je Metrik."
 function _bc_metric_table(err_mat::AbstractMatrix, grid)
     nn(x) = [v for v in x if !isnan(v)]
     metrics = [
@@ -207,7 +207,7 @@ struct _Prep
     dr_unit::Vector{Float64}
 end
 
-"Überlappung, Komponenten und Hilfsgrößen vorbereiten (Port von `.bc_prepare`)."
+"Überlappung, Komponenten und Hilfsgrößen vorbereiten (R: `.bc_prepare`)."
 function _bc_prepare(data, product, index, ter, leverage, rate, fx, rate_lag,
                      ter_basis, rate_basis, accrual, index_fill, lag)
     data = DP._as_frame(data)
@@ -254,7 +254,7 @@ end
 
 _par(p, k) = Float64(p[k])
 
-"Modellrenditen für einen Parametersatz (Port von `.bc_model_returns`)."
+"Modellrenditen für einen Parametersatz (R: `.bc_model_returns`)."
 function _bc_model_returns(prep::_Prep, par, model, reg = nothing)
     base = if model == "structural"
         b = _par(par, "beta")
@@ -276,7 +276,7 @@ _coef(reg) = (c = reg["coef"]; c isa RVector ? c.values : collect(Float64, c))
 
 _cumlog(rr) = SimLev.r_cumsum(Float64[_libm().log1p(max(v, -0.999999)) for v in rr])
 
-"Abweichungsvektor(en) im Fit-Fenster (Port von `.bc_errors`)."
+"Abweichungsvektor(en) im Fit-Fenster (R: `.bc_errors`)."
 function _bc_errors(r, win, obs, objective, horizon)
     rr = Float64.(r[win])
     rr[1] = 0.0
@@ -294,7 +294,7 @@ function _bc_errors(r, win, obs, objective, horizon)
     return (level = e_lvl, ret = e_ret)
 end
 
-"Daten der Zielfunktion für die C-Bibliothek (Port von `.bc_cprob`, N5)."
+"Daten der Zielfunktion für die C-Bibliothek (R: `.bc_cprob`)."
 function _bc_cprob(prep, model, reg, rws, obs, objective, loss, horizon, hybrid_weight)
     if model == "structural"
         x = Float64.(prep.x[rws]); c1 = Float64.(prep.fin[rws]); c2 = Float64.(prep.ter_cost[rws])
@@ -308,14 +308,14 @@ function _bc_cprob(prep, model, reg, rws, obs, objective, loss, horizon, hybrid_
             Float64(hybrid_weight))
 end
 
-"Zielfunktion (Port von `.bc_objective`)."
+"Zielfunktion (R: `.bc_objective`)."
 function _bc_objective(r, win, obs, objective, horizon, loss, hybrid_weight)
     e = _bc_errors(r, win, obs, objective, horizon)
     objective != "hybrid" && return _bc_loss(e, loss)
     return sqrt(hybrid_weight * SimLev.r_mean(_sq(e.ret)) + (1 - hybrid_weight) * SimLev.r_mean(_sq(e.level)))
 end
 
-"Kennzahlen Simulation vs. Produkt (Port von `.bc_diagnostics`)."
+"Kennzahlen Simulation vs. Produkt (R: `.bc_diagnostics`)."
 function _bc_diagnostics(r, win, obs, dates)
     E = _libm()
     rr = Float64.(r[win])
@@ -412,11 +412,123 @@ end
                  bounds = nothing, ter_basis = 365, rate_basis = 360, accrual = "linear",
                  index_fill = "locf", validate = true)
 
-Backcast-Modell an ein Produkt anpassen (Argumente wie in R, siehe
-`r/man/backcast_fit.Rd`; `end` heißt `end_`). `fixed`: benannte Liste fester
-Parameter; `grid`: Standard `seq(-3, 3, by = 0.005)`; `bounds`: benannte
-Liste mit Suchintervallen (ergänzt die Standardliste). Liefert eine `RList`
-der Klasse `SimLevBackcastFit`.
+Backcast-Modell an ein Produkt anpassen.
+
+Passt das Rückrechnungsmodell eines ETF/ETP (auch gehebelt oder invers) auf dem Zeitraum an, in dem sowohl das
+Produkt als auch sein Basisindex vorliegen. Die freien Parameter werden so gewählt, dass die Abweichung
+zwischen simuliertem und echtem Produkt minimal wird (täglich, kumuliert oder beides). Eingabe ist ein Tabelle
+(RFrame) mit Datum, Produktkursen (vor der Auflegung `NA`) und Indexniveaus; das Ergebnis wird mit
+`backcast()` in eine verlängerte Kursreihe umgerechnet.
+
+# Argumente
+- `data`: Tabelle (RFrame) mit Spalte `date` (Date oder umwandelbar, streng aufsteigend, ohne Duplikate) sowie
+  den Spalten für Produkt und Basisindex. Typisch ein Kalendertagsraster (wie in den Projekt-Skripten) oder
+  Handelstage; Lücken im Produkt (Feiertage, Börsenschluss) sind erlaubt.
+- `product`: Spaltenname der Produkt-Kursreihe (NAV oder Börsenkurs; Niveaus, `NA` vor der Auflegung; Werte <=
+  0 gelten als fehlend).
+- `index`: Spaltenname der Basisindex-Reihe (Niveau > 0, nicht Rendite; Lücken werden nach `index_fill`
+  gefüllt).
+- `ter`: Laufende Kosten in Prozent p. a. (0.5 = 0,5 Prozent; Standard 0): Skalar, Vektor der Länge
+  `nrow(data)`, Spaltenname, Tabelle (RFrame)(date, ter) (Stufenfunktion, gültig ab Datum) oder benannter
+  Vektor mit Datumsnamen, z. B. `["2010-02-24" = 0.35, "2023-10-10" = 0.50]`.
+- `leverage`: Hebel L des Produkts relativ zum Index als Zahl ungleich 0 (Standard 1; z. B. 2, -1, -2). Ist
+  der Index bereits ein Hebelindex (z. B. MSCI USA Leveraged 2x Daily), ist `leverage = 1` zu setzen.
+- `rate`: Finanzierungszins in Prozent p. a. (Tagesgeld, z. B. ESTR, EONIA, SOFR, EFFR) in denselben Formen
+  wie `ter`; `nothing` (Standard) = 0. Wirkt nur für `leverage != 1` (Faktor 1 - L).
+- `fx`: Optional (Standard `nothing` = keine Umrechnung): Umrechnungsfaktor Indexwährung -> Produktwährung in
+  denselben Formen wie `ter` (z. B. Spaltenname). Der Index wird mit `fx` multipliziert.
+- `model`: `"structural"` (Standard, Hebel-/Kostenmodell oben), `"linear"` (Regression Produktrendite ~
+  Indexrendite, Stambaugh- Backfill) oder `"spline"` (kubischer Glättungsspline nach Reinsch mit Knoten an
+  allen Stützstellen und GCV-Wahl der Glättung, Ersatz für das GAM aus '01 Base Indices'; die Kurve weicht
+  leicht von `smooth.spline()` ab, das bei vielen Punkten Knoten auswählt). Die Regressionsmodelle werden auf
+  Renditen direkt aufeinanderfolgender Produktbeobachtungen geschätzt und eignen sich für Proxy-Rückrechnungen
+  (z. B. MSCI USA aus S&P 500).
+- `fit`: Zeichenvektor der zu schätzenden Parameter (Standard `"drag"`): Teilmenge von `"drag"`
+  (Restabweichung in Prozent p. a.), `"spread"` (Spread auf den finanzierten Anteil in Prozent p. a., nur für
+  L != 1, sonst mit Warnung ignoriert) und `"beta"` (effektiver Hebel-Multiplikator, Faktor; nur
+  Strukturmodell). `character(0)` schätzt nichts (reine Kostenrechnung).
+- `fixed`: Benannte Liste fester Parameterwerte, z. B. `(spread = 0.4,)`; nicht genannte Parameter: drag = 0,
+  spread = 0 (Prozent p. a.), beta = 1. Die Werte dienen auch als Startwerte der Optimierung.
+- `objective`: `"level"` (Standard; kumulierte Pfadabweichung der Log-Niveaus, wie im Skript '02 Funds Data';
+  bestimmt die Tracking Difference), `"return"` (Log-Renditeabweichungen über `horizon` Beobachtungen;
+  Tracking Error) oder `"hybrid"` (gewichtete Kombination beider RMS-Fehler).
+- `loss`: Fehlermaß für "level" und "return": "rmse" (Standard), "mse", "mae", "median" (Median der Beträge)
+  oder "max". Bei "hybrid" ohne Wirkung (immer RMS).
+- `horizon`: Renditehorizont in Produktbeobachtungen für "return"/"hybrid" (ganze Zahl >= 1, Standard 1).
+  Werte > 1 (z. B. 5) dämpfen asynchrone Schlusskurse (Xetra vs. US-Index).
+- `hybrid_weight`: Gewicht des Renditeterms bei "hybrid" als Anteil (0..1, Standard 0.5); der Niveauterm
+  erhält 1 - `hybrid_weight`.
+- `lag`: Verzögerung des Index gegenüber dem Produkt in Zeilen (ganzzahlig, Standard 0; bei k > 0 wird die
+  Produktrendite in Zeile t mit der Indexrendite aus Zeile t - k modelliert) oder `"auto"` (Lag aus -2..2 mit
+  der höchsten Korrelation, bei negativem Hebel der niedrigsten).
+- `rate_lag`: Verzögerung des Zinssatzes in Zeilen (Standard 0 = Satz des Tages t; k > 0 = Satz aus Zeile t -
+  k).
+- `start`: Optionales Fit-Fenster (Datum oder Zeichenkette "JJJJ-MM-TT"); `nothing` (Standard) = gesamte
+  Überlappung. Mindestens 20 gemeinsame Beobachtungen.
+- `start`: Optionales Fit-Fenster (Datum oder Zeichenkette "JJJJ-MM-TT"); `nothing` (Standard) = gesamte
+  Überlappung. Mindestens 20 gemeinsame Beobachtungen.
+- `method`: `"optimize"` (Standard; ein Parameter mit `stats::optimize()` (Brent), mehrere mit projiziertem
+  BFGS (C-Bibliothek von SimLev) innerhalb von `bounds`) oder `"grid"` (Gittersuche für genau einen Parameter,
+  wie im Skript).
+- `grid`: Gitterwerte für `method = "grid"` in der Einheit des Parameters (drag, spread: Prozent p. a.; beta:
+  Faktor); Standard `seq(-3, 3, by = 0.005)`.
+- `bounds`: Benannte Liste von Suchintervallen `[unten, oben]` je Parameter für `method = "optimize"`, in der
+  Einheit des Parameters; Standard `list(drag = [-10, 10], spread = [-5, 10], beta = [0.5, 1.5]`. Eine eigene
+  Liste ergänzt die Standardliste: Nicht genannte Parameter behalten ihr Standardintervall (je Eintrag
+  `[unten, oben]` mit unten < oben).
+- `ter_basis`, `rate_basis`: Tagesbasis für TER (Standard 365) und für Zins und Spread (Standard 360,
+  Act/360).
+- `accrual`: Abgrenzung der TER: `"linear"` (Standard, TER * T / 365, Fondsbuchhaltung) oder `"geometric"` ((1
+  + TER)^(T/365) - 1, wie in den Skripten).
+- `index_fill`: Füllmethode für Indexlücken: "locf" (Standard), "linear" oder "stine" (Stineman-Interpolation
+  nach Stineman 1980, skaliert wie stinepack; eigene Umsetzung in der C-Bibliothek von SimLev). Führende
+  Lücken bleiben `NA`.
+- `validate`: Logisch (Standard `true`): Out-of-Sample-Prüfung (Fit auf der jüngeren Hälfte der
+  Produktbeobachtungen, Test auf der älteren, also in Backcast-Richtung); erst ab 80 Beobachtungen.
+
+# Rückgabe
+Objekt der Klasse `SimLevBackcastFit`, eine Liste mit u. a.
+
+- params: Liste `drag`, `spread` (Prozent p. a.) und `beta` (Faktor).
+- fitted, model, objective, loss, loss_value, method, horizon, lag: Fit-Einstellungen, Wert der Zielfunktion
+  und verwendeter Lag (Zeilen).
+- diagnostics, diagnostics_unfitted: Kennzahlen Simulation vs. Produkt mit bzw. ohne gefittete Parameter:
+  `n_obs`, `years`, `start`, `end`, `tracking_error` (Prozent p. a.), `tracking_difference` (Prozentpunkte p.
+  a.), `cagr_sim`, `cagr_product`, `final_deviation`, `max_abs_deviation` (jeweils Prozent), `rmse_level`
+  (RMSE der Log-Niveaus x 100), `correlation`, `r_squared` und `deviation` (Tabelle (RFrame) date, deviation =
+  1 - Sim/Produkt als Anteil).
+- grid, grid_metrics: Bei `method = "grid"`: Tabelle (RFrame) (value, loss) und bestes Gitterelement je
+  Fehlermetrik, sonst `nothing`.
+- validation: Out-of-Sample-Ergebnis (Zeiträume `train`, `test`, Parameter `par`, Testkennzahlen in Prozent)
+  oder `nothing`.
+- regression: Regressionsfit (nur "linear"/"spline"): `coef` (Achsenabschnitt, Steigung) bzw. `fit`
+  (Splineobjekt der C-Bibliothek mit `x`, `y`, `gam`, `lambda`, `df`, `gcv`; kein `smooth.spline`-Objekt).
+- inception, window: Erstes Produktdatum und Fit-Fenster.
+- drag_per_day: Drag in Prozent je Kalendertag.
+- call_args: Daten und Modellangaben für `backcast()`.
+
+# Details
+Strukturmodell (`model = "structural"`) je Zeile t mit Kalendertagen T_t seit der Vorzeile und Indexrendite
+x_t: r_t = β L x_t + (1 - L) i_t T_t / B_r - TER_t T_t / B_T
+- s m(L) T_t / B_r - drag T_t / 365 mit m(L) = max(L-1, 0) + max(-L, 0), B_r = `rate_basis`, B_T =
+  `ter_basis`; i, TER, s und drag gehen als Prozent p. a. / 100 ein. Bei den Regressionsmodellen ersetzt die
+  geschätzte Regression die ersten drei Terme (`ter` und `rate` gehen dann nicht ein); `spread` und `drag`
+  werden zusätzlich abgezogen.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 3000
+d = RFrame("date" => Date(2010, 1, 1) .+ Day.(0:n-1))
+d["idx"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+r = [0; diff(d["idx"]) ./ d["idx"][1:end-1]]
+etf = 50 .* cumprod(1 .+ 2 .* r .- 2 / 100 / 360 .- 0.6 / 100 / 365)
+etf[1:1500] .= NaN                              # Produkt erst ab Tag 1501
+d["etf"] = etf; d["rate"] = fill(2.0, n)
+fit = backcast_fit(d, "etf", "idx"; ter = 0.5, leverage = 2, rate = "rate")
+println(fit["params"]["drag"])                  # etwa 0.1 Prozent p. a.
+```
 """
 function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothing, fx = nothing,
                       model = ("structural", "linear", "spline"), fit = "drag", fixed = RList(),
@@ -503,10 +615,10 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
         count(ok) < 20 && error("Zu wenige aufeinanderfolgende Beobachtungen für das Regressionsmodell.")
         if model == "linear"
             X = hcat(ones(count(ok)), xx[ok])
-            f = SimLev.SLib.lsfit(X, y[ok])                         # kleinste Quadrate (Entwurf B.7)
+            f = SimLev.SLib.lsfit(X, y[ok])                         # kleinste Quadrate
             return RList("coef" => SimLev.RVector(f["coefficients"]; names = ["x1", "x2"]))
         end
-        fs = SimLev.SLib.smspline_fit(xx[ok], y[ok])               # Glättungsspline (Reinsch 1967, GCV; B.15)
+        fs = SimLev.SLib.smspline_fit(xx[ok], y[ok])               # Glättungsspline (Reinsch 1967, GCV)
         return RList("fit" => RList("x" => fs["x"], "y" => fs["y"], "gam" => fs["gam"], "lambda" => fs["lambda"],
                                     "df" => fs["df"], "gcv" => fs["gcv"]))
     end
@@ -546,7 +658,7 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
             return (par = p, value = Float64(_getel(o, "objective")), grid = nothing, metrics = nothing)
         end
         lo = Float64[bounds[k][1] for k in fit]; hi = Float64[bounds[k][2] for k in fit]
-        # N5: glatte Zielfunktion (rmse, mse, hybrid) mit analytischem Gradienten ganz in C (wie .sl_backcast_fit
+        # glatte Zielfunktion (rmse, mse, hybrid) mit analytischem Gradienten ganz in C (wie .sl_backcast_fit
         # in R); mae, median, max wie bis 1.1.0 über .sl_optim mit numerischem Gradienten
         o = if objective == "hybrid" || loss in ("rmse", "mse")
             SimLev.SLib.backcast_fit(_bc_cprob(prep, model, rg, rws, ob, objective, loss, horizon, hybrid_weight),
@@ -624,11 +736,54 @@ end
     backcast(fit = nothing; data = nothing, params = nothing, splice = "inception",
              fill = "locf", rebase = nothing, kwargs...)
 
-Produkt-Kursreihe zurückrechnen und verketten. `fit`: Ergebnis von
-[`backcast_fit`](@ref) oder `nothing` (dann `data`, `product`, `index` und
-Modellangaben als Schlüsselwörter; nur Strukturmodell). Liefert ein `RFrame`
-der Klasse `SimLevBackcast` (`date`, `value`, `return`, `model`, `product`,
-`source`) mit `attrs`: `fit`, `params`, `splice_date`.
+Produkt-Kursreihe zurückrechnen und verketten.
+
+Rechnet ein Produkt mit den Parametern aus `backcast_fit()` (oder fest vorgegebenen Parametern) über die
+gesamte Indexhistorie und verkettet die Simulation renditebasiert (Chain-Linking) mit der echten Produktreihe
+ab Auflegung. Es entsteht kein Sprung am Verkettungstag; ab dem Verkettungstag stimmt `value` (ohne `rebase`)
+an allen Beobachtungstagen mit den echten Kursen überein. Das Ergebnis kann z. B. nach Umbenennen von `value`
+als Kursspalte für `simulation()` dienen.
+
+# Argumente
+- `fit`: Ein `SimLevBackcastFit`-Objekt aus `backcast_fit()`. Alternativ `nothing` (Standard), dann werden
+  `data`, `product`, `index` und die Modellangaben über `...` übergeben und `params` direkt verwendet (nur
+  Strukturmodell).
+- `data`: Bei `fit`: optional anderer Datensatz (z. B. längere Indexhistorie) mit denselben Spaltennamen;
+  `nothing` (Standard) = Datensatz des Fits. Bei `fit = nothing` Pflicht (Format wie in `backcast_fit()`).
+- `params`: Optional Liste mit `drag`, `spread` (Prozent p. a.) und/oder `beta` (Faktor). Überschreibt
+  einzelne Parameter des Fits; ohne Fit gelten für fehlende Einträge drag = 0, spread = 0, beta = 1.
+- `splice`: `"inception"` (Standard: echte Renditen ab dem ersten Produktkurs), `"none"` (reine Modellreihe)
+  oder ein Datum: echte Renditen ab dem ersten Produktkurs an oder nach diesem Datum (Fehler, wenn danach kein
+  Produktkurs vorliegt).
+- `fill`: Füllmethode für Produktlücken nach der Verkettung: "locf" (Standard, wie die Engine), "linear",
+  "stine" (Stineman, wie bei `index_fill`) oder "model" (Lückentage mit Modellrenditen, Endpunkte aus echten
+  Kursen; erhält die echten Kurse an allen Beobachtungstagen).
+- `rebase`: `nothing` (Standard; Produkteinheiten, echte Kurse bleiben erhalten) oder Startwert der Reihe am
+  ersten Indextag, z. B. 100 (`value` und `model` werden skaliert, `product` nicht).
+- `kwargs...`: Bei `fit = nothing`: Argumente wie in `backcast_fit()` (`product`, `index` als Pflicht; `ter`
+  (Standard 0), `leverage` (1), `rate` (`nothing` = 0), `fx`, `rate_lag`, `ter_basis`, `rate_basis`,
+  `accrual`, `index_fill`, `lag`; `model` nur "structural").
+
+# Rückgabe
+Tabelle (RFrame) der Klasse `["SimLevBackcast", "data.frame"]` mit einer Zeile je Zeile von `data`: `date`,
+`value` (verkettete Reihe; `NA` vor dem ersten Indexwert), `return` (einfache Rendite von `value` als Anteil),
+`model` (reine Modellreihe auf gleichem Niveau), `product` (Rohdaten) und `source` ("backcast", "product" oder
+"filled"). Attribute `"fit"` (Fit-Objekt oder `nothing`), `"params"` (verwendete Parameter) und
+`"splice_date"` (Verkettungsdatum oder `NA`).
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 1000
+d = RFrame("date" => Date(2015, 1, 1) .+ Day.(0:n-1))
+d["idx"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+etf = series_leverage(d, "idx"; leverage = 2, rate = 2, expense = 0.6)
+etf[1:600] .= NaN                               # Produkt erst ab Tag 601
+d["etf"] = etf
+bc = backcast(; data = d, product = "etf", index = "idx", leverage = 2, rate = 2, ter = 0.6, rebase = 100)
+println(count(==("product"), bc["source"]))
+```
 """
 function backcast(fit_pos = nothing; fit = fit_pos, data = nothing, params = nothing, splice = "inception",
                   fill = ("locf", "linear", "stine", "model"), rebase = nothing, kwargs...)

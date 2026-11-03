@@ -4,12 +4,12 @@
  * Seit 0.5.0 ohne Rcpp: Die C++-Kerne haben extern "C"-Huellen (am Ende der
  * jeweiligen .cpp-Datei, Rahmen in simlev_capi.h). Die C-Uebernahmen (vendor_*.c), der
  * MS-GARCH-Filter (ms_garch.c), der DCC-Filter (dependence_core.cpp) und die
- * frueheren Bootstrap-Kerne (bootstrap_core.cpp) sind mit Etappe 9.6c entfallen;
+ * frueheren Bootstrap-Kerne (bootstrap_core.cpp) sind seit 1.0.0 entfallen;
  * ihre Aufgaben rechnet die C-Bibliothek slc. Registriert sind nur .Call-Routinen
  * unter Namen ohne Praefix; NAMESPACE laedt sie mit
  * useDynLib(SimLev, .registration = TRUE, .fixes = "C_"), in R heissen sie
  * daher C_<name> (z. B. C_sim_engine_run, gerufen von .sim_engine_run in R/sim_engine.R).
- * Dynamische Symbolsuche ist abgeschaltet. Seit Etappe 9.1 auch die Huellen der C-Bibliothek slc
+ * Dynamische Symbolsuche ist abgeschaltet. Registriert sind auch die Huellen der C-Bibliothek slc
  * (slc_r.c; Kerne slc*.c als Kopien aus core/, core/sync.py).
  */
 #include <R.h>
@@ -26,7 +26,7 @@ extern SEXP C_hmm_forward_backward(SEXP, SEXP, SEXP);
 extern SEXP C_roll_mean_core(SEXP, SEXP);
 extern SEXP C_kendall_tau_core(SEXP, SEXP);
 extern SEXP C_roll_cov_core(SEXP, SEXP, SEXP);
-/* slc_r.c (C-Bibliothek slc, Etappe 9.1) */
+/* slc_r.c (C-Bibliothek slc) */
 extern SEXP C_sl_version(void);
 extern SEXP C_sl_rng_seed(SEXP);
 extern SEXP C_sl_rng_seed_entropy(SEXP, SEXP, SEXP);
@@ -51,7 +51,7 @@ extern SEXP C_sl_qlogis(SEXP);
 extern SEXP C_sl_pbeta(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_pt(SEXP, SEXP, SEXP);
 extern SEXP C_sl_qt(SEXP, SEXP, SEXP);
-/* 9.2: slc_r_linalg.c (lineare Algebra, Matrixprodukt, kleinste Quadrate, Stineman, Spline, Kerndichte) */
+/* slc_r_linalg.c (lineare Algebra, Matrixprodukt, kleinste Quadrate, Stineman, Spline, Kerndichte) */
 extern SEXP C_sl_chol(SEXP);
 extern SEXP C_sl_chol_band(SEXP, SEXP);
 extern SEXP C_sl_trisolve(SEXP, SEXP, SEXP, SEXP);
@@ -70,7 +70,7 @@ extern SEXP C_sl_smspline_fit(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_smspline_predict(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_kde(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_kde_bw(SEXP);
-/* engine_core.cpp (E17: Tagesengine) */
+/* engine_core.cpp (Tagesengine) */
 extern SEXP C_sim_engine_run(SEXP);
 extern SEXP C_sim_dates_flags(SEXP);
 extern SEXP C_sim_evaluate(SEXP);
@@ -78,18 +78,18 @@ extern SEXP C_sim_xirr(SEXP, SEXP, SEXP, SEXP);
 /* withdrawal_core.cpp */
 extern SEXP C_wd_simulate(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_wd_tariff_check(SEXP, SEXP, SEXP);
-/* 9.3: slc_r_opt.c (Optimierer der C-Bibliothek slc) */
+/* slc_r_opt.c (Optimierer der C-Bibliothek slc) */
 extern SEXP C_sl_opt_init(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_opt_next(SEXP, SEXP);
 extern SEXP C_sl_opt_result(SEXP);
 extern SEXP C_sl_opt_testfn(SEXP, SEXP, SEXP);
 extern SEXP C_sl_opt_minimize_test(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_numgrad_test(SEXP, SEXP, SEXP, SEXP);
-/* 9.4: slc_r_models.c (Modelle der C-Bibliothek slc: GARCH/GJR, GPD, DCC, MS-GARCH und HMM, Bootstrap-Kerne) */
+/* slc_r_models.c (Modelle der C-Bibliothek slc: GARCH/GJR, GPD, DCC, MS-GARCH und HMM, Bootstrap-Kerne) */
 extern SEXP C_sl_garch11_filter(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_garch11_nll(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_garch11_fit(SEXP, SEXP);
-extern SEXP C_sl_garch11_grad(SEXP, SEXP, SEXP, SEXP);   /* N3 */
+extern SEXP C_sl_garch11_grad(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_garch11_estimate(SEXP, SEXP);
 extern SEXP C_sl_gpd_nll(SEXP, SEXP, SEXP);
 extern SEXP C_sl_gpd_pwm(SEXP);
@@ -100,7 +100,7 @@ extern SEXP C_sl_backcast_obj(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_backcast_fit(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_ms_garch_filter(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_ms_garch_nll(SEXP, SEXP, SEXP, SEXP, SEXP);
-extern SEXP C_sl_ms_garch_grad(SEXP, SEXP, SEXP, SEXP, SEXP);   /* N1 */
+extern SEXP C_sl_ms_garch_grad(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_ms_garch_starts(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_ms_garch_fitstarts(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_ms_garch_estimate(SEXP, SEXP, SEXP, SEXP);
@@ -131,7 +131,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"roll_mean_core", (DL_FUNC) &C_roll_mean_core, 2},
     {"kendall_tau_core", (DL_FUNC) &C_kendall_tau_core, 2},
     {"roll_cov_core", (DL_FUNC) &C_roll_cov_core, 3},
-    /* slc_r.c (C-Bibliothek slc, Etappe 9.1) */
+    /* slc_r.c (C-Bibliothek slc) */
     {"sl_version", (DL_FUNC) &C_sl_version, 0},
     {"sl_rng_seed", (DL_FUNC) &C_sl_rng_seed, 1},
     {"sl_rng_seed_entropy", (DL_FUNC) &C_sl_rng_seed_entropy, 3},
@@ -156,7 +156,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"sl_pbeta", (DL_FUNC) &C_sl_pbeta, 4},
     {"sl_pt", (DL_FUNC) &C_sl_pt, 3},
     {"sl_qt", (DL_FUNC) &C_sl_qt, 3},
-    /* 9.2: slc_r_linalg.c */
+    /* slc_r_linalg.c */
     {"sl_chol", (DL_FUNC) &C_sl_chol, 1},
     {"sl_chol_band", (DL_FUNC) &C_sl_chol_band, 2},
     {"sl_trisolve", (DL_FUNC) &C_sl_trisolve, 4},
@@ -176,18 +176,18 @@ static const R_CallMethodDef CallEntries[] = {
     {"sl_kde", (DL_FUNC) &C_sl_kde, 6},
     {"sl_kde_bw", (DL_FUNC) &C_sl_kde_bw, 1},
 
-    /* 9.3: slc_r_opt.c */
+    /* slc_r_opt.c */
     {"sl_opt_init", (DL_FUNC) &C_sl_opt_init, 7},
     {"sl_opt_next", (DL_FUNC) &C_sl_opt_next, 2},
     {"sl_opt_result", (DL_FUNC) &C_sl_opt_result, 1},
     {"sl_opt_testfn", (DL_FUNC) &C_sl_opt_testfn, 3},
     {"sl_opt_minimize_test", (DL_FUNC) &C_sl_opt_minimize_test, 8},
     {"sl_numgrad_test", (DL_FUNC) &C_sl_numgrad_test, 4},
-    /* 9.4: slc_r_models.c */
+    /* slc_r_models.c */
     {"sl_garch11_filter", (DL_FUNC) &C_sl_garch11_filter, 6},
     {"sl_garch11_nll", (DL_FUNC) &C_sl_garch11_nll, 4},
     {"sl_garch11_fit", (DL_FUNC) &C_sl_garch11_fit, 2},
-    {"sl_garch11_grad", (DL_FUNC) &C_sl_garch11_grad, 4},   /* N3 */
+    {"sl_garch11_grad", (DL_FUNC) &C_sl_garch11_grad, 4},
     {"sl_garch11_estimate", (DL_FUNC) &C_sl_garch11_estimate, 2},
     {"sl_gpd_nll", (DL_FUNC) &C_sl_gpd_nll, 3},
     {"sl_gpd_pwm", (DL_FUNC) &C_sl_gpd_pwm, 1},
@@ -198,7 +198,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"sl_backcast_fit", (DL_FUNC) &C_sl_backcast_fit, 5},
     {"sl_ms_garch_filter", (DL_FUNC) &C_sl_ms_garch_filter, 8},
     {"sl_ms_garch_nll", (DL_FUNC) &C_sl_ms_garch_nll, 5},
-    {"sl_ms_garch_grad", (DL_FUNC) &C_sl_ms_garch_grad, 5},   /* N1 */
+    {"sl_ms_garch_grad", (DL_FUNC) &C_sl_ms_garch_grad, 5},
     {"sl_ms_garch_starts", (DL_FUNC) &C_sl_ms_garch_starts, 5},
     {"sl_ms_garch_fitstarts", (DL_FUNC) &C_sl_ms_garch_fitstarts, 5},
     {"sl_ms_garch_estimate", (DL_FUNC) &C_sl_ms_garch_estimate, 4},

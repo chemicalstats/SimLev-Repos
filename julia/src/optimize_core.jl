@@ -1,4 +1,4 @@
-# OptimizeCore – Optimierungskerne aus core/research_core_impl.h (geteilte C++-Kerne, N7)
+# OptimizeCore – Optimierungskerne aus core/research_core_impl.h (geteilte C++-Kerne)
 #
 #   proj_box_simplex   exakte Projektion auf {w : sum w = 1, lo <= w <= hi}
 #                      (Knickpunkt-Verfahren), `.proj_box_simplex`
@@ -9,8 +9,8 @@
 #   min_cdar_core      minimaler CDaR (projizierter Subgradient), `.min_cdar_core`
 #
 # Es rechnen die geteilten Kerne wie in R und Python über die C-ABI-Hülle core/simlev_cabi.cpp (CAbi).
-# Der frühere Julia-Port (F2) samt der Nachbildung von libstdc++ `std::sort`/`std::nth_element` und
-# `quantile7` ist mit N7 entfallen. Gegenstück zu python/simlev/_optimize_core.py.
+# Der frühere Julia-Port samt der Nachbildung von libstdc++ `std::sort`/`std::nth_element` und
+# `quantile7` ist seit 1.2.0 entfallen. Gegenstück zu python/simlev/_optimize_core.py.
 module OptimizeCore
 
 import ..SimLev

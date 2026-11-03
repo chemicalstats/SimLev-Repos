@@ -2,17 +2,17 @@
 // Rechenkerne fuer Optimierung, Regression, Regime und Zeitreihen-Hilfen, reine
 // Rechnung ohne R, Python und Julia.
 //
-// GEMEINSAME QUELLE FUER R, PYTHON UND JULIA (Etappe 7.3a, Julia seit N7): R ruft die Kerne ueber die
+// GEMEINSAME QUELLE FUER R, PYTHON UND JULIA: R ruft die Kerne ueber die
 // .Call-Huellen in r/src/research_core.cpp auf (sie wandeln nur die R-Objekte um),
 // Python ueber das Erweiterungsmodul simlev._ext (python/src/_ext_research.cpp).
-// Kanonisch in core/ (seit Etappe 9.6c, F16); R und Python bauen aus
+// Kanonisch in core/; R und Python bauen aus
 // Byte-fuer-Byte-Kopien in r/src/ bzw. python/src/core/ (core/sync.py
 // --write/--check); Aenderungen nur in core/ vornehmen und danach kopieren.
 // Die Python-Huellen (simlev/_optimize_core.py, _dependence_core.py, _signals_core.py)
-// rufen nur noch diese Kerne; die reinen Python-Kerne als Rueckfall sind seit 9.6c entfallen.
-// Julia (seit N7) ruft die Kerne ueber die C-ABI-Huelle core/simlev_cabi.cpp auf (simlev_c_*; ccall aus
+// rufen nur diese Kerne (reine Python-Kerne als Rueckfall gibt es seit 1.0.0 nicht mehr).
+// Julia ruft die Kerne ueber die C-ABI-Huelle core/simlev_cabi.cpp auf (simlev_c_*; ccall aus
 // julia/src/optimize_core.jl, dependence_core.jl, signals_core.jl) und baut aus der Byte-fuer-Byte-Kopie
-// in julia/deps/core/ (libslc, julia/deps/build.jl); die frueheren Julia-Ports (F2) sind entfallen.
+// in julia/deps/core/ (libslc, julia/deps/build.jl); die frueheren Julia-Ports sind entfallen.
 //
 // Aufbau wie alle C++-Kerne (simlev_core.h): statische Funktionen ueber den Sichten
 // simlev_host::NumVec/IntVec/NumMat und den Host-Makros SIMLEV_* (Fehler, NA,
@@ -34,9 +34,9 @@
 //                      Hunter & Lange 2000, mit exakter Ecken-Politur bzw.
 //                      Austauschschritten bis zum Optimalitaetsnachweis)
 //   hmm_forward_backward  skalierter Vorwaerts-Rueckwaerts-Schritt (Baum-Welch)
-//   (garch_filter: in N2 entfernt; seit 9.6b ohne Aufrufer, ersetzt durch sl_garch11_filter)
+//   (garch_filter: bis 1.0.0, ersetzt durch sl_garch11_filter in core/slc_garch.c)
 //   roll_mean_core     rollierender Mittelwert mit kompensierter Summe
-//   kendall_tau_core   Kendalls Tau-b (N5: ganzzahlig und double-double statt long double)
+//   kendall_tau_core   Kendalls Tau-b (ganzzahlig und double-double statt long double)
 //   roll_cov_core      rollierende Kovarianz
 //
 // Alle Kerne rechnen dieselben Formeln wie die frueheren R-Fassungen; sie
@@ -697,7 +697,7 @@ static long long merge_count(std::vector<double>& y, std::vector<double>& buf, i
   return s;
 }
 
-// N5: double-double-Hilfen fuer kendall_tau_core. Kein fma (fp-contract off). Quellen: Dekker, T. J. (1971).
+// double-double-Hilfen fuer kendall_tau_core. Kein fma (fp-contract off). Quellen: Dekker, T. J. (1971).
 // A floating-point technique for extending the available precision. Numerische Mathematik 18(3), 224-242
 // (exakte Summe und Produkt mit Aufspaltung 2^27 + 1); Shewchuk, J. R. (1997). Adaptive precision
 // floating-point arithmetic and fast robust geometric predicates. Discrete & Computational Geometry 18(3),
@@ -757,7 +757,7 @@ static double kendall_tau_core(simlev_host::NumVec x, simlev_host::NumVec y) {
   for (int i = 1; i < n; ++i) { if (ys[i] == ys[i - 1]) ++ty; else { n2 += ty * (ty - 1) / 2; ty = 1; } }
   n2 += ty * (ty - 1) / 2;
   const long long n0 = (long long) n * (n - 1) / 2;
-  // N5: Zaehler und die Faktoren des Nenners exakt ganzzahlig; Wurzel und Division in doppelter
+  // Zaehler und die Faktoren des Nenners exakt ganzzahlig; Wurzel und Division in doppelter
   // double-Genauigkeit (Dekker 1971: Summe und Produkt ohne Rundungsfehler, ein Newton-Schritt fuer die
   // Wurzel, eine Korrektur fuer den Quotienten; relativer Fehler vor dem Runden < 1e-30), erst das
   // Ergebnis wird auf double gerundet. Ersetzt long double (x86-64 80 Bit, aarch64 128 Bit): gleiche

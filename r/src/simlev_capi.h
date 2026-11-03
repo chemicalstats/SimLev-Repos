@@ -8,11 +8,9 @@
 // von Rcpp::compileAttributes() erzeugten Huellen und ruft den Kern ueber
 // sl::call() auf:
 //
-//   * Zufallszahlen: sl::call beruehrt R's Zufallszustand nicht (Entwurf C.5, Regel 10).
-//     Die frueheren Kerne mit R's Zufallszahlen (bootstrap_core.cpp, ueber sl::call_rng mit
-//     GetRNGstate/PutRNGstate wie Rcpp::RNGScope) sind mit Etappe 9.6c entfallen; N2 hat
-//     auch den danach wirkungslosen Schalter rng von call_impl und put_rng in rcall/run
-//     entfernt.
+//   * Zufallszahlen: sl::call beruehrt R's Zufallszustand nicht. Die frueheren Kerne mit
+//     R's Zufallszahlen (bootstrap_core.cpp, ueber sl::call_rng mit GetRNGstate/PutRNGstate
+//     wie Rcpp::RNGScope) und der Schalter rng von call_impl sind seit 1.0.0 entfallen.
 //   * Fehler: sl::stop() wirft eine C++-Ausnahme. sl::call() faengt sie, raeumt
 //     auf (C++-Objekte, gehaltene R-Objekte) und loest erst danach
 //     den Fehler in R aus: stop(cond) mit cond = simpleError(Text, call = NULL),
@@ -43,8 +41,8 @@
 //     ganzzahligem dim-Attribut, Skalare als neue Vektoren der Laenge 1,
 //     benannte Listen mit names-Attribut.
 //
-// Seit Etappe 7.3a stehen die Kerne in src/*_impl.h (gemeinsam mit Python, siehe
-// simlev_core.h; kanonisch seit Etappe 9.6c in core/). Diese Datei ist ihr R-Host: der
+// Die Kerne stehen in src/*_impl.h (gemeinsam mit Python und Julia, siehe
+// simlev_core.h; kanonisch in core/). Diese Datei ist ihr R-Host: der
 // Abschnitt "R als Host der gemeinsamen Kerne" am Ende bindet die Namen simlev_host::* und
 // SIMLEV_* an genau die Aufrufe von sl::, die vor der Teilung im Kern standen (gleicher
 // Maschinencode). Eine .Call-Huelle bindet erst diese Datei, dann den Kern ein.
@@ -245,8 +243,7 @@ inline void raise(int status) {
 
 // Rahmen jeder .Call-Huelle: Kern ausfuehren (Umwandlung der Argumente
 // eingeschlossen), gehaltene Objekte freigeben, dann Ergebnis zurueckgeben oder den
-// Fehler in R ausloesen. Seit Etappe 9.6a (Entwurf C.5, Regel 10) liest und schreibt kein
-// Kern mehr .Random.seed (N2: Schalter rng entfernt).
+// Fehler in R ausloesen. Kein Kern liest oder schreibt .Random.seed.
 template <class F> SEXP call_impl(F& body) {
   frame f;
   f.anchor = nullptr;
@@ -591,7 +588,7 @@ inline void put(SEXP list, R_xlen_t i, SEXP value) {
 }  // namespace sl
 
 // ---------------------------------------------------------------------------
-// R als Host der gemeinsamen Kerne (Etappe 7.3a, Schnittstelle in simlev_core.h)
+// R als Host der gemeinsamen Kerne (Schnittstelle in simlev_core.h)
 // ---------------------------------------------------------------------------
 //
 // Die Kerne in src/*_impl.h (Kopien aus core/) sind gewoehnliche statische Funktionen ueber den Typen
@@ -606,7 +603,7 @@ typedef sl::IntVec IntVec;
 typedef sl::NumMat NumMat;
 using namespace sl;
 // logische Vektoren (die Kerne mit Zufallszahlen, die dazu auch Listen von
-// Ganzzahlvektoren und R's runif/rnorm/rgeom brauchten, sind mit Etappe 9.6c entfallen)
+// Ganzzahlvektoren und R's runif/rnorm/rgeom brauchten, sind seit 1.0.0 entfallen)
 typedef sl::LglVec LglVec;
 }  // namespace simlev_host
 

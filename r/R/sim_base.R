@@ -1,10 +1,10 @@
 # =============================================================================
 # SimLev - Grundfunktionen der Engine (aus simulation.R ausgelagert)
 # =============================================================================
-# Terminangaben (Termine rechnet seit E17 Stufe 2 core/prepare_core_impl.h), Tarifweg (Jahresrechnung in R, Referenz des Tarifkerns
+# Terminangaben (Termine rechnet core/prepare_core_impl.h), Tarifweg (Jahresrechnung in R, Referenz des Tarifkerns
 # core/tariff_core_impl.h), Kennzahlen und Gebuehrenangaben, die simulation()
 # (simulation.R) und die Phasen in sim_*.R nutzen. Die Handels- und Steuerfunktionen
-# der Tagesschleife rechnet seit E17 Stufe 1c der C++-Kern (sim_engine.R).
+# der Tagesschleife rechnet der C++-Kern (sim_engine.R).
 # Gegenstuecke: python/simlev/_sim_base.py und julia/src/engine.jl.
 # =============================================================================
 
@@ -17,7 +17,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 
 #--------> Hilfsfunktion zur Erstellung von Rebalance- und DCA-Flags:
-# E17 Stufe 2: die Termine rechnet der Kern core/prepare_core_impl.h (dates_flags, Monatsarithmetik wie seq.Date);
+# die Termine rechnet der Kern core/prepare_core_impl.h (dates_flags, Monatsarithmetik wie seq.Date);
 # R prueft und wandelt die Angaben (.sched_spec) wie bisher calculate_dates_flags.
 calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, anchor, start_date, skip_start, liquidate){
   sc <- .sched_spec(mode, span, unit, days, dates, value, anchor, start_date, skip_start)
@@ -25,9 +25,9 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
                                 dcode = sc$dcode, liquidate = if (sc$si[1L] && liquidate) 1L else 0L))
 }
 
-#' Angaben eines Terminplans fuer den Kern (E17 Stufe 2)
+#' Angaben eines Terminplans fuer den Kern
 #'
-#' Zweck: die Pruefungen und Umwandlungen von calculate_dates_flags (bis E17 Stufe 1c in R gerechnet): ohne
+#' Zweck: die Pruefungen und Umwandlungen von calculate_dates_flags (bis 1.3.0 in R gerechnet): ohne
 #' Termine (mode, unit, value), span-Vorgabe, match.arg, Startdatum; den Schritt liest R aus
 #' "<span> months" bzw. "<span> years" wie seq.Date, und was seq() dort ablehnt (span ohne ganze Zahl >= 1,
 #' Start nach dem letzten Tag), meldet seq() selbst. Den Tag von days fuer anchor = "start" liest
@@ -69,13 +69,13 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
 .show_arg_s <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = "")
 
 #--------> Tarifweg (income_tariff()): Hilfsfunktionen zur Jahresrechnung
-# Seit E17 Stufe 1c rechnet die Tagesengine den Jahresabschluss im Kern (tariff_core_impl.h); .tariff_close mit
+# rechnet die Tagesengine den Jahresabschluss im Kern (tariff_core_impl.h); .tariff_close mit
 # .tariff_base/.tariff_full/.tariff_diff bleibt als R-Referenz des Tarifkerns (Gleichlauf: tariff_fuzz.R und
 # die R-Tests zum Tarif).
 #' taxable_income pruefen: eine Zahl (alle Jahre), nach Jahr benannter Vektor oder data.frame (Jahr, Betrag)
 #' @param x Eingabe taxable_income
 #' @param years Ganzzahlen. Kalenderjahre der Simulation (jedes muss vorkommen)
-#' @param plan_ok Logisch. T14: ein Vektor ohne Namen (ein Wert je Planjahr von withdrawal_simulation()) ist
+#' @param plan_ok Logisch. ein Vektor ohne Namen (ein Wert je Planjahr von withdrawal_simulation()) ist
 #'   zulaessig (income_tariff()); simulation() prueft ohne (Fehler: nach Kalenderjahren benennen)
 #' @return Liste all (Zahl fuer alle Jahre oder NULL) und by_year (benannter Vektor oder NULL); mit plan_ok
 #'   und einem Vektor ohne Namen beide NULL
@@ -233,8 +233,8 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
 #' @keywords internal
 #' @noRd
 .xirr_rate <- function(t, amount, end_value, horizon) {
-  # E17 Stufe 3: Rechnung im Kern (core/evaluate_core_impl.h, xirr; Brent ueber sl_r_zeroin2 wie
-  # stats::uniroot); Warnungen von uniroot mit Text wie bis R 1.3.0, seit C19 ohne Aufruf
+  # Rechnung im Kern (core/evaluate_core_impl.h, xirr; Brent ueber sl_r_zeroin2 wie
+  # stats::uniroot); Warnungen von uniroot mit Text wie bis R 1.3.0, ohne Aufruf
   r <- .Call(C_sim_xirr, as.double(t), as.double(amount),
              if (length(end_value) == 1L) as.double(end_value) else NA_real_,
              if (length(horizon) == 1L) as.double(horizon) else NA_real_)
@@ -304,7 +304,7 @@ calculate_kurtosis <- function(x, na.rm = TRUE, excess = TRUE){
   if (is.numeric(x) && length(x) == 1L) x <- list(fixed = x)
   if (!is.list(x)) stop("order_fee/dca_fee: Zahl (EUR je Order) oder list(fixed, percent, min, max).")
   unk <- setdiff(names(x), c("fixed", "percent", "min", "max"))
-  if (length(x) && (is.null(names(x)) || any(names(x) == "") || length(unk)))   # R1-23: Tippfehler nicht still ignorieren
+  if (length(x) && (is.null(names(x)) || any(names(x) == "") || length(unk)))   # Tippfehler nicht still ignorieren
     stop(sprintf("order_fee/dca_fee: unbekannte oder unbenannte Felder (%s); erlaubt sind fixed, percent, min, max.",
                  paste(if (length(unk)) unk else "ohne Namen", collapse = ", ")))
   s <- list(fixed = x$fixed %||% 0, percent = (x$percent %||% 0) / 100, min = x$min %||% 0, max = x$max %||% Inf)

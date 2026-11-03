@@ -1,9 +1,9 @@
 /*
- * core/simlev_cabi.cpp -- C-ABI-Huelle der geteilten C++-Kerne (dritter Host: Julia; N7, 01.11.2026)
+ * core/simlev_cabi.cpp -- C-ABI-Huelle der geteilten C++-Kerne (dritter Host: Julia)
  *
  * Die geteilten Kerne (simlev_core.h, research_core_impl.h, withdrawal_core_impl.h, tariff_core_impl.h,
  * engine_core_impl.h) rechnen in R (Huellen r/src/<kern>.cpp) und Python
- * (python/src/_ext_<kern>.cpp) seit Etappe 7.3a aus derselben Quelle. Diese Datei stellt sie hinter einer
+ * (python/src/_ext_<kern>.cpp) aus derselben Quelle. Diese Datei stellt sie hinter einer
  * reinen C-Schnittstelle bereit (extern "C"; nur Zeiger, Laengen und Skalare), ueber die Julia sie
  * per ccall aufruft (julia/src/cabi.jl). Gebaut von julia/deps/build.jl in die Bibliothek libslc
  * (neben den C-Quellen von slc), mit denselben Gleitkomma-Schaltern wie R und Python
@@ -27,14 +27,14 @@
  *                                         kopiert die Ergebnisse in die Felder des Aufrufers
  *   SIMLEV_LIST, DONE, SET_FLAG           Tupel bzw. Merker wie in Python
  *
- * Auswertung (E17 Stufe 3, evaluate_core_impl.h): simlev_c_eval_* (Ergebnisobjekt je Aufrufer) und simlev_c_xirr.
+ * Auswertung (evaluate_core_impl.h): simlev_c_eval_* (Ergebnisobjekt je Aufrufer) und simlev_c_xirr.
  *
- * Tagesengine (E17, engine_core_impl.h): eigener Zustand im Kern, flache Eingabe (struct Input); Julia
+ * Tagesengine (engine_core_impl.h): eigener Zustand im Kern, flache Eingabe (struct Input); Julia
  * uebergibt Zeiger, Laengen und Skalare und holt die Ergebnisse ueber simlev_c_engine_* (julia/src/sim_engine.jl).
  * Die frueheren Engine-Kerne (simulation_core_impl.h, fifo_core_impl.h, tax_core_impl.h) mit ihrem Host auf
- * dem Simulationszustand von Julia (simlev_host::Obj, simlev_c_asset, simlev_c_layout) sind mit E17 Stufe 1c
+ * dem Simulationszustand von Julia (simlev_host::Obj, simlev_c_asset, simlev_c_layout) sind seit 1.4.0
  * entfallen. Geblieben sind feste Groessen und Schrittweiten der flachen Felder; simlev_c_flat_layout meldet sie,
- * Julia prueft sie beim Vorkompilieren (J15b).
+ * Julia prueft sie beim Vorkompilieren.
  *
  * Rueckgabecodes: 0 in Ordnung, 1 Fehler des Kerns (Text), 2 Benutzerabbruch, 3 kein Speicher,
  * 4 unbekannte Ausnahme, 5 Fehlaufruf der Huelle (Laengen; Text).
@@ -239,8 +239,8 @@ typedef cabi::IVec LglVec;
 
 #include "research_core_impl.h"
 #include "withdrawal_core_impl.h"
-#include "engine_core_impl.h"   /* E17: Tagesengine (eigener Zustand, ohne Host-Objekte) */
-#include "evaluate_core_impl.h" /* E17 Stufe 3: Auswertung von simulation(), xirr */
+#include "engine_core_impl.h"   /* Tagesengine (eigener Zustand, ohne Host-Objekte) */
+#include "evaluate_core_impl.h" /* Auswertung von simulation(), xirr */
 
 /* ===========================================================================
  * Exportierte Funktionen (Praefix simlev_c_). Laengen als int64_t, Matrizen spaltenweise.
@@ -339,7 +339,7 @@ SIMLEV_C_EXPORT int simlev_c_kendall_tau_core(const double* x, const double* y, 
  * mats: R, INF, CAPE, BASE (Zeiger) mit dims[8] (nr, nc je Matrix). Ergebnis in out[11] (Felder in der
  * Reihenfolge wealth, spending, planned, terminal_real, terminal_nominal, taxes_real, depletion_period,
  * failed, wealth_end, taxes_end, tariff_years (25 x (ny + 1) Pfade)) mit den Laengen outlen[11]; odims[8]: ny, paths, wealth
- * (nr, nc), wealth_end (nr, nc), tariff_years (nr, nc). T14: tariff_par/zve wie in R (leer = ohne Tarifweg). */
+ * (nr, nc), wealth_end (nr, nc), tariff_years (nr, nc). tariff_par/zve wie in R (leer = ohne Tarifweg). */
 SIMLEV_C_EXPORT int simlev_c_wd_simulate(const double* const* mats, const int64_t* dims, int64_t ppy, int64_t rule,
                                          const double* rp, int64_t nrp, int start_timing, double start_value,
                                          const double* income, int64_t ninc, int tax_on, double tax_rate, double tfs,
@@ -374,14 +374,14 @@ SIMLEV_C_EXPORT int simlev_c_wd_simulate(const double* const* mats, const int64_
     });
 }
 
-/* ---- E17: Tagesengine (engine_core_impl.h, flache Eingabe struct Input) ----
+/* ---- Tagesengine (engine_core_impl.h, flache Eingabe struct Input) ----
  * Ablauf in Julia (julia/src/sim_engine.jl): h = simlev_c_engine_new(); simlev_c_engine_run(h, ...) rechnet und
  * schreibt die Report-Vektoren (Zeiger reports, 5 je Asset: worth, money, flows, total, share) an Ort und Stelle;
  * simlev_c_engine_counts und _lots/_sells/_taxes/_prices/_events/_rows holen die uebrigen Ergebnisse;
  * simlev_c_engine_free(h). Das Engine-Objekt gehoert dem Aufrufer (kein globaler Zustand; je Thread eigene
  * Objekte). Eingaben wie python/src/_ext_engine.cpp (sim_engine_run): ai[AI_N na], ad[AD_N na], ci[CI_N],
  * cd[CD_N], fees[10], tot0[TT_N], tariff_par[n_tariff_par], zve[2 n_zve] (Jahr, zvE); event_w und base_rates:
- * nullptr oder je Asset ein Zeiger (nullptr ohne Spalte). Seit E17 Stufe 2 rechnet der Kern vorher die
+ * nullptr oder je Asset ein Zeiger (nullptr ohne Spalte). Der Kern rechnet vorher die
  * Vorbereitung (prepare_core_impl.h): pi[PI_N], pd[PD_N], start[na], filled[n] bzw. nullptr, event[n] bzw.
  * nullptr, Tage der Plaene (d_*, b_*); flags_out[n] erhaelt die Tagesflags (Freibetragstage fuer das Ergebnis).
  * Rueckgabe von simlev_c_engine_run: 0 in Ordnung, 6 Abbruch (NA in einer Bedingung bzw. Split-Verhaeltnis;
@@ -420,7 +420,7 @@ SIMLEV_C_EXPORT int simlev_c_engine_run(void* h, int64_t n, int64_t na, const do
     return rcode != 0 ? 6 : SIMLEV_C_OK;
 }
 
-/* E17 Stufe 2: calculate_dates_flags() ueber den Kern (prepare_core_impl.h, dates_flags): si[SI_N] (on, years,
+/* calculate_dates_flags() ueber den Kern (prepare_core_impl.h, dates_flags): si[SI_N] (on, years,
  * quarter, end, skip, has_days, step), start, days/dcode (nd Werte, nullptr ohne days), out[n] 0/1 */
 SIMLEV_C_EXPORT int simlev_c_dates_flags(int64_t n, const double* dates, const int32_t* si, double start, int64_t nd,
                                          const double* days, const int32_t* dcode, int32_t liquidate, int32_t* out) {
@@ -483,7 +483,7 @@ SIMLEV_C_EXPORT void simlev_c_engine_rows(void* h, double* rows, double* ks) {
     E.ks_out(ks);
 }
 
-/* ── Auswertung von simulation() (E17 Stufe 3, evaluate_core_impl.h; Julia: src/sim_evaluate.jl) ─────────────────
+/* ── Auswertung von simulation() (evaluate_core_impl.h; Julia: src/sim_evaluate.jl) ─────────────────
  * h = simlev_c_eval_new(); simlev_c_eval_run(h, ...) rechnet; cnt[2] = Zeilen von undefined_metrics, Warnungen;
  * simlev_c_eval_get holt die Ergebnisse; simlev_c_eval_free(h). Eingaben wie python/src/_ext_engine.cpp
  * (sim_evaluate): je Asset Zeiger auf total, flows, worth, money, price (n); filled nullptr oder n Werte 0/1;
@@ -553,7 +553,7 @@ SIMLEV_C_EXPORT int simlev_c_xirr(int64_t n, const double* t, const double* amou
     });
 }
 
-/* Feldlagen der flachen Felder (J15b): Seit E17 teilen Julia und die Kerne keine Strukturen mehr, wohl aber feste
+/* Feldlagen der flachen Felder: Julia und die Kerne teilen keine Strukturen, wohl aber feste
  * Groessen und Schrittweiten der flachen Ein- und Ausgaben, die julia/src/sim_engine.jl und sim_evaluate.jl als
  * Zahlen annehmen (_CABI_LAYOUT). Julia vergleicht sie beim Vorkompilieren mit diesen Werten; eine Abweichung
  * (der Kern liest oder schreibt sonst neben die Felder von Julia) bricht mit Namen und Werten ab. Wert k:

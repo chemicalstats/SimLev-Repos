@@ -7,7 +7,7 @@
 #                     W. Fullerton (Los Alamos); sprintf.c: ursprünglich Jonathan Rougier
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet seit N10 der C-Kern
+#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet der C-Kern
 #                     core/slc_rbase_date.c.
 # RFmt – format(), prettyNum(), formatC(), sprintf(), Datumsformate.
 # Vorlage: python/simlev/_r/fmt.py; R 4.3.3 format.c, format.R, sprintf.c,
@@ -768,8 +768,8 @@ end
 const sprintf = r_sprintf
 
 # ── Datum ──────────────────────────────────────────────────────────────────
-# N10: format.Date/strftime (C-Locale) rechnet der gemeinsame Kern core/slc_rbase_date.c (wie Python).
-# N11: %OS ohne Ziffer nach digits_secs (set_options); Ergebnis über 2048 Bytes ist ein Fehler wie in R.
+# format.Date/strftime (C-Locale) rechnet der gemeinsame Kern core/slc_rbase_date.c (wie Python).
+# %OS ohne Ziffer nach digits_secs (set_options); Ergebnis über 2048 Bytes ist ein Fehler wie in R.
 
 function _format_date_list(days::AbstractVector{Float64}, fmts::AbstractVector)
     n = length(days)

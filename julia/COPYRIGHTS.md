@@ -31,7 +31,7 @@ haben dieselben Felder, dazu `Dateien:`.
 
 | Teil | Inhalt |
 |---|---|
-| `src/*.jl` | alle Funktionen von SimLev (Ausnahme: Kalenderteile, Abschnitt 2.4); `core.jl`, `signals_core.jl`, `withdrawal_core.jl`, `dependence_core.jl`, `optimize_core.jl` rufen seit N7 die gemeinsamen C++-Kerne über `cabi.jl` auf |
+| `src/*.jl` | alle Funktionen von SimLev (Ausnahme: Kalenderteile, Abschnitt 2.4); `core.jl`, `signals_core.jl`, `withdrawal_core.jl`, `dependence_core.jl`, `optimize_core.jl` rufen seit 1.2.0 die gemeinsamen C++-Kerne über `cabi.jl` auf |
 | `src/slib*.jl` | Hüllen der C-Bibliothek per `ccall` |
 | `deps/core/` | Kopien der kanonischen C-Quellen aus `core/` (Repo-Wurzel, `core/sync.py`): die C-Bibliothek `slc*.c`, `slc*.h` **ohne `slc_rbase*`** (Zufall, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, Bootstrap-Kerne, Stineman, Glättungsspline, Kerndichte), die gemeinsamen C++-Kerne `simlev_core.h`, `*_core_impl.h` (Engine, FIFO, Steuer, Research, Entnahme) und ihre C-ABI-Hülle `simlev_cabi.cpp` |
 | `deps/build.jl` | Bau der C-Bibliothek |
@@ -39,8 +39,8 @@ haben dieselben Felder, dazu `Dateien:`.
 
 Die C-Bibliothek (ohne `slc_rbase*`) ist nach Veröffentlichungen
 geschrieben, nicht nach fremdem Code. Der Kopf jeder Datei in `core/` nennt
-ihre Quellen; die vollständigen Angaben stehen im Abschnitt
-[Literatur](../README.md#literatur).
+ihre Quellen; die vollständigen Angaben stehen in
+[`LITERATUR.md`](../LITERATUR.md).
 
 ## 2. Fremde Vorlagen
 
@@ -52,7 +52,7 @@ ihre Quellen; die vollständigen Angaben stehen im Abschnitt
 | Herkunft | übersetzt aus bzw. nachgebildet nach R 4.3.3 (*The R Project for Statistical Computing*, <https://www.R-project.org/>), je Datei siehe Tabelle und Kopf der Datei |
 | Rechte | The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut Kopf der jeweiligen R-Quelle); weitere Personen siehe 2.3 |
 | Lizenz der Vorlage | GPL (≥ 2) laut Kopf der R-Quellen; in SimLev unter GPL-3 |
-| Änderungen | Übertragung nach Julia (Vorlage jeweils die Python-Fassung, maßgeblich R) im von SimLev genutzten Umfang; Teile rechnen seit N8/N10 die C-Kerne aus 2.2 |
+| Änderungen | Übertragung nach Julia (nach den Gegenstücken in R und Python) im von SimLev genutzten Umfang; Teile rechnen seit 1.2.0 die C-Kerne aus 2.2 |
 
 | Datei | Herkunft | R-Funktionen |
 |---|---|---|
@@ -74,8 +74,8 @@ ihre Quellen; die vollständigen Angaben stehen im Abschnitt
 
 | | |
 |---|---|
-| Dateien | `deps/core/slc_rbase.h`, `slc_rbase.c`, `slc_rbase_sort.c`, `slc_rbase_cov.c`, `slc_rbase_num.c`, `slc_rbase_date.c` (Hülle `src/r/rbase_c.jl`; seit E17 sind `slc_rbase.c` und `slc_rbase.h` auch im R-Paket, für die Summen der Tagesengine `engine_core_impl.h` und seit Stufe 3 für die Auswertung `evaluate_core_impl.h`) |
-| Herkunft | übersetzt aus R 4.3.3 über die Port-Module aus 2.1: `slc_rbase.c` aus `summary.c`, `cum.c`, `array.c`, `arithmetic.c`, `stats/src/zeroin.c` (seit E17 Stufe 3, `sl_r_zeroin2`); `slc_rbase_sort.c` aus `sort.c` (`psort_body`, `Psort0`) und `qsort-body.c` (Schritt für Schritt); `slc_rbase_cov.c` aus `stats/src/cov.c`; `slc_rbase_num.c` aus `util.c` (`R_strtod`), `arithmetic.c` (`myfmod`), `format.c` (`scientific`). `slc_rbase_date.c`: nachgebildet nach den R-Hilfeseiten `?strptime`, `?format.Date`, `?as.Date`, Kalender nach 2.4 |
+| Dateien | `deps/core/slc_rbase.h`, `slc_rbase.c`, `slc_rbase_sort.c`, `slc_rbase_cov.c`, `slc_rbase_num.c`, `slc_rbase_date.c` (Hülle `src/r/rbase_c.jl`; seit 1.4.0 sind `slc_rbase.c` und `slc_rbase.h` auch im R-Paket, für die Summen der Tagesengine `engine_core_impl.h` und für die Auswertung `evaluate_core_impl.h`) |
+| Herkunft | übersetzt aus R 4.3.3 über die Port-Module aus 2.1: `slc_rbase.c` aus `summary.c`, `cum.c`, `array.c`, `arithmetic.c`, `stats/src/zeroin.c` (seit 1.4.0, `sl_r_zeroin2`); `slc_rbase_sort.c` aus `sort.c` (`psort_body`, `Psort0`) und `qsort-body.c` (Schritt für Schritt); `slc_rbase_cov.c` aus `stats/src/cov.c`; `slc_rbase_num.c` aus `util.c` (`R_strtod`), `arithmetic.c` (`myfmod`), `format.c` (`scientific`). `slc_rbase_date.c`: nachgebildet nach den R-Hilfeseiten `?strptime`, `?format.Date`, `?as.Date`, Kalender nach 2.4 |
 | Rechte | wie 2.1; Quicksort nach R. C. Singleton (siehe 2.3) |
 | Lizenz der Vorlage | GPL (≥ 2) laut Kopf der R-Quellen; in SimLev unter GPL-3 |
 | Änderungen | C99 ohne R-Datenstrukturen, gemeinsamer Kern für Python und Julia; je Datei im Kopf genannt |
@@ -93,7 +93,7 @@ ihre Quellen; die vollständigen Angaben stehen im Abschnitt
 | Funktion (Dateien) | Herkunft laut R-Quelle | Lizenzvermerk der älteren Vorlage |
 |---|---|---|
 | `optimize` (`_optim.jl`, `stats_optim.jl`) | `optimize.c`: „fmin.f -- translated by f2c“; Netlib `go/fmin.f`: Übersetzung von Brents ALGOL-60-Prozedur `localmin` (R. P. Brent, *Algorithms for Minimization without Derivatives*, Prentice-Hall 1973) | keiner (Netlib-Datei ohne Urheber- und Lizenzvermerk) |
-| `uniroot` (`_optim.jl`, `stats_optim.jl`; seit E17 Stufe 3 `.xirr_rate` über `sl_r_zeroin2` in `deps/core/slc_rbase.c`) | `zeroin.c`: „from NETLIB c/brent.shar with max.iter, add'l info and convergence details hacked in by Peter Dalgaard“; Netlib `go/zeroin.f`: Übersetzung von Brents Prozedur `zero` (Brent 1973) | `go/zeroin.f`: keiner; `c/brent.shar`: nicht geprüft (Abruf nicht möglich) |
+| `uniroot` (`_optim.jl`, `stats_optim.jl`; seit 1.4.0 `.xirr_rate` über `sl_r_zeroin2` in `deps/core/slc_rbase.c`) | `zeroin.c`: „from NETLIB c/brent.shar with max.iter, add'l info and convergence details hacked in by Peter Dalgaard“; Netlib `go/zeroin.f`: Übersetzung von Brents Prozedur `zero` (Brent 1973) | `go/zeroin.f`: keiner; `c/brent.shar`: nicht geprüft (Abruf nicht möglich) |
 | `hclust` (`stats_cluster.jl`) | `hclust.f`: „F. Murtagh, ESA/ESO/STECF, Garching, February 1986. Modifications for R: Ross Ihaka, Dec 1996“, weitere Änderungen Fritz Leisch, Martin Maechler | keiner in `hclust.f` |
 | Sortierung (`stats_sort.jl`, `slc_rbase_sort.c`) | `qsort-body.c`: „Based on CACM algorithm #347 by R. C. Singleton (1969)“ | ACM-Software-Hinweis (Nutzung „solely for academic, research and other similar noncommercial uses“), Anwendbarkeit auf R's Umarbeitung nicht belegt |
 | `signif` (`rformat.jl`, `fmt.jl`, `_fmt_core.jl`) | `fprec.c`: „a translation into C of a Fortran subroutine by W. Fullerton of Los Alamos Scientific Laboratory“ | keiner genannt |
@@ -104,7 +104,7 @@ ihre Quellen; die vollständigen Angaben stehen im Abschnitt
 
 | | |
 |---|---|
-| Dateien | `deps/core/prepare_core_impl.h` (`eng_civil`, `eng_days`; bis E17 Stufe 1c `engine_core_impl.h`, davor `fifo_core_impl.h`, `tax_core_impl.h`), `deps/core/slc_rbase_date.c` (`sl_r_civil_from_days`, `sl_r_days_from_civil`), `src/data_prep.jl` (`_civil_to_days`, `_days_to_civil`) |
+| Dateien | `deps/core/prepare_core_impl.h` (`eng_civil`, `eng_days`; bis 1.3.0 `engine_core_impl.h`, davor `fifo_core_impl.h`, `tax_core_impl.h`), `deps/core/slc_rbase_date.c` (`sl_r_civil_from_days`, `sl_r_days_from_civil`), `src/data_prep.jl` (`_civil_to_days`, `_days_to_civil`) |
 | Herkunft | übersetzt aus H. Hinnant, *chrono-Compatible Low-Level Date Algorithms*, <https://howardhinnant.github.io/date_algorithms.html> |
 | Rechte | gemeinfrei: „Consider these donated to the public domain.“ |
 | Lizenz der Vorlage | keine (gemeinfrei) |
@@ -122,20 +122,20 @@ ihre Quellen; die vollständigen Angaben stehen im Abschnitt
 
 Die Pakete evd, imputeTS, stinepack, rugarch, Rsolnp, truncnorm, MSGARCH und
 numDeriv sind weder enthalten noch eine Abhängigkeit (siehe
-[Literatur](../README.md#literatur)).
+[`LITERATUR.md`](../LITERATUR.md)).
 
 ## 4. Früher enthaltene Teile (entfernt)
 
-Bis Etappe 9 bildete die Julia-Fassung Teile von evd, imputeTS, stinepack,
+Bis 0.10.0 bildete die Julia-Fassung Teile von evd, imputeTS, stinepack,
 rugarch, Rsolnp und truncnorm sowie R's Zufallszahlen, Verteilungsfunktionen
 (nmath), lineare Algebra (BLAS, LAPACK, LINPACK) und Optimierer (`optim`,
-`nlminb`) nach; diese Teile sind entfernt (9.6c). Mit N7 entfiel die
+`nlminb`) nach; diese Teile sind entfernt (1.0.0). Mit 1.2.0 entfiel die
 Übersetzung von libstdc++ `std::sort`/`std::nth_element` (`_std_sort!` u. a.
 in `src/dependence_core.jl`, `src/optimize_core.jl`; Vorlage `bits/stl_algo.h`,
 Free Software Foundation, Teile Hewlett-Packard 1994 und Silicon Graphics
-1996, GPL-3 mit GCC Runtime Library Exception 3.1), mit N10 die Tabelle der
+1996, GPL-3 mit GCC Runtime Library Exception 3.1), mit 1.2.0 die Tabelle der
 glibc-Werte `powl(10.0L, k)` (`src/r/_fmt_powl.jl`) und die long-double-
 Nachbildung `src/r/ld80.jl`. Zufall und Numerik rechnet die eigene
 C-Bibliothek von SimLev. Die Pakete dienten nur als Vorbild und
-Prüforakel; ihre Angaben stehen im Abschnitt
-[Literatur](../README.md#literatur) der Haupt-README.
+Prüforakel; ihre Angaben stehen in
+[`LITERATUR.md`](../LITERATUR.md) im Wurzelverzeichnis.

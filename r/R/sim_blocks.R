@@ -1,5 +1,5 @@
 # =============================================================================
-# Bausteine fuer simulation() (Etappe 6.3, Anhang C)
+# Bausteine fuer simulation()
 # =============================================================================
 #
 # Jeder Baustein ist ein Konstruktor mit Pruefung der Argumente (deutsche Meldungen), einer Klasse und
@@ -18,7 +18,7 @@
 #
 # NULL heisst aus (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern).
 # funds_costs(fee, performance_fee) ist der Kostenbaustein fuer den Fonds-Wrapper (wrapper_config(costs = ),
-# wrapper.R, Etappe 6.5c); der alte Fondsmodus simulation(funds = ) ist entfernt.
+# wrapper.R); der alte Fondsmodus simulation(funds = ) ist entfernt.
 
 # ── Pruefhilfen ───────────────────────────────────────────────────────────────
 
@@ -37,7 +37,7 @@
   invisible(NULL)
 }
 
-# Anteil statt Prozent (R1-23, R8-04): Warnung wie in simulation()
+# Anteil statt Prozent: Warnung wie in simulation()
 .blk_frac_warn <- function(who, x, arg, hi = 1) {
   if (is.numeric(x) && length(x) == 1L && is.finite(x) && x > 0 && x < hi)
     warning(sprintf("%s: %s = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
@@ -59,7 +59,7 @@
   x
 }
 
-# Bezugsdatum: Date oder "JJJJ-MM-TT" (R1-22)
+# Bezugsdatum: Date oder "JJJJ-MM-TT"
 .blk_start <- function(who, x) {
   if (is.null(x)) return(invisible(NULL))
   d <- tryCatch(as.Date(x), error = function(e) NA)
@@ -272,7 +272,7 @@ income_tariff <- function(taxable_income, tariff = NULL) {
   if (missing(taxable_income) || is.null(taxable_income))
     stop("income_tariff: taxable_income (zu versteuerndes Einkommen in EUR je Kalenderjahr ohne die Ertr\u00e4ge der Simulation) fehlt.",
          call. = FALSE)
-  .check_taxable_income(taxable_income, integer(0), who = "income_tariff", plan_ok = TRUE)   # T14: auch je Planjahr
+  .check_taxable_income(taxable_income, integer(0), who = "income_tariff", plan_ok = TRUE)   # auch je Planjahr
   if (!is.null(tariff) && !inherits(tariff, "SimLevTaxTariff")) {
     if (is.character(tariff) && length(tariff) == 1L && !is.na(tariff)) tariff <- tax_tariff(tariff)
     else stop("income_tariff: tariff muss NULL (mitgelieferte Tarifdatei), ein Dateipfad oder ein Objekt aus tax_tariff() sein.",
@@ -482,15 +482,15 @@ print.SimLevFundsCosts <- function(x, ...) {
   a
 }
 
-# ── Aufrufer von simulation(): sim_args und Pfade (Etappe 6.4) ────────────────
+# ── Aufrufer von simulation(): sim_args und Pfade ────────────────
 #
 # sim_args der Aufrufer (bootstrap_study, param_search, param_bootstrap, sensitivity_grid,
 # sensitivity_leverage, sensitivity_rebalancing, planning_lumpsum_vs_dca, Zusatzargumente von
 # tactical_simulation) sind Argumente von simulation(), also auch Bausteine (dca = dca_plan(...)).
-# Raster und Suchraeume (F1) sprechen Parameter der Bausteine mit Pfad an: "dca.value",
+# Raster und Suchraeume sprechen Parameter der Bausteine mit Pfad an: "dca.value",
 # "rebalance.thresh", "tax.rate", "tax.income.marginal_rate", "tax.harvest.day". Ein Pfad baut den
 # Baustein neu: Grundwerte aus dem vorhandenen Baustein (z. B. aus sim_args), sonst die Standardwerte des
-# Konstruktors. Alte flache Namen (bis 6.3) ergeben einen Fehler mit dem neuen Baustein (E1: keine Aliasse).
+# Konstruktors. Alte flache Namen (bis 0.8.0) ergeben einen Fehler mit dem neuen Baustein (keine Aliasse).
 
 .SIM_TOP <- c("start_value", "costs", "dca", "rebalance", "splits", "tax", "risk_free", "fractions",
               "liquidate", "details")
@@ -609,7 +609,7 @@ print.SimLevFundsCosts <- function(x, ...) {
   do.call(get(ctor, mode = "function"), f)
 }
 
-#' Argumente fuer simulation() setzen (Etappe 6.4)
+#' Argumente fuer simulation() setzen
 #'
 #' Zweck: over (benannte Liste: Argumente von simulation() und Pfade) auf args anwenden, wie bisher
 #' utils::modifyList auf der obersten Ebene (NULL entfernt das Argument, also Standardwert). Pfade bauen den

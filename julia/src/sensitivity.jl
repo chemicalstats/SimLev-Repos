@@ -1,4 +1,4 @@
-# Sensitivity – r/R/sensitivity.R (Vorlage python/simlev/sensitivity.py)
+# Sensitivity – Gegenstück zu r/R/sensitivity.R und python/simlev/sensitivity.py
 #
 #  sensitivity_grid()         beliebige simulation()-Argumente im Raster
 #  sensitivity_rebalancing()  Rebalancing-Frequenz, Versatz und Bänder
@@ -52,10 +52,55 @@ end
     sensitivity_grid(data, strategy, grid; sim_args = nothing, metrics = nothing,
                      keep_results = false, cores = 1)
 
-Ruft `simulation()` für jede Kombination von `grid` (benannte Liste von
-Argumentwerten oder `RFrame` mit einer Zeile je Lauf; `NA`/`missing` lässt
-das Argument weg) auf und sammelt die Kennzahlen in einem `RFrame`.
-`sim_args = nothing` steht für R `list()`, `metrics = nothing` für `bootstrap_study_metrics`.
+`simulation` über ein Parameterraster.
+
+Ruft `simulation()` für jede Kombination von `grid` auf denselben Daten und derselben Strategie auf und
+sammelt die Kennzahlen in einem Tabelle (RFrame) (eine Zeile je Lauf). Grundlage der speziellen Studien in
+diesem Abschnitt (`sensitivity_rebalancing()`, `sensitivity_leverage()`).
+
+# Argumente
+- `data`, `strategy`: Wie in `simulation()`: Tabelle (RFrame) mit Spalte `date` und Kursspalten (Niveaus) bzw.
+  Strategie aus `create_strategy()`.
+- `grid`: Benannte Liste von Argumentwerten für `simulation()`; alle Kombinationen werden gerechnet. Parameter
+  der Bausteine werden mit Pfad `"<Baustein>.<Parameter>"` angesprochen, z. B. `(rebalance.unit = ["month",
+  "year"], rebalance.thresh = [5, 10])`, `"dca.value"`, `"tax.rate"`, `"tax.church_tax"`; Teilbausteine von
+  `tax_profile()` mit drei Teilen (`"tax.income.marginal_rate"`, `"tax.income.taxable_income"`,
+  `"tax.harvest.day"`). Ein Pfad baut den Baustein für jeden Lauf neu: Grundwerte aus dem gleichnamigen
+  Baustein in `sim_args` (ohne ihn die Standardwerte des Konstruktors, z. B. `dca_plan(value, span)` braucht
+  dann beide Pfade); mehrere Pfade eines Bausteins gelten zusammen. Ohne Punkt sind es Argumente von
+  `simulation()` (`start_value`, `risk_free`, `fractions`, `liquidate`, `details` oder ein ganzer Baustein als
+  Listen-Spalte). Unbekannte Pfade und die alten Einzelargumente (z. B. `balance_unit`) ergeben einen Fehler
+  mit den möglichen Bausteinen und Parametern. Alternativ ein Tabelle (RFrame) mit einer Zeile je Lauf.
+  Listen-Spalten (z. B. `splits.thresh`) sind erlaubt. `NA` lässt das Argument weg (Standardwert bzw. Wert aus
+  `sim_args`).
+- `sim_args`: Benannte Liste gemeinsamer Argumente für alle Läufe (Standard `()`); Werte aus `grid` haben
+  Vorrang. Argumente von `simulation()` außer `data` und `strategy`, also auch Bausteine (z. B. `dca =
+  dca_plan(100, 1)`, `tax = tax_profile()`) und Pfade zu Parametern der Bausteine (`"dca.value"`, siehe
+  `sensitivity_grid`). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B. `dca_value`) ergeben einen
+  Fehler, der den Baustein nennt.
+- `metrics`: Funktion `SimLevResult -> benannter numerischer Vektor` (Standard `bootstrap_study_metrics()`).
+- `keep_results`: Logisch (Standard `false`): Ergebnisse der Läufe zusätzlich als Attribut `results`
+  zurückgeben.
+- `cores`: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
+
+# Rückgabe
+Tabelle (RFrame): Rasterspalten (Listen-Spalten als Text "a/b"), die Kennzahlen aus `metrics` (bei
+`bootstrap_study_metrics()` z. B. `cagr` als Anteil; mit Sparplan geldgewichtet, XIRR) und, falls ein Lauf
+fehlschlug, eine Spalte `error` (Fehlermeldung, Kennzahlen dann `NA`); schlagen alle Läufe fehl, ein Fehler
+mit den Meldungen der Läufe. Bei `keep_results = true` Attribut `results` (Liste der `SimLevResult`).
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 1500
+d = RFrame("date" => Date(2015, 1, 1) .+ Day.(0:n-1))
+d["A"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+d["B"] = 100 .* cumprod(1 .+ 1e-4 .+ 0.004 .* randn(rng, n))
+st = create_strategy(A = asset_config("etf"; share = 0.6), B = asset_config("etf"; share = 0.4))
+g = sensitivity_grid(d, st, ("rebalance.unit" => ["month", "year"],); sim_args = (rebalance = rebalance_plan(1),))
+println(g)
+```
 """
 function sensitivity_grid(data, strategy, grid; sim_args = nothing, metrics = nothing, keep_results::Bool = false,
                           cores = 1)
@@ -117,11 +162,59 @@ _isna_lgl(v) = v === missing || v === nothing      # logisches NA (R: NA)
                             bands = missing, band_type = "absolute", include_none = true,
                             sim_args = nothing, metrics = nothing, cores = 1)
 
-Vergleicht Rebalancing-Frequenzen (`name => (unit, span)`), Versatz vor dem
-Periodenende (`offsets`, Kalendertage) und Toleranzbänder (`bands`, Prozent;
-`missing`/`NA` = an jedem Termin). Ergebnis: `RFrame` der Klasse
-`SimLevSensitivity` (Attribut `kind = "rebalancing"`). `sim_args = nothing` steht für
-R `list()`, `metrics = nothing` für `bootstrap_study_metrics`.
+Rebalancing-Sensitivität.
+
+Vergleicht Rebalancing-Frequenzen, Versatz vor dem Periodenende und Toleranzbänder (absolut oder relativ) für
+eine Strategie, wie die Rebalancing-Sensitivity von testfol.io. Jede Kombination aus `frequencies`, `offsets`
+und `bands` wird mit `simulation()` (`rebalance = rebalance_plan(...)`) gerechnet. Bänder werden an den
+Kalenderterminen der jeweiligen Frequenz geprüft. Termine, die nicht als Zeile in `data` vorkommen (bei
+Handelstagsdaten z. B. Wochenenden), entfallen.
+
+# Argumente
+- `data`, `strategy`: Wie in `simulation()`: Tabelle (RFrame) mit Spalte `date` und Kursspalten (Niveaus) bzw.
+  Strategie aus `create_strategy()`.
+- `frequencies`: Benannte Liste von `[unit, span]` mit `unit` "month", "quarter" oder "year" und `span` =
+  Anzahl Einheiten zwischen den Terminen (`unit` und `span` von `rebalance_plan()`). Standard: monatlich,
+  zweimonatlich, quartalsweise, viermonatlich, halbjährlich, jährlich (Namen monthly, bimonthly, quarterly,
+  four_monthly, semiannual, yearly).
+- `offsets`: Numerischer Vektor: Kalendertage vor dem Ende des Monats, Dreimonatsblocks bzw. Jahres, in dem
+  der Termin liegt (0 = letzter Tag; `rebalance_plan(anchor = "end", days = offset + 1)`). `nothing`
+  (Standard) rebalanciert am Periodenanfang.
+- `bands`: Toleranzbänder in Prozent (5 = 5 Prozent); `NA` (Standard) = an jedem Termin rebalancieren. Mehrere
+  Werte, auch gemischt mit `NA`, sind möglich.
+- `band_type`: "absolute" (Standard; Prozentpunkte Abweichung vom Zielgewicht) oder "relative" (Prozent des
+  Zielgewichts), siehe `thresh_type` von `rebalance_plan()`.
+- `include_none`: Logisch (Standard `true`): zusätzlich einen Lauf ohne Rebalancing (Zeile `frequency =
+  "none"`).
+- `sim_args`: Benannte Liste gemeinsamer Argumente für alle Läufe (Standard `()`): Argumente von
+  `simulation()` außer `data` und `strategy`, also auch Bausteine (z. B. `dca = dca_plan(100, 1)`, `tax =
+  tax_profile()`) und Pfade zu Parametern der Bausteine (`"dca.value"`, siehe `sensitivity_grid`). Alte
+  Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B. `dca_value`) ergeben einen Fehler, der den Baustein
+  nennt. Ein `rebalance = rebalance_plan(...)` in `sim_args` liefert die Grundwerte (z. B. `start`,
+  `event_col`); Frequenz, Versatz und Band setzt die Funktion je Lauf über die Pfade `"rebalance.unit"`,
+  `"rebalance.span"`, `"rebalance.anchor"`, `"rebalance.days"`, `"rebalance.thresh"` und
+  `"rebalance.thresh_type"`; der Lauf ohne Rebalancing setzt `rebalance = nothing`.
+- `metrics`: Funktion `SimLevResult -> benannter numerischer Vektor` (Standard `bootstrap_study_metrics()`).
+- `cores`: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
+
+# Rückgabe
+Tabelle (RFrame) der Klasse `SimLevSensitivity` mit den Spalten `frequency`, `offset`, `band`, `band_type` und
+den Kennzahlen aus `metrics`; fehlgeschlagene Läufe fehlen. Attribut `kind = "rebalancing"`. Ausgabe und
+Grafik über `print()` und `plot()`. Mit Sparplan (`sim_args`) ist `cagr` geldgewichtet (XIRR); `print()` weist
+darauf hin.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 1500
+d = RFrame("date" => Date(2015, 1, 1) .+ Day.(0:n-1))
+d["A"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+d["B"] = 100 .* cumprod(1 .+ 1e-4 .+ 0.004 .* randn(rng, n))
+st = create_strategy(A = asset_config("etf"; share = 0.6), B = asset_config("etf"; share = 0.4))
+println(sensitivity_rebalancing(d, st; frequencies = (monthly = ["month", 1], yearly = ["year", 1]),
+                                bands = [missing, 5]))
+```
 """
 function sensitivity_rebalancing(data, strategy; frequencies = nothing, offsets = nothing, bands = missing,
                                  band_type = nothing, include_none::Bool = true, sim_args = nothing, metrics = nothing,
@@ -202,10 +295,65 @@ _rep_get(rep, a, key) = (r = rep[a]; v = r isa AbstractDict || r isa SL.RList ? 
     planning_lumpsum_vs_dca(data, strategy; amount = 10000, months = 12, horizon = 10, step = 1,
                    sim_args = nothing, cores = 1)
 
-Einmalanlage gegen Einstieg in `months` Monatsraten für rollierende
-Starttermine (Monatserste); Vergleich des Vermögens nach `horizon` Jahren.
-Ergebnis: `RFrame` der Klasse `SimLevLumpSum` mit Attributen `summary` und
-`settings`. `sim_args = nothing` steht für R `list()`.
+Einmalanlage gegen gestreckten Einstieg (Lump Sum vs. DCA).
+
+Vergleicht für rollierende Starttermine (jeweils am Monatsersten) die sofortige Anlage eines Betrags mit einem
+Einstieg in `months` gleichen Monatsraten. Verglichen wird das Vermögen nach `horizon` Jahren.
+
+# Argumente
+- `data`, `strategy`: Wie in `simulation()`: Tabelle (RFrame) mit Spalte `date` und Kursspalten (Niveaus) bzw.
+  Strategie aus `create_strategy()`.
+- `amount`: Anlagebetrag in Währungseinheiten (Standard 10000); bei DCA in `months` Raten von `amount /
+  months` aufgeteilt.
+- `months`: Anzahl Monatsraten des gestreckten Einstiegs (Standard 12).
+- `horizon`: Vergleichshorizont in Jahren ab Start (Standard 10).
+- `step`: Jeder wievielte mögliche Starttermin verwendet wird (Standard 1 = jeder Monat; 12 = jährlich).
+- `sim_args`: Benannte Liste weiterer Argumente für `simulation()` (z. B. `tax = tax_profile()`): Argumente
+  von `simulation()` außer `data` und `strategy`, also auch Bausteine (z. B. `dca = dca_plan(100, 1)`, `tax =
+  tax_profile()`) und Pfade zu Parametern der Bausteine (`"dca.value"`, siehe `sensitivity_grid`). Alte
+  Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B. `dca_value`) ergeben einen Fehler, der den Baustein
+  nennt. `start_value` und `dca` (auch Pfade `"dca.*"` und die alten `dca_*`) setzt die Funktion selbst (in
+  `sim_args` ein Fehler).
+- `cores`: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
+
+# Rückgabe
+Tabelle (RFrame) der Klasse `SimLevLumpSum` mit einer Zeile je Start: `start` (Datum), `lump_sum` und `dca`
+(Endvermögen nach `horizon` Jahren in Währungseinheiten), `advantage` (Lump Sum / DCA - 1, als Anteil) und
+`exact` (logisch: DCA-Depot exakt über Stückzahlen fortgeschrieben, siehe oben). Attribut `summary`:
+`win_rate` (Anteil der Starttermine mit Vorsprung der Einmalanlage), `mean_advantage`, `median_advantage`,
+`mlsa` (mittlerer Vorsprung bei Gewinn) und `mlsd` (mittlerer Rückstand bei Verlust), alle als Anteil;
+Attribut `settings`.
+
+# Details
+Die Einmalanlage wird über den ganzen Horizont mit `simulation()` gerechnet, der gestreckte Einstieg über die
+`months` Monate der Einstiegsphase (Sparplan). Danach wird das DCA-Depot fortgeschrieben:
+
+- exakt: Handelt die Strategie nach der Einstiegsphase nicht mehr (in der Einmalanlage bleibt die Stückzahl
+  jedes Assets bis zum Horizont gleich, z. B. Buy-and-Hold ohne Rebalancing, ohne Steuern), hält auch das
+  DCA-Depot seine Stückzahlen: Endwert = Summe der Stückzahlen am Ende der Einstiegsphase x Kurs am Horizont
+  plus Cash. Jedes Asset behält so seine eigenen Gewichte.
+- Näherung: Sonst (Rebalancing, Signale, Steuern mit Vorabpauschale oder Kosten, die Stück verkaufen) wächst
+  das DCA-Depot mit dem zeitgewichteten Index der Einmalanlage (`result_index()`), als hätte es ab dem Ende
+  der Einstiegsphase deren Gewichte; mit Steuern (`tax = tax_profile()`) erscheint dazu eine Warnung.
+
+Welche Variante verwendet wurde, steht je Start in der Spalte `exact`. Für Fonds-Wrapper
+(`asset_config(wrapper = )`) ist der Kurs der Anteilswert aus `wrapper_nav()` im Fenster der Einmalanlage, wie
+ihn `simulation()` rechnet.
+
+Als Starttermine dienen nur Monatserste, die als Zeile in `data` vorkommen (bei Handelstagsdaten entfallen
+Monate, deren Erster kein Handelstag ist), und nur solche, nach denen noch `horizon` Jahre Daten folgen.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 2190
+d = RFrame("date" => Date(2010, 1, 1) .+ Day.(0:n-1))
+d["ETF"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+ld = planning_lumpsum_vs_dca(d, create_strategy(ETF = asset_config("etf")); amount = 12000, months = 12,
+                             horizon = 3, step = 6)
+println(ld)
+```
 """
 function planning_lumpsum_vs_dca(data, strategy; amount = 10000, months = 12, horizon = 10, step = 1, sim_args = nothing,
                         cores = 1)
@@ -311,10 +459,39 @@ _col(data, k) = data isa SL.RFrame ? data[k] : OF._lget(data, k)
 """
     series_leverage(data, index; leverage = 2, rate = 0, expense = 0, spread = 0, start = 100)
 
-Täglich zurückgesetzte Hebelreihe (Niveau) aus der Indexspalte `index`:
-`r = L x + (1 - L) i T/360 - TER T/365 - s m(L) T/360` (Raten in Prozent
-p. a.; `rate` als Zahl, Spaltenname, Vektor, data.frame(date, value) oder
-benannter Vektor).
+Gehebelte Reihe aus einem Index erzeugen (täglich zurückgesetzt, MSCI-Formel plus Kosten).
+
+Bildet eine täglich zurückgesetzte Hebelreihe (Niveau) nach der MSCI-Formel plus Fondskosten (wie die
+Ticker-Parameter L, E, SP und FR bei testfol.io): r = L x + (1 - L) i T/360 - TER· T/365 - s· m(L) T/360 mit
+Indexrendite x, Kalendertagen T seit der Vorzeile, m(L) = max(L-1, 0) + max(-L, 0) und i, TER, s als Anteil
+(Prozentangabe / 100); der Zins gilt für den Tag der Rendite. Das Ergebnis kann als Kursspalte in
+`simulation()` dienen; für die Anpassung an ein echtes Produkt siehe `backcast_fit()`.
+
+# Argumente
+- `data`: Tabelle (RFrame) mit Spalte `date` und der Indexspalte.
+- `index`: Spaltenname des Index (Niveau, nicht Rendite; Lücken werden mit dem letzten Wert gefüllt).
+- `leverage`: Hebel L als Zahl (Standard 2; negativ für Short).
+- `rate`: Finanzierungszins in Prozent p. a. (Standard 0): Skalar, Spaltenname, Vektor der Länge `nrow(data)`,
+  `data.frame(date, value)` oder benannter Vektor mit Datumsnamen.
+- `expense`: TER in Prozent p. a. (Standard 0).
+- `spread`: Spread auf den finanzierten bzw. leerverkauften Anteil m(L) in Prozent p. a. (Standard 0).
+- `start`: Startwert der Reihe in der ersten Zeile (Standard 100).
+
+# Rückgabe
+Numerischer Vektor (Niveau, Länge `nrow(data)`); fällt eine Tagesrendite auf -100 Prozent oder darunter,
+bleibt die Reihe ab dort bei 0.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 1500
+d = RFrame("date" => Date(2015, 1, 1) .+ Day.(0:n-1))
+d["idx"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+d["zins"] = fill(2.0, n)
+d["l2"] = series_leverage(d, "idx"; leverage = 2, rate = "zins", expense = 0.6, spread = 0.3)
+println(d["l2"][end])
+```
 """
 function series_leverage(data, index; leverage = 2, rate = 0, expense = 0, spread = 0, start = 100)
     data = SimLev.as_rframe(data)
@@ -339,11 +516,47 @@ end
     sensitivity_leverage(data, index; leverages = 0.5:0.25:4, rate = 0, expense = 0, spread = 0,
                          strategy = nothing, sim_args = nothing, metrics = nothing, cores = 1)
 
-Kennzahlen über den Hebel: je Hebel eine Reihe aus [`series_leverage`](@ref)
-als Asset `LEV` simuliert. Ergebnis: `RFrame` der Klasse
-`SimLevSensitivity` mit Attributen `optimal` (Hebel mit maximaler CAGR bzw.
-Sharpe Ratio) und `kind = "leverage"`. `sim_args = nothing` steht für R `list()`,
-`metrics = nothing` für `bootstrap_study_metrics`.
+Kennzahlen über den Hebel.
+
+Erzeugt für jeden Hebel eine Reihe mit `series_leverage()`, simuliert sie als Buy-and-Hold (oder mit einer
+eigenen Strategie für das Asset `"LEV"`) und bestimmt den Hebel mit der höchsten CAGR bzw. Sharpe Ratio, wie
+die LETF-Analyse von testfol.io. An `simulation()` wird ein Tabelle (RFrame) mit den Spalten `date` und `LEV`
+übergeben.
+
+# Argumente
+- `data`: Tabelle (RFrame) mit Spalte `date` und der Indexspalte.
+- `index`: Spaltenname des Index (Niveau, nicht Rendite; Lücken werden mit dem letzten Wert gefüllt).
+- `leverages`: Numerischer Vektor der zu prüfenden Hebel (Standard `seq(0.5, 4, by = 0.25)`).
+- `rate`: Finanzierungszins in Prozent p. a. (Standard 0): Skalar, Spaltenname, Vektor der Länge `nrow(data)`,
+  `data.frame(date, value)` oder benannter Vektor mit Datumsnamen.
+- `expense`: TER in Prozent p. a. (Standard 0).
+- `spread`: Spread auf den finanzierten bzw. leerverkauften Anteil m(L) in Prozent p. a. (Standard 0).
+- `strategy`: Optional Strategie mit dem Asset `"LEV"`; `nothing` (Standard) = Buy-and-Hold-ETF mit 30 Prozent
+  Teilfreistellung (`asset_config("etf", "bnh", partial_exemption = 30)`).
+- `sim_args`: Benannte Liste gemeinsamer Argumente für alle Läufe (Standard `()`): Argumente von
+  `simulation()` außer `data` und `strategy`, also auch Bausteine (z. B. `dca = dca_plan(100, 1)`, `tax =
+  tax_profile()`) und Pfade zu Parametern der Bausteine (`"dca.value"`, siehe `sensitivity_grid`). Alte
+  Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B. `dca_value`) ergeben einen Fehler, der den Baustein
+  nennt.
+- `metrics`: Funktion `SimLevResult -> benannter numerischer Vektor` (Standard `bootstrap_study_metrics()`).
+- `cores`: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
+
+# Rückgabe
+Tabelle (RFrame) der Klasse `SimLevSensitivity` mit `leverage` und den Kennzahlen aus `metrics`
+(fehlgeschlagene Läufe fehlen); Attribut `optimal` (benannter Vektor `cagr`, `sharpe`: Hebel mit maximaler
+CAGR bzw. Sharpe Ratio) und `kind = "leverage"`. Mit Sparplan (`sim_args`) ist `cagr` geldgewichtet (XIRR).
+Ausgabe und Grafik über `print()` und `plot()`.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 1500
+d = RFrame("date" => Date(2015, 1, 1) .+ Day.(0:n-1))
+d["idx"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+lv = sensitivity_leverage(d, "idx"; leverages = [1, 1.5, 2, 3], rate = 2, expense = 0.5)
+println(lv)
+```
 """
 function sensitivity_leverage(data, index; leverages = nothing, rate = 0, expense = 0, spread = 0, strategy = nothing,
                               sim_args = nothing, metrics = nothing, cores = 1)

@@ -475,7 +475,7 @@ portfolio_optimize <- function(x, assets = NULL,
   wb <- NULL
   if (resample > 0) {
     block <- block %||% max(2, round(nrow(R)^(1 / 3)))
-    S <- .sl_main_stream(seed)                                  # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+    S <- .sl_main_stream(seed)                                  # Hauptstrom
     wb <- matrix(vapply(seq_len(resample), function(b) core(R[.sl_boot_idx_stationary(nrow(R), nrow(R), block, stream = S), , drop = FALSE]), numeric(N)),
                  ncol = N, byrow = TRUE)
     colnames(wb) <- nm

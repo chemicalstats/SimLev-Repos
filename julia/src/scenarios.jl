@@ -1,4 +1,4 @@
-# Scenarios – Port von r/R/scenarios.R (Vorlage python/simlev/scenarios.py)
+# Scenarios – Gegenstück zu r/R/scenarios.R und python/simlev/scenarios.py
 #
 #   scenario_entropy_pooling()   gewichtet Szenarien so um, dass sie eigene Annahmen
 #                       ("Views") erfüllen, bei minimaler relativer Entropie
@@ -47,15 +47,124 @@ end
 
 _ops = ("=", "<=", ">=")
 
-"Annahme an den Erwartungswert einer Spalte (Einheit der Spalte)."
+"""
+    view_mean(var, value; op = "=")
+
+Annahme an den Erwartungswert einer Spalte (Einheit der Spalte).
+
+Bausteine für die Annahmen ("Views") von `scenario_entropy_pooling()`. Jede Funktion beschreibt nur die
+Annahme; geprüft und umgesetzt wird sie erst in `scenario_entropy_pooling()` auf der Szenario-Tabelle. Werte
+stehen in der Einheit der Szenario-Spalten: Bei Kursdaten sind das einfache Renditen in Prozent je Periode (-5
+= -5 %), Zustandsvariablen in ihrer eigenen Einheit.
+
+- view_mean: Erwartungswert einer Spalte (Rendite in Prozent je Periode oder Zustandsvariable in ihrer
+  Einheit).
+- view_prob: Wahrscheinlichkeit eines Ereignisses, als Ausdruck über die Spalten (z. B. `"aktien < -5"`).
+- view_vol: Standardabweichung einer Spalte (um ihren Erwartungswert unter der Ausgangsverteilung bzw. einer
+  `view_mean`-Annahme mit `op = "="` für dieselbe Spalte). Umgesetzt wird die Bedingung an das zweite Moment
+  um diesen festen Wert; verschiebt sich der Mittelwert durch andere Annahmen, kann die Standardabweichung
+  nach der Umgewichtung davon abweichen.
+
+# Argumente
+- `var`: Spaltenname der Szenario-Tabelle (Zeichenkette, Anlage oder Zustandsvariable).
+- `value`: Zielwert: bei `view_mean` und `view_vol` in der Einheit der Spalte (bei Kursdaten Prozent je
+  Periode), bei `view_prob` eine Wahrscheinlichkeit als Anteil (0.2 = 20 %). Eine endliche Zahl; bei
+  `view_vol` >= 0, bei `view_prob` zwischen 0 und 1 (sonst Fehler).
+- `op`: Art der Bedingung: `"="` (Standard), `"<="` oder `">="`.
+
+# Rückgabe
+Liste mit `type` (`"mean"`, `"prob"` oder `"vol"`), `var` bzw. `expr`, `value` und `op`.
+
+# Beispiel
+```julia
+using SimLev, Random
+rng = MersenneTwister(1)
+X = RFrame("aktien" => 0.15 .+ 2 .* randn(rng, 1000), "anleihen" => 0.05 .+ 0.6 .* randn(rng, 1000))
+ep = scenario_entropy_pooling(X, ["aktien", "anleihen"], [view_mean("aktien", -0.2)])
+println(ep["summary"])
+```
+"""
 view_mean(var, value, op_pos = _ops; op = op_pos) =
     (v = _view_value(value, "view_mean"); RList("type" => "mean", "var" => var, "value" => v, "op" => _D()._match_arg(op, _ops)))
 
-"Annahme an die Wahrscheinlichkeit eines Ereignisses (Ausdruck als Text über den Spalten)."
+"""
+    view_prob(expr, value; op = "=")
+
+Annahme an die Wahrscheinlichkeit eines Ereignisses (Ausdruck in R-Syntax über die Spalten, z. B. `"aktien < -2 & inflation > 2"`).
+
+Bausteine für die Annahmen ("Views") von `scenario_entropy_pooling()`. Jede Funktion beschreibt nur die
+Annahme; geprüft und umgesetzt wird sie erst in `scenario_entropy_pooling()` auf der Szenario-Tabelle. Werte
+stehen in der Einheit der Szenario-Spalten: Bei Kursdaten sind das einfache Renditen in Prozent je Periode (-5
+= -5 %), Zustandsvariablen in ihrer eigenen Einheit.
+
+- view_mean: Erwartungswert einer Spalte (Rendite in Prozent je Periode oder Zustandsvariable in ihrer
+  Einheit).
+- view_prob: Wahrscheinlichkeit eines Ereignisses, als Ausdruck über die Spalten (z. B. `"aktien < -5"`).
+- view_vol: Standardabweichung einer Spalte (um ihren Erwartungswert unter der Ausgangsverteilung bzw. einer
+  `view_mean`-Annahme mit `op = "="` für dieselbe Spalte). Umgesetzt wird die Bedingung an das zweite Moment
+  um diesen festen Wert; verschiebt sich der Mittelwert durch andere Annahmen, kann die Standardabweichung
+  nach der Umgewichtung davon abweichen.
+
+# Argumente
+- `expr`: Ereignis als Zeichenkette, ein R-Ausdruck über die Spaltennamen der Szenario-Tabelle, der einen
+  logischen Wert je Szenario liefert (z. B. `"aktien < -5 & inflation > 3"`).
+- `value`: Zielwert: bei `view_mean` und `view_vol` in der Einheit der Spalte (bei Kursdaten Prozent je
+  Periode), bei `view_prob` eine Wahrscheinlichkeit als Anteil (0.2 = 20 %). Eine endliche Zahl; bei
+  `view_vol` >= 0, bei `view_prob` zwischen 0 und 1 (sonst Fehler).
+- `op`: Art der Bedingung: `"="` (Standard), `"<="` oder `">="`.
+
+# Rückgabe
+Liste mit `type` (`"mean"`, `"prob"` oder `"vol"`), `var` bzw. `expr`, `value` und `op`.
+
+# Beispiel
+```julia
+using SimLev, Random
+rng = MersenneTwister(1)
+X = RFrame("aktien" => 0.15 .+ 2 .* randn(rng, 1000), "anleihen" => 0.05 .+ 0.6 .* randn(rng, 1000))
+ep = scenario_entropy_pooling(X, ["aktien", "anleihen"], [view_prob("aktien < -2", 0.15; op = ">=")])
+println(ep["summary"])
+```
+"""
 view_prob(expr, value, op_pos = _ops; op = op_pos) =
     (v = _view_value(value, "view_prob", 0, 1); RList("type" => "prob", "expr" => expr, "value" => v, "op" => _D()._match_arg(op, _ops)))
 
-"Annahme an die Standardabweichung einer Spalte (Einheit der Spalte, >= 0)."
+"""
+    view_vol(var, value; op = "=")
+
+Annahme an die Standardabweichung einer Spalte (Einheit der Spalte, >= 0).
+
+Bausteine für die Annahmen ("Views") von `scenario_entropy_pooling()`. Jede Funktion beschreibt nur die
+Annahme; geprüft und umgesetzt wird sie erst in `scenario_entropy_pooling()` auf der Szenario-Tabelle. Werte
+stehen in der Einheit der Szenario-Spalten: Bei Kursdaten sind das einfache Renditen in Prozent je Periode (-5
+= -5 %), Zustandsvariablen in ihrer eigenen Einheit.
+
+- view_mean: Erwartungswert einer Spalte (Rendite in Prozent je Periode oder Zustandsvariable in ihrer
+  Einheit).
+- view_prob: Wahrscheinlichkeit eines Ereignisses, als Ausdruck über die Spalten (z. B. `"aktien < -5"`).
+- view_vol: Standardabweichung einer Spalte (um ihren Erwartungswert unter der Ausgangsverteilung bzw. einer
+  `view_mean`-Annahme mit `op = "="` für dieselbe Spalte). Umgesetzt wird die Bedingung an das zweite Moment
+  um diesen festen Wert; verschiebt sich der Mittelwert durch andere Annahmen, kann die Standardabweichung
+  nach der Umgewichtung davon abweichen.
+
+# Argumente
+- `var`: Spaltenname der Szenario-Tabelle (Zeichenkette, Anlage oder Zustandsvariable).
+- `value`: Zielwert: bei `view_mean` und `view_vol` in der Einheit der Spalte (bei Kursdaten Prozent je
+  Periode), bei `view_prob` eine Wahrscheinlichkeit als Anteil (0.2 = 20 %). Eine endliche Zahl; bei
+  `view_vol` >= 0, bei `view_prob` zwischen 0 und 1 (sonst Fehler).
+- `op`: Art der Bedingung: `"="` (Standard), `"<="` oder `">="`.
+
+# Rückgabe
+Liste mit `type` (`"mean"`, `"prob"` oder `"vol"`), `var` bzw. `expr`, `value` und `op`.
+
+# Beispiel
+```julia
+using SimLev, Random
+rng = MersenneTwister(1)
+X = RFrame("aktien" => 0.15 .+ 2 .* randn(rng, 1000), "anleihen" => 0.05 .+ 0.6 .* randn(rng, 1000))
+ep = scenario_entropy_pooling(X, ["aktien", "anleihen"], [view_vol("anleihen", 0.8)])
+println(ep["summary"])
+```
+"""
 view_vol(var, value, op_pos = _ops; op = op_pos) =
     (v = _view_value(value, "view_vol", 0); RList("type" => "vol", "var" => var, "value" => v, "op" => _D()._match_arg(op, _ops)))
 
@@ -87,9 +196,58 @@ _vget(v, k) = SimLev.Dependence._getopt(v, k)
 """
     scenario_entropy_pooling(x, assets, views; states = nothing, frequency = "week", prior = nothing, env = Main)
 
-Entropy Pooling: Szenarien (`x`: Kursdaten mit `date` oder fertige
-Szenario-Tabelle) auf Annahmen aus `view_mean`, `view_prob`, `view_vol`
-umgewichten. Klasse `SimLevScenarios`.
+Entropy Pooling: Szenarien auf eigene Annahmen umgewichten.
+
+Sucht die Szenario-Wahrscheinlichkeiten q, die alle Annahmen erfüllen und dabei der Ausgangsverteilung p
+(Standard: gleichgewichtete Historie) am nächsten kommen, min_q Σ_j q_j log(q_j / p_j)quadu. d. N. Aq = b, Gq
+≤ h, Σ q = 1. Gelöst über das duale Problem (projizierter BFGS der C-Bibliothek von SimLev). Damit lassen sich
+Fragen stellen wie: "Wie sieht die gemeinsame Verteilung von Aktien und Anleihen aus, wenn die Inflation im
+Mittel 5 % beträgt?" - alle Abhängigkeiten bleiben aus der Historie erhalten, nur die Gewichte der Szenarien
+ändern sich. Sind die Annahmen nicht (genau genug) erfüllbar, gibt die Funktion eine Warnung aus.
+
+# Argumente
+- `x`: Tabelle (RFrame) mit Spalte `date` (Date) und Kursspalten (Kursniveaus; Renditen werden gebildet) oder
+  eine fertige Szenario-Tabelle (Tabelle (RFrame) oder Matrix ohne `date`, z. B. simulierte Renditen).
+- `assets`: Zeichenvektor der Anlagespalten (bei Kursdaten Kursspalten).
+- `views`: Liste von Annahmen aus `view_mean()`, `view_prob()`, `view_vol()`; eine leere Liste liefert die
+  Ausgangsverteilung.
+- `states`: Zeichenvektor der Zustandsspalten (z. B. Inflation, in ihrer eigenen Einheit), bei Kursdaten
+  verzögert wie in `dependence_analysis()`. `nothing` (Standard) = keine.
+- `frequency`: Renditefrequenz bei Kursdaten: `"week"` (Standard, ISO-Woche), `"day"` oder `"month"`; bei
+  einer fertigen Tabelle nur Beschriftung.
+- `prior`: Ausgangswahrscheinlichkeiten als numerischer Vektor mit einem Wert je Szenario (also je Zeile nach
+  der Aufbereitung; andere Längen, negative oder nicht endliche Werte sind ein Fehler), wird auf Summe 1
+  normiert. `nothing` (Standard) = gleichverteilt.
+- `env`: Modul, in dem freie Variablen und Funktionen in den Ausdrücken von `view_prob` gesucht werden
+  (Standard `Main`).
+
+# Rückgabe
+Objekt der Klasse `SimLevScenarios`, eine Liste mit `scenarios` (Szenario-Tabelle; bei Kursdaten mit `date`,
+Renditen in Prozent je Periode und Zuständen), `prob` (neue Wahrscheinlichkeiten, Summe 1), `prior`,
+`effective_n` (effektive Szenarioanzahl exp(H), H = Entropie von `prob`), `summary` (Tabelle (RFrame) je
+Anlage und Zustand: `var`, `mean_prior`, `mean_post`, `sd_prior`, `sd_post`, in der Einheit der Spalte),
+`correlation` (Korrelationsmatrix der Anlagen nachher), `assets`, `states`, `views`, `frequency` und `kind`
+(`"entropy_pooling"`). Methode `print`.
+
+# Details
+Szenarien: Bei einem Tabelle (RFrame) mit Spalte `date` wird je Periode ein Szenario gebildet. Die Kurse
+werden wie in `dependence_analysis()` aufbereitet (Fortschreiben fehlender Werte, letzte Zeile je ISO-Woche
+bzw. Kalendermonat) und in einfache Renditen in Prozent je Periode umgerechnet, 100 (P_t / P_t-1 - 1);
+Zustandsspalten gehen mit dem Wert am Ende der Vorperiode ein, Perioden mit fehlenden Werten entfallen. Jede
+andere Eingabe wird unverändert als Szenario-Tabelle verwendet (eine Zeile je Szenario, Einheiten wie
+geliefert).
+
+# Literatur
+Meucci, A. (2008), Fully Flexible Views: Theory and Practice, Risk 21(10), 97-102.
+
+# Beispiel
+```julia
+using SimLev, Random
+rng = MersenneTwister(1)
+X = RFrame("aktien" => 0.15 .+ 2 .* randn(rng, 1000), "anleihen" => 0.05 .+ 0.6 .* randn(rng, 1000))
+ep = scenario_entropy_pooling(X, ["aktien", "anleihen"], [view_mean("aktien", -0.2)])
+println(ep["summary"])
+```
 """
 function scenario_entropy_pooling(x, assets, views; states = nothing, frequency = ("week", "day", "month"), prior = nothing, env = Main)
     x = SimLev.as_rframe(x)
@@ -171,7 +329,7 @@ function scenario_entropy_pooling(x, assets, views; states = nothing, frequency 
         gr(l) = b .- D._matvec(A, dual(l)[2])
         lower = [ineq[i] ? 0.0 : -Inf for i in eachindex(b)]
         o = SimLev.SLib.optim(zeros(length(b)), fn, gr; method = "L-BFGS-B", lower = lower,
-                              control = Dict{String,Any}("maxit" => 5000, "factr" => 1e3, "pgtol" => 1e-12))   # projizierter BFGS (slc, B.8)
+                              control = Dict{String,Any}("maxit" => 5000, "factr" => 1e3, "pgtol" => 1e-12))   # projizierter BFGS (slc)
         q = dual(_fvec(D._el(o, "par")))[2]
         viol = D._matvec(A, q) .- b
         for i in eachindex(viol)
@@ -214,9 +372,9 @@ _approx_fn(xg, yg) = u -> _fvec(D_el(_D()._flex(SimLev.RStats.approx, (xg, yg), 
 D_el(o, k) = _D()._el(o, k)
 
 _rnorm_mat(m, k, rs) = reshape(SimLev.SLib.rnorm(Int(m * k); stream = rs), Int(m), Int(k))
-"`.sl_chol(A)` (Cholesky der C-Bibliothek slc, Entwurf B.5)."
+"`.sl_chol(A)` (Cholesky der C-Bibliothek slc)."
 _chol(A) = _fmat(SimLev.SLib.chol(_fmat(A)))
-"`.sl_solve_spd(A)`: Inverse einer symmetrisch positiv definiten Matrix (Entwurf B.5)."
+"`.sl_solve_spd(A)`: Inverse einer symmetrisch positiv definiten Matrix."
 _solve(A) = _fmat(SimLev.SLib.solve_spd(_fmat(A)))
 _rchisq(n, df, rs) = SimLev.SLib.rchisq(Int(n), Float64(df); stream = rs)
 
@@ -231,9 +389,59 @@ end
 """
     scenario_copula(x, assets; n = 10000, family = "t", stress = nothing, frequency = "week", seed = nothing)
 
-Szenarien aus einer t- bzw. Gauss-Copula mit empirischen Rändern. `stress`:
-benannte Liste (NamedTuple, RList, Vektor von Paaren) von Quantilbändern je
-Anlage, z. B. `(aktien = [0, 0.05],)`. Klasse `SimLevScenarios`.
+Szenarien aus einer Copula mit empirischen Rändern.
+
+Passt eine t-Copula (oder Gauß-Copula) an die Periodenrenditen an: Korrelationsmatrix aus Kendalls Tau (ρ =
+sin(πτ/2)), Freiheitsgrade per Profil-Likelihood auf den Rängen, Ränder empirisch. Mit `stress` wird bedingt
+simuliert: Die genannten Anlagen werden in ein Quantilband gezwungen (z. B. Aktien in ihre schlechtesten 5 %
+der Wochen), die übrigen folgen der bedingten Copula-Verteilung - so zeigt sich, was die Abhängigkeitsstruktur
+für die anderen Anlagen in solchen Phasen erwarten lässt (einschließlich gemeinsamer Abstürze bei der
+t-Copula).
+
+# Argumente
+- `x`: Tabelle (RFrame) mit Spalte `date` (Date) und Kursspalten (Kursniveaus) oder fertige Tabelle von
+  Periodenrenditen ohne `date`.
+- `assets`: Zeichenvektor der Kurs- bzw. Renditespalten.
+- `n`: Anzahl Szenarien (ganze Zahl, Standard 10000).
+- `family`: Copula: `"t"` (Standard) oder `"gaussian"`.
+- `stress`: Optional benannte Liste von Quantilbändern je Anlage als Anteile `[von, bis]` mit 0 <= von < bis
+  <= 1, z. B. `(aktien = [0, 0.05],)` (schlechteste 5 % der Perioden). Unbenannte Einträge, unbekannte Anlagen
+  und ungültige Bänder sind ein Fehler. `nothing` (Standard) = unbedingte Simulation.
+- `frequency`: Renditefrequenz bei Kursdaten: `"week"` (Standard, ISO-Woche), `"day"` oder `"month"`.
+- `seed`: Startwert der Ziehung. Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis reproduzierbar und
+  der Zufallszustand von SimLev bleibt unverändert; mit `nothing` wird genau einmal ein Startwert aus dem
+  Zufallszustand von SimLev gezogen (siehe `simlev_seed()`), wiederholte Aufrufe liefern dann verschiedene
+  Ergebnisse. `set.seed()` wirkt nicht.
+
+# Rückgabe
+Objekt der Klasse `SimLevScenarios` mit `scenarios` (Tabelle (RFrame) mit `n` Zeilen, eine Spalte je Anlage,
+in der Einheit der Eingangsrenditen, bei Kursdaten Prozent je Periode), `prob` und `prior` (je 1 / n),
+`effective_n` (= n), `copula` (Liste: `family`, `correlation`, `df`; `Inf` bei `"gaussian"`), `stress`,
+`summary` (`var`, `mean_prior`, `sd_prior` der Historie, `mean_post`, `sd_post` der Szenarien), `correlation`
+(Pearson-Korrelation der Szenarien), `assets`, `frequency`, `kind` (`"copula"`). Methode `print`; weiter mit
+`scenario_risk()`.
+
+# Details
+Die Periodenrenditen werden wie bei `scenario_entropy_pooling()` gebildet (einfache Renditen in Prozent je
+Periode aus Kursdaten; eine fertige Tabelle ohne `date` wird unverändert verwendet). Die Ränder sind die
+empirischen Quantilfunktionen mit linearer Interpolation; simulierte Werte liegen daher nie außerhalb der
+historischen Spannweite. Die Freiheitsgrade werden im Bereich 2.1 bis 100 gesucht. Bei einer Anlage in
+`stress` wird ihr Quantil gleichverteilt im Band gezogen; bei mehreren werden deren Werte gemeinsam aus der
+Copula gezogen und nur Ziehungen behalten, die in allen Bändern liegen (Verwerfungsverfahren, exakt bedingt;
+bei einer gemeinsamen Trefferquote, die nach 5e7 Ziehungen keine `n` Treffer liefert, bricht die Funktion ab).
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 1095
+d = RFrame("date" => Date(2015, 1, 1) .+ Day.(0:n-1))
+e = randn(rng, n)
+d["aktien"] = 100 .* cumprod(1 .+ 0.01 .* e)
+d["anleihen"] = 100 .* cumprod(1 .+ 0.004 .* (0.3 .* e .+ randn(rng, n)))
+cs = scenario_copula(d, ["aktien", "anleihen"]; n = 2000, stress = (aktien = [0, 0.05],), seed = 1)
+println(scenario_risk(cs, (aktien = 0.6, anleihen = 0.4)))
+```
 """
 function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stress = nothing,
                           frequency = ("week", "day", "month"), seed = nothing)
@@ -294,7 +502,7 @@ function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stres
     end
     n = Int(n)
     fin = isfinite(nu)
-    sim = let rs = SimLev.SLib.main_stream(seed)          # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+    sim = let rs = SimLev.SLib.main_stream(seed)          # Hauptstrom
         st = st_list === nothing ? Int[] : [findfirst(==(p.first), assets) for p in st_list]
         Z = zeros(n, k)
         if length(st) == 1
@@ -417,9 +625,38 @@ _isnum_arr(a) = all(v -> v isa Real && !(v isa Bool), a)
 """
     scenario_risk(x, weights; alpha = 0.05)
 
-Portfolio-Kennzahlen auf Szenarien (gewichtet mit `x["prob"]`): benannter Vektor
-`mean`, `volatility`, `var`, `cvar`, `q05`, `q50`, `q95`, `prob_loss`.
-`weights`: benannter Vektor (RVector, NamedTuple, Dict, Paare).
+Portfolio-Kennzahlen auf Szenarien (gewichtet mit `x["prob"]`).
+
+Berechnet die Portfoliorendite r_j = Σ_i w_i X_ji je Szenario und daraus Kennzahlen, gewichtet mit den
+Szenario-Wahrscheinlichkeiten `x["prob"]` (z. B. nach `scenario_entropy_pooling()`). Quantile sind die
+kleinste Szenariorendite, bei der die kumulierte Wahrscheinlichkeit den Wert erreicht. Der CVaR ist der
+erwartete Verlust in der Wahrscheinlichkeitsmasse `alpha` der schlechtesten Szenarien (Rockafellar & Uryasev
+2002): Szenarien unterhalb des VaR zählen voll, das Grenzszenario (das den VaR bestimmt) mit dem Teil seiner
+Wahrscheinlichkeit, der die Masse auf `alpha` auffüllt. Damit ist der CVaR kohärent und fällt monoton in
+`alpha`.
+
+# Argumente
+- `x`: Objekt der Klasse `SimLevScenarios` aus `scenario_entropy_pooling()` oder `scenario_copula()`.
+- `weights`: Benannter Gewichtsvektor (Anteile, Namen = Anlagespalten der Szenarien); wird nicht normiert.
+- `alpha`: Tail-Wahrscheinlichkeit als Anteil für VaR und CVaR (Standard 0.05).
+
+# Rückgabe
+Benannter numerischer Vektor: `mean`, `volatility`, `var`, `cvar` (Verluste positiv), `q05`, `q50`, `q95`
+(Quantile der Portfoliorendite mit Vorzeichen) in der Einheit der Szenarien (bei Kursdaten Prozent je Periode)
+sowie `prob_loss` (Wahrscheinlichkeit einer negativen Rendite als Anteil 0 bis 1).
+
+# Literatur
+Rockafellar, R. T. & Uryasev, S. (2002), Conditional value-at-risk for general loss distributions, Journal of
+Banking & Finance 26(7), 1443-1471.
+
+# Beispiel
+```julia
+using SimLev, Random
+rng = MersenneTwister(1)
+X = RFrame("aktien" => 0.15 .+ 2 .* randn(rng, 1000), "anleihen" => 0.05 .+ 0.6 .* randn(rng, 1000))
+ep = scenario_entropy_pooling(X, ["aktien", "anleihen"], [view_mean("aktien", -0.2)])
+println(scenario_risk(ep, (aktien = 0.6, anleihen = 0.4)))
+```
 """
 function scenario_risk(x, weights; alpha = 0.05)
     x = SimLev.as_rframe(x)
@@ -459,7 +696,7 @@ const _DEFAULT_CRISES = RFrame(
     "end" => Date.(["1974-10-03", "1987-12-04", "2002-10-09", "2009-03-09", "2011-10-03", "2020-03-23", "2022-10-12"]))
 
 "`cumprod` (long double)."
-_cumprod(x) = SimLev._rb_cumprod(Float64[Float64(v) for v in x])   # N10: C-Kern
+_cumprod(x) = SimLev._rb_cumprod(Float64[Float64(v) for v in x])   # C-Kern
 "`cummax` (NA/NaN pflanzt sich fort)."
 function _cummax(x)
     out = similar(x, Float64)
@@ -474,8 +711,50 @@ end
 """
     scenario_crisis(data, weights; crises = nothing, rebalance = false)
 
-Portfolio (`weights`, auf Summe 1 normiert) durch historische Krisen führen;
-`crises`: RFrame mit `crisis`, `start`, `end` (`nothing` = eingebaute Liste).
+Portfolio durch historische Krisen führen.
+
+Rechnet ein heutiges Portfolio durch historische Krisenfenster (Standard: große Aktienkrisen von 1973 bis
+2022, Hoch bis Tief des US-Aktienmarkts) und meldet Rendite, maximalen Drawdown und die Erholungsdauer nach
+dem Fensterende, je Anlage und für das Portfolio. Das Fenster beginnt an der ersten Datenzeile ab `start` und
+endet an der letzten Zeile bis `end`; fehlende Kurse werden mit dem letzten Wert fortgeschrieben. Krisen
+außerhalb des Datenzeitraums (oder mit fehlendem Startkurs einer Anlage) werden übersprungen; liegt keine im
+Zeitraum, bricht die Funktion ab.
+
+# Argumente
+- `data`: Tabelle (RFrame) mit Spalte `date` (Date) und Kursspalten (Kursniveaus, keine Renditen, positiv),
+  typischerweise täglich. Die Zeilen werden nach `date` sortiert (mit Hinweis, falls nötig); fehlende oder
+  doppelte Daten sind ein Fehler.
+- `weights`: Benannter Gewichtsvektor (Namen = Kursspalten), wird auf Summe 1 normiert (Summe muss positiv
+  sein; unbekannte Namen sind ein Fehler).
+- `crises`: Tabelle (RFrame) mit `crisis` (Name), `start`, `end` (Date). `nothing` (Standard) = eingebaute
+  Liste (siehe oben).
+- `rebalance`: Logisch: `false` (Standard, Kaufen und Halten ab Fensterbeginn) oder `true` (an jeder
+  Datenzeile auf die Gewichte zurück).
+
+# Rückgabe
+Tabelle (RFrame) je Krise im Datenzeitraum: `crisis`, `start`, `end` (tatsächlich verwendete Datenzeilen),
+`portfolio` (Portfoliorendite im Fenster in Prozent), `max_drawdown` (maximaler Drawdown des Portfolios im
+Fenster in Prozent, negativ), `days_to_recover` (Kalendertage ab Fensterende, bis der Kaufen-und-Halten-Wert
+des Portfolios (auch bei `rebalance = true`) wieder den Wert bei Fensterbeginn erreicht; 0 = am Fensterende
+nicht darunter; `NA` = nicht erholt bzw. Daten enden) und je Anlage deren Rendite im Fenster in Prozent.
+
+# Details
+Eingebaute Krisen (`crises = nothing`): Ölkrise 1973/74 (1973-01-11 bis 1974-10-03), Schwarzer Montag 1987
+(1987-08-25 bis 1987-12-04), Dotcom 2000-02 (2000-03-24 bis 2002-10-09), Finanzkrise 2007-09 (2007-10-09 bis
+2009-03-09), Eurokrise 2011 (2011-04-29 bis 2011-10-03), Covid 2020 (2020-02-19 bis 2020-03-23),
+Inflation/Zinsen 2022 (2022-01-03 bis 2022-10-12).
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 1460
+d = RFrame("date" => Date(2018, 1, 1) .+ Day.(0:n-1))
+d["aktien"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.012 .* randn(rng, n))
+d["anleihen"] = 100 .* cumprod(1 .+ 1e-4 .+ 0.003 .* randn(rng, n))
+kr = RFrame("crisis" => ["Test"], "start" => [Date(2019, 5, 1)], "end" => [Date(2019, 9, 30)])
+println(scenario_crisis(d, (aktien = 0.6, anleihen = 0.4); crises = kr))
+```
 """
 function scenario_crisis(data, weights, crises_pos = nothing; crises = crises_pos, rebalance::Bool = false)
     data = SimLev.as_rframe(data)

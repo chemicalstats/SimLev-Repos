@@ -1,5 +1,5 @@
 // core/prepare_core_impl.h
-// Vorbereitung von simulation() als gemeinsamer C++-Kern (E17 Stufe 2): Termine (calculate_dates_flags mit der
+// Vorbereitung von simulation() als gemeinsamer C++-Kern: Termine (calculate_dates_flags mit der
 // Monatsarithmetik von seq.Date), Split-Termine, Tagesflags samt Verschieben von Terminen auf aufgefuellten
 // Tagen, Aktivierung, Freibetragstermine, Jahreswechsel und VP-Abrechnungstage, Startgewichte und Anfangszustand.
 // Ergebnis ist die flache Eingabe der Tagesengine (engine_core_impl.h: Tagesflags, flag_dca_n, Startindizes,
@@ -280,7 +280,7 @@ static inline int prepare(const PrepIn& I, const PrepOut& O) {
     std::vector<int64_t> hit;
     for (int64_t i = 0; i < n; i++)
       if (dca_n[i] != 0 && filled[i]) hit.push_back(i);
-    for (int64_t i : hit) {   // R1-16: Anzahl der Sparplantermine mitnehmen
+    for (int64_t i : hit) {   // Anzahl der Sparplantermine mitnehmen
       const int64_t j = target(i);
       if (j >= 0 && j < n) dca_n[j] = dca_n[j] + dca_n[i];
       dca_n[i] = 0.0;
@@ -288,7 +288,7 @@ static inline int prepare(const PrepIn& I, const PrepOut& O) {
     shift(split);
     shift(liq);
     for (int64_t i = 0; i < n; i++) {
-      if (liq[i]) { reb[i] = 0; dca_n[i] = 0.0; }   // A7-02
+      if (liq[i]) { reb[i] = 0; dca_n[i] = 0.0; }
       dca[i] = dca_n[i] > 0;
       trade[i] = !reb[i] && day[i] != I.stopp && !filled[i];
     }
@@ -364,7 +364,7 @@ static inline int prepare(const PrepIn& I, const PrepOut& O) {
       if (!yc[ys]) continue;
       int64_t j = ys;
       while (j < n && filled[j] && year[j] == year[ys]) j++;
-      // R3a-01: ohne Handelstag im Folgejahr am 1.1. abrechnen
+      // ohne Handelstag im Folgejahr am 1.1. abrechnen
       if (j >= n || year[j] != year[ys]) j = ys;
       vp[j] = 1;
     }

@@ -107,7 +107,7 @@
 
 #' Interne-Zinsfuss-Rendite (MWRR, p. a.) eines Ergebnisses
 #' @keywords internal
-#' R4-03: gleiche Konvention und gleiches Verfahren wie die Engine (simulation()$cagr): mit
+#' gleiche Konvention und gleiches Verfahren wie die Engine (simulation()$cagr): mit
 #' Einzahlungen nach dem Starttag XIRR ueber .xirr_rate() (Startbetrag brutto, Kalendertage /
 #' 365,25, adaptive Klammer, auch bei Beinahe-Totalverlust und sehr hohen Renditen), sonst die
 #' CAGR aus dem Depotwert am Starttag.
@@ -425,8 +425,7 @@
 #' d$A <- 100 * cumprod(1 + rnorm(3000, 3e-4, 0.010))
 #' d$B <- 100 * cumprod(1 + rnorm(3000, 2e-4, 0.006))
 #' a <- simulation(d, create_strategy(A = asset_config("etf", "bnh")))
-#' b <- simulation(d, create_strategy(A = asset_config("etf", "bnh", 0.6), B = asset_config("etf", "bnh", 0.4)),
-#'                 balance_mode = TRUE, balance_span = 1, balance_unit = "year")
+#' b <- simulation(d, create_strategy(A = asset_config("etf", "bnh", 0.6), B = asset_config("etf", "bnh", 0.4)), rebalance = rebalance_plan(span = 1, unit = "year"))
 #' da <- result_analysis(list(Aktien = a, Mischung = b), benchmark = "Aktien", risk_free = 1)
 #' da
 #' # Eigene Kursreihe als Benchmark (data.frame mit date und Wertspalte), real mit 2 % Inflation
@@ -543,7 +542,7 @@ NULL
            "positive_months", "avg_gain", "avg_loss", "alpha", "active_return", "tracking_error", "m2", "treynor")
   if (is.na(v)) return("\u2013")
   if (k %in% pct || grepl("^c?var_", k)) return(sprintf("%.2f %%", 100 * v))
-  if (k %in% c("start_value", "end_value", "taxes")) return(formatC(v, format = "f", digits = 0, big.mark = " "))   # R9-07: Tabelle, Leerzeichen als Tausendertrenner
+  if (k %in% c("start_value", "end_value", "taxes")) return(formatC(v, format = "f", digits = 0, big.mark = " "))   # Tabelle, Leerzeichen als Tausendertrenner
   if (k %in% c("longest_drawdown_days")) return(sprintf("%.0f T.", v))
   sprintf("%.3f", v)
 }

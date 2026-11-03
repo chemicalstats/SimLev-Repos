@@ -81,7 +81,7 @@ Punkte.}
 (Standard: keine): Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
 also auch Bausteine (z. B. \code{dca = dca_plan(100, 1)}, \code{tax = tax_profile()}) und
 Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
-\code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.5.0 vor den Bausteinen, z. B.
+\code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B.
 \code{dca_value}) ergeben einen Fehler, der den Baustein nennt.}
 
 \item{burn_in}{Anzahl Zeilen am Anfang von \code{data} (bei Tagesdaten:
@@ -99,9 +99,10 @@ Sparplan geldgewichtet, XIRR).}
 \item{maximize}{Logisch: Zielgroesse maximieren (Standard \code{TRUE};
 \code{FALSE} z. B. fuer \code{max_drawdown}).}
 
-\item{cores}{Anzahl paralleler Prozesse (ganze Zahl, Standard 1); unter
-Unix per Fork (\code{parallel::mclapply}), unter Windows per
-PSOCK-Cluster.}
+\item{keep_returns}{\code{"day"} (Standard): taegliche Renditen je
+Punkt speichern (noetig fuer \code{\link[=overfit_pbo]{overfit_pbo()}}, \code{\link[=sharpe_deflated]{sharpe_deflated()}},
+\code{\link[=overfit_walk_forward]{overfit_walk_forward()}}, \code{\link[=overfit_reality_check]{overfit_reality_check()}}, \code{\link[=sharpe_haircut]{sharpe_haircut()}});
+\code{"none"}: keine. \code{TRUE}/\code{FALSE} (bis 1.0.0) ergeben einen Fehler.}
 
 \item{seed}{Startwert fuer den Versuchsplan bei \code{"random"}/\code{"lhs"} (Standard
 \code{NULL}; bei \code{"grid"} ohne Bedeutung). Mit Startwert (ganze Zahl, \eqn{|seed| < 2^{53}}) ist das Ergebnis reproduzierbar und der
@@ -110,10 +111,9 @@ Startwert aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_s
 Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
 Die Auswertung der Punkte ist deterministisch, das Ergebnis haengt nicht von \code{cores} ab.}
 
-\item{keep_returns}{\code{"day"} (Standard): taegliche Renditen je
-Punkt speichern (noetig fuer \code{\link[=overfit_pbo]{overfit_pbo()}}, \code{\link[=sharpe_deflated]{sharpe_deflated()}},
-\code{\link[=overfit_walk_forward]{overfit_walk_forward()}}, \code{\link[=overfit_reality_check]{overfit_reality_check()}}, \code{\link[=sharpe_haircut]{sharpe_haircut()}}));
-\code{"none"}: keine. \code{TRUE}/\code{FALSE} (bis 6.5b) ergeben einen Fehler.}
+\item{cores}{Anzahl paralleler Prozesse (ganze Zahl, Standard 1); unter
+Unix per Fork (\code{parallel::mclapply}), unter Windows per
+PSOCK-Cluster.}
 
 \item{object, x}{Objekt der Klasse \code{SimLevParamSearch}.}
 

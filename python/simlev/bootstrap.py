@@ -1,4 +1,4 @@
-"""Bootstrap-Pfade für Indizes, Hebelprodukte und Signale (Port von ``r/R/bootstrap.R``).
+"""Bootstrap-Pfade für Indizes, Hebelprodukte und Signale (Gegenstück zu ``r/R/bootstrap.R``).
 
 Öffentliche Funktionen:
 
@@ -19,7 +19,7 @@ schätzt ihr Modell wie R selbst, :mod:`simlev.ms_garch`).
 Datenstrukturen: Pfade sind ``pandas.DataFrame`` (Spalten = Pfadnamen, eine
 Zeile je Pfadzeile); die Niveau-Variante der Zusatzreihen steht in
 ``P.attrs["aux_level"]`` (Attribut ``aux_level`` in R). Zufallszahlen
-ausschließlich aus der C-Bibliothek slc (:mod:`simlev._lib`, Entwurf C.5): ein Strom je Pfad
+ausschließlich aus der C-Bibliothek slc (:mod:`simlev._lib`): ein Strom je Pfad
 U_i = J^i(S_0), gezogen über die Kerne slc_boot (:mod:`simlev._lib_models`), bitgleich zu R.
 """
 from __future__ import annotations
@@ -272,7 +272,7 @@ def _to_date(x, what="date"):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Zufall (Entwurf C.5): Ströme aus simlev._lib; .par_lapply in _r.parallel
+# Zufall: Ströme aus simlev._lib; .par_lapply in _r.parallel
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ``.par_lapply`` steht in Schicht 0 (``simlev._r.parallel``); dieser Name leitet weiter.
@@ -335,19 +335,103 @@ def bootstrap_config(indices, *, letfs=(), regime_index=None, aux=None, aux_type
                      cross=("ratio", "joint"), input=("returns", "prices")):  # noqa: A002
     """Bootstrap-Konfiguration erstellen.
 
+    Beschreibt, welche Spalten eines Datensatzes gebootstrappt werden, welche Hebelprodukte (LETFs) daraus je Pfad
+    abgeleitet werden und welche Zusatzreihen (Zinsen, Inflation, Kalendertage, ...) jeweils aus derselben
+    historischen Zeile mitgezogen werden. Das Ergebnis ist die Eingabe ``config`` von ``bootstrap()`` und
+    ``bootstrap_study()``.
+
     Args:
-        indices: Benannter Vektor (``dict``/``Series``) Pfadname -> Spaltenname.
-        letfs: Liste von Hebelprodukten (je ein ``dict`` mit ``base`` und
-            optional ``leverage``, ``finance``, ``expense``, ``spread``,
-            ``days``, ``rate_basis``, ``ter_basis``, ``name``).
-        regime_index: Pfadname des Referenzindex (``None`` = erster Index).
-        aux: Optional benannter Vektor Zusatzreihen Pfadname -> Spaltenname.
-        aux_type: Optional benannter Vektor Art je Zusatzreihe ("level"/"rate").
-        cross: "ratio" (Standard) oder "joint".
-        input: "returns" (Standard) oder "prices".
+        indices: Benannter Zeichenvektor oder benannte Liste: Pfadname -> Spaltenname in ``data``, z. B. ``{"us":
+            "us_index_l1_return", "eu": "eu_index_l1_return"}``. Die Pfadnamen werden zu Spaltennamen der
+            erzeugten Pfade.
+        letfs: Liste von Hebelprodukten (Standard: keine). Jedes Element ist eine Liste mit
+
+            - base: Name des Basisindex (Pfadname aus ``indices``), Pflicht.
+            - leverage: Hebel L als Zahl ungleich 0 (Standard 2; negativ für Short-Produkte).
+            - finance: Finanzierungszins in Prozent p. a. (3.5 = 3,5 Prozent) als Skalar oder Name einer
+              Zusatzreihe aus ``aux``, deren Werte ebenfalls in Prozent p. a. vorliegen (Standard 3.5).
+            - expense: TER in Prozent p. a. (Standard 0.5; muss >= 0 sein).
+            - spread: Spread auf den finanzierten bzw. leerverkauften Anteil m(L) in Prozent p. a. (Standard 0).
+            - days: Kalendertage je Zeile: Skalar (Standard 1, passend für Kalendertagsdaten) oder Name einer
+              Zusatzreihe (z. B. Datumsabstand bei Handelstagsdaten).
+            - rate_basis, ter_basis: Tagesbasis für Zins und Spread bzw. TER (Standard 360 bzw. 365).
+            - name: Spaltenname im Pfad (Standard ``<base>_l<L>``, z. B. "eu_l2", bei negativem Hebel
+              ``<base>_inv<|L|>``, z. B. "us_inv1").
+
+            Tagesrendite (MSCI Daily Leveraged/Short, plus Fondskosten): r = 1 + L (R - 1) + (1 - L) i · d / 360 -
+            TER · d / 365
+            - s · m(L) · d / 360 mit Brutto-Indexrendite R, Tagen je Zeile d, i, TER und s als Anteil
+              (Prozentangabe / 100) und m(L) = max(L-1,0) + max(-L,0); 360 und 365 stehen für ``rate_basis`` und
+              ``ter_basis``. Fällt r auf 0 oder darunter, bleibt das Produkt ab diesem Tag bei 0 (Totalverlust).
+              Für L = 2 und konstantem Zins entspricht das dem Original (Finanzierung auf L - 1); für
+              Short-Produkte wird - anders als im Original - der Zinsertrag auf Kapital und Leerverkaufserlös
+              gutgeschrieben (MSCI-Methodik: -R + 2i).
+        regime_index: Pfadname des Referenzindex für die Verfahren "regime", "evt", "tails" und die GARCH-Familie
+            (Standard ``None`` = erster Index).
+        aux: Optional (Standard ``None`` = keine) benannter Zeichenvektor Zusatzreihen: Pfadname -> Spaltenname,
+            z. B. ``{"rate": "eu_rate", "cpi": "eu_cpi"}``. Zusatzreihen werden nicht simuliert, sondern aus
+            denselben historischen Zeilen gezogen wie die Renditen; wie sie in den Pfad und in die
+            Weiterverarbeitung eingehen, legt ``aux_type`` fest.
+        aux_type: Optional (Standard ``None`` = keine Angabe) benannter Zeichenvektor: Art je Zusatzreihe, Name
+            aus ``aux`` -> ``"level"`` oder ``"rate"``. Ein leerer Vektor (``character(0)``) gilt wie ``None``.
+            Nicht genannte Reihen stehen wie ``"rate"`` mit ihren Originalwerten im Pfad, behalten aber in der
+            Weiterverarbeitung das bisherige Verhalten (siehe unten).
+
+            - "level": Niveau, z. B. ein Preisindex (CPI). Die Reihe wird in Zeilenverhältnisse zerlegt (Wert je
+              Zeile / Wert der Vorzeile); der Pfad enthält das Niveau, das sich durch Kumulieren der Verhältnisse
+              der gezogenen Zeilen ergibt. Startwert (Pfadzeile 1) ist der Wert der ersten verwendeten
+              Historienzeile, bei ``input = "prices"`` der Wert der Zeile davor (Startzeile der Kurse). So
+              entstehen keine Sprünge an Blockgrenzen. Bei ``input = "returns"`` hat die erste Historienzeile
+              mangels Vorzeile das Verhältnis 1. Die Werte müssen positiv und endlich sein.
+            - "rate": Rate in Prozent pro Jahr (2 = 2 % p. a.; nicht je Datenperiode, kein Anteil wie 0.02), z. B.
+              ein Zins oder eine Inflationsrate: Werte der gezogenen Zeilen unverändert (keine Normierung auf 100;
+              Pfadzeile 1 wiederholt den Wert der ersten gezogenen Zeile). Als Inflation wird die Rate je
+              Pfadzeile über die Kalendertage seit der Vorzeile aufgezinst, Π (1 + r/100)^Tage/365.25; eine
+              konstante Rate 2 ergibt damit je Jahr 1.02^Tage/365.25 (1,02 bei 365,25 Tagen), bei Kalender- wie
+              Handelstagsdaten.
+
+            Eine ausdrückliche Angabe gilt einheitlich in allen Funktionen, die die Reihe weiterverarbeiten:
+            ``keep_aux`` in ``bootstrap_study()``, ``inflation`` in ``withdrawal_paths()`` und
+            ``withdrawal_simulation()`` (``"level"`` = Preisindex, ``"rate"`` = Inflationsrate in Prozent p. a.;
+            ``inflation_type`` muss nicht erneut angegeben werden) und ``withdrawal_cohorts()`` mit einer Tabelle
+            aus ``bootstrap_data()``. Widersprechende Angaben dort (z. B. ``inflation_type = "level"`` bei
+            ``"rate"``) sind ein Fehler. Ohne Angabe gilt das bisherige Verhalten: Originalwerte im Pfad; als
+            Inflation (``keep_aux``, ``withdrawal_paths()`` mit ``inflation_type = "level"``) dient die
+            Niveau-Variante (Attribut ``aux_level``, siehe ``bootstrap()``), also die kumulierten
+            Zeilenverhältnisse, als wäre die Reihe ein Preisindex; eine Rate in Prozent p. a. muss dann mit
+            ``inflation_type = "rate_pa"`` in ``withdrawal_paths()`` angegeben werden. Der Finanzierungszins von
+            Hebelprodukten (``finance``) ist ebenfalls in Prozent p. a. (einfache Verzinsung je Zeile über
+            ``rate_basis``) und darf nicht ``"level"`` sein; ebenso die Tage je Zeile (``days``, Werte unverändert
+            verwendet, am besten ohne Angabe).
+        cross: Kopplung der Nicht-Referenzindizes bei den Verfahren "garch", "gjr_garch", "ms_garch",
+            "ms_ar_garch_m" und "tvtp_ms_garch": ``"ratio"`` (Standard, wie Original: GARCH(1,1) auf das
+            Verhältnis zur Referenz, z. B. EUR-Index = USD-Index x Wechselkurs) oder ``"joint"`` (eigene
+            GARCH(1,1)-Dynamik je Reihe, Kopplung nur über das gemeinsame Residuendatum). Bei den übrigen
+            Verfahren ohne Wirkung.
+        input: ``"returns"`` (Standard; Brutto-Renditen > 0 je Zeile, wie im Original) oder ``"prices"``
+            (Kursniveaus; Renditen werden intern als Verhältnis aufeinanderfolgender Zeilen gebildet, die erste
+            Zeile entfällt).
 
     Returns:
-        :class:`BootstrapConfig`.
+        Objekt der Klasse ``bootstrap_config`` (Liste mit ``indices``, ``letfs`` (mit allen Standardwerten
+        ergänzt), ``regime_index``, ``aux``, ``aux_type`` (Art je Zusatzreihe, vollständig), ``aux_type_set``
+        (Namen der ausdrücklich angegebenen Arten), ``cross``, ``input``, ``n_indices``, ``n_letfs``, ``n_aux``,
+        ``index_names``, ``letf_names``, ``aux_names``).
+
+    Details:
+        Eingabedaten (``data`` in ``bootstrap()``): ein DataFrame oder eine Matrix mit einer Zeile je Beobachtung
+        (z. B. Kalendertage oder Handelstage) und den hier genannten Spalten. Mit ``input = "returns"`` enthalten
+        die Index-Spalten Brutto-Renditen je Zeile (z. B. 1.002 für +0,2 Prozent), mit ``input = "prices"``
+        Kursniveaus. Eine Datumsspalte wird nicht benötigt und nicht ausgewertet; Zeilen mit fehlenden Werten in
+        den verwendeten Spalten werden entfernt.
+
+    Beispiel::
+
+        import simlev
+        cfg = simlev.bootstrap_config({"us": "us_ret", "eu": "eu_ret"}, regime_index="us",
+                                      letfs=[{"base": "eu", "leverage": 2, "finance": "rate", "expense": 0.5}],
+                                      aux={"rate": "eu_rate"})
+        print(cfg["letf_names"])
     """
     cross = _match_arg(cross, ("ratio", "joint"))
     input = _match_arg(input, ("returns", "prices"))  # noqa: A001
@@ -490,7 +574,7 @@ def _complete_rows(m) -> np.ndarray:
 
 @_quiet
 def _extract_returns(data, config):
-    """Renditematrix und Zusatzreihen extrahieren (Port von ``.extract_returns``).
+    """Renditematrix und Zusatzreihen extrahieren (R: ``.extract_returns``).
 
     Returns:
         dict mit ``ret`` (n x k), ``aux`` (n x a oder ``None``), ``aux_ratio``,
@@ -572,7 +656,7 @@ _PARAM_DEFAULTS = (
 
 
 def _get_base_params(method, params, n):
-    """Standardparameter je Verfahren (Port von ``.get_base_params``)."""
+    """Standardparameter je Verfahren (R: ``.get_base_params``)."""
     p = dict(params or {})
     for nm, dv in _PARAM_DEFAULTS:
         if p.get(nm) is None:
@@ -593,7 +677,7 @@ _ESS_GRIDS = {
 
 
 def _get_ess_grid(method, n):
-    """Standard-ESS-Gitter je Verfahren (Port von ``.get_ess_grid``)."""
+    """Standard-ESS-Gitter je Verfahren (R: ``.get_ess_grid``)."""
     g = _ESS_GRIDS.get(method)
     if g is None:
         return None
@@ -612,7 +696,7 @@ def _pget(params, nm, default):
 
 
 def _calculate_ess(n, method, params, info=None):
-    """Effektive Stichprobengröße je Konfiguration (Port von ``.calculate_ess``)."""
+    """Effektive Stichprobengröße je Konfiguration (R: ``.calculate_ess``)."""
     n = float(n)
     if method in ("raw", "wild", "reset", "garch", "gjr_garch"):
         ess = n
@@ -647,7 +731,7 @@ def _calculate_ess(n, method, params, info=None):
 
 @_quiet
 def _pw_block(x):
-    """Optimale Blocklänge nach Politis & White (2004), Port von ``.pw_block``.
+    """Optimale Blocklänge nach Politis & White (2004), R: ``.pw_block``.
 
     Returns:
         ``pandas.Series`` mit ``stationary`` und ``circular``.
@@ -701,12 +785,45 @@ def _pw_block(x):
 def bootstrap_block_length(x, *, transform=("none", "abs", "squared")):
     """Optimale Blocklänge nach Politis & White (2004) mit Korrektur von Patton et al. (2009).
 
+    Schätzt die optimale (erwartete) Blocklänge für den stationären und den zirkulären Block-Bootstrap nach
+    Politis & White (2004) mit der Korrektur von Patton, Politis & White (2009) (Flat-Top-Lagfenster, c = 2, K_N =
+    max(5, √log_10 n)).
+
     Args:
-        x: Numerischer Vektor oder Matrix/``DataFrame`` (Spalten = Reihen).
-        transform: "none" (Standard), "abs" (``|x - mean|``) oder "squared".
+        x: Numerischer Vektor oder Matrix (Spalten = Reihen), z. B. (Log-)Renditen je Zeile. Nicht-endliche Werte
+            werden je Spalte entfernt.
+        transform: Transformation vor der Schätzung: ``"none"`` (Standard, Reihe selbst), ``"abs"`` (|x - bar x|)
+            oder ``"squared"`` ((x - bar x)^2).
 
     Returns:
-        ``DataFrame`` mit Spalten ``stationary`` und ``circular``, eine Zeile je Reihe.
+        Matrix mit Spalten ``stationary`` (erwartete Blocklänge für den stationären Bootstrap, Parameter ``L``)
+        und ``circular`` (feste Blocklänge für den zirkulären Block-Bootstrap, Parameter ``block_length``), eine
+        Zeile je Reihe (Zeilennamen = Spaltennamen von ``x`` bzw. V1, V2, ...). Einheit: Zeilen (Beobachtungen)
+        von ``x``; Werte sind nicht gerundet, mindestens 1 und höchstens ⌈min(3√(n), n/3)⌉; bei weniger als 20
+        Beobachtungen 1.
+
+    Details:
+        Hinweis: Das Verfahren optimiert die Varianzschätzung des Mittelwerts. Für tägliche Aktienrenditen ergeben
+        sich oft sehr kurze Blöcke, weil die Renditen kaum autokorreliert sind. Für Pfad-Simulationen mit
+        Trendfolge-Signalen ist daher ``transform = "abs"`` (Volatilitäts- Clustering) und eine
+        Sensitivitätsanalyse über mehrere Blocklängen zu empfehlen; die Blocklänge sollte die
+        Signal-Lookback-Länge nicht weit unterschreiten.
+
+        Mit ``params = {"L": "auto"}`` bzw. ``{"block_length": "auto"}`` verwenden ``bootstrap()`` und
+        ``bootstrap_study()`` diese Schätzung (Maximum über alle Indizes, jeweils für Log-Renditen und deren
+        Beträge).
+
+    Literatur:
+        Politis, D.N. & White, H. (2004), Econometric Reviews 23(1); Patton, A., Politis, D.N. & White, H. (2009),
+        Econometric Reviews 28(4).
+
+    Beispiel::
+
+        import numpy as np, simlev
+        rng = np.random.default_rng(1)
+        e = rng.normal(size=2000); x = np.empty(2000); x[0] = e[0]
+        for t in range(1, 2000): x[t] = 0.5 * x[t - 1] + e[t]   # AR(1)
+        print(simlev.bootstrap_block_length(x))
     """
     transform = _match_arg(transform, ("none", "abs", "squared"))
     if isinstance(x, pd.DataFrame):
@@ -732,7 +849,7 @@ def bootstrap_block_length(x, *, transform=("none", "abs", "squared")):
 
 
 def _resolve_auto(params, returns, config, method):
-    """"auto"-Parameter auflösen (Port von ``.resolve_auto``)."""
+    """"auto"-Parameter auflösen (R: ``.resolve_auto``)."""
     params = dict(params or {})
     for nm in ("L", "block_length"):
         if isinstance(params.get(nm), str) and params.get(nm) == "auto":
@@ -752,10 +869,10 @@ def _resolve_auto(params, returns, config, method):
 
 @_quiet
 def _fit_garch11(e, gjr=False, quiet=False):
-    """GARCH(1,1) / GJR-GARCH(1,1) schätzen (ML -> Momente), Port von ``.fit_garch11``.
+    """GARCH(1,1) / GJR-GARCH(1,1) schätzen (ML -> Momente), R: ``.fit_garch11``.
 
-    Seit Etappe 9.6b wie R über die C-Bibliothek slc (``_lib.fit_garch11``, Entwurf B.10, F10):
-    ML-Punktschätzer unter Normalverteilung (Raster-Starts, BFGS; GJR seit N1 mit α + γ >= 0, also auch
+    Seit 1.0.0 wie R über die C-Bibliothek slc (``_lib.fit_garch11``):
+    ML-Punktschätzer unter Normalverteilung (Raster-Starts, BFGS; GJR mit α + γ >= 0, also auch
     γ < 0, und BFGS von allen sieben Rasterpunkten), bei Fehlschlag die
     Momente mit Warnung; Methodenlabel ``"konstant"``, ``"ml"`` oder ``"momente"``. Der frühere
     Weg über die rugarch-Nachbildung (mit gosolnp und Uhrzeit-Seed) und Nelder-Mead entfällt.
@@ -765,7 +882,7 @@ def _fit_garch11(e, gjr=False, quiet=False):
 
 @_quiet
 def _fit_cross(returns, config, base):
-    """Nicht-Referenzreihen als GARCH(1,1) modellieren (Port von ``.fit_cross``); ``base`` 1-basiert."""
+    """Nicht-Referenzreihen als GARCH(1,1) modellieren (R: ``.fit_cross``); ``base`` 1-basiert."""
     k = returns.shape[1]
     n = returns.shape[0]
     others = [j for j in range(1, k + 1) if j != base]
@@ -790,9 +907,9 @@ def _fit_cross(returns, config, base):
 
 @_quiet
 def _fit_tail(base_ret, prob, side):
-    """Tail-Schätzung (GPD-ML -> Momente -> empirisch -> Default), Port von ``.fit_tail``.
+    """Tail-Schätzung (GPD-ML -> Momente -> empirisch -> Default), R: ``.fit_tail``.
 
-    Den GPD-Fit (``_lib.gpd_fit``, C-Bibliothek slc, Entwurf B.12) nimmt R bei mindestens 30
+    Den GPD-Fit (``_lib.gpd_fit``, C-Bibliothek slc) nimmt R bei mindestens 30
     Überschreitungen; Fehler darin (z. B. Suche an der Grenze ξ = -0,999) führen wie das
     ``tryCatch`` in R zum Momenten-Schätzer.
     """
@@ -846,7 +963,7 @@ def _seq_len_out(n_out):
 
 @_quiet
 def _prepare_regime_info(base_ret, vol_window, n_regimes):
-    """Regime aus rollierender Volatilität (Port von ``.prepare_regime_info``)."""
+    """Regime aus rollierender Volatilität (R: ``.prepare_regime_info``)."""
     vol = _slm.rolling_vol(base_ret, int(vol_window))
     th = _quantile7(vol, _seq_len_out(float(n_regimes) + 1))
     th[-1] = th[-1] + 1e-10
@@ -856,14 +973,14 @@ def _prepare_regime_info(base_ret, vol_window, n_regimes):
 
 @_quiet
 def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp, cores=1):
-    """MS-GARCH-Familie vorbereiten (Port von ``.prepare_ms_info``; eigene ML-Schätzung
+    """MS-GARCH-Familie vorbereiten (R: ``.prepare_ms_info``; eigene ML-Schätzung
     :func:`simlev.ms_garch._ms_garch_fit`); ``base`` 1-basiert."""
     from . import ms_garch as _msg
     _msg._ms_garch_check(K, garch_model)
     ex = returns[:, base - 1] - 1
     n = len(ex)
     try:
-        fit = _msg._ms_garch_fit(ex, K, garch_model, cores)   # N6: cores Threads für die Starts
+        fit = _msg._ms_garch_fit(ex, K, garch_model, cores)   # cores Threads für die Starts
     except Exception as e:  # noqa: BLE001 - tryCatch(..., error = function(e) stop(...))
         _stop(_sp("MS-GARCH(%d, %s) Fit fehlgeschlagen: %s", int(float(np.asarray(K).ravel()[0])), garch_model, str(e)))
     K = int(float(np.asarray(K).ravel()[0]))
@@ -916,7 +1033,7 @@ def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp, cores=1
                 if j != i and int(np.sum(to == j + 1)) >= 5:
                     try:
                         g = _sl.logit_irls(np.column_stack([np.ones(x.size), x]), (to == j + 1).astype(np.float64))
-                        d = float(g["coefficients"][1])   # Logit-IRLS (Entwurf B.7)
+                        d = float(g["coefficients"][1])   # Logit-IRLS
                     except Exception:  # noqa: BLE001 - tryCatch(..., error = function(e) NA)
                         d = _NAN
                     if math.isfinite(d):
@@ -941,7 +1058,7 @@ def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp, cores=1
 
 
 def _prepare_method_info(returns, config, method, params, cores=1):
-    """Verfahrensspezifische Vorberechnung (Port von ``.prepare_method_info``)."""
+    """Verfahrensspezifische Vorberechnung (R: ``.prepare_method_info``)."""
     p = _get_base_params(method, params, returns.shape[0])
     base = config["index_names"].index(config["regime_index"]) + 1
     br = returns[:, base - 1]
@@ -999,9 +1116,9 @@ def _as_int(x) -> int:
 
 @_quiet
 def _generate_returns(returns, method, p, info, n_out, stream):
-    """Eine Renditematrix samt Quellzeilen erzeugen (Port von ``.generate_returns``).
+    """Eine Renditematrix samt Quellzeilen erzeugen (R: ``.generate_returns``).
 
-    Ziehungen aus dem Strom des Pfads (Kerne slc_boot, Entwurf B.17 und C.5 Regel 6)."""
+    Ziehungen aus dem Strom des Pfads (Kerne slc_boot)."""
     n, k = returns.shape
 
     def from_idx(idx):
@@ -1049,7 +1166,7 @@ def _generate_returns(returns, method, p, info, n_out, stream):
 
 @_quiet
 def _letf_returns(rb, letf, aux_rows, aux_names):
-    """Hebelprodukt-Renditen (MSCI-Formel plus Fondskosten), Port von ``.letf_returns``."""
+    """Hebelprodukt-Renditen (MSCI-Formel plus Fondskosten), R: ``.letf_returns``."""
     L = float(letf["leverage"])
     fin = letf["finance"]
     rate = aux_rows[:, aux_names.index(fin)] if isinstance(fin, str) else float(fin)
@@ -1075,7 +1192,7 @@ def _cumprod_cols(M):
 
 @_quiet
 def _build_path(g, aux, config, start=100, aux_ratio=None, aux_start=None):
-    """Preis-Pfad aus Renditen bauen (Port von ``.build_path``); ``DataFrame`` oder ``None``."""
+    """Preis-Pfad aus Renditen bauen (R: ``.build_path``); ``DataFrame`` oder ``None``."""
     ret = g["ret"]
     idx = np.asarray(g["idx"], dtype=np.int64)
     if not isinstance(ret, np.ndarray) or ret.ndim != 2 or (~np.isfinite(ret)).any() or (ret <= 0).any():
@@ -1124,7 +1241,7 @@ def _build_path(g, aux, config, start=100, aux_ratio=None, aux_start=None):
 
 @_quiet
 def _ess_design(method, params, grid, budget, n_obs):
-    """ESS-Design (Port von ``.ess_design``): ``DataFrame`` oder ``None``."""
+    """ESS-Design (R: ``.ess_design``): ``DataFrame`` oder ``None``."""
     if grid is None:
         grid = _get_ess_grid(method, n_obs)
     if grid is None or not len(grid):
@@ -1177,7 +1294,7 @@ def _ess_design(method, params, grid, budget, n_obs):
 
 
 def _check_boot_params(method, p, n_obs):
-    """Verfahrensparameter vor dem Ziehen prüfen (Port von ``.check_boot_params``)."""
+    """Verfahrensparameter vor dem Ziehen prüfen (R: ``.check_boot_params``)."""
     if method == "stationary" and (not _num1(p.get("L")) or float(_num_vec(p.get("L"))[0]) < 1):
         _stop("params$L (erwartete Blocklänge) muss eine Zahl >= 1 sein (erhalten: %s)." % _show(p.get("L")))
     if method in ("block", "circular"):
@@ -1207,7 +1324,7 @@ def _modify_list(base, val):
 
 @_quiet
 def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores=1):
-    """Gemeinsame Vorbereitung für bootstrap() und bootstrap_study() (Port von ``.boot_setup``)."""
+    """Gemeinsame Vorbereitung für bootstrap() und bootstrap_study() (R: ``.boot_setup``)."""
     if not _is_config(config):
         _stop("config muss mit bootstrap_config() erstellt werden")
     if method not in _BOOT_METHODS:
@@ -1237,7 +1354,7 @@ def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cor
     infos = []
     for cp in combos:
         try:
-            infos.append(_prepare_method_info(ex["ret"], config, method, cp, cores))   # N6
+            infos.append(_prepare_method_info(ex["ret"], config, method, cp, cores))
         except (ImportError, ModuleNotFoundError, NotImplementedError):
             raise
         except Exception as err:  # noqa: BLE001
@@ -1253,9 +1370,9 @@ def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cor
 
 @_quiet
 def _draw_path(setup, i, stream, config, method, max_tries):
-    """Einen gültigen Pfad mit eigenem Zufallsstrom erzeugen (Port von ``.draw_path``); ``i`` 1-basiert.
+    """Einen gültigen Pfad mit eigenem Zufallsstrom erzeugen (R: ``.draw_path``); ``i`` 1-basiert.
 
-    ``stream`` ist der SimLev-Strom des Pfads (Entwurf C.5, Regel 6); Wiederholungen ziehen daraus weiter."""
+    ``stream`` ist der SimLev-Strom des Pfads; Wiederholungen ziehen daraus weiter."""
     c_id = int(setup["combo_of_path"][i - 1])
     err = "Pfad ungültig (Indexrendite <= 0 oder nicht endlich)"
     ex = setup["ex"]
@@ -1304,32 +1421,156 @@ def bootstrap(data, config, *, method="raw", n=1000, params=None, ess=False, ess
               max_tries=10, seed=None, cores=1, progress=True):
     """Bootstrap-Pfade erzeugen.
 
+    Erzeugt ``n`` simulierte Preis-Pfade für alle Indizes der Konfiguration, leitet daraus die Hebelprodukte ab
+    und zieht Zusatzreihen mit. Eingabe ist ein Datensatz mit historischen Renditen oder Kursen (Format siehe
+    ``bootstrap_config()``); Ergebnis sind Pfadmatrizen im Speicher. Einen einzelnen Pfad macht
+    ``bootstrap_data()`` zum DataFrame für ``simulation()``; ``withdrawal_paths()`` wandelt alle Pfade in
+    Periodenrenditen für ``withdrawal_simulation()`` um. Für Strategievergleiche über viele Pfade ohne Speicherung
+    der Pfade dient ``bootstrap_study()``.
+
     Args:
-        data: ``DataFrame`` mit den in ``config`` genannten Spalten.
-        config: Objekt aus :func:`bootstrap_config`.
-        method: Verfahren (Standard "raw").
-        n: Anzahl Pfade (Standard 1000); bei ``ess=True`` das Gesamtbudget.
-        params: dict der Verfahrensparameter (Standard: alle Standardwerte).
-        ess: ESS-gewichtete Gittersuche über Hyperparameter.
-        ess_grid: dict Wertevektoren je Hyperparameter (``None`` = Standardgitter).
-        progress: Fortschrittsmeldung (stderr).
-        path_length: Pfadlänge in Zeilen (``None`` = Länge der Historie).
-        seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand
-            von SimLev gezogen, siehe :func:`simlev_seed`, und unter ``seed`` abgelegt).
-        cores: Anzahl Prozesse (Fork wie R; ohne Fork sequentiell, Ergebnis identisch); bei den MS-GARCH-Verfahren
-            rechnet der Fit seine Startpunkte zudem auf so vielen Threads (Ergebnis unabhängig davon).
-        max_tries: Versuche je Pfad (Standard 10).
+        data: DataFrame oder Matrix mit den in ``config`` genannten Spalten (Index-Spalten als Brutto-Renditen je
+            Zeile oder, bei ``input = "prices"``, als Kursniveaus; Zusatzreihen beliebig). Jede Zeile ist ein
+            Simulationsschritt ("Tag"); eine Datumsspalte wird nicht ausgewertet.
+        config: Objekt aus ``bootstrap_config()``.
+        method: Verfahren (Standard in ``bootstrap()``: ``"raw"``, in ``bootstrap_study()``: ``"stationary"``). In
+            Klammern die Einträge von ``params``, die das Verfahren verwendet:
+
+            - "raw": IID-Zeilen-Bootstrap (Efron 1979); zerstört Zeitabhängigkeit (Nullmodell). Keine Parameter.
+            - "block": Moving Block Bootstrap (Künsch 1989) (``block_length``)
+            - "circular": Circular Block Bootstrap (Politis & Romano 1992) (``block_length``)
+            - "stationary": Stationärer Bootstrap (Politis & Romano 1994), geometrisch verteilte Blöcke (``L``)
+            - "wild": Wild Bootstrap mit gemeinsamem Gewicht je Zeile für alle Reihen (``wild_type``); erhält die
+              Chronologie
+            - "regime": Volatilitätsregime-Markov-Bootstrap: Regime aus Quantilen der rollierenden Volatilität des
+              Referenzindex (``n_regimes``, ``vol_window``)
+            - "evt": GPD-Tails des Referenzindex plus empirischer Bulk (``tail_prob``, ``both_tails``); übrige
+              Indizes über das historische Verhältnis zum Referenzindex gekoppelt
+            - "tails": Empirische Tail-Schichtung des Referenzindex (``tail_prob``)
+            - "reset": Chronologie mit zufällig gespiegelten Segmenten (``p_break``); erhält die Chronologie
+            - "garch", "gjr_garch": (GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung
+              über ``cross`` in ``bootstrap_config()``). Geschätzt per Maximum Likelihood unter Normalverteilung
+              mit der C-Bibliothek von SimLev (GJR mit α + γ ≥ 0, also auch γ < 0; bis Version 1.0.0 γ ≥ 0; BFGS
+              von sieben Rasterpunkten), notfalls mit Momentschätzern; die Meldungen nennen den Weg "ml" bzw.
+              "momente" (bis 0.10.0 "rugarch"/"optim")
+            - "ms_garch", "ms_ar_garch_m", "tvtp_ms_garch": Markov-Switching-GARCH-Familie: eigene ML-Schätzung
+              des MS-GARCH-Modells nach Haas, Mittnik und Paolella (2004), Normalverteilung, Varianzmodell
+              "sGARCH" oder "gjrGARCH" je Regime (GJR mit α + γ ≥ 0, also auch γ < 0; BFGS mit analytischem
+              Gradienten von 12 bzw. bei "gjrGARCH" 20 Startpunkten); "ms_ar_garch_m" zusätzlich mit AR- und
+              GARCH-in-Mean-Termen je Regime, "tvtp_ms_garch" mit zeitvariablen Uebergangswahrscheinlichkeiten
+              (``ms_n_regimes``/``ms_garch_model``, ``ms_ar_n_regimes``/``ms_ar_garch_model`` bzw.
+              ``tvtp_n_regimes``/``tvtp_garch_model``)
+
+            Bei "wild" und "reset" muss ``path_length`` der Länge der Historie entsprechen.
+        n: Anzahl Pfade (Standard 1000); bei ``ess = True`` das Gesamtbudget, das auf die Parameterkombinationen
+            verteilt wird. Pfade, die nach ``max_tries`` Versuchen ungültig bleiben, fehlen im Ergebnis.
+        params: Benannte Liste von Verfahrensparametern; nicht angegebene Einträge erhalten den Standardwert
+            (Standard ``{}`` = alle Standardwerte). Je Verfahren werden nur die oben genannten Einträge verwendet:
+
+            - L: Erwartete Blocklänge in Zeilen für "stationary" (Zahl >= 1, Standard 20) oder ``"auto"``
+              (``bootstrap_block_length()``, Spalte ``stationary``).
+            - block_length: Feste Blocklänge in Zeilen für "block" und "circular" (ganze Zahl, Standard 20; bei
+              "block" höchstens Zeilen der Historie minus 1, bei "circular" höchstens Zeilen der Historie) oder
+              ``"auto"`` (``bootstrap_block_length()``, Spalte ``circular``).
+            - wild_type: Gewichte beim Wild Bootstrap: 0 = Rademacher (Standard), 1 = Mammen, 2 = Standardnormal;
+              andere Werte sind ein Fehler.
+            - n_regimes: Anzahl Volatilitätsregime für "regime" (Standard 2).
+            - vol_window: Fensterlänge der rollierenden Volatilität in Zeilen für "regime" (Standard 20).
+            - tail_prob: Tail-Wahrscheinlichkeit je Seite als Anteil für "evt" und "tails" (Standard 0.05 = 5
+              Prozent).
+            - both_tails: Logisch, nur "evt": auch den rechten Tail mit einer GPD modellieren (Standard ``True``).
+            - p_break: Wahrscheinlichkeit je Zeile als Anteil (0 bis 1), dass bei "reset" ein neues Segment
+              beginnt (Standard 0.02).
+            - ms_n_regimes, ms_ar_n_regimes, tvtp_n_regimes: Anzahl Regime für "ms_garch", "ms_ar_garch_m" bzw.
+              "tvtp_ms_garch" (Standard je 2). Hat die Reihe weniger deutlich getrennte Regime als angefordert (z.
+              B. drei Regime auf einer Reihe mit nur einem oder zwei Volatilitätszuständen), kann ein Regime
+              entarten: Verweilwahrscheinlichkeit nahe 0 (Meldung "P(stay)"), kaum oder keine Tage im Regimepfad,
+              mitunter Persistenz nahe 1 mit unplausibel hoher unbedingter Varianz; die Log-Likelihood liegt dann
+              kaum über der mit einem Regime weniger. In diesem Fall die Anzahl Regime verkleinern.
+            - ms_garch_model, ms_ar_garch_model, tvtp_garch_model: Varianzmodell je Regime: "sGARCH" (GARCH(1,1))
+              oder "gjrGARCH" (GJR-GARCH(1,1), Standard je "gjrGARCH"); andere Werte sind ein Fehler.
+
+            Der Eintrag ``garch_order`` (Standard ``[1, 1]``) ist vorhanden, ändert aber nichts: die
+            GARCH-Verfahren schätzen immer GARCH(1,1).
+        ess: Logisch (Standard ``False``): ESS-gewichtete Gittersuche über Hyperparameter (wie im Original). Das
+            Budget ``n`` wird invers zur effektiven Stichprobengröße (ESS) je Kombination verteilt; die Pfade
+            erhalten Gewichte (Mittel 1), mit denen ``bootstrap_probability()`` und ``summary()`` rechnen. Für
+            "raw", "garch" und "gjr_garch" gibt es kein Standardgitter (dann normaler Bootstrap).
+        ess_grid: Benannte Liste von Wertevektoren je Hyperparameter (z. B. ``{"L": [20, 50, 100]}``); ``None``
+            (Standard) = Standardgitter des Verfahrens (z. B. ``L`` bzw. ``block_length`` 5, 10, 20, 30, 50, 75,
+            100 Zeilen, begrenzt auf die halbe Historienlänge). Nur bei ``ess = True`` verwendet.
+        path_length: Pfadlänge in Zeilen (simulierte Schritte, ganze Zahl, mindestens 1); ``None`` (Standard) =
+            Anzahl verwendbarer Zeilen der Historie. Damit lassen sich z. B. 50-jährige Pfade aus 30 Jahren
+            Historie erzeugen. Jeder Pfad hat ``path_length + 1`` Zeilen (Startzeile plus Schritte).
+        max_tries: Versuche je Pfad (Standard 10), falls ein Pfad ungültig ist (Indexrendite <= 0 oder nicht
+            endlich). Ein Totalverlust eines Hebelprodukts macht den Pfad nicht ungültig.
+        seed: Ganzzahliger Startwert (|seed| < 2^53); ``None`` (Standard) = genau einmal aus dem Zufallszustand
+            von SimLev gezogen (siehe ``simlev_seed()``; ganze Zahl von 0 bis 2^31 - 1, im Ergebnis unter ``seed``
+            gespeichert, damit reproduzierbar). Jeder Pfad i erhält einen eigenen Strom (Sprung um 2^128 Schritte
+            je Pfad), so dass Pfad i unabhängig von ``cores`` (und bei ``bootstrap_study()`` von ``chunk_size``)
+            ist und ``bootstrap()`` und ``bootstrap_study()`` mit gleichem Seed (und gleichen Daten, Verfahren,
+            ``params``, ``ess`` und ``path_length``) dieselben Pfade erzeugen. Mit angegebenem Seed bleibt der
+            Zufallszustand von SimLev unverändert; mit ``seed = None`` liefern wiederholte Aufrufe verschiedene
+            Pfade. ``set.seed()`` wirkt nicht.
+        cores: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK-Cluster auf Windows). Bei den MS-GARCH-Verfahren
+            (``ms_garch``, ``ms_ar_garch_m``, ``tvtp_ms_garch``) rechnet der Fit seine Startpunkte zudem auf so
+            vielen Threads; das Ergebnis hängt davon nicht ab.
+        progress: Logisch: Fortschritts- und Abschlussmeldung per ``message()`` ausgeben (Standard ``True``).
 
     Returns:
-        :class:`BootstrapResult`.
+        Objekt der Klasse ``bootstrap_result``, eine Liste mit
+
+        - paths: Liste von Matrizen, eine je gültigem Pfad, mit ``path_length + 1`` Zeilen: Zeile 1 = Startwert
+          100 für Indizes und Hebelprodukte, danach je Simulationsschritt. Spalten: Indizes, Hebelprodukte,
+          Zusatzreihen in dieser Reihenfolge. Keine Datumsspalte. Zusatzreihen mit ``aux_type = "rate"`` (Prozent
+          p. a.) und ohne Angabe in ``aux_type`` enthalten die Originalwerte der gezogenen Zeilen, solche mit
+          ``"level"`` das kumulierte Niveau (Startwert = erste verwendete Historienzeile bzw. Startzeile der
+          Kurse, danach die historischen Zeilenverhältnisse der gezogenen Zeilen kumuliert; keine Sprünge an
+          Blockgrenzen). Bei Zusatzreihen trägt jede Matrix zusätzlich das Attribut ``aux_level``: diese
+          Niveau-Variante für alle Zusatzreihen (für ``"level"``-Reihen identisch mit der Pfadspalte). Ihr
+          Startwert (Zeile 1) ist die erste Historienzeile (bzw. Startzeile der Kurse) und damit für alle Pfade
+          gleich; früher war es der Wert der Historienzeile vor dem ersten gezogenen Schritt (je Pfad
+          verschieden). Die Zeilenverhältnisse sind unverändert die historischen Verhältnisse der gezogenen
+          Zeilen, können aber durch die andere Startskalierung um 1 ulp von früheren Läufen abweichen
+          (beabsichtigt; betrifft z. B. ``withdrawal_paths()`` mit ``inflation_type = "level"`` und ``keep_aux``).
+          Es dient als Inflation für Reihen ohne Angabe in ``aux_type`` (``withdrawal_paths()`` mit
+          ``inflation_type = "level"``, ``keep_aux`` in ``bootstrap_study()``); für Reihen mit ``aux_type =
+          "rate"`` wird es dort nicht verwendet.
+        - weights: Pfadgewichte (Mittel 1; ohne ESS alle 1).
+        - method, config, seed: Verfahren, Konfiguration und verwendeter Seed.
+        - params: Vollständige Parameterliste (bei ESS: der ersten Kombination).
+        - ess, ess_design: Logisch, ob ESS verwendet wurde, und das ESS-Design (DataFrame je Kombination mit
+          Parametern, ``ess_per_boot``, ``n_sims``, ``weight`` u. a.) bzw. ``None``.
+        - param_values: Bei ESS: Parameterliste je Pfad, sonst ``None``.
+        - knockout_rate: Anteil der ungültigen Versuche an allen Versuchen in Prozent (``100 *
+          stats["knockout_rate"]``).
+        - stats: Liste mit ``attempts`` (Versuche gesamt), ``success`` (gültige Pfade), ``null`` (Versuche ohne
+          gültigen Pfad) und ``knockout_rate`` (``null / attempts``, als Anteil).
+
+    Literatur:
+        Haas, M., Mittnik, S. & Paolella, M.S. (2004), A New Approach to Markov-Switching GARCH Models, Journal of
+        Financial Econometrics 2(4) (Verfahren "ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"); Hamilton, J.D.
+        (1989), Econometrica 57(2) (Filter).
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(2)
+        d = pd.DataFrame({"us": 1 + rng.normal(3e-4, 0.01, 1500)})
+        d["eu"] = d["us"] * (1 + rng.normal(0, 0.004, 1500))
+        d["rate"] = 2.0
+        cfg = simlev.bootstrap_config({"us": "us", "eu": "eu"}, aux={"rate": "rate"},
+                                      letfs=[{"base": "eu", "leverage": 2, "finance": "rate"}])
+        b = simlev.bootstrap(d, cfg, method="stationary", n=5, params={"L": 50}, seed=1, progress=False)
+        print(b["paths"][0].shape)
     """
     t0 = time.time()
     setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
-    if seed is None:                    # Regel 3/4: None -> einmal k aus G
+    if seed is None:                    # None -> einmal k aus G
         seed = _sl.next_seed()
     else:
         _sl.check_seed(seed)
-    streams = _sl.streams(seed, setup["n_paths"])                                 # Regel 6: U_i = J^i(S_0)
+    streams = _sl.streams(seed, setup["n_paths"])                                 # U_i = J^i(S_0)
     res = _par_lapply(
         range(1, setup["n_paths"] + 1),
         lambda i: _draw_path(setup, i, streams[i - 1], config, method, max_tries), cores)
@@ -1365,8 +1606,30 @@ def _is_boot_result(x) -> bool:
 def bootstrap_validate(result, *, min_rows=None, verbose=True):
     """Bootstrap-Ergebnis validieren und bereinigen.
 
-    Entfernt leere, unvollständige oder nicht endliche Pfade sowie Pfade mit
-    abweichender Zeilenzahl und normiert die Gewichte neu auf Mittel 1.
+    Entfernt leere, unvollständige (``NA``) oder nicht endliche Pfade sowie Pfade, deren Zeilenzahl von der
+    häufigsten Zeilenzahl abweicht, und normiert die Gewichte neu auf Mittel 1 (wie im Original). Nützlich vor der
+    Weiterverarbeitung von ``bootstrap()``-Ergebnissen, die z. B. von Hand verändert oder aus mehreren Läufen
+    zusammengesetzt wurden.
+
+    Args:
+        result: Objekt der Klasse ``bootstrap_result`` aus ``bootstrap()``.
+        min_rows: Mindestzeilenzahl je Pfad; ``None`` (Standard) = keine Mindestlänge.
+        verbose: Logisch: Anzahl entfernter und gültiger Pfade ausgeben (Standard ``True``).
+
+    Returns:
+        Das bereinigte ``bootstrap_result`` (``paths``, ``weights`` und ``param_values`` gekürzt). Bleibt kein
+        Pfad übrig, bricht die Funktion mit einem Fehler ab.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        d = pd.DataFrame({"r": 1 + rng.normal(3e-4, 0.01, 500)})
+        b = simlev.bootstrap(d, simlev.bootstrap_config({"idx": "r"}), method="stationary", n=3, params={"L": 20},
+                             seed=1, progress=False)
+        b["paths"][1][9, 0] = np.nan       # einen Pfad beschädigen
+        b = simlev.bootstrap_validate(b)
+        print(len(b["paths"]))
     """
     if not _is_boot_result(result):
         _stop("result muss ein bootstrap_result-Objekt sein")
@@ -1412,15 +1675,39 @@ def bootstrap_validate(result, *, min_rows=None, verbose=True):
 def bootstrap_data(result, *, i=1, dates=None, start="2000-01-01"):
     """Bootstrap-Pfad als ``DataFrame`` für :func:`simlev.simulation`.
 
+    Wandelt einen Pfad aus ``bootstrap()`` in einen DataFrame mit Datumsspalte um, der direkt an ``simulation()``
+    übergeben werden kann. Die Spaltennamen sind die Pfadnamen aus ``bootstrap_config()`` (Indizes, Hebelprodukte,
+    Zusatzreihen); die Strategie muss Assets mit diesen Namen verwenden.
+
     Args:
-        result: :class:`BootstrapResult` oder eine einzelne Pfadmatrix (``DataFrame``).
-        i: Pfadnummer (1-basiert wie in R; Standard 1).
-        dates: Datumsvektor (Länge = Zeilen des Pfads) oder ``None``.
-        start: Startdatum für ``dates=None``.
+        result: ``bootstrap_result`` aus ``bootstrap()`` oder eine einzelne Pfadmatrix (z. B.
+            ``result["paths"][[i]]``).
+        i: Pfadnummer (Standard 1); nur bei ``bootstrap_result`` verwendet.
+        dates: Datumsvektor mit genau so vielen Elementen wie der Pfad Zeilen hat (``path_length + 1``), z. B. ein
+            Handelstagskalender; ``None`` (Standard) = aufeinanderfolgende Kalendertage ab ``start``.
+        start: Startdatum für ``dates = None`` (Zeichenkette oder Date, Standard "2000-01-01").
 
     Returns:
-        ``DataFrame`` mit Spalte ``date`` und allen Pfadspalten; ausdrücklich als
-        "rate" gekennzeichnete Zusatzreihen stehen in ``df.attrs["aux_type"]``.
+        DataFrame mit Spalte ``date`` (Klasse Date) und allen Pfadspalten (Kursniveaus mit Startwert 100;
+        Zusatzreihen mit ``aux_type = "rate"`` (Prozent p. a.) und ohne Angabe als Originalwerte der gezogenen
+        Zeilen, mit ``"level"`` als kumuliertes Niveau, z. B. ein durchgehender CPI ohne Sprünge an Blockgrenzen;
+        siehe ``bootstrap_config()``). Bei einem ``bootstrap_result``, dessen Konfiguration Reihen ausdrücklich
+        als ``aux_type = "rate"`` kennzeichnet, trägt der DataFrame das Attribut ``aux_type`` mit diesen Reihen
+        (z. B. ``{"infl": "rate"}``); ``withdrawal_cohorts()`` behandelt sie als Inflationsrate in Prozent p. a.
+        Ohne solche Angabe entfällt das Attribut (Ergebnis wie bisher). Umformungen wie ``transform()``,
+        ``merge()``, ``cbind()`` oder CSV-Export entfernen das Attribut; dann in ``withdrawal_cohorts()``
+        ``inflation_type = "rate_pa"`` angeben.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        d = pd.DataFrame({"r": 1 + rng.normal(3e-4, 0.01, 800)})
+        cfg = simlev.bootstrap_config({"idx": "r"}, letfs=[{"base": "idx", "leverage": 2}])
+        b = simlev.bootstrap(d, cfg, method="stationary", n=2, params={"L": 20}, path_length=400, seed=1, progress=False)
+        x = simlev.bootstrap_data(b, i=2, start="2030-01-01")
+        res = simlev.simulation(x, simlev.create_strategy(idx_l2=simlev.asset_config(asset_class="etf")))
+        print(res["cagr"])
     """
     is_res = _is_boot_result(result)
     if not is_res:
@@ -1463,7 +1750,44 @@ def _res_get(res, name, default=None):
 
 @_quiet
 def bootstrap_study_metrics(res):
-    """Standard-Kennzahlen für :func:`bootstrap_study` (benannter Vektor als ``Series``)."""
+    """Standard-Kennzahlen für :func:`bootstrap_study` (benannter Vektor).
+
+    Fasst ein Ergebnis von ``simulation()`` zu einem benannten Kennzahlenvektor zusammen. Standardwert des
+    Arguments ``metrics`` von ``bootstrap_study()``, ``sensitivity_grid()``, ``sensitivity_rebalancing()`` und
+    ``sensitivity_leverage()``; eigene Kennzahlfunktionen müssen ebenfalls ein ``SimLevResult`` entgegennehmen und
+    einen benannten numerischen Vektor liefern.
+
+    Args:
+        res: ``SimLevResult`` aus ``simulation()``.
+
+    Returns:
+        Benannter numerischer Vektor mit
+
+        - cagr, ttwror: CAGR und annualisierte TTWROR als Anteil (0.05 = 5 Prozent). Mit Sparplan (Einzahlungen
+          nach dem Starttag, ``res["external_flows"]``) ist ``cagr`` die geldgewichtete Jahresrendite (XIRR, siehe
+          ``simulation()``), ``ttwror`` die zeitgewichtete.
+        - final_value: Endwert des Depots (Währungseinheiten).
+        - max_drawdown, avg_drawdown: Maximaler und mittlerer Drawdown (Mittel über Zeilen mit Drawdown > 0), als
+          positiver Anteil.
+        - dd_q50, dd_q90: Median und 90-Prozent-Quantil der Drawdowns über alle Zeilen, als Anteil.
+        - ulcer_index: Ulcer Index (Drawdowns als Anteil).
+        - longest_drawdown: Längste Drawdown-Phase in Zeilen der Daten.
+        - sharpe, sortino, calmar, omega: Kennzahlen aus ``res["statistics"]``, wie in ``simulation()`` berechnet.
+        - mean, sd, skewness, kurtosis, lpm, hpm: Momente und partielle Momente der Renditen je Zeile aus
+          ``res["statistics"]``.
+        - taxes: Gezahlte Steuern gesamt (Währungseinheiten; 0 ohne Steuerbericht).
+        - trades: Käufe plus Verkäufe je Jahr, summiert über alle Assets.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1095
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        d["aktien"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        res = simlev.simulation(d, simlev.create_strategy(aktien=simlev.asset_config(asset_class="etf")))
+        print(simlev.bootstrap_study_metrics(res))
+    """
     s = _res_get(res, "statistics", {})
     dq = _quantile7(np.asarray(_res_get(res, "drawdowns"), dtype=np.float64), [0.5, 0.9])
     worth = np.asarray(_res_get(res, "worth"), dtype=np.float64)
@@ -1555,7 +1879,7 @@ def _result_index(res):
 
 
 def _keep_count(x, n, who):
-    """Anzahl behaltener Pfade aus ``keep_paths`` (R: ``.keep_count``, 6.5b, Variante A).
+    """Anzahl behaltener Pfade aus ``keep_paths`` (R: ``.keep_count``).
 
     ``True`` = alle Pfade, ``False`` oder 0 = keine, ganze Zahl k >= 1 = die ersten k Pfade (k > n: still alle).
     Logisch wird vor der Ganzzahl geprüft (``True`` ist in Python eine Ganzzahl). Fehler bei NA, Text, Vektor,
@@ -1579,24 +1903,207 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
                     seed=None, cores=1, progress=True):
     """Strategien auf Bootstrap-Pfaden auswerten.
 
-    Erzeugt Pfade wie :func:`bootstrap`, berechnet je Pfad die Signale,
-    simuliert alle Strategien mit :func:`simlev.simulation` auf demselben Pfad
-    und speichert nur Kennzahlen (siehe R-Dokumentation ``bootstrap_study``).
+    Erzeugt Bootstrap-Pfade wie ``bootstrap()``, berechnet je Pfad die Signale, simuliert alle Strategien mit
+    ``simulation()`` auf DEMSELBEN Pfad (Common Random Numbers, gepaarter Vergleich) und speichert nur Kennzahlen.
+    Pfade werden nach der Auswertung verworfen; der Speicherbedarf ist daher unabhängig von ``n``. Entspricht der
+    Pipeline aus '06 Bootstraps' (Chunks, Parallelisierung), ohne die Pfade zwischenzuspeichern.
 
     Args:
-        strategies: dict Name -> Strategie oder dict mit ``strategy`` und optional
-            ``signal`` (Funktion ``DataFrame -> DataFrame | dict``), ``args``
-            (dict für ``simulation``) und ``map`` (dict Alias -> Pfadspalte).
-        seed: wie in :func:`bootstrap` (``None`` = genau einmal aus dem Zufallszustand von SimLev
-            gezogen und unter ``seed`` abgelegt); jeder Pfad hat einen eigenen Strom, das Ergebnis
-            hängt nicht von ``cores`` oder ``chunk_size`` ab.
-        keep_paths: ``True`` = alle Pfadmatrizen behalten, ``False``/0 (Standard) = keine, ganze Zahl k >= 1 = die
-            ersten k (6.5b; Speicherbedarf etwa Pfade x (Pfadlänge + 1) x Reihen x 8 Byte). Mit ``chunk_dir`` und
-            k > 0 tragen die Chunk-Dateien den Zusatz ``_keep<k>``.
-        Übrige Argumente wie in R.
+        data: DataFrame oder Matrix mit den in ``config`` genannten Spalten (Index-Spalten als Brutto-Renditen je
+            Zeile oder, bei ``input = "prices"``, als Kursniveaus; Zusatzreihen beliebig). Jede Zeile ist ein
+            Simulationsschritt ("Tag"); eine Datumsspalte wird nicht ausgewertet.
+        config: Objekt aus ``bootstrap_config()``.
+        method: Verfahren (Standard in ``bootstrap()``: ``"raw"``, in ``bootstrap_study()``: ``"stationary"``). In
+            Klammern die Einträge von ``params``, die das Verfahren verwendet:
+
+            - "raw": IID-Zeilen-Bootstrap (Efron 1979); zerstört Zeitabhängigkeit (Nullmodell). Keine Parameter.
+            - "block": Moving Block Bootstrap (Künsch 1989) (``block_length``)
+            - "circular": Circular Block Bootstrap (Politis & Romano 1992) (``block_length``)
+            - "stationary": Stationärer Bootstrap (Politis & Romano 1994), geometrisch verteilte Blöcke (``L``)
+            - "wild": Wild Bootstrap mit gemeinsamem Gewicht je Zeile für alle Reihen (``wild_type``); erhält die
+              Chronologie
+            - "regime": Volatilitätsregime-Markov-Bootstrap: Regime aus Quantilen der rollierenden Volatilität des
+              Referenzindex (``n_regimes``, ``vol_window``)
+            - "evt": GPD-Tails des Referenzindex plus empirischer Bulk (``tail_prob``, ``both_tails``); übrige
+              Indizes über das historische Verhältnis zum Referenzindex gekoppelt
+            - "tails": Empirische Tail-Schichtung des Referenzindex (``tail_prob``)
+            - "reset": Chronologie mit zufällig gespiegelten Segmenten (``p_break``); erhält die Chronologie
+            - "garch", "gjr_garch": (GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung
+              über ``cross`` in ``bootstrap_config()``). Geschätzt per Maximum Likelihood unter Normalverteilung
+              mit der C-Bibliothek von SimLev (GJR mit α + γ ≥ 0, also auch γ < 0; bis Version 1.0.0 γ ≥ 0; BFGS
+              von sieben Rasterpunkten), notfalls mit Momentschätzern; die Meldungen nennen den Weg "ml" bzw.
+              "momente" (bis 0.10.0 "rugarch"/"optim")
+            - "ms_garch", "ms_ar_garch_m", "tvtp_ms_garch": Markov-Switching-GARCH-Familie: eigene ML-Schätzung
+              des MS-GARCH-Modells nach Haas, Mittnik und Paolella (2004), Normalverteilung, Varianzmodell
+              "sGARCH" oder "gjrGARCH" je Regime (GJR mit α + γ ≥ 0, also auch γ < 0; BFGS mit analytischem
+              Gradienten von 12 bzw. bei "gjrGARCH" 20 Startpunkten); "ms_ar_garch_m" zusätzlich mit AR- und
+              GARCH-in-Mean-Termen je Regime, "tvtp_ms_garch" mit zeitvariablen Uebergangswahrscheinlichkeiten
+              (``ms_n_regimes``/``ms_garch_model``, ``ms_ar_n_regimes``/``ms_ar_garch_model`` bzw.
+              ``tvtp_n_regimes``/``tvtp_garch_model``)
+
+            Bei "wild" und "reset" muss ``path_length`` der Länge der Historie entsprechen.
+        n: Anzahl Pfade (Standard 1000); bei ``ess = True`` das Gesamtbudget, das auf die Parameterkombinationen
+            verteilt wird. Pfade, die nach ``max_tries`` Versuchen ungültig bleiben, fehlen im Ergebnis.
+        strategies: Benannte, nicht leere Liste. Jedes Element ist entweder direkt eine Strategie
+            (``create_strategy()``) oder eine Liste mit
+
+            - strategy: Strategie (Pflicht).
+            - signal: Optional Funktion, die den Pfad-DataFrame (alle Zeilen einschließlich ``burn_in``) erhält
+              und entweder einen DataFrame (ersetzt den Pfad-DataFrame) oder eine benannte Liste von Spalten
+              gleicher Länge zurückgibt, z. B. ``{"buy": ..., "sell": ...}``; ``NA`` in logischen Spalten wird zu
+              ``False``.
+            - args: Liste von Argumenten für ``simulation()``, die ``sim_args`` für diese Strategie überschreiben.
+            - map: Spalten-Aliase als benannter Zeichenvektor Alias -> Pfadspalte, z. B. ``{"letf": "eu_l2"}``.
+
+            Die Asset-Namen der Strategien müssen Spaltennamen des Pfads (bzw. Aliase aus ``map``) sein. Schlägt
+            Signal, Simulation oder Kennzahlberechnung für einen Pfad fehl, fehlt diese Zeile im Ergebnis; die
+            Funktion warnt mit der Anzahl und der häufigsten Fehlermeldung (alle in ``errors``). Schlagen alle
+            Kombinationen fehl, bricht sie mit dieser Meldung ab. Warnungen aus Signal, Simulation und Kennzahlen
+            werden je Pfad gesammelt, dedupliziert und am Ende als eine Warnung ausgegeben (mit Anzahl der
+            betroffenen Pfade; alle in ``warnings``); bei ``cores > 1`` ebenso.
+        params: Benannte Liste von Verfahrensparametern; nicht angegebene Einträge erhalten den Standardwert
+            (Standard ``{}`` = alle Standardwerte). Je Verfahren werden nur die oben genannten Einträge verwendet:
+
+            - L: Erwartete Blocklänge in Zeilen für "stationary" (Zahl >= 1, Standard 20) oder ``"auto"``
+              (``bootstrap_block_length()``, Spalte ``stationary``).
+            - block_length: Feste Blocklänge in Zeilen für "block" und "circular" (ganze Zahl, Standard 20; bei
+              "block" höchstens Zeilen der Historie minus 1, bei "circular" höchstens Zeilen der Historie) oder
+              ``"auto"`` (``bootstrap_block_length()``, Spalte ``circular``).
+            - wild_type: Gewichte beim Wild Bootstrap: 0 = Rademacher (Standard), 1 = Mammen, 2 = Standardnormal;
+              andere Werte sind ein Fehler.
+            - n_regimes: Anzahl Volatilitätsregime für "regime" (Standard 2).
+            - vol_window: Fensterlänge der rollierenden Volatilität in Zeilen für "regime" (Standard 20).
+            - tail_prob: Tail-Wahrscheinlichkeit je Seite als Anteil für "evt" und "tails" (Standard 0.05 = 5
+              Prozent).
+            - both_tails: Logisch, nur "evt": auch den rechten Tail mit einer GPD modellieren (Standard ``True``).
+            - p_break: Wahrscheinlichkeit je Zeile als Anteil (0 bis 1), dass bei "reset" ein neues Segment
+              beginnt (Standard 0.02).
+            - ms_n_regimes, ms_ar_n_regimes, tvtp_n_regimes: Anzahl Regime für "ms_garch", "ms_ar_garch_m" bzw.
+              "tvtp_ms_garch" (Standard je 2). Hat die Reihe weniger deutlich getrennte Regime als angefordert (z.
+              B. drei Regime auf einer Reihe mit nur einem oder zwei Volatilitätszuständen), kann ein Regime
+              entarten: Verweilwahrscheinlichkeit nahe 0 (Meldung "P(stay)"), kaum oder keine Tage im Regimepfad,
+              mitunter Persistenz nahe 1 mit unplausibel hoher unbedingter Varianz; die Log-Likelihood liegt dann
+              kaum über der mit einem Regime weniger. In diesem Fall die Anzahl Regime verkleinern.
+            - ms_garch_model, ms_ar_garch_model, tvtp_garch_model: Varianzmodell je Regime: "sGARCH" (GARCH(1,1))
+              oder "gjrGARCH" (GJR-GARCH(1,1), Standard je "gjrGARCH"); andere Werte sind ein Fehler.
+
+            Der Eintrag ``garch_order`` (Standard ``[1, 1]``) ist vorhanden, ändert aber nichts: die
+            GARCH-Verfahren schätzen immer GARCH(1,1).
+        ess: Logisch (Standard ``False``): ESS-gewichtete Gittersuche über Hyperparameter (wie im Original). Das
+            Budget ``n`` wird invers zur effektiven Stichprobengröße (ESS) je Kombination verteilt; die Pfade
+            erhalten Gewichte (Mittel 1), mit denen ``bootstrap_probability()`` und ``summary()`` rechnen. Für
+            "raw", "garch" und "gjr_garch" gibt es kein Standardgitter (dann normaler Bootstrap).
+        ess_grid: Benannte Liste von Wertevektoren je Hyperparameter (z. B. ``{"L": [20, 50, 100]}``); ``None``
+            (Standard) = Standardgitter des Verfahrens (z. B. ``L`` bzw. ``block_length`` 5, 10, 20, 30, 50, 75,
+            100 Zeilen, begrenzt auf die halbe Historienlänge). Nur bei ``ess = True`` verwendet.
+        path_length: Pfadlänge in Zeilen (simulierte Schritte, ganze Zahl, mindestens 1); ``None`` (Standard) =
+            Anzahl verwendbarer Zeilen der Historie. Damit lassen sich z. B. 50-jährige Pfade aus 30 Jahren
+            Historie erzeugen. Jeder Pfad hat ``path_length + 1`` Zeilen (Startzeile plus Schritte).
+        dates, start: Kalender der Pfade: ``dates`` ist ein Datumsvektor der Länge ``path_length + 1``; ``None``
+            (Standard) = aufeinanderfolgende Kalendertage ab ``start`` (Standard "2000-01-01"), siehe
+            ``bootstrap_data()``.
+        burn_in: Anzahl Anfangszeilen des Pfads, die nach der Signalberechnung verworfen werden (Signal-Vorlauf,
+            z. B. 730 Tage für eine 430-Tage-SMA; Standard 0). Muss kleiner als ``path_length`` sein.
+        sim_args: Benannte Liste gemeinsamer Argumente für ``simulation()`` (Standard ``{}``), z. B.
+            ``{"start_value": 1000, "tax": tax_profile()}``: Argumente von ``simulation()`` außer ``data`` und
+            ``strategy``, also auch Bausteine (z. B. ``dca = dca_plan(100, 1)``, ``tax = tax_profile()``) und
+            Pfade zu Parametern der Bausteine (``"dca.value"``, siehe ``sensitivity_grid``). Alte Einzelargumente
+            (bis 0.8.0, vor den Bausteinen, z. B. ``dca_value``) ergeben einen Fehler, der den Baustein nennt.
+        metrics: Funktion ``SimLevResult -> benannter numerischer Vektor`` (Standard
+            ``bootstrap_study_metrics()``); die Namen werden zu Spalten von ``results``.
+        benchmark: Name einer Strategie aus ``strategies`` als Vergleich für die gepaarte Auswertung in
+            ``summary()``; ``None`` (Standard) = keine.
+        chunk_dir: Optional (Standard ``None``) Verzeichnis für Zwischenergebnisse je Chunk (Dateien
+            ``chunk_<Nr>_seed<Seed>.rds``, bei ``keep_returns`` mit Frequenz-Suffix, bei ``keep_paths`` > 0 mit
+            Suffix ``_keep<k>``). Vorhandene Dateien werden gelesen statt neu gerechnet; so wird ein abgebrochener
+            Lauf mit gleichem Seed fortgesetzt. Die Dateien werden nur über Chunk-Nummer, Seed, ``keep_returns``
+            und ``keep_paths`` zugeordnet: bei geänderten Strategien, Daten oder Parametern ein neues Verzeichnis
+            verwenden.
+        keep_paths: Pfadmatrizen zusätzlich zurückgeben (Diagnose): ``True`` = alle Pfade, ``False`` oder 0
+            (Standard) = keine, ganze Zahl k >= 1 = die ersten k Pfade (k größer als die Pfadzahl: alle); ``NA``,
+            Text, Vektoren, negative oder nicht ganze Zahlen ergeben einen Fehler. Speicherbedarf: Alle behaltenen
+            Pfadmatrizen bleiben im Ergebnis und gehen bei ``cores > 1`` auch durch die Prozessgrenze, ungefähr
+            Pfade x (Pfadlänge + 1) x Reihen x 8 Byte (z. B. 10 000 Pfade x 7 300 Tage x 3 Reihen x 8 Byte = 1,75
+            GB).
+        keep_returns: ``"none"`` (Standard) oder ``"year"``, ``"quarter"``, ``"month"``: speichert je Strategie
+            und Pfad die zeitgewichteten Brutto-Periodenrenditen (aus ``result_index()``, Perioden ab dem ersten
+            Tag nach ``burn_in``). Die Studie kann dann direkt an ``withdrawal_simulation()`` bzw.
+            ``withdrawal_paths()`` übergeben werden.
+        keep_aux: Zeichenvektor mit Namen von Zusatzreihen aus ``config``, deren Brutto-Inflation je Periode
+            ebenfalls gespeichert wird (Inflation für die Entnahmephase, Argument ``inflation`` von
+            ``withdrawal_paths()``); nur zusammen mit ``keep_returns`` wirksam. Die Behandlung folgt ``aux_type``
+            in ``bootstrap_config()``: ``"level"`` (Preisindex) = Periodenverhältnisse des kumulierten Niveaus in
+            der Pfadspalte; ausdrücklich ``"rate"`` = Inflationsrate in Prozent pro Jahr (2 = 2 % p. a.; nicht je
+            Datenperiode, kein Anteil), je Pfadzeile über die Kalendertage aus ``dates`` aufgezinst, Π (1 +
+            r/100)^Tage/365.25 über die Zeilen der Periode (wie ``inflation_type = "rate_pa"`` in
+            ``withdrawal_paths()``, das dann nicht erneut angegeben werden muss). Ohne Angabe in ``aux_type`` gilt
+            die Reihe wie bisher als Niveau (Niveau-Variante des Pfads, Attribut ``aux_level``, siehe
+            ``bootstrap()``: Verhältnis der kumulierten Zeilenverhältnisse an den Periodenenden), so dass jede
+            Periode die Inflation der gezogenen Zeilen eines Preisindex enthält; eine Ratenspalte ergibt so keine
+            Inflation in Prozent p. a. Sind gespeicherte Faktoren nicht endlich oder <= 0 (z. B. eine nicht
+            gekennzeichnete Zinsreihe mit Vorzeichenwechsel), warnt die Funktion, und ``withdrawal_paths()``
+            bricht mit dieser Reihe als Inflation ab. Standard ``None``.
+        max_tries: Versuche je Pfad (Standard 10), falls ein Pfad ungültig ist (Indexrendite <= 0 oder nicht
+            endlich). Ein Totalverlust eines Hebelprodukts macht den Pfad nicht ungültig.
+        chunk_size: Pfade je Arbeitspaket (Standard 25); Einheit der Parallelisierung und der Zwischenspeicherung.
+        seed: Ganzzahliger Startwert (|seed| < 2^53); ``None`` (Standard) = genau einmal aus dem Zufallszustand
+            von SimLev gezogen (siehe ``simlev_seed()``; ganze Zahl von 0 bis 2^31 - 1, im Ergebnis unter ``seed``
+            gespeichert, damit reproduzierbar). Jeder Pfad i erhält einen eigenen Strom (Sprung um 2^128 Schritte
+            je Pfad), so dass Pfad i unabhängig von ``cores`` (und bei ``bootstrap_study()`` von ``chunk_size``)
+            ist und ``bootstrap()`` und ``bootstrap_study()`` mit gleichem Seed (und gleichen Daten, Verfahren,
+            ``params``, ``ess`` und ``path_length``) dieselben Pfade erzeugen. Mit angegebenem Seed bleibt der
+            Zufallszustand von SimLev unverändert; mit ``seed = None`` liefern wiederholte Aufrufe verschiedene
+            Pfade. ``set.seed()`` wirkt nicht.
+        cores: Anzahl Prozesse (Standard 1); parallelisiert wird über Chunks. Der MS-GARCH-Fit der Vorberechnung
+            nutzt ebenso viele Threads (Ergebnis unabhängig davon).
+        progress: Logisch: Fortschrittsmeldungen per ``message()`` (Standard ``True``; Meldung je Chunk nur bei
+            ``cores = 1``).
 
     Returns:
-        :class:`SimLevBootstrapStudy`.
+        Objekt der Klasse ``SimLevBootstrapStudy``, eine Liste mit
+
+        - results: DataFrame mit einer Zeile je Pfad und Strategie: ``strategy``, ``path`` (Pfadnummer),
+          ``weight`` (Pfadgewicht), ``combo`` (ESS-Kombination), ``tries`` (Versuche) und den Kennzahlen aus
+          ``metrics`` (bei ``bootstrap_study_metrics()`` z. B. ``cagr`` und ``max_drawdown`` als Anteil).
+        - method, n_paths, strategies, benchmark, config, params, seed, burn_in, path_length, elapsed: Metadaten
+          (``elapsed`` in Sekunden).
+        - ess_design, path_weights: ESS-Design (oder ``None``) und Gewichte aller Pfade.
+        - paths: Liste der mit ``keep_paths`` behaltenen Pfadmatrizen.
+        - returns, aux_returns: Bei ``keep_returns``: je Strategie bzw. Zusatzreihe eine Matrix (Perioden x Pfade)
+          von Brutto-Periodenrenditen bzw. Brutto-Inflation (z. B. 1.05 bzw. 1.02), sonst ``None``.
+        - returns_frequency, returns_dates: Frequenz und Periodenenden (Datum) der gespeicherten Renditen.
+        - errors: DataFrame der Fehler der Einzelsimulationen (``strategy``, ``stage`` = "Signal", "Simulation"
+          oder "Kennzahlen", ``message``, ``n`` = Anzahl Pfade, ``first_path``), nach Häufigkeit sortiert;
+          ``None``, wenn keine.
+        - warnings: DataFrame der deduplizierten Warnungen (``strategy``, ``message``, ``n`` = Anzahl Pfade mit
+          dieser Warnung, ``first_path``); ``None``, wenn keine.
+
+    Details:
+        Ablauf je Pfad: Pfadmatrix erzeugen, mit ``dates`` zu einem DataFrame wie in ``bootstrap_data()`` machen
+        (Spalte ``date`` plus Pfadspalten aus ``bootstrap_config()``), je Strategie optional ``signal`` und
+        ``map`` anwenden, die ersten ``burn_in`` Zeilen verwerfen, ``simulation()`` mit ``sim_args`` aufrufen und
+        ``metrics`` auswerten. Weiterverarbeitung: ``summary()`` und ``plot()`` (siehe SimLevBootstrap-methods),
+        ``bootstrap_probability()``; mit ``keep_returns`` zusätzlich ``withdrawal_paths()`` bzw.
+        ``withdrawal_simulation()`` (Entnahmephase auf den simulierten Strategiepfaden).
+
+    Literatur:
+        Haas, M., Mittnik, S. & Paolella, M.S. (2004), A New Approach to Markov-Switching GARCH Models, Journal of
+        Financial Econometrics 2(4) (Verfahren "ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"); Hamilton, J.D.
+        (1989), Econometrica 57(2) (Filter).
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1095
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        d["aktien"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        cfg = simlev.bootstrap_config({"akt": "aktien"}, input="prices",
+                                      letfs=[{"base": "akt", "leverage": 2, "finance": 2}])
+        st = simlev.bootstrap_study(d, cfg, "stationary", 5, params={"L": 30}, path_length=500, seed=1, progress=False,
+                                    strategies={"etf": simlev.create_strategy(akt=simlev.asset_config(asset_class="etf")),
+                                                "letf": simlev.create_strategy(akt_l2=simlev.asset_config(asset_class="etf"))})
+        print(st["results"][["strategy", "path", "cagr", "max_drawdown"]].head())
     """
     keep_returns = _match_arg(keep_returns, ("none", "year", "quarter", "month"))
     if keep_aux is not None:
@@ -1622,7 +2129,7 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
     for nm0 in snames:
         specs[nm0]["sim"] = _sim_args_set(sim_args, specs[nm0].get("args"), "bootstrap_study")
     setup = _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
-    keep_paths = _keep_count(keep_paths, setup["n_paths"], "bootstrap_study")   # 6.5b: True = alle Pfade
+    keep_paths = _keep_count(keep_paths, setup["n_paths"], "bootstrap_study")   # True = alle Pfade
     n_out = setup["n_out"]
     if dates is None:
         dates = _seq_dates(_to_date(start, "start"), n_out + 1)
@@ -1631,12 +2138,12 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
     dates = _to_date(dates, "dates")
     if burn_in >= n_out:
         _stop("burn_in ist länger als der Pfad.")
-    if seed is None:                    # Regel 3/4: None -> einmal k aus G
+    if seed is None:                    # None -> einmal k aus G
         seed = _sl.next_seed()
     else:
         _sl.check_seed(seed)
     n_paths = setup["n_paths"]
-    streams = _sl.streams(seed, n_paths)                                          # Regel 6: U_i = J^i(S_0)
+    streams = _sl.streams(seed, n_paths)                                          # U_i = J^i(S_0)
     ids = np.arange(1, n_paths + 1)
     chunk_size = float(chunk_size)
     keys = np.ceil(ids / chunk_size)
@@ -1934,7 +2441,7 @@ def _logical_fill(v):
 
 @_quiet
 def _wquantile(x, w, probs):
-    """Gewichtete Quantile (gewichteter Typ 7, Akinshin 2023), Port von ``.wquantile``."""
+    """Gewichtete Quantile (gewichteter Typ 7, Akinshin 2023), R: ``.wquantile``."""
     x = np.asarray(x, dtype=np.float64).ravel()
     w = np.asarray(w, dtype=np.float64).ravel()
     if w.size == 1 and x.size != 1:
@@ -1953,7 +2460,7 @@ def _wquantile(x, w, probs):
     o = np.argsort(x, kind="stable")
     x = x[o]
     w = w[o] / sw
-    r = r_cumsum(w)   # N11: C-Kern (cumsum in long double wie R)
+    r = r_cumsum(w)   # C-Kern (cumsum in long double wie R)
     r[-1] = 1.0
     lft = np.concatenate([[0.0], r[:-1]])
     ne = 1 / r_sum(w * w)
@@ -1994,22 +2501,56 @@ def _eval_condition(cond, d, env):
 def bootstrap_probability(study, *args, thresholds=None, env=None, **kwargs):
     """Wahrscheinlichkeiten aus einer Bootstrap-Studie.
 
-    Bedingungen als Zeichenketten in R-Syntax (Spaltennamen von
-    ``study.results`` als Variablen, z. B. ``"cagr > 0 & max_drawdown <= 0.5"``;
-    Vorrang, NA-Logik und Funktionen wie in R, siehe :mod:`simlev._r.rexpr`)
-    oder Funktionen ``DataFrame -> bool-Array``. Unbenannte Bedingungen
-    (``*args``) werden nach ihrem Text benannt, benannte über Schlüsselwörter
-    (``joint="cagr > 0 & max_drawdown <= 0.5"``). Freie Variablen werden in
-    ``env`` gesucht (Voreinstellung: Namensraum des Aufrufers).
+    Wertet beliebige logische Bedingungen je Strategie über alle Pfade einer ``bootstrap_study()`` aus (mit den
+    Pfadgewichten, also ESS-gewichtet), z. B. die gemeinsame Wahrscheinlichkeit, eine Mindestrendite zu erreichen
+    und einen maximalen Drawdown nicht zu überschreiten (wie ``calc_metrics`` in '06 Bootstraps').
 
     Args:
-        study: :class:`SimLevBootstrapStudy`.
-        thresholds: dict Strategie -> dict Name -> Bedingung; ersetzt für diese
-            Strategie die Bedingungen aus ``*args``/``**kwargs``.
+        study: Objekt der Klasse ``SimLevBootstrapStudy`` aus ``bootstrap_study()``.
+        *args: Benannte oder unbenannte Bedingungen in Kennzahlnamen, z. B. ``ttwror >= 0.13``, ``joint = ttwror
+            >= 0.13 & max_drawdown <= 0.95``. Unbenannte Bedingungen werden nach ihrem Ausdruck benannt.
+        thresholds: Optional (Standard ``None``) benannte Liste je Strategiename mit einer benannten Liste von
+            Ausdrücken (``quote()``), z. B. ``{"sma": {"ziel": quote(cagr >= 0.08)}}``. Für eine hier genannte
+            Strategie ersetzen diese Bedingungen die Bedingungen aus ``...`` (strategiespezifische Schwellen).
         env: Mapping für freie Variablen und Funktionen in Bedingungen.
+        **kwargs: Benannte oder unbenannte Bedingungen in Kennzahlnamen, z. B. ``ttwror >= 0.13``, ``joint =
+            ttwror >= 0.13 & max_drawdown <= 0.95``. Unbenannte Bedingungen werden nach ihrem Ausdruck benannt.
 
     Returns:
-        ``DataFrame`` mit ``strategy``, ``condition``, ``probability``, ``se``, ``n``.
+        DataFrame mit einer Zeile je Strategie und Bedingung: ``strategy``, ``condition`` (Name), ``probability``
+        (gewichtete Wahrscheinlichkeit als Anteil), ``se`` (Monte-Carlo-Standardfehler √p(1-p)/n_eff mit
+        effektiver Pfadzahl n_eff = (Σ w)^2 / Σ w^2) und ``n`` (Anzahl ausgewerteter Pfade).
+
+    Details:
+        Die Bedingungen werden zeilenweise in ``study["results"]`` ausgewertet; verwendbar sind dort alle Spalten,
+        also die Kennzahlen aus ``metrics`` (bei ``bootstrap_study_metrics()`` z. B. ``cagr``, ``ttwror``,
+        ``max_drawdown`` als Anteil) sowie ``path``, ``weight``, ``combo`` und ``tries``. Zeilen mit
+        ``NA``-Ergebnis zählen nicht. Freie Variablen in den Bedingungen (z. B. eine Schwelle ``thr``) werden in
+        der Umgebung des Aufrufs gesucht (auch lokale Variablen einer aufrufenden Funktion), Spalten von
+        ``study["results"]`` haben Vorrang.
+
+    Hinweise (Python):
+        Bedingungen als Zeichenketten in R-Syntax (Spaltennamen von
+        ``study.results`` als Variablen, z. B. ``"cagr > 0 & max_drawdown <= 0.5"``;
+        Vorrang, NA-Logik und Funktionen wie in R, siehe :mod:`simlev._r.rexpr`)
+        oder Funktionen ``DataFrame -> bool-Array``. Unbenannte Bedingungen
+        (``*args``) werden nach ihrem Text benannt, benannte über Schlüsselwörter
+        (``joint="cagr > 0 & max_drawdown <= 0.5"``). Freie Variablen werden in
+        ``env`` gesucht (Voreinstellung: Namensraum des Aufrufers).
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1095
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        d["aktien"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        cfg = simlev.bootstrap_config({"akt": "aktien"}, input="prices",
+                                      letfs=[{"base": "akt", "leverage": 2, "finance": 2}])
+        st = simlev.bootstrap_study(d, cfg, "stationary", 5, params={"L": 30}, path_length=500, seed=1, progress=False,
+                                    strategies={"etf": simlev.create_strategy(akt=simlev.asset_config(asset_class="etf")),
+                                                "letf": simlev.create_strategy(akt_l2=simlev.asset_config(asset_class="etf"))})
+        print(simlev.bootstrap_probability(st, "cagr > 0", joint="cagr > 0.05 & max_drawdown <= 0.3"))
     """
     if not _is_study(study):
         _stop("study muss ein SimLevBootstrapStudy-Objekt sein.")
@@ -2162,7 +2703,7 @@ def _plot_study(x, metric="cagr", width=640, height=420):
     dens = []
     for v in dl:
         v = v[np.isfinite(v)]
-        dd = _sl.kde(v)   # Gauß-Kerndichte wie .sl_kde in R (slc, Entwurf B.16; nur Grafik)
+        dd = _sl.kde(v)   # Gauß-Kerndichte wie .sl_kde in R (slc; nur Grafik)
         dens.append((np.asarray(_get(dd, "x"), dtype=np.float64), np.asarray(_get(dd, "y"), dtype=np.float64)))
     x0, x1 = (0.0, 1.0) if allv.size == 0 else (_jl_minimum(allv), _jl_maximum(allv))
     if x1 == x0:

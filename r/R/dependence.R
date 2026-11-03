@@ -130,7 +130,7 @@
       r <- par[1]; x <- .sl_qnorm(u); y <- .sl_qnorm(v)
       .cop_g_ll(r, x, y, x^2, y^2)
     },
-    t = {                                                         # N2: Hilfen .cop_t_c0, .cop_t_ll
+    t = {                                                         # Hilfen .cop_t_c0, .cop_t_ll
       r <- par[1]; nu <- par[2]; x <- .sl_qt(u, nu); y <- .sl_qt(v, nu)
       .cop_t_ll(r, nu, .cop_t_c0(nu), x, y, x^2, y^2, (nu + 1) / 2 * (log1p(x^2 / nu) + log1p(y^2 / nu)))
     },
@@ -153,7 +153,7 @@
   if (!is.finite(s)) -1e10 else s
 }
 
-# N2: Teile der Log-Dichten der Gauss- und t-Copula (je Beobachtung), auch für die Profil-Likelihood in
+# Teile der Log-Dichten der Gauss- und t-Copula (je Beobachtung), auch für die Profil-Likelihood in
 # .cop_fit_t; x2 = x^2, y2 = y^2, B = (nu + 1)/2 (log1p(x^2/nu) + log1p(y^2/nu)) vorab. Gleiche Rechenfolge wie
 # bisher in .cop_ll.
 #' @keywords internal
@@ -165,7 +165,7 @@
 .cop_t_ll <- function(r, nu, c0, x, y, x2, y2, B)
   c0 - 0.5 * log(1 - r^2) - (nu + 2) / 2 * log1p((x2 - 2 * r * x * y + y2) / (nu * (1 - r^2))) + B
 
-# N2: c0(nu) = lgamma((nu + 2)/2) + lgamma(nu/2) - 2 lgamma((nu + 1)/2) der t-Copula. Für nu > 64 löschen sich die
+# c0(nu) = lgamma((nu + 2)/2) + lgamma(nu/2) - 2 lgamma((nu + 1)/2) der t-Copula. Für nu > 64 löschen sich die
 # lgamma-Werte aus (bei nu = 1e8 ist die Differenz reines Rundungsrauschen), daher dort die Stirling-Reihe mit
 # Bernoulli-Polynomen (DLMF 5.11.8, h = 0 und 1/2): c0 = -2 sum_{k ungerade} (2^-k - 2) B_{k+1} / (k (k+1) a^k),
 # a = nu/2, also 1/(4a) - 1/(96 a^3) + 1/(320 a^5) - 17/(7168 a^7) + 31/(9216 a^9) (Rest < 1e-16 relativ).
@@ -177,7 +177,7 @@
   ((((31 / 9216 * ia2 - 17 / 7168) * ia2 + 1 / 320) * ia2 - 1 / 96) * ia2 + 1 / 4) / a
 }
 
-# N2: t-Copula per Profil-Likelihood in nu (statt Nelder-Mead in beiden Parametern; die Likelihood ist in nu sehr
+# t-Copula per Profil-Likelihood in nu (statt Nelder-Mead in beiden Parametern; die Likelihood ist in nu sehr
 # flach). Für festes nu hängt die Log-Likelihood nur über x = qt(u, nu), y = qt(v, nu) von nu ab; das Maximum in
 # rho (Variable atanh rho in [-20, 20], Brent mit tol 1e-10) braucht daher nur eine qt-Auswertung je nu.
 # Raster nu = 2 + 2^k, k = -4 ... 12, und nu = Inf (Grenzfall Gauss-Copula, Dichte .cop_g_ll); um den besten
@@ -300,13 +300,13 @@ copula_fit <- function(x, y, families = NULL) {
   if (is.null(families)) families <- if (tau >= 0)
     c("gaussian", "t", "clayton", "gumbel", "frank", "clayton_180", "gumbel_180")
     else c("gaussian", "t", "frank", "clayton_90", "clayton_270", "gumbel_90", "gumbel_270")
-  # N2: Startwert rho0 = sin(pi tau / 2) entfällt (t-Copula per Profil-Likelihood, .cop_fit_t)
+  # Startwert rho0 = sin(pi tau / 2) entfällt (t-Copula per Profil-Likelihood, .cop_fit_t)
   fit1 <- function(fam) {
     base <- sub("_.*$", "", fam)
     f <- function(p) -.cop_ll(fam, p, u, v)
     res <- switch(base,
       gaussian = { o <- stats::optimize(function(r) f(r), c(-0.995, 0.995)); list(par = c(o$minimum, NA), nll = o$objective, k = 1) },
-      t = {                                                     # N2: Profil-Likelihood in nu
+      t = {                                                     # Profil-Likelihood in nu
         o <- .cop_fit_t(u, v)
         list(par = c(tanh(o[1]), min(o[2], 500)), nll = o[3], k = 2)
       },
@@ -395,7 +395,7 @@ tail_dependence <- function(x, y, q = c(0.01, 0.025, 0.05, 0.10, 0.20)) {
 #' Die Schaetzung ist deterministisch: Den frueheren zufaelligen Rueckfall der
 #' GARCH-Stufe (gosolnp mit Startwert aus der Uhrzeit) gibt es nicht mehr; die
 #' GARCH-Stufe meldet \code{method = "ml"} statt \code{"rugarch"}/\code{"optim"}
-#' (Etappe 9.6b).
+#' (seit 1.0.0).
 #'
 #' @param R Numerische Renditematrix oder data.frame (Zeilen = Zeit, Spalten
 #'   = Reihen; mindestens zwei Spalten und 100 Zeilen, keine fehlenden
@@ -441,8 +441,8 @@ dependence_dcc <- function(R) {
     stop(sprintf("dependence_dcc: Korrelationsmatrix der standardisierten Residuen ist singul\u00e4r (z. B. '%s' und '%s': Korrelation %.6f); DCC nicht sch\u00e4tzbar. Doppelte bzw. linear abh\u00e4ngige Reihen entfernen.",
                  nm[ij[1]], nm[ij[2]], Qb[ij[1], ij[2]]))
   }
-  # Stufe 2 ganz in C (Entwurf B.11): s = 0.999 plogis(th1), a = s plogis(th2), b = s - a; Start
-  # (qlogis(0.98/0.999), qlogis(0.03/0.98)); N5: BFGS mit analytischem
+  # Stufe 2 ganz in C: s = 0.999 plogis(th1), a = s plogis(th2), b = s - a; Start
+  # (qlogis(0.98/0.999), qlogis(0.03/0.98)); BFGS mit analytischem
   # Gradienten (bis 1.1.0 Nelder-Mead, maxit 2000, reltol 1e-10); deterministisch
   o <- .sl_dcc_fit(Z, Qb)
   p <- c(o$a, o$b)
@@ -701,7 +701,7 @@ dependence_analysis <- function(data, assets, conditions = NULL, frequency = c("
       ct <- do.call(rbind, rows)
       if (B > 0 && length(lv) >= 2) {
         nk <- nrow(Xk)
-        # Regel 3/4: seed = NULL -> einmal k aus G (beim ersten Bootstrap), dann je Zustand wie seed = k
+        # seed = NULL -> einmal k aus G (beim ersten Bootstrap), dann je Zustand wie seed = k
         if (is.null(seed)) seed <- .sl_next_seed()
         S <- .sl_main_stream(seed)
         boot <- lapply(seq_len(B), function(b) {
@@ -945,7 +945,7 @@ quantile_regression <- function(y, X = NULL, tau = 0.5, intercept = TRUE, tol = 
   ok <- is.finite(y) & rowSums(!is.finite(X)) == 0; y <- y[ok]; X <- X[ok, , drop = FALSE]
   if (!ncol(X)) stop("quantile_regression: keine Regressoren (X = NULL und intercept = FALSE).")
   if (length(y) < ncol(X)) stop(sprintf("quantile_regression: %d vollst\u00e4ndige Beobachtungen f\u00fcr %d Koeffizienten.", length(y), ncol(X)))
-  qx <- .sl_lsfit(X, y)                                        # OLS-Start: Householder-QR (Entwurf B.7)
+  qx <- .sl_lsfit(X, y)                                        # OLS-Start: Householder-QR
   if (qx$rank < ncol(X))
     stop(sprintf("quantile_regression: Regressoren linear abh\u00e4ngig (%s); doppelte oder konstante Spalten entfernen (die Konstante ist bei intercept = TRUE schon enthalten).",
                  paste0("'", nm[qx$pivot[(qx$rank + 1):ncol(X)]], "'", collapse = ", ")))
@@ -1032,7 +1032,7 @@ tail_regression <- function(data, asset, drivers, quantiles = c(0.05, 0.25, 0.5,
   n_failed <- 0L
   if (B > 0) {
     block <- block %||% min(max(2, .pw_block(abs(y - mean(y)))[["stationary"]]), n / 10)
-    S <- .sl_main_stream(seed)                                  # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+    S <- .sl_main_stream(seed)                                  # Hauptstrom
     bs <- lapply(seq_len(B), function(b) { idx <- .sl_boot_idx_stationary(n, n, block, stream = S)
       yb <- y[idx]; Xb <- X1[idx, , drop = FALSE]
       # z. B. Treiber in der Stichprobe konstant -> singulaer: Wiederholung als NA
@@ -1049,7 +1049,7 @@ tail_regression <- function(data, asset, drivers, quantiles = c(0.05, 0.25, 0.5,
   coefs <- data.frame(quantile = rep(quantiles, each = length(terms)), term = rep(terms, length(quantiles)),
                       estimate = as.vector(est), se = as.vector(se), lower = as.vector(lo), upper = as.vector(hi),
                       stringsAsFactors = FALSE)
-  ols <- .sl_lsfit(X1, y)$coefficients; names(ols) <- terms   # OLS (Entwurf B.7)
+  ols <- .sl_lsfit(X1, y)$coefficients; names(ols) <- terms   # OLS
   structure(list(coefficients = coefs, ols = ols, asset = asset, drivers = drivers, quantiles = quantiles,
                  n = n, frequency = frequency, B = B, B_failed = n_failed, block = block, data = rd), class = "SimLevTailRegression")
 }

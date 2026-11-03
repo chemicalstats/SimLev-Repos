@@ -1,7 +1,7 @@
 /*
  * python/src/_ext_research.cpp -- Python-Huellen der Kerne aus research_core_impl.h
  *
- * Etappe 7.3a. Gemeinsamer Kern mit R (core/research_core_impl.h, Kopie in src/core/);
+ * Gemeinsamer Kern mit R und Julia (core/research_core_impl.h, Kopie in src/core/);
  * aufgerufen aus simlev._optimize_core, _dependence_core und _signals_core, die vorher
  * wie R umwandeln. Matrizen
  * kommen spaltenweise als flache double-Puffer mit Zeilen- und Spaltenzahl;
@@ -21,7 +21,7 @@
  * Die Huellen pruefen die Laengen so, dass der Kern nur innerhalb der Puffer liest
  * und schreibt (die R-Kerne setzen dieselben Laengen stillschweigend voraus); andere
  * Eingaben weisen die aufrufenden Python-Funktionen vorher ab (die reinen Python-Kerne
- * als Rueckfall sind seit Etappe 9.6c entfallen).
+ * als Rueckfall sind seit 1.0.0 entfallen).
  */
 #include "_ext_common.h"
 #include "core/research_core_impl.h"

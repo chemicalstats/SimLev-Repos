@@ -1,33 +1,59 @@
 # Entwicklernotiz: Python-Fassung von SimLev
 
-Diese Notiz gilt für alle Änderungen an `python/simlev/`. Sie beschreibt die
-Konventionen der bitgleichen Portierung des R-Pakets SimLev 0.5.0, das
-Referenzwerkzeug und die Zuordnung der R-Dateien zu den Python-Modulen.
+Diese Notiz gilt für alle Änderungen an `python/simlev/`. Die Rechenkerne
+liegen als gemeinsamer C/C++-Code in `core/` und rechnen in R, Python und
+Julia dieselben Zahlen; Python bildet die Schnittstelle darum (Eingabeprüfung,
+Datenaufbereitung, Ablauf, Ergebnisobjekte, Druck, Grafik). Die Notiz
+beschreibt die Konventionen, mit denen dieser Python-Teil bitgleich zu den
+Gegenstücken in R und Julia bleibt, das Prüfwerkzeug und die Zuordnung der
+R-Dateien zu den Python-Modulen. Die
+Zuordnung aller öffentlichen Funktionen zu Dateien in R, Python und Julia
+steht in [`STRUKTUR.md`](../STRUKTUR.md).
 Was speziell die Engine (`simulation()`) betrifft, steht im Abschnitt
 [Engine](#engine-simulation).
 
-> **Stand Etappe 9:** Zufall und Numerik rechnet die eigene C-Bibliothek slc (Abschnitte
-> [C-Erweiterung](#c-erweiterung), [Zufall](#zufall-etappe-9) und
-> [Tests in Etappe 9](#tests-in-etappe-9)). `simlev/_r/` bildet nur noch Grundfunktionen von R
+> **Stand:** Zufall und Numerik rechnet die eigene C-Bibliothek slc, die Engine von
+> `simulation()` der gemeinsame C++-Kern (Abschnitte [C-Erweiterung](#c-erweiterung),
+> [Zufall](#zufall) und [Tests](#tests)). `simlev/_r/` bildet nur noch Grundfunktionen von R
 > nach (Liste und Herkunft in [`COPYRIGHTS.md`](COPYRIGHTS.md)); Nachbildungen von R's Zufall,
 > nmath, BLAS/LAPACK/LINPACK, `optim`/`nlminb` und der früher übernommenen Pakete gibt es nicht
 > mehr, ebenso keine reinen Python-Kerne.
 
+## Bauen, Abgleich der C-Quellen und Tests
+
+Aus der Repo-Wurzel, immer mit `LC_ALL=C.UTF-8`:
+
+``` bash
+python3 core/sync.py --check          # Kopien der C-Quellen in r/src, python/src/core, julia/deps/core prüfen
+python3 core/sync.py --write          # nach einer Änderung in core/ verteilen
+(cd python && python3 setup.py build_ext --inplace --force)   # C-Erweiterung im Klon bauen
+PYTHONPATH=python python3 -m pytest tests                     # Tests (Gruppen gleichlauf, fehler, ausgabe, schnittstelle)
+tests/werkzeuge/gleichlauf/run.sh --quick                       # Gleichlauf mit R und Julia
+tests/werkzeuge/doku/beispiele.sh python                        # Beispiele der READMEs und des Tutorials
+```
+
+Die C-Quellen werden nur in `core/` geändert (Regeln in [`core/README.md`](../core/README.md)).
+Die Tests liegen im Ordner `tests/` des Repositorys, nach Zweck gegliedert, und gehören nicht
+zum Paket; Katalog und Befehle stehen in [`tests/README.md`](../tests/README.md). Sie sollen
+künftig nur lokal liegen (dort Abschnitt „Lokal aufbewahren“); Bauen, `pip install` und
+`pip wheel` laufen ohne sie.
+
 ## Voraussetzungen
 
-- Maßgeblich sind die Quellen des R-Pakets: `r/R/*.R`, `r/man/*.Rd` und `r/NEWS.md`, für die
-  C- und C++-Kerne `core/` (Regeln in `core/README.md`). Für die nachgebauten
+- Für die Rechenkerne gilt `core/` (Regeln in `core/README.md`). Verhalten und Meldungen der
+  Schnittstelle sind in allen drei Sprachen gleich; als Vergleich dienen die Gegenstücke in
+  `r/R/*.R` und `julia/src/`, die Hilfe (`r/man/*.Rd`, Docstrings) und die Referenzfälle. Für die nachgebauten
   R-Grundfunktionen in `simlev/_r/` sind es die Quellen von R 4.3.3 (`src/main`, `src/nmath`
   nur `fround.c`/`fprec.c`, `src/library/stats`, `src/library/base`; Liste in
   [`COPYRIGHTS.md`](COPYRIGHTS.md)).
-- Referenzfälle erzeugt R 4.3.3 mit dem installierten R-Paket SimLev 0.5.0
+- Referenzfälle erzeugt R 4.3.3 mit dem installierten R-Paket SimLev
   und `jsonlite`; kein Generator braucht ein weiteres Paket. Die Module
   `gen_evd.R`, `gen_imputets.R`, `gen_rugarch.R`, `gen_r_nmath.R`, `gen_r_rng.R`,
   `gen_r_linalg.R` und `gen_r_nlminb.R` prüfen entfallene Nachbildungen und sind aus dem
-  Gleichlauf ausgenommen (Entwurf F24). MS-GARCH, GARCH, GPD, DCC und die Bootstrap-Kerne
+  Gleichlauf ausgenommen. MS-GARCH, GARCH, GPD, DCC und die Bootstrap-Kerne
   rechnet die C-Bibliothek (`simlev._lib_models`).
 - Bitgleichheit setzt Linux x86-64 (80-Bit-`long double`), glibc-libm und denselben Compiler
-  mit denselben Flags für die C-Bibliothek voraus (seit Etappe 9.6c keine System-LAPACK mehr).
+  mit denselben Flags für die C-Bibliothek voraus (seit 1.0.0 keine System-LAPACK mehr).
 - Immer mit `LC_ALL=C.UTF-8` arbeiten; unter dem C-Locale schlagen die
   Vergleiche der Druckausgabe wegen der Umlaute fehl.
 
@@ -39,8 +65,8 @@ Voreinstellungen. Ergebnisse sind **bitgleich** (IEEE-754-Doubles
 identisch), Druckausgaben (`print`) zeichengleich, Fehlermeldungen und
 Warnungen wortgleich (deutsch). Argumente, die in Python Schlüsselwörter
 sind, heißen `yield_`, `raise_` und `from_`. Nicht-Pflichtargumente öffentlicher Funktionen
-gehen nur als Schlüsselwort (`*` in der Signatur, Anhang A Regel 5, Etappe
-6.5); Pflichtargumente bleiben positionell, auch wenn sie in R nach
+gehen nur als Schlüsselwort (`*` in der Signatur, seit
+0.9.0); Pflichtargumente bleiben positionell, auch wenn sie in R nach
 optionalen Argumenten stehen (`bootstrap_study(data, config, method, n,
 strategies, *, …)`, `param_search(data, builder, space, *, …)`,
 `tactical_glidepath(data, from_, to, *, …)`).
@@ -91,7 +117,7 @@ strategies, *, …)`, `param_search(data, builder, space, *, …)`,
 2. R akkumuliert `sum`, `mean`, `cumsum`, `prod`, `rowSums`, `colSums`,
    `var`/`cov` in 80-Bit-`long double`. Dafür gibt es die C-Kerne
    `core/slc_rbase*.c` hinter `simlev._r.rnum` bzw. `simlev._r.base` (`r_sum`,
-   `r_mean`, `r_colmeans`, …; seit N11 kein `numpy.longdouble` mehr); `np.sum`
+   `r_mean`, `r_colmeans`, …; seit 1.3.0 kein `numpy.longdouble` mehr); `np.sum`
    und `np.cumsum` ergeben andere Bits. `cumprod` nutzt in R `LDOUBLE`,
    `cummax`/`cummin` nicht.
 3. **Keine numpy-Transzendentalfunktionen** (`np.exp`, `np.log`,
@@ -102,7 +128,7 @@ strategies, *, …)`, `param_search(data, builder, space, *, …)`,
    sind exakt gerundet. `x^2` ist in R `x*x`, `x^y` sonst libm-`pow` (siehe
    `_r.rnum.r_pow`, vektoriell `r_pow_vec`, `r_exp_vec`).
 4. Zufallszahlen ausschließlich über `simlev._lib` (Zustand von SimLev bzw. ein `Stream`, siehe
-   [Zufall](#zufall-etappe-9)); die Reihenfolge der Ziehungen muss exakt der in R entsprechen.
+   [Zufall](#zufall)); die Reihenfolge der Ziehungen muss exakt der in R entsprechen.
 5. R-Grundfunktionen (`quantile`, `median`, `cor`, `optimize`, `uniroot`, `hclust`, `approx`,
    `filter`, `p.adjust`, …) kommen aus `simlev._r.stats`, Formatierung (`format`, `formatC`,
    `round`, `signif`, `prettyNum`, `print` von Vektoren, Matrizen und data.frames) aus
@@ -112,7 +138,7 @@ strategies, *, …)`, `param_search(data, builder, space, *, …)`,
    Verteilungen (`qnorm`, `pt`, `qt`, `lgamma`, …), Optimierer und Modelle kommen aus der
    C-Bibliothek slc (`simlev._lib`, `_lib_linalg`, `_lib_opt`, `_lib_models`; in R `.sl_*`).
    Ein neues Verfahren gehört nach `core/` (nach Veröffentlichungen, Quellen im Dateikopf und im
-   Abschnitt Literatur der Haupt-README), nicht in ein Python-Modul.
+   [`LITERATUR.md`](../LITERATUR.md)), nicht in ein Python-Modul.
 7. Nichts erfinden: Maßgeblich sind R-Code und R-Ergebnis. Bei Unklarheit
    in R nachrechnen.
 8. Grafiken (SVG über `simlev/svg.py`, wie in Julia) müssen nicht bitgleich
@@ -159,8 +185,8 @@ rechnet; `bootstrap`, `bootstrap_study`, `param_search` (auch über
 `overfit_walk_forward`/`param_bootstrap`), `sensitivity_grid`,
 `sensitivity_rebalancing`, `planning_lumpsum_vs_dca` und `sensitivity_leverage` rufen
 sie auf. Sie bildet `parallel::mclapply(mc.preschedule = FALSE, mc.set.seed =
-FALSE)` nach (Verhalten in R 4.3.3 ermittelt in Etappe 5). R bündelt die
-Einheiten seit dem 26.10.2026 in höchstens `4 × cores` Pakete (ein Fork je Paket)
+FALSE)` nach (Verhalten in R 4.3.3). R bündelt die
+Einheiten seit 0.9.1 in höchstens `4 × cores` Pakete (ein Fork je Paket)
 mit denselben Ergebnissen, demselben Zufallszustand und denselben Fehlern;
 innerhalb eines Pakets erscheinen Ausgaben dort in Einheitenreihenfolge.
 
@@ -198,9 +224,9 @@ innerhalb eines Pakets erscheinen Ausgaben dort in Einheitenreihenfolge.
    nicht beim Import binden), Meldungen über die `_message`-Helfer; direkte
    Schreibzugriffe auf die Dateideskriptoren 1/2 fängt `par_lapply` nicht ein.
 5. Zufall in einer Einheit nur über den mitgegebenen `Stream` (`simlev._lib`), nie über den
-   globalen Zustand (siehe [Zufall](#zufall-etappe-9)).
+   globalen Zustand (siehe [Zufall](#zufall)).
 6. Eine neue Funktion mit `cores` braucht Referenzfälle mit `cores = 1` und
-   `cores = 2` (wie `sg_cores1_rng`/`sg_cores2_rng` in `tests/faelle/forschung.jsonl.gz`).
+   `cores = 2` (wie `sg_cores1_rng`/`sg_cores2_rng` in `tests/gleichlauf/faelle/forschung.jsonl.gz`).
 
 ## Zuordnung R-Datei → Python-Modul
 
@@ -210,11 +236,11 @@ innerhalb eines Pakets erscheinen Ausgaben dort in Einheitenreihenfolge.
 | `sim_blocks.R` | `_sim_blocks.py` (Bausteine, Übersetzer `_sim_from_blocks`, `sim_args` und Pfade der Aufrufer: `_sim_args_set`, `_sim_check_names`, `_sim_call`) |
 | `sim_base.R` | `_sim_base.py` |
 | `sim_validate.R`, `sim_prepare.R` | `_sim_phases.py` |
-| `sim_actions.R`, `sim_loop.R` | `_sim_loop.py` |
+| `sim_engine.R` | `_sim_engine.py` (Phasen 4 und 5 über den C++-Kern `core/engine_core_impl.h`) |
 | `sim_evaluate.R` | `_sim_evaluate.py` |
-| `simulation_core.cpp`, `fifo_core.cpp`, `tax_core.cpp` (Kerne in `core/*_core_impl.h`) | `_core.py` (Hüllen um `simlev._ext`, siehe [C-Erweiterung](#c-erweiterung)) |
+| `engine_core.cpp` (Kerne `core/engine_core_impl.h`, `prepare_core_impl.h`, `evaluate_core_impl.h`, `tariff_core_impl.h`) | Hülle `src/_ext_engine.cpp` in `simlev._ext`, aufgerufen aus `_sim_engine.py` (siehe [C-Erweiterung](#c-erweiterung)) |
 | `asset_config.R`, `strategy.R` | `config.py` |
-| `wrapper.R` (Fonds-Wrapper, Etappe 6.5c) | `wrapper.py` (`wrapper_config`, `wrapper_nav`, `SimLevWrapperConfig`, `SimLevWrapperNav`; Engine-Schicht, rechnet mit `simulation()`) |
+| `wrapper.R` (Fonds-Wrapper, seit 0.10.0) | `wrapper.py` (`wrapper_config`, `wrapper_nav`, `SimLevWrapperConfig`, `SimLevWrapperNav`; Engine-Schicht, rechnet mit `simulation()`) |
 | `compute_rebal_trigger.R` | `trigger.py` |
 | `tax_tariff.R`, `inst/extdata/steuertarif.csv` | `_tax_tariff.py`, `data/steuertarif.csv` |
 | `print`/`summary` von `SimLevResult` | `result.py` |
@@ -238,7 +264,7 @@ innerhalb eines Pakets erscheinen Ausgaben dort in Einheitenreihenfolge.
 | `overfitting.R` | `overfitting.py` |
 | `param_search.R` | `param_search.py` |
 | `sensitivity.R` | `sensitivity.py` |
-| R-Grundfunktionen (R 4.3.3) | `_r/`: `rnum.py` (unterste Schicht: `NA_REAL`, long-double-Summen, `R_pow`, `R_zeroin2`), `rformat.py` (`fround.c`, `fprec.c`, `formatReal`, `sprintf` für die Engine), `parallel.py` (`.par_lapply`, siehe [Parallelität](#parallelität-cores)), `stats.py` (Sammelmodul der Themen `stats_sort.py`, `stats_cor.py`, `stats_smooth.py`, `stats_optim.py`, `stats_models.py`, `stats_cluster.py`), `_optim.py` (`Brent_fmin`, `R_zeroin2`), `linalg.py` (`outer`, `diag`, `isSymmetric`), `base.py`, `libm.py`, `fmt.py`, `_collate.py`, `rlist.py`, `rexpr.py`, `env.py`, `reftree.py`; Herkunft in [`COPYRIGHTS.md`](COPYRIGHTS.md) |
+| R-Grundfunktionen (R 4.3.3) | `_r/`: `rnum.py` (unterste Schicht: `NA_REAL`, long-double-Summen, `R_pow`, `R_zeroin2`), `rformat.py` (`fround.c`, `fprec.c`, `formatReal`, `sprintf` für die Engine), `parallel.py` (`.par_lapply`, siehe [Parallelität](#parallelität-cores)), `stats.py` (Sammelmodul der Themen `stats_sort.py`, `stats_cor.py`, `stats_smooth.py`, `stats_optim.py`, `stats_models.py`, `stats_cluster.py`), `_optim.py` (`Brent_fmin`, `R_zeroin2`), `linalg.py` (`outer`, `diag`, `isSymmetric`), `base.py`, `libm.py`, `fmt.py`, `_collate.py`, `rlist.py`, `rexpr.py`, `env.py`; Herkunft in [`COPYRIGHTS.md`](COPYRIGHTS.md) |
 | C-Bibliothek slc (`core/slc*.c`) | `_lib.py` (Zufall, `simlev_seed`, Verteilungen), `_lib_linalg.py`, `_lib_opt.py`, `_lib_models.py` (Hüllen um `simlev._ext`) |
 
 Die `.Call`-Hüllen (`r/R/cores.R`, `r/src/init.c`, `r/src/simlev_capi.h`)
@@ -265,9 +291,9 @@ Julia-Dateien heißen gleich und gehören alle zum Untermodul `RStats`.
 | `stats.py` | `stats.jl` | Sammelmodul bzw. Modulkopf `RStats` mit Exporten und `include`s |
 | `stats_sort.py` | `stats_sort.jl` | Hilfen, `order`, `sort`, `rank`, `rle`, `tabulate`, `findInterval`, `cut`, `complete_cases`, partielle Sortierung, `quantile`, `median`, `weighted_mean` |
 | `stats_cor.py` | `stats_cor.jl` | `cor`, `cov`, `var`, `sd`, `cov2cor`, `scale` (cov.c) |
-| `stats_smooth.py` | `stats_smooth.jl` | `approx`, `approxfun`, `filter` (seit 9.6c ohne `fft`, `bw_nrd0`, `density`, `smooth_spline`) |
-| `stats_optim.py` | `stats_optim.jl` | `optimize`, `uniroot` (seit 9.6c ohne `optim`, `optimhess`, `nlminb`) |
-| `stats_models.py` | `stats_models.jl` | `coef`, `fitted`, `residuals`, `p_adjust`, `ecdf`, `ave`, `aggregate` (seit 9.6c ohne `lm`, `glm`, `poly`, `summary_lm`, `predict`, `t_test`) |
+| `stats_smooth.py` | `stats_smooth.jl` | `approx`, `approxfun`, `filter` (seit 1.0.0 ohne `fft`, `bw_nrd0`, `density`, `smooth_spline`) |
+| `stats_optim.py` | `stats_optim.jl` | `optimize`, `uniroot` (seit 1.0.0 ohne `optim`, `optimhess`, `nlminb`) |
+| `stats_models.py` | `stats_models.jl` | `coef`, `fitted`, `residuals`, `p_adjust`, `ecdf`, `ave`, `aggregate` (seit 1.0.0 ohne `lm`, `glm`, `poly`, `summary_lm`, `predict`, `t_test`) |
 | `stats_cluster.py` | `stats_cluster.jl` | `dist`, `as_dist`, `dist_as_matrix`, `hclust` |
 
 Importrichtung (ohne Kreise): `stats_sort` ← `stats_cor`, `stats_sort` ← `stats_smooth` ←
@@ -276,12 +302,12 @@ Importrichtung (ohne Kreise): `stats_sort` ← `stats_cor`, `stats_sort` ← `st
 ## Engine (`simulation()`)
 
 Dieser Abschnitt gilt für `simulation()` und alles, was daran hängt
-(`engine.py`, `_sim_base.py`, `_sim_phases.py`, `_sim_loop.py`,
-`_sim_evaluate.py`, `_core.py`, `_dates.py`, `config.py`, `trigger.py`,
+(`engine.py`, `_sim_base.py`, `_sim_phases.py`, `_sim_engine.py`,
+`_sim_evaluate.py`, `_dates.py`, `config.py`, `trigger.py`,
 `result.py`, `_tax_tariff.py`, `_sim_blocks.py`, `wrapper.py`, `dashboard.py`), und für Module, die die
 Engine aufrufen oder ihre Helfer verwenden.
 
-**Fonds-Wrapper (`wrapper.py`, Etappe 6.5c).** `_sim_check_inputs` rechnet nach der Prüfung der
+**Fonds-Wrapper (`wrapper.py`, seit 0.10.0).** `_sim_check_inputs` rechnet nach der Prüfung der
 Datumsspalte je Wrapper-Asset den Anteilswert mit `_wrapper_nav_calc` aus den normalisierten Daten
 (ein `_Frame`; `simulation()` nimmt ihn über `_to_frame` als Kopie an) und hängt ihn als Kursspalte an;
 `cfg["no_split"]` nimmt die Wrapper von den Splits aus, `cfg["wrappers"]` (nur mit `details`) wird
@@ -291,7 +317,7 @@ weiter (je Meldung bis zum Zeilenende), ihre Warnungen werden gesammelt und mit 
 ausgegeben, Fehler als `ValueError` mit Präfix. `SimLevWrapperNav` ist ein `DataFrame`; jede Auswahl daraus ist ein
 gewöhnlicher `pandas.DataFrame` ohne `attrs` (`_constructor = pd.DataFrame`; die `attrs` `inner` und
 `wrapper` stehen in einem `_NavAttrs`, das bei der Weitergabe durch pandas, `copy.deepcopy`, ein
-leeres `dict` ergibt; R `[.SimLevWrapperNav`, Etappe 8.0). Die Engine liest Tage und Werte über
+leeres `dict` ergibt; R `[.SimLevWrapperNav`). Die Engine liest Tage und Werte über
 `_nav_raw`.
 
 ### Aufbau der Engine
@@ -300,11 +326,11 @@ Die Engine ist wie in R und Julia nach Phasen auf Dateien verteilt:
 
 | Python | R | Julia | Inhalt |
 |---|---|---|---|
-| `_sim_blocks.py` | `sim_blocks.R` | `sim_blocks.jl` | Bausteine `sim_costs()`, `dca_plan()`, `rebalance_plan()`, `split_rule()`, `tax_profile()`, `income_rate()`, `income_tariff()`, `harvest_rule()`, `funds_costs()` mit Prüfung und Druck; `_sim_from_blocks` übersetzt sie in die flachen Engine-Argumente; `_sim_args_set` setzt `sim_args` und Pfade wie `"dca.value"` der Aufrufer (Etappe 6.4) |
+| `_sim_blocks.py` | `sim_blocks.R` | `sim_blocks.jl` | Bausteine `sim_costs()`, `dca_plan()`, `rebalance_plan()`, `split_rule()`, `tax_profile()`, `income_rate()`, `income_tariff()`, `harvest_rule()`, `funds_costs()` mit Prüfung und Druck; `_sim_from_blocks` übersetzt sie in die flachen Engine-Argumente; `_sim_args_set` setzt `sim_args` und Pfade wie `"dca.value"` der Aufrufer |
 | `engine.py` | `simulation.R` | `engine.jl` (Kopf, `include`s), `sim_evaluate.jl` (`simulation`, `_simulation_flat`) | Einstieg `simulation()` (Bausteine) und Engine `_simulation_flat()` (flache Argumente); bietet die öffentlichen Helfer und `_as_date`, `_r_class_name` weiter an |
 | `_sim_base.py` | `sim_base.R` | `engine.jl` | Ausgabe- und Datumshilfen, Spaltendaten (`_Frame`), Gebühren, Termine und Flags, Handels- und Steuerfunktionen, Tarifweg, Jahreswechsel, Kennzahlen (`_xirr_rate`, Schiefe, Wölbung) |
 | `_sim_phases.py` | `sim_validate.R`, `sim_prepare.R` | `sim_phases.jl` | Phase 1 `_sim_check_inputs`, Phase 2 `_sim_prepare_data`, `_sim_build_state`, `_sim_build_calendar`, `_sim_init_weights`, `_sim_build_schedule` |
-| `_sim_loop.py` | `sim_actions.R`, `sim_loop.R` | `sim_loop.jl` | Phase 3 `_Actions`, Phase 4 `_sim_run_days` mit `_sim_day_*`, Phase 5 `_sim_close_years` |
+| `_sim_engine.py` | `sim_engine.R` | `sim_engine.jl` | Phasen 4 und 5 über den gemeinsamen C++-Kern (`core/engine_core_impl.h`, Vorbereitung `core/prepare_core_impl.h`): Tagesschleife und Abschluss des letzten Jahres in `_sim_engine_run`; die Texte der Warnungen, `details`-Ausgaben und Abbrüche setzt `_sim_engine_signal` |
 | `_sim_evaluate.py` | `sim_evaluate.R` | `sim_evaluate.jl` | Phase 6 `_sim_compact_trades`, `_sim_returns`, `_sim_risk_stats`, `_sim_undefined_metrics`, `_sim_result` |
 
 `simulation()` steht in Python in `engine.py` (in Julia in `sim_evaluate.jl`),
@@ -314,9 +340,9 @@ weil `engine.py` alle Phasenmodule einbindet und diese ihrerseits
 
 ### Stand
 
-- Die Engine-Fälle (bis T20 `cases` 55/55 und `extra` 35/35) sind bitgleich (seit Etappe 6.5c ohne die 15 Fälle des Fondsmodus),
+- Die Engine-Fälle (bis 1.4.0 `cases` 55/55 und `extra` 35/35) sind bitgleich (seit 0.10.0 ohne die 15 Fälle des Fondsmodus),
   einschließlich Druckausgabe und `details = TRUE`
-  (`python3 tests/gleichlauf/vergleich.py [Pfade] [-k id] [-v]`).
+  (`python3 tests/werkzeuge/gleichlauf/vergleich.py [Pfade] [-k id] [-v]`).
 - Zusätzlich frisch erzeugte Fälle (300 Zufallsfälle, Seed 777 bzw. 999,
   jeweils mit den festen Fällen des Generators): `engine_faelle.R` und
   `engine_stress.R` ergeben 669/669. Die neuen Argumente (order_fee, dca_fee,
@@ -324,9 +350,9 @@ weil `engine.py` alle Phasenmodule einbindet und diese ihrerseits
   750 Fällen voll verglichen.
 - Die R-Tests der Engine sind nach `tests/test_*engine*.py`, `test_tax*.py`,
   `test_simulation.py`, `test_config.py` und `test_dashboard.py` portiert.
-- Diese Zahlen beschreiben den Stand vor Etappe 9; die gespeicherten Fälle und die Tests sind
-  bis zum Neuaufbau ausgesetzt. Der Gleichlauf (`tests/gleichlauf/run.sh --full`) ergab am
-  27.10.2026 Engine 1.182/1.182 und Module 4.260/4.260.
+- Diese Zahlen beschreiben den Stand vor 1.0.0. Der Gleichlauf
+  (`tests/werkzeuge/gleichlauf/run.sh --full`) ergab am 27.10.2026 Engine 1.182/1.182 und Module
+  4.260/4.260. Seit 1.4.2 prüfen die Szenarien und Tabellen in `tests/` (siehe [Tests](#tests)).
 
 ### Abbildung der Engine-Objekte
 
@@ -366,7 +392,7 @@ R-Namen aus `_r.base` bzw. `_r.fmt`). In `rnum.py` stehen die Summen
 (`r_sum`, `r_mean` mit Korrekturdurchlauf, `r_mean_int`, `r_cumsum`,
 `r_prod`, `r_cumprod`, `r_cummax`, `r_var`, `r_sd`, `r_median`,
 `r_rowsums`, `r_colsums`, `r_rowmeans`, `r_colmeans`; alle über die C-Kerne
-`core/slc_rbase*.c`), `r_pow`, `r_mod1` (`core/slc_rbase_num.c`, N11) und die
+`core/slc_rbase*.c`), `r_pow`, `r_mod1` (`core/slc_rbase_num.c`, seit 1.3.0) und die
 Nullstellensuche, in `rformat.py` Runden und Textausgabe:
 
 - Runden: `r_round` (fround.c, R ≥ 4), `r_signif` (fprec.c).
@@ -440,30 +466,31 @@ und zugleich nach `julia/src/svg.jl`.
 
 ## Referenzfälle und Prüfung
 
-> Seit Etappe 9 ausgesetzt (siehe [Tests in Etappe 9](#tests-in-etappe-9)): Die gespeicherten
-> Fälle beschreiben den Stand vor dem eigenen Zufall und den eigenen Kernen. Generatoren und
-> Vergleicher unten gelten weiter; frische Fälle erzeugt und vergleicht die Gleichlaufprüfung.
+Die Referenzfälle liegen seit 1.4.1 im Ordner `tests/` des Repositorys (Katalog
+[`tests/README.md`](../tests/README.md)); frische Fälle erzeugt und vergleicht die
+Gleichlaufprüfung.
 
-Die Engine prüfen die Golden-Fälle in `tests/faelle/engine.jsonl.gz` (Engine-Format)
-(`tests/gleichlauf/vergleich.py`, `tests/python/test_faelle.py`; siehe
+Die Engine prüfen die Szenarien und Tabellen in `tests/<gruppe>/faelle/engine.jsonl.gz` (seit 1.4.2; die
+Zufallsfälle im Engine-Format nur noch im Gleichlauf, `tests/werkzeuge/zufall`)
+(`tests/werkzeuge/gleichlauf/vergleich.py`, `tests/gleichlauf/test_gleichlauf.py`; siehe
 [Engine](#engine-simulation)). Alle übrigen Funktionen und die
-R-Interna prüfen Referenzfälle unter `tests/faelle/<bereich>.jsonl.gz`.
+R-Interna prüfen Referenzfälle unter `tests/<gruppe>/faelle/<bereich>.jsonl.gz`.
 
-- Je Modul gibt es einen Generator `tests/erzeugen/<bereich>.R`, der
-  `tests/erzeugen/ref_tools.R` lädt. Aufruf aus der Repo-Wurzel:
+- Je Modul gibt es einen Generator `tests/gleichlauf/erzeugen/<bereich>.R`, der
+  `tests/gleichlauf/erzeugen/ref_tools.R` lädt. Aufruf aus der Repo-Wurzel:
 
   ``` bash
-  LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev 0.5.0> Rscript tests/erzeugen/<bereich>.R
+  LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> Rscript tests/gleichlauf/erzeugen/<bereich>.R
   ```
 
   `ref_init()` leert den Zielordner, jeder `ref_case()` schreibt
-  `tests/faelle/<bereich>.jsonl.gz` (eine Zeile je Fall) mit Eingaben, R-Code, Python-Code,
+  `tests/<gruppe>/faelle/<bereich>.jsonl.gz` (eine Zeile je Fall) mit Eingaben, R-Code, Python-Code,
   Julia-Code (Feld `jl`, für die Julia-Fassung), Ergebnis,
   Konsolenausgabe, Druckausgabe, Warnungen bzw. Fehlermeldung (Format in
   `tests/README.md`). Beispiel:
 
   ``` r
-  source("tests/erzeugen/ref_tools.R"); ref_init("signals")
+  source("tests/gleichlauf/erzeugen/ref_tools.R"); ref_init("signals")
   set.seed(1); px <- 100 * cumprod(1 + rnorm(300, 0, 0.01))
   ref_case("sma1", r = "signal_sma(px, 20)",
            py = "result = simlev.signal_sma(px, 20)",
@@ -472,8 +499,8 @@ R-Interna prüfen Referenzfälle unter `tests/faelle/<bereich>.jsonl.gz`.
   ```
 
 - Fälle decken typische Aufrufe, alle Argumentvarianten und die Randfälle
-  aus `tests/r` ab, auch Fehler- und Warnpfade. Zufallsabhängige
-  Fälle setzen den Startwert in allen Codes (seit Etappe 9.6a `simlev_seed(5)` ↔
+  aus `tests/run.R` ab, auch Fehler- und Warnpfade. Zufallsabhängige
+  Fälle setzen den Startwert in allen Codes (seit 1.0.0 `simlev_seed(5)` ↔
   `simlev.simlev_seed(5)` ↔ `simlev_seed(5)` in Julia, oder `seed = 5` am Aufruf). R's
   `set.seed` dient nur noch zum Erzeugen gespeicherter Eingaben im R-Generator.
 - Dateien klein halten (Eingaben höchstens etwa 2.000 Zeilen, nur so viele
@@ -481,101 +508,98 @@ R-Interna prüfen Referenzfälle unter `tests/faelle/<bereich>.jsonl.gz`.
 - Prüfen:
 
   ``` bash
-  python3 tests/gleichlauf/vergleich.py [datei.jsonl.gz ...] [-k id] [-v]
-  python3 -m pytest tests/python/test_faelle.py -k <modul>
+  python3 tests/werkzeuge/gleichlauf/vergleich.py [datei.jsonl.gz ...] [-k id] [-v]
+  python3 -m pytest tests/gleichlauf/test_gleichlauf.py -k <modul>
   ```
 
-  `simlev._r.reftree` lädt einen Fall, führt den Python-Code aus und
+  `tests/lib/reftree.py` lädt einen Fall, führt den Python-Code aus und
   vergleicht Ergebnis, Ausgaben, Warnungen und Fehlermeldung bitgenau.
-- Engine: `tests/gleichlauf/vergleich.py` vergleicht Golden-Fälle (`.json`/`.json.gz`)
+- Engine: `tests/werkzeuge/gleichlauf/vergleich.py` vergleicht Golden-Fälle (`.json`/`.json.gz`)
   in einem oder mehreren Ordnern. Frische Fälle erzeugen
-  `Rscript tests/erzeugen/engine_faelle.R <ziel> N SEED` bzw. `engine_stress.R`; das
+  `Rscript tests/werkzeuge/zufall/engine_faelle.R <ziel> N SEED` bzw. `engine_stress.R`; das
   Ziel liegt **außerhalb des Repos** (z. B. in einem temporären Ordner),
-  danach `tests/gleichlauf/vergleich.py` aufrufen.
+  danach `tests/werkzeuge/gleichlauf/vergleich.py` aufrufen.
 
 Nach jeder Änderung an der Rechenlogik läuft die Gleichlaufprüfung
-(`tests/gleichlauf/run.sh --quick`, vor einem Zwischenstand `--full`); alle Fälle müssen in Python
-und Julia bitgleich zu R sein. Sie vergleicht alle Fälle der Generatoren, die Tests (`tests/python`) die Auswahl im Katalog.
+(`tests/werkzeuge/gleichlauf/run.sh --quick`, vor einer neuen Version `--full`); alle Fälle müssen in Python
+und Julia bitgleich zu R sein. Sie vergleicht alle Fälle der Generatoren, die Tests (`tests/` (pytest)) die Auswahl im Katalog.
 
 Was ein Referenzfall bitgleich prüft, steht nicht noch einmal als Test in
-`tests/` (Etappe 4.1): Die Fälle `tests/faelle/r_grundfunktionen.jsonl.gz` (r_fmt), `r_linalg` und
-`r_stats` laufen nur in `test_module_reference.py`, die Fälle
-`engine/um01`–`um04` ersetzen drei Tests aus `test_engine_notes.py`. Die
+`tests/`. Die
 Tests in `tests/` prüfen, was kein Fall abdeckt: Eigenschaften und
 Handrechnungen auf eigenen Daten, Fehlerklassen, Warnungen, Dateien,
 Grafiken und Schalter.
 
 ## Eingefrorene Schnittstelle
 
-Die öffentliche Schnittstelle 0.5.0 ist in `tests/api/frozen/py.json`
-festgehalten (Etappe 6.6): je Funktion aus `simlev.__all__` und je Methode
+Die öffentliche Schnittstelle ist in `tests/schnittstelle/frozen/py.json`
+festgehalten (seit 0.9.0): je Funktion aus `simlev.__all__` und je Methode
 `print`/`summary`/`plot` der Klassen mit `r_class` die Argumente in
 Reihenfolge mit Art (`positional_or_keyword`, `keyword_only`, …) und
 Standardwert als Text (`repr`), dazu die Namen der exportierten Klassen;
-ohne Modul, Datei, Zeile und Datum. `tests/python/test_api.py` ruft dafür den
-Auszug `tests/api/api_py.py --frozen-check` in einem eigenen Prozess
+ohne Modul, Datei, Zeile und Datum. `tests/schnittstelle/test_api.py` ruft dafür den
+Auszug `tests/schnittstelle/api_py.py --frozen-check` in einem eigenen Prozess
 auf und nennt bei Abweichung jede Änderung (Funktion neu oder weg, Argument
 neu, weg oder umsortiert, Art oder Standardwert geändert).
 
 Eine gewollte Änderung der Schnittstelle wird bewusst neu festgeschrieben:
-Eintrag oben in `tests/api/CHANGES.md` (Datum, was sich ändert,
-warum), dann aus der Repo-Wurzel `tests/api/run.sh --freeze`; das
+Eintrag oben in `tests/schnittstelle/CHANGES.md` (Datum, was sich ändert,
+warum), dann aus der Repo-Wurzel `tests/schnittstelle/run.sh --freeze`; das
 schreibt `frozen/` für alle drei Sprachen neu und bricht ohne neuen Eintrag
-ab. Einzelheiten in [`tests/api/README.md`](../tests/api/README.md).
+ab. Einzelheiten in [`tests/schnittstelle/README.md`](../tests/schnittstelle/README.md).
 
 ## Schalter `SIMLEV_*`
 
 Alle Umgebungsschalter liest (und setzt) nur `simlev/_r/env.py`; Paket,
-Tests und Werkzeuge holen sie von dort (`tests/test_layers.py` prüft das).
-Wann gelesen wird, bestimmt die aufrufende Stelle: `reftree` und
-`tests/gleichlauf/vergleich.py` beim Laden, `_collate` beim ersten Vergleich (neu
+Tests und Werkzeuge holen sie von dort.
+Wann gelesen wird, bestimmt die aufrufende Stelle: `tests/lib/reftree.py` und
+`tests/werkzeuge/gleichlauf/vergleich.py` beim Laden, `_collate` beim ersten Vergleich (neu
 nach `collate_reset()`).
 
 | Schalter | Zweck | Art |
 |---|---|---|
 | `SIMLEV_COLLATE` | Sortierung: `icu:<Locale>` (`icu:root` wie R unter C.UTF-8) oder `C` (Bytes); ohne Angabe nach `LC_ALL`/`LC_COLLATE`/`LANG` | Nutzer |
 | `SIMLEV_ICU` | Pfad zur ICU-Bibliothek (`libicui18n`) | Nutzer |
-| `SIMLEV_LAX_NA` | `1`: NA = NaN im Vergleich (`reftree`, `tests/python/faelle.py`) | Prüfung |
-| `SIMLEV_STRICT_ZERO` | `0`: −0 = +0 im Vergleich (`reftree`) | Prüfung |
-| `SIMLEV_FAELLE_DIR` | anderer Ordner der Bereichsdateien für `tests/python` (T20; `SIMLEV_GOLDEN_DIR`/`SIMLEV_MODULE_DIR` liest nur noch `simlev._r.env`) | Prüfung |
+| `SIMLEV_LAX_NA` | `1`: NA = NaN im Vergleich (`tests/lib/reftree.py`, `tests/lib/faelle.py`) | Prüfung |
+| `SIMLEV_STRICT_ZERO` | `0`: −0 = +0 im Vergleich (`tests/lib/reftree.py`) | Prüfung |
+| `SIMLEV_FAELLE_DIR` | anderer Ordner der Bereichsdateien für `tests/` (pytest) (seit 1.4.1; `SIMLEV_GOLDEN_DIR` und `SIMLEV_MODULE_DIR` entfallen seit 1.4.2) | Prüfung |
 
-Seit Etappe 9.6c (Entwurf C.6 Nr. 10) entfallen `SIMLEV_NO_EXT` (die C-Erweiterung ist Pflicht),
+Seit 1.0.0 entfallen `SIMLEV_NO_EXT` (die C-Erweiterung ist Pflicht),
 `SIMLEV_LAPACK` und `SIMLEV_R_SYS_TIME`.
 
-`reftree` setzt `SIMLEV_COLLATE=icu:root`, falls nicht gesetzt (die
-Referenzen entstanden unter C.UTF-8). Die Generatoren in `tests/erzeugen/`
+`tests/lib/reftree.py` setzt `SIMLEV_COLLATE=icu:root`, falls nicht gesetzt (die
+Referenzen entstanden unter C.UTF-8). Die Generatoren in `tests/gleichlauf/erzeugen/`
 lesen eigene Schalter (`SIMLEV_R_NMATH_SRC`, `SIMLEV_ALLOW_PARTIAL`, siehe
 `tests/README.md`).
 
 ## C-Erweiterung
 
-**Pflicht seit Etappe 9.1/9.6c.** `simlev._ext` enthält die C-Bibliothek slc (Zufall, Verteilungen,
+**Pflicht seit 1.0.0.** `simlev._ext` enthält die C-Bibliothek slc (Zufall, Verteilungen,
 lineare Algebra, Optimierer, Modelle, Bootstrap-Kerne) und die mit R geteilten Kerne der Engine,
 FIFO, Steuer, Research und Entnahme. `setup.py` baut sie mit `optional=False`: Ohne C/C++-Compiler
 scheitert die Installation mit der Meldung von setuptools. Reine Python-Kerne als Rückfall gibt es
-nicht mehr (`SIMLEV_NO_EXT` entfällt); `_core.py`, `_dependence_core.py`, `_optimize_core.py`,
+nicht mehr (`SIMLEV_NO_EXT` entfällt); `_dependence_core.py`, `_optimize_core.py`,
 `_signals_core.py` und `_withdrawal_core.py` sind dünne Hüllen, die die Argumente wie R umwandeln
-und `simlev._ext` rufen. Julia ruft seit N7 dieselben Kerne über die C-ABI-Hülle `core/simlev_cabi.cpp` per `ccall` auf
-(vorher eigene Ports, F2).
+und `simlev._ext` rufen. Julia ruft seit 1.2.0 dieselben Kerne über die C-ABI-Hülle `core/simlev_cabi.cpp` per `ccall` auf
+(vorher eigene Ports).
 
-**Ort der Quellen (`core/`, Entwurf C.1, F16):** Kanonisch sind alle C-Quellen in `core/` (nur dort
+**Ort der Quellen (`core/`):** Kanonisch sind alle C-Quellen in `core/` (nur dort
 ändern):
 
 | Dateien in `core/` | Kopien | Hüllen |
 |---|---|---|
 | `slc*.c`, `slc*.h` (C-Bibliothek slc) | `r/src/`, `python/src/core/`, `julia/deps/core/` | R `r/src/slc_r*.c` (`.Call`, `R/slc*.R`), Python `src/_ext_slc*.c` (`simlev._lib*`), Julia `src/slib*.jl` (`ccall`) |
-| `simlev_core.h`, `research_core_impl.h`, `withdrawal_core_impl.h`, `simulation_core_impl.h`, `fifo_core_impl.h`, `tax_core_impl.h` (geteilte Kerne, seit 9.6c) | `r/src/`, `python/src/core/` | R `r/src/<kern>.cpp` (`.Call`, `R/cores.R`), Python `src/_ext_research.cpp`, `_ext_withdrawal.cpp`, `_ext_engine.cpp` |
+| `simlev_core.h`, `research_core_impl.h`, `withdrawal_core_impl.h`, `engine_core_impl.h`, `prepare_core_impl.h`, `evaluate_core_impl.h`, `tariff_core_impl.h` (geteilte Kerne) | `r/src/`, `python/src/core/`, `julia/deps/core/` (dort mit der C-ABI-Hülle `simlev_cabi.cpp`) | R `r/src/<kern>.cpp` (`.Call`, `R/cores.R`), Python `src/_ext_research.cpp`, `_ext_withdrawal.cpp`, `_ext_engine.cpp` |
 
 `core/sync.py --write` kopiert (nur geänderte Dateien) und entfernt veraltete Kopien;
 `--check` vergleicht alle Kopien per SHA-256 (Ende 1 bei Abweichung) und läuft in jeder
-Gleichlaufprüfung und in `verify_9.sh`. Er ersetzt den früheren Gleichheitstest
-`tests/test_shared_c.py` (jetzt nur noch Aufruf von `core_sync --check` und Prüfung der Hüllen).
-Die Python-Hüllen binden die Kopien als `#include "core/<datei>"` ein. Beim Verschieben in 9.6c
-blieb der Maschinencode der R-Kerne gleich (Vergleich der Objektdateien Funktion für Funktion).
-N2: `garch_filter` (seit 9.6b ohne Aufrufer) ist aus `research_core_impl.h` und den Hüllen
-entfernt; die Ergebnisse der übrigen Research-Kerne blieben bitgleich.
+Gleichlaufprüfung.
+Die Python-Hüllen binden die Kopien als `#include "core/<datei>"` ein. Beim Verschieben nach
+`core/` (1.0.0) blieb der Maschinencode der R-Kerne gleich (Vergleich der Objektdateien Funktion
+für Funktion). `garch_filter` (seit 1.0.0 ohne Aufrufer) ist aus `research_core_impl.h` und den
+Hüllen entfernt; die Ergebnisse der übrigen Research-Kerne blieben bitgleich.
 
-- **Aufbau der geteilten Kerne:** wie seit Etappe 7.3a: Rechnung in `<datei>_impl.h` ohne R- und
+- **Aufbau der geteilten Kerne:** wie seit 0.9.1: Rechnung in `<datei>_impl.h` ohne R- und
   Python-Header, Host über `simlev_host::NumVec`, `IntVec`, `NumMat` (Engine: `Obj` und die
   Zugriffe) und die Makros `SIMLEV_*` (`simlev_core.h`); R-Host `r/src/simlev_capi.h`,
   Python-Host `src/_ext_common.h` bzw. `_ext_engine.cpp`. Fehler: `SIMLEV_FAIL` → R `stop()`,
@@ -590,19 +614,19 @@ entfernt; die Ergebnisse der übrigen Research-Kerne blieben bitgleich.
 - **NaN-Nutzlast:** Treffen zwei NaN verschiedener Nutzlast aufeinander, wählt der Compiler die
   Operandenfolge; die Hüllen markieren ihre Prüfungen als unwahrscheinlich (`EXT_FAIL_IF`), damit
   der Kern wie in R übersetzt wird. Die früheren Nachbildungen der Operandenfolge in den reinen
-  Python-Kernen (`n_add` usw. in `_core.py`, `_dependence_core.py` …) sind mit ihnen entfallen.
+  Python-Kernen (`n_add` usw.) sind mit ihnen entfallen.
 - **Neuen Kern hinzufügen:** Rechnung in `core/` (slc: Regeln in `core/README.md`; geteilter
   C++-Kern: `core/<datei>_impl.h` mit Host-Namen), `core/sync.py --write`, R-Hülle und
   Registrierung in `r/src/init.c`, Python-Hülle `src/_ext_<kern>.c(pp)` mit Methodentabelle (in
   `_ext_common.h` deklarieren, in `_ext.cpp` eintragen, in `setup.py` aufnehmen), Julia-Hülle per
-  `ccall` (slc) bzw. eigener Port; Referenzfälle in `tests/erzeugen/slc.R`.
-- **Schichten:** `_ext` gehört zu Schicht 0 und steht in `tests/test_layers.py` unter `EXTENSIONS`.
+  `ccall` (slc) bzw. eigener Port; Referenzfälle in `tests/gleichlauf/erzeugen/slc.R`.
+- **Schichten:** `_ext` gehört zu Schicht 0.
 
-## Zufall (Etappe 9)
+## Zufall
 
 Alle Ziehungen rechnet die C-Bibliothek (xoshiro256**, SplitMix64-Seeding, Ströme über Sprünge um
-2^128; Entwurf B.1, B.2); `simlev._lib` hält den globalen Zustand G (prozessweit, mit Sperre). Die
-Regeln (Entwurf C.5) sind in R, Python und Julia gleich, damit die Ergebnisse bitgleich sind:
+2^128); `simlev._lib` hält den globalen Zustand G (prozessweit, mit Sperre). Die
+Regeln sind in R, Python und Julia gleich, damit die Ergebnisse bitgleich sind:
 
 1. `simlev_seed(seed)` setzt G reproduzierbar (ganze Zahl, |seed| < 2^53); `simlev_seed()` und das
    Laden des Pakets setzen G aus Uhrzeit, Prozessnummer und Zähler.
@@ -614,31 +638,29 @@ Regeln (Entwurf C.5) sind in R, Python und Julia gleich, damit die Ergebnisse bi
    das Ergebnis hängt nicht von `cores` oder `chunk_size` ab. In einer Einheit ist G gesperrt
    (`in_unit`, Fehler „interner Fehler: globaler Zufallszustand in paralleler Einheit“).
 5. R's `set.seed`/`.Random.seed` wirken nicht; die Nachbildung von R's Zufall (`simlev._r.rng`,
-   Exporte `set_seed`/`rng_kind`) und ihre C-Fassung `src/_rng_r.c` sind mit Etappe 9.6c entfallen.
+   Exporte `set_seed`/`rng_kind`) und ihre C-Fassung `src/_rng_r.c` sind mit 1.0.0 entfallen.
 
-## Tests in Etappe 9
+## Tests
 
-Die alten Tests (Entwurf C.7 ausgesetzt) hat T18 durch eine neu aufgebaute Suite ersetzt (`tests/`,
-siehe [`tests/README.md`](../tests/README.md)); der Schalter `SIMLEV_LEGACY_TESTS` ist mit C19 entfallen.
-
-Dazu kommt die **Gleichlaufprüfung** `tests/gleichlauf/run.sh [--quick | --full]` (Entwurf C.8): Sie
-baut R, Python und Julia, prüft `core_sync --check`, erzeugt die Referenzfälle mit dem aktuellen R
-neu und vergleicht Python und Julia streng dagegen. Ausgenommen sind die Module, die entfallene
-R-Nachbildungen prüfen (`r_nmath`, `r_rng`, `r_linalg`, `r_nlminb`, `rugarch`, `evd`, `imputets`;
-ihre Dateien bleiben nach F24 liegen) und in `r_stats` die Fälle der entfallenen Funktionen. Das
-Modul `bootstrap_core` ist mit 9.6c gestrichen (die slc-Kerne prüft `slc_models`).
+Die Tests stehen in `tests/` (siehe [Bauen, Abgleich der C-Quellen und
+Tests](#bauen-abgleich-der-c-quellen-und-tests)): Python prüft die Gruppen `gleichlauf`, `fehler`,
+`ausgabe` und `schnittstelle` mit `python3 -m pytest tests` bzw. `tests/<gruppe>` gegen die
+Referenzfälle aus R. Dazu kommt die **Gleichlaufprüfung** `tests/werkzeuge/gleichlauf/run.sh
+[--quick | --full]`: Sie baut R, Python und Julia, prüft `core/sync.py --check`, erzeugt die
+Referenzfälle mit dem aktuellen R neu und vergleicht Python und Julia streng dagegen.
+Ausgenommen sind die Module, die entfallene R-Nachbildungen prüfen (`r_nmath`, `r_rng`,
+`r_linalg`, `r_nlminb`, `rugarch`, `evd`, `imputets`) und in `r_stats` die Fälle der entfallenen
+Funktionen.
 
 ## Schichten und Laden
 
-Die Module gehören zu fünf Schichten (Anhang F des Entwicklungsdokuments):
+Die Module gehören zu fünf Schichten:
 0 R-Interna (`simlev/_r/`), 1 Daten und Strategie (`config`, `data_prep`,
 `backcast`, `bonds`, `signals`, `trigger`, `_tax_tariff`, `_dates`),
 2 Engine (`engine`, `_sim_*` einschließlich `_sim_blocks`, `_core`, `result`), 3 Analysen (je ein Modul
-mit seinem Kern), 4 Ausgabe (`svg`, `dashboard`). `tests/test_layers.py`
-liest alle Importe (auch in Funktionen und über `_ext("modul", …)`) und
-prüft, dass kein Modul eine höhere Schicht importiert; die Zuordnung und
-die bekannten Ausnahmen (vor allem die plot-Methoden der Analysen, die die
-Grafikbausteine aus `svg` holen) stehen mit Begründung im Test.
+mit seinem Kern), 4 Ausgabe (`svg`, `dashboard`). Kein Modul importiert eine höhere Schicht;
+Ausnahmen sind vor allem die plot-Methoden der Analysen, die die
+Grafikbausteine aus `svg` holen.
 
 `import simlev` lädt die Analysemodule nicht: `__init__.py` nennt ihre
 Namen in `_LAZY` und lädt ein Modul beim ersten Zugriff auf einen seiner

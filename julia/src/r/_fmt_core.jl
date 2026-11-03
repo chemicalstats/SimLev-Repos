@@ -7,7 +7,7 @@
 #                     W. Fullerton (Los Alamos); sprintf.c: ursprünglich Jonathan Rougier
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet seit N10 der C-Kern
+#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet der C-Kern
 #                     core/slc_rbase_date.c.
 # RFmt – Kern: Optionen, interne Vektordarstellung, C-printf, round/signif,
 # formatReal/scientific, Kodierung von Zahlen und Zeichenketten.
@@ -310,7 +310,7 @@ function _as_v0(x, type)
 end
 
 """
-String → double wie `String2Real`: (Wert, NA, NaN, Warnung). N11: über `SimLev.RExpr._str2num` (R_strtod mit dem
+String → double wie `String2Real`: (Wert, NA, NaN, Warnung). über `SimLev.RExpr._str2num` (R_strtod mit dem
 C-Kern `sl_r_strtod_num`, long double wie R; vorher `parse`, korrekt gerundet und damit bei mehr als 17 Ziffern
 teils anders als R). Wie Python `fmt._r_strtod`.
 """
@@ -582,7 +582,7 @@ function _scientific(r::Float64, digits::Int)
         end
         return kpw, j, false
     end
-    # N10: long-double-Teil von scientific() über den C-Kern (core/slc_rbase_num.c)
+    # long-double-Teil von scientific() über den C-Kern (core/slc_rbase_num.c)
     kpower, nsig, rw = SimLev._rb_scientific(r, digits)
     return kpower, nsig, rw
 end

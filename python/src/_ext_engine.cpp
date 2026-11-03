@@ -1,13 +1,13 @@
 /*
- * python/src/_ext_engine.cpp -- Python-Huelle der Tagesengine von simulation() (E17)
+ * python/src/_ext_engine.cpp -- Python-Huelle der Tagesengine von simulation()
  *
  * Kern core/engine_core_impl.h (Kopie in src/core/; gemeinsam mit R r/src/engine_core.cpp und Julia
  * core/simlev_cabi.cpp, simlev_c_engine_*): eigener Zustand im Kern, flache Eingabe (struct Input), Ergebnisse
- * ueber die Methoden *_out. Aufruf aus simlev/_sim_engine.py (sim_engine_run); seit E17 Stufe 2 mit der Vorbereitung
+ * ueber die Methoden *_out. Aufruf aus simlev/_sim_engine.py (sim_engine_run); mit der Vorbereitung
  * (core/prepare_core_impl.h) im selben Aufruf, dazu sim_dates_flags (calculate_dates_flags). Die frueheren Engine-Kerne
  * (simulation_core_impl.h, fifo_core_impl.h, tax_core_impl.h) mit ihrem Host auf der dict/list-Struktur sim
- * (simlev_host::Obj) und die Funktionen sim_dca_flows ... sim_sell_count sind mit E17 Stufe 1c entfallen.
- * Seit E17 Stufe 3 auch die Auswertung (core/evaluate_core_impl.h): sim_evaluate (simlev/_sim_evaluate.py) und
+ * (simlev_host::Obj) und die Funktionen sim_dca_flows ... sim_sell_count sind seit 1.4.0 entfallen.
+ * auch die Auswertung (core/evaluate_core_impl.h): sim_evaluate (simlev/_sim_evaluate.py) und
  * sim_xirr (xirr_rate, simlev/_sim_base.py).
  */
 #include "_ext_common.h"
@@ -19,7 +19,7 @@
 
 namespace {
 
-/* E17: Tagesengine (core/engine_core_impl.h, flache Eingabe struct Input). Aufruf aus simlev/_sim_engine.py:
+/* Tagesengine (core/engine_core_impl.h, flache Eingabe struct Input). Aufruf aus simlev/_sim_engine.py:
  *   sim_engine_run(flags, dca_n, day, prices, sig_buy, sig_sell, event_w, base_rates, ai, ad, st0, ci, cd, fees,
  *                  tot0, tariff_par, zve, reports)
  *   flags int32[n], dca_n/day float64[n]; prices, sig_buy, sig_sell: Listen je Asset (float64[n]);
@@ -30,7 +30,7 @@ namespace {
  * Rueckgabe: (status [8 na], totals [TT_N], lots je Asset [7 k], sells je Asset [8 k], taxes je Asset [8 k],
  *   prices je Asset (None oder [n], nach Splits), fee_paid, tax_unpaid, rows [TR_N k], ks [2 k], refund_due,
  *   events [(code, site, day, asset, aux, (Jahre bzw. Assets), d0, d1, (Werte))], error (site, day, asset, code,
- *   d0) bzw. None); details-Ereignisse (code >= 200) mit Werten (E17 Stufe 1c);
+ *   d0) bzw. None); details-Ereignisse (code >= 200) mit Werten;
  *   Zahlenfelder als bytearray (float64). Der Kern laeuft ohne GIL. */
 // Puffer oder None (dann nullptr); len >= 0: Laenge pruefen
 bool get_opt(PyObject* o, ext::Buf& b, char kind, const char* fn, const char* name, Py_ssize_t len = -1) {
@@ -61,8 +61,8 @@ bool get_prep(PyObject* o, ext::Buf* b, Py_ssize_t n, Py_ssize_t na, simlev_prep
     return true;
 }
 
-/* E17: Tagesengine (core/engine_core_impl.h, flache Eingabe struct Input) mit Vorbereitung (Stufe 2,
- * core/prepare_core_impl.h). Aufruf aus simlev/_sim_engine.py:
+/* Tagesengine (core/engine_core_impl.h, flache Eingabe struct Input) mit Vorbereitung
+ * (core/prepare_core_impl.h). Aufruf aus simlev/_sim_engine.py:
  *   sim_engine_run(prep, day, prices, sig_buy, sig_sell, event_w, base_rates, ai, ad, ci, cd, fees, tot0,
  *                  tariff_par, zve, reports)
  *   prep: (pi int32[PI_N], pd float64[PD_N], start float64[na], filled int32[n]/None, event int32[n]/None,
@@ -74,7 +74,7 @@ bool get_prep(PyObject* o, ext::Buf* b, Py_ssize_t n, Py_ssize_t na, simlev_prep
  * Rueckgabe: (status [8 na], totals [TT_N], lots je Asset [7 k], sells je Asset [8 k], taxes je Asset [8 k],
  *   prices je Asset (None oder [n], nach Splits), fee_paid, tax_unpaid, rows [TR_N k], ks [2 k], refund_due,
  *   events [(code, site, day, asset, aux, (Jahre bzw. Assets), d0, d1, (Werte))], error (site, day, asset, code,
- *   d0) bzw. None, flags (Tagesflags, int32[n])); details-Ereignisse (code >= 200) mit Werten (E17 Stufe 1c);
+ *   d0) bzw. None, flags (Tagesflags, int32[n])); details-Ereignisse (code >= 200) mit Werten;
  *   Zahlenfelder als bytearray (float64). Der Kern laeuft ohne GIL. */
 PyObject* e_engine_run(PyObject*, PyObject* a) {
     using namespace simlev_engine;
@@ -267,7 +267,7 @@ PyObject* doubles_of(const double* x, std::size_t n) {
     return o;
 }
 
-/* Auswertung von simulation() (E17 Stufe 3, core/evaluate_core_impl.h). Aufruf aus simlev/_sim_evaluate.py:
+/* Auswertung von simulation() (core/evaluate_core_impl.h). Aufruf aus simlev/_sim_evaluate.py:
  *   sim_evaluate(total, flows, worth, money, price, day, filled, sc, status_money, n_buys, n_sells, rf, rf_ok)
  *   total ... price: Listen je Asset (float64[n]); day float64[n]; filled int32[n] oder None; sc float64[4]
  *   (start_date, stopp_date, start_value, tax_unpaid); status_money, n_buys, n_sells float64[na]; rf float64[] oder
@@ -370,13 +370,13 @@ PyMethodDef simlev_ext_engine_methods[] = {
     {"sim_engine_run", e_engine_run, METH_VARARGS,
      "sim_engine_run(prep, day, prices, sig_buy, sig_sell, event_w, base_rates, ai, ad, ci, cd, fees, tot0,\n"
      "               tariff_par, zve, reports) -> (status, totals, lots, sells, taxes, prices, fee_paid,\n"
-     "               tax_unpaid, rows, ks, refund_due, events, error, flags)  (E17: Vorbereitung und Tagesengine)"},
+     "               tax_unpaid, rows, ks, refund_due, events, error, flags)  (Vorbereitung und Tagesengine)"},
     {"sim_dates_flags", e_dates_flags, METH_VARARGS,
-     "sim_dates_flags(dates, si, start, days, dcode, liquidate) -> int32-Flags  (E17 Stufe 2: Termine)"},
+     "sim_dates_flags(dates, si, start, days, dcode, liquidate) -> int32-Flags  (Termine)"},
     {"sim_evaluate", e_evaluate, METH_VARARGS,
      "sim_evaluate(total, flows, worth, money, price, day, filled, sc, status_money, n_buys, n_sells, rf, rf_ok)\n"
-     "  -> Auswertung von simulation()  (E17 Stufe 3)"},
+     "  -> Auswertung von simulation()"},
     {"sim_xirr", e_xirr, METH_VARARGS,
-     "sim_xirr(t, amount, end_value, horizon) -> (Wert, Warnungen)  (E17 Stufe 3: interner Zinsfuss)"},
+     "sim_xirr(t, amount, end_value, horizon) -> (Wert, Warnungen)  (interner Zinsfuss)"},
     {nullptr, nullptr, 0, nullptr}
 };

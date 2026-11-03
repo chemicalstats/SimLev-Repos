@@ -93,22 +93,22 @@ function r_strtod(cs::Vector{Char}, i0::Int = 1)
     end
     low(k, m) = lowercase(String(cs[k:min(n, k + m - 1)]))
     if low(p, 3) == "nan"
-        return (NaN, p + 3)                  # N11: R gibt NaN ohne Vorzeichen (0x7FF8000000000000)
+        return (NaN, p + 3)                  # R gibt NaN ohne Vorzeichen (0x7FF8000000000000)
     elseif low(p, 8) == "infinity"
         return (sign * Inf, p + 8)
     elseif low(p, 3) == "inf"
         return (sign * Inf, p + 3)
     end
-    # N10: Zahlteil (dezimal mit Exponent, hexadezimal mit Punkt und p-Exponent) in long double über den
+    # Zahlteil (dezimal mit Exponent, hexadezimal mit Punkt und p-Exponent) in long double über den
     # C-Kern core/slc_rbase_num.c; gelesen werden nur ASCII-Zeichen, Bytes = Zeichen
     q = p
     while q <= n && isascii(cs[q]) && (isxdigit(cs[q]) || cs[q] in ".xXpPeE+-")
         q += 1
     end
-    # N11: ein Zeichen mehr übergeben – "0x" gilt wie in R (und Python) nur, wenn danach noch etwas folgt
+    # ein Zeichen mehr übergeben – "0x" gilt wie in R (und Python) nur, wenn danach noch etwas folgt
     v, used, gt = SimLev._rb_strtod_num(String(cs[p:min(q, n)]), 1)
     used < 0 && return (_NA, i0)
-    gt && (v = Inf)                          # N11: Betrag über DBL_MAX (long double) → ±Inf wie R
+    gt && (v = Inf)                          # Betrag über DBL_MAX (long double) → ±Inf wie R
     return (sign * v, p + used)
 end
 r_strtod(s::AbstractString, i0::Int = 1) = r_strtod(collect(String(s)), i0)
@@ -1251,7 +1251,7 @@ function r_fmod(x1::Float64, x2::Float64)
     end
     q = x1 / x2
     (isfinite(q) && abs(q) * _LDBL_EPS > 1) && _warn("probable complete loss of accuracy in modulus")
-    # C-Kern (long double wie R); NaN-Operanden nach der Regel in core/slc_rbase_num.c (N11)
+    # C-Kern (long double wie R); NaN-Operanden nach der Regel in core/slc_rbase_num.c
     return SimLev._rb_fmod_ld(x1, x2)
 end
 
@@ -1260,7 +1260,7 @@ function r_idiv(x1::Float64, x2::Float64)
     q = x1 / x2
     (x2 == 0.0 || abs(q) * _LDBL_EPS > 1 || !isfinite(q)) && return q
     abs(q) < 1 && return q < 0 ? -1.0 : (((x1 < 0 && x2 > 0) || (x1 > 0 && x2 < 0)) ? -1.0 : 0.0)
-    return SimLev._rb_idiv_ld(x1, x2)   # N10: C-Kern (long double wie R)
+    return SimLev._rb_idiv_ld(x1, x2)   # C-Kern (long double wie R)
 end
 
 function _iop(op::String, x::Union{Missing,Int}, y::Union{Missing,Int}, of::Ref{Bool})

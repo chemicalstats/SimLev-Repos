@@ -1,9 +1,9 @@
 // src/withdrawal_core.cpp
 // .Call-Huelle der Entnahme-Simulation (.wd_simulate)
 //
-// Die Rechnung steht seit Etappe 7.3a in src/withdrawal_core_impl.h (ohne R-Bezug,
-// Regeln, Zeitkonvention und Steuermodell siehe dort; gemeinsam mit Python:
-// simlev._ext; kanonisch in core/, F16). Diese Datei wandelt nur die Argumente um
+// Die Rechnung steht in src/withdrawal_core_impl.h (ohne R-Bezug,
+// Regeln, Zeitkonvention und Steuermodell siehe dort; gemeinsam mit Python und
+// Julia; kanonisch in core/). Diese Datei wandelt nur die Argumente um
 // (wie die fruehere Rcpp-Huelle) und ruft den Kern auf; die Sichten und Aufrufe des
 // Kerns bindet simlev_capi.h an R (Abschnitt "R als Host der gemeinsamen Kerne").
 
@@ -54,7 +54,7 @@ extern "C" SEXP C_wd_simulate(SEXP s_R, SEXP s_INF, SEXP s_CAPE, SEXP s_BASE, SE
   });
 }
 
-// T14: Pruefzugang zum Tarifkern (tariff_core_impl.h) fuer den Zufallsvergleich mit den R-Funktionen
+// Pruefzugang zum Tarifkern (tariff_core_impl.h) fuer den Zufallsvergleich mit den R-Funktionen
 // (Gleichlauf: tariff_fuzz.R ueber .wd_tariff_check): mode 1 = ESt T(x) je x, 2 = Soli S(E) je x,
 // 3 = Jahresabschluss je Zeile von x (Matrix n x 5: zvE, ks_prev, g23, k_base, abg_rate) -> Matrix n x 25
 // (Spalten der Jahreszeile, Jahr NA; ohne zvE alle NA).

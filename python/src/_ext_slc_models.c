@@ -1,6 +1,6 @@
 /*
  * python/src/_ext_slc_models.c -- Python-Huellen der Modelle der C-Bibliothek slc im Modul
- * simlev._ext (Etappe 9.4): GARCH/GJR, GPD, DCC, MS-GARCH und HMM, Bootstrap-Kerne.
+ * simlev._ext: GARCH/GJR, GPD, DCC, MS-GARCH und HMM, Bootstrap-Kerne.
  *
  * Kerne: src/core/slc_{garch,gpd,dcc,msgarch,boot}.c (Kopien von core/). Die Python-Seite
  * (simlev/_lib_models.py) prueft und wandelt die Argumente und legt die Ausgabefelder an
@@ -131,7 +131,7 @@ static PyObject *slc_garch11_nll(PyObject *self, PyObject *args)
     return PyFloat_FromDouble(v);
 }
 
-/* N3: (e, theta5, gjr, s2_init, out5) -> nll; out = analytischer Gradient; N4: sGARCH mit theta4, out4 */
+/* (e, theta5, gjr, s2_init, out5) -> nll; out = analytischer Gradient; sGARCH mit theta4, out4 */
 static PyObject *slc_garch11_grad(PyObject *self, PyObject *args)
 {
     PyObject *e, *th, *o;
@@ -303,7 +303,7 @@ static PyObject *slc_dcc_fit(PyObject *self, PyObject *args)
     return Py_BuildValue("(dddidd)", a, b, nll, code, th[0], th[1]);
 }
 
-/* ── Backcast (N5) ── */
+/* ── Backcast ── */
 
 /* Daten der Zielfunktion: x (None: Regression), c1, c2 (None erlaubt), sp, dr, pos (int32, 1-basiert), logp */
 typedef struct { int m, nobs; const double *x, *c1, *c2, *sp, *dr, *logp; const int32_t *pos; } bc_in;
@@ -458,7 +458,7 @@ static PyObject *slc_ms_garch_nll(PyObject *self, PyObject *args)
     return PyFloat_FromDouble(v);
 }
 
-/* N1: (y, theta, K, gjr, h1, out[npar]) -> nll; out = analytischer Gradient */
+/* (y, theta, K, gjr, h1, out[npar]) -> nll; out = analytischer Gradient */
 static PyObject *slc_ms_garch_grad(PyObject *self, PyObject *args)
 {
     PyObject *y, *th, *o;
@@ -543,7 +543,7 @@ static PyObject *slc_ms_garch_estimate(PyObject *self, PyObject *args)
     int32_t *o6;
     sl_ctx cx;
     (void) self;
-    /* N6: letztes Argument (optional) Zahl der Threads */
+    /* letztes Argument (optional) Zahl der Threads */
     if (!PyArg_ParseTuple(args, "OipOOOOOOO|i", &y, &K, &gjr, &om, &al, &be, &ga, &P, &rg, &s2, &nt)) return NULL;
     if (K < 2 || K > 64) { PyErr_Format(PyExc_ValueError, "MS-GARCH: Anzahl Regime muss zwischen 2 und 64 liegen (erhalten: %d)", K); return NULL; }
     yp = (const double *) buf(&B, y, 0, 'd', -1, &n, "y"); FAIL_IF(!yp);
@@ -555,7 +555,7 @@ static PyObject *slc_ms_garch_estimate(PyObject *self, PyObject *args)
     o6 = IW(rg, n, "regimes"); FAIL_IF(!o6);
     o7 = DW(s2, n, "s2"); FAIL_IF(!o7);
     ctx_init(&cx);
-    st = sl_msgarch_estimate_mt(&cx, (int) n, yp, K, gjr, o1, o2, o3, o4, o5, o6, o7, &ll, &code, nt);   /* N6 */
+    st = sl_msgarch_estimate_mt(&cx, (int) n, yp, K, gjr, o1, o2, o3, o4, o5, o6, o7, &ll, &code, nt);
     bufs_free(&B);
     if (finish(&cx, st) < 0) return NULL;
     return Py_BuildValue("(di)", ll, code);
@@ -909,40 +909,40 @@ static PyObject *slc_estimate_trans_mat(PyObject *self, PyObject *args)
 }
 
 PyMethodDef simlev_ext_slc_models_methods[] = {
-    {"slc_garch11_filter", slc_garch11_filter, METH_VARARGS, "9.4: GARCH-Filter"},
-    {"slc_garch11_nll", slc_garch11_nll, METH_VARARGS, "9.4: GARCH-NLL"},
-    {"slc_garch11_fit", slc_garch11_fit, METH_VARARGS, "9.4: GARCH-ML"},
-    {"slc_garch11_grad", slc_garch11_grad, METH_VARARGS, "N3/N4: GARCH-NLL mit analytischem Gradienten"},
-    {"slc_garch11_estimate", slc_garch11_estimate, METH_VARARGS, "9.4: GARCH-Stufe wie .fit_garch11"},
-    {"slc_gpd_nll", slc_gpd_nll, METH_VARARGS, "9.4: GPD-NLL"},
-    {"slc_gpd_pwm", slc_gpd_pwm, METH_VARARGS, "9.4: GPD-PWM"},
-    {"slc_gpd_fit", slc_gpd_fit, METH_VARARGS, "9.4: GPD-ML"},
-    {"slc_dcc_filter", slc_dcc_filter, METH_VARARGS, "9.4: DCC-Filter"},
-    {"slc_dcc_fit", slc_dcc_fit, METH_VARARGS, "9.4: DCC-Schätzung"},
-    {"slc_backcast_obj", slc_backcast_obj, METH_VARARGS, "N5: Zielfunktion von backcast_fit"},
-    {"slc_backcast_fit", slc_backcast_fit, METH_VARARGS, "N5: Fit mehrerer Parameter von backcast_fit"},
-    {"slc_ms_garch_filter", slc_ms_garch_filter, METH_VARARGS, "9.4: MS-GARCH-Filter"},
-    {"slc_ms_garch_npar", slc_ms_garch_npar, METH_VARARGS, "9.4: Zahl der MS-GARCH-Parameter"},
-    {"slc_ms_garch_maxstart", slc_ms_garch_maxstart, METH_NOARGS, "9.4: höchste Zahl der MS-GARCH-Startpunkte"},
-    {"slc_ms_garch_nll", slc_ms_garch_nll, METH_VARARGS, "9.4: MS-GARCH-NLL"},
-    {"slc_ms_garch_grad", slc_ms_garch_grad, METH_VARARGS, "N1: MS-GARCH-NLL mit analytischem Gradienten"},
-    {"slc_ms_garch_starts", slc_ms_garch_starts, METH_VARARGS, "9.4: MS-GARCH-Startpunkte"},
-    {"slc_ms_garch_fitstarts", slc_ms_garch_fitstarts, METH_VARARGS, "9.4: MS-GARCH-BFGS ab Startpunkten"},
-    {"slc_ms_garch_estimate", slc_ms_garch_estimate, METH_VARARGS, "9.4: MS-GARCH wie .ms_garch_fit"},
-    {"slc_hmm_em_univ", slc_hmm_em_univ, METH_VARARGS, "9.4: univariates HMM-EM"},
-    {"slc_hmm_viterbi", slc_hmm_viterbi, METH_VARARGS, "9.4: Viterbi"},
-    {"slc_boot_idx_iid", slc_boot_idx_iid, METH_VARARGS, "9.4: Bootstrap iid"},
-    {"slc_boot_idx_block", slc_boot_idx_block, METH_VARARGS, "9.4: Bootstrap Blöcke"},
-    {"slc_boot_idx_stationary", slc_boot_idx_stationary, METH_VARARGS, "9.4: Bootstrap stationär"},
-    {"slc_boot_idx_regime", slc_boot_idx_regime, METH_VARARGS, "9.4: Bootstrap Regime"},
-    {"slc_boot_idx_tails", slc_boot_idx_tails, METH_VARARGS, "9.4: Bootstrap Ränder"},
-    {"slc_boot_wild", slc_boot_wild, METH_VARARGS, "9.4: Wild-Bootstrap"},
-    {"slc_boot_reset", slc_boot_reset, METH_VARARGS, "9.4: Reset-Bootstrap"},
-    {"slc_boot_evt", slc_boot_evt, METH_VARARGS, "9.4: EVT-Bootstrap"},
-    {"slc_boot_garch", slc_boot_garch, METH_VARARGS, "9.4: GARCH-Bootstrap"},
-    {"slc_boot_ms_garch", slc_boot_ms_garch, METH_VARARGS, "9.4: MS-GARCH-Bootstrap"},
-    {"slc_rolling_vol", slc_rolling_vol, METH_VARARGS, "9.4: rollierende Volatilität"},
-    {"slc_assign_regimes", slc_assign_regimes, METH_VARARGS, "9.4: Regime über Schwellen"},
-    {"slc_estimate_trans_mat", slc_estimate_trans_mat, METH_VARARGS, "9.4: Übergangsmatrix"},
+    {"slc_garch11_filter", slc_garch11_filter, METH_VARARGS, "GARCH-Filter"},
+    {"slc_garch11_nll", slc_garch11_nll, METH_VARARGS, "GARCH-NLL"},
+    {"slc_garch11_fit", slc_garch11_fit, METH_VARARGS, "GARCH-ML"},
+    {"slc_garch11_grad", slc_garch11_grad, METH_VARARGS, "GARCH-NLL mit analytischem Gradienten"},
+    {"slc_garch11_estimate", slc_garch11_estimate, METH_VARARGS, "GARCH-Stufe wie .fit_garch11"},
+    {"slc_gpd_nll", slc_gpd_nll, METH_VARARGS, "GPD-NLL"},
+    {"slc_gpd_pwm", slc_gpd_pwm, METH_VARARGS, "GPD-PWM"},
+    {"slc_gpd_fit", slc_gpd_fit, METH_VARARGS, "GPD-ML"},
+    {"slc_dcc_filter", slc_dcc_filter, METH_VARARGS, "DCC-Filter"},
+    {"slc_dcc_fit", slc_dcc_fit, METH_VARARGS, "DCC-Schätzung"},
+    {"slc_backcast_obj", slc_backcast_obj, METH_VARARGS, "Zielfunktion von backcast_fit"},
+    {"slc_backcast_fit", slc_backcast_fit, METH_VARARGS, "Fit mehrerer Parameter von backcast_fit"},
+    {"slc_ms_garch_filter", slc_ms_garch_filter, METH_VARARGS, "MS-GARCH-Filter"},
+    {"slc_ms_garch_npar", slc_ms_garch_npar, METH_VARARGS, "Zahl der MS-GARCH-Parameter"},
+    {"slc_ms_garch_maxstart", slc_ms_garch_maxstart, METH_NOARGS, "höchste Zahl der MS-GARCH-Startpunkte"},
+    {"slc_ms_garch_nll", slc_ms_garch_nll, METH_VARARGS, "MS-GARCH-NLL"},
+    {"slc_ms_garch_grad", slc_ms_garch_grad, METH_VARARGS, "MS-GARCH-NLL mit analytischem Gradienten"},
+    {"slc_ms_garch_starts", slc_ms_garch_starts, METH_VARARGS, "MS-GARCH-Startpunkte"},
+    {"slc_ms_garch_fitstarts", slc_ms_garch_fitstarts, METH_VARARGS, "MS-GARCH-BFGS ab Startpunkten"},
+    {"slc_ms_garch_estimate", slc_ms_garch_estimate, METH_VARARGS, "MS-GARCH wie .ms_garch_fit"},
+    {"slc_hmm_em_univ", slc_hmm_em_univ, METH_VARARGS, "univariates HMM-EM"},
+    {"slc_hmm_viterbi", slc_hmm_viterbi, METH_VARARGS, "Viterbi"},
+    {"slc_boot_idx_iid", slc_boot_idx_iid, METH_VARARGS, "Bootstrap iid"},
+    {"slc_boot_idx_block", slc_boot_idx_block, METH_VARARGS, "Bootstrap Blöcke"},
+    {"slc_boot_idx_stationary", slc_boot_idx_stationary, METH_VARARGS, "Bootstrap stationär"},
+    {"slc_boot_idx_regime", slc_boot_idx_regime, METH_VARARGS, "Bootstrap Regime"},
+    {"slc_boot_idx_tails", slc_boot_idx_tails, METH_VARARGS, "Bootstrap Ränder"},
+    {"slc_boot_wild", slc_boot_wild, METH_VARARGS, "Wild-Bootstrap"},
+    {"slc_boot_reset", slc_boot_reset, METH_VARARGS, "Reset-Bootstrap"},
+    {"slc_boot_evt", slc_boot_evt, METH_VARARGS, "EVT-Bootstrap"},
+    {"slc_boot_garch", slc_boot_garch, METH_VARARGS, "GARCH-Bootstrap"},
+    {"slc_boot_ms_garch", slc_boot_ms_garch, METH_VARARGS, "MS-GARCH-Bootstrap"},
+    {"slc_rolling_vol", slc_rolling_vol, METH_VARARGS, "rollierende Volatilität"},
+    {"slc_assign_regimes", slc_assign_regimes, METH_VARARGS, "Regime über Schwellen"},
+    {"slc_estimate_trans_mat", slc_estimate_trans_mat, METH_VARARGS, "Übergangsmatrix"},
     {NULL, NULL, 0, NULL}
 };

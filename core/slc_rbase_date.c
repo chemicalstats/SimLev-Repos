@@ -1,4 +1,4 @@
-/* core/slc_rbase_date.c – Datumsformat und -lesen wie R für Python und Julia (SimLev core, N10, N11)
+/* core/slc_rbase_date.c – Datumsformat und -lesen wie R für Python und Julia (SimLev core)
  *
  * Verfahren:  Kalender: proleptischer Gregorianischer Kalender, Tage seit 1970-01-01 <-> (Jahr, Monat,
  *             Tag) mit ganzzahliger Ära-Rechnung (400-Jahres-Zyklen; H. Hinnant, "chrono-Compatible
@@ -12,7 +12,7 @@
  *             1–12, 1–31), das Trennzeichen muss folgen, der Rest nach dem Tag bleibt unbeachtet;
  *             ungültige Kalendertage ergeben NA.
  * Plattform:  ?strptime nennt Schalter, Breiten und andere Umwandlungen "system-specific". Festgelegt wie
- *             glibc unter Linux (N11; glibc-Handbuch "Formatting Calendar Time", strftime; R 4.3.3 unter
+ *             glibc unter Linux (glibc-Handbuch "Formatting Calendar Time", strftime; R 4.3.3 unter
  *             Linux als Orakel, Gleichlauf: date_fuzz.R):
  *             - Angabe: % [Schalter …] [Breite] [E|O] Umwandlung. Schalter "_" (mit Leerzeichen füllen),
  *               "-" (nicht füllen), "0" (mit Nullen füllen) – der letzte gilt –, "^" (Großbuchstaben),
@@ -37,7 +37,7 @@
  *               n Nullen) – und das Format dann als Ganzes ausgegeben (so wird aus "%%OS" bei n = 0 "%S").
  *             - Ergebnisse über 2048 Bytes sind wie in R ein Fehler ("output string exceeded 2048 bytes").
  * Zweck:      Python (python/simlev/_r/fmt.py u. a.) und Julia (julia/src/r/_fmt_format.jl u. a.)
- *             bildeten Format und Lesen je für sich nach; seit N10 rechnen beide mit diesem Kern.
+ *             bildeten Format und Lesen je für sich nach; seit 1.2.0 rechnen beide mit diesem Kern.
  *             R behält sein eigenes Datumsformat (Datei wird nicht nach r/src/ kopiert).
  * Locale:     Monats- und Tagesnamen, %p, %c, %x, %X wie in der C-Locale (wie bisher in den Ports;
  *             SimLev formatiert Daten in R unter LC_TIME=C).

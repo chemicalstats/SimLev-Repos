@@ -65,7 +65,7 @@
 # auch die im Jahr auf K einbehaltene KiSt. Hilfsfunktionen: .tariff_base(), .tariff_full(),
 # .tariff_diff(), .tariff_close(), .tariff_book().
 #
-# @section Berechnung der Vorabpauschale (M1, M3, M4, T-1):
+# @section Berechnung der Vorabpauschale (T-1):
 # Die Vorabpauschale wird je am 31.12. gehaltenem Lot berechnet als (§ 18 Abs. 1-2 InvStG):
 # \deqn{VP = max(0, min(Basisertrag, Wertzuwachs)) x Monatsfaktor}
 # mit:
@@ -81,14 +81,14 @@
 #
 # Besonderheiten:
 # \itemize{
-#   \item M1: Ein negativer Basiszins ergibt VP = 0 (nicht negativ).
-#   \item M3: Eigene Funktion .calculate_vorabpauschale_tax(). Die VP wird mit dem
+#   \item Ein negativer Basiszins ergibt VP = 0 (nicht negativ).
+#   \item Eigene Funktion .calculate_vorabpauschale_tax(). Die VP wird mit dem
 #     allgemeinen § 20-Verlusttopf verrechnet (vor dem Sparer-Pauschbetrag, R-2),
 #     erzeugt aber selbst keinen Verlust.
-#   \item M4: Nur Lots, die zum Jahresende noch gehalten werden, zaehlen.
+#   \item Nur Lots, die zum Jahresende noch gehalten werden, zaehlen.
 # }
 #
-# @section Verlustbehandlung nach § 23 EStG (M2):
+# @section Verlustbehandlung nach § 23 EStG:
 # Verluste aus privaten Veraeusserungsgeschaeften (Haltedauer bis 1 Jahr) werden
 # getrennt gefuehrt:
 # \itemize{
@@ -103,11 +103,11 @@
 # @changelog
 # 2.1.0 (2025-02-05):
 #   - I3: Guenstigerpruefung (§ 32d Abs. 6 EStG) ergaenzt
-#   - M1: Behandlung negativer Basiszinsen bei der Vorabpauschale korrigiert
-#   - M2: Zeitpunkt der § 23-Verlustverrechnung korrigiert (Jahresende, nicht je Verkauf)
-#   - M3: Eigene Funktion .calculate_vorabpauschale_tax() ohne Verlustverrechnung
+#   - Behandlung negativer Basiszinsen bei der Vorabpauschale korrigiert
+#   - Zeitpunkt der § 23-Verlustverrechnung korrigiert (Jahresende, nicht je Verkauf)
+#   - Eigene Funktion .calculate_vorabpauschale_tax() ohne Verlustverrechnung
 #     (inzwischen geaendert: Verrechnung mit dem § 20-Verlusttopf, R-2)
-#   - M4: Vorabpauschale nur fuer Lots, die zum Jahresende gehalten werden
+#   - Vorabpauschale nur fuer Lots, die zum Jahresende gehalten werden
 #   - effective_tax_rate fuer die Guenstigerpruefung durchgaengig ergaenzt
 #   - Ausfuehrliche Dokumentation ergaenzt
 #
@@ -480,7 +480,7 @@ simulation <- function(data, strategy, start_value = 10000,
                        costs = sim_costs(), dca = NULL, rebalance = NULL, splits = NULL,
                        tax = NULL,
                        risk_free = 0, fractions = TRUE, liquidate = FALSE, details = FALSE) {
-  # Etappe 6.3: Bausteine pruefen und in die Argumente der Engine uebersetzen (.sim_from_blocks); die Engine
+  # Bausteine pruefen und in die Argumente der Engine uebersetzen (.sim_from_blocks); die Engine
   # (.simulation_flat) rechnet unveraendert. Bedingungen tragen den Aufruf von simulation().
   sim_call <- sys.call()
   flat <- .sim_from_blocks(costs, dca, rebalance, splits, tax)
@@ -494,10 +494,10 @@ simulation <- function(data, strategy, start_value = 10000,
 #' Engine von simulation() mit den internen (flachen) Argumenten
 #'
 #' Zweck: die Rechnung von simulation(); simulation() ruft sie mit den aus den Bausteinen uebersetzten Werten
-#' auf (die Bausteine haben ihre Argumente schon geprueft, Meldungen nennen die Bausteine; C19: einziger
+#' auf (die Bausteine haben ihre Argumente schon geprueft, Meldungen nennen die Bausteine; einziger
 #' Aufrufer, der flache Weg ohne Bausteine mit eigenen Pruefungen ist entfallen).
 #' Die Aufrufer mit sim_args (bootstrap_study, param_search, sensitivity_*, planning_lumpsum_vs_dca,
-#' tactical_simulation) gehen seit Etappe 6.4 ueber simulation() (.sim_args_set, .sim_call in sim_blocks.R).
+#' tactical_simulation) gehen seit 0.9.0 ueber simulation() (.sim_args_set, .sim_call in sim_blocks.R).
 #' @keywords internal
 #' @noRd
 .simulation_flat <- function(
@@ -537,8 +537,8 @@ simulation <- function(data, strategy, start_value = 10000,
     private_sale_threshold = 1000,
     sparer_pauschbetrag = 1000,
     use_sparer_pauschbetrag = TRUE,
-    include_soli_on_income_tax = FALSE,  # F4: Default FALSE (Soli-Freigrenze greift bei den meisten Steuerpflichtigen)
-    soli_rate_income_tax = 5.5,          # F4: Soli-Satz in Prozent (5.5 = 5,5 %), nur relevant wenn include_soli_on_income_tax = TRUE
+    include_soli_on_income_tax = FALSE,  # Default FALSE (Soli-Freigrenze greift bei den meisten Steuerpflichtigen)
+    soli_rate_income_tax = 5.5,          # Soli-Satz in Prozent (5.5 = 5,5 %), nur relevant wenn include_soli_on_income_tax = TRUE
     # Basiszins
     base_rate = NULL,
     base_rate_flex = FALSE,
@@ -601,7 +601,7 @@ simulation <- function(data, strategy, start_value = 10000,
     fl <- cal$flags
     if (!is.null(cfg$event_col)) event_weight <- cal$event_weight
 
-    # 3.-5. Termine, Tages-Flags und Startgewichte (E17 Stufe 2), Tagesschleife und Abschluss des letzten
+    # 3.-5. Termine, Tages-Flags und Startgewichte, Tagesschleife und Abschluss des letzten
     # Jahres im C++-Kern (sim_engine.R)
     eng <- .sim_engine_run(sim_mem, fl, cfg, data, event_weight, split_thresh, balance_dca, harvest_loss_pot,
                            liquidate, prep$stopp_date, details, harvest_day)
@@ -610,7 +610,7 @@ simulation <- function(data, strategy, start_value = 10000,
     fl$flag_harvest <- eng$flag_harvest
     fl$tax_regimes <- eng$tax_regimes
 
-    # 6. Auswertung im C++-Kern (E17 Stufe 3, sim_evaluate.R) und Ergebnisobjekt
+    # 6. Auswertung im C++-Kern (sim_evaluate.R) und Ergebnisobjekt
     ev <- .sim_evaluate(sim_mem, fl, cfg, data, prep, tax_unpaid)
     .sim_result(sim_mem, fl, cfg, ev)
   },
@@ -620,7 +620,7 @@ simulation <- function(data, strategy, start_value = 10000,
 
 
 
-#' Anzahl Tage mit Singular/Plural (R9-03): "1 Tag", "n Tage"
+#' Anzahl Tage mit Singular/Plural: "1 Tag", "n Tage"
 #' @keywords internal
 #' @noRd
 .n_tage <- function(n) {
@@ -677,7 +677,7 @@ print.SimLevResult <- function(x, ...) {
   cat(sprintf("  Mittl. Drawdown:  %.2f%%\n", s$average_drawdown * 100))
   cat(sprintf("  Ulcer Index:      %.4f\n", s$ulcer_index))
   cat(sprintf("  L\u00e4ngster DD:      %s\n", .n_tage(s$longest_drawdown)))
-  cat(sprintf("  Mittl. Erholung:  %s\n",   # R9-03: ohne Wert nur "\u2013"
+  cat(sprintf("  Mittl. Erholung:  %s\n",   # ohne Wert nur "\u2013"
               if (is.na(s$avg_recovery_time)) "\u2013" else .n_tage(sprintf("%.0f", s$avg_recovery_time))))
   cat("\n")
 
@@ -757,7 +757,7 @@ summary.SimLevResult <- function(object, ...) {
     n_days = n_days,
     n_years = round(n_days / 365.25, 2),
     start_value = object$worth[1],         # Depotwert am Starttag (nach Kaufkosten, mit Rate des Starttags)
-    # R9-04: Startkapital (Argument start_value) = eingezahlt am Starttag ohne die Sparrate des Starttags
+    # Startkapital (Argument start_value) = eingezahlt am Starttag ohne die Sparrate des Starttags
     start_capital = if (!is.null(object$invested))
       object$invested[1] - sum(vapply(object$report, function(r) r[["flows"]][1], numeric(1)), na.rm = TRUE) else NA_real_,
     end_value = tail(object$worth, 1),
@@ -811,7 +811,7 @@ print.summary.SimLevResult <- function(x, ...) {
   cat("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n\n")
   
   cat(sprintf("  Zeitraum:         %s (%.1f Jahre)\n", .n_tage(n_days), summary_list$n_years))
-  # R9-04: Startkapital (start_value) und Depotwert am Starttag (nach Kaufkosten, ggf. mit Sparrate) getrennt
+  # Startkapital (start_value) und Depotwert am Starttag (nach Kaufkosten, ggf. mit Sparrate) getrennt
   if (!is.null(summary_list$start_capital) && !is.na(summary_list$start_capital))
     cat(sprintf("  Startkapital:     %.2f EUR\n", summary_list$start_capital))
   cat(sprintf("  Depotwert Starttag: %.2f EUR\n", summary_list$start_value))

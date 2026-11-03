@@ -8,11 +8,11 @@
 """Nachbildung von SimLev's ``.par_lapply`` (``r/R/bootstrap.R``): ``parallel::mclapply``
 mit ``mc.preschedule = FALSE`` und ``mc.set.seed = FALSE``.
 
-Verhalten (ermittelt in Etappe 5, siehe ``python/DEVELOPING.md``; Zufall seit Etappe 9.6a):
+Verhalten (siehe ``python/DEVELOPING.md``; Zufall seit 1.0.0):
 
 - ``cores`` wird wie in ``mclapply`` ganzzahlig abgeschnitten; bei weniger als zwei Kernen
   oder höchstens einem Element ist es ``lapply``.
-- Zufall (Entwurf C.5, Regeln 6, 7 und 10): Jede Einheit läuft als parallele Einheit
+- Zufall: Jede Einheit läuft als parallele Einheit
   (:func:`simlev._lib.in_unit`): der globale Zufallszustand von SimLev ist darin gesperrt, auch
   bei ``cores = 1``. Zufällige Einheiten bekommen ihren Strom als Argument; das Ergebnis hängt
   damit nicht von ``cores`` ab. Die frühere Sicherung und Wiederherstellung des
@@ -54,7 +54,7 @@ def fork_available() -> bool:
 
 
 def _unit(FUN, x):
-    """``FUN(x)`` als parallele Einheit (Entwurf C.5, Regel 7: G gesperrt)."""
+    """``FUN(x)`` als parallele Einheit (globaler Zustand G gesperrt)."""
     from .. import _lib
     with _lib.in_unit():
         return FUN(x)
@@ -70,7 +70,7 @@ def _ncores(cores) -> int:
 
 
 def par_lapply(X, FUN, cores=1):
-    """Port von ``.par_lapply(X, FUN, cores)``; Ergebnis als Liste."""
+    """Gegenstück zu ``.par_lapply(X, FUN, cores)`` in R; Ergebnis als Liste."""
     X = list(X)
     if cores is None or cores <= 1 or len(X) <= 1:
         return [_unit(FUN, x) for x in X]

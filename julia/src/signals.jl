@@ -1,4 +1,4 @@
-# Signals – r/R/signals.R (Vorlage python/simlev/signals.py)
+# Signals – Gegenstück zu r/R/signals.R und python/simlev/signals.py
 #
 # Jeder Baustein nimmt eine Kursreihe und liefert `RList(buy, sell)` mit
 # logischen Vektoren gleicher Länge (NA → false), das Format für
@@ -80,11 +80,68 @@ end
 """
     signal_sma(x, n = 200; band = 0, lag = 0)
 
-(Die optionalen Argumente der Signal-Bausteine gehen positionell wie in R
-oder als Schlüsselwort, z. B. `signal_sma(x, 50)` oder `signal_sma(x; n = 50)`.)
+Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten `n` Zeilen.
 
-Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten `n`
-Zeilen: Kauf ab `SMA * (1 + band/100)`, Verkauf unter `SMA * (1 - band/100)`.
+Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das `bootstrap_study()` und
+`param_search()` für `signal = function(df) ...` erwarten: Die Elemente `buy` und `sell` werden dort als
+gleichnamige Spalten an den Datensatz angehängt. Für `simulation()` hängt man sie selbst an und nennt sie in
+`asset_config()` (`trading = "signal"`, `signal_buy`, `signal_sell`); für `tactical_rules()` lassen sie sich
+direkt als Bedingung verwenden.
+
+# Argumente
+- `x`: Numerischer Vektor mit Kursniveaus (z. B. `df["eu"]`).
+- `n`: Fensterlänge in Zeilen (Standard: 200 bei `signal_sma` und `signal_ema`, 250 bei `signal_momentum`, 20
+  bei `signal_volatility`).
+- `band`: Hysterese-Band (Standard 0 = keins): bei Durchschnitten in Prozent des Durchschnitts (1 = 1 %), bei
+  `signal_momentum` und `signal_volatility` in Prozentpunkten um `threshold`.
+- `lag`: Verzögerung der Signale in Zeilen (Standard 0; z. B. 1, um erst in der Folgezeile zu handeln). Die
+  ersten `lag` Zeilen sind `false`.
+
+# Rückgabe
+`RList("buy" => …, "sell" => …)` mit logischen Vektoren der Länge von `x` (NA als `false`).
+
+# Details
+Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B. eine Spalte aus `series_align()`.
+Alle Fenster (`n`, `fast`, `slow`, `window`, `lag`) zählen in Zeilen der Daten, bei Kalendertagsdaten
+(Wochenenden per LOCF) also in Kalendertagen, bei Handelstagsdaten in Handelstagen. Solange ein Fenster noch
+nicht gefüllt ist, sind beide Signale `false` (außer bei `signal_drawdown`, das anfangs das Hoch der
+bisherigen Zeilen verwendet). `x` sollte keine NA enthalten: Bei Durchschnitten liefern Fenster mit NA kein
+Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei `signal_drawdown` nur die Zeile mit
+NA (das Hoch wird ohne sie fortgeführt).
+
+`band` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale `false`, der Zustand in
+`simulation()` bzw. `signal_state()` bleibt dann unverändert. Bei Durchschnitten (`signal_sma`, `signal_ema`,
+`signal_crossover`) ist `band` relativ zum Durchschnitt in Prozent, bei `signal_momentum` und
+`signal_volatility` ein Abstand in Prozentpunkten zu `threshold`.
+
+- signal_sma: Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten `n` Zeilen (einschließlich der
+  aktuellen): Kauf ab `SMA * (1 + band/100)`, Verkauf unter `SMA * (1 - band/100)`, dazwischen bleibt der
+  Zustand.
+- signal_ema: Wie `signal_sma` mit exponentiellem Durchschnitt (Glättung 2 / (n + 1), Start mit dem einfachen
+  Mittel der ersten `n` Werte).
+- signal_crossover: Schneller über langsamem Durchschnitt: Kauf, wenn der schnelle mindestens das `(1 +
+  band/100)`-fache des langsamen erreicht, Verkauf unter dem `(1 - band/100)`-fachen.
+- signal_momentum: Rendite über `n` Zeilen in Prozent: Kauf ab `threshold + band`, Verkauf unter `threshold -
+  band`.
+- signal_drawdown: Verkauf ab `sell_dd` Prozent unter dem (rollierenden) Hoch, Kauf (Wiedereinstieg), solange
+  der Abstand unter `buy_dd` Prozent liegt; dazwischen bleibt der Zustand.
+- signal_volatility: Realisierte Volatilität der Log-Renditen über `n` Zeilen, annualisiert mit `ppy`, in
+  Prozent p. a.: Kauf bis `threshold - band`, Verkauf über `threshold + band`.
+- signal_combine: Verknüpft Signale: `"and"` kauft nur, wenn alle kaufen, und verkauft, sobald eines verkauft;
+  `"or"` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 1000
+d = RFrame("date" => Date(2018, 1, 1) .+ Day.(0:n-1))
+d["A"] = 100 .* cumprod(1 .+ 2e-4 .+ 0.01 .* randn(rng, n))
+s = signal_sma(d["A"], 200; band = 1, lag = 1)
+d["buy"] = s["buy"]; d["sell"] = s["sell"]
+res = simulation(d, create_strategy(A = asset_config("etf", "signal"; signal_buy = "buy", signal_sell = "sell")))
+println(res["buys"], " ", res["sells"])
+```
 """
 function signal_sma(x, n_ = nothing; n = 200, band = 0, lag = 0)
     n_ === nothing || (n = n_)
@@ -93,7 +150,66 @@ function signal_sma(x, n_ = nothing; n = 200, band = 0, lag = 0)
     return _sig_out(_cmp(>=, xv, s .* (1 + band / 100)), _cmp(<, xv, s .* (1 - band / 100)), lag)
 end
 
-"Wie [`signal_sma`](@ref) mit exponentiellem Durchschnitt (Glättung 2/(n+1))."
+"""
+    signal_ema(x, n_ = nothing; n = 200, band = 0, lag = 0)
+
+Wie `signal_sma` mit exponentiellem Durchschnitt (Glättung 2/(n+1)).
+
+Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das `bootstrap_study()` und
+`param_search()` für `signal = function(df) ...` erwarten: Die Elemente `buy` und `sell` werden dort als
+gleichnamige Spalten an den Datensatz angehängt. Für `simulation()` hängt man sie selbst an und nennt sie in
+`asset_config()` (`trading = "signal"`, `signal_buy`, `signal_sell`); für `tactical_rules()` lassen sie sich
+direkt als Bedingung verwenden.
+
+# Argumente
+- `x`: Numerischer Vektor mit Kursniveaus (z. B. `df["eu"]`).
+- `n`: Fensterlänge in Zeilen (Standard: 200 bei `signal_sma` und `signal_ema`, 250 bei `signal_momentum`, 20
+  bei `signal_volatility`).
+- `band`: Hysterese-Band (Standard 0 = keins): bei Durchschnitten in Prozent des Durchschnitts (1 = 1 %), bei
+  `signal_momentum` und `signal_volatility` in Prozentpunkten um `threshold`.
+- `lag`: Verzögerung der Signale in Zeilen (Standard 0; z. B. 1, um erst in der Folgezeile zu handeln). Die
+  ersten `lag` Zeilen sind `false`.
+
+# Rückgabe
+`RList("buy" => …, "sell" => …)` mit logischen Vektoren der Länge von `x` (NA als `false`).
+
+# Details
+Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B. eine Spalte aus `series_align()`.
+Alle Fenster (`n`, `fast`, `slow`, `window`, `lag`) zählen in Zeilen der Daten, bei Kalendertagsdaten
+(Wochenenden per LOCF) also in Kalendertagen, bei Handelstagsdaten in Handelstagen. Solange ein Fenster noch
+nicht gefüllt ist, sind beide Signale `false` (außer bei `signal_drawdown`, das anfangs das Hoch der
+bisherigen Zeilen verwendet). `x` sollte keine NA enthalten: Bei Durchschnitten liefern Fenster mit NA kein
+Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei `signal_drawdown` nur die Zeile mit
+NA (das Hoch wird ohne sie fortgeführt).
+
+`band` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale `false`, der Zustand in
+`simulation()` bzw. `signal_state()` bleibt dann unverändert. Bei Durchschnitten (`signal_sma`, `signal_ema`,
+`signal_crossover`) ist `band` relativ zum Durchschnitt in Prozent, bei `signal_momentum` und
+`signal_volatility` ein Abstand in Prozentpunkten zu `threshold`.
+
+- signal_sma: Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten `n` Zeilen (einschließlich der
+  aktuellen): Kauf ab `SMA * (1 + band/100)`, Verkauf unter `SMA * (1 - band/100)`, dazwischen bleibt der
+  Zustand.
+- signal_ema: Wie `signal_sma` mit exponentiellem Durchschnitt (Glättung 2 / (n + 1), Start mit dem einfachen
+  Mittel der ersten `n` Werte).
+- signal_crossover: Schneller über langsamem Durchschnitt: Kauf, wenn der schnelle mindestens das `(1 +
+  band/100)`-fache des langsamen erreicht, Verkauf unter dem `(1 - band/100)`-fachen.
+- signal_momentum: Rendite über `n` Zeilen in Prozent: Kauf ab `threshold + band`, Verkauf unter `threshold -
+  band`.
+- signal_drawdown: Verkauf ab `sell_dd` Prozent unter dem (rollierenden) Hoch, Kauf (Wiedereinstieg), solange
+  der Abstand unter `buy_dd` Prozent liegt; dazwischen bleibt der Zustand.
+- signal_volatility: Realisierte Volatilität der Log-Renditen über `n` Zeilen, annualisiert mit `ppy`, in
+  Prozent p. a.: Kauf bis `threshold - band`, Verkauf über `threshold + band`.
+- signal_combine: Verknüpft Signale: `"and"` kauft nur, wenn alle kaufen, und verkauft, sobald eines verkauft;
+  `"or"` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+# Beispiel
+```julia
+using SimLev, Random
+x = 100 .* cumprod(1 .+ 2e-4 .+ 0.01 .* randn(MersenneTwister(1), 1000))
+println(sum(signal_ema(x; n = 200, band = 1)["buy"]))
+```
+"""
 function signal_ema(x, n_ = nothing; n = 200, band = 0, lag = 0)
     n_ === nothing || (n = n_)
     xv = DP._as_numeric(x)
@@ -104,7 +220,63 @@ end
 """
     signal_crossover(x, fast = 50, slow = 200; type = "sma", band = 0, lag = 0)
 
-Schneller über langsamem Durchschnitt (`type`: `"sma"` oder `"ema"`).
+Schneller über langsamem Durchschnitt.
+
+Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das `bootstrap_study()` und
+`param_search()` für `signal = function(df) ...` erwarten: Die Elemente `buy` und `sell` werden dort als
+gleichnamige Spalten an den Datensatz angehängt. Für `simulation()` hängt man sie selbst an und nennt sie in
+`asset_config()` (`trading = "signal"`, `signal_buy`, `signal_sell`); für `tactical_rules()` lassen sie sich
+direkt als Bedingung verwenden.
+
+# Argumente
+- `x`: Numerischer Vektor mit Kursniveaus (z. B. `df["eu"]`).
+- `fast`, `slow`: Fensterlängen in Zeilen für den schnellen und den langsamen Durchschnitt (Standard 50 und
+  200; `fast < slow`).
+- `type`: Art der Durchschnitte bei `signal_crossover`: `"sma"` (Standard) oder `"ema"`.
+- `band`: Hysterese-Band (Standard 0 = keins): bei Durchschnitten in Prozent des Durchschnitts (1 = 1 %), bei
+  `signal_momentum` und `signal_volatility` in Prozentpunkten um `threshold`.
+- `lag`: Verzögerung der Signale in Zeilen (Standard 0; z. B. 1, um erst in der Folgezeile zu handeln). Die
+  ersten `lag` Zeilen sind `false`.
+
+# Rückgabe
+`RList("buy" => …, "sell" => …)` mit logischen Vektoren der Länge von `x` (NA als `false`).
+
+# Details
+Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B. eine Spalte aus `series_align()`.
+Alle Fenster (`n`, `fast`, `slow`, `window`, `lag`) zählen in Zeilen der Daten, bei Kalendertagsdaten
+(Wochenenden per LOCF) also in Kalendertagen, bei Handelstagsdaten in Handelstagen. Solange ein Fenster noch
+nicht gefüllt ist, sind beide Signale `false` (außer bei `signal_drawdown`, das anfangs das Hoch der
+bisherigen Zeilen verwendet). `x` sollte keine NA enthalten: Bei Durchschnitten liefern Fenster mit NA kein
+Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei `signal_drawdown` nur die Zeile mit
+NA (das Hoch wird ohne sie fortgeführt).
+
+`band` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale `false`, der Zustand in
+`simulation()` bzw. `signal_state()` bleibt dann unverändert. Bei Durchschnitten (`signal_sma`, `signal_ema`,
+`signal_crossover`) ist `band` relativ zum Durchschnitt in Prozent, bei `signal_momentum` und
+`signal_volatility` ein Abstand in Prozentpunkten zu `threshold`.
+
+- signal_sma: Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten `n` Zeilen (einschließlich der
+  aktuellen): Kauf ab `SMA * (1 + band/100)`, Verkauf unter `SMA * (1 - band/100)`, dazwischen bleibt der
+  Zustand.
+- signal_ema: Wie `signal_sma` mit exponentiellem Durchschnitt (Glättung 2 / (n + 1), Start mit dem einfachen
+  Mittel der ersten `n` Werte).
+- signal_crossover: Schneller über langsamem Durchschnitt: Kauf, wenn der schnelle mindestens das `(1 +
+  band/100)`-fache des langsamen erreicht, Verkauf unter dem `(1 - band/100)`-fachen.
+- signal_momentum: Rendite über `n` Zeilen in Prozent: Kauf ab `threshold + band`, Verkauf unter `threshold -
+  band`.
+- signal_drawdown: Verkauf ab `sell_dd` Prozent unter dem (rollierenden) Hoch, Kauf (Wiedereinstieg), solange
+  der Abstand unter `buy_dd` Prozent liegt; dazwischen bleibt der Zustand.
+- signal_volatility: Realisierte Volatilität der Log-Renditen über `n` Zeilen, annualisiert mit `ppy`, in
+  Prozent p. a.: Kauf bis `threshold - band`, Verkauf über `threshold + band`.
+- signal_combine: Verknüpft Signale: `"and"` kauft nur, wenn alle kaufen, und verkauft, sobald eines verkauft;
+  `"or"` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+# Beispiel
+```julia
+using SimLev, Random
+x = 100 .* cumprod(1 .+ 2e-4 .+ 0.01 .* randn(MersenneTwister(1), 1000))
+println(sum(signal_crossover(x, 50, 200)["buy"]))
+```
 """
 function signal_crossover(x, fast_ = nothing, slow_ = nothing; fast = 50, slow = 200, type = ("sma", "ema"), band = 0, lag = 0)
     fast_ === nothing || (fast = fast_)
@@ -120,8 +292,64 @@ end
 """
     signal_momentum(x, n = 250; threshold = 0, band = 0, lag = 0)
 
-Rendite über `n` Zeilen in Prozent: Kauf ab `threshold + band`, Verkauf
-unter `threshold - band`.
+Rendite über `n` Zeilen in Prozent: Kauf ab `threshold + band`, Verkauf unter `threshold - band`.
+
+Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das `bootstrap_study()` und
+`param_search()` für `signal = function(df) ...` erwarten: Die Elemente `buy` und `sell` werden dort als
+gleichnamige Spalten an den Datensatz angehängt. Für `simulation()` hängt man sie selbst an und nennt sie in
+`asset_config()` (`trading = "signal"`, `signal_buy`, `signal_sell`); für `tactical_rules()` lassen sie sich
+direkt als Bedingung verwenden.
+
+# Argumente
+- `x`: Numerischer Vektor mit Kursniveaus (z. B. `df["eu"]`).
+- `n`: Fensterlänge in Zeilen (Standard: 200 bei `signal_sma` und `signal_ema`, 250 bei `signal_momentum`, 20
+  bei `signal_volatility`).
+- `threshold`: Schwelle in Prozent: bei `signal_momentum` für die Rendite über `n` Zeilen (Standard 0), bei
+  `signal_volatility` für die Volatilität in Prozent p. a. (Standard 25).
+- `band`: Hysterese-Band (Standard 0 = keins): bei Durchschnitten in Prozent des Durchschnitts (1 = 1 %), bei
+  `signal_momentum` und `signal_volatility` in Prozentpunkten um `threshold`.
+- `lag`: Verzögerung der Signale in Zeilen (Standard 0; z. B. 1, um erst in der Folgezeile zu handeln). Die
+  ersten `lag` Zeilen sind `false`.
+
+# Rückgabe
+`RList("buy" => …, "sell" => …)` mit logischen Vektoren der Länge von `x` (NA als `false`).
+
+# Details
+Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B. eine Spalte aus `series_align()`.
+Alle Fenster (`n`, `fast`, `slow`, `window`, `lag`) zählen in Zeilen der Daten, bei Kalendertagsdaten
+(Wochenenden per LOCF) also in Kalendertagen, bei Handelstagsdaten in Handelstagen. Solange ein Fenster noch
+nicht gefüllt ist, sind beide Signale `false` (außer bei `signal_drawdown`, das anfangs das Hoch der
+bisherigen Zeilen verwendet). `x` sollte keine NA enthalten: Bei Durchschnitten liefern Fenster mit NA kein
+Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei `signal_drawdown` nur die Zeile mit
+NA (das Hoch wird ohne sie fortgeführt).
+
+`band` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale `false`, der Zustand in
+`simulation()` bzw. `signal_state()` bleibt dann unverändert. Bei Durchschnitten (`signal_sma`, `signal_ema`,
+`signal_crossover`) ist `band` relativ zum Durchschnitt in Prozent, bei `signal_momentum` und
+`signal_volatility` ein Abstand in Prozentpunkten zu `threshold`.
+
+- signal_sma: Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten `n` Zeilen (einschließlich der
+  aktuellen): Kauf ab `SMA * (1 + band/100)`, Verkauf unter `SMA * (1 - band/100)`, dazwischen bleibt der
+  Zustand.
+- signal_ema: Wie `signal_sma` mit exponentiellem Durchschnitt (Glättung 2 / (n + 1), Start mit dem einfachen
+  Mittel der ersten `n` Werte).
+- signal_crossover: Schneller über langsamem Durchschnitt: Kauf, wenn der schnelle mindestens das `(1 +
+  band/100)`-fache des langsamen erreicht, Verkauf unter dem `(1 - band/100)`-fachen.
+- signal_momentum: Rendite über `n` Zeilen in Prozent: Kauf ab `threshold + band`, Verkauf unter `threshold -
+  band`.
+- signal_drawdown: Verkauf ab `sell_dd` Prozent unter dem (rollierenden) Hoch, Kauf (Wiedereinstieg), solange
+  der Abstand unter `buy_dd` Prozent liegt; dazwischen bleibt der Zustand.
+- signal_volatility: Realisierte Volatilität der Log-Renditen über `n` Zeilen, annualisiert mit `ppy`, in
+  Prozent p. a.: Kauf bis `threshold - band`, Verkauf über `threshold + band`.
+- signal_combine: Verknüpft Signale: `"and"` kauft nur, wenn alle kaufen, und verkauft, sobald eines verkauft;
+  `"or"` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+# Beispiel
+```julia
+using SimLev, Random
+x = 100 .* cumprod(1 .+ 2e-4 .+ 0.01 .* randn(MersenneTwister(1), 1000))
+println(sum(signal_momentum(x, 250)["buy"]))
+```
 """
 function signal_momentum(x, n_ = nothing; n = 250, threshold = 0, band = 0, lag = 0)
     n_ === nothing || (n = n_)
@@ -140,8 +368,61 @@ end
 """
     signal_drawdown(x, sell_dd = 20, buy_dd = 10; window = nothing, lag = 0)
 
-Verkauf ab `sell_dd` Prozent unter dem (rollierenden) Hoch, Kauf unter
-`buy_dd` Prozent (`buy_dd <= sell_dd`).
+Verkauf ab `sell_dd` Prozent unter dem (rollierenden) Hoch, Kauf unter `buy_dd` Prozent.
+
+Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das `bootstrap_study()` und
+`param_search()` für `signal = function(df) ...` erwarten: Die Elemente `buy` und `sell` werden dort als
+gleichnamige Spalten an den Datensatz angehängt. Für `simulation()` hängt man sie selbst an und nennt sie in
+`asset_config()` (`trading = "signal"`, `signal_buy`, `signal_sell`); für `tactical_rules()` lassen sie sich
+direkt als Bedingung verwenden.
+
+# Argumente
+- `x`: Numerischer Vektor mit Kursniveaus (z. B. `df["eu"]`).
+- `sell_dd`, `buy_dd`: Abstand zum Hoch in Prozent (positiv, 20 = 20 % unter dem Hoch); `buy_dd` darf nicht
+  größer als `sell_dd` sein (Standard 20 und 10).
+- `window`: Fenster in Zeilen für das rollierende Hoch (Standard `nothing` = laufendes Hoch seit Beginn).
+- `lag`: Verzögerung der Signale in Zeilen (Standard 0; z. B. 1, um erst in der Folgezeile zu handeln). Die
+  ersten `lag` Zeilen sind `false`.
+
+# Rückgabe
+`RList("buy" => …, "sell" => …)` mit logischen Vektoren der Länge von `x` (NA als `false`).
+
+# Details
+Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B. eine Spalte aus `series_align()`.
+Alle Fenster (`n`, `fast`, `slow`, `window`, `lag`) zählen in Zeilen der Daten, bei Kalendertagsdaten
+(Wochenenden per LOCF) also in Kalendertagen, bei Handelstagsdaten in Handelstagen. Solange ein Fenster noch
+nicht gefüllt ist, sind beide Signale `false` (außer bei `signal_drawdown`, das anfangs das Hoch der
+bisherigen Zeilen verwendet). `x` sollte keine NA enthalten: Bei Durchschnitten liefern Fenster mit NA kein
+Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei `signal_drawdown` nur die Zeile mit
+NA (das Hoch wird ohne sie fortgeführt).
+
+`band` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale `false`, der Zustand in
+`simulation()` bzw. `signal_state()` bleibt dann unverändert. Bei Durchschnitten (`signal_sma`, `signal_ema`,
+`signal_crossover`) ist `band` relativ zum Durchschnitt in Prozent, bei `signal_momentum` und
+`signal_volatility` ein Abstand in Prozentpunkten zu `threshold`.
+
+- signal_sma: Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten `n` Zeilen (einschließlich der
+  aktuellen): Kauf ab `SMA * (1 + band/100)`, Verkauf unter `SMA * (1 - band/100)`, dazwischen bleibt der
+  Zustand.
+- signal_ema: Wie `signal_sma` mit exponentiellem Durchschnitt (Glättung 2 / (n + 1), Start mit dem einfachen
+  Mittel der ersten `n` Werte).
+- signal_crossover: Schneller über langsamem Durchschnitt: Kauf, wenn der schnelle mindestens das `(1 +
+  band/100)`-fache des langsamen erreicht, Verkauf unter dem `(1 - band/100)`-fachen.
+- signal_momentum: Rendite über `n` Zeilen in Prozent: Kauf ab `threshold + band`, Verkauf unter `threshold -
+  band`.
+- signal_drawdown: Verkauf ab `sell_dd` Prozent unter dem (rollierenden) Hoch, Kauf (Wiedereinstieg), solange
+  der Abstand unter `buy_dd` Prozent liegt; dazwischen bleibt der Zustand.
+- signal_volatility: Realisierte Volatilität der Log-Renditen über `n` Zeilen, annualisiert mit `ppy`, in
+  Prozent p. a.: Kauf bis `threshold - band`, Verkauf über `threshold + band`.
+- signal_combine: Verknüpft Signale: `"and"` kauft nur, wenn alle kaufen, und verkauft, sobald eines verkauft;
+  `"or"` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+# Beispiel
+```julia
+using SimLev, Random
+x = 100 .* cumprod(1 .+ 2e-4 .+ 0.01 .* randn(MersenneTwister(1), 1000))
+println(sum(signal_drawdown(x, 20, 10)["sell"]))
+```
 """
 function signal_drawdown(x, sell_dd_ = nothing, buy_dd_ = nothing; sell_dd = 20, buy_dd = 10, window = nothing, lag = 0)
     sell_dd_ === nothing || (sell_dd = sell_dd_)
@@ -171,8 +452,66 @@ end
 """
     signal_volatility(x, n = 20; threshold = 25, band = 0, ppy = 365.25, lag = 0)
 
-Realisierte Volatilität der Log-Renditen über `n` Zeilen in Prozent p. a.:
-Kauf bis `threshold - band`, Verkauf über `threshold + band`.
+Realisierte Volatilität der Log-Renditen über `n` Zeilen in Prozent p. a.
+
+Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das `bootstrap_study()` und
+`param_search()` für `signal = function(df) ...` erwarten: Die Elemente `buy` und `sell` werden dort als
+gleichnamige Spalten an den Datensatz angehängt. Für `simulation()` hängt man sie selbst an und nennt sie in
+`asset_config()` (`trading = "signal"`, `signal_buy`, `signal_sell`); für `tactical_rules()` lassen sie sich
+direkt als Bedingung verwenden.
+
+# Argumente
+- `x`: Numerischer Vektor mit Kursniveaus (z. B. `df["eu"]`).
+- `n`: Fensterlänge in Zeilen (Standard: 200 bei `signal_sma` und `signal_ema`, 250 bei `signal_momentum`, 20
+  bei `signal_volatility`).
+- `threshold`: Schwelle in Prozent: bei `signal_momentum` für die Rendite über `n` Zeilen (Standard 0), bei
+  `signal_volatility` für die Volatilität in Prozent p. a. (Standard 25).
+- `band`: Hysterese-Band (Standard 0 = keins): bei Durchschnitten in Prozent des Durchschnitts (1 = 1 %), bei
+  `signal_momentum` und `signal_volatility` in Prozentpunkten um `threshold`.
+- `ppy`: Zeilen je Jahr für die Annualisierung der Volatilität (Standard 365.25 für Kalendertagsdaten; bei
+  Handelstagsdaten z. B. 252). Wird nicht aus den Daten ermittelt.
+- `lag`: Verzögerung der Signale in Zeilen (Standard 0; z. B. 1, um erst in der Folgezeile zu handeln). Die
+  ersten `lag` Zeilen sind `false`.
+
+# Rückgabe
+`RList("buy" => …, "sell" => …)` mit logischen Vektoren der Länge von `x` (NA als `false`).
+
+# Details
+Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B. eine Spalte aus `series_align()`.
+Alle Fenster (`n`, `fast`, `slow`, `window`, `lag`) zählen in Zeilen der Daten, bei Kalendertagsdaten
+(Wochenenden per LOCF) also in Kalendertagen, bei Handelstagsdaten in Handelstagen. Solange ein Fenster noch
+nicht gefüllt ist, sind beide Signale `false` (außer bei `signal_drawdown`, das anfangs das Hoch der
+bisherigen Zeilen verwendet). `x` sollte keine NA enthalten: Bei Durchschnitten liefern Fenster mit NA kein
+Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei `signal_drawdown` nur die Zeile mit
+NA (das Hoch wird ohne sie fortgeführt).
+
+`band` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale `false`, der Zustand in
+`simulation()` bzw. `signal_state()` bleibt dann unverändert. Bei Durchschnitten (`signal_sma`, `signal_ema`,
+`signal_crossover`) ist `band` relativ zum Durchschnitt in Prozent, bei `signal_momentum` und
+`signal_volatility` ein Abstand in Prozentpunkten zu `threshold`.
+
+- signal_sma: Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten `n` Zeilen (einschließlich der
+  aktuellen): Kauf ab `SMA * (1 + band/100)`, Verkauf unter `SMA * (1 - band/100)`, dazwischen bleibt der
+  Zustand.
+- signal_ema: Wie `signal_sma` mit exponentiellem Durchschnitt (Glättung 2 / (n + 1), Start mit dem einfachen
+  Mittel der ersten `n` Werte).
+- signal_crossover: Schneller über langsamem Durchschnitt: Kauf, wenn der schnelle mindestens das `(1 +
+  band/100)`-fache des langsamen erreicht, Verkauf unter dem `(1 - band/100)`-fachen.
+- signal_momentum: Rendite über `n` Zeilen in Prozent: Kauf ab `threshold + band`, Verkauf unter `threshold -
+  band`.
+- signal_drawdown: Verkauf ab `sell_dd` Prozent unter dem (rollierenden) Hoch, Kauf (Wiedereinstieg), solange
+  der Abstand unter `buy_dd` Prozent liegt; dazwischen bleibt der Zustand.
+- signal_volatility: Realisierte Volatilität der Log-Renditen über `n` Zeilen, annualisiert mit `ppy`, in
+  Prozent p. a.: Kauf bis `threshold - band`, Verkauf über `threshold + band`.
+- signal_combine: Verknüpft Signale: `"and"` kauft nur, wenn alle kaufen, und verkauft, sobald eines verkauft;
+  `"or"` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+# Beispiel
+```julia
+using SimLev, Random
+x = 100 .* cumprod(1 .+ 2e-4 .+ 0.01 .* randn(MersenneTwister(1), 1000))
+println(sum(signal_volatility(x, 20; threshold = 25)["buy"]))
+```
 """
 function signal_volatility(x, n_ = nothing; n = 20, threshold = 25, band = 0, ppy = 365.25, lag = 0)
     n_ === nothing || (n = n_)
@@ -193,9 +532,59 @@ _getsig(z, k) = z isa AbstractDict ? get(z, k, nothing) : z isa NamedTuple ? get
 """
     signal_combine(signals...; op = "and")
 
-Verknüpft Signale: `"and"` kauft nur, wenn alle kaufen, und verkauft, sobald
-eines verkauft; `"or"` kauft, sobald eines kauft, und verkauft nur, wenn alle
-verkaufen.
+Verknüpft Signale: `"and"` kauft nur, wenn alle kaufen, und verkauft, sobald eines verkauft; `"or"` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das `bootstrap_study()` und
+`param_search()` für `signal = function(df) ...` erwarten: Die Elemente `buy` und `sell` werden dort als
+gleichnamige Spalten an den Datensatz angehängt. Für `simulation()` hängt man sie selbst an und nennt sie in
+`asset_config()` (`trading = "signal"`, `signal_buy`, `signal_sell`); für `tactical_rules()` lassen sie sich
+direkt als Bedingung verwenden.
+
+# Argumente
+- `signals...`: Bei `signal_combine`: Signal-Listen `RList("buy" => …, "sell" => …)` gleicher Länge (sonst
+  Fehler).
+- `op`: Verknüpfung bei `signal_combine`: `"and"` (Standard) oder `"or"`.
+
+# Rückgabe
+`RList("buy" => …, "sell" => …)` mit logischen Vektoren der Länge von `x` (NA als `false`).
+
+# Details
+Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B. eine Spalte aus `series_align()`.
+Alle Fenster (`n`, `fast`, `slow`, `window`, `lag`) zählen in Zeilen der Daten, bei Kalendertagsdaten
+(Wochenenden per LOCF) also in Kalendertagen, bei Handelstagsdaten in Handelstagen. Solange ein Fenster noch
+nicht gefüllt ist, sind beide Signale `false` (außer bei `signal_drawdown`, das anfangs das Hoch der
+bisherigen Zeilen verwendet). `x` sollte keine NA enthalten: Bei Durchschnitten liefern Fenster mit NA kein
+Signal, beim exponentiellen Durchschnitt auch alle folgenden Zeilen; bei `signal_drawdown` nur die Zeile mit
+NA (das Hoch wird ohne sie fortgeführt).
+
+`band` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale `false`, der Zustand in
+`simulation()` bzw. `signal_state()` bleibt dann unverändert. Bei Durchschnitten (`signal_sma`, `signal_ema`,
+`signal_crossover`) ist `band` relativ zum Durchschnitt in Prozent, bei `signal_momentum` und
+`signal_volatility` ein Abstand in Prozentpunkten zu `threshold`.
+
+- signal_sma: Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten `n` Zeilen (einschließlich der
+  aktuellen): Kauf ab `SMA * (1 + band/100)`, Verkauf unter `SMA * (1 - band/100)`, dazwischen bleibt der
+  Zustand.
+- signal_ema: Wie `signal_sma` mit exponentiellem Durchschnitt (Glättung 2 / (n + 1), Start mit dem einfachen
+  Mittel der ersten `n` Werte).
+- signal_crossover: Schneller über langsamem Durchschnitt: Kauf, wenn der schnelle mindestens das `(1 +
+  band/100)`-fache des langsamen erreicht, Verkauf unter dem `(1 - band/100)`-fachen.
+- signal_momentum: Rendite über `n` Zeilen in Prozent: Kauf ab `threshold + band`, Verkauf unter `threshold -
+  band`.
+- signal_drawdown: Verkauf ab `sell_dd` Prozent unter dem (rollierenden) Hoch, Kauf (Wiedereinstieg), solange
+  der Abstand unter `buy_dd` Prozent liegt; dazwischen bleibt der Zustand.
+- signal_volatility: Realisierte Volatilität der Log-Renditen über `n` Zeilen, annualisiert mit `ppy`, in
+  Prozent p. a.: Kauf bis `threshold - band`, Verkauf über `threshold + band`.
+- signal_combine: Verknüpft Signale: `"and"` kauft nur, wenn alle kaufen, und verkauft, sobald eines verkauft;
+  `"or"` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+# Beispiel
+```julia
+using SimLev, Random
+x = 100 .* cumprod(1 .+ 2e-4 .+ 0.01 .* randn(MersenneTwister(1), 1000))
+both = signal_combine(signal_sma(x, 200), signal_volatility(x, 20; threshold = 25))
+println(sum(both["buy"]))
+```
 """
 function signal_combine(signals...; op = ("and", "or"))
     op = DP._match_arg(op, ("and", "or"))

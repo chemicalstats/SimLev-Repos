@@ -1,3 +1,5 @@
+# utils.R  —  interne Hilfen (Operator %||% fuer NULL-Ersatzwerte)
+
 #' Operator fuer NULL-Ersatzwerte
 #'
 #' Gibt \code{a} zurueck, ausser es ist \code{NULL}; dann wird \code{b} zurueckgegeben.

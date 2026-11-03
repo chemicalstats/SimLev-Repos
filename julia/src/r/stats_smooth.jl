@@ -9,9 +9,8 @@
 # stats/src/approx.c, filter.c; Python: _r/stats_smooth.py.
 # Teil des Untermoduls RStats (eingebunden in stats.jl).
 #
-# Seit Etappe 9.6c entfallen fft, bw_nrd0, density, smooth_spline und predict_smooth_spline: SimLev
-# nutzt die eigene Gauß-Kerndichte und den eigenen Glättungsspline der C-Bibliothek slc (SimLev.SLib,
-# Entwurf B.15, B.16).
+# Seit 1.0.0 entfallen fft, bw_nrd0, density, smooth_spline und predict_smooth_spline: SimLev
+# nutzt die eigene Gauß-Kerndichte und den eigenen Glättungsspline der C-Bibliothek slc (SimLev.SLib).
 
 # ── approx / approxfun / filter ──────────────────────────────────────────
 

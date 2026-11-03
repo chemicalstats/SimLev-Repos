@@ -3,14 +3,14 @@
 #
 # Portiert aus src/library/stats/R/*.R und src/library/stats/src/*.c bzw. *.f
 # (sowie Teilen von src/main/sort.c, qsort-body.c, seq.c, cum.c) über die
-# Vorlage python/simlev/_r/stats.py. Rechenreihenfolge, long-double-
+# Gegenstück python/simlev/_r/stats.py. Rechenreihenfolge, long-double-
 # Akkumulation (C-Kerne core/slc_rbase*.c) und libm-Aufrufe (SimLev.RLibm) wie in R.
 #
 # Konventionen
 # * Namen wie in R bzw. der Python-Fassung, `.` → `_` (weighted.mean →
 #   weighted_mean, p.adjust → p_adjust, …). Kollisionen mit Base: r_sort,
 #   r_rank, r_filter.
-# * Seit Etappe 9.6c entfallen optim, optimhess, nlminb, lm/lm_fit, poly, summary_lm,
+# * Seit 1.0.0 entfallen optim, optimhess, nlminb, lm/lm_fit, poly, summary_lm,
 #   glm/r_binomial, t_test, predict, fft, density, bw_nrd0 und smooth_spline (eigene
 #   Verfahren der C-Bibliothek slc, SimLev.SLib).
 # * Eingaben: Vektoren (NA = SimLev.NA bzw. missing), RVector (benannt),

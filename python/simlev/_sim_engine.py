@@ -1,8 +1,8 @@
-"""simulation(), Phasen 4 und 5 über den gemeinsamen C++-Kern (E17): Tagesengine ``core/engine_core_impl.h``.
+"""simulation(), Phasen 4 und 5 über den gemeinsamen C++-Kern: Tagesengine ``core/engine_core_impl.h``.
 
 Der Kern rechnet die Tagesschleife (Batch- und Marktupdate, Aktivierung, Splits, Sparplan, Handel, Rebalancing,
 Freibetrag, Vorabpauschale, Liquidation, Jahreswechsel und Abrechnungen mit Steuer) und den Abschluss des letzten
-Jahres (bis E17 Stufe 1c die Phasen ``_sim_run_days``, ``_Actions`` und ``_sim_close_years``). Warnungen,
+Jahres (bis 1.3.0 die Phasen ``_sim_run_days``, ``_Actions`` und ``_sim_close_years``). Warnungen,
 ``details``-Ausgaben und Abbrüche meldet der Kern als Codes mit Werten; die Texte setzt ``_sim_engine_signal``
 wortgleich zu R 1.3.0, in derselben Reihenfolge (Ausgabe und Warnungen verzahnt). Gegenstücke:
 ``r/R/sim_engine.R``, ``julia/src/sim_engine.jl``.
@@ -68,7 +68,7 @@ def _harvest_md(harvest_day) -> int:
 
 def _sim_engine_run(sim: dict, fl: dict, cfg: dict, fr, event_weight, split_thresh, balance_dca, harvest_loss_pot,
                     liquidate, stopp_date: int, details: bool, harvest_day) -> tuple[dict, float]:
-    """Vorbereitung (E17 Stufe 2), Phasen 4 und 5 über den C++-Kern (Termine, Flags, Startgewichte, Tagesschleife
+    """Vorbereitung, Phasen 4 und 5 über den C++-Kern (Termine, Flags, Startgewichte, Tagesschleife
     und Abschluss des letzten Jahres); Rückgabe (sim, nicht gedeckte Steuerzahlungen in EUR). Setzt
     fl["flag_harvest"] und fl["tax_regimes"]."""
     nm = list(fl["flag_assets"])

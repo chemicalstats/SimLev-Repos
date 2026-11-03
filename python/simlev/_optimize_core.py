@@ -9,10 +9,10 @@
 - :func:`min_cdar_core`     minimaler CDaR (projizierter Subgradient),
   ``.min_cdar_core``
 
-Es rechnen die gemeinsamen Kerne von R und Python (``core/research_core_impl.h`` über
-``simlev._ext``, Etappe 7.3a). Die bitgleichen Python-Ports als Rückfall (``SIMLEV_NO_EXT=1``),
-die Nachbildung von libstdc++ ``std::sort``/``std::nth_element`` und ``quantile7`` sind mit
-Etappe 9.6c entfallen.
+Es rechnen die gemeinsamen Kerne von R, Python und Julia (``core/research_core_impl.h`` über
+``simlev._ext``). Die bitgleichen Python-Ports als Rückfall (``SIMLEV_NO_EXT=1``),
+die Nachbildung von libstdc++ ``std::sort``/``std::nth_element`` und ``quantile7`` sind seit
+1.0.0 entfallen.
 """
 from __future__ import annotations
 

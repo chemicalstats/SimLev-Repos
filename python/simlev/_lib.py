@@ -1,4 +1,4 @@
-"""Hüllen der C-Bibliothek slc (SimLev core, Etappe 9.1): Zufallszustand, ``simlev_seed()``,
+"""Hüllen der C-Bibliothek slc (SimLev core): Zufallszustand, ``simlev_seed()``,
 interne Ziehungen und Verteilungen.
 
 Gegenstück zu ``r/R/slc.R`` (R) und ``julia/src/slib.jl`` (Julia). Die Rechnung steht in
@@ -6,18 +6,18 @@ Gegenstück zu ``r/R/slc.R`` (R) und ``julia/src/slib.jl`` (Julia). Die Rechnung
 ``simlev._ext``). Warnungen und Fehlertexte kommen aus dem Kern und sind in allen drei Sprachen
 gleich (Warnung: ``warnings.warn``; Fehler: ``ValueError``).
 
-Zufallszustand (Entwurf C.5):
+Zufallszustand:
 
 * globaler Zustand G: ``bytearray(32)`` in diesem Modul, mit ``threading.Lock``; beim Laden und
   mit ``simlev_seed(None)`` aus Uhrzeit (ns), Prozessnummer und Zähler;
 * Strom-Objekt: :class:`Stream` (32 Byte); Ströme sind nicht gesperrt (je Einheit einer);
 * innerhalb einer parallelen Einheit (:func:`in_unit`) darf G nicht benutzt werden.
 
-Seit Etappe 9.6a ziehen alle zufälligen Exporte hierüber (Regeln C.5): ``seed=None`` zieht genau
+Seit 1.0.0 ziehen alle zufälligen Exporte hierüber: ``seed=None`` zieht genau
 einmal k = :func:`next_seed` aus G und verfährt dann wie mit ``seed=k``; ``seed=s`` lässt G
 unberührt, der Hauptstrom ist ``Stream(s)`` (:func:`main_stream`); Einheiten mit ``cores``
 bekommen ihre Ströme U_i = J^i(S_0) aus :func:`streams` vor der Verteilung. Die Nachbildung von
-R's Zufall (``simlev._r.rng``, Export ``set_seed``) ist mit Etappe 9.6c entfallen.
+R's Zufall (``simlev._r.rng``, Export ``set_seed``) ist seit 1.0.0 entfallen.
 """
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ with _LOCK:
 
 
 def check_seed(seed):
-    """Seed prüfen: ``int`` (kein ``bool``) mit ``|seed| < 2**53`` (Entwurf C.5, Regel 2)."""
+    """Seed prüfen: ``int`` (kein ``bool``) mit ``|seed| < 2**53``."""
     if isinstance(seed, bool) or not isinstance(seed, (int, np.integer)) or not abs(int(seed)) < 2 ** 53:
         raise ValueError("seed: ganze Zahl erwartet (erhalten: %s)" % _seed_text(seed))
     return int(seed)
@@ -72,42 +72,57 @@ def _seed_text(seed):
 def simlev_seed(seed=None):
     """Zufallszustand von SimLev setzen.
 
-    Setzt den globalen Zufallszustand der C-Bibliothek von SimLev. Mit einer ganzen Zahl entsteht
-    ein reproduzierbarer Zustand; ohne Argument (oder mit ``None``) ein neuer Zustand aus Uhrzeit,
-    Prozessnummer und einem Zähler, der nicht reproduzierbar ist. Beim Laden des Pakets geschieht
+    Setzt den globalen Zufallszustand der C-Bibliothek von SimLev. Mit einer ganzen Zahl entsteht ein
+    reproduzierbarer Zustand; ohne Argument (oder mit ``None``) ein neuer Zustand aus Uhrzeit, Prozessnummer und
+    einem Zähler, der nicht reproduzierbar ist (wie R ohne ``set.seed()``). Beim Laden des Pakets geschieht
     dasselbe.
 
-    Der Zustand wird in R, Python und Julia gleich gesetzt und liefert dort bei gleichem ``seed`` und gleicher
-    Aufruffolge bitgleiche Ziehungen. Generator ist xoshiro256** (Blackman, Vigna 2021) mit
-    SplitMix64-Seeding (Steele, Lea, Flood 2014); unabhängige Ströme je Einheit entstehen durch
-    Sprünge um 2^128 Schritte.
+    Args:
+        seed: ganze Zahl mit |seed| < 2^53 oder ``None`` (neuer, nicht reproduzierbarer Zustand).
 
-    Die zufälligen Funktionen von SimLev (Argument ``seed``, z. B. ``bootstrap()``,
-    ``bootstrap_study()``, ``scenario_copula()``, ``regime_hmm()``) ziehen aus diesem Zustand:
+    Returns:
+        ``seed``, unsichtbar.
 
-    * ``seed=None``: der Aufruf zieht **genau einmal** einen Startwert k (0 … 2^31 - 1) und rechnet
-      wie mit ``seed=k``; ``bootstrap()``/``bootstrap_study()`` legen k unter ``seed`` ab. Nach
-      ``simlev_seed(s)`` ist so auch eine Folge von Aufrufen mit ``seed=None`` reproduzierbar.
-    * ``seed=s``: der globale Zustand bleibt unberührt.
-    * Funktionen mit ``cores`` geben jedem Pfad einen eigenen Strom; das Ergebnis hängt nicht von
-      ``cores`` oder ``chunk_size`` ab.
-    * R's ``set.seed()`` wirkt auf SimLev nicht (die Nachbildung ``set_seed`` ist seit 9.6c entfallen).
+    Details:
+        Der Zufallszustand von SimLev ist unabhängig von ``set.seed()`` und ``.Random.seed``; er wird in R, Python
+        und Julia gleich gesetzt und liefert dort bei gleichem ``seed`` und gleicher Aufruffolge bitgleiche
+        Ziehungen. Generator ist xoshiro256** (Blackman, Vigna 2021) mit SplitMix64-Seeding (Steele, Lea, Flood
+        2014); unabhängige Ströme je Einheit entstehen durch Sprünge um 2^128 Schritte.
+
+        Die zufälligen Funktionen von SimLev (Argument ``seed``, z. B. ``bootstrap()``, ``bootstrap_study()``,
+        ``scenario_copula()``, ``regime_hmm()``) ziehen aus diesem Zustand:
+
+        - Mit ``seed = None`` zieht ein Aufruf **genau einmal** einen Startwert k aus dem globalen Zustand (ganze
+          Zahl von 0 bis 2^31 - 1) und rechnet dann wie mit ``seed = k``. ``bootstrap()`` und
+          ``bootstrap_study()`` legen k unter ``$seed`` ab; damit lässt sich das Ergebnis wiederholen. Nach
+          ``simlev_seed(s)`` ist daher auch eine Folge von Aufrufen mit ``seed = None`` reproduzierbar.
+        - Mit ``seed = s`` bleibt der globale Zustand unberührt.
+        - Funktionen mit ``cores`` geben jedem Pfad einen eigenen Strom (Sprung um 2^128 je Pfad); das Ergebnis
+          hängt nicht von ``cores`` oder ``chunk_size`` ab.
+        - ``set.seed()``, ``RNGkind()`` und ``.Random.seed`` wirken auf SimLev nicht; SimLev liest, setzt und
+          löscht ``.Random.seed`` nie.
+
+    Literatur:
+        Blackman, D., Vigna, S. (2021). Scrambled linear pseudorandom number generators. *ACM Transactions on
+        Mathematical Software* 47(4), Art. 36.
+
+        Steele, G. L., Lea, D., Flood, C. H. (2014). Fast splittable pseudorandom number generators. *Proceedings
+        OOPSLA 2014*, 453–472.
+
+    Hinweise (Python):
+        Der Zustand wird in R, Python und Julia gleich gesetzt und liefert dort bei gleichem ``seed`` und gleicher
+        Aufruffolge bitgleiche Ziehungen. Generator ist xoshiro256** (Blackman, Vigna 2021) mit
+        SplitMix64-Seeding (Steele, Lea, Flood 2014); unabhängige Ströme je Einheit entstehen durch
+        Sprünge um 2^128 Schritte.
 
     Beispiel::
 
-        simlev_seed(42)
-        a = sharpe_test(x, y, method="bootstrap", B=50)   # seed=None: ein Zug aus dem Zustand
-        simlev_seed(42)
-        b = sharpe_test(x, y, method="bootstrap", B=50)   # gleich a
-
-    Parameters
-    ----------
-    seed : int oder None
-        ganze Zahl mit ``|seed| < 2**53`` oder ``None`` (neuer, nicht reproduzierbarer Zustand).
-
-    Returns
-    -------
-    seed (unverändert)
+        import simlev
+        x = [0.010, -0.020, 0.015, 0.003, -0.007, 0.012, -0.004, 0.009, 0.002, -0.011, 0.006, 0.001]
+        y = [0.004, -0.006, 0.011, -0.002, 0.001, 0.008, -0.009, 0.005, 0.003, -0.004, 0.002, 0.000]
+        simlev.simlev_seed(42); s1 = simlev.sharpe_test(x, y, method="bootstrap", B=50, ppy=52)
+        simlev.simlev_seed(42); s2 = simlev.sharpe_test(x, y, method="bootstrap", B=50, ppy=52)
+        print(s1.equals(s2))   # True: dieselbe Aufruffolge nach demselben simlev_seed()
     """
     if seed is None:
         with _LOCK:
@@ -141,7 +156,7 @@ def _in_unit():
 
 @contextlib.contextmanager
 def in_unit():
-    """Block als parallele Einheit ausführen: G ist darin gesperrt (Entwurf C.5, Regel 7)."""
+    """Block als parallele Einheit ausführen: G ist darin gesperrt."""
     old = _in_unit()
     _UNIT.flag = True
     try:
@@ -156,24 +171,24 @@ def _global_check():
 
 
 def next_seed():
-    """Regel 3: nächster Startwert aus G (0 ... 2^31 - 1); G rückt um eine Ausgabe vor."""
+    """Nächster Startwert aus G (0 ... 2^31 - 1); G rückt um eine Ausgabe vor."""
     _global_check()
     with _LOCK:
         return _ext.slc_seed31(_G)
 
 
 def resolve_seed(seed):
-    """Regeln 3 und 4: ``None`` -> :func:`next_seed`, sonst geprüft."""
+    """``None`` -> :func:`next_seed`, sonst geprüft (G bleibt unberührt)."""
     return next_seed() if seed is None else check_seed(seed)
 
 
 def main_stream(seed):
-    """Hauptstrom einer zufälligen Funktion (Regeln 3 bis 5): ``Stream(resolve_seed(seed))``."""
+    """Hauptstrom einer zufälligen Funktion: ``Stream(resolve_seed(seed))``."""
     return Stream(resolve_seed(seed))
 
 
 def streams(stream, n):
-    """Regel 6: Ströme je Einheit U_i = J^i(S_0), i = 1 ... n (Liste von :class:`Stream`)."""
+    """Ströme je Einheit U_i = J^i(S_0), i = 1 ... n (Liste von :class:`Stream`)."""
     base = stream if isinstance(stream, Stream) else Stream(stream)
     n = int(n)
     if n < 0:
@@ -311,16 +326,16 @@ def qlogis(p):
     return _apply(_ext.slc_qlogis, p)
 
 
-# 9.2: lineare Algebra, Matrixprodukt, kleinste Quadrate, Stineman, Spline, Kerndichte (_lib_linalg.py)
+# lineare Algebra, Matrixprodukt, kleinste Quadrate, Stineman, Spline, Kerndichte (_lib_linalg.py)
 from ._lib_linalg import *  # noqa: E402,F401,F403
 from ._lib_linalg import __all__ as _ALL_92  # noqa: E402
 
 __all__ += _ALL_92
-# 9.3: Optimierer der C-Bibliothek slc (simlev/_lib_opt.py)
+# Optimierer der C-Bibliothek slc (simlev/_lib_opt.py)
 from ._lib_opt import minimize_test, numgrad_test, opt_testfn, optim  # noqa: E402
 
 __all__ += ["optim", "opt_testfn", "minimize_test", "numgrad_test"]
-# 9.4: Modelle der C-Bibliothek slc (simlev/_lib_models.py)
+# Modelle der C-Bibliothek slc (simlev/_lib_models.py)
 from ._lib_models import *  # noqa: E402,F401,F403
 from ._lib_models import __all__ as _ALL_94  # noqa: E402
 

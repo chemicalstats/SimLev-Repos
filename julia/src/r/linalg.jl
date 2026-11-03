@@ -5,7 +5,7 @@
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang.
 # ─────────────────────────────────────────────────────────────────────────────
-# RLinalg – lineare Hilfen wie R 4.3.3, die nach Etappe 9.6c bleiben
+# RLinalg – lineare Hilfen wie R 4.3.3, die neben der C-Bibliothek slc bleiben
 #
 #   R                    Julia
 #   ───────────────────  ─────────────────────────────────────────────────────
@@ -13,8 +13,8 @@
 #   diag, isSymmetric    diag, is_symmetric
 #   all.equal            all_equal_numeric (numerisch)
 #
-# Seit Etappe 9.6c rechnet SimLev Matrixprodukte, Cholesky, Dreieckslöser, SPD-Löser,
-# Eigenwerte und QR/kleinste Quadrate in der C-Bibliothek slc (SimLev.SLib, Entwurf B.5–B.7);
+# Seit 1.0.0 rechnet SimLev Matrixprodukte, Cholesky, Dreieckslöser, SPD-Löser,
+# Eigenwerte und QR/kleinste Quadrate in der C-Bibliothek slc (SimLev.SLib);
 # die Nachbildungen von %*%, crossprod, solve, chol, backsolve, determinant, eigen und qr
 # über Referenz-BLAS, LAPACK und LINPACK sind entfallen.
 #
@@ -107,7 +107,7 @@ function outer(X, Y, FUN = "*")
     dX = ismat(mx) ? [mx.dim...] : [len(mx)]
     dY = ismat(my) ? [my.dim...] : [len(my)]
     if FUN isa AbstractString && FUN == "*"
-        # seit 9.6c ohne die Nachbildung der Referenz-BLAS (bei innerer Länge 1 genau 0 + Produkt)
+        # seit 1.0.0 ohne die Nachbildung der Referenz-BLAS (bei innerer Länge 1 genau 0 + Produkt)
         xv = Float64.(mx.v); yv = Float64.(my.v)
         flat = vec(0.0 .+ xv .* transpose(yv))
     else

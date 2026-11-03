@@ -1,4 +1,4 @@
-"""Hüllen der C-Bibliothek slc, Etappe 9.2 (SimLev core): lineare Algebra, Matrixprodukt,
+"""Hüllen der C-Bibliothek slc (SimLev core): lineare Algebra, Matrixprodukt,
 kleinste Quadrate und Logit-IRLS, Stineman-Interpolation, Glättungsspline, Kerndichte.
 
 Gegenstück zu ``r/R/slc_linalg.R`` (R) und ``julia/src/slib_linalg.jl`` (Julia). Die Rechnung
@@ -7,7 +7,7 @@ in ``src/_ext_slc_linalg.c`` (Modul ``simlev._ext``). Fehlertexte und Warnungen 
 Kern (Fehler: ``ValueError``; Warnung: ``warnings.warn``). Die Funktionen sind über
 ``simlev._lib`` erreichbar. Matrizen sind 2-D-Felder (intern spaltenweise), Vektoren 1-D.
 
-Seit Etappe 9.6b rufen die Ports diese Hüllen an denselben Stellen wie R.
+Seit 1.0.0 rufen die Ports diese Hüllen an denselben Stellen wie R.
 """
 from __future__ import annotations
 

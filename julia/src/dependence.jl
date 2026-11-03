@@ -1,4 +1,4 @@
-# Dependence – Port von r/R/dependence.R (Vorlage python/simlev/dependence.py)
+# Dependence – Gegenstück zu r/R/dependence.R und python/simlev/dependence.py
 #
 #   dependence_analysis()   Korrelationen (Pearson, Spearman, Kendall), empirische
 #                           Tail-Abhängigkeit, Exceedance-Korrelationen, Copula-Fits,
@@ -66,7 +66,7 @@ _fill_na(x, method; keep_leading = false) =
 _roll_var(x, n) = _fvec(SimLev.Signals._roll_var(x, n))
 _roll_cov(x, y, n) = _fvec(SimLev.Signals._roll_cov(x, y, n))
 _roll_mean(x, n) = _fvec(SimLev.Signals._roll_mean(x, n))
-"Zufall der C-Bibliothek slc (Entwurf C.5)."
+"Zufall der C-Bibliothek slc."
 _SL() = SimLev.SLib
 _boot_idx_stationary(n_src, n_out, L, stream) = Vector{Int}(SimLev.SLib.boot_idx_stationary(n_src, n_out, L; stream = stream))
 _pw_block_stationary(x) = Float64(_el(SimLev.Bootstrap._pw_block(x), "stationary"))
@@ -94,7 +94,7 @@ function _optimize(f, lower, upper)
     o = SimLev.RStats.optimize(f, [Float64(lower), Float64(upper)])
     Float64(_el(o, "minimum")), Float64(_el(o, "objective"))
 end
-# Verteilungen der C-Bibliothek slc (Entwurf B.3, B.4), wie .sl_qnorm usw. in R; Zahl oder Feld
+# Verteilungen der C-Bibliothek slc, wie .sl_qnorm usw. in R; Zahl oder Feld
 _f64a(x) = x isa AbstractArray ? Float64.(x) : Float64(x)
 _qnorm(p) = SimLev.SLib.qnorm(_f64a(p))
 _qt(p, df) = SimLev.SLib.qt(_f64a(p), Float64(df))
@@ -102,7 +102,7 @@ _pt(q, df) = SimLev.SLib.pt(_f64a(q), Float64(df))
 _lgamma(x) = Float64(SimLev.SLib.lgamma(Float64(x)))
 _log(x::Real) = SimLev.RLibm.log(Float64(x))
 _exp(x::Real) = SimLev.RLibm.exp(Float64(x))
-"`A %m% B` (slc-Matrixprodukt, Entwurf B.6); Vektor B als Spalte."
+"`A %m% B` (slc-Matrixprodukt); Vektor B als Spalte."
 _matprod(A, B) = _fmat(SimLev.SLib.matmul(_fmat(A), B isa AbstractVector ? reshape(_fvec(B), :, 1) : _fmat(B)))
 _matvec(A, b) = vec(_matprod(A, reshape(_fvec(b), :, 1)))
 
@@ -201,7 +201,7 @@ _pobs(x) = (v = _fvec(x); _rank_avg(v) ./ (length(v) + 1))
 "`combn(k, 2)` als Liste von (i, j) in R-Reihenfolge."
 _combn2(k::Integer) = [(i, j) for i in 1:k for j in (i+1):k]
 
-"`colMeans` (long-double-Summe / n; C-Kern, N10)."
+"`colMeans` (long-double-Summe / n; C-Kern)."
 _colmeans(X) = (A = _fmat(X); SimLev._ld_colsums(A; mean = true))
 
 "`colSums` (long double)."
@@ -500,7 +500,7 @@ function _cop_ll(family::AbstractString, par, u, v)
         r = par[1]
         x = _qnorm(u); y = _qnorm(v)
         ll = _cop_g_ll(r, x, y, x .* x, y .* y)
-    elseif base == "t"                      # N2: Hilfen _cop_t_c0, _cop_t_ll
+    elseif base == "t"                      # Hilfen _cop_t_c0, _cop_t_ll
         r, nu = par[1], par[2]
         x = _qt(u, nu); y = _qt(v, nu)
         ll = _cop_t_ll(r, nu, _cop_t_c0(nu), x, y, x .* x, y .* y,
@@ -526,7 +526,7 @@ function _cop_ll(family::AbstractString, par, u, v)
     isfinite(s) ? s : -1e10
 end
 
-# N2: Teile der Log-Dichten der Gauss- und t-Copula je Beobachtung (wie .cop_g_ll, .cop_t_ll in R), auch für die
+# Teile der Log-Dichten der Gauss- und t-Copula je Beobachtung (wie .cop_g_ll, .cop_t_ll in R), auch für die
 # Profil-Likelihood in _cop_fit_t; x2 = x^2, y2 = y^2, B = (nu + 1)/2 (log1p(x^2/nu) + log1p(y^2/nu)).
 function _cop_g_ll(r, x, y, x2, y2)
     r2 = r * r
@@ -538,14 +538,14 @@ function _cop_t_ll(r, nu, c0, x, y, x2, y2, B)
     c = c0 - 0.5 * SimLev.RLibm.log(1 - r2)
     c .- (nu + 2) / 2 .* SimLev.RLibm.log1p.((x2 .- 2 .* r .* x .* y .+ y2) ./ (nu * (1 - r2))) .+ B
 end
-"N2: c0(nu) = lgamma((nu+2)/2) + lgamma(nu/2) - 2 lgamma((nu+1)/2); für nu > 64 asymptotisch (`.cop_t_c0`)."
+"c0(nu) = lgamma((nu+2)/2) + lgamma(nu/2) - 2 lgamma((nu+1)/2); für nu > 64 asymptotisch (`.cop_t_c0`)."
 function _cop_t_c0(nu)
     nu <= 64 && return _lgamma((nu + 2) / 2) + _lgamma(nu / 2) - 2 * _lgamma((nu + 1) / 2)
     a = nu / 2
     ia2 = 1 / (a * a)
     ((((31 / 9216 * ia2 - 17 / 7168) * ia2 + 1 / 320) * ia2 - 1 / 96) * ia2 + 1 / 4) / a
 end
-"N2: t-Copula per Profil-Likelihood in nu (`.cop_fit_t`); Ergebnis [atanh rho, nu, -loglik]."
+"t-Copula per Profil-Likelihood in nu (`.cop_fit_t`); Ergebnis [atanh rho, nu, -loglik]."
 function _cop_fit_t(u, v)
     best = [0.0, Inf, Inf]
     function prof(nu)
@@ -612,14 +612,51 @@ _len(x) = x === nothing ? 0 : x isa AbstractString ? 1 : x isa Union{AbstractVec
     copula_fit(x, y, families = nothing)
 
 Copulas an zwei Reihen anpassen (Pseudo-ML auf Rängen, Auswahl per AIC).
-`families`: `"gaussian"`, `"t"`, `"clayton"`, `"gumbel"`, `"frank"`, Clayton und
-Gumbel optional mit Rotation `"_90"`, `"_180"`, `"_270"`; `nothing` = Auswahl
-nach dem Vorzeichen von Kendalls Tau. Ergebnis: `RFrame` je Familie
-(aufsteigend nach AIC) mit `family`, `par1`, `par2`, `loglik`, `aic`, `bic`,
-`lambda_lower`, `lambda_upper`; `attrs(out)["tau"]`, `attrs(out)["n"]`.
-Die t-Copula wird über die Profil-Likelihood in den Freiheitsgraden geschätzt (Raster
-nu = 2 + 2^k, k = -4 ... 12, und nu = Inf als Gauss-Grenzfall, danach eindimensionale Suche);
-bei nu > 500 steht in `par2` 500, `loglik` gilt für das gefundene nu.
+
+Passt mehrere bivariate Copula-Familien an zwei Reihen (z. B. Periodenrenditen zweier Anlagen) an und
+vergleicht sie per AIC. Pseudo-Maximum-Likelihood auf Rängen (Genest, Ghoudi & Rivest 1995): Die Reihen werden
+in Pseudo-Beobachtungen Rang / (n + 1) umgerechnet, die Ränder gehen also nicht ein. Familien: Gauß-, t-,
+Clayton-, Gumbel- und Frank-Copula. Clayton und Gumbel erfassen asymmetrische Tails: Clayton die gemeinsamen
+Abstürze (unterer Tail), Gumbel gemeinsame Anstiege; die um 180 Grad rotierten Varianten jeweils umgekehrt.
+Bei negativer Abhängigkeit (z. B. Aktien und Anleihen in Deflationsphasen) werden die um 90/270 Grad rotierten
+Varianten verwendet. Kendalls Tau wird intern in O(n log n) berechnet (gleiches Ergebnis wie
+`stats::cor(method = "kendall")`).
+
+# Argumente
+- `x`, `y`: Numerische Vektoren gleicher Länge (z. B. Renditen; nur die Ränge zählen). Paare mit nicht
+  endlichen Werten werden entfernt; mindestens 20 Paare nötig.
+- `families`: Zeichenvektor der Familien: `"gaussian"`, `"t"`, `"clayton"`, `"gumbel"`, `"frank"`, jeweils
+  optional mit Rotation `"_90"`, `"_180"` oder `"_270"` (z. B. `"clayton_180"`). `nothing` (Standard) =
+  Auswahl nach dem Vorzeichen von Kendalls Tau: bei Tau >= 0 `gaussian`, `t`, `clayton`, `gumbel`, `frank`,
+  `clayton_180`, `gumbel_180`; sonst `gaussian`, `t`, `frank`, `clayton_90`, `clayton_270`, `gumbel_90`,
+  `gumbel_270`. Rotationen gibt es nur für `clayton` und `gumbel` (Gauß-, t- und Frank-Copula sind
+  radialsymmetrisch); andere Namen sind ein Fehler, ebenso eine konstante Reihe.
+
+# Rückgabe
+Tabelle (RFrame) mit einer Zeile je Familie, aufsteigend nach AIC sortiert (erste Zeile = beste Familie):
+`family`, `par1` (Korrelation bei Gauß/t, sonst θ), `par2` (Freiheitsgrade der t-Copula, höchstens 500; sonst
+`NA`), `loglik`, `aic`, `bic`, `lambda_lower`, `lambda_upper` (implizite Tail-Koeffizienten der Copula,
+Anteile 0 bis 1; für die um 90/270 Grad rotierten Familien 0). Attribute `tau` (Kendalls Tau) und `n` (Anzahl
+Paare).
+
+# Details
+Die t-Copula wird über die Profil-Likelihood in den Freiheitsgraden ν geschätzt, weil die Likelihood in ν sehr
+flach ist: für jedes ν eines Rasters (ν = 2 + 2^k, k = -4, …, 12, und ν = ∞, der Grenzfall Gauß-Copula) das
+Maximum in der Korrelation, danach eine eindimensionale Suche um den besten Rasterpunkt. Liegt das Maximum bei
+ν > 500 (auch ν = ∞), steht in `par2` 500; `loglik` gilt für das gefundene ν.
+
+# Literatur
+Genest, C., Ghoudi, K. & Rivest, L.-P. (1995), Biometrika 82(3); Joe, H. (2014), Dependence Modeling with
+Copulas.
+
+# Beispiel
+```julia
+using SimLev, Random
+rng = MersenneTwister(1)
+z = randn(rng, 1000, 2) * [1 0.6; 0 0.8]
+w = sqrt.(sum(randn(rng, 1000, 4) .^ 2; dims = 2)[:, 1] ./ 4)
+println(copula_fit(z[:, 1] ./ w, z[:, 2] ./ w))
+```
 """
 function copula_fit(x, y, families_pos = nothing; families = families_pos)
     lx, ly = _len(x), _len(y)
@@ -648,7 +685,7 @@ function copula_fit(x, y, families_pos = nothing; families = families_pos)
         families = tau >= 0 ? ["gaussian", "t", "clayton", "gumbel", "frank", "clayton_180", "gumbel_180"] :
                               ["gaussian", "t", "frank", "clayton_90", "clayton_270", "gumbel_90", "gumbel_270"]
     end
-    # N2: Startwert rho0 entfällt (t-Copula per Profil-Likelihood, _cop_fit_t)
+    # Startwert rho0 entfällt (t-Copula per Profil-Likelihood, _cop_fit_t)
     fam_c = String[]; p1 = Float64[]; p2 = Float64[]; llk = Float64[]; aic = Float64[]; bic = Float64[]
     ll_ = Float64[]; lu_ = Float64[]
     for fam in families
@@ -657,7 +694,7 @@ function copula_fit(x, y, families_pos = nothing; families = families_pos)
         if base == "gaussian"
             mn, ob = _optimize(r -> f([r]), -0.995, 0.995)
             par, nll, k = [mn, _NA], ob, 1
-        elseif base == "t"                  # N2: Profil-Likelihood in nu
+        elseif base == "t"                  # Profil-Likelihood in nu
             o = _cop_fit_t(u, v)
             par, nll, k = [SimLev.RLibm.tanh(o[1]), min(o[2], 500.0)], o[3], 2
         elseif base == "clayton"
@@ -689,8 +726,35 @@ _isnumvec(q) = (q isa Real && !(q isa Bool)) || (q isa AbstractVector && all(v -
 """
     tail_dependence(x, y, q = [0.01, 0.025, 0.05, 0.10, 0.20])
 
-Empirische Tail-Abhängigkeit (`lower`, `upper`) und Exceedance-Korrelationen
-(`exceed_lower`, `exceed_upper`) je Wert von `q`; `RFrame`.
+Empirische Tail-Abhängigkeit und Exceedance-Korrelationen.
+
+Misst für zwei Reihen (z. B. Periodenrenditen), wie oft extreme Werte gemeinsam auftreten, ohne ein
+Copula-Modell anzunehmen: hatλ_L(q) = frac\\#\\u_i ≤ q, v_i ≤ q\\n q, hatλ_U(q) = frac\\#\\u_i > 1 - q, v_i > 1 -
+q\\n q auf Pseudo-Beobachtungen u_i, v_i (Rang / (n + 1)). Unter Unabhängigkeit ist hatλ(q) ≈ q, bei
+Gauß-Abhängigkeit fällt es für q → 0 gegen 0, bei echter Tail-Abhängigkeit bleibt es positiv. Die
+Exceedance-Korrelation (Longin & Solnik 2001) ist die Pearson-Korrelation der Beobachtungen, in denen beide
+Reihen höchstens auf ihrem empirischen q-Quantil (bzw. mindestens auf ihrem (1 - q)-Quantil) liegen.
+
+# Argumente
+- `x`, `y`: Numerische Vektoren gleicher Länge (z. B. Periodenrenditen). Paare mit nicht endlichen Werten
+  werden entfernt.
+- `q`: Numerischer Vektor von Tail-Wahrscheinlichkeiten als Anteil echt zwischen 0 und 1 (0.05 = die unteren
+  bzw. oberen 5 % der Beobachtungen).
+
+# Rückgabe
+Tabelle (RFrame) mit einer Zeile je Wert von `q`: `q`, `lower`, `upper` (hatλ_L(q), hatλ_U(q)),
+`exceed_lower`, `exceed_upper` (Exceedance-Korrelationen; `NA` bei weniger als 8 gemeinsamen Überschreitungen
+oder Streuung 0), `n_lower`, `n_upper` (Anzahl der Paare, die gemeinsam im unteren bzw. oberen Tail liegen).
+
+# Literatur
+Longin, F. & Solnik, B. (2001), Journal of Finance 56(2).
+
+# Beispiel
+```julia
+using SimLev, Random
+rng = MersenneTwister(1); z = randn(rng, 2000)
+println(tail_dependence(z .+ randn(rng, 2000), z .+ randn(rng, 2000), [0.05, 0.10]))
+```
 """
 function tail_dependence(x, y, q_pos = [0.01, 0.025, 0.05, 0.10, 0.20]; q = q_pos)
     lx, ly = _len(x), _len(y)
@@ -725,11 +789,41 @@ end
 """
     dependence_dcc(R)
 
-DCC(1,1) (Engle 2002) für eine Renditematrix (mindestens zwei Spalten, 100
-Zeilen). Ergebnis: RList `a`, `b`, `loglik`, `correlation` (Zeit × Paare),
-`pairs`, `garch` (`method` = "ml", "momente" oder "konstant"), `z`, `Qbar`.
-Seit Etappe 9.6b wie R: GARCH-Stufe per ML der C-Bibliothek (Label "ml" statt
-"rugarch"/"optim"), Stufe 2 ganz in C; die Schätzung ist deterministisch.
+DCC(1,1)-Modell (Engle 2002).
+
+Schätzt zeitvariable Korrelationen zwischen mehreren Renditereihen. Zweistufige Schätzung: univariate
+GARCH(1,1) mit Konstante je Reihe (wie im Bootstrap: Maximum Likelihood unter Normalverteilung mit der
+C-Bibliothek von SimLev, notfalls Momentschätzer), danach die Korrelationsdynamik der standardisierten
+Residuen z_t Q_t = (1 - a - b)bar Q + a z_t-1 z_t-1' + b Q_t-1 mit Q_1 = bar Q (Stichproben-Korrelation der
+z_t) und a, b > 0, a + b < 0.999, per Quasi-Maximum-Likelihood (BFGS mit analytischem Gradienten, ganz in der
+C-Bibliothek von SimLev). Die bedingte Korrelation ist R_t = diag(Q_t)^-1/2 Q_t diag(Q_t)^-1/2. Die Schätzung
+ist deterministisch: Den früheren zufälligen Rückfall der GARCH-Stufe (gosolnp mit Startwert aus der Uhrzeit)
+gibt es nicht mehr; die GARCH-Stufe meldet `method = "ml"` statt `"rugarch"`/`"optim"` (seit 1.0.0).
+
+# Argumente
+- `R`: Numerische Renditematrix oder Tabelle (RFrame) (Zeilen = Zeit, Spalten = Reihen; mindestens zwei
+  Spalten und 100 Zeilen, keine fehlenden Werte). Die Einheit ist frei (z. B. Log-Renditen als Anteil); die
+  Korrelationen hängen nicht davon ab. Spaltennamen werden übernommen (sonst `V1`, `V2`, ...). Konstante oder
+  (nahezu) perfekt korrelierte Reihen (singuläre Korrelationsmatrix der standardisierten Residuen, kleinster
+  Eigenwert unter 1e-8) sind ein Fehler.
+
+# Rückgabe
+Liste mit `a`, `b` (DCC-Parameter), `loglik` (Korrelationsteil der Quasi-Log-Likelihood), `correlation`
+(Matrix Zeit x Paare der bedingten Korrelationen R_t; Spaltennamen wie `pairs`), `pairs` (Paarnamen `"A ~
+B"`), `garch` (Tabelle (RFrame) je Reihe: `series`, `alpha`, `beta`, `method` = Schätzweg der GARCH-Stufe:
+`"ml"`, `"momente"` oder `"konstant"`), `z` (Matrix der standardisierten Residuen) und `Qbar`.
+
+# Literatur
+Engle, R. (2002), Journal of Business & Economic Statistics 20(3), 339-350.
+
+# Beispiel
+```julia
+using SimLev, Random
+rng = MersenneTwister(1)
+a = 0.01 .* randn(rng, 500); b = 0.5 .* a .+ sqrt(0.75) .* 0.01 .* randn(rng, 500)
+fit = dependence_dcc([a b])
+println(fit["a"], " ", fit["b"])
+```
 """
 function dependence_dcc(R)
     Rm, nm = _as_matrix(R)
@@ -753,7 +847,7 @@ function dependence_dcc(R)
         error("dependence_dcc: Korrelationsmatrix der standardisierten Residuen ist singulär (z. B. '$(nm[i0])' und '$(nm[j0])': " *
               "Korrelation $(_sprintf("%.6f", Qb[i0, j0]))); DCC nicht schätzbar. Doppelte bzw. linear abhängige Reihen entfernen.")
     end
-    # Stufe 2 ganz in C (Entwurf B.11, wie .sl_dcc_fit in R): deterministisch
+    # Stufe 2 ganz in C (wie .sl_dcc_fit in R): deterministisch
     o = SimLev.SLib.dcc_fit(Z, Qb)
     a, b, oval = Float64(_el(o, "a")), Float64(_el(o, "b")), Float64(_el(o, "nll"))
     fl = SimLev.SLib.dcc_filter(Z, a, b, Qb, true)
@@ -880,8 +974,99 @@ end
                         window = nothing, dcc = true, copulas = true, B = 499,
                         block = nothing, tail_q = 0.10, seed = nothing)
 
-Abhängigkeitsanalyse mit Tail-Risiko und Drittvariablen (Klasse `SimLevDependence`).
-`breaks`: Dict/NamedTuple/RList mit Grenzen je Zustandsvariable.
+Abhängigkeitsanalyse mit Tail-Risiko und Drittvariablen.
+
+Untersucht die Abhängigkeit zwischen Anlagen (Kursreihen) über die reine Korrelation hinaus:
+Rangkorrelationen, empirische Tail-Abhängigkeit, Exceedance-Korrelationen, die am besten passende Copula je
+Paar, rollierende Korrelation und DCC. Mit `conditions` wird zusätzlich gefragt, wie sich die Abhängigkeit mit
+dem Zustand von Drittvariablen ändert - etwa die Aktien-Anleihen-Korrelation bei hoher gegenüber niedriger
+Inflation oder bei steigenden gegenüber fallenden Zinsen. Unterschiede zwischen Regimen werden mit einem
+stationären Block-Bootstrap abgesichert (Standardtests unterschätzen bei autokorrelierten Reihen die
+Unsicherheit).
+
+# Argumente
+- `data`: Tabelle (RFrame) mit Spalte `date` (Klasse Date oder in Date umwandelbar), Kursspalten (Kursniveaus,
+  keine Renditen) und Zustandsspalten (z. B. mit `series_align()` und `series_align_macro()` vorbereitet).
+- `assets`: Zeichenvektor der Kursspalten (mindestens zwei).
+- `conditions`: Zeichenvektor der Zustandsspalten (Drittvariablen, in ihrer eigenen Einheit); gehen um eine
+  Periode verzögert ein. `nothing` (Standard) = keine bedingte Analyse.
+- `frequency`: Renditefrequenz: `"week"` (Standard; ISO-Woche, vermeidet Effekte unterschiedlicher
+  Handelszeiten), `"day"` oder `"month"`.
+- `quantiles`: Numerischer Vektor von Tail-Wahrscheinlichkeiten als Anteil (Standard `[0.05, 0.10]`) für die
+  Tail-Kennzahlen über die ganze Stichprobe (siehe `tail_dependence()`).
+- `breaks`: Optional benannte Liste von Grenzen je Zustandsvariable in deren Einheit, z. B. `(inflation =
+  [-Inf, 2, 4, Inf],)`; Intervalle links geschlossen, rechts offen. `nothing` (Standard) bzw. fehlender
+  Eintrag = `n_regimes` gleich besetzte Quantilsgruppen.
+- `n_regimes`: Anzahl Regime ohne `breaks` (ganze Zahl, Standard 3: niedrig, mittel, hoch). Fallen
+  Quantilsgrenzen zusammen oder bliebe eine Quantilsgruppe leer (diskrete Zustände wie 1/2 aus
+  `regime_states()`), entstehen weniger Regime. Leere Regime aus vorgegebenen `breaks` erscheinen mit `n = 0`
+  und `NA`-Kennzahlen.
+- `window`: Fenster der rollierenden Pearson-Korrelation in Perioden der gewählten Frequenz. `nothing`
+  (Standard) = Anzahl Perioden je Jahr (aus den Daten ermittelt, mindestens 10).
+- `dcc`: Logisch: DCC(1,1) mit `dependence_dcc()` schätzen (nur bei mindestens 100 Perioden; Fehler werden als
+  Meldung ausgegeben).
+- `copulas`: Logisch: Copula-Fits mit `copula_fit()` je Paar (und je Regime ab 40 Perioden).
+- `B`: Anzahl Bootstrap-Wiederholungen für die Regime-Vergleiche (ganze Zahl, Standard 499; 0 = aus).
+- `block`: Mittlere Blocklänge des stationären Bootstraps in Perioden. `nothing` (Standard) =
+  Politis-White-Schätzung auf dem Produkt der standardisierten Renditen (Maximum über die Paare, begrenzt auf
+  2 bis n / 10).
+- `tail_q`: Tail-Wahrscheinlichkeit als Anteil (Standard 0.10) für die Tail-Kennzahlen je Regime.
+- `seed`: Startwert für den Bootstrap. Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis
+  reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit `nothing` wird genau einmal ein
+  Startwert aus dem Zufallszustand von SimLev gezogen (siehe `simlev_seed()`), wiederholte Aufrufe liefern
+  dann verschiedene Ergebnisse. `set.seed()` wirkt nicht.
+
+# Rückgabe
+Objekt der Klasse `SimLevDependence`, eine Liste mit
+
+- returns: Tabelle (RFrame) mit `date` (Periodenende), den Log-Renditen der Anlagen (Anteile je Periode) und
+  den verzögerten Zustandsvariablen.
+- correlation: Liste der Matrizen `pearson`, `spearman`, `kendall`.
+- pairs: Tabelle (RFrame) je Paar: `pair`, `pearson`, `spearman`, `kendall`, je Wert von `quantiles`
+  `lambda_lower_`q und `lambda_upper_`q (z. B. `lambda_lower_0.05`); mit `copulas = true` zusätzlich `copula`
+  (beste Familie nach AIC), `copula_lambda_lower`, `copula_lambda_upper`, `t_rho`, `t_nu` (Parameter der
+  t-Copula).
+- tail: Ergebnis von `tail_dependence()` je Paar (Spalte `pair`) und Quantil.
+- copulas: Benannte Liste der `copula_fit()`-Tabellen je Paar oder `nothing`.
+- rolling: Tabelle (RFrame) mit `date` und der rollierenden Korrelation je Paar (`nothing`, wenn die Historie
+  nicht länger als `window` ist).
+- dcc: Ergebnis von `dependence_dcc()` oder `nothing`.
+- conditional: Liste je Zustandsvariable: Tabelle (RFrame) je Paar und Regime mit `n`, `vol_1`, `vol_2`
+  (annualisierte Volatilität der Log-Renditen als Anteil), `pearson`, `spearman`, `kendall`, `lambda_lower`,
+  `lambda_upper`, `exceed_lower` (bei `tail_q`), `t_rho`, `t_nu`, `copula`, `copula_lambda_lower` und mit
+  Bootstrap `pearson_lo`, `pearson_hi` (90-%-Intervall).
+- regimes: Liste je Zustandsvariable: `regime`, `n`, `mean_state` (mittlerer Zustand im Regime).
+- differences: Tabelle (RFrame) (oder `nothing`): oberstes minus unterstes Regime je Paar und
+  Zustandsvariable, `diff_pearson`, `diff_spearman` mit 95-%-Bootstrap-Intervall (`lo_`, `hi_`) und
+  zweiseitigem p-Wert (`p_`).
+
+sowie `assets`, `conditions`, `frequency`, `ppy` (Perioden je Jahr, aus den Daten), `window`, `block`, `B`,
+`tail_q`. Methoden `print` und `plot`.
+
+# Details
+Renditen: Die Zeilen werden nach `date` sortiert (mit Hinweis, falls nötig; fehlende oder doppelte Daten sind
+ein Fehler, ebenso Kurse <= 0 oder nicht endliche Kurse). Die Kurse werden je Anlage mit dem letzten Wert
+fortgeschrieben (führende Lücken bleiben leer), auf die letzte vorhandene Zeile jeder Periode reduziert
+(`"week"`: ISO-Woche, `"month"`: Kalendermonat, `"day"`: jede Zeile) und in Log-Renditen log(P_t / P_t-1)
+(Anteile, keine Prozent) umgerechnet. Zeilen mit fehlenden Renditen entfallen; bei `"day"` auch Zeilen, in
+denen alle Anlagen die Rendite 0 haben (z. B. Feiertage). Zustandsvariablen werden ebenfalls fortgeschrieben
+und gehen mit ihrem Wert am Ende der Vorperiode ein.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 1500
+d = RFrame("date" => Date(2010, 1, 1) .+ Day.(0:n-1))
+infl = 2 .+ cumsum(0.05 .* randn(rng, n))
+e1 = randn(rng, n); e2 = randn(rng, n)
+rho = ifelse.(infl .> 2, 0.5, -0.3)
+d["stocks"] = 100 .* exp.(cumsum(0.01 .* e1))
+d["bonds"] = 100 .* exp.(cumsum(0.005 .* (rho .* e1 .+ sqrt.(1 .- rho .^ 2) .* e2)))
+d["inflation"] = infl
+da = dependence_analysis(d, ["stocks", "bonds"]; conditions = "inflation", B = 19, seed = 1)
+println(da["correlation"])
+```
 """
 function dependence_analysis(data, assets; conditions = nothing, frequency = ("week", "day", "month"),
                              quantiles = [0.05, 0.10], breaks = nothing, n_regimes = 3, window = nothing,
@@ -1017,7 +1202,7 @@ function dependence_analysis(data, assets; conditions = nothing, frequency = ("w
                                c == "n" ? Int[r[c] for r in rows] : Float64[r[c] for r in rows]) for c in cnames)...)
             if B > 0 && nlv >= 2
                 nk = size(Xk, 1)
-                # Regel 3/4: seed = nothing -> einmal k aus G (beim ersten Bootstrap), dann je Zustand wie seed = k
+                # seed = nothing -> einmal k aus G (beim ersten Bootstrap), dann je Zustand wie seed = k
                 seed === nothing && (seed = _SL().next_seed())
                 S = _SL().main_stream(seed)
                 boot = Any[]
@@ -1164,7 +1349,7 @@ end
 # Quantilsregression, Tail-Regression, CoVaR
 # ═════════════════════════════════════════════════════════════════════════════
 
-"OLS-Start über `.sl_lsfit` (Householder-QR, Entwurf B.7): (Fit, Rang, Pivot)."
+"OLS-Start über `.sl_lsfit` (Householder-QR): (Fit, Rang, Pivot)."
 function _qr_rank_pivot_coef(Xm, y)
     qx = SimLev.SLib.lsfit(_fmat(Xm), _fvec(y))
     rank = Int(qx["rank"])
@@ -1180,9 +1365,61 @@ _is_numeric(x) = x isa Real && !(x isa Bool) || (x isa AbstractArray && _is_numc
 """
     quantile_regression(y, X = nothing, tau = 0.5; intercept = true, tol = 1e-10, maxit = 2000)
 
-Lineare Quantilsregression (exakte Lösung mit Optimalitätsnachweis). `X`:
-Vektor, Matrix, `NamedMat` oder `RFrame` (ohne Konstante); `nothing` = nur
-Konstante. Ergebnis: benannter Vektor der Koeffizienten.
+Lineare Quantilsregression (exakte Lösung mit Optimalitätsnachweis).
+
+Schätzt die Koeffizienten des bedingten τ-Quantils von `y` (Koenker & Bassett 1978), d. h. minimiert Σ_i
+ρ_τ(y_i - x_i'β) mit ρ_τ(r) = r(τ - 1\\r < 0\\). Geliefert wird die exakte Lösung dieses linearen Programms mit
+Optimalitätsnachweis (Ausnahme: entartete Fälle, siehe unten), berechnet in zwei Schritten (Kern in C++):
+
+- MM-Algorithmus von Hunter & Lange (2000), ausgehend von der KQ-Lösung: iterativ gewichtete kleinste Quadrate
+  mit β ← (X'WX)^-1(X'Wy + (τ - 1/2) X'1), W = diag(1 / (2(ε + |r_i|))) in vier Stufen mit ε = sd(y) mal 1e-2,
+  1e-4, 1e-6, 1e-8.
+- Ecken-Politur: Aus den p Beobachtungen mit den kleinsten Residuen der Näherung (linear unabhängig gewählt)
+  wird die Ecke des linearen Programms berechnet, die diese Beobachtungen exakt interpoliert, und über die
+  Subgradientenbedingung auf Optimalität geprüft (an entarteten Ecken wie unten per linearem Programm). Ist
+  der Nachweis erbracht (nach jeder Stufe und alle 25 Iterationen geprüft), ist diese Ecke das Ergebnis.
+
+Gelingt der Nachweis bis zur letzten Stufe nicht (z. B. bei τ nahe 0 oder 1, wenn die Näherung noch weit von
+der Ecke entfernt ist), folgen von dieser Ecke aus Austauschschritten wie im Simplex-Verfahren von Barrodale &
+Roberts (1974): Solange eine Kante der Ecke abwärts führt, wird entlang der steilsten bis zum Minimum
+gegangen; die Zielfunktion fällt dabei streng. Ohne Abstiegskante wird die Optimalität exakt nachgewiesen; an
+entarteten Ecken (weitere Residuen exakt 0, z. B. bei diskreten Regressoren, gerundeten Werten oder doppelten
+Beobachtungen) über die Bedingung, dass 0 im Teildifferential liegt: Es muss λ_j ∈ [τ - 1, τ] für die
+Beobachtungen mit Residuum 0 geben mit Σ_j λ_j x_j = -Σ_r_i ≠ 0 ψ_τ(r_i) x_i; geprüft als lineares
+Zulässigkeitsproblem (Phase 1 des Simplex-Verfahrens mit beschränkten Variablen, gleiche Zeilen x_j
+zusammengefasst). Scheitert der Nachweis, erscheint eine Warnung, und geliefert wird die gefundene Ecke,
+sofern ihr Zielwert nicht größer ist als der der MM-Näherung, sonst die MM-Näherung. Ist die Lösung nicht
+eindeutig (z. B. ohne Regressoren, wenn n * tau ganzzahlig ist), wird eine der optimalen Lösungen geliefert.
+
+# Argumente
+- `y`: Numerischer Vektor, Zielvariable (beliebige Einheit).
+- `X`: Regressoren als numerischer Vektor, Matrix oder Tabelle (RFrame) (ohne Konstante). `nothing` (Standard)
+  = nur Konstante, d. h. das empirische τ-Quantil von `y`. Zeilen mit nicht endlichen Werten in `y` oder `X`
+  werden entfernt. Erwartet werden `length(y)` Zeilen, nur numerische Spalten (Faktoren vorher in
+  Indikatorspalten umwandeln) und linear unabhängige Regressoren einschließlich der Konstante; sonst bricht
+  die Funktion mit Fehler ab.
+- `tau`: Quantil als Anteil, echt zwischen 0 und 1 (Standard 0.5 = Median-Regression).
+- `intercept`: Logisch: Konstante aufnehmen (Standard `true`).
+- `tol`: Konvergenzschwelle der MM-Stufen: Eine Stufe endet, wenn sich kein Koeffizient um mehr als `tol * (1
+  + max|beta|)` ändert (in den ersten drei Stufen wird höchstens 1e-7 verlangt). Standard 1e-10.
+- `maxit`: Höchstzahl der Iterationen je MM-Stufe (ganze Zahl, Standard 2000).
+
+# Rückgabe
+Benannter numerischer Koeffizientenvektor in der Einheit von `y` je Einheit des Regressors: `"(Intercept)"`
+(falls `intercept = true`) und je Spalte von `X` deren Name (sonst `x1`, `x2`, ...).
+
+# Literatur
+Koenker, R. & Bassett, G. (1978), Econometrica 46(1); Hunter, D. R. & Lange, K. (2000), Journal of
+Computational and Graphical Statistics 9(1); Barrodale, I. & Roberts, F. D. K. (1974), Communications of the
+ACM 17(6).
+
+# Beispiel
+```julia
+using SimLev, Random
+rng = MersenneTwister(1)
+x = randn(rng, 500); y = 1 .+ 2 .* x .+ randn(rng, 500) .* (1 .+ abs.(x))
+println(quantile_regression(y, x, 0.9))
+```
 """
 function quantile_regression(y, X_pos = nothing, tau_pos = 0.5; X = X_pos, tau = tau_pos, intercept::Bool = true, tol = 1e-10, maxit = 2000)
     tv = tau isa AbstractVector || tau isa Tuple ? collect(tau) : [tau]
@@ -1228,14 +1465,61 @@ function quantile_regression(y, X_pos = nothing, tau_pos = 0.5; X = X_pos, tau =
     RVector(beta; names = nm)
 end
 
-"`.sl_lsfit(X1, y)\$coefficients` (OLS mit Konstante in `X1`, Entwurf B.7)."
+"`.sl_lsfit(X1, y)\$coefficients` (OLS mit Konstante in `X1`)."
 _lm_coef(y, X1) = _fvec(SimLev.SLib.lsfit(_fmat(X1), _fvec(y))["coefficients"])
 
 """
     tail_regression(data, asset, drivers; quantiles = [0.05, 0.25, 0.5, 0.75, 0.95],
                     frequency = "week", B = 199, block = nothing, seed = nothing)
 
-Renditequantile in Abhängigkeit von Drittvariablen (Klasse `SimLevTailRegression`).
+Renditequantile in Abhängigkeit von Drittvariablen (Quantilsregression).
+
+Schätzt für mehrere Quantile, wie sich die Verteilung der Periodenrendite einer Anlage mit dem (verzögerten)
+Zustand von Drittvariablen verschiebt (lineare Quantilsregression mit `quantile_regression()`, zum Vergleich
+OLS für den Mittelwert). Ein negativer Koeffizient der Inflation im 5-%-Quantil heißt z. B.: Bei höherer
+Inflation fallen die schlechten Perioden schlechter aus, auch wenn sich der Median kaum bewegt. Standardfehler
+per stationärem Block-Bootstrap der Perioden.
+
+# Argumente
+- `data`: Tabelle (RFrame) mit Spalte `date` (Date), Kursspalte (Kursniveaus, keine Renditen) und
+  Zustandsspalten.
+- `asset`: Name der Kursspalte (Zeichenkette).
+- `drivers`: Zeichenvektor der Zustandsspalten (Drittvariablen).
+- `quantiles`: Numerischer Vektor der Quantile als Anteil (Standard `[0.05, 0.25, 0.5, 0.75, 0.95]`).
+- `frequency`: Renditefrequenz: `"week"` (Standard, ISO-Woche), `"day"` oder `"month"`.
+- `B`: Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 199; 0 = keine Standardfehler und Intervalle).
+- `block`: Mittlere Blocklänge des stationären Bootstraps in Perioden. `nothing` (Standard) =
+  Politis-White-Schätzung auf den absoluten Abweichungen der Rendite vom Mittel (begrenzt auf 2 bis n / 10).
+- `seed`: Startwert für den Bootstrap. Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis
+  reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit `nothing` wird genau einmal ein
+  Startwert aus dem Zufallszustand von SimLev gezogen (siehe `simlev_seed()`), wiederholte Aufrufe liefern
+  dann verschiedene Ergebnisse. `set.seed()` wirkt nicht.
+
+# Rückgabe
+Objekt der Klasse `SimLevTailRegression` mit `coefficients` (Tabelle (RFrame): `quantile`, `term`, `estimate`,
+`se` (Bootstrap-Standardabweichung), `lower`, `upper` (90-%-Bootstrap-Intervall, 5- und 95-%-Quantil);
+Koeffizienten in Prozentpunkten Log-Rendite je Periode bzw. je Einheit des Treibers), `ols`
+(OLS-Koeffizienten, gleiche Einheit), `data` (aufbereitete Perioden: `date`, Log-Rendite als Anteil,
+verzögerte Treiber) sowie `asset`, `drivers`, `quantiles`, `n` (Anzahl Perioden), `frequency`, `B`, `B_failed`
+(Anzahl Bootstrap-Stichproben, die nicht schätzbar waren, z. B. weil ein Treiber in der Stichprobe konstant
+ist; sie fehlen in Standardfehlern und Intervallen, mit Warnung), `block`. Methoden `print` und `plot`.
+
+# Details
+Zielgröße ist die Log-Rendite der Periode in Prozent, 100 log(P_t / P_t-1); die Kurse werden wie in
+`dependence_analysis()` aufbereitet (Fortschreiben fehlender Werte, letzte Zeile je ISO-Woche bzw. Monat). Die
+Treiber gehen mit ihrem Wert am Ende der Vorperiode in ihrer eigenen Einheit ein.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 1095
+d = RFrame("date" => Date(2015, 1, 1) .+ Day.(0:n-1))
+d["aktien"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+d["inflation"] = 2 .+ cumsum(0.05 .* randn(rng, n))
+tr = tail_regression(d, "aktien", "inflation"; quantiles = [0.05, 0.5, 0.95], B = 49, seed = 1)
+println(tr["coefficients"])
+```
 """
 function tail_regression(data, asset, drivers; quantiles = [0.05, 0.25, 0.5, 0.75, 0.95],
                          frequency = ("week", "day", "month"), B = 199, block = nothing, seed = nothing)
@@ -1262,7 +1546,7 @@ function tail_regression(data, asset, drivers; quantiles = [0.05, 0.25, 0.5, 0.7
     n_failed = 0
     if B > 0
         block === nothing && (block = _rmin(_rmax(2.0, _pw_block_stationary(abs.(y .- SimLev.r_mean(y)))), n / 10))
-        S = _SL().main_stream(seed)                     # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+        S = _SL().main_stream(seed)                     # Hauptstrom
         bs = Matrix{Float64}[]
         for _b in 1:Int(B)
             idx = _boot_idx_stationary(n, n, block, S)
@@ -1328,7 +1612,54 @@ end
 """
     tail_covar(data, system, assets; state = nothing, q = 0.05, frequency = "week")
 
-CoVaR und Delta-CoVaR (Adrian & Brunnermeier 2016), Klasse `SimLevCoVaR`.
+CoVaR und Delta-CoVaR (Adrian & Brunnermeier 2016).
+
+Nach Adrian & Brunnermeier (2016): Wie weit verschiebt sich das `q`-Quantil der Rendite von `system` (z. B.
+das Portfolio), wenn eine Anlage selbst in ihrem `q`-Quantil steht, gegenüber ihrem Median? Mit `state`
+(Drittvariablen, verzögert) werden VaR und CoVaR zeitvariabel: X^sys_t = α + β X^i_t + γ' M_t-1 + ε (Quantil
+q) Δ CoVaR_t = β (VaR^i_t(q) - VaR^i_t(0.5)) Dabei ist VaR^i_t(p) das per `quantile_regression()` geschätzte
+(bei `state = nothing` konstante) p-Quantil der Rendite der Anlage, also eine Rendite mit Vorzeichen (Verluste
+negativ), und CoVaR_t = α + β VaR^i_t(q) + γ' M_t-1. Renditen sind Log-Renditen der Periode in Prozent, 100
+log(P_t / P_t-1), aufbereitet wie in `dependence_analysis()` (Fortschreiben fehlender Kurse, letzte Zeile je
+ISO-Woche bzw. Monat); Zustandsvariablen gehen mit dem Wert am Ende der Vorperiode ein. Perioden mit fehlenden
+Werten entfallen.
+
+# Argumente
+- `data`: Tabelle (RFrame) mit Spalte `date` (Date), Kursspalten (Kursniveaus, keine Renditen) und
+  gegebenenfalls Zustandsspalten.
+- `system`: Name der Kursspalte des Systems bzw. Portfolios (Zeichenkette).
+- `assets`: Zeichenvektor der Kursspalten der einzelnen Anlagen.
+- `state`: Optionaler Zeichenvektor der Zustandsspalten (in ihrer eigenen Einheit). `nothing` (Standard) =
+  zeitkonstante Quantile.
+- `q`: Quantil als Anteil (Standard 0.05 = 5-%-Quantil).
+- `frequency`: Renditefrequenz: `"week"` (Standard, ISO-Woche), `"day"` oder `"month"`.
+
+# Rückgabe
+Objekt der Klasse `SimLevCoVaR` mit
+
+- summary: Tabelle (RFrame) je Anlage: `asset`, `beta` (Steigung der Systemrendite auf die Anlagerendite im
+  q-Quantil, ohne Einheit), `var`, `covar`, `delta_covar` (Mittel über die Zeit) und `delta_covar_min`
+  (kleinster Wert), alle außer `beta` in Prozent je Periode (Renditen mit Vorzeichen, Verluste negativ).
+- series: Tabelle (RFrame) mit `date`, `asset`, `var`, `covar`, `delta_covar` je Periode und Anlage (Prozent
+  je Periode).
+
+sowie `system`, `state`, `q`, `frequency` und `n` (Anzahl Perioden). Methoden `print` und `plot`.
+
+# Literatur
+Adrian, T. & Brunnermeier, M. K. (2016), American Economic Review 106(7), 1705-1741.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 1095
+d = RFrame("date" => Date(2015, 1, 1) .+ Day.(0:n-1))
+e = randn(rng, n)
+d["aktien"] = 100 .* cumprod(1 .+ 0.01 .* e)
+d["anleihen"] = 100 .* cumprod(1 .+ 0.004 .* (0.3 .* e .+ randn(rng, n)))
+d["portfolio"] = 0.6 .* d["aktien"] .+ 0.4 .* d["anleihen"]
+println(tail_covar(d, "portfolio", ["aktien", "anleihen"]; q = 0.05))
+```
 """
 function tail_covar(data, system, assets; state = nothing, q = 0.05, frequency = ("week", "day", "month"))
     data = SimLev.as_rframe(data)
@@ -1412,9 +1743,45 @@ end
 """
     dependence_validate(boot, data; agg = 5, q = 0.10, max_paths = 200)
 
-Abhängigkeitsstruktur von Bootstrap-Pfaden (`bootstrap_result`) mit der
-Historie vergleichen; `RFrame` mit `pair`, `metric`, `historical`, `median`,
-`p05`, `p95`, `percentile`.
+Abhängigkeitsstruktur von Bootstrap-Pfaden prüfen.
+
+Vergleicht Kendalls Tau, Pearson-Korrelation, empirische Tail-Abhängigkeit und die untere
+Exceedance-Korrelation der Indizes in der Historie mit ihrer Verteilung über die Bootstrap-Pfade. Liegt der
+historische Wert am Rand der Pfadverteilung, gibt das Verfahren die Abhängigkeit nicht wieder (z. B.
+Tail-Abhängigkeit beim IID-Bootstrap zwar erhalten, Volatilitäts-Clustering aber nicht).
+
+# Argumente
+- `boot`: Objekt der Klasse `bootstrap_result` aus `bootstrap()` mit mindestens zwei Indizes in der
+  Konfiguration.
+- `data`: Historische Daten wie für `bootstrap()` (Tabelle (RFrame) oder Matrix mit den Spalten der
+  Konfiguration).
+- `agg`: Zeilen je Periode für die Aggregation (ganze Zahl, Standard 5; z. B. 5 Handelstage oder 7
+  Kalendertage ergibt Wochen; 1 = keine Aggregation).
+- `q`: Tail-Wahrscheinlichkeit als Anteil für die Tail-Kennzahlen (Standard 0.10, siehe `tail_dependence()`).
+- `max_paths`: Höchstens so viele Pfade auswerten (die ersten `max_paths` Pfade; Standard 200).
+
+# Rückgabe
+Tabelle (RFrame) mit einer Zeile je Indexpaar und Kennzahl: `pair`, `metric` (`"kendall"`, `"pearson"`,
+`"lambda_lower"`, `"lambda_upper"`, `"exceed_lower"`), `historical` (Wert der Historie), `median`, `p05`,
+`p95` (Median und 5-/95-%-Quantil über die Pfade) und `percentile` (Anteil der Pfade mit Wert <= Historie, 0
+bis 1; Werte nahe 0 oder 1 zeigen, dass die Pfade die Kennzahl nicht wiedergeben).
+
+# Details
+Alle Kennzahlen werden auf Log-Renditen berechnet, die über nicht überlappende Blöcke von `agg` Zeilen
+summiert werden (ein unvollständiger Rest am Ende entfällt; mindestens 20 Blöcke nötig). Historie: Renditen
+der Indizes aus `data` gemäß `boot["config"]` (Brutto-Renditen bzw. Kurse bei `input = "prices"`); Pfade:
+Log-Differenzen der Indexspalten der Pfade. Hebelprodukte und Zusatzreihen gehen nicht ein.
+
+# Beispiel
+```julia
+using SimLev, Random
+rng = MersenneTwister(2)
+us = 1 .+ 3e-4 .+ 0.01 .* randn(rng, 1500)
+d = RFrame("us" => us, "eu" => us .* (1 .+ 0.004 .* randn(rng, 1500)))
+b = bootstrap(d, bootstrap_config((us = "us", eu = "eu")); method = "stationary", n = 20, params = (L = 20,),
+              seed = 1, progress = false)
+println(dependence_validate(b, d; agg = 5, q = 0.10))
+```
 """
 function dependence_validate(boot, data; agg = 5, q = 0.10, max_paths = 200)
     data = SimLev.as_rframe(data)
@@ -1481,12 +1848,35 @@ end
 """
     regime_subset(data, condition; min_run = 1, env = Main)
 
-Zeilen eines Regimes für Stress-Bootstraps. `condition`: logischer Vektor der
-Länge `nrow(data)` (NA = FALSE) oder Ausdruck als Text in R-Syntax (z. B.
-`"inflation >= 4 & zins < 2"`, siehe `_eval_condition`; freie Variablen aus
-`env`). Ergebnis: Teilmenge von
-`data`; `attrs(out)["episodes"]` mit `start`, `end`, `length` (und
-`start_date`, `end_date`, falls `date` vorhanden).
+Zeilen eines Regimes für Stress-Bootstraps.
+
+Wählt die Zeilen aus, in denen `condition` gilt (z. B. hohe Inflation), und verwirft zu kurze Episoden. Mit
+Rendite-Eingabe (`bootstrap_config(input = "returns")`) lässt sich das Ergebnis direkt an `bootstrap()` oder
+`bootstrap_study()` übergeben: Die Pfade bestehen dann nur aus Blöcken dieses Regimes (inklusive der
+mitgezogenen Zusatzreihen wie Zinsen). Die Episoden werden ohne Trennung aneinandergehängt; Bootstrap-Blöcke
+können daher über Episodengrenzen hinwegreichen.
+
+# Argumente
+- `data`: Tabelle (RFrame), eine Zeile je Beobachtung (für `bootstrap()` typischerweise Tage mit
+  Brutto-Renditen wie 1.002 und Zusatzreihen). Eine Spalte `date` ist optional.
+- `condition`: Logischer Vektor der Länge `nrow(data)` (NA = false) oder Ausdruck als Zeichenkette, der in
+  `data` ausgewertet wird, z. B. `"inflation >= 4"`.
+- `min_run`: Mindestlänge einer Episode in Zeilen (ganze Zahl, Standard 1); kürzere zusammenhängende
+  Abschnitte werden verworfen.
+- `env`: Modul, in dem freie Variablen und Funktionen der Bedingungen gesucht werden (Standard `Main`).
+
+# Rückgabe
+Teilmenge von `data` (Zeilen der behaltenen Episoden in ursprünglicher Reihenfolge) mit Attribut `episodes`:
+Tabelle (RFrame) mit `start`, `end` (Zeilennummern in `data`), `length` (Zeilen) und, falls `data` eine Spalte
+`date` hat, `start_date`, `end_date`. Fehler, wenn keine Episode die Bedingung erfüllt.
+
+# Beispiel
+```julia
+using SimLev, Random
+d = RFrame("r" => 1 .+ 0.01 .* randn(MersenneTwister(1), 100), "infl" => [fill(1.0, 40); fill(5.0, 30); fill(1.0, 30)])
+s = regime_subset(d, "infl >= 4"; min_run = 10)
+println(SimLev.attrs(s)["episodes"])
+```
 """
 function regime_subset(data, condition; min_run = 1, env = Main)
     data = SimLev.as_rframe(data)

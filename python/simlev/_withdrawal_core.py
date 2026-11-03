@@ -1,8 +1,8 @@
 """Entnahme-Kern (``.wd_simulate``, Python-Hülle).
 
 Es rechnet der gemeinsame Kern von R und Python (``core/withdrawal_core_impl.h`` über
-``simlev._ext``, Etappe 7.3a). Der bitgleiche Python-Port als Rückfall (``SIMLEV_NO_EXT=1``,
-mit ``rule_amount``, ``pmt_due`` und der FIFO-Steuer) ist mit Etappe 9.6c entfallen.
+``simlev._ext``). Der bitgleiche Python-Port als Rückfall (``SIMLEV_NO_EXT=1``,
+mit ``rule_amount``, ``pmt_due`` und der FIFO-Steuer) ist seit 1.0.0 entfallen.
 """
 from __future__ import annotations
 
@@ -61,6 +61,6 @@ def wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_value, in
            "terminal_real": vec(arrs[3]), "terminal_nominal": vec(arrs[4]), "taxes_real": vec(arrs[5]),
            "failed": vec(arrs[7]), "depletion_period": vec(arrs[6]),
            "wealth_end": mat(arrs[8], enr, enc), "taxes_end": mat(arrs[9], enr, enc)}
-    if len(tariff_par):  # T14: Jahreszeilen nur mit Tarifweg (sonst wie bisher)
+    if len(tariff_par):  # Jahreszeilen nur mit Tarifweg (sonst wie bisher)
         out["tariff_years"] = mat(arrs[10], tnr, tnc)
     return out

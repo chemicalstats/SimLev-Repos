@@ -1,17 +1,17 @@
 // core/withdrawal_core_impl.h
 // Entnahme-Simulationen (Decumulation) fuer SimLev, reine Rechnung ohne R, Python und Julia
 //
-// GEMEINSAME QUELLE FUER R, PYTHON UND JULIA (Etappe 7.3a, Julia seit N7): R ruft den Kern ueber die
+// GEMEINSAME QUELLE FUER R, PYTHON UND JULIA: R ruft den Kern ueber die
 // .Call-Huelle in r/src/withdrawal_core.cpp auf (sie wandelt nur die R-Objekte um),
 // Python ueber das Erweiterungsmodul simlev._ext (python/src/_ext_withdrawal.cpp).
-// Kanonisch in core/ (seit Etappe 9.6c, F16); R und Python bauen aus
+// Kanonisch in core/; R und Python bauen aus
 // Byte-fuer-Byte-Kopien in r/src/ bzw. python/src/core/ (core/sync.py
 // --write/--check); Aenderungen nur in core/ vornehmen und danach kopieren.
-// Die Python-Huelle (simlev/_withdrawal_core.py) ruft nur noch diesen Kern; der reine
-// Python-Kern als Rueckfall ist seit 9.6c entfallen.
-// Julia (seit N7) ruft den Kern ueber die C-ABI-Huelle core/simlev_cabi.cpp auf (simlev_c_wd_simulate;
+// Die Python-Huelle (simlev/_withdrawal_core.py) ruft nur diesen Kern (einen reinen
+// Python-Kern als Rueckfall gibt es seit 1.0.0 nicht mehr).
+// Julia ruft den Kern ueber die C-ABI-Huelle core/simlev_cabi.cpp auf (simlev_c_wd_simulate;
 // ccall aus julia/src/withdrawal_core.jl) und baut aus der Byte-fuer-Byte-Kopie in julia/deps/core/
-// (libslc, julia/deps/build.jl); der fruehere Julia-Port (F2) ist entfallen.
+// (libslc, julia/deps/build.jl); der fruehere Julia-Port ist entfallen.
 //
 // Aufbau wie alle C++-Kerne (simlev_core.h): statische Funktionen ueber den Sichten
 // simlev_host::NumVec/IntVec/NumMat und den Host-Makros SIMLEV_* (Fehler, NA,
@@ -53,7 +53,7 @@
 //  13 sensible        Basis (rate * P1 real) + e * realer Vorjahresgewinn
 //  14 hebeler         Autopilot II: lambda * W_vj * Infl + (1 - lambda) * PMT(r, Restjahre) * P
 //
-// Tarifweg (T14, Variante T1; tax_profile(income = income_tariff())): Veranlagung je Planjahr und Pfad mit
+// Tarifweg (tax_profile(income = income_tariff())): Veranlagung je Planjahr und Pfad mit
 // tariff_core_impl.h wie der Jahresabschluss von simulation() (.tariff_close): K = mit Abgeltungsteuer
 // belastete Bemessungsgrundlage des Planjahres (nach Teilfreistellung, Verlusttopf und Pauschbetrag; die VP
 // zaehlt im Jahr ihres Zuflusses), zvE je Planjahr nominal wie angegeben. Der Saldo wird mit der ersten
@@ -420,7 +420,7 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
       }
       n -= G / u; if (all) { n = 0.0; basis = 0.0; }
     };
-    // Abrechnung der offenen Vorabpauschale am Pfadende (wie simulation() bei Datenende am 31.12., A7-11):
+    // Abrechnung der offenen Vorabpauschale am Pfadende (wie simulation() bei Datenende am 31.12.):
     // 1. VP-Steuer vorab mit den Toepfen des Folgejahres vor dem Verkauf (neuer Pauschbetrag, Verlusttopf am
     //    Jahresende) bestimmen und per Zwangsverkauf noch im ablaufenden Jahr (dessen Toepfe) zahlen;
     // 2. endgueltige VP-Steuer mit dem Verlusttopf nach diesem Verkauf; Differenz wie .pay_vp(prepaid):

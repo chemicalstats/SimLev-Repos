@@ -170,7 +170,7 @@ plot.SimLevResult <- function(
   dates <- if (!is.null(x$dates)) x$dates else seq_along(x$worth)
   n_days <- length(x$worth)
 
-  # R1-19: Kennzahlen wie in x$statistics (simulation()): Tagesrenditen um
+  # Kennzahlen wie in x$statistics (simulation()): Tagesrenditen um
   # Einzahlungen bereinigt, aufgefuellte Tage (LOCF) ausgeschlossen, Annualisierung
   # mit der tatsaechlichen Beobachtungsfrequenz statt fest 252
   .dash <- .dashboard_returns(x)
@@ -399,7 +399,7 @@ plot.SimLevResult <- function(
     dates_date <- as.Date(dates)
     year_month <- format(dates_date, "%Y-%m")
     
-    # R1-19: Monatsende zu Monatsende (erster Monat ab Starttag), einzahlungsbereinigt:
+    # Monatsende zu Monatsende (erster Monat ab Starttag), einzahlungsbereinigt:
     # verkettete Tagesrenditen des Monats
     month_ret <- c(0, .dash$all_returns)
     monthly_data <- tapply(month_ret, year_month, function(r) (prod(1 + r) - 1) * 100)
@@ -694,7 +694,7 @@ export_dashboard <- function(x, filename = "dashboard.pdf",
                              width = 14, height = 10, ...) {
   pdf(filename, width = width, height = height)
   dev_pdf <- dev.cur()
-  on.exit(dev.off(dev_pdf))   # R1-22: PDF-Geraet auch bei Fehler schliessen
+  on.exit(dev.off(dev_pdf))   # PDF-Geraet auch bei Fehler schliessen
   plot(x, ...)
   message(sprintf("export_dashboard: Dashboard gespeichert in %s", filename))
 }

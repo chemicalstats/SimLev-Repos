@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Fonds-Wrapper (Port von r/R/wrapper.R, Etappe 6.5c): Anteilswert (NAV) aus einer
+# Fonds-Wrapper (Gegenstück zu r/R/wrapper.R): Anteilswert (NAV) aus einer
 # inneren Strategie. Vorlage: python/simlev/wrapper.py.
 #
 #   wrapper_config(strategy; rebalance, costs, order_fee, volume)  → RList der Klasse SimLevWrapperConfig
@@ -36,15 +36,68 @@ using Base.CoreLogging: AbstractLogger, current_logger, with_logger
 """
     wrapper_config(strategy; rebalance = nothing, costs = funds_costs(), order_fee = nothing, volume = nothing)
 
-Fonds-Wrapper konfigurieren (R: `wrapper_config()`, Etappe 6.5c). `strategy`: innere Strategie aus
-`create_strategy()` oder eine benannte Liste, die `create_strategy(; assets = )` annimmt (Gewichte mit
-Summe 1, ohne verschachtelte Wrapper; innere Signale erlaubt). `rebalance`: `nothing` oder
-`rebalance_plan()` (Umschichten innen). `costs`: `funds_costs()` (Verwaltungsgebühr in % p. a., täglich je
-Kalendertag; Performancegebühr in % über dem Höchststand, täglich abgegrenzt, am 31.12. festgeschrieben).
-`order_fee`: Ordergebühr der inneren Käufe wie in `sim_costs()`; feste Beträge, `min` und `max` brauchen das
-Fondsvolumen `volume` (EUR, Start der inneren Rechnung; sonst 100). Innere Assets mit Spread > 0 ergeben
-einen Hinweis. Ergebnis: `RList` der Klasse `SimLevWrapperConfig` (`strategy`, `rebalance`, `costs`,
-`order_fee`, `volume`).
+Fonds-Wrapper konfigurieren.
+
+Beschreibt einen Fonds-Wrapper: Innen handelt eine eigene Strategie (mit Umschichten, Signalen und
+Ordergebühren), es fallen Verwaltungs- und Performancegebühr an. Außen ist der Wrapper **ein** Asset der
+Strategie: `asset_config(..., wrapper = wrapper_config(...))`. Der Anleger kauft und verkauft Anteile mit
+eigenem Spread und eigenen Order- und Sparplangebühren und zahlt Steuern wie auf ein Einzelpapier (nach
+`asset_class` bzw. `tax_regime`). `simulation` rechnet dafür je Lauf den Anteilswert mit `wrapper_nav`.
+
+# Argumente
+- `strategy`: Innere Strategie: Objekt aus `create_strategy` oder eine benannte Liste, die
+  `create_strategy(assets = )` annimmt. Die Namen sind Kursspalten in `data`. Kein inneres Asset darf selbst
+  einen Wrapper haben (Fehler). Innere Signale (`trading = "signal"`) sind erlaubt und beziehen sich auf
+  Spalten in `data`. Die Gewichte (`share`) müssen sich auf 1 summieren. Innere Spreads gelten wie angegeben
+  (Standard 0); Werte > 0 ergeben beim Erzeugen einen Hinweis mit der Liste der Assets.
+- `rebalance`: `nothing` (kein Umschichten) oder ein Objekt aus `rebalance_plan`: Umschichten innerhalb des
+  Wrappers.
+- `costs`: Objekt aus `funds_costs`: Verwaltungsgebühr `fee` in Prozent p. a. und Performancegebühr
+  `performance_fee` in Prozent (Rechnung siehe `wrapper_nav`). Standard: `funds_costs()` (0,95 % p. a., 5 %).
+- `order_fee`: Ordergebühr der inneren Käufe und Verkäufe (beim Start und beim Umschichten), im Format von
+  `sim_costs`: Zahl (EUR je Order) oder `RList("fixed" => …, "percent" => …, "min" => …, "max" => …)`.
+  `nothing` = keine.
+- `volume`: `nothing` oder Fondsvolumen in EUR (eine Zahl > 0). Pflicht, sobald `order_fee` feste Beträge
+  enthält (`fixed` oder `min` > 0 bzw. `max` < ∞), sonst Fehler; reine Prozentgebühren gehen ohne `volume`.
+  Die innere Rechnung startet mit `volume`, ohne Angabe mit 100. Einzahlungen der Anleger ändern das
+  Fondsvolumen nicht.
+
+# Rückgabe
+Objekt der Klasse `SimLevWrapperConfig`: Liste mit `strategy` (geprüft, Klasse `strategy`), `rebalance`,
+`costs`, `order_fee` (wie übergeben) und `volume`. `print` zeigt innere Assets, Umschichten, Kosten,
+Ordergebühr und Volumen und liefert `x` unsichtbar zurück.
+
+# Details
+**Steuerliche Einordnung.** Ob ein konkreter Wrapper steuerlich ein Investmentfonds (`tax_regime =
+"investment_fund"` mit `partial_exemption`, Vorabpauschale) oder eine Kapitalforderung ist (`asset_class =
+"certificate"`: Besteuerung erst beim Verkauf, ohne Vorabpauschale und Teilfreistellung), entscheidet der
+Nutzer über `asset_class`/`tax_regime` des äußeren Assets; der Code legt das nicht fest.
+
+**Performancegebühr.** Die Rechnung folgt den Leitlinien der ESMA zu Performancegebühren (tägliche Abgrenzung
+bei jeder Berechnung des Anteilswerts, Festschreibung höchstens einmal jährlich, High-Water-Mark über die
+ganze Laufzeit). Diese Leitlinien gelten für OGAW. Bei Zertifikaten gelten die Emissionsbedingungen des
+Produkts; der Nutzer prüft, ob die Rechnung dazu passt.
+
+**Kleines Volumen.** Mindestbeträge der Engine (z. B. entfallen Umschichtungen unter 0,01 EUR) beziehen sich
+innen auf das Volumen (ohne `volume` 100). Für eine genaue Übereinstimmung mit der direkt gehaltenen Strategie
+`volume` in der Größe des Depots angeben.
+
+Mit Wrapper-Assets sind keine äußeren Signale möglich (`trading = "bnh"`).
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 730
+d = RFrame("date" => Date(2020, 1, 1) .+ Day.(0:n-1))
+d["Welt"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+d["Gold"] = 50 .* cumprod(1 .+ 1e-4 .+ 0.008 .* randn(rng, n))
+w = wrapper_config(create_strategy(Welt = asset_config("etf"; share = 0.7), Gold = asset_config("etc"; share = 0.3));
+                   rebalance = rebalance_plan(; unit = "quarter"), costs = funds_costs(0.95, 10))
+s = create_strategy(Zertifikat = asset_config("certificate"; spread = 0.5, wrapper = w))
+r = simulation(d, s; tax = tax_profile(; church_tax = 8), liquidate = true)
+println(r["tax_report"]["total_taxes_paid"])
+```
 """
 function wrapper_config(strategy; rebalance = nothing, costs = funds_costs(), order_fee = nothing, volume = nothing)
     @nospecialize
@@ -244,14 +297,85 @@ _wrapper_max0(x::Float64) = x > 0.0 ? x : 0.0
 """
     wrapper_nav(data, wrapper; splits = nothing)
 
-Anteilswert eines Fonds-Wrappers (R: `wrapper_nav()`, Etappe 6.5c). `data`: data.frame-artig mit `date` und
-den Kursspalten der inneren Strategie (unsortiert wird nach Datum sortiert; das Attribut `filled` aus
-`series_align()` geht an die innere Rechnung); `wrapper`: Ergebnis von `wrapper_config()`; `splits`:
-`nothing` oder `split_rule()` (für die inneren Spalten). Ergebnis: RFrame der Klasse `SimLevWrapperNav`
-(`date`, `nav`, `gross`, `fee`, `perf_fee`, `perf_paid`, `hwm`; Start 100) mit Attributen `inner`
-(inneres `SimLevResult`) und `wrapper`. Eine Zeilenauswahl (`rows(x, i)`) ist eine gewöhnliche Tabelle
-(`RFrame`) ohne Klasse und Attribute (R: `x[i, ]` ergibt einen data.frame); `withdrawal_simulation` nimmt
-nur das ganze Objekt.
+Anteilswert eines Fonds-Wrappers.
+
+Rechnet den täglichen Anteilswert eines Wrappers aus `wrapper_config`: innere Bruttorechnung mit `simulation`,
+dann Verwaltungsgebühr je Kalendertag und Performancegebühr gegen die High-Water-Mark. `simulation()`
+verwendet dieselbe Rechnung für Wrapper-Assets; `wrapper_nav()` dient für eigene Auswertungen und Grafiken,
+als Renditequelle für `withdrawal_simulation` (`x = wrapper_nav(...)`) und zur Prüfung.
+
+# Argumente
+- `data`: `data.frame` mit Spalte `date` und den Kursspalten (und ggf. Signal- und Ereignisspalten) der
+  inneren Strategie. `date` wird wie in `simulation()` als Datum gelesen; unsortierte Zeilen werden nach Datum
+  sortiert.
+- `wrapper`: Objekt aus `wrapper_config`.
+- `splits`: `nothing` oder Objekt aus `split_rule` für die inneren Spalten (in `simulation()` die `splits` des
+  Aufrufs).
+
+# Rückgabe
+Objekt der Klasse `["SimLevWrapperNav", "data.frame"]` mit einer Zeile je NAV-Tag:
+
+- date: Datum.
+- nav: Anteilswert NAV_t (Start 100).
+- groß: Bruttowert 100 · G_t / G_0 ohne Fondskosten.
+- fee: Verwaltungsgebühr des Tages je Anteil f_t.
+- perf_fee: Abgegrenzte (aufgelaufene, noch nicht festgeschriebene) Performancegebühr je Anteil A_t am Tag t.
+- perf_paid: Am Tag festgeschriebene Performancegebühr je Anteil (am letzten NAV-Tag eines Kalenderjahres A_t,
+  sonst 0).
+- hwm: High-Water-Mark H nach dem Tag (nach einer Festschreibung).
+
+Attribute: `inner` (das innere `SimLevResult`) und `wrapper` (das `SimLevWrapperConfig`). `print` zeigt
+Zeitraum, Kosten p. a. und Endwert (mit Brutto) und liefert `x` unsichtbar zurück.
+
+**Auswahl.** Jede Auswahl von Zeilen oder Spalten (`x[i, ]`, `x[j]`, `x[i, j]`, `x[]`, `head()`, `tail()`,
+`subset()`) liefert einen gewöhnlichen `data.frame` ohne Klasse `SimLevWrapperNav` und ohne die Attribute
+`inner` und `wrapper`, weil das innere Ergebnis nicht mehr zum Ausschnitt passt (Python: `pandas.DataFrame`
+ohne `attrs`, Julia: `rows()` ohne Klasse und Attribute). Für `withdrawal_simulation` ist ein Ausschnitt keine
+Renditequelle mehr: `withdrawal_simulation(withdrawal_cohorts(x[i, ], price = "nav", inflation = 2))`.
+
+# Details
+**1. Innere Bruttorechnung.** `simulation(d, strategy, start_value = S, costs = sim_costs(order_fee =
+order_fee), rebalance = rebalance, splits = splits, tax = nothing, fractions = true)` mit S = `volume`, ohne
+`volume` S = 100. `d` ist `data` ab der ersten Zeile, in der mindestens eine innere Kursspalte einen Wert hat.
+NAV-Tage sind die Zeilen von `d`, die die innere Rechnung nicht als aufgefüllt führt; an Tagen, an denen alle
+inneren Kurse `NA` sind (oder die das Attribut `filled` als aufgefüllt kennzeichnet), gibt es keinen
+Anteilswert. G_t ist der Gesamtwert der inneren Rechnung am NAV-Tag t; vor dem ersten NAV-Tag gilt G_0 = S.
+Der Paketzustand der Ordergebühren wird gesichert und, auch bei Fehlern, wiederhergestellt.
+
+**2. Verwaltungsgebühr täglich je Kalendertag.** Mit U_0 = 100: a_t = U_t-1 · G_t / G_t-1, f_t = a_t · (fee /
+100 · Δ d_t / D_t), U_t = a_t - f_t. Δ d_t = Kalendertage seit dem vorigen NAV-Tag (am ersten NAV-Tag seit dem
+ersten Tag von `d`, in der Regel 0), D_t = 366 im Schaltjahr des Datums t, sonst 365. Ein Zeitraum über den
+Jahreswechsel zählt mit D_t des Jahres von t. Rechenfolge: ((fee / 100) · Δ d_t) / D_t, dann mal a_t.
+
+**3. Performancegebühr (High-Water-Mark über die ganze Laufzeit).** Mit H = 100: A_t = pf / 100 * max(0, U_t -
+H), NAV_t = U_t - A_t mit pf = `performance_fee`. Am letzten NAV-Tag jedes Kalenderjahres wird
+festgeschrieben: U_t := NAV_t, danach H := max(H, U_t). Am letzten NAV-Tag insgesamt wird nicht
+festgeschrieben; die Abgrenzung steckt bereits im Anteilswert. Die Verwaltungsgebühr bemisst sich an U (vor
+der Abgrenzung).
+
+**Näherungen.** Die Kosten werden auf die Bruttorechnung angewandt; feste Ordergebühren beziehen sich damit
+auf das Volumen ohne abgezogene Fondskosten. Einzahlungen der Anleger ändern das Fondsvolumen nicht. Eine
+Ordergebühr beim Start und ein innerer Spread senken schon den ersten Anteilswert (100 · G_1 / S).
+
+**Randfälle.** Ein einziger Datentag ergibt einen Anteilswert ohne Gebühr (die innere Rechnung warnt dann wie
+`simulation()` vor nicht definierten Kennzahlen). Sind alle inneren Kurse `NA`, fehlt eine innere Spalte oder
+ist G_t-1 ≤ 0 bzw. G_t nicht endlich und positiv, folgt ein Fehler. Meldungen der inneren Rechnung erscheinen
+als „Hinweis: wrapper_nav (innere Rechnung): ...“, Warnungen und Fehler als „wrapper_nav (innere Rechnung):
+...“. Rechtliche Einordnung der Performancegebühr: siehe `wrapper_config`.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 730
+d = RFrame("date" => Date(2020, 1, 1) .+ Day.(0:n-1))
+d["Welt"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+d["Gold"] = 50 .* cumprod(1 .+ 1e-4 .+ 0.008 .* randn(rng, n))
+w = wrapper_config(create_strategy(Welt = asset_config("etf"; share = 0.7), Gold = asset_config("etc"; share = 0.3));
+                   costs = funds_costs(0.95, 10))
+nv = wrapper_nav(d, w)
+println(nv["nav"][end] / nv["gross"][end] - 1)   # Kosten über die Laufzeit
+```
 """
 function wrapper_nav(data, wrapper; splits = nothing)
     @nospecialize
@@ -303,5 +427,5 @@ end
 
 register_print!("SimLevWrapperConfig", _print_wrapper_config)
 register_print!("SimLevWrapperNav", _print_wrapper_nav)
-# Jede Zeilenauswahl (rows) ist eine gewöhnliche Tabelle ohne Klasse und Attribute (R: `[.SimLevWrapperNav`, Etappe 8.0)
+# Jede Zeilenauswahl (rows) ist eine gewöhnliche Tabelle ohne Klasse und Attribute (R: `[.SimLevWrapperNav`)
 register_plain_rows!("SimLevWrapperNav")

@@ -1,6 +1,6 @@
-/* core/slc_matmul.c – Matrixprodukt A B, X'Y, X Y' (SimLev core, Etappe 9.2)
+/* core/slc_matmul.c – Matrixprodukt A B, X'Y, X Y' (SimLev core)
  * Verfahren:  C_ij = sum_l A_il B_lj; je Element beginnt die Summe mit 0.0 und läuft in
- *             aufsteigender Reihenfolge von l (Entwurf B.6). Die Schleifen sind für die
+ *             aufsteigender Reihenfolge von l. Die Schleifen sind für die
  *             spaltenweise Ablage geschachtelt (A B: j, l, i; X'Y: j, i, l; X Y': j, l, i); die
  *             Reihenfolge je Element bleibt dabei gleich, kein Blocking über l, keine Umordnung.
  *             Ohne fast-math und mit -ffp-contract=off ordnet der Compiler die Summen nicht um und

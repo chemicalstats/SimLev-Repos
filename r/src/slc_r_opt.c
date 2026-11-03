@@ -1,10 +1,10 @@
 /*
- * src/slc_r_opt.c -- R-Huellen (.Call) der Optimierer der C-Bibliothek slc (Etappe 9.3)
+ * src/slc_r_opt.c -- R-Huellen (.Call) der Optimierer der C-Bibliothek slc
  *
  * Kerne: slc_opt.c, slc_opt_test.c (Kopien aus core/, core/sync.py); Registrierung in
- * init.c (Block "9.3"), die R-Seite steht in R/slc_opt.R (.sl_optim und Pruefhilfen).
+ * init.c, die R-Seite steht in R/slc_opt.R (.sl_optim und Pruefhilfen).
  *
- * Rueckfrage an den Host (Entwurf B.8): Das Arbeitsfeld ist ein R-Vektor (double), den
+ * Rueckfrage an den Host: Das Arbeitsfeld ist ein R-Vektor (double), den
  * C_sl_opt_init neu anlegt und den nur .sl_optim haelt; C_sl_opt_next aendert ihn an Ort und
  * Stelle (er wird nie kopiert oder geteilt). Zwischen zwei Aufrufen rechnet R die Zielfunktion;
  * Fehler dort laufen als gewoehnliche R-Fehler durch.
@@ -213,7 +213,7 @@ SEXP C_sl_opt_minimize_test(SEXP id, SEXP method, SEXP x0, SEXP lo, SEXP hi, SEX
     return out;
 }
 
-/* numerischer Gradient (B.9) einer Prueffunktion */
+/* numerischer Gradient einer Prueffunktion */
 SEXP C_sl_numgrad_test(SEXP id, SEXP x, SEXP lo, SEXP hi)
 {
     int n, st, cnt = 0;

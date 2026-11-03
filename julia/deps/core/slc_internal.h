@@ -1,5 +1,5 @@
-/* core/slc_internal.h – gemeinsame interne Hilfen der Kerndateien (SimLev core, Etappe 9)
- * Verfahren:  keine Rechnung; Gleitkomma-Schutz, Schleifen-Abbruchprüfung, NaN-Regeln (B.0).
+/* core/slc_internal.h – gemeinsame interne Hilfen der Kerndateien (SimLev core)
+ * Verfahren:  keine Rechnung; Gleitkomma-Schutz, Schleifen-Abbruchprüfung, NaN-Regeln.
  * Quellen:    ISO/IEC 9899:1999 (C99), Abschnitte 7.12 (math.h) und 6.10.6 (STDC FP_CONTRACT).
  * Konstanten: keine.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
@@ -9,10 +9,10 @@
 #ifndef SLC_INTERNAL_H
 #define SLC_INTERNAL_H
 
-/* Gleitkomma (C.3): kein fast-math; kein Zusammenziehen zu fma. GCC beachtet das Pragma nicht
+/* Gleitkomma: kein fast-math; kein Zusammenziehen zu fma. GCC beachtet das Pragma nicht
  * und bekommt -ffp-contract=off als Flag (alle drei Builds); Clang zusätzlich das Pragma. */
 #ifdef __FAST_MATH__
-#error "slc: nicht mit -ffast-math uebersetzen (C.3)"
+#error "slc: nicht mit -ffast-math uebersetzen"
 #endif
 #if defined(__clang__)
 #pragma STDC FP_CONTRACT OFF
@@ -23,7 +23,7 @@
 
 #include "slc.h"
 
-/* Benutzerabbruch höchstens alle 2^16 Elemente prüfen (B.0) */
+/* Benutzerabbruch höchstens alle 2^16 Elemente prüfen */
 #define SL_POLL(cx, i) \
     do { if ((((i) + 1) & 0xFFFF) == 0 && sl_interrupted(cx)) return SL_EINTR; } while (0)
 

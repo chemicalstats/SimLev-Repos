@@ -80,7 +80,7 @@
 #'
 #' @param v numerischer Vektor.
 #' @param method "none", "locf", "linear" oder "stine" (Stineman-Interpolation
-#'   der inneren Luecken mit der C-Bibliothek slc, .sl_stineman, seit Etappe 9.6b;
+#'   der inneren Luecken mit der C-Bibliothek slc, .sl_stineman, seit 1.0.0;
 #'   Stuetzstellen sind die Positionen der vorhandenen Werte). "locf" rechnet
 #'   SimLev selbst (ohne die C-Huelle .imputets_locf).
 #' @param keep_leading Fuehrende NAs beibehalten (TRUE) oder rueckwaerts fuellen.
@@ -104,7 +104,7 @@
   } else {
     out <- v
     gap <- setdiff(first:last, ok)                       # innere Luecken; Stuetzstellen = Positionen der Werte
-    out[gap] <- .sl_stineman(ok, v[ok], gap)             # Stineman (1980), skaliert (Entwurf B.14, slc)
+    out[gap] <- .sl_stineman(ok, v[ok], gap)             # Stineman (1980), skaliert (slc)
     if (last < length(v)) out[(last + 1L):length(v)] <- v[last]
     if (first > 1L) out[1:(first - 1L)] <- v[first]
   }
@@ -229,7 +229,7 @@
   list(level = e_lvl, ret = e_ret)
 }
 
-#' Daten der Zielfunktion fuer die C-Bibliothek (N5, .sl_backcast_fit, slc_backcast.c)
+#' Daten der Zielfunktion fuer die C-Bibliothek (.sl_backcast_fit, slc_backcast.c)
 #'
 #' Zeilen \code{rows} des Fit-Fensters: im Strukturmodell x, fin und ter_cost (r = beta L x + fin -
 #' ter_cost - ...), sonst die Basis der Regression als c1 (wie .bc_model_returns ohne spread und drag).
@@ -535,7 +535,7 @@ backcast_fit <- function(data, product, index,
     ok <- is.finite(y) & is.finite(xx) & !is.na(prep$prod[o - 1L])
     if (sum(ok) < 20) stop("Zu wenige aufeinanderfolgende Beobachtungen f\u00fcr das Regressionsmodell.")
     if (model == "linear") list(coef = stats::setNames(.sl_lsfit(cbind(1, xx[ok]), y[ok])$coefficients, c("x1", "x2")))
-    else list(fit = .sl_smspline_fit(xx[ok], y[ok]))   # Glaettungsspline (Reinsch 1967, GCV; Entwurf B.15)
+    else list(fit = .sl_smspline_fit(xx[ok], y[ok]))   # Glaettungsspline (Reinsch 1967, GCV)
   }
   reg <- fit_reg(win)
 
@@ -569,7 +569,7 @@ backcast_fit <- function(data, product, index,
       return(list(par = p, value = o$objective, grid = NULL))
     }
     lo <- vapply(fit, function(k) bounds[[k]][1], 0); hi <- vapply(fit, function(k) bounds[[k]][2], 0)
-    # N5: glatte Zielfunktion (rmse, mse, hybrid): Wert und analytischer Gradient ganz in C (projizierter
+    # glatte Zielfunktion (rmse, mse, hybrid): Wert und analytischer Gradient ganz in C (projizierter
     # BFGS mit den Steuerwerten von .sl_optim "L-BFGS-B"). mae, median und max sind nicht differenzierbar;
     # dort bleibt .sl_optim mit Rueckfragen an obj_fun und numerischem Gradienten (wie bis 1.1.0).
     o <- if (objective == "hybrid" || loss %in% c("rmse", "mse"))
@@ -901,7 +901,7 @@ plot.SimLevBackcast <- function(x, log = TRUE, ...) {
   plot(x$date[ok], x$value[ok], type = "n", log = if (log) "y" else "", xlab = "Datum",
        ylab = if (log) "Wert (log. Skala)" else "Wert", main = "Backcast und Produkt", yaxt = "n", ...)
   at <- graphics::axTicks(2)
-  graphics::axis(2, at = at, labels = formatC(at, format = "fg", big.mark = " "))   # R9-07: Dezimalpunkt, Leerzeichen als Tausendertrenner
+  graphics::axis(2, at = at, labels = formatC(at, format = "fg", big.mark = " "))   # Dezimalpunkt, Leerzeichen als Tausendertrenner
   bc <- x$source == "backcast" & ok
   graphics::lines(x$date[ok], x$model[ok], col = "grey65", lwd = 1)
   graphics::lines(x$date[bc], x$value[bc], col = "#B5562B", lwd = 1.2)

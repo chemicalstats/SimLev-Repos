@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""core/gen_constants.py – Konstanten der C-Bibliothek slc (SimLev core, Etappe 9).
+"""core/gen_constants.py – Konstanten der C-Bibliothek slc (SimLev core).
 
 Erzeugt ``core/slc_constants.h``. Alle Werte werden hier selbst hergeleitet, nur mit der
 Python-Standardbibliothek (``fractions``, ``decimal``); es gibt keine übernommenen
@@ -25,7 +25,7 @@ Hergeleitet werden:
 * Stützwerte von erfc an z_j = j/8 (j = 0 ... 28) über DLMF 7.6.2 und (2/sqrt pi) e^(-z_j^2);
 * die ersten Glieder der Umkehrreihe von Phi um 1/2 (Startwert von qnorm) per Reihenumkehr
   mit Brüchen aus Phi(x) - 1/2 = phi(0) sum (-1)^n x^(2n+1) / (2^n n! (2n+1)) (DLMF 7.6.1);
-* N2: rationale Näherungen für qnorm in drei Zonen, selbst angepasst an die eigene Referenz
+* rationale Näherungen für qnorm in drei Zonen, selbst angepasst an die eigene Referenz
   (kleinste Quadrate im relativen Fehler nach Sanathanan/Koerner 1963, Umgewichtung nach
   Lawson 1961; Einzelheiten bei ``qnorm_fits``), dazu sqrt(2 pi) als hi + lo und geteilt;
 * das Inkrement von SplitMix64: die ungerade Zahl nächst 2^64 / goldener Schnitt
@@ -226,7 +226,7 @@ def taylor_poly(c: Fraction, k: Fraction, hmax: Fraction = Fraction(1, 16), nmax
     return s, e, N
 
 
-# ── N2: rationale Näherungen für qnorm (selbst angepasst) ───────────────────
+# ── rationale Näherungen für qnorm (selbst angepasst) ───────────────────
 #
 # Drei Zonen in p (unteres Ende; das obere über 1 - p bzw. die Symmetrie):
 #
@@ -546,7 +546,7 @@ def hi_lo(v: Decimal):
 def build() -> str:
     L = []
     w = L.append
-    w("/* core/slc_constants.h – Konstanten der C-Bibliothek slc (SimLev core, Etappe 9)")
+    w("/* core/slc_constants.h – Konstanten der C-Bibliothek slc (SimLev core)")
     w(" *")
     w(" * ERZEUGT von core/gen_constants.py – nicht von Hand ändern.")
     w(" * Herleitung: siehe Kopf von gen_constants.py (nur Python-Standardbibliothek,")
@@ -679,7 +679,7 @@ def build() -> str:
     w("#define SLC_QN_C5 %s  /* %s */" % (fmt(float(b[5])), b[5]))
     w("")
 
-    # N2: qnorm-Zonen und selbst angepasste rationale Näherungen (Herleitung bei qnorm_fits)
+    # qnorm-Zonen und selbst angepasste rationale Näherungen (Herleitung bei qnorm_fits)
     res = qnorm_fits()
     chk = qn_fit_check(res)
     s2h = dbl(SQRT2PI)
@@ -689,7 +689,7 @@ def build() -> str:
     s2a = t_ - (t_ - s2h)
     s2b = s2h - s2a
     qa = dbl(Dnorm_half(QN_XA))
-    w("/* ── N2: qnorm in drei Zonen mit selbst angepassten rationalen Näherungen (gen_constants.py, ── */")
+    w("/* ── qnorm in drei Zonen mit selbst angepassten rationalen Näherungen (gen_constants.py, ── */")
     w("/*    qnorm_fits: Sanathanan-Koerner + Lawson an der eigenen Referenz, Stützstellen nach         */")
     w("/*    Tschebyschow). Zone A |p - 1/2| <= SLC_QN_QA: x = s (1 + w G(z)), s = sqrt(2 pi) q,          */")
     w("/*    w = q^2, z = 1/4 - w, G = P_7(z)/Q_8(z). Zone B p >= SLC_QN_PC: -x = P_4(t)/Q_4(t), Zone C:  */")

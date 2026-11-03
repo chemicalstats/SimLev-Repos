@@ -1,4 +1,4 @@
-"""Abhängigkeiten, Tail-Risiko und Drittvariablen (Port von ``r/R/dependence.R``).
+"""Abhängigkeiten, Tail-Risiko und Drittvariablen (Gegenstück zu ``r/R/dependence.R``).
 
 - :func:`dependence_analysis`  Korrelationen (Pearson, Spearman, Kendall),
   empirische Tail-Abhängigkeit, Exceedance-Korrelationen, Copula-Fits,
@@ -85,7 +85,7 @@ def _boot():
 
 
 def _sl():
-    """Zufall der C-Bibliothek slc (Entwurf C.5): ``simlev._lib``."""
+    """Zufall der C-Bibliothek slc: ``simlev._lib``."""
     from . import _lib
     return _lib
 
@@ -184,7 +184,7 @@ def _colmeans(X):
     n = X.shape[0]
     if n == 0:
         return np.full(X.shape[1], _RNAN)
-    return r_colmeans(X)   # N11: C-Kern core/slc_rbase.c (long double wie R; wie Julia)
+    return r_colmeans(X)   # C-Kern core/slc_rbase.c (long double wie R; wie Julia)
 
 
 def _scale1(x):
@@ -364,7 +364,7 @@ def _optimize(f, lower, upper):
     return float(o["minimum"]), float(o["objective"])
 
 
-# Verteilungen der C-Bibliothek slc (Entwurf B.3, B.4), wie .sl_qnorm usw. in R
+# Verteilungen der C-Bibliothek slc, wie .sl_qnorm usw. in R
 def _qnorm(p):
     return _sl().qnorm(p)
 
@@ -394,7 +394,7 @@ def _as_frame(data):
 
 
 def _dep_sort_dates(data, what="data"):
-    """Zeilen nach Datum ordnen (Port von ``.dep_sort_dates``).
+    """Zeilen nach Datum ordnen (R: ``.dep_sort_dates``).
 
     Fehlende oder doppelte Daten sind ein Fehler, unsortierte Zeilen werden
     mit Hinweis aufsteigend sortiert; ``date`` wird per ``_to_date`` in
@@ -446,7 +446,7 @@ def _period_keys(d, frequency):
 
 
 def _dep_returns(data, assets, conditions=None, frequency="week", drop_flat=True):
-    """Periodenrenditen und verzögerte Zustandsvariablen (Port von ``.dep_returns``)."""
+    """Periodenrenditen und verzögerte Zustandsvariablen (R: ``.dep_returns``)."""
     if not isinstance(data, pd.DataFrame) or "date" not in data.columns:
         raise ValueError("data.frame mit Spalte 'date' erwartet.")
     assets = _as_names(assets)
@@ -493,7 +493,7 @@ def _as_names(x):
 
 
 def _kendall(x, y=None):
-    """Kendalls Tau-b; für eine Matrix die Korrelationsmatrix (Port von ``.kendall``).
+    """Kendalls Tau-b; für eine Matrix die Korrelationsmatrix (R: ``.kendall``).
 
     Bei nicht endlichen Werten wie ``stats::cor(method = "kendall")``.
     """
@@ -554,7 +554,7 @@ def _cop_ll(family, par, u, v):
             x = np.asarray(_qnorm(u), dtype=np.float64)
             y = np.asarray(_qnorm(v), dtype=np.float64)
             ll = _cop_g_ll(r, x, y, x * x, y * y)
-        elif base == "t":                     # N2: Hilfen _cop_t_c0, _cop_t_ll
+        elif base == "t":                     # Hilfen _cop_t_c0, _cop_t_ll
             r, nu = par[0], par[1]
             x = np.asarray(_qt(u, nu), dtype=np.float64)
             y = np.asarray(_qt(v, nu), dtype=np.float64)
@@ -585,7 +585,7 @@ def _cop_ll(family, par, u, v):
     return -1e10 if not math.isfinite(s) else s
 
 
-# N2: Teile der Log-Dichten der Gauss- und t-Copula je Beobachtung (wie .cop_g_ll, .cop_t_ll in R), auch für die
+# Teile der Log-Dichten der Gauss- und t-Copula je Beobachtung (wie .cop_g_ll, .cop_t_ll in R), auch für die
 # Profil-Likelihood in _cop_fit_t; x2 = x^2, y2 = y^2, B = (nu + 1)/2 (log1p(x^2/nu) + log1p(y^2/nu)).
 def _cop_g_ll(r, x, y, x2, y2):
     r2 = r * r
@@ -601,7 +601,7 @@ def _cop_t_ll(r, nu, c0, x, y, x2, y2, B):
 
 
 def _cop_t_c0(nu):
-    """N2: c0(nu) = lgamma((nu+2)/2) + lgamma(nu/2) - 2 lgamma((nu+1)/2); für nu > 64 asymptotisch (``.cop_t_c0``)."""
+    """c0(nu) = lgamma((nu+2)/2) + lgamma(nu/2) - 2 lgamma((nu+1)/2); für nu > 64 asymptotisch (``.cop_t_c0``)."""
     if nu <= 64:
         return _lgamma((nu + 2) / 2) + _lgamma(nu / 2) - 2 * _lgamma((nu + 1) / 2)
     a = nu / 2
@@ -610,7 +610,7 @@ def _cop_t_c0(nu):
 
 
 def _cop_fit_t(u, v):
-    """N2: t-Copula per Profil-Likelihood in nu (``.cop_fit_t``); Ergebnis [atanh rho, nu, -loglik]."""
+    """t-Copula per Profil-Likelihood in nu (``.cop_fit_t``); Ergebnis [atanh rho, nu, -loglik]."""
     best = [0.0, math.inf, math.inf]
 
     def prof(nu):
@@ -683,22 +683,50 @@ def _finite_pairs(x, y):
 def copula_fit(x, y, *, families=None):
     """Copulas an zwei Reihen anpassen (Pseudo-ML auf Rängen, Auswahl per AIC).
 
-    Die t-Copula wird über die Profil-Likelihood in den Freiheitsgraden geschätzt (Raster
-    nu = 2 + 2^k, k = -4 ... 12, und nu = Inf als Gauss-Grenzfall, danach eindimensionale Suche);
-    bei nu > 500 steht in ``par2`` 500, ``loglik`` gilt für das gefundene nu.
+    Passt mehrere bivariate Copula-Familien an zwei Reihen (z. B. Periodenrenditen zweier Anlagen) an und
+    vergleicht sie per AIC. Pseudo-Maximum-Likelihood auf Rängen (Genest, Ghoudi & Rivest 1995): Die Reihen werden
+    in Pseudo-Beobachtungen Rang / (n + 1) umgerechnet, die Ränder gehen also nicht ein. Familien: Gauß-, t-,
+    Clayton-, Gumbel- und Frank-Copula. Clayton und Gumbel erfassen asymmetrische Tails: Clayton die gemeinsamen
+    Abstürze (unterer Tail), Gumbel gemeinsame Anstiege; die um 180 Grad rotierten Varianten jeweils umgekehrt.
+    Bei negativer Abhängigkeit (z. B. Aktien und Anleihen in Deflationsphasen) werden die um 90/270 Grad rotierten
+    Varianten verwendet. Kendalls Tau wird intern in O(n log n) berechnet (gleiches Ergebnis wie
+    ``stats::cor(method = "kendall")``).
 
     Args:
-        x, y: Numerische Vektoren gleicher Länge (nur die Ränge zählen); Paare
-            mit nicht endlichen Werten werden entfernt; mindestens 20 Paare.
-        families: Familien ``"gaussian"``, ``"t"``, ``"clayton"``,
-            ``"gumbel"``, ``"frank"``, optional mit Rotation ``"_90"``,
-            ``"_180"``, ``"_270"`` (nur Clayton/Gumbel). ``None`` = Auswahl
-            nach dem Vorzeichen von Kendalls Tau.
+        x, y: Numerische Vektoren gleicher Länge (z. B. Renditen; nur die Ränge zählen). Paare mit nicht endlichen
+            Werten werden entfernt; mindestens 20 Paare nötig.
+        families: Zeichenvektor der Familien: ``"gaussian"``, ``"t"``, ``"clayton"``, ``"gumbel"``, ``"frank"``,
+            jeweils optional mit Rotation ``"_90"``, ``"_180"`` oder ``"_270"`` (z. B. ``"clayton_180"``).
+            ``None`` (Standard) = Auswahl nach dem Vorzeichen von Kendalls Tau: bei Tau >= 0 ``gaussian``, ``t``,
+            ``clayton``, ``gumbel``, ``frank``, ``clayton_180``, ``gumbel_180``; sonst ``gaussian``, ``t``,
+            ``frank``, ``clayton_90``, ``clayton_270``, ``gumbel_90``, ``gumbel_270``. Rotationen gibt es nur für
+            ``clayton`` und ``gumbel`` (Gauß-, t- und Frank-Copula sind radialsymmetrisch); andere Namen sind ein
+            Fehler, ebenso eine konstante Reihe.
 
     Returns:
-        ``pandas.DataFrame`` je Familie (aufsteigend nach AIC): ``family``,
-        ``par1``, ``par2``, ``loglik``, ``aic``, ``bic``, ``lambda_lower``,
-        ``lambda_upper``; ``attrs["tau"]``, ``attrs["n"]``.
+        DataFrame mit einer Zeile je Familie, aufsteigend nach AIC sortiert (erste Zeile = beste Familie):
+        ``family``, ``par1`` (Korrelation bei Gauß/t, sonst θ), ``par2`` (Freiheitsgrade der t-Copula, höchstens
+        500; sonst ``NA``), ``loglik``, ``aic``, ``bic``, ``lambda_lower``, ``lambda_upper`` (implizite
+        Tail-Koeffizienten der Copula, Anteile 0 bis 1; für die um 90/270 Grad rotierten Familien 0). Attribute
+        ``tau`` (Kendalls Tau) und ``n`` (Anzahl Paare).
+
+    Details:
+        Die t-Copula wird über die Profil-Likelihood in den Freiheitsgraden ν geschätzt, weil die Likelihood in ν
+        sehr flach ist: für jedes ν eines Rasters (ν = 2 + 2^k, k = -4, …, 12, und ν = ∞, der Grenzfall
+        Gauß-Copula) das Maximum in der Korrelation, danach eine eindimensionale Suche um den besten Rasterpunkt.
+        Liegt das Maximum bei ν > 500 (auch ν = ∞), steht in ``par2`` 500; ``loglik`` gilt für das gefundene ν.
+
+    Literatur:
+        Genest, C., Ghoudi, K. & Rivest, L.-P. (1995), Biometrika 82(3); Joe, H. (2014), Dependence Modeling with
+        Copulas.
+
+    Beispiel::
+
+        import numpy as np, simlev
+        rng = np.random.default_rng(1)
+        z = rng.normal(size=(1000, 2)) @ np.linalg.cholesky([[1, 0.6], [0.6, 1]]).T
+        w = np.sqrt(rng.chisquare(4, 1000) / 4)
+        print(simlev.copula_fit(z[:, 0] / w, z[:, 1] / w)[["family", "par1", "par2", "aic"]])
     """
     lx, ly = len(np.atleast_1d(x)), len(np.atleast_1d(y))
     if lx != ly:
@@ -728,7 +756,7 @@ def copula_fit(x, y, *, families=None):
     if families is None:
         families = (["gaussian", "t", "clayton", "gumbel", "frank", "clayton_180", "gumbel_180"] if tau >= 0
                     else ["gaussian", "t", "frank", "clayton_90", "clayton_270", "gumbel_90", "gumbel_270"])
-    # N2: Startwert rho0 entfällt (t-Copula per Profil-Likelihood, _cop_fit_t)
+    # Startwert rho0 entfällt (t-Copula per Profil-Likelihood, _cop_fit_t)
     rows = []
     for fam in families:
         base = fam.split("_", 1)[0]
@@ -738,7 +766,7 @@ def copula_fit(x, y, *, families=None):
         if base == "gaussian":
             mn, ob = _optimize(lambda r: f([r]), -0.995, 0.995)
             par, nll, k = [mn, _NAN], ob, 1
-        elif base == "t":                     # N2: Profil-Likelihood in nu
+        elif base == "t":                     # Profil-Likelihood in nu
             o = _cop_fit_t(u, v)
             par, nll, k = [math.tanh(o[0]), min(o[1], 500)], o[2], 2
         elif base == "clayton":
@@ -765,14 +793,34 @@ def copula_fit(x, y, *, families=None):
 def tail_dependence(x, y, *, q=(0.01, 0.025, 0.05, 0.10, 0.20)):
     """Empirische Tail-Abhängigkeit und Exceedance-Korrelationen.
 
+    Misst für zwei Reihen (z. B. Periodenrenditen), wie oft extreme Werte gemeinsam auftreten, ohne ein
+    Copula-Modell anzunehmen: hatλ_L(q) = frac\\#\\u_i ≤ q, v_i ≤ q\\n q, hatλ_U(q) = frac\\#\\u_i > 1 - q, v_i > 1 -
+    q\\n q auf Pseudo-Beobachtungen u_i, v_i (Rang / (n + 1)). Unter Unabhängigkeit ist hatλ(q) ≈ q, bei
+    Gauß-Abhängigkeit fällt es für q → 0 gegen 0, bei echter Tail-Abhängigkeit bleibt es positiv. Die
+    Exceedance-Korrelation (Longin & Solnik 2001) ist die Pearson-Korrelation der Beobachtungen, in denen beide
+    Reihen höchstens auf ihrem empirischen q-Quantil (bzw. mindestens auf ihrem (1 - q)-Quantil) liegen.
+
     Args:
-        x, y: Numerische Vektoren gleicher Länge; Paare mit nicht endlichen
-            Werten werden entfernt.
-        q: Tail-Wahrscheinlichkeiten als Anteil echt zwischen 0 und 1.
+        x, y: Numerische Vektoren gleicher Länge (z. B. Periodenrenditen). Paare mit nicht endlichen Werten werden
+            entfernt.
+        q: Numerischer Vektor von Tail-Wahrscheinlichkeiten als Anteil echt zwischen 0 und 1 (0.05 = die unteren
+            bzw. oberen 5 % der Beobachtungen).
 
     Returns:
-        ``pandas.DataFrame`` je Wert von ``q``: ``q``, ``lower``, ``upper``,
-        ``exceed_lower``, ``exceed_upper``, ``n_lower``, ``n_upper``.
+        DataFrame mit einer Zeile je Wert von ``q``: ``q``, ``lower``, ``upper`` (hatλ_L(q), hatλ_U(q)),
+        ``exceed_lower``, ``exceed_upper`` (Exceedance-Korrelationen; ``NA`` bei weniger als 8 gemeinsamen
+        Überschreitungen oder Streuung 0), ``n_lower``, ``n_upper`` (Anzahl der Paare, die gemeinsam im unteren
+        bzw. oberen Tail liegen).
+
+    Literatur:
+        Longin, F. & Solnik, B. (2001), Journal of Finance 56(2).
+
+    Beispiel::
+
+        import numpy as np, simlev
+        rng = np.random.default_rng(1)
+        z = rng.normal(size=2000)
+        print(simlev.tail_dependence(z + rng.normal(size=2000), z + rng.normal(size=2000), q=[0.05, 0.10]))
     """
     lx, ly = len(np.atleast_1d(x)), len(np.atleast_1d(y))
     if lx != ly:
@@ -810,17 +858,39 @@ def tail_dependence(x, y, *, q=(0.01, 0.025, 0.05, 0.10, 0.20)):
 def dependence_dcc(R):
     """DCC(1,1)-Modell (Engle 2002).
 
+    Schätzt zeitvariable Korrelationen zwischen mehreren Renditereihen. Zweistufige Schätzung: univariate
+    GARCH(1,1) mit Konstante je Reihe (wie im Bootstrap: Maximum Likelihood unter Normalverteilung mit der
+    C-Bibliothek von SimLev, notfalls Momentschätzer), danach die Korrelationsdynamik der standardisierten
+    Residuen z_t Q_t = (1 - a - b)bar Q + a z_t-1 z_t-1' + b Q_t-1 mit Q_1 = bar Q (Stichproben-Korrelation der
+    z_t) und a, b > 0, a + b < 0.999, per Quasi-Maximum-Likelihood (BFGS mit analytischem Gradienten, ganz in der
+    C-Bibliothek von SimLev). Die bedingte Korrelation ist R_t = diag(Q_t)^-1/2 Q_t diag(Q_t)^-1/2. Die Schätzung
+    ist deterministisch: Den früheren zufälligen Rückfall der GARCH-Stufe (gosolnp mit Startwert aus der Uhrzeit)
+    gibt es nicht mehr; die GARCH-Stufe meldet ``method = "ml"`` statt ``"rugarch"``/``"optim"`` (seit 1.0.0).
+
     Args:
-        R: Renditematrix oder DataFrame (Zeilen = Zeit, mindestens zwei
-            Spalten und 100 Zeilen, keine fehlenden Werte).
+        R: Numerische Renditematrix oder DataFrame (Zeilen = Zeit, Spalten = Reihen; mindestens zwei Spalten und
+            100 Zeilen, keine fehlenden Werte). Die Einheit ist frei (z. B. Log-Renditen als Anteil); die
+            Korrelationen hängen nicht davon ab. Spaltennamen werden übernommen (sonst ``V1``, ``V2``, ...).
+            Konstante oder (nahezu) perfekt korrelierte Reihen (singuläre Korrelationsmatrix der standardisierten
+            Residuen, kleinster Eigenwert unter 1e-8) sind ein Fehler.
 
     Returns:
-        dict mit ``a``, ``b``, ``loglik``, ``correlation`` (DataFrame Zeit x
-        Paare), ``pairs``, ``garch`` (DataFrame; ``method`` = ``"ml"``, ``"momente"``
-        oder ``"konstant"``), ``z``, ``Qbar``.
+        Liste mit ``a``, ``b`` (DCC-Parameter), ``loglik`` (Korrelationsteil der Quasi-Log-Likelihood),
+        ``correlation`` (Matrix Zeit x Paare der bedingten Korrelationen R_t; Spaltennamen wie ``pairs``),
+        ``pairs`` (Paarnamen ``"A ~ B"``), ``garch`` (DataFrame je Reihe: ``series``, ``alpha``, ``beta``,
+        ``method`` = Schätzweg der GARCH-Stufe: ``"ml"``, ``"momente"`` oder ``"konstant"``), ``z`` (Matrix der
+        standardisierten Residuen) und ``Qbar``.
 
-    Seit Etappe 9.6b wie R: GARCH-Stufe per ML der C-Bibliothek (Label ``"ml"`` statt
-    ``"rugarch"``/``"optim"``), Stufe 2 ganz in C; die Schätzung ist deterministisch.
+    Literatur:
+        Engle, R. (2002), Journal of Business & Economic Statistics 20(3), 339-350.
+
+    Beispiel::
+
+        import numpy as np, simlev
+        rng = np.random.default_rng(1)
+        a = rng.normal(0, 0.01, 500); b = 0.5 * a + np.sqrt(0.75) * rng.normal(0, 0.01, 500)
+        fit = simlev.dependence_dcc(np.column_stack([a, b]))
+        print(fit["a"], fit["b"])
     """
     Rm, nm = _as_matrix(R)
     if Rm.shape[1] < 2 or Rm.shape[0] < 100:
@@ -846,7 +916,7 @@ def dependence_dcc(R):
                          "Korrelation %s); DCC nicht schätzbar. Doppelte bzw. linear abhängige Reihen entfernen."
                          % (nm[i0], nm[j0], _sprintf("%.6f", float(Qb[i0, j0]))))
 
-    # Stufe 2 ganz in C (Entwurf B.11, wie .sl_dcc_fit in R): deterministisch
+    # Stufe 2 ganz in C (wie .sl_dcc_fit in R): deterministisch
     o = _sl().dcc_fit(Z, Qb)
     a, b, oval = float(o["a"]), float(o["b"]), float(o["nll"])
     fl = _sl().dcc_filter(Z, a, b, Qb, True)
@@ -962,24 +1032,97 @@ def dependence_analysis(data, assets, *, conditions=None, frequency=("week", "da
                         dcc=True, copulas=True, B=499, block=None, tail_q=0.10, seed=None):
     """Abhängigkeitsanalyse mit Tail-Risiko und Drittvariablen.
 
+    Untersucht die Abhängigkeit zwischen Anlagen (Kursreihen) über die reine Korrelation hinaus:
+    Rangkorrelationen, empirische Tail-Abhängigkeit, Exceedance-Korrelationen, die am besten passende Copula je
+    Paar, rollierende Korrelation und DCC. Mit ``conditions`` wird zusätzlich gefragt, wie sich die Abhängigkeit
+    mit dem Zustand von Drittvariablen ändert - etwa die Aktien-Anleihen-Korrelation bei hoher gegenüber niedriger
+    Inflation oder bei steigenden gegenüber fallenden Zinsen. Unterschiede zwischen Regimen werden mit einem
+    stationären Block-Bootstrap abgesichert (Standardtests unterschätzen bei autokorrelierten Reihen die
+    Unsicherheit).
+
     Args:
-        data: DataFrame mit Spalte ``date``, Kursspalten und Zustandsspalten.
-        assets: Kursspalten (mindestens zwei).
-        conditions: Zustandsspalten (verzögert); ``None`` = keine bedingte Analyse.
-        frequency: ``"week"`` (Standard), ``"day"`` oder ``"month"``.
-        quantiles: Tail-Wahrscheinlichkeiten für die Kennzahlen der ganzen Stichprobe.
-        breaks: dict mit Grenzen je Zustandsvariable; ``None`` = Quantilsgruppen.
-        n_regimes: Anzahl Regime ohne ``breaks``.
-        window: Fenster der rollierenden Korrelation (``None`` = Perioden je Jahr, mindestens 10).
-        dcc: DCC(1,1) schätzen (ab 100 Perioden).
-        copulas: Copula-Fits je Paar (und je Regime ab 40 Perioden).
-        B: Bootstrap-Wiederholungen für die Regime-Vergleiche (0 = aus).
-        block: mittlere Blocklänge (``None`` = Politis-White).
-        tail_q: Tail-Wahrscheinlichkeit für die Kennzahlen je Regime.
-        seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`) für den Bootstrap.
+        data: DataFrame mit Spalte ``date`` (Klasse Date oder in Date umwandelbar), Kursspalten (Kursniveaus,
+            keine Renditen) und Zustandsspalten (z. B. mit ``series_align()`` und ``series_align_macro()``
+            vorbereitet).
+        assets: Zeichenvektor der Kursspalten (mindestens zwei).
+        conditions: Zeichenvektor der Zustandsspalten (Drittvariablen, in ihrer eigenen Einheit); gehen um eine
+            Periode verzögert ein. ``None`` (Standard) = keine bedingte Analyse.
+        frequency: Renditefrequenz: ``"week"`` (Standard; ISO-Woche, vermeidet Effekte unterschiedlicher
+            Handelszeiten), ``"day"`` oder ``"month"``.
+        quantiles: Numerischer Vektor von Tail-Wahrscheinlichkeiten als Anteil (Standard ``[0.05, 0.10]``) für die
+            Tail-Kennzahlen über die ganze Stichprobe (siehe ``tail_dependence()``).
+        breaks: Optional benannte Liste von Grenzen je Zustandsvariable in deren Einheit, z. B. ``{"inflation":
+            [-Inf, 2, 4, Inf]}``; Intervalle links geschlossen, rechts offen. ``None`` (Standard) bzw. fehlender
+            Eintrag = ``n_regimes`` gleich besetzte Quantilsgruppen.
+        n_regimes: Anzahl Regime ohne ``breaks`` (ganze Zahl, Standard 3: niedrig, mittel, hoch). Fallen
+            Quantilsgrenzen zusammen oder bliebe eine Quantilsgruppe leer (diskrete Zustände wie 1/2 aus
+            ``regime_states()``), entstehen weniger Regime. Leere Regime aus vorgegebenen ``breaks`` erscheinen
+            mit ``n = 0`` und ``NA``-Kennzahlen.
+        window: Fenster der rollierenden Pearson-Korrelation in Perioden der gewählten Frequenz. ``None``
+            (Standard) = Anzahl Perioden je Jahr (aus den Daten ermittelt, mindestens 10).
+        dcc: Logisch: DCC(1,1) mit ``dependence_dcc()`` schätzen (nur bei mindestens 100 Perioden; Fehler werden
+            als Meldung ausgegeben).
+        copulas: Logisch: Copula-Fits mit ``copula_fit()`` je Paar (und je Regime ab 40 Perioden).
+        B: Anzahl Bootstrap-Wiederholungen für die Regime-Vergleiche (ganze Zahl, Standard 499; 0 = aus).
+        block: Mittlere Blocklänge des stationären Bootstraps in Perioden. ``None`` (Standard) =
+            Politis-White-Schätzung auf dem Produkt der standardisierten Renditen (Maximum über die Paare,
+            begrenzt auf 2 bis n / 10).
+        tail_q: Tail-Wahrscheinlichkeit als Anteil (Standard 0.10) für die Tail-Kennzahlen je Regime.
+        seed: Startwert für den Bootstrap. Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis
+            reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit ``None`` wird genau einmal
+            ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe ``simlev_seed()``), wiederholte Aufrufe
+            liefern dann verschiedene Ergebnisse. ``set.seed()`` wirkt nicht.
 
     Returns:
-        :class:`SimLevDependence`.
+        Objekt der Klasse ``SimLevDependence``, eine Liste mit
+
+        - returns: DataFrame mit ``date`` (Periodenende), den Log-Renditen der Anlagen (Anteile je Periode) und
+          den verzögerten Zustandsvariablen.
+        - correlation: Liste der Matrizen ``pearson``, ``spearman``, ``kendall``.
+        - pairs: DataFrame je Paar: ``pair``, ``pearson``, ``spearman``, ``kendall``, je Wert von ``quantiles``
+          ``lambda_lower_``q und ``lambda_upper_``q (z. B. ``lambda_lower_0.05``); mit ``copulas = True``
+          zusätzlich ``copula`` (beste Familie nach AIC), ``copula_lambda_lower``, ``copula_lambda_upper``,
+          ``t_rho``, ``t_nu`` (Parameter der t-Copula).
+        - tail: Ergebnis von ``tail_dependence()`` je Paar (Spalte ``pair``) und Quantil.
+        - copulas: Benannte Liste der ``copula_fit()``-Tabellen je Paar oder ``None``.
+        - rolling: DataFrame mit ``date`` und der rollierenden Korrelation je Paar (``None``, wenn die Historie
+          nicht länger als ``window`` ist).
+        - dcc: Ergebnis von ``dependence_dcc()`` oder ``None``.
+        - conditional: Liste je Zustandsvariable: DataFrame je Paar und Regime mit ``n``, ``vol_1``, ``vol_2``
+          (annualisierte Volatilität der Log-Renditen als Anteil), ``pearson``, ``spearman``, ``kendall``,
+          ``lambda_lower``, ``lambda_upper``, ``exceed_lower`` (bei ``tail_q``), ``t_rho``, ``t_nu``, ``copula``,
+          ``copula_lambda_lower`` und mit Bootstrap ``pearson_lo``, ``pearson_hi`` (90-%-Intervall).
+        - regimes: Liste je Zustandsvariable: ``regime``, ``n``, ``mean_state`` (mittlerer Zustand im Regime).
+        - differences: DataFrame (oder ``None``): oberstes minus unterstes Regime je Paar und Zustandsvariable,
+          ``diff_pearson``, ``diff_spearman`` mit 95-%-Bootstrap-Intervall (``lo_``, ``hi_``) und zweiseitigem
+          p-Wert (``p_``).
+
+        sowie ``assets``, ``conditions``, ``frequency``, ``ppy`` (Perioden je Jahr, aus den Daten), ``window``,
+        ``block``, ``B``, ``tail_q``. Methoden ``print`` und ``plot``.
+
+    Details:
+        Renditen: Die Zeilen werden nach ``date`` sortiert (mit Hinweis, falls nötig; fehlende oder doppelte Daten
+        sind ein Fehler, ebenso Kurse <= 0 oder nicht endliche Kurse). Die Kurse werden je Anlage mit dem letzten
+        Wert fortgeschrieben (führende Lücken bleiben leer), auf die letzte vorhandene Zeile jeder Periode
+        reduziert (``"week"``: ISO-Woche, ``"month"``: Kalendermonat, ``"day"``: jede Zeile) und in Log-Renditen
+        log(P_t / P_t-1) (Anteile, keine Prozent) umgerechnet. Zeilen mit fehlenden Renditen entfallen; bei
+        ``"day"`` auch Zeilen, in denen alle Anlagen die Rendite 0 haben (z. B. Feiertage). Zustandsvariablen
+        werden ebenfalls fortgeschrieben und gehen mit ihrem Wert am Ende der Vorperiode ein.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1500
+        d = pd.DataFrame({"date": pd.date_range("2010-01-01", periods=n)})
+        infl = 2 + np.cumsum(rng.normal(0, 0.05, n))
+        e1, e2 = rng.normal(size=n), rng.normal(size=n)
+        rho = np.where(infl > 2, 0.5, -0.3)
+        d["stocks"] = 100 * np.exp(np.cumsum(0.01 * e1))
+        d["bonds"] = 100 * np.exp(np.cumsum(0.005 * (rho * e1 + np.sqrt(1 - rho ** 2) * e2)))
+        d["inflation"] = infl
+        da = simlev.dependence_analysis(d, ["stocks", "bonds"], conditions="inflation", B=19, seed=1)
+        print(da["correlation"])
     """
     frequency = _match_arg(frequency, ("week", "day", "month"))
     assets = _as_names(assets)
@@ -1111,7 +1254,7 @@ def dependence_analysis(data, assets, *, conditions=None, frequency=("week", "da
             ct = pd.DataFrame(rows)
             if B > 0 and nlv >= 2:
                 nk = Xk.shape[0]
-                # Regel 3/4: seed=None -> einmal k aus G (beim ersten Bootstrap), dann je Zustand wie seed=k
+                # seed=None -> einmal k aus G (beim ersten Bootstrap), dann je Zustand wie seed=k
                 if seed is None:
                     seed = _sl().next_seed()
                 S = _sl().main_stream(seed)
@@ -1431,25 +1574,66 @@ def _plot_covar(x, width=800, height=450):
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _qr_decomp(X, y):
-    """OLS-Start über ``.sl_lsfit`` (Householder-QR, Entwurf B.7): dict(coefficients, rank, pivot, ...)."""
+    """OLS-Start über ``.sl_lsfit`` (Householder-QR): dict(coefficients, rank, pivot, ...)."""
     return _sl().lsfit(X, y)
 
 
 def quantile_regression(y, *, X=None, tau=0.5, intercept=True, tol=1e-10, maxit=2000):
     """Lineare Quantilsregression (exakte Lösung mit Optimalitätsnachweis).
 
+    Schätzt die Koeffizienten des bedingten τ-Quantils von ``y`` (Koenker & Bassett 1978), d. h. minimiert Σ_i
+    ρ_τ(y_i - x_i'β) mit ρ_τ(r) = r(τ - 1\\r < 0\\). Geliefert wird die exakte Lösung dieses linearen Programms mit
+    Optimalitätsnachweis (Ausnahme: entartete Fälle, siehe unten), berechnet in zwei Schritten (Kern in C++):
+
+    - MM-Algorithmus von Hunter & Lange (2000), ausgehend von der KQ-Lösung: iterativ gewichtete kleinste Quadrate
+      mit β ← (X'WX)^-1(X'Wy + (τ - 1/2) X'1), W = diag(1 / (2(ε + |r_i|))) in vier Stufen mit ε = sd(y) mal 1e-2,
+      1e-4, 1e-6, 1e-8.
+    - Ecken-Politur: Aus den p Beobachtungen mit den kleinsten Residuen der Näherung (linear unabhängig gewählt)
+      wird die Ecke des linearen Programms berechnet, die diese Beobachtungen exakt interpoliert, und über die
+      Subgradientenbedingung auf Optimalität geprüft (an entarteten Ecken wie unten per linearem Programm). Ist
+      der Nachweis erbracht (nach jeder Stufe und alle 25 Iterationen geprüft), ist diese Ecke das Ergebnis.
+
+    Gelingt der Nachweis bis zur letzten Stufe nicht (z. B. bei τ nahe 0 oder 1, wenn die Näherung noch weit von
+    der Ecke entfernt ist), folgen von dieser Ecke aus Austauschschritten wie im Simplex-Verfahren von Barrodale &
+    Roberts (1974): Solange eine Kante der Ecke abwärts führt, wird entlang der steilsten bis zum Minimum
+    gegangen; die Zielfunktion fällt dabei streng. Ohne Abstiegskante wird die Optimalität exakt nachgewiesen; an
+    entarteten Ecken (weitere Residuen exakt 0, z. B. bei diskreten Regressoren, gerundeten Werten oder doppelten
+    Beobachtungen) über die Bedingung, dass 0 im Teildifferential liegt: Es muss λ_j ∈ [τ - 1, τ] für die
+    Beobachtungen mit Residuum 0 geben mit Σ_j λ_j x_j = -Σ_r_i ≠ 0 ψ_τ(r_i) x_i; geprüft als lineares
+    Zulässigkeitsproblem (Phase 1 des Simplex-Verfahrens mit beschränkten Variablen, gleiche Zeilen x_j
+    zusammengefasst). Scheitert der Nachweis, erscheint eine Warnung, und geliefert wird die gefundene Ecke,
+    sofern ihr Zielwert nicht größer ist als der der MM-Näherung, sonst die MM-Näherung. Ist die Lösung nicht
+    eindeutig (z. B. ohne Regressoren, wenn n * tau ganzzahlig ist), wird eine der optimalen Lösungen geliefert.
+
     Args:
-        y: Zielvariable.
-        X: Regressoren (Vektor, Matrix oder DataFrame, ohne Konstante);
-            ``None`` = nur Konstante.
-        tau: Quantil echt zwischen 0 und 1.
-        intercept: Konstante aufnehmen.
-        tol: Konvergenzschwelle der MM-Stufen.
-        maxit: Höchstzahl Iterationen je MM-Stufe.
+        y: Numerischer Vektor, Zielvariable (beliebige Einheit).
+        X: Regressoren als numerischer Vektor, Matrix oder DataFrame (ohne Konstante). ``None`` (Standard) = nur
+            Konstante, d. h. das empirische τ-Quantil von ``y``. Zeilen mit nicht endlichen Werten in ``y`` oder
+            ``X`` werden entfernt. Erwartet werden ``length(y)`` Zeilen, nur numerische Spalten (Faktoren vorher
+            in Indikatorspalten umwandeln) und linear unabhängige Regressoren einschließlich der Konstante; sonst
+            bricht die Funktion mit Fehler ab.
+        tau: Quantil als Anteil, echt zwischen 0 und 1 (Standard 0.5 = Median-Regression).
+        intercept: Logisch: Konstante aufnehmen (Standard ``True``).
+        tol: Konvergenzschwelle der MM-Stufen: Eine Stufe endet, wenn sich kein Koeffizient um mehr als ``tol * (1
+            + max|beta|)`` ändert (in den ersten drei Stufen wird höchstens 1e-7 verlangt). Standard 1e-10.
+        maxit: Höchstzahl der Iterationen je MM-Stufe (ganze Zahl, Standard 2000).
 
     Returns:
-        ``pandas.Series`` der Koeffizienten (``"(Intercept)"``, Spaltennamen
-        bzw. ``x1``, ``x2``, …).
+        Benannter numerischer Koeffizientenvektor in der Einheit von ``y`` je Einheit des Regressors:
+        ``"(Intercept)"`` (falls ``intercept = True``) und je Spalte von ``X`` deren Name (sonst ``x1``, ``x2``,
+        ...).
+
+    Literatur:
+        Koenker, R. & Bassett, G. (1978), Econometrica 46(1); Hunter, D. R. & Lange, K. (2000), Journal of
+        Computational and Graphical Statistics 9(1); Barrodale, I. & Roberts, F. D. K. (1974), Communications of
+        the ACM 17(6).
+
+    Beispiel::
+
+        import numpy as np, simlev
+        rng = np.random.default_rng(1)
+        x = rng.normal(size=500); y = 1 + 2 * x + rng.normal(size=500) * (1 + abs(x))
+        print(simlev.quantile_regression(y, X=x, tau=0.9))
     """
     tv = np.atleast_1d(np.asarray(tau, dtype=object))
     if (tv.size != 1 or isinstance(tv[0], (bool, np.bool_, str)) or tv[0] is None
@@ -1540,7 +1724,7 @@ class SimLevTailRegression(RList):
 
 
 def _lm_coef(y, X1):
-    """``.sl_lsfit(X1, y)$coefficients`` (OLS mit Konstante in ``X1``, Entwurf B.7)."""
+    """``.sl_lsfit(X1, y)$coefficients`` (OLS mit Konstante in ``X1``)."""
     return np.asarray(_sl().lsfit(X1, y)["coefficients"], dtype=np.float64)
 
 
@@ -1548,18 +1732,52 @@ def tail_regression(data, asset, drivers, *, quantiles=(0.05, 0.25, 0.5, 0.75, 0
                     frequency=("week", "day", "month"), B=199, block=None, seed=None):
     """Renditequantile in Abhängigkeit von Drittvariablen (Quantilsregression).
 
+    Schätzt für mehrere Quantile, wie sich die Verteilung der Periodenrendite einer Anlage mit dem (verzögerten)
+    Zustand von Drittvariablen verschiebt (lineare Quantilsregression mit ``quantile_regression()``, zum Vergleich
+    OLS für den Mittelwert). Ein negativer Koeffizient der Inflation im 5-%-Quantil heißt z. B.: Bei höherer
+    Inflation fallen die schlechten Perioden schlechter aus, auch wenn sich der Median kaum bewegt. Standardfehler
+    per stationärem Block-Bootstrap der Perioden.
+
     Args:
-        data: DataFrame mit ``date``, Kursspalte und Zustandsspalten.
-        asset: Kursspalte.
-        drivers: Zustandsspalten (Drittvariablen).
-        quantiles: Quantile als Anteil.
-        frequency: ``"week"``, ``"day"`` oder ``"month"``.
-        B: Bootstrap-Wiederholungen (0 = keine Standardfehler).
-        block: mittlere Blocklänge (``None`` = Politis-White).
-        seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`) für den Bootstrap.
+        data: DataFrame mit Spalte ``date`` (Date), Kursspalte (Kursniveaus, keine Renditen) und Zustandsspalten.
+        asset: Name der Kursspalte (Zeichenkette).
+        drivers: Zeichenvektor der Zustandsspalten (Drittvariablen).
+        quantiles: Numerischer Vektor der Quantile als Anteil (Standard ``[0.05, 0.25, 0.5, 0.75, 0.95]``).
+        frequency: Renditefrequenz: ``"week"`` (Standard, ISO-Woche), ``"day"`` oder ``"month"``.
+        B: Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 199; 0 = keine Standardfehler und Intervalle).
+        block: Mittlere Blocklänge des stationären Bootstraps in Perioden. ``None`` (Standard) =
+            Politis-White-Schätzung auf den absoluten Abweichungen der Rendite vom Mittel (begrenzt auf 2 bis n /
+            10).
+        seed: Startwert für den Bootstrap. Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis
+            reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit ``None`` wird genau einmal
+            ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe ``simlev_seed()``), wiederholte Aufrufe
+            liefern dann verschiedene Ergebnisse. ``set.seed()`` wirkt nicht.
 
     Returns:
-        :class:`SimLevTailRegression`.
+        Objekt der Klasse ``SimLevTailRegression`` mit ``coefficients`` (DataFrame: ``quantile``, ``term``,
+        ``estimate``, ``se`` (Bootstrap-Standardabweichung), ``lower``, ``upper`` (90-%-Bootstrap-Intervall, 5-
+        und 95-%-Quantil); Koeffizienten in Prozentpunkten Log-Rendite je Periode bzw. je Einheit des Treibers),
+        ``ols`` (OLS-Koeffizienten, gleiche Einheit), ``data`` (aufbereitete Perioden: ``date``, Log-Rendite als
+        Anteil, verzögerte Treiber) sowie ``asset``, ``drivers``, ``quantiles``, ``n`` (Anzahl Perioden),
+        ``frequency``, ``B``, ``B_failed`` (Anzahl Bootstrap-Stichproben, die nicht schätzbar waren, z. B. weil
+        ein Treiber in der Stichprobe konstant ist; sie fehlen in Standardfehlern und Intervallen, mit Warnung),
+        ``block``. Methoden ``print`` und ``plot``.
+
+    Details:
+        Zielgröße ist die Log-Rendite der Periode in Prozent, 100 log(P_t / P_t-1); die Kurse werden wie in
+        ``dependence_analysis()`` aufbereitet (Fortschreiben fehlender Werte, letzte Zeile je ISO-Woche bzw.
+        Monat). Die Treiber gehen mit ihrem Wert am Ende der Vorperiode in ihrer eigenen Einheit ein.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1095
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        d["aktien"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d["inflation"] = 2 + np.cumsum(rng.normal(0, 0.05, n))
+        tr = simlev.tail_regression(d, "aktien", "inflation", quantiles=[0.05, 0.5, 0.95], B=49, seed=1)
+        print(tr["coefficients"])
     """
     frequency = _match_arg(frequency, ("week", "day", "month"))
     drivers = _as_names(drivers)
@@ -1586,7 +1804,7 @@ def tail_regression(data, asset, drivers, *, quantiles=(0.05, 0.25, 0.5, 0.75, 0
         if block is None:
             block = _rmin(_rmax(2, float(_boot()._pw_block(np.abs(y - r_mean(y)))["stationary"])), n / 10)
 
-        S = _sl().main_stream(seed)                     # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+        S = _sl().main_stream(seed)                     # Hauptstrom
         bs = []
         for _b in range(int(B)):
             idx = np.asarray(_boot_idx_stationary(n, n, block, S), dtype=np.int64) - 1
@@ -1656,7 +1874,7 @@ class SimLevCoVaR(RList):
 
 
 def _matvec(M, b):
-    """``drop(M %m% b)`` (slc-Matrixprodukt, Entwurf B.6)."""
+    """``drop(M %m% b)`` (slc-Matrixprodukt)."""
     return np.asarray(_sl().matmul(np.asarray(M, dtype=np.float64), np.asarray(b, dtype=np.float64).reshape(-1, 1)),
                       dtype=np.float64).ravel()
 
@@ -1664,16 +1882,53 @@ def _matvec(M, b):
 def tail_covar(data, system, assets, *, state=None, q=0.05, frequency=("week", "day", "month")):
     """CoVaR und Delta-CoVaR (Adrian & Brunnermeier 2016).
 
+    Nach Adrian & Brunnermeier (2016): Wie weit verschiebt sich das ``q``-Quantil der Rendite von ``system`` (z.
+    B. das Portfolio), wenn eine Anlage selbst in ihrem ``q``-Quantil steht, gegenüber ihrem Median? Mit ``state``
+    (Drittvariablen, verzögert) werden VaR und CoVaR zeitvariabel: X^sys_t = α + β X^i_t + γ' M_t-1 + ε (Quantil
+    q) Δ CoVaR_t = β (VaR^i_t(q) - VaR^i_t(0.5)) Dabei ist VaR^i_t(p) das per ``quantile_regression()`` geschätzte
+    (bei ``state = None`` konstante) p-Quantil der Rendite der Anlage, also eine Rendite mit Vorzeichen (Verluste
+    negativ), und CoVaR_t = α + β VaR^i_t(q) + γ' M_t-1. Renditen sind Log-Renditen der Periode in Prozent, 100
+    log(P_t / P_t-1), aufbereitet wie in ``dependence_analysis()`` (Fortschreiben fehlender Kurse, letzte Zeile je
+    ISO-Woche bzw. Monat); Zustandsvariablen gehen mit dem Wert am Ende der Vorperiode ein. Perioden mit fehlenden
+    Werten entfallen.
+
     Args:
-        data: DataFrame mit ``date``, Kursspalten und gegebenenfalls Zustandsspalten.
-        system: Kursspalte des Systems bzw. Portfolios.
-        assets: Kursspalten der einzelnen Anlagen.
-        state: Zustandsspalten (``None`` = zeitkonstante Quantile).
-        q: Quantil als Anteil.
-        frequency: ``"week"``, ``"day"`` oder ``"month"``.
+        data: DataFrame mit Spalte ``date`` (Date), Kursspalten (Kursniveaus, keine Renditen) und gegebenenfalls
+            Zustandsspalten.
+        system: Name der Kursspalte des Systems bzw. Portfolios (Zeichenkette).
+        assets: Zeichenvektor der Kursspalten der einzelnen Anlagen.
+        state: Optionaler Zeichenvektor der Zustandsspalten (in ihrer eigenen Einheit). ``None`` (Standard) =
+            zeitkonstante Quantile.
+        q: Quantil als Anteil (Standard 0.05 = 5-%-Quantil).
+        frequency: Renditefrequenz: ``"week"`` (Standard, ISO-Woche), ``"day"`` oder ``"month"``.
 
     Returns:
-        :class:`SimLevCoVaR`.
+        Objekt der Klasse ``SimLevCoVaR`` mit
+
+        - summary: DataFrame je Anlage: ``asset``, ``beta`` (Steigung der Systemrendite auf die Anlagerendite im
+          q-Quantil, ohne Einheit), ``var``, ``covar``, ``delta_covar`` (Mittel über die Zeit) und
+          ``delta_covar_min`` (kleinster Wert), alle außer ``beta`` in Prozent je Periode (Renditen mit
+          Vorzeichen, Verluste negativ).
+        - series: DataFrame mit ``date``, ``asset``, ``var``, ``covar``, ``delta_covar`` je Periode und Anlage
+          (Prozent je Periode).
+
+        sowie ``system``, ``state``, ``q``, ``frequency`` und ``n`` (Anzahl Perioden). Methoden ``print`` und
+        ``plot``.
+
+    Literatur:
+        Adrian, T. & Brunnermeier, M. K. (2016), American Economic Review 106(7), 1705-1741.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1095
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        e = rng.normal(size=n)
+        d["aktien"] = 100 * np.cumprod(1 + 0.01 * e)
+        d["anleihen"] = 100 * np.cumprod(1 + 0.004 * (0.3 * e + rng.normal(size=n)))
+        d["portfolio"] = 0.6 * d["aktien"] + 0.4 * d["anleihen"]
+        print(simlev.tail_covar(d, "portfolio", ["aktien", "anleihen"], q=0.05))
     """
     frequency = _match_arg(frequency, ("week", "day", "month"))
     assets = _as_names(assets)
@@ -1730,17 +1985,44 @@ def _rowsum_blocks(L, agg, k):
 def dependence_validate(boot, data, *, agg=5, q=0.10, max_paths=200):
     """Abhängigkeitsstruktur von Bootstrap-Pfaden prüfen.
 
+    Vergleicht Kendalls Tau, Pearson-Korrelation, empirische Tail-Abhängigkeit und die untere
+    Exceedance-Korrelation der Indizes in der Historie mit ihrer Verteilung über die Bootstrap-Pfade. Liegt der
+    historische Wert am Rand der Pfadverteilung, gibt das Verfahren die Abhängigkeit nicht wieder (z. B.
+    Tail-Abhängigkeit beim IID-Bootstrap zwar erhalten, Volatilitäts-Clustering aber nicht).
+
     Args:
-        boot: Ergebnis von ``bootstrap()`` (Klasse ``bootstrap_result``) mit
-            mindestens zwei Indizes.
-        data: historische Daten wie für ``bootstrap()``.
-        agg: Zeilen je Periode für die Aggregation.
-        q: Tail-Wahrscheinlichkeit.
-        max_paths: höchstens so viele Pfade auswerten.
+        boot: Objekt der Klasse ``bootstrap_result`` aus ``bootstrap()`` mit mindestens zwei Indizes in der
+            Konfiguration.
+        data: Historische Daten wie für ``bootstrap()`` (DataFrame oder Matrix mit den Spalten der Konfiguration).
+        agg: Zeilen je Periode für die Aggregation (ganze Zahl, Standard 5; z. B. 5 Handelstage oder 7
+            Kalendertage ergibt Wochen; 1 = keine Aggregation).
+        q: Tail-Wahrscheinlichkeit als Anteil für die Tail-Kennzahlen (Standard 0.10, siehe
+            ``tail_dependence()``).
+        max_paths: Höchstens so viele Pfade auswerten (die ersten ``max_paths`` Pfade; Standard 200).
 
     Returns:
-        ``pandas.DataFrame`` mit ``pair``, ``metric``, ``historical``,
-        ``median``, ``p05``, ``p95``, ``percentile``.
+        DataFrame mit einer Zeile je Indexpaar und Kennzahl: ``pair``, ``metric`` (``"kendall"``, ``"pearson"``,
+        ``"lambda_lower"``, ``"lambda_upper"``, ``"exceed_lower"``), ``historical`` (Wert der Historie),
+        ``median``, ``p05``, ``p95`` (Median und 5-/95-%-Quantil über die Pfade) und ``percentile`` (Anteil der
+        Pfade mit Wert <= Historie, 0 bis 1; Werte nahe 0 oder 1 zeigen, dass die Pfade die Kennzahl nicht
+        wiedergeben).
+
+    Details:
+        Alle Kennzahlen werden auf Log-Renditen berechnet, die über nicht überlappende Blöcke von ``agg`` Zeilen
+        summiert werden (ein unvollständiger Rest am Ende entfällt; mindestens 20 Blöcke nötig). Historie:
+        Renditen der Indizes aus ``data`` gemäß ``boot["config"]`` (Brutto-Renditen bzw. Kurse bei ``input =
+        "prices"``); Pfade: Log-Differenzen der Indexspalten der Pfade. Hebelprodukte und Zusatzreihen gehen nicht
+        ein.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(2)
+        d = pd.DataFrame({"us": 1 + rng.normal(3e-4, 0.01, 1500)})
+        d["eu"] = d["us"] * (1 + rng.normal(0, 0.004, 1500))
+        cfg = simlev.bootstrap_config({"us": "us", "eu": "eu"})
+        b = simlev.bootstrap(d, cfg, method="stationary", n=20, params={"L": 20}, seed=1, progress=False)
+        print(simlev.dependence_validate(b, d, agg=5, q=0.10))
     """
     rc = getattr(boot, "r_class", ())
     if "bootstrap_result" not in tuple(rc):
@@ -1813,18 +2095,35 @@ def _eval_condition(expr, data, env=None):
 def regime_subset(data, condition, *, min_run=1, env=None):
     """Zeilen eines Regimes für Stress-Bootstraps.
 
+    Wählt die Zeilen aus, in denen ``condition`` gilt (z. B. hohe Inflation), und verwirft zu kurze Episoden. Mit
+    Rendite-Eingabe (``bootstrap_config(input = "returns")``) lässt sich das Ergebnis direkt an ``bootstrap()``
+    oder ``bootstrap_study()`` übergeben: Die Pfade bestehen dann nur aus Blöcken dieses Regimes (inklusive der
+    mitgezogenen Zusatzreihen wie Zinsen). Die Episoden werden ohne Trennung aneinandergehängt; Bootstrap-Blöcke
+    können daher über Episodengrenzen hinwegreichen.
+
     Args:
-        data: DataFrame (Spalte ``date`` optional).
-        condition: Logischer Vektor der Länge ``len(data)`` (NA = FALSE),
-            Ausdruck als Text in R-Syntax (z. B. ``"inflation >= 4 & zins < 2"``,
-            siehe :mod:`simlev._r.rexpr`) oder Funktion ``data -> Vektor``.
-        min_run: Mindestlänge einer Episode in Zeilen.
-        env: Mapping für freie Variablen und Funktionen in ``condition``
-            (Voreinstellung: Namensraum des Aufrufers).
+        data: DataFrame, eine Zeile je Beobachtung (für ``bootstrap()`` typischerweise Tage mit Brutto-Renditen
+            wie 1.002 und Zusatzreihen). Eine Spalte ``date`` ist optional.
+        condition: Logischer Vektor der Länge ``nrow(data)`` (NA = False) oder Ausdruck als Zeichenkette, der in
+            ``data`` ausgewertet wird, z. B. ``"inflation >= 4"``.
+        min_run: Mindestlänge einer Episode in Zeilen (ganze Zahl, Standard 1); kürzere zusammenhängende
+            Abschnitte werden verworfen.
+        env: Mapping für freie Variablen und Funktionen in ``condition`` (Voreinstellung: Namensraum des
+            Aufrufers).
 
     Returns:
-        Teilmenge von ``data`` mit ``attrs["episodes"]`` (DataFrame ``start``,
-        ``end``, ``length`` und ggf. ``start_date``, ``end_date``).
+        Teilmenge von ``data`` (Zeilen der behaltenen Episoden in ursprünglicher Reihenfolge) mit Attribut
+        ``episodes``: DataFrame mit ``start``, ``end`` (Zeilennummern in ``data``), ``length`` (Zeilen) und, falls
+        ``data`` eine Spalte ``date`` hat, ``start_date``, ``end_date``. Fehler, wenn keine Episode die Bedingung
+        erfüllt.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        d = pd.DataFrame({"r": 1 + rng.normal(0, 0.01, 100), "infl": [1] * 40 + [5] * 30 + [1] * 30})
+        s = simlev.regime_subset(d, "infl >= 4", min_run=10)
+        print(len(s))
     """
     if isinstance(condition, str) or callable(condition):
         cond = _eval_condition(condition, data, env)

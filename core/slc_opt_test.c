@@ -1,4 +1,4 @@
-/* core/slc_opt_test.c – Prüffunktionen der Optimierer (SimLev core, Etappe 9.3)
+/* core/slc_opt_test.c – Prüffunktionen der Optimierer (SimLev core)
  * Verfahren:  Standardtestfunktionen der unbeschränkten Optimierung mit analytischem Gradienten,
  *             für die Plausibilitätsprüfung gegen optim und den Gleichlauf der Sprachen (dieselbe
  *             C-Zielfunktion über die Hüllen in R, Python und Julia): 1 Rosenbrock (verkettet),

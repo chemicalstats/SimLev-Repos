@@ -1,4 +1,4 @@
-"""Dashboard-Grafiken für SimLev-Ergebnisse (Port von plot_dashboard.R) als abhängigkeitsfreies SVG.
+"""Dashboard-Grafiken für SimLev-Ergebnisse (Gegenstück zu plot_dashboard.R) als abhängigkeitsfreies SVG.
 
 Prüfungen, Meldungen, Beschriftungen und alle berechneten Werte (``_dashboard_returns``,
 Kennzahlentexte, Monatsrenditen, rollierende Renditen und Korrelationen, Vergleichstabelle)
@@ -221,8 +221,8 @@ def _format_amount(x: Any, signif3: bool = False) -> list[str]:
 
 
 def _r_cor(x: np.ndarray, y: np.ndarray) -> float:
-    """``stats::cor(x, y)`` für zwei vollständige Vektoren (N11: C-Kern ``sl_r_cov``, long double wie R;
-    wie Julia seit N10)."""
+    """``stats::cor(x, y)`` für zwei vollständige Vektoren (C-Kern ``sl_r_cov``, long double wie R;
+    wie Julia)."""
     x = np.ascontiguousarray(x, dtype=np.float64).ravel()
     y = np.ascontiguousarray(y, dtype=np.float64).ravel()
     ans = np.empty(1)

@@ -1,4 +1,4 @@
-"""Szenarien mit eigenen Annahmen und Stresstests (Port von ``r/R/scenarios.R``).
+"""Szenarien mit eigenen Annahmen und Stresstests (Gegenstück zu ``r/R/scenarios.R``).
 
 - :func:`scenario_entropy_pooling`   gewichtet Szenarien so um, dass sie eigene Annahmen
   ("Views") erfüllen, bei minimaler relativer Entropie (Meucci 2008)
@@ -56,20 +56,116 @@ def _view_value(value, what, lo=-math.inf, hi=math.inf):
 
 
 def view_mean(var, value, *, op=("=", "<=", ">=")):
-    """Annahme an den Erwartungswert einer Spalte (Einheit der Spalte)."""
+    """Annahme an den Erwartungswert einer Spalte (Einheit der Spalte).
+
+    Bausteine für die Annahmen ("Views") von ``scenario_entropy_pooling()``. Jede Funktion beschreibt nur die
+    Annahme; geprüft und umgesetzt wird sie erst in ``scenario_entropy_pooling()`` auf der Szenario-Tabelle. Werte
+    stehen in der Einheit der Szenario-Spalten: Bei Kursdaten sind das einfache Renditen in Prozent je Periode (-5
+    = -5 %), Zustandsvariablen in ihrer eigenen Einheit.
+
+    - view_mean: Erwartungswert einer Spalte (Rendite in Prozent je Periode oder Zustandsvariable in ihrer
+      Einheit).
+    - view_prob: Wahrscheinlichkeit eines Ereignisses, als Ausdruck über die Spalten (z. B. ``"aktien < -5"``).
+    - view_vol: Standardabweichung einer Spalte (um ihren Erwartungswert unter der Ausgangsverteilung bzw. einer
+      ``view_mean``-Annahme mit ``op = "="`` für dieselbe Spalte). Umgesetzt wird die Bedingung an das zweite
+      Moment um diesen festen Wert; verschiebt sich der Mittelwert durch andere Annahmen, kann die
+      Standardabweichung nach der Umgewichtung davon abweichen.
+
+    Args:
+        var: Spaltenname der Szenario-Tabelle (Zeichenkette, Anlage oder Zustandsvariable).
+        value: Zielwert: bei ``view_mean`` und ``view_vol`` in der Einheit der Spalte (bei Kursdaten Prozent je
+            Periode), bei ``view_prob`` eine Wahrscheinlichkeit als Anteil (0.2 = 20 %). Eine endliche Zahl; bei
+            ``view_vol`` >= 0, bei ``view_prob`` zwischen 0 und 1 (sonst Fehler).
+        op: Art der Bedingung: ``"="`` (Standard), ``"<="`` oder ``">="``.
+
+    Returns:
+        Liste mit ``type`` (``"mean"``, ``"prob"`` oder ``"vol"``), ``var`` bzw. ``expr``, ``value`` und ``op``.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        X = pd.DataFrame({"aktien": rng.normal(0.15, 2, 1000), "anleihen": rng.normal(0.05, 0.6, 1000)})
+        ep = simlev.scenario_entropy_pooling(X, ["aktien", "anleihen"], [simlev.view_mean("aktien", -0.2)])
+        print(ep["summary"])
+    """
     v = _view_value(value, "view_mean")
     return {"type": "mean", "var": var, "value": v, "op": _match_arg(op, ("=", "<=", ">="))}
 
 
 def view_prob(expr, value, *, op=("=", "<=", ">=")):
-    """Annahme an die Wahrscheinlichkeit eines Ereignisses (Ausdruck in R-Syntax über die Spalten,
-    z. B. ``"aktien < -2 & inflation > 2"``; siehe :mod:`simlev._r.rexpr`)."""
+    """Annahme an die Wahrscheinlichkeit eines Ereignisses (Ausdruck in R-Syntax über die Spalten, z. B. ``"aktien < -2 & inflation > 2"``; siehe :mod:`simlev._r.rexpr`).
+
+    Bausteine für die Annahmen ("Views") von ``scenario_entropy_pooling()``. Jede Funktion beschreibt nur die
+    Annahme; geprüft und umgesetzt wird sie erst in ``scenario_entropy_pooling()`` auf der Szenario-Tabelle. Werte
+    stehen in der Einheit der Szenario-Spalten: Bei Kursdaten sind das einfache Renditen in Prozent je Periode (-5
+    = -5 %), Zustandsvariablen in ihrer eigenen Einheit.
+
+    - view_mean: Erwartungswert einer Spalte (Rendite in Prozent je Periode oder Zustandsvariable in ihrer
+      Einheit).
+    - view_prob: Wahrscheinlichkeit eines Ereignisses, als Ausdruck über die Spalten (z. B. ``"aktien < -5"``).
+    - view_vol: Standardabweichung einer Spalte (um ihren Erwartungswert unter der Ausgangsverteilung bzw. einer
+      ``view_mean``-Annahme mit ``op = "="`` für dieselbe Spalte). Umgesetzt wird die Bedingung an das zweite
+      Moment um diesen festen Wert; verschiebt sich der Mittelwert durch andere Annahmen, kann die
+      Standardabweichung nach der Umgewichtung davon abweichen.
+
+    Args:
+        expr: Ereignis als Zeichenkette, ein R-Ausdruck über die Spaltennamen der Szenario-Tabelle, der einen
+            logischen Wert je Szenario liefert (z. B. ``"aktien < -5 & inflation > 3"``).
+        value: Zielwert: bei ``view_mean`` und ``view_vol`` in der Einheit der Spalte (bei Kursdaten Prozent je
+            Periode), bei ``view_prob`` eine Wahrscheinlichkeit als Anteil (0.2 = 20 %). Eine endliche Zahl; bei
+            ``view_vol`` >= 0, bei ``view_prob`` zwischen 0 und 1 (sonst Fehler).
+        op: Art der Bedingung: ``"="`` (Standard), ``"<="`` oder ``">="``.
+
+    Returns:
+        Liste mit ``type`` (``"mean"``, ``"prob"`` oder ``"vol"``), ``var`` bzw. ``expr``, ``value`` und ``op``.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        X = pd.DataFrame({"aktien": rng.normal(0.15, 2, 1000), "anleihen": rng.normal(0.05, 0.6, 1000)})
+        ep = simlev.scenario_entropy_pooling(X, ["aktien", "anleihen"], [simlev.view_prob("aktien < -2", 0.15, op=">=")])
+        print(ep["summary"])
+    """
     v = _view_value(value, "view_prob", 0, 1)
     return {"type": "prob", "expr": expr, "value": v, "op": _match_arg(op, ("=", "<=", ">="))}
 
 
 def view_vol(var, value, *, op=("=", "<=", ">=")):
-    """Annahme an die Standardabweichung einer Spalte (Einheit der Spalte, >= 0)."""
+    """Annahme an die Standardabweichung einer Spalte (Einheit der Spalte, >= 0).
+
+    Bausteine für die Annahmen ("Views") von ``scenario_entropy_pooling()``. Jede Funktion beschreibt nur die
+    Annahme; geprüft und umgesetzt wird sie erst in ``scenario_entropy_pooling()`` auf der Szenario-Tabelle. Werte
+    stehen in der Einheit der Szenario-Spalten: Bei Kursdaten sind das einfache Renditen in Prozent je Periode (-5
+    = -5 %), Zustandsvariablen in ihrer eigenen Einheit.
+
+    - view_mean: Erwartungswert einer Spalte (Rendite in Prozent je Periode oder Zustandsvariable in ihrer
+      Einheit).
+    - view_prob: Wahrscheinlichkeit eines Ereignisses, als Ausdruck über die Spalten (z. B. ``"aktien < -5"``).
+    - view_vol: Standardabweichung einer Spalte (um ihren Erwartungswert unter der Ausgangsverteilung bzw. einer
+      ``view_mean``-Annahme mit ``op = "="`` für dieselbe Spalte). Umgesetzt wird die Bedingung an das zweite
+      Moment um diesen festen Wert; verschiebt sich der Mittelwert durch andere Annahmen, kann die
+      Standardabweichung nach der Umgewichtung davon abweichen.
+
+    Args:
+        var: Spaltenname der Szenario-Tabelle (Zeichenkette, Anlage oder Zustandsvariable).
+        value: Zielwert: bei ``view_mean`` und ``view_vol`` in der Einheit der Spalte (bei Kursdaten Prozent je
+            Periode), bei ``view_prob`` eine Wahrscheinlichkeit als Anteil (0.2 = 20 %). Eine endliche Zahl; bei
+            ``view_vol`` >= 0, bei ``view_prob`` zwischen 0 und 1 (sonst Fehler).
+        op: Art der Bedingung: ``"="`` (Standard), ``"<="`` oder ``">="``.
+
+    Returns:
+        Liste mit ``type`` (``"mean"``, ``"prob"`` oder ``"vol"``), ``var`` bzw. ``expr``, ``value`` und ``op``.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        X = pd.DataFrame({"aktien": rng.normal(0.15, 2, 1000), "anleihen": rng.normal(0.05, 0.6, 1000)})
+        ep = simlev.scenario_entropy_pooling(X, ["aktien", "anleihen"], [simlev.view_vol("anleihen", 0.8)])
+        print(ep["summary"])
+    """
     v = _view_value(value, "view_vol", 0)
     return {"type": "vol", "var": var, "value": v, "op": _match_arg(op, ("=", "<=", ">="))}
 
@@ -147,18 +243,55 @@ class SimLevScenarios(RList):
 def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week", "day", "month"), prior=None, env=None):
     """Entropy Pooling: Szenarien auf eigene Annahmen umgewichten.
 
+    Sucht die Szenario-Wahrscheinlichkeiten q, die alle Annahmen erfüllen und dabei der Ausgangsverteilung p
+    (Standard: gleichgewichtete Historie) am nächsten kommen, min_q Σ_j q_j log(q_j / p_j)quadu. d. N. Aq = b, Gq
+    ≤ h, Σ q = 1. Gelöst über das duale Problem (projizierter BFGS der C-Bibliothek von SimLev). Damit lassen sich
+    Fragen stellen wie: "Wie sieht die gemeinsame Verteilung von Aktien und Anleihen aus, wenn die Inflation im
+    Mittel 5 % beträgt?" - alle Abhängigkeiten bleiben aus der Historie erhalten, nur die Gewichte der Szenarien
+    ändern sich. Sind die Annahmen nicht (genau genug) erfüllbar, gibt die Funktion eine Warnung aus.
+
     Args:
-        x: DataFrame mit ``date`` und Kursspalten oder fertige Szenario-Tabelle.
-        assets: Anlagespalten.
-        views: Liste von Annahmen aus :func:`view_mean`, :func:`view_prob`, :func:`view_vol`.
-        states: Zustandsspalten (bei Kursdaten verzögert).
-        frequency: ``"week"`` (Standard), ``"day"`` oder ``"month"``.
-        prior: Ausgangswahrscheinlichkeiten (ein Wert je Szenario; ``None`` = gleichverteilt).
-        env: Mapping für freie Variablen und Funktionen in den Ausdrücken von
-            :func:`view_prob` (Voreinstellung: Namensraum des Aufrufers).
+        x: DataFrame mit Spalte ``date`` (Date) und Kursspalten (Kursniveaus; Renditen werden gebildet) oder eine
+            fertige Szenario-Tabelle (DataFrame oder Matrix ohne ``date``, z. B. simulierte Renditen).
+        assets: Zeichenvektor der Anlagespalten (bei Kursdaten Kursspalten).
+        views: Liste von Annahmen aus ``view_mean()``, ``view_prob()``, ``view_vol()``; eine leere Liste liefert
+            die Ausgangsverteilung.
+        states: Zeichenvektor der Zustandsspalten (z. B. Inflation, in ihrer eigenen Einheit), bei Kursdaten
+            verzögert wie in ``dependence_analysis()``. ``None`` (Standard) = keine.
+        frequency: Renditefrequenz bei Kursdaten: ``"week"`` (Standard, ISO-Woche), ``"day"`` oder ``"month"``;
+            bei einer fertigen Tabelle nur Beschriftung.
+        prior: Ausgangswahrscheinlichkeiten als numerischer Vektor mit einem Wert je Szenario (also je Zeile nach
+            der Aufbereitung; andere Längen, negative oder nicht endliche Werte sind ein Fehler), wird auf Summe 1
+            normiert. ``None`` (Standard) = gleichverteilt.
+        env: Mapping für freie Variablen und Funktionen in den Ausdrücken von :func:`view_prob` (Voreinstellung:
+            Namensraum des Aufrufers).
 
     Returns:
-        :class:`SimLevScenarios`.
+        Objekt der Klasse ``SimLevScenarios``, eine Liste mit ``scenarios`` (Szenario-Tabelle; bei Kursdaten mit
+        ``date``, Renditen in Prozent je Periode und Zuständen), ``prob`` (neue Wahrscheinlichkeiten, Summe 1),
+        ``prior``, ``effective_n`` (effektive Szenarioanzahl exp(H), H = Entropie von ``prob``), ``summary``
+        (DataFrame je Anlage und Zustand: ``var``, ``mean_prior``, ``mean_post``, ``sd_prior``, ``sd_post``, in
+        der Einheit der Spalte), ``correlation`` (Korrelationsmatrix der Anlagen nachher), ``assets``, ``states``,
+        ``views``, ``frequency`` und ``kind`` (``"entropy_pooling"``). Methode ``print``.
+
+    Details:
+        Szenarien: Bei einem DataFrame mit Spalte ``date`` wird je Periode ein Szenario gebildet. Die Kurse werden
+        wie in ``dependence_analysis()`` aufbereitet (Fortschreiben fehlender Werte, letzte Zeile je ISO-Woche
+        bzw. Kalendermonat) und in einfache Renditen in Prozent je Periode umgerechnet, 100 (P_t / P_t-1 - 1);
+        Zustandsspalten gehen mit dem Wert am Ende der Vorperiode ein, Perioden mit fehlenden Werten entfallen.
+        Jede andere Eingabe wird unverändert als Szenario-Tabelle verwendet (eine Zeile je Szenario, Einheiten wie
+        geliefert).
+
+    Literatur:
+        Meucci, A. (2008), Fully Flexible Views: Theory and Practice, Risk 21(10), 97-102.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        X = pd.DataFrame({"aktien": rng.normal(0.15, 2, 1000), "anleihen": rng.normal(0.05, 0.6, 1000)})
+        ep = simlev.scenario_entropy_pooling(X, ["aktien", "anleihen"], [simlev.view_mean("aktien", -0.2)])
+        print(ep["summary"])
     """
     frequency = _match_arg(frequency, ("week", "day", "month"))
     assets = _dep._as_names(assets)
@@ -214,7 +347,7 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
         val = float(v["value"]) * float(v["value"]) if t == "vol" else float(v["value"])
         sg = {"=": 0, "<=": 1, ">=": -1}[v["op"]]
         rows.append((-f if sg == -1 else f, -val if sg == -1 else val, sg != 0))
-    la = _dep._sl()                        # slc-Matrixprodukt (Entwurf B.6)
+    la = _dep._sl()                        # slc-Matrixprodukt
     if not rows:
         q = p
     else:
@@ -238,7 +371,7 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
             return b - np.asarray(la.matmul(A, q_.reshape(-1, 1)), dtype=np.float64).ravel()
         lower = np.where(ineq, 0.0, -math.inf)
         o = la.optim(np.zeros(b.size), fn, gr, method="L-BFGS-B", lower=lower,
-                     control={"maxit": 5000, "factr": 1e3, "pgtol": 1e-12})   # projizierter BFGS (slc, Entwurf B.8)
+                     control={"maxit": 5000, "factr": 1e3, "pgtol": 1e-12})   # projizierter BFGS (slc)
         q = dual(np.asarray(o["par"], dtype=np.float64))[1]
         viol = np.asarray(la.matmul(A, q.reshape(-1, 1)), dtype=np.float64).ravel() - b
         viol[ineq] = np.maximum(viol[ineq], 0)
@@ -283,18 +416,18 @@ def _approx_fn(xg, yg):
 
 
 def _matprod(A, B):
-    """``A %m% B`` (slc-Matrixprodukt, Entwurf B.6)."""
+    """``A %m% B`` (slc-Matrixprodukt)."""
     return np.asarray(_dep._sl().matmul(np.asarray(A, dtype=np.float64), np.asarray(B, dtype=np.float64)),
                       dtype=np.float64)
 
 
 def _chol(A):
-    """``.sl_chol(A)`` (Cholesky der C-Bibliothek slc, Entwurf B.5)."""
+    """``.sl_chol(A)`` (Cholesky der C-Bibliothek slc)."""
     return np.asarray(_dep._sl().chol(np.asarray(A, dtype=np.float64)), dtype=np.float64)
 
 
 def _solve(A):
-    """``.sl_solve_spd(A)``: Inverse einer symmetrisch positiv definiten Matrix (Entwurf B.5)."""
+    """``.sl_solve_spd(A)``: Inverse einer symmetrisch positiv definiten Matrix."""
     return np.asarray(_dep._sl().solve_spd(np.asarray(A, dtype=np.float64)), dtype=np.float64)
 
 
@@ -307,18 +440,57 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
                      seed=None):
     """Szenarien aus einer Copula mit empirischen Rändern.
 
+    Passt eine t-Copula (oder Gauß-Copula) an die Periodenrenditen an: Korrelationsmatrix aus Kendalls Tau (ρ =
+    sin(πτ/2)), Freiheitsgrade per Profil-Likelihood auf den Rängen, Ränder empirisch. Mit ``stress`` wird bedingt
+    simuliert: Die genannten Anlagen werden in ein Quantilband gezwungen (z. B. Aktien in ihre schlechtesten 5 %
+    der Wochen), die übrigen folgen der bedingten Copula-Verteilung - so zeigt sich, was die Abhängigkeitsstruktur
+    für die anderen Anlagen in solchen Phasen erwarten lässt (einschließlich gemeinsamer Abstürze bei der
+    t-Copula).
+
     Args:
-        x: DataFrame mit ``date`` und Kursspalten oder fertige Renditetabelle.
-        assets: Kurs- bzw. Renditespalten.
-        n: Anzahl Szenarien.
-        family: ``"t"`` (Standard) oder ``"gaussian"``.
-        stress: dict ``{anlage: (von, bis)}`` mit Quantilbändern (Anteile);
-            ``None`` = unbedingte Simulation.
-        frequency: ``"week"``, ``"day"`` oder ``"month"``.
-        seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`) der Ziehung.
+        x: DataFrame mit Spalte ``date`` (Date) und Kursspalten (Kursniveaus) oder fertige Tabelle von
+            Periodenrenditen ohne ``date``.
+        assets: Zeichenvektor der Kurs- bzw. Renditespalten.
+        n: Anzahl Szenarien (ganze Zahl, Standard 10000).
+        family: Copula: ``"t"`` (Standard) oder ``"gaussian"``.
+        stress: Optional benannte Liste von Quantilbändern je Anlage als Anteile ``[von, bis]`` mit 0 <= von < bis
+            <= 1, z. B. ``{"aktien": [0, 0.05]}`` (schlechteste 5 % der Perioden). Unbenannte Einträge, unbekannte
+            Anlagen und ungültige Bänder sind ein Fehler. ``None`` (Standard) = unbedingte Simulation.
+        frequency: Renditefrequenz bei Kursdaten: ``"week"`` (Standard, ISO-Woche), ``"day"`` oder ``"month"``.
+        seed: Startwert der Ziehung. Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis reproduzierbar und
+            der Zufallszustand von SimLev bleibt unverändert; mit ``None`` wird genau einmal ein Startwert aus dem
+            Zufallszustand von SimLev gezogen (siehe ``simlev_seed()``), wiederholte Aufrufe liefern dann
+            verschiedene Ergebnisse. ``set.seed()`` wirkt nicht.
 
     Returns:
-        :class:`SimLevScenarios`.
+        Objekt der Klasse ``SimLevScenarios`` mit ``scenarios`` (DataFrame mit ``n`` Zeilen, eine Spalte je
+        Anlage, in der Einheit der Eingangsrenditen, bei Kursdaten Prozent je Periode), ``prob`` und ``prior`` (je
+        1 / n), ``effective_n`` (= n), ``copula`` (Liste: ``family``, ``correlation``, ``df``; ``Inf`` bei
+        ``"gaussian"``), ``stress``, ``summary`` (``var``, ``mean_prior``, ``sd_prior`` der Historie,
+        ``mean_post``, ``sd_post`` der Szenarien), ``correlation`` (Pearson-Korrelation der Szenarien),
+        ``assets``, ``frequency``, ``kind`` (``"copula"``). Methode ``print``; weiter mit ``scenario_risk()``.
+
+    Details:
+        Die Periodenrenditen werden wie bei ``scenario_entropy_pooling()`` gebildet (einfache Renditen in Prozent
+        je Periode aus Kursdaten; eine fertige Tabelle ohne ``date`` wird unverändert verwendet). Die Ränder sind
+        die empirischen Quantilfunktionen mit linearer Interpolation; simulierte Werte liegen daher nie außerhalb
+        der historischen Spannweite. Die Freiheitsgrade werden im Bereich 2.1 bis 100 gesucht. Bei einer Anlage in
+        ``stress`` wird ihr Quantil gleichverteilt im Band gezogen; bei mehreren werden deren Werte gemeinsam aus
+        der Copula gezogen und nur Ziehungen behalten, die in allen Bändern liegen (Verwerfungsverfahren, exakt
+        bedingt; bei einer gemeinsamen Trefferquote, die nach 5e7 Ziehungen keine ``n`` Treffer liefert, bricht
+        die Funktion ab).
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1095
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        e = rng.normal(size=n)
+        d["aktien"] = 100 * np.cumprod(1 + 0.01 * e)
+        d["anleihen"] = 100 * np.cumprod(1 + 0.004 * (0.3 * e + rng.normal(size=n)))
+        cs = simlev.scenario_copula(d, ["aktien", "anleihen"], n=2000, stress={"aktien": [0, 0.05]}, seed=1)
+        print(simlev.scenario_risk(cs, {"aktien": 0.6, "anleihen": 0.4}))
     """
     family = _match_arg(family, ("t", "gaussian"))
     frequency = _match_arg(frequency, ("week", "day", "month"))
@@ -341,7 +513,7 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
         named = False
     Ri = _solve(R)
     ldR = float(la.logdet_spd(R))
-    nm = _dep._sl()                        # Verteilungen der C-Bibliothek slc (Entwurf B.3, B.4)
+    nm = _dep._sl()                        # Verteilungen der C-Bibliothek slc
 
     def ll_t(nu):
         Z = np.asarray(nm.qt(U, nu), dtype=np.float64).reshape(U.shape)
@@ -427,7 +599,7 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
             if fin:
                 Z = Z / np.sqrt(np.asarray(rng.rchisq(n, nu, stream=rs), dtype=np.float64) / nu).reshape(-1, 1)
         return Z
-    sim = draw(rng.main_stream(seed))              # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+    sim = draw(rng.main_stream(seed))              # Hauptstrom
     if math.isfinite(nu):
         V = np.asarray(nm.pt(sim, nu), dtype=np.float64).reshape(sim.shape)
     else:
@@ -476,14 +648,36 @@ def _isnum_arr(a):
 def scenario_risk(x, weights, *, alpha=0.05):
     """Portfolio-Kennzahlen auf Szenarien (gewichtet mit ``x.prob``).
 
+    Berechnet die Portfoliorendite r_j = Σ_i w_i X_ji je Szenario und daraus Kennzahlen, gewichtet mit den
+    Szenario-Wahrscheinlichkeiten ``x["prob"]`` (z. B. nach ``scenario_entropy_pooling()``). Quantile sind die
+    kleinste Szenariorendite, bei der die kumulierte Wahrscheinlichkeit den Wert erreicht. Der CVaR ist der
+    erwartete Verlust in der Wahrscheinlichkeitsmasse ``alpha`` der schlechtesten Szenarien (Rockafellar & Uryasev
+    2002): Szenarien unterhalb des VaR zählen voll, das Grenzszenario (das den VaR bestimmt) mit dem Teil seiner
+    Wahrscheinlichkeit, der die Masse auf ``alpha`` auffüllt. Damit ist der CVaR kohärent und fällt monoton in
+    ``alpha``.
+
     Args:
-        x: :class:`SimLevScenarios`.
-        weights: benannter Gewichtsvektor (Series oder dict; Namen = Anlagespalten).
-        alpha: Tail-Wahrscheinlichkeit für VaR und CVaR.
+        x: Objekt der Klasse ``SimLevScenarios`` aus ``scenario_entropy_pooling()`` oder ``scenario_copula()``.
+        weights: Benannter Gewichtsvektor (Anteile, Namen = Anlagespalten der Szenarien); wird nicht normiert.
+        alpha: Tail-Wahrscheinlichkeit als Anteil für VaR und CVaR (Standard 0.05).
 
     Returns:
-        ``pandas.Series`` mit ``mean``, ``volatility``, ``var``, ``cvar``,
-        ``q05``, ``q50``, ``q95``, ``prob_loss``.
+        Benannter numerischer Vektor: ``mean``, ``volatility``, ``var``, ``cvar`` (Verluste positiv), ``q05``,
+        ``q50``, ``q95`` (Quantile der Portfoliorendite mit Vorzeichen) in der Einheit der Szenarien (bei
+        Kursdaten Prozent je Periode) sowie ``prob_loss`` (Wahrscheinlichkeit einer negativen Rendite als Anteil 0
+        bis 1).
+
+    Literatur:
+        Rockafellar, R. T. & Uryasev, S. (2002), Conditional value-at-risk for general loss distributions, Journal
+        of Banking & Finance 26(7), 1443-1471.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        X = pd.DataFrame({"aktien": rng.normal(0.15, 2, 1000), "anleihen": rng.normal(0.05, 0.6, 1000)})
+        ep = simlev.scenario_entropy_pooling(X, ["aktien", "anleihen"], [simlev.view_mean("aktien", -0.2)])
+        print(simlev.scenario_risk(ep, {"aktien": 0.6, "anleihen": 0.4}))
     """
     if not isinstance(x, SimLevScenarios):
         raise ValueError("x muss ein SimLevScenarios sein.")
@@ -506,7 +700,7 @@ def scenario_risk(x, weights, *, alpha=0.05):
     o = np.concatenate([o[~nan], o[nan]])
     qo = q[o]
     ro = r[o]
-    cw = r_cumsum(qo)   # N11: C-Kern (cumsum in long double wie R)
+    cw = r_cumsum(qo)   # C-Kern (cumsum in long double wie R)
 
     def qf(a):
         h = np.nonzero(cw >= a)[0]
@@ -533,14 +727,48 @@ _DEFAULT_CRISES = pd.DataFrame({
 def scenario_crisis(data, weights, *, crises=None, rebalance=False):
     """Portfolio durch historische Krisen führen.
 
+    Rechnet ein heutiges Portfolio durch historische Krisenfenster (Standard: große Aktienkrisen von 1973 bis
+    2022, Hoch bis Tief des US-Aktienmarkts) und meldet Rendite, maximalen Drawdown und die Erholungsdauer nach
+    dem Fensterende, je Anlage und für das Portfolio. Das Fenster beginnt an der ersten Datenzeile ab ``start``
+    und endet an der letzten Zeile bis ``end``; fehlende Kurse werden mit dem letzten Wert fortgeschrieben. Krisen
+    außerhalb des Datenzeitraums (oder mit fehlendem Startkurs einer Anlage) werden übersprungen; liegt keine im
+    Zeitraum, bricht die Funktion ab.
+
     Args:
-        data: DataFrame mit ``date`` und Kursspalten.
-        weights: benannter Gewichtsvektor (wird auf Summe 1 normiert).
-        crises: DataFrame mit ``crisis``, ``start``, ``end``; ``None`` = eingebaute Liste.
-        rebalance: ``False`` (Kaufen und Halten) oder ``True`` (an jeder Zeile zurück auf die Gewichte).
+        data: DataFrame mit Spalte ``date`` (Date) und Kursspalten (Kursniveaus, keine Renditen, positiv),
+            typischerweise täglich. Die Zeilen werden nach ``date`` sortiert (mit Hinweis, falls nötig); fehlende
+            oder doppelte Daten sind ein Fehler.
+        weights: Benannter Gewichtsvektor (Namen = Kursspalten), wird auf Summe 1 normiert (Summe muss positiv
+            sein; unbekannte Namen sind ein Fehler).
+        crises: DataFrame mit ``crisis`` (Name), ``start``, ``end`` (Date). ``None`` (Standard) = eingebaute Liste
+            (siehe oben).
+        rebalance: Logisch: ``False`` (Standard, Kaufen und Halten ab Fensterbeginn) oder ``True`` (an jeder
+            Datenzeile auf die Gewichte zurück).
 
     Returns:
-        ``pandas.DataFrame`` je Krise im Datenzeitraum.
+        DataFrame je Krise im Datenzeitraum: ``crisis``, ``start``, ``end`` (tatsächlich verwendete Datenzeilen),
+        ``portfolio`` (Portfoliorendite im Fenster in Prozent), ``max_drawdown`` (maximaler Drawdown des
+        Portfolios im Fenster in Prozent, negativ), ``days_to_recover`` (Kalendertage ab Fensterende, bis der
+        Kaufen-und-Halten-Wert des Portfolios (auch bei ``rebalance = True``) wieder den Wert bei Fensterbeginn
+        erreicht; 0 = am Fensterende nicht darunter; ``NA`` = nicht erholt bzw. Daten enden) und je Anlage deren
+        Rendite im Fenster in Prozent.
+
+    Details:
+        Eingebaute Krisen (``crises = None``): Ölkrise 1973/74 (1973-01-11 bis 1974-10-03), Schwarzer Montag 1987
+        (1987-08-25 bis 1987-12-04), Dotcom 2000-02 (2000-03-24 bis 2002-10-09), Finanzkrise 2007-09 (2007-10-09
+        bis 2009-03-09), Eurokrise 2011 (2011-04-29 bis 2011-10-03), Covid 2020 (2020-02-19 bis 2020-03-23),
+        Inflation/Zinsen 2022 (2022-01-03 bis 2022-10-12).
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1460
+        d = pd.DataFrame({"date": pd.date_range("2018-01-01", periods=n)})
+        d["aktien"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.012, n))
+        d["anleihen"] = 100 * np.cumprod(1 + rng.normal(1e-4, 0.003, n))
+        kr = pd.DataFrame({"crisis": ["Test"], "start": pd.to_datetime(["2019-05-01"]), "end": pd.to_datetime(["2019-09-30"])})
+        print(simlev.scenario_crisis(d, {"aktien": 0.6, "anleihen": 0.4}, crises=kr))
     """
     if crises is None:
         crises = _DEFAULT_CRISES

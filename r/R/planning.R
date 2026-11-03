@@ -220,7 +220,7 @@ bootstrap_pooled <- function(datasets, columns, weights = NULL, inflation = NULL
   L <- L %||% (10 * ppy)
   nper <- as.integer(years * ppy); nc <- length(G)
   cw <- country_weights %||% rep(1 / nc, nc); cw <- cw / sum(cw)
-  S <- .sl_main_stream(seed)                                    # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+  S <- .sl_main_stream(seed)                                    # Hauptstrom
   draw <- lapply(seq_len(n), function(i) {
     ctry <- integer(nper); row <- integer(nper); t <- 1L
     while (t <= nper) {
@@ -458,7 +458,7 @@ planning_goal <- function(returns, start_value, goal, horizon, contributions = 0
   }
   p_dp <- interp(V, start_value)
   sim <- {
-    st <- .sl_main_stream(seed)                                 # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+    st <- .sl_main_stream(seed)                                 # Hauptstrom
     W <- rep(start_value, n_sim); choice <- matrix(NA_integer_, horizon, n_sim); ruined <- rep(FALSE, n_sim)
     for (t in seq_len(horizon)) {
       base <- W + cf[t]; alive <- base > 0 & !ruined; ruined <- ruined | !alive
@@ -500,7 +500,7 @@ planning_goal <- function(returns, start_value, goal, horizon, contributions = 0
 #' @keywords internal
 #' @export
 print.SimLevGoalPlan <- function(x, ...) {
-  eur <- function(v) formatC(round(v), format = "d", big.mark = " ")   # R9-07: Leerzeichen als Tausendertrenner
+  eur <- function(v) formatC(round(v), format = "d", big.mark = " ")   # Leerzeichen als Tausendertrenner
   cat(sprintf("Zielplanung: Ziel %s in %d Perioden, Start %s%s\n", eur(x$goal), x$horizon, eur(x$start_value),
               if (any(x$contributions != 0)) sprintf(", Zahlungen %s je Periode", paste(eur(unique(x$contributions)), collapse = "/")) else ""))
   cat(sprintf("Zielwahrscheinlichkeit dynamisch: %.1f %% (Vorw\u00e4rtssimulation, SE %.1f Prozentpunkte; DP-Wert %.1f %%)\n",

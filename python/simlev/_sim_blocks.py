@@ -1,4 +1,4 @@
-"""Bausteine für ``simulation()`` (Port von ``r/R/sim_blocks.R``, Etappe 6.3, Anhang C).
+"""Bausteine für ``simulation()`` (Gegenstück zu ``r/R/sim_blocks.R``).
 
 Jeder Baustein ist ein Konstruktor mit Prüfung der Argumente (deutsche Meldungen wie in R), einer
 R-Klasse (``RList`` mit ``r_class``) und einer Druckausgabe wie die R-``print``-Methode:
@@ -14,7 +14,7 @@ R-Klasse (``RList`` mit ``r_class``) und einer Druckausgabe wie die R-``print``-
 
 ``None`` heißt aus. ``_sim_from_blocks`` übersetzt die Bausteine in die internen Werte der Engine
 (``engine._simulation_flat``), die unverändert rechnet. ``funds_costs(fee, performance_fee)`` ist der
-Kostenbaustein für den Fonds-Wrapper (folgt, Etappe 6.5c); ``simulation()`` nimmt ihn nicht an (der alte
+Kostenbaustein für den Fonds-Wrapper (folgt); ``simulation()`` nimmt ihn nicht an (der alte
 Fondsmodus ist entfernt).
 """
 from __future__ import annotations
@@ -340,7 +340,63 @@ def _mk(cls: type, items: list) -> RList:
 # ── Konstruktoren ────────────────────────────────────────────────────────────
 
 def sim_costs(*, order_fee: Any = None, dca_fee: Any = None) -> SimLevSimCosts:
-    """Kosten für ``simulation()`` (Ordergebühr, Gebühr der Sparplankäufe); siehe R ``?sim_costs``."""
+    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
+
+    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
+    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
+    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
+    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
+    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
+    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
+    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
+
+    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
+    ``simulation()`` nimmt ihn nicht an.
+
+    Args:
+        order_fee: ``sim_costs``: Ordergebühr: ``None`` (keine, Standard), eine Zahl (feste Gebühr in EUR je
+            Order) oder ``{"fixed": ..., "percent": ..., "min": ..., "max": ...}`` mit ``fixed``, ``min``, ``max``
+            in EUR und ``percent`` in Prozent des Ordervolumens, z. B. ``{"fixed": 4.9, "percent": 0.25, "max":
+            59}``. Die Gebühr erhöht beim Kauf den Einstandskurs (Anschaffungsnebenkosten) und mindert beim
+            Verkauf den Erlös (Veräußerungskosten); steuerlich wirkt sie damit gewinnmindernd. Zusätzlich zum
+            Spread je Asset (``spread`` in ``asset_config``; einen Spread für die ganze Simulation gibt es nicht).
+            Unbekannte Listenfelder (z. B. ``fix`` statt ``fixed``) und negative Gebühren führen zu einem Fehler.
+            Bei Zwangsverkäufen für die Vorabpauschale und die § 23-Steuer wird so viel verkauft, dass Steuer und
+            Gebühr gedeckt sind.
+        dca_fee: ``sim_costs``: Gebühr für die Sparplankäufe (Format wie ``order_fee``): Käufe von
+            Buy-and-Hold-Assets an Sparplantagen. Rebalancing-Verkäufe und -Käufe, Signal-Trades,
+            Steuer-Zwangsverkäufe und die Liquidation am selben Tag kosten ``order_fee``. Ist der erste
+            Simulationstag ein Sparplantag, wird das Startkapital mit ``order_fee`` und nur die Sparrate mit
+            ``dca_fee`` angelegt (zwei Orders); fällt ein Sparplantermin auf einen Rebalancing-Tag, wird die Rate
+            im Rebalancing mit angelegt. Standard (``None``): wie ``order_fee``. Viele Broker führen Sparpläne
+            kostenlos aus (``dca_fee = 0``).
+
+    Returns:
+        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
+        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
+        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
+        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
+        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
+
+    Übersetzung in die Engine:
+        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
+        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
+        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
+        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
+        tax_profile()`` steht für die persönliche Besteuerung.
+
+    Fondskosten:
+        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
+        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
+        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
+        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
+        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
+
+    Beispiel::
+
+        import simlev
+        print(simlev.sim_costs(order_fee={"fixed": 1, "percent": 0.25, "min": 2, "max": 20}, dca_fee=0))
+    """
     _fee_spec(order_fee)
     _fee_spec(dca_fee)
     return _mk(SimLevSimCosts, [("order_fee", order_fee), ("dca_fee", dca_fee)])
@@ -348,7 +404,84 @@ def sim_costs(*, order_fee: Any = None, dca_fee: Any = None) -> SimLevSimCosts:
 
 def dca_plan(value: Any = _MISSING, span: Any = _MISSING, *, days: Any = None, unit: Any = ("month", "quarter", "year"),
              anchor: Any = ("start", "end"), start: Any = None, skip: Any = False, fill_deficits: Any = False) -> SimLevDcaPlan:
-    """Sparplan für ``simulation()``; siehe R ``?dca_plan``."""
+    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
+
+    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
+    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
+    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
+    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
+    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
+    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
+    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
+
+    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
+    ``simulation()`` nimmt ihn nicht an.
+
+    Args:
+        value: ``dca_plan``: Betrag je Sparplan-Termin in EUR; Pflicht, eine einzelne endliche Zahl ``> 0``
+            (Vektor, ``NA`` oder Text: Fehler).
+        span: ``dca_plan``: Abstand zwischen zwei Terminen in Perioden von ``unit`` (z. B. ``3`` mit ``"month"`` =
+            alle drei Monate); Pflicht, eine einzelne ganze Zahl ``>= 1`` (sonst Fehler). ``rebalance_plan``:
+            Rebalancing-Intervall in Perioden von ``unit``; ``None`` (Standard) = 1.
+        days: Integer-Vektor oder ``None``. Tag(e) innerhalb jeder Periode (1--31): bei ``"month"`` Tag des
+            Monats, bei ``"quarter"`` Tag im ersten Monat der Periode, bei ``"year"`` Tag im Januar; mit ``anchor
+            = "end"`` rückwärts vom Periodenende gezählt (1 = letzter Tag). Nicht existierende Tage entfallen (z.
+            B. Tag 31 im April, bei ``"end"`` Tag 31 vom Ende im Februar). Werte außerhalb von 1--31 oder nicht
+            ganzzahlig: Fehler; doppelte Tage ergeben nur einen Termin (Warnung, der Baustein enthält jeden Tag
+            einmal). Fallen bei Handelstagsdaten mehrere Sparplantermine auf denselben Handelstag (Verschiebung
+            von Wochenenden), wird je Termin eine Rate eingezahlt. ``None`` (Standard) = erster Tag der Periode.
+        unit: Einheit des Abstands: ``"month"`` (Standard), ``"quarter"`` oder ``"year"``. Perioden beginnen am
+            Monatsersten des Startmonats (``start`` bzw. erster Datentag), bei ``"year"`` am 1. Januar; Quartale
+            sind daher nicht zwingend Kalenderquartale.
+        anchor: Bezugspunkt für ``days``: ``"start"`` (Standard, ab Periodenbeginn) oder ``"end"`` (ab
+            Periodenende). Ohne ``days`` wirkungslos.
+        start: Date (oder ``"JJJJ-MM-TT"``) oder ``None``. Bezugsdatum des Terminplans: Die Perioden beginnen am
+            Monatsersten dieses Datums (bei ``"year"`` am 1. Januar); Termine vor dem ersten Datentag entfallen.
+            Kein Datum: Fehler beim Anlegen; liegt das Datum nach dem letzten Datentag, bricht ``simulation()``
+            mit Fehler ab. ``None`` (Standard) = erster Tag von ``data``.
+        skip: Logisch. ``dca_plan``: Sparplan-Termin am ersten Simulationstag auslassen (Termine an anderen Tagen
+            bleiben). ``rebalance_plan``: Rebalancing-Termin am ersten Simulationstag auslassen. Mit ``event_col``
+            und ``event_mode = "replace"`` (Rebalancing nur an Ereignistagen) heißt ``skip = True``: am ersten Tag
+            nicht umschichten, das Startkapital wird wie ohne Rebalancing angelegt; mit ``skip = False`` wird am
+            ersten Tag (und am Starttag später startender Assets) über das Rebalancing nach Zielgewichten gekauft.
+            Standard: ``False``.
+        fill_deficits: ``dca_plan``: ``False`` (Standard): Jede Rate wird fix nach den **Strategie-Gewichten**
+            (``share``) verteilt, renormiert über die aktiven Assets — 70:30 bleibt 70:30, unabhängig von der
+            Depot-Drift. ``True``: Die Rate wirkt als Mini-Rebalancing — sie füllt zuerst die Wert-Defizite zu den
+            Strategie-Zielen; ein Rest wird nach Strategie-Gewichten verteilt.
+
+    Returns:
+        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
+        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
+        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
+        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
+        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
+
+    Übersetzung in die Engine:
+        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
+        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
+        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
+        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
+        tax_profile()`` steht für die persönliche Besteuerung.
+
+    Fondskosten:
+        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
+        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
+        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
+        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
+        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 730
+        d = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n)})
+        d["A"] = 100 * 1.0003 ** np.arange(n)
+        r = simlev.simulation(d, simlev.create_strategy(A=simlev.asset_config(asset_class="etf")),
+                              dca=simlev.dca_plan(100, 1))
+        print(r["worth"][-1], r["invested"][-1])
+    """
     who = "dca_plan"
     value = None if isinstance(value, _Missing) else value
     span = None if isinstance(span, _Missing) else span
@@ -372,7 +505,108 @@ def rebalance_plan(*, span: Any = None, days: Any = None, unit: Any = ("month", 
                    anchor: Any = ("start", "end"), start: Any = None, skip: Any = False, thresh: Any = None,
                    thresh_type: Any = ("absolute", "relative"), event_col: Any = None,
                    event_mode: Any = _Default(("additional", "replace")), event_weight: Any = None) -> SimLevRebalancePlan:
-    """Rebalancing für ``simulation()``; siehe R ``?rebalance_plan``."""
+    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
+
+    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
+    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
+    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
+    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
+    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
+    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
+    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
+
+    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
+    ``simulation()`` nimmt ihn nicht an.
+
+    Args:
+        span: ``dca_plan``: Abstand zwischen zwei Terminen in Perioden von ``unit`` (z. B. ``3`` mit ``"month"`` =
+            alle drei Monate); Pflicht, eine einzelne ganze Zahl ``>= 1`` (sonst Fehler). ``rebalance_plan``:
+            Rebalancing-Intervall in Perioden von ``unit``; ``None`` (Standard) = 1.
+        days: Integer-Vektor oder ``None``. Tag(e) innerhalb jeder Periode (1--31): bei ``"month"`` Tag des
+            Monats, bei ``"quarter"`` Tag im ersten Monat der Periode, bei ``"year"`` Tag im Januar; mit ``anchor
+            = "end"`` rückwärts vom Periodenende gezählt (1 = letzter Tag). Nicht existierende Tage entfallen (z.
+            B. Tag 31 im April, bei ``"end"`` Tag 31 vom Ende im Februar). Werte außerhalb von 1--31 oder nicht
+            ganzzahlig: Fehler; doppelte Tage ergeben nur einen Termin (Warnung, der Baustein enthält jeden Tag
+            einmal). Fallen bei Handelstagsdaten mehrere Sparplantermine auf denselben Handelstag (Verschiebung
+            von Wochenenden), wird je Termin eine Rate eingezahlt. ``None`` (Standard) = erster Tag der Periode.
+        unit: Einheit des Abstands: ``"month"`` (Standard), ``"quarter"`` oder ``"year"``. Perioden beginnen am
+            Monatsersten des Startmonats (``start`` bzw. erster Datentag), bei ``"year"`` am 1. Januar; Quartale
+            sind daher nicht zwingend Kalenderquartale.
+        anchor: Bezugspunkt für ``days``: ``"start"`` (Standard, ab Periodenbeginn) oder ``"end"`` (ab
+            Periodenende). Ohne ``days`` wirkungslos.
+        start: Date (oder ``"JJJJ-MM-TT"``) oder ``None``. Bezugsdatum des Terminplans: Die Perioden beginnen am
+            Monatsersten dieses Datums (bei ``"year"`` am 1. Januar); Termine vor dem ersten Datentag entfallen.
+            Kein Datum: Fehler beim Anlegen; liegt das Datum nach dem letzten Datentag, bricht ``simulation()``
+            mit Fehler ab. ``None`` (Standard) = erster Tag von ``data``.
+        skip: Logisch. ``dca_plan``: Sparplan-Termin am ersten Simulationstag auslassen (Termine an anderen Tagen
+            bleiben). ``rebalance_plan``: Rebalancing-Termin am ersten Simulationstag auslassen. Mit ``event_col``
+            und ``event_mode = "replace"`` (Rebalancing nur an Ereignistagen) heißt ``skip = True``: am ersten Tag
+            nicht umschichten, das Startkapital wird wie ohne Rebalancing angelegt; mit ``skip = False`` wird am
+            ersten Tag (und am Starttag später startender Assets) über das Rebalancing nach Zielgewichten gekauft.
+            Standard: ``False``.
+        thresh: ``rebalance_plan``: Minimale Gewichtsabweichung **in Prozent** (z. B. ``5`` = 5 Prozentpunkte,
+            siehe ``thresh_type``) für einen Rebalancing-Trade; geprüft wird die größte Abweichung über alle
+            aktiven Assets. ``None`` (Standard) = an jedem Termin rebalancieren. Gewichte, Abweichung und
+            Depotwert werden an jedem Rebalancing-Tag zum Tageskurs vor dem Handel bestimmt (nach Sparrate und
+            Signal-Ein-/Ausstieg des Tages), gehandelt wird zum selben Kurs. Werte unter 0,2 (vermutlich Anteil,
+            z. B. ``0.05`` für 5 Prozentpunkte) werden mit Warnung als Prozent gelesen. ``split_rule``:
+            Numerischer Vektor der Länge 2 ``[untere, obere]``: Kursschwellen in Preiseinheiten der Kursreihe.
+            Steigt der Kurs über die obere Schwelle, folgt ein Split (Verhältnis Kurs/100), fällt er unter die
+            untere, eine Zusammenlegung (100/Kurs); der Kurs wird jeweils auf 100 gesetzt. Bestand, Lots und die
+            gesamte Kurshistorie (auch der Jahresanfangskurs für die Vorabpauschale) werden umgerechnet. Erwartet
+            wird ``untere < 100 < obere``; sonst Warnung, da nach dem ersten Split (Kurs 100) an jedem folgenden
+            Tag ein weiterer Split ausgelöst wird. Kein Zahlenvektor der Länge 2: Fehler. Hat ein Asset am
+            Split-Tag keinen Bestand, wird seine Kursreihe trotzdem umgerechnet.
+        thresh_type: ``"absolute"`` (Standard): ``thresh`` sind Prozentpunkte des Gewichts (5 = Ziel 40 % darf
+            35--45 % sein). ``"relative"``: Prozent des Zielgewichts (25 = Ziel 40 % darf 30--50 % sein).
+        event_col: Character oder ``None``. Name einer logischen Spalte in ``data``, die ereignisbasiertes
+            Rebalancing auslöst (siehe ``rebalance_trigger``); fehlt die Spalte, bricht ``simulation()`` mit
+            Fehler ab. Kein Rebalancing am ersten Tag und (mit ``liquidate``) am Liquidationstag. Standard:
+            ``None``.
+        event_mode: ``"additional"`` (Standard: zusätzlich zu den Terminen) oder ``"replace"`` (nur an
+            Ereignistagen, die Termine entfallen; siehe ``skip``). Ohne ``event_col`` wirkungslos (Warnung, wenn
+            angegeben).
+        event_weight: Benannter Character-Vektor oder benannte Liste oder ``None``: je Asset-Name der Name einer
+            numerischen Spalte in ``data`` mit dem Zielgewicht. Wirkt nur an Tagen, an denen ``event_col``
+            ``True`` ist; die Werte werden auf Summe 1 normiert und nur verwendet, wenn alle aktiven Assets einen
+            endlichen Wert haben und die Summe positiv ist (fehlt ein Asset, gelten mit Warnung an Event-Tagen die
+            Strategie-Gewichte). Unbenannte Angaben, unbekannte Asset-Namen, fehlende Spalten und negative
+            Gewichte führen in ``simulation()`` zu einem Fehler. ``None`` = Strategie-Gewichte. Ohne ``event_col``
+            wirkungslos (Warnung).
+
+    Returns:
+        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
+        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
+        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
+        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
+        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
+
+    Übersetzung in die Engine:
+        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
+        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
+        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
+        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
+        tax_profile()`` steht für die persönliche Besteuerung.
+
+    Fondskosten:
+        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
+        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
+        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
+        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
+        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1500
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        d["A"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d["B"] = 100 * np.cumprod(1 + rng.normal(1e-4, 0.004, n))
+        st = simlev.create_strategy(A=simlev.asset_config(asset_class="etf", share=0.6), B=simlev.asset_config(asset_class="etf", share=0.4))
+        r = simlev.simulation(d, st, rebalance=simlev.rebalance_plan(unit="quarter", thresh=5))
+        print(r["buys"], r["sells"])
+    """
     who = "rebalance_plan"
     days = _blk_days(who, days)
     unit = _match_arg(unit, ("month", "quarter", "year"), "unit")
@@ -397,7 +631,60 @@ def rebalance_plan(*, span: Any = None, days: Any = None, unit: Any = ("month", 
 
 
 def split_rule(thresh: Any = _MISSING) -> SimLevSplitRule:
-    """Automatische Splits für ``simulation()``: ``thresh = (untere, obere)``; siehe R ``?split_rule``."""
+    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
+
+    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
+    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
+    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
+    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
+    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
+    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
+    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
+
+    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
+    ``simulation()`` nimmt ihn nicht an.
+
+    Args:
+        thresh: ``rebalance_plan``: Minimale Gewichtsabweichung **in Prozent** (z. B. ``5`` = 5 Prozentpunkte,
+            siehe ``thresh_type``) für einen Rebalancing-Trade; geprüft wird die größte Abweichung über alle
+            aktiven Assets. ``None`` (Standard) = an jedem Termin rebalancieren. Gewichte, Abweichung und
+            Depotwert werden an jedem Rebalancing-Tag zum Tageskurs vor dem Handel bestimmt (nach Sparrate und
+            Signal-Ein-/Ausstieg des Tages), gehandelt wird zum selben Kurs. Werte unter 0,2 (vermutlich Anteil,
+            z. B. ``0.05`` für 5 Prozentpunkte) werden mit Warnung als Prozent gelesen. ``split_rule``:
+            Numerischer Vektor der Länge 2 ``[untere, obere]``: Kursschwellen in Preiseinheiten der Kursreihe.
+            Steigt der Kurs über die obere Schwelle, folgt ein Split (Verhältnis Kurs/100), fällt er unter die
+            untere, eine Zusammenlegung (100/Kurs); der Kurs wird jeweils auf 100 gesetzt. Bestand, Lots und die
+            gesamte Kurshistorie (auch der Jahresanfangskurs für die Vorabpauschale) werden umgerechnet. Erwartet
+            wird ``untere < 100 < obere``; sonst Warnung, da nach dem ersten Split (Kurs 100) an jedem folgenden
+            Tag ein weiterer Split ausgelöst wird. Kein Zahlenvektor der Länge 2: Fehler. Hat ein Asset am
+            Split-Tag keinen Bestand, wird seine Kursreihe trotzdem umgerechnet.
+
+    Returns:
+        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
+        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
+        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
+        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
+        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
+
+    Übersetzung in die Engine:
+        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
+        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
+        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
+        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
+        tax_profile()`` steht für die persönliche Besteuerung.
+
+    Fondskosten:
+        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
+        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
+        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
+        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
+        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
+
+    Beispiel::
+
+        import simlev
+        print(simlev.split_rule([20, 500]))
+    """
     thresh = None if isinstance(thresh, _Missing) else thresh
     st = _num_vec(thresh) if thresh is not None else None
     if st is None or len(st) != 2 or any(v is None or math.isnan(v) for v in st):
@@ -411,7 +698,54 @@ def split_rule(thresh: Any = _MISSING) -> SimLevSplitRule:
 
 
 def income_rate(marginal_rate: Any = _MISSING, *, soli_rate: Any = 0) -> SimLevIncomeRate:
-    """Einkommen mit festem Grenzsteuersatz (für ``tax_profile(income=)``); siehe R ``?income_rate``."""
+    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
+
+    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
+    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
+    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
+    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
+    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
+    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
+    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
+
+    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
+    ``simulation()`` nimmt ihn nicht an.
+
+    Args:
+        marginal_rate: ``income_rate``: Persönlicher Grenzsteuersatz **in Prozent** (z. B. ``42``), zulässig 0 bis
+            50; Pflicht. Werte zwischen 0 und 1 (vermutlich Anteil) werden mit Warnung als Prozent gelesen. Die §
+            23-Steuer (Satz mal (1 + Soli-Satz + Kirchensteuersatz)) entsteht mit dem Jahresabschluss und wird am
+            Abrechnungstag der Vorabpauschale aus dem Depot gezahlt.
+        soli_rate: ``income_rate``: Solidaritätszuschlag auf die Einkommensteuer **in Prozent** (z. B. ``5.5``);
+            ``0`` (Standard) heißt ohne Soli (seit 2021 zahlen wegen der Freigrenze die meisten Steuerpflichtigen
+            keinen Soli auf die Einkommensteuer). Eine einzelne endliche Zahl ``>= 0``.
+
+    Returns:
+        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
+        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
+        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
+        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
+        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
+
+    Übersetzung in die Engine:
+        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
+        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
+        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
+        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
+        tax_profile()`` steht für die persönliche Besteuerung.
+
+    Fondskosten:
+        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
+        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
+        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
+        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
+        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
+
+    Beispiel::
+
+        import simlev
+        print(simlev.tax_profile(church_tax=9, guenstigerpruefung=True, income=simlev.income_rate(42)))
+    """
     who = "income_rate"
     marginal_rate = None if isinstance(marginal_rate, _Missing) else marginal_rate
     _blk_num(who, marginal_rate, "marginal_rate", "eine einzelne Zahl in Prozent von 0 bis 50 (z. B. 42)")
@@ -424,17 +758,65 @@ def income_rate(marginal_rate: Any = _MISSING, *, soli_rate: Any = 0) -> SimLevI
 
 
 def income_tariff(taxable_income: Any = _MISSING, *, tariff: Any = None) -> SimLevIncomeTariff:
-    """Einkommen mit Einkommensteuertarif (für ``tax_profile(income=)``); siehe R ``?income_tariff``.
+    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
 
-    Für ``withdrawal_simulation()`` gilt das zvE je Planjahr, nominal wie angegeben: eine Zahl für alle Planjahre oder
-    ein Vektor ohne Namen mit einem Wert je Planjahr (in ``simulation()`` ein Fehler); nach Kalenderjahren benannt nur
-    mit einem ``SimLevResult`` als ``start_value``. Das ``income`` von ``withdrawal_simulation()`` zählt nicht zum zvE;
-    einen steuerpflichtigen Teil (etwa einer Rente) selbst in ``taxable_income`` einrechnen.
+    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
+    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
+    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
+    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
+    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
+    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
+    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
+
+    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
+    ``simulation()`` nimmt ihn nicht an.
+
+    Args:
+        taxable_income: ``income_tariff``: Zu versteuerndes Einkommen (zvE) in EUR je Kalenderjahr **ohne** die
+            Kapitalerträge und § 23-Gewinne der Simulation; Pflicht. Eine Zahl (gilt für alle Jahre), ein nach
+            Kalenderjahren benannter Zahlenvektor (z. B. ``{"2024": 50000, "2025": 52000}``) oder ein
+            ``data.frame`` mit den Spalten ``year`` und ``taxable_income`` (oder genau zwei Spalten Jahr, Betrag).
+            Fehlt ein Kalenderjahr der Simulation, bricht ``simulation()`` mit Fehler ab. Die Engine rechnet dann
+            mit dem Einkommensteuertarif (Abschnitt „Einkommensteuertarif“ in ``simulation``). Für
+            ``withdrawal_simulation`` gilt das zvE je **Planjahr**, nominal wie angegeben: eine Zahl für alle
+            Planjahre oder ein Vektor **ohne** Namen mit einem Wert je Planjahr (in ``simulation()`` ein Fehler);
+            nach Kalenderjahren benannt nur mit einem ``SimLevResult`` als ``start_value``. Das ``income`` von
+            ``withdrawal_simulation()`` zählt nicht zum zvE; einen steuerpflichtigen Teil (etwa einer Rente)
+            selbst in ``taxable_income`` einrechnen.
+        tariff: ``income_tariff``: ``None`` (Standard: mitgelieferte Datei ``system.file("extdata",
+            "steuertarif.csv", package = "SimLev")``, Rechtslage ab VZ 2026), ein Dateipfad (wird beim Anlegen mit
+            ``tax_tariff`` gelesen) oder ein Objekt aus ``tax_tariff``.
+
+    Returns:
+        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
+        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
+        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
+        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
+        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
+
+    Übersetzung in die Engine:
+        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
+        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
+        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
+        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
+        tax_profile()`` steht für die persönliche Besteuerung.
+
+    Fondskosten:
+        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
+        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
+        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
+        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
+        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
+
+    Beispiel::
+
+        import simlev
+        print(simlev.tax_profile(income=simlev.income_tariff(60000)))
     """
     if isinstance(taxable_income, _Missing) or taxable_income is None:
         _stop("income_tariff: taxable_income (zu versteuerndes Einkommen in EUR je Kalenderjahr ohne die Erträge der "
               "Simulation) fehlt.")
-    _check_taxable_income(taxable_income, [], who="income_tariff", plan_ok=True)  # T14: auch je Planjahr
+    _check_taxable_income(taxable_income, [], who="income_tariff", plan_ok=True)  # auch je Planjahr
     if tariff is not None and not isinstance(tariff, SimLevTaxTariff):
         if isinstance(tariff, str):
             tariff = tax_tariff(file=tariff)
@@ -445,7 +827,50 @@ def income_tariff(taxable_income: Any = _MISSING, *, tariff: Any = None) -> SimL
 
 
 def harvest_rule(*, day: Any = "12-15", loss_pot: Any = True) -> SimLevHarvestRule:
-    """Freibetrag jährlich ausschöpfen (für ``tax_profile(harvest=)``); siehe R ``?harvest_rule``."""
+    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
+
+    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
+    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
+    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
+    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
+    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
+    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
+    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
+
+    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
+    ``simulation()`` nimmt ihn nicht an.
+
+    Args:
+        day: ``harvest_rule``: Termin als ``"MM-TT"`` (Standard ``"12-15"``); genutzt wird der erste Handelstag ab
+            diesem Datum, vor dem 31.12. (sonst Fehler).
+        loss_pot: ``harvest_rule``: Auch den Verlusttopf durch realisierte Gewinne nutzen? Standard ``True``.
+
+    Returns:
+        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
+        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
+        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
+        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
+        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
+
+    Übersetzung in die Engine:
+        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
+        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
+        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
+        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
+        tax_profile()`` steht für die persönliche Besteuerung.
+
+    Fondskosten:
+        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
+        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
+        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
+        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
+        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
+
+    Beispiel::
+
+        import simlev
+        print(simlev.tax_profile(harvest=simlev.harvest_rule(day="12-15")))
+    """
     if not isinstance(day, str) or not re.match(r"^\d{2}-\d{2}$", day) or day >= "12-31":
         _stop("harvest_rule: day im Format 'MM-TT' und vor dem 31.12. angeben (z. B. '12-15').")
     _blk_lgl("harvest_rule", loss_pot, "loss_pot")
@@ -455,7 +880,88 @@ def harvest_rule(*, day: Any = "12-15", loss_pot: Any = True) -> SimLevHarvestRu
 def tax_profile(*, rate: Any = _Dflt(26.375), church_tax: Any = 0, sparer_pauschbetrag: Any = 1000,
                 private_sale_threshold: Any = 1000, base_rate: Any = None, guenstigerpruefung: Any = False,
                 income: Any = None, harvest: Any = None) -> SimLevTaxProfile:
-    """Persönliche Besteuerung für ``simulation()``; siehe R ``?tax_profile``."""
+    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
+
+    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
+    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
+    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
+    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
+    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
+    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
+    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
+
+    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
+    ``simulation()`` nimmt ihn nicht an.
+
+    Args:
+        rate: ``tax_profile``: Kapitalertragsteuersatz inkl. Solidaritätszuschlag **in Prozent** (z. B. ``26.375``
+            = 25 % KapESt + 5,5 % Soli), zulässig 0 bis 100. Werte zwischen 0 und 1 (vermutlich ein Anteil) werden
+            mit Warnung als Prozent gelesen. Gilt nur ohne Kirchensteuer: ``rate`` zusammen mit ``church_tax > 0``
+            ergibt einen Fehler. Standard: ``26.375``.
+        church_tax: ``tax_profile``: Kirchensteuersatz in Prozent (``8`` oder ``9``; Standard ``0``). Setzt den
+            Abgeltungsteuersatz nach § 32d Abs. 1 EStG (25 % / (1 + 0,25 k) zuzüglich Solidaritätszuschlag und
+            Kirchensteuer), z. B. 27,99 % bei 9 %. Auf die Einkommensteuer (§ 23-Steuer mit ``income_rate()``,
+            persönlicher Satz der Günstigerprüfung) wird die Kirchensteuer als ``church_tax`` Prozent der
+            Einkommensteuer aufgeschlagen. Mit ``income_tariff()`` ist die Kirchensteuer ``church_tax`` Prozent
+            der Einkommensteuer und wird als Sonderausgabe im Jahr ihrer Zahlung berücksichtigt. Zulässig ist eine
+            Zahl von 0 bis 100; Werte zwischen 0 und 1 (Anteil statt Prozent) und über 9 werden mit Warnung
+            angenommen.
+        sparer_pauschbetrag: ``tax_profile``: Jährlicher Sparer-Pauschbetrag in EUR (Freibetrag; ``2000`` bei
+            Zusammenveranlagung); ``0`` heißt ohne Pauschbetrag. Genutzt wird höchstens der positive Jahressaldo
+            der Kapitalerträge nach Verlustverrechnung (§ 20 Abs. 9 Satz 4, § 43a Abs. 3 EStG), Verlusttopf vor
+            Pauschbetrag (siehe ``simulation``). Eine einzelne endliche Zahl ``>= 0`` (sonst Fehler). Standard:
+            ``1000``.
+        private_sale_threshold: ``tax_profile``: Jährliche Freigrenze nach § 23 Abs. 3 Satz 5 EStG in EUR, für
+            alle Jahre gleich. Ab Erreichen der Freigrenze ist der Jahressaldo abzüglich Verlustvortrag
+            steuerpflichtig (BFH IX R 27/04), darunter steuerfrei. Eine einzelne endliche Zahl ``>= 0`` (sonst
+            Fehler). Standard: ``1000``.
+        base_rate: ``tax_profile``: Basiszins für die Vorabpauschale: ``None`` (Standard: keine Vorabpauschale),
+            eine Zahl **in Prozent** (z. B. ``2.55`` = 2,55 %; negativ erlaubt und wie 0 behandelt) oder der Name
+            einer Spalte in ``data`` mit täglichen Basiszinswerten in Prozent (wie ``risk_free``; ``NA`` wird zu
+            0, für ein Jahr zählt der Wert vom ersten Handelstag, § 18 Abs. 4 InvStG). Zahlen zwischen 0 und 0,05
+            (vermutlich Anteil) werden mit Warnung als Prozent gelesen, für eine Spalte gilt dieselbe Schwelle für
+            den Median; fehlt die Spalte, bricht ``simulation()`` mit Fehler ab.
+        guenstigerpruefung: ``tax_profile``: Günstigerprüfung nach § 32d Abs. 6 EStG anwenden? Mit
+            ``income_rate()`` wird statt ``rate`` der persönliche Satz (mit Soli und Kirchensteuer) verwendet,
+            wenn die Belastung einschließlich Zuschlagsteuern niedriger ist; ohne Grenzsteuersatz warnt
+            ``simulation()`` und rechnet mit der Abgeltungsteuer. Mit ``income_tariff()`` wird unterjährig die
+            Abgeltungsteuer einbehalten und im Jahresabschluss mit dem Tarif verglichen; die Differenz wird
+            erstattet. Standard: ``False``.
+        income: ``tax_profile``: Einkommen für § 23 EStG und die Günstigerprüfung: ``None`` (Standard; sind §
+            23-Gewinne steuerpflichtig, werden 42 % angesetzt, mit Warnung in ``simulation()``), ``income_rate()``
+            (fester Grenzsteuersatz) oder ``income_tariff()`` (Einkommensteuertarif); beide Wege schließen sich
+            aus.
+        harvest: ``tax_profile``: ``None`` (Standard) oder ``harvest_rule()``: Einmal je Jahr werden bei Fonds und
+            § 20-Produkten Gewinne bis zum noch freien Sparer-Pauschbetrag (und mit ``loss_pot`` bis zur Höhe des
+            Verlusttopfs) realisiert und sofort wieder angelegt („Freibetrag ausschöpfen“); Spread und Gebühren
+            fallen für Verkauf und Kauf an.
+
+    Returns:
+        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
+        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
+        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
+        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
+        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
+
+    Übersetzung in die Engine:
+        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
+        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
+        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
+        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
+        tax_profile()`` steht für die persönliche Besteuerung.
+
+    Fondskosten:
+        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
+        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
+        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
+        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
+        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
+
+    Beispiel::
+
+        import simlev
+        print(simlev.tax_profile(church_tax=9, base_rate=2.29, income=simlev.income_rate(42), harvest=simlev.harvest_rule()))
+    """
     who = "tax_profile"
     rate_given = not isinstance(rate, _Dflt)
     if not _is_num(rate) or math.isnan(float(rate)) or rate < 0 or rate > 100:
@@ -502,7 +1008,54 @@ def tax_profile(*, rate: Any = _Dflt(26.375), church_tax: Any = 0, sparer_pausch
 
 
 def funds_costs(*, fee: Any = 0.95, performance_fee: Any = 5) -> SimLevFundsCosts:
-    """Kostenbaustein für den Fonds-Wrapper (folgt); siehe R ``?funds_costs``."""
+    """Bausteine für simulation: Kosten, Sparplan, Rebalancing, Splits, Steuern; Fondskosten.
+
+    Die Einstellungen von ``simulation`` werden als Bausteine übergeben: ``costs = sim_costs()``, ``dca =
+    dca_plan()``, ``rebalance = rebalance_plan()``, ``splits = split_rule()``, ``tax = tax_profile()`` (mit
+    ``income = income_rate()`` oder ``income_tariff()`` und ``harvest = harvest_rule()``). ``None`` heißt aus
+    (kein Sparplan, kein Rebalancing, keine Splits, keine Steuern). Jeder Baustein prüft seine Argumente beim
+    Anlegen (deutsche Fehlermeldungen und Warnungen) und druckt eine kurze Zusammenfassung. ``simulation()`` prüft
+    nur noch das Zusammenspiel mit den Daten (z. B. ob die Spalte ``event_col`` in ``data`` steht oder ob
+    ``start`` im Datenzeitraum liegt). Die Rechnung der Engine ist dieselbe wie mit den früheren Einzelargumenten.
+
+    ``funds_costs()`` ist der Kostenbaustein des Fonds-Wrappers (``wrapper_config(costs = funds_costs())``);
+    ``simulation()`` nimmt ihn nicht an.
+
+    Args:
+        fee: ``funds_costs``: Jährliche Verwaltungsgebühr (Fondskostenquote) **in Prozent** (z. B. ``0.95``), im
+            Wrapper täglich je Kalendertag vom Anteilswert abgezogen. Zulässig 0 bis 100 (sonst Fehler). Standard:
+            ``0.95``.
+        performance_fee: ``funds_costs``: Performancegebühr **in Prozent** des Wertzuwachses des Anteilswerts über
+            dem Höchststand (High-Water-Mark über die ganze Laufzeit); im Wrapper täglich abgegrenzt und am
+            letzten Datentag jedes Kalenderjahres festgeschrieben. Zulässig 0 bis 100 (sonst Fehler). Standard:
+            ``5``.
+
+    Returns:
+        Ein Baustein: Liste mit den Argumenten (nach der Prüfung; ``unit``, ``anchor``, ``thresh_type`` und
+        ``event_mode`` aufgelöst, ``days`` ohne doppelte Tage, ``tariff`` aus einem Dateipfad gelesen) und der
+        Klasse ``SimLevSimCosts``, ``SimLevDcaPlan``, ``SimLevRebalancePlan``, ``SimLevSplitRule``,
+        ``SimLevTaxProfile``, ``SimLevIncomeRate``, ``SimLevIncomeTariff``, ``SimLevHarvestRule`` bzw.
+        ``SimLevFundsCosts``. Die ``print``-Methoden geben ``x`` unsichtbar zurück.
+
+    Übersetzung in die Engine:
+        ``simulation()`` übersetzt die Bausteine am Anfang in die internen Werte der Engine: ``dca_plan()``
+        schaltet den Sparplan ein, ``rebalance_plan()`` das Rebalancing (auch am ersten Simulationstag und am
+        Starttag später startender Assets wird dann über das Rebalancing gekauft); nur mit ``event_col``,
+        ``event_mode = "replace"`` und ``skip = True`` wird ausschließlich an Ereignistagen umgeschichtet. ``tax =
+        tax_profile()`` steht für die persönliche Besteuerung.
+
+    Fondskosten:
+        ``funds_costs(fee, performance_fee)`` ist der Kostenbaustein des Fonds-Wrappers:
+        ``wrapper_config(strategy, costs = funds_costs(...))``. Die Rechnung (Verwaltungsgebühr je Kalendertag,
+        Performancegebühr gegen die High-Water-Mark) steht in ``wrapper_nav``. ``print()`` zeigt die Überschrift
+        „Fondskosten (funds_costs)“. Der frühere Fondsmodus ``simulation(funds = funds_costs())`` ist entfernt;
+        ``simulation(funds = )`` ergibt den Fehler für ein unbekanntes Argument.
+
+    Beispiel::
+
+        import simlev
+        print(simlev.funds_costs(fee=0.5, performance_fee=10))
+    """
     for a, x in (("fee", fee), ("performance_fee", performance_fee)):
         if not _is_num(x) or math.isnan(float(x)) or x < 0 or x > 100:
             _stop("funds_costs: %s muss eine Zahl in Prozent zwischen 0 und 100 sein (z. B. %s), nicht %s."
@@ -559,7 +1112,7 @@ def _sim_from_blocks(costs, dca, rebalance, splits, tax) -> dict:
     return a
 
 
-# ── Aufrufer von simulation(): sim_args und Pfade (Etappe 6.4) ────────────────
+# ── Aufrufer von simulation(): sim_args und Pfade ────────────────
 # R: Abschnitt „Aufrufer von simulation()“ in r/R/sim_blocks.R. sim_args der Aufrufer sind Argumente von
 # simulation() (auch Bausteine); Raster und Suchräume sprechen Parameter der Bausteine mit Pfad an
 # („dca.value“, „rebalance.thresh“, „tax.income.marginal_rate“). Alte flache Namen ergeben einen Fehler.

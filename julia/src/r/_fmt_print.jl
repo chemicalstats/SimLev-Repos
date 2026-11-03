@@ -7,7 +7,7 @@
 #                     W. Fullerton (Los Alamos); sprintf.c: ursprünglich Jonathan Rougier
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet seit N10 der C-Kern
+#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet der C-Kern
 #                     core/slc_rbase_date.c.
 # RFmt – Druckausgabe: Vektoren, Faktoren, Matrizen, data.frames, Listen, cat.
 # Vorlage: python/simlev/_r/fmt.py; R 4.3.3 printvector.c, printmatrix.c,

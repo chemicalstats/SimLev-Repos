@@ -10,28 +10,25 @@
 
 ---
 
-Dies ist das R-Paket **SimLev**, die Referenzimplementierung. Die
-Python-Fassung 0.5.0 und die Julia-Fassung 0.5.0 im selben Repository sind
-vollständige Ports dieser Fassung und rechnen bitgleich zu ihr: Alle drei
-nutzen dieselbe eigene C-Bibliothek für Zufall und Numerik (siehe
-[Gleichlauf](../README.md#gleichlauf-der-drei-sprachen) und
-[`NEWS.md`](NEWS.md)). Das Paket enthält keinen Code aus fremden Paketen;
-die Quellen der Verfahren stehen im Abschnitt
-[Literatur](../README.md#literatur) der Haupt-README.
+Dies ist das R-Paket **SimLev**, eine von drei gleichwertigen Fassungen. Die
+Rechenkerne liegen als gemeinsamer C/C++-Code in [`core/`](../core/); R,
+Python und Julia bilden die Schnittstelle darum (Eingabeprüfung,
+Datenaufbereitung, Ablauf, Ergebnisobjekte, Druck, Grafik), haben dieselben
+Funktionen und rechnen bitgleich (siehe
+[Haupt-README](../README.md#bitgleichheit)). Das Paket braucht außer Basis-R
+keine weiteren Pakete und enthält keinen Code aus fremden Paketen; die
+Quellen der Verfahren stehen in [`LITERATUR.md`](../LITERATUR.md).
 
-**Die vollständige Dokumentation mit Schnellstart, Grundkonzepten und
-Beispielen für alle drei Sprachen steht in der
-[Haupt-README](../README.md).** Hier finden Sie nur, was speziell das
-R-Paket betrifft.
+**Einstieg:** das Tutorial als Vignette
+([`vignettes/getting-started.Rmd`](vignettes/getting-started.Rmd), im
+installierten Paket `vignette("getting-started", package = "SimLev")`) mit
+Daten, Strategie, `simulation()` mit allen Bausteinen, Auswertung,
+Bootstrap, Entnahme, Optimierung und Grafik.
 
 ## Installation
 
-SimLev enthält C++- und C-Code (Marktupdates, FIFO-Lotverwaltung, Steuerkern,
-Entnahme- und Research-Kerne sowie die C-Bibliothek mit Zufall, Verteilungen,
-linearer Algebra, Optimierern, Modellen und Bootstrap-Kernen; angebunden über
-R's eigene C-Schnittstelle, ohne Rcpp) und wird aus dem Quellcode kompiliert. Zum Installieren braucht es
-außer Basis-R keine weiteren Pakete. Neben **R ≥ 4.0** brauchen Sie einen
-funktionierenden Compiler:
+SimLev enthält C- und C++-Code und wird aus dem Quellcode übersetzt. Neben
+**R ≥ 4.0** brauchen Sie einen Compiler:
 
 | Betriebssystem | Was Sie benötigen |
 |---|---|
@@ -39,26 +36,18 @@ funktionierenden Compiler:
 | macOS | Xcode Command Line Tools (`xcode-select --install` im Terminal) |
 | Linux | `build-essential` bzw. `gcc`/`g++` und die R-Entwicklungspakete (z. B. `r-base-dev`) |
 
-Ob alles bereit ist, prüft `pkgbuild::check_build_tools()`.
-
+<!-- beispiele: nicht ausführen -->
 ``` r
 # install.packages("remotes")
 remotes::install_github("chemicalstats/SimLev-Repos", subdir = "r")
 
-# oder aus einem lokalen Quellarchiv
-install.packages("SimLev_0.5.0.tar.gz", repos = NULL, type = "source")
+# oder aus einem lokalen Quellarchiv (R CMD build r)
+install.packages("SimLev_<Version>.tar.gz", repos = NULL, type = "source")
 ```
 
-**Optionale Pakete:**
-
-| Paket | Wofür |
-|---|---|
-| `knitr`, `rmarkdown` | Bauen der Vignette |
-
-Technische Indikatoren für Signalstrategien (z. B. gleitende Durchschnitte)
-lassen sich bequem mit dem Paket `TTR` berechnen (`TTR::SMA()` u. a.). `TTR`
-ist keine Abhängigkeit von SimLev und wird bei Bedarf separat installiert
-(`install.packages("TTR")`).
+Optional: `knitr` und `rmarkdown` zum Bauen der Vignette. Technische
+Indikatoren für eigene Signale berechnet z. B. das Paket `TTR`; es ist keine
+Abhängigkeit von SimLev.
 
 ## Kurzbeispiel
 
@@ -72,132 +61,47 @@ data <- data.frame(
   WORLD = 100 * cumprod(1 + rnorm(n, 4e-4, 0.010)),
   BONDS =  50 * cumprod(1 + rnorm(n, 1e-4, 0.003))
 )
-
 strategy <- create_strategy(
   WORLD = asset_config("etf", trading = "bnh", share = 0.7, spread = 0.1, partial_exemption = 30),
   BONDS = asset_config("etf", trading = "bnh", share = 0.3, spread = 0.1, partial_exemption = 0)
 )
-
-result <- simulation(data, strategy,
-                     start_value = 10000,
+result <- simulation(data, strategy, start_value = 10000,
                      rebalance = rebalance_plan(span = 1, unit = "year"),
-                     tax = tax_profile(rate = 26.375),
-                     liquidate = TRUE, risk_free = 2)
-
-print(result)   # CAGR +5.93 %, Endwert 17.765,20 EUR
-plot(result)
+                     tax = tax_profile(rate = 26.375), liquidate = TRUE, risk_free = 2)
+tail(result$worth, 1)
 ```
 
-## Weiterführende Dokumentation im Paket
-
-- `?SimLev` – Arbeitsweise (eigene Daten einlesen oder erzeugen,
-  simulieren, fertige Simulationen weiterverarbeiten) und Glossar der
-  Einheiten und Argumentnamen
-- [`NEWS.md`](NEWS.md) – Änderungen je Version
-- `?simulation` – alle Argumente der Hauptfunktion im Detail, inklusive
-  Terminverschiebung, signalbewusstem Rebalancing und Event-Rebalancing
-- `?asset_config`, `?create_strategy` – Assets und Strategien
-- `?tax_tariff` – Einkommensteuertarif (§ 32a EStG, Soli) aus einer
-  austauschbaren Datei für `simulation(tax = tax_profile(income = income_tariff(taxable_income)))`
-- `?rebalance_trigger` – ereignisbasierte Trigger
-- `?plot.SimLevResult` – Visualisierung und Export
-- `vignette("getting-started", package = "SimLev")` – Einführung Schritt
-  für Schritt
-- [`inst/examples/rebal_trigger_cookbook.R`](inst/examples/rebal_trigger_cookbook.R) –
-  kommentierte Vorlagen für eigene Trigger-Regeln
-- `?backcast_fit`, `?bootstrap_study`, `?withdrawal_simulation` – Backcast
-  von Produkten, Bootstrap-Studien und Entnahmephase
-- `?result_analysis`, `?sensitivity_rebalancing`, `?planning_lumpsum_vs_dca` –
-  vertiefte Auswertung und Parameterstudien
-- `?param_search`, `?overfit_pbo`, `?sharpe_deflated`, `?overfit_walk_forward`, `?signals` –
-  Parametersuche mit Prüfung auf Überanpassung
-- `?series_align`, `?series_check`, `?series_align_macro`, `?portfolio_template` –
-  Daten- und Portfolio-Aufbereitung
-- `?dependence_analysis`, `?copula_fit`, `?tail_regression`,
-  `?tail_covar` – Abhängigkeiten, Tail-Risiko und Drittvariablen
-- `?tactical_simulation`, `?tactical_rules`, `?tactical_rotation`,
-  `?tactical_target_volatility`, `?tactical_conditional_volatility` – taktische Allokation
-- `?portfolio_optimize`, `?portfolio_frontier`, `?portfolio_risk_contributions` –
-  Optimierung und Risikozerlegung
-- `?index_bond`, `?index_money_market` – synthetische Reihen
-- `?scenario_entropy_pooling`, `?scenario_copula`, `?scenario_crisis` – Szenarien
-- `?bootstrap_pooled`, `?withdrawal_horizon`, `?planning_goal` – Planung
-- `?sharpe_test`, `?overfit_reality_check`, `?signal_analysis`, `?regime_hmm` –
-  Prüfungen und Regime
-- [`inst/tutorial/`](inst/tutorial/) – Tutorial (R Markdown, Ausgabe als
-  HTML)
-- [`inst/examples/`](inst/examples/) – ausführliche Beispielsammlungen zu
-  Strategie-Objekten, Dashboards sowie Backcast, Bootstrap und Entnahmen
-  ([`backcast_bootstrap_withdrawal_examples.md`](inst/examples/backcast_bootstrap_withdrawal_examples.md))
-
-## Tests
-
-``` r
-rcmdcheck::rcmdcheck()      # Paket-Check: Beispiele, Vignette
+``` text
+[1] 17765.2
 ```
 
-Die Tests des Pakets, die Referenzfälle für Python und Julia, die
-Gleichlaufprüfung und die Prüfung der eingefrorenen Schnittstelle gehören nicht
-zum Paket; sie liegen im Repository (siehe dessen Haupt-README). Wer die
-Rechenlogik ändert, zieht die Python- und die Julia-Fassung nach und prüft mit
-dem Gleichlauf.
+`print(result)` zeigt alle Kennzahlen, `plot(result)` das Dashboard.
 
-## Paketaufbau
+## Hilfe
 
-```
-R/
-  simulation.R               simulation(), Ablaufsteuerung, print/summary
-  sim_base.R                 Steuer-, Termin-, Handels-, Split- und Gebührenfunktionen,
-                             Tarifweg, Jahreswechsel, Kennzahlen
-  sim_validate.R, sim_prepare.R, sim_actions.R, sim_loop.R, sim_evaluate.R
-                             Phasen von simulation(): Eingabeprüfung, Vorbereitung,
-                             Zahlungshelfer, Tagesschleife, Auswertung
-  tax_tariff.R               tax_tariff(): Einkommensteuertarif aus
-                             inst/extdata/steuertarif.csv
-  asset_config.R, strategy.R asset_config(), create_strategy() & Co.
-  compute_rebal_trigger.R    ereignisbasierte Trigger
-  plot_dashboard.R           statisches Dashboard (Base-Grafik)
-  backcast.R                 backcast_fit(), backcast()
-  bootstrap.R                bootstrap_config(), bootstrap(), bootstrap_study(), bootstrap_block_length()
-  withdrawal.R               withdrawal_rule(), withdrawal_simulation() & Co.
-  deep_analysis.R            result_analysis(): vertiefte Auswertung
-  sensitivity.R              sensitivity_grid(), sensitivity_rebalancing(),
-                             planning_lumpsum_vs_dca(), sensitivity_leverage()
-  signals.R                  signal_sma() & Co.: parametrisierbare Signale
-  param_search.R             param_space(), param_search(), param_plateau()
-  overfitting.R              overfit_pbo(), sharpe_deflated(), overfit_walk_forward(),
-                             param_bootstrap()
-  data_prep.R                series_align(), series_check(), series_align_macro(),
-                             series_splice(), portfolio_template() & Co.
-  dependence.R               dependence_analysis(), copula_fit(), dependence_dcc(),
-                             quantile_regression(), tail_regression(), tail_covar()
-  tactical.R                 tactical_rules(), tactical_rotation(),
-                             tactical_target_volatility(), tactical_conditional_volatility(),
-                             tactical_glidepath(), tactical_simulation()
-  optimize.R                 portfolio_optimize(), portfolio_frontier(),
-                             portfolio_rolling(), portfolio_risk_contributions()
-  bonds.R                    index_bond(), index_money_market(),
-                             index_currency_hedged()
-  scenarios.R                scenario_entropy_pooling(), scenario_copula(),
-                             scenario_risk(), scenario_crisis()
-  planning.R                 series_shift_return(), bootstrap_pooled(),
-                             portfolio_returns(), planning_goal()
-  analysis_tests.R           signal_analysis(), sharpe_test(), overfit_reality_check(),
-                             sharpe_min_track_record(), result_heatmap()
-  regimes.R                  regime_hmm(), regime_states()
-  ms_garch.R                 eigene MS-GARCH-Schätzung (Kern in der C-Bibliothek)
-  cores.R                    .Call-Hüllen der C++-Kerne
-  slc.R, slc_*.R             Hüllen der C-Bibliothek, simlev_seed()
-  utils.R
-src/                         C++-Kerne (FIFO, Steuern, Markt-Updates, Research,
-                             Entnahmeregeln) und C-Bibliothek slc*.c (Kopien aus
-                             ../core/, nur dort ändern), Hüllen slc_r*.c,
-                             init.c (Registrierung), simlev_capi.h
-                             (Anbindung an R's C-Schnittstelle)
-man/                         Hilfeseiten
-vignettes/                   Einführung
-inst/examples/               Beispielsammlungen
-```
+- `?SimLev`: Arbeitsweise und Glossar der Einheiten und Argumentnamen.
+- `?simulation` und `?sim_blocks`: die Engine und ihre Bausteine
+  (`sim_costs()`, `dca_plan()`, `rebalance_plan()`, `split_rule()`,
+  `tax_profile()`); `?tax_tariff`, `?wrapper_config`, `?rebalance_trigger`.
+- `?plot.SimLevResult`: Dashboard und Export.
+- Erweiterungen: `?backcast_fit`, `?bootstrap_study`,
+  `?withdrawal_simulation`, `?result_analysis`, `?param_search`,
+  `?series_align`, `?dependence_analysis`, `?tactical_simulation`,
+  `?portfolio_optimize`, `?scenario_entropy_pooling`, `?planning_goal`,
+  `?sharpe_test`, `?regime_hmm`.
+- [`inst/examples/`](inst/examples/) (im Paket
+  `system.file("examples", package = "SimLev")`): Beispielsammlungen zu
+  Strategie-Objekten, Dashboards, Backcast, Bootstrap und Entnahme sowie
+  Vorlagen für eigene Rebalancing-Trigger.
+- [`NEWS.md`](NEWS.md) bzw. `news(package = "SimLev")`: Änderungen je Version.
+- Zuordnung der Funktionen zu Python und Julia:
+  [`STRUKTUR.md`](../STRUKTUR.md).
+
+## Entwicklung und Tests
+
+Bauen, Prüfen und den Abgleich der C-Quellen beschreibt
+[`DEVELOPING.md`](DEVELOPING.md). Die Tests gehören nicht zum Paket; sie
+liegen im Ordner `tests/` des Repositorys.
 
 ## Lizenz
 

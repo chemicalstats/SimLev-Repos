@@ -41,7 +41,7 @@ ausgewertet.}
 \item{"evt"}{GPD-Tails des Referenzindex plus empirischer Bulk (\code{tail_prob}, \code{both_tails}); uebrige Indizes ueber das historische Verhaeltnis zum Referenzindex gekoppelt}
 \item{"tails"}{Empirische Tail-Schichtung des Referenzindex (\code{tail_prob})}
 \item{"reset"}{Chronologie mit zufaellig gespiegelten Segmenten (\code{p_break}); erhaelt die Chronologie}
-\item{"garch", "gjr_garch"}{(GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung ueber \code{cross} in \code{\link[=bootstrap_config]{bootstrap_config()}}). Geschaetzt per Maximum Likelihood unter Normalverteilung mit der C-Bibliothek von SimLev (GJR mit \eqn{\alpha + \gamma \ge 0}, also auch \eqn{\gamma < 0}; bis Version 1.0.0 \eqn{\gamma \ge 0}; BFGS von sieben Rasterpunkten), notfalls mit Momentschaetzern; die Meldungen nennen den Weg "ml" bzw. "momente" (bis Etappe 9.6b "rugarch"/"optim")}
+\item{"garch", "gjr_garch"}{(GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung ueber \code{cross} in \code{\link[=bootstrap_config]{bootstrap_config()}}). Geschaetzt per Maximum Likelihood unter Normalverteilung mit der C-Bibliothek von SimLev (GJR mit \eqn{\alpha + \gamma \ge 0}, also auch \eqn{\gamma < 0}; bis Version 1.0.0 \eqn{\gamma \ge 0}; BFGS von sieben Rasterpunkten), notfalls mit Momentschaetzern; die Meldungen nennen den Weg "ml" bzw. "momente" (bis 0.10.0 "rugarch"/"optim")}
 \item{"ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"}{Markov-Switching-GARCH-Familie: eigene ML-Schaetzung des MS-GARCH-Modells nach Haas, Mittnik und Paolella (2004), Normalverteilung, Varianzmodell "sGARCH" oder "gjrGARCH" je Regime (GJR mit \eqn{\alpha + \gamma \ge 0}, also auch \eqn{\gamma < 0}; BFGS mit analytischem Gradienten von 12 bzw. bei "gjrGARCH" 20 Startpunkten); "ms_ar_garch_m" zusaetzlich mit AR- und GARCH-in-Mean-Termen je Regime, "tvtp_ms_garch" mit zeitvariablen Uebergangswahrscheinlichkeiten (\code{ms_n_regimes}/\code{ms_garch_model}, \code{ms_ar_n_regimes}/\code{ms_ar_garch_model} bzw. \code{tvtp_n_regimes}/\code{tvtp_garch_model})}
 }
 Bei "wild" und "reset" muss \code{path_length} der Laenge der Historie
@@ -105,13 +105,14 @@ des Verfahrens (z. B. \code{L} bzw. \code{block_length} 5, 10, 20, 30,
 50, 75, 100 Zeilen, begrenzt auf die halbe Historienlaenge). Nur bei
 \code{ess = TRUE} verwendet.}
 
-\item{progress}{Logisch: Fortschritts- und Abschlussmeldung per
-\code{message()} ausgeben (Standard \code{TRUE}).}
-
 \item{path_length}{Pfadlaenge in Zeilen (simulierte Schritte, ganze Zahl,
 mindestens 1); \code{NULL} (Standard) = Anzahl verwendbarer Zeilen der Historie. Damit lassen sich
 z. B. 50-jaehrige Pfade aus 30 Jahren Historie erzeugen. Jeder Pfad hat
 \code{path_length + 1} Zeilen (Startzeile plus Schritte).}
+
+\item{max_tries}{Versuche je Pfad (Standard 10), falls ein Pfad ungueltig
+ist (Indexrendite <= 0 oder nicht endlich). Ein Totalverlust eines
+Hebelprodukts macht den Pfad nicht ungueltig.}
 
 \item{seed}{Ganzzahliger Startwert (\eqn{|seed| < 2^{53}}); \code{NULL} (Standard) = genau
 einmal aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}; ganze Zahl von 0
@@ -129,9 +130,8 @@ Windows). Bei den MS-GARCH-Verfahren (\code{ms_garch}, \code{ms_ar_garch_m},
 \code{tvtp_ms_garch}) rechnet der Fit seine Startpunkte zudem auf so vielen
 Threads; das Ergebnis haengt davon nicht ab.}
 
-\item{max_tries}{Versuche je Pfad (Standard 10), falls ein Pfad ungueltig
-ist (Indexrendite <= 0 oder nicht endlich). Ein Totalverlust eines
-Hebelprodukts macht den Pfad nicht ungueltig.}
+\item{progress}{Logisch: Fortschritts- und Abschlussmeldung per
+\code{message()} ausgeben (Standard \code{TRUE}).}
 }
 \value{
 Objekt der Klasse \code{bootstrap_result}, eine Liste mit

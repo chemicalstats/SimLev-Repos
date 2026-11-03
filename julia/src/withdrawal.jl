@@ -1,4 +1,4 @@
-# Withdrawal – r/R/withdrawal.R (Vorlage python/simlev/withdrawal.py)
+# Withdrawal – Gegenstück zu r/R/withdrawal.R und python/simlev/withdrawal.py
 #
 # Entnahme-Simulationen (Ruhestand / Decumulation):
 #   withdrawal_rule        Regel-Objekt (14 Regeln)
@@ -88,66 +88,168 @@ _num(x) = x isa Bool ? x : x isa Integer ? Float64(x) : x
                     cape_b = 0.5, ratchet_threshold = 1.5, ratchet_gap = 3, extra = 10, floor95 = 95,
                     min_real = 0, max_real = Inf, max_rate = 100)
 
-Entnahmeregel definieren (Port von `withdrawal_rule()`).
+Entnahmeregel definieren.
 
-Quellen und Abweichungen:
-    clyatt: Nach Clyatt (2005): jedes Jahr rate des aktuellen Depots,
-        mindestens floor95 Prozent der Vorjahresentnahme, nominal;
-        Kürzungen in Folgejahren verketten sich (95 % von 95 %). Keine
-        Abweichung.
-    endowment: Angelehnt an die Yale-Regel (Swensen 2009, Kap. 3, mit Verweis auf
-        Tobin 1974): Gewicht mal Vorjahresentnahme plus
-        (1 - Gewicht) mal Zielrate mal Vermögen; Yale früher 70 %, heute
-        80 %. Abweichend: Yale wendet die Zielrate auf den Wert zum Ende des
-        vorigen Geschäftsjahres an und schreibt die Summe beider Teile mit
-        der Inflation fort; SimLev nimmt das Depot zu Beginn des Planjahres
-        und inflationiert nur die Vorjahresentnahme.
-    one_over_n: Nach Bogleheads Wiki, Withdrawal methods (1/N): Depot
-        geteilt durch die Restjahre. Abweichend: das Wiki empfiehlt 1/N eher
-        als Höchstbetrag; SimLev entnimmt genau 1/N.
-    abw: Angelehnt an die jährlich neu berechnete virtuelle Annuität (ARVA)
-        von Waring & Siegel (2015): Rate einer vorschüssigen Annuität mit dem
-        aktuellen Depot über die Restjahre. Abweichend: feste erwartete
-        Realrendite exp_return statt der aktuellen Marktzinsen; reales
-        Zielvermögen fv als eigene Ergänzung.
-    cape: Nach Jeske (2017): Rate = a + b / CAPE auf das aktuelle Depot;
-        1,75 % und 0,5 sind eine der dort gerechneten Varianten. Abweichend:
-        dort monatlich mit den Werten vom Ende des Vormonats, in SimLev
-        jährlich mit dem CAPE zu Beginn des Planjahres; CAPE <= 0 ergibt nur
-        a (eigene Festlegung).
-    sensible: Angelehnt an Ponzo (o. J.), Sensible Withdrawals:
-        Grundentnahme plus ein Anteil (dort Beispiele 10 und 25 %) des
-        Zuwachses, wenn das Depot nach der Grundentnahme stärker als die
-        Inflation gewachsen ist. Abweichend bzw. dort offen: SimLev setzt die
-        Grundentnahme als inflationierte Erstentnahme rate · P_1, misst den
-        Zuwachs als reales Depot vor der Entnahme minus reales Depot nach der
-        Vorjahresentnahme und begrenzt den Zusatz nicht.
-    hebeler: Angelehnt an Hebelers Retirement Autopilot (Hebeler 2001);
-        Gewichtung 75 % inflationierte Vorjahresentnahme plus 25 % Annuität
-        nach Steiner (2015). Abweichend: Hebeler rechnet die Annuität über
-        die Lebenserwartung (IRS-Tabellen) mit einem niedrigen Realzins,
-        SimLev über die Restjahre der Simulation mit exp_return.
+Erzeugt eine validierte Entnahmeregel für `withdrawal_simulation()` und `withdrawal_max_rate()`. Die
+Jahresentnahme wird zu Beginn jedes Planjahres festgelegt (Guyton & Klinger 2006; Suarez et al. 2015) und bei
+unterjährigen Perioden gleichmäßig ausgezahlt (Jahresbetrag / Perioden je Jahr). Alle Beträge sind
+Netto-Konsum; Steuern werden zusätzlich aus dem Depot verkauft. Alle Raten und Schranken werden in Prozent
+angegeben (`rate = 4` bedeutet 4 % des Depots); welche Argumente eine Regel nutzt, zeigt die Tabelle unter
+Details. Jedes Argument muss eine einzelne Zahl ohne `NA` im zulässigen Bereich sein (Prozentsätze wie
+`floor`, `cut`, `smoothing`, `floor95`, `extra`, `max_rate` 0 bis 100, `ceiling`, `raise`, `inflation_cap` >=
+0, `min_real <= max_real`, bei `vpw` `age < max_age` und `max_rate > 0`); sonst bricht die Funktion mit einer
+Meldung ab. Schranken zwischen 0 und 0,2 lösen eine Warnung aus (vermutlich Anteil statt Prozent).
 
-Literatur:
-    Bengen (1994, 2001); Cooley, Hubbard & Walz (1998); Guyton & Klinger
-    (2006), Journal of Financial Planning 19(3); Vanguard (2021), Sustainable
-    spending rates in turbulent markets; Bogleheads Wiki, Variable percentage
-    withdrawal; Kitces (2015); Suarez, Suarez & Walz (2015), Financial
-    Services Review 24; Clyatt, B. (2005), Work Less, Live More: The New Way
-    to Retire Early, Nolo, Berkeley; Swensen, D. F. (2009), Pioneering
-    Portfolio Management, Fully Revised and Updated, Free Press, Kap. 3, mit Verweis auf
-    Tobin, J. (1974), What is permanent endowment income?, American Economic
-    Review 64(2), 427-432; Bogleheads Wiki, Withdrawal methods,
-    https://www.bogleheads.org/wiki/Withdrawal_methods; Waring, M. B. &
-    Siegel, L. B. (2015), The only spending rule article you will ever need,
-    Financial Analysts Journal 71(1), 91-107, doi:10.2469/faj.v71.n1.2;
-    Jeske, K. (2017), The ultimate guide to safe withdrawal rates - Part 18:
-    Flexibility and the mechanics of CAPE-based rules, earlyretirementnow.com,
-    30.08.2017; Ponzo, P. (o. J.), Sensible withdrawals, gummy-stuff,
-    https://www.financialwisdomforum.org/gummy-stuff/sensible_withdrawals.htm;
-    Hebeler, H. K. (2001), J.K. Lasser's Your Winning Retirement Plan, Wiley;
-    Steiner, K. (2015), Bud Hebeler's Autopilot withdrawal rule, Blog How much
-    can I afford to spend in retirement?, 22.01.2015.
+# Argumente
+- `type`: Regel (Zeichenkette, Standard `"constant"`):
+
+  - "constant": Bengen (1994) / Trinity-Studie: W_1 = rate · P_1, danach W_t-1(1+π) (real konstant).
+  - "percent": Fester Prozentsatz des aktuellen Depots: rate · P.
+  - "vanguard": Vanguard Dynamic Spending: rate · P, die Veränderung gegenüber W_t-1(1+π) (also real) begrenzt
+    auf +`ceiling` Prozent / -`floor` Prozent (Standard 5 / 2,5).
+  - "guyton_klinger": Guyton & Klinger (2006): Erstentnahme rate · P_1, Anfangsrate WR_0 = W_1 / P_1. Danach
+    W_t-1 mit Inflationsausgleich (höchstens `inflation_cap` Prozent). Withdrawal-Rule (`skip_inflation`):
+    kein Inflationsausgleich, wenn die nominale Depotrendite des Vorjahres negativ war und die inflationierte
+    Entnahme eine Rate über WR_0 ergäbe. Capital-Preservation-Rule: Kürzung um `cut` Prozent, wenn die
+    aktuelle Rate W / P über WR_0 (1 + ceiling/100) liegt und noch mehr als `cpr_years` Restjahre bleiben.
+    Prosperity-Rule: sonst Erhöhung um `raise` Prozent, wenn die Rate unter WR_0 (1 - floor/100) liegt.
+    Standard 20 / 20 / 10 / 10, 15 Jahre.
+  - "floor_ceiling": Bengen (2001): rate · P, begrenzt auf das (1 - `floor`/100)- bis (1 +
+    `ceiling`/100)-fache der realen Erstentnahme in heutigen Preisen (Standard 15 / 20).
+  - "clyatt": Clyatt: max(rate · P, floor95/100 · W_t-1), nominal (ohne Inflationsausgleich).
+  - "ratchet": Kitces: real konstant wie `"constant"`; Erhöhung um `raise` Prozent (10), wenn das reale Depot
+    das `ratchet_threshold`-fache (1,5) des realen Startdepots übersteigt, höchstens alle `ratchet_gap` (3)
+    Jahre (frühestens im Jahr 1 + `ratchet_gap`).
+  - "endowment": Yale/Tobin: λ W_t-1(1+π) + (1-λ) rate · P mit λ = `smoothing`/100 (Standard 70).
+  - "one_over_n": P / Restjahre; leert das Depot planmäßig bis zum Ende der Simulation.
+  - "vpw": Bogleheads VPW: P · PMT(r, n) mit n = `max_age` - Alter im Planjahr (`age` im ersten Jahr) und r =
+    `exp_return`/100, höchstens `max_rate` Prozent des Depots; bei n ≤ 1 das ganze Depot.
+  - "abw": Amortisation: reale vorschüssige Annuität (P_real - fv / (1+r)^n) · PMT(r, n) über n = Restjahre
+    mit r = `exp_return`/100 und Zielvermögen `fv`; nicht negativ.
+  - "cape": (cape_a/100 + cape_b / CAPE) · P mit dem CAPE zu Beginn des Planjahres (CAPE <= 0: nur `cape_a`).
+    Standard `cape_a` = 1,75, `cape_b` = 0,5 (ERN); CAPE-Reihe nötig (Argument `cape` in
+    `withdrawal_cohorts()` bzw. `withdrawal_paths()`).
+  - "sensible": Erstes Jahr rate · P_1; danach diese Erstentnahme real (inflationiert) plus `extra` Prozent
+    (10) des realen Depotzuwachses seit der Vorjahresentnahme (nur Zuwächse).
+  - "hebeler": Autopilot II: λ W_t-1(1+π) + (1-λ) PMT(r, n) · P mit λ = `smoothing`/100 (Standard 75), r =
+    `exp_return`/100, n = Restjahre; im ersten Jahr nur die Annuität.
+- `rate`: Entnahmerate in Prozent (4 = 4 % des Depots; Standard 4; zulässig 0 bis 100): Anfangsrate
+  (`constant`, `guyton_klinger`, `ratchet`, `sensible`) bzw. laufende Rate auf das aktuelle Depot (`percent`,
+  `vanguard`, `floor_ceiling`, `clyatt`, `endowment`). Von `one_over_n`, `vpw`, `abw`, `cape` und `hebeler`
+  nicht genutzt. Werte zwischen 0 und 0,2 lösen bei `constant`, `percent`, `vanguard` und `guyton_klinger`
+  eine Warnung aus (vermutlich Anteil statt Prozent).
+- `ceiling`, `floor`: Obere bzw. untere Schranke in Prozent (>= 0), Bedeutung je Regel: `vanguard` = maximale
+  reale Erhöhung / Senkung gegenüber dem Vorjahr (Standard 5 / 2,5); `guyton_klinger` = Abstand der
+  Leitplanken von der Anfangsrate (20 / 20); `floor_ceiling` = Korridor um die reale Erstentnahme (20 / 15).
+  `nothing` = diese Regel-Standards; andere Regeln ignorieren die Werte (gespeichert als 0).
+- `cut`, `raise`: Kürzung bzw. Erhöhung der Entnahme in Prozent (>= 0, Standard 10 / 10): `cut` für
+  `guyton_klinger`, `raise` für `guyton_klinger` und `ratchet`.
+- `cpr_years`: Guyton-Klinger: Anzahl Jahre (Standard 15). Die Capital-Preservation-Rule greift nur, solange
+  mehr als `cpr_years` Restjahre (einschließlich des aktuellen) bleiben.
+- `inflation_cap`: Guyton-Klinger: maximaler Inflationsausgleich je Jahr in Prozent (Standard `Inf` =
+  unbegrenzt, wie in der Fassung von 2006).
+- `skip_inflation`: Logisch, Guyton-Klinger: Withdrawal-Rule aktiv (Standard `true`; siehe `type`).
+- `smoothing`: Glättungsgewicht der Vorjahresentnahme in Prozent (0 bis 100) für `endowment` und `hebeler`.
+  `nothing` = 75 bei `hebeler`, sonst 70.
+- `exp_return`: Erwartete reale Rendite in Prozent p. a. für `vpw`, `abw` und `hebeler`. `nothing` = 5 x
+  `stock_share`/100 + 1,9 x (1 - `stock_share`/100), beim Standard `stock_share = 60` also 3,76.
+- `stock_share`: Aktienquote in Prozent (60 = 60 %, Standard 60); nur für den Standardwert von `exp_return`
+  verwendet.
+- `age`, `max_age`: Alter bei Rentenbeginn und Planungsalter in Jahren (Standard 65 / 100), nur `vpw`.
+- `fv`: `abw`: reales Zielvermögen am Ende als Geldbetrag in Kaufkraft des Startzeitpunkts (Standard 0 = Depot
+  aufbrauchen).
+- `cape_a`, `cape_b`: CAPE-Regel: Konstante in Prozent (Standard 1.75 = 1,75 %) und Faktor auf 1 / CAPE als
+  Anteil (Standard 0.5; bei CAPE 25 also 0.5 / 25 = 0.02 = 2 %).
+- `ratchet_threshold`: `ratchet`: Faktor auf das reale Startdepot (Standard 1.5 = 150 %), ab dem erhöht wird.
+- `ratchet_gap`: `ratchet`: Mindestabstand zwischen Erhöhungen in Jahren (Standard 3).
+- `extra`: `sensible`: Anteil des realen Depotzuwachses in Prozent (Standard 10).
+- `floor95`: `clyatt`: Mindestanteil der Vorjahresentnahme in Prozent (Standard 95).
+- `min_real`, `max_real`: Absolute Unter- bzw. Obergrenze der Jahresentnahme als Geldbetrag in Kaufkraft des
+  Startzeitpunkts, für alle Regeln (Standard 0 und `Inf` = keine Grenze).
+- `max_rate`: `vpw`: Höchstsatz in Prozent des Depots (Standard 100).
+
+# Rückgabe
+Objekt der Klasse `withdrawal_rule` (Liste) mit `type` und allen Parametern in Prozent-Konvention, wobei
+`ceiling`, `floor`, `smoothing` und `exp_return` bereits mit den Standardwerten gefüllt sind (`stock_share`
+wird nicht gespeichert). Ausgabe mit `print()`.
+
+# Details
+Bezeichnungen: P = nominaler Depotwert zu Beginn des Planjahres vor der Entnahme, P_1 = Startdepot, W_t-1 =
+nominale Entnahme des Vorjahres, π = Inflation des Vorjahres, Restjahre = verbleibende Planjahre der
+Simulation einschließlich des aktuellen Jahres, PMT(r, n) = vorschüssige Annuität je Geldeinheit Kapital (r /
+((1 - (1+r)^-n)(1+r)), bei n ≤ 1 gleich 1). Nach jeder Regel werden `min_real` und `max_real` angewendet.
+
+Genutzte Argumente je Regel (Standardwerte von `ceiling`, `floor` und `smoothing` in Klammern; `min_real` und
+`max_real` gelten für alle Regeln):
+- Regel | genutzte Argumente
+- `constant` | `rate`
+- `percent` | `rate`
+- `vanguard` | `rate`, `ceiling` (5), `floor` (2.5)
+- `guyton_klinger` | `rate`, `ceiling` (20), `floor` (20), `cut`, `raise`, `cpr_years`, `inflation_cap`,
+  `skip_inflation`
+- `floor_ceiling` | `rate`, `ceiling` (20), `floor` (15)
+- `clyatt` | `rate`, `floor95`
+- `ratchet` | `rate`, `raise`, `ratchet_threshold`, `ratchet_gap`
+- `endowment` | `rate`, `smoothing` (70)
+- `one_over_n` | keine (nur Restjahre)
+- `vpw` | `exp_return` bzw. `stock_share`, `age`, `max_age`, `max_rate`
+- `abw` | `exp_return` bzw. `stock_share`, `fv` (Restjahre)
+- `cape` | `cape_a`, `cape_b`; CAPE-Reihe in den Pfaden nötig
+- `sensible` | `rate`, `extra`
+- `hebeler` | `exp_return` bzw. `stock_share`, `smoothing` (75) (Restjahre)
+
+Die Restjahre (`one_over_n`, `abw`, `hebeler` und die Capital-Preservation-Rule von `guyton_klinger`) sind
+kein Argument der Regel: Sie ergeben sich in `withdrawal_simulation()` aus der Zahl der Planjahre (Pfadlänge
+bzw. `years`). Eine zufällige Laufzeit je Pfad (`horizon` in `withdrawal_simulation()`, Objekt aus
+`withdrawal_horizon()`) ändert nur die Auswertung (Erfolg, Konsum und Endvermögen bis zum Horizont); die Regel
+rechnet weiter mit den Restjahren der vollen Pfadlänge.
+
+# Quellen und Abweichungen
+- `clyatt`: Nach Clyatt (2005): jedes Jahr `rate` des aktuellen Depots, mindestens `floor95` Prozent der
+  Vorjahresentnahme, nominal; Kürzungen in Folgejahren verketten sich (95 % von 95 %). Keine Abweichung.
+- `endowment`: Angelehnt an die Yale-Regel (Swensen 2009, Kap. 3, mit Verweis auf Tobin 1974): Gewicht mal
+  Vorjahresentnahme plus (1 - Gewicht) mal Zielrate mal Vermögen; Yale früher 70 %, heute 80 %. Abweichend:
+  Yale wendet die Zielrate auf den Wert zum Ende des vorigen Geschäftsjahres an und schreibt die Summe beider
+  Teile mit der Inflation fort; SimLev nimmt das Depot zu Beginn des Planjahres und inflationiert nur die
+  Vorjahresentnahme.
+- `one_over_n`: Nach Bogleheads Wiki, Withdrawal methods (1/N): Depot geteilt durch die Restjahre. Abweichend:
+  das Wiki empfiehlt 1/N eher als Höchstbetrag; SimLev entnimmt genau 1/N.
+- `abw`: Angelehnt an die jährlich neu berechnete virtuelle Annuität (ARVA) von Waring & Siegel (2015): Rate
+  einer vorschüssigen Annuität mit dem aktuellen Depot über die Restjahre. Abweichend: feste erwartete
+  Realrendite `exp_return` statt der aktuellen Marktzinsen; reales Zielvermögen `fv` als eigene Ergänzung.
+- `cape`: Nach Jeske (2017): Rate = a + b / CAPE auf das aktuelle Depot; 1,75 % und 0,5 sind eine der dort
+  gerechneten Varianten. Abweichend: dort monatlich mit den Werten vom Ende des Vormonats, in SimLev jährlich
+  mit dem CAPE zu Beginn des Planjahres; CAPE <= 0 ergibt nur a (eigene Festlegung).
+- `sensible`: Angelehnt an Ponzo (o. J.), Sensible Withdrawals: Grundentnahme plus ein Anteil (dort Beispiele
+  10 und 25 %) des Zuwachses, wenn das Depot nach der Grundentnahme stärker als die Inflation gewachsen ist.
+  Abweichend bzw. dort offen: SimLev setzt die Grundentnahme als inflationierte Erstentnahme rate · P_1, misst
+  den Zuwachs als reales Depot vor der Entnahme minus reales Depot nach der Vorjahresentnahme und begrenzt den
+  Zusatz nicht.
+- `hebeler`: Angelehnt an Hebelers Retirement Autopilot (Hebeler 2001); Gewichtung 75 % inflationierte
+  Vorjahresentnahme plus 25 % Annuität nach Steiner (2015). Abweichend: Hebeler rechnet die Annuität über die
+  Lebenserwartung (IRS-Tabellen) mit einem niedrigen Realzins, SimLev über die Restjahre der Simulation mit
+  `exp_return`.
+
+# Literatur
+Bengen (1994, 2001); Cooley, Hubbard & Walz (1998); Guyton & Klinger (2006), Journal of Financial Planning
+19(3); Vanguard (2021), Sustainable spending rates in turbulent markets; Bogleheads Wiki, Variable percentage
+withdrawal; Kitces (2015); Suarez, Suarez & Walz (2015), Financial Services Review 24; Clyatt, B. (2005), Work
+Less, Live More: The New Way to Retire Early, Nolo, Berkeley; Swensen, D. F. (2009), Pioneering Portfolio
+Management, Fully Revised and Updated, Free Press, Kap. 3; Tobin, J. (1974), What is permanent endowment
+income?, American Economic Review 64(2), 427-432; Bogleheads Wiki, Withdrawal methods,
+https://www.bogleheads.org/wiki/Withdrawal_methods; Waring, M. B. & Siegel, L. B. (2015), The only spending
+rule article you will ever need, Financial Analysts Journal 71(1), 91-107, doi:10.2469/faj.v71.n1.2; Jeske, K.
+(2017), The ultimate guide to safe withdrawal rates - Part 18: Flexibility and the mechanics of CAPE-based
+rules, earlyretirementnow.com, 30.08.2017; Ponzo, P. (o. J.), Sensible withdrawals, gummy-stuff,
+https://www.financialwisdomforum.org/gummy-stuff/sensible_withdrawals.htm; Hebeler, H. K. (2001), J.K.
+Lasser's Your Winning Retirement Plan, Wiley; Steiner, K. (2015), Bud Hebeler's Autopilot withdrawal rule,
+Blog How much can I afford to spend in retirement?, 22.01.2015.
+
+# Beispiel
+```julia
+using SimLev
+println(withdrawal_rule("vanguard"; rate = 5, ceiling = 5, floor = 2.5))
+```
 """
 function withdrawal_rule(type_pos = nothing; type = type_pos, type_ = type, rate = 4, ceiling = nothing, floor = nothing, cut = 10, raise = 10,
                          cpr_years = 15, inflation_cap = Inf, skip_inflation = true, smoothing = nothing,
@@ -290,7 +392,7 @@ function _wd_ppy(frequency)
     _stop("frequency muss 'year', 'quarter' oder 'month' sein.")
 end
 
-"Letzte Zeile je Kalenderperiode (1-basiert), Port von `.period_ends`."
+"Letzte Zeile je Kalenderperiode (1-basiert), R: `.period_ends`."
 function _period_ends(dates, frequency)
     d = _todate(dates, "dates")
     key = [frequency == "year" ? Dates.year(x) : frequency == "quarter" ? Dates.year(x) * 10 + (Dates.month(x) - 1) ÷ 3 :
@@ -331,8 +433,64 @@ _as_matrix(x) = x isa RFrame ? reduce(hcat, [_dvec(c) for c in x.cols]) : x isa 
     withdrawal_cohorts(data; price = "value", inflation = nothing, years = 30, frequency = "year",
                        step = "month", wrap = false, cape = nothing, base_rate = nothing, inflation_type = "level")
 
-Historische Entnahme-Kohorten bilden (Port von `withdrawal_cohorts()`).
-`data`: RFrame mit `date` und Kursspalte oder ein SimLevResult.
+Historische Entnahme-Kohorten bilden.
+
+Erzeugt rollierende Start-Kohorten (wie Bengen 1994 und die Trinity-Studie) aus einer historischen Kursreihe:
+Für jeden Startmonat bzw. jedes Startjahr entsteht ein Pfad über `years` Jahre. Eingabe ist ein Tabelle
+(RFrame) mit Spalte `date` und einer Kursspalte (Niveau, keine Renditen) oder ein gespeichertes Ergebnis von
+`simulation()`. Die Reihe wird auf Monatsenden verdichtet (letzter Wert je Kalendermonat, fehlende Werte
+fortgeschrieben); die Monatsrenditen werden zur gewählten `frequency` aufmultipliziert. Die Daten müssen jeden
+Kalendermonat zwischen erstem und letztem Datum enthalten (Tages-, Wochen- oder Monatsdaten); sonst, etwa bei
+Jahresdaten, bricht die Funktion ab. Das Ergebnis geht direkt an `withdrawal_simulation()`,
+`withdrawal_max_rate()` oder `withdrawal_perfect_rate()`.
+
+# Argumente
+- `data`: Tabelle (RFrame) mit Spalte `date` (Klasse Date oder umwandelbar) und der Kursspalte `price` (ggf.
+  auch Spalten für `inflation`, `cape`, `base_rate`), oder ein `SimLevResult`: dann wird dessen
+  zeitgewichteter Wertindex `result_index()` verwendet, `price` ignoriert, und nur `nothing` oder ein
+  Prozentsatz für `inflation` ist erlaubt (keine `cape`- oder `base_rate`-Spalten).
+- `price`: Name der Kursspalte des Portfolios (Total-Return-Niveau, nach Kosten), z. B. eine Backcast-Reihe.
+  Standard `"value"`.
+- `inflation`: `nothing` (Standard; keine Inflation), Zahl = konstante Inflation in Prozent p. a. (2 = 2 % p.
+  a., tagesgenau über 365.25 Tage je Jahr umgerechnet) oder Zeichenkette = Name einer Preisindex-Spalte
+  (CPI-Niveau, z. B. HVPI) bzw. einer Ratenspalte (siehe `inflation_type`).
+- `years`: Länge jeder Kohorte in Jahren (Standard 30; intern 12 x `years` Monate). Muss ganze Perioden der
+  `frequency` ergeben (bei `"year"` ganze Jahre, bei `"quarter"` z. B. auch 2.5).
+- `frequency`: Periodenlänge der Entnahme-Simulation: `"year"` (Standard), `"quarter"` oder `"month"`.
+- `step`: Abstand der Kohortenstarts: `"month"` (Standard; jede Kohorte beginnt einen Monat später) oder
+  `"year"` (alle 12 Monate).
+- `wrap`: Logisch (Standard `false`). `true`: Kohorten über das Datenende hinaus durch Fortsetzung am
+  Datenanfang verlängern (wie FI Calc, Option "loop"), so dass jeder Startzeitpunkt gemäß `step` eine Kohorte
+  ergibt; `false`: nur Kohorten, die vollständig in den Daten liegen.
+- `cape`: Optional Name einer Spalte mit CAPE-Werten (für die Regel `"cape"` in `withdrawal_rule()`);
+  verwendet wird der Wert zu Beginn jeder Periode.
+- `base_rate`: Optional Name einer Spalte mit dem Basiszins in Prozent (2.5 = 2,5 %) für die Vorabpauschale
+  (Wert zu Beginn jeder Periode); sonst gilt `base_rate` aus `withdrawal_simulation()`.
+- `inflation_type`: Behandlung einer Spalte in `inflation`: `"level"` (Reihe ist ein Preisindex-Niveau;
+  Inflation = Verhältnis der Monatsendwerte) oder `"rate_pa"` (Reihe ist eine Inflationsrate in Prozent pro
+  Jahr, 2 = 2 % p. a., nicht je Datenperiode, kein Anteil; je Zeile über die Kalendertage seit der Vorzeile
+  aufgezinst, Π (1 + r/100)^Tage/365.25). Stammt `data` aus `bootstrap_data()` und ist die Spalte in
+  `bootstrap_config()` ausdrücklich als `aux_type = "rate"` gekennzeichnet (Attribut `aux_type` des Tabelle
+  (RFrame)), ergibt sich `"rate_pa"` daraus; `inflation_type` kann dann entfallen und muss, wenn angegeben,
+  dazu passen (sonst Fehler). Ohne Attribut gilt `inflation_type` (Standard `"level"`, bisheriges Verhalten).
+  Das Attribut geht bei Umformungen wie `transform()`, `merge()`, `cbind()` oder Speichern als CSV verloren;
+  dann `inflation_type = "rate_pa"` angeben. Bei Zahl oder `nothing` in `inflation` ohne Wirkung.
+
+# Rückgabe
+Objekt der Klasse `withdrawal_paths` (Liste) mit `returns` (Matrix Perioden x Kohorten der
+Brutto-Periodenrenditen), `inflation` (gleiche Form, Brutto-Inflation je Periode; ohne Inflation 1), `cape`
+und `base_rate` (Matrizen der Werte zu Periodenbeginn oder `nothing`), `frequency`, `start_dates` (Datum des
+Monatsendwerts, ab dem jede Kohorte läuft), `historical = true`, `wrap` und `source` (Name der Kursspalte).
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+dts = [Date(1990, 1, 1) + Month(k) for k in 0:359]
+d = RFrame("date" => dts, "depot" => 100 .* cumprod(exp.(0.005 .+ 0.04 .* randn(MersenneTwister(1), 360))))
+coh = withdrawal_cohorts(d; price = "depot", inflation = 2, years = 20, step = "year")
+ws = withdrawal_simulation(coh, withdrawal_rule("constant"; rate = 4))
+println(size(coh["returns"]))
+```
 """
 function withdrawal_cohorts(data; price = "value", inflation = nothing, years = 30, frequency = nothing, step = nothing,
                             wrap = false, cape = nothing, base_rate = nothing, inflation_type = _MISSING)
@@ -432,8 +590,35 @@ _report_items(rep) = rep === nothing ? Any[] : rep isa AbstractDict ? collect(va
 """
     result_index(x; base = 100)
 
-Zeitgewichteter Wertindex eines Simulationsergebnisses: RFrame mit `date`,
-`value`, `worth`, `flows`.
+Zeitgewichteter Wertindex eines Simulationsergebnisses.
+
+Bildet aus einem `SimLevResult` den um Ein- und Auszahlungen bereinigten Wertindex (Basis der TTWROR). Damit
+lässt sich jedes gespeicherte Ergebnis von `simulation()` als Renditequelle für `withdrawal_simulation()`
+verwenden. Verwendet wird der von `simulation()` gespeicherte Index `twr_index`: an Tagen ohne Zahlung I_t =
+I_t-1 W_t / W_t-1; an Tagen mit Zahlung wird der Vortagesbestand zum Schlusskurs vor der Zahlung bewertet
+(siehe `simulation()`, Abschnitt Kennzahlen), sodass die Zahlung die Rendite nicht verzerrt. W_t ist der
+Depotwert. Für ältere Ergebnisse ohne `twr_index` gilt I_t = I_t-1 (W_t - F_t) / W_t-1 mit F_t = Summe der
+Ein- und Auszahlungen aller Assets am Tag t; nicht endliche Tagesfaktoren (z. B. bei Depotwert 0) werden dabei
+als 1 gesetzt.
+
+# Argumente
+- `x`: Objekt der Klasse `SimLevResult` (Ergebnis von `simulation()`).
+- `base`: Startwert des Index (Zahl, Standard 100).
+
+# Rückgabe
+Tabelle (RFrame) mit einer Zeile je Simulationstag und den Spalten `date` (Date), `value` (Index, beginnt bei
+`base`), `worth` (Depotwert) und `flows` (Summe der Ein-/Auszahlungen je Tag, Geldbetrag).
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 400
+d = RFrame("date" => Date(2020, 1, 1) .+ Day.(0:n-1))
+d["ETF"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+res = simulation(d, create_strategy(ETF = asset_config("etf")); dca = dca_plan(100, 1))
+println(result_index(res))
+```
 """
 function result_index(x; base = 100)
     x = SimLev.as_rframe(x)
@@ -462,7 +647,7 @@ function result_index(x; base = 100)
     return RFrame("date" => dts, "value" => Float64(base) .* idx, "worth" => w, "flows" => fl)
 end
 
-"Periodenenden als Jahrestage ab Startdatum (1-basierte Zeilen), Port von `.anniv_ends`."
+"Periodenenden als Jahrestage ab Startdatum (1-basierte Zeilen), R: `.anniv_ends`."
 function _anniv_ends(dates, frequency)
     stp = frequency == "year" ? 12 : frequency == "quarter" ? 3 : 1
     d = _todate(dates, "dates")
@@ -507,8 +692,81 @@ _vapply_mat(vecs, L) = L == 1 ? reshape(Float64[v[1] for v in vecs], :, 1) :
     withdrawal_paths(x; column = nothing, strategy = nothing, inflation = nothing, inflation_type = "level",
                      frequency = "year", dates = nothing, start = "2000-01-01", cape = nothing)
 
-Pfade in Periodenrenditen für Entnahmen umwandeln (Port von `withdrawal_paths()`).
-`x`: SimLevBootstrapStudy, Liste von SimLevResult oder bootstrap_result.
+Pfade in Perioden-Renditen für Entnahmen umwandeln.
+
+Wandelt fertige Simulationen in die Periodenmatrizen von `withdrawal_simulation()` um, damit sich eine
+Entnahmephase auf bereits gerechnete Pfade setzen lässt. Perioden beginnen am Startdatum der Pfade und enden
+an den Jahrestagen (bzw. Quartals- oder Monatstagen) danach, je vom Startdatum gezählt und auf das Monatsende
+begrenzt (Start 31.01.: 29.02., 31.03., 30.04. ...); eine unvollständige letzte Periode entfällt.
+
+# Argumente
+- `x`: `SimLevBootstrapStudy`, Liste von `SimLevResult` oder `bootstrap_result` (siehe oben).
+- `column`: Nur bei `bootstrap_result` (dort Pflicht): Name der Kursspalte im Pfad (Index oder Hebelprodukt).
+- `strategy`: Nur bei `SimLevBootstrapStudy`: Strategiename. `nothing` (Standard) = erste gespeicherte
+  Strategie.
+- `inflation`: `nothing` (Standard; keine Inflation, Faktor 1), Zahl = konstante Inflation in Prozent p. a. (2
+  = 2 % p. a., über die Kalendertage der Perioden umgerechnet) oder Zeichenkette = Name einer Zusatzreihe: bei
+  `bootstrap_result` eine Spalte der Pfade (aus `aux` in `bootstrap_config()`; Behandlung nach `aux_type` bzw.
+  `inflation_type`), bei Studien eine mit `keep_aux` gespeicherte Reihe (deren gespeicherte Periodenfaktoren
+  werden direkt als Brutto-Inflation verwendet; nicht endliche Faktoren oder Werte <= 0 sind ein Fehler). Eine
+  Reihe mit `aux_type = "rate"` gilt dabei immer als Inflationsrate in Prozent pro Jahr (2 = 2 % p. a.; nicht
+  je Datenperiode, kein Anteil), je Pfadzeile über die Kalendertage aufgezinst, Π (1 + r/100)^Tage/365.25. Bei
+  Ergebnislisten nur `nothing` oder eine Zahl.
+- `inflation_type`: Behandlung einer Zusatzreihe in `inflation`: `"level"` (Reihe ist ein Preisindex-Niveau;
+  Inflation = Verhältnis des kumulierten Niveaus an den Periodenenden, d. h. die historischen
+  Zeilenverhältnisse der gezogenen Zeilen) oder `"rate_pa"` (Reihe ist eine Inflationsrate in Prozent pro
+  Jahr, 2 = 2 % p. a., nicht je Datenperiode, kein Anteil; je Pfadzeile über die Kalendertage aufgezinst, Π (1
+  + r/100)^Tage/365.25). Ist die Art der Reihe in `bootstrap_config()` mit `aux_type` ausdrücklich angegeben,
+  ergibt sich die Behandlung daraus (`"level"` bzw. `"rate"` -> `"rate_pa"`); `inflation_type` kann dann
+  entfallen und muss, wenn angegeben, dazu passen (sonst Fehler). Ohne Angabe in `aux_type` gilt das bisherige
+  Verhalten: bei `bootstrap_result` entscheidet `inflation_type` (Standard `"level"`; verwendet wird die
+  Niveau-Variante im Pfad, Attribut `aux_level` aus `bootstrap()`); bei Studien werden die mit `keep_aux`
+  gespeicherten Faktoren (Niveau-Variante) unverändert verwendet, ein ausdrückliches `inflation_type =
+  "rate_pa"` ist dort ein Fehler (die Rate lässt sich aus den gespeicherten Faktoren nicht gewinnen; `aux_type
+  = [<Name> = "rate"]` angeben und die Studie neu rechnen).
+- `frequency`: Periodenlänge: `"year"` (Standard), `"quarter"` oder `"month"`. Bei Studien gilt stattdessen
+  die gespeicherte Frequenz.
+- `dates`, `start`: Nur bei `bootstrap_result`: Kalender der Pfadzeilen. `dates` = Date-Vektor (oder in Date
+  umwandelbar) mit genau einem Datum je Pfadzeile, streng aufsteigend; `nothing` (Standard) = tägliche
+  Kalenderdaten ab `start` (Standard `"2000-01-01"`), d. h. jede Pfadzeile zählt als ein Kalendertag. Für
+  Pfade aus Handelstagen passende `dates` angeben (siehe `bootstrap_data()`).
+- `cape`: Nur bei `bootstrap_result`: optional Name einer Pfadspalte mit CAPE-Werten (Wert zu Periodenbeginn)
+  für die Regel `"cape"`.
+
+# Rückgabe
+Objekt der Klasse `withdrawal_paths` (Liste) mit `returns` (Matrix Perioden x Pfade der
+Brutto-Periodenrenditen), `inflation` (gleiche Form, Brutto-Inflation je Periode), `cape` (Matrix oder
+`nothing`), `base_rate = nothing`, `frequency`, `start_dates = nothing`, `historical = false`, `weights`
+(Pfadgewichte oder `nothing`) und `source` (Spaltenname, `"study:"` mit angehängtem Strategienamen oder
+`"results"`).
+
+# Details
+Akzeptierte Eingaben `x`:
+
+- `SimLevBootstrapStudy`: Ergebnis von `bootstrap_study()`, das mit `keep_returns = "year"`, `"quarter"` oder
+  `"month"` gerechnet wurde. Verwendet die gespeicherten zeitgewichteten Periodenrenditen der Strategie
+  `strategy` und deren Frequenz (`frequency` wird ignoriert); Pfade mit fehlenden Werten entfallen; die
+  Pfadgewichte der Studie werden übernommen.
+- Liste von `SimLevResult`: z. B. gespeicherte Läufe von `simulation()` auf Bootstrap-Pfaden; je Element ein
+  Pfad über dessen zeitgewichteten Wertindex (`result_index()`). Alle Ergebnisse müssen gleich viele Tage
+  haben; der Kalender des ersten Ergebnisses gilt.
+- `bootstrap_result`: Ergebnis von `bootstrap()`; `column` wählt die Kursspalte der Pfade, die Pfadgewichte
+  werden übernommen.
+
+Ein einzelnes `SimLevResult` wird hier nicht angenommen (dafür `withdrawal_cohorts()`). Bereits fertige
+`withdrawal_paths` (aus `withdrawal_cohorts()` oder `bootstrap_pooled()`) und Renditematrizen werden direkt an
+`withdrawal_simulation()` übergeben; `withdrawal_simulation()` ruft diese Funktion für Studien und
+Ergebnislisten auch selbst auf.
+
+# Beispiel
+```julia
+using SimLev, Random
+d = RFrame("us" => 1 .+ 3e-4 .+ 0.01 .* randn(MersenneTwister(2), 1500), "infl" => fill(2.0, 1500))
+cfg = bootstrap_config((us = "us",); aux = (infl = "infl",))
+b = bootstrap(d, cfg; method = "stationary", n = 20, params = (L = 50,), path_length = 3653, seed = 1, progress = false)
+wp = withdrawal_paths(b; column = "us", inflation = "infl", inflation_type = "rate_pa")
+println(size(wp["returns"]))   # 10 Jahre x 20 Pfade
+```
 """
 function withdrawal_paths(x; column = nothing, strategy = nothing, inflation = nothing, inflation_type = _MISSING,
                           frequency = nothing, dates = nothing, start = "2000-01-01", cape = nothing)
@@ -650,7 +908,7 @@ end
 # Perfect Withdrawal Rate
 # ═══════════════════════════════════════════════════════════════════════════
 
-"Reale Jahresrenditen aus Perioden-Matrizen (Port von `.annual_real`)."
+"Reale Jahresrenditen aus Perioden-Matrizen (R: `.annual_real`)."
 function _annual_real(wp)
     ppy = _wd_ppy(_get(wp, "frequency"))
     real = _mat(_get(wp, "returns")) ./ _mat(_get(wp, "inflation"))
@@ -662,9 +920,32 @@ end
 """
     withdrawal_perfect_rate(real_returns; legacy = 0)
 
-Perfect Withdrawal Rate (PWR) je Pfad in Prozent. `real_returns`: Matrix
-(Jahre × Pfade) realer Brutto-Jahresrenditen, Vektor (ein Pfad) oder
-`withdrawal_paths`-Objekt.
+Perfect Withdrawal Rate (PWR) je Pfad in Prozent.
+
+Exakte konstante reale Entnahmerate, die ein Depot bei gegebener Renditefolge genau aufbraucht bzw. das
+Zielvermögen hinterlässt (Suarez, Suarez & Walz 2015; Entnahme jeweils zu Jahresbeginn): PWR = (R_n - K_E/K_S)
+· S_n, R_n = Π (1+r_i), S_n = 1 / Σ_i=1^n Π_j=i^n (1 + r_j)
+
+# Argumente
+- `real_returns`: Numerische Matrix (Jahre x Pfade) realer Brutto-Jahresrenditen (z. B. 1.05 = +5 % real; ein
+  Vektor gilt als ein Pfad) oder ein `withdrawal_paths`-Objekt: dann werden `returns / inflation` je Periode
+  zu Jahren aufmultipliziert (ein unvollständiges letztes Jahr entfällt).
+- `legacy`: Reales Zielvermögen am Ende als Anteil des Startvermögens (K_E / K_S; 0 = aufbrauchen (Standard),
+  0.5 = 50 % erhalten; >= 0). Renditen müssen Brutto-Renditen sein (1.05, nicht 0.05); eine Matrix mit Median
+  unter 0.5, negativen oder nicht endlichen Werten ist ein Fehler.
+
+# Rückgabe
+Numerischer Vektor der PWR je Pfad in Prozent des Startvermögens (4 = 4 % je Jahr).
+
+# Details
+Die PWR hängt nur von der realen Renditefolge ab (keine Steuern, Verkaufskosten oder weiteren Einkommen).
+
+# Beispiel
+```julia
+using SimLev, Random
+R = exp.(0.03 .+ 0.12 .* randn(MersenneTwister(1), 30, 5))   # 30 Jahre, 5 Pfade, real
+println(withdrawal_perfect_rate(R))
+```
 """
 function withdrawal_perfect_rate(real_returns; legacy = 0)
     _is_wp(real_returns) && (real_returns = _annual_real(real_returns))
@@ -710,7 +991,7 @@ function _last_worth(report, nm)
 end
 _list_names(ol) = ol === nothing ? String[] : collect(String, something(_names(ol), String[]))
 
-"Am Ende der Ansparphase gehaltene Assets (Port von `.wd_held`)."
+"Am Ende der Ansparphase gehaltene Assets (R: `.wd_held`)."
 function _wd_held(ol, report, sv; tol = 1e-12)
     out = String[]
     for nm in _list_names(ol)
@@ -723,7 +1004,7 @@ function _wd_held(ol, report, sv; tol = 1e-12)
     return out
 end
 
-"Offene Lots als FIFO-Bestand für den Kern (Port von `.wd_lots`)."
+"Offene Lots als FIFO-Bestand für den Kern (R: `.wd_lots`)."
 function _wd_lots(ol, report, sv; tol = 1e-12)
     n = Float64[]; basis = Float64[]; vp = Float64[]; group = Int[]
     g = 0
@@ -779,10 +1060,10 @@ end
 _dflt(x, d) = x === _MISSING ? d : x
 _sv_get(r, path...) = (v = r; for k in path; v = _get(v, k); end; v)
 
-"Mittel bzw. Summe je Spalte in long double (colMeans/colSums; C-Kern, N10)."
+"Mittel bzw. Summe je Spalte in long double (colMeans/colSums; C-Kern)."
 _col_ld(M::Matrix{Float64}, mean::Bool) = SimLev._ld_colsums(M; mean = mean)
 
-"Steuerangaben der Person prüfen (R: `.wd_tax_mode`, F2, 6.5b, T14): `nothing` → \"none\", `tax_profile()` → \"person\"."
+"Steuerangaben der Person prüfen (R: `.wd_tax_mode`): `nothing` → \"none\", `tax_profile()` → \"person\"."
 function _wd_tax_mode(tax)
     tax === nothing && return "none"
     (tax isa RList && SimLev.inherits(tax, "SimLevTaxProfile")) ||
@@ -802,7 +1083,7 @@ const _WD_TARIFF_COLS = ("year", "taxable_income", "church_tax_paid_deductible",
                          "tariff_income_tax_k", "tariff_soli_k", "tariff_church_tax_k", "tariff_burden", "burden_without_gp",
                          "burden_with_gp", "guenstiger", "settlement", "refund", "church_tax_settlement_next_year")
 
-"Tarifparameter für den Kern (R: `.wd_tariff_par`, T14, `core/tariff_core_impl.h`)."
+"Tarifparameter für den Kern (R: `.wd_tariff_par`, `core/tariff_core_impl.h`)."
 function _wd_tariff_par(tt, church_k::Float64, use_gp)
     z = tt["zones"]; so = tt["soli"]
     out = Float64[use_gp === true ? 1.0 : 0.0, church_k, 0.25 / (1 + 0.25 * church_k), Float64(so["freigrenze"]),
@@ -813,7 +1094,7 @@ function _wd_tariff_par(tt, church_k::Float64, use_gp)
     return out
 end
 
-"""zvE je Planjahr für den Tarifweg der Entnahme (R: `.wd_zve`, T14): Zahl für alle Planjahre, Vektor ohne Namen der
+"""zvE je Planjahr für den Tarifweg der Entnahme (R: `.wd_zve`): Zahl für alle Planjahre, Vektor ohne Namen der
 Länge `ny`, nach Kalenderjahren benannt nur mit `year1`; Länge `ny + 1` (Folgejahr ggf. NA)."""
 function _wd_zve(x, ny::Int, year1)
     who = "withdrawal_simulation"
@@ -832,7 +1113,7 @@ function _wd_zve(x, ny::Int, year1)
     return Float64[get(zv.by_year, string(y), NA) for y in year1:(year1 + ny)]
 end
 
-"""Jahreszeilen des Tarifwegs als RFrame (R: `.wd_tariff_years`, T14): `path`, `year` (Planjahr) und die Spalten von
+"""Jahreszeilen des Tarifwegs als RFrame (R: `.wd_tariff_years`): `path`, `year` (Planjahr) und die Spalten von
 `tax_report["tariff_years"]` aus `simulation()`, nach Pfad und Jahr."""
 function _wd_tariff_years(M::Matrix{Float64}, ny::Int)
     keep = findall(!isnan, M[1, :])
@@ -851,29 +1132,288 @@ end
                           base_rate = 3.20, vorabpauschale = true, sale_cost = 0,
                           cost_basis = 100, loss_carryforward = 0, gamma = 2, keep_paths = true, horizon = nothing)
 
-Entnahme-Simulation über viele Pfade (Port von `withdrawal_simulation()`).
-`x`: withdrawal_paths, Renditematrix (Perioden × Pfade), SimLevResult,
-Liste von SimLevResult oder Bootstrap-Studie. `tax`: `nothing` (ohne Steuern) oder
-`tax_profile()` (F2, 6.5b, T14: ausgewertet werden `rate`, `church_tax`, `sparer_pauschbetrag`, `guenstigerpruefung` und
-`income = income_rate()`, Satz wie in `simulation()`, oder `income = income_tariff()`; `private_sale_threshold` ≠ 1000,
-`base_rate` und `harvest` ergeben einen Fehler). Kirchensteuer und Günstigerprüfung werden nicht aus der Ansparphase
-übernommen, sondern hier ausdrücklich angegeben. Tarifweg (`income_tariff(taxable_income, tariff)`) wie `simulation()`:
-unterjährig Abgeltungsteuer, nach jedem Planjahr je Pfad eine Veranlagung mit festem Tarif aus `tax_tariff()` (K = mit
-Abgeltungsteuer belastete Bemessungsgrundlage des Planjahres, die VP im Jahr ihres Zuflusses; Kirchensteuer als
-Sonderausgabe im Zahlungsjahr, im ersten Planjahr 0; mit `guenstigerpruefung` der Vergleich mit dem Tarif auf zvE + K).
-Der Saldo wird mit der ersten Entnahme des Folgejahres gezahlt bzw. mindert sie (wie die VP-Steuer; eine Erstattung
-darüber hinaus fließt als Geld ins Depot); am Pfadende und am Horizont sofort wie `simulation()` am letzten Tag (mit
-Günstigerprüfung auch die VP des letzten Planjahres im Folgejahr, sofern dafür ein zvE vorliegt). `taxable_income` =
-zvE ohne die Erträge der Entnahme, nominal in EUR genau wie angegeben (ohne Inflation): eine Zahl für alle Planjahre
-oder ein Vektor ohne Namen mit einem Wert je Planjahr; nach Kalenderjahren benannt nur mit einem `SimLevResult` als
-`start_value` (Planjahr 1 = `tax_report["next_year"]["year"]`). `income` dieser Funktion zählt nicht zum zvE; einen
-steuerpflichtigen Teil (etwa einer Rente) selbst in `taxable_income` einrechnen. Mit dem Tarifweg enthält das
-Ergebnis zusätzlich `tariff_years` (RFrame je Pfad und veranlagtem Planjahr: `path`, `year` = Planjahr bzw.
-Planjahre + 1 für das Folgejahr, dazu die Spalten von `tax_report["tariff_years"]` aus `simulation()`; Beträge nominal
-in EUR). `keep_paths`: `true` (Standard) = Vermögensmatrix `wealth` aller
-Pfade, `false`/0 = keine, ganze Zahl k ≥ 1 = die ersten k Spalten (gerechnet werden alle Pfade; `plot` zeichnet den
-Vermögensfächer dann aus k Pfaden mit Titelzusatz „(erste k von n Pfaden)“, auch als Attribut `title` der Tabelle
-`data["wealth"]`). Ergebnis: RList der Klasse `SimLevWithdrawal`.
+Entnahme-Simulation über viele Pfade.
+
+Simuliert eine Entnahmeregel auf historischen Kohorten (`withdrawal_cohorts()`), Bootstrap-Pfaden
+(`withdrawal_paths()`, `bootstrap_pooled()`), gespeicherten Ergebnissen von `simulation()` bzw.
+`bootstrap_study()` oder einer beliebigen Renditematrix. Je Pfad entstehen Erfolg, Erschöpfungsjahr, reales
+Endvermögen, Konsumkennzahlen, Steuern und die Perfect Withdrawal Rate. Der Rechenkern ist in C++
+implementiert.
+
+# Argumente
+- `x`: Renditequelle, eine der folgenden:
+
+  - `withdrawal_paths`: aus `withdrawal_cohorts()`, `withdrawal_paths()` oder `bootstrap_pooled()`; Inflation
+    und Frequenz stammen aus dem Objekt (`inflation` und `frequency` werden ignoriert).
+  - Matrix: (Perioden x Pfade) von Brutto-Periodenrenditen nach Produktkosten (1.05 = +5 Prozent); keine
+    negativen Werte, Median >= 0.5.
+  - `SimLevResult`: historische Kohorten über dessen Verlauf, Länge `years` (Standard 30 Jahre).
+  - `SimLevWrapperNav`: Anteilswert eines Fonds-Wrappers aus `wrapper_nav()`: historische Kohorten über die
+    Spalte `nav` wie `withdrawal_cohorts(x, price = "nav")`, Länge `years` (Standard 30 Jahre). Nur das ganze
+    Objekt: Ein Ausschnitt (`x[i, ]`, `head()`, `subset()`) ist ein gewöhnlicher `data.frame`; Tabellen mit
+    Spalte `date` ergeben einen Fehler mit Hinweis auf `withdrawal_cohorts(x, price = "nav")`.
+  - Liste von `SimLevResult` oder `SimLevBootstrapStudy`: (mit `keep_returns`; Strategie über `strategy`) je
+    Element bzw. Studienpfad ein Pfad.
+- `rule`: Objekt aus `withdrawal_rule()` (Standard: konstante reale Entnahme mit 4 %).
+- `start_value`: Startvermögen als Geldbetrag > 0 (Standard 1e6) oder ein `SimLevResult` der Ansparphase: dann
+  gilt dessen letzter Depotwert (Stück x Schlusskurs ohne Spread plus Cash) als Startvermögen (ein Endwert <=
+  0, etwa durch eine offene Steuerschuld `tax_report["open_tax_debt"]`, ist ein Fehler) und, sofern
+  `cost_basis` nicht angegeben ist, wird `cost_basis` daraus abgeleitet (siehe dort). Mit Steuern (`tax =
+  tax_profile()`) wird gewarnt, wenn die am Ende gehaltenen Assets eine andere Teilfreistellung als
+  `partial_exemption` haben (Regime `"capital_gains"` zählt als 0 %) oder das Regime `"private_sale"` (§ 23
+  EStG) haben, das die Entnahmephase nicht abbildet. Mit Steuern werden außerdem die Lots (FIFO, siehe
+  Details) und nicht angegebene `partial_exemption`, `loss_carryforward` und `sale_cost` aus dem Ergebnis
+  übernommen (siehe dort); was übernommen wurde, meldet ein Hinweis (`message()`) und steht im Ergebnis unter
+  `adopted`. Ausdrückliche Angaben haben immer Vorrang.
+- `inflation`: Inflation für Eingaben ohne eigene Inflationsreihe: Zahl = konstante Inflation in Prozent p. a.
+  (Standard 0; 2 = 2 % p. a.) bei Matrix-, Ergebnis-, Ergebnislisten- und Studien-Eingabe; bei Matrix-Eingabe
+  auch eine Matrix gleicher Dimension mit Brutto-Periodeninflation (z. B. 1.002 je Monat); bei Studien auch
+  der Name einer mit `keep_aux` gespeicherten Zusatzreihe (Behandlung wie in `withdrawal_paths()` ohne
+  `inflation_type`: eine Reihe mit `aux_type = "rate"` in `bootstrap_config()` gilt als Inflationsrate in
+  Prozent pro Jahr, 2 = 2 % p. a., nicht je Datenperiode, kein Anteil, über die Kalendertage aufgezinst; ohne
+  Angabe in `aux_type` wie bisher die gespeicherte Niveau-Variante). `nothing` wie 0. Bei `withdrawal_paths`
+  ohne Wirkung.
+- `frequency`: Periodenlänge der Zeilen bei Matrix-Eingabe bzw. der erzeugten Perioden bei Ergebnis- und
+  Ergebnislisten-Eingabe: `"year"` (Standard), `"quarter"` oder `"month"`. Bei `withdrawal_paths` und Studien
+  gilt die gespeicherte Frequenz.
+- `strategy`: Bei `SimLevBootstrapStudy`: Name der Strategie (`nothing` = erste gespeicherte).
+- `years`: Optional Anzahl Jahre (> 0, `years` x Perioden je Jahr muss ganzzahlig sein): Kürzung auf die
+  ersten `years` Jahre (`years` x Perioden je Jahr Zeilen). Bei einem `SimLevResult` zugleich die
+  Kohortenlänge (`nothing` = 30). `nothing` (Standard) = volle Pfadlänge.
+- `timing`: Zeitpunkt der Entnahme innerhalb jeder Periode: `"start"` (Standard; vor der Rendite) oder `"end"`
+  (nach der Rendite).
+- `income`: Optional weitere Einkommen (z. B. gesetzliche Rente): Liste von Listen `(start = Jahr, end = Jahr,
+  amount = Betrag)`; ein einzelnes `RList("start" => …, "end" => …, "amount" => …)` wird automatisch verpackt.
+  `start`/`end` sind Planjahre (Standard 1 bzw. letztes Jahr, `start <= end`; Jahre nach dem Pfadende
+  entfallen), `amount` ist ein realer Jahresbetrag in Kaufkraft des Startzeitpunkts. Einkommen mindern die
+  Depotentnahme (Entnahme = max(0, Regelbetrag - Einkommen)) und zählen im Konsum (`spending`) mit.
+- `tax`: Steuerdaten der Person: `nothing` (Standard; keine Steuern) oder ein Objekt aus `tax_profile()`
+  (vereinfachte deutsche Besteuerung, siehe Details). Ausgewertet werden `rate` (Abgeltungsteuer inkl.
+  Solidaritätszuschlag in Prozent, Standard 26.375), `church_tax` (Kirchensteuer in Prozent; der Satz der
+  Abgeltungsteuer folgt dann § 32d Abs. 1 EStG wie in `simulation()`), `guenstigerpruefung` mit `income =
+  income_rate()` (Günstigerprüfung wie in `simulation()`: einmal je Lauf; ist der Grenzsteuersatz
+  einschließlich Soli und Kirchensteuer niedriger als die Abgeltungsteuer, gilt er für alle Verkäufe und
+  Vorabpauschalen aller Pfade und Planjahre; ohne `income` Warnung und Abgeltungsteuer; `income_rate()` ohne
+  `guenstigerpruefung = true` wirkt nicht) und `sparer_pauschbetrag` (Sparer-Pauschbetrag je Planjahr als
+  nominaler Geldbetrag, Standard 1000; 2000 bei Zusammenveranlagung; 0 = ohne). Bei `start_value` =
+  `SimLevResult` mit `tax_report["next_year"]` steht im ersten Planjahr nur dieser Betrag minus
+  `next_year["sparer_pauschbetrag_used"]` zur Verfügung (siehe Details, Kalender; bei gleichem Pauschbetrag
+  wie in der Ansparphase `next_year["sparer_pauschbetrag_remaining"]`). Angaben, die die Entnahmephase nicht
+  abbildet (`private_sale_threshold` ungleich 1000, `base_rate`, `harvest`), ergeben einen Fehler; der
+  Basiszins kommt aus `base_rate` dieser Funktion. Mit `income = income_tariff(taxable_income, tariff)`
+  rechnet die Entnahmephase den Tarifweg wie `simulation()`: unterjährig Abgeltungsteuer, nach jedem Planjahr
+  je Pfad eine Veranlagung (siehe Details, Tarifweg). `taxable_income` ist das zu versteuernde Einkommen ohne
+  die Erträge der Entnahme, nominal in EUR genau wie angegeben (ohne Fortschreibung mit der Inflation): eine
+  Zahl gilt für alle Planjahre, ein Vektor ohne Namen braucht einen Wert je Planjahr; nach Kalenderjahren
+  benannt (Vektor oder Tabelle (RFrame) wie in `simulation()`) nur mit einem `SimLevResult` als `start_value`
+  (Planjahr 1 = `tax_report["next_year"]\$year`), sonst Fehler. `income` dieser Funktion zählt nicht zum zvE;
+  einen steuerpflichtigen Teil (etwa einer Rente) selbst in `taxable_income` einrechnen. Kirchensteuer und
+  Günstigerprüfung werden nicht aus der Ansparphase (`start_value` = `SimLevResult`) übernommen, sondern hier
+  ausdrücklich in `tax_profile()` angegeben. Die Bestandsmerkmale (`partial_exemption`, `vorabpauschale`,
+  `cost_basis`, `loss_carryforward`, `sale_cost`) sind eigene Argumente. Wie in `simulation()` sind
+  `partial_exemption`, `sale_cost`, `cost_basis`, `loss_carryforward` und `gamma` einzelne endliche Zahlen im
+  zulässigen Bereich (sonst Fehler); Werte zwischen 0 und 1 bei `partial_exemption` und `cost_basis` sowie
+  zwischen 0 und 0,05 bei `inflation` (Zahl) und `base_rate` (Zahl) lösen eine Warnung aus (vermutlich Anteil
+  statt Prozent).
+- `partial_exemption`: Teilfreistellung in Prozent (Standard 30 für Aktienfonds; 15 für Mischfonds). Nicht
+  angegeben und `start_value` ein `SimLevResult` mit `open_lots`: die gemeinsame Teilfreistellung der am Ende
+  gehaltenen Assets (Regime `"capital_gains"` = 0), sofern alle denselben Wert haben und keines das Regime
+  `"private_sale"` hat und keine Fonds neben anderen Regimen gehalten werden; sonst 30 mit Warnung. Als
+  gehalten gelten Assets mit Endwert > 1e-12 x Depotwert (Stückreste ohne Wert zählen nicht).
+- `base_rate`: Basiszins für die Vorabpauschale in Prozent (Standard 3.20 für 2026; negative Werte zählen als
+  0): Skalar oder Matrix (Perioden x Pfade, gleiche Dimension wie die Renditen vor einer Kürzung mit `years`),
+  maßgeblich ist der Wert der letzten Periode jedes Planjahres. Enthält `x` eine Basiszins-Reihe (Argument
+  `base_rate` in `withdrawal_cohorts()`), wird diese verwendet.
+- `vorabpauschale`: Logisch: Vorabpauschale berücksichtigen (Standard `true`; nur mit `tax = tax_profile()`
+  wirksam). Nicht angegeben und `start_value` ein `SimLevResult` mit `open_lots`, in dem kein gehaltenes Asset
+  das Regime `"investment_fund"` hat (nur ETN/Zertifikate, `"capital_gains"`, bzw. `"private_sale"`): `false`,
+  da `simulation()` dort keine Vorabpauschale erhebt. Bei Fonds neben anderen Regimen Warnung, keine
+  Übernahme.
+- `sale_cost`: Verkaufskosten in Prozent des Verkaufsbetrags (Standard 0; z. B. halber Spread). Nicht
+  angegeben und `start_value` ein `SimLevResult` mit `open_lots`: der halbe Spread (`spread`) der am Ende
+  gehaltenen Assets, sofern alle denselben Spread haben (sonst 0 mit Warnung; ohne Spread-Angabe im Ergebnis
+  0). Ordergebühren bildet die Entnahmephase nicht ab; waren sie in der Ansparphase gesetzt, warnt die
+  Funktion.
+- `cost_basis`: Anschaffungskosten in Prozent des Startwerts (Standard 100 = frisch gekauft; kleiner bei
+  Altbestand mit stillen Reserven), einschließlich bereits versteuerter Vorabpauschalen, die beim Verkauf nach
+  § 19 InvStG angerechnet werden. Mit `cost_basis` rechnet die Entnahmephase mit Durchschnittskosten: jede
+  Entnahme verbraucht den Anteil Entnahme / Depotwert der Basis. Ein ausdrücklich angegebener Wert gilt immer
+  (auch bei einem `SimLevResult`; dann ohne FIFO-Lots). Ist `start_value` ein `SimLevResult` und `cost_basis`
+  nicht angegeben:
+
+  - nur Cash am letzten Tag: (z. B. `liquidate = true`): 100, alle Gewinne sind bereits versteuert.
+  - mit offenen Lots: (Element `open_lots`, nur Ergebnisse mit `simulation(tax = tax_profile())`): mit `tax =
+    tax_profile()` die Lots selbst (FIFO, siehe Details); ihre Summe entspricht 100 x (Anschaffungskosten
+    `units` x `price` plus anzurechnende Vorabpauschalen `vp` aller Assets plus Cash) / Endwert. Ein Verkauf
+    ergibt dieselbe Steuer wie in `simulation()` beim Verkauf derselben Stückzahl, wenn `sale_cost` dem halben
+    Spread entspricht, keine Ordergebühr anfällt, alle Assets die Teilfreistellung `partial_exemption` haben
+    und Topf und Sparer-Pauschbetrag gleich stehen.
+  - sonst: (Ergebnis ohne Steuern oder älter): die Näherung 100 x (Startwert brutto + Summe der Einzahlungen)
+    / Endwert, mit Warnung bei `tax = tax_profile()`. Sie behandelt bereits realisierte (und versteuerte)
+    Gewinne, Vorabpauschalen und Cash wie stille Reserven und überschätzt die spätere Steuer dann.
+- `loss_carryforward`: Anfangsbestand des Verlusttopfs als nominaler Geldbetrag (Standard 0; Betrag nach
+  Teilfreistellung wie in `simulation()`). Nicht angegeben und `start_value` ein `SimLevResult` mit
+  `open_lots`: der allgemeine Verlusttopf (Topf für Fonds und sonstige Kapitalerträge) zu Beginn des ersten
+  Planjahres, `tax_report["next_year"]\$loss_carryforward_capital` (ältere Ergebnisse ohne `next_year`:
+  `tax_report["loss_carryforward_capital"]`); der Verlustvortrag für private Veräußerungsgeschäfte wird nicht
+  übernommen.
+- `gamma`: Relative Risikoaversion (CRRA, Zahl, Standard 2) für das Sicherheitsäquivalent der realen
+  jährlichen Konsumreihe (`gamma = 1`: geometrisches Mittel).
+- `keep_paths`: Vermögensmatrix `wealth` zurückgeben: `true` (Standard) = alle Pfade, `false` oder 0 = keine,
+  ganze Zahl k >= 1 = die ersten k Pfade (Spalten; k größer als die Pfadzahl: alle). Gerechnet werden immer
+  alle Pfade; `plot()` zeichnet den Vermögensfächer dann nur aus den behaltenen Pfaden (Titel mit „erste k von
+  n Pfaden“). Bei historischen Kohorten sind das die frühesten Starts.
+- `horizon`: Optional Laufzeit je Pfad: Objekt aus `withdrawal_horizon()` (zufällige Laufzeit in Jahren je
+  Pfad) oder eine Zahl > 0 = feste Laufzeit in Jahren. `nothing` (Standard) = volle Pfadlänge. Dann gilt ein
+  Pfad als erfolgreich, wenn das Vermögen bis zu seinem Horizont reicht; reales Endvermögen, Steuern,
+  Konsumkennzahlen und PWR (diese nur bei Jahresperioden, sonst `NA`) beziehen sich auf den jeweiligen
+  Horizont; Endvermögen und Steuern enthalten dabei die Abrechnung der Vorabpauschale des Horizontjahres wie
+  am Pfadende (ein Pfad mit H Jahren und Horizont H auf längeren Pfaden ergeben dasselbe) (`paths["horizon"]`,
+  Erfolg über die volle Pfadlänge in `paths["success_full"]`). Horizonte über der Pfadlänge werden mit Warnung
+  gekürzt. Die Regel selbst rechnet weiter mit den Restjahren der vollen Pfadlänge. Nicht zu verwechseln mit
+  `horizon` in `planning_goal()` (Perioden).
+
+# Rückgabe
+Objekt der Klasse `SimLevWithdrawal` (Liste):
+
+- `paths`: Tabelle (RFrame) mit einer Zeile je Pfad: `success` (logisch: alle geplanten Entnahmen voll bezahlt
+  bzw. planmäßig vollständig geleert, siehe Details), `depletion_year` (Planjahr der ersten Unterdeckung,
+  sonst `NA`), `terminal_real` (reales Endvermögen), `terminal_nominal` (nominales Endvermögen am Pfadende),
+  `first_withdrawal` (realer Konsum im ersten Planjahr), `mean_spending`, `min_spending`, `total_spending`
+  (Mittel, Minimum, Summe des realen Jahreskonsums), `spending_drawdown` (größter Rückgang des realen Konsums
+  gegenüber dem bisherigen Höchststand, als Anteil 0 bis 1), `ce_spending` (Sicherheitsäquivalent nach
+  `gamma`); Mittel, Minimum, Rückgang und Sicherheitsäquivalent nur über volle Planjahre (ein unvollständiges
+  letztes Planjahr zählt nur in `total_spending`; ohne volles Jahr `NA`), `taxes` (Summe der Steuern, real)
+  und `pwr` (Perfect Withdrawal Rate in Prozent); bei Kohorten zusätzlich `start` (Startdatum), mit `horizon`
+  zusätzlich `horizon` (Jahre) und `success_full`.
+- `spending`: Matrix Planjahre x Pfade: realer Konsum (Netto-Entnahme plus `income`).
+- `planned`: Matrix Planjahre x Pfade: von der Regel geplante Jahresentnahme (real, vor Abzug von `income`).
+- `wealth`: Matrix (Planjahre + 1) x Pfade: reales Vermögen zu Beginn jedes Planjahres, letzte Zeile am Ende;
+  mit `keep_paths = k` nur die ersten k Spalten, `nothing` bei `keep_paths = false`.
+- `rule`, `start_value`, `frequency`, `horizon`, `tax_mode` (`"person"` mit `tax`, sonst `"none"`), `gamma`,
+  `timing`: Eingaben.
+- `years`, `full_years`: Anzahl Planjahre (einschließlich eines unvollständigen letzten Jahres) bzw. voller
+  Planjahre.
+- `historical`: `true` bei historischen Kohorten.
+- `adopted`: Nur bei `start_value` = `SimLevResult` und `tax = tax_profile()`: benannte Liste der aus der
+  Ansparphase übernommenen Werte (`lots` = Anzahl FIFO-Lots einschließlich Cash-Position, `cost_basis` bei
+  Durchschnittskosten, `partial_exemption`, `loss_carryforward`, `sale_cost`, `sparer_pauschbetrag_used_year1`
+  = im ersten Planjahr bereits verbrauchter Pauschbetrag, `vorabpauschale` = `false` ohne gehaltene Fonds);
+  sonst `nothing`.
+- `weights`: Pfadgewichte (Standard 1 je Pfad).
+- `source`: Herkunft der Renditen.
+- `elapsed`: Rechenzeit in Sekunden (ab Start des Kerns).
+- `tariff_years`: Nur mit dem Tarifweg (`income_tariff()`): Tabelle (RFrame) mit einer Zeile je Pfad und
+  veranlagtem Planjahr, nach Pfad und Jahr: `path`, `year` (Planjahr; Planjahre + 1 = Folgejahr am Pfadende)
+  und dieselben Spalten wie `tax_report["tariff_years"]` in `simulation()` (zvE, Kirchensteuer-Sonderausgaben
+  und ihre Wirkung, § 23-Spalten, in der Entnahme 0, `capital_income` = K, Abgeltungsteuer, Tarif auf K,
+  Belastung ohne und mit Günstigerprüfung, `guenstiger`, `settlement` > 0 Nachzahlung bzw. < 0 Erstattung,
+  `refund`, `church_tax_settlement_next_year`); Beträge nominal in EUR.
+
+Auswertung mit `print()`, `summary()` und `plot()` (siehe SimLevWithdrawal-methods).
+
+# Details
+Ablauf je Planjahr: Zu Beginn legt die Regel den Jahresbetrag fest; er wird gleichmäßig auf die Perioden des
+Jahres verteilt und je nach `timing` zu Beginn oder Ende jeder Periode als Netto-Betrag entnommen (abzüglich
+`income`). Ein Pfad scheitert, sobald eine geplante Entnahme nicht mehr voll bezahlt werden kann. Ausnahme
+Verzehrregeln (`one_over_n`, `vpw`, `abw`, `hebeler`): Sie leeren das Depot planmäßig im letzten Planjahr bzw.
+in dem Jahr, für das sie das ganze Depot vorsehen (Jahresbetrag >= Depotwert zu Jahresbeginn, z. B. `vpw` bei
+Erreichen von `max_age`). Wird das Depot in einem solchen Jahr vollständig verkauft und fällt die Entnahme
+dabei kleiner aus (Steuern und Kosten aus dem Erlös bezahlt, bei unterjährigen Perioden auch Kursverluste im
+Jahr), ist das kein Fehlschlag, sofern der Jahresbetrag das Depot zu Jahresbeginn nicht übersteigt (sonst, z.
+B. bei `hebeler` durch die Glättung, bleibt es ein Fehlschlag). Bei allen anderen Regeln zählt jede nicht voll
+bezahlte Entnahme als Fehlschlag. Alle "realen" Größen sind durch die aufgelaufene Inflation geteilt, also in
+Kaufkraft des Startzeitpunkts.
+
+Besteuerung (`tax = tax_profile()`): vereinfachtes Modell eines einzelnen thesaurierenden Fondsbestands nach
+heutiger Rechtslage (Modellphilosophie des Pakets): Verkaufsgewinne mit Teilfreistellung, Verlustverrechnung
+vor Sparer-Pauschbetrag, Abgeltungsteuer; Vorabpauschale zum Jahresende festgesetzt; sie gilt nach § 18 Abs. 3
+InvStG am ersten Werktag des Folgejahres als zugeflossen und wird daher wie in `simulation()` mit Verlusttopf
+und Sparer-Pauschbetrag des Folgejahres versteuert, durch Anteilsverkauf beglichen und beim späteren Verkauf
+angerechnet. Die Vorabpauschale des letzten Planjahres wird am Pfadende abgerechnet wie in `simulation()` bei
+Datenende am 31.12.: die Steuer auf die VP wird vorab mit den Töpfen des Folgejahres (neuer Pauschbetrag,
+Verlusttopf am Jahresende) bestimmt und per Zwangsverkauf noch im ablaufenden Jahr bezahlt (Gewinn mit dessen
+Pauschbetrag und Verlusttopf); danach wird die VP-Steuer mit dem Verlusttopf nach diesem Verkauf endgültig
+berechnet und die Differenz ausgeglichen (Nachzahlung per Verkauf im Folgejahr, Erstattung als Geld ins
+Depot). Alle diese Steuern mindern das Endvermögen und zählen in `taxes`; ebenso beim Endvermögen am Horizont
+(`horizon`). Während des Pfades wird die VP-Steuer dagegen zusammen mit der ersten Entnahme des Folgejahres
+verkauft (Töpfe des Folgejahres). Ohne Lots einer Ansparphase rechnet der Kern mit Durchschnittskosten
+(`cost_basis`); bei einer Einmalanlage ohne Zukäufe ist das identisch mit FIFO. Das Planjahr wird als
+Steuerjahr behandelt; der Sparer-Pauschbetrag steht in jedem Planjahr neu und nominal unverändert zur
+Verfügung.
+
+FIFO mit den Lots einer Ansparphase: Ist `start_value` ein `SimLevResult` mit `open_lots` (gerechnet mit `tax
+= tax_profile()`), `cost_basis` nicht angegeben und `tax = tax_profile()`, übernimmt die Entnahmephase die
+einzelnen Lots: je Asset in FIFO-Reihenfolge mit Anschaffungskosten (`units` x `price`) und anzurechnender
+Vorabpauschale (`vp`); der Wert eines Lots ist sein Stückanteil am Endwert des Assets. Ein Verkauf nimmt jedem
+Asset seinen Wertanteil am Depot (die Entnahmephase hat nur eine Renditereihe, die Anteile bleiben daher
+konstant) und innerhalb des Assets die ältesten Lots zuerst; Gewinn je Lot = Erlös x (1 - `sale_cost` / 100)
+minus Anschaffungskosten minus anteilige Vorabpauschale (§ 19 InvStG), die Gewinne aller verkauften Lots
+werden summiert und mit Teilfreistellung `partial_exemption`, Verlusttopf, Sparer-Pauschbetrag und Steuersatz
+`rate` besteuert (wie `simulation()` je Verkauf, siehe dort `open_lots`). Cash am Ende der Ansparphase ist
+eine eigene Position mit Basis = Betrag, die wie bisher mit der Depotrendite wächst und anteilig verkauft
+wird. Neue Vorabpauschalen sind je Anteil für alle Lots gleich: es gibt keine Zukäufe, jedes Lot wird
+ganzjährig gehalten, und alle Assets haben dieselbe Rendite (in `simulation()` hängt die VP je Stück nur vom
+Kursverlauf des Jahres und der Haltedauer ab). Einkommen mindern nur die Entnahme, Umschichtungen gibt es in
+der Entnahmephase nicht; die Lots werden also nur durch Verkäufe und Vorabpauschalen fortgeschrieben.
+
+Tarifweg (`tax = tax_profile(income = income_tariff())`): Verkäufe und Vorabpauschalen werden unterjährig mit
+der Abgeltungsteuer belastet. Nach jedem Planjahr folgt je Pfad eine Veranlagung wie der Jahresabschluss von
+`simulation()` mit einem festen Tarif aus `tax_tariff()`: Kapitalerträge K = mit Abgeltungsteuer belastete
+Bemessungsgrundlage des Planjahres (nach Teilfreistellung, Verlusttopf und Sparer-Pauschbetrag; die
+Vorabpauschale zählt im Jahr ihres Zuflusses), Kirchensteuer als Sonderausgabe im Zahlungsjahr (Saldo des
+Bescheids des Vorjahres; im ersten Planjahr 0), mit `guenstigerpruefung = true` der Vergleich mit dem Tarif
+auf zvE + K. Der Saldo (Nachzahlung bzw. Erstattung) wird mit der ersten Entnahme des Folgejahres gezahlt bzw.
+mindert sie (wie die Steuer auf die Vorabpauschale); eine Erstattung über diese Entnahme hinaus fließt als
+Geld ins Depot. Am Pfadende und am Horizont wird das letzte Planjahr sofort veranlagt und abgerechnet wie in
+`simulation()` am letzten Tag (der Zwangsverkauf für die Vorabpauschale zählt zu diesem Jahr); mit
+Günstigerprüfung wird die Vorabpauschale des letzten Planjahres (Zufluss im Folgejahr) zusätzlich für das
+Folgejahr veranlagt, sofern dafür ein zvE vorliegt (eine Zahl für alle Jahre bzw. ein benannter Wert für
+dieses Kalenderjahr). Nachzahlungen werden per Verkauf, Erstattungen als Geld ins Depot abgerechnet; alle
+Salden zählen in `taxes`. Ohne Kirchensteuer und ohne Günstigerprüfung ist der Saldo stets 0. Die Jahreszeilen
+stehen im Ergebnis unter `tariff_years`.
+
+Kalender: Die Entnahmephase kennt keine Kalenderjahre; ihr erstes Planjahr gilt als das Jahr nach dem letzten
+Datentag der Ansparphase (`tax_report["next_year"]\$year`), jedes weitere Planjahr als ein neues Steuerjahr.
+Was `simulation()` diesem Jahr schon zugerechnet hat (endet die Ansparphase am 31.12.: die dort festgesetzte
+und im Folgejahr verrechnete Vorabpauschale), geht ein: im ersten Planjahr steht nur `sparer_pauschbetrag`
+minus `next_year["sparer_pauschbetrag_used"]` zur Verfügung, der Verlusttopf beginnt mit
+`next_year["loss_carryforward_capital"]`.
+
+Grenzen gegenüber `simulation()`: (1) Verluste: Die Entnahmephase saldiert Gewinne und Verluste der Lots eines
+Verkaufs sofort und trägt einen verbleibenden Verlust in den Topf vor; eine Erstattung bereits versteuerter
+Erträge desselben Jahres gibt es nicht. `simulation()` besteuert jeden Verkauf eines Assets einzeln und
+erstattet zum Jahresende Steuer auf im Jahr versteuerte Erträge, wenn später im Jahr Verluste entstehen
+(unterjährige Verlustverrechnung, mit Freigabe des Pauschbetrags). Gleich sind beide, solange in einem
+Planjahr alle Verkäufe Gewinne ergeben. (2) Steuersatz: die Entnahmephase rechnet mit einem festen Satz aus
+`tax_profile()` (`rate` bzw. mit `church_tax` der Satz nach § 32d Abs. 1 EStG, mit `guenstigerpruefung` und
+`income_rate()` gegebenenfalls der persönliche Satz). Kirchensteuer und Günstigerprüfung der Ansparphase
+werden nicht übernommen; sie sind in `tax` ausdrücklich anzugeben. Mit dem Tarifweg (`income_tariff()`) gilt
+unterjährig die Abgeltungsteuer und je Planjahr eine Veranlagung (siehe Tarifweg); das zvE gilt für alle Pfade
+gleich, wird nicht mit der Inflation fortgeschrieben, und `income` zählt nicht dazu. (3) Ordergebühren beim
+Verkauf bildet die Entnahmephase nicht ab (Warnung, wenn sie in der Ansparphase gesetzt waren). (4)
+Verschiedene Teilfreistellungen, Regime `"capital_gains"` neben Fonds und `"private_sale"` (§ 23 EStG) werden
+nicht getrennt besteuert (Warnung); Teilfreistellung und Vorabpauschale gelten für den ganzen Bestand. (5)
+Positionen ohne Wert (Endwert <= 1e-12 x Depotwert, etwa nach Knockout) entfallen; ein Verlust aus ihrem
+Verkauf entsteht in der Entnahmephase nicht.
+
+Renditequellen: Die Entnahmephase ist bewusst von `simulation()` getrennt. Ein gespeichertes Ergebnis von
+`simulation()` (etwa per `saveRDS()`) liefert über seinen zeitgewichteten Wertindex (`result_index()`) die
+Renditen; bei einem Einzelergebnis werden daraus historische Kohorten gebildet (wie `withdrawal_cohorts()` mit
+monatlichen Starts), eine Liste von Ergebnissen (z. B. je Bootstrap-Pfad) oder eine `bootstrap_study()` mit
+`keep_returns` liefert je Element einen Pfad (über `withdrawal_paths()`). Ein `bootstrap_result` aus
+`bootstrap()` zuerst mit `withdrawal_paths()` umwandeln. Wurde das Quellergebnis bereits mit Steuern (`tax =
+tax_profile()`) gerechnet, enthält der Index schon Vorabpauschalen; dann hier `vorabpauschale = false` setzen
+oder die Quelle ohne Steuern rechnen (bei Ergebnissen und Ergebnislisten erscheint dazu eine Warnung).
+
+# Beispiel
+```julia
+using SimLev, Random
+rng = MersenneTwister(1)
+R = exp.(0.05 .+ 0.15 .* randn(rng, 30, 200))   # 30 Jahre, 200 Pfade
+ws = withdrawal_simulation(R, withdrawal_rule("guyton_klinger"; rate = 5); start_value = 1e6, inflation = 2)
+println(ws)
+```
 """
 function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_value = 1e6, inflation = 0,
                                frequency = nothing, strategy = nothing, years = nothing, timing = nothing,
@@ -892,9 +1432,9 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     freq_arg = frequency
     timing = _match_arg(timing, ("start", "end"))
     tax_mode = _wd_tax_mode(tax)
-    # 6.5b: Satz wie in simulation() (_tax_rates: Kirchensteuer, Günstigerprüfung einmal je Lauf); die Angaben stehen
+    # Satz wie in simulation() (_tax_rates: Kirchensteuer, Günstigerprüfung einmal je Lauf); die Angaben stehen
     # ausdrücklich in tax_profile(), aus der Ansparphase wird nichts übernommen
-    # T14: Tarifweg (income_tariff()): unterjährig Abgeltungsteuer, Veranlagung je Planjahr und Pfad im Kern
+    # Tarifweg (income_tariff()): unterjährig Abgeltungsteuer, Veranlagung je Planjahr und Pfad im Kern
     tariff_on = tax !== nothing && tax["income"] isa RList && SimLev.inherits(tax["income"], "SimLevIncomeTariff")
     tax_rate = if tax === nothing
         26.375 / 100
@@ -1094,7 +1634,7 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
         (_isnum(inflation)) || _stop("Bei einem SimLevWrapperNav ist 'inflation' ein Prozentsatz p. a.")
         x = withdrawal_cohorts(x; price = "nav", inflation = inflation, years = years === nothing ? 30 : years,
                                frequency = _match_arg(freq_arg, ("year", "quarter", "month")))
-    elseif x isa RFrame && haskey(x, "date")   # Kurstabelle, z. B. Ausschnitt aus wrapper_nav() (Etappe 8.0)
+    elseif x isa RFrame && haskey(x, "date")   # Kurstabelle, z. B. Ausschnitt aus wrapper_nav()
         _stop("x ist eine Tabelle mit Spalte 'date' (z. B. ein Ausschnitt aus wrapper_nav(), der eine gewöhnliche " *
               "Tabelle ist); Kurse zuerst mit withdrawal_cohorts(x, price = \"<Kursspalte>\") in Renditen umwandeln " *
               "oder das ganze Ergebnis von wrapper_nav() übergeben.")
@@ -1172,7 +1712,7 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     end
     rp = _wd_param_vector(rule)
     kp = min(kp, Float64(size(R, 2)))
-    # T14: Tarifweg: zvE je Planjahr (nominal wie angegeben; income zählt nicht dazu) und Tarif wie in simulation()
+    # Tarifweg: zvE je Planjahr (nominal wie angegeben; income zählt nicht dazu) und Tarif wie in simulation()
     tariff_par = Float64[]; zve = Float64[]
     if tariff_on
         zve = _wd_zve(tax["income"]["taxable_income"], Int(ny), year1)
@@ -1257,9 +1797,40 @@ end
     withdrawal_max_rate(x, rule = withdrawal_rule("constant"); success = 0.95, lower = 0.5, upper = 20,
                         tol = 0.005, kwargs...)
 
-Maximale Anfangsrate für eine Ziel-Erfolgsquote (Bisektion). Ergebnis:
-RVector der Länge 1 (Rate in Prozent, NA wenn schon `lower` die Zielquote
-verfehlt) mit Attribut `success` (`attrs(r)["success"]`).
+Maximale Anfangsrate für eine Ziel-Erfolgsquote (Bisektion).
+
+Bestimmt per Bisektion die höchste Entnahmerate (`rate` der Regel), bei der der (mit den Pfadgewichten
+gewichtete) Anteil erfolgreicher Pfade mindestens `success` beträgt. Für die konstante Regel ohne Steuern und
+Einkommen entspricht das dem Quantil der Perfect Withdrawal Rate (historisch: Minimum über alle Kohorten =
+SWR). Jeder Suchschritt ruft `withdrawal_simulation()` mit `keep_paths = false` auf.
+
+# Argumente
+- `x`: Renditequelle wie in `withdrawal_simulation()`: `withdrawal_paths` (z. B. aus `withdrawal_cohorts()`,
+  `withdrawal_paths()`, `bootstrap_pooled()`), Renditematrix, `SimLevResult`, Liste von `SimLevResult` oder
+  `SimLevBootstrapStudy`.
+- `rule`: Objekt aus `withdrawal_rule()`; dessen `rate` wird variiert (Standard:
+  `withdrawal_rule("constant")`). Nur für Regeln, die `rate` nutzen; bei `one_over_n`, `vpw`, `abw`, `cape`
+  und `hebeler` bricht die Funktion ab.
+- `success`: Ziel-Erfolgsquote als Anteil (0.95 = 95 % der Pfade, Standard); 1 = historische SWR. Zulässig 0 <
+  success <= 1 (95 statt 0.95 ist ein Fehler).
+- `lower`, `upper`: Suchintervall für `rate` in Prozent (Standard 0.5 und 20).
+- `tol`: Genauigkeit in Prozentpunkten (Standard 0.005; > 0). Es muss 0 <= lower < upper <= 100 gelten.
+- `kwargs...`: weitere Argumente für `withdrawal_simulation()` (z. B. `inflation`, `tax_mode`, `horizon`). Ein
+  `horizon` aus `withdrawal_horizon()` mit `seed = nothing` wird einmal zu einem Startwert aufgelöst (ein Zug
+  aus dem Zufallszustand von SimLev, `simlev_seed()`); alle Suchschritte vergleichen damit dieselben
+  Laufzeiten.
+
+# Rückgabe
+Rate in Prozent (Zahl; 4 = 4 %) mit Attribut `"success"` (erreichte Erfolgsquote als Anteil). `NA`, wenn schon
+`lower` die Zielquote verfehlt; `upper`, wenn selbst `upper` sie erreicht.
+
+# Beispiel
+```julia
+using SimLev, Random
+rng = MersenneTwister(1)
+R = exp.(0.05 .+ 0.15 .* randn(rng, 30, 200))   # 30 Jahre, 200 Pfade
+println(withdrawal_max_rate(R, withdrawal_rule("constant"); success = 0.9, inflation = 2))
+```
 """
 function withdrawal_max_rate(x, rule_pos = _MISSING; rule = _MISSING, success = 0.95, lower = 0.5, upper = 20, tol = 0.005, kwargs...)
     x = SimLev.as_rframe(x)
@@ -1281,7 +1852,7 @@ function withdrawal_max_rate(x, rule_pos = _MISSING; rule = _MISSING, success = 
         _stop(@sprintf("withdrawal_max_rate: tol muss eine Zahl > 0 in Prozentpunkten sein (z. B. 0.005; erhalten: %s).", _show(tol)))
     end
     lower = Float64(lower); upper = Float64(upper); success = Float64(success); tol = Float64(tol)
-    # Entwurf C.5, Regel 9: ein Horizont mit seed = nothing wird einmal zu k aufgelöst; alle
+    # Ein Horizont mit seed = nothing wird einmal zu k aufgelöst; alle
     # Suchschritte ziehen damit dieselben Laufzeiten
     hz = get(kwargs, :horizon, nothing)
     if _is_horizon(hz) && _get(hz, "seed") === nothing && hz["type"] != "fixed"
@@ -1414,7 +1985,7 @@ function _plot_wd(x; probs = [0.05, 0.25, 0.5, 0.75, 0.95], file = nothing, widt
     probs = _dvec(probs)
     w = _dvec(x["weights"])
     panels = Any[]
-    # keep_paths = k < Pfade (6.5b): Vermögensfächer mit den Gewichten der behaltenen Spalten, Konsum mit allen;
+    # keep_paths = k < Pfade: Vermögensfächer mit den Gewichten der behaltenen Spalten, Konsum mit allen;
     # Titel mit Zusatz, ebenso als Attribut `title` der Tabelle `wealth` in `data`
     spm = _mat(x["spending"])
     title = nothing
@@ -1476,7 +2047,54 @@ end
     withdrawal_horizon(type = "fixed"; years = nothing, prob = nothing, min = nothing, max = nothing,
                   mean = nothing, sd = nothing, mode = nothing, seed = 1)
 
-Laufzeit der Entnahmephase nach eigenen Annahmen (Port von `withdrawal_horizon()`).
+Laufzeit der Entnahmephase nach eigenen Annahmen.
+
+Beschreibt, wie lange die Entnahmephase dauern soll - fest oder als Verteilung nach eigenen Vorgaben. Jeder
+Pfad von `withdrawal_simulation()` erhält eine eigene Laufzeit, gezogen mit festem Startwert (gleiche
+Laufzeiten bei wiederholten Aufrufen; mit `seed = nothing` je Aufruf andere, außer innerhalb von
+`withdrawal_max_rate()`).
+
+# Argumente
+- `type`: Verteilung: `"fixed"` (Standard), `"uniform"`, `"discrete"`, `"normal"`, `"triangular"` oder
+  `"sample"` (siehe oben). Fehlende Pflichtparameter führen zu einem Fehler.
+- `years`: Laufzeit(en) in Jahren: feste Laufzeit (`fixed`), mögliche Laufzeiten (`discrete`) bzw. Stichprobe
+  (`sample`). Bei `discrete` und `sample` ist auch ein einzelner Wert erlaubt (dann immer diese Laufzeit).
+- `prob`: `discrete`: Wahrscheinlichkeiten je Eintrag von `years` (gleiche Länge, >= 0, Summe > 0; werden
+  normiert).
+- `min`, `max`: Untere und obere Grenze in Jahren (`uniform`, `normal`, `triangular`); `min <= max`.
+- `mean`, `sd`: `normal`: Mittelwert und Standardabweichung in Jahren.
+- `mode`: `triangular`: häufigster Wert in Jahren.
+- `seed`: Startwert für die Ziehung der Laufzeiten (Standard 1; ganze Zahl mit |seed| < 2^53); der
+  Zufallszustand von SimLev bleibt dann unverändert. `nothing` = bei jeder Ziehung wird genau einmal ein
+  Startwert aus dem Zufallszustand von SimLev gezogen (siehe `simlev_seed()`), jede Ziehung ist anders;
+  `withdrawal_max_rate()` löst `nothing` einmal auf und nutzt in allen Suchschritten dieselben Laufzeiten.
+  `set.seed()` wirkt nicht.
+
+# Rückgabe
+Objekt der Klasse `SimLevHorizon` (Liste mit `type`, `seed` und den benötigten Parametern) zur Übergabe an das
+Argument `horizon` von `withdrawal_simulation()` bzw. `withdrawal_max_rate()`. Ausgabe mit `print()` (siehe
+SimLevWithdrawal-methods).
+
+# Details
+- fixed: `years`: feste Laufzeit.
+- uniform: `min`, `max`: ganzzahlig gleichverteilt.
+- discrete: `years`, `prob`: eigene Wahrscheinlichkeiten je Laufzeit, z. B. `years = [25, 30, 35, 40], prob =
+  [.3, .4, .2, .1]`.
+- normal: `mean`, `sd`, `min`, `max`: gerundet und auf `[min, max]` begrenzt.
+- triangular: `min`, `mode`, `max` mit `min <= mode <= max`.
+- sample: `years`: eigene Stichprobe von Laufzeiten, aus der mit Zurücklegen gezogen wird.
+
+Gezogene Laufzeiten werden auf ganze Jahre gebracht (bei `normal` und `triangular` gerundet) und sind
+mindestens 1 Jahr. Laufzeiten über der Pfadlänge kürzt `withdrawal_simulation()` mit Warnung. Die
+Laufzeit-Parameter `years`, `min`, `max`, `mean` und `mode` müssen > 0 sein (sonst Fehler).
+
+# Beispiel
+```julia
+using SimLev, Random
+h = withdrawal_horizon("discrete"; years = [25, 30, 35, 40], prob = [0.3, 0.4, 0.2, 0.1])
+R = exp.(0.05 .+ 0.15 .* randn(MersenneTwister(1), 40, 500))
+println(withdrawal_simulation(R, withdrawal_rule("constant"; rate = 4); inflation = 2, horizon = h))
+```
 """
 function withdrawal_horizon(type_pos = nothing; type = type_pos, type_ = type, years = nothing, prob = nothing, min = nothing, max = nothing,
                        mean = nothing, sd = nothing, mode = nothing, seed = 1)
@@ -1509,7 +2127,7 @@ function withdrawal_horizon(type_pos = nothing; type = type_pos, type_ = type, y
         _stop(_sp("withdrawal_horizon('triangular'): mode (%g) muss zwischen min (%g) und max (%g) liegen.", mode, min, max))
     end
     t == "normal" && sd < 0 && _stop("withdrawal_horizon('normal'): sd muss >= 0 sein.")
-    seed === nothing || SimLev.SLib.check_seed(seed)          # Entwurf C.5, Regel 2
+    seed === nothing || SimLev.SLib.check_seed(seed)          # ganze Zahl, |seed| < 2^53
     out = RList("type" => t, "seed" => seed; class = "SimLevHorizon")
     for k in need
         out[k] = _rval(given[k])
@@ -1524,10 +2142,10 @@ function _seq_from_to(a, b)
     return Float64[a + i for i in 0:n]
 end
 
-"Laufzeiten ziehen (Port von `.draw_horizon`); ganzzahlig, mindestens 1."
+"Laufzeiten ziehen (R: `.draw_horizon`); ganzzahlig, mindestens 1."
 function _draw_horizon(h, n)
     n = Int(n)
-    # Hauptstrom aus h["seed"] (Entwurf C.5, Regeln 3, 4 und 9); "fixed" zieht nicht
+    # Hauptstrom aus h["seed"]; "fixed" zieht nicht
     rs = h["type"] == "fixed" ? nothing : SimLev.SLib.main_stream(_get(h, "seed"))
     function pick(x, prob = nothing)
         x = _dvec(x)

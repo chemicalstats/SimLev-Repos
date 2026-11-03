@@ -1,15 +1,15 @@
-/* core/slc_rbase.h – Grundfunktionen mit R-Regeln für Python und Julia (SimLev core, N8)
+/* core/slc_rbase.h – Grundfunktionen mit R-Regeln für Python und Julia (SimLev core)
  * Verfahren:  siehe slc_rbase.c (Summen, Mittel, Varianz, Kumulationen, Potenz in long double bzw.
  *             double wie R), slc_rbase_sort.c (Ordnung, Rang, partielle Sortierung, Quantile Typ 1–9,
  *             tabulate, findInterval) und slc_rbase_cov.c (cov/cor: pearson, kendall; spearman über
- *             die Ränge im Host), slc_rbase_date.c (Datumsformat und -lesen, N10),
- *             slc_rbase_num.c (R_strtod, %%, %/%, scientific() in long double, N10).
+ *             die Ränge im Host), slc_rbase_date.c (Datumsformat und -lesen),
+ *             slc_rbase_num.c (R_strtod, %%, %/%, scientific() in long double).
  * Zweck:      Python (simlev._ext) und Julia (ccall auf libslc) bildeten diese Grundfunktionen von R
- *             je für sich nach (python/simlev/_r/, julia/src/r/); seit N8 rechnen beide mit diesen
- *             Kernen. R selbst behält seine Grundfunktionen (Entscheidung 9.0 (4)); nur slc_rbase.c und
- *             diese Datei gehen seit E17 auch nach r/src/ (Summen der Tagesengine, seit Stufe 3 die
+ *             je für sich nach (python/simlev/_r/, julia/src/r/); seit 1.2.0 rechnen beide mit diesen
+ *             Kernen. R selbst behält seine Grundfunktionen; nur slc_rbase.c und
+ *             diese Datei gehen auch nach r/src/ (Summen der Tagesengine, die
  *             Auswertung evaluate_core_impl.h mit sl_r_zeroin2); nicht von slc.h eingebunden.
- * long double: Anders als die SimLev-eigenen Kerne (seit N5 ohne long double) akkumulieren diese
+ * long double: Anders als die SimLev-eigenen Kerne (ohne long double) akkumulieren diese
  *             Kerne dort in long double, wo R es tut (sum, prod, mean, var, cumsum, cumprod,
  *             rowSums/colSums, cov/cor). Bitgleich zu R sind sie damit nur auf derselben Plattform mit
  *             demselben Compiler (hier x86-64 Linux, gcc: long double = x87 80 Bit; R und slc mit
@@ -61,7 +61,7 @@ int    sl_r_rowsums(int64_t nr, int64_t nc, const double *x, int narm, int mean,
 /* x ^ y elementweise (R's Operator ^ für Doubles); y mit Länge 1 */
 void   sl_r_pow(int64_t n, const double *x, double y, double *out);
 double sl_r_pow1(double x, double y);
-/* Nullstelle nach Brent wie R_zeroin2 (stats::uniroot, E17 Stufe 3): f im Intervall [ax, bx] mit den
+/* Nullstelle nach Brent wie R_zeroin2 (stats::uniroot): f im Intervall [ax, bx] mit den
  * Funktionswerten fa, fb (Vorzeichenwechsel vom Aufrufer geprüft), Toleranz tol, höchstens maxit Schritte.
  * Rückgabe die Näherung; *iter die Zahl der Schritte, -1 ohne Konvergenz. f rechnet der Aufrufer (bei
  * uniroot mit der Ersetzung nicht endlicher Werte durch ±DBL_MAX und deren Warnungen). */
@@ -98,7 +98,7 @@ void   sl_r_findinterval(int64_t nv, const double *vec, int64_t nx, const double
 int    sl_r_cov(sl_ctx *cx, int64_t n, int64_t ncx, const double *x, int64_t ncy, const double *y,
                 int use, int kendall, int cor, double *ans, int *sd0);
 
-/* ── slc_rbase_num.c: weitere long-double-Rechenwege (N10) ──────────────────
+/* ── slc_rbase_num.c: weitere long-double-Rechenwege ──────────────────
  * sl_r_strtod_num: Zahlteil von R_strtod ab s (nach Vorzeichen): *used = gelesene Bytes (-1: keine
  * Ziffer, NA), *gt_max = Betrag > DBL_MAX in long double. sl_r_fmod_ld/sl_r_idiv_ld: long-double-Teil
  * von %% und %/% (endliche Operanden). sl_r_scientific: scientific() von formatReal für r > 0 endlich,
@@ -108,7 +108,7 @@ double  sl_r_fmod_ld(double x1, double x2);
 double  sl_r_idiv_ld(double x1, double x2);
 int     sl_r_scientific(double r, int digits, int *kpower, int *nsig);
 
-/* ── slc_rbase_date.c: Datum (N10) ───────────────────────────────────────────
+/* ── slc_rbase_date.c: Datum ───────────────────────────────────────────
  * Tage seit 1970-01-01, proleptisch gregorianisch. sl_r_strftime: format.Date(z, fmt) in der C-Locale
  * (Schalter, Breiten, E/O wie glibc unter Linux; digits_secs = getOption("digits.secs") für %OS ohne Ziffer,
  * nicht gesetzt 0) nach buf (höchstens cap Bytes, ohne abschließende 0); Rückgabe die volle Länge (höchstens

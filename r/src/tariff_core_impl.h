@@ -1,5 +1,5 @@
 // core/tariff_core_impl.h
-// Einkommensteuertarif fuer die Entnahmephase (T14, Tarifweg T1): tarifliche Einkommensteuer,
+// Einkommensteuertarif fuer die Entnahmephase (Tarifweg): tarifliche Einkommensteuer,
 // Solidaritaetszuschlag, Kirchensteuer und Jahresabschluss mit § 23, Guenstigerpruefung und
 // Kirchensteuer-Saldo des Vorjahres; reine Rechnung ohne Host-Objekte.
 //

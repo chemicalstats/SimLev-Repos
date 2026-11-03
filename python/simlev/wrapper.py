@@ -1,4 +1,4 @@
-"""Fonds-Wrapper (Port von ``r/R/wrapper.R``, Etappe 6.5c): Anteilswert (NAV) aus einer inneren Strategie.
+"""Fonds-Wrapper (Gegenstück zu ``r/R/wrapper.R``): Anteilswert (NAV) aus einer inneren Strategie.
 
 - ``wrapper_config(strategy, rebalance, costs, order_fee, volume)``  → :class:`SimLevWrapperConfig`
 - ``asset_config(..., wrapper=wrapper_config(...))``                Wrapper als ein Asset der Strategie
@@ -102,22 +102,73 @@ _FUNDS_COSTS = _FundsCostsDefault()
 
 def wrapper_config(strategy: Any, *, rebalance: Any = None, costs: Any = _FUNDS_COSTS, order_fee: Any = None,
                    volume: Any = None) -> SimLevWrapperConfig:
-    """Fonds-Wrapper konfigurieren (R: ``wrapper_config()``, Etappe 6.5c).
+    """Fonds-Wrapper konfigurieren.
+
+    Beschreibt einen Fonds-Wrapper: Innen handelt eine eigene Strategie (mit Umschichten, Signalen und
+    Ordergebühren), es fallen Verwaltungs- und Performancegebühr an. Außen ist der Wrapper **ein** Asset der
+    Strategie: ``asset_config(..., wrapper = wrapper_config(...))``. Der Anleger kauft und verkauft Anteile mit
+    eigenem Spread und eigenen Order- und Sparplangebühren und zahlt Steuern wie auf ein Einzelpapier (nach
+    ``asset_class`` bzw. ``tax_regime``). ``simulation`` rechnet dafür je Lauf den Anteilswert mit
+    ``wrapper_nav``.
 
     Args:
-        strategy: innere Strategie aus :func:`simlev.create_strategy` oder ein ``dict``, das
-            ``create_strategy(assets=...)`` annimmt; Gewichte (``share``) mit Summe 1, ohne verschachtelte
-            Wrapper. Innere Signale sind erlaubt.
-        rebalance: ``None`` oder :func:`simlev.rebalance_plan` (Umschichten innen).
-        costs: :func:`simlev.funds_costs` (Verwaltungsgebühr in % p. a., täglich je Kalendertag; Performancegebühr
-            in % über dem Höchststand, täglich abgegrenzt, am 31.12. festgeschrieben).
-        order_fee: Ordergebühr der inneren Käufe im Format von :func:`simlev.sim_costs` (Zahl oder ``dict`` mit
-            ``fixed``, ``percent``, ``min``, ``max``).
-        volume: ``None`` oder Fondsvolumen in EUR (Zahl > 0); Pflicht für feste Beträge, ``min`` und ``max`` der
-            Ordergebühr. Die innere Rechnung startet mit diesem Volumen, sonst mit 100.
+        strategy: Innere Strategie: Objekt aus ``create_strategy`` oder eine benannte Liste, die
+            ``create_strategy(assets = )`` annimmt. Die Namen sind Kursspalten in ``data``. Kein inneres Asset
+            darf selbst einen Wrapper haben (Fehler). Innere Signale (``trading = "signal"``) sind erlaubt und
+            beziehen sich auf Spalten in ``data``. Die Gewichte (``share``) müssen sich auf 1 summieren. Innere
+            Spreads gelten wie angegeben (Standard 0); Werte > 0 ergeben beim Erzeugen einen Hinweis mit der Liste
+            der Assets.
+        rebalance: ``None`` (kein Umschichten) oder ein Objekt aus ``rebalance_plan``: Umschichten innerhalb des
+            Wrappers.
+        costs: Objekt aus ``funds_costs``: Verwaltungsgebühr ``fee`` in Prozent p. a. und Performancegebühr
+            ``performance_fee`` in Prozent (Rechnung siehe ``wrapper_nav``). Standard: ``funds_costs()`` (0,95 %
+            p. a., 5 %).
+        order_fee: Ordergebühr der inneren Käufe und Verkäufe (beim Start und beim Umschichten), im Format von
+            ``sim_costs``: Zahl (EUR je Order) oder ``{"fixed": ..., "percent": ..., "min": ..., "max": ...}``.
+            ``None`` = keine.
+        volume: ``None`` oder Fondsvolumen in EUR (eine Zahl > 0). Pflicht, sobald ``order_fee`` feste Beträge
+            enthält (``fixed`` oder ``min`` > 0 bzw. ``max`` < ∞), sonst Fehler; reine Prozentgebühren gehen ohne
+            ``volume``. Die innere Rechnung startet mit ``volume``, ohne Angabe mit 100. Einzahlungen der Anleger
+            ändern das Fondsvolumen nicht.
 
     Returns:
-        :class:`SimLevWrapperConfig`. Innere Assets mit Spread > 0 ergeben einen Hinweis (``sys.stderr``).
+        Objekt der Klasse ``SimLevWrapperConfig``: Liste mit ``strategy`` (geprüft, Klasse ``strategy``),
+        ``rebalance``, ``costs``, ``order_fee`` (wie übergeben) und ``volume``. ``print`` zeigt innere Assets,
+        Umschichten, Kosten, Ordergebühr und Volumen und liefert ``x`` unsichtbar zurück.
+
+    Details:
+        **Steuerliche Einordnung.** Ob ein konkreter Wrapper steuerlich ein Investmentfonds (``tax_regime =
+        "investment_fund"`` mit ``partial_exemption``, Vorabpauschale) oder eine Kapitalforderung ist
+        (``asset_class = "certificate"``: Besteuerung erst beim Verkauf, ohne Vorabpauschale und
+        Teilfreistellung), entscheidet der Nutzer über ``asset_class``/``tax_regime`` des äußeren Assets; der Code
+        legt das nicht fest.
+
+        **Performancegebühr.** Die Rechnung folgt den Leitlinien der ESMA zu Performancegebühren (tägliche
+        Abgrenzung bei jeder Berechnung des Anteilswerts, Festschreibung höchstens einmal jährlich,
+        High-Water-Mark über die ganze Laufzeit). Diese Leitlinien gelten für OGAW. Bei Zertifikaten gelten die
+        Emissionsbedingungen des Produkts; der Nutzer prüft, ob die Rechnung dazu passt.
+
+        **Kleines Volumen.** Mindestbeträge der Engine (z. B. entfallen Umschichtungen unter 0,01 EUR) beziehen
+        sich innen auf das Volumen (ohne ``volume`` 100). Für eine genaue Übereinstimmung mit der direkt
+        gehaltenen Strategie ``volume`` in der Größe des Depots angeben.
+
+        Mit Wrapper-Assets sind keine äußeren Signale möglich (``trading = "bnh"``).
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 730
+        d = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n)})
+        d["Welt"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d["Gold"] = 50 * np.cumprod(1 + rng.normal(1e-4, 0.008, n))
+        w = simlev.wrapper_config(simlev.create_strategy(Welt=simlev.asset_config(asset_class="etf", share=0.7),
+                                                        Gold=simlev.asset_config(asset_class="etc", share=0.3)),
+                                  rebalance=simlev.rebalance_plan(unit="quarter"),
+                                  costs=simlev.funds_costs(fee=0.95, performance_fee=10))
+        s = simlev.create_strategy(Zertifikat=simlev.asset_config(asset_class="certificate", spread=0.5, wrapper=w))
+        r = simlev.simulation(d, s, tax=simlev.tax_profile(church_tax=8), liquidate=True)
+        print(r["tax_report"]["total_taxes_paid"])
     """
     if isinstance(costs, _FundsCostsDefault):
         costs = funds_costs()
@@ -169,7 +220,7 @@ class _NavAttrs(dict):
     """``attrs`` eines :class:`SimLevWrapperNav` (``inner``, ``wrapper``). pandas gibt ``attrs`` bei jeder Auswahl
     (Zeilen, Spalten, ``head``, ``query``, ``copy`` …) per ``copy.deepcopy`` an das Ergebnis weiter; hier ergibt
     das ein leeres ``dict``: Eine Auswahl ist eine gewöhnliche Tabelle ohne Attribute (R: ``[.SimLevWrapperNav``,
-    Etappe 8.0), und das innere Ergebnis wird nicht mehr bei jeder Spaltenauswahl tief kopiert."""
+    seit 0.10.0), und das innere Ergebnis wird nicht mehr bei jeder Spaltenauswahl tief kopiert."""
 
     __slots__ = ()
 
@@ -395,17 +446,91 @@ def _nav_raw(x: SimLevWrapperNav) -> tuple:
 
 
 def wrapper_nav(data: Any, wrapper: Any, *, splits: Any = None) -> SimLevWrapperNav:
-    """Anteilswert eines Fonds-Wrappers (R: ``wrapper_nav()``, Etappe 6.5c).
+    """Anteilswert eines Fonds-Wrappers.
+
+    Rechnet den täglichen Anteilswert eines Wrappers aus ``wrapper_config``: innere Bruttorechnung mit
+    ``simulation``, dann Verwaltungsgebühr je Kalendertag und Performancegebühr gegen die High-Water-Mark.
+    ``simulation()`` verwendet dieselbe Rechnung für Wrapper-Assets; ``wrapper_nav()`` dient für eigene
+    Auswertungen und Grafiken, als Renditequelle für ``withdrawal_simulation`` (``x = wrapper_nav(...)``) und zur
+    Prüfung.
 
     Args:
-        data: ``DataFrame`` mit ``date`` und den Kursspalten der inneren Strategie (unsortiert wird nach Datum
-            sortiert; ``attrs["filled"]`` aus :func:`simlev.series_align` geht an die innere Rechnung).
-        wrapper: :class:`SimLevWrapperConfig` aus :func:`wrapper_config`.
-        splits: ``None`` oder :func:`simlev.split_rule` (für die inneren Spalten).
+        data: ``data.frame`` mit Spalte ``date`` und den Kursspalten (und ggf. Signal- und Ereignisspalten) der
+            inneren Strategie. ``date`` wird wie in ``simulation()`` als Datum gelesen; unsortierte Zeilen werden
+            nach Datum sortiert.
+        wrapper: Objekt aus ``wrapper_config``.
+        splits: ``None`` oder Objekt aus ``split_rule`` für die inneren Spalten (in ``simulation()`` die
+            ``splits`` des Aufrufs).
 
     Returns:
-        :class:`SimLevWrapperNav` (``date``, ``nav``, ``gross``, ``fee``, ``perf_fee``, ``perf_paid``, ``hwm``;
-        Start 100). ``print()`` zeigt Zeitraum, Kosten und Endwert.
+        Objekt der Klasse ``["SimLevWrapperNav", "data.frame"]`` mit einer Zeile je NAV-Tag:
+
+        - date: Datum.
+        - nav: Anteilswert NAV_t (Start 100).
+        - groß: Bruttowert 100 · G_t / G_0 ohne Fondskosten.
+        - fee: Verwaltungsgebühr des Tages je Anteil f_t.
+        - perf_fee: Abgegrenzte (aufgelaufene, noch nicht festgeschriebene) Performancegebühr je Anteil A_t am Tag
+          t.
+        - perf_paid: Am Tag festgeschriebene Performancegebühr je Anteil (am letzten NAV-Tag eines Kalenderjahres
+          A_t, sonst 0).
+        - hwm: High-Water-Mark H nach dem Tag (nach einer Festschreibung).
+
+        Attribute: ``inner`` (das innere ``SimLevResult``) und ``wrapper`` (das ``SimLevWrapperConfig``).
+        ``print`` zeigt Zeitraum, Kosten p. a. und Endwert (mit Brutto) und liefert ``x`` unsichtbar zurück.
+
+        **Auswahl.** Jede Auswahl von Zeilen oder Spalten (``x[i, ]``, ``x[j]``, ``x[i, j]``, ``x[]``, ``head()``,
+        ``tail()``, ``subset()``) liefert einen gewöhnlichen ``data.frame`` ohne Klasse ``SimLevWrapperNav`` und
+        ohne die Attribute ``inner`` und ``wrapper``, weil das innere Ergebnis nicht mehr zum Ausschnitt passt
+        (Python: ``pandas.DataFrame`` ohne ``attrs``, Julia: ``rows()`` ohne Klasse und Attribute). Für
+        ``withdrawal_simulation`` ist ein Ausschnitt keine Renditequelle mehr:
+        ``withdrawal_simulation(withdrawal_cohorts(x[i, ], price = "nav", inflation = 2))``.
+
+    Details:
+        **1. Innere Bruttorechnung.** ``simulation(d, strategy, start_value = S, costs = sim_costs(order_fee =
+        order_fee), rebalance = rebalance, splits = splits, tax = None, fractions = True)`` mit S = ``volume``,
+        ohne ``volume`` S = 100. ``d`` ist ``data`` ab der ersten Zeile, in der mindestens eine innere Kursspalte
+        einen Wert hat. NAV-Tage sind die Zeilen von ``d``, die die innere Rechnung nicht als aufgefüllt führt; an
+        Tagen, an denen alle inneren Kurse ``NA`` sind (oder die das Attribut ``filled`` als aufgefüllt
+        kennzeichnet), gibt es keinen Anteilswert. G_t ist der Gesamtwert der inneren Rechnung am NAV-Tag t; vor
+        dem ersten NAV-Tag gilt G_0 = S. Der Paketzustand der Ordergebühren wird gesichert und, auch bei Fehlern,
+        wiederhergestellt.
+
+        **2. Verwaltungsgebühr täglich je Kalendertag.** Mit U_0 = 100: a_t = U_t-1 · G_t / G_t-1, f_t = a_t ·
+        (fee / 100 · Δ d_t / D_t), U_t = a_t - f_t. Δ d_t = Kalendertage seit dem vorigen NAV-Tag (am ersten
+        NAV-Tag seit dem ersten Tag von ``d``, in der Regel 0), D_t = 366 im Schaltjahr des Datums t, sonst 365.
+        Ein Zeitraum über den Jahreswechsel zählt mit D_t des Jahres von t. Rechenfolge: ((fee / 100) · Δ d_t) /
+        D_t, dann mal a_t.
+
+        **3. Performancegebühr (High-Water-Mark über die ganze Laufzeit).** Mit H = 100: A_t = pf / 100 * max(0,
+        U_t - H), NAV_t = U_t - A_t mit pf = ``performance_fee``. Am letzten NAV-Tag jedes Kalenderjahres wird
+        festgeschrieben: U_t := NAV_t, danach H := max(H, U_t). Am letzten NAV-Tag insgesamt wird nicht
+        festgeschrieben; die Abgrenzung steckt bereits im Anteilswert. Die Verwaltungsgebühr bemisst sich an U
+        (vor der Abgrenzung).
+
+        **Näherungen.** Die Kosten werden auf die Bruttorechnung angewandt; feste Ordergebühren beziehen sich
+        damit auf das Volumen ohne abgezogene Fondskosten. Einzahlungen der Anleger ändern das Fondsvolumen nicht.
+        Eine Ordergebühr beim Start und ein innerer Spread senken schon den ersten Anteilswert (100 · G_1 / S).
+
+        **Randfälle.** Ein einziger Datentag ergibt einen Anteilswert ohne Gebühr (die innere Rechnung warnt dann
+        wie ``simulation()`` vor nicht definierten Kennzahlen). Sind alle inneren Kurse ``NA``, fehlt eine innere
+        Spalte oder ist G_t-1 ≤ 0 bzw. G_t nicht endlich und positiv, folgt ein Fehler. Meldungen der inneren
+        Rechnung erscheinen als „Hinweis: wrapper_nav (innere Rechnung): ...“, Warnungen und Fehler als
+        „wrapper_nav (innere Rechnung): ...“. Rechtliche Einordnung der Performancegebühr: siehe
+        ``wrapper_config``.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 730
+        d = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n)})
+        d["Welt"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d["Gold"] = 50 * np.cumprod(1 + rng.normal(1e-4, 0.008, n))
+        w = simlev.wrapper_config(simlev.create_strategy(Welt=simlev.asset_config(asset_class="etf", share=0.7),
+                                                        Gold=simlev.asset_config(asset_class="etc", share=0.3)),
+                                  costs=simlev.funds_costs(fee=0.95, performance_fee=10))
+        nv = simlev.wrapper_nav(d, w)
+        print(nv["nav"].iloc[-1] / nv["gross"].iloc[-1] - 1)   # Kosten über die Laufzeit
     """
     if not _is_wrapper(wrapper):
         raise ValueError("wrapper_nav: wrapper muss ein Objekt aus wrapper_config() sein, nicht %s."

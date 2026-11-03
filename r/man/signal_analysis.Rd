@@ -103,7 +103,7 @@ als Anteil) und \code{n} (Haeufigkeiten); \code{NULL} ohne
 \code{model} ist eine Liste mit \code{coefficients} (Basis 1, z, z^2, ...
 mit z = (signal - Mittel) / Standardabweichung), \code{fitted}
 (angepasste Werte), \code{degree} und \code{basis} (\code{center},
-\code{scale}); bis Etappe 9.6b war es ein \code{lm}-Objekt mit
+\code{scale}); bis 0.10.0 war es ein \code{lm}-Objekt mit
 orthogonalen Polynomen (angepasste Werte und \eqn{R^2} sind gleich).}
 \item{\code{data}}{data.frame der Stichtage mit \code{date},
 \code{signal}, \code{forward} (Anteil), ggf. \code{signal2},

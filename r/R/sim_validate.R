@@ -8,12 +8,12 @@
 #                   .sim_build_state()             Zentralstruktur sim_mem (Feldfolge .SIM_MEM_LAYOUT)
 #                   .sim_build_calendar()          Angaben der Termine, Ereignis-Spalte, Pruefungen
 #   sim_engine.R    .sim_engine_run()              Termine, Tages-Flags und Startgewichte (core/prepare_core_impl.h;
-#                                                  E17 Stufe 2, bis dahin .sim_build_calendar(), .sim_init_weights(),
+#                                                  bis 1.3.0 .sim_build_calendar(), .sim_init_weights(),
 #                                                  .sim_build_schedule()), Tagesschleife und Abschluss des letzten
-#                                                  Jahres im C++-Kern (core/engine_core_impl.h; E17, bis 1.3.0
+#                                                  Jahres im C++-Kern (core/engine_core_impl.h; bis 1.3.0
 #                                                  .sim_make_actions(), .sim_run_days() mit .sim_day_*() und
 #                                                  .sim_close_years())
-#   sim_evaluate.R  .sim_evaluate() (Kern core/evaluate_core_impl.h, E17 Stufe 3), .sim_risk_free(),
+#   sim_evaluate.R  .sim_evaluate() (Kern core/evaluate_core_impl.h), .sim_risk_free(),
 #                   .sim_result()   Auswertung und Ergebnisobjekt
 # Die Phasen geben ihre Ergebnisse als Werte zurueck; Argumente von simulation() werden unausgewertet
 # durchgereicht und erst beim ersten Gebrauch ausgewertet (wie vorher in einem Funktionskoerper).
@@ -44,9 +44,9 @@
   invokeRestart("muffleWarning")
 }
 
-#' Prozent-Konvention fuer Spalten pruefen (R9-06)
+#' Prozent-Konvention fuer Spalten pruefen
 #'
-#' Zweck: wie die Warnung fuer Skalare (R8-04), aber fuer eine Zinsspalte (risk_free als Spaltenname,
+#' Zweck: wie die Warnung fuer Skalare, aber fuer eine Zinsspalte (risk_free als Spaltenname,
 #' base_rate_data): Warnung, wenn der Median der Werte ohne NA und ohne 0 zwischen 0 und hi liegt.
 #' Eingabe: v (Spalte), arg (Argumentname), col (Spaltenname), hi (Schwelle wie beim Skalar).
 #' Ausgabe: keine (ggf. Warnung).
@@ -63,17 +63,17 @@
   invisible(NULL)
 }
 
-#' Steuersaetze aus Abgeltungsteuer, Kirchensteuer und Guenstigerpruefung (6.5b)
+#' Steuersaetze aus Abgeltungsteuer, Kirchensteuer und Guenstigerpruefung
 #'
 #' Zweck: gemeinsamer Helfer von simulation() (.sim_check_inputs) und withdrawal_simulation(): Satz der
 #' Abgeltungsteuer mit Kirchensteuer (§ 32d Abs. 1 EStG), Umrechnung der Prozentangaben in Anteile und
 #' effektiver Satz der Guenstigerpruefung (§ 32d Abs. 6 EStG, einmal je Lauf mit dem Grenzsteuersatz aus
-#' income_rate()). Rechenfolge, Warnungen und Druck (details) wie bis 6.5b in .sim_check_inputs; Meldungen
+#' income_rate()). Rechenfolge, Warnungen und Druck (details) wie bis 1.0.0 in .sim_check_inputs; Meldungen
 #' beginnen mit who.
 #' Eingabe: rate (Abgeltungsteuer in Prozent), church_tax (Prozent oder NULL), guenstigerpruefung (logisch),
 #' marginal_rate (Grenzsteuersatz in Prozent oder NULL), include_soli (logisch), soli_rate (Prozent), who
 #' (Name des Aufrufers), details (Druck der Guenstigerpruefung), tariff_on (Tarifweg: die Guenstigerpruefung
-#' folgt im Jahresabschluss, hier nicht). Meldungen nennen die Bausteine (C19: der flache Weg entfaellt).
+#' folgt im Jahresabschluss, hier nicht). Meldungen nennen die Bausteine (der flache Weg entfaellt).
 #' Ausgabe: Liste tax_rate, marginal_tax_rate, soli_rate_income_tax (Anteile), effective_tax_rate,
 #' church_k, soli_factor_income.
 #' @keywords internal
@@ -87,7 +87,7 @@
     k <- church_tax / 100
     tax_rate <- 100 * 0.25 / (1 + 0.25 * k) * (1 + 0.055 + k)
   }
-  # R3a-06: Kirchensteuer auf die Einkommensteuer (§ 23 mit marginal_tax_rate, persoenlicher Satz der
+  # Kirchensteuer auf die Einkommensteuer (§ 23 mit marginal_tax_rate, persoenlicher Satz der
   # Guenstigerpruefung): church_tax Prozent der ESt; der Sonderausgabenabzug der KiSt (§ 10 Abs. 1
   # Nr. 4 EStG) wird bei der ESt nicht abgebildet. Die Abgeltungsteuer-Formel oben bleibt unveraendert.
   church_k <- if (!is.null(church_tax) && church_tax > 0) church_tax / 100 else 0
@@ -103,11 +103,11 @@
   # niedrigem Einkommen, ihre Kapitalerträge zum persönlichen Steuersatz zu
   # versteuern statt zur Abgeltungsteuer (25%).
   #
-  # Voraussetzung (R4-01): Die Belastung mit dem persoenlichen Satz einschliesslich Soli und KiSt
+  # Voraussetzung: Die Belastung mit dem persoenlichen Satz einschliesslich Soli und KiSt
   # muss niedriger sein als die Abgeltungsteuer einschliesslich Zuschlagsteuern.
   # 
   # Berechnung des effektiven Steuersatzes:
-  # - Bei Günstigerprüfung: marginal_tax_rate * (1 + Soli-Satz + KiSt-Satz), wenn kleiner als tax_rate (R4-01)
+  # - Bei Günstigerprüfung: marginal_tax_rate * (1 + Soli-Satz + KiSt-Satz), wenn kleiner als tax_rate
   # - Ohne Günstigerprüfung: tax_rate / 100, Standard 0.26375 (25% + 5.5% Soli)
   # ══════════════════════════════════════════════════════════════════════════
 
@@ -125,10 +125,10 @@
       )
     } else if ((personal_rate <- marginal_tax_rate *
                 ((if (include_soli_on_income_tax) (1 + soli_rate_income_tax) else 1.0) + church_k)) < tax_rate) {
-      # R4-01: § 32d Abs. 6 Satz 1 EStG: Tarif nur, wenn die Einkommensteuer EINSCHLIESSLICH
+      # § 32d Abs. 6 Satz 1 EStG: Tarif nur, wenn die Einkommensteuer EINSCHLIESSLICH
       # Zuschlagsteuern niedriger ist -> Gesamtbelastung persoenlicher Satz x (1 + Soli + KiSt)
       # gegen den effektiven Abgeltungsteuersatz (tax_rate, bei church_tax nach § 32d Abs. 1)
-      effective_tax_rate <- personal_rate   # ESt + Soli + KiSt (R3a-06)
+      effective_tax_rate <- personal_rate   # ESt + Soli + KiSt
       
       if (details) {
         cat(sprintf(
@@ -149,7 +149,7 @@
   }
   # ══════════════════════════════════════════════════════════════════════════
 
-  # F4: Soli-Faktor für ESt-Berechnungen (§ 23, Günstigerprüfung)
+  # Soli-Faktor für ESt-Berechnungen (§ 23, Günstigerprüfung)
   soli_factor_income <- if (include_soli_on_income_tax) (1 + soli_rate_income_tax) else 1.0
 
   list(tax_rate = tax_rate, marginal_tax_rate = marginal_tax_rate, soli_rate_income_tax = soli_rate_income_tax,
@@ -163,7 +163,7 @@
 #' (Guenstigerpruefung) bestimmen.
 #' Eingabe: die gleichnamigen Argumente von .simulation_flat() (tariff = tax_tariff), aus den Bausteinen von
 #' simulation() uebersetzt. Die Bausteine haben ihre Argumente schon geprueft (die Pruefungen hier entfallen,
-#' Warnungen kommen nicht doppelt), Meldungen nennen die Bausteine (C19: der flache Weg ohne Bausteine
+#' Warnungen kommen nicht doppelt), Meldungen nennen die Bausteine (der flache Weg ohne Bausteine
 #' mit eigenen Pruefungen und Meldungen ist entfallen).
 #' Ausgabe: Liste cfg mit data und strategy (geprueft, ggf. sortiert bzw. mit start), den
 #' Steuerwerten als Anteil (tax_rate, marginal_tax_rate, effective_tax_rate, soli_factor_income,
@@ -192,10 +192,10 @@
     stop(sprintf("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein (z. B. aus create_strategy()), nicht %s.",
                  if (missing(strategy)) "fehlend" else "leer (L\u00e4nge 0)"))
   }
-  if (!is.null(spread))   # R1-26: Argument bleibt fuer die Signatur (Python/Julia) erhalten
+  if (!is.null(spread))   # Argument bleibt fuer die Signatur (Python/Julia) erhalten
     warning("simulation: Das Argument 'spread' wird nicht ausgewertet; ma\u00dfgeblich ist spread je Asset (asset_config()).", call. = FALSE)
 
-  # --- Eingabepruefung der Daten (R1-13/14/15/17/22) ---
+  # --- Eingabepruefung der Daten ---
   filled_attr <- attr(data, "filled")                 # series_align(): gefuellte Werte (Matrix)
   if (!identical(class(data), "data.frame")) data <- as.data.frame(data, stringsAsFactors = FALSE)  # z. B. tibble
   if (is.null(names(strategy)) || any(names(strategy) == ""))
@@ -223,7 +223,7 @@
     if (!is.character(a$trading) || length(a$trading) != 1L || !a$trading %in% c("bnh", "signal"))
       stop(sprintf("simulation: trading %s von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\".",
                    .show_arg_s(a$trading), nm), call. = FALSE)
-    if (!is.null(a[["wrapper"]])) {   # Fonds-Wrapper (Etappe 6.5c, wrapper.R)
+    if (!is.null(a[["wrapper"]])) {   # Fonds-Wrapper (wrapper.R)
       if (!inherits(a[["wrapper"]], "SimLevWrapperConfig"))
         stop(sprintf("simulation: wrapper von Asset '%s' muss ein Objekt aus wrapper_config() sein, nicht %s.",
                      nm, paste(class(a[["wrapper"]]), collapse = "/")), call. = FALSE)
@@ -287,7 +287,7 @@
     }
   }
   # Tage ohne echten Kurs: aus series_align() (Attribut 'filled') bzw. Zeilen, in denen alle Kurse NA sind
-  # R2-03: Attribut mit anderer Zeilenzahl (z. B. nach Zeilenauswahl) ist nicht zuordenbar (traegt keine Daten)
+  # Attribut mit anderer Zeilenzahl (z. B. nach Zeilenauswahl) ist nicht zuordenbar (traegt keine Daten)
   if (!is.null(filled_attr) && (n_fa <- if (is.matrix(filled_attr)) nrow(filled_attr) else length(filled_attr)) != nrow(data)) {
     warning(sprintf(paste0("simulation: Attribut 'filled' von 'data' hat %d Zeilen, 'data' aber %d (z. B. nach Zeilenauswahl einer ",
                            "series_align()-Ausgabe); es wird ignoriert, aufgef\u00fcllte Tage gelten dann als Handelstage. ",
@@ -336,8 +336,8 @@
   }
   
   # Steuer-, Kosten-, Termin- und Split-Angaben haben die Bausteine geprueft (tax_profile(), sim_costs(),
-  # dca_plan(), rebalance_plan(), split_rule(); C19: die Pruefungen des flachen Wegs sind entfallen).
-  # A7-10: fractions (TRUE/FALSE) und risk_free (Prozent-Konvention) prueft simulation() selbst
+  # dca_plan(), rebalance_plan(), split_rule(); die Pruefungen des flachen Wegs sind entfallen).
+  # fractions (TRUE/FALSE) und risk_free (Prozent-Konvention) prueft simulation() selbst
   .show_arg <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = "")
   .frac_warn <- function(x, arg, hi = 1) {
     if (is.numeric(x) && length(x) == 1L && is.finite(x) && x > 0 && x < hi)
@@ -347,7 +347,7 @@
   if (!is.logical(fractions) || length(fractions) != 1L || is.na(fractions))
     stop(sprintf("simulation: '%s' muss TRUE oder FALSE sein, nicht %s.", "fractions", .show_arg(fractions)), call. = FALSE)
   .frac_warn(risk_free, "risk_free", hi = 0.05)
-  # R9-06: dieselbe Schwelle fuer risk_free als Spaltenname (Median der Spalte; base_rate_data: .sim_prepare_data)
+  # dieselbe Schwelle fuer risk_free als Spaltenname (Median der Spalte; base_rate_data: .sim_prepare_data)
   if (is.character(risk_free) && length(risk_free) == 1L && !is.na(risk_free) && risk_free %in% names(data))
     .frac_warn_col(data[[risk_free]], "risk_free", risk_free, hi = 0.05)
 
@@ -378,7 +378,7 @@
     isTRUE(a$asset_class == "etn_deliverable") ||
     (isTRUE(a$asset_class %in% c("etn", "etc")) && isTRUE(a$deliverable))
   }))
-  if (has_private_sale && is.null(marginal_tax_rate) && tax_mode == "person" && !tariff_on) {   # R2-07: nur wenn § 23 besteuert wird
+  if (has_private_sale && is.null(marginal_tax_rate) && tax_mode == "person" && !tariff_on) {   # nur wenn § 23 besteuert wird
     warning("simulation: Der Grenzsteuersatz ist nicht gesetzt (tax_profile(income = income_rate(marginal_rate))), die Strategie enth\u00e4lt aber Assets mit tax_regime = \"private_sale\"; ",
             "Gewinne nach Paragraf 23 EStG werden dann m\u00f6glicherweise nicht korrekt besteuert. income_rate(marginal_rate) in Prozent angeben (z. B. 42).")
   }
@@ -404,7 +404,7 @@
     ))
   }
 
-  # Steuersaetze (Kirchensteuer, Prozent -> Anteil, Guenstigerpruefung) im gemeinsamen Helfer (6.5b,
+  # Steuersaetze (Kirchensteuer, Prozent -> Anteil, Guenstigerpruefung) im gemeinsamen Helfer (seit 1.1.0
   # auch fuer withdrawal_simulation()); Rechenfolge, Warnungen und Druck wie bisher an dieser Stelle
   tr <- .tax_rates(tax_rate, church_tax, use_guenstigerpruefung, marginal_tax_rate, include_soli_on_income_tax,
                    soli_rate_income_tax, who = "simulation", details = details, tariff_on = tariff_on)

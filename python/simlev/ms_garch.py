@@ -1,4 +1,4 @@
-"""Eigene ML-Schätzung des MS-GARCH-Modells (Port von ``r/R/ms_garch.R``).
+"""Eigene ML-Schätzung des MS-GARCH-Modells (Gegenstück zu ``r/R/ms_garch.R``).
 
 Modell nach Haas, Mittnik und Paolella (2004): K Regime, je Regime ein
 GARCH(1,1)- (``"sGARCH"``) oder GJR-GARCH(1,1)-Varianzpfad
@@ -6,9 +6,9 @@ GARCH(1,1)- (``"sGARCH"``) oder GJR-GARCH(1,1)-Varianzpfad
 Normalverteilung mit Mittelwert 0; Regimewechsel als Markov-Kette.
 Likelihood über den Hamilton-Filter, Maximierung mit BFGS auf eigener
 Parametrisierung auf R^p, deterministische Startwerte (kein Zufall): volles HMM-EM
-und Rangeinteilung der Volatilität, je mit kleinem Raster. Seit Etappe 9.6b
+und Rangeinteilung der Volatilität, je mit kleinem Raster. Seit 1.0.0
 rechnet die Schätzung wie in R ganz in der C-Bibliothek slc
-(:func:`simlev._lib.ms_garch_fit`); seit 9.6c entfallen der frühere Filter-Port und die
+(:func:`simlev._lib.ms_garch_fit`); seit 1.0.0 entfallen der frühere Filter-Port und die
 Umrechnung der Parameter (``_ms_garch_unpack``/``_pack``). Genutzt von ``bootstrap._prepare_ms_info`` für
 die Verfahren ``"ms_garch"``, ``"ms_ar_garch_m"`` und ``"tvtp_ms_garch"``.
 
@@ -76,7 +76,7 @@ def _ms_garch_stat(P):
     Potenziteration wie für ``pi_`` in ``.prepare_ms_info``: Start
     gleichverteilt, höchstens 1000 Schritte, Abbruch bei maximaler Änderung
     < 1e-12. ``pi_ %m% P`` in der Reihenfolge des slc-Matrixprodukts (je Element ab 0,0
-    aufsteigend summiert, Entwurf B.6; bei nicht endlichen Werten ``_lib.matmul``).
+    aufsteigend summiert; bei nicht endlichen Werten ``_lib.matmul``).
     """
     P = np.asarray(P, dtype=np.float64)
     K = P.shape[0]
@@ -85,7 +85,7 @@ def _ms_garch_stat(P):
     Pc = [[float(P[i, j]) for i in range(K)] for j in range(K)]   # Spalten
     start = 0
     if K == 2 and fin:
-        # Etappe 7.1: dieselbe Rechnung für zwei Regime mit lokalen Variablen
+        # dieselbe Rechnung für zwei Regime mit lokalen Variablen
         # (s = 0.0 + P[0, j] * pi[0], dann s + P[1, j] * pi[1]); wird pi nicht
         # endlich, geht es im allgemeinen Weg mit demselben Schritt weiter
         (c00, c01), (c10, c11) = Pc
@@ -153,10 +153,10 @@ def _ms_garch_fit(y, K, model, cores=1):
         Mischungsvarianz s2[t] = sum_k P(s_t = k | F_{t-1}) h[t, k],
         Log-Likelihood und Konvergenzcode des besten BFGS-Laufs.
 
-    Seit Etappe 9.6b wie R ganz in der C-Bibliothek slc (``_lib.ms_garch_fit``, Entwurf B.13):
+    Seit 1.0.0 wie R ganz in der C-Bibliothek slc (``_lib.ms_garch_fit``):
     Starts aus HMM-EM und Rangeinteilung, BFGS von allen Rasterpunkten beider Familien (sGARCH 12,
-    gjrGARCH seit N1 20), seit N1 mit analytischem Gradienten; GJR je Regime mit alpha + gamma >= 0,
-    also auch gamma < 0. N6: ``cores`` Threads für die Starts (Ergebnis unabhängig davon; Standard 1).
+    gjrGARCH 20), mit analytischem Gradienten; GJR je Regime mit alpha + gamma >= 0,
+    also auch gamma < 0. ``cores`` Threads für die Starts (Ergebnis unabhängig davon; Standard 1).
     """
     return _slm.ms_garch_fit(y, K, model, cores)
 

@@ -12,7 +12,17 @@ Golden-Master-Fälle der Engine bitgleich; die aktuelle Fassung 0.5.0
 korrigiert Rechenfehler der Engine, setzt die Besteuerung nach geltendem
 Recht um, gibt alle Ausgaben auf Deutsch aus und erzeugt alle 105 Fälle
 neu (siehe unten). Python 0.5.0 und Julia 0.5.0 sind zu allen Fällen
-bitgleich (seit Etappe 6.5c 90; die 15 Fälle des entfernten Fondsmodus entfielen).
+bitgleich (seit 0.10.0 90; die 15 Fälle des entfernten Fondsmodus entfielen).
+
+## SimLev 1.4.2
+
+Patch-Update (R/Python/Julia). Ergebnisse, Ausgaben und Meldungen bleiben unverändert; neu sind Dokumentation, Hilfe, Beispieldaten und die Gliederung der Tests.
+
+- Dokumentation: Das Haupt-README ist eine Fallstudie (Aktien, Anleihen, Rohstoffe und Managed Futures für einen deutschen Privatanleger, Ansparphase und Entnahme) mit Code in R, Python und Julia und echten, in allen drei Sprachen gleichen Ausgaben, dazu ein Haftungsausschluss. Je Sprache ein Tutorial mit denselben Kapiteln (R: Vignette, Python und Julia: examples/tutorial.md); das frühere R-Tutorial inst/tutorial geht darin auf. Kurze Sprach-READMEs, DEVELOPING je Sprache, Zuordnung der Funktionen in STRUKTUR.md und Quellen in LITERATUR.md; der Ordner docs entfällt, die Bilder liegen bei den Paketen. Alle drei Sprachen sind gleichrangig beschrieben: Die Rechenkerne liegen als gemeinsamer C/C++-Code in core/, die Sprachpakete bilden die Schnittstelle darum.
+- Beispieldaten: anlageklassen.csv (synthetische Tageskurse für Aktien, Anleihen, Rohstoffe und Managed Futures 2005–2024; Rendite, Volatilität und Korrelation nach Abrams, Bhaduri und Flores 2012) mit Erzeugerskript, in allen drei Paketen.
+- Hilfe: Alle 116 Exporte haben in R, Python und Julia Beschreibung, Argumente, Rückgabe und ein lauffähiges Beispiel; Python- und Julia-Docstrings inhaltlich gleich der R-Hilfe. Berichtigt: withdrawal_simulation ohne das nicht vorhandene Argument sparer_pauschbetrag, die alten Einzelargumente galten bis 0.8.0, DCC-Schätzung mit BFGS (Nelder-Mead nur als Rückfall).
+- Quelltext: Kommentare überarbeitet, ohne interne Arbeitsstände; Maschinencode der C/C++-Kerne unverändert.
+- Tests (Ordner tests des Repositorys, nicht Teil der Pakete): nach Zweck gegliedert in methodik (Steuerrecht, Tarif, Engine, Entnahme, Kennzahlen, C-Bibliothek; Erwartung aus Gesetz, Handrechnung, Formel bzw. Testvektoren), gleichlauf (alle drei Sprachen rechnen bitgleich), fehler, ausgabe, schnittstelle und werkzeuge, mit einem Einstieg je Sprache und tests/run.sh. Aus 1.364 Referenzfällen werden 347 Tests: Szenarien, die mehrere Ergebnisse zugleich prüfen (in sechs Bereichen als Aufrufketten), und Tabellen „Eingabe → Meldung“ bzw. „Eingabe → Wert“; 5,2 statt 6,5 MB, Zeilenabdeckung in R, C/C++, Python und Julia unverändert, alle bisher geprüften Meldungen bleiben geprüft. Die methodik-Tests stehen als Tabellen mit Quelle je Zeile; die erwarteten Werte sind unverändert.
 
 ## SimLev 1.4.1
 
@@ -158,15 +168,15 @@ Ergebniselemente (z. B. `fees_paid`, `harvest_days`, `twr_index`,
 `full_years`, `initial`) sowie klare Fehlermeldungen und Warnungen bei
 ungültigen Eingaben. Alle Meldungen und Ausgaben sind deutsch.
 
-### Etappe 9 – SimLev eigenständig
+### SimLev eigenständig (1.0.0)
 
-Entscheidung des Nutzers vom 27.10.2026: SimLev nutzt keine Funktionen aus
+SimLev nutzt keine Funktionen aus
 fremden Paketen mehr. Zufall und Numerik rechnet eine eigene C-Bibliothek
 (kanonisch in `core/`, Kopien in `src/`, `python/src/core/`,
 `julia/deps/core/`), die R, Python und Julia gemeinsam nutzen. Die Pakete
 evd, imputeTS, stinepack, rugarch, Rsolnp, truncnorm, MSGARCH und numDeriv
 erscheinen nur noch als Literatur bzw. Prüforakel (Abschnitt „Literatur“
-der Haupt-README); `inst/COPYRIGHTS` und das Feld `Copyright:` in
+[`LITERATUR.md`](../LITERATUR.md)); `inst/COPYRIGHTS` und das Feld `Copyright:` in
 `DESCRIPTION` nennen keine fremden Autoren mehr. Die Quellen jedes Kerns
 stehen im Kopf seiner Datei und im Abschnitt „Literatur“.
 
@@ -265,7 +275,7 @@ Weiter genutzt werden Grundfunktionen von R wie `quantile`, `sort`, `order`,
   ändern sich nur im Rahmen der Rechengenauigkeit.
 
 **Laufzeit** (`tools/bench`, Median in Sekunden, ein Kern, vor und nach dem
-Einbau der eigenen Kerne in Etappe 9.6b, beide mit dem eigenen Zufall):
+Einbau der eigenen Kerne (1.0.0), beide mit dem eigenen Zufall):
 
 | Aufgabe | R vorher | R jetzt | Python vorher | Python jetzt | Julia vorher | Julia jetzt |
 |---|---|---|---|---|---|---|
@@ -301,24 +311,24 @@ führt sie aus). Bis dahin prüft die Gleichlaufprüfung
 von 4.260 Modul-Fällen und 1.182 von 1.182 Engine-Fällen in Python und Julia
 bitgleich zu R.
 
-### Eigene numerische Kerne (Etappe 9.6b)
+### Eigene numerische Kerne (1.0.0)
 
-- **Verteilungen, lineare Algebra, Optimierer und Modelle aus der C-Bibliothek von SimLev statt R's stats bzw. der übernommenen Pakete:** `pnorm`/`qnorm`/`dnorm`/`pt`/`qt`/`lgamma`/`plogis`/`qlogis`, `chol`/`solve`/`backsolve`/`determinant`/`eigen`, `%*%`/`crossprod`/`tcrossprod` (internes `%m%`, je Element aufsteigend summiert), `qr`/`lm`/`lm.fit`/`poly`/`glm`, `t.test` (eigener Welch-Test), `density` (eigene Gauß-Kerndichte, nur Grafik) und `optim` (BFGS, projizierter BFGS, Nelder-Mead) rechnen in SimLev selbst. **Geänderte Ergebnisse:** Die GARCH-Stufe von `bootstrap()` (`"garch"`, `"gjr_garch"`, Kopplung) und `dependence_dcc()`/`dependence_analysis()` schätzt per eigener ML (GJR mit γ ≥ 0) statt mit rugarch und meldet den Weg `"ml"` statt `"rugarch"`/`"optim"` (Warnung „GARCH: ML-Schätzung fehlgeschlagen, verwende Moment-Schätzer“); `dependence_dcc()` ist deterministisch (kein gosolnp-Rückfall mit Uhrzeit-Seed mehr); der GPD-Fit (`"evt"`) nutzt eine eigene ML statt evd; MS-GARCH läuft ganz in C mit zwölf Starts; `backcast_fit(model = "spline")` nutzt einen Reinsch-Glättungsspline mit Knoten an allen Stützstellen (`regression$fit` ist ein SimLev-Splineobjekt), `"stine"` eine eigene Stineman-Interpolation; `signal_analysis()$fit$model` ist kein `lm`-Objekt mehr (Koeffizienten, angepasste Werte, Grad, Basis; angepasste Werte und R² unverändert); `sharpe_haircut()` rechnet die Rücktransformation über das obere Normalende. Alle übrigen Ergebnisse ändern sich nur im Rahmen der Rechengenauigkeit; R, Python und Julia bleiben bitgleich. Zusammenfassung oben (Etappe 9).
+- **Verteilungen, lineare Algebra, Optimierer und Modelle aus der C-Bibliothek von SimLev statt R's stats bzw. der übernommenen Pakete:** `pnorm`/`qnorm`/`dnorm`/`pt`/`qt`/`lgamma`/`plogis`/`qlogis`, `chol`/`solve`/`backsolve`/`determinant`/`eigen`, `%*%`/`crossprod`/`tcrossprod` (internes `%m%`, je Element aufsteigend summiert), `qr`/`lm`/`lm.fit`/`poly`/`glm`, `t.test` (eigener Welch-Test), `density` (eigene Gauß-Kerndichte, nur Grafik) und `optim` (BFGS, projizierter BFGS, Nelder-Mead) rechnen in SimLev selbst. **Geänderte Ergebnisse:** Die GARCH-Stufe von `bootstrap()` (`"garch"`, `"gjr_garch"`, Kopplung) und `dependence_dcc()`/`dependence_analysis()` schätzt per eigener ML (GJR mit γ ≥ 0) statt mit rugarch und meldet den Weg `"ml"` statt `"rugarch"`/`"optim"` (Warnung „GARCH: ML-Schätzung fehlgeschlagen, verwende Moment-Schätzer“); `dependence_dcc()` ist deterministisch (kein gosolnp-Rückfall mit Uhrzeit-Seed mehr); der GPD-Fit (`"evt"`) nutzt eine eigene ML statt evd; MS-GARCH läuft ganz in C mit zwölf Starts; `backcast_fit(model = "spline")` nutzt einen Reinsch-Glättungsspline mit Knoten an allen Stützstellen (`regression$fit` ist ein SimLev-Splineobjekt), `"stine"` eine eigene Stineman-Interpolation; `signal_analysis()$fit$model` ist kein `lm`-Objekt mehr (Koeffizienten, angepasste Werte, Grad, Basis; angepasste Werte und R² unverändert); `sharpe_haircut()` rechnet die Rücktransformation über das obere Normalende. Alle übrigen Ergebnisse ändern sich nur im Rahmen der Rechengenauigkeit; R, Python und Julia bleiben bitgleich. Zusammenfassung oben („SimLev eigenständig“).
 
-### Eigener Zufall (Etappe 9.6a)
+### Eigener Zufall (1.0.0)
 
-- **Zufall von SimLev statt R's Zufallszahlen:** Alle zufälligen Funktionen (`bootstrap()`, `bootstrap_study()`, `param_bootstrap()`, `param_search()`, `sharpe_test()`, `overfit_reality_check()`, `dependence_analysis()`, `tail_regression()`, `portfolio_optimize()`, `portfolio_rolling()`, `bootstrap_pooled()`, `planning_goal()`, `scenario_copula()`, `regime_hmm()`, `withdrawal_horizon()`/`withdrawal_simulation()`/`withdrawal_max_rate()`) ziehen aus dem Zufallszustand von SimLev (xoshiro256**, neu `simlev_seed()`); `seed = NULL` zieht genau einmal einen Startwert daraus, `set.seed()` wirkt nicht mehr. Zufällige Ergebnisse ändern sich daher (gleiche Verteilung), sind aber in R, Python und Julia bitgleich und unabhängig von `cores`; `withdrawal_max_rate()` nutzt bei `horizon$seed = NULL` in allen Suchschritten dieselben Laufzeiten. Zusammenfassung oben (Etappe 9).
+- **Zufall von SimLev statt R's Zufallszahlen:** Alle zufälligen Funktionen (`bootstrap()`, `bootstrap_study()`, `param_bootstrap()`, `param_search()`, `sharpe_test()`, `overfit_reality_check()`, `dependence_analysis()`, `tail_regression()`, `portfolio_optimize()`, `portfolio_rolling()`, `bootstrap_pooled()`, `planning_goal()`, `scenario_copula()`, `regime_hmm()`, `withdrawal_horizon()`/`withdrawal_simulation()`/`withdrawal_max_rate()`) ziehen aus dem Zufallszustand von SimLev (xoshiro256**, neu `simlev_seed()`); `seed = NULL` zieht genau einmal einen Startwert daraus, `set.seed()` wirkt nicht mehr. Zufällige Ergebnisse ändern sich daher (gleiche Verteilung), sind aber in R, Python und Julia bitgleich und unabhängig von `cores`; `withdrawal_max_rate()` nutzt bei `horizon$seed = NULL` in allen Suchschritten dieselben Laufzeiten. Zusammenfassung oben („SimLev eigenständig“).
 
-### Restpunkte Fonds-Wrapper (Etappe 8.0)
+### Restpunkte Fonds-Wrapper (0.10.0)
 
 - **Auswahl aus `wrapper_nav()`:** Neue Methode `[.SimLevWrapperNav`: Jede Auswahl von Zeilen oder Spalten (`x[i, ]`, `x[j]`, `x[]`, über `[` auch `head()`, `tail()`, `subset()`) liefert einen gewöhnlichen `data.frame` ohne Klasse `SimLevWrapperNav` und ohne die Attribute `inner` und `wrapper` (bisher behielt eine Zeilenauswahl Klasse und Attribute, eine Spaltenauswahl die Klasse), weil das innere Ergebnis nicht mehr zum Ausschnitt passt. Python und Julia ebenso. Das ganze Objekt bleibt unverändert nutzbar, auch in `withdrawal_simulation(x = …)`.
 - **`withdrawal_simulation()`:** Eine Tabelle mit Spalte `date` (z. B. ein Ausschnitt aus `wrapper_nav()`) als `x` ergibt jetzt einen klaren Fehler mit Hinweis auf `withdrawal_cohorts(x, price = …)` (bisher „x muss eine numerische Matrix …“, in Python ohne Fehler mit unsinnigen Zahlen).
 - **`strategy_from_weights()`/`portfolio_template()` mit `wrapper`:** Ein `SimLevWrapperConfig` gilt für alle Assets, eine benannte Liste solcher Objekte je Asset (Assets ohne Eintrag ohne Wrapper; in `portfolio_template()` gelten die Namen nach `map`). Unbekannte Namen, andere Elemente, eine Liste ohne Namen und `wrapper` mit `trading = "signal"` (Meldung nennt das Asset) sind ein Fehler. Bisher wurde ein `SimLevWrapperConfig` als benannte Liste je Asset zerlegt (R: Fehler von `asset_config()`, Python und Julia: Wrapper stillschweigend weggelassen).
 - Neue Referenzfälle: `wrapper` 9 (jetzt 81), `data_prep` 15 (jetzt 175); alle bisherigen Fälle byte-gleich.
 
-### Fonds-Wrapper (Etappe 6.5c, Teil C)
+### Fonds-Wrapper (0.10.0)
 
-Neu: `wrapper_config()`, `wrapper_nav()` und das Argument `asset_config(wrapper = )` (Entscheidungen E1–E9 vom 26.10.2026). Ein Fonds-Wrapper (Zertifikat oder Fonds über eine innere Strategie) ist **ein** Asset der Strategie; `simulation()` rechnet vor der Engine seinen Anteilswert aus den inneren Spalten von `data` und handelt und besteuert ihn wie ein Einzelpapier. Alle bisherigen Referenzfälle rechnen unverändert; neu ist das Modul `golden/modules/wrapper` (72 Fälle; Python und Julia bitgleich seit Teil D).
+Neu: `wrapper_config()`, `wrapper_nav()` und das Argument `asset_config(wrapper = )`. Ein Fonds-Wrapper (Zertifikat oder Fonds über eine innere Strategie) ist **ein** Asset der Strategie; `simulation()` rechnet vor der Engine seinen Anteilswert aus den inneren Spalten von `data` und handelt und besteuert ihn wie ein Einzelpapier. Alle bisherigen Referenzfälle rechnen unverändert; neu ist das Modul `golden/modules/wrapper` (72 Fälle; Python und Julia bitgleich seit Teil D).
 
 - **`wrapper_config(strategy, rebalance, costs = funds_costs(), order_fee, volume)`:** innere Strategie (Signale erlaubt, keine verschachtelten Wrapper), inneres Umschichten, Kosten, Ordergebühr der inneren Käufe und Verkäufe (Format wie `sim_costs()`) und Fondsvolumen in EUR (Pflicht bei festen Beträgen `fixed`, `min`, `max`; die innere Rechnung startet dann mit diesem Volumen, sonst mit 100). Innere Spreads gelten wie angegeben; Werte > 0 ergeben einen Hinweis.
 - **Anteilswert (`wrapper_nav()`):** innere Bruttorechnung ohne Steuern mit `fractions = TRUE`; Verwaltungsgebühr täglich je Kalendertag (`fee / 100 · Δd / 365` bzw. `/ 366` im Schaltjahr); Performancegebühr täglich gegen die High-Water-Mark abgegrenzt und am letzten Datentag jedes Kalenderjahres festgeschrieben (ESMA-Leitlinien zu Performancegebühren für OGAW; bei Zertifikaten gelten die Emissionsbedingungen). Ergebnis `SimLevWrapperNav` mit `date`, `nav`, `gross`, `fee`, `perf_fee` (abgegrenzt), `perf_paid` (festgeschrieben) und `hwm`, inneres Ergebnis als Attribut `inner`; Druck mit Zeitraum, Kosten und Endwert. Auch als Renditequelle `withdrawal_simulation(x = wrapper_nav(...))`.
@@ -327,20 +337,20 @@ Neu: `wrapper_config()`, `wrapper_nav()` und das Argument `asset_config(wrapper 
 - **Aufrufer:** `bootstrap_study()`, `param_search()` (der `builder` kann den Wrapper bauen), `param_bootstrap()`, `sensitivity_*()` und `overfit_*()` gehen über `simulation()` und rechnen den Anteilswert je Pfad bzw. Lauf neu; Bootstrap zieht die inneren Spalten. `planning_lumpsum_vs_dca()` nimmt als Kurs des Wrappers den Anteilswert im Fenster. `tactical_simulation()`, `strategy_from_weights()` und `portfolio_template()` bauen ihre Strategien selbst aus Spalten bzw. Gewichten (ohne Wrapper).
 - **`print(funds_costs())`** zeigt die Überschrift „Fondskosten (funds_costs)“ statt „Fondsmodus“ (Referenzfälle `engine/pr18`, `pr19`; Python und Julia gleich angepasst).
 
-### Standard-Spread 0 und alter Fondsmodus entfernt (Etappe 6.5c, Teil A und B)
+### Standard-Spread 0 und alter Fondsmodus entfernt (0.10.0)
 
-Entscheidung des Nutzers vom 26.10.2026; die Schnittstelle ist neu eingefroren (`tools/api_snapshot/CHANGES.md`).
+Die Schnittstelle ist neu eingefroren (`tools/api_snapshot/CHANGES.md`).
 
 - **Standard-Spread jetzt 0:** `asset_config(spread = 0)` statt `0.1`; wer Spreads abbilden will, gibt sie an. Ausdrücklich gesetzte Werte bleiben. Ohne Angabe rechnen damit `asset_config()`, Listen an `create_strategy()`, `strategy_from_weights()`, `portfolio_template()`, die `asset_args` von `tactical_simulation()` und die Standardstrategie von `sensitivity_leverage()` ohne Spread (bisher 0,1 %). Die Referenzfälle bleiben gleich: Ihre Generatoren schreiben `spread = 0.1` jetzt aus.
 - **Alter Fondsmodus entfernt:** `simulation()` hat kein Argument `funds` mehr; `simulation(..., funds = funds_costs())` ergibt den üblichen Fehler für ein unbekanntes Argument (`unused argument (funds = funds_costs())`), ohne Sonderbehandlung. Entfallen sind der Engine-Weg `tax_mode = "funds"` (Fondskosten am 31.12. und anteilig am letzten Tag mit Teilverkauf, Performancegebühr gegen den Höchststand des Depots, Steuer auf den Gesamtgewinn bei Liquidation) sowie der Baustein `funds` in `sim_args`, Rastern und Suchräumen (Pfade `"funds.*"`); die flachen Namen `funds_fee` und `bonus_fee` sind jetzt unbekannte Argumente. Die geteilten C/C++-Kerne enthielten keinen Fondscode.
-- **Umstellung:** Nachfolger ist der Fonds-Wrapper `wrapper_config()` (siehe oben, Etappe 6.5c Teil C) mit `funds_costs()` als Kostenbaustein: Der Wrapper wird als eigene Kursreihe (Anteilswert) gerechnet und außen wie ein Einzelpapier gehandelt und besteuert. Unterschiede zum alten Modus: Die Fondskosten werden täglich vom Anteilswert abgezogen (bisher am 31.12. aus der Summe der Tageswerte bzw. anteilig am letzten Tag), und die Performancegebühr bemisst sich am Höchststand je Anteil (bisher am Höchststand des Depots, der mit jeder Einzahlung stieg). `funds_costs()` bleibt mit Prüfung und Druckausgabe exportiert; `simulation()` nimmt es nicht an.
-- **Referenzfälle:** Entfernt sind die 39 Referenzfälle des Fondsmodus: 13 in `golden/cases` (`f07_funds_liq`, `f08_funds_1231`, `f28_details_split_funds`, `r018`, `r035`, `r052`, `r086`, `r171`, `r222`, `r358`, `r443`, `r460`, `r477`), 2 in `golden/extra` (`x02_30y_funds_split_int`, `x16_funds_fee_high`) und 24 im Modul `engine` (`bk01`, `bk18`, `bk19`, `ch12`, `fee05`, `fu01`–`fu11`, `fu14`, `fu16`, `gp05`, `hv15`, `zz02`, `zz08`, `zz13`, `zz20`); Engine-Fälle jetzt 90 (55 + 35), Modul-Fälle 4.659. Alle übrigen Fälle rechnen unverändert (Nachweis und Liste in [`golden/README.md`](../golden/README.md)); acht Fehlerfälle in `bootstrap`, `param_search` und `sensitivity` nennen `funds` nicht mehr in der Liste der Bausteine.
+- **Umstellung:** Nachfolger ist der Fonds-Wrapper `wrapper_config()` (siehe oben) mit `funds_costs()` als Kostenbaustein: Der Wrapper wird als eigene Kursreihe (Anteilswert) gerechnet und außen wie ein Einzelpapier gehandelt und besteuert. Unterschiede zum alten Modus: Die Fondskosten werden täglich vom Anteilswert abgezogen (bisher am 31.12. aus der Summe der Tageswerte bzw. anteilig am letzten Tag), und die Performancegebühr bemisst sich am Höchststand je Anteil (bisher am Höchststand des Depots, der mit jeder Einzahlung stieg). `funds_costs()` bleibt mit Prüfung und Druckausgabe exportiert; `simulation()` nimmt es nicht an.
+- **Referenzfälle:** Entfernt sind die 39 Referenzfälle des Fondsmodus: 13 in `golden/cases` (`f07_funds_liq`, `f08_funds_1231`, `f28_details_split_funds`, `r018`, `r035`, `r052`, `r086`, `r171`, `r222`, `r358`, `r443`, `r460`, `r477`), 2 in `golden/extra` (`x02_30y_funds_split_int`, `x16_funds_fee_high`) und 24 im Modul `engine` (`bk01`, `bk18`, `bk19`, `ch12`, `fee05`, `fu01`–`fu11`, `fu14`, `fu16`, `gp05`, `hv15`, `zz02`, `zz08`, `zz13`, `zz20`); Engine-Fälle jetzt 90 (55 + 35), Modul-Fälle 4.659. Alle übrigen Fälle rechnen unverändert (Nachweis und Liste in `golden/README.md`, im Repository bis 1.4.0); acht Fehlerfälle in `bootstrap`, `param_search` und `sensitivity` nennen `funds` nicht mehr in der Liste der Bausteine.
 
-### Eingefrorene Schnittstelle (Etappe 6.6)
+### Eingefrorene Schnittstelle (0.9.0)
 
 Die Schnittstelle 0.5.0 ist in `tools/api_snapshot/frozen/r.json` festgehalten und wird von `tests/testthat/test-api-frozen.R` und `tools/api_snapshot/run.sh --check` geprüft; Änderungen nur über `run.sh --freeze` mit Eintrag in `tools/api_snapshot/CHANGES.md`.
 
-### Umbenennungen (Etappe 6)
+### Umbenennungen (0.9.0)
 
 Mechanisch umbenannt mit `tools/rename.py` nach `tools/rename_map.tsv`; die Rechnung ist unverändert (Nachweis über die Referenzfälle). Die alten Namen gibt es nicht mehr.
 
@@ -410,22 +420,22 @@ Mechanisch umbenannt mit `tools/rename.py` nach `tools/rename_map.tsv`; die Rech
 
 Interne Helfer der Engine (nicht exportiert) folgen dem Namensschema: in R mit Punkt, in Python und Julia mit `_`: `apply_spread`, `calculate_buy_signal`, `calculate_fifo_price`, `calculate_fifo_vorabpauschale`, `calculate_flat_rate`, `calculate_fund_fees`, `calculate_paragraph_20_tax`, `calculate_private_sale_tax`, `calculate_sell_count`, `calculate_sell_signal`, `calculate_split_flags`, `calculate_vorabpauschale_tax`, `forward_asset_split`, `handle_year_change`, `perform_asset_split`, `perform_gain_harvest`, `perform_trade_buy`, `perform_trade_sell`, `reverse_asset_split`, `update_fifo_front`.
 
-### Aufrufer von `simulation()`, Argumentordnung (Etappe 6.4, 6.5)
+### Aufrufer von `simulation()`, Argumentordnung (0.9.0)
 
-- **Fondsmodus mit eigenen Steuern** (Korrektur zu 6.3; seit 6.5c samt Fondsmodus entfernt, siehe oben): `simulation(funds = funds_costs(...), tax = tax_profile(...))` ist wieder erlaubt; der Fondsmodus steht für einen eigenen Wrapper (etwa ein Zertifikat) mit eigenen Kosten und eigener Steuer. Aus `tax_profile()` wirken dort wie früher mit `tax_mode = "funds"` der Satz `rate` bzw. die Kirchensteuer `church_tax` (Satz nach § 32d Abs. 1 EStG) für die Steuer auf den Gesamtgewinn bei Liquidation; `harvest` und `income_tariff()` wirken nicht (Warnung), die übrigen Angaben still nicht. Ohne `tax` gilt wie bisher 26,375 %. Referenzfall `ch12` rechnet wieder wie vor 6.3.
+- **Fondsmodus mit eigenen Steuern** (Korrektur der Bausteine; seit 0.10.0 samt Fondsmodus entfernt, siehe oben): `simulation(funds = funds_costs(...), tax = tax_profile(...))` ist wieder erlaubt; der Fondsmodus steht für einen eigenen Wrapper (etwa ein Zertifikat) mit eigenen Kosten und eigener Steuer. Aus `tax_profile()` wirken dort wie früher mit `tax_mode = "funds"` der Satz `rate` bzw. die Kirchensteuer `church_tax` (Satz nach § 32d Abs. 1 EStG) für die Steuer auf den Gesamtgewinn bei Liquidation; `harvest` und `income_tariff()` wirken nicht (Warnung), die übrigen Angaben still nicht. Ohne `tax` gilt wie bisher 26,375 %. Referenzfall `ch12` rechnet wieder wie in 0.8.0.
 - **`sim_args` mit Bausteinen** in `bootstrap_study()`, `param_search()`, `param_bootstrap()`, `sensitivity_grid()`, `sensitivity_leverage()`, `sensitivity_rebalancing()`, `planning_lumpsum_vs_dca()` und den Zusatzargumenten von `tactical_simulation()`: Argumente von `simulation()`, z. B. `sim_args = list(start_value = 1000, tax = tax_profile(), dca = dca_plan(100, 1))`. Die Aufrufer gehen über `simulation()`. Alte flache Namen sind ein Fehler, der den Baustein nennt: `sensitivity_grid: dca_value gibt es nicht mehr; bitte dca = dca_plan(value = …) (Pfad "dca.value").`; unbekannte Namen ebenso (`unbekanntes Argument … für simulation()`).
-- **Pfade zu Bausteinparametern** (F1) in Rastern (`sensitivity_grid(grid = )`), Suchräumen (`param_space()` ohne `builder`), den `args` einer Spezifikation und in `sim_args`: `"dca.value"`, `"rebalance.thresh"`, `"tax.rate"`, `"tax.church_tax"`, für Teilbausteine `"tax.income.marginal_rate"`, `"tax.harvest.day"`. Ein Pfad baut den Baustein für jeden Lauf neu, Grundwerte aus dem Baustein in `sim_args` (ohne ihn die Standardwerte des Konstruktors). Ergebnisspalten heißen wie der Pfad (bisher wie das flache Argument, z. B. `balance_unit` → `rebalance.unit`). Unbekannte Pfade nennen die möglichen Bausteine und Parameter. `sensitivity_rebalancing()` setzt Frequenz, Versatz und Band über diese Pfade, die übrigen Angaben eines `rebalance_plan()` aus `sim_args` bleiben erhalten.
-- **`withdrawal_simulation(tax = tax_profile())`** (F2) statt `tax_mode`, `tax_rate`, `sparer_pauschbetrag`: ausgewertet werden `rate` und `sparer_pauschbetrag`; was die Entnahmephase nicht abbildet (`church_tax`, `private_sale_threshold`, `base_rate`, `guenstigerpruefung`, `income`, `harvest`), ist ein Fehler. `partial_exemption`, `vorabpauschale`, `cost_basis`, `loss_carryforward`, `sale_cost` und der Basiszins `base_rate` (auch als Matrix) bleiben eigene Argumente; das Ergebniselement `tax_mode` bleibt (`"person"`/`"none"`).
+- **Pfade zu Bausteinparametern** in Rastern (`sensitivity_grid(grid = )`), Suchräumen (`param_space()` ohne `builder`), den `args` einer Spezifikation und in `sim_args`: `"dca.value"`, `"rebalance.thresh"`, `"tax.rate"`, `"tax.church_tax"`, für Teilbausteine `"tax.income.marginal_rate"`, `"tax.harvest.day"`. Ein Pfad baut den Baustein für jeden Lauf neu, Grundwerte aus dem Baustein in `sim_args` (ohne ihn die Standardwerte des Konstruktors). Ergebnisspalten heißen wie der Pfad (bisher wie das flache Argument, z. B. `balance_unit` → `rebalance.unit`). Unbekannte Pfade nennen die möglichen Bausteine und Parameter. `sensitivity_rebalancing()` setzt Frequenz, Versatz und Band über diese Pfade, die übrigen Angaben eines `rebalance_plan()` aus `sim_args` bleiben erhalten.
+- **`withdrawal_simulation(tax = tax_profile())`** statt `tax_mode`, `tax_rate`, `sparer_pauschbetrag`: ausgewertet werden `rate` und `sparer_pauschbetrag`; was die Entnahmephase nicht abbildet (`church_tax`, `private_sale_threshold`, `base_rate`, `guenstigerpruefung`, `income`, `harvest`), ist ein Fehler. `partial_exemption`, `vorabpauschale`, `cost_basis`, `loss_carryforward`, `sale_cost` und der Basiszins `base_rate` (auch als Matrix) bleiben eigene Argumente; das Ergebniselement `tax_mode` bleibt (`"person"`/`"none"`).
 - **`seed`, `cores`, `progress` am Ende** (Reihenfolge `…, max_tries, chunk_size, seed, cores, progress`): `bootstrap()`, `bootstrap_study()`, `param_search()` (`keep_returns` vor `seed`, `cores`), `sensitivity_grid()` (`keep_results` vor `cores`), `sharpe_test()` (`ppy` vor `seed`).
-- **`portfolio_rolling(data, …)`** statt `x` (F4: das erste Argument ist nur eine Tabelle mit Datumsspalte).
+- **`portfolio_rolling(data, …)`** statt `x` (das erste Argument ist nur eine Tabelle mit Datumsspalte).
 
-### Bausteine für `simulation()` (Etappe 6.3)
+### Bausteine für `simulation()` (0.9.0)
 
-`simulation()` nimmt die Einstellungen jetzt als Bausteine (Anhang C):
+`simulation()` nimmt die Einstellungen jetzt als Bausteine:
 
 `simulation(data, strategy, start_value = 10000, costs = sim_costs(), dca = NULL, rebalance = NULL, splits = NULL, tax = NULL, risk_free = 0, fractions = TRUE, liquidate = FALSE, details = FALSE)`
 
-`NULL` heißt aus. Die flachen Argumente bis 6.2 gibt es nicht mehr (keine Aliasse); die Engine rechnet unverändert, alle Referenzfälle sind nach der Übersetzung bitgleich (Nachweis mit `golden/tools/blocks_from_flat.py`). Jeder Baustein prüft seine Argumente selbst und hat eine Druckausgabe.
+`NULL` heißt aus. Die flachen Argumente bis 0.8.0 gibt es nicht mehr (keine Aliasse); die Engine rechnet unverändert, alle Referenzfälle sind nach der Übersetzung bitgleich (Nachweis mit `golden/tools/blocks_from_flat.py`). Jeder Baustein prüft seine Argumente selbst und hat eine Druckausgabe.
 
 | bisher (flach) | jetzt |
 |---|---|
@@ -438,7 +448,7 @@ Interne Helfer der Engine (nicht exportiert) folgen dem Namensschema: in R mit P
 | `marginal_tax_rate`, `include_soli_on_income_tax`, `soli_rate_income_tax` | `income = income_rate(marginal_rate, soli_rate)` (`soli_rate = 0` heißt ohne Soli) |
 | `taxable_income`, `tax_tariff` | `income = income_tariff(taxable_income, tariff)` |
 | `harvest_mode = TRUE`, `harvest_day`, `harvest_loss_pot` | `harvest = harvest_rule(day, loss_pot)` |
-| `tax_mode = "funds"`, `funds_fee`, `bonus_fee` | `funds = funds_costs(fee, performance_fee)`, seit 6.5c entfernt (siehe oben) |
+| `tax_mode = "funds"`, `funds_fee`, `bonus_fee` | `funds = funds_costs(fee, performance_fee)`, seit 0.10.0 entfernt (siehe oben) |
 | `spread` (ohne Wirkung, nur Warnung) | entfällt; der Spread gilt je Asset (`asset_config(spread = )`) |
 
 Neue Regeln: `tax_profile()` mit `rate` und `church_tax` > 0 ist ein Fehler (mit Kirchensteuer gilt der Satz nach § 32d Abs. 1 EStG); `income` nimmt entweder `income_rate()` oder `income_tariff()`. Freibetrag-Ausschöpfung ohne persönliche Besteuerung lässt sich nicht mehr angeben (bisher wirkungslos); die Warnungen zu wirkungslosen flachen Argumenten entfallen. Fehlermeldungen der Prüfungen nennen den Baustein (z. B. `dca_plan: 'value' muss …`, `tax_profile: church_tax …`). Mit `sparer_pauschbetrag = 0` steht in `tax_report$sparer_pauschbetrag_annual` 0 (bisher der angegebene Betrag neben `use_sparer_pauschbetrag = FALSE`).
@@ -902,57 +912,56 @@ Stand 54b5b4f (geprüft mit der Python-Fassung).
   unverändert); unverändert in dieser Runde sind `x21_err_missing_col`,
   `x24_dup_dates`, `y0722` und `y0871`.
 
-### Review 7, Nachprüfung und deutsche Ausgaben
+### Korrekturen in Engine, Entnahme, Statistik und Grafik; deutsche Ausgaben
 
 **Engine `simulation()`**
 
-* Vorabpauschale mit dem ersten Kurs des Jahres (A7-01); Aufteilung der
-  Vorabpauschale unabhängig von der Reihenfolge der Lots (A7-04).
-* Rebalancing zum Tageskurs (A7-06); keine Doppelorders bei der Aktivierung
-  später startender Assets (A7-03) und am ersten Tag mit `balance_mode`
-  (R8-05: vorher kaufte der Handelsblock und das Rebalancing schichtete
+* Vorabpauschale mit dem ersten Kurs des Jahres; Aufteilung der
+  Vorabpauschale unabhängig von der Reihenfolge der Lots.
+* Rebalancing zum Tageskurs; keine Doppelorders bei der Aktivierung
+  später startender Assets und am ersten Tag mit `balance_mode`
+  (vorher kaufte der Handelsblock und das Rebalancing schichtete
   danach Reste um).
 * Sortino Ratio: Downside-Abweichung über alle Beobachtungen,
   `sqrt(mean(pmin(Überschussrendite, 0)^2))` (Sortino/Price, wie
-  `deep_analysis()`); vorher nur über die negativen Tage (A7-08).
-* Ein Signal-Asset mit offener Position investiert neues Geld (A7-09).
-* Liquidationstag ohne weiteren Handel (A7-02), Simulationsende am 31.12.
-  (A7-11),
-  Splits ohne Bestand (A7-07), wachsende Lot-Liste (A7-05).
-* Prüfung von Listen-Strategien (C7-01) und der Steuerargumente mit klaren
-  Warnungen (A7-10, C7-04). Warnschwellen für Anteil statt Prozent so, dass
-  realistische kleine Prozentwerte nicht warnen (R8-04): `base_rate` und
+  `deep_analysis()`); vorher nur über die negativen Tage.
+* Ein Signal-Asset mit offener Position investiert neues Geld.
+* Liquidationstag ohne weiteren Handel, Simulationsende am 31.12.,
+  Splits ohne Bestand, wachsende Lot-Liste.
+* Prüfung von Listen-Strategien und der Steuerargumente mit klaren
+  Warnungen. Warnschwellen für Anteil statt Prozent so, dass
+  realistische kleine Prozentwerte nicht warnen: `base_rate` und
   `risk_free` unter 0,05, `balance_thresh` unter 0,2, `marginal_tax_rate`
   unter 1.
 * `summary()` druckt über eine eigene print-Methode
-  (`print.summary.SimLevResult`, C7-06); Hilfeseite `asset_config` (C7-03).
+  (`print.summary.SimLevResult`); Hilfeseite `asset_config`.
 
 **Entnahme und Planung**
 
-* `withdrawal_simulation()`: Vorabpauschale der Entnahmephase im Folgejahr
-  (B7-01); am Pfadende wie `simulation()` (Steuer mit den Töpfen des
-  Folgejahres, Zwangsverkauf im ablaufenden Jahr, R8-03); bei einem
+* `withdrawal_simulation()`: Vorabpauschale der Entnahmephase im Folgejahr;
+  am Pfadende wie `simulation()` (Steuer mit den Töpfen des
+  Folgejahres, Zwangsverkauf im ablaufenden Jahr); bei einem
   Horizont H auf längeren Pfaden Endvermögen und Steuern wie auf Pfaden mit
-  H Jahren (R8-02); planmäßig vollständige Entnahme der Verzehrregeln
+  H Jahren; planmäßig vollständige Entnahme der Verzehrregeln
   (`one_over_n`, `abw`, `hebeler`, `vpw`) gilt auch mit Steuern nicht als
-  Fehlschlag (R8-08).
-* `lumpsum_vs_dca()` exakt bei konstanten Stückzahlen (B7-02);
-  `goal_optimize()` meldet die simulierte Erfolgsquote (B7-03);
-  Monatsarithmetik auf das Monatsende begrenzt (B7-04); weitere Prüfungen in
+  Fehlschlag.
+* `lumpsum_vs_dca()` exakt bei konstanten Stückzahlen;
+  `goal_optimize()` meldet die simulierte Erfolgsquote;
+  Monatsarithmetik auf das Monatsende begrenzt; weitere Prüfungen in
   `withdrawal_max_rate()`, `withdrawal_simulation()`, `withdrawal_rule()`
-  u. a. (B7-06 bis B7-08).
+  u. a..
 
 **Statistik und Grafik**
 
-* `regime_hmm()` schneller und bitgleich (B7-05); Prüfungen in
-  `portfolio_optimize()` (B7-09), `upper = Inf` bedeutet keine Obergrenze
-  (R8-07, vorher Warnung und Abbruch); gewichtete Quantile nach Typ 7
-  (B7-10); Dokumentation von `seed` (B7-11).
+* `regime_hmm()` schneller und bitgleich; Prüfungen in
+  `portfolio_optimize()`, `upper = Inf` bedeutet keine Obergrenze
+  (vorher Warnung und Abbruch); gewichtete Quantile nach Typ 7;
+  Dokumentation von `seed`.
 * `walk_forward()`: Fenster vom Startdatum aus lückenlos und ohne
-  Überlappung (R8-01).
-* `bootstrap_study()` meldet Fehler und Warnungen der Einzelläufe (C7-07).
-* `plot()`: `panels` und `colors` (C7-08); R-Farbnamen werden akzeptiert,
-  Farbwerte geprüft, Transparenz über `adjustcolor()` (R8-06); Layout,
+  Überlappung.
+* `bootstrap_study()` meldet Fehler und Warnungen der Einzelläufe.
+* `plot()`: `panels` und `colors`; R-Farbnamen werden akzeptiert,
+  Farbwerte geprüft, Transparenz über `adjustcolor()`; Layout,
   Achsen, Ränder und Farblogik überarbeitet (u. a. `style = "custom"` mit 3,
   5 oder 7 Panels ohne Warnung).
 
@@ -964,10 +973,10 @@ Stand 54b5b4f (geprüft mit der Python-Fassung).
 
 **Golden-Master-Fälle**
 
-* Review 7: 94 Fälle neu erzeugt (Sortino in allen, Rebalancing, Signale,
+* Korrekturen oben: 94 Fälle neu erzeugt (Sortino in allen, Rebalancing, Signale,
   Aktivierung, VP-Aufteilung, Splits, Jahresanfangskurs).
 * Nachprüfung und Übersetzung: 101 Fälle neu erzeugt (deutsche
-  Druckausgabe); davon 19 mit geänderten Zahlen durch R8-05 (`f06`, `f10`,
+  Druckausgabe); davon 19 mit geänderten Zahlen durch die Korrektur der Doppelorders am ersten Tag mit `balance_mode` (`f06`, `f10`,
   `f11`, `f12`, `f27`, `f33`, `r018`, `r137`, `r290`, `r341`, `r358`,
   `r375`, `r426`, `r460`, `r477`, `x04`, `x05`, `x10`, `y0731`).
 
@@ -989,47 +998,47 @@ Stand 54b5b4f (geprüft mit der Python-Fassung).
   ungenutzte lokale Variablen.
 * Feldfolge von `sim_mem` (Positionszugriff der C++-Kerne) zentral in
   `.SIM_MEM_LAYOUT` festgelegt und vor dem ersten C++-Aufruf geprüft;
-  Reihenfolge und In-place-Semantik in den C++-Dateien kommentiert (C7-11).
+  Reihenfolge und In-place-Semantik in den C++-Dateien kommentiert.
 * Korrektur: Mit `details = TRUE` und `taxable_income` brach
   `simulation()` ab („object 'tax_due' not found“), sobald ein § 23-Gewinn
   die Freigrenze erreichte. Die Steuer (ESt + Soli + KiSt des
   § 23-Zuwachses) wird im Tarifweg nun in der Jahresveranlagung
   ausgegeben; die Zahlen waren nicht betroffen.
 
-### Abschlussprüfung (Review 9)
+### Meldungen, Zahlenformat und Dashboard
 
-* R9-01 (Entnahme): Die Vorabpauschale am Pfadende wird mit den Steuertöpfen
+* Entnahme: Die Vorabpauschale am Pfadende wird mit den Steuertöpfen
   (Verlusttopf, Sparer-Pauschbetrag) nach dem Verkauf des Pfadendes
   berechnet.
-* R9-02 (Engine, `details`): Im Tarifweg heißt die Zahlung aus der
+* Engine, `details`: Im Tarifweg heißt die Zahlung aus der
   Jahresveranlagung „Veranlagung <Jahr>: Nachzahlung … (davon § 23 …,
   Kirchensteuer-Sonderausgaben …, ggf. Günstigerprüfung …)“ mit der
   Aufteilung auf die Assets, statt „§ 23 EStG: Steuer“ (auch bei Fonds ohne
   § 23-Gewinn). Nur Text, Zahlen unverändert.
-* R9-03 (Zahlenformat, Singular/Plural): Beträge in Meldungen ohne
+* Zahlenformat, Singular/Plural: Beträge in Meldungen ohne
   englisches Tausenderkomma (`%.2f`), „1 Tag“/„n Tage“, „1 Tagesrendite“,
   ohne Wert nur „–“ (statt „– Tage“); ebenso „Kursspalte … fehlt“ und
   „Simulationsjahr“ im Singular.
-* R9-04 (Startkapital): `summary()` zeigt „Startkapital“ (Argument
+* Startkapital: `summary()` zeigt „Startkapital“ (Argument
   `start_value`, neues Feld `start_capital` = `invested[1]` minus Einzahlung
   des Starttags) getrennt vom „Depotwert Starttag“ (Feld `start_value`,
   nach Kaufkosten, mit Sparrate des Starttags); das Dashboard verwendet für
   „Startkapital“ dieselbe Definition.
-* R9-05 (Dashboard): Das Korrelationspanel zeigt die rollierende
+* Dashboard: Das Korrelationspanel zeigt die rollierende
   Korrelation zu `compare`; Panels, die ohne Vergleich bzw. Daten nicht
   gezeichnet werden können, entfallen mit Warnung statt eines leeren Felds.
-* R9-06 (Prozent-Konvention): Die Warnung „wird als … % gelesen“ gilt auch
+* Prozent-Konvention: Die Warnung „wird als … % gelesen“ gilt auch
   für `risk_free` als Spaltenname und die Basiszins-Spalte
   (`base_rate_data`): maßgeblich ist der Median der Werte ohne `NA` und 0
   (Schwellen wie bei den Zahlen).
-* R9-07 (Ausgaben): Alle Meldungen und Ausgaben verwenden echte Umlaute und
+* Ausgaben: Alle Meldungen und Ausgaben verwenden echte Umlaute und
   ß (als `\u`-Escapes; der R-Code bleibt ASCII). Zahlen mit Dezimalpunkt;
   Tausendertrennung nur in Tabellen und Druckausgaben, dort mit Leerzeichen
   (z. B. „20 350“), nie mit Punkt oder Komma (`print()` der Zielplanung,
   `deep_analysis()`, Lump Sum vs. DCA, Achse des Backcast-Plots); Meldungen
   ohne Tausendertrennung.
 * Golden-Master-Fälle: Zahlen unverändert; die Druckausgabe von 17 Fällen
-  ändert sich durch R9-03 (`f18`, `f19`, `f31`, `r001`, `r035`, `r256`,
+  ändert sich durch das Zahlenformat in Meldungen (`f18`, `f19`, `f31`, `r001`, `r035`, `r256`,
   `r290`, `r477`, `x04`–`x08`, `x15`, `x16`, `x22`, `x23`).
 
 ### Portabilität und Dokumentation
@@ -1044,7 +1053,7 @@ Stand 54b5b4f (geprüft mit der Python-Fassung).
 * Neue Tests für die C++-Kerne (`tests/testthat/test-cores.R`) und für jeden
   Befund des Stresstests (`tests/testthat/test-blue-*.R`).
 
-### Nachtrag
+### Korrektur der Fondskosten-Argumente
 
 * `simulation()` brach mit „subscript out of bounds“ ab, wenn `funds_fee`
   oder `bonus_fee` außerhalb des Fondsmodus angegeben war und zugleich ein

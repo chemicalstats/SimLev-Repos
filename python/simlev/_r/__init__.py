@@ -15,9 +15,8 @@ Untermodule:
 - ``rlist``   Basisklasse für R-Listen-Ergebnisse
 - ``parallel`` Nachbildung von ``.par_lapply`` (Fork)
 - ``env``     Umgebungsschalter ``SIMLEV_*``
-- ``reftree`` Vergleich mit R-Referenzfällen
 
-Seit Etappe 9.6c entfallen die Nachbildungen von R's Zufall (``rng``), nmath, BLAS/LAPACK/LINPACK,
+Seit 1.0.0 entfallen die Nachbildungen von R's Zufall (``rng``), nmath, BLAS/LAPACK/LINPACK,
 optim/L-BFGS-B/PORT, smooth.spline, FFT und TOMS 708 sowie der Übernahmen evd, rugarch, Rsolnp,
 truncnorm, stinepack und imputeTS; SimLev rechnet diese Aufgaben mit der C-Bibliothek slc
 (:mod:`simlev._lib`).

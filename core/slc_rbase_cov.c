@@ -1,4 +1,4 @@
-/* core/slc_rbase_cov.c – cov/cor mit R-Regeln (SimLev core, N8)
+/* core/slc_rbase_cov.c – cov/cor mit R-Regeln (SimLev core)
  * Verfahren:  Kovarianz bzw. Korrelation je Spaltenpaar wie ?cor beschreibt:
  *             - pearson: Mittel je Spalte in long double (Summe/n, Korrekturdurchlauf bei endlichem
  *               Zwischenwert), als double gespeichert; Kreuzsumme Σ(x_i − m_x)(y_i − m_y) in long

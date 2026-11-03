@@ -709,17 +709,24 @@ series_splice <- function(..., dates = NULL) {
 #'   Gewichte muessen positiv sein (Assets mit Gewicht 0 weglassen), die
 #'   Namen eindeutig, und die Summe muss 1 sein (wie in [simulation()];
 #'   sonst Fehler schon hier).
-#' @param ... Weitere Argumente fuer [asset_config()] (z. B.
+#' @param ... Weitere Argumente fuer \code{\link[=asset_config]{asset_config()}} (z. B.
 #'   \code{asset_class}, \code{spread} in Prozent, \code{partial_exemption}
 #'   in Prozent). Ein unbenannter einzelner Wert gilt fuer alle Assets;
 #'   benannte Vektoren werden je Asset zugeordnet, auch mit einem einzigen
 #'   Element wie \code{partial_exemption = c(aktien = 30)} (fehlende Assets
 #'   behalten den Standardwert, Namen ohne passendes Asset werden
 #'   ignoriert). Nur ein einzelner benannter Wert, dessen Name kein Asset
-#'   ist, gilt fuer alle Assets. Ausnahme \code{wrapper}: ein
-#'   \code{SimLevWrapperConfig} gilt fuer alle Assets, eine benannte Liste
-#'   solcher Objekte je Asset (Assets ohne Eintrag ohne Wrapper); unbekannte
-#'   Namen, andere Elemente und \code{trading = "signal"} sind ein Fehler.
+#'   ist, gilt fuer alle Assets.
+#'
+#'   \code{wrapper} (Fonds-Wrapper, \code{\link{wrapper_config}}) ist eine
+#'   Ausnahme, weil ein \code{SimLevWrapperConfig} selbst eine benannte Liste
+#'   ist: Ein einzelnes \code{SimLevWrapperConfig} gilt fuer alle Assets; eine
+#'   benannte Liste solcher Objekte (Name = Asset, z. B.
+#'   \code{wrapper = list(world = w)}) gilt je Asset, Assets ohne Eintrag
+#'   bleiben ohne Wrapper. Fehler: Namen, die kein Asset sind, Elemente, die
+#'   kein \code{SimLevWrapperConfig} sind, eine Liste ohne Namen, und
+#'   \code{wrapper} zusammen mit \code{trading = "signal"} fuer dasselbe Asset
+#'   (die Meldung nennt das Asset).
 #' @return Objekt der Klasse \code{strategy} (wie [create_strategy()]).
 #' @seealso [portfolio_template()], [create_strategy()], [simulation()],
 #'   [tactical_simulation()]
@@ -729,6 +736,14 @@ series_splice <- function(..., dates = NULL) {
 #'                             asset_class = c(aktien = "etf", gold = "etc"),
 #'                             partial_exemption = c(aktien = 30, gold = 0))
 #' sapply(st, `[[`, "asset_class")
+#'
+#' # Fonds-Wrapper je Asset: 'fonds' ist ein Wrapper, 'gold' bleibt ein Einzelpapier
+#' w <- wrapper_config(create_strategy(A = asset_config("etf", share = 0.6),
+#'                                     B = asset_config("etf", share = 0.4)),
+#'                     costs = funds_costs(fee = 0.5))
+#' st <- strategy_from_weights(c(fonds = 0.8, gold = 0.2), asset_class = c(fonds = "certificate", gold = "etc"),
+#'                             wrapper = list(fonds = w))
+#' sapply(st, function(a) !is.null(a$wrapper))
 #' @export
 strategy_from_weights <- function(weights, ...) {
   if (is.null(names(weights)) || any(is.na(names(weights)) | names(weights) == "")) stop("weights muss benannt sein.")
@@ -739,7 +754,7 @@ strategy_from_weights <- function(weights, ...) {
   if (abs(sum(weights) - 1) > 1e-6)
     stop(sprintf("Gewichte summieren sich zu %.4f; simulation() verlangt die Summe 1 (Anteile, 0.6 = 60 %%).", sum(weights)))
   extra <- list(...)
-  # Fonds-Wrapper (Etappe 8.0): ein SimLevWrapperConfig gilt fuer alle Assets, eine benannte Liste je Asset
+  # Fonds-Wrapper: ein SimLevWrapperConfig gilt fuer alle Assets, eine benannte Liste je Asset
   wmap <- list()
   iw <- match("wrapper", names(extra))
   if (!is.na(iw)) {
@@ -766,7 +781,7 @@ strategy_from_weights <- function(weights, ...) {
   create_strategy(assets = assets)
 }
 
-#' Argument wrapper von strategy_from_weights() je Asset (Etappe 8.0)
+#' Argument wrapper von strategy_from_weights() je Asset
 #'
 #' Zweck: NULL oder leere Liste -> ohne Wrapper; ein SimLevWrapperConfig -> fuer alle Assets; eine benannte
 #' Liste von SimLevWrapperConfig (Name = Asset) -> je Asset, Assets ohne Eintrag ohne Wrapper. Sonst Fehler
@@ -834,24 +849,30 @@ strategy_from_weights <- function(weights, ...) {
 #'
 #' @param name Name der Vorlage als Zeichenkette (siehe Tabelle). Ohne
 #'   \code{name} (Standard \code{NULL}) liefert \code{portfolio_template()}
-#'   die Liste aller Vorlagen.
+#'   die Liste aller Vorlagen; \code{map} und \code{...} sind dann nicht
+#'   erlaubt.
 #' @param map Benannter Zeichenvektor Rolle -> Spaltenname im Datensatz,
 #'   z. B. \code{c(stocks = "msci_world")}. Standard \code{NULL}; Rollen ohne
 #'   Eintrag behalten ihren Namen und muessen dann als Spalte vorliegen.
 #'   Unbekannte Rollen und mehrere Rollen auf derselben Spalte sind ein
 #'   Fehler.
-#' @param ... Weitere Argumente fuer [strategy_from_weights()] bzw.
-#'   [asset_config()] (z. B. \code{spread}, \code{partial_exemption},
-#'   \code{wrapper}); Namen je Asset (auch einer \code{wrapper}-Liste)
-#'   beziehen sich auf die Namen nach \code{map}.
-#' @return Mit \code{name}: Objekt der Klasse \code{strategy} fuer
-#'   [simulation()]; ohne \code{name}: data.frame aller Vorlagen mit
-#'   \code{template}, \code{role} und \code{weight} (Anteil, 0.6 = 60 %).
+#' @param ... Weitere Argumente fuer \code{\link[=strategy_from_weights]{strategy_from_weights()}} bzw.
+#'   \code{\link[=asset_config]{asset_config()}} (z. B. \code{spread}, \code{partial_exemption},
+#'   \code{wrapper}). Benannte Werte je Asset, auch die Namen einer
+#'   \code{wrapper}-Liste, beziehen sich auf die Namen nach \code{map}
+#'   (Spaltennamen); Rollen ohne \code{map}-Eintrag behalten ihren Namen.
+#' @return Mit \code{name}: Objekt der Klasse \code{strategy}
+#'   fuer \code{\link[=simulation]{simulation()}}; ohne \code{name}: data.frame aller
+#'   Vorlagen mit \code{template}, \code{role} und \code{weight} (Anteil, 0.6 = 60 %).
 #' @seealso [strategy_from_weights()], [simulation()]
 #' @examples
 #' portfolio_template("permanent", map = c(stocks = "msci_world", long_bonds = "bund_10y",
 #'                                         cash = "geldmarkt", gold = "gold_eur"))
 #' head(portfolio_template())
+#' # Aktienteil als Fonds-Wrapper (Name nach map), Anleihen direkt
+#' w <- wrapper_config(create_strategy(A = asset_config("etf", share = 0.5),
+#'                                     B = asset_config("etf", share = 0.5)))
+#' portfolio_template("60_40", map = c(stocks = "aktienfonds"), wrapper = list(aktienfonds = w))
 #' @export
 portfolio_template <- function(name = NULL, map = NULL, ...) {
   if (is.null(name)) {

@@ -1,4 +1,4 @@
-"""Daten- und Portfolio-Aufbereitung (Port von ``r/R/data_prep.R``).
+"""Daten- und Portfolio-Aufbereitung (Gegenstück zu ``r/R/data_prep.R``).
 
 - :func:`series_align`        Quellen nach Datum zusammenführen, Kalender, Füllung
 - :func:`series_check`        Prüfbericht: Lücken, Ausreißer, Spikes, Splits,
@@ -192,7 +192,7 @@ def _date_str(day) -> str:
 
 
 def _strptime_ymd(s, sep="-") -> float:
-    """``as.Date(s, format = "%Y-%m-%d")`` (bzw. ``/``) für einen Text; NA = nan (N10: Kern core/slc_rbase_date.c)."""
+    """``as.Date(s, format = "%Y-%m-%d")`` (bzw. ``/``) für einen Text; NA = nan (Kern core/slc_rbase_date.c)."""
     if s is None:
         return _NAN
     z = _ext.slc_r_strptime_ymd(s, sep)
@@ -256,7 +256,7 @@ def _is_datelike(v) -> bool:
 
 
 def _to_date(x, what="date", strict=True) -> np.ndarray:
-    """Datumsangaben in Date umwandeln (Port von ``.to_date``).
+    """Datumsangaben in Date umwandeln (R: ``.to_date``).
 
     POSIX-Zeitstempel mit Zeitzone ergeben den Kalendertag in ihrer eigenen
     Zeitzone, Text und Faktoren nur die Formate "JJJJ-MM-TT" und "JJJJ/MM/TT"
@@ -344,7 +344,7 @@ def _as_date_any(x) -> np.ndarray:
 
 
 def _add_months(x, k) -> np.ndarray:
-    """Datum plus ``k`` Kalendermonate, auf das Monatsende begrenzt (Port von ``.add_months``).
+    """Datum plus ``k`` Kalendermonate, auf das Monatsende begrenzt (R: ``.add_months``).
 
     31.01. + 1 Monat = 28.02. bzw. 29.02., 29.02. + 12 Monate = 28.02.
     Vektorisiert über ``x`` und ``k`` (ganze Zahlen, auch negativ; Recycling wie R).
@@ -492,7 +492,7 @@ def _trimws(s):
 def _num_text_cols(x, exclude=()) -> list:
     """Text- oder Faktorspalten, die wie Zahlen aussehen (z. B. Kurse mit Dezimalkomma).
 
-    Port von ``.num_text_cols(x, exclude)``; liefert die Spaltennamen.
+    R: ``.num_text_cols(x, exclude)``; liefert die Spaltennamen.
     """
     if isinstance(exclude, str):
         exclude = [exclude]
@@ -511,7 +511,7 @@ def _num_text_cols(x, exclude=()) -> list:
 
 
 def _num_text_stop(x, cols, name):
-    """Fehlermeldung für Zahlen als Text (Port von ``.num_text_stop``); löst ``ValueError`` aus."""
+    """Fehlermeldung für Zahlen als Text (R: ``.num_text_stop``); löst ``ValueError`` aus."""
     if isinstance(cols, str):
         cols = [cols]
     ex = [_trimws(e) for e in _as_character_vec(np.asarray(_col(x, cols[0]), dtype=object))]
@@ -579,7 +579,7 @@ def _duplicated(v) -> np.ndarray:
 
 
 def _dp_frame(x, name):
-    """Eine Quelle in ``DataFrame(date, ...)`` mit numerischen Spalten wandeln (Port von ``.dp_frame``).
+    """Eine Quelle in ``DataFrame(date, ...)`` mit numerischen Spalten wandeln (R: ``.dp_frame``).
 
     Returns:
         ``(days, cols)``: float-Tage (sortiert, eindeutig) und ``dict`` Spaltenname -> float-Array.
@@ -648,28 +648,73 @@ def series_align(*args, calendar=("day", "union", "intersect"), range=("common",
                  fill=("locf", "linear", "none"), max_gap=math.inf, start=None, end=None, **sources):
     """Datenquellen nach Datum zusammenführen.
 
-    Führt Kursreihen aus verschiedenen Quellen auf einen gemeinsamen Kalender
-    zusammen und liefert einen ``DataFrame`` mit Spalte ``date`` und je einer
-    numerischen Spalte pro Reihe. Erwartet werden Niveaus (Kurse,
-    Indexstände), keine Renditen: Lücken werden mit dem letzten Kurs (LOCF)
-    oder linear gefüllt.
+    Einstieg für eigene Daten: Führt Kursreihen aus verschiedenen Quellen (z. B. mit ``utils::read.csv()``
+    eingelesene Dateien) auf einen gemeinsamen Kalender zusammen und liefert einen DataFrame mit Spalte ``date``
+    (Klasse Date) und je einer numerischen Spalte pro Reihe. Erwartet werden Niveaus (Kurse, Indexstände), keine
+    Renditen: Lücken werden mit dem letzten Kurs (LOCF) oder linear gefüllt, was nur für Niveaus sinnvoll ist.
+    Renditereihen vorher in einen Index umrechnen, z. B. ``100 * cumprod(1 + r)``.
 
     Args:
-        **sources: Benannte Quellen (Name = Spaltenname im Ergebnis):
-            ``DataFrame(date, value)`` mit genau einer numerischen Spalte (sie
-            wird nach dem Argument benannt), ``DataFrame(date, A, B, ...)`` mit
-            mehreren numerischen Spalten oder benannte numerische Vektoren
-            (``pandas.Series``/``dict``) mit Datumsnamen.
-        calendar: ``"day"`` (alle Kalendertage), ``"union"`` oder ``"intersect"``.
-        range: ``"common"`` (vom spätesten Start bis zum frühesten Ende) oder ``"all"``.
-        fill: ``"locf"``, ``"linear"`` oder ``"none"`` (nur innerhalb der Laufzeit).
-        max_gap: Höchste Lücke in Kalendertagen, die noch gefüllt wird.
-        start, end: Optional Beginn und Ende des Zeitraums.
+        *args: Benannte Quellen (Name = Spaltenname im Ergebnis): ``data.frame(date, value)`` mit genau einer
+            numerischen Spalte (sie wird nach dem Argument benannt), ``data.frame(date, A, B, ...)`` mit mehreren
+            numerischen Spalten (Spaltennamen bleiben erhalten und müssen über alle Quellen eindeutig sein) oder
+            benannte numerische Vektoren mit Datumsnamen (``["2024-01-02" = 100, ...]``).
+        calendar: Zeilen des Ergebnisses: ``"day"`` (Standard; alle Kalendertage), ``"union"`` (alle Daten, an
+            denen mindestens eine Quelle notiert) oder ``"intersect"`` (nur Daten, an denen alle Quellen
+            notieren).
+        range: Zeitraum: ``"common"`` (Standard; vom spätesten Start bis zum frühesten Ende aller Quellen) oder
+            ``"all"`` (gesamter Zeitraum; außerhalb der Laufzeit einer Reihe NA).
+        fill: Füllung fehlender Werte: ``"locf"`` (Standard; letzter Wert), ``"linear"`` (lineare Interpolation)
+            oder ``"none"``. Gefüllt wird nur innerhalb der Laufzeit einer Reihe (erstes bis letztes vorhandenes
+            Datum).
+        max_gap: Höchste Lücke in Kalendertagen zwischen zwei vorhandenen Werten, die noch gefüllt wird; längere
+            Lücken bleiben NA (mit Hinweis). Standard ``Inf`` = alle Lücken füllen.
+        start, end: Optional Beginn und Ende des Zeitraums (Date oder ``"JJJJ-MM-TT"``); ``None`` = durch
+            ``range`` bestimmt.
+        **sources: Benannte Quellen (Name = Spaltenname im Ergebnis): ``data.frame(date, value)`` mit genau einer
+            numerischen Spalte (sie wird nach dem Argument benannt), ``data.frame(date, A, B, ...)`` mit mehreren
+            numerischen Spalten (Spaltennamen bleiben erhalten und müssen über alle Quellen eindeutig sein) oder
+            benannte numerische Vektoren mit Datumsnamen (``["2024-01-02" = 100, ...]``).
 
     Returns:
-        ``pandas.DataFrame`` mit Spalte ``date`` und je einer Spalte pro Reihe;
-        ``df.attrs["filled"]``: ``DataFrame`` (bool, Spalten = Reihen, TRUE =
-        gefüllter Wert).
+        DataFrame mit Spalte ``date`` (Klasse Date) und je einer numerischen Spalte pro Reihe, mit Attribut
+        ``filled`` (logische Matrix Zeilen x Reihen, True = gefüllter Wert).
+
+    Details:
+        Mit ``calendar = "day"`` (Standard) entsteht ein lückenloser Kalendertags-Kalender: Wochenenden und
+        Feiertage werden gefüllt, und unterschiedliche Börsenkalender (z. B. US- und EU-Feiertage) werden ohne
+        Zeilenverlust vereinheitlicht. Das Ergebnis passt direkt in ``simulation()``, ``series_check()``,
+        ``result_analysis()`` (je Reihe als ``data.frame(date, value)``) und die Gewichts-Erzeuger wie
+        ``tactical_rules()``. ``simulation()``, ``tactical_simulation()`` und ``result_analysis()`` werten das
+        Attribut ``filled`` aus: Ein Tag, an dem keine Anlage der Strategie einen echten Kurs hat, gilt als
+        aufgefüllt (kein Handel, nicht in den Risikokennzahlen) - genau wie Kalendertage, die ``simulation()`` bei
+        Handelstagsdaten selbst per LOCF auffüllt.
+
+        Je Quelle gilt: Fehlt eine Spalte ``date``, wird die erste Spalte der Klasse Date bzw. POSIXct als Datum
+        verwendet, sonst die erste Spalte (eine numerische erste Spalte, etwa Zeilennummern ``X`` aus
+        ``utils::write.csv()``, wird als Datum abgelehnt; eine Spalte ``X`` mit den Zeilennummern 1, 2, ... wird
+        neben weiteren Wertspalten mit Hinweis ignoriert). Zeichenketten müssen das Format ``"JJJJ-MM-TT"`` haben;
+        andere Formate wie ``"31.12.2024"`` vorher mit dem Argument ``format`` von ``as.Date()`` umwandeln, siehe
+        Beispiel (nicht lesbare Daten und Texte ohne vierstellige Jahreszahl am Anfang sind ein Fehler).
+        POSIXct-Zeitstempel zählen mit dem Kalendertag in ihrer eigenen Zeitzone. Übernommen werden nur numerische
+        Spalten; andere Text-Spalten fallen weg, Text- oder Faktorspalten, die wie Zahlen aussehen (etwa Kurse mit
+        Dezimalkomma, als Text eingelesen), sind ein Fehler. Zeilen ohne Datum werden entfernt, die Zeilen nach
+        Datum sortiert, bei doppeltem Datum gilt der letzte Wert (mit Hinweis).
+
+    Hinweise (Python):
+        Führt Kursreihen aus verschiedenen Quellen auf einen gemeinsamen Kalender
+        zusammen und liefert einen ``DataFrame`` mit Spalte ``date`` und je einer
+        numerischen Spalte pro Reihe. Erwartet werden Niveaus (Kurse,
+        Indexstände), keine Renditen: Lücken werden mit dem letzten Kurs (LOCF)
+        oder linear gefüllt.
+
+    Beispiel::
+
+        import pandas as pd, simlev
+        a = pd.DataFrame({"date": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-06"]),
+                          "value": [100, 101, 102, 103]})
+        b = pd.DataFrame({"date": pd.date_range("2024-01-02", periods=6), "value": [50, 51, 52, 53, 54, 55]})
+        print(simlev.series_align(us=a, eu=b))
     """
     calendar = _match_arg(calendar, ("day", "union", "intersect"))
     rng = _match_arg(range, ("common", "all"))
@@ -820,21 +865,52 @@ def _rle_true_runs(b):
 def series_check(data, *, columns=None, jump=20, stale=10, revert=0.8):
     """Kursreihen prüfen.
 
-    Erstellt einen Prüfbericht für eigene Kursreihen: fehlende oder nicht
-    lesbare Daten, doppelte oder unsortierte Daten, Kalenderlücken über 5
-    Tage, fehlende Werte innerhalb der Laufzeit, Sprünge, wahrscheinliche
-    Splits, Spikes, Werte <= 0 und stehende Kurse. Die Daten werden nicht
-    geändert.
+    Erstellt einen Prüfbericht für eigene Kursreihen, bevor sie in ``simulation()`` oder die Analysefunktionen
+    gehen. Erwartet wird ein DataFrame mit Spalte ``date`` und Kursspalten (Niveaus, keine Renditen), z. B. aus
+    ``series_align()``. Gemeldet werden: fehlende oder nicht lesbare Daten (z. B. Leerzeile am Dateiende),
+    doppelte oder unsortierte Daten, Kalenderlücken über 5 Tage, fehlende Werte innerhalb der Laufzeit, Sprünge,
+    wahrscheinliche Splits (Sprung nahe einem ganzzahligen Verhältnis 2:1 bis 10:1 bzw. 1:2 bis 1:10, ohne
+    Rücklauf), Spikes (Sprung mit sofortigem Rücklauf, typischer Datenfehler), Werte <= 0 und stehende Kurse. Die
+    Funktion ändert die Daten nicht.
 
     Args:
-        data: ``DataFrame`` mit Spalte ``date`` und Kursspalten.
-        columns: zu prüfende Spalten (Standard ``None`` = alle numerischen außer ``date``).
-        jump: Sprungschwelle in Prozent (20 = 20 %).
-        stale: Mindestlänge in Zeilen einer Folge unveränderter Werte.
-        revert: Rücklauf am Folgetag als Anteil des Sprungs (Log-Renditen).
+        data: DataFrame mit Spalte ``date`` (Date oder ``"JJJJ-MM-TT"``) und Kursspalten.
+        columns: Zeichenvektor der zu prüfenden Spalten (Standard ``None`` = alle numerischen Spalten außer
+            ``date``).
+        jump: Sprungschwelle in Prozent (20 = 20 %): Veränderung zum vorigen vorhandenen Wert, ab der ein Sprung
+            gemeldet wird.
+        stale: Mindestlänge in Zeilen einer Folge unveränderter Werte, die als stehender Kurs gemeldet wird (bei
+            Kalendertagsdaten sind 2-4 Zeilen über Wochenenden und Feiertage normal).
+        revert: Rücklauf am Folgetag als Anteil des Sprungs (0.8 = 80 %, gemessen in Log-Renditen), ab dem ein
+            Sprung als Spike gilt.
 
     Returns:
-        :class:`SimLevDataCheck` mit ``summary``, ``issues`` und ``settings``.
+        Objekt der Klasse ``SimLevDataCheck``, eine Liste mit
+
+        - summary: DataFrame je Spalte: ``column``, ``start``, ``end`` (erstes/letztes Datum mit Wert), ``n``
+          (Werte), ``missing`` (NA innerhalb der Laufzeit), ``jumps`` (alle Sprünge über ``jump``, einschließlich
+          Spikes und Splits), ``spikes``, ``splits``, ``stale_max`` (längste Folge gleicher Werte in Zeilen),
+          ``nonpositive`` (Anzahl Werte <= 0).
+        - issues: DataFrame je Fund: ``column``, ``date``, ``type`` (Art des Funds), ``value`` (Kurs) und ``info``
+          (bei Sprüngen die Veränderung in Prozent, bei Kalenderlücken die Tage, bei stehenden Kursen die Zeilen).
+        - settings: benannter Vektor ``jump``, ``stale``, ``revert``.
+
+        ``print()`` zeigt die Zusammenfassung und die ersten ``max_issues`` (Standard 25) Funde.
+
+    Details:
+        Sprünge werden zwischen aufeinanderfolgenden vorhandenen Werten (NA übersprungen) gemessen, also je Zeile,
+        nicht je Kalendertag, und nur zwischen zwei positiven Werten; Werte <= 0 (z. B. eine Zinsreihe mit
+        negativen Sätzen) erscheinen nur als "Wert <= 0".
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 400
+        d = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n)})
+        d["A"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d.loc[299:, "A"] /= 2               # Split 2:1
+        print(simlev.series_check(d)["summary"])
     """
     data = _as_frame(data)
     if not isinstance(data, pd.DataFrame) or "date" not in _names(data):
@@ -966,21 +1042,47 @@ def series_align_macro(data, macro, *, name="macro", lag=0, lag_unit=("day", "mo
                 transform=("level", "yoy", "mom", "diff", "yoy_diff"), periods=None):
     """Makroreihen mit Veröffentlichungsverzug auf den Tageskalender legen.
 
-    Ein Wert gilt ab ``Referenzdatum + lag`` bis zum nächsten verfügbaren Wert
-    (Stufenfunktion); davor ist das Ergebnis NA. Die Umrechnung
-    (``transform``) erfolgt auf der Makroreihe selbst, vor der Zuordnung.
+    Ordnet niederfrequente Reihen (Inflation, Leitzins, Zinsstruktur, Arbeitslosigkeit, ...) einem Tageskalender
+    zu, und zwar so, wie sie zum jeweiligen Tag bekannt waren: Ein Wert für den Referenzmonat Januar, der Mitte
+    Februar veröffentlicht wird, gilt erst ab Mitte Februar. Ohne diesen Verzug enthalten bedingte Analysen und
+    Signale Informationen aus der Zukunft.
 
     Args:
-        data: Datumsvektor oder ``DataFrame`` mit Spalte ``date``.
-        macro: ``DataFrame(date, value)`` oder benannter numerischer Vektor mit Datumsnamen.
-        name: Name der neuen Spalte, wenn ``data`` ein ``DataFrame`` ist.
-        lag: Veröffentlichungsverzug in Einheiten von ``lag_unit``.
-        lag_unit: ``"day"`` oder ``"month"`` (auf das Monatsende begrenzt).
-        transform: ``"level"``, ``"yoy"``, ``"mom"``, ``"diff"`` oder ``"yoy_diff"``.
-        periods: Perioden je Jahr (``None`` = aus dem mittleren Datumsabstand).
+        data: Datumsvektor oder DataFrame mit Spalte ``date`` (z. B. aus ``series_align()``).
+        macro: ``data.frame(date, value)`` (es zählt die erste numerische Spalte; fehlt ``date``, gilt die erste
+            Spalte als Datum) oder benannter numerischer Vektor mit Datumsnamen. ``date`` ist der
+            Referenzzeitpunkt (z. B. Monatsanfang des Referenzmonats).
+        name: Name der neuen Spalte, wenn ``data`` ein DataFrame ist (Standard ``"macro"``).
+        lag: Veröffentlichungsverzug als Zahl in Einheiten von ``lag_unit`` (Standard 0 = ab dem Referenzdatum
+            bekannt).
+        lag_unit: Einheit von ``lag``: ``"day"`` (Standard; Kalendertage) oder ``"month"`` (Kalendermonate; der
+            Tag wird auf das Monatsende begrenzt, z. B. 31.01. + 1 Monat = 29.02. bzw. 28.02.).
+        transform: ``"level"`` (Standard; Wert unverändert), ``"yoy"`` (Veränderung gegen Vorjahr in Prozent, 2 =
+            2 %), ``"mom"`` (gegen Vorperiode in Prozent), ``"diff"`` (absolute Differenz zur Vorperiode, z. B.
+            Zinsänderung in Prozentpunkten) oder ``"yoy_diff"`` (absolute Differenz zum Vorjahr).
+        periods: Perioden je Jahr der Makroreihe, bestimmt den Abstand für ``"yoy"`` und ``"yoy_diff"``. Standard
+            ``None`` = aus dem mittleren Datumsabstand geschätzt (1, 4, 12, 52 oder 252, z. B. 12 für
+            Monatsdaten). Bei 1, 4 und 12 wird der Bezugswert per Datum gesucht (Vorjahr bzw. Vormonat/-quartal
+            desselben Kalenders; fehlt er, etwa bei einem fehlenden Monat, ist das Ergebnis NA), sonst per Zeile
+            (``periods`` bzw. eine Zeile zurück).
 
     Returns:
-        Bei Datumsvektor ``numpy.ndarray`` gleicher Länge, sonst ``data`` mit neuer Spalte ``name``.
+        Bei Datumsvektor ein numerischer Vektor gleicher Länge, sonst ``data`` mit neuer Spalte ``name`` (NA vor
+        dem ersten bekannten Wert).
+
+    Details:
+        Ein Wert gilt ab ``Referenzdatum + lag`` bis zum nächsten verfügbaren Wert (Stufenfunktion); davor ist das
+        Ergebnis NA. Die Umrechnung (``transform``) erfolgt auf der Makroreihe selbst, vor der Zuordnung. Das
+        Ergebnis eignet sich z. B. für Bedingungen in ``tactical_rules()`` (``"inflation > 3"``) oder als
+        Preisindex für ``series_deflate()``.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        cpi = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=36, freq="MS"), "value": 100 * 1.002 ** np.arange(36)})
+        d = pd.DataFrame({"date": pd.date_range("2021-01-01", periods=400)})
+        d = simlev.series_align_macro(d, cpi, name="inflation", lag=45, transform="yoy")
+        print(d.dropna().head(3))
     """
     lag_unit = _match_arg(lag_unit, ("day", "month"))
     transform = _match_arg(transform, ("level", "yoy", "mom", "diff", "yoy_diff"))
@@ -1053,20 +1155,32 @@ def series_align_macro(data, macro, *, name="macro", lag=0, lag_unit=("day", "mo
 def series_convert_currency(data, columns, fx, *, method=("divide", "multiply"), suffix=None):
     """Währung umrechnen.
 
-    Je Zeile wird der Kurs durch den Wechselkurs geteilt (``"divide"``) oder
-    mit ihm multipliziert (``"multiply"``).
+    Rechnet Kursspalten eines DataFrames tageweise mit einem Wechselkurs in eine andere Währung um, z. B. einen
+    US-Index in USD nach EUR, bevor er in ``simulation()`` geht. Erwartet wird ein DataFrame mit Spalte ``date``
+    und Kursniveaus (z. B. aus ``series_align()``). Je Zeile wird der Kurs durch den Wechselkurs geteilt
+    (``"divide"``) oder mit ihm multipliziert (``"multiply"``); eine Kurssicherung wird nicht abgebildet.
 
     Args:
-        data: ``DataFrame`` mit Spalte ``date`` und den Kursspalten.
-        columns: umzurechnende Spalten.
-        fx: Wechselkurs als Niveau: Spaltenname, ``DataFrame(date, value)``
-            (Stufenfunktion), benannter Vektor mit Datumsnamen, Vektor der
-            Länge ``nrow(data)`` oder Skalar. Alle Werte positiv.
-        method: ``"divide"`` oder ``"multiply"``.
-        suffix: Endung für neue Spalten; ``None`` = Spalten überschreiben.
+        data: DataFrame mit Spalte ``date`` und den Kursspalten.
+        columns: Zeichenvektor der umzurechnenden Spalten.
+        fx: Wechselkurs als Niveau: Spaltenname in ``data`` (NA per LOCF gefüllt), ``data.frame(date, value)``
+            (Stufenfunktion: Wert gilt ab seinem Datum bis zum nächsten; vor dem ersten Datum gilt der erste
+            Wert), benannter Vektor mit Datumsnamen, Vektor der Länge ``nrow(data)`` oder Skalar (fester Kurs).
+            Alle Werte müssen positiv sein.
+        method: ``"divide"`` (Standard; Wechselkurs als Fremdwährung je Zielwährung, z. B. USD-Index mit EURUSD =
+            USD je EUR in EUR umrechnen) oder ``"multiply"`` (Wechselkurs als Zielwährung je Fremdwährung).
+        suffix: Endung für neue Spalten (z. B. ``"_eur"``); Standard ``None`` = die Spalten in ``columns`` werden
+            überschrieben.
 
     Returns:
-        ``data`` (Kopie) mit umgerechneten bzw. zusätzlichen Spalten.
+        ``data`` mit umgerechneten (bzw. zusätzlichen) Spalten.
+
+    Beispiel::
+
+        import pandas as pd, simlev
+        d = pd.DataFrame({"date": pd.date_range("2024-01-01", periods=5), "sp500_usd": [4700, 4710, 4690, 4720, 4730],
+                          "eurusd": [1.10, 1.11, 1.10, 1.09, 1.10]})
+        print(simlev.series_convert_currency(d, "sp500_usd", "eurusd", suffix="_eur"))
     """
     from .backcast import _resolve_series
     method = _match_arg(method, ("divide", "multiply"))
@@ -1098,19 +1212,39 @@ def series_convert_currency(data, columns, fx, *, method=("divide", "multiply"),
 def index_total_return(price, *, dividends=None, yield_=None, withholding=0, dates=None, start=None, **kw):
     """Total-Return-Index aus Kursindex und Ausschüttungen.
 
-    r_t = (P_t + D_t (1 - w)) / P_{t-1} - 1 + y_t/100 (1-w) Δt/365.25
+    r_t = fracP_t + D_t (1 - w)P_t-1 - 1 + (y_t)/(100)(1-w)(Δ t)/(365.25) mit Ausschüttung je Anteil D_t am
+    Ex-Tag, Quellensteuer w und alternativ laufend aufgezinster Dividendenrendite y_t (Prozent p. a.). Δ t ist der
+    Abstand zur Vorzeile in Kalendertagen.
 
     Args:
-        price: Kursreihe (Niveaus); NA werden per LOCF gefüllt.
-        dividends: Ausschüttung je Anteil am Ex-Tag (0 oder NA sonst).
-        yield_: Dividendenrendite in Prozent p. a. (auch als ``yield=`` über
-            ``**{"yield": ...}`` angebbar, wie in R).
-        withholding: Quellensteuer in Prozent.
-        dates: Datumsvektor gleicher Länge für Δt (aufsteigend).
-        start: Startwert (Standard erster Kurs).
+        price: Kursreihe als numerischer Vektor (Niveaus); NA werden per LOCF gefüllt.
+        dividends: Ausschüttung je Anteil in Währungseinheiten am Ex-Tag (numerischer Vektor gleicher Länge, 0
+            oder NA an Tagen ohne Ausschüttung). Standard ``None`` = keine.
+        yield_: ``yield`` (in Python ``yield_``, da ``yield`` ein Schlüsselwort ist): Dividendenrendite in Prozent
+            p. a. (2 = 2 %; Skalar oder Vektor gleicher Länge), anteilig je Zeile aufgezinst. Standard ``None`` =
+            keine.
+        withholding: Quellensteuer in Prozent (15 = 15 %), mindert ``dividends`` und ``yield``. Standard 0.
+        dates: Datumsvektor gleicher Länge für Δ t, aufsteigend sortiert wie ``price`` (sonst Fehler); Standard
+            ``None`` = 1 Tag je Zeile (nur für ``yield`` von Bedeutung).
+        start: Startwert des Index (Standard ``None`` = erster Kurs).
+        **kw: nur ``yield`` (``**{"yield": …}``) als Schreibweise für ``yield_`` (``yield`` ist in Python ein
+            Schlüsselwort); andere Namen sind ein Fehler.
 
     Returns:
-        ``numpy.ndarray`` (Index gleicher Länge wie ``price``).
+        Numerischer Indexvektor gleicher Länge wie ``price``.
+
+    Details:
+        Wandelt einen Kursindex (Preisindex ohne Ausschüttungen) in einen Total-Return-Index um (Ausschüttungen
+        nach Quellensteuer reinvestiert). Arbeitet auf Vektoren; das Ergebnis kann direkt als neue Kursspalte in
+        den DataFrame für ``simulation()`` geschrieben werden. Werden ``dividends`` und ``yield`` zugleich
+        angegeben, wirken beide.
+
+    Beispiel::
+
+        import simlev
+        p = [100, 101, 99, 100, 102, 103]
+        div = [0, 0, 0, 2, 0, 0]             # 2 je Anteil am Ex-Tag (Zeile 4)
+        print(simlev.index_total_return(p, dividends=div, withholding=15))
     """
     from .backcast import _fill_na
     if "yield" in kw:
@@ -1143,7 +1277,7 @@ def index_total_return(price, *, dividends=None, yield_=None, withholding=0, dat
 
 
 def _cpi_level(cpi, data, dts, what):
-    """Preisindex-Niveau je Zeile; vor dem ersten bekannten Wert NA (Port von ``.cpi_level``).
+    """Preisindex-Niveau je Zeile; vor dem ersten bekannten Wert NA (R: ``.cpi_level``).
 
     Args:
         cpi: Spaltenname, ``DataFrame(date, value)``, benannter Vektor oder Vektor.
@@ -1183,16 +1317,34 @@ def _cpi_level(cpi, data, dts, what):
 def series_deflate(data, columns, cpi, *, base_date=None, suffix="_real"):
     """Reale Werte über einen Preisindex: real_t = nominal_t * cpi_b / cpi_t.
 
+    Rechnet nominale Kurs- oder Wertspalten in reale Werte (Kaufkraft des Bezugsdatums) um: real_t = nominal_t ·
+    cpi_b / cpi_t mit der Bezugszeile b. Erwartet wird ein DataFrame mit Spalte ``date`` und einem Preisindex als
+    Niveau (z. B. Verbraucherpreisindex), keine Inflationsrate. Die realen Spalten kommen als neue Spalten hinzu
+    und können wie Kursspalten in ``simulation()`` oder ``result_analysis()`` verwendet werden; für die reale
+    Auswertung fertiger Ergebnisse hat ``result_analysis()`` ein eigenes Argument ``inflation``.
+
     Args:
-        data: ``DataFrame`` mit Spalte ``date`` und den Spalten aus ``columns``.
-        columns: Spalten, die deflationiert werden.
-        cpi: Preisindex-Niveau (Spaltenname, ``DataFrame(date, value)``,
-            benannter Vektor mit Datumsnamen oder Vektor der Länge ``nrow(data)``).
-        base_date: Bezugsdatum (``None`` = erste Zeile mit bekanntem Preisindex).
-        suffix: Endung der neuen Spalten.
+        data: DataFrame mit Spalte ``date`` und den Spalten aus ``columns``.
+        columns: Zeichenvektor der Spalten, die deflationiert werden.
+        cpi: Preisindex-Niveau: Spaltenname in ``data`` (NA per LOCF gefüllt; z. B. mit ``series_align_macro()``
+            und Veröffentlichungsverzug vorbereitet), ``data.frame(date, value)`` (Stufenfunktion: Wert gilt ab
+            seinem Datum), benannter Vektor mit Datumsnamen oder Vektor der Länge ``nrow(data)``. Vor dem ersten
+            bekannten Wert wird nicht zurückgefüllt: Die realen Werte dieser Zeilen sind NA (mit Hinweis).
+        base_date: Bezugsdatum, an dem real = nominal (Date oder ``"JJJJ-MM-TT"``; verwendet wird die Zeile mit
+            dem nächstgelegenen Datum; dort muss der Preisindex bekannt sein). Standard ``None`` = erste Zeile mit
+            bekanntem Preisindex.
+        suffix: Endung für die neuen Spalten (Standard ``"_real"``).
 
     Returns:
-        ``data`` (Kopie) mit zusätzlichen realen Spalten.
+        ``data`` mit zusätzlichen realen Spalten ``paste0(columns, suffix)``.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        cpi = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=36, freq="MS"), "value": 100 * 1.003 ** np.arange(36)})
+        d = pd.DataFrame({"date": pd.date_range("2021-01-01", periods=400), "depot": 10000 * 1.0002 ** np.arange(400)})
+        d = simlev.series_align_macro(d, cpi, name="cpi", lag=1, lag_unit="month")
+        print(simlev.series_deflate(d, "depot", "cpi").tail(3))
     """
     if isinstance(columns, str):
         columns = [columns]
@@ -1226,17 +1378,51 @@ def series_deflate(data, columns, cpi, *, base_date=None, suffix="_real"):
 def series_splice(*args, dates=None, **series):
     """Reihen verketten (Proxy -> Index -> Fonds).
 
-    Verbindet mehrere Reihen renditebasiert zu einer langen Historie; die
-    erste Reihe hat Vorrang.
+    Verbindet mehrere Reihen renditebasiert zu einer langen Historie. Die erste Reihe hat Vorrang: Wo sie
+    vorliegt, wird sie unverändert übernommen. Davor (und in ihren Lücken) werden die Tagesrenditen der nächsten
+    verfügbaren Reihe verkettet, usw. Typisch: Fonds, dann zurückgerechneter Fonds aus ``backcast()``, dann ein
+    Proxy-Index.
 
     Args:
-        **series: Mindestens zwei benannte Reihen in Prioritätsreihenfolge,
-            alle als numerische Vektoren gleicher Länge (dann ``dates``
-            angeben) oder alle als ``DataFrame(date, value)``.
-        dates: Datumsvektor bei Vektoren.
+        *args: Mindestens zwei benannte Reihen in Prioritätsreihenfolge, entweder alle als numerische Vektoren
+            gleicher Länge (z. B. Spalten eines gemeinsamen DataFrames; dann ``dates`` angeben) oder alle als
+            ``data.frame(date, value)`` (sie werden mit ``series_align()`` und ``range = "all"`` auf Kalendertage
+            gelegt und per LOCF gefüllt). Bei DataFrames gelten Folgen von mehr als 4 Kalendertagen (länger als
+            ein langes Wochenende), an denen die erste Reihe nur gefüllt ist, während eine andere Reihe echte
+            Kurse hat, als Lücken der ersten Reihe und werden mit den Renditen der nächsten Reihe verkettet.
+            Kürzere Folgen (Wochenenden und Feiertage einer Handelstagsreihe, auch wenn die nächste Reihe
+            Kalendertagswerte hat) und Tage ohne echte Kurse aller Reihen behalten den letzten Wert der ersten
+            Reihe (LOCF); deren Bewegung in der nächsten Reihe geht am folgenden Handelstag der ersten Reihe ein.
+        dates: Datumsvektor, wenn Vektoren übergeben werden (sonst ignoriert).
+        **series: Mindestens zwei benannte Reihen in Prioritätsreihenfolge, entweder alle als numerische Vektoren
+            gleicher Länge (z. B. Spalten eines gemeinsamen DataFrames; dann ``dates`` angeben) oder alle als
+            ``data.frame(date, value)`` (sie werden mit ``series_align()`` und ``range = "all"`` auf Kalendertage
+            gelegt und per LOCF gefüllt). Bei DataFrames gelten Folgen von mehr als 4 Kalendertagen (länger als
+            ein langes Wochenende), an denen die erste Reihe nur gefüllt ist, während eine andere Reihe echte
+            Kurse hat, als Lücken der ersten Reihe und werden mit den Renditen der nächsten Reihe verkettet.
+            Kürzere Folgen (Wochenenden und Feiertage einer Handelstagsreihe, auch wenn die nächste Reihe
+            Kalendertagswerte hat) und Tage ohne echte Kurse aller Reihen behalten den letzten Wert der ersten
+            Reihe (LOCF); deren Bewegung in der nächsten Reihe geht am folgenden Handelstag der ersten Reihe ein.
 
     Returns:
-        ``DataFrame`` mit ``date``, ``value`` und ``source``.
+        DataFrame mit ``date``, ``value`` (verkettete Reihe) und ``source``: Name der Reihe, deren Wert (erste
+        Reihe) bzw. Rendite vom Vortag auf diesen Tag verwendet wurde (NA, wo keine Rendite vorliegt, z. B. in der
+        ersten Zeile).
+
+    Details:
+        Alle Reihen müssen Niveaus (Kurse, Indexstände) sein, keine Renditen; das Niveau der Kette richtet sich
+        nach der ersten Reihe. Vor dem Start der ersten Reihe wird rückwärts verkettet, solange Renditen
+        vorliegen. Das Ergebnis lässt sich als Kursspalte in ``simulation()`` oder als ``data.frame(date, value)``
+        in ``result_analysis()`` verwenden.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        proxy = pd.DataFrame({"date": pd.date_range("2010-01-01", periods=1500), "value": 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, 1500))})
+        fonds = proxy[proxy["date"] >= "2012-01-01"].copy(); fonds["value"] *= 0.5
+        lang = simlev.series_splice(fonds=fonds, proxy=proxy)
+        print(lang["source"].value_counts())
     """
     src = series
     if args or len(src) < 2:
@@ -1320,31 +1506,37 @@ def _named(x):
 def strategy_from_weights(weights, **kwargs):
     """Strategie aus Gewichten.
 
-    Baut aus einem benannten Gewichtsvektor eine statische Strategie für
-    :func:`simulation`; jedes Asset erhält ``share = Gewicht``.
+    Baut aus einem benannten Gewichtsvektor eine statische Strategie für ``simulation()``, ohne jedes Asset
+    einzeln mit ``asset_config()`` anlegen zu müssen. Die Namen müssen den Kursspalten des Datensatzes entsprechen
+    (z. B. aus ``series_align()``). Jedes Asset erhält ``share = Gewicht``; alle weiteren Einstellungen kommen aus
+    ``...`` oder den Standardwerten von ``asset_config()`` (ETF, Buy and Hold, ohne Spread).
 
     Args:
-        weights: Benannter Vektor (``dict``/``Series``) Spaltenname -> Gewicht
-            als Anteil; alle positiv, Namen eindeutig, Summe 1.
-        **kwargs: Weitere Argumente für :func:`asset_config`. Ein einzelner
-            Wert gilt für alle Assets; benannte Vektoren (``dict``/``Series``)
-            werden je Asset zugeordnet. Ausnahme ``wrapper`` (Fonds-Wrapper aus
-            :func:`simlev.wrapper_config`): ein ``SimLevWrapperConfig`` gilt für
-            alle Assets, ein ``dict`` Asset -> ``SimLevWrapperConfig`` je Asset
-            (Assets ohne Eintrag bleiben ohne Wrapper). Unbekannte Namen,
-            Einträge, die kein ``SimLevWrapperConfig`` sind, und ``wrapper`` mit
-            ``trading="signal"`` für dasselbe Asset sind ein Fehler.
+        weights: Benannter numerischer Vektor Spaltenname -> Gewicht als Anteil (0.6 = 60 %), z. B. ``{"world":
+            0.6, "bonds": 0.4}``. Alle Gewichte müssen positiv sein (Assets mit Gewicht 0 weglassen), die Namen
+            eindeutig, und die Summe muss 1 sein (wie in ``simulation()``; sonst Fehler schon hier).
+        **kwargs: Weitere Argumente für ``asset_config()`` (z. B. ``asset_class``, ``spread`` in Prozent,
+            ``partial_exemption`` in Prozent). Ein unbenannter einzelner Wert gilt für alle Assets; benannte
+            Vektoren werden je Asset zugeordnet, auch mit einem einzigen Element wie ``partial_exemption =
+            {"aktien": 30}`` (fehlende Assets behalten den Standardwert, Namen ohne passendes Asset werden
+            ignoriert). Nur ein einzelner benannter Wert, dessen Name kein Asset ist, gilt für alle Assets.
+
+            ``wrapper`` (Fonds-Wrapper, ``wrapper_config``) ist eine Ausnahme, weil ein ``SimLevWrapperConfig``
+            selbst eine benannte Liste ist: Ein einzelnes ``SimLevWrapperConfig`` gilt für alle Assets; eine
+            benannte Liste solcher Objekte (Name = Asset, z. B. ``wrapper = {"world": w}``) gilt je Asset, Assets
+            ohne Eintrag bleiben ohne Wrapper. Fehler: Namen, die kein Asset sind, Elemente, die kein
+            ``SimLevWrapperConfig`` sind, eine Liste ohne Namen, und ``wrapper`` zusammen mit ``trading =
+            "signal"`` für dasselbe Asset (die Meldung nennt das Asset).
 
     Returns:
-        ``Strategy`` (wie :func:`create_strategy`).
+        Objekt der Klasse ``strategy`` (wie ``create_strategy()``).
 
     Beispiel::
 
-        w = wrapper_config(create_strategy(A=asset_config(share=0.6), B=asset_config(share=0.4)),
-                           costs=funds_costs(fee=0.5))
-        st = strategy_from_weights({"fonds": 0.8, "gold": 0.2},
-                                   asset_class={"fonds": "certificate", "gold": "etc"},
-                                   wrapper={"fonds": w})      # nur 'fonds' ist ein Wrapper
+        import simlev
+        st = simlev.strategy_from_weights({"aktien": 0.7, "gold": 0.3}, asset_class={"aktien": "etf", "gold": "etc"},
+                                          partial_exemption={"aktien": 30, "gold": 0})
+        print({k: a["asset_class"] for k, a in st.items()})
     """
     from .config import _AC_MSG_WRAPPER_SIGNAL, asset_config, create_strategy
     nms, vals = _named(weights)
@@ -1364,7 +1556,7 @@ def strategy_from_weights(weights, **kwargs):
     if abs(s - 1) > 1e-6:
         raise ValueError("Gewichte summieren sich zu %.4f; simulation() verlangt die Summe 1 (Anteile, 0.6 = 60 %%)." % s)
 
-    # Fonds-Wrapper (Etappe 8.0): ein SimLevWrapperConfig gilt für alle Assets, ein dict je Asset
+    # Fonds-Wrapper: ein SimLevWrapperConfig gilt für alle Assets, ein dict je Asset
     wmap = {}
     if "wrapper" in kwargs:
         kwargs = dict(kwargs)
@@ -1420,7 +1612,7 @@ def strategy_from_weights(weights, **kwargs):
 
 
 def _sfw_wrappers(wv, assets):
-    """Argument ``wrapper`` von :func:`strategy_from_weights` je Asset (R: ``.sfw_wrappers``, Etappe 8.0).
+    """Argument ``wrapper`` von :func:`strategy_from_weights` je Asset (R: ``.sfw_wrappers``).
 
     ``None`` oder leer -> ohne Wrapper; ein ``SimLevWrapperConfig`` -> für alle Assets; ein ``dict`` (bzw.
     ``Series``) Asset -> ``SimLevWrapperConfig`` -> je Asset, Assets ohne Eintrag ohne Wrapper. Sonst Fehler
@@ -1472,23 +1664,42 @@ _PORTFOLIO_TEMPLATES = {
 def portfolio_template(*, name=None, map=None, **kwargs):  # noqa: A002 - R-Argumentname
     """Portfolio-Vorlagen.
 
-    Bekannte statische Allokationen mit Rollen-Namen; über ``map`` werden die
-    Rollen den Spalten des Datensatzes zugeordnet.
+    Bekannte statische Allokationen mit Rollen-Namen (z. B. ``stocks``, ``long_bonds``, ``gold``). Über ``map``
+    werden die Rollen den Spalten des Datensatzes zugeordnet. Die Vorlagen sind Ausgangspunkte zum Vergleich,
+    keine Empfehlungen.
 
     Args:
-        name: Name der Vorlage. Ohne ``name`` (Standard ``None``) liefert die
-            Funktion die Liste aller Vorlagen; ``map`` und weitere Argumente
-            sind dann nicht erlaubt.
-        map: Benannter Vektor Rolle -> Spaltenname (``dict``/``Series``).
-        **kwargs: Weitere Argumente für :func:`strategy_from_weights`. Namen je
-            Asset (auch die Schlüssel eines ``wrapper``-``dict``) beziehen sich
-            auf die Namen nach ``map``; Rollen ohne ``map``-Eintrag behalten
-            ihren Namen, z. B. ``portfolio_template(name="60_40",
-            map={"stocks": "aktienfonds"}, wrapper={"aktienfonds": w})``.
+        name: Name der Vorlage als Zeichenkette (siehe Tabelle). Ohne ``name`` (Standard ``None``) liefert
+            ``portfolio_template()`` die Liste aller Vorlagen; ``map`` und ``...`` sind dann nicht erlaubt.
+        map: Benannter Zeichenvektor Rolle -> Spaltenname im Datensatz, z. B. ``{"stocks": "msci_world"}``.
+            Standard ``None``; Rollen ohne Eintrag behalten ihren Namen und müssen dann als Spalte vorliegen.
+            Unbekannte Rollen und mehrere Rollen auf derselben Spalte sind ein Fehler.
+        **kwargs: Weitere Argumente für ``strategy_from_weights()`` bzw. ``asset_config()`` (z. B. ``spread``,
+            ``partial_exemption``, ``wrapper``). Benannte Werte je Asset, auch die Namen einer ``wrapper``-Liste,
+            beziehen sich auf die Namen nach ``map`` (Spaltennamen); Rollen ohne ``map``-Eintrag behalten ihren
+            Namen.
 
     Returns:
-        Mit ``name``: ``Strategy`` für :func:`simulation`; ohne ``name``:
-        ``DataFrame`` aller Vorlagen mit ``template``, ``role`` und ``weight``.
+        Mit ``name``: Objekt der Klasse ``strategy`` für ``simulation()``; ohne ``name``: DataFrame aller Vorlagen
+        mit ``template``, ``role`` und ``weight`` (Anteil, 0.6 = 60 %).
+
+    Details:
+        - ``60_40`` | Aktien 60, Anleihen 40
+        - ``permanent`` | Permanent Portfolio (H. Browne): je 25 Aktien, lange Anleihen, Geldmarkt, Gold
+        - ``all_weather`` | vereinfachtes All Weather: 30/40/15/7.5/7.5
+        - ``golden_butterfly`` | je 20 Aktien, Small Value, lange und kurze Anleihen, Gold
+        - ``three_fund`` | Aktien Heimat 48, international 32, Anleihen 20
+        - ``hfea`` | 55 3x-Aktien, 45 3x-lange Anleihen
+        - ``stocks_gold`` | Aktien 80, Gold 20
+
+        Gewichte in der Tabelle in Prozent; in der Strategie als Anteile.
+
+    Beispiel::
+
+        import simlev
+        st = simlev.portfolio_template(name="permanent", map={"stocks": "msci_world", "long_bonds": "bund_10y",
+                                                             "cash": "geldmarkt", "gold": "gold_eur"})
+        print(st)
     """
     if name is None:
         if map is not None or kwargs:

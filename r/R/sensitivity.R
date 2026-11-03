@@ -18,14 +18,29 @@
 #' @param data,strategy Wie in [simulation()]: data.frame mit Spalte
 #'   \code{date} und Kursspalten (Niveaus) bzw. Strategie aus
 #'   [create_strategy()].
-#' @param grid Benannte Liste von Argumentwerten fuer [simulation()]; alle
-#'   Kombinationen werden gerechnet, z. B.
-#'   \code{list(balance_unit = c("month", "year"), balance_thresh = c(5, 10))}.
-#'   Alternativ ein data.frame mit einer Zeile je Lauf. Listen-Spalten
-#'   (z. B. \code{split_thresh}) sind erlaubt. \code{NA} laesst das Argument
-#'   weg (Standardwert von [simulation()] bzw. Wert aus \code{sim_args}).
+#' @param grid Benannte Liste von Argumentwerten fuer \code{\link[=simulation]{simulation()}}; alle
+#'   Kombinationen werden gerechnet. Parameter der Bausteine werden mit Pfad
+#'   \code{"<Baustein>.<Parameter>"} angesprochen, z. B.
+#'   \code{list(rebalance.unit = c("month", "year"), rebalance.thresh = c(5, 10))},
+#'   \code{"dca.value"}, \code{"tax.rate"}, \code{"tax.church_tax"}; Teilbausteine von
+#'   \code{tax_profile()} mit drei Teilen (\code{"tax.income.marginal_rate"},
+#'   \code{"tax.income.taxable_income"}, \code{"tax.harvest.day"}). Ein Pfad baut den
+#'   Baustein fuer jeden Lauf neu: Grundwerte aus dem gleichnamigen Baustein in
+#'   \code{sim_args} (ohne ihn die Standardwerte des Konstruktors, z. B.
+#'   \code{dca_plan(value, span)} braucht dann beide Pfade); mehrere Pfade eines Bausteins
+#'   gelten zusammen. Ohne Punkt sind es Argumente von \code{simulation()}
+#'   (\code{start_value}, \code{risk_free}, \code{fractions}, \code{liquidate},
+#'   \code{details} oder ein ganzer Baustein als Listen-Spalte). Unbekannte Pfade und die
+#'   alten Einzelargumente (z. B. \code{balance_unit}) ergeben einen Fehler mit den
+#'   moeglichen Bausteinen und Parametern. Alternativ ein data.frame mit einer Zeile je
+#'   Lauf. Listen-Spalten (z. B. \code{splits.thresh}) sind erlaubt. \code{NA} laesst das
+#'   Argument weg (Standardwert bzw. Wert aus \code{sim_args}).
 #' @param sim_args Benannte Liste gemeinsamer Argumente fuer alle Laeufe
-#'   (Standard \code{list()}); Werte aus \code{grid} haben Vorrang.
+#'   (Standard \code{list()}); Werte aus \code{grid} haben Vorrang. Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
+#'   also auch Bausteine (z. B. \code{dca = dca_plan(100, 1)}, \code{tax = tax_profile()}) und
+#'   Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
+#'   \code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B.
+#'   \code{dca_value}) ergeben einen Fehler, der den Baustein nennt.
 #' @param metrics Funktion \code{SimLevResult -> benannter numerischer Vektor}
 #'   (Standard [bootstrap_study_metrics()]).
 #' @param cores Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
@@ -43,8 +58,10 @@
 #' d <- data.frame(date = seq.Date(as.Date("2015-01-01"), by = "day", length.out = 1500))
 #' d$A <- 100 * cumprod(1 + rnorm(1500, 3e-4, 0.01)); d$B <- 100 * cumprod(1 + rnorm(1500, 1e-4, 0.004))
 #' st <- create_strategy(A = asset_config("etf", "bnh", 0.6), B = asset_config("etf", "bnh", 0.4))
-#' sensitivity_grid(d, st, list(balance_unit = c("month", "year")),
-#'                  sim_args = list(balance_mode = TRUE, balance_span = 1))[, c("balance_unit", "cagr", "trades")]
+#' sensitivity_grid(d, st, list(rebalance.unit = c("month", "year")),
+#'                  sim_args = list(rebalance = rebalance_plan(span = 1)))[, c("rebalance.unit", "cagr", "trades")]
+#' sensitivity_grid(d, st, list(dca.value = c(100, 200), tax.rate = c(20, 26.375)),
+#'                  sim_args = list(dca = dca_plan(50, 1), tax = tax_profile()))[, c("dca.value", "tax.rate", "cagr")]
 #' @seealso [sensitivity_rebalancing()], [sensitivity_leverage()],
 #'   [bootstrap_study_metrics()], [simulation()]
 #' @export
@@ -87,7 +104,7 @@ sensitivity_grid <- function(data, strategy, grid, sim_args = list(), metrics = 
 #' Toleranzbaender (absolut oder relativ) fuer eine Strategie, wie die
 #' Rebalancing-Sensitivity von testfol.io. Jede Kombination aus
 #' \code{frequencies}, \code{offsets} und \code{bands} wird mit [simulation()]
-#' (\code{balance_mode = TRUE}) gerechnet. Baender werden an den
+#' (\code{rebalance = rebalance_plan(...)}) gerechnet. Baender werden an den
 #' Kalenderterminen der jeweiligen Frequenz geprueft. Termine, die nicht als
 #' Zeile in \code{data} vorkommen (bei Handelstagsdaten z. B. Wochenenden),
 #' entfallen.
@@ -95,22 +112,33 @@ sensitivity_grid <- function(data, strategy, grid, sim_args = list(), metrics = 
 #' @inheritParams sensitivity_grid
 #' @param frequencies Benannte Liste von \code{c(unit, span)} mit
 #'   \code{unit} "month", "quarter" oder "year" und \code{span} = Anzahl
-#'   Einheiten zwischen den Terminen (\code{balance_unit} und
-#'   \code{balance_span} in [simulation()]). Standard: monatlich,
+#'   Einheiten zwischen den Terminen (\code{unit} und
+#'   \code{span} von \code{\link{rebalance_plan}()}). Standard: monatlich,
 #'   zweimonatlich, quartalsweise, viermonatlich, halbjaehrlich, jaehrlich
 #'   (Namen monthly, bimonthly, quarterly, four_monthly, semiannual, yearly).
 #' @param offsets Numerischer Vektor: Kalendertage vor dem Ende des Monats,
 #'   Dreimonatsblocks bzw. Jahres, in dem der Termin liegt (0 = letzter Tag;
-#'   \code{balance_anchor = "end"}, \code{balance_days = offset + 1}).
+#'   \code{rebalance_plan(anchor = "end", days = offset + 1)}).
 #'   \code{NULL} (Standard) rebalanciert am Periodenanfang.
 #' @param bands Toleranzbaender in Prozent (5 = 5 Prozent); \code{NA} (Standard) =
 #'   an jedem Termin rebalancieren. Mehrere Werte, auch gemischt mit \code{NA},
 #'   sind moeglich.
 #' @param band_type "absolute" (Standard; Prozentpunkte Abweichung vom
 #'   Zielgewicht) oder "relative" (Prozent des Zielgewichts), siehe
-#'   \code{balance_thresh_type} in [simulation()].
+#'   \code{thresh_type} von \code{\link{rebalance_plan}()}.
 #' @param include_none Logisch (Standard \code{TRUE}): zusaetzlich einen Lauf
 #'   ohne Rebalancing (Zeile \code{frequency = "none"}).
+#' @param sim_args Benannte Liste gemeinsamer Argumente fuer alle Laeufe
+#'   (Standard \code{list()}): Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
+#'   also auch Bausteine (z. B. \code{dca = dca_plan(100, 1)}, \code{tax = tax_profile()}) und
+#'   Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
+#'   \code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B.
+#'   \code{dca_value}) ergeben einen Fehler, der den Baustein nennt. Ein \code{rebalance = rebalance_plan(...)} in
+#'   \code{sim_args} liefert die Grundwerte (z. B. \code{start}, \code{event_col}); Frequenz,
+#'   Versatz und Band setzt die Funktion je Lauf ueber die Pfade \code{"rebalance.unit"},
+#'   \code{"rebalance.span"}, \code{"rebalance.anchor"}, \code{"rebalance.days"},
+#'   \code{"rebalance.thresh"} und \code{"rebalance.thresh_type"}; der Lauf ohne Rebalancing
+#'   setzt \code{rebalance = NULL}.
 #' @return data.frame der Klasse \code{SimLevSensitivity} mit den Spalten
 #'   \code{frequency}, \code{offset}, \code{band}, \code{band_type} und den
 #'   Kennzahlen aus \code{metrics}; fehlgeschlagene Laeufe fehlen. Attribut
@@ -189,10 +217,12 @@ sensitivity_rebalancing <- function(data, strategy,
 #'     Vorabpauschale oder Kosten, die Stueck verkaufen) waechst das DCA-Depot
 #'     mit dem zeitgewichteten Index der Einmalanlage ([result_index()]),
 #'     als haette es ab dem Ende der Einstiegsphase deren Gewichte; mit
-#'     \code{tax_mode = "person"} erscheint dazu eine Warnung.}
+#'     Steuern (\code{tax = tax_profile()}) erscheint dazu eine Warnung.}
 #' }
 #' Welche Variante verwendet wurde, steht je Start in der Spalte
-#' \code{exact}.
+#' \code{exact}. Fuer Fonds-Wrapper (\code{asset_config(wrapper = )}) ist der Kurs der
+#' Anteilswert aus [wrapper_nav()] im Fenster der Einmalanlage,
+#' wie ihn \code{simulation()} rechnet.
 #'
 #' Als Starttermine dienen nur Monatserste, die als Zeile in \code{data}
 #' vorkommen (bei Handelstagsdaten entfallen Monate, deren Erster kein
@@ -206,10 +236,14 @@ sensitivity_rebalancing <- function(data, strategy,
 #' @param horizon Vergleichshorizont in Jahren ab Start (Standard 10).
 #' @param step Jeder wievielte moegliche Starttermin verwendet wird (Standard
 #'   1 = jeder Monat; 12 = jaehrlich).
-#' @param sim_args Benannte Liste weiterer Argumente fuer [simulation()]
-#'   (z. B. \code{tax_mode}); \code{start_value}, \code{dca_mode},
-#'   \code{dca_value}, \code{dca_span}, \code{dca_unit} und \code{dca_skip}
-#'   setzt die Funktion selbst (in \code{sim_args} ein Fehler).
+#' @param sim_args Benannte Liste weiterer Argumente fuer \code{\link[=simulation]{simulation()}}
+#'   (z. B. \code{tax = tax_profile()}): Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
+#'   also auch Bausteine (z. B. \code{dca = dca_plan(100, 1)}, \code{tax = tax_profile()}) und
+#'   Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
+#'   \code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B.
+#'   \code{dca_value}) ergeben einen Fehler, der den Baustein nennt. \code{start_value} und \code{dca}
+#'   (auch Pfade \code{"dca.*"} und die alten \code{dca_*}) setzt die Funktion selbst
+#'   (in \code{sim_args} ein Fehler).
 #' @return data.frame der Klasse \code{SimLevLumpSum} mit einer Zeile je
 #'   Start: \code{start} (Datum), \code{lump_sum} und \code{dca}
 #'   (Endvermoegen nach \code{horizon} Jahren in Waehrungseinheiten),
@@ -373,6 +407,12 @@ series_leverage <- function(data, index, leverage = 2, rate = 0, expense = 0, sp
 #'   (Standard) = Buy-and-Hold-ETF mit 30 Prozent Teilfreistellung
 #'   (\code{asset_config("etf", "bnh", partial_exemption = 30)}).
 #' @inheritParams sensitivity_grid
+#' @param sim_args Benannte Liste gemeinsamer Argumente fuer alle Laeufe
+#'   (Standard \code{list()}): Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
+#'   also auch Bausteine (z. B. \code{dca = dca_plan(100, 1)}, \code{tax = tax_profile()}) und
+#'   Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
+#'   \code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B.
+#'   \code{dca_value}) ergeben einen Fehler, der den Baustein nennt.
 #' @return data.frame der Klasse \code{SimLevSensitivity} mit \code{leverage}
 #'   und den Kennzahlen aus \code{metrics} (fehlgeschlagene Laeufe fehlen);
 #'   Attribut \code{optimal} (benannter Vektor \code{cagr}, \code{sharpe}:

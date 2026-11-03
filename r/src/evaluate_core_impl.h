@@ -1,5 +1,5 @@
 // core/evaluate_core_impl.h
-// Auswertung von simulation() als gemeinsamer C++-Kern (E17 Stufe 3): Depotwert und Zufluesse je Tag, CAGR
+// Auswertung von simulation() als gemeinsamer C++-Kern: Depotwert und Zufluesse je Tag, CAGR
 // (mit Einzahlungen geldgewichtet ueber XIRR), TTWROR, zeitgewichteter Wertindex, Drawdowns, Tagesrenditen,
 // Performance- und Risikokennzahlen, mittlere Kaeufe/Verkaeufe je Jahr und die Ursachen nicht definierter
 // Kennzahlen (undefined_metrics) als Codes; dazu der interne Zinsfuss xirr (.xirr_rate) fuer die Sprachen.
@@ -25,7 +25,7 @@
 //   - ifelse() mit NA im Test liefert NA_real_ (v_pre, Drawdowns bei NaN im laufenden Maximum).
 //   - x[x > 0] mit NaN in x waehlt NA aus (Downside-Abweichung, mittlerer Drawdown).
 //   - if () mit NA bricht ab ("missing value where TRUE/FALSE needed"); der Kern meldet die Stelle (Site), der
-//     Host loest den Fehler mit dem Text von R aus (R seit C19 mit dem Aufruf von simulation()).
+//     Host loest den Fehler mit dem Text von R aus (R seit 1.4.1 mit dem Aufruf von simulation()).
 //   - difftime(Datum, Datum, units = "days") ueber Sekunden: (a * 86400 - b * 86400) / 86400.
 //   - calculate_skewness/_kurtosis geben bei zu wenigen Werten bzw. Standardabweichung 0 ein logisches NA
 //     zurueck (Merker skew_lgl, kurt_lgl fuer R).
@@ -349,7 +349,7 @@ inline int evaluate(const In& I, Result& R) {
     if (c == 2) return abort(S_CAGR, 1);
     R.cagr = c ? sl_r_pow1(simlev_div(stopp_worth, start_worth), 1 / ann) - 1 : NA;
   }
-  // TTWROR: Periodenrenditen, an Zuflusstagen zum Zeitpunkt der Zahlung bewertet (R3B-02)
+  // TTWROR: Periodenrenditen, an Zuflusstagen zum Zeitpunkt der Zahlung bewertet
   std::vector<double> pr;
   if (n >= 2) {
     pr.assign((std::size_t) n, 0.0);
@@ -429,7 +429,7 @@ inline int evaluate(const In& I, Result& R) {
     if (R.cagr != R.cagr && ann > 0 && !(std::isfinite(stopp_worth) && stopp_worth < 0))
       msg(&R.msgs, W_NO_IRR, start_gross, sum_fi, stopp_worth);
   }
-  // offene Steuerschuld; negativer Endwert (R4-05)
+  // offene Steuerschuld; negativer Endwert
   {
     const int c = gt0(I.tax_unpaid);
     if (c == 2) return abort(S_TAX_DEBT, 1);
@@ -548,7 +548,7 @@ inline int evaluate(const In& I, Result& R) {
   if (I.filled) for (int64_t i = 1; i < n; i++) if (I.filled[i] != 0) any_mask = true;
   const int64_t n_r = (int64_t) rr.size();
   const double dpy = (ann > 0 && n_r > 0) ? (double) n_r / ann : 365.25;
-  // mittlere Kaeufe/Verkaeufe je Jahr (R5-04: Einzeltag NA)
+  // mittlere Kaeufe/Verkaeufe je Jahr (Einzeltag NA)
   R.buys.assign((std::size_t) na, NA);
   R.sells.assign((std::size_t) na, NA);
   for (int64_t a = 0; a < na; a++)

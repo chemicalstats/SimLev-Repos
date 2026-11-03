@@ -4,7 +4,7 @@
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang.
-"""Lineare Hilfen wie in R 4.3.3, die nach Etappe 9.6c bleiben.
+"""Lineare Hilfen wie in R 4.3.3, die neben der C-Bibliothek slc bleiben.
 
 ==================  ==========================================================
 R                   Python
@@ -18,9 +18,8 @@ R                   Python
 Dazu die Hilfen :class:`RError` (Fehler mit R's Meldungstext), ``_as_matrix``, ``_out`` und
 ``_vec_out`` für die übrigen ``_r``-Module.
 
-Seit Etappe 9.6c rechnet SimLev Matrixprodukte, Cholesky, Dreieckslöser, SPD-Löser,
-Eigenwerte und QR/kleinste Quadrate in der C-Bibliothek slc (:mod:`simlev._lib`, Entwurf
-B.5–B.7). Die Nachbildungen von ``%*%``, ``crossprod``, ``solve``, ``chol``, ``backsolve``,
+Seit 1.0.0 rechnet SimLev Matrixprodukte, Cholesky, Dreieckslöser, SPD-Löser,
+Eigenwerte und QR/kleinste Quadrate in der C-Bibliothek slc (:mod:`simlev._lib`). Die Nachbildungen von ``%*%``, ``crossprod``, ``solve``, ``chol``, ``backsolve``,
 ``determinant``, ``eigen`` und ``qr`` über Referenz-BLAS, LAPACK und LINPACK sind entfallen.
 
 Eingaben: 2-D ``numpy``-Arrays oder ``pandas.DataFrame`` (Matrix, dimnames
@@ -139,7 +138,7 @@ def outer(X, Y, FUN="*"):
     dX = list(mx.dim) if mx.is_matrix else [mx.length]
     dY = list(my.dim) if my.is_matrix else [my.length]
     if isinstance(FUN, str) and FUN == "*":
-        # Seit 9.6c ohne die Nachbildung der Referenz-BLAS: bei innerer Länge 1 ist das
+        # Seit 1.0.0 ohne die Nachbildung der Referenz-BLAS: bei innerer Länge 1 ist das
         # Matrixprodukt genau die Summe 0 + Produkt (wie dgemm und R's simple_matprod).
         with np.errstate(all="ignore"):
             Z = 0.0 + np.multiply.outer(np.asarray(mx.v, dtype=np.float64), np.asarray(my.v, dtype=np.float64))

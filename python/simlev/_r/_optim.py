@@ -12,7 +12,7 @@
 """Eindimensionale Verfahren aus R's ``src/library/stats/src/optimize.c`` / ``zeroin.c``
 (``Brent_fmin``, ``R_zeroin2``) für ``optimize``/``uniroot``, bitgleich in Python (skalare
 double-Arithmetik). Die mehrdimensionalen Optimierer aus ``src/appl/optim.c`` (``nmmin``,
-``vmmin``, ``cgmin``) sind mit Etappe 9.6c entfallen (eigene Optimierer in slc).
+``vmmin``, ``cgmin``) sind seit 1.0.0 entfallen (eigene Optimierer in slc).
 
 Die Zielfunktionen erhalten/liefern ``float``.
 """

@@ -4,10 +4,10 @@
 #                     Kopf der jeweiligen R-Quelle)
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang: Kovarianz und Korrelation rechnet seit N8 der C-Kern
+#                     SimLev genutzten Umfang: Kovarianz und Korrelation rechnet der C-Kern
 #                     core/slc_rbase_cov.c.
 # Kovarianz und Korrelation (cor, cov, var, sd, cov2cor) sowie scale aus R 4.3.3 stats/src/cov.c,
-# stats/R/cor.R und base/R/scale.R; Python: _r/stats_cor.py. Seit N8 rechnet der Kern von cov/cor
+# stats/R/cor.R und base/R/scale.R; Python: _r/stats_cor.py. rechnet der Kern von cov/cor
 # (pearson, kendall; alle `use`) in C (core/slc_rbase_cov.c, gemeinsam mit Python).
 # Teil des Untermoduls RStats (eingebunden in stats.jl).
 
@@ -36,7 +36,7 @@ function _as_cov_input(x)
 end
 _is_matlike(x) = x isa RFrame || x isa AbstractMatrix
 
-"R's `cor`/`cov` mit `use` als Zahl 1–5 (C-Kern `sl_r_cov`, N8)."
+"R's `cor`/`cov` mit `use` als Zahl 1–5 (C-Kern `sl_r_cov`)."
 function _corcov(x, y, method_na::Int, kendall::Bool, cor::Bool)
     X, xmat, xcn = _as_cov_input(x)
     n, ncx = size(X)

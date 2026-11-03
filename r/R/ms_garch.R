@@ -7,10 +7,10 @@
 #  0; Regimewechsel als Markov-Kette. Likelihood ueber den Hamilton-Filter im
 #  C-Kern, Maximierung mit BFGS auf eigener Parametrisierung auf R^p,
 #  deterministische Startwerte (kein Zufall): volles HMM-EM und Rangeinteilung
-#  der Volatilitaet, je mit kleinem Raster. Seit Etappe 9.6b rechnet die
+#  der Volatilitaet, je mit kleinem Raster. Seit 1.0.0 rechnet die
 #  Schaetzung ganz in der C-Bibliothek slc (.sl_ms_garch_fit, src/slc_msgarch.c);
-#  hier bleibt die Pruefung (Parametrisierung, Filter und stationaere Verteilung seit Etappe
-#  9.6c nur noch in C; die Ports behalten die stationaere Verteilung als Hilfe von
+#  hier bleibt die Pruefung (Parametrisierung, Filter und stationaere Verteilung seit 1.0.0
+#  nur in C; die Ports behalten die stationaere Verteilung als Hilfe von
 #  .prepare_ms_info).
 #  Genutzt von .prepare_ms_info (R/bootstrap.R) fuer die Verfahren "ms_garch",
 #  "ms_ar_garch_m" und "tvtp_ms_garch".
@@ -46,13 +46,13 @@
 #'   vorhergesagte Mischungsvarianz s2[t] = sum_k P(s_t = k | F_{t-1}) h[t, k],
 #'   Log-Likelihood und Konvergenzcode des besten BFGS-Laufs.
 #'
-#' Seit Etappe 9.6b ganz in der C-Bibliothek slc (.sl_ms_garch_fit,
-#' R/slc_models.R; Entwurf B.13): Starts aus HMM-EM und Rangeinteilung wie
-#' bisher, BFGS (maxit 500, reltol 1e-10, seit N1 mit analytischem Gradienten)
+#' Seit 1.0.0 ganz in der C-Bibliothek slc (.sl_ms_garch_fit,
+#' R/slc_models.R): Starts aus HMM-EM und Rangeinteilung wie
+#' bisher, BFGS (maxit 500, reltol 1e-10, mit analytischem Gradienten)
 #' von allen Rasterpunkten beider Familien (die zwei bisherigen zuerst; sGARCH
-#' 12, gjrGARCH seit N1 20 mit zwei Rasterpunkten gamma < 0), der beste Lauf
-#' gewinnt. GJR je Regime seit N1 mit alpha + gamma >= 0, also auch gamma < 0.
-#' N6: \code{cores} Threads fuer die Starts (Ergebnis unabhaengig davon; Standard 1).
+#' 12, gjrGARCH 20 mit zwei Rasterpunkten gamma < 0), der beste Lauf
+#' gewinnt. GJR je Regime mit alpha + gamma >= 0, also auch gamma < 0.
+#' \code{cores} Threads fuer die Starts (Ergebnis unabhaengig davon; Standard 1).
 #' @keywords internal
 #' @noRd
 .ms_garch_fit <- function(y, K, model, cores = 1L) .sl_ms_garch_fit(y, K, model, cores)

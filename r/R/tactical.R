@@ -728,7 +728,7 @@ plot.SimLevWeights <- function(x, main = "Zielgewichte", ...) {
 #'     jeweils letzte vorhandene Zeile der Periode), zu dem zusaetzlich auf
 #'     die aktuellen Zielgewichte zurueckgefuehrt wird.
 #'   \item \code{tolerance}: Toleranzband in Prozent (wird als
-#'     \code{balance_thresh} an [simulation()] uebergeben); an Terminen, an
+#'     \code{rebalance_plan(thresh = tolerance)} an [simulation()] uebergeben); an Terminen, an
 #'     denen keine Anlage staerker als das Band vom Ziel abweicht, wird nicht
 #'     gehandelt. Gilt auch fuer Wechseltermine.
 #'   \item Umschichtungen nutzen die Rebalancing-Logik der Engine, die mit den
@@ -736,7 +736,7 @@ plot.SimLevWeights <- function(x, main = "Zielgewichte", ...) {
 #'     Wechsel koennen daher Reste in der Groessenordnung der Tagesbewegung
 #'     (meist unter einem Prozent) in der verlassenen Anlage bleiben. Ein Pflegerhythmus (\code{rebalance =
 #'     "month"}) gleicht sie aus.
-#'   \item Sparplaene (\code{dca_mode}) zahlen nach den Startgewichten ein; der
+#'   \item Sparplaene (\code{dca = dca_plan(...)}) zahlen nach den Startgewichten ein; der
 #'     Sparplantag wird zum Rebalancing-Termin, so dass die Rate sofort auf die
 #'     aktuellen Zielgewichte verteilt wird.
 #' }
@@ -766,10 +766,12 @@ plot.SimLevWeights <- function(x, main = "Zielgewichte", ...) {
 #'   Ein unbenannter einzelner Wert gilt fuer alle Anlagen; benannte Vektoren
 #'   werden je Anlage zugeordnet (auch mit einem Element, siehe
 #'   [strategy_from_weights()]).
-#' @param ... Weitere Argumente fuer [simulation()] (z. B. Steuern,
-#'   \code{start_value}, \code{dca_mode}). Nicht erlaubt, weil hier
-#'   gesteuert: \code{event_col}, \code{event_mode}, \code{event_weight},
-#'   \code{balance_mode}, \code{balance_thresh}.
+#' @param ... Weitere Argumente fuer \code{\link[=simulation]{simulation()}} (z. B.
+#'   \code{tax = tax_profile()}, \code{start_value}, \code{dca = dca_plan(...)}). Das
+#'   Rebalancing (\code{rebalance_plan(event_col, event_mode = "replace", skip = TRUE,
+#' event_weight, thresh = tolerance, thresh_type = tolerance_type)}) steuert die Funktion
+#'   selbst; Pfade \code{"rebalance.*"} und die alten \code{event_col}, \code{event_mode},
+#'   \code{event_weight}, \code{balance_mode}, \code{balance_thresh} sind ein Fehler.
 #' @return \code{SimLevResult} wie von [simulation()] mit zusaetzlichem
 #'   Element \code{tactical}, einer Liste mit \code{weights} (gehandelte,
 #'   um \code{lag} verschobene Zielgewichte als \code{SimLevWeights}),

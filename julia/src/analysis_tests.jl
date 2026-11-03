@@ -1,4 +1,4 @@
-# AnalysisTests – r/R/analysis_tests.R (Vorlage python/simlev/analysis_tests.py)
+# AnalysisTests – Gegenstück zu r/R/analysis_tests.R und python/simlev/analysis_tests.py
 #
 #   signal_analysis()    Vorwärtsrenditen je Signalbereich (Regressogramm)
 #   sharpe_test()        Unterschied zweier Sharpe Ratios (Ledoit & Wolf 2008)
@@ -95,7 +95,7 @@ end
 const _ST_NAMES = ["n", "mean", "median", "win_rate", "sd", "t"]
 _median(z) = DA._vecf(SimLev.RStats.median(collect(Float64, z)))[1]
 
-"""Welch-Test wie `.sl_welch_test` (R, Entwurf B.16) → (statistic, p.value); p über `SLib.pt`.
+"""Welch-Test wie `.sl_welch_test` (R) → (statistic, p.value); p über `SLib.pt`.
 Bei se = 0 (beide Stichproben konstant) NA."""
 function _welch(x, y)
     x = collect(Float64, x); y = collect(Float64, y)
@@ -108,7 +108,7 @@ function _welch(x, y)
     tt, 2 * SimLev.SLib.pt(-abs(tt), nu)
 end
 
-"""Polynom-Kleinstquadrate wie `.sl_poly_fit` (R, Entwurf B.7): Basis 1, z, ..., z^d mit
+"""Polynom-Kleinstquadrate wie `.sl_poly_fit` (R): Basis 1, z, ..., z^d mit
 z = (x - mean(x)) / sd(x), Lösung über `SLib.lsfit`; r² = 1 - RSS/TSS → (Modell, R²)."""
 function _poly_lm(df, degree)
     x = DA._f64(df["signal"]); y = DA._f64(df["forward"]); degree = Int(degree)
@@ -132,10 +132,83 @@ end
     signal_analysis(data, signal, target; horizon = 21, step = nothing, bins = 5, breaks = nothing,
                     signal2 = nothing, bins2 = 3, splits = 1, degree = 2)
 
-Vorwärtsrenditen je Signalbereich (R: `signal_analysis()`); Ergebnis: `RList`
-der Klasse `SimLevSignalAnalysis`. Seit Etappe 9.6b ist `fit["model"]` wie in R eine
-Liste `coefficients`, `fitted`, `degree`, `basis` (kein lm-Objekt mehr); der Welch-Test
-rechnet mit dem t-Verteilungskern der C-Bibliothek.
+Signal-Analyse: Vorwärtsrenditen je Signalbereich.
+
+Beantwortet die Frage "Wenn das Signal auf diesem Niveau steht, was passiert danach typischerweise?" -
+unabhängig von einer konkreten Handelsregel. Für jeden Stichtag (Zeile 1, dann alle `step` Zeilen) wird die
+Rendite der Zielreihe über die folgenden `horizon` Zeilen gemessen (P_t+h / P_t - 1, als Anteil) und nach dem
+Signalwert am Stichtag in Bereiche eingeteilt (Regressogramm). Splits prüfen, ob der Zusammenhang über die
+Zeit stabil ist. Das ist eine Beschreibung vergangener Muster, kein Nachweis einer handelbaren Überrendite.
+
+# Argumente
+- `data`: Tabelle (RFrame) mit Spalte `date` (Klasse Date oder umwandelbar) und der Kursspalte `target`;
+  optional Signalspalten. Die Zeilen werden nach Datum sortiert (Signalvektoren mit), bei doppeltem Datum gilt
+  die letzte Zeile (mit Hinweis).
+- `signal`: Spaltenname in `data` oder numerischer Vektor der Länge `nrow(data)`. Der Wert in Zeile t muss nur
+  mit Daten bis einschließlich Zeile t berechnet sein (sonst Zukunftsinformation).
+- `target`: Name der Kursspalte (Niveaus, keine Renditen). Fehlende Kurse werden mit dem letzten bekannten
+  Wert fortgeschrieben.
+- `horizon`: Vorwärtshorizont in Zeilen der Daten (ganze Zahl von 1 bis `nrow(data) - 1`, Standard 21), z. B.
+  21 Handelstage oder 30 Kalendertage.
+- `step`: Abstand der Stichtage in Zeilen. `nothing` (Standard) = `horizon`, die Vorwärtsrenditen überlappen
+  dann nicht.
+- `bins`: Anzahl Bereiche nach Quantilen des Signals (ganze Zahl >= 2, Standard 5). Gleiche Quantilsgrenzen
+  werden zusammengefasst (dann weniger Bereiche). Hat das Signal höchstens `bins` verschiedene Werte (z. B.
+  0/1), erhält jeder Wert einen eigenen Bereich. Wird ignoriert, wenn `breaks` angegeben ist.
+- `breaks`: Numerischer Vektor (mindestens 3) streng aufsteigender Bereichsgrenzen in der Einheit des Signals;
+  `nothing` (Standard) = Quantile (`bins`). Die erste und letzte Grenze werden durch `-Inf` und `Inf` ersetzt;
+  Bereiche sind links geschlossen, `[a, b)`.
+- `signal2`, `bins2`: Optional zweites Signal (Spaltenname oder Vektor wie `signal`) und die Anzahl seiner
+  Quantilsbereiche (Standard 3) für eine 2D-Tabelle. `nothing` (Standard) = keine 2D-Tabelle.
+- `splits`: Anzahl gleich großer Gruppen aufeinanderfolgender Stichtage für die Stabilitätsprüfung (ganze
+  Zahl, Standard 1 = keine Aufteilung).
+- `degree`: Grad der Polynom-Regression `forward ~ poly(signal, degree)` (ganze Zahl, Standard 2; 0 = keine).
+  Wird nur geschätzt, wenn es mehr als `degree + 1` verschiedene Signalwerte gibt.
+
+# Rückgabe
+Objekt der Klasse `SimLevSignalAnalysis`, eine Liste mit
+
+- `bins`: Tabelle (RFrame) je (nicht leerem) Bereich: `bin` (Intervall als Text), `from`, `to` (kleinster und
+  größter Signalwert im Bereich), `n`, `mean`, `median` (Vorwärtsrendite als Anteil), `win_rate` (Anteil
+  positiver Renditen), `sd`, `t` (`mean / (sd / sqrt(n))`) und `annualized` ((1 + mean)^ppy / horizon - 1,
+  Anteil p. a.; `ppy` = Zeilen je Jahr, geschätzt als `(nrow(data) - 1)` / Zeitspanne in Jahren zu 365.25
+  Tagen).
+- `overall`: benannter Vektor `n`, `mean`, `median`, `win_rate`, `sd`, `t` über alle Stichtage.
+- `spread`: benannter Vektor `difference` (Mittel oberster minus unterster Bereich, Anteil), `t` und `p`
+  (Welch-t-Test mit Freiheitsgraden nach Welch-Satterthwaite; `NA`, wenn einer der beiden Bereiche höchstens 2
+  Werte hat oder beide konstant sind).
+- `splits`: Matrix Bereiche x Zeitabschnitte mit der mittleren Vorwärtsrendite (Anteil), Spaltennamen
+  "Jahr-Jahr"; `nothing` bei `splits = 1`.
+- `table2d`: Liste mit `mean` (Matrix Bereich `signal` x Bereich `signal2`, mittlere Vorwärtsrendite als
+  Anteil) und `n` (Häufigkeiten); `nothing` ohne `signal2`.
+- `fit`: Liste mit `model` und `r_squared` (R^2 = 1 - RSS/TSS); `nothing` ohne Polynom-Glättung. `model` ist
+  eine Liste mit `coefficients` (Basis 1, z, z^2, ... mit z = (signal - Mittel) / Standardabweichung),
+  `fitted` (angepasste Werte), `degree` und `basis` (`center`, `scale`); bis 0.10.0 war es ein `lm`-Objekt mit
+  orthogonalen Polynomen (angepasste Werte und R^2 sind gleich).
+- `data`: Tabelle (RFrame) der Stichtage mit `date`, `signal`, `forward` (Anteil), ggf. `signal2`, `bin`, ggf.
+  `bin2`.
+- `horizon`, `step`, `target`, `signal_name`: Einstellungen.
+
+`print()` zeigt die Bereichstabelle in Prozent, `plot()` Balken je Bereich (mit +/- 2 Standardfehlern) und ein
+Streudiagramm Signal gegen Vorwärtsrendite.
+
+# Details
+Eingabe ist ein Tabelle (RFrame) mit Datum, Kursspalte und Signal (Spalte oder Vektor). Stichtage mit
+fehlendem Signal (bzw. fehlendem zweiten Signal) oder fehlender Vorwärtsrendite entfallen; es müssen
+mindestens 20 Stichtage bleiben.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 1095
+d = RFrame("date" => Date(2015, 1, 1) .+ Day.(0:n-1))
+d["aktien"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+p = d["aktien"]
+d["mom"] = [i > 60 ? p[i] / p[i-60] - 1 : NaN for i in 1:n]   # 60-Tage-Rendite
+sa = signal_analysis(d, "mom", "aktien"; horizon = 21, bins = 4, splits = 2)
+println(sa["bins"])
+```
 """
 function signal_analysis(data, signal, target; horizon = 21, step = nothing, bins = 5, breaks = nothing,
                          signal2 = nothing, bins2 = 3, splits = 1, degree = 2)
@@ -332,7 +405,7 @@ end
 # ═══════════════════════════════════════════════════════════════════════════
 
 _mat(r) = Matrix{Float64}(r isa SimLev.NamedMat ? r.data : r)
-# Matrixprodukte der C-Bibliothek slc (Entwurf B.6), wie .sl_crossprod und %m% in R
+# Matrixprodukte der C-Bibliothek slc, wie .sl_crossprod und %m% in R
 _crossprod(A) = _mat(SimLev.SLib.crossprod(Matrix{Float64}(A)))
 _crossprod(A, B) = _mat(SimLev.SLib.crossprod(Matrix{Float64}(A), Matrix{Float64}(B)))
 _matprod(A, B) = _mat(SimLev.SLib.matmul(Matrix{Float64}(A), Matrix{Float64}(B)))
@@ -352,7 +425,7 @@ function _hac_cov(Y, lag = nothing)
     S
 end
 
-"Hauptstrom (Entwurf C.5, Regeln 3 bis 5)."
+"Hauptstrom."
 _main_stream(seed) = SimLev.SLib.main_stream(seed)
 _boot_idx(n, m, L, stream) = Vector{Int}(SimLev.SLib.boot_idx_stationary(n, m, L; stream = stream))
 _ppy_default(frequency) = Dict("day" => 252.0, "week" => 52.0, "month" => 12.0)[frequency]
@@ -364,8 +437,68 @@ const _SHARPE_NAMES = ["sharpe_x", "sharpe_y", "difference", "se", "z", "p_value
     sharpe_test(x, y; frequency = ["week", "day", "month"], method = ["hac", "bootstrap"],
                 B = 2000, block = nothing, ppy = nothing, seed = nothing)
 
-Test auf gleiche Sharpe Ratios (Ledoit & Wolf 2008; R: `sharpe_test()`).
-Ergebnis: benannter Vektor (`RVector`).
+Test auf gleiche Sharpe Ratios (Ledoit & Wolf 2008).
+
+Prüft, ob sich die Sharpe Ratios zweier Strategien unterscheiden, robust gegen Autokorrelation,
+Heteroskedastie und dicke Ränder (Ledoit & Wolf 2008): mit der Delta-Methode und Newey-West-Kovarianz
+(`"hac"`) oder einem stationären Block-Bootstrap der Renditepaare (`"bootstrap"`). Der klassische
+Jobson-Korkie-Test unterstellt Normalverteilung und unabhängige Renditen und ist für Finanzdaten zu
+optimistisch.
+
+# Argumente
+- `x`, `y`: Zwei Renditequellen derselben Art (nicht mischen, sonst Fehler):
+
+  - numerische Vektoren einfacher Periodenrenditen als Anteil (0.01 = 1 %), gleich lang und zeitgleich; Paare
+    mit einem nicht endlichen Wert werden entfernt;
+  - `SimLevResult` aus `simulation()` (verwendet wird der um Ein- und Auszahlungen bereinigte Wertindex aus
+    `result_index()`; bei `"day"` ohne aufgefüllte Tage) oder `data.frame` mit Spalte `date` und einer
+    Wertspalte (`value`, sonst die erste numerische Spalte; Niveaus, keine Renditen). Daraus werden Renditen
+    von Periodenende zu Periodenende der `frequency` gebildet und nur gemeinsame Perioden-Enddaten verwendet.
+- `frequency`: Periodenlänge: `"week"` (Standard, ISO-Wochen), `"day"` oder `"month"`. Bei Vektor-Eingabe
+  bestimmt sie nur den Standardwert von `ppy`.
+- `method`: `"hac"` (Standard): Delta-Methode mit Newey-West-Kovarianz (Bartlett-Kern, Lag ⌊ 4 (T/100)^2/9 ⌋);
+  `"bootstrap"`: stationärer Block-Bootstrap der Renditepaare (Standardfehler = Standardabweichung der
+  Bootstrap-Differenzen, p-Wert = Anteil der Wiederholungen mit |d^* - d| ≥ |d|, Intervall = 2.5- und
+  97.5-%-Quantil der Bootstrap-Differenzen).
+- `B`: Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 2000); nur bei `method = "bootstrap"`.
+- `block`: Mittlere Blocklänge des stationären Bootstraps in Perioden (geometrisch verteilte Blocklängen,
+  Blöcke laufen zyklisch über das Ende); `nothing` (Standard) = `max(2, round(T^(1/3)))` mit T = Anzahl
+  Renditepaare. Nur bei `method = "bootstrap"`.
+- `ppy`: Perioden je Jahr für die Annualisierung. `nothing` (Standard) = bei Vektoren 252 (`"day"`), 52
+  (`"week"`) bzw. 12 (`"month"`); bei Ergebnissen und Tabelle (RFrame) aus den gemeinsamen Daten geschätzt:
+  (Anzahl Perioden - 1) / (Zeitspanne in Tagen / 365.25).
+- `seed`: Startwert für den Bootstrap (Standard `nothing`). Mit Startwert (ganze Zahl, |seed| < 2^53) ist das
+  Ergebnis reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit `nothing` wird genau
+  einmal ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe `simlev_seed()`), wiederholte Aufrufe
+  liefern dann verschiedene Ergebnisse. `set.seed()` wirkt nicht.
+
+# Rückgabe
+Benannter numerischer Vektor: `sharpe_x`, `sharpe_y` (Sharpe Ratios p. a.), `difference` (`sharpe_x -
+sharpe_y`, p. a.), `se` (Standardfehler der Differenz, p. a.), `z` (`difference / se`), `p_value` (zweiseitig,
+Anteil), `ci_low`, `ci_high` (95-%-Intervall der Differenz, p. a.) und `n` (Anzahl verwendeter Renditepaare).
+
+# Details
+Fertige Simulationen lassen sich direkt vergleichen: `x` und `y` dürfen Ergebnisse von `simulation()` sein.
+Die Sharpe Ratio ist hier Mittelwert / Standardabweichung der Periodenrenditen, ohne Abzug eines risikolosen
+Zinses, annualisiert mit √(ppy).
+
+Mindestens 10 gemeinsame Renditepaare sind nötig, und keine der beiden Reihen darf die Varianz 0 haben (sonst
+Fehler). Identische Reihen ergeben `difference = 0`, `se = 0`, `z = 0` und `p_value = 1`.
+
+# Literatur
+Ledoit, O. & Wolf, M. (2008), Robust performance hypothesis testing with the Sharpe ratio, Journal of
+Empirical Finance 15(5), 850-859.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 1095
+d = RFrame("date" => Date(2015, 1, 1) .+ Day.(0:n-1))
+d["a"] = 100 .* cumprod(1 .+ 4e-4 .+ 0.01 .* randn(rng, n))
+d["b"] = 100 .* cumprod(1 .+ 2e-4 .+ 0.01 .* randn(rng, n))
+println(sharpe_test(RFrame("date" => d["date"], "a" => d["a"]), RFrame("date" => d["date"], "b" => d["b"])))
+```
 """
 function sharpe_test(x, y; frequency = ["week", "day", "month"], method = ["hac", "bootstrap"], B = 2000,
                      block = nothing, ppy = nothing, seed = nothing)
@@ -437,8 +570,64 @@ end
     overfit_reality_check(x; benchmark = nothing, B = 999, block = nothing,
                   frequency = ["week", "day", "month"], dates = nothing, seed = nothing)
 
-White Reality Check und Hansen-SPA-Test (R: `overfit_reality_check()`); Ergebnis:
-`RList` der Klasse `SimLevRealityCheck`.
+White Reality Check und Hansen-SPA-Test.
+
+Prüft, ob die beste von K Strategien (z. B. alle Punkte einer Parametersuche) eine Benchmark mehr als zufällig
+schlägt, unter Berücksichtigung, dass die beste aus vielen gewählt wurde. Der SPA-Test (Hansen 2005) ist
+weniger empfindlich gegen schlechte, irrelevante Strategien als der Reality Check (White 2000). Beide mit
+stationärem Block-Bootstrap der Ueberrenditen d_t,k = r_t,k - b_t.
+
+# Argumente
+- `x`: Renditequelle:
+
+  - `SimLevParamSearch` aus `param_search()` mit gespeicherten Renditen (`keep_returns = "day"`); verwendet
+    werden `x["returns"]` (tägliche Renditen je Punkt, Spalten `p<id>`) und `x["dates"]`;
+  - numerische Matrix oder Tabelle (RFrame) nur aus numerischen Spalten (ohne Datumsspalte): Zeilen =
+    Perioden, Spalten = Strategien, einfache Renditen als Anteil (0.01 = 1 %); ohne Spaltennamen heißen die
+    Spalten `p1`, `p2`, ...
+
+  Spalten ohne endlichen Wert werden verworfen, danach alle Zeilen mit einem fehlenden Wert. Bei `print()`:
+  Objekt der Klasse `SimLevRealityCheck`.
+- `benchmark`: Vergleich: `nothing` (Standard) = Rendite 0; eine einzelne Zahl oder Zeichenkette =
+  Spaltennummer bzw. -name in `x` (nach dem Verwerfen leerer Spalten), diese Spalte wird aus den Kandidaten
+  entfernt; ein numerischer Vektor (Länge > 1) = Benchmark-Renditen als Anteil mit genau einem Wert je Periode
+  nach Aggregation und Entfernen unvollständiger Zeilen.
+- `B`: Anzahl Bootstrap-Wiederholungen (ganze Zahl, Standard 999).
+- `block`: Mittlere Blocklänge des stationären Bootstraps in Perioden (geometrisch verteilte Blocklängen,
+  zyklisch); `nothing` (Standard) = `max(2, round(T^(1/3)))` mit T = Anzahl Perioden.
+- `frequency`: Periodenlänge: `"week"` (Standard), `"day"` oder `"month"`. Mit Datum (bei `SimLevParamSearch`
+  immer, bei Matrizen über `dates`) werden die Renditen geometrisch zu ISO-Wochen bzw. Kalendermonaten
+  verkettet; ohne Datum wird nicht aggregiert, die Zeilen gelten dann als Perioden.
+- `dates`: Datum je Zeile von `x` (Date oder umwandelbar), nur bei Matrix-Eingabe für die Aggregation;
+  `nothing` (Standard) = keine Aggregation. Bei `SimLevParamSearch` wird `x["dates"]` verwendet.
+- `seed`: Startwert (Standard `nothing`). Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis
+  reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit `nothing` wird genau einmal ein
+  Startwert aus dem Zufallszustand von SimLev gezogen (siehe `simlev_seed()`), wiederholte Aufrufe liefern
+  dann verschiedene Ergebnisse. `set.seed()` wirkt nicht.
+
+# Rückgabe
+Objekt der Klasse `SimLevRealityCheck`, eine Liste mit `p_rc` (p-Wert Reality Check), `p_spa` (p-Wert SPA,
+konsistente Variante), `p_spa_lower`, `p_spa_upper` (untere und obere SPA-Variante), `best` (Name der Spalte
+mit der höchsten mittleren Überrendite), `mean_excess` (benannter Vektor: mittlere Überrendite je Periode
+gegenüber `benchmark`, Anteil, nicht annualisiert), `n` (Anzahl Perioden), `k` (Anzahl Kandidaten) und `B`.
+Kleiner p-Wert = die beste Strategie schlägt die Benchmark auch nach Berücksichtigung der Auswahl.
+
+# Details
+Eingabe ist eine Parametersuche oder eine Renditematrix mit einer Spalte je Strategie. Mehrere fertige
+Simulationen (Liste von `SimLevResult`) werden vorher zu einer Matrix zusammengefasst, z. B. mit
+`sapply(liste, function(r) { v <- result_index(r)\$value; v[-1] / v[-length(v)] - 1 })` (gleicher Kalender
+aller Läufe vorausgesetzt; Datum dazu `result_index(liste[[1]])\$date[-1]`), siehe Beispiel.
+
+# Literatur
+White, H. (2000), A reality check for data snooping, Econometrica 68(5); Hansen, P. R. (2005), A test for
+superior predictive ability, Journal of Business & Economic Statistics 23(4).
+
+# Beispiel
+```julia
+using SimLev, Random
+R = 0.01 .* randn(MersenneTwister(4), 800, 10); R[:, 2] .+= 0.003   # eine Strategie mit echter Überrendite
+println(overfit_reality_check(R; B = 200, frequency = "day", seed = 1))
+```
 """
 function overfit_reality_check(x; benchmark = nothing, B = 999, block = nothing, frequency = ["week", "day", "month"],
                        dates = nothing, seed = nothing)
@@ -509,7 +698,40 @@ end
 """
     sharpe_min_track_record(x; target = 0, prob = 0.95, frequency = ["week", "day", "month"], ppy = nothing)
 
-Mindestlänge einer Historie (Minimum Track Record Length; R: `sharpe_min_track_record()`).
+Mindestlänge einer Historie (Minimum Track Record Length, Bailey & López de Prado 2012).
+
+Wie viele Perioden braucht es, um mit Wahrscheinlichkeit `prob` sagen zu können, dass die wahre Sharpe Ratio
+über `target` liegt? MinTRL = 1 + (1 - γ_3 SR + (γ_4 - 1)/(4)SR^2) (fracz_probSR - SR^*)^2 Dabei sind SR und
+SR^* Sharpe Ratios je Periode (Mittelwert / Standardabweichung, ohne Abzug eines risikolosen Zinses), γ_3 die
+Schiefe und γ_4 die Wölbung (nicht Exzess) der Renditen. Eingabe ist ein Renditevektor oder eine fertige
+Simulation bzw. Kursreihe.
+
+# Argumente
+- `x`: Renditequelle: numerischer Vektor einfacher Periodenrenditen als Anteil (0.01 = 1 %; nicht endliche
+  Werte werden entfernt), `SimLevResult` aus `simulation()` (bereinigter Wertindex aus `result_index()`) oder
+  `data.frame` mit `date` und einer Wertspalte (`value`, sonst erste numerische Spalte; Niveaus). Die beiden
+  letzten werden in Renditen der `frequency` umgerechnet.
+- `target`: Vergleichs-Sharpe-Ratio SR^* p. a. (Standard 0); intern durch √(ppy) geteilt.
+- `prob`: Geforderte Sicherheit als Anteil (Standard 0.95 = 95 %).
+- `frequency`: Periodenlänge `"week"` (Standard, ISO-Wochen), `"day"` oder `"month"`: bei `SimLevResult` und
+  Tabelle (RFrame) die Aggregation (Wert am Periodenende); bei Vektoren nur für den Standardwert von `ppy`.
+- `ppy`: Perioden je Jahr. `nothing` (Standard) = bei Vektoren 252 (`"day"`), 52 (`"week"`) bzw. 12
+  (`"month"`); sonst geschätzt als (Anzahl Renditen - 1) / (Zeitspanne in Tagen / 365.25).
+
+# Rückgabe
+Benannter numerischer Vektor: `sharpe` (Sharpe Ratio p. a.), `periods` (vorhandene Perioden), `needed_periods`
+(MinTRL in Perioden; `Inf`, wenn die Sharpe Ratio nicht über `target` liegt), `needed_years` (`needed_periods
+/ ppy`), `available_years` (`periods / ppy`) und `sufficient` (1 = `periods >= needed_periods`, sonst 0).
+
+# Literatur
+Bailey, D. H. & Lopez de Prado, M. (2012), The Sharpe ratio efficient frontier, Journal of Risk 15(2).
+
+# Beispiel
+```julia
+using SimLev, Random
+r = 0.002 .+ 0.02 .* randn(MersenneTwister(1), 520)   # 10 Jahre Wochenrenditen
+println(sharpe_min_track_record(r; target = 0, ppy = 52))
+```
 """
 function sharpe_min_track_record(x; target = 0, prob = 0.95, frequency = ["week", "day", "month"], ppy = nothing)
     x = SimLev.as_rframe(x)
@@ -548,8 +770,50 @@ end
 """
     result_heatmap(x; inflation = nothing, max_years = 30)
 
-Annualisierte (reale) Renditen je Startjahr und Haltedauer (R: `result_heatmap()`);
-Ergebnis: `RList` der Klasse `SimLevHeatmap` (`matrix`, `summary`, `real`).
+Renditen je Startjahr und Haltedauer (annualisiert, wahlweise real).
+
+Annualisierte Renditen für jede Kombination aus Startjahr und Haltedauer (wie die Heatmaps von Portfolio
+Charts), wahlweise real. Zeigt auf einen Blick, wie stark das Ergebnis vom Einstiegszeitpunkt abhängt.
+
+# Argumente
+- `x`: Eine Reihe: `SimLevResult` aus `simulation()` (verwendet wird der um Ein- und Auszahlungen bereinigte
+  Wertindex aus `result_index()`) oder `data.frame` mit Spalte `date` und einer Wertspalte (`value`, sonst die
+  erste numerische Spalte; Niveaus, keine Renditen; fehlende Werte werden fortgeschrieben). Eine Liste
+  mehrerer Reihen wird nicht angenommen; dafür die Funktion je Element aufrufen, z. B. `lapply(liste,
+  result_heatmap)`. Bei `print()`/`plot()`: Objekt der Klasse `SimLevHeatmap`.
+- `inflation`: Optional für reale Renditen: `nothing` (Standard) = nominal; eine Zahl = Inflationsrate in
+  Prozent p. a. (2 = 2 %), tageweise aufgezinst mit (1 + i/100)^Tage/365.25; oder ein Preisindex als
+  `data.frame(date, Wert)` (Niveaus, z. B. VPI; jeder Wert gilt ab seinem Datum) bzw. benannter numerischer
+  Vektor mit Datumsnamen. Die Werte werden durch den Index relativ zum Startdatum geteilt.
+- `max_years`: Längste Haltedauer in Jahren (ganze Zahl, Standard 30); höchstens die Zahl der verfügbaren
+  Jahre.
+
+# Rückgabe
+Objekt der Klasse `SimLevHeatmap`, eine Liste mit `matrix` (Zeilen = Startjahr, Spalten = Haltedauer 1, 2, ...
+Jahre; annualisierte Rendite als Anteil, `NA` wenn der Zeitraum über das Datenende hinausgeht), `summary`
+(Tabelle (RFrame) je Haltedauer: `years`, `min`, `median`, `max` (Anteil p. a.), `share_negative` (Anteil
+negativer Zeiträume), `n` (Anzahl Zeiträume)) und `real` (logisch, `true` mit `inflation`). `print()` zeigt
+die Zusammenfassung für 1, 3, 5, 10, 15, 20, 25 und 30 Jahre in Prozent; `plot()` zeichnet die Heatmap
+(Farbskala bei +/- 25 % begrenzt).
+
+# Details
+Grundlage sind die Werte am letzten verfügbaren Tag jedes Kalenderjahrs. Beginnt die Reihe am 1. Januar, ist
+der erste Wert der Startwert des ersten Jahres; sonst beginnt die Tabelle mit dem ersten vollen Jahr (bei
+Handelstagsdaten ohne Wert vom 01.01. also mit dem zweiten). Ein unvollständiges letztes Kalenderjahr entfällt
+(früher wurde es wie ein volles Jahr annualisiert); als vollständig gilt es, wenn das Datenende höchstens um
+die größte Zeilenlücke der Reihe (höchstens 7 Tage) vor dem 31.12. liegt, bei Handelstagen also z. B. der
+30.12. Die Daten werden nach Datum sortiert, doppelte Daten wie in `result_analysis()` behandelt.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 4380
+d = RFrame("date" => Date(2010, 1, 1) .+ Day.(0:n-1))
+d["value"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+hm = result_heatmap(d; inflation = 2, max_years = 10)
+println(size(hm["matrix"]))
+```
 """
 function result_heatmap(x; inflation = nothing, max_years = 30)
     x = SimLev.as_rframe(x)

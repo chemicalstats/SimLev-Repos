@@ -1,8 +1,8 @@
 /*
- * src/slc_r_models.c -- R-Huellen (.Call) der Modelle der C-Bibliothek slc (Etappe 9.4)
+ * src/slc_r_models.c -- R-Huellen (.Call) der Modelle der C-Bibliothek slc
  *
  * Kerne: slc_garch.c, slc_gpd.c, slc_dcc.c, slc_msgarch.c, slc_boot.c (Kopien aus core/,
- * core/sync.py); Registrierung in init.c (Block "9.4"), die R-Seite steht in
+ * core/sync.py); Registrierung in init.c, die R-Seite steht in
  * R/slc_models.R (interne Funktionen .sl_*).
  *
  * Rueckmeldungen wie slc_r.c: Warnungen nach dem Aufruf, Fehler mit Rf_errorcall(R_NilValue, ...)
@@ -153,7 +153,7 @@ SEXP C_sl_garch11_nll(SEXP e, SEXP par, SEXP gjr, SEXP s2i)
     return Rf_ScalarReal(v);
 }
 
-/* N3: GJR-NLL und analytischer Gradient an theta (5 Werte) -> list(value, gradient); N4: auch sGARCH (4 Werte) */
+/* GJR-NLL und analytischer Gradient an theta (5 Werte) -> list(value, gradient); auch sGARCH (4 Werte) */
 SEXP C_sl_garch11_grad(SEXP e, SEXP theta, SEXP gjr, SEXP s2i)
 {
     static const char *nm[] = {"value", "gradient"};
@@ -299,7 +299,7 @@ SEXP C_sl_dcc_fit(SEXP Z, SEXP Qbar)
     return out;
 }
 
-/* ── Backcast (N5) ── */
+/* ── Backcast ── */
 
 /* prob: list(x, c1, c2, lev, sp, dr, pos, logp, opt = c(objective, loss, horizon), hw); x, c2 NULL erlaubt */
 typedef struct { int m, nobs, opt[3]; const double *x, *c1, *c2, *sp, *dr, *logp; const int32_t *pos; double lev, hw; } bc_args;
@@ -402,7 +402,7 @@ SEXP C_sl_ms_garch_nll(SEXP y, SEXP theta, SEXP K, SEXP gjr, SEXP h1)
     return Rf_ScalarReal(v);
 }
 
-/* N1: NLL und analytischer Gradient an theta -> list(value, gradient) */
+/* NLL und analytischer Gradient an theta -> list(value, gradient) */
 SEXP C_sl_ms_garch_grad(SEXP y, SEXP theta, SEXP K, SEXP gjr, SEXP h1)
 {
     static const char *nm[] = {"value", "gradient"};
@@ -473,7 +473,7 @@ SEXP C_sl_ms_garch_estimate(SEXP y, SEXP K, SEXP gjr, SEXP threads)
     el[4] = PROTECT(Rf_allocMatrix(REALSXP, k, k)); el[5] = PROTECT(Rf_allocVector(INTSXP, n));
     el[6] = PROTECT(Rf_allocVector(REALSXP, n));
     ctx_init(&cx);
-    /* N6: Starts auf bis zu threads Threads (Ergebnis unabhängig davon) */
+    /* Starts auf bis zu threads Threads (Ergebnis unabhängig davon) */
     st = sl_msgarch_estimate_mt(&cx, n, dvec(y, -1, "y"), k, g, REAL(el[0]), REAL(el[1]), REAL(el[2]), REAL(el[3]),
                                 REAL(el[4]), (int32_t *) INTEGER(el[5]), REAL(el[6]), &ll, &code, i1(threads, "threads"));
     finish(&cx, st, 7);

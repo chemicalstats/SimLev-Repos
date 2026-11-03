@@ -1,9 +1,9 @@
-"""Bau der C/C++-Erweiterung ``simlev._ext`` (Etappe 7.2, seit 7.3a ein Modul für alle Kerne).
+"""Bau der C/C++-Erweiterung ``simlev._ext`` (ein Modul für alle Kerne).
 
-Alle übrigen Angaben stehen in ``pyproject.toml``. Seit Etappe 9.1 ist die Erweiterung
-Pflicht (``optional=False``, Entwurf C.2): Sie enthält die C-Bibliothek slc (Zufall,
+Alle übrigen Angaben stehen in ``pyproject.toml``. Seit 1.0.0 ist die Erweiterung
+Pflicht (``optional=False``): Sie enthält die C-Bibliothek slc (Zufall,
 Verteilungen), die es nur in C gibt. Ohne C-Compiler scheitert die Installation mit der
-Meldung von setuptools. Seit Etappe 9.6c gibt es auch keine reinen Python-Kerne als Rückfall
+Meldung von setuptools. Seit 1.0.0 gibt es auch keine reinen Python-Kerne als Rückfall
 mehr (kein Schalter ``SIMLEV_NO_EXT``).
 
 Quellen der C-Bibliothek slc: ``src/core/slc*.{c,h}`` sind Byte-für-Byte-Kopien der
@@ -11,23 +11,23 @@ kanonischen Dateien in ``core/`` (``core/sync.py --check``), die Hülle
 ``src/_ext_slc.c`` gibt es nur hier.
 
 Quellen: die geteilten Kerne ``src/core/*_core_impl.h`` und ``src/core/simlev_core.h`` sind
-seit Etappe 9.6c (F16) ebenfalls Byte-für-Byte-Kopien der kanonischen Dateien in ``core/``
+seit 1.0.0 ebenfalls Byte-für-Byte-Kopien der kanonischen Dateien in ``core/``
 (``core/sync.py --check``); die Python-Hüllen ``src/_ext*.cpp`` gibt es nur hier. Die
 früheren Kerne mit R-Zufall, die C-Übernahmen und die C-Nachbildung von R's Zufall
-(``_rng_r.c``) sind mit Etappe 9.6c entfallen.
+(``_rng_r.c``) sind seit 1.0.0 entfallen.
 
-Gleitkomma-Einstellungen wie im R-Paket: ``-O2`` (R: ``R CMD config CFLAGS`` bzw.
+Gleitkomma-Einstellungen wie in den Builds von R und Julia: ``-O2`` (R: ``R CMD config CFLAGS`` bzw.
 ``CXXFLAGS``), kein ``-ffast-math``, kein Zusammenziehen zu fma
 (``-ffp-contract=off``; die Kerndateien setzen dafuer unter GCC ein Pragma nur dort,
 wo fma erzeugt werden kann, und lassen es mit ``SIMLEV_FP_CONTRACT_BY_FLAG`` weg); C++
 wie R mit ``-std=gnu++17``; die C-Bibliothek slc wie R (``r/src/Makevars``) mit ``-std=c99``
-(Etappe 9.1, gleiche Flags in allen drei Builds: ``-O2 -std=c99 -ffp-contract=off -fno-fast-math``;
+(gleiche Flags in allen drei Builds: ``-O2 -std=c99 -ffp-contract=off -fno-fast-math``;
 die übrigen C-Dateien unverändert); unter
 MSVC ``/O2 /fp:precise /std:c++17`` (zu prüfen: ob MSVC unter ``/fp:precise`` zusammenzieht,
 sonst ``/fp:contract-``). Wie R ohne
 ``-fwrapv``: Python übersetzt Erweiterungen mit ``-fno-strict-overflow`` (= ``-fwrapv``);
 ``-fstrict-overflow`` (sofern der Compiler es kennt) stellt die Übersetzung der Schleifen
-wie in R her (Etappe 7.3a, Engine-Kerne).
+wie in R her (Engine-Kerne).
 """
 import glob
 import os
@@ -51,18 +51,18 @@ SHARED_HEADERS = ["core/simlev_core.h", "core/research_core_impl.h", "core/withd
                   "core/prepare_core_impl.h", "core/evaluate_core_impl.h"]
 # Python-Huellen (nur hier)
 WRAPPERS = ["_ext.cpp", "_ext_research.cpp", "_ext_withdrawal.cpp", "_ext_engine.cpp"]
-# C-Bibliothek slc (Etappe 9.1): Kopien aus core/ und die Hülle _ext_slc.c
+# C-Bibliothek slc: Kopien aus core/ und die Hülle _ext_slc.c
 _HERE = os.path.dirname(os.path.abspath(__file__))
 SLC = sorted(os.path.relpath(f, os.path.join(_HERE, "src")).replace(os.sep, "/")
              for f in glob.glob(os.path.join(_HERE, "src", "core", "slc*.c")))
 SLC_HEADERS = sorted(os.path.relpath(f, os.path.join(_HERE, "src")).replace(os.sep, "/")
                      for f in glob.glob(os.path.join(_HERE, "src", "core", "slc*.h")))
 SLC_WRAPPERS = ["_ext_slc.c"]
-# 9.2: Hülle der Etappe 9.2 (lineare Algebra, Matrixprodukt, kleinste Quadrate, Stineman, Spline, Kerndichte)
+# Hülle der linearen Algebra (Matrixprodukt, kleinste Quadrate, Stineman, Spline, Kerndichte)
 SLC_WRAPPERS += ["_ext_slc_linalg.c"]
-SLC_WRAPPERS += ["_ext_slc_opt.c"]   # 9.3: Hülle der Optimierer
-SLC_WRAPPERS += ["_ext_slc_models.c"]   # 9.4: Hülle der Modelle (GARCH/GJR, GPD, DCC, MS-GARCH, Bootstrap)
-SLC_WRAPPERS += ["_ext_slc_rbase.c"]   # N8: Hülle der Grundfunktionen mit R-Regeln (core/slc_rbase*)
+SLC_WRAPPERS += ["_ext_slc_opt.c"]   # Hülle der Optimierer
+SLC_WRAPPERS += ["_ext_slc_models.c"]   # Hülle der Modelle (GARCH/GJR, GPD, DCC, MS-GARCH, Bootstrap)
+SLC_WRAPPERS += ["_ext_slc_rbase.c"]   # Hülle der Grundfunktionen mit R-Regeln (core/slc_rbase*)
 HEADERS = SHARED_HEADERS + ["_ext_common.h"] + SLC_HEADERS
 
 
@@ -89,8 +89,8 @@ def _is_slc(src):
     """Quellen der C-Bibliothek slc (Kopien in src/core/ und die Hülle _ext_slc.c)."""
     p = src.replace(os.sep, "/")
     return ("/core/slc" in p or p.endswith("_ext_slc.c") or p.endswith("_ext_slc_linalg.c")
-            or p.endswith("_ext_slc_opt.c") or p.endswith("_ext_slc_models.c")  # 9.1-9.4
-            or p.endswith("_ext_slc_rbase.c"))  # N8
+            or p.endswith("_ext_slc_opt.c") or p.endswith("_ext_slc_models.c")
+            or p.endswith("_ext_slc_rbase.c"))
 
 
 class BuildExt(build_ext):
@@ -129,11 +129,11 @@ setup(
             depends=["src/" + f for f in HEADERS],
             include_dirs=["src"],
             # Gleitkomma ueber die Flags (-ffp-contract=off); das Pragma der Kerndateien entfaellt
-            # N6: außer unter Windows mit Threads für die parallelen Starts des MS-GARCH-Fits (wie r/src/Makevars)
+            # außer unter Windows mit Threads für die parallelen Starts des MS-GARCH-Fits (wie r/src/Makevars)
             define_macros=[("SIMLEV_FP_CONTRACT_BY_FLAG", "1")] + ([] if sys.platform == "win32" else [("SLC_THREADS", "1")]),
             language="c++",
-            libraries=[] if sys.platform == "win32" else ["m", "pthread"],   # exp, log aus der libm; N6: pthread
-            optional=False,     # Pflicht seit Etappe 9.1 (C-Bibliothek slc)
+            libraries=[] if sys.platform == "win32" else ["m", "pthread"],   # exp, log aus der libm; pthread
+            optional=False,     # Pflicht seit 1.0.0 (C-Bibliothek slc)
         )
     ],
     cmdclass={"build_ext": BuildExt},

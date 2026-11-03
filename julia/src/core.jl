@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Simulationszustand und Rechenkerne
 #
-# Zustand der Simulation (Lots, Verkäufe, Status, Markt, Report, Töpfe); die Tagesengine rechnet seit E17
+# Zustand der Simulation (Lots, Verkäufe, Status, Markt, Report, Töpfe); die Tagesengine rechnet
 # im gemeinsamen C++-Kern core/engine_core_impl.h (sim_engine.jl). Assets werden über ihren Index
 # (Reihenfolge der Strategie) angesprochen.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,9 +127,9 @@ struct Sim
 end
 
 
-# Die Tagesengine rechnet seit E17 im gemeinsamen Kern core/engine_core_impl.h (sim_engine.jl, flache
+# Die Tagesengine rechnet im gemeinsamen Kern core/engine_core_impl.h (sim_engine.jl, flache
 # Eingabe); die früheren Engine-Kerne simulation_core_impl.h, fifo_core_impl.h und tax_core_impl.h, die über
-# die C-ABI-Hülle direkt auf diesen Strukturen rechneten (Feldlagen geprüft), sind mit Stufe 1c entfallen.
+# die C-ABI-Hülle direkt auf diesen Strukturen rechneten (Feldlagen geprüft), sind seit 1.4.0 entfallen.
 
 "Bereichsprüfung eines 1-basierten Index (Hüllen der Kerne)."
 @inline _need(i::Int, n::Int) = (1 <= i <= n) || throw(BoundsError(1:n, i))

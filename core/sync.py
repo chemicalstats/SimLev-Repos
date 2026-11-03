@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""core/sync.py – Kopien der C-Quellen abgleichen (Etappe 9, Entwurf C.1, F16; bis T20 core_sync.py).
+"""core/sync.py – Kopien der C-Quellen abgleichen (bis 1.4.0 ``core_sync.py``).
 
 Kanonisch sind die Dateien in ``core/`` (nur dort ändern). Die Pakete bauen nur aus ihrem
 Teilbaum und bekommen daher Byte-für-Byte-Kopien:
@@ -10,13 +10,13 @@ Teilbaum und bekommen daher Byte-für-Byte-Kopien:
       python/src/core/
       julia/deps/core/
 
-* geteilte Kerne (seit Etappe 9.6c: ``core/simlev_core.h`` und ``core/*_core_impl.h``: Engine, FIFO,
-  Steuer, Research, Entnahme) nach ``r/src/``, ``python/src/core/`` und (seit N7) ``julia/deps/core/``;
-* die C-ABI-Hülle der geteilten Kerne für Julia (N7: ``core/simlev_cabi.cpp``) nur nach
+* geteilte C++-Kerne (``core/simlev_core.h`` und ``core/*_core_impl.h``: Tagesengine mit Vorbereitung
+  und Auswertung, Tarif, Research, Entnahme) nach ``r/src/``, ``python/src/core/`` und ``julia/deps/core/``;
+* die C-ABI-Hülle der geteilten Kerne für Julia (``core/simlev_cabi.cpp``) nur nach
   ``julia/deps/core/``;
-* die Grundfunktionen mit R-Regeln (N8: ``core/slc_rbase*``) nur nach ``python/src/core/`` und
-  ``julia/deps/core/`` (R rechnet sie selbst); seit E17 ``slc_rbase.c`` und ``slc_rbase.h`` auch nach
-  ``r/src/`` (``sl_r_sum`` für die Tagesengine ``core/engine_core_impl.h``).
+* die Grundfunktionen mit R-Regeln (``core/slc_rbase*``) nur nach ``python/src/core/`` und
+  ``julia/deps/core/`` (R rechnet sie selbst); nur ``slc_rbase.c`` und ``slc_rbase.h`` auch nach
+  ``r/src/`` (``sl_r_sum`` und ``sl_r_zeroin2`` für Tagesengine und Auswertung von ``simulation()``).
 
 Aufruf::
 
@@ -39,11 +39,11 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 CORE = os.path.join(ROOT, "core")
 TARGETS = [os.path.join(ROOT, "r", "src"), os.path.join(ROOT, "python", "src", "core"),
            os.path.join(ROOT, "julia", "deps", "core")]
-# geteilte Kerne (9.6c, F16): R und Python, seit N7 auch Julia
+# geteilte Kerne: R, Python und Julia
 SHARED_TARGETS = TARGETS
-# C-ABI-Hülle der geteilten Kerne (N7): nur Julia
+# C-ABI-Hülle der geteilten Kerne: nur Julia
 CABI_TARGETS = TARGETS[2:]
-# frühere Orte der Python-Kopien der geteilten Kerne (bis 9.6c python/src/): dort darf keine mehr liegen
+# früherer Ort der Python-Kopien der geteilten Kerne (vor 1.0.0 python/src/): dort darf keine mehr liegen
 OLD_SHARED = [os.path.join(ROOT, "python", "src")]
 
 
@@ -52,8 +52,8 @@ def is_slc(f: str) -> bool:
 
 
 def is_rbase(f: str) -> bool:
-    """N8: Grundfunktionen mit R-Regeln (slc_rbase*) nur für Python und Julia; R rechnet sie selbst.
-    Ausnahme E17: slc_rbase.c/.h (sl_r_sum für die Summen der Tagesengine, core/engine_core_impl.h)
+    """Grundfunktionen mit R-Regeln (slc_rbase*) nur für Python und Julia; R rechnet sie selbst.
+    Ausnahme slc_rbase.c/.h (sl_r_sum für die Summen der Tagesengine, core/engine_core_impl.h)
     gehen auch nach r/src/."""
     return f.startswith("slc_rbase") and f not in ("slc_rbase.c", "slc_rbase.h")
 
@@ -64,7 +64,7 @@ def is_shared(f: str) -> bool:
 
 
 def is_cabi(f: str) -> bool:
-    """C-ABI-Hülle der geteilten Kerne (N7, nur Julia)."""
+    """C-ABI-Hülle der geteilten Kerne (nur Julia)."""
     return f == "simlev_cabi.cpp"
 
 
@@ -92,10 +92,10 @@ def stale(target: str, files: list[str]) -> list[str]:
     if not os.path.isdir(target):
         return []
     keep = set(files) | {"slc_r.c"}
-    keep |= {"slc_r_linalg.c"}  # 9.2: R-Huelle der Etappe 9.2 (keine Kopie aus core/)
+    keep |= {"slc_r_linalg.c"}  # R-Hülle der linearen Algebra (nur in r/src/)
 
-    keep |= {"slc_r_opt.c"}   # 9.3: R-Hülle der Optimierer (nur in r/src/)
-    keep |= {"slc_r_models.c"}   # 9.4: R-Hülle der Modelle (nur in r/src/)
+    keep |= {"slc_r_opt.c"}   # R-Hülle der Optimierer (nur in r/src/)
+    keep |= {"slc_r_models.c"}   # R-Hülle der Modelle (nur in r/src/)
     return sorted(f for f in os.listdir(target)
                   if (is_slc(f) or is_shared(f) or is_cabi(f)) and f not in keep)
 

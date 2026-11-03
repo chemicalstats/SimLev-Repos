@@ -1,18 +1,18 @@
 # Arbeitslast beim Vorkompilieren: Maschinencode für die Engine und die öffentlichen Hauptfunktionen der
-# Erweiterungen – für die üblichen Argumenttypen – landet im Paket-Cache. Ziel (J15b): Jede Hauptfunktion
+# Erweiterungen – für die üblichen Argumenttypen – landet im Paket-Cache. Ziel: Jede Hauptfunktion
 # braucht beim ersten Aufruf in einem frischen Prozess höchstens etwa 1 s. Ganz so schnell wie spätere
 # Aufrufe wird der erste nicht: Laden des Caches, Laufzeit-Dispatch und Methoden für andere Argumenttypen
 # (etwa die Eingangsfunktion für eine NamedTuple mit anderen Spaltennamen oder Pfade, die die Arbeitslast
 # nicht berührt) kosten weiterhin Übersetzungszeit.
 #
 # Daten wie beim Aufrufer: NamedTuple mit Spalte date (Vector{Date}) und Kursen (Vector{Float64}), dazu
-# RFrame, RList, NamedMat und Matrizen. Seit E17 rechnen Tagesengine, Vorbereitung und Auswertung von
+# RFrame, RList, NamedMat und Matrizen. rechnen Tagesengine, Vorbereitung und Auswertung von
 # simulation() im C++-Kern; die Arbeitslast der Engine deckt die Kernhüllen (_sim_engine_run!, die Texte der
 # Ereignisse in _sim_engine_signal mit und ohne details, _sim_evaluate, calculate_dates_flags, xirr_rate) und
 # die Ausgabe ab, die früheren Wege der Julia-Tagesschleife nicht mehr (details nur noch in zwei Läufen statt
-# für jede Variante). Die Erweiterungen decken je Modul die Hauptfunktion mit kleinen Daten ab (J15b; bis
+# für jede Variante). Die Erweiterungen decken je Modul die Hauptfunktion mit kleinen Daten ab (bis
 # 1.3.0 nur Bootstrap, GARCH, MS-GARCH, Entnahme ohne Steuer, Optimierung auf Renditematrizen und
-# result_analysis, Etappe 4.8).
+# result_analysis).
 #
 # Was die Arbeitslast nur über Laufzeit-Dispatch erreicht, nennt precompile_statements.jl ausdrücklich (sonst
 # fehlt es im Cache, siehe dort).
@@ -26,7 +26,7 @@
 # `_precompile_ext(; strict = true)` meldet Fehler (für Tests). Abschalten:
 # SIMLEV_SKIP_PRECOMPILE=1 (alles), SIMLEV_SKIP_PRECOMPILE_EXT=1 (Erweiterungen).
 
-include("precompile_statements.jl")   # J15b: ausdrückliche Übersetzungsanweisungen (aus Traces)
+include("precompile_statements.jl")   # ausdrückliche Übersetzungsanweisungen (aus Traces)
 
 "Arbeitslast für die Erweiterungsmodule (je Modul die Hauptfunktionen)."
 function _precompile_ext(; strict::Bool = false)
@@ -76,7 +76,7 @@ function _precompile_ext(; strict::Bool = false)
         step("ms_garch") do
             MsGarch._ms_garch_fit(rb[1:300], 2, "gjrGARCH")
         end
-        # Withdrawal: Regeln, Steuer mit Satz und mit Tarifweg (T14), historische Kohorten
+        # Withdrawal: Regeln, Steuer mit Satz und mit Tarifweg, historische Kohorten
         step("withdrawal") do
             R = reshape([1.0 + 0.05 * sin(i) for i in 1:60], 20, 3)
             for rule in ("constant", "guyton_klinger", "vpw")
@@ -199,7 +199,7 @@ function _precompile_engine()
     # Kernhüllen außerhalb von simulation(): Termine und Zinsfuß
     calculate_dates_flags(true, 1, "month", nothing, dates)
     xirr_rate([0.0, 0.5, 1.0], [1000.0, -200.0, 300.0], 1500.0, 2.0)
-    # Fonds-Wrapper (Etappe 6.5c): Anteilswert und Wrapper-Asset in simulation()
+    # Fonds-Wrapper: Anteilswert und Wrapper-Asset in simulation()
     w = wrapper_config(s2; rebalance = rebalance_plan(; unit = "quarter"), costs = funds_costs(0.95, 10))
     sprint(show, MIME"text/plain"(), w)
     sprint(show, MIME"text/plain"(), wrapper_nav(data, w))

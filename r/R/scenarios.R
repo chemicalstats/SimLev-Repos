@@ -185,7 +185,7 @@ scenario_entropy_pooling <- function(x, assets, views, states = NULL, frequency 
   gr <- function(l) { q <- dual(l)$q; b - drop(A %m% q) }
   lower <- ifelse(ineq, 0, -Inf)
   o <- .sl_optim(rep(0, length(b)), fn, gr, method = "L-BFGS-B", lower = lower,
-                 control = list(maxit = 5000, factr = 1e3, pgtol = 1e-12))   # projizierter BFGS (slc, Entwurf B.8)
+                 control = list(maxit = 5000, factr = 1e3, pgtol = 1e-12))   # projizierter BFGS (slc)
   q <- dual(o$par)$q
   viol <- drop(A %m% q) - b; viol[ineq] <- pmax(viol[ineq], 0)
   if (max(abs(viol)) > 1e-4 * max(1, abs(b))) warning(sprintf("Annahmen nicht vollst\u00e4ndig erf\u00fcllbar (Abweichung %.2e).", max(abs(viol))))
@@ -294,7 +294,7 @@ scenario_copula <- function(x, assets, n = 10000L, family = c("t", "gaussian"), 
                      a, paste(format(b), collapse = ", "))) }
   }
   sim <- {
-    rs <- .sl_main_stream(seed)                                 # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+    rs <- .sl_main_stream(seed)                                 # Hauptstrom
     st <- if (is.null(stress)) integer(0) else match(names(stress), assets)
     Z <- matrix(0, n, k)
     if (length(st) == 1) {

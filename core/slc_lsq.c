@@ -1,5 +1,5 @@
 /* core/slc_lsq.c – kleinste Quadrate (Householder-QR mit begrenzter Spaltenpivotisierung) und
- * Logit-IRLS (SimLev core, Etappe 9.2)
+ * Logit-IRLS (SimLev core)
  * Verfahren:  sl_lsfit: die Zeilen von X und y werden mit sqrt(w_i) skaliert; dann Householder-QR
  *             (Golub/Van Loan 2013, §5.1.2–5.1.3, §5.2.2): je Schritt k der Spiegel
  *             H = I - beta v v' mit v = x + sign(x_1) ||x|| e_1 (ohne Auslöschung), beta =

@@ -1,12 +1,12 @@
 // core/engine_core_impl.h
-// Tagesengine von simulation() als gemeinsamer C++-Kern (E17): eigener Zustand, Ereignisprotokoll und
-// Tagesschleife mit Abschluss des letzten Jahres. Stufe 1a: Batch- und Marktupdate, Aktivierung, Sparplan,
-// Handel, Rebalancing und Liquidation; Stufe 1b: Steuerphasen (Jahreswechsel mit § 23, § 20-Erstattung und
+// Tagesengine von simulation() als gemeinsamer C++-Kern: eigener Zustand, Ereignisprotokoll und
+// Tagesschleife mit Abschluss des letzten Jahres: Batch- und Marktupdate, Aktivierung, Sparplan,
+// Handel, Rebalancing und Liquidation; Steuerphasen (Jahreswechsel mit § 23, § 20-Erstattung und
 // Tarif-Veranlagung samt Guenstigerpruefung ueber tariff_core_impl.h, Vorabpauschale mit Festsetzung am 31.12.
 // und Zufluss im Folgejahr, § 23-Zahlung, Zahlungen mit Zwangsverkauf), Splits, Freibetrag (Harvest) und der
-// Abschluss des letzten Jahres mit Probelauf; Stufe 1c: details-Ausgaben als Ereignisse mit Werten (DT_*), seitdem
-// rechnet der Kern alle Laeufe (R: .sim_engine_run in r/R/sim_engine.R, Python: simlev/_sim_engine.py, Julia:
-// src/sim_engine.jl; die bisherigen Engines der Sprachen und ihre Engine-Kerne sind entfallen). Stufe 2: die
+// Abschluss des letzten Jahres mit Probelauf; details-Ausgaben als Ereignisse mit Werten (DT_*). Der Kern
+// rechnet alle Laeufe (R: .sim_engine_run in r/R/sim_engine.R, Python: simlev/_sim_engine.py, Julia:
+// src/sim_engine.jl; die bis 1.3.0 eigenen Engines der Sprachen und ihre Engine-Kerne sind entfallen). Die
 // Vorbereitung (Termine, Tagesflags, Startgewichte) rechnet prepare_core_impl.h vor dem Lauf (setup_prepared).
 //
 // Herkunft:           uebersetzt aus SimLev 1.3.0, r/R/sim_loop.R (.sim_run_days, .sim_day_activate,
@@ -78,7 +78,7 @@
 
 namespace simlev_engine {
 
-// ── Tagesflags (Bitmaske je Tag; seit E17 Stufe 2 aus der Vorbereitung prepare_core_impl.h) ─────────────
+// ── Tagesflags (Bitmaske je Tag; aus der Vorbereitung prepare_core_impl.h) ─────────────
 enum DayFlag : uint32_t {
   F_SLOW = 1u << 0,        // flag_slow_path (TRUE)
   F_YEAR = 1u << 1,        // flag_year_change
@@ -107,7 +107,7 @@ enum CfgInt {
   CI_HAS_MARGINAL,    // marginal_tax_rate nicht NULL
   CI_STOPP_YEAR,      // Jahr von stopp_date
   CI_HAS_ZVE_ALL,     // Tarifweg: eine Zahl fuer alle Jahre (cd[CD_ZVE_ALL])
-  CI_DETAILS,         // details = TRUE: details-Ausgaben als Ereignisse (Stufe 1c)
+  CI_DETAILS,         // details = TRUE: details-Ausgaben als Ereignisse
   CI_N
 };
 enum CfgDbl {
@@ -158,7 +158,7 @@ enum EventCode : int {
   EV_MARGINAL = 6,      // Warnung .handle_year_change: marginal_tax_rate fehlt; d0 Jahressaldo, d1 Freigrenze
   EV_NA_COND = 100,     // Fehler: NA in einer Bedingung (site = Stelle)
   EV_SPLIT_RATIO = 101, // Fehler .perform_asset_split: ratio <= 0; d0 ratio
-  // details-Ausgaben (Stufe 1c): Werte in ev_vals[v_off ..], Ganzzahlen (Asset-Indizes bzw. Jahre) in
+  // details-Ausgaben: Werte in ev_vals[v_off ..], Ganzzahlen (Asset-Indizes bzw. Jahre) in
   // ev_ints[y_off ..]; Texte in den Hosts wortgleich zu den bisherigen cat()-Aufrufen von R
   DT_BUY = 201,         // .perform_trade_buy: aux Anlass (RS_*); v: Menge, Preis
   DT_SELL_VP = 202,     // .perform_trade_sell: Vorabpauschale-Anrechnung; v: Betrag
@@ -220,7 +220,7 @@ enum Reason : int {
 enum Label : int { LBL_VP = 0, LBL_P23 = 1, LBL_VERANLAGUNG = 2 };
 
 // Stellen (site) der Aufrufe bzw. Bedingungen (Anlass der Verkaeufe, sell_reason; bis R 1.3.0 ordnete R jeder
-// Stelle den Aufruf der Phase zu, seit C19 tragen die Bedingungen den Aufruf von simulation())
+// Stelle den Aufruf der Phase zu, seit 1.4.1 tragen die Bedingungen den Aufruf von simulation())
 enum Site : int {
   // Kaeufe (.perform_trade_buy)
   S_BUY_FEE_START = 1,  // .buy_with_fee: Startkapital am ersten Tag (sim_actions.R)
@@ -241,7 +241,7 @@ enum Site : int {
   S_SPLIT_REV = 19,     // Reverse-Split
   // Bedingungen mit moeglichem NA (if)
   C_BUYSIG_1 = 21,      // .calculate_buy_signal, erste Regel (Signal-Einstieg)
-  C_BUYSIG_2 = 22,      // .calculate_buy_signal, zweite Regel (offene Position, A7-09)
+  C_BUYSIG_2 = 22,      // .calculate_buy_signal, zweite Regel (offene Position)
   C_BUYSIG_3 = 23,      // .calculate_buy_signal, Buy-and-Hold
   C_SELLSIG = 24,       // .calculate_sell_signal
   C_BWF_START = 25,     // .buy_with_fee: time == 1L && money - dca_part > 0.005
@@ -264,7 +264,7 @@ enum Site : int {
   C_LIQ_COUNT = 42,     // .sim_day_liquidate: count > 0
   C_LIQ_LEFT = 43,      // .sim_day_liquidate: count > 0 nach dem Verkauf
   C_SLOW_NA = 44,       // .sim_run_days: if (!flag_slow_path[time]) mit NA
-  // Stufe 1b
+  // Steuerphasen
   C_PS_NET = 45,        // .perform_trade_sell: net_by != 0
   C_PS_GAIN = 46,       // .perform_trade_sell: lot_result$taxable_gain > 0
   C_PS_LOSS = 47,       // .perform_trade_sell: lot_result$taxable_loss > 0
@@ -315,7 +315,7 @@ enum Site : int {
   C_CY_PREPAID = 92,    // .sim_close_years: prepaid[j] > 0
   C_CY_GP = 93,         // .sim_close_years: isTRUE(use_gp) && y_last > Jahr && cgt_base_taxed_ytd > 0
   C_VT_SHARE = 94,      // .vp_taxes: sum(taxable) > 0
-  // Stufe 1c: Bedingungen, die R nur mit details = TRUE auswertet
+  // Bedingungen, die R nur mit details = TRUE auswertet
   C_D_VP = 95,          // .perform_trade_sell: vorabpauschale_paid > 0
   C_D_SPB = 96,         // .perform_trade_sell: result$spb_used > 0
   C_D_EXG = 97,         // .perform_trade_sell: lot_result$exempt_gain > 0
@@ -496,7 +496,7 @@ class Engine {
     px_changed.assign((std::size_t) na, 0);
   }
 
-  // E17 Stufe 2: Vorbereitung (prepare_core_impl.h) aus den flachen Angaben F, dann setup(). Aus I gelten
+  // Vorbereitung (prepare_core_impl.h) aus den flachen Angaben F, dann setup(). Aus I gelten
   // day, price, sig_buy, sig_sell, ai (Stil, no_split; Startindizes setzt die Vorbereitung), ad (share) und
   // reports (Tag 1 setzt die Vorbereitung); I.flags, I.dca_n und I.st0 werden hier gesetzt.
   // Rueckgabe wie setup(), 10 + Code von simlev_prepare::prepare bei fehlerhaften Angaben.
@@ -932,7 +932,7 @@ class Engine {
       if (rem > 0) {
         const double s = std::min(rem, ut);
         const double lot_vp = b.has_vp ? b.vp : 0.0;
-        if (rem > 0 && lot_vp > 0) tv = simlev_add(tv, simlev_mul(s, simlev_div(lot_vp, rem)));   // F9: Basis = remaining
+        if (rem > 0 && lot_vp > 0) tv = simlev_add(tv, simlev_mul(s, simlev_div(lot_vp, rem)));   // Basis = remaining
         ut = simlev_sub(ut, s);
       }
     }
@@ -976,7 +976,7 @@ class Engine {
       const double rem = b.remaining;
       if (rem > 0) {
         const double red = std::min(rem, ur);
-        if (b.has_vp && b.vp > 0 && rem > 0) b.vp = simlev_mul(b.vp, 1.0 - simlev_div(red, rem));   // F9
+        if (b.has_vp && b.vp > 0 && rem > 0) b.vp = simlev_mul(b.vp, 1.0 - simlev_div(red, rem));
         b.remaining = simlev_sub(rem, red);
         ur = simlev_sub(ur, red);
       }

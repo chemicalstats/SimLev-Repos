@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Backtest-Engine (Port von simulation() aus SimLev 0.5.0)
+# Backtest-Engine: simulation() mit Vorbereitung, Kern-Aufruf und Auswertung (Gegenstück zu r/R/simulation.R und python/simlev/engine.py)
 #
 # Die Struktur folgt den Phasen des R-Pakets (simulation.R, sim_base.R, sim_validate.R,
 # sim_prepare.R, sim_engine.R, sim_evaluate.R), damit beide
@@ -8,9 +8,9 @@
 #   1. _sim_check_inputs   Eingabeprüfung, Steuer- und Gebühreneinstellungen
 #   2. _sim_prepare_data   Kalenderraster, LOCF; _sim_build_state (sim_mem);
 #      _sim_build_calendar (Angaben der Termine, Ereignis-Spalte, Prüfungen)
-#   3.-5. _sim_engine_run! Termine, Tages-Flags und Startgewichte (core/prepare_core_impl.h, E17 Stufe 2; bis dahin
+#   3.-5. _sim_engine_run! Termine, Tages-Flags und Startgewichte (core/prepare_core_impl.h; bis 1.3.0
 #      _sim_build_calendar, _sim_init_weights!, _sim_build_schedule!), Tagesschleife und Abschluss des letzten
-#      Jahres im gemeinsamen C++-Kern (core/engine_core_impl.h, E17; bis Stufe 1c _sim_run_days! und _sim_close_years!)
+#      Jahres im gemeinsamen C++-Kern (core/engine_core_impl.h; bis 1.3.0 _sim_run_days! und _sim_close_years!)
 #   6. _sim_returns, _sim_risk_stats, _sim_undefined_metrics, _sim_result
 #
 # Tagesindizes (`time`) sind wie in R 1-basiert. Hier stehen die Terminangaben, der
@@ -57,7 +57,7 @@ end
 # Datumswerte
 # ═══════════════════════════════════════════════════════════════════════════
 
-"`as.Date(s, format = \"%Y-%m-%d\")` wie R's strptime (Ziffernfelder, Rest ignoriert; N10: core/slc_rbase_date.c)."
+"`as.Date(s, format = \"%Y-%m-%d\")` wie R's strptime (Ziffernfelder, Rest ignoriert; core/slc_rbase_date.c)."
 _r_strptime_ymd(s::AbstractString) = _rb_strptime_ymd(s, '-')
 
 "`as.Date(x)` für einen Wert (Text JJJJ-MM-TT bzw. JJJJ/MM/TT, Datum, Zahl); nothing = NA."
@@ -124,10 +124,10 @@ end
 # Termine und Flags
 # ═══════════════════════════════════════════════════════════════════════════
 
-# E17 Stufe 2: die Termine rechnet der Kern core/prepare_core_impl.h (dates_flags, Monatsarithmetik wie seq.Date)
+# die Termine rechnet der Kern core/prepare_core_impl.h (dates_flags, Monatsarithmetik wie seq.Date)
 const _Sched = Tuple{Vector{Int32},Float64,Vector{Float64},Vector{Int32}}
 
-"""Angaben eines Terminplans für den Kern (E17 Stufe 2): (si, start, days, dcode) wie `.sched_spec` in R; den Schritt
+"""Angaben eines Terminplans für den Kern: (si, start, days, dcode) wie `.sched_spec` in R; den Schritt
 liest R aus `"<span> months"` (`as.integer`), den Tag von `days` für anchor = "start" aus `as.Date("2000-1-<days>")`
 (0 = NA). Ohne days sind days und dcode leer (si[6] = 0)."""
 function _sched_spec(mode, span, unit, days, dates::Vector{Int}, value, anchor, start_date, skip_start)::_Sched
@@ -253,7 +253,7 @@ _message(s::AbstractString) = println(SimLev.RParallel.r_stderr(), s)
 # Tarifweg (taxable_income, tax_tariff)
 # ═══════════════════════════════════════════════════════════════════════════
 
-# plan_ok (T14, income_tariff()): ein Vektor ohne Namen (ein Wert je Planjahr von withdrawal_simulation()) ist zulässig;
+# plan_ok (income_tariff()): ein Vektor ohne Namen (ein Wert je Planjahr von withdrawal_simulation()) ist zulässig;
 # Ergebnis dann mit plan (Werte)
 function _check_taxable_income(x, years::Vector{Int}, who::String = "simulation"; plan_ok::Bool = false)
     @nospecialize
@@ -330,7 +330,7 @@ end
 const _XIRR_WARN = ("-Inf replaced by maximally negative value", "NA/Inf replaced by maximum positive value",
                     "_NOT_ converged in 1000 iterations")
 
-"`.xirr_rate()`: interner Zinsfuß p. a. (Brent über u = T log(1 + r)); seit E17 Stufe 3 im C++-Kern
+"`.xirr_rate()`: interner Zinsfuß p. a. (Brent über u = T log(1 + r)); im C++-Kern
 (core/evaluate_core_impl.h, `simlev_c_xirr`), Warnungen von `uniroot` mit den Texten von R."
 function xirr_rate(t::Union{Real,AbstractVector}, amount::Union{Real,AbstractVector}, end_value::Real, horizon::Real)
     tt = Float64[x for x in t]; aa = Float64[x for x in amount]
@@ -382,7 +382,7 @@ function calculate_dates_flags(mode, span, unit, days, dates; value = nothing, a
 end
 
 include("sim_phases.jl")
-include("sim_engine.jl")   # E17: Tagesengine im C++-Kern
+include("sim_engine.jl")   # Tagesengine im C++-Kern
 include("sim_evaluate.jl")
 include("sim_blocks.jl")
-include("wrapper.jl")       # Fonds-Wrapper (Etappe 6.5c): Anteilswert über simulation()
+include("wrapper.jl")       # Fonds-Wrapper: Anteilswert über simulation()

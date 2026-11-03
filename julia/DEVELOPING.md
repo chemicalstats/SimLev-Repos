@@ -1,17 +1,43 @@
 # Entwicklung der Julia-Fassung
 
-Die Julia-Fassung ist ein bitgleicher Port des R-Pakets SimLev 0.5.0 (Ordner
-`r/`) und rechnet dieselben IEEE-754-Zahlen wie R und die Python-Fassung
-(`python/`). Maßgeblich ist der R-Code; die Python-Fassung ist ein bereits
-bitgleich geprüfter Zwischenschritt, der die Rechenreihenfolge von R
-nachbildet und sich als Vorlage für die Übersetzung eignet.
+Die Julia-Fassung rechnet dieselben IEEE-754-Zahlen wie die R- und die
+Python-Fassung: Die Rechenkerne liegen als gemeinsamer C/C++-Code in `core/`
+(über `ccall`), Julia bildet die Schnittstelle darum (Eingabeprüfung,
+Datenaufbereitung, Ablauf, Ergebnisobjekte, Druck, Grafik). Für diese Teile
+sind die Gegenstücke in `r/R/` und `python/simlev/` der Vergleich; die
+Python-Fassung bildet dieselbe Rechenreihenfolge in einer ähnlichen Sprache
+nach und eignet sich daher als Vorlage für Änderungen. Die Zuordnung aller öffentlichen
+Funktionen zu Dateien in R, Python und Julia steht in [`STRUKTUR.md`](../STRUKTUR.md).
 
-> **Stand Etappe 9:** Zufall und Numerik rechnet die eigene C-Bibliothek slc (Abschnitte
-> [C-Bibliothek](#c-bibliothek-pflicht), [Zufall](#zufall-etappe-9) und
-> [Tests in Etappe 9](#tests-in-etappe-9)). `src/r/` bildet nur noch Grundfunktionen von R nach
+> **Stand:** Zufall und Numerik rechnet die eigene C-Bibliothek slc, die Engine von
+> `simulation()` und die übrigen geteilten Kerne die C++-Kerne aus `core/` (Abschnitte
+> [C-Bibliothek](#c-bibliothek-pflicht), [Zufall](#zufall) und [Tests](#tests)). `src/r/` bildet nur noch Grundfunktionen von R nach
 > (Liste und Herkunft in [`COPYRIGHTS.md`](COPYRIGHTS.md)); `RRng`, `RNmath`, die
 > BLAS/LAPACK/LINPACK-Ports, `optim`/`nlminb` und die früher übernommenen Pakete gibt es nicht
 > mehr.
+
+## Bauen, Vorkompilieren, Abgleich und Tests
+
+Aus der Repo-Wurzel, immer mit `LC_ALL=C.UTF-8`:
+
+``` bash
+python3 core/sync.py --check          # Kopien der C-Quellen (auch julia/deps/core) prüfen
+python3 core/sync.py --write          # nach einer Änderung in core/ verteilen
+julia --project=julia -e 'using Pkg; Pkg.build()'   # deps/build.jl: libslc mit C- und C++-Compiler
+julia --project=julia -e 'using SimLev'             # Vorkompilieren (einige Minuten, siehe unten)
+julia --project=julia tests/run.jl                  # Tests (Gruppen gleichlauf, fehler, ausgabe, schnittstelle)
+tests/werkzeuge/gleichlauf/run.sh --quick           # Gleichlauf mit R und Python
+tests/werkzeuge/doku/beispiele.sh julia             # Beispiele der READMEs und des Tutorials
+```
+
+Nach jeder Änderung an `src/` kompiliert das erste `using SimLev` das Paket neu vor; bei der
+Entwicklung schalten `SIMLEV_SKIP_PRECOMPILE_EXT=1` (ohne Erweiterungen) bzw.
+`SIMLEV_SKIP_PRECOMPILE=1` (ganz) die Arbeitslast ab (Einzelheiten unter
+[Referenzfälle und Prüfung](#referenzfälle-und-prüfung)). Die C-Quellen werden nur in `core/`
+geändert (Regeln in [`core/README.md`](../core/README.md)). Die Tests liegen im Ordner `tests/`
+des Repositorys, nach Zweck gegliedert, und gehören nicht zum Paket; Katalog und Befehle stehen
+in [`tests/README.md`](../tests/README.md). Sie sollen künftig nur lokal liegen (dort Abschnitt
+„Lokal aufbewahren“); `Pkg.build` und `using SimLev` laufen ohne sie.
 
 ## Aufbau
 
@@ -21,11 +47,11 @@ folgt der Reihenfolge der `include`s in `src/SimLev.jl`: erst die R-Interna
 dann die Module (C++-Kerne jeweils vor ihrem Modul), zuletzt `exports.jl`
 und `precompile.jl`.
 
-| Datei | Untermodul | Inhalt (R-Vorlage → Python-Vorlage) |
+| Datei | Untermodul | Inhalt (Gegenstück in R → in Python) |
 |---|---|---|
 | `src/r/env.jl` | `REnv` | Umgebungsschalter `SIMLEV_*`: einzige Stelle, die sie liest oder setzt (siehe [Schalter](#schalter-simlev_)) → `_r/env.py` |
 | `src/slib.jl` (+ `slib_linalg.jl`, `slib_opt.jl`, `slib_models.jl`) | `SLib` | Hüllen der C-Bibliothek slc per `ccall` (Zufall, Verteilungen, lineare Algebra, Optimierer, Modelle, Bootstrap-Kerne); Bibliothek aus `deps/build.jl` (siehe [C-Bibliothek](#c-bibliothek-pflicht)) → `simlev/_lib*.py` |
-| `src/cabi.jl` | `CAbi` | N7: Rückgabecodes, Fehlertexte und Feldlagen der C-ABI-Hülle `core/simlev_cabi.cpp` der geteilten C++-Kerne (in `libslc`) → `python/src/_ext_common.h` |
+| `src/cabi.jl` | `CAbi` | Rückgabecodes, Fehlertexte und Feldlagen der C-ABI-Hülle `core/simlev_cabi.cpp` der geteilten C++-Kerne (in `libslc`) → `python/src/_ext_common.h` |
 | `src/r/types.jl` | – | R-Datenstrukturen (`RList`, `RFrame`, `RVector`, `NamedMat`), Druck-/summary-/plot-Registrierung |
 | `src/r/rnum.jl` | – | `NA`, `isna_strict`, Summen/Mittel/Varianz in `long double` (`r_sum`, `r_mean`, …), `r_pow` (`R_POW`), zentrale Auswahl der C-Bibliotheken (`_LIBM`, `_LIBC`, `_SNPRINTF`) → `_r/rnum.py` |
 | `src/r/rformat.jl` | – | Textausgabe der Engine: `r_sprintf` (NA/NaN/Inf wie R), `r_format`, `r_as_character`, `r_deparse`, `r_round`, `r_signif` → `_r/rformat.py` |
@@ -34,13 +60,13 @@ und `precompile.jl`.
 | `src/r/parallel.jl` | `RParallel` | `.par_lapply` mit `Threads.@spawn` (`par_lapply`), Meldungen und Ausgaben je Aufgabe (`r_stderr`, `r_stdout`, `suppress_messages`), siehe [Parallelität](#parallelität-cores) → `_r/parallel.py` |
 | `src/r/fmt.jl` | `RFmt` | `format`, `formatC`, `sprintf`, `round`, `signif`, `print` von Vektoren/Matrizen/data.frames → `_r/fmt.py` |
 | `src/r/stats.jl` | `RStats` | Modulkopf mit Exporten; bindet die Themen ein (gleiche Namen wie in Python): `stats_sort.jl` (Hilfen, `order`, `r_sort`, `r_rank`, `cut`, `quantile`, `median`, …), `stats_cor.jl` (`cor`, `cov`, `var`, `scale`), `stats_smooth.jl` (`approx`, `r_filter`), `stats_optim.jl` (`optimize`, `uniroot`), `stats_models.jl` (`coef`, `fitted`, `p_adjust`, `ecdf`, `ave`, `aggregate`), `stats_cluster.jl` (`dist`, `hclust`) → `_r/stats.py` (Sammelmodul) und `_r/stats_*.py` |
-| `src/r/linalg.jl` | `RLinalg` | `outer`, `diag`, `is_symmetric`, `all_equal_numeric` (seit 9.6c ohne `matprod`, `solve`, `chol`, `qr`, `eigen` und die BLAS/LAPACK/LINPACK-Ports) → `_r/linalg.py` |
+| `src/r/linalg.jl` | `RLinalg` | `outer`, `diag`, `is_symmetric`, `all_equal_numeric` (seit 1.0.0 ohne `matprod`, `solve`, `chol`, `qr`, `eigen` und die BLAS/LAPACK/LINPACK-Ports) → `_r/linalg.py` |
 | `src/r/rexpr.jl` | `RExpr` | Ausdrücke in R-Syntax als Text (`eval(parse(text = …), data, env)`): ein gemeinsamer Auswerter für Bedingungen in `bootstrap_probability`, `regime_subset`, `view_prob`/`scenario_entropy_pooling` und `tactical_rules` (R-Vorrang inkl. schwach bindendem `!`, NA-Logik, `%in%`, `%%`, Funktionen über `RLibm`/`RFmt`) |
-| `src/engine.jl` u. a. | – | `simulation()` und Strategie/Config: `engine.jl` (Hilfen, Handels- und Steuerfunktionen; r/R/sim_base.R → `_sim_base.py`), `sim_phases.jl` (r/R/sim_validate.R, sim_prepare.R → `_sim_phases.py`), `sim_loop.jl` (r/R/sim_actions.R, sim_loop.R → `_sim_loop.py`), `sim_evaluate.jl` (r/R/sim_evaluate.R → `_sim_evaluate.py`; dazu `simulation()` und `_simulation_flat()` aus r/R/simulation.R → `engine.py`), `sim_blocks.jl` (Bausteine, r/R/sim_blocks.R → `_sim_blocks.py`), `wrapper.jl` (Fonds-Wrapper `wrapper_config`, `wrapper_nav`, Anteilswert `_wrapper_nav_calc`, r/R/wrapper.R → `wrapper.py`; Hilfen der Strategie `_strategy_columns`, `_strategy_wrappers` in `config.jl`) |
+| `src/engine.jl` u. a. | – | `simulation()` und Strategie/Config: `engine.jl` (Hilfen, Handels- und Steuerfunktionen; r/R/sim_base.R → `_sim_base.py`), `sim_phases.jl` (r/R/sim_validate.R, sim_prepare.R → `_sim_phases.py`), `sim_engine.jl` (Phasen 4 und 5 über den C++-Kern `core/engine_core_impl.h`; r/R/sim_engine.R → `_sim_engine.py`), `sim_evaluate.jl` (r/R/sim_evaluate.R → `_sim_evaluate.py`; dazu `simulation()` und `_simulation_flat()` aus r/R/simulation.R → `engine.py`), `sim_blocks.jl` (Bausteine, r/R/sim_blocks.R → `_sim_blocks.py`), `wrapper.jl` (Fonds-Wrapper `wrapper_config`, `wrapper_nav`, Anteilswert `_wrapper_nav_calc`, r/R/wrapper.R → `wrapper.py`; Hilfen der Strategie `_strategy_columns`, `_strategy_wrappers` in `config.jl`) |
 | `src/svg.jl` | – | Grafikmodul: `SimLevPlot`, `_plot_method` & Co., alle SVG-Zeichenbausteine (siehe [Grafik](#grafik)) → `simlev/svg.py` |
 | `src/dashboard.jl` | – | Dashboard-Daten und Panels, `plot_dashboard`, `export_dashboard` (r/R/plot_dashboard.R) → `dashboard.py` |
 | `src/<modul>.jl` | `DataPrep`, `Backcast`, `Bonds`, `Signals`, `Bootstrap`, `Withdrawal`, `Dependence`, `Regimes`, `MsGarch`, `Scenarios`, `Optimize`, `Tactical`, `DeepAnalysis`, `Planning`, `AnalysisTests`, `Overfitting`, `ParamSearch`, `Sensitivity` | je eine R-Datei `r/R/<modul>.R` → `python/simlev/<modul>.py` |
-| `src/<name>_core.jl` | `SignalsCore`, `WithdrawalCore`, `DependenceCore`, `OptimizeCore` | Hüllen der geteilten C++-Kerne aus `core/` über `ccall` (N7, `src/cabi.jl`; vorher eigene Ports, F2) → `python/simlev/_<name>_core.py`; `BootstrapCore` und der Port des DCC-Filters sind mit 9.6c entfallen |
+| `src/<name>_core.jl` | `SignalsCore`, `WithdrawalCore`, `DependenceCore`, `OptimizeCore` | Hüllen der geteilten C++-Kerne aus `core/` über `ccall` (seit 1.2.0, `src/cabi.jl`; vorher eigene Ports) → `python/simlev/_<name>_core.py`; `BootstrapCore` und der Port des DCC-Filters sind mit 1.0.0 entfallen |
 | `src/exports.jl` | – | sammelt die öffentlichen Funktionen der Untermodule für `using SimLev` |
 
 Funktionen anderer Untermodule werden **im Funktionsrumpf qualifiziert**
@@ -86,12 +112,12 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
    `ceil`, `+ - * /` sind exakt. Kein `muladd`/`fma`, kein `@fastmath`.
 4. **Keine Matrixprodukte mit `*`** (OpenBLAS): Matrixprodukte, Cholesky, Löser, Eigenwerte und
    QR kommen wie in R aus der C-Bibliothek (`SLib.matmul`, `crossprod`, `chol`, `eigen_sym`, …;
-   seit 9.6b/9.6c, keine System-LAPACK mehr).
+   seit 1.0.0, keine System-LAPACK mehr).
 5. Sortieren, Runden und Formatieren immer über `RStats`/`RFmt` (R's
    Sortierverfahren bei Gleichständen und ±0, R's `round`-Algorithmus,
    C-`printf` für Zahlen).
 6. Zufall nur über `SLib` (Zustand von SimLev bzw. ein `SLib.Stream`, siehe
-   [Zufall](#zufall-etappe-9)); `RRng` ist mit 9.6c entfallen.
+   [Zufall](#zufall)); `RRng` ist mit 1.0.0 entfallen.
 7. NA und NaN wie in R auseinanderhalten: Arithmetik mit NA ergibt auf x86
    wie in R wieder NA; wo R `NA_real_` setzt, `SimLev.NA` setzen.
 8. R-`warning(text)` → `@warn text` (nur die Meldung, keine weiteren
@@ -116,23 +142,23 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
     `SimLevPlot(svg, data, x, klasse)`. Geschrieben wird nur mit
     `file = "….svg"`, unbekannte Schlüsselwörter ergeben eine Warnung.
     Zeichenbausteine nur aus `src/svg.jl` (siehe [Grafik](#grafik)).
-14. long-double-Summen rechnen seit N8/N10 die C-Kerne `core/slc_rbase*.c` (x87 wie R, kein Nachbau in
-    Julia). In den geteilten Engine-Kernen gilt seit N10 die Regel „NA vor NaN“ (`core/simlev_core.h`).
+14. long-double-Summen rechnen seit 1.2.0 die C-Kerne `core/slc_rbase*.c` (x87 wie R, kein Nachbau in
+    Julia). In den geteilten Engine-Kernen gilt seit 1.2.0 die Regel „NA vor NaN“ (`core/simlev_core.h`).
     Zur Geschichte: treffen in `a + b` oder `a * b` zwei NaN
     aufeinander (NA und NaN), behält x86 den ersten Operanden der Anweisung,
     und LLVM darf die Operanden tauschen. Die Ports der nativen Kerne
-    (Engine `core.jl`, `DependenceCore`, `OptimizeCore.quantile7`; bis 9.6c auch
+    (Engine `core.jl`, `DependenceCore`, `OptimizeCore.quantile7`; bis 0.10.0 auch
     `BootstrapCore` und `RTruncnorm`) schreiben solche Stellen mit `nan_add`,
     `nan_mul` usw. (`src/r/rnum.jl`) in der Operandenfolge des R-Baus
-    (objdump von `SimLev.so`; seit Etappe 8.0, gleich wie Python), längere
+    (objdump von `SimLev.so`; seit 0.10.0, gleich wie Python), längere
     Kerne rechnen bei einem NaN im Ergebnis Schritt für Schritt nach
-    (`_hmm_nan`; bis 9.6c `_dcc_nan`, `_ms_garch_filter_nan`). `std::min`/`std::max`
+    (`_hmm_nan`; bis 0.10.0 `_dcc_nan`, `_ms_garch_filter_nan`). `std::min`/`std::max`
     als `cpp_min`/`cpp_max` (NaN ergibt den ersten bzw. konstanten Operanden),
     nie Julias `min`/`max` (die NaN weitergeben); `x - y` statt `x += -y`
-    (NaN-Vorzeichen). Feste Randfälle in `test/nan_kerne_tests.jl`. Wo die C++-Kerne
+    (NaN-Vorzeichen). Wo die C++-Kerne
     `std::sort`/`std::nth_element` nutzen, bilden die Ports deren Verhalten aus libstdc++ (GCC 13)
     nach (`_std_sort!` in `dependence_core.jl`, `optimize_core.jl`; Herkunft in `COPYRIGHTS.md`).
-15. Optionale R-Pakete gibt es nicht mehr: Seit Etappe 9.6c sind auch die Übernahmen (evd,
+15. Optionale R-Pakete gibt es nicht mehr: Seit 1.0.0 sind auch die Übernahmen (evd,
     imputeTS, stinepack, rugarch, Rsolnp, truncnorm) entfallen; ihre Aufgaben rechnet slc.
     `RBase.sys_time()` und `SIMLEV_R_SYS_TIME` (gosolnp) gibt es nicht mehr.
 
@@ -146,9 +172,9 @@ parallel rechnet (Aufrufer: `bootstrap`, `bootstrap_study`, `param_search`,
 `sensitivity_grid`, `sensitivity_rebalancing`, `planning_lumpsum_vs_dca`,
 `sensitivity_leverage`; `Bootstrap._par_lapply` und `ParamSearch._par_lapply`
 leiten weiter). Semantik wie `parallel::mclapply(mc.preschedule = FALSE,
-mc.set.seed = FALSE)` (Verhalten in R 4.3.3 ermittelt in Etappe 5): unter
+mc.set.seed = FALSE)` (Verhalten in R 4.3.3): unter
 zwei Kernen oder mit höchstens einem Element `lapply`; sonst rechnet jede
-Einheit mit dem Strom, den ihr der Aufrufer mitgibt (seit 9.6a, Regeln C.5; der globale Zustand
+Einheit mit dem Strom, den ihr der Aufrufer mitgibt (seit 1.0.0, Regeln unter [Zufall](#zufall); der globale Zustand
 ist in einer Einheit gesperrt);
 Ergebnisse in Eingangsreihenfolge; Warnungen gehen verloren; Meldungen und
 Ausgaben erscheinen in Einheitenreihenfolge; beim ersten Fehler (in
@@ -162,7 +188,7 @@ Mit `Threads.nthreads() > 1` (`julia -t auto`, `julia -t 2`,
 (`Threads.@spawn`), die sich die Einheiten der Reihe nach holen; mit einem
 Thread rechnet `_sequential` nacheinander. Jede Einheit setzt den Merker `SLib.in_unit` und
 bekommt einen eigenen Ausgabepuffer im task-lokalen Speicher (die frühere Kopie des
-R-Zufallszustands über `RRng.with_state` ist mit 9.6a/9.6c entfallen); Warnungen verwirft ein `NullLogger` je
+R-Zufallszustands über `RRng.with_state` ist mit 1.0.0 entfallen); Warnungen verwirft ein `NullLogger` je
 Aufgabe. Referenzfälle zusätzlich mit `julia -t 2` prüfen.
 
 **Regeln für neue Module (Thread-Sicherheit):**
@@ -175,7 +201,7 @@ Aufgabe. Referenzfälle zusätzlich mit `julia -t 2` prüfen.
    Einrichtung (Bibliotheken laden, Tabellen) unter einer `ReentrantLock`
    und erst am Ende als fertig markieren (wie `_collate_init!`); Caches mit Sperre (wie `RFmt`/`rformat`, `RExpr`).
 3. Zufall nur über `SLib` mit einem `Stream` als Argument (in einer Einheit nie der globale
-   Zustand, siehe [Zufall](#zufall-etappe-9)).
+   Zustand, siehe [Zufall](#zufall)).
 4. Meldungen über `RParallel.r_stderr()`, Ausgaben einer Einheit über
    `RParallel.r_stdout()`; nie `redirect_stdout`/`redirect_stderr` in
    Paketcode (wirkt prozessweit). Direkte Schreibzugriffe auf `stdout`
@@ -226,21 +252,21 @@ und zugleich nach `python/simlev/svg.py`.
 
 ## Referenzfälle und Prüfung
 
-> Seit Etappe 9 ausgesetzt (siehe [Tests in Etappe 9](#tests-in-etappe-9)): Die gespeicherten
-> Fälle beschreiben den Stand vor dem eigenen Zufall und den eigenen Kernen. Generatoren und
-> Vergleicher unten gelten weiter; frische Fälle erzeugt und vergleicht die Gleichlaufprüfung
-> `tests/gleichlauf/run.sh`, die nach jeder Änderung an der Rechenlogik läuft.
+Die Referenzfälle liegen seit 1.4.1 im Ordner `tests/` des Repositorys (Katalog
+[`tests/README.md`](../tests/README.md)); frische Fälle erzeugt und vergleicht die
+Gleichlaufprüfung `tests/werkzeuge/gleichlauf/run.sh`, die nach jeder Änderung an der Rechenlogik
+läuft.
 
-Die Referenzfälle unter `tests/faelle/<bereich>.jsonl.gz` erzeugen die Generatoren
-`tests/erzeugen/<bereich>.R`. Jeder Aufruf `ref_case(id, r = …, py = …,
+Die Referenzfälle unter `tests/<gruppe>/faelle/<bereich>.jsonl.gz` erzeugen die Generatoren
+`tests/gleichlauf/erzeugen/<bereich>.R`. Jeder Aufruf `ref_case(id, r = …, py = …,
 jl = …)` trägt R-, Python- und Julia-Code; der Julia-Code setzt `result`
-und sieht die Eingaben als Variablen (siehe `tests/julia/faelle.jl`, `decode`).
+und sieht die Eingaben als Variablen (siehe `tests/lib/faelle.jl`, `decode`).
 
 ``` bash
-julia --project=julia tests/gleichlauf/vergleich.jl [datei.jsonl.gz …] [-k id] [-v]
-julia --project=julia -t 2 tests/gleichlauf/vergleich.jl          # dasselbe mit zwei Threads (cores = 2 echt parallel)
-julia --project=julia tests/gleichlauf/vergleich.jl [ordner …] [-k fall]   # ohne Pfad: der Katalog tests/faelle
-julia --project=julia tests/julia/runtests.jl         # alle Fälle des Katalogs, Schnittstelle, Grafik
+julia --project=julia tests/werkzeuge/gleichlauf/vergleich.jl [datei.jsonl.gz …] [-k id] [-v]
+julia --project=julia -t 2 tests/werkzeuge/gleichlauf/vergleich.jl          # dasselbe mit zwei Threads (cores = 2 echt parallel)
+julia --project=julia tests/werkzeuge/gleichlauf/vergleich.jl [ordner …] [-k fall]   # ohne Pfad: der Katalog tests/<gruppe>/faelle
+julia --project=julia tests/run.jl         # alle Fälle des Katalogs, Schnittstelle, Grafik
 ```
 
 Verglichen wird ohne Toleranz: NA ≠ NaN, Vorzeichen der Null, Druck- und
@@ -258,17 +284,17 @@ Dates oder Printf enthält, übernimmt Julia nicht in den Cache;
 `--trace-compile` der ersten Aufrufe, ohne die Typen der Daten des
 Aufrufers, ohne Closures). Bis 1.3.0 deckte die Arbeitslast nur Engine,
 `bootstrap`, `bootstrap_study`, `_ms_garch_fit`, Entnahme ohne Steuer,
-Optimierung auf Renditematrizen und `result_analysis` ab (Etappe 4.8).
+Optimierung auf Renditematrizen und `result_analysis` ab.
 Gemessen auf zwei Kernen, Julia 1.13.2, eigenes Depot; erster Aufruf je
-Aufgabe in einem frischen Prozess (die Bench-Aufgaben aus `tests/bench`
-und je Modul eine weitere Hauptfunktion, 30 Aufgaben; J15b):
+Aufgabe in einem frischen Prozess (die Bench-Aufgaben aus `tests/werkzeuge/bench`
+und je Modul eine weitere Hauptfunktion, 30 Aufgaben):
 
-| | vorher (E17, `abd5ff46`) | J15b |
+| | vorher (Arbeitslast wie bis 1.3.0) | 1.4.0 |
 |---|---|---|
 | Vorkompilieren (`Base.compilecache`) | 145 s | 240 s |
 | Cache (`.so` / `.ji`) | 78,0 / 1,6 MB | 118,1 / 1,6 MB |
 | `using SimLev` | 0,41 s | 0,60 s |
-| erster Aufruf S30 / T3 / T5 / T4s (`tests/bench`) | 0,8 / 1,7 / 5,0 / 3,0 s | 0,24 / 0,82 / 0,47 / 0,18 s |
+| erster Aufruf S30 / T3 / T5 / T4s (`tests/werkzeuge/bench`) | 0,8 / 1,7 / 5,0 / 3,0 s | 0,24 / 0,82 / 0,47 / 0,18 s |
 | erster Aufruf, höchster Übersetzungsanteil | 5,7 s (`regime_hmm`) | 0,7 s (`bootstrap_study`) |
 | Summe der ersten Aufrufe (30 Aufgaben) | 84 s | 12 s |
 
@@ -283,35 +309,33 @@ Erweiterungen. Neue Hauptfunktionen gehören in die Arbeitslast; fehlen nach
 einer Änderung Methoden im Cache, zeigt `julia --trace-compile=stderr
 --trace-compile-timing` beim ersten Aufruf, welche.
 
-Was ein Referenzfall bitgleich prüft, steht nicht noch einmal als Test in
-`test/` (Etappe 4.1); so stehen die konstanten Ausdrücke, die
-`tests/faelle/r_grundfunktionen.jsonl.gz` (rexpr) wörtlich prüft, nicht mehr in `rexpr_tests.jl`.
+Was ein Referenzfall bitgleich prüft, steht nicht noch einmal als eigener Test.
 
 ## Eingefrorene Schnittstelle
 
-Die öffentliche Schnittstelle 0.5.0 ist in `tests/api/frozen/jl.json`
-festgehalten (Etappe 6.6): je Export aus `names(SimLev)` und je registrierter
+Die öffentliche Schnittstelle ist in `tests/schnittstelle/frozen/jl.json`
+festgehalten (seit 0.9.0): je Export aus `names(SimLev)` und je registrierter
 `show`/`r_summary`/`r_plot`-Methode die Argumente der Hauptmethode in
 Reihenfolge mit Art (`positional`, `keyword`, `varargs`, `kwargs_rest`) und
 Standardwert aus dem Quelltext, dazu die Namen der exportierten Typen; ohne
-Datei, Zeile, Modul und Datum. `tests/julia/api.jl` (in `tests/julia/runtests.jl`)
-lädt dafür den Auszug `tests/api/api_jl.jl` in ein eigenes Modul,
+Datei, Zeile, Modul und Datum. `tests/schnittstelle/api.jl` (in `tests/run.jl`)
+lädt dafür den Auszug `tests/schnittstelle/api_jl.jl` in ein eigenes Modul,
 ruft `frozen_check` im Testprozess auf und nennt bei Abweichung jede Änderung
 (Funktion neu oder weg, Argument neu, weg oder umsortiert, Art oder
 Standardwert geändert).
 
 Eine gewollte Änderung der Schnittstelle wird bewusst neu festgeschrieben:
-Eintrag oben in `tests/api/CHANGES.md` (Datum, was sich ändert,
-warum), dann aus der Repo-Wurzel `tests/api/run.sh --freeze`; das
+Eintrag oben in `tests/schnittstelle/CHANGES.md` (Datum, was sich ändert,
+warum), dann aus der Repo-Wurzel `tests/schnittstelle/run.sh --freeze`; das
 schreibt `frozen/` für alle drei Sprachen neu und bricht ohne neuen Eintrag
-ab. Einzelheiten in [`tests/api/README.md`](../tests/api/README.md).
+ab. Einzelheiten in [`tests/schnittstelle/README.md`](../tests/schnittstelle/README.md).
 
 ## Schalter `SIMLEV_*`
 
 Alle Umgebungsschalter liest (und setzt) nur `src/r/env.jl` (`SimLev.REnv`);
 Paket, Vorkompilierung, Tests und Werkzeuge holen sie von dort
-(`test/layers_tests.jl` prüft das). Wann gelesen wird, bestimmt die
-aufrufende Stelle: `tests/julia/faelle.jl` beim Laden, die Kollation beim ersten
+Wann gelesen wird, bestimmt die
+aufrufende Stelle: `tests/lib/faelle.jl` beim Laden, die Kollation beim ersten
 Vergleich (neu nach `RStats.collate_reset()`), `precompile.jl` beim
 Vorkompilieren.
 
@@ -319,72 +343,68 @@ Vorkompilieren.
 |---|---|---|
 | `SIMLEV_COLLATE` | Sortierung: `icu:<Locale>` (`icu:root` wie R unter C.UTF-8) oder `C` (Bytes); ohne Angabe nach `LC_ALL`/`LC_COLLATE`/`LANG` | Nutzer |
 | `SIMLEV_ICU` | Pfad zur ICU-Bibliothek (`libicui18n`) | Nutzer |
-| `SIMLEV_LAX_NA` | `1`: NA = NaN im Vergleich (`reftree.jl`) | Prüfung |
-| `SIMLEV_STRICT_ZERO` | `0`: −0 = +0 im Vergleich (`reftree.jl`) | Prüfung |
-| `SIMLEV_FAELLE_DIR` | anderer Ordner der Bereichsdateien für `tests/julia` (T20; `SIMLEV_FULL_TESTS`, `SIMLEV_GOLDEN_DIR` und `SIMLEV_MODULE_DIR` liest nur noch `REnv`, ohne Wirkung) | Prüfung |
+| `SIMLEV_LAX_NA` | `1`: NA = NaN im Vergleich (`tests/lib/faelle.jl`) | Prüfung |
+| `SIMLEV_STRICT_ZERO` | `0`: −0 = +0 im Vergleich (`tests/lib/faelle.jl`) | Prüfung |
+| `SIMLEV_FAELLE_DIR` | anderer Ordner der Bereichsdateien für `tests/run.jl` (seit 1.4.1; `SIMLEV_FULL_TESTS`, `SIMLEV_GOLDEN_DIR` und `SIMLEV_MODULE_DIR` entfallen seit 1.4.2) | Prüfung |
 | `SIMLEV_SKIP_PRECOMPILE` | `1`: keine Arbeitslast beim Vorkompilieren | Entwicklung |
 | `SIMLEV_SKIP_PRECOMPILE_EXT` | `1`: Arbeitslast ohne die Analysemodule | Entwicklung |
 | `SIMLEV_CC` | C-Compiler für `Pkg.build` (gelesen in `deps/build.jl`) | Bau |
 
-Seit Etappe 9.6c (Entwurf C.6 Nr. 10) entfallen `SIMLEV_LAPACK` und `SIMLEV_R_SYS_TIME`.
+Seit 1.0.0 entfallen `SIMLEV_LAPACK` und `SIMLEV_R_SYS_TIME`.
 
-`reftree.jl` setzt `SIMLEV_COLLATE=icu:root`, falls nicht gesetzt (die
-Referenzen entstanden unter C.UTF-8). Die Generatoren in `tests/erzeugen/`
+`tests/lib/faelle.jl` setzt `SIMLEV_COLLATE=icu:root`, falls nicht gesetzt (die
+Referenzen entstanden unter C.UTF-8). Die Generatoren in `tests/gleichlauf/erzeugen/`
 lesen eigene Schalter (`SIMLEV_R_NMATH_SRC`, `SIMLEV_ALLOW_PARTIAL`, siehe
 `tests/README.md`).
 
 ## C-Bibliothek (Pflicht)
 
 Zufall, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, die
-Bootstrap-Kerne, Stineman, Glättungsspline und Kerndichte rechnet die C-Bibliothek slc (Etappe
-9.1–9.6c). `deps/build.jl` (läuft bei `Pkg.build`/`Pkg.add`) übersetzt `deps/core/*.c` mit
+Bootstrap-Kerne, Stineman, Glättungsspline und Kerndichte rechnet die C-Bibliothek slc (seit
+1.0.0). `deps/build.jl` (läuft bei `Pkg.build`/`Pkg.add`) übersetzt `deps/core/*.c` mit
 `-std=c99 -O2 -fPIC -ffp-contract=off -fno-fast-math` zu `deps/usr/lib/libslc` und schreibt
-`deps/deps.jl`; der Compiler kommt aus `SIMLEV_CC`, sonst `cc`, `gcc` oder `clang`. Ohne Bibliothek
+`deps/deps.jl`; der C-Compiler kommt aus `SIMLEV_CC`, sonst `cc`, `gcc` oder `clang`, der
+C++-Compiler aus `SIMLEV_CXX`, sonst `c++`, `g++` oder `clang++`. Ohne Bibliothek
 bricht `using SimLev` mit einer Meldung ab, die `Pkg.build("SimLev")` mit C-Compiler verlangt. Die
 Hüllen stehen in `src/slib*.jl` (`SimLev.SLib`, `ccall`, Fehler über den Kontext `sl_ctx`).
 
-**Ort der Quellen (`core/`, Entwurf C.1, F16):** kanonisch in `core/` (nur dort ändern); Kopien
+**Ort der Quellen (`core/`):** kanonisch in `core/` (nur dort ändern); Kopien
 der slc-Dateien liegen in `julia/deps/core/`, `r/src/` und `python/src/core/`. Die geteilten
 C++-Kerne (`core/simlev_core.h`, `core/*_core_impl.h`: Engine, FIFO, Steuer, Research, Entnahme)
-liegen seit 9.6c ebenfalls in `core/` und werden seit N7 auch nach `julia/deps/core/` kopiert, dazu
+liegen seit 1.0.0 ebenfalls in `core/` und werden seit 1.2.0 auch nach `julia/deps/core/` kopiert, dazu
 ihre C-ABI-Hülle `core/simlev_cabi.cpp` (nur Julia). `deps/build.jl` übersetzt sie mit dem
 C++-Compiler (Schalter wie Python: `-O2 -std=gnu++17 -ffp-contract=off -fno-fast-math`,
 `SIMLEV_FP_CONTRACT_BY_FLAG`) in `libslc`; `src/cabi.jl` (Modul `CAbi`) wertet die Rückgabecodes aus,
 die Aufrufe stehen in `core.jl`, `signals_core.jl`, `withdrawal_core.jl`, `dependence_core.jl` und
-`optimize_core.jl` (die früheren eigenen Ports, F2, sind entfallen).
+`optimize_core.jl` (die früheren eigenen Ports sind entfallen).
 `core/sync.py --write` kopiert, `--check` vergleicht alle Kopien per SHA-256 (Ende 1 bei
 Abweichung) und läuft in jeder Gleichlaufprüfung.
 
-## Zufall (Etappe 9)
+## Zufall
 
-Den globalen Zustand hält `SLib` prozessweit mit `ReentrantLock` (F3); alle Ziehungen rechnet die
-C-Bibliothek (xoshiro256**, SplitMix64, Ströme über Sprünge um 2^128). Regeln wie in R und Python
-(Entwurf C.5): `simlev_seed(seed)` setzt den Zustand (ganze Zahl, |seed| < 2^53; ohne Argument aus
+Den globalen Zustand hält `SLib` prozessweit mit `ReentrantLock`; alle Ziehungen rechnet die
+C-Bibliothek (xoshiro256**, SplitMix64, Ströme über Sprünge um 2^128). Regeln wie in R und Python: `simlev_seed(seed)` setzt den Zustand (ganze Zahl, |seed| < 2^53; ohne Argument aus
 Uhrzeit, Prozessnummer und Zähler); `seed = nothing` an einer zufälligen Funktion zieht genau
 einmal k aus dem Zustand und rechnet wie mit `seed = k`; `seed = s` lässt ihn unberührt
 (Hauptstrom `SLib.main_stream(s)`); Einheiten von `par_lapply` bekommen ihre Ströme
 `SLib.streams` vor der Verteilung, das Ergebnis hängt nicht von `cores` oder `julia -t` ab. Die
-Nachbildung von R's Zufall (`RRng`, Exporte `set_seed`/`rng_kind`) ist mit 9.6c entfallen.
+Nachbildung von R's Zufall (`RRng`, Exporte `set_seed`/`rng_kind`) ist mit 1.0.0 entfallen.
 
-## Tests in Etappe 9
+## Tests
 
-Die alten Tests (Entwurf C.7 ausgesetzt) hat T18 durch eine neu aufgebaute Suite ersetzt
-(`tests/julia/runtests.jl`, siehe [`tests/README.md`](../tests/README.md)); der Schalter
-`SIMLEV_LEGACY_TESTS` ist mit C19 entfallen. Dazu kommt die Gleichlaufprüfung `tests/gleichlauf/run.sh` (siehe
-[`python/DEVELOPING.md`](../python/DEVELOPING.md#tests-in-etappe-9)).
+Die Tests stehen in `tests/` (siehe [Bauen, Vorkompilieren, Abgleich und
+Tests](#bauen-vorkompilieren-abgleich-und-tests)): `julia --project=julia tests/run.jl [gleichlauf
+fehler ausgabe schnittstelle]` prüft gegen die Referenzfälle aus R. Dazu kommt die
+Gleichlaufprüfung `tests/werkzeuge/gleichlauf/run.sh` (siehe
+[`python/DEVELOPING.md`](../python/DEVELOPING.md#tests)).
 
 ## Schichten
 
-Die Dateien in `src/` gehören zu fünf Schichten (Anhang F des
-Entwicklungsdokuments): 0 R-Interna (`src/r/`), 1 Daten und Strategie
+Die Dateien in `src/` gehören zu fünf Schichten: 0 R-Interna (`src/r/`), 1 Daten und Strategie
 (`dates.jl`, `config.jl`, `trigger.jl`, `data.jl`, `tax_tariff.jl`,
 `data_prep.jl`, `backcast.jl`, `bonds.jl`, `signals*.jl`), 2 Engine
 (`core.jl`, `result.jl`, `engine.jl`, `sim_*.jl`, `wrapper.jl`), 3 Analysen (je eine Datei
 mit ihrem Kern), 4 Ausgabe (`svg.jl`, `dashboard.jl`); `SimLev.jl`,
-`exports.jl` und `precompile.jl` sind die Paketebene. `test/layers_tests.jl`
-liest die `using`/`import`-Zeilen, die qualifizierten Zugriffe
-(`Modul.f`, `SimLev.f`) und in Dateien der Paketebene die Aufrufe von
-Namen anderer Dateien und prüft, dass keine Datei auf eine höhere Schicht
-zugreift. Die Zuordnung und die bekannten Ausnahmen (vor allem die
-plot-Methoden der Analysen, die die Grafikbausteine aus `svg.jl` holen)
-stehen mit Begründung im Test.
+`exports.jl` und `precompile.jl` sind die Paketebene. Keine Datei greift
+auf eine höhere Schicht zu; Ausnahmen sind vor allem die plot-Methoden der
+Analysen, die die Grafikbausteine aus `svg.jl` holen.

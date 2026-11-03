@@ -12,8 +12,8 @@
 """Eindimensionale Verfahren ``optimize`` und ``uniroot``, nachgebildet aus R 4.3.3
 ``stats/R/optimize.R`` und ``stats/src/optimize.c``.
 
-Seit Etappe 9.6c entfallen ``optim``, ``optimhess`` und ``nlminb`` (PORT): SimLev optimiert mit den
-eigenen Verfahren der C-Bibliothek slc (:mod:`simlev._lib`, Entwurf B.8).
+Seit 1.0.0 entfallen ``optim``, ``optimhess`` und ``nlminb`` (PORT): SimLev optimiert mit den
+eigenen Verfahren der C-Bibliothek slc (:mod:`simlev._lib`).
 """
 from __future__ import annotations
 

@@ -2,7 +2,7 @@
 
 Portiert aus ``src/library/stats/R/*.R`` und ``src/library/stats/src/*.c``
 bzw. ``*.f`` (sowie Teilen von ``src/main/sort.c``, ``seq.c``, ``cum.c``).
-Rechenreihenfolge, ``long double``-Akkumulation (seit N8/N11 über die C-Kerne
+Rechenreihenfolge, ``long double``-Akkumulation (über die C-Kerne
 ``core/slc_rbase*.c`` in :mod:`simlev._ext`) und libm-Aufrufe (``math``) wie in R.
 
 Konventionen
@@ -32,7 +32,7 @@ und ``simlev._r.stats.<name>`` gültig bleiben:
   ``aggregate``
 * :mod:`.stats_cluster` ``dist``, ``hclust``
 
-Seit Etappe 9.6c entfallen ``optim``, ``optimhess``, ``nlminb``, ``lm``/``lm.fit``, ``poly``,
+Seit 1.0.0 entfallen ``optim``, ``optimhess``, ``nlminb``, ``lm``/``lm.fit``, ``poly``,
 ``summary.lm``, ``glm``/``binomial``, ``t.test``, ``predict``, ``fft``, ``density``, ``bw.nrd0``
 und ``smooth.spline``; SimLev rechnet sie mit der C-Bibliothek slc (:mod:`simlev._lib`).
 """

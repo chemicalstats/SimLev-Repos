@@ -1,12 +1,12 @@
-# Huellen der Optimierer der C-Bibliothek slc (SimLev core, Etappe 9.3): .sl_optim() und
+# Huellen der Optimierer der C-Bibliothek slc (SimLev core): .sl_optim() und
 # Pruefhilfen. Die Rechnung steht in src/slc_opt.c (Kopie von core/, core/sync.py), die
 # .Call-Huellen in src/slc_r_opt.c (Registrierung in src/init.c, in R als C_sl_*).
 #
-# Rueckfrage an den Host (Entwurf B.8): .sl_optim() laeuft in einer Schleife "Anfrage holen ->
+# Rueckfrage an den Host: .sl_optim() laeuft in einer Schleife "Anfrage holen ->
 # Zielfunktion in R -> Antwort geben"; der Kern ruft nie in R zurueck. Fehler der Zielfunktion
 # sind daher gewoehnliche R-Fehler.
 #
-# Seit Etappe 9.6b sind die Aufrufer (stats::optim an sechs Stellen) umgestellt bzw. laufen ganz
+# Seit 1.0.0 sind die Aufrufer (stats::optim an sechs Stellen) umgestellt bzw. laufen ganz
 # in C (GARCH, DCC, MS-GARCH); .sl_optim() nimmt dafuer die Argumente und Steuerwerte von stats::optim an, soweit
 # SimLev sie nutzt, und gibt eine Liste wie optim zurueck.
 
@@ -129,7 +129,7 @@
   r[c("par", "value", "convergence", "iterations", "nfev", "evaluations")]
 }
 
-# numerischer Gradient (B.9) der Prueffunktion id an x (Schranken wahlweise)
+# numerischer Gradient der Prueffunktion id an x (Schranken wahlweise)
 .sl_numgrad_test <- function(id, x, lower = NULL, upper = NULL) {
   n <- length(x)
   .Call(C_sl_numgrad_test, as.integer(id), as.double(x),

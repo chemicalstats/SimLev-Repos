@@ -1,4 +1,4 @@
-# Übersetzungsanweisungen für den Paket-Cache (J15b), eingebunden von precompile.jl nach der Arbeitslast.
+# Übersetzungsanweisungen für den Paket-Cache, eingebunden von precompile.jl nach der Arbeitslast.
 #
 # Die Arbeitslast führt die Hauptfunktionen aus; Methoden, die sie nur über Laufzeit-Dispatch erreicht
 # (Aufrufer mit @nospecialize, Any-typisierte Felder in RList/RFrame) und deren Signatur nur Typen aus Base,

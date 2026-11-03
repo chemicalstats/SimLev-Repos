@@ -31,7 +31,7 @@ Werte sind intern Vektoren wie in R (Listen-Unterklassen ``LGL``, ``INT``,
 logischer Vektor); alle Operationen elementweise mit Recycling und
 dreiwertiger NA-Logik, Ganzzahlarithmetik mit Überlauf → NA und Warnung,
 Zahlen wie R (``^`` über ``R_POW``, ``%%``/``%/%`` wie ``myfmod``/``myfloor``,
-Literale und ``as.numeric`` über R_strtod mit long double (N11: long-double-Teile im
+Literale und ``as.numeric`` über R_strtod mit long double (long-double-Teile im
 C-Kern ``core/slc_rbase_num.c`` über :mod:`simlev._ext`), Summen/Mittel über
 :mod:`simlev._r.base`, ``median``, ``var``, ``sd``, ``quantile`` über
 :mod:`simlev._r.stats`, Funktionen über :mod:`simlev._r.libm`),
@@ -131,7 +131,7 @@ def _isdig(c):
     return "0" <= c <= "9"
 
 
-# N11: R_strtod und String_to_real stehen in simlev._r.rnum (gemeinsam mit fmt; Zahlteil im C-Kern)
+# R_strtod und String_to_real stehen in simlev._r.rnum (gemeinsam mit fmt; Zahlteil im C-Kern)
 r_strtod = _rnum.r_strtod
 _str2num = _rnum.r_string_to_real
 
@@ -1565,7 +1565,7 @@ def _fsub(x, y):
 def r_fmod(x1, x2):
     """R's ``myfmod(x1, x2)`` (``x1 %% x2``)."""
     if x2 == 0.0:
-        return _R_NAN   # R_NaN (positiv), auch bei NA in x1 (N11)
+        return _R_NAN   # R_NaN (positiv), auch bei NA in x1
     if abs(x2) * _LDBL_EPS > 1 and math.isfinite(x1) and abs(x1) <= abs(x2):
         if abs(x1) == abs(x2):
             return 0.0
@@ -1573,7 +1573,7 @@ def r_fmod(x1, x2):
     q = _fdiv(x1, x2)
     if math.isfinite(q) and abs(q) * _LDBL_EPS > 1:
         _warn("probable complete loss of accuracy in modulus")
-    # long-double-Teil im C-Kern core/slc_rbase_num.c; NaN-Operanden nach der dort beschriebenen Regel (N11)
+    # long-double-Teil im C-Kern core/slc_rbase_num.c; NaN-Operanden nach der dort beschriebenen Regel
     return _ext.slc_r_fmod_ld(x1, x2)
 
 
@@ -1586,7 +1586,7 @@ def r_idiv(x1, x2):
         if q < 0:
             return -1.0
         return -1.0 if ((x1 < 0 and x2 > 0) or (x1 > 0 and x2 < 0)) else 0.0
-    return _ext.slc_r_idiv_ld(x1, x2)   # N11: long-double-Teil im C-Kern core/slc_rbase_num.c
+    return _ext.slc_r_idiv_ld(x1, x2)   # long-double-Teil im C-Kern core/slc_rbase_num.c
 
 
 def _iop(op, x, y, of):

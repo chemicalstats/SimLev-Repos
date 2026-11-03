@@ -1,4 +1,4 @@
-/* core/slc_normal.c – Normalverteilung: erfc, pnorm, qnorm, dnorm (SimLev core, Etappe 9)
+/* core/slc_normal.c – Normalverteilung: erfc, pnorm, qnorm, dnorm (SimLev core)
  * Verfahren:  Q(x) = 1 - Phi(x) für x >= 0 in zwei Zonen.
  *             (1) 0 <= x <= 5: Taylor-Entwicklung um den nächsten Stützpunkt c = j/8 mit
  *                 |h| = |x - c| <= 1/16. Aus phi' = -x phi (DLMF 7.10.1 mit n = 0) folgt
@@ -11,7 +11,7 @@
  *                 Diese Zone braucht keine Exponentialfunktion.
  *             (2) x > 5: sqrt(pi) e^(z^2) erfc(z) als Kettenbruch DLMF 7.9.2 (gerader Teil von
  *                 7.9.1) mit z = x/sqrt 2, von unten ausgewertet mit fester Tiefe
- *                 N = 6 + ceil(140/z^2) (bei x = 5 also 18 Glieder; gemessen in 9.1). Das
+ *                 N = 6 + ceil(140/z^2) (bei x = 5 also 18 Glieder; gemessen). Das
  *                 modifizierte Lentz-Verfahren (DLMF 3.10(iii)) wurde verworfen: das Produkt seiner
  *                 Faktoren häufte bis 2e-15 relativen Fehler an.
  *                 e^(-x^2/2) ohne Auslöschung: x_h = x auf 26 Bit (Teilung nach Veltkamp/Dekker),
@@ -23,7 +23,7 @@
  *             erfc(z) entsprechend mit eigener Tabelle an z_j = j/8 (z <= 3.5; Taylor aus
  *             (e^(-z^2))' = -2z e^(-z^2): (n+1) a_{n+1} = -2c a_n - 2 a_{n-1}; Grad <= 14) und
  *             Kettenbruch 7.9.2 für z > 3.5; erfc(-z) = 2 - erfc(z).
- *             qnorm(p) (N2, drei Zonen; rationale Näherungen selbst angepasst in gen_constants.py,
+ *             qnorm(p) (drei Zonen; rationale Näherungen selbst angepasst in gen_constants.py,
  *             qnorm_fits: kleinste Quadrate im relativen Fehler, Sanathanan-Koerner und Lawson, an der
  *             eigenen Referenz; keine Koeffizienten aus AS 241 oder anderen Programmen):
  *             (A) |p - 1/2| <= Phi(1.5) - 1/2: x = s (1 + w G(z)) mit s = sqrt(2 pi) q, q = p - 1/2,
@@ -42,7 +42,7 @@
  *                 subnormales p genau); Ende nach |d| <= 2^-30 |x| (quadratische Konvergenz).
  *             Oberes Ende über qnorm(p) = -qnorm(1 - p) (1 - p exakt für p >= 1/2). Phi(x) - p wird im
  *             passenden Teil gebildet: für |x| <= 1/2 als (1/2 - p) - D(|x|) (1/2 - p exakt), sonst als
- *             Q(|x|) - p. Bis 1.0.0 (9.1): Startwert aus der Umkehrreihe bzw. DLMF 7.12.1 und bis zu
+ *             Q(|x|) - p. Während der Entwicklung von 1.0.0: Startwert aus der Umkehrreihe bzw. DLMF 7.12.1 und bis zu
  *             acht Halley-Schritte (7-mal langsamer als R).
  *             dnorm(x) = phi(x): für |x| <= 5 aus der Tabelle (phi(c) sum b_n h^n), sonst
  *             e^(-x^2/2)/sqrt(2 pi) mit derselben Teilung; log-Dichte -x_h^2/2 - x_l(x+x_h)/2 -
@@ -60,7 +60,7 @@
  *               precision. Numerische Mathematik 18(3), 224–242 (Teilung nach Veltkamp).
  *             Halley-Verfahren: z. B. Householder, A. S. (1970). The Numerical Treatment of a
  *               Single Nonlinear Equation. McGraw-Hill, Kap. 4.
- *             N2: Sanathanan, C. K., Koerner, J. (1963). Transfer function synthesis as a ratio of two
+ *             Sanathanan, C. K., Koerner, J. (1963). Transfer function synthesis as a ratio of two
  *               complex polynomials. IEEE Transactions on Automatic Control 8(1), 56–58.
  *             Lawson, C. L. (1961). Contributions to the Theory of Linear Least Maximum
  *               Approximation. Dissertation, University of California, Los Angeles.
@@ -68,12 +68,12 @@
  * Konstanten: selbst hergeleitet (core/gen_constants.py): Stützwerte phi, Phi - 1/2, Q an
  *             j/8 (j <= 40) und erfc, (2/sqrt pi) e^(-z^2) an j/8 (j <= 28), Umkehrreihe 1/6, 7/120,
  *             sqrt(2 pi), ln 2 pi, 1/sqrt(pi), 1/sqrt 2. Veltkamp-Faktor 2^27 + 1 (Dekker 1971).
- *             N2: Koeffizienten der Zonen A, B, C (slc_qn_*), sqrt(2 pi) als hi + lo und geteilt,
+ *             Koeffizienten der Zonen A, B, C (slc_qn_*), sqrt(2 pi) als hi + lo und geteilt,
  *             Zonengrenzen SLC_QN_QA = Phi(1.5) - 1/2, SLC_QN_PC = 2.8e-7.
- *             Zonengrenzen 5 und 3.5 gemessen in 9.1 (e91/); Taylor-Polynome je Stützpunkt.
+ *             Zonengrenzen 5 und 3.5 gemessen; Taylor-Polynome je Stützpunkt.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
- * Prüforakel: R 4.3.3 pnorm, qnorm, dnorm; eigene Rechnung mit decimal (scratchpad/e91/, N2: en2/).
+ * Prüforakel: R 4.3.3 pnorm, qnorm, dnorm; eigene Rechnung mit decimal.
  */
 #define SLC_NEED_NORMAL_TABLES
 #include "slc_internal.h"
@@ -141,7 +141,7 @@ static int ntayS(double x, double *S)
 }
 
 /* sqrt(pi) e^(z^2) erfc(z), z >= 3.4, Kettenbruch DLMF 7.9.2 von unten ausgewertet mit fester
- * Tiefe N = 6 + ceil(140/z^2) (gemessen in 9.1: die nötige Tiefe für 2^-58 relativ liegt für
+ * Tiefe N = 6 + ceil(140/z^2) (gemessen: die nötige Tiefe für 2^-58 relativ liegt für
  * 3.4 <= z <= 30 um mindestens ein Glied darunter; e91/tools/cfdepth.py). Von unten gerechnet
  * häufen sich die Rundungsfehler nicht an wie beim Produkt der Lentz-Faktoren. */
 static double cf_erfcx(double z)
@@ -253,7 +253,7 @@ double sl_dnorm1(double x, int give_log)
 
 /* ── qnorm ── */
 
-/* N2: wie ntay, aber nach Estrin (Grad SLC_NPOLY_DEG fest, die Tabellen sind mit 0 aufgefüllt): kürzere
+/* wie ntay, aber nach Estrin (Grad SLC_NPOLY_DEG fest, die Tabellen sind mit 0 aufgefüllt): kürzere
  * Abhängigkeitskette für den Korrekturschritt von qnorm; S und E bis auf Rundung wie ntay */
 static int ntay_estrin(double x, double *S, double *E)
 {
@@ -293,12 +293,12 @@ static void qn_eval(double x, double p, double pm, double *res, double *ph)
     }
 }
 
-/* N2: Zone A (|p - 1/2| <= SLC_QN_QA, |x| <= 1.5) ohne Korrekturschritt:
+/* Zone A (|p - 1/2| <= SLC_QN_QA, |x| <= 1.5) ohne Korrekturschritt:
  * x = s (1 + w G(z)) mit s = sqrt(2 pi) q, w = q^2, z = 1/4 - w, G = P_7(z)/Q_8(z) (gen_constants.py).
  * q = qh + ql exakt (Fast2Sum mit |1/2| >= |p| für p <= 1/2; für p > 1/2 ist p - 1/2 exakt, ql = 0);
  * s = sh + sl als Doppelwort (Produktfehler nach Dekker 1971 mit der Veltkamp-Teilung von sqrt(2 pi));
  * x = sh + (sl + sh w G). Der Rest sh w G ist höchstens 28 % von x, sein Rundungsfehler geht also
- * stark verkleinert ein (gemessen: höchstens ~1,5 ulp, scratchpad/en2/). Ungerade in q: x(1 - p) = -x(p). */
+ * stark verkleinert ein (gemessen: höchstens ~1,5 ulp). Ungerade in q: x(1 - p) = -x(p). */
 static double qn_zone_a(double p)
 {
     double qh = p - 0.5, ql = p - (qh + 0.5);
@@ -315,7 +315,7 @@ static double qn_zone_a(double p)
 }
 
 /* 0 < p <= 1/2 außerhalb der Zone A; Ergebnis < 0.
- * N2: Startwert aus den rationalen Näherungen der Zonen B und C in t = sqrt(-2 ln p) (Fehler < 1e-11
+ * Startwert aus den rationalen Näherungen der Zonen B und C in t = sqrt(-2 ln p) (Fehler < 1e-11
  * bzw. 1e-10 relativ); die Schleifen unten enden daher nach einem Schritt. */
 static double qnorm_low(double p)
 {
@@ -346,7 +346,7 @@ static double qnorm_low(double p)
         if (!isfinite(d)) break;
         x = x - d / (1.0 + 0.5 * x * d);
         /* Halley konvergiert kubisch: nach |d| <= 2^-20 |x| ist der Fehler des neuen x
-         * von der Größe |d|^3 / |x|^2 < 2^-60 |x| (in 9.1 gegen R und decimal gemessen) */
+         * von der Größe |d|^3 / |x|^2 < 2^-60 |x| (gegen R und decimal gemessen) */
         if (fabs(d) <= 0x1p-20 * fabs(x)) break;
     }
     return x;
@@ -356,7 +356,7 @@ double slc_qnorm_std(double p, int lower)
 {
     double x;
     if (!lower) return -slc_qnorm_std(p, 1);
-    if (fabs(p - 0.5) <= SLC_QN_QA) x = qn_zone_a(p);               /* N2 */
+    if (fabs(p - 0.5) <= SLC_QN_QA) x = qn_zone_a(p);
     else x = (p > 0.5) ? -qnorm_low(1.0 - p) : qnorm_low(p);
     return x + 0.0;        /* -0 -> +0 */
 }

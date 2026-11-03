@@ -1,5 +1,5 @@
 /*
- * python/src/_ext_slc_linalg.c -- Python-Huellen der Etappe 9.2 der C-Bibliothek slc im Modul
+ * python/src/_ext_slc_linalg.c -- Python-Huellen der C-Bibliothek slc im Modul
  * simlev._ext: lineare Algebra, Matrixprodukt, kleinste Quadrate und Logit-IRLS, Stineman,
  * Glaettungsspline, Kerndichte
  *
@@ -7,7 +7,7 @@
  * kanonischen Quellen in core/ (core/sync.py); nur diese Huelle gibt es nur hier. Die
  * Python-Seite (simlev/_lib_linalg.py) prueft Argumente und legt die Felder an (float64,
  * eindimensional; Matrizen spaltenweise); die Huellen pruefen Typ, Laenge und Beschreibbarkeit.
- * Rueckmeldungen wie _ext_slc.c (Entwurf C.4): Warnungen nach dem Aufruf mit warnings.warn,
+ * Rueckmeldungen wie _ext_slc.c: Warnungen nach dem Aufruf mit warnings.warn,
  * Fehler als ValueError mit dem Text des Kerns, Abbruch ueber PyErr_CheckSignals().
  */
 #define PY_SSIZE_T_CLEAN

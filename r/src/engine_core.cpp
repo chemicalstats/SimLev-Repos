@@ -1,8 +1,8 @@
 // src/engine_core.cpp
-// .Call-Huelle der Tagesengine (E17, Kern src/engine_core_impl.h; R-Seite R/sim_engine.R)
+// .Call-Huelle der Tagesengine (Kern src/engine_core_impl.h; R-Seite R/sim_engine.R)
 //
-// Die Huelle liest die flache Eingabe des Kerns (struct Input) und die Angaben der Vorbereitung (E17 Stufe 2,
-// prepare_core_impl.h: PrepFlat) aus einer benannten Liste (Aufbau in .sim_engine_run), laesst den Kern
+// Die Huelle liest die flache Eingabe des Kerns (struct Input) und die Angaben der Vorbereitung
+// (prepare_core_impl.h: PrepFlat) aus einer benannten Liste (Aufbau in .sim_engine_run), laesst den Kern
 // vorbereiten und rechnen und gibt die Tagesflags (Freibetragstage), Status, Report-Vektoren, Lots, Verkaeufe,
 // Steuerbuchungen, geaenderte Kursreihen (Splits), Toepfe, Gebuehren, offene Steuer, Jahreszeilen und
 // KiSt-Salden des Tarifwegs, das Ereignisprotokoll und einen etwaigen Abbruch als Liste zurueck. Lots,
@@ -10,7 +10,7 @@
 // (perform_trade_buy_cpp, .perform_trade_sell, .pay_vp, .settle_p23, .sim_day_assess_vp). Die Texte der
 // Warnungen und Fehler setzt R (.sim_engine_signal).
 //
-// E17 Stufe 3: C_sim_evaluate rechnet die Auswertung (Kern src/evaluate_core_impl.h; R-Seite .sim_evaluate in
+// C_sim_evaluate rechnet die Auswertung (Kern src/evaluate_core_impl.h; R-Seite .sim_evaluate in
 // R/sim_evaluate.R), C_sim_xirr den internen Zinsfuss (.xirr_rate in R/sim_base.R).
 
 #include "simlev_capi.h"
@@ -191,7 +191,7 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
       SET_VECTOR_ELT(report, a, r);
     }
     I.reports = reps.data();
-    // Vorbereitung (E17 Stufe 2, prepare_core_impl.h): Termine, Tagesflags, Startgewichte
+    // Vorbereitung (prepare_core_impl.h): Termine, Tagesflags, Startgewichte
     simlev_prepare::PrepFlat F;
     F.pi = int_of(inp, "pi", simlev_prepare::PI_N);
     F.pd = real_of(inp, "pd", simlev_prepare::PD_N);
@@ -373,7 +373,7 @@ SEXP msgs_out(const std::vector<simlev_eval::Msg>& m, SEXP& vals) {
 }
 }  // namespace
 
-// Auswertung von simulation() (E17 Stufe 3): inp = list(n, total, flows, worth, money, price (je Asset Reihen),
+// Auswertung von simulation(): inp = list(n, total, flows, worth, money, price (je Asset Reihen),
 // day, filled (0/1 oder NULL), sc = c(start_date, stopp_date, start_value, tax_unpaid), status_money, n_buys,
 // n_sells (je Asset), rf (Zahlen oder NULL), rf_ok)
 extern "C" SEXP C_sim_evaluate(SEXP inp) {

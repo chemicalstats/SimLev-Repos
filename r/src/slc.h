@@ -1,15 +1,15 @@
-/* core/slc.h – öffentliche Schnittstelle der C-Bibliothek slc (SimLev core, Etappe 9)
+/* core/slc.h – öffentliche Schnittstelle der C-Bibliothek slc (SimLev core)
  *
  * Verfahren:  siehe die Kerndateien slc_ctx.c (Kontext), slc_rng.c (Zufallsgenerator),
  *             slc_sample.c (Ziehungen), slc_normal.c (Normalverteilung), slc_special.c
  *             (lgamma, unvollständige Beta, t, logistisch); jede nennt ihre Quellen.
- * Quellen:    Entwurf SPEZ-9 (Abschnitte B.0–B.4, C.1–C.5); Literatur je Kerndatei.
+ * Quellen:    Literatur je Kerndatei.
  * Konstanten: core/slc_constants.h, erzeugt von core/gen_constants.py.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
- * Prüforakel: R 4.3.3 (nur Plausibilität, scratchpad/e91/).
+ * Prüforakel: R 4.3.3 (nur Plausibilität).
  *
- * Regeln (B.0):
+ * Regeln:
  *   - reines C99, kein longjmp, kein exit, keine Ausgabe; kein globaler Zustand,
  *     alle Funktionen wiedereintrittsfähig;
  *   - Funktionen, die scheitern oder warnen können, nehmen sl_ctx * als erstes Argument und
@@ -32,7 +32,7 @@
 extern "C" {
 #endif
 
-#define SLC_VERSION "0.1.0"   /* Etappe 9.1 */
+#define SLC_VERSION "0.1.0"
 
 /* ── Kontext: Fehler, Warnungen, Abbruch (slc_ctx.c) ──────────────────────── */
 
@@ -63,7 +63,7 @@ void        sl_warn(sl_ctx *cx, const char *fmt, ...);             /* gleiche Te
 int         sl_interrupted(sl_ctx *cx);              /* 1 (und SL_EINTR) bei Benutzerabbruch */
 const char *sl_version(void);
 
-/* ── Zufallsgenerator xoshiro256** (slc_rng.c, B.1) ───────────────────────── */
+/* ── Zufallsgenerator xoshiro256** (slc_rng.c) ───────────────────────── */
 
 typedef struct sl_rng { uint64_t s[4]; } sl_rng;     /* 32 Byte, Host-Bytereihenfolge */
 
@@ -77,7 +77,7 @@ int32_t  sl_rng_seed31(sl_rng *global);              /* nächster Startwert 0 ..
 double   sl_unif01(sl_rng *r);                       /* (floor(x / 2^11) + 1/2) 2^-53 in (0, 1) */
 int      sl_runif(sl_ctx *cx, sl_rng *r, int64_t n, double a, double b, double *out);
 
-/* ── Ziehungen (slc_sample.c, B.2) ─────────────────────────────────────────── */
+/* ── Ziehungen (slc_sample.c) ─────────────────────────────────────────── */
 
 int64_t sl_rint(sl_rng *r, int64_t n);               /* gleichverteilt in [0, n), n >= 1 */
 int sl_sample(sl_ctx *cx, sl_rng *r, int64_t n, int64_t size, int replace,
@@ -88,7 +88,7 @@ int sl_rgeom(sl_ctx *cx, sl_rng *r, int64_t n, double p, double *out);
 int sl_rgamma(sl_ctx *cx, sl_rng *r, int64_t n, double shape, double scale, double *out);
 int sl_rchisq(sl_ctx *cx, sl_rng *r, int64_t n, double df, double *out);
 
-/* ── Normalverteilung (slc_normal.c, B.3) ─────────────────────────────────── */
+/* ── Normalverteilung (slc_normal.c) ─────────────────────────────────── */
 
 double sl_erfc(double x);
 double sl_pnorm1(double x, int lower);               /* Standardnormal, ein Wert */
@@ -99,7 +99,7 @@ int    sl_pnorm(sl_ctx *cx, int64_t n, const double *x, double mu, double sd, in
 int    sl_qnorm(sl_ctx *cx, int64_t n, const double *p, double mu, double sd, int lower, double *out);
 int    sl_dnorm(sl_ctx *cx, int64_t n, const double *x, double mu, double sd, int give_log, double *out);
 
-/* ── lgamma, unvollständige Beta, t, logistisch (slc_special.c, B.4) ──────── */
+/* ── lgamma, unvollständige Beta, t, logistisch (slc_special.c) ──────── */
 
 int    sl_lgamma(sl_ctx *cx, int64_t n, const double *x, double *out);
 int    sl_pbeta(sl_ctx *cx, int64_t n, const double *x, double a, double b, int lower, double *out);
@@ -112,9 +112,9 @@ int    sl_qlogis(sl_ctx *cx, int64_t n, const double *p, double *out);
 }
 #endif
 
-#include "slc_linalg.h"   /* 9.2: lineare Algebra, Matrixprodukt, kleinste Quadrate, Stineman, Spline, Kerndichte */
+#include "slc_linalg.h"   /* lineare Algebra, Matrixprodukt, kleinste Quadrate, Stineman, Spline, Kerndichte */
 
 #endif /* SLC_H */
 
-#include "slc_opt.h"   /* 9.3: Optimierer und numerischer Gradient */
-#include "slc_models.h"   /* 9.4: Modelle (GARCH/GJR, GPD, DCC, MS-GARCH und HMM, Bootstrap-Kerne) */
+#include "slc_opt.h"   /* Optimierer und numerischer Gradient */
+#include "slc_models.h"   /* Modelle (GARCH/GJR, GPD, DCC, MS-GARCH und HMM, Bootstrap-Kerne) */

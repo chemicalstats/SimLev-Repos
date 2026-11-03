@@ -1,4 +1,4 @@
-/* core/slc_special.c – lgamma, unvollständige Beta, t-Verteilung, logistisch (SimLev core, Etappe 9)
+/* core/slc_special.c – lgamma, unvollständige Beta, t-Verteilung, logistisch (SimLev core)
  * Verfahren:  lgamma(x), x > 0:
  *               x >= 10: Stirling-Reihe DLMF 5.11.1 mit 8 Gliedern B_2k/(2k(2k-1) x^(2k-1)),
  *                 gebildet als (x - 1/2)(ln x - 1) - 1/2 + ln sqrt(2 pi) + omega(x);
@@ -29,7 +29,7 @@
  *               x = nu/(nu + t^2), 1 - x = t^2/(nu + t^2) je einzeln ohne Auslöschung gebildet; das
  *               andere Ende über die Symmetrie in t (1/2 + I_(1-x)(1/2, nu/2)/2, wo dieses Ende direkt
  *               berechnet ist). nu = Inf: Normalverteilung. Kein Wechsel auf die Normalverteilung für
- *               große endliche nu (in 9.1 gemessen: bei nu = 4e5 wäre der Fehler 3e-7).
+ *               große endliche nu (gemessen: bei nu = 4e5 wäre der Fehler 3e-7).
  *             qt(p, nu): nu = 1 exakt über tan (p >= 1/4: tan(pi (p - 1/2)), sonst -1/tan(pi p));
  *               nu = 2 exakt: t = -(1 - 2p)/sqrt(2 p (1 - p)) aus F(t) = 1/2 + t/(2 sqrt(2 + t^2));
  *               sonst Startwert aus der Entwicklung um das Normalquantil (A&S 26.7.5, vier Glieder)
@@ -54,7 +54,7 @@
  *             Aus der Quelle: die Polynome g1 ... g4 von A&S 26.7.5 (nur Startwert).
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
- * Prüforakel: R 4.3.3 lgamma, pbeta, pt, qt, plogis, qlogis (scratchpad/e91/).
+ * Prüforakel: R 4.3.3 lgamma, pbeta, pt, qt, plogis, qlogis.
  */
 #define SLC_NEED_GAMMA_TABLES
 #include "slc_internal.h"
@@ -226,7 +226,7 @@ static void cf_terms(double a, double b, double x, double y, long m, double *bet
 
 /* Das Lentz-Verfahren bestimmt die nötige Tiefe M (bis |Delta - 1| <= 2^-52). Braucht es mehr als
  * 40 Stufen, wird der Kettenbruch mit der Tiefe M + M/8 + 4 von unten neu ausgewertet: das
- * Produkt der Lentz-Faktoren häuft sonst Rundungsfehler an (gemessen in 9.1: 1e-11 bei
+ * Produkt der Lentz-Faktoren häuft sonst Rundungsfehler an (gemessen: 1e-11 bei
  * a = 1e6, b = 0.01); von unten werden sie gedämpft. */
 static double ibeta_cf(double a, double b, double x, double y, int *conv)
 {
@@ -278,18 +278,18 @@ static void ibeta_eval(const ibeta_par *P, double x, double y, double lx, double
         /* genau ein großer Parameter L, ein kleiner S: L vorn (umgeformte Teilnenner ohne
          * Auslöschung), außer die Variable v von S liegt klar unter der Schwelle ihres
          * Kettenbruchs: (S + L) v <= (S + 1)/2 bzw. (S + 1)/8 für S < 1 (dann sind alle |d_k|
-         * klein); in 9.1 gemessen */
+         * klein); gemessen */
         int a_large = P->a >= P->b;
         double S = a_large ? P->b : P->a, v = a_large ? y : x;
         /* Grenze: für S < 1 liefert diese Orientierung meist das große Ende (Komplement), daher
-         * enger (gemessen in 9.1, e91/tools/sfexp.py) */
+         * enger (gemessen) */
         int small_first = (P->a + P->b) * v <= ((S < 1.0) ? 0.125 : 0.5) * (S + 1.0);
         swap = a_large ? small_first : !small_first;
     } else {
         /* Schwelle des Kettenbruchs (DLMF 8.17.22); zwischen Schwelle und Mittelwert a/(a + b)
          * liegt aber das kleine Ende auf der anderen Seite: ist dort der zweite Parameter < 1 und
          * die Variable >= 1/2, wird das kleine Ende direkt mit den umgeformten (positiven)
-         * Teilnennern berechnet statt als Komplement (in 9.1 gemessen) */
+         * Teilnennern berechnet statt als Komplement (gemessen) */
         double mu = P->a / (P->a + P->b);
         swap = x > (P->a + 1.0) / (P->a + P->b + 2.0);
         if (swap && P->b < 1.0 && x < mu && x >= 0.5) swap = 0;

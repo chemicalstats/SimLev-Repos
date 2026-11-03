@@ -1,12 +1,12 @@
 /*
- * python/src/_ext_slc.c -- Python-Huellen der C-Bibliothek slc im Modul simlev._ext (Etappe 9.1)
+ * python/src/_ext_slc.c -- Python-Huellen der C-Bibliothek slc im Modul simlev._ext
  *
  * Die Kerne src/core/slc*.c, slc*.h sind Byte-fuer-Byte-Kopien der kanonischen Quellen in core/
  * (core/sync.py); nur diese Huelle gibt es nur hier. Die Python-Seite (simlev/_lib.py)
  * prueft Argumente und legt die Felder an; die Huellen pruefen nur Typ, Laenge und
  * Beschreibbarkeit der Puffer.
  *
- * Rueckmeldungen (Entwurf C.4): Warnungen des Kerns nach dem Aufruf in Reihenfolge mit
+ * Rueckmeldungen: Warnungen des Kerns nach dem Aufruf in Reihenfolge mit
  * warnings.warn (UserWarning), Fehler als ValueError mit dem Text des Kerns. Abbruch:
  * PyErr_CheckSignals() < 0 (die Huelle haelt die GIL) -> SL_EINTR -> die Ausnahme des
  * Signal-Handlers (KeyboardInterrupt).

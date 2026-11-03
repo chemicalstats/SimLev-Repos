@@ -1,4 +1,4 @@
-/* core/slc_rbase.c – Summen, Mittel, Varianz, Kumulationen und Potenz mit R-Regeln (SimLev core, N8)
+/* core/slc_rbase.c – Summen, Mittel, Varianz, Kumulationen und Potenz mit R-Regeln (SimLev core)
  * Verfahren:  sequenzielle Akkumulation in long double in der Reihenfolge der Elemente, wie R sie
  *             für sum, prod, mean, var, cumsum, cumprod, rowSums/colSums dokumentiert ("accumulated
  *             in long double where available", ?sum, ?cumsum, ?colSums):
@@ -17,7 +17,7 @@
  *               je Zeile, spaltenweise aufaddiert; Mittel durch die Anzahl (bei narm je Zeile).
  *             - pow: R's ^ für Doubles: y == 2 → x·x, x == 1 oder y == 0 → 1, sonst libm pow mit
  *               R's Randfällen (?Arithmetic: 1^y und y^0 sind 1, auch für NA/NaN).
- *             - zeroin2 (E17 Stufe 3): Brent-Verfahren (inverse quadratische bzw. lineare Interpolation mit
+ *             - zeroin2: Brent-Verfahren (inverse quadratische bzw. lineare Interpolation mit
  *               Bisektion als Rückfall) wie R_zeroin2 hinter stats::uniroot, Schritt für Schritt in derselben
  *               Rechenfolge.
  *             Leere Eingabe: mean ist 0/0 in long double (NaN mit gesetztem Vorzeichenbit wie in R).

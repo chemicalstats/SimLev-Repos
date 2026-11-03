@@ -178,7 +178,7 @@ bootstrap_config <- function(indices, letfs = list(), regime_index = NULL, aux =
   if (anyDuplicated(index_names)) stop("Doppelte Index-Namen: ", paste(index_names[duplicated(index_names)], collapse = ", "))
   if (!is.null(aux) && (is.null(names(aux)) || any(names(aux) == ""))) stop("aux muss benannt sein.")
   aux_names <- names(aux) %||% character(0)
-  if (!is.null(aux_type) && !length(aux_type)) aux_type <- NULL   # R3B-04: character(0) wie NULL (keine Angabe)
+  if (!is.null(aux_type) && !length(aux_type)) aux_type <- NULL   # character(0) wie NULL (keine Angabe)
   if (!is.null(aux_type)) {
     if (!is.character(aux_type) || is.null(names(aux_type)) || any(names(aux_type) == "") || anyNA(aux_type))
       stop("aux_type muss ein benannter Zeichenvektor sein: c(<Name aus aux> = 'level' oder 'rate'), z. B. c(cpi = 'level', zins = 'rate').")
@@ -478,9 +478,9 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 
 #' GARCH(1,1) / GJR-GARCH(1,1) schaetzen (ML -> Momente)
 #'
-#' Seit Etappe 9.6b mit der C-Bibliothek slc (.sl_fit_garch11, R/slc_models.R;
-#' Entwurf B.10, F10): ML-Punktschaetzer unter Normalverteilung (Raster-Starts,
-#' BFGS, Umparametrisierung wie MS-GARCH; GJR seit N1 mit alpha + gamma >= 0, also
+#' Seit 1.0.0 mit der C-Bibliothek slc (.sl_fit_garch11, R/slc_models.R):
+#' ML-Punktschaetzer unter Normalverteilung (Raster-Starts,
+#' BFGS, Umparametrisierung wie MS-GARCH; GJR mit alpha + gamma >= 0, also
 #' auch gamma < 0, und BFGS von allen sieben Rasterpunkten), bei Fehlschlag die
 #' Momente mit Warnung; Methodenlabel "konstant", "ml" oder "momente". Der
 #' fruehere Weg ueber rugarch (mit Rsolnp/gosolnp und dessen Uhrzeit-Seed) und
@@ -514,8 +514,8 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 
 #' Tail-Schaetzung (GPD-ML -> Momente -> empirisch -> Default)
 #'
-#' Der GPD-Fit nutzt seit Etappe 9.6b die C-Bibliothek slc (.sl_gpd_fit,
-#' Entwurf B.12: ML in (log sigma, xi) mit Startwerten nach Hosking/Wallis 1987).
+#' Der GPD-Fit nutzt seit 1.0.0 die C-Bibliothek slc (.sl_gpd_fit,
+#' ML in (log sigma, xi) mit Startwerten nach Hosking/Wallis 1987).
 #' @keywords internal
 #' @noRd
 .fit_tail <- function(base_ret, prob, side) {
@@ -556,7 +556,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 .prepare_ms_info <- function(returns, config, base, K, garch_model, ar_gm, tvtp, cores = 1L) {
   .ms_garch_check(K, garch_model)
   ex <- returns[, base] - 1; n <- length(ex)
-  fit <- tryCatch(.ms_garch_fit(ex, K, garch_model, cores),   # N6: cores Threads fuer die Starts
+  fit <- tryCatch(.ms_garch_fit(ex, K, garch_model, cores),   # cores Threads fuer die Starts
                   error = function(e) stop(sprintf("MS-GARCH(%d, %s) Fit fehlgeschlagen: %s", K, garch_model, e$message)))
   om <- fit$omega; al <- fit$alpha; be <- fit$beta; ga <- fit$gamma
   P <- fit$P
@@ -582,7 +582,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
     from <- which(reg[-n] == i); if (length(from) < 50) next
     x <- s2[from] / unc[i] - 1; to <- reg[from + 1]
     for (j in seq_len(K)) if (j != i && sum(to == j) >= 5) {
-      d <- tryCatch(.sl_logit_irls(cbind(1, x), as.integer(to == j))$coefficients[2], error = function(e) NA)   # Logit-IRLS (B.7)
+      d <- tryCatch(.sl_logit_irls(cbind(1, x), as.integer(to == j))$coefficients[2], error = function(e) NA)   # Logit-IRLS
       if (is.finite(d)) delta[i, j] <- max(-3, min(3, d))
     }
   }
@@ -645,7 +645,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 .generate_returns <- function(returns, method, p, info, n_out, stream) {
   n <- nrow(returns); k <- ncol(returns)
   from_idx <- function(idx) list(ret = returns[idx, , drop = FALSE], idx = idx)
-  # Ziehungen aus dem Strom des Pfads (Kerne slc_boot, Entwurf B.17 und C.5 Regel 6)
+  # Ziehungen aus dem Strom des Pfads (Kerne slc_boot)
   g <- switch(method,
     raw        = from_idx(.sl_boot_idx_iid(n, n_out, stream = stream)),
     block      = from_idx(.sl_boot_idx_block(n, n_out, as.integer(p$block_length), FALSE, stream = stream)),
@@ -813,7 +813,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   })
   combo_of_path <- if (is.null(design)) rep(1L, n) else rep(seq_len(nrow(design)), design$n_sims)
   n_paths <- length(combo_of_path)
-  infos <- lapply(combos, function(cp) tryCatch(.prepare_method_info(ex$ret, config, method, cp, cores),   # N6
+  infos <- lapply(combos, function(cp) tryCatch(.prepare_method_info(ex$ret, config, method, cp, cores),
                                                error = function(e) stop(sprintf("Vorberechnung fehlgeschlagen: %s", e$message))))
   base_p <- lapply(combos, function(cp) .get_base_params(method, cp, n_obs))
   for (bp in base_p) .check_boot_params(method, bp, n_obs)
@@ -825,7 +825,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 
 #' Einen gueltigen Pfad mit eigenem Zufallsstrom erzeugen (mit Wiederholungen)
 #'
-#' \code{stream} ist der SimLev-Strom des Pfads (Entwurf C.5, Regel 6); Wiederholungen ziehen
+#' \code{stream} ist der SimLev-Strom des Pfads; Wiederholungen ziehen
 #' daraus weiter.
 #' @keywords internal
 #' @noRd
@@ -846,11 +846,11 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' Parallele Ausfuehrung (fork auf Unix, PSOCK auf Windows)
 #'
 #' Unix: [.par_lapply_fork()] (Einheiten in Pakete gebuendelt, ein Fork je Paket).
-#' Jede Einheit laeuft als parallele Einheit im Sinne von Entwurf C.5, Regel 7
-#' (Merker \code{.sl_state$in_unit}): der globale Zufallszustand von SimLev ist darin gesperrt,
-#' auch bei \code{cores = 1}. Zufaellige Einheiten bekommen ihren Strom als Argument (Regel 6); damit
+#' Jede Einheit laeuft als parallele Einheit (Merker \code{.sl_state$in_unit}): der globale
+#' Zufallszustand von SimLev ist darin gesperrt, auch bei \code{cores = 1}. Zufaellige Einheiten
+#' bekommen ihren Strom als Argument (Stroeme je Einheit, R/slc.R); damit
 #' haengt das Ergebnis nicht von \code{cores} ab. R's Zufallszustand (\code{.Random.seed})
-#' wird weder gelesen noch gesetzt (Regel 10).
+#' wird weder gelesen noch gesetzt.
 #' @keywords internal
 #' @noRd
 .par_lapply <- function(X, FUN, cores) {
@@ -859,7 +859,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   cl <- parallel::makePSOCKcluster(cores)
   on.exit(parallel::stopCluster(cl))
   parallel::clusterEvalQ(cl, { suppressPackageStartupMessages(library(SimLev))
-    assign("in_unit", TRUE, envir = SimLev:::.sl_state) })      # Merker "in Einheit" (Regel 7)
+    assign("in_unit", TRUE, envir = SimLev:::.sl_state) })      # Merker "in Einheit": globaler Zustand gesperrt
   parallel::parLapplyLB(cl, X, FUN)
 }
 
@@ -872,7 +872,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   \item P = min(Einheiten, 4 * cores) Pakete aufeinanderfolgender Einheiten,
 #'     Groessen um hoechstens 1 verschieden; \code{mclapply} verteilt die Pakete
 #'     dynamisch, jedes Paket rechnet seine Einheiten der Reihe nach.
-#'   \item Zufall: keiner der Sonderwege von frueher (Etappe 9.6a, Entwurf C.5 Regel 10).
+#'   \item Zufall: keiner der Sonderwege von frueher.
 #'     SimLev-Einheiten ziehen nur aus dem Strom, den sie als Argument bekommen; R's
 #'     Zufallszustand (\code{.Random.seed}, \code{RNGkind()}) wird weder gelesen noch gesetzt.
 #'   \item Fehler: je Einheit \code{try}, \code{try-error} mit derselben Meldung
@@ -903,7 +903,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   packs <- unname(split(seq_len(n), ((seq_len(n) - 1) * n_pk) %/% n))
   run_pack <- function(idx, ...) {
     out <- vector("list", length(idx)); err <- logical(length(idx))
-    .sl_state$in_unit <- TRUE                                 # Merker "in Einheit" (Regel 7), nur im Kind
+    .sl_state$in_unit <- TRUE                                 # Merker "in Einheit", nur im Kind
     for (k in seq_along(idx)) {
       # Aufruf wortgleich wie in mclapply (Meldung und Bedingung des try-error)
       i <- nexti <- idx[[k]]
@@ -950,20 +950,20 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #'   ausgewertet.
 #' @param config Objekt aus [bootstrap_config()].
 #' @param method Verfahren (Standard in \code{bootstrap()}: \code{"raw"}, in
-#'   [bootstrap_study()]: \code{"stationary"}). In Klammern die Eintraege von
+#'   \code{\link[=bootstrap_study]{bootstrap_study()}}: \code{"stationary"}). In Klammern die Eintraege von
 #'   \code{params}, die das Verfahren verwendet:
 #'   \describe{
-#'     \item{"raw"}{IID-Zeilen-Bootstrap (Efron 1979); zerstoert Zeitabhaengigkeit (Nullmodell). Keine Parameter.}
-#'     \item{"block"}{Moving Block Bootstrap (Kuensch 1989) (\code{block_length})}
-#'     \item{"circular"}{Circular Block Bootstrap (Politis & Romano 1992) (\code{block_length})}
-#'     \item{"stationary"}{Stationaerer Bootstrap (Politis & Romano 1994), geometrisch verteilte Bloecke (\code{L})}
-#'     \item{"wild"}{Wild Bootstrap mit gemeinsamem Gewicht je Zeile fuer alle Reihen (\code{wild_type}); erhaelt die Chronologie}
-#'     \item{"regime"}{Volatilitaetsregime-Markov-Bootstrap: Regime aus Quantilen der rollierenden Volatilitaet des Referenzindex (\code{n_regimes}, \code{vol_window})}
-#'     \item{"evt"}{GPD-Tails des Referenzindex plus empirischer Bulk (\code{tail_prob}, \code{both_tails}); uebrige Indizes ueber das historische Verhaeltnis zum Referenzindex gekoppelt}
-#'     \item{"tails"}{Empirische Tail-Schichtung des Referenzindex (\code{tail_prob})}
-#'     \item{"reset"}{Chronologie mit zufaellig gespiegelten Segmenten (\code{p_break}); erhaelt die Chronologie}
-#'     \item{"garch", "gjr_garch"}{(GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung ueber \code{cross} in [bootstrap_config()]). Geschaetzt per Maximum Likelihood unter Normalverteilung mit der C-Bibliothek von SimLev (GJR mit \eqn{\alpha + \gamma \ge 0}, also auch \eqn{\gamma < 0}; bis Version 1.0.0 \eqn{\gamma \ge 0}; BFGS von sieben Rasterpunkten), notfalls mit Momentschaetzern; die Meldungen nennen den Weg "ml" bzw. "momente" (bis Etappe 9.6b "rugarch"/"optim")}
-#'     \item{"ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"}{Markov-Switching-GARCH-Familie: eigene ML-Schaetzung des MS-GARCH-Modells nach Haas, Mittnik und Paolella (2004), Normalverteilung, Varianzmodell "sGARCH" oder "gjrGARCH" je Regime (GJR mit \eqn{\alpha + \gamma \ge 0}, also auch \eqn{\gamma < 0}; BFGS mit analytischem Gradienten von 12 bzw. bei "gjrGARCH" 20 Startpunkten); "ms_ar_garch_m" zusaetzlich mit AR- und GARCH-in-Mean-Termen je Regime, "tvtp_ms_garch" mit zeitvariablen Uebergangswahrscheinlichkeiten (\code{ms_n_regimes}/\code{ms_garch_model}, \code{ms_ar_n_regimes}/\code{ms_ar_garch_model} bzw. \code{tvtp_n_regimes}/\code{tvtp_garch_model})}
+#'   \item{"raw"}{IID-Zeilen-Bootstrap (Efron 1979); zerstoert Zeitabhaengigkeit (Nullmodell). Keine Parameter.}
+#'   \item{"block"}{Moving Block Bootstrap (Kuensch 1989) (\code{block_length})}
+#'   \item{"circular"}{Circular Block Bootstrap (Politis & Romano 1992) (\code{block_length})}
+#'   \item{"stationary"}{Stationaerer Bootstrap (Politis & Romano 1994), geometrisch verteilte Bloecke (\code{L})}
+#'   \item{"wild"}{Wild Bootstrap mit gemeinsamem Gewicht je Zeile fuer alle Reihen (\code{wild_type}); erhaelt die Chronologie}
+#'   \item{"regime"}{Volatilitaetsregime-Markov-Bootstrap: Regime aus Quantilen der rollierenden Volatilitaet des Referenzindex (\code{n_regimes}, \code{vol_window})}
+#'   \item{"evt"}{GPD-Tails des Referenzindex plus empirischer Bulk (\code{tail_prob}, \code{both_tails}); uebrige Indizes ueber das historische Verhaeltnis zum Referenzindex gekoppelt}
+#'   \item{"tails"}{Empirische Tail-Schichtung des Referenzindex (\code{tail_prob})}
+#'   \item{"reset"}{Chronologie mit zufaellig gespiegelten Segmenten (\code{p_break}); erhaelt die Chronologie}
+#'   \item{"garch", "gjr_garch"}{(GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung ueber \code{cross} in \code{\link[=bootstrap_config]{bootstrap_config()}}). Geschaetzt per Maximum Likelihood unter Normalverteilung mit der C-Bibliothek von SimLev (GJR mit \eqn{\alpha + \gamma \ge 0}, also auch \eqn{\gamma < 0}; bis Version 1.0.0 \eqn{\gamma \ge 0}; BFGS von sieben Rasterpunkten), notfalls mit Momentschaetzern; die Meldungen nennen den Weg "ml" bzw. "momente" (bis 0.10.0 "rugarch"/"optim")}
+#'   \item{"ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"}{Markov-Switching-GARCH-Familie: eigene ML-Schaetzung des MS-GARCH-Modells nach Haas, Mittnik und Paolella (2004), Normalverteilung, Varianzmodell "sGARCH" oder "gjrGARCH" je Regime (GJR mit \eqn{\alpha + \gamma \ge 0}, also auch \eqn{\gamma < 0}; BFGS mit analytischem Gradienten von 12 bzw. bei "gjrGARCH" 20 Startpunkten); "ms_ar_garch_m" zusaetzlich mit AR- und GARCH-in-Mean-Termen je Regime, "tvtp_ms_garch" mit zeitvariablen Uebergangswahrscheinlichkeiten (\code{ms_n_regimes}/\code{ms_garch_model}, \code{ms_ar_n_regimes}/\code{ms_ar_garch_model} bzw. \code{tvtp_n_regimes}/\code{tvtp_garch_model})}
 #'   }
 #'   Bei "wild" und "reset" muss \code{path_length} der Laenge der Historie
 #'   entsprechen.
@@ -1129,8 +1129,8 @@ bootstrap <- function(data, config, method = "raw", n = 1000, params = list(), e
                       cores = 1L, progress = TRUE) {
   t0 <- Sys.time()
   setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
-  if (is.null(seed)) seed <- .sl_next_seed() else .sl_check_seed(seed)   # Regel 3/4: NULL -> einmal k aus G
-  streams <- .sl_streams(seed, setup$n_paths)                 # Regel 6: U_i = J^i(S_0) je Pfad
+  if (is.null(seed)) seed <- .sl_next_seed() else .sl_check_seed(seed)   # NULL -> einmal k aus G
+  streams <- .sl_streams(seed, setup$n_paths)                 # U_i = J^i(S_0) je Pfad
   res <- .par_lapply(seq_len(setup$n_paths), function(i)
     .draw_path(setup, i, streams[[i]], config, method, max_tries), cores)
   ok <- !vapply(res, function(r) is.null(r$path), TRUE)
@@ -1360,9 +1360,13 @@ bootstrap_study_metrics <- function(res) {
 #'   werden je Pfad gesammelt, dedupliziert und am Ende als eine Warnung
 #'   ausgegeben (mit Anzahl der betroffenen Pfade; alle in \code{warnings});
 #'   bei \code{cores > 1} ebenso.
-#' @param sim_args Benannte Liste gemeinsamer Argumente fuer [simulation()]
+#' @param sim_args Benannte Liste gemeinsamer Argumente fuer \code{\link[=simulation]{simulation()}}
 #'   (Standard \code{list()}), z. B. \code{list(start_value = 1000,
-#'   tax_mode = "person")}.
+#'     tax = tax_profile())}: Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
+#'   also auch Bausteine (z. B. \code{dca = dca_plan(100, 1)}, \code{tax = tax_profile()}) und
+#'   Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
+#'   \code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B.
+#'   \code{dca_value}) ergeben einen Fehler, der den Baustein nennt.
 #' @param dates,start Kalender der Pfade: \code{dates} ist ein
 #'   Datumsvektor der Laenge \code{path_length + 1}; \code{NULL} (Standard) =
 #'   aufeinanderfolgende Kalendertage ab \code{start} (Standard
@@ -1380,19 +1384,20 @@ bootstrap_study_metrics <- function(res) {
 #'   Parallelisierung und der Zwischenspeicherung.
 #' @param chunk_dir Optional (Standard \code{NULL}) Verzeichnis fuer
 #'   Zwischenergebnisse je Chunk (Dateien \code{chunk_<Nr>_seed<Seed>.rds},
-#'   bei \code{keep_returns} mit Frequenz-Suffix, bei \code{keep_paths} > 0
-#'   mit Suffix \code{_keep<k>}). Vorhandene Dateien werden
+#'   bei \code{keep_returns} mit Frequenz-Suffix, bei \code{keep_paths} > 0 mit
+#'   Suffix \code{_keep<k>}). Vorhandene Dateien werden
 #'   gelesen statt neu gerechnet; so wird ein abgebrochener Lauf mit
 #'   gleichem Seed fortgesetzt. Die Dateien werden nur ueber Chunk-Nummer,
-#'   Seed, \code{keep_returns} und \code{keep_paths} zugeordnet: bei geaenderten Strategien,
-#'   Daten oder Parametern ein neues Verzeichnis verwenden.
+#'   Seed, \code{keep_returns} und \code{keep_paths} zugeordnet: bei geaenderten
+#'   Strategien, Daten oder Parametern ein neues Verzeichnis verwenden.
 #' @param keep_paths Pfadmatrizen zusaetzlich zurueckgeben (Diagnose):
 #'   \code{TRUE} = alle Pfade, \code{FALSE} oder 0 (Standard) = keine, ganze
-#'   Zahl k >= 1 = die ersten k Pfade (k groesser als die Pfadzahl: alle).
-#'   Speicherbedarf: alle Pfadmatrizen bleiben im Ergebnis und gehen bei
-#'   \code{cores > 1} auch durch die Prozessgrenze, ungefaehr Pfade x
-#'   (Pfadlaenge + 1) x Reihen x 8 Byte (z. B. 10 000 x 7 300 x 3 x 8 Byte =
-#'   1,75 GB).
+#'   Zahl k >= 1 = die ersten k Pfade (k groesser als die Pfadzahl: alle);
+#'   \code{NA}, Text, Vektoren, negative oder nicht ganze Zahlen ergeben einen
+#'   Fehler. Speicherbedarf: Alle behaltenen Pfadmatrizen bleiben im Ergebnis
+#'   und gehen bei \code{cores > 1} auch durch die Prozessgrenze, ungefaehr
+#'   Pfade x (Pfadlaenge + 1) x Reihen x 8 Byte (z. B. 10 000 Pfade x 7 300
+#'   Tage x 3 Reihen x 8 Byte = 1,75 GB).
 #' @param keep_returns \code{"none"} (Standard) oder \code{"year"},
 #'   \code{"quarter"}, \code{"month"}: speichert je Strategie und Pfad die
 #'   zeitgewichteten Brutto-Periodenrenditen (aus [result_index()], Perioden
@@ -1490,7 +1495,7 @@ bootstrap_study_metrics <- function(res) {
 #'     sma = list(strategy = create_strategy(eu_l2 = asset_config("etf", "signal",
 #'                  partial_exemption = 30, signal_buy = "buy", signal_sell = "sell")),
 #'                signal = sma_signal)),
-#'   sim_args = list(start_value = 1000, tax_mode = "person"),
+#'   sim_args = list(start_value = 1000, tax = tax_profile()),
 #'   burn_in = 730, benchmark = "bnh", cores = 8, seed = 42)
 #' summary(st)
 #' bootstrap_probability(st, ttwror >= 0.10 & max_drawdown <= 0.6)
@@ -1523,13 +1528,13 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
   sim_args <- .sim_args_set(list(), sim_args, "bootstrap_study")
   for (nm in names(specs)) specs[[nm]]$sim <- .sim_args_set(sim_args, specs[[nm]]$args, "bootstrap_study")
   setup <- .boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cores)
-  keep_paths <- .keep_count(keep_paths, setup$n_paths, "bootstrap_study")   # 6.5b: TRUE = alle Pfade
+  keep_paths <- .keep_count(keep_paths, setup$n_paths, "bootstrap_study")   # TRUE = alle Pfade
   if (is.null(dates)) dates <- seq.Date(.to_date(start, "start"), by = "day", length.out = setup$n_out + 1L)
   if (length(dates) != setup$n_out + 1L) stop(sprintf("dates braucht L\u00e4nge %d (Pfadl\u00e4nge + 1).", setup$n_out + 1L))
   dates <- .to_date(dates, "dates")
   if (burn_in >= setup$n_out) stop("burn_in ist l\u00e4nger als der Pfad.")
-  if (is.null(seed)) seed <- .sl_next_seed() else .sl_check_seed(seed)   # Regel 3/4: NULL -> einmal k aus G
-  streams <- .sl_streams(seed, setup$n_paths)                 # Regel 6: U_i = J^i(S_0) je Pfad
+  if (is.null(seed)) seed <- .sl_next_seed() else .sl_check_seed(seed)   # NULL -> einmal k aus G
+  streams <- .sl_streams(seed, setup$n_paths)                 # U_i = J^i(S_0) je Pfad
   chunks <- split(seq_len(setup$n_paths), ceiling(seq_len(setup$n_paths) / chunk_size))
   if (!is.null(chunk_dir)) dir.create(chunk_dir, showWarnings = FALSE, recursive = TRUE)
   sim_rows <- (burn_in + 1L):(setup$n_out + 1L)
@@ -1659,7 +1664,7 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
   ), class = "SimLevBootstrapStudy")
 }
 
-#' Anzahl behaltener Pfade aus keep_paths (6.5b, Variante A)
+#' Anzahl behaltener Pfade aus keep_paths
 #'
 #' Zweck: gemeinsame Pruefung von keep_paths in bootstrap_study() und withdrawal_simulation(): TRUE = alle
 #' Pfade, FALSE oder 0 = keine, ganze Zahl k >= 1 = die ersten k Pfade; k > n still alle.
@@ -1918,7 +1923,7 @@ plot.SimLevBootstrapStudy <- function(x, metric = "cagr", ...) {
   dl <- lapply(x$strategies, function(s) tab[[metric]][tab$strategy == s])
   rng <- range(unlist(dl), finite = TRUE)
   cols <- grDevices::hcl.colors(length(dl), "Dark 3")
-  dens <- lapply(dl, function(v) .sl_kde(v[is.finite(v)]))   # Gauss-Kerndichte (slc, Entwurf B.16; nur Grafik)
+  dens <- lapply(dl, function(v) .sl_kde(v[is.finite(v)]))   # Gauss-Kerndichte (slc; nur Grafik)
   plot(NULL, xlim = rng, ylim = c(0, max(vapply(dens, function(d) max(d$y), 0))),
        xlab = metric, ylab = "Dichte", main = sprintf("Verteilung %s (%s, %d Pfade)", metric, x$method, x$n_paths), ...)
   for (i in seq_along(dens)) graphics::lines(dens[[i]], col = cols[i], lwd = 1.5)

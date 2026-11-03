@@ -1,6 +1,6 @@
 # WithdrawalCore – .wd_simulate aus core/withdrawal_core_impl.h: geteilter C++-Kern wie in R und Python über
-# die C-ABI-Hülle core/simlev_cabi.cpp (CAbi, N7). Der frühere Julia-Port (F2; rule_amount, pmt_due,
-# FIFO-Steuer) ist mit N7 entfallen. Gegenstück zu python/simlev/_withdrawal_core.py.
+# die C-ABI-Hülle core/simlev_cabi.cpp (CAbi). Der frühere Julia-Port (rule_amount, pmt_due,
+# FIFO-Steuer) ist seit 1.2.0 entfallen. Gegenstück zu python/simlev/_withdrawal_core.py.
 module WithdrawalCore
 
 import ..SimLev
@@ -50,7 +50,7 @@ function wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_valu
     terminal = Vector{Float64}(undef, paths); terminal_nom = Vector{Float64}(undef, paths)
     taxes = Vector{Float64}(undef, paths); depl = Vector{Float64}(undef, paths); fail = Vector{Float64}(undef, paths)
     wealth_end = Matrix{Float64}(undef, ed); taxes_end = Matrix{Float64}(undef, ed)
-    # T14: Jahreszeilen des Tarifwegs (25 Zeilen, (ny + 1) x Pfade Spalten; ohne Tarifweg leer)
+    # Jahreszeilen des Tarifwegs (25 Zeilen, (ny + 1) x Pfade Spalten; ohne Tarifweg leer)
     td = Bool(tax_on) && !isempty(tariff_par) ? (25, (ny + 1) * paths) : (0, 0)
     tariff_years = Matrix{Float64}(undef, td)
     outs = (wealth, spend, planned, terminal, terminal_nom, taxes, depl, fail, wealth_end, taxes_end, tariff_years)
@@ -78,7 +78,7 @@ function wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_valu
     out = SimLev.RList("wealth" => wealth, "spending" => spend, "planned" => planned, "terminal_real" => terminal,
                        "terminal_nominal" => terminal_nom, "taxes_real" => taxes, "failed" => fail,
                        "depletion_period" => depl, "wealth_end" => wealth_end, "taxes_end" => taxes_end)
-    isempty(tariff_par) || (out["tariff_years"] = tariff_years)   # T14: Jahreszeilen nur mit Tarifweg
+    isempty(tariff_par) || (out["tariff_years"] = tariff_years)   # Jahreszeilen nur mit Tarifweg
     return out
 end
 

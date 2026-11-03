@@ -7,7 +7,7 @@
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang: Ordnung, Rang, partielle Sortierung und Quantile
-#                     rechnet seit N8 der C-Kern core/slc_rbase_sort.c.
+#                     rechnet der C-Kern core/slc_rbase_sort.c.
 """Gemeinsame Hilfen, Sortieren, Ränge, Einteilen und Lagemaße (``order``, ``sort``, ``rank``, ``rle``,
 ``tabulate``, ``findInterval``, ``cut``, ``complete.cases``, ``quantile``, ``median``, ``weighted.mean``),
 nachgebildet aus R 4.3.3 (``src/main/sort.c``, ``qsort-body.c``, ``seq.c``; ``base/R/sort.R``, ``rle.R``,
@@ -25,7 +25,7 @@ from .linalg import RError
 from .rlist import RList
 from . import rnum as _rn
 from .rnum import NA_REAL
-from .. import _ext   # N8: C-Kerne core/slc_rbase_sort.c
+from .. import _ext   # C-Kerne core/slc_rbase_sort.c
 from ._collate import collate_key
 
 __all__ = [
@@ -187,7 +187,7 @@ def order(*args, na_last=True, decreasing=False):
     if len(dec) == 1:
         dec = dec * len(keys)
     if not any(k[2] for k in keys):
-        # N8: nur Zahlenschlüssel -> C-Kern sl_r_order (stabil, -0 == 0, NA/NaN fehlend)
+        # nur Zahlenschlüssel -> C-Kern sl_r_order (stabil, -0 == 0, NA/NaN fehlend)
         kk = np.ascontiguousarray(np.concatenate([np.asarray(k[0], dtype=np.float64) for k in keys]) if keys else np.zeros(0))
         out = np.empty(n, dtype=np.int64)
         nl = -1 if na_last is None else (1 if na_last else 0)
@@ -273,7 +273,7 @@ def rank(x, na_last=True, ties_method="average"):
     xs = v[~nas]
     m = len(xs)
     if not isstr and ties_method in _TIES:
-        # N8: C-Kern sl_r_rank (Zahlen ohne NA)
+        # C-Kern sl_r_rank (Zahlen ohne NA)
         yd = np.empty(m)
         _ext.slc_r_rank(np.ascontiguousarray(xs, dtype=np.float64), _TIES[ties_method], yd)
         y = yd if ties_method == "average" else yd.astype(np.int64)
@@ -548,7 +548,7 @@ def quantile(x, probs=(0.0, 0.25, 0.5, 0.75, 1.0), na_rm=False, names=True, type
             raise RError("'probs' outside [0,1]")
     pp = np.where(np.isnan(p), p, np.maximum(0.0, np.minimum(1.0, p)))
     np_ = pp.size
-    # N8: C-Kern sl_r_quantile (partielle Sortierung wie R, Typen 1–9)
+    # C-Kern sl_r_quantile (partielle Sortierung wie R, Typen 1–9)
     qs = np.empty(np_)
     _ext.slc_r_quantile(np.ascontiguousarray(xv, dtype=np.float64), np.ascontiguousarray(pp), int(type), qs)
     qs = np.where(pok, qs, p)

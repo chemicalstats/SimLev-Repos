@@ -1,4 +1,4 @@
-/* core/slc_linalg.h – Schnittstelle der Etappe 9.2 (SimLev core): lineare Algebra, Matrixprodukt,
+/* core/slc_linalg.h – Schnittstelle der C-Bibliothek slc (SimLev core): lineare Algebra, Matrixprodukt,
  * kleinste Quadrate und Logit-IRLS, Stineman-Interpolation, kubischer Glättungsspline, Kerndichte
  *
  * Verfahren:  siehe die Kerndateien slc_linalg.c (Cholesky, Band-Cholesky, Dreieckslöser,
@@ -6,11 +6,11 @@
  *             slc_lsq.c (Householder-QR mit begrenzter Spaltenpivotisierung, Logit-IRLS),
  *             slc_stine.c (Stineman), slc_spline.c (Reinsch-Spline mit GCV), slc_kde.c
  *             (Gauß-Kerndichte); jede nennt ihre Quellen.
- * Quellen:    Entwurf SPEZ-9, Abschnitte B.5–B.7, B.14–B.16; Literatur je Kerndatei.
+ * Quellen:    Literatur je Kerndatei.
  * Konstanten: keine.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
- * Prüforakel: R 4.3.3, stinepack 1.5 (nur Plausibilität, scratchpad/e92/).
+ * Prüforakel: R 4.3.3, stinepack 1.5 (nur Plausibilität).
  *
  * Eingebunden von slc.h (eine Zeile); nicht direkt einbinden.
  *
@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-/* ── Lineare Algebra (slc_linalg.c, B.5) ──────────────────────────────────── */
+/* ── Lineare Algebra (slc_linalg.c) ──────────────────────────────────── */
 
 /* A = R'R, R obere Dreiecksmatrix (n x n, unteres Dreieck 0); gelesen wird das obere Dreieck von A */
 int sl_chol(sl_ctx *cx, int n, const double *A, double *R);
@@ -46,13 +46,13 @@ int sl_eigen_sym(sl_ctx *cx, int n, const double *A, int want_vectors, double *v
  * Stelle; Speicher ab[(i - j) + j (kd + 1)] = A[i, j] für j <= i <= min(n - 1, j + kd) (unteres Band) */
 int sl_chol_band(sl_ctx *cx, int n, int kd, double *ab);
 
-/* ── Matrixprodukt (slc_matmul.c, B.6) ─────────────────────────────────────── */
+/* ── Matrixprodukt (slc_matmul.c) ─────────────────────────────────────── */
 
 void sl_matmul(int m, int k, int n, const double *A, const double *B, double *C);      /* A B:  A m x k, B k x n */
 void sl_crossprod(int m, int k, int n, const double *X, const double *Y, double *C);   /* X'Y:  X m x k, Y m x n */
 void sl_tcrossprod(int m, int k, int n, const double *X, const double *Y, double *C);  /* X Y': X m x k, Y n x k */
 
-/* ── Kleinste Quadrate und Logit-IRLS (slc_lsq.c, B.7) ─────────────────────── */
+/* ── Kleinste Quadrate und Logit-IRLS (slc_lsq.c) ─────────────────────── */
 
 /* y ~ X (m x n) mit Gewichten w (NULL: 1); pivot = 1 begrenzte, 2 volle Spaltenpivotisierung.
  * coef (n): ausgefallene Koeffizienten NA (NaN mit Nutzlast 1954); fitted (m, NULL erlaubt) = X b;
@@ -64,7 +64,7 @@ int sl_lsfit(sl_ctx *cx, int m, int n, const double *X, const double *y, const d
 int sl_logit_irls(sl_ctx *cx, int m, int n, const double *X, const double *y,
                   int maxit, double tol, double *coef, int *converged);
 
-/* ── Stineman-Interpolation (slc_stine.c, B.14) ────────────────────────────── */
+/* ── Stineman-Interpolation (slc_stine.c) ────────────────────────────── */
 
 /* x streng steigend (n >= 1); scale = 1: Steigungen auf skalierten Daten (wie heute "scaledstineman");
  * yout = NA außerhalb [x_1, x_n] bzw. für NaN in xout */
@@ -74,7 +74,7 @@ int sl_stineman_slopes(sl_ctx *cx, int n, const double *x, const double *y, int 
 int sl_stineman_eval(sl_ctx *cx, int n, const double *x, const double *y, const double *yp,
                      int nout, const double *xout, double *yout);
 
-/* ── Kubischer Glättungsspline (slc_spline.c, B.15) ────────────────────────── */
+/* ── Kubischer Glättungsspline (slc_spline.c) ────────────────────────── */
 
 /* x, y, w (NULL: 1) Länge n; lambda <= 0: Wahl per GCV. Ausgabe (Felder der Länge n):
  * nk verschiedene Knoten, g = Werte, gam = zweite Ableitungen an den Knoten (0 an den Rändern) */
@@ -84,7 +84,7 @@ int sl_smspline_fit(sl_ctx *cx, int n, const double *x, const double *y, const d
 int sl_smspline_predict(sl_ctx *cx, int nk, const double *knots, const double *g, const double *gam,
                         int nout, const double *xout, double *yout);
 
-/* ── Gauß-Kerndichte (slc_kde.c, B.16) ─────────────────────────────────────── */
+/* ── Gauß-Kerndichte (slc_kde.c) ─────────────────────────────────────── */
 
 /* Dichte auf ngrid Punkten von from bis to; w (NULL: 1/n) */
 int sl_kde(sl_ctx *cx, int64_t n, const double *x, const double *w, double bw,

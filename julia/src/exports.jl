@@ -38,14 +38,14 @@ for (m, fs) in _MODULE_EXPORTS
     end
 end
 
-# Zufallszustand der C-Bibliothek slc (Etappe 9.1, src/slib.jl)
+# Zufallszustand der C-Bibliothek slc (src/slib.jl)
 const simlev_seed = SLib.simlev_seed
 export simlev_seed
 
-# set_seed/rng_kind (Nachbildung von R's Zufall, RRng) sind mit Etappe 9.6c entfallen (Entwurf C.6)
+# set_seed/rng_kind (Nachbildung von R's Zufall, RRng) sind seit 1.0.0 entfallen
 export tax_tariff, SimLevSummary, format_summary
-# Bausteine für simulation() (Etappe 6.3, sim_blocks.jl)
+# Bausteine für simulation() (sim_blocks.jl)
 export sim_costs, dca_plan, rebalance_plan, split_rule, tax_profile, income_rate, income_tariff, harvest_rule,
        funds_costs
-# Fonds-Wrapper (Etappe 6.5c, wrapper.jl)
+# Fonds-Wrapper (wrapper.jl)
 export wrapper_config, wrapper_nav

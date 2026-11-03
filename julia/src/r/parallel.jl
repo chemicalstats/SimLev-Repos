@@ -9,10 +9,10 @@
 # `parallel::mclapply(X, FUN, mc.cores = cores, mc.preschedule = FALSE,
 # mc.set.seed = FALSE)`. Vorlage: python/simlev/_r/parallel.py.
 #
-# Verhalten wie R (Etappe 5, siehe julia/DEVELOPING.md; Zufall seit Etappe 9.6a):
+# Verhalten wie R (siehe julia/DEVELOPING.md; Zufall seit 1.0.0):
 # * `cores` wird ganzzahlig abgeschnitten; unter zwei Kernen oder mit höchstens
 #   einem Element ist es `lapply`.
-# * Zufall (Entwurf C.5, Regeln 6, 7 und 10): jede Einheit läuft als parallele
+# * Zufall: jede Einheit läuft als parallele
 #   Einheit (`SimLev.SLib.in_unit`, Merker je Aufgabe): der globale Zufallszustand
 #   von SimLev ist darin gesperrt, auch bei `cores = 1`. Zufällige Einheiten
 #   bekommen ihren Strom als Argument; das Ergebnis hängt nicht von `cores` oder
@@ -124,7 +124,7 @@ function _replay(cap::Capture)
     nothing
 end
 
-# ── Einheit (Entwurf C.5, Regel 7) ───────────────────────────────────────
+# ── Einheit ───────────────────────────────────────
 
 "`FUN(x)` als parallele Einheit: der globale Zufallszustand von SimLev ist darin gesperrt."
 _unit(FUN, x) = SimLev.SLib.in_unit(() -> FUN(x))
@@ -137,7 +137,7 @@ _ncores(cores) = cores isa Integer ? Int(cores) : unsafe_trunc(Int, Float64(core
 """
     par_lapply(X, FUN, cores = 1)
 
-Port von `.par_lapply(X, FUN, cores)`; Ergebnis `Vector{Any}` in der Reihenfolge
+R: `.par_lapply(X, FUN, cores)`; Ergebnis `Vector{Any}` in der Reihenfolge
 von `X`. Parallel mit `Threads.@spawn`, wenn `Threads.nthreads() > 1`.
 """
 function par_lapply(X, FUN, cores = 1)

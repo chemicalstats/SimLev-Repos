@@ -1,6 +1,6 @@
 """Grundfunktionen der Engine: Ausgabe- und Datumshilfen, Spaltendaten, Gebühren, Termine, Tarifweg (Prüfung,
 ``_TariffEnv``) und Kennzahlen (nachgebildet aus ``r/R/sim_base.R``; Julia: ``engine.jl``). Die Handels- und
-Steuerfunktionen der Tagesschleife rechnet seit E17 Stufe 1c der gemeinsame C++-Kern (``_sim_engine.py``).
+Steuerfunktionen der Tagesschleife rechnet der gemeinsame C++-Kern (``_sim_engine.py``).
 """
 from __future__ import annotations
 
@@ -106,7 +106,7 @@ def _num_vec(x: Any) -> list | None:
 
 
 def _n_tage(n: Any) -> str:
-    """``.n_tage()``: "1 Tag" bzw. "n Tage" (R9-03)."""
+    """``.n_tage()``: "1 Tag" bzw. "n Tage"."""
     s = n if isinstance(n, str) else "%d" % int(n)
     return "1 Tag" if s == "1" else s + " Tage"
 
@@ -151,7 +151,7 @@ def _unwrap(x: Any) -> Any:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _r_strptime_ymd(s: str) -> int | None:
-    """``as.Date(s, format = "%Y-%m-%d")`` wie R's strptime (Ziffernfelder, Rest ignoriert; N10: Kern
+    """``as.Date(s, format = "%Y-%m-%d")`` wie R's strptime (Ziffernfelder, Rest ignoriert; Kern
     core/slc_rbase_date.c)."""
     return _ext.slc_r_strptime_ymd(s, "-")
 
@@ -317,7 +317,7 @@ def _column(v: Any) -> tuple[str, np.ndarray]:
             if not (norm.isna() | (norm == s)).all():
                 midnight = False
             # Tage seit 1970 des (auf Mitternacht gesetzten) Zeitpunkts, NaT -> NA;
-            # Etappe 7.1: auf dem ganzen Feld statt je Element über to_pydatetime()
+            # auf dem ganzen Feld statt je Element über to_pydatetime()
             na = norm.isna().to_numpy()
             days = norm.to_numpy().astype("datetime64[D]").astype(np.int64).astype(np.float64)
             if na.any():
@@ -426,7 +426,7 @@ def _fee_spec(x: Any) -> dict | None:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _sched_spec(mode, span, unit, days, dates: np.ndarray, value, anchor, start_date, skip_start) -> tuple:
-    """Angaben eines Terminplans für den Kern (E17 Stufe 2, core/prepare_core_impl.h): (si, start, days, dcode)
+    """Angaben eines Terminplans für den Kern (core/prepare_core_impl.h): (si, start, days, dcode)
     wie ``.sched_spec`` in R; den Schritt liest R aus ``"<span> months"`` (``as.integer``), den Tag von ``days`` für
     anchor = "start" aus ``as.Date("2000-1-<days>")`` (0 = NA)."""
     if not mode or unit is None or (value is not None and value <= 0):
@@ -465,7 +465,7 @@ def _calculate_dates_flags(mode, span, unit, days, dates: np.ndarray, value, anc
 
 
 def _check_taxable_income(x: Any, years: list[int], who: str = "simulation", plan_ok: bool = False) -> dict:
-    """zvE prüfen (R: ``.check_taxable_income``). ``plan_ok`` (T14, ``income_tariff()``): ein Vektor ohne Namen
+    """zvE prüfen (R: ``.check_taxable_income``). ``plan_ok`` (``income_tariff()``): ein Vektor ohne Namen
     (ein Wert je Planjahr von ``withdrawal_simulation()``) ist zulässig; Ergebnis dann mit ``plan`` (Werte)."""
     form = ("eine Zahl (zvE in EUR f\u00fcr alle Jahre), ein nach Kalenderjahren benannter Zahlenvektor "
             "(z. B. c(\"2024\" = 50000, \"2025\" = 52000)) oder ein data.frame mit den Spalten year und taxable_income")
@@ -569,7 +569,7 @@ _XIRR_WARN = {1: "-Inf replaced by maximally negative value", 2: "NA/Inf replace
 
 
 def _xirr_rate(t: np.ndarray, amount: np.ndarray, end_value: float, horizon: float) -> float:
-    """``.xirr_rate()``: interner Zinsfuß p. a. (Brent über u = T log(1 + r)); seit E17 Stufe 3 im Kern
+    """``.xirr_rate()``: interner Zinsfuß p. a. (Brent über u = T log(1 + r)); im Kern
     (``core/evaluate_core_impl.h``, ``_ext.sim_xirr``), Warnungen von ``uniroot`` mit den Texten von R."""
     v, msgs = _ext.sim_xirr(np.ascontiguousarray(t, dtype=np.float64), np.ascontiguousarray(amount, dtype=np.float64),
                             float(end_value), float(horizon))

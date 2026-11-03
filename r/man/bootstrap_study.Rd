@@ -53,7 +53,7 @@ ausgewertet.}
 \item{"evt"}{GPD-Tails des Referenzindex plus empirischer Bulk (\code{tail_prob}, \code{both_tails}); uebrige Indizes ueber das historische Verhaeltnis zum Referenzindex gekoppelt}
 \item{"tails"}{Empirische Tail-Schichtung des Referenzindex (\code{tail_prob})}
 \item{"reset"}{Chronologie mit zufaellig gespiegelten Segmenten (\code{p_break}); erhaelt die Chronologie}
-\item{"garch", "gjr_garch"}{(GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung ueber \code{cross} in \code{\link[=bootstrap_config]{bootstrap_config()}}). Geschaetzt per Maximum Likelihood unter Normalverteilung mit der C-Bibliothek von SimLev (GJR mit \eqn{\alpha + \gamma \ge 0}, also auch \eqn{\gamma < 0}; bis Version 1.0.0 \eqn{\gamma \ge 0}; BFGS von sieben Rasterpunkten), notfalls mit Momentschaetzern; die Meldungen nennen den Weg "ml" bzw. "momente" (bis Etappe 9.6b "rugarch"/"optim")}
+\item{"garch", "gjr_garch"}{(GJR-)GARCH(1,1) mit Filtered Historical Simulation (keine Parameter; Kopplung ueber \code{cross} in \code{\link[=bootstrap_config]{bootstrap_config()}}). Geschaetzt per Maximum Likelihood unter Normalverteilung mit der C-Bibliothek von SimLev (GJR mit \eqn{\alpha + \gamma \ge 0}, also auch \eqn{\gamma < 0}; bis Version 1.0.0 \eqn{\gamma \ge 0}; BFGS von sieben Rasterpunkten), notfalls mit Momentschaetzern; die Meldungen nennen den Weg "ml" bzw. "momente" (bis 0.10.0 "rugarch"/"optim")}
 \item{"ms_garch", "ms_ar_garch_m", "tvtp_ms_garch"}{Markov-Switching-GARCH-Familie: eigene ML-Schaetzung des MS-GARCH-Modells nach Haas, Mittnik und Paolella (2004), Normalverteilung, Varianzmodell "sGARCH" oder "gjrGARCH" je Regime (GJR mit \eqn{\alpha + \gamma \ge 0}, also auch \eqn{\gamma < 0}; BFGS mit analytischem Gradienten von 12 bzw. bei "gjrGARCH" 20 Startpunkten); "ms_ar_garch_m" zusaetzlich mit AR- und GARCH-in-Mean-Termen je Regime, "tvtp_ms_garch" mit zeitvariablen Uebergangswahrscheinlichkeiten (\code{ms_n_regimes}/\code{ms_garch_model}, \code{ms_ar_n_regimes}/\code{ms_ar_garch_model} bzw. \code{tvtp_n_regimes}/\code{tvtp_garch_model})}
 }
 Bei "wild" und "reset" muss \code{path_length} der Laenge der Historie
@@ -157,10 +157,10 @@ eine 430-Tage-SMA; Standard 0). Muss kleiner als \code{path_length} sein.}
 
 \item{sim_args}{Benannte Liste gemeinsamer Argumente fuer \code{\link[=simulation]{simulation()}}
 (Standard \code{list()}), z. B. \code{list(start_value = 1000,
-  tax = tax_profile())}: Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
+    tax = tax_profile())}: Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
 also auch Bausteine (z. B. \code{dca = dca_plan(100, 1)}, \code{tax = tax_profile()}) und
 Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
-\code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.5.0 vor den Bausteinen, z. B.
+\code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B.
 \code{dca_value}) ergeben einen Fehler, der den Baustein nennt.}
 
 \item{metrics}{Funktion \code{SimLevResult -> benannter numerischer Vektor}
@@ -171,24 +171,6 @@ Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
 fuer die gepaarte Auswertung in \code{summary()}; \code{NULL} (Standard)
 = keine.}
 
-\item{cores}{Anzahl Prozesse (Standard 1); parallelisiert wird ueber Chunks.
-Der MS-GARCH-Fit der Vorberechnung nutzt ebenso viele Threads (Ergebnis
-unabhaengig davon).}
-
-\item{chunk_size}{Pfade je Arbeitspaket (Standard 25); Einheit der
-Parallelisierung und der Zwischenspeicherung.}
-
-\item{seed}{Ganzzahliger Startwert (\eqn{|seed| < 2^{53}}); \code{NULL} (Standard) = genau
-einmal aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}; ganze Zahl von 0
-bis \eqn{2^{31} - 1}, im Ergebnis unter \code{seed} gespeichert, damit reproduzierbar).
-Jeder Pfad i erhaelt einen eigenen Strom (Sprung um \eqn{2^{128}} Schritte je Pfad), so
-dass Pfad i unabhaengig von \code{cores} (und bei \code{\link[=bootstrap_study]{bootstrap_study()}} von
-\code{chunk_size}) ist und \code{\link[=bootstrap]{bootstrap()}} und \code{\link[=bootstrap_study]{bootstrap_study()}} mit gleichem Seed (und
-gleichen Daten, Verfahren, \code{params}, \code{ess} und \code{path_length})
-dieselben Pfade erzeugen. Mit angegebenem Seed bleibt der Zufallszustand von SimLev
-unveraendert; mit \code{seed = NULL} liefern wiederholte Aufrufe verschiedene Pfade.
-\code{set.seed()} wirkt nicht.}
-
 \item{chunk_dir}{Optional (Standard \code{NULL}) Verzeichnis fuer
 Zwischenergebnisse je Chunk (Dateien \code{chunk_<Nr>_seed<Seed>.rds},
 bei \code{keep_returns} mit Frequenz-Suffix, bei \code{keep_paths} > 0 mit
@@ -197,10 +179,6 @@ gelesen statt neu gerechnet; so wird ein abgebrochener Lauf mit
 gleichem Seed fortgesetzt. Die Dateien werden nur ueber Chunk-Nummer,
 Seed, \code{keep_returns} und \code{keep_paths} zugeordnet: bei geaenderten
 Strategien, Daten oder Parametern ein neues Verzeichnis verwenden.}
-
-\item{max_tries}{Versuche je Pfad (Standard 10), falls ein Pfad ungueltig
-ist (Indexrendite <= 0 oder nicht endlich). Ein Totalverlust eines
-Hebelprodukts macht den Pfad nicht ungueltig.}
 
 \item{keep_paths}{Pfadmatrizen zusaetzlich zurueckgeben (Diagnose):
 \code{TRUE} = alle Pfade, \code{FALSE} oder 0 (Standard) = keine, ganze
@@ -237,6 +215,28 @@ eine Ratenspalte ergibt so keine Inflation in Prozent p. a. Sind gespeicherte Fa
 endlich oder <= 0 (z. B. eine nicht gekennzeichnete Zinsreihe mit
 Vorzeichenwechsel), warnt die Funktion, und \code{\link[=withdrawal_paths]{withdrawal_paths()}} bricht
 mit dieser Reihe als Inflation ab. Standard \code{NULL}.}
+
+\item{max_tries}{Versuche je Pfad (Standard 10), falls ein Pfad ungueltig
+ist (Indexrendite <= 0 oder nicht endlich). Ein Totalverlust eines
+Hebelprodukts macht den Pfad nicht ungueltig.}
+
+\item{chunk_size}{Pfade je Arbeitspaket (Standard 25); Einheit der
+Parallelisierung und der Zwischenspeicherung.}
+
+\item{seed}{Ganzzahliger Startwert (\eqn{|seed| < 2^{53}}); \code{NULL} (Standard) = genau
+einmal aus dem Zufallszustand von SimLev gezogen (siehe \code{\link[=simlev_seed]{simlev_seed()}}; ganze Zahl von 0
+bis \eqn{2^{31} - 1}, im Ergebnis unter \code{seed} gespeichert, damit reproduzierbar).
+Jeder Pfad i erhaelt einen eigenen Strom (Sprung um \eqn{2^{128}} Schritte je Pfad), so
+dass Pfad i unabhaengig von \code{cores} (und bei \code{\link[=bootstrap_study]{bootstrap_study()}} von
+\code{chunk_size}) ist und \code{\link[=bootstrap]{bootstrap()}} und \code{\link[=bootstrap_study]{bootstrap_study()}} mit gleichem Seed (und
+gleichen Daten, Verfahren, \code{params}, \code{ess} und \code{path_length})
+dieselben Pfade erzeugen. Mit angegebenem Seed bleibt der Zufallszustand von SimLev
+unveraendert; mit \code{seed = NULL} liefern wiederholte Aufrufe verschiedene Pfade.
+\code{set.seed()} wirkt nicht.}
+
+\item{cores}{Anzahl Prozesse (Standard 1); parallelisiert wird ueber Chunks.
+Der MS-GARCH-Fit der Vorberechnung nutzt ebenso viele Threads (Ergebnis
+unabhaengig davon).}
 
 \item{progress}{Logisch: Fortschrittsmeldungen per \code{message()}
 (Standard \code{TRUE}; Meldung je Chunk nur bei \code{cores = 1}).}

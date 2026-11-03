@@ -1,15 +1,15 @@
-/* core/slc_opt.h – Optimierer und numerischer Gradient der C-Bibliothek slc (SimLev core, Etappe 9.3)
+/* core/slc_opt.h – Optimierer und numerischer Gradient der C-Bibliothek slc (SimLev core)
  *
  * Verfahren:  BFGS mit starker Wolfe-Liniensuche, projizierter BFGS für Schranken, Nelder-Mead,
  *             Gradient über zentrale Differenzen (einseitig an Schranken); Einzelheiten und
  *             Quellen im Kopf von core/slc_opt.c, Prüffunktionen in core/slc_opt_test.c.
- * Quellen:    Entwurf SPEZ-9, Abschnitte B.8 und B.9; Literatur in core/slc_opt.c.
+ * Quellen:    Literatur in core/slc_opt.c.
  * Konstanten: keine (Verfahrensparameter in core/slc_opt.c).
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
- * Prüforakel: R 4.3.3 optim (nur Plausibilität, scratchpad/e93/).
+ * Prüforakel: R 4.3.3 optim (nur Plausibilität).
  *
- * Zwei Wege (B.8):
+ * Zwei Wege:
  *
  *   1. Rückfrage an den Host (reverse communication), für Zielfunktionen in R, Python, Julia:
  *        ws = Feld mit sl_opt_wsize(method, n) double (vom Host angelegt; keine Zeiger darin)
@@ -21,9 +21,9 @@
  *        sl_opt_result(ws, x, &f, &code, &iter, &nfev, &ngev);
  *      Zwischen ask und tell ist der Kern nicht aktiv; Fehler der Zielfunktion laufen als
  *      gewöhnliche Host-Fehler durch. Ohne Gradient (have_grad = 0) fragt der Kern nur
- *      Funktionswerte ab und bildet den Gradienten selbst (B.9).
+ *      Funktionswerte ab und bildet den Gradienten selbst.
  *
- *   2. Direkt in C (Zielfunktionen der Modelle, Etappe 9.4): sl_minimize mit Funktionszeigern.
+ *   2. Direkt in C (Zielfunktionen der Modelle): sl_minimize mit Funktionszeigern.
  *      Er durchläuft dieselbe Schleife wie 1., die Ergebnisse sind also bitgleich.
  *
  * Steuerung (sl_opt_ctrl, Standardwerte mit sl_opt_ctrl_default):
@@ -101,7 +101,7 @@ int sl_opt_info(const double *ws, int *reason, int *ntot);
 int sl_opt_dim(const double *ws);                     /* n eines initialisierten Arbeitsfelds, sonst -1 */
 const char *sl_opt_message(int reason);
 
-/* Direkt in C (9.4: GARCH, GPD, DCC, MS-GARCH). f liefert den Wert (nicht endlich = +Inf),
+/* Direkt in C (GARCH, GPD, DCC, MS-GARCH, Backcast). f liefert den Wert (nicht endlich = +Inf),
  * g den Gradienten (NULL: zentrale Differenzen). x: Start und Ergebnis. */
 typedef double (*sl_fn)(const double *x, void *data);
 typedef void   (*sl_gr)(const double *x, double *g, void *data);
@@ -109,7 +109,7 @@ int sl_minimize(sl_ctx *cx, int method, int n, double *x, const double *lo, cons
                 const sl_opt_ctrl *ctrl, sl_fn f, sl_gr g, void *data,
                 double *fmin, int *code, int *iter, int *nfev);
 
-/* Numerischer Gradient nach B.9 an x mit f(x) = fx (lo, hi: NULL oder n Werte); nfev: Zahl
+/* Numerischer Gradient (zentrale Differenzen, slc_opt.c) an x mit f(x) = fx (lo, hi: NULL oder n Werte); nfev: Zahl
  * der Auswertungen (darf NULL sein). Dieselbe Schrittweitenregel wie in den Optimierern. */
 int sl_numgrad(sl_ctx *cx, int n, const double *x, const double *lo, const double *hi, double fx,
                sl_fn f, void *data, double *g, int *nfev);

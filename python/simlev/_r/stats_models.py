@@ -9,9 +9,9 @@
 ``aggregate``, nachgebildet aus R 4.3.3 ``stats/R/lm.R`` (Zugriffe), ``p.adjust.R``, ``ecdf.R``,
 ``ave.R`` und ``aggregate.R``.
 
-Seit Etappe 9.6c entfallen ``lm.fit``, ``lm``, ``poly``, ``summary.lm``, ``glm``/``binomial``,
+Seit 1.0.0 entfallen ``lm.fit``, ``lm``, ``poly``, ``summary.lm``, ``glm``/``binomial``,
 ``t.test`` und das generische ``predict``: SimLev rechnet kleinste Quadrate, Logit-IRLS, Polynomfit,
-r² und den Welch-Test selbst (C-Bibliothek slc, :mod:`simlev._lib`; Entwurf B.7, B.16).
+r² und den Welch-Test selbst (C-Bibliothek slc, :mod:`simlev._lib`).
 """
 from __future__ import annotations
 
@@ -121,11 +121,11 @@ def p_adjust(p, method="holm", n=None):
 
 
 def _cummax(x):
-    return _rn.r_cummax(x)          # N8: C-Kern
+    return _rn.r_cummax(x)          # C-Kern
 
 
 def _cummin(x):
-    return _rn.r_cummin(x)          # N8: C-Kern
+    return _rn.r_cummin(x)          # C-Kern
 
 
 def ecdf(x):
@@ -138,7 +138,7 @@ def ecdf(x):
     vals = pd.unique(xs)
     idx = np.searchsorted(vals, xs) + 1
     counts = tabulate(idx, nbins=vals.size)
-    yv = np.cumsum(counts.astype(np.int64)).astype(np.float64) / n   # N11: ganzzahlig wie R (und Julia)
+    yv = np.cumsum(counts.astype(np.int64)).astype(np.float64) / n   # ganzzahlig wie R (und Julia)
     f = approxfun(vals, yv, method="constant", yleft=0.0, yright=1.0, f=0, ties="ordered")
     f.nobs = n
     f.knots = vals

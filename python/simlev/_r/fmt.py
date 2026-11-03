@@ -7,7 +7,7 @@
 #                     W. Fullerton (Los Alamos); sprintf.c: ursprünglich Jonathan Rougier
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet seit N10 der C-Kern
+#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet der C-Kern
 #                     core/slc_rbase_date.c.
 """Formatierung und Druckausgabe wie R 4.3.3.
 
@@ -20,7 +20,7 @@ Zeichengenaue Nachbildung von R's ``format``, ``formatC``, ``prettyNum``,
 ``dataframe.R``, ``factor.R``, ``dates.R``).
 
 Voreinstellungen wie ``options(digits = 7, scipen = 0, width = 80,
-OutDec = ".")``, ``digits.secs`` nicht gesetzt (N11, für ``%OS`` in
+OutDec = ".")``, ``digits.secs`` nicht gesetzt (für ``%OS`` in
 :func:`format_date`); änderbar über :func:`set_options`.
 
 Abbildung der Python-Eingaben auf R-Typen
@@ -41,7 +41,7 @@ str/None
                                 ``RangeIndex`` gilt als unbenannt)
 ==============================  ======================================
 
-Ganzzahlige R-Vektoren mit NA kommen aus ``reftree.decode`` als float an;
+Ganzzahlige R-Vektoren mit NA kommen aus den R-Referenzfällen als float an;
 dann ``type="integer"`` (bzw. ``types={"spalte": "integer"}`` bei
 data.frames) angeben oder ``pandas.array(..., dtype="Int64")`` verwenden –
 R druckt integer und double verschieden (``100000`` gegenüber ``1e+05``).
@@ -342,7 +342,7 @@ def _from_array(a, names, dtype=None):
 
 
 def _r_strtod(s):
-    """String -> double wie ``String2Real``: (Wert, NA, NaN, Warnung). N11: über
+    """String -> double wie ``String2Real``: (Wert, NA, NaN, Warnung). über
     :func:`simlev._r.rnum.r_string_to_real` (R_strtod mit dem C-Kern ``sl_r_strtod_num``, long double wie R;
     vorher Python-``float``, korrekt gerundet und damit bei mehr als 17 Ziffern teils anders als R)."""
     if s is None:
@@ -614,8 +614,8 @@ def signif(x, digits=6):
 def _scientific(r, digits):
     """``scientific()`` aus format.c, vektorisiert für |x| > 0 (endlich).
 
-    r: float64-Array (Beträge, > 0). Liefert (kpower, nsig, roundingwidens). N11: für digits <= 15 im
-    C-Kern ``sl_r_scientific`` (core/slc_rbase_num.c, long double wie R; wie Julia seit N10)."""
+    r: float64-Array (Beträge, > 0). Liefert (kpower, nsig, roundingwidens). für digits <= 15 im
+    C-Kern ``sl_r_scientific`` (core/slc_rbase_num.c, long double wie R; wie Julia)."""
     n = len(r)
     if n == 0:
         z = np.zeros(0, np.int64)
@@ -1796,7 +1796,7 @@ def sprintf(fmt, *args):
 
 
 # ── Datum ──────────────────────────────────────────────────────────────────
-# N10: format.Date/strftime (C-Locale) rechnet der gemeinsame Kern core/slc_rbase_date.c (wie Julia).
+# format.Date/strftime (C-Locale) rechnet der gemeinsame Kern core/slc_rbase_date.c (wie Julia).
 
 
 def _format_date_list(days, fmts):

@@ -1,5 +1,5 @@
 # =============================================================================
-# Fonds-Wrapper (Etappe 6.5c, Ansatz C): Anteilswert (NAV) aus einer inneren Strategie
+# Fonds-Wrapper: Anteilswert (NAV) aus einer inneren Strategie
 # =============================================================================
 #
 #   wrapper_config(strategy, rebalance, costs, order_fee, volume)  -> SimLevWrapperConfig
@@ -32,7 +32,7 @@
 #      Ist G_prev <= 0 oder G_t nicht endlich und > 0, bricht die Rechnung mit Fehler ab (kommt ohne
 #      Entnahmen und Steuern nicht vor: Kurse sind positiv, Gebuehren uebersteigen nie den Orderwert).
 #   Naeherung: Die Kosten werden auf die Bruttorechnung angewandt; feste Ordergebuehren beziehen sich damit auf
-#   das Volumen ohne abgezogene Fondskosten. Einzahlungen der Anleger aendern das Fondsvolumen nicht (E9).
+#   das Volumen ohne abgezogene Fondskosten. Einzahlungen der Anleger aendern das Fondsvolumen nicht.
 #   Mit einer Ordergebuehr beim Start ist schon der erste Anteilswert 100 * G_1 / S < 100 (ebenso mit innerem
 #   Spread > 0): Das ist U_0 = 100 vor dem ersten Tag und G_0 = S.
 
@@ -245,7 +245,7 @@ wrapper_nav <- function(data, wrapper, splits = NULL) {
   .wrapper_nav_calc(data, wrapper, splits, tag = "wrapper_nav", who = "wrapper_nav")
 }
 
-#' Auswahl aus einem SimLevWrapperNav (Etappe 8.0)
+#' Auswahl aus einem SimLevWrapperNav
 #'
 #' Jede Auswahl von Zeilen oder Spalten (x[i, ], x[j], x[i, j], x[], ueber `[` auch head(), tail() und
 #' subset()) liefert einen gewoehnlichen data.frame ohne Klasse SimLevWrapperNav und ohne die Attribute

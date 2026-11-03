@@ -135,7 +135,7 @@ def _apply_math(fast, slow, x):
     Ausnahme wirft, genau ``fast(v)`` ist (``_exp``, ``_log``): Dann ergibt ein
     Durchlauf ohne Ausnahme dieselben Bits. Bei einer Ausnahme (Überlauf,
     ``log(0)``, ``log(<0)``) rechnet ``apply1`` das ganze Feld neu.
-    Etappe 7.1: spart den Python-Aufruf von ``slow`` je Element.
+    spart den Python-Aufruf von ``slow`` je Element.
     """
     if np.isscalar(x) or (isinstance(x, np.ndarray) and x.ndim == 0):
         return slow(float(x))

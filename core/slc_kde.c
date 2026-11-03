@@ -1,4 +1,4 @@
-/* core/slc_kde.c – Gauß-Kerndichte und Bandbreite nach Silverman (SimLev core, Etappe 9.2)
+/* core/slc_kde.c – Gauß-Kerndichte und Bandbreite nach Silverman (SimLev core)
  * Verfahren:  f(u_j) = sum_i w_i phi((u_j - x_i) / h) / h auf ngrid gleichabständigen Punkten
  *             u_j = from + j (to - from) / (ngrid - 1) (u_{ngrid-1} = to), phi(z) =
  *             e^(-z^2/2) / sqrt(2 pi); w_i = 1/n ohne Gewichte. Direkte Summation in fester

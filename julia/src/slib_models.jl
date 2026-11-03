@@ -1,16 +1,16 @@
-# SLib (Teil 9.4) – Hüllen der Modelle der C-Bibliothek slc über ccall: GARCH/GJR(1,1), GPD,
+# SLib – Hüllen der Modelle der C-Bibliothek slc über ccall: GARCH/GJR(1,1), GPD,
 # DCC(1,1), MS-GARCH und univariates HMM, Bootstrap-Kerne.
 #
 # Gegenstück zu r/R/slc_models.R und python/simlev/_lib_models.py. Die Rechnung steht in
 # deps/core/slc_{garch,gpd,dcc,msgarch,boot}.c (Kopien von core/), gebaut von deps/build.jl in
 # libslc. Fehlertexte und Warnungen kommen aus dem Kern. Ergebnisse als RList (Reihenfolge wie R).
-# Die Bootstrap-Kerne ziehen aus einem Stream bzw. dem globalen Zustand (Entwurf C.5, _draw).
+# Die Bootstrap-Kerne ziehen aus einem Stream bzw. dem globalen Zustand (_draw).
 #
-# Seit Etappe 9.6a/b rufen die Ports diese Hüllen an denselben Stellen wie R. Eingebunden am Ende von
+# Seit 1.0.0/b rufen die Ports diese Hüllen an denselben Stellen wie R. Eingebunden am Ende von
 # slib.jl (Modul SLib); RList steht im übergeordneten Modul (_P aus slib_opt.jl).
 
 const _GARCH_METHODS = ("konstant", "ml", "momente")
-# SL_MSGARCH_MAXSTART in slc_models.h: 20 (N1; bis 1.0.0 12)
+# SL_MSGARCH_MAXSTART in slc_models.h: 20 (bis 1.0.0 12)
 
 _fv(x) = Vector{Float64}(vec(collect(Float64, x)))
 _iv(x) = Vector{Int32}(vec(collect(x)))
@@ -42,9 +42,9 @@ function garch11_nll(e, par; gjr = false, s2_init = nothing)
     v[]
 end
 
-"""N3: GJR-NLL und analytischer Gradient an `theta` = (mu, log omega, a, g, b) (Vorwärtsrekursion der Ableitungen
+"""GJR-NLL und analytischer Gradient an `theta` = (mu, log omega, a, g, b) (Vorwärtsrekursion der Ableitungen
 von s2, wie im Fit); RList(value, gradient), nicht endlich: value = Inf, gradient = NaN.
-N4: auch sGARCH (`gjr = false`, `theta` = (mu, log omega, a, b))."""
+auch sGARCH (`gjr = false`, `theta` = (mu, log omega, a, b))."""
 function garch11_grad(theta, e; gjr = true, s2_init = nothing)
     ev = _fv(e); th = _fv(theta); v = Ref{Float64}(0.0); np = gjr ? 5 : 4
     length(th) == np || error("interner Fehler: theta hat die falsche Länge")
@@ -67,7 +67,7 @@ function garch11_fit(e; gjr = false)
              "loglik" => ll[], "convergence" => Int(code[]), "method" => "ml")
 end
 
-"GARCH(1,1) / GJR-GARCH(1,1) wie `_fit_garch11` (ML -> Momente, F10)."
+"GARCH(1,1) / GJR-GARCH(1,1) wie `_fit_garch11` (ML -> Momente)."
 function fit_garch11(e; gjr = false, quiet = false)
     ev = _fv(e); n = length(ev)
     p = zeros(5); s2 = Vector{Float64}(undef, n); z = Vector{Float64}(undef, n)
@@ -146,7 +146,7 @@ function dcc_fit(Z, Qbar)
     _P.RList("a" => a[], "b" => b[], "nll" => nll[], "convergence" => Int(code[]), "par" => th)
 end
 
-# ── Backcast (N5) ───────────────────────────────────────────────────────────
+# ── Backcast ───────────────────────────────────────────────────────────
 
 # prob = (x oder nothing, c1, c2 oder nothing, lev, sp, dr, pos (1-basiert), logp, (objective, loss, horizon), hw)
 function _bc_args(prob)
@@ -224,7 +224,7 @@ function ms_garch_nll(theta, y, K, model; h1 = nothing)
     v[]
 end
 
-"N1: NLL und analytischer Gradient an `theta` (vorwärts mitdifferenzierter Hamilton-Filter); RList(value, gradient)."
+"NLL und analytischer Gradient an `theta` (vorwärts mitdifferenzierter Hamilton-Filter); RList(value, gradient)."
 function ms_garch_grad(theta, y, K, model; h1 = nothing)
     g = _gjr(model); yv = _fv(y); th = _fv(theta); v = Ref{Float64}(0.0)
     1 <= K <= 64 || error("interner Fehler: K")
@@ -241,7 +241,7 @@ end
 function ms_garch_starts(y, K, model; h1 = nothing, all = false)
     g = _gjr(model); yv = _fv(y)
     2 <= K <= 64 || error("MS-GARCH: Anzahl Regime muss zwischen 2 und 64 liegen (erhalten: $(K))")
-    np = _npar(K, g); out = Vector{Float64}(undef, 20 * np); ns = Ref{Cint}(0)   # N1: SL_MSGARCH_MAXSTART 20
+    np = _npar(K, g); out = Vector{Float64}(undef, 20 * np); ns = Ref{Cint}(0)   # SL_MSGARCH_MAXSTART 20
     cx = _ctx()
     st = ccall((:sl_msgarch_starts, LIBSLC), Cint, (Ptr{Cvoid}, Cint, Ptr{Float64}, Cint, Cint, Float64, Cint, Ref{Cint}, Ptr{Float64}),
                cx, Cint(length(yv)), yv, Cint(K), Cint(g), _h1(h1), Cint(all), ns, out)
@@ -261,7 +261,7 @@ function ms_garch_fitstarts(y, K, model, starts; h1 = nothing)
     _P.RList("par" => th, "value" => v[], "convergence" => Int(code[]))
 end
 
-# N6: Zahl der Threads aus cores wie `.sl_threads` (ganze Zahl; ungültig oder < 1 -> 1)
+# Zahl der Threads aus cores wie `.sl_threads` (ganze Zahl; ungültig oder < 1 -> 1)
 function _threads(cores)
     c = cores isa AbstractVector || cores isa Tuple ? (isempty(cores) ? NaN : first(cores)) : cores
     v = try Float64(c) catch; NaN end
@@ -270,7 +270,7 @@ function _threads(cores)
     nt >= 1 ? nt : 1
 end
 
-"MS-GARCH-Modell wie `_ms_garch_fit`, ganz in C (Starts, BFGS, Sortierung, Viterbi); N6: Starts auf bis zu `cores` Threads (Ergebnis unabhängig davon)."
+"MS-GARCH-Modell wie `_ms_garch_fit`, ganz in C (Starts, BFGS, Sortierung, Viterbi); Starts auf bis zu `cores` Threads (Ergebnis unabhängig davon)."
 function ms_garch_fit(y, K, model; cores = 1)
     _P.MsGarch._ms_garch_check(K, model)
     K = Int(K); yv = _fv(y); n = length(yv)

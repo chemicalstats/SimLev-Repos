@@ -1,8 +1,8 @@
 ---
-title: "Erste Schritte mit SimLev"
+title: "SimLev-Tutorial"
 output: rmarkdown::html_vignette
 vignette: >
- %\VignetteIndexEntry{Erste Schritte mit SimLev}
+ %\VignetteIndexEntry{SimLev-Tutorial}
  %\VignetteEngine{knitr::rmarkdown}
  %\VignetteEncoding{UTF-8}
 ---
@@ -16,35 +16,32 @@ knitr::opts_chunk$set(
 )
 ```
 
-## Worum es geht
-
-SimLev rechnet Anlagestrategien auf täglichen Preisreihen durch: von der
+SimLev rechnet Anlagestrategien auf täglichen Preisreihen durch, von der
 einfachen Mischung aus Aktien- und Anleihe-ETF über Sparpläne und
-Rebalancing bis zu Signalstrategien. Dabei bildet die Engine die deutsche
-Besteuerung eines Privatanlegers Tag für Tag ab (Teilfreistellung,
-Vorabpauschale, Sparer-Pauschbetrag, Verlusttöpfe, § 23 EStG,
-Günstigerprüfung). Diese Vignette zeigt die Grundschritte am Beispiel des
-Schnellstarts aus der README des Repositorys.
+Rebalancing bis zu Signalstrategien mit gehebelten Produkten. Die Engine
+`simulation()` bildet die Besteuerung eines deutschen Privatanlegers Tag für
+Tag ab: Teilfreistellung, Vorabpauschale, Sparer-Pauschbetrag, getrennte
+Verlusttöpfe nach § 20 und § 23 EStG und Günstigerprüfung.
 
-## Installation
+Dieses Tutorial führt in neun Kapiteln durch das Paket. Die Python- und die
+Julia-Fassung haben dasselbe Tutorial mit denselben Kapiteln
+(`python/examples/tutorial.md` und `julia/examples/tutorial.md` im
+Repository). Alle Argumente stehen in der Hilfe, z. B. `?simulation`; die
+Arbeitsweise und ein Glossar der Einheiten in `?SimLev`.
 
-SimLev enthält C++-Code und wird aus dem Quellcode kompiliert; neben R
-brauchen Sie einen funktionierenden Compiler (unter Windows Rtools).
+## 1 Daten
 
-```{r eval = FALSE}
-# install.packages("remotes")
-remotes::install_github("chemicalstats/SimLev-Repos", subdir = "r")
-```
+SimLev erwartet einen `data.frame` mit einer Spalte `date` (Klasse `Date`
+oder Text `"JJJJ-MM-TT"`) und je Asset einer Spalte mit dem
+**Kursniveau** (keine Renditen). Hebel, Dividenden und Finanzierungskosten
+werden nicht intern berechnet, sie müssen in der Kursreihe enthalten sein.
+Weitere Spalten können Signale, einen Basiszins oder einen risikolosen Zins
+enthalten.
 
-## Schritt 1: Preisdaten
-
-SimLev erwartet einen `data.frame` mit einer Spalte `date` (Klasse `Date`)
-und je Asset einer Spalte mit dem **Kursniveau** (keine Renditen). Hebel,
-Dividenden und Finanzierungskosten müssen in der Kursreihe bereits
-enthalten sein. Hier erzeugen wir zehn Jahre synthetische Kurse für einen
-Aktien-ETF (`WORLD`) und einen Anleihe-ETF (`BONDS`). `set.seed()` steuert
-dabei nur diese Beispieldaten; den Zufall von SimLev selbst (Bootstrap,
-Szenarien u. a.) setzt `simlev_seed()` bzw. das Argument `seed`:
+Hier erzeugen wir zehn Jahre synthetische Kurse für einen Aktien-ETF
+(`WORLD`), einen Anleihe-ETF (`BONDS`) und physisch hinterlegtes Gold
+(`GOLD`). `set.seed()` steuert nur diese Beispieldaten; den Zufall von
+SimLev selbst setzen `simlev_seed()` bzw. das Argument `seed`.
 
 ```{r}
 library(SimLev)
@@ -54,127 +51,424 @@ n <- 365 * 10
 data <- data.frame(
   date  = seq.Date(as.Date("2015-01-01"), by = "day", length.out = n),
   WORLD = 100 * cumprod(1 + rnorm(n, 4e-4, 0.010)),
-  BONDS =  50 * cumprod(1 + rnorm(n, 1e-4, 0.003))
+  BONDS =  50 * cumprod(1 + rnorm(n, 1e-4, 0.003)),
+  GOLD  =  80 * cumprod(1 + rnorm(n, 2e-4, 0.009))
 )
 head(data, 3)
 ```
 
-## Schritt 2: Strategie
+Fehlende Kalendertage wie Wochenenden füllt SimLev mit dem letzten
+bekannten Kurs auf und nimmt sie aus den renditebasierten Kennzahlen heraus.
+Doppelte Datumswerte und Kurse ≤ 0 sind ein Fehler. `series_check()` prüft
+eigene Daten vorab auf Lücken, Sprünge und mögliche Splits.
+
+**Prozent-Konvention.** Raten, Spreads, Gebühren, Steuersätze und
+Toleranzbänder werden in Prozent angegeben (`26.375` heißt 26,375 %),
+Gewichte (`share`) dagegen als Anteile, die sich zu 1 summieren.
+
+## 2 Strategie
 
 Jedes Asset beschreibt `asset_config()`, `create_strategy()` fasst die
-Assets zusammen und prüft die Eingaben sofort. Zielgewichte
-(`share`) sind Anteile und müssen sich zu 1 summieren; Spreads und
-Teilfreistellung werden **in Prozent** angegeben (`spread = 0.1`
-heißt 0,1 % voller Spread, `partial_exemption = 30` heißt 30 % Teilfreistellung
-für Aktien-ETFs).
+Assets zusammen und prüft die Eingaben sofort. Die Assetklasse bestimmt das
+Steuerregime: `"etf"` als Investmentfonds (Teilfreistellung,
+Vorabpauschale), `"etn"`/`"etc"` und `"certificate"` nach § 20 EStG, mit
+`deliverable = TRUE` als privates Veräußerungsgeschäft nach § 23 EStG
+(steuerfrei nach einem Jahr). `spread` ist der volle Bid-Ask-Spread in
+Prozent (Standard 0).
 
 ```{r}
 strategy <- create_strategy(
   WORLD = asset_config("etf", trading = "bnh",
-                       share = 0.7, spread = 0.1, partial_exemption = 30),
+                       share = 0.6, spread = 0.1, partial_exemption = 30),
   BONDS = asset_config("etf", trading = "bnh",
-                       share = 0.3, spread = 0.1, partial_exemption = 0)
+                       share = 0.3, spread = 0.1, partial_exemption = 0),
+  GOLD  = asset_config("etc", trading = "bnh",
+                       share = 0.1, spread = 0.2, deliverable = TRUE)
 )
 strategy
+strategy_validate(strategy, data)
 ```
 
-## Schritt 3: Simulation
+`strategy_add_asset()`, `strategy_update_asset()` und
+`strategy_remove_asset()` geben eine geänderte Strategie zurück;
+`strategy_from_weights()` und `portfolio_template()` bauen Strategien aus
+Gewichten bzw. bekannten Allokationen.
 
-10.000 EUR Einmalanlage, jährliches Rebalancing, Besteuerung eines
-Privatanlegers (`tax_rate = 26.375`, also 25 % Abgeltungsteuer plus
-Solidaritätszuschlag, in Prozent) und Verkauf aller Positionen am Ende:
+Mit `trading = "signal"` steigt ein Asset nach eigenen logischen
+Signalspalten ein und aus; die Signal-Bausteine `signal_sma()`,
+`signal_momentum()` u. a. erzeugen solche Spalten:
 
 ```{r}
+sig <- signal_sma(data$WORLD, n = 200)
+data$buy  <- sig$buy
+data$sell <- sig$sell
+strategy_sig <- create_strategy(
+  WORLD = asset_config("etf", trading = "signal", share = 1, spread = 0.1,
+                       partial_exemption = 30,
+                       signal_buy = "buy", signal_sell = "sell")
+)
+res_sig <- simulation(data, strategy_sig, start_value = 10000,
+                      tax = tax_profile())
+round(c(Endwert = tail(res_sig$worth, 1), Verkaeufe_je_Jahr = res_sig$sells), 2)
+```
+
+## 3 `simulation()` mit Bausteinen
+
+`simulation(data, strategy, ...)` nimmt neben Startwert und Zeitraum
+Bausteine für Kosten, Sparplan, Rebalancing, Splits und Steuer. Jeder
+Baustein ist ein eigenes Objekt; ohne Angabe ist er aus.
+
+```{r}
+steuer <- tax_profile(26.375, income = income_rate(42))
 result <- simulation(
   data, strategy,
   start_value = 10000,
-  rebalance   = rebalance_plan(span = 1, unit = "year"),
-  tax         = tax_profile(rate = 26.375),
+  rebalance   = rebalance_plan(1, unit = "year"),
+  tax         = steuer,
   liquidate   = TRUE,
   risk_free   = 2
 )
 result
 ```
 
-*Endwert* ist der Depotwert nach allen Spreads und Steuern in EUR, *CAGR*
-die jährliche Wachstumsrate. Der Steuerteil zeigt die gezahlten Steuern
-und den genutzten Sparer-Pauschbetrag.
+*Endwert* ist der Depotwert nach Spreads und Steuern in EUR, *CAGR* die
+jährliche Wachstumsrate. Mit `liquidate = TRUE` wird am letzten Tag alles
+verkauft und versteuert. Weil `GOLD` nach § 23 EStG besteuert wird, nennt
+`income_rate(42)` den persönlichen Grenzsteuersatz für Gewinne innerhalb der
+Haltefrist (ohne ihn warnt `simulation()`).
 
-## Schritt 4: Dashboard
+### Kosten
+
+Spreads stehen je Asset in `asset_config()`. Ordergebühren setzt
+`sim_costs()`: ein fester Betrag in EUR je Order oder
+`list(fixed, percent, min, max)`; `dca_fee` gilt für Sparplankäufe.
+
+```{r}
+res_kosten <- simulation(data, strategy, start_value = 10000,
+  costs = sim_costs(order_fee = list(fixed = 4.9, percent = 0.25, min = 9.9, max = 59),
+                    dca_fee = 0),
+  rebalance = rebalance_plan(1, unit = "year"),
+  tax = steuer, liquidate = TRUE)
+round(c(Gebuehren = res_kosten$fees_paid, Endwert = tail(res_kosten$worth, 1)), 2)
+```
+
+### Sparplan
+
+`dca_plan(value, span, unit)` zahlt regelmäßig ein, hier 250 EUR im Monat.
+Mit `fill_deficits = TRUE` fließt jede Rate zuerst in untergewichtete
+Assets und ersetzt so einen Teil der Umschichtungen.
+
+```{r}
+res_dca <- simulation(data, strategy, start_value = 10000,
+  dca = dca_plan(250, 1, unit = "month", fill_deficits = TRUE),
+  rebalance = rebalance_plan(1, unit = "year"),
+  tax = steuer, liquidate = TRUE)
+round(100 * c(CAGR_geldgewichtet = res_dca$cagr, TTWROR = res_dca$ttwror), 2)
+round(c(Eingezahlt = tail(res_dca$invested, 1), Endwert = tail(res_dca$worth, 1)), 2)
+```
+
+Mit Einzahlungen ist die CAGR die geldgewichtete Rendite (interner Zinsfuß,
+XIRR). Für den Vergleich mit anderen Strategien oder einem Index eignet sich
+die zeitgewichtete Rendite TTWROR; Drawdowns misst SimLev dann auf dem
+zeitgewichteten Wertindex `twr_index`.
+
+### Rebalancing
+
+`rebalance_plan()` schichtet kalenderbasiert um, mit `thresh` nur bei einer
+Abweichung über dem Band (in Prozentpunkten, mit
+`thresh_type = "relative"` relativ zum Zielgewicht) und mit `event_col`
+an Tagen, an denen eine logische Datenspalte `TRUE` ist (z. B. aus
+`rebalance_trigger()`).
+
+```{r}
+res_band <- simulation(data, strategy, start_value = 10000,
+  rebalance = rebalance_plan(1, unit = "quarter", thresh = 5),
+  tax = steuer, liquidate = TRUE)
+res_band$sells
+```
+
+`buys` und `sells` nennen die mittlere Zahl der Käufe und Verkäufe je Jahr
+und Asset.
+
+### Splits
+
+Manche Hebelprodukte splitten, wenn ihr Kurs eine Grenze über- oder
+unterschreitet. `split_rule(c(unten, oben))` bildet das nach: über der
+oberen Grenze wird gesplittet, unter der unteren zusammengelegt; die
+Anschaffungskosten der Lots werden angepasst, Kaufdaten bleiben erhalten.
+`series_leverage()` erzeugt hier eine täglich zurückgesetzte 2-fach
+gehebelte Reihe aus `WORLD` (Hebel, Zins und Kosten in Prozent).
+
+```{r}
+data$LEV <- series_leverage(data, "WORLD", leverage = 2, rate = 2, expense = 0.6)
+strategy_lev <- create_strategy(
+  LEV   = asset_config("certificate", trading = "bnh", share = 0.5, spread = 0.2),
+  BONDS = asset_config("etf", trading = "bnh", share = 0.5, spread = 0.1)
+)
+res_split <- simulation(data, strategy_lev, start_value = 10000,
+  rebalance = rebalance_plan(1, unit = "year"),
+  splits = split_rule(c(20, 150)), tax = tax_profile(), liquidate = TRUE)
+round(range(data$LEV), 2)
+round(tail(res_split$worth, 1), 2)
+```
+
+### Steuer
+
+`tax_profile()` schaltet die Besteuerung ein (`tax = NULL` rechnet ohne
+Steuern). Wichtige Argumente: `rate` (Abgeltungsteuer mit Soli, Standard
+26,375 %), `church_tax`, `sparer_pauschbetrag` (Standard 1.000 EUR),
+`base_rate` (Basiszins der Vorabpauschale, Zahl oder Spaltenname),
+`guenstigerpruefung` und `income` für den persönlichen Steuersatz:
+`income_rate(42)` als fester Grenzsteuersatz oder
+`income_tariff(taxable_income)` mit dem Einkommensteuertarif aus
+`tax_tariff()`.
+
+```{r}
+res_steuer <- simulation(data, strategy, start_value = 100000,
+  rebalance = rebalance_plan(1, unit = "month", thresh = 3),
+  tax = tax_profile(base_rate = 2.55, church_tax = 9, guenstigerpruefung = TRUE,
+                    income = income_tariff(14000)),
+  liquidate = TRUE)
+ty <- res_steuer$tax_report$tariff_years
+round(ty[ty$year >= 2023, c("year", "capital_income", "abgeltung_burden",
+                            "gain_p23", "tax_p23", "settlement")], 2)
+res_steuer$tax_report$total_taxes_paid
+```
+
+`tariff_years` zeigt die Veranlagung je Jahr. SimLev projiziert die heutige
+Rechtslage in die Vergangenheit: Ein Backtest beantwortet, wie eine
+Strategie zu heutigen Konditionen abgeschnitten hätte. Die Einzelheiten
+(Vorabpauschale, Verlusttöpfe, § 23, Kirchensteuer als Sonderausgabe,
+Vereinfachungen) stehen in `?simulation` und `?tax_tariff`.
+
+### Wrapper
+
+Ein Fonds-Wrapper ist **ein** Asset der Strategie, dessen Kurs der
+Anteilswert einer inneren Strategie ist, mit Verwaltungsgebühr und
+Performancegebühr gegen die High-Water-Mark (`funds_costs()`, in Prozent).
+Außen wird er wie ein Einzelpapier gehandelt und besteuert.
+
+```{r}
+inner <- wrapper_config(
+  create_strategy(WORLD = asset_config("etf", share = 0.7),
+                  GOLD  = asset_config("etc", share = 0.3)),
+  rebalance = rebalance_plan(unit = "quarter"),
+  costs     = funds_costs(fee = 0.95, performance_fee = 5))
+nav <- wrapper_nav(data, inner)
+tail(nav, 2)
+strategy_wrap <- create_strategy(
+  Zertifikat = asset_config("certificate", share = 0.8, spread = 0.5, wrapper = inner),
+  BONDS      = asset_config("etf", share = 0.2, spread = 0.1))
+res_wrap <- simulation(data, strategy_wrap, start_value = 10000,
+                       tax = tax_profile(), liquidate = TRUE)
+round(tail(res_wrap$worth, 1), 2)
+```
+
+Der Name `Zertifikat` ist keine Kursspalte; `simulation()` rechnet den
+Anteilswert vorab aus `WORLD` und `GOLD`. Mehr in `?wrapper_config` und
+`?wrapper_nav`.
+
+## 4 Ergebnis und Auswertung
+
+`simulation()` liefert ein `SimLevResult`. Wichtige Bestandteile sind
+`dates`, `worth` (Depotwert je Tag), `twr_index`, `drawdowns`, `cagr`,
+`ttwror`, `statistics` (alle Kennzahlen), `report` (Werte je Asset),
+`tax_report`, `buys`, `sells` und, mit Steuer, `open_lots`.
+
+```{r}
+round(unlist(result$statistics[c("sharpe", "sortino", "calmar", "omega")]), 4)
+names(result$report)
+summary(result)$total_return_twr
+```
+
+`result_analysis()` wertet gespeicherte Ergebnisse oder Kursreihen
+nachträglich aus, auch gegen eine Benchmark (Alpha, Beta, Capture, Tracking
+Error, VaR/CVaR, Jahres- und Monatstabellen, rollierende Kennzahlen):
+
+```{r}
+da <- result_analysis(list(Mischung = result, Mit_Sparplan = res_dca),
+                      benchmark = "Mischung", risk_free = 2)
+da
+```
+
+Für Parameterstudien rufen `sensitivity_grid()`, `sensitivity_rebalancing()`,
+`planning_lumpsum_vs_dca()` und `sensitivity_leverage()` die Engine
+wiederholt auf.
+
+## 5 Bootstrap
+
+`bootstrap_config()` beschreibt die Reihen, `bootstrap_study()` erzeugt
+Pfade, simuliert alle Strategien auf denselben Pfaden und behält die
+Kennzahlen; `keep_returns = "year"` behält zusätzlich die Jahresrenditen
+für die Entnahmephase. Jeder Pfad hat einen eigenen Zufallsstrom; das Ergebnis hängt
+nicht von `cores` ab und ist in R, Python und Julia gleich.
+
+```{r}
+cfg <- bootstrap_config(c(WORLD = "WORLD", BONDS = "BONDS", GOLD = "GOLD"),
+                        input = "prices")
+study <- bootstrap_study(data, cfg, "stationary", n = 100, params = list(L = 250),
+                         strategies = list(mix = strategy), seed = 42,
+                         keep_returns = "year", progress = FALSE)
+summary(study)
+bootstrap_probability(study, cagr > 0.05 & max_drawdown <= 0.3)
+```
+
+Verfahren sind u. a. `block`, `stationary`, `regime`, `evt`, `garch`,
+`gjr_garch` und `ms_garch` (Liste in `?bootstrap`).
+`bootstrap_block_length()` schätzt eine Blocklänge.
+
+## 6 Entnahme
+
+Die Entnahmephase rechnet auf Periodenrenditen: aus historischen Kohorten,
+Bootstrap-Pfaden oder einem gespeicherten Ergebnis von `simulation()`.
+`withdrawal_rule()` wählt eine von 14 Regeln, z. B. `"constant"` (4-%-Regel),
+`"vanguard"` oder `"guyton_klinger"`.
+
+```{r}
+wd <- withdrawal_simulation(study, withdrawal_rule("guyton_klinger", rate = 5),
+                            strategy = "mix", years = 8, inflation = 2,
+                            start_value = 500000)
+wd
+```
+
+Ist `start_value` ein Ergebnis von `simulation()` mit Steuer, übernimmt die
+Entnahmephase dessen Endwert und die offenen Lots und verkauft per FIFO.
+`withdrawal_max_rate()` sucht die höchste Anfangsrate für eine
+Ziel-Erfolgsquote.
+
+## 7 Optimierung und Forschung
+
+`portfolio_optimize()` schätzt Gewichte (Minimum-Varianz, maximale Sharpe
+Ratio, Risikoparität, HRP, minimaler CVaR u. a.) aus Wochenrenditen:
+
+```{r}
+opt <- portfolio_optimize(data, assets = c("WORLD", "BONDS", "GOLD"),
+                          method = "risk_parity")
+opt
+```
+
+`param_search()` prüft eine Strategie über einen Parameterraum; die Ergebnisse
+lassen sich auf Überanpassung prüfen (`overfit_pbo()`, `sharpe_deflated()`,
+`overfit_walk_forward()`):
+
+```{r}
+ps <- param_search(data,
+  builder = function(p) list(strategy = strategy_sig,
+                             signal = function(df) signal_sma(df$WORLD, p$n)),
+  space = param_space(n = c(50, 100, 150, 200, 250)),
+  objective = "sharpe")
+ps
+sharpe_deflated(ps)
+```
+
+Weitere Forschungsfunktionen: Abhängigkeiten und Tail-Risiko
+(`dependence_analysis()`, `copula_fit()`, `tail_covar()`), taktische
+Allokation (`tactical_simulation()`), Szenarien
+(`scenario_entropy_pooling()`, `scenario_crisis()`), Planung
+(`planning_goal()`) und statistische Prüfungen (`sharpe_test()`,
+`overfit_reality_check()`, `regime_hmm()`).
+
+## 8 Weitere Werkzeuge
+
+Die übrigen Werkzeuge arbeiten auf denselben Daten; je Funktion beschreibt
+die Hilfe Argumente und Ergebnis und zeigt ein Beispiel (z. B.
+`?backcast_fit`). Eine Auswahl:
+
+**Daten prüfen und Vorlagen.** `series_check()` meldet Lücken, Sprünge,
+mögliche Splits und stehende Kurse, ohne die Daten zu ändern;
+`portfolio_template()` baut bekannte Allokationen auf die eigenen Spalten.
+`series_align()`, `series_align_macro()` und `series_splice()` führen
+Quellen zusammen, legen Makroreihen mit Veröffentlichungsverzug auf den
+Tageskalender und verketten Reihen.
+
+```{r}
+chk <- series_check(data)
+chk$summary[, c("column", "n", "missing", "jumps", "splits")]
+portfolio_template("60_40", map = c(stocks = "WORLD", bonds = "BONDS"))
+```
+
+**Backcast.** Ein gehebeltes Produkt, das es erst seit 2020 gibt, wird aus
+dem Index zurückgerechnet. `backcast_fit()` schätzt auf dem
+Überlappungszeitraum die laufenden Kosten, die über TER und Finanzierung
+hinausgehen (hier 0,2 % p. a.), `backcast()` verlängert die Reihe:
+
+```{r}
+d8 <- data[, c("date", "WORLD")]
+d8$LEV <- series_leverage(d8, "WORLD", leverage = 2, rate = 2, expense = 0.8)
+d8$LEV[d8$date < as.Date("2020-01-01")] <- NA
+fit <- backcast_fit(d8, "LEV", "WORLD", leverage = 2, rate = 2, ter = 0.6)
+fit$params$drag
+bc <- backcast(fit)
+table(bc$source)
+```
+
+**Historische Entnahme-Kohorten.** `withdrawal_cohorts()` bildet aus einer
+Kursreihe überlappende Entnahmezeiträume, `withdrawal_max_rate()` sucht die
+höchste Anfangsrate für eine Ziel-Erfolgsquote:
+
+```{r}
+coh <- withdrawal_cohorts(data, price = "WORLD", inflation = 2, years = 5, step = "year")
+dim(coh$returns)
+withdrawal_max_rate(coh, withdrawal_rule("constant"), success = 0.9)
+```
+
+**Taktische Allokation.** `tactical_rules()` legt Zielgewichte nach Regeln
+fest (hier: Aktien über dem 200-Tage-Durchschnitt, sonst Anleihen),
+`tactical_simulation()` rechnet sie mit `simulation()`:
+
+```{r}
+w <- tactical_rules(data, list(list(when = signal_sma(data$WORLD, 200), weights = c(WORLD = 1))),
+                    default = c(BONDS = 1))
+res_takt <- tactical_simulation(data, w, rebalance = "switch")
+res_takt$tactical$switches
+round(res_takt$cagr, 4)
+```
+
+**Abhängigkeiten und Szenarien.** `tail_dependence()` misst die gemeinsamen
+Ausschläge in den Rändern, `scenario_crisis()` führt ein Portfolio durch
+Krisenfenster (eigene Fenster oder die eingebaute Liste):
+
+```{r}
+tail_dependence(diff(log(data$WORLD)), diff(log(data$GOLD)), q = c(0.05, 0.10))[, c("q", "lower", "upper")]
+kr <- data.frame(crisis = "Beispiel", start = as.Date("2020-02-15"), end = as.Date("2020-04-30"))
+scenario_crisis(data, c(WORLD = 0.6, BONDS = 0.4), crises = kr)[, c("crisis", "portfolio", "max_drawdown")]
+```
+
+Weitere Werkzeuge: Bootstrap-Verfahren und Studien mit Signalen
+(`bootstrap_study()`), Steuern in der Entnahmephase (`tax_profile()` in
+`withdrawal_simulation()`), Sensitivitäten (`sensitivity_grid()`,
+`sensitivity_rebalancing()`), Abhängigkeitsanalyse mit Drittvariablen
+(`dependence_analysis()`, `tail_regression()`, `tail_covar()`), Rotation und
+Zielvolatilität (`tactical_rotation()`, `tactical_target_volatility()`),
+Anleihen und Geldmarkt aus Zinsreihen (`index_bond()`,
+`index_money_market()`), Szenarien mit eigenen Annahmen
+(`scenario_entropy_pooling()`), Planung (`planning_goal()`) und
+statistische Prüfungen (`sharpe_test()`, `overfit_reality_check()`,
+`regime_hmm()`).
+
+## 9 Grafik
+
+`plot(result)` zeichnet das Dashboard mit Base-Grafik; `style = "compact"`
+zeigt vier Panels, `style = "custom"` die Panels aus `panels`, `compare` ein
+zweites Ergebnis daneben.
 
 ```{r fig.height = 8}
 plot(result)
 ```
 
-`plot(result, style = "compact")` zeigt nur vier Panels;
-`export_dashboard(result, "backtest.pdf")` schreibt das Dashboard als PDF.
-
-## Sparplan
-
-Ein Sparplan investiert zusätzlich regelmäßig einen festen Betrag, hier
-250 EUR im Monat. Mit `dca_plan(fill_deficits = TRUE)` fließt jede Rate zuerst in
-untergewichtete Assets.
-
 ```{r}
-result_dca <- simulation(
-  data, strategy,
-  start_value = 10000,
-  dca = dca_plan(value = 250, span = 1, unit = "month", fill_deficits = TRUE),
-  rebalance = rebalance_plan(span = 1, unit = "year"),
-  tax = tax_profile(rate = 26.375),
-  liquidate = TRUE
-)
-round(100 * c(CAGR_geldgewichtet = result_dca$cagr, TTWROR = result_dca$ttwror), 2)  # in Prozent
-round(c(Eingezahlt = tail(result_dca$invested, 1), Endwert = tail(result_dca$worth, 1)), 2)  # in EUR
+plot(result, style = "custom", panels = c("performance", "drawdown"),
+     compare = res_dca)
 ```
 
-Mit Einzahlungen ist die CAGR die **geldgewichtete** Rendite (interner
-Zinsfuß, XIRR). Zum Vergleich mit anderen Strategien oder einem Index
-eignet sich die zeitgewichtete Rendite TTWROR.
-
-## Rebalancing mit Toleranzband
-
-`rebalance_plan(thresh = )` ist ein Band **in Prozent**: Mit `thresh = 5`
-wird an einem Termin nur umgeschichtet, wenn ein Gewicht um mehr als
-5 Prozentpunkte vom Ziel abweicht.
-
-```{r}
-result_band <- simulation(
-  data, strategy,
-  start_value = 10000,
-  rebalance = rebalance_plan(span = 1, unit = "quarter", thresh = 5),
-  tax = tax_profile(), liquidate = TRUE
-)
-result_band$sells
-```
-
-`sells` und `buys` nennen die mittlere Zahl der Verkäufe und Käufe je Jahr
-und Asset.
-
-## Vergleich
-
-```{r}
-endwerte <- c(
-  "Einmalanlage"  = tail(result$worth, 1),
-  "Mit Sparplan"  = tail(result_dca$worth, 1),
-  "Toleranzband"  = tail(result_band$worth, 1)
-)
-round(endwerte, 2)
-barplot(endwerte, main = "Endwerte nach Steuern", ylab = "EUR",
-        col = "steelblue", las = 1)
-```
-
-Die Einmalanlage und das Toleranzband starten mit 10.000 EUR, der
-Sparplan zahlt zusätzlich 120 Raten zu 250 EUR ein; die Endwerte sind
-deshalb nicht direkt vergleichbar.
+`export_dashboard(result, "backtest.pdf")` schreibt das Dashboard als
+Datei. Auch die übrigen Ergebnisobjekte haben eine `plot()`-Methode, etwa
+`plot(study)`, `plot(wd)` und `plot(da)`.
 
 ## Weiter
 
-- `?simulation`: alle Argumente der Engine, u. a. Signale, Splits,
-  Ordergebühren, Kirchensteuer und Einkommensteuertarif
-  (`income_tariff(taxable_income)`, `tax_tariff()`).
+- `?simulation`: alle Argumente der Engine.
 - `?SimLev`: Arbeitsweise und Glossar der Einheiten und Argumentnamen.
-- Tutorial zu Backcast, Bootstrap, Entnahmephase, Analyse und Planung:
-  `system.file("tutorial", "SimLev_Tutorial.Rmd", package = "SimLev")`.
-- Beispielsammlungen: `system.file("examples", package = "SimLev")`.
+- Je Funktion ein Beispiel: die Hilfe, z. B. `?backcast_fit`, `?dependence_analysis`.
+- Weitere Beispiele: `system.file("examples", package = "SimLev")`.
 - Änderungen je Version: `news(package = "SimLev")`.

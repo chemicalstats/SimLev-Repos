@@ -1,4 +1,4 @@
-"""Taktische Allokation über zeitvariable Zielgewichte (Port von ``r/R/tactical.R``).
+"""Taktische Allokation über zeitvariable Zielgewichte (Gegenstück zu ``r/R/tactical.R``).
 
 Gewichts-Erzeuger (liefern ein :class:`SimLevWeights`: ``DataFrame(date, Asset…)``
 mit dem Zielgewicht, das nach Schlusskurs des Tages bekannt ist):
@@ -103,7 +103,7 @@ def _find_interval(x, vec):
     return np.searchsorted(np.asarray(vec, dtype=np.float64), np.asarray(x, dtype=np.float64), side="right")
 
 
-# N11: Summen und Mittel über die C-Kerne core/slc_rbase.c (long double wie R; wie Julia seit N10)
+# Summen und Mittel über die C-Kerne core/slc_rbase.c (long double wie R; wie Julia)
 def _rowsums(M):
     """``rowSums`` (long double, spaltenweise)."""
     return r_rowsums(M)
@@ -432,15 +432,24 @@ def _lgl(v):
 def signal_state(signal, *, initial=False):
     """Signale in einen dauerhaften Zustand übersetzen.
 
-    ``True`` ab einem Kaufsignal bis zum nächsten Verkaufssignal. Zeilen, in denen
-    beide Signale ``False`` (oder beide ``True``) sind, ändern den Zustand nicht.
+    ``True`` ab einem Kaufsignal bis zum nächsten Verkaufssignal (wie die Ein-/Ausstiegslogik von
+    ``simulation()``). Zeilen, in denen beide Signale ``False`` sind (z. B. innerhalb eines Hysterese-Bands) oder
+    beide ``True``, ändern den Zustand nicht. So lassen sich Signale als "investiert ja/nein" auswerten oder als
+    Bedingung in ``tactical_rules()`` verwenden (dort geschieht die Umwandlung automatisch).
 
     Args:
-        signal: ``{"buy": ..., "sell": ...}`` mit logischen Vektoren gleicher Länge.
-        initial: Zustand vor dem ersten Signal (Standard ``False``).
+        signal: ``{"buy": ..., "sell": ...}`` mit logischen Vektoren gleicher Länge (z. B. aus ``signal_sma()``);
+            NA vorher durch ``False`` ersetzen (die Signal-Bausteine liefern keine NA).
+        initial: Logischer Zustand vor dem ersten Signal (Standard ``False`` = nicht investiert).
 
     Returns:
-        Logisches ``numpy.ndarray`` (``True`` = investiert).
+        Logischer Vektor gleicher Länge (``True`` = investiert).
+
+    Beispiel::
+
+        import numpy as np, simlev
+        x = np.array([100, 102, 105, 103, 99, 97, 100, 104])
+        print(simlev.signal_state({"buy": x > 101, "sell": x < 98}))
     """
     b, bna = _lgl(_sig_part(signal, "buy"))
     s, sna = _lgl(_sig_part(signal, "sell"))
@@ -480,17 +489,39 @@ def _momentum_back(d, lookbacks):
 def momentum_score(data, assets, *, lookbacks=(1, 3, 6, 12), type=("average", "13612w")):  # noqa: A002
     """Momentum-Score: mittlere Rendite über mehrere Rückblicke (Kalendermonate).
 
+    Mittlere Rendite über mehrere Rückblicke (Monate, kalenderbasiert) je Anlage, z. B. der "13612"-Score (1, 3,
+    6, 12 Monate). Mit ``type = "13612w"`` gewichtet wie bei Keller & Keuning: (12 r_1 + 4 r_3 + 2 r_6 + r_12) /
+    4.
+
     Args:
-        data: ``DataFrame`` mit Spalte ``date`` und Kursspalten (Niveaus).
-        assets: Kursspalten.
-        lookbacks: Rückblicke in Kalendermonaten (Standard 1, 3, 6, 12); bei
-            ``type="13612w"`` ignoriert.
-        type: ``"average"`` (ungewichtetes Mittel) oder ``"13612w"``
-            ((12 r1 + 4 r3 + 2 r6 + r12) / 4).
+        data: DataFrame mit Spalte ``date`` (Klasse Date) und Kursspalten (Niveaus).
+        assets: Zeichenvektor der Kursspalten.
+        lookbacks: Rückblicke in Kalendermonaten (Standard ``[1, 3, 6, 12]``); bei ``type = "13612w"`` ignoriert.
+        type: ``"average"`` (Standard; ungewichtetes Mittel der Renditen) oder ``"13612w"`` (gewichtet, Rückblicke
+            fest 1, 3, 6, 12).
 
     Returns:
-        ``DataFrame`` Zeilen von ``data`` x ``assets`` mit dem Score als Anteil
-        (NA, solange die Historie für den längsten Rückblick zu kurz ist).
+        Numerische Matrix Zeilen von ``data`` x ``assets`` mit dem Score als Anteil (NA, solange die Historie für
+        den längsten Rückblick zu kurz ist).
+
+    Details:
+        Die Rendite r_m je Zeile ist der aktuelle Kurs geteilt durch den Kurs der letzten Zeile mit Datum am oder
+        vor dem Tag m Monate zuvor, minus 1 (als Anteil, 0.05 = 5 %). Hat der Zielmonat weniger Tage, gilt sein
+        letzter Tag (31.03. minus 1 Monat = 28.02. bzw. 29.02.; im früheren Stand (Commit 54b5b4f) lief der
+        Rückblick wie bei ``seq.Date()`` in den Folgemonat über, z. B. auf den 02.03.). Lücken in den Kursen
+        werden per LOCF gefüllt; Handels- und Kalendertagsdaten funktionieren gleichermassen. Grundlage für
+        ``tactical_rotation()``.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 730
+        d = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n)})
+        d["aktien"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d["anleihen"] = 100 * np.cumprod(1 + rng.normal(1e-4, 0.003, n))
+        ms = simlev.momentum_score(d, ["aktien", "anleihen"])
+        print(ms.tail(3))
     """
     type = _match_arg(type, ("average", "13612w"))  # noqa: A001
     d = _days(_to_date(_col(data, "date") if "date" in _df_names(data) else None, "momentum_score: data$date"))
@@ -556,25 +587,44 @@ def _as_logical(v, n):
 def tactical_rules(data, rules, default, *, env=None):
     """Regelbasierte taktische Allokation.
 
-    Geordnete Bedingungen wählen je Tag ein Zielportfolio; die erste zutreffende
-    Regel gewinnt, sonst gilt ``default``.
+    Geordnete Bedingungen wählen je Tag ein Zielportfolio; die erste zutreffende Regel gewinnt, sonst gilt
+    ``default``. Bedingungen sind logische Vektoren, Ausdrücke als Zeichenkette (ausgewertet in ``data``, z. B.
+    ``"inflation > 3"``) oder Signale aus den Signal-Bausteinen (``{"buy": ..., "sell": ...}``, als Zustand mit
+    Hysterese).
 
     Args:
-        data: ``DataFrame`` mit Spalte ``date`` (und den in Bedingungen verwendeten
-            Spalten).
-        rules: Liste von Regeln ``{"when": ..., "weights": {"A": 0.6, "B": 0.4}}`` in
-            Prioritätsreihenfolge. ``when``: logischer Vektor der Länge ``len(data)``,
-            Zeichenkette mit einem Ausdruck in R-Syntax (ausgewertet mit den Spalten von
-            ``data``, dann in ``env``; siehe :mod:`simlev._r.rexpr`), Funktion
-            ``data -> Vektor`` oder ``{"buy", "sell"}`` (wird mit :func:`signal_state`
-            in einen Zustand übersetzt); NA gilt als ``False``.
-        default: Gewichte für Zeilen ohne zutreffende Regel.
-        env: Mapping für freie Variablen und Funktionen in Bedingungen
-            (Voreinstellung: Namensraum des Aufrufers).
+        data: DataFrame mit Spalte ``date`` (und den in Bedingungen verwendeten Spalten, z. B. aus
+            ``series_align_macro()``).
+        rules: Liste von Regeln ``{"when": ..., "weights": {"A": 0.6, "B": 0.4}}``, in Prioritätsreihenfolge.
+            ``when``: logischer Vektor der Länge ``nrow(data)``, Zeichenkette mit einem R-Ausdruck (ausgewertet in
+            ``data``, dann in der aufrufenden Umgebung) oder ``{"buy": ..., "sell": ...}`` (wird mit
+            ``signal_state()`` in einen Zustand übersetzt); NA gilt als ``False``. ``weights``: benannter Vektor
+            Kursspalte -> Gewicht als Anteil.
+        default: Benannter Gewichtsvektor (Anteile) für Zeilen, in denen keine Regel zutrifft.
+        env: Mapping für freie Variablen und Funktionen in Bedingungen (Voreinstellung: Namensraum des Aufrufers).
 
     Returns:
-        :class:`SimLevWeights` mit ``attrs["regime"]`` (Nummer der aktiven Regel,
-        0 = ``default``) und ``attrs["source"]``.
+        ``SimLevWeights``: DataFrame mit ``date`` und je Anlage einer Spalte Zielgewicht (Anteil, Zeilensumme 1),
+        mit Attributen ``regime`` (Nummer der aktiven Regel je Zeile, 0 = ``default``) und ``source``. ``print()``
+        zeigt Mittel, Minimum, Maximum und letztes Gewicht in Prozent sowie die Zahl der Wechsel, ``plot()`` die
+        Gewichte als gestapelte Flächen.
+
+    Details:
+        Entschieden wird in jeder Zeile (kein Rhythmus); das Zielgewicht gilt als nach Schluss des Tages bekannt.
+        Gehandelt wird erst in ``tactical_simulation()``, dort mit Verzögerung ``lag`` und optionalem
+        Pflegerhythmus ``rebalance``. Gewichte werden je Zeile auf die Summe 1 normiert (negative Werte als 0);
+        Anlagen, die nur in anderen Regeln vorkommen, erhalten 0.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 500
+        d = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n)})
+        d["A"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d["B"] = 100 * np.cumprod(1 + rng.normal(1e-4, 0.003, n))
+        w = simlev.tactical_rules(d, [{"when": simlev.signal_sma(d["A"], n=200), "weights": {"A": 1}}], {"B": 1})
+        print(w)
     """
     n = _nrow(data)
     rules = list(rules) if rules is not None else []
@@ -634,26 +684,55 @@ def tactical_rotation(data, assets, *, top=1, safe=None, absolute=True, canary=N
                       every=("month", "week", "quarter"), weighting=("equal", "inverse_vol")):
     """Momentum-Rotation, Dual Momentum und Canary-Schutz.
 
-    An jedem Entscheidungstermin (Periodenende) werden die Anlagen nach ihrem
-    Momentum-Score sortiert und die besten ``top`` gehalten. Absolutes Momentum
-    (``absolute=True``): ein gewählter Platz mit negativem Score geht an die beste
-    sichere Anlage aus ``safe``. Canary (``canary``): bei b Canary-Anlagen mit
-    negativem Score geht der Anteil min(1, b / breadth) an die sichere Anlage.
+    An jedem Entscheidungstermin (Periodenende) werden die Anlagen nach ihrem Momentum-Score sortiert und die
+    besten ``top`` gehalten.
+
+    - **Absolutes Momentum** (``absolute = True``, Dual Momentum nach Antonacci): Ein gewählter Platz mit
+      negativem Score geht an die beste sichere Anlage aus ``safe``.
+    - **Canary/Breite** (``canary``, Keller & Keuning): Bei b Canary-Anlagen mit negativem Score geht der Anteil
+      min(1, b / B) an die sichere Anlage (B = ``breadth``).
 
     Args:
-        data: ``DataFrame`` mit ``date`` und Kursspalten aller Anlagen.
-        assets: Risikoanlagen für die Rotation.
-        top: Anzahl gehaltener Anlagen (1 bis Anzahl ``assets``).
-        safe: sichere Anlage(n) (Pflicht bei ``absolute`` oder ``canary``).
-        absolute: absoluten Momentum-Filter anwenden.
-        canary: Canary-Anlagen (``None`` = kein Canary-Schutz).
-        breadth: Schutzschwelle (mindestens 1; ``None`` = Anzahl Canary-Anlagen).
-        lookbacks, type: siehe :func:`momentum_score`.
-        every: ``"month"``, ``"week"`` (ISO-Woche) oder ``"quarter"``.
-        weighting: ``"equal"`` oder ``"inverse_vol"`` (63 Zeilen).
+        data: DataFrame mit Spalte ``date`` (Klasse Date) und Kursspalten (Niveaus) aller Anlagen aus ``assets``,
+            ``safe`` und ``canary``.
+        assets: Zeichenvektor der Risikoanlagen für die Rotation.
+        top: Anzahl gehaltener Anlagen (Standard 1; 1 bis Anzahl ``assets``).
+        safe: Zeichenvektor der sicheren Anlage(n); bei mehreren wird die mit dem besten Score gewählt. Pflicht,
+            wenn ``absolute = True`` (Standard) oder ``canary`` gesetzt ist (sonst Fehler).
+        absolute: Logisch: absoluten Momentum-Filter anwenden (Standard ``True``; Score < 0 => sichere Anlage).
+        canary: Optional Zeichenvektor der Canary-Anlagen (Standard ``None`` = kein Canary-Schutz).
+        breadth: Schutzschwelle B als Anzahl Anlagen (mindestens 1; Standard ``None`` = Anzahl Canary-Anlagen).
+        lookbacks, type: Siehe ``momentum_score()`` (Rückblicke in Monaten; ``"average"`` oder ``"13612w"``).
+        every: Entscheidungsrhythmus: ``"month"`` (Standard), ``"week"`` (ISO-Woche) oder ``"quarter"``.
+        weighting: Gewichtung der gewählten Anlagen: ``"equal"`` (Standard) oder ``"inverse_vol"`` (umgekehrt
+            proportional zur Wurzel der mittleren quadrierten Log-Renditen der letzten 63 Zeilen).
 
     Returns:
-        :class:`SimLevWeights` mit ``attrs["scores"]`` und ``attrs["decision_rows"]``.
+        ``SimLevWeights`` (DataFrame mit ``date`` und Zielgewichten je Anlage aus ``assets`` und ``safe``,
+        Anteile) mit Attributen ``scores`` (Matrix der Momentum-Scores aller Anlagen je Zeile) und
+        ``decision_rows`` (Zeilennummern der Entscheidungstermine).
+
+    Details:
+        Entscheidungstermine sind die letzten vorhandenen Zeilen jeder Periode von ``every``, ab dem ersten
+        Termin, an dem mindestens ``top`` Anlagen einen Score haben. Das Zielgewicht gilt ab dem Termin bis zum
+        nächsten; davor liegt alles in ``safe[1]`` (ohne ``safe`` in ``assets[1]``). ``every`` legt nur den
+        Entscheidungsrhythmus fest; gehandelt wird in ``tactical_simulation()`` (Verzögerung ``lag``,
+        Pflegerhythmus ``rebalance``).
+
+    Literatur:
+        Antonacci, G. (2014), Dual Momentum Investing; Keller, W. J. & Keuning, J. W. (2018), Breadth Momentum and
+        the Canary Universe: Defensive Asset Allocation (DAA), SSRN 3212862.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1460
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        d["aktien"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d["anleihen"] = 100 * np.cumprod(1 + rng.normal(1e-4, 0.003, n))
+        d["geld"] = 100 * np.cumprod(np.full(n, 1 + 0.01 / 365))
+        print(simlev.tactical_rotation(d, ["aktien", "anleihen"], safe="geld"))
     """
     type = _match_arg(type, ("average", "13612w"))  # noqa: A001
     every = _match_arg(every, ("month", "week", "quarter"))
@@ -818,18 +897,56 @@ def tactical_target_volatility(data, weights, safe, *, target=10, window=63, max
                       every=("month", "week", "day", "quarter"), ppy=None):
     """Zielvolatilität: Risikoanteil ``min(max_exposure, (target / 100) / vol)``.
 
+    Skaliert den Risikoteil einer Gewichtsreihe so, dass die geschätzte Volatilität des Risikoportfolios dem Ziel
+    entspricht; der Rest geht in die sichere Anlage. Die Volatilität wird aus den Tagesrenditen der Risikoanlagen
+    mit den aktuellen Gewichten über ``window`` Zeilen mit Kursbewegung geschätzt (Tage ohne Bewegung, etwa
+    Wochenenden, zählen nicht).
+
     Args:
-        data: ``DataFrame`` mit ``date`` und Kursspalten der Risikoanlagen und von ``safe``.
-        weights: :class:`SimLevWeights` oder benannter Gewichtsvektor (statisch).
-        safe: Kursspalte der sicheren Anlage.
-        target: Zielvolatilität in Prozent p. a. (Standard 10).
-        window: Fensterlänge in Zeilen mit Kursbewegung (Standard 63).
-        max_exposure: höchster Risikoanteil (höchstens 1).
-        every: ``"month"``, ``"week"``, ``"day"`` oder ``"quarter"``.
-        ppy: Tage mit Kursbewegung je Jahr (``None`` = aus den Daten).
+        data: DataFrame mit Spalte ``date`` (Klasse Date) und Kursspalten (Niveaus) der Risikoanlagen und der
+            sicheren Anlage.
+        weights: Gewichte des Risikoportfolios: ``SimLevWeights`` (z. B. aus ``tactical_rotation()``) oder
+            benannter Gewichtsvektor (Anteile, statisch). Eine darin enthaltene sichere Anlage zählt nicht zum
+            Risikoteil.
+        safe: Name der Kursspalte der sicheren Anlage (Zeichenkette).
+        target: Zielvolatilität in Prozent p. a. (10 = 10 %; Standard 10). Werte unter 1 ergeben eine Warnung
+            (vermutlich als Anteil angegeben).
+        window: Fensterlänge der Volatilitätsschätzung in Zeilen mit Kursbewegung (Standard 63).
+        max_exposure: Höchster Risikoanteil als Anteil (Standard 1 = ohne Hebel; Werte > 1 sind nicht erlaubt, da
+            die Engine keinen Kredit kennt).
+        every: Anpassungsrhythmus des Risikoanteils: ``"month"`` (Standard), ``"week"``, ``"day"`` oder
+            ``"quarter"``.
+        ppy: Tage mit Kursbewegung je Jahr für die Annualisierung. Standard ``None`` = aus den Daten ermittelt
+            (Zahl der Tage mit Bewegung geteilt durch die Länge des Zeitraums in Jahren, z. B. rund 252 bei
+            Börsentagen, 365 bei einem Index, der auch am Wochenende notiert).
 
     Returns:
-        :class:`SimLevWeights` mit ``attrs["exposure"]`` und ``attrs["volatility"]``.
+        ``SimLevWeights`` (DataFrame mit ``date`` und Zielgewichten der Risikoanlagen und von ``safe``, Anteile)
+        mit Attributen ``exposure`` (Risikoanteil je Zeile, Anteil) und ``volatility`` (geschätzte Volatilität des
+        Risikoportfolios je Zeile, Anteil p. a., 0.15 = 15 %).
+
+    Details:
+        Der Risikoanteil (Exposure) ist ``min(max_exposure, (target / 100) / vol)`` mit der geschätzten
+        Volatilität ``vol`` als Anteil p. a.; er wird an den Terminen von ``every`` (letzte vorhandene Zeile je
+        Periode) neu gesetzt und bis zum nächsten Termin gehalten. Vor dem ersten Termin mit vollem Fenster ist
+        der Risikoanteil 0 (alles in ``safe``); anders als bei ``tactical_conditional_volatility()``, wo vorher
+        der Grundanteil ``base`` gilt (hier gibt es keinen Grundanteil). ``every`` legt nur den Anpassungsrhythmus
+        der Zielgewichte fest; gehandelt wird in ``tactical_simulation()``.
+
+    Literatur:
+        Moreira, A. & Muir, T. (2017), Volatility-Managed Portfolios, Journal of Finance 72(4).
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1460
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        d["aktien"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d["anleihen"] = 100 * np.cumprod(1 + rng.normal(1e-4, 0.003, n))
+        d["geld"] = 100 * np.cumprod(np.full(n, 1 + 0.01 / 365))
+        tv = simlev.tactical_target_volatility(d, {"aktien": 0.8, "anleihen": 0.2}, "geld", target=8)
+        print(tv)
     """
     every = _match_arg(every, ("month", "week", "day", "quarter"))
     if max_exposure > 1:
@@ -865,24 +982,76 @@ def tactical_conditional_volatility(data, weights, safe, *, base=1, upper=0.8, l
                            ppy=None):
     """Bedingte Volatilitätssteuerung: nur in extremen Phasen skalieren.
 
-    Liegt die geschätzte Volatilität über ihrem ``upper``-Quantil (expandierend,
-    monatlich, ohne Blick in die Zukunft), wird der Risikoanteil gesenkt, unter dem
-    ``lower``-Quantil erhöht; dazwischen gilt ``base``.
+    Wie ``tactical_target_volatility()``, aber nur in extremen Volatilitätsphasen: Liegt die geschätzte
+    Volatilität des Risikoportfolios über ihrem ``upper``-Quantil, wird der Risikoanteil gesenkt, liegt sie unter
+    dem ``lower``-Quantil, wird er erhöht; dazwischen bleibt er beim Grundanteil ``base``. Das spart die meisten
+    Umschichtungen (und damit Steuern und Kosten) der ständigen Steuerung (Bongaerts, Kang & van Dijk 2020).
 
     Args:
-        data, weights, safe, window, every, ppy: wie :func:`tactical_target_volatility`.
-        base: Grundanteil (0 bis ``max_exposure``).
-        upper, lower: Quantil-Wahrscheinlichkeiten (``lower=None`` schaltet das
-            Hochskalieren ab).
-        target: Vergleichsvolatilität in Prozent p. a. (``None`` = Mittel der bisherigen).
-        min_exposure, max_exposure: Grenzen des Risikoanteils.
-        min_history: Mindesthistorie in Jahren.
-        scaling: ``"inverse"`` (``base * target / vol``) oder ``"fixed"``.
-        high_exposure, low_exposure: feste Anteile für ``scaling="fixed"``.
+        data: DataFrame mit Spalte ``date`` (Klasse Date) und Kursspalten (Niveaus) der Risikoanlagen und der
+            sicheren Anlage.
+        weights: Gewichte des Risikoportfolios: ``SimLevWeights`` (z. B. aus ``tactical_rotation()``) oder
+            benannter Gewichtsvektor (Anteile, statisch). Eine darin enthaltene sichere Anlage zählt nicht zum
+            Risikoteil.
+        safe: Name der Kursspalte der sicheren Anlage (Zeichenkette).
+        base: Grundanteil des Risikoportfolios in normalen Phasen als Anteil (0 bis ``max_exposure``; Standard 1).
+        upper: Quantil-Wahrscheinlichkeit (zwischen 0 und 1), ab der die Volatilität als hoch gilt (Standard 0.8 =
+            oberstes Fünftel der bisherigen Werte).
+        lower: Quantil-Wahrscheinlichkeit (zwischen 0 und ``upper``), unter der sie als niedrig gilt (Standard
+            0.2); ``None`` schaltet das Hochskalieren ab.
+        target: Vergleichsvolatilität in Prozent p. a. (10 = 10 %); Standard ``None`` = Mittel der bisherigen
+            Volatilität (expandierend, monatlich aktualisiert).
+        window: Fensterlänge der Volatilitätsschätzung in Zeilen mit Kursbewegung (Standard 63).
+        min_exposure, max_exposure: Untere und obere Grenze des Risikoanteils als Anteil (Standard 0 und 1;
+            ``min_exposure`` höchstens ``base``, ``max_exposure`` höchstens 1).
+        min_history: Mindesthistorie der Volatilitätsschätzung in Jahren (Standard 3), bevor gesteuert wird. Ist
+            sie länger als die vorhandene Historie, wird nie gesteuert (mit Warnung).
+        scaling: ``"inverse"`` (Standard): Anteil ``base * target / vol``; ``"fixed"``: feste Anteile
+            ``high_exposure`` und ``low_exposure``.
+        high_exposure, low_exposure: Feste Risikoanteile (Anteile) für ``scaling = "fixed"`` in hohen bzw.
+            niedrigen Phasen; ``high_exposure`` höchstens ``base``, ``low_exposure`` zwischen ``base`` und
+            ``max_exposure`` (Pflicht, wenn ``lower`` gesetzt ist).
+        every: Anpassungsrhythmus des Risikoanteils: ``"month"`` (Standard), ``"week"``, ``"day"`` oder
+            ``"quarter"``.
+        ppy: Tage mit Kursbewegung je Jahr für die Annualisierung. Standard ``None`` = aus den Daten ermittelt
+            (Zahl der Tage mit Bewegung geteilt durch die Länge des Zeitraums in Jahren, z. B. rund 252 bei
+            Börsentagen, 365 bei einem Index, der auch am Wochenende notiert).
 
     Returns:
-        :class:`SimLevWeights` mit ``attrs`` ``exposure``, ``volatility``, ``state``
-        (-1 niedrig, 0 normal, 1 hoch) und ``thresholds``.
+        ``SimLevWeights`` (DataFrame mit ``date`` und Zielgewichten, Anteile) mit Attributen ``exposure``
+        (Risikoanteil je Zeile, Anteil), ``volatility`` (geschätzte Volatilität, Anteil p. a.), ``state`` (Phase
+        am letzten Anpassungstermin, je Zeile fortgeschrieben: -1 niedrig, 0 normal, 1 hoch) und ``thresholds``
+        (DataFrame mit ``date``, ``lower``, ``upper`` und ``target`` als Anteile p. a., wie sie zum jeweiligen
+        Monatsende bekannt waren; NA vor ``min_history``).
+
+    Details:
+        Die Quantile und der langfristige Vergleichswert werden nur aus der Volatilität bis zum jeweiligen Tag
+        berechnet (expandierendes Fenster, monatlich aktualisiert) – ohne Blick in die Zukunft. Vor
+        ``min_history`` Jahren Historie gilt der Grundanteil.
+
+        In einer extremen Phase ist der Risikoanteil ``base * target / vol``, oben höchstens ``base``, unten
+        mindestens ``base``, begrenzt auf ``[min_exposure, max_exposure]``. Weil die Engine keinen Kredit kennt,
+        ist ``max_exposure`` höchstens 1; Hochskalieren setzt daher ``base < max_exposure`` voraus.
+
+        Einheiten: ``base``, ``min_exposure``, ``max_exposure``, ``high_exposure`` und ``low_exposure`` sind
+        Anteile des Depots (0.8 = 80 %), ``upper`` und ``lower`` Quantil-Wahrscheinlichkeiten (0 bis 1),
+        ``target`` Prozent p. a. (10 = 10 %). Die geschätzte Volatilität und die Schwellen in ``thresholds`` sind
+        Anteile p. a. (0.15 = 15 %). Vor dem ersten Termin von ``every`` gilt der Grundanteil ``base``.
+
+    Literatur:
+        Bongaerts, D., Kang, X. & van Dijk, M. (2020), Conditional Volatility Targeting, Financial Analysts
+        Journal 76(4), 54-71.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 4380
+        d = pd.DataFrame({"date": pd.date_range("2010-01-01", periods=n)})
+        d["aktien"] = 100 * np.exp(np.cumsum(rng.normal(0.0002, 0.01 * np.exp(np.sin(np.arange(1, n + 1) / 300)))))
+        d["geld"] = 100 * np.cumprod(np.full(n, 1 + 0.01 / 365))
+        cv = simlev.tactical_conditional_volatility(d, {"aktien": 1}, "geld", base=0.8)
+        print(cv)
     """
     every = _match_arg(every, ("month", "week", "day", "quarter"))
     scaling = _match_arg(scaling, ("inverse", "fixed"))
@@ -979,21 +1148,34 @@ def tactical_conditional_volatility(data, weights, safe, *, base=1, upper=0.8, l
 def tactical_glidepath(data, from_=_MISSING, to=_MISSING, *, start=None, end=None, every=("year", "quarter", "month"), **kwargs):
     """Glidepath zwischen zwei Allokationen.
 
-    Stufenweise lineare Bewegung von ``from_`` (R: ``from``) nach ``to``; eine Stufe
-    beginnt in der ersten Zeile und an der letzten vorhandenen Zeile jeder Periode von
-    ``every``; Gewicht ``(1 - p) * from + p * to`` mit dem Zeitanteil ``p`` zwischen
-    ``start`` und ``end`` (begrenzt auf 0 bis 1).
+    Erzeugt Zielgewichte, die sich stufenweise linear von ``from`` nach ``to`` bewegen, z. B. von aktienlastig zu
+    anleihenlastig bis zum Rentenbeginn. Eine Stufe beginnt in der ersten Zeile und an der letzten vorhandenen
+    Zeile jeder Periode von ``every``; ihr Gewicht ist (1 - p) · from + p · to mit dem Zeitanteil p des Datums
+    zwischen ``start`` (0) und ``end`` (1), begrenzt auf 0 bis 1. Vor ``start`` gilt ``from``, nach ``end`` gilt
+    ``to``; bei ``start = end`` wechselt die erste Stufe an oder nach diesem Datum direkt auf ``to``, ``end`` vor
+    ``start`` ist ein Fehler. Das Ergebnis geht in ``tactical_simulation()`` oder als Kern in
+    ``tactical_blend()``.
 
     Args:
-        data: ``DataFrame`` mit Spalte ``date`` oder Datumsvektor.
-        from_, to: Gewichte am Anfang und Ende, beide Pflicht wie in R (``from`` ist in
-            Python reserviert; ``**{"from": ...}`` geht ebenfalls).
-        start, end: Beginn und Ende (Datum oder "JJJJ-MM-TT"; ``None`` = erstes bzw.
+        data: DataFrame mit Spalte ``date`` (z. B. der Datensatz für ``simulation()``) oder Datumsvektor.
+        from_, to: ``from`` (in Python ``from_``, da ``from`` ein Schlüsselwort ist): Benannte Gewichtsvektoren
+            (Anteile) am Anfang und Ende; Anlagen, die nur in einem vorkommen, erhalten im anderen 0. Je Zeile auf
+            Summe 1 normiert.
+        start, end: Beginn und Ende des Uebergangs (Date oder ``"JJJJ-MM-TT"``; Standard ``None`` = erstes bzw.
             letztes Datum).
-        every: ``"year"``, ``"quarter"`` oder ``"month"``.
+        every: Rhythmus der Stufen: ``"year"`` (Standard), ``"quarter"`` oder ``"month"``.
+        **kwargs: nur ``from`` (``**{"from": …}``) als Schreibweise für ``from_`` (``from`` ist in Python ein
+            Schlüsselwort); andere Namen sind ein Fehler.
 
     Returns:
-        :class:`SimLevWeights`.
+        ``SimLevWeights`` (DataFrame mit ``date`` und Zielgewichten je Anlage, Anteile).
+
+    Beispiel::
+
+        import pandas as pd, simlev
+        gp = simlev.tactical_glidepath(pd.date_range("2025-01-01", "2045-12-31"),
+                                       {"aktien": 0.9, "anleihen": 0.1}, {"aktien": 0.4, "anleihen": 0.6})
+        print(gp)
     """
     if "from" in kwargs:
         from_ = kwargs.pop("from")
@@ -1034,16 +1216,37 @@ def tactical_glidepath(data, from_=_MISSING, to=_MISSING, *, start=None, end=Non
 
 
 def tactical_blend(*args, shares=None, **kwargs):
-    """Gewichtsreihen mischen (Kern-Satellit): je Zeile und Anlage
-    ``sum_k shares_k * w_k``, dann auf Summe 1 normiert.
+    """Gewichtsreihen mischen (Kern-Satellit): je Zeile und Anlage ``sum_k shares_k * w_k``, dann auf Summe 1 normiert.
+
+    Mischt mehrere Zielgewichtsreihen zu einer, z. B. einen statischen Kern oder ``tactical_glidepath()`` mit
+    einem taktischen Satelliten aus ``tactical_rotation()``: Je Zeile und Anlage ist das Gewicht Σ_k shares_k ·
+    w_k, anschließend auf Summe 1 normiert. Anlagen, die in einer Reihe fehlen, zählen dort mit 0. Alle Reihen
+    müssen dieselben Daten haben (z. B. aus demselben Datensatz erzeugt).
 
     Args:
-        *args: :class:`SimLevWeights` mit identischer Spalte ``date`` (auch als
-            benannte Argumente; Namen werden nicht verwendet).
-        shares: Anteile je Reihe (``None`` = gleiche Anteile).
+        *args: ``SimLevWeights`` (in der Regel zwei oder mehr) mit identischer Spalte ``date`` (Namen werden nicht
+            verwendet).
+        shares: Numerischer Vektor der Anteile je Reihe in der Reihenfolge von ``...`` (z. B. ``[0.7, 0.3]``;
+            genau ein nichtnegativer Wert je Reihe); Standard ``None`` = gleiche Anteile.
+        **kwargs: ``SimLevWeights`` (in der Regel zwei oder mehr) mit identischer Spalte ``date`` (Namen werden
+            nicht verwendet).
 
     Returns:
-        :class:`SimLevWeights`.
+        ``SimLevWeights`` (DataFrame mit ``date`` und Zielgewichten aller Anlagen, Anteile) für
+        ``tactical_simulation()``.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1460
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        d["aktien"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d["anleihen"] = 100 * np.cumprod(1 + rng.normal(1e-4, 0.003, n))
+        d["geld"] = 100 * np.cumprod(np.full(n, 1 + 0.01 / 365))
+        kern = simlev.tactical_glidepath(d, {"aktien": 0.8, "anleihen": 0.2}, {"aktien": 0.5, "anleihen": 0.5})
+        satellit = simlev.tactical_rotation(d, ["aktien", "anleihen"], safe="geld")
+        print(simlev.tactical_blend(kern, satellit, shares=[0.7, 0.3]))
     """
     ws = list(args) + list(kwargs.values())
     if not ws or not all(_is_weights(w) for w in ws):
@@ -1175,27 +1378,82 @@ def tactical_simulation(data, weights, *, rebalance=("switch", "month", "quarter
                         tolerance_type=("absolute", "relative"), lag=1, asset_args=None, **kwargs):
     """Taktische Allokation simulieren.
 
-    Übersetzt eine Zielgewichtsreihe in Ereignis-Rebalancing von :func:`simlev.simulation`
-    (``event_col``, ``event_mode="replace"``, ``event_weight``): Handel an Wechselterminen
-    (nach ``lag`` Zeilen; mit ``data.attrs["filled"]`` nur Zeilen mit echten Kursen) und an
-    Pflegeterminen ``rebalance``, optional mit Toleranzband ``tolerance`` (Prozent).
+    Übersetzt eine Zielgewichtsreihe in Ereignis-Rebalancing von ``simulation()``: An Wechselterminen (Zielgewicht
+    ändert sich) und an optionalen Pflegeterminen wird auf die Zielgewichte umgeschichtet, mit Steuern, Spreads
+    und allen weiteren Einstellungen der Engine. Die Engine selbst bleibt unverändert (``event_col``, ``event_mode
+    = "replace"``, ``event_weight``).
 
     Args:
-        data: ``DataFrame`` mit ``date`` und Kursspalten aller Anlagen der Gewichte.
-        weights: :class:`SimLevWeights`.
-        rebalance: ``"switch"``, ``"month"``, ``"quarter"`` oder ``"year"``.
-        tolerance: Toleranzband in Prozent (``None`` = an jedem Termin handeln).
-        tolerance_type: ``"absolute"`` oder ``"relative"``.
-        lag: Verzögerung in Zeilen (ganze Zahl >= 0).
-        asset_args: Argumente für :func:`asset_config` über ``strategy_from_weights``.
-        **kwargs: weitere Argumente für :func:`simlev.simulation`, z. B. ``tax=tax_profile()``,
-            ``dca=dca_plan(...)``; das Rebalancing steuert die Funktion selbst (``rebalance.*`` und die
-            alten ``event_col``, ``event_mode``, ``event_weight``, ``balance_mode``, ``balance_thresh``
-            sind ein Fehler).
+        data: DataFrame mit Spalte ``date`` (Klasse Date) und Kursspalten (Niveaus) aller Anlagen der Gewichte (z.
+            B. mit ``series_align()`` vorbereitet). Fehlende Kalendertage füllt ``simulation()`` selbst.
+        weights: ``SimLevWeights`` (aus ``tactical_rules()``, ``tactical_rotation()``,
+            ``tactical_target_volatility()``, ``tactical_conditional_volatility()``, ``tactical_glidepath()``,
+            ``tactical_blend()`` oder ``portfolio_rolling()``). Daten von ``data``, die in ``weights`` fehlen,
+            übernehmen das letzte bekannte Zielgewicht.
+        rebalance: Pflegerhythmus: ``"switch"`` (Standard; nur bei Wechseln), ``"month"``, ``"quarter"`` oder
+            ``"year"``.
+        tolerance: Toleranzband in Prozent (5 = 5 %; Standard ``None`` = an jedem Termin handeln).
+        tolerance_type: Messung der Abweichung für ``tolerance``: ``"absolute"`` (Standard; Prozentpunkte des
+            Gewichts: bei 5 und Ziel 40 % wird gehandelt, wenn eine Anlage unter 35 % oder über 45 % liegt) oder
+            ``"relative"`` (Prozent des Zielgewichts).
+        lag: Verzögerung in Zeilen von ``data`` (ganze Zahl >= 0, Standard 1); mit Attribut ``filled`` in Zeilen
+            mit echten Kursen.
+        asset_args: Liste von Argumenten für ``asset_config()`` (über ``strategy_from_weights()``), z. B.
+            ``{"spread": 0.1, "partial_exemption": {"aktien": 30, "geld": 0}}``. Ein unbenannter einzelner Wert
+            gilt für alle Anlagen; benannte Vektoren werden je Anlage zugeordnet (auch mit einem Element, siehe
+            ``strategy_from_weights()``).
+        **kwargs: Weitere Argumente für ``simulation()`` (z. B. ``tax = tax_profile()``, ``start_value``, ``dca =
+            dca_plan(...)``). Das Rebalancing (``rebalance_plan(event_col, event_mode = "replace", skip = True,
+            event_weight, thresh = tolerance, thresh_type = tolerance_type)``) steuert die Funktion selbst; Pfade
+            ``"rebalance.*"`` und die alten ``event_col``, ``event_mode``, ``event_weight``, ``balance_mode``,
+            ``balance_thresh`` sind ein Fehler.
 
     Returns:
-        ``SimLevResult`` mit zusätzlichem Element ``tactical`` (``weights``, ``events``,
-        ``switches``, ``lag``, ``rebalance``).
+        ``SimLevResult`` wie von ``simulation()`` mit zusätzlichem Element ``tactical``, einer Liste mit
+        ``weights`` (gehandelte, um ``lag`` verschobene Zielgewichte als ``SimLevWeights``), ``events`` (Daten der
+        Umschichtungstermine aus Wechseln, Pflege und Sparplan, vor Anwendung von ``tolerance``), ``switches``
+        (Zahl der Zielwechsel), ``lag`` und ``rebalance``. Das Ergebnis lässt sich mit ``result_analysis()`` oder
+        ``result_index()`` weiterverarbeiten.
+
+    Details:
+        - ``every`` vs. ``rebalance``: Das Argument ``every`` der Gewichts-Erzeuger (``tactical_rotation()``,
+          ``tactical_target_volatility()``, ``tactical_glidepath()`` usw.) bestimmt, wann sich das Zielgewicht
+          ändern kann. ``rebalance`` hier bestimmt, wann zusätzlich ohne Zielwechsel auf die aktuellen
+          Zielgewichte zurückgeführt wird. Gehandelt wird an jedem Wechsel (nach ``lag``) und an den
+          Pflegeterminen.
+        - ``lag``: Ein Zielgewicht, das nach Schluss von Tag t bekannt ist, wird nach ``lag`` Zeilen von ``data``
+          gehandelt (Standard 1 = nächste Zeile, bei Kalendertagsdaten also der nächste Kalendertag; 0 = am selben
+          Schlusskurs, wie bei vielen Online-Backtestern). Trägt ``data`` das Attribut ``filled`` aus
+          ``series_align()``, zählen nur Zeilen, in denen alle Anlagen der Gewichte echte (nicht gefüllte) Kurse
+          haben: Ein Signal vom Freitag wird mit ``lag = 1`` am Montag gehandelt, nicht am Samstag zum
+          Freitagskurs. Das Attribut wird an ``simulation()`` weitergereicht.
+        - ``rebalance``: ``"switch"`` (Standard; nur bei Wechseln) oder ein Rhythmus (``"month"``, ``"quarter"``,
+          ``"year"``; jeweils letzte vorhandene Zeile der Periode), zu dem zusätzlich auf die aktuellen
+          Zielgewichte zurückgeführt wird.
+        - ``tolerance``: Toleranzband in Prozent (wird als ``rebalance_plan(thresh = tolerance)`` an
+          ``simulation()`` übergeben); an Terminen, an denen keine Anlage stärker als das Band vom Ziel abweicht,
+          wird nicht gehandelt. Gilt auch für Wechseltermine.
+        - Umschichtungen nutzen die Rebalancing-Logik der Engine, die mit den Ist-Gewichten des letzten
+          Bewertungsstands (Vortag) rechnet; nach einem Wechsel können daher Reste in der Größenordnung der
+          Tagesbewegung (meist unter einem Prozent) in der verlassenen Anlage bleiben. Ein Pflegerhythmus
+          (``rebalance = "month"``) gleicht sie aus.
+        - Sparpläne (``dca = dca_plan(...)``) zahlen nach den Startgewichten ein; der Sparplantag wird zum
+          Rebalancing-Termin, so dass die Rate sofort auf die aktuellen Zielgewichte verteilt wird.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1460
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        d["aktien"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d["anleihen"] = 100 * np.cumprod(1 + rng.normal(1e-4, 0.003, n))
+        d["geld"] = 100 * np.cumprod(np.full(n, 1 + 0.01 / 365))
+        w = simlev.tactical_rules(d, [{"when": simlev.signal_sma(d["aktien"], n=200, band=1), "weights": {"aktien": 1}}],
+                                  {"geld": 1})
+        res = simlev.tactical_simulation(d, w, rebalance="switch", lag=1,
+                                         asset_args={"partial_exemption": {"aktien": 30, "geld": 0}})
+        print(res["tactical"]["switches"])
     """
     rebalance = _match_arg(rebalance, ("switch", "month", "quarter", "year"))
     tolerance_type = _match_arg(tolerance_type, ("absolute", "relative"))

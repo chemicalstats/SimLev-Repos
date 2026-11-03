@@ -1,4 +1,4 @@
-# DataPrep – r/R/data_prep.R (Vorlage python/simlev/data_prep.py)
+# DataPrep – Gegenstück zu r/R/data_prep.R und python/simlev/data_prep.py
 #
 #   series_align        Quellen nach Datum zusammenführen, Kalender, Füllung
 #   series_check        Prüfbericht (Lücken, Ausreißer, Spikes, Splits, stehende Kurse)
@@ -159,7 +159,7 @@ function _date_str(day)
     return string(lpad(y, 4, '0'), "-", lpad(m, 2, '0'), "-", lpad(d, 2, '0'))
 end
 
-"`as.Date(s, format = \"%Y-%m-%d\")` (bzw. `/`) für einen Text; NA = `SimLev.NA` (N10: core/slc_rbase_date.c)."
+"`as.Date(s, format = \"%Y-%m-%d\")` (bzw. `/`) für einen Text; NA = `SimLev.NA` (core/slc_rbase_date.c)."
 function _strptime_ymd(s, sep::Char = '-')
     (s === nothing || s === missing) && return NA
     z = SimLev._rb_strptime_ymd(s, sep)
@@ -196,7 +196,7 @@ end
 """
     _to_date(x, what = "date"; strict = true)
 
-Datumsangaben in Date umwandeln (Port von `.to_date`): `Date`/`DateTime`
+Datumsangaben in Date umwandeln (R: `.to_date`): `Date`/`DateTime`
 (Kalendertag), Text nur "JJJJ-MM-TT" und "JJJJ/MM/TT" mit vierstelliger
 Jahreszahl; numerische Werte werden abgelehnt. Mit `strict = true` Fehler für
 nicht lesbare Werte, sonst NA. Liefert immer einen Vektor (`Vector{Date}`,
@@ -256,7 +256,7 @@ end
 """
     _add_months(x, k)
 
-Datum plus `k` Kalendermonate, auf das Monatsende begrenzt (Port von
+Datum plus `k` Kalendermonate, auf das Monatsende begrenzt (R:
 `.add_months`); 31.01. + 1 Monat = 28.02. bzw. 29.02. Vektorisiert über `x`
 und `k` (Recycling wie R). Liefert einen Datumsvektor.
 """
@@ -387,7 +387,7 @@ _chr_vals(v) = [e === missing || e === nothing ? nothing : _trimws(string(e)) fo
     _num_text_cols(x, exclude = String[])
 
 Text- oder Faktorspalten, die wie Zahlen aussehen (z. B. Kurse mit
-Dezimalkomma). Port von `.num_text_cols`; liefert die Spaltennamen.
+Dezimalkomma). R: `.num_text_cols`; liefert die Spaltennamen.
 """
 function _num_text_cols(x, exclude = String[])
     exclude isa AbstractString && (exclude = [exclude])
@@ -403,7 +403,7 @@ function _num_text_cols(x, exclude = String[])
     return out
 end
 
-"Fehlermeldung für Zahlen als Text (Port von `.num_text_stop`)."
+"Fehlermeldung für Zahlen als Text (R: `.num_text_stop`)."
 function _num_text_stop(x, cols, name)
     cols isa AbstractString && (cols = [cols])
     x = _as_frame(x)
@@ -447,7 +447,7 @@ _stable_order(x) = sortperm(x; alg = Base.Sort.DEFAULT_STABLE)
 """
     _dp_frame(x, name)
 
-Eine Quelle in `RFrame(date, ...)` mit numerischen Spalten wandeln (Port von
+Eine Quelle in `RFrame(date, ...)` mit numerischen Spalten wandeln (R:
 `.dp_frame`): Datumsspalte suchen, Zeilen ohne Datum entfernen, nach Datum
 sortieren, bei doppeltem Datum den letzten Wert behalten. Bei genau einer
 numerischen Spalte heißt sie `name`.
@@ -525,12 +525,64 @@ end
                  max_gap = Inf, start = nothing, end_ = nothing, sources...)
     series_align("name" => quelle, ...; kwargs...)
 
-Datenquellen nach Datum zusammenführen. Benannte Quellen (Name =
-Spaltenname im Ergebnis) als `RFrame(date, value)` (eine numerische Spalte),
-`RFrame(date, A, B, ...)` oder benannter numerischer Vektor mit
-Datumsnamen. Liefert ein `RFrame` mit Spalte `date` und je einer Spalte pro
-Reihe; `attrs(df)["filled"]` ist ein `RFrame` aus Bool-Spalten (TRUE =
-gefüllter Wert).
+Datenquellen nach Datum zusammenführen.
+
+Einstieg für eigene Daten: Führt Kursreihen aus verschiedenen Quellen (z. B. mit `utils::read.csv()`
+eingelesene Dateien) auf einen gemeinsamen Kalender zusammen und liefert einen Tabelle (RFrame) mit Spalte
+`date` (Klasse Date) und je einer numerischen Spalte pro Reihe. Erwartet werden Niveaus (Kurse, Indexstände),
+keine Renditen: Lücken werden mit dem letzten Kurs (LOCF) oder linear gefüllt, was nur für Niveaus sinnvoll
+ist. Renditereihen vorher in einen Index umrechnen, z. B. `100 * cumprod(1 + r)`.
+
+# Argumente
+- `calendar`: Zeilen des Ergebnisses: `"day"` (Standard; alle Kalendertage), `"union"` (alle Daten, an denen
+  mindestens eine Quelle notiert) oder `"intersect"` (nur Daten, an denen alle Quellen notieren).
+- `range`: Zeitraum: `"common"` (Standard; vom spätesten Start bis zum frühesten Ende aller Quellen) oder
+  `"all"` (gesamter Zeitraum; außerhalb der Laufzeit einer Reihe NA).
+- `fill`: Füllung fehlender Werte: `"locf"` (Standard; letzter Wert), `"linear"` (lineare Interpolation) oder
+  `"none"`. Gefüllt wird nur innerhalb der Laufzeit einer Reihe (erstes bis letztes vorhandenes Datum).
+- `max_gap`: Höchste Lücke in Kalendertagen zwischen zwei vorhandenen Werten, die noch gefüllt wird; längere
+  Lücken bleiben NA (mit Hinweis). Standard `Inf` = alle Lücken füllen.
+- `start`: Optional Beginn und Ende des Zeitraums (Date oder `"JJJJ-MM-TT"`); `nothing` = durch `range`
+  bestimmt.
+- `start`: Optional Beginn und Ende des Zeitraums (Date oder `"JJJJ-MM-TT"`); `nothing` = durch `range`
+  bestimmt.
+- `sources`: Benannte Quellen als Schlüsselwörter oder Paare `"name" => quelle`.
+- `kwargs...`: Benannte Quellen (Name = Spaltenname im Ergebnis): `data.frame(date, value)` mit genau einer
+  numerischen Spalte (sie wird nach dem Argument benannt), `data.frame(date, A, B, ...)` mit mehreren
+  numerischen Spalten (Spaltennamen bleiben erhalten und müssen über alle Quellen eindeutig sein) oder
+  benannte numerische Vektoren mit Datumsnamen (`["2024-01-02" = 100, ...]`).
+
+# Rückgabe
+Tabelle (RFrame) mit Spalte `date` (Klasse Date) und je einer numerischen Spalte pro Reihe, mit Attribut
+`filled` (logische Matrix Zeilen x Reihen, true = gefüllter Wert).
+
+# Details
+Mit `calendar = "day"` (Standard) entsteht ein lückenloser Kalendertags-Kalender: Wochenenden und Feiertage
+werden gefüllt, und unterschiedliche Börsenkalender (z. B. US- und EU-Feiertage) werden ohne Zeilenverlust
+vereinheitlicht. Das Ergebnis passt direkt in `simulation()`, `series_check()`, `result_analysis()` (je Reihe
+als `data.frame(date, value)`) und die Gewichts-Erzeuger wie `tactical_rules()`. `simulation()`,
+`tactical_simulation()` und `result_analysis()` werten das Attribut `filled` aus: Ein Tag, an dem keine Anlage
+der Strategie einen echten Kurs hat, gilt als aufgefüllt (kein Handel, nicht in den Risikokennzahlen) - genau
+wie Kalendertage, die `simulation()` bei Handelstagsdaten selbst per LOCF auffüllt.
+
+Je Quelle gilt: Fehlt eine Spalte `date`, wird die erste Spalte der Klasse Date bzw. POSIXct als Datum
+verwendet, sonst die erste Spalte (eine numerische erste Spalte, etwa Zeilennummern `X` aus
+`utils::write.csv()`, wird als Datum abgelehnt; eine Spalte `X` mit den Zeilennummern 1, 2, ... wird neben
+weiteren Wertspalten mit Hinweis ignoriert). Zeichenketten müssen das Format `"JJJJ-MM-TT"` haben; andere
+Formate wie `"31.12.2024"` vorher mit dem Argument `format` von `as.Date()` umwandeln, siehe Beispiel (nicht
+lesbare Daten und Texte ohne vierstellige Jahreszahl am Anfang sind ein Fehler). POSIXct-Zeitstempel zählen
+mit dem Kalendertag in ihrer eigenen Zeitzone. Übernommen werden nur numerische Spalten; andere Text-Spalten
+fallen weg, Text- oder Faktorspalten, die wie Zahlen aussehen (etwa Kurse mit Dezimalkomma, als Text
+eingelesen), sind ein Fehler. Zeilen ohne Datum werden entfernt, die Zeilen nach Datum sortiert, bei doppeltem
+Datum gilt der letzte Wert (mit Hinweis).
+
+# Beispiel
+```julia
+using SimLev, Dates
+a = RFrame("date" => Date(2024, 1, 1) .+ Day.([0, 1, 2, 5]), "value" => [100.0, 101, 102, 103])
+b = RFrame("date" => Date(2024, 1, 2) .+ Day.(0:5), "value" => 50.0 .+ (0:5))
+println(series_align(us = a, eu = b))
+```
 """
 function series_align(args...; calendar = ("day", "union", "intersect"), range = ("common", "all"),
                       fill = ("locf", "linear", "none"), max_gap = Inf, start = nothing, end_ = nothing,
@@ -647,8 +699,54 @@ end
 """
     series_check(data; columns = nothing, jump = 20, stale = 10, revert = 0.8)
 
-Kursreihen prüfen: Prüfbericht (Klasse `SimLevDataCheck`) mit `summary`,
-`issues` und `settings`. Die Daten werden nicht geändert.
+Kursreihen prüfen.
+
+Erstellt einen Prüfbericht für eigene Kursreihen, bevor sie in `simulation()` oder die Analysefunktionen
+gehen. Erwartet wird ein Tabelle (RFrame) mit Spalte `date` und Kursspalten (Niveaus, keine Renditen), z. B.
+aus `series_align()`. Gemeldet werden: fehlende oder nicht lesbare Daten (z. B. Leerzeile am Dateiende),
+doppelte oder unsortierte Daten, Kalenderlücken über 5 Tage, fehlende Werte innerhalb der Laufzeit, Sprünge,
+wahrscheinliche Splits (Sprung nahe einem ganzzahligen Verhältnis 2:1 bis 10:1 bzw. 1:2 bis 1:10, ohne
+Rücklauf), Spikes (Sprung mit sofortigem Rücklauf, typischer Datenfehler), Werte <= 0 und stehende Kurse. Die
+Funktion ändert die Daten nicht.
+
+# Argumente
+- `data`: Tabelle (RFrame) mit Spalte `date` (Date oder `"JJJJ-MM-TT"`) und Kursspalten.
+- `columns`: Zeichenvektor der zu prüfenden Spalten (Standard `nothing` = alle numerischen Spalten außer
+  `date`).
+- `jump`: Sprungschwelle in Prozent (20 = 20 %): Veränderung zum vorigen vorhandenen Wert, ab der ein Sprung
+  gemeldet wird.
+- `stale`: Mindestlänge in Zeilen einer Folge unveränderter Werte, die als stehender Kurs gemeldet wird (bei
+  Kalendertagsdaten sind 2-4 Zeilen über Wochenenden und Feiertage normal).
+- `revert`: Rücklauf am Folgetag als Anteil des Sprungs (0.8 = 80 %, gemessen in Log-Renditen), ab dem ein
+  Sprung als Spike gilt.
+
+# Rückgabe
+Objekt der Klasse `SimLevDataCheck`, eine Liste mit
+
+- summary: Tabelle (RFrame) je Spalte: `column`, `start`, `end` (erstes/letztes Datum mit Wert), `n` (Werte),
+  `missing` (NA innerhalb der Laufzeit), `jumps` (alle Sprünge über `jump`, einschließlich Spikes und Splits),
+  `spikes`, `splits`, `stale_max` (längste Folge gleicher Werte in Zeilen), `nonpositive` (Anzahl Werte <= 0).
+- issues: Tabelle (RFrame) je Fund: `column`, `date`, `type` (Art des Funds), `value` (Kurs) und `info` (bei
+  Sprüngen die Veränderung in Prozent, bei Kalenderlücken die Tage, bei stehenden Kursen die Zeilen).
+- settings: benannter Vektor `jump`, `stale`, `revert`.
+
+`print()` zeigt die Zusammenfassung und die ersten `max_issues` (Standard 25) Funde.
+
+# Details
+Sprünge werden zwischen aufeinanderfolgenden vorhandenen Werten (NA übersprungen) gemessen, also je Zeile,
+nicht je Kalendertag, und nur zwischen zwei positiven Werten; Werte <= 0 (z. B. eine Zinsreihe mit negativen
+Sätzen) erscheinen nur als "Wert <= 0".
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 400
+d = RFrame("date" => Date(2020, 1, 1) .+ Day.(0:n-1))
+d["A"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+d["A"][300:end] ./= 2               # Split 2:1
+println(series_check(d)["summary"])
+```
 """
 function series_check(data; columns = nothing, jump = 20, stale = 10, revert = 0.8)
     data = SimLev.as_rframe(data)
@@ -802,10 +900,50 @@ end
     series_align_macro(data, macro_; name = "macro", lag = 0, lag_unit = "day",
                 transform = "level", periods = nothing)
 
-Makroreihen mit Veröffentlichungsverzug auf den Tageskalender legen: Ein
-Wert gilt ab `Referenzdatum + lag` bis zum nächsten verfügbaren Wert. Bei
-einem Datumsvektor als `data` ein Float64-Vektor gleicher Länge, sonst eine
-Kopie von `data` mit neuer Spalte `name`.
+Makroreihen mit Veröffentlichungsverzug auf den Tageskalender legen.
+
+Ordnet niederfrequente Reihen (Inflation, Leitzins, Zinsstruktur, Arbeitslosigkeit, ...) einem Tageskalender
+zu, und zwar so, wie sie zum jeweiligen Tag bekannt waren: Ein Wert für den Referenzmonat Januar, der Mitte
+Februar veröffentlicht wird, gilt erst ab Mitte Februar. Ohne diesen Verzug enthalten bedingte Analysen und
+Signale Informationen aus der Zukunft.
+
+# Argumente
+- `data`: Datumsvektor oder Tabelle (RFrame) mit Spalte `date` (z. B. aus `series_align()`).
+- `macro_`: `data.frame(date, value)` (es zählt die erste numerische Spalte; fehlt `date`, gilt die erste
+  Spalte als Datum) oder benannter numerischer Vektor mit Datumsnamen. `date` ist der Referenzzeitpunkt (z. B.
+  Monatsanfang des Referenzmonats).
+- `name`: Name der neuen Spalte, wenn `data` ein Tabelle (RFrame) ist (Standard `"macro"`).
+- `lag`: Veröffentlichungsverzug als Zahl in Einheiten von `lag_unit` (Standard 0 = ab dem Referenzdatum
+  bekannt).
+- `lag_unit`: Einheit von `lag`: `"day"` (Standard; Kalendertage) oder `"month"` (Kalendermonate; der Tag wird
+  auf das Monatsende begrenzt, z. B. 31.01. + 1 Monat = 29.02. bzw. 28.02.).
+- `transform`: `"level"` (Standard; Wert unverändert), `"yoy"` (Veränderung gegen Vorjahr in Prozent, 2 = 2
+  %), `"mom"` (gegen Vorperiode in Prozent), `"diff"` (absolute Differenz zur Vorperiode, z. B. Zinsänderung
+  in Prozentpunkten) oder `"yoy_diff"` (absolute Differenz zum Vorjahr).
+- `periods`: Perioden je Jahr der Makroreihe, bestimmt den Abstand für `"yoy"` und `"yoy_diff"`. Standard
+  `nothing` = aus dem mittleren Datumsabstand geschätzt (1, 4, 12, 52 oder 252, z. B. 12 für Monatsdaten). Bei
+  1, 4 und 12 wird der Bezugswert per Datum gesucht (Vorjahr bzw. Vormonat/-quartal desselben Kalenders; fehlt
+  er, etwa bei einem fehlenden Monat, ist das Ergebnis NA), sonst per Zeile (`periods` bzw. eine Zeile
+  zurück).
+
+# Rückgabe
+Bei Datumsvektor ein numerischer Vektor gleicher Länge, sonst `data` mit neuer Spalte `name` (NA vor dem
+ersten bekannten Wert).
+
+# Details
+Ein Wert gilt ab `Referenzdatum + lag` bis zum nächsten verfügbaren Wert (Stufenfunktion); davor ist das
+Ergebnis NA. Die Umrechnung (`transform`) erfolgt auf der Makroreihe selbst, vor der Zuordnung. Das Ergebnis
+eignet sich z. B. für Bedingungen in `tactical_rules()` (`"inflation > 3"`) oder als Preisindex für
+`series_deflate()`.
+
+# Beispiel
+```julia
+using SimLev, Dates
+cpi = RFrame("date" => [Date(2020, 1, 1) + Month(k) for k in 0:35], "value" => 100 .* 1.002 .^ (0:35))
+d = RFrame("date" => Date(2021, 1, 1) .+ Day.(0:399))
+d = series_align_macro(d, cpi; name = "inflation", lag = 45, transform = "yoy")
+println(d["inflation"][end])
+```
 """
 function series_align_macro(data, macro_; name = "macro", lag = 0, lag_unit = ("day", "month"),
                      transform = ("level", "yoy", "mom", "diff", "yoy_diff"), periods = nothing)
@@ -877,10 +1015,35 @@ end
 """
     series_convert_currency(data, columns, fx; method = "divide", suffix = nothing)
 
-Währung umrechnen: je Zeile Kurs durch den Wechselkurs teilen (`"divide"`)
-oder mit ihm multiplizieren (`"multiply"`). `fx` als Spaltenname,
-`RFrame(date, value)` (Stufenfunktion), benannter Vektor, Vektor der Länge
-`nrow(data)` oder Skalar.
+Währung umrechnen.
+
+Rechnet Kursspalten eines Tabelle (RFrame) tageweise mit einem Wechselkurs in eine andere Währung um, z. B.
+einen US-Index in USD nach EUR, bevor er in `simulation()` geht. Erwartet wird ein Tabelle (RFrame) mit Spalte
+`date` und Kursniveaus (z. B. aus `series_align()`). Je Zeile wird der Kurs durch den Wechselkurs geteilt
+(`"divide"`) oder mit ihm multipliziert (`"multiply"`); eine Kurssicherung wird nicht abgebildet.
+
+# Argumente
+- `data`: Tabelle (RFrame) mit Spalte `date` und den Kursspalten.
+- `columns`: Zeichenvektor der umzurechnenden Spalten.
+- `fx`: Wechselkurs als Niveau: Spaltenname in `data` (NA per LOCF gefüllt), `data.frame(date, value)`
+  (Stufenfunktion: Wert gilt ab seinem Datum bis zum nächsten; vor dem ersten Datum gilt der erste Wert),
+  benannter Vektor mit Datumsnamen, Vektor der Länge `nrow(data)` oder Skalar (fester Kurs). Alle Werte müssen
+  positiv sein.
+- `method`: `"divide"` (Standard; Wechselkurs als Fremdwährung je Zielwährung, z. B. USD-Index mit EURUSD =
+  USD je EUR in EUR umrechnen) oder `"multiply"` (Wechselkurs als Zielwährung je Fremdwährung).
+- `suffix`: Endung für neue Spalten (z. B. `"_eur"`); Standard `nothing` = die Spalten in `columns` werden
+  überschrieben.
+
+# Rückgabe
+`data` mit umgerechneten (bzw. zusätzlichen) Spalten.
+
+# Beispiel
+```julia
+using SimLev, Dates
+d = RFrame("date" => Date(2024, 1, 1) .+ Day.(0:4), "sp500_usd" => [4700.0, 4710, 4690, 4720, 4730],
+           "eurusd" => [1.10, 1.11, 1.10, 1.09, 1.10])
+println(series_convert_currency(d, "sp500_usd", "eurusd"; suffix = "_eur"))
+```
 """
 function series_convert_currency(data, columns, fx; method = ("divide", "multiply"), suffix = nothing)
     data = SimLev.as_rframe(data)
@@ -909,8 +1072,42 @@ _rep_len(x, n) = (v = x isa AbstractVector ? x : [x]; n == 0 ? Float64[] : Float
     index_total_return(price; dividends = nothing, yield = nothing, withholding = 0,
                        dates = nothing, start = nothing)
 
-Total-Return-Index aus Kursindex und Ausschüttungen:
+Total-Return-Index aus Kursindex und Ausschüttungen.
+
+r_t = fracP_t + D_t (1 - w)P_t-1 - 1 + (y_t)/(100)(1-w)(Δ t)/(365.25) mit Ausschüttung je Anteil D_t am
+Ex-Tag, Quellensteuer w und alternativ laufend aufgezinster Dividendenrendite y_t (Prozent p. a.). Δ t ist der
+Abstand zur Vorzeile in Kalendertagen.
+
+# Argumente
+- `price`: Kursreihe als numerischer Vektor (Niveaus); NA werden per LOCF gefüllt.
+- `dividends`: Ausschüttung je Anteil in Währungseinheiten am Ex-Tag (numerischer Vektor gleicher Länge, 0
+  oder NA an Tagen ohne Ausschüttung). Standard `nothing` = keine.
+- `yield`: Dividendenrendite in Prozent p. a. (2 = 2 %; Skalar oder Vektor gleicher Länge), anteilig je Zeile
+  aufgezinst. Standard `nothing` = keine.
+- `withholding`: Quellensteuer in Prozent (15 = 15 %), mindert `dividends` und `yield`. Standard 0.
+- `dates`: Datumsvektor gleicher Länge für Δ t, aufsteigend sortiert wie `price` (sonst Fehler); Standard
+  `nothing` = 1 Tag je Zeile (nur für `yield` von Bedeutung).
+- `start`: Startwert des Index (Standard `nothing` = erster Kurs).
+
+# Rückgabe
+Numerischer Indexvektor gleicher Länge wie `price`.
+
+# Details
+Wandelt einen Kursindex (Preisindex ohne Ausschüttungen) in einen Total-Return-Index um (Ausschüttungen nach
+Quellensteuer reinvestiert). Arbeitet auf Vektoren; das Ergebnis kann direkt als neue Kursspalte in den
+Tabelle (RFrame) für `simulation()` geschrieben werden. Werden `dividends` und `yield` zugleich angegeben,
+wirken beide.
+
+# Total-Return-Index aus Kursindex und Ausschüttungen
 `r_t = (P_t + D_t (1 - w)) / P_{t-1} - 1 + y_t/100 (1-w) Δt/365.25`.
+
+# Beispiel
+```julia
+using SimLev
+p = [100, 101, 99, 100, 102, 103]
+div = [0, 0, 0, 2, 0, 0]             # 2 je Anteil am Ex-Tag (Zeile 4)
+println(index_total_return(p; dividends = div, withholding = 15))
+```
 """
 function index_total_return(price; dividends = nothing, yield = nothing, yield_ = nothing, withholding = 0,
                             dates = nothing, start = nothing)
@@ -938,7 +1135,7 @@ end
 """
     _cpi_level(cpi, data, dts, what)
 
-Preisindex-Niveau je Zeile; vor dem ersten bekannten Wert NA (Port von
+Preisindex-Niveau je Zeile; vor dem ersten bekannten Wert NA (R:
 `.cpi_level`). `dts`: Datumswerte der Zeilen (Date-Vektor oder Float64-Tage).
 """
 function _cpi_level(cpi, data, dts, what)
@@ -973,7 +1170,37 @@ end
 """
     series_deflate(data, columns, cpi; base_date = nothing, suffix = "_real")
 
-Reale Werte über einen Preisindex: `real_t = nominal_t * cpi_b / cpi_t`.
+Reale Werte über einen Preisindex: real_t = nominal_t * cpi_b / cpi_t.
+
+Rechnet nominale Kurs- oder Wertspalten in reale Werte (Kaufkraft des Bezugsdatums) um: real_t = nominal_t ·
+cpi_b / cpi_t mit der Bezugszeile b. Erwartet wird ein Tabelle (RFrame) mit Spalte `date` und einem Preisindex
+als Niveau (z. B. Verbraucherpreisindex), keine Inflationsrate. Die realen Spalten kommen als neue Spalten
+hinzu und können wie Kursspalten in `simulation()` oder `result_analysis()` verwendet werden; für die reale
+Auswertung fertiger Ergebnisse hat `result_analysis()` ein eigenes Argument `inflation`.
+
+# Argumente
+- `data`: Tabelle (RFrame) mit Spalte `date` und den Spalten aus `columns`.
+- `columns`: Zeichenvektor der Spalten, die deflationiert werden.
+- `cpi`: Preisindex-Niveau: Spaltenname in `data` (NA per LOCF gefüllt; z. B. mit `series_align_macro()` und
+  Veröffentlichungsverzug vorbereitet), `data.frame(date, value)` (Stufenfunktion: Wert gilt ab seinem Datum),
+  benannter Vektor mit Datumsnamen oder Vektor der Länge `nrow(data)`. Vor dem ersten bekannten Wert wird
+  nicht zurückgefüllt: Die realen Werte dieser Zeilen sind NA (mit Hinweis).
+- `base_date`: Bezugsdatum, an dem real = nominal (Date oder `"JJJJ-MM-TT"`; verwendet wird die Zeile mit dem
+  nächstgelegenen Datum; dort muss der Preisindex bekannt sein). Standard `nothing` = erste Zeile mit
+  bekanntem Preisindex.
+- `suffix`: Endung für die neuen Spalten (Standard `"_real"`).
+
+# Rückgabe
+`data` mit zusätzlichen realen Spalten `paste0(columns, suffix)`.
+
+# Beispiel
+```julia
+using SimLev, Dates
+cpi = RFrame("date" => [Date(2020, 1, 1) + Month(k) for k in 0:35], "value" => 100 .* 1.003 .^ (0:35))
+d = RFrame("date" => Date(2021, 1, 1) .+ Day.(0:399), "depot" => 10000 .* 1.0002 .^ (0:399))
+d = series_align_macro(d, cpi; name = "cpi", lag = 1, lag_unit = "month")
+println(series_deflate(d, "depot", "cpi")["depot_real"][end])
+```
 """
 function series_deflate(data, columns, cpi; base_date = nothing, suffix = "_real")
     data = SimLev.as_rframe(data)
@@ -1007,10 +1234,37 @@ end
     series_splice(; dates = nothing, series...)
     series_splice("name" => reihe, ...; dates = nothing)
 
-Reihen verketten (Proxy → Index → Fonds); die erste Reihe hat Vorrang.
-Mindestens zwei benannte Reihen in Prioritätsreihenfolge, alle als
-numerische Vektoren gleicher Länge (dann `dates` angeben) oder alle als
-`RFrame(date, value)`. Liefert `RFrame(date, value, source)`.
+Reihen verketten (Proxy -> Index -> Fonds).
+
+Verbindet mehrere Reihen renditebasiert zu einer langen Historie. Die erste Reihe hat Vorrang: Wo sie
+vorliegt, wird sie unverändert übernommen. Davor (und in ihren Lücken) werden die Tagesrenditen der nächsten
+verfügbaren Reihe verkettet, usw. Typisch: Fonds, dann zurückgerechneter Fonds aus `backcast()`, dann ein
+Proxy-Index.
+
+# Argumente
+- `dates`: Datumsvektor, wenn Vektoren übergeben werden (sonst ignoriert).
+- `series`: Benannte Reihen als Schlüsselwörter oder Paare `"name" => reihe`.
+
+# Rückgabe
+Tabelle (RFrame) mit `date`, `value` (verkettete Reihe) und `source`: Name der Reihe, deren Wert (erste Reihe)
+bzw. Rendite vom Vortag auf diesen Tag verwendet wurde (NA, wo keine Rendite vorliegt, z. B. in der ersten
+Zeile).
+
+# Details
+Alle Reihen müssen Niveaus (Kurse, Indexstände) sein, keine Renditen; das Niveau der Kette richtet sich nach
+der ersten Reihe. Vor dem Start der ersten Reihe wird rückwärts verkettet, solange Renditen vorliegen. Das
+Ergebnis lässt sich als Kursspalte in `simulation()` oder als `data.frame(date, value)` in `result_analysis()`
+verwenden.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+dts = Date(2010, 1, 1) .+ Day.(0:1499)
+v = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(MersenneTwister(1), 1500))
+k = dts .>= Date(2012, 1, 1)
+lang = series_splice(fonds = RFrame("date" => dts[k], "value" => 0.5 .* v[k]), proxy = RFrame("date" => dts, "value" => v))
+println(count(isequal("proxy"), lang["source"]))
+```
 """
 function series_splice(args...; dates = nothing, series...)
     src = _named_sources(args, series)
@@ -1088,22 +1342,38 @@ _rlen(v) = v === nothing ? 0 : v isa Union{AbstractVector,NamedTuple,AbstractDic
 """
     strategy_from_weights(weights; kwargs...)
 
-Strategie aus einem benannten Gewichtsvektor (`RVector`, Paare, NamedTuple
-oder Dict); jedes Asset erhält `share = Gewicht`. Weitere Argumente
-gehen an `asset_config`: ein einzelner Wert gilt für alle Assets, benannte
-Vektoren werden je Asset zugeordnet. Ausnahme `wrapper` (Fonds-Wrapper aus
-`wrapper_config()`): ein `SimLevWrapperConfig` gilt für alle Assets, eine
-benannte Liste (NamedTuple, `Dict`, `RList`, Paare) Asset → `SimLevWrapperConfig`
-je Asset (Assets ohne Eintrag bleiben ohne Wrapper). Unbekannte Namen,
-Einträge, die kein `SimLevWrapperConfig` sind, und `wrapper` mit
-`trading = "signal"` für dasselbe Asset sind ein Fehler.
+Strategie aus Gewichten.
 
+Baut aus einem benannten Gewichtsvektor eine statische Strategie für `simulation()`, ohne jedes Asset einzeln
+mit `asset_config()` anlegen zu müssen. Die Namen müssen den Kursspalten des Datensatzes entsprechen (z. B.
+aus `series_align()`). Jedes Asset erhält `share = Gewicht`; alle weiteren Einstellungen kommen aus `...` oder
+den Standardwerten von `asset_config()` (ETF, Buy and Hold, ohne Spread).
+
+# Argumente
+- `weights`: Benannter numerischer Vektor Spaltenname -> Gewicht als Anteil (0.6 = 60 %), z. B. `(world = 0.6,
+  bonds = 0.4)`. Alle Gewichte müssen positiv sein (Assets mit Gewicht 0 weglassen), die Namen eindeutig, und
+  die Summe muss 1 sein (wie in `simulation()`; sonst Fehler schon hier).
+- `kwargs...`: Weitere Argumente für `asset_config()` (z. B. `asset_class`, `spread` in Prozent,
+  `partial_exemption` in Prozent). Ein unbenannter einzelner Wert gilt für alle Assets; benannte Vektoren
+  werden je Asset zugeordnet, auch mit einem einzigen Element wie `partial_exemption = (aktien = 30,)`
+  (fehlende Assets behalten den Standardwert, Namen ohne passendes Asset werden ignoriert). Nur ein einzelner
+  benannter Wert, dessen Name kein Asset ist, gilt für alle Assets.
+
+  `wrapper` (Fonds-Wrapper, `wrapper_config`) ist eine Ausnahme, weil ein `SimLevWrapperConfig` selbst eine
+  benannte Liste ist: Ein einzelnes `SimLevWrapperConfig` gilt für alle Assets; eine benannte Liste solcher
+  Objekte (Name = Asset, z. B. `wrapper = (world = w,)`) gilt je Asset, Assets ohne Eintrag bleiben ohne
+  Wrapper. Fehler: Namen, die kein Asset sind, Elemente, die kein `SimLevWrapperConfig` sind, eine Liste ohne
+  Namen, und `wrapper` zusammen mit `trading = "signal"` für dasselbe Asset (die Meldung nennt das Asset).
+
+# Rückgabe
+Objekt der Klasse `strategy` (wie `create_strategy()`).
+
+# Beispiel
 ```julia
-w = wrapper_config(create_strategy("A" => asset_config("etf", "bnh", 0.6), "B" => asset_config("etf", "bnh", 0.4));
-                   costs = funds_costs(0.5, 0))
-st = strategy_from_weights(named("fonds" => 0.8, "gold" => 0.2);
-                           asset_class = named("fonds" => "certificate", "gold" => "etc"),
-                           wrapper = (fonds = w,))          # nur "fonds" ist ein Wrapper
+using SimLev
+st = strategy_from_weights((aktien = 0.7, gold = 0.3); asset_class = (aktien = "etf", gold = "etc"),
+                           partial_exemption = (aktien = 30, gold = 0))
+println(st)
 ```
 """
 function strategy_from_weights(weights; kwargs...)
@@ -1118,7 +1388,7 @@ function strategy_from_weights(weights; kwargs...)
     (any(isnan, w) || any(<=(0), w)) && error("Gewichte müssen positiv sein (Assets mit Gewicht 0 weglassen).")
     s = SimLev.r_sum(w)
     abs(s - 1) > 1e-6 && error(_sprintf("Gewichte summieren sich zu %.4f; simulation() verlangt die Summe 1 (Anteile, 0.6 = 60 %%).", s))
-    # Fonds-Wrapper (Etappe 8.0): ein SimLevWrapperConfig gilt für alle Assets, eine benannte Liste je Asset
+    # Fonds-Wrapper: ein SimLevWrapperConfig gilt für alle Assets, eine benannte Liste je Asset
     wmap = Dict{String,Any}()
     if haskey(kwargs, :wrapper)
         wmap = _sfw_wrappers(kwargs[:wrapper], nms)
@@ -1161,7 +1431,7 @@ end
 """
     _sfw_wrappers(wv, assets)
 
-Argument `wrapper` von `strategy_from_weights` je Asset (R: `.sfw_wrappers`, Etappe 8.0): `nothing` oder leer →
+Argument `wrapper` von `strategy_from_weights` je Asset (R: `.sfw_wrappers`): `nothing` oder leer →
 ohne Wrapper; ein `SimLevWrapperConfig` → für alle Assets; eine benannte Liste (NamedTuple, `Dict`, `RList`,
 Paare) Asset → `SimLevWrapperConfig` → je Asset, Assets ohne Eintrag ohne Wrapper. Sonst Fehler (Reihenfolge:
 Art, Namen vorhanden, doppelte Namen, unbekannte Namen, Elemente). Ergebnis: `Dict` Asset → Wrapper.
@@ -1204,11 +1474,44 @@ const _PORTFOLIO_TEMPLATES = [
 """
     portfolio_template(name = nothing; map = nothing, kwargs...)
 
-Bekannte statische Allokationen mit Rollen-Namen; `map` (benannter Vektor
-Rolle → Spaltenname) ordnet die Rollen den Spalten zu. Weitere Argumente
-gehen an [`strategy_from_weights`](@ref). Ohne `name` (Standard `nothing`)
-liefert die Funktion alle Vorlagen als `RFrame(template, role, weight)`;
-`map` und weitere Argumente sind dann nicht erlaubt.
+Portfolio-Vorlagen.
+
+Bekannte statische Allokationen mit Rollen-Namen (z. B. `stocks`, `long_bonds`, `gold`). Über `map` werden die
+Rollen den Spalten des Datensatzes zugeordnet. Die Vorlagen sind Ausgangspunkte zum Vergleich, keine
+Empfehlungen.
+
+# Argumente
+- `name`: Name der Vorlage als Zeichenkette (siehe Tabelle). Ohne `name` (Standard `nothing`) liefert
+  `portfolio_template()` die Liste aller Vorlagen; `map` und `...` sind dann nicht erlaubt.
+- `map`: Benannter Zeichenvektor Rolle -> Spaltenname im Datensatz, z. B. `(stocks = "msci_world",)`. Standard
+  `nothing`; Rollen ohne Eintrag behalten ihren Namen und müssen dann als Spalte vorliegen. Unbekannte Rollen
+  und mehrere Rollen auf derselben Spalte sind ein Fehler.
+- `kwargs...`: Weitere Argumente für `strategy_from_weights()` bzw. `asset_config()` (z. B. `spread`,
+  `partial_exemption`, `wrapper`). Benannte Werte je Asset, auch die Namen einer `wrapper`-Liste, beziehen
+  sich auf die Namen nach `map` (Spaltennamen); Rollen ohne `map`-Eintrag behalten ihren Namen.
+
+# Rückgabe
+Mit `name`: Objekt der Klasse `strategy` für `simulation()`; ohne `name`: Tabelle (RFrame) aller Vorlagen mit
+`template`, `role` und `weight` (Anteil, 0.6 = 60 %).
+
+# Details
+- `60_40` | Aktien 60, Anleihen 40
+- `permanent` | Permanent Portfolio (H. Browne): je 25 Aktien, lange Anleihen, Geldmarkt, Gold
+- `all_weather` | vereinfachtes All Weather: 30/40/15/7.5/7.5
+- `golden_butterfly` | je 20 Aktien, Small Value, lange und kurze Anleihen, Gold
+- `three_fund` | Aktien Heimat 48, international 32, Anleihen 20
+- `hfea` | 55 3x-Aktien, 45 3x-lange Anleihen
+- `stocks_gold` | Aktien 80, Gold 20
+
+Gewichte in der Tabelle in Prozent; in der Strategie als Anteile.
+
+# Beispiel
+```julia
+using SimLev
+st = portfolio_template("permanent"; map = (stocks = "msci_world", long_bonds = "bund_10y", cash = "geldmarkt",
+                                           gold = "gold_eur"))
+println(st)
+```
 """
 function portfolio_template(name_pos = nothing; name = name_pos, map = nothing, kwargs...)
     if name === nothing

@@ -1,5 +1,5 @@
 /* core/slc_rbase_sort.c – Ordnung, Rang, partielle Sortierung, Quantile, tabulate, findInterval mit
- * R-Regeln (SimLev core, N8)
+ * R-Regeln (SimLev core)
  * Verfahren:  - order: stabile Sortierung (Mischsortieren, Knuth TAOCP Bd. 3, 5.2.4) mit
  *               lexikographischem Vergleich der Schlüssel; -0 und +0 sind gleich, NA und NaN fehlend
  *               (vorn, hinten oder entfernt); Gleichstände in der ursprünglichen Reihenfolge, auch

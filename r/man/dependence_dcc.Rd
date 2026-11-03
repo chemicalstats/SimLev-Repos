@@ -41,7 +41,7 @@ C-Bibliothek von SimLev). Die bedingte Korrelation ist
 Die Schaetzung ist deterministisch: Den frueheren zufaelligen Rueckfall der
 GARCH-Stufe (gosolnp mit Startwert aus der Uhrzeit) gibt es nicht mehr; die
 GARCH-Stufe meldet \code{method = "ml"} statt \code{"rugarch"}/\code{"optim"}
-(Etappe 9.6b).
+(seit 1.0.0).
 }
 \examples{
 set.seed(1); n <- 500

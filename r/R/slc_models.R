@@ -1,18 +1,18 @@
-# Huellen der Modelle der C-Bibliothek slc (SimLev core, Etappe 9.4): GARCH/GJR(1,1), GPD,
+# Huellen der Modelle der C-Bibliothek slc (SimLev core): GARCH/GJR(1,1), GPD,
 # DCC(1,1), MS-GARCH und univariates HMM, Bootstrap-Kerne. Die Rechnung steht in
 # src/slc_{garch,gpd,dcc,msgarch,boot}.c (Kopien von core/, core/sync.py), die .Call-Huellen
 # in src/slc_r_models.c (Registrierung in src/init.c, in R als C_sl_*).
 #
-# Seit Etappe 9.6a ziehen die Bootstrap-Verfahren ueber .sl_boot_*(..., stream) mit dem Strom je
+# Seit 1.0.0 ziehen die Bootstrap-Verfahren ueber .sl_boot_*(..., stream) mit dem Strom je
 # Pfad (R/bootstrap.R, .generate_returns) bzw. dem Hauptstrom (sharpe_test, dependence_analysis
-# u. a.). Seit Etappe 9.6b rufen .fit_garch11, .fit_tail, dependence_dcc und .ms_garch_fit die
+# u. a.). Seit 1.0.0 rufen .fit_garch11, .fit_tail, dependence_dcc und .ms_garch_fit die
 # Huellen hier auf (sie geben dieselben Ergebnisstrukturen zurueck wie die frueheren Wege):
-#   .sl_fit_garch11(e, gjr, quiet)  wie .fit_garch11 (Methode "ml" statt "rugarch"/"optim", F10)
+#   .sl_fit_garch11(e, gjr, quiet)  wie .fit_garch11 (Methode "ml" statt "rugarch"/"optim")
 #   .sl_gpd_fit(exc)                ersetzt .evd_fpot(exc, threshold = 0, std.err = FALSE)
 #   .sl_dcc_fit(Z, Qbar)            ersetzt optim(Nelder-Mead) in dependence_dcc
-#   .sl_backcast_fit(prob, ...)     N5: Fit mehrerer Parameter in backcast_fit ganz in C
-#   .sl_ms_garch_fit(y, K, model, cores = 1)   wie .ms_garch_fit (ganz in C; N6: cores Threads)
-#   .sl_boot_*(..., stream)         wie .boot_* mit Zug aus einem SimLev-Strom (Entwurf C.5)
+#   .sl_backcast_fit(prob, ...)     Fit mehrerer Parameter in backcast_fit ganz in C
+#   .sl_ms_garch_fit(y, K, model, cores = 1)   wie .ms_garch_fit (ganz in C; cores Threads)
+#   .sl_boot_*(..., stream)         wie .boot_* mit Zug aus einem SimLev-Strom
 
 # ── GARCH(1,1) / GJR-GARCH(1,1) ──────────────────────────────────────────────
 
@@ -28,9 +28,9 @@
   .Call(C_sl_garch11_nll, as.double(e), as.double(rep_len(c(par, 0), 5)), as.logical(gjr),
         if (is.null(s2_init)) NaN else as.double(s2_init))
 
-# N3: GJR-NLL und analytischer Gradient an theta = c(mu, log omega, a, g, b) (Vorwaertsrekursion der
+# GJR-NLL und analytischer Gradient an theta = c(mu, log omega, a, g, b) (Vorwaertsrekursion der
 # Ableitungen von s2, wie im Fit); list(value, gradient), nicht endlich: value = Inf, gradient = NaN.
-# N4: auch sGARCH (gjr = FALSE, theta = c(mu, log omega, a, b)).
+# auch sGARCH (gjr = FALSE, theta = c(mu, log omega, a, b)).
 .sl_garch11_grad <- function(theta, e, gjr = TRUE, s2_init = NULL)
   .Call(C_sl_garch11_grad, as.double(e), as.double(theta), as.logical(gjr),
         if (is.null(s2_init)) NaN else as.double(s2_init))
@@ -73,11 +73,11 @@
 .sl_dcc_filter <- function(Z, a, b, Qbar, keep)
   .Call(C_sl_dcc_filter, .sl_mmat(Z), as.double(a), as.double(b), .sl_mmat(Qbar), as.logical(keep))
 
-# Schaetzung von (a, b) ganz in C; list(a, b, nll, convergence, par). N5: BFGS mit analytischem
+# Schaetzung von (a, b) ganz in C; list(a, b, nll, convergence, par). BFGS mit analytischem
 # Gradienten nach grobem Nelder-Mead-Vorlauf (bis 1.1.0 Nelder-Mead wie dependence_dcc)
 .sl_dcc_fit <- function(Z, Qbar) .Call(C_sl_dcc_fit, .sl_mmat(Z), .sl_mmat(Qbar))
 
-# ── Backcast (N5) ────────────────────────────────────────────────────────────
+# ── Backcast ────────────────────────────────────────────────────────────
 
 # Zielfunktion von backcast_fit in C: prob = .bc_cprob(...) (r/R/backcast.R), par = c(drag, spread,
 # beta), fit = Indizes 1 drag, 2 spread, 3 beta; list(value, gradient) (gradient nur bei grad = TRUE)
@@ -109,13 +109,13 @@
 .sl_ms_garch_nll <- function(theta, y, K, model, h1 = NULL)
   .Call(C_sl_ms_garch_nll, as.double(y), as.double(theta), as.integer(K), .sl_ms_gjr(model), .sl_h1(h1))
 
-# N1: NLL und analytischer Gradient an theta (vorwaerts mitdifferenzierter Hamilton-Filter);
+# NLL und analytischer Gradient an theta (vorwaerts mitdifferenzierter Hamilton-Filter);
 # list(value, gradient), nicht endliche Likelihood: value = Inf, gradient = NaN
 .sl_ms_garch_grad <- function(theta, y, K, model, h1 = NULL)
   .Call(C_sl_ms_garch_grad, as.double(y), as.double(theta), as.integer(K), .sl_ms_gjr(model), .sl_h1(h1))
 
 # Startpunkte wie .ms_garch_fit (Spalten: HMM-Start, falls gelungen, dann Rang-Start); all = TRUE:
-# danach die uebrigen Rasterpunkte beider Familien (so rechnet .sl_ms_garch_fit, 9.4; N1: bei
+# danach die uebrigen Rasterpunkte beider Familien (so rechnet .sl_ms_garch_fit; bei
 # gjrGARCH 20 statt 12 Spalten)
 .sl_ms_garch_starts <- function(y, K, model, h1 = NULL, all = FALSE)
   .Call(C_sl_ms_garch_starts, as.double(y), as.integer(K), .sl_ms_gjr(model), .sl_h1(h1), as.logical(all))
@@ -125,8 +125,8 @@
   .Call(C_sl_ms_garch_fitstarts, as.double(y), as.integer(K), .sl_ms_gjr(model), .sl_mmat(starts), .sl_h1(h1))
 
 #' MS-GARCH-Modell wie .ms_garch_fit, ganz in C (Starts, BFGS, Sortierung, Viterbi); BFGS laeuft von
-#' allen Rasterpunkten der beiden Startfamilien (die zwei bisherigen zuerst; sGARCH 12, gjrGARCH seit
-#' N1 20), seit N1 mit analytischem Gradienten; N6: die Starts auf bis zu \code{cores} Threads verteilt
+#' allen Rasterpunkten der beiden Startfamilien (die zwei bisherigen zuerst; sGARCH 12, gjrGARCH
+#' 20), mit analytischem Gradienten; die Starts auf bis zu \code{cores} Threads verteilt
 #' (Ergebnis unabhaengig davon; ungueltig oder < 1: 1)
 #' @keywords internal
 #' @noRd
@@ -135,7 +135,7 @@
   .Call(C_sl_ms_garch_estimate, as.double(y), as.integer(K), model == "gjrGARCH", .sl_threads(cores))
 }
 
-# N6: Zahl der Threads aus cores (wie bootstrap(): ganze Zahl; NA, ungueltig oder < 1 -> 1)
+# Zahl der Threads aus cores (wie bootstrap(): ganze Zahl; NA, ungueltig oder < 1 -> 1)
 .sl_threads <- function(cores) {
   nt <- suppressWarnings(as.integer(cores[1L]))
   if (length(nt) != 1L || is.na(nt) || nt < 1L) 1L else nt
@@ -147,7 +147,7 @@
 
 .sl_hmm_viterbi <- function(lB, lA, lp0) .Call(C_sl_hmm_viterbi, .sl_mmat(lB), .sl_mmat(lA), as.double(lp0))
 
-# ── Bootstrap-Kerne (Zufall aus stream bzw. dem globalen Zustand, Entwurf C.5) ──
+# ── Bootstrap-Kerne (Zufall aus stream bzw. dem globalen Zustand) ──
 
 .sl_boot_idx_iid <- function(n_src, n_out, stream = NULL)
   .sl_draw(C_sl_boot_idx_iid, stream, as.integer(n_src), as.integer(n_out))

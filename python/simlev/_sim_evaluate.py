@@ -1,7 +1,7 @@
 """Phase 6 von ``simulation()``: Auswertung und Ergebnisobjekt (nachgebildet aus ``r/R/sim_evaluate.R``; Julia:
 ``sim_evaluate.jl``).
 
-Seit E17 Stufe 3 rechnet der C++-Kern ``core/evaluate_core_impl.h`` (``_ext.sim_evaluate``) Wertreihen, Renditen,
+rechnet der C++-Kern ``core/evaluate_core_impl.h`` (``_ext.sim_evaluate``) Wertreihen, Renditen,
 XIRR, Drawdowns, Kennzahlen und die Ursachen nicht definierter Kennzahlen; Warnungen, Abbrüche und Ursachen kommen
 als Codes mit Werten, die Texte setzt dieses Modul wortgleich zu R. Hier bleiben ``risk_free`` (Spalte von ``data``),
 die Texte und das Ergebnisobjekt.
@@ -144,7 +144,7 @@ def _f64(x) -> np.ndarray:
 
 def _sim_evaluate(sim: dict, trades: dict, fl: dict, cfg: dict, fr: _Frame, start_date: int, stopp_date: int,
                   tax_unpaid: float) -> dict:
-    """Auswertung im Kern (E17 Stufe 3); Meldungen in der Reihenfolge von R (Warnungen, risk_free, Abbruch)."""
+    """Auswertung im Kern; Meldungen in der Reihenfolge von R (Warnungen, risk_free, Abbruch)."""
     nm = fl["flag_assets"]
     flag_date = fl["flag_date"]
     n = int(flag_date.size)

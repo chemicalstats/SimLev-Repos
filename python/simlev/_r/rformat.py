@@ -7,7 +7,7 @@
 #                     W. Fullerton (Los Alamos); sprintf.c: ursprünglich Jonathan Rougier
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet seit N10 der C-Kern
+#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet der C-Kern
 #                     core/slc_rbase_date.c.
 """R-kompatible Textausgabe und Rundung (Engine).
 
@@ -170,7 +170,7 @@ _KP_MAX = 27
 def _scientific(x: float, digits: int):
     """``scientific()`` aus R's format.c: (neg, kpower, nsig, roundingwidens).
 
-    N11: für digits <= 15 im C-Kern ``sl_r_scientific`` (core/slc_rbase_num.c, long double wie R; dieselbe
+    für digits <= 15 im C-Kern ``sl_r_scientific`` (core/slc_rbase_num.c, long double wie R; dieselbe
     Rechnung wie :func:`simlev._r.fmt._scientific` und Julia)."""
     if x == 0.0:
         return 0, 0, 1, False

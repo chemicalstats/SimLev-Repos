@@ -1,8 +1,8 @@
 """Kerne für Kendalls Tau, Quantilsregression und HMM (Python-Hüllen).
 
-Rufen aus ``core/research_core_impl.h`` (über ``simlev._ext``, Etappe 7.3a) ``.kendall_tau_core``,
-``.quantile_reg_core`` und ``.hmm_forward_backward`` mit denselben Quellen wie R auf. Seit
-Etappe 9.6c entfallen die bitgleichen Python-Ports als Rückfall (``SIMLEV_NO_EXT=1``, samt der
+Rufen aus ``core/research_core_impl.h`` (über ``simlev._ext``) ``.kendall_tau_core``,
+``.quantile_reg_core`` und ``.hmm_forward_backward`` mit denselben Quellen wie R und Julia auf. Seit
+1.0.0 entfallen die bitgleichen Python-Ports als Rückfall (``SIMLEV_NO_EXT=1``, samt der
 Nachbildung von libstdc++ ``std::sort``) und der Port des DCC-Filters (``.dcc_filter``,
 ``chol_small``); den DCC-Filter rechnet die C-Bibliothek slc (:func:`simlev._lib.dcc_filter`).
 """

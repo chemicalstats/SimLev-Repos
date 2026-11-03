@@ -51,7 +51,7 @@ ohne Rebalancing (Zeile \code{frequency = "none"}).}
 (Standard \code{list()}): Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
 also auch Bausteine (z. B. \code{dca = dca_plan(100, 1)}, \code{tax = tax_profile()}) und
 Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
-\code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.5.0 vor den Bausteinen, z. B.
+\code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B.
 \code{dca_value}) ergeben einen Fehler, der den Baustein nennt. Ein \code{rebalance = rebalance_plan(...)} in
 \code{sim_args} liefert die Grundwerte (z. B. \code{start}, \code{event_col}); Frequenz,
 Versatz und Band setzt die Funktion je Lauf ueber die Pfade \code{"rebalance.unit"},

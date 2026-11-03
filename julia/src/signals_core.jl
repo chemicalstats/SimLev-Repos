@@ -1,5 +1,5 @@
 # SignalsCore – .roll_mean_core, .roll_cov_core: geteilte C++-Kerne aus core/research_core_impl.h über die
-# C-ABI-Hülle (CAbi, N7; vorher Julia-Port, F2). Gegenstück zu python/simlev/_signals_core.py.
+# C-ABI-Hülle (CAbi; bis 1.1.0 Julia-Port). Gegenstück zu python/simlev/_signals_core.py.
 module SignalsCore
 
 import ..SimLev

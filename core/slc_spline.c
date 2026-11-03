@@ -1,4 +1,4 @@
-/* core/slc_spline.c – kubischer Glättungsspline mit GCV und Vorhersage (SimLev core, Etappe 9.2)
+/* core/slc_spline.c – kubischer Glättungsspline mit GCV und Vorhersage (SimLev core)
  * Verfahren:  Minimiert wird sum_i w_i (y_i - f(x_i))^2 + lambda int f''^2 über natürliche kubische
  *             Splines mit Knoten an allen verschiedenen x_i (Reinsch 1967). Mit h_i = t_{i+1} - t_i,
  *             der Bandmatrix Q (n x (n-2); q_{j-1,j} = 1/h_{j-1}, q_{jj} = -1/h_{j-1} - 1/h_j,
@@ -21,7 +21,7 @@
  *             Suche auf s = log10(lambda / r0) mit r0 = tr R / tr P (macht lambda maßstabsfrei):
  *             Raster mit 25 Punkten auf [-6, 4 log10(n) + 4] (gemessen: die effektiven
  *             Freiheitsgrade laufen dort von n - 1e-4 (n - df(-2) zwischen 0.02 und 0.7 % von n)
- *             bis etwa 2, scratchpad/e92/df_ends.txt; das Minimum liegt mitunter am Rand
+ *             bis etwa 2; das Minimum liegt mitunter am Rand
  *             lambda -> 0), dann Goldener Schnitt (Kiefer 1953) in den Intervallen um die bis zu drei
  *             kleinsten lokalen Rasterminima (GCV ist oft zweigipflig) bis zur Breite 1e-6 in s;
  *             genommen wird der beste ausgewertete Punkt. Ist das Bandsystem für ein lambda
@@ -50,11 +50,11 @@
  *             Knuth, D. E. (1998). The Art of Computer Programming, Bd. 3, 2. Aufl., §5.2.4.
  *             R Core Team: Hilfeseiten ?smooth.spline, ?predict.smooth.spline (nur dokumentiertes
  *             Verhalten: GCV bei cv = FALSE, Bindungen, lineare Fortsetzung).
- * Konstanten: (sqrt 5 - 1)/2 aus sqrt(5) zur Laufzeit; Raster und Grenzen eigene Festlegung (B.15).
+ * Konstanten: (sqrt 5 - 1)/2 aus sqrt(5) zur Laufzeit; Raster und Grenzen eigene Festlegung.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
  * Prüforakel: R 4.3.3 smooth.spline(x, y, cv = FALSE), predict (nur Plausibilität; R wählt für
- *             n > 49 weniger Knoten, F20).
+ *             n > 49 weniger Knoten).
  */
 #include "slc_internal.h"
 #include "slc_la_internal.h"

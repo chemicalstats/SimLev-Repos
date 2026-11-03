@@ -1,5 +1,5 @@
 /* core/slc_linalg.c – Cholesky, Band-Cholesky, Dreieckslöser, SPD-Löser, symmetrische Eigenwerte
- * (SimLev core, Etappe 9.2)
+ * (SimLev core)
  * Verfahren:  Cholesky A = R'R spaltenweise (Golub/Van Loan 2013, §4.2.5, Alg. 4.2.2 in der
  *             Skalarprodukt-Form): r_ij = (a_ij - sum_{k<i} r_ki r_kj) / r_ii, r_jj = sqrt(a_jj -
  *             sum_{k<j} r_kj^2); gelesen wird nur das obere Dreieck. Band-Cholesky A = LL' derselbe
@@ -30,11 +30,11 @@
  *             Kap. 4 (kompensierte Summen), Kap. 8 (Dreieckssysteme), Kap. 10 (Cholesky).
  *             Neumaier, A. (1974). ZAMM 54(1), 39–51 (kompensierte Summe).
  * Konstanten: 2^-52, 2^-53 (Gleitkomma-Grenzen, slc_constants.h); 60 Durchläufe und Schwelle 1/2
- *             eigene Festlegung (Entwurf B.5).
+ *             eigene Festlegung.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
  * Prüforakel: R 4.3.3 chol, backsolve, solve, determinant, eigen(symmetric = TRUE) (nur
- *             Plausibilität, scratchpad/e92/).
+ *             Plausibilität).
  */
 #include "slc_internal.h"
 #include "slc_la_internal.h"

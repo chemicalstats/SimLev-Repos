@@ -210,7 +210,7 @@ overfit_pbo <- function(x, S = 16L, metric = c("sharpe", "sortino", "geometric",
     oosm[idx] <- apply(OOS, 1, stats::median)
   }
   ok <- !is.na(isb) & !is.na(oosb)                              # wie lm(): Paare mit NA entfallen
-  cf <- .sl_lsfit(cbind(1, isb[ok]), oosb[ok])$coefficients     # OOS ~ IS, kleinste Quadrate (Entwurf B.7)
+  cf <- .sl_lsfit(cbind(1, isb[ok]), oosb[ok])$coefficients     # OOS ~ IS, kleinste Quadrate
   structure(list(pbo = mean(lam <= 0), lambda = lam, is_best = isb, oos_best = oosb, oos_median = oosm,
                  slope = unname(cf[2]), intercept = unname(cf[1]),
                  prob_loss = mean(oosb < 0), S = S, n_combos = C, n_points = N, n_obs = bl * S,
@@ -735,7 +735,7 @@ sharpe_haircut <- function(x, n_obs = NULL, n_tests = NULL, frequency = c("week"
     pp <- c(p, rep(1, max(0, M - length(p))))                       # unbekannte weitere Tests: p = 1
     stats::p.adjust(pp, method = method, n = max(M, length(p)))[seq_along(p)]
   }
-  back <- function(pa) sign(sr) * .sl_qnorm(pmin(pa, 1) / 2, lower.tail = FALSE) / sqrt(Tn) * sqrt(ppy)   # oberes Ende (F23)
+  back <- function(pa) sign(sr) * .sl_qnorm(pmin(pa, 1) / 2, lower.tail = FALSE) / sqrt(Tn) * sqrt(ppy)   # oberes Ende
   out <- data.frame(id = ids, sharpe = sr * sqrt(ppy), t = tstat, p = p)
   for (m in c(bonferroni = "bonferroni", holm = "holm", bhy = "BY")) {
     nm <- names(which(c(bonferroni = "bonferroni", holm = "holm", bhy = "BY") == m))

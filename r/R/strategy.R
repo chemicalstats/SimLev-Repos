@@ -1,3 +1,6 @@
+# strategy.R  —  Anlagestrategie: erstellen, pruefen, Assets hinzufuegen, aendern und entfernen,
+#                 Druck und Zusammenfassung (Klasse strategy)
+
 #' Anlagestrategie erstellen
 #'
 #' Erstellt ein Strategie-Objekt aus einer oder mehreren Asset-Konfigurationen.
@@ -44,7 +47,7 @@ create_strategy <- function(..., assets = NULL) {
   if (is.null(names(dots)) || any(names(dots) == "")) {
     stop("create_strategy: alle Assets m\u00fcssen benannt sein (Name = Kursspalte in data), z. B. create_strategy(ETF = asset_config(\"etf\")).")
   }
-  if (anyDuplicated(names(dots))) {   # R1-22
+  if (anyDuplicated(names(dots))) {
     stop(sprintf("create_strategy: Asset-Name '%s' kommt mehrfach vor; jeder Name darf nur einmal vorkommen.",
                  names(dots)[anyDuplicated(names(dots))]))
   }
@@ -182,7 +185,7 @@ strategy_update_asset <- function(strategy, name, ...) {
   updates <- list(...)
   asset <- strategy[[name]]
   
-  # R1-25: Wurde tax_regime bisher automatisch abgeleitet, wird es nach einer
+  # Wurde tax_regime bisher automatisch abgeleitet, wird es nach einer
   # Aenderung von asset_class/deliverable neu abgeleitet (explizite Werte bleiben)
   if (any(c("asset_class", "deliverable") %in% names(updates)) && !"tax_regime" %in% names(updates)) {
     derived <- tryCatch(suppressWarnings(do.call(asset_config, modifyList(unclass(asset), list(tax_regime = NULL), keep.null = TRUE)))$tax_regime,

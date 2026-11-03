@@ -224,7 +224,7 @@ regime_hmm <- function(data, columns, k = 2L, frequency = c("week", "day", "mont
                                  paste0("'", flat, "'", collapse = ", ")))
   ppy <- (Tn - 1) / (as.numeric(rd$date[Tn] - rd$date[1]) / 365.25)
   ridge <- diag(1e-10 + 1e-6 * mean(apply(X, 2, stats::var)), d)
-  rs <- if (isTRUE(n_start >= 2)) .sl_main_stream(seed) else NULL   # Hauptstrom (Entwurf C.5), nur bei Zufallsstarts
+  rs <- if (isTRUE(n_start >= 2)) .sl_main_stream(seed) else NULL   # Hauptstrom, nur bei Zufallsstarts
   inits <- lapply(seq_len(n_start), function(s) {
     if (s == 1) .hmm_init_rank(X, k, max(4, round(ppy / 12)), ridge)
     else .hmm_init_cl(X, .sl_sample(k, Tn, replace = TRUE, stream = rs), k, ridge)

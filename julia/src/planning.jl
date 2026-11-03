@@ -1,4 +1,4 @@
-# Planning – r/R/planning.R (Vorlage python/simlev/planning.py)
+# Planning – Gegenstück zu r/R/planning.R und python/simlev/planning.py
 #
 #   series_shift_return()  verschiebt historische Renditen auf eine eigene
 #                          Renditeannahme (Streuung, Abhängigkeiten und
@@ -39,10 +39,42 @@ _cols(columns) = columns isa AbstractString ? [String(columns)] : String[String(
 """
     series_shift_return(data, columns, target; type = ["returns", "prices"], ppy = nothing)
 
-Verschiebt die logarithmierten Renditen der Spalten `columns` so, dass ihre
-geometrische Rendite `target` Prozent p. a. beträgt (R: `series_shift_return()`).
-Ergebnis: Kopie von `data`; `attrs(x)["shift"]` = angewendete Verschiebung je
-Spalte in Prozent p. a.
+Historische Renditen auf eine Renditeannahme verschieben.
+
+Historische Mittelwerte sind für die Zukunft oft zu optimistisch (z. B. US-Aktien des 20. Jahrhunderts). Diese
+Funktion verschiebt die logarithmierten Renditen jeder Spalte um eine Konstante, so dass die geometrische
+Rendite der Historie der Annahme entspricht. Streuung der Log-Renditen, Schiefe, Abhängigkeiten und zeitliche
+Muster bleiben unverändert; ein anschließender `bootstrap()` zieht dann Pfade mit der gewünschten
+Renditeerwartung. Eingabe ist ein Tabelle (RFrame) mit Brutto-Renditen je Zeile oder mit Kursniveaus; zurück
+kommt derselbe Tabelle (RFrame) mit verschobenen Spalten.
+
+# Argumente
+- `data`: Tabelle (RFrame) mit den Spalten aus `columns`; die Spalte `date` (Klasse Date oder in Date
+  umwandelbar) wird für den Standardwert von `ppy` und bei `type = "prices"` für die zeitliche Reihenfolge
+  gebraucht (Zeilen müssen nicht sortiert sein, die Zeilenreihenfolge des Ergebnisses bleibt erhalten; ohne
+  `date` gilt die Zeilenreihenfolge als Zeitfolge). Eine Matrix ist nicht zulässig.
+- `columns`: Zeichenvektor mit den Namen der zu verschiebenden Spalten.
+- `target`: Geometrische Zielrendite in Prozent p. a. (4 = 4 % p. a.): Skalar (gilt für alle `columns`) oder
+  benannter Vektor mit einem Eintrag je Spalte aus `columns` (z. B. `(us = 5, eu = 5)`); fehlt eine Spalte,
+  bricht die Funktion ab.
+- `type`: Art der Spalten: `"returns"` (Standard; Brutto-Renditen je Zeile, z. B. 1.001 für +0,1 %, wie für
+  `bootstrap()`) oder `"prices"` (Kursniveaus; die Verschiebung wird dann als Trend über die Zeilen
+  aufmultipliziert).
+- `ppy`: Renditen (Zeilen) je Jahr. `nothing` (Standard): bei einem Tabelle (RFrame) mit `date` Anzahl der
+  Renditen geteilt durch die Spanne von `date` in Jahren (Tage / 365.25), sonst 252.
+
+# Rückgabe
+`data` mit angepassten Spalten. Attribut `shift`: benannter Vektor der angewendeten Verschiebung je Spalte in
+Prozent p. a. (geometrisch; negativ = Rendite abgesenkt). Fehlende Werte werden bei der Mittelwertbildung
+ignoriert.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+d = RFrame("date" => Date(2000, 1, 1) .+ Day.(0:3649), "us" => exp.(3e-4 .+ 0.01 .* randn(MersenneTwister(1), 3650)))
+d2 = series_shift_return(d, "us", 4)
+println(prod(d2["us"])^(365.25 / 3650) - 1)   # etwa 0.04 = 4 % p. a.
+```
 """
 function series_shift_return(data, columns, target; type = ["returns", "prices"], ppy = nothing)
     data = SimLev.as_rframe(data)
@@ -148,8 +180,73 @@ _wd_ppy(frequency) = SimLev.Withdrawal._wd_ppy(frequency)
                      frequency = ["year", "quarter", "month"], n = 1000, years = 30, L = nothing,
                      country_weights = nothing, target = nothing, seed = nothing)
 
-Länder-Bootstrap für lange Horizonte (R: `bootstrap_pooled()`); Ergebnis ist
-ein `withdrawal_paths`-Objekt (`RList`).
+Länder-Bootstrap für lange Horizonte.
+
+Stationärer Block-Bootstrap über mehrere Länder: Jeder Block stammt aus einem zufällig gezogenen Land
+(Standard: gleich wahrscheinlich) und beginnt an einer zufälligen Stelle seiner Historie; Blockgrenzen sind
+geometrisch verteilt (Politis & Romano 1994). Innerhalb eines Blocks bleiben alle Spalten eines Landes
+gemeinsam (Aktien, Anleihen, Inflation). So gehen auch Märkte mit schlechten Phasen (Kriege, Hyperinflation,
+lange Baissen) in die Planung ein - US-Daten allein überschätzen langfristige Renditen (Anarkulova, Cederburg
+& O'Doherty 2022).
+
+# Argumente
+- `datasets`: Benannte Liste von Tabelle (RFrame) (Name = Land), jeweils mit Spalte `date` (Klasse Date oder
+  umwandelbar), den Kursspalten aus `columns` (Total-Return-Niveaus, keine Renditen) und ggf. der
+  Preisindex-Spalte aus `inflation`. Jedes Land braucht mindestens 2 vollständige Periodenrenditen.
+- `columns`: Zeichenvektor der Kursspalten (in allen Ländern gleich benannt).
+- `weights`: Vektor der Portfolio-Gewichte (>= 0) mit einem Eintrag je Spalte aus `columns`: benannt mit genau
+  diesen Spaltennamen oder unbenannt in der Reihenfolge von `columns` (wird auf Summe 1 normiert; Rebalancing
+  auf die Gewichte in jeder Periode). `nothing` (Standard) = gleiche Gewichte. Die Portfoliorendite ist die
+  Renditequelle für `withdrawal_simulation()`.
+- `inflation`: `nothing` (Standard; keine Inflation, Faktor 1) oder Name einer Preisindex-Spalte (Niveau, z.
+  B. CPI), die in allen Ländern vorhanden ist. Sie wird im selben Block wie die Kurse gezogen.
+- `frequency`: Periodenlänge: `"year"` (Standard), `"quarter"` oder `"month"`.
+- `n`: Anzahl simulierter Pfade (Standard 1000).
+- `years`: Länge jedes Pfads in Jahren (Standard 30); ergibt `years` x Perioden je Jahr (1, 4 bzw. 12)
+  Perioden.
+- `L`: Mittlere Blocklänge in Perioden der gewählten `frequency` (Blocklänge = 1 + geometrisch verteilte Zahl
+  mit Mittel `L` - 1). `nothing` (Standard) = 10 Jahre, also 10 Jahre, 40 Quartale bzw. 120 Monate.
+- `country_weights`: Numerischer Vektor der Ziehungswahrscheinlichkeiten je Land in der Reihenfolge von
+  `datasets` (wird auf Summe 1 normiert). `nothing` (Standard) = alle Länder gleich wahrscheinlich.
+- `target`: Optional Renditeannahmen in Prozent p. a. (geometrisch): Skalar für alle `columns` oder benannter
+  Vektor je Spalte. Die Verschiebung wird über die gepoolten Renditen aller Länder bestimmt und für alle
+  Länder gleich angewendet (wie `series_shift_return()`). `nothing` (Standard) = historische Renditen.
+- `seed`: Startwert der Ziehung (Standard `nothing`). Mit Startwert (ganze Zahl, |seed| < 2^53) ist das
+  Ergebnis reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit `nothing` wird genau
+  einmal ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe `simlev_seed()`), wiederholte Aufrufe
+  liefern dann verschiedene Ergebnisse. `set.seed()` wirkt nicht.
+
+# Rückgabe
+Objekt der Klasse `withdrawal_paths` (Liste) mit `returns` (Matrix Perioden x Pfade der
+Brutto-Portfoliorenditen), `inflation` (Matrix gleicher Form, Brutto-Inflation je Periode; ohne `inflation`
+überall 1), `frequency`, `source = "pooled_bootstrap"`, `historical = false`, `cape`, `base_rate`,
+`start_dates`, `weights` (alle `nothing`) sowie den zusätzlichen Elementen `assets` (benannte Liste der
+Brutto-Renditematrizen je Spalte aus `columns`), `countries` (Zeichenmatrix Perioden x Pfade: gezogenes Land)
+und `country_names`.
+
+# Details
+Die Kursreihen jedes Landes werden zuerst auf Periodenrenditen der gewählten `frequency` verdichtet (Wert am
+letzten Datum jeder Kalenderperiode; eine unvollständige letzte Periode zählt mit; nur Perioden ohne fehlende
+Werte). Ein Block beginnt an einer zufälligen Periode und läuft am Ende der Landeshistorie zyklisch am Anfang
+weiter. Das Ergebnis ist ein `withdrawal_paths`-Objekt und kann direkt an `withdrawal_simulation()`,
+`withdrawal_max_rate()` oder `withdrawal_perfect_rate()` übergeben werden.
+
+# Literatur
+Anarkulova, A., Cederburg, S. & O'Doherty, M. S. (2022), Stocks for the long run? Evidence from a broad sample
+of developed markets, Journal of Financial Economics 143(1), 409-433.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+land(mu) = RFrame("date" => [Date(1950 + k, 12, 31) for k in 0:69],
+                  "aktien" => 100 .* cumprod(exp.(mu .+ 0.18 .* randn(rng, 70))),
+                  "anleihen" => 100 .* cumprod(exp.(0.02 .+ 0.06 .* randn(rng, 70))),
+                  "cpi" => 100 .* cumprod(exp.(0.025 .+ 0.02 .* randn(rng, 70))))
+pb = bootstrap_pooled(RList("de" => land(0.05), "us" => land(0.07)), ["aktien", "anleihen"];
+                      weights = (aktien = 0.6, anleihen = 0.4), inflation = "cpi", n = 200, years = 30, L = 5, seed = 1)
+println(size(pb["returns"]))   # 30 Jahre x 200 Pfade
+```
 """
 function bootstrap_pooled(datasets, columns; weights = nothing, inflation = nothing,
                           frequency = ["year", "quarter", "month"], n = 1000, years = 30, L = nothing,
@@ -221,7 +318,7 @@ function bootstrap_pooled(datasets, columns; weights = nothing, inflation = noth
         end
         out
     end
-    draw = draw_all(SimLev.SLib.main_stream(seed))        # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+    draw = draw_all(SimLev.SLib.main_stream(seed))        # Hauptstrom
     Gall = reduce(vcat, G)
     off = vcat(0, cumsum(nrs))[1:nc]
     gi = zeros(Int, nper, nn)
@@ -256,7 +353,7 @@ end
 # portfolio_returns
 # ═══════════════════════════════════════════════════════════════════════════
 
-"`A %m% x` (Matrix mal Vektor) wie R (slc-Matrixprodukt, Entwurf B.6)."
+"`A %m% x` (Matrix mal Vektor) wie R (slc-Matrixprodukt)."
 function _matvec(A::AbstractMatrix, x::AbstractVector)
     r = SimLev.SLib.matmul(Matrix{Float64}(A), reshape(collect(Float64, x), :, 1))
     DA._vecf(r isa SimLev.NamedMat ? r.data : r)
@@ -265,9 +362,36 @@ end
 """
     portfolio_returns(data, candidates; frequency = ["year", "quarter", "month"])
 
-Brutto-Periodenrenditen von Kandidaten-Portfolios mit festen Gewichten
-(R: `portfolio_returns()`); `candidates`: Liste benannter Gewichtsvektoren.
-Ergebnis: NamedMat Perioden x Kandidaten.
+Periodenrenditen von Kandidaten-Portfolios (feste Gewichte, Rebalancing je Periode).
+
+Berechnet aus Kursreihen die Brutto-Periodenrenditen mehrerer Kandidaten-Portfolios mit festen Gewichten
+(Rebalancing auf die Gewichte zu Beginn jeder Periode). Eingabe ist ein Tabelle (RFrame) mit Spalte `date`
+(Klasse Date) und Kursspalten (Niveaus, keine Renditen); Periodenwerte sind die Kurse am letzten Datum jeder
+Kalenderperiode (fehlende Kurse werden fortgeschrieben, eine unvollständige letzte Periode zählt mit). Das
+Ergebnis dient als Szenario-Stichprobe für `planning_goal()`.
+
+# Argumente
+- `data`: Tabelle (RFrame) mit Spalte `date` und allen in `candidates` genannten Kursspalten (Niveaus).
+- `candidates`: Liste von benannten Gewichtsvektoren (Namen = Kursspalten; je Kandidat auf Summe 1 normiert),
+  z. B. aus `lapply(seq(0, 1, 0.1), function(a) (aktien = a, anleihen = 1 - a))`. Die Listennamen werden
+  Spaltennamen des Ergebnisses; ohne Namen `"P1"`, `"P2"`, ...
+- `frequency`: Periodenlänge und Rebalancing-Rhythmus: `"year"` (Standard), `"quarter"` oder `"month"`.
+
+# Rückgabe
+Numerische Matrix Perioden x Kandidaten mit Brutto-Renditen (z. B. 1.05 = +5 %); nur Perioden, in denen alle
+beteiligten Kursspalten Werte haben.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 3650
+d = RFrame("date" => Date(2010, 1, 1) .+ Day.(0:n-1))
+d["aktien"] = 100 .* cumprod(1 .+ 3e-4 .+ 0.01 .* randn(rng, n))
+d["anleihen"] = 100 .* cumprod(1 .+ 1e-4 .+ 0.002 .* randn(rng, n))
+cand = RList("a20" => RList("aktien" => 0.2, "anleihen" => 0.8), "a60" => RList("aktien" => 0.6, "anleihen" => 0.4))
+println(size(portfolio_returns(d, cand)))
+```
 """
 function portfolio_returns(data, candidates; frequency = ["year", "quarter", "month"])
     data = SimLev.as_rframe(data)
@@ -325,8 +449,90 @@ end
     planning_goal(returns, start_value, goal, horizon; contributions = 0, n_grid = 301,
                   n_sim = 5000, seed = nothing)
 
-Zielbasierte Allokation per dynamischer Programmierung (R: `planning_goal()`).
-Ergebnis: `RList` der Klasse `SimLevGoalPlan`.
+Zielbasierte Allokation per dynamischer Programmierung (Das et al. 2020).
+
+Bestimmt für jeden Zeitpunkt und jedes Vermögen das Portfolio aus einer Kandidatenliste, das die
+Wahrscheinlichkeit maximiert, zum Horizont ein Zielvermögen zu erreichen (Das et al. 2020). Ein- und
+Auszahlungen je Periode sind möglich; mit Auszahlungen und `goal = 0` wird die Wahrscheinlichkeit maximiert,
+dass das Geld bis zum Horizont reicht. Die Renditen werden je Periode aus der Stichprobe `returns` gezogen
+(unabhängig über die Zeit; Zeilen = Szenarien, gemeinsam über die Kandidaten). Die Wertfunktion wird auf einem
+logarithmischen Vermögensraster gespeichert und dazwischen linear in log(Vermögen) auf der Probit-Skala
+(`qnorm` der Wahrscheinlichkeit) interpoliert; in der letzten Periode wird die 0/1-Zielbedingung exakt
+ausgewertet.
+
+# Argumente
+- `returns`: Numerische Matrix (Szenarien x Kandidaten) von Brutto-Periodenrenditen (z. B. 1.05 = +5 %), z. B.
+  aus `portfolio_returns()` (historische Perioden) oder aus Bootstrap-Pfaden. Jede Zeile ist ein gleich
+  wahrscheinliches Szenario für eine Periode. Spaltennamen benennen die Kandidaten (fehlen sie: `"P1"`,
+  `"P2"`, ...); für die Grafik aufsteigend nach Risiko sortieren.
+- `start_value`: Startvermögen (Geldbetrag, > 0).
+- `goal`: Zielvermögen zum Horizont (Geldbetrag in denselben Einheiten wie `start_value`; real oder nominal,
+  passend zu den Renditen). Erfolg heißt Endvermögen >= `goal`.
+- `horizon`: Anzahl Perioden bis zum Ziel (ganze Zahl >= 1; Periodenlänge wie die Zeilen von `returns`, z. B.
+  Jahre bei Jahresrenditen). Nicht zu verwechseln mit `horizon` in `withdrawal_simulation()` (Objekt aus
+  `withdrawal_horizon()` oder Jahre).
+- `contributions`: Zahlung je Periode als Geldbetrag (Standard 0): Skalar oder Vektor (wird mit `rep_len()`
+  auf `horizon` Perioden gebracht); positiv = Einzahlung, negativ = Entnahme, jeweils zu Periodenbeginn vor
+  der Rendite.
+- `n_grid`: Anzahl Punkte des logarithmischen Vermögensrasters (Standard 301, mindestens 2; dazu Ziel und
+  Startwert); mehr Punkte = genauer, aber langsamer.
+- `n_sim`: Anzahl Pfade der Vorwärtssimulation der optimalen Politik (Standard 5000).
+- `seed`: Startwert für die Vorwärtssimulation (Standard `nothing`). Mit Startwert (ganze Zahl, |seed| < 2^53)
+  ist das Ergebnis reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit `nothing` wird
+  genau einmal ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe `simlev_seed()`), wiederholte
+  Aufrufe liefern dann verschiedene Ergebnisse. `set.seed()` wirkt nicht.
+
+# Rückgabe
+Objekt der Klasse `SimLevGoalPlan` (Liste):
+
+- `probability`: Zielwahrscheinlichkeit der gefundenen Politik als Anteil (0.8 = 80 Prozent): Erfolgsquote der
+  Vorwärtssimulation (`mean(simulation["success"])`, siehe Details, Verzerrung).
+- `probability_se`: Standardfehler von `probability` (Anteil, aus `n_sim`).
+- `probability_dp`: Wert der dynamischen Programmierung (Anteil; Näherung, meist über dem Optimum).
+- `static`: Benannter Vektor: Zielwahrscheinlichkeit (Anteil), wenn durchgehend derselbe Kandidat gehalten
+  wird.
+- `policy`: Ganzzahlige Matrix Perioden x Rasterpunkte: Nummer des optimalen Kandidaten (Spalte von
+  `returns`).
+- `grid`: Vermögensraster (Geldbeträge, aufsteigend; Länge `n_grid` plus Ziel und Startwert).
+- `value`: Liste der Länge `horizon + 1`: Element `t` ist die Zielwahrscheinlichkeit je Rasterpunkt zu Beginn
+  von Periode `t` (letztes Element: 0/1 am Horizont).
+- `simulation`: Liste mit `terminal` (Endvermögen je Pfad), `choice` (Matrix Perioden x Pfade: gewählter
+  Kandidat) und `success` (logisch: nie ruiniert und Endvermögen >= `goal`).
+- `goal`, `start_value`, `horizon`: Eingaben.
+- `contributions`: Zahlungen je Periode (Länge `horizon`).
+- `candidates`: Namen der Kandidaten.
+
+Ausgabe mit `print()`, Grafik der Politik mit `plot()`.
+
+# Details
+Das Raster reicht logarithmisch gleichabständig von `max(1e-6, m / 1000)` (m = kleinster positiver Wert von
+`goal` und `start_value`) bis `20 * max(goal, start_value)`; `goal` (falls > 0) und `start_value` sind
+zusätzlich exakte Rasterpunkte. Fällt das Vermögen nach einer Zahlung auf 0 oder darunter, gilt der Pfad als
+gescheitert. Bei Gleichstand (Unterschied unter 1e-9) wählt die Politik den Kandidaten mit der geringsten
+Streuung der Log-Renditen. Die Vorwärtssimulation wendet die Politik auf `n_sim` zufällige Pfade an (Kandidat
+des nächstniedrigeren Rasterpunkts des Vermögens vor der Zahlung).
+
+Verzerrung: Der DP-Wert (`probability_dp`) ist eine Näherung des Optimums und liegt typischerweise darüber,
+weil die interpolierte Wertfunktion die Zielstufe zwischen den Rasterpunkten glättet und das Maximum über
+Kandidaten diese Fehler bevorzugt (bei grobem Raster einige Prozentpunkte). Gemeldet wird daher als
+`probability` die in der Vorwärtssimulation erreichte Erfolgsquote der gefundenen Politik: eine unverzerrte
+Schätzung der Zielwahrscheinlichkeit einer tatsächlich umsetzbaren Politik, also im Erwartungswert höchstens
+das Optimum (Stichprobenfehler `probability_se`). Weicht der DP-Wert um mehr als 4 Standardfehler plus 1
+Prozentpunkt davon ab, warnt die Funktion (`n_grid` erhöhen). Auch `static` beruht auf der interpolierten
+Wertfunktion und kann leicht überschätzt sein.
+
+# Literatur
+Das, S. R., Ostrov, D., Radhakrishnan, A. & Srivastav, D. (2020), Dynamic portfolio allocation in goals-based
+wealth management, Computational Management Science 17, 613-640.
+
+# Beispiel
+```julia
+using SimLev, Random
+rng = MersenneTwister(1); a = [0.2 0.6 1.0]
+R = exp.((0.01 .+ 0.04 .* a) .+ (0.02 .+ 0.16 .* a) .* randn(rng, 500, 3))
+gp = planning_goal(R, 100000, 150000, 10; contributions = 2000, n_grid = 101, n_sim = 1000, seed = 1)
+println(gp["probability"])
+```
 """
 function planning_goal(returns, start_value, goal, horizon; contributions = 0, n_grid = 301, n_sim = 5000, seed = nothing)
     returns = SimLev.as_rframe(returns)
@@ -440,7 +646,7 @@ function planning_goal(returns, start_value, goal, horizon; contributions = 0, n
         end
         SimLev.RList("terminal" => W, "choice" => choice, "success" => .!ruined .& (W .>= goal))
     end
-    sim = run(SimLev.SLib.main_stream(seed))              # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+    sim = run(SimLev.SLib.main_stream(seed))              # Hauptstrom
     p_sim = DA._mean_lgl(sim["success"])
     se = sqrt(p_sim * (1 - p_sim) / nsim)
     tol = 4 * sqrt(max(p_sim * (1 - p_sim), 1 / nsim) / nsim) + 0.01

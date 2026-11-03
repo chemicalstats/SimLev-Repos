@@ -1,4 +1,4 @@
-"""Parametrisierbare Signal-Bausteine (Port von ``r/R/signals.R``).
+"""Parametrisierbare Signal-Bausteine (Gegenstück zu ``r/R/signals.R``).
 
 Jeder Baustein nimmt eine Kursreihe und liefert ``{"buy": ..., "sell": ...}``
 mit logischen Vektoren gleicher Länge (NA -> False). Das ist das Format, das
@@ -99,16 +99,66 @@ def _sig_out(buy, sell, lag=0):
 def signal_sma(x, *, n=200, band=0, lag=0):
     """Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten ``n`` Zeilen.
 
-    Kauf ab ``SMA * (1 + band/100)``, Verkauf unter ``SMA * (1 - band/100)``.
+    Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das ``bootstrap_study()`` und
+    ``param_search()`` für ``signal = function(df) ...`` erwarten: Die Elemente ``buy`` und ``sell`` werden dort
+    als gleichnamige Spalten an den Datensatz angehängt. Für ``simulation()`` hängt man sie selbst an und nennt
+    sie in ``asset_config()`` (``trading = "signal"``, ``signal_buy``, ``signal_sell``); für ``tactical_rules()``
+    lassen sie sich direkt als Bedingung verwenden.
 
     Args:
-        x: Kursniveaus.
-        n: Fensterlänge in Zeilen.
-        band: Hysterese-Band in Prozent des Durchschnitts.
-        lag: Verzögerung der Signale in Zeilen.
+        x: Numerischer Vektor mit Kursniveaus (z. B. ``df["eu"]``).
+        n: Fensterlänge in Zeilen (Standard: 200 bei ``signal_sma`` und ``signal_ema``, 250 bei
+            ``signal_momentum``, 20 bei ``signal_volatility``).
+        band: Hysterese-Band (Standard 0 = keins): bei Durchschnitten in Prozent des Durchschnitts (1 = 1 %), bei
+            ``signal_momentum`` und ``signal_volatility`` in Prozentpunkten um ``threshold``.
+        lag: Verzögerung der Signale in Zeilen (Standard 0; z. B. 1, um erst in der Folgezeile zu handeln). Die
+            ersten ``lag`` Zeilen sind ``False``.
 
     Returns:
-        ``dict`` mit ``buy`` und ``sell`` (bool-Arrays).
+        ``{"buy": ..., "sell": ...}`` mit logischen Vektoren der Länge von ``x`` (NA als ``False``).
+
+    Details:
+        Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B. eine Spalte aus
+        ``series_align()``. Alle Fenster (``n``, ``fast``, ``slow``, ``window``, ``lag``) zählen in Zeilen der
+        Daten, bei Kalendertagsdaten (Wochenenden per LOCF) also in Kalendertagen, bei Handelstagsdaten in
+        Handelstagen. Solange ein Fenster noch nicht gefüllt ist, sind beide Signale ``False`` (außer bei
+        ``signal_drawdown``, das anfangs das Hoch der bisherigen Zeilen verwendet). ``x`` sollte keine NA
+        enthalten: Bei Durchschnitten liefern Fenster mit NA kein Signal, beim exponentiellen Durchschnitt auch
+        alle folgenden Zeilen; bei ``signal_drawdown`` nur die Zeile mit NA (das Hoch wird ohne sie fortgeführt).
+
+        ``band`` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale ``False``, der
+        Zustand in ``simulation()`` bzw. ``signal_state()`` bleibt dann unverändert. Bei Durchschnitten
+        (``signal_sma``, ``signal_ema``, ``signal_crossover``) ist ``band`` relativ zum Durchschnitt in Prozent,
+        bei ``signal_momentum`` und ``signal_volatility`` ein Abstand in Prozentpunkten zu ``threshold``.
+
+        - signal_sma: Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten ``n`` Zeilen
+          (einschließlich der aktuellen): Kauf ab ``SMA * (1 + band/100)``, Verkauf unter ``SMA * (1 -
+          band/100)``, dazwischen bleibt der Zustand.
+        - signal_ema: Wie ``signal_sma`` mit exponentiellem Durchschnitt (Glättung 2 / (n + 1), Start mit dem
+          einfachen Mittel der ersten ``n`` Werte).
+        - signal_crossover: Schneller über langsamem Durchschnitt: Kauf, wenn der schnelle mindestens das ``(1 +
+          band/100)``-fache des langsamen erreicht, Verkauf unter dem ``(1 - band/100)``-fachen.
+        - signal_momentum: Rendite über ``n`` Zeilen in Prozent: Kauf ab ``threshold + band``, Verkauf unter
+          ``threshold - band``.
+        - signal_drawdown: Verkauf ab ``sell_dd`` Prozent unter dem (rollierenden) Hoch, Kauf (Wiedereinstieg),
+          solange der Abstand unter ``buy_dd`` Prozent liegt; dazwischen bleibt der Zustand.
+        - signal_volatility: Realisierte Volatilität der Log-Renditen über ``n`` Zeilen, annualisiert mit ``ppy``,
+          in Prozent p. a.: Kauf bis ``threshold - band``, Verkauf über ``threshold + band``.
+        - signal_combine: Verknüpft Signale: ``"and"`` kauft nur, wenn alle kaufen, und verkauft, sobald eines
+          verkauft; ``"or"`` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1000
+        d = pd.DataFrame({"date": pd.date_range("2018-01-01", periods=n)})
+        d["A"] = 100 * np.cumprod(1 + rng.normal(2e-4, 0.01, n))
+        s = simlev.signal_sma(d["A"], n=200, band=1, lag=1)
+        d["buy"], d["sell"] = s["buy"], s["sell"]
+        res = simlev.simulation(d, simlev.create_strategy(A=simlev.asset_config(asset_class="etf", trading="signal",
+                                                                                 signal_buy="buy", signal_sell="sell")))
+        print(res["buys"], res["sells"])
     """
     xv = _as_numeric(x)
     s = _roll_mean(xv, n)
@@ -116,7 +166,62 @@ def signal_sma(x, *, n=200, band=0, lag=0):
 
 
 def signal_ema(x, *, n=200, band=0, lag=0):
-    """Wie :func:`signal_sma` mit exponentiellem Durchschnitt (Glättung 2/(n+1))."""
+    """Wie :func:`signal_sma` mit exponentiellem Durchschnitt (Glättung 2/(n+1)).
+
+    Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das ``bootstrap_study()`` und
+    ``param_search()`` für ``signal = function(df) ...`` erwarten: Die Elemente ``buy`` und ``sell`` werden dort
+    als gleichnamige Spalten an den Datensatz angehängt. Für ``simulation()`` hängt man sie selbst an und nennt
+    sie in ``asset_config()`` (``trading = "signal"``, ``signal_buy``, ``signal_sell``); für ``tactical_rules()``
+    lassen sie sich direkt als Bedingung verwenden.
+
+    Args:
+        x: Numerischer Vektor mit Kursniveaus (z. B. ``df["eu"]``).
+        n: Fensterlänge in Zeilen (Standard: 200 bei ``signal_sma`` und ``signal_ema``, 250 bei
+            ``signal_momentum``, 20 bei ``signal_volatility``).
+        band: Hysterese-Band (Standard 0 = keins): bei Durchschnitten in Prozent des Durchschnitts (1 = 1 %), bei
+            ``signal_momentum`` und ``signal_volatility`` in Prozentpunkten um ``threshold``.
+        lag: Verzögerung der Signale in Zeilen (Standard 0; z. B. 1, um erst in der Folgezeile zu handeln). Die
+            ersten ``lag`` Zeilen sind ``False``.
+
+    Returns:
+        ``{"buy": ..., "sell": ...}`` mit logischen Vektoren der Länge von ``x`` (NA als ``False``).
+
+    Details:
+        Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B. eine Spalte aus
+        ``series_align()``. Alle Fenster (``n``, ``fast``, ``slow``, ``window``, ``lag``) zählen in Zeilen der
+        Daten, bei Kalendertagsdaten (Wochenenden per LOCF) also in Kalendertagen, bei Handelstagsdaten in
+        Handelstagen. Solange ein Fenster noch nicht gefüllt ist, sind beide Signale ``False`` (außer bei
+        ``signal_drawdown``, das anfangs das Hoch der bisherigen Zeilen verwendet). ``x`` sollte keine NA
+        enthalten: Bei Durchschnitten liefern Fenster mit NA kein Signal, beim exponentiellen Durchschnitt auch
+        alle folgenden Zeilen; bei ``signal_drawdown`` nur die Zeile mit NA (das Hoch wird ohne sie fortgeführt).
+
+        ``band`` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale ``False``, der
+        Zustand in ``simulation()`` bzw. ``signal_state()`` bleibt dann unverändert. Bei Durchschnitten
+        (``signal_sma``, ``signal_ema``, ``signal_crossover``) ist ``band`` relativ zum Durchschnitt in Prozent,
+        bei ``signal_momentum`` und ``signal_volatility`` ein Abstand in Prozentpunkten zu ``threshold``.
+
+        - signal_sma: Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten ``n`` Zeilen
+          (einschließlich der aktuellen): Kauf ab ``SMA * (1 + band/100)``, Verkauf unter ``SMA * (1 -
+          band/100)``, dazwischen bleibt der Zustand.
+        - signal_ema: Wie ``signal_sma`` mit exponentiellem Durchschnitt (Glättung 2 / (n + 1), Start mit dem
+          einfachen Mittel der ersten ``n`` Werte).
+        - signal_crossover: Schneller über langsamem Durchschnitt: Kauf, wenn der schnelle mindestens das ``(1 +
+          band/100)``-fache des langsamen erreicht, Verkauf unter dem ``(1 - band/100)``-fachen.
+        - signal_momentum: Rendite über ``n`` Zeilen in Prozent: Kauf ab ``threshold + band``, Verkauf unter
+          ``threshold - band``.
+        - signal_drawdown: Verkauf ab ``sell_dd`` Prozent unter dem (rollierenden) Hoch, Kauf (Wiedereinstieg),
+          solange der Abstand unter ``buy_dd`` Prozent liegt; dazwischen bleibt der Zustand.
+        - signal_volatility: Realisierte Volatilität der Log-Renditen über ``n`` Zeilen, annualisiert mit ``ppy``,
+          in Prozent p. a.: Kauf bis ``threshold - band``, Verkauf über ``threshold + band``.
+        - signal_combine: Verknüpft Signale: ``"and"`` kauft nur, wenn alle kaufen, und verkauft, sobald eines
+          verkauft; ``"or"`` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+    Beispiel::
+
+        import numpy as np, simlev
+        x = 100 * np.cumprod(1 + np.random.default_rng(1).normal(2e-4, 0.01, 1000))
+        print(simlev.signal_ema(x, n=200, band=1)["buy"].sum())
+    """
     xv = _as_numeric(x)
     s = _ema(xv, n)
     return _sig_out(_cmp(np.greater_equal, xv, s * (1 + band / 100)), _cmp(np.less, xv, s * (1 - band / 100)), lag)
@@ -125,12 +230,60 @@ def signal_ema(x, *, n=200, band=0, lag=0):
 def signal_crossover(x, *, fast=50, slow=200, type=("sma", "ema"), band=0, lag=0):  # noqa: A002
     """Schneller über langsamem Durchschnitt.
 
+    Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das ``bootstrap_study()`` und
+    ``param_search()`` für ``signal = function(df) ...`` erwarten: Die Elemente ``buy`` und ``sell`` werden dort
+    als gleichnamige Spalten an den Datensatz angehängt. Für ``simulation()`` hängt man sie selbst an und nennt
+    sie in ``asset_config()`` (``trading = "signal"``, ``signal_buy``, ``signal_sell``); für ``tactical_rules()``
+    lassen sie sich direkt als Bedingung verwenden.
+
     Args:
-        x: Kursniveaus.
-        fast, slow: Fensterlängen (``fast < slow``).
-        type: ``"sma"`` oder ``"ema"``.
-        band: Hysterese-Band in Prozent.
-        lag: Verzögerung in Zeilen.
+        x: Numerischer Vektor mit Kursniveaus (z. B. ``df["eu"]``).
+        fast, slow: Fensterlängen in Zeilen für den schnellen und den langsamen Durchschnitt (Standard 50 und 200;
+            ``fast < slow``).
+        type: Art der Durchschnitte bei ``signal_crossover``: ``"sma"`` (Standard) oder ``"ema"``.
+        band: Hysterese-Band (Standard 0 = keins): bei Durchschnitten in Prozent des Durchschnitts (1 = 1 %), bei
+            ``signal_momentum`` und ``signal_volatility`` in Prozentpunkten um ``threshold``.
+        lag: Verzögerung der Signale in Zeilen (Standard 0; z. B. 1, um erst in der Folgezeile zu handeln). Die
+            ersten ``lag`` Zeilen sind ``False``.
+
+    Returns:
+        ``{"buy": ..., "sell": ...}`` mit logischen Vektoren der Länge von ``x`` (NA als ``False``).
+
+    Details:
+        Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B. eine Spalte aus
+        ``series_align()``. Alle Fenster (``n``, ``fast``, ``slow``, ``window``, ``lag``) zählen in Zeilen der
+        Daten, bei Kalendertagsdaten (Wochenenden per LOCF) also in Kalendertagen, bei Handelstagsdaten in
+        Handelstagen. Solange ein Fenster noch nicht gefüllt ist, sind beide Signale ``False`` (außer bei
+        ``signal_drawdown``, das anfangs das Hoch der bisherigen Zeilen verwendet). ``x`` sollte keine NA
+        enthalten: Bei Durchschnitten liefern Fenster mit NA kein Signal, beim exponentiellen Durchschnitt auch
+        alle folgenden Zeilen; bei ``signal_drawdown`` nur die Zeile mit NA (das Hoch wird ohne sie fortgeführt).
+
+        ``band`` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale ``False``, der
+        Zustand in ``simulation()`` bzw. ``signal_state()`` bleibt dann unverändert. Bei Durchschnitten
+        (``signal_sma``, ``signal_ema``, ``signal_crossover``) ist ``band`` relativ zum Durchschnitt in Prozent,
+        bei ``signal_momentum`` und ``signal_volatility`` ein Abstand in Prozentpunkten zu ``threshold``.
+
+        - signal_sma: Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten ``n`` Zeilen
+          (einschließlich der aktuellen): Kauf ab ``SMA * (1 + band/100)``, Verkauf unter ``SMA * (1 -
+          band/100)``, dazwischen bleibt der Zustand.
+        - signal_ema: Wie ``signal_sma`` mit exponentiellem Durchschnitt (Glättung 2 / (n + 1), Start mit dem
+          einfachen Mittel der ersten ``n`` Werte).
+        - signal_crossover: Schneller über langsamem Durchschnitt: Kauf, wenn der schnelle mindestens das ``(1 +
+          band/100)``-fache des langsamen erreicht, Verkauf unter dem ``(1 - band/100)``-fachen.
+        - signal_momentum: Rendite über ``n`` Zeilen in Prozent: Kauf ab ``threshold + band``, Verkauf unter
+          ``threshold - band``.
+        - signal_drawdown: Verkauf ab ``sell_dd`` Prozent unter dem (rollierenden) Hoch, Kauf (Wiedereinstieg),
+          solange der Abstand unter ``buy_dd`` Prozent liegt; dazwischen bleibt der Zustand.
+        - signal_volatility: Realisierte Volatilität der Log-Renditen über ``n`` Zeilen, annualisiert mit ``ppy``,
+          in Prozent p. a.: Kauf bis ``threshold - band``, Verkauf über ``threshold + band``.
+        - signal_combine: Verknüpft Signale: ``"and"`` kauft nur, wenn alle kaufen, und verkauft, sobald eines
+          verkauft; ``"or"`` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+    Beispiel::
+
+        import numpy as np, simlev
+        x = 100 * np.cumprod(1 + np.random.default_rng(1).normal(2e-4, 0.01, 1000))
+        print(simlev.signal_crossover(x, fast=50, slow=200)["buy"].sum())
     """
     type_ = _match_arg(type, ("sma", "ema"))
     if fast >= slow:
@@ -142,7 +295,64 @@ def signal_crossover(x, *, fast=50, slow=200, type=("sma", "ema"), band=0, lag=0
 
 
 def signal_momentum(x, *, n=250, threshold=0, band=0, lag=0):
-    """Rendite über ``n`` Zeilen in Prozent: Kauf ab ``threshold + band``, Verkauf unter ``threshold - band``."""
+    """Rendite über ``n`` Zeilen in Prozent: Kauf ab ``threshold + band``, Verkauf unter ``threshold - band``.
+
+    Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das ``bootstrap_study()`` und
+    ``param_search()`` für ``signal = function(df) ...`` erwarten: Die Elemente ``buy`` und ``sell`` werden dort
+    als gleichnamige Spalten an den Datensatz angehängt. Für ``simulation()`` hängt man sie selbst an und nennt
+    sie in ``asset_config()`` (``trading = "signal"``, ``signal_buy``, ``signal_sell``); für ``tactical_rules()``
+    lassen sie sich direkt als Bedingung verwenden.
+
+    Args:
+        x: Numerischer Vektor mit Kursniveaus (z. B. ``df["eu"]``).
+        n: Fensterlänge in Zeilen (Standard: 200 bei ``signal_sma`` und ``signal_ema``, 250 bei
+            ``signal_momentum``, 20 bei ``signal_volatility``).
+        threshold: Schwelle in Prozent: bei ``signal_momentum`` für die Rendite über ``n`` Zeilen (Standard 0),
+            bei ``signal_volatility`` für die Volatilität in Prozent p. a. (Standard 25).
+        band: Hysterese-Band (Standard 0 = keins): bei Durchschnitten in Prozent des Durchschnitts (1 = 1 %), bei
+            ``signal_momentum`` und ``signal_volatility`` in Prozentpunkten um ``threshold``.
+        lag: Verzögerung der Signale in Zeilen (Standard 0; z. B. 1, um erst in der Folgezeile zu handeln). Die
+            ersten ``lag`` Zeilen sind ``False``.
+
+    Returns:
+        ``{"buy": ..., "sell": ...}`` mit logischen Vektoren der Länge von ``x`` (NA als ``False``).
+
+    Details:
+        Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B. eine Spalte aus
+        ``series_align()``. Alle Fenster (``n``, ``fast``, ``slow``, ``window``, ``lag``) zählen in Zeilen der
+        Daten, bei Kalendertagsdaten (Wochenenden per LOCF) also in Kalendertagen, bei Handelstagsdaten in
+        Handelstagen. Solange ein Fenster noch nicht gefüllt ist, sind beide Signale ``False`` (außer bei
+        ``signal_drawdown``, das anfangs das Hoch der bisherigen Zeilen verwendet). ``x`` sollte keine NA
+        enthalten: Bei Durchschnitten liefern Fenster mit NA kein Signal, beim exponentiellen Durchschnitt auch
+        alle folgenden Zeilen; bei ``signal_drawdown`` nur die Zeile mit NA (das Hoch wird ohne sie fortgeführt).
+
+        ``band`` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale ``False``, der
+        Zustand in ``simulation()`` bzw. ``signal_state()`` bleibt dann unverändert. Bei Durchschnitten
+        (``signal_sma``, ``signal_ema``, ``signal_crossover``) ist ``band`` relativ zum Durchschnitt in Prozent,
+        bei ``signal_momentum`` und ``signal_volatility`` ein Abstand in Prozentpunkten zu ``threshold``.
+
+        - signal_sma: Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten ``n`` Zeilen
+          (einschließlich der aktuellen): Kauf ab ``SMA * (1 + band/100)``, Verkauf unter ``SMA * (1 -
+          band/100)``, dazwischen bleibt der Zustand.
+        - signal_ema: Wie ``signal_sma`` mit exponentiellem Durchschnitt (Glättung 2 / (n + 1), Start mit dem
+          einfachen Mittel der ersten ``n`` Werte).
+        - signal_crossover: Schneller über langsamem Durchschnitt: Kauf, wenn der schnelle mindestens das ``(1 +
+          band/100)``-fache des langsamen erreicht, Verkauf unter dem ``(1 - band/100)``-fachen.
+        - signal_momentum: Rendite über ``n`` Zeilen in Prozent: Kauf ab ``threshold + band``, Verkauf unter
+          ``threshold - band``.
+        - signal_drawdown: Verkauf ab ``sell_dd`` Prozent unter dem (rollierenden) Hoch, Kauf (Wiedereinstieg),
+          solange der Abstand unter ``buy_dd`` Prozent liegt; dazwischen bleibt der Zustand.
+        - signal_volatility: Realisierte Volatilität der Log-Renditen über ``n`` Zeilen, annualisiert mit ``ppy``,
+          in Prozent p. a.: Kauf bis ``threshold - band``, Verkauf über ``threshold + band``.
+        - signal_combine: Verknüpft Signale: ``"and"`` kauft nur, wenn alle kaufen, und verkauft, sobald eines
+          verkauft; ``"or"`` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+    Beispiel::
+
+        import numpy as np, simlev
+        x = 100 * np.cumprod(1 + np.random.default_rng(1).normal(2e-4, 0.01, 1000))
+        print(simlev.signal_momentum(x, n=250)["buy"].sum())
+    """
     x = _as_numeric(x)
     m = len(x)
     n = int(n)
@@ -156,11 +366,58 @@ def signal_momentum(x, *, n=250, threshold=0, band=0, lag=0):
 def signal_drawdown(x, *, sell_dd=20, buy_dd=10, window=None, lag=0):
     """Verkauf ab ``sell_dd`` Prozent unter dem (rollierenden) Hoch, Kauf unter ``buy_dd`` Prozent.
 
+    Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das ``bootstrap_study()`` und
+    ``param_search()`` für ``signal = function(df) ...`` erwarten: Die Elemente ``buy`` und ``sell`` werden dort
+    als gleichnamige Spalten an den Datensatz angehängt. Für ``simulation()`` hängt man sie selbst an und nennt
+    sie in ``asset_config()`` (``trading = "signal"``, ``signal_buy``, ``signal_sell``); für ``tactical_rules()``
+    lassen sie sich direkt als Bedingung verwenden.
+
     Args:
-        x: Kursniveaus.
-        sell_dd, buy_dd: Abstand zum Hoch in Prozent (``buy_dd <= sell_dd``).
-        window: Fenster für das rollierende Hoch (``None`` = laufendes Hoch).
-        lag: Verzögerung in Zeilen.
+        x: Numerischer Vektor mit Kursniveaus (z. B. ``df["eu"]``).
+        sell_dd, buy_dd: Abstand zum Hoch in Prozent (positiv, 20 = 20 % unter dem Hoch); ``buy_dd`` darf nicht
+            größer als ``sell_dd`` sein (Standard 20 und 10).
+        window: Fenster in Zeilen für das rollierende Hoch (Standard ``None`` = laufendes Hoch seit Beginn).
+        lag: Verzögerung der Signale in Zeilen (Standard 0; z. B. 1, um erst in der Folgezeile zu handeln). Die
+            ersten ``lag`` Zeilen sind ``False``.
+
+    Returns:
+        ``{"buy": ..., "sell": ...}`` mit logischen Vektoren der Länge von ``x`` (NA als ``False``).
+
+    Details:
+        Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B. eine Spalte aus
+        ``series_align()``. Alle Fenster (``n``, ``fast``, ``slow``, ``window``, ``lag``) zählen in Zeilen der
+        Daten, bei Kalendertagsdaten (Wochenenden per LOCF) also in Kalendertagen, bei Handelstagsdaten in
+        Handelstagen. Solange ein Fenster noch nicht gefüllt ist, sind beide Signale ``False`` (außer bei
+        ``signal_drawdown``, das anfangs das Hoch der bisherigen Zeilen verwendet). ``x`` sollte keine NA
+        enthalten: Bei Durchschnitten liefern Fenster mit NA kein Signal, beim exponentiellen Durchschnitt auch
+        alle folgenden Zeilen; bei ``signal_drawdown`` nur die Zeile mit NA (das Hoch wird ohne sie fortgeführt).
+
+        ``band`` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale ``False``, der
+        Zustand in ``simulation()`` bzw. ``signal_state()`` bleibt dann unverändert. Bei Durchschnitten
+        (``signal_sma``, ``signal_ema``, ``signal_crossover``) ist ``band`` relativ zum Durchschnitt in Prozent,
+        bei ``signal_momentum`` und ``signal_volatility`` ein Abstand in Prozentpunkten zu ``threshold``.
+
+        - signal_sma: Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten ``n`` Zeilen
+          (einschließlich der aktuellen): Kauf ab ``SMA * (1 + band/100)``, Verkauf unter ``SMA * (1 -
+          band/100)``, dazwischen bleibt der Zustand.
+        - signal_ema: Wie ``signal_sma`` mit exponentiellem Durchschnitt (Glättung 2 / (n + 1), Start mit dem
+          einfachen Mittel der ersten ``n`` Werte).
+        - signal_crossover: Schneller über langsamem Durchschnitt: Kauf, wenn der schnelle mindestens das ``(1 +
+          band/100)``-fache des langsamen erreicht, Verkauf unter dem ``(1 - band/100)``-fachen.
+        - signal_momentum: Rendite über ``n`` Zeilen in Prozent: Kauf ab ``threshold + band``, Verkauf unter
+          ``threshold - band``.
+        - signal_drawdown: Verkauf ab ``sell_dd`` Prozent unter dem (rollierenden) Hoch, Kauf (Wiedereinstieg),
+          solange der Abstand unter ``buy_dd`` Prozent liegt; dazwischen bleibt der Zustand.
+        - signal_volatility: Realisierte Volatilität der Log-Renditen über ``n`` Zeilen, annualisiert mit ``ppy``,
+          in Prozent p. a.: Kauf bis ``threshold - band``, Verkauf über ``threshold + band``.
+        - signal_combine: Verknüpft Signale: ``"and"`` kauft nur, wenn alle kaufen, und verkauft, sobald eines
+          verkauft; ``"or"`` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+    Beispiel::
+
+        import numpy as np, simlev
+        x = 100 * np.cumprod(1 + np.random.default_rng(1).normal(2e-4, 0.01, 1000))
+        print(simlev.signal_drawdown(x, sell_dd=20, buy_dd=10)["sell"].sum())
     """
     x = _as_numeric(x)
     if buy_dd > sell_dd:
@@ -180,7 +437,63 @@ def signal_drawdown(x, *, sell_dd=20, buy_dd=10, window=None, lag=0):
 def signal_volatility(x, *, n=20, threshold=25, band=0, ppy=365.25, lag=0):
     """Realisierte Volatilität der Log-Renditen über ``n`` Zeilen in Prozent p. a.
 
-    Kauf bis ``threshold - band``, Verkauf über ``threshold + band``.
+    Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das ``bootstrap_study()`` und
+    ``param_search()`` für ``signal = function(df) ...`` erwarten: Die Elemente ``buy`` und ``sell`` werden dort
+    als gleichnamige Spalten an den Datensatz angehängt. Für ``simulation()`` hängt man sie selbst an und nennt
+    sie in ``asset_config()`` (``trading = "signal"``, ``signal_buy``, ``signal_sell``); für ``tactical_rules()``
+    lassen sie sich direkt als Bedingung verwenden.
+
+    Args:
+        x: Numerischer Vektor mit Kursniveaus (z. B. ``df["eu"]``).
+        n: Fensterlänge in Zeilen (Standard: 200 bei ``signal_sma`` und ``signal_ema``, 250 bei
+            ``signal_momentum``, 20 bei ``signal_volatility``).
+        threshold: Schwelle in Prozent: bei ``signal_momentum`` für die Rendite über ``n`` Zeilen (Standard 0),
+            bei ``signal_volatility`` für die Volatilität in Prozent p. a. (Standard 25).
+        band: Hysterese-Band (Standard 0 = keins): bei Durchschnitten in Prozent des Durchschnitts (1 = 1 %), bei
+            ``signal_momentum`` und ``signal_volatility`` in Prozentpunkten um ``threshold``.
+        ppy: Zeilen je Jahr für die Annualisierung der Volatilität (Standard 365.25 für Kalendertagsdaten; bei
+            Handelstagsdaten z. B. 252). Wird nicht aus den Daten ermittelt.
+        lag: Verzögerung der Signale in Zeilen (Standard 0; z. B. 1, um erst in der Folgezeile zu handeln). Die
+            ersten ``lag`` Zeilen sind ``False``.
+
+    Returns:
+        ``{"buy": ..., "sell": ...}`` mit logischen Vektoren der Länge von ``x`` (NA als ``False``).
+
+    Details:
+        Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B. eine Spalte aus
+        ``series_align()``. Alle Fenster (``n``, ``fast``, ``slow``, ``window``, ``lag``) zählen in Zeilen der
+        Daten, bei Kalendertagsdaten (Wochenenden per LOCF) also in Kalendertagen, bei Handelstagsdaten in
+        Handelstagen. Solange ein Fenster noch nicht gefüllt ist, sind beide Signale ``False`` (außer bei
+        ``signal_drawdown``, das anfangs das Hoch der bisherigen Zeilen verwendet). ``x`` sollte keine NA
+        enthalten: Bei Durchschnitten liefern Fenster mit NA kein Signal, beim exponentiellen Durchschnitt auch
+        alle folgenden Zeilen; bei ``signal_drawdown`` nur die Zeile mit NA (das Hoch wird ohne sie fortgeführt).
+
+        ``band`` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale ``False``, der
+        Zustand in ``simulation()`` bzw. ``signal_state()`` bleibt dann unverändert. Bei Durchschnitten
+        (``signal_sma``, ``signal_ema``, ``signal_crossover``) ist ``band`` relativ zum Durchschnitt in Prozent,
+        bei ``signal_momentum`` und ``signal_volatility`` ein Abstand in Prozentpunkten zu ``threshold``.
+
+        - signal_sma: Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten ``n`` Zeilen
+          (einschließlich der aktuellen): Kauf ab ``SMA * (1 + band/100)``, Verkauf unter ``SMA * (1 -
+          band/100)``, dazwischen bleibt der Zustand.
+        - signal_ema: Wie ``signal_sma`` mit exponentiellem Durchschnitt (Glättung 2 / (n + 1), Start mit dem
+          einfachen Mittel der ersten ``n`` Werte).
+        - signal_crossover: Schneller über langsamem Durchschnitt: Kauf, wenn der schnelle mindestens das ``(1 +
+          band/100)``-fache des langsamen erreicht, Verkauf unter dem ``(1 - band/100)``-fachen.
+        - signal_momentum: Rendite über ``n`` Zeilen in Prozent: Kauf ab ``threshold + band``, Verkauf unter
+          ``threshold - band``.
+        - signal_drawdown: Verkauf ab ``sell_dd`` Prozent unter dem (rollierenden) Hoch, Kauf (Wiedereinstieg),
+          solange der Abstand unter ``buy_dd`` Prozent liegt; dazwischen bleibt der Zustand.
+        - signal_volatility: Realisierte Volatilität der Log-Renditen über ``n`` Zeilen, annualisiert mit ``ppy``,
+          in Prozent p. a.: Kauf bis ``threshold - band``, Verkauf über ``threshold + band``.
+        - signal_combine: Verknüpft Signale: ``"and"`` kauft nur, wenn alle kaufen, und verkauft, sobald eines
+          verkauft; ``"or"`` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+    Beispiel::
+
+        import numpy as np, simlev
+        x = 100 * np.cumprod(1 + np.random.default_rng(1).normal(2e-4, 0.01, 1000))
+        print(simlev.signal_volatility(x, n=20, threshold=25)["buy"].sum())
     """
     x = _as_numeric(x)
     r = np.concatenate([[_NAN], np.diff(_libm.log(x))]) if len(x) else np.empty(0)
@@ -201,12 +514,58 @@ def _get(z, k):
 
 
 def signal_combine(*signals, op=("and", "or")):
-    """Verknüpft Signale: ``"and"`` kauft nur, wenn alle kaufen, und verkauft, sobald eines verkauft;
-    ``"or"`` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+    """Verknüpft Signale: ``"and"`` kauft nur, wenn alle kaufen, und verkauft, sobald eines verkauft; ``"or"`` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+    Erzeugen Kauf- und Verkaufssignale aus einer Kursreihe, im Format, das ``bootstrap_study()`` und
+    ``param_search()`` für ``signal = function(df) ...`` erwarten: Die Elemente ``buy`` und ``sell`` werden dort
+    als gleichnamige Spalten an den Datensatz angehängt. Für ``simulation()`` hängt man sie selbst an und nennt
+    sie in ``asset_config()`` (``trading = "signal"``, ``signal_buy``, ``signal_sell``); für ``tactical_rules()``
+    lassen sie sich direkt als Bedingung verwenden.
 
     Args:
-        *signals: Signal-Listen ``{"buy", "sell"}`` gleicher Länge.
-        op: ``"and"`` oder ``"or"``.
+        *signals: Bei ``signal_combine``: Signal-Listen ``{"buy": ..., "sell": ...}`` gleicher Länge (sonst
+            Fehler).
+        op: Verknüpfung bei ``signal_combine``: ``"and"`` (Standard) oder ``"or"``.
+
+    Returns:
+        ``{"buy": ..., "sell": ...}`` mit logischen Vektoren der Länge von ``x`` (NA als ``False``).
+
+    Details:
+        Eingabe ist ein numerischer Vektor mit Kursniveaus (keine Renditen), z. B. eine Spalte aus
+        ``series_align()``. Alle Fenster (``n``, ``fast``, ``slow``, ``window``, ``lag``) zählen in Zeilen der
+        Daten, bei Kalendertagsdaten (Wochenenden per LOCF) also in Kalendertagen, bei Handelstagsdaten in
+        Handelstagen. Solange ein Fenster noch nicht gefüllt ist, sind beide Signale ``False`` (außer bei
+        ``signal_drawdown``, das anfangs das Hoch der bisherigen Zeilen verwendet). ``x`` sollte keine NA
+        enthalten: Bei Durchschnitten liefern Fenster mit NA kein Signal, beim exponentiellen Durchschnitt auch
+        alle folgenden Zeilen; bei ``signal_drawdown`` nur die Zeile mit NA (das Hoch wird ohne sie fortgeführt).
+
+        ``band`` wirkt als Hysterese: Zwischen Kauf- und Verkaufsschwelle sind beide Signale ``False``, der
+        Zustand in ``simulation()`` bzw. ``signal_state()`` bleibt dann unverändert. Bei Durchschnitten
+        (``signal_sma``, ``signal_ema``, ``signal_crossover``) ist ``band`` relativ zum Durchschnitt in Prozent,
+        bei ``signal_momentum`` und ``signal_volatility`` ein Abstand in Prozentpunkten zu ``threshold``.
+
+        - signal_sma: Kurs über/unter dem einfachen gleitenden Durchschnitt der letzten ``n`` Zeilen
+          (einschließlich der aktuellen): Kauf ab ``SMA * (1 + band/100)``, Verkauf unter ``SMA * (1 -
+          band/100)``, dazwischen bleibt der Zustand.
+        - signal_ema: Wie ``signal_sma`` mit exponentiellem Durchschnitt (Glättung 2 / (n + 1), Start mit dem
+          einfachen Mittel der ersten ``n`` Werte).
+        - signal_crossover: Schneller über langsamem Durchschnitt: Kauf, wenn der schnelle mindestens das ``(1 +
+          band/100)``-fache des langsamen erreicht, Verkauf unter dem ``(1 - band/100)``-fachen.
+        - signal_momentum: Rendite über ``n`` Zeilen in Prozent: Kauf ab ``threshold + band``, Verkauf unter
+          ``threshold - band``.
+        - signal_drawdown: Verkauf ab ``sell_dd`` Prozent unter dem (rollierenden) Hoch, Kauf (Wiedereinstieg),
+          solange der Abstand unter ``buy_dd`` Prozent liegt; dazwischen bleibt der Zustand.
+        - signal_volatility: Realisierte Volatilität der Log-Renditen über ``n`` Zeilen, annualisiert mit ``ppy``,
+          in Prozent p. a.: Kauf bis ``threshold - band``, Verkauf über ``threshold + band``.
+        - signal_combine: Verknüpft Signale: ``"and"`` kauft nur, wenn alle kaufen, und verkauft, sobald eines
+          verkauft; ``"or"`` kauft, sobald eines kauft, und verkauft nur, wenn alle verkaufen.
+
+    Beispiel::
+
+        import numpy as np, simlev
+        x = 100 * np.cumprod(1 + np.random.default_rng(1).normal(2e-4, 0.01, 1000))
+        both = simlev.signal_combine(simlev.signal_sma(x, n=200), simlev.signal_volatility(x, n=20, threshold=25))
+        print(both["buy"].sum())
     """
     op = _match_arg(op, ("and", "or"))
     s = list(signals)

@@ -1,4 +1,4 @@
-"""Portfolio-Optimierung und Risikozerlegung (Port von ``r/R/optimize.R``).
+"""Portfolio-Optimierung und Risikozerlegung (Gegenstück zu ``r/R/optimize.R``).
 
 - :func:`portfolio_optimize`    Minimum-Varianz, Mean-Variance, maximale Sharpe Ratio,
   maximale Diversifikation, Risikoparität (Risikobudgets), Hierarchical Risk Parity,
@@ -89,7 +89,7 @@ def _col_means(R):
 
 
 def _mp(x, y):
-    """``x %m% y`` (slc-Matrixprodukt, Entwurf B.6; Ergebnis ndarray)."""
+    """``x %m% y`` (slc-Matrixprodukt; Ergebnis ndarray)."""
     return np.asarray(_lib.matmul(x, y), dtype=np.float64)
 
 
@@ -502,7 +502,7 @@ def _min_cvar(R, alpha, lo, hi):
 def _cdar_hist(r, alpha):
     """``.cdar_hist``: CDaR der kumulierten, nicht aufgezinsten Rendite."""
     r = np.asarray(r, dtype=np.float64).ravel()
-    C = np.concatenate(([0.0], r_cumsum(r)))   # N11: C-Kern (cumsum in long double wie R)
+    C = np.concatenate(([0.0], r_cumsum(r)))   # C-Kern (cumsum in long double wie R)
     D = (np.maximum.accumulate(C) - C)[1:]
     v = _quantile(D, 1 - alpha)
     return r_mean(D[D >= v])
@@ -679,28 +679,111 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
                        risk_aversion=4, budget=None, alpha=0.05, frequency=_FREQS, resample=0, block=None, seed=None):
     """Portfolio optimieren (Long-only, Summe 1, optionale Grenzen je Anlage).
 
+    Bestimmt Gewichte für ein Long-only-Portfolio (Summe 1) mit optionalen Grenzen je Anlage aus historischen
+    Periodenrenditen. Eingabe ist entweder ein DataFrame mit Kursen oder eine fertige Renditematrix; Ergebnis sind
+    Gewichte, Kennzahlen und Risikobeiträge.
+
     Args:
-        x: ``DataFrame`` mit Spalte ``date`` und Kursspalten oder Matrix einfacher
-            Periodenrenditen als Anteil (ohne Spaltennamen ``A1``, ``A2``, …).
-        assets: zu verwendende Spalten (``None`` = alle numerischen außer ``date``).
-        method: ``"min_variance"`` (Standard), ``"max_sharpe"``, ``"mean_variance"``,
-            ``"max_diversification"``, ``"risk_parity"``, ``"hrp"``, ``"min_cvar"``,
-            ``"min_cdar"``, ``"inverse_vol"`` oder ``"equal"``.
-        lower, upper: Grenzen als Anteil (Skalar, benannter Vektor oder ein Wert je Anlage).
-        cov: ``"sample"``, ``"ledoit_wolf"``, ``"ewma"``, ``"denoise"`` oder ``"gerber"``.
-        mu: erwartete Renditen in Prozent p. a. (für ``max_sharpe``, ``mean_variance``).
-        risk_free: risikoloser Zins in Prozent p. a.
-        risk_aversion: Risikoaversion für ``mean_variance``.
-        budget: Risikobudgets für ``risk_parity``.
-        alpha: Tail-Wahrscheinlichkeit für CVaR/CDaR, in (0, 0.5].
-        frequency: ``"week"`` (Standard), ``"day"`` oder ``"month"``.
-        resample: Anzahl Block-Bootstrap-Stichproben (Michaud; 0 = aus).
-        block: mittlere Blocklänge (``None`` = T^(1/3) gerundet, mindestens 2).
-        seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`) für das Resampling.
+        x: DataFrame mit Spalte ``date`` (Date) und Kursspalten (Kursniveaus, keine Renditen) oder numerische
+            Matrix bzw. DataFrame ohne ``date`` mit einfachen Periodenrenditen als Anteil (Zeilen = Perioden,
+            Spalten = Anlagen; ohne Spaltennamen ``A1``, ``A2``, ...).
+        assets: Zeichenvektor der zu verwendenden Spalten. ``None`` (Standard) = alle numerischen Spalten außer
+            ``date`` bzw. alle Spalten der Matrix.
+        method: Verfahren (siehe Tabelle oben): ``"min_variance"`` (Standard), ``"max_sharpe"``,
+            ``"mean_variance"``, ``"max_diversification"``, ``"risk_parity"``, ``"hrp"``, ``"min_cvar"``,
+            ``"min_cdar"``, ``"inverse_vol"`` oder ``"equal"``. ``risk_parity``, ``hrp``, ``inverse_vol`` und
+            ``equal`` ignorieren ``lower``/``upper`` (mit Warnung, wenn andere als die Standardgrenzen angegeben
+            sind). ``risk_parity``, ``hrp`` und ``inverse_vol`` brechen bei Anlagen ohne Schwankung (Volatilität
+            0, z. B. Geldmarkt mit festem Zins) mit Fehler ab.
+        lower, upper: Unter- und Obergrenzen der Gewichte als Anteil (0.6 = 60 %): Skalar für alle Anlagen,
+            benannter Vektor (nicht genannte Anlagen erhalten 0 bzw. 1; unbekannte Namen sind ein Fehler) oder
+            unbenannter Vektor mit genau einem Wert je Anlage (in der Reihenfolge der Spalten; andere Längen sind
+            ein Fehler). Standard 0 und 1. Keine NA; ``lower`` >= 0 (Long-only). Erforderlich ist sum(lower) <= 1
+            <= sum(upper) und lower <= upper. ``Inf`` in ``upper`` bedeutet keine Obergrenze und wird als 1
+            geführt (auch in ``bounds``); andere Obergrenzen > 1 wirken ebenfalls wie 1, erzeugen aber eine
+            Warnung (vermutlich Prozent statt Anteil, z. B. 26 statt 0.26).
+        cov: Kovarianzschätzer: ``"sample"`` (Standard, Stichprobe), ``"ledoit_wolf"`` (Schrumpfung auf skalierte
+            Einheitsmatrix, Ledoit & Wolf 2004), ``"ewma"`` (exponentiell gewichtet, Halbwertszeit ein Viertel der
+            Stichprobe, 5 bis 52 Perioden), ``"denoise"`` (Marchenko-Pastur-Rauschfilter, Laloux et al. 1999) oder
+            ``"gerber"`` (Gerber-Statistik, Gerber et al. 2022).
+        mu: Optional erwartete Renditen in Prozent p. a. (5 = 5 %), endlich, ohne NA: benannter Vektor (unbekannte
+            Namen sind ein Fehler), unbenannter Vektor mit genau einem Wert je Anlage (in der Reihenfolge der
+            Spalten) oder Skalar (für alle Anlagen gleich); nur für ``max_sharpe`` und ``mean_variance`` verwendet
+            (fehlt dort eine Anlage im benannten Vektor, bricht die Funktion mit ihrem Namen ab). ``None``
+            (Standard) = historisches arithmetisches Mittel, annualisiert.
+        risk_free: Risikoloser Zins in Prozent p. a. (Standard 0) für ``max_sharpe`` und die ausgewiesene Sharpe
+            Ratio.
+        risk_aversion: Risikoaversion γ für ``mean_variance`` (Standard 4), bezogen auf Rendite und Varianz als
+            Anteil p. a.
+        budget: Risikobudgets für ``risk_parity``: Skalar (gleiche Budgets), benannter Vektor (nicht genannte
+            Anlagen 0) oder unbenannter Vektor mit einem Wert je Anlage (Spaltenreihenfolge); Werte >= 0, wird auf
+            Summe 1 normiert. ``None`` (Standard) = gleiche Risikobeiträge.
+        alpha: Tail-Wahrscheinlichkeit als Anteil für CVaR und CDaR (Standard 0.05 = schlechteste 5 % der Perioden
+            bzw. Drawdowns), im Bereich (0, 0.5]; nicht das Konfidenzniveau (0.95) und nicht in Prozent (5) -
+            beides ist ein Fehler. Wirkt auf ``min_cvar``, ``min_cdar`` und die ausgewiesenen Kennzahlen.
+        frequency: Renditefrequenz: ``"week"`` (Standard), ``"day"`` oder ``"month"``. Bei Kursdaten Aggregation
+            (ISO-Woche, Kalendermonat); bei einer Renditematrix nur die Perioden je Jahr (52, 252, 12).
+        resample: Anzahl Block-Bootstrap-Stichproben für das Michaud-Resampling (ganze Zahl, Standard 0 = aus);
+            die Gewichte sind dann das Mittel der Einzeloptimierungen.
+        block: Mittlere Blocklänge des stationären Bootstraps für das Resampling in Perioden. ``None`` (Standard)
+            = T^1/3 gerundet, mindestens 2 (T = Anzahl Perioden).
+        seed: Startwert für das Resampling. Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis
+            reproduzierbar und der Zufallszustand von SimLev bleibt unverändert; mit ``None`` wird genau einmal
+            ein Startwert aus dem Zufallszustand von SimLev gezogen (siehe ``simlev_seed()``), wiederholte Aufrufe
+            liefern dann verschiedene Ergebnisse. ``set.seed()`` wirkt nicht.
 
     Returns:
-        :class:`SimLevOptimization` mit ``weights``, ``stats``, ``risk``, ``alpha``,
-        ``method``, ``bounds``, ``resampled``, ``cov_type``, ``frequency``, ``n_obs``.
+        Objekt der Klasse ``SimLevOptimization``, eine Liste mit
+
+        - weights: Benannter Gewichtsvektor (Anteile, Summe 1).
+        - stats: Benannter Vektor: ``expected_return`` (historisches Mittel, annualisiert, Anteil p. a.; auch wenn
+          ``mu`` angegeben ist), ``volatility`` (Anteil p. a.), ``sharpe`` (bei Volatilität 0 wie auch
+          ``diversification_ratio``, ``effective_n_risk`` und ``risk_share`` ``NA``, mit Warnung), ``cvar``
+          (historischer CVaR je Periode, Verlust positiv, Anteil), ``cdar`` (CDaR der kumulierten, nicht
+          aufgezinsten Rendite, Anteil), ``diversification_ratio``, ``effective_n`` (1 / Σ w^2),
+          ``effective_n_risk`` (dasselbe für die Risikoanteile).
+        - risk: DataFrame je Anlage: ``asset``, ``weight``, ``volatility_contribution`` (Anteil p. a., Summe =
+          Volatilität), ``risk_share`` (Anteil an der Volatilität).
+
+        sowie ``alpha``, ``method``, ``bounds`` (Matrix der Grenzen), ``resampled`` (Gewichte je Stichprobe oder
+        ``None``), ``cov_type``, ``frequency``, ``n_obs`` (Anzahl Perioden). Methoden ``print`` und ``plot``.
+
+    Details:
+        Renditen: Bei einem DataFrame mit Spalte ``date`` werden die Kurse wie in ``dependence_analysis()``
+        aufbereitet (Fortschreiben fehlender Werte, letzte Zeile je ISO-Woche bzw. Kalendermonat, bei ``"day"``
+        jede Zeile außer Tagen, an denen sich keine Anlage bewegt) und in einfache Renditen P_t / P_t-1 - 1
+        (Anteile) umgerechnet; die Perioden je Jahr werden aus den Daten ermittelt. Jede andere Eingabe wird als
+        Matrix einfacher Periodenrenditen als Anteil (0.01 = 1 %) behandelt; Zeilen mit fehlenden Werten
+        entfallen, unendliche Renditen (``Inf``) sind ein Fehler (mit Spalte und Zeile), die Perioden je Jahr sind
+        dann fest 252 (``"day"``), 52 (``"week"``) bzw. 12 (``"month"``). Erwartete Renditen und Kovarianz werden
+        mit diesen Perioden je Jahr annualisiert.
+
+        - ``min_variance`` | minimale Varianz
+        - ``mean_variance`` | max μ'w - (γ)/(2) w'Σ w mit Risikoaversion ``risk_aversion``
+        - ``max_sharpe`` | maximale Sharpe Ratio (Suche entlang der Effizienzgrenze)
+        - ``max_diversification`` | maximales Diversifikationsverhältnis w'σ / √(w'Σ w) (Choueifaty & Coignard
+          2008)
+        - ``risk_parity`` | gleiche (oder vorgegebene, ``budget``) Risikobeiträge (Spinu 2013)
+        - ``hrp`` | Hierarchical Risk Parity (Lopez de Prado 2016)
+        - ``min_cvar`` | minimaler historischer CVaR (Rockafellar & Uryasev 2000, geglättet)
+        - ``min_cdar`` | minimaler Conditional Drawdown at Risk (Chekhlov, Uryasev & Zabarankin 2005)
+        - ``inverse_vol``, ``equal`` | einfache Heuristiken
+
+        Erwartete Renditen aus der Historie sind sehr unsicher; Verfahren, die sie nutzen (``max_sharpe``,
+        ``mean_variance``), reagieren stark auf Schätzfehler. ``resample`` mittelt die Gewichte über
+        Block-Bootstrap- Stichproben der Historie (Michaud-Resampling) und glättet diese Abhängigkeit.
+
+    Literatur:
+        Ledoit, O. & Wolf, M. (2004), Journal of Multivariate Analysis 88(2); Spinu, F. (2013), SSRN 2297383;
+        Lopez de Prado, M. (2016), Journal of Portfolio Management 42(4); Rockafellar, R. T. & Uryasev, S. (2000),
+        Journal of Risk 2(3); Michaud, R. (1998), Efficient Asset Management.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        R = pd.DataFrame(rng.normal([0.002, 0.001, 0.0005], [0.03, 0.02, 0.01], (520, 3)), columns=["aktien", "reits", "anleihen"])
+        print(simlev.portfolio_optimize(R, method="risk_parity"))
     """
     method = _match_arg(method, _METHODS)
     cov = _match_arg(cov, _COVS)
@@ -733,7 +816,7 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
         from ._lib_models import boot_idx_stationary
 
         A = R.to_numpy(dtype=np.float64)
-        S = main_stream(seed)                           # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+        S = main_stream(seed)                           # Hauptstrom
         wbm = np.empty((int(resample), N))
         for bb in range(int(resample)):
             idx = np.asarray(boot_idx_stationary(T, T, block, stream=S), dtype=np.int64) - 1
@@ -886,12 +969,53 @@ def _dup_key(v):
 
 
 def portfolio_frontier(x, *, assets=None, n=40, lower=0, upper=1, cov=_COVS, risk_free=0, frequency=_FREQS):
-    """Effizienzgrenze: für ``n`` Risikoaversionen von 1e4 bis 0.02 (logarithmisch)
-    ``max mu'w - gamma/2 w'Sigma w`` unter denselben Grenzen wie :func:`portfolio_optimize`.
+    """Effizienzgrenze: für ``n`` Risikoaversionen von 1e4 bis 0.02 (logarithmisch) ``max mu'w - gamma/2 w'Sigma w`` unter denselben Grenzen wie :func:`portfolio_optimize`.
+
+    Berechnet Mean-Variance-effiziente Long-only-Portfolios unter denselben Grenzen wie ``portfolio_optimize()``:
+    Für ``n`` Risikoaversionen γ von 1e4 bis 0.02 (logarithmisch gestuft) wird max μ'w - (γ)/(2) w'Σ w gelöst, mit
+    historischen Mitteln und Kovarianz (annualisiert). Eingabe und Renditeberechnung wie bei
+    ``portfolio_optimize()`` (Kurs-DataFrame mit ``date`` oder Matrix einfacher Periodenrenditen als Anteil); die
+    Grenzen werden ebenso geprüft (unerfüllbare Grenzen sind ein Fehler). ``print`` zeigt den Punkt mit der
+    kleinsten Volatilität ("Minimum-Varianz") und den mit der höchsten Sharpe Ratio, ``plot`` zeichnet die Grenze
+    mit den Einzelanlagen und markiert den Punkt mit der höchsten Sharpe Ratio.
+
+    Args:
+        x: DataFrame mit Spalte ``date`` (Date) und Kursspalten (Kursniveaus, keine Renditen) oder numerische
+            Matrix bzw. DataFrame ohne ``date`` mit einfachen Periodenrenditen als Anteil (Zeilen = Perioden,
+            Spalten = Anlagen; ohne Spaltennamen ``A1``, ``A2``, ...).
+        assets: Zeichenvektor der zu verwendenden Spalten. ``None`` (Standard) = alle numerischen Spalten außer
+            ``date`` bzw. alle Spalten der Matrix.
+        n: Anzahl der Risikoaversionen (ganze Zahl, Standard 40). Punkte mit (auf 6 Stellen) gleicher Rendite und
+            Volatilität werden nur einmal behalten; das Ergebnis kann daher weniger Zeilen haben.
+        lower, upper: Unter- und Obergrenzen der Gewichte als Anteil (0.6 = 60 %): Skalar für alle Anlagen,
+            benannter Vektor (nicht genannte Anlagen erhalten 0 bzw. 1; unbekannte Namen sind ein Fehler) oder
+            unbenannter Vektor mit genau einem Wert je Anlage (in der Reihenfolge der Spalten; andere Längen sind
+            ein Fehler). Standard 0 und 1. Keine NA; ``lower`` >= 0 (Long-only). Erforderlich ist sum(lower) <= 1
+            <= sum(upper) und lower <= upper. ``Inf`` in ``upper`` bedeutet keine Obergrenze und wird als 1
+            geführt (auch in ``bounds``); andere Obergrenzen > 1 wirken ebenfalls wie 1, erzeugen aber eine
+            Warnung (vermutlich Prozent statt Anteil, z. B. 26 statt 0.26).
+        cov: Kovarianzschätzer: ``"sample"`` (Standard, Stichprobe), ``"ledoit_wolf"`` (Schrumpfung auf skalierte
+            Einheitsmatrix, Ledoit & Wolf 2004), ``"ewma"`` (exponentiell gewichtet, Halbwertszeit ein Viertel der
+            Stichprobe, 5 bis 52 Perioden), ``"denoise"`` (Marchenko-Pastur-Rauschfilter, Laloux et al. 1999) oder
+            ``"gerber"`` (Gerber-Statistik, Gerber et al. 2022).
+        risk_free: Risikoloser Zins in Prozent p. a. (Standard 0) für ``max_sharpe`` und die ausgewiesene Sharpe
+            Ratio.
+        frequency: Renditefrequenz: ``"week"`` (Standard), ``"day"`` oder ``"month"``. Bei Kursdaten Aggregation
+            (ISO-Woche, Kalendermonat); bei einer Renditematrix nur die Perioden je Jahr (52, 252, 12).
 
     Returns:
-        :class:`SimLevFrontier` mit ``frontier`` (``expected_return``, ``volatility``,
-        ``sharpe``, Gewichte je Anlage), ``assets``, ``risk_free``, ``frequency``.
+        Objekt der Klasse ``SimLevFrontier`` mit ``frontier`` (DataFrame je Punkt: ``expected_return``,
+        ``volatility`` als Anteil p. a., ``sharpe`` mit ``risk_free`` (``NA`` bei Volatilität 0), dann je Anlage
+        eine Gewichtsspalte), ``assets`` (DataFrame der Einzelanlagen: ``asset``, ``expected_return``,
+        ``volatility``, Anteil p. a.), ``risk_free`` und ``frequency``. Methoden ``print`` und ``plot``.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        R = pd.DataFrame(rng.normal([0.002, 0.001, 0.0005], [0.03, 0.02, 0.01], (520, 3)), columns=["aktien", "reits", "anleihen"])
+        ef = simlev.portfolio_frontier(R, n=20, upper=0.7)
+        print(ef["frontier"].head(3))
     """
     cov = _match_arg(cov, _COVS)
     frequency = _match_arg(frequency, _FREQS)
@@ -1031,13 +1155,49 @@ def portfolio_rolling(data, assets, *, method="min_variance", window=3, every=("
                          frequency=_FREQS, **kwargs):
     """Rollierende Optimierung (Zielgewichte außerhalb der Stichprobe).
 
-    An jedem Entscheidungstermin (letzte Zeile je Monat/Quartal/Jahr, mindestens
-    ``window`` Jahre nach dem ersten Datum) wird auf dem Fenster (Termin - window*365.25
-    Tage, Termin] optimiert; fehlgeschlagene Termine erhalten Gleichgewichtung (Warnung).
+    Optimiert an jedem Entscheidungstermin auf den Renditen des zurückliegenden Fensters und hält die Gewichte bis
+    zum nächsten Termin. Das Ergebnis ist eine Zielgewichtsreihe für ``tactical_simulation()``; jede Entscheidung
+    nutzt nur Daten bis einschließlich des Entscheidungstags (gehandelt wird in ``tactical_simulation()`` mit
+    dessen ``lag``).
+
+    Args:
+        data: DataFrame mit Spalte ``date`` (Date) und Kursspalten (Kursniveaus, keine Renditen), z. B. aus
+            ``series_align()``. Eine Renditematrix ist hier nicht möglich.
+        assets: Zeichenvektor der Kursspalten (Pflicht).
+        method: Verfahren wie in ``portfolio_optimize()`` (Zeichenkette, Standard ``"min_variance"``).
+        window: Fensterlänge in Jahren (Standard 3).
+        every: Entscheidungsrhythmus: ``"month"`` (Standard), ``"quarter"`` oder ``"year"``.
+        frequency: Renditefrequenz innerhalb des Fensters: ``"week"`` (Standard, ISO-Woche), ``"day"`` oder
+            ``"month"``.
+        **kwargs: Weitere Argumente für ``portfolio_optimize()`` (``lower``, ``upper``, ``cov``, ``mu``,
+            ``risk_free``, ``budget``, ``alpha``, ``resample``, ...).
 
     Returns:
-        :class:`simlev.tactical.SimLevWeights` mit ``attrs`` ``source``,
-        ``decision_rows`` und ``failed_dates``.
+        Objekt der Klasse ``SimLevWeights`` (DataFrame mit ``date`` und einer Gewichtsspalte je Anlage, Anteile
+        mit Zeilensumme 1, eine Zeile je Zeile von ``data``); vor dem ersten Entscheidungstermin gleich gewichtet.
+        Attribute ``source`` (``"rolling <method>"``), ``decision_rows`` (Zeilennummern der Entscheidungstermine)
+        und ``failed_dates`` (Date-Vektor der Termine mit fehlgeschlagener Optimierung, dort Gleichgewichtung;
+        leer, wenn keine).
+
+    Details:
+        Entscheidungstermine sind die letzten Zeilen jedes Monats, Quartals bzw. Jahres, deren Datum mindestens
+        ``window`` Jahre (``window * 365.25`` Tage, gerundet) nach dem ersten Datum liegt. Das Fenster umfasst die
+        Zeilen mit Datum im Zeitraum (Termin - ``window * 365.25`` Tage, Termin]. Argumentfehler (unbekanntes
+        ``method``, unbekannte Argumente in ``...``, unerfüllbare Grenzen) brechen sofort ab. Schlägt eine
+        Optimierung an einem Termin fehl (z. B. zu wenige Perioden im Fenster), gilt dort Gleichgewichtung; die
+        Funktion warnt mit der Anzahl und der ersten Fehlermeldung. Die Zeilen von ``data`` werden nach ``date``
+        sortiert (mit Hinweis, falls nötig).
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1825
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        d["aktien"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d["anleihen"] = 100 * np.cumprod(1 + rng.normal(1e-4, 0.003, n))
+        w = simlev.portfolio_rolling(d, ["aktien", "anleihen"], window=2, every="quarter")
+        print(w)
     """
     every = _match_arg(every, ("month", "quarter", "year"))
     frequency = _match_arg(frequency, _FREQS)
@@ -1115,10 +1275,37 @@ def portfolio_rolling(data, assets, *, method="min_variance", window=3, every=("
 def portfolio_risk_contributions(x, weights, *, measure=("volatility", "cvar"), alpha=0.05, frequency=_FREQS, cov=_COVS):
     """Risikobeiträge (Euler-Zerlegung) von Volatilität oder historischem CVaR.
 
+    Zerlegt Volatilität oder historischen CVaR eines Portfolios additiv auf die Anlagen: RC_i = w_i ∂ ρ / ∂ w_i,
+    Σ_i RC_i = ρ. Für die Volatilität RC_i = w_i (Σ w)_i / σ_p, für den CVaR der mittlere Verlustbeitrag der
+    Anlage in den Perioden jenseits des VaR (historische Perioden, in denen der Portfolioverlust mindestens das (1
+    - ``alpha``)-Quantil der Verluste erreicht). Eingabe und Renditeberechnung wie bei ``portfolio_optimize()``.
+
+    Args:
+        x: DataFrame mit Spalte ``date`` (Date) und Kursspalten (Kursniveaus) oder Matrix einfacher
+            Periodenrenditen als Anteil (siehe ``portfolio_optimize()``).
+        weights: Benannter Gewichtsvektor (Anteile; Namen = Spalten von ``x``, nur diese Anlagen gehen ein; wird
+            nicht normiert; unbenannte Vektoren oder unbekannte Namen sind ein Fehler) oder Objekt der Klasse
+            ``SimLevOptimization`` (dessen ``weights``).
+        measure: Risikomaß: ``"volatility"`` (Standard, annualisiert) oder ``"cvar"`` (historischer CVaR je
+            Periode).
+        alpha: Tail-Wahrscheinlichkeit als Anteil für den CVaR (Standard 0.05 = schlechteste 5 % der Perioden), im
+            Bereich (0, 0.5].
+        frequency, cov: Siehe ``portfolio_optimize()`` (``cov`` nur für ``measure = "volatility"``).
+
     Returns:
-        ``DataFrame`` je Anlage (``asset``, ``weight``, ``contribution``, ``share``,
-        ``marginal``) mit ``attrs`` ``total``, ``measure``, ``effective_n`` und bei
+        DataFrame je Anlage: ``asset``, ``weight``, ``contribution`` (Beitrag RC_i; bei ``"volatility"`` als
+        Anteil p. a., bei ``"cvar"`` als Anteil je Periode, Verlust positiv), ``share`` (Anteil am Gesamtrisiko),
+        ``marginal`` (marginaler Beitrag ∂ ρ / ∂ w_i, bei ``"cvar"`` der mittlere Verlust der Anlage in den
+        Tail-Perioden, also ``contribution / weight``, auch für Gewicht 0 definiert). Attribute ``total``
+        (Gesamtrisiko in derselben Einheit), ``measure``, ``effective_n`` (1 / Σ share^2) und nur bei
         ``"volatility"`` ``diversification_ratio``.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        R = pd.DataFrame(rng.normal([0.002, 0.001, 0.0005], [0.03, 0.02, 0.01], (520, 3)), columns=["aktien", "reits", "anleihen"])
+        print(simlev.portfolio_risk_contributions(R, {"aktien": 0.5, "reits": 0.2, "anleihen": 0.3}))
     """
     measure = _match_arg(measure, ("volatility", "cvar"))
     frequency = _match_arg(frequency, _FREQS)
@@ -1195,18 +1382,60 @@ def portfolio_cpcv(x, *, assets=None, methods=("equal", "inverse_vol", "min_vari
                    n_groups=6, test_groups=2, purge=2, embargo=2, frequency=_FREQS):
     """Kombinatorische Kreuzvalidierung von Optimierungsverfahren (CPCV, Lopez de Prado 2018).
 
+    Teilt die Historie in ``n_groups`` zeitlich zusammenhängende Gruppen und bildet alle Kombinationen von
+    ``test_groups`` Testgruppen. Je Aufteilung wird auf den übrigen Gruppen optimiert - mit einer Sperrzone
+    (``purge``) von Perioden an den Grenzen zu den Testgruppen und einem ``embargo`` danach, damit sich Trainings-
+    und Testdaten nicht über Autokorrelation beeinflussen - und das Ergebnis auf den Testgruppen bewertet. Statt
+    eines einzelnen Backtests entsteht so eine Verteilung der Out-of-Sample-Kennzahlen je Verfahren (Lopez de
+    Prado 2018, Kap. 12).
+
     Args:
-        x: wie :func:`portfolio_optimize`.
-        assets: Spalten (``None`` = alle).
-        methods: Zeichenvektor von Verfahren oder benanntes ``dict`` von
-            Argumentlisten für :func:`portfolio_optimize`.
-        n_groups, test_groups: Gruppen insgesamt und je Aufteilung im Test.
-        purge, embargo: Sperrzone und Embargo in Perioden.
-        frequency: wie :func:`portfolio_optimize`.
+        x: DataFrame mit Spalte ``date`` (Date) und Kursspalten (Kursniveaus) oder Matrix einfacher
+            Periodenrenditen als Anteil (siehe ``portfolio_optimize()``).
+        assets: Zeichenvektor der Spalten. ``None`` (Standard) = alle numerischen Spalten außer ``date`` bzw. alle
+            Spalten der Matrix.
+        methods: Zeichenvektor von Verfahren aus ``portfolio_optimize()`` (Standard ``["equal", "inverse_vol",
+            "min_variance", "risk_parity", "max_sharpe"]``) oder benannte Liste von Argumentlisten für
+            ``portfolio_optimize()`` (z. B. ``{"mv": {"method": "min_variance", "cov": "ledoit_wolf"}}``).
+        n_groups: Anzahl Gruppen insgesamt (ganze Zahl >= 2, Standard 6).
+        test_groups: Anzahl Testgruppen je Aufteilung (ganze Zahl, Standard 2, kleiner als ``n_groups``); es gibt
+            choose(n_groups, test_groups) Aufteilungen.
+        purge, embargo: Sperrzone und Embargo in Perioden der gewählten Frequenz (Zeilen der Renditen, ganze
+            Zahlen >= 0, je Standard 2).
+        frequency: Siehe ``portfolio_optimize()``.
 
     Returns:
-        :class:`SimLevCPCV` mit ``splits``, ``summary``, ``n_splits``, ``n_groups``,
-        ``test_groups``, ``frequency``, ``failed``.
+        Objekt der Klasse ``SimLevCPCV`` mit
+
+        - splits: DataFrame je Verfahren und Aufteilung: ``method``, ``split``, ``return`` (arithmetisches Mittel,
+          annualisiert, Anteil p. a.), ``volatility`` (Anteil p. a.), ``sharpe`` (annualisiert, ohne risikolosen
+          Zins), ``cdar`` (CDaR bei 5 % der kumulierten, nicht aufgezinsten Testrenditen, Anteil).
+        - summary: DataFrame je Verfahren, absteigend nach mittlerer Sharpe Ratio: ``method``, ``mean``, ``sd``,
+          ``q10``, ``q50``, ``q90`` (der Sharpe Ratio über die Aufteilungen), ``volatility``, ``cdar`` (Mittel),
+          ``best_share`` (Anteil der Aufteilungen, in denen das Verfahren die höchste Sharpe Ratio hat, 0 bis 1).
+
+        sowie ``n_splits``, ``n_groups``, ``test_groups``, ``frequency`` und ``failed`` (DataFrame der
+        fehlgeschlagenen Optimierungen mit ``method``, ``split``, ``message`` oder ``None``). Methode ``print``.
+
+    Details:
+        Eingabe und Renditeberechnung wie bei ``portfolio_optimize()``; die Gruppen sind etwa gleich lange,
+        zusammenhängende Abschnitte der Periodenrenditen. Konkret werden vor jeder Testgruppe ``purge``
+        Trainingsperioden entfernt und nach jeder Testgruppe ``max(purge, embargo)`` Perioden (Sperrzone und
+        Embargo beginnen beide direkt nach dem Testende; bei 0 entfällt die jeweilige Sperrzone). Trainiert wird
+        mit denselben Perioden je Jahr wie die Bewertung (bei Kursdaten aus den Daten geschätzt). Die Testgruppen
+        einer Aufteilung werden für die Kennzahlen aneinandergehängt. Unbekannte Verfahren oder Argumente sind
+        sofort ein Fehler; Verfahren, deren Optimierung in einer Aufteilung fehlschlägt, fehlen dort (mit Warnung,
+        Einzelheiten in ``failed``); schlagen alle fehl, bricht die Funktion mit der ersten Fehlermeldung ab.
+
+    Literatur:
+        Lopez de Prado, M. (2018), Advances in Financial Machine Learning, Wiley, Kap. 7 und 12.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        R = pd.DataFrame(rng.normal([0.002, 0.001, 0.0005], [0.03, 0.02, 0.01], (520, 3)), columns=["aktien", "reits", "anleihen"])
+        print(simlev.portfolio_cpcv(R, methods=["equal", "inverse_vol", "min_variance"], n_groups=5, test_groups=2))
     """
     frequency = _match_arg(frequency, _FREQS)
     rr = _opt_returns(x, assets, frequency)

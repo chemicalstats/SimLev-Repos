@@ -1,8 +1,8 @@
 """Rollierende Kerne aus ``r/src/research_core.cpp`` (``.roll_mean_core``, ``.roll_cov_core``).
 
 Python-Hüllen um die gemeinsamen Kerne von R und Python (``core/research_core_impl.h`` über
-``simlev._ext``, Etappe 7.3a). Die bitgleichen Python-Ports als Rückfall (``SIMLEV_NO_EXT=1``)
-sind mit Etappe 9.6c entfallen.
+``simlev._ext``). Die bitgleichen Python-Ports als Rückfall (``SIMLEV_NO_EXT=1``)
+sind seit 1.0.0 entfallen.
 """
 from __future__ import annotations
 

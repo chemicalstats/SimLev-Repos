@@ -2,8 +2,10 @@
     SimLev
 
 Backtesting für ETF-, Hebel- und Multi-Asset-Strategien mit deutscher
-Investmentbesteuerung. Julia-Portierung des gleichnamigen R-Pakets; die
-Engine rechnet bitgleich zur R-Version (Linux x86-64).
+Investmentbesteuerung. Julia-Fassung von SimLev, gleichwertig zu den Fassungen in
+R und Python: Die Rechenkerne liegen als gemeinsamer C/C++-Code in `core/` (Bibliothek
+`libslc`, `ccall`), Julia bildet die Schnittstelle darum. Alle drei Fassungen rechnen
+bitgleich (geprüft unter Linux x86-64).
 """
 module SimLev
 
@@ -18,14 +20,14 @@ export simulation, SimLevResult, format_result,
        RList, RFrame, RVector, NamedMat, named, nrow, ncol, rows, attrs, r_class, inherits,
        r_summary, r_plot
 
-# R-Interna (R 4.3.3), in Abhängigkeitsreihenfolge (seit Etappe 9.6c ohne die Nachbildungen von
+# R-Interna (R 4.3.3), in Abhängigkeitsreihenfolge (seit 1.0.0 ohne die Nachbildungen von
 # R's Zufall, nmath, BLAS/LAPACK/LINPACK, optim/PORT und der Übernahmen evd, rugarch, Rsolnp,
 # truncnorm, stinepack, imputeTS; diese Aufgaben rechnet die C-Bibliothek slc, SLib)
 include("r/env.jl")          # Umgebungsschalter SIMLEV_* (einzige Lesestelle)
-include("slib.jl")           # C-Bibliothek slc (Etappe 9.1): Zufall, Verteilungen; deps/build.jl
-include("cabi.jl")           # N7: geteilte C++-Kerne über die C-ABI-Hülle (in libslc)
+include("slib.jl")           # C-Bibliothek slc: Zufall, Verteilungen; deps/build.jl
+include("cabi.jl")           # geteilte C++-Kerne über die C-ABI-Hülle (in libslc)
 using .SLib: LIBSLC
-include("r/rbase_c.jl")       # N8: Grundfunktionen mit R-Regeln aus libslc (core/slc_rbase*.c)
+include("r/rbase_c.jl")       # Grundfunktionen mit R-Regeln aus libslc (core/slc_rbase*.c)
 include("r/types.jl")
 include("r/rnum.jl")
 include("r/rformat.jl")

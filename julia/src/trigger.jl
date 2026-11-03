@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Vorberechnung der Event-Trigger-Spalte (Port von compute_rebal_trigger.R)
+# Vorberechnung der Event-Trigger-Spalte (Gegenstück zu compute_rebal_trigger.R)
 # ─────────────────────────────────────────────────────────────────────────────
 
 function _getcol(df, name::AbstractString)
@@ -46,13 +46,63 @@ _first_obs(v) = (i = findfirst(!isnan, v); i === nothing ? length(v) : i)
     rebalance_trigger(df, type; threshold = 10, lev_col = "target_leverage",
                           vol_col = "sigma_ewma", triggers = nothing, out_col = "rebal_trigger")
 
-Logische Trigger-Spalte für `simulation(...; rebalance = rebalance_plan(; event_col = ...))` vorberechnen
-(`type` = `"abs_leverage"`, `"rel_leverage"`, `"vol_band"` oder `"combined"`).
-`threshold` **in Prozent** (intern /100). Die Referenz ist der erste nicht
-fehlende Wert und springt nur an Trigger-Tagen; NA löst nicht aus. `"combined"`
-verknüpft die Sub-Trigger aus `triggers` (Liste benannter Listen) per ODER.
-Gibt eine Kopie von `df` (RFrame, NamedTuple oder Dict) mit der Spalte
-`out_col` zurück; Tag 1 ist immer `false`.
+Logische Trigger-Spalte für `simulation(..., rebalance=rebalance_plan(event_col=...))` vorberechnen.
+
+Berechnet eine binäre Trigger-Spalte, die `simulation` über `event_col` konsumiert. Die gesamte
+Schwellenwert-/Bandlogik liegt hier, außerhalb der Engine — der Nutzer kann sie nach Bedarf anpassen oder
+ersetzen.
+
+Vier Trigger-Typen sind implementiert:
+
+- `"abs_leverage"`: Trigger, wenn die absolute Abweichung des Ziel-Hebels vom zuletzt gehaltenen Hebel größer
+  als `threshold` ist.
+- `"rel_leverage"`: Trigger, wenn die relative Abweichung des Ziel-Hebels vom zuletzt gehaltenen Hebel größer
+  als `threshold` ist.
+- `"vol_band"`: Trigger, wenn die Volatilität relativ zum letzten Rebalancing-Referenzwert um mehr als
+  `threshold` abweicht.
+- `"combined"`: OR-Verknüpfung mehrerer Sub-Trigger-Specs aus `triggers`.
+
+Der Referenzwert (gehaltener Hebel bzw. Volatilität) ist der erste nicht fehlende Wert (in der Regel der erste
+Tag; bei führenden `NA`, etwa in der Anlaufphase einer EWMA-Volatilität, der erste Tag mit Wert; bis dahin
+wird nicht ausgelöst) und wird nur an Tagen fortgeschrieben, an denen dieser Trigger auslöst (nicht an
+kalendarischen Rebalancing-Tagen in `simulation`). Ausgelöst wird bei einer Abweichung *größer* als die
+Schwelle; `NA`-Werte lösen nicht aus. Bei `"rel_leverage"` und `"vol_band"` wird nicht ausgelöst, solange der
+Referenzwert 0 ist.
+
+# Argumente
+- `df`: `data.frame` mit täglichen Feldern (mindestens eine Zeile). Muss die relevanten numerischen Spalten
+  (`lev_col` bzw. `vol_col`) enthalten, sonst Fehler.
+- `type`: Character. Trigger-Typ: `"abs_leverage"`, `"rel_leverage"`, `"vol_band"` oder `"combined"`. Kein
+  Standardwert; andere Werte führen zu einem Fehler.
+- `threshold`: Numerisch. Auslöseschwelle **in Prozent** (Paket-Konvention). Bedeutung je Typ:
+  `"abs_leverage"` in Prozentpunkten des Hebels (`10` = 0,10 Hebelabweichung); `"rel_leverage"`/`"vol_band"`
+  relative Abweichung (`10` = 10 %). Bei `type = "combined"` ignoriert (Schwellen je Sub-Trigger). Standard:
+  `10`.
+- `lev_col`: Character. Name der Ziel-Hebel-Spalte in `df`. Wird von `"abs_leverage"` und `"rel_leverage"`
+  verwendet. Standard: `"target_leverage"`.
+- `vol_col`: Character. Name der Volatilitätsspalte in `df`. Wird von `"vol_band"` verwendet. Standard:
+  `"sigma_ewma"`.
+- `triggers`: Liste von Sub-Trigger-Specs (nur bei `type = "combined"`). Jeder Eintrag ist eine Liste mit
+  `type` und ggf. `threshold` (in Prozent, fehlt er: `10`), `lev_col`, `vol_col`. Jeder Sub-Trigger führt
+  seinen eigenen Referenzwert; die Ergebnisse werden OR-verknüpft. Standard: `nothing`.
+- `out_col`: Character. Name der zu erzeugenden logischen Spalte in `df`. Standard: `"rebal_trigger"`.
+
+# Rückgabe
+`df` mit einer zusätzlichen logischen Spalte `out_col`. `true` bedeutet: an diesem Tag wird Rebalancing
+ausgelöst. Tag 1 ist immer `false` (kein Rebalancing am Einstiegstag).
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 500
+d = RFrame("date" => Date(2020, 1, 1) .+ Day.(0:n-1))
+d["ETF"] = 100 .* cumprod(1 .+ 4e-4 .+ 0.012 .* randn(rng, n))
+d["target_leverage"] = 2 .+ 0.5 .* sin.(range(0, 4pi; length = n))
+d["sigma_ewma"] = 0.01 .+ 0.005 .* abs.(randn(rng, n))
+d = rebalance_trigger(d, "abs_leverage"; threshold = 10)
+println(sum(d["rebal_trigger"]))     # Anzahl der Rebalancing-Tage
+```
 """
 function rebalance_trigger(df, type::AbstractString; threshold::Real = 10,
                                lev_col::AbstractString = "target_leverage",

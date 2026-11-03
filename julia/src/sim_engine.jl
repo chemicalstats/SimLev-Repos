@@ -1,15 +1,15 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# simulation(), Phasen 4 und 5 über den gemeinsamen C++-Kern (E17): Tagesengine core/engine_core_impl.h
+# simulation(), Phasen 4 und 5 über den gemeinsamen C++-Kern: Tagesengine core/engine_core_impl.h
 #
 # Der Kern rechnet die Tagesschleife (Batch- und Marktupdate, Aktivierung, Splits, Sparplan, Handel, Rebalancing,
 # Freibetrag, Vorabpauschale, Liquidation, Jahreswechsel und Abrechnungen mit Steuer) und den Abschluss des letzten
-# Jahres (bis E17 Stufe 1c die Phasen _sim_run_days! und _sim_close_years!). Warnungen, details-Ausgaben und
+# Jahres (bis 1.3.0 die Phasen _sim_run_days! und _sim_close_years!). Warnungen, details-Ausgaben und
 # Abbrüche meldet der Kern als Codes mit Werten; die Texte setzt _sim_engine_signal wortgleich zu R 1.3.0, in
 # derselben Reihenfolge (Ausgabe und Warnungen verzahnt). Gegenstücke: r/R/sim_engine.R,
 # python/simlev/_sim_engine.py.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Feldlagen der flachen Felder (J15b): Seit E17 teilen Julia und die Kerne keine Strukturen mehr; diese Datei und
+# Feldlagen der flachen Felder: teilen Julia und die Kerne keine Strukturen mehr; diese Datei und
 # sim_evaluate.jl nehmen aber feste Größen und Schrittweiten an (Eingaben ai, ad, ci, cd, tot0, pint, pdbl, Termine
 # _sched_spec in engine.jl; Ausgaben status, Lots, Verkäufe, Steuerbuchungen, Ereignisse, Jahreszeilen,
 # Kennzahlen). Sie stehen hier und werden beim Vorkompilieren mit simlev_c_flat_layout (core/simlev_cabi.cpp,
@@ -56,7 +56,7 @@ function _harvest_md(harvest_day)
     return isempty(ok) ? 9999 : minimum(ok)
 end
 
-"Vorbereitung (E17 Stufe 2), Phasen 4 und 5 über den C++-Kern: Termine, Flags, Startgewichte, Tagesschleife und Abschluss des letzten Jahres."
+"Vorbereitung, Phasen 4 und 5 über den C++-Kern: Termine, Flags, Startgewichte, Tagesschleife und Abschluss des letzten Jahres."
 function _sim_engine_run!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight, split_thresh, balance_dca,
                           harvest_loss_pot, stopp_date::Int, harvest_day)
     @nospecialize

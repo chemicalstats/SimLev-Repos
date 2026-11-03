@@ -63,7 +63,7 @@ def _frac_warn_col(fr: _Frame, col: str, arg: str, hi: float) -> None:
 
 def _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli, soli_rate, who, *, details=False,
                tariff_on=False):
-    """Steuersätze aus Abgeltungsteuer, Kirchensteuer und Günstigerprüfung (R: ``.tax_rates``, 6.5b).
+    """Steuersätze aus Abgeltungsteuer, Kirchensteuer und Günstigerprüfung (R: ``.tax_rates``).
 
     Gemeinsamer Helfer von ``simulation()`` (``_sim_check_inputs``) und ``withdrawal_simulation()``: Satz der
     Abgeltungsteuer mit Kirchensteuer (§ 32d Abs. 1 EStG), Prozentangaben als Anteile und effektiver Satz der
@@ -120,7 +120,7 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
                       fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
                       order_fee, dca_fee, harvest_mode, taxable_income, tariff) -> dict:
     """Phase 1 (``.sim_check_inputs``). ``tariff`` = Argument ``tax_tariff`` von ``_simulation_flat``; Werte aus
-    den Bausteinen von ``simulation()`` (deren Prüfungen entfallen hier, Meldungen nennen die Bausteine; C19: der
+    den Bausteinen von ``simulation()`` (deren Prüfungen entfallen hier, Meldungen nennen die Bausteine; der
     flache Weg ohne Bausteine mit eigenen Prüfungen ist entfallen)."""
     tax_mode = _match_arg(tax_mode, ("none", "person"), "tax_mode")
     if not isinstance(data, (pd.DataFrame, Mapping, _Frame)):
@@ -167,7 +167,7 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
         if not isinstance(at, str) or at not in ("bnh", "signal"):
             _stop("simulation: trading %s von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\"."
                   % (r_deparse(at), nm))
-        if a.get("wrapper") is not None:   # Fonds-Wrapper (Etappe 6.5c, wrapper.py)
+        if a.get("wrapper") is not None:   # Fonds-Wrapper (wrapper.py)
             if not _is_wrapper(a["wrapper"]):
                 _stop("simulation: wrapper von Asset '%s' muss ein Objekt aus wrapper_config() sein, nicht %s."
                       % (nm, _cls_all(a["wrapper"])))
@@ -317,7 +317,7 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
         _stop("simulation: start_value muss eine positive Zahl sein (Anfangskapital in EUR, z. B. 10000), nicht %s."
               % r_deparse(start_value))
     start_value = float(start_value)
-    # Steuer-, Kosten-, Termin- und Split-Angaben haben die Bausteine geprüft (C19: die Prüfungen des flachen
+    # Steuer-, Kosten-, Termin- und Split-Angaben haben die Bausteine geprüft (die Prüfungen des flachen
     # Wegs sind entfallen); fractions und risk_free prüft simulation() selbst
     tax_rate = float(tax_rate)
     if church_tax is not None:
@@ -389,7 +389,7 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
                   "(Anteile, z. B. 0.6 und 0.4).\n  Aktuelle Gewichte: %s", total_weight,
                   ", ".join(_sp("%s=%.3f", k, NA if v.get("share") is None else float(v.get("share")))
                             for k, v in strat.items())))
-    # Steuersätze (Kirchensteuer, Prozent -> Anteil, Günstigerprüfung) im gemeinsamen Helfer (6.5b, auch für
+    # Steuersätze (Kirchensteuer, Prozent -> Anteil, Günstigerprüfung) im gemeinsamen Helfer (seit 1.1.0 auch für
     # withdrawal_simulation()); Rechenfolge, Warnungen und Druck wie bisher an dieser Stelle
     tr = _tax_rates(tax_rate, church_tax, use_guenstigerpruefung, marginal_tax_rate, include_soli_on_income_tax,
                     soli_rate_income_tax, "simulation", details=details, tariff_on=tariff_on)
@@ -551,7 +551,7 @@ def _sim_build_state(fr: _Frame, strategy: dict, start_value: float, start_date:
         }
         sim["trades"][name] = {"buys": [], "buy_count": 0, "sells": [], "sell_count": 0, "taxes": [],
                                "tax_count": 0, "fifo_front": 1}
-    return sim   # status und report setzt der Kern (E17 Stufe 2: Startgewichte, Anfangszustand)
+    return sim   # status und report setzt der Kern (Startgewichte, Anfangszustand)
 
 
 def _as_logical_col(fr: _Frame, col: str) -> np.ndarray:
@@ -576,7 +576,7 @@ def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, 
                         balance_skip, event_col, event_mode, event_weight) -> dict:
     """Angaben der Termine und Tages-Flags (wie ``.sim_build_calendar`` in R): Kalender, Terminpläne
     (``_sched_spec``), Ereignis-Spalte und die Prüfungen; Termine, Splits, Flags, Aktivierung, Freibetrag und
-    Startgewichte rechnet seit E17 Stufe 2 der Kern (core/prepare_core_impl.h, über ``_sim_engine_run``)."""
+    Startgewichte rechnet der Kern (core/prepare_core_impl.h, über ``_sim_engine_run``)."""
     flag_date = np.arange(start_date, stopp_date + 1, dtype=np.int64)
     n = flag_date.size
     if ".filled" in fr:
@@ -631,7 +631,7 @@ def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, 
             _stop("simulation: start von '%s' (%s) liegt nach dem letzten Datentag (%s); das Asset w\u00e4re nie "
                   "handelbar. start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie "
                   "entfernen." % (name, fmt_date(st_a), fmt_date(stopp_date)))
-    # bis E17 Stufe 1c _sim_init_weights: mindestens ein Asset ab dem ersten Tag handelbar
+    # bis 1.3.0 _sim_init_weights: mindestens ein Asset ab dem ersten Tag handelbar
     if not any(sim["assets"][nm]["start"] <= int(flag_date[0]) for nm in flag_assets):
         _stop("simulation: Kein Asset ist am ersten Datentag (%s) handelbar (start bzw. erste Kurse sp\u00e4ter); "
               "mindestens ein Asset muss ab Beginn handelbar sein." % fmt_date(int(flag_date[0])))

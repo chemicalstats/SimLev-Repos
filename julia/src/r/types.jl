@@ -242,7 +242,7 @@ end
 Base.propertynames(df::RFrame, private::Bool = false) = Tuple(Symbol.(_rf(df, :names)))
 """
 Klassen, deren Zeilenauswahl mit [`rows`](@ref) eine gewöhnliche Tabelle ohne Klasse und ohne Attribute
-ergibt (R: eigene `[`-Methode, z. B. `[.SimLevWrapperNav`, Etappe 8.0); Eintrag über `register_plain_rows!`.
+ergibt (R: eigene `[`-Methode, z. B. `[.SimLevWrapperNav`); Eintrag über `register_plain_rows!`.
 """
 const _PLAIN_ROWS = Set{String}()
 register_plain_rows!(cls::AbstractString) = (push!(_PLAIN_ROWS, String(cls)); nothing)

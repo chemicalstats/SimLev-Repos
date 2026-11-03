@@ -35,12 +35,12 @@ haben dieselben Felder, dazu `Dateien:`.
 | `src/core/` | Kopien der kanonischen C-Quellen aus `core/` (Repo-Wurzel, `core/sync.py`): die C-Bibliothek `slc*.c`, `slc*.h` **ohne `slc_rbase*`** (Zufall, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, Bootstrap-Kerne, Stineman, Glättungsspline, Kerndichte) und die gemeinsamen C++-Kerne `simlev_core.h`, `*_core_impl.h` (Engine, FIFO, Steuer, Research, Entnahme) |
 | `src/_ext*.c`, `src/_ext*.cpp`, `src/_ext_common.h` | Hüllen der C-Erweiterung `simlev._ext` |
 | `simlev/_lib*.py` | Python-Hüllen der C-Bibliothek |
-| `simlev/_r/rlist.py`, `reftree.py`, `env.py`, `stats.py`, `__init__.py` | Ergebnisobjekte, Vergleich mit den Referenzfällen, Umgebungsschalter, Sammelmodule |
+| `simlev/_r/rlist.py`, `env.py`, `stats.py`, `__init__.py` | Ergebnisobjekte, Umgebungsschalter, Sammelmodule |
 
 Die C-Bibliothek (ohne `slc_rbase*`) ist nach Veröffentlichungen
 geschrieben, nicht nach fremdem Code. Der Kopf jeder Datei in `core/` nennt
-ihre Quellen; die vollständigen Angaben stehen im Abschnitt
-[Literatur](../README.md#literatur).
+ihre Quellen; die vollständigen Angaben stehen in
+[`LITERATUR.md`](../LITERATUR.md).
 
 ## 2. Fremde Vorlagen
 
@@ -52,7 +52,7 @@ ihre Quellen; die vollständigen Angaben stehen im Abschnitt
 | Herkunft | übersetzt aus bzw. nachgebildet nach R 4.3.3 (*The R Project for Statistical Computing*, <https://www.R-project.org/>), je Datei siehe Tabelle und Kopf der Datei |
 | Rechte | The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut Kopf der jeweiligen R-Quelle); weitere Personen siehe 2.3 |
 | Lizenz der Vorlage | GPL (≥ 2) laut Kopf der R-Quellen; in SimLev unter GPL-3 |
-| Änderungen | Übertragung nach Python im von SimLev genutzten Umfang; Teile rechnen seit N8/N10 die C-Kerne aus 2.2 |
+| Änderungen | Übertragung nach Python im von SimLev genutzten Umfang; Teile rechnen seit 1.2.0 die C-Kerne aus 2.2 |
 
 | Datei | Herkunft | R-Funktionen |
 |---|---|---|
@@ -74,8 +74,8 @@ ihre Quellen; die vollständigen Angaben stehen im Abschnitt
 
 | | |
 |---|---|
-| Dateien | `src/core/slc_rbase.h`, `slc_rbase.c`, `slc_rbase_sort.c`, `slc_rbase_cov.c`, `slc_rbase_num.c`, `slc_rbase_date.c` (Hülle `src/_ext_slc_rbase.c`; seit E17 sind `slc_rbase.c` und `slc_rbase.h` auch im R-Paket, für die Summen der Tagesengine `engine_core_impl.h` und seit Stufe 3 für die Auswertung `evaluate_core_impl.h`) |
-| Herkunft | übersetzt aus R 4.3.3 über die Port-Module aus 2.1: `slc_rbase.c` aus `summary.c`, `cum.c`, `array.c`, `arithmetic.c`, `stats/src/zeroin.c` (seit E17 Stufe 3, `sl_r_zeroin2`); `slc_rbase_sort.c` aus `sort.c` (`psort_body`, `Psort0`) und `qsort-body.c` (Schritt für Schritt); `slc_rbase_cov.c` aus `stats/src/cov.c`; `slc_rbase_num.c` aus `util.c` (`R_strtod`), `arithmetic.c` (`myfmod`), `format.c` (`scientific`). `slc_rbase_date.c`: nachgebildet nach den R-Hilfeseiten `?strptime`, `?format.Date`, `?as.Date`, Kalender nach 2.4 |
+| Dateien | `src/core/slc_rbase.h`, `slc_rbase.c`, `slc_rbase_sort.c`, `slc_rbase_cov.c`, `slc_rbase_num.c`, `slc_rbase_date.c` (Hülle `src/_ext_slc_rbase.c`; seit 1.4.0 sind `slc_rbase.c` und `slc_rbase.h` auch im R-Paket, für die Summen der Tagesengine `engine_core_impl.h` und für die Auswertung `evaluate_core_impl.h`) |
+| Herkunft | übersetzt aus R 4.3.3 über die Port-Module aus 2.1: `slc_rbase.c` aus `summary.c`, `cum.c`, `array.c`, `arithmetic.c`, `stats/src/zeroin.c` (seit 1.4.0, `sl_r_zeroin2`); `slc_rbase_sort.c` aus `sort.c` (`psort_body`, `Psort0`) und `qsort-body.c` (Schritt für Schritt); `slc_rbase_cov.c` aus `stats/src/cov.c`; `slc_rbase_num.c` aus `util.c` (`R_strtod`), `arithmetic.c` (`myfmod`), `format.c` (`scientific`). `slc_rbase_date.c`: nachgebildet nach den R-Hilfeseiten `?strptime`, `?format.Date`, `?as.Date`, Kalender nach 2.4 |
 | Rechte | wie 2.1; Quicksort nach R. C. Singleton (siehe 2.3) |
 | Lizenz der Vorlage | GPL (≥ 2) laut Kopf der R-Quellen; in SimLev unter GPL-3 |
 | Änderungen | C99 ohne R-Datenstrukturen, gemeinsamer Kern für Python und Julia; je Datei im Kopf genannt |
@@ -93,7 +93,7 @@ ihre Quellen; die vollständigen Angaben stehen im Abschnitt
 | Funktion (Dateien) | Herkunft laut R-Quelle | Lizenzvermerk der älteren Vorlage |
 |---|---|---|
 | `optimize` (`_optim.py`, `stats_optim.py`) | `optimize.c`: „fmin.f -- translated by f2c“; Netlib `go/fmin.f`: Übersetzung von Brents ALGOL-60-Prozedur `localmin` (R. P. Brent, *Algorithms for Minimization without Derivatives*, Prentice-Hall 1973) | keiner (Netlib-Datei ohne Urheber- und Lizenzvermerk) |
-| `uniroot` (`_optim.py`, `stats_optim.py`; seit E17 Stufe 3 `.xirr_rate` über `sl_r_zeroin2` in `src/core/slc_rbase.c`) | `zeroin.c`: „from NETLIB c/brent.shar with max.iter, add'l info and convergence details hacked in by Peter Dalgaard“; Netlib `go/zeroin.f`: Übersetzung von Brents Prozedur `zero` (Brent 1973) | `go/zeroin.f`: keiner; `c/brent.shar`: nicht geprüft (Abruf nicht möglich) |
+| `uniroot` (`_optim.py`, `stats_optim.py`; seit 1.4.0 `.xirr_rate` über `sl_r_zeroin2` in `src/core/slc_rbase.c`) | `zeroin.c`: „from NETLIB c/brent.shar with max.iter, add'l info and convergence details hacked in by Peter Dalgaard“; Netlib `go/zeroin.f`: Übersetzung von Brents Prozedur `zero` (Brent 1973) | `go/zeroin.f`: keiner; `c/brent.shar`: nicht geprüft (Abruf nicht möglich) |
 | `hclust` (`stats_cluster.py`) | `hclust.f`: „F. Murtagh, ESA/ESO/STECF, Garching, February 1986. Modifications for R: Ross Ihaka, Dec 1996“, weitere Änderungen Fritz Leisch, Martin Maechler | keiner in `hclust.f` |
 | Sortierung (`stats_sort.py`, `slc_rbase_sort.c`) | `qsort-body.c`: „Based on CACM algorithm #347 by R. C. Singleton (1969)“ | ACM-Software-Hinweis (Nutzung „solely for academic, research and other similar noncommercial uses“), Anwendbarkeit auf R's Umarbeitung nicht belegt |
 | `signif` (`rformat.py`, `fmt.py`) | `fprec.c`: „a translation into C of a Fortran subroutine by W. Fullerton of Los Alamos Scientific Laboratory“ | keiner genannt |
@@ -104,7 +104,7 @@ ihre Quellen; die vollständigen Angaben stehen im Abschnitt
 
 | | |
 |---|---|
-| Dateien | `src/core/prepare_core_impl.h` (`eng_civil`, `eng_days`; bis E17 Stufe 1c `engine_core_impl.h`, davor `fifo_core_impl.h`, `tax_core_impl.h`), `src/core/slc_rbase_date.c` (`sl_r_civil_from_days`, `sl_r_days_from_civil`), `simlev/data_prep.py` (`_civil_to_days`, `_days_to_civil`), `simlev/tactical.py` (`_civil`) |
+| Dateien | `src/core/prepare_core_impl.h` (`eng_civil`, `eng_days`; bis 1.3.0 `engine_core_impl.h`, davor `fifo_core_impl.h`, `tax_core_impl.h`), `src/core/slc_rbase_date.c` (`sl_r_civil_from_days`, `sl_r_days_from_civil`), `simlev/data_prep.py` (`_civil_to_days`, `_days_to_civil`), `simlev/tactical.py` (`_civil`) |
 | Herkunft | übersetzt aus H. Hinnant, *chrono-Compatible Low-Level Date Algorithms*, <https://howardhinnant.github.io/date_algorithms.html> |
 | Rechte | gemeinfrei: „Consider these donated to the public domain.“ |
 | Lizenz der Vorlage | keine (gemeinfrei) |
@@ -121,16 +121,16 @@ ihre Quellen; die vollständigen Angaben stehen im Abschnitt
 
 Die Pakete evd, imputeTS, stinepack, rugarch, Rsolnp, truncnorm, MSGARCH und
 numDeriv sind weder enthalten noch eine Abhängigkeit (siehe
-[Literatur](../README.md#literatur)).
+[`LITERATUR.md`](../LITERATUR.md)).
 
 ## 4. Früher enthaltene Teile (entfernt)
 
-Bis Etappe 9 bildete die Python-Fassung Teile von evd, imputeTS, stinepack,
+Bis 0.10.0 bildete die Python-Fassung Teile von evd, imputeTS, stinepack,
 rugarch, Rsolnp und truncnorm sowie R's Zufallszahlen, Verteilungsfunktionen
 (nmath), lineare Algebra (BLAS, LAPACK, LINPACK) und Optimierer (`optim`,
-`nlminb`) nach; diese Teile sind entfernt (9.6c), ebenso die Nachbildung von
+`nlminb`) nach; diese Teile sind entfernt (1.0.0), ebenso die Nachbildung von
 libstdc++ `std::sort`/`std::nth_element` in den Python-Ports der C++-Kerne
 (`_dependence_core.py`, `_optimize_core.py`). Zufall und Numerik rechnet die
 eigene C-Bibliothek von SimLev. Die Pakete dienten nur als Vorbild und
-Prüforakel; ihre Angaben stehen im Abschnitt
-[Literatur](../README.md#literatur) der Haupt-README.
+Prüforakel; ihre Angaben stehen in
+[`LITERATUR.md`](../LITERATUR.md) im Wurzelverzeichnis.

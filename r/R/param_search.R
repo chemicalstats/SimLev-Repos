@@ -28,7 +28,8 @@
 #'
 #' @param ... Benannte Dimensionen (alle Namen Pflicht; sie werden zu den
 #'   Namen der Liste \code{p} im \code{builder}, ohne \code{builder} zu
-#'   Argumentnamen von [simulation()]). Jede ist entweder ein nicht leerer
+#'   Argumentnamen von \code{\link[=simulation]{simulation()}} bzw. Pfaden zu Parametern der
+#'   Bausteine wie \code{dca.value} oder \code{rebalance.thresh}). Jede ist entweder ein nicht leerer
 #'   atomarer Vektor diskreter Werte (numerisch, Zeichen, logisch) oder ein
 #'   Bereich aus \code{param_range()}. Bei \code{print()} ungenutzt.
 #' @param lower,upper Bereichsgrenzen (Zahlen in der Einheit des Parameters,
@@ -188,13 +189,17 @@ print.SimLevParamSpace <- function(x, ...) {
 #' @param builder Funktion \code{function(p)}, die aus einer benannten Liste
 #'   \code{p} (ein Punkt des Raums) entweder eine Strategie oder eine Liste
 #'   \code{list(strategy, signal, args, map, data)} liefert:
-#'   \code{signal} wie in [bootstrap_study()] (Funktion \code{df ->}
-#'   data.frame oder Liste von Spalten, z. B. mit [signal_sma()]),
-#'   \code{args} (Liste) ueberschreibt \code{sim_args}, \code{map} (benannter
+#'   \code{signal} wie in \code{\link[=bootstrap_study]{bootstrap_study()}} (Funktion \code{df ->}
+#'   data.frame oder Liste von Spalten, z. B. mit \code{\link[=signal_sma]{signal_sma()}}),
+#'   \code{args} (Liste, wie \code{sim_args}, auch mit Pfaden wie \code{"rebalance.thresh"})
+#'   ueberschreibt \code{sim_args}, \code{map} (benannter
 #'   Zeichenvektor) legt Spalten-Aliase an, \code{data} ist optional eine
-#'   Funktion \code{df -> df} (z. B. eine Hebelreihe mit [series_leverage()]
+#'   Funktion \code{df -> df} (z. B. eine Hebelreihe mit \code{\link[=series_leverage]{series_leverage()}}
 #'   anlegen). \code{NULL} (Standard) = ohne \code{builder}: die Parameter
-#'   werden als Argumente von [simulation()] fuer \code{strategy} verwendet.
+#'   werden als Argumente von \code{\link[=simulation]{simulation()}} fuer \code{strategy} verwendet;
+#'   Parameter der Bausteine dann mit Pfad, z. B.
+#'   \code{param_space(rebalance.thresh = c(2, 5), dca.value = c(100, 200))} (wie in
+#'   \code{\link{sensitivity_grid}}); die Spalten von \code{results} heissen wie die Pfade.
 #' @param space Suchraum aus [param_space()] (oder benannte Liste, die an
 #'   [param_space()] weitergegeben wird).
 #' @param strategy Feste Strategie (z. B. aus [create_strategy()]), wenn
@@ -210,8 +215,12 @@ print.SimLevParamSpace <- function(x, ...) {
 #'   zulaessige Punkte liefert (z. B. Gewichte summieren sich hoechstens zu
 #'   1); Punkte ohne \code{TRUE} entfallen. \code{NULL} (Standard) = alle
 #'   Punkte.
-#' @param sim_args Benannte Liste gemeinsamer Argumente fuer [simulation()]
-#'   (Standard: keine).
+#' @param sim_args Benannte Liste gemeinsamer Argumente fuer \code{\link[=simulation]{simulation()}}
+#'   (Standard: keine): Argumente von \code{\link[=simulation]{simulation()}} ausser \code{data} und \code{strategy},
+#'   also auch Bausteine (z. B. \code{dca = dca_plan(100, 1)}, \code{tax = tax_profile()}) und
+#'   Pfade zu Parametern der Bausteine (\code{"dca.value"}, siehe
+#'   \code{\link{sensitivity_grid}}). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B.
+#'   \code{dca_value}) ergeben einen Fehler, der den Baustein nennt.
 #' @param burn_in Anzahl Zeilen am Anfang von \code{data} (bei Tagesdaten:
 #'   Tage), die nach der Signalberechnung verworfen werden (Signal-Vorlauf;
 #'   ganze Zahl, Standard 0).
@@ -233,9 +242,9 @@ print.SimLevParamSpace <- function(x, ...) {
 #'   Aufrufe liefern dann verschiedene Ergebnisse. \code{set.seed()} wirkt nicht.
 #'   Die Auswertung der Punkte ist deterministisch, das Ergebnis haengt nicht von \code{cores} ab.
 #' @param keep_returns \code{"day"} (Standard): taegliche Renditen je
-#'   Punkt speichern (noetig fuer [overfit_pbo()], [sharpe_deflated()],
-#'   [overfit_walk_forward()], [overfit_reality_check()], [sharpe_haircut()]);
-#'   \code{"none"}: keine. \code{TRUE}/\code{FALSE} (bis 6.5b) ergeben einen Fehler.
+#'   Punkt speichern (noetig fuer \code{\link[=overfit_pbo]{overfit_pbo()}}, \code{\link[=sharpe_deflated]{sharpe_deflated()}},
+#'   \code{\link[=overfit_walk_forward]{overfit_walk_forward()}}, \code{\link[=overfit_reality_check]{overfit_reality_check()}}, \code{\link[=sharpe_haircut]{sharpe_haircut()}});
+#'   \code{"none"}: keine. \code{TRUE}/\code{FALSE} (bis 1.0.0) ergeben einen Fehler.
 #' @return Objekt der Klasse \code{SimLevParamSearch}, eine Liste mit
 #'   \describe{
 #'     \item{\code{results}}{data.frame je Punkt: \code{id}, eine Spalte je
@@ -278,7 +287,7 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
                          objective = "sharpe", maximize = TRUE, keep_returns = c("day", "none"), seed = NULL,
                          cores = 1L) {
   method <- match.arg(method)
-  # 6.5b (C.1): Text statt Logisch, ohne Alias (E1)
+  # Text statt Logisch (bis 1.0.0), ohne Alias
   if (is.logical(keep_returns))
     stop("param_search: keep_returns ist \"day\" oder \"none\" (fr\u00fcher TRUE/FALSE).", call. = FALSE)
   keep_returns <- match.arg(keep_returns)
@@ -290,7 +299,7 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
     builder <- function(p) list(strategy = strategy, args = p)
   }
   sim_run_args <- .sim_args_set(list(), sim_args, "param_search")
-  # Zufall nur im Versuchsplan (Hauptstrom, Entwurf C.5); die Auswertung je Punkt ist deterministisch
+  # Zufall nur im Versuchsplan (Hauptstrom); die Auswertung je Punkt ist deterministisch
   design <- .ps_design(space, method, n, constraint, if (method == "grid") NULL else .sl_main_stream(seed))
   t0 <- Sys.time()
   run <- function(i) {

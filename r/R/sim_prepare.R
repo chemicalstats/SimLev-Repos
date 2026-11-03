@@ -2,7 +2,7 @@
 # simulation(), Phase 2: Datenvorbereitung, Zentralstruktur sim_mem, Termine und Flags
 # =============================================================================
 
-# C7-11: Feldfolge der obersten Ebene von sim_mem. Bis E17 Stufe 1c lasen die Engine-Kerne
+# C7-11: Feldfolge der obersten Ebene von sim_mem. Bis 1.3.0 lasen die Engine-Kerne
 # (simulation_core.cpp, fifo_core.cpp) diese Ebene ueber die Position; seit der Tagesengine im Kern
 # (sim_engine.R) liest .sim_engine_run die Felder ueber Namen. Die Reihenfolge wird weiter hier
 # festgelegt und geprueft (Aufbau des Ergebnisses).
@@ -39,11 +39,11 @@
   start_date <- head(data[, "date"], 1)
   stopp_date <- tail(data[, "date"], 1)
   
-  # R9-06: Prozent-Konvention auch fuer die Basiszins-Spalte (Median, gleiche Schwelle wie base_rate)
+  # Prozent-Konvention auch fuer die Basiszins-Spalte (Median, gleiche Schwelle wie base_rate)
   if (isTRUE(base_rate_flex) && is.character(base_rate_data) && length(base_rate_data) == 1L &&
       !is.na(base_rate_data) && base_rate_data %in% names(data))
     .frac_warn_col(data[[base_rate_data]], "base_rate", base_rate_data, hi = 0.05)
-  # R3a-07: NA in der Basiszins-Spalte = 0 (keine VP), unabhaengig von der Datenform: vor dem
+  # NA in der Basiszins-Spalte = 0 (keine VP), unabhaengig von der Datenform: vor dem
   # LOCF-Auffuellen ersetzen (sonst fuellte LOCF ein NA an Handelstagsdaten mit dem Vortageswert)
   if (isTRUE(base_rate_flex) && is.character(base_rate_data) && length(base_rate_data) == 1L &&
       base_rate_data %in% names(data) && anyNA(data[[base_rate_data]]) &&
@@ -67,7 +67,7 @@
       v[idx]
     }
     all_dates <- seq.Date(as.Date(start_date), as.Date(stopp_date), by = "day")
-    data$.filled <- pre_filled      # R1-17: Tage ohne echten Kurs (align_series/NA) bleiben markiert
+    data$.filled <- pre_filled      # Tage ohne echten Kurs (align_series/NA) bleiben markiert
     data <- merge(data.frame(date = all_dates), data, by = "date", all.x = TRUE)
     data$.filled[is.na(data$.filled)] <- TRUE   # A-2: aufgefuellte Tage markieren
     num_cols <- setdiff(names(data)[vapply(data, is.numeric, logical(1))], "date")
@@ -75,7 +75,7 @@
     lgl_cols <- names(data)[vapply(data, is.logical, logical(1))]
     for (cc in lgl_cols) data[[cc]][is.na(data[[cc]])] <- FALSE
   } else if (any(pre_filled)) {
-    data$.filled <- pre_filled      # R1-17: aufgefuellte Tage aus series_align() wie eigene behandeln
+    data$.filled <- pre_filled      # aufgefuellte Tage aus series_align() wie eigene behandeln
   }
 
   list(data = data, start_date = start_date, stopp_date = stopp_date)
@@ -84,7 +84,7 @@
 #' Phase 2b von simulation(): Zentralstruktur sim_mem anlegen
 #'
 #' Zweck: sim_mem mit den Feldern aus .SIM_MEM_LAYOUT (assets, status, market, trades, report,
-#' totals) je Asset vorbelegen (status und report setzt seit E17 Stufe 2 der Kern: Startgewichte und
+#' totals) je Asset vorbelegen (status und report setzt der Kern: Startgewichte und
 #' Anfangszustand in core/prepare_core_impl.h); prueft die Signal- und Basiszinsspalten.
 #' Eingabe: data und strategy (vorbereitet), start_value, start_date, stopp_date, sparer_pauschbetrag,
 #' use_sparer_pauschbetrag, base_rate, base_rate_flex, base_rate_data (Meldungen nennen die Bausteine).
@@ -178,7 +178,7 @@
       spread_rate = (strategy[[name]][["spread"]] %||% 0) / 100   # PROZENT-KONVENTION
     )
 
-    #---> Trade-Objekt (Listen setzt die Tagesengine, E17)
+    #---> Trade-Objekt (Listen setzt die Tagesengine)
     sim_mem[["trades"]][[name]] <- list(buys = list(), sells = list(), taxes = list())
   }
 
@@ -191,7 +191,7 @@
 #' (.sched_spec), Ereignis-Rebalancing (event_col, event_weight); prueft dca_start, balance_start, event_col,
 #' event_weight und start sowie, dass ein Asset am ersten Tag handelbar ist. Termine, Splits, das Verschieben
 #' von Terminen auf aufgefuellten Tagen, Aktivierung, Freibetrag, Jahreswechsel und Startgewichte rechnet seit
-#' E17 Stufe 2 der Kern (core/prepare_core_impl.h, ueber .sim_engine_run); bis dahin .sim_build_calendar,
+#' 1.4.0 der Kern (core/prepare_core_impl.h, ueber .sim_engine_run); bis dahin .sim_build_calendar,
 #' .sim_init_weights und .sim_build_schedule.
 #' Eingabe: data, sim_mem, strategy, start_date, stopp_date und die Termin-Argumente von .simulation_flat()
 #' (dca_days und balance_days aus .sim_check_inputs); Meldungen nennen die Bausteine.
@@ -212,7 +212,7 @@
   } else rep(FALSE, length(flag_date))
   data[[".filled"]] <- NULL
   flag_assets <- names(strategy)
-  for (a in c("dca", "balance")) {   # R1-22: Bezugsdatum pruefen (sonst kryptischer seq()-Fehler)
+  for (a in c("dca", "balance")) {   # Bezugsdatum pruefen (sonst kryptischer seq()-Fehler)
     sd0 <- get(paste0(a, "_start"))
     if (!isTRUE(get(paste0(a, "_mode"))) || is.null(sd0)) next
     sd1 <- tryCatch(as.Date(sd0), error = function(e) NA)
@@ -233,7 +233,7 @@
       stop(sprintf("simulation: event_col '%s' nicht im Datensatz gefunden.", event_col))
     flag_event <- as.logical(data[[event_col]])
     flag_event[is.na(flag_event)] <- FALSE
-    if (!is.null(event_weight)) {   # R1-22/R1-23: Gewichtsspalten pruefen
+    if (!is.null(event_weight)) {   # Gewichtsspalten pruefen
       if (is.null(names(event_weight)) || any(names(event_weight) == ""))
         stop("simulation: event_weight muss benannt sein (Asset = Spaltenname), z. B. c(A = \"wA\", B = \"wB\").")
       event_weight <- as.list(event_weight)
@@ -254,7 +254,7 @@
     }
   }
 
-  # R3a-05: start nach dem letzten Datentag waere nie handelbar (frueher still auf Tag 1 gesetzt)
+  # start nach dem letzten Datentag waere nie handelbar (frueher still auf Tag 1 gesetzt)
   starts <- lapply(flag_assets, function(name) sim_mem[["assets"]][[name]][["start"]])
   for (k in seq_along(flag_assets)) {
     st_a <- starts[[k]]
@@ -262,8 +262,8 @@
       stop(sprintf("simulation: start von '%s' (%s) liegt nach dem letzten Datentag (%s); das Asset w\u00e4re nie handelbar. start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie entfernen.",
                    flag_assets[k], format(st_a), format(stopp_date)))
   }
-  # bis E17 Stufe 1c .sim_init_weights: mindestens ein Asset ab dem ersten Tag handelbar
-  if (!length(flag_assets[vapply(starts, function(st) (st %||% flag_date[1]) <= flag_date[1], NA)]))   # R1-22
+  # bis 1.3.0 .sim_init_weights: mindestens ein Asset ab dem ersten Tag handelbar
+  if (!length(flag_assets[vapply(starts, function(st) (st %||% flag_date[1]) <= flag_date[1], NA)]))
     stop(sprintf("simulation: Kein Asset ist am ersten Datentag (%s) handelbar (start bzw. erste Kurse sp\u00e4ter); mindestens ein Asset muss ab Beginn handelbar sein.",
                  format(flag_date[1])))
 

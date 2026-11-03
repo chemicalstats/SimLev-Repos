@@ -1,18 +1,18 @@
-# Huellen der C-Bibliothek slc (SimLev core, Etappe 9.1): Zufallszustand, simlev_seed(),
+# Huellen der C-Bibliothek slc (SimLev core): Zufallszustand, simlev_seed(),
 # interne Ziehungen und Verteilungen .sl_*.
 #
 # Die Rechnung steht in src/slc*.c (Kopien von core/, core/sync.py), die .Call-Huellen in
 # src/slc_r.c (Registrierung in src/init.c, in R als C_sl_*). Kein Code hier ruft R's
 # Zufallszahlen auf; set.seed() und .Random.seed wirken auf diese Funktionen nicht.
 #
-# Zufallszustand (Entwurf C.5):
+# Zufallszustand:
 #   - globaler Zustand G: .sl_state$rng (raw(32), Host-Bytereihenfolge von uint64_t[4]);
 #     beim Laden des Pakets und mit simlev_seed(NULL) aus Uhrzeit, Prozessnummer und Zaehler;
 #   - Strom-Objekt: Umgebung mit Feld state (raw(32)); die Huellen geben den neuen Zustand zurueck,
 #     R ersetzt ihn (kein Aendern an Ort und Stelle);
 #   - innerhalb einer parallelen Einheit (.sl_in_unit) darf G nicht benutzt werden.
 #
-# Seit Etappe 9.6a ziehen alle zufaelligen Exporte hierueber (Regeln C.5): seed = NULL zieht
+# Seit 1.0.0 ziehen alle zufaelligen Exporte hierueber: seed = NULL zieht
 # genau einmal k = .sl_next_seed() aus G und verfaehrt dann wie mit seed = k (.sl_resolve_seed);
 # seed = s laesst G unberuehrt, der Hauptstrom ist .sl_stream(s); Einheiten mit cores bekommen
 # ihre Stroeme U_i = J^i(S_0) aus .sl_streams() vor der Verteilung.
@@ -42,7 +42,7 @@
   txt
 }
 
-# Seed pruefen: ganze Zahl mit |seed| < 2^53 (Entwurf C.5, Regel 2); liefert double
+# Seed pruefen: ganze Zahl mit |seed| < 2^53; liefert double
 .sl_check_seed <- function(seed) {
   ok <- is.numeric(seed) && length(seed) == 1L && !is.na(seed) && is.finite(seed) &&
     seed == trunc(seed) && abs(seed) < 2^53
@@ -86,7 +86,7 @@
 #' Transactions on Mathematical Software* 47(4), Art. 36.
 #'
 #' Steele, G. L., Lea, D., Flood, C. H. (2014). Fast splittable pseudorandom number
-#' generators. *Proceedings OOPSLA 2014*, ACM SIGPLAN Notices 49(10), 453–472.
+#' generators. *Proceedings OOPSLA 2014*, 453–472.
 #' @seealso [bootstrap()], [bootstrap_study()], [scenario_copula()], [regime_hmm()]
 #' @examples
 #' simlev_seed(42)   # reproduzierbarer Zustand
@@ -105,9 +105,9 @@ simlev_seed <- function(seed = NULL) {
   invisible(seed)
 }
 
-# ── Zustand, Stroeme, Regeln C.5 ─────────────────────────────────────────────
+# ── Zustand, Stroeme ─────────────────────────────────────────────
 
-# G benutzen (Regel 7: nie innerhalb einer parallelen Einheit)
+# G benutzen (nie innerhalb einer parallelen Einheit)
 .sl_global_check <- function() {
   if (isTRUE(.sl_state$in_unit))
     stop("interner Fehler: globaler Zufallszustand in paralleler Einheit", call. = FALSE)
@@ -136,7 +136,7 @@ simlev_seed <- function(seed = NULL) {
   s
 }
 
-# Regel 3: naechster Startwert aus G (0 ... 2^31 - 1, integer); G rueckt um eine Ausgabe vor
+# naechster Startwert aus G (0 ... 2^31 - 1, integer); G rueckt um eine Ausgabe vor
 .sl_next_seed <- function() {
   .sl_global_check()
   res <- .Call(C_sl_rng_seed31, .sl_state$rng)
@@ -144,13 +144,13 @@ simlev_seed <- function(seed = NULL) {
   res[[1L]]
 }
 
-# Regeln 3 und 4: seed = NULL -> .sl_next_seed(), sonst geprueft
+# seed = NULL -> .sl_next_seed(), sonst geprueft (G bleibt unberuehrt)
 .sl_resolve_seed <- function(seed) if (is.null(seed)) .sl_next_seed() else .sl_check_seed(seed)
 
-# Hauptstrom einer zufaelligen Funktion (Regeln 3 bis 5): S := Seeding(k bzw. s)
+# Hauptstrom einer zufaelligen Funktion: S := Seeding(k bzw. s)
 .sl_main_stream <- function(seed) .sl_stream(.sl_resolve_seed(seed))
 
-# Regel 6: Stroeme je Einheit U_i = J^i(S_0), i = 1 ... n (Liste von Stroemen)
+# Stroeme je Einheit U_i = J^i(S_0), i = 1 ... n (Liste von Stroemen)
 .sl_streams <- function(stream, n) {
   st <- if (is.environment(stream)) stream$state else .Call(C_sl_rng_seed, .sl_check_seed(stream))
   lapply(.Call(C_sl_rng_streams, st, as.double(n)), .sl_stream_from_state)

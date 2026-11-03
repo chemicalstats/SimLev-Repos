@@ -1,4 +1,4 @@
-# SLib, Etappe 9.2 – Hüllen der C-Bibliothek slc über ccall: lineare Algebra, Matrixprodukt,
+# SLib – Hüllen der C-Bibliothek slc über ccall: lineare Algebra, Matrixprodukt,
 # kleinste Quadrate und Logit-IRLS, Stineman-Interpolation, Glättungsspline, Kerndichte.
 #
 # Wird innerhalb von `module SLib` (slib.jl) eingebunden und nutzt dessen Kontext (_ctx/_finish)
@@ -7,7 +7,7 @@
 # Fehlertexte und Warnungen kommen aus dem Kern. Matrizen sind AbstractMatrix (spaltenweise wie
 # in C), Vektoren AbstractVector bzw. Zahlen. Benannte Ergebnisse als Dict{String,Any}.
 #
-# Seit Etappe 9.6b rufen die Ports diese Hüllen an denselben Stellen wie R.
+# Seit 1.0.0 rufen die Ports diese Hüllen an denselben Stellen wie R.
 
 _la_ismat(x) = x isa AbstractMatrix
 _la_vec(x) = x isa Number ? Float64[x] : Vector{Float64}(vec(collect(x)))

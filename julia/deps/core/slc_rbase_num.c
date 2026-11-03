@@ -1,14 +1,14 @@
-/* core/slc_rbase_num.c – long-double-Rechenwege von R außerhalb der Summen (SimLev core, N10)
+/* core/slc_rbase_num.c – long-double-Rechenwege von R außerhalb der Summen (SimLev core)
  *
  * Verfahren:  sl_r_strtod_num: Zahlteil von R_strtod (as.numeric(<Text>), Parser): Dezimalziffern mit
  *             Punkt und Exponent e[+-]n bzw. Hexadezimal 0x… mit Punkt und Binärexponent p[+-]n,
  *             akkumuliert in long double (ans = 10 * ans + Ziffer), danach Skalierung mit Zehner- bzw.
  *             Zweierpotenzen durch wiederholtes Quadrieren (bei sehr kleinen Exponenten zuerst Division
- *             durch 10 je Ziffer); Zehnerpotenzen in long double, Zweierpotenzen in double (N11: ab 2^1024
+ *             durch 10 je Ziffer); Zehnerpotenzen in long double, Zweierpotenzen in double (ab 2^1024
  *             Inf wie R); Vorzeichen, Leerraum, NA, NaN, Inf prüft der Host.
  *             sl_r_fmod_ld/sl_r_idiv_ld: der long-double-Teil von R's %% und %/% (myfmod, myfloor) für
  *             endliche Operanden nach den Sonderfällen im Host.
- *             NaN bei %% (N11, R 4.3.3 als Orakel, x86-64): x2 == ±0 ergibt im Host R_NaN (0x7FF8000000000000,
+ *             NaN bei %% (R 4.3.3 als Orakel, x86-64): x2 == ±0 ergibt im Host R_NaN (0x7FF8000000000000,
  *             positiv, auch bei NA in x1); sonst bei NaN-Operanden (NA eingeschlossen) liefert sl_r_fmod_ld: beide
  *             beruhigt, ist nur einer NaN dieser (Vorzeichen und Nutzlast bleiben), sonst der mit der größeren
  *             Mantisse, bei gleicher Mantisse der positive (z. B. NA %% 1 = NA beruhigt 0x7FF80000000007A2,
@@ -18,8 +18,8 @@
  *             "Rundung verbreitert") mit long double und nearbyintl wie R; Zehnerpotenzen 1e0..1e27 als
  *             double-Werte (wie R), sonst powl(10, kp).
  * Zweck:      Julia rechnete diese Stellen mit der Nachbildung von long double (julia/src/r/ld80.jl,
- *             F80); seit N10 mit diesen Kernen (ld80.jl entfällt). Python rechnete mit numpy.longdouble;
- *             seit N11 ebenfalls mit diesen Kernen (python/src/_ext_slc_rbase.c).
+ *             F80); seit 1.2.0 mit diesen Kernen (ld80.jl entfällt). Python rechnete mit numpy.longdouble;
+ *             seit 1.3.0 ebenfalls mit diesen Kernen (python/src/_ext_slc_rbase.c).
  * long double: wie slc_rbase.c (x86-64: x87 80 Bit, wie R).
  * Herkunft:           übersetzt aus R 4.3.3, src/main/util.c (R_strtod), arithmetic.c (myfmod,
  *                     myfloor), format.c (scientific), über die Julia-Nachbildungen
@@ -47,7 +47,7 @@ static int hexval_(char c)
     return -1;
 }
 
-/* 2^k (k >= 0) durch Quadrieren in double: ab k >= 1024 Inf (N11: so verhält sich R beim Binärexponenten
+/* 2^k (k >= 0) durch Quadrieren in double: ab k >= 1024 Inf (so verhält sich R beim Binärexponenten
  * hexadezimaler Zahlen, z. B. as.numeric("0x1p-1024") = 0, "0x1p-1023" = 1.1e-308; R 4.3.3 als Orakel) */
 static double pow2_dbl_(int64_t k)
 {
@@ -174,7 +174,7 @@ double sl_r_strtod_num(const char *s, int64_t len, int64_t *used, int *gt_max)
     return (double) ans;
 }
 
-/* NaN-Operanden von %% (N11): beide beruhigt (Bit 51 gesetzt); ist nur einer NaN, dieser; sonst der mit der
+/* NaN-Operanden von %%: beide beruhigt (Bit 51 gesetzt); ist nur einer NaN, dieser; sonst der mit der
  * größeren Mantisse (Bits 0..51), bei gleicher Mantisse positiv, wenn einer positiv ist (x87-Regel wie in R) */
 static double nan_pick_(double x1, double x2)
 {

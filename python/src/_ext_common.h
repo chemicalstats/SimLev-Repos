@@ -1,7 +1,7 @@
 /*
  * python/src/_ext_common.h -- gemeinsame Hilfen der Python-Huellen von simlev._ext
  *
- * Etappe 7.3a. Jede Huelle (_ext_<kern>.cpp) nimmt ihre Felder ueber das
+ * Jede Huelle (_ext_<kern>.cpp) nimmt ihre Felder ueber das
  * Buffer-Protokoll entgegen (numpy-Arrays float64 bzw. int32, zusammenhaengend;
  * keine numpy-Header) und ruft die gemeinsame Kernfunktion (core/<datei>_impl.h,
  * Kopie in src/core/) mit den Sichten ext::Vec/ext::IVec/ext::Mat auf. Am Ende dieser Datei
@@ -19,8 +19,8 @@
  *   SIMLEV_NUM/MATRIX/COPY  -> Speicher je Thread (ext::Alloc), vor jedem Kern geleert;
  *   SIMLEV_INT                 die Huelle kopiert die Ergebnisse danach in Python-Objekte
  *
- * Die frueheren Kerne mit Zufallszahlen (Etappe 7.3b: Bootstrap, truncnorm mit der
- * C-Nachbildung von R's RNG in _rng_r.c) sind mit Etappe 9.6c entfallen; Zufall zieht nur
+ * Die frueheren Kerne mit Zufallszahlen (Bootstrap, truncnorm mit der
+ * C-Nachbildung von R's RNG in _rng_r.c) sind seit 1.0.0 entfallen; Zufall zieht nur
  * noch die C-Bibliothek slc (_ext_slc*.c).
  *
  * Ohne Abbruchpruefung geben die Huellen die GIL waehrend der Rechnung frei. Die
@@ -49,7 +49,7 @@
 
 namespace ext {
 
-/* Pruefung vor dem Kern, deren Fehlschlag die Huelle verlaesst (Etappe 7.3b): als unwahrscheinlich
+/* Pruefung vor dem Kern, deren Fehlschlag die Huelle verlaesst: als unwahrscheinlich
  * markiert, damit der Compiler den eingebetteten Kern als heissen Pfad uebersetzt wie in der
  * R-Huelle (dort werfen die Umwandlungen, statt zu verzweigen). Sonst gilt der Kern hinter einer
  * Kette von Pruefungen als selten, wird auf Groesse optimiert (etwa sqrt als Aufruf statt sqrtsd)
@@ -318,15 +318,15 @@ typedef ext::IVec LglVec;   /* logische Vektoren als int32 */
 extern PyMethodDef simlev_ext_research_methods[];
 extern PyMethodDef simlev_ext_withdrawal_methods[];
 extern PyMethodDef simlev_ext_engine_methods[];
-/* _ext_slc.c (C, Etappe 9.1): Huellen der C-Bibliothek slc */
+/* _ext_slc.c (C): Huellen der C-Bibliothek slc */
 extern "C" PyMethodDef simlev_ext_slc_methods[];
-/* 9.2: _ext_slc_linalg.c (C): lineare Algebra, Matrixprodukt, kleinste Quadrate, Stineman, Spline, Kerndichte */
+/* _ext_slc_linalg.c (C): lineare Algebra, Matrixprodukt, kleinste Quadrate, Stineman, Spline, Kerndichte */
 extern "C" PyMethodDef simlev_ext_slc_linalg_methods[];
 
-/* 9.3: _ext_slc_opt.c (C): Huellen der Optimierer der C-Bibliothek slc */
+/* _ext_slc_opt.c (C): Huellen der Optimierer der C-Bibliothek slc */
 extern "C" PyMethodDef simlev_ext_slc_opt_methods[];
-/* 9.4: _ext_slc_models.c (C): Huellen der Modelle der C-Bibliothek slc */
+/* _ext_slc_models.c (C): Huellen der Modelle der C-Bibliothek slc */
 extern "C" PyMethodDef simlev_ext_slc_models_methods[];
-extern "C" PyMethodDef simlev_ext_slc_rbase_methods[];   /* N8: _ext_slc_rbase.c */
+extern "C" PyMethodDef simlev_ext_slc_rbase_methods[];   /* _ext_slc_rbase.c */
 
 #endif

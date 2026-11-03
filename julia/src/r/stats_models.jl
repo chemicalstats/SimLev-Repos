@@ -9,9 +9,9 @@
 # stats/R/lm.R (Zugriffe), p.adjust.R, ecdf.R, ave.R und aggregate.R; Python: _r/stats_models.py.
 # Teil des Untermoduls RStats (eingebunden in stats.jl).
 #
-# Seit Etappe 9.6c entfallen lm_fit, lm, poly, summary_lm, glm/r_binomial, t_test und das
+# Seit 1.0.0 entfallen lm_fit, lm, poly, summary_lm, glm/r_binomial, t_test und das
 # generische predict: SimLev rechnet kleinste Quadrate, Logit-IRLS, Polynomfit, r² und den
-# Welch-Test selbst (C-Bibliothek slc, SimLev.SLib; Entwurf B.7, B.16).
+# Welch-Test selbst (C-Bibliothek slc, SimLev.SLib).
 
 # ── generische Zugriffe ──────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ _vals(x) = x isa RVector ? Float64[_fl(v) for v in x.values] : x isa AbstractArr
 
 const _PADJ = ["holm", "hochberg", "hommel", "bonferroni", "BH", "BY", "fdr", "none"]
 
-# cummax/cummin wie R (N8: C-Kerne)
+# cummax/cummin wie R (C-Kerne)
 _cumext(x, greater::Bool) = greater ? SimLev._rb_cummax(SimLev._rbv(x)) : SimLev._rb_cummin(SimLev._rbv(x))
 _pmin1(x) = Float64[isnan(t) ? t : (t < 1.0 ? t : 1.0) for t in x]
 

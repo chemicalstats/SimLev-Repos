@@ -1,5 +1,5 @@
 /* core/slc_msgarch.c – MS-GARCH(1,1) mit Normalverteilung und univariates Gauß-HMM
- *                      (SimLev core, Etappe 9.4)
+ *                      (SimLev core)
  * Verfahren:  Modell nach Haas, Mittnik, Paolella (2004): K Regime mit je einem GARCH(1,1)- bzw.
  *             GJR-GARCH(1,1)-Varianzpfad, die parallel auf den Daten laufen; Mittelwert 0;
  *             Regimewechsel als Markov-Kette mit Übergangsmatrix P (Zeile = von). Likelihood über
@@ -10,25 +10,25 @@
  *             Zeile für Zeile als C-ABI überführt (gleiche Rechenfolge und Klammerung); die
  *             Zielfunktion rechnet dieselben Schritte ohne die n x K-Felder.
  *             Umparametrisierung, stationäre Verteilung, Startwerte und Ablauf wie die eigene
- *             R-Funktion .ms_garch_fit (r/R/ms_garch.R, eigener Code seit Etappe 2):
+ *             R-Funktion .ms_garch_fit (r/R/ms_garch.R, eigener Code):
  *             .ms_garch_unpack/.ms_garch_pack, .ms_garch_stat (Potenziteration), Startfamilie 1 aus
  *             dem Baum-Welch-EM des Gauß-HMM (Baum u. a. 1970; wie .hmm_em mit Start
  *             .hmm_init_rank, r/R/regimes.R), Startfamilie 2 aus der Rangeinteilung der
  *             rollierenden Volatilität (.rolling_vol, Quantile, .assign_regimes,
  *             .estimate_trans_mat), je mit dem festen Raster (alpha, gamma, beta) und den
  *             Start-Übergangsmatrizen P0 und P99. Optimierung ganz in C mit BFGS (slc_opt.c,
- *             maxit 500, reltol 1e-10; seit N1 mit analytischem Gradienten, siehe ms_grad_w) von
- *             jedem Startpunkt; der beste Lauf gewinnt, bei Gleichstand der erste. Ergänzung 9.4:
+ *             maxit 500, reltol 1e-10; mit analytischem Gradienten, siehe ms_grad_w) von
+ *             jedem Startpunkt; der beste Lauf gewinnt, bei Gleichstand der erste. Ergänzung in C:
  *             sl_msgarch_estimate startet nach den beiden bisherigen Punkten (bester Rasterpunkt je
  *             Familie) auch von den übrigen Rasterpunkten; von denselben zwei Starts fand BFGS auf
- *             flachen, mehrgipfligen Likelihoods mitunter ein anderes lokales Maximum als optim
- *             (scratchpad/e94/). N1: GJR je Regime mit gamma < 0, solange alpha + gamma > 0
+ *             flachen, mehrgipfligen Likelihoods mitunter ein anderes lokales Maximum als optim.
+ *             GJR je Regime mit gamma < 0, solange alpha + gamma > 0
  *             (Umparametrisierung (alpha/2, (alpha + gamma)/2, beta) wie in slc_garch.c; Glosten,
  *             Jagannathan, Runkle 1993), Raster dafür um zwei Punkte mit gamma < 0 ergänzt (GJR 20
  *             statt 12 Starts, sGARCH unverändert 12). Danach Regime aufsteigend nach unbedingter
  *             Varianz, letzter Filterlauf, Mischungsvarianz und Viterbi-Pfad (Viterbi 1967; wie
  *             .hmm_viterbi, erstes Maximum). Ein nicht endlicher Wert der Zielfunktion zählt als
- *             +Inf (statt des Strafwerts 1e10 in R, SPEZ-9 B.8).
+ *             +Inf (statt des Strafwerts 1e10 in R).
  *             HMM: skalierter Vorwärts-Rückwärts-Schritt wie der eigene Kern hmm_forward_backward
  *             (r/src/research_core_impl.h); M-Schritt mit gewichteten Mitteln und Varianzen
  *             (plus ridge), Abbruch bei |l - l_alt| < tol (1 + |l|).
@@ -37,7 +37,7 @@
  *             breite Intervalle der Ränge mit um 0.1 % der Spannweite erweiterten Rändern
  *             (dokumentiertes Verhalten von cut); Median als Mittel der beiden mittleren Werte.
  *             Summen über die Zeit kompensiert (Neumaier 1974), außer im überführten Filter.
- *             N6: f und g in einem Durchlauf (ms_fc/ms_gc), Starts auf Wunsch parallel
+ *             f und g in einem Durchlauf (ms_fc/ms_gc), Starts auf Wunsch parallel
  *             (sl_msgarch_fit_mt, POSIX-Threads mit SLC_THREADS), Auswahl in fester Reihenfolge;
  *             Ergebnisse bitgleich zu 1.1.0 und unabhängig von der Zahl der Threads.
  * Quellen:    Haas, M., Mittnik, S., Paolella, M. S. (2004). A new approach to Markov-switching
@@ -52,7 +52,7 @@
  *             Hyndman, R. J., Fan, Y. (1996). Sample quantiles in statistical packages. The
  *               American Statistician 50(4), 361–365.
  *             Neumaier, A. (1974). ZAMM 54(1), 39–51. Nocedal, Wright (2006) (BFGS, slc_opt.c).
- *             N1: Glosten, L. R., Jagannathan, R., Runkle, D. E. (1993). The Journal of Finance
+ *             Glosten, L. R., Jagannathan, R., Runkle, D. E. (1993). The Journal of Finance
  *               48(5), 1779–1801 (Bereich der GJR-Parameter).
  *             Griewank, A., Walther, A. (2008). Evaluating Derivatives: Principles and Techniques
  *               of Algorithmic Differentiation, 2. Aufl., SIAM (Vorwärtsmodus; der Gradient ist
@@ -70,8 +70,8 @@
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen (MSGARCH nicht
  *             gelesen).
  * Prüforakel: der bisherige eigene Fit .ms_garch_fit (optim-BFGS) und MSGARCH 2.51 (nur
- *             Plausibilität, scratchpad/e94/); N1: SimLev 1.0.0 und die MSGARCH-Werte aus M2,
- *             Gradient gegen zentrale Differenzen (scratchpad/en1/); N6: SimLev 1.1.0 (scratchpad/en6/).
+ *             Plausibilität); SimLev 1.0.0 und MSGARCH-Vergleichswerte,
+ *             Gradient gegen zentrale Differenzen; SimLev 1.1.0.
  */
 #include "slc_internal.h"
 #include "slc_la_internal.h"
@@ -206,8 +206,8 @@ void sl_msgarch_unpack(int K, int gjr, const double *th, double *om, double *al,
         const int b = k * np;
         om[k] = exp(th[b]);
         if (gjr) {
-            /* N1: (alpha/2, (alpha + gamma)/2, beta) = exp(.) / (1 + Summe); gamma < 0 zulässig, solange
-             * alpha + gamma > 0 (bis 1.0.0: (alpha, gamma/2, beta), also gamma >= 0, F9) */
+            /* (alpha/2, (alpha + gamma)/2, beta) = exp(.) / (1 + Summe); gamma < 0 zulässig, solange
+             * alpha + gamma > 0 (bis 1.0.0: (alpha, gamma/2, beta), also gamma >= 0) */
             const double e1 = exp(th[b + 1]), e2 = exp(th[b + 2]), e3 = exp(th[b + 3]);
             const double d = 1.0 + ((e1 + e2) + e3);
             al[k] = 2.0 * e1 / d; ga[k] = 2.0 * (e2 - e1) / d; be[k] = e3 / d;
@@ -234,7 +234,7 @@ void sl_msgarch_pack(int K, int gjr, const double *om, const double *al, const d
         const double g = gjr ? ga[k] : 0.0;
         const double r = 1.0 - al[k] - g / 2.0 - be[k];
         th[p++] = log(om[k]);
-        if (gjr) { th[p++] = log((al[k] / 2.0) / r); th[p++] = log(((al[k] + g) / 2.0) / r); }   /* N1 */
+        if (gjr) { th[p++] = log((al[k] / 2.0) / r); th[p++] = log(((al[k] + g) / 2.0) / r); }
         else th[p++] = log(al[k] / r);
         th[p++] = log(be[k] / r);
     }
@@ -262,7 +262,7 @@ void sl_msgarch_stat(int K, const double *P, double *pi)
 }
 
 /* Arbeitsfeld der Zielfunktion: om, al, be, ga, xi0 (je K), P (K^2), Filter (4 K) */
-typedef struct { int n, K, gjr; const double *y; double h1; double *w; double *gw; } ms_data;   /* gw: N1 */
+typedef struct { int n, K, gjr; const double *y; double h1; double *w; double *gw; } ms_data;   /* gw: Arbeitsfeld des Gradienten */
 
 static double ms_nll_w(const ms_data *d, const double *th)
 {
@@ -279,14 +279,14 @@ static double ms_nll_w(const ms_data *d, const double *th)
     return isfinite(ll) ? -ll : INFINITY;
 }
 
-/* N1: Länge des Arbeitsfelds des analytischen Gradienten (ms_grad_w) */
+/* Länge des Arbeitsfelds des analytischen Gradienten (ms_grad_w) */
 static size_t ms_gw_len(int K, int gjr)
 {
     const size_t G = (size_t) sl_msgarch_npar(K, gjr), nP = (size_t) K * (K - 1), Kz = (size_t) K;
     return 3 * Kz + Kz * 4 + 4 * Kz * G + 2 * G + 2 * Kz * nP + 4 * Kz + 5 * Kz + Kz * Kz;
 }
 
-/* N1: analytischer Gradient der negativen Log-Likelihood (dieselbe Funktion wie ms_nll_w), vorwärts
+/* analytischer Gradient der negativen Log-Likelihood (dieselbe Funktion wie ms_nll_w), vorwärts
  * mitdifferenziert (Vorwärtsmodus der Kettenregel):
  *   Parameter je Regime k: omega = exp(t0); sGARCH (alpha, beta) = s(t1, t2), GJR (alpha/2,
  *   (alpha + gamma)/2, beta) = s(t1, t2, t3) mit s = Softmax mit 1 im Nenner, ds_i/dt_j = s_i (d_ij - s_j);
@@ -302,8 +302,8 @@ static size_t ms_gw_len(int K, int gjr)
  *   dpost_k = (phi_k / f) dpr_k + post_k c_k dh_k - post_k d log f;
  *   pr_{t+1,j} = sum_i P_ij post_i, dpr_{t+1,j} = sum_i (P_ij dpost_i + dP_ij post_i).
  * Rückgabe 0; bei nicht endlicher Likelihood -1 (g = NaN). gw: ms_gw_len(K, gjr) double.
- * N6: nll (darf NULL sein) erhält dieselbe negative Log-Likelihood wie ms_nll_w (dieselben Rechenschritte in
- * derselben Reihenfolge, die Summe der log f_t läuft mit; bitgleich geprüft, scratchpad/en6/); NaN, wenn der
+ * nll (darf NULL sein) erhält dieselbe negative Log-Likelihood wie ms_nll_w (dieselben Rechenschritte in
+ * derselben Reihenfolge, die Summe der log f_t läuft mit; bitgleich geprüft); NaN, wenn der
  * Gradient nicht berechnet wurde (dann gilt ms_nll_w). */
 #if defined(__GNUC__)
 #define MS_INLINE inline __attribute__((always_inline))
@@ -322,7 +322,7 @@ static MS_INLINE int ms_grad_core(const ms_data *d, const double *th, double *g,
            *dfl = dpn + (size_t) K * G, *dll = dfl + (size_t) K * G, *dlf = dll + G, *dpi = dlf + G,
            *dq = dpi + (size_t) K * nP, *h = dq + (size_t) K * nP, *pr = h + K, *post = pr + K, *wk = post + K,
            *pi = wk + K, *q = pi + K, *ck = q + K, *pn = ck + K, *phi = pn + K, *Pm = phi + K;
-    double ll = 0.0, dsa[64][2][3], dsb[64][3];   /* N6: Ableitungen der Anteile, je Regime fest */
+    double ll = 0.0, dsa[64][2][3], dsb[64][3];   /* Ableitungen der Anteile, je Regime fest */
     int t, k, i, j, m, a, it, conv;
     sl_msgarch_unpack(K, gjr, th, om, al, be, ga, P);
     for (k = 0; k < K; k++)
@@ -341,7 +341,7 @@ static MS_INLINE int ms_grad_core(const ms_data *d, const double *th, double *g,
             S[3 * k] = e1 / dd; S[3 * k + 1] = e2 / dd; S[3 * k + 2] = 0.0;
         }
     }
-    /* N6: d a_t / d theta und d beta / d theta je Regime vor der Zeitschleife (dieselben Ausdrücke wie bisher in
+    /* d a_t / d theta und d beta / d theta je Regime vor der Zeitschleife (dieselben Ausdrücke wie bisher in
      * der Schleife, also dieselben Werte): GJR a = 2 s1 (y >= 0) bzw. 2 s2 (y < 0), beta = s3; sGARCH a = s1,
      * beta = s2 */
     for (k = 0; k < K; k++) {
@@ -365,7 +365,7 @@ static MS_INLINE int ms_grad_core(const ms_data *d, const double *th, double *g,
      * sum dpi = 0 (letzte Spalte von I - P durch Einsen ersetzt, LU mit Spaltenpivotsuche; Golub, Van
      * Loan 2013, Alg. 3.4.1): Die mitgeführte Ableitung ist dort unbrauchbar, weil die Iteration je nach
      * Startpunkt schon nach 0 Schritten endet (z. B. symmetrisches P).
-     * N6: zuerst nur pi (wie sl_msgarch_stat); die mitgeführte Ableitung läuft nur, wenn die Grenze erreicht
+     * zuerst nur pi (wie sl_msgarch_stat); die mitgeführte Ableitung läuft nur, wenn die Grenze erreicht
      * wird, dann mit derselben Iteration von vorn (gleiche pi, gleiche Ableitung wie bisher). */
     for (k = 0; k < K; k++) pi[k] = 1.0 / K;
     for (it = 0; it < 1000; it++) {
@@ -473,7 +473,7 @@ static MS_INLINE int ms_grad_core(const ms_data *d, const double *th, double *g,
                 ck[k] = (y2 / hk - 1.0) / (2.0 * hk);
             }
             if (!isfinite(f) || f <= 0.0) goto bad;
-            ll = ll + log(f);   /* N6: wie ms_loglik */
+            ll = ll + log(f);   /* wie ms_loglik */
             for (k = 0; k < K; k++) { wk[k] = phi[k] / f; post[k] = post[k] / f; }
             for (a = 0; a < G; a++) dlf[a] = 0.0;
             for (k = 0; k < K; k++) {
@@ -524,7 +524,7 @@ bad:
     return -1;
 }
 
-/* N6: eigene Übersetzung für die häufigen Fälle K = 2, 3 (sGARCH, GJR), damit der Übersetzer die kurzen
+/* eigene Übersetzung für die häufigen Fälle K = 2, 3 (sGARCH, GJR), damit der Übersetzer die kurzen
  * Schleifen über Regime und Parameter auflöst; dieselbe Rechnung in derselben Reihenfolge (bitgleich). */
 static int ms_grad_w(const ms_data *d, const double *th, double *g, double *gw, double *nll)
 {
@@ -533,7 +533,7 @@ static int ms_grad_w(const ms_data *d, const double *th, double *g, double *gw, 
     return ms_grad_core(d, th, g, gw, nll, d->K, d->gjr);
 }
 
-/* N6: f und g in einem Durchlauf für BFGS (wie fg_cache in slc_garch.c): Jede Anfrage nach f rechnet mit
+/* f und g in einem Durchlauf für BFGS (wie fg_cache in slc_garch.c): Jede Anfrage nach f rechnet mit
  * ms_grad_w auch g und bewahrt beides auf; die Anfrage nach g am selben Punkt (BFGS fragt sie nach erfüllter
  * Abnahmebedingung, gemessen bei 92 % der Punkte) und eine zweite nach f lesen nur den Speicher. f ist
  * bitgleich zu ms_nll_w (siehe ms_grad_w), g zu ms_gr; nur die Zahl der Durchläufe sinkt. */
@@ -567,7 +567,7 @@ static int ms_data_init(sl_ctx *cx, ms_data *d, int n, const double *y, int K, i
     return SL_OK;
 }
 
-/* N1: Arbeitsfeld des Gradienten anlegen (nur für Fit und sl_msgarch_grad) */
+/* Arbeitsfeld des Gradienten anlegen (nur für Fit und sl_msgarch_grad) */
 static int ms_data_grad(sl_ctx *cx, ms_data *d)
 {
     d->gw = (double *) malloc(ms_gw_len(d->K, d->gjr) * sizeof(double));
@@ -617,11 +617,11 @@ int sl_msgarch_grad(sl_ctx *cx, int n, const double *y, int K, int gjr, const do
     return SL_OK;
 }
 
-/* N6: BFGS von den Startpunkten, auf Wunsch parallel (Threads, Schalter SLC_THREADS beim Übersetzen; ohne ihn
+/* BFGS von den Startpunkten, auf Wunsch parallel (Threads, Schalter SLC_THREADS beim Übersetzen; ohne ihn
  * und bei nthreads <= 1 nacheinander wie bisher). Jeder Start läuft unabhängig mit eigenem Arbeitsfeld und
  * liefert dasselbe Ergebnis wie nacheinander; ausgewählt wird danach in der festen Reihenfolge der Starts (der
  * beste gewinnt, bei Gleichstand der erste), Fehler und Warnungen gelten in derselben Reihenfolge. Damit hängt
- * das Ergebnis nicht von der Zahl der Threads ab (bitgleich geprüft, scratchpad/en6/). Benutzerabbruch fragt nur
+ * das Ergebnis nicht von der Zahl der Threads ab (bitgleich geprüft). Benutzerabbruch fragt nur
  * der aufrufende Thread ab (die Hüllen von R und Python dürfen nur dort zurückrufen); er hält die übrigen über
  * eine gemeinsame Marke an. */
 typedef struct {
@@ -728,7 +728,7 @@ int sl_msgarch_fit_mt(sl_ctx *cx, int n, const double *y, int K, int gjr, int ns
     if (nstart < 1) return sl_fail(cx, SL_EARG, "MS-GARCH: keine Startpunkte");
     if (ctrl) c = *ctrl;
     else { sl_opt_ctrl_default(&c, SL_OPT_BFGS); c.maxit = 500; c.reltol = 1e-10; }
-    if (K > 64) return sl_fail(cx, SL_EARG, "MS-GARCH: höchstens 64 Regime");    /* N1: Gradient */
+    if (K > 64) return sl_fail(cx, SL_EARG, "MS-GARCH: höchstens 64 Regime");    /* Gradient */
     memset(&p, 0, sizeof p);
     p.n = n; p.K = K; p.gjr = gjr; p.np = np; p.nstart = nstart; p.y = y; p.starts = starts; p.h1 = h1; p.c = &c;
     p.main_cx = cx; p.stop_at = nstart;
@@ -827,8 +827,8 @@ static void fix_P(int K, double *P)
 
 /* Rasterpunkte einer Familie (Varianzen s2k aufsteigend, Start-Übergangsmatrizen P0 und P99, je MS_NG
  * Rasterpunkte): out = bester Punkt (kleinste NLL, bei Gleichstand der erste; wie .ms_garch_fit),
- * rest = die übrigen 2 MS_NG - 1 in Rasterreihenfolge (Ergänzung 9.4, siehe sl_msgarch_starts).
- * N1: bei GJR zwei Rasterpunkte mehr mit gamma < 0 (alpha + gamma > 0), hinter den bisherigen drei. */
+ * rest = die übrigen 2 MS_NG - 1 in Rasterreihenfolge (siehe sl_msgarch_starts).
+ * bei GJR zwei Rasterpunkte mehr mit gamma < 0 (alpha + gamma > 0), hinter den bisherigen drei. */
 #define MS_NG_S 3
 #define MS_NG_G 5
 #define MS_NG(gjr) ((gjr) ? MS_NG_G : MS_NG_S)
@@ -1205,8 +1205,8 @@ int sl_msgarch_starts(sl_ctx *cx, int n, const double *y, int K, int gjr, double
         best_start(&d, s2k, P0, starts + (size_t) np * ns, rest + (size_t) np * nr);
         ns++; nr += 2 * MS_NG(gjr) - 1;
     }
-    /* 9.4: danach die übrigen Rasterpunkte beider Familien (BFGS von denselben Starts wie heute findet
-     * auf flachen, mehrgipfligen Likelihoods teils andere lokale Maxima als optim; scratchpad/e94/) */
+    /* danach die übrigen Rasterpunkte beider Familien (BFGS von denselben Starts findet
+     * auf flachen, mehrgipfligen Likelihoods teils andere lokale Maxima als optim) */
     if (all_pts) {
         memcpy(starts + (size_t) np * ns, rest, (size_t) np * nr * sizeof(double));
         ns += nr;
@@ -1242,7 +1242,7 @@ int sl_msgarch_estimate_mt(sl_ctx *cx, int n, const double *y, int K, int gjr, d
     theta = starts + (size_t) SL_MSGARCH_MAXSTART * np;
     st = sl_msgarch_starts(cx, n, y, K, gjr, h1, 1, &ns, starts);
     if (st != SL_OK) goto out;
-    st = sl_msgarch_fit_mt(cx, n, y, K, gjr, ns, starts, h1, NULL, theta, &nll, code, nthreads);   /* N6 */
+    st = sl_msgarch_fit_mt(cx, n, y, K, gjr, ns, starts, h1, NULL, theta, &nll, code, nthreads);
     if (st != SL_OK) goto out;
     if (!isfinite(nll) || !slc_all_finite(np, theta)) {
         st = sl_fail(cx, SL_ECONV, "Log-Likelihood nicht endlich (Optimierer-Code %d).", *code);

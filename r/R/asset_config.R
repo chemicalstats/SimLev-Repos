@@ -21,7 +21,7 @@
 #'   \describe{
 #'     \item{"bnh"}{Buy-and-Hold: am ersten Tag kaufen, bis zum Ende halten}
 #'     \item{"signal"}{Signalgesteuert: Ein-/Ausstieg nach Signalspalten in den Daten; bei offener
-#'       Position wird neues Geld sofort angelegt wie bei Buy-and-Hold (A7-09)}
+#'       Position wird neues Geld sofort angelegt wie bei Buy-and-Hold}
 #'   }
 #' @param share Zahl. Zielgewicht im Portfolio als Anteil, groesser 0 und hoechstens 1.
 #'   Wird fuer Rebalancing und DCA-Aufteilung genutzt; die Summe ueber alle Assets
@@ -112,7 +112,7 @@ asset_config <- function(
   
   # Pruefungen
 
-  # R1-23: Zahlen muessen Zahlen sein (kein Text wie "0.5"), Prozentangaben plausibel
+  # Zahlen muessen Zahlen sein (kein Text wie "0.5"), Prozentangaben plausibel
   .num1 <- function(x, arg) {
     if (!is.numeric(x) || length(x) != 1L || is.na(x))
       stop(sprintf("asset_config: %s muss eine einzelne Zahl sein, nicht %s.", arg, paste(deparse(x), collapse = "")))
@@ -148,7 +148,7 @@ asset_config <- function(
     stop("asset_config: bei trading = \"signal\" m\u00fcssen signal_buy und signal_sell angegeben werden (Namen der Signalspalten in data).")
   }
   
-  # Fonds-Wrapper (Etappe 6.5c): keine Signale auf den Anteilswert (E5)
+  # Fonds-Wrapper: keine Signale auf den Anteilswert
   if (!is.null(wrapper)) {
     if (!inherits(wrapper, "SimLevWrapperConfig"))
       stop(sprintf("asset_config: wrapper muss NULL oder ein Objekt aus wrapper_config() sein, nicht %s.",

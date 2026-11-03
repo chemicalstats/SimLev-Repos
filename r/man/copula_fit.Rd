@@ -45,7 +45,8 @@ gemeinsamen Abstuerze (unterer Tail), Gumbel gemeinsame Anstiege; die um
 (z. B. Aktien und Anleihen in Deflationsphasen) werden die um 90/270 Grad
 rotierten Varianten verwendet. Kendalls Tau wird intern in O(n log n)
 berechnet (gleiches Ergebnis wie \code{stats::cor(method = "kendall")}).
-
+}
+\details{
 Die t-Copula wird ueber die Profil-Likelihood in den Freiheitsgraden
 \eqn{\nu} geschaetzt, weil die Likelihood in \eqn{\nu} sehr flach ist:
 fuer jedes \eqn{\nu} eines Rasters (\eqn{\nu = 2 + 2^k}, \eqn{k = -4,

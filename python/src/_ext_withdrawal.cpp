@@ -1,7 +1,7 @@
 /*
  * python/src/_ext_withdrawal.cpp -- Python-Huelle des Entnahme-Kerns (.wd_simulate)
  *
- * Etappe 7.3a. Gemeinsamer Kern mit R (core/withdrawal_core_impl.h, Kopie in src/core/);
+ * Gemeinsamer Kern mit R und Julia (core/withdrawal_core_impl.h, Kopie in src/core/);
  * aufgerufen aus simlev._withdrawal_core.wd_simulate, das die Argumente vorher
  * wie R umwandelt. Matrizen spaltenweise als flache
  * double-Puffer mit Zeilen- und Spaltenzahl, lot_group als int32-Puffer.

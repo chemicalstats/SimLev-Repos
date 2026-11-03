@@ -1,7 +1,7 @@
 # =============================================================================
 # simulation(), Phase 6: Auswertung und Ergebnisobjekt
 # =============================================================================
-# Seit E17 Stufe 3 rechnet der C++-Kern core/evaluate_core_impl.h die Auswertung: Depotwert und Zufluesse je
+# rechnet der C++-Kern core/evaluate_core_impl.h die Auswertung: Depotwert und Zufluesse je
 # Tag, CAGR (mit Einzahlungen geldgewichtet ueber XIRR), TTWROR, zeitgewichteter Wertindex, Drawdowns,
 # Tagesrenditen, Performance- und Risikokennzahlen, Kaeufe/Verkaeufe je Jahr und die Ursachen nicht definierter
 # Kennzahlen (bis R 1.3.0 .sim_compact_trades, .sim_returns, .sim_risk_stats, .sim_undefined_metrics). Warnungen,
@@ -110,7 +110,7 @@
   warning(w)
 }
 
-#' Phase 6 von simulation(): Auswertung im Kern (E17 Stufe 3)
+#' Phase 6 von simulation(): Auswertung im Kern
 #'
 #' Zweck: Wertreihen, Renditen, Drawdowns, Kennzahlen und Ursachen nicht definierter Kennzahlen ueber
 #' core/evaluate_core_impl.h; Meldungen in der Reihenfolge von R 1.3.0 (Warnungen von .sim_returns, dann die von
@@ -139,7 +139,7 @@
     rf = if (is.double(rfv)) rfv else if (!is.null(rfv)) as.double(rfv), rf_ok = as.integer(!rf$failed))
   ev <- .Call(C_sim_evaluate, inp)
   # Meldungen: Warnungen von .sim_returns, Abbruch dort, Meldungen von risk_free, Abbruch in .sim_risk_stats
-  cl <- sys.call()   # C19: Aufruf der Phase; .sim_restore_call setzt den Aufruf von simulation()
+  cl <- sys.call()   # Aufruf der Phase; .sim_restore_call setzt den Aufruf von simulation()
   for (i in seq_along(ev$msg_code)) .sim_eval_warn(ev$msg_code[i], ev$msg_v[4L * (i - 1L) + 1:4], cl)
   na_stop <- function() stop(simpleError("missing value where TRUE/FALSE needed", cl))
   if (ev$err[2] == 1L) na_stop()

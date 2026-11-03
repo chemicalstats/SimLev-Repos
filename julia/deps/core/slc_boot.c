@@ -1,7 +1,7 @@
-/* core/slc_boot.c – Bootstrap-Kerne mit Zufall aus einem übergebenen Strom (SimLev core, Etappe 9.4)
+/* core/slc_boot.c – Bootstrap-Kerne mit Zufall aus einem übergebenen Strom (SimLev core)
  * Verfahren:  Die eigenen Bootstrap-Kerne von SimLev (r/src/bootstrap_core_impl.h, C++ über
  *             Host-Sichten) als reines C; Rechnung und Reihenfolge der Ziehungen wie dort, gezogen
- *             wird nur aus dem übergebenen Strom sl_rng * (SPEZ-9 B.17, C.5): ganze Zahl in [0, n)
+ *             wird nur aus dem übergebenen Strom sl_rng *: ganze Zahl in [0, n)
  *             mit sl_rint (Lemire 2019) statt floor(runif(0, n)), geometrisch mit sl_rgeom
  *             (Inversion), normal mit sl_rnorm (Inversion), gleichverteilt mit sl_unif01.
  *             Indexkerne (Quellzeilen 1-basiert):
@@ -53,7 +53,7 @@
  *             zur Laufzeit aus sqrt(5) wie im eigenen Kern; Untergrenze der Varianz 1e-14.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
- * Prüforakel: die bisherigen eigenen Kerne (statistisch, anderer Generator; scratchpad/e94/).
+ * Prüforakel: die früheren eigenen Kerne (statistisch, anderer Generator).
  */
 #include "slc_internal.h"
 #include "slc_la_internal.h"

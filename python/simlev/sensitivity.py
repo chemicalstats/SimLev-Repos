@@ -139,22 +139,58 @@ def _is_na_scalar(v):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def sensitivity_grid(data, strategy, grid, *, sim_args=None, metrics=None, keep_results=False, cores=1):
-    """``simulation()`` über ein Parameterraster.
+    """``simulation`` über ein Parameterraster.
 
-    Ruft ``simulation()`` für jede Kombination von ``grid`` auf denselben Daten
-    und derselben Strategie auf und sammelt die Kennzahlen in einem data.frame.
+    Ruft ``simulation()`` für jede Kombination von ``grid`` auf denselben Daten und derselben Strategie auf und
+    sammelt die Kennzahlen in einem DataFrame (eine Zeile je Lauf). Grundlage der speziellen Studien in diesem
+    Abschnitt (``sensitivity_rebalancing()``, ``sensitivity_leverage()``).
 
     Args:
-        data, strategy: wie in ``simulation()``.
-        grid: dict von Argumentwerten (alle Kombinationen) oder data.frame mit
-            einer Zeile je Lauf; ``NA`` lässt das Argument weg.
-        sim_args: gemeinsame Argumente (Werte aus ``grid`` haben Vorrang).
-        metrics: Funktion ``SimLevResult`` → benannter Vektor (Standard ``bootstrap_study_metrics``).
-        cores: Anzahl Prozesse (Standard 1).
-        keep_results: Ergebnisse zusätzlich in ``attrs["results"]``.
+        data, strategy: Wie in ``simulation()``: DataFrame mit Spalte ``date`` und Kursspalten (Niveaus) bzw.
+            Strategie aus ``create_strategy()``.
+        grid: Benannte Liste von Argumentwerten für ``simulation()``; alle Kombinationen werden gerechnet.
+            Parameter der Bausteine werden mit Pfad ``"<Baustein>.<Parameter>"`` angesprochen, z. B.
+            ``{"rebalance.unit": ["month", "year"], "rebalance.thresh": [5, 10]}``, ``"dca.value"``,
+            ``"tax.rate"``, ``"tax.church_tax"``; Teilbausteine von ``tax_profile()`` mit drei Teilen
+            (``"tax.income.marginal_rate"``, ``"tax.income.taxable_income"``, ``"tax.harvest.day"``). Ein Pfad
+            baut den Baustein für jeden Lauf neu: Grundwerte aus dem gleichnamigen Baustein in ``sim_args`` (ohne
+            ihn die Standardwerte des Konstruktors, z. B. ``dca_plan(value, span)`` braucht dann beide Pfade);
+            mehrere Pfade eines Bausteins gelten zusammen. Ohne Punkt sind es Argumente von ``simulation()``
+            (``start_value``, ``risk_free``, ``fractions``, ``liquidate``, ``details`` oder ein ganzer Baustein
+            als Listen-Spalte). Unbekannte Pfade und die alten Einzelargumente (z. B. ``balance_unit``) ergeben
+            einen Fehler mit den möglichen Bausteinen und Parametern. Alternativ ein DataFrame mit einer Zeile je
+            Lauf. Listen-Spalten (z. B. ``splits.thresh``) sind erlaubt. ``NA`` lässt das Argument weg
+            (Standardwert bzw. Wert aus ``sim_args``).
+        sim_args: Benannte Liste gemeinsamer Argumente für alle Läufe (Standard ``{}``); Werte aus ``grid`` haben
+            Vorrang. Argumente von ``simulation()`` außer ``data`` und ``strategy``, also auch Bausteine (z. B.
+            ``dca = dca_plan(100, 1)``, ``tax = tax_profile()``) und Pfade zu Parametern der Bausteine
+            (``"dca.value"``, siehe ``sensitivity_grid``). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z.
+            B. ``dca_value``) ergeben einen Fehler, der den Baustein nennt.
+        metrics: Funktion ``SimLevResult -> benannter numerischer Vektor`` (Standard
+            ``bootstrap_study_metrics()``).
+        keep_results: Logisch (Standard ``False``): Ergebnisse der Läufe zusätzlich als Attribut ``results``
+            zurückgeben.
+        cores: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
 
     Returns:
-        ``pandas.DataFrame``: Rasterspalten, Kennzahlen und ggf. ``error``.
+        DataFrame: Rasterspalten (Listen-Spalten als Text "a/b"), die Kennzahlen aus ``metrics`` (bei
+        ``bootstrap_study_metrics()`` z. B. ``cagr`` als Anteil; mit Sparplan geldgewichtet, XIRR) und, falls ein
+        Lauf fehlschlug, eine Spalte ``error`` (Fehlermeldung, Kennzahlen dann ``NA``); schlagen alle Läufe fehl,
+        ein Fehler mit den Meldungen der Läufe. Bei ``keep_results = True`` Attribut ``results`` (Liste der
+        ``SimLevResult``).
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1500
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        d["A"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d["B"] = 100 * np.cumprod(1 + rng.normal(1e-4, 0.004, n))
+        st = simlev.create_strategy(A=simlev.asset_config(asset_class="etf", share=0.6), B=simlev.asset_config(asset_class="etf", share=0.4))
+        g = simlev.sensitivity_grid(d, st, {"rebalance.unit": ["month", "year"]},
+                                    sim_args={"rebalance": simlev.rebalance_plan(span=1)})
+        print(g[["rebalance.unit", "cagr", "trades"]])
     """
     metrics = _metrics_default(metrics)
     design = _grid_frame(grid)
@@ -376,22 +412,58 @@ def sensitivity_rebalancing(data, strategy, *, frequencies=None, offsets=None, b
                             cores=1):
     """Rebalancing-Sensitivität.
 
-    Vergleicht Rebalancing-Frequenzen, Versatz vor dem Periodenende und
-    Toleranzbänder (absolut oder relativ) für eine Strategie. Jede Kombination
-    aus ``frequencies``, ``offsets`` und ``bands`` wird mit ``simulation()``
-    (``balance_mode = True``) gerechnet.
+    Vergleicht Rebalancing-Frequenzen, Versatz vor dem Periodenende und Toleranzbänder (absolut oder relativ) für
+    eine Strategie, wie die Rebalancing-Sensitivity von testfol.io. Jede Kombination aus ``frequencies``,
+    ``offsets`` und ``bands`` wird mit ``simulation()`` (``rebalance = rebalance_plan(...)``) gerechnet. Bänder
+    werden an den Kalenderterminen der jeweiligen Frequenz geprüft. Termine, die nicht als Zeile in ``data``
+    vorkommen (bei Handelstagsdaten z. B. Wochenenden), entfallen.
 
     Args:
-        data, strategy: wie in ``simulation()``.
-        frequencies: dict Name → ``(unit, span)``; Standard monatlich bis jährlich.
-        offsets: Kalendertage vor dem Periodenende (0 = letzter Tag); ``None`` = Periodenanfang.
-        bands: Toleranzbänder in Prozent; ``NA`` = an jedem Termin.
-        band_type: ``"absolute"`` (Standard) oder ``"relative"``.
-        include_none: zusätzlich ein Lauf ohne Rebalancing (Standard ``True``).
-        sim_args, metrics, cores: wie bei :func:`sensitivity_grid`.
+        data, strategy: Wie in ``simulation()``: DataFrame mit Spalte ``date`` und Kursspalten (Niveaus) bzw.
+            Strategie aus ``create_strategy()``.
+        frequencies: Benannte Liste von ``[unit, span]`` mit ``unit`` "month", "quarter" oder "year" und ``span``
+            = Anzahl Einheiten zwischen den Terminen (``unit`` und ``span`` von ``rebalance_plan()``). Standard:
+            monatlich, zweimonatlich, quartalsweise, viermonatlich, halbjährlich, jährlich (Namen monthly,
+            bimonthly, quarterly, four_monthly, semiannual, yearly).
+        offsets: Numerischer Vektor: Kalendertage vor dem Ende des Monats, Dreimonatsblocks bzw. Jahres, in dem
+            der Termin liegt (0 = letzter Tag; ``rebalance_plan(anchor = "end", days = offset + 1)``). ``None``
+            (Standard) rebalanciert am Periodenanfang.
+        bands: Toleranzbänder in Prozent (5 = 5 Prozent); ``NA`` (Standard) = an jedem Termin rebalancieren.
+            Mehrere Werte, auch gemischt mit ``NA``, sind möglich.
+        band_type: "absolute" (Standard; Prozentpunkte Abweichung vom Zielgewicht) oder "relative" (Prozent des
+            Zielgewichts), siehe ``thresh_type`` von ``rebalance_plan()``.
+        include_none: Logisch (Standard ``True``): zusätzlich einen Lauf ohne Rebalancing (Zeile ``frequency =
+            "none"``).
+        sim_args: Benannte Liste gemeinsamer Argumente für alle Läufe (Standard ``{}``): Argumente von
+            ``simulation()`` außer ``data`` und ``strategy``, also auch Bausteine (z. B. ``dca = dca_plan(100,
+            1)``, ``tax = tax_profile()``) und Pfade zu Parametern der Bausteine (``"dca.value"``, siehe
+            ``sensitivity_grid``). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B. ``dca_value``)
+            ergeben einen Fehler, der den Baustein nennt. Ein ``rebalance = rebalance_plan(...)`` in ``sim_args``
+            liefert die Grundwerte (z. B. ``start``, ``event_col``); Frequenz, Versatz und Band setzt die Funktion
+            je Lauf über die Pfade ``"rebalance.unit"``, ``"rebalance.span"``, ``"rebalance.anchor"``,
+            ``"rebalance.days"``, ``"rebalance.thresh"`` und ``"rebalance.thresh_type"``; der Lauf ohne
+            Rebalancing setzt ``rebalance = None``.
+        metrics: Funktion ``SimLevResult -> benannter numerischer Vektor`` (Standard
+            ``bootstrap_study_metrics()``).
+        cores: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
 
     Returns:
-        :class:`SimLevSensitivity` (``attrs["kind"] = "rebalancing"``).
+        DataFrame der Klasse ``SimLevSensitivity`` mit den Spalten ``frequency``, ``offset``, ``band``,
+        ``band_type`` und den Kennzahlen aus ``metrics``; fehlgeschlagene Läufe fehlen. Attribut ``kind =
+        "rebalancing"``. Ausgabe und Grafik über ``print()`` und ``plot()``. Mit Sparplan (``sim_args``) ist
+        ``cagr`` geldgewichtet (XIRR); ``print()`` weist darauf hin.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1500
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        d["A"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d["B"] = 100 * np.cumprod(1 + rng.normal(1e-4, 0.004, n))
+        st = simlev.create_strategy(A=simlev.asset_config(asset_class="etf", share=0.6), B=simlev.asset_config(asset_class="etf", share=0.4))
+        print(simlev.sensitivity_rebalancing(d, st, frequencies={"monthly": ["month", 1], "yearly": ["year", 1]},
+                                             bands=[np.nan, 5]))
     """
     band_type = _match_arg(band_type, ("absolute", "relative"), "band_type")
     frequencies = _FREQ if frequencies is None else frequencies
@@ -485,21 +557,64 @@ def _report_get(rep, a, key):
 def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=10, step=1, sim_args=None, cores=1):
     """Einmalanlage gegen gestreckten Einstieg (Lump Sum vs. DCA).
 
-    Vergleicht für rollierende Starttermine (jeweils am Monatsersten) die
-    sofortige Anlage eines Betrags mit einem Einstieg in ``months`` gleichen
-    Monatsraten; verglichen wird das Vermögen nach ``horizon`` Jahren.
+    Vergleicht für rollierende Starttermine (jeweils am Monatsersten) die sofortige Anlage eines Betrags mit einem
+    Einstieg in ``months`` gleichen Monatsraten. Verglichen wird das Vermögen nach ``horizon`` Jahren.
 
     Args:
-        data, strategy: wie in ``simulation()``.
-        amount: Anlagebetrag (Standard 10000).
-        months: Anzahl Monatsraten (Standard 12).
-        horizon: Vergleichshorizont in Jahren (Standard 10).
-        step: jeder wievielte mögliche Starttermin (Standard 1).
-        sim_args: weitere ``simulation()``-Argumente (Bausteine, Pfade; ohne ``start_value`` und ``dca``).
-        cores: Anzahl Prozesse.
+        data, strategy: Wie in ``simulation()``: DataFrame mit Spalte ``date`` und Kursspalten (Niveaus) bzw.
+            Strategie aus ``create_strategy()``.
+        amount: Anlagebetrag in Währungseinheiten (Standard 10000); bei DCA in ``months`` Raten von ``amount /
+            months`` aufgeteilt.
+        months: Anzahl Monatsraten des gestreckten Einstiegs (Standard 12).
+        horizon: Vergleichshorizont in Jahren ab Start (Standard 10).
+        step: Jeder wievielte mögliche Starttermin verwendet wird (Standard 1 = jeder Monat; 12 = jährlich).
+        sim_args: Benannte Liste weiterer Argumente für ``simulation()`` (z. B. ``tax = tax_profile()``):
+            Argumente von ``simulation()`` außer ``data`` und ``strategy``, also auch Bausteine (z. B. ``dca =
+            dca_plan(100, 1)``, ``tax = tax_profile()``) und Pfade zu Parametern der Bausteine (``"dca.value"``,
+            siehe ``sensitivity_grid``). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B. ``dca_value``)
+            ergeben einen Fehler, der den Baustein nennt. ``start_value`` und ``dca`` (auch Pfade ``"dca.*"`` und
+            die alten ``dca_*``) setzt die Funktion selbst (in ``sim_args`` ein Fehler).
+        cores: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
 
     Returns:
-        :class:`SimLevLumpSum` mit ``attrs["summary"]`` und ``attrs["settings"]``.
+        DataFrame der Klasse ``SimLevLumpSum`` mit einer Zeile je Start: ``start`` (Datum), ``lump_sum`` und
+        ``dca`` (Endvermögen nach ``horizon`` Jahren in Währungseinheiten), ``advantage`` (Lump Sum / DCA - 1, als
+        Anteil) und ``exact`` (logisch: DCA-Depot exakt über Stückzahlen fortgeschrieben, siehe oben). Attribut
+        ``summary``: ``win_rate`` (Anteil der Starttermine mit Vorsprung der Einmalanlage), ``mean_advantage``,
+        ``median_advantage``, ``mlsa`` (mittlerer Vorsprung bei Gewinn) und ``mlsd`` (mittlerer Rückstand bei
+        Verlust), alle als Anteil; Attribut ``settings``.
+
+    Details:
+        Die Einmalanlage wird über den ganzen Horizont mit ``simulation()`` gerechnet, der gestreckte Einstieg
+        über die ``months`` Monate der Einstiegsphase (Sparplan). Danach wird das DCA-Depot fortgeschrieben:
+
+        - exakt: Handelt die Strategie nach der Einstiegsphase nicht mehr (in der Einmalanlage bleibt die
+          Stückzahl jedes Assets bis zum Horizont gleich, z. B. Buy-and-Hold ohne Rebalancing, ohne Steuern), hält
+          auch das DCA-Depot seine Stückzahlen: Endwert = Summe der Stückzahlen am Ende der Einstiegsphase x Kurs
+          am Horizont plus Cash. Jedes Asset behält so seine eigenen Gewichte.
+        - Näherung: Sonst (Rebalancing, Signale, Steuern mit Vorabpauschale oder Kosten, die Stück verkaufen)
+          wächst das DCA-Depot mit dem zeitgewichteten Index der Einmalanlage (``result_index()``), als hätte es
+          ab dem Ende der Einstiegsphase deren Gewichte; mit Steuern (``tax = tax_profile()``) erscheint dazu eine
+          Warnung.
+
+        Welche Variante verwendet wurde, steht je Start in der Spalte ``exact``. Für Fonds-Wrapper
+        (``asset_config(wrapper = )``) ist der Kurs der Anteilswert aus ``wrapper_nav()`` im Fenster der
+        Einmalanlage, wie ihn ``simulation()`` rechnet.
+
+        Als Starttermine dienen nur Monatserste, die als Zeile in ``data`` vorkommen (bei Handelstagsdaten
+        entfallen Monate, deren Erster kein Handelstag ist), und nur solche, nach denen noch ``horizon`` Jahre
+        Daten folgen.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 2190
+        d = pd.DataFrame({"date": pd.date_range("2010-01-01", periods=n)})
+        d["ETF"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        ld = simlev.planning_lumpsum_vs_dca(d, simlev.create_strategy(ETF=simlev.asset_config(asset_class="etf")),
+                                            amount=12000, months=12, horizon=3, step=6)
+        print(ld.head())
     """
     sim_args = {} if sim_args is None else dict(sim_args)
     own = [k for k in sim_args if k in ("start_value", "dca", "dca_mode", "dca_value", "dca_span", "dca_unit", "dca_skip")
@@ -611,21 +726,36 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
 def series_leverage(data, index, *, leverage=2, rate=0, expense=0, spread=0, start=100):
     """Gehebelte Reihe aus einem Index erzeugen (täglich zurückgesetzt, MSCI-Formel plus Kosten).
 
-    ``r = L x + (1 - L) i T/360 - TER T/365 - s m(L) T/360`` mit Indexrendite
-    ``x``, Kalendertagen ``T`` seit der Vorzeile und ``m(L) = max(L-1, 0) + max(-L, 0)``.
+    Bildet eine täglich zurückgesetzte Hebelreihe (Niveau) nach der MSCI-Formel plus Fondskosten (wie die
+    Ticker-Parameter L, E, SP und FR bei testfol.io): r = L x + (1 - L) i T/360 - TER· T/365 - s· m(L) T/360 mit
+    Indexrendite x, Kalendertagen T seit der Vorzeile, m(L) = max(L-1, 0) + max(-L, 0) und i, TER, s als Anteil
+    (Prozentangabe / 100); der Zins gilt für den Tag der Rendite. Das Ergebnis kann als Kursspalte in
+    ``simulation()`` dienen; für die Anpassung an ein echtes Produkt siehe ``backcast_fit()``.
 
     Args:
-        data: data.frame mit Spalte ``date`` und der Indexspalte.
-        index: Spaltenname des Index (Niveau; Lücken per LOCF gefüllt).
-        leverage: Hebel (Standard 2; negativ für Short).
-        rate: Finanzierungszins in Prozent p. a. (Skalar, Spaltenname, Vektor,
-            data.frame(date, value) oder benannter Vektor mit Datumsnamen).
-        expense: TER in Prozent p. a.
-        spread: Spread auf den finanzierten bzw. leerverkauften Anteil (Prozent p. a.).
-        start: Startwert der Reihe (Standard 100).
+        data: DataFrame mit Spalte ``date`` und der Indexspalte.
+        index: Spaltenname des Index (Niveau, nicht Rendite; Lücken werden mit dem letzten Wert gefüllt).
+        leverage: Hebel L als Zahl (Standard 2; negativ für Short).
+        rate: Finanzierungszins in Prozent p. a. (Standard 0): Skalar, Spaltenname, Vektor der Länge
+            ``nrow(data)``, ``data.frame(date, value)`` oder benannter Vektor mit Datumsnamen.
+        expense: TER in Prozent p. a. (Standard 0).
+        spread: Spread auf den finanzierten bzw. leerverkauften Anteil m(L) in Prozent p. a. (Standard 0).
+        start: Startwert der Reihe in der ersten Zeile (Standard 100).
 
     Returns:
-        ``numpy.ndarray`` (Niveau, Länge ``nrow(data)``).
+        Numerischer Vektor (Niveau, Länge ``nrow(data)``); fällt eine Tagesrendite auf -100 Prozent oder darunter,
+        bleibt die Reihe ab dort bei 0.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1500
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        d["idx"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        d["zins"] = 2.0
+        d["l2"] = simlev.series_leverage(d, "idx", leverage=2, rate="zins", expense=0.6, spread=0.3)
+        print(d.tail(2))
     """
     idx = _fill_locf(np.asarray(data[index], dtype=np.float64))
     dts = _days(_to_date(data["date"], "data$date")).astype(np.float64)
@@ -649,19 +779,45 @@ def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spre
                          metrics=None, cores=1):
     """Kennzahlen über den Hebel.
 
-    Erzeugt für jeden Hebel eine Reihe mit :func:`series_leverage`, simuliert
-    sie als Buy-and-Hold (oder mit eigener Strategie für das Asset ``"LEV"``)
-    und bestimmt den Hebel mit der höchsten CAGR bzw. Sharpe Ratio.
+    Erzeugt für jeden Hebel eine Reihe mit ``series_leverage()``, simuliert sie als Buy-and-Hold (oder mit einer
+    eigenen Strategie für das Asset ``"LEV"``) und bestimmt den Hebel mit der höchsten CAGR bzw. Sharpe Ratio, wie
+    die LETF-Analyse von testfol.io. An ``simulation()`` wird ein DataFrame mit den Spalten ``date`` und ``LEV``
+    übergeben.
 
     Args:
-        data, index, rate, expense, spread: wie bei :func:`series_leverage`.
-        leverages: zu prüfende Hebel (Standard ``seq(0.5, 4, by = 0.25)``).
-        strategy: optional Strategie mit Asset ``"LEV"``; Standard Buy-and-Hold-ETF
-            mit 30 % Teilfreistellung.
-        sim_args, metrics, cores: wie bei :func:`sensitivity_grid`.
+        data: DataFrame mit Spalte ``date`` und der Indexspalte.
+        index: Spaltenname des Index (Niveau, nicht Rendite; Lücken werden mit dem letzten Wert gefüllt).
+        leverages: Numerischer Vektor der zu prüfenden Hebel (Standard ``seq(0.5, 4, by = 0.25)``).
+        rate: Finanzierungszins in Prozent p. a. (Standard 0): Skalar, Spaltenname, Vektor der Länge
+            ``nrow(data)``, ``data.frame(date, value)`` oder benannter Vektor mit Datumsnamen.
+        expense: TER in Prozent p. a. (Standard 0).
+        spread: Spread auf den finanzierten bzw. leerverkauften Anteil m(L) in Prozent p. a. (Standard 0).
+        strategy: Optional Strategie mit dem Asset ``"LEV"``; ``None`` (Standard) = Buy-and-Hold-ETF mit 30
+            Prozent Teilfreistellung (``asset_config("etf", "bnh", partial_exemption = 30)``).
+        sim_args: Benannte Liste gemeinsamer Argumente für alle Läufe (Standard ``{}``): Argumente von
+            ``simulation()`` außer ``data`` und ``strategy``, also auch Bausteine (z. B. ``dca = dca_plan(100,
+            1)``, ``tax = tax_profile()``) und Pfade zu Parametern der Bausteine (``"dca.value"``, siehe
+            ``sensitivity_grid``). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B. ``dca_value``)
+            ergeben einen Fehler, der den Baustein nennt.
+        metrics: Funktion ``SimLevResult -> benannter numerischer Vektor`` (Standard
+            ``bootstrap_study_metrics()``).
+        cores: Anzahl Prozesse (Standard 1; Fork auf Unix, PSOCK auf Windows).
 
     Returns:
-        :class:`SimLevSensitivity` mit ``attrs["optimal"]`` und ``attrs["kind"] = "leverage"``.
+        DataFrame der Klasse ``SimLevSensitivity`` mit ``leverage`` und den Kennzahlen aus ``metrics``
+        (fehlgeschlagene Läufe fehlen); Attribut ``optimal`` (benannter Vektor ``cagr``, ``sharpe``: Hebel mit
+        maximaler CAGR bzw. Sharpe Ratio) und ``kind = "leverage"``. Mit Sparplan (``sim_args``) ist ``cagr``
+        geldgewichtet (XIRR). Ausgabe und Grafik über ``print()`` und ``plot()``.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 1500
+        d = pd.DataFrame({"date": pd.date_range("2015-01-01", periods=n)})
+        d["idx"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        lv = simlev.sensitivity_leverage(d, "idx", leverages=[1, 1.5, 2, 3], rate=2, expense=0.5)
+        print(lv)
     """
     leverages = _seq_by(0.5, 4, 0.25) if leverages is None else np.atleast_1d(np.asarray(leverages, dtype=np.float64))
     sim_args = _args_set({}, sim_args, "sensitivity_leverage")

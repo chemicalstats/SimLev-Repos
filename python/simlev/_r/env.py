@@ -2,7 +2,7 @@
 
 Alle übrigen Stellen (Paket, Tests, Werkzeuge) holen die Werte über diese Funktionen. Jede
 Funktion liest die Umgebung bei jedem Aufruf neu; wann gelesen wird, bestimmt der Aufrufer
-(z. B. ``reftree`` beim Laden, ``_collate`` beim ersten Vergleich nach ``collate_reset()``).
+(z. B. die Tests beim Laden, ``_collate`` beim ersten Vergleich nach ``collate_reset()``).
 
 | Schalter | Zweck | Art |
 |---|---|---|
@@ -10,17 +10,15 @@ Funktion liest die Umgebung bei jedem Aufruf neu; wann gelesen wird, bestimmt de
 | ``SIMLEV_ICU`` | Pfad zur ICU-Bibliothek (``libicui18n``) | Nutzer |
 | ``SIMLEV_LAX_NA`` | ``1``: NA = NaN im Vergleich mit den Referenzfällen | Prüfung |
 | ``SIMLEV_STRICT_ZERO`` | ``0``: −0 = +0 im Vergleich mit den Referenzfällen | Prüfung |
-| ``SIMLEV_GOLDEN_DIR`` | andere Ordner der Engine-Fälle für pytest (mit ``os.pathsep`` getrennt) | Prüfung |
-| ``SIMLEV_MODULE_DIR`` | anderer Ordner der Modul-Fälle für pytest | Prüfung |
 
-Seit Etappe 9.6c (Entwurf C.6 Nr. 10) entfallen ``SIMLEV_NO_EXT`` (die C-Erweiterung ist
+Seit 1.0.0 entfallen ``SIMLEV_NO_EXT`` (die C-Erweiterung ist
 Pflicht, es gibt keine reinen Python-Kerne mehr), ``SIMLEV_LAPACK`` (keine System-LAPACK) und
-``SIMLEV_R_SYS_TIME`` (feste Uhr für gosolnp), seit C19 ``SIMLEV_LEGACY_TESTS`` (Tests seit T18 neu aufgebaut, wirkte nicht mehr).
+``SIMLEV_R_SYS_TIME`` (feste Uhr für gosolnp), ``SIMLEV_LEGACY_TESTS`` (Tests neu aufgebaut, wirkte nicht mehr),
+seit 1.4.2 ``SIMLEV_GOLDEN_DIR`` und ``SIMLEV_MODULE_DIR`` (Ordner der Fälle bis 1.4.0; die Tests lesen ``SIMLEV_FAELLE_DIR``).
 """
 import os
 
-__all__ = ["SWITCHES", "collate", "icu_path", "lax_na", "strict_zero", "set_collate_default",
-           "golden_dir", "module_dir"]
+__all__ = ["SWITCHES", "collate", "icu_path", "lax_na", "strict_zero", "set_collate_default"]
 
 # Name -> (Zweck, Art); Art: Nutzer, Prüfung (Julia zusätzlich: Entwicklung; R-Generatoren: Generator)
 SWITCHES = {
@@ -28,8 +26,6 @@ SWITCHES = {
     "SIMLEV_ICU": ("Pfad zur ICU-Bibliothek (libicui18n)", "Nutzer"),
     "SIMLEV_LAX_NA": ("1: NA = NaN im Vergleich mit den Referenzfällen", "Prüfung"),
     "SIMLEV_STRICT_ZERO": ("0: -0 = +0 im Vergleich mit den Referenzfällen", "Prüfung"),
-    "SIMLEV_GOLDEN_DIR": ("andere Ordner der Engine-Fälle für pytest (os.pathsep-getrennt)", "Prüfung"),
-    "SIMLEV_MODULE_DIR": ("anderer Ordner der Modul-Fälle für pytest", "Prüfung"),
 }
 
 
@@ -60,14 +56,4 @@ def strict_zero():
 def set_collate_default(value="icu:root"):
     """Setzt ``SIMLEV_COLLATE`` auf ``value``, falls nicht gesetzt (Kollation der Referenzfälle)."""
     os.environ.setdefault("SIMLEV_COLLATE", value)
-
-
-def golden_dir():
-    """``SIMLEV_GOLDEN_DIR`` als Text oder ``None``."""
-    return os.environ.get("SIMLEV_GOLDEN_DIR")
-
-
-def module_dir():
-    """``SIMLEV_MODULE_DIR`` als Text oder ``None``."""
-    return os.environ.get("SIMLEV_MODULE_DIR")
 

@@ -76,7 +76,7 @@ def _days(d):
     return (d.astype("datetime64[D]") - _EPOCH).astype(np.int64).astype(np.float64)
 
 
-# N11: colSums/colMeans/rowSums/rowMeans über den C-Kern core/slc_rbase.c (long double wie R; wie Julia)
+# colSums/colMeans/rowSums/rowMeans über den C-Kern core/slc_rbase.c (long double wie R; wie Julia)
 def _colsums(M):
     """``colSums`` (long-double-Akkumulator, sequenziell)."""
     return r_colsums(M)
@@ -108,7 +108,7 @@ def _rowsum(M, codes, ng):
 
 
 def _matprod(A, B):
-    """``A %m% B`` wie R (slc-Matrixprodukt, Entwurf B.6)."""
+    """``A %m% B`` wie R (slc-Matrixprodukt)."""
     return np.asarray(_lib.matmul(A, B), dtype=np.float64)
 
 
@@ -149,7 +149,7 @@ def _stats(name):
 
 
 def _lm_coef(x, y):
-    """Koeffizienten (Achsenabschnitt, Steigung) wie ``.sl_lsfit(cbind(1, x), y)`` (Entwurf B.7)."""
+    """Koeffizienten (Achsenabschnitt, Steigung) wie ``.sl_lsfit(cbind(1, x), y)``."""
     f = _lib.lsfit
     x = np.asarray(x, float)
     y = np.asarray(y, float)
@@ -407,23 +407,72 @@ def overfit_pbo(x, *, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
         frequency=("week", "day", "month"), dates=None, risk_free=0):
     """Probability of Backtest Overfitting (CSCV).
 
-    Teilt die Renditehistorie aller Punkte einer Parametersuche in ``S`` gleich
-    lange Blöcke und bildet alle ``choose(S, S/2)`` Aufteilungen in In-Sample-
-    und Out-of-Sample-Hälften. Je Aufteilung wird der In-Sample-beste Punkt
-    bestimmt und sein Rang Out-of-Sample gemessen (Logit lambda). Die PBO ist der
-    Anteil der Aufteilungen mit lambda <= 0.
+    Teilt die Renditehistorie aller Punkte einer Parametersuche in ``S`` gleich lange Blöcke und bildet alle
+    binom(S, S/2) Aufteilungen in In-Sample- und Out-of-Sample-Hälften. Je Aufteilung wird der In-Sample- beste
+    Punkt bestimmt und sein Rang Out-of-Sample gemessen (Logit λ). Die PBO ist der Anteil der Aufteilungen, in
+    denen der gewählte Punkt Out-of-Sample nicht über dem Median landet (λ ≤ 0, Schätzer ∫_-∞^0 f(λ)dλ nach Bailey
+    et al.; λ = 0, also genau der Median-Rang, zählt mit). Werte nahe 0 sprechen für echte Ueberlegenheit, Werte
+    um 0.5 und darüber für eine Auswahl nach Zufall. Bei reinem Zufall und ungerader Punktezahl N landet der
+    gewählte Punkt mit Wahrscheinlichkeit 1/N genau auf dem Median; der Erwartungswert der PBO ist dann (N + 1) /
+    (2N) statt 0.5 (z. B. 0.67 bei N = 3, 0.6 bei N = 5). Gleichstände (z. B. identische Spalten) erhalten
+    mittlere Ränge und können ebenfalls λ = 0 ergeben.
 
     Args:
-        x: ``SimLevParamSearch`` mit gespeicherten Renditen oder numerische
-            Renditematrix (Zeilen = Perioden, Spalten = Punkte).
-        S: Anzahl Blöcke (gerade ganze Zahl >= 2, Standard 16).
-        metric: ``"sharpe"`` (Standard), ``"sortino"``, ``"geometric"`` oder ``"mean"``.
-        frequency: ``"week"`` (Standard), ``"day"`` oder ``"month"``.
-        dates: Datum je Zeile (nur Matrix-Eingabe).
-        risk_free: risikoloser Zins in Prozent p. a.
+        x: Renditequelle:
+
+            - ``SimLevParamSearch`` aus ``param_search()`` mit gespeicherten Renditen (``keep_returns = "day"``);
+              verwendet werden ``x["returns"]`` (tägliche Renditen je Punkt) und ``x["dates"]``;
+            - numerische Matrix oder DataFrame nur aus numerischen Spalten (ohne Datumsspalte): Zeilen = Perioden,
+              Spalten = Punkte bzw. Strategien, einfache Renditen als Anteil (0.01 = 1 %); ohne Spaltennamen
+              heißen die Spalten ``p1``, ``p2``, ...
+
+            Spalten ohne endlichen Wert werden verworfen, danach alle Zeilen mit einem fehlenden Wert; bei
+            ``metric = "sharpe"`` außerdem Spalten ohne Schwankung (Standardabweichung <= 1e-10 je Periode, mit
+            Warnung), deren Sharpe Ratio nicht definiert ist. Mindestens zwei Spalten nötig. Bei
+            ``print()``/``plot()``: Objekt der Klasse ``SimLevPBO``.
+        S: Anzahl Blöcke (gerade ganze Zahl >= 2, Standard 16 ergibt binom(16, 8) = 12870 Aufteilungen).
+        metric: Kennzahl je Periode (nach Abzug von ``risk_free``, nicht annualisiert): ``"sharpe"`` (Standard;
+            Mittelwert / Standardabweichung), ``"sortino"`` (Mittelwert / Wurzel des mittleren quadrierten
+            negativen Teils), ``"geometric"`` (geometrische Periodenrendite exp(log(1 + r)) - 1, Anteil) oder
+            ``"mean"`` (arithmetisches Mittel, Anteil). Höher = besser.
+        frequency: Periodenlänge der Auswertung: ``"week"`` (Standard), ``"day"`` oder ``"month"``. Mit Datum (bei
+            ``SimLevParamSearch`` immer, bei Matrizen über ``dates``) werden die Tagesrenditen geometrisch zu
+            ISO-Wochen bzw. Kalendermonaten verkettet. Ohne Datum wird nicht aggregiert; die Zeilen gelten dann
+            als Perioden dieser Frequenz (wichtig für ``ppy``). Achtung: Eine Matrix von Tagesrenditen ohne
+            ``dates`` braucht ``frequency = "day"``; mit dem Standard ``"week"`` wird mit 52 statt 252 Perioden je
+            Jahr annualisiert (betrifft annualisierte Sharpe Ratios und ``risk_free``).
+        dates: Datum je Zeile von ``x`` (Date oder umwandelbar), nur bei Matrix-Eingabe; ``None`` (Standard) =
+            keine Aggregation. Bei ``SimLevParamSearch`` wird ``x["dates"]`` verwendet.
+        risk_free: Risikoloser Zins in Prozent p. a. (2 = 2 %, Standard 0); wird als ``risk_free / 100 / ppy`` von
+            jeder Periodenrendite abgezogen. ``ppy`` (Perioden je Jahr) wird aus dem Datum geschätzt: (Anzahl
+            Perioden - 1) / (Zeitspanne in Tagen / 365.25); ohne Datum 252 (``"day"``), 52 (``"week"``) bzw. 12
+            (``"month"``).
 
     Returns:
-        :class:`SimLevPBO`.
+        Objekt der Klasse ``SimLevPBO``, eine Liste mit ``pbo`` (Anteil der Aufteilungen mit λ ≤ 0), ``lambda``
+        (Logit je Aufteilung), ``is_best`` (In-Sample-Kennzahl des gewählten Punkts je Aufteilung), ``oos_best``
+        (seine Out-of-Sample-Kennzahl), ``oos_median`` (Median der Out-of-Sample-Kennzahl aller Punkte),
+        ``slope``, ``intercept`` (Regression ``oos_best ~ is_best``; negative Steigung = Leistungsabfall),
+        ``prob_loss`` (Anteil der Aufteilungen mit ``oos_best < 0``), ``S``, ``n_combos`` (Anzahl Aufteilungen),
+        ``n_points`` (Anzahl Spalten), ``n_obs`` (verwendete Perioden), ``metric``, ``frequency`` und ``ppy``. Die
+        Kennzahlen sind je Periode angegeben, nicht annualisiert.
+
+    Details:
+        Verwendet werden die letzten S ⌊ T/S ⌋ Perioden; jeder Block braucht mindestens 4 Perioden. Eingabe ist
+        eine Parametersuche oder eine Renditematrix (eine Spalte je Variante). Mehrere fertige Simulationen (Liste
+        von ``SimLevResult``) werden vorher zu einer Matrix zusammengefasst, siehe Beispiel bei
+        ``overfit_reality_check()``.
+
+    Literatur:
+        Bailey, D. H., Borwein, J., Lopez de Prado, M. & Zhu, Q. J. (2017). The probability of backtest
+        overfitting. Journal of Computational Finance 20(4), 39-69.
+
+    Beispiel::
+
+        import numpy as np, simlev
+        rng = np.random.default_rng(1)
+        R = rng.normal(2e-4, 0.01, (2000, 30))     # 30 Zufallsstrategien
+        print(simlev.overfit_pbo(R, S=10, frequency="day")["pbo"])   # etwa 0.5
     """
     metric = _match_arg(metric, ("sharpe", "sortino", "geometric", "mean"), "metric")
     frequency = _match_arg(frequency, ("week", "day", "month"), "frequency")
@@ -534,17 +583,31 @@ def _plot_pbo(x):
 def sharpe_probabilistic(r, *, benchmark=0, ppy=52):
     """Probabilistic Sharpe Ratio.
 
-    Wahrscheinlichkeit, dass die wahre Sharpe Ratio über ``benchmark`` liegt,
-    unter Berücksichtigung von Stichprobenlänge, Schiefe und Wölbung.
+    Wahrscheinlichkeit, dass die wahre Sharpe Ratio über ``benchmark`` liegt, unter Berücksichtigung von
+    Stichprobenlänge, Schiefe und Wölbung: PSR = Φ(frac(SR - SR^*)√(T-1) √(1 - γ_3 SR + (γ_4 - 1)/(4)SR^2)) Dabei
+    sind SR (Mittelwert / Standardabweichung) und SR^* Sharpe Ratios je Periode, T die Anzahl Renditen, γ_3 die
+    Schiefe und γ_4 die Wölbung (nicht Exzess). Eingabe ist ein Renditevektor; für ein Ergebnis von
+    ``simulation()`` z. B. ``v <- result_index(res)$value; r <- v[-1] / v[-length(v)] - 1``.
 
     Args:
-        r: numerischer Vektor einfacher Periodenrenditen (Anteil); nicht
-            endliche Werte werden entfernt.
-        benchmark: Vergleichs-Sharpe-Ratio p. a. (Standard 0).
-        ppy: Perioden je Jahr (Standard 52).
+        r: Numerischer Vektor einfacher Periodenrenditen als Anteil (0.01 = 1 %); nicht endliche Werte werden
+            entfernt. Ein risikoloser Zins wird nicht abgezogen.
+        benchmark: Vergleichs-Sharpe-Ratio SR^* p. a. (Standard 0); intern durch √(ppy) geteilt.
+        ppy: Perioden je Jahr der Renditen in ``r`` (Standard 52 = Wochenrenditen; z. B. 252 für Handelstage, 12
+            für Monate). Wird nicht geschätzt und dient nur der Umrechnung von ``benchmark``.
 
     Returns:
-        float: Wahrscheinlichkeit (0 bis 1).
+        Eine Zahl: Wahrscheinlichkeit als Anteil (0 bis 1).
+
+    Literatur:
+        Bailey, D. H. & Lopez de Prado, M. (2012). The Sharpe ratio efficient frontier. Journal of Risk 15(2),
+        3-44.
+
+    Beispiel::
+
+        import numpy as np, simlev
+        r = np.random.default_rng(1).normal(0.002, 0.02, 520)   # 10 Jahre Wochenrenditen
+        print(simlev.sharpe_probabilistic(r, benchmark=0, ppy=52))
     """
     r = np.asarray(r, dtype=np.float64).ravel()
     r = r[np.isfinite(r)]
@@ -589,19 +652,56 @@ def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 
                     frequency=("week", "day", "month"), dates=None, risk_free=0):
     """Deflated Sharpe Ratio.
 
-    Korrigiert die Sharpe Ratio des besten Punkts einer Suche um die Zahl der
-    Versuche (erwartetes Maximum aus ``N`` wertlosen Versuchen, effektive
-    Versuchsanzahl aus der mittleren paarweisen Korrelation).
+    Korrigiert die Sharpe Ratio des besten Punkts einer Suche um die Zahl der Versuche: Die Nullhypothese ist
+    nicht SR = 0, sondern die Sharpe Ratio, die man als Maximum aus N wertlosen Versuchen erwarten würde, SR_0 =
+    √(V[SR_n])((1-γ)Φ^-1(1 - 1/N) + γ Φ^-1(1 - 1/(N e))) (γ Euler-Mascheroni). Weil die Punkte einer Suche stark
+    korreliert sind, wird standardmäßig eine effektive Versuchsanzahl N_eff = barρ + (1 - barρ) N aus der
+    mittleren paarweisen Korrelation verwendet (mindestens 1; bei negativer mittlerer Korrelation N). V[SR_n] ist
+    die Varianz der Sharpe Ratios je Periode über alle Punkte. PSR und DSR werden mit ``sharpe_probabilistic()``
+    berechnet. Spalten ohne Schwankung (Standardabweichung <= 1e-10 je Periode, z. B. ein Punkt, der nur Geldmarkt
+    mit festem Zins hält) haben keine definierte Sharpe Ratio und werden mit Warnung ausgeschlossen.
 
     Args:
-        x: ``SimLevParamSearch`` mit Renditen oder numerische Renditematrix.
-        id: zu prüfender Punkt (``id`` bzw. Spaltennummer); ``None`` = höchste Sharpe Ratio.
-        n_trials: Versuchsanzahl (überschreibt die Schätzung).
-        effective: effektive Versuchsanzahl verwenden (Standard ``True``).
-        frequency, dates, risk_free: wie bei :func:`overfit_pbo`.
+        x: Renditequelle wie bei ``overfit_pbo()``: ``SimLevParamSearch`` aus ``param_search()`` mit gespeicherten
+            Renditen oder numerische Renditematrix bzw. DataFrame nur aus numerischen Spalten (Zeilen = Perioden,
+            Spalten = Punkte, einfache Renditen als Anteil). Bei ``print()``: Objekt der Klasse ``SimLevDSR``.
+        id: Zu prüfender Punkt: bei ``SimLevParamSearch`` die ``id`` aus ``x["results"]``, bei einer Matrix die
+            Spaltennummer der ursprünglichen Matrix. ``None`` (Standard) = Punkt mit der höchsten Sharpe Ratio.
+        n_trials: Versuchsanzahl N (positive Zahl, überschreibt die Schätzung), z. B. wenn vorher schon andere
+            Suchen gelaufen sind. ``None`` (Standard) = aus ``x`` geschätzt (siehe ``effective``).
+        effective: Logisch. ``True`` (Standard) = effektive Versuchsanzahl N_eff; ``False`` = Anzahl gültiger
+            Spalten.
+        frequency: Periodenlänge der Auswertung: ``"week"`` (Standard), ``"day"`` oder ``"month"``. Mit Datum (bei
+            ``SimLevParamSearch`` immer, bei Matrizen über ``dates``) werden die Tagesrenditen geometrisch zu
+            ISO-Wochen bzw. Kalendermonaten verkettet. Ohne Datum wird nicht aggregiert; die Zeilen gelten dann
+            als Perioden dieser Frequenz (wichtig für ``ppy``). Achtung: Eine Matrix von Tagesrenditen ohne
+            ``dates`` braucht ``frequency = "day"``; mit dem Standard ``"week"`` wird mit 52 statt 252 Perioden je
+            Jahr annualisiert (betrifft annualisierte Sharpe Ratios und ``risk_free``).
+        dates: Datum je Zeile von ``x`` (Date oder umwandelbar), nur bei Matrix-Eingabe; ``None`` (Standard) =
+            keine Aggregation. Bei ``SimLevParamSearch`` wird ``x["dates"]`` verwendet.
+        risk_free: Risikoloser Zins in Prozent p. a. (2 = 2 %, Standard 0); wird als ``risk_free / 100 / ppy`` von
+            jeder Periodenrendite abgezogen. ``ppy`` (Perioden je Jahr) wird aus dem Datum geschätzt: (Anzahl
+            Perioden - 1) / (Zeitspanne in Tagen / 365.25); ohne Datum 252 (``"day"``), 52 (``"week"``) bzw. 12
+            (``"month"``).
 
     Returns:
-        :class:`SimLevDSR`.
+        Objekt der Klasse ``SimLevDSR``, eine Liste mit ``id`` (geprüfter Punkt), ``sharpe`` (seine Sharpe Ratio
+        p. a.), ``sr0`` (erwartetes Maximum ohne Können, p. a.), ``psr`` (Wahrscheinlichkeit SR > 0, Anteil),
+        ``dsr`` (Wahrscheinlichkeit SR > ``sr0``, Anteil), ``n_trials`` (verwendete Versuchsanzahl), ``n_points``
+        (Anzahl Spalten), ``n_eff``, ``rho`` (mittlere paarweise Korrelation), ``var_sr`` (Varianz der Sharpe
+        Ratios, annualisiert: Varianz je Periode mal ``ppy``), ``n_obs`` (Anzahl Perioden) und ``frequency``.
+        Annualisiert wird mit √(ppy); ``ppy`` wird wie unter ``risk_free`` beschrieben bestimmt.
+
+    Literatur:
+        Bailey, D. H. & Lopez de Prado, M. (2014). The deflated Sharpe ratio. Journal of Portfolio Management
+        40(5), 94-107.
+
+    Beispiel::
+
+        import numpy as np, simlev
+        rng = np.random.default_rng(1)
+        R = rng.normal(2e-4, 0.01, (2000, 20))     # 20 Zufallsstrategien
+        print(simlev.sharpe_deflated(R, frequency="day"))
     """
     frequency = _match_arg(frequency, ("week", "day", "month"), "frequency")
     rr = _of_drop_flat(_rr(x, frequency, dates, risk_free), "sharpe_deflated")
@@ -729,21 +829,73 @@ def overfit_walk_forward(x, *, train=5, test=1, step=None, anchored=False,
                  select=("best", "plateau"), risk_free=0):
     """Walk-Forward-Auswahl.
 
-    Wählt in rollierenden Trainingsfenstern den besten Punkt einer
-    Parametersuche (oder das beste Plateau) und verkettet dessen Renditen im
-    jeweils folgenden Testfenster.
+    Wählt in rollierenden Trainingsfenstern den besten Punkt einer Parametersuche (oder das beste Plateau) und
+    verkettet dessen Renditen im jeweils folgenden Testfenster. So entsteht eine Out-of-Sample-Reihe, die nur
+    Informationen nutzt, die zum Entscheidungszeitpunkt vorlagen. Verglichen wird mit dem nachträglich besten
+    Punkt (Rückschau) und mit dem Durchschnitt aller Punkte (zufällige Wahl).
 
     Args:
-        x: ``SimLevParamSearch`` mit gespeicherten Renditen.
-        train, test, step: Fensterlängen und Vorschub in Jahren (Standard 5, 1,
-            ``step = test``); intern ganze Monate.
-        anchored: ``True`` = Training beginnt immer am ersten Tag.
-        metric: ``"sharpe"`` (Standard), ``"sortino"``, ``"geometric"`` oder ``"mean"``.
-        select: ``"best"`` (Standard) oder ``"plateau"``.
-        risk_free: risikoloser Zins in Prozent p. a.
+        x: ``SimLevParamSearch`` aus ``param_search()`` mit gespeicherten Renditen (``keep_returns = "day"``).
+            Renditematrizen oder Listen von Ergebnissen werden nicht angenommen, weil Parameterwerte (und bei
+            ``select = "plateau"`` der Suchraum) gebraucht werden. Bei ``print()``/``plot()``: Objekt der Klasse
+            ``SimLevWalkForward``.
+        train, test, step: Länge des Trainingsfensters, Länge des Testfensters und Vorschub der Fenster, jeweils
+            in Jahren (Standard 5, 1 und ``step = test``); intern in ganze Monate umgerechnet (``round(12 *
+            Jahre)``; Fenstergrenzen = Startdatum plus Monate, auf das Monatsende begrenzt, z. B. 31.01. + 1 Monat
+            = 29.02.). Mit ``step < test`` überlappen die Testfenster; in ``series`` und ``summary`` zählt jeder
+            Tag dann nur einmal, für das jüngste Fenster, dessen Test schon begonnen hat (die Kennzahlen in
+            ``windows`` beziehen sich auf das ganze Testfenster). Mit ``step > test`` entstehen Lücken zwischen
+            den Testfenstern; sie fehlen in ``series`` und zählen nicht als Zeit.
+        anchored: Logisch. ``False`` (Standard) = rollierendes Trainingsfenster der Länge ``train``; ``True`` =
+            Training beginnt immer am ersten Tag (expandierendes Fenster).
+        metric: Auswahl- und Bewertungskennzahl, je Fenster aus den Tagesrenditen: ``"sharpe"`` (Standard),
+            ``"sortino"``, ``"geometric"`` oder ``"mean"`` (Definitionen wie bei ``overfit_pbo()``, je Tag, nicht
+            annualisiert; höher = besser).
+        select: ``"best"`` (Standard): Punkt mit der höchsten Trainings-Kennzahl; ``"plateau"``: Punkt mit dem
+            höchsten Mittel der Trainings-Kennzahl über seine Nachbarschaft (Nachbarn wie in ``param_plateau()``
+            mit ``radius = 1`` bzw. ``k = 5``).
+        risk_free: Risikoloser Zins in Prozent p. a. (2 = 2 %, Standard 0); wird als ``risk_free / 100 / ppy`` von
+            jeder Tagesrendite abgezogen, ``ppy`` = (Anzahl Tage - 1) / (Zeitspanne in Tagen / 365.25). Wirkt auch
+            auf ``series`` und die CAGR in ``summary`` (dann Ueberrenditen).
 
     Returns:
-        :class:`SimLevWalkForward`.
+        Objekt der Klasse ``SimLevWalkForward``, eine Liste mit
+
+        - ``windows``: DataFrame je Testfenster: ``train_start``, ``test_start``, ``test_end`` (Date), ``id``
+          (gewählter Punkt), eine Spalte je Parameter, ``is_metric`` und ``oos_metric`` (Kennzahl im Trainings-
+          bzw. Testfenster), ``oos_rank`` (Rang des gewählten Punkts im Testfenster als Anteil, (Rang - 0.5) /
+          Anzahl Punkte; nahe 1 = bester, 0.5 = Zufall), ``oos_return`` (Rendite des gewählten Punkts im
+          Testfenster, Anteil) und ``oos_average`` (mittlere Rendite aller Punkte im Testfenster, Anteil).
+        - ``series``: DataFrame mit ``date`` und den Wachstumsindizes (Startwert 1 vor dem ersten Testtag)
+          ``walk_forward`` (verkettete gewählte Punkte), ``hindsight`` (Punkt mit dem höchsten Endwert über alle
+          Testtage) und ``average`` (täglich gleichgewichteter Durchschnitt aller Punkte).
+        - ``summary``: benannter Vektor ``cagr_walk_forward``, ``cagr_hindsight``, ``cagr_average`` (CAGR über die
+          Testtage, Anteil p. a.; annualisiert über die von den Testtagen überdeckte Zeit, d. h. die Summe der
+          Abstände jedes Testtags zum vorherigen Datentag ohne den ersten Testtag - bei lückenlosen Testfenstern
+          die Spanne vom ersten bis zum letzten Testtag), ``mean_oos_rank``, ``efficiency`` (mittlere OOS- durch
+          mittlere IS-Kennzahl) und ``switches`` (Anzahl Wechsel des gewählten Punkts).
+        - ``hindsight_id``, ``metric``, ``select``, ``train``, ``test``, ``anchored``, ``params``: Rückschau-Punkt
+          und Einstellungen.
+
+    Details:
+        Gerechnet wird auf den täglichen Renditen der Suche (keine Aggregation). Das erste Trainingsfenster
+        beginnt am ersten Tag der gespeicherten Renditen; die Fenster rücken um ``step`` vor, bis das Testfenster
+        am oder nach dem letzten Tag beginnen würde oder ein Fenster zu kurz ist (weniger als 20 Trainings- oder 5
+        Testtage). Das letzte Testfenster kann kürzer als ``test`` sein.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 3000
+        d = pd.DataFrame({"date": pd.date_range("2010-01-01", periods=n)})
+        d["A"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.011, n))
+        st = simlev.create_strategy(A=simlev.asset_config(asset_class="etf", trading="signal", signal_buy="buy",
+                                                         signal_sell="sell"))
+        ps = simlev.param_search(d, lambda p: {"strategy": st, "signal": lambda df: simlev.signal_sma(df["A"], n=p["n"], band=p["band"])},
+                                 simlev.param_space(n=[50, 100, 200], band=[0, 2]), burn_in=250)
+        wf = simlev.overfit_walk_forward(ps, train=3, test=1)
+        print(wf["summary"])
     """
     if step is None:
         step = test
@@ -844,23 +996,52 @@ def param_bootstrap(x, data, config, *, ids=None, top=5, by=("objective", "plate
                     include=None, **kwargs):
     """Beste Punkte einer Parametersuche auf Bootstrap-Pfaden prüfen.
 
-    Baut für die ``top`` besten Punkte (nach Zielgröße oder Plateau) die
-    Strategie-Spezifikationen mit dem ``builder`` der Suche und wertet sie
-    gemeinsam mit :func:`simlev.bootstrap_study` auf denselben Pfaden aus.
+    Baut für die ``top`` besten Punkte (nach Zielgröße oder Plateau) die Strategie-Spezifikationen mit dem
+    ``builder`` der Suche und wertet sie gemeinsam mit ``bootstrap_study()`` auf denselben Pfaden aus. Der
+    ``builder`` muss mit den Spaltennamen der Pfade arbeiten (Indizes, Hebelprodukte, Zusatzreihen aus
+    ``config``); abweichende Namen lassen sich über ``map`` in der Spezifikation abbilden.
 
     Args:
-        x: ``SimLevParamSearch``.
-        data: Historie für die Pfaderzeugung (wie bei ``bootstrap()``).
+        x: ``SimLevParamSearch`` aus ``param_search()`` (verwendet werden ``results``, ``builder``, ``sim_args``
+            und ``burn_in``; gespeicherte Renditen sind nicht nötig).
+        data: Historie für die Pfaderzeugung: DataFrame oder Matrix mit den Spalten aus ``config``, Format wie bei
+            ``bootstrap()``.
         config: Konfiguration aus ``bootstrap_config()``.
-        ids: ``id``-Werte aus ``x.results``; ``None`` = die ``top`` besten nach ``by``.
-        top: Anzahl bester Punkte (Standard 5).
-        by: ``"objective"`` (Standard) oder ``"plateau"``.
-        map: Spalten-Aliase (dict), die jeder Spezifikation hinzugefügt werden.
-        include: weitere Strategien (dict) im Format von ``strategies``.
-        **kwargs: weitere Argumente für ``bootstrap_study()``.
+        ids: Ganzzahliger Vektor von ``id``-Werten aus ``x["results"]``; ``None`` (Standard) = die ``top`` besten
+            Punkte nach ``by``.
+        top: Anzahl bester Punkte (ganze Zahl, Standard 5); nur ohne ``ids``.
+        by: Rangfolge für ``top``: ``"objective"`` (Standard, Zielgröße der Suche) oder ``"plateau"``
+            (``plateau_mean`` aus ``param_plateau()``); Richtung nach ``x["maximize"]``, Punkte mit ``NA``
+            entfallen.
+        map: Benannter Zeichenvektor von Spalten-Aliasen, die jeder Spezifikation hinzugefügt werden, z. B.
+            ``{"letf": "eu_l2"}``, wenn die Strategie in der Suche auf die Spalte ``letf`` zugreift und im Pfad
+            das Hebelprodukt ``eu_l2`` heißt. ``None`` (Standard) = keine.
+        include: Weitere Strategien als benannte Liste im Format von ``strategies`` in ``bootstrap_study()``, z.
+            B. ein Buy-and-Hold (Standard: keine).
+        **kwargs: Weitere Argumente für ``bootstrap_study()``, z. B. ``method``, ``n`` (Anzahl Pfade), ``params``,
+            ``seed``, ``cores``, ``progress``, ``sim_args``, ``burn_in``.
 
     Returns:
-        ``SimLevBootstrapStudy`` mit Attribut ``param_ids`` (Strategiename -> id).
+        Objekt der Klasse ``SimLevBootstrapStudy`` (siehe ``bootstrap_study()``); die Strategien heißen ``p<id>``
+        (plus die Namen aus ``include``). Attribut ``param_ids``: benannter Vektor Strategiename -> ``id``.
+
+    Details:
+        Die Signalfunktion der Spezifikation wird je Pfad neu berechnet; ein ``data``-Element der Spezifikation
+        (Funktion ``df -> df``, siehe ``param_search()``) wertet ``bootstrap_study()`` nicht aus. ``sim_args`` und
+        ``burn_in`` werden aus der Suche übernommen, lassen sich aber über ``...`` überschreiben.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(2); n = 1500
+        h = pd.DataFrame({"us": 1 + rng.normal(3e-4, 0.01, n)})
+        d = pd.DataFrame({"date": pd.date_range("2010-01-01", periods=n + 1), "us": 100 * np.cumprod(np.r_[1, h["us"]])})
+        st = simlev.create_strategy(us=simlev.asset_config(asset_class="etf", trading="signal", signal_buy="buy", signal_sell="sell"))
+        ps = simlev.param_search(d, lambda p: {"strategy": st, "signal": lambda df: simlev.signal_sma(df["us"], n=p["n"])},
+                                 simlev.param_space(n=[20, 50, 100]), burn_in=100)
+        bs = simlev.param_bootstrap(ps, h, simlev.bootstrap_config({"us": "us"}), top=2, method="stationary", n=3,
+                                    params={"L": 50}, seed=1, progress=False)
+        print(bs["results"][["strategy", "path", "cagr"]])
     """
     from .param_search import _as_spec, param_plateau, _modify_list, _order, _row_params
     by = _match_arg(by, ("objective", "plateau"), "by")
@@ -911,20 +1092,46 @@ def sharpe_haircut(x, *, n_obs=None, n_tests=None, frequency=("week", "day", "mo
                    risk_free=0, ppy=52):
     """Sharpe-Ratio-Abschlag für Mehrfachtests (Harvey & Liu 2015).
 
-    Wandelt die Sharpe Ratio jedes Punkts in t- und p-Wert, korrigiert die
-    p-Werte (Bonferroni, Holm, Benjamini-Hochberg-Yekutieli) und rechnet sie in
-    eine abgeschlagene Sharpe Ratio zurück.
+    Wandelt die Sharpe Ratio jedes Punkts einer Suche (oder gegebene Sharpe Ratios) in einen t-Wert und p-Wert,
+    korrigiert die p-Werte für die Zahl der Versuche (Bonferroni, Holm, Benjamini-Hochberg-Yekutieli) und rechnet
+    sie in eine "abgeschlagene" Sharpe Ratio zurück: SR^adj = Φ^-1(1 - p^adj/2) / √(T). Der Abschlag 1 - SR^adj/SR
+    zeigt, wie viel der gemessenen Sharpe Ratio die Suche selbst erklärt.
 
     Args:
-        x: ``SimLevParamSearch`` mit Renditen, numerische Renditematrix oder
-            Vektor annualisierter Sharpe Ratios (dann ``n_obs`` und ``ppy``).
-        n_obs: Anzahl Perioden (nur und zwingend bei Vektor-Eingabe).
-        n_tests: Gesamtzahl der Versuche (Standard: Anzahl Sharpe Ratios).
-        frequency, dates, risk_free: wie bei :func:`overfit_pbo`.
-        ppy: Perioden je Jahr, nur bei Vektor-Eingabe (Standard 52).
+        x: Eingabe: ``SimLevParamSearch`` aus ``param_search()`` mit gespeicherten Renditen, numerische
+            Renditematrix bzw. DataFrame nur aus numerischen Spalten (Zeilen = Perioden, Spalten = Punkte,
+            einfache Renditen als Anteil; wie bei ``overfit_pbo()``) oder numerischer Vektor annualisierter Sharpe
+            Ratios (dann ``n_obs`` und ``ppy`` angeben).
+        n_obs: Anzahl Perioden T, auf denen die Sharpe Ratios beruhen (Perioden der Länge, die ``ppy``
+            beschreibt); nur und zwingend bei Vektor-Eingabe. Sonst die Zeilenzahl nach Aggregation.
+        n_tests: Gesamtzahl der Versuche M (ganze Zahl). ``None`` (Standard) = Anzahl Sharpe Ratios bzw. Punkte;
+            bei früheren Suchen entsprechend höher ansetzen (fehlende Versuche gehen mit p = 1 in die Korrektur
+            ein).
+        frequency, dates, risk_free: Aggregation, Datum und risikoloser Zins (Prozent p. a.) wie bei
+            ``overfit_pbo()``; nur bei Suche oder Matrix.
+        ppy: Perioden je Jahr, nur bei Vektor-Eingabe (Standard 52 = Wochen). Bei Suche oder Matrix wird es wie
+            bei ``overfit_pbo()`` bestimmt (aus dem Datum geschätzt, sonst 252/52/12 je ``frequency``).
 
     Returns:
-        ``pandas.DataFrame`` absteigend nach ``sharpe``; ``attrs`` ``n_tests`` und ``n_obs``.
+        DataFrame je Punkt, absteigend nach ``sharpe`` sortiert, mit ``id`` (Punkt bzw. Spaltennummer; bei
+        Vektoren die Position), ``sharpe`` (p. a.), ``t``, ``p`` und für jedes Verfahren ``bonferroni``, ``holm``
+        und ``bhy`` (Benjamini-Hochberg-Yekutieli) die Spalten ``p_<verfahren>`` (angepasster p-Wert),
+        ``sharpe_<verfahren>`` (abgeschlagene Sharpe Ratio p. a.) und ``haircut_<verfahren>`` (Abschlag als
+        Anteil; ``NA`` bei ``sharpe = 0``). Attribute ``n_tests`` und ``n_obs``.
+
+    Details:
+        Der t-Wert ist SR √(T) mit der Sharpe Ratio je Periode und T Perioden, der p-Wert zweiseitig
+        (Normalverteilung). Die abgeschlagene Sharpe Ratio je Periode wird mit √(ppy) annualisiert und erhält das
+        Vorzeichen von SR. Bei Renditen werden Spalten ohne Schwankung (Standardabweichung <= 1e-10 je Periode)
+        mit Warnung ausgeschlossen (Sharpe Ratio nicht definiert).
+
+    Literatur:
+        Harvey, C. R. & Liu, Y. (2015), Backtesting, Journal of Portfolio Management 42(1), 13-28.
+
+    Beispiel::
+
+        import simlev
+        print(simlev.sharpe_haircut([1, 0.5], n_obs=520, n_tests=50, ppy=52))
     """
     frequency = _match_arg(frequency, ("week", "day", "month"), "frequency")
     names = None
@@ -958,7 +1165,7 @@ def sharpe_haircut(x, *, n_obs=None, n_tests=None, frequency=("week", "day", "mo
         return _p_adjust(pp, method, max(M, p.size))[:p.size]
 
     def back(pa):
-        return _sign(sr) * np.asarray(_lib.qnorm(np.minimum(pa, 1) / 2, lower_tail=False), dtype=np.float64) / math.sqrt(Tn) * math.sqrt(ppy)   # oberes Ende (F23)
+        return _sign(sr) * np.asarray(_lib.qnorm(np.minimum(pa, 1) / 2, lower_tail=False), dtype=np.float64) / math.sqrt(Tn) * math.sqrt(ppy)   # oberes Ende
     out = pd.DataFrame({"id": ids, "sharpe": sr * math.sqrt(ppy), "t": tstat, "p": p})
     if names is not None:
         out.index = names

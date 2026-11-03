@@ -36,7 +36,7 @@ rebalance_trigger <- function(df, type,
   if(n < 1L) stop("rebalance_trigger: leerer data.frame.")
   threshold <- threshold / 100               # PROZENT-KONVENTION (Sub-Trigger via Rekursion)
   trig <- logical(n)                         # Tag 1 (Einstieg) bleibt immer FALSE
-  # R1-21: Referenz = erster nicht fehlender Wert (z. B. nach EWMA-Anlaufphase);
+  # Referenz = erster nicht fehlender Wert (z. B. nach EWMA-Anlaufphase);
   # bis dahin und bei NA kein Trigger. Nur NA -> nie ein Trigger.
   .first_obs <- function(v) { i <- which(!is.na(v))[1]; if (is.na(i)) length(v) else i }
 

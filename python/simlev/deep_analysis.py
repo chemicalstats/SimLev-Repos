@@ -1,4 +1,4 @@
-"""Vertiefte Auswertung gespeicherter Ergebnisse (Port von ``r/R/deep_analysis.R``).
+"""Vertiefte Auswertung gespeicherter Ergebnisse (Gegenstück zu ``r/R/deep_analysis.R``).
 
 :func:`result_analysis` analysiert ein oder mehrere Ergebnisse von
 :func:`simlev.simulation` (oder beliebige Kursreihen) nachträglich, im Umfang
@@ -148,12 +148,12 @@ def _cov(x, y):
 def _col_means(M, na_rm=False):
     """``colMeans(M, na.rm)``: long-double-Summe je Spalte / Anzahl, dann double."""
     M = np.asarray(M, dtype=np.float64)
-    return r_colmeans(M, na_rm=na_rm)   # N11: C-Kern core/slc_rbase.c (long double wie R; wie Julia)
+    return r_colmeans(M, na_rm=na_rm)   # C-Kern core/slc_rbase.c (long double wie R; wie Julia)
 
 
 def _row_means(M):
     """``rowMeans(M)``: long-double-Summe über Spalten / p, dann double."""
-    return r_rowmeans(np.asarray(M, dtype=np.float64))   # N11: C-Kern
+    return r_rowmeans(np.asarray(M, dtype=np.float64))   # C-Kern
 
 
 def _mean_lgl(b):
@@ -695,29 +695,114 @@ def result_analysis(x, *, benchmark=None, risk_free=0, rolling_years=3, var_leve
                   inflation=None):
     """Vertiefte Analyse von Simulationsergebnissen.
 
-    Wertet ein oder mehrere gespeicherte Ergebnisse von :func:`simlev.simulation`
-    (oder Kursreihen) aus. Bei ``SimLevResult`` ist Grundlage der
-    zeitgewichtete Wertindex (``result_index``); von der Simulation
-    aufgefüllte Tage werden aus den Tagesrenditen ausgeschlossen.
+    Wertet ein oder mehrere gespeicherte Ergebnisse von ``simulation()`` (oder Kursreihen) aus, im Umfang gängiger
+    Portfolio-Backtester wie testfol.io. Bei ``SimLevResult`` ist Grundlage der zeitgewichtete Wertindex
+    (``result_index()``); Sparpläne und Entnahmen verzerren die Renditen daher nicht. Tage, die ``simulation()``
+    per LOCF aufgefüllt hat, werden aus den Tagesrenditen für Volatilität, Sharpe, VaR usw. ausgeschlossen.
 
     Args:
-        x: ``SimLevResult``, ``DataFrame(date, value)`` oder eine Liste
-            (unbenannt: Reihen ``S1``, ``S2``, …) bzw. ein ``dict`` davon.
-        benchmark: ``None`` (keine), Name einer Reihe aus ``x`` oder eigenes
-            ``SimLevResult``/``DataFrame`` (Name ``"Benchmark"``).
-        risk_free: Risikoloser Zins in Prozent p. a.: Skalar,
-            ``DataFrame(date, rate)`` oder benannter Vektor mit Datumsnamen.
-        rolling_years: Fensterlänge der rollierenden Kennzahlen in Jahren.
-        var_levels: Wahrscheinlichkeiten für VaR und CVaR (Anteile).
-        top_drawdowns: Anzahl Einträge der Drawdown-Tabelle je Reihe.
-        inflation: ``None`` (nominal), Inflation in Prozent p. a. oder
-            Preisindex als ``DataFrame(date, value)`` bzw. benannter Vektor.
+        x: Ein ``SimLevResult``, ein ``data.frame(date, value)`` oder eine (benannte) Liste davon, z. B. mehrere
+            gespeicherte Läufe (siehe Details).
+        benchmark: Benchmark für die Benchmark-Kennzahlen: ``None`` (Standard; keine), ein Name aus ``x``
+            (Zeichenkette) oder ein eigenes ``SimLevResult`` bzw. ``data.frame(date, value)``; dieses wird unter
+            dem Namen ``"Benchmark"`` als weitere Reihe aufgenommen. Verglichen wird auf den gemeinsamen Daten
+            (mindestens 3 gemeinsame Renditen). Enthält ``x`` schon eine Reihe ``"Benchmark"``, ist ein eigenes
+            Objekt hier ein Fehler.
+        risk_free: Risikoloser Zins in Prozent p. a. (1 = 1 %): Skalar (Standard 0), ``data.frame(date, rate)``
+            oder benannter Vektor mit Datumsnamen (jeweils Stufenfunktion: Wert gilt ab seinem Datum). Je
+            ausgewerteter Rendite gilt der Zins über den Kalenderabstand zur vorigen ausgewerteten Zeile, (1 +
+            Zins/100)^Tage/365.25 - 1 (Handels- und Kalendertagsdaten ergeben so dieselbe Überschussrendite; im
+            früheren Stand (Commit 54b5b4f) je Zeile Zins / 100 / 365.25, bei Handelstagen also nur rund 69 % des
+            Zinses). Mit ``inflation`` wird auch der Zins deflationiert (real). ``upi``, rollierende Sharpe und M²
+            verwenden den daraus aufgezinsten Zins p. a.
+        rolling_years: Fensterlänge der rollierenden Kennzahlen in Jahren (auf ganze Monate gerundet, mindestens 2
+            Monate; Standard 3).
+        var_levels: Wahrscheinlichkeiten für VaR und CVaR als Anteile (Standard ``[0.01, 0.05, 0.10]``);
+            historisch aus Tages- und Monatsrenditen.
+        top_drawdowns: Anzahl Einträge der Drawdown-Tabelle je Reihe (Standard 10, nach Tiefe sortiert).
+        inflation: Optional: Inflation in Prozent p. a. (Skalar, 2 = 2 %) oder ein Preisindex-Niveau als
+            ``data.frame(date, value)`` bzw. benannter Vektor mit Datumsnamen (z. B. mit ``series_align_macro()``
+            vorbereitet). Dann werden alle Kennzahlen real (in Kaufkraft des Startdatums) berechnet, auch die MWRR
+            und der risikolose Zins. Ein Preisindex muss am Start jeder Reihe bekannt sein. Standard ``None`` =
+            nominal.
 
     Returns:
-        :class:`SimLevAnalysis` (``metrics``, ``benchmark_metrics``,
-        ``benchmark``, ``annual``, ``monthly``, ``seasonality``, ``drawdowns``,
-        ``rolling``, ``rolling_years``, ``correlation``, ``series``,
-        ``risk_free``, ``var_levels``, ``real``).
+        Objekt der Klasse ``SimLevAnalysis``, eine Liste mit
+
+        - metrics: Matrix Kennzahl x Reihe. Renditen, Volatilität, Drawdowns, VaR/CVaR (``var_daily_5``,
+          ``cvar_monthly_5`` usw.) als Anteile (0.07 = 7 %), Drawdowns positiv; ``years`` in Jahren,
+          ``longest_drawdown_days`` in Kalendertagen; ``taxes`` in Währungseinheiten und ``trades_per_year`` nur
+          bei ``SimLevResult``, sonst NA (ebenso ``mwrr``).
+        - benchmark_metrics: Matrix Kennzahl x Reihe (ohne Benchmark): ``alpha``, ``beta``, ``correlation``,
+          ``r_squared``, ``correlation_up``, ``correlation_down``, ``up_capture``, ``down_capture``,
+          ``capture_spread``, ``active_return``, ``tracking_error``, ``information_ratio``, ``m2``, ``treynor``;
+          ``None`` ohne Benchmark.
+        - benchmark: Name der Benchmark-Reihe oder ``None``.
+        - annual: Matrix Jahr x Reihe der Jahresrenditen (Anteile); Zeilen = alle Jahre aller Reihen, NA, wo eine
+          Reihe kein Jahr hat.
+        - monthly: Liste je Reihe: Matrix Jahr x Monat (``Jan`` bis ``Dec``) plus Spalte ``Year`` (Anteile).
+        - seasonality: Matrix Monat x Reihe: mittlere Monatsrendite.
+        - drawdowns: Liste je Reihe: DataFrame mit ``start``, ``trough``, ``end`` (NA, solange nicht erholt),
+          ``depth`` (negativer Anteil), ``days_to_trough``, ``days_to_recover``, ``days_total`` (Kalendertage).
+        - rolling: Liste je Reihe: DataFrame (Monatsende) mit ``cagr``, ``volatility``, ``sharpe``,
+          ``max_drawdown``, ``beta``, ``excess_cagr`` über ``rolling_years`` (``sharpe`` = (CAGR - risikoloser
+          Zins im Fenster p. a.) / Volatilität); ``None``, wenn die Reihe zu kurz ist.
+        - rolling_years, risk_free, var_levels: die Eingaben.
+        - correlation: Liste ``daily`` und ``monthly``: Korrelationsmatrizen der Renditen auf gemeinsamen Daten
+          (bei mindestens zwei Reihen und mehr als 30 gemeinsamen Tagen, sonst ``None``).
+        - series: Liste je Reihe: ``data.frame(date, value)`` der ausgewerteten (ggf. realen) Wertreihe.
+        - real: ``True``, wenn ``inflation`` gesetzt war.
+
+        Ausgabe mit ``print()``, ``summary()`` und ``plot()``, siehe SimLevAnalysis-methods.
+
+    Details:
+        Akzeptierte Eingaben (je Reihe):
+
+        - ein ``SimLevResult`` aus ``simulation()``, ``tactical_simulation()`` usw.; nur hier gibt es MWRR,
+          Steuern und Transaktionen (ältere Ergebnisse ohne Element ``filled`` gelten als ungefüllt);
+        - ein ``data.frame`` mit Spalte ``date`` (Date, POSIXct mit dem Kalendertag in seiner Zeitzone oder
+          ``"JJJJ-MM-TT"``) und einer Wertspalte (positive Niveaus, keine Renditen): ``value``, sonst die erste
+          numerische Spalte außer ``date`` (bei mehreren mit Hinweis auf die gewählte); weitere Spalten werden
+          ignoriert. Zahlen als Text oder Faktor (etwa mit Dezimalkomma eingelesen) sind ein Fehler. Die Zeilen
+          werden nach Datum sortiert, bei doppeltem Datum gilt der letzte Wert (mit Hinweis). Führende und
+          nachlaufende NA werden abgeschnitten, innere NA per LOCF gefüllt und wie gefüllte Tage behandelt. Trägt
+          der DataFrame das Attribut ``filled`` aus ``series_align()`` (Spalte der Wertspalte bzw. einzige
+          Spalte), werden diese Tage aus den Tagesrenditen ausgeschlossen. Handelstagsdaten ohne Wochenenden sind
+          zulässig; z. B. eine eigene Kursreihe, ein Ergebnis von ``series_splice()`` oder ``result_index()``;
+        - eine Liste solcher Objekte (auch gemischt); Namen werden zu Spaltennamen; ist die Liste nicht
+          vollständig benannt, heißen alle Reihen ``S1``, ``S2``, ... Ein einzelnes Objekt heißt ``Strategie``.
+
+        Numerische Vektoren werden nicht akzeptiert (vorher als ``data.frame(date, value)`` aufbereiten).
+
+        Die Annualisierung (``ppy``) wird je Reihe aus den Daten ermittelt: Anzahl nicht aufgefüllter
+        Tagesrenditen je Jahr (rund 365 bei Kalendertagen, rund 252 bei Handelstagen). Tagesrenditen laufen von
+        einem echten (nicht gefüllten) Wert zum nächsten. Monats- und Jahreswerte sind die letzten vorhandenen
+        Werte je Kalendermonat bzw. -jahr; das erste Jahr und der erste Monat können daher unvollständig sein.
+
+        Kennzahlen je Reihe: Gesamtrendite, CAGR, geldgewichtete Rendite (MWRR, interner Zinsfuß der Ein- und
+        Auszahlungen), Volatilität, Sharpe, Sortino, Calmar, maximaler und mittlerer Drawdown, Ulcer Index, UPI,
+        längste Drawdown-Dauer, Recovery Factor, nötige Rendite zur Erholung, Schiefe, Kurtosis, beste und
+        schlechteste Tage, Monate und Jahre, Anteil positiver Monate, Gewinn/Verlust-Verhältnis, historischer VaR
+        und CVaR (täglich und monatlich), bei SimLev-Ergebnissen auch Steuern und Transaktionen.
+
+        Gegen einen Benchmark: Alpha (annualisiert, CAPM auf Überschussrenditen), Beta, Korrelation gesamt sowie
+        in Auf- und Abwärtsphasen, R², Up-/Down-Capture (Monatsbasis), Capture Spread, aktive Rendite, Tracking
+        Error, Information Ratio, M² (Modigliani) und Treynor.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 3000
+        d = pd.DataFrame({"date": pd.date_range("2010-01-01", periods=n)})
+        d["A"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.010, n))
+        d["B"] = 100 * np.cumprod(1 + rng.normal(2e-4, 0.006, n))
+        a = simlev.simulation(d, simlev.create_strategy(A=simlev.asset_config(asset_class="etf")))
+        b = simlev.simulation(d, simlev.create_strategy(A=simlev.asset_config(asset_class="etf", share=0.6),
+                                                        B=simlev.asset_config(asset_class="etf", share=0.4)),
+                              rebalance=simlev.rebalance_plan(span=1, unit="year"))
+        da = simlev.result_analysis({"Aktien": a, "Mischung": b}, benchmark="Aktien", risk_free=1)
+        print(da["metrics"].head())
     """
     if _is_result(x) or isinstance(x, pd.DataFrame):
         x = {"Strategie": x}

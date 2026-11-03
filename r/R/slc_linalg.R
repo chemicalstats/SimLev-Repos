@@ -1,14 +1,14 @@
-# Huellen der C-Bibliothek slc, Etappe 9.2 (SimLev core): lineare Algebra, Matrixprodukt,
+# Huellen der C-Bibliothek slc (SimLev core): lineare Algebra, Matrixprodukt,
 # kleinste Quadrate und Logit-IRLS, Stineman-Interpolation, Glaettungsspline, Kerndichte
 # (interne Funktionen .sl_*).
 #
 # Die Rechnung steht in src/slc_linalg.c, slc_matmul.c, slc_lsq.c, slc_stine.c, slc_spline.c und
 # slc_kde.c (Kopien von core/, core/sync.py), die .Call-Huellen in src/slc_r_linalg.c
-# (Registrierung in src/init.c, Block 9.2). Gegenstuecke: python/simlev/_lib_linalg.py und
+# (Registrierung in src/init.c). Gegenstuecke: python/simlev/_lib_linalg.py und
 # julia/src/slib_linalg.jl. Fehlertexte und Warnungen kommen aus dem Kern.
 #
-# Seit Etappe 9.6b sind die Aufrufstellen umgestellt (%m%, .sl_crossprod, .sl_lsfit usw.); dazu
-# kommen unten die Host-Rechnungen Welch-Test, Polynom-Kleinstquadrate und r^2 (Entwurf B.7, B.16).
+# Seit 1.0.0 sind die Aufrufstellen umgestellt (%m%, .sl_crossprod, .sl_lsfit usw.); dazu
+# kommen unten die Host-Rechnungen Welch-Test, Polynom-Kleinstquadrate und r^2.
 
 # double-Matrix (Vektor als Spaltenmatrix), dimnames bleiben
 .sl_dmat <- function(x) {
@@ -65,7 +65,7 @@
 
 # ── Matrixprodukt ────────────────────────────────────────────────────────────
 
-# x %*% y mit den Vektorregeln von %*% (Entwurf B.6)
+# x %*% y mit den Vektorregeln von %*%
 .sl_matmul <- function(x, y) {
   if (is.double(x) && is.double(y) && is.matrix(x) && is.matrix(y)) return(.Call(C_sl_matmul, x, y))
   xm <- is.matrix(x); ym <- is.matrix(y)
@@ -167,7 +167,7 @@
   res
 }
 
-# ── 9.6b: Rechnungen im Host (Entwurf B.7, B.16; Ausnahmen nach Entscheidung 4) ──
+# ── Rechnungen im Host (kein eigener Kern in slc) ──
 
 # Welch-Test (Welch 1947; Satterthwaite 1946): t = (mean(x) - mean(y)) / se mit
 # se^2 = var(x)/n_x + var(y)/n_y, Freiheitsgrade nu = se^4 / ((var(x)/n_x)^2/(n_x - 1) + (var(y)/n_y)^2/(n_y - 1)),
@@ -185,7 +185,7 @@
 
 # Polynom-Kleinstquadrate vom Grad d (ersetzt lm(y ~ poly(x, d))): Basis 1, z, z^2, ..., z^d mit
 # z = (x - mean(x)) / sd(x) (Potenzen durch fortgesetztes Multiplizieren), Loesung ueber .sl_lsfit;
-# angepasste Werte und r^2 = 1 - RSS/TSS haengen nicht von der Basis ab (Entwurf B.7, B.16).
+# angepasste Werte und r^2 = 1 - RSS/TSS haengen nicht von der Basis ab.
 .sl_poly_fit <- function(x, y, degree) {
   x <- as.double(x); y <- as.double(y); degree <- as.integer(degree)
   cx <- mean(x); sx <- stats::sd(x)

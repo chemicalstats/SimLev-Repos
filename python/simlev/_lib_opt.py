@@ -1,13 +1,13 @@
-"""Hüllen der Optimierer der C-Bibliothek slc (SimLev core, Etappe 9.3): :func:`optim` und
+"""Hüllen der Optimierer der C-Bibliothek slc (SimLev core): :func:`optim` und
 Prüfhilfen.
 
 Gegenstück zu ``r/R/slc_opt.R`` (``.sl_optim``) und ``julia/src/slib_opt.jl`` (``SLib.optim``).
 Die Rechnung steht in ``src/core/slc_opt.c`` (Kopie von ``core/``), die Hülle in
-``src/_ext_slc_opt.c`` (Modul ``simlev._ext``). Rückfrage an den Host (Entwurf B.8): Python holt
+``src/_ext_slc_opt.c`` (Modul ``simlev._ext``). Rückfrage an den Host: Python holt
 die nächste Anfrage, rechnet die Zielfunktion selbst und gibt die Antwort; der Kern ruft nie
 nach Python zurück, Fehler der Zielfunktion sind gewöhnliche Python-Ausnahmen.
 
-Seit Etappe 9.6b rufen die Ports :func:`optim` an denselben Stellen wie R. :func:`optim` nimmt die
+Seit 1.0.0 rufen die Ports :func:`optim` an denselben Stellen wie R. :func:`optim` nimmt die
 Argumente und Steuerwerte von R's ``optim`` an, soweit SimLev sie nutzt, und gibt ein ``dict``
 mit ``par``, ``value``, ``counts`` (``{"function": …, "gradient": …}``, bei Nelder-Mead
 ``gradient = None``), ``convergence``, ``message``, ``iterations``, ``evaluations`` (und
@@ -159,7 +159,7 @@ def minimize_test(id, par, method="Nelder-Mead", lower=-math.inf, upper=math.inf
 
 
 def numgrad_test(id, x, lower=None, upper=None):  # noqa: A002
-    """Numerischer Gradient (B.9) der Prüffunktion ``id`` an ``x`` (Schranken wahlweise)."""
+    """Numerischer Gradient der Prüffunktion ``id`` an ``x`` (Schranken wahlweise)."""
     x = np.ascontiguousarray(np.asarray(x, dtype=np.float64).ravel())
     n = x.size
     g = np.empty(n, dtype=np.float64)

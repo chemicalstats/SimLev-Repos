@@ -7,16 +7,16 @@
 #                     W. Fullerton (Los Alamos); sprintf.c: ursprünglich Jonathan Rougier
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet seit N10 der C-Kern
+#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet der C-Kern
 #                     core/slc_rbase_date.c.
 # RFmt – R-Formatierung und Druckausgabe (format, formatC, sprintf, round, print …)
 #
 # Zeichengenaue Nachbildung von R 4.3.3 (format.c, printutils.c,
 # printvector.c, printmatrix.c, print.c, paste.c, sprintf.c, util.c,
 # nmath/fround.c, nmath/fprec.c, base/R/format.R, dataframe.R, factor.R,
-# dates.R); Vorlage python/simlev/_r/fmt.py. Zahlen formatiert wie in R die
+# dates.R); Gegenstück python/simlev/_r/fmt.py. Zahlen formatiert wie in R die
 # C-Bibliothek (glibc `snprintf` über ccall), `log10`/`pow` aus der glibc-libm,
-# `scientific()` in long double über den C-Kern `sl_r_scientific` (N10, core/slc_rbase_num.c).
+# `scientific()` in long double über den C-Kern `sl_r_scientific` (core/slc_rbase_num.c).
 #
 # Eingaben (R-Typ aus dem Julia-Typ):
 #   Float64 / Vector{Float64}        double (SimLev.NA = NA, sonst NaN = NaN)

@@ -7,7 +7,7 @@ Copyright ChemicalStats von der Mauerstrasse.
 SimLev enthält keinen Code aus anderen Paketen. Das R-Paket nutzt die
 Grundfunktionen von R selbst; nachgebildet sind sie nur in den Kernen
 src/slc_rbase.c und src/slc_rbase.h, die die gemeinsamen C++-Kerne der
-Tagesengine und der Auswertung von simulation() brauchen (seit E17,
+Tagesengine und der Auswertung von simulation() brauchen (seit 1.4.0,
 Abschnitte 2.2 und 2.3; 2.1 entfällt). Sonst sind fremde Vorlage nur
 gemeinfreie Kalenderalgorithmen (Abschnitt 2.4). Die gleiche Gliederung haben
 python/COPYRIGHTS.md und julia/COPYRIGHTS.md im Repository.
@@ -55,16 +55,16 @@ src/        C++-Kerne der Engine (Markt-Updates, FIFO-Lotverwaltung,
             core/ des Repositorys (core/sync.py). Die C-Bibliothek ist
             nach Veröffentlichungen geschrieben, nicht nach fremdem Code; der
             Kopf jeder Datei nennt ihre Quellen, die vollständigen Angaben
-            stehen im Abschnitt "Literatur" der README im Wurzelverzeichnis
-            des Repositorys. Konstanten (Stützwerte, Reihenkoeffizienten,
+            stehen in der Datei LITERATUR.md im Wurzelverzeichnis des
+            Repositorys. Konstanten (Stützwerte, Reihenkoeffizienten,
             Sprungpolynom des Zufallsgenerators) sind selbst hergeleitet
             (core/gen_constants.py, nicht Teil des R-Pakets);
             Verfahrenskonstanten aus den Veröffentlichungen (etwa die
             Parameter von xoshiro256** und SplitMix64) nennen die Dateiköpfe.
-            Von den Kernen core/slc_rbase* gehören seit E17 nur
+            Von den Kernen core/slc_rbase* gehören seit 1.4.0 nur
             src/slc_rbase.c und src/slc_rbase.h zum R-Paket (Abschnitt 2.2:
             Summen in long double für die Tagesengine engine_core_impl.h,
-            seit E17 Stufe 3 auch Summen, Mittel, Varianz, Kumulationen,
+            seit 1.4.0 auch Summen, Mittel, Varianz, Kumulationen,
             Potenz und die Nullstellensuche nach Brent für die Auswertung
             evaluate_core_impl.h).
 
@@ -83,7 +83,7 @@ Entfällt im R-Paket (nur Python und Julia).
 
 2.2 C-Kerne mit R-Regeln (slc_rbase*)
 -------------------------------------
-Dateien:            src/slc_rbase.c, src/slc_rbase.h (seit E17; die übrigen
+Dateien:            src/slc_rbase.c, src/slc_rbase.h (seit 1.4.0; die übrigen
                     slc_rbase*-Dateien nur in Python und Julia)
 Herkunft:           übersetzt aus R 4.3.3 (src/main/summary.c, cum.c,
                     array.c, arithmetic.c, src/library/stats/src/zeroin.c)
@@ -94,7 +94,7 @@ Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 Änderungen:         C99 ohne R-Datenstrukturen, gemeinsamer Kern für R, Python
                     und Julia; das R-Paket nutzt daraus sl_r_sum für die
                     Summen der Tagesengine (src/engine_core_impl.h), wie R
-                    in long double, seit E17 Stufe 3 für die Auswertung
+                    in long double, seit 1.4.0 für die Auswertung
                     (src/evaluate_core_impl.h) auch sl_r_rowsums, sl_r_prod,
                     sl_r_mean, sl_r_var, sl_r_cumsum, sl_r_cumprod,
                     sl_r_cummax, sl_r_pow und sl_r_zeroin2 (Brent wie
@@ -102,7 +102,7 @@ Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 
 2.3 Ältere Herkunft innerhalb der R-Vorlagen
 --------------------------------------------
-Dateien:            src/slc_rbase.c (sl_r_zeroin2, seit E17 Stufe 3)
+Dateien:            src/slc_rbase.c (sl_r_zeroin2, seit 1.4.0)
 Herkunft:           zeroin.c von R: "from NETLIB c/brent.shar with
                     max.iter, add'l info and convergence details hacked in
                     by Peter Dalgaard"; Netlib go/zeroin.f: Übersetzung von
@@ -115,7 +115,7 @@ Lizenz der Vorlage: go/zeroin.f: keiner; c/brent.shar: nicht geprüft (Abruf
 
 2.4 Kalenderrechnung nach Hinnant
 ---------------------------------
-Dateien:            src/prepare_core_impl.h (eng_civil, eng_days; bis E17 Stufe 1c
+Dateien:            src/prepare_core_impl.h (eng_civil, eng_days; bis 1.3.0
                     src/engine_core_impl.h, davor src/fifo_core_impl.h und
                     src/tax_core_impl.h)
 Herkunft:           übersetzt aus H. Hinnant, "chrono-Compatible Low-Level
@@ -138,18 +138,18 @@ nichts nach. Beim Bau nutzen die C++-Kerne std::sort und std::nth_element
 GPL-3 mit GCC Runtime Library Exception 3.1).
 
 Die Pakete evd, imputeTS, stinepack, rugarch, Rsolnp, truncnorm, MSGARCH
-und numDeriv sind weder enthalten noch eine Abhängigkeit (siehe Abschnitt
-"Literatur" der README im Wurzelverzeichnis des Repositorys).
+und numDeriv sind weder enthalten noch eine Abhängigkeit (siehe Datei
+LITERATUR.md im Wurzelverzeichnis des Repositorys).
 
 
 4. Früher enthaltene Teile (entfernt)
 =====================================
 
-Bis Etappe 9 enthielt das Paket Teile von evd 2.3-7.1, imputeTS 3.4,
+Bis 0.10.0 enthielt das Paket Teile von evd 2.3-7.1, imputeTS 3.4,
 stinepack 1.5, rugarch 1.5-6, Rsolnp 1.16 und truncnorm 1.0-9 (Dateien
 R/vendor_*.R und src/vendor_*). Sie sind entfernt; ihre Aufgaben rechnet
 die C-Bibliothek von SimLev. Diese Pakete und MSGARCH 2.51 dienten bei der
 Entwicklung nur als Vorbild für das Verhalten und als Prüforakel; numDeriv
 2016.8-1.1 war früher Prüforakel der numerischen Ableitungen. Autorinnen,
-Autoren und Lizenzen dieser Pakete stehen im Abschnitt "Literatur" der
-README.
+Autoren und Lizenzen dieser Pakete stehen in der Datei
+LITERATUR.md im Wurzelverzeichnis des Repositorys.

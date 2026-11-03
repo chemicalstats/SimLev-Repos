@@ -1,16 +1,16 @@
 # =============================================================================
-# simulation(), Phasen 4 und 5 ueber den gemeinsamen C++-Kern (E17): Tagesengine core/engine_core_impl.h
+# simulation(), Phasen 4 und 5 ueber den gemeinsamen C++-Kern: Tagesengine core/engine_core_impl.h
 # =============================================================================
-# Seit E17 Stufe 2 rechnet der Kern auch die Vorbereitung (core/prepare_core_impl.h): Termine, Splits,
+# rechnet der Kern auch die Vorbereitung (core/prepare_core_impl.h): Termine, Splits,
 # Tages-Flags, Aktivierung, Freibetrag, Jahreswechsel und Startgewichte aus den Angaben von .sim_build_calendar.
 # Der Kern rechnet die Tagesschleife (Batch- und Marktupdate, Aktivierung, Splits, Sparplan, Handel,
 # Rebalancing, Freibetrag, Vorabpauschale, Liquidation, Jahreswechsel und Abrechnungen mit Steuer) und den
 # Abschluss des letzten Jahres; bis R 1.3.0 waren das die Phasen .sim_run_days (mit den Tagesschritten
-# .sim_day_*), .sim_make_actions und .sim_close_years, seit E17 Stufe 1c entfallen.
+# .sim_day_*), .sim_make_actions und .sim_close_years, entfallen.
 # Warnungen, details-Ausgaben und Abbrueche meldet der Kern als Codes mit Werten in einem Protokoll; die
 # Texte setzt .sim_engine_signal wortgleich zu R 1.3.0, in derselben Reihenfolge (cat() und warning()
 # verzahnt). Warnungen und Abbrueche, die bis R 1.3.0 den Aufruf einer Phasenfunktion trugen (.perform_trade_*,
-# .perform_asset_split, if-Ausdruecke, max()), tragen seit C19 den Aufruf von simulation() (.sim_restore_call).
+# .perform_asset_split, if-Ausdruecke, max()), tragen den Aufruf von simulation() (.sim_restore_call).
 # Gegenstuecke: python/simlev/_sim_engine.py, julia/src/sim_engine.jl.
 
 #' Vorbereitung, Phasen 4 und 5 ueber den C++-Kern: Termine, Tages-Flags, Startgewichte, Tagesschleife und
@@ -146,7 +146,7 @@
 #' @keywords internal
 #' @noRd
 .sim_engine_signal <- function(ev, ev_ints, ev_vals, err, nm, flag_date) {
-  cl <- sys.call()   # C19: Phase in .SIM_PHASES, .sim_restore_call setzt den Aufruf von simulation()
+  cl <- sys.call()   # Phase in .SIM_PHASES, .sim_restore_call setzt den Aufruf von simulation()
   dstr <- function(d) as.character(structure(as.numeric(flag_date[d]), class = "Date"))
   for (i in seq_along(ev$code)) {
     code <- ev$code[i]

@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Statisches Dashboard (Port von plot_dashboard.R) als abhängigkeitsfreies SVG
+# Statisches Dashboard (Gegenstück zu plot_dashboard.R) als abhängigkeitsfreies SVG
 #
 # Prüfungen, Meldungen, Beschriftungen und alle berechneten Werte (Tagesrenditen
 # wie `.dashboard_returns`, Kennzahlentexte, Monatsrenditen, rollierende
@@ -133,7 +133,7 @@ function _format_amount(x; signif3::Bool = false)
     return out
 end
 
-"`stats::cor(x, y)` für zwei vollständige Vektoren (N10: C-Kern `sl_r_cov`, long double wie R)."
+"`stats::cor(x, y)` für zwei vollständige Vektoren (C-Kern `sl_r_cov`, long double wie R)."
 function _r_cor(x::Vector{Float64}, y::Vector{Float64})
     ans, _ = SimLev._rb_cov(copy(x), length(x), 1, copy(y), 1, 4, false, true)
     return ans[1]
@@ -617,11 +617,91 @@ end
 """
     export_dashboard(x, filename = "dashboard.svg"; width = 14, height = 10, kwargs...)
 
-Dashboard als SVG-Datei speichern (Größe in Zoll wie in R, 100 px je Zoll);
-weitere Argumente gehen an [`plot_dashboard`](@ref) (unbekannte → Warnung).
-`filename` auch als Schlüsselwort. Es gibt nur SVG: Eine andere Dateiendung
-(R kann über ggsave auch .png/.pdf) bricht vor dem Zeichnen mit einer Meldung
-ab, statt die Endung still zu ersetzen. Meldung wie in R nach `stderr`.
+Speichert das Dashboard als SVG-Datei (Größe in Zoll, 100 px je Zoll; nur Endung `.svg`).
+
+Methoden und Export-Funktionen für `"SimLevResult"`-Objekte, die von `simulation` zurückgegeben werden.
+
+`plot` erstellt ein mehrteiliges Dashboard-Layout mit wählbaren Panels (Wertentwicklung, Drawdown,
+Renditeverteilung, rollierende Renditen, Monatsrenditen-Heatmap, Kennzahlen, Korrelation, Strategievergleich).
+Korrelation und Strategievergleich gibt es nur mit `compare`.
+
+`export_dashboard` speichert das Dashboard als PDF.
+
+`print` gibt die wichtigsten Kennzahlen und ggf. die Steuerzusammenfassung auf der Konsole aus. `summary`
+liefert eine Liste der Klasse `"summary.SimLevResult"` und druckt nicht selbst; ihre Methode `print` zeigt die
+kompakte Kennzahlentabelle (in der Konsole erscheint sie bei `summary(x)` wie bisher, bei `s <- summary(x)`
+erst mit `print(s)` bzw. `s`).
+
+# Argumente
+- `x`: Ein `"SimLevResult"`-Objekt (bei `print.summary.SimLevResult`: das Ergebnis von `summary`).
+- `filename`: Character. Pfad der Ausgabedatei. Standard: `"dashboard.pdf"`.
+- `width`: Numerisch. Breite in Zoll. Standard: `14`.
+- `height`: Numerisch. Höhe in Zoll. Standard: `10`.
+- `kwargs...`: Für `plot`, `print`, `summary`: wird ignoriert. Für `export_dashboard`: wird an
+  `plot.SimLevResult` weitergeleitet.
+
+# Rückgabe
+- `plot.SimLevResult`: Unsichtbar `nothing` (Seiteneffekt: Plot).
+
+- `print.SimLevResult`: Unsichtbar `x`.
+
+- `summary.SimLevResult`: Sichtbar eine Liste der Klasse `"summary.SimLevResult"` mit `n_days`, `n_years`,
+  `start_value` (Depotwert am Starttag in EUR, nach Kaufkosten und mit der Sparrate des Starttags; Ausgabe
+  „Depotwert Starttag“), `start_capital` (Startkapital in EUR: Argument `start_value` von `simulation`,
+  berechnet als `invested[1]` minus Einzahlungen des Starttags; `NA` ohne `invested`), `end_value`, `invested`
+  (EUR; Startwert plus Einzahlungen, brutto), `total_return_twr` (zeitgewichtete Gesamtrendite: mit Sparplan
+  letzter Wert von `twr_index` minus 1, sonst Endwert / Depotwert am Starttag - 1), `return_on_invested`
+  ((Endwert - Eingezahlt) / Eingezahlt), `total_return` (gleichwertiger Alias für `total_return_twr`), `cagr`,
+  `ttwror` (Anteile; mit Sparplan ist `cagr` geldgewichtet), den Kennzahlen aus `statistics` (`sharpe`,
+  `sortino`, `calmar`, `omega`, `gain_to_pain`, `serenity`, `martin_ratio`, `max_drawdown`,
+  `average_drawdown`, `ulcer_index`, `longest_drawdown`, `avg_recovery_time`) sowie `statistics`, `tax_report`
+  (einschließlich `open_tax_debt`, bei `tax_mode = "person"` `next_year`, mit `taxable_income`
+  `tariff_years`), `undefined_metrics` (Ursachen nicht definierter Kennzahlen, siehe `simulation`) und
+  `external_flows`.
+
+- `print.summary.SimLevResult`: Unsichtbar `x`; gibt die kompakte Zusammenfassung aus (nicht definierte
+  Kennzahlen als „nicht definiert (Ursache)“).
+
+- `export_dashboard`: Unsichtbar `nothing` (PDF-Datei wird geschrieben; das PDF-Gerät wird auch bei einem
+  Fehler wieder geschlossen).
+
+# Details
+Die Kennzahlen des Dashboards entsprechen `x["statistics"]`: Die Sharpe Ratio ist `statistics["sharpe"]` (mit
+dem in `simulation` gewählten `risk_free`), die annualisierte Volatilität `statistics["sd"]` mal Wurzel der
+tatsächlichen Beobachtungen je Jahr (ohne aufgefüllte Tage, also rund 252 bei Handelstagsdaten und 365 bei
+Kalenderdaten). Alle Renditen sind um Einzahlungen (Sparplan) bereinigt: Die Verteilungsgrafik zeigt einfache
+Tagesrenditen in Prozent ohne aufgefüllte (LOCF-)Tage, die rollierenden Renditen werden kalendergenau
+annualisiert (Exponent 365,25 / Kalendertage des Fensters), die Monats-Heatmap zeigt Monatsrenditen von
+Monatsende zu Monatsende (erster Monat ab dem Starttag) in Prozent; die Farbskala reicht von -10 bis +10
+Prozent, stärkere Monate erhalten die Randfarbe (der Wert steht im Feld). Beträge werden in EUR beschriftet
+(Wertachse in Tsd. bzw. Mio., Einheit im Achsentitel; Endwert-Label mit drei gültigen Stellen,
+Kennzahlentabelle mit vollen Beträgen auf zwei Nachkommastellen). Die Ränder richten sich nach der Breite der
+Beschriftungen; Kennzahlentabelle und Strategievergleich verkleinern bei wenig Platz die Schrift (die
+Kennzahlen ggf. in zwei Spalten). Im Strategievergleich ist die Differenz Strategie 1 minus Strategie 2 grün,
+wenn Strategie 1 besser ist (bei Max. DD und Volatilität also kleiner), rot, wenn sie schlechter ist, und grau
+bei Gleichstand (auf zwei Nachkommastellen). Bei sehr kurzen Ergebnissen zeigen Panels ohne ausreichende Daten
+den Hinweis „Zu wenige Daten".
+
+**Sparplan (Einzahlungen, `x["external_flows"] = true`).** Die Wertgrafik zeigt weiterhin den Depotwert
+`x["worth"]` und zusätzlich die Summe der Einzahlungen (Startwert plus Sparraten, `x["invested"]`) als
+gepunktete Linie. Drawdown-Grafik und Drawdown-Kennzahlen beruhen auf dem zeitgewichteten Wertindex
+`x["twr_index"]` (wie `x["drawdowns"]`), die CAGR ist geldgewichtet (interner Zinsfuß) und so beschriftet; die
+Gesamtrendite im Kennzahlen-Panel und im Vergleich ist zeitgewichtet, die Referenzlinie der rollierenden
+Renditen zeigt die TTWROR. `print` und `summary` kennzeichnen die CAGR als geldgewichtet, TTWROR,
+Gesamtrendite und Drawdowns als zeitgewichtet, nennen die eingezahlte Summe und weisen darauf hin, dass
+Calmar, Serenity und Martin Ratio dann mit der TTWROR rechnen. Ohne Einzahlungen bleiben Grafik und Ausgabe
+unverändert.
+
+# Beispiel
+```julia
+using SimLev, Dates, Random
+rng = MersenneTwister(1)
+n = 500
+d = RFrame("date" => Date(2021, 1, 1) .+ Day.(0:n-1))
+d["ETF"] = 100 .* cumprod(1 .+ 4e-4 .+ 0.012 .* randn(rng, n))
+res = simulation(d, create_strategy(ETF = asset_config("etf")))
+export_dashboard(res, joinpath(mktempdir(), "bericht.svg"))
+```
 """
 function export_dashboard(x, filename_pos::AbstractString = "dashboard.svg"; filename::AbstractString = filename_pos, width::Real = 14, height::Real = 10, kwargs...)
     _check_svg_file(filename, "export_dashboard")

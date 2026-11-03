@@ -8,7 +8,7 @@
 #                     Ergänzungen von Peter Dalgaard
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang: Summen und Kumulationen rechnen seit N8 die C-Kerne
+#                     SimLev genutzten Umfang: Summen und Kumulationen rechnen die C-Kerne
 #                     core/slc_rbase*.
 """Basis-Numerik wie in R (long-double-Akkumulation).
 

@@ -1,4 +1,4 @@
-"""Synthetische Anleihe-, Geldmarkt- und gesicherte Reihen (Port von ``r/R/bonds.R``).
+"""Synthetische Anleihe-, Geldmarkt- und gesicherte Reihen (Gegenstück zu ``r/R/bonds.R``).
 
 - :func:`index_bond`  Total-Return-Index einer Anleihe konstanter
   Laufzeit aus einer Renditereihe (Swinkels 2019)
@@ -39,7 +39,7 @@ class RVector(np.ndarray):
 
 
 def _bond_price(y, coupon, maturity, m):
-    """Kurs einer Anleihe je 1 Nominal (Port von ``.bond_price``)."""
+    """Kurs einer Anleihe je 1 Nominal (R: ``.bond_price``)."""
     y = np.asarray(y, dtype=np.float64)
     coupon = np.asarray(coupon, dtype=np.float64)
     i = y / m
@@ -54,23 +54,43 @@ def index_bond(data, *, yield_=None, maturity=10, coupon_frequency=1, method=("e
                            start=100, **kw):
     """Anleihe-Index aus Renditen (konstante Laufzeit).
 
-    An jedem Tag wird eine neue Par-Anleihe (Kupon = Rendite des Vortags)
-    gekauft und am Folgetag zur neuen Rendite bewertet:
-    ``r_t = P(y_t; c = y_{t-1}, M) - 1 + y_{t-1} Δt``. Mit
-    ``method="duration"`` Näherung über Duration und Konvexität.
+    Bildet einen Total-Return-Index einer Staatsanleihe mit konstanter Restlaufzeit aus einer Renditereihe. An
+    jedem Tag wird eine neue Par-Anleihe (Kupon = Rendite des Vortags) gekauft und am Folgetag zur neuen Rendite
+    bewertet: r_t = P(y_t; c = y_t-1, M) - 1 + y_t-1 Δ t mit Δ t = Kalendertage seit der Vorzeile / 365.25. Mit
+    ``method = "duration"`` wird die Kursänderung über modifizierte Duration und Konvexität angenähert, -D Δ y +
+    tfrac12 C Δ y^2 (wie bei Swinkels 2019). Roll-down-Effekte entlang der Zinskurve und Kosten sind nicht
+    enthalten. Das Ergebnis kann als Kursspalte (Niveau) in ``simulation()`` oder ``bootstrap_config()`` verwendet
+    werden.
 
     Args:
-        data: ``DataFrame`` mit Spalte ``date``.
-        yield_: Rendite in Prozent p. a. (Spaltenname, Vektor, Skalar,
-            ``DataFrame(date, value)`` oder benannter Vektor); in R ``yield``
-            (auch als ``**{"yield": ...}`` angebbar).
-        maturity: Restlaufzeit in Jahren.
-        coupon_frequency: Kupons je Jahr.
-        method: ``"exact"`` oder ``"duration"``.
-        start: Startwert des Index.
+        data: DataFrame mit Spalte ``date`` (Date oder umwandelbar, eine Zeile je Tag des gewünschten Index).
+        yield_: ``yield`` (in Python ``yield_``, da ``yield`` ein Schlüsselwort ist): Rendite in Prozent p. a.
+            (2.5 = 2,5 Prozent): Spaltenname, Vektor der Länge ``nrow(data)``, Skalar, ``data.frame(date, value)``
+            (z. B. Monatswerte, Stufenfunktion ab Datum) oder benannter Vektor mit Datumsnamen.
+        maturity: Konstante Restlaufzeit in Jahren (Standard 10).
+        coupon_frequency: Kupons je Jahr (Standard 1 = jährlich wie Bundesanleihen; 2 = halbjährlich wie
+            US-Treasuries).
+        method: ``"exact"`` (Standard, Neubewertung) oder ``"duration"`` (Duration-/Konvexitätsnäherung).
+        start: Startwert des Index in der ersten Zeile (Standard 100).
+        **kw: nur ``yield`` (``**{"yield": …}``) als Schreibweise für ``yield_`` (``yield`` ist in Python ein
+            Schlüsselwort); andere Namen sind ein Fehler.
 
     Returns:
-        :class:`RVector` (Indexniveau) mit ``attrs["duration"]``.
+        Numerischer Indexvektor (Niveau, Länge ``nrow(data)``) mit Attribut ``duration`` (modifizierte Duration
+        der Par-Anleihe zur Rendite des jeweiligen Tages, in Jahren).
+
+    Literatur:
+        Swinkels, L. (2019), Treasury Bond Return Data Starting in 1962, Data 4(3), 91.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 400
+        d = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n)})
+        d["y10"] = 2 + np.cumsum(rng.normal(0, 0.03, n))
+        b = simlev.index_bond(d, yield_="y10", maturity=10, coupon_frequency=1)
+        print(b[-1])
     """
     from .data_prep import _match_arg
     if "yield" in kw:
@@ -109,16 +129,30 @@ def index_bond(data, *, yield_=None, maturity=10, coupon_frequency=1, method=("e
 def index_money_market(data, rate, *, spread=0, basis=360, start=100):
     """Geldmarkt-Index aus einem Tageszins: ``I_t = I_{t-1} (1 + (i_{t-1} - s)/100 Δt/B)``.
 
+    Bildet einen Geldmarkt- bzw. Tagesgeld-Index (Niveau) aus einem Zinssatz, z. B. ESTR oder EFFR, als Kursspalte
+    für ``simulation()``: I_t = I_t-1(1 + fraci_t-1 - s100·(Δ t)/(B)) mit Zins i des Vortags, Abschlag s (z. B.
+    Fondskosten), Kalendertagen Δ t seit der Vorzeile und Tagesbasis B (Act/360).
+
     Args:
-        data: ``DataFrame`` mit Spalte ``date``.
-        rate: Zins in Prozent p. a. (Spaltenname, Vektor, Skalar, ``DataFrame(date, value)``
-            oder benannter Vektor mit Datumsnamen).
-        spread: Abschlag in Prozent p. a.
-        basis: Tagesbasis (360 oder 365).
-        start: Startwert.
+        data: DataFrame mit Spalte ``date`` (eine Zeile je Indextag).
+        rate: Zins in Prozent p. a. (3 = 3 Prozent): Spaltenname, Vektor der Länge ``nrow(data)``, Skalar,
+            ``data.frame(date, value)`` (Stufenfunktion ab Datum) oder benannter Vektor mit Datumsnamen.
+        spread: Abschlag in Prozent p. a. (Standard 0), auf derselben Tagesbasis wie der Zins.
+        basis: Tagesbasis (Standard 360; üblich 360 oder 365).
+        start: Startwert des Index in der ersten Zeile (Standard 100).
 
     Returns:
-        ``numpy.ndarray`` (Indexniveau).
+        Numerischer Indexvektor (Niveau, Länge ``nrow(data)``).
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 730
+        d = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n)})
+        d["estr"] = 3.0
+        mm = simlev.index_money_market(d, "estr", spread=0.1)
+        print(mm[-1])
     """
     data = _as_frame(data)
     i = _resolve_series(rate, data, "rate")
@@ -131,16 +165,34 @@ def index_money_market(data, rate, *, spread=0, basis=360, start=100):
 def index_currency_hedged(data, local, domestic_rate, foreign_rate, *, cost=0, basis=360, start=None):
     """Währungsgesicherte Reihe: lokale Rendite plus Zinsdifferenz, minus Sicherungskosten.
 
+    Näherung einer rollierend per Devisentermingeschäft gesicherten Anlage: Die Rendite in Lokalwährung plus die
+    Zinsdifferenz zwischen Heimat- und Fremdwährung (gedeckte Zinsparität), abzüglich Sicherungskosten: r^h_t =
+    r^lokal_t + fraci^heim_t-1 - i^fremd_t-1100·(Δ t)/(B) - (k)/(100)·(Δ t)/(365) mit Zinsen des Vortags und
+    Kalendertagen Δ t seit der Vorzeile. Effekte aus der Absicherung nur des Anfangswerts einer Rollperiode
+    (Restrisiko auf Kursgewinne) sind nicht enthalten.
+
     Args:
-        data: ``DataFrame`` mit Spalte ``date``.
-        local: Kursreihe in Lokalwährung (Spaltenname oder Vektor; Lücken per LOCF).
-        domestic_rate, foreign_rate: Zinsen in Prozent p. a.
-        cost: Sicherungskosten in Prozent p. a. (Tagesbasis 365).
-        basis: Tagesbasis der Zinsdifferenz.
-        start: Startwert (``None`` = erster Wert der lokalen Reihe).
+        data: DataFrame mit Spalte ``date``.
+        local: Kursreihe in Lokalwährung (Niveau): Spaltenname in ``data`` oder numerischer Vektor der Länge
+            ``nrow(data)``; Lücken werden mit dem letzten Wert gefüllt.
+        domestic_rate, foreign_rate: Zinsen der Heimat- bzw. Fremdwährung in Prozent p. a. (Spaltenname, Vektor,
+            Skalar, ``data.frame(date, value)`` oder benannter Vektor mit Datumsnamen).
+        cost: Sicherungskosten in Prozent p. a. (Standard 0; Tagesbasis 365).
+        basis: Tagesbasis der Zinsdifferenz (Standard 360).
+        start: Startwert; ``None`` (Standard) = erster Wert der lokalen Reihe.
 
     Returns:
-        ``numpy.ndarray`` (Indexniveau).
+        Numerischer Indexvektor (Niveau, Länge ``nrow(data)``).
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 730
+        d = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=n)})
+        d["sp500"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.01, n))
+        h = simlev.index_currency_hedged(d, "sp500", 3, 5, cost=0.1)
+        print(d["sp500"].iloc[-1], h[-1])
     """
     data = _as_frame(data)
     x = _as_numeric(_col(data, local)) if isinstance(local, str) else _as_numeric(local)

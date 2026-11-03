@@ -21,7 +21,7 @@ _show_arg(x) = x === nothing ? "NULL" : r_deparse(x)
     _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli, soli_rate, who;
                details = false, tariff_on = false, io = stdout)
 
-Steuersätze aus Abgeltungsteuer, Kirchensteuer und Günstigerprüfung (R: `.tax_rates`, 6.5b). Gemeinsamer
+Steuersätze aus Abgeltungsteuer, Kirchensteuer und Günstigerprüfung (R: `.tax_rates`). Gemeinsamer
 Helfer von `simulation()` (`_sim_check_inputs`) und `withdrawal_simulation()`: Satz der Abgeltungsteuer mit
 Kirchensteuer (§ 32d Abs. 1 EStG), Prozentangaben als Anteile und effektiver Satz der Günstigerprüfung (einmal
 je Lauf mit dem Grenzsteuersatz aus `income_rate()`). Rechenfolge, Warnungen und Druck wie in R; Meldungen
@@ -111,7 +111,7 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
             error("simulation: trading $(_show_arg(at)) von Asset '$nm' ist ungültig; erlaubt sind \"bnh\" und \"signal\".")
         end
         w = get(a, "wrapper", nothing)
-        if w !== nothing   # Fonds-Wrapper (Etappe 6.5c, wrapper.jl)
+        if w !== nothing   # Fonds-Wrapper (wrapper.jl)
             _is_wrapper(w) || error("simulation: wrapper von Asset '$nm' muss ein Objekt aus wrapper_config() sein, nicht $(_cls_all(w)).")
             at == "bnh" || error("simulation: Asset '$nm' ist ein Fonds-Wrapper; dafür ist nur trading = \"bnh\" möglich (keine Signale auf den Anteilswert).")
         end
@@ -251,7 +251,7 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     (!_is_num(start_value) || start_value <= 0) &&
         error("simulation: start_value muss eine positive Zahl sein (Anfangskapital in EUR, z. B. 10000), nicht $(r_deparse(start_value)).")
     start_value = Float64(start_value)
-    # Steuer-, Kosten-, Termin- und Split-Angaben haben die Bausteine geprüft (C19: die Prüfungen des flachen Wegs
+    # Steuer-, Kosten-, Termin- und Split-Angaben haben die Bausteine geprüft (die Prüfungen des flachen Wegs
     # sind entfallen); fractions und risk_free prüft simulation() selbst
     tax_rate = Float64(tax_rate)
     church_tax !== nothing && (church_tax = Float64(church_tax))
@@ -306,7 +306,7 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         error(r_sprintf("simulation: Asset-Gewichte (share) summieren sich auf %.4f, müssen aber exakt 1.0 ergeben (Anteile, z. B. 0.6 und 0.4).\n  Aktuelle Gewichte: %s",
                         total_weight, join((r_sprintf("%s=%.3f", k, (s = get(v, "share", nothing); s === nothing ? NA : Float64(s))) for (k, v) in strat), ", ")))
     end
-    # Steuersätze (Kirchensteuer, Prozent -> Anteil, Günstigerprüfung) im gemeinsamen Helfer (6.5b, auch für
+    # Steuersätze (Kirchensteuer, Prozent -> Anteil, Günstigerprüfung) im gemeinsamen Helfer (seit 1.1.0 auch für
     # withdrawal_simulation()); Rechenfolge, Warnungen und Druck wie bisher an dieser Stelle
     tr = _tax_rates(tax_rate, church_tax, use_guenstigerpruefung, marginal_tax_rate, include_soli_on_income_tax,
                     soli_rate_income_tax, "simulation"; details = details == true, tariff_on = tariff_on, io = io)
@@ -437,7 +437,7 @@ function _sim_build_state(fr::_Frame, strategy, start_value::Float64, start_date
             (ss === nothing || !haskey(fr, ss)) &&
                 error("simulation: signal_sell-Spalte '$(ss === nothing ? "NULL" : ss)' fehlt im Datensatz (Asset '$name').")
         end
-        push!(status, Status(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))   # setzt der Kern (E17 Stufe 2)
+        push!(status, Status(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))   # setzt der Kern
         local br::Vector{Float64}
         if _truthy_mode(base_rate_flex)
             if base_rate_data === nothing || !haskey(fr, base_rate_data)
@@ -460,8 +460,8 @@ function _sim_build_state(fr::_Frame, strategy, start_value::Float64, start_date
 end
 
 """Angaben der Termine und Tages-Flags (wie `.sim_build_calendar` in R): Kalender, Terminpläne (`_sched_spec`),
-Ereignis-Spalte und die Prüfungen; Termine, Splits, Flags, Aktivierung, Freibetrag und Startgewichte rechnet seit E17
-Stufe 2 der Kern (core/prepare_core_impl.h, über `_sim_engine_run!`)."""
+Ereignis-Spalte und die Prüfungen; Termine, Splits, Flags, Aktivierung, Freibetrag und Startgewichte rechnet
+der Kern (core/prepare_core_impl.h, über `_sim_engine_run!`)."""
 function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, stopp_date::Int, liquidate,
                              dca_mode, dca_span, dca_unit, dca_days, dca_value, dca_anchor, dca_start, dca_skip,
                              balance_mode, balance_span, balance_unit, balance_days, balance_anchor, balance_start,
@@ -509,7 +509,7 @@ function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, st
         st_a = sim.assets[a].start
         st_a > stopp_date && error("simulation: start von '$name' ($(fmt_date(st_a))) liegt nach dem letzten Datentag ($(fmt_date(stopp_date))); das Asset wäre nie handelbar. start auf ein Datum im Datenzeitraum setzen oder das Asset aus der Strategie entfernen.")
     end
-    # bis E17 Stufe 1c _sim_init_weights!: mindestens ein Asset ab dem ersten Tag handelbar
+    # bis 1.3.0 _sim_init_weights!: mindestens ein Asset ab dem ersten Tag handelbar
     any(a -> sim.assets[a].start <= flag_date[1], eachindex(flag_assets)) ||
         error("simulation: Kein Asset ist am ersten Datentag ($(fmt_date(flag_date[1]))) handelbar (start bzw. erste Kurse später); mindestens ein Asset muss ab Beginn handelbar sein.")
     fl = Flags(flag_date, flag_filled, flag_assets, dca, balance, flag_event, event_mode == "replace", falses(n), String[])

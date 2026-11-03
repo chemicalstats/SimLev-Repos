@@ -1,4 +1,4 @@
-/* core/slc_backcast.c – Zielfunktion und Fit von backcast_fit (SimLev core, N5)
+/* core/slc_backcast.c – Zielfunktion und Fit von backcast_fit (SimLev core)
  * Verfahren:  Zielfunktion der eigenen R-Funktion backcast_fit (r/R/backcast.R: .bc_model_returns,
  *             .bc_errors, .bc_loss, .bc_objective) für die Fits mit mehreren Parametern, dort
  *             bisher über .sl_optim(method = "L-BFGS-B") mit Rückfragen an den Host und
@@ -18,13 +18,13 @@
  *             rr_s < -0.999999); dF = sum_j q_j de_j mit q = e / (n F) (rmse), 2 e / n (mse),
  *             w e_ret / (n_ret F) bzw. (1 - w) e_lvl / (n_lvl F) (hybrid). Für mae, median und max
  *             ist F nicht überall differenzierbar (Knicke bei e_j = 0 bzw. bei Gleichstand); der
- *             Fit nimmt dort wie bisher zentrale Differenzen (B.9, jetzt in C), sl_backcast_obj gibt
+ *             Fit nimmt dort wie bisher zentrale Differenzen (in C), sl_backcast_obj gibt
  *             den Gradienten des aktiven Zweigs (sign(e_j) / n bzw. sign(e_k) an den Rangstellen).
  *             backcast_fit ruft sl_backcast_fit nur für rmse, mse und hybrid; für mae, median und max
  *             bleibt dort .sl_optim mit der Zielfunktion des Hosts (Ergebnisse wie 1.1.0): Mit der
  *             C-Zielfunktion lagen die Optima bei mae je nach Rundung der Summen bis 9e-9 relativ
  *             besser oder schlechter, mit dem Gradienten des aktiven Zweigs bei median und max bis
- *             zum Faktor 4 schlechter (scratchpad/en5/).
+ *             zum Faktor 4 schlechter.
  *             Fit: projizierter BFGS (slc_opt.c) mit den Steuerwerten von .sl_optim für
  *             "L-BFGS-B" (maxit 100, reltol 1e7 eps, gtol 1e-8, xtol eps), Start und Schranken
  *             wie in backcast_fit.
@@ -35,7 +35,7 @@
  * Konstanten: keine; -0.999999 wie .bc_errors.
  * Reinraum:   geschrieben nur nach den genannten Quellen und dem eigenen SimLev-Code; kein Code
  *             und keine Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
- * Prüforakel: backcast_fit aus SimLev 1.1.0 (R, .sl_optim); scratchpad/en5/.
+ * Prüforakel: backcast_fit aus SimLev 1.1.0 (R, .sl_optim).
  */
 #include "slc_internal.h"
 #include "slc_la_internal.h"

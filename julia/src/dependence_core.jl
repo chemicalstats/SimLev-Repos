@@ -1,8 +1,8 @@
 # DependenceCore – .kendall_tau_core, .quantile_reg_core und .hmm_forward_backward aus
 # core/research_core_impl.h: geteilte C++-Kerne wie in R und Python über die C-ABI-Hülle
-# core/simlev_cabi.cpp (CAbi, N7). Der frühere Julia-Port (F2, samt der Nachbildung von libstdc++
-# `std::sort` und dem NaN-genauen HMM-Weg) ist mit N7 entfallen; der Port des DCC-Filters schon mit
-# Etappe 9.6c (den DCC-Filter rechnet die C-Bibliothek slc, SimLev.SLib.dcc_filter). Gegenstück zu
+# core/simlev_cabi.cpp (CAbi). Der frühere Julia-Port (samt der Nachbildung von libstdc++
+# `std::sort` und dem NaN-genauen HMM-Weg) ist seit 1.2.0 entfallen, der Port des DCC-Filters seit
+# 1.0.0 (den DCC-Filter rechnet die C-Bibliothek slc, SimLev.SLib.dcc_filter). Gegenstück zu
 # python/simlev/_dependence_core.py.
 module DependenceCore
 

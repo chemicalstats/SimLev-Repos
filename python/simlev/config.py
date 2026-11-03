@@ -1,4 +1,4 @@
-"""Asset-Konfiguration und Strategie-Objekte (Port von ``asset_config.R`` und ``strategy.R``).
+"""Asset-Konfiguration und Strategie-Objekte (Gegenstück zu ``asset_config.R`` und ``strategy.R``).
 
 R-Objekte mit Klasse werden als :class:`simlev._r.rlist.RList` abgebildet
 (``x["share"]`` und ``x.share`` gleichwertig); ``print()`` bzw. ``str(x)``
@@ -176,15 +176,83 @@ def asset_config(
     signal_sell: str | None = None,
     wrapper: Any = None,
 ) -> AssetConfig:
-    """Asset-Konfiguration erstellen und prüfen (R: ``asset_config()``).
+    """Asset-Konfiguration erstellen und prüfen.
 
-    Raten in Prozent: ``spread=0.1`` = 0,1 % voller Bid-Ask-Spread (Standard 0: ohne Spread; wer
-    Spreads abbilden will, gibt sie an), ``partial_exemption=30`` = 30 % Teilfreistellung; ``share`` ist ein Anteil in (0, 1]. ``start`` (Datum oder
-    ``"JJJJ-MM-TT"``) wird als ``datetime.date`` gespeichert.
+    Erstellt und validiert die Konfiguration eines einzelnen Assets für die Simulation. Pflichtfelder werden
+    geprüft, ungültige Werte sofort gemeldet. Das Ergebnis wird als ``"asset_config"``-Objekt in
+    ``create_strategy`` eingesetzt.
 
-    ``wrapper``: ``None`` oder ein Objekt aus :func:`simlev.wrapper_config` (Etappe 6.5c). Das Asset ist dann
-    ein Fonds-Wrapper: sein Name ist keine Kursspalte, die Kurse sind der Anteilswert der inneren Strategie
-    (:func:`simlev.wrapper_nav`); nur mit ``trading="bnh"``. Das Feld ``wrapper`` gibt es nur mit Wrapper.
+    Args:
+        asset_class: Character. Assetklasse. Zulässig: ``"etf"`` (Standard), ``"etn"``, ``"etc"``,
+            ``"certificate"`` sowie die veralteten Werte ``"etn_standard"`` und ``"etn_deliverable"``, die mit
+            Warnung in ``"etn"`` mit ``deliverable = False`` bzw. ``True`` umgesetzt werden.
+        trading: Character. Handelsstrategie: ``"bnh"`` (Buy-and-Hold) oder ``"signal"`` (signalgesteuert). Bei
+            ``"signal"`` steuern die Signalspalten nur Ein- und Ausstieg: Ohne Bestand wartet das Geld des Assets
+            als Cash auf das Kaufsignal; hält das Asset Stücke (Position offen), wird neues Geld (Sparraten,
+            Restcash, Umverteilungen) sofort angelegt wie bei Buy-and-Hold (nicht am Tag eines Verkaufssignals),
+            unabhängig von ``balance_mode``. Standard: ``"bnh"``.
+        share: Numerisch (keine Zeichenkette). Zielgewicht des Assets im Portfolio **als Anteil** (größer 0 und
+            höchstens 1, z. B. ``0.6`` = 60 %). Es wird nicht normiert: ``simulation`` verlangt, dass sich die
+            Gewichte aller Assets auf 1 summieren. Standard: ``1``.
+        spread: Numerisch. Voller Bid-Ask-Spread **in Prozent** (z. B. ``0.1`` = 0,1 %), nicht negativ. Pro Seite
+            wird der halbe Spread angewandt. Standard: ``0`` (ohne Spread; wer Spreads abbilden will, gibt sie
+            an).
+        partial_exemption: Numerisch. Teilfreistellungssatz nach § 20 Abs. 1 InvStG **in Prozent** (0 bis 100; z.
+            B. ``30`` für Aktien-ETFs, ``15`` für Mischfonds). Wirkt nur im Regime ``"investment_fund"``. Werte
+            zwischen 0 und 1 (vermutlich ein Anteil statt Prozent, z. B. ``0.3``) werden mit Warnung angenommen.
+            Standard: ``0``.
+        deliverable: Logisch. Physisch lieferbar (relevant für ETC/ETN: ``True`` → ``"private_sale"``-Regime wie
+            Xetra-Gold)? Standard: ``False``.
+        start: Date, Character (``"JJJJ-MM-TT"``) oder ``None``. Frühestmögliches Kaufdatum für dieses Asset (für
+            gestaffelte Asset-Starts); wird als ``Date`` gespeichert, ein ungültiges Datum führt zu einem Fehler.
+            In ``simulation`` erhält das Asset ab diesem Tag sein volles Zielgewicht ``share``: Am Starttag wird
+            immer auf die Zielgewichte umgeschichtet (Verkauf der übrigen Assets, Erstkauf des neuen Assets; mit
+            Steuern, Spreads und Gebühren wie bei jedem Rebalancing), auch ohne ``balance_mode``; ein zusätzlicher
+            Handelsblock läuft an diesem Tag nicht. Mit ``balance_mode = True`` gilt danach der normale Rhythmus,
+            ohne ``balance_mode`` wird danach nicht mehr umgeschichtet (Sparraten nach Strategie-Gewichten).
+            Standard: ``None`` (ab Simulationsbeginn).
+        tax_regime: Character oder ``None``. Steuerregime: ``"investment_fund"`` (§§ 18–20 InvStG, ETFs),
+            ``"capital_gains"`` (§ 20 EStG, keine VP), ``"private_sale"`` (§ 23 EStG, 1-Jahres-Frist). ``None`` =
+            wird automatisch aus ``asset_class`` und ``deliverable`` abgeleitet. Andere Werte führen zu einem
+            Fehler.
+        signal_buy: Character oder ``None``. Name der Spalte in ``data`` mit dem Kaufsignal (logisch, ``True`` =
+            kaufen). Bei ``trading = "signal"`` Pflicht (sonst Fehler).
+        signal_sell: Character oder ``None``. Name der Spalte in ``data`` mit dem Verkaufssignal (logisch,
+            ``True`` = verkaufen). Bei ``trading = "signal"`` Pflicht (sonst Fehler).
+        wrapper: ``None`` oder ein Objekt aus ``wrapper_config``: Das Asset ist dann ein Fonds-Wrapper (Zertifikat
+            oder Fonds über eine innere Strategie). Sein Name ist **keine** Kursspalte; ``simulation`` rechnet die
+            Kurse als Anteilswert (``wrapper_nav``) aus den inneren Spalten. Eine Spalte gleichen Namens in
+            ``data`` ist ein Fehler. Mit ``wrapper`` ist nur ``trading = "bnh"`` möglich (keine Signale auf den
+            Anteilswert; Signale gehen in der inneren Strategie). Die äußeren Felder (``asset_class``,
+            ``tax_regime``, ``partial_exemption``, ``spread``, ``share``, ``start``) gelten für den Wrapper wie
+            für ein Einzelpapier. Standard: ``None`` (kein Wrapper).
+
+    Returns:
+        Objekt der Klasse ``"asset_config"`` (benannte Liste) mit den Feldern ``asset_class``, ``trading``,
+        ``share``, ``spread``, ``partial_exemption``, ``deliverable``, ``start``, ``tax_regime``, ``signal_buy``,
+        ``signal_sell``, mit Wrapper zusätzlich ``wrapper``; validiert und ggf. mit abgeleitetem ``tax_regime``.
+        Die Zahlen bleiben in den Einheiten der Eingabe (``share`` als Anteil, ``spread`` und
+        ``partial_exemption`` in Prozent).
+
+        ``print`` und ``summary`` geben die Konfiguration auf der Konsole aus (mit Wrapper eine Zeile mit den
+        inneren Assets und den Fondskosten) und liefern ``x`` unsichtbar zurück.
+
+    Details:
+        Das ``tax_regime`` wird automatisch abgeleitet, wenn ``None``:
+
+        - ``"etf"`` → ``"investment_fund"``
+        - ``"etn"``, ``"etc"``: ``deliverable = True`` → ``"private_sale"``; sonst ``"capital_gains"``
+        - ``"certificate"`` → ``"capital_gains"``
+
+        Der ``spread`` ist der *volle* Bid-Ask-Spread; die Engine wendet den halben Spread je Seite an (Kauf:
+        Briefkurs, Verkauf: Geldkurs).
+
+    Beispiel::
+
+        import simlev
+        etf = simlev.asset_config(asset_class="etf", trading="bnh", share=0.6, spread=0.1, partial_exemption=30)
+        gold = simlev.asset_config(asset_class="etc", share=0.2, deliverable=True)
+        print(gold["tax_regime"])   # private_sale
     """
     asset_class = _match_arg(asset_class, _ASSET_CLASSES, "asset_class")
     trading = _match_arg(trading, _ACTION_TYPES, "trading")
@@ -226,7 +294,7 @@ def asset_config(
     if trading == "signal" and (signal_buy is None or signal_sell is None):
         raise ValueError("asset_config: bei trading = \"signal\" müssen signal_buy und signal_sell angegeben werden "
                          "(Namen der Signalspalten in data).")
-    if wrapper is not None:   # Fonds-Wrapper (Etappe 6.5c): keine Signale auf den Anteilswert (E5)
+    if wrapper is not None:   # Fonds-Wrapper: keine Signale auf den Anteilswert
         if not _is_wrapper(wrapper):
             raise ValueError("asset_config: wrapper muss NULL oder ein Objekt aus wrapper_config() sein, nicht %s."
                              % _cls_all(wrapper))
@@ -302,15 +370,67 @@ class Strategy(RList):
 
 
 def create_strategy(*args: Any, assets: Mapping[str, Any] | None = None, **named: Any) -> Strategy:
-    """Strategie aus benannten Asset-Konfigurationen erstellen (R: ``create_strategy()``).
+    """Strategie aus benannten Asset-Konfigurationen erstellen.
+
+    Funktionen zum Erstellen, Validieren und Bearbeiten von ``"strategy"``-Objekten. Eine Strategie ist eine
+    benannte Liste von ``asset_config``-Konfigurationen, die an ``simulation`` übergeben wird.
+
+    Args:
+        *args: Für ``create_strategy``: benannte ``asset_config``-Objekte (z. B. ``SPY = asset_config(...)``);
+            einfache Listen werden über ``asset_config`` umgewandelt und geprüft. Jeder Name darf nur einmal
+            vorkommen (sonst Fehler). Für ``strategy_update_asset``: benannte Felder, die im Asset aktualisiert
+            werden. Für ``print``, ``summary``: ignoriert.
+        assets: Benannte Liste von ``asset_config``-Objekten oder ``None``. Alternative zu ``...`` für
+            programmatische Nutzung (nicht beides zugleich). Standard: ``None``.
+        **named: Für ``create_strategy``: benannte ``asset_config``-Objekte (z. B. ``SPY = asset_config(...)``);
+            einfache Listen werden über ``asset_config`` umgewandelt und geprüft. Jeder Name darf nur einmal
+            vorkommen (sonst Fehler). Für ``strategy_update_asset``: benannte Felder, die im Asset aktualisiert
+            werden. Für ``print``, ``summary``: ignoriert.
+
+    Returns:
+        - ``create_strategy``: Objekt der Klasse ``"strategy"``.
+
+        - ``strategy_validate``: ``True`` wenn valide; sonst Fehler mit Beschreibung.
+
+        - ``strategy_add_asset``, ``strategy_update_asset``, ``strategy_remove_asset``: Aktualisiertes
+          ``"strategy"``-Objekt.
+
+        - ``print``, ``summary``: Ausgabe auf der Konsole; ``x`` bzw. ``object`` unsichtbar.
+
+    Details:
+        ``create_strategy`` normiert die Zielgewichte nicht, und auch ``simulation`` normiert sie nicht: Die
+        ``share``-Werte (Anteile, je größer 0 und höchstens 1) müssen sich für die Simulation auf 1 summieren,
+        sonst bricht ``simulation`` mit Fehler ab. ``summary`` weist auf eine abweichende Summe hin.
+
+        ``strategy_validate`` prüft ohne ``data``, ob ``strategy`` die Klasse ``"strategy"`` hat und jedes Element
+        ein ``asset_config``-Objekt ist (Wertebereiche prüft bereits ``asset_config``). Mit ``data``: zusätzlich,
+        ob jede Asset-Spalte und bei ``trading = "signal"`` die Signalspalten vorhanden sind. Für Fonds-Wrapper
+        (``asset_config(wrapper = )``) werden statt des Asset-Namens die Spalten der inneren Strategie geprüft
+        (auch deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
+
+        ``strategy_update_asset`` akzeptiert Felder als ``name = wert``-Paare; nur Felder, die das Asset bereits
+        hat, sowie ``wrapper`` werden übernommen (unbekannte mit Warnung ignoriert; ``wrapper = None`` entfernt
+        einen Wrapper). Das Asset wird danach mit ``asset_config`` neu geprüft; nicht angegebene Felder bleiben
+        unverändert. Ändert sich ``asset_class`` oder ``deliverable`` und wird ``tax_regime`` nicht mit angegeben,
+        wird ein bisher automatisch abgeleitetes ``tax_regime`` neu abgeleitet (z. B. ``"certificate"`` ->
+        ``"etf"``: ``"investment_fund"``); ein abweichend gesetztes (explizites) ``tax_regime`` bleibt erhalten.
+
+        Die veralteten Klassen ``"etn_deliverable"``/``"etn_standard"`` setzt bereits ``asset_config`` mit Warnung
+        in ``"etn"`` mit ``deliverable = True``/``False`` um.
+
+        Eine einfache benannte Liste ohne Klasse liefert ``unclass(strategy)`` — nützlich für Systeme, die keine
+        S3-Objekte erwarten.
+
+    Hinweise (Python):
+        Alternativ ein ``dict`` über ``assets=``. Einfache ``dict``-Angaben werden mit
+        :func:`asset_config` geprüft; die Gewichte werden nicht normiert.
 
     Beispiel::
 
-        create_strategy(WORLD=asset_config("etf", share=0.7, partial_exemption=30),
-                        BONDS=asset_config("etf", share=0.3))
-
-    Alternativ ein ``dict`` über ``assets=``. Einfache ``dict``-Angaben werden mit
-    :func:`asset_config` geprüft; die Gewichte werden nicht normiert.
+        import simlev
+        st = simlev.create_strategy(MSCI=simlev.asset_config(asset_class="etf", share=0.7, partial_exemption=30),
+                                    BOND=simlev.asset_config(asset_class="etf", share=0.3))
+        print(st)
     """
     n_dots = len(args) + len(named)
     if assets is not None and n_dots > 0:
@@ -357,7 +477,62 @@ def _r_class(x: Any) -> str:
 
 
 def strategy_validate(strategy: Strategy, *, data: Any = None) -> bool:
-    """Strategie (und optional die Spalten von ``data``) prüfen; ``True`` oder Fehler."""
+    """Strategie (und optional die Spalten von ``data``) prüfen; ``True`` oder Fehler.
+
+    Funktionen zum Erstellen, Validieren und Bearbeiten von ``"strategy"``-Objekten. Eine Strategie ist eine
+    benannte Liste von ``asset_config``-Konfigurationen, die an ``simulation`` übergeben wird.
+
+    Args:
+        strategy: Ein ``"strategy"``-Objekt.
+        data: ``data.frame`` oder ``None``. Falls angegeben, prüft ``strategy_validate`` ob alle Asset-Spalten und
+            Signal-Spalten in ``data`` vorhanden sind.
+
+    Returns:
+        - ``create_strategy``: Objekt der Klasse ``"strategy"``.
+
+        - ``strategy_validate``: ``True`` wenn valide; sonst Fehler mit Beschreibung.
+
+        - ``strategy_add_asset``, ``strategy_update_asset``, ``strategy_remove_asset``: Aktualisiertes
+          ``"strategy"``-Objekt.
+
+        - ``print``, ``summary``: Ausgabe auf der Konsole; ``x`` bzw. ``object`` unsichtbar.
+
+    Details:
+        ``create_strategy`` normiert die Zielgewichte nicht, und auch ``simulation`` normiert sie nicht: Die
+        ``share``-Werte (Anteile, je größer 0 und höchstens 1) müssen sich für die Simulation auf 1 summieren,
+        sonst bricht ``simulation`` mit Fehler ab. ``summary`` weist auf eine abweichende Summe hin.
+
+        ``strategy_validate`` prüft ohne ``data``, ob ``strategy`` die Klasse ``"strategy"`` hat und jedes Element
+        ein ``asset_config``-Objekt ist (Wertebereiche prüft bereits ``asset_config``). Mit ``data``: zusätzlich,
+        ob jede Asset-Spalte und bei ``trading = "signal"`` die Signalspalten vorhanden sind. Für Fonds-Wrapper
+        (``asset_config(wrapper = )``) werden statt des Asset-Namens die Spalten der inneren Strategie geprüft
+        (auch deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
+
+        ``strategy_update_asset`` akzeptiert Felder als ``name = wert``-Paare; nur Felder, die das Asset bereits
+        hat, sowie ``wrapper`` werden übernommen (unbekannte mit Warnung ignoriert; ``wrapper = None`` entfernt
+        einen Wrapper). Das Asset wird danach mit ``asset_config`` neu geprüft; nicht angegebene Felder bleiben
+        unverändert. Ändert sich ``asset_class`` oder ``deliverable`` und wird ``tax_regime`` nicht mit angegeben,
+        wird ein bisher automatisch abgeleitetes ``tax_regime`` neu abgeleitet (z. B. ``"certificate"`` ->
+        ``"etf"``: ``"investment_fund"``); ein abweichend gesetztes (explizites) ``tax_regime`` bleibt erhalten.
+
+        Die veralteten Klassen ``"etn_deliverable"``/``"etn_standard"`` setzt bereits ``asset_config`` mit Warnung
+        in ``"etn"`` mit ``deliverable = True``/``False`` um.
+
+        Eine einfache benannte Liste ohne Klasse liefert ``unclass(strategy)`` — nützlich für Systeme, die keine
+        S3-Objekte erwarten.
+
+    Beispiel::
+
+        import simlev
+        st = simlev.create_strategy(MSCI=simlev.asset_config(asset_class="etf", share=0.7, partial_exemption=30),
+                                    BOND=simlev.asset_config(asset_class="etf", share=0.3))
+        import numpy as np, pandas as pd
+        rng = np.random.default_rng(1)
+        d = pd.DataFrame({"date": pd.date_range("2020-01-01", periods=200),
+                          "MSCI": 100 * np.cumprod(1 + rng.normal(4e-4, 0.012, 200)),
+                          "BOND": 50 * np.cumprod(1 + rng.normal(1e-4, 0.004, 200))})
+        print(simlev.strategy_validate(st, data=d))
+    """
     if not isinstance(strategy, Strategy):
         raise ValueError("strategy_validate: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), "
                          "nicht %s." % _r_class(strategy))
@@ -392,7 +567,58 @@ def strategy_validate(strategy: Strategy, *, data: Any = None) -> bool:
 
 
 def strategy_add_asset(strategy: Strategy, name: str, asset: AssetConfig) -> Strategy:
-    """Asset hinzufügen bzw. ersetzen (gibt eine neue Strategie zurück)."""
+    """Asset hinzufügen bzw. ersetzen (gibt eine neue Strategie zurück).
+
+    Funktionen zum Erstellen, Validieren und Bearbeiten von ``"strategy"``-Objekten. Eine Strategie ist eine
+    benannte Liste von ``asset_config``-Konfigurationen, die an ``simulation`` übergeben wird.
+
+    Args:
+        strategy: Ein ``"strategy"``-Objekt.
+        name: Character. Name des Assets (muss Spalte in ``data`` entsprechen, außer bei Fonds-Wrappern).
+        asset: Ein ``asset_config``-Objekt.
+
+    Returns:
+        - ``create_strategy``: Objekt der Klasse ``"strategy"``.
+
+        - ``strategy_validate``: ``True`` wenn valide; sonst Fehler mit Beschreibung.
+
+        - ``strategy_add_asset``, ``strategy_update_asset``, ``strategy_remove_asset``: Aktualisiertes
+          ``"strategy"``-Objekt.
+
+        - ``print``, ``summary``: Ausgabe auf der Konsole; ``x`` bzw. ``object`` unsichtbar.
+
+    Details:
+        ``create_strategy`` normiert die Zielgewichte nicht, und auch ``simulation`` normiert sie nicht: Die
+        ``share``-Werte (Anteile, je größer 0 und höchstens 1) müssen sich für die Simulation auf 1 summieren,
+        sonst bricht ``simulation`` mit Fehler ab. ``summary`` weist auf eine abweichende Summe hin.
+
+        ``strategy_validate`` prüft ohne ``data``, ob ``strategy`` die Klasse ``"strategy"`` hat und jedes Element
+        ein ``asset_config``-Objekt ist (Wertebereiche prüft bereits ``asset_config``). Mit ``data``: zusätzlich,
+        ob jede Asset-Spalte und bei ``trading = "signal"`` die Signalspalten vorhanden sind. Für Fonds-Wrapper
+        (``asset_config(wrapper = )``) werden statt des Asset-Namens die Spalten der inneren Strategie geprüft
+        (auch deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
+
+        ``strategy_update_asset`` akzeptiert Felder als ``name = wert``-Paare; nur Felder, die das Asset bereits
+        hat, sowie ``wrapper`` werden übernommen (unbekannte mit Warnung ignoriert; ``wrapper = None`` entfernt
+        einen Wrapper). Das Asset wird danach mit ``asset_config`` neu geprüft; nicht angegebene Felder bleiben
+        unverändert. Ändert sich ``asset_class`` oder ``deliverable`` und wird ``tax_regime`` nicht mit angegeben,
+        wird ein bisher automatisch abgeleitetes ``tax_regime`` neu abgeleitet (z. B. ``"certificate"`` ->
+        ``"etf"``: ``"investment_fund"``); ein abweichend gesetztes (explizites) ``tax_regime`` bleibt erhalten.
+
+        Die veralteten Klassen ``"etn_deliverable"``/``"etn_standard"`` setzt bereits ``asset_config`` mit Warnung
+        in ``"etn"`` mit ``deliverable = True``/``False`` um.
+
+        Eine einfache benannte Liste ohne Klasse liefert ``unclass(strategy)`` — nützlich für Systeme, die keine
+        S3-Objekte erwarten.
+
+    Beispiel::
+
+        import simlev
+        st = simlev.create_strategy(MSCI=simlev.asset_config(asset_class="etf", share=0.7, partial_exemption=30),
+                                    BOND=simlev.asset_config(asset_class="etf", share=0.3))
+        st = simlev.strategy_add_asset(st, "GOLD", simlev.asset_config(asset_class="etc", share=0.1, deliverable=True))
+        print(list(st))
+    """
     if not isinstance(strategy, Strategy):
         raise ValueError("strategy_add_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), nicht %s."
                          % _r_class(strategy))
@@ -406,8 +632,58 @@ def strategy_add_asset(strategy: Strategy, name: str, asset: AssetConfig) -> Str
 def strategy_update_asset(strategy: Strategy, name: str, **updates: Any) -> Strategy:
     """Felder eines Assets ändern und mit :func:`asset_config` neu prüfen.
 
-    Ändert sich ``asset_class`` oder ``deliverable`` ohne Angabe von ``tax_regime``, wird ein
-    bisher automatisch abgeleitetes Steuerregime neu abgeleitet (explizite Werte bleiben).
+    Funktionen zum Erstellen, Validieren und Bearbeiten von ``"strategy"``-Objekten. Eine Strategie ist eine
+    benannte Liste von ``asset_config``-Konfigurationen, die an ``simulation`` übergeben wird.
+
+    Args:
+        strategy: Ein ``"strategy"``-Objekt.
+        name: Character. Name des Assets (muss Spalte in ``data`` entsprechen, außer bei Fonds-Wrappern).
+        **updates: Für ``create_strategy``: benannte ``asset_config``-Objekte (z. B. ``SPY = asset_config(...)``);
+            einfache Listen werden über ``asset_config`` umgewandelt und geprüft. Jeder Name darf nur einmal
+            vorkommen (sonst Fehler). Für ``strategy_update_asset``: benannte Felder, die im Asset aktualisiert
+            werden. Für ``print``, ``summary``: ignoriert.
+
+    Returns:
+        - ``create_strategy``: Objekt der Klasse ``"strategy"``.
+
+        - ``strategy_validate``: ``True`` wenn valide; sonst Fehler mit Beschreibung.
+
+        - ``strategy_add_asset``, ``strategy_update_asset``, ``strategy_remove_asset``: Aktualisiertes
+          ``"strategy"``-Objekt.
+
+        - ``print``, ``summary``: Ausgabe auf der Konsole; ``x`` bzw. ``object`` unsichtbar.
+
+    Details:
+        ``create_strategy`` normiert die Zielgewichte nicht, und auch ``simulation`` normiert sie nicht: Die
+        ``share``-Werte (Anteile, je größer 0 und höchstens 1) müssen sich für die Simulation auf 1 summieren,
+        sonst bricht ``simulation`` mit Fehler ab. ``summary`` weist auf eine abweichende Summe hin.
+
+        ``strategy_validate`` prüft ohne ``data``, ob ``strategy`` die Klasse ``"strategy"`` hat und jedes Element
+        ein ``asset_config``-Objekt ist (Wertebereiche prüft bereits ``asset_config``). Mit ``data``: zusätzlich,
+        ob jede Asset-Spalte und bei ``trading = "signal"`` die Signalspalten vorhanden sind. Für Fonds-Wrapper
+        (``asset_config(wrapper = )``) werden statt des Asset-Namens die Spalten der inneren Strategie geprüft
+        (auch deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
+
+        ``strategy_update_asset`` akzeptiert Felder als ``name = wert``-Paare; nur Felder, die das Asset bereits
+        hat, sowie ``wrapper`` werden übernommen (unbekannte mit Warnung ignoriert; ``wrapper = None`` entfernt
+        einen Wrapper). Das Asset wird danach mit ``asset_config`` neu geprüft; nicht angegebene Felder bleiben
+        unverändert. Ändert sich ``asset_class`` oder ``deliverable`` und wird ``tax_regime`` nicht mit angegeben,
+        wird ein bisher automatisch abgeleitetes ``tax_regime`` neu abgeleitet (z. B. ``"certificate"`` ->
+        ``"etf"``: ``"investment_fund"``); ein abweichend gesetztes (explizites) ``tax_regime`` bleibt erhalten.
+
+        Die veralteten Klassen ``"etn_deliverable"``/``"etn_standard"`` setzt bereits ``asset_config`` mit Warnung
+        in ``"etn"`` mit ``deliverable = True``/``False`` um.
+
+        Eine einfache benannte Liste ohne Klasse liefert ``unclass(strategy)`` — nützlich für Systeme, die keine
+        S3-Objekte erwarten.
+
+    Beispiel::
+
+        import simlev
+        st = simlev.create_strategy(MSCI=simlev.asset_config(asset_class="etf", share=0.7, partial_exemption=30),
+                                    BOND=simlev.asset_config(asset_class="etf", share=0.3))
+        st = simlev.strategy_update_asset(st, "MSCI", share=0.6, spread=0.1)
+        print(st["MSCI"]["share"])
     """
     if not isinstance(strategy, Strategy):
         raise ValueError("strategy_update_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), "
@@ -439,7 +715,56 @@ def strategy_update_asset(strategy: Strategy, name: str, **updates: Any) -> Stra
 
 
 def strategy_remove_asset(strategy: Strategy, name: str) -> Strategy:
-    """Asset entfernen (Warnung, wenn die Strategie danach leer ist)."""
+    """Asset entfernen (Warnung, wenn die Strategie danach leer ist).
+
+    Funktionen zum Erstellen, Validieren und Bearbeiten von ``"strategy"``-Objekten. Eine Strategie ist eine
+    benannte Liste von ``asset_config``-Konfigurationen, die an ``simulation`` übergeben wird.
+
+    Args:
+        strategy: Ein ``"strategy"``-Objekt.
+        name: Character. Name des Assets (muss Spalte in ``data`` entsprechen, außer bei Fonds-Wrappern).
+
+    Returns:
+        - ``create_strategy``: Objekt der Klasse ``"strategy"``.
+
+        - ``strategy_validate``: ``True`` wenn valide; sonst Fehler mit Beschreibung.
+
+        - ``strategy_add_asset``, ``strategy_update_asset``, ``strategy_remove_asset``: Aktualisiertes
+          ``"strategy"``-Objekt.
+
+        - ``print``, ``summary``: Ausgabe auf der Konsole; ``x`` bzw. ``object`` unsichtbar.
+
+    Details:
+        ``create_strategy`` normiert die Zielgewichte nicht, und auch ``simulation`` normiert sie nicht: Die
+        ``share``-Werte (Anteile, je größer 0 und höchstens 1) müssen sich für die Simulation auf 1 summieren,
+        sonst bricht ``simulation`` mit Fehler ab. ``summary`` weist auf eine abweichende Summe hin.
+
+        ``strategy_validate`` prüft ohne ``data``, ob ``strategy`` die Klasse ``"strategy"`` hat und jedes Element
+        ein ``asset_config``-Objekt ist (Wertebereiche prüft bereits ``asset_config``). Mit ``data``: zusätzlich,
+        ob jede Asset-Spalte und bei ``trading = "signal"`` die Signalspalten vorhanden sind. Für Fonds-Wrapper
+        (``asset_config(wrapper = )``) werden statt des Asset-Namens die Spalten der inneren Strategie geprüft
+        (auch deren Signalspalten); eine Spalte mit dem Namen des Wrapper-Assets ist ein Fehler.
+
+        ``strategy_update_asset`` akzeptiert Felder als ``name = wert``-Paare; nur Felder, die das Asset bereits
+        hat, sowie ``wrapper`` werden übernommen (unbekannte mit Warnung ignoriert; ``wrapper = None`` entfernt
+        einen Wrapper). Das Asset wird danach mit ``asset_config`` neu geprüft; nicht angegebene Felder bleiben
+        unverändert. Ändert sich ``asset_class`` oder ``deliverable`` und wird ``tax_regime`` nicht mit angegeben,
+        wird ein bisher automatisch abgeleitetes ``tax_regime`` neu abgeleitet (z. B. ``"certificate"`` ->
+        ``"etf"``: ``"investment_fund"``); ein abweichend gesetztes (explizites) ``tax_regime`` bleibt erhalten.
+
+        Die veralteten Klassen ``"etn_deliverable"``/``"etn_standard"`` setzt bereits ``asset_config`` mit Warnung
+        in ``"etn"`` mit ``deliverable = True``/``False`` um.
+
+        Eine einfache benannte Liste ohne Klasse liefert ``unclass(strategy)`` — nützlich für Systeme, die keine
+        S3-Objekte erwarten.
+
+    Beispiel::
+
+        import simlev
+        st = simlev.create_strategy(MSCI=simlev.asset_config(asset_class="etf", share=0.7, partial_exemption=30),
+                                    BOND=simlev.asset_config(asset_class="etf", share=0.3))
+        print(list(simlev.strategy_remove_asset(st, "BOND")))
+    """
     if not isinstance(strategy, Strategy):
         raise ValueError("strategy_remove_asset: strategy muss ein Objekt der Klasse \"strategy\" sein (aus create_strategy()), "
                          "nicht %s." % _r_class(strategy))

@@ -276,17 +276,31 @@ class SimLevParamSpace(RList):
 def param_space(*args, **dims):
     """Suchraum für :func:`param_search`.
 
-    Je Parameter eine benannte Dimension mit diskreten Werten (Liste/Vektor)
-    oder einem stetigen Bereich aus :func:`param_range`. Bei ``method = "grid"``
-    werden alle Kombinationen der Rasterwerte ausgewertet; bei ``"random"`` und
-    ``"lhs"`` werden diskrete Werte gleichverteilt ausgewählt und Bereiche
-    stetig zwischen ``lower`` und ``upper`` gezogen.
+    ``param_space()`` beschreibt den Suchraum für ``param_search()``: je Parameter eine benannte Dimension mit
+    diskreten Werten oder einem stetigen Bereich aus ``param_range()``. Bei ``method = "grid"`` werden alle
+    Kombinationen der Rasterwerte ausgewertet; bei ``"random"`` und ``"lhs"`` werden diskrete Werte gleichverteilt
+    ausgewählt und Bereiche stetig zwischen ``lower`` und ``upper`` gezogen (``n`` und ``step`` spielen dann keine
+    Rolle).
 
     Args:
-        **dims: benannte Dimensionen (Vektor diskreter Werte oder ``param_range()``).
+        *args: Benannte Dimensionen (alle Namen Pflicht; sie werden zu den Namen der Liste ``p`` im ``builder``,
+            ohne ``builder`` zu Argumentnamen von ``simulation()`` bzw. Pfaden zu Parametern der Bausteine wie
+            ``dca.value`` oder ``rebalance.thresh``). Jede ist entweder ein nicht leerer atomarer Vektor diskreter
+            Werte (numerisch, Zeichen, logisch) oder ein Bereich aus ``param_range()``. Bei ``print()`` ungenutzt.
+        **dims: Benannte Dimensionen (alle Namen Pflicht; sie werden zu den Namen der Liste ``p`` im ``builder``,
+            ohne ``builder`` zu Argumentnamen von ``simulation()`` bzw. Pfaden zu Parametern der Bausteine wie
+            ``dca.value`` oder ``rebalance.thresh``). Jede ist entweder ein nicht leerer atomarer Vektor diskreter
+            Werte (numerisch, Zeichen, logisch) oder ein Bereich aus ``param_range()``. Bei ``print()`` ungenutzt.
 
     Returns:
-        :class:`SimLevParamSpace`.
+        ``param_space``: Objekt der Klasse ``SimLevParamSpace`` (benannte Liste der Dimensionen); ``param_range``:
+        Objekt der Klasse ``SimLevParamRange`` (Liste mit ``lower``, ``upper``, ``n``, ``step``, ``integer``,
+        ``log``).
+
+    Beispiel::
+
+        import simlev
+        print(simlev.param_space(n=[50, 100, 200], w=simlev.param_range(0.3, 0.9, step=0.1)))
     """
     if args or not dims:
         raise ValueError("param_space: alle Dimensionen müssen benannt sein.")
@@ -312,15 +326,35 @@ def _fmt_any(v):
 def param_range(lower, upper, *, n=5, step=None, integer=False, log=False):
     """Stetiger Bereich einer Dimension für :func:`param_space`.
 
+    ``param_space()`` beschreibt den Suchraum für ``param_search()``: je Parameter eine benannte Dimension mit
+    diskreten Werten oder einem stetigen Bereich aus ``param_range()``. Bei ``method = "grid"`` werden alle
+    Kombinationen der Rasterwerte ausgewertet; bei ``"random"`` und ``"lhs"`` werden diskrete Werte gleichverteilt
+    ausgewählt und Bereiche stetig zwischen ``lower`` und ``upper`` gezogen (``n`` und ``step`` spielen dann keine
+    Rolle).
+
     Args:
-        lower, upper: Bereichsgrenzen (``lower <= upper``; bei ``log = True`` ``lower > 0``).
-        n: Anzahl Rasterpunkte bei ``method = "grid"`` (ganze Zahl >= 1, Standard 5).
-        step: Schrittweite des Rasters (hat Vorrang vor ``n`` und ``log``).
-        integer: Raster- und Zufallswerte auf ganze Zahlen runden.
-        log: Raster gleichabständig auf der Log-Skala, Ziehung log-gleichverteilt.
+        lower, upper: Bereichsgrenzen (Zahlen in der Einheit des Parameters, ``lower <= upper``; bei ``log =
+            True`` ``lower > 0``).
+        n: Anzahl Rasterpunkte des Bereichs bei ``method = "grid"`` (ganze Zahl >= 1, Standard 5); wird ignoriert,
+            wenn ``step`` angegeben ist.
+        step: Schrittweite des Rasters in der Einheit des Parameters (``seq(lower, upper, by = step)``, > 0); hat
+            Vorrang vor ``n`` und ``log`` (``log`` gilt dann nur für Zufallsziehungen). ``None`` (Standard) =
+            ``n`` Punkte.
+        integer: Logisch (Standard ``False``): Raster- und Zufallswerte auf ganze Zahlen runden; doppelte
+            Rasterwerte entfallen.
+        log: Logisch (Standard ``False``): Raster gleichabständig auf der Log-Skala und Ziehung
+            log-gleichverteilt, z. B. für Fensterlängen.
 
     Returns:
-        :class:`SimLevParamRange`.
+        ``param_space``: Objekt der Klasse ``SimLevParamSpace`` (benannte Liste der Dimensionen); ``param_range``:
+        Objekt der Klasse ``SimLevParamRange`` (Liste mit ``lower``, ``upper``, ``n``, ``step``, ``integer``,
+        ``log``).
+
+    Beispiel::
+
+        import simlev
+        sp = simlev.param_space(n=simlev.param_range(50, 400, n=8, integer=True, log=True), band=[0, 1, 2])
+        print(sp)
     """
     if not _is_numeric_scalar(lower) or not _is_numeric_scalar(upper) or upper < lower:
         raise ValueError("param_range: lower <= upper erforderlich.")
@@ -513,40 +547,96 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
                  keep_returns=("day", "none"), seed=None, cores=1):
     """Parametersuche über Strategie- und Simulationsparameter.
 
-    Wertet eine Strategie für jeden Punkt eines Parameterraums mit
-    ``simulation()`` aus. Neben den Kennzahlen werden die täglichen
-    zeitgewichteten Renditen jedes Punkts gespeichert (Grundlage für
-    ``overfit_pbo()``, ``sharpe_deflated()``, ``overfit_walk_forward()``).
-
-    Je Punkt: ``signal(df)`` auf dem vollen Datensatz, dann ``data(df)``, dann
-    ``map``, dann Verwerfen der ersten ``burn_in`` Zeilen, schließlich
-    ``simulation()`` mit ``sim_args``, überschrieben durch ``args``. Fehler
-    einzelner Punkte stehen in ``results["error"]``.
+    Wertet eine Strategie für jeden Punkt eines Parameterraums mit ``simulation()`` aus. Neben den Kennzahlen
+    werden die täglichen zeitgewichteten Renditen jedes Punkts gespeichert; darauf bauen die
+    Überanpassungs-Prüfungen ``overfit_pbo()``, ``sharpe_deflated()`` und ``overfit_walk_forward()`` auf.
 
     Args:
-        data: data.frame wie in ``simulation()`` (inklusive Signal-Vorlauf).
-        builder: ``function(p)`` → Strategie oder dict ``(strategy, signal, args,
-            map, data)``; ``None`` = Parameter als ``simulation()``-Argumente für ``strategy``.
-        space: Suchraum aus :func:`param_space` (oder dict).
-        strategy: feste Strategie, wenn ``builder`` fehlt.
-        method: ``"grid"`` (Standard), ``"random"`` oder ``"lhs"``.
-        n: Anzahl Punkte bei ``"random"``/``"lhs"`` (Standard 50).
-        constraint: optional ``function(p)`` → ``True`` für zulässige Punkte.
-        sim_args: gemeinsame Argumente für ``simulation()``.
-        burn_in: Anzahl verworfener Zeilen am Anfang (Standard 0).
-        metrics: Funktion ``SimLevResult`` → benannter Vektor (Standard ``bootstrap_study_metrics``).
-        objective: Name der Zielgröße (Standard ``"sharpe"``).
-        maximize: Zielgröße maximieren (Standard ``True``).
-        cores: Anzahl Prozesse (Standard 1).
-        seed: Startwert (ganze Zahl, ``|seed| < 2**53``; ``None`` = genau einmal aus dem Zufallszustand von SimLev gezogen, siehe :func:`simlev.simlev_seed`) für den Versuchsplan; die Auswertung ist deterministisch und unabhängig von ``cores``.
-        keep_returns: ``"day"`` (Standard): tägliche Renditen speichern; ``"none"``: keine. ``True``/``False``
-            (bis 6.5b) ergeben einen Fehler.
+        data: DataFrame wie in ``simulation()`` (Spalte ``date`` und Kursspalten als Niveaus), inklusive Vorlauf
+            für Signale (siehe ``burn_in``).
+        builder: Funktion ``function(p)``, die aus einer benannten Liste ``p`` (ein Punkt des Raums) entweder eine
+            Strategie oder eine Liste ``{"strategy": ..., "signal": ..., "args": ..., "map": ..., "data": ...}``
+            liefert: ``signal`` wie in ``bootstrap_study()`` (Funktion ``df ->`` DataFrame oder Liste von Spalten,
+            z. B. mit ``signal_sma()``), ``args`` (Liste, wie ``sim_args``, auch mit Pfaden wie
+            ``"rebalance.thresh"``) überschreibt ``sim_args``, ``map`` (benannter Zeichenvektor) legt
+            Spalten-Aliase an, ``data`` ist optional eine Funktion ``df -> df`` (z. B. eine Hebelreihe mit
+            ``series_leverage()`` anlegen). ``None`` (Standard) = ohne ``builder``: die Parameter werden als
+            Argumente von ``simulation()`` für ``strategy`` verwendet; Parameter der Bausteine dann mit Pfad, z.
+            B. ``param_space(rebalance.thresh = [2, 5], dca.value = [100, 200])`` (wie in ``sensitivity_grid``);
+            die Spalten von ``results`` heißen wie die Pfade.
+        space: Suchraum aus ``param_space()`` (oder benannte Liste, die an ``param_space()`` weitergegeben wird).
+        strategy: Feste Strategie (z. B. aus ``create_strategy()``), wenn ``builder`` fehlt; sonst ungenutzt.
+        method: ``"grid"`` (Standard, volles Raster), ``"random"`` (Zufallssuche) oder ``"lhs"`` (Latin Hypercube;
+            gleichmäßige Abdeckung bei vielen Dimensionen).
+        n: Anzahl Punkte bei ``"random"`` und ``"lhs"`` (ganze Zahl, Standard 50); bei ``"grid"`` ignoriert.
+            Doppelte Punkte werden entfernt und in höchstens 20 Runden nachgezogen; es können weniger Punkte
+            entstehen.
+        constraint: Optional ``function(p)``, die ``True`` für zulässige Punkte liefert (z. B. Gewichte summieren
+            sich höchstens zu 1); Punkte ohne ``True`` entfallen. ``None`` (Standard) = alle Punkte.
+        sim_args: Benannte Liste gemeinsamer Argumente für ``simulation()`` (Standard: keine): Argumente von
+            ``simulation()`` außer ``data`` und ``strategy``, also auch Bausteine (z. B. ``dca = dca_plan(100,
+            1)``, ``tax = tax_profile()``) und Pfade zu Parametern der Bausteine (``"dca.value"``, siehe
+            ``sensitivity_grid``). Alte Einzelargumente (bis 0.8.0, vor den Bausteinen, z. B. ``dca_value``)
+            ergeben einen Fehler, der den Baustein nennt.
+        burn_in: Anzahl Zeilen am Anfang von ``data`` (bei Tagesdaten: Tage), die nach der Signalberechnung
+            verworfen werden (Signal-Vorlauf; ganze Zahl, Standard 0).
+        metrics: Funktion ``SimLevResult ->`` benannter numerischer Vektor (Standard
+            ``bootstrap_study_metrics()``: u. a. ``cagr``, ``max_drawdown`` als Anteil, ``sharpe``; ``cagr`` ist
+            mit Sparplan geldgewichtet, XIRR).
+        objective: Name der Zielgröße (Element von ``metrics``, Standard ``"sharpe"``) für Ranking, Plateau und
+            ``param_bootstrap()``.
+        maximize: Logisch: Zielgröße maximieren (Standard ``True``; ``False`` z. B. für ``max_drawdown``).
+        keep_returns: ``"day"`` (Standard): tägliche Renditen je Punkt speichern (nötig für ``overfit_pbo()``,
+            ``sharpe_deflated()``, ``overfit_walk_forward()``, ``overfit_reality_check()``, ``sharpe_haircut()``);
+            ``"none"``: keine. ``True``/``False`` (bis 1.0.0) ergeben einen Fehler.
+        seed: Startwert für den Versuchsplan bei ``"random"``/``"lhs"`` (Standard ``None``; bei ``"grid"`` ohne
+            Bedeutung). Mit Startwert (ganze Zahl, |seed| < 2^53) ist das Ergebnis reproduzierbar und der
+            Zufallszustand von SimLev bleibt unverändert; mit ``None`` wird genau einmal ein Startwert aus dem
+            Zufallszustand von SimLev gezogen (siehe ``simlev_seed()``), wiederholte Aufrufe liefern dann
+            verschiedene Ergebnisse. ``set.seed()`` wirkt nicht. Die Auswertung der Punkte ist deterministisch,
+            das Ergebnis hängt nicht von ``cores`` ab.
+        cores: Anzahl paralleler Prozesse (ganze Zahl, Standard 1); unter Unix per Fork (``parallel::mclapply``),
+            unter Windows per PSOCK-Cluster.
 
     Returns:
-        :class:`SimLevParamSearch`.
+        Objekt der Klasse ``SimLevParamSearch``, eine Liste mit
+
+        - ``results``: DataFrame je Punkt: ``id``, eine Spalte je Parameter, die Kennzahlen aus ``metrics``
+          (``NA`` bei Fehler) und ``error`` (Fehlermeldung oder ``NA``).
+        - ``returns``: Matrix Tage x Punkte der täglichen zeitgewichteten Renditen als Anteil (aus
+          ``result_index()``); Zeilen = Tage nach ``burn_in`` ohne den ersten, Spalten ``p1``, ``p2``, ... (Nummer
+          = ``id``); ``NA`` für fehlgeschlagene Punkte. ``None`` bei ``keep_returns = "none"``.
+        - ``dates``: Datum je Zeile von ``returns`` (Kalender des ersten erfolgreichen Punkts).
+        - ``space``, ``params``, ``method``, ``objective``, ``maximize``, ``builder``, ``sim_args``, ``burn_in``:
+          Einstellungen (``params`` = Parameternamen).
+        - ``metrics``: Namen der Kennzahlen.
+        - ``elapsed``: Laufzeit in Sekunden.
+
+        Methoden ``print``, ``summary``, ``plot``; Weiterverarbeitung mit ``param_plateau()``, ``overfit_pbo()``,
+        ``sharpe_deflated()``, ``overfit_walk_forward()``, ``param_bootstrap()``.
+
+    Details:
+        Je Punkt wird die Spezifikation in dieser Reihenfolge angewandt: ``signal(df)`` auf dem vollen Datensatz,
+        dann ``data(df)``, dann ``map``, dann das Verwerfen der ersten ``burn_in`` Zeilen und schließlich
+        ``simulation()`` mit ``sim_args``, überschrieben durch ``args``. Fehler einzelner Punkte brechen die Suche
+        nicht ab, sondern stehen in ``results["error"]``. Das Ergebnis lässt sich auch mit
+        ``overfit_reality_check()`` und ``sharpe_haircut()`` weiterverarbeiten.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 3000
+        d = pd.DataFrame({"date": pd.date_range("2010-01-01", periods=n)})
+        d["A"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.011, n))
+        st = simlev.create_strategy(A=simlev.asset_config(asset_class="etf", trading="signal", signal_buy="buy",
+                                                         signal_sell="sell"))
+        ps = simlev.param_search(d, lambda p: {"strategy": st, "signal": lambda df: simlev.signal_sma(df["A"], n=p["n"], band=p["band"])},
+                                 simlev.param_space(n=[50, 100, 200], band=[0, 2]), burn_in=250)
+        print(ps["results"][["id", "n", "band", "cagr", "sharpe"]])
     """
     method = _match_arg(method, ("grid", "random", "lhs"), "method")
-    # 6.5b (C.1): Text statt Logisch, ohne Alias (E1); logisch vor dem Text prüfen
+    # Text statt Logisch, ohne Alias (E1); logisch vor dem Text prüfen
     if isinstance(keep_returns, (bool, np.bool_)):
         raise ValueError("param_search: keep_returns ist \"day\" oder \"none\" (früher TRUE/FALSE).")
     keep_returns = _match_arg(keep_returns, ("day", "none"), "keep_returns")
@@ -569,7 +659,7 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
             return {"strategy": fixed, "args": p}
     from ._sim_blocks import _sim_args_set
     sim_run_args = _sim_args_set({}, sim_args, "param_search")
-    # Zufall nur im Versuchsplan (Hauptstrom, Entwurf C.5); die Auswertung je Punkt ist deterministisch
+    # Zufall nur im Versuchsplan (Hauptstrom); die Auswertung je Punkt ist deterministisch
     from ._lib import main_stream
     design = _ps_design(space, method, n, constraint, None if method == "grid" else main_stream(seed))
     t0 = time.perf_counter()
@@ -722,18 +812,43 @@ def _lower_better():
 def param_plateau(x, *, metric=None, radius=1, k=5):
     """Plateau-Wert: Zielgröße über die Nachbarschaft eines Punkts.
 
-    Beim Raster sind Nachbarn alle Punkte, die sich in jeder Dimension um
-    höchstens ``radius`` Rasterstufen unterscheiden; bei Zufallssuche/LHS die
-    ``k`` nächsten Punkte im rangskalierten Raum.
+    Eine einzelne Spitze im Parameterraum ist oft Zufall. Robuster ist ein Punkt, dessen Nachbarn ebenfalls gut
+    abschneiden. Beim Raster sind Nachbarn alle Punkte, die sich in jeder Dimension um höchstens ``radius``
+    Rasterstufen unterscheiden; bei Zufallssuche/LHS die ``k`` nächsten Punkte im rangskalierten Raum.
 
     Args:
-        x: ``SimLevParamSearch``.
-        metric: Kennzahlspalte von ``x.results`` (Standard: Zielgröße).
-        radius: maximaler Abstand in Rasterstufen (Standard 1; nur Raster).
-        k: Anzahl Nachbarn inklusive Punkt selbst (Standard 5; nur random/lhs).
+        x: ``SimLevParamSearch`` aus ``param_search()`` (gespeicherte Renditen sind nicht nötig).
+        metric: Name einer Kennzahlspalte von ``x["results"]`` (Standard: Zielgröße der Suche,
+            ``x["objective"]``).
+        radius: Maximaler Abstand in Rasterstufen je Dimension (ganze Zahl, Standard 1); nur ``method = "grid"``.
+        k: Anzahl Nachbarn inklusive Punkt selbst (ganze Zahl, Standard 5); nur ``method = "random"`` und
+            ``"lhs"``.
 
     Returns:
-        ``pandas.DataFrame`` mit ``id``, ``value``, ``plateau_mean``, ``plateau_min``, ``neighbours``.
+        DataFrame je Punkt mit ``id``, ``value`` (Kennzahl des Punkts), ``plateau_mean`` (Mittel der Kennzahl über
+        die Nachbarschaft, fehlende Werte ignoriert), ``plateau_min`` (ungünstigster Wert der Nachbarschaft: bei
+        der Zielgröße je nach ``x["maximize"]`` das Minimum bzw. Maximum; bei anderen Kennzahlen das Maximum für
+        ``max_drawdown``, ``avg_drawdown``, ``dd_q50``, ``dd_q90``, ``ulcer_index`` und ``longest_drawdown``
+        (kleiner = besser), sonst das Minimum) und ``neighbours`` (Anzahl Punkte der Nachbarschaft). Die Einheit
+        entspricht der Kennzahl.
+
+    Details:
+        Rasterstufen sind die Positionen in den Rasterwerten jeder Dimension des Suchraums. Im rangskalierten Raum
+        wird jede Dimension über ihre Ränge auf 0 bis 1 abgebildet (nicht numerische Parameter über ihre
+        Faktorcodes) und der euklidische Abstand verwendet. Der Punkt selbst gehört immer zu seiner Nachbarschaft.
+
+    Beispiel::
+
+        import numpy as np, pandas as pd, simlev
+        rng = np.random.default_rng(1)
+        n = 3000
+        d = pd.DataFrame({"date": pd.date_range("2010-01-01", periods=n)})
+        d["A"] = 100 * np.cumprod(1 + rng.normal(3e-4, 0.011, n))
+        st = simlev.create_strategy(A=simlev.asset_config(asset_class="etf", trading="signal", signal_buy="buy",
+                                                         signal_sell="sell"))
+        ps = simlev.param_search(d, lambda p: {"strategy": st, "signal": lambda df: simlev.signal_sma(df["A"], n=p["n"], band=p["band"])},
+                                 simlev.param_space(n=[50, 100, 200], band=[0, 2]), burn_in=250)
+        print(simlev.param_plateau(ps))
     """
     if not isinstance(x, SimLevParamSearch):
         raise ValueError("x muss ein SimLevParamSearch sein.")

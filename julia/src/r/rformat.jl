@@ -7,12 +7,12 @@
 #                     W. Fullerton (Los Alamos); sprintf.c: ursprünglich Jonathan Rougier
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet seit N10 der C-Kern
+#                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet der C-Kern
 #                     core/slc_rbase_date.c.
 # ─────────────────────────────────────────────────────────────────────────────
 # Textausgabe wie R (Engine): sprintf() mit NA/NaN/Inf-Regeln, format() und
 # as.character() für Zahlen (formatReal/scientific aus R's format.c, long
-# double im C-Kern sl_r_scientific, N10), deparse() für einfache Werte, round()/signif().
+# double im C-Kern sl_r_scientific), deparse() für einfache Werte, round()/signif().
 # ─────────────────────────────────────────────────────────────────────────────
 
 const _FMT_CACHE = Dict{String,Printf.Format}()
@@ -152,7 +152,7 @@ function _scientific(x::Float64, digits::Int)
         end
         return (neg, kpower, i, false)
     end
-    # N10: long-double-Teil von scientific() über den C-Kern (core/slc_rbase_num.c)
+    # long-double-Teil von scientific() über den C-Kern (core/slc_rbase_num.c)
     kpower, nsig, rw = _rb_scientific(r, digits)
     return (neg, kpower, nsig, rw)
 end

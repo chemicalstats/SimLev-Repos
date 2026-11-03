@@ -1,7 +1,7 @@
 /*
- * python/src/_ext_slc_rbase.c -- Python-Huellen der Grundfunktionen mit R-Regeln (N8) im Modul
+ * python/src/_ext_slc_rbase.c -- Python-Huellen der Grundfunktionen mit R-Regeln im Modul
  * simlev._ext: Summen, Mittel, Varianz, Kumulationen, Potenz, Ordnung, Rang, partielle Sortierung,
- * Quantile, tabulate, findInterval, cov/cor; seit N10 Datumsformat und -lesen (slc_rbase_date.c), seit N11
+ * Quantile, tabulate, findInterval, cov/cor; Datumsformat und -lesen (slc_rbase_date.c),
  * R_strtod, %%, %/% und scientific() in long double (slc_rbase_num.c)
  *
  * Die Kerne src/core/slc_rbase*.c sind Byte-fuer-Byte-Kopien der kanonischen Quellen in core/
@@ -262,9 +262,9 @@ static PyObject *slc_r_cov(PyObject *self, PyObject *args)
     return PyBool_FromLong(sd0);
 }
 
-/* N10: format.Date für einen Vektor: (days float64, fmts list[str | None][, digits_secs int]) -> list[str | None]
+/* format.Date für einen Vektor: (days float64, fmts list[str | None][, digits_secs int]) -> list[str | None]
  * wie fmt._format_date_list (Länge max(n, nf) mit Wiederholung; NA, NaN, ±Inf, None und |Tage| >= 1e14 -> None).
- * N11: digits_secs = getOption("digits.secs") für %OS ohne Ziffer (0..6); Ergebnis über 2048 Bytes ist wie in R
+ * digits_secs = getOption("digits.secs") für %OS ohne Ziffer (0..6); Ergebnis über 2048 Bytes ist wie in R
  * ein Fehler (ValueError "output string exceeded 2048 bytes"). */
 static PyObject *slc_r_format_date(PyObject *self, PyObject *args)
 {
@@ -313,7 +313,7 @@ static PyObject *slc_r_format_date(PyObject *self, PyObject *args)
     return out;
 }
 
-/* N10: as.Date(s, format = "%Y<sep>%m<sep>%d"): (s str, sep str) -> int | None */
+/* as.Date(s, format = "%Y<sep>%m<sep>%d"): (s str, sep str) -> int | None */
 static PyObject *slc_r_strptime_ymd(PyObject *self, PyObject *args)
 {
     (void) self;
@@ -325,7 +325,7 @@ static PyObject *slc_r_strptime_ymd(PyObject *self, PyObject *args)
     return PyLong_FromLongLong((long long) z);
 }
 
-/* N11: weitere long-double-Wege (slc_rbase_num.c), wie Julia seit N10 */
+/* weitere long-double-Wege (slc_rbase_num.c), wie Julia */
 
 /* Zahlteil von R_strtod: (s bytes) -> (Wert, gelesene Bytes oder -1, Betrag > DBL_MAX) */
 static PyObject *slc_r_strtod_num(PyObject *self, PyObject *args)
@@ -410,12 +410,12 @@ PyMethodDef simlev_ext_slc_rbase_methods[] = {
     {"slc_r_tabulate", slc_r_tabulate, METH_VARARGS, "slc_r_tabulate(bin, out)"},
     {"slc_r_findinterval", slc_r_findinterval, METH_VARARGS, "slc_r_findinterval(vec, x, rc, ai, lo, out)"},
     {"slc_r_cov", slc_r_cov, METH_VARARGS, "slc_r_cov(x, n, ncx, y, ncy, use, kendall, cor, ans) -> sd0"},
-    {"slc_r_format_date", slc_r_format_date, METH_VARARGS, "slc_r_format_date(days, fmts[, digits_secs]) -> list (format.Date, N10/N11)"},
-    {"slc_r_strptime_ymd", slc_r_strptime_ymd, METH_VARARGS, "slc_r_strptime_ymd(s, sep) -> Tage | None (as.Date, N10)"},
-    {"slc_r_strtod_num", slc_r_strtod_num, METH_VARARGS, "slc_r_strtod_num(s bytes) -> (Wert, Bytes, > DBL_MAX) (R_strtod, N11)"},
-    {"slc_r_fmod_ld", slc_r_fmod_ld, METH_VARARGS, "slc_r_fmod_ld(x1, x2) -> long-double-Teil von %% (N11)"},
-    {"slc_r_idiv_ld", slc_r_idiv_ld, METH_VARARGS, "slc_r_idiv_ld(x1, x2) -> long-double-Teil von %/% (N11)"},
-    {"slc_r_scientific", slc_r_scientific, METH_VARARGS, "slc_r_scientific(r, digits) -> (kpower, nsig, rw) (N11)"},
-    {"slc_r_scientific_vec", slc_r_scientific_vec, METH_VARARGS, "slc_r_scientific_vec(r, digits, kp, nsig, rw) (N11)"},
+    {"slc_r_format_date", slc_r_format_date, METH_VARARGS, "slc_r_format_date(days, fmts[, digits_secs]) -> list (format.Date)"},
+    {"slc_r_strptime_ymd", slc_r_strptime_ymd, METH_VARARGS, "slc_r_strptime_ymd(s, sep) -> Tage | None (as.Date)"},
+    {"slc_r_strtod_num", slc_r_strtod_num, METH_VARARGS, "slc_r_strtod_num(s bytes) -> (Wert, Bytes, > DBL_MAX) (R_strtod)"},
+    {"slc_r_fmod_ld", slc_r_fmod_ld, METH_VARARGS, "slc_r_fmod_ld(x1, x2) -> long-double-Teil von %%"},
+    {"slc_r_idiv_ld", slc_r_idiv_ld, METH_VARARGS, "slc_r_idiv_ld(x1, x2) -> long-double-Teil von %/%"},
+    {"slc_r_scientific", slc_r_scientific, METH_VARARGS, "slc_r_scientific(r, digits) -> (kpower, nsig, rw)"},
+    {"slc_r_scientific_vec", slc_r_scientific_vec, METH_VARARGS, "slc_r_scientific_vec(r, digits, kp, nsig, rw)"},
     {NULL, NULL, 0, NULL}
 };

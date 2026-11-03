@@ -12,8 +12,8 @@
 # Eindimensionale Verfahren optimize und uniroot aus R 4.3.3 stats/R/optimize.R und
 # stats/src/optimize.c; Python: _r/stats_optim.py. Teil des Untermoduls RStats (eingebunden in stats.jl).
 #
-# Seit Etappe 9.6c entfallen optim, optimhess und nlminb (PORT): SimLev optimiert mit den eigenen
-# Verfahren der C-Bibliothek slc (SimLev.SLib, Entwurf B.8).
+# Seit 1.0.0 entfallen optim, optimhess und nlminb (PORT): SimLev optimiert mit den eigenen
+# Verfahren der C-Bibliothek slc (SimLev.SLib).
 
 # ── optimize / uniroot ────────────────────────────────────────────────────
 

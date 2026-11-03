@@ -107,7 +107,7 @@
 #'       \code{model} ist eine Liste mit \code{coefficients} (Basis 1, z, z^2, ...
 #'       mit z = (signal - Mittel) / Standardabweichung), \code{fitted}
 #'       (angepasste Werte), \code{degree} und \code{basis} (\code{center},
-#'       \code{scale}); bis Etappe 9.6b war es ein \code{lm}-Objekt mit
+#'       \code{scale}); bis 0.10.0 war es ein \code{lm}-Objekt mit
 #'       orthogonalen Polynomen (angepasste Werte und \eqn{R^2} sind gleich).}
 #'     \item{\code{data}}{data.frame der Stichtage mit \code{date},
 #'       \code{signal}, \code{forward} (Anteil), ggf. \code{signal2},
@@ -186,12 +186,12 @@ signal_analysis <- function(data, signal, target, horizon = 21L, step = NULL, bi
     check.names = FALSE) else NULL))
   rownames(tab) <- NULL
   lv <- levels(df$bin); lo <- df$forward[df$bin == lv[1]]; hi <- df$forward[df$bin == lv[length(lv)]]
-  wt <- if (length(lo) > 2 && length(hi) > 2) .sl_welch_test(hi, lo) else NULL   # Welch-Test (Entwurf B.16)
+  wt <- if (length(lo) > 2 && length(hi) > 2) .sl_welch_test(hi, lo) else NULL   # Welch-Test
   spread <- c(difference = mean(hi) - mean(lo), t = if (!is.null(wt)) unname(wt$statistic) else NA,
               p = if (!is.null(wt)) wt$p.value else NA)
   fit <- NULL
   if (degree > 0 && length(unique(df$signal)) > degree + 1) {
-    m <- .sl_poly_fit(df$signal, df$forward, degree)         # kleinste Quadrate (B.7), r^2 aus den Residuen (B.16)
+    m <- .sl_poly_fit(df$signal, df$forward, degree)         # kleinste Quadrate, r^2 aus den Residuen
     fit <- list(model = m[c("coefficients", "fitted", "degree", "basis")], r_squared = m$r_squared)
   }
   spl <- NULL
@@ -380,7 +380,7 @@ sharpe_test <- function(x, y, frequency = c("week", "day", "month"), method = c(
     z <- d0 / se; p <- 2 * .sl_pnorm(-abs(z)); ci <- d0 + c(-1, 1) * .sl_qnorm(0.975) * se
   } else {
     block <- block %||% max(2, round(Tn^(1 / 3)))
-    S <- .sl_main_stream(seed)                                  # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+    S <- .sl_main_stream(seed)                                  # Hauptstrom
     db <- vapply(seq_len(B), function(i) { k <- .sl_boot_idx_stationary(Tn, Tn, block, stream = S); sr(ra[k]) - sr(rb[k]) }, 0)
     se <- stats::sd(db); z <- d0 / se; p <- mean(abs(db - d0) >= abs(d0))
     ci <- stats::quantile(db, c(0.025, 0.975), names = FALSE)
@@ -487,7 +487,7 @@ overfit_reality_check <- function(x, benchmark = NULL, B = 999L, block = NULL, f
   D <- R - b; Tn <- nrow(D); K <- ncol(D)
   fbar <- colMeans(D)
   block <- block %||% max(2, round(Tn^(1 / 3)))
-  S <- .sl_main_stream(seed)                                    # Hauptstrom (Entwurf C.5, Regeln 3 bis 5)
+  S <- .sl_main_stream(seed)                                    # Hauptstrom
   Fb <- vapply(seq_len(B), function(i) colMeans(D[.sl_boot_idx_stationary(Tn, Tn, block, stream = S), , drop = FALSE]), numeric(K))
   Fb <- matrix(Fb, nrow = B, ncol = K, byrow = TRUE)          # B x K, auch bei einem Kandidaten (vapply liefert dann einen Vektor)
   om <- pmax(apply(Fb, 2, stats::sd), 1e-12) * sqrt(Tn)

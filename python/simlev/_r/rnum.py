@@ -1,10 +1,10 @@
 # Herkunft:           übersetzt aus R 4.3.3, src/main/summary.c, cum.c, array.c, arithmetic.c
-#                     (R_zeroin2/uniroot aus zeroin.c bzw. nlm.R seit C19 entfallen, XIRR im Kern)
+#                     (R_zeroin2/uniroot aus zeroin.c bzw. nlm.R entfallen, XIRR im Kern)
 # Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
 #                     Kopf der jeweiligen R-Quelle)
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang: Summen und Kumulationen rechnen seit N8 die C-Kerne
+#                     SimLev genutzten Umfang: Summen und Kumulationen rechnen die C-Kerne
 #                     core/slc_rbase*.
 """R-kompatible Numerik (Kern der R-Nachbildung, Gegenstück zu ``julia/src/r/rnum.jl``).
 
@@ -13,7 +13,7 @@ importiert nichts aus ``simlev``. Es definiert ``NA_REAL`` (R's
 ``NA_real_``, die einzige Definition im Paket; öffentlich als ``simlev.NA``)
 mit ``r_isna``/``r_isna_arr`` und die skalaren bzw. eindimensionalen
 Engine-Hilfen mit ``r_``-Präfix: Summen, Mittel, Varianzen und Produkte in
-long double, ``r_pow`` (``R_POW``) und ``r_mod1`` (``r_uniroot`` ist seit C19 entfallen: XIRR im Kern
+long double, ``r_pow`` (``R_POW``) und ``r_mod1`` (``r_uniroot`` ist entfallen: XIRR im Kern
 ``core/evaluate_core_impl.h``). Darauf bauen auf:
 
 - :mod:`simlev._r.rformat`: ``r_round``, ``r_signif``, ``r_format``,
@@ -27,7 +27,7 @@ long double, ``r_pow`` (``R_POW``) und ``r_mod1`` (``r_uniroot`` ist seit C19 en
   ``print``).
 
 R akkumuliert Summen, Mittelwerte, Varianzen und Produkte intern mit
-``long double`` (auf x86-64 Linux: 80-Bit-Extended-Precision). Seit N8 rechnen
+``long double`` (auf x86-64 Linux: 80-Bit-Extended-Precision). rechnen
 ``r_sum``, ``r_prod``, ``r_mean``, ``r_var``, die Kumulationen, ``r_rowsums``/
 ``r_colsums`` und ``r_pow_vec`` mit den C-Kernen ``core/slc_rbase.c`` (über
 :mod:`simlev._ext`), die Julia ebenso nutzt; sie akkumulieren in long double
@@ -37,10 +37,10 @@ Transzendente Funktionen: immer ``math.*`` (glibc-libm wie R), nie die
 SIMD-Varianten von numpy (``np.exp``, ``np.log``, ``np.power`` …), die auf
 Rechnern mit AVX-512 in den letzten Bits abweichen können.
 
-Seit N11 rechnet Python nirgends mehr mit ``numpy.longdouble``: auch ``r_mod1``
+rechnet Python nirgends mehr mit ``numpy.longdouble``: auch ``r_mod1``
 (``%%``), ``R_strtod`` (:mod:`simlev._r.rexpr`) und ``scientific()``
 (:mod:`simlev._r.fmt`, :mod:`simlev._r.rformat`) nutzen die C-Kerne
-``core/slc_rbase_num.c``, wie Julia seit N10. Auf Plattformen, deren
+``core/slc_rbase_num.c``, wie Julia. Auf Plattformen, deren
 C-``long double`` nur 64 Bit breit ist (z. B. macOS auf Apple Silicon,
 Windows), verhält sich R dort ebenso; die Bitgleichheit ist dann
 plattformabhängig.
@@ -52,7 +52,7 @@ import struct
 
 import numpy as np
 
-from .. import _ext   # C-Erweiterung (N8: Kerne core/slc_rbase*.c)
+from .. import _ext   # C-Erweiterung (Kerne core/slc_rbase*.c)
 
 _NAN = float("nan")
 
@@ -116,7 +116,7 @@ def _handle_nan(x: np.ndarray, out: np.ndarray) -> np.ndarray:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Summen, Mittelwerte, Varianzen (N8: C-Kerne core/slc_rbase.c, long double wie R)
+# Summen, Mittelwerte, Varianzen (C-Kerne core/slc_rbase.c, long double wie R)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _c64(x) -> np.ndarray:
@@ -235,12 +235,12 @@ def r_colsums(m: np.ndarray, na_rm: bool = False) -> np.ndarray:
 
 
 def r_rowmeans(m: np.ndarray, na_rm: bool = False) -> np.ndarray:
-    """``rowMeans(m)`` wie in R (N11; Kern wie ``r_rowsums``, Summe / Anzahl in long double)."""
+    """``rowMeans(m)`` wie in R (Kern wie ``r_rowsums``, Summe / Anzahl in long double)."""
     return _margsums(m, na_rm, True, True)
 
 
 def r_colmeans(m: np.ndarray, na_rm: bool = False) -> np.ndarray:
-    """``colMeans(m)`` wie in R (N11; Kern wie ``r_colsums``, Summe / Anzahl in long double)."""
+    """``colMeans(m)`` wie in R (Kern wie ``r_colsums``, Summe / Anzahl in long double)."""
     return _margsums(m, na_rm, True, False)
 
 
@@ -262,7 +262,7 @@ def r_pow_vec(x, y: float) -> np.ndarray:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# R_strtod und String_to_real (N11; vorher in rexpr.py bzw. mit float() in fmt.py)
+# R_strtod und String_to_real (bis 1.2.0 in rexpr.py bzw. mit float() in fmt.py)
 # ═══════════════════════════════════════════════════════════════════════════
 
 _SPACE_C = frozenset(" \t\n\v\f\r")
@@ -275,7 +275,7 @@ def r_strtod(cs, i0: int = 0):
     Rückgabe ``(Wert, Endindex)``; ohne Ziffer ``(NA, i0)``. Leerraum, Vorzeichen, ``NaN``/``Inf``/``infinity``
     (Groß-/Kleinschreibung egal) prüft der Host; der Zahlteil (dezimal mit Exponent, hexadezimal mit Punkt und
     p-Exponent) rechnet der C-Kern ``sl_r_strtod_num`` (core/slc_rbase_num.c) in long double. Betrag über
-    DBL_MAX (in long double) ergibt ±Inf wie R (N11)."""
+    DBL_MAX (in long double) ergibt ±Inf wie R."""
     n = len(cs)
 
     def at(k):
@@ -331,7 +331,7 @@ def r_mod1(x: float) -> float:
     x = float(x)
     if not math.isfinite(x):
         return _NAN
-    return _ext.slc_r_fmod_ld(x, 1.0)   # N11: long-double-Teil von myfmod im C-Kern core/slc_rbase_num.c
+    return _ext.slc_r_fmod_ld(x, 1.0)   # long-double-Teil von myfmod im C-Kern core/slc_rbase_num.c
 
 
 # ═══════════════════════════════════════════════════════════════════════════

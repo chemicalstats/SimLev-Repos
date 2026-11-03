@@ -1,4 +1,4 @@
-/* core/slc_dcc.c – DCC(1,1): Filter und Schätzung des Korrelationsteils (SimLev core, Etappe 9.4)
+/* core/slc_dcc.c – DCC(1,1): Filter und Schätzung des Korrelationsteils (SimLev core)
  * Verfahren:  Dynamische bedingte Korrelation nach Engle (2002) auf standardisierten Residuen
  *             z_t (Stufe 1: univariate GARCH, slc_garch.c):
  *               Q_t = (1 - a - b) Qbar + a z_{t-1} z_{t-1}' + b Q_{t-1},  Q_1 = Qbar,
@@ -11,13 +11,13 @@
  *             Schätzung (Stufe 2) ganz in C über die logistische Abbildung der eigenen R-Funktion
  *             dependence_dcc (r/R/dependence.R): s = 0.999 plogis(th1), a = s plogis(th2), b = s - a
  *             (damit a, b > 0, a + b < 0.999); Start (qlogis(0.98/0.999), qlogis(0.03/0.98)).
- *             Bis 1.1.0 Nelder-Mead (höchstens 2000 Auswertungen, reltol 1e-10). N5: BFGS mit
+ *             Bis 1.1.0 Nelder-Mead (höchstens 2000 Auswertungen, reltol 1e-10). BFGS mit
  *             analytischem Gradienten (dcc_fg: Vorwärtsrekursion von dQ_t/da, dQ_t/db, Kettenregel
  *             über die logistische Abbildung), maxit 500, reltol 1e-12, gtol 1e-8, vom bisherigen
  *             Start. Die Likelihood hat oft mehrere lokale Minima (Grat kleines a / b nahe 1 gegen
  *             den Rand a -> 0); BFGS findet häufig ein besseres Becken als der bisherige Nelder-Mead,
- *             auf 160 simulierten Datensätzen in 2 bis 6 Fällen aber ein schlechteres (scratchpad/en5/;
- *             Entscheidung des Nutzers 01.11.2026: reiner BFGS ohne Nelder-Mead-Vorlauf). Scheitert
+ *             auf 160 simulierten Datensätzen in 2 bis 6 Fällen aber ein schlechteres (bewusst
+ *             reiner BFGS ohne Nelder-Mead-Vorlauf). Scheitert
  *             BFGS (Start nicht endlich), läuft als Rückfall der bisherige Nelder-Mead.
  *             Ersetzt optim(Nelder-Mead) in dependence_dcc; zusammen mit slc_garch.c entfällt
  *             der zufällige gosolnp-Rückfall der GARCH-Stufe.
@@ -35,7 +35,7 @@
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen (rugarch,
  *             Rsolnp nicht gelesen).
- * Prüforakel: der bisherige eigene Weg dependence_dcc (optim, .dcc_filter); scratchpad/e94/.
+ * Prüforakel: der frühere eigene Weg dependence_dcc (optim, .dcc_filter).
  */
 #include "slc_internal.h"
 #include "slc_la_internal.h"
@@ -129,7 +129,7 @@ int sl_dcc_filter(sl_ctx *cx, int n, int k, const double *Z, double a, double b,
     return SL_OK;
 }
 
-/* N5: NLL und analytischer Gradient nach (a, b) in einem Durchlauf (Vorwärtsrekursion).
+/* NLL und analytischer Gradient nach (a, b) in einem Durchlauf (Vorwärtsrekursion).
  *   dQ_t/da = -Qbar + z_{t-1} z_{t-1}' + b dQ_{t-1}/da,  dQ_t/db = -Qbar + Q_{t-1} + b dQ_{t-1}/db,
  *   dQ_1 = 0. Mit M = R^-1 - w w', w = R^-1 z_t, und dR_ij = dQ_ij / sqrt(q_ii q_jj)
  *   - R_ij (dq_ii / q_ii + dq_jj / q_jj) / 2 gilt d l_t = tr(M dR) / 2 = sum_ij N_ij dQ_ij / 2 mit
@@ -249,7 +249,7 @@ static double dcc_obj(const double *th, void *data)
     return dcc_run(d->n, d->k, d->Z, a, b, d->Qbar, 0, NULL, &ok, d->work);
 }
 
-/* N5: f und Gradient in theta (logistische Abbildung wie bisher); Kettenregel über
+/* f und Gradient in theta (logistische Abbildung wie bisher); Kettenregel über
  * s = 0.999 p1, a = s p2, b = s - a mit p_i = plogis(th_i), dp_i/dth_i = plogis(th_i) plogis(-th_i)
  * (ohne Auslöschung in 1 - p). */
 static double dcc_fg_th(dcc_data *d, const double *th, double *g)

@@ -1,12 +1,12 @@
-# SLib (Teil 9.3) – Hüllen der Optimierer der C-Bibliothek slc über ccall: optim und Prüfhilfen.
+# SLib – Hüllen der Optimierer der C-Bibliothek slc über ccall: optim und Prüfhilfen.
 #
 # Gegenstück zu r/R/slc_opt.R (.sl_optim) und python/simlev/_lib_opt.py (optim). Die Rechnung
 # steht in deps/core/slc_opt.c (Kopie von core/), gebaut von deps/build.jl in libslc.
-# Rückfrage an den Host (Entwurf B.8): Julia holt die nächste Anfrage, rechnet die Zielfunktion
+# Rückfrage an den Host: Julia holt die nächste Anfrage, rechnet die Zielfunktion
 # selbst und gibt die Antwort; der Kern ruft nie nach Julia zurück, Fehler der Zielfunktion sind
 # gewöhnliche Julia-Ausnahmen. Das Arbeitsfeld ist ein Vector{Float64} des Hosts.
 #
-# Seit Etappe 9.6b rufen die Ports optim an denselben Stellen wie R. optim nimmt die
+# Seit 1.0.0 rufen die Ports optim an denselben Stellen wie R. optim nimmt die
 # Argumente und Steuerwerte von R's optim an, soweit SimLev sie nutzt, und gibt eine RList mit
 # par, value, counts (RVector "function", "gradient"; bei Nelder-Mead gradient = missing),
 # convergence, message, iterations, evaluations (und trace) zurück.
@@ -191,7 +191,7 @@ function minimize_test(id, par; method = "Nelder-Mead", lower = -Inf, upper = In
              "nfev" => Int(nf[]), "evaluations" => Int(ntot[]))
 end
 
-"Numerischer Gradient (B.9) der Prüffunktion `id` an `x` (Schranken wahlweise)."
+"Numerischer Gradient der Prüffunktion `id` an `x` (Schranken wahlweise)."
 function numgrad_test(id, x; lower = nothing, upper = nothing)
     v = Float64.(vec(collect(x)))
     n = length(v)

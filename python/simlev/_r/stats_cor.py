@@ -4,12 +4,12 @@
 #                     Kopf der jeweiligen R-Quelle)
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang: Kovarianz und Korrelation rechnet seit N8 der C-Kern
+#                     SimLev genutzten Umfang: Kovarianz und Korrelation rechnet der C-Kern
 #                     core/slc_rbase_cov.c.
 """Kovarianz und Korrelation (``cor``, ``cov``, ``var``, ``sd``, ``cov2cor``) sowie ``scale``, nachgebildet aus
 R 4.3.3 ``src/library/stats/src/cov.c``, ``stats/R/cor.R`` und ``base/R/scale.R``.
 
-Seit N8 rechnet der Kern von ``cov``/``cor`` (pearson, kendall; alle ``use``) in C
+rechnet der Kern von ``cov``/``cor`` (pearson, kendall; alle ``use``) in C
 (``core/slc_rbase_cov.c``, gemeinsam mit Julia); hier bleiben Argumentprüfung, Ränge für
 spearman und die Ergebnisform.
 """
@@ -23,7 +23,7 @@ import pandas as pd
 from .linalg import RError, _as_r, _as_matrix, _out
 from .rnum import NA_REAL, _margsums
 from .stats_sort import _NAN, _rsum, _warn, rank
-from .. import _ext   # N8: C-Kern core/slc_rbase_cov.c
+from .. import _ext   # C-Kern core/slc_rbase_cov.c
 
 __all__ = [
     "var", "sd", "cov", "cor", "cov2cor", "scale",
@@ -62,7 +62,7 @@ def _as_cov_input(x):
 
 
 def _corcov(x, y, method_na, kendall, cor):
-    """R's ``cor``/``cov`` mit ``use`` als Zahl 1–5 (C-Kern ``sl_r_cov``, N8)."""
+    """R's ``cor``/``cov`` mit ``use`` als Zahl 1–5 (C-Kern ``sl_r_cov``)."""
     X, xmat, xcn = _as_cov_input(x)
     n, ncx = X.shape
     ansmat = xmat

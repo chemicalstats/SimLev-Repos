@@ -1,29 +1,29 @@
-/* core/slc_garch.c – GARCH(1,1) und GJR-GARCH(1,1) mit Normalverteilung (SimLev core, Etappe 9.4)
+/* core/slc_garch.c – GARCH(1,1) und GJR-GARCH(1,1) mit Normalverteilung (SimLev core)
  * Verfahren:  Modell e_t = mu + eps_t, eps_t = sigma_t z_t, z_t ~ N(0, 1),
  *             sigma_t^2 = omega + (alpha + gamma 1{eps_{t-1} < 0}) eps_{t-1}^2 + beta sigma_{t-1}^2
  *             (Bollerslev 1986; GJR: Glosten, Jagannathan, Runkle 1993), Start sigma_1^2 =
- *             Stichprobenvarianz von e (eigene Wahl wie h1 im eigenen MS-GARCH, SPEZ-9 B.10).
+ *             Stichprobenvarianz von e (eigene Wahl wie h1 im eigenen MS-GARCH).
  *             Punktschätzer per Maximum Likelihood, NLL = 1/2 sum (log 2 pi + log sigma_t^2 +
  *             eps_t^2 / sigma_t^2), kompensiert summiert (Neumaier 1974). Parameter (GJR-Fit,
- *             sl_garch11_pack/unpack/grad; der sGARCH-Fit seit N9 siehe unten) ohne
+ *             sl_garch11_pack/unpack/grad; zum sGARCH-Fit siehe unten) ohne
  *             Nebenbedingungen über die Umparametrisierung des eigenen MS-GARCH mit einem Regime
  *             (SimLev r/R/ms_garch.R, .ms_garch_unpack): mu frei, omega = exp(theta_omega),
- *             sGARCH (alpha, beta) = exp(a, b) / (1 + Summe); GJR (N1) (alpha/2, (alpha + gamma)/2,
+ *             sGARCH (alpha, beta) = exp(a, b) / (1 + Summe); GJR (alpha/2, (alpha + gamma)/2,
  *             beta) = exp(a, g, b) / (1 + Summe). Damit gelten omega, alpha, beta > 0, bei GJR
  *             alpha + gamma > 0 (gamma < 0 zulässig; bis 1.0.0 (alpha, gamma/2, beta), also
- *             gamma >= 0, F9) und alpha + gamma/2 + beta < 1 von selbst: Das Bild ist genau das
+ *             gamma >= 0) und alpha + gamma/2 + beta < 1 von selbst: Das Bild ist genau das
  *             Innere des Bereichs, in dem die bedingte Varianz für jedes Vorzeichen von eps
  *             positiv bleibt und das Modell unter der Normalverteilung (E 1{eps < 0} = 1/2)
  *             stationär ist (Glosten, Jagannathan, Runkle 1993).
  *             Startwerte GJR: mu = Mittelwert, festes Raster (alpha, gamma, beta) wie in .ms_garch_fit
- *             (seit N1 sieben Punkte: die drei sGARCH-Punkte mit gamma, zwei mit gamma < 0, zwei mit kleinem
+ *             (sieben Punkte: die drei sGARCH-Punkte mit gamma, zwei mit gamma < 0, zwei mit kleinem
  *             beta), omega über Varianz-Targeting; BFGS (slc_opt.c, sl_minimize) von jedem Rasterpunkt, der
- *             beste Lauf gewinnt, bei Gleichstand der erste; seit N3 mit dem analytischen Gradienten aus einer
+ *             beste Lauf gewinnt, bei Gleichstand der erste; mit dem analytischen Gradienten aus einer
  *             Vorwärtsrekursion der Ableitungen von sigma_t^2 (garch_fg: f und g in einem Durchlauf,
  *             Logarithmen über ein laufendes Produkt);
  *             mu in Einheiten der Standardabweichung (parscale), damit die Hesse-Matrix gut
  *             skaliert ist.
- *             sGARCH (N9, bis 1.2.0 BFGS in der Umparametrisierung, N6 mit zweitem Lauf bei Randlage): ein
+ *             sGARCH (bis 1.1.0 BFGS in der Umparametrisierung, zuletzt mit zweitem Lauf bei Randlage): ein
  *             Optimierungslauf, Trust-Region-Newton mit exakter Hesse-Matrix (sg_fgh: f, g, H in einem
  *             Durchlauf) in den natürlichen Parametern ((mu - m)/sd, omega/v, alpha, beta) mit den
  *             Schranken omega >= 0, alpha >= 0, beta >= 0, alpha + beta <= 1 - 2^-50 über eine aktive
@@ -33,13 +33,13 @@
  *             (kleinste Quadrate von eps_t^2 auf die GARCH-Regressoren je beta, sg_ls), nur ausgewertet,
  *             ohne Optimierung. Die Likelihood mit festem s2_1 hat echte lokale Optima am Rand (alpha = 0
  *             mit beta -> 1: dort ist dNLL/dalpha proportional zu -sum_k beta^k gamma_k(eps^2) > 0) und
- *             im Inneren; die Startwahl entscheidet, welches der Lauf erreicht (scratchpad/en9s/).
+ *             im Inneren; die Startwahl entscheidet, welches der Lauf erreicht.
  *             Filter: wie der frühere eigene Kern garch_filter (bis 1.0.0): s2[0] =
  *             s2_init, Rekursion wie oben, Untergrenze 1e-14.
  *             Ganze Stufe sl_garch11_estimate wie die eigene R-Funktion .fit_garch11
  *             (r/R/bootstrap.R) ohne die Übernahme: Varianz < 1e-16 "konstant", sonst ML,
- *             Rückfall Momente (F10, ohne Nelder-Mead-Stufe), Filter, standardisierte Residuen.
- *             Nur Punktschätzer (F4): keine Standardfehler, keine Hesse-Matrix.
+ *             Rückfall Momente (ohne Nelder-Mead-Stufe), Filter, standardisierte Residuen.
+ *             Nur Punktschätzer: keine Standardfehler, keine Hesse-Matrix.
  * Quellen:    Bollerslev, T. (1986). Generalized autoregressive conditional heteroskedasticity.
  *               Journal of Econometrics 31(3), 307–327.
  *             Glosten, L. R., Jagannathan, R., Runkle, D. E. (1993). On the relation between the
@@ -48,31 +48,30 @@
  *             Neumaier, A. (1974). Rundungsfehleranalyse einiger Verfahren zur Summation endlicher
  *               Summen. ZAMM 54(1), 39–51.
  *             Nocedal, J., Wright, S. J. (2006). Numerical Optimization, 2. Aufl., Springer
- *               (BFGS, über slc_opt.c; N9: Trust-Region-Verfahren Kap. 4, aktive Menge Kap. 16).
+ *               (BFGS, über slc_opt.c; Trust-Region-Verfahren Kap. 4, aktive Menge Kap. 16).
  *             Moré, J. J., Sorensen, D. C. (1983). Computing a trust region step. SIAM Journal on
- *               Scientific and Statistical Computing 4(3), 553–572 (N9: Teilproblem, harter Fall).
+ *               Scientific and Statistical Computing 4(3), 553–572 (Teilproblem, harter Fall).
  *             Golub, G. H., Van Loan, C. F. (2013). Matrix Computations, 4. Aufl., Johns Hopkins
- *               (N9: Jacobi-Verfahren für die Eigenzerlegung, 8.5).
+ *               (Jacobi-Verfahren für die Eigenzerlegung, 8.5).
  *             Kristensen, D., Linton, O. (2006). A closed-form estimator for the GARCH(1,1) model.
- *               Econometric Theory 22(2), 323–337 (N9: Momente der quadrierten Renditen als Startwahl).
+ *               Econometric Theory 22(2), 323–337 (Momente der quadrierten Renditen als Startwahl).
  *             Fiorentini, G., Calzolari, G., Panattoni, L. (1996). Analytic derivatives and the
  *               computation of GARCH estimates. Journal of Applied Econometrics 11(4), 399–417
- *               (N3/N4: Rekursion der Ableitungen der bedingten Varianz; N9: zweite Ableitungen).
+ *               (Rekursion der Ableitungen der bedingten Varianz; zweite Ableitungen).
  *             Griewank, A., Walther, A. (2008). Evaluating Derivatives, 2. Aufl., SIAM
- *               (N3/N4/N9: Vorwärtsmodus, von Hand geschrieben).
+ *               (Vorwärtsmodus, von Hand geschrieben).
  *             Eigener SimLev-Code: .ms_garch_unpack/.ms_garch_pack und das Raster aus
  *               r/R/ms_garch.R, .fit_garch11 aus r/R/bootstrap.R (bis zur Grenze des
  *               rugarch-Aufrufs), früher garch_filter (bis 1.0.0).
  * Konstanten: ln(2 pi) aus slc_constants.h (gen_constants.py). Verfahrensparameter (eigene Wahl,
- *             SPEZ-9 B.10): Raster wie .ms_garch_fit (GJR ergänzt in N1), maxit 500, reltol 1e-10 (GJR);
- *             sGARCH (N9) Startpunkte sg_vt, sg_beta, Trust-Region-Radius 1 am Start, maxit 200, Ende bei
+ *             Raster wie .ms_garch_fit (GJR um Punkte mit gamma < 0 ergänzt), maxit 500, reltol 1e-10 (GJR);
+ *             sGARCH Startpunkte sg_vt, sg_beta, Trust-Region-Radius 1 am Start, maxit 200, Ende bei
  *             pred <= 1e-8 |f| nach innerem Newton-Schritt bzw. pred <= 1e-15 |f|,
  *             Momente alpha 0.08, beta 0.88, gamma 0.04 wie .fit_garch11.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen (rugarch,
  *             Rsolnp nicht gelesen).
- * Prüforakel: rugarch 1.5-6 ugarchfit (nur Plausibilität, scratchpad/e94/, N1: scratchpad/en1/,
- *             N3: scratchpad/en3/, N4: scratchpad/en4/, N6: scratchpad/en6/, N9: scratchpad/en9s/).
+ * Prüforakel: rugarch 1.5-6 ugarchfit (nur Plausibilität).
  */
 #include "slc_internal.h"
 #include "slc_la_internal.h"
@@ -84,7 +83,7 @@
 
 #define GARCH_FLOOR 1e-14
 
-/* N1: GJR zusätzlich mit gamma < 0 (alpha + gamma > 0) und mit kleinem beta (fast unabhängige Reihen:
+/* GJR zusätzlich mit gamma < 0 (alpha + gamma > 0) und mit kleinem beta (fast unabhängige Reihen:
  * dort liegt das Optimum oft bei beta -> 0); die drei bisherigen Punkte zuerst. BFGS läuft bei GJR von
  * jedem Rasterpunkt (siehe sl_garch11_fit). */
 #define GRID_NG 7
@@ -149,8 +148,8 @@ void sl_garch11_unpack(int gjr, const double *th, double *par)
     par[0] = th[0];
     par[1] = exp(th[1]);
     if (gjr) {
-        /* N1: (alpha/2, (alpha + gamma)/2, beta) = exp(a, g, b) / (1 + Summe); gamma < 0 zulässig,
-         * solange alpha + gamma > 0 (bis 1.0.0: (alpha, gamma/2, beta), also gamma >= 0, F9) */
+        /* (alpha/2, (alpha + gamma)/2, beta) = exp(a, g, b) / (1 + Summe); gamma < 0 zulässig,
+         * solange alpha + gamma > 0 (bis 1.0.0: (alpha, gamma/2, beta), also gamma >= 0) */
         double e1 = exp(th[2]), e2 = exp(th[3]), e3 = exp(th[4]);
         double d = 1.0 + ((e1 + e2) + e3);
         par[2] = 2.0 * e1 / d; par[4] = 2.0 * (e2 - e1) / d; par[3] = e3 / d;
@@ -170,7 +169,7 @@ int sl_garch11_pack(sl_ctx *cx, int gjr, const double *par, double *th)
         return sl_fail(cx, SL_EARG, "garch11_pack: Parameter außerhalb des Bereichs (omega, alpha, beta > 0, alpha + gamma > 0, Persistenz < 1)");
     th[0] = par[0];
     th[1] = log(om);
-    if (gjr) { th[2] = log((al / 2.0) / r); th[3] = log(((al + ga) / 2.0) / r); th[4] = log(be / r); }   /* N1 */
+    if (gjr) { th[2] = log((al / 2.0) / r); th[3] = log(((al + ga) / 2.0) / r); th[4] = log(be / r); }
     else { th[2] = log(al / r); th[3] = log(be / r); }
     return SL_OK;
 }
@@ -219,7 +218,7 @@ static double garch_obj(const double *th, void *data)
     return nll_par(d->n, d->e, par, d->s2_init);
 }
 
-/* N3: GJR-Zielfunktion und ihr analytischer Gradient nach theta = (mu, log omega, a, g, b) in einem
+/* GJR-Zielfunktion und ihr analytischer Gradient nach theta = (mu, log omega, a, g, b) in einem
  * Durchlauf (Vorwärtsmodus, Griewank/Walther 2008; Ableitungen der GARCH-Likelihood wie bei
  * Fiorentini/Calzolari/Panattoni 1996, hier für die Umparametrisierung und GJR). Mit
  * c+ = alpha, c- = alpha + gamma (Koeffizient von eps^2 bei eps >= 0 bzw. eps < 0) gilt
@@ -229,17 +228,17 @@ static double garch_obj(const double *th, void *data)
  *   D_c-' = 1{eps_t < 0} eps_t^2 + beta D_c-,  D_beta' = s2_t + beta D_beta,
  * und dNLL = 1/2 sum q_t D_t mit q_t = (1 - eps_t^2/s2_t)/s2_t, für mu zusätzlich -eps_t/s2_t. Zum Schluss die
  * Kettenregel über omega = exp(theta_omega) und (c+/2, c-/2, beta) = softmax: d s_i / d th_j = s_i (1{i=j} - s_j).
- * N4: sGARCH (gjr = 0, theta = (mu, log omega, a, b)) mit demselben Durchlauf ohne den Asymmetrie-Term:
+ * sGARCH (gjr = 0, theta = (mu, log omega, a, b)) mit demselben Durchlauf ohne den Asymmetrie-Term:
  * c_t = alpha für beide Vorzeichen, D_alpha' = eps_t^2 + beta D_alpha (an der Stelle von D_c+, D_c- entfällt),
  * Kettenregel über (alpha, beta) = softmax.
  * Je Zeitpunkt eine Division und kein Logarithmus: sum log s2_t läuft über ein Produkt, das bei Verlassen von
  * [2^-600, 2^600] logarithmiert und neu begonnen wird (s2_t >= 1e-14 > 2^-47; s2_t > 2^400 geht einzeln in
  * die Summe, damit das Produkt endlich bleibt). Der Indikator 1{eps < 0} wird je Zeitpunkt einmal bestimmt.
  * NLL: eps_t^2/s2_t in Teilsummen über je 32 Zeitpunkte, diese und die Logarithmen kompensiert (Neumaier);
- * Summen des Gradienten einfach. Gemessen (scratchpad/en3/): relativer Fehler von f gegen eine Rechnung in
+ * Summen des Gradienten einfach. Gemessen: relativer Fehler von f gegen eine Rechnung in
  * long double höchstens 7e-16 wie bei sl_garch11_nll (Logarithmus je Zeitpunkt, alles kompensiert).
  * gjr ist in beiden Aufrufen (gjr_fg, sg_fg) eine Konstante; mit GARCH_FG_INLINE (GCC, Clang) wird die
- * Schleife je Modell eigens übersetzt (gemessen, scratchpad/en4/: GJR sonst bis 14 % langsamer als in N3,
+ * Schleife je Modell eigens übersetzt (gemessen: GJR sonst bis 14 % langsamer als mit eigener Schleife,
  * sGARCH 15 %). Die Ergebnisse hängen davon nicht ab. Nicht endlich: +Inf, g = NaN (4 bzw. 5 Werte). */
 #if defined(__GNUC__)
 #define GARCH_FG_INLINE inline __attribute__((always_inline))
@@ -306,16 +305,16 @@ static double gjr_fg(int n, const double *e, const double *th, double s2_init, d
     return garch_fg(n, e, th, s2_init, g, 1);
 }
 
-/* N4: sGARCH, theta = (mu, log omega, a, b) */
+/* sGARCH, theta = (mu, log omega, a, b) */
 static double sg_fg(int n, const double *e, const double *th, double s2_init, double *g)
 {
     return garch_fg(n, e, th, s2_init, g, 0);
 }
 
-/* N6: sGARCH-NLL an K Startpunkten (alle mit mu = m, Parameter q[j] = (omega, alpha, beta)) in einem
+/* sGARCH-NLL an K Startpunkten (alle mit mu = m, Parameter q[j] = (omega, alpha, beta)) in einem
  * Durchlauf, ohne Gradient, für die Auswahl des Startpunkts. Je Punkt dieselbe Rekursion wie nll_par, aber
  * ohne Logarithmus je Zeitpunkt (laufendes Produkt wie garch_fg) und mit unabhängigen Ketten je Punkt, die
- * der Prozessor überlappt; gemessen (scratchpad/en6/) etwa ein Drittel der Zeit von K Aufrufen nll_par.
+ * der Prozessor überlappt; gemessen etwa ein Drittel der Zeit von K Aufrufen nll_par.
  * Summen wie in garch_fg: eps^2/s2 in Teilsummen über 32 Zeitpunkte, Teilsummen und Logarithmen
  * kompensiert (Neumaier). Nicht endlich: +Inf. Genutzt nur für Vergleiche (kleinste NLL). */
 #define SCR_MAX 6
@@ -354,13 +353,13 @@ int sl_garch11_grad(sl_ctx *cx, int n, const double *e, int gjr, const double *t
     int st = check_series(cx, n, e, 1, "garch11_grad");
     if (st != SL_OK) return st;
     if (isnan(s2_init)) s2_init = var_c(n, e, mean_c(n, e));
-    *nll = gjr ? gjr_fg(n, e, theta, s2_init, grad) : sg_fg(n, e, theta, s2_init, grad);   /* N4: auch sGARCH */
+    *nll = gjr ? gjr_fg(n, e, theta, s2_init, grad) : sg_fg(n, e, theta, s2_init, grad);   /* auch sGARCH */
     return SL_OK;
 }
 
-/* ── N9: sGARCH-Fit in einem Lauf (Trust-Region-Newton mit Schranken) ── */
+/* ── sGARCH-Fit in einem Lauf (Trust-Region-Newton mit Schranken) ── */
 
-/* N9: f, Gradient und Hesse-Matrix der sGARCH-NLL nach den natürlichen Parametern u = (mu, omega, alpha, beta)
+/* f, Gradient und Hesse-Matrix der sGARCH-NLL nach den natürlichen Parametern u = (mu, omega, alpha, beta)
  * in einem Durchlauf (Vorwärtsmodus, Griewank/Walther 2008; Fiorentini/Calzolari/Panattoni 1996). Mit
  * eps_t = e_t - mu, s_{t+1} = omega + alpha eps_t^2 + beta s_t, D = ds/du, H = d^2 s/du^2 (s_1 fest):
  *   D' = beta D + (-2 alpha eps, 1, eps^2, s),
@@ -533,7 +532,7 @@ static int tr_sub(int k, const double *H, const double *g, double del, double *d
 }
 
 /* Nebenbedingungen a_j'x >= b_j: omega >= 0, alpha >= 0, beta >= 0, alpha + beta <= SG_PMAX (das Bild der
- * Abbildung von bis N8 ist das Innere dieses Bereichs, Grenzwerte inklusive) */
+ * Abbildung bis 1.1.0 ist das Innere dieses Bereichs, Grenzwerte inklusive) */
 #define SG_PMAX (1.0 - 0x1p-50)
 #define SG_TOL1 1e-8   /* Ende nach innerem Newton-Schritt mit pred <= SG_TOL1 |f| (gemessen: LL wie mit 1e-10 bis 3e-12 relativ) */
 static const double sg_a[4][4] = {{0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}, {0, 0, -1, -1}};
@@ -570,7 +569,7 @@ static int sg_null(const int *act, double *Z)
     return k;
 }
 
-/* N9: Trust-Region-Newton mit aktiver Menge (Nocedal/Wright 2006, Kap. 4 und 16.5) ab zulässigem x.
+/* Trust-Region-Newton mit aktiver Menge (Nocedal/Wright 2006, Kap. 4 und 16.5) ab zulässigem x.
  * Je Schritt: aktive Menge = Nebenbedingungen auf der Grenze, außer denen mit negativem Multiplikator
  * (g = sum lambda_j a_j, kleinste Quadrate); Teilproblem im Nullraum; der Schritt endet an der ersten
  * verletzten Nebenbedingung (diese wird dort genau erfüllt); zeigt er sofort hinaus, wird sie aktiv und der
@@ -657,7 +656,7 @@ static int sg_newton(sl_ctx *cx, const sg_prob *p, double *x, int maxit, double 
     return SL_OK;
 }
 
-/* N9: Kleinste Quadrate je beta (Momente, ohne Optimierung): eps_t^2 - beta^(t-1) s_1 ~ omega A_t + alpha B_t
+/* Kleinste Quadrate je beta (Momente, ohne Optimierung): eps_t^2 - beta^(t-1) s_1 ~ omega A_t + alpha B_t
  * (t >= 2) mit A_t = sum_{j < t-1} beta^j, B_t = sum_j beta^j eps_{t-1-j}^2, also E(eps_t^2 | Vergangenheit) = s_t
  * (vgl. Kristensen/Linton 2006 für Momentenschätzer des GARCH(1,1)). Lösung der 2 x 2-Normalgleichungen;
  * negative Werte: die bessere der beiden Einparameter-Lösungen; alpha <= SG_PMAX - beta. K <= 6 Werte von beta in
@@ -693,16 +692,16 @@ static void sg_ls(int n, const double *e, double mu, double s1, const double *be
     }
 }
 
-/* N9: Startpunkte des sGARCH-Fits (alpha, beta), omega über Varianz-Targeting: das bisherige Raster, ARCH-Punkte
+/* Startpunkte des sGARCH-Fits (alpha, beta), omega über Varianz-Targeting: das bisherige Raster, ARCH-Punkte
  * mit großem alpha (große Ausreißer) und Punkte im Inneren; dazu die Momentenschätzer sg_ls für ein Raster in beta.
- * Gewählt nach Messung auf 211 bekannten und 480 neuen simulierten Reihen (scratchpad/en9s/). */
+ * Gewählt nach Messung auf 211 bekannten und 480 neuen simulierten Reihen. */
 #define SG_NV 12
 static const double sg_vt[SG_NV][2] = {{0.05, 0.90}, {0.10, 0.85}, {0.03, 0.95}, {0.30, 0.0}, {0.60, 0.0}, {0.90, 0.0},
                                        {0.20, 0.50}, {0.35, 0.50}, {0.10, 0.70}, {0.35, 0.10}, {0.50, 0.10}, {0.20, 0.30}};
 #define SG_NB 8
 static const double sg_beta[SG_NB] = {0.0, 0.4, 0.7, 0.85, 0.92, 0.97, 0.995, 0.9999};
 
-/* N9: sGARCH-Fit in einem Optimierungslauf. Startpunkt: kleinste NLL (nll_screen, mu = Mittelwert, bei Gleichstand
+/* sGARCH-Fit in einem Optimierungslauf. Startpunkt: kleinste NLL (nll_screen, mu = Mittelwert, bei Gleichstand
  * der erste) unter den SG_NV + SG_NB Punkten oben; ausgewertet wird nur die NLL, ohne Optimierung. Von dort ein
  * Lauf sg_newton in den natürlichen Parametern mit den Schranken des Modells (omega >= 0, alpha, beta >= 0,
  * alpha + beta <= SG_PMAX). */
@@ -731,14 +730,14 @@ static int fit_sgarch(sl_ctx *cx, int n, const double *e, double m, double v, co
 
 /* ── ML-Schätzung ── */
 
-/* N3: GJR – BFGS mit analytischem Gradienten (gjr_fg) über sl_minimize von jedem Rasterpunkt mit endlicher
+/* GJR – BFGS mit analytischem Gradienten (gjr_fg) über sl_minimize von jedem Rasterpunkt mit endlicher
  * NLL (Varianz-Targeting wie bei sGARCH), der beste Lauf gewinnt, bei Gleichstand der erste. f und g kommen
  * aus einem Durchlauf: Bei jeder Anfrage nach f wird g mitgerechnet und aufbewahrt; die Anfrage nach g am
  * selben Punkt (BFGS fragt sie nach erfüllter Abnahmebedingung, in den Messungen bei 92 % der Punkte) liest
  * nur den Speicher. Alle sieben Starts laufen bis zum Ende: Ein kurzer Vorlauf mit Fortsetzung nur der besten
- * Starts sparte 13–35 %, traf aber auf neuen Reihen nicht immer das Optimum (scratchpad/en3/). (N1: von nur
- * einem Start blieb BFGS auf fast unabhängigen Reihen an der Grenze beta -> 1 hängen, scratchpad/en1/.)
- * N4–N8: sGARCH ebenso mit sg_fg und demselben Speicher (seit N9 eigener Löser, fit_sgarch). */
+ * Starts sparte 13–35 %, traf aber auf neuen Reihen nicht immer das Optimum. Von nur einem Start blieb
+ * BFGS auf fast unabhängigen Reihen an der Grenze beta -> 1 hängen, daher sieben Starts.
+ * sGARCH bis 1.1.0 ebenso mit sg_fg und demselben Speicher (seitdem eigener Löser, fit_sgarch). */
 typedef struct { const garch_data *d; double xc[5], gc[5]; int have; } fg_cache;
 
 static double fg_obj(const double *th, void *data)
@@ -792,7 +791,7 @@ static int fit_gjr(sl_ctx *cx, garch_data *d, double m, double v, const sl_opt_c
         if (!isfinite(fs[i])) continue;
         memcpy(th, ths[i], sizeof th);
         k.have = 0;
-        st = sl_minimize(cx, SL_OPT_BFGS, 5, th, NULL, NULL, &c, fg_obj, fg_gr, &k, &fmin, &cd, &iter, &nfev);   /* N3 */
+        st = sl_minimize(cx, SL_OPT_BFGS, 5, th, NULL, NULL, &c, fg_obj, fg_gr, &k, &fmin, &cd, &iter, &nfev);
         if (st != SL_OK) return st;
         if (!have || fmin < best) { memcpy(best_th, th, sizeof th); best = fmin; *code = cd; have = 1; }
     }
@@ -813,8 +812,8 @@ int sl_garch11_fit(sl_ctx *cx, int n, const double *e, int gjr, const sl_opt_ctr
     v = var_c(n, e, m);
     if (!(v > 0.0) || !isfinite(v)) return sl_fail(cx, SL_EARG, "GARCH: Varianz der Reihe ist 0");
     d.n = n; d.gjr = gjr; d.e = e; d.s2_init = v;
-    if (gjr) return fit_gjr(cx, &d, m, v, ctrl, par, loglik, code);   /* N1 */
-    return fit_sgarch(cx, n, e, m, v, ctrl, par, loglik, code);       /* N9 */
+    if (gjr) return fit_gjr(cx, &d, m, v, ctrl, par, loglik, code);
+    return fit_sgarch(cx, n, e, m, v, ctrl, par, loglik, code);
 }
 
 /* ── ganze Stufe wie .fit_garch11 ── */

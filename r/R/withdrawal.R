@@ -1832,7 +1832,9 @@ summary.SimLevWithdrawal <- function(object, probs = c(0.05, 0.25, 0.5, 0.75, 0.
 #' @rdname SimLevWithdrawal-methods
 #' @export
 print.summary.SimLevWithdrawal <- function(x, ...) {
-  q <- function(v, pct = FALSE) paste(vapply(v, function(z) if (is.na(z)) sprintf("%10s", "\u2013")
+  # Fehlwert als Gedankenstrich, rechtsbuendig auf 10 Zeichen; nicht mit sprintf("%10s"), das bei %s
+  # Bytes zaehlt (der Gedankenstrich hat in UTF-8 drei)
+  q <- function(v, pct = FALSE) paste(vapply(v, function(z) if (is.na(z)) paste0(strrep(" ", 9L), "\u2013")
                                              else if (pct) sprintf("%9.2f%%", z) else sprintf("%10.0f", z), ""), collapse = "")
   hdr <- paste(sprintf("%10s", sprintf("q%02d", round(100 * x$probs))), collapse = "")
   cat("\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n")

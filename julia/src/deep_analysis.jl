@@ -780,7 +780,7 @@ LOCF aufgefüllt hat, werden aus den Tagesrenditen für Volatilität, Sharpe, Va
 - `risk_free`: Risikoloser Zins in Prozent p. a. (1 = 1 %): Skalar (Standard 0), `data.frame(date, rate)` oder
   benannter Vektor mit Datumsnamen (jeweils Stufenfunktion: Wert gilt ab seinem Datum). Je ausgewerteter
   Rendite gilt der Zins über den Kalenderabstand zur vorigen ausgewerteten Zeile, (1 + Zins/100)^Tage/365.25 -
-  1 (Handels- und Kalendertagsdaten ergeben so dieselbe Überschussrendite; im früheren Stand (Commit 54b5b4f)
+  1 (Handels- und Kalendertagsdaten ergeben so dieselbe Überschussrendite; in 0.5.0 (Vorfassung vor den Korrekturen)
   je Zeile Zins / 100 / 365.25, bei Handelstagen also nur rund 69 % des Zinses). Mit `inflation` wird auch der
   Zins deflationiert (real). `upi`, rollierende Sharpe und M² verwenden den daraus aufgezinsten Zins p. a.
 - `rolling_years`: Fensterlänge der rollierenden Kennzahlen in Jahren (auf ganze Monate gerundet, mindestens 2

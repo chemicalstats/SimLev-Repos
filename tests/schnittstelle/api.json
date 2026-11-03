@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-02",
+ "generated": "2026-11-03",
  "tool": "tests/schnittstelle/compare_api.py",
  "sources": {
   "R": {
@@ -1047,7 +1047,7 @@
     ],
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 2433,
+    "line": 2435,
     "bases": [
      "RList",
      "OrderedDict",
@@ -1686,7 +1686,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 256,
+    "line": 257,
     "args": [
      {
       "name": "asset_class",
@@ -4426,7 +4426,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 419,
+    "line": 420,
     "args": [
      {
       "name": "args...",
@@ -5333,7 +5333,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/result.jl",
-    "line": 80,
+    "line": 81,
     "args": [
      {
       "name": "x",
@@ -5375,7 +5375,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/result.jl",
-    "line": 176,
+    "line": 177,
     "args": [
      {
       "name": "x",
@@ -8669,7 +8669,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/r/types.jl",
-    "line": 358,
+    "line": 368,
     "args": [
      {
       "name": "x",
@@ -11766,7 +11766,7 @@
     "generic": "plot",
     "class": "SimLevWithdrawal",
     "file": "r/R/withdrawal.R",
-    "line": 1870,
+    "line": 1872,
     "args": [
      {
       "name": "x",
@@ -11798,7 +11798,7 @@
     "class": "SimLevWithdrawal",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 2359,
+    "line": 2361,
     "args": [
      {
       "name": "x",
@@ -11842,7 +11842,7 @@
     "class": "SimLevWithdrawal",
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1984,
+    "line": 1986,
     "args": [
      {
       "name": "x",
@@ -11877,7 +11877,7 @@
     ],
     "defaults_known": true,
     "args_source": "source",
-    "note": "über _plot_method (Zeichenfunktion _plot_wd, julia/src/withdrawal.jl:1984)"
+    "note": "über _plot_method (Zeichenfunktion _plot_wd, julia/src/withdrawal.jl:1986)"
    },
    "abweichungen": [
     {
@@ -14652,7 +14652,7 @@
     "generic": "print",
     "class": "SimLevHorizon",
     "file": "r/R/withdrawal.R",
-    "line": 2001,
+    "line": 2003,
     "args": [
      {
       "name": "x",
@@ -14678,7 +14678,7 @@
     "class": "SimLevHorizon",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 2438,
+    "line": 2440,
     "args": [
      {
       "name": "self",
@@ -14698,7 +14698,7 @@
     "class": "SimLevHorizon",
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 2179,
+    "line": 2181,
     "args": [
      {
       "name": "x",
@@ -15587,7 +15587,7 @@
     "class": "SimLevResult",
     "module": "SimLev",
     "file": "julia/src/result.jl",
-    "line": 232,
+    "line": 233,
     "args": [
      {
       "name": "x",
@@ -16476,7 +16476,7 @@
     "generic": "print",
     "class": "SimLevWithdrawal",
     "file": "r/R/withdrawal.R",
-    "line": 1866,
+    "line": 1868,
     "args": [
      {
       "name": "x",
@@ -16528,7 +16528,7 @@
     "class": "SimLevWithdrawal",
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1978,
+    "line": 1980,
     "args": [
      {
       "name": "x",
@@ -16774,7 +16774,7 @@
     "class": "asset_config",
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 347,
+    "line": 348,
     "args": [
      {
       "name": "x",
@@ -17029,7 +17029,7 @@
     "class": "strategy",
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 769,
+    "line": 770,
     "args": [
      {
       "name": "x",
@@ -17284,7 +17284,7 @@
     "class": "summary.SimLevResult",
     "module": "SimLev",
     "file": "julia/src/result.jl",
-    "line": 233,
+    "line": 234,
     "args": [
      {
       "name": "x",
@@ -24127,7 +24127,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 610,
+    "line": 611,
     "args": [
      {
       "name": "strategy",
@@ -24294,7 +24294,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 759,
+    "line": 760,
     "args": [
      {
       "name": "strategy",
@@ -24387,7 +24387,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 677,
+    "line": 678,
     "args": [
      {
       "name": "strategy",
@@ -24473,7 +24473,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 527,
+    "line": 528,
     "args": [
      {
       "name": "strategy",
@@ -24542,7 +24542,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/r/types.jl",
-    "line": 352,
+    "line": 362,
     "args": [
      {
       "name": "object",
@@ -25057,7 +25057,7 @@
     "class": "SimLevResult",
     "module": "SimLev",
     "file": "julia/src/result.jl",
-    "line": 142,
+    "line": 143,
     "args": [
      {
       "name": "object",
@@ -25068,7 +25068,7 @@
     ],
     "defaults_known": true,
     "args_source": "source",
-    "note": "Hülle um _summary_result (julia/src/result.jl:142)"
+    "note": "Hülle um _summary_result (julia/src/result.jl:143)"
    },
    "abweichungen": [
     {
@@ -25252,7 +25252,7 @@
     "class": "asset_config",
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 811,
+    "line": 812,
     "args": [
      {
       "name": "x",
@@ -25355,7 +25355,7 @@
     "class": "strategy",
     "module": "SimLev",
     "file": "julia/src/config.jl",
-    "line": 810,
+    "line": 811,
     "args": [
      {
       "name": "x",
@@ -28028,7 +28028,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/withdrawal.R",
-    "line": 1952,
+    "line": 1954,
     "args": [
      {
       "name": "type",
@@ -28096,7 +28096,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 2449,
+    "line": 2451,
     "args": [
      {
       "name": "type",
@@ -28163,7 +28163,7 @@
     "class": null,
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 2099,
+    "line": 2101,
     "args": [
      {
       "name": "type_pos",

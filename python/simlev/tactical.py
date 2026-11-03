@@ -507,7 +507,7 @@ def momentum_score(data, assets, *, lookbacks=(1, 3, 6, 12), type=("average", "1
     Details:
         Die Rendite r_m je Zeile ist der aktuelle Kurs geteilt durch den Kurs der letzten Zeile mit Datum am oder
         vor dem Tag m Monate zuvor, minus 1 (als Anteil, 0.05 = 5 %). Hat der Zielmonat weniger Tage, gilt sein
-        letzter Tag (31.03. minus 1 Monat = 28.02. bzw. 29.02.; im früheren Stand (Commit 54b5b4f) lief der
+        letzter Tag (31.03. minus 1 Monat = 28.02. bzw. 29.02.; in 0.5.0 (Vorfassung vor den Korrekturen) lief der
         Rückblick wie bei ``seq.Date()`` in den Folgemonat über, z. B. auf den 02.03.). Lücken in den Kursen
         werden per LOCF gefüllt; Handels- und Kalendertagsdaten funktionieren gleichermassen. Grundlage für
         ``tactical_rotation()``.

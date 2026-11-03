@@ -5,14 +5,24 @@ vollständige Ports dieser R-Fassung 0.5.0 (alle Exporte, alle
 Erweiterungen) und bitgleich zu ihr; ihre Änderungen stehen in
 [`python/NEWS.md`](../python/NEWS.md) und
 [`julia/NEWS.md`](../julia/NEWS.md). Ihre Vorversionen 0.1.0 enthielten nur
-die Engine und entsprachen dem früheren Stand des R-Pakets vor den
-Korrekturen (Commit 54b5b4f, damals ebenfalls als 0.5.0 bezeichnet; im
-Folgenden „Stand 54b5b4f“). Bis zu diesem Stand blieben die 105
+die Engine und entsprachen dem früheren Stand des R-Pakets, der vor
+den Korrekturen ebenfalls als 0.5.0 bezeichnet war; im Folgenden heißt er
+„0.5.0 (Vorfassung vor den Korrekturen)“. Bis zu diesem Stand blieben die 105
 Golden-Master-Fälle der Engine bitgleich; die aktuelle Fassung 0.5.0
 korrigiert Rechenfehler der Engine, setzt die Besteuerung nach geltendem
 Recht um, gibt alle Ausgaben auf Deutsch aus und erzeugt alle 105 Fälle
 neu (siehe unten). Python 0.5.0 und Julia 0.5.0 sind zu allen Fällen
 bitgleich (seit 0.10.0 90; die 15 Fälle des entfernten Fondsmodus entfielen).
+
+## SimLev 1.4.3
+
+Patch-Update (R/Python/Julia). Ergebnisse und Meldungen bleiben unverändert, die Druckausgabe ändert sich nur durch zwei Korrekturen (unten); dazu ergänzt 1.4.3 Dateien, die in 1.4.2 fehlten, und ersetzt die Beispieldaten.
+
+- Vollständigkeit: Julia: src/result.jl (Ergebnisobjekt SimLevResult mit print und summary) fehlte in 1.4.2, obwohl SimLev.jl die Datei einbindet; das Paket ließ sich daher nicht laden. R: die Hilfeseiten momentum_score.Rd und result_analysis.Rd fehlten in 1.4.2 und sind ergänzt.
+- Beispieldaten: anlageklassen.csv neu erzeugt (in allen drei Paketen, mit Erzeugerskript). Rendite, Volatilität und Korrelation sind jetzt runde, hypothetische Annahmen zur Konstruktion eines Beispieldatensatzes (Rendite/Volatilität p. a.: Aktien 9 %/16 %, Anleihen 5 %/6 %, Rohstoffe 7 %/16 %, Managed Futures 8 %/10 %), kein Abbild realer Märkte; in 1.4.2 folgten sie Abrams, Bhaduri und Flores (2012), der Abschnitt „Beispieldaten“ in LITERATUR.md entfällt. Fallstudie im README, Tutorials und Abbildungen mit den neuen Daten neu gerechnet.
+- Druckausgabe berichtigt (Zahlen unverändert): Im Druck von withdrawal_simulation() (summary) stehen fehlende Werte („–“) wieder rechtsbündig in ihrer Spalte; die Breite wurde mit sprintf("%10s") in Bytes statt Zeichen bemessen, und der Gedankenstrich hat in UTF-8 drei Bytes, die Zeile war daher je Spalte um zwei Zeichen zu kurz (R, Python und Julia). Julia: display() hängt an Ergebnisobjekte, deren Druck schon mit einem Zeilenumbruch endet (z. B. Optimierung, Parametersuche, sharpe_deflated, overfit_pbo), keine Leerzeile mehr an; die Ausgabe gleicht damit der von R und Python.
+- Dokumentation: Versionsnamen statt Commit-Verweisen; der frühere Stand des R-Pakets heißt „0.5.0 (Vorfassung vor den Korrekturen)“ (erklärt in der Einleitung von r/NEWS.md).
+- Tests: Der Abgleich der Beispielausgaben (tests/werkzeuge/doku/beispiele.py) vergleicht auch Leerzeilen; die Entnahme-Fälle in gleichlauf und fehler sind an den berichtigten Druck angepasst.
 
 ## SimLev 1.4.2
 
@@ -148,8 +158,8 @@ Patch-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der währ
 
 ## SimLev 0.5.0
 
-Diese Fassung fasst den zunächst als 0.5.0 veröffentlichten Stand (Commit
-54b5b4f, Grundlage der Python- und Julia-Fassung 0.1.0) und alle danach
+Diese Fassung fasst den zunächst als 0.5.0 veröffentlichten Stand,
+0.5.0 (Vorfassung vor den Korrekturen), Grundlage der Python- und Julia-Fassung 0.1.0, und alle danach
 vorgenommenen Korrekturen und Erweiterungen zusammen; eine eigene
 Zwischenversion dafür gibt es nicht. Neue Funktionen sind unten aufgeführt, darunter
 `read_tax_tariff()` (Einkommensteuertarif aus einer austauschbaren Datei).
@@ -495,9 +505,9 @@ Weitere Änderungen: `plot(<SimLevWeights>, main = "Zielgewichte")` hat den Tite
 
 Rechenintensive Teile laufen jetzt in C++ (`src/research_core.cpp`); einige
 R-Schleifen sind vektorisiert. Gemessen auf 30 Jahren synthetischer
-Tagesdaten (Stand 54b5b4f → aktuelle Fassung):
+Tagesdaten, 0.5.0 (Vorfassung vor den Korrekturen) gegen die aktuelle Fassung:
 
-| Funktion | Stand 54b5b4f | aktuell |
+| Funktion | 0.5.0 (Vorfassung vor den Korrekturen) | aktuell |
 |---|---|---|
 | `cpcv_portfolio()` (3 Verfahren, 15 Aufteilungen) | 39,2 s | 0,11 s |
 | `tail_regression()` (5 Quantile, B = 100) | 14,9 s | 1,2 s |
@@ -509,7 +519,7 @@ Tagesdaten (Stand 54b5b4f → aktuelle Fassung):
 | `dcc_fit()` | 1,66 s | 0,01 s |
 | `regime_hmm()` | 1,40 s | 0,23 s |
 
-Der Code des Tutorials (Stand 54b5b4f) lief in 55 statt 115 Sekunden
+Der Code des Tutorials in der Form von 0.5.0 (Vorfassung vor den Korrekturen) lief in 55 statt 115 Sekunden
 (Wanduhrzeit einschließlich der Simulations- und Bootstrap-Läufe).
 
 * Optimierer: exakte Projektion auf den Simplex mit Grenzen (Knickpunkt-
@@ -559,7 +569,7 @@ Runde von unabhängigen Prüfern nachgeprüft.
 105 Golden-Master-Fälle; sie wurden neu erzeugt. Eine unabhängige
 Nachrechnung von 18 dieser Fälle bestätigt die neuen Werte; 27 typische
 gültige Konfigurationen (Kaufen und Halten, Sparplan, Rebalancing, Steuern,
-Gebühren, Signale) waren nach dieser Runde bitgleich zum Stand 54b5b4f. Die
+Gebühren, Signale) waren nach dieser Runde bitgleich zu 0.5.0 (Vorfassung vor den Korrekturen). Die
 Änderungen im nächsten Abschnitt betreffen viele weitere Fälle.
 
 * Fondsmodus (`tax_mode = "funds"`): Die Fondskosten wurden bei voll
@@ -662,10 +672,10 @@ Gebühren, Signale) waren nach dieser Runde bitgleich zum Stand 54b5b4f. Die
 Die Steuerlogik der Engine wurde gegen den Gesetzestext geprüft und
 angepasst; jede Änderung ist mit einer Handrechnung als Test abgesichert
 (`tests/testthat/test-tax-law.R`, `test-engine-rest.R`) und von
-unabhängigen Prüfern nachgerechnet. Insgesamt sind seit dem Stand
-54b5b4f alle 105 Golden-Master-Fälle neu erzeugt (einschließlich der Runden
-unten). Nur bei `f18` und `f19` entsprechen alle Zahlenfelder noch dem
-Stand 54b5b4f (geprüft mit der Python-Fassung).
+unabhängigen Prüfern nachgerechnet. Insgesamt sind seit 0.5.0 (Vorfassung vor den Korrekturen)
+alle 105 Golden-Master-Fälle neu erzeugt (einschließlich der Runden
+unten). Nur bei `f18` und `f19` entsprechen alle Zahlenfelder noch denen
+von 0.5.0 (Vorfassung vor den Korrekturen); geprüft mit der Python-Fassung.
 
 **Besteuerung**
 

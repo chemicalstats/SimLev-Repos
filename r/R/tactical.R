@@ -100,8 +100,8 @@ signal_state <- function(signal, initial = FALSE) {
 #' Die Rendite \eqn{r_m} je Zeile ist der aktuelle Kurs geteilt durch den
 #' Kurs der letzten Zeile mit Datum am oder vor dem Tag \eqn{m} Monate
 #' zuvor, minus 1 (als Anteil, 0.05 = 5 %). Hat der Zielmonat weniger Tage,
-#' gilt sein letzter Tag (31.03. minus 1 Monat = 28.02. bzw. 29.02.; im
-#' frueheren Stand (Commit 54b5b4f) lief der Rueckblick wie bei [seq.Date()] in den Folgemonat
+#' gilt sein letzter Tag (31.03. minus 1 Monat = 28.02. bzw. 29.02.;
+#' in 0.5.0 (Vorfassung vor den Korrekturen) lief der Rueckblick wie bei [seq.Date()] in den Folgemonat
 #' ueber, z. B. auf den 02.03.). Luecken in den Kursen werden
 #' per LOCF gefuellt; Handels- und Kalendertagsdaten funktionieren
 #' gleichermassen. Grundlage fuer [tactical_rotation()].

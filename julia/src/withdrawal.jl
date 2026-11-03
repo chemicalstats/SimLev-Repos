@@ -1940,8 +1940,10 @@ const _WLINE = repeat("═", 62)
 _fw(s) = (r = SimLev.RFmt.format(s; width = 28); r isa AbstractString ? String(r) : String(first(r)))
 
 function _print_summary_wd(io::IO, x)
+    # Fehlwert als Gedankenstrich, rechtsbündig auf 10 Zeichen; nicht mit _sp("%10s"), das wie R bei %s
+    # Bytes zählt (der Gedankenstrich hat in UTF-8 drei)
     function q(v; pct = false)
-        join([isnan(z) ? _sp("%10s", "–") : pct ? _sp("%9.2f%%", z) : _sp("%10.0f", z) for z in _dvec(v)])
+        join([isnan(z) ? " "^9 * "–" : pct ? _sp("%9.2f%%", z) : _sp("%10.0f", z) for z in _dvec(v)])
     end
     probs = _dvec(x["probs"])
     hdr = join([_sp("%10s", _sp("q%02d", _round0(100 * p))) for p in probs])

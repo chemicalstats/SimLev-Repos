@@ -2308,11 +2308,13 @@ def _summary_wd(obj, probs=(0.05, 0.25, 0.5, 0.75, 0.95)):
 
 
 def _cat_summary_wd(x) -> str:
+    # Fehlwert als Gedankenstrich, rechtsbündig auf 10 Zeichen; nicht mit _sp("%10s"), das wie R bei %s
+    # Bytes zählt (der Gedankenstrich hat in UTF-8 drei)
     def q(v, pct=False):
         out = []
         for z in np.asarray(v, dtype=np.float64).ravel():
             if math.isnan(z):
-                out.append(_sp("%10s", "–"))
+                out.append(" " * 9 + "–")
             elif pct:
                 out.append(_sp("%9.2f%%", z))
             else:

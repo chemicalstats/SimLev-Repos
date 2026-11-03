@@ -15,8 +15,9 @@ besteht, steht für beliebig viele Zeilen. Abweichungen sind Fehler. Mit --write
 werden erwartete Ausgaben ohne "..." durch die tatsächliche Ausgabe ersetzt.
 
 Steht in einer Datei die Zeile <!-- beispiele: gleiche Ausgaben -->, müssen dort außerdem
-die erwarteten Ausgaben des n-ten R-, Python- und Julia-Blocks übereinstimmen (Leerzeilen
-zählen nicht, da Julias display() bei manchen Objekten eine Leerzeile anhängt). So zeigt
+die erwarteten Ausgaben des n-ten R-, Python- und Julia-Blocks Zeile für Zeile übereinstimmen,
+einschließlich der Leerzeilen (seit 1.4.3; zuvor hängte Julias display() bei manchen Objekten eine
+Leerzeile an, die nicht zählte). So zeigt
 z. B. das Haupt-README, dass alle drei Sprachen dasselbe rechnen.
 
 .py- und .jl-Dateien werden als Ganzes ausgeführt.
@@ -142,7 +143,7 @@ def matches(exp, act):
 
 
 def check_same(rel, bl, lines):
-    """Erwartete Ausgaben der n-ten Blöcke je Sprache vergleichen (ohne Leerzeilen)."""
+    """Erwartete Ausgaben der n-ten Blöcke je Sprache vergleichen (mit Leerzeilen)."""
     if SAME not in (l.strip() for l in lines):
         return True
     sel = {lang: [b for b in bl if b["lang"] == lang] for lang in ("r", "python", "julia")}
@@ -151,7 +152,7 @@ def check_same(rel, bl, lines):
         bad.append("ungleiche Zahl der Blöcke: " + ", ".join("{} {}".format(k, len(v)) for k, v in sel.items()))
     else:
         for r, p, j in zip(sel["r"], sel["python"], sel["julia"]):
-            e = [[l for l in clean(b["expected"] or []) if l.strip()] for b in (r, p, j)]
+            e = [clean(b["expected"] or []) for b in (r, p, j)]
             if not (e[0] == e[1] == e[2]):
                 bad.append("Ausgaben nach Block Zeile {} (R), {} (Python), {} (Julia) ungleich".format(
                     r["line"], p["line"], j["line"]))

@@ -344,6 +344,16 @@ function Base.show(io::IO, ::MIME"text/plain", df::RFrame)
 end
 Base.show(io::IO, df::RFrame) = print(io, "RFrame(", nrow(df), " × ", ncol(df), ": ", join(_rf(df, :names), ", "), ")")
 
+# display() im Text (Skript, `julia datei.jl`) wie R: Endet die Druckausgabe schon mit einem Zeilenumbruch,
+# folgt keiner mehr (Julias Standard hängt immer einen an, das ergäbe eine Leerzeile, die R nicht druckt).
+function _display_text(d::TextDisplay, M::MIME"text/plain", x)
+    s = sprint(show, M, x; context = d.io)
+    print(d.io, s)
+    endswith(s, "\n") || println(d.io)
+    nothing
+end
+Base.display(d::TextDisplay, M::MIME"text/plain", x::Union{RList,RFrame}) = _display_text(d, M, x)
+
 # Voreinstellung, bis die Formatierung (RFmt) eine R-genaue print-Funktion setzt
 const _DEFAULT_PRINT = Ref{Function}((io, x) -> print(io, x))
 _default_print(io, x) = _DEFAULT_PRINT[](io, x)

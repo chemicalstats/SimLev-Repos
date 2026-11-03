@@ -361,7 +361,7 @@
 #'   Je ausgewerteter Rendite gilt der Zins ueber den Kalenderabstand zur
 #'   vorigen ausgewerteten Zeile, \eqn{(1 + Zins/100)^{Tage/365.25} - 1}
 #'   (Handels- und Kalendertagsdaten ergeben so dieselbe Ueberschussrendite;
-#'   im frueheren Stand (Commit 54b5b4f) je Zeile Zins / 100 / 365.25, bei Handelstagen also
+#'   in 0.5.0 (Vorfassung vor den Korrekturen) je Zeile Zins / 100 / 365.25, bei Handelstagen also
 #'   nur rund 69 % des Zinses). Mit \code{inflation} wird auch der Zins
 #'   deflationiert (real). \code{upi}, rollierende Sharpe und M² verwenden
 #'   den daraus aufgezinsten Zins p. a.

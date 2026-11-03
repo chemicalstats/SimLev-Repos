@@ -1,5 +1,15 @@
 # simlev (Python) – Änderungen je Version
 
+## simlev (Python) 1.4.3
+
+Patch-Update (R/Python/Julia). Ergebnisse und Meldungen bleiben unverändert, die Druckausgabe ändert sich nur durch zwei Korrekturen (unten); dazu ergänzt 1.4.3 Dateien, die in 1.4.2 fehlten, und ersetzt die Beispieldaten.
+
+- Vollständigkeit: Julia: src/result.jl (Ergebnisobjekt SimLevResult mit print und summary) fehlte in 1.4.2, obwohl SimLev.jl die Datei einbindet; das Paket ließ sich daher nicht laden. R: die Hilfeseiten momentum_score.Rd und result_analysis.Rd fehlten in 1.4.2 und sind ergänzt.
+- Beispieldaten: anlageklassen.csv neu erzeugt (in allen drei Paketen, mit Erzeugerskript). Rendite, Volatilität und Korrelation sind jetzt runde, hypothetische Annahmen zur Konstruktion eines Beispieldatensatzes (Rendite/Volatilität p. a.: Aktien 9 %/16 %, Anleihen 5 %/6 %, Rohstoffe 7 %/16 %, Managed Futures 8 %/10 %), kein Abbild realer Märkte; in 1.4.2 folgten sie Abrams, Bhaduri und Flores (2012), der Abschnitt „Beispieldaten“ in LITERATUR.md entfällt. Fallstudie im README, Tutorials und Abbildungen mit den neuen Daten neu gerechnet.
+- Druckausgabe berichtigt (Zahlen unverändert): Im Druck von withdrawal_simulation() (summary) stehen fehlende Werte („–“) wieder rechtsbündig in ihrer Spalte; die Breite wurde mit sprintf("%10s") in Bytes statt Zeichen bemessen, und der Gedankenstrich hat in UTF-8 drei Bytes, die Zeile war daher je Spalte um zwei Zeichen zu kurz (R, Python und Julia). Julia: display() hängt an Ergebnisobjekte, deren Druck schon mit einem Zeilenumbruch endet (z. B. Optimierung, Parametersuche, sharpe_deflated, overfit_pbo), keine Leerzeile mehr an; die Ausgabe gleicht damit der von R und Python.
+- Dokumentation: Versionsnamen statt Commit-Verweisen; der frühere Stand des R-Pakets heißt „0.5.0 (Vorfassung vor den Korrekturen)“ (erklärt in der Einleitung von r/NEWS.md).
+- Tests: Der Abgleich der Beispielausgaben (tests/werkzeuge/doku/beispiele.py) vergleicht auch Leerzeilen; die Entnahme-Fälle in gleichlauf und fehler sind an den berichtigten Druck angepasst.
+
 ## simlev (Python) 1.4.2
 
 Patch-Update (R/Python/Julia). Ergebnisse, Ausgaben und Meldungen bleiben unverändert; neu sind Dokumentation, Hilfe, Beispieldaten und die Gliederung der Tests.
@@ -138,7 +148,8 @@ Patch-Update (R/Python/Julia). Einzelheiten stehen im Abschnitt 0.5.0, der währ
 Die Python-Fassung ist jetzt ein vollständiger Port des R-Pakets SimLev
 0.5.0: alle 104 Exporte aus `r/NAMESPACE`, bitgleich zu R. Die Vorversion
 0.1.0 enthielt nur die Engine und entsprach dem früheren Stand des
-R-Pakets vor den Korrekturen (Commit 54b5b4f). Zwischenversionen 0.2 bis
+R-Pakets, 0.5.0 (Vorfassung vor den Korrekturen); der Name ist in der
+Einleitung von [`r/NEWS.md`](../r/NEWS.md) erklärt. Zwischenversionen 0.2 bis
 0.4 der Python-Fassung gibt es nicht; alle Änderungen sind in 0.5.0
 zusammengefasst. Die Begründungen der fachlichen Änderungen stehen in
 [`r/NEWS.md`](../r/NEWS.md), Abschnitt „SimLev 0.5.0“.
@@ -364,7 +375,7 @@ Weitere Änderungen: `plot(<SimLevWeights>, main = "Zielgewichte")` hat den Tite
 
 ### Engine (`simulation()`)
 
-* Alle Korrekturen der R-Engine nach dem Stand 54b5b4f sind übernommen,
+* Alle Korrekturen der R-Engine nach 0.5.0 (Vorfassung vor den Korrekturen) sind übernommen,
   u. a. Fondsmodus (Fondskosten je Kalendertag, High-Watermark), Splits mit
   ganzen Anteilen, später startende Assets, Sparplantermine, unsortierte,
   doppelte oder fehlende Daten, Rebalancing zum Tageskurs und die Sortino

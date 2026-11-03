@@ -1,4 +1,4 @@
-/* core/slc_rng.c – Zufallsgenerator xoshiro256** mit SplitMix64-Seeding und Sprung (SimLev core, Etappe 9)
+/* core/slc_rng.c – Zufallsgenerator xoshiro256** mit SplitMix64-Seeding und Sprung (SimLev core)
  * Verfahren:  xoshiro256** (256 Bit Zustand, Periode 2^256 - 1): lineare Zustandsabbildung
  *             mit Schiebe-, Rotations- und XOR-Schritten (a = 17, b = 45), Ausgabe
  *             rotl(s1 * 5, 7) * 9. Seeding: die ganze Zahl seed (int64, im Zweierkomplement als
@@ -29,7 +29,7 @@
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
  * Prüforakel: unabhängige Rechnung in Python mit großen Ganzzahlen; java.util.SplittableRandom
- *             (nur Ausgaben von SplitMix64); scratchpad/e91/.
+ *             (nur Ausgaben von SplitMix64).
  */
 #define SLC_NEED_JUMP
 #include "slc_internal.h"

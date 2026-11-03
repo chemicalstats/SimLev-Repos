@@ -38,6 +38,7 @@ macro _rlist_wrapper(T, classes)
             f = _dispatch(_PRINTERS, x, "print")
             f === nothing ? print(io, x) : f(io, x)
         end
+        Base.display(d::TextDisplay, M::MIME"text/plain", x::$T) = _display_text(d, M, x)
     end |> esc
 end
 

@@ -1,5 +1,5 @@
 /* core/slc_opt.c – Optimierer BFGS, projizierter BFGS, Nelder-Mead; numerischer Gradient
- *                  (SimLev core, Etappe 9.3)
+ *                  (SimLev core)
  * Verfahren:  BFGS (SL_OPT_BFGS): Quasi-Newton auf der inversen Hesse-Matrix H, Richtung p = -H g,
  *             H_0 = I und vor der ersten Aufdatierung H = (y's / y'y) I; Aufdatierung nach der
  *             inversen BFGS-Formel, ausgelassen bei y's <= 1e-10 ||s|| ||y||. Liniensuche mit den
@@ -24,7 +24,7 @@
  *             Funktionswert, bei Gleichstand bleibt die ältere Ecke vorn (die neue Ecke kommt
  *             hinter alle Ecken mit gleichem Wert; beim Schrumpfen bleibt x_1 vorn).
  *             Startsimplex x_0 + delta_i e_i mit delta_i = 0.1 max(|x_0i|, 1) (eigene Wahl).
- *             Numerischer Gradient (B.9): zentrale Differenzen mit h_i = eps^(1/3) max(|x_i|, 1);
+ *             Numerischer Gradient: zentrale Differenzen mit h_i = eps^(1/3) max(|x_i|, 1);
  *             reicht der Kasten nicht, einseitig mit h_i = eps^(1/2) max(|x_i|, 1) zur
  *             zulässigen Seite (ist das Intervall noch schmaler: Differenz über seine Enden;
  *             l_i = u_i: 0). Geteilt wird durch die tatsächlich dargestellte Differenz der
@@ -60,10 +60,10 @@
  *             (Nocedal/Wright Kap. 3.1, 6.1); rho, chi, gamma, sigma (Lagarias u. a. 1998, Gl. 2.1).
  *             Eigene, dokumentierte Wahl: Verdoppeln beim Klammern, höchstens 40 Versuche je
  *             Liniensuche, Schranke 1e-3 der eps-aktiven Menge, Startsimplex 0.1 max(|x|, 1),
- *             Auslassregel 1e-10 (SPEZ-9 B.8).
+ *             Auslassregel 1e-10.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
- * Prüforakel: R 4.3.3 optim (Nelder-Mead, BFGS, L-BFGS-B) als Black Box; scratchpad/e93/.
+ * Prüforakel: R 4.3.3 optim (Nelder-Mead, BFGS, L-BFGS-B) als Black Box.
  */
 #include "slc_internal.h"
 #include "slc_opt.h"
@@ -250,7 +250,7 @@ static int interrupted(sl_ctx *cx, W *w)
     return 0;
 }
 
-/* ── numerischer Gradient (B.9) ──────────────────────────────────────────── */
+/* ── numerischer Gradient ──────────────────────────────────────────── */
 
 enum { FD_ZERO = 0, FD_CENTRAL = 1, FD_FORWARD = 2, FD_BACKWARD = 3, FD_ENDS = 4 };
 

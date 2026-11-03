@@ -1,4 +1,4 @@
-/* core/slc_la_internal.h – interne Hilfen der Etappe 9.2 (SimLev core): kompensierte Summen, NA
+/* core/slc_la_internal.h – interne Hilfen der linearen Algebra (SimLev core): kompensierte Summen, NA
  * Verfahren:  Summation nach Neumaier (1974): neben der laufenden Summe s wird der Rundungsfehler
  *             jeder Addition exakt bestimmt (für |s| >= |a|: (s - (s + a)) + a, sonst
  *             (a - (s + a)) + s) und in c aufsummiert; Ergebnis s + c. Skalarprodukte summieren die

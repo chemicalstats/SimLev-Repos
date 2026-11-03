@@ -99,7 +99,7 @@ allen vier Anlageklassen mit der klassischen Mischung 60/40 aus Aktien und
 Anleihen.
 
 Aus der Ausgangsfrage ergeben sich mehrere Teilfragen. Am Anfang steht das
-Fundament: Was steckt in den Daten, und stimmen sie mit ihrer Quelle
+Fundament: Was steckt in den Daten, und stimmen sie mit ihren Annahmen
 überein? Welche Produkte stehen für die vier Anlageklassen, und wie werden
 sie besteuert? Danach geht es um die Ansparphase selbst – wie sich beide
 Mischungen über 20 Jahre mit Sparplan, Kosten, Rebalancing und Steuer
@@ -122,10 +122,12 @@ Jeder der folgenden Abschnitte zeigt dazu den Code, das Ergebnis und eine
 Einordnung.
 
 > **Synthetische Daten.** Die Kurse sind keine Marktdaten. Rendite,
-> Volatilität und Korrelation der vier Reihen stammen aus der Literatur
-> (Abschnitt „Die Daten“), der Rest ist Zufall: Die Reihen haben keine
-> Krisen, keine Regime und keine dicken Ränder. Alle Zahlen hier zeigen,
-> *wie* SimLev rechnet, nicht, was ein Anleger erwarten kann.
+> Volatilität und Korrelation der vier Reihen sind hypothetische Annahmen
+> zur Konstruktion eines Beispieldatensatzes (Abschnitt „Die Daten“); ihre
+> Größenordnungen gelten als allgemein bekannt, sie bilden aber keinen
+> realen Markt ab. Der Rest ist Zufall: Die Reihen haben keine Krisen,
+> keine Regime und keine dicken Ränder. Alle Zahlen hier zeigen, *wie*
+> SimLev rechnet, nicht, was ein Anleger erwarten kann.
 
 <!-- beispiele: gleiche Ausgaben -->
 Der Code steht in R, Python und Julia, jeweils aufklappbar. Alle Blöcke
@@ -154,22 +156,22 @@ Kurse an allen Werktagen vom 3. Januar 2005 bis 31. Dezember 2024, je
 Reihe mit Startwert 100. Erzeugt hat sie das Skript
 [`r/inst/extdata/anlageklassen.R`](r/inst/extdata/anlageklassen.R): tägliche
 Logrenditen aus einer Normalverteilung, deren Mittelwert,
-Standardabweichung und Korrelation über die 20 Jahre genau den Kennzahlen
-von Abrams, Bhaduri und Flores (2012, Exhibit 4 und 7; siehe
-[`LITERATUR.md`](LITERATUR.md#beispieldaten)) entsprechen. Dort
-sind es US-Indizes in USD bis Dezember 2011; hier gelten die Kurse
+Standardabweichung und Korrelation über die 20 Jahre genau den folgenden
+Vorgaben entsprechen. Die Vorgaben sind runde, hypothetische Annahmen zur
+Konstruktion eines Beispieldatensatzes; ihre Größenordnungen gelten als
+allgemein bekannt, sie sind kein Abbild realer Märkte. Die Kurse gelten
 vereinfachend als EUR-Kurse.
 
-| Spalte | Anlageklasse | Index der Quelle | Rendite p. a. | Volatilität p. a. |
-|---|---|---|---:|---:|
-| `AKTIEN` | Aktien | S&P 500 Total Return | 11,06 % | 15,62 % |
-| `ANLEIHEN` | Anleihen | Barclays Capital Bond Composite US | 6,41 % | 3,45 % |
-| `ROHSTOFFE` | Rohstoffe | S&P GSCI Total Return | 6,32 % | 19,56 % |
-| `MFUTURES` | Managed Futures | Barclay BTOP 50 | 8,99 % | 10,47 % |
+| Spalte | Anlageklasse | Rendite p. a. | Volatilität p. a. |
+|---|---|---:|---:|
+| `AKTIEN` | Aktien | 9 % | 16 % |
+| `ANLEIHEN` | Anleihen | 5 % | 6 % |
+| `ROHSTOFFE` | Rohstoffe | 7 % | 16 % |
+| `MFUTURES` | Managed Futures (Trendfolge) | 8 % | 10 % |
 
-Korrelationen laut Quelle: Aktien–Anleihen −0,10, Aktien–Rohstoffe 0,17,
-Aktien–Managed Futures −0,04, Anleihen–Rohstoffe −0,03,
-Anleihen–Managed Futures 0,20, Rohstoffe–Managed Futures 0,12.
+Angenommene Korrelationen: Aktien–Anleihen 0,10, Aktien–Rohstoffe 0,05,
+Aktien–Managed Futures 0,00, Anleihen–Rohstoffe −0,15,
+Anleihen–Managed Futures −0,05, Rohstoffe–Managed Futures 0,10.
 
 SimLev erwartet eine Tabelle mit einer Spalte `date` und je Asset einer
 Spalte mit dem Kursniveau. `series_check()` prüft sie auf Lücken, Sprünge
@@ -201,7 +203,7 @@ SimLev-Datenprüfung
     AKTIEN 2005-01-03 2024-12-31 5217       0     0      0      0         1
   ANLEIHEN 2005-01-03 2024-12-31 5217       0     0      0      0         1
  ROHSTOFFE 2005-01-03 2024-12-31 5217       0     0      0      0         1
-  MFUTURES 2005-01-03 2024-12-31 5217       0     0      0      0         1
+  MFUTURES 2005-01-03 2024-12-31 5217       0     0      0      0         2
  nonpositive
            0
            0
@@ -216,14 +218,14 @@ Keine Auffälligkeiten.
   Zeitraum: 2005-01-03 bis 2024-12-31 (20.0 Jahre)
 
                                   AKTIEN    ANLEIHEN   ROHSTOFFE    MFUTURES
-  Gesamtrendite                 714.99 %    246.46 %    240.64 %    459.41 %
-  CAGR (TWR)                     11.06 %      6.41 %      6.32 %      8.99 %
+  Gesamtrendite                 460.44 %    165.33 %    286.97 %    366.10 %
+  CAGR (TWR)                      9.00 %      5.00 %      7.00 %      8.00 %
   MWRR (geldgewichtet)                 –           –           –           –
-  Volatilität p. a.              15.63 %      3.45 %     19.57 %     10.48 %
-  Sharpe                           0.750       1.818       0.411       0.875
-  Sortino                          1.102       2.832       0.598       1.299
-  Calmar                           0.377       1.420       0.173       0.369
-  Max. Drawdown                  29.33 %      4.52 %     36.48 %     24.36 %
+  Volatilität p. a.              16.01 %      6.00 %     16.01 %     10.01 %
+  Sharpe                           0.619       0.843       0.503       0.820
+  Sortino                          0.903       1.248       0.734       1.213
+  Calmar                           0.272       0.311       0.258       0.272
+  Max. Drawdown                  33.08 %     16.11 %     27.13 %     29.45 %
 ...
 ```
 
@@ -258,7 +260,7 @@ SimLev-Datenprüfung
     AKTIEN 2005-01-03 2024-12-31 5217       0     0      0      0         1
   ANLEIHEN 2005-01-03 2024-12-31 5217       0     0      0      0         1
  ROHSTOFFE 2005-01-03 2024-12-31 5217       0     0      0      0         1
-  MFUTURES 2005-01-03 2024-12-31 5217       0     0      0      0         1
+  MFUTURES 2005-01-03 2024-12-31 5217       0     0      0      0         2
  nonpositive
            0
            0
@@ -273,14 +275,14 @@ Keine Auffälligkeiten.
   Zeitraum: 2005-01-03 bis 2024-12-31 (20.0 Jahre)
 
                                   AKTIEN    ANLEIHEN   ROHSTOFFE    MFUTURES
-  Gesamtrendite                 714.99 %    246.46 %    240.64 %    459.41 %
-  CAGR (TWR)                     11.06 %      6.41 %      6.32 %      8.99 %
+  Gesamtrendite                 460.44 %    165.33 %    286.97 %    366.10 %
+  CAGR (TWR)                      9.00 %      5.00 %      7.00 %      8.00 %
   MWRR (geldgewichtet)                 –           –           –           –
-  Volatilität p. a.              15.63 %      3.45 %     19.57 %     10.48 %
-  Sharpe                           0.750       1.818       0.411       0.875
-  Sortino                          1.102       2.832       0.598       1.299
-  Calmar                           0.377       1.420       0.173       0.369
-  Max. Drawdown                  29.33 %      4.52 %     36.48 %     24.36 %
+  Volatilität p. a.              16.01 %      6.00 %     16.01 %     10.01 %
+  Sharpe                           0.619       0.843       0.503       0.820
+  Sortino                          0.903       1.248       0.734       1.213
+  Calmar                           0.272       0.311       0.258       0.272
+  Max. Drawdown                  33.08 %     16.11 %     27.13 %     29.45 %
 ...
 ```
 
@@ -311,7 +313,7 @@ SimLev-Datenprüfung
     AKTIEN 2005-01-03 2024-12-31 5217       0     0      0      0         1
   ANLEIHEN 2005-01-03 2024-12-31 5217       0     0      0      0         1
  ROHSTOFFE 2005-01-03 2024-12-31 5217       0     0      0      0         1
-  MFUTURES 2005-01-03 2024-12-31 5217       0     0      0      0         1
+  MFUTURES 2005-01-03 2024-12-31 5217       0     0      0      0         2
  nonpositive
            0
            0
@@ -326,25 +328,27 @@ Keine Auffälligkeiten.
   Zeitraum: 2005-01-03 bis 2024-12-31 (20.0 Jahre)
 
                                   AKTIEN    ANLEIHEN   ROHSTOFFE    MFUTURES
-  Gesamtrendite                 714.99 %    246.46 %    240.64 %    459.41 %
-  CAGR (TWR)                     11.06 %      6.41 %      6.32 %      8.99 %
+  Gesamtrendite                 460.44 %    165.33 %    286.97 %    366.10 %
+  CAGR (TWR)                      9.00 %      5.00 %      7.00 %      8.00 %
   MWRR (geldgewichtet)                 –           –           –           –
-  Volatilität p. a.              15.63 %      3.45 %     19.57 %     10.48 %
-  Sharpe                           0.750       1.818       0.411       0.875
-  Sortino                          1.102       2.832       0.598       1.299
-  Calmar                           0.377       1.420       0.173       0.369
-  Max. Drawdown                  29.33 %      4.52 %     36.48 %     24.36 %
+  Volatilität p. a.              16.01 %      6.00 %     16.01 %     10.01 %
+  Sharpe                           0.619       0.843       0.503       0.820
+  Sortino                          0.903       1.248       0.734       1.213
+  Calmar                           0.272       0.311       0.258       0.272
+  Max. Drawdown                  33.08 %     16.11 %     27.13 %     29.45 %
 ...
 ```
 
 </details>
 
 **Einordnung:** Die Daten sind lückenlos, und CAGR sowie
-Volatilität treffen die Quelle bis auf die zweite Nachkommastelle. Ohne
-risikolosen Zins hat der Anleihe-Index mit 1,82 die mit Abstand höchste
-Sharpe Ratio und den kleinsten Drawdown (4,52 %); die Rohstoffe haben bei
-kleinerer Rendite als die Aktien den tiefsten Drawdown (36,48 %) und die
-längste Durststrecke (2.153 Tage).
+Volatilität treffen die Vorgaben bis auf 0,01 Prozentpunkte. Ohne
+risikolosen Zins haben die Anleihen mit 0,843 die höchste Sharpe Ratio,
+knapp vor den Managed Futures (0,820), und den kleinsten Drawdown
+(16,11 %). Den tiefsten Drawdown haben die Aktien (33,08 %); bei den
+Managed Futures (29,45 %) ist er trotz kleinerer Volatilität tiefer als bei
+den Rohstoffen (27,13 %). Anders als CAGR und Volatilität ist der Drawdown
+nicht vorgegeben, er folgt aus dem Verlauf der einen gezogenen Reihe.
 
 ### Anlageklassen und ihre Besteuerung
 
@@ -477,14 +481,13 @@ Ordergebühren (hier 1 EUR je Order, Sparplanraten ohne Gebühr),
 Umschichten (einmal im Jahr, aber nur bei mehr als 5 Prozentpunkten
 Abweichung) und `tax_profile()` für die Steuer: Abgeltungsteuer mit
 Solidaritätszuschlag (26,375 %), Sparer-Pauschbetrag 1.000 EUR und
-Vorabpauschale mit dem Basiszins 2024 von 2,29 % (BMF-Schreiben vom
-5. Januar 2024) für alle Jahre.
+Vorabpauschale mit einem angenommenen Basiszins von 2,5 % für alle Jahre.
 
 <details>
 <summary><b>R</b></summary>
 
 ```r
-steuer <- tax_profile(base_rate = 2.29)
+steuer <- tax_profile(base_rate = 2.5)
 anspar <- function(strategie, tax = steuer, rebalance = rebalance_plan(1, unit = "year", thresh = 5)) {
   simulation(data, strategie, start_value = 10000,
              costs     = sim_costs(order_fee = 1, dca_fee = 0),
@@ -504,42 +507,42 @@ res_mix
 
   Wertentwicklung
   ─────────────────────
-  CAGR:             +8.89% (geldgewichtet, XIRR)
-  TTWROR:           +8.94% (zeitgewichtet)
-  Endwert:          243709.48 EUR
+  CAGR:             +7.43% (geldgewichtet, XIRR)
+  TTWROR:           +7.58% (zeitgewichtet)
+  Endwert:          201375.05 EUR
   Eingezahlt:       81700.00 EUR (Start + Sparraten)
 
   Risiko (zeitgewichtet, ohne Einzahlungseffekte)
   ─────────────────────
-  Max. Drawdown:    12.81%
-  Mittl. Drawdown:  3.33%
-  Ulcer Index:      0.0411
-  Längster DD:      679 Tage
-  Mittl. Erholung:  27 Tage
+  Max. Drawdown:    12.59%
+  Mittl. Drawdown:  3.48%
+  Ulcer Index:      0.0427
+  Längster DD:      712 Tage
+  Mittl. Erholung:  30 Tage
 
   Kennzahlen
   ─────────────────────
-  Sharpe:           +1.158
-  Sortino:          +1.744
-  Calmar:           +0.698
-  Omega:            +1.198
-  Gain/Pain:        +0.198
-  Serenity:         +17.009
-  Martin Ratio:     +2.179
+  Sharpe:           +1.016
+  Sortino:          +1.519
+  Calmar:           +0.602
+  Omega:            +1.171
+  Gain/Pain:        +0.171
+  Serenity:         +14.076
+  Martin Ratio:     +1.773
   (Calmar, Serenity, Martin mit TTWROR)
 
   Verteilung
   ─────────────────────
-  Mittel je Tag:    +0.0340%
-  Std.-Abw. je Tag: 0.4737%
-  Schiefe:          0.024
-  Wölbung:          0.003
+  Mittel je Tag:    +0.0291%
+  Std.-Abw. je Tag: 0.4622%
+  Schiefe:          0.023
+  Wölbung:          -0.012
 
   Steuern
   ─────────────────────
-  Gezahlte Steuern: 8956.40 EUR
+  Gezahlte Steuern: 6716.09 EUR
   Verlustvortrag:   0.00 EUR (§ 20) / 0.00 EUR (§ 23)
-  SPB genutzt:      14098.91 EUR (Ersparnis: 3718.59 EUR)
+  SPB genutzt:      13768.74 EUR (Ersparnis: 3631.51 EUR)
 
 ══════════════════════════════════════════════════════════════
 ```
@@ -550,7 +553,7 @@ res_mix
 <summary><b>Python</b></summary>
 
 ```python
-steuer = simlev.tax_profile(base_rate=2.29)
+steuer = simlev.tax_profile(base_rate=2.5)
 def anspar(strategie, tax=steuer, rebalance=simlev.rebalance_plan(span=1, unit="year", thresh=5)):
     return simlev.simulation(data, strategie, start_value=10000,
                              costs=simlev.sim_costs(order_fee=1, dca_fee=0),
@@ -569,42 +572,42 @@ print(res_mix)
 
   Wertentwicklung
   ─────────────────────
-  CAGR:             +8.89% (geldgewichtet, XIRR)
-  TTWROR:           +8.94% (zeitgewichtet)
-  Endwert:          243709.48 EUR
+  CAGR:             +7.43% (geldgewichtet, XIRR)
+  TTWROR:           +7.58% (zeitgewichtet)
+  Endwert:          201375.05 EUR
   Eingezahlt:       81700.00 EUR (Start + Sparraten)
 
   Risiko (zeitgewichtet, ohne Einzahlungseffekte)
   ─────────────────────
-  Max. Drawdown:    12.81%
-  Mittl. Drawdown:  3.33%
-  Ulcer Index:      0.0411
-  Längster DD:      679 Tage
-  Mittl. Erholung:  27 Tage
+  Max. Drawdown:    12.59%
+  Mittl. Drawdown:  3.48%
+  Ulcer Index:      0.0427
+  Längster DD:      712 Tage
+  Mittl. Erholung:  30 Tage
 
   Kennzahlen
   ─────────────────────
-  Sharpe:           +1.158
-  Sortino:          +1.744
-  Calmar:           +0.698
-  Omega:            +1.198
-  Gain/Pain:        +0.198
-  Serenity:         +17.009
-  Martin Ratio:     +2.179
+  Sharpe:           +1.016
+  Sortino:          +1.519
+  Calmar:           +0.602
+  Omega:            +1.171
+  Gain/Pain:        +0.171
+  Serenity:         +14.076
+  Martin Ratio:     +1.773
   (Calmar, Serenity, Martin mit TTWROR)
 
   Verteilung
   ─────────────────────
-  Mittel je Tag:    +0.0340%
-  Std.-Abw. je Tag: 0.4737%
-  Schiefe:          0.024
-  Wölbung:          0.003
+  Mittel je Tag:    +0.0291%
+  Std.-Abw. je Tag: 0.4622%
+  Schiefe:          0.023
+  Wölbung:          -0.012
 
   Steuern
   ─────────────────────
-  Gezahlte Steuern: 8956.40 EUR
+  Gezahlte Steuern: 6716.09 EUR
   Verlustvortrag:   0.00 EUR (§ 20) / 0.00 EUR (§ 23)
-  SPB genutzt:      14098.91 EUR (Ersparnis: 3718.59 EUR)
+  SPB genutzt:      13768.74 EUR (Ersparnis: 3631.51 EUR)
 
 ══════════════════════════════════════════════════════════════
 ```
@@ -615,7 +618,7 @@ print(res_mix)
 <summary><b>Julia</b></summary>
 
 ```julia
-steuer = tax_profile(; base_rate = 2.29)
+steuer = tax_profile(; base_rate = 2.5)
 anspar(strategie; tax = steuer, rebalance = rebalance_plan(1; unit = "year", thresh = 5)) =
     simulation(data, strategie; start_value = 10000,
                costs     = sim_costs(; order_fee = 1, dca_fee = 0),
@@ -634,53 +637,53 @@ display(res_mix)
 
   Wertentwicklung
   ─────────────────────
-  CAGR:             +8.89% (geldgewichtet, XIRR)
-  TTWROR:           +8.94% (zeitgewichtet)
-  Endwert:          243709.48 EUR
+  CAGR:             +7.43% (geldgewichtet, XIRR)
+  TTWROR:           +7.58% (zeitgewichtet)
+  Endwert:          201375.05 EUR
   Eingezahlt:       81700.00 EUR (Start + Sparraten)
 
   Risiko (zeitgewichtet, ohne Einzahlungseffekte)
   ─────────────────────
-  Max. Drawdown:    12.81%
-  Mittl. Drawdown:  3.33%
-  Ulcer Index:      0.0411
-  Längster DD:      679 Tage
-  Mittl. Erholung:  27 Tage
+  Max. Drawdown:    12.59%
+  Mittl. Drawdown:  3.48%
+  Ulcer Index:      0.0427
+  Längster DD:      712 Tage
+  Mittl. Erholung:  30 Tage
 
   Kennzahlen
   ─────────────────────
-  Sharpe:           +1.158
-  Sortino:          +1.744
-  Calmar:           +0.698
-  Omega:            +1.198
-  Gain/Pain:        +0.198
-  Serenity:         +17.009
-  Martin Ratio:     +2.179
+  Sharpe:           +1.016
+  Sortino:          +1.519
+  Calmar:           +0.602
+  Omega:            +1.171
+  Gain/Pain:        +0.171
+  Serenity:         +14.076
+  Martin Ratio:     +1.773
   (Calmar, Serenity, Martin mit TTWROR)
 
   Verteilung
   ─────────────────────
-  Mittel je Tag:    +0.0340%
-  Std.-Abw. je Tag: 0.4737%
-  Schiefe:          0.024
-  Wölbung:          0.003
+  Mittel je Tag:    +0.0291%
+  Std.-Abw. je Tag: 0.4622%
+  Schiefe:          0.023
+  Wölbung:          -0.012
 
   Steuern
   ─────────────────────
-  Gezahlte Steuern: 8956.40 EUR
+  Gezahlte Steuern: 6716.09 EUR
   Verlustvortrag:   0.00 EUR (§ 20) / 0.00 EUR (§ 23)
-  SPB genutzt:      14098.91 EUR (Ersparnis: 3718.59 EUR)
+  SPB genutzt:      13768.74 EUR (Ersparnis: 3631.51 EUR)
 
 ══════════════════════════════════════════════════════════════
 ```
 
 </details>
 
-**Einordnung:** Aus 81.700 EUR Einzahlungen werden 243.709 EUR,
-eine geldgewichtete Rendite (XIRR) von 8,89 % p. a. Der größte Rückgang
-des zeitgewichteten Wertindex beträgt 12,81 %. Bis zum Ende der
-Ansparphase hat die Mischung 8.956 EUR Steuern gezahlt; der
-Sparer-Pauschbetrag hat 14.099 EUR Erträge freigestellt und 3.719 EUR
+**Einordnung:** Aus 81.700 EUR Einzahlungen werden 201.375 EUR,
+eine geldgewichtete Rendite (XIRR) von 7,43 % p. a. Der größte Rückgang
+des zeitgewichteten Wertindex beträgt 12,59 %. Bis zum Ende der
+Ansparphase hat die Mischung 6.716 EUR Steuern gezahlt; der
+Sparer-Pauschbetrag hat 13.769 EUR Erträge freigestellt und 3.632 EUR
 Steuer gespart. Die Gewinne, die noch im Depot stecken, sind dabei noch
 nicht versteuert.
 
@@ -706,12 +709,12 @@ zeige(Endwert_ohne_Steuer      = tail(ohne$worth, 1),
 ```
 
 ```text
-Endwert_ohne_Steuer               251714.49
-Endwert_mit_Steuer                243709.48
-Steuern_Mischung                    8956.40
-Steuern_60_40                       4104.75
-Steuern_Mischung_ohne_Reb           1828.71
-Steuern_60_40_ohne_Reb              2436.70
+Endwert_ohne_Steuer               210345.41
+Endwert_mit_Steuer                201375.05
+Steuern_Mischung                    6716.09
+Steuern_60_40                       3237.10
+Steuern_Mischung_ohne_Reb            935.39
+Steuern_60_40_ohne_Reb              1200.41
 ```
 
 </details>
@@ -730,12 +733,12 @@ zeige(Endwert_ohne_Steuer=ohne.worth[-1],
 ```
 
 ```text
-Endwert_ohne_Steuer               251714.49
-Endwert_mit_Steuer                243709.48
-Steuern_Mischung                    8956.40
-Steuern_60_40                       4104.75
-Steuern_Mischung_ohne_Reb           1828.71
-Steuern_60_40_ohne_Reb              2436.70
+Endwert_ohne_Steuer               210345.41
+Endwert_mit_Steuer                201375.05
+Steuern_Mischung                    6716.09
+Steuern_60_40                       3237.10
+Steuern_Mischung_ohne_Reb            935.39
+Steuern_60_40_ohne_Reb              1200.41
 ```
 
 </details>
@@ -754,21 +757,21 @@ zeige(Endwert_ohne_Steuer  = ohne.worth[end],
 ```
 
 ```text
-Endwert_ohne_Steuer               251714.49
-Endwert_mit_Steuer                243709.48
-Steuern_Mischung                    8956.40
-Steuern_60_40                       4104.75
-Steuern_Mischung_ohne_Reb           1828.71
-Steuern_60_40_ohne_Reb              2436.70
+Endwert_ohne_Steuer               210345.41
+Endwert_mit_Steuer                201375.05
+Steuern_Mischung                    6716.09
+Steuern_60_40                       3237.10
+Steuern_Mischung_ohne_Reb            935.39
+Steuern_60_40_ohne_Reb              1200.41
 ```
 
 </details>
 
-**Einordnung:** Ohne Steuer stünden am Ende 251.714 EUR im
-Depot, 8.005 EUR mehr. Die Mischung zahlt mehr als doppelt so viel Steuer
-wie 60/40 (8.956 gegen 4.105 EUR). Das liegt am Rebalancing: Ohne
-Umschichten zahlt die Mischung sogar weniger als 60/40 (1.829 gegen
-2.437 EUR). Rebalancing verkauft, was gestiegen ist, und realisiert damit
+**Einordnung:** Ohne Steuer stünden am Ende 210.345 EUR im
+Depot, 8.970 EUR mehr. Die Mischung zahlt mehr als doppelt so viel Steuer
+wie 60/40 (6.716 gegen 3.237 EUR). Das liegt am Rebalancing: Ohne
+Umschichten zahlt die Mischung sogar weniger als 60/40 (935 gegen
+1.200 EUR). Rebalancing verkauft, was gestiegen ist, und realisiert damit
 Gewinne; die des Rohstoff-ETC sind ohne Teilfreistellung voll
 steuerpflichtig. Mit
 `income = income_tariff()` und `guenstigerpruefung = TRUE` rechnet
@@ -798,30 +801,30 @@ plot(res_mix)
   Zeitraum: 2005-01-03 bis 2024-12-31 (20.0 Jahre)
 
                                klassisch         mix
-  Gesamtrendite                 484.35 %    454.31 %
-  CAGR (TWR)                      9.23 %      8.94 %
-  MWRR (geldgewichtet)            8.60 %      8.89 %
-  Volatilität p. a.               9.36 %      7.65 %
-  Sharpe                           0.990       1.158
-  Sortino                          1.475       1.744
-  Calmar                           0.552       0.698
-  Max. Drawdown                  16.73 %     12.81 %
+  Gesamtrendite                 323.25 %    330.70 %
+  CAGR (TWR)                      7.48 %      7.58 %
+  MWRR (geldgewichtet)            6.72 %      7.43 %
+  Volatilität p. a.              10.25 %      7.47 %
+  Sharpe                           0.756       1.016
+  Sortino                          1.112       1.519
+  Calmar                           0.372       0.602
+  Max. Drawdown                  20.10 %     12.59 %
 ...
-  Steuern                          4 105       8 956
+  Steuern                          3 237       6 716
 
   Gegen Benchmark 'klassisch'
                                      mix
-  Alpha p. a.                     2.01 %
-  Beta                             0.739
-  Korrelation                      0.904
-  R²                               0.817
-  Up-Capture                       0.810
-  Down-Capture                     0.649
-  Capture Spread                   0.161
-  Aktive Rendite p. a.           -0.29 %
-  Tracking Error                  4.09 %
-  Information Ratio               -0.100
-  M² (Modigliani)                10.84 %
+  Alpha p. a.                     2.44 %
+  Beta                             0.664
+  Korrelation                      0.912
+  R²                               0.832
+  Up-Capture                       0.748
+  Down-Capture                     0.569
+  Capture Spread                   0.179
+  Aktive Rendite p. a.            0.09 %
+  Tracking Error                  4.60 %
+  Information Ratio               -0.035
+  M² (Modigliani)                10.41 %
 ══════════════════════════════════════════════════════════════
 ```
 
@@ -843,30 +846,30 @@ res_mix.plot()
   Zeitraum: 2005-01-03 bis 2024-12-31 (20.0 Jahre)
 
                                klassisch         mix
-  Gesamtrendite                 484.35 %    454.31 %
-  CAGR (TWR)                      9.23 %      8.94 %
-  MWRR (geldgewichtet)            8.60 %      8.89 %
-  Volatilität p. a.               9.36 %      7.65 %
-  Sharpe                           0.990       1.158
-  Sortino                          1.475       1.744
-  Calmar                           0.552       0.698
-  Max. Drawdown                  16.73 %     12.81 %
+  Gesamtrendite                 323.25 %    330.70 %
+  CAGR (TWR)                      7.48 %      7.58 %
+  MWRR (geldgewichtet)            6.72 %      7.43 %
+  Volatilität p. a.              10.25 %      7.47 %
+  Sharpe                           0.756       1.016
+  Sortino                          1.112       1.519
+  Calmar                           0.372       0.602
+  Max. Drawdown                  20.10 %     12.59 %
 ...
-  Steuern                          4 105       8 956
+  Steuern                          3 237       6 716
 
   Gegen Benchmark 'klassisch'
                                      mix
-  Alpha p. a.                     2.01 %
-  Beta                             0.739
-  Korrelation                      0.904
-  R²                               0.817
-  Up-Capture                       0.810
-  Down-Capture                     0.649
-  Capture Spread                   0.161
-  Aktive Rendite p. a.           -0.29 %
-  Tracking Error                  4.09 %
-  Information Ratio               -0.100
-  M² (Modigliani)                10.84 %
+  Alpha p. a.                     2.44 %
+  Beta                             0.664
+  Korrelation                      0.912
+  R²                               0.832
+  Up-Capture                       0.748
+  Down-Capture                     0.569
+  Capture Spread                   0.179
+  Aktive Rendite p. a.            0.09 %
+  Tracking Error                  4.60 %
+  Information Ratio               -0.035
+  M² (Modigliani)                10.41 %
 ══════════════════════════════════════════════════════════════
 ```
 
@@ -888,30 +891,30 @@ plot_dashboard(res_mix)
   Zeitraum: 2005-01-03 bis 2024-12-31 (20.0 Jahre)
 
                                klassisch         mix
-  Gesamtrendite                 484.35 %    454.31 %
-  CAGR (TWR)                      9.23 %      8.94 %
-  MWRR (geldgewichtet)            8.60 %      8.89 %
-  Volatilität p. a.               9.36 %      7.65 %
-  Sharpe                           0.990       1.158
-  Sortino                          1.475       1.744
-  Calmar                           0.552       0.698
-  Max. Drawdown                  16.73 %     12.81 %
+  Gesamtrendite                 323.25 %    330.70 %
+  CAGR (TWR)                      7.48 %      7.58 %
+  MWRR (geldgewichtet)            6.72 %      7.43 %
+  Volatilität p. a.              10.25 %      7.47 %
+  Sharpe                           0.756       1.016
+  Sortino                          1.112       1.519
+  Calmar                           0.372       0.602
+  Max. Drawdown                  20.10 %     12.59 %
 ...
-  Steuern                          4 105       8 956
+  Steuern                          3 237       6 716
 
   Gegen Benchmark 'klassisch'
                                      mix
-  Alpha p. a.                     2.01 %
-  Beta                             0.739
-  Korrelation                      0.904
-  R²                               0.817
-  Up-Capture                       0.810
-  Down-Capture                     0.649
-  Capture Spread                   0.161
-  Aktive Rendite p. a.           -0.29 %
-  Tracking Error                  4.09 %
-  Information Ratio               -0.100
-  M² (Modigliani)                10.84 %
+  Alpha p. a.                     2.44 %
+  Beta                             0.664
+  Korrelation                      0.912
+  R²                               0.832
+  Up-Capture                       0.748
+  Down-Capture                     0.569
+  Capture Spread                   0.179
+  Aktive Rendite p. a.            0.09 %
+  Tracking Error                  4.60 %
+  Information Ratio               -0.035
+  M² (Modigliani)                10.41 %
 ══════════════════════════════════════════════════════════════
 ```
 
@@ -922,12 +925,12 @@ plot_dashboard(res_mix)
 </p>
 
 **Einordnung:** Die Mischung schwankt weniger als 60/40
-(Volatilität 7,65 % gegen 9,36 %, größter Rückgang 12,81 % gegen 16,73 %)
-und hat die höhere Sharpe Ratio (1,158 gegen 0,990). Die zeitgewichtete
-Rendite ist etwas niedriger (8,94 % gegen 9,23 % p. a.), die
-geldgewichtete etwas höher (8,89 % gegen 8,60 %). Gegenüber 60/40 fängt sie
-65 % der Verluste, aber 81 % der Gewinne ein (Down- und Up-Capture); das
-Beta liegt bei 0,74. Das Dashboard zeigt Depotwert und Einzahlungen,
+(Volatilität 7,47 % gegen 10,25 %, größter Rückgang 12,59 % gegen 20,10 %)
+und hat die höhere Sharpe Ratio (1,016 gegen 0,756). Die zeitgewichtete
+Rendite ist etwas höher (7,58 % gegen 7,48 % p. a.), die geldgewichtete
+ebenfalls (7,43 % gegen 6,72 %). Gegenüber 60/40 fängt sie
+57 % der Verluste, aber 75 % der Gewinne ein (Down- und Up-Capture); das
+Beta liegt bei 0,66. Das Dashboard zeigt Depotwert und Einzahlungen,
 Drawdowns, die Verteilung der Tagesrenditen, rollierende Renditen,
 Monatsrenditen und die wichtigsten Kennzahlen.
 
@@ -966,31 +969,31 @@ zeige(P_Drawdown_ueber_20_klassisch = p$probability[1], P_Drawdown_ueber_20_mix 
 
   cagr (mit Sparplan geldgewichtet, XIRR)
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch           9.05%      6.24%     8.05%     8.73%     9.99%    12.40%
-  mix                 8.75%      6.43%     7.83%     8.58%     9.64%    11.34%
+  klassisch           7.28%      3.98%     6.09%     7.02%     8.56%    10.89%
+  mix                 7.50%      5.38%     6.63%     7.37%     8.29%    10.13%
 
   ttwror
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch           9.07%      6.39%     7.95%     8.98%     9.92%    12.66%
-  mix                 8.80%      6.26%     7.90%     8.77%     9.71%    11.79%
+  klassisch           7.30%      4.32%     6.03%     7.28%     8.22%    10.86%
+  mix                 7.54%      5.18%     6.67%     7.45%     8.38%    10.58%
 
   max_drawdown
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch          18.32%     12.98%    16.21%    17.34%    20.10%    25.45%
-  mix                13.39%     10.27%    11.76%    12.81%    14.80%    17.72%
+  klassisch          22.28%     15.40%    19.39%    20.66%    25.15%    31.53%
+  mix                13.96%     10.47%    11.98%    13.25%    15.83%    18.72%
 
   sharpe
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch           0.961      0.704     0.851     0.961     1.050     1.285
-  mix                 1.139      0.859     1.035     1.139     1.237     1.503
+  klassisch           0.737      0.458     0.619     0.737     0.823     1.051
+  mix                 1.002      0.722     0.898     1.007     1.103     1.371
 
 ...
   final_value
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch          258496     172917    218253    238583    282136    389925
-  mix                244625     177141    212170    234067    269334    337908
+  klassisch          206786     130469    169627    191183    233484    318221
+  mix                207569     155174    181776    199866    225262    287257
 ══════════════════════════════════════════════════════════════
-P_Drawdown_ueber_20_klassisch          0.27
+P_Drawdown_ueber_20_klassisch          0.62
 P_Drawdown_ueber_20_mix                0.03
 ```
 
@@ -1020,31 +1023,31 @@ zeige(P_Drawdown_ueber_20_klassisch=p["probability"][0], P_Drawdown_ueber_20_mix
 
   cagr (mit Sparplan geldgewichtet, XIRR)
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch           9.05%      6.24%     8.05%     8.73%     9.99%    12.40%
-  mix                 8.75%      6.43%     7.83%     8.58%     9.64%    11.34%
+  klassisch           7.28%      3.98%     6.09%     7.02%     8.56%    10.89%
+  mix                 7.50%      5.38%     6.63%     7.37%     8.29%    10.13%
 
   ttwror
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch           9.07%      6.39%     7.95%     8.98%     9.92%    12.66%
-  mix                 8.80%      6.26%     7.90%     8.77%     9.71%    11.79%
+  klassisch           7.30%      4.32%     6.03%     7.28%     8.22%    10.86%
+  mix                 7.54%      5.18%     6.67%     7.45%     8.38%    10.58%
 
   max_drawdown
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch          18.32%     12.98%    16.21%    17.34%    20.10%    25.45%
-  mix                13.39%     10.27%    11.76%    12.81%    14.80%    17.72%
+  klassisch          22.28%     15.40%    19.39%    20.66%    25.15%    31.53%
+  mix                13.96%     10.47%    11.98%    13.25%    15.83%    18.72%
 
   sharpe
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch           0.961      0.704     0.851     0.961     1.050     1.285
-  mix                 1.139      0.859     1.035     1.139     1.237     1.503
+  klassisch           0.737      0.458     0.619     0.737     0.823     1.051
+  mix                 1.002      0.722     0.898     1.007     1.103     1.371
 
 ...
   final_value
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch          258496     172917    218253    238583    282136    389925
-  mix                244625     177141    212170    234067    269334    337908
+  klassisch          206786     130469    169627    191183    233484    318221
+  mix                207569     155174    181776    199866    225262    287257
 ══════════════════════════════════════════════════════════════
-P_Drawdown_ueber_20_klassisch          0.27
+P_Drawdown_ueber_20_klassisch          0.62
 P_Drawdown_ueber_20_mix                0.03
 ```
 
@@ -1074,31 +1077,31 @@ zeige(P_Drawdown_ueber_20_klassisch = p["probability"][1], P_Drawdown_ueber_20_m
 
   cagr (mit Sparplan geldgewichtet, XIRR)
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch           9.05%      6.24%     8.05%     8.73%     9.99%    12.40%
-  mix                 8.75%      6.43%     7.83%     8.58%     9.64%    11.34%
+  klassisch           7.28%      3.98%     6.09%     7.02%     8.56%    10.89%
+  mix                 7.50%      5.38%     6.63%     7.37%     8.29%    10.13%
 
   ttwror
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch           9.07%      6.39%     7.95%     8.98%     9.92%    12.66%
-  mix                 8.80%      6.26%     7.90%     8.77%     9.71%    11.79%
+  klassisch           7.30%      4.32%     6.03%     7.28%     8.22%    10.86%
+  mix                 7.54%      5.18%     6.67%     7.45%     8.38%    10.58%
 
   max_drawdown
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch          18.32%     12.98%    16.21%    17.34%    20.10%    25.45%
-  mix                13.39%     10.27%    11.76%    12.81%    14.80%    17.72%
+  klassisch          22.28%     15.40%    19.39%    20.66%    25.15%    31.53%
+  mix                13.96%     10.47%    11.98%    13.25%    15.83%    18.72%
 
   sharpe
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch           0.961      0.704     0.851     0.961     1.050     1.285
-  mix                 1.139      0.859     1.035     1.139     1.237     1.503
+  klassisch           0.737      0.458     0.619     0.737     0.823     1.051
+  mix                 1.002      0.722     0.898     1.007     1.103     1.371
 
 ...
   final_value
   Strategie          Mittel        q05       q25       q50       q75       q95
-  klassisch          258496     172917    218253    238583    282136    389925
-  mix                244625     177141    212170    234067    269334    337908
+  klassisch          206786     130469    169627    191183    233484    318221
+  mix                207569     155174    181776    199866    225262    287257
 ══════════════════════════════════════════════════════════════
-P_Drawdown_ueber_20_klassisch          0.27
+P_Drawdown_ueber_20_klassisch          0.62
 P_Drawdown_ueber_20_mix                0.03
 ```
 
@@ -1106,11 +1109,13 @@ P_Drawdown_ueber_20_mix                0.03
 
 Über 100 Pfade bleibt das Bild aus Abschnitt „Ansparphase mit `simulation()`“
 bestehen: Die Mischung hat in allen gezeigten Quantilen die höhere Sharpe
-Ratio und den kleineren größten Rückgang (im 95-%-Quantil 17,72 % gegen
-25,45 %). Einen Rückgang von mehr als 20 % erleben 27 % der Pfade von
-60/40, aber nur 3 % der Pfade der Mischung. Bei der Rendite liegt 60/40
-leicht vorn (Median der XIRR 8,73 % gegen 8,58 %). Der echte Lauf der
-Mischung (8,89 %) liegt zwischen Median und 75-%-Quantil.
+Ratio und den kleineren größten Rückgang (im 95-%-Quantil 18,72 % gegen
+31,53 %). Einen Rückgang von mehr als 20 % erleben 62 % der Pfade von
+60/40, aber nur 3 % der Pfade der Mischung. Auch bei der Rendite liegt die
+Mischung im Median leicht vorn (XIRR 7,37 % gegen 7,02 %); 60/40 streut
+breiter (5-%-Quantil 3,98 % gegen 5,38 %, 95-%-Quantil 10,89 % gegen
+10,13 %). Der echte Lauf der Mischung (7,43 %) liegt zwischen Median und
+75-%-Quantil.
 
 Der Bootstrap setzt Blöcke der einen Geschichte neu zusammen; Zustände, die
 in den Daten fehlen, erzeugt er nicht. Ob die Daten Regime enthalten, also
@@ -1125,10 +1130,10 @@ regime_hmm(data, "AKTIEN")
 ```
 
 ```text
-Hidden-Markov-Modell: 2 Zustände auf AKTIEN (week), 1043 Perioden, logL 2510.7, BIC -4972.7
+Hidden-Markov-Modell: 2 Zustände auf AKTIEN (week), 1043 Perioden, logL 2485.6, BIC -4922.6
 
-  Z1: Anteil 3 %, erwartete Dauer 7.3 Perioden, Rendite -72.9 % p. a., Vola 9.4 %
-  Z2: Anteil 97 %, erwartete Dauer 277.4 Perioden, Rendite 13.1 % p. a., Vola 15.8 %
+  Z1: Anteil 3 %, erwartete Dauer 7.3 Perioden, Rendite -76.8 % p. a., Vola 9.6 %
+  Z2: Anteil 97 %, erwartete Dauer 277.4 Perioden, Rendite 11.3 % p. a., Vola 16.2 %
 
 Übergangsmatrix
       Z1    Z2
@@ -1148,10 +1153,10 @@ print(simlev.regime_hmm(data, "AKTIEN"))
 ```
 
 ```text
-Hidden-Markov-Modell: 2 Zustände auf AKTIEN (week), 1043 Perioden, logL 2510.7, BIC -4972.7
+Hidden-Markov-Modell: 2 Zustände auf AKTIEN (week), 1043 Perioden, logL 2485.6, BIC -4922.6
 
-  Z1: Anteil 3 %, erwartete Dauer 7.3 Perioden, Rendite -72.9 % p. a., Vola 9.4 %
-  Z2: Anteil 97 %, erwartete Dauer 277.4 Perioden, Rendite 13.1 % p. a., Vola 15.8 %
+  Z1: Anteil 3 %, erwartete Dauer 7.3 Perioden, Rendite -76.8 % p. a., Vola 9.6 %
+  Z2: Anteil 97 %, erwartete Dauer 277.4 Perioden, Rendite 11.3 % p. a., Vola 16.2 %
 
 Übergangsmatrix
       Z1    Z2
@@ -1171,10 +1176,10 @@ display(regime_hmm(data, "AKTIEN"))
 ```
 
 ```text
-Hidden-Markov-Modell: 2 Zustände auf AKTIEN (week), 1043 Perioden, logL 2510.7, BIC -4972.7
+Hidden-Markov-Modell: 2 Zustände auf AKTIEN (week), 1043 Perioden, logL 2485.6, BIC -4922.6
 
-  Z1: Anteil 3 %, erwartete Dauer 7.3 Perioden, Rendite -72.9 % p. a., Vola 9.4 %
-  Z2: Anteil 97 %, erwartete Dauer 277.4 Perioden, Rendite 13.1 % p. a., Vola 15.8 %
+  Z1: Anteil 3 %, erwartete Dauer 7.3 Perioden, Rendite -76.8 % p. a., Vola 9.6 %
+  Z2: Anteil 97 %, erwartete Dauer 277.4 Perioden, Rendite 11.3 % p. a., Vola 16.2 %
 
 Übergangsmatrix
       Z1    Z2
@@ -1187,7 +1192,7 @@ Aktueller Zustand (gefiltert): Z2 mit 98 %
 </details>
 
 **Einordnung:** Das Modell findet einen Zustand Z1 mit 3 % der
-Wochen und einer Rendite von −72,9 % p. a. Die Daten haben aber nach
+Wochen und einer Rendite von −76,8 % p. a. Die Daten haben aber nach
 ihrer Konstruktion kein Regime: Z1 fasst nur rund 30 schwache Wochen
 zusammen. Ein Modell mit zwei Zuständen liefert immer zwei Zustände; ob sie
 mehr als Rauschen sind, ist eine eigene Frage, etwa nach ihrer Stabilität
@@ -1212,29 +1217,29 @@ SimLev Abhängigkeitsanalyse: 1043 Perioden (week), 2005-01-14 bis 2024-12-31
 
 Korrelation (Pearson unten links, Kendall oben rechts)
           AKTIEN ANLEIHEN ROHSTOFFE MFUTURES
-AKTIEN     1.000   -0.071     0.139   -0.040
-ANLEIHEN  -0.114    1.000    -0.012    0.117
-ROHSTOFFE  0.215   -0.028     1.000    0.060
-MFUTURES  -0.065    0.186     0.092    1.000
+AKTIEN     1.000    0.061     0.062   -0.016
+ANLEIHEN   0.088    1.000    -0.078   -0.042
+ROHSTOFFE  0.099   -0.136     1.000    0.050
+MFUTURES  -0.024   -0.064     0.077    1.000
 
 Tail-Abhängigkeit je Paar
-                 Paar Kendall lamL 0.05 lamU 0.05 lamL 0.1 lamU 0.1      Copula
-    AKTIEN ~ ANLEIHEN  -0.071      0.06      0.04     0.07     0.04 clayton_270
-   AKTIEN ~ ROHSTOFFE   0.139      0.13      0.10     0.24     0.14     clayton
-    AKTIEN ~ MFUTURES  -0.040      0.08      0.02     0.09     0.10    gaussian
- ANLEIHEN ~ ROHSTOFFE  -0.012      0.02      0.06     0.11     0.08  clayton_90
-  ANLEIHEN ~ MFUTURES   0.117      0.10      0.10     0.15     0.20    gaussian
- ROHSTOFFE ~ MFUTURES   0.060      0.10      0.10     0.16     0.14    gaussian
+                 Paar Kendall lamL 0.05 lamU 0.05 lamL 0.1 lamU 0.1     Copula
+    AKTIEN ~ ANLEIHEN   0.061      0.10      0.08     0.12     0.09      frank
+   AKTIEN ~ ROHSTOFFE   0.062      0.12      0.08     0.17     0.10    clayton
+    AKTIEN ~ MFUTURES  -0.016      0.08      0.04     0.11     0.12 gumbel_270
+ ANLEIHEN ~ ROHSTOFFE  -0.078      0.02      0.02     0.06     0.05   gaussian
+  ANLEIHEN ~ MFUTURES  -0.042      0.04      0.04     0.07     0.12 clayton_90
+ ROHSTOFFE ~ MFUTURES   0.050      0.10      0.06     0.12     0.15 gumbel_180
  Cop. lamL Cop. lamU     t: rho/nu
-      0.00      0.00 -0.12 / 500.0
-      0.08      0.00  0.22 / 500.0
-      0.00      0.00 -0.06 / 500.0
-      0.00      0.00 -0.03 / 165.3
-      0.00      0.00  0.18 / 500.0
-      0.00      0.00  0.09 / 500.0
+      0.00      0.00  0.09 / 189.0
+      0.01      0.00  0.10 / 175.7
+      0.00      0.00  -0.03 / 58.2
+      0.00      0.00  -0.13 / 57.4
+      0.00      0.00 -0.07 / 500.0
+      0.06      0.00  0.08 / 500.0
   (Unabhängigkeit: lam(q) ~ q; Gauß-Abhängigkeit: lam -> 0 für kleine q)
 
-DCC(1,1): a = 0.0017, b = 0.9754 (Persistenz 0.9771); Korrelation zuletzt: AKTIEN ~ ANLEIHEN -0.11, AKTIEN ~ ROHSTOFFE 0.23, AKTIEN ~ MFUTURES -0.06, ANLEIHEN ~ ROHSTOFFE -0.04, ANLEIHEN ~ MFUTURES 0.20, ROHSTOFFE ~ MFUTURES 0.08
+DCC(1,1): a = 0.0018, b = 0.9757 (Persistenz 0.9775); Korrelation zuletzt: AKTIEN ~ ANLEIHEN 0.10, AKTIEN ~ ROHSTOFFE 0.11, AKTIEN ~ MFUTURES -0.02, ANLEIHEN ~ ROHSTOFFE -0.15, ANLEIHEN ~ MFUTURES -0.05, ROHSTOFFE ~ MFUTURES 0.07
 ```
 
 </details>
@@ -1251,29 +1256,29 @@ SimLev Abhängigkeitsanalyse: 1043 Perioden (week), 2005-01-14 bis 2024-12-31
 
 Korrelation (Pearson unten links, Kendall oben rechts)
           AKTIEN ANLEIHEN ROHSTOFFE MFUTURES
-AKTIEN     1.000   -0.071     0.139   -0.040
-ANLEIHEN  -0.114    1.000    -0.012    0.117
-ROHSTOFFE  0.215   -0.028     1.000    0.060
-MFUTURES  -0.065    0.186     0.092    1.000
+AKTIEN     1.000    0.061     0.062   -0.016
+ANLEIHEN   0.088    1.000    -0.078   -0.042
+ROHSTOFFE  0.099   -0.136     1.000    0.050
+MFUTURES  -0.024   -0.064     0.077    1.000
 
 Tail-Abhängigkeit je Paar
-                 Paar Kendall lamL 0.05 lamU 0.05 lamL 0.1 lamU 0.1      Copula
-    AKTIEN ~ ANLEIHEN  -0.071      0.06      0.04     0.07     0.04 clayton_270
-   AKTIEN ~ ROHSTOFFE   0.139      0.13      0.10     0.24     0.14     clayton
-    AKTIEN ~ MFUTURES  -0.040      0.08      0.02     0.09     0.10    gaussian
- ANLEIHEN ~ ROHSTOFFE  -0.012      0.02      0.06     0.11     0.08  clayton_90
-  ANLEIHEN ~ MFUTURES   0.117      0.10      0.10     0.15     0.20    gaussian
- ROHSTOFFE ~ MFUTURES   0.060      0.10      0.10     0.16     0.14    gaussian
+                 Paar Kendall lamL 0.05 lamU 0.05 lamL 0.1 lamU 0.1     Copula
+    AKTIEN ~ ANLEIHEN   0.061      0.10      0.08     0.12     0.09      frank
+   AKTIEN ~ ROHSTOFFE   0.062      0.12      0.08     0.17     0.10    clayton
+    AKTIEN ~ MFUTURES  -0.016      0.08      0.04     0.11     0.12 gumbel_270
+ ANLEIHEN ~ ROHSTOFFE  -0.078      0.02      0.02     0.06     0.05   gaussian
+  ANLEIHEN ~ MFUTURES  -0.042      0.04      0.04     0.07     0.12 clayton_90
+ ROHSTOFFE ~ MFUTURES   0.050      0.10      0.06     0.12     0.15 gumbel_180
  Cop. lamL Cop. lamU     t: rho/nu
-      0.00      0.00 -0.12 / 500.0
-      0.08      0.00  0.22 / 500.0
-      0.00      0.00 -0.06 / 500.0
-      0.00      0.00 -0.03 / 165.3
-      0.00      0.00  0.18 / 500.0
-      0.00      0.00  0.09 / 500.0
+      0.00      0.00  0.09 / 189.0
+      0.01      0.00  0.10 / 175.7
+      0.00      0.00  -0.03 / 58.2
+      0.00      0.00  -0.13 / 57.4
+      0.00      0.00 -0.07 / 500.0
+      0.06      0.00  0.08 / 500.0
   (Unabhängigkeit: lam(q) ~ q; Gauß-Abhängigkeit: lam -> 0 für kleine q)
 
-DCC(1,1): a = 0.0017, b = 0.9754 (Persistenz 0.9771); Korrelation zuletzt: AKTIEN ~ ANLEIHEN -0.11, AKTIEN ~ ROHSTOFFE 0.23, AKTIEN ~ MFUTURES -0.06, ANLEIHEN ~ ROHSTOFFE -0.04, ANLEIHEN ~ MFUTURES 0.20, ROHSTOFFE ~ MFUTURES 0.08
+DCC(1,1): a = 0.0018, b = 0.9757 (Persistenz 0.9775); Korrelation zuletzt: AKTIEN ~ ANLEIHEN 0.10, AKTIEN ~ ROHSTOFFE 0.11, AKTIEN ~ MFUTURES -0.02, ANLEIHEN ~ ROHSTOFFE -0.15, ANLEIHEN ~ MFUTURES -0.05, ROHSTOFFE ~ MFUTURES 0.07
 ```
 
 </details>
@@ -1290,43 +1295,44 @@ SimLev Abhängigkeitsanalyse: 1043 Perioden (week), 2005-01-14 bis 2024-12-31
 
 Korrelation (Pearson unten links, Kendall oben rechts)
           AKTIEN ANLEIHEN ROHSTOFFE MFUTURES
-AKTIEN     1.000   -0.071     0.139   -0.040
-ANLEIHEN  -0.114    1.000    -0.012    0.117
-ROHSTOFFE  0.215   -0.028     1.000    0.060
-MFUTURES  -0.065    0.186     0.092    1.000
+AKTIEN     1.000    0.061     0.062   -0.016
+ANLEIHEN   0.088    1.000    -0.078   -0.042
+ROHSTOFFE  0.099   -0.136     1.000    0.050
+MFUTURES  -0.024   -0.064     0.077    1.000
 
 Tail-Abhängigkeit je Paar
-                 Paar Kendall lamL 0.05 lamU 0.05 lamL 0.1 lamU 0.1      Copula
-    AKTIEN ~ ANLEIHEN  -0.071      0.06      0.04     0.07     0.04 clayton_270
-   AKTIEN ~ ROHSTOFFE   0.139      0.13      0.10     0.24     0.14     clayton
-    AKTIEN ~ MFUTURES  -0.040      0.08      0.02     0.09     0.10    gaussian
- ANLEIHEN ~ ROHSTOFFE  -0.012      0.02      0.06     0.11     0.08  clayton_90
-  ANLEIHEN ~ MFUTURES   0.117      0.10      0.10     0.15     0.20    gaussian
- ROHSTOFFE ~ MFUTURES   0.060      0.10      0.10     0.16     0.14    gaussian
+                 Paar Kendall lamL 0.05 lamU 0.05 lamL 0.1 lamU 0.1     Copula
+    AKTIEN ~ ANLEIHEN   0.061      0.10      0.08     0.12     0.09      frank
+   AKTIEN ~ ROHSTOFFE   0.062      0.12      0.08     0.17     0.10    clayton
+    AKTIEN ~ MFUTURES  -0.016      0.08      0.04     0.11     0.12 gumbel_270
+ ANLEIHEN ~ ROHSTOFFE  -0.078      0.02      0.02     0.06     0.05   gaussian
+  ANLEIHEN ~ MFUTURES  -0.042      0.04      0.04     0.07     0.12 clayton_90
+ ROHSTOFFE ~ MFUTURES   0.050      0.10      0.06     0.12     0.15 gumbel_180
  Cop. lamL Cop. lamU     t: rho/nu
-      0.00      0.00 -0.12 / 500.0
-      0.08      0.00  0.22 / 500.0
-      0.00      0.00 -0.06 / 500.0
-      0.00      0.00 -0.03 / 165.3
-      0.00      0.00  0.18 / 500.0
-      0.00      0.00  0.09 / 500.0
+      0.00      0.00  0.09 / 189.0
+      0.01      0.00  0.10 / 175.7
+      0.00      0.00  -0.03 / 58.2
+      0.00      0.00  -0.13 / 57.4
+      0.00      0.00 -0.07 / 500.0
+      0.06      0.00  0.08 / 500.0
   (Unabhängigkeit: lam(q) ~ q; Gauß-Abhängigkeit: lam -> 0 für kleine q)
 
-DCC(1,1): a = 0.0017, b = 0.9754 (Persistenz 0.9771); Korrelation zuletzt: AKTIEN ~ ANLEIHEN -0.11, AKTIEN ~ ROHSTOFFE 0.23, AKTIEN ~ MFUTURES -0.06, ANLEIHEN ~ ROHSTOFFE -0.04, ANLEIHEN ~ MFUTURES 0.20, ROHSTOFFE ~ MFUTURES 0.08
+DCC(1,1): a = 0.0018, b = 0.9757 (Persistenz 0.9775); Korrelation zuletzt: AKTIEN ~ ANLEIHEN 0.10, AKTIEN ~ ROHSTOFFE 0.11, AKTIEN ~ MFUTURES -0.02, ANLEIHEN ~ ROHSTOFFE -0.15, ANLEIHEN ~ MFUTURES -0.05, ROHSTOFFE ~ MFUTURES 0.07
 ```
 
 </details>
 
 **Einordnung:** Die Korrelationen der Wochenrenditen liegen nahe
-an den Vorgaben der Quelle. Für die Krise zählen die Ränder: Die
+an den Vorgaben. Für die Krise zählen die Ränder: Die
 geschätzte Tail-Abhängigkeit der Copulas ist fast überall 0, die
-t-Copula landet bei ν = 500 und ist damit praktisch die Gauß-Copula, und
-die DCC-Korrelation ist mit a = 0,0017 nahezu konstant. Das entspricht der
-Konstruktion der Daten: Eine gemeinsame Normalverteilung hat keine
-Randabhängigkeit, und die Korrelation ist fest. Die Diversifikation hält
-hier also auch in schlechten Wochen; das ist eine Eigenschaft der
-synthetischen Daten, keine Aussage über Märkte. Mit echten Kursen ist
-genau diese Analyse der Prüfstein, ob eine Beimischung in der Krise hilft.
+t-Copula landet bei ν zwischen 57 und 500 und ist damit nahe an der
+Gauß-Copula, und die DCC-Korrelation ist mit a = 0,0018 nahezu konstant.
+Das entspricht der Konstruktion der Daten: Eine gemeinsame
+Normalverteilung hat keine Randabhängigkeit, und die Korrelation ist fest.
+Die Diversifikation hält hier also auch in schlechten Wochen; das ist eine
+Eigenschaft der synthetischen Daten, keine Aussage über Märkte. Mit echten
+Kursen ist genau diese Analyse der Prüfstein, ob eine Beimischung in der
+Krise hilft.
 
 ### Optimierung
 
@@ -1344,14 +1350,14 @@ portfolio_optimize(data, assets = assets, method = "max_sharpe")
 SimLev-Optimierung: max_sharpe (1043 Perioden, week, Kovarianz sample)
 
     Anlage Gewicht Risikoanteil
-    AKTIEN   9.1 %       15.0 %
-  ANLEIHEN  81.4 %       72.8 %
- ROHSTOFFE   1.6 %        1.9 %
-  MFUTURES   7.9 %       10.3 %
+    AKTIEN  10.3 %       15.0 %
+  ANLEIHEN  51.8 %       38.8 %
+ ROHSTOFFE  10.8 %       13.2 %
+  MFUTURES  27.1 %       33.0 %
 
-Erwartete Rendite 7.00 % p. a. (historisch), Volatilität 3.29 %, Sharpe 2.126
-CVaR(0.05) 0.83 % je Periode, CDaR(0.05) 2.18 % (kumuliert)
-Diversifikationsverhältnis 1.65, effektive Anzahl: Gewichte 1.5, Risiko 1.8
+Erwartete Rendite 6.71 % p. a. (historisch), Volatilität 4.78 %, Sharpe 1.405
+CVaR(0.05) 1.21 % je Periode, CDaR(0.05) 4.32 % (kumuliert)
+Diversifikationsverhältnis 1.96, effektive Anzahl: Gewichte 2.7, Risiko 3.3
 ```
 
 </details>
@@ -1367,14 +1373,14 @@ print(simlev.portfolio_optimize(data, assets=assets, method="max_sharpe"))
 SimLev-Optimierung: max_sharpe (1043 Perioden, week, Kovarianz sample)
 
     Anlage Gewicht Risikoanteil
-    AKTIEN   9.1 %       15.0 %
-  ANLEIHEN  81.4 %       72.8 %
- ROHSTOFFE   1.6 %        1.9 %
-  MFUTURES   7.9 %       10.3 %
+    AKTIEN  10.3 %       15.0 %
+  ANLEIHEN  51.8 %       38.8 %
+ ROHSTOFFE  10.8 %       13.2 %
+  MFUTURES  27.1 %       33.0 %
 
-Erwartete Rendite 7.00 % p. a. (historisch), Volatilität 3.29 %, Sharpe 2.126
-CVaR(0.05) 0.83 % je Periode, CDaR(0.05) 2.18 % (kumuliert)
-Diversifikationsverhältnis 1.65, effektive Anzahl: Gewichte 1.5, Risiko 1.8
+Erwartete Rendite 6.71 % p. a. (historisch), Volatilität 4.78 %, Sharpe 1.405
+CVaR(0.05) 1.21 % je Periode, CDaR(0.05) 4.32 % (kumuliert)
+Diversifikationsverhältnis 1.96, effektive Anzahl: Gewichte 2.7, Risiko 3.3
 ```
 
 </details>
@@ -1390,21 +1396,22 @@ display(portfolio_optimize(data; assets = assets, method = "max_sharpe"))
 SimLev-Optimierung: max_sharpe (1043 Perioden, week, Kovarianz sample)
 
     Anlage Gewicht Risikoanteil
-    AKTIEN   9.1 %       15.0 %
-  ANLEIHEN  81.4 %       72.8 %
- ROHSTOFFE   1.6 %        1.9 %
-  MFUTURES   7.9 %       10.3 %
+    AKTIEN  10.3 %       15.0 %
+  ANLEIHEN  51.8 %       38.8 %
+ ROHSTOFFE  10.8 %       13.2 %
+  MFUTURES  27.1 %       33.0 %
 
-Erwartete Rendite 7.00 % p. a. (historisch), Volatilität 3.29 %, Sharpe 2.126
-CVaR(0.05) 0.83 % je Periode, CDaR(0.05) 2.18 % (kumuliert)
-Diversifikationsverhältnis 1.65, effektive Anzahl: Gewichte 1.5, Risiko 1.8
+Erwartete Rendite 6.71 % p. a. (historisch), Volatilität 4.78 %, Sharpe 1.405
+CVaR(0.05) 1.21 % je Periode, CDaR(0.05) 4.32 % (kumuliert)
+Diversifikationsverhältnis 1.96, effektive Anzahl: Gewichte 2.7, Risiko 3.3
 ```
 
 </details>
 
-Der Optimierer legt 81,4 % in Anleihen. Er
-übernimmt die Kennzahlen der Daten als Erwartung, und dort haben die
-Anleihen die mit Abstand beste Sharpe Ratio (Abschnitt „Die Daten“). Die
+Der Optimierer legt 51,8 % in Anleihen und 27,1 % in Managed Futures,
+Aktien und Rohstoffe erhalten je rund 10 %. Er übernimmt die Kennzahlen
+der Daten als Erwartung, und dort haben Anleihen und Managed Futures die
+höchsten Sharpe Ratios (Abschnitt „Die Daten“). Die
 Risikoparität dagegen verlangt von jeder Anlageklasse denselben Beitrag
 zum Risiko und braucht keine Renditeschätzung:
 
@@ -1419,14 +1426,14 @@ portfolio_optimize(data, assets = assets, method = "risk_parity")
 SimLev-Optimierung: risk_parity (1043 Perioden, week, Kovarianz sample)
 
     Anlage Gewicht Risikoanteil
-    AKTIEN  13.2 %       25.0 %
-  ANLEIHEN  59.9 %       25.0 %
- ROHSTOFFE   9.2 %       25.0 %
-  MFUTURES  17.7 %       25.0 %
+    AKTIEN  14.5 %       25.0 %
+  ANLEIHEN  45.1 %       25.0 %
+ ROHSTOFFE  15.6 %       25.0 %
+  MFUTURES  24.9 %       25.0 %
 
-Erwartete Rendite 7.65 % p. a. (historisch), Volatilität 4.21 %, Sharpe 1.816
-CVaR(0.05) 1.05 % je Periode, CDaR(0.05) 3.28 % (kumuliert)
-Diversifikationsverhältnis 1.88, effektive Anzahl: Gewichte 2.4, Risiko 4.0
+Erwartete Rendite 6.99 % p. a. (historisch), Volatilität 5.11 %, Sharpe 1.368
+CVaR(0.05) 1.31 % je Periode, CDaR(0.05) 4.84 % (kumuliert)
+Diversifikationsverhältnis 1.99, effektive Anzahl: Gewichte 3.2, Risiko 4.0
 ```
 
 </details>
@@ -1442,14 +1449,14 @@ print(simlev.portfolio_optimize(data, assets=assets, method="risk_parity"))
 SimLev-Optimierung: risk_parity (1043 Perioden, week, Kovarianz sample)
 
     Anlage Gewicht Risikoanteil
-    AKTIEN  13.2 %       25.0 %
-  ANLEIHEN  59.9 %       25.0 %
- ROHSTOFFE   9.2 %       25.0 %
-  MFUTURES  17.7 %       25.0 %
+    AKTIEN  14.5 %       25.0 %
+  ANLEIHEN  45.1 %       25.0 %
+ ROHSTOFFE  15.6 %       25.0 %
+  MFUTURES  24.9 %       25.0 %
 
-Erwartete Rendite 7.65 % p. a. (historisch), Volatilität 4.21 %, Sharpe 1.816
-CVaR(0.05) 1.05 % je Periode, CDaR(0.05) 3.28 % (kumuliert)
-Diversifikationsverhältnis 1.88, effektive Anzahl: Gewichte 2.4, Risiko 4.0
+Erwartete Rendite 6.99 % p. a. (historisch), Volatilität 5.11 %, Sharpe 1.368
+CVaR(0.05) 1.31 % je Periode, CDaR(0.05) 4.84 % (kumuliert)
+Diversifikationsverhältnis 1.99, effektive Anzahl: Gewichte 3.2, Risiko 4.0
 ```
 
 </details>
@@ -1465,23 +1472,23 @@ display(portfolio_optimize(data; assets = assets, method = "risk_parity"))
 SimLev-Optimierung: risk_parity (1043 Perioden, week, Kovarianz sample)
 
     Anlage Gewicht Risikoanteil
-    AKTIEN  13.2 %       25.0 %
-  ANLEIHEN  59.9 %       25.0 %
- ROHSTOFFE   9.2 %       25.0 %
-  MFUTURES  17.7 %       25.0 %
+    AKTIEN  14.5 %       25.0 %
+  ANLEIHEN  45.1 %       25.0 %
+ ROHSTOFFE  15.6 %       25.0 %
+  MFUTURES  24.9 %       25.0 %
 
-Erwartete Rendite 7.65 % p. a. (historisch), Volatilität 4.21 %, Sharpe 1.816
-CVaR(0.05) 1.05 % je Periode, CDaR(0.05) 3.28 % (kumuliert)
-Diversifikationsverhältnis 1.88, effektive Anzahl: Gewichte 2.4, Risiko 4.0
+Erwartete Rendite 6.99 % p. a. (historisch), Volatilität 5.11 %, Sharpe 1.368
+CVaR(0.05) 1.31 % je Periode, CDaR(0.05) 4.84 % (kumuliert)
+Diversifikationsverhältnis 1.99, effektive Anzahl: Gewichte 3.2, Risiko 4.0
 ```
 
 </details>
 
 **Einordnung:** Auch die Risikoparität legt den größten Teil in
-Anleihen (59,9 %), weil sie am wenigsten schwanken; jede Anlageklasse
-trägt 25 % zum Risiko bei. Rohstoffe erhalten mit 9,2 % das kleinste
-Gewicht. Wer die Anleihenrenditen der Quelle (1997 bis 2011) nicht für
-die Zukunft erwartet, gibt eigene Erwartungen vor (`mu` in
+Anleihen (45,1 %), weil sie am wenigsten schwanken; jede Anlageklasse
+trägt 25 % zum Risiko bei. Aktien erhalten mit 14,5 % das kleinste
+Gewicht, knapp vor den Rohstoffen (15,6 %). Wer andere Erwartungen hat als
+die Kennzahlen der Daten, gibt sie vor (`mu` in
 `portfolio_optimize()`) oder nutzt Szenarien
 (`scenario_entropy_pooling()`); `portfolio_frontier()` zeigt die ganze
 Effizienzkurve.
@@ -1518,35 +1525,35 @@ zeige(Sharpe_Halten = halten$statistics$sharpe, CAGR_Halten_Prozent = 100 * halt
 Zielgröße: sharpe
 
  id   n   cagr max_drawdown sharpe ulcer_index trades plateau
-  2  50 7.84 %      25.64 %  0.676       0.099 18.608   0.547
-  3 100 6.10 %      25.85 %  0.529       0.111 13.406   0.543
-  6 250 5.72 %      26.41 %  0.487       0.131  7.803   0.467
-  7 300 5.61 %      26.41 %  0.473       0.142  7.003   0.480
-  5 200 5.01 %      27.77 %  0.442       0.136  9.604   0.450
-  1  20 4.64 %      26.64 %  0.436       0.122 32.863   0.556
-  4 150 4.74 %      27.04 %  0.423       0.143 11.455   0.464
+  2  50 7.22 %      25.11 %  0.623       0.100 18.157   0.455
+  3 100 5.07 %      29.66 %  0.452       0.131 13.105   0.454
+  7 300 4.50 %      29.92 %  0.397       0.163  7.453   0.384
+  6 250 4.07 %      31.21 %  0.371       0.169  7.853   0.372
+  5 200 3.75 %      29.17 %  0.347       0.156  8.854   0.334
+  1  20 2.87 %      36.76 %  0.289       0.150 32.713   0.456
+  4 150 2.88 %      31.17 %  0.285       0.180 12.655   0.362
 cagr: mit Sparplan geldgewichtet (XIRR), sonst CAGR des Depotwerts
 
-Bester Punkt:   #2 (n = 50), sharpe = 0.676
-Bestes Plateau: #1 (n = 20), sharpe = 0.436, Nachbarschaft = 0.556
+Bester Punkt:   #2 (n = 50), sharpe = 0.623
+Bestes Plateau: #1 (n = 20), sharpe = 0.289, Nachbarschaft = 0.456
 Deflated Sharpe Ratio
   Punkt #2, 1044 Beobachtungen (week)
-  Sharpe Ratio (p. a.):                 0.671
+  Sharpe Ratio (p. a.):                 0.619
   Versuche: 7 nominal, 2.1 effektiv (mittlere Korrelation 0.82), verwendet 2.1
-  Erwartetes Maximum ohne Können (p. a.):  0.048
-  PSR (SR > 0):                         99.9 %
-  DSR (SR > erwartetes Maximum):        99.8 %
+  Erwartetes Maximum ohne Können (p. a.):  0.065
+  PSR (SR > 0):                         99.7 %
+  DSR (SR > erwartetes Maximum):        99.4 %
   Lesart: DSR über 95 % = Ergebnis hält der Mehrfachtest-Korrektur stand.
 Probability of Backtest Overfitting (PBO, CSCV)
   7 Punkte, 1040 Beobachtungen (week), S = 16 Blöcke, 12870 Aufteilungen, Kennzahl sharpe
-  PBO:                              14.2 %
+  PBO:                              5.0 %
   Median-Logit lambda:              1.95
   Leistungsabfall (Steigung OOS~IS): -1.01
-  OOS-Verlustwahrscheinlichkeit:    1.1 %
-  Gewählter Punkt OOS vor Median:   85.8 %
+  OOS-Verlustwahrscheinlichkeit:    1.2 %
+  Gewählter Punkt OOS vor Median:   95.0 %
   Lesart: PBO nahe 0 = Auswahl trägt, um 57 % = Zufall (ungerade Punktezahl: (N + 1) / (2N)), darüber = Auswahl schadet.
-Sharpe_Halten                          0.75
-CAGR_Halten_Prozent                   11.06
+Sharpe_Halten                          0.62
+CAGR_Halten_Prozent                    9.00
 ```
 
 </details>
@@ -1574,35 +1581,35 @@ zeige(Sharpe_Halten=halten.statistics["sharpe"], CAGR_Halten_Prozent=100 * halte
 Zielgröße: sharpe
 
  id   n   cagr max_drawdown sharpe ulcer_index trades plateau
-  2  50 7.84 %      25.64 %  0.676       0.099 18.608   0.547
-  3 100 6.10 %      25.85 %  0.529       0.111 13.406   0.543
-  6 250 5.72 %      26.41 %  0.487       0.131  7.803   0.467
-  7 300 5.61 %      26.41 %  0.473       0.142  7.003   0.480
-  5 200 5.01 %      27.77 %  0.442       0.136  9.604   0.450
-  1  20 4.64 %      26.64 %  0.436       0.122 32.863   0.556
-  4 150 4.74 %      27.04 %  0.423       0.143 11.455   0.464
+  2  50 7.22 %      25.11 %  0.623       0.100 18.157   0.455
+  3 100 5.07 %      29.66 %  0.452       0.131 13.105   0.454
+  7 300 4.50 %      29.92 %  0.397       0.163  7.453   0.384
+  6 250 4.07 %      31.21 %  0.371       0.169  7.853   0.372
+  5 200 3.75 %      29.17 %  0.347       0.156  8.854   0.334
+  1  20 2.87 %      36.76 %  0.289       0.150 32.713   0.456
+  4 150 2.88 %      31.17 %  0.285       0.180 12.655   0.362
 cagr: mit Sparplan geldgewichtet (XIRR), sonst CAGR des Depotwerts
 
-Bester Punkt:   #2 (n = 50), sharpe = 0.676
-Bestes Plateau: #1 (n = 20), sharpe = 0.436, Nachbarschaft = 0.556
+Bester Punkt:   #2 (n = 50), sharpe = 0.623
+Bestes Plateau: #1 (n = 20), sharpe = 0.289, Nachbarschaft = 0.456
 Deflated Sharpe Ratio
   Punkt #2, 1044 Beobachtungen (week)
-  Sharpe Ratio (p. a.):                 0.671
+  Sharpe Ratio (p. a.):                 0.619
   Versuche: 7 nominal, 2.1 effektiv (mittlere Korrelation 0.82), verwendet 2.1
-  Erwartetes Maximum ohne Können (p. a.):  0.048
-  PSR (SR > 0):                         99.9 %
-  DSR (SR > erwartetes Maximum):        99.8 %
+  Erwartetes Maximum ohne Können (p. a.):  0.065
+  PSR (SR > 0):                         99.7 %
+  DSR (SR > erwartetes Maximum):        99.4 %
   Lesart: DSR über 95 % = Ergebnis hält der Mehrfachtest-Korrektur stand.
 Probability of Backtest Overfitting (PBO, CSCV)
   7 Punkte, 1040 Beobachtungen (week), S = 16 Blöcke, 12870 Aufteilungen, Kennzahl sharpe
-  PBO:                              14.2 %
+  PBO:                              5.0 %
   Median-Logit lambda:              1.95
   Leistungsabfall (Steigung OOS~IS): -1.01
-  OOS-Verlustwahrscheinlichkeit:    1.1 %
-  Gewählter Punkt OOS vor Median:   85.8 %
+  OOS-Verlustwahrscheinlichkeit:    1.2 %
+  Gewählter Punkt OOS vor Median:   95.0 %
   Lesart: PBO nahe 0 = Auswahl trägt, um 57 % = Zufall (ungerade Punktezahl: (N + 1) / (2N)), darüber = Auswahl schadet.
-Sharpe_Halten                          0.75
-CAGR_Halten_Prozent                   11.06
+Sharpe_Halten                          0.62
+CAGR_Halten_Prozent                    9.00
 ```
 
 </details>
@@ -1630,51 +1637,49 @@ zeige(Sharpe_Halten = halten.statistics["sharpe"], CAGR_Halten_Prozent = 100 * h
 Zielgröße: sharpe
 
  id   n   cagr max_drawdown sharpe ulcer_index trades plateau
-  2  50 7.84 %      25.64 %  0.676       0.099 18.608   0.547
-  3 100 6.10 %      25.85 %  0.529       0.111 13.406   0.543
-  6 250 5.72 %      26.41 %  0.487       0.131  7.803   0.467
-  7 300 5.61 %      26.41 %  0.473       0.142  7.003   0.480
-  5 200 5.01 %      27.77 %  0.442       0.136  9.604   0.450
-  1  20 4.64 %      26.64 %  0.436       0.122 32.863   0.556
-  4 150 4.74 %      27.04 %  0.423       0.143 11.455   0.464
+  2  50 7.22 %      25.11 %  0.623       0.100 18.157   0.455
+  3 100 5.07 %      29.66 %  0.452       0.131 13.105   0.454
+  7 300 4.50 %      29.92 %  0.397       0.163  7.453   0.384
+  6 250 4.07 %      31.21 %  0.371       0.169  7.853   0.372
+  5 200 3.75 %      29.17 %  0.347       0.156  8.854   0.334
+  1  20 2.87 %      36.76 %  0.289       0.150 32.713   0.456
+  4 150 2.88 %      31.17 %  0.285       0.180 12.655   0.362
 cagr: mit Sparplan geldgewichtet (XIRR), sonst CAGR des Depotwerts
 
-Bester Punkt:   #2 (n = 50), sharpe = 0.676
-Bestes Plateau: #1 (n = 20), sharpe = 0.436, Nachbarschaft = 0.556
-
+Bester Punkt:   #2 (n = 50), sharpe = 0.623
+Bestes Plateau: #1 (n = 20), sharpe = 0.289, Nachbarschaft = 0.456
 Deflated Sharpe Ratio
   Punkt #2, 1044 Beobachtungen (week)
-  Sharpe Ratio (p. a.):                 0.671
+  Sharpe Ratio (p. a.):                 0.619
   Versuche: 7 nominal, 2.1 effektiv (mittlere Korrelation 0.82), verwendet 2.1
-  Erwartetes Maximum ohne Können (p. a.):  0.048
-  PSR (SR > 0):                         99.9 %
-  DSR (SR > erwartetes Maximum):        99.8 %
+  Erwartetes Maximum ohne Können (p. a.):  0.065
+  PSR (SR > 0):                         99.7 %
+  DSR (SR > erwartetes Maximum):        99.4 %
   Lesart: DSR über 95 % = Ergebnis hält der Mehrfachtest-Korrektur stand.
-
 Probability of Backtest Overfitting (PBO, CSCV)
   7 Punkte, 1040 Beobachtungen (week), S = 16 Blöcke, 12870 Aufteilungen, Kennzahl sharpe
-  PBO:                              14.2 %
+  PBO:                              5.0 %
   Median-Logit lambda:              1.95
   Leistungsabfall (Steigung OOS~IS): -1.01
-  OOS-Verlustwahrscheinlichkeit:    1.1 %
-  Gewählter Punkt OOS vor Median:   85.8 %
+  OOS-Verlustwahrscheinlichkeit:    1.2 %
+  Gewählter Punkt OOS vor Median:   95.0 %
   Lesart: PBO nahe 0 = Auswahl trägt, um 57 % = Zufall (ungerade Punktezahl: (N + 1) / (2N)), darüber = Auswahl schadet.
-
-Sharpe_Halten                          0.75
-CAGR_Halten_Prozent                   11.06
+Sharpe_Halten                          0.62
+CAGR_Halten_Prozent                    9.00
 ```
 
 </details>
 
 Der beste Filter (n = 50) erreicht eine Sharpe
-Ratio von 0,676, das reine Halten des Aktien-ETF unter denselben
-Bedingungen 0,75 und eine CAGR von 11,06 % statt 7,84 %. Keine Variante
-schlägt also das Halten. Das passt zu den Daten: Sie enthalten keinen
+Ratio von 0,623, das reine Halten des Aktien-ETF unter denselben
+Bedingungen 0,62, bei einer CAGR von 9,00 % statt 7,22 %. Bei der Sharpe
+Ratio liegt der Filter also gleichauf, bei der Rendite klar hinter dem
+Halten. Das passt zu den Daten: Sie enthalten keinen
 Trend, den ein Filter ausnutzen könnte. Die beiden Prüfungen auf
 Überanpassung schlagen trotzdem nicht an, und das ist kein Widerspruch.
 Die Deflated Sharpe Ratio prüft, ob die beste Sharpe Ratio über dem
-Wert liegt, den sieben Versuche ohne jedes Können erwarten ließen (0,048
-p. a.); mit 0,671 tut sie das klar (DSR 99,8 %). Die PBO von 14,2 % sagt,
+Wert liegt, den sieben Versuche ohne jedes Können erwarten ließen (0,065
+p. a.); mit 0,619 tut sie das klar (DSR 99,4 %). Die PBO von 5,0 % sagt,
 dass die im Ausschnitt beste Variante meist auch außerhalb davon vorn
 liegt. Beide Prüfungen vergleichen gegen null bzw. die geprüften Varianten
 untereinander; den Vergleich mit dem Halten muss man selbst anstellen.
@@ -1695,13 +1700,13 @@ sensitivity_rebalancing(data, mix,
 ```text
 Toleranzbänder: absolut (Prozentpunkte)
  frequency offset band   cagr max_drawdown sharpe ulcer_index  taxes trades
-     monat     NA    - 8.68 %      13.18 %  1.139       0.042 3751.3   49.0
-     monat     NA    5 8.98 %      11.86 %  1.187       0.040 1247.8    2.9
-   quartal     NA    - 8.93 %      12.98 %  1.167       0.042 3165.3   16.7
-   quartal     NA    5 8.96 %      12.74 %  1.173       0.041  909.7    2.3
-      jahr     NA    - 9.05 %      12.16 %  1.181       0.041  981.8    5.0
-      jahr     NA    5 9.05 %      12.29 %  1.175       0.040  354.4    1.3
-      none     NA    - 9.05 %      18.07 %  0.996       0.057    0.0    0.3
+     monat     NA    - 7.52 %      13.47 %  1.012       0.045 2261.8   48.9
+     monat     NA    5 7.66 %      12.92 %  1.018       0.044  669.2    2.2
+   quartal     NA    - 7.71 %      13.01 %  1.034       0.044 1912.3   16.9
+   quartal     NA    5 7.72 %      12.78 %  1.020       0.045  778.5    2.2
+      jahr     NA    - 7.79 %      12.58 %  1.042       0.044  480.9    4.9
+      jahr     NA    5 7.72 %      12.34 %  1.035       0.042  689.6    1.6
+      none     NA    - 7.59 %      17.97 %  0.866       0.061    0.0    0.3
 cagr: mit Sparplan geldgewichtet (XIRR), sonst CAGR des Depotwerts
 ```
 
@@ -1719,13 +1724,13 @@ print(simlev.sensitivity_rebalancing(data, mix,
 ```text
 Toleranzbänder: absolut (Prozentpunkte)
  frequency offset band   cagr max_drawdown sharpe ulcer_index  taxes trades
-     monat     NA    - 8.68 %      13.18 %  1.139       0.042 3751.3   49.0
-     monat     NA    5 8.98 %      11.86 %  1.187       0.040 1247.8    2.9
-   quartal     NA    - 8.93 %      12.98 %  1.167       0.042 3165.3   16.7
-   quartal     NA    5 8.96 %      12.74 %  1.173       0.041  909.7    2.3
-      jahr     NA    - 9.05 %      12.16 %  1.181       0.041  981.8    5.0
-      jahr     NA    5 9.05 %      12.29 %  1.175       0.040  354.4    1.3
-      none     NA    - 9.05 %      18.07 %  0.996       0.057    0.0    0.3
+     monat     NA    - 7.52 %      13.47 %  1.012       0.045 2261.8   48.9
+     monat     NA    5 7.66 %      12.92 %  1.018       0.044  669.2    2.2
+   quartal     NA    - 7.71 %      13.01 %  1.034       0.044 1912.3   16.9
+   quartal     NA    5 7.72 %      12.78 %  1.020       0.045  778.5    2.2
+      jahr     NA    - 7.79 %      12.58 %  1.042       0.044  480.9    4.9
+      jahr     NA    5 7.72 %      12.34 %  1.035       0.042  689.6    1.6
+      none     NA    - 7.59 %      17.97 %  0.866       0.061    0.0    0.3
 cagr: mit Sparplan geldgewichtet (XIRR), sonst CAGR des Depotwerts
 ```
 
@@ -1743,26 +1748,30 @@ display(sensitivity_rebalancing(data, mix;
 ```text
 Toleranzbänder: absolut (Prozentpunkte)
  frequency offset band   cagr max_drawdown sharpe ulcer_index  taxes trades
-     monat     NA    - 8.68 %      13.18 %  1.139       0.042 3751.3   49.0
-     monat     NA    5 8.98 %      11.86 %  1.187       0.040 1247.8    2.9
-   quartal     NA    - 8.93 %      12.98 %  1.167       0.042 3165.3   16.7
-   quartal     NA    5 8.96 %      12.74 %  1.173       0.041  909.7    2.3
-      jahr     NA    - 9.05 %      12.16 %  1.181       0.041  981.8    5.0
-      jahr     NA    5 9.05 %      12.29 %  1.175       0.040  354.4    1.3
-      none     NA    - 9.05 %      18.07 %  0.996       0.057    0.0    0.3
+     monat     NA    - 7.52 %      13.47 %  1.012       0.045 2261.8   48.9
+     monat     NA    5 7.66 %      12.92 %  1.018       0.044  669.2    2.2
+   quartal     NA    - 7.71 %      13.01 %  1.034       0.044 1912.3   16.9
+   quartal     NA    5 7.72 %      12.78 %  1.020       0.045  778.5    2.2
+      jahr     NA    - 7.79 %      12.58 %  1.042       0.044  480.9    4.9
+      jahr     NA    5 7.72 %      12.34 %  1.035       0.042  689.6    1.6
+      none     NA    - 7.59 %      17.97 %  0.866       0.061    0.0    0.3
 cagr: mit Sparplan geldgewichtet (XIRR), sonst CAGR des Depotwerts
 ```
 
 </details>
 
 **Einordnung:** Ohne Rebalancing (`none`) fällt die Sharpe Ratio auf
-0,996, und der größte Rückgang steigt auf 18,07 %. Häufiges Umschichten
+0,866, und der größte Rückgang steigt auf 17,97 %. Häufiges Umschichten
 hält das Risiko klein, kostet aber Steuern: monatlich ohne Band
-3.751 EUR, jährlich mit Band 354 EUR. Die
-Sharpe Ratio liegt bei allen Rhythmen mit Rebalancing zwischen 1,139 und
-1,187; das Toleranzband senkt die Zahl der Umschichtungen und die Steuer
-deutlich, bei kaum veränderten Kennzahlen. Das ist die Begründung
-für das jährliche Rebalancing mit Band in Abschnitt „Ansparphase mit `simulation()`“.
+2.262 EUR. Die Sharpe Ratio liegt bei allen Rhythmen mit Rebalancing
+zwischen 1,012 und 1,042. Monatlich und vierteljährlich senkt das
+Toleranzband die Zahl der Umschichtungen und die Steuer deutlich (auf
+669 bzw. 779 EUR), bei kaum veränderten Kennzahlen; jährlich senkt es die
+Zahl der Umschichtungen (1,6 gegen 4,9), die Steuer aber steigt (690 gegen
+481 EUR). Das jährliche Rebalancing mit Band aus Abschnitt „Ansparphase
+mit `simulation()`“ hat den kleinsten größten Rückgang (12,34 %) und die
+wenigsten Umschichtungen, aber weder die höchste Sharpe Ratio noch die
+niedrigste Steuer.
 
 ### Planung: Wird das Ziel erreicht?
 
@@ -1784,11 +1793,11 @@ planning_goal(portfolio_returns(data, kandidaten), start_value = 10000, goal = 2
 
 ```text
 Zielplanung: Ziel 250 000 in 20 Perioden, Start 10 000, Zahlungen 3 600 je Periode
-Zielwahrscheinlichkeit dynamisch: 80.8 % (Vorwärtssimulation, SE 0.6 Prozentpunkte; DP-Wert 81.1 %)
-Bester fester Kandidat: aktien mit 76.0 %
+Zielwahrscheinlichkeit dynamisch: 60.9 % (Vorwärtssimulation, SE 0.7 Prozentpunkte; DP-Wert 62.1 %)
+Bester fester Kandidat: aktien mit 55.8 %
 
 klassisch       mix    aktien
-     62.0      63.6      76.0
+     33.9      36.9      55.8
 
 Wahl im ersten Schritt: aktien
 ```
@@ -1808,11 +1817,11 @@ print(simlev.planning_goal(simlev.portfolio_returns(data, kandidaten), start_val
 
 ```text
 Zielplanung: Ziel 250 000 in 20 Perioden, Start 10 000, Zahlungen 3 600 je Periode
-Zielwahrscheinlichkeit dynamisch: 80.8 % (Vorwärtssimulation, SE 0.6 Prozentpunkte; DP-Wert 81.1 %)
-Bester fester Kandidat: aktien mit 76.0 %
+Zielwahrscheinlichkeit dynamisch: 60.9 % (Vorwärtssimulation, SE 0.7 Prozentpunkte; DP-Wert 62.1 %)
+Bester fester Kandidat: aktien mit 55.8 %
 
 klassisch       mix    aktien
-     62.0      63.6      76.0
+     33.9      36.9      55.8
 
 Wahl im ersten Schritt: aktien
 ```
@@ -1832,11 +1841,11 @@ display(planning_goal(portfolio_returns(data, kandidaten), 10000, 250000, 20;
 
 ```text
 Zielplanung: Ziel 250 000 in 20 Perioden, Start 10 000, Zahlungen 3 600 je Periode
-Zielwahrscheinlichkeit dynamisch: 80.8 % (Vorwärtssimulation, SE 0.6 Prozentpunkte; DP-Wert 81.1 %)
-Bester fester Kandidat: aktien mit 76.0 %
+Zielwahrscheinlichkeit dynamisch: 60.9 % (Vorwärtssimulation, SE 0.7 Prozentpunkte; DP-Wert 62.1 %)
+Bester fester Kandidat: aktien mit 55.8 %
 
 klassisch       mix    aktien
-     62.0      63.6      76.0
+     33.9      36.9      55.8
 
 Wahl im ersten Schritt: aktien
 ```
@@ -1844,12 +1853,12 @@ Wahl im ersten Schritt: aktien
 </details>
 
 **Einordnung:** Mit fester Mischung erreichen 60/40 und die
-Mischung das Ziel in 62,0 % bzw. 63,6 % der Fälle, reine Aktien in
-76,0 %. Für ein hohes Ziel zählt die Rendite mehr als die Schwankung. Wer
+Mischung das Ziel in 33,9 % bzw. 36,9 % der Fälle, reine Aktien in
+55,8 %. Für ein hohes Ziel zählt die Rendite mehr als die Schwankung. Wer
 die Mischung jedes Jahr nach dem erreichten Vermögen neu wählt, kommt auf
-80,8 % und beginnt mit Aktien. Die Rechnung kennt nur die Jahresrenditen
+60,9 % und beginnt mit Aktien. Die Rechnung kennt nur die Jahresrenditen
 der Daten, keine Steuern und keine Kosten; der echte Lauf der Mischung
-endete in Abschnitt „Ansparphase mit `simulation()`“ nach Steuern bei 243.709 EUR.
+endete in Abschnitt „Ansparphase mit `simulation()`“ nach Steuern bei 201.375 EUR.
 
 ### Entnahmephase mit Steuer
 
@@ -1872,7 +1881,7 @@ von 15.000 EUR im Jahr an, etwa aus einer Rente.
 entnahme <- function(tax) {
   withdrawal_simulation(study, withdrawal_rule("constant", rate = 4), strategy = "mix",
                         years = 15, inflation = 2, start_value = res_mix,
-                        partial_exemption = 12, sale_cost = 0.15, base_rate = 2.29, tax = tax)
+                        partial_exemption = 12, sale_cost = 0.15, base_rate = 2.5, tax = tax)
 }
 wd <- entnahme(tax_profile())
 wd
@@ -1886,32 +1895,32 @@ wd_gp
 ══════════════════════════════════════════════════════════════
 
   Regel:            Konstante reale Entnahme (Bengen/Trinity)
-  Pfade:            100 Pfade über 15 Jahre, Startvermögen 243709
+  Pfade:            100 Pfade über 15 Jahre, Startvermögen 201375
   Steuern:          deutsche Privatperson (vereinfacht)
 
   Erfolgsquote:     100.0 % (Depot reicht für alle geplanten Entnahmen)
-  Kapitalerhalt:    22.0 % (reales Endvermögen >= Start)
-  SWR (5-%-Quantil PWR): 7.30 % der Startsumme
+  Kapitalerhalt:    11.0 % (reales Endvermögen >= Start)
+  SWR (5-%-Quantil PWR): 6.92 % der Startsumme
 
   real, in Startkaufkraft            q05       q25       q50       q75       q95
-  Endvermögen                     114275    160528    195045    235051    328456
-  Entnahme Jahr 1                   9748      9748      9748      9748      9748
-  Konsum Jahr 1                     9748      9748      9748      9748      9748
-  Konsum Jahr 10                    9748      9748      9748      9748      9748
-  Konsum Jahr 20                     –       –       –       –       –
-  Konsum Jahr 30                     –       –       –       –       –
-  Konsum Durchschnitt               9748      9748      9748      9748      9748
-  Konsum Minimum                    9748      9748      9748      9748      9748
-  Sicherheitsäquiv. (g=2)           9748      9748      9748      9748      9748
+  Endvermögen                      78194    112625    136476    162412    225257
+  Entnahme Jahr 1                   8055      8055      8055      8055      8055
+  Konsum Jahr 1                     8055      8055      8055      8055      8055
+  Konsum Jahr 10                    8055      8055      8055      8055      8055
+  Konsum Jahr 20                       –         –         –         –         –
+  Konsum Jahr 30                       –         –         –         –         –
+  Konsum Durchschnitt               8055      8055      8055      8055      8055
+  Konsum Minimum                    8055      8055      8055      8055      8055
+  Sicherheitsäquiv. (g=2)           8055      8055      8055      8055      8055
   Max. Konsumrückgang              0.00%     0.00%     0.00%     0.00%     0.00%
-  PWR                              7.30%     8.15%     8.78%     9.53%    10.59%
-  Steuern gesamt                   27487     31451     33665     36481     41947
+  PWR                              6.92%     7.72%     8.36%     8.99%    10.09%
+  Steuern gesamt                   18965     22627     24471     27049     31854
 
 ══════════════════════════════════════════════════════════════
 ...
-  Kapitalerhalt:    24.0 % (reales Endvermögen >= Start)
+  Kapitalerhalt:    12.0 % (reales Endvermögen >= Start)
 ...
-  Steuern gesamt                   24458     28267     30436     33267     38870
+  Steuern gesamt                   16406     19820     21531     23996     28659
 ...
 ```
 
@@ -1924,7 +1933,7 @@ wd_gp
 def entnahme(tax):
     return simlev.withdrawal_simulation(study, rule=simlev.withdrawal_rule(type="constant", rate=4), strategy="mix",
                                         years=15, inflation=2, start_value=res_mix,
-                                        partial_exemption=12, sale_cost=0.15, base_rate=2.29, tax=tax)
+                                        partial_exemption=12, sale_cost=0.15, base_rate=2.5, tax=tax)
 wd = entnahme(simlev.tax_profile())
 print(wd)
 wd_gp = entnahme(simlev.tax_profile(guenstigerpruefung=True, income=simlev.income_tariff(15000)))
@@ -1937,32 +1946,32 @@ print(wd_gp)
 ══════════════════════════════════════════════════════════════
 
   Regel:            Konstante reale Entnahme (Bengen/Trinity)
-  Pfade:            100 Pfade über 15 Jahre, Startvermögen 243709
+  Pfade:            100 Pfade über 15 Jahre, Startvermögen 201375
   Steuern:          deutsche Privatperson (vereinfacht)
 
   Erfolgsquote:     100.0 % (Depot reicht für alle geplanten Entnahmen)
-  Kapitalerhalt:    22.0 % (reales Endvermögen >= Start)
-  SWR (5-%-Quantil PWR): 7.30 % der Startsumme
+  Kapitalerhalt:    11.0 % (reales Endvermögen >= Start)
+  SWR (5-%-Quantil PWR): 6.92 % der Startsumme
 
   real, in Startkaufkraft            q05       q25       q50       q75       q95
-  Endvermögen                     114275    160528    195045    235051    328456
-  Entnahme Jahr 1                   9748      9748      9748      9748      9748
-  Konsum Jahr 1                     9748      9748      9748      9748      9748
-  Konsum Jahr 10                    9748      9748      9748      9748      9748
-  Konsum Jahr 20                     –       –       –       –       –
-  Konsum Jahr 30                     –       –       –       –       –
-  Konsum Durchschnitt               9748      9748      9748      9748      9748
-  Konsum Minimum                    9748      9748      9748      9748      9748
-  Sicherheitsäquiv. (g=2)           9748      9748      9748      9748      9748
+  Endvermögen                      78194    112625    136476    162412    225257
+  Entnahme Jahr 1                   8055      8055      8055      8055      8055
+  Konsum Jahr 1                     8055      8055      8055      8055      8055
+  Konsum Jahr 10                    8055      8055      8055      8055      8055
+  Konsum Jahr 20                       –         –         –         –         –
+  Konsum Jahr 30                       –         –         –         –         –
+  Konsum Durchschnitt               8055      8055      8055      8055      8055
+  Konsum Minimum                    8055      8055      8055      8055      8055
+  Sicherheitsäquiv. (g=2)           8055      8055      8055      8055      8055
   Max. Konsumrückgang              0.00%     0.00%     0.00%     0.00%     0.00%
-  PWR                              7.30%     8.15%     8.78%     9.53%    10.59%
-  Steuern gesamt                   27487     31451     33665     36481     41947
+  PWR                              6.92%     7.72%     8.36%     8.99%    10.09%
+  Steuern gesamt                   18965     22627     24471     27049     31854
 
 ══════════════════════════════════════════════════════════════
 ...
-  Kapitalerhalt:    24.0 % (reales Endvermögen >= Start)
+  Kapitalerhalt:    12.0 % (reales Endvermögen >= Start)
 ...
-  Steuern gesamt                   24458     28267     30436     33267     38870
+  Steuern gesamt                   16406     19820     21531     23996     28659
 ...
 ```
 
@@ -1974,7 +1983,7 @@ print(wd_gp)
 ```julia
 entnahme(tax) = withdrawal_simulation(study, withdrawal_rule("constant"; rate = 4); strategy = "mix",
     years = 15, inflation = 2, start_value = res_mix,
-    partial_exemption = 12, sale_cost = 0.15, base_rate = 2.29, tax = tax)
+    partial_exemption = 12, sale_cost = 0.15, base_rate = 2.5, tax = tax)
 wd = entnahme(tax_profile())
 display(wd)
 wd_gp = entnahme(tax_profile(; guenstigerpruefung = true, income = income_tariff(15000)))
@@ -1987,45 +1996,45 @@ display(wd_gp)
 ══════════════════════════════════════════════════════════════
 
   Regel:            Konstante reale Entnahme (Bengen/Trinity)
-  Pfade:            100 Pfade über 15 Jahre, Startvermögen 243709
+  Pfade:            100 Pfade über 15 Jahre, Startvermögen 201375
   Steuern:          deutsche Privatperson (vereinfacht)
 
   Erfolgsquote:     100.0 % (Depot reicht für alle geplanten Entnahmen)
-  Kapitalerhalt:    22.0 % (reales Endvermögen >= Start)
-  SWR (5-%-Quantil PWR): 7.30 % der Startsumme
+  Kapitalerhalt:    11.0 % (reales Endvermögen >= Start)
+  SWR (5-%-Quantil PWR): 6.92 % der Startsumme
 
   real, in Startkaufkraft            q05       q25       q50       q75       q95
-  Endvermögen                     114275    160528    195045    235051    328456
-  Entnahme Jahr 1                   9748      9748      9748      9748      9748
-  Konsum Jahr 1                     9748      9748      9748      9748      9748
-  Konsum Jahr 10                    9748      9748      9748      9748      9748
-  Konsum Jahr 20                     –       –       –       –       –
-  Konsum Jahr 30                     –       –       –       –       –
-  Konsum Durchschnitt               9748      9748      9748      9748      9748
-  Konsum Minimum                    9748      9748      9748      9748      9748
-  Sicherheitsäquiv. (g=2)           9748      9748      9748      9748      9748
+  Endvermögen                      78194    112625    136476    162412    225257
+  Entnahme Jahr 1                   8055      8055      8055      8055      8055
+  Konsum Jahr 1                     8055      8055      8055      8055      8055
+  Konsum Jahr 10                    8055      8055      8055      8055      8055
+  Konsum Jahr 20                       –         –         –         –         –
+  Konsum Jahr 30                       –         –         –         –         –
+  Konsum Durchschnitt               8055      8055      8055      8055      8055
+  Konsum Minimum                    8055      8055      8055      8055      8055
+  Sicherheitsäquiv. (g=2)           8055      8055      8055      8055      8055
   Max. Konsumrückgang              0.00%     0.00%     0.00%     0.00%     0.00%
-  PWR                              7.30%     8.15%     8.78%     9.53%    10.59%
-  Steuern gesamt                   27487     31451     33665     36481     41947
+  PWR                              6.92%     7.72%     8.36%     8.99%    10.09%
+  Steuern gesamt                   18965     22627     24471     27049     31854
 
 ══════════════════════════════════════════════════════════════
 ...
-  Kapitalerhalt:    24.0 % (reales Endvermögen >= Start)
+  Kapitalerhalt:    12.0 % (reales Endvermögen >= Start)
 ...
-  Steuern gesamt                   24458     28267     30436     33267     38870
+  Steuern gesamt                   16406     19820     21531     23996     28659
 ...
 ```
 
 </details>
 
-**Einordnung:** Die Entnahme von 9.748 EUR im Jahr (4 % von
-243.709 EUR) gelingt auf allen 100 Pfaden; nach 15 Jahren liegt das reale
-Vermögen im Median bei 195.045 EUR, und 22 % der Pfade haben ihr
+**Einordnung:** Die Entnahme von 8.055 EUR im Jahr (4 % von
+201.375 EUR) gelingt auf allen 100 Pfaden; nach 15 Jahren liegt das reale
+Vermögen im Median bei 136.476 EUR, und 11 % der Pfade haben ihr
 Startvermögen real erhalten. Die höchste Anfangsrate, die auf 95 % der
 Pfade bis zum vollständigen Verzehr getragen hätte (SWR), liegt bei
-7,30 %. An Steuern fallen im Median
-33.665 EUR an (real). Mit Günstigerprüfung und 15.000 EUR übrigem zu
-versteuernden Einkommen sind es 30.436 EUR, weil der persönliche Tarif
+6,92 %. An Steuern fallen im Median
+24.471 EUR an (real). Mit Günstigerprüfung und 15.000 EUR übrigem zu
+versteuernden Einkommen sind es 21.531 EUR, weil der persönliche Tarif
 dann unter der Abgeltungsteuer liegt. `withdrawal_rule()` kennt 14 Regeln, `withdrawal_max_rate()` sucht die
 höchste Anfangsrate für eine Ziel-Erfolgsquote.
 
@@ -2077,9 +2086,9 @@ cat(bits(tail(res_mix$worth, 1)), bits(res_mix$tax_report$total_taxes_paid),
 ```
 
 ```text
-410dbfebd8c896dd
-40c17e32ea2a1522
-40e0e0e2524773cc
+410894f85cbc3c16
+40ba3c17d02c18e3
+40d98a89aa06b34a
 ```
 
 </details>
@@ -2094,9 +2103,9 @@ print(bits(res_mix.worth[-1]), bits(res_mix.tax_report["total_taxes_paid"]),
 ```
 
 ```text
-410dbfebd8c896dd
-40c17e32ea2a1522
-40e0e0e2524773cc
+410894f85cbc3c16
+40ba3c17d02c18e3
+40d98a89aa06b34a
 ```
 
 </details>
@@ -2111,9 +2120,9 @@ println(bits(res_mix.worth[end]), "\n", bits(res_mix.tax_report.total_taxes_paid
 ```
 
 ```text
-410dbfebd8c896dd
-40c17e32ea2a1522
-40e0e0e2524773cc
+410894f85cbc3c16
+40ba3c17d02c18e3
+40d98a89aa06b34a
 ```
 
 </details>
@@ -2148,7 +2157,7 @@ anhand gemeinsamer Referenzfälle ([`tests/README.md`](tests/README.md)).
 | Funktionsreferenz | R: Hilfeseiten (`?simulation`, Übersicht und Glossar in `?SimLev`); Python: Docstrings (`help(simlev.simulation)`); Julia: Docstrings (`?simulation`) |
 | Schreibweisen je Sprache | [`r/README.md`](r/README.md), [`python/README.md`](python/README.md), [`julia/README.md`](julia/README.md) |
 | Zuordnung der Funktionen und Dateien R / Python / Julia | [`STRUKTUR.md`](STRUKTUR.md) |
-| Quellen der Verfahren und der Beispieldaten | [`LITERATUR.md`](LITERATUR.md) |
+| Quellen der Verfahren | [`LITERATUR.md`](LITERATUR.md) |
 | Änderungen je Version | [`r/NEWS.md`](r/NEWS.md), [`python/NEWS.md`](python/NEWS.md), [`julia/NEWS.md`](julia/NEWS.md) |
 | Weiterentwicklung | [`r/DEVELOPING.md`](r/DEVELOPING.md), [`python/DEVELOPING.md`](python/DEVELOPING.md), [`julia/DEVELOPING.md`](julia/DEVELOPING.md), [`core/README.md`](core/README.md) |
 
@@ -2172,7 +2181,7 @@ die gezeigten Ausgaben.
 SimLev-Repos/
 ├── README.md, LICENSE.md
 ├── STRUKTUR.md     Zuordnung R / Python / Julia (erzeugt aus tests/schnittstelle)
-├── LITERATUR.md    Quellen der Verfahren und der Beispieldaten
+├── LITERATUR.md    Quellen der Verfahren
 ├── core/           C-Bibliothek und gemeinsame C++-Kerne; Kopien in r/src,
 │                   python/src/core und julia/deps/core (core/sync.py)
 ├── r/              R-Paket mit Vignette (r/vignettes), Beispieldaten (r/inst/extdata)

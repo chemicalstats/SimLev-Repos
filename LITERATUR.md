@@ -417,27 +417,6 @@ Hyperparameter.
   [doi:10.1016/S0304-405X(97)00020-2](https://doi.org/10.1016/S0304-405X%2897%2900020-2)
   – Regressions-Rückrechnung `backcast_fit(model = "linear")`.
 
-## Beispieldaten
-
-Die synthetischen Kurse der Fallstudie im Haupt-README
-(`r/inst/extdata/anlageklassen.csv`, erzeugt mit
-`r/inst/extdata/anlageklassen.R`; Kopien in `python/simlev/data/` und
-`julia/data/`) folgen diesen Angaben:
-
-- Abrams, R., Bhaduri, R., Flores, E. (2012). *A Quantitative Analysis of
-  Managed Futures for Plan Sponsors, Endowments and Foundations: Lintner
-  Revisited*. CME Group, Mai 2012.
-  [cmegroup.com](https://www.cmegroup.com/education/files/PM282_White_Paper_Lintner_Revisited.pdf)
-  – Exhibit 4 (annualisierte Rendite und Standardabweichung) und Exhibit 7
-  (Korrelationsmatrix), jeweils bis Dezember 2011: S&P 500 Total Return
-  (ab Januar 1980), Barclays Capital Bond Composite US (ab September 1997),
-  GSCI TR (ab Januar 1980) und Barclay BTOP 50 (ab Januar 1987) als Vorgabe
-  für `AKTIEN`, `ANLEIHEN`, `ROHSTOFFE` und `MFUTURES`.
-- Bundesministerium der Finanzen (2024). Basiszins zur Berechnung der
-  Vorabpauschale gemäß § 18 Absatz 4 InvStG; Basiszins zum 2. Januar 2024.
-  BMF-Schreiben vom 5. Januar 2024, IV C 1 - S 1980-1/19/10038 :008. –
-  2,29 % als `tax_profile(base_rate = 2.29)` in der Fallstudie.
-
 ## Numerische Grundlagen der eigenen Kerne
 
 Die C-Bibliothek in [`core/`](core/) ist nach diesen Quellen geschrieben;

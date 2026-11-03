@@ -1,5 +1,5 @@
 /* core/slc_sample.c – Ziehungen: ganze Zahlen, Stichproben, normal, exponentiell, geometrisch,
- *                     Gamma, Chi-Quadrat (SimLev core, Etappe 9)
+ *                     Gamma, Chi-Quadrat (SimLev core)
  * Verfahren:  ganze Zahl in [0, n): Multiplikation x * n (64 x 64 -> 128 Bit, portabel aus
  *             32-Bit-Hälften) mit Ablehnung, wenn der untere Teil < 2^64 mod n ist.
  *             Stichprobe ohne Zurücklegen: Fisher-Yates von vorn (für i = 0 ... size-1 ein
@@ -27,7 +27,7 @@
  * Konstanten: 0.0331 und 1/3 aus Marsaglia/Tsang (2000); sonst keine.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
- * Prüforakel: Momente, KS- und Chi-Quadrat-Tests (scratchpad/e91/).
+ * Prüforakel: Momente, KS- und Chi-Quadrat-Tests.
  */
 #include "slc_internal.h"
 

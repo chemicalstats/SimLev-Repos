@@ -49,6 +49,7 @@ Base.delete!(x::SimLevResult, k::AbstractString) = (delete!(getfield(x, :data), 
 Base.copy(x::SimLevResult) = SimLevResult(copy(getfield(x, :data)), getfield(x, :trades))
 r_class(::SimLevResult) = ["SimLevResult"]
 Base.show(io::IO, ::MIME"text/plain", x::SimLevResult) = print(io, format_result(x))
+Base.display(d::TextDisplay, M::MIME"text/plain", x::SimLevResult) = _display_text(d, M, x)
 Base.show(io::IO, x::SimLevResult) =
     print(io, "SimLevResult(", length(x["worth"]), " Tage, Endwert ", r_sprintf("%.2f", x["worth"][end]), " EUR)")
 

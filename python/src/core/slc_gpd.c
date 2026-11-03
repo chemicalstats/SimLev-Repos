@@ -1,5 +1,5 @@
 /* core/slc_gpd.c – verallgemeinerte Pareto-Verteilung: Punktschätzer der Überschreitungen
- *                  (SimLev core, Etappe 9.4)
+ *                  (SimLev core)
  * Verfahren:  Überschreitungen x_i >= 0 einer Schwelle mit Dichte
  *             sigma^-1 (1 + xi x / sigma)^(-1/xi - 1) (Pickands 1975; Davison, Smith 1990),
  *             Träger 1 + xi x_i / sigma > 0, sonst NLL = +Inf.
@@ -9,7 +9,7 @@
  *             log1p(t)/xi über die Reihe y (1 - t/2 + t^2/3 - t^3/4) mit t = xi y gerechnet
  *             (Grenzfall exponentiell bei xi = 0, Fehler < t^4/5).
  *             ML in theta = (log sigma, xi) mit dem projizierten BFGS (slc_opt.c), xi in
- *             [-0.999, 10], log sigma frei. N5: analytischer Gradient (geschlossen, gpd_fg; f und g
+ *             [-0.999, 10], log sigma frei. Analytischer Gradient (geschlossen, gpd_fg; f und g
  *             in einem Durchlauf, Grenzfall xi -> 0 über eine Reihe) statt zentraler Differenzen. Für xi < -1 ist die Likelihood
  *             unbeschränkt; endet die Suche an der Grenze -0.999 (oder 10), ist das SL_ECONV und
  *             der Aufrufer fällt zurück (.fit_tail: Momente).
@@ -24,7 +24,7 @@
  *                  sigma = max(1e-3, m (1 + r)/2);
  *               3. (sigma, xi) = (sd, 0.1).
  *             Ein eindimensionales Verfahren nach Grimshaw (1993) bleibt als Reserve vermerkt und
- *             ist nicht gebaut. Nur Punktschätzer (F4), keine Standardfehler.
+ *             ist nicht gebaut. Nur Punktschätzer, keine Standardfehler.
  * Quellen:    Pickands, J. (1975). Statistical inference using extreme order statistics. The
  *               Annals of Statistics 3(1), 119–131.
  *             Davison, A. C., Smith, R. L. (1990). Models for exceedances over high thresholds.
@@ -35,12 +35,12 @@
  *               Summen. ZAMM 54(1), 39–51.
  *             Bertsekas, D. P. (1982); Kelley, C. T. (1999) (projizierter BFGS, über slc_opt.c).
  *             Eigener SimLev-Code: .fit_tail aus r/R/bootstrap.R (Momentenschätzer).
- * Konstanten: keine; Verfahrensparameter (eigene Wahl, SPEZ-9 B.12): Kasten [-0.999, 10],
+ * Konstanten: keine; Verfahrensparameter (eigene Wahl): Kasten [-0.999, 10],
  *             maxit 500, reltol 1e-12, Plotting-Position nach Hosking, Wallis (1987).
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen (evd nicht
  *             gelesen).
- * Prüforakel: evd 2.3-7.1 fpot (nur Plausibilität, scratchpad/e94/).
+ * Prüforakel: evd 2.3-7.1 fpot (nur Plausibilität).
  */
 #include "slc_internal.h"
 #include "slc_la_internal.h"
@@ -132,7 +132,7 @@ int sl_gpd_pwm(sl_ctx *cx, int n, const double *x, double *scale, double *shape)
     return SL_OK;
 }
 
-/* N5: NLL und analytischer Gradient in theta = (log sigma, xi) in einem Durchlauf. Der Wert ist
+/* NLL und analytischer Gradient in theta = (log sigma, xi) in einem Durchlauf. Der Wert ist
  * Operation für Operation der von gpd_nll_raw (bitgleich). Mit u_i = y_i / (1 + t_i):
  *   d NLL / d log sigma = n - (1 + xi) sum u_i,
  *   d NLL / d xi        = sum [u_i + y_i^2 H(t_i)],  H(t) = (t / (1 + t) - log1p(t)) / t^2,

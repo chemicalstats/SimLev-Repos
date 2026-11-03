@@ -534,9 +534,9 @@ print(wd)
   Endvermögen                     222000    353561    471995    686609    991504
   Entnahme Jahr 1                  25000     25000     25000     25000     25000
   Konsum Jahr 1                    25000     25000     25000     25000     25000
-  Konsum Jahr 10                     –       –       –       –       –
-  Konsum Jahr 20                     –       –       –       –       –
-  Konsum Jahr 30                     –       –       –       –       –
+  Konsum Jahr 10                       –         –         –         –         –
+  Konsum Jahr 20                       –         –         –         –         –
+  Konsum Jahr 30                       –         –         –         –         –
   Konsum Durchschnitt              23921     24276     24694     26875     31834
   Konsum Minimum                   23096     23559     24509     25000     25000
   Sicherheitsäquiv. (g=2)          23902     24265     24689     26829     30909

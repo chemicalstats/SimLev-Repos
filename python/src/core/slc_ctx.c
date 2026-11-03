@@ -1,7 +1,7 @@
-/* core/slc_ctx.c – Kontext: Fehler, Warnungen, Benutzerabbruch (SimLev core, Etappe 9)
+/* core/slc_ctx.c – Kontext: Fehler, Warnungen, Benutzerabbruch (SimLev core)
  * Verfahren:  Statuscode und Text im Kontext statt longjmp; Warnungen werden gesammelt (gleiche
  *             Texte nur einmal, höchstens SL_WARN_MAX) und vom Host nach dem Aufruf ausgegeben;
- *             der Abbruch wird über einen Rückruf des Hosts erfragt (B.0, C.4).
+ *             der Abbruch wird über einen Rückruf des Hosts erfragt.
  * Quellen:    ISO/IEC 9899:1999 (C99), 7.15 (stdarg.h), 7.19.6.12 (vsnprintf), 7.20.3 (malloc).
  * Konstanten: keine.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine

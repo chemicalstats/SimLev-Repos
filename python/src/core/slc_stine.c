@@ -1,4 +1,4 @@
-/* core/slc_stine.c – Stineman-Interpolation (SimLev core, Etappe 9.2)
+/* core/slc_stine.c – Stineman-Interpolation (SimLev core)
  * Verfahren:  stückweise rationale Interpolation nach Stineman (1980).
  *             Steigungen an den inneren Stützstellen: Steigung des Kreises durch die Stützstelle
  *             und ihre beiden Nachbarn. Mit a = P_i - P_{i-1}, b = P_{i+1} - P_i ist die Tangente
@@ -11,13 +11,13 @@
  *             das Mittel der Endsteigungen ist); haben s und yp_2 dasselbe Vorzeichen und ist
  *             |yp_2| > |s|, dann yp_1 = s^2 / yp_2 (geometrisches statt arithmetisches Spiegeln:
  *             yp_1 / s = s / yp_2, Vorzeichen und Monotonie bleiben erhalten). Die Fallunterscheidung
- *             ist mit stinepack 1.5 als Black-Box-Orakel bestätigt (scratchpad/e92/tools/probe_stine*.R;
- *             Abweichung < 2e-15 relativ zur Spannweite).
+ *             ist mit stinepack 1.5 als Black-Box-Orakel bestätigt (Abweichung < 2e-15 relativ zur
+ *             Spannweite).
  *             Zwischen x_i und x_{i+1}: y0 = linearer Interpolant, d1 = (yp_i - s)(x - x_i),
  *             d2 = (yp_{i+1} - s)(x - x_{i+1}); y = y0 + d1 d2 / (d1 + d2) bei d1 d2 > 0,
  *             y = y0 + d1 d2 (x - x_i + x - x_{i+1}) / ((d1 - d2)(x_{i+1} - x_i)) bei d1 d2 < 0,
  *             sonst y0 (Stineman 1980, Fallunterscheidung nach dem Vorzeichen der Abweichungen).
- *             Skalierung (scale = 1, F19; stinepack-Standard "scaledstineman"): die Steigungen
+ *             Skalierung (scale = 1; stinepack-Standard "scaledstineman"): die Steigungen
  *             werden für (x, f y) mit f = (x_n - x_1) / (max y - min y) berechnet und durch f geteilt,
  *             damit die Kreisgeometrie nicht von den Einheiten abhängt (eigene Regel, mit dem Orakel
  *             bestätigt; bei max y = min y ist f = 1). Der Interpolant ist in (y, yp) homogen vom

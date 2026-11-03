@@ -323,7 +323,7 @@ test_that("ohne Lots unver\u00e4ndert: numerisches start_value bitgleich, ein Lo
     ident(sprintf("%a", c(w$paths$taxes, w$paths$terminal_real)),
           c("0x1.ba7cc2e9114efp+14", "0x1.bd239668e40fp+14", "0x1.66462295e709ap+15", "0x1.75b999f2411dbp+16",
                          "0x1.c08bc897c3f1cp+14", "0x1.20a91a7d2f701p+17", "0x0p+0", "0x1.0401716570f6cp+19"),
-          quelle = "Referenz: Paketstand vor FIFO (Commit 2c0a43b), mit der Vorabpauschale im Folgejahr (Toepfe des Folgejahres, letzte VP am Pfadende); ohne Vorabpauschale unveraendert bitgleich zum Stand "))
+          quelle = "Referenz: Entwicklungsstand von 0.5.0 vor der FIFO-Entnahme (NEWS 0.5.0, Abschnitt \"Kirchensteuer nach dem Zahlungsjahr, FIFO in der Entnahmephase\"), mit der Vorabpauschale im Folgejahr (Toepfe des Folgejahres, letzte VP am Pfadende); ohne Vorabpauschale unveraendert bitgleich zu diesem Stand"))
   w0 <- withdrawal_simulation(R, withdrawal_rule("guyton_klinger", rate = 5), start_value = 5e5, inflation = 2, tax = tax_profile(),
                               cost_basis = 60, loss_carryforward = 3000, sale_cost = 0.1, base_rate = 2.5, vorabpauschale = FALSE)
   tabelle("ohne Lots unverändert: numerisches start_value bitgleich, ein Lot = Durchschnittskosten",

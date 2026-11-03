@@ -100,7 +100,6 @@ BONDS:
   Klasse: etf | Anteil: 30% | Steuer: investment_fund
 GOLD:
   Klasse: etc | Anteil: 10% | Steuer: private_sale
-
 true
 ```
 
@@ -522,9 +521,9 @@ display(wd)
   Endvermögen                     205661    294767    369425    492016    722638
   Entnahme Jahr 1                  25000     25000     25000     25000     25000
   Konsum Jahr 1                    25000     25000     25000     25000     25000
-  Konsum Jahr 10                     –       –       –       –       –
-  Konsum Jahr 20                     –       –       –       –       –
-  Konsum Jahr 30                     –       –       –       –       –
+  Konsum Jahr 10                       –         –         –         –         –
+  Konsum Jahr 20                       –         –         –         –         –
+  Konsum Jahr 30                       –         –         –         –         –
   Konsum Durchschnitt              23745     24157     24453     24755     27864
   Konsum Minimum                   22642     23556     24029     24510     25000
   Sicherheitsäquiv. (g=2)          23715     24143     24446     24753     27515
@@ -589,7 +588,6 @@ cagr: mit Sparplan geldgewichtet (XIRR), sonst CAGR des Depotwerts
 
 Bester Punkt:   #1 (n = 50), sharpe = 0.776
 Bestes Plateau: #1 (n = 50), sharpe = 0.776, Nachbarschaft = 0.632
-
 Deflated Sharpe Ratio
   Punkt #1, 522 Beobachtungen (week)
   Sharpe Ratio (p. a.):                 0.777

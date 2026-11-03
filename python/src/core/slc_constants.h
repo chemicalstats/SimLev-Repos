@@ -1,4 +1,4 @@
-/* core/slc_constants.h – Konstanten der C-Bibliothek slc (SimLev core, Etappe 9)
+/* core/slc_constants.h – Konstanten der C-Bibliothek slc (SimLev core)
  *
  * ERZEUGT von core/gen_constants.py – nicht von Hand ändern.
  * Herleitung: siehe Kopf von gen_constants.py (nur Python-Standardbibliothek,
@@ -304,7 +304,7 @@ static const double slc_epoly_S[29][SLC_EPOLY_DEG + 2] = {
 #define SLC_QN_C3 1.66666666666666657415e-01  /* 1/6 */
 #define SLC_QN_C5 5.83333333333333342585e-02  /* 7/120 */
 
-/* ── N2: qnorm in drei Zonen mit selbst angepassten rationalen Näherungen (gen_constants.py, ── */
+/* ── qnorm in drei Zonen mit selbst angepassten rationalen Näherungen (gen_constants.py, ── */
 /*    qnorm_fits: Sanathanan-Koerner + Lawson an der eigenen Referenz, Stützstellen nach         */
 /*    Tschebyschow). Zone A |p - 1/2| <= SLC_QN_QA: x = s (1 + w G(z)), s = sqrt(2 pi) q,          */
 /*    w = q^2, z = 1/4 - w, G = P_7(z)/Q_8(z). Zone B p >= SLC_QN_PC: -x = P_4(t)/Q_4(t), Zone C:  */

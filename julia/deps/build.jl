@@ -2,7 +2,7 @@
 # geteilten C++-Kerne (N7) mit dem System-Compiler in eine Bibliothek.
 #
 # Läuft bei Pkg.build("SimLev") bzw. Pkg.build() im Projekt und bei Pkg.add. Quellen sind die
-# Kopien in deps/core/ der kanonischen Dateien in core/ (tools/core_sync.py): slc*.{c,h}, die
+# Kopien in deps/core/ der kanonischen Dateien in core/ (core/sync.py): slc*.{c,h}, die
 # geteilten Kerne simlev_core.h und *_core_impl.h und ihre C-ABI-Hülle simlev_cabi.cpp.
 # C-Compiler aus ENV["SIMLEV_CC"], C++-Compiler aus ENV["SIMLEV_CXX"] (dürfen Optionen enthalten),
 # sonst cc, gcc, clang bzw. c++, g++, clang++. Gleiche Gleitkomma-Schalter wie R (r/src/Makevars)
@@ -40,8 +40,8 @@ function build()
     cc = find_cc()
     cxx = find_cxx()
     srcs = sort([joinpath(SRC, f) for f in readdir(SRC) if startswith(f, "slc") && endswith(f, ".c")])
-    isempty(srcs) && error("SimLev: keine Quellen in $SRC (tools/core_sync.py --write ausführen)")
-    isfile(joinpath(SRC, CABI)) || error("SimLev: $CABI fehlt in $SRC (tools/core_sync.py --write ausführen)")
+    isempty(srcs) && error("SimLev: keine Quellen in $SRC (core/sync.py --write ausführen)")
+    isfile(joinpath(SRC, CABI)) || error("SimLev: $CABI fehlt in $SRC (core/sync.py --write ausführen)")
     mkpath(LIBDIR)
     lib = joinpath(LIBDIR, "libslc." * dlext)
     tmp = lib * ".neu"

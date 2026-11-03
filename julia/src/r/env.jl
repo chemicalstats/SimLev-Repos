@@ -15,12 +15,11 @@
 # | SIMLEV_GOLDEN_DIR            | anderer Wurzelordner der Engine-Fälle (cases/, extra/)         | Prüfung     |
 # | SIMLEV_SKIP_PRECOMPILE       | 1: keine Arbeitslast beim Vorkompilieren                       | Entwicklung |
 # | SIMLEV_SKIP_PRECOMPILE_EXT   | 1: Arbeitslast ohne die Erweiterungsmodule                     | Entwicklung |
-# | SIMLEV_LEGACY_TESTS          | 1: alte Tests und Referenzvergleiche laufen (Etappe 9: sonst aus) | Prüfung     |
 # | SIMLEV_MODULE_DIR            | anderer Ordner der Modul-Fälle (compare_reference.jl, Gleichlauf) | Prüfung     |
 # | SIMLEV_CC                    | C-Compiler für Pkg.build (gelesen in deps/build.jl, Etappe 9.1)  | Bau         |
 #
 # Seit Etappe 9.6c (Entwurf C.6 Nr. 10) entfallen SIMLEV_LAPACK (keine System-LAPACK) und
-# SIMLEV_R_SYS_TIME (feste Uhr für gosolnp).
+# SIMLEV_R_SYS_TIME (feste Uhr für gosolnp), seit C19 SIMLEV_LEGACY_TESTS (Tests seit T18 neu aufgebaut).
 module REnv
 
 "Name => (Zweck, Art)."
@@ -33,7 +32,6 @@ const SWITCHES = (
     "SIMLEV_GOLDEN_DIR" => ("anderer Wurzelordner der Engine-Fälle (cases/, extra/)", "Prüfung"),
     "SIMLEV_SKIP_PRECOMPILE" => ("1: keine Arbeitslast beim Vorkompilieren", "Entwicklung"),
     "SIMLEV_SKIP_PRECOMPILE_EXT" => ("1: Arbeitslast ohne die Erweiterungsmodule", "Entwicklung"),
-    "SIMLEV_LEGACY_TESTS" => ("1: alte Tests und Referenzvergleiche laufen (Etappe 9: sonst ausgesetzt)", "Prüfung"),
     "SIMLEV_MODULE_DIR" => ("anderer Ordner der Modul-Fälle (compare_reference.jl, Gleichlauf)", "Prüfung"),
     "SIMLEV_CC" => ("C-Compiler für Pkg.build (gelesen in deps/build.jl, das SimLev nicht laden kann)", "Bau"),
 )
@@ -53,8 +51,6 @@ strict_zero() = get(ENV, "SIMLEV_STRICT_ZERO", "1") != "0"
 full_tests() = get(ENV, "SIMLEV_FULL_TESTS", "0") == "1"
 "`SIMLEV_GOLDEN_DIR`, sonst `default`."
 golden_dir(default) = get(ENV, "SIMLEV_GOLDEN_DIR", default)
-"`SIMLEV_LEGACY_TESTS=1`: alte Tests und Referenzvergleiche laufen (Etappe 9, Entwurf C.7)."
-legacy_tests() = get(ENV, "SIMLEV_LEGACY_TESTS", "") == "1"
 "`SIMLEV_MODULE_DIR`, sonst `default`."
 module_dir(default) = get(ENV, "SIMLEV_MODULE_DIR", default)
 "Setzt `SIMLEV_COLLATE = value`, falls nicht gesetzt; `true`, wenn gesetzt wurde."

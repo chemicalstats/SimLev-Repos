@@ -4,7 +4,7 @@
 //
 // Die Rechnung steht seit Etappe 7.3a in src/research_core_impl.h (ohne R-Bezug,
 // gemeinsam mit Python: simlev._ext; kanonisch seit Etappe 9.6c in core/, Kopie hier ueber
-// tools/core_sync.py). Diese Datei wandelt
+// core/sync.py). Diese Datei wandelt
 // nur die Argumente um (wie die frueheren Rcpp-Huellen) und ruft die Kerne auf; die
 // Sichten und Aufrufe der Kerne bindet simlev_capi.h an R (Abschnitt "R als Host
 // der gemeinsamen Kerne").

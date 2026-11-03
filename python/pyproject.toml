@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "simlev"
-version = "1.4.0"
+version = "1.4.1"
 description = "Backtesting für ETF-, Hebel- und Multi-Asset-Strategien mit deutscher Investmentbesteuerung: vollständige, bitgleiche Portierung des R-Pakets SimLev 0.5.0 (Engine, Bootstrap, Entnahmephase, Analyse, Optimierung u. a.)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,8 +20,6 @@ classifiers = [
 ]
 dependencies = ["numpy>=1.22", "pandas>=1.4"]
 
-[project.optional-dependencies]
-test = ["pytest>=7"]
 
 [tool.setuptools]
 packages = ["simlev", "simlev._r"]
@@ -31,6 +29,3 @@ license-files = ["LICENSE.md", "COPYRIGHTS.md"]
 
 [tool.setuptools.package-data]
 simlev = ["data/*"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]

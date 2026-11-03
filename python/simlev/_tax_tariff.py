@@ -2,9 +2,8 @@
 
 * :func:`tax_tariff` liest und prüft eine Tarifdatei (Standard: mitgelieferte
   ``simlev/data/steuertarif.csv``, ab VZ 2026, wie ``inst/extdata/steuertarif.csv`` in R).
-* ``tariff_income_tax`` (R: ``.tariff_income_tax``) – tarifliche Einkommensteuer
-  (§ 32a Abs. 1 EStG, Rundung auf volle Euro).
-* ``tariff_soli`` (R: ``.tariff_soli``) – Solidaritätszuschlag auf die ESt (§§ 3, 4 SolZG).
+* Tarifliche Einkommensteuer und Soli rechnet der Tarifkern ``core/tariff_core_impl.h`` (C19: die
+  Python-Fassungen ``tariff_income_tax``/``tariff_soli`` sind als ungenutzt entfallen).
 
 Verwendet von ``simulation(tax=tax_profile(income=income_tariff(taxable_income, tariff)))``.
 """
@@ -18,7 +17,7 @@ from typing import Any
 
 import pandas as pd
 
-from ._r.rformat import r_format1, r_round, r_signif, r_sprintf
+from ._r.rformat import r_format1, r_signif, r_sprintf
 from ._r.rnum import NA_REAL
 
 __all__ = ["SimLevTaxTariff", "tax_tariff", "default_tariff_file"]
@@ -257,22 +256,3 @@ def tax_tariff(*, file: str | None = None) -> SimLevTaxTariff:
                           stacklevel=2)
     return out
 
-
-def tariff_income_tax(tariff: SimLevTaxTariff, zve: float) -> float:
-    """Tarifliche Einkommensteuer T(x) in vollen EUR (R: ``.tariff_income_tax``)."""
-    z = tariff.zones
-    ab = z["ab"].to_numpy()
-    x = max(0.0, math.floor(zve + 1e-9))
-    k = max(i for i in range(len(ab)) if ab[i] <= x)
-    u = (x - float(z["bezug"].iloc[k])) / float(z["teiler"].iloc[k])
-    v = (float(z["a"].iloc[k]) * u + float(z["b"].iloc[k])) * u + float(z["c"].iloc[k])
-    return max(0.0, float(math.floor(r_round(v, 6))))
-
-
-def tariff_soli(tariff: SimLevTaxTariff, est: float) -> float:
-    """Solidaritätszuschlag S(E) auf die ESt (R: ``.tariff_soli``)."""
-    s = tariff.soli
-    if not est > s["freigrenze"]:
-        return 0.0
-    v = min(s["satz"] / 100 * est, s["milderung"] / 100 * (est - s["freigrenze"]))
-    return float(math.floor(r_round(v * 100, 6))) / 100

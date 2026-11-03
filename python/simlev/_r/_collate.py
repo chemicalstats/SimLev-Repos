@@ -37,7 +37,7 @@ import warnings
 
 from . import env as _env
 
-__all__ = ["str_collate", "collate_key", "collate_mode", "collate_reset", "r_key"]
+__all__ = ["str_collate", "collate_key", "collate_reset", "r_key"]
 
 _ST = {"init": False, "mode": None, "coll": None, "lib": None, "f": {}, "warned": False}
 
@@ -172,22 +172,6 @@ def collate_reset():
     if _ST["coll"] is not None:
         _ST["f"]["ucol_close"](_ST["coll"])
     _ST.update(init=False, mode=None, coll=None, lib=None, f={}, warned=False)
-
-
-def collate_mode():
-    """``"icu"`` (wie R), ``"bytes"`` (C-Locale) oder ``"codepoint"`` (Ersatzweg ohne ICU)."""
-    _init()
-    return _ST["mode"]
-
-
-def collate_locale():
-    """Locale des ICU-Collators (wie ``icuGetCollate()``), sonst ``None``."""
-    _init()
-    if _ST["mode"] != "icu" or "ucol_getLocaleByType" not in _ST["f"]:
-        return None
-    st = ctypes.c_int(0)
-    r = _ST["f"]["ucol_getLocaleByType"](_ST["coll"], 0, ctypes.byref(st))
-    return r.decode() if r else None
 
 
 def _warn_cp():

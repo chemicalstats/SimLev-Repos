@@ -9,7 +9,7 @@
 # Rueckgabewert liefern unsichtbar NULL.
 #
 # Die Rechnung der Kerne steht in den geteilten Dateien *_impl.h, kanonisch in core/ (seit
-# Etappe 9.6c, F16; Kopien in src/ ueber tools/core_sync.py). Die frueheren Bootstrap-, DCC-
+# Etappe 9.6c, F16; Kopien in src/ ueber core/sync.py). Die frueheren Bootstrap-, DCC-
 # und MS-GARCH-Kerne (bootstrap_core.cpp, dependence_core.cpp, ms_garch.c) und
 # die C-Uebernahmen (vendor_*) sind mit Etappe 9.6c entfallen; ihre Aufgaben rechnet die
 # C-Bibliothek slc (R/slc*.R).
@@ -73,5 +73,5 @@
 }
 
 # T14: Pruefzugang zum Tarifkern (core/tariff_core_impl.h) fuer den Zufallsvergleich mit .tariff_income_tax,
-# .tariff_soli und .tariff_close (tools/gleichlauf/tariff_fuzz.R); mode 1 ESt, 2 Soli, 3 Jahresabschluss
+# .tariff_soli und .tariff_close (Gleichlauf: tariff_fuzz.R); mode 1 ESt, 2 Soli, 3 Jahresabschluss
 .wd_tariff_check <- function(par, x, mode) .Call(C_wd_tariff_check, as.numeric(par), x, as.integer(mode))

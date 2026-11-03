@@ -35,16 +35,6 @@ static inline void slc_acc_add(slc_acc *a, double v)
 
 static inline double slc_acc_val(const slc_acc *a) { return a->s + a->c; }
 
-/* sum_{i < n} x[i * incx] y[i * incy], kompensiert, aufsteigend */
-static inline double slc_dot(int64_t n, const double *x, int64_t incx, const double *y, int64_t incy)
-{
-    slc_acc a;
-    int64_t i;
-    slc_acc_init(&a, 0.0);
-    for (i = 0; i < n; i++) slc_acc_add(&a, x[i * incx] * y[i * incy]);
-    return slc_acc_val(&a);
-}
-
 /* Euklidische Norm ohne Über- und Unterlauf: Skalierung mit dem Betragsmaximum, kompensierte Summe */
 static inline double slc_nrm2(int64_t n, const double *x, int64_t incx)
 {

@@ -155,18 +155,6 @@ function collate_reset()
     return nothing
 end
 
-"Kollationsweg: :icu (wie R), :bytes (C-Locale) oder :codepoint (Ersatzweg ohne ICU)."
-collate_mode() = _collate_init!().mode
-
-"Locale des ICU-Collators (wie `icuGetCollate()`), sonst `nothing`."
-function collate_locale()
-    S = _collate_init!()
-    (S.mode !== :icu || S.f_loc == C_NULL) && return nothing
-    st = Ref{Cint}(0)
-    p = ccall(S.f_loc, Cstring, (Ptr{Cvoid}, Cint, Ref{Cint}), S.coll, 0, st)
-    return p == C_NULL ? nothing : unsafe_string(p)
-end
-
 function _warn_cp(S)
     if !S.warned
         S.warned = true

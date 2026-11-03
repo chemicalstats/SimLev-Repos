@@ -12,16 +12,15 @@ Funktion liest die Umgebung bei jedem Aufruf neu; wann gelesen wird, bestimmt de
 | ``SIMLEV_STRICT_ZERO`` | ``0``: −0 = +0 im Vergleich mit den Referenzfällen | Prüfung |
 | ``SIMLEV_GOLDEN_DIR`` | andere Ordner der Engine-Fälle für pytest (mit ``os.pathsep`` getrennt) | Prüfung |
 | ``SIMLEV_MODULE_DIR`` | anderer Ordner der Modul-Fälle für pytest | Prüfung |
-| ``SIMLEV_LEGACY_TESTS`` | ``1``: die alten Tests und Referenzvergleiche laufen (Etappe 9: sonst ausgesetzt) | Prüfung |
 
 Seit Etappe 9.6c (Entwurf C.6 Nr. 10) entfallen ``SIMLEV_NO_EXT`` (die C-Erweiterung ist
 Pflicht, es gibt keine reinen Python-Kerne mehr), ``SIMLEV_LAPACK`` (keine System-LAPACK) und
-``SIMLEV_R_SYS_TIME`` (feste Uhr für gosolnp).
+``SIMLEV_R_SYS_TIME`` (feste Uhr für gosolnp), seit C19 ``SIMLEV_LEGACY_TESTS`` (Tests seit T18 neu aufgebaut, wirkte nicht mehr).
 """
 import os
 
 __all__ = ["SWITCHES", "collate", "icu_path", "lax_na", "strict_zero", "set_collate_default",
-           "golden_dir", "module_dir", "legacy_tests"]
+           "golden_dir", "module_dir"]
 
 # Name -> (Zweck, Art); Art: Nutzer, Prüfung (Julia zusätzlich: Entwicklung; R-Generatoren: Generator)
 SWITCHES = {
@@ -31,7 +30,6 @@ SWITCHES = {
     "SIMLEV_STRICT_ZERO": ("0: -0 = +0 im Vergleich mit den Referenzfällen", "Prüfung"),
     "SIMLEV_GOLDEN_DIR": ("andere Ordner der Engine-Fälle für pytest (os.pathsep-getrennt)", "Prüfung"),
     "SIMLEV_MODULE_DIR": ("anderer Ordner der Modul-Fälle für pytest", "Prüfung"),
-    "SIMLEV_LEGACY_TESTS": ("1: die alten Tests und Referenzvergleiche laufen (Etappe 9: sonst ausgesetzt)", "Prüfung"),
 }
 
 
@@ -73,8 +71,3 @@ def module_dir():
     """``SIMLEV_MODULE_DIR`` als Text oder ``None``."""
     return os.environ.get("SIMLEV_MODULE_DIR")
 
-
-def legacy_tests():
-    """``SIMLEV_LEGACY_TESTS=1``: die alten Tests (pytest) und Referenzvergleiche laufen; ohne den
-    Schalter sind sie in Etappe 9 ausgesetzt (Entwurf C.7), nur die Rauchproben laufen."""
-    return os.environ.get("SIMLEV_LEGACY_TESTS", "") == "1"

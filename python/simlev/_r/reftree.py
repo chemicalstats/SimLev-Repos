@@ -1,7 +1,7 @@
 """Referenzbäume: Vergleich von Python-Ergebnissen mit R-Referenzfällen.
 
-Die Fälle in ``golden/modules/<modul>/*.json.gz`` erzeugt R mit
-``golden/modules/ref_tools.R``. Jeder Fall enthält die Eingaben, den R-Code,
+Die Referenzfälle (gzip-komprimiertes JSON) erzeugt R mit den Generatoren der
+Tests. Jeder Fall enthält die Eingaben, den R-Code,
 den passenden Python-Code und das R-Ergebnis als Baum (siehe dort). Dieses
 Modul dekodiert die Eingaben in Python-Objekte, führt den Python-Code aus
 und vergleicht das Ergebnis Bit für Bit mit dem Baum.

@@ -66,7 +66,6 @@
 #' @export
 #' @noRd
 wrapper_config <- function(strategy, rebalance = NULL, costs = funds_costs(), order_fee = NULL, volume = NULL) {
-  who <- "wrapper_config"
   if (missing(strategy) || is.null(strategy))
     stop("wrapper_config: strategy fehlt (innere Strategie aus create_strategy() oder eine Liste, die create_strategy() annimmt).",
          call. = FALSE)

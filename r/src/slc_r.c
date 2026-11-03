@@ -1,7 +1,7 @@
 /*
  * src/slc_r.c -- R-Huellen (.Call) der C-Bibliothek slc (SimLev core, Etappe 9.1)
  *
- * Die Kerne (slc*.c, slc*.h) sind Kopien der kanonischen Quellen in core/ (tools/core_sync.py);
+ * Die Kerne (slc*.c, slc*.h) sind Kopien der kanonischen Quellen in core/ (core/sync.py);
  * nur diese Huelle gibt es nur hier. Registrierung in init.c (Namen sl_*, in R C_sl_*), die
  * R-Seite steht in R/slc.R (interne Funktionen .sl_*).
  *
@@ -120,14 +120,6 @@ SEXP C_sl_rng_seed_entropy(SEXP t_ns, SEXP pid, SEXP counter)
     uint64_t ub = (b > 0 && b < 1.8e19) ? (uint64_t) b : 0u;
     uint64_t uc = (c > 0 && c < 1.8e19) ? (uint64_t) c : 0u;
     sl_rng_seed_entropy(&r, ua, ub, uc);
-    return new_state(&r);
-}
-
-SEXP C_sl_rng_jump(SEXP state)
-{
-    sl_rng r;
-    get_state(state, &r);
-    sl_rng_jump(&r);
     return new_state(&r);
 }
 

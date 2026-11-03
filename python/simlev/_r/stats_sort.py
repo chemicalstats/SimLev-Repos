@@ -81,14 +81,6 @@ def _rmean_int(a):
     return _rn.r_mean_int(a)
 
 
-def _scalar_or(v, names=None):
-    if names is not None:
-        return pd.Series(v, index=names)
-    if v.size == 1:
-        return float(v[0])
-    return v
-
-
 def seq_len_out(frm, to, length_out):
     """``seq.int(from, to, length.out = n)`` (Werte wie R)."""
     n = int(length_out)
@@ -521,7 +513,6 @@ def _format_perc(probs, digits=7):
     else:
         s = list(_fmt.format(x, trim=True, digits=digits))
     return [("" if (xi != xi) else si + "%") for si, xi in zip(s, x.tolist())]
-
 
 
 # ── R's partielle Sortierung (sort.default(x, partial =)) ─────────────────

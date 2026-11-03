@@ -36,9 +36,7 @@ from .data_prep import (
     _which_min,
 )
 
-__all__ = ["backcast_fit", "backcast", "SimLevBackcastFit", "SimLevBackcast",
-           "print_SimLevBackcastFit", "summary_SimLevBackcastFit", "plot_SimLevBackcastFit",
-           "print_SimLevBackcast", "plot_SimLevBackcast"]
+__all__ = ["backcast_fit", "backcast", "SimLevBackcastFit", "SimLevBackcast", "summary_SimLevBackcastFit", "plot_SimLevBackcastFit", "plot_SimLevBackcast"]
 
 _NAN = NA_REAL   # R-NA_real_
 
@@ -929,12 +927,6 @@ def _format_fit(x) -> str:
     return txt[:-1] if txt.endswith("\n") else txt
 
 
-def print_SimLevBackcastFit(x):  # noqa: N802
-    """``print.SimLevBackcastFit``."""
-    print(x.format())
-    return x
-
-
 def summary_SimLevBackcastFit(object):  # noqa: A002,N802
     """``summary.SimLevBackcastFit``: druckt den Fit, liefert Parameter, Kennzahlen und Validierung."""
     print(object.format())
@@ -1023,12 +1015,6 @@ def _format_backcast(x, **kwargs) -> str:
     df = pd.DataFrame(x).iloc[:6].reset_index(drop=True)
     body = _fmt.print_data_frame(df, types={"source": "character", "date": "Date"}, **kwargs)
     return head + body
-
-
-def print_SimLevBackcast(x, **kwargs):  # noqa: N802
-    """``print.SimLevBackcast``: Kopfzeile und die ersten Zeilen."""
-    print(x.format(**kwargs))
-    return x
 
 
 def summary(object, *args, **kwargs):  # noqa: A002

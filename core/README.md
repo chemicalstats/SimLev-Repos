@@ -1,14 +1,14 @@
 # core/ – C-Bibliothek slc (SimLev core)
 
 Kanonische Quellen der C-Bibliothek, die R, Python und Julia gemeinsam nutzen (Etappe 9).
-**Nur hier ändern**, danach `python3 tools/core_sync.py --write`; `--check` prüft die Kopien
+**Nur hier ändern**, danach `python3 core/sync.py --write`; `--check` prüft die Kopien
 (SHA-256) und `core/slc_constants.h` gegen den Generator.
 
 | Datei | Inhalt |
 |---|---|
 | `slc.h` | öffentliche Schnittstelle (reines C99): Kontext `sl_ctx`, Generator `sl_rng`, Ziehungen, Verteilungen |
 | `slc_internal.h` | interne Hilfen: Gleitkomma-Schutz, Abbruchprüfung |
-| `slc_constants.h` | **erzeugt** von `tools/gen_constants.py` (nicht von Hand ändern) |
+| `slc_constants.h` | **erzeugt** von `gen_constants.py` (nicht von Hand ändern) |
 | `slc_ctx.c` | Fehler, Warnungen, Benutzerabbruch ohne `longjmp` |
 | `slc_rng.c` | xoshiro256**, SplitMix64-Seeding, Sprung um 2^128, Ströme, Gleichverteilung |
 | `slc_sample.c` | ganze Zahlen (Lemire), Stichproben, normal (Inversion), exponentiell, geometrisch, Gamma (Marsaglia–Tsang), Chi-Quadrat |
@@ -25,8 +25,8 @@ Kanonische Quellen der C-Bibliothek, die R, Python und Julia gemeinsam nutzen (E
 | `slc_opt.h`, `slc_opt.c`, `slc_opt_test.c` | (9.3) Optimierer BFGS (Wolfe-Liniensuche), projizierter BFGS, Nelder-Mead, numerischer Gradient; Rückfrage an den Host und `sl_minimize`; Prüffunktionen (Quellen: Nocedal/Wright, Bertsekas, Kelley, Nelder/Mead, Lagarias u. a., Gill/Murray/Wright, Moré/Garbow/Hillstrom) |
 | `slc_models.h`, `slc_garch.c`, `slc_gpd.c`, `slc_dcc.c`, `slc_msgarch.c`, `slc_boot.c` | (9.4) Modelle: GARCH/GJR(1,1) (ML, Umparametrisierung, Rückfall Momente), GPD (ML, Startwerte nach Hosking/Wallis), DCC(1,1) (Filter, Nelder-Mead), MS-GARCH (Filter, Starts aus HMM-EM und Rangeinteilung, BFGS, Viterbi), Bootstrap-Kerne mit Strom `sl_rng` (Quellen: Bollerslev, Glosten/Jagannathan/Runkle, Pickands, Davison/Smith, Hosking/Wallis, Engle, Haas/Mittnik/Paolella, Hamilton, Baum u. a., Viterbi, Efron, Künsch, Politis/Romano, Wu, Liu, Mammen, Barone-Adesi u. a.; eigener SimLev-Code) |
 | `slc_rbase.h`, `slc_rbase.c`, `slc_rbase_sort.c`, `slc_rbase_cov.c` | (N8) Grundfunktionen mit R-Regeln **für Python und Julia** (R rechnet sie selbst, Entscheidung 9.0 (4); nicht in `slc.h`); seit E17 gehen `slc_rbase.c` und `slc_rbase.h` auch nach `r/src/` (`sl_r_sum` für die Summen der Tagesengine `engine_core_impl.h`, seit Stufe 3 die Grundfunktionen und `sl_r_zeroin2` der Auswertung `evaluate_core_impl.h`): `sum`, `prod`, `mean`, `var`, `cumsum`/`cumprod`/`cummax`/`cummin`, `rowSums`/`colSums` (long double wie R), `^`, `order`, `rank`, `sort(partial =)`, `quantile` Typ 1–9, `tabulate`, `findInterval`, `cov`/`cor` (pearson, kendall; alle `use`). Anders als die SimLev-eigenen Kerne (seit N5 ohne long double) akkumulieren sie absichtlich in long double, damit sie auf derselben Plattform bitgleich zu R sind (Prüfung gegen R 4.3.3, ≥ 10.000 Zufallsfälle je Kern). Hüllen: `python/src/_ext_slc_rbase.c`, `julia/src/r/rbase_c.jl` |
-| `slc_rbase_date.c`, `slc_rbase_num.c` | (N10) wie `slc_rbase*` nur für Python und Julia: Datumsformat und -lesen (`format.Date`/`strftime` in der C-Locale, `as.Date(x, "%Y-%m-%d")`, proleptisch gregorianisch; dokumentierte Umwandlungen aus `?strptime` textgleich zu R) und weitere long-double-Wege von R (`R_strtod`, `%%`, `%/%`, `scientific()` von `formatReal`), mit denen Julia die Nachbildung `ld80.jl` (N10) und Python `numpy.longdouble` (N11) ablöst. Seit N11 Schalter, Breiten und E/O im Datumsformat wie glibc unter Linux, `digits.secs` für `%OS`. Prüfung: `tools/gleichlauf/date_fuzz*`, `rbase_fuzz*` |
-| `tools/gen_constants.py` | Konstanten, Bernoulli-Zahlen, zeta(k), Stützwerte und Taylor-Polynome, Sprungpolynom, N2: selbst angepasste rationale Näherungen für `qnorm` (nur Standardbibliothek) |
+| `slc_rbase_date.c`, `slc_rbase_num.c` | (N10) wie `slc_rbase*` nur für Python und Julia: Datumsformat und -lesen (`format.Date`/`strftime` in der C-Locale, `as.Date(x, "%Y-%m-%d")`, proleptisch gregorianisch; dokumentierte Umwandlungen aus `?strptime` textgleich zu R) und weitere long-double-Wege von R (`R_strtod`, `%%`, `%/%`, `scientific()` von `formatReal`), mit denen Julia die Nachbildung `ld80.jl` (N10) und Python `numpy.longdouble` (N11) ablöst. Seit N11 Schalter, Breiten und E/O im Datumsformat wie glibc unter Linux, `digits.secs` für `%OS`. Prüfung: Gleichlauf (`date_fuzz*`, `rbase_fuzz*`) |
+| `gen_constants.py` | Konstanten, Bernoulli-Zahlen, zeta(k), Stützwerte und Taylor-Polynome, Sprungpolynom, N2: selbst angepasste rationale Näherungen für `qnorm` (nur Standardbibliothek) |
 
 **Geteilte Kerne von R und Python (seit Etappe 9.6c, F16):** Auch die früher in `r/src/`
 kanonischen C++-Kerne liegen hier: `simlev_core.h` (Aufbau, Host-Schnittstelle, `NA`),
@@ -42,7 +42,7 @@ aus `libslc` auf (vorher eigene Ports, F2). Beim Verschieben blieb ihr Maschinen
 (Vergleich der Objektdateien Funktion für Funktion, Bericht 9.6c). Seit N10 rechnen die Engine-Kerne Operationen mit zwei
 Eingabeoperanden über `simlev_add`/`_sub`/`_mul`/`_div` (Regel „NA vor NaN“ in `simlev_core.h`), damit R, Python
 und Julia auch bei NA und NaN in einer Operation unabhängig vom Compiler dasselbe Bitmuster liefern (Prüfung bis
-E17 Stufe 1c: `tools/gleichlauf/engine_nan_fuzz.*`, seitdem `sim_fuzz.R` mit NA-Daten über `simulation()`).
+E17 Stufe 1c: Gleichlauf `engine_nan_fuzz.*`, seitdem `sim_fuzz.R` mit NA-Daten über `simulation()`).
 
 **Tagesengine (E17):** `engine_core_impl.h` rechnet die Tagesschleife von `simulation()` als ein Kern mit eigenem
 Zustand (C++-Strukturen statt Host-Objekten, wie `tariff_core_impl.h`), Ereignisprotokoll (Warnungen und Abbrüche
@@ -52,7 +52,7 @@ als Ereignisse mit Werten (1c; Texte wortgleich in den Hüllen, mit den Warnunge
 der Kern alle Läufe; die bisherigen Engines der Sprachen und die Engine-Kerne `simulation_core_impl.h`,
 `fifo_core_impl.h`, `tax_core_impl.h` mit ihren Hüllen sind entfallen. Hüllen: `r/src/engine_core.cpp`, `python/src/_ext_engine.cpp`
 (`sim_engine_run`), `simlev_cabi.cpp` (`simlev_c_engine_*`). Summen wie R in long double über `sl_r_sum`
-(`slc_rbase.c`, dafür auch in `r/src/`). Prüfung: `tools/gleichlauf/sim_fuzz.R` gegen R 1.3.0.
+(`slc_rbase.c`, dafür auch in `r/src/`). Prüfung: Gleichlauf `sim_fuzz.R` gegen R 1.3.0.
 
 **Vorbereitung (E17 Stufe 2):** `prepare_core_impl.h` rechnet vor der Tagesschleife die Termine (`calculate_dates_flags`
 mit der Monatsarithmetik von `seq.Date`), Split-Termine, die Tagesflags samt Verschieben von Terminen auf
@@ -60,7 +60,7 @@ aufgefüllten Tagen, Aktivierung, Freibetragstage, Jahreswechsel und VP-Abrechnu
 Anfangszustand; die Engine bindet sie ein (`Engine::setup_prepared`). Die Sprachen prüfen die Eingaben (Texte) und
 wandeln die Angaben (`span`, `days`, `harvest_day`) wie R (`.sched_spec`). Hüllen wie die Tagesengine, dazu
 `calculate_dates_flags` (`C_sim_dates_flags`, `sim_dates_flags`, `simlev_c_dates_flags`). Prüfung zusätzlich:
-`tools/gleichlauf/sched_fuzz.R` (Datums-Fuzz) gegen R 1.3.0.
+Gleichlauf `sched_fuzz.R` (Datums-Fuzz) gegen R 1.3.0.
 
 **Auswertung (E17 Stufe 3):** `evaluate_core_impl.h` rechnet nach dem Lauf Depotwert und Zuflüsse je Tag, CAGR (mit
 Einzahlungen geldgewichtet über XIRR: Brent wie `stats::uniroot` über `sl_r_zeroin2` in `slc_rbase.c`), TTWROR,
@@ -71,7 +71,7 @@ und Abbrüche (NA in einer Bedingung) meldet der Kern mit Werten bzw. Stelle; di
 rechnen `risk_free` aus `data` (Typen, Meldungen). Hüllen: `r/src/engine_core.cpp` (`C_sim_evaluate`,
 `C_sim_xirr`), `python/src/_ext_engine.cpp` (`sim_evaluate`, `sim_xirr`), `simlev_cabi.cpp` (`simlev_c_eval_*`,
 `simlev_c_xirr`). Summen, Mittel, Varianz, Kumulationen und Potenz wie R über `slc_rbase.c`. Prüfung zusätzlich:
-`tools/gleichlauf/metric_fuzz.R` (Fuzz der Kennzahlen) gegen R 1.3.0.
+Gleichlauf `metric_fuzz.R` (Fuzz der Kennzahlen) gegen R 1.3.0.
 
 Kopien (Pakete bauen nur aus ihrem Teilbaum): `r/src/` (flach), `python/src/core/`,
 `julia/deps/core/` (slc, seit N7 auch die geteilten Kerne und `simlev_cabi.cpp`). Die Hüllen gibt es nur je Sprache: `r/src/slc_r.c` (+ `r/R/slc.R`),
@@ -97,7 +97,7 @@ Kopien (Pakete bauen nur aus ihrem Teilbaum): `r/src/` (flach), `python/src/core
   R-Quellen übersetzt; sie tragen statt der Reinraum-Erklärung den Herkunftsblock (Felder
   „Herkunft“, „Rechte“, „Lizenz der Vorlage“, „Änderungen“; Schema in den COPYRIGHTS-Dateien).
   Ebenso tragen übernommene gemeinfreie Teile (Kalender nach Hinnant) einen Herkunftsblock mit „Teil“.
-- **Konstanten** werden in `tools/gen_constants.py` hergeleitet (Herleitung im Kopf des Skripts);
+- **Konstanten** werden in `gen_constants.py` hergeleitet (Herleitung im Kopf des Skripts);
   Verfahrensparameter aus einem Aufsatz stehen mit Fundstelle im Dateikopf.
 - **Schnittstelle.** Kein `exit`, kein `longjmp`, keine Ausgabe; Status als Rückgabewert, Text im
   Kontext; Warnungen gesammelt (gleiche Texte einmal), vom Host nach dem Aufruf ausgegeben. Kein
@@ -149,4 +149,4 @@ Kopien (Pakete bauen nur aus ihrem Teilbaum): `r/src/` (flach), `python/src/core
   ausgewertet. α und β können jetzt genau 0 sein, ω ebenso. GJR unverändert.
 
 Prüfung: Plausibilität gegen R und eine eigene decimal-Referenz (Arbeitsordner der Etappe),
-Gleichlauf der Sprachen mit `tools/gleichlauf/run.sh --quick`.
+Gleichlauf der Sprachen (Gleichlaufprüfung `run.sh --quick`).

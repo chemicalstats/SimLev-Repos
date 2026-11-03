@@ -136,22 +136,6 @@ def _mean_int(x):
     return r_mean_int(a)
 
 
-def _is_null(x):
-    return x is None
-
-
-def _length(x):
-    if x is None:
-        return 0
-    if isinstance(x, str):
-        return 1
-    if isinstance(x, Mapping):
-        return len(x)
-    if np.ndim(x) == 0:
-        return 1
-    return len(x)
-
-
 def _chr_vec(x):
     """Zeichenvektor (``NULL`` -> leer)."""
     if x is None:

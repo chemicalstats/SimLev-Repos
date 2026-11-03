@@ -389,8 +389,6 @@ function _modify_list(base, val)
     return out
 end
 
-_rlist(ps::Pair...) = RList(ps...)
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Öffentliche Funktionen
 # ═══════════════════════════════════════════════════════════════════════════
@@ -793,9 +791,6 @@ function format_SimLevBackcastFit(x)
     return String(take!(io))
 end
 
-"`print.SimLevBackcastFit`."
-print_SimLevBackcastFit(x; io::IO = stdout) = (print(io, format_SimLevBackcastFit(x)); x)
-
 "`summary.SimLevBackcastFit`: druckt den Fit, liefert Parameter, Kennzahlen (ohne Pfad) und Validierung."
 function summary_SimLevBackcastFit(object; io::IO = stdout)
     print(io, format_SimLevBackcastFit(object))
@@ -820,9 +815,6 @@ function format_SimLevBackcast(x; kw...)
     h.attrs = Dict{String,Any}()
     return head * DP._chomp(SimLev.RFmt.print_data_frame(h; kw...))
 end
-
-"`print.SimLevBackcast(x, ...)`: Schlüsselwörter gehen wie in R an print.data.frame (z. B. `digits`)."
-print_SimLevBackcast(x; io::IO = stdout, kw...) = (println(io, format_SimLevBackcast(x; kw...)); x)
 
 "Registrierte Druckmethode (R `print.SimLevBackcast(x, ...)`)."
 function _print_backcast(io::IO, x; kw...)

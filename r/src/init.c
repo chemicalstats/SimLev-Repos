@@ -10,7 +10,7 @@
  * useDynLib(SimLev, .registration = TRUE, .fixes = "C_"), in R heissen sie
  * daher C_<name> (z. B. C_sim_engine_run, gerufen von .sim_engine_run in R/sim_engine.R).
  * Dynamische Symbolsuche ist abgeschaltet. Seit Etappe 9.1 auch die Huellen der C-Bibliothek slc
- * (slc_r.c; Kerne slc*.c als Kopien aus core/, tools/core_sync.py).
+ * (slc_r.c; Kerne slc*.c als Kopien aus core/, core/sync.py).
  */
 #include <R.h>
 #include <Rinternals.h>
@@ -30,7 +30,6 @@ extern SEXP C_roll_cov_core(SEXP, SEXP, SEXP);
 extern SEXP C_sl_version(void);
 extern SEXP C_sl_rng_seed(SEXP);
 extern SEXP C_sl_rng_seed_entropy(SEXP, SEXP, SEXP);
-extern SEXP C_sl_rng_jump(SEXP);
 extern SEXP C_sl_rng_streams(SEXP, SEXP);
 extern SEXP C_sl_rng_seed31(SEXP);
 extern SEXP C_sl_rng_hex(SEXP);
@@ -136,7 +135,6 @@ static const R_CallMethodDef CallEntries[] = {
     {"sl_version", (DL_FUNC) &C_sl_version, 0},
     {"sl_rng_seed", (DL_FUNC) &C_sl_rng_seed, 1},
     {"sl_rng_seed_entropy", (DL_FUNC) &C_sl_rng_seed_entropy, 3},
-    {"sl_rng_jump", (DL_FUNC) &C_sl_rng_jump, 1},
     {"sl_rng_streams", (DL_FUNC) &C_sl_rng_streams, 2},
     {"sl_rng_seed31", (DL_FUNC) &C_sl_rng_seed31, 1},
     {"sl_rng_hex", (DL_FUNC) &C_sl_rng_hex, 1},

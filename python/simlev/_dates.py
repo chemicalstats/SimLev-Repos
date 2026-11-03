@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import datetime as _dt
-import re
 from typing import Any
 
 import numpy as np
@@ -30,20 +29,6 @@ def to_days(d: Any) -> int:
     raise TypeError("Kann %r nicht als Datum interpretieren" % (d,))
 
 
-def dates_to_days(values: Any) -> np.ndarray:
-    """Vektor von Datumswerten -> int64-Array (Tage seit Epoch)."""
-    arr = np.asarray(values)
-    if np.issubdtype(arr.dtype, np.datetime64):
-        return arr.astype("datetime64[D]").astype(np.int64)
-    if np.issubdtype(arr.dtype, np.integer):
-        return arr.astype(np.int64)
-    try:
-        import pandas as pd  # noqa: WPS433
-        return pd.to_datetime(pd.Series(list(values))).values.astype("datetime64[D]").astype(np.int64)
-    except Exception:
-        return np.array([to_days(v) for v in values], dtype=np.int64)
-
-
 def from_days(z: int) -> _dt.date:
     return _dt.date.fromordinal(int(z) + EPOCH_ORD)
 
@@ -65,42 +50,5 @@ def days_from_civil(y: int, m: int, d: int) -> int:
     return _dt.date(y, m, d).toordinal() - EPOCH_ORD
 
 
-def is_leap(y: int) -> bool:
-    return (y % 4 == 0 and y % 100 != 0) or (y % 400 == 0)
 
 
-def r_num_str(x: Any) -> str:
-    """``as.character(x)``/``paste()`` für Zahlen wie R (15 signifikante Stellen)."""
-    if isinstance(x, (bool, np.bool_)):
-        return "TRUE" if x else "FALSE"
-    if isinstance(x, (int, np.integer)):
-        return str(int(x))
-    xf = float(x)
-    if xf != xf:
-        return "NA"
-    if xf == int(xf) and abs(xf) < 1e15:
-        return str(int(xf))
-    s = "%.15g" % xf
-    if "e" in s:
-        mant, exp = s.split("e")
-        exp_i = int(exp)
-        s = "%se%s%02d" % (mant, "-" if exp_i < 0 else "+", abs(exp_i))
-    return s
-
-
-_LEAD_INT = re.compile(r"^\s*([+-]?)(\d+)")
-
-
-def r_strptime_ymd(y: Any, m: Any, d: Any) -> int | None:
-    """``as.Date(paste(y, m, d, sep='-'), format='%Y-%m-%d')`` wie R.
-
-    R liest ``%m`` und ``%d`` mit höchstens zwei Ziffern und ignoriert
-    nachfolgende Zeichen; ungültige Kalenderdaten ergeben ``NA`` (``None``).
-    """
-    from . import _ext   # N10: Kern core/slc_rbase_date.c
-    return _ext.slc_r_strptime_ymd("%s-%s-%s" % (r_num_str(y), r_num_str(m), r_num_str(d)), "-")
-
-
-def first_of_month(z: int) -> int:
-    y, m, _ = ymd(z)
-    return days_from_civil(y, m, 1)

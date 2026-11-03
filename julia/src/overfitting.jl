@@ -713,8 +713,6 @@ function overfit_walk_forward(x; train = 5, test = 1, step = nothing, anchored::
                     "params" => params; class = "SimLevWalkForward")
 end
 
-_ymd_str(d::Date) = _ymkey(d)
-
 function _print_wf(io::IO, x)
     print(io, _spf("Walk-Forward (%s, Training %g J., Test %g J., Auswahl %s nach %s)\n",
                    x["anchored"] ? "verankert" : "rollierend", Float64(x["train"]), Float64(x["test"]), x["select"], x["metric"]))

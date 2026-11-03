@@ -36,9 +36,6 @@ function set_options(; kw...)
     return old
 end
 
-"`getOption(name)` für digits, scipen, width, OutDec, digits_secs (auch \"digits.secs\")."
-get_option(name) = _OPT[String(name) == "digits.secs" ? :digits_secs : Symbol(name)]
-
 # getOption("digits.secs") wie bei R's %OS: ganzzahlig (zur Null hin); nicht gesetzt, NA, NaN oder außerhalb
 # des int-Bereichs 0; die Begrenzung auf 0..6 macht der Kern (wie Python fmt._digits_secs).
 function _digits_secs()
@@ -96,11 +93,6 @@ mutable struct _V
     ordered::Bool
     scalar::Bool
 end
-
-const _E_D = Float64[]
-const _E_I = Int[]
-const _E_L = Bool[]
-const _E_S = _Str[]
 
 function _len(v::_V)
     t = v.type

@@ -49,7 +49,7 @@
  *               26.7.5.
  *             Lentz (1976); Thompson, Barnett (1986), Abschnitt 3 (Lentz-Verfahren); Dekker (1971)
  *               (exaktes Produkt mit Teilung nach Veltkamp) – vollständige Angaben in slc_normal.c.
- * Konstanten: selbst hergeleitet (core/tools/gen_constants.py): Bernoulli-Glieder der Stirling-
+ * Konstanten: selbst hergeleitet (core/gen_constants.py): Bernoulli-Glieder der Stirling-
  *             Reihe, gamma und zeta(k) - 1 (Euler-Maclaurin), ln sqrt(2 pi), ln sqrt(pi), pi.
  *             Aus der Quelle: die Polynome g1 ... g4 von A&S 26.7.5 (nur Startwert).
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
@@ -98,13 +98,6 @@ double slc_lgamma_pos(double x)
     if (x > 1.5) return lg2(x - 2.0);
     if (x >= 0.5) return lg2(x - 1.0) - log1p(x - 1.0);
     return lg2(x) - log1p(x) - log(x);
-}
-
-double sl_lgamma1(double x)
-{
-    if (isnan(x)) return x;
-    if (!(x > 0)) return NAN;
-    return slc_lgamma_pos(x);
 }
 
 int sl_lgamma(sl_ctx *cx, int64_t n, const double *x, double *out)

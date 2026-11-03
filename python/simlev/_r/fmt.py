@@ -67,10 +67,10 @@ import numpy as np
 import pandas as pd
 
 __all__ = [
-    "NA_REAL", "set_options", "get_option",
+    "NA_REAL", "set_options",
     "r_round", "signif", "fround", "fprec",
     "as_character", "paste", "paste0", "to_string",
-    "format", "format_date", "format_info", "formatC", "prettyNum", "sprintf",
+    "format", "format_date", "formatC", "prettyNum", "sprintf",
     "nchar", "encode_string",
     "print_vector", "print_matrix", "print_data_frame", "format_data_frame", "print_factor",
     "print_list", "print_default", "r_cat", "cat_str",
@@ -96,10 +96,6 @@ def set_options(**kw):
         old[k] = _OPT[k]
         _OPT[k] = v
     return old
-
-
-def get_option(name):
-    return _OPT["digits.secs" if name == "digits_secs" else name]
 
 
 def _digits_secs():
@@ -1145,18 +1141,6 @@ def format(x, format=None, *, trim=False, digits=None, nsmall=0, justify="left",
                         preserve_width="individual" if trim else "common", zero_print=zero_print,
                         drop0trailing=drop0trailing, is_cmplx=False)
     return _out(r, v)
-
-
-def format_info(x, digits=None, nsmall=0):
-    """``format.info(x)``: [w] bzw. [w, d, e] für double."""
-    v = _as_v(x)
-    if v.type == "double":
-        return list(_format_real(v.v, v.na, v.nan, digits, nsmall))
-    if v.type == "integer":
-        return [_format_integer(v)]
-    if v.type == "logical":
-        return [_format_logical(v)]
-    return [_format_string(_as_character_list(v), 0)]
 
 
 # ── prettyNum ──────────────────────────────────────────────────────────────

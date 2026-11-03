@@ -41,7 +41,7 @@ import pandas as pd
 from ._dates import fmt_date, year_of
 from ._r.rformat import r_format1, r_sprintf
 from ._r.rlist import RList
-from ._r.rnum import NA_REAL as NA, r_sum
+from ._r.rnum import r_sum
 from ._sim_base import _FEE, _Frame, _fee_spec, _filled_matrix, _isna, _message, _to_frame
 from ._sim_blocks import (SimLevFundsCosts, SimLevRebalancePlan, SimLevSplitRule, _blk_print, _cls, _fee_text,
                           _fmt, _one_num, _sched_text, _show, funds_costs, sim_costs)

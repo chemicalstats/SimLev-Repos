@@ -13,8 +13,6 @@
 # Vorlage: python/simlev/_r/fmt.py; R 4.3.3 format.c, format.R, sprintf.c,
 # util.c (str_signif), dates.R.
 
-const _JUST = ("left", "right", "centre", "none")
-
 "`.Internal(format(...))` (do_format) → Liste von Zeichenketten (nothing = NA)."
 function _format_internal(v::_V; trim = false, digits = nothing, nsmall = 0, width = nothing, justify = "left",
                           na_encode = true, scientific = nothing, decimal_mark = nothing)
@@ -142,15 +140,6 @@ function _format(x, fmt; trim = false, digits = nothing, nsmall = 0, justify = "
     r = _pretty_num_chr(r; big_mark, big_interval, small_mark, small_interval, decimal_mark = dec, input_d_mark = dec,
                         preserve_width = trim ? "individual" : "common", zero_print, drop0trailing)
     return _out(r, v)
-end
-
-"`format.info(x)`: [w] bzw. [w, d, e] für double."
-function format_info(x; digits = nothing, nsmall = 0)
-    v = _as_v(x)
-    v.type === :double && return collect(_format_real(v, digits, nsmall))
-    v.type === :integer && return [_format_integer(v)]
-    v.type === :logical && return [_format_logical(v)]
-    return [_format_string(_as_character_list(v))]
 end
 
 # ── prettyNum ──────────────────────────────────────────────────────────────

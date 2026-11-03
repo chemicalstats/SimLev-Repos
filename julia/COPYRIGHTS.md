@@ -33,7 +33,7 @@ haben dieselben Felder, dazu `Dateien:`.
 |---|---|
 | `src/*.jl` | alle Funktionen von SimLev (Ausnahme: Kalenderteile, Abschnitt 2.4); `core.jl`, `signals_core.jl`, `withdrawal_core.jl`, `dependence_core.jl`, `optimize_core.jl` rufen seit N7 die gemeinsamen C++-Kerne über `cabi.jl` auf |
 | `src/slib*.jl` | Hüllen der C-Bibliothek per `ccall` |
-| `deps/core/` | Kopien der kanonischen C-Quellen aus `core/` (Repo-Wurzel, `tools/core_sync.py`): die C-Bibliothek `slc*.c`, `slc*.h` **ohne `slc_rbase*`** (Zufall, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, Bootstrap-Kerne, Stineman, Glättungsspline, Kerndichte), die gemeinsamen C++-Kerne `simlev_core.h`, `*_core_impl.h` (Engine, FIFO, Steuer, Research, Entnahme) und ihre C-ABI-Hülle `simlev_cabi.cpp` |
+| `deps/core/` | Kopien der kanonischen C-Quellen aus `core/` (Repo-Wurzel, `core/sync.py`): die C-Bibliothek `slc*.c`, `slc*.h` **ohne `slc_rbase*`** (Zufall, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, Bootstrap-Kerne, Stineman, Glättungsspline, Kerndichte), die gemeinsamen C++-Kerne `simlev_core.h`, `*_core_impl.h` (Engine, FIFO, Steuer, Research, Entnahme) und ihre C-ABI-Hülle `simlev_cabi.cpp` |
 | `deps/build.jl` | Bau der C-Bibliothek |
 | `src/r/types.jl`, `env.jl`, `stats.jl`, `rbase_c.jl` | R-Datenstrukturen, Umgebungsschalter, Sammelmodul, Hülle der Kerne aus 2.2 |
 
@@ -56,7 +56,7 @@ ihre Quellen; die vollständigen Angaben stehen im Abschnitt
 
 | Datei | Herkunft | R-Funktionen |
 |---|---|---|
-| `rnum.jl`, `base.jl` | übersetzt aus `src/main/summary.c`, `cum.c`, `array.c`, `arithmetic.c`; `src/library/stats/src/zeroin.c`; nachgebildet nach `stats/R/nlm.R` | `sum`, `mean`, `var`, `sd`, `prod`, `cumsum`, `cumprod`, `cummax`, `cummin`, `rowSums`, `colSums`, `rowMeans`, `colMeans`, `pmin`, `pmax`, `range`, `diff`, `R_POW`, `%%`, `R_zeroin2`/`uniroot` |
+| `rnum.jl`, `base.jl` | übersetzt aus `src/main/summary.c`, `cum.c`, `array.c`, `arithmetic.c` | `sum`, `mean`, `var`, `sd`, `prod`, `cumsum`, `cumprod`, `cummax`, `cummin`, `rowSums`, `colSums`, `rowMeans`, `colMeans`, `pmin`, `pmax`, `range`, `diff`, `R_POW`, `%%` |
 | `libm.jl` | nachgebildet nach `src/main/arithmetic.c` | Randregeln um die libm-Funktionen |
 | `rformat.jl`, `fmt.jl`, `_fmt_core.jl`, `_fmt_format.jl`, `_fmt_print.jl` | übersetzt aus `src/main/format.c`, `printutils.c`, `printvector.c`, `printarray.c`, `print.c`, `paste.c`, `sprintf.c`, `util.c`, `src/nmath/fround.c`, `fprec.c`; nachgebildet nach `base/R/format.R`, `dataframe.R`, `factor.R`, `dates.R` | `round`, `signif`, `format`, `formatC`, `prettyNum`, `sprintf`, `as.character`, `deparse` (einfache Werte), `paste`, `print`, `cat`, Datumsformate |
 | `_collate.jl` | nachgebildet nach `src/main/util.c` | `Scollate` |
@@ -93,7 +93,7 @@ ihre Quellen; die vollständigen Angaben stehen im Abschnitt
 | Funktion (Dateien) | Herkunft laut R-Quelle | Lizenzvermerk der älteren Vorlage |
 |---|---|---|
 | `optimize` (`_optim.jl`, `stats_optim.jl`) | `optimize.c`: „fmin.f -- translated by f2c“; Netlib `go/fmin.f`: Übersetzung von Brents ALGOL-60-Prozedur `localmin` (R. P. Brent, *Algorithms for Minimization without Derivatives*, Prentice-Hall 1973) | keiner (Netlib-Datei ohne Urheber- und Lizenzvermerk) |
-| `uniroot` (`_optim.jl`, `stats_optim.jl`, `rnum.jl`; seit E17 Stufe 3 `.xirr_rate` über `sl_r_zeroin2` in `deps/core/slc_rbase.c`) | `zeroin.c`: „from NETLIB c/brent.shar with max.iter, add'l info and convergence details hacked in by Peter Dalgaard“; Netlib `go/zeroin.f`: Übersetzung von Brents Prozedur `zero` (Brent 1973) | `go/zeroin.f`: keiner; `c/brent.shar`: nicht geprüft (Abruf nicht möglich) |
+| `uniroot` (`_optim.jl`, `stats_optim.jl`; seit E17 Stufe 3 `.xirr_rate` über `sl_r_zeroin2` in `deps/core/slc_rbase.c`) | `zeroin.c`: „from NETLIB c/brent.shar with max.iter, add'l info and convergence details hacked in by Peter Dalgaard“; Netlib `go/zeroin.f`: Übersetzung von Brents Prozedur `zero` (Brent 1973) | `go/zeroin.f`: keiner; `c/brent.shar`: nicht geprüft (Abruf nicht möglich) |
 | `hclust` (`stats_cluster.jl`) | `hclust.f`: „F. Murtagh, ESA/ESO/STECF, Garching, February 1986. Modifications for R: Ross Ihaka, Dec 1996“, weitere Änderungen Fritz Leisch, Martin Maechler | keiner in `hclust.f` |
 | Sortierung (`stats_sort.jl`, `slc_rbase_sort.c`) | `qsort-body.c`: „Based on CACM algorithm #347 by R. C. Singleton (1969)“ | ACM-Software-Hinweis (Nutzung „solely for academic, research and other similar noncommercial uses“), Anwendbarkeit auf R's Umarbeitung nicht belegt |
 | `signif` (`rformat.jl`, `fmt.jl`, `_fmt_core.jl`) | `fprec.c`: „a translation into C of a Fortran subroutine by W. Fullerton of Los Alamos Scientific Laboratory“ | keiner genannt |

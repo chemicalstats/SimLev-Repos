@@ -6,7 +6,7 @@
 // GEMEINSAME QUELLE FUER R, PYTHON UND JULIA: eingebunden von withdrawal_core_impl.h (R ueber
 // r/src/withdrawal_core.cpp, Python ueber python/src/_ext_withdrawal.cpp, Julia ueber
 // core/simlev_cabi.cpp). Kanonisch in core/; R, Python und Julia bauen aus Byte-fuer-Byte-
-// Kopien (tools/core_sync.py --write/--check); Aenderungen nur in core/ vornehmen.
+// Kopien (core/sync.py --write/--check); Aenderungen nur in core/ vornehmen.
 //
 // Bitgleich zu den R-Funktionen, die simulation() im Tarifweg nutzt (r/R/tax_tariff.R und
 // r/R/sim_base.R), in derselben Rechenfolge:
@@ -15,7 +15,7 @@
 //   full, diff  .tariff_full, .tariff_diff
 //   close       .tariff_close       Veranlagung eines Jahres (ohne Druck; die Jahreszeile in row)
 // round(x, 6) ist R's fround (nmath/fround.c, R >= 4.0.0), wie r_round in Python und Julia.
-// Geprueft per Zufallsvergleich gegen die R-Funktionen (tools/gleichlauf/tariff_fuzz.R ueber
+// Geprueft per Zufallsvergleich gegen die R-Funktionen (Gleichlauf: tariff_fuzz.R ueber
 // .wd_tariff_check).
 //
 // Parametervektor (Hosts bauen ihn aus tax_tariff() und tax_profile(), R: .wd_tariff_par):

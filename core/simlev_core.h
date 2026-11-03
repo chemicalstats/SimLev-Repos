@@ -6,7 +6,7 @@
  * Rechnung (<datei>_impl.h; ohne R- und Python-Header) und die Huellen (R:
  * r/src/<datei>.cpp mit den .Call-Funktionen; Python: python/src/_ext_<kern>.cpp im Modul
  * simlev._ext). Kanonisch sind die Dateien seit Etappe 9.6c (F16) in core/; R und Python
- * bauen aus Byte-fuer-Byte-Kopien in r/src/ bzw. python/src/core/ (tools/core_sync.py
+ * bauen aus Byte-fuer-Byte-Kopien in r/src/ bzw. python/src/core/ (core/sync.py
  * --write/--check). Aenderungen nur in core/, danach kopieren. Seit N7 ist Julia der dritte
  * Host (C-ABI-Huelle core/simlev_cabi.cpp, Kopie in julia/deps/core/; vorher eigene Ports, F2).
  * Zufallszahlen zieht seit Etappe 9.6c keiner der geteilten Kerne mehr;

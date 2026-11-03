@@ -4,7 +4,7 @@
  * Glaettungsspline, Kerndichte
  *
  * Die Kerne src/core/slc_{linalg,matmul,lsq,stine,spline,kde}.c sind Byte-fuer-Byte-Kopien der
- * kanonischen Quellen in core/ (tools/core_sync.py); nur diese Huelle gibt es nur hier. Die
+ * kanonischen Quellen in core/ (core/sync.py); nur diese Huelle gibt es nur hier. Die
  * Python-Seite (simlev/_lib_linalg.py) prueft Argumente und legt die Felder an (float64,
  * eindimensional; Matrizen spaltenweise); die Huellen pruefen Typ, Laenge und Beschreibbarkeit.
  * Rueckmeldungen wie _ext_slc.c (Entwurf C.4): Warnungen nach dem Aufruf mit warnings.warn,

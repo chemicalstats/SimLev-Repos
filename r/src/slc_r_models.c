@@ -2,7 +2,7 @@
  * src/slc_r_models.c -- R-Huellen (.Call) der Modelle der C-Bibliothek slc (Etappe 9.4)
  *
  * Kerne: slc_garch.c, slc_gpd.c, slc_dcc.c, slc_msgarch.c, slc_boot.c (Kopien aus core/,
- * tools/core_sync.py); Registrierung in init.c (Block "9.4"), die R-Seite steht in
+ * core/sync.py); Registrierung in init.c (Block "9.4"), die R-Seite steht in
  * R/slc_models.R (interne Funktionen .sl_*).
  *
  * Rueckmeldungen wie slc_r.c: Warnungen nach dem Aufruf, Fehler mit Rf_errorcall(R_NilValue, ...)

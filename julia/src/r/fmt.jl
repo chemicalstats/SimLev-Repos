@@ -42,10 +42,10 @@ module RFmt
 import ..SimLev
 using Dates: Dates, Date, DateTime, @dateformat_str
 
-export set_options, get_option, NA_REAL,
+export set_options, NA_REAL,
        r_round, signif, fround, fprec,
        as_character, paste, paste0, to_string,
-       r_format, format_date, format_info, formatC, prettyNum, r_sprintf,
+       r_format, format_date, formatC, prettyNum, r_sprintf,
        nchar, encode_string, RFactor, r_factor,
        print_vector, print_matrix, print_data_frame, format_data_frame, print_factor,
        print_list, print_default, r_cat, cat_str

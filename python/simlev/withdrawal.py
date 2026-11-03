@@ -115,10 +115,6 @@ def _fmtv(x):
     return [str(s) for s in np.asarray(r, dtype=object).ravel()]
 
 
-def _isnull_or(x, dflt):
-    return dflt if x is None else x
-
-
 def _is_result(x) -> bool:
     try:
         from .result import SimLevResult

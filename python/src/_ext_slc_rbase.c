@@ -5,7 +5,7 @@
  * R_strtod, %%, %/% und scientific() in long double (slc_rbase_num.c)
  *
  * Die Kerne src/core/slc_rbase*.c sind Byte-fuer-Byte-Kopien der kanonischen Quellen in core/
- * (tools/core_sync.py); nur diese Huelle gibt es nur hier. Die Python-Seite (simlev/_r/rnum.py,
+ * (core/sync.py); nur diese Huelle gibt es nur hier. Die Python-Seite (simlev/_r/rnum.py,
  * base.py, stats_sort.py, stats_cor.py) prueft Argumente und legt die Felder an (float64 bzw. int64,
  * eindimensional, zusammenhaengend; Matrizen spaltenweise). Die Huellen pruefen Typ, Laenge und
  * Beschreibbarkeit. Fehler wie _ext_slc.c: ValueError mit dem Text des Kerns, MemoryError.

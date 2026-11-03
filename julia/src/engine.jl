@@ -120,7 +120,6 @@ function _fee_spec(x)
     return s
 end
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Termine und Flags
 # ═══════════════════════════════════════════════════════════════════════════
@@ -324,7 +323,6 @@ function _check_taxable_income(x, years::Vector{Int}, who::String = "simulation"
     return (all = nothing, by_year = Dict{String,Float64}(string(y) => v for (y, v) in zip(yy, vals)))
 end
 
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Kennzahlen
 # ═══════════════════════════════════════════════════════════════════════════
@@ -373,12 +371,6 @@ function calculate_kurtosis(x::AbstractVector; na_rm::Bool = true, excess::Bool 
     kurt = (nf * (nf + 1)) / ((nf - 1) * (nf - 2) * (nf - 3)) * r_sum(r_pow(v - mean_x, 4.0) for v in a) / r_pow(sd_x, 4.0)
     excess && (kurt = kurt - (3 * r_pow(nf - 1, 2.0)) / ((nf - 2) * (nf - 3)))
     return kurt
-end
-
-"`calculate_partials(returns, exp = 1, type = c(\"lower\", \"higher\"))`: mittleres Partialmoment."
-function calculate_partials(returns::AbstractVector; exp::Real = 1, type::AbstractString = "lower")
-    v = Float64[isnan(r) ? r : r_pow(type == "lower" ? r_max2(0.0, -r) : r_max2(0.0, r), Float64(exp)) for r in returns]
-    return r_mean(v; na_rm = true)
 end
 
 "`calculate_dates_flags()`: logischer Vektor der Termine (Sparplan, Rebalancing) zu `dates`."

@@ -306,16 +306,16 @@ function simulation(data, strategy; start_value = 10000, costs = sim_costs(), dc
     @nospecialize
     flat = _sim_from_blocks(costs, dca, rebalance, splits, tax)
     return _simulation_flat(data, strategy; start_value = start_value, risk_free = risk_free, fractions = fractions,
-                            liquidate = liquidate, details = details, io = io, _blocks = true, flat...)
+                            liquidate = liquidate, details = details, io = io, flat...)
 end
 
 """
     _simulation_flat(data, strategy; start_value, spread, details, liquidate, dca_mode, …, io)
 
 Engine mit den flachen Argumenten bis Etappe 6.2 (R: `.simulation_flat`).
-`simulation()` übersetzt die Bausteine mit `_sim_from_blocks` hierher
-(`_blocks = true`: Prüfungen der Bausteine entfallen, Meldungen nennen die
-Bausteine). Die Aufrufer mit `sim_args` gehen seit Etappe 6.4 über
+`simulation()` übersetzt die Bausteine mit `_sim_from_blocks` hierher (einziger
+Aufrufer: Prüfungen der Bausteine entfallen, Meldungen nennen die Bausteine; C19:
+der flache Weg ohne Bausteine mit eigenen Prüfungen ist entfallen). Die Aufrufer mit `sim_args` gehen seit Etappe 6.4 über
 `simulation()` (`_sim_args_set`, `_sim_call` in sim_blocks.jl).
 `tax_tariff`: `nothing`, Dateipfad oder `tax_tariff()`.
 """
@@ -326,40 +326,29 @@ function _simulation_flat(data, strategy; start_value = 10000, spread = nothing,
                     balance_unit = ("month", "quarter", "year"), balance_anchor = ("start", "end"),
                     balance_start = nothing, balance_skip = false, balance_dca = false, balance_thresh = nothing,
                     balance_thresh_type = ("absolute", "relative"), tax_mode = ("none", "person"),
-                    tax_rate = _UNSET, marginal_tax_rate = _UNSET, use_guenstigerpruefung = false,
+                    tax_rate = 26.375, marginal_tax_rate = nothing, use_guenstigerpruefung = false,
                     private_sale_threshold = 1000, sparer_pauschbetrag = 1000, use_sparer_pauschbetrag = true,
-                    include_soli_on_income_tax = _UNSET, soli_rate_income_tax = _UNSET, base_rate = nothing,
+                    include_soli_on_income_tax = false, soli_rate_income_tax = 5.5, base_rate = nothing,
                     base_rate_flex = false, base_rate_data = nothing, fractions = true, risk_free = 0, split_mode = false, split_thresh = nothing, event_col = nothing,
-                    event_mode = _UNSET, event_weight = nothing, church_tax = 0, order_fee = nothing,
+                    event_mode = ("additional", "replace"), event_weight = nothing, church_tax = 0, order_fee = nothing,
                     dca_fee = nothing, harvest_mode = false, harvest_day = "12-15", harvest_loss_pot = true,
-                    taxable_income = nothing, tax_tariff = nothing, io::IO = stdout, _blocks::Bool = false)
+                    taxable_income = nothing, tax_tariff = nothing, io::IO = stdout)
     @nospecialize
-    given = _Given(Dict("tax_rate" => !(tax_rate isa _Unset), "marginal_tax_rate" => !(marginal_tax_rate isa _Unset),
-                        "include_soli_on_income_tax" => !(include_soli_on_income_tax isa _Unset),
-                        "soli_rate_income_tax" => !(soli_rate_income_tax isa _Unset),
-                        "event_mode" => !(event_mode isa _Unset)))
-    _blocks && (given = _Given(Dict(k => false for k in keys(given.d))))
-    tax_rate = _val(tax_rate, 26.375)
-    marginal_tax_rate = _val(marginal_tax_rate, nothing)
-    include_soli_on_income_tax = _val(include_soli_on_income_tax, false)
-    soli_rate_income_tax = _val(soli_rate_income_tax, 5.5)
-    event_mode = _val(event_mode, ("additional", "replace"))
     details = details == true
-    cfg, fr = _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_span, dca_days,
+    cfg, fr = _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_days,
                                 balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
                                 marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                                 use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
                                 fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
-                                order_fee, dca_fee, harvest_mode, harvest_day, taxable_income, tax_tariff, given, io,
-                                _blocks)
+                                order_fee, dca_fee, harvest_mode, taxable_income, tax_tariff, io)
     split_thresh !== nothing && (split_thresh = _num_vec(split_thresh))
-    start_date, stopp_date = _sim_prepare_data(fr, cfg.pre_filled, base_rate_flex, base_rate_data, _blocks)
+    start_date, stopp_date = _sim_prepare_data(fr, cfg.pre_filled, base_rate_flex, base_rate_data)
     sim = _sim_build_state(fr, cfg.strategy, cfg.start_value, start_date, stopp_date, cfg.sparer_pauschbetrag,
-                           cfg.use_sparer_pauschbetrag, cfg.base_rate, base_rate_flex, base_rate_data, _blocks)
+                           cfg.use_sparer_pauschbetrag, cfg.base_rate, base_rate_flex, base_rate_data)
     fl, ew = _sim_build_calendar(fr, sim, cfg.strategy, start_date, stopp_date, liquidate, cfg.dca_mode, dca_span,
                                  dca_unit, cfg.dca_days, cfg.dca_value, dca_anchor, dca_start, dca_skip, cfg.balance_mode,
                                  balance_span, balance_unit, cfg.balance_days, balance_anchor, balance_start,
-                                 balance_skip, cfg.event_col, event_mode, event_weight, _blocks)
+                                 balance_skip, cfg.event_col, event_mode, event_weight)
     cfg.event_col !== nothing && (event_weight = ew)
     event_weight isa Union{Nothing,Vector{Pair{String,Any}}} || (event_weight = Pair{String,Any}[p for p in _kvpairs(event_weight)])
     R = Run(cfg, fl, details, io, 0.0, 0.0)

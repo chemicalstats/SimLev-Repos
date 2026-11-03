@@ -37,7 +37,7 @@
  * Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
  * Änderungen:         C99 ohne R-Datenstrukturen, gemeinsamer Kern für Python und Julia (nicht Teil
  *                     des R-Pakets); long double nur dort, wo R es nutzt.
- * Prüforakel: R 4.3.3 (tools/gleichlauf/rbase_fuzz.R).
+ * Prüforakel: R 4.3.3 (Gleichlauf: rbase_fuzz.R).
  */
 #include "slc_internal.h"
 #include "slc_rbase.h"

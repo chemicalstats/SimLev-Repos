@@ -8,7 +8,7 @@
  * per ccall aufruft (julia/src/cabi.jl). Gebaut von julia/deps/build.jl in die Bibliothek libslc
  * (neben den C-Quellen von slc), mit denselben Gleitkomma-Schaltern wie R und Python
  * (-O2 -ffp-contract=off -fno-fast-math, SIMLEV_FP_CONTRACT_BY_FLAG wie Python). Kanonisch in core/,
- * Kopie in julia/deps/core/ (tools/core_sync.py); R und Python bauen sie nicht.
+ * Kopie in julia/deps/core/ (core/sync.py); R und Python bauen sie nicht.
  *
  * Host-Namen aus simlev_core.h:
  *

@@ -1,6 +1,6 @@
 /* core/slc_constants.h – Konstanten der C-Bibliothek slc (SimLev core, Etappe 9)
  *
- * ERZEUGT von core/tools/gen_constants.py – nicht von Hand ändern.
+ * ERZEUGT von core/gen_constants.py – nicht von Hand ändern.
  * Herleitung: siehe Kopf von gen_constants.py (nur Python-Standardbibliothek,
  * decimal mit 60 Stellen, fractions). 21 gültige Ziffern; Hex-Wert im Kommentar.
  */

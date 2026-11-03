@@ -144,7 +144,7 @@ Modul der R-Datei, aus der sie stammen, mit derselben Signatur:
 | `_as_weights`, `_period_last`, `_hold_rows` | `tactical.py` |
 | `_of_returns`, `_as_spec`, `_ps_neighbours`, `param_plateau` | `overfitting.py`, `param_search.py` |
 | `_da_series`, `_da_deflate` | `deep_analysis.py` |
-| `simulation`, `_xirr_rate`, `calculate_skewness`, `calculate_kurtosis`, `calculate_dates_flags` | `engine.py` (`simulation`; die übrigen stehen in `_sim_base.py` und sind über `engine` erreichbar) |
+| `simulation`, `_xirr_rate`, `calculate_dates_flags` | `engine.py` (`simulation`; die übrigen stehen in `_sim_base.py` und sind über `engine` erreichbar) |
 | `_strategy_columns`, `_strategy_wrappers`, `_wrapper_assets_text` (R `wrapper.R`) | `config.py` (Schicht 1, weil `strategy_validate` sie braucht; `wrapper.py` holt sie von dort) |
 | `_wrapper_nav_calc` (R `.wrapper_nav_calc`), `_nav_raw` (Tage und Anteilswerte ohne Kopie der `attrs`) | `wrapper.py` |
 
@@ -200,7 +200,7 @@ innerhalb eines Pakets erscheinen Ausgaben dort in Einheitenreihenfolge.
 5. Zufall in einer Einheit nur über den mitgegebenen `Stream` (`simlev._lib`), nie über den
    globalen Zustand (siehe [Zufall](#zufall-etappe-9)).
 6. Eine neue Funktion mit `cores` braucht Referenzfälle mit `cores = 1` und
-   `cores = 2` (wie `sg_cores1_rng`/`sg_cores2_rng` in `golden/modules/sensitivity`).
+   `cores = 2` (wie `sg_cores1_rng`/`sg_cores2_rng` in `tests/faelle/forschung.jsonl.gz`).
 
 ## Zuordnung R-Datei → Python-Modul
 
@@ -314,18 +314,18 @@ weil `engine.py` alle Phasenmodule einbindet und diese ihrerseits
 
 ### Stand
 
-- `golden/cases` 55/55 und `golden/extra` 35/35 sind bitgleich (seit Etappe 6.5c ohne die 15 Fälle des Fondsmodus),
+- Die Engine-Fälle (bis T20 `cases` 55/55 und `extra` 35/35) sind bitgleich (seit Etappe 6.5c ohne die 15 Fälle des Fondsmodus),
   einschließlich Druckausgabe und `details = TRUE`
-  (`python tools/compare_golden.py [Pfade] [-k ids] [-v] [-q]`).
+  (`python3 tests/gleichlauf/vergleich.py [Pfade] [-k id] [-v]`).
 - Zusätzlich frisch erzeugte Fälle (300 Zufallsfälle, Seed 777 bzw. 999,
-  jeweils mit den festen Fällen des Generators): `golden_cases.R` und
-  `stress_cases.R` ergeben 669/669. Die neuen Argumente (order_fee, dca_fee,
+  jeweils mit den festen Fällen des Generators): `engine_faelle.R` und
+  `engine_stress.R` ergeben 669/669. Die neuen Argumente (order_fee, dca_fee,
   church_tax, harvest_*, taxable_income, tax_tariff) wurden zusätzlich in
   750 Fällen voll verglichen.
 - Die R-Tests der Engine sind nach `tests/test_*engine*.py`, `test_tax*.py`,
   `test_simulation.py`, `test_config.py` und `test_dashboard.py` portiert.
 - Diese Zahlen beschreiben den Stand vor Etappe 9; die gespeicherten Fälle und die Tests sind
-  bis zum Neuaufbau ausgesetzt. Der Gleichlauf (`tools/gleichlauf/run.sh --full`) ergab am
+  bis zum Neuaufbau ausgesetzt. Der Gleichlauf (`tests/gleichlauf/run.sh --full`) ergab am
   27.10.2026 Engine 1.182/1.182 und Module 4.260/4.260.
 
 ### Abbildung der Engine-Objekte
@@ -375,17 +375,13 @@ Nullstellensuche, in `rformat.py` Runden und Textausgabe:
   (15 Stellen, Drop0), `r_deparse`, `r_sprintf(fmt, *args)`. Die letzte
   Funktion unterstützt `%*.*f`; NA, Inf und -Inf werden wie in R als `%s`
   mit `"NA"`, `"Inf"` bzw. `"-Inf"` ausgegeben.
-- Nullstellen (`rnum.py`): `r_uniroot(f, interval, f_lower, f_upper, tol, maxiter)`,
-  gestützt auf `r_zeroin2` (Brent wie in R, Inf und NA werden wie in fcn2
-  ersetzt).
 
-`_dates.py` enthält Tageszahlen ab 1970 und R-`strptime` für `"%Y-%m-%d"`
-(Semantik von get_number).
+`_dates.py` enthält Tageszahlen ab 1970; R-`strptime` für `"%Y-%m-%d"` (Semantik von get_number)
+rechnet der Kern `core/slc_rbase_date.c` (`data_prep._strptime_ymd`).
 
 ### Öffentliche Engine-Helfer für andere Module
 
-`simulation`, `xirr_rate` / `_xirr_rate`, `calculate_skewness`,
-`calculate_kurtosis`, `calculate_partials`, `calculate_dates_flags`,
+`simulation`, `xirr_rate` / `_xirr_rate`, `calculate_dates_flags`,
 `_apply_spread`, `create_strategy`, `asset_config` (sowie `strategy_add_asset`,
 `strategy_update_asset`, `strategy_remove_asset`, `strategy_validate`),
 `rebalance_trigger` und `tax_tariff`. Dazu kommen die
@@ -448,26 +444,26 @@ und zugleich nach `julia/src/svg.jl`.
 > Fälle beschreiben den Stand vor dem eigenen Zufall und den eigenen Kernen. Generatoren und
 > Vergleicher unten gelten weiter; frische Fälle erzeugt und vergleicht die Gleichlaufprüfung.
 
-Die Engine prüfen die Golden-Fälle in `golden/cases/` und `golden/extra/`
-(`tools/compare_golden.py`, `tests/test_golden_master.py`; siehe
+Die Engine prüfen die Golden-Fälle in `tests/faelle/engine.jsonl.gz` (Engine-Format)
+(`tests/gleichlauf/vergleich.py`, `tests/python/test_faelle.py`; siehe
 [Engine](#engine-simulation)). Alle übrigen Funktionen und die
-R-Interna prüfen Referenzfälle unter `golden/modules/<modul>/`.
+R-Interna prüfen Referenzfälle unter `tests/faelle/<bereich>.jsonl.gz`.
 
-- Je Modul gibt es einen Generator `golden/modules/gen_<modul>.R`, der
-  `golden/modules/ref_tools.R` lädt. Aufruf aus der Repo-Wurzel:
+- Je Modul gibt es einen Generator `tests/erzeugen/<bereich>.R`, der
+  `tests/erzeugen/ref_tools.R` lädt. Aufruf aus der Repo-Wurzel:
 
   ``` bash
-  LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev 0.5.0> Rscript golden/modules/gen_<modul>.R
+  LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev 0.5.0> Rscript tests/erzeugen/<bereich>.R
   ```
 
   `ref_init()` leert den Zielordner, jeder `ref_case()` schreibt
-  `golden/modules/<modul>/<id>.json.gz` mit Eingaben, R-Code, Python-Code,
+  `tests/faelle/<bereich>.jsonl.gz` (eine Zeile je Fall) mit Eingaben, R-Code, Python-Code,
   Julia-Code (Feld `jl`, für die Julia-Fassung), Ergebnis,
   Konsolenausgabe, Druckausgabe, Warnungen bzw. Fehlermeldung (Format in
-  `golden/README.md`). Beispiel:
+  `tests/README.md`). Beispiel:
 
   ``` r
-  source("golden/modules/ref_tools.R"); ref_init("signals")
+  source("tests/erzeugen/ref_tools.R"); ref_init("signals")
   set.seed(1); px <- 100 * cumprod(1 + rnorm(300, 0, 0.01))
   ref_case("sma1", r = "signal_sma(px, 20)",
            py = "result = simlev.signal_sma(px, 20)",
@@ -476,7 +472,7 @@ R-Interna prüfen Referenzfälle unter `golden/modules/<modul>/`.
   ```
 
 - Fälle decken typische Aufrufe, alle Argumentvarianten und die Randfälle
-  aus `r/tests/testthat` ab, auch Fehler- und Warnpfade. Zufallsabhängige
+  aus `tests/r` ab, auch Fehler- und Warnpfade. Zufallsabhängige
   Fälle setzen den Startwert in allen Codes (seit Etappe 9.6a `simlev_seed(5)` ↔
   `simlev.simlev_seed(5)` ↔ `simlev_seed(5)` in Julia, oder `seed = 5` am Aufruf). R's
   `set.seed` dient nur noch zum Erzeugen gespeicherter Eingaben im R-Generator.
@@ -485,25 +481,24 @@ R-Interna prüfen Referenzfälle unter `golden/modules/<modul>/`.
 - Prüfen:
 
   ``` bash
-  python python/tools/compare_reference.py [modul ...] [-k id] [-v]
-  pytest python/tests/test_module_reference.py -k <modul>
+  python3 tests/gleichlauf/vergleich.py [datei.jsonl.gz ...] [-k id] [-v]
+  python3 -m pytest tests/python/test_faelle.py -k <modul>
   ```
 
   `simlev._r.reftree` lädt einen Fall, führt den Python-Code aus und
   vergleicht Ergebnis, Ausgaben, Warnungen und Fehlermeldung bitgenau.
-- Engine: `tools/compare_golden.py` vergleicht Golden-Fälle (`.json`/`.json.gz`)
+- Engine: `tests/gleichlauf/vergleich.py` vergleicht Golden-Fälle (`.json`/`.json.gz`)
   in einem oder mehreren Ordnern. Frische Fälle erzeugen
-  `Rscript golden/golden_cases.R <ziel> N SEED` bzw. `stress_cases.R`; das
+  `Rscript tests/erzeugen/engine_faelle.R <ziel> N SEED` bzw. `engine_stress.R`; das
   Ziel liegt **außerhalb des Repos** (z. B. in einem temporären Ordner),
-  danach `compare_golden.py <ziel>` aufrufen.
+  danach `tests/gleichlauf/vergleich.py` aufrufen.
 
 Nach jeder Änderung an der Rechenlogik läuft die Gleichlaufprüfung
-(`tools/gleichlauf/run.sh --quick`, vor einem Zwischenstand `--full`); alle Fälle müssen in Python
-und Julia bitgleich zu R sein. Bis zum Neuaufbau der Tests ersetzt sie `compare_golden.py`,
-`compare_reference.py` und die Test-Suite.
+(`tests/gleichlauf/run.sh --quick`, vor einem Zwischenstand `--full`); alle Fälle müssen in Python
+und Julia bitgleich zu R sein. Sie vergleicht alle Fälle der Generatoren, die Tests (`tests/python`) die Auswahl im Katalog.
 
 Was ein Referenzfall bitgleich prüft, steht nicht noch einmal als Test in
-`tests/` (Etappe 4.1): Die Fälle `golden/modules/r_fmt`, `r_linalg` und
+`tests/` (Etappe 4.1): Die Fälle `tests/faelle/r_grundfunktionen.jsonl.gz` (r_fmt), `r_linalg` und
 `r_stats` laufen nur in `test_module_reference.py`, die Fälle
 `engine/um01`–`um04` ersetzen drei Tests aus `test_engine_notes.py`. Die
 Tests in `tests/` prüfen, was kein Fall abdeckt: Eigenschaften und
@@ -512,47 +507,45 @@ Grafiken und Schalter.
 
 ## Eingefrorene Schnittstelle
 
-Die öffentliche Schnittstelle 0.5.0 ist in `tools/api_snapshot/frozen/py.json`
+Die öffentliche Schnittstelle 0.5.0 ist in `tests/api/frozen/py.json`
 festgehalten (Etappe 6.6): je Funktion aus `simlev.__all__` und je Methode
 `print`/`summary`/`plot` der Klassen mit `r_class` die Argumente in
 Reihenfolge mit Art (`positional_or_keyword`, `keyword_only`, …) und
 Standardwert als Text (`repr`), dazu die Namen der exportierten Klassen;
-ohne Modul, Datei, Zeile und Datum. `tests/test_api_frozen.py` ruft dafür den
-Auszug `tools/api_snapshot/api_py.py --frozen-check` in einem eigenen Prozess
+ohne Modul, Datei, Zeile und Datum. `tests/python/test_api.py` ruft dafür den
+Auszug `tests/api/api_py.py --frozen-check` in einem eigenen Prozess
 auf und nennt bei Abweichung jede Änderung (Funktion neu oder weg, Argument
 neu, weg oder umsortiert, Art oder Standardwert geändert).
 
 Eine gewollte Änderung der Schnittstelle wird bewusst neu festgeschrieben:
-Eintrag oben in `tools/api_snapshot/CHANGES.md` (Datum, was sich ändert,
-warum), dann aus der Repo-Wurzel `tools/api_snapshot/run.sh --freeze`; das
+Eintrag oben in `tests/api/CHANGES.md` (Datum, was sich ändert,
+warum), dann aus der Repo-Wurzel `tests/api/run.sh --freeze`; das
 schreibt `frozen/` für alle drei Sprachen neu und bricht ohne neuen Eintrag
-ab. Einzelheiten in [`tools/api_snapshot/README.md`](../tools/api_snapshot/README.md).
+ab. Einzelheiten in [`tests/api/README.md`](../tests/api/README.md).
 
 ## Schalter `SIMLEV_*`
 
 Alle Umgebungsschalter liest (und setzt) nur `simlev/_r/env.py`; Paket,
 Tests und Werkzeuge holen sie von dort (`tests/test_layers.py` prüft das).
 Wann gelesen wird, bestimmt die aufrufende Stelle: `reftree` und
-`tools/compare_golden.py` beim Laden, `_collate` beim ersten Vergleich (neu
+`tests/gleichlauf/vergleich.py` beim Laden, `_collate` beim ersten Vergleich (neu
 nach `collate_reset()`).
 
 | Schalter | Zweck | Art |
 |---|---|---|
 | `SIMLEV_COLLATE` | Sortierung: `icu:<Locale>` (`icu:root` wie R unter C.UTF-8) oder `C` (Bytes); ohne Angabe nach `LC_ALL`/`LC_COLLATE`/`LANG` | Nutzer |
 | `SIMLEV_ICU` | Pfad zur ICU-Bibliothek (`libicui18n`) | Nutzer |
-| `SIMLEV_LAX_NA` | `1`: NA = NaN im Vergleich (`reftree`, `compare_golden.py`) | Prüfung |
+| `SIMLEV_LAX_NA` | `1`: NA = NaN im Vergleich (`reftree`, `tests/python/faelle.py`) | Prüfung |
 | `SIMLEV_STRICT_ZERO` | `0`: −0 = +0 im Vergleich (`reftree`) | Prüfung |
-| `SIMLEV_GOLDEN_DIR` | andere Ordner der Engine-Fälle für `test_golden_master.py` (mit `os.pathsep` getrennt) | Prüfung |
-| `SIMLEV_MODULE_DIR` | anderer Ordner der Modul-Fälle für `test_module_reference.py` und die Grafiktests | Prüfung |
-| `SIMLEV_LEGACY_TESTS` | `1`: die alten Tests und Referenzvergleiche laufen (Etappe 9: sonst ausgesetzt, siehe [Tests in Etappe 9](#tests-in-etappe-9)) | Prüfung |
+| `SIMLEV_FAELLE_DIR` | anderer Ordner der Bereichsdateien für `tests/python` (T20; `SIMLEV_GOLDEN_DIR`/`SIMLEV_MODULE_DIR` liest nur noch `simlev._r.env`) | Prüfung |
 
 Seit Etappe 9.6c (Entwurf C.6 Nr. 10) entfallen `SIMLEV_NO_EXT` (die C-Erweiterung ist Pflicht),
 `SIMLEV_LAPACK` und `SIMLEV_R_SYS_TIME`.
 
 `reftree` setzt `SIMLEV_COLLATE=icu:root`, falls nicht gesetzt (die
-Referenzen entstanden unter C.UTF-8). Die Generatoren in `golden/modules/`
+Referenzen entstanden unter C.UTF-8). Die Generatoren in `tests/erzeugen/`
 lesen eigene Schalter (`SIMLEV_R_NMATH_SRC`, `SIMLEV_ALLOW_PARTIAL`, siehe
-`golden/README.md`).
+`tests/README.md`).
 
 ## C-Erweiterung
 
@@ -573,7 +566,7 @@ und `simlev._ext` rufen. Julia ruft seit N7 dieselben Kerne über die C-ABI-Hül
 | `slc*.c`, `slc*.h` (C-Bibliothek slc) | `r/src/`, `python/src/core/`, `julia/deps/core/` | R `r/src/slc_r*.c` (`.Call`, `R/slc*.R`), Python `src/_ext_slc*.c` (`simlev._lib*`), Julia `src/slib*.jl` (`ccall`) |
 | `simlev_core.h`, `research_core_impl.h`, `withdrawal_core_impl.h`, `simulation_core_impl.h`, `fifo_core_impl.h`, `tax_core_impl.h` (geteilte Kerne, seit 9.6c) | `r/src/`, `python/src/core/` | R `r/src/<kern>.cpp` (`.Call`, `R/cores.R`), Python `src/_ext_research.cpp`, `_ext_withdrawal.cpp`, `_ext_engine.cpp` |
 
-`tools/core_sync.py --write` kopiert (nur geänderte Dateien) und entfernt veraltete Kopien;
+`core/sync.py --write` kopiert (nur geänderte Dateien) und entfernt veraltete Kopien;
 `--check` vergleicht alle Kopien per SHA-256 (Ende 1 bei Abweichung) und läuft in jeder
 Gleichlaufprüfung und in `verify_9.sh`. Er ersetzt den früheren Gleichheitstest
 `tests/test_shared_c.py` (jetzt nur noch Aufruf von `core_sync --check` und Prüfung der Hüllen).
@@ -599,10 +592,10 @@ entfernt; die Ergebnisse der übrigen Research-Kerne blieben bitgleich.
   der Kern wie in R übersetzt wird. Die früheren Nachbildungen der Operandenfolge in den reinen
   Python-Kernen (`n_add` usw. in `_core.py`, `_dependence_core.py` …) sind mit ihnen entfallen.
 - **Neuen Kern hinzufügen:** Rechnung in `core/` (slc: Regeln in `core/README.md`; geteilter
-  C++-Kern: `core/<datei>_impl.h` mit Host-Namen), `tools/core_sync.py --write`, R-Hülle und
+  C++-Kern: `core/<datei>_impl.h` mit Host-Namen), `core/sync.py --write`, R-Hülle und
   Registrierung in `r/src/init.c`, Python-Hülle `src/_ext_<kern>.c(pp)` mit Methodentabelle (in
   `_ext_common.h` deklarieren, in `_ext.cpp` eintragen, in `setup.py` aufnehmen), Julia-Hülle per
-  `ccall` (slc) bzw. eigener Port; Gleichlauffälle in `tools/gleichlauf/extra_cases*.R`.
+  `ccall` (slc) bzw. eigener Port; Referenzfälle in `tests/erzeugen/slc.R`.
 - **Schichten:** `_ext` gehört zu Schicht 0 und steht in `tests/test_layers.py` unter `EXTENSIONS`.
 
 ## Zufall (Etappe 9)
@@ -625,16 +618,10 @@ Regeln (Entwurf C.5) sind in R, Python und Julia gleich, damit die Ergebnisse bi
 
 ## Tests in Etappe 9
 
-Die alten Tests sind bis zum Neuaufbau ausgesetzt (Entwurf C.7); keine Testdatei wird gelöscht.
-Ohne `SIMLEV_LEGACY_TESTS=1` lädt pytest nur die Rauchproben `tests/test_etappe9_*.py`
-(`conftest.py`: `pytest_ignore_collect`; seit 9.6c werden die alten Dateien nicht einmal geladen,
-weil einige auf entfallene Module verweisen). Mit dem Schalter laufen alle alten Tests; Dateien,
-die entfallene Module oder Funktionen nutzen (`test_r_nmath.py`, `test_r_linalg.py`,
-`test_r_stats.py`, `test_reine_kerne_nan.py`, `test_ms_garch.py`, `test_parallel.py` …), scheitern
-dann erwartungsgemäß. `tools/compare_reference.py` und `compare_golden.py` enden ohne den Schalter
-mit Hinweis, außer `SIMLEV_MODULE_DIR` bzw. `SIMLEV_GOLDEN_DIR` zeigt auf einen Gleichlauf-Ordner.
+Die alten Tests (Entwurf C.7 ausgesetzt) hat T18 durch eine neu aufgebaute Suite ersetzt (`tests/`,
+siehe [`tests/README.md`](../tests/README.md)); der Schalter `SIMLEV_LEGACY_TESTS` ist mit C19 entfallen.
 
-Ersatz ist die **Gleichlaufprüfung** `tools/gleichlauf/run.sh [--quick | --full]` (Entwurf C.8): Sie
+Dazu kommt die **Gleichlaufprüfung** `tests/gleichlauf/run.sh [--quick | --full]` (Entwurf C.8): Sie
 baut R, Python und Julia, prüft `core_sync --check`, erzeugt die Referenzfälle mit dem aktuellen R
 neu und vergleicht Python und Julia streng dagegen. Ausgenommen sind die Module, die entfallene
 R-Nachbildungen prüfen (`r_nmath`, `r_rng`, `r_linalg`, `r_nlminb`, `rugarch`, `evd`, `imputets`;

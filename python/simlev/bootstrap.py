@@ -749,9 +749,6 @@ def _resolve_auto(params, returns, config, method):
 # Modellanpassung (GARCH-Familie, Regime, EVT)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _xp(v) -> float:
-    return _libm._exp(float(v))
-
 
 @_quiet
 def _fit_garch11(e, gjr=False, quiet=False):
@@ -1557,13 +1554,6 @@ def _result_index(res):
     return result_index(res)
 
 
-def _year_month(d):
-    a = np.asarray(d).astype("datetime64[D]")
-    y = a.astype("datetime64[Y]").astype(np.int64) + 1970
-    m = a.astype("datetime64[M]").astype(np.int64) % 12 + 1
-    return y, m
-
-
 def _keep_count(x, n, who):
     """Anzahl behaltener Pfade aus ``keep_paths`` (R: ``.keep_count``, 6.5b, Variante A).
 
@@ -1974,10 +1964,6 @@ def _wquantile(x, w, probs):
         fl = np.minimum(np.maximum((lft - a) * ne, 0.0), 1.0)
         out[i] = r_sum((fr - fl) * x)
     return out
-
-
-class _CondFrame(dict):
-    pass
 
 
 def _eval_condition(cond, d, env):

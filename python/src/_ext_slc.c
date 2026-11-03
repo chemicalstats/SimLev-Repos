@@ -2,7 +2,7 @@
  * python/src/_ext_slc.c -- Python-Huellen der C-Bibliothek slc im Modul simlev._ext (Etappe 9.1)
  *
  * Die Kerne src/core/slc*.c, slc*.h sind Byte-fuer-Byte-Kopien der kanonischen Quellen in core/
- * (tools/core_sync.py); nur diese Huelle gibt es nur hier. Die Python-Seite (simlev/_lib.py)
+ * (core/sync.py); nur diese Huelle gibt es nur hier. Die Python-Seite (simlev/_lib.py)
  * prueft Argumente und legt die Felder an; die Huellen pruefen nur Typ, Laenge und
  * Beschreibbarkeit der Puffer.
  *
@@ -106,20 +106,6 @@ static PyObject *slc_seed_entropy(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "OKKK", &st, &a, &b, &c)) return NULL;
     if (get_state(st, &v, &r) < 0) return NULL;
     sl_rng_seed_entropy(&r, (uint64_t) a, (uint64_t) b, (uint64_t) c);
-    put_state(&v, &r);
-    PyBuffer_Release(&v);
-    Py_RETURN_NONE;
-}
-
-static PyObject *slc_jump(PyObject *self, PyObject *args)
-{
-    PyObject *st;
-    Py_buffer v;
-    sl_rng r;
-    (void) self;
-    if (!PyArg_ParseTuple(args, "O", &st)) return NULL;
-    if (get_state(st, &v, &r) < 0) return NULL;
-    sl_rng_jump(&r);
     put_state(&v, &r);
     PyBuffer_Release(&v);
     Py_RETURN_NONE;
@@ -334,7 +320,6 @@ PyMethodDef simlev_ext_slc_methods[] = {
     {"slc_version", slc_version, METH_NOARGS, "Version der C-Bibliothek slc"},
     {"slc_seed", slc_seed, METH_VARARGS, "slc_seed(state, seed): Zustand aus seed (SplitMix64)"},
     {"slc_seed_entropy", slc_seed_entropy, METH_VARARGS, "slc_seed_entropy(state, t_ns, pid, counter)"},
-    {"slc_jump", slc_jump, METH_VARARGS, "slc_jump(state): 2^128 Schritte weiter"},
     {"slc_streams", slc_streams, METH_VARARGS, "slc_streams(state, out): out[i] = J^(i+1)(state), je 32 Byte"},
     {"slc_seed31", slc_seed31, METH_VARARGS, "slc_seed31(state) -> naechster Startwert 0 ... 2^31-1"},
     {"slc_u64", slc_u64, METH_VARARGS, "slc_u64(state, out): rohe 64-Bit-Ausgaben"},

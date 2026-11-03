@@ -27,7 +27,7 @@ und `precompile.jl`.
 | `src/slib.jl` (+ `slib_linalg.jl`, `slib_opt.jl`, `slib_models.jl`) | `SLib` | Hüllen der C-Bibliothek slc per `ccall` (Zufall, Verteilungen, lineare Algebra, Optimierer, Modelle, Bootstrap-Kerne); Bibliothek aus `deps/build.jl` (siehe [C-Bibliothek](#c-bibliothek-pflicht)) → `simlev/_lib*.py` |
 | `src/cabi.jl` | `CAbi` | N7: Rückgabecodes, Fehlertexte und Feldlagen der C-ABI-Hülle `core/simlev_cabi.cpp` der geteilten C++-Kerne (in `libslc`) → `python/src/_ext_common.h` |
 | `src/r/types.jl` | – | R-Datenstrukturen (`RList`, `RFrame`, `RVector`, `NamedMat`), Druck-/summary-/plot-Registrierung |
-| `src/r/rnum.jl` | – | `NA`, `isna_strict`, Summen/Mittel/Varianz in `long double` (`r_sum`, `r_mean`, …), `r_pow` (`R_POW`), `r_uniroot`, zentrale Auswahl der C-Bibliotheken (`_LIBM`, `_LIBC`, `_SNPRINTF`) → `_r/rnum.py` |
+| `src/r/rnum.jl` | – | `NA`, `isna_strict`, Summen/Mittel/Varianz in `long double` (`r_sum`, `r_mean`, …), `r_pow` (`R_POW`), zentrale Auswahl der C-Bibliotheken (`_LIBM`, `_LIBC`, `_SNPRINTF`) → `_r/rnum.py` |
 | `src/r/rformat.jl` | – | Textausgabe der Engine: `r_sprintf` (NA/NaN/Inf wie R), `r_format`, `r_as_character`, `r_deparse`, `r_round`, `r_signif` → `_r/rformat.py` |
 | `src/r/libm.jl` | `RLibm` | glibc-libm (`exp`, `log`, `log1p`, `expm1`, `pow`, `tanh`, …) → `_r/libm.py` |
 | `src/r/base.jl` | `RBase` | Summen, Mittel, `cumsum`, `cumprod`, `rowSums`, … mit `long double` → `_r/base.py` |
@@ -229,18 +229,18 @@ und zugleich nach `python/simlev/svg.py`.
 > Seit Etappe 9 ausgesetzt (siehe [Tests in Etappe 9](#tests-in-etappe-9)): Die gespeicherten
 > Fälle beschreiben den Stand vor dem eigenen Zufall und den eigenen Kernen. Generatoren und
 > Vergleicher unten gelten weiter; frische Fälle erzeugt und vergleicht die Gleichlaufprüfung
-> `tools/gleichlauf/run.sh`, die nach jeder Änderung an der Rechenlogik läuft.
+> `tests/gleichlauf/run.sh`, die nach jeder Änderung an der Rechenlogik läuft.
 
-Die Referenzfälle unter `golden/modules/<modul>/` erzeugen die Generatoren
-`golden/modules/gen_<modul>.R`. Jeder Aufruf `ref_case(id, r = …, py = …,
+Die Referenzfälle unter `tests/faelle/<bereich>.jsonl.gz` erzeugen die Generatoren
+`tests/erzeugen/<bereich>.R`. Jeder Aufruf `ref_case(id, r = …, py = …,
 jl = …)` trägt R-, Python- und Julia-Code; der Julia-Code setzt `result`
-und sieht die Eingaben als Variablen (siehe `test/reftree.jl`, `decode`).
+und sieht die Eingaben als Variablen (siehe `tests/julia/faelle.jl`, `decode`).
 
 ``` bash
-julia --project=julia julia/tools/compare_reference.jl [modul …] [-k id] [-v]
-julia --project=julia -t 2 julia/tools/compare_reference.jl          # dasselbe mit zwei Threads (cores = 2 echt parallel)
-julia --project=julia julia/tools/compare_golden.jl [ordner …] [-k fall …]   # ohne Pfad: golden/cases und golden/extra
-julia --project=julia -e 'using Pkg; Pkg.test()'      # Referenzfälle: Auswahl; alle mit SIMLEV_FULL_TESTS=1
+julia --project=julia tests/gleichlauf/vergleich.jl [datei.jsonl.gz …] [-k id] [-v]
+julia --project=julia -t 2 tests/gleichlauf/vergleich.jl          # dasselbe mit zwei Threads (cores = 2 echt parallel)
+julia --project=julia tests/gleichlauf/vergleich.jl [ordner …] [-k fall]   # ohne Pfad: der Katalog tests/faelle
+julia --project=julia tests/julia/runtests.jl         # alle Fälle des Katalogs, Schnittstelle, Grafik
 ```
 
 Verglichen wird ohne Toleranz: NA ≠ NaN, Vorzeichen der Null, Druck- und
@@ -260,7 +260,7 @@ Aufrufers, ohne Closures). Bis 1.3.0 deckte die Arbeitslast nur Engine,
 `bootstrap`, `bootstrap_study`, `_ms_garch_fit`, Entnahme ohne Steuer,
 Optimierung auf Renditematrizen und `result_analysis` ab (Etappe 4.8).
 Gemessen auf zwei Kernen, Julia 1.13.2, eigenes Depot; erster Aufruf je
-Aufgabe in einem frischen Prozess (die Bench-Aufgaben aus `tools/bench`
+Aufgabe in einem frischen Prozess (die Bench-Aufgaben aus `tests/bench`
 und je Modul eine weitere Hauptfunktion, 30 Aufgaben; J15b):
 
 | | vorher (E17, `abd5ff46`) | J15b |
@@ -268,7 +268,7 @@ und je Modul eine weitere Hauptfunktion, 30 Aufgaben; J15b):
 | Vorkompilieren (`Base.compilecache`) | 145 s | 240 s |
 | Cache (`.so` / `.ji`) | 78,0 / 1,6 MB | 118,1 / 1,6 MB |
 | `using SimLev` | 0,41 s | 0,60 s |
-| erster Aufruf S30 / T3 / T5 / T4s (`tools/bench`) | 0,8 / 1,7 / 5,0 / 3,0 s | 0,24 / 0,82 / 0,47 / 0,18 s |
+| erster Aufruf S30 / T3 / T5 / T4s (`tests/bench`) | 0,8 / 1,7 / 5,0 / 3,0 s | 0,24 / 0,82 / 0,47 / 0,18 s |
 | erster Aufruf, höchster Übersetzungsanteil | 5,7 s (`regime_hmm`) | 0,7 s (`bootstrap_study`) |
 | Summe der ersten Aufrufe (30 Aufgaben) | 84 s | 12 s |
 
@@ -285,33 +285,33 @@ einer Änderung Methoden im Cache, zeigt `julia --trace-compile=stderr
 
 Was ein Referenzfall bitgleich prüft, steht nicht noch einmal als Test in
 `test/` (Etappe 4.1); so stehen die konstanten Ausdrücke, die
-`golden/modules/rexpr` wörtlich prüft, nicht mehr in `rexpr_tests.jl`.
+`tests/faelle/r_grundfunktionen.jsonl.gz` (rexpr) wörtlich prüft, nicht mehr in `rexpr_tests.jl`.
 
 ## Eingefrorene Schnittstelle
 
-Die öffentliche Schnittstelle 0.5.0 ist in `tools/api_snapshot/frozen/jl.json`
+Die öffentliche Schnittstelle 0.5.0 ist in `tests/api/frozen/jl.json`
 festgehalten (Etappe 6.6): je Export aus `names(SimLev)` und je registrierter
 `show`/`r_summary`/`r_plot`-Methode die Argumente der Hauptmethode in
 Reihenfolge mit Art (`positional`, `keyword`, `varargs`, `kwargs_rest`) und
 Standardwert aus dem Quelltext, dazu die Namen der exportierten Typen; ohne
-Datei, Zeile, Modul und Datum. `test/api_frozen_tests.jl` (in `runtests.jl`)
-lädt dafür den Auszug `tools/api_snapshot/api_jl.jl` in ein eigenes Modul,
+Datei, Zeile, Modul und Datum. `tests/julia/api.jl` (in `tests/julia/runtests.jl`)
+lädt dafür den Auszug `tests/api/api_jl.jl` in ein eigenes Modul,
 ruft `frozen_check` im Testprozess auf und nennt bei Abweichung jede Änderung
 (Funktion neu oder weg, Argument neu, weg oder umsortiert, Art oder
 Standardwert geändert).
 
 Eine gewollte Änderung der Schnittstelle wird bewusst neu festgeschrieben:
-Eintrag oben in `tools/api_snapshot/CHANGES.md` (Datum, was sich ändert,
-warum), dann aus der Repo-Wurzel `tools/api_snapshot/run.sh --freeze`; das
+Eintrag oben in `tests/api/CHANGES.md` (Datum, was sich ändert,
+warum), dann aus der Repo-Wurzel `tests/api/run.sh --freeze`; das
 schreibt `frozen/` für alle drei Sprachen neu und bricht ohne neuen Eintrag
-ab. Einzelheiten in [`tools/api_snapshot/README.md`](../tools/api_snapshot/README.md).
+ab. Einzelheiten in [`tests/api/README.md`](../tests/api/README.md).
 
 ## Schalter `SIMLEV_*`
 
 Alle Umgebungsschalter liest (und setzt) nur `src/r/env.jl` (`SimLev.REnv`);
 Paket, Vorkompilierung, Tests und Werkzeuge holen sie von dort
 (`test/layers_tests.jl` prüft das). Wann gelesen wird, bestimmt die
-aufrufende Stelle: `test/reftree.jl` beim Laden, die Kollation beim ersten
+aufrufende Stelle: `tests/julia/faelle.jl` beim Laden, die Kollation beim ersten
 Vergleich (neu nach `RStats.collate_reset()`), `precompile.jl` beim
 Vorkompilieren.
 
@@ -321,20 +321,17 @@ Vorkompilieren.
 | `SIMLEV_ICU` | Pfad zur ICU-Bibliothek (`libicui18n`) | Nutzer |
 | `SIMLEV_LAX_NA` | `1`: NA = NaN im Vergleich (`reftree.jl`) | Prüfung |
 | `SIMLEV_STRICT_ZERO` | `0`: −0 = +0 im Vergleich (`reftree.jl`) | Prüfung |
-| `SIMLEV_FULL_TESTS` | `1`: `Pkg.test()` prüft alle Modul-Fälle statt bis zu vier je Modul | Prüfung |
-| `SIMLEV_GOLDEN_DIR` | anderer Wurzelordner der Engine-Fälle (`cases/`, `extra/`) für `Pkg.test()` | Prüfung |
+| `SIMLEV_FAELLE_DIR` | anderer Ordner der Bereichsdateien für `tests/julia` (T20; `SIMLEV_FULL_TESTS`, `SIMLEV_GOLDEN_DIR` und `SIMLEV_MODULE_DIR` liest nur noch `REnv`, ohne Wirkung) | Prüfung |
 | `SIMLEV_SKIP_PRECOMPILE` | `1`: keine Arbeitslast beim Vorkompilieren | Entwicklung |
 | `SIMLEV_SKIP_PRECOMPILE_EXT` | `1`: Arbeitslast ohne die Analysemodule | Entwicklung |
-| `SIMLEV_LEGACY_TESTS` | `1`: alte Tests und Referenzvergleiche laufen (Etappe 9: sonst ausgesetzt, siehe [Tests in Etappe 9](#tests-in-etappe-9)) | Prüfung |
-| `SIMLEV_MODULE_DIR` | anderer Ordner der Modul-Fälle (`compare_reference.jl`, Gleichlauf) | Prüfung |
 | `SIMLEV_CC` | C-Compiler für `Pkg.build` (gelesen in `deps/build.jl`) | Bau |
 
 Seit Etappe 9.6c (Entwurf C.6 Nr. 10) entfallen `SIMLEV_LAPACK` und `SIMLEV_R_SYS_TIME`.
 
 `reftree.jl` setzt `SIMLEV_COLLATE=icu:root`, falls nicht gesetzt (die
-Referenzen entstanden unter C.UTF-8). Die Generatoren in `golden/modules/`
+Referenzen entstanden unter C.UTF-8). Die Generatoren in `tests/erzeugen/`
 lesen eigene Schalter (`SIMLEV_R_NMATH_SRC`, `SIMLEV_ALLOW_PARTIAL`, siehe
-`golden/README.md`).
+`tests/README.md`).
 
 ## C-Bibliothek (Pflicht)
 
@@ -355,7 +352,7 @@ C++-Compiler (Schalter wie Python: `-O2 -std=gnu++17 -ffp-contract=off -fno-fast
 `SIMLEV_FP_CONTRACT_BY_FLAG`) in `libslc`; `src/cabi.jl` (Modul `CAbi`) wertet die Rückgabecodes aus,
 die Aufrufe stehen in `core.jl`, `signals_core.jl`, `withdrawal_core.jl`, `dependence_core.jl` und
 `optimize_core.jl` (die früheren eigenen Ports, F2, sind entfallen).
-`tools/core_sync.py --write` kopiert, `--check` vergleicht alle Kopien per SHA-256 (Ende 1 bei
+`core/sync.py --write` kopiert, `--check` vergleicht alle Kopien per SHA-256 (Ende 1 bei
 Abweichung) und läuft in jeder Gleichlaufprüfung.
 
 ## Zufall (Etappe 9)
@@ -371,14 +368,9 @@ Nachbildung von R's Zufall (`RRng`, Exporte `set_seed`/`rng_kind`) ist mit 9.6c 
 
 ## Tests in Etappe 9
 
-Die alten Tests sind bis zum Neuaufbau ausgesetzt (Entwurf C.7); keine Datei wird gelöscht.
-`test/runtests.jl` führt ohne `SIMLEV_LEGACY_TESTS=1` nur den Testsatz „Etappe 9“ aus (die
-Rauchproben `test/etappe9*.jl`) und lädt die übrigen Dateien nicht. Mit dem Schalter laufen alle
-alten Tests; Dateien, die entfallene Module nutzen (`RRng`, `RNmath`, `RLinalg`-Teile,
-`BootstrapCore` …, etwa `ms_garch_tests.jl`, `nan_kerne_tests.jl`, `parallel_tests.jl`), scheitern
-dann erwartungsgemäß. `tools/compare_reference.jl` und `compare_golden.jl` enden ohne Schalter mit
-Hinweis, außer `SIMLEV_MODULE_DIR` bzw. `SIMLEV_GOLDEN_DIR` zeigt auf einen Gleichlauf-Ordner.
-Ersatz ist die Gleichlaufprüfung `tools/gleichlauf/run.sh` (siehe
+Die alten Tests (Entwurf C.7 ausgesetzt) hat T18 durch eine neu aufgebaute Suite ersetzt
+(`tests/julia/runtests.jl`, siehe [`tests/README.md`](../tests/README.md)); der Schalter
+`SIMLEV_LEGACY_TESTS` ist mit C19 entfallen. Dazu kommt die Gleichlaufprüfung `tests/gleichlauf/run.sh` (siehe
 [`python/DEVELOPING.md`](../python/DEVELOPING.md#tests-in-etappe-9)).
 
 ## Schichten

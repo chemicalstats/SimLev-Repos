@@ -462,7 +462,6 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' @noRd
 .resolve_auto <- function(params, returns, config, method) {
   for (nm in c("L", "block_length")) if (identical(params[[nm]], "auto")) {
-    base <- which(config$index_names == config$regime_index)
     lr <- log(returns)
     b <- rbind(bootstrap_block_length(lr), bootstrap_block_length(lr, "abs"))
     col <- if (nm == "L") "stationary" else "circular"

@@ -70,8 +70,8 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
 
 #--------> Tarifweg (income_tariff()): Hilfsfunktionen zur Jahresrechnung
 # Seit E17 Stufe 1c rechnet die Tagesengine den Jahresabschluss im Kern (tariff_core_impl.h); .tariff_close mit
-# .tariff_base/.tariff_full/.tariff_diff bleibt als R-Referenz des Tarifkerns (tools/gleichlauf/tariff_fuzz.R,
-# tests/testthat/test-tariff.R).
+# .tariff_base/.tariff_full/.tariff_diff bleibt als R-Referenz des Tarifkerns (Gleichlauf: tariff_fuzz.R und
+# die R-Tests zum Tarif).
 #' taxable_income pruefen: eine Zahl (alle Jahre), nach Jahr benannter Vektor oder data.frame (Jahr, Betrag)
 #' @param x Eingabe taxable_income
 #' @param years Ganzzahlen. Kalenderjahre der Simulation (jedes muss vorkommen)
@@ -234,21 +234,12 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
 #' @noRd
 .xirr_rate <- function(t, amount, end_value, horizon) {
   # E17 Stufe 3: Rechnung im Kern (core/evaluate_core_impl.h, xirr; Brent ueber sl_r_zeroin2 wie
-  # stats::uniroot); Warnungen von uniroot mit Text und Aufruf wie bis R 1.3.0
+  # stats::uniroot); Warnungen von uniroot mit Text wie bis R 1.3.0, seit C19 ohne Aufruf
   r <- .Call(C_sim_xirr, as.double(t), as.double(amount),
              if (length(end_value) == 1L) as.double(end_value) else NA_real_,
              if (length(horizon) == 1L) as.double(horizon) else NA_real_)
   for (code in r[[2L]]) .sim_eval_warn(code, numeric(4))
   r[[1L]]
-}
-
-#--------> Hilfsfunktion zur Berechnung von Partial Moments:
-calculate_partials <- function(returns, exp = 1, type = c("lower", "higher")){
-  if(type == "lower"){
-    mean(pmax(0, -returns)^exp, na.rm = TRUE)
-  } else {
-    mean(pmax(0, returns)^exp, na.rm = TRUE)
-  }
 }
 
 #--------> Hilfsfunktion zur Berechnung der Skewness:

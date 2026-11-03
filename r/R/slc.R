@@ -1,7 +1,7 @@
 # Huellen der C-Bibliothek slc (SimLev core, Etappe 9.1): Zufallszustand, simlev_seed(),
 # interne Ziehungen und Verteilungen .sl_*.
 #
-# Die Rechnung steht in src/slc*.c (Kopien von core/, tools/core_sync.py), die .Call-Huellen in
+# Die Rechnung steht in src/slc*.c (Kopien von core/, core/sync.py), die .Call-Huellen in
 # src/slc_r.c (Registrierung in src/init.c, in R als C_sl_*). Kein Code hier ruft R's
 # Zufallszahlen auf; set.seed() und .Random.seed wirken auf diese Funktionen nicht.
 #

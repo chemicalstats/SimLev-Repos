@@ -4,7 +4,7 @@
  * Ein Modul fuer alle gemeinsamen Kerne von R und Python. Jede Huelle steht in
  * ihrer eigenen Datei _ext_<kern>.cpp und liefert eine Methodentabelle; dieses
  * Modul fuegt sie zusammen. Die Kerne selbst sind Byte-fuer-Byte-Kopien der
- * kanonischen Quellen in core/ (src/core/, tools/core_sync.py).
+ * kanonischen Quellen in core/ (src/core/, core/sync.py).
  *
  * Ein Modul statt eines je Kern: ein Bau- und Ladeschritt, ein gemeinsamer Satz
  * Hilfen (_ext_common.h) und ein Wheel-Inhalt. Seit Etappe 9.1 auch die Huellen der

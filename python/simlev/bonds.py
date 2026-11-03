@@ -148,7 +148,6 @@ def index_currency_hedged(data, local, domestic_rate, foreign_rate, *, cost=0, b
     i_d = _resolve_series(domestic_rate, data, "domestic_rate")
     i_f = _resolve_series(foreign_rate, data, "foreign_rate")
     d = _days(_to_date(_col(data, "date"), "data$date"))
-    n = len(x)
     days = np.concatenate([[0.0], np.diff(d)])
     with np.errstate(invalid="ignore", divide="ignore"):
         r = np.concatenate([[0.0], x[1:] / x[:-1] - 1 + (i_d[:-1] - i_f[:-1]) / 100 * days[1:] / basis

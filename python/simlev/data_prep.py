@@ -950,12 +950,6 @@ def series_check(data, *, columns=None, jump=20, stale=10, revert=0.8):
     return res
 
 
-def print_SimLevDataCheck(x, max_issues=25):  # noqa: N802 - R-Name
-    """``print.SimLevDataCheck(x, max_issues = 25)``."""
-    print(x.format(max_issues))
-    return x
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # series_align_macro
 # ═══════════════════════════════════════════════════════════════════════════

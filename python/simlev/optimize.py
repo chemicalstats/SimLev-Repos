@@ -74,15 +74,6 @@ def _match_arg(arg, choices):
 
 # ── kleine R-Hilfen ──────────────────────────────────────────────────────
 
-class _Mat:
-    """Numerische Matrix mit Spaltennamen (intern)."""
-
-    __slots__ = ("a", "cn")
-
-    def __init__(self, a, cn):
-        self.a = np.asarray(a, dtype=np.float64)
-        self.cn = list(cn)
-
 
 def _df(M, cn):
     return pd.DataFrame(np.asarray(M, dtype=np.float64), columns=list(cn))

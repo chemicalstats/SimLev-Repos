@@ -9,7 +9,8 @@
 # .sim_day_*), .sim_make_actions und .sim_close_years, seit E17 Stufe 1c entfallen.
 # Warnungen, details-Ausgaben und Abbrueche meldet der Kern als Codes mit Werten in einem Protokoll; die
 # Texte setzt .sim_engine_signal wortgleich zu R 1.3.0, in derselben Reihenfolge (cat() und warning()
-# verzahnt), die Aufrufe der Bedingungen stehen in .SIM_ENGINE_CALLS (sim_engine_calls.R).
+# verzahnt). Warnungen und Abbrueche, die bis R 1.3.0 den Aufruf einer Phasenfunktion trugen (.perform_trade_*,
+# .perform_asset_split, if-Ausdruecke, max()), tragen seit C19 den Aufruf von simulation() (.sim_restore_call).
 # Gegenstuecke: python/simlev/_sim_engine.py, julia/src/sim_engine.jl.
 
 #' Vorbereitung, Phasen 4 und 5 ueber den C++-Kern: Termine, Tages-Flags, Startgewichte, Tagesschleife und
@@ -145,6 +146,7 @@
 #' @keywords internal
 #' @noRd
 .sim_engine_signal <- function(ev, ev_ints, ev_vals, err, nm, flag_date) {
+  cl <- sys.call()   # C19: Phase in .SIM_PHASES, .sim_restore_call setzt den Aufruf von simulation()
   dstr <- function(d) as.character(structure(as.numeric(flag_date[d]), class = "Date"))
   for (i in seq_along(ev$code)) {
     code <- ev$code[i]
@@ -156,12 +158,12 @@
     }
     w <- switch(as.character(code),
       "1" = simpleWarning(sprintf("perform_trade_buy: ung\u00fcltiger Kurs (%.4f) f\u00fcr %s am %s; der Kauf wird \u00fcbersprungen.",
-                                  ev$d0[i], a, dstr(ev$day[i])), .SIM_ENGINE_CALLS[[as.character(ev$site[i])]]),
+                                  ev$d0[i], a, dstr(ev$day[i])), cl),
       "2" = simpleWarning(sprintf("perform_trade_sell: angeforderte Verkaufsmenge %.4f \u00fcbersteigt den Bestand %.4f von %s; verkauft wird der gesamte Bestand.",
-                                  ev$d0[i], ev$d1[i], a), .SIM_ENGINE_CALLS[[as.character(ev$site[i])]]),
+                                  ev$d0[i], ev$d1[i], a), cl),
       "3" = simpleWarning(sprintf("simulation: liquidate = TRUE: Position '%s' (Wert %.2f EUR) wurde nicht verkauft, weil die Ordergeb\u00fchr den Erl\u00f6s \u00fcbersteigt.",
                                   a, ev$d0[i])),
-      "4" = simpleWarning("no non-missing arguments to max; returning -Inf", quote(max(deviations, na.rm = TRUE))),
+      "4" = simpleWarning("no non-missing arguments to max; returning -Inf", cl),
       "5" = {
         simpleWarning(sprintf("simulation: %s von %.2f EUR am %s: das Depot reicht nicht aus; %.2f EUR bleiben als negativer Geldbestand (Steuerschuld) bei '%s'.",
                               .sim_engine_label(ev$aux[i], ev_ints[ev$y_off[i] + seq_len(ev$ny[i])]), ev$d0[i],
@@ -177,8 +179,8 @@
   if (!is.null(err)) {
     if (err$code == 101L)
       stop(simpleError(sprintf("perform_asset_split: ratio muss > 0 sein (Split-Verh\u00e4ltnis), nicht %s.", format(err$d0)),
-                       .SIM_ENGINE_CALLS[[as.character(err$site)]]))
-    stop(simpleError("missing value where TRUE/FALSE needed", .SIM_ENGINE_CALLS[[as.character(err$site)]]))
+                       cl))
+    stop(simpleError("missing value where TRUE/FALSE needed", cl))
   }
   invisible(NULL)
 }

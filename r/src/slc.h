@@ -4,7 +4,7 @@
  *             slc_sample.c (Ziehungen), slc_normal.c (Normalverteilung), slc_special.c
  *             (lgamma, unvollständige Beta, t, logistisch); jede nennt ihre Quellen.
  * Quellen:    Entwurf SPEZ-9 (Abschnitte B.0–B.4, C.1–C.5); Literatur je Kerndatei.
- * Konstanten: core/slc_constants.h, erzeugt von core/tools/gen_constants.py.
+ * Konstanten: core/slc_constants.h, erzeugt von core/gen_constants.py.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
  * Prüforakel: R 4.3.3 (nur Plausibilität, scratchpad/e91/).
@@ -20,7 +20,7 @@
  *     ein ungültiger Parameter ergibt NaN und genau eine Warnung "<funktion>: NaN erzeugt";
  *   - nur double, kein fma (-ffp-contract=off), kein fast-math.
  *
- * Kanonischer Ort: core/. Kopien (tools/core_sync.py): r/src/, python/src/core/, julia/deps/core/.
+ * Kanonischer Ort: core/. Kopien (core/sync.py): r/src/, python/src/core/, julia/deps/core/.
  */
 #ifndef SLC_H
 #define SLC_H
@@ -55,8 +55,6 @@ enum { SL_OK = 0, SL_EARG = 1, SL_ENONFINITE = 2, SL_ENOTPD = 3, SL_ESINGULAR = 
 void        sl_ctx_init(sl_ctx *cx);                 /* alles leer, interrupted = NULL */
 sl_ctx     *sl_ctx_alloc(void);                      /* für Hosts ohne Kenntnis des Layouts */
 void        sl_ctx_free(sl_ctx *cx);
-void        sl_ctx_reset(sl_ctx *cx);                /* Status und Warnungen leeren */
-int         sl_ctx_status(const sl_ctx *cx);
 const char *sl_ctx_msg(const sl_ctx *cx);
 int         sl_ctx_nwarn(const sl_ctx *cx);
 const char *sl_ctx_warn(const sl_ctx *cx, int i);    /* i = 0 ... nwarn-1 */
@@ -103,7 +101,6 @@ int    sl_dnorm(sl_ctx *cx, int64_t n, const double *x, double mu, double sd, in
 
 /* ── lgamma, unvollständige Beta, t, logistisch (slc_special.c, B.4) ──────── */
 
-double sl_lgamma1(double x);                         /* x > 0; sonst NaN */
 int    sl_lgamma(sl_ctx *cx, int64_t n, const double *x, double *out);
 int    sl_pbeta(sl_ctx *cx, int64_t n, const double *x, double a, double b, int lower, double *out);
 int    sl_pt(sl_ctx *cx, int64_t n, const double *t, double df, int lower, double *out);

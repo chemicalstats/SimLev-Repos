@@ -100,8 +100,6 @@ _qnorm(p) = SimLev.SLib.qnorm(_f64a(p))
 _qt(p, df) = SimLev.SLib.qt(_f64a(p), Float64(df))
 _pt(q, df) = SimLev.SLib.pt(_f64a(q), Float64(df))
 _lgamma(x) = Float64(SimLev.SLib.lgamma(Float64(x)))
-_plogis(x) = Float64(SimLev.SLib.plogis(Float64(x)))
-_qlogis(p) = Float64(SimLev.SLib.qlogis(Float64(p)))
 _log(x::Real) = SimLev.RLibm.log(Float64(x))
 _exp(x::Real) = SimLev.RLibm.exp(Float64(x))
 "`A %m% B` (slc-Matrixprodukt, Entwurf B.6); Vektor B als Spalte."

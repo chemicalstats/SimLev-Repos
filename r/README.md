@@ -53,7 +53,6 @@ install.packages("SimLev_0.5.0.tar.gz", repos = NULL, type = "source")
 
 | Paket | Wofür |
 |---|---|
-| `testthat` | Ausführen der Test-Suite |
 | `knitr`, `rmarkdown` | Bauen der Vignette |
 
 Technische Indikatoren für Signalstrategien (z. B. gleitende Durchschnitte)
@@ -134,31 +133,14 @@ plot(result)
 ## Tests
 
 ``` r
-rcmdcheck::rcmdcheck()      # Paket-Check: Beispiele, Vignette, Rauchproben tests/etappe9*.R
+rcmdcheck::rcmdcheck()      # Paket-Check: Beispiele, Vignette
 ```
 
-Die testthat-Suite (`tests/testthat/`) beschreibt den Stand vor dem eigenen
-Zufall und den eigenen Kernen und ist bis zu ihrem Neuaufbau ausgesetzt;
-`tests/testthat.R` führt sie nur mit `SIMLEV_LEGACY_TESTS=1` aus. Die
-Referenzfälle für Python und Julia erzeugen die Generatoren in
-[`../golden/`](../golden/) mit diesem Paket; die Gleichlaufprüfung
-`tools/gleichlauf/run.sh` (Repo-Wurzel) erzeugt sie neu und vergleicht beide
-Ports damit. Wer die Rechenlogik ändert, zieht die Python- und die
-Julia-Fassung nach und prüft mit dem Gleichlauf.
-
-### Eingefrorene Schnittstelle
-
-Die öffentliche Schnittstelle 0.5.0 (Exporte und S3-Methoden aus `NAMESPACE`,
-Argumente in Reihenfolge mit Standardwerten) ist in
-[`../tools/api_snapshot/frozen/r.json`](../tools/api_snapshot/frozen/r.json)
-festgehalten. `tests/testthat/test-api-frozen.R` vergleicht die Quellen damit
-und nennt jede Abweichung; beim Prüfen des gebauten Pakets (`R CMD check`)
-ist die Datei nicht erreichbar, der Test wird dann übersprungen. Solange die
-testthat-Suite ausgesetzt ist, prüft `tools/api_snapshot/run.sh --check`
-(Repo-Wurzel) die Schnittstelle aller drei Sprachen. Eine gewollte
-Änderung: Eintrag oben in `tools/api_snapshot/CHANGES.md` (Datum, was,
-warum), dann aus der Repo-Wurzel `tools/api_snapshot/run.sh --freeze`
-(siehe [`tools/api_snapshot/README.md`](../tools/api_snapshot/README.md)).
+Die Tests des Pakets, die Referenzfälle für Python und Julia, die
+Gleichlaufprüfung und die Prüfung der eingefrorenen Schnittstelle gehören nicht
+zum Paket; sie liegen im Repository (siehe dessen Haupt-README). Wer die
+Rechenlogik ändert, zieht die Python- und die Julia-Fassung nach und prüft mit
+dem Gleichlauf.
 
 ## Paketaufbau
 
@@ -213,7 +195,6 @@ src/                         C++-Kerne (FIFO, Steuern, Markt-Updates, Research,
                              init.c (Registrierung), simlev_capi.h
                              (Anbindung an R's C-Schnittstelle)
 man/                         Hilfeseiten
-tests/                       Rauchproben etappe9*.R; testthat/ (ausgesetzt)
 vignettes/                   Einführung
 inst/examples/               Beispielsammlungen
 ```

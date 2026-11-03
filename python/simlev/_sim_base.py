@@ -23,7 +23,7 @@ from ._tax_tariff import SimLevTaxTariff
 from ._r.rnum import NA_REAL as NA  # R's NA_real_ (Nutzlast 1954)
 
 __all__ = [
-    "calculate_skewness", "calculate_kurtosis", "calculate_partials", "calculate_dates_flags",
+    "calculate_skewness", "calculate_kurtosis", "calculate_dates_flags",
     "xirr_rate",
 ]
 
@@ -606,12 +606,6 @@ def _calculate_kurtosis(x: np.ndarray, excess: bool = True) -> float:
     return kurt
 
 
-def _calculate_partials(returns: np.ndarray, lower: bool) -> float:
-    v = np.maximum(0.0, -returns) if lower else np.maximum(0.0, returns)
-    v = np.where(np.isnan(returns), NA, v)
-    return r_mean(v, na_rm=True)
-
-
 # ── Öffentliche Helfer für andere Module (Namen wie in R) ──────────────────
 
 def calculate_skewness(x, na_rm: bool = True) -> float:
@@ -628,14 +622,6 @@ def calculate_kurtosis(x, na_rm: bool = True, excess: bool = True) -> float:
     if not na_rm and np.isnan(a).any():
         return NA
     return _calculate_kurtosis(a, excess=excess)
-
-
-def calculate_partials(returns, exp: float = 1, type: str = "lower") -> float:
-    """``calculate_partials(returns, exp = 1, type = c("lower", "higher"))``: mittleres Partialmoment."""
-    a = np.asarray(returns, dtype=np.float64).ravel()
-    v = np.maximum(0.0, -a) if type == "lower" else np.maximum(0.0, a)
-    v = np.where(np.isnan(a), NA, v)
-    return r_mean(r_pow_vec(v, float(exp)), na_rm=True)
 
 
 def calculate_dates_flags(mode, span, unit, days, dates, value=None, anchor=("start", "end"), start_date=None,

@@ -1117,7 +1117,6 @@ to_julia(v::CHR) = any(ismissing, v) ? v : Vector{String}(v)
 to_julia(v::DAT) = any(ismissing, v) ? v : Vector{Date}(v)
 to_julia(v) = v
 
-_isna_num(x::Float64) = isnan(x)
 _days(d::Date) = Dates.value(d - _EPOCH)
 _i2d(x::Union{Missing,Int}) = x === missing ? _NA : Float64(x)
 
@@ -1199,7 +1198,6 @@ _na_of(::INT) = missing
 _na_of(::NUM) = _NA
 _na_of(::CHR) = missing
 _na_of(::DAT) = missing
-_empty_like(v::Vector) = similar(v, 0)
 _isna_el(x) = x === missing || (x isa Float64 && isnan(x))
 
 _rtype(::LGL) = 1

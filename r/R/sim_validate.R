@@ -21,7 +21,8 @@
 # Namen der Phasenfunktionen: Bedingungen, die direkt in einer Phase entstehen (stop()/warning() ohne
 # call. = FALSE, R-Fehler im Phasencode), tragen den Aufruf von simulation() (.sim_restore_call)
 .SIM_PHASES <- c(".sim_check_inputs", ".sim_prepare_data", ".sim_build_state", ".sim_check_layout",
-                 ".sim_build_calendar", ".sim_evaluate", ".sim_risk_free", ".sim_result", ".tax_rates")
+                 ".sim_build_calendar", ".sim_engine_signal", ".sim_evaluate", ".sim_risk_free", ".sim_result",
+                 ".tax_rates")
 
 #' Aufruf von simulation() in Bedingungen aus den Phasen wiederherstellen
 #'
@@ -71,21 +72,18 @@
 #' beginnen mit who.
 #' Eingabe: rate (Abgeltungsteuer in Prozent), church_tax (Prozent oder NULL), guenstigerpruefung (logisch),
 #' marginal_rate (Grenzsteuersatz in Prozent oder NULL), include_soli (logisch), soli_rate (Prozent), who
-#' (Name des Aufrufers), details (Druck der Guenstigerpruefung), blocks (Meldungen nennen die Bausteine),
-#' rate_given (rate ausdruecklich angegeben: Warnung, wenn church_tax es ueberschreibt), tariff_on (Tarifweg:
-#' die Guenstigerpruefung folgt im Jahresabschluss, hier nicht).
+#' (Name des Aufrufers), details (Druck der Guenstigerpruefung), tariff_on (Tarifweg: die Guenstigerpruefung
+#' folgt im Jahresabschluss, hier nicht). Meldungen nennen die Bausteine (C19: der flache Weg entfaellt).
 #' Ausgabe: Liste tax_rate, marginal_tax_rate, soli_rate_income_tax (Anteile), effective_tax_rate,
 #' church_k, soli_factor_income.
 #' @keywords internal
 #' @noRd
 .tax_rates <- function(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli, soli_rate, who,
-                       details = FALSE, blocks = TRUE, rate_given = FALSE, tariff_on = FALSE) {
+                       details = FALSE, tariff_on = FALSE) {
   tax_rate <- rate; marginal_tax_rate <- marginal_rate; soli_rate_income_tax <- soli_rate
   use_guenstigerpruefung <- guenstigerpruefung; include_soli_on_income_tax <- include_soli
   # Kirchensteuer (§ 32d Abs. 1 EStG): ESt = 25 % / (1 + 0,25 k), dazu Soli 5,5 % und KiSt k
   if (!is.null(church_tax) && church_tax > 0) {
-    if (rate_given && abs(tax_rate - 26.375) > 1e-9)
-      warning("church_tax \u00fcberschreibt das angegebene tax_rate.")
     k <- church_tax / 100
     tax_rate <- 100 * 0.25 / (1 + 0.25 * k) * (1 + 0.055 + k)
   }
@@ -119,18 +117,10 @@
   # Guenstigerpruefung im Jahresabschluss (Tagesengine, Tarifkern core/tariff_core_impl.h)
   if (use_guenstigerpruefung && !tariff_on) {
     if (is.null(marginal_tax_rate)) {
-      if (blocks)
       warning(
         sprintf("%s: G\u00fcnstigerpr\u00fcfung aktiviert (tax_profile(guenstigerpruefung = TRUE)), aber der Grenzsteuersatz (income_rate(marginal_rate)) ist nicht gesetzt.\n", who),
         "Verwendet wird die Abgeltungsteuer (", round(tax_rate * 100, 2), " %).\n",
         "F\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung tax_profile(income = income_rate(marginal_rate)) in Prozent angeben (z. B. 42).",
-        call. = FALSE
-      )
-      else
-      warning(
-        sprintf("%s: G\u00fcnstigerpr\u00fcfung aktiviert (use_guenstigerpruefung = TRUE), aber 'marginal_tax_rate' ist nicht gesetzt.\n", who),
-        "Verwendet wird die Abgeltungsteuer (", round(tax_rate * 100, 2), " %).\n",
-        "F\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung marginal_tax_rate in Prozent angeben (z. B. 42).",
         call. = FALSE
       )
     } else if ((personal_rate <- marginal_tax_rate *
@@ -171,26 +161,25 @@
 #' Zweck: Argumente von simulation() pruefen (Fehler und Warnungen wie dokumentiert), Prozentangaben
 #' in Anteile umrechnen, Ordergebuehren, Einkommensteuertarif und effektiven Steuersatz
 #' (Guenstigerpruefung) bestimmen.
-#' Eingabe: die gleichnamigen Argumente von .simulation_flat() (tariff = tax_tariff); given = benannter
-#' logischer Vektor, TRUE = Argument im Aufruf angegeben (statt missing() bei Argumenten mit Standardwert);
-#' blocks = TRUE: Aufruf aus simulation() mit Bausteinen. Dann haben die Bausteine ihre Argumente schon
-#' geprueft (die Pruefungen hier entfallen, Warnungen kommen nicht doppelt), und Meldungen nennen die
-#' Bausteine statt der flachen Argumente.
+#' Eingabe: die gleichnamigen Argumente von .simulation_flat() (tariff = tax_tariff), aus den Bausteinen von
+#' simulation() uebersetzt. Die Bausteine haben ihre Argumente schon geprueft (die Pruefungen hier entfallen,
+#' Warnungen kommen nicht doppelt), Meldungen nennen die Bausteine (C19: der flache Weg ohne Bausteine
+#' mit eigenen Pruefungen und Meldungen ist entfallen).
 #' Ausgabe: Liste cfg mit data und strategy (geprueft, ggf. sortiert bzw. mit start), den
 #' Steuerwerten als Anteil (tax_rate, marginal_tax_rate, effective_tax_rate, soli_factor_income,
 #' church_k), tariff_env, den Gebuehren (fee_order, fee_dca, fees_on), pre_filled und den hier
 #' ausgewerteten Einstellungen.
 #' @keywords internal
 #' @noRd
-.sim_check_inputs <- function(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_span,
-                              dca_days, balance_mode, balance_days, balance_thresh,
+.sim_check_inputs <- function(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_days,
+                              balance_mode, balance_days, balance_thresh,
                               balance_thresh_type = c("absolute", "relative"),
                               tax_mode = c("none", "person"), tax_rate, marginal_tax_rate,
                               use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                               use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax,
                               base_rate, fractions, risk_free, split_mode, split_thresh,
-                              event_col, church_tax, order_fee, dca_fee, harvest_mode, harvest_day,
-                              taxable_income, tariff, given, blocks = FALSE) {
+                              event_col, church_tax, order_fee, dca_fee, harvest_mode,
+                              taxable_income, tariff) {
     # === PARAMETER-VALIDIERUNG ===
   tax_mode <- match.arg(tax_mode)
   
@@ -230,7 +219,7 @@
     if (!is.null(a$tax_regime) && (!is.character(a$tax_regime) || length(a$tax_regime) != 1L ||
                                    !a$tax_regime %in% c("investment_fund", "capital_gains", "private_sale")))
       stop(sprintf("simulation: tax_regime %s von Asset '%s' ist ung\u00fcltig; erlaubt sind investment_fund, capital_gains, private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern %s verwenden.",
-                   .show_arg_s(a$tax_regime), nm, if (blocks) "tax = NULL" else "tax_mode = \"none\""), call. = FALSE)
+                   .show_arg_s(a$tax_regime), nm, "tax = NULL"), call. = FALSE)
     if (!is.character(a$trading) || length(a$trading) != 1L || !a$trading %in% c("bnh", "signal"))
       stop(sprintf("simulation: trading %s von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\".",
                    .show_arg_s(a$trading), nm), call. = FALSE)
@@ -346,108 +335,25 @@
                  paste(deparse(start_value), collapse = "")))
   }
   
-  # tax_rate (mit Bausteinen: tax_profile() hat rate und church_tax geprueft)
-  if (!blocks) {
-  if (!is.numeric(tax_rate) || length(tax_rate) != 1L || is.na(tax_rate) || tax_rate < 0 || tax_rate > 100) {
-    stop(sprintf("simulation: tax_rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 f\u00fcr 26,375 %%), nicht %s.",
-                 paste(deparse(tax_rate), collapse = "")))
-  }
-  if (tax_rate > 0 && tax_rate < 1)   # R1-23: vermutlich Anteil statt Prozent
-    warning(sprintf("simulation: tax_rate = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
-                    format(tax_rate), format(tax_rate), format(tax_rate * 100)), call. = FALSE)
-  if (!is.null(church_tax)) {
-    if (!is.numeric(church_tax) || length(church_tax) != 1L || is.na(church_tax) || church_tax < 0 || church_tax > 100)
-      stop(sprintf("simulation: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9), nicht %s.",
-                   paste(format(church_tax), collapse = ", ")))
-    if (church_tax > 0 && church_tax < 1)
-      warning(sprintf("simulation: church_tax = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
-                      format(church_tax), format(church_tax), format(church_tax * 100)), call. = FALSE)
-    else if (church_tax > 9)
-      warning(sprintf("simulation: church_tax = %s %% ist ungew\u00f6hnlich hoch (Kirchensteuer in Deutschland: 8 oder 9 %%).", format(church_tax)), call. = FALSE)
-  }
-  if (isTRUE(harvest_mode) && tax_mode != "person")
-    warning("simulation: harvest_mode wirkt nur mit tax_mode = \"person\" und wird hier ignoriert.", call. = FALSE)
-  }
-  # A7-10: Steuer- und Schalterargumente pruefen (einzelne endliche Zahl bzw. TRUE/FALSE); sonst kryptische
-  # R-Fehler bzw. stille Fehldeutung (z. B. private_sale_threshold = "1000": Textvergleich)
+  # Steuer-, Kosten-, Termin- und Split-Angaben haben die Bausteine geprueft (tax_profile(), sim_costs(),
+  # dca_plan(), rebalance_plan(), split_rule(); C19: die Pruefungen des flachen Wegs sind entfallen).
+  # A7-10: fractions (TRUE/FALSE) und risk_free (Prozent-Konvention) prueft simulation() selbst
   .show_arg <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = "")
-  .chk_num <- function(x, arg, what, min = 0, null_ok = FALSE) {
-    if (is.null(x) && null_ok) return(invisible(NULL))
-    if (!is.numeric(x) || length(x) != 1L || !is.finite(x) || (!is.null(min) && x < min))
-      stop(sprintf("simulation: '%s' muss %s sein, nicht %s.", arg, what, .show_arg(x)), call. = FALSE)
-  }
   .frac_warn <- function(x, arg, hi = 1) {
     if (is.numeric(x) && length(x) == 1L && is.finite(x) && x > 0 && x < hi)
       warning(sprintf("simulation: %s = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
                       arg, format(x), format(x), format(x * 100)), call. = FALSE)
   }
-  if (!blocks) {
-  .chk_num(sparer_pauschbetrag, "sparer_pauschbetrag", "eine einzelne endliche Zahl >= 0 (EUR je Jahr, z. B. 1000)")
-  .chk_num(private_sale_threshold, "private_sale_threshold", "eine einzelne endliche Zahl >= 0 (Freigrenze in EUR, z. B. 1000)")
-  .chk_num(base_rate, "base_rate", "NULL oder eine einzelne endliche Zahl (Basiszins in Prozent, z. B. 2.29; negativ erlaubt)",
-           min = NULL, null_ok = TRUE)
-  .chk_num(marginal_tax_rate, "marginal_tax_rate", "NULL oder eine einzelne Zahl in Prozent von 0 bis 50 (z. B. 42)", null_ok = TRUE)
-  .chk_num(balance_thresh, "balance_thresh", "NULL oder eine einzelne endliche Zahl >= 0 in Prozent (z. B. 5)", null_ok = TRUE)
-  for (a in c("use_guenstigerpruefung", "include_soli_on_income_tax", "fractions", "use_sparer_pauschbetrag")) {
-    x <- get(a)
-    if (!is.logical(x) || length(x) != 1L || is.na(x))
-      stop(sprintf("simulation: '%s' muss TRUE oder FALSE sein, nicht %s.", a, .show_arg(x)), call. = FALSE)
-  }
-  # Anteil statt Prozent (wie bei tax_rate). R8-04: Schwellen so, dass realistische kleine Prozentwerte nicht
-  # warnen: base_rate < 0.05 (Basiszinsen 0.52 fuer 2019, 0.07 fuer 2020), risk_free < 0.05 (Geldmarkt
-  # 2016-2019 um 0.25 % p. a.; als Anteil gemeinte Zinsen liegen meist bei 0.01-0.05), balance_thresh < 0.2
-  # (Band von 0.5 Prozentpunkten ist ueblich; als Anteil gemeinte Baender 0.01-0.15); marginal_tax_rate < 1
-  # (Grenzsteuersaetze unter 1 % gibt es nicht, der Eingangssatz ist 14 %)
-  .frac_warn(base_rate, "base_rate", hi = 0.05); .frac_warn(marginal_tax_rate, "marginal_tax_rate")
-  .frac_warn(balance_thresh, "balance_thresh", hi = 0.2)
-  }
-  if (blocks && (!is.logical(fractions) || length(fractions) != 1L || is.na(fractions)))
+  if (!is.logical(fractions) || length(fractions) != 1L || is.na(fractions))
     stop(sprintf("simulation: '%s' muss TRUE oder FALSE sein, nicht %s.", "fractions", .show_arg(fractions)), call. = FALSE)
   .frac_warn(risk_free, "risk_free", hi = 0.05)
   # R9-06: dieselbe Schwelle fuer risk_free als Spaltenname (Median der Spalte; base_rate_data: .sim_prepare_data)
   if (is.character(risk_free) && length(risk_free) == 1L && !is.na(risk_free) && risk_free %in% names(data))
     .frac_warn_col(data[[risk_free]], "risk_free", risk_free, hi = 0.05)
-  # C7-04: wirkungslose Argumente nicht still ignorieren (mit Bausteinen: in den Bausteinen geprueft)
-  if (!blocks) {
-  if (!isTRUE(dca_mode) && !is.null(dca_value))
-    warning("simulation: dca_value wirkt nur mit dca_mode = TRUE und wird ignoriert.", call. = FALSE)
-  if (!isTRUE(balance_mode) && is.null(event_col) && !is.null(balance_thresh))
-    warning("simulation: balance_thresh wirkt nur mit balance_mode = TRUE oder event_col (Rebalancing) und wird ignoriert.", call. = FALSE)
-  if (is.null(event_col) && given[["event_mode"]])
-    warning("simulation: event_mode wirkt nur zusammen mit event_col und wird ignoriert.", call. = FALSE)
-  .check_days <- function(x, arg) {
-    if (!is.null(x) && (!is.numeric(x) || anyNA(x) || any(x < 1 | x > 31 | x != round(x))))
-      stop(sprintf("simulation: %s muss ganze Zahlen von 1 bis 31 enthalten, nicht %s.", arg, paste(format(x), collapse = ", ")))
-  }
-  .check_days(dca_days, "dca_days"); .check_days(balance_days, "balance_days")
-  for (a in c("dca_days", "balance_days")) {   # doppelte Tage ergeben nur einen Termin
-    x <- get(a)
-    if (!is.null(x) && anyDuplicated(x)) {
-      warning(sprintf("simulation: %s enth\u00e4lt doppelte Tage (%s); jeder Tag ergibt nur einen Termin, verwendet wird %s = %s.",
-                      a, paste(format(x), collapse = ", "), a, paste(deparse(unique(x)), collapse = "")), call. = FALSE)
-      assign(a, unique(x))
-    }
-  }
-  # R2-02: Splits setzen den Kurs auf 100; liegt 100 nicht zwischen den Schwellen, loest
-  # der neue Kurs sofort den naechsten Split aus (taegliche Splits)
-  if (isTRUE(split_mode) && !is.null(split_thresh)) {
-    st_v <- unlist(split_thresh)
-    if (!is.numeric(st_v) || length(st_v) != 2L || anyNA(st_v))
-      stop(sprintf("simulation: split_thresh muss ein Zahlenvektor c(untere, obere) der L\u00e4nge 2 sein, nicht %s.",
-                   paste(format(st_v), collapse = ", ")))
-    if (!(st_v[1] < 100 && 100 < st_v[2]))
-      warning(sprintf(paste0("simulation: split_thresh = c(%s, %s) schlie\u00dft den Zielkurs 100 nicht ein (erwartet untere < 100 < obere). ",
-                             "Ein Split setzt den Kurs auf 100; liegt 100 au\u00dferhalb der Schwellen, folgt danach an jedem Tag ein weiterer Split ",
-                             "(mit fractions = FALSE jeweils mit Spitzenausgleich)."), format(st_v[1]), format(st_v[2])), call. = FALSE)
-  }
-  }
 
   # Einkommensteuertarif (taxable_income, tax_tariff): zvE je Kalenderjahr pruefen, Tarif lesen
+  # (taxable_income und tax_tariff nur aus income_tariff() in tax_profile(), also nur mit tax_mode = "person")
   tariff_on <- !is.null(taxable_income) && tax_mode == "person"
-  if (!is.null(taxable_income) && tax_mode != "person")   # nur ohne Bausteine moeglich (income_tariff() steht in tax_profile())
-    warning(sprintf("simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"%s\") und wird ignoriert.", tax_mode), call. = FALSE)
-  if (is.null(taxable_income) && !is.null(tariff))
-    warning("simulation: tax_tariff wirkt nur zusammen mit taxable_income (zu versteuerndes Einkommen je Jahr) und wird ignoriert.", call. = FALSE)
   tariff_env <- NULL
   if (tariff_on) {
     sim_years <- seq(as.integer(format(min(data$date), "%Y")), as.integer(format(max(data$date), "%Y")))
@@ -464,11 +370,6 @@
     tariff_env$kapest_rate <- 0.25 / (1 + 0.25 * tariff_env$church_k)   # KapESt-Satz nach § 32d Abs. 1 EStG
     tariff_env$use_gp <- isTRUE(use_guenstigerpruefung)
     tariff_env$rows <- list(); tariff_env$refund_due <- 0
-    ign <- c("marginal_tax_rate", "include_soli_on_income_tax", "soli_rate_income_tax")[
-      c(given[["marginal_tax_rate"]] && !is.null(marginal_tax_rate), given[["include_soli_on_income_tax"]], given[["soli_rate_income_tax"]])]
-    if (length(ign))
-      warning(sprintf("simulation: Mit taxable_income gilt der Einkommensteuertarif der Tarifdatei (ESt und Soli); %s wirkt dann nicht.",
-                      paste(ign, collapse = ", ")), call. = FALSE)
   }
 
   # marginal_tax_rate (wenn private_sale vorhanden)
@@ -478,16 +379,8 @@
     (isTRUE(a$asset_class %in% c("etn", "etc")) && isTRUE(a$deliverable))
   }))
   if (has_private_sale && is.null(marginal_tax_rate) && tax_mode == "person" && !tariff_on) {   # R2-07: nur wenn § 23 besteuert wird
-    if (blocks)
-      warning("simulation: Der Grenzsteuersatz ist nicht gesetzt (tax_profile(income = income_rate(marginal_rate))), die Strategie enth\u00e4lt aber Assets mit tax_regime = \"private_sale\"; ",
-              "Gewinne nach Paragraf 23 EStG werden dann m\u00f6glicherweise nicht korrekt besteuert. income_rate(marginal_rate) in Prozent angeben (z. B. 42).")
-    else
-    warning("simulation: marginal_tax_rate ist nicht gesetzt, die Strategie enth\u00e4lt aber Assets mit tax_regime = \"private_sale\"; ",
-            "Gewinne nach Paragraf 23 EStG werden dann m\u00f6glicherweise nicht korrekt besteuert. marginal_tax_rate in Prozent angeben (z. B. 42).")
-  }
-  if (!blocks && !is.null(marginal_tax_rate) && (marginal_tax_rate < 0 || marginal_tax_rate > 50)) {
-    stop(sprintf("simulation: marginal_tax_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 f\u00fcr 42 %%), nicht %s.",
-                 paste(deparse(marginal_tax_rate), collapse = "")))
+    warning("simulation: Der Grenzsteuersatz ist nicht gesetzt (tax_profile(income = income_rate(marginal_rate))), die Strategie enth\u00e4lt aber Assets mit tax_regime = \"private_sale\"; ",
+            "Gewinne nach Paragraf 23 EStG werden dann m\u00f6glicherweise nicht korrekt besteuert. income_rate(marginal_rate) in Prozent angeben (z. B. 42).")
   }
 
   # Kirchensteuer, Prozent-Konvention und Guenstigerpruefung: .tax_rates() (unten, nach der Gewichtssumme)
@@ -499,24 +392,7 @@
   fee_order <- .fee_spec(order_fee); fee_dca <- if (is.null(dca_fee)) fee_order else .fee_spec(dca_fee)
   fees_on <- !is.null(fee_order) || !is.null(fee_dca)
   .fee_env$paid <- 0
-  if (isTRUE(harvest_mode) && !blocks) {
-    if (!grepl("^\\d{2}-\\d{2}$", harvest_day) || harvest_day >= "12-31")
-      stop("harvest_day im Format 'MM-TT' und vor dem 31.12. angeben (z. B. '12-15').")
-  }
   # base_rate: KEINE Division hier — .calculate_flat_rate teilt an der Verbrauchsstelle /100
-  
-  # DCA-Parameter
-  # R4-07: einzelne endliche Zahlen pruefen (sonst kryptische R-Fehler bei Vektor, NA oder Text)
-  if (dca_mode && !blocks) {
-    .one_num <- function(x) is.numeric(x) && length(x) == 1L && is.finite(x)
-    .show <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = "")
-    if (!.one_num(dca_value) || dca_value <= 0)
-      stop(sprintf("simulation: 'dca_value' muss bei dca_mode = TRUE eine einzelne endliche Zahl > 0 sein (Betrag je Sparplan-Termin in EUR), nicht %s.",
-                   .show(dca_value)), call. = FALSE)
-    if (!.one_num(dca_span) || dca_span < 1 || dca_span != round(dca_span))
-      stop(sprintf("simulation: 'dca_span' muss bei dca_mode = TRUE eine einzelne ganze Zahl >= 1 sein (Perioden zwischen zwei Terminen), nicht %s.",
-                   .show(dca_span)), call. = FALSE)
-  }
 
   # Gewichtssumme validieren
   total_weight <- sum(sapply(strategy, function(a) a$share), na.rm = TRUE)
@@ -531,8 +407,7 @@
   # Steuersaetze (Kirchensteuer, Prozent -> Anteil, Guenstigerpruefung) im gemeinsamen Helfer (6.5b,
   # auch fuer withdrawal_simulation()); Rechenfolge, Warnungen und Druck wie bisher an dieser Stelle
   tr <- .tax_rates(tax_rate, church_tax, use_guenstigerpruefung, marginal_tax_rate, include_soli_on_income_tax,
-                   soli_rate_income_tax, who = "simulation", details = details, blocks = blocks,
-                   rate_given = given[["tax_rate"]], tariff_on = tariff_on)
+                   soli_rate_income_tax, who = "simulation", details = details, tariff_on = tariff_on)
   tax_rate <- tr$tax_rate; marginal_tax_rate <- tr$marginal_tax_rate; effective_tax_rate <- tr$effective_tax_rate
   soli_factor_income <- tr$soli_factor_income; church_k <- tr$church_k
 

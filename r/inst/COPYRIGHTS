@@ -52,13 +52,13 @@ src/        C++-Kerne der Engine (Markt-Updates, FIFO-Lotverwaltung,
             Glättungsspline, Kerndichte) und ihre R-Hüllen (slc_r*.c).
 
             Die C-Quellen sind Kopien der kanonischen Dateien im Ordner
-            core/ des Repositorys (tools/core_sync.py). Die C-Bibliothek ist
+            core/ des Repositorys (core/sync.py). Die C-Bibliothek ist
             nach Veröffentlichungen geschrieben, nicht nach fremdem Code; der
             Kopf jeder Datei nennt ihre Quellen, die vollständigen Angaben
             stehen im Abschnitt "Literatur" der README im Wurzelverzeichnis
             des Repositorys. Konstanten (Stützwerte, Reihenkoeffizienten,
             Sprungpolynom des Zufallsgenerators) sind selbst hergeleitet
-            (core/tools/gen_constants.py, nicht Teil des R-Pakets);
+            (core/gen_constants.py, nicht Teil des R-Pakets);
             Verfahrenskonstanten aus den Veröffentlichungen (etwa die
             Parameter von xoshiro256** und SplitMix64) nennen die Dateiköpfe.
             Von den Kernen core/slc_rbase* gehören seit E17 nur

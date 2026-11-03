@@ -6,7 +6,7 @@
 // .Call-Huellen in r/src/research_core.cpp auf (sie wandeln nur die R-Objekte um),
 // Python ueber das Erweiterungsmodul simlev._ext (python/src/_ext_research.cpp).
 // Kanonisch in core/ (seit Etappe 9.6c, F16); R und Python bauen aus
-// Byte-fuer-Byte-Kopien in r/src/ bzw. python/src/core/ (tools/core_sync.py
+// Byte-fuer-Byte-Kopien in r/src/ bzw. python/src/core/ (core/sync.py
 // --write/--check); Aenderungen nur in core/ vornehmen und danach kopieren.
 // Die Python-Huellen (simlev/_optimize_core.py, _dependence_core.py, _signals_core.py)
 // rufen nur noch diese Kerne; die reinen Python-Kerne als Rueckfall sind seit 9.6c entfallen.

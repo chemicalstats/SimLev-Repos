@@ -84,15 +84,16 @@
     "19" = sprintf("%s nicht definiert: %s", .SIM_EVAL_METRICS[v[1] + 1], why_text[v[1] + 1]))
 }
 
-#' Warnungen der Auswertung (Codes des Kerns) mit den Texten von R 1.3.0
+#' Warnungen der Auswertung (Codes des Kerns) mit den Texten von R 1.3.0; call: Aufruf der Bedingung (aus
+#' .sim_evaluate dessen Aufruf, den .sim_restore_call durch den von simulation() ersetzt; sonst ohne Aufruf)
 #' @keywords internal
 #' @noRd
-.sim_eval_warn <- function(code, v) {
+.sim_eval_warn <- function(code, v, call = NULL) {
   dstr <- function(z) format(structure(z, class = "Date"))
   w <- switch(as.character(code),
-    "1" = simpleWarning("-Inf replaced by maximally negative value", .SIM_EVAL_CALLS[["uniroot"]]),
-    "2" = simpleWarning("NA/Inf replaced by maximum positive value", .SIM_EVAL_CALLS[["uniroot"]]),
-    "3" = simpleWarning("_NOT_ converged in 1000 iterations", .SIM_EVAL_CALLS[["uniroot"]]),
+    "1" = simpleWarning("-Inf replaced by maximally negative value", call),
+    "2" = simpleWarning("NA/Inf replaced by maximum positive value", call),
+    "3" = simpleWarning("_NOT_ converged in 1000 iterations", call),
     "10" = simpleWarning(sprintf("simulation: geldgewichtete Rendite (cagr) mit Einzahlungen nicht bestimmbar (Startwert %.2f EUR, Einzahlungen %.2f EUR, Endwert %.2f EUR): kein interner Zinsfu\u00df gefunden; cagr = NA.",
                                  v[1], v[2], v[3])),
     "11" = simpleWarning(sprintf("simulation: Endwert negativ (%.2f EUR, %s); Verlust \u00fcber 100 %%: cagr und ttwror sind nicht definiert (NA), Drawdowns auf 100 %% begrenzt.",
@@ -104,7 +105,7 @@
                                  dstr(v[1]), v[2], v[3], v[4])),
     "16" = simpleWarning(sprintf("simulation: Depotwert am %s negativ (%.2f EUR, Steuerschuld); Drawdowns auf 100 %% begrenzt.",
                                  dstr(v[1]), v[2])),
-    "17" = simpleWarning("no non-missing arguments to max; returning -Inf", .SIM_EVAL_CALLS[["max"]]),
+    "17" = simpleWarning("no non-missing arguments to max; returning -Inf", call),
     stop(sprintf("simulation: interner Fehler: unbekannter Ereigniscode %d der Auswertung.", code)))
   warning(w)
 }
@@ -138,8 +139,9 @@
     rf = if (is.double(rfv)) rfv else if (!is.null(rfv)) as.double(rfv), rf_ok = as.integer(!rf$failed))
   ev <- .Call(C_sim_evaluate, inp)
   # Meldungen: Warnungen von .sim_returns, Abbruch dort, Meldungen von risk_free, Abbruch in .sim_risk_stats
-  for (i in seq_along(ev$msg_code)) .sim_eval_warn(ev$msg_code[i], ev$msg_v[4L * (i - 1L) + 1:4])
-  na_stop <- function() stop(simpleError("missing value where TRUE/FALSE needed", .SIM_EVAL_CALLS[[as.character(ev$err[1])]]))
+  cl <- sys.call()   # C19: Aufruf der Phase; .sim_restore_call setzt den Aufruf von simulation()
+  for (i in seq_along(ev$msg_code)) .sim_eval_warn(ev$msg_code[i], ev$msg_v[4L * (i - 1L) + 1:4], cl)
+  na_stop <- function() stop(simpleError("missing value where TRUE/FALSE needed", cl))
   if (ev$err[2] == 1L) na_stop()
   for (cond in rf$conds) if (inherits(cond, "error")) stop(cond) else warning(cond)
   if (ev$err[2] == 2L) na_stop()

@@ -21,7 +21,7 @@
  *               0xbf58476d1ce4e5b9, 0x94d049bb133111eb); diese Mischfunktion nutzt der Java-Typ
  *               SplittableRandom, der Steele u. a. (2014) umsetzt, und Blackman/Vigna (2021)
  *               empfehlen SplitMix64 zum Seeding.
- * Konstanten: selbst hergeleitet in core/tools/gen_constants.py: Inkrement gamma = ungerade
+ * Konstanten: selbst hergeleitet in core/gen_constants.py: Inkrement gamma = ungerade
  *             Zahl nächst 2^64 / goldener Schnitt; Sprungpolynom per Berlekamp-Massey und
  *             Quadrieren (gleich dem in Blackman/Vigna 2021 veröffentlichten Wert). Aus der
  *             Quelle: die Verfahrensparameter 17, 45, 5, 7, 9 (Blackman/Vigna 2021) und die

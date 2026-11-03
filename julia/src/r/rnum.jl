@@ -1,11 +1,7 @@
-# Herkunft:           übersetzt aus R 4.3.3, src/main/summary.c, cum.c, array.c, arithmetic.c;
-#                     src/library/stats/src/zeroin.c (R_zeroin2); nachgebildet nach R 4.3.3,
-#                     src/library/stats/R/nlm.R (uniroot)
+# Herkunft:           übersetzt aus R 4.3.3, src/main/summary.c, cum.c, array.c, arithmetic.c
+#                     (R_zeroin2/uniroot aus zeroin.c bzw. nlm.R seit C19 entfallen, XIRR im Kern)
 # Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
-#                     Kopf der jeweiligen R-Quelle); Verfahren R. P. Brent, Algorithms for
-#                     Minimization without Derivatives (1973), über Netlib go/fmin.f (ohne Urheber-
-#                     und Lizenzvermerk) bzw. c/brent.shar (Kopf nicht geprüft); zeroin.c:
-#                     Ergänzungen von Peter Dalgaard
+#                     Kopf der jeweiligen R-Quelle)
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang: Summen und Kumulationen rechnen seit N8 die C-Kerne
@@ -23,7 +19,6 @@ const NA = reinterpret(Float64, 0x7FF00000000007A2)
 
 "TRUE nur für R's NA (nicht für NaN) – entspricht `R_IsNA`."
 isna_strict(x::Float64) = isnan(x) && (reinterpret(UInt64, x) & 0x00000000FFFFFFFF) == 0x00000000000007A2
-
 
 # ── Summen, Mittel, Varianz, Kumulationen (N8: C-Kerne core/slc_rbase.c) ─────
 # R akkumuliert in long double; die C-Kerne tun dasselbe (x87 auf x86-64, gegen R bitgleich geprüft)
@@ -168,90 +163,6 @@ r_median(x; na_rm::Bool = false) = Float64(RStats.median(collect(Float64, x); na
 
 const _DBL_EPS = 2.220446049250313e-16
 const _DBL_MAX = 1.7976931348623157e308
-
-"Port von `R_zeroin2` (stats/src/zeroin.c); Rückgabe (Wurzel, Iterationen, Genauigkeit)."
-function r_zeroin2(f, ax::Float64, bx::Float64, fa::Float64, fb::Float64, tol::Float64, maxit::Int)
-    a, b = ax, bx
-    c, fc = a, fa
-    maxit_c = maxit + 1
-    fa == 0.0 && return (a, 0, 0.0)
-    fb == 0.0 && return (b, 0, 0.0)
-    while maxit_c != 0
-        maxit_c -= 1
-        prev_step = b - a
-        if abs(fc) < abs(fb)
-            a = b; b = c; c = a
-            fa = fb; fb = fc; fc = fa
-        end
-        tol_act = 2 * _DBL_EPS * abs(b) + tol / 2
-        new_step = (c - b) / 2
-        if abs(new_step) <= tol_act || fb == 0.0
-            return (b, maxit - maxit_c, abs(c - b))
-        end
-        if abs(prev_step) >= tol_act && abs(fa) > abs(fb)
-            cb = c - b
-            if a == c
-                t1 = fb / fa
-                p = cb * t1
-                q = 1.0 - t1
-            else
-                q = fa / fc
-                t1 = fb / fc
-                t2 = fb / fa
-                p = t2 * (cb * q * (q - t1) - (b - a) * (t1 - 1.0))
-                q = (q - 1.0) * (t1 - 1.0) * (t2 - 1.0)
-            end
-            if p > 0.0
-                q = -q
-            else
-                p = -p
-            end
-            if p < (0.75 * cb * q - abs(tol_act * q) / 2) && p < abs(prev_step * q / 2)
-                new_step = p / q
-            end
-        end
-        if abs(new_step) < tol_act
-            new_step = new_step > 0.0 ? tol_act : -tol_act
-        end
-        a = b; fa = fb
-        b += new_step
-        fb = f(b)
-        if (fb > 0 && fc > 0) || (fb < 0 && fc < 0)
-            c = a; fc = fa
-        end
-    end
-    return (b, -1, abs(c - b))
-end
-
-"`stats::uniroot(f, interval, f.lower, f.upper, tol, maxiter)` (extendInt = \"no\")."
-function r_uniroot(f, interval; f_lower = nothing, f_upper = nothing, tol::Float64 = _DBL_EPS^0.25, maxiter::Int = 1000)
-    lower, upper = minimum(interval), maximum(interval)
-    lower < upper || error("lower < upper  is not fulfilled")
-    fl = f_lower === nothing ? f(lower) : Float64(f_lower)
-    fu = f_upper === nothing ? f(upper) : Float64(f_upper)
-    isnan(fl) && error("f.lower = f(lower) is NA")
-    isnan(fu) && error("f.upper = f(upper) is NA")
-    sign(fl) * sign(fu) <= 0 || error("f() values at end points not of opposite sign")
-    function fcn2(x)
-        v = Float64(f(x))
-        if !isfinite(v)
-            if v == -Inf
-                @warn "-Inf replaced by maximally negative value"
-                return -_DBL_MAX
-            end
-            @warn "NA/Inf replaced by maximum positive value"
-            return _DBL_MAX
-        end
-        return v
-    end
-    tr(v) = max(min(v, _DBL_MAX), -_DBL_MAX)
-    root, it, prec = r_zeroin2(fcn2, Float64(lower), Float64(upper), tr(fl), tr(fu), tol, maxiter)
-    if it < 0
-        @warn "_NOT_ converged in $maxiter iterations"
-        it = maxiter
-    end
-    return (root = root, iter = it, estim_prec = prec)
-end
 
 "`as.numeric(<Zeichenkette>)` wie R (R_strtod mit long double; ungültig → NA)."
 function r_as_numeric(s::AbstractString)

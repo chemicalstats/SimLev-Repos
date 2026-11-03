@@ -15,7 +15,7 @@ import numpy as np
 
 from . import _ext
 
-__all__ = ["chol", "chol_band", "backsolve", "forwardsolve", "solve_spd", "logdet_spd", "eigen_sym",
+__all__ = ["chol", "chol_band", "backsolve", "solve_spd", "logdet_spd", "eigen_sym",
            "matmul", "crossprod", "tcrossprod", "lsfit", "logit_irls", "stineman", "stineman_slopes",
            "stineman_eval", "smspline_fit", "smspline_predict", "bw_silverman", "kde"]
 
@@ -82,10 +82,6 @@ def backsolve(r, x, upper_tri=True, transpose=False):
     out = b.copy()
     _ext.slc_trisolve(ra, out, n, bn, bool(upper_tri), bool(transpose))
     return out if vec else _mat(out, bm, bn)
-
-
-def forwardsolve(l, x, upper_tri=False, transpose=False):  # noqa: E741 (Name wie in R)
-    return backsolve(l, x, upper_tri=upper_tri, transpose=transpose)
 
 
 def solve_spd(a, b=None):

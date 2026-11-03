@@ -24,8 +24,8 @@
 // R-Semantik, die der Kern nachbildet:
 //   - ifelse() mit NA im Test liefert NA_real_ (v_pre, Drawdowns bei NaN im laufenden Maximum).
 //   - x[x > 0] mit NaN in x waehlt NA aus (Downside-Abweichung, mittlerer Drawdown).
-//   - if () mit NA bricht ab ("missing value where TRUE/FALSE needed"); der Kern meldet die Stelle (Site), die
-//     Hosts setzen den Aufruf von R 1.3.0 (R: .SIM_EVAL_CALLS in r/R/sim_engine_calls.R).
+//   - if () mit NA bricht ab ("missing value where TRUE/FALSE needed"); der Kern meldet die Stelle (Site), der
+//     Host loest den Fehler mit dem Text von R aus (R seit C19 mit dem Aufruf von simulation()).
 //   - difftime(Datum, Datum, units = "days") ueber Sekunden: (a * 86400 - b * 86400) / 86400.
 //   - calculate_skewness/_kurtosis geben bei zu wenigen Werten bzw. Standardabweichung 0 ein logisches NA
 //     zurueck (Merker skew_lgl, kurt_lgl fuer R).

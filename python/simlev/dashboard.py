@@ -25,7 +25,6 @@ from .svg import (SimLevPlot, _MONATE_KURZ, _Canvas, _Panel, _alpha, _area, _che
                   _c, _svg, _svg_close, _svg_open, _svgcol, _svgop, _text, _title, _to_days, _warn_unknown_kw,
                   _write_svg, _yaxis, r_pretty)
 from ._r.rformat import r_format1
-from ._r.libm import exp as _libm_exp
 
 __all__ = ["plot_dashboard", "export_dashboard", "r_pretty"]
 

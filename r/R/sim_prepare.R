@@ -30,12 +30,11 @@
 #' Zweck: Start- und Enddatum bestimmen, NA im Basiszins durch 0 ersetzen, fehlende Kalendertage
 #' auffuellen (LOCF, Signale FALSE) und aufgefuellte Tage in der Spalte .filled markieren.
 #' Eingabe: data (aus .sim_check_inputs), pre_filled (Tage ohne echten Kurs), base_rate_flex,
-#' base_rate_data (Argumente von .simulation_flat()), blocks (Aufruf mit Bausteinen: Meldungen nennen
-#' tax_profile(base_rate)).
+#' base_rate_data (Argumente von .simulation_flat(); Meldungen nennen tax_profile(base_rate)).
 #' Ausgabe: list(data, start_date, stopp_date).
 #' @keywords internal
 #' @noRd
-.sim_prepare_data <- function(data, pre_filled, base_rate_flex, base_rate_data, blocks = FALSE) {
+.sim_prepare_data <- function(data, pre_filled, base_rate_flex, base_rate_data) {
   #----------------------------> Vorbereitung und Strukturierung von Datenobjekten:
   start_date <- head(data[, "date"], 1)
   stopp_date <- tail(data[, "date"], 1)
@@ -43,7 +42,7 @@
   # R9-06: Prozent-Konvention auch fuer die Basiszins-Spalte (Median, gleiche Schwelle wie base_rate)
   if (isTRUE(base_rate_flex) && is.character(base_rate_data) && length(base_rate_data) == 1L &&
       !is.na(base_rate_data) && base_rate_data %in% names(data))
-    .frac_warn_col(data[[base_rate_data]], if (blocks) "base_rate" else "base_rate_data", base_rate_data, hi = 0.05)
+    .frac_warn_col(data[[base_rate_data]], "base_rate", base_rate_data, hi = 0.05)
   # R3a-07: NA in der Basiszins-Spalte = 0 (keine VP), unabhaengig von der Datenform: vor dem
   # LOCF-Auffuellen ersetzen (sonst fuellte LOCF ein NA an Handelstagsdaten mit dem Vortageswert)
   if (isTRUE(base_rate_flex) && is.character(base_rate_data) && length(base_rate_data) == 1L &&
@@ -88,12 +87,12 @@
 #' totals) je Asset vorbelegen (status und report setzt seit E17 Stufe 2 der Kern: Startgewichte und
 #' Anfangszustand in core/prepare_core_impl.h); prueft die Signal- und Basiszinsspalten.
 #' Eingabe: data und strategy (vorbereitet), start_value, start_date, stopp_date, sparer_pauschbetrag,
-#' use_sparer_pauschbetrag, base_rate, base_rate_flex, base_rate_data, blocks (Meldungen mit Bausteinen).
+#' use_sparer_pauschbetrag, base_rate, base_rate_flex, base_rate_data (Meldungen nennen die Bausteine).
 #' Ausgabe: sim_mem.
 #' @keywords internal
 #' @noRd
 .sim_build_state <- function(data, strategy, start_value, start_date, stopp_date, sparer_pauschbetrag,
-                             use_sparer_pauschbetrag, base_rate, base_rate_flex, base_rate_data, blocks = FALSE) {
+                             use_sparer_pauschbetrag, base_rate, base_rate_flex, base_rate_data) {
   #--------> Initialisierung der Speicher-Objekte:
   sim_mem <- list(
     assets = setNames(vector("list", length = length(strategy)), names(strategy)),
@@ -163,10 +162,8 @@
       base_rates = if (base_rate_flex) {
   if (is.null(base_rate_data) || !base_rate_data %in% names(data)) {
     stop(if (is.null(base_rate_data)) "simulation: base_rate_flex = TRUE braucht base_rate_data (Name der Basiszins-Spalte in data, Prozent p. a.); base_rate_data fehlt."
-         else if (blocks) sprintf("simulation: base_rate-Spalte '%s' fehlt in data (tax_profile(base_rate = \"%s\") braucht eine Basiszins-Spalte in Prozent p. a.; vorhanden: %s).",
-                                  paste(base_rate_data, collapse = ", "), paste(base_rate_data, collapse = ", "), paste(names(data), collapse = ", "))
-         else sprintf("simulation: base_rate_data-Spalte '%s' fehlt in data (base_rate_flex = TRUE braucht eine Basiszins-Spalte in Prozent p. a.; vorhanden: %s).",
-                      paste(base_rate_data, collapse = ", "), paste(names(data), collapse = ", ")))
+         else sprintf("simulation: base_rate-Spalte '%s' fehlt in data (tax_profile(base_rate = \"%s\") braucht eine Basiszins-Spalte in Prozent p. a.; vorhanden: %s).",
+                      paste(base_rate_data, collapse = ", "), paste(base_rate_data, collapse = ", "), paste(names(data), collapse = ", ")))
   }
   br <- data[[base_rate_data]]
   br[is.na(br)] <- 0  # NA durch 0 ersetzen
@@ -197,7 +194,7 @@
 #' E17 Stufe 2 der Kern (core/prepare_core_impl.h, ueber .sim_engine_run); bis dahin .sim_build_calendar,
 #' .sim_init_weights und .sim_build_schedule.
 #' Eingabe: data, sim_mem, strategy, start_date, stopp_date und die Termin-Argumente von .simulation_flat()
-#' (dca_days und balance_days aus .sim_check_inputs); blocks (Meldungen mit Bausteinen).
+#' (dca_days und balance_days aus .sim_check_inputs); Meldungen nennen die Bausteine.
 #' Ausgabe: list(data = data ohne Spalte .filled, flags = list(flag_date, flag_filled, flag_assets, dca, balance
 #' (Angaben aus .sched_spec), flag_event (event_col als TRUE/FALSE bzw. NULL), event_replace), event_weight =
 #' geprueftes event_weight bzw. NULL ohne event_col).
@@ -207,7 +204,7 @@
                                 dca_mode, dca_span, dca_unit, dca_days, dca_value, dca_anchor, dca_start,
                                 dca_skip, balance_mode, balance_span, balance_unit, balance_days,
                                 balance_anchor, balance_start, balance_skip, event_col,
-                                event_mode = c("additional", "replace"), event_weight, blocks = FALSE) {
+                                event_mode = c("additional", "replace"), event_weight) {
   flag_date <- seq.Date(from = as.Date(start_date), to = as.Date(stopp_date), by = "days")
   # A-2: Markierung aufgefuellter (LOCF) Tage, aligned zu flag_date
   flag_filled <- if (".filled" %in% names(data)) {
@@ -221,8 +218,8 @@
     sd1 <- tryCatch(as.Date(sd0), error = function(e) NA)
     if (length(sd1) != 1L || is.na(sd1)) stop(sprintf("simulation: %s_start = '%s' ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").", a, format(sd0)))
     if (sd1 > stopp_date) stop(sprintf("simulation: %s (%s) liegt nach dem letzten Datentag (%s); es g\u00e4be keine Termine.",
-                                       if (blocks) sprintf("start von %s", if (a == "dca") "dca_plan()" else "rebalance_plan()")
-                                       else paste0(a, "_start"), format(sd1), format(stopp_date)))
+                                       sprintf("start von %s", if (a == "dca") "dca_plan()" else "rebalance_plan()"),
+                                       format(sd1), format(stopp_date)))
   }
   balance <- .sched_spec(balance_mode, balance_span, balance_unit, balance_days, flag_date, NULL, balance_anchor,
                         balance_start, balance_skip)

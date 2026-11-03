@@ -1,7 +1,7 @@
 /*
  * src/slc_r_opt.c -- R-Huellen (.Call) der Optimierer der C-Bibliothek slc (Etappe 9.3)
  *
- * Kerne: slc_opt.c, slc_opt_test.c (Kopien aus core/, tools/core_sync.py); Registrierung in
+ * Kerne: slc_opt.c, slc_opt_test.c (Kopien aus core/, core/sync.py); Registrierung in
  * init.c (Block "9.3"), die R-Seite steht in R/slc_opt.R (.sl_optim und Pruefhilfen).
  *
  * Rueckfrage an den Host (Entwurf B.8): Das Arbeitsfeld ist ein R-Vektor (double), den

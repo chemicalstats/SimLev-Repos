@@ -139,7 +139,7 @@ Aus einem lokalen Quellarchiv:
 install.packages("SimLev_0.5.0.tar.gz", repos = NULL, type = "source")
 ```
 
-Optionale Pakete: `testthat` (Tests), `knitr` und `rmarkdown` (Vignette).
+Optionale Pakete: `knitr` und `rmarkdown` (Vignette); für die Tests (`tests/`) `testthat`.
 Technische Indikatoren für Signalstrategien lassen sich bequem mit dem
 Paket `TTR` berechnen (z. B. `TTR::SMA()`); es ist keine Abhängigkeit von
 SimLev und wird bei Bedarf separat installiert.
@@ -172,7 +172,7 @@ pip install .                 # Engine und alle Erweiterungen (numpy, pandas)
 |---|---|---|
 | `numpy`, `pandas` | Datenhaltung und Datenaufnahme | ja |
 | C- und C++-Compiler | Bau der C-Erweiterung `simlev._ext` | ja |
-| `pytest` | Rauchproben (`tests/`) | optional |
+| `pytest` | Tests (`tests/python`) | optional |
 
 </details>
 
@@ -1801,18 +1801,14 @@ auf SimLev nicht; sie eignen sich weiter, um eigene Eingabedaten zu
 erzeugen (wie im Schnellstart). Die Regeln stehen in `?simlev_seed`.
 
 **So wird es geprüft:** Die Gleichlaufprüfung
-[`tools/gleichlauf/run.sh`](tools/gleichlauf/run.sh) baut R, Python und
+[`tests/gleichlauf/run.sh`](tests/gleichlauf/run.sh) baut R, Python und
 Julia, prüft, dass die Kopien der C-Quellen gleich sind
-(`tools/core_sync.py --check`), erzeugt die Referenzfälle mit den
-Generatoren in [`golden/modules/`](golden/modules/) und den
-Engine-Generatoren [`golden/golden_cases.R`](golden/golden_cases.R) und
-[`golden/stress_cases.R`](golden/stress_cases.R) mit dem aktuellen R-Paket
+(`core/sync.py --check`), erzeugt die Referenzfälle mit den
+Generatoren in [`tests/erzeugen/`](tests/erzeugen/) mit dem aktuellen R-Paket
 neu und vergleicht Python und Julia Bit für Bit dagegen. Der letzte
 vollständige Lauf (`--full`, 27.10.2026) ergab in beiden Ports
 4.260 von 4.260 Modul-Fällen und 1.182 von 1.182 Engine-Fällen gleich.
-Die früheren Testsuiten und die gespeicherten Fälle in `golden/` stammen aus
-der Zeit vor dem eigenen Zufall und den eigenen Kernen; sie sind bis zu
-ihrem Neuaufbau ausgesetzt (siehe
+Den Katalog der Tests beschreibt [`tests/README.md`](tests/README.md) (siehe
 [Aufbau des Repositorys und Entwicklung](#aufbau-des-repositorys-und-entwicklung)).
 
 **Plattformen:** Geprüft ist Linux auf x86-64 mit glibc (R 4.3.3,
@@ -1895,16 +1891,12 @@ SimLev-Repos/
 ├── core/              C-Bibliothek von SimLev (Zufall, Verteilungen, lineare Algebra,
 │                      Optimierer, Modelle, Bootstrap-Kerne) und die gemeinsamen
 │                      C++-Kerne der Engine; Kopien in r/src, python/src/core, julia/deps/core
-├── r/                 R-Paket (DESCRIPTION, R/, src/, man/, tests/, vignettes/)
-├── python/            Python-Paket (pyproject.toml, simlev/ mit _r/, src/, tests/, tools/, examples/)
-├── julia/             Julia-Paket (Project.toml, src/ mit r/, deps/, data/, test/, tools/, examples/)
-├── golden/            Referenzfälle aus R und ihre Generatoren
-│   ├── cases/, extra/ gespeicherte Engine-Fälle (Stand vor Etappe 9, ausgesetzt)
-│   ├── modules/       Generatoren gen_<modul>.R und ref_tools.R (je Fall R-, Python-
-│   │                  und Julia-Code); gespeicherte Fälle (Stand vor Etappe 9)
-│   ├── golden_cases.R
-│   └── stress_cases.R
-├── tools/             Gleichlaufprüfung (gleichlauf/), core_sync.py, api_snapshot/, bench/
+├── r/                 R-Paket (DESCRIPTION, R/, src/, man/, vignettes/)
+├── python/            Python-Paket (pyproject.toml, simlev/ mit _r/, src/, examples/)
+├── julia/             Julia-Paket (Project.toml, src/ mit r/, deps/, data/, examples/)
+├── tests/             alle Tests (Katalog tests/README.md): Referenzfälle faelle/ und ihre
+│                      Generatoren erzeugen/, Suiten r/, python/, julia/, Gleichlauf gleichlauf/,
+│                      Schnittstelle api/, Laufzeit bench/; die Pakete brauchen tests/ nicht
 └── docs/              Logo, Hex-Sticker, Dashboard-Abbildungen, STRUKTUR.md
 ```
 
@@ -1916,39 +1908,35 @@ Jede Fassung ist ein eigenständiges Paket mit eigener Versionsnummer
 Ports in [`python/DEVELOPING.md`](python/DEVELOPING.md) und
 [`julia/DEVELOPING.md`](julia/DEVELOPING.md), die Regeln für die
 C-Bibliothek in [`core/README.md`](core/README.md). Die C-Quellen werden
-nur in `core/` geändert; `python3 tools/core_sync.py --write` verteilt sie,
+nur in `core/` geändert; `python3 core/sync.py --write` verteilt sie,
 `--check` prüft die Kopien.
 
-**Prüfen:** Die früheren Testsuiten und die gespeicherten Referenzfälle
-beschreiben den Stand vor dem eigenen Zufall und den eigenen Kernen. Sie
-sind bis zu ihrem Neuaufbau ausgesetzt; keine Testdatei ist gelöscht, mit
-`SIMLEV_LEGACY_TESTS=1` laufen sie (und scheitern dort, wo sie entfallene
-Teile nutzen). Ohne den Schalter laufen nur Rauchproben:
+**Prüfen:** Alle Tests liegen in [`tests/`](tests/README.md) und laufen gegen die
+gebauten bzw. installierten Pakete; Python und Julia vergleichen gegen die
+Referenzfälle in `tests/faelle`:
 
 ``` bash
-Rscript r/tests/etappe9-smoke.R                              # R: Rauchproben (r/tests/etappe9*.R)
-(cd python && python -m pytest tests)                        # Python: Rauchproben der C-Bibliothek
-(cd julia && julia --project -e 'using Pkg; Pkg.test()')     # Julia: Testsatz „Etappe 9“
+LC_ALL=C.UTF-8 tests/run.sh                 # R, Python und Julia (einzeln: tests/run.sh r|python|julia)
+(cd r && Rscript -e 'rcmdcheck::rcmdcheck()')   # R: Paket-Check (ohne Tests)
 ```
 
-Maßgeblich ist bis dahin die **Gleichlaufprüfung** (siehe
+Dazu kommt die **Gleichlaufprüfung** (siehe
 [Gleichlauf](#gleichlauf-der-drei-sprachen)):
 
 ``` bash
-LC_ALL=C.UTF-8 tools/gleichlauf/run.sh --quick     # jede 20. Fall-Kennung, kleine Engine-Läufe
-LC_ALL=C.UTF-8 tools/gleichlauf/run.sh --full      # alle Fälle
-LC_ALL=C.UTF-8 tools/gleichlauf/run.sh bootstrap   # nur ein Modul
+LC_ALL=C.UTF-8 tests/gleichlauf/run.sh --quick     # jede 20. Fall-Kennung, kleine Engine-Läufe
+LC_ALL=C.UTF-8 tests/gleichlauf/run.sh --full      # alle Fälle
+LC_ALL=C.UTF-8 tests/gleichlauf/run.sh bootstrap   # nur ein Bereich
 ```
 
 Sie braucht R mit `jsonlite`, Python mit `numpy` und `pandas`, Julia und
-einen C/C++-Compiler; das Ergebnis steht in `tools/gleichlauf/out/bericht.txt`.
-`tools/api_snapshot/run.sh --check` prüft zusätzlich, dass die öffentliche
+einen C/C++-Compiler; das Ergebnis steht in `tests/gleichlauf/out/bericht.txt`.
+`tests/api/run.sh --check` prüft zusätzlich, dass die öffentliche
 Schnittstelle der drei Sprachen unverändert ist.
 
 **Neue Referenzfälle** erzeugen Sie mit R, dem R-Paket SimLev und
-`jsonlite` (`golden/golden_cases.R`, `golden/stress_cases.R` und
-`golden/modules/gen_<modul>.R`); Details stehen in
-[`golden/README.md`](golden/README.md).
+`jsonlite` (`tests/erzeugen/alle.sh`, je Bereich `tests/erzeugen/<bereich>.R`);
+Details stehen in [`tests/README.md`](tests/README.md).
 
 ## Hilfe und Mitwirken
 

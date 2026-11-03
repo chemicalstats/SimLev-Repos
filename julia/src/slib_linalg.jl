@@ -49,8 +49,6 @@ function backsolve(r, x; upper_tri = true, transpose = false)
     vecx ? vec(b) : b
 end
 
-forwardsolve(l, x; upper_tri = false, transpose = false) = backsolve(l, x; upper_tri = upper_tri, transpose = transpose)
-
 "solve(a, b) für symmetrisch positiv definites a (oberes Dreieck gelesen); ohne b die Inverse."
 function solve_spd(a, b = nothing)
     aa = _la_mat(a); n = size(aa, 1)

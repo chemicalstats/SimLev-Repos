@@ -31,14 +31,6 @@ sl_ctx *sl_ctx_alloc(void)
 
 void sl_ctx_free(sl_ctx *cx) { free(cx); }
 
-void sl_ctx_reset(sl_ctx *cx)
-{
-    cx->status = SL_OK;
-    cx->msg[0] = '\0';
-    cx->n_warn = 0;
-}
-
-int sl_ctx_status(const sl_ctx *cx) { return cx->status; }
 const char *sl_ctx_msg(const sl_ctx *cx) { return cx->msg; }
 int sl_ctx_nwarn(const sl_ctx *cx) { return cx->n_warn; }
 

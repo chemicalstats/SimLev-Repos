@@ -2,7 +2,7 @@
 
 Untermodule:
 
-- ``rnum``    unterste Schicht: ``NA_REAL``, Summen in long double, ``r_pow``, ``r_uniroot``
+- ``rnum``    unterste Schicht: ``NA_REAL``, Summen in long double, ``r_pow``
   (skalare/eindimensionale Engine-Hilfen)
 - ``rformat`` Rundung und Textausgabe der Engine (``r_round``, ``r_signif``, ``r_format``, ``r_sprintf``)
 - ``libm``    elementweise libm-Funktionen (statt numpy-SIMD-Varianten)

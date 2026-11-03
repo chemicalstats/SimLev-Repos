@@ -29,7 +29,6 @@ using ..SimLev: RVector, NamedMat, RFrame, NA, isna_strict
 using ..SimLev: r_sum, r_mean, r_mean_int, r_var, r_sd, r_cumsum, r_prod, r_rowsums,
                 r_pow, r_pow_vec, r_mod1
 
-
 # ── Matrizen ────────────────────────────────────────────────────────────────
 
 "→ (Werte n×p als Matrix{Float64}, Zeilennamen, Spaltennamen)."
@@ -107,8 +106,6 @@ r_cummin(x) = ((v, nm) = _vec(x); _named(SimLev._rb_cummin(v), nm))
 const cummax = r_cummax
 const cummin = r_cummin
 
-_isint(x) = x isa Integer || (x isa AbstractArray && eltype(x) <: Union{Integer,Missing} && !(eltype(x) <: Missing))
-
 "`mean(x)` auch für Matrizen/data.frames (alle Elemente spaltenweise), Integer wie R."
 function mean(x; na_rm::Bool = false)
     if x isa RFrame
@@ -122,7 +119,6 @@ function mean(x; na_rm::Bool = false)
     v, _ = _vec(xx)
     return r_mean(v; na_rm = na_rm)
 end
-const r_mean_all = mean
 
 "`diff(x, lag, differences)` für Vektoren und Matrizen (zeilenweise)."
 function r_diff(x; lag::Integer = 1, differences::Integer = 1)
@@ -174,8 +170,6 @@ end
 pmax(args...; na_rm::Bool = false) = _pext(args, na_rm, true)
 "`pmin(..., na.rm)`."
 pmin(args...; na_rm::Bool = false) = _pext(args, na_rm, false)
-const r_pmax = pmax
-const r_pmin = pmin
 
 "`range(..., na.rm, finite)` = `c(min, max)`."
 function r_range(args...; na_rm::Bool = false, finite::Bool = false)

@@ -532,8 +532,6 @@ end
 _xirr_rate(t, amount, end_value, horizon) =
     (isdefined(SimLev, :xirr_rate) ? SimLev.xirr_rate : getfield(SimLev, :_xirr_rate))(t, amount, end_value, horizon)
 
-const _DD_COLS = ["start", "trough", "end", "depth", "days_to_trough", "days_to_recover", "days_total"]
-
 "Drawdown-Episoden (`.da_drawdowns`), nach Tiefe sortiert."
 function _da_drawdowns(date, value, top = 10)
     date = date isa AbstractVector{Float64} ? date : _days(date)

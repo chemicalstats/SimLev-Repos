@@ -65,7 +65,7 @@
  *             Lawson, C. L. (1961). Contributions to the Theory of Linear Least Maximum
  *               Approximation. Dissertation, University of California, Los Angeles.
  *             Fast2Sum und Produktfehler: Dekker (1971), siehe oben.
- * Konstanten: selbst hergeleitet (core/tools/gen_constants.py): Stützwerte phi, Phi - 1/2, Q an
+ * Konstanten: selbst hergeleitet (core/gen_constants.py): Stützwerte phi, Phi - 1/2, Q an
  *             j/8 (j <= 40) und erfc, (2/sqrt pi) e^(-z^2) an j/8 (j <= 28), Umkehrreihe 1/6, 7/120,
  *             sqrt(2 pi), ln 2 pi, 1/sqrt(pi), 1/sqrt 2. Veltkamp-Faktor 2^27 + 1 (Dekker 1971).
  *             N2: Koeffizienten der Zonen A, B, C (slc_qn_*), sqrt(2 pi) als hi + lo und geteilt,

@@ -3,7 +3,7 @@
  * Matrixprodukt, kleinste Quadrate und Logit-IRLS, Stineman, Glaettungsspline, Kerndichte
  *
  * Die Kerne (slc_linalg.c, slc_matmul.c, slc_lsq.c, slc_stine.c, slc_spline.c, slc_kde.c) sind
- * Kopien der kanonischen Quellen in core/ (tools/core_sync.py); nur diese Huelle gibt es nur hier.
+ * Kopien der kanonischen Quellen in core/ (core/sync.py); nur diese Huelle gibt es nur hier.
  * Registrierung in init.c (Block 9.2), die R-Seite steht in R/slc_linalg.R (interne Funktionen
  * .sl_*). Rueckmeldungen wie slc_r.c (Entwurf C.4): Warnungen nach dem Aufruf in Reihenfolge,
  * Fehler mit dem Text des Kerns (Rf_errorcall(R_NilValue, ...), wie stop(call. = FALSE)).

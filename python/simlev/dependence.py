@@ -54,16 +54,6 @@ def _stats():
     return stats
 
 
-def _linalg():
-    from ._r import linalg
-    return linalg
-
-
-def _sl():
-    from . import _lib
-    return _lib
-
-
 def _to_date(x, what="date"):
     from .data_prep import _to_date as f
     return f(x, what)
@@ -389,14 +379,6 @@ def _pt(q, df):
 
 def _lgamma(x):
     return float(_sl().lgamma(x))
-
-
-def _plogis(x):
-    return float(_sl().plogis(x))
-
-
-def _qlogis(p):
-    return float(_sl().qlogis(p))
 
 
 # ═════════════════════════════════════════════════════════════════════════════

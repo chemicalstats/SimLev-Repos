@@ -2,7 +2,7 @@
  * python/src/_ext_slc_opt.c -- Python-Huellen der Optimierer der C-Bibliothek slc im Modul
  * simlev._ext (Etappe 9.3)
  *
- * Kerne: src/core/slc_opt.c, slc_opt_test.c (Kopien aus core/, tools/core_sync.py). Die
+ * Kerne: src/core/slc_opt.c, slc_opt_test.c (Kopien aus core/, core/sync.py). Die
  * Python-Seite (simlev/_lib_opt.py) legt das Arbeitsfeld (numpy float64) an und laeuft in der
  * Schleife "Anfrage -> Zielfunktion in Python -> Antwort"; der Kern ruft nie nach Python zurueck.
  *

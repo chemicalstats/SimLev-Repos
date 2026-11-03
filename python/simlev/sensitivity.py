@@ -18,7 +18,7 @@ import pandas as pd
 from ._r import fmt as _fmt
 from ._r.rnum import r_cumprod, r_mean, r_mean_int, r_median, r_sum
 from ._r.parallel import par_lapply as _par_lapply
-from .param_search import (_expand_grid, _isna, _match_arg, _modify_list, _py, _quiet, _seq_by,
+from .param_search import (_expand_grid, _isna, _match_arg, _py, _quiet, _seq_by,
                            _cond_msg, _which_max_py)
 from .svg import _res_fig, _res_finish, _res_line, _res_panel, _res_points, _res_range, _res_rect, _res_vline
 

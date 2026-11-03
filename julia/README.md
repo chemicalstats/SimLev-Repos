@@ -330,7 +330,7 @@ in [`DEVELOPING.md`](DEVELOPING.md), Herkunft in
 Geprüft wird ohne Toleranz und so streng wie in der Python-Fassung: `NA`
 und `NaN` werden unterschieden, ebenso das Vorzeichen der Null; verglichen
 werden außerdem Druck- und Konsolenausgabe, Warnungen und Fehlermeldungen.
-Die Gleichlaufprüfung `tools/gleichlauf/run.sh` im Repository erzeugt die
+Die Gleichlaufprüfung im Repository erzeugt die
 Referenzfälle mit dem aktuellen R-Paket neu und vergleicht Julia (und
 Python) damit. Der letzte vollständige Lauf (27.10.2026) ergab 4.260 von
 4.260 Modul-Fällen und 1.182 von 1.182 Engine-Fällen gleich.
@@ -342,21 +342,10 @@ geprüft und der Gleichlauf nicht zugesagt.
 
 ## Tests
 
-``` bash
-julia --project -e 'using Pkg; Pkg.test()'      # Testsatz „Etappe 9“: Rauchproben der C-Bibliothek
-```
-
-Die frühere Testsuite (Engine, R-Interna, Referenzfälle in `golden/`)
-beschreibt den Stand vor dem eigenen Zufall und den eigenen Kernen und ist
-bis zu ihrem Neuaufbau ausgesetzt; `SIMLEV_LEGACY_TESTS=1` lädt sie
-(Dateien, die entfallene Module nutzen, scheitern dann).
-`tools/compare_golden.jl` und `tools/compare_reference.jl` vergleichen mit
-gespeicherten Fällen; ohne den Schalter enden sie mit einem Hinweis, außer
-`SIMLEV_GOLDEN_DIR` bzw. `SIMLEV_MODULE_DIR` zeigt auf frisch erzeugte
-Fälle. Maßgeblich ist bis dahin die Gleichlaufprüfung aus der Repo-Wurzel
-(`LC_ALL=C.UTF-8 tools/gleichlauf/run.sh --quick`). Für die Fehlersuche
-lockern `SIMLEV_LAX_NA=1` (NA = NaN) und `SIMLEV_STRICT_ZERO=0` (−0 = +0)
-den Vergleich der Modul-Fälle.
+Die Tests, die Referenzfälle aus R und die Gleichlaufprüfung gehören nicht zum
+Paket; sie liegen im Repository (siehe dessen Haupt-README). Für die
+Fehlersuche lockern `SIMLEV_LAX_NA=1` (NA = NaN) und `SIMLEV_STRICT_ZERO=0`
+(−0 = +0) den Vergleich der Modul-Fälle.
 
 ## Projektstruktur
 
@@ -394,8 +383,6 @@ src/
   precompile.jl     Arbeitslast für die Vorkompilierung
   precompile_statements.jl  ausdrückliche Übersetzungsanweisungen (aus Traces der ersten Aufrufe)
 data/               Tarifdatei steuertarif.csv, R-Farbnamen r_colors.csv
-test/               Rauchproben „Etappe 9“; frühere Suite ausgesetzt; reftree.jl liest Referenzfälle
-tools/              compare_golden.jl (Engine), compare_reference.jl (Module)
 examples/           Lauffähige Beispiele
 ```
 

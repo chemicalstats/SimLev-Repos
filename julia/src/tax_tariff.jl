@@ -3,8 +3,8 @@
 #
 #   tax_tariff(file = nothing)  → RList der Klasse "SimLevTaxTariff"
 #                                      (zones::RFrame, soli::RList, geltung, file)
-#   _tariff_income_tax(tariff, zve)   tarifliche ESt (§ 32a Abs. 1 EStG), volle Euro
-#   _tariff_soli(tariff, est)         Soli (§§ 3, 4 SolZG)
+#   tarifliche ESt und Soli rechnet der Tarifkern core/tariff_core_impl.h (C19: _tariff_income_tax und
+#   _tariff_soli sind als ungenutzt entfallen)
 # ─────────────────────────────────────────────────────────────────────────────
 
 "Pfad der mitgelieferten Tarifdatei (R: `system.file(\"extdata\", \"steuertarif.csv\")`)."
@@ -159,21 +159,4 @@ function _print_tax_tariff(io::IO, x)
                         r_format1(s["milderung"])))
 end
 
-"Tarifliche Einkommensteuer T(x) in vollen EUR (R: `.tariff_income_tax`)."
-function _tariff_income_tax(tariff, zve::Float64)
-    z = tariff["zones"]
-    ab = z["ab"]
-    x = r_max2(0.0, floor(zve + 1e-9))
-    k = findlast(<=(x), ab)
-    u = (x - z["bezug"][k]) / z["teiler"][k]
-    return r_max2(0.0, floor(r_round((z["a"][k] * u + z["b"][k]) * u + z["c"][k], 6)))
-end
-
-"Solidaritätszuschlag S(E) auf die ESt (R: `.tariff_soli`)."
-function _tariff_soli(tariff, est::Float64)
-    s = tariff["soli"]
-    est > s["freigrenze"] || return 0.0
-    v = r_min2(s["satz"] / 100 * est, s["milderung"] / 100 * (est - s["freigrenze"]))
-    return floor(r_round(v * 100, 6)) / 100
-end
 register_print!("SimLevTaxTariff", _print_tax_tariff)

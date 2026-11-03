@@ -5,7 +5,7 @@
 // .Call-Huelle in r/src/withdrawal_core.cpp auf (sie wandelt nur die R-Objekte um),
 // Python ueber das Erweiterungsmodul simlev._ext (python/src/_ext_withdrawal.cpp).
 // Kanonisch in core/ (seit Etappe 9.6c, F16); R und Python bauen aus
-// Byte-fuer-Byte-Kopien in r/src/ bzw. python/src/core/ (tools/core_sync.py
+// Byte-fuer-Byte-Kopien in r/src/ bzw. python/src/core/ (core/sync.py
 // --write/--check); Aenderungen nur in core/ vornehmen und danach kopieren.
 // Die Python-Huelle (simlev/_withdrawal_core.py) ruft nur noch diesen Kern; der reine
 // Python-Kern als Rueckfall ist seit 9.6c entfallen.

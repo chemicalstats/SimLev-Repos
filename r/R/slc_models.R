@@ -1,6 +1,6 @@
 # Huellen der Modelle der C-Bibliothek slc (SimLev core, Etappe 9.4): GARCH/GJR(1,1), GPD,
 # DCC(1,1), MS-GARCH und univariates HMM, Bootstrap-Kerne. Die Rechnung steht in
-# src/slc_{garch,gpd,dcc,msgarch,boot}.c (Kopien von core/, tools/core_sync.py), die .Call-Huellen
+# src/slc_{garch,gpd,dcc,msgarch,boot}.c (Kopien von core/, core/sync.py), die .Call-Huellen
 # in src/slc_r_models.c (Registrierung in src/init.c, in R als C_sl_*).
 #
 # Seit Etappe 9.6a ziehen die Bootstrap-Verfahren ueber .sl_boot_*(..., stream) mit dem Strom je

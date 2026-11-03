@@ -40,7 +40,7 @@
  * Änderungen:         C99 ohne R-Datenstrukturen, gemeinsamer Kern für Python und Julia (nicht Teil
  *                     des R-Pakets); nur double-Werte und int64_t-Indizes; order als stabiles
  *                     Mischsortieren.
- * Prüforakel: R 4.3.3 (tools/gleichlauf/rbase_fuzz.R).
+ * Prüforakel: R 4.3.3 (Gleichlauf: rbase_fuzz.R).
  */
 #include "slc_internal.h"
 #include "slc_rbase.h"

@@ -55,7 +55,7 @@ extern "C" SEXP C_wd_simulate(SEXP s_R, SEXP s_INF, SEXP s_CAPE, SEXP s_BASE, SE
 }
 
 // T14: Pruefzugang zum Tarifkern (tariff_core_impl.h) fuer den Zufallsvergleich mit den R-Funktionen
-// (tools/gleichlauf/tariff_fuzz.R ueber .wd_tariff_check): mode 1 = ESt T(x) je x, 2 = Soli S(E) je x,
+// (Gleichlauf: tariff_fuzz.R ueber .wd_tariff_check): mode 1 = ESt T(x) je x, 2 = Soli S(E) je x,
 // 3 = Jahresabschluss je Zeile von x (Matrix n x 5: zvE, ks_prev, g23, k_base, abg_rate) -> Matrix n x 25
 // (Spalten der Jahreszeile, Jahr NA; ohne zvE alle NA).
 extern "C" SEXP C_wd_tariff_check(SEXP s_par, SEXP s_x, SEXP s_mode) {

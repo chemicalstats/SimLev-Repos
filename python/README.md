@@ -69,7 +69,6 @@ Linux auf x86-64.
 |---|---|---|
 | `numpy`, `pandas` | Datenhaltung und Datenaufnahme | ja |
 | C- und C++-Compiler (C99, C++17), Python-Header | Bau der C-Erweiterung `simlev._ext` | ja |
-| `pytest` | Rauchproben (`tests/`) | optional |
 
 ## Kurzbeispiel
 
@@ -296,7 +295,7 @@ Voraussetzungen des Gleichlaufs:
   `p.data` schon. Gespeichert wird nur als SVG; für PDF oder PNG die
   Datei z. B. mit `rsvg-convert` oder CairoSVG umwandeln.
 
-Geprüft wird mit der Gleichlaufprüfung `tools/gleichlauf/run.sh` im
+Geprüft wird mit der Gleichlaufprüfung im
 Repository: Sie erzeugt die Referenzfälle mit dem aktuellen R-Paket neu und
 vergleicht Python bitgenau dagegen (Ergebnis, Konsolen- und Druckausgabe,
 Warnungen, Fehlermeldungen; NA ≠ NaN, Vorzeichen der Null). Der letzte
@@ -321,28 +320,10 @@ Bekannte Grenzen:
 
 ## Tests
 
-``` bash
-pip install ".[test]"
-pytest                                        # Rauchproben der C-Bibliothek (tests/test_etappe9_*.py)
-python ../tools/core_sync.py --check          # Kopien der C-Quellen gleich core/ (aus python/)
-```
-
-Die frühere Test-Suite (Engine, R-Interna, Referenzfälle in `golden/`)
-beschreibt den Stand vor dem eigenen Zufall und den eigenen Kernen und ist
-bis zu ihrem Neuaufbau ausgesetzt; `SIMLEV_LEGACY_TESTS=1` lädt sie (Dateien,
-die entfallene Module nutzen, scheitern dann). `tools/compare_golden.py` und
-`tools/compare_reference.py` vergleichen mit gespeicherten Fällen; ohne den
-Schalter enden sie mit einem Hinweis, außer `SIMLEV_GOLDEN_DIR` bzw.
-`SIMLEV_MODULE_DIR` zeigt auf frisch erzeugte Fälle. Maßgeblich ist bis
-dahin die Gleichlaufprüfung aus der Repo-Wurzel:
-
-``` bash
-LC_ALL=C.UTF-8 tools/gleichlauf/run.sh --quick    # baut R, Python und Julia, erzeugt und vergleicht
-```
-
-Wie die Fälle aufgebaut sind und erzeugt werden, steht in
-[`golden/README.md`](../golden/README.md); Hinweise für die
-Weiterentwicklung in [DEVELOPING.md](DEVELOPING.md).
+Die Tests, die Referenzfälle aus R und die Gleichlaufprüfung gehören nicht zum
+Paket; sie liegen im Repository (siehe dessen Haupt-README). Die Kopien der
+C-Quellen prüft aus der Repo-Wurzel `python3 core/sync.py --check`. Hinweise für
+die Weiterentwicklung in [DEVELOPING.md](DEVELOPING.md).
 
 ## Projektstruktur
 
@@ -405,8 +386,6 @@ simlev/
 src/                 C-Erweiterung simlev._ext: _ext*.cpp/.c (Hüllen) und core/ (Kopien der
                      C-Bibliothek und der gemeinsamen Kerne aus core/ im Repository)
 setup.py             Bau der Erweiterung (Pflicht, setuptools Extension)
-tests/               Rauchproben; frühere Suite ausgesetzt (SIMLEV_LEGACY_TESTS=1)
-tools/               compare_golden.py, compare_reference.py
 examples/            lauffähige Beispiele
 ```
 

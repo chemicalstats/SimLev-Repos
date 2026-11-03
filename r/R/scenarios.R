@@ -509,7 +509,6 @@ scenario_crisis <- function(data, weights, crises = NULL, rebalance = FALSE) {
     rel <- sweep(P[s:e, , drop = FALSE], 2, P[s, ], "/")
     port <- if (rebalance) cumprod(c(1, drop((rel[-1, , drop = FALSE] / rel[-nrow(rel), , drop = FALSE]) %m% w))) else drop(rel %m% w)
     dd <- min(port / cummax(port) - 1)
-    pk <- max(port)
     after <- if (e < length(d)) {
       relx <- sweep(P[e:length(d), , drop = FALSE], 2, P[s, ], "/")
       px <- drop(relx %m% w)

@@ -13,7 +13,7 @@
  *             ungültige Kalendertage ergeben NA.
  * Plattform:  ?strptime nennt Schalter, Breiten und andere Umwandlungen "system-specific". Festgelegt wie
  *             glibc unter Linux (N11; glibc-Handbuch "Formatting Calendar Time", strftime; R 4.3.3 unter
- *             Linux als Orakel, tools/gleichlauf/date_fuzz.R):
+ *             Linux als Orakel, Gleichlauf: date_fuzz.R):
  *             - Angabe: % [Schalter …] [Breite] [E|O] Umwandlung. Schalter "_" (mit Leerzeichen füllen),
  *               "-" (nicht füllen), "0" (mit Nullen füllen) – der letzte gilt –, "^" (Großbuchstaben),
  *               "#" (Groß-/Kleinschreibung tauschen). Breite dezimal (intern höchstens 1.000.000).
@@ -46,7 +46,7 @@
  * Herkunft:           nachgebildet nach R 4.3.3, Hilfeseiten ?strptime, ?format.Date, ?as.Date, dem
  *                     glibc-Handbuch (strftime) und der Logik der bisherigen Port-Funktionen;
  *                     Kalenderrechnung siehe den Teil-Block bei sl_r_civil_from_days; R 4.3.3 diente
- *                     als Orakel (tools/gleichlauf/date_fuzz.R)
+ *                     als Orakel (Gleichlauf: date_fuzz.R)
  * Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation
  *                     (laut Kopf der jeweiligen R-Quelle)
  * Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3

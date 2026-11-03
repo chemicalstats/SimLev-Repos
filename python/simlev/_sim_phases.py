@@ -4,14 +4,13 @@
 from __future__ import annotations
 
 import math
-import re
 from typing import Mapping
 
 import numpy as np
 import pandas as pd
 
 from ._dates import fmt_date, year_of
-from ._r.rformat import r_as_character, r_deparse, r_format, r_format1, r_round
+from ._r.rformat import r_as_character, r_deparse, r_format1, r_round
 from ._r.rnum import r_median, r_sum
 from .config import _match_arg
 from ._tax_tariff import SimLevTaxTariff, tax_tariff
@@ -63,7 +62,7 @@ def _frac_warn_col(fr: _Frame, col: str, arg: str, hi: float) -> None:
 
 
 def _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli, soli_rate, who, *, details=False,
-               blocks=True, rate_given=False, tariff_on=False):
+               tariff_on=False):
     """Steuersätze aus Abgeltungsteuer, Kirchensteuer und Günstigerprüfung (R: ``.tax_rates``, 6.5b).
 
     Gemeinsamer Helfer von ``simulation()`` (``_sim_check_inputs``) und ``withdrawal_simulation()``: Satz der
@@ -80,8 +79,6 @@ def _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli
     if church_tax is not None:
         church_tax = float(church_tax)
     if church_tax is not None and church_tax > 0:
-        if rate_given and abs(tax_rate - 26.375) > 1e-9:
-            _warn("church_tax \u00fcberschreibt das angegebene tax_rate.")
         k = church_tax / 100
         tax_rate = 100 * 0.25 / (1 + 0.25 * k) * (1 + 0.055 + k)
     church_k = church_tax / 100 if (church_tax is not None and church_tax > 0) else 0.0
@@ -91,15 +88,11 @@ def _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli
     soli_rate_income_tax = float(soli_rate_income_tax) / 100
     effective_tax_rate = tax_rate
     if use_guenstigerpruefung and not tariff_on:
-        if marginal_tax_rate is None and blocks:
+        if marginal_tax_rate is None:
             _warn(who + ": G\u00fcnstigerpr\u00fcfung aktiviert (tax_profile(guenstigerpruefung = TRUE)), aber der "
                   "Grenzsteuersatz (income_rate(marginal_rate)) ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer ("
                   + r_as_character(r_round(tax_rate * 100, 2)) + " %).\nF\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung "
                   "tax_profile(income = income_rate(marginal_rate)) in Prozent angeben (z. B. 42).")
-        elif marginal_tax_rate is None:
-            _warn(who + ": G\u00fcnstigerpr\u00fcfung aktiviert (use_guenstigerpruefung = TRUE), aber 'marginal_tax_rate' "
-                  "ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer (" + r_as_character(r_round(tax_rate * 100, 2)) +
-                  " %).\nF\u00fcr eine korrekte G\u00fcnstigerpr\u00fcfung marginal_tax_rate in Prozent angeben (z. B. 42).")
         else:
             personal_rate = marginal_tax_rate * (((1 + soli_rate_income_tax) if include_soli_on_income_tax else 1.0)
                                                  + church_k)
@@ -120,16 +113,15 @@ def _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli
             "effective_tax_rate": effective_tax_rate, "church_k": church_k, "soli_factor_income": soli_factor_income}
 
 
-def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_span, dca_days,
+def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_days,
                       balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
                       marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                       use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
                       fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
-                      order_fee, dca_fee, harvest_mode, harvest_day, taxable_income, tariff, given,
-                      blocks=False) -> dict:
-    """Phase 1 (``.sim_check_inputs``). ``tariff`` = Argument ``tax_tariff`` von ``_simulation_flat``;
-    ``blocks=True``: Aufruf aus ``simulation()`` mit Bausteinen (Prüfungen der Bausteine entfallen hier,
-    Meldungen nennen die Bausteine)."""
+                      order_fee, dca_fee, harvest_mode, taxable_income, tariff) -> dict:
+    """Phase 1 (``.sim_check_inputs``). ``tariff`` = Argument ``tax_tariff`` von ``_simulation_flat``; Werte aus
+    den Bausteinen von ``simulation()`` (deren Prüfungen entfallen hier, Meldungen nennen die Bausteine; C19: der
+    flache Weg ohne Bausteine mit eigenen Prüfungen ist entfallen)."""
     tax_mode = _match_arg(tax_mode, ("none", "person"), "tax_mode")
     if not isinstance(data, (pd.DataFrame, Mapping, _Frame)):
         _stop("simulation: data muss ein data.frame mit Spalte 'date' und je Asset einer Kursspalte sein, nicht %s."
@@ -170,7 +162,7 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
                                                                            "private_sale")):
             _stop("simulation: tax_regime %s von Asset '%s' ist ung\u00fcltig; erlaubt sind investment_fund, capital_gains, "
                   "private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern %s verwenden."
-                  % (r_deparse(tr_), nm, "tax = NULL" if blocks else "tax_mode = \"none\""))
+                  % (r_deparse(tr_), nm, "tax = NULL"))
         at = a.get("trading")
         if not isinstance(at, str) or at not in ("bnh", "signal"):
             _stop("simulation: trading %s von Asset '%s' ist ung\u00fcltig; erlaubt sind \"bnh\" und \"signal\"."
@@ -325,51 +317,17 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
         _stop("simulation: start_value muss eine positive Zahl sein (Anfangskapital in EUR, z. B. 10000), nicht %s."
               % r_deparse(start_value))
     start_value = float(start_value)
-    if not blocks and (not _is_num(tax_rate) or math.isnan(float(tax_rate)) or tax_rate < 0 or tax_rate > 100):
-        _stop("simulation: tax_rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 f\u00fcr "
-              "26,375 %%), nicht %s." % r_deparse(tax_rate))
+    # Steuer-, Kosten-, Termin- und Split-Angaben haben die Bausteine geprüft (C19: die Prüfungen des flachen
+    # Wegs sind entfallen); fractions und risk_free prüft simulation() selbst
     tax_rate = float(tax_rate)
-    if not blocks and 0 < tax_rate < 1:
-        _warn("simulation: tax_rate = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s."
-              % (r_format1(tax_rate), r_format1(tax_rate), r_format1(tax_rate * 100)))
     if church_tax is not None:
-        if not blocks and (not _is_num(church_tax) or math.isnan(float(church_tax)) or church_tax < 0 or church_tax > 100):
-            _stop("simulation: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9), "
-                  "nicht %s." % ", ".join(r_format(church_tax)))
         church_tax = float(church_tax)
-        if blocks:
-            pass
-        elif 0 < church_tax < 1:
-            _warn("simulation: church_tax = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s."
-                  % (r_format1(church_tax), r_format1(church_tax), r_format1(church_tax * 100)))
-        elif church_tax > 9:
-            _warn("simulation: church_tax = %s %% ist ungew\u00f6hnlich hoch (Kirchensteuer in Deutschland: 8 oder 9 %%)."
-                  % r_format1(church_tax))
-    if not blocks and _is_true(harvest_mode) and tax_mode != "person":
-        _warn("simulation: harvest_mode wirkt nur mit tax_mode = \"person\" und wird hier ignoriert.")
 
     def show_arg(x):
         return "NULL" if x is None else r_deparse(x)
 
-    def chk_num(x, arg, what, mn=0.0, null_ok=False):
-        if x is None and null_ok or blocks:
-            return
-        if not _is_num(x) or not math.isfinite(float(x)) or (mn is not None and x < mn):
-            _stop("simulation: '%s' muss %s sein, nicht %s." % (arg, what, show_arg(x)))
-    chk_num(sparer_pauschbetrag, "sparer_pauschbetrag", "eine einzelne endliche Zahl >= 0 (EUR je Jahr, z. B. 1000)")
-    chk_num(private_sale_threshold, "private_sale_threshold",
-            "eine einzelne endliche Zahl >= 0 (Freigrenze in EUR, z. B. 1000)")
-    chk_num(base_rate, "base_rate", "NULL oder eine einzelne endliche Zahl (Basiszins in Prozent, z. B. 2.29; "
-            "negativ erlaubt)", mn=None, null_ok=True)
-    chk_num(marginal_tax_rate, "marginal_tax_rate", "NULL oder eine einzelne Zahl in Prozent von 0 bis 50 (z. B. 42)",
-            null_ok=True)
-    chk_num(balance_thresh, "balance_thresh", "NULL oder eine einzelne endliche Zahl >= 0 in Prozent (z. B. 5)",
-            null_ok=True)
-    for a, x in (("use_guenstigerpruefung", use_guenstigerpruefung),
-                 ("include_soli_on_income_tax", include_soli_on_income_tax),
-                 ("fractions", fractions), ("use_sparer_pauschbetrag", use_sparer_pauschbetrag)):
-        if (not blocks or a == "fractions") and not _is_bool(x):
-            _stop("simulation: '%s' muss TRUE oder FALSE sein, nicht %s." % (a, show_arg(x)))
+    if not _is_bool(fractions):
+        _stop("simulation: '%s' muss TRUE oder FALSE sein, nicht %s." % ("fractions", show_arg(fractions)))
     sparer_pauschbetrag = float(sparer_pauschbetrag)
     private_sale_threshold = float(private_sale_threshold)
     use_guenstigerpruefung = bool(use_guenstigerpruefung)
@@ -377,67 +335,14 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     fractions = bool(fractions)
     use_sparer_pauschbetrag = bool(use_sparer_pauschbetrag)
 
-    def frac_warn(x, arg, hi=1.0):
-        if blocks and arg != "risk_free":
-            return
-        if _is_num(x) and math.isfinite(float(x)) and 0 < x < hi:
-            _warn("simulation: %s = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s."
-                  % (arg, r_format1(x), r_format1(x), r_format1(x * 100)))
-    frac_warn(base_rate, "base_rate", hi=0.05)
-    frac_warn(marginal_tax_rate, "marginal_tax_rate")
-    frac_warn(balance_thresh, "balance_thresh", hi=0.2)
-    frac_warn(risk_free, "risk_free", hi=0.05)
+    if _is_num(risk_free) and math.isfinite(float(risk_free)) and 0 < risk_free < 0.05:
+        _warn("simulation: %s = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s."
+              % ("risk_free", r_format1(risk_free), r_format1(risk_free), r_format1(risk_free * 100)))
     if isinstance(risk_free, str) and risk_free in fr:
         _frac_warn_col(fr, risk_free, "risk_free", hi=0.05)
-    if not blocks and not _is_true(dca_mode) and dca_value is not None:
-        _warn("simulation: dca_value wirkt nur mit dca_mode = TRUE und wird ignoriert.")
-    if not blocks and not _is_true(balance_mode) and event_col is None and balance_thresh is not None:
-        _warn("simulation: balance_thresh wirkt nur mit balance_mode = TRUE oder event_col (Rebalancing) und wird "
-              "ignoriert.")
-    if event_col is None and given["event_mode"]:
-        _warn("simulation: event_mode wirkt nur zusammen mit event_col und wird ignoriert.")
 
-    def check_days(x, arg):
-        if x is None or blocks:
-            return
-        v = _num_vec(x)
-        if v is None or any(math.isnan(d) for d in v) or any(d < 1 or d > 31 or d != r_round(d) for d in v):
-            shown = r_format(list(x) if isinstance(x, (list, tuple, np.ndarray)) else x)
-            _stop("simulation: %s muss ganze Zahlen von 1 bis 31 enthalten, nicht %s." % (arg, ", ".join(shown)))
-    check_days(dca_days, "dca_days")
-    check_days(balance_days, "balance_days")
-    days_out = {}
-    for a, x in (("dca_days", dca_days), ("balance_days", balance_days)):
-        if x is not None and not blocks:
-            v = _num_vec(x)
-            u = []
-            for d in v:
-                if d not in u:
-                    u.append(d)
-            if len(u) < len(v):
-                _warn("simulation: %s enth\u00e4lt doppelte Tage (%s); jeder Tag ergibt nur einen Termin, verwendet wird "
-                      "%s = %s." % (a, ", ".join(r_format(v)), a, r_deparse(u)))
-                x = u
-        days_out[a] = x
-    dca_days, balance_days = days_out["dca_days"], days_out["balance_days"]
-    if not blocks and _is_true(split_mode) and split_thresh is not None:
-        st_v = _num_vec(split_thresh)
-        if st_v is None or len(st_v) != 2 or any(math.isnan(v) for v in st_v):
-            shown = r_format(list(split_thresh) if isinstance(split_thresh, (list, tuple, np.ndarray)) else split_thresh)
-            _stop("simulation: split_thresh muss ein Zahlenvektor c(untere, obere) der L\u00e4nge 2 sein, nicht %s."
-                  % ", ".join(shown))
-        if not (st_v[0] < 100 < st_v[1]):
-            _warn("simulation: split_thresh = c(%s, %s) schlie\u00dft den Zielkurs 100 nicht ein (erwartet untere < 100 < "
-                  "obere). Ein Split setzt den Kurs auf 100; liegt 100 au\u00dferhalb der Schwellen, folgt danach an jedem "
-                  "Tag ein weiterer Split (mit fractions = FALSE jeweils mit Spitzenausgleich)."
-                  % (r_format1(st_v[0]), r_format1(st_v[1])))
-
+    # taxable_income und tax_tariff nur aus income_tariff() in tax_profile(), also nur mit tax_mode = "person"
     tariff_on = taxable_income is not None and tax_mode == "person"
-    if taxable_income is not None and tax_mode != "person":   # nur ohne Bausteine möglich (income_tariff() in tax_profile())
-        _warn("simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"%s\") und wird ignoriert." % tax_mode)
-    if taxable_income is None and tariff is not None:
-        _warn("simulation: tax_tariff wirkt nur zusammen mit taxable_income (zu versteuerndes Einkommen je Jahr) und "
-              "wird ignoriert.")
     tariff_env = None
     if tariff_on:
         y0, y1 = year_of(int(dvals.min())), year_of(int(dvals.max()))
@@ -458,28 +363,15 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
         tariff_env.church_k = church_tax / 100 if (church_tax is not None and church_tax > 0) else 0.0
         tariff_env.kapest_rate = 0.25 / (1 + 0.25 * tariff_env.church_k)
         tariff_env.use_gp = bool(use_guenstigerpruefung)
-        ign = [a for a, g in (("marginal_tax_rate", given["marginal_tax_rate"] and marginal_tax_rate is not None),
-                              ("include_soli_on_income_tax", given["include_soli_on_income_tax"]),
-                              ("soli_rate_income_tax", given["soli_rate_income_tax"])) if g]
-        if ign:
-            _warn("simulation: Mit taxable_income gilt der Einkommensteuertarif der Tarifdatei (ESt und Soli); %s wirkt "
-                  "dann nicht." % ", ".join(ign))
 
     def is_private(a):
         return (a.get("tax_regime") == "private_sale" or a.get("asset_class") == "etn_deliverable"
                 or (a.get("asset_class") in ("etn", "etc") and _is_true(a.get("deliverable"))))
     has_private_sale = any(is_private(a) for a in strat.values())
-    if has_private_sale and marginal_tax_rate is None and tax_mode == "person" and not tariff_on and blocks:
+    if has_private_sale and marginal_tax_rate is None and tax_mode == "person" and not tariff_on:
         _warn("simulation: Der Grenzsteuersatz ist nicht gesetzt (tax_profile(income = income_rate(marginal_rate))), die "
               "Strategie enth\u00e4lt aber Assets mit tax_regime = \"private_sale\"; Gewinne nach Paragraf 23 EStG werden "
               "dann m\u00f6glicherweise nicht korrekt besteuert. income_rate(marginal_rate) in Prozent angeben (z. B. 42).")
-    elif has_private_sale and marginal_tax_rate is None and tax_mode == "person" and not tariff_on:
-        _warn("simulation: marginal_tax_rate ist nicht gesetzt, die Strategie enth\u00e4lt aber Assets mit tax_regime = "
-              "\"private_sale\"; Gewinne nach Paragraf 23 EStG werden dann m\u00f6glicherweise nicht korrekt besteuert. "
-              "marginal_tax_rate in Prozent angeben (z. B. 42).")
-    if not blocks and marginal_tax_rate is not None and (marginal_tax_rate < 0 or marginal_tax_rate > 50):
-        _stop("simulation: marginal_tax_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 f\u00fcr "
-              "42 %%), nicht %s." % r_deparse(marginal_tax_rate))
     # Kirchensteuer, Prozent-Konvention und Günstigerprüfung: _tax_rates() (unten, nach der Gewichtssumme)
     if balance_thresh is not None:
         balance_thresh = float(balance_thresh) / 100
@@ -488,18 +380,7 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     fee_dca = fee_order if dca_fee is None else _fee_spec(dca_fee)
     fees_on = fee_order is not None or fee_dca is not None
     _FEE.paid = 0.0
-    if _is_true(harvest_mode) and not blocks:
-        if not isinstance(harvest_day, str) or not re.match(r"^\d{2}-\d{2}$", harvest_day) or harvest_day >= "12-31":
-            _stop("harvest_day im Format 'MM-TT' und vor dem 31.12. angeben (z. B. '12-15').")
     if dca_mode:
-        def one_num(x):
-            return _is_num(x) and math.isfinite(float(x))
-        if not blocks and (not one_num(dca_value) or dca_value <= 0):
-            _stop("simulation: 'dca_value' muss bei dca_mode = TRUE eine einzelne endliche Zahl > 0 sein (Betrag je "
-                  "Sparplan-Termin in EUR), nicht %s." % show_arg(dca_value))
-        if not blocks and (not one_num(dca_span) or dca_span < 1 or dca_span != r_round(float(dca_span))):
-            _stop("simulation: 'dca_span' muss bei dca_mode = TRUE eine einzelne ganze Zahl >= 1 sein (Perioden "
-                  "zwischen zwei Terminen), nicht %s." % show_arg(dca_span))
         dca_value = float(dca_value)
     shares = [a.get("share") for a in strat.values()]
     total_weight = r_sum([NA if s is None else float(s) for s in shares], na_rm=True)
@@ -511,8 +392,7 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     # Steuersätze (Kirchensteuer, Prozent -> Anteil, Günstigerprüfung) im gemeinsamen Helfer (6.5b, auch für
     # withdrawal_simulation()); Rechenfolge, Warnungen und Druck wie bisher an dieser Stelle
     tr = _tax_rates(tax_rate, church_tax, use_guenstigerpruefung, marginal_tax_rate, include_soli_on_income_tax,
-                    soli_rate_income_tax, "simulation", details=details, blocks=blocks, rate_given=given["tax_rate"],
-                    tariff_on=tariff_on)
+                    soli_rate_income_tax, "simulation", details=details, tariff_on=tariff_on)
     tax_rate = tr["tax_rate"]
     marginal_tax_rate = tr["marginal_tax_rate"]
     effective_tax_rate = tr["effective_tax_rate"]
@@ -548,12 +428,12 @@ def _locf_fill(v: np.ndarray) -> np.ndarray:
     return v[idx - 1]
 
 
-def _sim_prepare_data(fr: _Frame, pre_filled: np.ndarray, base_rate_flex, base_rate_data, blocks=False) -> dict:
+def _sim_prepare_data(fr: _Frame, pre_filled: np.ndarray, base_rate_flex, base_rate_data) -> dict:
     dates = fr.get("date")
     start_date = int(dates[0])
     stopp_date = int(dates[-1])
     if _is_true(base_rate_flex) and isinstance(base_rate_data, str) and base_rate_data in fr:
-        _frac_warn_col(fr, base_rate_data, "base_rate" if blocks else "base_rate_data", hi=0.05)
+        _frac_warn_col(fr, base_rate_data, "base_rate", hi=0.05)
     if _is_true(base_rate_flex) and isinstance(base_rate_data, str) and base_rate_data in fr:
         col = fr.get(base_rate_data)
         k = fr.kinds[base_rate_data]
@@ -610,7 +490,7 @@ def _signal_col(fr: _Frame, col: str | None, n: int) -> np.ndarray:
 
 def _sim_build_state(fr: _Frame, strategy: dict, start_value: float, start_date: int, stopp_date: int,
                      sparer_pauschbetrag: float, use_sparer_pauschbetrag: bool, base_rate, base_rate_flex,
-                     base_rate_data, blocks=False) -> dict:
+                     base_rate_data) -> dict:
     n = fr.nrow
     sim: dict = {
         "assets": {}, "status": {}, "market": {}, "trades": {}, "report": {},
@@ -653,12 +533,9 @@ def _sim_build_state(fr: _Frame, strategy: dict, start_value: float, start_date:
                 if base_rate_data is None:
                     _stop("simulation: base_rate_flex = TRUE braucht base_rate_data (Name der Basiszins-Spalte in data, "
                           "Prozent p. a.); base_rate_data fehlt.")
-                if blocks:
-                    _stop("simulation: base_rate-Spalte '%s' fehlt in data (tax_profile(base_rate = \"%s\") braucht eine "
-                          "Basiszins-Spalte in Prozent p. a.; vorhanden: %s)." % (base_rate_data, base_rate_data,
-                                                                                  ", ".join(fr.names)))
-                _stop("simulation: base_rate_data-Spalte '%s' fehlt in data (base_rate_flex = TRUE braucht eine "
-                      "Basiszins-Spalte in Prozent p. a.; vorhanden: %s)." % (base_rate_data, ", ".join(fr.names)))
+                _stop("simulation: base_rate-Spalte '%s' fehlt in data (tax_profile(base_rate = \"%s\") braucht eine "
+                      "Basiszins-Spalte in Prozent p. a.; vorhanden: %s)." % (base_rate_data, base_rate_data,
+                                                                              ", ".join(fr.names)))
             br = np.array(fr.get(base_rate_data), dtype=np.float64)
             br[np.isnan(br)] = 0.0
         else:
@@ -696,7 +573,7 @@ def _as_logical_col(fr: _Frame, col: str) -> np.ndarray:
 def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, stopp_date: int, liquidate,
                         dca_mode, dca_span, dca_unit, dca_days, dca_value, dca_anchor, dca_start, dca_skip,
                         balance_mode, balance_span, balance_unit, balance_days, balance_anchor, balance_start,
-                        balance_skip, event_col, event_mode, event_weight, blocks=False) -> dict:
+                        balance_skip, event_col, event_mode, event_weight) -> dict:
     """Angaben der Termine und Tages-Flags (wie ``.sim_build_calendar`` in R): Kalender, Terminpläne
     (``_sched_spec``), Ereignis-Spalte und die Prüfungen; Termine, Splits, Flags, Aktivierung, Freibetrag und
     Startgewichte rechnet seit E17 Stufe 2 der Kern (core/prepare_core_impl.h, über ``_sim_engine_run``)."""
@@ -717,7 +594,7 @@ def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, 
                   % (a, r_format1(sd0) if not isinstance(sd0, str) else sd0))
         if sd1 > stopp_date:
             _stop("simulation: %s (%s) liegt nach dem letzten Datentag (%s); es g\u00e4be keine Termine."
-                  % (("start von %s" % ("dca_plan()" if a == "dca" else "rebalance_plan()")) if blocks else a + "_start",
+                  % ("start von %s" % ("dca_plan()" if a == "dca" else "rebalance_plan()"),
                      fmt_date(sd1), fmt_date(stopp_date)))
     balance = _sched_spec(balance_mode, balance_span, balance_unit, balance_days, flag_date, None, balance_anchor,
                          balance_start, balance_skip)

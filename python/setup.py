@@ -7,12 +7,12 @@ Meldung von setuptools. Seit Etappe 9.6c gibt es auch keine reinen Python-Kerne 
 mehr (kein Schalter ``SIMLEV_NO_EXT``).
 
 Quellen der C-Bibliothek slc: ``src/core/slc*.{c,h}`` sind Byte-für-Byte-Kopien der
-kanonischen Dateien in ``core/`` (``tools/core_sync.py --check``), die Hülle
+kanonischen Dateien in ``core/`` (``core/sync.py --check``), die Hülle
 ``src/_ext_slc.c`` gibt es nur hier.
 
 Quellen: die geteilten Kerne ``src/core/*_core_impl.h`` und ``src/core/simlev_core.h`` sind
 seit Etappe 9.6c (F16) ebenfalls Byte-für-Byte-Kopien der kanonischen Dateien in ``core/``
-(``tools/core_sync.py --check``); die Python-Hüllen ``src/_ext*.cpp`` gibt es nur hier. Die
+(``core/sync.py --check``); die Python-Hüllen ``src/_ext*.cpp`` gibt es nur hier. Die
 früheren Kerne mit R-Zufall, die C-Übernahmen und die C-Nachbildung von R's Zufall
 (``_rng_r.c``) sind mit Etappe 9.6c entfallen.
 

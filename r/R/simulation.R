@@ -487,14 +487,15 @@ simulation <- function(data, strategy, start_value = 10000,
   args <- c(if (!missing(data)) list(data = data), if (!missing(strategy)) list(strategy = strategy),
             list(start_value = start_value, risk_free = risk_free, fractions = fractions, liquidate = liquidate,
                  details = details),
-            flat, list(.blocks = TRUE, .call = sim_call))
+            flat, list(.call = sim_call))
   do.call(.simulation_flat, args, quote = TRUE)   # quote: .call ist ein Aufruf und darf nicht ausgewertet werden
 }
 
 #' Engine von simulation() mit den internen (flachen) Argumenten
 #'
 #' Zweck: die Rechnung von simulation(); simulation() ruft sie mit den aus den Bausteinen uebersetzten Werten
-#' auf (.blocks = TRUE: die Bausteine haben ihre Argumente schon geprueft, Meldungen nennen die Bausteine).
+#' auf (die Bausteine haben ihre Argumente schon geprueft, Meldungen nennen die Bausteine; C19: einziger
+#' Aufrufer, der flache Weg ohne Bausteine mit eigenen Pruefungen ist entfallen).
 #' Die Aufrufer mit sim_args (bootstrap_study, param_search, sensitivity_*, planning_lumpsum_vs_dca,
 #' tactical_simulation) gehen seit Etappe 6.4 ueber simulation() (.sim_args_set, .sim_call in sim_blocks.R).
 #' @keywords internal
@@ -561,23 +562,16 @@ simulation <- function(data, strategy, start_value = 10000,
     # === Einkommensteuertarif (Datei) statt marginal_tax_rate ===
     taxable_income = NULL,                  # zvE je Kalenderjahr OHNE die Ertraege dieser Simulation (EUR)
     tax_tariff = NULL,                      # NULL = mitgelieferte Tarifdatei, Dateipfad oder tax_tariff()-Objekt
-    .blocks = FALSE,                        # TRUE: Aufruf aus simulation() mit Bausteinen
     .call = NULL                            # Aufruf fuer Bedingungen (aus simulation())
 ) {
   # Ablauf in Phasen (interne Funktionen, Uebersicht in sim_validate.R). Fehler und Warnungen, die
   # direkt in einer Phase entstehen, tragen wie bisher den Aufruf von simulation() (.sim_restore_call).
   sim_call <- if (is.null(.call)) sys.call() else .call
-  # Mit Bausteinen gilt kein Argument als einzeln angegeben (die Bausteine pruefen das Zusammenspiel selbst)
-  given <- if (.blocks) c(tax_rate = FALSE, marginal_tax_rate = FALSE, include_soli_on_income_tax = FALSE,
-                          soli_rate_income_tax = FALSE, event_mode = FALSE)
-           else c(tax_rate = !missing(tax_rate), marginal_tax_rate = !missing(marginal_tax_rate),
-                  include_soli_on_income_tax = !missing(include_soli_on_income_tax),
-                  soli_rate_income_tax = !missing(soli_rate_income_tax), event_mode = !missing(event_mode))
   withCallingHandlers({
     # 1. Eingabepruefung, Steuer- und Gebuehreneinstellungen
     cfg <- .sim_check_inputs(
       data = data, strategy = strategy, start_value = start_value, spread = spread, details = details,
-      dca_mode = dca_mode, dca_value = dca_value, dca_span = dca_span, dca_days = dca_days,
+      dca_mode = dca_mode, dca_value = dca_value, dca_days = dca_days,
       balance_mode = balance_mode, balance_days = balance_days, balance_thresh = balance_thresh,
       balance_thresh_type = balance_thresh_type, tax_mode = tax_mode, tax_rate = tax_rate,
       marginal_tax_rate = marginal_tax_rate, use_guenstigerpruefung = use_guenstigerpruefung,
@@ -586,14 +580,14 @@ simulation <- function(data, strategy, start_value = 10000,
       soli_rate_income_tax = soli_rate_income_tax, base_rate = base_rate,
       fractions = fractions, risk_free = risk_free, split_mode = split_mode,
       split_thresh = split_thresh, event_col = event_col, church_tax = church_tax, order_fee = order_fee,
-      dca_fee = dca_fee, harvest_mode = harvest_mode, harvest_day = harvest_day,
-      taxable_income = taxable_income, tariff = tax_tariff, given = given, blocks = .blocks)
+      dca_fee = dca_fee, harvest_mode = harvest_mode,
+      taxable_income = taxable_income, tariff = tax_tariff)
 
     # 2. Daten, Zentralstruktur sim_mem, Termine und Flags
-    prep <- .sim_prepare_data(cfg$data, cfg$pre_filled, base_rate_flex, base_rate_data, blocks = .blocks)
+    prep <- .sim_prepare_data(cfg$data, cfg$pre_filled, base_rate_flex, base_rate_data)
     sim_mem <- .sim_build_state(prep$data, cfg$strategy, cfg$start_value, prep$start_date, prep$stopp_date,
                                 cfg$sparer_pauschbetrag, cfg$use_sparer_pauschbetrag, cfg$base_rate,
-                                base_rate_flex, base_rate_data, blocks = .blocks)
+                                base_rate_flex, base_rate_data)
     .sim_check_layout(sim_mem)   # C7-11: vor dem ersten C++-Aufruf
     cal <- .sim_build_calendar(
       data = prep$data, sim_mem = sim_mem, strategy = cfg$strategy, start_date = prep$start_date,
@@ -602,7 +596,7 @@ simulation <- function(data, strategy, start_value = 10000,
       dca_start = dca_start, dca_skip = dca_skip, balance_mode = cfg$balance_mode, balance_span = balance_span,
       balance_unit = balance_unit, balance_days = cfg$balance_days, balance_anchor = balance_anchor,
       balance_start = balance_start, balance_skip = balance_skip, event_col = cfg$event_col,
-      event_mode = event_mode, event_weight = event_weight, blocks = .blocks)
+      event_mode = event_mode, event_weight = event_weight)
     data <- cal$data
     fl <- cal$flags
     if (!is.null(cfg$event_col)) event_weight <- cal$event_weight

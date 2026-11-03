@@ -183,15 +183,6 @@ def _poly_lm(df, degree):
     return model, float(r2)
 
 
-def _stats_mod():
-    import importlib
-    return importlib.import_module("simlev._r.stats")
-
-
-def _sum_ld(x):
-    return r_sum(np.asarray(x, dtype=np.float64).ravel())   # N11: C-Kern core/slc_rbase.c
-
-
 def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, breaks=None,
                     signal2=None, bins2=3, splits=1, degree=2):
     """Signal-Analyse: Vorwärtsrenditen je Signalbereich.

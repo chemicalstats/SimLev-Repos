@@ -131,10 +131,6 @@ def _isdig(c):
     return "0" <= c <= "9"
 
 
-def _isspace_c(c):
-    return c in " \t\n\v\f\r"
-
-
 # N11: R_strtod und String_to_real stehen in simlev._r.rnum (gemeinsam mit fmt; Zahlteil im C-Kern)
 r_strtod = _rnum.r_strtod
 _str2num = _rnum.r_string_to_real
@@ -1564,10 +1560,6 @@ def _fsub(x, y):
     if x != x or y != y:
         return _nanop(x, y)
     return x - y
-
-
-def _floor(x):
-    return float(np.floor(x))
 
 
 def r_fmod(x1, x2):

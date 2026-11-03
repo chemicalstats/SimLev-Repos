@@ -117,7 +117,6 @@ function _days_to_civil(z::Integer)
     return (y + (m <= 2), m, d)
 end
 
-
 _date_of(z::Real) = Date(Dates.UTD(_UTD0 + Int64(floor(z))))
 _day_of(d::Date) = Float64(Dates.value(d) - _UTD0)
 _day_of(d::DateTime) = _day_of(Date(d))
@@ -793,12 +792,6 @@ _chomp(s) = (s = String(s); endswith(s, "\n") ? s[1:prevind(s, end)] : s)
 function _print_datacheck(io::IO, x; max_issues = 25, kw...)
     print(io, format_SimLevDataCheck(x; max_issues = max_issues))
     return nothing
-end
-
-"`print.SimLevDataCheck(x, max_issues = 25)`."
-function print_SimLevDataCheck(x; max_issues = 25, io::IO = stdout)
-    println(io, format_SimLevDataCheck(x; max_issues = max_issues))
-    return x
 end
 
 # ═══════════════════════════════════════════════════════════════════════════

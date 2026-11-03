@@ -1,5 +1,5 @@
 # Huellen der Optimierer der C-Bibliothek slc (SimLev core, Etappe 9.3): .sl_optim() und
-# Pruefhilfen. Die Rechnung steht in src/slc_opt.c (Kopie von core/, tools/core_sync.py), die
+# Pruefhilfen. Die Rechnung steht in src/slc_opt.c (Kopie von core/, core/sync.py), die
 # .Call-Huellen in src/slc_r_opt.c (Registrierung in src/init.c, in R als C_sl_*).
 #
 # Rueckfrage an den Host (Entwurf B.8): .sl_optim() laeuft in einer Schleife "Anfrage holen ->

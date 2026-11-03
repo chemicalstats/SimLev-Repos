@@ -1,11 +1,7 @@
-# Herkunft:           übersetzt aus R 4.3.3, src/main/summary.c, cum.c, array.c, arithmetic.c;
-#                     src/library/stats/src/zeroin.c (R_zeroin2); nachgebildet nach R 4.3.3,
-#                     src/library/stats/R/nlm.R (uniroot)
+# Herkunft:           übersetzt aus R 4.3.3, src/main/summary.c, cum.c, array.c, arithmetic.c
+#                     (R_zeroin2/uniroot aus zeroin.c bzw. nlm.R seit C19 entfallen, XIRR im Kern)
 # Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
-#                     Kopf der jeweiligen R-Quelle); Verfahren R. P. Brent, Algorithms for
-#                     Minimization without Derivatives (1973), über Netlib go/fmin.f (ohne Urheber-
-#                     und Lizenzvermerk) bzw. c/brent.shar (Kopf nicht geprüft); zeroin.c:
-#                     Ergänzungen von Peter Dalgaard
+#                     Kopf der jeweiligen R-Quelle)
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang: Summen und Kumulationen rechnen seit N8 die C-Kerne
@@ -17,8 +13,8 @@ importiert nichts aus ``simlev``. Es definiert ``NA_REAL`` (R's
 ``NA_real_``, die einzige Definition im Paket; öffentlich als ``simlev.NA``)
 mit ``r_isna``/``r_isna_arr`` und die skalaren bzw. eindimensionalen
 Engine-Hilfen mit ``r_``-Präfix: Summen, Mittel, Varianzen und Produkte in
-long double, ``r_pow`` (``R_POW``), ``r_mod1`` und ``r_uniroot``
-(Brent-Verfahren ``R_zeroin2``). Darauf bauen auf:
+long double, ``r_pow`` (``R_POW``) und ``r_mod1`` (``r_uniroot`` ist seit C19 entfallen: XIRR im Kern
+``core/evaluate_core_impl.h``). Darauf bauen auf:
 
 - :mod:`simlev._r.rformat`: ``r_round``, ``r_signif``, ``r_format``,
   ``r_as_character``, ``r_deparse``, ``r_sprintf`` (Textausgabe der Engine),
@@ -53,8 +49,6 @@ from __future__ import annotations
 
 import math
 import struct
-import warnings
-from typing import Callable, Sequence
 
 import numpy as np
 
@@ -63,10 +57,10 @@ from .. import _ext   # C-Erweiterung (N8: Kerne core/slc_rbase*.c)
 _NAN = float("nan")
 
 __all__ = [
-    "NA_REAL", "r_isna", "r_isna_arr", "na_or_nan", "r_sum", "r_cumsum", "r_prod", "r_cumprod", "r_mean", "r_mean_int", "r_var", "r_sd",
-    "r_rowsums", "r_colsums", "r_rowmeans", "r_colmeans", "r_cummin", "r_pow", "r_pow_vec", "r_exp_vec", "r_mod1",
-    "r_median", "r_cummax", "r_uniroot", "r_zeroin2", "c_div",
-    "r_strtod", "r_string_to_real", "X86_NAN", "nan_quiet", "n_add", "n_sub", "n_mul", "n_div", "n_sqrt", "n_log", "n_exp",
+    "NA_REAL", "r_isna", "r_isna_arr", "r_sum", "r_cumsum", "r_prod", "r_cumprod", "r_mean", "r_mean_int", "r_var", "r_sd",
+    "r_rowsums", "r_colsums", "r_rowmeans", "r_colmeans", "r_cummin", "r_pow", "r_pow_vec", "r_mod1",
+    "r_median", "r_cummax",
+    "r_strtod", "r_string_to_real",
 ]
 
 
@@ -88,115 +82,10 @@ _PACK_D = struct.Struct("<d")
 _PACK_Q = struct.Struct("<Q")
 #: R's ``NA_real_`` (Bitmuster wie in R)
 NA_REAL = _PACK_D.unpack(_PACK_Q.pack(0x7FF00000000007A2))[0]
-_QUIET = 0x0008000000000000
-_FRAC = 0x000FFFFFFFFFFFFF
-_INDEF = 0xFFF8000000000000          # x87 "real indefinite" (ungültige Operation)
 
 
 def _bits(x: float) -> int:
     return _PACK_Q.unpack(_PACK_D.pack(x))[0]
-
-
-def _from_bits(b: int) -> float:
-    return _PACK_D.unpack(_PACK_Q.pack(b))[0]
-
-
-def c_div(a: float, b: float) -> float:
-    """``a / b`` wie C bzw. R auf x86-64 (IEEE, kein ``ZeroDivisionError``).
-
-    Für ``b != 0`` ist das Pythons Division (dieselbe Maschinenoperation). Für
-    ``b == 0`` rechnet die Maschine: ``±Inf`` mit dem Vorzeichen aus beiden
-    Operanden, ``0/0`` das Standard-NaN ``0xfff8…`` (negatives Vorzeichen), ein
-    NaN-Zähler bleibt mit seiner Nutzlast erhalten (NA bleibt NA).
-    """
-    try:
-        return a / b
-    except ZeroDivisionError:
-        with np.errstate(all="ignore"):
-            return float(np.float64(a) / np.float64(b))
-
-
-# ── NaN-genaue Einzeloperationen ─────────────────────────────────────────────
-#
-# Treffen in einer Operation zwei NaN aufeinander (etwa NA und NaN), behält
-# x86-64/SSE die Nutzlast des ersten Operanden der Maschinenanweisung
-# (``addsd src, dst``: dst). Welcher Operand das ist, legt der C-Compiler fest,
-# bei kommutativen Operationen auch entgegen der Quelltextfolge; CPython wählt
-# wieder anders (``a + b`` behält b, ``a * b`` behält a). Ungültige Operationen
-# (0/0, Inf - Inf, log oder sqrt einer negativen Zahl) liefern in C das
-# Standard-NaN von x86 (Vorzeichen gesetzt, 0xFFF8000000000000), Python
-# ``math.nan`` ist +NaN. Die Funktionen ``n_*`` rechnen eine Operation wie die
-# SSE-Anweisung mit ``a`` als erstem Operanden; die reinen Python-Kerne nutzen
-# sie auf ihrem NaN-genauen Weg mit der Operandenfolge aus dem Maschinencode des
-# R-Baus (gcc -O2, x86-64).
-
-_QUIET = 0x0008000000000000
-X86_NAN = _PACK_D.unpack(_PACK_Q.pack(0xFFF8000000000000))[0]   # Standard-NaN (0/0) auf x86-64
-
-
-def nan_quiet(x: float) -> float:
-    """``x`` als stilles NaN (wie jede Gleitkomma-Operation es zurückgibt)."""
-    return _PACK_D.unpack(_PACK_Q.pack(_PACK_Q.unpack(_PACK_D.pack(x))[0] | _QUIET))[0]
-
-
-def _nn(r: float, a: float, b: float) -> float:
-    if a != a and b != b:
-        return nan_quiet(a)
-    return r
-
-
-def n_add(a: float, b: float) -> float:
-    """``a + b`` (SSE, ``a`` erster Operand)."""
-    return _nn(a + b, a, b)
-
-
-def n_sub(a: float, b: float) -> float:
-    """``a - b`` (SSE)."""
-    return _nn(a - b, a, b)
-
-
-def n_mul(a: float, b: float) -> float:
-    """``a * b`` (SSE, ``a`` erster Operand)."""
-    return _nn(a * b, a, b)
-
-
-def n_div(a: float, b: float) -> float:
-    """``a / b`` (SSE), auch für ``b == 0``."""
-    if b == 0.0 or b != b or a != a:
-        with np.errstate(all="ignore"):
-            r = float(np.float64(a) / np.float64(b))
-        return _nn(r, a, b)
-    return a / b
-
-
-def n_sqrt(x: float) -> float:
-    """``sqrtsd`` bzw. glibc ``sqrt``: sqrt(NaN) = NaN (still), sqrt(<0) = Standard-NaN von x86."""
-    if x >= 0.0:
-        return math.sqrt(x)
-    if x != x:
-        return nan_quiet(x)
-    return X86_NAN
-
-
-def n_log(x: float) -> float:
-    """glibc ``log``: log(NaN) = NaN (still), log(<0) und log(-Inf) = Standard-NaN von x86."""
-    if x > 0.0:
-        return math.log(x)
-    if x == 0.0:
-        return -math.inf
-    if x != x:
-        return nan_quiet(x)
-    return X86_NAN
-
-
-def n_exp(x: float) -> float:
-    """glibc ``exp`` (NaN still, Überlauf Inf)."""
-    if x != x:
-        return nan_quiet(x)
-    try:
-        return math.exp(x)
-    except OverflowError:
-        return math.inf
 
 
 def r_isna(x) -> bool:
@@ -209,14 +98,6 @@ def r_isna_arr(a) -> np.ndarray:
     """Maske ``R_IsNA`` für ein Array."""
     a = np.ascontiguousarray(a, dtype=np.float64)
     return np.isnan(a) & ((a.view(np.uint64) & np.uint64(0xFFFFFFFF)) == np.uint64(1954))
-
-
-def na_or_nan(*vals) -> float:
-    """NA, falls ein Wert NA ist, sonst R's NaN (wie ``if_NA_Math*_set``)."""
-    for v in vals:
-        if r_isna(v):
-            return NA_REAL
-    return _NAN
 
 
 def _handle_nan(x: np.ndarray, out: np.ndarray) -> np.ndarray:
@@ -380,18 +261,6 @@ def r_pow_vec(x, y: float) -> np.ndarray:
     return out
 
 
-def r_exp_vec(x) -> np.ndarray:
-    """Elementweises ``exp(x)`` über libm (``math.exp``) wie R."""
-    a = _as_f64(x)
-    out = np.empty_like(a)
-    for i, v in enumerate(a):
-        try:
-            out[i] = math.exp(v)
-        except OverflowError:
-            out[i] = math.inf
-    return out
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # R_strtod und String_to_real (N11; vorher in rexpr.py bzw. mit float() in fmt.py)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -473,94 +342,3 @@ _DBL_EPS = 2.220446049250313e-16
 _DBL_MAX = 1.7976931348623157e308
 
 
-def r_zeroin2(f: Callable[[float], float], ax: float, bx: float, fa: float, fb: float,
-              tol: float, maxit: int):
-    """Port von ``R_zeroin2`` (stats/src/zeroin.c). Rückgabe: (Wurzel, Iterationen, Genauigkeit)."""
-    a, b = ax, bx
-    c, fc = a, fa
-    maxit_c = maxit + 1
-    if fa == 0.0:
-        return a, 0, 0.0
-    if fb == 0.0:
-        return b, 0, 0.0
-    while maxit_c:
-        maxit_c -= 1
-        prev_step = b - a
-        if abs(fc) < abs(fb):
-            a = b
-            b = c
-            c = a
-            fa = fb
-            fb = fc
-            fc = fa
-        tol_act = 2 * _DBL_EPS * abs(b) + tol / 2
-        new_step = (c - b) / 2
-        if abs(new_step) <= tol_act or fb == 0.0:
-            return b, maxit - maxit_c, abs(c - b)
-        if abs(prev_step) >= tol_act and abs(fa) > abs(fb):
-            cb = c - b
-            if a == c:
-                t1 = fb / fa
-                p = cb * t1
-                q = 1.0 - t1
-            else:
-                q = fa / fc
-                t1 = fb / fc
-                t2 = fb / fa
-                p = t2 * (cb * q * (q - t1) - (b - a) * (t1 - 1.0))
-                q = (q - 1.0) * (t1 - 1.0) * (t2 - 1.0)
-            if p > 0.0:
-                q = -q
-            else:
-                p = -p
-            if p < (0.75 * cb * q - abs(tol_act * q) / 2) and p < abs(prev_step * q / 2):
-                new_step = p / q
-        if abs(new_step) < tol_act:
-            new_step = tol_act if new_step > 0.0 else -tol_act
-        a = b
-        fa = fb
-        b += new_step
-        fb = f(b)
-        if (fb > 0 and fc > 0) or (fb < 0 and fc < 0):
-            c = a
-            fc = fa
-    return b, -1, abs(c - b)
-
-
-def r_uniroot(f: Callable[[float], float], interval: Sequence[float], f_lower: float | None = None,
-              f_upper: float | None = None, tol: float = _DBL_EPS ** 0.25, maxiter: int = 1000) -> dict:
-    """``stats::uniroot(f, interval, f.lower =, f.upper =, tol =, maxiter =)`` (extendInt = "no")."""
-    lower, upper = min(interval), max(interval)
-    if not lower < upper:
-        raise ValueError("lower < upper  is not fulfilled")
-    if f_lower is None:
-        f_lower = f(lower)
-    if f_upper is None:
-        f_upper = f(upper)
-    if math.isnan(f_lower):
-        raise ValueError("f.lower = f(lower) is NA")
-    if math.isnan(f_upper):
-        raise ValueError("f.upper = f(upper) is NA")
-
-    def trunc(v):
-        return max(min(v, _DBL_MAX), -_DBL_MAX)
-
-    def sign(v):
-        return (v > 0) - (v < 0)
-    if not sign(f_lower) * sign(f_upper) <= 0:
-        raise ValueError("f() values at end points not of opposite sign")
-
-    def fcn2(x):
-        v = float(f(x))
-        if not math.isfinite(v):
-            if v == -math.inf:
-                warnings.warn("-Inf replaced by maximally negative value")
-                return -_DBL_MAX
-            warnings.warn("NA/Inf replaced by maximum positive value")
-            return _DBL_MAX
-        return v
-    root, it, prec = r_zeroin2(fcn2, lower, upper, trunc(f_lower), trunc(f_upper), tol, maxiter)
-    if it < 0:
-        warnings.warn("_NOT_ converged in %d iterations" % maxiter)
-        it = maxiter
-    return {"root": root, "iter": it, "estim.prec": prec}

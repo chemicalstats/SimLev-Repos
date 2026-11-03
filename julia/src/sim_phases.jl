@@ -3,12 +3,6 @@
 # Zentralstruktur, Termine und Ablaufplan (sim_prepare.R)
 # ─────────────────────────────────────────────────────────────────────────────
 
-"`given` aus simulation(): welche Argumente ausdrücklich angegeben wurden."
-struct _Given
-    d::Dict{String,Bool}
-end
-_g(g::_Given, k::String) = g.d[k]
-
 function _frac_warn_col(fr::_Frame, col::String, arg::String, hi::Float64)
     @nospecialize
     _fis_numeric(fr, col) || return nothing
@@ -25,7 +19,7 @@ _show_arg(x) = x === nothing ? "NULL" : r_deparse(x)
 
 """
     _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli, soli_rate, who;
-               details = false, blocks = true, rate_given = false, tariff_on = false, io = stdout)
+               details = false, tariff_on = false, io = stdout)
 
 Steuersätze aus Abgeltungsteuer, Kirchensteuer und Günstigerprüfung (R: `.tax_rates`, 6.5b). Gemeinsamer
 Helfer von `simulation()` (`_sim_check_inputs`) und `withdrawal_simulation()`: Satz der Abgeltungsteuer mit
@@ -35,8 +29,7 @@ beginnen mit `who`. Ergebnis: NamedTuple `tax_rate`, `marginal_tax_rate`, `soli_
 `effective_tax_rate`, `church_k`, `soli_factor_income`.
 """
 function _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli, soli_rate, who::AbstractString;
-                    details::Bool = false, blocks::Bool = true, rate_given::Bool = false, tariff_on::Bool = false,
-                    io::IO = stdout)
+                    details::Bool = false, tariff_on::Bool = false, io::IO = stdout)
     tax_rate = Float64(rate)
     church_tax = church_tax === nothing ? nothing : Float64(church_tax)
     marginal_tax_rate = marginal_rate
@@ -44,7 +37,6 @@ function _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include
     include_soli_on_income_tax = include_soli === true
     soli_rate_income_tax = soli_rate
     if church_tax !== nothing && church_tax > 0
-        rate_given && abs(tax_rate - 26.375) > 1e-9 && @warn "church_tax überschreibt das angegebene tax_rate."
         k = church_tax / 100
         tax_rate = 100 * 0.25 / (1 + 0.25 * k) * (1 + 0.055 + k)
     end
@@ -54,12 +46,9 @@ function _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include
     soli_rate = Float64(soli_rate_income_tax) / 100
     effective_tax_rate = tax_rate
     if use_guenstigerpruefung && !tariff_on
-        if mtr === nothing && blocks
+        if mtr === nothing
             @warn who * ": Günstigerprüfung aktiviert (tax_profile(guenstigerpruefung = TRUE)), aber der Grenzsteuersatz (income_rate(marginal_rate)) ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer (" *
                   r_as_character(r_round(tax_rate * 100, 2)) * " %).\nFür eine korrekte Günstigerprüfung tax_profile(income = income_rate(marginal_rate)) in Prozent angeben (z. B. 42)."
-        elseif mtr === nothing
-            @warn who * ": Günstigerprüfung aktiviert (use_guenstigerpruefung = TRUE), aber 'marginal_tax_rate' ist nicht gesetzt.\nVerwendet wird die Abgeltungsteuer (" *
-                  r_as_character(r_round(tax_rate * 100, 2)) * " %).\nFür eine korrekte Günstigerprüfung marginal_tax_rate in Prozent angeben (z. B. 42)."
         else
             personal_rate = mtr * ((include_soli_on_income_tax ? (1 + soli_rate) : 1.0) + church_k)
             if personal_rate < tax_rate
@@ -77,13 +66,12 @@ function _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include
             effective_tax_rate = effective_tax_rate, church_k = church_k, soli_factor_income = soli_factor_income)
 end
 
-function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_span, dca_days,
+function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_days,
                            balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
                            marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                            use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
                            fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
-                           order_fee, dca_fee, harvest_mode, harvest_day, taxable_income, tariff, given::_Given,
-                           io::IO, blocks::Bool = false)
+                           order_fee, dca_fee, harvest_mode, taxable_income, tariff, io::IO)
     @nospecialize
     tax_mode = match_arg(tax_mode, ("none", "person"), "tax_mode")
     if !(data isa RFrame || data isa NamedTuple || data isa AbstractDict || data isa AbstractVector{<:Pair} || data isa _Frame)
@@ -116,7 +104,7 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         end
         tr_ = get(a, "tax_regime", nothing)
         if tr_ !== nothing && (!(tr_ isa AbstractString) || !(tr_ in VALID_REGIMES))
-            error("simulation: tax_regime $(r_deparse(tr_)) von Asset '$nm' ist ungültig; erlaubt sind investment_fund, capital_gains, private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern $(blocks ? "tax = NULL" : "tax_mode = \"none\"") verwenden.")
+            error("simulation: tax_regime $(r_deparse(tr_)) von Asset '$nm' ist ungültig; erlaubt sind investment_fund, capital_gains, private_sale (oder weglassen: aus asset_class abgeleitet). Ohne Steuern tax = NULL verwenden.")
         end
         at = get(a, "trading", nothing)
         if !(at isa AbstractString) || !(at in ("bnh", "signal"))
@@ -263,95 +251,19 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     (!_is_num(start_value) || start_value <= 0) &&
         error("simulation: start_value muss eine positive Zahl sein (Anfangskapital in EUR, z. B. 10000), nicht $(r_deparse(start_value)).")
     start_value = Float64(start_value)
-    if !blocks && (!_is_num(tax_rate) || isnan(Float64(tax_rate)) || tax_rate < 0 || tax_rate > 100)
-        error("simulation: tax_rate muss eine einzelne Zahl in Prozent zwischen 0 und 100 sein (z. B. 26.375 für 26,375 %), nicht $(r_deparse(tax_rate)).")
-    end
+    # Steuer-, Kosten-, Termin- und Split-Angaben haben die Bausteine geprüft (C19: die Prüfungen des flachen Wegs
+    # sind entfallen); fractions und risk_free prüft simulation() selbst
     tax_rate = Float64(tax_rate)
-    !blocks && 0 < tax_rate < 1 && @warn "simulation: tax_rate = $(r_format1(tax_rate)) wird als $(r_format1(tax_rate)) % gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(tax_rate * 100))."
-    if church_tax !== nothing
-        if !blocks && (!_is_num(church_tax) || isnan(Float64(church_tax)) || church_tax < 0 || church_tax > 100)
-            error("simulation: church_tax muss eine Zahl in Prozent zwischen 0 und 100 sein (in Deutschland 8 oder 9), nicht $(join(r_format(church_tax), ", ")).")
-        end
-        church_tax = Float64(church_tax)
-        if blocks
-        elseif 0 < church_tax < 1
-            @warn "simulation: church_tax = $(r_format1(church_tax)) wird als $(r_format1(church_tax)) % gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(church_tax * 100))."
-        elseif church_tax > 9
-            @warn "simulation: church_tax = $(r_format1(church_tax)) % ist ungewöhnlich hoch (Kirchensteuer in Deutschland: 8 oder 9 %)."
-        end
-    end
-    !blocks && _is_true(harvest_mode) && tax_mode != "person" && @warn "simulation: harvest_mode wirkt nur mit tax_mode = \"person\" und wird hier ignoriert."
-    function chk_num(x, arg, what; mn = 0.0, null_ok = false)
-        (x === nothing && null_ok || blocks) && return
-        if !_is_num(x) || !isfinite(Float64(x)) || (mn !== nothing && x < mn)
-            error("simulation: '$arg' muss $what sein, nicht $(_show_arg(x)).")
-        end
-    end
-    chk_num(sparer_pauschbetrag, "sparer_pauschbetrag", "eine einzelne endliche Zahl >= 0 (EUR je Jahr, z. B. 1000)")
-    chk_num(private_sale_threshold, "private_sale_threshold", "eine einzelne endliche Zahl >= 0 (Freigrenze in EUR, z. B. 1000)")
-    chk_num(base_rate, "base_rate", "NULL oder eine einzelne endliche Zahl (Basiszins in Prozent, z. B. 2.29; negativ erlaubt)";
-            mn = nothing, null_ok = true)
-    chk_num(marginal_tax_rate, "marginal_tax_rate", "NULL oder eine einzelne Zahl in Prozent von 0 bis 50 (z. B. 42)"; null_ok = true)
-    chk_num(balance_thresh, "balance_thresh", "NULL oder eine einzelne endliche Zahl >= 0 in Prozent (z. B. 5)"; null_ok = true)
-    for (a, x) in (("use_guenstigerpruefung", use_guenstigerpruefung), ("include_soli_on_income_tax", include_soli_on_income_tax),
-                   ("fractions", fractions), ("use_sparer_pauschbetrag", use_sparer_pauschbetrag))
-        (!blocks || a == "fractions") && !(x isa Bool) && error("simulation: '$a' muss TRUE oder FALSE sein, nicht $(_show_arg(x)).")
-    end
+    church_tax !== nothing && (church_tax = Float64(church_tax))
+    !(fractions isa Bool) && error("simulation: 'fractions' muss TRUE oder FALSE sein, nicht $(_show_arg(fractions)).")
     sparer_pauschbetrag = Float64(sparer_pauschbetrag)
     private_sale_threshold = Float64(private_sale_threshold)
-    function frac_warn(x, arg, hi = 1.0)
-        blocks && arg != "risk_free" && return
-        if _is_num(x) && isfinite(Float64(x)) && 0 < x < hi
-            @warn "simulation: $arg = $(r_format1(x)) wird als $(r_format1(x)) % gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(x * 100))."
-        end
+    if _is_num(risk_free) && isfinite(Float64(risk_free)) && 0 < risk_free < 0.05
+        @warn "simulation: risk_free = $(r_format1(risk_free)) wird als $(r_format1(risk_free)) % gelesen (Prozent-Konvention); gemeint war vermutlich $(r_format1(risk_free * 100))."
     end
-    frac_warn(base_rate, "base_rate", 0.05)
-    frac_warn(marginal_tax_rate, "marginal_tax_rate")
-    frac_warn(balance_thresh, "balance_thresh", 0.2)
-    frac_warn(risk_free, "risk_free", 0.05)
     risk_free isa AbstractString && haskey(fr, risk_free) && _frac_warn_col(fr, String(risk_free), "risk_free", 0.05)
-    !blocks && !_is_true(dca_mode) && dca_value !== nothing && @warn "simulation: dca_value wirkt nur mit dca_mode = TRUE und wird ignoriert."
-    if !blocks && !_is_true(balance_mode) && event_col === nothing && balance_thresh !== nothing
-        @warn "simulation: balance_thresh wirkt nur mit balance_mode = TRUE oder event_col (Rebalancing) und wird ignoriert."
-    end
-    event_col === nothing && _g(given, "event_mode") && @warn "simulation: event_mode wirkt nur zusammen mit event_col und wird ignoriert."
-    function check_days(x, arg)
-        (x === nothing || blocks) && return
-        v = _num_vec(x)
-        if v === nothing || any(isnan, v) || any(d -> d < 1 || d > 31 || d != r_round(d), v)
-            shown = r_format(x isa Union{AbstractVector,Tuple} ? collect(Any, x) : x)
-            error("simulation: $arg muss ganze Zahlen von 1 bis 31 enthalten, nicht $(join(shown, ", ")).")
-        end
-    end
-    check_days(dca_days, "dca_days")
-    check_days(balance_days, "balance_days")
-    days_out = Dict{String,Any}()
-    for (a, x) in (("dca_days", dca_days), ("balance_days", balance_days))
-        if x !== nothing && !blocks
-            v = _num_vec(x)
-            u = unique(v)
-            if length(u) < length(v)
-                @warn "simulation: $a enthält doppelte Tage ($(join(r_format(v), ", "))); jeder Tag ergibt nur einen Termin, verwendet wird $a = $(r_deparse(u))."
-                x = u
-            end
-        end
-        days_out[a] = x
-    end
-    dca_days, balance_days = days_out["dca_days"], days_out["balance_days"]
-    if !blocks && _is_true(split_mode) && split_thresh !== nothing
-        st_v = _num_vec(split_thresh)
-        if st_v === nothing || length(st_v) != 2 || any(isnan, st_v)
-            shown = r_format(split_thresh isa Union{AbstractVector,Tuple} ? collect(Any, split_thresh) : split_thresh)
-            error("simulation: split_thresh muss ein Zahlenvektor c(untere, obere) der Länge 2 sein, nicht $(join(shown, ", ")).")
-        end
-        if !(st_v[1] < 100 < st_v[2])
-            @warn "simulation: split_thresh = c($(r_format1(st_v[1])), $(r_format1(st_v[2]))) schließt den Zielkurs 100 nicht ein (erwartet untere < 100 < obere). Ein Split setzt den Kurs auf 100; liegt 100 außerhalb der Schwellen, folgt danach an jedem Tag ein weiterer Split (mit fractions = FALSE jeweils mit Spitzenausgleich)."
-        end
-    end
+    # taxable_income und tax_tariff nur aus income_tariff() in tax_profile(), also nur mit tax_mode = "person"
     tariff_on = taxable_income !== nothing && tax_mode == "person"
-    # nur ohne Bausteine möglich (income_tariff() steht in tax_profile())
-    taxable_income !== nothing && tax_mode != "person" && @warn "simulation: taxable_income wirkt nur bei tax_mode = \"person\" (hier \"$tax_mode\") und wird ignoriert."
-    taxable_income === nothing && tariff !== nothing && @warn "simulation: tax_tariff wirkt nur zusammen mit taxable_income (zu versteuerndes Einkommen je Jahr) und wird ignoriert."
     tariff_env = nothing
     if tariff_on
         y0, y1 = year_of(Int(minimum(dvals))), year_of(Int(maximum(dvals)))
@@ -372,21 +284,12 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         tariff_env.church_k = (church_tax !== nothing && church_tax > 0) ? church_tax / 100 : 0.0
         tariff_env.kapest_rate = 0.25 / (1 + 0.25 * tariff_env.church_k)
         tariff_env.use_gp = use_guenstigerpruefung
-        ign = [a for (a, g) in (("marginal_tax_rate", _g(given, "marginal_tax_rate") && marginal_tax_rate !== nothing),
-                                ("include_soli_on_income_tax", _g(given, "include_soli_on_income_tax")),
-                                ("soli_rate_income_tax", _g(given, "soli_rate_income_tax"))) if g]
-        isempty(ign) || @warn "simulation: Mit taxable_income gilt der Einkommensteuertarif der Tarifdatei (ESt und Soli); $(join(ign, ", ")) wirkt dann nicht."
     end
     is_private(a) = get(a, "tax_regime", nothing) == "private_sale" || get(a, "asset_class", nothing) == "etn_deliverable" ||
                     (get(a, "asset_class", nothing) in ("etn", "etc") && _is_true(get(a, "deliverable", nothing)))
     has_private_sale = any(p -> is_private(p.second), strat)
-    if has_private_sale && marginal_tax_rate === nothing && tax_mode == "person" && !tariff_on && blocks
+    if has_private_sale && marginal_tax_rate === nothing && tax_mode == "person" && !tariff_on
         @warn "simulation: Der Grenzsteuersatz ist nicht gesetzt (tax_profile(income = income_rate(marginal_rate))), die Strategie enthält aber Assets mit tax_regime = \"private_sale\"; Gewinne nach Paragraf 23 EStG werden dann möglicherweise nicht korrekt besteuert. income_rate(marginal_rate) in Prozent angeben (z. B. 42)."
-    elseif has_private_sale && marginal_tax_rate === nothing && tax_mode == "person" && !tariff_on
-        @warn "simulation: marginal_tax_rate ist nicht gesetzt, die Strategie enthält aber Assets mit tax_regime = \"private_sale\"; Gewinne nach Paragraf 23 EStG werden dann möglicherweise nicht korrekt besteuert. marginal_tax_rate in Prozent angeben (z. B. 42)."
-    end
-    if !blocks && marginal_tax_rate !== nothing && (marginal_tax_rate < 0 || marginal_tax_rate > 50)
-        error("simulation: marginal_tax_rate muss ein Grenzsteuersatz in Prozent zwischen 0 und 50 sein (z. B. 42 für 42 %), nicht $(r_deparse(marginal_tax_rate)).")
     end
     # Kirchensteuer, Prozent-Konvention und Günstigerprüfung: _tax_rates() (unten, nach der Gewichtssumme)
     bth = balance_thresh === nothing ? nothing : Float64(balance_thresh) / 100
@@ -394,17 +297,7 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     fee_order = _fee_spec(order_fee)
     fee_dca = dca_fee === nothing ? fee_order : _fee_spec(dca_fee)
     fees_on = fee_order !== nothing || fee_dca !== nothing
-    if _is_true(harvest_mode) && !blocks
-        if !(harvest_day isa AbstractString) || !occursin(r"^\d{2}-\d{2}$", harvest_day) || harvest_day >= "12-31"
-            error("harvest_day im Format 'MM-TT' und vor dem 31.12. angeben (z. B. '12-15').")
-        end
-    end
     if _truthy_mode(dca_mode)
-        one_num(x) = _is_num(x) && isfinite(Float64(x))
-        !blocks && (!one_num(dca_value) || dca_value <= 0) &&
-            error("simulation: 'dca_value' muss bei dca_mode = TRUE eine einzelne endliche Zahl > 0 sein (Betrag je Sparplan-Termin in EUR), nicht $(_show_arg(dca_value)).")
-        !blocks && (!one_num(dca_span) || dca_span < 1 || dca_span != r_round(Float64(dca_span))) &&
-            error("simulation: 'dca_span' muss bei dca_mode = TRUE eine einzelne ganze Zahl >= 1 sein (Perioden zwischen zwei Terminen), nicht $(_show_arg(dca_span)).")
         dca_value = Float64(dca_value)
     end
     shares = Float64[(s = get(a, "share", nothing); s === nothing ? NA : Float64(s)) for (_, a) in strat]
@@ -416,8 +309,7 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     # Steuersätze (Kirchensteuer, Prozent -> Anteil, Günstigerprüfung) im gemeinsamen Helfer (6.5b, auch für
     # withdrawal_simulation()); Rechenfolge, Warnungen und Druck wie bisher an dieser Stelle
     tr = _tax_rates(tax_rate, church_tax, use_guenstigerpruefung, marginal_tax_rate, include_soli_on_income_tax,
-                    soli_rate_income_tax, "simulation"; details = details == true, blocks = blocks,
-                    rate_given = _g(given, "tax_rate"), tariff_on = tariff_on, io = io)
+                    soli_rate_income_tax, "simulation"; details = details == true, tariff_on = tariff_on, io = io)
     tax_rate = tr.tax_rate; mtr = tr.marginal_tax_rate; effective_tax_rate = tr.effective_tax_rate
     soli_factor_income = tr.soli_factor_income; church_k = tr.church_k
     cfg = Cfg(tax_mode, start_value, tax_rate, mtr, effective_tax_rate, soli_factor_income, church_k, tariff_env,
@@ -440,13 +332,13 @@ function _locf_fill(v::Vector{Float64})
     return out
 end
 
-function _sim_prepare_data(fr::_Frame, pre_filled::BitVector, base_rate_flex, base_rate_data, blocks::Bool = false)
+function _sim_prepare_data(fr::_Frame, pre_filled::BitVector, base_rate_flex, base_rate_data)
     @nospecialize
     dates = fr.cols["date"]::Vector{Float64}
     start_date = Int(dates[1])
     stopp_date = Int(dates[end])
     flex = _is_true(base_rate_flex) && base_rate_data isa AbstractString && haskey(fr, base_rate_data)
-    flex && _frac_warn_col(fr, String(base_rate_data), blocks ? "base_rate" : "base_rate_data", 0.05)
+    flex && _frac_warn_col(fr, String(base_rate_data), "base_rate", 0.05)
     if flex
         col = fr.cols[base_rate_data]
         k = fr.kinds[base_rate_data]
@@ -516,8 +408,7 @@ function _signal_col(fr::_Frame, col, n::Int)
 end
 
 function _sim_build_state(fr::_Frame, strategy, start_value::Float64, start_date::Int, stopp_date::Int,
-                          sparer_pauschbetrag::Float64, use_spb::Bool, base_rate, base_rate_flex, base_rate_data,
-                          blocks::Bool = false)
+                          sparer_pauschbetrag::Float64, use_spb::Bool, base_rate, base_rate_flex, base_rate_data)
     @nospecialize
     n = _fnrow(fr)
     totals = Totals(0.0, 0.0, 0.0, 0.0, 0.0, sparer_pauschbetrag, use_spb ? sparer_pauschbetrag : 0.0,
@@ -551,8 +442,7 @@ function _sim_build_state(fr::_Frame, strategy, start_value::Float64, start_date
         if _truthy_mode(base_rate_flex)
             if base_rate_data === nothing || !haskey(fr, base_rate_data)
                 base_rate_data === nothing && error("simulation: base_rate_flex = TRUE braucht base_rate_data (Name der Basiszins-Spalte in data, Prozent p. a.); base_rate_data fehlt.")
-                blocks && error("simulation: base_rate-Spalte '$base_rate_data' fehlt in data (tax_profile(base_rate = \"$base_rate_data\") braucht eine Basiszins-Spalte in Prozent p. a.; vorhanden: $(join(fr.names, ", "))).")
-                error("simulation: base_rate_data-Spalte '$base_rate_data' fehlt in data (base_rate_flex = TRUE braucht eine Basiszins-Spalte in Prozent p. a.; vorhanden: $(join(fr.names, ", "))).")
+                error("simulation: base_rate-Spalte '$base_rate_data' fehlt in data (tax_profile(base_rate = \"$base_rate_data\") braucht eine Basiszins-Spalte in Prozent p. a.; vorhanden: $(join(fr.names, ", "))).")
             end
             col = fr.cols[base_rate_data]
             br = Float64[_isna_val(x) ? 0.0 : Float64(x) for x in col]
@@ -575,7 +465,7 @@ Stufe 2 der Kern (core/prepare_core_impl.h, über `_sim_engine_run!`)."""
 function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, stopp_date::Int, liquidate,
                              dca_mode, dca_span, dca_unit, dca_days, dca_value, dca_anchor, dca_start, dca_skip,
                              balance_mode, balance_span, balance_unit, balance_days, balance_anchor, balance_start,
-                             balance_skip, event_col, event_mode, event_weight, blocks::Bool = false)
+                             balance_skip, event_col, event_mode, event_weight)
     @nospecialize
     flag_date = collect(start_date:stopp_date)
     n = length(flag_date)
@@ -586,7 +476,7 @@ function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, st
         (!_is_true(mode) || sd0 === nothing) && continue
         sd1 = _as_date(sd0)
         sd1 === nothing && error("simulation: $(a)_start = '$(sd0 isa AbstractString ? sd0 : r_format1(sd0))' ist kein Datum (erwartet Date oder \"JJJJ-MM-TT\").")
-        sd1 > stopp_date && error("simulation: $(blocks ? "start von " * (a == "dca" ? "dca_plan()" : "rebalance_plan()") : a * "_start") ($(fmt_date(sd1))) liegt nach dem letzten Datentag ($(fmt_date(stopp_date))); es gäbe keine Termine.")
+        sd1 > stopp_date && error("simulation: $("start von " * (a == "dca" ? "dca_plan()" : "rebalance_plan()")) ($(fmt_date(sd1))) liegt nach dem letzten Datentag ($(fmt_date(stopp_date))); es gäbe keine Termine.")
     end
     balance = _sched_spec(balance_mode, balance_span, balance_unit, balance_days, flag_date, nothing, balance_anchor,
                          balance_start, balance_skip)

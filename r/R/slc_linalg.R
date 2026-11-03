@@ -3,7 +3,7 @@
 # (interne Funktionen .sl_*).
 #
 # Die Rechnung steht in src/slc_linalg.c, slc_matmul.c, slc_lsq.c, slc_stine.c, slc_spline.c und
-# slc_kde.c (Kopien von core/, tools/core_sync.py), die .Call-Huellen in src/slc_r_linalg.c
+# slc_kde.c (Kopien von core/, core/sync.py), die .Call-Huellen in src/slc_r_linalg.c
 # (Registrierung in src/init.c, Block 9.2). Gegenstuecke: python/simlev/_lib_linalg.py und
 # julia/src/slib_linalg.jl. Fehlertexte und Warnungen kommen aus dem Kern.
 #
@@ -37,9 +37,6 @@
   out <- .Call(C_sl_trisolve, r, b, as.logical(upper.tri), as.logical(transpose))
   if (vec) .sl_dvec(out) else { dimnames(out) <- NULL; out }
 }
-
-.sl_forwardsolve <- function(l, x, upper.tri = FALSE, transpose = FALSE)
-  .sl_backsolve(l, x, upper.tri = upper.tri, transpose = transpose)
 
 # solve(a, b) fuer symmetrisch positiv definites a (oberes Dreieck gelesen); ohne b die Inverse
 .sl_solve_spd <- function(a, b = NULL) {

@@ -31,7 +31,7 @@
 // tariff_core_impl.h). R bindet sie ueber r/src/engine_core.cpp ein, Python ueber
 // python/src/_ext_engine.cpp, Julia ueber core/simlev_cabi.cpp (simlev_c_engine_*). Alle drei fuellen
 // dieselbe flache Eingabe (struct Input, Felder unten) und lesen die Ergebnisse ueber die Methoden *_out.
-// Kanonisch in core/; R, Python und Julia bauen aus Byte-fuer-Byte-Kopien (tools/core_sync.py --write/--check).
+// Kanonisch in core/; R, Python und Julia bauen aus Byte-fuer-Byte-Kopien (core/sync.py --write/--check).
 //
 // Regeln (wie die uebrigen Engine-Kerne, simlev_core.h):
 //   - Gleitkomma: kein fast-math, kein fma (-ffp-contract=off bzw. Pragma unten); Rechenreihenfolge wie
@@ -219,7 +219,8 @@ enum Reason : int {
 // Bezeichnungen der Steuerzahlungen (.pay_tax label)
 enum Label : int { LBL_VP = 0, LBL_P23 = 1, LBL_VERANLAGUNG = 2 };
 
-// Stellen (site) der Aufrufe bzw. Bedingungen; die Hosts ordnen jeder den Aufruf von R zu
+// Stellen (site) der Aufrufe bzw. Bedingungen (Anlass der Verkaeufe, sell_reason; bis R 1.3.0 ordnete R jeder
+// Stelle den Aufruf der Phase zu, seit C19 tragen die Bedingungen den Aufruf von simulation())
 enum Site : int {
   // Kaeufe (.perform_trade_buy)
   S_BUY_FEE_START = 1,  // .buy_with_fee: Startkapital am ersten Tag (sim_actions.R)

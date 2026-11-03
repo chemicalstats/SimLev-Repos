@@ -27,12 +27,9 @@ from typing import Any, Mapping, Sequence
 
 from . import _sim_base as _base
 from ._sim_base import (
-    _Default,
     _num_vec,
-    _unwrap,
     calculate_dates_flags,
     calculate_kurtosis,
-    calculate_partials,
     calculate_skewness,
     xirr_rate,
 )
@@ -50,8 +47,8 @@ from ._sim_evaluate import (
     _sim_result,
 )
 
-__all__ = ["simulation", "_simulation_flat", "calculate_skewness", "calculate_kurtosis", "calculate_partials",
-           "calculate_dates_flags", "xirr_rate"]
+__all__ = ["simulation", "_simulation_flat", "calculate_skewness", "calculate_kurtosis", "calculate_dates_flags",
+           "xirr_rate"]
 
 # Wiederausgabe interner Namen, die andere Module über ``engine`` nutzen
 # (``config.py``: ``_as_date``, ``dashboard.py``: ``_r_class_name``)
@@ -108,7 +105,7 @@ def simulation(
         costs = _blocks.sim_costs()
     flat = _blocks._sim_from_blocks(costs, dca, rebalance, splits, tax)
     return _simulation_flat(data, strategy, start_value=start_value, risk_free=risk_free, fractions=fractions,
-                            liquidate=liquidate, details=details, _blocks=True, **flat)
+                            liquidate=liquidate, details=details, **flat)
 
 
 def _simulation_flat(
@@ -140,14 +137,14 @@ def _simulation_flat(
     balance_thresh_type: str | Sequence[str] = ("absolute", "relative"),
     # Steuern
     tax_mode: str | Sequence[str] = ("none", "person"),
-    tax_rate: float = _Default(26.375),
-    marginal_tax_rate: float | None = _Default(None),
+    tax_rate: float = 26.375,
+    marginal_tax_rate: float | None = None,
     use_guenstigerpruefung: bool = False,
     private_sale_threshold: float = 1000,
     sparer_pauschbetrag: float = 1000,
     use_sparer_pauschbetrag: bool = True,
-    include_soli_on_income_tax: bool = _Default(False),
-    soli_rate_income_tax: float = _Default(5.5),
+    include_soli_on_income_tax: bool = False,
+    soli_rate_income_tax: float = 5.5,
     # Basiszins
     base_rate: float | None = None,
     base_rate_flex: bool = False,
@@ -159,7 +156,7 @@ def _simulation_flat(
     split_thresh: Sequence[float] | None = None,
     # Ereignisbasiertes Rebalancing
     event_col: str | None = None,
-    event_mode: str | Sequence[str] = _Default(("additional", "replace")),
+    event_mode: str | Sequence[str] = ("additional", "replace"),
     event_weight: Mapping[str, str] | None = None,
     # Deutsche Praxis
     church_tax: float | None = 0,
@@ -171,12 +168,12 @@ def _simulation_flat(
     # Einkommensteuertarif
     taxable_income: Any = None,
     tax_tariff: Any = None,
-    _blocks: bool = False,
 ):
     """Engine von ``simulation()`` mit den internen (flachen) Argumenten (R: ``.simulation_flat``).
 
-    ``simulation()`` ruft sie mit den aus den Bausteinen übersetzten Werten auf (``_blocks=True``). Die
-    Aufrufer mit ``sim_args`` gehen seit Etappe 6.4 über ``simulation()`` (``_sim_blocks._sim_args_set``).
+    ``simulation()`` ruft sie mit den aus den Bausteinen übersetzten Werten auf (einziger Aufrufer; C19: der flache
+    Weg ohne Bausteine mit eigenen Prüfungen ist entfallen). Die Aufrufer mit ``sim_args`` gehen seit Etappe 6.4
+    über ``simulation()`` (``_sim_blocks._sim_args_set``).
 
     Bitgleiche Portierung der Rechnung von ``simulation()`` aus dem R-Paket SimLev 0.5.0. Alle Raten und
     Schwellen werden **in Prozent** angegeben (``tax_rate=26.375``, ``balance_thresh=5``,
@@ -200,20 +197,9 @@ def _simulation_flat(
     ``tax_report``, ``undefined_metrics``, ``open_lots``, ggf. ``fees_paid`` und
     ``harvest_days``).
     """
-    given = {k: False for k in ("tax_rate", "marginal_tax_rate", "include_soli_on_income_tax", "soli_rate_income_tax",
-                                "event_mode")} if _blocks else {
-        "tax_rate": not isinstance(tax_rate, _Default),
-        "marginal_tax_rate": not isinstance(marginal_tax_rate, _Default),
-        "include_soli_on_income_tax": not isinstance(include_soli_on_income_tax, _Default),
-        "soli_rate_income_tax": not isinstance(soli_rate_income_tax, _Default),
-        "event_mode": not isinstance(event_mode, _Default),
-    }
-    tax_rate, marginal_tax_rate = _unwrap(tax_rate), _unwrap(marginal_tax_rate)
-    include_soli_on_income_tax, soli_rate_income_tax = _unwrap(include_soli_on_income_tax), _unwrap(soli_rate_income_tax)
-    event_mode = _unwrap(event_mode)
     cfg = _sim_check_inputs(
         data=data, strategy=strategy, start_value=start_value, spread=spread, details=details,
-        dca_mode=dca_mode, dca_value=dca_value, dca_span=dca_span, dca_days=dca_days, balance_mode=balance_mode,
+        dca_mode=dca_mode, dca_value=dca_value, dca_days=dca_days, balance_mode=balance_mode,
         balance_days=balance_days, balance_thresh=balance_thresh, balance_thresh_type=balance_thresh_type,
         tax_mode=tax_mode, tax_rate=tax_rate, marginal_tax_rate=marginal_tax_rate,
         use_guenstigerpruefung=use_guenstigerpruefung, private_sale_threshold=private_sale_threshold,
@@ -221,19 +207,19 @@ def _simulation_flat(
         include_soli_on_income_tax=include_soli_on_income_tax, soli_rate_income_tax=soli_rate_income_tax,
         base_rate=base_rate, fractions=fractions, risk_free=risk_free,
         split_mode=split_mode, split_thresh=split_thresh, event_col=event_col, church_tax=church_tax,
-        order_fee=order_fee, dca_fee=dca_fee, harvest_mode=harvest_mode, harvest_day=harvest_day,
-        taxable_income=taxable_income, tariff=tax_tariff, given=given, blocks=_blocks)
+        order_fee=order_fee, dca_fee=dca_fee, harvest_mode=harvest_mode,
+        taxable_income=taxable_income, tariff=tax_tariff)
     if split_thresh is not None:
         split_thresh = _num_vec(split_thresh)
-    prep = _sim_prepare_data(cfg["data"], cfg["pre_filled"], base_rate_flex, base_rate_data, blocks=_blocks)
+    prep = _sim_prepare_data(cfg["data"], cfg["pre_filled"], base_rate_flex, base_rate_data)
     sim = _sim_build_state(prep["data"], cfg["strategy"], cfg["start_value"], prep["start_date"],
                            prep["stopp_date"], cfg["sparer_pauschbetrag"], cfg["use_sparer_pauschbetrag"],
-                           cfg["base_rate"], base_rate_flex, base_rate_data, blocks=_blocks)
+                           cfg["base_rate"], base_rate_flex, base_rate_data)
     cal = _sim_build_calendar(prep["data"], sim, cfg["strategy"], prep["start_date"], prep["stopp_date"],
                               liquidate, cfg["dca_mode"], dca_span, dca_unit, cfg["dca_days"], cfg["dca_value"],
                               dca_anchor, dca_start, dca_skip, cfg["balance_mode"], balance_span, balance_unit,
                               cfg["balance_days"], balance_anchor, balance_start, balance_skip, cfg["event_col"],
-                              event_mode, event_weight, blocks=_blocks)
+                              event_mode, event_weight)
     fr = cal["data"]
     fl = cal["flags"]
     if cfg["event_col"] is not None:

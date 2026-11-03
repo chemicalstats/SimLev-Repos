@@ -32,6 +32,16 @@
 #                              (core/prepare_core_impl.h); Referenz aus R 1.3.0 wie sim_fuzz
 #   metric_fuzz.R (1.4.0)       Fuzz der Kennzahlen (core/evaluate_core_impl.h) quick 300, full 2000 Fälle
 #                              .xirr_rate direkt und simulation(); Referenz aus R 1.3.0 wie sim_fuzz
+#   approx_fuzz.R (1.5.0)      approx/approxfun (core/slc_rbase.c, sl_r_approx) quick 300, full 2000 Fälle
+#                              und planning_goal; Referenz aus R 1.4.2 (Pflicht: SIMLEV_FUZZ_REFLIB142, Standard
+#                              /home/claude/rlib142), dagegen R neu, Python und Julia wie sim_fuzz
+#   wd_fuzz.R (1.5.0)          Auswertung der Entnahme (core/withdrawal_core_impl.h) quick 300, full 2000 Fälle
+#                              withdrawal_perfect_rate, withdrawal_simulation (Horizont, Steuer, Tarifweg),
+#                              withdrawal_max_rate; Referenz aus R 1.4.2 wie approx_fuzz
+#   hmm_fuzz.R (1.5.0)         regime_hmm (HMM-EM im Kern, hmm_em)          quick 300, full 2000 Fälle
+#   goal_fuzz.R (1.5.0)        planning_goal (Rekursion im Kern, goal_dp)   quick 300, full 2000 Fälle
+#   pbo_fuzz.R (1.5.0)         overfit_pbo (CSCV im Kern, pbo_cscv)         quick 300, full 2000 Fälle
+#                              alle drei mit Referenz aus R 1.4.2 wie approx_fuzz
 # 6 Abdeckung der Exporte durch die Katalogfälle (exporte.py). Ende 1, wenn eine Sprache abweicht, ein Schritt
 # scheitert, R vom Katalog abweicht oder core/sync.py --check abweicht. Läufe nie parallel im selben Arbeitsordner.
 set -uo pipefail
@@ -53,7 +63,9 @@ while (($#)); do
   shift
 done
 if [[ $mode == quick ]]; then sub=20; ng=10; ns=20; fz_date=500; fz_rb=200; fz_tt=200; fz_sim=300; fz_sched=300; fz_met=300
-else sub=1; ng=500; ns=1000; fz_date=10000; fz_rb=5000; fz_tt=10000; fz_sim=2000; fz_sched=2000; fz_met=2000; fi
+  fz_apx=300; fz_wd=300; fz_hmm=300; fz_goal=300; fz_pbo=300
+else sub=1; ng=500; ns=1000; fz_date=10000; fz_rb=5000; fz_tt=10000; fz_sim=2000; fz_sched=2000; fz_met=2000
+  fz_apx=2000; fz_wd=2000; fz_hmm=2000; fz_goal=2000; fz_pbo=2000; fi
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 rep="$out/bericht.txt"; : > "$rep"
@@ -179,6 +191,24 @@ if ((engine)) || [[ $mode == full ]]; then
     step "Python metric_fuzz gegen R 1.3.0" "$out/fz_metric_py.txt" python3 tests/werkzeuge/gleichlauf/vergleich.py "$fz/metric_ref/metric_fuzz.jsonl.gz"
     step "Julia metric_fuzz gegen R 1.3.0" "$out/fz_metric_jl.txt" julia --project=julia tests/werkzeuge/gleichlauf/vergleich.jl "$fz/metric_ref/metric_fuzz.jsonl.gz"
   fi
+  # Zufallsfälle der in 1.5.0 in den Kern verlagerten Teile (approx, Entnahme-Auswertung, HMM-EM, Zielplanung, CSCV);
+  # Referenz aus R 1.4.2 (Pflicht)
+  reflib142="${SIMLEV_FUZZ_REFLIB142:-/home/claude/rlib142}"
+  for fzn in approx:$fz_apx:20261104 wd:$fz_wd:20261105 hmm:$fz_hmm:20261106 goal:$fz_goal:20261107 pbo:$fz_pbo:20261108; do
+    IFS=: read -r fzm fzk fzs <<< "$fzn"
+    rm -rf "$fz/${fzm}_ref" "$fz/${fzm}_new"; mkdir -p "$fz/${fzm}_ref" "$fz/${fzm}_new"
+    if [[ ! -d "$reflib142/SimLev" ]]; then
+      note "FEHLER  ${fzm}_fuzz: Referenzbibliothek R 1.4.2 fehlt ($reflib142; SIMLEV_FUZZ_REFLIB142)"; status=1
+    elif step "erzeugen ${fzm}_fuzz Referenz R 1.4.2 ($fzk)" "$out/fz_${fzm}_ref.txt" \
+           env R_LIBS="$reflib142" SIMLEV_FAELLE_DIR="$fz/${fzm}_ref" Rscript tests/werkzeuge/gleichlauf/${fzm}_fuzz.R $fzk $fzs \
+       && step "erzeugen ${fzm}_fuzz R neu ($fzk)" "$out/fz_${fzm}_new.txt" \
+           env SIMLEV_FAELLE_DIR="$fz/${fzm}_new" Rscript tests/werkzeuge/gleichlauf/${fzm}_fuzz.R $fzk $fzs; then
+      step "Vergleich ${fzm}_fuzz R neu gegen R 1.4.2" "$out/fz_${fzm}_r.txt" \
+        python3 -I tests/werkzeuge/gleichlauf/sim_fuzz_cmp.py "$fz/${fzm}_ref/${fzm}_fuzz.jsonl.gz" "$fz/${fzm}_new/${fzm}_fuzz.jsonl.gz"
+      step "Python ${fzm}_fuzz gegen R 1.4.2" "$out/fz_${fzm}_py.txt" python3 tests/werkzeuge/gleichlauf/vergleich.py "$fz/${fzm}_ref/${fzm}_fuzz.jsonl.gz"
+      step "Julia ${fzm}_fuzz gegen R 1.4.2" "$out/fz_${fzm}_jl.txt" julia --project=julia tests/werkzeuge/gleichlauf/vergleich.jl "$fz/${fzm}_ref/${fzm}_fuzz.jsonl.gz"
+    fi
+  done
 fi
 
 # 6. Abdeckung der Exporte durch den Katalog (Bericht; ohne Fall nur export_dashboard, schreibt eine Datei)
@@ -192,7 +222,9 @@ for f in py_ref jl_ref; do
   note "== $f"; grep -E "bitgleich|^Gesamt" "$out/$f.txt" | tee -a "$rep" > /dev/null
   grep -E "^Gesamt" "$out/$f.txt" | sed 's/^/   /'
 done
-for f in faelle_diff fz_date_py fz_date_jl fz_rbase_py fz_rbase_jl fz_tariff fz_sim_r fz_sim_py fz_sim_jl fz_sched_r fz_sched_py fz_sched_jl fz_metric_r fz_metric_py fz_metric_jl; do
+for f in faelle_diff fz_date_py fz_date_jl fz_rbase_py fz_rbase_jl fz_tariff fz_sim_r fz_sim_py fz_sim_jl fz_sched_r fz_sched_py fz_sched_jl fz_metric_r fz_metric_py fz_metric_jl \
+         fz_approx_r fz_approx_py fz_approx_jl fz_wd_r fz_wd_py fz_wd_jl fz_hmm_r fz_hmm_py fz_hmm_jl \
+         fz_goal_r fz_goal_py fz_goal_jl fz_pbo_r fz_pbo_py fz_pbo_jl; do
   [[ -f "$out/$f.txt" ]] || continue
   note "== $f"; grep -E "textgleich|gleich$|gleich \(|^Gesamt|^GESAMT|^sim_fuzz|^[a-z0-9_]+ +[0-9]+ +[0-9]+/[0-9]+" "$out/$f.txt" | tee -a "$rep" > /dev/null
   grep -E "^Gesamt|^GESAMT" "$out/$f.txt" | sed 's/^/   /'

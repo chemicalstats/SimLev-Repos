@@ -418,12 +418,6 @@ end
 # planning_goal
 # ═══════════════════════════════════════════════════════════════════════════
 
-"`approx(x, y, xout, rule = 2)\$y`."
-function _approx2(x, y, xout)
-    r = SimLev.RStats.approx(collect(Float64, x), collect(Float64, y); xout = collect(Float64, xout), rule = 2)
-    DA._vecf(DA._rget(r, "y"))
-end
-
 _fmt_vals(v) = join(DA._format(v isa Union{AbstractVector,Tuple} ? (all(DA._isnum_el, v) ? DA._f64(v) : collect(v)) : v), ", ")
 
 "`as.matrix(returns)` → (Matrix, Spaltennamen, numerisch?)."
@@ -567,69 +561,19 @@ function planning_goal(returns, start_value, goal, horizon; contributions = 0, n
     grid = sort(unique(pts))
     ng = length(grid)
     lgrid = SimLev.RLibm.log.(grid)
-    term(W) = Float64[w >= goal ? 1.0 : 0.0 for w in W]
-    V = term(grid)
-    pol = zeros(Int, horizon, ng)
-    Vt = Vector{Any}(undef, horizon + 1); Vt[horizon+1] = V
-    function interp(Vn, W)
-        W = W isa AbstractVector ? W : [Float64(W)]
-        out = zeros(length(W))
-        for i in eachindex(W)
-            W[i] >= wmax && (out[i] = wmax >= goal ? 1.0 : 0.0)
-            W[i] <= 0 && (out[i] = 0.0)
-        end
-        mid = findall(w -> w > 0 && w < wmax, W)
-        if !isempty(mid)
-            z = DA._vecf(SimLev.SLib.qnorm(Float64[min(1 - 1e-12, max(1e-12, v)) for v in Vn]))
-            Wm = W[mid]
-            pn = DA._vecf(SimLev.SLib.pnorm(Float64.(_approx2(lgrid, z, SimLev.RLibm.log.(Wm)))))
-            alt = goal > 0 ? 0.0 : Float64(Vn[1])
-            for (q, i) in enumerate(mid)
-                out[i] = Wm[q] < wmin ? alt : pn[q]
-            end
-        end
-        out
-    end
-    function expect(Vn, base, k, last)
-        Rk = R[:, k]
-        X = [b * r for b in base, r in Rk]
-        xv = vec(X)
-        v = reshape(last ? term(xv) : interp(Vn, xv), size(X))
-        e = DA._row_means(v)
-        e[base .<= 0] .= 0.0
-        e
-    end
-    static = zeros(K)
-    for k in 1:K
-        Vs = V
-        for t in horizon:-1:1
-            Vs = expect(Vs, grid .+ cf[t], k, t == horizon)
-        end
-        static[k] = interp(Vs, start_value)[1]
-    end
+    # Rückwärtsrekursion im Kern (core/research_core_impl.h, goal_dp; bis 1.4.3 hier in Julia); Gleichstand
+    # (innerhalb 1e-9): Kandidat mit der geringsten Streuung der Log-Renditen
     lr = SimLev.RLibm.log.(max.(R, 1e-300))
     sds = Float64[SimLev.r_sd(lr[:, j]) for j in 1:K]
     risk_rank = zeros(Int, K); risk_rank[sortperm(sds; alg = MergeSort)] = 1:K
-    tie = Float64.(K + 1 .- risk_rank)
-    for t in horizon:-1:1
-        base = grid .+ cf[t]
-        E = reduce(hcat, [expect(V, base, k, t == horizon) for k in 1:K])
-        E = reshape(E, ng, K)
-        for i in 1:ng
-            mx = DA._rmax(E[i, :])
-            best_j = 0; best_s = -Inf
-            for j in 1:K
-                sc = E[i, j] >= mx - 1e-9 ? tie[j] : 0.0
-                if sc > best_s
-                    best_s = sc; best_j = j
-                end
-            end
-            pol[t, i] = best_j
-        end
-        V = Float64[E[i, pol[t, i]] for i in 1:ng]
-        Vt[t] = V
+    dp = SimLev.DependenceCore.goal_dp(R, grid, cf, goal, wmin, wmax, start_value, Float64.(K + 1 .- risk_rank))
+    for _ in 1:dp.collapsed                         # wie stats::approx bei gleichen log(grid)-Werten
+        @warn "collapsing to unique 'x' values"
     end
-    p_dp = interp(V, start_value)[1]
+    static = dp.static
+    pol = dp.policy
+    Vt = Any[dp.value[:, t] for t in 1:horizon+1]
+    p_dp = dp.p_dp
     function run(rs)
         W = fill(start_value, nsim)
         choice = zeros(Int, horizon, nsim)

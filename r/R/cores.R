@@ -40,6 +40,22 @@
   .Call(C_hmm_forward_backward, B, A, p0)
 }
 
+# Baum-Welch-EM aus einem Startwert (seit 1.5.0): NULL bei Fehler, sonst list(mu, S (d x d x k als Vektor), A, p0, ll,
+# filtered, smoothed, lB, iter)
+.hmm_em_core <- function(X, k, mu, S, A, n_iter, tol, ridge)
+  .Call(C_hmm_em_core, X, as.integer(k), mu, as.numeric(S), A, as.integer(n_iter), as.numeric(tol), ridge)
+
+# Rueckwaertsrekursion von planning_goal() (seit 1.5.0): list(static, policy, value (ng x (horizon + 1)), p_dp,
+# collapsed = Zahl der approx-Aufrufe mit zusammengefassten gleichen log(grid)-Werten)
+.goal_dp <- function(R, grid, cf, goal, wmin, wmax, start_value, tie_score)
+  .Call(C_goal_dp, R, as.numeric(grid), as.numeric(cf), as.numeric(goal), as.numeric(wmin), as.numeric(wmax),
+        as.numeric(start_value), as.numeric(tie_score))
+
+# Aufteilungen der CSCV von overfit_pbo() (seit 1.5.0): list(lambda, is_best, oos_best, oos_median)
+.pbo_cscv <- function(B, T, combos, half, metric, S, N)
+  .Call(C_pbo_cscv, as.numeric(B), as.numeric(T), combos, as.numeric(half),
+        match(metric, c("sharpe", "sortino", "geometric", "mean")) - 1L, as.integer(S), as.integer(N))
+
 .roll_mean_core <- function(x, n) {
   .Call(C_roll_mean_core, x, n)
 }
@@ -71,6 +87,16 @@
   if (!length(tariff_par)) r$tariff_years <- NULL   # Jahreszeilen nur mit Tarifweg (sonst Liste wie bisher)
   r
 }
+
+# Auswertung je Pfad (seit 1.5.0, core/withdrawal_core_impl.h): Kennzahlen der Entnahmen (Liste mean_spending,
+# min_spending, spending_drawdown, ce_spending, total_spending; H = NULL oder Horizont je Pfad), Perfect Withdrawal
+# Rate (Liste pwr, status 0/1 nicht endlich/2 Median < 0.5/3 negativ, path), Jahresprodukte je ppy Perioden und
+# Jahreszeilen des Tarifwegs ohne Jahre NA (Matrix: Pfad, dann die 25 Zeilen von core$tariff_years)
+.wd_metrics <- function(sp, nfy, H, gamma, start_value)
+  .Call(C_wd_metrics, sp, as.integer(nfy), H, as.numeric(gamma), as.numeric(start_value))
+.wd_pwr <- function(AR, legacy, H = NULL) .Call(C_wd_pwr, AR, as.numeric(legacy), H)
+.wd_annual_prod <- function(real, ppy) .Call(C_wd_annual_prod, real, as.integer(ppy))
+.wd_tariff_compact <- function(M, ny) .Call(C_wd_tariff_compact, M, as.integer(ny))
 
 # Pruefzugang zum Tarifkern (core/tariff_core_impl.h) fuer den Zufallsvergleich mit .tariff_income_tax,
 # .tariff_soli und .tariff_close (Gleichlauf: tariff_fuzz.R); mode 1 ESt, 2 Soli, 3 Jahresabschluss

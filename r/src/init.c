@@ -23,6 +23,9 @@ extern SEXP C_min_cvar_core(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_min_cdar_core(SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_quantile_reg_core(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_hmm_forward_backward(SEXP, SEXP, SEXP);
+extern SEXP C_hmm_em_core(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_goal_dp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_pbo_cscv(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_roll_mean_core(SEXP, SEXP);
 extern SEXP C_kendall_tau_core(SEXP, SEXP);
 extern SEXP C_roll_cov_core(SEXP, SEXP, SEXP);
@@ -78,6 +81,10 @@ extern SEXP C_sim_xirr(SEXP, SEXP, SEXP, SEXP);
 /* withdrawal_core.cpp */
 extern SEXP C_wd_simulate(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_wd_tariff_check(SEXP, SEXP, SEXP);
+extern SEXP C_wd_metrics(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_wd_pwr(SEXP, SEXP, SEXP);
+extern SEXP C_wd_annual_prod(SEXP, SEXP);
+extern SEXP C_wd_tariff_compact(SEXP, SEXP);
 /* slc_r_opt.c (Optimierer der C-Bibliothek slc) */
 extern SEXP C_sl_opt_init(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_opt_next(SEXP, SEXP);
@@ -128,6 +135,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"min_cdar_core", (DL_FUNC) &C_min_cdar_core, 5},
     {"quantile_reg_core", (DL_FUNC) &C_quantile_reg_core, 7},
     {"hmm_forward_backward", (DL_FUNC) &C_hmm_forward_backward, 3},
+    {"hmm_em_core", (DL_FUNC) &C_hmm_em_core, 8},
+    {"goal_dp", (DL_FUNC) &C_goal_dp, 8},
+    {"pbo_cscv", (DL_FUNC) &C_pbo_cscv, 7},
     {"roll_mean_core", (DL_FUNC) &C_roll_mean_core, 2},
     {"kendall_tau_core", (DL_FUNC) &C_kendall_tau_core, 2},
     {"roll_cov_core", (DL_FUNC) &C_roll_cov_core, 3},
@@ -225,6 +235,10 @@ static const R_CallMethodDef CallEntries[] = {
     /* withdrawal_core.cpp */
     {"wd_simulate", (DL_FUNC) &C_wd_simulate, 27},
     {"wd_tariff_check", (DL_FUNC) &C_wd_tariff_check, 3},
+    {"wd_metrics", (DL_FUNC) &C_wd_metrics, 5},
+    {"wd_pwr", (DL_FUNC) &C_wd_pwr, 3},
+    {"wd_annual_prod", (DL_FUNC) &C_wd_annual_prod, 2},
+    {"wd_tariff_compact", (DL_FUNC) &C_wd_tariff_compact, 2},
     {NULL, NULL, 0}
 };
 

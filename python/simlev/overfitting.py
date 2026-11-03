@@ -29,6 +29,7 @@ from ._r import libm as _libm
 from . import _lib
 from ._r import fmt as _fmt
 from ._r.rlist import RList
+from . import _dependence_core as _dcore
 from ._r.rnum import r_colmeans, r_colsums, r_rowmeans, r_rowsums, r_mean, r_mean_int, r_median, r_pow, r_prod, r_cumprod, r_sum, r_var, r_sd
 # Grafik: Bausteine des Stils Ergebnisgrafiken und Zahlen wie in Julia aus svg.py
 from .svg import (_jl_unique, _res_abline, _res_fig, _res_finish, _res_hline, _res_legend, _res_line, _res_panel,
@@ -503,37 +504,8 @@ def overfit_pbo(x, *, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
     combos = np.array(list(itertools.combinations(range(S), S // 2)), dtype=np.int64)   # C x S/2
     C = combos.shape[0]
     half = bl * S / 2
-    lam = np.zeros(C)
-    isb = np.zeros(C)
-    oosb = np.zeros(C)
-    oosm = np.zeros(C)
-    for st in range(0, C, 2000):
-        idx = np.arange(st, min(C, st + 2000))
-        k = idx.size
-        Ind = np.zeros((k, S))
-        Ind[np.repeat(np.arange(k), S // 2), combos[idx].ravel()] = 1.0
-        I1, I2, Id, Il, Ic = (_matprod(Ind, B) for B in (B1, B2, Bd, Bl, Bc))
-
-        def rep_t(v):
-            return np.tile(np.asarray(v, float)[None, :], (k, 1))
-        IS = _of_metric(half, I1, I2, Id, Il, metric, c1=Ic)
-        OOS = _of_metric(half, rep_t(T1) - I1, rep_t(T2) - I2, rep_t(Td) - Id, rep_t(Tl) - Il, metric,
-                         c1=rep_t(Tc) - Ic)
-        best = _max_col_first(IS)
-        rows = np.arange(k)
-        bb = np.where(best < 0, 0, best)
-        ob = np.where(best < 0, _NA, OOS[rows, bb])
-        with np.errstate(invalid="ignore"):
-            lt = (OOS < ob[:, None]).astype(np.float64)
-            eq = (OOS == ob[:, None]).astype(np.float64)
-        na = np.isnan(OOS).any(axis=1) | np.isnan(ob)
-        rk = _rowsums(lt) + (_rowsums(eq) + 1) / 2
-        rk[na] = _NA
-        w = rk / (N + 1)
-        lam[idx] = _libm.log(w / (1 - w))
-        isb[idx] = np.where(best < 0, _NA, IS[rows, bb])
-        oosb[idx] = ob
-        oosm[idx] = [r_median(OOS[i]) for i in range(k)]
+    # je Aufteilung im Kern (core/research_core_impl.h, pbo_cscv; bis 1.4.3 hier in Python)
+    lam, isb, oosb, oosm = _dcore.pbo_cscv((B1, B2, Bd, Bl, Bc), (T1, T2, Td, Tl, Tc), combos + 1, half, metric, S, N)
     intercept, slope = _lm_coef(isb, oosb)
     return SimLevPBO(pbo=_mean_lgl(lam <= 0, np.isnan(lam)), **{"lambda": lam}, is_best=isb, oos_best=oosb,
                      oos_median=oosm, slope=slope, intercept=intercept,

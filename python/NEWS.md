@@ -1,5 +1,25 @@
 # simlev (Python) – Änderungen je Version
 
+## simlev (Python) 1.5.0
+
+Minor-Update (R/Python/Julia). Rechenintensive Teile laufen jetzt im gemeinsamen C/C++-Kern (core/) statt in jeder Sprache für sich. Ergebnisse, Ausgaben, Warnungen und Fehler bleiben bitgleich zu 1.4.3; Python und Julia sind in den unten genannten Fällen jetzt wie R.
+
+- withdrawal_simulation(), withdrawal_max_rate(), withdrawal_perfect_rate(): Die Kennzahlen je Pfad (mittlere, kleinste und sicherheitsäquivalente Entnahme, Drawdown der Entnahmen, Summe; auch bis zum Horizont), die Perfect Withdrawal Rate mit ihren Prüfungen, die realen Jahresrenditen aus Perioden und die Jahreszeilen des Tarifwegs rechnet der Kern (core/withdrawal_core_impl.h). Meldungen und ihre Aufrufe bleiben unverändert.
+- regime_hmm(): Der Baum-Welch-EM (E- und M-Schritt, Log-Dichten, Abbruchtest) läuft im Kern (core/research_core_impl.h); Startwerte und Zufall bleiben in der Sprache.
+- planning_goal(): Die Rückwärtsrekursion über das Vermögensgitter (Wertfunktion, Interpolation auf der Probit-Skala, Politik je Periode) läuft im Kern; Gitter und Vorwärtssimulation bleiben in der Sprache.
+- overfit_pbo(): Die Aufteilungen der CSCV (In- und Out-of-Sample-Kennzahlen, bester Punkt, Rang, Logit, Median) laufen im Kern.
+- Laufzeit gegenüber 1.4.3 (Median über 21 Läufe, alt und neu abwechselnd, ein Kern): regime_hmm (k = 2, Wochendaten) R −76 %, Python −72 %, Julia −79 %; overfit_pbo (S = 16) R −86 %, Python −64 %, Julia −50 %; planning_goal (n_grid 101, n_sim 1.000) R −43 %, Python −96 % (5,4 s → 0,23 s), Julia −49 %; withdrawal_simulation (2.000 Pfade, 30 Jahre) R −88 %, Python −81 %, Julia −37 %, mit Einkommensteuertarif R −55 %, Python −30 %, Julia −17 %; withdrawal_max_rate R −75 %, Python −80 %, Julia −21 %. Übrige Aufgaben unverändert (innerhalb der Messstreuung).
+- Tests (Ordner tests des Repositorys): fünf neue Zufallsprüfungen im Gleichlauf mit 1.4.3 als Referenz (approx_fuzz, wd_fuzz, hmm_fuzz, goal_fuzz, pbo_fuzz; quick je 300, full je 2.000 Fälle).
+
+Nur Python und Julia:
+
+- approx() und approxfun() (und damit planning_goal(), Szenarien, backcast_fit()) interpolieren im Kern (core/slc_rbase.c, wie R's approx.c); in Python fällt die langsame Schleife weg.
+- Berichtigt: approx(x, y, n = …) ohne xout meldet bei nicht endlichen Grenzen wie R „'from' must be a finite number“ bzw. „'to' …“ (bisher kein Fehler), und bei ganzzahligen Grenzen und Schrittweite liefert es wie R 0 statt −0.
+
+Nur Python:
+
+- Berichtigt: regime_hmm() gibt bei einer Übergangswahrscheinlichkeit 1 (erwartete Dauer unendlich) wie R keine Warnung „divide by zero“ mehr aus.
+
 ## simlev (Python) 1.4.3
 
 Patch-Update (R/Python/Julia). Ergebnisse und Meldungen bleiben unverändert, die Druckausgabe ändert sich nur durch zwei Korrekturen (unten); dazu ergänzt 1.4.3 Dateien, die in 1.4.2 fehlten, und ersetzt die Beispieldaten.

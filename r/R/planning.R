@@ -420,43 +420,16 @@ planning_goal <- function(returns, start_value, goal, horizon, contributions = 0
   # Ziel und Startwert als exakte Rasterpunkte (Stufe der Zielfunktion liegt auf dem Raster)
   grid <- sort(unique(c(exp(seq(log(wmin), log(wmax), length.out = n_grid)), if (goal > 0) goal, start_value)))
   ng <- length(grid)
-  term <- function(W) as.numeric(W >= goal)
-  V <- term(grid)
-  pol <- matrix(NA_integer_, horizon, ng); Vt <- vector("list", horizon + 1L); Vt[[horizon + 1L]] <- V
-  # Interpolation linear in log(W) auf der Probit-Skala: Wahrscheinlichkeiten der Form
-  # Phi((log W - a) / b) werden exakt getroffen (lineare Interpolation der 0/1-nahen Stufe
-  # ueberschaetzt sonst kleine Wahrscheinlichkeiten). Unter wmin: 0 (bei goal = 0 Wert bei wmin).
-  interp <- function(Vn, W) {
-    out <- numeric(length(W)); out[W >= wmax] <- 1 * (wmax >= goal); out[W <= 0] <- 0
-    mid <- W > 0 & W < wmax
-    z <- .sl_qnorm(pmin(1 - 1e-12, pmax(1e-12, Vn)))
-    out[mid] <- ifelse(W[mid] < wmin, if (goal > 0) 0 else Vn[1], .sl_pnorm(stats::approx(log(grid), z, log(W[mid]), rule = 2)$y))
-    out
-  }
-  expect <- function(Vn, base, k, last) {                 # E[V(base * R_k)] je Rasterpunkt
-    X <- outer(base, R[, k])
-    v <- matrix(if (last) term(as.vector(X)) else interp(Vn, as.vector(X)), length(base))   # letzte Periode: 0/1 exakt
-    e <- rowMeans(v); e[base <= 0] <- 0; e
-  }
-  static <- stats::setNames(numeric(K), colnames(R))
-  for (k in seq_len(K)) {
-    Vs <- V
-    for (t in horizon:1) Vs <- expect(Vs, grid + cf[t], k, t == horizon)
-    static[k] <- interp(Vs, start_value)
-  }
-  # Gleichstand (innerhalb 1e-9): Kandidat mit der geringsten Streuung der Log-Renditen
+  # Rueckwaertsrekursion im Kern (core/research_core_impl.h, goal_dp; bis 1.4.3 hier in R): Wertfunktion
+  # 1(W >= goal) am Ende; dazwischen Interpolation linear in log(W) auf der Probit-Skala (Wahrscheinlichkeiten der
+  # Form Phi((log W - a) / b) werden exakt getroffen), unter wmin 0 (bei goal = 0 Wert bei wmin); E[V(base * R_k)]
+  # je Rasterpunkt; Gleichstand (innerhalb 1e-9): Kandidat mit der geringsten Streuung der Log-Renditen
   risk_rank <- rank(apply(log(pmax(R, 1e-300)), 2, stats::sd), ties.method = "first")
-  tie_score <- matrix(K + 1 - risk_rank, ng, K, byrow = TRUE)
-  for (t in horizon:1) {
-    base <- grid + cf[t]
-    E <- vapply(seq_len(K), function(k) expect(V, base, k, t == horizon), numeric(ng))
-    if (!is.matrix(E)) E <- matrix(E, ncol = K)
-    best <- E >= apply(E, 1, max) - 1e-9
-    pol[t, ] <- max.col(ifelse(best, tie_score, 0), ties.method = "first")
-    V <- E[cbind(seq_len(ng), pol[t, ])]
-    Vt[[t]] <- V
-  }
-  p_dp <- interp(V, start_value)
+  dp <- .goal_dp(R, grid, cf, goal, wmin, wmax, start_value, K + 1 - risk_rank)
+  for (i in seq_len(dp$collapsed))                          # wie stats::approx bei gleichen log(grid)-Werten
+    warning(simpleWarning("collapsing to unique 'x' values", quote(regularize.values(x, y, ties, missing(ties), na.rm = na.rm))))
+  static <- stats::setNames(dp$static, colnames(R))
+  pol <- dp$policy; Vt <- lapply(seq_len(horizon + 1L), function(t) dp$value[, t]); p_dp <- dp$p_dp
   sim <- {
     st <- .sl_main_stream(seed)                                 # Hauptstrom
     W <- rep(start_value, n_sim); choice <- matrix(NA_integer_, horizon, n_sim); ruined <- rep(FALSE, n_sim)

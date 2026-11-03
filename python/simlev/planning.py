@@ -24,10 +24,12 @@ from ._r.fmt import NA_REAL
 from ._r import libm as _libm
 from . import _lib as _sl
 from ._r.rlist import RList
+from ._r.stats_sort import _warn as _rwarn
+from . import _dependence_core as _dcore
 from ._r.rnum import r_mean, r_sd, r_sum
 from .deep_analysis import (
     _ext, _fill_na, _is_num_scalar, _key_month, _key_year, _last_of_key, _match_arg, _mean_lgl,
-    _row_means, _sp, _stats, _to_date_days,
+    _sp, _stats, _to_date_days,
 )
 from .svg import _AnaSvg, _ana_hline, _ana_legend, _ana_panel, _ana_ramp, _ana_rect, _ana_svg_done
 
@@ -441,13 +443,6 @@ def portfolio_returns(data, candidates, *, frequency=("year", "quarter", "month"
 # planning_goal
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _approx2(x, y, xout):
-    """``approx(x, y, xout, rule = 2)$y``."""
-    r = _stats("approx")(x, y, xout=xout, rule=2)
-    v = r["y"] if isinstance(r, Mapping) else getattr(r, "y")
-    return np.atleast_1d(np.asarray(v, dtype=np.float64))
-
-
 def _fmt_vals(v):
     a = np.atleast_1d(np.asarray(v, dtype=object)).ravel()
     try:
@@ -601,57 +596,19 @@ def planning_goal(returns, start_value, goal, horizon, *, contributions=0, n_gri
     ng = len(grid)
     lgrid = _libm.log(grid)
 
-    def term(W):
-        return (np.asarray(W) >= goal).astype(np.float64)
-
-    V = term(grid)
-    pol = np.zeros((horizon, ng), dtype=np.int64)
-    Vt = [None] * (horizon + 1)
-    Vt[horizon] = V
-
-    def interp(Vn, W):
-        W = np.atleast_1d(np.asarray(W, dtype=np.float64))
-        out = np.zeros(len(W))
-        out[W >= wmax] = 1.0 * (wmax >= goal)
-        out[W <= 0] = 0.0
-        mid = (W > 0) & (W < wmax)
-        z = _sl.qnorm(np.minimum(1 - 1e-12, np.maximum(1e-12, np.asarray(Vn, dtype=np.float64))))
-        Wm = W[mid]
-        if Wm.size:
-            pn = np.atleast_1d(np.asarray(_sl.pnorm(_approx2(lgrid, np.asarray(z, dtype=np.float64), _libm.log(Wm))),
-                                          dtype=np.float64))
-            alt = 0.0 if goal > 0 else float(Vn[0])
-            out[mid] = np.where(Wm < wmin, alt, pn)
-        return out
-
-    def expect(Vn, base, k, last):
-        X = np.multiply.outer(base, R[:, k])
-        xv = X.ravel(order="F")
-        v = (term(xv) if last else interp(Vn, xv)).reshape(X.shape, order="F")
-        e = _row_means(v)
-        e[base <= 0] = 0.0
-        return e
-
-    static = np.zeros(K)
-    for k in range(K):
-        Vs = V
-        for t in range(horizon, 0, -1):
-            Vs = expect(Vs, grid + cf[t - 1], k, t == horizon)
-        static[k] = float(interp(Vs, start_value)[0])
+    # Rückwärtsrekursion im Kern (core/research_core_impl.h, goal_dp; bis 1.4.3 hier in Python); Gleichstand
+    # (innerhalb 1e-9): Kandidat mit der geringsten Streuung der Log-Renditen
     lr = _libm.log(np.maximum(R, 1e-300))
     sds = np.array([r_sd(lr[:, j]) for j in range(K)])
     risk_rank = np.empty(K, dtype=np.int64)
     risk_rank[np.argsort(sds, kind="stable")] = np.arange(1, K + 1)
-    tie_score = np.tile((K + 1 - risk_rank).astype(np.float64), (ng, 1))
-    for t in range(horizon, 0, -1):
-        base = grid + cf[t - 1]
-        E = np.column_stack([expect(V, base, k, t == horizon) for k in range(K)])
-        best = E >= (np.max(E, axis=1) - 1e-9)[:, None]
-        sc = np.where(best, tie_score, 0.0)
-        pol[t - 1, :] = np.argmax(sc, axis=1) + 1
-        V = E[np.arange(ng), pol[t - 1, :] - 1]
-        Vt[t - 1] = V
-    p_dp = float(interp(V, start_value)[0])
+    dp = _dcore.goal_dp(R, grid, cf, goal, wmin, wmax, start_value, (K + 1 - risk_rank).astype(np.float64))
+    for _ in range(dp["collapsed"]):                     # wie stats::approx bei gleichen log(grid)-Werten
+        _rwarn("collapsing to unique 'x' values")
+    static = dp["static"]
+    pol = dp["policy"]
+    Vt = [dp["value"][:, t].copy() for t in range(horizon + 1)]
+    p_dp = float(dp["p_dp"])
 
     def run(st):
         W = np.repeat(start_value, n_sim)

@@ -840,19 +840,20 @@ withdrawal_paths <- function(x, column = NULL, strategy = NULL, inflation = NULL
 withdrawal_perfect_rate <- function(real_returns, legacy = 0) {
   if (inherits(real_returns, "withdrawal_paths")) real_returns <- .annual_real(real_returns)
   R <- as.matrix(real_returns)
-  if (!is.numeric(R) || !length(R) || anyNA(R) || any(!is.finite(R)))
-    stop("withdrawal_perfect_rate: real_returns muss eine Matrix endlicher realer Brutto-Jahresrenditen sein (1.05 = +5 %).")
-  if (stats::median(R) < 0.5)
+  msg_a <- "withdrawal_perfect_rate: real_returns muss eine Matrix endlicher realer Brutto-Jahresrenditen sein (1.05 = +5 %)."
+  if (!is.numeric(R) || !length(R)) stop(msg_a)
+  lg_ok <- is.numeric(legacy) && length(legacy) == 1L && is.finite(legacy) && legacy >= 0
+  # Pruefungen (nicht endlich, Median, negativ) und PWR je Spalte im Kern (core/withdrawal_core_impl.h, wd_pwr)
+  core <- .wd_pwr(R, if (lg_ok) legacy else 0)
+  if (core$status == 1L) stop(msg_a)
+  if (core$status == 2L)
     stop(sprintf(paste0("withdrawal_perfect_rate: real_returns sieht nicht wie Brutto-Renditen aus (Median %s); erwartet z. B. 1.05 ",
                         "f\u00fcr +5 %%, nicht 0.05 (Nettorendite: 1 + r \u00fcbergeben)."), format(stats::median(R), digits = 4)))
-  if (any(R < 0)) stop("withdrawal_perfect_rate: Brutto-Renditen in real_returns m\u00fcssen >= 0 sein (0 = Totalverlust).")
-  if (!is.numeric(legacy) || length(legacy) != 1L || !is.finite(legacy) || legacy < 0)
+  if (core$status == 3L) stop("withdrawal_perfect_rate: Brutto-Renditen in real_returns m\u00fcssen >= 0 sein (0 = Totalverlust).")
+  if (!lg_ok)
     stop(sprintf("withdrawal_perfect_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 %% des Startverm\u00f6gens; erhalten: %s).",
                  paste(format(legacy), collapse = ", ")))
-  apply(R, 2, function(r) {
-    tail_prod <- rev(cumprod(rev(r)))                     # prod_{j=i..n}
-    (prod(r) - legacy) / sum(tail_prod) * 100
-  })
+  stats::setNames(core$pwr, colnames(R))                  # wie apply(R, 2, ...): Namen der Spalten
 }
 
 #' Reale Jahresrenditen aus Perioden-Matrizen
@@ -863,7 +864,14 @@ withdrawal_perfect_rate <- function(real_returns, legacy = 0) {
   real <- wp$returns / wp$inflation
   if (ppy == 1L) return(real)
   np <- nrow(real); ny <- np %/% ppy
-  apply(real[seq_len(ny * ppy), , drop = FALSE], 2, function(col) apply(matrix(col, nrow = ppy), 2, prod))
+  if (!is.matrix(real) || ny < 1L || !ncol(real))
+    return(apply(real[seq_len(ny * ppy), , drop = FALSE], 2, function(col) apply(matrix(col, nrow = ppy), 2, prod)))
+  # Produkt je Jahr im Kern (wd_annual_prod); Form und Namen wie apply(): bei einem Jahr ein Vektor
+  A <- .wd_annual_prod(real, ppy)
+  dn <- dimnames(real)[2L]
+  if (ny == 1L) return(stats::setNames(A[1L, ], dn[[1L]]))
+  if (!is.null(names(dn)) || !is.null(dn[[1L]])) dimnames(A) <- c(list(NULL), dn)
+  A
 }
 
 
@@ -1616,12 +1624,10 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
                        tariff_par, zve)
   sp <- core$spending
   w0 <- sp[1, ]
-  ce_fun <- function(c) { c <- pmax(c, 1e-9 * start_value)
-    if (abs(gamma - 1) < 1e-12) exp(mean(log(c))) else mean(c^(1 - gamma))^(1 / (1 - gamma)) }
-  dd_fun <- function(c) { m <- cummax(c); max(1 - c / m) }
-  # Konsumkennzahlen je Jahr nur ueber volle Planjahre (ein Rumpfjahr zaehlt nicht als volles Jahr)
-  per_path <- function(fun, H = rep(ny, ncol(sp)))
-    vapply(seq_len(ncol(sp)), function(i) { r <- seq_len(min(H[i], nfy)); if (length(r)) fun(sp[r, i]) else NA_real_ }, 0)
+  # Konsumkennzahlen je Pfad im Kern (wd_metrics): je Jahr nur ueber volle Planjahre (ein Rumpfjahr zaehlt nicht
+  # als volles Jahr); Mittel, Minimum, Drawdown der Entnahmen max(1 - c / cummax(c)), Sicherheitsaequivalent mit
+  # pmax(c, 1e-9 start_value) (gamma = 1: geometrisches Mittel), Summe
+  mt <- .wd_metrics(sp, nfy, NULL, gamma, start_value)
   pwr <- if (ppy == 1L || nrow(R) >= ppy) withdrawal_perfect_rate(.annual_real(list(returns = R, inflation = I, frequency = x$frequency))) else NA
   paths <- data.frame(
     success = core$failed == 0,
@@ -1629,11 +1635,11 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
     terminal_real = core$terminal_real,
     terminal_nominal = core$terminal_nominal,
     first_withdrawal = w0,
-    mean_spending = if (nfy == ny) colMeans(sp) else per_path(mean),
-    min_spending = per_path(min),
-    spending_drawdown = per_path(dd_fun),
-    ce_spending = per_path(ce_fun),
-    total_spending = colSums(sp),
+    mean_spending = mt$mean_spending,
+    min_spending = mt$min_spending,
+    spending_drawdown = mt$spending_drawdown,
+    ce_spending = mt$ce_spending,
+    total_spending = mt$total_spending,
     taxes = core$taxes_real,
     pwr = pwr)
   if (!is.null(x$start_dates)) paths$start <- x$start_dates
@@ -1652,12 +1658,18 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
     # (wie am Pfadende): ein H-jaehriger Pfad und Horizont H auf laengeren Pfaden ergeben dasselbe
     paths$terminal_real <- core$wealth_end[cbind(H + 1L, seq_along(H))]
     paths$taxes <- core$taxes_end[cbind(H + 1L, seq_along(H))]
-    paths$mean_spending <- per_path(mean, H); paths$min_spending <- per_path(min, H)
-    paths$total_spending <- vapply(seq_along(H), function(i) sum(sp[seq_len(H[i]), i]), 0)
-    paths$spending_drawdown <- per_path(dd_fun, H); paths$ce_spending <- per_path(ce_fun, H)
+    mt <- .wd_metrics(sp, nfy, H, gamma, start_value)
+    paths$mean_spending <- mt$mean_spending; paths$min_spending <- mt$min_spending
+    paths$total_spending <- mt$total_spending
+    paths$spending_drawdown <- mt$spending_drawdown; paths$ce_spending <- mt$ce_spending
     if (ppy == 1L) {
       AR <- .annual_real(list(returns = R, inflation = I, frequency = x$frequency))
-      paths$pwr <- vapply(seq_along(H), function(i) withdrawal_perfect_rate(AR[seq_len(H[i]), i, drop = FALSE]), 0)
+      pc <- .wd_pwr(AR, 0, H)                             # PWR je Pfad bis zum Horizont (Pruefung je Pfad)
+      if (pc$status) {                                    # erster ungueltige Pfad: Fehler wie bisher
+        i <- pc$path
+        withdrawal_perfect_rate(AR[seq_len(H[i]), i, drop = FALSE])
+      }
+      paths$pwr <- pc$pwr
     } else paths$pwr <- NA_real_
     if (kp == 0) core$wealth <- NULL
   }
@@ -2042,9 +2054,9 @@ print.SimLevHorizon <- function(x, ...) {
             "capital_income", "abgeltung_burden", "church_tax_withheld_k", "tariff_income_tax_k", "tariff_soli_k",
             "tariff_church_tax_k", "tariff_burden", "burden_without_gp", "burden_with_gp", "guenstiger", "settlement",
             "refund", "church_tax_settlement_next_year")
-  keep <- which(!is.na(M[1L, ]))
-  d <- data.frame(path = as.integer((keep - 1L) %/% (ny + 1L) + 1L))
-  for (j in seq_along(cols)) d[[cols[j]]] <- M[j, keep]
+  C <- .wd_tariff_compact(M, ny)                          # Spalten mit Jahr NA entfallen (Kern)
+  d <- data.frame(path = as.integer(C[, 1L]))
+  for (j in seq_along(cols)) d[[cols[j]]] <- C[, j + 1L]
   d$year <- as.integer(d$year); d$guenstiger <- d$guenstiger != 0
   rownames(d) <- NULL
   d

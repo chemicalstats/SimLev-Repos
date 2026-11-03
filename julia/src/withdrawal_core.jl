@@ -1,12 +1,13 @@
 # WithdrawalCore – .wd_simulate aus core/withdrawal_core_impl.h: geteilter C++-Kern wie in R und Python über
 # die C-ABI-Hülle core/simlev_cabi.cpp (CAbi). Der frühere Julia-Port (rule_amount, pmt_due,
-# FIFO-Steuer) ist seit 1.2.0 entfallen. Gegenstück zu python/simlev/_withdrawal_core.py.
+# FIFO-Steuer) ist seit 1.2.0 entfallen. Seit 1.5.0 auch die Auswertung je Pfad (wd_metrics, wd_pwr,
+# wd_annual_prod, wd_tariff_compact). Gegenstück zu python/simlev/_withdrawal_core.py.
 module WithdrawalCore
 
 import ..SimLev
 using ..SimLev: CAbi, LIBSLC
 
-export wd_simulate
+export wd_simulate, wd_metrics, wd_pwr, wd_annual_prod, wd_tariff_compact
 
 function _mat(x, nr = 0)
     x isa SimLev.NamedMat && return Matrix{Float64}(x.data)
@@ -79,6 +80,72 @@ function wd_simulate(R, INF, CAPE, BASE, ppy, rule, rp, start_timing, start_valu
                        "terminal_nominal" => terminal_nom, "taxes_real" => taxes, "failed" => fail,
                        "depletion_period" => depl, "wealth_end" => wealth_end, "taxes_end" => taxes_end)
     isempty(tariff_par) || (out["tariff_years"] = tariff_years)   # Jahreszeilen nur mit Tarifweg
+    return out
+end
+
+# ── Auswertung je Pfad (seit 1.5.0) ─────────────────────────────────────────────────────────────────────────────
+
+_hv(H) = H === nothing ? nothing : Cint[Cint(v) for v in H]
+
+"""
+    wd_metrics(sp, nfy, H, gamma, start_value)
+
+Kennzahlen der Entnahmen je Pfad (R: `.wd_metrics`): RList mit `mean_spending`, `min_spending`,
+`spending_drawdown`, `ce_spending`, `total_spending`; `H` `nothing` oder Horizont je Pfad.
+"""
+function wd_metrics(sp, nfy, H, gamma, start_value)
+    sp = _mat(sp)
+    ny, np_ = size(sp)
+    outs = ntuple(_ -> Vector{Float64}(undef, np_), 5)
+    hv = _hv(H)
+    GC.@preserve sp outs hv begin
+        op = Ptr{Float64}[pointer(o) for o in outs]
+        CAbi.check(ccall((:simlev_c_wd_metrics, LIBSLC), Cint,
+                         (Ptr{Float64}, Int64, Int64, Int64, Ptr{Cint}, Float64, Float64, Ptr{Ptr{Float64}}),
+                         sp, ny, np_, Int(nfy), hv === nothing ? C_NULL : pointer(hv), Float64(gamma),
+                         Float64(start_value), op))
+    end
+    return SimLev.RList("mean_spending" => outs[1], "min_spending" => outs[2], "spending_drawdown" => outs[3],
+                        "ce_spending" => outs[4], "total_spending" => outs[5])
+end
+
+"""
+    wd_pwr(AR, legacy, H = nothing) -> (pwr, status, path)
+
+Perfect Withdrawal Rate je Spalte (R: `.wd_pwr`); status 1 nicht endlich, 2 Median < 0.5, 3 negativ (dann pwr
+unvollständig, path der erste ungültige Pfad mit `H`).
+"""
+function wd_pwr(AR, legacy, H = nothing)
+    AR = _mat(AR)
+    ny, np_ = size(AR)
+    out = Vector{Float64}(undef, np_)
+    st = Ref{Int32}(0); path = Ref{Int64}(0)
+    hv = _hv(H)
+    GC.@preserve AR out hv begin
+        CAbi.check(ccall((:simlev_c_wd_pwr, LIBSLC), Cint,
+                         (Ptr{Float64}, Int64, Int64, Float64, Ptr{Cint}, Ptr{Float64}, Ptr{Int32}, Ptr{Int64}),
+                         AR, ny, np_, Float64(legacy), hv === nothing ? C_NULL : pointer(hv), out, st, path))
+    end
+    return out, Int(st[]), Int(path[])
+end
+
+"Produkt je Block von `ppy` Zeilen (R: `.wd_annual_prod`): Matrix `(nr ÷ ppy) × nc`."
+function wd_annual_prod(real, ppy)
+    real = _mat(real)
+    nr, nc = size(real)
+    out = Matrix{Float64}(undef, nr ÷ Int(ppy), nc)
+    CAbi.check(ccall((:simlev_c_wd_annual_prod, LIBSLC), Cint, (Ptr{Float64}, Int64, Int64, Int64, Ptr{Float64}),
+                     real, nr, nc, Int(ppy), out))
+    return out
+end
+
+"Jahreszeilen des Tarifwegs ohne Jahre NA (R: `.wd_tariff_compact`): Matrix mit Pfad und den 25 Zeilen."
+function wd_tariff_compact(M::Matrix{Float64}, ny)
+    N = size(M, 2)
+    nk = ccall((:simlev_c_wd_tariff_count, LIBSLC), Int64, (Ptr{Float64}, Int64), M, N)
+    out = Matrix{Float64}(undef, nk, size(M, 1) + 1)
+    CAbi.check(ccall((:simlev_c_wd_tariff_compact, LIBSLC), Cint, (Ptr{Float64}, Int64, Int64, Int64, Ptr{Float64}),
+                     M, N, Int(ny), nk, out))
     return out
 end
 

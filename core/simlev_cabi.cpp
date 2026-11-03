@@ -28,6 +28,9 @@
  *   SIMLEV_LIST, DONE, SET_FLAG           Tupel bzw. Merker wie in Python
  *
  * Auswertung (evaluate_core_impl.h): simlev_c_eval_* (Ergebnisobjekt je Aufrufer) und simlev_c_xirr.
+ * Entnahme (withdrawal_core_impl.h): simlev_c_wd_simulate, seit 1.5.0 die Auswertung je Pfad simlev_c_wd_metrics,
+ * _pwr, _annual_prod, _tariff_count, _tariff_compact.
+ * Forschung (research_core_impl.h), seit 1.5.0: simlev_c_hmm_em, simlev_c_goal_dp, simlev_c_pbo_cscv.
  *
  * Tagesengine (engine_core_impl.h): eigener Zustand im Kern, flache Eingabe (struct Input); Julia
  * uebergibt Zeiger, Laengen und Skalare und holt die Ergebnisse ueber simlev_c_engine_* (julia/src/sim_engine.jl).
@@ -335,6 +338,46 @@ SIMLEV_C_EXPORT int simlev_c_kendall_tau_core(const double* x, const double* y, 
     return cabi::run([&] { *out = simlev::kendall_tau_core(cabi::vec(x, n), cabi::vec(y, n)); });
 }
 
+/* HMM-EM aus einem Startwert (seit 1.5.0; research_core_impl.h, hmm_em): X Tn x d, mu k x d, S d x d x k, A k x k
+ * (an Ort und Stelle), p0 (k), filt, smooth, lB (Tn x k) -> *status 0 oder 1 (Fehler: Startwert verwerfen), *ll, *iter */
+SIMLEV_C_EXPORT int simlev_c_hmm_em(const double* X, int64_t Tn, int64_t d, int64_t k, double* mu, double* S, double* A,
+                                    double* p0, int64_t n_iter, double tol, const double* ridge, double* filt,
+                                    double* smooth, double* lB, int32_t* status, double* ll, int64_t* iter) {
+    return cabi::run([&] {
+        if (Tn < 1 || d < 1 || k < 1) cabi::badcall("hmm_em: Abmessungen passen nicht");
+        int it = 0;
+        *status = simlev::hmm_em((int) Tn, (int) d, (int) k, X, mu, S, A, p0, (int) n_iter, tol, ridge, ll, filt, smooth,
+                                 lB, &it);
+        *iter = it;
+    });
+}
+
+/* Rueckwaertsrekursion von planning_goal() (seit 1.5.0; research_core_impl.h, goal_dp): R S x K, grid (ng), cf (h),
+ * tie (K) -> stat (K), pol (h x ng), val (ng x (h + 1)), *p_dp, *ncoll (-1 bei Fehler der Verteilungen) */
+SIMLEV_C_EXPORT int simlev_c_goal_dp(const double* R, int64_t S, int64_t K, const double* grid, int64_t ng,
+                                     const double* cf, int64_t h, double goal, double wmin, double wmax, double sv,
+                                     const double* tie, double* stat, int32_t* pol, double* val, double* p_dp,
+                                     int64_t* ncoll) {
+    return cabi::run([&] {
+        if (S < 1 || K < 1 || ng < 2 || h < 1) cabi::badcall("goal_dp: Abmessungen passen nicht");
+        *ncoll = simlev::goal_dp((int) S, (int) K, R, (int) ng, grid, (int) h, cf, goal, wmin, wmax, sv, tie, stat, pol,
+                                 val, p_dp);
+    });
+}
+
+/* CSCV von overfit_pbo() (seit 1.5.0; research_core_impl.h, pbo_cscv): B 5 x S x N, T 5 x N, combos S/2 x C (1-basiert),
+ * metric 0..3 -> lam, isb, oosb, oosm (je C) */
+SIMLEV_C_EXPORT int simlev_c_pbo_cscv(const double* B, const double* T, const int32_t* combos, int64_t C, double half,
+                                      int64_t metric, int64_t S, int64_t N, double* lam, double* isb, double* oosb,
+                                      double* oosm) {
+    return cabi::run([&] {
+        if (S < 2 || S % 2 || N < 1 || C < 0 || metric < 0 || metric > 3) cabi::badcall("pbo_cscv: Abmessungen passen nicht");
+        for (int64_t i = 0; i < C * (S / 2); i++)
+            if (combos[i] < 1 || combos[i] > S) cabi::badcall("pbo_cscv: Block ausserhalb 1..%lld", (long long) S);
+        simlev::pbo_cscv((int) S, (int) N, (int) C, B, T, combos, half, (int) metric, lam, isb, oosb, oosm);
+    });
+}
+
 /* ---- withdrawal_core_impl.h ----
  * mats: R, INF, CAPE, BASE (Zeiger) mit dims[8] (nr, nc je Matrix). Ergebnis in out[11] (Felder in der
  * Reihenfolge wealth, spending, planned, terminal_real, terminal_nominal, taxes_real, depletion_period,
@@ -371,6 +414,56 @@ SIMLEV_C_EXPORT int simlev_c_wd_simulate(const double* const* mats, const int64_
             const std::size_t sk = (std::size_t) (k < 10 ? k : 11);
             cabi::put(out[k], outlen[k], st[sk].data(), (cabi::idx_t) st[sk].size(), "wd_simulate", "Ergebnis");
         }
+    });
+}
+
+/* ---- Auswertung je Pfad der Entnahme (seit 1.5.0; withdrawal_core_impl.h) ----
+ * Reine Funktionen auf Zeigern; Julia legt die Ergebnisfelder an (julia/src/withdrawal_core.jl).
+ * simlev_c_wd_metrics: sp ny x np (spaltenweise), nfy, H (np Werte 0..ny) oder NULL, gamma, start_value; out[5]:
+ *   mean, min, dd, ce, total (je np). simlev_c_wd_pwr: AR ny x np, legacy, H oder NULL, out (np) -> *status
+ *   (0, 1 nicht endlich, 2 Median < 0.5, 3 negativ), *path. simlev_c_wd_annual_prod: real nr x nc, ppy -> out
+ *   (nr / ppy) x nc. simlev_c_wd_tariff_count/_compact: M 25 x N -> nkeep bzw. out nkeep x 26. */
+static void wd_horizon(const int* H, int64_t ny, int64_t np, const char* fn) {
+    if (!H) return;
+    for (int64_t i = 0; i < np; i++)
+        if (H[i] < 0 || H[i] > ny) cabi::badcall("%s: Horizont %d ausserhalb 0..%lld", fn, H[i], (long long) ny);
+}
+
+SIMLEV_C_EXPORT int simlev_c_wd_metrics(const double* sp, int64_t ny, int64_t np, int64_t nfy, const int* H,
+                                        double gamma, double start_value, double* const* out) {
+    return cabi::run([&] {
+        if (ny < 0 || np < 0 || nfy < 0 || nfy > ny) cabi::badcall("wd_metrics: Abmessungen passen nicht");
+        wd_horizon(H, ny, np, "wd_metrics");
+        std::vector<double> tmp(2 * (std::size_t) ny + 1);
+        simlev::wd_metrics(ny, np, sp, nfy, H, gamma, start_value, out[0], out[1], out[2], out[3], out[4], tmp.data());
+    });
+}
+
+SIMLEV_C_EXPORT int simlev_c_wd_pwr(const double* AR, int64_t ny, int64_t np, double legacy, const int* H, double* out,
+                                    int32_t* status, int64_t* path) {
+    return cabi::run([&] {
+        if (ny < 0 || np < 0) cabi::badcall("wd_pwr: Abmessungen passen nicht");
+        wd_horizon(H, ny, np, "wd_pwr");
+        std::vector<double> w(std::max((std::size_t) ny * (std::size_t) np, 2 * (std::size_t) ny) + 1);
+        *status = simlev::wd_pwr(ny, np, AR, legacy, H, out, path, w.data());
+    });
+}
+
+SIMLEV_C_EXPORT int simlev_c_wd_annual_prod(const double* real, int64_t nr, int64_t nc, int64_t ppy, double* out) {
+    return cabi::run([&] {
+        if (nr < 0 || nc < 0 || ppy < 1) cabi::badcall("wd_annual_prod: Abmessungen passen nicht");
+        simlev::wd_annual_prod(nr, nc, real, ppy, out);
+    });
+}
+
+SIMLEV_C_EXPORT int64_t simlev_c_wd_tariff_count(const double* M, int64_t N) {
+    return N < 0 ? 0 : simlev::wd_tariff_count(N, M);
+}
+
+SIMLEV_C_EXPORT int simlev_c_wd_tariff_compact(const double* M, int64_t N, int64_t ny, int64_t nkeep, double* out) {
+    return cabi::run([&] {
+        if (N < 0 || simlev::wd_tariff_count(N, M) != nkeep) cabi::badcall("wd_tariff_compact: Zahl der Zeilen passt nicht");
+        simlev::wd_tariff_compact(N, M, ny, nkeep, out);
     });
 }
 

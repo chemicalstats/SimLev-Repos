@@ -29,6 +29,10 @@
 //   * rule_amount  : Zustandsautomat aller Entnahmeregeln
 //   * .wd_simulate : schneller Monte-Carlo-/Kohorten-Kern ueber viele Pfade
 //                    mit vereinfachter deutscher Besteuerung
+//   * Auswertung je Pfad (seit 1.5.0; bis 1.4.3 in den Sprachen): wd_metrics (Mittel, Minimum,
+//                    Drawdown, Sicherheitsaequivalent und Summe der Entnahmen), wd_pwr (Perfect Withdrawal
+//                    Rate mit den Pruefungen von withdrawal_perfect_rate()), wd_annual_prod (reale
+//                    Jahresrenditen aus Perioden), wd_tariff_compact (Jahreszeilen des Tarifwegs)
 //
 // Zeitkonvention (Guyton & Klinger 2006, Suarez et al. 2015): Die Jahresentnahme
 // wird zu Beginn eines Planjahres festgelegt; mit Periodenschritten (Monat,
@@ -88,9 +92,12 @@
 
 #include <cmath>
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <limits>
 #include <vector>
 
+#include "slc_rbase.h"
 #include "tariff_core_impl.h"
 
 namespace simlev {
@@ -607,6 +614,177 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
                     "terminal_real", terminal, "terminal_nominal", terminal_nom,
                     "taxes_real", taxes, "failed", fail, "depletion_period", depl,
                     "wealth_end", wealth_end, "taxes_end", taxes_end, "tariff_years", tyears);
+}
+
+// ---------------------------------------------------------------------------
+// Auswertung je Pfad (seit 1.5.0): bis 1.4.3 rechneten R, Python und Julia sie je fuer sich
+// (withdrawal_simulation: per_path, ce_fun, dd_fun, colMeans/colSums; withdrawal_perfect_rate;
+// .annual_real; .wd_tariff_years). Reine Funktionen auf Zeigern ohne Host-Objekte (reentrant); die
+// Hüllen legen die Ergebnisfelder an. Rechenfolge und R-Semantik wie dort: Summen, Mittel, Produkte,
+// Kumulationen und Potenz ueber core/slc_rbase.c (long double wie R), min/max wie R's Summary-Gruppe
+// (NA vor NaN), pmax wie R (NA/NaN bleiben), log/exp aus der libm wie R's math1.
+// ---------------------------------------------------------------------------
+
+inline double wd_na_real() {
+  const uint64_t u = UINT64_C(0x7FF00000000007A2);
+  double d;
+  std::memcpy(&d, &u, sizeof d);
+  return d;
+}
+inline bool wd_isna(double x) {          // R's ISNA: NaN mit Nutzlast 1954
+  if (!std::isnan(x)) return false;
+  uint64_t u;
+  std::memcpy(&u, &x, sizeof u);
+  return (u & UINT64_C(0xFFFFFFFF)) == 1954;
+}
+
+// min(x) bzw. max(x) fuer n >= 1 Doubles wie R (rmin/rmax und die Zusammenfassung in do_summary)
+inline double wd_r_minmax(int64_t n, const double* x, bool is_max) {
+  double s = 0.0;
+  bool upd = false;
+  for (int64_t k = 0; k < n; k++) {
+    if (std::isnan(x[k])) {
+      if (!wd_isna(s)) s = x[k];
+      upd = true;
+    } else if (!upd || (is_max ? x[k] > s : x[k] < s)) {
+      s = x[k];
+      upd = true;
+    }
+  }
+  double z = is_max ? -std::numeric_limits<double>::infinity() : std::numeric_limits<double>::infinity();
+  if (upd) {
+    if (std::isnan(s)) z = wd_isna(s) ? s : z + s;
+    else if (is_max ? s > z : s < z) z = s;
+  }
+  return z;
+}
+
+// R's log fuer Doubles (R_log ueber math1: NaN bleibt, 0 -> -Inf)
+inline double wd_r_log(double x) {
+  if (std::isnan(x)) return x;
+  return x > 0 ? std::log(x) : x == 0 ? -std::numeric_limits<double>::infinity()
+                                      : std::numeric_limits<double>::quiet_NaN();
+}
+
+// Kennzahlen der Entnahmen je Pfad. sp: Entnahmen ny x np (spaltenweise), nfy volle Planjahre,
+// H: Horizont je Pfad (0 <= H[i] <= ny) oder nullptr; gamma, sv wie withdrawal_simulation().
+//   ohne H: mean = colMeans(sp), wenn nfy == ny, sonst mean der ersten nfy Zeilen; total = colSums(sp);
+//   mit H:  mean ueber die ersten min(H[i], nfy) Zeilen, total = sum(sp[seq_len(H[i]), i]);
+//   min, dd (max(1 - c / cummax(c))) und ce (Sicherheitsaequivalent mit pmax(c, 1e-9 sv)) ueber die ersten
+//   min(H[i], nfy) bzw. nfy Zeilen; ohne Zeilen NA.
+// tmp: Arbeitsfeld mit 2 ny Plaetzen.
+inline void wd_metrics(int64_t ny, int64_t np, const double* sp, int64_t nfy, const int* H, double gamma,
+                       double sv, double* mean, double* mn, double* dd, double* ce, double* total, double* tmp) {
+  const double na = wd_na_real();
+  const double lo = 1e-9 * sv;
+  const bool log_ce = std::fabs(gamma - 1) < 1e-12;
+  const double g1 = 1 - gamma, gi = 1 / (1 - gamma);
+  double* a = tmp;
+  double* b = tmp + ny;
+  if (!H) {
+    if (nfy == ny) sl_r_colsums(ny, np, sp, 0, 1, mean);
+    sl_r_colsums(ny, np, sp, 0, 0, total);
+  }
+  for (int64_t i = 0; i < np; i++) {
+    const double* c = sp + i * ny;
+    const int64_t h = H ? (int64_t) H[i] : ny;
+    const int64_t r = std::min(h, nfy);
+    if (H) total[i] = sl_r_sum(h, c, 0);
+    if (r <= 0) {
+      if (H || nfy != ny) mean[i] = na;
+      mn[i] = na; dd[i] = na; ce[i] = na;
+      continue;
+    }
+    if (H || nfy != ny) mean[i] = sl_r_mean(r, c);
+    mn[i] = wd_r_minmax(r, c, false);
+    sl_r_cummax(r, c, a);                               // m <- cummax(c); max(1 - c / m)
+    for (int64_t k = 0; k < r; k++) b[k] = 1 - c[k] / a[k];
+    dd[i] = wd_r_minmax(r, b, true);
+    for (int64_t k = 0; k < r; k++) a[k] = (!std::isnan(c[k]) && lo > c[k]) ? lo : c[k];   // pmax(c, 1e-9 sv)
+    if (log_ce) {                                       // exp(mean(log(c)))
+      for (int64_t k = 0; k < r; k++) b[k] = wd_r_log(a[k]);
+      const double m = sl_r_mean(r, b);
+      ce[i] = std::isnan(m) ? m : std::exp(m);
+    } else {                                            // mean(c^(1 - gamma))^(1 / (1 - gamma))
+      sl_r_pow(r, a, g1, b);
+      ce[i] = sl_r_pow1(sl_r_mean(r, b), gi);
+    }
+  }
+}
+
+// Pruefung von withdrawal_perfect_rate() fuer n Werte: 0 in Ordnung, 1 nicht endlich (auch NA oder leer),
+// 2 Median < 0.5, 3 negativ (Reihenfolge wie dort). w: Arbeitsfeld mit n Plaetzen.
+inline int wd_pwr_check(int64_t n, const double* x, double* w) {
+  if (n <= 0) return 1;
+  for (int64_t k = 0; k < n; k++) if (!std::isfinite(x[k])) return 1;
+  std::copy(x, x + n, w);
+  const int64_t half = (n + 1) / 2;                     // median.default
+  double med;
+  std::nth_element(w, w + (half - 1), w + n);
+  if (n % 2 == 1) med = w[half - 1];
+  else {
+    double two[2];
+    two[0] = w[half - 1];
+    two[1] = *std::min_element(w + half, w + n);
+    med = sl_r_mean(2, two);
+  }
+  if (med < 0.5) return 2;
+  for (int64_t k = 0; k < n; k++) if (x[k] < 0) return 3;
+  return 0;
+}
+
+// Perfect Withdrawal Rate je Pfad: (prod(r) - legacy) / sum(rev(cumprod(rev(r)))) * 100.
+// AR: ny x np (spaltenweise). Ohne H ganze Spalten, Pruefung ueber die ganze Matrix; mit H je Pfad die
+// ersten H[i] Zeilen, Pruefung je Pfad. Rueckgabe Status wie wd_pwr_check (dann *path = 1-basierter Pfad mit
+// H bzw. 0, out unvollstaendig). w: Arbeitsfeld mit max(ny np, 2 ny) Plaetzen.
+inline int wd_pwr(int64_t ny, int64_t np, const double* AR, double legacy, const int* H, double* out,
+                  int64_t* path, double* w) {
+  *path = 0;
+  if (!H) {
+    const int st = wd_pwr_check(ny * np, AR, w);
+    if (st) return st;
+  }
+  for (int64_t i = 0; i < np; i++) {
+    const double* r = AR + i * ny;
+    const int64_t n = H ? (int64_t) H[i] : ny;
+    if (H) {
+      const int st = wd_pwr_check(n, r, w);
+      if (st) { *path = i + 1; return st; }
+    }
+    double* rv = w;
+    double* tp = w + n;
+    for (int64_t k = 0; k < n; k++) rv[k] = r[n - 1 - k];
+    sl_r_cumprod(n, rv, tp);                            // tp = cumprod(rev(r))
+    for (int64_t k = 0; k < n; k++) rv[k] = tp[n - 1 - k];   // rev(...)
+    out[i] = (sl_r_prod(n, r, 0) - legacy) / sl_r_sum(n, rv, 0) * 100;
+  }
+  return 0;
+}
+
+// Reale Jahresrenditen: Produkt je Block von ppy Perioden (prod in long double wie R) der ersten ny ppy Zeilen
+// von real (nr x nc); out ny x nc mit ny = nr / ppy.
+inline void wd_annual_prod(int64_t nr, int64_t nc, const double* real, int64_t ppy, double* out) {
+  const int64_t ny = nr / ppy;
+  for (int64_t j = 0; j < nc; j++)
+    for (int64_t y = 0; y < ny; y++) out[y + ny * j] = sl_r_prod(ppy, real + j * nr + y * ppy, 0);
+}
+
+// Jahreszeilen des Tarifwegs: M (TR_N x N, Spalte (Pfad - 1)(ny + 1) + Planjahr) ohne die Spalten mit Jahr NA
+// (is.na) als out (nkeep x (TR_N + 1), spaltenweise): Pfad (1-basiert), dann die TR_N Zeilen von M.
+inline int64_t wd_tariff_count(int64_t N, const double* M) {
+  int64_t m = 0;
+  for (int64_t c = 0; c < N; c++) m += !std::isnan(M[c * (int64_t) TR_N]);
+  return m;
+}
+inline void wd_tariff_compact(int64_t N, const double* M, int64_t ny, int64_t nkeep, double* out) {
+  int64_t row = 0;
+  for (int64_t c = 0; c < N; c++) {
+    const double* col = M + c * (int64_t) TR_N;
+    if (std::isnan(col[0])) continue;
+    out[row] = (double) (c / (ny + 1) + 1);
+    for (int64_t j = 0; j < (int64_t) TR_N; j++) out[row + nkeep * (j + 1)] = col[j];
+    row++;
+  }
 }
 
 }  // namespace simlev

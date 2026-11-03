@@ -34,6 +34,9 @@
 //                      Hunter & Lange 2000, mit exakter Ecken-Politur bzw.
 //                      Austauschschritten bis zum Optimalitaetsnachweis)
 //   hmm_forward_backward  skalierter Vorwaerts-Rueckwaerts-Schritt (Baum-Welch)
+//   hmm_em              Baum-Welch-EM aus einem Startwert (seit 1.5.0)
+//   goal_dp             Rueckwaertsrekursion von planning_goal() (seit 1.5.0)
+//   pbo_cscv            Aufteilungen der CSCV von overfit_pbo() (seit 1.5.0)
 //   (garch_filter: bis 1.0.0, ersetzt durch sl_garch11_filter in core/slc_garch.c)
 //   roll_mean_core     rollierender Mittelwert mit kompensierter Summe
 //   kendall_tau_core   Kendalls Tau-b (ganzzahlig und double-double statt long double)
@@ -64,6 +67,8 @@
 #endif
 
 #include "simlev_core.h"
+#include "slc.h"
+#include "slc_rbase.h"
 #if !defined(SIMLEV_NA) || !defined(SIMLEV_FAIL) || !defined(SIMLEV_NUM)
 #error "Vor diesem Kern den Host einbinden: R simlev_capi.h, Python _ext_common.h (siehe simlev_core.h)."
 #endif
@@ -72,6 +77,8 @@
 #include <cmath>
 #include <algorithm>
 #include <numeric>
+#include <limits>
+#include <climits>
 
 namespace simlev {
 
@@ -617,34 +624,330 @@ static auto quantile_reg_core(simlev_host::NumVec y, simlev_host::NumMat X, doub
 // Hidden-Markov-Modell: skalierter Vorwaerts-Rueckwaerts-Schritt
 // ---------------------------------------------------------------------------
 
-// B: Emissionsdichten (T x K, je Zeile skaliert), A: Uebergangsmatrix, p0: Start.
+// B: Emissionsdichten (T x K, je Zeile skaliert), A: Uebergangsmatrix (lda Zeilen), p0: Start. Ergebnisse auf
+// Zeigern (al, be, ga T x K, xi K x K mit 0 vorbelegt, cs T); seit 1.5.0 auch vom HMM-EM (hmm_em) genutzt.
+static void hmm_fb_raw(int T, int K, const double* B, const double* A, int lda, const double* p0, double* al,
+                       double* be, double* ga, double* xi, double* cs) {
+  auto b = [&](int t, int j) { return B[t + (std::size_t) T * j]; };
+  auto a = [&](int i, int j) { return A[i + (std::size_t) lda * j]; };
+  auto AL = [&](int t, int j) -> double& { return al[t + (std::size_t) T * j]; };
+  auto BE = [&](int t, int j) -> double& { return be[t + (std::size_t) T * j]; };
+  auto GA = [&](int t, int j) -> double& { return ga[t + (std::size_t) T * j]; };
+  std::vector<double> av(K), tmp(K);
+  double s = 0.0;
+  for (int j = 0; j < K; ++j) { av[j] = p0[j] * b(0, j); s += av[j]; }
+  cs[0] = s; for (int j = 0; j < K; ++j) AL(0, j) = av[j] / s;
+  for (int t = 1; t < T; ++t) {
+    s = 0.0;
+    for (int j = 0; j < K; ++j) { double v = 0.0; for (int i = 0; i < K; ++i) v += AL(t - 1, i) * a(i, j); av[j] = v * b(t, j); s += av[j]; }
+    cs[t] = s; for (int j = 0; j < K; ++j) AL(t, j) = av[j] / s;
+  }
+  for (int j = 0; j < K; ++j) BE(T - 1, j) = 1.0;
+  for (int t = T - 2; t >= 0; --t) {
+    for (int j = 0; j < K; ++j) tmp[j] = b(t + 1, j) * BE(t + 1, j);
+    for (int i = 0; i < K; ++i) { double v = 0.0; for (int j = 0; j < K; ++j) v += a(i, j) * tmp[j]; BE(t, i) = v / cs[t + 1]; }
+  }
+  for (int t = 0; t < T; ++t) {
+    double rs = 0.0; for (int j = 0; j < K; ++j) { GA(t, j) = AL(t, j) * BE(t, j); rs += GA(t, j); }
+    for (int j = 0; j < K; ++j) GA(t, j) /= rs;
+  }
+  for (int t = 0; t < T - 1; ++t) {
+    for (int j = 0; j < K; ++j) tmp[j] = b(t + 1, j) * BE(t + 1, j);
+    for (int i = 0; i < K; ++i) for (int j = 0; j < K; ++j) xi[i + (std::size_t) K * j] += AL(t, i) * tmp[j] * a(i, j) / cs[t + 1];
+  }
+}
+
 static auto hmm_forward_backward(simlev_host::NumMat B, simlev_host::NumMat A, simlev_host::NumVec p0) {
   const int T = B.nrow(), K = B.ncol();
   auto al = SIMLEV_MATRIX(T, K), be = SIMLEV_MATRIX(T, K), ga = SIMLEV_MATRIX(T, K), xi = SIMLEV_MATRIX(K, K);
   auto cs = SIMLEV_NUM(T);
-  std::vector<double> a(K), tmp(K);
-  double s = 0.0;
-  for (int j = 0; j < K; ++j) { a[j] = p0[j] * B(0, j); s += a[j]; }
-  cs[0] = s; for (int j = 0; j < K; ++j) al(0, j) = a[j] / s;
-  for (int t = 1; t < T; ++t) {
-    s = 0.0;
-    for (int j = 0; j < K; ++j) { double v = 0.0; for (int i = 0; i < K; ++i) v += al(t - 1, i) * A(i, j); a[j] = v * B(t, j); s += a[j]; }
-    cs[t] = s; for (int j = 0; j < K; ++j) al(t, j) = a[j] / s;
-  }
-  for (int j = 0; j < K; ++j) be(T - 1, j) = 1.0;
-  for (int t = T - 2; t >= 0; --t) {
-    for (int j = 0; j < K; ++j) tmp[j] = B(t + 1, j) * be(t + 1, j);
-    for (int i = 0; i < K; ++i) { double v = 0.0; for (int j = 0; j < K; ++j) v += A(i, j) * tmp[j]; be(t, i) = v / cs[t + 1]; }
-  }
-  for (int t = 0; t < T; ++t) {
-    double rs = 0.0; for (int j = 0; j < K; ++j) { ga(t, j) = al(t, j) * be(t, j); rs += ga(t, j); }
-    for (int j = 0; j < K; ++j) ga(t, j) /= rs;
-  }
-  for (int t = 0; t < T - 1; ++t) {
-    for (int j = 0; j < K; ++j) tmp[j] = B(t + 1, j) * be(t + 1, j);
-    for (int i = 0; i < K; ++i) for (int j = 0; j < K; ++j) xi(i, j) += al(t, i) * tmp[j] * A(i, j) / cs[t + 1];
-  }
+  hmm_fb_raw(T, K, &B(0, 0), &A(0, 0), A.nrow(), &p0[0], &al(0, 0), &be(0, 0), &ga(0, 0), &xi(0, 0), &cs[0]);
   return SIMLEV_LIST("filtered", al, "smoothed", ga, "xi", xi, "scale", cs);
+}
+
+// ---------------------------------------------------------------------------
+// Hidden-Markov-Modell: Baum-Welch-EM aus einem Startwert (seit 1.5.0; bis 1.4.3 .hmm_em/_hmm_em in den Sprachen)
+// ---------------------------------------------------------------------------
+// Gauss'sches HMM mit k Zustaenden auf X (Tn x d). Rechnung Schritt fuer Schritt wie die fruehere Sprachfassung:
+//   E-Schritt: lB[, j] = -0.5 rowSums(Z^2) - sum(log(diag(L))) - 0.5 d log(2 pi), L = chol(S_j) (sl_chol),
+//     Z = t(backsolve(L, t(X - mu_j), transpose = TRUE)) (sl_trisolve); m = Zeilenmaximum wie pmax (NA/NaN
+//     gewinnt), Vorwaerts-Rueckwaerts auf exp(lB - m) (hmm_fb_raw), ll = sum(log(scale)) + sum(m).
+//   M-Schritt: p0 = ga[1, ], A = xi / rowSums(xi), je j: w = ga[, j], mu_j = colSums(X w) / sum(w),
+//     S_j = crossprod((X - mu_j) sqrt(w)) / sum(w) + ridge (sl_crossprod).
+//   Abbruch, wenn |ll - ll_alt| < tol (1 + |ll|); danach ein E-Schritt zu den gelieferten Parametern.
+// Summen wie R ueber slc_rbase (long double), log/exp/sqrt wie R's math1 (NaN bleibt).
+// Rueckgabe 0 oder 1 = Fehler (R: Fehler in .hmm_em, z. B. Matrix nicht positiv definit, NA im Abbruchtest).
+// mu (k x d), S (d x d x k), A (k x k) sind Start- und Ergebniswerte; p0 (k), ll, filt, smooth, lB (Tn x k), iter.
+static inline double hmm_r_log(double x) {
+  if (std::isnan(x)) return x;
+  return x > 0 ? std::log(x) : x == 0 ? -std::numeric_limits<double>::infinity() : std::numeric_limits<double>::quiet_NaN();
+}
+static inline double hmm_keepnan(double x, double y) { return std::isnan(x) ? x : y; }
+
+static int hmm_em(int Tn, int d, int k, const double* X, double* mu, double* S, double* A, double* p0, int n_iter,
+                  double tol, const double* ridge, double* ll_out, double* filt, double* smooth, double* lB, int* iter) {
+  const std::size_t T = (std::size_t) Tn, D = (std::size_t) d, K = (std::size_t) k;
+  std::vector<double> L(D * D), Bt(D * T), Z2(T * D), rs(T), ld(D), m(T), Be(T * K), be(T * K), xi(K * K), cs(T),
+      lcs(T), w(T), xw(T * D), cmu(D), C(D * D), rsx(K);
+  sl_ctx cx;
+  const double c0 = 0.5 * d * std::log(2 * M_PI);
+  for (int j = 0; j < k; ++j) p0[j] = 1.0 / k;
+  double ll = 0.0, ll_old = -std::numeric_limits<double>::infinity();
+  auto estep = [&]() -> int {
+    for (int j = 0; j < k; ++j) {
+      sl_ctx_init(&cx);
+      if (sl_chol(&cx, d, S + D * D * j, L.data()) != SL_OK) return 1;
+      for (std::size_t t = 0; t < T; ++t)
+        for (std::size_t c = 0; c < D; ++c) Bt[c + D * t] = X[t + T * c] - mu[j + K * c];
+      if (sl_trisolve(&cx, d, Tn, L.data(), 1, 1, Bt.data()) != SL_OK) return 1;
+      for (std::size_t t = 0; t < T; ++t)
+        for (std::size_t c = 0; c < D; ++c) { const double z = Bt[c + D * t]; Z2[t + T * c] = z * z; }
+      sl_r_rowsums(Tn, d, Z2.data(), 0, 0, rs.data());
+      for (std::size_t c = 0; c < D; ++c) ld[c] = hmm_r_log(L[c + D * c]);
+      const double sld = sl_r_sum(d, ld.data(), 0);
+      for (std::size_t t = 0; t < T; ++t) lB[t + T * j] = -0.5 * rs[t] - sld - c0;
+    }
+    for (std::size_t t = 0; t < T; ++t) m[t] = lB[t];
+    for (int j = 1; j < k; ++j)
+      for (std::size_t t = 0; t < T; ++t) {                     // pmax(m, lB[, j])
+        const double b = lB[t + T * j];
+        if ((!std::isnan(m[t]) && !std::isnan(b) && b > m[t]) || std::isnan(b)) m[t] = b;
+      }
+    for (std::size_t j = 0; j < K; ++j)
+      for (std::size_t t = 0; t < T; ++t) { const double v = lB[t + T * j] - m[t]; Be[t + T * j] = hmm_keepnan(v, std::exp(v)); }
+    std::fill(xi.begin(), xi.end(), 0.0);
+    hmm_fb_raw(Tn, k, Be.data(), A, k, p0, filt, be.data(), smooth, xi.data(), cs.data());
+    for (std::size_t t = 0; t < T; ++t) lcs[t] = hmm_r_log(cs[t]);
+    ll = sl_r_sum(Tn, lcs.data(), 0) + sl_r_sum(Tn, m.data(), 0);
+    return 0;
+  };
+  int it = 0;
+  for (it = 1; it <= n_iter; ++it) {
+    SIMLEV_CHECK_INTERRUPT();
+    if (estep()) return 1;
+    for (int j = 0; j < k; ++j) p0[j] = smooth[T * j];
+    sl_r_rowsums(k, k, xi.data(), 0, 0, rsx.data());
+    for (std::size_t j = 0; j < K; ++j) for (std::size_t i = 0; i < K; ++i) A[i + K * j] = xi[i + K * j] / rsx[i];
+    for (std::size_t j = 0; j < K; ++j) {
+      const double* wj = smooth + T * j;
+      const double sw = sl_r_sum(Tn, wj, 0);
+      for (std::size_t c = 0; c < D; ++c) for (std::size_t t = 0; t < T; ++t) xw[t + T * c] = X[t + T * c] * wj[t];
+      sl_r_colsums(Tn, d, xw.data(), 0, 0, cmu.data());
+      for (std::size_t c = 0; c < D; ++c) mu[j + K * c] = cmu[c] / sw;
+      for (std::size_t t = 0; t < T; ++t) w[t] = hmm_keepnan(wj[t], std::sqrt(wj[t]));
+      for (std::size_t c = 0; c < D; ++c)
+        for (std::size_t t = 0; t < T; ++t) xw[t + T * c] = (X[t + T * c] - mu[j + K * c]) * w[t];
+      sl_crossprod(Tn, d, d, xw.data(), xw.data(), C.data());
+      for (std::size_t q = 0; q < D * D; ++q) S[D * D * j + q] = C[q] / sw + ridge[q];
+    }
+    const double lhs = std::fabs(ll - ll_old), rhs = tol * (1 + std::fabs(ll));
+    if (std::isnan(lhs) || std::isnan(rhs)) return 1;              // R: if (NA) -> Fehler
+    if (lhs < rhs) break;
+    ll_old = ll;
+  }
+  if (it > n_iter) it = n_iter;
+  if (estep()) return 1;
+  *ll_out = ll;
+  *iter = it;
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Zielplanung: Rueckwaertsrekursion von planning_goal() ueber das Vermoegensgitter (seit 1.5.0; bis 1.4.3 in den
+// Sprachen)
+// ---------------------------------------------------------------------------
+// R: S x K Brutto-Renditen, grid (ng, aufsteigend), cf (horizon Zahlungen), goal, wmin, wmax, sv (Startwert),
+// tie_score (K: K + 1 - Rang der Streuung). Rechnung wie die fruehere Sprachfassung:
+//   term(W) = W >= goal; interp(Vn, W): 1 * (wmax >= goal) fuer W >= wmax, 0 fuer W <= 0, dazwischen unter wmin
+//     (goal > 0 ? 0 : Vn[1]), sonst pnorm(approx(log(grid), qnorm(pmin(1 - 1e-12, pmax(1e-12, Vn))), log(W),
+//     rule = 2)) (sl_qnorm, sl_pnorm, sl_r_approx; approx wie ifelse() nur, wenn ein W in [wmin, wmax) liegt);
+//   expect(Vn, base, k, last) = rowMeans(term bzw. interp von outer(base, R[, k])), 0 wo base <= 0;
+//   static[k]: Rekursion mit festem Kandidaten, dann interp(., sv); Politik je Periode: erstes Maximum von
+//   (E >= max - 1e-9) * tie_score (max.col, ties "first"), V = E[, pol]; p_dp = interp(V, sv).
+// Haben log(grid) gleiche Werte, fasst approx sie wie R mit mean zusammen (je Aufruf eine Warnung
+// "collapsing to unique 'x' values"): Rueckgabe = Zahl dieser approx-Aufrufe (sonst 0), -1 bei Fehler der Verteilungen.
+// Ausgaben: stat (K), pol (horizon x ng, NA = INT_MIN), Vt (ng x (horizon + 1): Spalte t = Wertfunktion nach
+// Periode t - 1, letzte = term(grid)), p_dp.
+static int64_t goal_dp(int S, int K, const double* R, int ng, const double* grid, int horizon, const double* cf,
+                       double goal, double wmin, double wmax, double sv, const double* tie_score, double* stat,
+                       int* pol, double* Vt, double* p_dp) {
+  const std::size_t NG = (std::size_t) ng, NS = (std::size_t) S;
+  sl_ctx cx;
+  bool bad = false;
+  // log(grid) und die Bindungen von approx (regularize.values mit ties = mean)
+  std::vector<double> lg(NG);
+  for (std::size_t i = 0; i < NG; ++i) lg[i] = hmm_r_log(grid[i]);
+  std::vector<std::size_t> gs;                         // Anfang jeder Gruppe gleicher Werte
+  for (std::size_t i = 0; i < NG; ++i) if (i == 0 || !(lg[i] == lg[i - 1])) gs.push_back(i);
+  const bool ties = gs.size() < NG;
+  std::vector<double> ux(gs.size()), uy(gs.size());
+  for (std::size_t g = 0; g < gs.size(); ++g) ux[g] = lg[gs[g]];
+  int64_t ncoll = 0;
+  std::vector<double> p(NG), z(NG), lw, yo, X, v(NG);
+  auto interp = [&](const double* Vn, std::size_t n, const double* W, double* out) {
+    for (std::size_t i = 0; i < NG; ++i) {             // pmin(1 - 1e-12, pmax(1e-12, Vn))
+      double a = 1e-12, t = Vn[i];
+      if ((!std::isnan(a) && !std::isnan(t) && t > a) || std::isnan(t)) a = t;
+      double b = 1 - 1e-12;
+      if ((!std::isnan(b) && !std::isnan(a) && a < b) || std::isnan(a)) b = a;
+      p[i] = b;
+    }
+    sl_ctx_init(&cx);
+    if (sl_qnorm(&cx, ng, p.data(), 0.0, 1.0, 1, z.data()) != SL_OK) bad = true;
+    const double* yy = z.data();
+    if (ties) {
+      for (std::size_t g = 0; g < gs.size(); ++g) {
+        const std::size_t e = g + 1 < gs.size() ? gs[g + 1] : NG;
+        uy[g] = sl_r_mean((int64_t) (e - gs[g]), z.data() + gs[g]);
+      }
+      yy = uy.data();
+    }
+    lw.clear();
+    bool any_hi = false;                               // ifelse(): approx nur, wenn ein W[mid] >= wmin
+    for (std::size_t i = 0; i < n; ++i)
+      if (W[i] > 0 && W[i] < wmax) { lw.push_back(hmm_r_log(W[i])); if (!(W[i] < wmin)) any_hi = true; }
+    if (ties && any_hi) ++ncoll;
+    yo.assign(lw.size(), 0.0);
+    sl_r_approx((int64_t) ux.size(), ux.data(), yy, (int64_t) lw.size(), lw.data(), 1, yy[0], yy[ux.size() - 1], 0.0,
+                yo.data());
+    sl_ctx_init(&cx);
+    if (!yo.empty() && sl_pnorm(&cx, (int64_t) yo.size(), yo.data(), 0.0, 1.0, 1, yo.data()) != SL_OK) bad = true;
+    const double alt = goal > 0 ? 0.0 : Vn[0];
+    std::size_t q = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+      double o = 0.0;
+      if (W[i] >= wmax) o = 1 * (double) (wmax >= goal);
+      if (W[i] <= 0) o = 0.0;
+      if (W[i] > 0 && W[i] < wmax) { o = W[i] < wmin ? alt : yo[q]; ++q; }
+      out[i] = o;
+    }
+  };
+  auto expect = [&](const double* Vn, const std::vector<double>& base, int k, bool last, double* e) {
+    X.resize(NG * NS);
+    for (std::size_t s = 0; s < NS; ++s) {
+      const double r = R[s + NS * (std::size_t) k];
+      for (std::size_t i = 0; i < NG; ++i) X[i + NG * s] = base[i] * r;
+    }
+    if (last) for (std::size_t q = 0; q < NG * NS; ++q) X[q] = X[q] >= goal ? 1.0 : 0.0;
+    else { std::vector<double> o(NG * NS); interp(Vn, NG * NS, X.data(), o.data()); X.swap(o); }
+    sl_r_rowsums(ng, S, X.data(), 0, 1, e);
+    for (std::size_t i = 0; i < NG; ++i) if (base[i] <= 0) e[i] = 0.0;
+  };
+  double* V = Vt + NG * (std::size_t) horizon;          // term(grid)
+  for (std::size_t i = 0; i < NG; ++i) V[i] = grid[i] >= goal ? 1.0 : 0.0;
+  std::vector<double> base(NG), Vs(NG), tmp(NG), one(1);
+  for (int k = 0; k < K; ++k) {
+    std::copy(V, V + NG, Vs.begin());
+    for (int t = horizon; t >= 1; --t) {
+      for (std::size_t i = 0; i < NG; ++i) base[i] = grid[i] + cf[t - 1];
+      expect(Vs.data(), base, k, t == horizon, tmp.data());
+      Vs.swap(tmp);
+    }
+    interp(Vs.data(), 1, &sv, one.data());
+    stat[k] = one[0];
+  }
+  std::vector<double> E(NG * (std::size_t) K);
+  const double* Vn = V;
+  for (int t = horizon; t >= 1; --t) {
+    SIMLEV_CHECK_INTERRUPT();
+    for (std::size_t i = 0; i < NG; ++i) base[i] = grid[i] + cf[t - 1];
+    for (int k = 0; k < K; ++k) expect(Vn, base, k, t == horizon, E.data() + NG * (std::size_t) k);
+    double* Vo = Vt + NG * (std::size_t) (t - 1);
+    for (std::size_t i = 0; i < NG; ++i) {
+      double mx = 0.0; bool upd = false, na = false;  // max je Zeile wie R (NaN bleibt)
+      for (int k = 0; k < K; ++k) {
+        const double x = E[i + NG * k];
+        if (std::isnan(x)) { na = true; if (!upd || !std::isnan(mx)) mx = x; upd = true; }
+        else if (!upd || (!std::isnan(mx) && x > mx)) { mx = x; upd = true; }
+      }
+      int best = -1; double bs = 0.0;
+      for (int k = 0; k < K && !na; ++k) {             // max.col(ifelse(E >= mx - 1e-9, tie_score, 0), "first")
+        const double sc = E[i + NG * k] >= mx - 1e-9 ? tie_score[k] : 0.0;
+        if (best < 0 || sc > bs) { best = k; bs = sc; }
+      }
+      if (na || best < 0) { pol[(t - 1) + (std::size_t) horizon * i] = INT_MIN; Vo[i] = SIMLEV_NA; }
+      else { pol[(t - 1) + (std::size_t) horizon * i] = best + 1; Vo[i] = E[i + NG * best]; }
+    }
+    Vn = Vo;
+  }
+  interp(Vn, 1, &sv, one.data());
+  *p_dp = one[0];
+  return bad ? -1 : ncoll;
+}
+
+// ---------------------------------------------------------------------------
+// CSCV von overfit_pbo() (seit 1.5.0; bis 1.4.3 in den Sprachen): je Aufteilung der S Bloecke in Haelften
+// ---------------------------------------------------------------------------
+// B: fuenf Blocksummen S x N (Reihenfolge B1 = R, B2 = (R - Mittel)^2, Bd = pmin(R, 0)^2, Bl = log1p(R), Bc = R - Mittel),
+// T: deren Spaltensummen (5 x N), combos: S/2 x C (1-basiert, utils::combn), half = Beobachtungen je Haelfte,
+// metric 0 sharpe, 1 sortino, 2 geometric, 3 mean. Wie die fruehere Sprachfassung in Bloecken zu 2000 Aufteilungen:
+//   In-Sample-Summen = Ind %*% B (sl_matmul), Out-of-Sample = T - In-Sample; Kennzahl wie .of_metric
+//   (m = s1 / n; sharpe m / sqrt(pmax((s2 - c1^2 / n) / (n - 1), 1e-300)), sortino m / sqrt(pmax(sdn / n, 1e-300)),
+//   geometric expm1(sl / n), mean m); best = max.col(IS, "first") (NA bei NaN in der Zeile), ob = OOS[best],
+//   Rang = #(OOS < ob) + (#(OOS == ob) + 1) / 2, w = Rang / (N + 1), lambda = log(w / (1 - w)), Median je Zeile
+//   wie median.default (NA bei NA/NaN). NA wie R (NA_real_).
+// Ausgaben lam, isb, oosb, oosm (je C).
+static inline double pbo_metric(double n, double s1, double s2, double sdn, double sl, double c1, int metric) {
+  const double m = s1 / n;
+  auto pmx = [](double x) { const double t = 1e-300; return (!std::isnan(x) && t > x) ? t : x; };
+  auto sq = [](double x) { return std::isnan(x) ? x : std::sqrt(x); };
+  switch (metric) {
+    case 0: return m / sq(pmx((s2 - c1 * c1 / n) / (n - 1)));
+    case 1: return m / sq(pmx(sdn / n));
+    case 2: { const double x = sl / n; return std::isnan(x) ? x : std::expm1(x); }
+    default: return m;
+  }
+}
+
+static void pbo_cscv(int S, int N, int C, const double* B, const double* T, const int* combos, double half, int metric,
+                     double* lam, double* isb, double* oosb, double* oosm) {
+  const std::size_t SN = (std::size_t) S * N, H = (std::size_t) (S / 2);
+  const double na = SIMLEV_NA;
+  std::vector<double> Ind, I(5), IS, OOS, row((std::size_t) N);
+  std::vector<std::vector<double>> Im(5);
+  for (int st = 0; st < C; st += 2000) {
+    SIMLEV_CHECK_INTERRUPT();
+    const int k = std::min(C, st + 2000) - st;
+    const std::size_t K = (std::size_t) k;
+    Ind.assign(K * S, 0.0);
+    for (std::size_t r = 0; r < K; ++r)
+      for (std::size_t q = 0; q < H; ++q) Ind[r + K * (std::size_t) (combos[q + H * (st + r)] - 1)] = 1.0;
+    for (int b = 0; b < 5; ++b) { Im[b].resize(K * N); sl_matmul(k, S, N, Ind.data(), B + SN * b, Im[b].data()); }
+    IS.resize(K * N); OOS.resize(K * N);
+    for (std::size_t j = 0; j < (std::size_t) N; ++j)
+      for (std::size_t r = 0; r < K; ++r) {
+        const std::size_t q = r + K * j;
+        IS[q] = pbo_metric(half, Im[0][q], Im[1][q], Im[2][q], Im[3][q], Im[4][q], metric);
+        OOS[q] = pbo_metric(half, T[j] - Im[0][q], T[N + j] - Im[1][q], T[2 * N + j] - Im[2][q], T[3 * N + j] - Im[3][q],
+                            T[4 * N + j] - Im[4][q], metric);
+      }
+    for (std::size_t r = 0; r < K; ++r) {
+      const std::size_t c = st + r;
+      bool rna = false;                                  // max.col(IS, ties.method = "first")
+      for (int j = 0; j < N; ++j) if (std::isnan(IS[r + K * j])) { rna = true; break; }
+      int best = 0;
+      if (!rna) { double a = IS[r]; for (int j = 1; j < N; ++j) { const double b = IS[r + K * j]; if (a < b) { a = b; best = j; } } }
+      const double ob = rna ? na : OOS[r + K * best];
+      isb[c] = rna ? na : IS[r + K * best];
+      oosb[c] = ob;
+      bool ona = false;
+      for (int j = 0; j < N; ++j) { row[j] = OOS[r + K * j]; if (std::isnan(row[j])) ona = true; }
+      if (rna || ona || std::isnan(ob)) lam[c] = na;
+      else {
+        double lt = 0.0, eq = 0.0;
+        for (int j = 0; j < N; ++j) { lt += row[j] < ob; eq += row[j] == ob; }
+        const double w = (lt + (eq + 1) / 2) / (N + 1);
+        lam[c] = hmm_r_log(w / (1 - w));
+      }
+      if (ona) oosm[c] = na;                             // median.default
+      else {
+        const std::size_t hh = ((std::size_t) N + 1) / 2;
+        std::nth_element(row.begin(), row.begin() + (hh - 1), row.end());
+        if (N % 2 == 1) oosm[c] = row[hh - 1];
+        else { double two[2] = {row[hh - 1], *std::min_element(row.begin() + hh, row.end())}; oosm[c] = sl_r_mean(2, two); }
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

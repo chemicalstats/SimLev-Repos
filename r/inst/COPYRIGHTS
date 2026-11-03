@@ -86,8 +86,9 @@ Entfällt im R-Paket (nur Python und Julia).
 Dateien:            src/slc_rbase.c, src/slc_rbase.h (seit 1.4.0; die übrigen
                     slc_rbase*-Dateien nur in Python und Julia)
 Herkunft:           übersetzt aus R 4.3.3 (src/main/summary.c, cum.c,
-                    array.c, arithmetic.c, src/library/stats/src/zeroin.c)
-                    über die Port-Module der Python- und Julia-Fassung
+                    array.c, arithmetic.c, src/library/stats/src/zeroin.c,
+                    seit 1.5.0 approx.c) über die Port-Module der Python-
+                    und Julia-Fassung
 Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka,
                     The R Foundation (laut Kopf der jeweiligen R-Quelle)
 Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
@@ -98,7 +99,12 @@ Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
                     (src/evaluate_core_impl.h) auch sl_r_rowsums, sl_r_prod,
                     sl_r_mean, sl_r_var, sl_r_cumsum, sl_r_cumprod,
                     sl_r_cummax, sl_r_pow und sl_r_zeroin2 (Brent wie
-                    stats::uniroot, für den internen Zinsfuß .xirr_rate)
+                    stats::uniroot, für den internen Zinsfuß .xirr_rate),
+                    seit 1.5.0 für die Auswertung je Pfad der Entnahme
+                    (src/withdrawal_core_impl.h) sl_r_colsums, sl_r_sum,
+                    sl_r_prod, sl_r_mean, sl_r_cumprod, sl_r_cummax,
+                    sl_r_pow und sl_r_pow1; sl_r_approx (approx1 aus
+                    stats/src/approx.c) rechnet nur in Python und Julia
 
 2.3 Ältere Herkunft innerhalb der R-Vorlagen
 --------------------------------------------

@@ -30,8 +30,8 @@ const B = SimLev.Bootstrap
 const _MISSING = B._MISSING
 const _Missing = B._Missing
 import ..Bootstrap: _stop, _warn, _message, _sp, _keep_count, _fmt1, _fmtstrs, _show, _as_char, _round0, _isnum, _numvec, _num1, _f1,
-                    _dvec, _ivec, _mat, _get, _names, _values, _len, _rval, _rsum, _rmean, _rprod, _rpow, _rlog, _rexp,
-                    _cumprod, _cummax, _median, _quantile7, _weighted_mean, _wquantile, _uniq,
+                    _dvec, _ivec, _mat, _get, _names, _values, _len, _rval, _rsum, _rprod, _rpow,
+                    _cumprod, _median, _quantile7, _weighted_mean, _wquantile, _uniq,
                     _match_arg, _todate, _seq_dates, _days, _is_boot_result, _is_study, _is_result, _deparse,
                     _quiet, _no_messages, _aux_type_of, _cfg_list, _as_numeric_col, _pmax, _pmin, _istrue
 
@@ -914,7 +914,9 @@ function _annual_real(wp)
     real = _mat(_get(wp, "returns")) ./ _mat(_get(wp, "inflation"))
     ppy == 1 && return real
     ny = size(real, 1) ÷ ppy
-    return _apply_cols(real[1:ny*ppy, :], c -> _agg_prod(c, ppy))
+    (ny < 1 || size(real, 2) == 0) && return _apply_cols(real[1:ny*ppy, :], c -> _agg_prod(c, ppy))
+    A = _wcore().wd_annual_prod(real, ppy)    # Produkt je Jahr im Kern; bei einem Jahr ein Vektor (wie apply)
+    return ny == 1 ? A[1, :] : A
 end
 
 """
@@ -954,25 +956,20 @@ function withdrawal_perfect_rate(real_returns; legacy = 0)
     catch
         nothing
     end
-    if R === nothing || isempty(R) || any(isnan, R) || any(!isfinite, R)
-        _stop("withdrawal_perfect_rate: real_returns muss eine Matrix endlicher realer Brutto-Jahresrenditen sein (1.05 = +5 %).")
-    end
-    med = _median(vec(R))
-    if med < 0.5
-        _stop(@sprintf("withdrawal_perfect_rate: real_returns sieht nicht wie Brutto-Renditen aus (Median %s); erwartet z. B. 1.05 für +5 %%, nicht 0.05 (Nettorendite: 1 + r übergeben).",
-                       _fmt1(med; digits = 4)))
-    end
-    any(<(0), R) && _stop("withdrawal_perfect_rate: Brutto-Renditen in real_returns müssen >= 0 sein (0 = Totalverlust).")
+    msg_a = "withdrawal_perfect_rate: real_returns muss eine Matrix endlicher realer Brutto-Jahresrenditen sein (1.05 = +5 %)."
+    (R === nothing || isempty(R)) && _stop(msg_a)
     lv = _numvec(legacy)
-    if lv === nothing || length(lv) != 1 || !isfinite(lv[1]) || lv[1] < 0
-        _stop(@sprintf("withdrawal_perfect_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 %% des Startvermögens; erhalten: %s).", _show(legacy)))
+    lg_ok = lv !== nothing && length(lv) == 1 && isfinite(lv[1]) && lv[1] >= 0
+    # Prüfungen (nicht endlich, Median, negativ) und PWR je Spalte im Kern (core/withdrawal_core_impl.h, wd_pwr)
+    out, st, _ = _wcore().wd_pwr(R, lg_ok ? Float64(lv[1]) : 0.0)
+    st == 1 && _stop(msg_a)
+    if st == 2
+        _stop(@sprintf("withdrawal_perfect_rate: real_returns sieht nicht wie Brutto-Renditen aus (Median %s); erwartet z. B. 1.05 für +5 %%, nicht 0.05 (Nettorendite: 1 + r übergeben).",
+                       _fmt1(_median(vec(R)); digits = 4)))
     end
-    lg = lv[1]
-    out = Vector{Float64}(undef, size(R, 2))
-    for j in 1:size(R, 2)
-        r = R[:, j]
-        tp = reverse(_cumprod(reverse(r)))
-        out[j] = (_rprod(r) - lg) / _rsum(tp) * 100
+    st == 3 && _stop("withdrawal_perfect_rate: Brutto-Renditen in real_returns müssen >= 0 sein (0 = Totalverlust).")
+    if !lg_ok
+        _stop(@sprintf("withdrawal_perfect_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 %% des Startvermögens; erhalten: %s).", _show(legacy)))
     end
     return out
 end
@@ -1060,9 +1057,6 @@ end
 _dflt(x, d) = x === _MISSING ? d : x
 _sv_get(r, path...) = (v = r; for k in path; v = _get(v, k); end; v)
 
-"Mittel bzw. Summe je Spalte in long double (colMeans/colSums; C-Kern)."
-_col_ld(M::Matrix{Float64}, mean::Bool) = SimLev._ld_colsums(M; mean = mean)
-
 "Steuerangaben der Person prüfen (R: `.wd_tax_mode`): `nothing` → \"none\", `tax_profile()` → \"person\"."
 function _wd_tax_mode(tax)
     tax === nothing && return "none"
@@ -1116,10 +1110,10 @@ end
 """Jahreszeilen des Tarifwegs als RFrame (R: `.wd_tariff_years`): `path`, `year` (Planjahr) und die Spalten von
 `tax_report["tariff_years"]` aus `simulation()`, nach Pfad und Jahr."""
 function _wd_tariff_years(M::Matrix{Float64}, ny::Int)
-    keep = findall(!isnan, M[1, :])
-    cols = Pair{String,Any}["path" => Int[(k - 1) ÷ (ny + 1) + 1 for k in keep]]
+    C = _wcore().wd_tariff_compact(M, ny)           # Spalten mit Jahr NA entfallen (Kern)
+    cols = Pair{String,Any}["path" => Int[Int(v) for v in C[:, 1]]]
     for (j, c) in enumerate(_WD_TARIFF_COLS)
-        col = M[j, keep]
+        col = C[:, j + 1]
         push!(cols, c => (c == "year" ? Int[Int(v) for v in col] : c == "guenstiger" ? Bool[v != 0 for v in col] : col))
     end
     return RFrame(cols...; class = ["data.frame"])
@@ -1733,16 +1727,9 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     sp = core["spending"]
     w0 = sp[1, :]
     gamma = Float64(gamma)
-    function ce_fun(c)
-        c = Float64[_pmax(v, 1e-9 * start_value) for v in c]
-        abs(gamma - 1) < 1e-12 && return _rexp(_rmean(Float64[_rlog(v) for v in c]))
-        return _rpow(_rmean(_pow_vec(c, 1 - gamma)), 1 / (1 - gamma))
-    end
-    dd_fun(c) = (m = _cummax(c); maximum(1 .- c ./ m))
     ncol = size(sp, 2)
-    function per_path(fun, H = fill(ny, ncol))
-        Float64[(r = min(Int(H[i]), nfy); r > 0 ? fun(sp[1:r, i]) : NA) for i in 1:ncol]
-    end
+    # Konsumkennzahlen je Pfad im Kern (wd_metrics, core/withdrawal_core_impl.h): je Jahr nur über volle Planjahre
+    mt = _wcore().wd_metrics(sp, nfy, nothing, gamma, start_value)
     pwr = (ppy == 1 || size(R, 1) >= ppy) ?
           withdrawal_perfect_rate(_annual_real(RList("returns" => R, "inflation" => I, "frequency" => x["frequency"]))) : nothing
     pwr = pwr === nothing ? Union{Missing,Bool}[missing for _ in 1:ncol] :
@@ -1750,9 +1737,10 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     dep = Float64[ceil(v / ppy) for v in core["depletion_period"]]
     cols = Pair{String,Any}["success" => core["failed"] .== 0, "depletion_year" => dep,
             "terminal_real" => core["terminal_real"], "terminal_nominal" => core["terminal_nominal"],
-            "first_withdrawal" => w0, "mean_spending" => nfy == ny ? _col_ld(sp, true) : per_path(_rmean),
-            "min_spending" => per_path(minimum), "spending_drawdown" => per_path(dd_fun), "ce_spending" => per_path(ce_fun),
-            "total_spending" => _col_ld(sp, false), "taxes" => core["taxes_real"], "pwr" => pwr]
+            "first_withdrawal" => w0, "mean_spending" => mt["mean_spending"],
+            "min_spending" => mt["min_spending"], "spending_drawdown" => mt["spending_drawdown"],
+            "ce_spending" => mt["ce_spending"], "total_spending" => mt["total_spending"], "taxes" => core["taxes_real"],
+            "pwr" => pwr]
     paths = RFrame(cols...)
     sd = _get(x, "start_dates")
     sd === nothing || (paths["start"] = _todate(sd, "dates"))
@@ -1770,12 +1758,17 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
         paths["depletion_year"] = Float64[!isnan(dy[i]) && dy[i] <= H[i] ? dy[i] : NA for i in eachindex(H)]
         paths["terminal_real"] = Float64[core["wealth_end"][H[i]+1, i] for i in eachindex(H)]
         paths["taxes"] = Float64[core["taxes_end"][H[i]+1, i] for i in eachindex(H)]
-        paths["mean_spending"] = per_path(_rmean, H); paths["min_spending"] = per_path(minimum, H)
-        paths["total_spending"] = Float64[_rsum(sp[1:H[i], i]) for i in eachindex(H)]
-        paths["spending_drawdown"] = per_path(dd_fun, H); paths["ce_spending"] = per_path(ce_fun, H)
+        mt = _wcore().wd_metrics(sp, nfy, H, gamma, start_value)
+        paths["mean_spending"] = mt["mean_spending"]; paths["min_spending"] = mt["min_spending"]
+        paths["total_spending"] = mt["total_spending"]
+        paths["spending_drawdown"] = mt["spending_drawdown"]; paths["ce_spending"] = mt["ce_spending"]
         if ppy == 1
             AR = _annual_real(RList("returns" => R, "inflation" => I, "frequency" => x["frequency"]))
-            paths["pwr"] = Float64[withdrawal_perfect_rate(AR[1:H[i], i:i])[1] for i in eachindex(H)]
+            pc, st, path = _wcore().wd_pwr(AR, 0.0, H)     # PWR je Pfad bis zum Horizont (Prüfung je Pfad)
+            if st != 0                                      # erster ungültiger Pfad: Fehler wie bisher
+                withdrawal_perfect_rate(AR[1:H[path], path:path])
+            end
+            paths["pwr"] = pc
         else
             paths["pwr"] = fill(NA, length(H))
         end

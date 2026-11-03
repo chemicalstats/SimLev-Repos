@@ -20,6 +20,10 @@
  *             - zeroin2: Brent-Verfahren (inverse quadratische bzw. lineare Interpolation mit
  *               Bisektion als Rückfall) wie R_zeroin2 hinter stats::uniroot, Schritt für Schritt in derselben
  *               Rechenfolge.
+ *             - approx: Interpolation je Ausgabepunkt wie R_approxfun/approx1 hinter stats::approx und
+ *               approxfun (nach der Aufbereitung von x und y in der Sprache): Bisektion des Intervalls,
+ *               linear y_i + (y_j − y_i)((v − x_i)/(x_j − x_i)) bzw. konstant f1 y_i + f2 y_j (Summand 0,
+ *               wenn das Gewicht 0 ist); außerhalb yleft/yright, NA/NaN in v bleibt v.
  *             Leere Eingabe: mean ist 0/0 in long double (NaN mit gesetztem Vorzeichenbit wie in R).
  *             NaN-Ergebnisse (welche Nutzlast bei zwei NaN-Operanden gewinnt) folgen der Hardware
  *             (x87 bei long double), genau wie in R; die Ports bildeten dafür die x87-Regel nach.
@@ -30,8 +34,9 @@
  * Herkunft:           übersetzt aus R 4.3.3, src/main/summary.c, cum.c (handleNaN), array.c,
  *                     arithmetic.c (R_POW), src/library/stats/src/zeroin.c (R_zeroin2; dort: aus Netlib
  *                     c/brent.shar, Brents Prozedur zero, R. P. Brent, Algorithms for Minimization without
- *                     Derivatives, 1973), über die Port-Funktionen python/simlev/_r/rnum.py,
- *                     base.py und julia/src/r/rnum.jl (r_zeroin2), base.jl, ld80.jl
+ *                     Derivatives, 1973), src/library/stats/src/approx.c (approx1, R_approxfun; seit
+ *                     1.5.0), über die Port-Funktionen python/simlev/_r/rnum.py, base.py, stats_smooth.py
+ *                     (_approx_core) und julia/src/r/rnum.jl (r_zeroin2), base.jl, ld80.jl
  * Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation
  *                     (laut Kopf der jeweiligen R-Quelle)
  * Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
@@ -331,4 +336,31 @@ double sl_r_zeroin2(sl_r_fn1 f, void *info, double ax, double bx, double fa, dou
     }
     *iter = -1;
     return b;
+}
+
+/* approx1/R_approxfun (stats/src/approx.c) über den Port python/simlev/_r/stats_smooth.py (_approx_core):
+ * x aufsteigend ohne NA (Länge n), y gleich lang; je v = xout[k] Bisektion i < j mit x[i] <= v <= x[j]. */
+static double approx1(double v, const double *x, const double *y, int64_t n, int method, double yleft,
+                      double yright, double f1, double f2)
+{
+    int64_t i = 0, j = n - 1;
+    if (!n) return R_NAN;
+    if (v < x[i]) return yleft;
+    if (v > x[j]) return yright;
+    while (i < j - 1) {
+        int64_t ij = (i + j) / 2;
+        if (v < x[ij]) j = ij; else i = ij;
+    }
+    if (v == x[j]) return y[j];
+    if (v == x[i]) return y[i];
+    if (method == 1) return y[i] + (y[j] - y[i]) * ((v - x[i]) / (x[j] - x[i]));
+    return (f1 != 0.0 ? y[i] * f1 : 0.0) + (f2 != 0.0 ? y[j] * f2 : 0.0);
+}
+
+void sl_r_approx(int64_t n, const double *x, const double *y, int64_t nout, const double *xout, int method,
+                 double yleft, double yright, double f, double *yout)
+{
+    const double f2 = f, f1 = 1 - f;
+    for (int64_t k = 0; k < nout; k++)
+        yout[k] = isnan(xout[k]) ? xout[k] : approx1(xout[k], x, y, n, method, yleft, yright, f1, f2);
 }

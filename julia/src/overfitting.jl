@@ -508,38 +508,8 @@ function overfit_pbo(x; S = 16, metric = nothing, frequency = nothing, dates = n
     T1, T2, Td, Tl, Tc = _colsums(B1), _colsums(B2), _colsums(Bd), _colsums(Bl), _colsums(Bc)
     combos = _combn(S, S ÷ 2)
     C = length(combos); half = bl * S / 2
-    lam = zeros(C); isb = zeros(C); oosb = zeros(C); oosm = zeros(C)
-    for st in 1:2000:C
-        idx = st:min(C, st + 1999); k = length(idx)
-        Ind = zeros(k, S)
-        for (r, ci) in enumerate(idx), s in combos[ci]
-            Ind[r, s] = 1.0
-        end
-        mp(B) = Matrix{Float64}(SL.SLib.matmul(Ind, B))   # slc-Matrixprodukt
-        I1, I2, Id, Il, Ic = mp(B1), mp(B2), mp(Bd), mp(Bl), mp(Bc)
-        rep_t(v) = repeat(permutedims(v), k, 1)
-        IS = _of_metric(half, I1, I2, Id, Il, metric; c1 = Ic)
-        OOS = _of_metric(half, rep_t(T1) .- I1, rep_t(T2) .- I2, rep_t(Td) .- Id, rep_t(Tl) .- Il, metric;
-                         c1 = rep_t(Tc) .- Ic)
-        best = _max_col_first(IS)
-        for r in 1:k
-            b = best[r]
-            ob = b == 0 ? NA : OOS[r, b]
-            row = view(OOS, r, :)
-            rk = if isnan(ob) || any(isnan, row)
-                NA
-            else
-                lt = 0; eq = 0
-                for v in row; v < ob && (lt += 1); v == ob && (eq += 1); end
-                Float64(lt) + (Float64(eq) + 1) / 2
-            end
-            w = rk / (N + 1)
-            lam[idx[r]] = SL.RLibm.log(w / (1 - w))
-            isb[idx[r]] = b == 0 ? NA : IS[r, b]
-            oosb[idx[r]] = ob
-            oosm[idx[r]] = _median(row)
-        end
-    end
+    # je Aufteilung im Kern (core/research_core_impl.h, pbo_cscv; bis 1.4.3 hier in Julia)
+    lam, isb, oosb, oosm = SL.DependenceCore.pbo_cscv((B1, B2, Bd, Bl, Bc), (T1, T2, Td, Tl, Tc), combos, half, metric, S, N)
     intercept, slope = _lm_coef(isb, oosb)
     return SL.RList("pbo" => _mean_lgl([_lgl(<=, v, 0.0) for v in lam]), "lambda" => lam, "is_best" => isb,
                     "oos_best" => oosb, "oos_median" => oosm, "slope" => slope, "intercept" => intercept,

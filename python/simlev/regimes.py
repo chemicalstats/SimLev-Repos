@@ -18,7 +18,7 @@ from . import dependence as _dep
 from ._r import fmt as _fmt
 from ._r import libm as _libm
 from ._r.rlist import RList
-from ._r.rnum import r_colsums, r_mean, r_rowsums, r_sd, r_sum, r_var
+from ._r.rnum import r_mean, r_rowsums, r_sd, r_sum, r_var
 
 __all__ = ["regime_hmm", "regime_states", "SimLevHMM"]
 
@@ -94,45 +94,15 @@ def _hmm_em(X, k, init, max_iter, tol, ridge):
         ``lB``, ``iter``; ``ll``, ``filtered``, ``smoothed`` und ``lB`` zu den
         gelieferten (zuletzt geschätzten) Parametern.
     """
-    X = np.asarray(X, dtype=np.float64)
-    Tn, d = X.shape
-    k = int(k)
-    la = _dep._sl()                        # slc: Cholesky, Dreieckslöser, Kreuzprodukt
-    with np.errstate(all="ignore"):
-        mu = np.array(init["mu"], dtype=np.float64).reshape(k, d)
-        S = [np.array(s, dtype=np.float64) for s in init["S"]]
-        A = np.array(init["A"], dtype=np.float64)
-        p0 = np.full(k, 1 / k)
-        ll_old = -math.inf
-
-        def estep():
-            lB = np.column_stack([_ldmvn(X, mu[j, :], S[j]) for j in range(k)])
-            m = lB[:, 0].copy()
-            for j in range(1, k):
-                b = lB[:, j]
-                m = np.where(np.isnan(b) | (b > m), b, m)   # pmax: NaN/NA in b gewinnt, NaN/NA in m bleibt
-            fb = _core.hmm_forward_backward(_libm.exp(lB - m.reshape(-1, 1)), A, p0)
-            ll = r_sum(_libm.log(fb["scale"])) + r_sum(m)
-            return lB, fb, ll
-        it = 0
-        for it in range(1, int(max_iter) + 1):
-            lB, fb, ll = estep()
-            ga = fb["smoothed"]
-            xi = fb["xi"]
-            p0 = ga[0, :].copy()
-            A = xi / r_rowsums(xi).reshape(-1, 1)
-            for j in range(k):
-                w = ga[:, j]
-                sw = r_sum(w)
-                mu[j, :] = r_colsums(X * w.reshape(-1, 1)) / sw
-                Xc = X - mu[j, :].reshape(1, -1)
-                S[j] = np.asarray(la.crossprod(Xc * np.sqrt(w).reshape(-1, 1)), dtype=np.float64) / sw + ridge
-            if abs(ll - ll_old) < tol * (1 + abs(ll)):
-                break
-            ll_old = ll
-        lB, fb, ll = estep()
-    return {"mu": mu, "S": S, "A": A, "p0": p0, "ll": ll, "filtered": fb["filtered"], "smoothed": fb["smoothed"],
-            "lB": lB, "iter": it}
+    # E- und M-Schritte im Kern (core/research_core_impl.h, hmm_em; bis 1.4.3 hier in Python); ein Fehler dort
+    # verwirft wie in R den Startwert (regime_hmm fängt ihn ab)
+    ni = int(max_iter)                     # max_iter = 0: nur der E-Schritt zum Startwert
+    if ni < 0:                             # R: seq_len(max_iter) scheitert
+        raise ValueError("argument of length 0")
+    r = _core.hmm_em(np.asarray(X, dtype=np.float64), int(k), init["mu"], init["S"], init["A"], ni, float(tol), ridge)
+    if r is None:
+        raise ValueError("regime_hmm: EM-Schritt fehlgeschlagen")
+    return r
 
 
 def _hmm_init_cl(X, cl, k, ridge):
@@ -385,7 +355,8 @@ def regime_hmm(data, columns, *, k=2, frequency=("week", "day", "month"), n_star
     out["loglik"] = f["ll"]
     out["bic"] = -2 * f["ll"] + npar * math.log(Tn)
     out["initial"] = pd.Series(f["p0"][o], index=zn)
-    out["duration"] = pd.Series(1 / (1 - np.diag(A)), index=zn)
+    with np.errstate(divide="ignore"):            # p_jj = 1: Inf ohne Warnung wie R
+        out["duration"] = pd.Series(1 / (1 - np.diag(A)), index=zn)
     out["frequency"] = frequency
     out["ppy"] = ppy
     out["share"] = _dep._colmeans(f["smoothed"][:, o])

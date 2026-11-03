@@ -6,7 +6,8 @@
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang.
 """Interpolation und Filter (``approx``, ``approxfun``, ``filter``), nachgebildet aus R 4.3.3
-``stats/R/approx.R``, ``filter.R`` und ``stats/src/approx.c``, ``filter.c``.
+``stats/R/approx.R``, ``filter.R`` und ``stats/src/approx.c``, ``filter.c``. Die Interpolation je Punkt
+(``approx.c``) rechnet seit 1.5.0 der C-Kern ``sl_r_approx`` (core/slc_rbase.c).
 
 Seit 1.0.0 entfallen ``fft``, ``bw.nrd0``, ``density``, ``smooth.spline`` und
 ``predict.smooth.spline``: SimLev nutzt die eigene Gauß-Kerndichte und den eigenen
@@ -19,6 +20,7 @@ import math
 import numpy as np
 import pandas as pd
 
+from .. import _ext   # C-Kern sl_r_approx (core/slc_rbase.c)
 from .linalg import RError
 from .rlist import RList
 from .rnum import NA_REAL
@@ -89,42 +91,11 @@ def _regularize(x, y, ties, warn_collapsing, na_rm):
 
 
 def _approx_core(x, y, v, method, yleft, yright, f):
-    n = x.size
+    """R_approxfun: Interpolation je Punkt im C-Kern ``sl_r_approx`` (core/slc_rbase.c, seit 1.5.0)."""
     out = np.empty(v.size)
-    if n == 0:
-        out[:] = np.nan
-        return out
-    f2 = f
-    f1 = 1 - f
-    with np.errstate(all="ignore"):
-        for k, vk in enumerate(v.tolist()):
-            if vk != vk:
-                out[k] = vk
-                continue
-            i = 0
-            j = n - 1
-            if vk < x[i]:
-                out[k] = yleft
-                continue
-            if vk > x[j]:
-                out[k] = yright
-                continue
-            while i < j - 1:
-                ij = (i + j) // 2
-                if vk < x[ij]:
-                    j = ij
-                else:
-                    i = ij
-            if vk == x[j]:
-                out[k] = y[j]
-                continue
-            if vk == x[i]:
-                out[k] = y[i]
-                continue
-            if method == 1:
-                out[k] = y[i] + (y[j] - y[i]) * ((vk - x[i]) / (x[j] - x[i]))
-            else:
-                out[k] = (y[i] * f1 if f1 != 0.0 else 0.0) + (y[j] * f2 if f2 != 0.0 else 0.0)
+    _ext.slc_r_approx(np.ascontiguousarray(x, dtype=np.float64), np.ascontiguousarray(y, dtype=np.float64),
+                      np.ascontiguousarray(v, dtype=np.float64), int(method), float(yleft), float(yright),
+                      float(f), out)
     return out
 
 
@@ -161,6 +132,29 @@ def _approx_setup(x, y, method, yleft, yright, rule, f, ties, na_rm, ties_missin
     return xv, yv, method, float(yleft), float(yright), nona, notna, nx
 
 
+def _seq_int(frm, to, n):
+    """``seq.int(from, to, length.out = n)`` in ``approx``: Grenzen endlich (sonst Fehler wie R); sind from, to und
+    Schritt ganzzahlig, liefert R ganze Zahlen (aus -0 wird 0)."""
+    frm = float(frm)
+    to = float(to)
+    if not math.isfinite(frm):
+        raise RError("'from' must be a finite number")
+    if not math.isfinite(to):
+        raise RError("'to' must be a finite number")
+    out = seq_len_out(frm, to, n)
+    n = int(n)
+    rby = 0.0
+    if n > 2:
+        nint = float(n - 1)
+        rby = to - frm
+        rby = rby / nint if math.isfinite(rby) else to / nint - frm / nint
+    lim = 2147483647.0
+    if (-lim - 1 <= frm <= lim and -lim - 1 <= to <= lim and frm == math.trunc(frm)
+            and (n <= 1 or to == math.trunc(to)) and (n <= 2 or rby == math.trunc(rby))):
+        out = out + 0.0
+    return out
+
+
 class _XY(RList):
     pass
 
@@ -180,10 +174,10 @@ def approx(x, y=None, xout=None, method="linear", n=50, yleft=None, yright=None,
         if n <= 0:
             raise RError("'approx' requires n >= 1")
         if nona:
-            xo = seq_len_out(xv[0], xv[nx - 1], n)
+            xo = _seq_int(xv[0], xv[nx - 1], n)
         else:
             xs = xv[notna]
-            xo = seq_len_out(xs[0], xs[-1], n)
+            xo = _seq_int(xs[0], xs[-1], n)
     else:
         xo, _ = _vec(xout)
     res = _XY()

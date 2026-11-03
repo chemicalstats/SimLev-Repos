@@ -1019,7 +1019,7 @@
     ],
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1276,
+    "line": 1279,
     "bases": [
      "RList",
      "OrderedDict",
@@ -1033,7 +1033,7 @@
     ],
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1296,
+    "line": 1299,
     "bases": [
      "RList",
      "OrderedDict",
@@ -1047,7 +1047,7 @@
     ],
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 2435,
+    "line": 2417,
     "bases": [
      "RList",
      "OrderedDict",
@@ -1103,7 +1103,7 @@
     ],
     "module": "simlev.regimes",
     "file": "python/simlev/regimes.py",
-    "line": 182,
+    "line": 152,
     "bases": [
      "RList",
      "OrderedDict",
@@ -1218,7 +1218,7 @@
     ],
     "module": "simlev.planning",
     "file": "python/simlev/planning.py",
-    "line": 691,
+    "line": 648,
     "bases": [
      "RList",
      "OrderedDict",
@@ -1274,7 +1274,7 @@
     ],
     "module": "simlev.overfitting",
     "file": "python/simlev/overfitting.py",
-    "line": 367,
+    "line": 368,
     "bases": [
      "RList",
      "OrderedDict",
@@ -1288,7 +1288,7 @@
     ],
     "module": "simlev.overfitting",
     "file": "python/simlev/overfitting.py",
-    "line": 628,
+    "line": 600,
     "bases": [
      "RList",
      "OrderedDict",
@@ -1302,7 +1302,7 @@
     ],
     "module": "simlev.overfitting",
     "file": "python/simlev/overfitting.py",
-    "line": 748,
+    "line": 720,
     "bases": [
      "RList",
      "OrderedDict",
@@ -1773,7 +1773,7 @@
     "class": null,
     "module": "SimLev",
     "file": "julia/src/r/stats_smooth.jl",
-    "line": 218,
+    "line": 199,
     "args": [
      {
       "name": "F",
@@ -3290,7 +3290,7 @@
     "class": null,
     "module": "simlev.planning",
     "file": "python/simlev/planning.py",
-    "line": 217,
+    "line": 219,
     "args": [
      {
       "name": "datasets",
@@ -6822,7 +6822,7 @@
     "class": null,
     "module": "simlev.overfitting",
     "file": "python/simlev/overfitting.py",
-    "line": 406,
+    "line": 407,
     "args": [
      {
       "name": "x",
@@ -7099,7 +7099,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/overfitting.R",
-    "line": 485,
+    "line": 475,
     "args": [
      {
       "name": "x",
@@ -7162,7 +7162,7 @@
     "class": null,
     "module": "simlev.overfitting",
     "file": "python/simlev/overfitting.py",
-    "line": 827,
+    "line": 799,
     "args": [
      {
       "name": "x",
@@ -7223,7 +7223,7 @@
     "class": null,
     "module": "SimLev.Overfitting",
     "file": "julia/src/overfitting.jl",
-    "line": 834,
+    "line": 804,
     "args": [
      {
       "name": "x",
@@ -7306,7 +7306,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/overfitting.R",
-    "line": 640,
+    "line": 630,
     "args": [
      {
       "name": "x",
@@ -7375,7 +7375,7 @@
     "class": null,
     "module": "simlev.overfitting",
     "file": "python/simlev/overfitting.py",
-    "line": 995,
+    "line": 967,
     "args": [
      {
       "name": "x",
@@ -7442,7 +7442,7 @@
     "class": null,
     "module": "SimLev.Overfitting",
     "file": "julia/src/overfitting.jl",
-    "line": 1013,
+    "line": 983,
     "args": [
      {
       "name": "x",
@@ -8306,7 +8306,7 @@
     "class": null,
     "module": "simlev.planning",
     "file": "python/simlev/planning.py",
-    "line": 461,
+    "line": 456,
     "args": [
      {
       "name": "returns",
@@ -8367,7 +8367,7 @@
     "class": null,
     "module": "SimLev.Planning",
     "file": "julia/src/planning.jl",
-    "line": 537,
+    "line": 531,
     "args": [
      {
       "name": "returns",
@@ -9950,7 +9950,7 @@
     "generic": "plot",
     "class": "SimLevGoalPlan",
     "file": "r/R/planning.R",
-    "line": 518,
+    "line": 491,
     "args": [
      {
       "name": "x",
@@ -9976,7 +9976,7 @@
     "class": "SimLevGoalPlan",
     "module": "simlev.planning",
     "file": "python/simlev/planning.py",
-    "line": 721,
+    "line": 678,
     "args": [
      {
       "name": "x",
@@ -10002,7 +10002,7 @@
     "class": "SimLevGoalPlan",
     "module": "SimLev.Planning",
     "file": "julia/src/planning.jl",
-    "line": 686,
+    "line": 630,
     "args": [
      {
       "name": "x",
@@ -10019,7 +10019,7 @@
     ],
     "defaults_known": true,
     "args_source": "source",
-    "note": "über _plot_method (Zeichenfunktion _plot_goalplan, julia/src/planning.jl:686)"
+    "note": "über _plot_method (Zeichenfunktion _plot_goalplan, julia/src/planning.jl:630)"
    },
    "abweichungen": [
     {
@@ -10061,7 +10061,7 @@
     "generic": "plot",
     "class": "SimLevHMM",
     "file": "r/R/regimes.R",
-    "line": 269,
+    "line": 258,
     "args": [
      {
       "name": "x",
@@ -10093,7 +10093,7 @@
     "class": "SimLevHMM",
     "module": "simlev.regimes",
     "file": "python/simlev/regimes.py",
-    "line": 213,
+    "line": 183,
     "args": [
      {
       "name": "x",
@@ -10137,7 +10137,7 @@
     "class": "SimLevHMM",
     "module": "SimLev.Regimes",
     "file": "julia/src/regimes.jl",
-    "line": 414,
+    "line": 368,
     "args": [
      {
       "name": "x",
@@ -10172,7 +10172,7 @@
     ],
     "defaults_known": true,
     "args_source": "source",
-    "note": "über _plot_method (Zeichenfunktion _plot_hmm, julia/src/regimes.jl:414)"
+    "note": "über _plot_method (Zeichenfunktion _plot_hmm, julia/src/regimes.jl:368)"
    },
    "abweichungen": [
     {
@@ -10516,7 +10516,7 @@
     "generic": "plot",
     "class": "SimLevPBO",
     "file": "r/R/overfitting.R",
-    "line": 239,
+    "line": 229,
     "args": [
      {
       "name": "x",
@@ -10542,7 +10542,7 @@
     "class": "SimLevPBO",
     "module": "simlev.overfitting",
     "file": "python/simlev/overfitting.py",
-    "line": 544,
+    "line": 516,
     "args": [
      {
       "name": "x",
@@ -10568,7 +10568,7 @@
     "class": "SimLevPBO",
     "module": "SimLev.Overfitting",
     "file": "julia/src/overfitting.jl",
-    "line": 567,
+    "line": 537,
     "args": [
      {
       "name": "x",
@@ -10585,7 +10585,7 @@
     ],
     "defaults_known": true,
     "args_source": "source",
-    "note": "über _plot_method (Zeichenfunktion _plot_pbo, julia/src/overfitting.jl:567)"
+    "note": "über _plot_method (Zeichenfunktion _plot_pbo, julia/src/overfitting.jl:537)"
    },
    "abweichungen": [
     {
@@ -11474,7 +11474,7 @@
     "generic": "plot",
     "class": "SimLevWalkForward",
     "file": "r/R/overfitting.R",
-    "line": 567,
+    "line": 557,
     "args": [
      {
       "name": "x",
@@ -11500,7 +11500,7 @@
     "class": "SimLevWalkForward",
     "module": "simlev.overfitting",
     "file": "python/simlev/overfitting.py",
-    "line": 785,
+    "line": 757,
     "args": [
      {
       "name": "x",
@@ -11526,7 +11526,7 @@
     "class": "SimLevWalkForward",
     "module": "SimLev.Overfitting",
     "file": "julia/src/overfitting.jl",
-    "line": 935,
+    "line": 905,
     "args": [
      {
       "name": "x",
@@ -11543,7 +11543,7 @@
     ],
     "defaults_known": true,
     "args_source": "source",
-    "note": "über _plot_method (Zeichenfunktion _plot_wf, julia/src/overfitting.jl:935)"
+    "note": "über _plot_method (Zeichenfunktion _plot_wf, julia/src/overfitting.jl:905)"
    },
    "abweichungen": [
     {
@@ -11766,7 +11766,7 @@
     "generic": "plot",
     "class": "SimLevWithdrawal",
     "file": "r/R/withdrawal.R",
-    "line": 1872,
+    "line": 1884,
     "args": [
      {
       "name": "x",
@@ -11798,7 +11798,7 @@
     "class": "SimLevWithdrawal",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 2361,
+    "line": 2343,
     "args": [
      {
       "name": "x",
@@ -11842,7 +11842,7 @@
     "class": "SimLevWithdrawal",
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1986,
+    "line": 1979,
     "args": [
      {
       "name": "x",
@@ -11877,7 +11877,7 @@
     ],
     "defaults_known": true,
     "args_source": "source",
-    "note": "über _plot_method (Zeichenfunktion _plot_wd, julia/src/withdrawal.jl:1986)"
+    "note": "über _plot_method (Zeichenfunktion _plot_wd, julia/src/withdrawal.jl:1979)"
    },
    "abweichungen": [
     {
@@ -12772,7 +12772,7 @@
     "class": null,
     "module": "simlev.planning",
     "file": "python/simlev/planning.py",
-    "line": 387,
+    "line": 389,
     "args": [
      {
       "name": "data",
@@ -13785,7 +13785,7 @@
     "generic": "print",
     "class": "SimLevDSR",
     "file": "r/R/overfitting.R",
-    "line": 382,
+    "line": 372,
     "args": [
      {
       "name": "x",
@@ -13811,7 +13811,7 @@
     "class": "SimLevDSR",
     "module": "simlev.overfitting",
     "file": "python/simlev/overfitting.py",
-    "line": 646,
+    "line": 618,
     "args": [
      {
       "name": "self",
@@ -13831,7 +13831,7 @@
     "class": "SimLevDSR",
     "module": "SimLev.Overfitting",
     "file": "julia/src/overfitting.jl",
-    "line": 737,
+    "line": 707,
     "args": [
      {
       "name": "x",
@@ -14312,7 +14312,7 @@
     "generic": "print",
     "class": "SimLevGoalPlan",
     "file": "r/R/planning.R",
-    "line": 502,
+    "line": 475,
     "args": [
      {
       "name": "x",
@@ -14338,7 +14338,7 @@
     "class": "SimLevGoalPlan",
     "module": "simlev.planning",
     "file": "python/simlev/planning.py",
-    "line": 696,
+    "line": 653,
     "args": [
      {
       "name": "self",
@@ -14358,7 +14358,7 @@
     "class": "SimLevGoalPlan",
     "module": "SimLev.Planning",
     "file": "julia/src/planning.jl",
-    "line": 666,
+    "line": 610,
     "args": [
      {
       "name": "x",
@@ -14397,7 +14397,7 @@
     "generic": "print",
     "class": "SimLevHMM",
     "file": "r/R/regimes.R",
-    "line": 256,
+    "line": 245,
     "args": [
      {
       "name": "x",
@@ -14423,7 +14423,7 @@
     "class": "SimLevHMM",
     "module": "simlev.regimes",
     "file": "python/simlev/regimes.py",
-    "line": 187,
+    "line": 157,
     "args": [
      {
       "name": "self",
@@ -14443,7 +14443,7 @@
     "class": "SimLevHMM",
     "module": "SimLev.Regimes",
     "file": "julia/src/regimes.jl",
-    "line": 394,
+    "line": 348,
     "args": [
      {
       "name": "x",
@@ -14652,7 +14652,7 @@
     "generic": "print",
     "class": "SimLevHorizon",
     "file": "r/R/withdrawal.R",
-    "line": 2003,
+    "line": 2015,
     "args": [
      {
       "name": "x",
@@ -14678,7 +14678,7 @@
     "class": "SimLevHorizon",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 2440,
+    "line": 2422,
     "args": [
      {
       "name": "self",
@@ -14698,7 +14698,7 @@
     "class": "SimLevHorizon",
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 2181,
+    "line": 2174,
     "args": [
      {
       "name": "x",
@@ -15077,7 +15077,7 @@
     "generic": "print",
     "class": "SimLevPBO",
     "file": "r/R/overfitting.R",
-    "line": 223,
+    "line": 213,
     "args": [
      {
       "name": "x",
@@ -15103,7 +15103,7 @@
     "class": "SimLevPBO",
     "module": "simlev.overfitting",
     "file": "python/simlev/overfitting.py",
-    "line": 389,
+    "line": 390,
     "args": [
      {
       "name": "self",
@@ -15123,7 +15123,7 @@
     "class": "SimLevPBO",
     "module": "SimLev.Overfitting",
     "file": "julia/src/overfitting.jl",
-    "line": 551,
+    "line": 521,
     "args": [
      {
       "name": "x",
@@ -16306,7 +16306,7 @@
     "generic": "print",
     "class": "SimLevWalkForward",
     "file": "r/R/overfitting.R",
-    "line": 547,
+    "line": 537,
     "args": [
      {
       "name": "x",
@@ -16332,7 +16332,7 @@
     "class": "SimLevWalkForward",
     "module": "simlev.overfitting",
     "file": "python/simlev/overfitting.py",
-    "line": 778,
+    "line": 750,
     "args": [
      {
       "name": "self",
@@ -16352,7 +16352,7 @@
     "class": "SimLevWalkForward",
     "module": "SimLev.Overfitting",
     "file": "julia/src/overfitting.jl",
-    "line": 912,
+    "line": 882,
     "args": [
      {
       "name": "x",
@@ -16476,7 +16476,7 @@
     "generic": "print",
     "class": "SimLevWithdrawal",
     "file": "r/R/withdrawal.R",
-    "line": 1868,
+    "line": 1880,
     "args": [
      {
       "name": "x",
@@ -16502,7 +16502,7 @@
     "class": "SimLevWithdrawal",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1291,
+    "line": 1294,
     "args": [
      {
       "name": "self",
@@ -16528,7 +16528,7 @@
     "class": "SimLevWithdrawal",
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1980,
+    "line": 1973,
     "args": [
      {
       "name": "x",
@@ -17323,7 +17323,7 @@
     "generic": "print",
     "class": "summary.SimLevWithdrawal",
     "file": "r/R/withdrawal.R",
-    "line": 1834,
+    "line": 1846,
     "args": [
      {
       "name": "x",
@@ -17349,7 +17349,7 @@
     "class": "summary.SimLevWithdrawal",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1301,
+    "line": 1304,
     "args": [
      {
       "name": "self",
@@ -17369,7 +17369,7 @@
     "class": "summary.SimLevWithdrawal",
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1942,
+    "line": 1935,
     "args": [
      {
       "name": "x",
@@ -17410,7 +17410,7 @@
     "class": "withdrawal_paths",
     "module": "simlev.planning",
     "file": "python/simlev/planning.py",
-    "line": 213,
+    "line": 215,
     "args": [
      {
       "name": "self",
@@ -18175,7 +18175,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/regimes.R",
-    "line": 212,
+    "line": 201,
     "args": [
      {
       "name": "data",
@@ -18237,7 +18237,7 @@
     "class": null,
     "module": "simlev.regimes",
     "file": "python/simlev/regimes.py",
-    "line": 233,
+    "line": 203,
     "args": [
      {
       "name": "data",
@@ -18298,7 +18298,7 @@
     "class": null,
     "module": "SimLev.Regimes",
     "file": "julia/src/regimes.jl",
-    "line": 315,
+    "line": 269,
     "args": [
      {
       "name": "data",
@@ -18365,7 +18365,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/regimes.R",
-    "line": 318,
+    "line": 307,
     "args": [
      {
       "name": "x",
@@ -18416,7 +18416,7 @@
     "class": null,
     "module": "simlev.regimes",
     "file": "python/simlev/regimes.py",
-    "line": 395,
+    "line": 366,
     "args": [
      {
       "name": "x",
@@ -18465,7 +18465,7 @@
     "class": null,
     "module": "SimLev.Regimes",
     "file": "julia/src/regimes.jl",
-    "line": 466,
+    "line": 420,
     "args": [
      {
       "name": "x",
@@ -21351,7 +21351,7 @@
     "class": null,
     "module": "simlev.planning",
     "file": "python/simlev/planning.py",
-    "line": 68,
+    "line": 70,
     "args": [
      {
       "name": "data",
@@ -21536,7 +21536,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/overfitting.R",
-    "line": 355,
+    "line": 345,
     "args": [
      {
       "name": "x",
@@ -21592,7 +21592,7 @@
     "class": null,
     "module": "simlev.overfitting",
     "file": "python/simlev/overfitting.py",
-    "line": 651,
+    "line": 623,
     "args": [
      {
       "name": "x",
@@ -21647,7 +21647,7 @@
     "class": null,
     "module": "SimLev.Overfitting",
     "file": "julia/src/overfitting.jl",
-    "line": 698,
+    "line": 668,
     "args": [
      {
       "name": "x",
@@ -21708,7 +21708,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/overfitting.R",
-    "line": 721,
+    "line": 711,
     "args": [
      {
       "name": "x",
@@ -21764,7 +21764,7 @@
     "class": null,
     "module": "simlev.overfitting",
     "file": "python/simlev/overfitting.py",
-    "line": 1091,
+    "line": 1063,
     "args": [
      {
       "name": "x",
@@ -21819,7 +21819,7 @@
     "class": null,
     "module": "SimLev.Overfitting",
     "file": "julia/src/overfitting.jl",
-    "line": 1121,
+    "line": 1091,
     "args": [
      {
       "name": "x",
@@ -22016,7 +22016,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/overfitting.R",
-    "line": 282,
+    "line": 272,
     "args": [
      {
       "name": "r",
@@ -22047,7 +22047,7 @@
     "class": null,
     "module": "simlev.overfitting",
     "file": "python/simlev/overfitting.py",
-    "line": 583,
+    "line": 555,
     "args": [
      {
       "name": "r",
@@ -22078,7 +22078,7 @@
     "class": null,
     "module": "SimLev.Overfitting",
     "file": "julia/src/overfitting.jl",
-    "line": 628,
+    "line": 598,
     "args": [
      {
       "name": "r",
@@ -25103,7 +25103,7 @@
     "generic": "summary",
     "class": "SimLevWithdrawal",
     "file": "r/R/withdrawal.R",
-    "line": 1805,
+    "line": 1817,
     "args": [
      {
       "name": "object",
@@ -25135,7 +25135,7 @@
     "class": "SimLevWithdrawal",
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1281,
+    "line": 1284,
     "args": [
      {
       "name": "self",
@@ -25161,7 +25161,7 @@
     "class": "SimLevWithdrawal",
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1897,
+    "line": 1890,
     "args": [
      {
       "name": "obj",
@@ -25178,7 +25178,7 @@
     ],
     "defaults_known": true,
     "args_source": "source",
-    "note": "Hülle um _summary_wd (julia/src/withdrawal.jl:1897)"
+    "note": "Hülle um _summary_wd (julia/src/withdrawal.jl:1890)"
    },
    "abweichungen": [
     {
@@ -28028,7 +28028,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/withdrawal.R",
-    "line": 1954,
+    "line": 1966,
     "args": [
      {
       "name": "type",
@@ -28096,7 +28096,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 2451,
+    "line": 2433,
     "args": [
      {
       "name": "type",
@@ -28163,7 +28163,7 @@
     "class": null,
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 2101,
+    "line": 2094,
     "args": [
      {
       "name": "type_pos",
@@ -28248,7 +28248,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/withdrawal.R",
-    "line": 1717,
+    "line": 1729,
     "args": [
      {
       "name": "x",
@@ -28304,7 +28304,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 2153,
+    "line": 2135,
     "args": [
      {
       "name": "x",
@@ -28359,7 +28359,7 @@
     "class": null,
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1835,
+    "line": 1828,
     "args": [
      {
       "name": "x",
@@ -28674,7 +28674,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1138,
+    "line": 1141,
     "args": [
      {
       "name": "real_returns",
@@ -28699,7 +28699,7 @@
     "class": null,
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 950,
+    "line": 952,
     "args": [
      {
       "name": "real_returns",
@@ -29242,7 +29242,7 @@
     "generic": null,
     "class": null,
     "file": "r/R/withdrawal.R",
-    "line": 1351,
+    "line": 1359,
     "args": [
      {
       "name": "x",
@@ -29371,7 +29371,7 @@
     "class": null,
     "module": "simlev.withdrawal",
     "file": "python/simlev/withdrawal.py",
-    "line": 1400,
+    "line": 1403,
     "args": [
      {
       "name": "x",
@@ -29498,7 +29498,7 @@
     "class": null,
     "module": "SimLev.Withdrawal",
     "file": "julia/src/withdrawal.jl",
-    "line": 1418,
+    "line": 1412,
     "args": [
      {
       "name": "x",

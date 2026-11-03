@@ -17,6 +17,13 @@
  * Pfade; die Felder kommen als
  * bytearray (float64, spaltenweise). Fehler des Kerns: ValueError mit dem Text
  * von R (die Python-Seite macht daraus WdError).
+ *
+ * Auswertung je Pfad (seit 1.5.0; Ergebnisfelder legt die Python-Seite an, float64, Matrizen spaltenweise):
+ *   wd_metrics(sp, ny, np, nfy, H | None, gamma, start_value, mean, min, dd, ce, total)
+ *   wd_pwr(AR, ny, np, legacy, H | None, out) -> (status, path)
+ *   wd_annual_prod(real, nr, nc, ppy, out)
+ *   wd_tariff_count(M, N) -> nkeep;  wd_tariff_compact(M, N, ny, nkeep, out)
+ * H als int32-Puffer (Horizont je Pfad, 0..ny).
  */
 #include "_ext_common.h"
 #include "core/withdrawal_core_impl.h"
@@ -89,6 +96,108 @@ PyObject* w_simulate(PyObject*, PyObject* args) {
                          dims[7], o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[8], o[9], o[10]);
 }
 
+bool horizon_arg(PyObject* oH, ext::Buf& bH, int ny, int np, const char* fn, const int** H) {
+    *H = nullptr;
+    if (oH == Py_None) return true;
+    if (!ext::get(oH, bH, 'i', false, fn, "H", np)) return false;
+    for (int i = 0; i < np; i++)
+        if (bH.i()[i] < 0 || bH.i()[i] > ny) {
+            PyErr_Format(PyExc_ValueError, "%s: Horizont %d ausserhalb 0..%d", fn, bH.i()[i], ny);
+            return false;
+        }
+    *H = bH.i();
+    return true;
+}
+
+PyObject* w_metrics(PyObject*, PyObject* args) {
+    PyObject *osp, *oH, *om, *omn, *odd, *oce, *otot;
+    int ny, np, nfy;
+    double gamma, sv;
+    if (!PyArg_ParseTuple(args, "OiiiOddOOOOO:wd_metrics", &osp, &ny, &np, &nfy, &oH, &gamma, &sv, &om, &omn, &odd,
+                          &oce, &otot))
+        return nullptr;
+    const char* fn = "wd_metrics";
+    ext::Buf bsp, bH, bm, bmn, bdd, bce, btot;
+    const int* H = nullptr;
+    if (ny < 0 || np < 0 || nfy < 0 || nfy > ny) {
+        PyErr_Format(PyExc_ValueError, "%s: Abmessungen passen nicht", fn);
+        return nullptr;
+    }
+    if (!ext::get(osp, bsp, 'd', false, fn, "sp", (Py_ssize_t) ny * np) || !horizon_arg(oH, bH, ny, np, fn, &H) ||
+        !ext::get(om, bm, 'd', true, fn, "mean", np) || !ext::get(omn, bmn, 'd', true, fn, "min", np) ||
+        !ext::get(odd, bdd, 'd', true, fn, "dd", np) || !ext::get(oce, bce, 'd', true, fn, "ce", np) ||
+        !ext::get(otot, btot, 'd', true, fn, "total", np))
+        return nullptr;
+    std::vector<double> tmp(2 * (std::size_t) ny + 1);
+    simlev::wd_metrics(ny, np, bsp.d(), nfy, H, gamma, sv, bm.d(), bmn.d(), bdd.d(), bce.d(), btot.d(), tmp.data());
+    Py_RETURN_NONE;
+}
+
+PyObject* w_pwr(PyObject*, PyObject* args) {
+    PyObject *oA, *oH, *oo;
+    int ny, np;
+    double legacy;
+    if (!PyArg_ParseTuple(args, "OiidOO:wd_pwr", &oA, &ny, &np, &legacy, &oH, &oo)) return nullptr;
+    const char* fn = "wd_pwr";
+    ext::Buf bA, bH, bo;
+    const int* H = nullptr;
+    if (ny < 0 || np < 0) {
+        PyErr_Format(PyExc_ValueError, "%s: Abmessungen passen nicht", fn);
+        return nullptr;
+    }
+    if (!ext::get(oA, bA, 'd', false, fn, "AR", (Py_ssize_t) ny * np) || !horizon_arg(oH, bH, ny, np, fn, &H) ||
+        !ext::get(oo, bo, 'd', true, fn, "out", np))
+        return nullptr;
+    std::vector<double> w(std::max((std::size_t) ny * (std::size_t) np, 2 * (std::size_t) ny) + 1);
+    int64_t path = 0;
+    const int st = simlev::wd_pwr(ny, np, bA.d(), legacy, H, bo.d(), &path, w.data());
+    return Py_BuildValue("(iL)", st, (long long) path);
+}
+
+PyObject* w_annual_prod(PyObject*, PyObject* args) {
+    PyObject *oR, *oo;
+    int nr, nc, ppy;
+    if (!PyArg_ParseTuple(args, "OiiiO:wd_annual_prod", &oR, &nr, &nc, &ppy, &oo)) return nullptr;
+    const char* fn = "wd_annual_prod";
+    ext::Buf bR, bo;
+    if (nr < 0 || nc < 0 || ppy < 1) {
+        PyErr_Format(PyExc_ValueError, "%s: Abmessungen passen nicht", fn);
+        return nullptr;
+    }
+    if (!ext::get(oR, bR, 'd', false, fn, "real", (Py_ssize_t) nr * nc) ||
+        !ext::get(oo, bo, 'd', true, fn, "out", (Py_ssize_t) (nr / ppy) * nc))
+        return nullptr;
+    simlev::wd_annual_prod(nr, nc, bR.d(), ppy, bo.d());
+    Py_RETURN_NONE;
+}
+
+PyObject* w_tariff_count(PyObject*, PyObject* args) {
+    PyObject* oM;
+    int N;
+    if (!PyArg_ParseTuple(args, "Oi:wd_tariff_count", &oM, &N)) return nullptr;
+    ext::Buf bM;
+    if (N < 0 || !ext::get(oM, bM, 'd', false, "wd_tariff_count", "M", (Py_ssize_t) N * simlev::TR_N)) return nullptr;
+    return PyLong_FromLongLong((long long) simlev::wd_tariff_count(N, bM.d()));
+}
+
+PyObject* w_tariff_compact(PyObject*, PyObject* args) {
+    PyObject *oM, *oo;
+    int N, ny;
+    long long nkeep;
+    if (!PyArg_ParseTuple(args, "OiiLO:wd_tariff_compact", &oM, &N, &ny, &nkeep, &oo)) return nullptr;
+    const char* fn = "wd_tariff_compact";
+    ext::Buf bM, bo;
+    if (N < 0 || nkeep < 0 || !ext::get(oM, bM, 'd', false, fn, "M", (Py_ssize_t) N * simlev::TR_N) ||
+        !ext::get(oo, bo, 'd', true, fn, "out", (Py_ssize_t) nkeep * (simlev::TR_N + 1)))
+        return nullptr;
+    if (simlev::wd_tariff_count(N, bM.d()) != nkeep) {
+        PyErr_Format(PyExc_ValueError, "%s: Zahl der Zeilen passt nicht", fn);
+        return nullptr;
+    }
+    simlev::wd_tariff_compact(N, bM.d(), ny, nkeep, bo.d());
+    Py_RETURN_NONE;
+}
+
 }  // namespace
 
 PyMethodDef simlev_ext_withdrawal_methods[] = {
@@ -98,5 +207,11 @@ PyMethodDef simlev_ext_withdrawal_methods[] = {
      "            loss0, keep, lot_n, lot_basis, lot_vp, lot_group, spb_first, horizon_end, tariff_par, zve)\n"
      "-> (shape, wealth, spending, planned, terminal_real, terminal_nominal, taxes_real,\n"
      "    depletion_period, failed, wealth_end, taxes_end, tariff_years)"},
+    {"wd_metrics", w_metrics, METH_VARARGS,
+     "wd_metrics(sp, ny, np, nfy, H, gamma, start_value, mean, min, dd, ce, total): Kennzahlen je Pfad"},
+    {"wd_pwr", w_pwr, METH_VARARGS, "wd_pwr(AR, ny, np, legacy, H, out) -> (status, path): PWR je Pfad"},
+    {"wd_annual_prod", w_annual_prod, METH_VARARGS, "wd_annual_prod(real, nr, nc, ppy, out): Produkt je Jahr"},
+    {"wd_tariff_count", w_tariff_count, METH_VARARGS, "wd_tariff_count(M, N) -> Zahl der Jahreszeilen"},
+    {"wd_tariff_compact", w_tariff_compact, METH_VARARGS, "wd_tariff_compact(M, N, ny, nkeep, out): Jahreszeilen"},
     {nullptr, nullptr, 0, nullptr}
 };

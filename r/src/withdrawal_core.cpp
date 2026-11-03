@@ -1,5 +1,6 @@
 // src/withdrawal_core.cpp
-// .Call-Huelle der Entnahme-Simulation (.wd_simulate)
+// .Call-Huelle der Entnahme-Simulation (.wd_simulate) und der Auswertung je Pfad (seit 1.5.0: .wd_metrics,
+// .wd_pwr, .wd_annual_prod, .wd_tariff_compact)
 //
 // Die Rechnung steht in src/withdrawal_core_impl.h (ohne R-Bezug,
 // Regeln, Zeitkonvention und Steuermodell siehe dort; gemeinsam mit Python und
@@ -82,5 +83,79 @@ extern "C" SEXP C_wd_tariff_check(SEXP s_par, SEXP s_x, SEXP s_mode) {
       for (int c = 0; c < (int) simlev::TR_N; c++) out(i, c) = std::isnan(D) ? SIMLEV_NA : row[c];
     }
     return SIMLEV_DONE(out);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Auswertung je Pfad (seit 1.5.0; Kerne wd_metrics, wd_pwr, wd_annual_prod, wd_tariff_compact)
+// ---------------------------------------------------------------------------
+
+namespace {
+// Horizont je Pfad (ganze Zahlen 0..ny) oder NULL
+const int* horizon_arg(SEXP s_H, int ny, int np, const char* fn) {
+  if (Rf_isNull(s_H)) return nullptr;
+  sl::IntVec H = sl::int_vec(s_H);
+  if (H.size() != np) sl::stop("%s: Horizont hat %d statt %d Werte", fn, (int) H.size(), np);
+  for (int i = 0; i < np; i++)
+    if (H[i] == NA_INTEGER || H[i] < 0 || H[i] > ny) sl::stop("%s: Horizont %d ausserhalb 0..%d", fn, H[i], ny);
+  return H.ptr;
+}
+}  // namespace
+
+// Kennzahlen der Entnahmen je Pfad: sp (ny x np), nfy, H (NULL oder je Pfad), gamma, start_value
+// -> list(mean_spending, min_spending, spending_drawdown, ce_spending, total_spending)
+extern "C" SEXP C_wd_metrics(SEXP s_sp, SEXP s_nfy, SEXP s_H, SEXP s_gamma, SEXP s_sv) {
+  return sl::call([&]() {
+    sl::NumMat sp = sl::num_mat(s_sp);
+    const int ny = sp.nrow(), np = sp.ncol();
+    const int nfy = sl::as_int(s_nfy);
+    if (nfy < 0 || nfy > ny) sl::stop("wd_metrics: nfy ausserhalb 0..%d", ny);
+    const int* H = horizon_arg(s_H, ny, np, "wd_metrics");
+    sl::NumVec mean = sl::new_num(np), mn = sl::new_num(np), dd = sl::new_num(np), ce = sl::new_num(np),
+               total = sl::new_num(np);
+    std::vector<double> tmp(2 * (std::size_t) ny + 1);
+    simlev::wd_metrics(ny, np, sp.ptr, nfy, H, sl::as_double(s_gamma), sl::as_double(s_sv), mean.ptr, mn.ptr, dd.ptr,
+                       ce.ptr, total.ptr, tmp.data());
+    return sl::named_list("mean_spending", mean, "min_spending", mn, "spending_drawdown", dd, "ce_spending", ce,
+                          "total_spending", total);
+  });
+}
+
+// Perfect Withdrawal Rate je Pfad: AR (Jahre x Pfade), legacy, H (NULL oder je Pfad)
+// -> list(pwr, status, path) (status wie simlev::wd_pwr_check; dann pwr unvollstaendig)
+extern "C" SEXP C_wd_pwr(SEXP s_AR, SEXP s_legacy, SEXP s_H) {
+  return sl::call([&]() {
+    sl::NumMat AR = sl::num_mat(s_AR);
+    const int ny = AR.nrow(), np = AR.ncol();
+    const int* H = horizon_arg(s_H, ny, np, "wd_pwr");
+    sl::NumVec out = sl::new_num(np);
+    std::vector<double> w(std::max((std::size_t) ny * (std::size_t) np, 2 * (std::size_t) ny) + 1);
+    int64_t path = 0;
+    const int st = simlev::wd_pwr(ny, np, AR.ptr, sl::as_double(s_legacy), H, out.ptr, &path, w.data());
+    return sl::named_list("pwr", out, "status", st, "path", (int) path);
+  });
+}
+
+// Produkt je Block von ppy Zeilen: real (nr x nc) -> Matrix (nr %/% ppy) x nc
+extern "C" SEXP C_wd_annual_prod(SEXP s_real, SEXP s_ppy) {
+  return sl::call([&]() {
+    sl::NumMat real = sl::num_mat(s_real);
+    const int ppy = sl::as_int(s_ppy);
+    if (ppy < 1) sl::stop("wd_annual_prod: ppy muss >= 1 sein");
+    sl::NumMat out = sl::new_mat(real.nrow() / ppy, real.ncol());
+    simlev::wd_annual_prod(real.nrow(), real.ncol(), real.ptr, ppy, out.ptr);
+    return out.sexp;
+  });
+}
+
+// Jahreszeilen des Tarifwegs: M (TR_N x N aus .wd_simulate), ny -> Matrix nkeep x (TR_N + 1) (Pfad, Zeilen von M)
+extern "C" SEXP C_wd_tariff_compact(SEXP s_M, SEXP s_ny) {
+  return sl::call([&]() {
+    sl::NumMat M = sl::num_mat(s_M);
+    if (M.nrow() != (int) simlev::TR_N) sl::stop("wd_tariff_compact: %d statt %d Zeilen", M.nrow(), (int) simlev::TR_N);
+    const int64_t n = simlev::wd_tariff_count(M.ncol(), M.ptr);
+    sl::NumMat out = sl::new_mat((int) n, (int) simlev::TR_N + 1);
+    simlev::wd_tariff_compact(M.ncol(), M.ptr, sl::as_int(s_ny), n, out.ptr);
+    return out.sexp;
   });
 }

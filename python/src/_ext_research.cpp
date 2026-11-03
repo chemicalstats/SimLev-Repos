@@ -14,6 +14,12 @@
  *   min_cdar_core(R, T, N, alpha, lo, hi, iters, out)
  *   quantile_reg_core(y, X, n, p, tau, beta0, sc, tol, maxit) -> (beta | None, optimal)
  *   hmm_forward_backward(B, T, K, A, anr, p0, al, be, ga, xi, cs)
+ *   hmm_em(X, Tn, d, k, mu, S, A, p0, n_iter, tol, ridge, filt, smooth, lB) -> (status, ll, iter)  (seit 1.5.0;
+ *     mu, S, A an Ort und Stelle; Matrizen spaltenweise)
+ *   goal_dp(R, S, K, grid, cf, goal, wmin, wmax, sv, tie, static, policy, value) -> (collapsed, p_dp)  (seit 1.5.0;
+ *     policy int32 horizon x ng, value ng x (horizon + 1))
+ *   pbo_cscv(B, T, combos, half, metric, S, N, lam, isb, oosb, oosm)  (seit 1.5.0; B 5 x S x N, T 5 x N, combos
+ *     int32 S/2 x C 1-basiert)
  *   roll_mean_core(x, n, out)
  *   kendall_tau_core(x, y) -> float
  *   roll_cov_core(x, y, n, out)
@@ -176,6 +182,101 @@ PyObject* r_hmm(PyObject*, PyObject* args) {
     Py_RETURN_NONE;
 }
 
+PyObject* r_hmm_em(PyObject*, PyObject* args) {
+    PyObject *oX, *omu, *oS, *oA, *op0, *orid, *of, *osm, *olb;
+    int Tn, d, k, n_iter;
+    double tol;
+    const char* fn = "hmm_em";
+    if (!PyArg_ParseTuple(args, "OiiiOOOOidOOOO:hmm_em", &oX, &Tn, &d, &k, &omu, &oS, &oA, &op0, &n_iter, &tol, &orid,
+                          &of, &osm, &olb)) return nullptr;
+    if (Tn < 1 || d < 1 || k < 1) {
+        PyErr_Format(PyExc_ValueError, "%s: ungueltige Abmessungen.", fn);
+        return nullptr;
+    }
+    ext::Buf X, mu, S, A, p0, rid, f, sm, lb;
+    const Py_ssize_t TK = (Py_ssize_t) Tn * k;
+    if (!ext::get(oX, X, 'd', false, fn, "X", (Py_ssize_t) Tn * d) ||
+        !ext::get(omu, mu, 'd', true, fn, "mu", (Py_ssize_t) k * d) ||
+        !ext::get(oS, S, 'd', true, fn, "S", (Py_ssize_t) d * d * k) ||
+        !ext::get(oA, A, 'd', true, fn, "A", (Py_ssize_t) k * k) || !ext::get(op0, p0, 'd', true, fn, "p0", k) ||
+        !ext::get(orid, rid, 'd', false, fn, "ridge", (Py_ssize_t) d * d) ||
+        !ext::get(of, f, 'd', true, fn, "filtered", TK) || !ext::get(osm, sm, 'd', true, fn, "smoothed", TK) ||
+        !ext::get(olb, lb, 'd', true, fn, "lB", TK)) return nullptr;
+    int st = 0, iter = 0;
+    double ll = 0.0;
+    if (!ext::run([&] {
+            st = simlev::hmm_em(Tn, d, k, X.d(), mu.d(), S.d(), A.d(), p0.d(), n_iter, tol, rid.d(), &ll, f.d(), sm.d(),
+                                lb.d(), &iter);
+        }, false)) return nullptr;                       // mit GIL: Abbruchpruefung je Iteration
+    return Py_BuildValue("(idi)", st, ll, iter);
+}
+
+PyObject* r_goal_dp(PyObject*, PyObject* args) {
+    PyObject *oR, *og, *ocf, *otie, *ost, *opol, *ov;
+    int S, K;
+    double goal, wmin, wmax, sv;
+    const char* fn = "goal_dp";
+    if (!PyArg_ParseTuple(args, "OiiOOddddOOOO:goal_dp", &oR, &S, &K, &og, &ocf, &goal, &wmin, &wmax, &sv, &otie, &ost,
+                          &opol, &ov)) return nullptr;
+    ext::Buf R, g, cf, tie, st, pol, v;
+    if (S < 1 || K < 1 || !ext::get(oR, R, 'd', false, fn, "R", (Py_ssize_t) S * K) ||
+        !ext::get(og, g, 'd', false, fn, "grid") || !ext::get(ocf, cf, 'd', false, fn, "cf") ||
+        !ext::get(otie, tie, 'd', false, fn, "tie", K) || !ext::get(ost, st, 'd', true, fn, "static", K)) {
+        if (!PyErr_Occurred()) PyErr_Format(PyExc_ValueError, "%s: ungueltige Abmessungen.", fn);
+        return nullptr;
+    }
+    const int ng = (int) g.n, h = (int) cf.n;
+    if (ng < 2 || h < 1) {
+        PyErr_Format(PyExc_ValueError, "%s: ungueltige Abmessungen.", fn);
+        return nullptr;
+    }
+    if (!ext::get(opol, pol, 'i', true, fn, "policy", (Py_ssize_t) h * ng) ||
+        !ext::get(ov, v, 'd', true, fn, "value", (Py_ssize_t) ng * (h + 1))) return nullptr;
+    int64_t nc = 0;
+    double p_dp = 0.0;
+    if (!ext::run([&] {
+            nc = simlev::goal_dp(S, K, R.d(), ng, g.d(), h, cf.d(), goal, wmin, wmax, sv, tie.d(), st.d(), pol.i(), v.d(),
+                                 &p_dp);
+        }, false)) return nullptr;                       // mit GIL: Abbruchpruefung je Periode
+    if (nc < 0) {
+        PyErr_Format(PyExc_ValueError, "%s: Fehler der Normalverteilung", fn);
+        return nullptr;
+    }
+    return Py_BuildValue("(Ld)", (long long) nc, p_dp);
+}
+
+PyObject* r_pbo_cscv(PyObject*, PyObject* args) {
+    PyObject *oB, *oT, *oc, *ol, *oi, *oo, *om;
+    double half;
+    int metric, S, N;
+    const char* fn = "pbo_cscv";
+    if (!PyArg_ParseTuple(args, "OOOdiiiOOOO:pbo_cscv", &oB, &oT, &oc, &half, &metric, &S, &N, &ol, &oi, &oo, &om))
+        return nullptr;
+    if (S < 2 || S % 2 || N < 1) {
+        PyErr_Format(PyExc_ValueError, "%s: ungueltige Abmessungen.", fn);
+        return nullptr;
+    }
+    ext::Buf B, T, cb, lam, isb, oosb, oosm;
+    if (!ext::get(oB, B, 'd', false, fn, "B", (Py_ssize_t) 5 * S * N) || !ext::get(oT, T, 'd', false, fn, "T", (Py_ssize_t) 5 * N) ||
+        !ext::get(oc, cb, 'i', false, fn, "combos")) return nullptr;
+    if (cb.n % (S / 2)) {
+        PyErr_Format(PyExc_ValueError, "%s: ungueltige Abmessungen.", fn);
+        return nullptr;
+    }
+    const int C = (int) (cb.n / (S / 2));
+    for (Py_ssize_t i = 0; i < cb.n; i++)
+        if (cb.i()[i] < 1 || cb.i()[i] > S) {
+            PyErr_Format(PyExc_ValueError, "%s: Block ausserhalb 1..%d", fn, S);
+            return nullptr;
+        }
+    if (!ext::get(ol, lam, 'd', true, fn, "lam", C) || !ext::get(oi, isb, 'd', true, fn, "isb", C) ||
+        !ext::get(oo, oosb, 'd', true, fn, "oosb", C) || !ext::get(om, oosm, 'd', true, fn, "oosm", C)) return nullptr;
+    if (!ext::run([&] {
+            simlev::pbo_cscv(S, N, C, B.d(), T.d(), cb.i(), half, metric, lam.d(), isb.d(), oosb.d(), oosm.d());
+        }, false)) return nullptr;                       // mit GIL: Abbruchpruefung je Block
+    Py_RETURN_NONE;
+}
+
 PyObject* r_rmean(PyObject*, PyObject* args) {
     PyObject *ox, *oout;
     int n;
@@ -226,6 +327,11 @@ PyMethodDef simlev_ext_research_methods[] = {
     {"quantile_reg_core", r_qreg, METH_VARARGS,
      "quantile_reg_core(y, X, n, p, tau, beta0, sc, tol, maxit) -> (beta | None, optimal)"},
     {"hmm_forward_backward", r_hmm, METH_VARARGS, "hmm_forward_backward(B, T, K, A, anr, p0, al, be, ga, xi, cs)"},
+    {"goal_dp", r_goal_dp, METH_VARARGS,
+     "goal_dp(R, S, K, grid, cf, goal, wmin, wmax, sv, tie, static, policy, value) -> (collapsed, p_dp)"},
+    {"pbo_cscv", r_pbo_cscv, METH_VARARGS, "pbo_cscv(B, T, combos, half, metric, S, N, lam, isb, oosb, oosm)"},
+    {"hmm_em", r_hmm_em, METH_VARARGS,
+     "hmm_em(X, Tn, d, k, mu, S, A, p0, n_iter, tol, ridge, filtered, smoothed, lB) -> (status, ll, iter)"},
     {"roll_mean_core", r_rmean, METH_VARARGS, "roll_mean_core(x, n, out)"},
     {"kendall_tau_core", r_kendall, METH_VARARGS, "kendall_tau_core(x, y) -> float"},
     {"roll_cov_core", r_rcov, METH_VARARGS, "roll_cov_core(x, y, n, out)"},

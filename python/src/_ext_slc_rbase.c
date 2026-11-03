@@ -1,7 +1,7 @@
 /*
  * python/src/_ext_slc_rbase.c -- Python-Huellen der Grundfunktionen mit R-Regeln im Modul
  * simlev._ext: Summen, Mittel, Varianz, Kumulationen, Potenz, Ordnung, Rang, partielle Sortierung,
- * Quantile, tabulate, findInterval, cov/cor; Datumsformat und -lesen (slc_rbase_date.c),
+ * Quantile, tabulate, findInterval, approx, cov/cor; Datumsformat und -lesen (slc_rbase_date.c),
  * R_strtod, %%, %/% und scientific() in long double (slc_rbase_num.c)
  *
  * Die Kerne src/core/slc_rbase*.c sind Byte-fuer-Byte-Kopien der kanonischen Quellen in core/
@@ -238,6 +238,25 @@ static PyObject *slc_r_findinterval(PyObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
+/* approx: (x, y, v, method, yleft, yright, f, out); x, y gleich lang, out wie v */
+static PyObject *slc_r_approx(PyObject *self, PyObject *args)
+{
+    PyObject *x, *y, *v, *o;
+    int method;
+    double yl, yr, f;
+    Py_buffer vx = {0}, vy = {0}, vv = {0}, vo = {0};
+    (void) self;
+    if (!PyArg_ParseTuple(args, "OOOidddO", &x, &y, &v, &method, &yl, &yr, &f, &o)) return NULL;
+    if (DBUF(x, &vx, 0, -1, "x") < 0) return NULL;
+    if (DBUF(y, &vy, 0, NITEMS(vx), "y") < 0) { rel(&vx); return NULL; }
+    if (DBUF(v, &vv, 0, -1, "v") < 0) { rel(&vx); rel(&vy); return NULL; }
+    if (DBUF(o, &vo, 1, NITEMS(vv), "Ausgabe") < 0) { rel(&vx); rel(&vy); rel(&vv); return NULL; }
+    sl_r_approx(NITEMS(vx), (const double *) vx.buf, (const double *) vy.buf, NITEMS(vv), (const double *) vv.buf,
+                method, yl, yr, f, (double *) vo.buf);
+    rel(&vx); rel(&vy); rel(&vv); rel(&vo);
+    Py_RETURN_NONE;
+}
+
 /* cov: (x, n, ncx, y oder None, ncy, use, kendall, cor, ans) -> sd0 */
 static PyObject *slc_r_cov(PyObject *self, PyObject *args)
 {
@@ -409,6 +428,7 @@ PyMethodDef simlev_ext_slc_rbase_methods[] = {
     {"slc_r_quantile", slc_r_quantile, METH_VARARGS, "slc_r_quantile(x, p, type, out)"},
     {"slc_r_tabulate", slc_r_tabulate, METH_VARARGS, "slc_r_tabulate(bin, out)"},
     {"slc_r_findinterval", slc_r_findinterval, METH_VARARGS, "slc_r_findinterval(vec, x, rc, ai, lo, out)"},
+    {"slc_r_approx", slc_r_approx, METH_VARARGS, "slc_r_approx(x, y, v, method, yleft, yright, f, out): approx wie R"},
     {"slc_r_cov", slc_r_cov, METH_VARARGS, "slc_r_cov(x, n, ncx, y, ncy, use, kendall, cor, ans) -> sd0"},
     {"slc_r_format_date", slc_r_format_date, METH_VARARGS, "slc_r_format_date(days, fmts[, digits_secs]) -> list (format.Date)"},
     {"slc_r_strptime_ymd", slc_r_strptime_ymd, METH_VARARGS, "slc_r_strptime_ymd(s, sep) -> Tage | None (as.Date)"},

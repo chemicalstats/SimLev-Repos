@@ -9,7 +9,7 @@ module DependenceCore
 import ..SimLev
 using ..SimLev: CAbi, LIBSLC
 
-export kendall_tau_core, quantile_reg_core, hmm_forward_backward, QuantileRegError
+export kendall_tau_core, quantile_reg_core, hmm_forward_backward, hmm_em, goal_dp, pbo_cscv, QuantileRegError
 
 "Fehler aus dem Quantilsregressions-Kern (Rcpp `stop`)."
 struct QuantileRegError <: Exception
@@ -74,6 +74,80 @@ function hmm_forward_backward(B, A, p0)
                       Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}),
                      Bm, T, K, Am, size(Am, 1), size(Am, 2), p0, length(p0), al, ga, xi, cs))
     SimLev.RList("filtered" => al, "smoothed" => ga, "xi" => xi, "scale" => cs)
+end
+
+"""
+    hmm_em(X, k, mu, S, A, n_iter, tol, ridge)
+
+Baum-Welch-EM aus einem Startwert (R: `.hmm_em_core`, seit 1.5.0): `nothing` bei Fehler, sonst NamedTuple
+`(mu, S, A, p0, ll, filtered, smoothed, lB, iter)` (S Vektor von k Matrizen).
+"""
+function hmm_em(X, k, mu, S, A, n_iter, tol, ridge)
+    Xm = _fmat(X); Tn, d = size(Xm); k = Int(k)
+    mum = copy(_fmat(mu)); Am = copy(_fmat(A)); rid = _fmat(ridge)
+    (size(mum) == (k, d) && size(Am) == (k, k) && size(rid) == (d, d) && length(S) == k) ||
+        error("hmm_em: ungültige Abmessungen.")
+    Sv = Vector{Float64}(undef, d * d * k)
+    for j in 1:k
+        Sj = _fmat(S[j]); size(Sj) == (d, d) || error("hmm_em: ungültige Abmessungen.")
+        Sv[(j - 1) * d * d + 1:j * d * d] = vec(Sj)
+    end
+    p0 = Vector{Float64}(undef, k)
+    f = Matrix{Float64}(undef, Tn, k); sm = Matrix{Float64}(undef, Tn, k); lB = Matrix{Float64}(undef, Tn, k)
+    st = Ref{Int32}(0); ll = Ref{Float64}(0.0); it = Ref{Int64}(0)
+    CAbi.check(ccall((:simlev_c_hmm_em, LIBSLC), Cint,
+                     (Ptr{Float64}, Int64, Int64, Int64, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Int64,
+                      Float64, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Int32}, Ptr{Float64}, Ptr{Int64}),
+                     Xm, Tn, d, k, mum, Sv, Am, p0, Int(n_iter), Float64(tol), rid, f, sm, lB, st, ll, it))
+    st[] == 0 || return nothing
+    Sl = [reshape(Sv[(j - 1) * d * d + 1:j * d * d], d, d) for j in 1:k]
+    return (mu = mum, S = Sl, A = Am, p0 = p0, ll = ll[], filtered = f, smoothed = sm, lB = lB, iter = Int(it[]))
+end
+
+"""
+    goal_dp(R, grid, cf, goal, wmin, wmax, start_value, tie_score)
+
+Rückwärtsrekursion von `planning_goal()` (R: `.goal_dp`, seit 1.5.0): NamedTuple `(static, policy, value, p_dp,
+collapsed)`; `policy` horizon × ng (Int), `value` ng × (horizon + 1), `collapsed` = Zahl der approx-Aufrufe mit
+zusammengefassten gleichen log(grid)-Werten.
+"""
+function goal_dp(R, grid, cf, goal, wmin, wmax, start_value, tie_score)
+    Rm = _fmat(R); S, K = size(Rm)
+    g = Float64.(collect(grid)); c = Float64.(collect(cf)); tie = Float64.(collect(tie_score))
+    ng = length(g); h = length(c)
+    (ng >= 2 && h >= 1 && length(tie) == K) || error("goal_dp: ungültige Abmessungen.")
+    stat = Vector{Float64}(undef, K); pol = Matrix{Int32}(undef, h, ng); val = Matrix{Float64}(undef, ng, h + 1)
+    nc = Ref{Int64}(0); pdp = Ref{Float64}(0.0)
+    CAbi.check(ccall((:simlev_c_goal_dp, LIBSLC), Cint,
+                     (Ptr{Float64}, Int64, Int64, Ptr{Float64}, Int64, Ptr{Float64}, Int64, Float64, Float64, Float64,
+                      Float64, Ptr{Float64}, Ptr{Float64}, Ptr{Int32}, Ptr{Float64}, Ptr{Float64}, Ptr{Int64}),
+                     Rm, S, K, g, ng, c, h, Float64(goal), Float64(wmin), Float64(wmax), Float64(start_value), tie, stat,
+                     pol, val, pdp, nc))
+    nc[] < 0 && error("goal_dp: Fehler der Normalverteilung")
+    return (static = stat, policy = Int.(pol), value = val, p_dp = pdp[], collapsed = Int(nc[]))
+end
+
+"""
+    pbo_cscv(Bs, Ts, combos, half, metric, S, N) -> (lambda, is_best, oos_best, oos_median)
+
+Aufteilungen der CSCV von `overfit_pbo()` (R: `.pbo_cscv`, seit 1.5.0); `Bs` fünf Blocksummen S × N, `Ts` deren
+Spaltensummen, `combos` Vektor der Aufteilungen (je S/2 Blöcke, 1-basiert).
+"""
+function pbo_cscv(Bs, Ts, combos, half, metric, S, N)
+    Bv = reduce(vcat, [vec(_fmat(B)) for B in Bs]); Tv = reduce(vcat, [Float64.(collect(t)) for t in Ts])
+    H = S ÷ 2; C = length(combos)
+    cb = Vector{Int32}(undef, H * C)
+    for (c, cmb) in enumerate(combos), (q, b) in enumerate(cmb)
+        cb[(c - 1) * H + q] = Int32(b)
+    end
+    (length(Bv) == 5 * S * N && length(Tv) == 5 * N) || error("pbo_cscv: ungültige Abmessungen.")
+    out = ntuple(_ -> Vector{Float64}(undef, C), 4)
+    m = findfirst(==(String(metric)), ["sharpe", "sortino", "geometric", "mean"]) - 1
+    CAbi.check(ccall((:simlev_c_pbo_cscv, LIBSLC), Cint,
+                     (Ptr{Float64}, Ptr{Float64}, Ptr{Int32}, Int64, Float64, Int64, Int64, Int64, Ptr{Float64},
+                      Ptr{Float64}, Ptr{Float64}, Ptr{Float64}),
+                     Bv, Tv, cb, C, Float64(half), m, S, N, out[1], out[2], out[3], out[4]))
+    return out
 end
 
 end # module

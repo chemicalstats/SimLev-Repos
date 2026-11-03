@@ -2,7 +2,8 @@
 """Zufallsfälle über simulation() (seit 1.4.0) (tests/werkzeuge/gleichlauf/sim_fuzz.R) – R neu gegen die Referenz aus R 1.3.0.
 
 Aufruf: python3 -I tests/werkzeuge/gleichlauf/sim_fuzz_cmp.py <referenz/sim_fuzz.jsonl.gz> <neu/sim_fuzz.jsonl.gz>
-(ebenso für den Datums-Fuzz tests/werkzeuge/gleichlauf/sched_fuzz.R, Modul sched_fuzz)
+(ebenso für den Datums-Fuzz tests/werkzeuge/gleichlauf/sched_fuzz.R, Modul sched_fuzz, und seit 1.5.0 für approx_fuzz.R und
+wd_fuzz.R mit der Referenz aus R 1.4.2)
 
 Vergleicht jeden Fall und den Eingabespeicher (Zeile 1) der beiden Bereichsdateien streng: gleicher JSON-Baum (Zahlen als Hex-Literale, also
 bitgleich einschließlich NA/NaN und Vorzeichen der Null), gleiche Konsolenausgabe, gleiche print()-Ausgabe,
@@ -117,7 +118,7 @@ def main(argv):
           % (sum(heads.values()), " (%s)" % ", ".join("%s %d" % kv for kv in sorted(heads.items())) if heads else ""))
     print("sim_fuzz: %d/%d Einträge gleich" % (len(set(fr) & set(fn)) - bad + len(set(fr) ^ set(fn)) * 0,
                                               len(set(fr) | set(fn))) if bad else
-          "sim_fuzz: alle %d Fälle gleich (R neu = R 1.3.0)" % (len(fr) - 1))
+          "sim_fuzz: alle %d Fälle gleich (R neu = Referenz)" % (len(fr) - 1))
     return 1 if bad else 0
 
 

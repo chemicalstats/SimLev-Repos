@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# Skripte behalten LF auch bei Checkout unter Windows
+*.sh text eol=lf
+# Referenzfälle und Bilder sind Binärdateien (kein Diff, keine Umwandlung)
+*.gz binary
+*.png binary

@@ -114,56 +114,13 @@ die jeder Kovarianzmatrix im M-Schritt zugeschlagen wird. Liefert
 lB zu den gelieferten (zuletzt geschätzten) Parametern.
 """
 function _hmm_em(X, k, init, max_iter, tol, ridge)
-    D = _D()
-    X = _fmat(X)
-    Tn, d = size(X)
-    k = Int(k)
-    lg = SimLev.RLibm.log; ex = SimLev.RLibm.exp
-    mu = copy(_fmat(init.mu)); S = [copy(_fmat(s)) for s in init.S]; A = copy(_fmat(init.A))
-    p0 = fill(1 / k, k)
-    ll_old = -Inf
-    function estep()
-        lB = reduce(hcat, [_ldmvn(X, mu[j, :], S[j]) for j in 1:k])
-        lB = reshape(lB, Tn, k)
-        m = lB[:, 1]
-        for j in 2:k
-            m = _pmax2(m, lB[:, j])
-        end
-        E = Matrix{Float64}(undef, Tn, k)
-        for j in 1:k, i in 1:Tn
-            E[i, j] = ex(lB[i, j] - m[i])
-        end
-        fb = SimLev.DependenceCore.hmm_forward_backward(E, A, p0)
-        ll = SimLev.r_sum(lg.(fb["scale"])) + SimLev.r_sum(m)
-        lB, fb, ll
-    end
-    it = 0
-    for it_ in 1:Int(max_iter)
-        it = it_
-        lB, fb, ll = estep()
-        ga = fb["smoothed"]; xi = fb["xi"]
-        p0 = ga[1, :]
-        rsx = D._rowsums(xi)
-        A = Matrix{Float64}(undef, k, k)
-        for j in 1:k, i in 1:k
-            A[i, j] = xi[i, j] / rsx[i]
-        end
-        for j in 1:k
-            w = ga[:, j]
-            sw = SimLev.r_sum(w)
-            mu[j, :] = D._colsums(X .* w) ./ sw
-            Xc = Matrix{Float64}(undef, Tn, d)
-            sq = sqrt.(w)
-            for c in 1:d, i in 1:Tn
-                Xc[i, c] = (X[i, c] - mu[j, c]) * sq[i]
-            end
-            S[j] = _fmat(SimLev.SLib.crossprod(Xc)) ./ sw .+ ridge   # slc-Kreuzprodukt
-        end
-        abs(ll - ll_old) < tol * (1 + abs(ll)) && break
-        ll_old = ll
-    end
-    lB, fb, ll = estep()
-    (mu = mu, S = S, A = A, p0 = p0, ll = ll, filtered = fb["filtered"], smoothed = fb["smoothed"], lB = lB, iter = it)
+    # E- und M-Schritte im Kern (core/research_core_impl.h, hmm_em; bis 1.4.3 hier in Julia); ein Fehler dort
+    # verwirft wie in R den Startwert (regime_hmm fängt ihn ab)
+    ni = trunc(Int, max_iter)                     # max_iter = 0: nur der E-Schritt zum Startwert
+    ni < 0 && error("argument of length 0")       # R: seq_len(max_iter) scheitert
+    r = SimLev.DependenceCore.hmm_em(_fmat(X), Int(k), init.mu, init.S, init.A, ni, Float64(tol), _fmat(ridge))
+    r === nothing && error("regime_hmm: EM-Schritt fehlgeschlagen")
+    return r
 end
 
 """
@@ -208,9 +165,6 @@ end
 
 "`stats::cov2cor` (über RStats, mit R's Warnung)."
 _cov2cor(V) = _fmat(SimLev.RStats.cov2cor(_fmat(V)))
-
-"R `pmax(a, b)` elementweise (NaN in `b` gewinnt, NaN in `a` bleibt)."
-_pmax2(a, b) = [(b[i] > a[i] || isnan(b[i])) ? b[i] : a[i] for i in eachindex(a)]
 
 function _isint_scalar(k)
     k isa AbstractVector && (length(k) == 1 ? (k = k[1]) : return false)

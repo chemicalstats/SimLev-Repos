@@ -32,7 +32,7 @@ from . import _withdrawal_core as _wcore
 from ._r import fmt as _fmt
 from . import _lib as _sl
 from ._r.rlist import RList
-from ._r.rnum import r_colmeans, r_colsums, r_rowsums, r_cummax, r_cumprod, r_mean, r_mean_int, r_median, r_pow, r_pow_vec, r_prod, r_sum
+from ._r.rnum import r_rowsums, r_cumprod, r_mean_int, r_median, r_pow, r_pow_vec, r_prod, r_sum
 from .bootstrap import (_quiet, _get, _is_boot_result, _is_num, _is_study, _keep_count, _message, _names, _num1, _num_vec,
                         _quantile7, _r_round0, _show, _sp, _stop, _strip1, _values, _warn, _weighted_mean,
                         _wquantile, summary, plot)
@@ -1131,8 +1131,11 @@ def _annual_real(wp):
         return real
     npr = real.shape[0]
     ny = npr // ppy
-    sub = real[:ny * ppy, :]
-    return _apply_cols(sub, lambda c: [r_prod(c[i:i + ppy]) for i in range(0, len(c), ppy)])
+    if real.ndim != 2 or ny < 1 or not real.shape[1]:
+        sub = real[:ny * ppy, :]
+        return _apply_cols(sub, lambda c: [r_prod(c[i:i + ppy]) for i in range(0, len(c), ppy)])
+    A = _wcore.wd_annual_prod(real, ppy)       # Produkt je Jahr im Kern; bei einem Jahr ein Vektor (wie apply)
+    return A[0, :].copy() if ny == 1 else A
 
 
 @_quiet
@@ -1169,25 +1172,25 @@ def withdrawal_perfect_rate(real_returns, *, legacy=0):
         R = _as_matrix(real_returns)
     except (TypeError, ValueError):
         R = None
-    if R is None or not R.size or np.isnan(R).any() or (~np.isfinite(R)).any():
-        _stop("withdrawal_perfect_rate: real_returns muss eine Matrix endlicher realer Brutto-Jahresrenditen sein "
-              "(1.05 = +5 %).")
-    med = r_median(R.ravel(order="F"))
-    if med < 0.5:
+    msg_a = ("withdrawal_perfect_rate: real_returns muss eine Matrix endlicher realer Brutto-Jahresrenditen sein "
+             "(1.05 = +5 %).")
+    if R is None or not R.size:
+        _stop(msg_a)
+    lv = _num_vec(legacy)
+    lg_ok = lv is not None and lv.size == 1 and math.isfinite(lv[0]) and lv[0] >= 0
+    # Prüfungen (nicht endlich, Median, negativ) und PWR je Spalte im Kern (core/withdrawal_core_impl.h, wd_pwr)
+    out, st, _ = _wcore.wd_pwr(R, float(lv[0]) if lg_ok else 0.0)
+    if st == 1:
+        _stop(msg_a)
+    if st == 2:
+        med = r_median(R.ravel(order="F"))
         _stop(("withdrawal_perfect_rate: real_returns sieht nicht wie Brutto-Renditen aus (Median %s); erwartet z. B. "
                "1.05 für +5 %%, nicht 0.05 (Nettorendite: 1 + r übergeben).") % _fmt1(med, digits=4))
-    if (R < 0).any():
+    if st == 3:
         _stop("withdrawal_perfect_rate: Brutto-Renditen in real_returns müssen >= 0 sein (0 = Totalverlust).")
-    lv = _num_vec(legacy)
-    if lv is None or lv.size != 1 or not math.isfinite(lv[0]) or lv[0] < 0:
+    if not lg_ok:
         _stop("withdrawal_perfect_rate: legacy muss ein Anteil >= 0 sein (0.5 = 50 %% des Startvermögens; "
               "erhalten: %s)." % _show(legacy))
-    legacy = float(lv[0])
-    out = np.empty(R.shape[1])
-    for j in range(R.shape[1]):
-        r = R[:, j]
-        tp = r_cumprod(r[::-1])[::-1]
-        out[j] = (r_prod(r) - legacy) / r_sum(tp) * 100
     return out
 
 
@@ -1385,10 +1388,10 @@ def _wd_zve(x, ny, year1):
 def _wd_tariff_years(M, ny):
     """Jahreszeilen des Tarifwegs als ``DataFrame`` (R: ``.wd_tariff_years``): ``path``, ``year`` (Planjahr) und
     die Spalten von ``tax_report["tariff_years"]`` aus ``simulation()``, nach Pfad und Jahr."""
-    keep = np.flatnonzero(~np.isnan(M[0, :]))
-    d = {"path": (keep // (ny + 1) + 1).astype(np.int64)}
+    C = _wcore.wd_tariff_compact(M, ny)              # Spalten mit Jahr NA entfallen (Kern)
+    d = {"path": C[:, 0].astype(np.int64)}
     for j, c in enumerate(_WD_TARIFF_COLS):
-        col = M[j, keep].copy()
+        col = C[:, j + 1].copy()
         if c == "year":
             col = col.astype(np.int64)
         elif c == "guenstiger":
@@ -2058,35 +2061,9 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
     sp = core["spending"]
     w0 = sp[0, :].copy()
     gamma = float(gamma)
-
-    def ce_fun(c):
-        c = np.maximum(c, 1e-9 * start_value)
-        if abs(gamma - 1) < 1e-12:
-            from ._r import libm as _libm
-            return float(_libm.exp(r_mean(np.asarray(_libm.log(c), dtype=np.float64))))
-        return r_pow(r_mean(_pow_vec(c, 1 - gamma)), 1 / (1 - gamma))
-
-    def dd_fun(c):
-        m = r_cummax(c)
-        return float(np.max(1 - c / m))
-
     ncol = sp.shape[1]
-
-    def per_path(fun, H=None):
-        H = np.full(ncol, ny) if H is None else H
-        out = np.empty(ncol)
-        for i in range(ncol):
-            r = min(int(H[i]), nfy)
-            out[i] = fun(sp[:r, i]) if r > 0 else _NA
-        return out
-
-    # colMeans/colSums über den C-Kern core/slc_rbase.c (long double wie R; wie Julia _col_ld)
-    def col_means(M):
-        return r_colmeans(M) if M.shape[0] else np.full(M.shape[1], _NAN)
-
-    def col_sums(M):
-        return r_colsums(M)
-
+    # Konsumkennzahlen je Pfad im Kern (wd_metrics, core/withdrawal_core_impl.h): je Jahr nur über volle Planjahre
+    mt = _wcore.wd_metrics(sp, nfy, None, gamma, start_value)
     if ppy == 1 or R.shape[0] >= ppy:
         pwr = withdrawal_perfect_rate(_annual_real({"returns": R, "inflation": I, "frequency": x["frequency"]}))
     else:
@@ -2100,11 +2077,11 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
         "terminal_real": core["terminal_real"],
         "terminal_nominal": core["terminal_nominal"],
         "first_withdrawal": w0,
-        "mean_spending": col_means(sp) if nfy == ny else per_path(r_mean),
-        "min_spending": per_path(lambda c: float(np.min(c))),
-        "spending_drawdown": per_path(dd_fun),
-        "ce_spending": per_path(ce_fun),
-        "total_spending": col_sums(sp),
+        "mean_spending": mt["mean_spending"],
+        "min_spending": mt["min_spending"],
+        "spending_drawdown": mt["spending_drawdown"],
+        "ce_spending": mt["ce_spending"],
+        "total_spending": mt["total_spending"],
         "taxes": core["taxes_real"],
         "pwr": pwr})
     if x.get("start_dates") is not None:
@@ -2124,14 +2101,19 @@ def withdrawal_simulation(x, *, rule=None, start_value=1e6, inflation=0, frequen
         cols = np.arange(len(H))
         paths["terminal_real"] = core["wealth_end"][H, cols]
         paths["taxes"] = core["taxes_end"][H, cols]
-        paths["mean_spending"] = per_path(r_mean, H)
-        paths["min_spending"] = per_path(lambda c: float(np.min(c)), H)
-        paths["total_spending"] = np.array([r_sum(sp[:int(H[i]), i]) for i in range(len(H))])
-        paths["spending_drawdown"] = per_path(dd_fun, H)
-        paths["ce_spending"] = per_path(ce_fun, H)
+        mt = _wcore.wd_metrics(sp, nfy, H, gamma, start_value)
+        paths["mean_spending"] = mt["mean_spending"]
+        paths["min_spending"] = mt["min_spending"]
+        paths["total_spending"] = mt["total_spending"]
+        paths["spending_drawdown"] = mt["spending_drawdown"]
+        paths["ce_spending"] = mt["ce_spending"]
         if ppy == 1:
             AR = _annual_real({"returns": R, "inflation": I, "frequency": x["frequency"]})
-            paths["pwr"] = np.array([withdrawal_perfect_rate(AR[:int(H[i]), i:i + 1])[0] for i in range(len(H))])
+            pc, st, path = _wcore.wd_pwr(AR, 0.0, H)       # PWR je Pfad bis zum Horizont (Prüfung je Pfad)
+            if st:                                          # erster ungültiger Pfad: Fehler wie bisher
+                i = path - 1
+                withdrawal_perfect_rate(AR[:int(H[i]), i:i + 1])
+            paths["pwr"] = pc
         else:
             paths["pwr"] = _NA
         if kp == 0:

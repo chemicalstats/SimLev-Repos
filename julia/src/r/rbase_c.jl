@@ -3,7 +3,7 @@
 #
 # Python (simlev._ext, python/src/_ext_slc_rbase.c) und Julia rechnen damit dieselbe Implementierung:
 # Summen, Mittel, Varianz und Kumulationen in long double wie R, R's Potenz, stabile Ordnung und Rang,
-# partielle Sortierung und Quantile wie R, tabulate, findInterval und cov/cor. Die Hüllen hier nehmen
+# partielle Sortierung und Quantile wie R, tabulate, findInterval, approx und cov/cor. Die Hüllen hier nehmen
 # Float64-Vektoren (spaltenweise Matrizen) und geben Float64 zurück; die R-Logik um die Kerne
 # (Argumente, Namen, NA-Prüfungen) steht in rnum.jl, base.jl, stats_sort.jl und stats_cor.jl.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -99,6 +99,16 @@ function _rb_findinterval(vec::Vector{Float64}, x::Vector{Float64}, rc::Bool, ai
     out = Vector{Float64}(undef, length(x))
     ccall((:sl_r_findinterval, LIBSLC), Cvoid, (Int64, Ptr{Float64}, Int64, Ptr{Float64}, Cint, Cint, Cint, Ptr{Float64}),
           length(vec), vec, length(x), x, rc, ai, lo, out)
+    out
+end
+
+"approx-Kern (R_approxfun): x aufsteigend ohne NA, y gleich lang; Interpolation je Punkt von v (seit 1.5.0)."
+function _rb_approx(x::Vector{Float64}, y::Vector{Float64}, v::Vector{Float64}, method::Int, yleft::Float64,
+                    yright::Float64, f::Float64)
+    length(y) == length(x) || error("_rb_approx: x und y verschieden lang")
+    out = Vector{Float64}(undef, length(v))
+    ccall((:sl_r_approx, LIBSLC), Cvoid, (Int64, Ptr{Float64}, Ptr{Float64}, Int64, Ptr{Float64}, Cint, Float64, Float64,
+                                          Float64, Ptr{Float64}), length(x), x, y, length(v), v, method, yleft, yright, f, out)
     out
 end
 

@@ -1,0 +1,17 @@
+r/src/*.o
+r/src/*.so
+r/src/*.dll
+# C-Erweiterung von Python, an Ort und Stelle gebaut (python setup.py build_ext --inplace)
+python/simlev/*.so
+python/simlev/*.pyd
+# Julia: gebaute C-Bibliothek slc mit den geteilten Kernen (julia/deps/build.jl)
+julia/deps/usr/
+julia/deps/deps.jl
+julia/deps/build.log
+__pycache__/
+# R: Bau- und Prüfprodukte (R CMD build/check), Sitzungsdateien
+*.Rcheck/
+SimLev_*.tar.gz
+.Rhistory
+.RData
+.Rproj.user/

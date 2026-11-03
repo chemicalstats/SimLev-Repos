@@ -6,7 +6,8 @@
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang.
 # Interpolation und Filter (approx, approxfun, r_filter) aus R 4.3.3 stats/R/approx.R, filter.R und
-# stats/src/approx.c, filter.c; Python: _r/stats_smooth.py.
+# stats/src/approx.c, filter.c; Python: _r/stats_smooth.py. Die Interpolation je Punkt (approx.c) rechnet seit
+# 1.5.0 der C-Kern sl_r_approx (core/slc_rbase.c).
 # Teil des Untermoduls RStats (eingebunden in stats.jl).
 #
 # Seit 1.0.0 entfallen fft, bw_nrd0, density, smooth_spline und predict_smooth_spline: SimLev
@@ -99,51 +100,31 @@ function _nan_last_perm(v::Vector{Float64})
     vcat(ok[_stable_argsort(v[ok], false, false)], bad)
 end
 
-function _approx_core(x::Vector{Float64}, y::Vector{Float64}, v::Vector{Float64}, method::Int,
-                      yleft::Float64, yright::Float64, f::Float64)
-    n = length(x)
-    out = Vector{Float64}(undef, length(v))
-    if n == 0
-        fill!(out, NaN)
-        return out
+"""`seq.int(from, to, length.out = n)` in `approx`: Grenzen endlich (sonst Fehler wie R); sind from, to und Schritt
+ganzzahlig, liefert R ganze Zahlen (aus -0 wird 0)."""
+function _seq_int(frm, to, n)
+    frm = Float64(frm); to = Float64(to)
+    isfinite(frm) || error("'from' must be a finite number")
+    isfinite(to) || error("'to' must be a finite number")
+    out = seq_len_out(frm, to, n)
+    n = trunc(Int, n)
+    rby = 0.0
+    if n > 2
+        nint = Float64(n - 1)
+        rby = to - frm
+        rby = isfinite(rby) ? rby / nint : to / nint - frm / nint
     end
-    f2 = f
-    f1 = 1 - f
-    for (k, vk) in enumerate(v)
-        if isnan(vk)
-            out[k] = vk
-            continue
-        end
-        i = 1
-        j = n
-        if vk < x[i]
-            out[k] = yleft; continue
-        end
-        if vk > x[j]
-            out[k] = yright; continue
-        end
-        while i < j - 1
-            ij = (i + j) ÷ 2
-            if vk < x[ij]
-                j = ij
-            else
-                i = ij
-            end
-        end
-        if vk == x[j]
-            out[k] = y[j]; continue
-        end
-        if vk == x[i]
-            out[k] = y[i]; continue
-        end
-        if method == 1
-            out[k] = y[i] + (y[j] - y[i]) * ((vk - x[i]) / (x[j] - x[i]))
-        else
-            out[k] = (f1 != 0.0 ? y[i] * f1 : 0.0) + (f2 != 0.0 ? y[j] * f2 : 0.0)
-        end
+    lim = 2147483647.0
+    if -lim - 1 <= frm <= lim && -lim - 1 <= to <= lim && frm == trunc(frm) && (n <= 1 || to == trunc(to)) &&
+       (n <= 2 || rby == trunc(rby))
+        out = out .+ 0.0
     end
     out
 end
+
+"R_approxfun: Interpolation je Punkt im C-Kern `sl_r_approx` (core/slc_rbase.c, seit 1.5.0)."
+_approx_core(x::Vector{Float64}, y::Vector{Float64}, v::Vector{Float64}, method::Int, yleft::Float64, yright::Float64,
+             f::Float64) = SimLev._rb_approx(x, y, v, method, yleft, yright, f)
 
 function _approx_setup(x, y, method, yleft, yright, rule, f::Float64, ties, na_rm::Bool, ties_missing::Bool)
     meths = [("linear", 1), ("constant", 2)]
@@ -187,10 +168,10 @@ function approx(x, y = nothing; xout = nothing, method::AbstractString = "linear
     if xout === nothing
         n <= 0 && error("'approx' requires n >= 1")
         if nona
-            xo = seq_len_out(xv[1], xv[nx], n)
+            xo = _seq_int(xv[1], xv[nx], n)
         else
             xs = xv[notna]
-            xo = seq_len_out(xs[1], xs[end], n)
+            xo = _seq_int(xs[1], xs[end], n)
         end
     else
         xo = _v(xout)

@@ -19,10 +19,10 @@
  * NA:         R's NA_real_ ist das NaN mit Nutzlast 1954 (0x7FF00000000007A2), R's NaN das ruhige
  *             0x7FF8000000000000. Die Kerne unterscheiden beide wie R.
  * Herkunft:           übersetzt aus R 4.3.3 über die Port-Funktionen
- *                     python/simlev/_r/{rnum,base,stats_sort,stats_cor}.py und
- *                     julia/src/r/{rnum,base,stats_sort,stats_cor}.jl (diese nach
+ *                     python/simlev/_r/{rnum,base,stats_sort,stats_cor,stats_smooth}.py und
+ *                     julia/src/r/{rnum,base,stats_sort,stats_cor,stats_smooth}.jl (diese nach
  *                     src/main/summary.c, cum.c, array.c, arithmetic.c, sort.c, qsort-body.c,
- *                     util.c, format.c und src/library/stats/src/cov.c, zeroin.c); Verhalten laut
+ *                     util.c, format.c und src/library/stats/src/cov.c, zeroin.c, approx.c); Verhalten laut
  *                     R-Hilfeseiten (?sum, ?mean, ?cumsum, ?quantile, ?order, ?rank, ?sort, ?cor,
  *                     ?tabulate, ?findInterval, ?Arithmetic); Einzelheiten in den Köpfen der
  *                     .c-Dateien
@@ -68,6 +68,10 @@ double sl_r_pow1(double x, double y);
 typedef double (*sl_r_fn1)(double x, void *info);
 double sl_r_zeroin2(sl_r_fn1 f, void *info, double ax, double bx, double fa, double fb, double tol, int maxit,
                     int *iter);
+/* approx(x, y, xout, method, yleft, yright, f)$y nach der Aufbereitung (stats::approx, approxfun):
+ * x aufsteigend ohne NA und y mit Länge n; method 1 linear, 2 konstant; NA/NaN in xout bleibt (seit 1.5.0) */
+void   sl_r_approx(int64_t n, const double *x, const double *y, int64_t nout, const double *xout, int method,
+                   double yleft, double yright, double f, double *yout);
 
 /* ── slc_rbase_sort.c: Ordnung, Rang, Quantile ───────────────────────────────
  * Rückgabe 0 oder SL_ENOMEM. Indizes 1-basiert wie R. */

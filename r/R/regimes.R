@@ -11,7 +11,7 @@
 #                   regime_subset())
 # =============================================================================
 
-#' Log-Dichte der multivariaten Normalverteilung je Zeile
+#' Log-Dichte der multivariaten Normalverteilung je Zeile (seit 1.5.0 rechnet regime_hmm sie im Kern hmm_em)
 #' @keywords internal
 #' @noRd
 .ldmvn <- function(X, mu, S) {
@@ -52,25 +52,14 @@
 #' @keywords internal
 #' @noRd
 .hmm_em <- function(X, k, init, max_iter, tol, ridge) {
-  Tn <- nrow(X)
-  mu <- init$mu; S <- init$S; A <- init$A; p0 <- rep(1 / k, k); ll_old <- -Inf
-  estep <- function() {                                           # E-Schritt mit den aktuellen Parametern
-    lB <- vapply(seq_len(k), function(j) .ldmvn(X, mu[j, ], S[[j]]), numeric(Tn))
-    if (!is.matrix(lB)) lB <- matrix(lB, ncol = k)
-    m <- lB[, 1]; for (j in seq_len(k)[-1]) m <- pmax(m, lB[, j])   # Zeilenmaximum (wie apply(lB, 1, max), aber vektorisiert)
-    fb <- .hmm_forward_backward(exp(lB - m), A, p0)               # Kern in C++
-    list(lB = lB, fb = fb, ll = sum(log(fb$scale)) + sum(m))
-  }
-  for (it in seq_len(max_iter)) {
-    es <- estep(); ga <- es$fb$smoothed; xi <- es$fb$xi; ll <- es$ll
-    p0 <- ga[1, ]; A <- xi / rowSums(xi)
-    for (j in seq_len(k)) { w <- ga[, j]; sw <- sum(w); mu[j, ] <- colSums(X * w) / sw
-      Xc <- sweep(X, 2, mu[j, ]); S[[j]] <- .sl_crossprod(Xc * sqrt(w)) / sw + ridge }
-    if (abs(ll - ll_old) < tol * (1 + abs(ll))) break
-    ll_old <- ll
-  }
-  es <- estep()       # Log-Likelihood und Wahrscheinlichkeiten zu den gelieferten (zuletzt geschaetzten) Parametern
-  list(mu = mu, S = S, A = A, p0 = p0, ll = es$ll, filtered = es$fb$filtered, smoothed = es$fb$smoothed, lB = es$lB, iter = it)
+  # E- und M-Schritte im Kern (core/research_core_impl.h, hmm_em; bis 1.4.3 hier in R); ein Fehler dort (Matrix nicht
+  # positiv definit, NA im Abbruchtest) verwirft wie bisher den Startwert (tryCatch in regime_hmm)
+  ni <- length(seq_len(max_iter))                                   # max_iter = 0: nur der E-Schritt zum Startwert
+  r <- .hmm_em_core(X, k, init$mu, unlist(init$S), init$A, ni, tol, ridge)
+  if (is.null(r)) stop("regime_hmm: EM-Schritt fehlgeschlagen")
+  d <- ncol(X); dn <- if (!is.null(colnames(X))) list(colnames(X), colnames(X))   # wie .sl_crossprod
+  S <- lapply(seq_len(k), function(j) { s <- matrix(r$S[(j - 1L) * d * d + seq_len(d * d)], d, d); dimnames(s) <- dn; s })
+  list(mu = r$mu, S = S, A = r$A, p0 = r$p0, ll = r$ll, filtered = r$filtered, smoothed = r$smoothed, lB = r$lB, iter = r$iter)
 }
 
 #' HMM-Startwert aus einer Einteilung der Perioden in k Gruppen: Mittelwert

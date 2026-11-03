@@ -24,7 +24,7 @@ Kanonische Quellen der C-Bibliothek, die R, Python und Julia gemeinsam nutzen.
 | `slc_kde.c` | Gauß-Kerndichte, Bandbreite nach Silverman |
 | `slc_opt.h`, `slc_opt.c`, `slc_opt_test.c` | Optimierer BFGS (Wolfe-Liniensuche), projizierter BFGS, Nelder-Mead, numerischer Gradient; Rückfrage an den Host und `sl_minimize`; Prüffunktionen (Quellen: Nocedal/Wright, Bertsekas, Kelley, Nelder/Mead, Lagarias u. a., Gill/Murray/Wright, Moré/Garbow/Hillstrom) |
 | `slc_models.h`, `slc_garch.c`, `slc_gpd.c`, `slc_dcc.c`, `slc_msgarch.c`, `slc_boot.c` | Modelle: GARCH/GJR(1,1) (ML, Umparametrisierung, Rückfall Momente), GPD (ML, Startwerte nach Hosking/Wallis), DCC(1,1) (Filter, BFGS, Rückfall Nelder-Mead), MS-GARCH (Filter, Starts aus HMM-EM und Rangeinteilung, BFGS, Viterbi), Bootstrap-Kerne mit Strom `sl_rng` (Quellen: Bollerslev, Glosten/Jagannathan/Runkle, Pickands, Davison/Smith, Hosking/Wallis, Engle, Haas/Mittnik/Paolella, Hamilton, Baum u. a., Viterbi, Efron, Künsch, Politis/Romano, Wu, Liu, Mammen, Barone-Adesi u. a.; eigener SimLev-Code) |
-| `slc_rbase.h`, `slc_rbase.c`, `slc_rbase_sort.c`, `slc_rbase_cov.c` | Grundfunktionen mit R-Regeln **für Python und Julia** (R rechnet sie selbst; nicht in `slc.h`); nur `slc_rbase.c` und `slc_rbase.h` gehen auch nach `r/src/` (`sl_r_sum` für die Summen der Tagesengine `engine_core_impl.h`, die Grundfunktionen und `sl_r_zeroin2` der Auswertung `evaluate_core_impl.h`): `sum`, `prod`, `mean`, `var`, `cumsum`/`cumprod`/`cummax`/`cummin`, `rowSums`/`colSums` (long double wie R), `^`, `order`, `rank`, `sort(partial =)`, `quantile` Typ 1–9, `tabulate`, `findInterval`, `cov`/`cor` (pearson, kendall; alle `use`). Anders als die SimLev-eigenen Kerne (ohne long double) akkumulieren sie absichtlich in long double, damit sie auf derselben Plattform bitgleich zu R sind (Prüfung gegen R 4.3.3, ≥ 10.000 Zufallsfälle je Kern). Hüllen: `python/src/_ext_slc_rbase.c`, `julia/src/r/rbase_c.jl` |
+| `slc_rbase.h`, `slc_rbase.c`, `slc_rbase_sort.c`, `slc_rbase_cov.c` | Grundfunktionen mit R-Regeln **für Python und Julia** (R rechnet sie selbst; nicht in `slc.h`); nur `slc_rbase.c` und `slc_rbase.h` gehen auch nach `r/src/` (`sl_r_sum` für die Summen der Tagesengine `engine_core_impl.h`, die Grundfunktionen und `sl_r_zeroin2` der Auswertung `evaluate_core_impl.h`, die Auswertung je Pfad der Entnahme `withdrawal_core_impl.h`): `sum`, `prod`, `mean`, `var`, `cumsum`/`cumprod`/`cummax`/`cummin`, `rowSums`/`colSums` (long double wie R), `^`, `approx` (Interpolation je Punkt wie `approx1` von `stats::approx`, seit 1.5.0; Prüfung `approx_fuzz.R`), `order`, `rank`, `sort(partial =)`, `quantile` Typ 1–9, `tabulate`, `findInterval`, `cov`/`cor` (pearson, kendall; alle `use`). Anders als die SimLev-eigenen Kerne (ohne long double) akkumulieren sie absichtlich in long double, damit sie auf derselben Plattform bitgleich zu R sind (Prüfung gegen R 4.3.3, ≥ 10.000 Zufallsfälle je Kern). Hüllen: `python/src/_ext_slc_rbase.c`, `julia/src/r/rbase_c.jl` |
 | `slc_rbase_date.c`, `slc_rbase_num.c` | wie `slc_rbase*` nur für Python und Julia: Datumsformat und -lesen (`format.Date`/`strftime` in der C-Locale, `as.Date(x, "%Y-%m-%d")`, proleptisch gregorianisch; dokumentierte Umwandlungen aus `?strptime` textgleich zu R) und weitere long-double-Wege von R (`R_strtod`, `%%`, `%/%`, `scientific()` von `formatReal`), mit denen Julia die Nachbildung `ld80.jl` und Python `numpy.longdouble` ablöst. Schalter, Breiten und E/O im Datumsformat wie glibc unter Linux, `digits.secs` für `%OS`. Prüfung: Gleichlauf (`date_fuzz*`, `rbase_fuzz*`) |
 | `gen_constants.py` | Konstanten, Bernoulli-Zahlen, zeta(k), Stützwerte und Taylor-Polynome, Sprungpolynom, selbst angepasste rationale Näherungen für `qnorm` (nur Standardbibliothek) |
 
@@ -71,6 +71,29 @@ rechnen `risk_free` aus `data` (Typen, Meldungen). Hüllen: `r/src/engine_core.c
 `C_sim_xirr`), `python/src/_ext_engine.cpp` (`sim_evaluate`, `sim_xirr`), `simlev_cabi.cpp` (`simlev_c_eval_*`,
 `simlev_c_xirr`). Summen, Mittel, Varianz, Kumulationen und Potenz wie R über `slc_rbase.c`. Prüfung zusätzlich:
 Gleichlauf `metric_fuzz.R` (Fuzz der Kennzahlen) gegen R 1.3.0.
+
+**Entnahme:** `withdrawal_core_impl.h` rechnet die Pfade von `withdrawal_simulation()` (`wd_simulate`, Regeln,
+Steuer, Tarifweg) und seit 1.5.0 auch die Auswertung je Pfad, die bis 1.4.3 jede Sprache selbst rechnete:
+`wd_metrics` (Mittel, Minimum, Drawdown `max(1 - c / cummax(c))`, Sicherheitsäquivalent und Summe der Entnahmen
+über die vollen Planjahre bzw. bis zum Horizont), `wd_pwr` (Perfect Withdrawal Rate mit den Prüfungen von
+`withdrawal_perfect_rate()` als Status; je Pfad bis zum Horizont), `wd_annual_prod` (reale Jahresrenditen aus
+Perioden) und `wd_tariff_compact` (Jahreszeilen des Tarifwegs). Reine Funktionen auf Zeigern (reentrant); Summen,
+Mittel, Produkte, Kumulationen und Potenz über `slc_rbase.c`, `min`/`max`/`pmax` mit R's NA-Regeln. Die Sprachen
+setzen die Meldungen (Texte und Aufrufe wie bisher), Namen und Datenrahmen. Hüllen: `r/src/withdrawal_core.cpp`
+(`C_wd_metrics`, `C_wd_pwr`, `C_wd_annual_prod`, `C_wd_tariff_compact`), `python/src/_ext_withdrawal.cpp`,
+`simlev_cabi.cpp` (`simlev_c_wd_*`). Prüfung zusätzlich: Gleichlauf `wd_fuzz.R` gegen R 1.4.2.
+
+**Forschung (seit 1.5.0):** `research_core_impl.h` rechnet außer Optimierung, Quantilsregression, Vorwärts-
+Rückwärts-Schritt und rollierenden Kennzahlen auch den Baum-Welch-EM von `regime_hmm()` (`hmm_em`: E-Schritt mit
+Log-Dichten über `sl_chol`/`sl_trisolve`, M-Schritt mit `sl_crossprod`, Abbruchtest; ein Fehler verwirft wie bisher
+den Startwert), die Rückwärtsrekursion von `planning_goal()` (`goal_dp`: Wertfunktion auf dem Gitter, Interpolation
+über `sl_r_approx`, `sl_qnorm`/`sl_pnorm`, Politik je Periode; gleiche `log(grid)`-Werte fasst es wie `approx`
+zusammen und meldet die Zahl der Aufrufe für die Warnungen der Sprachen) und die Aufteilungen der CSCV von
+`overfit_pbo()` (`pbo_cscv`: Blocksummen über `sl_matmul`, Kennzahlen, bester Punkt, Rang, Logit, Median).
+Startwerte und Zufall (`regime_hmm`), Gitter und Vorwärtssimulation (`planning_goal`), Blocksummen und Regression
+(`overfit_pbo`) bleiben in den Sprachen. Hüllen: `r/src/research_core.cpp` (`C_hmm_em_core`, `C_goal_dp`,
+`C_pbo_cscv`), `python/src/_ext_research.cpp`, `simlev_cabi.cpp` (`simlev_c_hmm_em`, `simlev_c_goal_dp`,
+`simlev_c_pbo_cscv`). Prüfung zusätzlich: Gleichlauf `hmm_fuzz.R`, `goal_fuzz.R`, `pbo_fuzz.R` gegen R 1.4.2.
 
 Kopien (Pakete bauen nur aus ihrem Teilbaum): `r/src/` (flach), `python/src/core/`,
 `julia/deps/core/` (slc, die geteilten Kerne und `simlev_cabi.cpp`). Die Hüllen gibt es nur je Sprache: `r/src/slc_r.c` (+ `r/R/slc.R`),

@@ -194,21 +194,11 @@ overfit_pbo <- function(x, S = 16L, metric = c("sharpe", "sortino", "geometric",
   T1 <- colSums(B1); T2 <- colSums(B2); Td <- colSums(Bd); Tl <- colSums(Bl); Tc <- colSums(Bc)
   combos <- utils::combn(S, S / 2L)
   C <- ncol(combos); half <- bl * S / 2
-  lam <- isb <- oosb <- oosm <- numeric(C)
-  for (st in seq(1L, C, by = 2000L)) {
-    idx <- st:min(C, st + 1999L); k <- length(idx)
-    Ind <- matrix(0, k, S); Ind[cbind(rep(seq_len(k), each = S / 2L), as.vector(combos[, idx]))] <- 1
-    I1 <- Ind %m% B1; I2 <- Ind %m% B2; Id <- Ind %m% Bd; Il <- Ind %m% Bl; Ic <- Ind %m% Bc
-    rep_t <- function(v) matrix(v, k, N, byrow = TRUE)
-    IS <- .of_metric(half, I1, I2, Id, Il, metric, c1 = Ic)
-    OOS <- .of_metric(half, rep_t(T1) - I1, rep_t(T2) - I2, rep_t(Td) - Id, rep_t(Tl) - Il, metric, c1 = rep_t(Tc) - Ic)
-    best <- max.col(IS, ties.method = "first")
-    ob <- OOS[cbind(seq_len(k), best)]
-    rk <- rowSums(OOS < ob) + (rowSums(OOS == ob) + 1) / 2
-    w <- rk / (N + 1)
-    lam[idx] <- log(w / (1 - w)); isb[idx] <- IS[cbind(seq_len(k), best)]; oosb[idx] <- ob
-    oosm[idx] <- apply(OOS, 1, stats::median)
-  }
+  # je Aufteilung im Kern (core/research_core_impl.h, pbo_cscv; bis 1.4.3 hier in R): In-Sample-Summen Ind %*% B,
+  # Out-of-Sample = Gesamt - In-Sample, Kennzahl wie .of_metric, bester IS-Punkt (max.col, erster), dessen
+  # relativer OOS-Rang w und Logit log(w / (1 - w)), Median der OOS-Kennzahlen
+  cs <- .pbo_cscv(c(B1, B2, Bd, Bl, Bc), c(T1, T2, Td, Tl, Tc), combos, half, metric, S, N)
+  lam <- cs$lambda; isb <- cs$is_best; oosb <- cs$oos_best; oosm <- cs$oos_median
   ok <- !is.na(isb) & !is.na(oosb)                              # wie lm(): Paare mit NA entfallen
   cf <- .sl_lsfit(cbind(1, isb[ok]), oosb[ok])$coefficients     # OOS ~ IS, kleinste Quadrate
   structure(list(pbo = mean(lam <= 0), lambda = lam, is_best = isb, oos_best = oosb, oos_median = oosm,

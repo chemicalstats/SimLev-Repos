@@ -49,6 +49,9 @@ const _ENGINE_ROWS = ("year", "taxable_income", "church_tax_paid_deductible", "c
                       "church_tax_settlement_next_year")
 
 "Freibetrag ab harvest_day (\"MM-TT\"): erster Monat * 100 + Tag, den der Zeichenvergleich zulässt (wie R)."
+# Zeiger auf eine Signalspalte; leer (keine Spalte, seit 1.6.1) → C_NULL, der Kern liest FALSE an jedem Tag
+_sig_ptr(v::Vector{Float64}) = isempty(v) ? Ptr{Float64}(C_NULL) : pointer(v)
+
 function _harvest_md(harvest_day)
     harvest_day isa AbstractString && occursin(r"^[0-9]{2}-[0-9]{2}$", harvest_day) &&
         return parse(Int, harvest_day[1:2]) * 100 + parse(Int, harvest_day[4:5])
@@ -128,8 +131,8 @@ function _sim_engine_run!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight,
     try
         GC.@preserve sim day ew ai ad ci cd fees tot0 tariff_par zve pint pdbl starts filled event fl flags_out begin
             prices = Ptr{Float64}[pointer(sim.market[a].asset_price) for a in 1:na]
-            sb = Ptr{Float64}[pointer(sim.market[a].signal_buy.v) for a in 1:na]
-            ss = Ptr{Float64}[pointer(sim.market[a].signal_sell.v) for a in 1:na]
+            sb = Ptr{Float64}[_sig_ptr(sim.market[a].signal_buy.v) for a in 1:na]
+            ss = Ptr{Float64}[_sig_ptr(sim.market[a].signal_sell.v) for a in 1:na]
             ewp = event_weight === nothing ? Ptr{Ptr{Float64}}(C_NULL) :
                   Ptr{Float64}[ew[a] === nothing ? Ptr{Float64}(C_NULL) : pointer(ew[a]) for a in 1:na]
             brp = person ? Ptr{Float64}[pointer(sim.market[a].base_rates) for a in 1:na] : Ptr{Ptr{Float64}}(C_NULL)

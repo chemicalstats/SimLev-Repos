@@ -35,6 +35,7 @@ from .data_prep import (
     _is_number, _match_arg, _named_parts, _names, _names_as_dates_optional, _nrow, _to_date,
     _which_min,
 )
+from ._util import _which_max
 
 __all__ = ["backcast_fit", "backcast", "SimLevBackcastFit", "SimLevBackcast", "summary_SimLevBackcastFit", "plot_SimLevBackcastFit", "plot_SimLevBackcast"]
 
@@ -244,7 +245,7 @@ def _bc_metric_table(err_mat, grid):
     out = {}
     for k, f in metrics.items():
         vals = [f(err_mat[:, j]) for j in np.arange(err_mat.shape[1])]
-        out[k] = float(grid[_which_min(vals)])
+        out[k] = float(grid[_which_min(vals, -1)])
     return pd.Series(out)
 
 
@@ -673,7 +674,10 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
             ok = np.isfinite(xs) & np.isfinite(pr)
             cors.append(_NAN if ok.sum() < 30 else _cor(xs[ok], pr[ok]))
         sg = 1.0 if prep.leverage > 0 else -1.0
-        lag = cand[_which_max([sg * c for c in cors])]
+        j = _which_max([sg * c for c in cors])
+        if j is None:
+            raise ValueError("argument of length 0")
+        lag = cand[j]
         prep = _bc_prepare(data, product, index, ter, leverage, rate, fx, int(rate_lag), ter_basis, rate_basis,
                            accrual, index_fill, int(lag))
 
@@ -728,7 +732,7 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
             if len(fit) != 1:
                 raise ValueError("method = 'grid' unterstützt genau einen Parameter in 'fit'.")
             vals = np.array([obj_fun(g, rows, ob, rg) for g in grid], dtype=np.float64)
-            best = float(grid[_which_min(list(vals))])
+            best = float(grid[_which_min(list(vals), -1)])
             cols = []
             for g in grid:
                 p = dict(par0)
@@ -818,17 +822,6 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
                              fx=fx, rate_lag=int(rate_lag), ter_basis=ter_basis, rate_basis=rate_basis,
                              accrual=accrual, index_fill=index_fill)
     return out
-
-
-def _which_max(a) -> int:
-    best = -1
-    bv = -math.inf
-    for i, v in enumerate(a):
-        if not math.isnan(v) and (best < 0 or v > bv):
-            best, bv = i, v
-    if best < 0:
-        raise ValueError("argument of length 0")
-    return best
 
 
 class SimLevBackcast(pd.DataFrame):

@@ -28,6 +28,15 @@ def _first_obs(v: np.ndarray) -> int:
     return int(ok[0]) if ok.size else v.size - 1
 
 
+def _trig_series(df, name):
+    """Spalte ``name`` als Liste von Python-Zahlen (statt float()/np.isnan je Tag, seit 1.5.2) und erste Beobachtung."""
+    col = _col(df, name)
+    if col is None:
+        raise ValueError("Spalte '%s' fehlt." % name)
+    v = np.asarray(col, dtype=np.float64)
+    return v.tolist(), _first_obs(v)
+
+
 def rebalance_trigger(
     df: Any,
     type: str,
@@ -108,15 +117,11 @@ def rebalance_trigger(
     threshold = threshold / 100
     trig = np.zeros(n, dtype=bool)
     if type in ("abs_leverage", "rel_leverage"):
-        col = _col(df, lev_col)
-        if col is None:
-            raise ValueError("Spalte '%s' fehlt." % lev_col)
-        lev = np.asarray(col, dtype=np.float64)
-        t0 = _first_obs(lev)
-        held = float(lev[t0])
+        lv, t0 = _trig_series(df, lev_col)
+        held = lv[t0]
         for t in range(t0 + 1, n):
-            v = float(lev[t])
-            if np.isnan(v):
+            v = lv[t]
+            if v != v:
                 continue
             if type == "abs_leverage":
                 if abs(v - held) > threshold:
@@ -126,15 +131,11 @@ def rebalance_trigger(
                 trig[t] = True
                 held = v
     elif type == "vol_band":
-        col = _col(df, vol_col)
-        if col is None:
-            raise ValueError("Spalte '%s' fehlt." % vol_col)
-        vol = np.asarray(col, dtype=np.float64)
-        t0 = _first_obs(vol)
-        ref = float(vol[t0])
+        vl, t0 = _trig_series(df, vol_col)
+        ref = vl[t0]
         for t in range(t0 + 1, n):
-            v = float(vol[t])
-            if not np.isnan(v) and ref != 0 and abs(v / ref - 1) > threshold:
+            v = vl[t]
+            if v == v and ref != 0 and abs(v / ref - 1) > threshold:
                 trig[t] = True
                 ref = v
     elif type == "combined":

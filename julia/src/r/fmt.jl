@@ -27,7 +27,7 @@
 #   String / Vector{String}          character
 #   Date / Vector{Date}              Date
 #   missing in Vektoren              NA des jeweiligen Typs; `missing` allein = logical NA
-#   RFactor (r_factor)               factor
+#   RFactor                          factor
 #   RVector                          benannter Vektor
 #   Matrix / NamedMat                Matrix (mit dimnames)
 #   RFrame                           data.frame
@@ -38,7 +38,7 @@
 # Zeichenergebnissen ist `missing`.
 #
 # Namen mit Präfix `r_` wegen Base: `r_round`, `r_sprintf` (auch als
-# `sprintf`), `r_cat`; `format` steht auch als `r_format` bereit.
+# `sprintf`); `format` steht auch als `r_format` bereit.
 module RFmt
 
 import ..SimLev
@@ -46,11 +46,11 @@ using Dates: Dates, Date, DateTime, @dateformat_str
 
 export set_options, NA_REAL,
        r_round, signif, fround, fprec,
-       as_character, paste, paste0, to_string,
-       r_format, format_date, formatC, prettyNum, r_sprintf,
-       nchar, encode_string, RFactor, r_factor,
-       print_vector, print_matrix, print_data_frame, format_data_frame, print_factor,
-       print_list, print_default, r_cat, cat_str
+       as_character, paste, paste0,
+       r_format, formatC, r_sprintf,
+       nchar, RFactor,
+       print_vector, print_matrix, print_data_frame,
+       print_list, print_default
 
 include("_fmt_core.jl")
 include("_fmt_format.jl")

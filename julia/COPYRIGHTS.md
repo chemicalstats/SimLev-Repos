@@ -58,7 +58,7 @@ ihre Quellen; die vollständigen Angaben stehen in
 |---|---|---|
 | `rnum.jl`, `base.jl` | übersetzt aus `src/main/summary.c`, `cum.c`, `array.c`, `arithmetic.c` | `sum`, `mean`, `var`, `sd`, `prod`, `cumsum`, `cumprod`, `cummax`, `cummin`, `rowSums`, `colSums`, `rowMeans`, `colMeans`, `pmin`, `pmax`, `range`, `diff`, `R_POW`, `%%` |
 | `libm.jl` | nachgebildet nach `src/main/arithmetic.c` | Randregeln um die libm-Funktionen |
-| `rformat.jl`, `fmt.jl`, `_fmt_core.jl`, `_fmt_format.jl`, `_fmt_print.jl` | übersetzt aus `src/main/format.c`, `printutils.c`, `printvector.c`, `printarray.c`, `print.c`, `paste.c`, `sprintf.c`, `util.c`, `src/nmath/fround.c`, `fprec.c`; nachgebildet nach `base/R/format.R`, `dataframe.R`, `factor.R`, `dates.R` | `round`, `signif`, `format`, `formatC`, `prettyNum`, `sprintf`, `as.character`, `deparse` (einfache Werte), `paste`, `print`, `cat`, Datumsformate |
+| `rformat.jl`, `fmt.jl`, `_fmt_core.jl`, `_fmt_format.jl`, `_fmt_print.jl` | übersetzt aus `src/main/format.c`, `printutils.c`, `printvector.c`, `printarray.c`, `print.c`, `paste.c`, `sprintf.c`, `util.c`, `src/nmath/fround.c`, `fprec.c`; nachgebildet nach `base/R/format.R`, `dataframe.R`, `factor.R`, `dates.R` | `round`, `signif`, `format`, `formatC`, `sprintf`, `as.character`, `deparse` (einfache Werte), `paste`, `print`, Datumsformate |
 | `_collate.jl` | nachgebildet nach `src/main/util.c` | `Scollate` |
 | `stats_sort.jl` | übersetzt aus `src/main/sort.c`, `qsort-body.c`, `seq.c`; nachgebildet nach `base/R/sort.R`, `rle.R`, `cut.R`, `findInt.R`, `stats/R/quantile.R`, `median.R`, `weighted.mean.R` | `order`, `sort`, `rank`, partielle Sortierung, `rle`, `tabulate`, `findInterval`, `cut`, `complete.cases`, `quantile`, `median`, `weighted.mean` |
 | `stats_cor.jl` | übersetzt aus `stats/src/cov.c`; nachgebildet nach `stats/R/cor.R`, `base/R/scale.R` | `cor`, `cov`, `var`, `sd`, `cov2cor`, `scale` |
@@ -66,7 +66,7 @@ ihre Quellen; die vollständigen Angaben stehen in
 | `stats_optim.jl` (`_optim.jl` bis 1.5.2) | nachgebildet nach `stats/src/optimize.c` (`do_fmin`, `fcn1`) und `stats/R/optimize.R`; `Brent_fmin` seit 1.6.0 im Kern (`core/slc_opt_fmin.cpp`, Herkunftsblock dort) | `optimize` (`uniroot` bis 1.5.1) |
 | `stats_models.jl` | nachgebildet nach `stats/R/lm.R` (Zugriffe), `p.adjust.R`, `ecdf.R`, `ave.R`, `aggregate.R` | `coef`, `fitted`, `residuals`, `p.adjust`, `ecdf`, `ave`, `aggregate` |
 | `stats_cluster.jl` | übersetzt aus `stats/src/distance.c`, `hclust.f`; nachgebildet nach `stats/R/dist.R`, `hclust.R` | `dist`, `as.dist`, `hclust` |
-| `linalg.jl` | nachgebildet nach `base/R/outer.R`, `diag.R`, `all.equal.R` | `outer`, `diag`, `isSymmetric`, `all.equal` (numerisch) |
+| `linalg.jl` | nachgebildet nach `base/R/diag.R`, `all.equal.R` | `diag`, `all.equal` (numerisch) |
 | `rexpr.jl` | nachgebildet nach `src/main/gram.y` und der Semantik der Grundoperatoren | Bedingungen in R-Syntax |
 | `parallel.jl` | nachgebildet nach `parallel/R/unix/mclapply.R` (nur Verhalten) | `mclapply(mc.preschedule = FALSE)` für `.par_lapply` |
 

@@ -703,7 +703,7 @@ def plot_dashboard(x, style: Any = ("full", "compact", "custom"), panels: Any = 
     _warn_unknown_kw("plot_dashboard", list(kwargs))
     if file is not None:
         _check_svg_file(file, "plot_dashboard")
-    from .config import _match_arg, _pmatch
+    from ._util import _match_arg, _pmatch
     style = _match_arg(style, ("full", "compact", "custom"), "style")
     panels_given = panels is not None
     if panels is None:

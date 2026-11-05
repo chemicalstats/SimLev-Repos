@@ -173,26 +173,6 @@ function _print_factor_lines(v::_V, quote_ = false, max_levels = nothing, right 
     return String.(lines)
 end
 
-"""
-    print_factor(x; quote_ = false, max_levels = nothing, levels = nothing, ordered = false, right = false)
-
-`print(<factor>)`. `x`: `RFactor` oder Werte (mit `levels`, sonst sortierte
-eindeutige Werte).
-"""
-function print_factor(x; quote_ = false, max_levels = nothing, levels = nothing, ordered = false, right = false)
-    if levels !== nothing
-        f = r_factor(x; levels, ordered)
-        v = _Vf(f.codes, f.levels; ordered = f.ordered)
-    else
-        v = _as_v(x)
-        if v.type !== :factor
-            f = r_factor(_Vs(_as_character_list(v)); ordered)
-            v = _Vf(f.codes, f.levels; names = v.names, ordered)
-        end
-    end
-    return join(_print_factor_lines(v, quote_, max_levels, right), "\n")
-end
-
 # ── Matrizen ───────────────────────────────────────────────────────────────
 
 "printMatrix. cols: Vektor von _V je Spalte (gleicher Typ)."
@@ -367,18 +347,6 @@ _as_frame(df::AbstractDict) = SimLev.RFrame((String(k) => v for (k, v) in df)...
 _as_frame(df::AbstractVector{<:Pair}) = SimLev.RFrame((String(p.first) => p.second for p in df)...)
 
 """
-    format_data_frame(df; digits = nothing, na_encode = false, justify = "none", types = nothing)
-
-`format.data.frame`: Vektor der formatierten Spalten (`String`/`missing`).
-"""
-function format_data_frame(df; digits = nothing, na_encode = false, justify = "none", types = nothing)
-    df = _as_frame(df)
-    nms = names(df)
-    return [_jvec(_fmt_column(getfield(df, :cols)[j]; digits, na_encode, justify,
-                              type = types === nothing ? nothing : get(types, nms[j], nothing))) for j in eachindex(nms)]
-end
-
-"""
     print_data_frame(df; row_names = true, digits = nothing, right = true, quote_ = false, types = nothing)
 
 Text von `print(<data.frame>)` wie `print.data.frame`. `row_names`: `true`,
@@ -500,69 +468,6 @@ function print_default(x; digits = nothing, quote_ = nothing, right = false, row
     x isa AbstractMatrix && return print_matrix(x; digits, quote_, right)
     _is_list(x) && return print_list(x; digits, quote_)
     return print_vector(x; digits, quote_, right)
-end
-
-# ── cat ────────────────────────────────────────────────────────────────────
-
-function _cat_items(x)
-    v = _as_v(x)
-    t = v.type
-    t === :NULL && return String[]
-    if t === :double
-        res = String[]
-        for i in 1:length(v)
-            xi = v.d[i]
-            if v.na[i]
-                push!(res, "NA")
-                continue
-            end
-            w, d, e = _format_real([xi], [false])
-            push!(res, _encode_real(xi, 0, d, e, _OPT[:OutDec], false))
-        end
-        return res
-    end
-    t === :integer && return String[v.na[i] ? "NA" : string(v.i[i]) for i in 1:length(v)]
-    t === :logical && return String[v.na[i] ? "NA" : (v.l[i] ? "TRUE" : "FALSE") for i in 1:length(v)]
-    t === :character && return String[s === nothing ? "NA" : s for s in v.s]
-    t === :Date && return _cat_items(_Vd(copy(v.d), copy(v.na), falses(length(v)) |> collect))
-    t === :factor && return String[v.na[i] ? "NA" : string(v.i[i]) for i in 1:length(v)]
-    error(string(t))
-end
-
-"""
-    cat_str(args...; sep = " ", fill = false)
-
-Text, den `cat(..., sep = sep)` ausgäbe (Zahlen mit 7 signifikanten Stellen
-je Element wie R).
-"""
-function cat_str(args...; sep = " ", fill = false)
-    seps = sep isa AbstractString ? [String(sep)] : String[string(s) for s in sep]
-    nlsep = any(s -> occursin('\n', s), seps)
-    out = IOBuffer()
-    ntot = 0
-    for (iobj, a) in enumerate(args)
-        if iobj != 1 && a !== nothing
-            print(out, seps[ntot % length(seps) + 1])
-            ntot += 1
-        end
-        items = _cat_items(a)
-        n = length(items)
-        for i in 1:n
-            print(out, items[i])
-            if i < n
-                print(out, seps[ntot % length(seps) + 1])
-                ntot += 1
-            end
-        end
-    end
-    (fill !== false || nlsep) && print(out, '\n')
-    return String(take!(out))
-end
-
-"`cat(...)`: schreibt nach `stdout` (bzw. `file`)."
-function r_cat(args...; sep = " ", fill = false, file = nothing)
-    print(file === nothing ? stdout : file, cat_str(args...; sep, fill))
-    return nothing
 end
 
 # ── Standarddruck für RList/RFrame (SimLev._DEFAULT_PRINT) ────────────────

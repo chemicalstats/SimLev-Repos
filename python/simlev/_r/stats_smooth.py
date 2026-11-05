@@ -6,7 +6,7 @@
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang; seit 1.6.0 rechnen regularize.values und filter im C-Kern
 #                     core/slc_rbase_smooth.cpp (sl_r_regularize, sl_r_filter_conv, sl_r_filter_rec).
-"""Interpolation und Filter (``approx``, ``approxfun``, ``filter``), nachgebildet aus R 4.3.3
+"""Interpolation und Filter (``approx``, ``filter``), nachgebildet aus R 4.3.3
 ``stats/R/approx.R``, ``filter.R`` und ``stats/src/approx.c``, ``filter.c``. Die Interpolation je Punkt
 (``approx.c``) rechnet seit 1.5.0 der C-Kern ``sl_r_approx`` (core/slc_rbase.cpp).
 
@@ -27,7 +27,7 @@ from .rlist import RList
 from .rnum import NA_REAL
 from .stats_sort import _rmean, _vec, _warn, seq_len_out
 
-__all__ = ["approx", "approxfun", "filter"]
+__all__ = ["approx", "filter"]
 
 
 # ── approx / filter ──────────────────────────────────────────────────────
@@ -164,24 +164,6 @@ def approx(x, y=None, xout=None, method="linear", n=50, yleft=None, yright=None,
     yo = _approx_core(xv, yv, xo, meth, yl, yr, float(f))
     res["y"] = float(yo[0]) if np.isscalar(xout) else yo
     return res
-
-
-def approxfun(x, y=None, method="linear", yleft=None, yright=None, rule=1, f=0, ties=None, na_rm=True):
-    """``approxfun(...)``: liefert eine Funktion ``v -> y``."""
-    ties_missing = ties is None
-    xv, yv, meth, yl, yr, nona, notna, nx = _approx_setup(
-        x, y, method, yleft, yright, rule, float(f), _rmean if ties is None else ties, na_rm, ties_missing)
-    ff = float(f)
-
-    def fun(v):
-        vv, _ = _vec(v)
-        out = _approx_core(xv, yv, vv, meth, yl, yr, ff)
-        if np.isscalar(v):
-            return float(out[0])
-        return out
-    fun.x = xv
-    fun.y = yv
-    return fun
 
 
 def filter(x, filter, method="convolution", sides=2, circular=False, init=None):

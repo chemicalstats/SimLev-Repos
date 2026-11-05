@@ -13,14 +13,14 @@ importiert nichts aus ``simlev``. Es definiert ``NA_REAL`` (R's
 ``NA_real_``, die einzige Definition im Paket; öffentlich als ``simlev.NA``)
 mit ``r_isna``/``r_isna_arr`` und die skalaren bzw. eindimensionalen
 Engine-Hilfen mit ``r_``-Präfix: Summen, Mittel, Varianzen und Produkte in
-long double, ``r_pow`` (``R_POW``) und ``r_mod1`` (``r_uniroot`` ist entfallen: XIRR im Kern
-``core/evaluate_core_impl.h``). Darauf bauen auf:
+long double und ``r_pow`` (``R_POW``; ``r_uniroot`` ist entfallen: XIRR im Kern
+``core/evaluate_core_impl.h``; ``r_mod1`` und ``r_cummin`` seit 1.6.1, ohne Aufrufer). Darauf bauen auf:
 
 - :mod:`simlev._r.rformat`: ``r_round``, ``r_signif``, ``r_format``,
   ``r_as_character``, ``r_deparse``, ``r_sprintf`` (Textausgabe der Engine),
 - :mod:`simlev._r.base`: re-exportiert die Summenhilfen und ergänzt
   Funktionen von R's base mit R-Namen für Vektoren, Matrizen und DataFrames
-  (``colSums``, ``rowMeans``, ``cumprod``, ``pmin``, ``range`` …), dazu
+  (``mean``, ``diff``, ``pmin``, ``range``), dazu
   ``quiet_fp`` (Gleitkomma-Warnungen bei NA unterdrücken, ``env`` aus dem
   Aufrufer) und ``sys_time``,
 - :mod:`simlev._r.fmt`: die volle Formatierung (``format``, ``formatC``,
@@ -37,8 +37,8 @@ Transzendente Funktionen: immer ``math.*`` (glibc-libm wie R), nie die
 SIMD-Varianten von numpy (``np.exp``, ``np.log``, ``np.power`` …), die auf
 Rechnern mit AVX-512 in den letzten Bits abweichen können.
 
-rechnet Python nirgends mehr mit ``numpy.longdouble``: auch ``r_mod1``
-(``%%``), ``R_strtod`` (:mod:`simlev._r.rexpr`) und ``scientific()``
+rechnet Python nirgends mehr mit ``numpy.longdouble``: auch ``%%``
+(:mod:`simlev._r.rexpr`), ``R_strtod`` (:mod:`simlev._r.rexpr`) und ``scientific()``
 (:mod:`simlev._r.fmt`, :mod:`simlev._r.rformat`) nutzen die C-Kerne
 ``core/slc_rbase_num.cpp``, wie Julia. Auf Plattformen, deren
 C-``long double`` nur 64 Bit breit ist (z. B. macOS auf Apple Silicon,
@@ -57,9 +57,8 @@ from .. import _ext   # C-Erweiterung (Kerne core/slc_rbase*.cpp)
 _NAN = float("nan")
 
 __all__ = [
-    "NA_REAL", "r_isna", "r_isna_arr", "r_sum", "r_cumsum", "r_prod", "r_cumprod", "r_mean", "r_mean_int", "r_var", "r_sd",
-    "r_rowsums", "r_colsums", "r_rowmeans", "r_colmeans", "r_cummin", "r_pow", "r_pow_vec", "r_mod1",
-    "r_median", "r_cummax",
+    "NA_REAL", "r_isna", "r_isna_arr", "r_sum", "r_cumsum", "r_prod", "r_cumprod", "r_mean", "r_mean_int", "r_var",
+    "r_sd", "r_rowsums", "r_colsums", "r_rowmeans", "r_colmeans", "r_pow", "r_pow_vec", "r_median", "r_cummax",
     "r_strtod", "r_string_to_real",
 ]
 
@@ -98,21 +97,6 @@ def r_isna_arr(a) -> np.ndarray:
     """Maske ``R_IsNA`` für ein Array."""
     a = np.ascontiguousarray(a, dtype=np.float64)
     return np.isnan(a) & ((a.view(np.uint64) & np.uint64(0xFFFFFFFF)) == np.uint64(1954))
-
-
-def _handle_nan(x: np.ndarray, out: np.ndarray) -> np.ndarray:
-    """R's ``handleNaN`` (cum.c): ab dem ersten NaN NA (sobald ein NA vorkam) bzw. NaN."""
-    has_nan = has_na = False
-    for i, v in enumerate(x.tolist()):
-        if not has_nan and v != v:
-            has_nan = True
-        if has_nan and not has_na and r_isna(v):
-            has_na = True
-        if has_na:
-            out[i] = NA_REAL
-        elif has_nan:
-            out[i] = _NAN
-    return out
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -155,14 +139,6 @@ def r_cummax(x) -> np.ndarray:
     a = _c64(x)
     out = np.empty(a.size)
     _ext.slc_r_cum(2, a, out)
-    return out
-
-
-def r_cummin(x) -> np.ndarray:
-    """``cummin(x)`` wie in R."""
-    a = _c64(x)
-    out = np.empty(a.size)
-    _ext.slc_r_cum(3, a, out)
     return out
 
 
@@ -324,11 +300,3 @@ def r_string_to_real(s):
     if all(c in _SPACE_C for c in s[e:]):
         return (v, False)
     return (NA_REAL, True)
-
-
-def r_mod1(x: float) -> float:
-    """``x %% 1`` für endliche Doubles wie R's ``myfmod(x, 1)``."""
-    x = float(x)
-    if not math.isfinite(x):
-        return _NAN
-    return _ext.slc_r_fmod_ld(x, 1.0)   # long-double-Teil von myfmod im C-Kern core/slc_rbase_num.cpp

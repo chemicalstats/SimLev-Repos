@@ -33,10 +33,11 @@ from ._r import linalg as _la          # bleibende Hilfen diag, outer (Inventar 
 from ._r.rlist import RList
 from ._r.rnum import r_cumsum, r_mean, r_pow, r_sd
 from .tactical import (
-    _as_dates, _as_weights_m, _colmeans, _days, _fmt1, _hold_rows_m, _ldsum, _mean_int,
+    _as_weights_m, _colmeans, _days, _fmt1, _hold_rows_m, _ldsum, _mean_int,
     _period_last, _rowsums, _setdiff, _unique,
 )
 from .svg import _alloc_c, _alloc_ticks, _esc, _jl_max, _jl_min, _jl_str
+from ._util import _dates as _as_dates, _match_arg, _which_max, _which_min
 
 __all__ = ["portfolio_optimize", "portfolio_frontier", "portfolio_rolling", "portfolio_risk_contributions",
            "portfolio_cpcv", "SimLevOptimization", "SimLevFrontier", "SimLevCPCV", "SimLevBoundsPercent",
@@ -67,16 +68,7 @@ def _st():
     return stats
 
 
-def _match_arg(arg, choices):
-    from .data_prep import _match_arg as m
-    return m(arg, choices)
-
-
 # ── kleine R-Hilfen ──────────────────────────────────────────────────────
-
-
-def _df(M, cn):
-    return pd.DataFrame(np.asarray(M, dtype=np.float64), columns=list(cn))
 
 
 def _cov(R):
@@ -559,7 +551,7 @@ def _opt_core(R, method, lo, hi, cov_type, mu, risk_free, risk_aversion, budget,
             ws.append(_qp_simplex(_libm.exp(float(lg[k])) * S, -mm, lo, hi, prev, tol=1e-10))
             prev = ws[k]
         sh = np.array([sharpe_of(w, mm) for w in ws])
-        k = _which_max(sh)
+        k = _which_max(sh, 0)
         a = lg[min(len(lg), k + 2) - 1]
         b = lg[max(1, k) - 1]
         w0 = ws[k]
@@ -587,7 +579,7 @@ def _opt_core(R, method, lo, hi, cov_type, mu, risk_free, risk_aversion, budget,
                 x2 = a + gr * (b - a)
                 f2 = fx(x2)
         cand = [ws[k], f1[0], f2[0]]
-        return cand[_which_max(np.array([sh[k], f1[1], f2[1]]))]
+        return cand[_which_max(np.array([sh[k], f1[1], f2[1]]), 0)]
 
     default_bounds = bool((lo == 0).all() and (hi == 1).all())
     if method in ("inverse_vol", "risk_parity", "hrp") and N > 1:
@@ -640,24 +632,6 @@ def _opt_core(R, method, lo, hi, cov_type, mu, risk_free, risk_aversion, budget,
     w = np.array(w, dtype=np.float64)
     w[np.abs(w) < 1e-12] = 0.0
     return pd.Series(w / _sum(w), index=nm)
-
-
-def _which_max(v):
-    v = np.asarray(v, dtype=np.float64)
-    ok = ~np.isnan(v)
-    if not ok.any():
-        return 0
-    mx = v[ok].max()
-    return int(np.flatnonzero(ok & (v == mx))[0])
-
-
-def _which_min(v):
-    v = np.asarray(v, dtype=np.float64)
-    ok = ~np.isnan(v)
-    if not ok.any():
-        return 0
-    mn = v[ok].min()
-    return int(np.flatnonzero(ok & (v == mn))[0])
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -785,6 +759,16 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
         R = pd.DataFrame(rng.normal([0.002, 0.001, 0.0005], [0.03, 0.02, 0.01], (520, 3)), columns=["aktien", "reits", "anleihen"])
         print(simlev.portfolio_optimize(R, method="risk_parity"))
     """
+    return _portfolio_optimize(x, assets=assets, method=method, lower=lower, upper=upper, cov=cov, mu=mu,
+                               risk_free=risk_free, risk_aversion=risk_aversion, budget=budget, alpha=alpha,
+                               frequency=frequency, resample=resample, block=block, seed=seed)
+
+
+def _portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov=_COVS, mu=None, risk_free=0,
+                        risk_aversion=4, budget=None, alpha=0.05, frequency=_FREQS, resample=0, block=None, seed=None,
+                        weights_only=False):
+    """``portfolio_optimize``; ``weights_only=True`` (portfolio_rolling, seit 1.5.1): nur die Gewichte, von den
+    Kennzahlen nur die Prüfung der Volatilität mit ihrer Warnung (gleiche Meldungen wie das volle Ergebnis)."""
     method = _match_arg(method, _METHODS)
     cov = _match_arg(cov, _COVS)
     frequency = _match_arg(frequency, _FREQS)
@@ -824,6 +808,9 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
         wb = pd.DataFrame(wbm, columns=nm)
         wv = _colmeans(wbm)
         w = pd.Series(wv / _sum(wv), index=nm)
+    if weights_only:
+        _opt_vol(w.to_numpy(dtype=np.float64), R.to_numpy(dtype=np.float64), ppy, cov)
+        return w
     out = _opt_summary(w, R, ppy, cov, risk_free, alpha)
     res = SimLevOptimization(out)
     res["method"] = method
@@ -835,24 +822,28 @@ def portfolio_optimize(x, *, assets=None, method=_METHODS, lower=0, upper=1, cov
     return res
 
 
+def _opt_vol(wv, A, ppy, cov_type):
+    """Kovarianz (annualisiert) und Volatilität des Portfolios wie in ``.opt_summary`` mit dessen Warnung bei
+    Volatilität 0: ``(S, vol, vq)`` (``vq`` NA bei Volatilität 0)."""
+    S = _opt_cov_m(A, cov_type) * ppy
+    q = _quad(wv, S)
+    vol = math.sqrt(max(q, 0.0)) if not math.isnan(q) else q
+    if vol <= 1e-10:
+        _warn("Portfolio ohne Schwankung (Volatilität 0, nur Anlagen mit konstanter Rendite): Sharpe Ratio, "
+              "Diversifikationsverhältnis und Risikoanteile sind nicht definiert (NA).")
+        return S, 0.0, _NA
+    return S, vol, vol
+
+
 def _opt_summary(w, R, ppy, cov_type, risk_free, alpha):
     """``.opt_summary``: Kennzahlen eines Gewichtsvektors."""
     A = R.to_numpy(dtype=np.float64)
     nm = list(w.index)
     wv = w.to_numpy(dtype=np.float64)
-    S = _opt_cov_m(A, cov_type) * ppy
     m = _colmeans(A) * ppy
-    q = _quad(wv, S)
-    vol = math.sqrt(max(q, 0.0)) if not math.isnan(q) else q
     ret = _sum(wv * m)
     rp = _mat_vec(A, wv)
-    if vol <= 1e-10:
-        _warn("Portfolio ohne Schwankung (Volatilität 0, nur Anlagen mit konstanter Rendite): Sharpe Ratio, "
-              "Diversifikationsverhältnis und Risikoanteile sind nicht definiert (NA).")
-        vol = 0.0
-        vq = _NA
-    else:
-        vq = vol
+    S, vol, vq = _opt_vol(wv, A, ppy, cov_type)
     rc = wv * _mat_vec(S, wv) / vq
     stats = pd.Series({
         "expected_return": ret, "volatility": vol, "sharpe": (ret - risk_free / 100) / vq,
@@ -1060,8 +1051,8 @@ def print_SimLevFrontier(x, _return=False):  # noqa: N802 - R-Name
     """``print.SimLevFrontier``: Minimum-Varianz und Max.-Sharpe-Punkt."""
     f = x["frontier"]
     sh = f["sharpe"].to_numpy(dtype=np.float64)
-    ks = [] if np.isnan(sh).all() else [_which_max(sh)]
-    j = _which_min(f["volatility"].to_numpy(dtype=np.float64))
+    ks = [] if np.isnan(sh).all() else [_which_max(sh, 0)]
+    j = _which_min(f["volatility"].to_numpy(dtype=np.float64), 0)
     idx = _unique([j] + ks)
     show = f.iloc[idx].copy()
     show.index = ["Minimum-Varianz", "Max. Sharpe"][:len(show)]
@@ -1129,7 +1120,7 @@ def plot_SimLevFrontier(x, width=700, height=480):  # noqa: N802 - R-Name
         out.append("<text x=\"%s\" y=\"%s\" text-anchor=\"middle\" font-size=\"10\">%s</text>"
                    % (_alloc_c(px(av[k])), _alloc_c(py(ar[k]) - 8), _esc(nm)))
     sh = np.asarray(f["sharpe"], dtype=np.float64).ravel()
-    k = None if np.isnan(sh).all() else _which_max(sh)
+    k = None if np.isnan(sh).all() else _which_max(sh, 0)
     if k is not None:
         cx, cy = px(fv[k]), py(fr[k])
         out.append("<polygon points=\"%s,%s %s,%s %s,%s\" fill=\"#3E8E5A\"/>"
@@ -1236,15 +1227,21 @@ def portfolio_rolling(data, assets, *, method="min_variance", window=3, every=("
     msg = [""] * len(rows)
     M = np.empty((len(rows), N))
     sub_cols = ["date"] + assets
+    pre = _roll_prep(data, d, assets, frequency)      # seit 1.5.1: Kurse und Perioden einmal statt je Fenster
     for k, i1 in enumerate(rows):
         di = d[i1 - 1]
-        sel = (d > di - wd) & (d <= di)
-        sub = data.loc[sel, sub_cols].reset_index(drop=True)
+        lo = int(np.searchsorted(d, di - wd, side="right")) if pre is not None else 0
         w = None
         try:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=SimLevBoundsPercent)
-                w = portfolio_optimize(sub, assets=assets, method=method, frequency=frequency, **dots)["weights"]
+                if pre is not None and lo <= i1 - 1:
+                    rr = _roll_returns(pre, lo, i1 - 1, assets, frequency)
+                    w = _portfolio_optimize(rr, method=method, frequency=frequency, weights_only=True, **dots)
+                else:
+                    sel = (d > di - wd) & (d <= di)
+                    sub = data.loc[sel, sub_cols].reset_index(drop=True)
+                    w = portfolio_optimize(sub, assets=assets, method=method, frequency=frequency, **dots)["weights"]
             w = np.asarray(w, dtype=np.float64)
         except Exception as e:  # noqa: BLE001 - wie tryCatch(error = ...)
             msg[k] = _err_text(e)
@@ -1266,6 +1263,79 @@ def portfolio_rolling(data, assets, *, method="min_variance", window=3, every=("
     out.attrs["decision_rows"] = rows
     out.attrs["failed_dates"] = _as_dates(d[rows[failed] - 1]) if failed else _as_dates(np.zeros(0))
     return out
+
+
+class _RetMat:
+    """Renditematrix eines Fensters ohne pandas (portfolio_rolling, seit 1.5.1): ``columns``, ``to_numpy()``,
+    ``len()`` wie der DataFrame, den ``_opt_returns`` sonst baut."""
+
+    __slots__ = ("A", "columns")
+
+    def __init__(self, A, columns):
+        self.A = A
+        self.columns = columns
+
+    def __len__(self):
+        return self.A.shape[0]
+
+    def to_numpy(self, dtype=None):
+        return self.A
+
+
+def _roll_prep(data, d, assets, frequency):
+    """Einmal je ``portfolio_rolling`` (seit 1.5.1; bis 1.5.0 je Fenster in ``_dep_returns``): Kurse je Spalte,
+    unzulässige Kurse (kumuliert), letzte vorhandene Zeile je Tag (Fortschreiben), Logarithmen und Periodenwechsel
+    (ISO-Woche bzw. Monat). ``None`` bei Spalten, die nicht eindeutig numerisch sind (dann je Fenster wie bisher)."""
+    from .dependence import _num, _period_keys
+    cols = [str(c) for c in data.columns]
+    if not assets or len(set(assets)) != len(assets) or "date" in assets or any(cols.count(a) != 1 for a in assets):
+        return None
+    if any(data[a].dtype.kind not in "fiub" for a in assets):
+        return None
+    n = len(d)
+    V = np.empty((n, len(assets)))
+    for j, a in enumerate(assets):
+        V[:, j] = _num(data[a])
+    okv = ~np.isnan(V)
+    bad = okv & (~np.isfinite(V) | (V <= 0))
+    nbad = np.vstack([np.zeros((1, V.shape[1]), dtype=np.int64), np.cumsum(bad, axis=0)])
+    idx = np.where(okv, np.arange(n)[:, None], -1)
+    idx = np.maximum.accumulate(idx, axis=0)
+    cj = np.arange(V.shape[1])[None, :]
+    Vf = np.where(idx >= 0, V[np.maximum(idx, 0), cj], V)
+    dates = _as_dates(d)
+    brk = None
+    if frequency != "day":
+        key = _period_keys(dates, frequency)
+        brk = np.array([key[i + 1] != key[i] for i in range(n - 1)], dtype=bool)
+    return {"V": V, "nbad": nbad, "idx": idx, "lv": _libm.log(Vf), "lv0": _libm.log(V), "brk": brk, "d": d,
+            "dates": dates}
+
+
+def _roll_returns(pre, lo, hi, assets, frequency):
+    """Renditen des Fensters ``lo..hi`` (0-basiert, inklusive) wie ``_opt_returns(_dep_returns(Fenster))``: Prüfung
+    der Kurse, Fortschreiben nur innerhalb des Fensters (führende Lücken bleiben), letzte Zeile je Periode,
+    Log-Differenzen, Zeilen mit NA entfallen (bei ``"day"`` auch Tage ohne Bewegung), einfache Renditen und ppy."""
+    from .dependence import _dep_check_prices
+    V, nbad = pre["V"], pre["nbad"]
+    for j, a in enumerate(assets):
+        if nbad[hi + 1, j] > nbad[lo, j]:
+            _dep_check_prices(V[lo:hi + 1, j], a, pre["dates"][lo:hi + 1])      # meldet wie je Fenster
+    if frequency == "day":
+        e = np.arange(lo, hi + 1)
+    else:
+        e = np.concatenate([np.flatnonzero(pre["brk"][lo:hi]) + lo, [hi]]).astype(np.int64)
+    L = np.where(pre["idx"][e] >= lo, pre["lv"][e], pre["lv0"][e])
+    R = L[1:, :] - L[:-1, :]
+    ok = ~np.isnan(R).any(axis=1) if R.size else np.ones(R.shape[0], dtype=bool)
+    if frequency == "day":
+        ok &= (np.abs(R) > 0).sum(axis=1) > 0
+    R = R[ok]
+    dd = pre["d"][e][1:][ok]
+    nr = R.shape[0]
+    with np.errstate(all="ignore"):
+        ppy = (nr - 1) / ((dd[nr - 1] - dd[0]) / 365.25) if nr else _NAN
+    return _OptReturns(R=_RetMat(_libm.expm1(R).reshape(R.shape), list(assets)), ppy=float(ppy))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1545,7 +1615,7 @@ def portfolio_cpcv(x, *, assets=None, methods=("equal", "inverse_vol", "min_vari
     best = []
     for s in sorted(sp["split"].unique().tolist()):
         z = sp[sp["split"] == s]
-        best.append(z["method"].iloc[_which_max(z["sharpe"].to_numpy(dtype=np.float64))])
+        best.append(z["method"].iloc[_which_max(z["sharpe"].to_numpy(dtype=np.float64), 0)])
     best = np.array(best, dtype=object)
     summ["best_share"] = [_mean_int(best == m) for m in summ["method"]]
     o = st.order(-summ["mean"].to_numpy(dtype=np.float64))
@@ -1601,4 +1671,4 @@ SimLevFrontier.plot = _plot_method(plot_SimLevFrontier, "SimLevFrontier")
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
 from ._r.base import quiet_fp  # noqa: E402
 
-quiet_fp(globals(), list(__all__) + ["_cdar_hist", "_col_means", "_cov", "_cvar_hist", "_hrp", "_mat_vec", "_opt_cov", "_qp_simplex", "_risk_parity", "_opt_summary"])
+quiet_fp(globals(), list(__all__) + ["_cdar_hist", "_col_means", "_cov", "_cvar_hist", "_hrp", "_mat_vec", "_opt_cov", "_qp_simplex", "_risk_parity", "_opt_summary", "_portfolio_optimize"])

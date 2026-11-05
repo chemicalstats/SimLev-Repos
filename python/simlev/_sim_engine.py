@@ -36,8 +36,11 @@ _TOT_FIELDS = ("total_taxes", "loss_capital_gains", "loss_private_sales", "priva
 _REGIMES = (None, "investment_fund", "capital_gains", "private_sale")
 
 
-def _signal(v) -> tuple[np.ndarray, int]:
-    """Signalspalte als float64 (logisch: 0/1, NA als NaN) und Merker 'logisch' (isTRUE nur für TRUE)."""
+def _signal(v) -> tuple[np.ndarray | None, int]:
+    """Signalspalte als float64 (logisch: 0/1, NA als NaN) und Merker 'logisch' (isTRUE nur für TRUE); ``None``
+    (keine Spalte) bleibt ``None``, der Kern bekommt dann einen leeren Zeiger (seit 1.6.1)."""
+    if v is None:
+        return None, 1
     if isinstance(v, np.ndarray) and v.dtype == np.float64:
         return v, 0
     a = np.asarray(v)

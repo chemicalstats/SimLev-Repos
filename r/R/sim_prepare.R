@@ -137,6 +137,7 @@
     # === Ende neu ===
   )
 
+  asset_day <- .sim_days(start_date, stopp_date)   # seq.Date(start_date, stopp_date, by = "days"); seit 1.6.1 einmal
   for(name in names(strategy)){
     #---> Initialisierung des Assets-Objekts:
     sim_mem[["assets"]][[name]] <- list(
@@ -167,7 +168,7 @@
 
     #---> Initialisierung des Market-Objekts:
     sim_mem[["market"]][[name]] <- list(
-      asset_day = .sim_days(start_date, stopp_date),   # seq.Date(start_date, stopp_date, by = "days")
+      asset_day = asset_day,
       base_rates = if (base_rate_flex) {
   if (is.null(base_rate_data) || !base_rate_data %in% names(data)) {
     stop(if (is.null(base_rate_data)) "simulation: base_rate_flex = TRUE braucht base_rate_data (Name der Basiszins-Spalte in data, Prozent p. a.); base_rate_data fehlt."

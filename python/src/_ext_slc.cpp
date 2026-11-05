@@ -244,7 +244,6 @@ static PyObject *slc_sample(PyObject *self, PyObject *args)
 typedef int (*unary_fn)(sl_ctx *, int64_t, const double *, double *);
 typedef int (*norm_fn)(sl_ctx *, int64_t, const double *, double, double, int, double *);
 typedef int (*beta_fn)(sl_ctx *, int64_t, const double *, double, double, int, double *);
-typedef int (*tdist_fn)(sl_ctx *, int64_t, const double *, double, int, double *);
 
 static int io_bufs(PyObject *x, PyObject *out, Py_buffer *xi, Py_buffer *o)
 {
@@ -291,29 +290,10 @@ static PyObject *two_par(PyObject *args, norm_fn f)
     Py_RETURN_NONE;
 }
 
-static PyObject *one_par(PyObject *args, tdist_fn f)
-{
-    PyObject *x, *out;
-    double a;
-    int flag, rc;
-    Py_buffer xi, o;
-    sl_ctx cx;
-    if (!PyArg_ParseTuple(args, "OOdp", &x, &out, &a, &flag)) return NULL;
-    if (io_bufs(x, out, &xi, &o) < 0) return NULL;
-    ctx_init(&cx);
-    rc = f(&cx, (int64_t) NITEMS(o), (const double *) xi.buf, a, flag, (double *) o.buf);
-    PyBuffer_Release(&xi);
-    PyBuffer_Release(&o);
-    if (finish(&cx, rc) < 0) return NULL;
-    Py_RETURN_NONE;
-}
-
 static PyObject *slc_pnorm(PyObject *s, PyObject *a) { (void) s; return two_par(a, sl_pnorm); }
 static PyObject *slc_qnorm(PyObject *s, PyObject *a) { (void) s; return two_par(a, sl_qnorm); }
 static PyObject *slc_dnorm(PyObject *s, PyObject *a) { (void) s; return two_par(a, sl_dnorm); }
 static PyObject *slc_pbeta(PyObject *s, PyObject *a) { (void) s; return two_par(a, sl_pbeta); }
-static PyObject *slc_pt(PyObject *s, PyObject *a) { (void) s; return one_par(a, sl_pt); }
-static PyObject *slc_qt(PyObject *s, PyObject *a) { (void) s; return one_par(a, sl_qt); }
 static PyObject *slc_erfc(PyObject *s, PyObject *a) { (void) s; return unary(a, sl_erfc_v); }
 static PyObject *slc_lgamma(PyObject *s, PyObject *a) { (void) s; return unary(a, sl_lgamma); }
 static PyObject *slc_plogis(PyObject *s, PyObject *a) { (void) s; return unary(a, sl_plogis); }
@@ -337,8 +317,6 @@ PyMethodDef simlev_ext_slc_methods[] = {
     {"slc_qnorm", slc_qnorm, METH_VARARGS, "slc_qnorm(p, out, mu, sd, lower)"},
     {"slc_dnorm", slc_dnorm, METH_VARARGS, "slc_dnorm(x, out, mu, sd, log)"},
     {"slc_pbeta", slc_pbeta, METH_VARARGS, "slc_pbeta(x, out, a, b, lower)"},
-    {"slc_pt", slc_pt, METH_VARARGS, "slc_pt(t, out, df, lower)"},
-    {"slc_qt", slc_qt, METH_VARARGS, "slc_qt(p, out, df, lower)"},
     {"slc_erfc", slc_erfc, METH_VARARGS, "slc_erfc(x, out)"},
     {"slc_lgamma", slc_lgamma, METH_VARARGS, "slc_lgamma(x, out)"},
     {"slc_plogis", slc_plogis, METH_VARARGS, "slc_plogis(x, out)"},

@@ -1680,7 +1680,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
               historical = isTRUE(x$historical), weights = w, tax_mode = tax_mode, gamma = gamma,
               timing = timing, source = x$source, adopted = if (length(adopted)) adopted else NULL,
               elapsed = as.numeric(difftime(Sys.time(), t0, units = "secs")))
-  if (tariff_on) out$tariff_years <- .wd_tariff_years(core$tariff_years, ncol(R), ny)
+  if (tariff_on) out$tariff_years <- .wd_tariff_years(core$tariff_years, ny)
   class(out) <- "SimLevWithdrawal"
   out
 }
@@ -2044,22 +2044,22 @@ print.SimLevHorizon <- function(x, ...) {
 #' Jahreszeilen des Tarifwegs aus dem Kern als data.frame
 #'
 #' Eingabe: M (Matrix 25 x (ny + 1) Pfade: Zeilen wie die Spalten von tax_report$tariff_years in simulation(); Spalte
-#' (Pfad - 1) (ny + 1) + Planjahr, Jahr NA = keine Veranlagung), paths, ny.
+#' (Pfad - 1) (ny + 1) + Planjahr, Jahr NA = keine Veranlagung), ny.
 #' Ausgabe: data.frame mit path, year (Planjahr) und den Spalten von tax_report$tariff_years, nach Pfad und Jahr.
 #' @keywords internal
 #' @noRd
-.wd_tariff_years <- function(M, paths, ny) {
+.wd_tariff_years <- function(M, ny) {
   cols <- c("year", "taxable_income", "church_tax_paid_deductible", "church_tax_refunded", "church_tax_net_deduction",
             "taxable_income_net", "deduction_effect", "gain_p23", "income_tax_p23", "soli_p23", "church_tax_p23", "tax_p23",
             "capital_income", "abgeltung_burden", "church_tax_withheld_k", "tariff_income_tax_k", "tariff_soli_k",
             "tariff_church_tax_k", "tariff_burden", "burden_without_gp", "burden_with_gp", "guenstiger", "settlement",
             "refund", "church_tax_settlement_next_year")
   C <- .wd_tariff_compact(M, ny)                          # Spalten mit Jahr NA entfallen (Kern)
-  d <- data.frame(path = as.integer(C[, 1L]))
-  for (j in seq_along(cols)) d[[cols[j]]] <- C[, j + 1L]
+  # seit 1.6.1 als Liste mit einem Aufbau (wie data.frame() und Spalte für Spalte, ohne dessen Kopien je Spalte)
+  d <- c(list(path = as.integer(C[, 1L])), lapply(seq_along(cols), function(j) C[, j + 1L]))
+  names(d) <- c("path", cols)
   d$year <- as.integer(d$year); d$guenstiger <- d$guenstiger != 0
-  rownames(d) <- NULL
-  d
+  structure(d, row.names = .set_row_names(nrow(C)), class = "data.frame")
 }
 
 #' Tarifparameter fuer den Kern (core/tariff_core_impl.h)

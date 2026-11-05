@@ -7,7 +7,7 @@
 # Erzeugt <n> Fälle im Format der Referenzfälle (tests/gleichlauf/erzeugen/ref_tools.R) als Modul clust_fuzz:
 #   - d-Fälle: stats::dist mit allen sechs Methoden (Abkürzungen, "euclidian"), p für minkowski (auch ungültig),
 #     0 bis 40 Zeilen und 1 bis 7 Spalten, Werte mit NA, NaN, ±Inf, ±0, Bindungen, Zeilennamen mit Nicht-ASCII
-#     (as.matrix), Fehler (unbekannte Methode).
+#     (as.matrix; seit 1.6.1 nur Python, nur = "py"), Fehler (unbekannte Methode).
 #   - h-Fälle: stats::hclust mit allen acht Verfahren über dist bzw. as.dist, 1 bis 120 Objekte, viele Bindungen
 #     (gerundete Daten, gleiche Abstände), Gewichte (members), Fehler (n < 2, Länge von members, Methode).
 # Warnungen und Fehler mit ihren Aufrufen (r_calls) wie sim_fuzz.R.
@@ -21,8 +21,8 @@ ref_bereich("clust_fuzz", alle = TRUE); ref_init("clust_fuzz")
 pick <- function(x) x[[sample.int(length(x), 1L)]]
 coin <- function(p) runif(1) < p
 
-fuzz_case <- function(id, r, py, jl, inputs) {
-  ref_case(id, r = r, py = py, jl = jl, inputs = inputs)
+fuzz_case <- function(id, r, py, jl, inputs, nur = NULL) {   # nur: seit 1.6.1 (Nachbildung einer Sprache entfallen)
+  ref_case(id, r = r, py = py, jl = jl, inputs = inputs, nur = nur)
   if (!.ref_in_subset(id)) return(invisible(NULL))
   env <- new.env(parent = globalenv())
   for (k in names(inputs)) assign(k, inputs[[k]], envir = env)
@@ -66,13 +66,13 @@ for (kk in seq_len(N)) {
     if (lab && coin(0.7)) {
       r <- sprintf("as.matrix(dist(X, method = '%s', p = %s))", m, num(p))
       py <- sprintf("%sresult = st.dist_as_matrix(st.dist(X, method='%s', p=%s))", PH, m, pnum(p))
-      jl <- sprintf("%sresult = st.dist_as_matrix(st.dist(X; method = \"%s\", p = %s))", JH, m, num(p))
+      jl <- NULL                                  # as.matrix(dist) nur noch in Python (Julia seit 1.6.1 ohne)
     } else {
       r <- sprintf("as.vector(dist(X, method = '%s', p = %s))", m, num(p))
       py <- sprintf("%sresult = np.asarray(st.dist(X, method='%s', p=%s))", PH, m, pnum(p))
       jl <- sprintf("%sresult = st.dist(X; method = \"%s\", p = %s)", JH, m, num(p))
     }
-    fuzz_case(sprintf("d%05d", kk), r = r, py = py, jl = jl, inputs = list(X = X))
+    fuzz_case(sprintf("d%05d", kk), r = r, py = py, jl = jl, inputs = list(X = X), nur = if (is.null(jl)) "py" else NULL)
   } else {
     n <- pick(c(1, 2, 3, 4, 6, 10, 25, 60, 120)); k <- pick(c(1, 2, 4))
     X <- switch(pick(1:4), matrix(rnorm(n * k), n, k), matrix(round(rnorm(n * k)), n, k),
@@ -84,14 +84,14 @@ for (kk in seq_len(N)) {
     asd <- coin(0.2)
     rd <- if (asd) "as.dist(as.matrix(dist(X, '%s')))" else "dist(X, '%s')"
     pd <- if (asd) "st.as_dist(st.dist_as_matrix(st.dist(X, method='%s')).to_numpy())" else "st.dist(X, method='%s')"
-    jd <- if (asd) "st.as_dist(st.dist_as_matrix(st.dist(X; method = \"%s\")))" else "st.dist(X; method = \"%s\")"
+    jd <- if (asd) NULL else "st.dist(X; method = \"%s\")"   # as.dist(as.matrix(dist)) nur Python (seit 1.6.1)
     mr <- if (is.null(mem)) "" else sprintf(", members = c(%s)", paste(mem, collapse = ", "))
     mp <- if (is.null(mem)) "" else sprintf(", members=[%s]", paste(mem, collapse = ", "))
     mj <- if (is.null(mem)) "" else sprintf("; members = [%s]", paste(mem, collapse = ", "))
     r <- sprintf("h <- hclust(%s, method = '%s'%s); h[c('merge', 'height', 'order')]", sprintf(rd, dm), m, mr)
     py <- sprintf("%sresult = st.hclust(%s, method='%s'%s)", PH, sprintf(pd, dm), m, mp)
-    jl <- sprintf("%sresult = st.hclust(%s, \"%s\"%s)", JH, sprintf(jd, dm), m, mj)
-    fuzz_case(sprintf("h%05d", kk), r = r, py = py, jl = jl, inputs = list(X = X))
+    jl <- if (is.null(jd)) NULL else sprintf("%sresult = st.hclust(%s, \"%s\"%s)", JH, sprintf(jd, dm), m, mj)
+    fuzz_case(sprintf("h%05d", kk), r = r, py = py, jl = jl, inputs = list(X = X), nur = if (is.null(jl)) "py" else NULL)
   }
 }
 ref_done(); ref_schreiben()

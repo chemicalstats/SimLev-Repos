@@ -2232,9 +2232,7 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
         if dp["path"] is None:
             return None
         P = dp["path"]
-        df0 = pd.DataFrame({"date": dates})
-        for c in P.columns:
-            df0[c] = P[c].to_numpy()
+        df0 = pd.DataFrame({"date": dates, **{c: P[c].to_numpy() for c in P.columns}})   # ein Aufbau (seit 1.6.1)
         rows = {}
         for nm in snames:
             sp = specs[nm]
@@ -2290,9 +2288,9 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
             if isinstance(m, Mapping):
                 m = pd.Series(list(m.values()), index=list(m.keys()), dtype=np.float64)
             m = pd.Series(np.asarray(m, dtype=np.float64), index=list(m.index) if isinstance(m, pd.Series) else None)
-            row = pd.concat([pd.Series([float(i), float(setup["weights"][i - 1]),
-                                        float(setup["combo_of_path"][i - 1]), float(dp["tries"])],
-                                       index=["path", "weight", "combo", "tries"]), m])
+            row = pd.Series(np.concatenate([[float(i), float(setup["weights"][i - 1]),
+                                             float(setup["combo_of_path"][i - 1]), float(dp["tries"])], m.to_numpy()]),
+                            index=["path", "weight", "combo", "tries"] + list(m.index), dtype=np.float64)
             rows[nm] = {"row": row, "ret": per_ret(_result_index(res)["value"].to_numpy()) if ret_ends is not None
                         else None, "warn": _uniq(wr)}
         aux_ret = None
@@ -2329,9 +2327,7 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
             continue
         cols = list(rws[0].index)
         mat = np.array([np.asarray(rw, dtype=np.float64) for rw in rws])
-        d = pd.DataFrame({"strategy": [nm] * len(rws)})
-        for j, c in enumerate(cols):
-            d[c] = mat[:, j]
+        d = pd.DataFrame({"strategy": [nm] * len(rws), **{c: mat[:, j] for j, c in enumerate(cols)}})   # einmal
         tab_parts.append(d)
     tab = pd.concat(tab_parts, ignore_index=True) if tab_parts else None
 
@@ -2825,19 +2821,5 @@ from ._r.base import quiet_fp  # noqa: E402
 quiet_fp(globals(), list(__all__) + ["_calculate_ess", "_ess_design", "_extract_returns", "_fit_garch11", "_fit_tail", "_get_base_params", "_get_ess_grid", "_letf_returns", "_prepare_regime_info", "_pw_block", "_wquantile"])  # bootstrap_probability: env aus dem Aufrufer (env_from_caller)
 
 
-def _make_callable():
-    """Macht dieses Modul aufrufbar wie die gleichnamige Funktion (``simlev.bootstrap(...)`` wie in R;
-    ``simlev.bootstrap.<name>`` und ``import simlev.bootstrap`` erreichen weiter das Modul). Steht hier statt
-    in ``__init__.py``, weil das Modul erst bei Bedarf geladen wird (PEP 562)."""
-    import sys
-    import types
-
-    class _CallableModule(types.ModuleType):
-        def __call__(self, *args, **kwargs):
-            return getattr(self, "bootstrap")(*args, **kwargs)
-
-    sys.modules[__name__].__class__ = _CallableModule
-
-
-_make_callable()
-del _make_callable
+from . import _callable_module  # noqa: E402 (aufrufbar wie die gleichnamige Funktion, PEP 562)
+_callable_module("bootstrap")

@@ -4,7 +4,8 @@
 #   LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek> SIMLEV_FAELLE_DIR=<ordner> Rscript tests/werkzeuge/gleichlauf/approx_fuzz.R <n> <seed>
 #
 # Erzeugt <n> Fälle im Format der Referenzfälle (tests/gleichlauf/erzeugen/ref_tools.R) als Modul approx_fuzz:
-#   - a-Fälle (gut zwei Drittel): stats::approx bzw. approxfun(...)(v) (Python simlev._r.stats, Julia SL.RStats) mit
+#   - a-Fälle (gut zwei Drittel): stats::approx bzw. approxfun(...)(v) (Python simlev._r.stats, Julia SL.RStats; approxfun
+#     seit 1.6.1 nur Julia, nur = "jl") mit
 #     1 bis 300 Stützstellen, unsortiert, mit Bindungen (Mittel mit Warnung, "ordered", min, max), NA in x oder y
 #     (na.rm TRUE/FALSE), ±Inf, -0, Ausgabepunkten innerhalb, außerhalb, auf Stützstellen, NA, NaN, ±Inf; linear und
 #     konstant (f in [0, 1], auch 0 und 1, ungültig), rule 1/2/c(1, 2)/c(2, 1), yleft/yright, n statt xout; Fehler
@@ -28,8 +29,8 @@ pick <- function(x) x[[sample.int(length(x), 1L)]]
 coin <- function(p) runif(1) < p
 
 # Fall schreiben und die Aufrufe der Warnungen und des Fehlers (nur R) als r_calls nachtragen
-fuzz_case <- function(id, r, py, jl, inputs) {
-  ref_case(id, r = r, py = py, jl = jl, inputs = inputs)
+fuzz_case <- function(id, r, py, jl, inputs, nur = NULL) {   # nur: seit 1.6.1 (Nachbildung einer Sprache entfallen)
+  ref_case(id, r = r, py = py, jl = jl, inputs = inputs, nur = nur)
   if (!.ref_in_subset(id)) return(invisible(NULL))
   env <- new.env(parent = globalenv())
   for (k in names(inputs)) assign(k, inputs[[k]], envir = env)
@@ -101,10 +102,11 @@ for (k in seq_len(na)) {   # a-Fälle: approx, approxfun
     jl <- sprintf("%sresult = st.approx(x, y; n = %d%s)", JH, nn, cm(ja))
   } else {
     r <- sprintf("approxfun(x, y%s)(xo)", cm(ra))
-    py <- sprintf("%simport math, simlev\nresult = st.approxfun(x, y%s)(xo)", PH, cm(pa))
+    py <- NULL                                    # approxfun nur noch in Julia (Python seit 1.6.1 ohne)
     jl <- sprintf("%sresult = st.approxfun(x, y%s)(xo)", JH, cm(ja, "; "))
   }
-  fuzz_case(sprintf("a%05d", k), r = r, py = py, jl = jl, inputs = list(x = x, y = y, xo = xo))
+  fuzz_case(sprintf("a%05d", k), r = r, py = py, jl = jl, inputs = list(x = x, y = y, xo = xo),
+            nur = if (is.null(py)) "jl" else NULL)
 }
 
 for (k in seq_len(N - na)) {   # p-Fälle: planning_goal

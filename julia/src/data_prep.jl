@@ -15,6 +15,7 @@
 module DataPrep
 
 import ..SimLev
+using ..SimLev: _match_arg, _which_min   # util.jl (seit 1.6.1 eine Fassung)
 using ..SimLev: RList, RFrame, RVector, NamedMat, nrow, ncol, attrs, NA, isna_strict, rows,
                 register_print!, register_summary!, r_class, inherits
 using Dates
@@ -28,30 +29,6 @@ export series_align, series_check, series_align_macro, series_convert_currency, 
 
 "R-`message()`: Text mit Zeilenumbruch auf `stderr`."
 message(text) = (io = SimLev.RParallel.r_stderr(); println(io, text); flush(io); nothing)
-
-"""
-    _match_arg(arg, choices)
-
-R-`match.arg(arg)` mit den Voreinstellungen `choices`: `nothing` oder der
-vollständige Auswahlvektor ergeben die erste Wahl; eindeutige Präfixe werden
-ergänzt. Fehlermeldungen wortgleich zu R.
-"""
-function _match_arg(arg, choices)
-    ch = String[String(c) for c in choices]
-    arg === nothing && return ch[1]
-    if arg isa Union{AbstractVector,Tuple}
-        a = collect(arg)
-        (length(a) == length(ch) && all(i -> a[i] isa AbstractString && a[i] == ch[i], eachindex(a))) && return ch[1]
-        length(a) == 1 || error("'arg' must be of length 1")
-        arg = a[1]
-    end
-    arg isa Symbol && (arg = String(arg))
-    arg isa AbstractString || error("'arg' must be NULL or a character vector")
-    arg in ch && return String(arg)
-    hits = isempty(arg) ? String[] : [c for c in ch if startswith(c, arg)]
-    length(hits) == 1 && return hits[1]
-    error("'arg' should be one of " * join(("\u201c$(c)\u201d" for c in ch), ", "))
-end
 
 _isna(x) = x === missing || x === nothing || (x isa AbstractFloat && isnan(x))
 _isna(x::Date) = false
@@ -663,25 +640,6 @@ end
 # series_check
 # ═══════════════════════════════════════════════════════════════════════════
 
-function _which_min(a)
-    best = 0; bv = Inf
-    for (i, v) in enumerate(a)
-        if !isnan(v) && (best == 0 || v < bv)
-            best, bv = i, v
-        end
-    end
-    return best
-end
-function _which_max(a)
-    best = 0; bv = -Inf
-    for (i, v) in enumerate(a)
-        if !isnan(v) && (best == 0 || v > bv)
-            best, bv = i, v
-        end
-    end
-    return best
-end
-
 _rsign(x) = isnan(x) ? x : (x > 0 ? 1.0 : x < 0 ? -1.0 : 0.0)
 
 function _rle(b::AbstractVector{Bool})
@@ -807,7 +765,7 @@ function series_check(data; columns = nothing, jump = 20, stale = 10, revert = 0
             j in skip && continue
             nxt = j < length(r) ? r[j+1] : NA
             ratio = x[j] / x[j+1]
-            near = cand[_which_min([abs(SimLev.RLibm.log(ratio / c)) for c in cand])]
+            near = cand[something(_which_min([abs(SimLev.RLibm.log(ratio / c)) for c in cand]), 0)]
             rj = r[j]
             if !isnan(nxt) && _rsign(nxt) != _rsign(rj) &&
                abs(SimLev.RLibm.log1p(nxt)) >= revert * abs(SimLev.RLibm.log1p(rj))
@@ -1216,7 +1174,7 @@ function series_deflate(data, columns, cpi; base_date = nothing, suffix = "_real
         known[1]
     else
         bd = _days(_to_date(base_date, "base_date"))
-        _which_min([abs(t - bd[1]) for t in dts])
+        something(_which_min([abs(t - bd[1]) for t in dts]), 0)
     end
     isnan(c0[b]) && error("series_deflate: am Bezugsdatum $(_date_str(dts[b])) ist kein Preisindex bekannt (erster Wert am $(_date_str(dts[known[1]]))); base_date später wählen.")
     data = copy(data)

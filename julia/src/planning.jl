@@ -616,13 +616,13 @@ function _print_goalplan(io::IO, x)
     print(io, DA._sp("Zielwahrscheinlichkeit dynamisch: %.1f %% (Vorwärtssimulation, SE %.1f Prozentpunkte; DP-Wert %.1f %%)\n",
                      100 * x["probability"], 100 * (pse === nothing ? _NA : pse), 100 * x["probability_dp"]))
     st = x["static"]; sv = DA._f64(st.values)
-    best = DA._which_max(sv)
+    best = something(SimLev._which_max(sv), 0)
     print(io, DA._sp("Bester fester Kandidat: %s mit %.1f %%\n\n", st.names[best], 100 * sv[best]))
     DA._print_vector(io, SimLev.RVector(Float64[DA._rround(100 * v, 1) for v in sv]; names = st.names))
     cands = DA._strs(x["candidates"])
     first_ = vec(x["simulation"]["choice"][1, :])
     cnt = [count(==(j), first_) for j in eachindex(cands)]
-    print(io, "\nWahl im ersten Schritt: ", cands[DA._which_max(Float64.(cnt))], "\n")
+    print(io, "\nWahl im ersten Schritt: ", cands[something(SimLev._which_max(Float64.(cnt)), 0)], "\n")
     nothing
 end
 

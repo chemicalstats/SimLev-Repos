@@ -14,9 +14,9 @@ ref_init("r_fmt")
 P <- "from simlev._r import fmt as F\n"
 cap <- function(txt) sprintf("paste(capture.output(%s), collapse = '\\n')", txt)
 JP <- "const F = SL.RFmt\n"
-case <- function(id, r, py, inputs = list(), pre = "", jl = NULL, jlpre = "")
-  ref_case(id, r = r, py = paste0(P, pre, "result = ", py), inputs = inputs,
-           jl = if (is.null(jl)) NULL else paste0(JP, jlpre, "result = ", jl))
+case <- function(id, r, py, inputs = list(), pre = "", jl = NULL, jlpre = "", nur = NULL)
+  ref_case(id, r = r, py = if (is.null(py)) NULL else paste0(P, pre, "result = ", py), inputs = inputs,
+           jl = if (is.null(jl)) NULL else paste0(JP, jlpre, "result = ", jl), nur = nur)
 # Python-Argumente -> Julia (Anführungszeichen, True/False)
 pj <- function(s) { s <- gsub("True", "true", gsub("False", "false", s)); if (grepl("\"'\"", s, fixed = TRUE)) s else gsub("'", "\"", s) }
 jll <- function(x) if (x) "true" else "false"
@@ -83,12 +83,11 @@ case("aschar_date", "as.character(as.Date(c('2024-02-29', '1999-12-31')))", "F.a
      jl = "F.as_character([Date(2024, 2, 29), Date(1999, 12, 31)])")
 case("paste1", "paste('Wert', x, 'EUR')", "F.paste('Wert', x, 'EUR')", list(x = c(1.5, 1e5, 123456.7, NA, 1/3)),
      jl = 'F.paste("Wert", x, "EUR")')
-case("paste2", "paste0('a', 1:3, c('x', 'y', 'z'), collapse = '|')", "F.paste0('a', np.arange(1, 4), np.array(['x', 'y', 'z'], dtype=object), collapse='|')",
-     jl = 'F.paste0("a", 1:3, ["x", "y", "z"], collapse = "|")')
+case("paste2", "paste0('a', 1:3, c('x', 'y', 'z'), collapse = '|')", NULL,
+     jl = 'F.paste0("a", 1:3, ["x", "y", "z"], collapse = "|")', nur = "jl")
 case("paste3", "c(paste(c('a', NA), TRUE, sep = '-'), paste('x', character(0)), paste(1e-20, 0.1 + 0.2))",
      "np.concatenate([F.paste(np.array(['a', None], dtype=object), True, sep='-'), F.paste('x', np.array([], dtype=object)), [F.paste(1e-20, 0.1 + 0.2)]])",
      jl = 'vcat(F.paste(["a", missing], true, sep = "-"), F.paste("x", String[]), [F.paste(1e-20, 0.1 + 0.2)])')
-case("tostring", "toString(c(1.5, 2, 1e6))", "F.to_string(np.array([1.5, 2, 1e6]))", jl = "F.to_string([1.5, 2, 1e6])")
 
 ## ── format(): Zahlen ───────────────────────────────────────────────────────
 for (i in 1:40) {
@@ -156,7 +155,7 @@ case("fmt_chr_width", "list(format('Endvermögen', width = 28), format(s, width 
 case("fmt_chr_na", "format(c('a', NA), na.encode = FALSE)", "F.format(np.array(['a', None], dtype=object), na_encode=False)",
      jl = 'F.format(["a", missing], na_encode=false)')
 case("fmt_factor", "format(factor(c('b', 'a', NA, 'ccc')))", "F.format(pd.Categorical(['b', 'a', None, 'ccc']))",
-     jl = 'F.format(F.r_factor(["b", "a", missing, "ccc"]))')
+     jl = 'F.format(F.RFactor([2, 1, 0, 3], ["a", "b", "ccc"]))')
 
 ## ── Datum ──────────────────────────────────────────────────────────────────
 dts <- as.Date(c("2024-02-29", "1999-12-31", "2000-01-01", "2021-01-03", "2020-12-31", "2015-01-01", "2016-01-03",
@@ -164,11 +163,9 @@ dts <- as.Date(c("2024-02-29", "1999-12-31", "2000-01-01", "2021-01-03", "2020-1
 dfm <- c("%Y-%m-%d", "%d.%m.%Y", "%Y-%m", "%Y", "%m", "%m-%d", "%Y-%m-01", "%Y-01-01", "%G-%V", "%u", "%b %Y", "%B %d, %Y",
          "%a %A %w", "%j %U %W", "%y%m%d %e", "%C %g %h", "%D %F", "%x %X", "%c", "Woche %V/%G (%%)")
 for (i in seq_along(dfm))
-  case(sprintf("date_%02d", i), sprintf("format(d, '%s')", dfm[i]), sprintf("F.format_date(d, '%s')", dfm[i]), list(d = dts),
-       jl = sprintf('F.format_date(d, "%s")', dfm[i]))
+  case(sprintf("date_%02d", i), sprintf("format(d, '%s')", dfm[i]), sprintf("F.format_date(d, '%s')", dfm[i]), list(d = dts), nur = "py")
 set.seed(7); d_iso <- as.Date("1990-12-20") + sort(c(outer(0:14, 365.25 * 0:30, "+")))
-case("date_iso_many", "format(d, '%G-%V %u %U %W %j')", "F.format_date(d, '%G-%V %u %U %W %j')", list(d = d_iso),
-     jl = 'F.format_date(d, "%G-%V %u %U %W %j")')
+case("date_iso_many", "format(d, '%G-%V %u %U %W %j')", "F.format_date(d, '%G-%V %u %U %W %j')", list(d = d_iso), nur = "py")
 case("date_format_generic", "c(format(d), format(d[1], '%d.%m.%Y'))", "[*F.format(d), F.format(d[0], '%d.%m.%Y')]", list(d = dts[1:5]),
      jl = '[F.format(d)..., F.format(d[1], "%d.%m.%Y")]')
 case("date_print", cap("print(d)"), "F.print_vector(d)", list(d = dts), jl = "F.print_vector(d)")
@@ -209,9 +206,6 @@ case("fmtC_pkg", "c(formatC(c(12345.678, 987654321), format = 'f', digits = 0, b
 case("fmtC_rand", "lapply(c('f', 'e', 'g', 'fg'), function(f) formatC(x, format = f, digits = 4, width = 10))",
      "[F.formatC(x, format=f, digits=4, width=10) for f in ('f', 'e', 'g', 'fg')]", list(x = rnum(30, 1)),
      jl = '[F.formatC(x, format=f, digits=4, width=10) for f in ("f", "e", "g", "fg")]')
-case("prettynum", "list(prettyNum(c(123456, 1234567.5), big.mark = ','), prettyNum(1234567L, big.mark = ' '), prettyNum(c('1234567', '12.5'), big.mark = '.'), prettyNum(c(0, 1.5), zero.print = '.'))",
-     "[F.prettyNum(np.array([123456.0, 1234567.5]), big_mark=','), F.prettyNum(1234567, big_mark=' '), F.prettyNum(np.array(['1234567', '12.5'], dtype=object), big_mark='.'), F.prettyNum(np.array([0.0, 1.5]), zero_print='.')]",
-     jl = '[F.prettyNum([123456.0, 1234567.5], big_mark=","), F.prettyNum(1234567, big_mark=" "), F.prettyNum(["1234567", "12.5"], big_mark="."), F.prettyNum([0.0, 1.5], zero_print=".")]')
 
 ## ── sprintf ────────────────────────────────────────────────────────────────
 x_s <- c(0.123456, -1.5, 1234.5678, 0, 1e-10, 2.675, NA, Inf, -Inf, NaN, 1e20)
@@ -273,12 +267,6 @@ case("pv_named_digits", cap("print(x, digits = 3)"), "F.print_vector(x, digits=3
 case("pv_empty", "c(capture.output(print(numeric(0))), capture.output(print(character(0))), capture.output(print(integer(0))), capture.output(print(logical(0))), capture.output(print(NULL)), capture.output(print(c(a = 1)[0])))",
      "[F.print_vector(np.array([], dtype=float)), F.print_vector(np.array([], dtype=object)), F.print_vector(np.array([], dtype=np.int64)), F.print_vector(np.array([], dtype=bool)), F.print_vector(None), F.print_vector(pd.Series(np.array([], dtype=float), index=pd.Index([], dtype=object)))]",
      jl = "[F.print_vector(Float64[]), F.print_vector(String[]), F.print_vector(Int[]), F.print_vector(Bool[]), F.print_vector(nothing), F.print_vector(SL.RVector(Float64[]; names=String[]))]")
-case("pv_factor", cap("print(factor(f, levels = lev))"), "F.print_factor(f, levels=lev)", list(f = as.character(c("b", "a", NA, "b", "Öl")), lev = c("Öl", "a", "b", "z")),
-     jl = "F.print_factor(f, levels=lev)")
-case("pv_factor_many", cap("print(factor(f, levels = lev))"), "F.print_factor(f, levels=lev)", list(f = sample(c(month.name, NA), 40, TRUE), lev = c(month.name, paste("Level", 1:20))),
-     jl = "F.print_factor(f, levels=lev)")
-case("pv_factor_ord", cap("print(factor(f, levels = lev, ordered = TRUE))"), "F.print_factor(f, levels=lev, ordered=True)", list(f = c("niedrig", "hoch", "mittel"), lev = c("niedrig", "mittel", "hoch")),
-     jl = "F.print_factor(f, levels=lev, ordered=true)")
 case("pv_width", cap("{ op <- options(width = 40); on.exit(options(op)); print(x) }"), "_r", list(x = rnum(20, 3)),
      pre = "_old = F.set_options(width=40)\ntry:\n    _r = F.print_vector(x)\nfinally:\n    F.set_options(**_old)\n",
      jlpre = "_old = F.set_options(width=40)\n", jl = "try F.print_vector(x) finally F.set_options(; _old...) end")
@@ -362,51 +350,34 @@ for (i in 1:12) {
 }
 
 ## ── print: Listen, cat ─────────────────────────────────────────────────────
-case("plist1", cap("print(l)"), "F.print_list(l)", list(l = list(a = 1, b = "x", c = list(d = 1:3, 2), `x y` = NULL, z = c(TRUE, NA))), jl = "F.print_list(l)")
-case("plist2", cap("print(l)"), "F.print_list(l)", list(l = list(1.5, "a", list(c(1.25, 100)))), jl = "F.print_list(l)")
-case("plist3", cap("print(l)"), "F.print_list(l)", list(l = list(settings = c(jump = 0.25, stale = 5, revert = 0.1), n = 3L, m = matrix(1:4, 2), d = data.frame(a = 1:2, b = c("x", "y")))),
-     jl = "F.print_list(l)")
+case("plist1", cap("print(l)"), NULL, list(l = list(a = 1, b = "x", c = list(d = 1:3, 2), `x y` = NULL, z = c(TRUE, NA))), jl = "F.print_list(l)", nur = "jl")
+case("plist2", cap("print(l)"), NULL, list(l = list(1.5, "a", list(c(1.25, 100)))), jl = "F.print_list(l)", nur = "jl")
+case("plist3", cap("print(l)"), NULL, list(l = list(settings = c(jump = 0.25, stale = 5, revert = 0.1), n = 3L, m = matrix(1:4, 2), d = data.frame(a = 1:2, b = c("x", "y")))),
+     jl = "F.print_list(l)", nur = "jl")
 case("plist_empty", "c(paste(capture.output(print(list())), collapse = '\\n'), paste(capture.output(print(setNames(list(), character(0)))), collapse = '\\n'))",
-     "[F.print_list([]), F.print_list({})]", jl = "[F.print_list(Any[]), F.print_list(SL.RList())]")
-case("cat1", "capture.output(cat(1/3, 1e5, 123456.7, 1e-20, NA, NaN, TRUE, 3L, Inf, -0.5, 1e15, 100000.1, 0.1 + 0.2, '\\n'))",
-     "F.cat_str(1/3, 1e5, 123456.7, 1e-20, F.NA_REAL, np.nan, True, 3, np.inf, -0.5, 1e15, 100000.1, 0.1 + 0.2, '\\n').rstrip('\\n')",
-     jl = 'String(rstrip(F.cat_str(1/3, 1e5, 123456.7, 1e-20, SL.NA, NaN, true, 3, Inf, -0.5, 1e15, 100000.1, 0.1 + 0.2, "\\n"), \'\\n\'))')
-case("cat2", "paste(capture.output(cat('a', character(0), 'b', NULL, c(1, 2), c('x', 'y'), sep = c('-', '+'))), collapse = '\\n')",
-     "F.cat_str('a', np.array([], dtype=object), 'b', None, np.array([1.0, 2.0]), np.array(['x', 'y'], dtype=object), sep=['-', '+'])",
-     jl = 'F.cat_str("a", String[], "b", nothing, [1.0, 2.0], ["x", "y"], sep=["-", "+"])')
-case("cat3", "capture.output(cat(x, sep = '\\n'))", "F.cat_str(x, sep='\\n').rstrip('\\n').split('\\n')", list(x = rnum(10, 1)),
-     jl = 'String.(split(rstrip(F.cat_str(x, sep="\\n"), \'\\n\'), \'\\n\'))')
-case("cat_out", "cat('Wert:', 1/7, '\\n'); cat(sprintf('%.2f\\n', 2.5)); invisible(NULL)",
-     "None\nF.r_cat('Wert:', 1/7, '\\n'); F.r_cat(F.sprintf('%.2f\\n', 2.5))",
-     jl = 'nothing\nF.r_cat("Wert:", 1/7, "\\n"); F.r_cat(F.r_sprintf("%.2f\\n", 2.5))')
+     NULL, jl = "[F.print_list(Any[]), F.print_list(SL.RList())]", nur = "jl")
 
 ## ── Verteiler ──────────────────────────────────────────────────────────────
 case("pdefault", "c(paste(capture.output(print(1:3)), collapse = '\\n'), paste(capture.output(print(data.frame(a = 1:2))), collapse = '\\n'), paste(capture.output(print(matrix(1:4, 2))), collapse = '\\n'), paste(capture.output(print(list(a = 1))), collapse = '\\n'))",
-     "[F.print_default(np.arange(1, 4)), F.print_default(pd.DataFrame({'a': np.array([1, 2])})), F.print_default(np.array([[1, 3], [2, 4]])), F.print_default({'a': 1.0})]",
-     jl = '[F.print_default(1:3), F.print_default(SL.RFrame("a" => [1, 2])), F.print_default([1 3; 2 4]), F.print_default(SL.RList("a" => 1.0))]')
+     NULL,
+     jl = '[F.print_default(1:3), F.print_default(SL.RFrame("a" => [1, 2])), F.print_default([1 3; 2 4]), F.print_default(SL.RList("a" => 1.0))]', nur = "jl")
 
 ## ── Ergänzungen ────────────────────────────────────────────────────────────
 case("date_wide", "format(d, '%Y-%m-%d|%C|%G|%y|%a|%V|%j|%U|%W')", "F.format_date(d, '%Y-%m-%d|%C|%G|%y|%a|%V|%j|%U|%W')",
-     list(d = as.Date(c(3e6, -1e6, -719528, -719529, -719162, 0, 19000, sample(-800000:3000000, 40)))),
-     jl = 'F.format_date(d, "%Y-%m-%d|%C|%G|%y|%a|%V|%j|%U|%W")')
+     list(d = as.Date(c(3e6, -1e6, -719528, -719529, -719162, 0, 19000, sample(-800000:3000000, 40)))), nur = "py")
 case("date_flags", "format(d, '%C|%g|%10Y|%_d|%-m|%^b|%#A|%_3j|%-e|%0e|%6C|%s|%r|%R|%T|%p|%P|%Z|%z|%h|%n|%t|%%|%q|%k|%l|%I|%Ey|%Od|%-V')",
      "F.format_date(d, '%C|%g|%10Y|%_d|%-m|%^b|%#A|%_3j|%-e|%0e|%6C|%s|%r|%R|%T|%p|%P|%Z|%z|%h|%n|%t|%%|%q|%k|%l|%I|%Ey|%Od|%-V')",
-     list(d = as.Date(c("2024-03-05", "0999-12-31", "2000-01-09"))),
-     jl = 'F.format_date(d, "%C|%g|%10Y|%_d|%-m|%^b|%#A|%_3j|%-e|%0e|%6C|%s|%r|%R|%T|%p|%P|%Z|%z|%h|%n|%t|%%|%q|%k|%l|%I|%Ey|%Od|%-V")')
-case("date_numeric", "format(as.Date(c(0, 19000.7, -1)), '%d.%m.%Y')", "F.format_date(np.array([0, 19000.7, -1]), '%d.%m.%Y')",
-     jl = 'F.format_date([0, 19000.7, -1], "%d.%m.%Y")')
+     list(d = as.Date(c("2024-03-05", "0999-12-31", "2000-01-09"))), nur = "py")
+case("date_numeric", "format(as.Date(c(0, 19000.7, -1)), '%d.%m.%Y')", "F.format_date(np.array([0, 19000.7, -1]), '%d.%m.%Y')", nur = "py")
 # Schalter, Breiten und E/O (seit 1.3.0) wie glibc unter Linux; %OS mit options(digits.secs)
 case("date_flags_glibc", "format(d, '%-5d|%5q|%Ob|%#p|%^#Z|%08s|%-3C|%5z|%#Eb|%2n|%^P|%_-4Y|%EA|%5')",
      "F.format_date(d, '%-5d|%5q|%Ob|%#p|%^#Z|%08s|%-3C|%5z|%#Eb|%2n|%^P|%_-4Y|%EA|%5')",
-     list(d = as.Date(c("2024-03-05", "0999-12-31", "1969-12-31", "0000-01-01"))),
-     jl = 'F.format_date(d, "%-5d|%5q|%Ob|%#p|%^#Z|%08s|%-3C|%5z|%#Eb|%2n|%^P|%_-4Y|%EA|%5")')
+     list(d = as.Date(c("2024-03-05", "0999-12-31", "1969-12-31", "0000-01-01"))), nur = "py")
 case("opt_digits_secs", "local({ op <- options(digits.secs = 3); on.exit(options(op)); format(as.Date(c('2020-03-04', '1999-12-31', '2000-01-01', '1970-01-01')), c('%OS', '%H:%M:%OS', '%OS1|%OS', '%%OS')) })",
-     "_r", pre = "_old = F.set_options(digits_secs=3)\ntry:\n    _r = F.format_date(np.array(['2020-03-04', '1999-12-31', '2000-01-01', '1970-01-01'], dtype='datetime64[D]'), ['%OS', '%H:%M:%OS', '%OS1|%OS', '%%OS'])\nfinally:\n    F.set_options(**_old)\n",
-     jlpre = "_old = F.set_options(digits_secs=3)\n",
-     jl = 'try F.format_date([Date(2020, 3, 4), Date(1999, 12, 31), Date(2000, 1, 1), Date(1970, 1, 1)], ["%OS", "%H:%M:%OS", "%OS1|%OS", "%%OS"]) finally F.set_options(; _old...) end')
+     "_r", pre = "_old = F.set_options(digits_secs=3)\ntry:\n    _r = F.format_date(np.array(['2020-03-04', '1999-12-31', '2000-01-01', '1970-01-01'], dtype='datetime64[D]'), ['%OS', '%H:%M:%OS', '%OS1|%OS', '%%OS'])\nfinally:\n    F.set_options(**_old)\n", nur = "py")
 case("misc_null", "c(format(NULL), as.character(c(a = 1.5)), sprintf('%s', as.Date('2024-01-31')), paste(factor(c('x', 'y')), as.Date('2020-02-02')))",
      "[F.format(None), *F.as_character(pd.Series([1.5], index=['a'])), F.sprintf('%s', np.datetime64('2024-01-31')), *F.paste(pd.Categorical(['x', 'y']), np.datetime64('2020-02-02'))]",
-     jl = '[F.format(nothing), F.as_character(SL.RVector([1.5]; names=["a"]))..., F.r_sprintf("%s", Date(2024, 1, 31)), F.paste(F.r_factor(["x", "y"]), Date(2020, 2, 2))...]')
+     jl = '[F.format(nothing), F.as_character(SL.RVector([1.5]; names=["a"]))..., F.r_sprintf("%s", Date(2024, 1, 31)), F.paste(F.RFactor([1, 2], ["x", "y"]), Date(2020, 2, 2))...]')
 case("misc_bigint", "c(format(3e9), format(c(1, 3e9)), as.character(3e9))", "[F.format(3000000000), *F.format(np.array([1, 3000000000])), F.as_character(3000000000)]",
      jl = "[F.format(3000000000), F.format([1, 3000000000])..., F.as_character(3000000000)]")
 case("misc_nchar", "c(nchar(c('Ärger', '日本', 'a\\\\b')), nchar(c('Ärger', '日本'), type = 'bytes'), nchar(c('Ärger', '日本'), type = 'width'))",
@@ -414,19 +385,16 @@ case("misc_nchar", "c(nchar(c('Ärger', '日本', 'a\\\\b')), nchar(c('Ärger', 
      jl = 'vcat(F.nchar(["Ärger", "日本", "a\\\\b"]), F.nchar(["Ärger", "日本"], type="bytes"), F.nchar(["Ärger", "日本"], type="width"))')
 case("misc_zeroprint", "format(c(0, 1), zero.print = 'abc')", "F.format(np.array([0.0, 1.0]), zero_print='abc')",
      jl = 'F.format([0.0, 1.0], zero_print="abc")')
-case("misc_encode", "c(encodeString(c('a', 'Zeile\nneu', NA), quote = '\"'), encodeString('x', width = 5, justify = 'right'))",
-     "[*F.encode_string(np.array(['a', 'Zeile\\nneu', None], dtype=object), quote='\"'), F.encode_string('x', width=5, justify='right')]",
-     jl = '[F.encode_string(["a", "Zeile\\nneu", missing], quote_="\\"")..., F.encode_string("x", width=5, justify="right")]')
 
 case("fmt_matrix", "list(format(m), formatC(m, format = 'f', digits = 1), formatC(round(100 * m, 1), digits = 1, format = 'f'), formatC(md, format = 'f', digits = 2, width = 8))",
      "[F.format(m), F.formatC(m, format='f', digits=1), F.formatC(F.r_round(np.array([[100 * v for v in row] for row in m.tolist()]), 1), digits=1, format='f'), F.formatC(md, format='f', digits=2, width=8)]",
      list(m = matrix(c(1.5, 3, 2, 40.25, -0.004, NA), 2), md = matrix(c(0.1234, -5, 12.5, NA), 2, dimnames = list(c("a", "b"), c("x", "y")))),
      jl = '[F.format(m), F.formatC(m, format="f", digits=1), F.formatC(F.r_round(100 .* m, 1), digits=1, format="f"), F.formatC(md, format="f", digits=2, width=8)]')
 
-case("opt_scipen", "local({ op <- options(scipen = 100); on.exit(options(op)); c(as.character(1e5), format(1e10), capture.output(print(c(1e-10, 1))), capture.output(cat(1e5)), sprintf('%s', 1e20)) })",
-     "_r", pre = "_old = F.set_options(scipen=100)\ntry:\n    _r = [F.as_character(1e5), F.format(1e10), F.print_vector(np.array([1e-10, 1.0])), F.cat_str(1e5), F.sprintf('%s', 1e20)]\nfinally:\n    F.set_options(**_old)\n",
+case("opt_scipen", "local({ op <- options(scipen = 100); on.exit(options(op)); c(as.character(1e5), format(1e10), capture.output(print(c(1e-10, 1))), sprintf('%s', 1e20)) })",
+     "_r", pre = "_old = F.set_options(scipen=100)\ntry:\n    _r = [F.as_character(1e5), F.format(1e10), F.print_vector(np.array([1e-10, 1.0])), F.sprintf('%s', 1e20)]\nfinally:\n    F.set_options(**_old)\n",
      jlpre = "_old = F.set_options(scipen=100)\n",
-     jl = 'try [F.as_character(1e5), F.format(1e10), F.print_vector([1e-10, 1.0]), F.cat_str(1e5), F.r_sprintf("%s", 1e20)] finally F.set_options(; _old...) end')
+     jl = 'try [F.as_character(1e5), F.format(1e10), F.print_vector([1e-10, 1.0]), F.r_sprintf("%s", 1e20)] finally F.set_options(; _old...) end')
 case("opt_digits", "local({ op <- options(digits = 3); on.exit(options(op)); c(format(pi), capture.output(print(c(a = 1/3, b = 2/3))), as.character(pi)) })",
      "_r", pre = "_old = F.set_options(digits=3)\ntry:\n    _r = [F.format(math.pi), *F.print_vector(pd.Series([1/3, 2/3], index=['a', 'b'])).split('\\n'), F.as_character(math.pi)]\nfinally:\n    F.set_options(**_old)\n",
      jlpre = "_old = F.set_options(digits=3)\n",
@@ -491,11 +459,11 @@ ms <- c(lapply(comb(v3, 4), matrix, nrow = 2),
 
 P <- "import numpy as np\nfrom simlev._r import base as B\nwith np.errstate(all='ignore'):\n    "
 J <- "B = SL.RBase\n"
-vf <- function(id, rf, pyf, jlf) {
+vf <- function(id, rf, pyf, jlf, nur = NULL) {
   ref_case(id, sprintf("lapply(xs, %s)", rf),
-           paste0(P, sprintf("result = [%s for x in xs]", pyf)),
+           if (is.null(pyf)) NULL else paste0(P, sprintf("result = [%s for x in xs]", pyf)),
            inputs = list(xs = xs),
-           jl = paste0(J, sprintf("result = Any[%s for x in (vcat(x) for x in xs)]", jlf)))
+           jl = if (is.null(jlf)) NULL else paste0(J, sprintf("result = Any[%s for x in (vcat(x) for x in xs)]", jlf)), nur = nur)
 }
 vf("sum", "sum", "B.r_sum(x)", "B.r_sum(x)")
 vf("sum_narm", "sum, na.rm = TRUE", "B.r_sum(x, na_rm=True)", "B.r_sum(x; na_rm = true)")
@@ -505,10 +473,9 @@ vf("mean_all", "mean", "B.mean(x)", "B.mean(x)")
 vf("prod", "prod", "B.r_prod(x)", "B.r_prod(x)")
 vf("prod_narm", "prod, na.rm = TRUE", "B.r_prod(x, na_rm=True)", "B.r_prod(x; na_rm = true)")
 vf("cumsum", "cumsum", "B.r_cumsum(x)", "B.r_cumsum(x)")
-vf("cumprod", "cumprod", "B.cumprod(x)", "B.r_cumprod(x)")
 vf("cumprod_engine", "cumprod", "simlev._r.rnum.r_cumprod(x)", "SL.r_cumprod(x)")
-vf("cummax", "cummax", "B.cummax(x)", "B.r_cummax(x)")
-vf("cummin", "cummin", "B.cummin(x)", "B.r_cummin(x)")
+vf("cummax", "cummax", "simlev._r.rnum.r_cummax(x)", "B.r_cummax(x)")
+vf("cummin", "cummin", NULL, "B.r_cummin(x)", nur = "jl")
 vf("var", "var", "B.r_var(x)", "B.r_var(x)")
 vf("var_narm", "var, na.rm = TRUE", "B.r_var(x, na_rm=True)", "B.r_var(x; na_rm = true)")
 vf("sd", "sd", "B.r_sd(x)", "B.r_sd(x)")
@@ -519,7 +486,8 @@ mf <- function(id, rf, narm) {
   pa <- if (narm) ", na_rm=True" else ""
   ja <- if (narm) "; na_rm = true" else ""
   ref_case(id, sprintf("lapply(ms, %s%s)", rf, ra),
-           paste0(P, sprintf("result = [B.%s(m%s) for m in ms]", rf, pa)),
+           # Python seit 1.6.1 über simlev._r.rnum (base.colSums & Co. ohne Aufrufer entfallen)
+           paste0(P, sprintf("result = [simlev._r.rnum.r_%s(np.asarray(m, dtype=float)%s) for m in ms]", tolower(rf), pa)),
            inputs = list(ms = ms),
            jl = paste0(J, sprintf("result = Any[B.%s(m%s) for m in ms]", rf, ja)))
 }
@@ -547,7 +515,8 @@ ref_init("r_stats")
 HDR <- "import math\nimport simlev._r.stats as st\nimport simlev._r.base as rb\n"
 JHDR <- "const st = SL.RStats\nconst rb = SL.RBase\n"
 cs <- function(id, r, py, inputs = list(), jl = NULL, ...)
-  ref_case(id, r = r, py = paste0(HDR, py), inputs = inputs, jl = if (is.null(jl)) NULL else paste0(JHDR, jl), ...)
+  ref_case(id, r = r, py = if (is.null(py)) NULL else paste0(HDR, py), inputs = inputs,
+           jl = if (is.null(jl)) NULL else paste0(JHDR, jl), ...)
 
 set.seed(11)
 x1 <- rnorm(37); x2 <- round(rnorm(40) * 3)            # x2 mit Bindungen
@@ -628,17 +597,10 @@ cs("cov_err_pair", 'cov(M, method = "spearman", use = "pairwise.complete.obs")',
    'result = st.cov(M, method="spearman", use="pairwise.complete.obs")', list(M = M), jl = "result = st.cov(M; method = \"spearman\", use = \"pairwise.complete.obs\")")
 cs("cov2cor_a", "cov2cor(cov(M))", "result = st.cov2cor(st.cov(M))", list(M = M), jl = "result = st.cov2cor(st.cov(M))")
 cs("cov2cor_warn", "cov2cor(matrix(c(1, 0.5, 0.5, -1), 2))", "result = st.cov2cor(np.array([[1, 0.5], [0.5, -1.]]))", jl = "result = st.cov2cor([1 0.5; 0.5 -1.0])")
-cs("wmean_a", "weighted.mean(x, w)", "result = st.weighted_mean(x, w)", list(x = x1, w = runif(37)), jl = "result = st.weighted_mean(x, w)")
-cs("wmean_zero", "weighted.mean(x, w)", "result = st.weighted_mean(x, w)", list(x = c(1, NA, 3), w = c(1, 0, 2)), jl = "result = st.weighted_mean(x, w)")
-cs("wmean_isnan", "r <- c(weighted.mean(c(1, 2), c(0, 0)), weighted.mean(c(NA, 2), c(1, 0)), weighted.mean(numeric(0))); c(is.na(r), is.nan(r))",
-   "import simlev._r.fmt as fm\nr = [st.weighted_mean([1, 2], [0, 0]), st.weighted_mean([fm.NA_REAL, 2], [1, 0]), st.weighted_mean(np.zeros(0))]\nresult = np.array([x != x for x in r] + [fm._is_rnan(x) for x in r])", jl = "r = [st.weighted_mean([1.0, 2], [0.0, 0]), st.weighted_mean([SL.NA, 2], [1.0, 0]), st.weighted_mean(Float64[])]\nresult = vcat(isnan.(r), [isnan(v) && !SL.isna_strict(v) for v in r])")
 cs("cov2cor_isnan", "r <- suppressWarnings(cov2cor(matrix(c(1, 0.5, 0.2, 0.5, -1, 0, 0.2, 0, 0), 3))); r[1, 1] <- NA; c(r, is.nan(r))",
    "import simlev._r.fmt as fm\nimport warnings\nwith warnings.catch_warnings():\n    warnings.simplefilter('ignore')\n    r = st.cov2cor(np.array([[1, 0.5, 0.2], [0.5, -1, 0], [0.2, 0, 0.]]))\nr[0, 0] = fm.NA_REAL\nresult = np.concatenate([r.ravel(order='F'), fm._nan_mask(r.ravel(order='F'))])", jl = "import Logging\nr = Logging.with_logger(Logging.NullLogger()) do\n    st.cov2cor([1 0.5 0.2; 0.5 -1 0; 0.2 0 0.0])\nend\nr[1, 1] = SL.NA\nresult = vcat(vec(r), [Float64(isnan(v) && !SL.isna_strict(v)) for v in vec(r)])")
 cs("cov2cor_na", "r <- suppressWarnings(cov2cor(matrix(c(2, NA, 0.2, NA, -1, 0, 0.2, 0, NA), 3))); c(r, is.nan(r))",
    "import simlev._r.fmt as fm\nimport warnings\nwith warnings.catch_warnings():\n    warnings.simplefilter('ignore')\n    r = st.cov2cor(np.array([[2, fm.NA_REAL, 0.2], [fm.NA_REAL, -1, 0], [0.2, 0, fm.NA_REAL]]))\nresult = np.concatenate([r.ravel(order='F'), fm._nan_mask(r.ravel(order='F'))])", jl = "import Logging\nr = Logging.with_logger(Logging.NullLogger()) do\n    st.cov2cor([2 SL.NA 0.2; SL.NA -1 0; 0.2 0 SL.NA])\nend\nresult = vcat(vec(r), [Float64(isnan(v) && !SL.isna_strict(v)) for v in vec(r)])")
-cs("wmean_narm", "weighted.mean(x, w, na.rm = TRUE)", "result = st.weighted_mean(x, w, na_rm=True)",
-   list(x = xna, w = runif(21)), jl = "result = st.weighted_mean(x, w; na_rm = true)")
-cs("wmean_now", "weighted.mean(x)", "result = st.weighted_mean(x)", list(x = x1), jl = "result = st.weighted_mean(x)")
 cs("scale_default", "scale(M)", "result = st.scale(M)", list(M = unname(M)), jl = "result = st.scale(M)")
 cs("scale_noc", "scale(M, center = FALSE)", "result = st.scale(M, center=False)", list(M = unname(Mna)), jl = "result = st.scale(M; center = false)")
 cs("scale_num", "scale(M, center = c(1, 2, 3), scale = c(2, 2, 0.5))",
@@ -666,8 +628,8 @@ cs("approx_na", "approx(x, y, xout = c(1.5, 3.5))", "result = st.approx(x, y, xo
 cs("approx_err_one", "approx(1, 2, xout = 1)", "result = st.approx([1.0], [2.0], xout=1.0)", jl = "result = st.approx([1.0], [2.0]; xout = 1.0)")
 cs("approx_err_f", 'approx(x, y, method = "constant", f = 2)', 'result = st.approx(x, y, method="constant", f=2)',
    list(x = ax, y = ay), jl = "result = st.approx(x, y; method = \"constant\", f = 2)")
-cs("approxfun_a", "f <- approxfun(x, y, rule = 2); f(xo)", "f = st.approxfun(x, y, rule=2)\nresult = f(xo)",
-   list(x = ax, y = ay, xo = xo), jl = "f = st.approxfun(x, y; rule = 2)\nresult = f(xo)")
+cs("approxfun_a", "f <- approxfun(x, y, rule = 2); f(xo)", NULL,
+   list(x = ax, y = ay, xo = xo), jl = "f = st.approxfun(x, y; rule = 2)\nresult = f(xo)", nur = "jl")
 fx <- c(1.5, NA, 3, 2, 5, 4, 4.5, 7, 6, 8, 9.5, 9)
 cs("filter_conv2", "as.vector(filter(x, rep(1/3, 3)))", "result = st.filter(x, np.full(3, 1/3))", list(x = x1), jl = "result = st.r_filter(x, fill(1/3, 3))")
 cs("filter_conv1", "as.vector(filter(x, c(0.5, 0.3, 0.2), sides = 1))", "result = st.filter(x, [0.5, 0.3, 0.2], sides=1)", list(x = x1), jl = "result = st.r_filter(x, [0.5, 0.3, 0.2]; sides = 1)")
@@ -682,7 +644,7 @@ cs("filter_err_long", "filter(1:3, rep(1, 4))", "result = st.filter(np.arange(1,
 cs("filter_err_sides", "filter(x, 1, sides = 3)", "result = st.filter(x, 1, sides=3)", list(x = x1), jl = "result = st.r_filter(x, 1; sides = 3)")
 cs("filter_err_init", 'filter(x, c(1, 2), method = "recursive", init = 1)', 'result = st.filter(x, [1, 2], method="recursive", init=1)', list(x = x1), jl = "result = st.r_filter(x, [1, 2]; method = \"recursive\", init = 1)")
 
-## ── optimize / uniroot ──────────────────────────────────────────────────
+## ── optimize (uniroot seit 1.5.2 ohne Port) ──────────────────────────────────────────────────
 cs("optimize_a", "optimize(function(x) (x - 0.37)^2 + sin(3 * x), c(-1, 2))",
    "result = st.optimize(lambda x: (x - 0.37)*(x - 0.37) + math.sin(3*x), (-1, 2))", jl = "result = st.optimize(x -> (x - 0.37)*(x - 0.37) + SL.RLibm.sin(3*x), [-1, 2])")
 cs("optimize_tol", "optimize(function(x) abs(x - 1/3) + 0.1 * x^2, lower = -5, upper = 5, tol = 1e-10)",
@@ -692,26 +654,6 @@ cs("optimize_max", "optimize(function(x) x * exp(-x), c(0, 4), maximum = TRUE)",
 cs("optimize_na", "optimize(function(x) if (x < 0.5) NA else (x - 1)^2, c(0, 3))",
    "result = st.optimize(lambda x: float('nan') if x < 0.5 else (x - 1)*(x - 1), (0, 3))", jl = "result = st.optimize(x -> x < 0.5 ? SL.NA : (x - 1)*(x - 1), [0, 3])")
 cs("optimize_err", "optimize(function(x) x^2, c(1, 1))", "result = st.optimize(lambda x: x*x, (1, 1))", jl = "result = st.optimize(x -> x*x, [1, 1])")
-cs("uniroot_a", "uniroot(function(x) x^3 - x - 1, c(1, 2))",
-   "result = st.uniroot(lambda x: math.pow(x, 3) - x - 1, (1, 2))", jl = "result = st.uniroot(x -> SL.RLibm.pow(x, 3) - x - 1, [1, 2])")
-cs("uniroot_tol", "uniroot(function(x) cos(x) - x, c(-pi, pi), tol = 1e-12)",
-   "result = st.uniroot(lambda x: math.cos(x) - x, (-math.pi, math.pi), tol=1e-12)", jl = "result = st.uniroot(x -> SL.RLibm.cos(x) - x, [-pi, pi]; tol = 1e-12)")
-cs("uniroot_fl", "uniroot(function(x) exp(x) - 3, lower = 0, upper = 2, f.lower = -2, f.upper = exp(2) - 3)",
-   "result = st.uniroot(lambda x: math.exp(x) - 3, lower=0, upper=2, f_lower=-2, f_upper=math.exp(2) - 3)", jl = "result = st.uniroot(x -> SL.RLibm.exp(x) - 3; lower = 0, upper = 2, f_lower = -2, f_upper = SL.RLibm.exp(2.0) - 3)")
-cs("uniroot_ext_yes", 'uniroot(function(x) exp(x) - 50, c(0, 1), extendInt = "yes")',
-   'result = st.uniroot(lambda x: math.exp(x) - 50, (0, 1), extendInt="yes")', jl = "result = st.uniroot(x -> SL.RLibm.exp(x) - 50, [0, 1]; extendInt = \"yes\")")
-cs("uniroot_ext_up", 'uniroot(function(x) x - 10.5, c(0, 1), extendInt = "upX")',
-   'result = st.uniroot(lambda x: x - 10.5, (0, 1), extendInt="upX")', jl = "result = st.uniroot(x -> x - 10.5, [0, 1]; extendInt = \"upX\")")
-cs("uniroot_ext_down", 'uniroot(function(x) 3 - x, c(5, 6), extendInt = "downX")',
-   'result = st.uniroot(lambda x: 3 - x, (5, 6), extendInt="downX")', jl = "result = st.uniroot(x -> 3 - x, [5, 6]; extendInt = \"downX\")")
-cs("uniroot_maxit", "uniroot(function(x) x^3 - x - 1, c(1, 2), maxiter = 3)",
-   "result = st.uniroot(lambda x: math.pow(x, 3) - x - 1, (1, 2), maxiter=3)", jl = "result = st.uniroot(x -> SL.RLibm.pow(x, 3) - x - 1, [1, 2]; maxiter = 3)")
-cs("uniroot_endroot", "uniroot(function(x) x - 1, c(1, 2))", "result = st.uniroot(lambda x: x - 1, (1, 2))", jl = "result = st.uniroot(x -> x - 1, [1, 2])")
-cs("uniroot_err_sign", "uniroot(function(x) x^2 + 1, c(-1, 2))", "result = st.uniroot(lambda x: x*x + 1, (-1, 2))", jl = "result = st.uniroot(x -> x*x + 1, [-1, 2])")
-cs("uniroot_err_lu", "uniroot(function(x) x, lower = 2, upper = 1)", "result = st.uniroot(lambda x: x, lower=2, upper=1)", jl = "result = st.uniroot(x -> x; lower = 2, upper = 1)")
-cs("uniroot_inf", "uniroot(function(x) if (x > 1.9) Inf else x - 1, c(0, 2))",
-   "result = st.uniroot(lambda x: math.inf if x > 1.9 else x - 1, (0, 2))", jl = "result = st.uniroot(x -> x > 1.9 ? Inf : x - 1, [0, 2])")
-
 ## ── dist / hclust ────────────────────────────────────────────────────────
 D5 <- matrix(rnorm(40), 8, 5); D5r <- round(D5); D5na <- D5; D5na[2, 3] <- NA
 for (m in c("euclidean", "maximum", "manhattan", "canberra", "binary", "minkowski")) {
@@ -722,9 +664,9 @@ for (m in c("euclidean", "maximum", "manhattan", "canberra", "binary", "minkowsk
      sprintf("result = np.asarray(st.dist(X, method='%s'))", m), list(X = D5na),
      jl = sprintf("result = st.dist(X; method = \"%s\")", m))
 }
-cs("dist_matrix", "as.matrix(dist(X))", "result = st.dist_as_matrix(st.dist(X))", list(X = D5), jl = "result = st.dist_as_matrix(st.dist(X))")
+cs("dist_matrix", "as.matrix(dist(X))", "result = st.dist_as_matrix(st.dist(X))", list(X = D5), nur = "py")
 cs("dist_labels", "as.matrix(dist(X))", "result = st.dist_as_matrix(st.dist(X))",
-   list(X = `rownames<-`(D5, letters[1:8])), jl = "result = st.dist_as_matrix(st.dist(X))")
+   list(X = `rownames<-`(D5, letters[1:8])), nur = "py")
 for (m in c("ward.D", "single", "complete", "average", "mcquitty", "median", "centroid", "ward.D2")) {
   cs(paste0("hclust_", m), sprintf("h <- hclust(dist(X), method = '%s'); h[c('merge', 'height', 'order', 'labels', 'method', 'dist.method')]", m),
      sprintf("result = st.hclust(st.dist(X), method='%s')", m), list(X = D5),
@@ -792,19 +734,17 @@ for (tm in c("average", "min", "max", "first", "last"))
 cs("chr_rank_keep", "rank(s, na.last = 'keep')", "result = st.rank(s, na_last='keep')", list(s = chs), jl = "result = st.r_rank(s; na_last = \"keep\")")
 cs("chr_factor_levels", "f <- factor(s); list(levels(f), as.integer(f))",
    "import simlev._r.fmt as fm\nlv = list(st.sort(pd.unique(np.asarray([v for v in s if v is not None], dtype=object))))\npos = {v: i + 1 for i, v in enumerate(lv)}\nresult = [lv, np.array([fm.NA_REAL if v is None else pos[v] for v in s])]",
-   list(s = chs), jl = "f = SL.RFmt.r_factor(s)\nresult = [f.levels, [c == 0 ? missing : c for c in f.codes]]")
-cs("chr_factor_print", "f <- factor(s); paste(capture.output(print(f)), collapse = '\\n')", "import simlev._r.fmt as fm\nresult = fm.print_factor(s)",
-   list(s = chd), jl = "result = SL.RFmt.print_factor(s)")
+   list(s = chs), nur = "py")
 cs("chr_table", "t <- table(s); list(names(t), as.vector(t))",
-   "a = st.aggregate(np.ones(len([v for v in s if v is not None])), {'g': [v for v in s if v is not None]}, len)\nresult = [list(a['g']), a['x'].to_numpy(dtype=np.int64)]",
-   list(s = chd), jl = "ss = [v for v in s if v !== missing]\na = st.aggregate(ones(length(ss)), [\"g\" => ss], length)\nresult = [a[\"g\"], Int.(a[\"x\"])]")
-cs("chr_aggregate", "aggregate(x, list(g = s, h = t), sum)", "result = st.aggregate(x, {'g': s, 'h': t}, st._rsum)",
+   NULL,
+   list(s = chd), jl = "ss = [v for v in s if v !== missing]\na = st.aggregate(ones(length(ss)), [\"g\" => ss], length)\nresult = [a[\"g\"], Int.(a[\"x\"])]", nur = "jl")
+cs("chr_aggregate", "aggregate(x, list(g = s, h = t), sum)", NULL,
    list(x = c(1, 2, 3, 4, 5, 6, 7, 8), s = c("b", "A", "a", "B", "a", "ä", "B", "b"), t = c("y", "Y", "y", "Y", "Y", "y", "Y", "y")),
-   jl = "result = st.aggregate(x, [\"g\" => s, \"h\" => t], v -> SL.r_sum(v))")
+   jl = "result = st.aggregate(x, [\"g\" => s, \"h\" => t], v -> SL.r_sum(v))", nur = "jl")
 cs("chr_ave_order", "o <- character(0); r <- ave(x, s, FUN = function(v) { o <<- c(o, paste(v, collapse = ',')); v * 0 + length(o) }); list(r, o)",
-   "o = []\ndef f(v):\n    o.append(','.join('%d' % t for t in v))\n    return v * 0 + len(o)\nr = st.ave(x, s, FUN=f)\nresult = [r, o]",
+   NULL,
    list(x = c(1, 2, 3, 4, 5, 6), s = c("b", "A", "a", "B", "ä", "a")),
-   jl = "o = String[]\nf(v) = (push!(o, join([string(Int(t)) for t in v], \",\")); v .* 0 .+ length(o))\nr = st.ave(x, s; FUN = f)\nresult = [r, o]")
+   jl = "o = String[]\nf(v) = (push!(o, join([string(Int(t)) for t in v], \",\")); v .* 0 .+ length(o))\nr = st.ave(x, s; FUN = f)\nresult = [r, o]", nur = "jl")
 chp <- c("a", "A", "b", "B", "ä", "Ä", "a b", "ab", "a-b", "10", "2", "", " ", "ß", "ss", "St", "st", "x10", "x2", "é", "e")
 cs("chr_collate_pairs", "outer(s, s, function(a, b) ifelse(a < b, -1L, ifelse(a > b, 1L, 0L)))",
    "result = np.array([[st.str_collate(a, b) for b in s] for a in s], dtype=np.int64)",
@@ -812,16 +752,16 @@ cs("chr_collate_pairs", "outer(s, s, function(a, b) ifelse(a < b, -1L, ifelse(a 
 cs("chr_lt", "c(s < 'b', s > 'B', s <= 'a', s >= 'ä')",
    "result = np.array([st.str_collate(v, 'b') < 0 for v in s] + [st.str_collate(v, 'B') > 0 for v in s] + [st.str_collate(v, 'a') <= 0 for v in s] + [st.str_collate(v, 'ä') >= 0 for v in s])",
    list(s = chp), jl = "result = vcat([st.str_collate(v, \"b\") < 0 for v in s], [st.str_collate(v, \"B\") > 0 for v in s], [st.str_collate(v, \"a\") <= 0 for v in s], [st.str_collate(v, \"ä\") >= 0 for v in s])")
-cs("rle_a", "unclass(rle(x))", "result = st.rle(x)", list(x = c(1, 1, 2, 2, 2, 3, 1, 1)), jl = "result = st.rle(x)")
-cs("rle_lgl", "unclass(rle(x))", "result = st.rle(x)", list(x = c(TRUE, TRUE, FALSE, TRUE)), jl = "result = st.rle(x)")
-cs("tabulate_a", "tabulate(x)", "result = st.tabulate(x)", list(x = c(2, 3, 3, 5, NA, 0)), jl = "result = st.tabulate(x)")
-cs("tabulate_nb", "tabulate(x, nbins = 3)", "result = st.tabulate(x, nbins=3)", list(x = c(2, 3, 3, 5)), jl = "result = st.tabulate(x; nbins = 3)")
+cs("rle_a", "unclass(rle(x))", NULL, list(x = c(1, 1, 2, 2, 2, 3, 1, 1)), jl = "result = st.rle(x)", nur = "jl")
+cs("rle_lgl", "unclass(rle(x))", NULL, list(x = c(TRUE, TRUE, FALSE, TRUE)), jl = "result = st.rle(x)", nur = "jl")
+cs("tabulate_a", "tabulate(x)", NULL, list(x = c(2, 3, 3, 5, NA, 0)), jl = "result = st.tabulate(x)", nur = "jl")
+cs("tabulate_nb", "tabulate(x, nbins = 3)", NULL, list(x = c(2, 3, 3, 5)), jl = "result = st.tabulate(x; nbins = 3)", nur = "jl")
 fv <- c(1, 2, 2, 3.5, 7); fq <- c(-1, 1, 2, 2.5, 3.5, 7, 8, NA)
-cs("findint_a", "findInterval(x, v)", "result = st.findInterval(x, v)", list(x = fq, v = fv), jl = "result = st.findInterval(x, v)")
-cs("findint_rc", "findInterval(x, v, rightmost.closed = TRUE)", "result = st.findInterval(x, v, rightmost_closed=True)", list(x = fq, v = fv), jl = "result = st.findInterval(x, v; rightmost_closed = true)")
-cs("findint_ai", "findInterval(x, v, all.inside = TRUE)", "result = st.findInterval(x, v, all_inside=True)", list(x = fq, v = fv), jl = "result = st.findInterval(x, v; all_inside = true)")
-cs("findint_lo", "findInterval(x, v, left.open = TRUE)", "result = st.findInterval(x, v, left_open=True)", list(x = fq, v = fv), jl = "result = st.findInterval(x, v; left_open = true)")
-cs("findint_err", "findInterval(1, c(2, 1))", "result = st.findInterval(1, [2, 1])", jl = "result = st.findInterval(1, [2, 1])")
+cs("findint_a", "findInterval(x, v)", NULL, list(x = fq, v = fv), jl = "result = st.findInterval(x, v)", nur = "jl")
+cs("findint_rc", "findInterval(x, v, rightmost.closed = TRUE)", NULL, list(x = fq, v = fv), jl = "result = st.findInterval(x, v; rightmost_closed = true)", nur = "jl")
+cs("findint_ai", "findInterval(x, v, all.inside = TRUE)", NULL, list(x = fq, v = fv), jl = "result = st.findInterval(x, v; all_inside = true)", nur = "jl")
+cs("findint_lo", "findInterval(x, v, left.open = TRUE)", NULL, list(x = fq, v = fv), jl = "result = st.findInterval(x, v; left_open = true)", nur = "jl")
+cs("findint_err", "findInterval(1, c(2, 1))", NULL, jl = "result = st.findInterval(1, [2, 1])", nur = "jl")
 cs("cut_codes", "cut(x, 4, labels = FALSE)", "result = st.cut(x, 4, labels=False)", list(x = x1), jl = "result = st.cut(x, 4; labels = false)")
 cs("cut_seq", "cut(seq_len(23), 5, labels = FALSE)", "result = st.cut(np.arange(1, 24), 5, labels=False)", jl = "result = st.cut(1:23, 5; labels = false)")
 cs("cut_labels", "as.character(cut(x, c(-3, -1, 0, 1, 3)))", "result = np.asarray(st.cut(x, [-3, -1, 0, 1, 3]), dtype=object)", list(x = x1), jl = "result = collect(st.cut(x, [-3, -1, 0, 1, 3]))")
@@ -832,40 +772,37 @@ cs("cut_userlab", "as.character(cut(x, c(-5, 0, 5), labels = c('neg', 'pos'), ri
 cs("cut_err_breaks", "cut(1:3, c(1, 1, 2))", "result = st.cut(np.arange(1, 4), [1, 1, 2])", jl = "result = st.cut(1:3, [1, 1, 2])")
 
 ## ── complete.cases / ecdf / ave / aggregate ─────────────────────────────
-cs("cc_df", "complete.cases(d)", "result = st.complete_cases(d)",
-   list(d = data.frame(a = c(1, NA, 3, 4), b = c("x", "y", NA, "z"), stringsAsFactors = FALSE)), jl = "result = st.complete_cases(d)")
-cs("cc_mat_vec", "complete.cases(M, v)", "result = st.complete_cases(M, v)", list(M = unname(Mna), v = c(NA, rep(1, 19))), jl = "result = st.complete_cases(M, v)")
-cs("ecdf_a", "F <- ecdf(x); F(c(-5, x[1:5], 0, 5))", "F = st.ecdf(x)\nresult = F(np.concatenate([[-5], x[:5], [0, 5]]))", list(x = x2), jl = "F = st.ecdf(x)\nresult = F(vcat(-5, x[1:5], 0, 5))")
-cs("ave_mean", "ave(x, g)", "result = st.ave(x, g)", list(x = x1, g = rep(1:4, length.out = 37)), jl = "result = st.ave(x, g)")
-cs("ave_sum2", "ave(x, g, h, FUN = sum)", "result = st.ave(x, g, h, FUN=lambda v: st._rsum(v))",
-   list(x = x1, g = rep(1:3, length.out = 37), h = rep(c(0, 1), each = 19)[1:37]), jl = "result = st.ave(x, g, h; FUN = v -> SL.r_sum(v))")
-cs("ave_nog", "ave(x)", "result = st.ave(x)", list(x = x1), jl = "result = st.ave(x)")
-cs("aggregate_1", "aggregate(x, list(p = g), mean)", "result = st.aggregate(x, {'p': g}, st._rmean)", list(x = x1, g = rep(c(3, 1, 2), length.out = 37)), jl = "result = st.aggregate(x, [\"p\" => g], v -> SL.RStats._rmean(v))")
-cs("aggregate_2", "aggregate(x, list(p1 = g, p2 = h), median)", "result = st.aggregate(x, {'p1': g, 'p2': h}, st.median)",
-   list(x = x1, g = rep(1:3, length.out = 37), h = rep(c(0.5, 0.1), length.out = 37)), jl = "result = st.aggregate(x, [\"p1\" => g, \"p2\" => h], st.median)")
+cs("ecdf_a", "F <- ecdf(x); F(c(-5, x[1:5], 0, 5))", NULL, list(x = x2), jl = "F = st.ecdf(x)\nresult = F(vcat(-5, x[1:5], 0, 5))", nur = "jl")
+cs("ave_mean", "ave(x, g)", NULL, list(x = x1, g = rep(1:4, length.out = 37)), jl = "result = st.ave(x, g)", nur = "jl")
+cs("ave_sum2", "ave(x, g, h, FUN = sum)", NULL,
+   list(x = x1, g = rep(1:3, length.out = 37), h = rep(c(0, 1), each = 19)[1:37]), jl = "result = st.ave(x, g, h; FUN = v -> SL.r_sum(v))", nur = "jl")
+cs("ave_nog", "ave(x)", NULL, list(x = x1), jl = "result = st.ave(x)", nur = "jl")
+cs("aggregate_1", "aggregate(x, list(p = g), mean)", NULL, list(x = x1, g = rep(c(3, 1, 2), length.out = 37)), jl = "result = st.aggregate(x, [\"p\" => g], v -> SL.RStats._rmean(v))", nur = "jl")
+cs("aggregate_2", "aggregate(x, list(p1 = g, p2 = h), median)", NULL,
+   list(x = x1, g = rep(1:3, length.out = 37), h = rep(c(0.5, 0.1), length.out = 37)), jl = "result = st.aggregate(x, [\"p1\" => g, \"p2\" => h], st.median)", nur = "jl")
 
 ## ── base: colSums & Co. ─────────────────────────────────────────────────
-cs("base_colSums", "colSums(M)", "result = rb.colSums(M)", list(M = M), jl = "result = rb.colSums(M)")
-cs("base_colSums_na", "colSums(M, na.rm = TRUE)", "result = rb.colSums(M, na_rm=True)", list(M = Mna), jl = "result = rb.colSums(M; na_rm = true)")
-cs("base_colMeans", "colMeans(M)", "result = rb.colMeans(M)", list(M = Mna), jl = "result = rb.colMeans(M)")
-cs("base_colMeans_na", "colMeans(M, na.rm = TRUE)", "result = rb.colMeans(M, na_rm=True)", list(M = Mna), jl = "result = rb.colMeans(M; na_rm = true)")
-cs("base_rowSums", "rowSums(M)", "result = rb.rowSums(M)", list(M = Mna), jl = "result = rb.rowSums(M)")
-cs("base_rowSums_na", "rowSums(M, na.rm = TRUE)", "result = rb.rowSums(M, na_rm=True)", list(M = Mna), jl = "result = rb.rowSums(M; na_rm = true)")
-cs("base_rowMeans", "rowMeans(M)", "result = rb.rowMeans(M)", list(M = M), jl = "result = rb.rowMeans(M)")
-cs("base_rowMeans_na", "rowMeans(M, na.rm = TRUE)", "result = rb.rowMeans(M, na_rm=True)", list(M = Mna), jl = "result = rb.rowMeans(M; na_rm = true)")
-cs("base_rowMeans_df", "rowMeans(d)", "result = rb.rowMeans(d)", list(d = as.data.frame(M)), jl = "result = rb.rowMeans(d)")
-cs("base_cumprod", "cumprod(1 + x / 100)", "result = rb.cumprod(1 + x / 100)", list(x = x1), jl = "result = rb.r_cumprod(1 .+ x ./ 100)")
-cs("base_cumprod_na", "cumprod(x)", "result = rb.cumprod(x)", list(x = c(1.1, 2, NA, 3)), jl = "result = rb.r_cumprod(x)")
-cs("base_cummax", "cummax(x)", "result = rb.cummax(x)", list(x = xna), jl = "result = rb.r_cummax(x)")
-cs("base_cummin", "cummin(x)", "result = rb.cummin(x)", list(x = x1), jl = "result = rb.r_cummin(x)")
+cs("base_colSums", "colSums(M)", NULL, list(M = M), jl = "result = rb.colSums(M)", nur = "jl")
+cs("base_colSums_na", "colSums(M, na.rm = TRUE)", NULL, list(M = Mna), jl = "result = rb.colSums(M; na_rm = true)", nur = "jl")
+cs("base_colMeans", "colMeans(M)", NULL, list(M = Mna), jl = "result = rb.colMeans(M)", nur = "jl")
+cs("base_colMeans_na", "colMeans(M, na.rm = TRUE)", NULL, list(M = Mna), jl = "result = rb.colMeans(M; na_rm = true)", nur = "jl")
+cs("base_rowSums", "rowSums(M)", NULL, list(M = Mna), jl = "result = rb.rowSums(M)", nur = "jl")
+cs("base_rowSums_na", "rowSums(M, na.rm = TRUE)", NULL, list(M = Mna), jl = "result = rb.rowSums(M; na_rm = true)", nur = "jl")
+cs("base_rowMeans", "rowMeans(M)", NULL, list(M = M), jl = "result = rb.rowMeans(M)", nur = "jl")
+cs("base_rowMeans_na", "rowMeans(M, na.rm = TRUE)", NULL, list(M = Mna), jl = "result = rb.rowMeans(M; na_rm = true)", nur = "jl")
+cs("base_rowMeans_df", "rowMeans(d)", NULL, list(d = as.data.frame(M)), jl = "result = rb.rowMeans(d)", nur = "jl")
+cs("base_cumprod", "cumprod(1 + x / 100)", "result = simlev._r.rnum.r_cumprod(1 + x / 100)", list(x = x1), jl = "result = rb.r_cumprod(1 .+ x ./ 100)")
+cs("base_cumprod_na", "cumprod(x)", "result = simlev._r.rnum.r_cumprod(x)", list(x = c(1.1, 2, NA, 3)), jl = "result = rb.r_cumprod(x)")
+cs("base_cummax", "cummax(x)", "result = simlev._r.rnum.r_cummax(x)", list(x = xna), jl = "result = rb.r_cummax(x)")
+cs("base_cummin", "cummin(x)", NULL, list(x = x1), jl = "result = rb.r_cummin(x)", nur = "jl")
 cs("base_mean_mat", "mean(M)", "result = rb.mean(M)", list(M = M), jl = "result = rb.mean(M)")
-cs("base_diff", "diff(x)", "result = rb.diff(x)", list(x = x1), jl = "result = rb.r_diff(x)")
-cs("base_diff_lag", "diff(x, lag = 2, differences = 2)", "result = rb.diff(x, lag=2, differences=2)", list(x = x1), jl = "result = rb.r_diff(x; lag = 2, differences = 2)")
-cs("base_diff_mat", "diff(M)", "result = rb.diff(M)", list(M = unname(M)), jl = "result = rb.r_diff(M)")
+cs("base_diff", "diff(x)", "result = rb.diff(x)", list(x = x1), nur = "py")
+cs("base_diff_lag", "diff(x, lag = 2, differences = 2)", "result = rb.diff(x, lag=2, differences=2)", list(x = x1), nur = "py")
+cs("base_diff_mat", "diff(M)", "result = rb.diff(M)", list(M = unname(M)), nur = "py")
 cs("base_pmax", "pmax(x, 0.2)", "result = rb.pmax(x, 0.2)", list(x = xna), jl = "result = rb.pmax(x, 0.2)")
 cs("base_pmin_narm", "pmin(x, rev(x), na.rm = TRUE)", "result = rb.pmin(x, x[::-1], na_rm=True)", list(x = xna), jl = "result = rb.pmin(x, reverse(x); na_rm = true)")
-cs("base_range", "range(x)", "result = rb.range(x)", list(x = x1), jl = "result = rb.r_range(x)")
-cs("base_range_na", "range(x, na.rm = TRUE)", "result = rb.range(x, na_rm=True)", list(x = xna), jl = "result = rb.r_range(x; na_rm = true)")
+cs("base_range", "range(x)", "result = rb.range(x)", list(x = x1), nur = "py")
+cs("base_range_na", "range(x, na.rm = TRUE)", "result = rb.range(x, na_rm=True)", list(x = xna), nur = "py")
 
 ref_done()
 

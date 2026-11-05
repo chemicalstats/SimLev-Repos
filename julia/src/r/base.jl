@@ -16,7 +16,7 @@
 # `r_sd`, `r_cumsum`, `r_prod`, `r_rowsums`, `r_pow`, `r_pow_vec`, `r_mod1`,
 # `r_mean_int`) und ergänzt weitere Funktionen von R's base:
 # `colSums`, `colMeans`, `rowSums`, `rowMeans`, `r_cumprod`, `r_cummax`,
-# `r_cummin`, `mean`, `r_diff`, `pmin`, `pmax`, `r_range`.
+# `r_cummin`, `mean`, `pmin`, `pmax` (seit 1.6.1 ohne `r_diff`, `r_range`: nur Referenzfälle).
 # Vorlage: python/simlev/_r/base.py; maßgeblich R's `src/main/array.c`
 # (do_colsum), `cum.c`, `summary.c` (do_pmin, rmin/rmax).
 #
@@ -55,34 +55,19 @@ _fmat(m::AbstractMatrix) = Float64[v === missing ? NA : Float64(v) for v in m]
 
 _named(v::Vector{Float64}, nms) = nms === nothing ? v : RVector(v; names = nms)
 
-# Spalten- und Zeilensummen über den C-Kern (core/slc_rbase.cpp, long double wie R)
-_col_sums(a::Matrix{Float64}, na_rm::Bool, mean::Bool) = SimLev._rb_margsums(vec(a), size(a, 1), size(a, 2), na_rm, mean, false)
-
+# Spalten- und Zeilensummen über den C-Kern (core/slc_rbase.cpp, long double wie R); seit 1.6.1 eine Hülle
+function _margins(x, na_rm::Bool, mean::Bool, rows::Bool)
+    a, rn, cn = _mat(x)
+    return _named(SimLev._rb_margsums(vec(a), size(a, 1), size(a, 2), na_rm, mean, rows), rows ? rn : cn)
+end
 "`colSums(x, na.rm)` (long double je Spalte)."
-function colSums(x; na_rm::Bool = false)
-    a, rn, cn = _mat(x)
-    return _named(_col_sums(a, na_rm, false), cn)
-end
-
+colSums(x; na_rm::Bool = false) = _margins(x, na_rm, false, false)
 "`colMeans(x, na.rm)` (long-double-Summe / Anzahl)."
-function colMeans(x; na_rm::Bool = false)
-    a, rn, cn = _mat(x)
-    return _named(_col_sums(a, na_rm, true), cn)
-end
-
-_row_sums(a::Matrix{Float64}, na_rm::Bool, mean::Bool) = SimLev._rb_margsums(vec(a), size(a, 1), size(a, 2), na_rm, mean, true)
-
+colMeans(x; na_rm::Bool = false) = _margins(x, na_rm, true, false)
 "`rowSums(x, na.rm)` (spaltenweise in long double akkumuliert)."
-function rowSums(x; na_rm::Bool = false)
-    a, rn, cn = _mat(x)
-    return _named(_row_sums(a, na_rm, false), rn)
-end
-
+rowSums(x; na_rm::Bool = false) = _margins(x, na_rm, false, true)
 "`rowMeans(x, na.rm)`."
-function rowMeans(x; na_rm::Bool = false)
-    a, rn, cn = _mat(x)
-    return _named(_row_sums(a, na_rm, true), rn)
-end
+rowMeans(x; na_rm::Bool = false) = _margins(x, na_rm, true, true)
 
 # ── Vektoren ────────────────────────────────────────────────────────────────
 
@@ -120,29 +105,6 @@ function mean(x; na_rm::Bool = false)
     return r_mean(v; na_rm = na_rm)
 end
 
-"`diff(x, lag, differences)` für Vektoren und Matrizen (zeilenweise)."
-function r_diff(x; lag::Integer = 1, differences::Integer = 1)
-    if x isa AbstractMatrix || x isa RFrame
-        a, rn, cn = _mat(x)
-        for _ in 1:differences
-            size(a, 1) <= lag && return a[1:0, :]
-            a = a[lag+1:end, :] .- a[1:end-lag, :]
-        end
-        if rn !== nothing || cn !== nothing
-            return NamedMat(a; rownames = rn === nothing ? nothing : rn[lag*differences+1:end], colnames = cn)
-        end
-        return a
-    end
-    v, nm = _vec(x)
-    for _ in 1:differences
-        length(v) <= lag && return Float64[]
-        v = v[lag+1:end] .- v[1:end-lag]
-        nm === nothing || (nm = nm[lag+1:end])
-    end
-    return _named(v, nm)
-end
-r_diff(x, lag::Integer, differences::Integer = 1) = r_diff(x; lag = lag, differences = differences)
-
 function _pext(args, na_rm::Bool, greater::Bool)
     isempty(args) && error("no arguments")
     vals = [_vec(a) for a in args]
@@ -170,32 +132,5 @@ end
 pmax(args...; na_rm::Bool = false) = _pext(args, na_rm, true)
 "`pmin(..., na.rm)`."
 pmin(args...; na_rm::Bool = false) = _pext(args, na_rm, false)
-
-"`range(..., na.rm, finite)` = `c(min, max)`."
-function r_range(args...; na_rm::Bool = false, finite::Bool = false)
-    v = isempty(args) ? Float64[] : reduce(vcat, [_vec(a)[1] for a in args])
-    if finite
-        v = filter(isfinite, v)
-    elseif na_rm
-        v = filter(!isnan, v)
-    else
-        if any(isna_strict, v)
-            return [NA, NA]
-        elseif any(isnan, v)
-            return [NaN, NaN]
-        end
-    end
-    if isempty(v)
-        @warn "no non-missing arguments to min; returning Inf"
-        @warn "no non-missing arguments to max; returning -Inf"
-        return [Inf, -Inf]
-    end
-    lo = v[1]; hi = v[1]
-    for t in v
-        t < lo && (lo = t)
-        t > hi && (hi = t)
-    end
-    return [lo, hi]
-end
 
 end # module

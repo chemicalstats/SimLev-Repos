@@ -11,6 +11,7 @@
 module DeepAnalysis
 
 import ..SimLev
+using ..SimLev: _match_arg, _which_min   # util.jl (seit 1.6.1 eine Fassung)
 using ..SimLev: _AnaSvg, _MONATE_KURZ, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_ramp, _ana_rect,
                 _ana_svg_done, _ana_text, _ana_year_ticks
 using Dates
@@ -106,27 +107,6 @@ function _rmin(x)
     upd || @warn "no non-missing arguments to min; returning Inf"
     s
 end
-"`which.min(x)` (erstes Minimum, NaN ignoriert; 0 = keines)."
-function _which_min(x)
-    k = 0; m = Inf
-    for (i, v) in enumerate(x)
-        isnan(v) && continue
-        if k == 0 || v < m
-            k = i; m = v
-        end
-    end
-    k
-end
-function _which_max(x)
-    k = 0; m = -Inf
-    for (i, v) in enumerate(x)
-        isnan(v) && continue
-        if k == 0 || v > m
-            k = i; m = v
-        end
-    end
-    k
-end
 
 "R's `cummax()` (NA/NaN pflanzen sich fort)."
 function _cummax(x::AbstractVector)
@@ -160,9 +140,6 @@ function _col_means(M::AbstractMatrix; na_rm::Bool = false)
     end
     out
 end
-
-"`rowMeans(M)`: long-double-Summe über Spalten / p."
-_row_means(M::AbstractMatrix) = SimLev._ld_rowsums(M; mean = true)   # C-Kern
 
 # ── Datum ───────────────────────────────────────────────────────────────────
 
@@ -207,30 +184,6 @@ function _key_isoweek(days)
 end
 
 # ── Argumente ───────────────────────────────────────────────────────────────
-
-"Nachbildung von R's `match.arg(arg)` mit R's Meldungen."
-function _match_arg(value, choices)
-    choices = String[String(c) for c in choices]
-    value === nothing && return choices[1]
-    if value isa Union{AbstractVector,Tuple}
-        all(v -> v isa AbstractString, value) || error("'arg' must be NULL or a character vector")
-        String[String(v) for v in value] == choices && return choices[1]
-        length(value) > 1 && error("'arg' must be of length 1")
-        value = isempty(value) ? "" : first(value)
-    end
-    value isa Union{AbstractString,Symbol} || error("'arg' must be NULL or a character vector")
-    v = String(string(value))
-    i = findfirst(==(v), choices)
-    if i === nothing && !isempty(v)
-        hits = findall(c -> startswith(c, v), choices)
-        length(hits) == 1 && (i = hits[1])
-    end
-    if i === nothing
-        chs = unique(filter(!isempty, choices))
-        error((length(chs) == 1 ? "'arg' should be " : "'arg' should be one of ") * join(("“$(c)”" for c in chs), ", "))
-    end
-    choices[i]
-end
 
 "Element eines Ergebnisobjekts (Feld oder Schlüssel; fehlt → nothing)."
 function _rget(x, name::AbstractString, default = nothing)
@@ -552,7 +505,7 @@ function _da_drawdowns(date, value, top = 10)
     tr = Int[]
     for k in 1:maximum(seg)
         r = rws[seg .== k]
-        push!(tr, r[_which_min(dd[r])])
+        push!(tr, r[something(_which_min(dd[r]), 0)])
     end
     s0 = max.(1, st .- 1); rec = en .+ 1; opn = rec .> n
     recc = min.(rec, n)
@@ -977,6 +930,8 @@ function result_analysis(x; benchmark = nothing, risk_free = 0, rolling_years = 
         Rd = reduce(hcat, [_ratio_m1(ser[k].value[_match(common, ser[k].date)]) for k in order])
         cor_d = SimLev.NamedMat(_cor_mat(Rd); rownames = order, colnames = order)
         Rm = reduce(hcat, [_ratio_m1(_da_period_values(common, ser[k].value[_match(common, ser[k].date)], "month").value) for k in order])
+        # vapply() liefert bei einer Monatsrendite einen Vektor: cor() wie R mit Fehler (seit 1.5.1)
+        size(Rm, 1) == 1 && error("supply both 'x' and 'y' or a matrix-like 'x'")
         cor_m = SimLev.NamedMat(_cor_mat(Rm); rownames = order, colnames = order)
     end
     series = SimLev.RList()

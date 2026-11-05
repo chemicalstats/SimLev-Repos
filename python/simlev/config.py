@@ -15,6 +15,7 @@ import numpy as np
 from ._r.rlist import RList
 from ._r.rformat import r_deparse, r_format1, r_sprintf
 from ._r.rnum import r_sum
+from ._util import _match_arg   # seit 1.5.2 in _util (auch für _sim_base.py)
 
 __all__ = [
     "AssetConfig",
@@ -32,41 +33,6 @@ _ACTION_TYPES = ("bnh", "signal")
 _VALID_REGIMES = ("investment_fund", "capital_gains", "private_sale")
 _FIELDS = ("asset_class", "trading", "share", "spread", "partial_exemption",
            "deliverable", "start", "tax_regime", "signal_buy", "signal_sell", "wrapper")
-
-
-def _pmatch(value: str, choices: tuple) -> int | None:
-    if value in choices:
-        return choices.index(value)
-    if not value:
-        return None
-    hits = [i for i, c in enumerate(choices) if c.startswith(value)]
-    return hits[0] if len(hits) == 1 else None
-
-
-def _match_arg(value: Any, choices: Iterable[str], argname: str = "arg") -> str:
-    """Nachbildung von R's ``match.arg`` (inkl. eindeutiger Präfixe und R-Meldungen)."""
-    choices = tuple(choices)
-    if value is None:
-        return choices[0]
-    if isinstance(value, (list, tuple)):
-        if tuple(value) == choices:
-            return choices[0]
-        if not all(isinstance(v, str) for v in value):
-            raise ValueError("'arg' must be NULL or a character vector")
-        if len(value) > 1:
-            raise ValueError("'arg' must be of length 1")
-        if len(value) == 0:
-            value = ""
-        else:
-            value = value[0]
-    if not isinstance(value, str):
-        raise ValueError("'arg' must be NULL or a character vector")
-    i = _pmatch(value, choices)
-    if i is None:
-        chs = [c for c in dict.fromkeys(choices) if c]
-        raise ValueError(("'arg' should be %s" if len(chs) == 1 else "'arg' should be one of %s")
-                         % ", ".join("“%s”" % c for c in chs))
-    return choices[i]
 
 
 def _is_num1(x: Any) -> bool:

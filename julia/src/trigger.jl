@@ -41,6 +41,13 @@ end
 
 _f64(x) = x === missing || x === nothing ? NA : Float64(x)
 _first_obs(v) = (i = findfirst(!isnan, v); i === nothing ? length(v) : i)
+# Spalte als Vector{Float64} und erste Beobachtung (seit 1.6.1 eine Hilfe für beide Auslöser)
+function _trig_series(df, name::AbstractString)
+    col = _getcol(df, name)
+    col === nothing && error("Spalte '$name' fehlt.")
+    v = Float64[_f64(x) for x in col]
+    return v, _first_obs(v)
+end
 
 """
     rebalance_trigger(df, type; threshold = 10, lev_col = "target_leverage",
@@ -113,10 +120,7 @@ function rebalance_trigger(df, type::AbstractString; threshold::Real = 10,
     thr = threshold / 100
     trig = falses(n)
     if type == "abs_leverage" || type == "rel_leverage"
-        col = _getcol(df, lev_col)
-        col === nothing && error("Spalte '$lev_col' fehlt.")
-        lev = Float64[_f64(x) for x in col]
-        t0 = _first_obs(lev)
+        lev, t0 = _trig_series(df, lev_col)
         held = lev[t0]
         for t in t0+1:n
             v = lev[t]
@@ -130,10 +134,7 @@ function rebalance_trigger(df, type::AbstractString; threshold::Real = 10,
             end
         end
     elseif type == "vol_band"
-        col = _getcol(df, vol_col)
-        col === nothing && error("Spalte '$vol_col' fehlt.")
-        vol = Float64[_f64(x) for x in col]
-        t0 = _first_obs(vol)
+        vol, t0 = _trig_series(df, vol_col)
         ref = vol[t0]
         for t in t0+1:n
             v = vol[t]

@@ -82,13 +82,24 @@ def _cmp(op, a, b):
     return res & ~na
 
 
+def _sig_clean(v):
+    """Logischer Vektor ohne NA (NA, NaN und ``None`` → ``False``); Schnellweg für bool- und float64-Felder (seit
+    1.6.1, gleiche Werte wie die Schleife: ``bool(x)`` ist dort ``x != 0``)."""
+    a = np.asarray(v)
+    if a.dtype == np.bool_:
+        return a.ravel().astype(bool)
+    if a.dtype == np.float64:
+        a = a.ravel()
+        return ~np.isnan(a) & (a != 0)
+    return np.array([bool(x) if x is not None and not (isinstance(x, float) and math.isnan(x)) else False
+                     for x in np.asarray(v, dtype=object).ravel()], dtype=bool)
+
+
 def _sig_out(buy, sell, lag=0):
     """Signale um ``lag`` Zeilen verzögern und NA bereinigen."""
     lag = int(lag)
-    buy = np.array([bool(v) if v is not None and not (isinstance(v, float) and math.isnan(v)) else False
-                    for v in np.asarray(buy, dtype=object).ravel()], dtype=bool)
-    sell = np.array([bool(v) if v is not None and not (isinstance(v, float) and math.isnan(v)) else False
-                     for v in np.asarray(sell, dtype=object).ravel()], dtype=bool)
+    buy = _sig_clean(buy)
+    sell = _sig_clean(sell)
     if lag > 0:
         m = len(buy)
         buy = np.concatenate([np.zeros(lag, dtype=bool), buy[: m - lag]])

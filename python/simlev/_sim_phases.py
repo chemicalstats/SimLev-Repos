@@ -473,9 +473,9 @@ def _sim_prepare_data(fr: _Frame, pre_filled: np.ndarray, base_rate_flex, base_r
     return {"data": fr, "start_date": start_date, "stopp_date": stopp_date}
 
 
-def _signal_col(fr: _Frame, col: str | None, n: int) -> np.ndarray:
+def _signal_col(fr: _Frame, col: str | None, n: int) -> np.ndarray | None:
     if col is None:
-        return np.array([False] * n, dtype=object)
+        return None   # keine Spalte: der Kern liest FALSE an jedem Tag (seit 1.6.1; bis 1.6.0 ein Feld aus False je Tag)
     v = fr.get(col)
     if fr.kinds[col] == "numeric":
         return np.array(v, dtype=np.float64)

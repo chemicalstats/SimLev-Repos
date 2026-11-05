@@ -26,7 +26,9 @@ Aufruf::
 ``--check`` prüft zusätzlich, dass ``core/slc_constants.h`` dem Stand von
 ``core/gen_constants.py`` entspricht und (seit 1.6.0) die Meldungstabellen ``r/R/meldungen.R``,
 ``python/simlev/_meldungen.py`` und ``julia/src/meldungen.jl`` dem Stand von ``core/meldungen.tsv``
-(``core/gen_meldungen.py --check``; ``--write`` schreibt sie). Nur Standardbibliothek.
+(``core/gen_meldungen.py --check``; ``--write`` schreibt sie) und (seit 1.6.1), dass ``r/src/Makevars`` und
+``Makevars.win`` für jede ``.cpp``-Datei in ``r/src/`` eine eigene Regel mit den Gleitkomma-Schaltern haben. Nur
+Standardbibliothek.
 """
 from __future__ import annotations
 
@@ -106,6 +108,21 @@ def stale(target: str, files: list[str]) -> list[str]:
                   if (is_slc(f) or is_old_c(f) or is_shared(f) or is_cabi(f)) and f not in keep)
 
 
+def check_makevars() -> int:
+    """Je .cpp in r/src/ eine Regel ``x.o: x.cpp`` mit ``$(SIMLEV_CXXFLAGS)`` in Makevars und Makevars.win (seit 1.6.1)."""
+    d = os.path.join(ROOT, "r", "src")
+    srcs = sorted(f for f in os.listdir(d) if f.endswith(".cpp"))
+    bad = 0
+    for mk in ("Makevars", "Makevars.win"):
+        txt = open(os.path.join(d, mk), encoding="utf-8").read()
+        for f in srcs:
+            o = f[:-4] + ".o"
+            if "%s: %s\n\t$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c %s -o %s" % (o, f, f, o) not in txt:
+                print("core_sync: r/src/%s: keine Regel für %s" % (mk, f))
+                bad += 1
+    return bad
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     g = ap.add_mutually_exclusive_group(required=True)
@@ -162,6 +179,7 @@ def main(argv=None) -> int:
                     print("core_sync: %s/%s am alten Ort (jetzt python/src/core/)" % (rel, f))
                     bad += 1
     if a.check:
+        bad += check_makevars()
         print("core_sync: %d Kopien geprüft, %s" % (n, "alle gleich" if bad == 0 else "%d Abweichungen" % bad))
     return 1 if bad else 0
 

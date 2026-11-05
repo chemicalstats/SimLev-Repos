@@ -58,8 +58,11 @@ SLC_HEADERS = sorted(os.path.relpath(f, os.path.join(_HERE, "src")).replace(os.s
 HEADERS = SHARED_HEADERS + ["_ext_common.h"] + SLC_HEADERS
 
 
-# wie R ohne -fwrapv, nur wenn der Compiler die Option ohne Warnung annimmt
-OPTIONAL_FLAGS = {"unix": ["-fstrict-overflow"], "mingw32": ["-fstrict-overflow"]}
+# wie R ohne -fwrapv, nur wenn der Compiler die Option ohne Warnung annimmt; seit 1.6.1 außerdem Sprünge nicht über
+# 32-Byte-Grenzen (GNU as; Intel-JCC-Erratum: sonst schwankt die Laufzeit der Kerne je nach Lage im Code um bis zu
+# 30 %; ändert nur die Auffüllung, nicht die Befehle), ebenfalls nur, wenn der Assembler die Option kennt
+OPTIONAL_FLAGS = {"unix": ["-fstrict-overflow", "-Wa,-mbranches-within-32B-boundaries"],
+                  "mingw32": ["-fstrict-overflow"]}
 
 
 def _accepts(compiler, flag):

@@ -350,6 +350,7 @@ static inline int prepare(const PrepIn& I, const PrepOut& O) {
   for (int64_t a = 0; a < na; a++) {
     if (I.style[a] != 1) continue;
     const double *b = I.sig_buy[a], *s = I.sig_sell[a];
+    if (!b || !s) return 1;   // leere Zeiger nur ohne Signalstil (seit 1.6.1)
     for (int64_t i = 0; i < n; i++) {
       const int x = b[i] != b[i] ? 2 : b[i] != 0, y = s[i] != s[i] ? 2 : s[i] != 0;
       const int v = (x == 1 || y == 1) ? 1 : ((x == 2 || y == 2) ? 2 : 0);

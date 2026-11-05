@@ -28,7 +28,7 @@ from ._r.rnum import r_colmeans, r_cummax, r_cumsum, r_mean, r_mean_int, r_pow, 
 # Grafik: Bausteine des Stils Analysegrafiken und Zahlen wie in Julia aus svg.py
 from .svg import (_MONATE_KURZ, _AnaSvg, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_ramp, _ana_rect,
                   _ana_svg_done, _ana_text, _ana_year_ticks, _jl_max, _jl_maximum, _jl_min, _jl_minimum)
-from ._util import _match_arg_r as _match_arg
+from ._util import _dates, _days, _match_arg
 from ._util import _ext
 
 __all__ = ["result_analysis", "SimLevAnalysis"]
@@ -50,26 +50,6 @@ def _stats(name):
 def _message(text):
     """``message()``: Hinweis auf stderr."""
     sys.stderr.write(text + "\n")
-
-
-def _days(d):
-    """Datum (``datetime64``-Array) → Tage seit 1970 als float64 (NaT → NaN)."""
-    a = np.asarray(d)
-    if a.dtype.kind == "M":
-        a = a.astype("datetime64[D]")
-        out = (a - _EPOCH).astype(np.int64).astype(np.float64)
-        out[np.isnat(a)] = _NA
-        return out
-    return np.asarray(a, dtype=np.float64)
-
-
-def _dates(days):
-    """Tage seit 1970 (float) → ``datetime64[D]``-Array (NaN → NaT)."""
-    a = np.asarray(days, dtype=np.float64)
-    out = np.full(a.shape, np.datetime64("NaT", "D"), dtype="datetime64[D]")
-    ok = ~np.isnan(a)
-    out[ok] = _EPOCH + a[ok].astype(np.int64).astype("timedelta64[D]")
-    return out
 
 
 def _to_date_days(x, what):

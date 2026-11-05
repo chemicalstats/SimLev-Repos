@@ -2,8 +2,8 @@
 
 Diese Datei ist erzeugt; nicht von Hand ändern.
 
-- **Erzeugt** mit `tests/schnittstelle/run.sh` (Auszüge `api_r.R`, `api_py.py`, `api_jl.jl`, Vergleich `compare_api.py`, diese Datei `make_struktur.py`) aus `tests/schnittstelle/api.json`.
-- **Stand:** 2026-11-03.
+- **Erzeugt** mit `tests/schnittstelle/run.py` (Auszüge `api_r.R`, `api_py.py`, `api_jl.jl`, Vergleich `compare_api.py`, diese Datei `make_struktur.py`) aus `tests/schnittstelle/api.json`.
+- **Stand:** 2026-11-04.
 - **Umfang:** R 116 Exporte und 78 S3-Methoden, Python 119 Funktionen und 79 Methoden, Julia 129 Funktionen und 77 Methoden.
 - **Zuordnung:** R `a.b` → `a_b`; S3-Methode `<generic>.<Klasse>` → Python `<Klasse>.<generic>` (print über `.print` bzw. `.format`), Julia registrierte Methode (`show`, `r_summary`, `r_plot`). Regeln: `python/DEVELOPING.md`, `julia/DEVELOPING.md`.
 - **Abweichungen** der Argumente und Standardwerte meldet `compare_api.py`; bekannte stehen in `tests/schnittstelle/known_differences.tsv`.

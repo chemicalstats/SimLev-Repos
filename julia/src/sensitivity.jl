@@ -102,7 +102,7 @@ g = sensitivity_grid(d, st, ("rebalance.unit" => ["month", "year"],); sim_args =
 println(g)
 ```
 """
-function sensitivity_grid(data, strategy, grid; sim_args = nothing, metrics = nothing, keep_results::Bool = false,
+SimLev.@study function sensitivity_grid(data, strategy, grid; sim_args = nothing, metrics = nothing, keep_results::Bool = false,
                           cores = 1)
     data = SimLev.as_rframe(data)
     metrics = _metrics(metrics)
@@ -216,7 +216,7 @@ println(sensitivity_rebalancing(d, st; frequencies = (monthly = ["month", 1], ye
                                 bands = [missing, 5]))
 ```
 """
-function sensitivity_rebalancing(data, strategy; frequencies = nothing, offsets = nothing, bands = missing,
+SimLev.@study function sensitivity_rebalancing(data, strategy; frequencies = nothing, offsets = nothing, bands = missing,
                                  band_type = nothing, include_none::Bool = true, sim_args = nothing, metrics = nothing,
                                  cores = 1)
     data = SimLev.as_rframe(data)
@@ -355,7 +355,7 @@ ld = planning_lumpsum_vs_dca(d, create_strategy(ETF = asset_config("etf")); amou
 println(ld)
 ```
 """
-function planning_lumpsum_vs_dca(data, strategy; amount = 10000, months = 12, horizon = 10, step = 1, sim_args = nothing,
+SimLev.@study function planning_lumpsum_vs_dca(data, strategy; amount = 10000, months = 12, horizon = 10, step = 1, sim_args = nothing,
                         cores = 1)
     data = SimLev.as_rframe(data)
     sim_args = SL.RList(SL._sim_kv(sim_args)...)
@@ -558,7 +558,7 @@ lv = sensitivity_leverage(d, "idx"; leverages = [1, 1.5, 2, 3], rate = 2, expens
 println(lv)
 ```
 """
-function sensitivity_leverage(data, index; leverages = nothing, rate = 0, expense = 0, spread = 0, strategy = nothing,
+SimLev.@study function sensitivity_leverage(data, index; leverages = nothing, rate = 0, expense = 0, spread = 0, strategy = nothing,
                               sim_args = nothing, metrics = nothing, cores = 1)
     data = SimLev.as_rframe(data)
     leverages = leverages === nothing ? PS._seq_by(0.5, 4, 0.25) : OF._tofloat(PS._vec(leverages))
@@ -589,8 +589,8 @@ function sensitivity_leverage(data, index; leverages = nothing, rate = 0, expens
     end
     SL.attrs(tab)["kind"] = "leverage"
     lv = tab["leverage"]
-    jc = haskey(tab, "cagr") ? OF._which_max(tab["cagr"]) : nothing
-    js = haskey(tab, "sharpe") ? OF._which_max(tab["sharpe"]) : nothing
+    jc = haskey(tab, "cagr") ? SimLev._which_max(tab["cagr"]) : nothing
+    js = haskey(tab, "sharpe") ? SimLev._which_max(tab["sharpe"]) : nothing
     # R: c(cagr = lev[which.max(cagr)], sharpe = ...): ein leeres which.max lässt das Element weg
     on = String[]; ov = Float64[]
     jc === nothing || (push!(on, "cagr"); push!(ov, lv[jc]))
@@ -652,7 +652,7 @@ function _plot_sens(x; metric = "cagr", file = nothing, kw...)
         lv = OF._tofloat(x["leverage"])
         p = _res_panel(f, 70, 40, 620, 360, _res_range(lv), _res_range(y); title = "$metric nach Hebel", xlab = "Hebel", ylab = metric)
         _res_line!(f, p, lv, y); _res_points!(f, p, lv, y)
-        j = OF._which_max(x[metric])
+        j = SimLev._which_max(x[metric])
         j === nothing || _res_vline!(f, p, lv[j]; width = 1, dash = "2,3")
         data = SL.RList("leverage" => SL.RFrame("leverage" => lv, "value" => OF._tofloat(x[metric])))
     else

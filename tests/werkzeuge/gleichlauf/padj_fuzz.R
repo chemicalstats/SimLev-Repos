@@ -6,7 +6,7 @@
 # Erzeugt <n> Fälle im Format der Referenzfälle (tests/gleichlauf/erzeugen/ref_tools.R) als Modul padj_fuzz:
 #   - p-Fälle: p.adjust mit allen acht Verfahren (auch abgekürzt), 0 bis 60 Werten mit NA/NaN, Bindungen, 0 und 1,
 #     Namen (auch Nicht-ASCII), n größer als die Zahl der Werte; Fehler (n zu klein, unbekanntes Verfahren).
-#   - e-Fälle: ecdf(x)(v) mit Bindungen, ±0, ±Inf, NA/NaN in x; Fehler (keine Werte).
+#   - e-Fälle: ecdf(x)(v) mit Bindungen, ±0, ±Inf, NA/NaN in x; Fehler (keine Werte). Seit 1.6.1 nur Julia (nur = "jl").
 # Warnungen und Fehler mit ihren Aufrufen (r_calls) wie sim_fuzz.R.
 #
 # Prüfung (tests/werkzeuge/gleichlauf/run.py, Schritt 5): Referenz aus R 1.5.2 (R_LIBS=/home/claude/rlib152), R neu mit
@@ -18,8 +18,8 @@ ref_bereich("padj_fuzz", alle = TRUE); ref_init("padj_fuzz")
 pick <- function(x) x[[sample.int(length(x), 1L)]]
 coin <- function(p) runif(1) < p
 
-fuzz_case <- function(id, r, py, jl, inputs) {
-  ref_case(id, r = r, py = py, jl = jl, inputs = inputs)
+fuzz_case <- function(id, r, py, jl, inputs, nur = NULL) {   # nur: seit 1.6.1 (Nachbildung einer Sprache entfallen)
+  ref_case(id, r = r, py = py, jl = jl, inputs = inputs, nur = nur)
   if (!.ref_in_subset(id)) return(invisible(NULL))
   env <- new.env(parent = globalenv())
   for (k in names(inputs)) assign(k, inputs[[k]], envir = env)
@@ -60,9 +60,9 @@ for (kk in seq_len(N)) {
     if (n > 0 && coin(0.3)) x[sample.int(n, max(1, n %/% 5))] <- pick(c(NA, NaN, Inf, -Inf))
     v <- c(-Inf, -2, -1, -0.5, -0, 0, 0.3, 1, 1.5, 2, Inf, NA)
     r <- "ecdf(x)(v)"
-    py <- sprintf("%sresult = st.ecdf(%s)(v)", PH, if (n == 1) "np.atleast_1d(x)" else "x")
     jl <- sprintf("%sresult = st.ecdf(%s)(v)", JH, if (n == 1) "[x]" else "x")
-    fuzz_case(sprintf("e%05d", kk), r = r, py = py, jl = jl, inputs = list(x = x, v = v))
+    # ecdf nur noch in Julia (Python-Nachbildung seit 1.6.1 ohne Aufrufer entfallen)
+    fuzz_case(sprintf("e%05d", kk), r = r, py = NULL, jl = jl, inputs = list(x = x, v = v), nur = "jl")
   }
 }
 ref_done(); ref_schreiben()

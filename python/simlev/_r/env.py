@@ -2,7 +2,7 @@
 
 Alle übrigen Stellen (Paket, Tests, Werkzeuge) holen die Werte über diese Funktionen. Jede
 Funktion liest die Umgebung bei jedem Aufruf neu; wann gelesen wird, bestimmt der Aufrufer
-(z. B. die Tests beim Laden, ``_collate`` beim ersten Vergleich nach ``collate_reset()``).
+(z. B. die Tests beim Laden, ``_collate`` beim ersten Vergleich).
 
 | Schalter | Zweck | Art |
 |---|---|---|

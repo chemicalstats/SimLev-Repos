@@ -453,6 +453,7 @@ class Engine {
   const double* day = nullptr;             // flag_date als Tageszahl (n)
   std::vector<AssetIn> in;
   std::vector<std::vector<double>> px;     // Kurse je Asset (Kopie; Splits rechnen sie um)
+  std::vector<double> no_sig;              // seit 1.6.1: FALSE an jedem Tag fuer Assets ohne Signalspalte (leerer Zeiger)
   std::vector<char> px_changed;            // Kursreihe durch einen Split geaendert
   int fractions = 0, fees_on = 0, balance_mode = 0, balance_dca = 0;
   int thresh_set = 0, thresh_relative = 0, has_event_weight = 0;
@@ -493,6 +494,7 @@ class Engine {
     in.assign((std::size_t) na, AssetIn());
     rep.assign((std::size_t) na, ReportOut{nullptr, nullptr, nullptr, nullptr, nullptr});
     px.assign((std::size_t) na, std::vector<double>());
+    no_sig.clear();
     px_changed.assign((std::size_t) na, 0);
   }
 
@@ -554,10 +556,16 @@ class Engine {
     has_event_weight = I.event_w != nullptr;
     for (int a = 0; a < na; a++) {
       AssetIn& A = in[a];
-      if (!I.price[a] || !I.sig_buy[a] || !I.sig_sell[a]) return 2;
+      if (!I.price[a]) return 2;
+      // Seit 1.6.1 darf ein Asset ohne Signalstil (bnh) leere Zeiger fuer die Signale haben (Python, Julia: keine
+      // Spalte); sie lesen sich wie FALSE an jedem Tag, also wie die bis 1.6.0 von den Hosts angelegten Nullspalten.
+      if (!I.sig_buy[a] || !I.sig_sell[a]) {
+        if (I.ai[(std::size_t) AI_N * a + AI_STYLE] == 1) return 2;
+        if (no_sig.empty()) no_sig.assign((std::size_t) n, 0.0);
+      }
       px[a].assign(I.price[a], I.price[a] + n);
-      A.sig_buy = I.sig_buy[a];
-      A.sig_sell = I.sig_sell[a];
+      A.sig_buy = I.sig_buy[a] ? I.sig_buy[a] : no_sig.data();
+      A.sig_sell = I.sig_sell[a] ? I.sig_sell[a] : no_sig.data();
       A.event_w = I.event_w ? I.event_w[a] : nullptr;
       A.base_rates = I.base_rates ? I.base_rates[a] : nullptr;
       const int32_t* ai = I.ai + (std::size_t) AI_N * a;

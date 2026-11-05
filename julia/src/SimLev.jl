@@ -40,6 +40,7 @@ include("meldungen.jl")       # Meldungstabellen der Kerne (erzeugt aus core/mel
 include("r/stats.jl")
 include("r/linalg.jl")
 include("r/rexpr.jl")
+include("util.jl")           # interne Hilfen mehrerer Module (match.arg, which.max; seit 1.6.1)
 
 # Engine: simulation() mit Strategie, Config, Ergebnis und Dashboard
 include("dates.jl")

@@ -268,36 +268,6 @@ function _pretty_num_chr(x::Vector{_Str}; big_mark = "", big_interval = 3, small
     return res
 end
 
-"""
-    prettyNum(x; big_mark = "", big_interval = 3, small_mark = "", small_interval = 5,
-              decimal_mark = nothing, input_d_mark = nothing, preserve_width = "common",
-              zero_print = nothing, replace_zero = false, drop0trailing = false, kw...)
-
-`prettyNum(x, ...)`: Tausender-/Dezimaltrenner in formatierte Zahlen.
-"""
-function prettyNum(x; big_mark = "", big_interval = 3, small_mark = "", small_interval = 5, decimal_mark = nothing,
-                   input_d_mark = nothing, preserve_width = "common", zero_print = nothing, replace_zero = false,
-                   drop0trailing = false, kw...)
-    dec = decimal_mark === nothing ? _OPT[:OutDec] : decimal_mark
-    idm = input_d_mark === nothing ? dec : input_d_mark
-    v = _as_v(x)
-    if v.type !== :character
-        strs = _Str[]
-        for i in 1:length(v)
-            r = _format(_subset(v, [i]), nothing; big_mark, big_interval, small_mark, small_interval, decimal_mark = dec,
-                        zero_print, drop0trailing, kw...)
-            r = r isa AbstractVector ? r[1] : r
-            push!(strs, r === missing ? nothing : r)
-        end
-        res = _pretty_num_chr(strs; big_mark, big_interval, small_mark, small_interval, decimal_mark = dec,
-                              input_d_mark = idm, preserve_width, zero_print, replace_zero, drop0trailing, not_char = true)
-    else
-        res = _pretty_num_chr(copy(v.s); big_mark, big_interval, small_mark, small_interval, decimal_mark = dec,
-                              input_d_mark = idm, preserve_width, zero_print, replace_zero, drop0trailing)
-    end
-    return _out(res, v)
-end
-
 # ── formatC ────────────────────────────────────────────────────────────────
 
 """
@@ -526,26 +496,4 @@ function _format_date_list(days::AbstractVector{Float64}, fmts::AbstractVector)
         end
     end
     return out
-end
-
-"""
-    format_date(x, fmt = "%Y-%m-%d")
-
-`format(<Date>, fmt)` wie `format.Date`/`strftime` in der C-Locale. `x`:
-`Date`, Tage seit 1970-01-01 (Zahl), ISO-Text oder Vektor davon; NA → `missing`.
-"""
-function format_date(x, fmt = "%Y-%m-%d")
-    v = _as_v(x)
-    if v.type in (:double, :integer)
-        v = _coerce(v, :Date)
-    elseif v.type === :character
-        days = Float64[]
-        for s in v.s
-            d = s === nothing || length(s) < 10 ? nothing : tryparse(Date, s[1:10], dateformat"yyyy-mm-dd")
-            push!(days, d === nothing ? NaN : _days(d))
-        end
-        v = _Vdate(days, Bool[isnan(z) for z in days]; names = v.names, scalar = v.scalar)
-    end
-    fv = _as_v(fmt, "character")
-    return _out(_format_date_list(v.d, fv.s), v)
 end

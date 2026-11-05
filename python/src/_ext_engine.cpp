@@ -113,13 +113,14 @@ PyObject* e_engine_run(PyObject*, PyObject* a) {
     std::vector<double*> prep((std::size_t) (5 * na));
     for (Py_ssize_t k = 0; k < na; k++) {
         ext::Buf* b = &bufs[(std::size_t) (10 * k)];
+        PyObject *osb = PyList_GET_ITEM(o_sb, k), *oss = PyList_GET_ITEM(o_ss, k);   // None: keine Signalspalte (seit 1.6.1)
         if (!ext::get(PyList_GET_ITEM(o_prices, k), b[0], 'd', false, fn, "prices", n) ||
-            !ext::get(PyList_GET_ITEM(o_sb, k), b[1], 'd', false, fn, "sig_buy", n) ||
-            !ext::get(PyList_GET_ITEM(o_ss, k), b[2], 'd', false, fn, "sig_sell", n))
+            (osb != Py_None && !ext::get(osb, b[1], 'd', false, fn, "sig_buy", n)) ||
+            (oss != Py_None && !ext::get(oss, b[2], 'd', false, fn, "sig_sell", n)))
             return nullptr;
         pp[k] = b[0].d();
-        psb[k] = b[1].d();
-        pss[k] = b[2].d();
+        psb[k] = osb == Py_None ? nullptr : b[1].d();
+        pss[k] = oss == Py_None ? nullptr : b[2].d();
         if (o_ew != Py_None && PyList_GET_ITEM(o_ew, k) != Py_None) {
             if (!ext::get(PyList_GET_ITEM(o_ew, k), b[3], 'd', false, fn, "event_w", n)) return nullptr;
             pew[k] = b[3].d();

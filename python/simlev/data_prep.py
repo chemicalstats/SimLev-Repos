@@ -34,7 +34,7 @@ from ._r.base import quiet_fp
 from ._r.fmt import NA_REAL
 from ._r.rlist import RList
 from ._r.rnum import r_cumprod, r_isna, r_mean, r_median, r_sum
-from ._util import _match_arg
+from ._util import _match_arg, _which_min  # noqa: F401 (_which_min auch für backcast)
 
 __all__ = [
     "series_align", "series_check", "SimLevDataCheck", "series_align_macro", "series_convert_currency",
@@ -526,6 +526,16 @@ def _as_frame(x):
     return x
 
 
+def _dup_names(v):
+    """Mehrfach vorkommende Werte (je einmal, in der Reihenfolge ihrer ersten Wiederholung; seit 1.6.1 für die drei
+    Namensprüfungen)."""
+    u = []
+    for k, dflag in zip(v, _duplicated(v)):
+        if dflag and k not in u:
+            u.append(k)
+    return u
+
+
 def _duplicated(v, from_last=False) -> np.ndarray:
     """R ``duplicated(v, fromLast)``; NaN/NA als ein Schlüssel, 0 und -0 gleich. Gleitkommafelder seit 1.5.2 ohne
     Schleife (``np.unique``: erstes Vorkommen je Wert)."""
@@ -804,15 +814,6 @@ def _check_types(df):
     return t
 
 
-def _which_min(a) -> int:
-    best = -1
-    bv = math.inf
-    for i, v in enumerate(a):
-        if not math.isnan(v) and (best < 0 or v < bv):
-            best, bv = i, v
-    return best
-
-
 def _rsign(x):
     if math.isnan(x):
         return x          # sign(NA) = NA, sign(NaN) = NaN
@@ -935,7 +936,7 @@ def series_check(data, *, columns=None, jump=20, stale=10, revert=0.8):
                 continue
             nxt = float(r[j + 1]) if j < len(r) - 1 else _NAN
             ratio = float(x[j] / x[j + 1])
-            near = cand[_which_min([abs(_libm.log(ratio / c)) for c in cand])]
+            near = cand[_which_min([abs(_libm.log(ratio / c)) for c in cand], -1)]
             rj = float(r[j])
             if (not math.isnan(nxt) and _rsign(nxt) != _rsign(rj)
                     and abs(_libm.log1p(nxt)) >= revert * abs(_libm.log1p(rj))):
@@ -1330,7 +1331,7 @@ def series_deflate(data, columns, cpi, *, base_date=None, suffix="_real"):
         b = known[0]
     else:
         bd = _days(_to_date(base_date, "base_date"))
-        b = _which_min(list(np.abs(dts - bd[0])))
+        b = _which_min(list(np.abs(dts - bd[0])), -1)
     if math.isnan(c0[b]):
         raise ValueError("series_deflate: am Bezugsdatum %s ist kein Preisindex bekannt (erster Wert am %s); base_date sp\u00e4ter w\u00e4hlen."
                          % (_date_str(dts[b]), _date_str(dts[known[0]])))
@@ -1511,12 +1512,8 @@ def strategy_from_weights(weights, **kwargs):
     nms, vals = _named(weights)
     if nms is None or any(k is None or k == "" for k in nms):
         raise ValueError("weights muss benannt sein.")
-    dup = _duplicated(nms)
-    if dup.any():
-        u = []
-        for k, dflag in zip(nms, dup):
-            if dflag and k not in u:
-                u.append(k)
+    u = _dup_names(nms)
+    if u:
         raise ValueError("weights: doppelte Namen %s; jedes Asset nur einmal angeben." % ", ".join("'%s'" % k for k in u))
     w = np.array([_NAN if _isna_scalar(v) else float(v) for v in vals], dtype=np.float64)
     if np.isnan(w).any() or (w <= 0).any():
@@ -1601,12 +1598,8 @@ def _sfw_wrappers(wv, assets):
     if nm is None or any(k is None or k == "" for k in nm):
         raise ValueError("wrapper: als Liste braucht jedes Element einen Namen (Name = Asset, z. B. "
                          "list(%s = wrapper_config(...)))." % assets[0])
-    dup = _duplicated(nm)
-    if dup.any():
-        u = []
-        for k, dflag in zip(nm, dup):
-            if dflag and k not in u:
-                u.append(k)
+    u = _dup_names(nm)
+    if u:
         raise ValueError("wrapper: doppelte Namen %s; jedes Asset nur einmal angeben." % ", ".join("'%s'" % k for k in u))
     unk = [k for k in nm if k not in assets]
     if unk:
@@ -1695,12 +1688,8 @@ def portfolio_template(*, name=None, map=None, **kwargs):  # noqa: A002 - R-Argu
         for k, v in zip(mn, mv):
             lookup.setdefault(k, v)
         roles = [str(lookup[r]) if r in lookup else r for r in roles]
-        dup = _duplicated(roles)
-        if dup.any():
-            u = []
-            for k, dflag in zip(roles, dup):
-                if dflag and k not in u:
-                    u.append(k)
+        u = _dup_names(roles)
+        if u:
             raise ValueError("map: mehrere Rollen zeigen auf dieselbe Spalte %s; je Spalte nur eine Rolle "
                              "(Gewichte sonst selbst zusammenfassen und strategy_from_weights() verwenden)."
                              % ", ".join("'%s'" % k for k in u))

@@ -20,8 +20,6 @@
 
 include("tax_tariff.jl")
 
-const _DOUBLE_LINE = "═"^62
-
 "Sentinel für nicht angegebene Argumente (R: `missing(arg)`)."
 struct _Unset end
 const _UNSET = _Unset()

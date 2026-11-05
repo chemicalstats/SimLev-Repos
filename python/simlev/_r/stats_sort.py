@@ -1,6 +1,6 @@
 # Herkunft:           übersetzt aus R 4.3.3, src/main/sort.c, qsort-body.c, seq.c; nachgebildet nach
-#                     R 4.3.3, src/library/base/R/sort.R, rle.R, cut.R, findInt.R;
-#                     src/library/stats/R/quantile.R, median.R, weighted.mean.R
+#                     R 4.3.3, src/library/base/R/sort.R, cut.R;
+#                     src/library/stats/R/quantile.R, median.R
 # Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
 #                     Kopf der jeweiligen R-Quelle); qsort-body.c nach R. C. Singleton,
 #                     CACM-Algorithmus 347 (1969)
@@ -8,10 +8,9 @@
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang: Ordnung, Rang, partielle Sortierung und Quantile
 #                     rechnet der C-Kern core/slc_rbase_sort.cpp.
-"""Gemeinsame Hilfen, Sortieren, Ränge, Einteilen und Lagemaße (``order``, ``sort``, ``rank``, ``rle``,
-``tabulate``, ``findInterval``, ``cut``, ``complete.cases``, ``quantile``, ``median``, ``weighted.mean``),
-nachgebildet aus R 4.3.3 (``src/main/sort.c``, ``qsort-body.c``, ``seq.c``; ``base/R/sort.R``, ``rle.R``,
-``cut.R``, ``findInt.R``; ``stats/R/quantile.R``, ``median.R``, ``weighted.mean.R``).
+"""Gemeinsame Hilfen, Sortieren, Ränge, Einteilen und Lagemaße (``order``, ``sort``, ``rank``, ``cut``,
+``quantile``, ``median``), nachgebildet aus R 4.3.3 (``src/main/sort.c``, ``qsort-body.c``, ``seq.c``;
+``base/R/sort.R``, ``cut.R``; ``stats/R/quantile.R``, ``median.R``).
 """
 from __future__ import annotations
 
@@ -22,15 +21,13 @@ import numpy as np
 import pandas as pd
 
 from .linalg import RError
-from .rlist import RList
 from . import rnum as _rn
 from .rnum import NA_REAL
 from .. import _ext   # C-Kerne core/slc_rbase_sort.cpp
 from ._collate import collate_key
 
 __all__ = [
-    "quantile", "median", "weighted_mean", "rank", "order", "sort", "rle", "cut", "findInterval",
-    "tabulate", "complete_cases", "seq_len_out",
+    "quantile", "median", "rank", "order", "sort", "cut", "seq_len_out",
 ]
 
 
@@ -75,10 +72,6 @@ def _rsum(a):
 def _rmean(a):
     """``mean`` für Doubles wie R's ``real_mean`` (long double, Korrekturdurchlauf)."""
     return _rn.r_mean(a)
-
-
-def _rmean_int(a):
-    return _rn.r_mean_int(a)
 
 
 def seq_len_out(frm, to, length_out):
@@ -312,60 +305,6 @@ def rank(x, na_last=True, ties_method="average"):
     return y
 
 
-def rle(x):
-    """``rle(x)``: ``RList`` mit ``lengths`` (int) und ``values``."""
-    a = np.asarray(x.to_numpy() if isinstance(x, pd.Series) else x)
-    n = a.size
-    res = _RLE()
-    if n == 0:
-        res["lengths"] = np.zeros(0, dtype=np.int64)
-        res["values"] = a
-        return res
-    if a.dtype.kind == "f":
-        y = a[1:] != a[:-1]
-        nay = np.isnan(a[1:]) | np.isnan(a[:-1])
-        y = y | nay
-    elif a.dtype == object:
-        y = np.array([(p is None or q is None) or (p != q) for p, q in zip(a[1:], a[:-1])], dtype=bool)
-    else:
-        y = a[1:] != a[:-1]
-    i = np.concatenate([np.where(y)[0] + 1, [n]])
-    res["lengths"] = np.diff(np.concatenate([[0], i])).astype(np.int64)
-    res["values"] = a[i - 1]
-    return res
-
-
-class _RLE(RList):
-    r_class = ("rle",)
-
-
-def tabulate(bin, nbins=None):
-    """``tabulate(bin, nbins = max(1, bin, na.rm = TRUE))`` (C-Kern ``sl_r_tabulate``)."""
-    b, _ = _vec(bin)
-    b = np.ascontiguousarray(b, dtype=np.float64)
-    if nbins is None:
-        with np.errstate(invalid="ignore"):
-            bb = np.trunc(b[~np.isnan(b)])
-        nbins = int(max([1.0] + ([float(bb.max())] if bb.size else [])))
-    out = np.zeros(max(int(nbins), 0), dtype=np.int64)
-    _ext.slc_r_tabulate(b, out)
-    return out
-
-
-def findInterval(x, vec, rightmost_closed=False, all_inside=False, left_open=False):
-    """``findInterval(x, vec, rightmost.closed, all.inside, left.open)`` (C-Kern ``sl_r_findinterval``)."""
-    v, _ = _vec(vec)
-    xx, _ = _vec(x)
-    if np.isnan(v).any() or (v.size > 1 and (np.diff(v) < 0).any()):
-        raise RError("'vec' must be sorted non-decreasingly and not contain NAs")
-    res = np.empty(xx.size)
-    _ext.slc_r_findinterval(np.ascontiguousarray(v), np.ascontiguousarray(xx), bool(rightmost_closed),
-                            bool(all_inside), bool(left_open), res)
-    if np.isnan(xx).any():
-        return res
-    return res.astype(np.int64)
-
-
 def _bincode(x, breaks, right=True, include_lowest=False):
     """``.bincode`` (C-Kern ``sl_r_bincode``, seit 1.6.0): Intervallnummern als float, NA außerhalb."""
     out = np.empty(np.size(x))
@@ -447,42 +386,6 @@ def cut(x, breaks, labels=None, include_lowest=False, right=True, dig_lab=3, ord
     return pd.Categorical.from_codes(codes, categories=labs, ordered=ordered_result)
 
 
-def complete_cases(*args):
-    """``complete.cases(...)`` für Vektoren, Matrizen und data.frames."""
-    n = None
-    ok = None
-    for a in args:
-        if isinstance(a, pd.DataFrame):
-            cols = [a[c].to_numpy() for c in a.columns]
-        elif isinstance(a, np.ndarray) and a.ndim == 2:
-            cols = [a[:, j] for j in range(a.shape[1])]
-        elif isinstance(a, (list, tuple)) and a and isinstance(a[0], (list, tuple, np.ndarray, pd.Series)):
-            cols = list(a)
-        else:
-            cols = [a.to_numpy() if isinstance(a, pd.Series) else np.asarray(a)]
-        for c in cols:
-            c = np.asarray(c)
-            if c.dtype.kind == "f":
-                m = ~np.isnan(c)
-            elif c.dtype.kind == "M":
-                m = ~np.isnat(c)
-            elif c.dtype == object:
-                m = np.array([not (v is None or (isinstance(v, float) and v != v) or v is pd.NaT) for v in c],
-                             dtype=bool)
-            else:
-                m = np.ones(c.shape[0], dtype=bool)
-            if n is None:
-                n = m.size
-                ok = m.copy()
-            else:
-                if m.size != n:
-                    raise RError("not all arguments have the same length")
-                ok &= m
-    if ok is None:
-        raise RError("no input has determined the number of cases")
-    return ok
-
-
 # ── Lage- und Streuungsmaße ──────────────────────────────────────────────
 
 def _format_perc(probs, digits=7):
@@ -554,38 +457,6 @@ def median(x, na_rm=False):
     if is_int and np.count_nonzero(~np.isnan(xv)) % 2 == 1:
         return int(r)
     return r
-
-
-def weighted_mean(x, w=None, na_rm=False):
-    """``weighted.mean(x, w, na.rm)``."""
-    xv, _ = _vec(x)
-    if w is None:
-        if na_rm:
-            xv = xv[~np.isnan(xv)]
-        with np.errstate(all="ignore"):
-            r = float(np.float64(_rsum(xv)) / np.float64(xv.size))
-        return _arith_nan(r, xv)
-    wv, _ = _vec(w)
-    if wv.size != xv.size:
-        raise RError("'x' and 'w' must have the same length")
-    if na_rm:
-        i = ~np.isnan(xv)
-        wv = wv[i]
-        xv = xv[i]
-    with np.errstate(all="ignore"):
-        prod = xv * wv
-        # (x*w)[w != 0]: NA im Index (w NA/NaN) liefert NA
-        sel = (wv != 0) | np.isnan(wv)
-        prod = np.where(np.isnan(wv), NA_REAL, prod)[sel]
-        r = float(np.float64(_rsum(prod)) / np.float64(_rsum(wv)))
-    return _arith_nan(r, prod, wv)
-
-
-def _arith_nan(r, *operands):
-    """Arithmetisch entstandenes NaN (keine NA in den Operanden) → R's ``NaN`` (``math.nan``)."""
-    if r == r or any(np.isnan(o).any() for o in operands):
-        return r
-    return math.nan
 
 
 from .base import quiet_fp  # noqa: E402

@@ -449,7 +449,7 @@ end
 
 function _signal_col(fr::_Frame, col, n::Int)
     @nospecialize
-    col === nothing && return Signal(true, zeros(n))
+    col === nothing && return Signal(true, Float64[])   # keine Spalte: leerer Zeiger, der Kern liest FALSE (seit 1.6.1)
     v = fr.cols[col]
     k = fr.kinds[col]
     k == :numeric && return Signal(false, copy(v))

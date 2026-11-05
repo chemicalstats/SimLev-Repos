@@ -60,7 +60,7 @@ und `precompile.jl`.
 | `src/r/parallel.jl` | `RParallel` | `.par_lapply` mit `Threads.@spawn` (`par_lapply`), Meldungen und Ausgaben je Aufgabe (`r_stderr`, `r_stdout`, `suppress_messages`), siehe [Parallelität](#parallelität-cores) → `_r/parallel.py` |
 | `src/r/fmt.jl` | `RFmt` | `format`, `formatC`, `sprintf`, `round`, `signif`, `print` von Vektoren/Matrizen/data.frames → `_r/fmt.py` |
 | `src/r/stats.jl` | `RStats` | Modulkopf mit Exporten; bindet die Themen ein (gleiche Namen wie in Python): `stats_sort.jl` (Hilfen, `order`, `r_sort`, `r_rank`, `cut`, `quantile`, `median`, …), `stats_cor.jl` (`cor`, `cov`, `var`, `scale`), `stats_smooth.jl` (`approx`, `r_filter`), `stats_optim.jl` (`optimize`), `stats_models.jl` (`coef`, `fitted`, `p_adjust`, `ecdf`, `ave`, `aggregate`), `stats_cluster.jl` (`dist`, `hclust`) → `_r/stats.py` (Sammelmodul) und `_r/stats_*.py` |
-| `src/r/linalg.jl` | `RLinalg` | `outer`, `diag`, `all_equal_numeric` (seit 1.0.0 ohne `matprod`, `solve`, `chol`, `qr`, `eigen` und die BLAS/LAPACK/LINPACK-Ports) → `_r/linalg.py` |
+| `src/r/linalg.jl` | `RLinalg` | `diag`, `all_equal_numeric` (seit 1.6.1 ohne `outer`; seit 1.0.0 ohne `matprod`, `solve`, `chol`, `qr`, `eigen` und die BLAS/LAPACK/LINPACK-Ports) → `_r/linalg.py` |
 | `src/r/rexpr.jl` | `RExpr` | Ausdrücke in R-Syntax als Text (`eval(parse(text = …), data, env)`): ein gemeinsamer Auswerter für Bedingungen in `bootstrap_probability`, `regime_subset`, `view_prob`/`scenario_entropy_pooling` und `tactical_rules` (R-Vorrang inkl. schwach bindendem `!`, NA-Logik, `%in%`, `%%`, Funktionen über `RLibm`/`RFmt`) |
 | `src/engine.jl` u. a. | – | `simulation()` und Strategie/Config: `engine.jl` (Hilfen, Handels- und Steuerfunktionen; r/R/sim_base.R → `_sim_base.py`), `sim_phases.jl` (r/R/sim_validate.R, sim_prepare.R → `_sim_phases.py`), `sim_engine.jl` (Phasen 4 und 5 über den C++-Kern `core/engine_core_impl.h`; r/R/sim_engine.R → `_sim_engine.py`), `sim_evaluate.jl` (r/R/sim_evaluate.R → `_sim_evaluate.py`; dazu `simulation()` und `_simulation_flat()` aus r/R/simulation.R → `engine.py`), `sim_blocks.jl` (Bausteine, r/R/sim_blocks.R → `_sim_blocks.py`), `wrapper.jl` (Fonds-Wrapper `wrapper_config`, `wrapper_nav`, Anteilswert `_wrapper_nav_calc`, r/R/wrapper.R → `wrapper.py`; Hilfen der Strategie `_strategy_columns`, `_strategy_wrappers` in `config.jl`) |
 | `src/svg.jl` | – | Grafikmodul: `SimLevPlot`, `_plot_method` & Co., alle SVG-Zeichenbausteine (siehe [Grafik](#grafik)) → `simlev/svg.py` |
@@ -403,7 +403,7 @@ Gleichlaufprüfung `tests/werkzeuge/gleichlauf/run.py` (siehe
 ## Schichten
 
 Die Dateien in `src/` gehören zu fünf Schichten: 0 R-Interna (`src/r/`), 1 Daten und Strategie
-(`dates.jl`, `config.jl`, `trigger.jl`, `data.jl`, `tax_tariff.jl`,
+(`util.jl` mit `match.arg`/`which.max`/`which.min` für alle Module, seit 1.6.1; `dates.jl`, `config.jl`, `trigger.jl`, `data.jl`, `tax_tariff.jl`,
 `data_prep.jl`, `backcast.jl`, `bonds.jl`, `signals*.jl`), 2 Engine
 (`core.jl`, `result.jl`, `engine.jl`, `sim_*.jl`, `wrapper.jl`), 3 Analysen (je eine Datei
 mit ihrem Kern), 4 Ausgabe (`svg.jl`, `dashboard.jl`); `SimLev.jl`,

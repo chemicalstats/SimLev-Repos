@@ -190,31 +190,6 @@ function str_collate(a::AbstractString, b::AbstractString)
     return _bytecmp(a, b)
 end
 
-"""
-    collate_key(s) -> Vector{UInt8}
-
-Sortierschlüssel: `collate_key(a) < collate_key(b)` genau dann, wenn
-`str_collate(a, b) < 0` (Gleichheit ebenso).
-"""
-function collate_key(s::AbstractString)
-    S = _collate_init!()
-    ss = String(s)
-    if S.mode === :icu && S.f_key != C_NULL
-        u = transcode(UInt16, ss)
-        size = 64 + 4 * length(u)
-        while true
-            buf = Vector{UInt8}(undef, size)
-            need = Int(ccall(S.f_key, Cint, (Ptr{Cvoid}, Ptr{UInt16}, Cint, Ptr{UInt8}, Cint),
-                             S.coll, u, length(u), buf, size))
-            need <= size && return buf[1:max(need - 1, 0)]
-            size = need
-        end
-    end
-    S.mode === :codepoint && _warn_cp(S)
-    S.mode === :icu && error("ucol_getSortKey nicht verfügbar")
-    return Vector{UInt8}(codeunits(ss))
-end
-
 "`lt`-Funktion für `sort`/`sortperm` auf Zeichenketten nach R's Kollation."
 str_lt(a, b) = str_collate(a, b) < 0
 

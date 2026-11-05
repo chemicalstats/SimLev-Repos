@@ -12,6 +12,7 @@
 module Overfitting
 
 import ..SimLev
+using ..SimLev: _match_arg, _which_max   # util.jl (seit 1.6.1 eine Fassung)
 using ..SimLev: _res_abline!, _res_fig, _res_finish, _res_hline!, _res_legend!, _res_line!, _res_panel, _res_points!,
                 _res_range, _res_rect!, _res_vline!
 using Dates
@@ -28,22 +29,6 @@ export overfit_pbo, sharpe_probabilistic, sharpe_deflated, overfit_walk_forward,
 
 _f64(v) = v === missing || v === nothing ? NA : Float64(v)
 _isna(v) = v === missing || v === nothing || (v isa AbstractFloat && isnan(v))
-
-"R's `match.arg(arg)` mit der Fehlermeldung von R."
-function _match_arg(value, choices)
-    ch = String[String(c) for c in choices]
-    value === nothing && return ch[1]
-    if value isa Union{AbstractVector,Tuple}
-        String[String(string(v)) for v in value] == ch && return ch[1]
-        length(value) == 1 || error("'arg' must be of length 1")
-        value = first(value)
-    end
-    v = String(string(value))
-    v in ch && return v
-    hits = isempty(v) ? String[] : [c for c in ch if startswith(c, v)]
-    length(hits) == 1 && return hits[1]
-    error("'arg' should be one of " * join(("“" * c * "”" for c in ch), ", "))
-end
 
 "`sprintf` (R) für Skalare → String."
 function _spf(f::AbstractString, args...)
@@ -94,16 +79,6 @@ function _rowsum(M::AbstractMatrix, codes::Vector{Int}, ng::Int)
     out
 end
 
-"`which.max` (erster Index des Maximums ohne NA; `nothing`, wenn leer)."
-function _which_max(v)
-    best = nothing
-    for i in eachindex(v)
-        x = Float64(v[i])
-        isnan(x) && continue
-        (best === nothing || x > Float64(v[best])) && (best = i)
-    end
-    best
-end
 _okey(x::Real) = (f = Float64(x); f == 0 ? 0.0 : f)
 _okey(x) = x
 _isna_key(x) = x === missing || x === nothing || (x isa Real && isnan(Float64(x)))

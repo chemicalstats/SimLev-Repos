@@ -25,6 +25,7 @@
 module Optimize
 
 import ..SimLev
+using ..SimLev: _match_arg, _which_max, _which_min   # util.jl (seit 1.6.1 eine Fassung)
 using ..SimLev: _alloc_c, _alloc_ticks, _esc
 using ..SimLev: RList, RFrame, RVector, NamedMat, NA, isna_strict
 using Dates
@@ -44,7 +45,6 @@ const _PO_FORMALS = ["x", "assets", "method", "lower", "upper", "cov", "mu", "ri
 # kleine R-Hilfen
 # ═══════════════════════════════════════════════════════════════════════════
 
-_match_arg(arg, choices) = SimLev.DataPrep._match_arg(arg, choices)
 _sprintf(fmt, args...) = (s = SimLev.RFmt.sprintf(fmt, args...); s isa AbstractString ? String(s) : String(first(s)))
 _sqrt(x::Float64) = x < 0 ? NaN : sqrt(x)
 
@@ -115,26 +115,6 @@ function _diagm(v, N::Int)
 end
 _diag(S::AbstractMatrix) = Float64[S[i, i] for i in 1:min(size(S)...)]
 
-"`which.max` (erstes Maximum, NA/NaN übergangen; 0 wenn keins)."
-function _which_max(v)
-    k = 0
-    for i in eachindex(v)
-        x = v[i]
-        isnan(x) && continue
-        (k == 0 || x > v[k]) && (k = i)
-    end
-    k
-end
-function _which_min(v)
-    k = 0
-    for i in eachindex(v)
-        x = v[i]
-        isnan(x) && continue
-        (k == 0 || x < v[k]) && (k = i)
-    end
-    k
-end
-
 _unique(v) = (out = similar(v, 0); for s in v; s in out || push!(out, s); end; out)
 _setdiff(a, b) = _unique([x for x in a if !(x in b)])
 
@@ -199,6 +179,14 @@ _isnum_col(c) = eltype(c) <: Union{Missing,Real} && !(nonmissingtype(eltype(c)) 
 _opt_returns_obj(A, cn, ppy) = RList("R" => NamedMat(A; colnames = cn), "ppy" => ppy; class = "SimLevOptReturns")
 
 "`.opt_returns`: Periodenrenditen (einfach) → (R = Matrix, cn, ppy, dates)."
+# Spalte j von L aus c (missing → NA); Funktionsgrenze, die Schleife wird je Spaltentyp übersetzt (seit 1.6.1)
+function _opt_fillcol!(L::Matrix{Float64}, j::Int, c)
+    for i in 1:size(L, 1)
+        L[i, j] = c[i] === missing ? NA : Float64(c[i])
+    end
+    L
+end
+
 function _opt_returns(x, assets = nothing, frequency = "week")
     assets isa AbstractString && (assets = [assets])
     if x isa RList && SimLev.inherits(x, "SimLevOptReturns")
@@ -221,10 +209,7 @@ function _opt_returns(x, assets = nothing, frequency = "week")
         nr = SimLev.nrow(rd)
         L = zeros(nr, length(assets))
         for (j, a) in enumerate(assets)
-            c = rd[a]
-            for i in 1:nr
-                L[i, j] = c[i] === missing ? NA : Float64(c[i])
-            end
+            _opt_fillcol!(L, j, rd[a])
         end
         A = SimLev.RLibm.expm1(L)
         A = reshape(A, nr, length(assets))
@@ -582,7 +567,7 @@ function _opt_core(A::Matrix{Float64}, nm, method, lo, hi, cov_type, mu, risk_fr
             prev = ws[k]
         end
         sh = Float64[sharpe_of(w, mm) for w in ws]
-        k = _which_max(sh)
+        k = something(_which_max(sh), 0)
         a = lg[min(length(lg), k + 1)]
         b = lg[max(1, k - 1)]
         w0 = ws[k]
@@ -600,7 +585,7 @@ function _opt_core(A::Matrix{Float64}, nm, method, lo, hi, cov_type, mu, risk_fr
             end
         end
         cand = [ws[k], f1[1], f2[1]]
-        cand[_which_max([sh[k], f1[2], f2[2]])]
+        cand[something(_which_max([sh[k], f1[2], f2[2]]), 0)]
     end
     default_bounds = all(==(0), lo) && all(==(1), hi)
     if method in ("inverse_vol", "risk_parity", "hrp") && N > 1
@@ -976,8 +961,8 @@ end
 function print_SimLevFrontier(io::IO, x)
     f = x["frontier"]
     sh = _asvec(f["sharpe"])
-    k = _which_max(sh)
-    j = _which_min(_asvec(f["volatility"]))
+    k = something(_which_max(sh), 0)
+    j = something(_which_min(_asvec(f["volatility"])), 0)
     idx = _unique(k == 0 ? [j] : [j, k])
     labs = ["Minimum-Varianz", "Max. Sharpe"][1:length(idx)]
     cols = Pair{String,Any}[c => _asvec(SimLev.RFmt.r_round(_asvec(f[c])[idx], 4)) for c in names(f)]
@@ -1416,7 +1401,7 @@ function portfolio_cpcv(x; assets = nothing, methods = ["equal", "inverse_vol", 
     best = String[]
     for s in sort(unique(r_split))
         ix = findall(==(s), r_split)
-        push!(best, r_method[ix][_which_max(r_sh[ix])])
+        push!(best, r_method[ix][something(_which_max(r_sh[ix]), 0)])
     end
     s_best = Float64[_mean_lgl(best .== m) for m in ms]
     o = _order_desc(s_mean)
@@ -1555,7 +1540,7 @@ function plot_SimLevFrontier(x; file = nothing, width = 700, height = 480)
         println(io, "<circle cx=\"$(_alloc_c(px(av[k])))\" cy=\"$(_alloc_c(py(ar[k])))\" r=\"4\" fill=\"#B5562B\"/>")
         println(io, "<text x=\"$(_alloc_c(px(av[k])))\" y=\"$(_alloc_c(py(ar[k]) - 8))\" text-anchor=\"middle\" font-size=\"10\">$(_esc(nm))</text>")
     end
-    k = _which_max(_asvec(f["sharpe"]))
+    k = something(_which_max(_asvec(f["sharpe"])), 0)
     if k > 0
         cx = px(fv[k]); cy = py(fr[k])
         println(io, "<polygon points=\"$(_alloc_c(cx)),$(_alloc_c(cy-6)) $(_alloc_c(cx-5)),$(_alloc_c(cy+4)) $(_alloc_c(cx+5)),$(_alloc_c(cy+4))\" fill=\"#3E8E5A\"/>")

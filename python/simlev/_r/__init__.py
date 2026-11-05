@@ -6,9 +6,9 @@ Untermodule:
   (skalare/eindimensionale Engine-Hilfen)
 - ``rformat`` Rundung und Textausgabe der Engine (``r_round``, ``r_signif``, ``r_format``, ``r_sprintf``)
 - ``libm``    elementweise libm-Funktionen (statt numpy-SIMD-Varianten)
-- ``base``    Funktionen von R's base (``colSums``, ``cumprod``, ``pmin`` …) mit long double wie R,
+- ``base``    Funktionen von R's base (``mean``, ``diff``, ``pmin``, ``range``) mit long double wie R,
   ``quiet_fp``
-- ``stats``   quantile, cor, optimize, uniroot, approx, filter, p.adjust, hclust, …
+- ``stats``   quantile, cor, optimize, approx, filter, p.adjust, hclust, …
 - ``linalg``  outer, diag, isSymmetric und Hilfen (``RError``)
 - ``fmt``     format, formatC, round, signif, print von Vektoren/data.frames
 - ``rexpr``   Auswertung von R-Ausdrücken als Text (Bedingungen in R-Syntax)

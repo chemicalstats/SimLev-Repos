@@ -56,15 +56,15 @@ ihre Quellen; die vollständigen Angaben stehen in
 
 | Datei | Herkunft | R-Funktionen |
 |---|---|---|
-| `rnum.py`, `base.py` | übersetzt aus `src/main/summary.c`, `cum.c`, `array.c`, `arithmetic.c` | `sum`, `mean`, `var`, `sd`, `prod`, `cumsum`, `cumprod`, `cummax`, `cummin`, `rowSums`, `colSums`, `rowMeans`, `colMeans`, `pmin`, `pmax`, `range`, `diff`, `R_POW`, `%%` |
+| `rnum.py`, `base.py` | übersetzt aus `src/main/summary.c`, `cum.c`, `array.c`, `arithmetic.c` | `sum`, `mean`, `var`, `sd`, `prod`, `cumsum`, `cumprod`, `cummax`, `rowSums`, `colSums`, `rowMeans`, `colMeans` (über `rnum`), `pmin`, `pmax`, `range`, `diff`, `R_POW` |
 | `libm.py` | nachgebildet nach `src/main/arithmetic.c` | Randregeln um die libm-Funktionen |
-| `rformat.py`, `fmt.py` | übersetzt aus `src/main/format.c`, `printutils.c`, `printvector.c`, `printarray.c`, `print.c`, `paste.c`, `sprintf.c`, `util.c`, `src/nmath/fround.c`, `fprec.c`; nachgebildet nach `base/R/format.R`, `dataframe.R`, `factor.R`, `dates.R` | `round`, `signif`, `format`, `formatC`, `prettyNum`, `sprintf`, `as.character`, `paste`, `print`, Datumsformate |
+| `rformat.py`, `fmt.py` | übersetzt aus `src/main/format.c`, `printutils.c`, `printvector.c`, `printarray.c`, `print.c`, `paste.c`, `sprintf.c`, `util.c`, `src/nmath/fround.c`, `fprec.c`; nachgebildet nach `base/R/format.R`, `dataframe.R`, `factor.R`, `dates.R` | `round`, `signif`, `format`, `formatC`, `sprintf`, `as.character`, `paste`, `print`, Datumsformate |
 | `_collate.py` | nachgebildet nach `src/main/util.c` | `Scollate` |
-| `stats_sort.py` | übersetzt aus `src/main/sort.c`, `qsort-body.c`, `seq.c`; nachgebildet nach `base/R/sort.R`, `rle.R`, `cut.R`, `findInt.R`, `stats/R/quantile.R`, `median.R`, `weighted.mean.R` | `order`, `sort`, `rank`, partielle Sortierung, `rle`, `tabulate`, `findInterval`, `cut`, `complete.cases`, `quantile`, `median`, `weighted.mean` |
+| `stats_sort.py` | übersetzt aus `src/main/sort.c`, `qsort-body.c`, `seq.c`; nachgebildet nach `base/R/sort.R`, `cut.R`, `stats/R/quantile.R`, `median.R` | `order`, `sort`, `rank`, partielle Sortierung, `cut`, `quantile`, `median` |
 | `stats_cor.py` | übersetzt aus `stats/src/cov.c`; nachgebildet nach `stats/R/cor.R`, `base/R/scale.R` | `cor`, `cov`, `var`, `sd`, `cov2cor`, `scale` |
-| `stats_smooth.py` | übersetzt aus `stats/src/approx.c`, `filter.c`; nachgebildet nach `stats/R/approx.R`, `filter.R` | `approx`, `approxfun`, `filter` |
+| `stats_smooth.py` | übersetzt aus `stats/src/approx.c`, `filter.c`; nachgebildet nach `stats/R/approx.R`, `filter.R` | `approx`, `filter` |
 | `stats_optim.py` (`_optim.py` bis 1.5.2) | nachgebildet nach `stats/src/optimize.c` (`do_fmin`, `fcn1`) und `stats/R/optimize.R`; `Brent_fmin` seit 1.6.0 im Kern (`core/slc_opt_fmin.cpp`, Herkunftsblock dort) | `optimize` (`uniroot` bis 1.5.1) |
-| `stats_models.py` | nachgebildet nach `stats/R/lm.R` (Zugriffe), `p.adjust.R`, `ecdf.R`, `ave.R`, `aggregate.R` | `coef`, `fitted`, `residuals`, `p.adjust`, `ecdf`, `ave`, `aggregate` |
+| `stats_models.py` | nachgebildet nach `stats/R/lm.R` (Zugriffe), `p.adjust.R` | `coef`, `fitted`, `residuals`, `p.adjust` |
 | `stats_cluster.py` | übersetzt aus `stats/src/distance.c`, `hclust.f`; nachgebildet nach `stats/R/dist.R`, `hclust.R` | `dist`, `as.dist`, `hclust` |
 | `linalg.py` | nachgebildet nach `base/R/outer.R`, `diag.R`, `all.equal.R` | `outer`, `diag`, `isSymmetric`, `all.equal` (numerisch) |
 | `rexpr.py` | nachgebildet nach `src/main/gram.y` und der Semantik der Grundoperatoren | Bedingungen in R-Syntax |
@@ -104,7 +104,7 @@ ihre Quellen; die vollständigen Angaben stehen in
 
 | | |
 |---|---|
-| Dateien | `src/core/prepare_core_impl.h` (`eng_civil`, `eng_days`; bis 1.3.0 `engine_core_impl.h`, davor `fifo_core_impl.h`, `tax_core_impl.h`), `src/core/slc_rbase_date.cpp` (`sl_r_civil_from_days`, `sl_r_days_from_civil`), `simlev/data_prep.py` (`_civil_to_days`, `_days_to_civil`), `simlev/tactical.py` (`_civil`) |
+| Dateien | `src/core/prepare_core_impl.h` (`eng_civil`, `eng_days`; bis 1.3.0 `engine_core_impl.h`, davor `fifo_core_impl.h`, `tax_core_impl.h`), `src/core/slc_rbase_date.cpp` (`sl_r_civil_from_days`, `sl_r_days_from_civil`), `simlev/data_prep.py` (`_civil_to_days`, `_days_to_civil`; seit 1.6.1 auch für `simlev/tactical.py`, bis 1.6.0 dort `_civil`) |
 | Herkunft | übersetzt aus H. Hinnant, *chrono-Compatible Low-Level Date Algorithms*, <https://howardhinnant.github.io/date_algorithms.html> |
 | Rechte | gemeinfrei: „Consider these donated to the public domain.“ |
 | Lizenz der Vorlage | keine (gemeinfrei) |

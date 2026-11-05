@@ -20,6 +20,7 @@
 module Bootstrap
 
 import ..SimLev
+using ..SimLev: _match_arg   # util.jl (seit 1.6.1 eine Fassung)
 using Dates
 using Printf
 
@@ -217,8 +218,6 @@ function _uniq(seq)
     end
     return out
 end
-
-_match_arg(arg, choices) = SimLev.DataPrep._match_arg(arg, choices)
 
 function _todate(x, what)
     d = SimLev.DataPrep._to_date(x, what)

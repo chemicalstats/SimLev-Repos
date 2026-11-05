@@ -34,10 +34,25 @@ function find_compiler(var, names, what)
 end
 find_cxx() = find_compiler("SIMLEV_CXX", ("c++", "g++", "clang++"), "C++-Compiler")
 
+# Seit 1.6.1: Sprünge nicht über 32-Byte-Grenzen legen (GNU as; Intel-JCC-Erratum, sonst schwankt die Laufzeit
+# der Kerne je nach Lage im Code um bis zu 30 %). Ändert nur die Auffüllung, nicht die Befehle; nur wenn der
+# Assembler die Option kennt (wie python/setup.py).
+const LAYOUT_FLAG = "-Wa,-mbranches-within-32B-boundaries"
+function layout_flags(cxx)
+    ok = mktempdir() do d
+        src = joinpath(d, "probe.cpp")
+        write(src, "int simlev_probe() { return 0; }\n")
+        success(pipeline(Cmd([cxx..., LAYOUT_FLAG, "-Werror", "-c", src, "-o", joinpath(d, "probe.o")]);
+                         stdout = devnull, stderr = devnull))
+    end
+    return ok ? [LAYOUT_FLAG] : String[]
+end
+
 function build()
     isempty(strip(get(ENV, "SIMLEV_CC", ""))) ||
         @warn "SimLev: SIMLEV_CC wird seit 1.6.0 nicht mehr gelesen (alle Quellen C++); den Compiler wählt SIMLEV_CXX"
     cxx = find_cxx()
+    lay = layout_flags(cxx)
     srcs = sort([joinpath(SRC, f) for f in readdir(SRC) if startswith(f, "slc") && endswith(f, ".cpp")])
     isempty(srcs) && error("SimLev: keine Quellen in $SRC (core/sync.py --write ausführen)")
     isfile(joinpath(SRC, CABI)) || error("SimLev: $CABI fehlt in $SRC (core/sync.py --write ausführen)")
@@ -47,10 +62,10 @@ function build()
     tmp = lib * ".neu"
     objs = String[]
     mktempdir() do dir
-        @info "SimLev: übersetze $(length(srcs)) Quellen" cmd = Cmd([cxx..., CXXFLAGS..., THREAD_FLAGS..., "-c"])
+        @info "SimLev: übersetze $(length(srcs)) Quellen" cmd = Cmd([cxx..., CXXFLAGS..., lay..., THREAD_FLAGS..., "-c"])
         for s in srcs
             o = joinpath(dir, splitext(basename(s))[1] * ".o")
-            run(Cmd([cxx..., CXXFLAGS..., THREAD_FLAGS..., "-c", s, "-o", o]))
+            run(Cmd([cxx..., CXXFLAGS..., lay..., THREAD_FLAGS..., "-c", s, "-o", o]))
             push!(objs, o)
         end
         cmd = Cmd([cxx..., "-shared", objs..., THREAD_FLAGS..., "-lm", "-o", tmp])

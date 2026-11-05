@@ -177,10 +177,3 @@ end
 _rb_fmod_ld(x1::Float64, x2::Float64) = ccall((:sl_r_fmod_ld, LIBSLC), Float64, (Float64, Float64), x1, x2)
 "Long-double-Teil von R's `x1 %/% x2` (myfloor)."
 _rb_idiv_ld(x1::Float64, x2::Float64) = ccall((:sl_r_idiv_ld, LIBSLC), Float64, (Float64, Float64), x1, x2)
-"`scientific()` von formatReal für r > 0 (endlich), 1 ≤ digits ≤ 15 → (kpower, nsig, roundingwidens)."
-function _rb_scientific(r::Float64, digits::Int)
-    kp = Ref{Cint}(0)
-    ns = Ref{Cint}(0)
-    rw = ccall((:sl_r_scientific, LIBSLC), Cint, (Float64, Cint, Ref{Cint}, Ref{Cint}), r, digits, kp, ns)
-    return Int(kp[]), Int(ns[]), rw != 0
-end

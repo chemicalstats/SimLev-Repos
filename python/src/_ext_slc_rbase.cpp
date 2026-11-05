@@ -2,7 +2,7 @@
  * python/src/_ext_slc_rbase.cpp -- Python-Huellen der Grundfunktionen mit R-Regeln im Modul
  * simlev._ext: Summen, Mittel, Varianz, Kumulationen, Potenz, libm elementweise, Ordnung, Rang,
  * partielle Sortierung, Quantile, tabulate, findInterval, approx, cov/cor; Datumsformat und -lesen (slc_rbase_date.cpp),
- * R_strtod, %%, %/% und scientific() in long double (slc_rbase_num.cpp)
+ * R_strtod, %% und %/% in long double (slc_rbase_num.cpp)
  *
  * Die Kerne src/core/slc_rbase*.cpp sind Byte-fuer-Byte-Kopien der kanonischen Quellen in core/
  * (core/sync.py); nur diese Huelle gibt es nur hier. Die Python-Seite (simlev/_r/rnum.py,
@@ -413,45 +413,6 @@ static PyObject *slc_r_idiv_ld(PyObject *self, PyObject *args)
     return PyFloat_FromDouble(sl_r_idiv_ld(x1, x2));
 }
 
-/* scientific() für r > 0 endlich, 1 <= digits <= 15: (r, digits) -> (kpower, nsig, roundingwidens) */
-static PyObject *slc_r_scientific(PyObject *self, PyObject *args)
-{
-    double r;
-    int digits, kp = 0, ns = 0;
-    (void) self;
-    if (!PyArg_ParseTuple(args, "di", &r, &digits)) return NULL;
-    if (digits < 1 || digits > 15) { PyErr_SetString(PyExc_ValueError, "interner Fehler: digits"); return NULL; }
-    const int rw = sl_r_scientific(r, digits, &kp, &ns);
-    return Py_BuildValue("iiO", kp, ns, rw ? Py_True : Py_False);
-}
-
-/* dasselbe für ein Feld: (r float64, digits, kpower int64 out, nsig int64 out, rw int64 out) */
-static PyObject *slc_r_scientific_vec(PyObject *self, PyObject *args)
-{
-    PyObject *o_r, *o_k, *o_n, *o_w;
-    int digits;
-    Py_buffer vr = {}, vk = {}, vn = {}, vw = {};
-    (void) self;
-    if (!PyArg_ParseTuple(args, "OiOOO", &o_r, &digits, &o_k, &o_n, &o_w)) return NULL;
-    if (digits < 1 || digits > 15) { PyErr_SetString(PyExc_ValueError, "interner Fehler: digits"); return NULL; }
-    if (DBUF(o_r, &vr, 0, -1, "r") < 0) return NULL;
-    const Py_ssize_t n = NITEMS(vr);
-    if (LBUF(o_k, &vk, 1, n, "kpower") < 0 || LBUF(o_n, &vn, 1, n, "nsig") < 0 || LBUF(o_w, &vw, 1, n, "rw") < 0) {
-        rel(&vr); rel(&vk); rel(&vn);
-        return NULL;
-    }
-    const double *r = (const double *) vr.buf;
-    int64_t *k = (int64_t *) vk.buf, *ns = (int64_t *) vn.buf, *w = (int64_t *) vw.buf;
-    for (Py_ssize_t i = 0; i < n; i++) {
-        int kp = 0, nsg = 0;
-        w[i] = sl_r_scientific(r[i], digits, &kp, &nsg);
-        k[i] = kp;
-        ns[i] = nsg;
-    }
-    rel(&vr); rel(&vk); rel(&vn); rel(&vw);
-    Py_RETURN_NONE;
-}
-
 PyMethodDef simlev_ext_slc_rbase_methods[] = {
     {"slc_r_sum", slc_r_sum, METH_VARARGS, "slc_r_sum(x, kind, narm) -> float (kind 0 sum, 1 prod, 2 mean, 3 var)"},
     {"slc_r_mean_int", slc_r_mean_int, METH_VARARGS, "slc_r_mean_int(x int64) -> float"},
@@ -474,8 +435,6 @@ PyMethodDef simlev_ext_slc_rbase_methods[] = {
     {"slc_r_strtod_num", slc_r_strtod_num, METH_VARARGS, "slc_r_strtod_num(s bytes) -> (Wert, Bytes, > DBL_MAX) (R_strtod)"},
     {"slc_r_fmod_ld", slc_r_fmod_ld, METH_VARARGS, "slc_r_fmod_ld(x1, x2) -> long-double-Teil von %%"},
     {"slc_r_idiv_ld", slc_r_idiv_ld, METH_VARARGS, "slc_r_idiv_ld(x1, x2) -> long-double-Teil von %/%"},
-    {"slc_r_scientific", slc_r_scientific, METH_VARARGS, "slc_r_scientific(r, digits) -> (kpower, nsig, rw)"},
-    {"slc_r_scientific_vec", slc_r_scientific_vec, METH_VARARGS, "slc_r_scientific_vec(r, digits, kp, nsig, rw)"},
     {NULL, NULL, 0, NULL}
 };
 

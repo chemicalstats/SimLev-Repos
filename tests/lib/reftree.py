@@ -477,6 +477,9 @@ def run_case(case, check_print=True, check_output=True, check_warnings=True):
 def _run_case(case, check_print, check_output, check_warnings):
     import simlev
 
+    if case.get("nur") == "jl":   # Fall nur für Julia (Python-Nachbildung ohne Aufrufer entfallen, seit 1.6.1)
+        return []
+
     ns = {"simlev": simlev, "np": np, "pd": pd, "math": math}
     for k, v in (case.get("inputs") or {}).items():
         ns[k] = decode(v)

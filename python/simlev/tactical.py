@@ -34,8 +34,8 @@ from ._r.base import env_from_caller
 from ._r import libm as _libm
 from ._r.rnum import r_colmeans, r_cumsum, r_mean_int, r_rowmeans, r_rowsums as _rowsums, r_sum
 from .svg import _alloc_c, _alloc_ramp, _esc, _jl_str, _jl_unique
-from ._util import _match_arg
-from .data_prep import _to_date
+from ._util import _dates, _days, _match_arg
+from .data_prep import _civil_to_days, _to_date
 
 
 class _Missing:
@@ -73,22 +73,6 @@ def _message(msg):
 def _fill_na(v, method="locf", keep_leading=False):
     from .backcast import _fill_na as f
     return np.asarray(f(v, method, keep_leading=keep_leading), dtype=np.float64)
-
-
-def _days(d):
-    """datetime64[D]-Array -> float-Tage (NaT -> nan)."""
-    a = np.asarray(d).astype("datetime64[D]")
-    out = (a - _EPOCH).astype(np.int64).astype(np.float64)
-    out[np.isnat(a)] = _NA
-    return out
-
-
-def _as_dates(days):
-    a = np.asarray(days, dtype=np.float64)
-    out = np.full(a.shape, np.datetime64("NaT", "D"), dtype="datetime64[D]")
-    ok = ~np.isnan(a)
-    out[ok] = _EPOCH + a[ok].astype(np.int64).astype("timedelta64[D]")
-    return out
 
 
 def _find_interval(x, vec):
@@ -234,38 +218,17 @@ def _date_str(d):
 
 def _datefmt1(day):
     """``format(<Date>)`` eines Tages (float)."""
-    s = _fmt.format(_as_dates([day]))
+    s = _fmt.format(_dates([day]))
     return s if isinstance(s, str) else str(list(s)[0])
 
 
 def _ymd(days):
     """Tage -> (Jahr, Monat 1-12, Tag) als int-Arrays."""
-    d = _as_dates(days)
+    d = _dates(days)
     y = d.astype("datetime64[Y]").astype(np.int64) + 1970
     m = (d.astype("datetime64[M]").astype(np.int64) % 12) + 1
     dd = (d - d.astype("datetime64[M]").astype("datetime64[D]")).astype(np.int64) + 1
     return y, m, dd
-
-
-# Teil:               _civil
-# Herkunft:           übersetzt aus H. Hinnant, chrono-Compatible Low-Level Date Algorithms,
-#                     https://howardhinnant.github.io/date_algorithms.html
-# Rechte:             gemeinfrei ("Consider these donated to the public domain.")
-# Lizenz der Vorlage: keine (gemeinfrei)
-# Änderungen:         vektorisiert mit numpy (int64, floor_divide); Monatsverschiebung als (m + 9) %
-#                     12; Ergebnis als float64.
-def _civil(y, m, d):
-    """(Jahr, Monat, Tag) -> Tage seit 1970-01-01 (Arrays)."""
-    y = np.asarray(y, dtype=np.int64)
-    m = np.asarray(m, dtype=np.int64)
-    d = np.asarray(d, dtype=np.int64)
-    y2 = y - (m <= 2)
-    era = np.floor_divide(y2, 400)
-    yoe = y2 - era * 400
-    mp = (m + 9) % 12
-    doy = (153 * mp + 2) // 5 + d - 1
-    doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
-    return (era * 146097 + doe - 719468).astype(np.float64)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -365,7 +328,7 @@ def _period_last(dates, every):
         wd = (zi + 3) % 7
         th = zi - wd + 3
         y, _, _ = _ymd(th.astype(np.float64))
-        jan1 = _civil(y, np.ones_like(y), np.ones_like(y)).astype(np.int64)
+        jan1 = _civil_to_days(y, np.ones_like(y), np.ones_like(y))
         key = y * 100 + (th - jan1) // 7 + 1
     else:
         y, m, _ = _ymd(z)
@@ -410,8 +373,15 @@ def _sig_part(signal, key):
 
 
 def _lgl(v):
-    """Logischer Vektor mit NA (None/nan) -> (Werte, NA-Maske)."""
-    a = np.asarray(v.to_numpy() if isinstance(v, (pd.Series, pd.Index)) else v, dtype=object).ravel()
+    """Logischer Vektor mit NA (None/nan) -> (Werte, NA-Maske); Schnellweg für bool- und float64-Felder (seit 1.6.1)."""
+    a = np.asarray(v.to_numpy() if isinstance(v, (pd.Series, pd.Index)) else v)
+    if a.dtype == np.bool_:
+        return a.ravel().astype(bool), np.zeros(a.size, dtype=bool)
+    if a.dtype == np.float64:
+        a = a.ravel()
+        na = np.isnan(a)
+        return ~na & (a != 0), na
+    a = np.asarray(a, dtype=object).ravel()
     na = np.array([x is None or (isinstance(x, float) and math.isnan(x)) or x is pd.NA for x in a], dtype=bool)
     val = np.array([False if m else bool(x) for x, m in zip(a, na)], dtype=bool)
     return val, na
@@ -467,8 +437,8 @@ def _momentum_back(d, lookbacks):
         mo = mon - mi
         y2 = y + np.floor_divide(mo, 12)
         mo2 = np.mod(mo, 12)
-        first = _civil(y2, mo2 + 1, np.ones_like(y2))
-        nxt = _civil(y2 + (mo2 + 1) // 12, (mo2 + 1) % 12 + 1, np.ones_like(y2))
+        first = _civil_to_days(y2, mo2 + 1, np.ones_like(y2)).astype(np.float64)
+        nxt = _civil_to_days(y2 + (mo2 + 1) // 12, (mo2 + 1) % 12 + 1, np.ones_like(y2)).astype(np.float64)
         target = first + np.minimum(mday, (nxt - first).astype(np.int64)) - 1
         back.append(_find_interval(target, d))
     return back
@@ -568,7 +538,13 @@ def _eval_when(expr, data, env):
 def _as_logical(v, n):
     if isinstance(v, (bool, np.bool_)) or (np.ndim(v) == 0 and not isinstance(v, str)):
         v = [v]
-    a = np.asarray(v.to_numpy() if isinstance(v, (pd.Series, pd.Index)) else v, dtype=object).ravel()
+    a = np.asarray(v.to_numpy() if isinstance(v, (pd.Series, pd.Index)) else v)
+    if a.dtype == np.bool_:          # Schnellweg (seit 1.6.1): gleiche Werte wie die Schleife
+        return a.ravel().astype(bool)
+    if a.dtype == np.float64:
+        a = a.ravel()
+        return ~np.isnan(a) & (a != 0)
+    a = np.asarray(a, dtype=object).ravel()
     out = np.zeros(len(a), dtype=bool)
     for i, x in enumerate(a):
         if x is None or x is pd.NA:
@@ -831,7 +807,7 @@ def tactical_rotation(data, assets, *, top=1, safe=None, absolute=True, canary=N
     H[:first - 1, :] = 0.0
     if first > 1:
         H[:first - 1, oi[safe[0] if len(safe) else assets[0]]] = 1.0
-    out = _as_weights_m(_as_dates(d), H, out_assets, "rotation")
+    out = _as_weights_m(_dates(d), H, out_assets, "rotation")
     out.attrs["scores"] = Sdf
     out.attrs["decision_rows"] = rows
     return out
@@ -849,7 +825,7 @@ def _risk_vol(data, weights, safe, window, ppy):
         if not _is_numeric_named(weights):
             raise ValueError("weights: SimLevWeights oder benannter Gewichtsvektor erwartet.")
         nm, vals = _named(weights)
-        weights = _as_weights_m(_as_dates(d), np.tile(vals, (n, 1)), nm, "static")
+        weights = _as_weights_m(_dates(d), np.tile(vals, (n, 1)), nm, "static")
     if safe not in _df_names(data):
         raise ValueError("Sichere Anlage '%s' fehlt in data." % safe)
     risky = _setdiff([str(c) for c in weights.columns[1:]], [safe])
@@ -889,7 +865,7 @@ def _risk_weights(rv, expo, safe, source):
     """``.risk_weights``: Risikoteil mit Exposure skalieren, Rest in die sichere Anlage."""
     W = np.column_stack([rv["Wr"] * expo[:, None], 1 - expo * rv["rs"]])
     W[W < 0] = 0.0
-    return _as_weights_m(_as_dates(rv["d"]), W, rv["risky"] + [safe], source)
+    return _as_weights_m(_dates(rv["d"]), W, rv["risky"] + [safe], source)
 
 
 def _g(x):
@@ -1100,7 +1076,7 @@ def tactical_conditional_volatility(data, weights, safe, *, base=1, upper=0.8, l
         th[gi, 0] = _NA if lower is None else _quantile7(v, lower)
         th[gi, 1] = _quantile7(v, upper)
         th[gi, 2] = cs[g - 1] / cn[g - 1] if target is None else target / 100
-    thresholds = pd.DataFrame({"date": _as_dates(d[grid - 1]), "lower": th[:, 0], "upper": th[:, 1],
+    thresholds = pd.DataFrame({"date": _dates(d[grid - 1]), "lower": th[:, 0], "upper": th[:, 1],
                                "target": th[:, 2]})
     if np.isnan(th[:, 1]).all():
         yrs = (d[n - 1] - first_ok) / 365.25 if len(ok) else 0.0
@@ -1202,8 +1178,8 @@ def tactical_glidepath(data, from_=_MISSING, to=_MISSING, *, start=None, end=Non
         f[a.index(k)] = x
     for k, x in zip(tn or [], tv):
         t[a.index(k)] = x
-    s = _days(_to_date(_as_dates([d[0]]) if start is None else start, "start"))[0]
-    e = _days(_to_date(_as_dates([d[-1]]) if end is None else end, "end"))[0]
+    s = _days(_to_date(_dates([d[0]]) if start is None else start, "start"))[0]
+    e = _days(_to_date(_dates([d[-1]]) if end is None else end, "end"))[0]
     if e < s:
         raise ValueError("tactical_glidepath: end (%s) liegt vor start (%s); für den umgekehrten Weg from und to tauschen."
                          % (_datefmt1(e), _datefmt1(s)))
@@ -1215,7 +1191,7 @@ def tactical_glidepath(data, from_=_MISSING, to=_MISSING, *, start=None, end=Non
         frac = (d[rows - 1] >= s).astype(np.float64)
     M = np.array([(1 - p) * f + p * t for p in frac]).reshape(len(frac), len(a))
     H = _hold_rows_m(len(d), rows, M)
-    return _as_weights_m(_as_dates(d), H, a, "glidepath")
+    return _as_weights_m(_dates(d), H, a, "glidepath")
 
 
 def tactical_blend(*args, shares=None, **kwargs):
@@ -1271,7 +1247,7 @@ def tactical_blend(*args, shares=None, **kwargs):
         for nm in [str(c) for c in w.columns[1:]]:
             j = a.index(nm)
             W[:, j] = W[:, j] + sh[k] * np.asarray(w[nm], dtype=np.float64)
-    return _as_weights_m(_as_dates(d), W, a, "blend")
+    return _as_weights_m(_dates(d), W, a, "blend")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1540,8 +1516,8 @@ def tactical_simulation(data, weights, *, rebalance=("switch", "month", "quarter
     rb = rebalance_plan(event_col=".tev", event_mode="replace", skip=True,
                         event_weight={a: c for a, c in zip(assets, wcols)}, thresh=tolerance, thresh_type=tolerance_type)
     res = _sim_call(df, st, {"rebalance": rb, **sim_args})
-    tw = _as_weights_m(_as_dates(d), W, assets, weights.attrs.get("source"))
-    res["tactical"] = {"weights": tw, "events": _as_dates(d[ev]), "switches": int(change.sum()), "lag": lag,
+    tw = _as_weights_m(_dates(d), W, assets, weights.attrs.get("source"))
+    res["tactical"] = {"weights": tw, "events": _dates(d[ev]), "switches": int(change.sum()), "lag": lag,
                        "rebalance": rebalance}
     return res
 

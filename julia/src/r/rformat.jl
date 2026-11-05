@@ -17,10 +17,6 @@
 # zum C-Kern sl_r_sprintf (core/slc_rbase_fmt.cpp) wie RFmt.sprintf.
 # ─────────────────────────────────────────────────────────────────────────────
 
-_as_float(x::Real) = Float64(x)
-_as_float(::Missing) = NA
-_as_float(::Nothing) = NA
-
 "Wert als Text wie R's `as.character()` in `%s` (Zahlen 15 Stellen, Datum JJJJ-MM-TT)."
 function _as_str(@nospecialize(v))
     v === nothing && return "NULL"

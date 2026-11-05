@@ -34,7 +34,8 @@ from ._r.rnum import r_colmeans, r_colsums, r_rowmeans, r_mean, r_mean_int, r_me
 # Grafik: Bausteine des Stils Ergebnisgrafiken und Zahlen wie in Julia aus svg.py
 from .svg import (_jl_unique, _res_abline, _res_fig, _res_finish, _res_hline, _res_legend, _res_line, _res_panel,
                   _res_points, _res_range, _res_rect, _res_vline)
-from ._util import _match_arg_r as _match_arg
+from ._util import _match_arg
+from ._util import _which_max
 from ._util import _ext
 from ._util import _fmt_vec
 
@@ -99,19 +100,6 @@ def _rowsum(M, codes, ng):
 def _matprod(A, B):
     """``A %m% B`` wie R (slc-Matrixprodukt)."""
     return np.asarray(_lib.matmul(A, B), dtype=np.float64)
-
-
-def _which_max(v):
-    """``which.max``: erster Index (0-basiert) des Maximums ohne NA; ``None`` wenn leer."""
-    v = np.asarray(v, dtype=np.float64)
-    ok = ~np.isnan(v)
-    if not ok.any():
-        return None
-    best = None
-    for i in range(v.size):
-        if ok[i] and (best is None or v[i] > v[best]):
-            best = i
-    return best
 
 
 def _rank_avg(x):

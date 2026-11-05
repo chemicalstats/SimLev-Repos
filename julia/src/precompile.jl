@@ -83,6 +83,7 @@ function _precompile_ext(; strict::Bool = false)
                 w = Withdrawal.withdrawal_simulation(R, Withdrawal.withdrawal_rule(rule); inflation = 2)
                 sh(w); sh(r_summary(w))
             end
+            sh(Withdrawal.withdrawal_simulation(R, Withdrawal.withdrawal_rule("constant"; rate = 4); start_value = 1e6))
             for inc in (income_rate(30), income_tariff(40000))
                 sh(Withdrawal.withdrawal_simulation(R, Withdrawal.withdrawal_rule("constant"; rate = 4); start_value = 1e6,
                                                     base_rate = 2.5, cost_basis = 60,
@@ -98,6 +99,9 @@ function _precompile_ext(; strict::Bool = false)
                 sh(Optimize.portfolio_optimize(Rm; method = m))
                 Optimize.portfolio_optimize(nt; assets = A3, method = m)
             end
+            for m in ("min_variance", "hrp")   # RFrame wie beim Aufrufer (seit 1.6.1)
+                sh(Optimize.portfolio_optimize(d; assets = A3, method = m))
+            end
             sh(Optimize.portfolio_rolling(nt, A3; method = "min_variance", window = 1))
             sh(Optimize.portfolio_frontier(nt; assets = A3, n = 4))
         end
@@ -105,12 +109,19 @@ function _precompile_ext(; strict::Bool = false)
         step("dependence") do
             sh(Dependence.dependence_analysis(nt, A3; copulas = false))
             sh(Dependence.copula_fit(rb[1:400], rc[1:400]))
+            # mit Copulas und Bootstrap, NamedTuple und RFrame (seit 1.6.1)
+            sh(Dependence.dependence_analysis(nt, A3; copulas = true, B = 5, seed = 1))
+            sh(Dependence.dependence_analysis(d, A3; copulas = true, B = 5, seed = 1))
         end
         step("regimes") do
             sh(Regimes.regime_hmm(nt, ["A", "B"]; k = 2, n_start = 1))
         end
         step("scenarios") do
             sh(Scenarios.scenario_entropy_pooling(nt, A3, [Scenarios.view_mean("A", 0.0)]))
+            for x in (nt, d)   # t- und Gauß-Copula (seit 1.6.1)
+                sh(Scenarios.scenario_copula(x, A3; n = 200, seed = 1))
+                sh(Scenarios.scenario_copula(x, A3; n = 200, seed = 1, family = "gaussian"))
+            end
         end
         # Raster, Planung und Sensitivität über simulation()
         step("param_search") do
@@ -127,6 +138,7 @@ function _precompile_ext(; strict::Bool = false)
         end
         step("tactical") do
             sh(Tactical.tactical_simulation(nt, Tactical.tactical_rotation(nt, A3; top = 1, absolute = false)))
+            sh(Tactical.tactical_rotation(d, A3; top = 2, absolute = false))   # RFrame (seit 1.6.1)
         end
         step("planning") do
             G = reshape([1.0 + 0.05 * sin(i) for i in 1:60], 20, 3)
@@ -147,6 +159,11 @@ function _precompile_ext(; strict::Bool = false)
             x1 = RFrame("date" => dates, "value" => A)
             sh(DeepAnalysis.result_analysis(RList("X" => x1, "Y" => RFrame("date" => dates, "value" => B));
                                           benchmark = "X", rolling_years = 1))
+            # einzelnes Ergebnis von simulation() mit Sparplan, Rebalancing und Steuer, RFrame (seit 1.6.1)
+            r = simulation(d, st; start_value = 1e5, dca = dca_plan(; value = 500, span = 1),
+                           rebalance = rebalance_plan(; unit = "quarter"), tax = tax_profile(; base_rate = 2))
+            sh(r); sh(r_summary(r))
+            sh(DeepAnalysis.result_analysis(r))
         end
     finally
         # Zwischenspeicher wie vorher (der globale Zufallszustand bleibt unberührt)

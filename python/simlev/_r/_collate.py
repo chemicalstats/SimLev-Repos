@@ -37,7 +37,7 @@ import warnings
 
 from . import env as _env
 
-__all__ = ["str_collate", "collate_key", "collate_reset", "r_key"]
+__all__ = ["str_collate", "collate_key", "r_key"]
 
 _ST = {"init": False, "mode": None, "coll": None, "lib": None, "f": {}, "warned": False}
 
@@ -165,13 +165,6 @@ def _init():
     if st.value > 0 or not coll:
         raise RuntimeError("failed to open ICU collator (%d)" % st.value)
     _ST.update(mode="icu", coll=coll, lib=lib, f=f)
-
-
-def collate_reset():
-    """Liest ``SIMLEV_COLLATE``/``SIMLEV_ICU``/Locale-Variablen neu ein."""
-    if _ST["coll"] is not None:
-        _ST["f"]["ucol_close"](_ST["coll"])
-    _ST.update(init=False, mode=None, coll=None, lib=None, f={}, warned=False)
 
 
 def _warn_cp():

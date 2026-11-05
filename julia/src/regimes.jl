@@ -9,6 +9,7 @@
 module Regimes
 
 import ..SimLev
+using ..SimLev: _which_max   # util.jl (seit 1.6.1 eine Fassung)
 using ..SimLev: _grid_lines!, _grid_svg
 using Dates
 
@@ -23,33 +24,6 @@ const NamedMat = SimLev.NamedMat
 _D() = SimLev.Dependence
 _fmat(X) = SimLev.Dependence._fmat(X)
 _fvec(x) = SimLev.Dependence._fvec(x)
-
-"Log-Dichte der multivariaten Normalverteilung je Zeile (`.ldmvn`)."
-function _ldmvn(X, mu, S)
-    X = _fmat(X); mu = _fvec(mu)
-    L = _fmat(SimLev.SLib.chol(_fmat(S)))                    # Cholesky der C-Bibliothek slc
-    n, d = size(X)
-    Xc = Matrix{Float64}(undef, n, d)
-    for j in 1:d, i in 1:n
-        Xc[i, j] = X[i, j] - mu[j]
-    end
-    Z = permutedims(_fmat(SimLev.SLib.backsolve(L, permutedims(Xc); transpose = true)))
-    rs = _D()._rowsums(Z .* Z)
-    sl = SimLev.r_sum([SimLev.RLibm.log(L[i, i]) for i in 1:size(L, 1)])
-    c = 0.5 * d * SimLev.RLibm.log(2 * pi)
-    (-0.5 .* rs .- sl) .- c
-end
-
-"R `which.max` (erstes Maximum, NA ignoriert); `nothing`, wenn leer."
-function _which_max(v)
-    v = _fvec(v)
-    best = nothing
-    for i in eachindex(v)
-        isnan(v[i]) && continue
-        (best === nothing || v[i] > v[best]) && (best = i)
-    end
-    best
-end
 
 "`max.col(m, ties.method = \"first\")` je Zeile (NA bei NaN in der Zeile)."
 function _max_col_first(M)

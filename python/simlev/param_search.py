@@ -15,7 +15,6 @@ Parametersatz dieselbe Spezifikation liefert wie ein Element von
 from __future__ import annotations
 
 import contextlib
-import importlib
 import io
 import math
 import time
@@ -25,6 +24,7 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
+from ._sim_base import _study_scope  # Prüf-Cache je Studie (seit 1.5.1)
 from ._r import fmt as _fmt
 from ._r import libm as _libm
 from ._r.rlist import RList
@@ -32,6 +32,9 @@ from ._r.rnum import r_mean
 from ._r.parallel import par_lapply as _par_lapply
 from .svg import (_res_fig, _res_finish, _res_line, _res_panel, _res_points, _res_ramp, _res_range, _res_rect,
                   _res_text, _res_tx, _res_ty)
+from ._util import _match_arg
+from ._util import _ext
+from ._util import _fmt_vec
 
 __all__ = ["param_space", "param_range", "param_search", "param_plateau",
            "SimLevParamSpace", "SimLevParamRange", "SimLevParamSearch", "SummarySimLevParamSearch"]
@@ -48,16 +51,6 @@ class _Missing:
 
 
 _MISSING = _Missing()
-
-
-def _ext(mod, name):
-    m = importlib.import_module("simlev." + mod)
-    return getattr(m, name)
-
-
-def _match_arg(value, choices, argname="arg"):
-    from .config import _match_arg as ma
-    return ma(value, choices, argname)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -542,6 +535,7 @@ class SimLevParamSearch(RList):
     # ``plot`` (SVG, ``SimLevPlot``) wird am Modulende über ``_plot_method`` gesetzt.
 
 
+@_study_scope
 def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("grid", "random", "lhs"), n=50,
                  constraint=None, sim_args=None, burn_in=0, metrics=None, objective="sharpe", maximize=True,
                  keep_returns=("day", "none"), seed=None, cores=1):
@@ -753,12 +747,6 @@ def _rank_avg(x):
     return ra(x)
 
 
-def _which_max_py(v):
-    """``which.max`` (0-basiert, ``None`` wenn leer oder nur NA)."""
-    from .overfitting import _which_max
-    return _which_max(v)
-
-
 def _factor_codes(col):
     vals = [_py(v) for v in np.asarray(col).tolist()]
     from ._r._collate import r_key   # Stufen wie factor(): R's Kollation
@@ -923,13 +911,6 @@ def _fmt_scalar(v):
     return str(np.atleast_1d(_fmt.format(np.array([v]) if not isinstance(v, str) else np.array([v], dtype=object)))[0])
 
 
-def _fmt_vec(f, v):
-    out = _fmt.sprintf(f, np.asarray(v, dtype=np.float64))
-    if isinstance(out, str):
-        out = np.array([out], dtype=object)
-    return np.asarray(out, dtype=object)
-
-
 def _summary_param_search(obj_, top=10):
     tab = obj_["results"].copy()
     obj = obj_["objective"]
@@ -1077,19 +1058,5 @@ from ._r.base import quiet_fp  # noqa: E402
 quiet_fp(globals(), list(__all__) + ["_as_spec", "_ps_design", "_ps_levels", "_ps_map", "_ps_neighbours"])
 
 
-def _make_callable():
-    """Macht dieses Modul aufrufbar wie die gleichnamige Funktion (``simlev.param_search(...)`` wie in R;
-    ``simlev.param_search.<name>`` und ``import simlev.param_search`` erreichen weiter das Modul). Steht hier statt
-    in ``__init__.py``, weil das Modul erst bei Bedarf geladen wird (PEP 562)."""
-    import sys
-    import types
-
-    class _CallableModule(types.ModuleType):
-        def __call__(self, *args, **kwargs):
-            return getattr(self, "param_search")(*args, **kwargs)
-
-    sys.modules[__name__].__class__ = _CallableModule
-
-
-_make_callable()
-del _make_callable
+from . import _callable_module  # noqa: E402 (aufrufbar wie die gleichnamige Funktion, PEP 562)
+_callable_module("param_search")

@@ -27,6 +27,8 @@
 #   r                   R-Code, der das Ergebnis liefert (letzter Ausdruck)
 #   py                  Python-Code, der `result = ...` setzt
 #   jl                  Julia-Code, der `result = ...` setzt (optional)
+#   nur                 "py" oder "jl": Fall nur für diese Sprache (seit 1.6.1, wenn die Nachbildung der anderen
+#                       Sprache ohne Aufrufer im Paket entfallen ist); py bzw. jl der anderen Sprache entfällt
 #   result              Ergebnis als Baum
 #   output              Konsolenausgabe während des Aufrufs (cat/print)
 #   print               capture.output(print(result)) oder NULL
@@ -45,7 +47,7 @@
 #
 # Umgebung:
 #   SIMLEV_FAELLE_DIR   Ausgabeordner D (Standard: tests/<gruppe>/faelle)
-#   SIMLEV_GEN_ALLE=1   zusätzlich alle Fälle nach D/alle/ (Gleichlauf, tests/werkzeuge/gleichlauf/run.sh)
+#   SIMLEV_GEN_ALLE=1   zusätzlich alle Fälle nach D/alle/ (Gleichlauf, tests/werkzeuge/gleichlauf/run.py)
 #   SIMLEV_GEN_SUBSET=m nur die Fälle, deren Kennung (Modul/Fall) per Prüfsumme in eine 1/m-Stichprobe fällt
 #                       (deterministisch; m = 1 oder leer: alle); die übrigen werden nicht ausgewertet
 #
@@ -213,13 +215,16 @@ enc <- function(x) {
 }
 
 # print = NA: Druckausgabe nur für Objekte mit eigener print-Methode in SimLev
-ref_case <- function(id, r, py, inputs = list(), print = NA, note = NULL, jl = NULL) {
+ref_case <- function(id, r, py, inputs = list(), print = NA, note = NULL, jl = NULL, nur = NULL) {
   if (!.ref_in_subset(id)) return(invisible(NULL))
+  stopifnot(is.null(nur) || nur %in% c("py", "jl"))
   ev <- .ref_eval(r, inputs, print)
   .ref$used <- character(0)
   case <- list(id = id, module = .ref$module, note = note,
-               inputs = lapply(inputs, function(x) .ref_input(enc(x))), r = r, py = py)
-  if (!is.null(jl)) case$jl <- jl
+               inputs = lapply(inputs, function(x) .ref_input(enc(x))), r = r)
+  if (!identical(nur, "jl")) case$py <- py
+  if (!is.null(jl) && !identical(nur, "py")) case$jl <- jl
+  if (!is.null(nur)) case$nur <- nur
   case <- c(case, ev$fields)
   .ref_add(case, .ref$used)
   invisible(ev$res)

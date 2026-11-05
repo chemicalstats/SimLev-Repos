@@ -480,7 +480,7 @@ _dvec_or(c) = c["t"] in ("num", "int", "lgl", "chr", "date") ? _dvec(c) : decode
 struct _Missing end
 const MISSING_EL = _Missing()
 
-function _get(obj, name::String)
+function _get(@nospecialize(obj), name::String)
     obj === nothing && return MISSING_EL
     if obj isa SimLev.RFrame || obj isa SimLev.RList || obj isa AbstractDict
         return haskey(obj, name) ? obj[name] : MISSING_EL
@@ -500,7 +500,7 @@ _names_of(x::AbstractDict) = String.(collect(keys(x)))
 _names_of(x::NamedTuple) = String.(collect(keys(x)))
 _names_of(x::AbstractVector{<:Pair}) = String[string(p.first) for p in x]   # benannter Vektor als Paare ("A" => "wA")
 
-function _flat(x)
+function _flat(@nospecialize(x))
     x isa SimLev.RFrame && return vcat([collect(c) for c in x.cols]...)
     x isa SimLev.NamedMat && return vec(x.data)
     x isa AbstractMatrix && return vec(x)
@@ -532,8 +532,11 @@ end
 
 _hx(x::Float64) = isnan(x) ? (SimLev.isna_strict(x) ? "NA" : "NaN") : string(x)
 
+# compare! und seine Helfer übersetzen `py` nicht je Typ (@nospecialize): Jedes Szenario liefert einen eigenen Typ
+# (etwa eine NamedTuple seiner Teile); je Typ neu übersetzt kostete das rund 50 s der Julia-Suite. Die Schleifen über
+# die Elemente stehen hinter einer Funktionsgrenze (_abweichend_num, _abweichend_sonst) und werden je Vektortyp übersetzt.
 "Vergleicht `py` (Julia-Objekt) mit dem R-Baum `ref`; hängt Abweichungen an `errs` an."
-function compare!(errs, ref, py, path = "result"; maxerr = 40)
+function compare!(errs, ref, @nospecialize(py), path = "result"; maxerr = 40)
     length(errs) >= maxerr && return errs
     t = ref["t"]
     t == "skip" && return errs
@@ -556,20 +559,7 @@ function compare!(errs, ref, py, path = "result"; maxerr = 40)
         if length(rv) != length(pv)
             push!(errs, "$path: Länge R $(length(rv)), Julia $(length(pv))"); return errs
         end
-        bad = Int[]
-        if t in ("num", "int", "date")
-            for i in eachindex(rv)
-                r = rv[i] === missing ? SimLev.NA : t == "date" ? Float64(Dates.value(rv[i] - _EPOCH)) : Float64(rv[i])
-                _numeq(r, _num(pv[i])) || push!(bad, i)
-            end
-        else
-            for i in eachindex(rv)
-                a = rv[i]; b = pv[i]
-                b isa AbstractFloat && isnan(b) && (b = missing)
-                ok = (a === missing && b === missing) || (a !== missing && b !== missing && a == b)
-                ok || push!(bad, i)
-            end
-        end
+        bad = t in ("num", "int", "date") ? _abweichend_num(t == "date", rv, pv) : _abweichend_sonst(rv, pv)
         if !isempty(bad)
             i = bad[1]
             _rp(x) = x isa Float64 ? _hx(x) : repr(x)
@@ -639,6 +629,26 @@ function compare!(errs, ref, py, path = "result"; maxerr = 40)
     errs
 end
 
+function _abweichend_num(datum::Bool, rv, pv)
+    bad = Int[]
+    for i in eachindex(rv)
+        r = rv[i] === missing ? SimLev.NA : datum ? Float64(Dates.value(rv[i] - _EPOCH)) : Float64(rv[i])
+        _numeq(r, _num(pv[i])) || push!(bad, i)
+    end
+    bad
+end
+
+function _abweichend_sonst(rv, pv)
+    bad = Int[]
+    for i in eachindex(rv)
+        a = rv[i]; b = pv[i]
+        b isa AbstractFloat && isnan(b) && (b = missing)
+        ok = (a === missing && b === missing) || (a !== missing && b !== missing && a == b)
+        ok || push!(bad, i)
+    end
+    bad
+end
+
 # ── Ausführen ────────────────────────────────────────────────────────────────
 
 struct _WarnCollector <: AbstractLogger
@@ -681,6 +691,7 @@ function _neues_modul()
 end
 
 function _run_ref_case(case; check_print = true, check_output = true, check_warnings = true)
+    get(case, "nur", "") == "py" && return String[]   # Fall nur für Python (seit 1.6.1)
     haskey(case, "jl") || return ["kein Julia-Code (Feld jl) im Fall"]
     m = _neues_modul()
     inp = get(case, "inputs", nothing)

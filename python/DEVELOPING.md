@@ -131,7 +131,7 @@ strategies, *, …)`, `param_search(data, builder, space, *, …)`,
    [Zufall](#zufall)); die Reihenfolge der Ziehungen muss exakt der in R entsprechen.
 5. R-Grundfunktionen (`quantile`, `median`, `cor`, `optimize`, `hclust`, `approx`,
    `filter`, `p.adjust`, …) kommen aus `simlev._r.stats`, Formatierung (`format`, `formatC`,
-   `round`, `signif`, `prettyNum`, `print` von Vektoren, Matrizen und data.frames) aus
+   `round`, `signif`, `print` von Vektoren, Matrizen und data.frames) aus
    `simlev._r.fmt`. Fehlt dort etwas, wird es dort ergänzt (mit Gleichlauf-Fällen und einem
    Eintrag in `COPYRIGHTS.md`), nicht im aufrufenden Modul nachgebaut.
 6. Lineare Algebra (`%*%`, `crossprod`, `solve`, `chol`, `eigen`, `qr`, kleinste Quadrate),
@@ -289,11 +289,11 @@ Julia-Dateien heißen gleich und gehören alle zum Untermodul `RStats`.
 | Python (`simlev/_r/`) | Julia (`julia/src/r/`) | Inhalt |
 |---|---|---|
 | `stats.py` | `stats.jl` | Sammelmodul bzw. Modulkopf `RStats` mit Exporten und `include`s |
-| `stats_sort.py` | `stats_sort.jl` | Hilfen, `order`, `sort`, `rank`, `rle`, `tabulate`, `findInterval`, `cut`, `complete_cases`, partielle Sortierung, `quantile`, `median`, `weighted_mean` |
+| `stats_sort.py` | `stats_sort.jl` | Hilfen, `order`, `sort`, `rank`, `cut`, partielle Sortierung, `quantile`, `median`; nur Julia `rle`, `tabulate`, `findInterval` (seit 1.6.1; `complete_cases`, `weighted_mean` in beiden entfallen, ohne Aufrufer) |
 | `stats_cor.py` | `stats_cor.jl` | `cor`, `cov`, `var`, `sd`, `cov2cor`, `scale` (cov.c) |
-| `stats_smooth.py` | `stats_smooth.jl` | `approx`, `approxfun`, `filter` (seit 1.0.0 ohne `fft`, `bw_nrd0`, `density`, `smooth_spline`) |
+| `stats_smooth.py` | `stats_smooth.jl` | `approx`, `filter`; nur Julia `approxfun` (seit 1.6.1) (seit 1.0.0 ohne `fft`, `bw_nrd0`, `density`, `smooth_spline`) |
 | `stats_optim.py` | `stats_optim.jl` | `optimize` (seit 1.0.0 ohne `optim`, `optimhess`, `nlminb`; seit 1.5.2 ohne `uniroot`) |
-| `stats_models.py` | `stats_models.jl` | `coef`, `fitted`, `residuals`, `p_adjust`, `ecdf`, `ave`, `aggregate` (seit 1.0.0 ohne `lm`, `glm`, `poly`, `summary_lm`, `predict`, `t_test`) |
+| `stats_models.py` | `stats_models.jl` | `coef`, `fitted`, `residuals`, `p_adjust`; nur Julia `ecdf`, `ave`, `aggregate` (seit 1.6.1; seit 1.0.0 ohne `lm`, `glm`, `poly`, `summary_lm`, `predict`, `t_test`) |
 | `stats_cluster.py` | `stats_cluster.jl` | `dist`, `as_dist`, `dist_as_matrix`, `hclust` |
 
 Importrichtung (ohne Kreise): `stats_sort` ← `stats_cor`, `stats_sort` ← `stats_smooth` ←
@@ -392,7 +392,7 @@ R-Namen aus `_r.base` bzw. `_r.fmt`). In `rnum.py` stehen die Summen
 (`r_sum`, `r_mean` mit Korrekturdurchlauf, `r_mean_int`, `r_cumsum`,
 `r_prod`, `r_cumprod`, `r_cummax`, `r_var`, `r_sd`, `r_median`,
 `r_rowsums`, `r_colsums`, `r_rowmeans`, `r_colmeans`; alle über die C-Kerne
-`core/slc_rbase*.cpp`), `r_pow` und `r_mod1` (`core/slc_rbase_num.cpp`, seit 1.3.0), in
+`core/slc_rbase*.cpp`) und `r_pow` (`core/slc_rbase_num.cpp`, seit 1.3.0), in
 `rformat.py` Runden und Textausgabe (seit 1.5.2 rechnen Runden und `formatReal` die Funktionen
 aus `fmt.py`; nur `r_sprintf` ist eine eigene, skalare Fassung):
 
@@ -554,8 +554,7 @@ ab. Einzelheiten in [`tests/schnittstelle/README.md`](../tests/schnittstelle/REA
 Alle Umgebungsschalter liest (und setzt) nur `simlev/_r/env.py`; Paket,
 Tests und Werkzeuge holen sie von dort.
 Wann gelesen wird, bestimmt die aufrufende Stelle: `tests/lib/reftree.py` und
-`tests/werkzeuge/gleichlauf/vergleich.py` beim Laden, `_collate` beim ersten Vergleich (neu
-nach `collate_reset()`).
+`tests/werkzeuge/gleichlauf/vergleich.py` beim Laden, `_collate` beim ersten Vergleich.
 
 | Schalter | Zweck | Art |
 |---|---|---|
@@ -669,7 +668,7 @@ Namen (PEP 562, `__getattr__`/`__dir__`). `from simlev import X`,
 `simlev.X`, `dir(simlev)` und `__all__` wirken wie zuvor. Ein neuer
 öffentlicher Name eines Analysemoduls kommt in `_LAZY` und `__all__`;
 `bootstrap` und `param_search` machen sich am Dateiende
-selbst aufrufbar (`_make_callable`).
+selbst aufrufbar (`simlev._callable_module`, wie `backcast`).
 
 ## Codestil
 

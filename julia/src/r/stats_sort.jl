@@ -9,8 +9,8 @@
 #                     SimLev genutzten Umfang: Ordnung, Rang, partielle Sortierung und Quantile
 #                     rechnet der C-Kern core/slc_rbase_sort.cpp.
 # Gemeinsame Hilfen, Sortieren, Ränge, Einteilen und Lagemaße (order, r_sort, r_rank, rle,
-# tabulate, findInterval, cut, complete_cases, quantile, median, weighted_mean) aus R 4.3.3 (src/main/sort.c,
-# qsort-body.c, seq.c; base/R/sort.R, rle.R, cut.R, findInt.R; stats/R/quantile.R, median.R, weighted.mean.R);
+# tabulate, findInterval, cut, quantile, median) aus R 4.3.3 (src/main/sort.c,
+# qsort-body.c, seq.c; base/R/sort.R, rle.R, cut.R, findInt.R; stats/R/quantile.R, median.R);
 # Python: _r/stats_sort.py.
 # Teil des Untermoduls RStats (eingebunden in stats.jl).
 
@@ -57,9 +57,6 @@ _rsum(a) = SimLev.r_sum(a)
 
 "mean() für Doubles (long double, zweiter Korrekturdurchlauf; C-Kern)."
 _rmean(a) = SimLev._rb_mean(SimLev._rbv(a))
-
-"mean() für ganzzahlige Vektoren (C-Kern)."
-_rmean_int(a) = SimLev._rb_mean_int(Int64[Int64(v) for v in a])
 
 "`seq.int(from, to, length.out = n)` (Werte wie R)."
 function seq_len_out(frm, to, length_out)
@@ -388,48 +385,6 @@ function cut(x, breaks; labels = nothing, include_lowest::Bool = false, right::B
     return SimLev.RFmt.RFactor(code, labs; ordered = ordered_result)
 end
 
-function _isok_el(v)
-    v === missing && return false
-    v === nothing && return false
-    v isa AbstractFloat && return !isnan(v)
-    return true
-end
-
-"`complete.cases(...)` für Vektoren, Matrizen und data.frames."
-function complete_cases(args...)
-    n = -1
-    ok = Bool[]
-    for a in args
-        cols = if a isa RFrame
-            collect(a.cols)
-        elseif a isa NamedMat
-            [a.data[:, j] for j in 1:size(a.data, 2)]
-        elseif a isa AbstractMatrix
-            [a[:, j] for j in 1:size(a, 2)]
-        elseif a isa RVector
-            [a.values]
-        elseif a isa AbstractVector && !isempty(a) && first(a) isa AbstractVector
-            collect(a)
-        elseif a isa AbstractVector
-            [a]
-        else
-            [[a]]
-        end
-        for c in cols
-            m = Bool[_isok_el(v) for v in c]
-            if n < 0
-                n = length(m)
-                ok = copy(m)
-            else
-                length(m) != n && error("not all arguments have the same length")
-                ok .&= m
-            end
-        end
-    end
-    n < 0 && error("no input has determined the number of cases")
-    return ok
-end
-
 # ── Lage- und Streuungsmaße ──────────────────────────────────────────────
 
 function _format_perc(probs::Vector{Float64}, digits::Int = 7)
@@ -482,21 +437,4 @@ function median(x; na_rm::Bool = false)
     r === nothing && return is_int ? missing : NA
     (is_int && isodd(count(!isnan, xv))) && return Int(r)
     return r
-end
-
-"`weighted.mean(x, w, na.rm)`."
-function weighted_mean(x, w = nothing; na_rm::Bool = false)
-    xv = _v(x)
-    if w === nothing
-        na_rm && (xv = filter(!isnan, xv))
-        return _rsum(xv) / Float64(length(xv))
-    end
-    wv = _v(w)
-    length(wv) != length(xv) && error("'x' and 'w' must have the same length")
-    if na_rm
-        i = .!isnan.(xv)
-        wv = wv[i]; xv = xv[i]
-    end
-    prod = [xv[i] * wv[i] for i in eachindex(xv) if wv[i] != 0]
-    return _rsum(prod) / _rsum(wv)
 end

@@ -6,7 +6,80 @@
 # Die Kerndateien brechen bei __FAST_MATH__ ab (slc_internal.h, *_core_impl.h).
 # Parallele Starts des MS-GARCH-Fits mit POSIX-Threads (SLC_THREADS, nur slc_msgarch.cpp nutzt es;
 # Makevars.win ohne, dort laufen die Starts nacheinander, Ergebnis gleich).
+# Seit 1.6.1 stehen die Gleitkomma-Schalter wie bis 1.5.2 in einer eigenen Variablen mit einer Regel je Datei
+# (statt PKG_CXXFLAGS, das R CMD check als nicht portabel meldet); core/sync.py --check prueft, dass jede
+# .cpp-Datei in src/ hier eine Regel hat (in Makevars und Makevars.win). Gleicher Maschinencode wie 1.6.0.
 CXX_STD = CXX17
 PKG_CPPFLAGS = -DSIMLEV_FP_CONTRACT_BY_FLAG -DSLC_THREADS
-PKG_CXXFLAGS = -ffp-contract=off -fno-fast-math -pthread
+SIMLEV_CXXFLAGS = -ffp-contract=off -fno-fast-math -pthread
 PKG_LIBS = -pthread
+
+# erstes Ziel: die Bibliothek (sonst wuerde die erste Regel unten das Standardziel)
+all: $(SHLIB)
+
+engine_core.o: engine_core.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c engine_core.cpp -o engine_core.o
+init.o: init.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c init.cpp -o init.o
+prep_r.o: prep_r.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c prep_r.cpp -o prep_r.o
+research_core.o: research_core.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c research_core.cpp -o research_core.o
+slc_backcast.o: slc_backcast.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_backcast.cpp -o slc_backcast.o
+slc_boot.o: slc_boot.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_boot.cpp -o slc_boot.o
+slc_bootpath.o: slc_bootpath.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_bootpath.cpp -o slc_bootpath.o
+slc_ctx.o: slc_ctx.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_ctx.cpp -o slc_ctx.o
+slc_dcc.o: slc_dcc.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_dcc.cpp -o slc_dcc.o
+slc_garch.o: slc_garch.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_garch.cpp -o slc_garch.o
+slc_gpd.o: slc_gpd.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_gpd.cpp -o slc_gpd.o
+slc_kde.o: slc_kde.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_kde.cpp -o slc_kde.o
+slc_linalg.o: slc_linalg.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_linalg.cpp -o slc_linalg.o
+slc_lsq.o: slc_lsq.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_lsq.cpp -o slc_lsq.o
+slc_matmul.o: slc_matmul.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_matmul.cpp -o slc_matmul.o
+slc_msgarch.o: slc_msgarch.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_msgarch.cpp -o slc_msgarch.o
+slc_normal.o: slc_normal.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_normal.cpp -o slc_normal.o
+slc_opt.o: slc_opt.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_opt.cpp -o slc_opt.o
+slc_opt_fmin.o: slc_opt_fmin.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_opt_fmin.cpp -o slc_opt_fmin.o
+slc_opt_test.o: slc_opt_test.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_opt_test.cpp -o slc_opt_test.o
+slc_prep.o: slc_prep.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_prep.cpp -o slc_prep.o
+slc_r.o: slc_r.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_r.cpp -o slc_r.o
+slc_r_linalg.o: slc_r_linalg.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_r_linalg.cpp -o slc_r_linalg.o
+slc_r_models.o: slc_r_models.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_r_models.cpp -o slc_r_models.o
+slc_r_opt.o: slc_r_opt.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_r_opt.cpp -o slc_r_opt.o
+slc_rbase.o: slc_rbase.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_rbase.cpp -o slc_rbase.o
+slc_rng.o: slc_rng.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_rng.cpp -o slc_rng.o
+slc_sample.o: slc_sample.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_sample.cpp -o slc_sample.o
+slc_special.o: slc_special.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_special.cpp -o slc_special.o
+slc_spline.o: slc_spline.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_spline.cpp -o slc_spline.o
+slc_stine.o: slc_stine.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_stine.cpp -o slc_stine.o
+slc_tcop.o: slc_tcop.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c slc_tcop.cpp -o slc_tcop.o
+withdrawal_core.o: withdrawal_core.cpp
+	$(CXX) $(ALL_CPPFLAGS) $(ALL_CXXFLAGS) $(SIMLEV_CXXFLAGS) -c withdrawal_core.cpp -o withdrawal_core.o

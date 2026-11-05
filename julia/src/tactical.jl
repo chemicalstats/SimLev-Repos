@@ -24,6 +24,7 @@
 module Tactical
 
 import ..SimLev
+using ..SimLev: _match_arg   # util.jl (seit 1.6.1 eine Fassung)
 using ..SimLev: _alloc_c, _alloc_ramp, _esc
 using ..SimLev: RList, RFrame, RVector, NamedMat, NA, isna_strict
 using Dates
@@ -35,11 +36,12 @@ export signal_state, momentum_score, tactical_rules, tactical_rotation, tactical
 # R-Hilfen
 # ═══════════════════════════════════════════════════════════════════════════
 
-_match_arg(arg, choices) = SimLev.DataPrep._match_arg(arg, choices)
 _sprintf(fmt, args...) = (s = SimLev.RFmt.sprintf(fmt, args...); s isa AbstractString ? String(s) : String(first(s)))
 _to_date(x, what = "date") = SimLev.DataPrep._to_date(x, what)
 _fill_na(v, method = "locf"; keep_leading = false) =
-    Float64[Float64(z) for z in SimLev.Backcast._fill_na(Float64[Float64(z) for z in v], method; keep_leading = keep_leading)]
+    _f64copy(SimLev.Backcast._fill_na(_f64copy(v), method; keep_leading = keep_leading))
+"Float64-Kopie (Funktionsgrenze: die Schleife wird für den Typ von `v` übersetzt; seit 1.6.1)."
+_f64copy(v) = Float64[Float64(z) for z in v]
 _message(msg) = SimLev.DataPrep.message(msg)
 _warn(msg) = (@warn msg; nothing)
 
@@ -266,6 +268,10 @@ println(signal_state(RList("buy" => x .> 101, "sell" => x .< 98)))
 function signal_state(signal; initial = false)
     b, bna = _lgl(_sig_part(signal, "buy"))
     s, sna = _lgl(_sig_part(signal, "sell"))
+    return _signal_state(b, bna, s, sna, initial)
+end
+# Funktionsgrenze (seit 1.6.1): `_sig_part` liefert `Any`, die Schleifen laufen hier mit festen Typen
+function _signal_state(b::Vector{Bool}, bna::Vector{Bool}, s::Vector{Bool}, sna::Vector{Bool}, initial)
     n = length(b)
     if length(s) != n
         s = [s[mod1(i, length(s))] for i in 1:n]

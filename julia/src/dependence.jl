@@ -22,6 +22,7 @@
 module Dependence
 
 import ..SimLev
+using ..SimLev: _match_arg   # util.jl (seit 1.6.1 eine Fassung)
 using ..SimLev: _grid_bars!, _grid_lines!, _grid_scatter!, _grid_svg
 using Dates
 using Printf
@@ -60,7 +61,6 @@ _has(o, k::AbstractString) = o isa NamedTuple ? haskey(o, Symbol(k)) :
                               o isa RVector ? haskey(o, k) : hasproperty(o, Symbol(k))
 
 _to_date(x, what) = _flex(SimLev.DataPrep._to_date, (x,), (what = String(what),))
-_match_arg(arg, choices) = SimLev.DataPrep._match_arg(arg isa Tuple ? collect(arg) : arg, collect(choices))
 _fill_na(x, method; keep_leading = false) =
     _fvec(_flex(SimLev.Backcast._fill_na, (x,), (method = method,), (keep_leading = keep_leading,)))
 _roll_var(x, n) = _fvec(SimLev.Signals._roll_var(x, n))
@@ -382,6 +382,21 @@ function _period_ends(d::AbstractVector, frequency)
     [i for i in 1:nr if i == nr || key[i+1] != key[i]]
 end
 
+# Log-Renditen je Spalte (Funktionsgrenze: V hat in _dep_returns keinen ableitbaren Typ; log je Kurs einmal statt
+# zweimal je Rendite; seit 1.6.1, gleiche Werte)
+function _dep_logret(V::Matrix{Float64})
+    m, k = size(V)
+    LV = Matrix{Float64}(undef, m, k)
+    for j in 1:k, i in 1:m
+        LV[i, j] = _log(V[i, j])
+    end
+    R = zeros(max(m - 1, 0), k)
+    for j in 1:k, i in 1:(m-1)
+        R[i, j] = LV[i+1, j] - LV[i, j]
+    end
+    R
+end
+
 """
     _dep_returns(data, assets, conditions = nothing, frequency = "week"; drop_flat = true)
 
@@ -397,17 +412,14 @@ function _dep_returns(data, assets, conditions = nothing, frequency = "week"; dr
     data = _dep_sort_dates(data)
     d = collect(data["date"])
     nr = length(d)
-    ends = _period_ends(d, frequency)
+    ends = _period_ends(d, frequency)::Vector{Int}
     V = zeros(nr, length(assets))
     for (j, a) in enumerate(assets)
         V[:, j] = _fill_na(_dep_check_prices(_num(data[a]), a, d), "locf"; keep_leading = true)
     end
     V = V[ends, :]
     m = size(V, 1)
-    R = zeros(max(m - 1, 0), length(assets))
-    for j in 1:length(assets), i in 1:(m-1)
-        R[i, j] = _log(V[i+1, j]) - _log(V[i, j])
-    end
+    R = _dep_logret(V)
     dates = m >= 1 ? d[ends][2:end] : Date[]
     cols = Pair{String,Any}["date" => Vector{Date}(dates)]
     for (j, a) in enumerate(assets)

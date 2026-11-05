@@ -18,33 +18,14 @@ from . import dependence as _dep
 from ._r import fmt as _fmt
 from ._r import libm as _libm
 from ._r.rlist import RList
-from ._r.rnum import r_mean, r_rowsums, r_sd, r_sum, r_var
+from ._r.rnum import r_mean, r_rowsums, r_sd, r_var
+from ._util import _cov2cor
+from ._util import _which_max
 
 __all__ = ["regime_hmm", "regime_states", "SimLevHMM"]
 
 _NAN = float("nan")      # R's NaN
 _NA = _fmt.NA_REAL       # R's NA_real_
-
-
-def _ldmvn(X, mu, S):
-    """Log-Dichte der multivariaten Normalverteilung je Zeile (``.ldmvn``)."""
-    la = _dep._sl()                        # slc: Cholesky, Dreieckslöser, Kreuzprodukt
-    X = np.asarray(X, dtype=np.float64)
-    L = np.asarray(la.chol(np.asarray(S, dtype=np.float64)), dtype=np.float64)
-    Xc = X - np.asarray(mu, dtype=np.float64).reshape(1, -1)
-    Z = np.asarray(la.backsolve(L, Xc.T, transpose=True), dtype=np.float64).T
-    d = X.shape[1]
-    return -0.5 * r_rowsums(Z * Z) - r_sum(_libm.log(np.diag(L))) - 0.5 * d * math.log(2 * math.pi)
-
-
-def _which_max(v):
-    """R ``which.max`` (erstes Maximum, NA ignoriert); ``None`` wenn leer."""
-    v = np.asarray(v, dtype=np.float64)
-    ok = ~np.isnan(v)
-    if not ok.any():
-        return None
-    idx = np.nonzero(ok)[0]
-    return int(idx[np.argmax(v[idx])])
 
 
 def _hmm_viterbi(lB, lA, lp0):
@@ -137,16 +118,6 @@ def _hmm_init_rank(X, k, win, ridge):
     if na.any():
         vol[na] = _dep._median(vol, na_rm=True)
     return _hmm_init_cl(X, _dep._cut_n(_dep._rank_avg(vol), k), k, ridge)
-
-
-def _cov2cor(V):
-    """``stats::cov2cor``."""
-    V = np.asarray(V, dtype=np.float64)
-    p = V.shape[0]
-    Is = np.sqrt(1 / np.diag(V))
-    r = Is.reshape(-1, 1) * V * Is.reshape(1, -1)
-    r[np.arange(p), np.arange(p)] = 1.0
-    return r
 
 
 class SimLevHMM(RList):
@@ -433,4 +404,4 @@ SimLevHMM.plot = _plot_method(_plot_hmm, "SimLevHMM")
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
 from ._r.base import quiet_fp  # noqa: E402
 
-quiet_fp(globals(), list(__all__) + ["_hmm_viterbi", "_ldmvn", "_hmm_em", "_hmm_init_cl", "_hmm_init_rank"])
+quiet_fp(globals(), list(__all__) + ["_hmm_viterbi", "_hmm_em", "_hmm_init_cl", "_hmm_init_rank"])

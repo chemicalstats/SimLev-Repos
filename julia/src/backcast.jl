@@ -117,7 +117,10 @@ rückwärts gefüllt. Liefert eine Float64-Kopie.
 """
 function _fill_na(v, method = ("locf", "linear", "stine", "none"); keep_leading::Bool = false)
     method = DP._match_arg(method, ("locf", "linear", "stine", "none"))
-    v = DP._as_numeric(v)
+    return _fill_na_m(DP._as_numeric(v), method, keep_leading)
+end
+# Funktionsgrenze (seit 1.6.1): der Rumpf wird für den Typ von `v` übersetzt, das Ergebnis ist ableitbar
+function _fill_na_m(v, method::String, keep_leading::Bool)
     ok = findall(!isnan, v)
     (method == "none" || isempty(ok) || length(ok) == length(v)) && return v
     first_, last_ = ok[1], ok[end]
@@ -185,7 +188,7 @@ function _bc_metric_table(err_mat::AbstractMatrix, grid)
     vals = Float64[]
     for (_, f) in metrics
         s = Float64[f(err_mat[:, j]) for j in 1:size(err_mat, 2)]
-        push!(vals, Float64(grid[DP._which_min(s)]))
+        push!(vals, Float64(grid[something(SimLev._which_min(s), 0)]))
     end
     return RVector(vals; names = first.(metrics))
 end
@@ -256,20 +259,38 @@ _par(p, k) = Float64(p[k])
 
 "Modellrenditen für einen Parametersatz (R: `.bc_model_returns`)."
 function _bc_model_returns(prep::_Prep, par, model, reg = nothing)
-    base = if model == "structural"
-        b = _par(par, "beta")
-        Float64[b * prep.leverage * prep.x[i] + prep.fin[i] - prep.ter_cost[i] for i in 1:prep.n]
+    # seit 1.5.1 typstabil: Parameter als Float64 in eigene Schleifen (_bc_mr_*); bis 1.5.0 Komprehensionen über
+    # Werte aus der RList (dynamische Aufrufe je Tag, 5,6-mal langsamer als R). Rechenfolge unverändert.
+    sp = _par(par, "spread"); dr = _par(par, "drag")
+    if model == "structural"
+        return _bc_mr_structural(prep, _par(par, "beta"), sp, dr)
     elseif model == "linear"
         cf = _coef(reg)
-        Float64[cf[1] + cf[2] * prep.x[i] for i in 1:prep.n]
-    else
-        out = fill(NA, prep.n)
-        ok = findall(isfinite, prep.x)
-        out[ok] .= SimLev.SLib.smspline_predict(reg["fit"], prep.x[ok])   # außerhalb linear fortgesetzt
-        out
+        return _bc_mr_spread(prep, Float64[Float64(cf[1]) + Float64(cf[2]) * prep.x[i] for i in 1:prep.n], sp, dr)
     end
-    sp = _par(par, "spread"); dr = _par(par, "drag")
-    return Float64[base[i] - sp * prep.sp_unit[i] - dr * prep.dr_unit[i] for i in 1:prep.n]
+    out = fill(NA, prep.n)
+    ok = findall(isfinite, prep.x)
+    out[ok] .= SimLev.SLib.smspline_predict(reg["fit"], prep.x[ok])   # außerhalb linear fortgesetzt
+    return _bc_mr_spread(prep, out, sp, dr)
+end
+
+function _bc_mr_structural(prep::_Prep, b::Float64, sp::Float64, dr::Float64)
+    x = prep.x; fin = prep.fin; tc = prep.ter_cost; su = prep.sp_unit; du = prep.dr_unit; L = prep.leverage
+    out = Vector{Float64}(undef, prep.n)
+    @inbounds for i in 1:prep.n
+        base = b * L * x[i] + fin[i] - tc[i]
+        out[i] = base - sp * su[i] - dr * du[i]
+    end
+    out
+end
+
+function _bc_mr_spread(prep::_Prep, base::Vector{Float64}, sp::Float64, dr::Float64)
+    su = prep.sp_unit; du = prep.dr_unit
+    out = Vector{Float64}(undef, prep.n)
+    @inbounds for i in 1:prep.n
+        out[i] = base[i] - sp * su[i] - dr * du[i]
+    end
+    out
 end
 
 _coef(reg) = (c = reg["coef"]; c isa RVector ? c.values : collect(Float64, c))
@@ -582,7 +603,7 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
             push!(cors, count(ok) < 30 ? NA : Float64(_stats().cor(xs[ok], pr[ok])))
         end
         sg = prep.leverage > 0 ? 1.0 : -1.0
-        lag = cand[DP._which_max(sg .* cors)]
+        lag = cand[something(SimLev._which_max(sg .* cors), 0)]
         prep = _bc_prepare(data, product, index, ter, leverage, rate, fx, rl, ter_basis, rate_basis,
                            accrual, index_fill, Int(lag))
     end
@@ -640,7 +661,7 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
         if method == "grid"
             length(fit) != 1 && error("method = 'grid' unterstützt genau einen Parameter in 'fit'.")
             vals = Float64[obj_fun(g, rws, ob, rg) for g in grid]
-            best = grid[DP._which_min(vals)]
+            best = grid[something(SimLev._which_min(vals), 0)]
             err_mat = Matrix{Float64}(undef, length(ob.pos), length(grid))
             for (j, g) in enumerate(grid)
                 p = copy(par0); p[fit[1]] = g

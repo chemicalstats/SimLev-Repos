@@ -16,8 +16,8 @@ Re-exportiert die Summenhilfen aus :mod:`simlev._r.rnum` (unterste Schicht:
 ``NA_REAL``, skalare und eindimensionale ``r_``-Hilfen; Rundung und
 Textausgabe der Engine in :mod:`simlev._r.rformat`) und ergänzt
 Funktionen von R's base mit R-Namen für Vektoren, Matrizen und DataFrames
-(``colSums``, ``rowMeans``, ``cumprod``, ``cummax``, ``diff``, ``pmin``,
-``range`` …) sowie ``quiet_fp``/``env_from_caller`` für die
+(``mean``, ``diff``, ``pmin``, ``pmax``, ``range``; seit 1.6.1 ohne
+``colSums``/``rowMeans``/``cumprod``/``cummax``/``cummin``, die nur Referenzfälle nutzten) sowie ``quiet_fp``/``env_from_caller`` für die
 öffentlichen Funktionen der Module.
 """
 from __future__ import annotations
@@ -26,7 +26,6 @@ from .rnum import (  # noqa: F401
     r_cumsum,
     r_mean,
     r_mean_int,
-    r_mod1,
     r_pow,
     r_pow_vec,
     r_prod,
@@ -35,8 +34,7 @@ from .rnum import (  # noqa: F401
     r_sum,
     r_var,
 )
-from .rnum import NA_REAL, _handle_nan, _margsums, r_cummax, r_cummin, r_isna_arr  # noqa: F401
-from .rnum import r_cumprod as _r_cumprod
+from .rnum import NA_REAL, r_isna_arr  # noqa: F401
 
 import builtins as _bi
 import functools as _functools
@@ -49,9 +47,8 @@ import pandas as _pd
 
 
 
-__all__ = ["r_cumsum", "r_mean", "r_mean_int", "r_mod1", "r_pow", "r_pow_vec", "r_prod",
-           "r_rowsums", "r_sd", "r_sum", "r_var", "colSums", "colMeans", "rowSums", "rowMeans",
-           "cumprod", "cummax", "cummin", "mean", "diff", "pmin", "pmax", "range"]
+__all__ = ["r_cumsum", "r_mean", "r_mean_int", "r_pow", "r_pow_vec", "r_prod", "r_rowsums", "r_sd", "r_sum", "r_var",
+           "mean", "diff", "pmin", "pmax", "range"]
 
 
 def _mat(x):
@@ -73,61 +70,11 @@ def _named(v, names):
     return _pd.Series(v, index=names)
 
 
-def _col_sums(a, na_rm, mean):
-    return _margsums(a, na_rm, mean, False)
-
-
-def colSums(x, na_rm=False):
-    """``colSums(x, na.rm)`` (long double je Spalte)."""
-    a, rn, cn = _mat(x)
-    return _named(_col_sums(a, na_rm, False), cn)
-
-
-def colMeans(x, na_rm=False):
-    """``colMeans(x, na.rm)`` (long-double-Summe / Anzahl)."""
-    a, rn, cn = _mat(x)
-    return _named(_col_sums(a, na_rm, True), cn)
-
-
-def _row_sums(a, na_rm, mean):
-    return _margsums(a, na_rm, mean, True)
-
-
-def rowSums(x, na_rm=False):
-    """``rowSums(x, na.rm)`` (spaltenweise in long double akkumuliert)."""
-    a, rn, cn = _mat(x)
-    return _named(_row_sums(a, na_rm, False), rn)
-
-
-def rowMeans(x, na_rm=False):
-    """``rowMeans(x, na.rm)``."""
-    a, rn, cn = _mat(x)
-    return _named(_row_sums(a, na_rm, True), rn)
-
-
 def _vec(x):
     if isinstance(x, _pd.Series):
         nm = None if isinstance(x.index, _pd.RangeIndex) else list(x.index)
         return x.to_numpy(dtype=_np.float64, na_value=_np.nan), nm
     return _np.atleast_1d(_np.asarray(x, dtype=_np.float64)).ravel(order="F"), None
-
-
-def cumprod(x):
-    """``cumprod(x)`` (``LDOUBLE``-Produkt, NA/NaN ab dem ersten Auftreten; C-Kern)."""
-    v, nm = _vec(x)
-    return _named(_r_cumprod(v), nm)
-
-
-def cummax(x):
-    """``cummax(x)`` (double, ``(max > x) ? max : x``; C-Kern)."""
-    v, nm = _vec(x)
-    return _named(r_cummax(v), nm)
-
-
-def cummin(x):
-    """``cummin(x)`` (C-Kern)."""
-    v, nm = _vec(x)
-    return _named(r_cummin(v), nm)
 
 
 def mean(x, na_rm=False):

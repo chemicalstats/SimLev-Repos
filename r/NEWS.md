@@ -14,6 +14,40 @@ Recht um, gibt alle Ausgaben auf Deutsch aus und erzeugt alle 105 Fälle
 neu (siehe unten). Python 0.5.0 und Julia 0.5.0 sind zu allen Fällen
 bitgleich (seit 0.10.0 90; die 15 Fälle des entfernten Fondsmodus entfielen).
 
+## SimLev 1.6.1
+
+Patch (R/Python/Julia). Weniger Code in Python und Julia, schnellerer Wirtscode und kürzere erste Aufrufe in Julia; Ergebnisse, Ausgaben, Warnungen und Fehler bleiben bitgleich zu 1.6.0 (geprüft gegen R 1.5.2), außer den unten als „Berichtigt“ genannten Meldungen von match.arg in Randfällen.
+
+- simulation(): Assets ohne Signalspalte (Kaufen und Halten) bekommen keine Spalte aus FALSE je Tag mehr; der Kern der Tagesengine liest für sie FALSE an jedem Tag (leerer Zeiger, `core/engine_core_impl.h`, `core/prepare_core_impl.h`). R übergibt weiter seine Vektoren.
+- t-Copula (dependence_analysis() mit `copulas = TRUE`, scenario_copula()): Auf einer ruhigen Maschine nachgemessen, mit zwei Threads gegen einen (`SIMLEV_THREADS=1`) in allen drei Sprachen −26 bis −46 %; die Voreinstellung (Zahl der Prozessoren, höchstens 8) bleibt.
+- Laufzeit gegenüber 1.6.0 (große Fälle, alt und neu abwechselnd, 2 Runden): Python simulation() −14 bis −46 %, sensitivity_grid() −67 %, tactical_rules() −93 %, bootstrap_study() −42 %, wrapper_nav() −62 %; Julia tactical_rules() −63 %, tactical_simulation() −38 bis −46 %, portfolio_optimize("hrp") −25 %, portfolio_rolling() −28 %; R simulation() mit 200/500 Anlagen −14 bis −17 %.
+- Tests (Ordner tests des Repositorys): Referenzfälle können für eine Sprache allein gelten (`ref_case(..., nur = "py" | "jl")`), wenn die Nachbildung der anderen Sprache ohne Aufrufer entfallen ist. Entfallen sind die Fälle der gestrichenen Nachbildungen in beiden Sprachen (cat, print.factor, toString, prettyNum, encodeString, weighted.mean, complete.cases, cumprod über `simlev._r.base`); `opt_scipen` prüft cat() nicht mehr.
+
+Nur R:
+
+- `src/Makevars`, `Makevars.win`: Die Gleitkomma-Schalter (`-ffp-contract=off -fno-fast-math`) stehen wie bis 1.5.2 in einer eigenen Variablen mit einer Regel je Datei; R CMD check meldete sie in 1.6.0 in `PKG_CXXFLAGS` als WARNING (nicht portabel). Gleicher Maschinencode (alle 33 Objekte verglichen).
+- withdrawal_simulation() mit Tarifweg: die Jahreszeilen (`tax_report$tariff_years`) entstehen als Liste mit einem Aufbau statt Spalte für Spalte (`.wd_tariff_years`).
+- simulation(): Die Tage je Asset entstehen einmal je Lauf statt je Asset, die offenen Lots je Asset (`open_lots`) ohne data.frame() je Asset; 500 Anlagen mit Steuer −10 %.
+
+Nur Python und Julia:
+
+- Nachbildungen von R-Funktionen ohne Aufrufer im Paket entfallen (bisher nur von Referenzfällen genutzt), siehe die Listen unter „Nur Python“ und „Nur Julia“. Die Umgebungsschalter `SIMLEV_LAX_NA`, `SIMLEV_STRICT_ZERO` und `SIMLEV_COLLATE` bleiben (dokumentiert, von den Tests gelesen), ebenso `set_options` (vom Zufallstest des Datumsformats genutzt).
+- Bau: Sprünge nicht über 32-Byte-Grenzen (`-Wa,-mbranches-within-32B-boundaries`, nur wenn der Assembler es kennt; `python/setup.py`, `julia/deps/build.jl`). Ohne den Schalter schwankte die Laufzeit einzelner Kerne je nach Lage im Code um bis zu 30 % (Intel-JCC-Erratum; z. B. `qp_box_simplex` in portfolio_rolling() bei gleichem Objektcode +28 %). Nur Auffüllung, gleiche Befehle. Nachgeprüft danach: alle Fälle und Zufallsfälle des Gleichlaufs in Python (50.318/50.318), Datums- und Grundfunktionsprüfungen in Python und Julia, Julia-Build; der Julia-Vergleich aller Fälle und tests/run.py für Python und Julia sind nach dem Schalter nicht erneut gelaufen.
+- Eine Fassung von `match.arg` je Sprache (bis 1.6.0 in Python zwei, in Julia drei): Prüfungen und Meldungen wie R 4.3.3. Berichtigt (bisher nur in Randfällen anders als R): ein leerer Vektor als Wahl meldet „'arg' should be one of …“ statt „'arg' must be of length 1“, ein Vektor mit Nicht-Text „'arg' must be NULL or a character vector“, bei einer einzigen Wahl lautet die Meldung „'arg' should be “…”“, doppelte und leere Wahlen erscheinen nicht in der Meldung.
+- Eine Fassung von `which.max`/`which.min` je Sprache (bis 1.6.0 vier bis fünf Kopien mit verschiedenen Rückgaben bei leerer Eingabe; die Aufrufer behalten ihr Verhalten).
+
+Nur Python:
+
+- Entfallen (ohne Aufrufer): `_r.base.colSums`/`colMeans`/`rowSums`/`rowMeans`/`cumprod`/`cummax`/`cummin` (das Paket nutzt `_r.rnum`), `_r.fmt.prettyNum`, `encode_string`, `paste0`, `to_string`, `print_factor`, `print_list`, `print_default`, `cat_str`, `r_cat`, `_r.stats` `weighted_mean`, `complete_cases`, `rle`, `tabulate`, `findInterval`, `ecdf`, `ave`, `aggregate`, `approxfun`, `_r.libm.apply2`/`atan2`, `_r.rnum.r_mod1`/`r_cummin`, `_collate.collate_reset`; die C-Hüllen `slc_qt`/`slc_pt` (seit 1.6.0 über die Thread-Fassungen) und `slc_r_scientific`/`slc_r_scientific_vec`.
+- Schnellere Wege: Signale (`signal_*`, `_sig_out`), tactical_rules() und signal_state() wandeln bool- und float64-Felder ohne Schleife je Wert um; bootstrap_study() baut Pfadtabelle, Ergebniszeilen und Tabelle je Strategie mit einem Aufbau.
+- Doppelte Hilfen zusammengelegt (`_lib_models` nutzt die Matrixhilfen aus `_lib_linalg`, `tactical` die Kalenderrechnung aus `data_prep`, eine Fassung von `_days`/`_dates`, ein Aufruf von `_callable_module` für bootstrap und param_search, eine Prüfung doppelter Namen in `data_prep`).
+
+Nur Julia:
+
+- Entfallen (ohne Aufrufer): `RFmt.r_factor`, `encode_string`, `to_string`, `prettyNum`, `format_date`, `print_factor`, `format_data_frame`, `cat_str`, `r_cat`, `RBase.r_diff`, `r_range`, `RLinalg.outer`, `RStats.dist_as_matrix`, `complete_cases`, `weighted_mean`, `collate_key` und Reste aus 1.6.0 (`_rb_scientific`, `_cpow`, `_as_float`, `_DBL_DIG`, `_MAX10E`, `_DOUBLE_LINE`). `RFactor` bleibt als Typ (Eingaben der Druckausgabe), ebenso die `IndexStyle`-Methoden von `RFactor` und `RVector` (ruft Base selbst auf).
+- Typstabilität: signal_state(), tactical_rules(), `_fill_na` (Backcast, Tactical) und die Renditen von dependence_analysis()/portfolio_optimize() (`_dep_returns`, `_opt_returns`) laufen hinter Funktionsgrenzen mit festen Typen; portfolio_optimize(method = "hrp") mit 200 Anlagen −25 bis −47 %, portfolio_rolling() −28 %.
+- Erster Aufruf in einem frischen Prozess: Die Arbeitslast beim Vorkompilieren deckt zusätzlich dependence_analysis() mit Copulas, scenario_copula() (t und Gauß), result_analysis() eines Ergebnisses von simulation(), portfolio_optimize() und tactical_rotation() mit `RFrame` ab: erster Aufruf scenario_copula() 2,4 → 0,4 s, result_analysis() 0,9 → 0,2 s, dependence_analysis() mit Copulas 0,8 → 0,5 s, tactical_rotation() 0,75 → 0,21 s, portfolio_optimize() 0,33 → 0,20 s; Ladezeit (0,6 s) und Pkg.build() mit Vorkompilieren (262 s) unverändert.
+
 ## SimLev 1.6.0
 
 Minor-Update (R/Python/Julia). Der Kern ist einheitlich C++, die Rechenschritte, die bei großen Strategien und Daten die meiste Zeit kosten, rechnet er in allen drei Sprachen mit demselben Code, ebenso die bis 1.5.2 in Python und Julia je für sich nachgebildeten Grundfunktionen von R. Ergebnisse, Ausgaben, Warnungen und Fehler bleiben bitgleich zu 1.5.2, außer den unten als „Berichtigt“ genannten Abweichungen der Ports von R.

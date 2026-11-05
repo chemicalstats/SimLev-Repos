@@ -107,9 +107,6 @@ def _num_vec(x: Any) -> list | None:
     return None
 
 
-_DOUBLE_LINE = "\u2550" * 62
-
-
 def _r_class_name(x: Any) -> str:
     """Klassenname wie ``class(x)[1]`` in R für Python-Werte."""
     if isinstance(x, (bool, np.bool_)):

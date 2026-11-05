@@ -675,7 +675,7 @@ function overfit_reality_check(x; benchmark = nothing, B = 999, block = nothing,
         Ts = Float64[max(DA._rmax((sq .* (Fb[i, :] .- gv)) ./ om), 0.0) for i in 1:size(Fb, 1)]
         DA._mean_lgl(Ts .>= Tspa)
     end
-    jbest = DA._which_max(fbar)
+    jbest = something(SimLev._which_max(fbar), 0)
     SimLev.RList("p_rc" => p_rc, "p_spa" => spa_p(fbar .* (fbar .>= thr)), "p_spa_lower" => spa_p(max.(fbar, 0.0)),
                  "p_spa_upper" => spa_p(fbar), "best" => cn[jbest], "mean_excess" => SimLev.RVector(fbar; names = cn),
                  "n" => Tn, "k" => K, "B" => B; class = ["SimLevRealityCheck"])

@@ -7,7 +7,7 @@
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang; seit 1.6.0 rechnen Abstände und Clusterbaum im Kern
 #                     core/slc_rbase_clust.cpp (sl_r_dist, sl_r_hclust), hier bleiben Argumente und Rückgabe.
-# Distanzen und hierarchische Clusteranalyse (dist, as_dist, dist_as_matrix, hclust) aus R 4.3.3
+# Distanzen und hierarchische Clusteranalyse (dist, as_dist, hclust) aus R 4.3.3
 # stats/R/dist.R, hclust.R und stats/src/distance.c, hclust.f; Python: _r/stats_cluster.py.
 # Teil des Untermoduls RStats (eingebunden in stats.jl).
 
@@ -48,20 +48,6 @@ function as_dist(m; diag::Bool = false, upper::Bool = false)
     size(A, 2) != p && @warn "non-square matrix"
     vals = Float64[A[i, j] for j in 1:size(A, 2) for i in 1:size(A, 1) if i > j]
     return _mkdist(vals, p, rn !== nothing ? rn : cn, diag, upper, nothing)
-end
-
-"`as.matrix(<dist>)` (dimnames Labels bzw. 1..n)."
-function dist_as_matrix(d)
-    size = d.attrs["Size"]
-    M = zeros(size, size)
-    k = 0
-    for j in 1:size, i in j+1:size
-        k += 1
-        M[i, j] = d.values[k]
-    end
-    M = M .+ permutedims(M)
-    lab = d.attrs["Labels"] !== nothing ? d.attrs["Labels"] : string.(1:size)
-    return NamedMat(M; rownames = lab, colnames = lab)
 end
 
 const _HC_METHODS = ["ward.D", "single", "complete", "average", "mcquitty", "median", "centroid", "ward.D2"]

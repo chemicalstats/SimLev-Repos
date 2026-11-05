@@ -13,9 +13,9 @@
 #                     core/slc_rbase_fmt.cpp (eine Fassung für Python und Julia).
 """Formatierung und Druckausgabe wie R 4.3.3.
 
-Zeichengenaue Nachbildung von R's ``format``, ``formatC``, ``prettyNum``,
+Zeichengenaue Nachbildung von R's ``format``, ``formatC``,
 ``sprintf``, ``as.character``, ``paste``, ``round``/``signif`` und der
-``print``-Ausgabe von Vektoren, Matrizen, data.frames, Faktoren und Listen
+``print``-Ausgabe von Vektoren, Matrizen, data.frames und Faktoren
 (Quellen: ``src/main/format.c``, ``printutils.c``, ``printvector.c``,
 ``printarray.c``, ``print.c``, ``paste.c``, ``sprintf.c``, ``util.c``,
 ``src/nmath/fround.c``, ``fprec.c``, ``src/library/base/R/format.R``,
@@ -62,20 +62,15 @@ import datetime as _dt
 import math
 import re
 import struct
-import sys
 import unicodedata
 
 import numpy as np
 import pandas as pd
 
 __all__ = [
-    "NA_REAL", "set_options",
-    "r_round", "signif", "fround", "fprec",
-    "as_character", "paste", "paste0", "to_string",
-    "format", "format_date", "formatC", "prettyNum", "sprintf",
-    "nchar", "encode_string",
-    "print_vector", "print_matrix", "print_data_frame", "format_data_frame", "print_factor",
-    "print_list", "print_default", "r_cat", "cat_str",
+    "NA_REAL", "set_options", "r_round", "signif", "fround", "fprec", "as_character", "paste", "format",
+    "format_date", "formatC", "sprintf", "nchar", "print_vector", "print_matrix", "print_data_frame",
+    "format_data_frame",
 ]
 
 # ── Optionen ────────────────────────────────────────────────────────────────
@@ -686,23 +681,6 @@ def _format_string(strs, quote=0):
     return w
 
 
-def encode_string(x, width=0, quote="", justify="left", na_encode=True):
-    """``encodeString``: Escapes, Anführungszeichen, Auffüllen."""
-    v = _as_v(x, "character")
-    q = quote if quote else 0
-    if width is None:
-        width = max([(_strwid(s, q) + (2 if q else 0)) if s is not None else 2 for s in v.v] or [0])
-    out = []
-    for s in v.v:
-        if s is None and not na_encode:
-            out.append(None)
-        elif s is None:
-            out.append("NA".ljust(width) if justify == "left" else "NA".rjust(width))
-        else:
-            out.append(_encode_string(s, width, q, justify))
-    return _out(out, v)
-
-
 def nchar(x, type="chars"):
     """``nchar(x, type)``: 'chars', 'bytes' oder 'width'."""
     v = _as_v(x, "character")
@@ -722,12 +700,6 @@ def nchar(x, type="chars"):
 
 
 # ── as.character / paste ───────────────────────────────────────────────────
-
-def _real_to_str(x, na=False, nan=False):
-    """``StringFromReal`` mit 15 Stellen (as.character für double; C-Kern, seit 1.6.0)."""
-    if x != x:
-        return None if (na or not nan) else "NaN"
-    return _ext.slc_r_as_character_real(np.array([x], dtype=np.float64), int(_OPT["scipen"]), _OPT["OutDec"])[0]
 
 
 def _as_character_list(v):
@@ -788,16 +760,6 @@ def paste(*args, sep=" ", collapse=None):
     a = np.empty(len(res), dtype=object)
     a[:] = res
     return a
-
-
-def paste0(*args, collapse=None):
-    """``paste0(..., collapse)``."""
-    return paste(*args, sep="", collapse=collapse)
-
-
-def to_string(x, sep=", "):
-    """``toString(x)``."""
-    return paste(x, collapse=sep)
 
 
 # ── format() ───────────────────────────────────────────────────────────────
@@ -1046,34 +1008,7 @@ def _pretty_num_chr(x, big_mark="", big_interval=3, small_mark="", small_interva
     return res
 
 
-def prettyNum(x, big_mark="", big_interval=3, small_mark="", small_interval=5,
-              decimal_mark=None, input_d_mark=None, preserve_width="common",
-              zero_print=None, replace_zero=False, drop0trailing=False, **kw):
-    """``prettyNum(x, ...)``: Tausender-/Dezimaltrenner in formatierte Zahlen."""
-    dec = _OPT["OutDec"] if decimal_mark is None else decimal_mark
-    v = _as_v(x)
-    if v.type != "character":
-        strs = []
-        for i in range(len(v)):
-            strs.append(format(v.subset([i]), big_mark=big_mark, big_interval=big_interval,
-                               small_mark=small_mark, small_interval=small_interval,
-                               decimal_mark=dec, zero_print=zero_print,
-                               drop0trailing=drop0trailing, **kw)[0])
-        res = _pretty_num_chr(strs, big_mark, big_interval, small_mark, small_interval, dec,
-                              dec if input_d_mark is None else input_d_mark, preserve_width,
-                              zero_print, replace_zero, drop0trailing, not_char=True)
-    else:
-        res = _pretty_num_chr(list(v.v), big_mark, big_interval, small_mark, small_interval, dec,
-                              dec if input_d_mark is None else input_d_mark, preserve_width,
-                              zero_print, replace_zero, drop0trailing)
-    return _out(res, v)
-
-
 # ── formatC ────────────────────────────────────────────────────────────────
-
-def _c_flags(flag):
-    # Python kennt "'" und "I" nicht (in der C-Locale wirkungslos)
-    return "".join(c for c in flag if c in "-+ #0")
 
 
 def _keep_dim(x, res):
@@ -1494,22 +1429,6 @@ def _print_factor_lines(v, quote=False, max_levels=None, right=False):
     return lines
 
 
-def print_factor(x, quote=False, max_levels=None, levels=None, ordered=False, right=False):
-    """``print(<factor>)``. ``x``: ``pandas.Categorical``/Series oder Werte mit ``levels``."""
-    if levels is not None:
-        c = pd.Categorical(np.asarray(x, dtype=object), categories=levels, ordered=ordered)
-        v = _from_categorical(c, None)
-    else:
-        v = _as_v(x)
-        if v.type != "factor":
-            vals = _as_character_list(v)
-            from ._collate import collate_key
-            levs = sorted(dict.fromkeys(s for s in vals if s is not None), key=collate_key)
-            c = pd.Categorical(vals, categories=levs, ordered=ordered)
-            v = _from_categorical(c, v.names)
-    return "\n".join(_print_factor_lines(v, quote, max_levels, right))
-
-
 # ── Druckausgabe: Matrizen ─────────────────────────────────────────────────
 
 def _matrix_lines(cols, ctype, r, c, rl, cl, rn=None, cn=None, quote=0, right=False, digits=None):
@@ -1745,161 +1664,3 @@ def print_data_frame(df, row_names=True, digits=None, right=True, quote=False, t
     vcols = [_V("character", c, np.array([s is None for s in c], bool)) for c in cols]
     q = '"' if quote else 0
     return "\n".join(_matrix_lines(vcols, "character", n, len(cl), rl, cl, None, None, q, right, None))
-
-
-# ── Listen und Verteiler ───────────────────────────────────────────────────
-
-_RESERVED = {"if", "else", "repeat", "while", "function", "for", "next", "break", "TRUE", "FALSE",
-             "NULL", "Inf", "NaN", "NA", "NA_integer_", "NA_real_", "NA_character_", "NA_complex_", "in"}
-
-
-def _is_valid_name(s):
-    if not s:
-        return False
-    c = s[0]
-    if not (c.isalpha() or c == "."):
-        return False
-    if c == "." and len(s) > 1 and s[1].isdigit():
-        return False
-    if not all(ch.isalnum() or ch in "._" for ch in s):
-        return False
-    if s == "...":
-        return True
-    if s in _RESERVED:
-        return False
-    if re.fullmatch(r"\.\.\d+", s):
-        return False
-    return True
-
-
-def _own_format(x):
-    """Objekt mit eigener print-Methode (RList-Unterklasse mit format())?"""
-    try:
-        from .rlist import RList
-    except ImportError:  # pragma: no cover
-        return False
-    return isinstance(x, RList) and type(x).format is not RList.format
-
-
-def _print_lines(x, tag="", digits=None, quote=None):
-    """PrintValueRec -> Zeilen."""
-    if x is None:
-        return ["NULL"]
-    if hasattr(x, "__r_print_lines__"):
-        return x.__r_print_lines__()
-    if _own_format(x):
-        return x.format().split("\n")
-    if isinstance(x, pd.DataFrame):
-        return print_data_frame(x, digits=digits).split("\n")
-    if isinstance(x, np.ndarray) and x.ndim == 2:
-        return print_matrix(x, digits=digits, quote=quote).split("\n")
-    if isinstance(x, (dict, list)):
-        return _print_list_lines(x, tag, digits, quote)
-    return _print_vec_v(_as_v(x), digits, quote)
-
-
-def _print_list_lines(x, tag="", digits=None, quote=None):
-    if isinstance(x, dict):
-        items = [(None if k is None else str(k), v) for k, v in x.items()]
-        named = True
-    else:
-        items = [(None, v) for v in x]
-        named = False
-    if not items:
-        return ["named list()" if named else "list()"]
-    lines = []
-    for i, (nm, val) in enumerate(items):
-        if i > 0:
-            lines.append("")
-        if named and nm is not None and nm != "":
-            t = tag + ("$%s" % nm if _is_valid_name(nm) else "$`%s`" % nm)
-        else:
-            t = tag + "[[%d]]" % (i + 1)
-        lines.append(t)
-        if isinstance(val, (dict, list)) and not _own_format(val):
-            lines.extend(_print_list_lines(val, t, digits, quote))
-        else:
-            lines.extend(_print_lines(val, t, digits, quote))
-    lines.append("")
-    return lines
-
-
-def print_list(x, digits=None, quote=None):
-    """``print(<list>)``: dict = benannte Liste, list = unbenannte Liste."""
-    return "\n".join(_print_list_lines(x, "", digits, quote))
-
-
-def print_default(x, digits=None, quote=None, right=False, row_names=True):
-    """Verteiler wie ``print()``: DataFrame -> print.data.frame, 2-D-Array ->
-    Matrix, dict/list -> Liste, Categorical -> factor, sonst Vektor."""
-    if isinstance(x, pd.DataFrame):
-        return print_data_frame(x, row_names=row_names, digits=digits)
-    if isinstance(x, np.ndarray) and x.ndim == 2:
-        return print_matrix(x, digits=digits, quote=quote, right=right)
-    if _own_format(x):
-        return x.format()
-    if isinstance(x, (dict, list)):
-        return print_list(x, digits=digits, quote=quote)
-    if hasattr(x, "__r_print_lines__"):
-        return "\n".join(x.__r_print_lines__())
-    return print_vector(x, digits=digits, quote=quote, right=right)
-
-
-# ── cat ────────────────────────────────────────────────────────────────────
-
-def _cat_items(x):
-    v = _as_v(x)
-    t = v.type
-    if t == "NULL":
-        return []
-    if t == "double":
-        res = []
-        for i in range(len(v)):
-            xi = float(v.v[i])
-            if v.na[i]:
-                res.append("NA")
-                continue
-            w, d, e = _format_real(np.array([xi]), np.array([False]), v.nan[i:i + 1], None)
-            res.append(_encode_real(xi, 0, d, e, _OPT["OutDec"], False, bool(v.nan[i])))
-        return res
-    if t == "integer":
-        return ["NA" if v.na[i] else "%d" % int(v.v[i]) for i in range(len(v))]
-    if t == "logical":
-        return ["NA" if v.na[i] else ("TRUE" if v.v[i] else "FALSE") for i in range(len(v))]
-    if t == "character":
-        return ["NA" if s is None else s for s in v.v]
-    if t == "Date":
-        # cat() eines Date druckt die Zahl
-        return _cat_items(_V("double", v.v, v.na))
-    if t == "factor":
-        return ["NA" if v.na[i] else "%d" % (int(v.v[i]) + 1) for i in range(len(v))]
-    raise TypeError(t)
-
-
-def cat_str(*args, sep=" ", fill=False):
-    """Text, den ``cat(..., sep = sep)`` ausgäbe (Zahlen mit 7 signifikanten
-    Stellen je Element, wie R)."""
-    seps = [sep] if isinstance(sep, str) else list(sep)
-    nlsep = any("\n" in s for s in seps)
-    out = []
-    ntot = 0
-    for iobj, a in enumerate(args):
-        if iobj != 0 and a is not None:
-            out.append(seps[ntot % len(seps)])
-            ntot += 1
-        items = _cat_items(a)
-        n = len(items)
-        for i in range(n):
-            out.append(items[i])
-            if i < n - 1:
-                out.append(seps[ntot % len(seps)])
-                ntot += 1
-    if fill or nlsep:
-        out.append("\n")
-    return "".join(out)
-
-
-def r_cat(*args, sep=" ", fill=False, file=None):
-    """Wie ``cat(...)``: schreibt nach ``sys.stdout`` (bzw. ``file``)."""
-    s = cat_str(*args, sep=sep, fill=fill)
-    (file or sys.stdout).write(s)

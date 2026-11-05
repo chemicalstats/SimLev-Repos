@@ -7,8 +7,8 @@
 # Akkumulation (C-Kerne core/slc_rbase*.cpp) und libm-Aufrufe (SimLev.RLibm) wie in R.
 #
 # Konventionen
-# * Namen wie in R bzw. der Python-Fassung, `.` → `_` (weighted.mean →
-#   weighted_mean, p.adjust → p_adjust, …). Kollisionen mit Base: r_sort,
+# * Namen wie in R bzw. der Python-Fassung, `.` → `_` (p.adjust →
+#   p_adjust, seq_len(length.out) → seq_len_out, …). Kollisionen mit Base: r_sort,
 #   r_rank, r_filter.
 # * Seit 1.0.0 entfallen optim, optimhess, nlminb, lm/lm_fit, poly, summary_lm,
 #   glm/r_binomial, t_test, predict, fft, density, bw_nrd0 und smooth_spline (eigene
@@ -27,10 +27,10 @@ import ..SimLev
 import ..SimLev: RList, RVector, NamedMat, RFrame, NA, isna_strict
 using Dates
 
-export quantile, median, var, sd, cov, cor, cov2cor, weighted_mean, scale, approx, approxfun,
+export quantile, median, var, sd, cov, cor, cov2cor, scale, approx, approxfun,
        r_filter, optimize, optimise, hclust, dist,
-       as_dist, dist_as_matrix, p_adjust, r_rank, order, r_sort, sort_partial, rle, cut,
-       findInterval, tabulate, ave, aggregate, complete_cases, ecdf, fitted, coef, residuals,
+       as_dist, p_adjust, r_rank, order, r_sort, sort_partial, rle, cut,
+       findInterval, tabulate, ave, aggregate, ecdf, fitted, coef, residuals,
        seq_len_out, ApproxFun, str_collate, r_isless
 
 const _DBL_EPS = 2.220446049250313e-16

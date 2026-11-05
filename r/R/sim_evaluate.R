@@ -172,6 +172,17 @@
 #' Ausgabe: Objekt der Klasse SimLevResult (siehe simulation()).
 #' @keywords internal
 #' @noRd
+# Offene Lots eines Assets als data.frame (date, units, price, vp). Seit 1.6.1 ohne data.frame() je Asset, wenn die
+# Lots keine Namen tragen (dann gleiches Objekt wie data.frame(); sonst nimmt data.frame() die Namen als Zeilennamen).
+.sim_lots_frame <- function(lots) {
+  cols <- list(date = as.Date(vapply(lots, function(b) as.numeric(b[["date"]]), numeric(1)), origin = "1970-01-01"),
+               units = vapply(lots, function(b) b[["remaining"]], numeric(1)),
+               price = vapply(lots, function(b) b[["price"]], numeric(1)),
+               vp = vapply(lots, function(b) b[["vp"]] %||% 0, numeric(1)))
+  if (!is.null(names(lots))) return(do.call(data.frame, cols))
+  structure(cols, row.names = .set_row_names(length(lots)), class = "data.frame")
+}
+
 .sim_result <- function(sim_mem, fl, cfg, ev) {
   flag_date <- fl$flag_date; flag_filled <- fl$flag_filled; flag_assets <- fl$flag_assets
   flag_harvest <- fl$flag_harvest; tax_regimes <- fl$tax_regimes
@@ -186,10 +197,7 @@
   #--------> E: offene Lots am letzten Tag (Grundlage fuer Steuerrechnungen nach dem Ende; nur tax_mode = "person")
   open_lots <- if (tax_mode == "person") stats::setNames(lapply(flag_assets, function(nm) {
     lots <- Filter(function(b) length(b) && b[["remaining"]] > 0, sim_mem[["trades"]][[nm]][["buys"]])
-    list(lots = data.frame(date = as.Date(vapply(lots, function(b) as.numeric(b[["date"]]), numeric(1)), origin = "1970-01-01"),
-                           units = vapply(lots, function(b) b[["remaining"]], numeric(1)),
-                           price = vapply(lots, function(b) b[["price"]], numeric(1)),
-                           vp = vapply(lots, function(b) b[["vp"]] %||% 0, numeric(1))),
+    list(lots = .sim_lots_frame(lots),
          regime = tax_regimes[[nm]],
          partial_exemption = 100 * sim_mem[["assets"]][[nm]][["bonus"]],
          cash = sim_mem[["status"]][[nm]][["money"]],

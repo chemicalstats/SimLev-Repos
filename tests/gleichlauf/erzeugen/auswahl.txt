@@ -1,7 +1,3 @@
-r_fmt/cat1
-r_fmt/cat2
-r_fmt/cat3
-r_fmt/cat_out
 r_fmt/date_format_generic
 r_fmt/date_numeric
 r_fmt/date_print
@@ -23,7 +19,6 @@ r_fmt/fmt_factor
 r_fmt/fmt_matrix
 r_fmt/fmt_named
 r_fmt/misc_bigint
-r_fmt/misc_encode
 r_fmt/misc_nchar
 r_fmt/misc_null
 r_fmt/misc_zeroprint
@@ -39,10 +34,8 @@ r_fmt/pm_chr_nodn
 r_fmt/pm_dnn
 r_fmt/pm_empty
 r_fmt/pm_rand15
-r_fmt/prettynum
 r_fmt/pv_chr_noq
 r_fmt/pv_empty
-r_fmt/pv_factor_many
 r_fmt/pv_int_na
 r_fmt/pv_lgl_long
 r_fmt/pv_named_chr
@@ -60,7 +53,6 @@ r_fmt/spf_err3
 r_fmt/spf_int
 r_fmt/spf_multi
 r_fmt/spf_warn
-r_fmt/tostring
 r_nana/mean_all
 r_nana/sd
 r_stats/approx_const
@@ -86,9 +78,6 @@ r_stats/base_range
 r_stats/base_range_na
 r_stats/base_rowMeans_df
 r_stats/base_rowSums
-r_stats/cc_df
-r_stats/cc_mat_vec
-r_stats/chr_factor_print
 r_stats/chr_order_nalastF
 r_stats/chr_order_two
 r_stats/chr_rank_average
@@ -155,16 +144,6 @@ r_stats/rle_lgl
 r_stats/scale_default
 r_stats/scale_num
 r_stats/tabulate_a
-r_stats/uniroot_endroot
-r_stats/uniroot_err_lu
-r_stats/uniroot_err_sign
-r_stats/uniroot_ext_down
-r_stats/uniroot_ext_up
-r_stats/uniroot_ext_yes
-r_stats/uniroot_inf
-r_stats/uniroot_maxit
-r_stats/wmean_isnan
-r_stats/wmean_narm
 rexpr/asnum_001
 rexpr/asnum_006
 rexpr/asnum_007

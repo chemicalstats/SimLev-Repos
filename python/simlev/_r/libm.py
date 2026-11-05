@@ -26,9 +26,8 @@ import numpy as np
 from .. import _ext
 from .rnum import r_pow as _r_pow
 
-__all__ = ["exp", "log", "log1p", "expm1", "log2", "log10", "pow", "sin", "cos", "tan",
-           "tanh", "atanh", "atan", "atan2", "asin", "acos", "sinh", "cosh", "lgamma_c",
-           "apply1", "apply2"]
+__all__ = ["exp", "log", "log1p", "expm1", "log2", "log10", "pow", "sin", "cos", "tan", "tanh", "atanh", "atan",
+           "asin", "acos", "sinh", "cosh", "lgamma_c", "apply1"]
 
 
 def _nan_wrap(f):
@@ -52,24 +51,6 @@ def apply1(f, x):
     flat = a.ravel()
     out = np.fromiter(map(f, flat.tolist()), dtype=np.float64, count=flat.size)
     return out.reshape(a.shape)
-
-
-def apply2(f, x, y):
-    """``f(x, y)`` elementweise mit R-Recycling (Länge 1 oder gleich)."""
-    sx = np.isscalar(x)
-    sy = np.isscalar(y)
-    if sx and sy:
-        return f(float(x), float(y))
-    a = np.asarray(x, dtype=np.float64)
-    b = np.asarray(y, dtype=np.float64)
-    if a.size == 0 or b.size == 0:
-        return np.empty(0)
-    shape = a.shape if a.size >= b.size else b.shape
-    af = a.ravel().tolist()
-    bf = b.ravel().tolist()
-    n = max(len(af), len(bf))
-    out = np.fromiter((f(af[i % len(af)], bf[i % len(bf)]) for i in range(n)), dtype=np.float64, count=n)
-    return out.reshape(shape)
 
 
 def _log(x):
@@ -200,7 +181,3 @@ acos = lambda x: apply1(_nan_wrap(math.acos), x)  # noqa: E731
 sinh = lambda x: apply1(_nan_wrap(math.sinh), x)  # noqa: E731
 cosh = lambda x: apply1(_nan_wrap(math.cosh), x)  # noqa: E731
 lgamma_c = lambda x: apply1(_nan_wrap(math.lgamma), x)  # noqa: E731  (C-lgamma, nicht R's lgammafn)
-
-
-def atan2(y, x):
-    return apply2(math.atan2, y, x)

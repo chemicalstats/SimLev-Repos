@@ -19,6 +19,7 @@ import warnings
 import numpy as np
 
 from . import _ext
+from ._lib_linalg import _fmat, _mat, _vec  # gleiche Hilfen (seit 1.6.1 nur dort)
 
 __all__ = ["garch11_filter", "garch11_nll", "garch11_grad", "garch11_fit", "fit_garch11", "gpd_nll", "gpd_pwm", "gpd_fit",
            "dcc_filter", "dcc_fit", "backcast_obj", "backcast_fit", "ms_garch_filter", "ms_garch_nll", "ms_garch_grad", "ms_garch_starts", "ms_garch_fitstarts",
@@ -29,36 +30,10 @@ __all__ = ["garch11_filter", "garch11_nll", "garch11_grad", "garch11_fit", "fit_
 _GARCH_METHODS = ("konstant", "ml", "momente")
 
 
-def _arr(x):
-    if hasattr(x, "to_numpy"):
-        x = x.to_numpy()
-    return np.asarray(x, dtype=np.float64)
-
-
-def _vec(x):
-    return np.ascontiguousarray(_arr(x).reshape(-1))
-
-
 def _ivec(x):
     if hasattr(x, "to_numpy"):
         x = x.to_numpy()
     return np.ascontiguousarray(np.asarray(x).reshape(-1).astype(np.int32))
-
-
-def _fmat(x):
-    """(Puffer spaltenweise, Zeilen, Spalten); 1-D als Spaltenvektor."""
-    a = _arr(x)
-    if a.ndim == 0:
-        a = a.reshape(1, 1)
-    elif a.ndim == 1:
-        a = a.reshape(-1, 1)
-    elif a.ndim != 2:
-        raise ValueError("interner Fehler: Matrix erwartet")
-    return np.ascontiguousarray(a.ravel(order="F")), a.shape[0], a.shape[1]
-
-
-def _mat(buf, m, n):
-    return buf.reshape((m, n), order="F")
 
 
 # ── GARCH(1,1) / GJR-GARCH(1,1) ──────────────────────────────────────────────

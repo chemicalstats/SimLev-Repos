@@ -15,12 +15,15 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
+from ._sim_base import _memo_seed_dates, _study_scope  # Prüf-Cache je Studie (seit 1.5.1)
 from ._r import fmt as _fmt
 from ._r.rnum import r_cumprod, r_mean, r_mean_int, r_median, r_sum
 from ._r.parallel import par_lapply as _par_lapply
 from .param_search import (_expand_grid, _isna, _match_arg, _py, _quiet, _seq_by,
-                           _cond_msg, _which_max_py)
+                           _cond_msg)
 from .svg import _res_fig, _res_finish, _res_line, _res_panel, _res_points, _res_range, _res_rect, _res_vline
+from ._util import _ext, _which_max
+from ._util import _fmt_vec
 
 __all__ = ["sensitivity_grid", "sensitivity_rebalancing", "planning_lumpsum_vs_dca", "series_leverage",
            "sensitivity_leverage", "SimLevSensitivity", "SimLevLumpSum"]
@@ -33,11 +36,6 @@ def _numna(e):
     """Zahl oder NA (``None``/``pd.NA`` → NA); ein NaN behält sein Bitmuster (NA bleibt NA, NaN bleibt NaN)."""
     return _NA if (e is None or e is pd.NA or e is pd.NaT) else float(e)
 _EPOCH = np.datetime64("1970-01-01", "D")
-
-
-def _ext(mod, name):
-    m = importlib.import_module("simlev." + mod)
-    return getattr(m, name)
 
 
 def _simulation():
@@ -138,6 +136,7 @@ def _is_na_scalar(v):
 # sensitivity_grid
 # ─────────────────────────────────────────────────────────────────────────────
 
+@_study_scope
 def sensitivity_grid(data, strategy, grid, *, sim_args=None, metrics=None, keep_results=False, cores=1):
     """``simulation`` über ein Parameterraster.
 
@@ -270,13 +269,6 @@ class _RFrame(pd.DataFrame):
         return self
 
 
-def _fmt_vec(f, v):
-    out = _fmt.sprintf(f, np.asarray(v, dtype=np.float64))
-    if isinstance(out, str):
-        out = np.array([out], dtype=object)
-    return np.asarray(out, dtype=object)
-
-
 class SimLevSensitivity(_RFrame):
     """Ergebnis von :func:`sensitivity_rebalancing` / :func:`sensitivity_leverage` (R-Klasse ``SimLevSensitivity``)."""
 
@@ -335,7 +327,6 @@ def _plot_sens(x, metric="cagr"):
     Liefert ``(svg, data)``: ``leverage`` (``leverage``, ``value``) bzw. ``variants`` (``label``, ``value``);
     ``value`` ist die Kennzahl unskaliert wie im Ergebnis (Anteile, nicht ×100).
     """
-    from . import overfitting as OF
     kind = x.attrs.get("kind", "grid")
     sc = 100 if metric in ("cagr", "ttwror", "max_drawdown", "avg_drawdown") else 1
     raw = np.array([_num1(v) for v in x[metric].tolist()], dtype=np.float64)
@@ -347,7 +338,7 @@ def _plot_sens(x, metric="cagr"):
                        xlab="Hebel", ylab=metric)
         _res_line(f, p, lv, y)
         _res_points(f, p, lv, y)
-        j = OF._which_max(raw)
+        j = _which_max(raw)
         if j is not None:
             _res_vline(f, p, float(lv[j]), width=1, dash="2,3")
         data = {"leverage": pd.DataFrame({"leverage": lv, "value": raw})}
@@ -407,6 +398,7 @@ def _vec(v):
     return [_py(v)]
 
 
+@_study_scope
 def sensitivity_rebalancing(data, strategy, *, frequencies=None, offsets=None, bands=_NAN,
                             band_type=("absolute", "relative"), include_none=True, sim_args=None, metrics=None,
                             cores=1):
@@ -554,6 +546,7 @@ def _report_get(rep, a, key):
     return np.asarray(v, dtype=np.float64)
 
 
+@_study_scope
 def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=10, step=1, sim_args=None, cores=1):
     """Einmalanlage gegen gestreckten Einstieg (Lump Sum vs. DCA).
 
@@ -626,6 +619,7 @@ def planning_lumpsum_vs_dca(data, strategy, *, amount=10000, months=12, horizon=
     data = data.copy()
     data["date"] = _to_date(data["date"], "planning_lumpsum_vs_dca: data$date")
     data = data.iloc[np.argsort(_days(data["date"].to_numpy()), kind="stable")].reset_index(drop=True)
+    _memo_seed_dates(data["date"])     # Prüf-Cache: die Fenster sind Ausschnitte dieser Datumsspalte (seit 1.5.1)
     d = data["date"].to_numpy().astype("datetime64[D]")
     dn = _days(d)
     if sim_args.get("tax") is not None:
@@ -775,6 +769,7 @@ def series_leverage(data, index, *, leverage=2, rate=0, expense=0, spread=0, sta
     return v
 
 
+@_study_scope
 def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spread=0, strategy=None, sim_args=None,
                          metrics=None, cores=1):
     """Kennzahlen über den Hebel.
@@ -848,8 +843,8 @@ def sensitivity_leverage(data, index, *, leverages=None, rate=0, expense=0, spre
             cols[k] = M[:, j]
     tab = SimLevSensitivity(cols)
     tab.attrs["kind"] = "leverage"
-    jc = _which_max_py(tab["cagr"].to_numpy(dtype=np.float64)) if "cagr" in tab.columns else None
-    js = _which_max_py(tab["sharpe"].to_numpy(dtype=np.float64)) if "sharpe" in tab.columns else None
+    jc = _which_max(tab["cagr"].to_numpy(dtype=np.float64)) if "cagr" in tab.columns else None
+    js = _which_max(tab["sharpe"].to_numpy(dtype=np.float64)) if "sharpe" in tab.columns else None
     lv = tab["leverage"].to_numpy(dtype=np.float64)
     # R: c(cagr = lev[which.max(cagr)], sharpe = ...): ein leeres which.max lässt das Element weg
     opt = {}

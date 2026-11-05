@@ -21,8 +21,8 @@ const _OPT = Dict{Symbol,Any}(:digits => 7, :scipen => 0, :width => 80, :OutDec 
 """
     set_options(; digits, scipen, width, OutDec, digits_secs)
 
-Wie `options()`; `digits_secs` ist R's `digits.secs` (Ziffern für `%OS` ohne Ziffer in
-`format_date`; `nothing` = nicht gesetzt wie in R). Liefert die alten Werte als `Dict`
+Wie `options()`; `digits_secs` ist R's `digits.secs` (Ziffern für `%OS` ohne Ziffer im
+Datumsformat; `nothing` = nicht gesetzt wie in R). Liefert die alten Werte als `Dict`
 (zurücksetzen mit `set_options(; alt...)`).
 """
 function set_options(; kw...)
@@ -53,7 +53,6 @@ const NA_REAL = SimLev.NA
 # ── glibc: snprintf, log10, pow ────────────────────────────────────────────
 
 _log10(x::Float64) = ccall((:log10, SimLev._LIBM), Cdouble, (Cdouble,), x)
-_cpow(x::Float64, y::Float64) = ccall((:pow, SimLev._LIBM), Cdouble, (Cdouble, Cdouble), x, y)
 
 # C-snprintf: seit 1.6.0 im C-Kern core/slc_rbase_fmt.cpp (sprintf, formatC, encodeReal)
 
@@ -124,8 +123,7 @@ end
     RFactor(codes, levels; ordered = false)
 
 R-Faktor: Codes (1-basiert, 0 = NA) und Levels. Verhält sich als Vektor der
-Labels (`f[i]` liefert das Level bzw. `missing`). Erzeugen mit
-[`r_factor`](@ref).
+Labels (`f[i]` liefert das Level bzw. `missing`).
 """
 struct RFactor <: AbstractVector{Union{Missing,String}}
     codes::Vector{Int}
@@ -139,36 +137,6 @@ Base.IndexStyle(::Type{RFactor}) = IndexLinear()
 Base.getindex(f::RFactor, i::Int) = f.codes[i] == 0 ? missing : f.levels[f.codes[i]]
 Base.getindex(f::RFactor, I::AbstractVector) = RFactor(f.codes[I], f.levels, f.ordered)
 Base.copy(f::RFactor) = RFactor(copy(f.codes), copy(f.levels), f.ordered)
-
-"""
-    r_factor(x; levels = nothing, ordered = false)
-
-`factor(x, levels, ordered)`: Levels voreingestellt als sortierte eindeutige
-Werte (Zahlen numerisch, Zeichenketten nach R's Kollation
-`SimLev.RStats.str_collate`, d. h. ICU wie R; `unique(as.character(y)[order(y)])`).
-"""
-function r_factor(x; levels = nothing, ordered::Bool = false)
-    x isa RFactor && levels === nothing && return RFactor(copy(x.codes), copy(x.levels), ordered || x.ordered)
-    v = _as_v(x)
-    vals = _as_character_list(v)
-    if levels === nothing
-        if v.type in (:double, :integer, :logical, :Date)
-            nv = v.type === :double || v.type === :Date ? v.d : v.type === :integer ? Float64.(v.i) : Float64.(v.l)
-            u = sort(unique([nv[i] for i in 1:length(v) if !v.na[i] && !v.nan[i]]))
-            lev = _as_character_list(v.type === :integer ? _Vi(Int.(u), falses(length(u)) |> collect) :
-                                     v.type === :logical ? _Vl(Bool.(u), falses(length(u)) |> collect) :
-                                     v.type === :Date ? _Vdate(u, falses(length(u)) |> collect) :
-                                     _Vd(u, falses(length(u)) |> collect, falses(length(u)) |> collect))
-            levs = unique(String[s for s in lev])
-        else
-            levs = sort(unique(String[s for s in vals if s !== nothing]); alg = MergeSort, lt = SimLev.RStats.str_lt)
-        end
-    else
-        levs = String[string(l) for l in (levels isa AbstractVector ? levels : [levels])]
-    end
-    codes = Int[s === nothing ? 0 : something(findfirst(==(s), levs), 0) for s in vals]
-    return RFactor(codes, levs, ordered)
-end
 
 # ── Julia-Objekt → _V ──────────────────────────────────────────────────────
 
@@ -393,9 +361,6 @@ function _out(strs::AbstractVector, v::_V)
 end
 
 # ── round / signif ─────────────────────────────────────────────────────────
-
-const _DBL_DIG = 15
-const _MAX10E = 308
 
 "R's `fround` (R >= 4.0.0) für ein double (C-Kern sl_r_fround, seit 1.6.0)."
 fround(x::Float64, digits::Float64) = SimLev._rb_fround(x, digits)
@@ -635,34 +600,6 @@ function _format_string(strs, q::Char = _NOQ)
     return w
 end
 
-_qchar(quote_) = quote_ === nothing || quote_ === false || quote_ == "" ? _NOQ :
-                 quote_ === true ? '"' : quote_ isa Char ? quote_ : first(String(quote_))
-
-"""
-    encode_string(x; width = 0, quote_ = "", justify = "left", na_encode = true)
-
-`encodeString`: Escapes, Anführungszeichen, Auffüllen (`width = nothing` =
-größte Breite).
-"""
-function encode_string(x; width = 0, quote_ = "", justify = "left", na_encode = true)
-    v = _as_v(x, "character")
-    q = _qchar(quote_)
-    if width === nothing
-        width = maximum([s === nothing ? 2 : _strwid(s, q) + (q != _NOQ ? 2 : 0) for s in v.s]; init = 0)
-    end
-    out = _Str[]
-    for s in v.s
-        if s === nothing && !na_encode
-            push!(out, nothing)
-        elseif s === nothing
-            push!(out, justify == "left" ? rpad("NA", width) : lpad("NA", width))
-        else
-            push!(out, _encode_string(s, Int(width), q, justify))
-        end
-    end
-    return _out(out, v)
-end
-
 """
     nchar(x, type = "chars")
 
@@ -687,12 +624,6 @@ function nchar(x, t = "chars"; type = t)
 end
 
 # ── as.character / paste ───────────────────────────────────────────────────
-
-"`StringFromReal` mit 15 Stellen (as.character für double; C-Kern, seit 1.6.0)."
-function _real_to_str(x::Float64, na::Bool = false, nan::Bool = false)
-    isnan(x) && return (na || !nan) ? nothing : "NaN"
-    return SimLev._rb_as_character_real([x], Int(_OPT[:scipen])::Int, String(_OPT[:OutDec])::String)[1]
-end
 
 function _as_character_list(v::_V)::Vector{_Str}
     t = v.type
@@ -751,6 +682,3 @@ end
 
 "`paste0(..., collapse)`."
 paste0(args...; collapse = nothing) = paste(args...; sep = "", collapse = collapse)
-
-"`toString(x)`."
-to_string(x; sep = ", ") = paste(x; collapse = sep)

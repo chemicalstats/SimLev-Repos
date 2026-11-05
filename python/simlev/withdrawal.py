@@ -1383,7 +1383,7 @@ def _wd_tariff_years(M, ny):
     C = _wcore.wd_tariff_compact(M, ny)              # Spalten mit Jahr NA entfallen (Kern)
     d = {"path": C[:, 0].astype(np.int64)}
     for j, c in enumerate(_WD_TARIFF_COLS):
-        col = C[:, j + 1].copy()
+        col = C[:, j + 1]          # der DataFrame kopiert ohnehin (seit 1.6.1 ohne Kopie je Spalte)
         if c == "year":
             col = col.astype(np.int64)
         elif c == "guenstiger":

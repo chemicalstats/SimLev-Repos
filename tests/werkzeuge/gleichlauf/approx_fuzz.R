@@ -1,5 +1,5 @@
 # tests/werkzeuge/gleichlauf/approx_fuzz.R – Fuzz von approx (seit 1.5.0: Interpolation je Punkt in Python und Julia
-# im C-Kern sl_r_approx, core/slc_rbase.c)
+# im C-Kern sl_r_approx, core/slc_rbase.cpp)
 #
 #   LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek> SIMLEV_FAELLE_DIR=<ordner> Rscript tests/werkzeuge/gleichlauf/approx_fuzz.R <n> <seed>
 #
@@ -11,9 +11,14 @@
 #     (zu wenige Werte, ungültiges f, NA in x bei na.rm = FALSE).
 #   - p-Fälle: planning_goal (Rückwärtsrekursion mit approx je Schritt) mit kleinen Gittern, 1 bis 4 Kandidaten,
 #     Ziel 0 bis über dem Startwert, Beiträgen (auch negativ), Renditen mit Totalverlust; Eingabefehler.
+#   - f-Fälle (seit 1.6.0, zusätzlich gut 30 % von <n>): stats::filter (Faltung mit sides 1/2 und zyklisch, rekursiv
+#     mit init, Vektor und Matrix) mit NA, NaN, ±Inf und Fehlern (Filter länger als die Reihe, sides, init), Kern
+#     sl_r_filter_conv/sl_r_filter_rec (core/slc_rbase_smooth.cpp).
+#   - r-Fälle (seit 1.6.0, zusätzlich gut 10 % von <n>): regularize.values über approx mit ties = list("ordered", mean)
+#     bzw. "mean" und unsortierten Bindungen mit NA (na.rm = FALSE), Kern sl_r_regularize.
 # Warnungen und Fehler mit ihren Aufrufen (r_calls) wie sim_fuzz.R.
 #
-# Prüfung (tests/werkzeuge/gleichlauf/run.sh, Schritt 5): Referenz aus R 1.4.2 (R_LIBS=/home/claude/rlib142), R neu mit
+# Prüfung (tests/werkzeuge/gleichlauf/run.py, Schritt 5): Referenz aus R 1.4.2 (R_LIBS=/home/claude/rlib142), R neu mit
 # tests/werkzeuge/gleichlauf/sim_fuzz_cmp.py, Python und Julia mit vergleich.py/vergleich.jl gegen die Referenz.
 source("tests/gleichlauf/erzeugen/ref_tools.R")
 args <- commandArgs(TRUE)
@@ -126,5 +131,50 @@ for (k in seq_len(N - na)) {   # p-Fälle: planning_goal
   jl <- sprintf("PL = SL.Planning\nresult = PL.planning_goal(R, %s, %s, %s; contributions = %s, n_grid = %s, n_sim = %s, seed = %d)",
                 num(sv), num(goal), num(h), cfp, if (is.na(ng)) "SL.NA" else num(ng), num(ns), k)
   fuzz_case(sprintf("p%05d", k), r = r, py = py, jl = jl, inputs = list(R = R))
+}
+for (k in seq_len(round(N * 0.3))) {   # f-Fälle: filter (seit 1.6.0)
+  set.seed(seed0 + 200000 + k)
+  n <- pick(c(1, 2, 5, 12, 60)); ns <- pick(c(1, 1, 2))
+  x <- matrix(pick(list(rnorm(n * ns), round(rnorm(n * ns) * 3), cumsum(rnorm(n * ns)))), n, ns)
+  if (coin(0.35)) x[sample.int(n * ns, max(1, (n * ns) %/% 6))] <- pick(c(NA, NaN, Inf, -Inf))
+  rec <- coin(0.45)
+  nf <- pick(c(1, 2, 3, 5)); fv <- round(rnorm(nf) / 2, pick(c(1, 3, 6)))
+  if (coin(0.03)) fv[1] <- NA
+  sides <- pick(c(2, 2, 1, if (coin(0.05)) 3)); circ <- coin(0.25)
+  xin <- if (ns == 1) "x[, 1]" else "x"; xpy <- if (ns == 1) "x[:, 0]" else "x"; xjl <- if (ns == 1) "x[:, 1]" else "x"
+  fr <- sprintf("c(%s)", paste(num(fv), collapse = ", ")); fp <- sprintf("[%s]", paste(ifelse(is.na(fv), "simlev._r.fmt.NA_REAL", num(fv)), collapse = ", "))
+  fj <- sprintf("[%s]", paste(ifelse(is.na(fv), "SL.NA", num(fv)), collapse = ", "))
+  if (!rec) {
+    r <- sprintf("unclass(filter(%s, %s, sides = %d, circular = %s))", xin, fr, sides, if (circ) "TRUE" else "FALSE")
+    py <- sprintf("%simport math, simlev\nresult = st.filter(%s, %s, sides=%d, circular=%s)", PH, xpy, fp, sides, if (circ) "True" else "False")
+    jl <- sprintf("%sresult = st.r_filter(%s, %s; sides = %d, circular = %s)", JH, xjl, fj, sides, if (circ) "true" else "false")
+  } else {
+    ini <- if (coin(0.5)) NULL else round(rnorm(nf + if (coin(0.05)) 1 else 0), 2)
+    ir <- if (is.null(ini)) "" else sprintf(", init = c(%s)", paste(num(ini), collapse = ", "))
+    ip <- if (is.null(ini)) "" else sprintf(", init=[%s]", paste(num(ini), collapse = ", "))
+    ij <- if (is.null(ini)) "" else sprintf(", init = [%s]", paste(num(ini), collapse = ", "))
+    r <- sprintf("unclass(filter(%s, %s, method = 'recursive'%s))", xin, fr, ir)
+    py <- sprintf("%simport math, simlev\nresult = st.filter(%s, %s, method='recursive'%s)", PH, xpy, fp, ip)
+    jl <- sprintf("%sresult = st.r_filter(%s, %s; method = \"recursive\"%s)", JH, xjl, fj, ij)
+  }
+  r <- sprintf("{ y <- %s; attr(y, 'tsp') <- NULL; y }", r)
+  fuzz_case(sprintf("f%05d", k), r = r, py = py, jl = jl, inputs = list(x = x))
+}
+
+for (k in seq_len(round(N * 0.1))) {   # r-Fälle: regularize.values mit ties-Listen (seit 1.6.0)
+  set.seed(seed0 + 300000 + k)
+  n <- pick(c(3, 6, 20)); x <- sample(round(runif(n, 0, 4)), n, TRUE); y <- round(rnorm(n), 2)
+  if (coin(0.4)) y[sample.int(n, 1)] <- NA
+  if (coin(0.3)) x[sample.int(n, 1)] <- -0
+  narm <- coin(0.6)
+  ti <- pick(c("ord", "mean", "ordmin"))
+  xo <- c(0.5, 1, 2.5, 3.9)
+  tr <- switch(ti, ord = "list('ordered', mean)", mean = "'mean'", ordmin = "list('ordered', min)")
+  tp <- switch(ti, ord = "('ordered', st._rmean)", mean = "'mean'", ordmin = "('ordered', lambda v: float(np.min(v)))")
+  tj <- switch(ti, ord = "(\"ordered\", st._rmean)", mean = "\"mean\"", ordmin = "(\"ordered\", minimum)")
+  r <- sprintf("approx(x, y, xout = xo, ties = %s, na.rm = %s)", tr, if (narm) "TRUE" else "FALSE")
+  py <- sprintf("%simport math, simlev\nimport numpy as np\nresult = st.approx(x, y, xout=xo, ties=%s, na_rm=%s)", PH, tp, if (narm) "True" else "False")
+  jl <- sprintf("%sresult = st.approx(x, y; xout = xo, ties = %s, na_rm = %s)", JH, tj, if (narm) "true" else "false")
+  fuzz_case(sprintf("r%05d", k), r = r, py = py, jl = jl, inputs = list(x = x, y = y, xo = xo))
 }
 ref_done(); ref_schreiben()

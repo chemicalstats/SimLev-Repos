@@ -2,7 +2,7 @@
 interne Ziehungen und Verteilungen.
 
 Gegenstück zu ``r/R/slc.R`` (R) und ``julia/src/slib.jl`` (Julia). Die Rechnung steht in
-``src/core/slc*.c`` (Kopien von ``core/``), die Hülle in ``src/_ext_slc.c`` (Modul
+``src/core/slc*.cpp`` (Kopien von ``core/``), die Hülle in ``src/_ext_slc.cpp`` (Modul
 ``simlev._ext``). Warnungen und Fehlertexte kommen aus dem Kern und sind in allen drei Sprachen
 gleich (Warnung: ``warnings.warn``; Fehler: ``ValueError``).
 
@@ -310,12 +310,23 @@ def pbeta(q, shape1, shape2, lower_tail=True):
     return _apply(_ext.slc_pbeta, q, float(shape1), float(shape2), bool(lower_tail))
 
 
+def nthreads():
+    """Threads der elementweisen Kerne (seit 1.6.0): ``SIMLEV_THREADS`` (ganze Zahl >= 1), sonst 0 = Zahl der
+    Prozessoren (höchstens 8); wie ``.sl_nthreads`` in R."""
+    v = os.environ.get("SIMLEV_THREADS", "")
+    try:
+        n = int(v.strip()) if v.strip() else 0
+    except ValueError:
+        return 0
+    return n if 1 <= n < 2 ** 31 else 0
+
+
 def pt(q, df, lower_tail=True):
-    return _apply(_ext.slc_pt, q, float(df), bool(lower_tail))
+    return _apply(_ext.slc_pt_mt, q, float(df), bool(lower_tail), nthreads())
 
 
 def qt(p, df, lower_tail=True):
-    return _apply(_ext.slc_qt, p, float(df), bool(lower_tail))
+    return _apply(_ext.slc_qt_mt, p, float(df), bool(lower_tail), nthreads())
 
 
 def plogis(q):

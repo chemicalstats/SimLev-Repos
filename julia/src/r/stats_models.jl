@@ -4,7 +4,8 @@
 #                     Kopf der jeweiligen R-Quelle)
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang.
+#                     SimLev genutzten Umfang; seit 1.6.0 rechnen p.adjust und ecdf im C-Kern
+#                     core/slc_rbase_models.cpp (sl_r_p_adjust, sl_r_ecdf).
 # Generische Zugriffe coef, fitted, residuals sowie p_adjust, ecdf, ave und aggregate aus R 4.3.3
 # stats/R/lm.R (Zugriffe), p.adjust.R, ecdf.R, ave.R und aggregate.R; Python: _r/stats_models.py.
 # Teil des Untermoduls RStats (eingebunden in stats.jl).
@@ -23,16 +24,12 @@ fitted(obj) = obj["fitted.values"]
 "`residuals(obj)` (Antwort-Residuen)."
 residuals(obj) = obj["residuals"]
 
-_vals(x) = x isa RVector ? Float64[_fl(v) for v in x.values] : x isa AbstractArray ? Float64[_fl(v) for v in vec(x)] : Float64[_fl(x)]
-
 
 # ── p.adjust / ecdf / ave / aggregate ────────────────────────────────────
 
 const _PADJ = ["holm", "hochberg", "hommel", "bonferroni", "BH", "BY", "fdr", "none"]
 
-# cummax/cummin wie R (C-Kerne)
-_cumext(x, greater::Bool) = greater ? SimLev._rb_cummax(SimLev._rbv(x)) : SimLev._rb_cummin(SimLev._rbv(x))
-_pmin1(x) = Float64[isnan(t) ? t : (t < 1.0 ? t : 1.0) for t in x]
+const _PADJ_CODE = Dict("holm" => 0, "hochberg" => 1, "hommel" => 2, "bonferroni" => 3, "BH" => 4, "BY" => 5, "none" => 6)
 
 "`p.adjust(p, method, n)`."
 function p_adjust(p, method::AbstractString = "holm"; n = nothing)
@@ -49,63 +46,14 @@ function p_adjust(p, method::AbstractString = "holm"; n = nothing)
     n === nothing && (n = lp)
     n >= lp || error("n >= lp is not TRUE")
     n <= 1 && return _vec_out(p0, nm)
-    (n == 2 && method == "hommel") && (method = "hochberg")
-    if method == "bonferroni"
-        r = _pmin1(n .* pp)
-    elseif method == "holm"
-        i = 1:lp
-        o = order(pp)
-        ro = order(Float64.(o))
-        r = _pmin1(_cumext(Float64.(n + 1 .- i) .* pp[o], true))[ro]
-    elseif method == "hommel"
-        nn_ = Int(n)
-        q_p = n > lp ? vcat(pp, ones(nn_ - lp)) : copy(pp)
-        i = 1:nn_
-        o = order(q_p)
-        q_p = q_p[o]
-        ro = order(Float64.(o))
-        mn = minimum(nn_ .* q_p ./ i)
-        q = fill(mn, nn_)
-        pa = fill(mn, nn_)
-        for j in nn_-1:-1:2
-            ij = 1:(nn_-j+1)
-            i2 = (nn_-j+2):nn_
-            q1 = minimum(j .* q_p[i2] ./ (2:j))
-            q[ij] = min.(j .* q_p[ij], q1)
-            q[i2] .= q[nn_-j+1]
-            pa = max.(pa, q)
-        end
-        r = max.(pa, q_p)[lp < nn_ ? ro[1:lp] : ro]
-    elseif method in ("hochberg", "BH", "BY")
-        i = lp:-1:1
-        o = order(pp; decreasing = true)
-        ro = order(Float64.(o))
-        if method == "hochberg"
-            r = _pmin1(_cumext(Float64.(n + 1 .- i) .* pp[o], false))[ro]
-        elseif method == "BH"
-            r = _pmin1(_cumext((n ./ i) .* pp[o], false))[ro]
-        else
-            q = _rsum(1.0 ./ (1:Int(n)))
-            r = _pmin1(_cumext((q * n ./ i) .* pp[o], false))[ro]
-        end
-    else
-        r = pp
-    end
+    r = SimLev._rb_p_adjust(Vector{Float64}(pp), Float64(n), _PADJ_CODE[method])   # C-Kern sl_r_p_adjust (seit 1.6.0)
     p0[nna] = r
     return _vec_out(p0, nm)
 end
 
 "`ecdf(x)`: aufrufbare Treppenfunktion (ApproxFun, attrs nobs)."
 function ecdf(x)
-    xs = sort(filter(!isnan, _v(x)); lt = <)
-    n = length(xs)
-    n < 1 && error("'x' must have 1 or more non-missing values")
-    vals, gidx = _unique_keys(xs)
-    counts = zeros(Int, length(vals))
-    for g in gidx
-        counts[g] += 1
-    end
-    yv = Float64.(cumsum(counts)) ./ n
+    vals, yv, n = SimLev._rb_ecdf(Vector{Float64}(_v(x)))   # C-Kern sl_r_ecdf (seit 1.6.0)
     return ApproxFun(vals, yv, 2, 0.0, 1.0, 0.0, Dict{String,Any}("nobs" => n, "class" => ["ecdf", "stepfun", "function"]))
 end
 

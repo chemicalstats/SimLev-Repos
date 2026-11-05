@@ -621,7 +621,7 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
 // (withdrawal_simulation: per_path, ce_fun, dd_fun, colMeans/colSums; withdrawal_perfect_rate;
 // .annual_real; .wd_tariff_years). Reine Funktionen auf Zeigern ohne Host-Objekte (reentrant); die
 // Hüllen legen die Ergebnisfelder an. Rechenfolge und R-Semantik wie dort: Summen, Mittel, Produkte,
-// Kumulationen und Potenz ueber core/slc_rbase.c (long double wie R), min/max wie R's Summary-Gruppe
+// Kumulationen und Potenz ueber core/slc_rbase.cpp (long double wie R), min/max wie R's Summary-Gruppe
 // (NA vor NaN), pmax wie R (NA/NaN bleiben), log/exp aus der libm wie R's math1.
 // ---------------------------------------------------------------------------
 

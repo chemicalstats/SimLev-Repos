@@ -28,11 +28,14 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
+from . import _ext
 from ._r import fmt as _fmt
 from ._r.base import env_from_caller
 from ._r import libm as _libm
-from ._r.rnum import r_colmeans, r_cumsum, r_mean_int, r_rowmeans, r_rowsums, r_sum
+from ._r.rnum import r_colmeans, r_cumsum, r_mean_int, r_rowmeans, r_rowsums as _rowsums, r_sum
 from .svg import _alloc_c, _alloc_ramp, _esc, _jl_str, _jl_unique
+from ._util import _match_arg
+from .data_prep import _to_date
 
 
 class _Missing:
@@ -67,16 +70,6 @@ def _message(msg):
     message(msg)
 
 
-def _match_arg(arg, choices):
-    from .data_prep import _match_arg as m
-    return m(arg, choices)
-
-
-def _to_date(x, what="date"):
-    from .data_prep import _to_date as f
-    return f(x, what)
-
-
 def _fill_na(v, method="locf", keep_leading=False):
     from .backcast import _fill_na as f
     return np.asarray(f(v, method, keep_leading=keep_leading), dtype=np.float64)
@@ -103,12 +96,7 @@ def _find_interval(x, vec):
     return np.searchsorted(np.asarray(vec, dtype=np.float64), np.asarray(x, dtype=np.float64), side="right")
 
 
-# Summen und Mittel über die C-Kerne core/slc_rbase.c (long double wie R; wie Julia)
-def _rowsums(M):
-    """``rowSums`` (long double, spaltenweise)."""
-    return r_rowsums(M)
-
-
+# Summen und Mittel über die C-Kerne core/slc_rbase.cpp (long double wie R; wie Julia)
 def _rowmeans(M):
     M = np.asarray(M, dtype=np.float64)
     if M.ndim == 1:
@@ -533,6 +521,21 @@ def momentum_score(data, assets, *, lookbacks=(1, 3, 6, 12), type=("average", "1
     if type == "13612w":
         lookbacks = [1, 3, 6, 12]
     lookbacks = list(np.atleast_1d(np.asarray(lookbacks, dtype=object)))
+    # seit 1.6.0 im Kern (sl_mom_score: Rückblickzeilen ganzzahlig, LOCF, Renditen, Scores) bei sortierten,
+    # endlichen Daten (Jahre 1000-9000); sonst wie bisher
+    lb = [_as_int1(m)[0] for m in lookbacks]
+    dv = np.asarray(d, dtype=np.float64)
+    if lb and (np.isnan(dv).any() or np.any(np.diff(dv) < 0)):     # wie findInterval in R (seit 1.6.0 auch hier)
+        from ._r.linalg import RError
+        raise RError("'vec' must be sorted non-decreasingly and not contain NAs")
+    if n and assets and lb and all(isinstance(v, (int, np.integer)) and abs(v) <= 12000 for v in lb) and \
+            np.all(np.isfinite(dv)) and dv.min() >= -354285 and dv.max() <= 2568019 and np.all(np.diff(dv) >= 0):
+        X = np.empty((len(assets), n))
+        for j, a in enumerate(assets):
+            X[j] = _num(_col(data, a))
+        S = np.empty((len(assets), n))
+        _ext.slc_mom_score(np.ascontiguousarray(dv), np.asarray(lb, dtype=np.int32), X, int(type == "13612w"), S)
+        return pd.DataFrame(np.ascontiguousarray(S.T), columns=assets)
     back = _momentum_back(d, lookbacks)
     S = np.empty((n, len(assets)))
     for j, a in enumerate(assets):

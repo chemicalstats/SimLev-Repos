@@ -18,6 +18,7 @@
 //   .hmm_em_core        Baum-Welch-EM aus einem Startwert (seit 1.5.0)
 //   .goal_dp            Rueckwaertsrekursion von planning_goal() (seit 1.5.0)
 //   .pbo_cscv           Aufteilungen der CSCV von overfit_pbo() (seit 1.5.0)
+//   .wrapper_nav_core   Tagesschleife des NAV von wrapper_nav() (seit 1.5.1; src/wrapper_core_impl.h)
 //   (.garch_filter: bis 1.0.0, ersetzt durch die C-Bibliothek slc)
 //   .roll_mean_core     rollierender Mittelwert mit kompensierter Summe
 //   .kendall_tau_core   Kendalls Tau-b
@@ -27,6 +28,7 @@
 
 #include "simlev_capi.h"
 #include "research_core_impl.h"
+#include "wrapper_core_impl.h"
 #include <vector>
 
 static SEXP proj_box_simplex_r(sl::NumVec v, sl::NumVec lo, sl::NumVec hi) {
@@ -37,7 +39,7 @@ static SEXP proj_box_simplex_r(sl::NumVec v, sl::NumVec lo, sl::NumVec hi) {
 }
 
 // ---------------------------------------------------------------------------
-// .Call-Huellen (registriert in init.c; R-Seite in R/cores.R)
+// .Call-Huellen (registriert in init.cpp; R-Seite in R/cores.R)
 // ---------------------------------------------------------------------------
 
 extern "C" SEXP C_proj_box_simplex(SEXP s_v, SEXP s_lo, SEXP s_hi) {
@@ -173,6 +175,26 @@ extern "C" SEXP C_pbo_cscv(SEXP s_B, SEXP s_T, SEXP s_combos, SEXP s_half, SEXP 
     simlev::pbo_cscv(S, N, C, B.ptr, T.ptr, cb.ptr, sl::as_double(s_half), sl::as_int(s_metric), lam.ptr, isb.ptr, oosb.ptr,
                      oosm.ptr);
     return sl::named_list("lambda", lam, "is_best", isb, "oos_best", oosb, "oos_median", oosm);
+  });
+}
+
+// NAV eines Fonds-Wrappers (simlev::wrapper_nav_core): G, day, yr (ganzzahlig), fee, pf, S, d0
+// -> list(bad (0 = ok, sonst erster Tag 1-basiert), nav, gross, fee, perf_fee, perf_paid, hwm)
+extern "C" SEXP C_wrapper_nav_core(SEXP s_G, SEXP s_day, SEXP s_yr, SEXP s_fee, SEXP s_pf, SEXP s_S, SEXP s_d0) {
+  return sl::call([&]() -> SEXP {
+    sl::NumVec G = sl::num_vec(s_G), day = sl::num_vec(s_day);
+    sl::IntVec yi = sl::int_vec(s_yr);
+    const R_xlen_t n = G.size();
+    if (day.size() != n || yi.size() != n) sl::stop("wrapper_nav_core: Abmessungen passen nicht");
+    std::vector<int64_t> yr((std::size_t) n);
+    for (R_xlen_t i = 0; i < n; i++) yr[i] = yi[i];
+    sl::NumVec nav = sl::new_num(n), gross = sl::new_num(n), fee = sl::new_num(n), acc = sl::new_num(n),
+               paid = sl::new_num(n), hwm = sl::new_num(n);
+    const int64_t bad = simlev::wrapper_nav_core(n, G.ptr, day.ptr, yr.data(), sl::as_double(s_fee), sl::as_double(s_pf),
+                                                 sl::as_double(s_S), sl::as_double(s_d0), nav.ptr, gross.ptr, fee.ptr,
+                                                 acc.ptr, paid.ptr, hwm.ptr);
+    return sl::named_list("bad", (double) (bad + 1), "nav", nav, "gross", gross, "fee", fee, "perf_fee", acc,
+                          "perf_paid", paid, "hwm", hwm);
   });
 }
 

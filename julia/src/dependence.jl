@@ -268,28 +268,9 @@ function _seq_int_len_out(a::Float64, b::Float64, n::Int)
     out
 end
 
-"`.bincode` (Intervallnummern 1..; 0 = NA)."
-function _bincode(x, breaks; right = true, include_lowest = false)
-    x = _fvec(x); br = _fvec(breaks)
-    nb1 = length(br) - 1
-    lft = !right
-    code = zeros(Int, length(x))
-    for (i, xi) in enumerate(x)
-        isnan(xi) && continue
-        lo, hi = 0, nb1
-        (xi < br[lo+1] || br[hi+1] < xi || (xi == br[(lft ? hi : lo)+1] && !include_lowest)) && continue
-        while hi - lo >= 2
-            new = div(hi + lo, 2)
-            if xi > br[new+1] || (lft && xi == br[new+1])
-                lo = new
-            else
-                hi = new
-            end
-        end
-        code[i] = lo + 1
-    end
-    code
-end
+"`.bincode` (Intervallnummern 1..; 0 = NA; seit 1.6.0 C-Kern sl_r_bincode)."
+_bincode(x, breaks; right = true, include_lowest = false) =
+    SimLev._rb_bincode(collect(Float64, _fvec(x)), collect(Float64, _fvec(breaks)), right, include_lowest)
 
 "`cut(x, k, labels = FALSE)` mit einer Intervallanzahl `k`."
 function _cut_n(x, k::Integer)
@@ -547,6 +528,10 @@ function _cop_t_c0(nu)
 end
 "t-Copula per Profil-Likelihood in nu (`.cop_fit_t`); Ergebnis [atanh rho, nu, -loglik]."
 function _cop_fit_t(u, v)
+    # seit 1.6.0 ganz im Kern (sl_tcop_fit, qt auf mehreren Threads); nur bei einer nicht endlichen Auswertung oder
+    # einer Warnung von qt wie bisher hier (gleiche Meldungen)
+    r = SimLev.SLib.tcop_fit(Vector{Float64}(_fvec(u)), Vector{Float64}(_fvec(v)))
+    r === nothing || return r
     best = [0.0, Inf, Inf]
     function prof(nu)
         if isinf(nu)

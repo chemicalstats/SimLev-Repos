@@ -4,7 +4,8 @@
 #                     Kopf der jeweiligen R-Quelle)
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang.
+#                     SimLev genutzten Umfang; seit 1.6.0 rechnet p.adjust im C-Kern core/slc_rbase_models.cpp
+#                     (sl_r_p_adjust, in Julia auch ecdf über sl_r_ecdf).
 """Generische Zugriffe ``coef``, ``fitted``, ``residuals`` sowie ``p.adjust``, ``ecdf``, ``ave`` und
 ``aggregate``, nachgebildet aus R 4.3.3 ``stats/R/lm.R`` (Zugriffe), ``p.adjust.R``, ``ecdf.R``,
 ``ave.R`` und ``aggregate.R``.
@@ -20,8 +21,8 @@ import numpy as np
 import pandas as pd
 
 from .linalg import RError, _vec_out
-from . import rnum as _rn
-from .stats_sort import _rmean, _rsum, _vec, order, sort, tabulate
+from .. import _ext   # C-Kern sl_r_p_adjust (core/slc_rbase_models.cpp, seit 1.6.0)
+from .stats_sort import _rmean, _vec, sort, tabulate
 from .stats_smooth import approxfun
 
 __all__ = ["p_adjust", "ave", "aggregate", "ecdf", "fitted", "coef", "residuals"]
@@ -70,62 +71,13 @@ def p_adjust(p, method="holm", n=None):
         raise RError("n >= lp is not TRUE")
     if n <= 1:
         return _vec_out(p0, nm) if (nm is not None or p0.size != 1) else float(p0[0])
-    if n == 2 and method == "hommel":
-        method = "hochberg"
-    with np.errstate(all="ignore"):
-        if method == "bonferroni":
-            r = np.minimum(1.0, n * pp)
-        elif method == "holm":
-            i = np.arange(1, lp + 1)
-            o = order(pp) - 1
-            ro = order(o.astype(np.float64)) - 1
-            r = np.minimum(1.0, _cummax((n + 1 - i) * pp[o]))[ro]
-        elif method == "hommel":
-            q_p = np.concatenate([pp, np.ones(int(n) - lp)]) if n > lp else pp.copy()
-            nn_ = int(n)
-            i = np.arange(1, nn_ + 1)
-            o = order(q_p) - 1
-            q_p = q_p[o]
-            ro = order(o.astype(np.float64)) - 1
-            mn = float(np.min(nn_ * q_p / i))
-            q = np.full(nn_, mn)
-            pa = np.full(nn_, mn)
-            for j in range(nn_ - 1, 1, -1):
-                ij = np.arange(0, nn_ - j + 1)
-                i2 = np.arange(nn_ - j + 1, nn_)
-                q1 = float(np.min(j * q_p[i2] / np.arange(2, j + 1)))
-                q[ij] = np.minimum(j * q_p[ij], q1)
-                q[i2] = q[nn_ - j]
-                pa = np.maximum(pa, q)
-            r = np.maximum(pa, q_p)[ro[:lp] if lp < nn_ else ro]
-        elif method == "hochberg":
-            i = np.arange(lp, 0, -1)
-            o = order(pp, decreasing=True) - 1
-            ro = order(o.astype(np.float64)) - 1
-            r = np.minimum(1.0, _cummin((n + 1 - i) * pp[o]))[ro]
-        elif method == "BH":
-            i = np.arange(lp, 0, -1)
-            o = order(pp, decreasing=True) - 1
-            ro = order(o.astype(np.float64)) - 1
-            r = np.minimum(1.0, _cummin(n / i * pp[o]))[ro]
-        elif method == "BY":
-            i = np.arange(lp, 0, -1)
-            o = order(pp, decreasing=True) - 1
-            ro = order(o.astype(np.float64)) - 1
-            q = _rsum(1.0 / np.arange(1, int(n) + 1))
-            r = np.minimum(1.0, _cummin(q * n / i * pp[o]))[ro]
-        else:
-            r = pp
+    r = np.empty(lp)   # C-Kern sl_r_p_adjust (seit 1.6.0)
+    _ext.slc_r_p_adjust(np.ascontiguousarray(pp), float(n), _PADJ_CODE[method], r)
     p0[nna] = r
     return _vec_out(p0, nm) if (nm is not None or p0.size != 1) else float(p0[0])
 
 
-def _cummax(x):
-    return _rn.r_cummax(x)          # C-Kern
-
-
-def _cummin(x):
-    return _rn.r_cummin(x)          # C-Kern
+_PADJ_CODE = {"holm": 0, "hochberg": 1, "hommel": 2, "bonferroni": 3, "BH": 4, "BY": 5, "none": 6}
 
 
 def ecdf(x):

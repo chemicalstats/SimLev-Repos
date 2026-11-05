@@ -8,17 +8,14 @@
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet der C-Kern
-#                     core/slc_rbase_date.c.
+#                     core/slc_rbase_date.cpp.
 # ─────────────────────────────────────────────────────────────────────────────
 # Textausgabe wie R (Engine): sprintf() mit NA/NaN/Inf-Regeln, format() und
-# as.character() für Zahlen (formatReal/scientific aus R's format.c, long
-# double im C-Kern sl_r_scientific), deparse() für einfache Werte, round()/signif().
+# as.character() für Zahlen, deparse() für einfache Werte, round()/signif(). Seit 1.5.2
+# eine dünne Hülle: Runden (fround, fprec) und formatReal/encodeReal rechnet RFmt
+# (_fmt_core.jl, nach der Python-Fassung); r_sprintf ist seit 1.6.0 nur noch der skalare Zugang
+# zum C-Kern sl_r_sprintf (core/slc_rbase_fmt.cpp) wie RFmt.sprintf.
 # ─────────────────────────────────────────────────────────────────────────────
-
-const _FMT_CACHE = Dict{String,Printf.Format}()
-const _FMT_LOCK = ReentrantLock()
-_pf(spec::String) = lock(() -> get!(() -> Printf.Format(spec), _FMT_CACHE, spec), _FMT_LOCK)
-_cfmt(spec::String, x) = Printf.format(_pf(spec), x)
 
 _as_float(x::Real) = Float64(x)
 _as_float(::Missing) = NA
@@ -38,202 +35,106 @@ function _as_str(@nospecialize(v))
     return string(v)
 end
 
-function _rspec(flags::String, width::String, prec::Union{Nothing,String}, conv::Char, @nospecialize(x))
-    spec = "%" * flags * width * (prec === nothing ? "" : "." * prec)
-    if conv == 's'
-        return _cfmt(spec * "s", _as_str(x))
-    elseif conv in ('d', 'i', 'o', 'x', 'X')
-        if x isa Bool
-            return _cfmt(spec * conv, Int(x))
-        elseif x isa Integer
-            return _cfmt(spec * conv, x)
-        end
-        v = _as_float(x)
-        if isnan(v)
-            return _cfmt("%" * replace(flags, "0" => "", "+" => "", " " => "") * width * "s", "NA")
-        end
-        (isfinite(v) && v == trunc(v)) ||
-            error("invalid format '" * spec * conv * "'; use format %f, %e, %g or %a for numeric objects")
-        return _cfmt(spec * conv, Int64(v))
-    elseif conv in ('e', 'E', 'f', 'F', 'g', 'G', 'a', 'A')
-        x isa AbstractString && error("invalid format '" * spec * conv * "'; use format %s for character objects")
-        v = _as_float(x)
-        isfinite(v) && return _cfmt(spec * conv, v)
-        sp = occursin(' ', flags)
-        s = isnan(v) ? (isna_strict(v) ? (sp ? " NA" : "NA") : (sp ? " NaN" : "NaN")) :
-            v > 0 ? (occursin('+', flags) ? "+Inf" : (sp ? " Inf" : "Inf")) : "-Inf"
-        return _cfmt("%" * replace(flags, "0" => "", "+" => "", " " => "") * width * "s", s)
-    elseif conv == 'c'
-        return _cfmt(spec * "c", x)
-    end
-    error("unrecognised format specification '" * spec * conv * "'")
-end
-
 """
     r_sprintf(fmt, args...)
 
-R's `sprintf()` für skalare Argumente: NA/NaN/Inf in Gleitkommaformaten als Text
-(gleiche Breite), ganzzahlige Doubles in `%d`, Zahlen in `%s` über
-`as.character()`, `*` für Breite/Genauigkeit.
+R's `sprintf()` für skalare Argumente (missing/nothing = NA): schneller Zugang zum C-Kern (sl_r_sprintf1, seit 1.6.0
+dieselbe Rechnung wie `RFmt.sprintf`; bis 1.5.2 eine zweite Nachbildung über Printf).
 """
-function r_sprintf(fmt::AbstractString, @nospecialize(args...))
-    out = IOBuffer()
-    s = String(fmt)
-    i = 1
-    n = ncodeunits(s)
-    k = 0
-    while i <= n
-        c = s[i]
-        if c != '%'
-            write(out, c)
-            i = nextind(s, i)
-            continue
+# Puffer je Thread für r_sprintf (Aufgaben wechseln den Thread nur an Haltepunkten; zwischen Füllen und ccall liegt
+# keiner), damit ein Aufruf außer dem Ergebnis keinen Speicher anlegt
+struct _SPBuf
+    types::Vector{Cint}
+    dv::Vector{Float64}
+    iv::Vector{Int32}
+    sv::Vector{Ptr{UInt8}}
+    out::Vector{UInt8}
+    nun::Base.RefValue{Cint}
+end
+_SPBuf() = _SPBuf(Vector{Cint}(undef, 16), Vector{Float64}(undef, 16), Vector{Int32}(undef, 16),
+                  Vector{Ptr{UInt8}}(undef, 16), Vector{UInt8}(undef, 1024), Ref{Cint}(0))
+const _SPBUFS = _SPBuf[]
+const _SPLOCK = ReentrantLock()
+function _spbuf()
+    if isempty(_SPBUFS)
+        lock(_SPLOCK) do
+            isempty(_SPBUFS) && append!(_SPBUFS, [_SPBuf() for _ in 1:Threads.maxthreadid()])
         end
-        j = i + 1
-        if j <= n && s[j] == '%'
-            write(out, '%'); i = j + 1; continue
-        end
-        f0 = j
-        while j <= n && s[j] in ('-', '+', ' ', '0', '#')
-            j += 1
-        end
-        flags = s[f0:j-1]
-        width = ""
-        if j <= n && s[j] == '*'
-            k += 1; width = string(Int(args[k])); j += 1
-            if startswith(width, "-")
-                flags *= "-"; width = width[2:end]
-            end
-        else
-            w0 = j
-            while j <= n && isdigit(s[j]); j += 1; end
-            width = s[w0:j-1]
-        end
-        prec = nothing
-        if j <= n && s[j] == '.'
-            j += 1
-            if j <= n && s[j] == '*'
-                k += 1; prec = string(Int(args[k])); j += 1
-            else
-                p0 = j
-                while j <= n && isdigit(s[j]); j += 1; end
-                prec = s[p0:j-1]
-            end
-        end
-        # Längenmodifikatoren ignorieren (wie R)
-        while j <= n && s[j] in ('l', 'h', 'L', 'q')
-            j += 1
-        end
-        conv = s[j]
-        k += 1
-        write(out, _rspec(flags, width, prec, conv, args[k]))
-        i = j + 1
     end
-    return String(take!(out))
+    return _SPBUFS[Threads.threadid()]
+end
+
+function r_sprintf(fmt::AbstractString, @nospecialize(args...))
+    n = length(args)
+    n > 16 && return RFmt.sprintf(fmt, args...)
+    b = _spbuf()
+    types = b.types; dv = b.dv; iv = b.iv; sv = b.sv
+    keep = nothing
+    for k in 1:n
+        v = args[k]
+        dv[k] = 0.0; iv[k] = 0; sv[k] = C_NULL
+        if v === nothing || v === missing
+            types[k] = 0; iv[k] = typemin(Int32)
+        elseif v isa Bool
+            types[k] = 0; iv[k] = v
+        elseif v isa Integer
+            if abs(v) < 2^31
+                types[k] = 1; iv[k] = v
+            else
+                types[k] = 2; dv[k] = v
+            end
+        elseif v isa Real
+            types[k] = 2; dv[k] = v
+        else
+            keep === nothing && (keep = Vector{String}(undef, n))
+            if v isa Date
+                types[k] = 5; dv[k] = Dates.value(v - Date(1970, 1, 1)); keep[k] = _as_str(v)
+            else
+                types[k] = 3; keep[k] = v isa String ? v : v isa AbstractString ? String(v) : _as_str(v)
+            end
+        end
+    end
+    f = fmt isa String ? fmt : String(fmt)
+    sp = RFmt._OPT[:scipen]; scipen = sp isa Int ? sp : Int(sp)::Int
+    od = RFmt._OPT[:OutDec]; dec = od isa String ? od : String(od)::String
+    out = b.out
+    while true
+        cap = length(out)
+        len = GC.@preserve keep out begin
+            if keep !== nothing
+                for k in 1:n
+                    isassigned(keep, k) && (sv[k] = pointer(keep[k]))
+                end
+            end
+            ccall((:sl_r_sprintf1, LIBSLC), Int64,
+                  (Cstring, Cint, Ptr{Cint}, Ptr{Float64}, Ptr{Int32}, Ptr{Ptr{UInt8}}, Cint, Cstring, Ptr{UInt8}, Int64,
+                   Ptr{UInt8}, Int64, Ref{Cint}),
+                  f, n, types, dv, iv, sv, scipen, dec, out, cap, out, cap, b.nun)
+        end
+        len == -2 && throw(OutOfMemoryError())
+        len == -1 && error(GC.@preserve out unsafe_string(pointer(out)))
+        if len <= cap
+            res = GC.@preserve out unsafe_string(pointer(out), len)
+            b.nun[] > 0 && RFmt._sprintf_warn(Int(b.nun[]), 1, f)
+            return res
+        end
+        out = Vector{UInt8}(undef, len)
+    end
 end
 const rsprintf = r_sprintf
 
-# ── formatReal / scientific (R's format.c) ──────────────────────────────────
+# ── formatReal (R's format.c) ───────────────────────────────────────────────
 
-_libm_log10(x::Float64) = ccall((:log10, _LIBM), Float64, (Float64,), x)
+_libm_log10(x::Float64) = ccall((:log10, _LIBM), Float64, (Float64,), x)   # dashboard.jl
 
-"`scientific()`: (neg, kpower, nsig, roundingwidens) für |x| mit `digits` Stellen."
-function _scientific(x::Float64, digits::Int)
-    x == 0.0 && return (0, 0, 1, false)
-    neg, r = x < 0 ? (1, -x) : (0, x)
-    if digits >= 16
-        s = _cfmt("%#." * string(digits - 1) * "e", r)
-        mant, ex = split(s, 'e')
-        kpower = parse(Int, ex)
-        digs = replace(mant, "." => "")
-        i = digits
-        while i >= 2 && digs[i] == '0'
-            i -= 1
-        end
-        return (neg, kpower, i, false)
-    end
-    # long-double-Teil von scientific() über den C-Kern (core/slc_rbase_num.c)
-    kpower, nsig, rw = _rb_scientific(r, digits)
-    return (neg, kpower, nsig, rw)
-end
-
-"`formatReal()`: gemeinsame Breite w, Nachkommastellen d, Exponentformat e."
-function _format_real(xs::AbstractVector{Float64}, digits::Int = 7, nsmall::Int = 0, scipen::Int = 0)
-    naflag = nanflag = posinf = neginf = false
-    neg = 0
-    BIG = 10^9
-    mnl = BIG
-    mxl = rgt = mxsl = mxns = -BIG
-    for x in xs
-        if !isfinite(x)
-            if isnan(x)
-                isna_strict(x) ? (naflag = true) : (nanflag = true)
-            elseif x > 0
-                posinf = true
-            else
-                neginf = true
-            end
-            continue
-        end
-        neg_i, kpower, nsig, rw = _scientific(x, digits)
-        left = kpower + 1
-        rw && (left -= 1)
-        sleft = neg_i + (left <= 0 ? 1 : left)
-        right = nsig - left
-        neg_i == 1 && (neg = 1)
-        rgt = max(rgt, right)
-        mxl = max(mxl, left)
-        mnl = min(mnl, left)
-        mxsl = max(mxsl, sleft)
-        mxns = max(mxns, nsig)
-    end
-    digits == 0 && (rgt = 0)
-    mxl < 0 && (mxsl = 1 + neg)
-    rgt < 0 && (rgt = 0)
-    wF = mxsl + rgt + (rgt != 0 ? 1 : 0)
-    e = (mxl > 100 || mnl <= -99) ? 2 : 1
-    if mxns != -BIG
-        d = mxns - 1
-        w = neg + (d > 0 ? 1 : 0) + d + 4 + e
-        if wF <= w + scipen
-            e = 0
-            if nsmall > rgt
-                rgt = nsmall
-                wF = mxsl + rgt + (rgt != 0 ? 1 : 0)
-            end
-            d = rgt
-            w = wF
-        end
-    else
-        w = d = e = 0
-    end
-    naflag && w < 2 && (w = 2)
-    nanflag && w < 3 && (w = 3)
-    posinf && w < 3 && (w = 3)
-    neginf && w < 4 && (w = 4)
-    return (w, d, e)
-end
-
-function _drop0(s::String)
-    m = match(r"^(.*?\.)(\d*)(.*)$", s)
-    m === nothing && return s
-    head, digs, tail = m.captures[1], rstrip(m.captures[2], '0'), m.captures[3]
-    return (isempty(digs) ? head[1:end-1] : head * digs) * tail
-end
+# Seit 1.5.2 rechnen formatReal, encodeReal und Drop0 die Funktionen von RFmt (_fmt_core.jl; bis 1.5.1 eine
+# zweite Nachbildung hier); NA-Maske wie R (isna_strict).
+_format_real(xs::AbstractVector{Float64}, digits::Int = 7, nsmall::Int = 0, scipen::Int = 0) =
+    RFmt._format_real(xs, Bool[isna_strict(x) for x in xs], digits, nsmall, scipen)
 
 function _encode_real(x::Float64, w::Int, d::Int, e::Int; drop0::Bool = false)
-    x == 0.0 && (x = 0.0)
-    if !isfinite(x)
-        s = isnan(x) ? (isna_strict(x) ? "NA" : "NaN") : (x > 0 ? "Inf" : "-Inf")
-        return lpad(s, w)
-    end
-    s = if e != 0
-        d > 0 ? _cfmt("%#" * string(w) * "." * string(d) * "e", x) : _cfmt("%" * string(w) * "." * string(d) * "e", x)
-    else
-        _cfmt("%" * string(w) * "." * string(d) * "f", x)
-    end
-    drop0 && occursin('.', s) && (s = _drop0(s))
-    return s
+    s = RFmt._encode_real(x, w, d, e, ".", isna_strict(x))
+    return drop0 && isfinite(x) ? RFmt._drop0(s) : s
 end
 
 function _insert_big_mark(s::String, mark::String)
@@ -351,101 +252,11 @@ end
 
 # ── Runden ──────────────────────────────────────────────────────────────────
 
-"R's `R_pow_di` (wiederholtes Quadrieren wie in R's arithmetic.c)."
-function _pow_di(x::Float64, n::Int)
-    xn = 1.0
-    isnan(x) && return x
-    if n != 0
-        isfinite(x) || return r_pow(x, Float64(n))
-        is_neg = n < 0
-        is_neg && (n = -n)
-        while true
-            (n & 1) != 0 && (xn *= x)
-            n >>= 1
-            n != 0 || break
-            x *= x
-        end
-        is_neg && (xn = 1.0 / xn)
-    end
-    return xn
-end
+"R's `round(x, digits)` (Algorithmus seit R 4.0.0, nmath/fround.c; Rechnung `RFmt.fround`)."
+r_round(x::Real, digits::Real = 0) = RFmt.fround(Float64(x), Float64(digits))
 
-"R's `round(x, digits)` (Algorithmus seit R 4.0.0, nmath/fround.c)."
-function r_round(x::Real, digits::Real = 0)
-    x = Float64(x); digits = Float64(digits)
-    (isnan(x) || isnan(digits)) && return x + digits
-    (!isfinite(x) || digits > 323 || x == 0.0) && return x
-    digits < -308 && return 0.0
-    digits == 0 && return round(x, RoundNearest)
-    dig = Int(floor(digits + 0.5))
-    sgn = 1.0
-    if x < 0.0
-        sgn = -1.0; x = -x
-    end
-    l10x = 0.301029995663981195213738894724 * (0.5 + exponent(x))
-    l10x + dig > 15 && return sgn * x
-    if dig <= 308
-        pow10 = _pow_di(10.0, dig)
-        x10 = x * pow10
-        i10 = floor(x10)
-        xd = i10 / pow10
-        xu = ceil(x10) / pow10
-    else
-        p10 = _pow_di(10.0, dig - 308)
-        pow10 = _pow_di(10.0, 308)
-        x10 = (x * pow10) * p10
-        i10 = floor(x10)
-        xd = i10 / pow10 / p10
-        xu = ceil(x10) / pow10 / p10
-    end
-    du = xu - x
-    dd = x - xd
-    return sgn * ((du < dd || (du == dd && rem(i10, 2.0) == 1)) ? xu : xd)
-end
-
-"R's `signif(x, digits)` (nmath/fprec.c)."
-function r_signif(x::Real, digits::Real = 6)
-    x = Float64(x); digits = Float64(digits)
-    max10e = 308
-    (isnan(x) || isnan(digits)) && return x + digits
-    isfinite(x) || return x
-    if !isfinite(digits)
-        digits > 0 && return x
-        digits = 1.0
-    end
-    x == 0 && return x
-    dig = Int(round(digits))
-    dig > 22 && return x
-    dig < 1 && (dig = 1)
-    sgn = 1.0
-    if x < 0.0
-        sgn = -sgn; x = -x
-    end
-    l10 = _libm_log10(x)
-    e10 = Int(dig - 1 - floor(l10))
-    if abs(l10) < max10e - 2
-        p10 = 1.0
-        if e10 > max10e
-            p10 = _pow_di(10.0, e10 - max10e)
-            e10 = max10e
-        end
-        if e10 > 0
-            pow10 = _pow_di(10.0, e10)
-            return sgn * (round((x * pow10) * p10, RoundNearest) / pow10) / p10
-        end
-        pow10 = _pow_di(10.0, -e10)
-        return sgn * (round(x / pow10, RoundNearest) * pow10)
-    end
-    do_round = max10e - l10 >= _pow_di(10.0, -dig)
-    e2 = dig + (e10 > 0 ? 1 : -1) * 22
-    p10 = _pow_di(10.0, e2)
-    x *= p10
-    P10 = _pow_di(10.0, e10 - e2)
-    x *= P10
-    do_round && (x += 0.5)
-    x = floor(x) / p10
-    return sgn * x / P10
-end
+"R's `signif(x, digits)` (nmath/fprec.c; Rechnung `RFmt.fprec`, `digits` wie R mit C-`round()`)."
+r_signif(x::Real, digits::Real = 6) = RFmt.fprec(Float64(x), Float64(digits))
 
 "`format(x, digits = d)` für einen Skalar wie R's `formatReal`."
 r_format_digits(x::Real, digits::Int = 7) = r_format1(Float64(x); digits = digits)

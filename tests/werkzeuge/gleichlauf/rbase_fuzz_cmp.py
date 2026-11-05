@@ -1,5 +1,5 @@
-"""Vergleich der Kerne core/slc_rbase*.c (über simlev._ext) mit den R-Ergebnissen aus rbase_fuzz.R;
-seit 1.3.0 auch slc_rbase_num.c über seine Nutzer (R_strtod in RExpr, %% und %/%, format mit scientific()).
+"""Vergleich der Kerne core/slc_rbase*.cpp (über simlev._ext) mit den R-Ergebnissen aus rbase_fuzz.R;
+seit 1.3.0 auch slc_rbase_num.cpp über seine Nutzer (R_strtod in RExpr, %% und %/%, format mit scientific()).
 
     Rscript tests/werkzeuge/gleichlauf/rbase_fuzz.R <ordner> [fälle]      # R als Orakel
     python3 tests/werkzeuge/gleichlauf/rbase_fuzz_cmp.py <ordner>         # Python (simlev._ext)
@@ -164,7 +164,7 @@ while not done():
             got = None
     check("cov" + ("_kendall" if kend else "") + ("_cor" if cr else ""), got, r, (n, ncx, x, ncy, y, use))
 
-# 12 (seit 1.3.0) Nutzer von slc_rbase_num.c: R_strtod (as.numeric), %% und %/%, format (scientific())
+# 12 (seit 1.3.0) Nutzer von slc_rbase_num.cpp: R_strtod (as.numeric), %% und %/%, format (scientific())
 if os.path.exists(os.path.join(D, "strtod.bin")):
     import warnings
     from simlev._r import fmt as _fmt, rexpr as _rexpr, rformat as _rformat

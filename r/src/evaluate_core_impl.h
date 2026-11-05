@@ -12,14 +12,14 @@
 // Lizenz der Vorlage: GPL-3 (SimLev)
 // Aenderungen:        Warnungen, Abbrueche (NA in einer Bedingung) und die Ursachen nicht definierter Kennzahlen
 //                     als Codes mit Werten (Texte in den Hosts, wortgleich zu R 1.3.0); stats::uniroot ueber
-//                     sl_r_zeroin2 (core/slc_rbase.c); Rechenfolge wie R.
+//                     sl_r_zeroin2 (core/slc_rbase.cpp); Rechenfolge wie R.
 //
 // GEMEINSAME QUELLE FUER R, PYTHON UND JULIA: reine Rechnung ohne Host-Objekte. R bindet sie ueber
 // r/src/engine_core.cpp ein (C_sim_evaluate, C_sim_xirr), Python ueber python/src/_ext_engine.cpp (sim_evaluate,
 // sim_xirr), Julia ueber core/simlev_cabi.cpp (simlev_c_eval_*, simlev_c_xirr).
 // Regeln wie engine_core_impl.h: kein globaler Zustand, Rechenfolge wie R, Operationen mit zwei Operanden aus
 // Eingaben ueber simlev_add/_sub/_mul/_div (NA vor NaN); sum, prod, mean, var, cumsum, cumprod, cummax,
-// rowSums wie R in long double bzw. mit R's Regeln ueber core/slc_rbase.c (bewusste Ausnahme "kein long double").
+// rowSums wie R in long double bzw. mit R's Regeln ueber core/slc_rbase.cpp (bewusste Ausnahme "kein long double").
 //
 // R-Semantik, die der Kern nachbildet:
 //   - ifelse() mit NA im Test liefert NA_real_ (v_pre, Drawdowns bei NaN im laufenden Maximum).

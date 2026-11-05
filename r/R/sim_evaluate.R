@@ -55,58 +55,56 @@
                        "nonpositive_twr_index", "not_finite", "zero_mean_return", "zero_volatility",
                        "no_negative_returns", "no_drawdown", "no_recovery")
 
-#' Klartext einer Ursache (enum Detail in core/evaluate_core_impl.h)
+#' Klartext einer Ursache (enum Detail in core/evaluate_core_impl.h); Texte aus .MELD_EVAL_DETAIL (R/meldungen.R)
 #' @keywords internal
 #' @noRd
 .sim_eval_detail <- function(d, v, why_text) {
+  m <- .MELD_EVAL_DETAIL
   dstr <- function(z) format(structure(z, class = "Date"))
   switch(as.character(d),
-    "0" = sprintf("Zeitraum %s, Laufzeit 0 Jahre (Einzeltag)", .n_tage(v[1])),
-    "1" = sprintf("Endwert %.2f EUR negativ", v[1]),
-    "2" = sprintf("Endwert %.2f EUR negativ: offene Steuerschuld %.2f EUR", v[1], v[2]),
-    "3" = sprintf("kein interner Zinsfu\u00df: Startwert %.2f EUR, Einzahlungen %.2f EUR, Endwert %.2f EUR", v[1], v[2], v[3]),
-    "4" = sprintf("Depotwert am Starttag %.2f EUR", v[1]),
-    "5" = sprintf("zeitgewichteter Wertindex am %s nicht positiv (Tagesrendite %.2f %%)", dstr(v[1]), v[2]),
-    "6" = "Rechnung ergibt keinen endlichen Wert",
-    "7" = "keine Tagesrendite (Einzeltag)",
-    "8" = sprintf("nur %d %s, mindestens %d n\u00f6tig", as.integer(v[1]), if (v[1] == 1) "Tagesrendite" else "Tagesrenditen",
-                  as.integer(v[2])),
-    "9" = "kein Drawdown im Zeitraum (max_drawdown 0)",
-    "10" = sprintf("Standardabweichung der %d Tagesrenditen ist 0 (konstanter Verlauf)", as.integer(v[1])),
-    "11" = "mittlere Tagesrendite ist 0",
-    "12" = sprintf("Standardabweichung der %d \u00dcberschussrenditen ist 0", as.integer(v[1])),
-    "13" = "keine negativen \u00dcberschussrenditen (Downside-Abweichung 0)",
-    "14" = "keine negativen Tagesrenditen",
-    "15" = "kein Drawdown im Zeitraum (Ulcer Index 0)",
-    "16" = "kein Drawdown im Zeitraum",
-    "17" = sprintf("Drawdown bis zum Ende nicht aufgeholt (l\u00e4ngster Drawdown %s)", .n_tage(v[1])),
-    "18" = sprintf("Zeitraum %s, Laufzeit 0 Jahre: keine Anzahl je Jahr (Einzeltag)", .n_tage(v[1])),
-    "19" = sprintf("%s nicht definiert: %s", .SIM_EVAL_METRICS[v[1] + 1], why_text[v[1] + 1]))
+    "0" = sprintf(m[["0"]], .n_tage(v[1])),
+    "1" = sprintf(m[["1"]], v[1]),
+    "2" = sprintf(m[["2"]], v[1], v[2]),
+    "3" = sprintf(m[["3"]], v[1], v[2], v[3]),
+    "4" = sprintf(m[["4"]], v[1]),
+    "5" = sprintf(m[["5"]], dstr(v[1]), v[2]),
+    "6" = m[["6"]],
+    "7" = m[["7"]],
+    "8" = sprintf(m[["8"]], as.integer(v[1]), if (v[1] == 1) m[["8.eins"]] else m[["8.mehr"]], as.integer(v[2])),
+    "9" = m[["9"]],
+    "10" = sprintf(m[["10"]], as.integer(v[1])),
+    "11" = m[["11"]],
+    "12" = sprintf(m[["12"]], as.integer(v[1])),
+    "13" = m[["13"]],
+    "14" = m[["14"]],
+    "15" = m[["15"]],
+    "16" = m[["16"]],
+    "17" = sprintf(m[["17"]], .n_tage(v[1])),
+    "18" = sprintf(m[["18"]], .n_tage(v[1])),
+    "19" = sprintf(m[["19"]], .SIM_EVAL_METRICS[v[1] + 1], why_text[v[1] + 1]))
 }
 
-#' Warnungen der Auswertung (Codes des Kerns) mit den Texten von R 1.3.0; call: Aufruf der Bedingung (aus
-#' .sim_evaluate dessen Aufruf, den .sim_restore_call durch den von simulation() ersetzt; sonst ohne Aufruf)
+#' Warnungen der Auswertung (Codes des Kerns) mit den Texten von R 1.3.0 (.MELD_EVAL_WARN, R/meldungen.R);
+#' call: Aufruf der Bedingung (aus .sim_evaluate dessen Aufruf, den .sim_restore_call durch den von simulation()
+#' ersetzt; sonst ohne Aufruf)
 #' @keywords internal
 #' @noRd
 .sim_eval_warn <- function(code, v, call = NULL) {
+  m <- .MELD_EVAL_WARN
   dstr <- function(z) format(structure(z, class = "Date"))
   w <- switch(as.character(code),
-    "1" = simpleWarning("-Inf replaced by maximally negative value", call),
-    "2" = simpleWarning("NA/Inf replaced by maximum positive value", call),
-    "3" = simpleWarning("_NOT_ converged in 1000 iterations", call),
-    "10" = simpleWarning(sprintf("simulation: geldgewichtete Rendite (cagr) mit Einzahlungen nicht bestimmbar (Startwert %.2f EUR, Einzahlungen %.2f EUR, Endwert %.2f EUR): kein interner Zinsfu\u00df gefunden; cagr = NA.",
-                                 v[1], v[2], v[3])),
-    "11" = simpleWarning(sprintf("simulation: Endwert negativ (%.2f EUR, %s); Verlust \u00fcber 100 %%: cagr und ttwror sind nicht definiert (NA), Drawdowns auf 100 %% begrenzt.",
-                                 v[1], if (v[2] > 0) sprintf("offene Steuerschuld %.2f EUR", v[2]) else "nicht gedeckte Steuerschuld")),
-    "12" = simpleWarning("simulation: zeitgewichteter Wertindex wird negativ (Tagesrendite unter -100 %); ttwror ist nicht definiert (NA)."),
-    "13" = simpleWarning(sprintf("simulation: Zeitraum %s (Laufzeit 0 Jahre): cagr und ttwror sind nicht definiert (NA).", .n_tage(v[1]))),
-    "14" = simpleWarning(sprintf("simulation: Depotwert am Starttag %.2f EUR: cagr ist nicht definiert (NA).", v[1])),
-    "15" = simpleWarning(sprintf("simulation: zeitgewichteter Wertindex am %s nicht positiv (Tagesrendite %.2f %% bei Depotwert %.2f EUR am Vortag und Einzahlung %.2f EUR); TTWROR und die zeitgewichteten Drawdowns sind nicht aussagekr\u00e4ftig (Drawdowns auf 100 %% begrenzt).",
-                                 dstr(v[1]), v[2], v[3], v[4])),
-    "16" = simpleWarning(sprintf("simulation: Depotwert am %s negativ (%.2f EUR, Steuerschuld); Drawdowns auf 100 %% begrenzt.",
-                                 dstr(v[1]), v[2])),
-    "17" = simpleWarning("no non-missing arguments to max; returning -Inf", call),
-    stop(sprintf("simulation: interner Fehler: unbekannter Ereigniscode %d der Auswertung.", code)))
+    "1" = simpleWarning(m[["1"]], call),
+    "2" = simpleWarning(m[["2"]], call),
+    "3" = simpleWarning(m[["3"]], call),
+    "10" = simpleWarning(sprintf(m[["10"]], v[1], v[2], v[3])),
+    "11" = simpleWarning(sprintf(m[["11"]], v[1], if (v[2] > 0) sprintf(m[["11.offen"]], v[2]) else m[["11.ungedeckt"]])),
+    "12" = simpleWarning(m[["12"]]),
+    "13" = simpleWarning(sprintf(m[["13"]], .n_tage(v[1]))),
+    "14" = simpleWarning(sprintf(m[["14"]], v[1])),
+    "15" = simpleWarning(sprintf(m[["15"]], dstr(v[1]), v[2], v[3], v[4])),
+    "16" = simpleWarning(sprintf(m[["16"]], dstr(v[1]), v[2])),
+    "17" = simpleWarning(m[["17"]], call),
+    stop(sprintf(m[["unbekannt"]], code)))
   warning(w)
 }
 

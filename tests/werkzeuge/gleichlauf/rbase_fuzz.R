@@ -1,4 +1,4 @@
-# Zufallsprüfung der Kerne core/slc_rbase*.c gegen R (Orakel); seit 1.3.0 auch slc_rbase_num.c über seine Nutzer. Schreibt je Kern eine Binärdatei
+# Zufallsprüfung der Kerne core/slc_rbase*.cpp gegen R (Orakel); seit 1.3.0 auch slc_rbase_num.cpp über seine Nutzer. Schreibt je Kern eine Binärdatei
 # mit Datensätzen aus Doubles: Felder als (Länge, Werte ...); Fehler als Länge -1.
 #   Rscript tests/werkzeuge/gleichlauf/rbase_fuzz.R <ordner> [fälle je kern]
 args <- commandArgs(TRUE)
@@ -104,7 +104,7 @@ for (i in 1:N) {
   rec(n, ncx, x, ncy, if (hasy) y else numeric(0), use, kend, cr)
   if (is.null(r)) err() else rec(r)
 }
-# 12 (seit 1.3.0) Nutzer von core/slc_rbase_num.c: as.numeric(<Text>) (R_strtod), %% und %/%, format(x, digits)
+# 12 (seit 1.3.0) Nutzer von core/slc_rbase_num.cpp: as.numeric(<Text>) (R_strtod), %% und %/%, format(x, digits)
 # (scientific()); Texte als Unicode-Codepunkte
 open_k("strtod")
 dg <- function(k, hex = FALSE) paste(sample(if (hex) c(0:9, letters[1:6], LETTERS[1:6]) else 0:9, k, TRUE), collapse = "")

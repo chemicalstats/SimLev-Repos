@@ -10,7 +10,7 @@
 # R-kompatible Numerik
 #
 # Summen, Mittel, Varianz, Kumulationen und Potenz rechnen die C-Kerne
-# core/slc_rbase*.c (r/rbase_c.jl), auch %% und R_strtod (slc_rbase_num.c). NA wird wie in R als NaN mit der
+# core/slc_rbase*.cpp (r/rbase_c.jl), auch %% und R_strtod (slc_rbase_num.cpp). NA wird wie in R als NaN mit der
 # Nutzlast 1954 dargestellt, sodass NA und NaN unterscheidbar bleiben.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -20,7 +20,7 @@ const NA = reinterpret(Float64, 0x7FF00000000007A2)
 "TRUE nur für R's NA (nicht für NaN) – entspricht `R_IsNA`."
 isna_strict(x::Float64) = isnan(x) && (reinterpret(UInt64, x) & 0x00000000FFFFFFFF) == 0x00000000000007A2
 
-# ── Summen, Mittel, Varianz, Kumulationen (C-Kerne core/slc_rbase.c) ─────
+# ── Summen, Mittel, Varianz, Kumulationen (C-Kerne core/slc_rbase.cpp) ─────
 # R akkumuliert in long double; die C-Kerne tun dasselbe (x87 auf x86-64, gegen R bitgleich geprüft)
 # und sind dieselbe Implementierung wie in Python. Die frühere Nachbildung über F80/F80Soft mit der
 # x87-Regel für zwei NaN-Operanden entfällt hier.
@@ -75,9 +75,8 @@ end
 # ── C-Bibliotheken je Betriebssystem (einzige Stelle; RLibm, RFmt nutzen sie) ─
 # libm: Linux glibc `libm.so.6` (bitgleich zu R nur hier zugesagt), macOS
 # libSystem, Windows die UCRT (`ucrtbase`, hat die C99-Funktionen log1p, expm1,
-# lgamma, …; Rückfall `msvcrt`), sonst `libm`. snprintf: glibc `libc.so.6`,
-# macOS libSystem, Windows `msvcrt` (`_snprintf`; die UCRT exportiert kein
-# `snprintf`). Fehlt ein Symbol, scheitert erst der Aufruf, nie das Laden.
+# lgamma, …; Rückfall `msvcrt`), sonst `libm`. snprintf ruft seit 1.6.0 der C-Kern
+# (core/slc_rbase_fmt.cpp). Fehlt ein Symbol, scheitert erst der Aufruf, nie das Laden.
 function _pick_lib(cands...)
     for c in cands
         h = Base.Libc.Libdl.dlopen(c, Base.Libc.Libdl.RTLD_LAZY; throw_error = false)
@@ -88,37 +87,7 @@ end
 const _LIBM = Sys.islinux() ? "libm.so.6" :
               Sys.isapple() ? "/usr/lib/libSystem.B.dylib" :
               Sys.iswindows() ? _pick_lib("ucrtbase", "msvcrt") : _pick_lib("libm.so", "libm")
-const _LIBC = Sys.islinux() ? "libc.so.6" :
-              Sys.isapple() ? "/usr/lib/libSystem.B.dylib" :
-              Sys.iswindows() ? "msvcrt" : _pick_lib("libc.so", "libc")
-const _SNPRINTF = Sys.iswindows() ? :_snprintf : :snprintf
-
-# C `snprintf(buf, n, fmt, args...)` für die benötigten Argumentmuster
-const _CTYPE = Dict(Float64 => :Cdouble, Int32 => :Cint, String => :Cstring)
-for sig in ((Float64,), (Int32,), (String,), (Int32, Int32, Float64), (Int32, Int32), (Int32, Float64))
-    nm = [Symbol(:a, i) for i in eachindex(sig)]
-    targs = [:($(nm[i])::$(sig[i])) for i in eachindex(sig)]
-    cargs = [:($(nm[i])::$(_CTYPE[sig[i]])) for i in eachindex(sig)]
-    call = Expr(:call, Expr(:., :_LIBC, QuoteNode(_SNPRINTF)), Expr(:parameters, cargs...),
-                :(buf::Ptr{UInt8}), :(nb::Csize_t), :(fmt::Cstring))
-    @eval _c_snprintf(buf::Vector{UInt8}, nb::Int, fmt::String, $(targs...)) =
-        $(Expr(:macrocall, Symbol("@ccall"), LineNumberNode(@__LINE__, Symbol(@__FILE__)), Expr(:(::), call, :Cint)))
-end
-
-"`sprintf(fmt, args...)` über C-`snprintf` (Puffer wächst bei Bedarf; Windows: `_snprintf` liefert -1)."
-function _c_sprintf(fmt::String, args...)
-    nb = 128
-    for a in args
-        a isa String && (nb += ncodeunits(a))
-    end
-    while true
-        buf = Vector{UInt8}(undef, nb)
-        n = Int(_c_snprintf(buf, nb, fmt, args...))
-        0 <= n < nb && return String(resize!(buf, n))
-        nb = n >= 0 ? n + 1 : 2nb
-        nb > (1 << 26) && error("snprintf: Formatierung von \"$fmt\" fehlgeschlagen")
-    end
-end
+# C-snprintf (bis 1.5.2 _c_sprintf hier): seit 1.6.0 im C-Kern core/slc_rbase_fmt.cpp
 
 # ── Potenz wie R (R_POW / R_pow) ────────────────────────────────────────────
 
@@ -131,7 +100,7 @@ r_pow(x::Real, y::Real) = _rb_pow1(Float64(x), Float64(y))
 r_pow_vec(x, y::Real) = _rb_pow(_rbv(x), Float64(y))
 
 "`x %% 1` für Doubles wie R's `myfmod(x, 1)`."
-r_mod1(x::Float64) = _rb_fmod_ld(x, 1.0)   # C-Kern (core/slc_rbase_num.c)
+r_mod1(x::Float64) = _rb_fmod_ld(x, 1.0)   # C-Kern (core/slc_rbase_num.cpp)
 
 @inline function _r_nan2(a::Float64, b::Float64)
     isnan(a) && isna_strict(a) && return a      # NA schlägt NaN
@@ -186,7 +155,7 @@ function r_as_numeric(s::AbstractString)
     if startswith(strip(String(SubString(str, 1))), "NA") && strip(str) == "NA"
         return NA
     end
-    # Zahlteil (dezimal, hexadezimal) in long double über den C-Kern (core/slc_rbase_num.c)
+    # Zahlteil (dezimal, hexadezimal) in long double über den C-Kern (core/slc_rbase_num.cpp)
     v, used, gt = _rb_strtod_num(str, p)
     (used < 0 || !rest(p + used)) && return NA
     gt && return sign * Inf

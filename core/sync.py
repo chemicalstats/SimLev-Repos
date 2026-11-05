@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""core/sync.py – Kopien der C-Quellen abgleichen (bis 1.4.0 ``core_sync.py``).
+"""core/sync.py – Kopien der Kernquellen abgleichen (bis 1.4.0 ``core_sync.py``).
 
 Kanonisch sind die Dateien in ``core/`` (nur dort ändern). Die Pakete bauen nur aus ihrem
 Teilbaum und bekommen daher Byte-für-Byte-Kopien:
 
-* C-Bibliothek slc (``core/slc*.c``, ``core/slc*.h``) nach
+* Bibliothek slc (``core/slc*.cpp``, ``core/slc*.h``; seit 1.6.0 C++, bis 1.5.2 ``slc*.c``) nach
 
       r/src/             (flach; R übersetzt nur die oberste Ebene von src/)
       python/src/core/
@@ -15,16 +15,18 @@ Teilbaum und bekommen daher Byte-für-Byte-Kopien:
 * die C-ABI-Hülle der geteilten Kerne für Julia (``core/simlev_cabi.cpp``) nur nach
   ``julia/deps/core/``;
 * die Grundfunktionen mit R-Regeln (``core/slc_rbase*``) nur nach ``python/src/core/`` und
-  ``julia/deps/core/`` (R rechnet sie selbst); nur ``slc_rbase.c`` und ``slc_rbase.h`` auch nach
+  ``julia/deps/core/`` (R rechnet sie selbst); nur ``slc_rbase.cpp`` und ``slc_rbase.h`` auch nach
   ``r/src/`` (``sl_r_sum`` und ``sl_r_zeroin2`` für Tagesengine und Auswertung von ``simulation()``).
 
 Aufruf::
 
-    python3 core/sync.py --write   # kopieren (nur geänderte), veraltete slc*-Kopien entfernen
+    python3 core/sync.py --write   # kopieren (nur geänderte), veraltete slc*-Kopien entfernen (auch slc*.c bis 1.5.2)
     python3 core/sync.py --check   # SHA-256-Vergleich; Ende 1 bei Abweichung
 
 ``--check`` prüft zusätzlich, dass ``core/slc_constants.h`` dem Stand von
-``core/gen_constants.py`` entspricht. Nur Standardbibliothek.
+``core/gen_constants.py`` entspricht und (seit 1.6.0) die Meldungstabellen ``r/R/meldungen.R``,
+``python/simlev/_meldungen.py`` und ``julia/src/meldungen.jl`` dem Stand von ``core/meldungen.tsv``
+(``core/gen_meldungen.py --check``; ``--write`` schreibt sie). Nur Standardbibliothek.
 """
 from __future__ import annotations
 
@@ -48,14 +50,19 @@ OLD_SHARED = [os.path.join(ROOT, "python", "src")]
 
 
 def is_slc(f: str) -> bool:
-    return f.startswith("slc") and f.endswith((".c", ".h"))
+    return f.startswith("slc") and f.endswith((".cpp", ".h"))
+
+
+def is_old_c(f: str) -> bool:
+    """C-Quellen bis 1.5.2 (slc*.c): seit 1.6.0 C++ (slc*.cpp); im Ziel und in core/ veraltet."""
+    return f.startswith("slc") and f.endswith(".c")
 
 
 def is_rbase(f: str) -> bool:
     """Grundfunktionen mit R-Regeln (slc_rbase*) nur für Python und Julia; R rechnet sie selbst.
-    Ausnahme slc_rbase.c/.h (sl_r_sum für die Summen der Tagesengine, core/engine_core_impl.h)
+    Ausnahme slc_rbase.cpp/.h (sl_r_sum für die Summen der Tagesengine, core/engine_core_impl.h)
     gehen auch nach r/src/."""
-    return f.startswith("slc_rbase") and f not in ("slc_rbase.c", "slc_rbase.h")
+    return f.startswith("slc_rbase") and f not in ("slc_rbase.cpp", "slc_rbase.h")
 
 
 def is_shared(f: str) -> bool:
@@ -87,17 +94,16 @@ def sha(path: str) -> str:
 
 
 def stale(target: str, files: list[str]) -> list[str]:
-    """slc*-Dateien bzw. geteilte Kerne im Ziel, die es in core/ nicht gibt (Hüllen wie slc_r.c
-    ausgenommen)."""
+    """slc*-Dateien bzw. geteilte Kerne im Ziel, die es in core/ nicht gibt (Hüllen wie slc_r.cpp
+    ausgenommen), und C-Quellen slc*.c bis 1.5.2."""
     if not os.path.isdir(target):
         return []
-    keep = set(files) | {"slc_r.c"}
-    keep |= {"slc_r_linalg.c"}  # R-Hülle der linearen Algebra (nur in r/src/)
-
-    keep |= {"slc_r_opt.c"}   # R-Hülle der Optimierer (nur in r/src/)
-    keep |= {"slc_r_models.c"}   # R-Hülle der Modelle (nur in r/src/)
+    keep = set(files) | {"slc_r.cpp"}
+    keep |= {"slc_r_linalg.cpp"}  # R-Hülle der linearen Algebra (nur in r/src/)
+    keep |= {"slc_r_opt.cpp"}   # R-Hülle der Optimierer (nur in r/src/)
+    keep |= {"slc_r_models.cpp"}   # R-Hülle der Modelle (nur in r/src/)
     return sorted(f for f in os.listdir(target)
-                  if (is_slc(f) or is_shared(f) or is_cabi(f)) and f not in keep)
+                  if (is_slc(f) or is_old_c(f) or is_shared(f) or is_cabi(f)) and f not in keep)
 
 
 def main(argv=None) -> int:
@@ -114,6 +120,14 @@ def main(argv=None) -> int:
         if r.returncode != 0:
             print("core_sync: core/slc_constants.h ist nicht aktuell (gen_constants.py --check)")
             bad += 1
+    r = subprocess.run([sys.executable, os.path.join(CORE, "gen_meldungen.py")] + (["--check"] if a.check else []),
+                       capture_output=True, text=True)
+    if a.write and r.stdout:
+        print(r.stdout, end="")
+    if r.returncode != 0:
+        print("core_sync: Meldungstabellen nicht aktuell (core/gen_meldungen.py; aus core/meldungen.tsv)")
+        print(r.stdout + r.stderr, end="")
+        bad += 1
     n = 0
     for t in TARGETS:
         rel = os.path.relpath(t, ROOT)

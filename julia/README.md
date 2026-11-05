@@ -29,10 +29,10 @@ Quellen der Verfahren in [`LITERATUR.md`](../LITERATUR.md).
 
 ## Installation
 
-Julia ≥ 1.10 und ein C- und C++-Compiler: `Pkg.add` bzw. `Pkg.build`
-führt `deps/build.jl` aus, das die Bibliothek von SimLev (Quellen in
-`deps/core/`) übersetzt; andere Compiler wählen `ENV["SIMLEV_CC"]` und
-`ENV["SIMLEV_CXX"]`. Ohne die Bibliothek bricht `using SimLev` mit einem
+Julia ≥ 1.10 und ein C++-Compiler (seit 1.6.0 genügt er; bis 1.5.2 auch ein
+C-Compiler): `Pkg.add` bzw. `Pkg.build` führt `deps/build.jl` aus, das die
+Bibliothek von SimLev (Quellen in `deps/core/`) übersetzt; einen anderen
+Compiler wählt `ENV["SIMLEV_CXX"]`. Ohne die Bibliothek bricht `using SimLev` mit einem
 Hinweis auf `Pkg.build` ab.
 
 <!-- beispiele: nicht ausführen -->

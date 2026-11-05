@@ -8,7 +8,7 @@
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet der C-Kern
-#                     core/slc_rbase_date.c.
+#                     core/slc_rbase_date.cpp.
 """R-kompatible Textausgabe und Rundung (Engine).
 
 Gegenstück zu ``julia/src/r/rformat.jl``. Nachbildungen von R-Funktionen,
@@ -16,9 +16,13 @@ deren Ergebnis in Ausgaben oder Rechnungen sichtbar wird: ``round()``
 (``nmath/fround.c``), ``signif()`` (``fprec.c``),
 ``format()``/``as.character()``/``deparse()`` für Zahlen
 (``formatReal``/``scientific`` aus ``main/format.c``) und ``sprintf()`` mit
-R-Verhalten für ``NA``/``NaN``/``Inf``. Baut nur auf :mod:`simlev._r.rnum`
-auf; die volle Formatierung (``format``, ``formatC``, ``print``) steht in
-:mod:`simlev._r.fmt`.
+R-Verhalten für ``NA``/``NaN``/``Inf``. Seit 1.5.2 eine dünne Hülle: Rundung
+(``fround``, ``fprec``) und ``formatReal``/``encodeReal`` rechnet
+:mod:`simlev._r.fmt` (bis 1.5.1 eine zweite Nachbildung hier); dort steht auch
+die volle Formatierung (``format``, ``formatC``, ``print``). ``r_sprintf`` ist
+seit 1.6.0 nur noch der skalare Zugang (``None`` = NA) zum selben C-Kern
+``sl_r_sprintf`` wie :func:`simlev._r.fmt.sprintf` (bis 1.5.2 eine zweite
+Nachbildung mit Python-Formaten).
 """
 from __future__ import annotations
 
@@ -29,246 +33,39 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from .. import _ext
-from .rnum import NA_REAL, r_isna, r_pow
+from . import fmt as _fmt
+from .. import _ext   # C-Kern sl_r_sprintf (core/slc_rbase_fmt.cpp, seit 1.6.0)
+from .rnum import NA_REAL, r_isna
 
 __all__ = ["r_round", "r_signif", "r_format", "r_format1", "r_as_character", "r_deparse", "r_sprintf"]
 
 
-def _ffloor(x: float) -> float:
-    return float(np.floor(x))
-
-
-def _fceil(x: float) -> float:
-    return float(np.ceil(x))
-
-
-def _r_pow_di(x: float, n: int) -> float:
-    """``R_pow_di``: x hoch ganzzahliges n durch wiederholtes Quadrieren."""
-    xn = 1.0
-    if math.isnan(x):
-        return x
-    if n != 0:
-        if not math.isfinite(x):
-            return r_pow(x, float(n))
-        neg = n < 0
-        if neg:
-            n = -n
-        while True:
-            if n & 1:
-                xn *= x
-            n >>= 1
-            if n:
-                x *= x
-            else:
-                break
-        if neg:
-            xn = 1.0 / xn
-    return xn
-
-
-_M_LOG10_2 = 0.301029995663981195213738894724
-
-
 def r_round(x: float, digits: float = 0.0) -> float:
-    """``round(x, digits)`` wie R >= 4.0.0 (``nmath/fround.c``)."""
-    x = float(x)
-    digits = float(digits)
-    max10e = 308
-    if math.isnan(x) or math.isnan(digits):
-        return x + digits
-    if not math.isfinite(x):
-        return x
-    if digits > 308 + 15 or x == 0.0:
-        return x
-    if digits < -max10e:
-        return 0.0
-    if digits == 0.0:
-        return float(np.rint(x))
-    dig = int(_ffloor(digits + 0.5))
-    sgn = 1.0
-    if x < 0.0:
-        sgn = -1.0
-        x = -x
-    logb = math.frexp(x)[1] - 1
-    l10x = _M_LOG10_2 * (0.5 + logb)
-    if l10x + dig > 15:
-        return sgn * x
-    if dig <= max10e:
-        pow10 = _r_pow_di(10.0, dig)
-        x10 = x * pow10
-        i10 = _ffloor(x10)
-        xd = i10 / pow10
-        xu = _fceil(x10) / pow10
-    else:
-        e10 = dig - max10e
-        p10 = _r_pow_di(10.0, e10)
-        pow10 = _r_pow_di(10.0, max10e)
-        x10 = (x * pow10) * p10
-        i10 = _ffloor(x10)
-        xd = i10 / pow10 / p10
-        xu = _fceil(x10) / pow10 / p10
-    du = xu - x
-    dd = x - xd
-    return sgn * (xu if (du < dd or (math.fmod(i10, 2.0) == 1 and du == dd)) else xd)
+    """``round(x, digits)`` wie R >= 4.0.0 (``nmath/fround.c``; Rechnung :func:`simlev._r.fmt.fround`)."""
+    return _fmt.fround(float(x), float(digits))
 
 
 def r_signif(x: float, digits: float = 6) -> float:
-    """``signif(x, digits)`` wie R (``nmath/fprec.c``)."""
-    x = float(x)
-    max10e = 308
-    if math.isnan(x) or math.isnan(digits):
-        return x + digits
-    if not math.isfinite(x):
-        return x
-    if not math.isfinite(digits):
-        if digits > 0:
-            return x
-        digits = 1.0
-    if x == 0:
-        return x
-    dig = int(round(digits))
-    if dig > 22:
-        return x
-    if dig < 1:
-        dig = 1
-    sgn = 1.0
-    if x < 0.0:
-        sgn = -sgn
-        x = -x
-    l10 = math.log10(x)
-    e10 = int(dig - 1 - _ffloor(l10))
-    if abs(l10) < max10e - 2:
-        p10 = 1.0
-        if e10 > max10e:
-            p10 = _r_pow_di(10.0, e10 - max10e)
-            e10 = max10e
-        if e10 > 0:
-            pow10 = _r_pow_di(10.0, e10)
-            return sgn * (float(np.rint((x * pow10) * p10)) / pow10) / p10
-        pow10 = _r_pow_di(10.0, -e10)
-        return sgn * (float(np.rint(x / pow10)) * pow10)
-    do_round = max10e - l10 >= _r_pow_di(10.0, -dig)
-    e2 = dig + (1 if e10 > 0 else -1) * 22
-    p10 = _r_pow_di(10.0, e2)
-    x *= p10
-    P10 = _r_pow_di(10.0, e10 - e2)
-    x *= P10
-    if do_round:
-        x += 0.5
-    x = _ffloor(x) / p10
-    return sgn * x / P10
+    """``signif(x, digits)`` wie R (``nmath/fprec.c``; Rechnung :func:`simlev._r.fmt.fprec`, ``digits`` wie R
+    mit C-``round()``)."""
+    return _fmt.fprec(float(x), digits)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Zahlenformatierung wie R (format.c, printutils.c)
+# Zahlenformatierung wie R (format.c, printutils.c): formatReal/encodeReal aus simlev._r.fmt
 # ═══════════════════════════════════════════════════════════════════════════
-
-_KP_MAX = 27
-
-
-def _scientific(x: float, digits: int):
-    """``scientific()`` aus R's format.c: (neg, kpower, nsig, roundingwidens).
-
-    für digits <= 15 im C-Kern ``sl_r_scientific`` (core/slc_rbase_num.c, long double wie R; dieselbe
-    Rechnung wie :func:`simlev._r.fmt._scientific` und Julia)."""
-    if x == 0.0:
-        return 0, 0, 1, False
-    if x < 0.0:
-        neg, r = 1, -x
-    else:
-        neg, r = 0, x
-    if digits >= 16:
-        s = "%#.*e" % (digits - 1, r)
-        mant, ex = s.split("e")
-        kpower = int(ex)
-        digs = mant.replace(".", "")
-        i = digits
-        while i >= 2 and digs[i - 1] == "0":
-            i -= 1
-        return neg, kpower, i, False
-    kpower, nsig, rw = _ext.slc_r_scientific(r, digits)
-    return neg, kpower, nsig, rw
-
 
 def _format_real(xs: Sequence[float], digits: int = 7, nsmall: int = 0, scipen: int = 0):
     """``formatReal()``: gemeinsame Breite w, Nachkommastellen d, Exponentformat e."""
-    naflag = nanflag = posinf = neginf = False
-    neg = 0
-    mnl = 10 ** 9
-    mxl = rgt = mxsl = mxns = -10 ** 9
-    for x in xs:
-        if not math.isfinite(x):
-            if math.isnan(x):
-                if r_isna(x):
-                    naflag = True
-                else:
-                    nanflag = True
-            elif x > 0:
-                posinf = True
-            else:
-                neginf = True
-            continue
-        neg_i, kpower, nsig, rw = _scientific(x, digits)
-        left = kpower + 1
-        if rw:
-            left -= 1
-        sleft = neg_i + (1 if left <= 0 else left)
-        right = nsig - left
-        if neg_i:
-            neg = 1
-        rgt = max(rgt, right)
-        mxl = max(mxl, left)
-        mnl = min(mnl, left)
-        mxsl = max(mxsl, sleft)
-        mxns = max(mxns, nsig)
-    if digits == 0:
-        rgt = 0
-    if mxl < 0:
-        mxsl = 1 + neg
-    if rgt < 0:
-        rgt = 0
-    wF = mxsl + rgt + (1 if rgt != 0 else 0)
-    e = 2 if (mxl > 100 or mnl <= -99) else 1
-    if mxns != -10 ** 9:
-        d = mxns - 1
-        w = neg + (1 if d > 0 else 0) + d + 4 + e
-        if wF <= w + scipen:
-            e = 0
-            if nsmall > rgt:
-                rgt = nsmall
-                wF = mxsl + rgt + (1 if rgt != 0 else 0)
-            d = rgt
-            w = wF
-    else:
-        w = d = e = 0
-    if naflag and w < 2:
-        w = 2
-    if nanflag and w < 3:
-        w = 3
-    if posinf and w < 3:
-        w = 3
-    if neginf and w < 4:
-        w = 4
-    return w, d, e
+    x = np.asarray(xs, dtype=np.float64)
+    nan = _fmt._nan_mask(x)
+    return _fmt._format_real(x, np.isnan(x) & ~nan, nan, digits, nsmall, scipen)
 
 
-def _encode_real(x: float, w: int, d: int, e: int, na: str = "NA", drop0: bool = False) -> str:
-    if x == 0.0:
-        x = 0.0
-    if not math.isfinite(x):
-        s = (na if r_isna(x) else "NaN") if math.isnan(x) else ("Inf" if x > 0 else "-Inf")
-        return s.rjust(w)
-    if e:
-        s = ("%#*.*e" % (w, d, x)) if d else ("%*.*e" % (w, d, x))
-    else:
-        s = "%*.*f" % (w, d, x)
-    if drop0 and "." in s:
-        m = re.match(r"^(.*?\.)(\d*)(.*)$", s)
-        head, digs, tail = m.group(1), m.group(2), m.group(3)
-        digs = digs.rstrip("0")
-        s = (head + digs if digs else head[:-1]) + tail
-    return s
+def _encode_real(x: float, w: int, d: int, e: int, drop0: bool = False) -> str:
+    na = r_isna(x)
+    s = _fmt._encode_real(x, w, d, e, ".", na, x != x and not na)
+    return _fmt._drop0(s) if drop0 and math.isfinite(x) else s
 
 
 def _insert_big_mark(s: str, mark: str) -> str:
@@ -398,65 +195,35 @@ def r_deparse(x: Any) -> str:
     return one(x, True)
 
 
-_SPEC = re.compile(r"%(?P<flags>[-+ #0]*)(?P<width>\*|\d+)?(?:\.(?P<prec>\*|\d+))?(?P<conv>[diouxXeEfFgGaAcs%])")
+_NA_INT = -2147483648
+
+
+def _sp_scalar(v: Any):
+    """Skalares Argument für den C-Kern ``sl_r_sprintf``: (Typ, Wert, Texte)."""
+    if v is None:
+        return (0, _NA_INT, None)
+    if isinstance(v, (bool, np.bool_)):
+        return (0, int(v), None)
+    if isinstance(v, (int, np.integer)):
+        return (1, int(v), None) if abs(int(v)) < 2 ** 31 else (2, float(v), None)
+    if isinstance(v, (float, np.floating)):
+        return (2, float(v), None)
+    if isinstance(v, str):
+        return (3, None, [v])
+    if isinstance(v, (_dt.date, np.datetime64)):
+        s = _as_str(v)
+        return (5, float((_dt.date.fromisoformat(s) - _dt.date(1970, 1, 1)).days), [s])
+    return (3, None, [str(v)])
 
 
 def r_sprintf(fmt: str, *args: Any) -> str:
-    """``sprintf(fmt, ...)`` mit R-Verhalten für Skalare.
-
-    Zahlen werden wie in R behandelt: ``NA``/``NaN``/``Inf`` in Gleitkomma-Formaten
-    als Text (gleiche Breite), ganze Doubles in ``%d``, Zahlen in ``%s`` über
-    ``as.character()``; Datumswerte in ``%s`` als JJJJ-MM-TT.
-    """
-    out = []
-    pos = 0
-    ai = 0
-    for m in _SPEC.finditer(fmt):
-        out.append(fmt[pos:m.start()])
-        pos = m.end()
-        conv = m.group("conv")
-        if conv == "%":
-            out.append("%")
-            continue
-        flags = m.group("flags") or ""
-        width = m.group("width")
-        prec = m.group("prec")
-        if width == "*":
-            width = str(int(args[ai]))
-            ai += 1
-        if prec == "*":
-            prec = str(int(args[ai]))
-            ai += 1
-        v = args[ai]
-        ai += 1
-        spec = "%" + flags + (width or "") + ("." + prec if prec is not None else "")
-        if conv in "eEfFgGaA":
-            if v is None or (_is_num(v) and not math.isfinite(float(v))):
-                if v is None or math.isnan(float(v)):
-                    s = "NA" if (v is None or r_isna(float(v))) else "NaN"
-                    s = " " + s if " " in flags else s
-                elif float(v) > 0:
-                    s = "+Inf" if "+" in flags else (" Inf" if " " in flags else "Inf")
-                else:
-                    s = "-Inf"
-                out.append(("%" + flags.replace("0", "").replace("+", "").replace(" ", "")
-                            + (width or "") + "s") % s)
-            else:
-                out.append((spec + conv) % float(v))
-        elif conv in "dioxX":
-            if v is None or (isinstance(v, float) and math.isnan(v)):
-                out.append(("%" + flags.replace("0", "") + (width or "") + "s") % "NA")
-            elif isinstance(v, (bool, np.bool_)):
-                out.append((spec + conv) % int(v))
-            else:
-                fv = float(v)
-                if fv != int(fv):
-                    raise ValueError("invalid format '%s'; use format %%f, %%e, %%g or %%a for numeric objects"
-                                     % (spec + conv))
-                out.append((spec + conv) % int(fv))
-        elif conv == "s":
-            out.append((spec + "s") % _as_str(v))
-        else:
-            out.append((spec + conv) % v)
-    out.append(fmt[pos:])
-    return "".join(out)
+    """``sprintf(fmt, ...)`` für Skalare (``None`` = NA): schneller Weg zum C-Kern ``sl_r_sprintf`` (seit 1.6.0 dieselbe
+    Rechnung wie :func:`simlev._r.fmt.sprintf`, ohne Umwandlung in Vektoren)."""
+    try:
+        res, nunused = _ext.slc_r_sprintf([fmt], [_sp_scalar(a) for a in args], int(_fmt._OPT["scipen"]),
+                                          _fmt._OPT["OutDec"])
+    except ValueError as e:
+        raise ValueError(str(e)) from None
+    if nunused:
+        _fmt._sprintf_warn(nunused, 1, fmt)
+    return res[0]

@@ -1,4 +1,4 @@
-# Vergleich des Datumskerns core/slc_rbase_date.c (über libslc) mit R (date_fuzz.R).
+# Vergleich des Datumskerns core/slc_rbase_date.cpp (über libslc) mit R (date_fuzz.R).
 #   julia --project=julia tests/werkzeuge/gleichlauf/date_fuzz_cmp.jl <ordner>
 # Wie date_fuzz_cmp.py: fmt.tsv, fmt_sys.tsv (seit 1.3.0 Prüfziel), fmt_os.tsv (digits.secs, seit 1.3.0), parse.tsv;
 # Ende 1 bei Abweichung.

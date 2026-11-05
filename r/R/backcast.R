@@ -229,7 +229,7 @@
   list(level = e_lvl, ret = e_ret)
 }
 
-#' Daten der Zielfunktion fuer die C-Bibliothek (.sl_backcast_fit, slc_backcast.c)
+#' Daten der Zielfunktion fuer die C-Bibliothek (.sl_backcast_fit, slc_backcast.cpp)
 #'
 #' Zeilen \code{rows} des Fit-Fensters: im Strukturmodell x, fin und ter_cost (r = beta L x + fin -
 #' ter_cost - ...), sonst die Basis der Regression als c1 (wie .bc_model_returns ohne spread und drag).

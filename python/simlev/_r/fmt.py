@@ -8,7 +8,9 @@
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet der C-Kern
-#                     core/slc_rbase_date.c.
+#                     core/slc_rbase_date.cpp; seit 1.6.0 round/signif, formatReal/encodeReal,
+#                     as.character für Zahlen, formatC (str_signif) und sprintf der C-Kern
+#                     core/slc_rbase_fmt.cpp (eine Fassung für Python und Julia).
 """Formatierung und Druckausgabe wie R 4.3.3.
 
 Zeichengenaue Nachbildung von R's ``format``, ``formatC``, ``prettyNum``,
@@ -440,134 +442,18 @@ def _out(strs, v, na_none=True):
 
 # ── Zahlen: round / signif ─────────────────────────────────────────────────
 
-_M_LOG10_2 = 0.301029995663981195213738894724
 _DBL_DIG = 15
 _MAX10E = 308
 
 
-def _pow_di(x, n):
-    """R_pow_di: x^n durch wiederholtes Quadrieren (double)."""
-    xn = 1.0
-    if x != x:
-        return x
-    if n != 0:
-        if not math.isfinite(x):
-            return math.pow(x, float(n))
-        neg = n < 0
-        if neg:
-            n = -n
-        while True:
-            if n & 1:
-                xn *= x
-            n >>= 1
-            if n:
-                x *= x
-            else:
-                break
-        if neg:
-            xn = 1.0 / xn
-    return xn
-
-
-def _nearbyint(x):
-    # Python round() auf float: Runden auf gerade Zahl, exakt wie nearbyint
-    r = float(round(x))
-    if r == 0.0:
-        return math.copysign(0.0, x)
-    return r
-
-
-def _logb(x):
-    m, e = math.frexp(x)
-    return float(e - 1)
-
-
 def fround(x, digits):
-    """R's ``fround`` (R >= 4.0.0) für ein double ``x``."""
-    max_digits = 308 + 15
-    if x != x or digits != digits:
-        return x + digits
-    if not math.isfinite(x):
-        return x
-    if digits > max_digits or x == 0.0:
-        return x
-    if digits < -_MAX10E:
-        return 0.0
-    if digits == 0.0:
-        return _nearbyint(x)
-    dig = int(math.floor(digits + 0.5))
-    sgn = 1.0
-    if x < 0.0:
-        sgn = -1.0
-        x = -x
-    l10x = _M_LOG10_2 * (0.5 + _logb(x))
-    if l10x + dig > _DBL_DIG:
-        return sgn * x
-    if dig <= _MAX10E:
-        pow10 = _pow_di(10.0, dig)
-        x10 = x * pow10
-        i10 = math.floor(x10)
-        xd = i10 / pow10
-        xu = math.ceil(x10) / pow10
-    else:
-        e10 = dig - _MAX10E
-        p10 = _pow_di(10.0, e10)
-        pow10 = _pow_di(10.0, _MAX10E)
-        x10 = (x * pow10) * p10
-        i10 = math.floor(x10)
-        xd = i10 / pow10 / p10
-        xu = math.ceil(x10) / pow10 / p10
-    du = xu - x
-    dd = x - xd
-    return sgn * (xu if (du < dd or (math.fmod(i10, 2.0) == 1 and du == dd)) else xd)
+    """R's ``fround`` (R >= 4.0.0) für ein double ``x`` (C-Kern ``sl_r_fround``, seit 1.6.0)."""
+    return _ext.slc_r_fround(float(x), float(digits))
 
 
 def fprec(x, digits):
-    """R's ``fprec`` (signif) für ein double ``x``."""
-    max_digits = 22
-    if x != x or digits != digits:
-        return x + digits
-    if not math.isfinite(x):
-        return x
-    if not math.isfinite(digits):
-        if digits > 0.0:
-            return x
-        digits = 1.0
-    if x == 0:
-        return x
-    dig = int(math.floor(abs(digits) + 0.5)) * (1 if digits >= 0 else -1)  # C round()
-    if dig > max_digits:
-        return x
-    elif dig < 1:
-        dig = 1
-    sgn = 1.0
-    if x < 0.0:
-        sgn = -sgn
-        x = -x
-    l10 = math.log10(x)
-    e10 = int(dig - 1 - math.floor(l10))
-    if abs(l10) < _MAX10E - 2:
-        p10 = 1.0
-        if e10 > _MAX10E:
-            p10 = _pow_di(10.0, e10 - _MAX10E)
-            e10 = _MAX10E
-        if e10 > 0:
-            pow10 = _pow_di(10.0, e10)
-            return sgn * (_nearbyint((x * pow10) * p10) / pow10) / p10
-        else:
-            pow10 = _pow_di(10.0, -e10)
-            return sgn * (_nearbyint(x / pow10) * pow10)
-    else:
-        do_round = _MAX10E - l10 >= _pow_di(10.0, -dig)
-        e2 = dig + (1 if e10 > 0 else -1) * max_digits
-        p10 = _pow_di(10.0, e2)
-        x *= p10
-        P10 = _pow_di(10.0, e10 - e2)
-        x *= P10
-        if do_round:
-            x += 0.5
-        x = math.floor(x) / p10
-        return sgn * x / P10
+    """R's ``fprec`` (signif) für ein double ``x`` (C-Kern ``sl_r_fprec``, seit 1.6.0)."""
+    return _ext.slc_r_fprec(float(x), float(digits))
 
 
 def _math2(f, x, digits):
@@ -584,17 +470,15 @@ def _math2(f, x, digits):
     a = np.asarray(x)
     if a.dtype.kind in "iu" and f is fround:
         return a.copy()
-    a = a.astype(np.float64)
-    flat = a.ravel().tolist()
-    d = np.asarray(digits, dtype=np.float64).ravel().tolist()
-    if len(d) == 1:
-        dd = float(d[0])
-        out = [f(v, dd) for v in flat]
-    else:
-        n = max(len(flat), len(d))
-        out = [f(flat[i % len(flat)], d[i % len(d)]) for i in range(n)]
-        return np.array(out, np.float64)
-    return np.array(out, np.float64).reshape(a.shape)
+    a = np.ascontiguousarray(a, dtype=np.float64)
+    d = np.ascontiguousarray(np.asarray(digits, dtype=np.float64).ravel())
+    flat = a.ravel()
+    n = max(flat.size, d.size) if flat.size and d.size else 0
+    out = np.empty(n)
+    _ext.slc_r_round(1 if f is fprec else 0, flat, d, out)   # C-Kern sl_r_round_vec (seit 1.6.0)
+    if d.size == 1:
+        return out.reshape(a.shape)
+    return out
 
 
 def r_round(x, digits=0):
@@ -611,130 +495,22 @@ def signif(x, digits=6):
 
 # ── formatReal / scientific ────────────────────────────────────────────────
 
-def _scientific(r, digits):
-    """``scientific()`` aus format.c, vektorisiert für |x| > 0 (endlich).
-
-    r: float64-Array (Beträge, > 0). Liefert (kpower, nsig, roundingwidens). für digits <= 15 im
-    C-Kern ``sl_r_scientific`` (core/slc_rbase_num.c, long double wie R; wie Julia)."""
-    n = len(r)
-    if n == 0:
-        z = np.zeros(0, np.int64)
-        return z, z, np.zeros(0, bool)
-    if digits >= _DBL_DIG + 1:
-        kpw = np.empty(n, np.int64)
-        nsg = np.empty(n, np.int64)
-        for i, ri in enumerate(r.tolist()):
-            buff = "%#.*e" % (digits - 1, ri)
-            kpw[i] = int(buff[digits + 2:])
-            j = digits
-            while j >= 2:
-                if buff[j] != "0":
-                    break
-                j -= 1
-            nsg[i] = j
-        return kpw, nsg, np.zeros(n, bool)
-    kpower = np.empty(n, np.int64)
-    nsig = np.empty(n, np.int64)
-    rw = np.empty(n, np.int64)
-    _ext.slc_r_scientific_vec(np.ascontiguousarray(r, dtype=np.float64), int(digits), kpower, nsig, rw)
-    return kpower, nsig, rw.astype(bool)
-
-
 def _format_real(x, na, nan, digits=None, nsmall=0, scipen=None):
-    """``formatReal``: (w, d, e) für das float-Array ``x``.
+    """``formatReal``: (w, d, e) für das float-Array ``x`` (C-Kern ``sl_r_format_real``, seit 1.6.0).
 
-    na/nan: Masken für NA bzw. NaN (beide sind in ``x`` nan)."""
+    na: Maske der NA (in ``x`` nan); nan bleibt für die Aufrufer (jedes andere nan ist NaN)."""
     if digits is None:
         digits = _OPT["digits"]
     if scipen is None:
         scipen = _OPT["scipen"]
-    x = np.asarray(x, dtype=np.float64)
-    fin = np.isfinite(x)
-    naflag = bool((na & ~fin).any()) if len(x) else False
-    nanflag = bool((~na & np.isnan(x)).any()) if len(x) else False
-    posinf = bool((x == math.inf).any())
-    neginf = bool((x == -math.inf).any())
-    xf = x[fin]
-    neg = 0
-    if len(xf):
-        r = np.abs(xf)
-        nz = r != 0.0
-        kpower = np.zeros(len(xf), np.int64)
-        nsig = np.ones(len(xf), np.int64)
-        rw = np.zeros(len(xf), bool)
-        negi = (xf < 0).astype(np.int64)
-        if nz.any():
-            kp_, ns_, rw_ = _scientific(r[nz], digits)
-            kpower[nz] = kp_
-            nsig[nz] = ns_
-            rw[nz] = rw_
-        left = kpower + 1
-        left = left - rw.astype(np.int64)
-        sleft = negi + np.where(left <= 0, 1, left)
-        right = nsig - left
-        if negi.any():
-            neg = 1
-        rgt = int(right.max())
-        mxl = int(left.max())
-        mnl = int(left.min())
-        mxsl = int(sleft.max())
-        mxns = int(nsig.max())
-    else:
-        rgt = mxl = mxsl = mxns = None
-        mnl = None
-    if mxns is not None:
-        if digits == 0:
-            rgt = 0
-        if mxl < 0:
-            mxsl = 1 + neg
-        if rgt < 0:
-            rgt = 0
-        wF = mxsl + rgt + (rgt != 0)
-        e = 2 if (mxl > 100 or mnl <= -99) else 1
-        d = mxns - 1
-        w = neg + (d > 0) + d + 4 + e
-        if wF <= w + scipen:
-            e = 0
-            if nsmall > rgt:
-                rgt = nsmall
-                wF = mxsl + rgt + (rgt != 0)
-            d = rgt
-            w = wF
-    else:
-        w = d = e = 0
-    if naflag and w < 2:
-        w = 2
-    if nanflag and w < 3:
-        w = 3
-    if posinf and w < 3:
-        w = 3
-    if neginf and w < 4:
-        w = 4
-    return w, d, e
+    x = np.ascontiguousarray(x, dtype=np.float64)
+    return _ext.slc_r_format_real(x, np.ascontiguousarray(na, dtype=np.uint8), int(digits), int(nsmall), int(scipen))
 
 
 def _encode_real(x, w, d, e, dec=".", na=False, nan=False, na_string="NA"):
-    """``EncodeReal0`` für ein double."""
-    if not math.isfinite(x):
-        if x != x:
-            s = "NaN" if (nan and not na) else na_string
-        elif x > 0:
-            s = "Inf"
-        else:
-            s = "-Inf"
-        return s.rjust(w)
-    if x == 0.0:
-        x = 0.0
-    if e:
-        if d:
-            s = "%#*.*e" % (w, d, x)
-        else:
-            s = "%*.*e" % (w, d, x)
-    else:
-        s = "%*.*f" % (w, d, x)
-    if dec != ".":
-        s = s.replace(".", dec)
-    return s
+    """``EncodeReal0`` für ein double (C-Kern ``sl_r_encode_real``, seit 1.6.0); nan ohne Kennung ``nan`` gilt als NA."""
+    m = np.array([bool(na) or not nan], dtype=np.uint8)
+    return _ext.slc_r_encode_real(np.array([x], dtype=np.float64), m, int(w), int(d), int(e), dec, na_string, False)[0]
 
 
 def _drop0(s):
@@ -752,10 +528,9 @@ def _drop0(s):
 
 
 def _encode_reals(v, w, d, e, dec="."):
-    xs = v.v.tolist()
-    na = v.na.tolist()
-    nan = v.nan.tolist()
-    return [_encode_real(xs[i], w, d, e, dec, na[i], nan[i]) for i in range(len(xs))]
+    m = np.ascontiguousarray(v.na | ~v.nan, dtype=np.uint8)
+    return _ext.slc_r_encode_real(np.ascontiguousarray(v.v, dtype=np.float64), m, int(w), int(d), int(e), dec, "NA",
+                                  False)
 
 
 def _index_width(n):
@@ -949,11 +724,10 @@ def nchar(x, type="chars"):
 # ── as.character / paste ───────────────────────────────────────────────────
 
 def _real_to_str(x, na=False, nan=False):
-    """``StringFromReal`` mit 15 Stellen (as.character für double)."""
+    """``StringFromReal`` mit 15 Stellen (as.character für double; C-Kern, seit 1.6.0)."""
     if x != x:
         return None if (na or not nan) else "NaN"
-    w, d, e = _format_real(np.array([x]), np.array([False]), np.array([False]), digits=15)
-    return _drop0(_encode_real(x, w, d, e, _OPT["OutDec"]))
+    return _ext.slc_r_as_character_real(np.array([x], dtype=np.float64), int(_OPT["scipen"]), _OPT["OutDec"])[0]
 
 
 def _as_character_list(v):
@@ -961,8 +735,9 @@ def _as_character_list(v):
     if t == "character":
         return list(v.v)
     if t == "double":
-        xs = v.v.tolist()
-        return [None if v.na[i] else _real_to_str(xs[i], False, bool(v.nan[i])) for i in range(len(xs))]
+        r = _ext.slc_r_as_character_real(np.ascontiguousarray(v.v, dtype=np.float64), int(_OPT["scipen"]), _OPT["OutDec"])
+        bad = (v.na | ~v.nan) & np.isnan(np.asarray(v.v, dtype=np.float64))
+        return [None if bad[i] else r[i] for i in range(len(r))]
     if t == "integer":
         return [None if v.na[i] else "%d" % int(v.v[i]) for i in range(len(v))]
     if t == "logical":
@@ -1439,187 +1214,53 @@ def formatC(x, width=None, digits=None, format=None, flag="", mode=None, big_mar
     return _out(r, v)
 
 
-def _fl_w(flag, width):
-    # negative Feldbreite über '*' wirkt in C wie das Flag '-'
-    return flag + "-" if width < 0 else flag
-
-
 def _str_signif(vals, type, width, digits, format, flag, istrlen):
-    """``str_signif`` aus util.c."""
-    dig = abs(digits)
-    rm_trailing_0 = digits >= 0
-    do_fg = format == "fg"
-    if width == 0:
-        raise ValueError("width cannot be zero")
-    out = []
-    if format == "d":
-        if type != "integer":
-            raise ValueError("'type' must be \"integer\" for  \"d\"-format")
-        for i, xv in enumerate(vals):
-            out.append(_c_printf(_fl_w(flag, width), abs(width), None, "d", int(xv))[:istrlen[i] + 2])
-        return out
-    conv = "g" if do_fg else format
-    for i, xx in enumerate(vals):
-        lim = istrlen[i] + 2
-        if do_fg:
-            if xx == 0.0:
-                out.append("0")
-                continue
-            xxx = abs(xx)
-            iex = int(math.floor(math.log10(xxx) + 1e-12))
-            X = fround(xxx / math.pow(10.0, float(iex)) + 1e-12, float(dig - 1))
-            if iex > 0 and X >= 10:
-                xx = X * math.pow(10.0, float(iex))
-                iex += 1
-            if iex == -4 and abs(xx) < 1e-4:
-                iex = -5
-            if iex < -4:
-                s = _c_printf(flag, 0, dig - 1 + -iex, "f", xx)[:lim]
-                if rm_trailing_0:
-                    j = len(s) - 1
-                    while j >= 0 and s[j] == "0":
-                        j -= 1
-                    s = s[:j + 1]
-                out.append(s)
-            else:
-                out.append(_c_printf(_fl_w(flag, width), abs(width), (iex + 1) if iex >= dig else dig,
-                                     "g", xx)[:lim])
-        else:
-            out.append(_c_printf(_fl_w(flag, width), abs(width), dig, conv, xx)[:lim])
-    return out
+    """``str_signif`` aus util.c (C-Kern ``sl_r_str_signif`` über snprintf, seit 1.6.0)."""
+    try:
+        return _ext.slc_r_str_signif(np.ascontiguousarray(vals, dtype=np.float64), type == "integer", int(width),
+                                     int(digits), format, flag, np.ascontiguousarray(istrlen, dtype=np.int64))
+    except ValueError as e:
+        raise ValueError(str(e)) from None
 
 
 # ── sprintf ────────────────────────────────────────────────────────────────
 
-_CONV = "diosfeEgGxXaA"
+_SP_TYPE = {"logical": 0, "integer": 1, "double": 2, "character": 3, "factor": 4, "Date": 5}
+_NA_INT = -2147483648
 
 
-def _hexfloat(x, prec, upper, flags, width):
-    """C-``%a`` (glibc)."""
-    if x != x or math.isinf(x):
-        s = "nan" if x != x else "inf"
-        sign = "-" if math.copysign(1.0, x) < 0 else ("+" if "+" in flags else (" " if " " in flags else ""))
-        s = sign + s
+def _sp_arg(v):
+    """Argument von sprintf für den C-Kern: (Typ, Daten, Texte)."""
+    t = v.type
+    if t == "character":
+        return (3, None, list(v.v))
+    if t in ("double", "Date"):
+        x = np.array(v.v, dtype=np.float64)
+        x[v.na] = NA_REAL
+        return (_SP_TYPE[t], x, _format_date_list(v.v, ["%Y-%m-%d"]) if t == "Date" else None)
+    if t == "factor":
+        c = np.asarray(v.v, dtype=np.int64)
+        iv = np.where(c < 0, _NA_INT, c + 1).astype(np.int32)
+        return (4, iv, [None if q < 0 else v.levels[int(q)] for q in c.tolist()])
+    if t in ("integer", "logical"):
+        iv = np.asarray(v.v, dtype=np.int64)
+        iv = np.where(v.na, _NA_INT, iv).astype(np.int32)
+        return (_SP_TYPE[t], iv, None)
+    if t == "NULL":
+        return (2, np.zeros(0), None)
+    raise ValueError("unsupported type")
+
+
+def _sprintf_warn(nunused, nfmt, f0):
+    import warnings
+    if nfmt == 1:
+        f0 = "NA" if f0 is None else f0
+        if nunused == 1:
+            warnings.warn("one argument not used by format '%s'" % f0)
+        else:
+            warnings.warn("%d arguments not used by format '%s'" % (nunused, f0))
     else:
-        sign = "-" if math.copysign(1.0, x) < 0 else ("+" if "+" in flags else (" " if " " in flags else ""))
-        a = abs(x)
-        if a == 0.0:
-            lead, mant, exp = 0, 0, 0
-        else:
-            m, e = math.frexp(a)  # a = m * 2^e, m in [0.5, 1)
-            if e < -1021:  # subnormal
-                lead = 0
-                mant = int(a / 2.0 ** -1074)  # Vielfaches von 2^-1074, 52 bit
-                exp = -1022
-            else:
-                ival = int(m * 2.0 ** 53)  # 53 bit
-                lead = 1
-                mant = ival - (1 << 52)
-                exp = e - 1
-        nd = 13
-        digs = "%013x" % mant
-        if prec is not None and prec < nd:
-            full = (lead << 52) | mant
-            shift = 4 * (nd - prec)
-            q, rem = divmod(full, 1 << shift)
-            half = 1 << (shift - 1)
-            if rem > half or (rem == half and (q & 1)):
-                q += 1
-            lead = q >> (4 * prec)
-            mant = q & ((1 << (4 * prec)) - 1)
-            digs = ("%0*x" % (prec, mant)) if prec > 0 else ""
-            if lead >= 2:
-                lead //= 2
-                # glibc normalisiert nicht, sondern schreibt "0x2p..." – selten
-                lead, exp = 1, exp + 1
-                digs = "0" * prec
-        else:
-            if prec is None:
-                digs = digs.rstrip("0")
-            else:
-                digs = digs + "0" * (prec - nd)
-        body = "0x%d" % lead
-        if digs or "#" in flags:
-            body += "." + digs
-        body += "p%+d" % exp
-        s = sign + body
-    if upper:
-        s = s.upper()
-    if width and len(s) < width:
-        if "-" in flags:
-            s = s.ljust(width)
-        elif "0" in flags and x == x and not math.isinf(x):
-            pre = 3 if s[0] in "+- " else 2
-            s = s[:pre] + "0" * (width - len(s)) + s[pre:]
-        else:
-            s = s.rjust(width)
-    return s
-
-
-_SPEC_RE = re.compile(r"^%([-+ #0'I]*)(\*|\d+)?(?:\.(\*|\d*))?([a-zA-Z])$")
-
-
-def _c_format(spec, val):
-    """Eine C-Formatangabe (ohne '*') auf einen Wert anwenden."""
-    m = _SPEC_RE.match(spec)
-    if not m:
-        raise ValueError("unrecognised format specification '%s'" % spec)
-    flags, w, p, conv = m.groups()
-    width = int(w) if w else 0
-    prec = None if p is None else (int(p) if p != "" else 0)
-    return _c_printf(flags, width, prec, conv, val)
-
-
-def _glibc_alt_g(flags, width, prec, conv, x):
-    """glibc-Eigenheit bei ``%#g``: rundet x auf 10^P hoch, obwohl der
-    Exponent vorher P-1 war, schreibt glibc "1.e+P" (ohne Nullen)."""
-    import decimal
-    P = 6 if prec is None else (prec if prec > 0 else 1)
-    a = abs(x)
-    X0 = decimal.Decimal(a).adjusted()
-    if X0 != P - 1:
-        return None
-    s = "%.*e" % (P - 1, a)
-    X = int(s[s.index("e") + 1:])
-    if X != P:
-        return None
-    sign = "-" if x < 0 or (x == 0 and math.copysign(1.0, x) < 0) else ("+" if "+" in flags else (" " if " " in flags else ""))
-    body = "1." + ("E" if conv == "G" else "e") + ("%+03d" % X)
-    out = sign + body
-    if len(out) < width:
-        if "-" in flags:
-            out = out.ljust(width)
-        elif "0" in flags:
-            out = out[:len(sign)] + "0" * (width - len(out)) + out[len(sign):]
-        else:
-            out = out.rjust(width)
-    return out
-
-
-def _c_printf(flags, width, prec, conv, val):
-    """C-printf (glibc) für eine Umwandlung; width/prec als Zahlen (prec None = keine)."""
-    pyfl = _c_flags(flags)
-    if conv in "gG" and "#" in flags and isinstance(val, float) and math.isfinite(val) and val != 0:
-        r = _glibc_alt_g(flags, width, prec, conv, val)
-        if r is not None:
-            return r
-    if conv == "s":
-        s = val
-        if prec is not None:
-            b = s.encode("utf-8")[:prec]
-            s = b.decode("utf-8", errors="ignore")
-        nb = len(s.encode("utf-8"))
-        if nb < width:
-            pad = " " * (width - nb)
-            s = s + pad if "-" in flags else pad + s
-        return s
-    if conv in "aA":
-        return _hexfloat(val, prec, conv == "A", flags, width)
-    if conv in "xXo" and val < 0:
-        val = val & 0xFFFFFFFF
-    ps = "%" + pyfl + (str(width) if width else "") + ("" if prec is None else "." + str(prec)) + \
-        ("d" if conv == "i" else conv)
-    return ps % val
+        warnings.warn("one argument not used by format" if nunused == 1 else "%d arguments not used by format" % nunused)
 
 
 def sprintf(fmt, *args):
@@ -1631,172 +1272,21 @@ def sprintf(fmt, *args):
     (wie C). Liefert str, wenn alles Länge 1 ist, sonst ein object-Array."""
     fv = _as_v(fmt, "character")
     vs = [_as_v(a) for a in args]
-    nfmt = len(fv)
-    if nfmt == 0:
-        return np.empty(0, dtype=object)
-    for v in vs:
-        if len(v) == 0:
-            return np.empty(0, dtype=object)
-    maxlen = max([nfmt] + [len(v) for v in vs])
-    if maxlen % nfmt or any(maxlen % len(v) for v in vs):
-        raise ValueError("arguments cannot be recycled to the same length")
-    used = [False] * len(vs)
-    coerced = {}
-    results = []
-    for ns in range(maxlen):
-        f = fv.v[ns % nfmt]
-        if f is None:
-            f = "NA"
-        out = []
-        cur = 0
-        cnt = 0
-        n = len(f)
-        while cur < n:
-            if f[cur] == "%":
-                if cur < n - 1 and f[cur + 1] == "%":
-                    out.append("%")
-                    cur += 2
-                    continue
-                j = cur + 1
-                while j < n and f[j] not in _CONV:
-                    j += 1
-                if j >= n:
-                    raise ValueError("unrecognised format specification '%s'" % f[cur:])
-                spec = f[cur:j + 1]
-                cur = j + 1
-                nthis = -1
-                mm = re.match(r"^%(\d{1,2})\$", spec)
-                if mm and len(spec) > 3:
-                    k = int(mm.group(1))
-                    if k > len(vs):
-                        raise ValueError("reference to non-existent argument %d" % k)
-                    nthis = k - 1
-                    spec = "%" + spec[mm.end():]
-                star = None
-                if "*" in spec:
-                    si = spec.index("*")
-                    nstar = -1
-                    mm = re.match(r"^\*(\d{1,2})\$", spec[si:])
-                    if mm:
-                        k = int(mm.group(1))
-                        if k > len(vs):
-                            raise ValueError("reference to non-existent argument %d" % k)
-                        nstar = k - 1
-                        spec = spec[:si + 1] + spec[si + mm.end():]
-                    if nstar < 0:
-                        if cnt >= len(vs):
-                            raise ValueError("too few arguments")
-                        nstar = cnt
-                        cnt += 1
-                    if "*" in spec[si + 1:]:
-                        raise ValueError("at most one asterisk '*' is supported in each conversion specification")
-                    sv = vs[nstar]
-                    used[nstar] = True
-                    if sv.type == "double":
-                        sv = _coerce(sv, "integer")
-                    if sv.type not in ("integer", "logical") or sv.na[ns % len(sv)]:
-                        raise ValueError("argument for '*' conversion specification must be a number")
-                    star = int(sv.v[ns % len(sv)])
-                    spec = spec.replace("*", str(star))
-                if nthis < 0:
-                    if cnt >= len(vs):
-                        raise ValueError("too few arguments")
-                    nthis = cnt
-                    cnt += 1
-                used[nthis] = True
-                conv = spec[-1]
-                if nthis not in coerced:
-                    v = vs[nthis]
-                    if conv in "dioxX":
-                        if v.type == "double":
-                            ok = all((v.na[i] or (math.isfinite(v.v[i]) and not v.nan[i]
-                                                   and float(int(v.v[i])) == v.v[i] and abs(v.v[i]) < 2**31))
-                                     for i in range(len(v)))
-                            if ok:
-                                v = _coerce(v, "integer")
-                    elif conv in "aAfeEgG":
-                        if v.type not in ("double", "character"):
-                            v = _coerce(v, "double")
-                    elif conv == "s":
-                        if v.type != "character":
-                            v = _V("character", _as_character_list(v), v.na.copy())
-                    coerced[nthis] = v
-                    vs[nthis] = v
-                v = vs[nthis]
-                i = ns % len(v)
-                t = v.type
-                if t == "factor":
-                    v = _coerce(v, "integer")
-                    t = "integer"
-                if t == "logical":
-                    if conv not in "di":
-                        raise ValueError("invalid format '%s'; use format %%d or %%i for logical objects" % spec)
-                    if v.na[i]:
-                        out.append(_c_format(spec[:-1] + "s", "NA"))
-                    else:
-                        out.append(_c_format(spec, int(bool(v.v[i]))))
-                elif t == "integer":
-                    if conv not in "dioxX":
-                        raise ValueError("invalid format '%s'; use format %%d, %%i, %%o, %%x or %%X for integer objects" % spec)
-                    if v.na[i]:
-                        out.append(_c_format(spec[:-1] + "s", "NA"))
-                    else:
-                        out.append(_c_format(spec, int(v.v[i])))
-                elif t in ("double", "Date"):
-                    if conv not in "aAfeEgG":
-                        raise ValueError("invalid format '%s'; use format %%f, %%e, %%g or %%a for numeric objects" % spec)
-                    xv = float(v.v[i])
-                    if math.isfinite(xv):
-                        out.append(_c_format(spec, xv))
-                    else:
-                        p = spec.find(".")
-                        sp = spec[:p] + "s" if p >= 0 else spec[:-1] + "s"
-                        if xv != xv:
-                            word = "NaN" if (v.nan[i] and not v.na[i]) else "NA"
-                            out.append(_c_format(sp, (" " + word) if " " in sp else word))
-                        elif xv > 0:
-                            out.append(_c_format(sp, "+Inf" if "+" in sp else (" Inf" if " " in sp else "Inf")))
-                        else:
-                            out.append(_c_format(sp, "-Inf"))
-                elif t == "character":
-                    if conv != "s":
-                        raise ValueError("invalid format '%s'; use format %%s for character objects" % spec)
-                    s = v.v[i]
-                    s = "NA" if s is None else s
-                    if spec[1] != "s":
-                        out.append(_c_format(spec, s))
-                    else:
-                        out.append(s)
-                else:
-                    raise ValueError("unsupported type")
-            else:
-                j = f.find("%", cur)
-                if j < 0:
-                    j = n
-                out.append(f[cur:j])
-                cur = j
-        results.append("".join(out))
-    nunused = sum(1 for u in used if not u)
+    try:   # C-Kern sl_r_sprintf (seit 1.6.0): Umwandlungen über snprintf wie R
+        res, nunused = _ext.slc_r_sprintf(list(fv.v), [_sp_arg(v) for v in vs], int(_OPT["scipen"]), _OPT["OutDec"])
+    except ValueError as e:
+        raise ValueError(str(e)) from None
     if nunused:
-        import warnings
-        if nfmt == 1:
-            if nunused == 1:
-                warnings.warn("one argument not used by format '%s'" % fv.v[0])
-            else:
-                warnings.warn("%d arguments not used by format '%s'" % (nunused, fv.v[0]))
-        else:
-            warnings.warn("one argument not used by format" if nunused == 1 else
-                          "%d arguments not used by format" % nunused)
-    scal = fv.scalar and all(v.scalar for v in [_as_v(a) for a in args])
-    if scal and len(results) == 1:
-        return results[0]
-    a = np.empty(len(results), dtype=object)
-    a[:] = results
+        _sprintf_warn(nunused, len(fv), fv.v[0] if len(fv) else None)
+    if fv.scalar and all(v.scalar for v in vs) and len(res) == 1:
+        return res[0]
+    a = np.empty(len(res), dtype=object)
+    a[:] = res
     return a
 
 
 # ── Datum ──────────────────────────────────────────────────────────────────
-# format.Date/strftime (C-Locale) rechnet der gemeinsame Kern core/slc_rbase_date.c (wie Julia).
+# format.Date/strftime (C-Locale) rechnet der gemeinsame Kern core/slc_rbase_date.cpp (wie Julia).
 
 
 def _format_date_list(days, fmts):

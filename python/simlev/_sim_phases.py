@@ -9,6 +9,7 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
+from . import _ext
 from ._dates import fmt_date, year_of
 from ._r.rformat import r_as_character, r_deparse, r_format1, r_round
 from ._r.rnum import r_median, r_sum
@@ -20,6 +21,9 @@ from .wrapper import _nav_raw, _wrapper_nav_calc
 from ._r.rnum import NA_REAL as NA  # R's NA_real_ (Nutzlast 1954)
 from ._sim_base import (
     _FEE,
+    _memo_arr,
+    _memo_set,
+    _memo_slice,
     _Frame,
     _TariffEnv,
     _as_date,
@@ -222,15 +226,18 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
             fa_m = fa_m[o, :]
         _message("Hinweis: 'data' war nicht aufsteigend nach Datum sortiert und wurde sortiert.")
     dvals = fr.get("date")
-    seen = set()
     dup_first = None
     n_dup = 0
-    for z in dvals:
-        if z in seen:
-            n_dup += 1
-            if dup_first is None:
-                dup_first = z
-        seen.add(z)
+    dates_ok = (_memo_arr("dates", dvals) is not None      # Studie: einmal je Datumsspalte ohne Meldung (seit 1.5.1),
+                or _memo_slice("dates_full", dvals) is not None)   # Fenster eindeutiger Tage sind eindeutig
+    if not dates_ok and len(dvals) > 1:
+        # dvals ist hier aufsteigend und ohne NA: Dubletten stehen nebeneinander (seit 1.5.2 ohne Schleife)
+        same = np.flatnonzero(np.diff(dvals) == 0)
+        n_dup = int(same.size)
+        if n_dup:
+            dup_first = dvals[same[0] + 1]
+    if dup_first is None and not dates_ok:
+        _memo_set("dates", dvals, True)
     if dup_first is not None:
         _stop("simulation: Datum %s kommt in 'data' mehrfach vor (%d doppelte Zeilen); je Tag genau eine Zeile."
               % (fmt_date(int(dup_first)), n_dup))
@@ -416,18 +423,6 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
 # Phase 2: Datenvorbereitung, sim_mem, Termine (sim_prepare.R)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _locf_fill(v: np.ndarray) -> np.ndarray:
-    isna = np.isnan(v)
-    non_na = np.flatnonzero(~isna)
-    if non_na.size == 0:
-        return v
-    idx = np.zeros(v.size, dtype=np.int64)
-    idx[non_na] = non_na + 1
-    idx = np.maximum.accumulate(idx)
-    idx[idx == 0] = non_na[0] + 1
-    return v[idx - 1]
-
-
 def _sim_prepare_data(fr: _Frame, pre_filled: np.ndarray, base_rate_flex, base_rate_data) -> dict:
     dates = fr.get("date")
     start_date = int(dates[0])
@@ -448,26 +443,25 @@ def _sim_prepare_data(fr: _Frame, pre_filled: np.ndarray, base_rate_flex, base_r
         _message("Hinweis: %d Zeilen, erwartet %d Kalendertage. Fehlende Tage werden aufgef\u00fcllt (LOCF; Signale = "
                  "FALSE)." % (fr.nrow, expected_days))
         all_dates = np.arange(start_date, stopp_date + 1, dtype=np.int64)
-        pos = {int(z): i for i, z in enumerate(fr.get("date"))}
-        src = np.array([pos.get(int(z), -1) for z in all_dates], dtype=np.int64)
-        have = src >= 0
         n = all_dates.size
+        # Zeile je Kalendertag und Zahlenspalten mit LOCF seit 1.6.0 im Kern (sl_cal_index, sl_cal_fill_real)
+        src = np.empty(n, dtype=np.int64)
+        _ext.slc_cal_index(np.trunc(np.asarray(fr.get("date"), dtype=np.float64)), float(start_date), src)  # int(z)
+        have = src >= 0
         new_cols, new_kinds = {"date": all_dates.astype(np.float64)}, {"date": "date"}
         names = ["date"] + [nm for nm in fr.names if nm != "date"]
         for nm in names[1:]:
             v = fr.cols[nm]
             k = fr.kinds[nm]
             if k in ("numeric", "date", "posixct"):
-                out = np.full(n, NA)
-                out[have] = v[src[have]]
-                if k == "numeric":
-                    out = _locf_fill(out)
+                out = np.empty(n)
+                _ext.slc_cal_fill_real(src, np.ascontiguousarray(v, dtype=np.float64), out, k == "numeric")
             else:
                 out = np.empty(n, dtype=object)
                 out[:] = None
                 out[have] = v[src[have]]
                 if k == "logical":
-                    out = np.array([False if x is None else x for x in out], dtype=object)
+                    out[np.equal(out, None)] = False
             new_cols[nm], new_kinds[nm] = out, k
         filled = np.ones(n, dtype=bool)
         filled[have] = np.asarray(pre_filled, dtype=bool)[src[have]]
@@ -488,7 +482,7 @@ def _signal_col(fr: _Frame, col: str | None, n: int) -> np.ndarray:
     return np.array(v, dtype=object)
 
 
-def _sim_build_state(fr: _Frame, strategy: dict, start_value: float, start_date: int, stopp_date: int,
+def _sim_build_state(fr: _Frame, strategy: dict, start_date: int, stopp_date: int,
                      sparer_pauschbetrag: float, use_sparer_pauschbetrag: bool, base_rate, base_rate_flex,
                      base_rate_data) -> dict:
     n = fr.nrow
@@ -570,7 +564,7 @@ def _as_logical_col(fr: _Frame, col: str) -> np.ndarray:
     return out
 
 
-def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, stopp_date: int, liquidate,
+def _sim_build_calendar(fr: _Frame, sim: dict, strategy: dict, start_date: int, stopp_date: int,
                         dca_mode, dca_span, dca_unit, dca_days, dca_value, dca_anchor, dca_start, dca_skip,
                         balance_mode, balance_span, balance_unit, balance_days, balance_anchor, balance_start,
                         balance_skip, event_col, event_mode, event_weight) -> dict:

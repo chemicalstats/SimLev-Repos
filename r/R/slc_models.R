@@ -1,7 +1,7 @@
 # Huellen der Modelle der C-Bibliothek slc (SimLev core): GARCH/GJR(1,1), GPD,
 # DCC(1,1), MS-GARCH und univariates HMM, Bootstrap-Kerne. Die Rechnung steht in
-# src/slc_{garch,gpd,dcc,msgarch,boot}.c (Kopien von core/, core/sync.py), die .Call-Huellen
-# in src/slc_r_models.c (Registrierung in src/init.c, in R als C_sl_*).
+# src/slc_{garch,gpd,dcc,msgarch,boot}.cpp (Kopien von core/, core/sync.py), die .Call-Huellen
+# in src/slc_r_models.cpp (Registrierung in src/init.cpp, in R als C_sl_*).
 #
 # Seit 1.0.0 ziehen die Bootstrap-Verfahren ueber .sl_boot_*(..., stream) mit dem Strom je
 # Pfad (R/bootstrap.R, .generate_returns) bzw. dem Hauptstrom (sharpe_test, dependence_analysis
@@ -105,7 +105,7 @@
 # h1 = NULL: Stichprobenvarianz von y (im Kern)
 .sl_h1 <- function(h1) if (is.null(h1)) NaN else as.double(h1)
 
-# negative Log-Likelihood an theta (Parametrisierung wie sl_ms_garch_unpack in src/slc_msgarch.c; nicht endlich -> Inf)
+# negative Log-Likelihood an theta (Parametrisierung wie sl_ms_garch_unpack in src/slc_msgarch.cpp; nicht endlich -> Inf)
 .sl_ms_garch_nll <- function(theta, y, K, model, h1 = NULL)
   .Call(C_sl_ms_garch_nll, as.double(y), as.double(theta), as.integer(K), .sl_ms_gjr(model), .sl_h1(h1))
 

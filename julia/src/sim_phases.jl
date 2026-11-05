@@ -66,6 +66,62 @@ function _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include
             effective_tax_rate = effective_tax_rate, church_k = church_k, soli_factor_income = soli_factor_income)
 end
 
+# Prüf-Cache je Studie (seit 1.5.1; R .sim_study_env, Python _StudyCache): Studien (bootstrap_study, param_search,
+# sensitivity_*, planning_lumpsum_vs_dca) rufen simulation() vielfach mit denselben Daten auf. Solange eine Studie
+# läuft, merkt sich simulation() je Art den zuletzt gesehenen Schlüssel von Prüfungen, die ohne Meldung durchgingen
+# (eindeutige Tage); Meldungen und Warnungen entstehen weiter je Lauf, Fehler brechen vor dem Merken ab.
+const _STUDY_ON = Ref(false)
+const _STUDY_M = Dict{String,Any}()
+const _STUDY_LOCK = ReentrantLock()
+
+function _sim_study()
+    lock(_STUDY_LOCK) do
+        _STUDY_ON[] && return false
+        _STUDY_ON[] = true; empty!(_STUDY_M)
+        return true
+    end
+end
+
+function _sim_study_end(own::Bool)
+    own || return nothing
+    lock(_STUDY_LOCK) do
+        _STUDY_ON[] = false; empty!(_STUDY_M)
+    end
+    nothing
+end
+
+function _memo_get(what::String, key::Vector{Float64})
+    _STUDY_ON[] || return nothing
+    lock(_STUDY_LOCK) do
+        e = get(_STUDY_M, what, nothing)
+        (e === nothing || !isequal(e[1], key)) && return nothing
+        return e[2]
+    end
+end
+
+function _memo_set(what::String, key::Vector{Float64}, val)
+    _STUDY_ON[] || return nothing
+    lock(_STUDY_LOCK) do
+        _STUDY_M[what] = (copy(key), val)
+    end
+    nothing
+end
+
+"""
+    @study function f(...) ... end
+
+Studie mit Prüf-Cache (seit 1.5.1): der Rumpf läuft zwischen `_sim_study()` und `_sim_study_end()` (auch bei
+Fehlern); geschachtelte Studien teilen den Cache der äußeren.
+"""
+macro study(fdef)
+    body = fdef.args[2]
+    # erste Zeilenangabe des Rumpfs bleibt vorn (Ort der Methode wie ohne Makro, für Stapel und Schnittstellenprüfung)
+    ln = body.args[1] isa LineNumberNode ? body.args[1] : LineNumberNode(__source__.line, __source__.file)
+    fin = Expr(:block, :($(SimLev)._sim_study_end(own_cache)))
+    fdef.args[2] = Expr(:block, ln, :(own_cache = $(SimLev)._sim_study()), Expr(:try, body, false, false, fin))
+    return esc(:(Base.@__doc__ $fdef))
+end
+
 function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_days,
                            balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
                            marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
@@ -159,13 +215,15 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     seen = Set{Float64}()
     dup_first = nothing
     n_dup = 0
-    for z in dvals
+    dates_ok = _memo_get("dates", dvals) !== nothing   # Studie: einmal je Datumsspalte ohne Meldung (seit 1.5.1)
+    for z in (dates_ok ? Float64[] : dvals)
         if z in seen
             n_dup += 1
             dup_first === nothing && (dup_first = z)
         end
         push!(seen, z)
     end
+    dup_first === nothing && !dates_ok && _memo_set("dates", dvals, true)
     dup_first === nothing || error("simulation: Datum $(fmt_date(Int(dup_first))) kommt in 'data' mehrfach vor ($n_dup doppelte Zeilen); je Tag genau eine Zeile.")
     # Fonds-Wrapper: Anteilswert je Wrapper-Asset aus den inneren Spalten (wrapper.jl) als Kursspalte mit dem
     # Asset-Namen anhängen (NA vor dem Beginn und an Tagen ohne inneren Kurs); danach ist das Asset ein
@@ -353,21 +411,16 @@ function _sim_prepare_data(fr::_Frame, pre_filled::BitVector, base_rate_flex, ba
     if nr != expected_days
         _message("Hinweis: $nr Zeilen, erwartet $expected_days Kalendertage. Fehlende Tage werden aufgefüllt (LOCF; Signale = FALSE).")
         n = expected_days
-        src = zeros(Int, n)
-        for (i, z) in enumerate(dates)
-            src[Int(z) - start_date + 1] = i
-        end
+        # Zeile je Kalendertag und Zahlenspalten mit LOCF seit 1.6.0 im Kern (sl_cal_index, sl_cal_fill_real)
+        src0 = SimLev.SLib.cal_index(Float64[Float64(Int(z)) for z in dates], Float64(start_date), n)
+        src = Int[s + 1 for s in src0]                     # 1-basiert, 0 = kein Kurs
         new_cols = Dict{String,AbstractVector}("date" => Float64.(start_date:stopp_date))
         new_kinds = Dict{String,Symbol}("date" => :date)
         nms = ["date"; [nm for nm in fr.names if nm != "date"]]
         for nm in nms[2:end]
             v = fr.cols[nm]; k = fr.kinds[nm]
             if k in (:numeric, :date, :posixct)
-                out = fill(NA, n)
-                for j in 1:n
-                    src[j] > 0 && (out[j] = v[src[j]])
-                end
-                k == :numeric && (out = _locf_fill(out))
+                out = SimLev.SLib.cal_fill_real(src0, Vector{Float64}(v), k == :numeric)
             elseif k == :logical
                 out = Vector{Union{Missing,Bool}}(undef, n)
                 for j in 1:n
@@ -400,14 +453,16 @@ function _signal_col(fr::_Frame, col, n::Int)
     v = fr.cols[col]
     k = fr.kinds[col]
     k == :numeric && return Signal(false, copy(v))
-    if k == :logical
-        return Signal(true, Float64[x === missing ? NA : (x ? 1.0 : 0.0) for x in v])
-    end
-    # andere Spaltenarten: wahr, wenn ein Wert vorliegt und nicht FALSE/0 ist
-    return Signal(false, Float64[_isna_val(x) ? NA : ((x === false || x == 0) ? 0.0 : 1.0) for x in v])
+    k == :logical && return Signal(true, _signal_logical(v))
+    return Signal(false, _signal_other(v))
 end
 
-function _sim_build_state(fr::_Frame, strategy, start_value::Float64, start_date::Int, stopp_date::Int,
+# Funktionsgrenze (seit 1.5.2): die Schleifen werden je Spaltentyp übersetzt (fr.cols ist Dict{String,AbstractVector})
+_signal_logical(v::AbstractVector) = Float64[x === missing ? NA : (x ? 1.0 : 0.0) for x in v]
+# andere Spaltenarten: wahr, wenn ein Wert vorliegt und nicht FALSE/0 ist
+_signal_other(v::AbstractVector) = Float64[_isna_val(x) ? NA : ((x === false || x == 0) ? 0.0 : 1.0) for x in v]
+
+function _sim_build_state(fr::_Frame, strategy, start_date::Int, stopp_date::Int,
                           sparer_pauschbetrag::Float64, use_spb::Bool, base_rate, base_rate_flex, base_rate_data)
     @nospecialize
     n = _fnrow(fr)
@@ -462,7 +517,7 @@ end
 """Angaben der Termine und Tages-Flags (wie `.sim_build_calendar` in R): Kalender, Terminpläne (`_sched_spec`),
 Ereignis-Spalte und die Prüfungen; Termine, Splits, Flags, Aktivierung, Freibetrag und Startgewichte rechnet
 der Kern (core/prepare_core_impl.h, über `_sim_engine_run!`)."""
-function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, stopp_date::Int, liquidate,
+function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, stopp_date::Int,
                              dca_mode, dca_span, dca_unit, dca_days, dca_value, dca_anchor, dca_start, dca_skip,
                              balance_mode, balance_span, balance_unit, balance_days, balance_anchor, balance_start,
                              balance_skip, event_col, event_mode, event_weight)

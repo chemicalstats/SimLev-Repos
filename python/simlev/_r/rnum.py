@@ -29,7 +29,7 @@ long double, ``r_pow`` (``R_POW``) und ``r_mod1`` (``r_uniroot`` ist entfallen: 
 R akkumuliert Summen, Mittelwerte, Varianzen und Produkte intern mit
 ``long double`` (auf x86-64 Linux: 80-Bit-Extended-Precision). rechnen
 ``r_sum``, ``r_prod``, ``r_mean``, ``r_var``, die Kumulationen, ``r_rowsums``/
-``r_colsums`` und ``r_pow_vec`` mit den C-Kernen ``core/slc_rbase.c`` (über
+``r_colsums`` und ``r_pow_vec`` mit den C-Kernen ``core/slc_rbase.cpp`` (über
 :mod:`simlev._ext`), die Julia ebenso nutzt; sie akkumulieren in long double
 wie R und sind gegen R bitgleich geprüft.
 
@@ -40,7 +40,7 @@ Rechnern mit AVX-512 in den letzten Bits abweichen können.
 rechnet Python nirgends mehr mit ``numpy.longdouble``: auch ``r_mod1``
 (``%%``), ``R_strtod`` (:mod:`simlev._r.rexpr`) und ``scientific()``
 (:mod:`simlev._r.fmt`, :mod:`simlev._r.rformat`) nutzen die C-Kerne
-``core/slc_rbase_num.c``, wie Julia. Auf Plattformen, deren
+``core/slc_rbase_num.cpp``, wie Julia. Auf Plattformen, deren
 C-``long double`` nur 64 Bit breit ist (z. B. macOS auf Apple Silicon,
 Windows), verhält sich R dort ebenso; die Bitgleichheit ist dann
 plattformabhängig.
@@ -52,7 +52,7 @@ import struct
 
 import numpy as np
 
-from .. import _ext   # C-Erweiterung (Kerne core/slc_rbase*.c)
+from .. import _ext   # C-Erweiterung (Kerne core/slc_rbase*.cpp)
 
 _NAN = float("nan")
 
@@ -116,7 +116,7 @@ def _handle_nan(x: np.ndarray, out: np.ndarray) -> np.ndarray:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Summen, Mittelwerte, Varianzen (C-Kerne core/slc_rbase.c, long double wie R)
+# Summen, Mittelwerte, Varianzen (C-Kerne core/slc_rbase.cpp, long double wie R)
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _c64(x) -> np.ndarray:
@@ -274,7 +274,7 @@ def r_strtod(cs, i0: int = 0):
 
     Rückgabe ``(Wert, Endindex)``; ohne Ziffer ``(NA, i0)``. Leerraum, Vorzeichen, ``NaN``/``Inf``/``infinity``
     (Groß-/Kleinschreibung egal) prüft der Host; der Zahlteil (dezimal mit Exponent, hexadezimal mit Punkt und
-    p-Exponent) rechnet der C-Kern ``sl_r_strtod_num`` (core/slc_rbase_num.c) in long double. Betrag über
+    p-Exponent) rechnet der C-Kern ``sl_r_strtod_num`` (core/slc_rbase_num.cpp) in long double. Betrag über
     DBL_MAX (in long double) ergibt ±Inf wie R."""
     n = len(cs)
 
@@ -331,14 +331,4 @@ def r_mod1(x: float) -> float:
     x = float(x)
     if not math.isfinite(x):
         return _NAN
-    return _ext.slc_r_fmod_ld(x, 1.0)   # long-double-Teil von myfmod im C-Kern core/slc_rbase_num.c
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Nullstellensuche: stats::uniroot() mit R_zeroin2 (Brent)
-# ═══════════════════════════════════════════════════════════════════════════
-
-_DBL_EPS = 2.220446049250313e-16
-_DBL_MAX = 1.7976931348623157e308
-
-
+    return _ext.slc_r_fmod_ld(x, 1.0)   # long-double-Teil von myfmod im C-Kern core/slc_rbase_num.cpp

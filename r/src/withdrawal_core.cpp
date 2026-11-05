@@ -12,7 +12,7 @@
 #include "withdrawal_core_impl.h"
 
 // ---------------------------------------------------------------------------
-// .Call-Huelle (registriert in init.c; R-Seite mit den Standardwerten in R/cores.R)
+// .Call-Huelle (registriert in init.cpp; R-Seite mit den Standardwerten in R/cores.R)
 // ---------------------------------------------------------------------------
 
 extern "C" SEXP C_wd_simulate(SEXP s_R, SEXP s_INF, SEXP s_CAPE, SEXP s_BASE, SEXP s_ppy, SEXP s_rule,

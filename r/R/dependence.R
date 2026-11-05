@@ -73,7 +73,8 @@
   data <- .dep_sort_dates(data)
   d <- data$date
   end <- if (frequency == "day") seq_along(d) else {
-    key <- if (frequency == "week") format(d, "%G-%V") else format(d, "%Y-%m")
+    key <- .date_key(d, frequency)                    # seit 1.5.1 ganzzahlig statt format() je Tag
+    if (is.null(key)) key <- if (frequency == "week") format(d, "%G-%V") else format(d, "%Y-%m")
     which(c(key[-1] != key[-length(key)], TRUE))
   }
   V <- vapply(assets, function(a) .fill_na(.dep_check_prices(as.numeric(data[[a]]), a, d), "locf", keep_leading = TRUE),
@@ -186,6 +187,10 @@
 #' @keywords internal
 #' @noRd
 .cop_fit_t <- function(u, v) {
+  # seit 1.6.0 ganz im Kern (sl_tcop_fit, qt auf mehreren Threads); NULL nur bei einer nicht endlichen Auswertung
+  # oder einer Warnung von qt: dann wie bisher in R (gleiche Meldungen)
+  if (is.double(u) && is.double(v) && length(u) == length(v) && length(u) >= 1L &&
+      !is.null(r <- .Call(C_sl_tcop_fit, u, v, .sl_nthreads()))) return(r)
   best <- c(0, Inf, Inf)
   prof <- function(nu) {
     if (is.infinite(nu)) {

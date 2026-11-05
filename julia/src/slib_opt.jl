@@ -1,7 +1,7 @@
 # SLib – Hüllen der Optimierer der C-Bibliothek slc über ccall: optim und Prüfhilfen.
 #
 # Gegenstück zu r/R/slc_opt.R (.sl_optim) und python/simlev/_lib_opt.py (optim). Die Rechnung
-# steht in deps/core/slc_opt.c (Kopie von core/), gebaut von deps/build.jl in libslc.
+# steht in deps/core/slc_opt.cpp (Kopie von core/), gebaut von deps/build.jl in libslc.
 # Rückfrage an den Host: Julia holt die nächste Anfrage, rechnet die Zielfunktion
 # selbst und gibt die Antwort; der Kern ruft nie nach Julia zurück, Fehler der Zielfunktion sind
 # gewöhnliche Julia-Ausnahmen. Das Arbeitsfeld ist ein Vector{Float64} des Hosts.

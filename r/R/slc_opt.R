@@ -1,6 +1,6 @@
 # Huellen der Optimierer der C-Bibliothek slc (SimLev core): .sl_optim() und
-# Pruefhilfen. Die Rechnung steht in src/slc_opt.c (Kopie von core/, core/sync.py), die
-# .Call-Huellen in src/slc_r_opt.c (Registrierung in src/init.c, in R als C_sl_*).
+# Pruefhilfen. Die Rechnung steht in src/slc_opt.cpp (Kopie von core/, core/sync.py), die
+# .Call-Huellen in src/slc_r_opt.cpp (Registrierung in src/init.cpp, in R als C_sl_*).
 #
 # Rueckfrage an den Host: .sl_optim() laeuft in einer Schleife "Anfrage holen ->
 # Zielfunktion in R -> Antwort geben"; der Kern ruft nie in R zurueck. Fehler der Zielfunktion

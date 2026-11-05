@@ -13,7 +13,8 @@
 # | SIMLEV_STRICT_ZERO           | 0: -0 = +0 im Vergleich mit den Referenzfällen                 | Prüfung     |
 # | SIMLEV_SKIP_PRECOMPILE       | 1: keine Arbeitslast beim Vorkompilieren                       | Entwicklung |
 # | SIMLEV_SKIP_PRECOMPILE_EXT   | 1: Arbeitslast ohne die Erweiterungsmodule                     | Entwicklung |
-# | SIMLEV_CC                    | C-Compiler für Pkg.build (gelesen in deps/build.jl)  | Bau         |
+# | SIMLEV_CXX                   | C++-Compiler für Pkg.build (deps/build.jl; seit 1.6.0, bis 1.5.2 SIMLEV_CC) | Bau |
+# | SIMLEV_THREADS               | Threads der elementweisen Kerne (qt, pt; seit 1.6.0), sonst Prozessoren   | Nutzer      |
 #
 # Seit 1.0.0 entfallen SIMLEV_LAPACK (keine System-LAPACK) und
 # SIMLEV_R_SYS_TIME (feste Uhr für gosolnp), SIMLEV_LEGACY_TESTS (Tests neu aufgebaut), seit 1.4.2
@@ -28,7 +29,8 @@ const SWITCHES = (
     "SIMLEV_STRICT_ZERO" => ("0: -0 = +0 im Vergleich mit den Referenzfällen", "Prüfung"),
     "SIMLEV_SKIP_PRECOMPILE" => ("1: keine Arbeitslast beim Vorkompilieren", "Entwicklung"),
     "SIMLEV_SKIP_PRECOMPILE_EXT" => ("1: Arbeitslast ohne die Erweiterungsmodule", "Entwicklung"),
-    "SIMLEV_CC" => ("C-Compiler für Pkg.build (gelesen in deps/build.jl, das SimLev nicht laden kann)", "Bau"),
+    "SIMLEV_CXX" => ("C++-Compiler für Pkg.build (gelesen in deps/build.jl, das SimLev nicht laden kann; bis 1.5.2 SIMLEV_CC)", "Bau"),
+    "SIMLEV_THREADS" => ("Threads der elementweisen Kerne (qt, pt; seit 1.6.0): ganze Zahl >= 1, sonst Zahl der Prozessoren (höchstens 8)", "Nutzer"),
 )
 
 # ── Nutzer ──────────────────────────────────────────────────────────────────
@@ -50,5 +52,12 @@ set_collate_default!(value = "icu:root") = haskey(ENV, "SIMLEV_COLLATE") ? false
 skip_precompile() = get(ENV, "SIMLEV_SKIP_PRECOMPILE", "0") == "1"
 "`SIMLEV_SKIP_PRECOMPILE_EXT=1`: Arbeitslast ohne die Erweiterungsmodule."
 skip_precompile_ext() = get(ENV, "SIMLEV_SKIP_PRECOMPILE_EXT", "0") == "1"
+
+# ── Threads (seit 1.6.0) ────────────────────────────────────────────────────
+"`SIMLEV_THREADS` als ganze Zahl >= 1, sonst 0 (Zahl der Prozessoren, höchstens 8); wie `.sl_nthreads` in R."
+function threads()
+    n = tryparse(Int, strip(get(ENV, "SIMLEV_THREADS", "")))
+    return n === nothing || n < 1 || n >= 2^31 ? 0 : n
+end
 
 end # module

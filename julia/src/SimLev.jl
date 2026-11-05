@@ -27,14 +27,16 @@ include("r/env.jl")          # Umgebungsschalter SIMLEV_* (einzige Lesestelle)
 include("slib.jl")           # C-Bibliothek slc: Zufall, Verteilungen; deps/build.jl
 include("cabi.jl")           # geteilte C++-Kerne über die C-ABI-Hülle (in libslc)
 using .SLib: LIBSLC
-include("r/rbase_c.jl")       # Grundfunktionen mit R-Regeln aus libslc (core/slc_rbase*.c)
+include("r/rbase_c.jl")       # Grundfunktionen mit R-Regeln aus libslc (core/slc_rbase*.cpp)
+include("r/rbase_c2.jl")      # Teil 2 (seit 1.6.0): dist, hclust, … aus libslc (core/slc_rbase2.h)
 include("r/types.jl")
 include("r/rnum.jl")
-include("r/rformat.jl")
 include("r/libm.jl")
 include("r/base.jl")
 include("r/parallel.jl")     # .par_lapply (Threads), Ausgaben je Aufgabe
 include("r/fmt.jl")
+include("r/rformat.jl")      # seit 1.5.2 nach fmt.jl: Runden und formatReal aus RFmt
+include("meldungen.jl")       # Meldungstabellen der Kerne (erzeugt aus core/meldungen.tsv, seit 1.6.0)
 include("r/stats.jl")
 include("r/linalg.jl")
 include("r/rexpr.jl")

@@ -74,7 +74,7 @@ function _print_df(df; row_names = false)
     return sprint(io -> SL.RFmt.print_data_frame(io, df; row_names = row_names))
 end
 
-# Summen, Mittel und Kumulationen wie R in long double über die C-Kerne (core/slc_rbase.c)
+# Summen, Mittel und Kumulationen wie R in long double über die C-Kerne (core/slc_rbase.cpp)
 "`colSums` (long double, sequenziell)."
 _colsums(M::AbstractMatrix) = SL._ld_colsums(M)
 "`colMeans`: long-double-Summe / n."
@@ -104,21 +104,6 @@ function _which_max(v)
     end
     best
 end
-"`max.col(M, ties.method = \"first\")` (0 = NA)."
-function _max_col_first(M::AbstractMatrix)
-    out = zeros(Int, size(M, 1))
-    for r in axes(M, 1)
-        any(isnan, view(M, r, :)) && continue
-        m = 1; a = M[r, 1]
-        for c in 2:size(M, 2)
-            b = M[r, c]
-            a < b && (a = b; m = c)
-        end
-        out[r] = m
-    end
-    out
-end
-
 _okey(x::Real) = (f = Float64(x); f == 0 ? 0.0 : f)
 _okey(x) = x
 _isna_key(x) = x === missing || x === nothing || (x isa Real && isnan(Float64(x)))
@@ -306,7 +291,7 @@ function _rr(x, frequency, dates = nothing, risk_free = 0)
         lev = unique(key)
         pos = Dict(k => i for (i, k) in enumerate(lev))
         codes = Int[pos[k] for k in key]
-        S = _rowsum(SL.RLibm.log1p.(R), codes, length(lev))
+        S = _rowsum(_log1p_w(R), codes, length(lev))
         R = SL.RLibm.exp.(S) .- 1.0
         rn = lev
         last = vcat([key[i] != key[i+1] for i in 1:length(key)-1], true)
@@ -363,7 +348,7 @@ function _of_col_metric(R::AbstractMatrix{Float64}, metric)
         P = _pmin.(R, 0.0)
         return _of_metric(n, s1, nothing, _colsums(P .* P), nothing, metric)
     elseif metric == "geometric"
-        return _of_metric(n, s1, nothing, nothing, _colsums(SL.RLibm.log1p.(R)), metric)
+        return _of_metric(n, s1, nothing, nothing, _colsums(_log1p_w(R)), metric)
     end
     error("metric: 'sharpe', 'sortino', 'geometric' oder 'mean'.")
 end
@@ -377,7 +362,7 @@ _of_col_metric(R::AbstractVector, metric) = _of_col_metric(reshape(_tofloat(R), 
 "Spalten ohne Schwankung (Sharpe Ratio nicht definiert) ausschließen."
 function _of_drop_flat(rr::_RR, what)
     sdv = Float64[SL.r_sd(view(rr.R, :, j)) for j in 1:size(rr.R, 2)]
-    flat = findall(s -> !(s > 1e-10), sdv)
+    flat = findall(s -> !(s > 1e-10) && !isnan(s), sdv)    # which(!(sdv > 1e-10)): NaN (z. B. bei Inf) zählt nicht
     isempty(flat) && return rr
     length(flat) == size(rr.R, 2) &&
         error("$what: alle Spalten ohne Schwankung (Standardabweichung <= 1e-10); Sharpe Ratio nicht definiert.")
@@ -391,12 +376,28 @@ end
 # PBO
 # ═════════════════════════════════════════════════════════════════════════════
 
-"`combn(S, k)` in lexikographischer Reihenfolge (eine Kombination je Element)."
+"`log1p(R)` mit R's Warnung \"NaNs produced\" (Werte unter -1, -Inf; seit 1.5.1)."
+function _log1p_w(R)
+    out = SL.RLibm.log1p.(R)
+    any(i -> isnan(out[i]) && !isnan(R[i]), eachindex(out, R)) && @warn "NaNs produced"
+    out
+end
+
+"`combn(S, k)` in lexikographischer Reihenfolge (Matrix k × C, eine Kombination je Spalte)."
 function _combn(S::Int, k::Int)
-    out = Vector{Vector{Int}}()
+    # utils::combn: Anzahl als Ganzzahl (as.integer(round(choose(n, m)))); jenseits von .Machine$integer.max wie R
+    # Warnung und Fehler, ohne die Kombinationen aufzubauen. Ablage k x C (Int32) wie in R (seit 1.5.1)
+    nc = binomial(big(S), big(k))
+    if nc > typemax(Int32)
+        @warn "NAs introduced by coercion to integer range"
+        error("invalid 'ncol' value (too large or NA)")
+    end
+    out = Matrix{Int32}(undef, k, Int(nc))
     c = collect(1:k)
+    col = 0
     while true
-        push!(out, copy(c))
+        col += 1
+        for q in 1:k; out[q, col] = c[q]; end
         i = k
         while i >= 1 && c[i] == S - k + i; i -= 1; end
         i == 0 && break
@@ -409,7 +410,8 @@ end
 "Koeffizienten (Achsenabschnitt, Steigung) wie `.sl_lsfit(cbind(1, x), y)` (na.omit)."
 function _lm_coef(x::Vector{Float64}, y::Vector{Float64})
     ok = [!(isnan(a) || isnan(b)) for (a, b) in zip(x, y)]
-    X = hcat(ones(count(ok)), x[ok])
+    # cbind(1, numeric(0)) ist 1 x 1: ohne Paar wie R "Längen von x und y passen nicht" (seit 1.5.1)
+    X = any(ok) ? hcat(ones(count(ok)), x[ok]) : ones(1, 1)
     fit = SL.SLib.lsfit(X, y[ok])
     cf = fit isa AbstractVector ? fit : (fit isa SL.RList || fit isa AbstractDict) ? fit["coefficients"] :
          hasproperty(fit, :coefficients) ? getproperty(fit, :coefficients) : fit[:coefficients]
@@ -504,10 +506,10 @@ function overfit_pbo(x; S = 16, metric = nothing, frequency = nothing, dates = n
     Rc = R .- _colmeans(R)'
     B1 = _rowsum(R, blk, S); B2 = _rowsum(Rc .* Rc, blk, S)
     Pm = _pmin.(R, 0.0)
-    Bd = _rowsum(Pm .* Pm, blk, S); Bl = _rowsum(SL.RLibm.log1p.(R), blk, S); Bc = _rowsum(Rc, blk, S)
+    Bd = _rowsum(Pm .* Pm, blk, S); Bl = _rowsum(_log1p_w(R), blk, S); Bc = _rowsum(Rc, blk, S)
     T1, T2, Td, Tl, Tc = _colsums(B1), _colsums(B2), _colsums(Bd), _colsums(Bl), _colsums(Bc)
     combos = _combn(S, S ÷ 2)
-    C = length(combos); half = bl * S / 2
+    C = size(combos, 2); half = bl * S / 2
     # je Aufteilung im Kern (core/research_core_impl.h, pbo_cscv; bis 1.4.3 hier in Julia)
     lam, isb, oosb, oosm = SL.DependenceCore.pbo_cscv((B1, B2, Bd, Bl, Bc), (T1, T2, Td, Tl, Tc), combos, half, metric, S, N)
     intercept, slope = _lm_coef(isb, oosb)
@@ -856,7 +858,8 @@ function overfit_walk_forward(x; train = 5, test = 1, step = nothing, anchored::
     nW = length(win)
     seg = Vector{Vector{Int}}()
     for i in 1:nW
-        r = findall(v -> v >= win[i].test_start && v <= win[i].test_end, d)
+        a, b = win[i].test_start, win[i].test_end   # vorab binden: win ist Vector{Any} (seit 1.5.2)
+        r = findall(v -> v >= a && v <= b, d)
         i < nW && (r = r[d[r] .< win[i+1].test_start])
         push!(seg, r)
     end

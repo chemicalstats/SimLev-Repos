@@ -4,10 +4,11 @@
 #                     Kopf der jeweiligen R-Quelle)
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang.
+#                     SimLev genutzten Umfang; seit 1.6.0 rechnen regularize.values und filter im C-Kern
+#                     core/slc_rbase_smooth.cpp (sl_r_regularize, sl_r_filter_conv, sl_r_filter_rec).
 """Interpolation und Filter (``approx``, ``approxfun``, ``filter``), nachgebildet aus R 4.3.3
 ``stats/R/approx.R``, ``filter.R`` und ``stats/src/approx.c``, ``filter.c``. Die Interpolation je Punkt
-(``approx.c``) rechnet seit 1.5.0 der C-Kern ``sl_r_approx`` (core/slc_rbase.c).
+(``approx.c``) rechnet seit 1.5.0 der C-Kern ``sl_r_approx`` (core/slc_rbase.cpp).
 
 Seit 1.0.0 entfallen ``fft``, ``bw.nrd0``, ``density``, ``smooth.spline`` und
 ``predict.smooth.spline``: SimLev nutzt die eigene Gauß-Kerndichte und den eigenen
@@ -20,7 +21,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from .. import _ext   # C-Kern sl_r_approx (core/slc_rbase.c)
+from .. import _ext   # C-Kerne sl_r_approx (core/slc_rbase.cpp), slc_rbase_smooth.cpp (seit 1.6.0)
 from .linalg import RError
 from .rlist import RList
 from .rnum import NA_REAL
@@ -40,58 +41,36 @@ def _regularize(x, y, ties, warn_collapsing, na_rm):
         yv, _ = _vec(y)
     if xv.size != yv.size:
         raise RError("'x' and 'y' lengths differ")
-    kept_na = False
-    na = np.isnan(xv) | np.isnan(yv)
-    ok = ~na
-    if na.any():
-        if na_rm:
-            xv = xv[ok]
-            yv = yv[ok]
-            nx = xv.size
-        else:
-            kept_na = True
-            nx = int(ok.sum())
-    else:
-        nx = xv.size
-    ordered = False
-    fun = ties
+    # C-Kern sl_r_regularize (seit 1.6.0): NA-Paare, Sortierung, Gruppen gleicher x, mean je Gruppe
     if isinstance(ties, str) and ties == "ordered":
-        ordered = True
-        fun = None
+        mode, fun = 2, None
     elif isinstance(ties, (list, tuple)) and len(ties) == 2 and callable(ties[1]):
-        fun = ties[1]
-        ordered = ties[0] == "ordered"
-    if not (isinstance(ties, str) and ties == "ordered"):
-        xx = xv[ok] if kept_na else xv
-        if not ordered and xx.size > 1 and (np.diff(xx) < 0).any():
-            o = np.argsort(xv, kind="stable")
-            xv = xv[o]
-            yv = yv[o]
-        ux = pd.unique(xv)
-        if ux.size < nx:
-            if warn_collapsing:
-                _warn("collapsing to unique 'x' values")
-            if fun is None or fun is _rmean or fun == "mean":
-                f = _rmean
-            else:
-                f = fun
-            groups = {}
-            keys = []
-            for xi, yi in zip(xv.tolist(), yv.tolist()):
-                k = xi if xi == xi else "NA"
-                if k not in groups:
-                    groups[k] = []
-                    keys.append(k)
-                groups[k].append(yi)
-            yv = np.array([float(f(np.array(groups[k]))) for k in keys])
-            xv = np.asarray(ux, dtype=np.float64)
-            if kept_na:
-                ok = ~np.isnan(xv)
-    return xv, yv, kept_na, (ok if kept_na else None)
+        mode, fun = (1 if ties[0] == "ordered" else 0), ties[1]
+    else:
+        mode, fun = 0, ties
+    mean = fun is None or fun is _rmean or fun == "mean"
+    x_in, y_in = xv, yv
+    n = xv.size
+    xo, yo, grp = np.empty(n), np.empty(n), np.empty(n, dtype=np.int64)
+    m, nout, collapsed, kept_na = _ext.slc_r_regularize(np.ascontiguousarray(xv), np.ascontiguousarray(yv),
+                                                         bool(na_rm), mode, mean, xo, yo, grp)
+    xv = xo[:nout]
+    if collapsed:
+        if warn_collapsing:
+            _warn("collapsing to unique 'x' values")
+        if not mean:
+            ys, g = yo[:m], grp[:m]
+            yo = np.array([float(fun(ys[g == k])) for k in range(nout)])
+    yv = yo[:nout]
+    # notNA wie R: ohne Zusammenfassen die Maske der Eingabe (vor dem Sortieren), sonst !is.na(x)
+    ok = None
+    if kept_na:
+        ok = ~np.isnan(xv) if collapsed else ~(np.isnan(x_in) | np.isnan(y_in))
+    return xv, yv, kept_na, ok
 
 
 def _approx_core(x, y, v, method, yleft, yright, f):
-    """R_approxfun: Interpolation je Punkt im C-Kern ``sl_r_approx`` (core/slc_rbase.c, seit 1.5.0)."""
+    """R_approxfun: Interpolation je Punkt im C-Kern ``sl_r_approx`` (core/slc_rbase.cpp, seit 1.5.0)."""
     out = np.empty(v.size)
     _ext.slc_r_approx(np.ascontiguousarray(x, dtype=np.float64), np.ascontiguousarray(y, dtype=np.float64),
                       np.ascontiguousarray(v, dtype=np.float64), int(method), float(yleft), float(yright),
@@ -220,82 +199,40 @@ def filter(x, filter, method="convolution", sides=2, circular=False, init=None):
     nf = fv.size
     if np.isnan(fv).any():
         raise RError("missing values in 'filter'")
-    Y = np.full((n, nser), NA_REAL)
-    with np.errstate(all="ignore"):
-        if method == "convolution":
-            if nf > n:
-                raise RError("'filter' is longer than time series")
-            sides = int(sides)
-            if sides not in (1, 2):
-                raise RError("argument 'sides' must be 1 or 2")
-            nshift = nf // 2 if sides == 2 else 0
-            for s in range(nser):
-                xs = X[:, s]
-                if not circular:
-                    i = np.arange(n)
-                    valid = (i + nshift - (nf - 1) >= 0) & (i + nshift < n)
-                    iv = i[valid]
-                    z = np.zeros(iv.size)
-                    bad = np.zeros(iv.size, dtype=bool)
-                    for j in range(nf):
-                        t = xs[iv + nshift - j]
-                        bad |= np.isnan(t)
-                        z = z + fv[j] * t
-                    z[bad] = NA_REAL
-                    Y[iv, s] = z
-                else:
-                    i = np.arange(n)
-                    z = np.zeros(n)
-                    bad = np.zeros(n, dtype=bool)
-                    for j in range(nf):
-                        ii = i + nshift - j
-                        ii = np.where(ii < 0, ii + n, ii)
-                        ii = np.where(ii >= n, ii - n, ii)
-                        t = xs[ii]
-                        bad |= np.isnan(t)
-                        z = z + fv[j] * t
-                    z[bad] = NA_REAL
-                    Y[:, s] = z
+    Y = np.empty((n, nser))
+    if method == "convolution":
+        if nf > n:
+            raise RError("'filter' is longer than time series")
+        sides = int(sides)
+        if sides not in (1, 2):
+            raise RError("argument 'sides' must be 1 or 2")
+        ini = np.zeros((0, nser))
+    else:
+        if init is None:
+            ini = np.zeros((nf, nser))
         else:
-            if init is None:
-                ini = np.zeros((nf, nser))
-            else:
-                ia = np.asarray(init, dtype=np.float64)
-                ni = ia.shape[0] if ia.ndim >= 1 else 1
-                if ia.ndim == 0:
-                    ia = ia.reshape(1)
-                    ni = 1
-                if ni != nf:
-                    raise RError("length of 'init' must equal length of 'filter'")
-                ncol = ia.shape[1] if ia.ndim == 2 else 1
-                if ncol != 1 and ncol != nser:
-                    if nser == 1:
-                        raise RError("'init' must have %d column" % nser)
-                    raise RError("'init' must have 1 or %d columns" % nser)
-                ini = ia.reshape(nf, -1) if ia.ndim == 2 else ia.reshape(nf, 1)
-                if ini.shape[1] == 1 and nser > 1:
-                    ini = np.repeat(ini, nser, axis=1)
-            for s in range(nser):
-                r = np.concatenate([ini[::-1, s], np.zeros(n)]).tolist()
-                xs = X[:, s].tolist()
-                fl = fv.tolist()
-                for i in range(n):
-                    sm = xs[i]
-                    if sm != sm:
-                        r[nf + i] = NA_REAL
-                        continue
-                    badf = False
-                    for j in range(nf):
-                        tmp = r[nf + i - j - 1]
-                        if tmp == tmp:
-                            sm += tmp * fl[j]
-                        else:
-                            r[nf + i] = NA_REAL
-                            badf = True
-                            break
-                    if not badf:
-                        r[nf + i] = sm
-                Y[:, s] = r[nf:]
+            ia = np.asarray(init, dtype=np.float64)
+            ni = ia.shape[0] if ia.ndim >= 1 else 1
+            if ia.ndim == 0:
+                ia = ia.reshape(1)
+                ni = 1
+            if ni != nf:
+                raise RError("length of 'init' must equal length of 'filter'")
+            ncol = ia.shape[1] if ia.ndim == 2 else 1
+            if ncol != 1 and ncol != nser:
+                if nser == 1:
+                    raise RError("'init' must have %d column" % nser)
+                raise RError("'init' must have 1 or %d columns" % nser)
+            if ncol == 1 and nser > 1:   # wie R (seit 1.6.0): dim(init) <- c(nf, nser) bzw. init[, 2]
+                if ia.ndim == 2:
+                    raise RError("subscript out of bounds")
+                raise RError("dims [product %d] do not match the length of object [%d]" % (nf * nser, nf))
+            ini = ia.reshape(nf, -1) if ia.ndim == 2 else ia.reshape(nf, 1)
+    out = np.empty(n)
+    for s in range(nser):   # C-Kerne sl_r_filter_conv, sl_r_filter_rec (seit 1.6.0)
+        _ext.slc_r_filter(np.ascontiguousarray(X[:, s]), np.ascontiguousarray(fv), method == "recursive", sides,
+                          bool(circular), np.ascontiguousarray(ini[:, s]), out)
+        Y[:, s] = out
     if is_mat:
         return Y
     return Y[:, 0]

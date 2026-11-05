@@ -36,6 +36,8 @@ from ._r.rnum import r_rowsums, r_cumprod, r_mean_int, r_median, r_pow, r_pow_ve
 from .bootstrap import (_quiet, _get, _is_boot_result, _is_num, _is_study, _keep_count, _message, _names, _num1, _num_vec,
                         _quantile7, _r_round0, _show, _sp, _stop, _strip1, _values, _warn, _weighted_mean,
                         _wquantile, summary, plot)
+from ._util import _match_arg
+from .data_prep import _to_date
 
 __all__ = [
     "withdrawal_rule", "WithdrawalRule", "withdrawal_cohorts", "WithdrawalPaths", "result_index",
@@ -87,11 +89,6 @@ class _DfltTrue:
 
 
 _D_TRUE = _DfltTrue()
-
-
-def _match_arg(arg, choices):
-    from .data_prep import _match_arg as _ma
-    return _ma(arg, choices)
 
 
 def _fmt1(x, **kw) -> str:
@@ -579,11 +576,6 @@ def _fill_locf(v):
     return np.asarray(_fill_na(np.asarray(v, dtype=np.float64), "locf"), dtype=np.float64)
 
 
-def _to_date(x, what):
-    from .data_prep import _to_date as _td
-    return _td(x, what)
-
-
 def _df_col(data, name):
     if isinstance(data, pd.DataFrame):
         return data[name].to_numpy()
@@ -813,7 +805,7 @@ def result_index(x, *, base=100):
                                                                           else rep)]
     if fls and len(w) > 1:
         M = np.column_stack(fls)
-        fl = r_rowsums(M)   # C-Kern core/slc_rbase.c (long double wie R)
+        fl = r_rowsums(M)   # C-Kern core/slc_rbase.cpp (long double wie R)
     elif fls:
         fl = np.array([float(f[0]) for f in fls])
     else:

@@ -7,7 +7,7 @@
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang: Ordnung, Rang, partielle Sortierung und Quantile
-#                     rechnet der C-Kern core/slc_rbase_sort.c.
+#                     rechnet der C-Kern core/slc_rbase_sort.cpp.
 """Gemeinsame Hilfen, Sortieren, Ränge, Einteilen und Lagemaße (``order``, ``sort``, ``rank``, ``rle``,
 ``tabulate``, ``findInterval``, ``cut``, ``complete.cases``, ``quantile``, ``median``, ``weighted.mean``),
 nachgebildet aus R 4.3.3 (``src/main/sort.c``, ``qsort-body.c``, ``seq.c``; ``base/R/sort.R``, ``rle.R``,
@@ -25,7 +25,7 @@ from .linalg import RError
 from .rlist import RList
 from . import rnum as _rn
 from .rnum import NA_REAL
-from .. import _ext   # C-Kerne core/slc_rbase_sort.c
+from .. import _ext   # C-Kerne core/slc_rbase_sort.cpp
 from ._collate import collate_key
 
 __all__ = [
@@ -89,22 +89,7 @@ def seq_len_out(frm, to, length_out):
     if n <= 0:
         return np.zeros(0)
     out = np.empty(n)
-    out[0] = frm
-    if n > 1:
-        out[n - 1] = to
-    if n > 2:
-        nint = float(n - 1)
-        rby = to - frm
-        if math.isfinite(rby):
-            rby = rby / nint
-            i = np.arange(1, n - 1, dtype=np.float64)
-            out[1:n - 1] = frm + i * rby
-        else:
-            rby = to / nint - frm / nint
-            f4 = frm / 4.0
-            b4 = rby / 4.0
-            i = np.arange(1, n - 1, dtype=np.float64)
-            out[1:n - 1] = (f4 + i * b4) * 4.0
+    _ext.slc_r_seq_len(frm, to, out)   # C-Kern sl_r_seq_len (seit 1.6.0)
     return out
 
 
@@ -382,23 +367,10 @@ def findInterval(x, vec, rightmost_closed=False, all_inside=False, left_open=Fal
 
 
 def _bincode(x, breaks, right=True, include_lowest=False):
-    B = np.asarray(breaks, dtype=np.float64)
-    nb1 = B.size - 1
-    lft = not right
-    out = np.full(x.size, NA_REAL)
-    for i, xi in enumerate(x.tolist()):
-        if xi != xi:
-            continue
-        lo, hi = 0, nb1
-        if xi < B[lo] or B[hi] < xi or (xi == B[hi if lft else lo] and not include_lowest):
-            continue
-        while hi - lo >= 2:
-            new = (hi + lo) // 2
-            if xi > B[new] or (lft and xi == B[new]):
-                lo = new
-            else:
-                hi = new
-        out[i] = lo + 1
+    """``.bincode`` (C-Kern ``sl_r_bincode``, seit 1.6.0): Intervallnummern als float, NA außerhalb."""
+    out = np.empty(np.size(x))
+    _ext.slc_r_bincode(np.ascontiguousarray(x, dtype=np.float64), np.ascontiguousarray(breaks, dtype=np.float64),
+                       bool(right), bool(include_lowest), out)
     return out
 
 
@@ -413,12 +385,23 @@ def cut(x, breaks, labels=None, include_lowest=False, right=True, dig_lab=3, ord
             raise RError("invalid number of intervals")
         nb = int(b0 + 1)
         ok = xv[~np.isnan(xv)]
+        if not ok.size:   # range(x, na.rm = TRUE) ohne Werte (Warnungen wie R, seit 1.6.0)
+            _warn("no non-missing arguments to min; returning Inf")
+            _warn("no non-missing arguments to max; returning -Inf")
         rx = (float(ok.min()), float(ok.max())) if ok.size else (math.inf, -math.inf)
-        dx = rx[1] - rx[0]
+        with np.errstate(invalid="ignore"):
+            dx = rx[1] - rx[0]
+        if dx != dx:   # if (dx == 0) mit NaN (nur +Inf bzw. nur -Inf; seit 1.6.0 wie R)
+            raise RError("missing value where TRUE/FALSE needed")
         if dx == 0:
             dx = abs(rx[0]) if rx[0] != 0 else 1.0
             br = seq_len_out(rx[0] - dx / 1000, rx[1] + dx / 1000, nb)
         else:
+            # seq.int prüft die Enden (seit 1.6.0 wie R)
+            if not math.isfinite(rx[0]):
+                raise RError("'from' must be a finite number")
+            if not math.isfinite(rx[1]):
+                raise RError("'to' must be a finite number")
             br = seq_len_out(rx[0], rx[1], nb)
             br[0] = rx[0] - dx / 1000
             br[nb - 1] = rx[1] + dx / 1000
@@ -565,22 +548,12 @@ def median(x, na_rm=False):
     """``median.default(x, na.rm)``."""
     is_int = _is_int_like(x)
     xv, _ = _vec(x)
-    if na_rm:
-        xv = xv[~np.isnan(xv)]
-    elif np.isnan(xv).any():
-        return NA_REAL                  # x[NA_integer_]
-    n = xv.size
-    if n == 0:
-        return NA_REAL
-    half = (n + 1) // 2
-    s = np.sort(xv) if is_int else sort_partial(xv, [half] if n % 2 == 1 else [half, half + 1])
-    if n % 2 == 1:
-        v = s[half - 1]
-        return int(v) if is_int else float(v)
-    pair = s[half - 1:half + 1]
-    if is_int:
-        return _rmean_int(pair.astype(np.int64))
-    return _rmean(pair)
+    r = _ext.slc_r_median(np.ascontiguousarray(xv), bool(na_rm), bool(is_int))   # C-Kern sl_r_median (seit 1.6.0)
+    if r is None:
+        return NA_REAL                  # x[NA_integer_] bzw. leer
+    if is_int and np.count_nonzero(~np.isnan(xv)) % 2 == 1:
+        return int(r)
+    return r
 
 
 def weighted_mean(x, w=None, na_rm=False):

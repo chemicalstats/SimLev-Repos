@@ -234,17 +234,18 @@ function _sim_engine_run!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight,
     return nothing
 end
 
-const _ENGINE_LABELS = ("Vorabpauschale", "§ 23-Steuer")
-# Anlass der Käufe und Verkäufe (enum Reason in engine_core_impl.h)
-const _ENGINE_REASONS = ("Handelssignal:", "Rebalancing:", "Rebalancing/Signal-Einstieg:", "Rebalancing/Signal-Ausstieg:",
-                         "Liquidation:", "Steuerereignis:", "Split:", "Freibetrag:")
+# Texte aus core/meldungen.tsv (meldungen.jl); Anlass der Käufe und Verkäufe (enum Reason in engine_core_impl.h)
+const _ENGINE_REASONS = Tuple(_MELD_ENGINE_REASON[string(k)] for k in 0:length(_MELD_ENGINE_REASON)-1)
 
 "Bezeichnung einer Steuerzahlung (.pay_tax label): Vorabpauschale, § 23-Steuer oder Veranlagung der Jahre."
-_engine_label(aux::Int, ints) = aux < 2 ? _ENGINE_LABELS[aux+1] : "Steuer aus der Veranlagung " * join(string.(ints), "/")
+_engine_label(aux::Int, ints) = aux < 2 ? _MELD_ENGINE_LABEL[string(aux)] :
+                                r_sprintf(_MELD_ENGINE_LABEL["2"], join(string.(ints), "/"))
 
-"Warnungen, details-Ausgaben und Abbruch des Kerns mit den Texten von R 1.3.0 auslösen (Reihenfolge des Protokolls)."
+"Warnungen, details-Ausgaben und Abbruch des Kerns mit den Texten von R 1.3.0 auslösen (Reihenfolge des Protokolls);
+Texte aus `_MELD_ENGINE_SIGNAL`."
 function _sim_engine_signal(R::Run, sim::Sim, fl::Flags, evi::Vector{Int32}, evd::Vector{Float64}, evy::Vector{Int32},
                             evv::Vector{Float64}, failed::Bool, err_code::Int, err_d0::Float64)
+    m = _MELD_ENGINE_SIGNAL
     for k in 0:(length(evd) ÷ 2 - 1)
         code, day, asset = evi[9k+1], Int(evi[9k+3]), Int(evi[9k+4])
         aux, y_off, ny, v_off, nv = Int(evi[9k+5]), Int(evi[9k+6]), Int(evi[9k+7]), Int(evi[9k+8]), Int(evi[9k+9])
@@ -254,169 +255,155 @@ function _sim_engine_signal(R::Run, sim::Sim, fl::Flags, evi::Vector{Int32}, evd
         if code >= 200
             _sim_engine_detail(R, fl, Int(code), nm, aux, @view(evv[v_off+1:v_off+nv]), ints, fmt_date(fl.flag_date[day]))
         elseif code == 1
-            @warn r_sprintf("perform_trade_buy: ungültiger Kurs (%.4f) für %s am %s; der Kauf wird übersprungen.",
-                            d0, nm, fmt_date(fl.flag_date[day]))
+            @warn r_sprintf(m["1"], d0, nm, fmt_date(fl.flag_date[day]))
         elseif code == 2
-            @warn r_sprintf("perform_trade_sell: angeforderte Verkaufsmenge %.4f übersteigt den Bestand %.4f von %s; verkauft wird der gesamte Bestand.",
-                            d0, d1, nm)
+            @warn r_sprintf(m["2"], d0, d1, nm)
         elseif code == 3
-            @warn r_sprintf("simulation: liquidate = TRUE: Position '%s' (Wert %.2f EUR) wurde nicht verkauft, weil die Ordergebühr den Erlös übersteigt.",
-                            nm, d0)
+            @warn r_sprintf(m["3"], nm, d0)
         elseif code == 4
-            @warn "no non-missing arguments to max; returning -Inf"
+            @warn m["4"]
         elseif code == 5
-            @warn r_sprintf("simulation: %s von %.2f EUR am %s: das Depot reicht nicht aus; %.2f EUR bleiben als negativer Geldbestand (Steuerschuld) bei '%s'.",
-                            _engine_label(aux, ints), d0, fmt_date(fl.flag_date[day]), d1, nm)
+            @warn r_sprintf(m["5"], _engine_label(aux, ints), d0, fmt_date(fl.flag_date[day]), d1, nm)
         elseif code == 6
-            @warn r_sprintf("simulation: Paragraf 23 EStG: Gewinne (%.2f EUR) erreichen die Freigrenze (%.2f EUR), ", d0, d1) *
-                  "aber 'marginal_tax_rate' ist nicht gesetzt.\n" *
-                  "Verwendet wird 42 % (Spitzensteuersatz); marginal_tax_rate in Prozent angeben (z. B. 42)."
+            @warn r_sprintf(m["6"], d0, d1) * m["6.rest"]
         else
-            error("simulation: interner Fehler: unbekannter Ereigniscode $code der Tagesengine.")
+            error(r_sprintf(m["unbekannt"], Int(code)))
         end
     end
     if failed
-        err_code == 101 && error("perform_asset_split: ratio muss > 0 sein (Split-Verhältnis), nicht $(r_format1(err_d0)).")
-        error("missing value where TRUE/FALSE needed")
+        err_code == 101 && error(r_sprintf(m["101"], r_format1(err_d0)))
+        error(m["na"])
     end
     return nothing
 end
 
-"details-Ausgabe eines Ereignisses (DT_* in engine_core_impl.h), wortgleich zu R 1.3.0."
+"details-Ausgabe eines Ereignisses (DT_* in engine_core_impl.h), wortgleich zu R 1.3.0; Texte aus `_MELD_ENGINE_DETAIL`."
 function _sim_engine_detail(R::Run, fl::Flags, code::Int, name::AbstractString, aux::Int, v, ints, ds::String)
     out(s) = _cat(R, s)
     anames(ix) = join((fl.flag_assets[k+1] for k in ix), ", ")
+    m = _MELD_ENGINE_DETAIL
+    sp = r_sprintf
     if code == 201
-        out(r_sprintf("%s\tKauf %.2fx %s zu %.2f EUR je Anteil am %s\n", _ENGINE_REASONS[aux+1], v[1], name, v[2], ds))
+        out(sp(m["201"], _ENGINE_REASONS[aux+1], v[1], name, v[2], ds))
     elseif code == 202
-        out(r_sprintf("\t\t=> Vorabpauschale-Anrechnung (§ 19 InvStG): %.2f EUR\n", v[1]))
+        out(sp(m["202"], v[1]))
     elseif code == 203
-        out(r_sprintf("\t\t=> Sparerpauschbetrag: %.2f EUR (verbleibend: %.2f EUR)\n", v[1], v[2]))
+        out(sp(m["203"], v[1], v[2]))
     elseif code == 204
-        out(r_sprintf("\t\t=> Steuerfreier Gewinn (Haltedauer > 1 Jahr): %.2f EUR\n", v[1]))
+        out(sp(m["204"], v[1]))
     elseif code == 205
-        out(r_sprintf("\t\t=> Nicht verrechenbarer Verlust (Haltedauer > 1 Jahr): %.2f EUR\n", v[1]))
+        out(sp(m["205"], v[1]))
     elseif code == 206
-        out(r_sprintf("\t\t=> Steuerpflichtiger Gewinn (Haltedauer < 1 Jahr): %.2f EUR (seit Jahresbeginn: %.2f EUR)\n", v[1], v[2]))
+        out(sp(m["206"], v[1], v[2]))
     elseif code == 207
-        out(r_sprintf("\t\t=> Verrechenbarer Verlust (Haltedauer < 1 Jahr): %.2f EUR (seit Jahresbeginn: %.2f EUR)\n", v[1], v[2]))
+        out(sp(m["207"], v[1], v[2]))
     elseif code == 208
-        out(r_sprintf("%s\tVerkauf %.2fx %s zu %.2f EUR je Anteil am %s\n", _ENGINE_REASONS[aux+1], v[1], name, v[2], ds))
+        out(sp(m["208"], _ENGINE_REASONS[aux+1], v[1], name, v[2], ds))
     elseif code == 209   # ifelse(gain < 0, ...) mit NA: "NA" wie R
-        out(r_sprintf("\t\t=> %s: %.2f EUR; Steuer: %.2f EUR\n", isnan(v[1]) ? "NA" : v[1] < 0 ? "Verlust" : "Gewinn", v[1], v[2]))
+        out(sp(m["209"], isnan(v[1]) ? "NA" : v[1] < 0 ? m["209.verlust"] : m["209.gewinn"], v[1], v[2]))
     elseif code == 210
-        out(r_sprintf("Freibetrag:\tRealisierung von Gewinnen %.2f EUR mit %.4fx %s (freier Sparer-Pauschbetrag/Verlusttopf %.2f EUR)\n",
-                      v[1], v[2], name, v[3]))
+        out(sp(m["210"], v[1], v[2], name, v[3]))
     elseif code == 211
-        desc = aux == 1 ? "1 : " * r_format1(v[1]; digits = 5) : r_format1(v[1]; digits = 5) * " : 1"
-        out("Split-Ereignis:\t$(aux == 1 ? "Split" : "Reverse-Split") $name im Verhältnis $desc am $ds\n")
+        desc = sp(aux == 1 ? m["211.v1"] : m["211.v2"], r_format1(v[1]; digits = 5))
+        out(sp(m["211"], aux == 1 ? m["211.split"] : m["211.reverse"], name, desc, ds))
     elseif code == 212
-        out("Split-Ereignis:\t$name ohne Bestand: Kursreihe $(aux == 1 ? "1 :" : ": 1") $(r_format1(v[1]; digits = 5)) am $ds\n")
+        out(sp(m["212"], name, aux == 1 ? m["212.v1"] : m["212.v2"], r_format1(v[1]; digits = 5), ds))
     elseif code == 213
-        out("Marktereignis:\tHandel mit $(anames(ints)) ab jetzt möglich.\n")
+        out(sp(m["213"], anames(ints)))
     elseif code == 214
-        parts = join((r_sprintf("%s %.2f EUR", fl.flag_assets[k+1], v[j+1]) for (j, k) in enumerate(ints)), "; ")
-        out(r_sprintf("Einzahlung:\t%.2f EUR in das Depot am %s\n\t\t=> ", v[1], ds) * parts * "\n")
+        parts = join((sp(m["214.teil"], fl.flag_assets[k+1], v[j+1]) for (j, k) in enumerate(ints)), "; ")
+        out(sp(m["214"], v[1], ds) * parts * "\n")
     elseif code == 215
-        out("Rebalancing:\tErzwungenes Rebalancing am $ds wegen neu handelbarer Assets: $(anames(ints))\n")
+        out(sp(m["215"], ds, anames(ints)))
     elseif code == 216
-        out(r_sprintf("Rebalancing:\tRebalancing am %s (max. Abweichung: %.2f%% > Schwelle: %.2f%%)\n", ds, v[1], v[2]))
+        out(sp(m["216"], ds, v[1], v[2]))
     elseif code == 217
-        out(r_sprintf("\t\t=> %s: Ziel=%.1f%%, Ist=%.1f%%, Abweichung=%.2f%%\n", name, v[1], v[2], v[3]))
+        out(sp(m["217"], name, v[1], v[2], v[3]))
     elseif code == 218
-        out(r_sprintf("Rebalancing:\tKein Rebalancing am %s (max. Abweichung: %.2f%% < Schwelle: %.2f%%)\n", ds, v[1], v[2]))
+        out(sp(m["218"], ds, v[1], v[2]))
     elseif code == 219
-        out(r_sprintf("\t\t%.2f EUR von %s in den Rebalancing-Topf\n", v[1], name))
+        out(sp(m["219"], v[1], name))
     elseif code == 220
-        out(r_sprintf("Rebalancing:\t%.2f EUR aus dem Rebalancing-Topf an %s\n", v[1], name))
+        out(sp(m["220"], v[1], name))
     elseif code == 221
-        out(r_sprintf("\t\t=> %s hält %.2f EUR als Cash-Reserve (Signal inaktiv)\n", name, v[1]))
+        out(sp(m["221"], name, v[1]))
     elseif code == 222
-        out(r_sprintf("\t\tRestverteilung von %.2f EUR aus dem Rebalancing-Topf\n", v[1]))
+        out(sp(m["222"], v[1]))
     elseif code == 223
-        out(r_sprintf("\t\t=> %.2f EUR an %s\n", v[1], name))
+        out(sp(m["223"], v[1], name))
     elseif code == 224
-        out(r_sprintf("Steuerereignis:\tVorabpauschale %s: %.2f EUR festgesetzt am %s (Zufluss und Steuer am ersten Handelstag des Folgejahres)\n",
-                      name, v[1], ds))
+        out(sp(m["224"], name, v[1], ds))
     elseif code == 225
-        out(r_sprintf("Steuerereignis:\tZahlung %s %.2f EUR für %s aus dem Geldbestand am %s\n", _engine_label(aux, ints), v[1], name, ds))
+        out(sp(m["225"], _engine_label(aux, ints), v[1], name, ds))
     elseif code == 226
-        out(r_sprintf("Steuerereignis:\tTeilzahlung %s %.2f EUR aus dem Geldbestand am %s\n", _engine_label(aux, ints), v[1], ds))
+        out(sp(m["226"], _engine_label(aux, ints), v[1], ds))
     elseif code == 227
-        out(r_sprintf("\t\t=> Anteile verkauft für den Rest von %.2f EUR (%s)\n", v[1], _engine_label(aux, ints)))
+        out(sp(m["227"], v[1], _engine_label(aux, ints)))
     elseif code == 228
-        out(r_sprintf("Steuerereignis:\tVeranlagung %d: Nachzahlung %.2f EUR (davon § 23 %.2f EUR, Kirchensteuer-Sonderausgaben %.2f EUR%s) am %s, aufgeteilt %s\n",
-                      Int(v[1]), v[2], v[3], v[4], aux & 1 != 0 ? r_sprintf(", Günstigerprüfung %.2f EUR", v[5]) : "", ds,
-                      aux & 2 != 0 ? "nach dem § 23-Jahressaldo je Asset" : "zu gleichen Teilen auf die Assets"))
+        out(sp(m["228"], Int(v[1]), v[2], v[3], v[4], aux & 1 != 0 ? sp(m["228.guenstiger"], v[5]) : "", ds,
+               aux & 2 != 0 ? m["228.asset"] : m["228.gleich"]))
     elseif code == 229
-        out(r_sprintf("\t\t=> Anteil %s: %.2f EUR\n", name, v[1]))
+        out(sp(m["229"], name, v[1]))
     elseif code == 230
-        out(r_sprintf("Steuerereignis:\t§ 23 EStG: Steuer %.2f EUR (%s) am %s\n", v[1], name, ds))
+        out(sp(m["230"], v[1], name, ds))
     elseif code == 231
-        out(r_sprintf("Steuerereignis:\tGünstigerprüfung: Erstattung %.2f EUR in den Geldbestand am %s\n", v[1], ds))
+        out(sp(m["231"], v[1], ds))
     elseif code == 232
-        out(r_sprintf("Steuerereignis:\tVorabpauschale %s (festgesetzt %s): %.2f EUR, nach TFS %.2f EUR, SPB %.2f EUR, Steuer %.2f EUR am %s\n",
-                      name, fmt_date(Int(v[1])), v[2], v[3], v[4], v[5], ds))
+        out(sp(m["232"], name, fmt_date(Int(v[1])), v[2], v[3], v[4], v[5], ds))
     elseif code == 240
-        out("\n" * _DOUBLE_LINE * "\n")
-        out("  JAHRESWECHSEL: $(Int(v[1])) -> $(Int(v[2]))\n")
-        out(_DOUBLE_LINE * "\n")
+        out(m["240.1"])
+        out(sp(m["240.2"], Int(v[1]), Int(v[2])))
+        out(m["240.3"])
     elseif code == 241
-        out(r_sprintf("  § 23 EStG: Verlustvortrag verwendet: %.2f EUR\n", v[1]))
-        out(r_sprintf("             Verbleibender Vortrag: %.2f EUR\n", v[2]))
+        out(sp(m["241.1"], v[1]))
+        out(sp(m["241.2"], v[2]))
     elseif code == 242
-        out("  § 23 EStG Jahresübersicht $(Int(v[1])):\n")
-        out(r_sprintf("    Bruttogewinne (< 1 Jahr):    %10.2f EUR\n", v[2]))
-        out(r_sprintf("    Bruttoverluste (< 1 Jahr):   %10.2f EUR\n", v[3]))
-        out(r_sprintf("    Interne Verrechnung:         %10.2f EUR\n", v[4]))
-        out(r_sprintf("    Verlustvortrag-Verrechnung:  %10.2f EUR\n", v[5]))
-        out("    " * "─"^41 * "\n")
-        out(r_sprintf("    Netto-Ergebnis:              %10.2f EUR\n", v[6]))
+        out(sp(m["242.1"], Int(v[1])))
+        out(sp(m["242.2"], v[2]))
+        out(sp(m["242.3"], v[3]))
+        out(sp(m["242.4"], v[4]))
+        out(sp(m["242.5"], v[5]))
+        out(m["242.6"])
+        out(sp(m["242.7"], v[6]))
     elseif code == 243
-        out("\n  ⚠ FREIGRENZE ERREICHT!\n")
-        out(r_sprintf("    Jahressaldo %.2f EUR >= Freigrenze %.2f EUR\n", v[1], v[2]))
-        out(r_sprintf("    → GESAMTER Gewinn nach Verlustvortrag steuerpflichtig: %.2f EUR (Freigrenze, kein Freibetrag!)\n", v[3]))
+        out(m["243.1"])
+        out(sp(m["243.2"], v[1], v[2]))
+        out(sp(m["243.3"], v[3]))
         if aux == 1
-            out("    → Steuer nach dem Einkommensteuertarif (ESt + Soli + KiSt des § 23-Zuwachses): siehe Jahresveranlagung unten (Zeile § 23)\n")
+            out(m["243.tarif"])
         else
-            out(r_sprintf("    → Steuersatz: %.1f%%%s%s\n", v[4] * 100,
-                          v[5] > 1 ? r_sprintf(" + %.1f%%%% Soli", (v[5] - 1) * 100) : "",
-                          v[6] > 0 ? r_sprintf(" + %.1f%% KiSt", v[6] * 100) : ""))
-            out(r_sprintf("    → Steuerlast: %.2f EUR\n", v[7]))
+            out(sp(m["243.satz"], v[4] * 100, v[5] > 1 ? sp(m["243.soli"], (v[5] - 1) * 100) : "",
+                   v[6] > 0 ? sp(m["243.kist"], v[6] * 100) : ""))
+            out(sp(m["243.last"], v[7]))
         end
     elseif code == 244
-        out(r_sprintf("\n  Nettoverlust %.2f EUR → Vortrag ins nächste Jahr\n", v[1]))
-        out(r_sprintf("  Gesamter Verlustvortrag: %.2f EUR\n", v[2]))
+        out(sp(m["244.1"], v[1]))
+        out(sp(m["244.2"], v[2]))
     elseif code == 245
-        out(r_sprintf("\n  ✓ Jahressaldo %.2f EUR < Freigrenze %.2f EUR → STEUERFREI (Verlustvortrag unverändert)\n", v[1], v[2]))
+        out(sp(m["245"], v[1], v[2]))
     elseif code == 246
-        out("\n  Keine steuerpflichtigen § 23 Vorgänge in $(Int(v[1]))\n")
+        out(sp(m["246"], Int(v[1])))
     elseif code == 247
-        out("\n  Sparerpauschbetrag $(Int(v[1])):\n")
-        out(r_sprintf("    Jahresbetrag:    %10.2f EUR\n", v[2]))
-        out(r_sprintf("    Verwendet:       %10.2f EUR\n", v[3]))
-        out(r_sprintf("    Verfallen:       %10.2f EUR\n", v[4]))
+        out(sp(m["247.1"], Int(v[1])))
+        out(sp(m["247.2"], v[2]))
+        out(sp(m["247.3"], v[3]))
+        out(sp(m["247.4"], v[4]))
     elseif code == 248
-        out(r_sprintf("  § 20 EStG: Unterjährige Verlustverrechnung -> Erstattung %.2f EUR in den Geldbestand\n", v[1]))
+        out(sp(m["248"], v[1]))
     elseif code == 249
-        out(r_sprintf("  § 20 EStG: Verlust gibt Sparer-Pauschbetrag frei: %.2f EUR (genutzt %d: %.2f EUR, Verlusttopf %.2f EUR)\n",
-                      v[1], Int(v[2]), v[3], v[4]))
+        out(sp(m["249"], v[1], Int(v[2]), v[3], v[4]))
     elseif code == 250   # Jahreszeile in der Reihenfolge TR_* (tariff_core_impl.h)
         year, X1, D = Int(v[1]), v[21], v[23]
-        out(r_sprintf("  Tarif %d: zvE %.2f EUR - KiSt-Sonderausgaben %.2f EUR (gezahlt %.2f, erstattet %.2f) = %.2f EUR (Wirkung %.2f EUR)\n",
-                      year, v[2], v[5], v[3], v[4], v[6], v[7]))
-        aux & 2 != 0 && out(r_sprintf("    § 23: Gewinn %.2f EUR -> Steuerlast ESt %.2f + Soli %.2f + KiSt %.2f = %.2f EUR\n",
-                                      v[8], v[9], v[10], v[11], v[12]))
-        aux & 1 != 0 && out(r_sprintf("    Günstigerprüfung: K %.2f EUR, Abgeltungsteuer %.2f EUR (KiSt %.2f), Tarif auf K %.2f EUR (ESt %.2f + Soli %.2f + KiSt %.2f); Belastung ohne %.2f / mit %s EUR -> %s\n",
-                                      v[13], v[14], v[15], v[19], v[16], v[17], v[18], v[20], isnan(X1) ? "-" : r_sprintf("%.2f", X1),
-                                      v[22] != 0 ? "Tarif" : "Abgeltungsteuer bleibt"))
-        out(r_sprintf("    Abrechnung: %s %.2f EUR; KiSt-Bescheid %+.2f EUR (Sonderausgabe %d)\n",
-                      D >= 0 ? "Nachzahlung" : "Erstattung", abs(D), v[25], year + 1))
+        out(sp(m["250.1"], year, v[2], v[5], v[3], v[4], v[6], v[7]))
+        aux & 2 != 0 && out(sp(m["250.p23"], v[8], v[9], v[10], v[11], v[12]))
+        aux & 1 != 0 && out(sp(m["250.guenstiger"], v[13], v[14], v[15], v[19], v[16], v[17], v[18], v[20],
+                               isnan(X1) ? "-" : sp(m["250.x1"], X1), v[22] != 0 ? m["250.tarif"] : m["250.bleibt"]))
+        out(sp(m["250.abrechnung"], D >= 0 ? m["250.nach"] : m["250.erst"], abs(D), v[25], year + 1))
     elseif code == 251
-        out("\n  Tracker zurückgesetzt für Jahr $(Int(v[1]))\n")
-        out(_DOUBLE_LINE * "\n\n")
+        out(sp(m["251.1"], Int(v[1])))
+        out(m["251.2"])
     else
-        error("simulation: interner Fehler: unbekannter Ereigniscode $code der Tagesengine.")
+        error(sp(_MELD_ENGINE_SIGNAL["unbekannt"], code))
     end
     return nothing
 end

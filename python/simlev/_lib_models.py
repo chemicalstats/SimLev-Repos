@@ -2,8 +2,8 @@
 DCC(1,1), MS-GARCH und univariates HMM, Bootstrap-Kerne.
 
 Gegenstück zu ``r/R/slc_models.R`` (R) und ``julia/src/slib_models.jl`` (Julia). Die Rechnung
-steht in ``src/core/slc_{garch,gpd,dcc,msgarch,boot}.c`` (Kopien von ``core/``), die Hülle in
-``src/_ext_slc_models.c`` (Modul ``simlev._ext``). Fehlertexte und Warnungen kommen aus dem Kern
+steht in ``src/core/slc_{garch,gpd,dcc,msgarch,boot}.cpp`` (Kopien von ``core/``), die Hülle in
+``src/_ext_slc_models.cpp`` (Modul ``simlev._ext``). Fehlertexte und Warnungen kommen aus dem Kern
 (Fehler: ``ValueError``; Warnung: ``warnings.warn``). Erreichbar über ``simlev._lib``.
 
 Seit 1.0.0/b rufen die Ports diese Hüllen an denselben Stellen wie R. Die Hüllen liefern

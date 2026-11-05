@@ -26,8 +26,8 @@ python3 core/sync.py --write          # nach einer Änderung in core/ verteilen
 julia --project=julia -e 'using Pkg; Pkg.build()'   # deps/build.jl: libslc mit C- und C++-Compiler
 julia --project=julia -e 'using SimLev'             # Vorkompilieren (einige Minuten, siehe unten)
 julia --project=julia tests/run.jl                  # Tests (Gruppen gleichlauf, fehler, ausgabe, schnittstelle)
-tests/werkzeuge/gleichlauf/run.sh --quick           # Gleichlauf mit R und Python
-tests/werkzeuge/doku/beispiele.sh julia             # Beispiele der READMEs und des Tutorials
+tests/werkzeuge/gleichlauf/run.py --quick           # Gleichlauf mit R und Python
+tests/werkzeuge/doku/beispiele.py julia             # Beispiele der READMEs und des Tutorials
 ```
 
 Nach jeder Änderung an `src/` kompiliert das erste `using SimLev` das Paket neu vor; bei der
@@ -59,8 +59,8 @@ und `precompile.jl`.
 | `src/r/base.jl` | `RBase` | Summen, Mittel, `cumsum`, `cumprod`, `rowSums`, … mit `long double` → `_r/base.py` |
 | `src/r/parallel.jl` | `RParallel` | `.par_lapply` mit `Threads.@spawn` (`par_lapply`), Meldungen und Ausgaben je Aufgabe (`r_stderr`, `r_stdout`, `suppress_messages`), siehe [Parallelität](#parallelität-cores) → `_r/parallel.py` |
 | `src/r/fmt.jl` | `RFmt` | `format`, `formatC`, `sprintf`, `round`, `signif`, `print` von Vektoren/Matrizen/data.frames → `_r/fmt.py` |
-| `src/r/stats.jl` | `RStats` | Modulkopf mit Exporten; bindet die Themen ein (gleiche Namen wie in Python): `stats_sort.jl` (Hilfen, `order`, `r_sort`, `r_rank`, `cut`, `quantile`, `median`, …), `stats_cor.jl` (`cor`, `cov`, `var`, `scale`), `stats_smooth.jl` (`approx`, `r_filter`), `stats_optim.jl` (`optimize`, `uniroot`), `stats_models.jl` (`coef`, `fitted`, `p_adjust`, `ecdf`, `ave`, `aggregate`), `stats_cluster.jl` (`dist`, `hclust`) → `_r/stats.py` (Sammelmodul) und `_r/stats_*.py` |
-| `src/r/linalg.jl` | `RLinalg` | `outer`, `diag`, `is_symmetric`, `all_equal_numeric` (seit 1.0.0 ohne `matprod`, `solve`, `chol`, `qr`, `eigen` und die BLAS/LAPACK/LINPACK-Ports) → `_r/linalg.py` |
+| `src/r/stats.jl` | `RStats` | Modulkopf mit Exporten; bindet die Themen ein (gleiche Namen wie in Python): `stats_sort.jl` (Hilfen, `order`, `r_sort`, `r_rank`, `cut`, `quantile`, `median`, …), `stats_cor.jl` (`cor`, `cov`, `var`, `scale`), `stats_smooth.jl` (`approx`, `r_filter`), `stats_optim.jl` (`optimize`), `stats_models.jl` (`coef`, `fitted`, `p_adjust`, `ecdf`, `ave`, `aggregate`), `stats_cluster.jl` (`dist`, `hclust`) → `_r/stats.py` (Sammelmodul) und `_r/stats_*.py` |
+| `src/r/linalg.jl` | `RLinalg` | `outer`, `diag`, `all_equal_numeric` (seit 1.0.0 ohne `matprod`, `solve`, `chol`, `qr`, `eigen` und die BLAS/LAPACK/LINPACK-Ports) → `_r/linalg.py` |
 | `src/r/rexpr.jl` | `RExpr` | Ausdrücke in R-Syntax als Text (`eval(parse(text = …), data, env)`): ein gemeinsamer Auswerter für Bedingungen in `bootstrap_probability`, `regime_subset`, `view_prob`/`scenario_entropy_pooling` und `tactical_rules` (R-Vorrang inkl. schwach bindendem `!`, NA-Logik, `%in%`, `%%`, Funktionen über `RLibm`/`RFmt`) |
 | `src/engine.jl` u. a. | – | `simulation()` und Strategie/Config: `engine.jl` (Hilfen, Handels- und Steuerfunktionen; r/R/sim_base.R → `_sim_base.py`), `sim_phases.jl` (r/R/sim_validate.R, sim_prepare.R → `_sim_phases.py`), `sim_engine.jl` (Phasen 4 und 5 über den C++-Kern `core/engine_core_impl.h`; r/R/sim_engine.R → `_sim_engine.py`), `sim_evaluate.jl` (r/R/sim_evaluate.R → `_sim_evaluate.py`; dazu `simulation()` und `_simulation_flat()` aus r/R/simulation.R → `engine.py`), `sim_blocks.jl` (Bausteine, r/R/sim_blocks.R → `_sim_blocks.py`), `wrapper.jl` (Fonds-Wrapper `wrapper_config`, `wrapper_nav`, Anteilswert `_wrapper_nav_calc`, r/R/wrapper.R → `wrapper.py`; Hilfen der Strategie `_strategy_columns`, `_strategy_wrappers` in `config.jl`) |
 | `src/svg.jl` | – | Grafikmodul: `SimLevPlot`, `_plot_method` & Co., alle SVG-Zeichenbausteine (siehe [Grafik](#grafik)) → `simlev/svg.py` |
@@ -103,7 +103,7 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
 2. **Nie `sum`, `prod`, `mean` aus Base auf Gleitkommavektoren**: Julia
    summiert paarweise. R summiert sequenziell in `long double` – dafür
    `RBase.r_sum`, `r_mean`, `r_cumsum`, `r_prod`, `r_var` usw., im Fachcode
-   `SimLev._ld_colsums`/`_ld_rowsums` (alle über die C-Kerne `core/slc_rbase*.c`).
+   `SimLev._ld_colsums`/`_ld_rowsums` (alle über die C-Kerne `core/slc_rbase*.cpp`).
    Wo C++ mit `double` sequenziell summiert, eine einfache Schleife.
 3. **Nie `exp`, `log`, `log1p`, `expm1`, `^`, `tanh`, `sin`, … aus Base** auf
    Float64: Julia rechnet sie selbst, R nutzt glibc-libm. Immer `RLibm.*`
@@ -142,7 +142,7 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
     `SimLevPlot(svg, data, x, klasse)`. Geschrieben wird nur mit
     `file = "….svg"`, unbekannte Schlüsselwörter ergeben eine Warnung.
     Zeichenbausteine nur aus `src/svg.jl` (siehe [Grafik](#grafik)).
-14. long-double-Summen rechnen seit 1.2.0 die C-Kerne `core/slc_rbase*.c` (x87 wie R, kein Nachbau in
+14. long-double-Summen rechnen seit 1.2.0 die C-Kerne `core/slc_rbase*.cpp` (x87 wie R, kein Nachbau in
     Julia). In den geteilten Engine-Kernen gilt seit 1.2.0 die Regel „NA vor NaN“ (`core/simlev_core.h`).
     Zur Geschichte: treffen in `a + b` oder `a * b` zwei NaN
     aufeinander (NA und NaN), behält x86 den ersten Operanden der Anweisung,
@@ -254,7 +254,7 @@ und zugleich nach `python/simlev/svg.py`.
 
 Die Referenzfälle liegen seit 1.4.1 im Ordner `tests/` des Repositorys (Katalog
 [`tests/README.md`](../tests/README.md)); frische Fälle erzeugt und vergleicht die
-Gleichlaufprüfung `tests/werkzeuge/gleichlauf/run.sh`, die nach jeder Änderung an der Rechenlogik
+Gleichlaufprüfung `tests/werkzeuge/gleichlauf/run.py`, die nach jeder Änderung an der Rechenlogik
 läuft.
 
 Die Referenzfälle unter `tests/<gruppe>/faelle/<bereich>.jsonl.gz` erzeugen die Generatoren
@@ -326,7 +326,7 @@ Standardwert geändert).
 
 Eine gewollte Änderung der Schnittstelle wird bewusst neu festgeschrieben:
 Eintrag oben in `tests/schnittstelle/CHANGES.md` (Datum, was sich ändert,
-warum), dann aus der Repo-Wurzel `tests/schnittstelle/run.sh --freeze`; das
+warum), dann aus der Repo-Wurzel `tests/schnittstelle/run.py --freeze`; das
 schreibt `frozen/` für alle drei Sprachen neu und bricht ohne neuen Eintrag
 ab. Einzelheiten in [`tests/schnittstelle/README.md`](../tests/schnittstelle/README.md).
 
@@ -348,7 +348,8 @@ Vorkompilieren.
 | `SIMLEV_FAELLE_DIR` | anderer Ordner der Bereichsdateien für `tests/run.jl` (seit 1.4.1; `SIMLEV_FULL_TESTS`, `SIMLEV_GOLDEN_DIR` und `SIMLEV_MODULE_DIR` entfallen seit 1.4.2) | Prüfung |
 | `SIMLEV_SKIP_PRECOMPILE` | `1`: keine Arbeitslast beim Vorkompilieren | Entwicklung |
 | `SIMLEV_SKIP_PRECOMPILE_EXT` | `1`: Arbeitslast ohne die Analysemodule | Entwicklung |
-| `SIMLEV_CC` | C-Compiler für `Pkg.build` (gelesen in `deps/build.jl`) | Bau |
+| `SIMLEV_CXX` | C++-Compiler für `Pkg.build` (gelesen in `deps/build.jl`; bis 1.5.2 `SIMLEV_CC` für den C-Teil) | Bau |
+| `SIMLEV_THREADS` | Threads der elementweisen Kerne (qt, pt; seit 1.6.0): ganze Zahl >= 1, sonst Zahl der Prozessoren (höchstens 8); Ergebnis unabhängig davon | Nutzer |
 
 Seit 1.0.0 entfallen `SIMLEV_LAPACK` und `SIMLEV_R_SYS_TIME`.
 
@@ -360,12 +361,13 @@ lesen eigene Schalter (`SIMLEV_R_NMATH_SRC`, `SIMLEV_ALLOW_PARTIAL`, siehe
 ## C-Bibliothek (Pflicht)
 
 Zufall, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, die
-Bootstrap-Kerne, Stineman, Glättungsspline und Kerndichte rechnet die C-Bibliothek slc (seit
-1.0.0). `deps/build.jl` (läuft bei `Pkg.build`/`Pkg.add`) übersetzt `deps/core/*.c` mit
-`-std=c99 -O2 -fPIC -ffp-contract=off -fno-fast-math` zu `deps/usr/lib/libslc` und schreibt
-`deps/deps.jl`; der C-Compiler kommt aus `SIMLEV_CC`, sonst `cc`, `gcc` oder `clang`, der
-C++-Compiler aus `SIMLEV_CXX`, sonst `c++`, `g++` oder `clang++`. Ohne Bibliothek
-bricht `using SimLev` mit einer Meldung ab, die `Pkg.build("SimLev")` mit C-Compiler verlangt. Die
+Bootstrap-Kerne, Stineman, Glättungsspline und Kerndichte rechnet die Bibliothek slc (seit
+1.0.0; seit 1.6.0 C++, bis 1.5.2 C99). `deps/build.jl` (läuft bei `Pkg.build`/`Pkg.add`) übersetzt
+`deps/core/slc*.cpp` und `deps/core/simlev_cabi.cpp` mit
+`-std=gnu++17 -O2 -fPIC -ffp-contract=off -fno-fast-math` zu `deps/usr/lib/libslc` und schreibt
+`deps/deps.jl`; der C++-Compiler kommt aus `SIMLEV_CXX`, sonst `c++`, `g++` oder `clang++`
+(`SIMLEV_CC` liest es seit 1.6.0 nicht mehr). Ohne Bibliothek
+bricht `using SimLev` mit einer Meldung ab, die `Pkg.build("SimLev")` mit C++-Compiler verlangt. Die
 Hüllen stehen in `src/slib*.jl` (`SimLev.SLib`, `ccall`, Fehler über den Kontext `sl_ctx`).
 
 **Ort der Quellen (`core/`):** kanonisch in `core/` (nur dort ändern); Kopien
@@ -395,7 +397,7 @@ Nachbildung von R's Zufall (`RRng`, Exporte `set_seed`/`rng_kind`) ist mit 1.0.0
 Die Tests stehen in `tests/` (siehe [Bauen, Vorkompilieren, Abgleich und
 Tests](#bauen-vorkompilieren-abgleich-und-tests)): `julia --project=julia tests/run.jl [gleichlauf
 fehler ausgabe schnittstelle]` prüft gegen die Referenzfälle aus R. Dazu kommt die
-Gleichlaufprüfung `tests/werkzeuge/gleichlauf/run.sh` (siehe
+Gleichlaufprüfung `tests/werkzeuge/gleichlauf/run.py` (siehe
 [`python/DEVELOPING.md`](../python/DEVELOPING.md#tests)).
 
 ## Schichten

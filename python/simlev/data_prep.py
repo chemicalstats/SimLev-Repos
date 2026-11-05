@@ -34,6 +34,7 @@ from ._r.base import quiet_fp
 from ._r.fmt import NA_REAL
 from ._r.rlist import RList
 from ._r.rnum import r_cumprod, r_isna, r_mean, r_median, r_sum
+from ._util import _match_arg
 
 __all__ = [
     "series_align", "series_check", "SimLevDataCheck", "series_align_macro", "series_convert_currency",
@@ -53,31 +54,6 @@ def message(text: str) -> None:
     """R-``message()``: Text mit Zeilenumbruch auf ``sys.stderr``."""
     sys.stderr.write(str(text) + "\n")
     sys.stderr.flush()
-
-
-def _match_arg(arg, choices):
-    """R-``match.arg(arg)`` mit den Voreinstellungen ``choices``.
-
-    ``None`` oder der vollständige Auswahlvektor ergeben die erste Wahl;
-    eindeutige Präfixe werden ergänzt. Fehlermeldung wortgleich zu R.
-    """
-    choices = tuple(choices)
-    if arg is None:
-        return choices[0]
-    if isinstance(arg, (list, tuple, np.ndarray)):
-        if tuple(arg) == choices:
-            return choices[0]
-        if len(arg) != 1:
-            raise ValueError("'arg' must be of length 1")
-        arg = arg[0]
-    if not isinstance(arg, str):
-        raise ValueError("'arg' must be NULL or a character vector")
-    if arg in choices:
-        return arg
-    hits = [c for c in choices if c.startswith(arg)] if arg else []
-    if len(hits) == 1:
-        return hits[0]
-    raise ValueError("'arg' should be one of %s" % ", ".join("\u201c%s\u201d" % c for c in choices))
 
 
 def _isna_scalar(x) -> bool:
@@ -192,7 +168,7 @@ def _date_str(day) -> str:
 
 
 def _strptime_ymd(s, sep="-") -> float:
-    """``as.Date(s, format = "%Y-%m-%d")`` (bzw. ``/``) für einen Text; NA = nan (Kern core/slc_rbase_date.c)."""
+    """``as.Date(s, format = "%Y-%m-%d")`` (bzw. ``/``) für einen Text; NA = nan (Kern core/slc_rbase_date.cpp)."""
     if s is None:
         return _NAN
     z = _ext.slc_r_strptime_ymd(s, sep)
@@ -550,24 +526,17 @@ def _as_frame(x):
     return x
 
 
-def _duplicated_from_last(v) -> np.ndarray:
+def _duplicated(v, from_last=False) -> np.ndarray:
+    """R ``duplicated(v, fromLast)``; NaN/NA als ein Schlüssel, 0 und -0 gleich. Gleitkommafelder seit 1.5.2 ohne
+    Schleife (``np.unique``: erstes Vorkommen je Wert)."""
+    if isinstance(v, np.ndarray) and v.ndim == 1 and v.dtype.kind == "f":
+        w = v[::-1] if from_last else v
+        out = np.ones(len(w), dtype=bool)
+        out[np.unique(w, return_index=True, equal_nan=True)[1]] = False
+        return out[::-1].copy() if from_last else out
     seen = set()
     out = np.zeros(len(v), dtype=bool)
-    for i in range(len(v) - 1, -1, -1):
-        key = v[i]
-        if isinstance(key, float) and math.isnan(key):
-            key = "NA"
-        if key in seen:
-            out[i] = True
-        else:
-            seen.add(key)
-    return out
-
-
-def _duplicated(v) -> np.ndarray:
-    seen = set()
-    out = np.zeros(len(v), dtype=bool)
-    for i in range(len(v)):
+    for i in (range(len(v) - 1, -1, -1) if from_last else range(len(v))):
         key = v[i]
         if isinstance(key, float) and math.isnan(key):
             key = "NA"
@@ -623,7 +592,7 @@ def _dp_frame(x, name):
     o = np.argsort(days, kind="stable")
     days = days[o]
     cols = {k: v[o] for k, v in cols.items()}
-    dup = _duplicated_from_last(days)
+    dup = _duplicated(days, from_last=True)
     if dup.any():
         message("Hinweis: '%s' hat %d doppelte Daten; der letzte Wert je Datum wird verwendet." % (name, int(dup.sum())))
         days = days[~dup]

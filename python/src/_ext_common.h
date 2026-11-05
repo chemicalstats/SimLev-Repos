@@ -21,7 +21,7 @@
  *
  * Die frueheren Kerne mit Zufallszahlen (Bootstrap, truncnorm mit der
  * C-Nachbildung von R's RNG in _rng_r.c) sind seit 1.0.0 entfallen; Zufall zieht nur
- * noch die C-Bibliothek slc (_ext_slc*.c).
+ * noch die C-Bibliothek slc (_ext_slc*.cpp).
  *
  * Ohne Abbruchpruefung geben die Huellen die GIL waehrend der Rechnung frei. Die
  * Tagesengine (_ext_engine.cpp, core/engine_core_impl.h) hat eigenen Zustand und braucht nur diese Makros.
@@ -318,15 +318,17 @@ typedef ext::IVec LglVec;   /* logische Vektoren als int32 */
 extern PyMethodDef simlev_ext_research_methods[];
 extern PyMethodDef simlev_ext_withdrawal_methods[];
 extern PyMethodDef simlev_ext_engine_methods[];
-/* _ext_slc.c (C): Huellen der C-Bibliothek slc */
+/* _ext_slc.cpp (C): Huellen der C-Bibliothek slc */
 extern "C" PyMethodDef simlev_ext_slc_methods[];
-/* _ext_slc_linalg.c (C): lineare Algebra, Matrixprodukt, kleinste Quadrate, Stineman, Spline, Kerndichte */
+/* _ext_slc_linalg.cpp (C): lineare Algebra, Matrixprodukt, kleinste Quadrate, Stineman, Spline, Kerndichte */
 extern "C" PyMethodDef simlev_ext_slc_linalg_methods[];
 
-/* _ext_slc_opt.c (C): Huellen der Optimierer der C-Bibliothek slc */
+/* _ext_slc_opt.cpp (C): Huellen der Optimierer der C-Bibliothek slc */
 extern "C" PyMethodDef simlev_ext_slc_opt_methods[];
-/* _ext_slc_models.c (C): Huellen der Modelle der C-Bibliothek slc */
+/* _ext_slc_models.cpp (C): Huellen der Modelle der C-Bibliothek slc */
 extern "C" PyMethodDef simlev_ext_slc_models_methods[];
-extern "C" PyMethodDef simlev_ext_slc_rbase_methods[];   /* _ext_slc_rbase.c */
+extern "C" PyMethodDef simlev_ext_slc_rbase_methods[];   /* _ext_slc_rbase.cpp */
+extern "C" PyMethodDef simlev_ext_slc_prep_methods[];    /* _ext_slc_prep.cpp (seit 1.6.0) */
+extern "C" PyMethodDef simlev_ext_slc_rbase2_methods[];  /* _ext_slc_rbase2.cpp (seit 1.6.0) */
 
 #endif

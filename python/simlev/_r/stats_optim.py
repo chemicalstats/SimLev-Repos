@@ -1,19 +1,19 @@
-# Herkunft:           übersetzt aus R 4.3.3, src/library/stats/src/optimize.c (Brent_fmin), zeroin.c
-#                     (R_zeroin2); nachgebildet nach R 4.3.3, src/library/stats/R/optimize.R, nlm.R
-#                     (uniroot)
+# Herkunft:           nachgebildet nach R 4.3.3, src/library/stats/R/optimize.R und src/library/stats/src/optimize.c
+#                     (do_fmin, fcn1); Brent_fmin seit 1.6.0 im Kern (core/slc_opt_fmin.cpp, bis 1.5.2 _optim.py)
 # Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut
 #                     Kopf der jeweiligen R-Quelle); Verfahren R. P. Brent, Algorithms for
 #                     Minimization without Derivatives (1973), über Netlib go/fmin.f (ohne Urheber-
-#                     und Lizenzvermerk) bzw. c/brent.shar (Kopf nicht geprüft); zeroin.c:
-#                     Ergänzungen von Peter Dalgaard
+#                     und Lizenzvermerk)
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang.
-"""Eindimensionale Verfahren ``optimize`` und ``uniroot``, nachgebildet aus R 4.3.3
-``stats/R/optimize.R`` und ``stats/src/optimize.c``.
+"""Eindimensionales Verfahren ``optimize``, nachgebildet aus R 4.3.3
+``stats/R/optimize.R`` und ``stats/src/optimize.c``; das Verfahren (Brent fmin) rechnet seit 1.6.0 der Kern
+(``core/slc_opt_fmin.cpp``, Frage/Antwort über ``simlev._ext.slc_fmin_*``).
 
 Seit 1.0.0 entfallen ``optim``, ``optimhess`` und ``nlminb`` (PORT): SimLev optimiert mit den
-eigenen Verfahren der C-Bibliothek slc (:mod:`simlev._lib`).
+eigenen Verfahren der C-Bibliothek slc (:mod:`simlev._lib`). Seit 1.5.2 entfällt ``uniroot`` (ohne
+Aufrufer, seit 1.4.0 rechnet XIRR im Kern mit ``sl_r_zeroin2``).
 """
 from __future__ import annotations
 
@@ -22,19 +22,15 @@ import math
 import numpy as np
 import pandas as pd
 
+from .. import _ext
 from .linalg import RError
 from .rlist import RList
-from .rnum import NA_REAL
-from .stats_sort import _DBL_MAX, _NAN, _warn
+from .stats_sort import _DBL_MAX, _warn
 
-__all__ = ["optimize", "optimise", "uniroot"]
+__all__ = ["optimize", "optimise"]
 
 
-# ── optimize / uniroot ────────────────────────────────────────────────────
-
-def _g(x):
-    return "%g" % x
-
+# ── optimize ────────────────────────────────────────────────────
 
 class _OptRes(RList):
     pass
@@ -81,9 +77,14 @@ def optimize(f, interval=None, *args, lower=None, upper=None, maximum=False,
     tol = float(tol)
     if not math.isfinite(tol) or tol <= 0.0:
         raise RError("invalid 'tol' value")
-    from ._optim import brent_fmin
+    # Brent fmin seit 1.6.0 im Kern (core/slc_opt_fmin.cpp, Frage/Antwort; bis 1.5.2 _r/_optim.py)
+    ws = np.empty(24)                          # SL_FMIN_WS
+    _ext.slc_fmin_init(ws, lower, upper, tol)
     with np.errstate(all="ignore"):
-        val = brent_fmin(lower, upper, fcn1, tol)
+        need, val = _ext.slc_fmin_ask(ws)
+        while need:
+            _ext.slc_fmin_tell(ws, fcn1(val))
+            need, val = _ext.slc_fmin_ask(ws)
     res = _OptRes()
     res["maximum" if maximum else "minimum"] = val
     obj = f(val, *args, **kwargs)
@@ -93,170 +94,6 @@ def optimize(f, interval=None, *args, lower=None, upper=None, maximum=False,
 
 
 optimise = optimize
-
-
-def uniroot(f, interval=None, *args, lower=None, upper=None, f_lower=None, f_upper=None,
-            extendInt="no", check_conv=False, tol=0.0001220703125, maxiter=1000, trace=0, **kwargs):
-    """``uniroot(f, interval, ..., lower, upper, f.lower, f.upper, extendInt,
-    check.conv, tol, maxiter, trace)``; ``RList`` mit ``root``, ``f_root``
-    (R-Name ``f.root``), ``iter``, ``init_it`` (``init.it``), ``estim_prec``
-    (``estim.prec``)."""
-    from ._optim import zeroin2
-    if interval is not None and len(interval) != 2:
-        raise RError("'interval' must be a vector of length 2")
-    if lower is None:
-        lower = min(interval)
-    if upper is None:
-        upper = max(interval)
-    lower = float(lower)
-    upper = float(upper)
-    if not lower < upper:
-        raise RError("lower < upper  is not fulfilled")
-
-    def ff(x):
-        v = _num1(f(x, *args, **kwargs), "")
-        return float(v[0]) if v.size >= 1 else _NAN
-    if f_lower is None:
-        f_lower = ff(lower)
-    if f_lower != f_lower:
-        raise RError("f.lower = f(lower) is NA")
-    if f_upper is None:
-        f_upper = ff(upper)
-    if f_upper != f_upper:
-        raise RError("f.upper = f(upper) is NA")
-    f_lower = float(f_lower)
-    f_upper = float(f_upper)
-    sigs = {"yes": None, "downX": -1.0, "no": 0.0, "upX": 1.0}
-    ext = [k for k in sigs if k.startswith(extendInt)] if extendInt else []
-    if len(ext) != 1:
-        raise RError("'arg' should be one of “no”, “yes”, “downX”, “upX”")
-    Sig = sigs[ext[0]]
-
-    def trunc(x):
-        return max(min(x, _DBL_MAX), -_DBL_MAX) if x == x else x
-    flo = trunc(f_lower)
-    fup = trunc(f_upper)
-    with np.errstate(all="ignore"):
-        doX = (Sig is None and flo * fup > 0) or (Sig is not None and (Sig * flo > 0 or Sig * fup < 0))
-    it = 0
-    if doX:
-        if trace:
-            print("search in [%s,%s]%s" % (_g(lower), _g(upper), "\n" if trace >= 2 else " ... "), end="")
-
-        def Delta(u):
-            return 0.01 * max(1e-4, abs(u))
-        if Sig is None:
-            delta = [Delta(lower), Delta(upper)]
-            while (f_lower * f_upper > 0) and (math.isfinite(lower) or math.isfinite(upper)):
-                iF = [math.isfinite(lower), math.isfinite(upper)]
-                it += 1
-                if it > maxiter:
-                    raise RError("no sign change found in %d iterations" % (it - 1))
-                if iF[0]:
-                    ol, of = lower, f_lower
-                    lower = lower - delta[0]
-                    f_lower = ff(lower)
-                    if f_lower != f_lower:
-                        lower, f_lower = ol, of
-                        delta[0] = delta[0] / 4
-                if iF[1]:
-                    ol, of = upper, f_upper
-                    upper = upper + delta[1]
-                    f_upper = ff(upper)
-                    if f_upper != f_upper:
-                        upper, f_upper = ol, of
-                        delta[1] = delta[1] / 4
-                if trace >= 2:
-                    print(" .. modified lower,upper: (%15s,%15s)" % (_g(lower), _g(upper)))
-                delta = [2 * delta[0], 2 * delta[1]]
-        else:
-            delta = Delta(lower)
-            while Sig * f_lower > 0:
-                it += 1
-                if it > maxiter:
-                    raise RError("no sign change found in %d iterations" % (it - 1))
-                lower = lower - delta
-                f_lower = ff(lower)
-                if trace >= 2:
-                    print(" .. modified lower: %s" % _g(lower))
-                delta = 2 * delta
-            delta = Delta(upper)
-            while Sig * f_upper < 0:
-                it += 1
-                if it > maxiter:
-                    raise RError("no sign change found in %d iterations" % (it - 1))
-                upper = upper + delta
-                f_upper = ff(upper)
-                if trace >= 2:
-                    print(" .. modified upper: %s" % _g(upper))
-                delta = 2 * delta
-        if trace and trace < 2:
-            print("extended to [%s, %s] in %d steps" % (_g(lower), _g(upper), it))
-    sg = lambda v: (0.0 if v == 0 else math.copysign(1.0, v)) if v == v else _NAN  # noqa: E731
-    prod = sg(f_lower) * sg(f_upper)
-    if not (prod == prod and prod <= 0):
-        raise RError("did not succeed extending the interval endpoints for f(lower) * f(upper) <= 0"
-                     if doX else "f() values at end points not of opposite sign")
-    if doX and it:
-        flo = trunc(f_lower)
-        fup = trunc(f_upper)
-    if not math.isfinite(lower):
-        raise RError("invalid 'xmin' value")
-    if not math.isfinite(upper):
-        raise RError("invalid 'xmax' value")
-    if lower >= upper:
-        raise RError("'xmin' not less than 'xmax'")
-    tol = float(tol)
-    if not math.isfinite(tol) or tol <= 0.0:
-        raise RError("invalid 'tol' value")
-    maxit = int(maxiter)
-    if maxit <= 0:
-        raise RError("'maxiter' must be positive")
-    warned = []
-
-    def fcn2(x):
-        v = _num1(f(x, *args, **kwargs), "")
-        if v.size != 1:
-            raise RError("invalid function value in 'zeroin'")
-        val = float(v[0])
-        if not math.isfinite(val):
-            if val == -math.inf:
-                msg = "-Inf replaced by maximally negative value"
-                if check_conv:
-                    warned.append(msg)
-                else:
-                    _warn(msg)
-                return -_DBL_MAX
-            msg = "NA/Inf replaced by maximum positive value"
-            if check_conv:
-                warned.append(msg)
-            else:
-                _warn(msg)
-            return _DBL_MAX
-        return val
-    with np.errstate(all="ignore"):
-        root, itr, prec = zeroin2(lower, upper, flo, fup, fcn2, tol, maxit)
-    if check_conv and warned:
-        raise RError("convergence problem in zero finding: " + warned[0])
-    itr = int(itr)
-    if itr < 0:
-        msg = ("_NOT_ converged in %d iteration" if maxiter == 1 else "_NOT_ converged in %d iterations") % maxiter
-        if check_conv:
-            raise RError(msg)
-        _warn(msg)
-        itr = int(maxiter)
-    if doX:
-        itr = itr + it
-        init_it = it
-    else:
-        init_it = NA_REAL               # NA_integer_
-    res = _OptRes()
-    res["root"] = root
-    res["f.root"] = ff(root)
-    res["iter"] = itr
-    res["init.it"] = init_it
-    res["estim.prec"] = prec
-    return res
 
 
 from .base import quiet_fp  # noqa: E402

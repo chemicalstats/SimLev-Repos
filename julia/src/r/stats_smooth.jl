@@ -4,10 +4,11 @@
 #                     Kopf der jeweiligen R-Quelle)
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
-#                     SimLev genutzten Umfang.
+#                     SimLev genutzten Umfang; seit 1.6.0 rechnen regularize.values und filter im C-Kern
+#                     core/slc_rbase_smooth.cpp (sl_r_regularize, sl_r_filter_conv, sl_r_filter_rec).
 # Interpolation und Filter (approx, approxfun, r_filter) aus R 4.3.3 stats/R/approx.R, filter.R und
 # stats/src/approx.c, filter.c; Python: _r/stats_smooth.py. Die Interpolation je Punkt (approx.c) rechnet seit
-# 1.5.0 der C-Kern sl_r_approx (core/slc_rbase.c).
+# 1.5.0 der C-Kern sl_r_approx (core/slc_rbase.cpp).
 # Teil des Untermoduls RStats (eingebunden in stats.jl).
 #
 # Seit 1.0.0 entfallen fft, bw_nrd0, density, smooth_spline und predict_smooth_spline: SimLev
@@ -15,30 +16,7 @@
 
 # ── approx / approxfun / filter ──────────────────────────────────────────
 
-"Gleiche Werte (−0 = +0, NaN als ein Wert) in Reihenfolge des ersten Auftretens."
-function _unique_keys(v::Vector{Float64})
-    keys = Float64[]
-    idx = Int[]
-    d = Dict{Float64,Int}()
-    nanidx = 0
-    for t in v
-        if isnan(t)
-            if nanidx == 0
-                push!(keys, t); nanidx = length(keys)
-            end
-            push!(idx, nanidx)
-        else
-            k = _z0(t)
-            g = get(d, k, 0)
-            if g == 0
-                push!(keys, t); g = length(keys); d[k] = g
-            end
-            push!(idx, g)
-        end
-    end
-    keys, idx
-end
-
+"regularize.values (C-Kern sl_r_regularize, seit 1.6.0: NA-Paare, Sortierung, Gruppen gleicher x, mean je Gruppe)."
 function _regularize(x, y, ties, warn_collapsing::Bool, na_rm::Bool)
     xv = _v(x)
     if y === nothing
@@ -48,56 +26,26 @@ function _regularize(x, y, ties, warn_collapsing::Bool, na_rm::Bool)
         yv = _v(y)
     end
     length(xv) != length(yv) && error("'x' and 'y' lengths differ")
-    kept_na = false
-    na = isnan.(xv) .| isnan.(yv)
-    ok = .!na
-    if any(na)
-        if na_rm
-            xv = xv[ok]; yv = yv[ok]
-            nx = length(xv)
-        else
-            kept_na = true
-            nx = count(ok)
-        end
-    else
-        nx = length(xv)
-    end
-    ordered = false
-    fun = ties
     if ties isa AbstractString && ties == "ordered"
-        ordered = true
-        fun = nothing
+        mode = 2; fun = nothing
     elseif ties isa Tuple && length(ties) == 2 && ties[2] isa Function
-        fun = ties[2]
-        ordered = ties[1] == "ordered"
+        mode = ties[1] == "ordered" ? 1 : 0; fun = ties[2]
+    else
+        mode = 0; fun = ties
     end
-    if !(ties isa AbstractString && ties == "ordered")
-        xx = kept_na ? xv[ok] : xv
-        if !ordered && length(xx) > 1 && any(i -> xx[i+1] < xx[i], 1:length(xx)-1)
-            o = _nan_last_perm(xv)
-            xv = xv[o]; yv = yv[o]
-        end
-        ux, gidx = _unique_keys(xv)
-        if length(ux) < nx
-            warn_collapsing && @warn "collapsing to unique 'x' values"
-            f = (fun === nothing || fun === _rmean || fun == "mean") ? _rmean : fun
-            groups = [Float64[] for _ in ux]
-            for (g, yi) in zip(gidx, yv)
-                push!(groups[g], yi)
-            end
-            yv = Float64[Float64(first(_v(f(gr)))) for gr in groups]
-            xv = ux
-            kept_na && (ok = .!isnan.(xv))
+    mean = fun === nothing || fun === _rmean || fun == "mean"
+    xo, yo, grp, m, nout, collapsed, kept_na = SimLev._rb_regularize(Vector{Float64}(xv), Vector{Float64}(yv), na_rm,
+                                                                    mode, mean)
+    if collapsed
+        warn_collapsing && @warn "collapsing to unique 'x' values"
+        if !mean
+            ys = yo[1:m]; g = grp[1:m]
+            yo = Float64[Float64(first(_v(fun(ys[g .== k])))) for k in 0:nout-1]
         end
     end
-    return xv, yv, kept_na, (kept_na ? ok : nothing)
-end
-
-"Stabile aufsteigende Permutation, NaN zuletzt (wie numpy argsort, kind = stable)."
-function _nan_last_perm(v::Vector{Float64})
-    ok = findall(!isnan, v)
-    bad = findall(isnan, v)
-    vcat(ok[_stable_argsort(v[ok], false, false)], bad)
+    # notNA wie R: ohne Zusammenfassen die Maske der Eingabe (vor dem Sortieren), sonst !is.na(x)
+    ok = !kept_na ? nothing : collapsed ? .!isnan.(xo[1:nout]) : .!(isnan.(xv) .| isnan.(yv))
+    return xo[1:nout], yo[1:nout], kept_na, ok
 end
 
 """`seq.int(from, to, length.out = n)` in `approx`: Grenzen endlich (sonst Fehler wie R); sind from, to und Schritt
@@ -122,7 +70,7 @@ function _seq_int(frm, to, n)
     out
 end
 
-"R_approxfun: Interpolation je Punkt im C-Kern `sl_r_approx` (core/slc_rbase.c, seit 1.5.0)."
+"R_approxfun: Interpolation je Punkt im C-Kern `sl_r_approx` (core/slc_rbase.cpp, seit 1.5.0)."
 _approx_core(x::Vector{Float64}, y::Vector{Float64}, v::Vector{Float64}, method::Int, yleft::Float64, yright::Float64,
              f::Float64) = SimLev._rb_approx(x, y, v, method, yleft, yright, f)
 
@@ -219,74 +167,31 @@ function r_filter(x, filter; method::AbstractString = "convolution", sides::Inte
     fv = _v(filter)
     nf = length(fv)
     any(isnan, fv) && error("missing values in 'filter'")
-    Y = fill(NA, n, nser)
-    isok(t) = !isnan(t)
+    Y = Matrix{Float64}(undef, n, nser)
     if method == "convolution"
         nf > n && error("'filter' is longer than time series")
         sides = Int(sides)
         sides in (1, 2) || error("argument 'sides' must be 1 or 2")
-        nshift = sides == 2 ? nf ÷ 2 : 0
-        for s in 1:nser
-            xs = view(X, :, s)
-            for i in 0:n-1
-                if !circular
-                    (i + nshift - (nf - 1) < 0 || i + nshift >= n) && continue
-                end
-                z = 0.0
-                bad = false
-                for j in 0:nf-1
-                    ii = i + nshift - j
-                    if circular
-                        ii < 0 && (ii += n)
-                        ii >= n && (ii -= n)
-                    end
-                    tmp = xs[ii+1]
-                    if isok(tmp)
-                        z += fv[j+1] * tmp
-                    else
-                        bad = true
-                        break
-                    end
-                end
-                Y[i+1, s] = bad ? NA : z
-            end
-        end
+        ini = zeros(0, nser)
+    elseif init === nothing
+        ini = zeros(nf, nser)
     else
-        if init === nothing
-            ini = zeros(nf, nser)
-        else
-            ia = init isa AbstractMatrix ? _fmat(init isa NamedMat ? init.data : init) : reshape(_v(init), :, 1)
-            size(ia, 1) != nf && error("length of 'init' must equal length of 'filter'")
-            ncol = size(ia, 2)
-            if ncol != 1 && ncol != nser
-                nser == 1 && error("'init' must have $nser column")
-                error("'init' must have 1 or $nser columns")
-            end
-            ini = (ncol == 1 && nser > 1) ? repeat(ia, 1, nser) : ia
+        ia = init isa AbstractMatrix ? _fmat(init isa NamedMat ? init.data : init) : reshape(_v(init), :, 1)
+        size(ia, 1) != nf && error("length of 'init' must equal length of 'filter'")
+        ncol = size(ia, 2)
+        if ncol != 1 && ncol != nser
+            nser == 1 && error("'init' must have $nser column")
+            error("'init' must have 1 or $nser columns")
         end
-        for s in 1:nser
-            r = vcat(reverse(ini[:, s]), zeros(n))
-            for i in 1:n
-                sm = X[i, s]
-                if !isok(sm)
-                    r[nf+i] = NA
-                    continue
-                end
-                badf = false
-                for j in 1:nf
-                    tmp = r[nf+i-j]
-                    if isok(tmp)
-                        sm += tmp * fv[j]
-                    else
-                        r[nf+i] = NA
-                        badf = true
-                        break
-                    end
-                end
-                badf || (r[nf+i] = sm)
-            end
-            Y[:, s] = r[nf+1:end]
+        if ncol == 1 && nser > 1   # wie R (seit 1.6.0): dim(init) <- c(nf, nser) bzw. init[, 2]
+            init isa AbstractMatrix && error("subscript out of bounds")
+            error("dims [product $(nf * nser)] do not match the length of object [$nf]")
         end
+        ini = ia
+    end
+    for s in 1:nser   # C-Kerne sl_r_filter_conv, sl_r_filter_rec (seit 1.6.0)
+        Y[:, s] = SimLev._rb_filter(Vector{Float64}(X[:, s]), Vector{Float64}(fv), method == "recursive", Int(sides),
+                                    circular, Vector{Float64}(ini[:, s]))
     end
     is_mat && return Y
     return _vec_out(Y[:, 1])

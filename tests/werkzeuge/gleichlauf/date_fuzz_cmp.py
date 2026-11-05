@@ -1,4 +1,4 @@
-"""Vergleich des Datumskerns core/slc_rbase_date.c (über simlev._ext) mit R (date_fuzz.R).
+"""Vergleich des Datumskerns core/slc_rbase_date.cpp (über simlev._ext) mit R (date_fuzz.R).
 
     python3 tests/werkzeuge/gleichlauf/date_fuzz_cmp.py <ordner>
 Textgleich heißt: dieselbe Zeichenkette (bzw. beide NA, beide Fehler) für format.Date und dieselben Tage für

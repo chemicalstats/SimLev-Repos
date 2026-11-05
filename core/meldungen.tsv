@@ -1,0 +1,147 @@
+# core/meldungen.tsv – Code->Text-Tabellen der Kerne (Tagesengine, Auswertung), eine Quelle fuer R, Python und Julia.
+# Spalten: tabelle, schluessel, text (Vorlage im Format von sprintf; \t, \n und \\ als Fluchtfolgen).
+# Erzeugt von core/gen_meldungen.py: r/R/meldungen.R, python/simlev/_meldungen.py, julia/src/meldungen.jl.
+# Nach einer Aenderung: python3 core/gen_meldungen.py (core/sync.py --check prueft, dass die Dateien aktuell sind).
+tabelle	schluessel	text
+engine_signal	1	perform_trade_buy: ungültiger Kurs (%.4f) für %s am %s; der Kauf wird übersprungen.
+engine_signal	2	perform_trade_sell: angeforderte Verkaufsmenge %.4f übersteigt den Bestand %.4f von %s; verkauft wird der gesamte Bestand.
+engine_signal	3	simulation: liquidate = TRUE: Position '%s' (Wert %.2f EUR) wurde nicht verkauft, weil die Ordergebühr den Erlös übersteigt.
+engine_signal	4	no non-missing arguments to max; returning -Inf
+engine_signal	5	simulation: %s von %.2f EUR am %s: das Depot reicht nicht aus; %.2f EUR bleiben als negativer Geldbestand (Steuerschuld) bei '%s'.
+engine_signal	6	simulation: Paragraf 23 EStG: Gewinne (%.2f EUR) erreichen die Freigrenze (%.2f EUR), 
+engine_signal	6.rest	aber 'marginal_tax_rate' ist nicht gesetzt.\nVerwendet wird 42 % (Spitzensteuersatz); marginal_tax_rate in Prozent angeben (z. B. 42).
+engine_signal	101	perform_asset_split: ratio muss > 0 sein (Split-Verhältnis), nicht %s.
+engine_signal	na	missing value where TRUE/FALSE needed
+engine_signal	unbekannt	simulation: interner Fehler: unbekannter Ereigniscode %d der Tagesengine.
+engine_label	0	Vorabpauschale
+engine_label	1	§ 23-Steuer
+engine_label	2	Steuer aus der Veranlagung %s
+engine_reason	0	Handelssignal:
+engine_reason	1	Rebalancing:
+engine_reason	2	Rebalancing/Signal-Einstieg:
+engine_reason	3	Rebalancing/Signal-Ausstieg:
+engine_reason	4	Liquidation:
+engine_reason	5	Steuerereignis:
+engine_reason	6	Split:
+engine_reason	7	Freibetrag:
+engine_detail	201	%s\tKauf %.2fx %s zu %.2f EUR je Anteil am %s\n
+engine_detail	202	\t\t=> Vorabpauschale-Anrechnung (§ 19 InvStG): %.2f EUR\n
+engine_detail	203	\t\t=> Sparerpauschbetrag: %.2f EUR (verbleibend: %.2f EUR)\n
+engine_detail	204	\t\t=> Steuerfreier Gewinn (Haltedauer > 1 Jahr): %.2f EUR\n
+engine_detail	205	\t\t=> Nicht verrechenbarer Verlust (Haltedauer > 1 Jahr): %.2f EUR\n
+engine_detail	206	\t\t=> Steuerpflichtiger Gewinn (Haltedauer < 1 Jahr): %.2f EUR (seit Jahresbeginn: %.2f EUR)\n
+engine_detail	207	\t\t=> Verrechenbarer Verlust (Haltedauer < 1 Jahr): %.2f EUR (seit Jahresbeginn: %.2f EUR)\n
+engine_detail	208	%s\tVerkauf %.2fx %s zu %.2f EUR je Anteil am %s\n
+engine_detail	209	\t\t=> %s: %.2f EUR; Steuer: %.2f EUR\n
+engine_detail	209.verlust	Verlust
+engine_detail	209.gewinn	Gewinn
+engine_detail	210	Freibetrag:\tRealisierung von Gewinnen %.2f EUR mit %.4fx %s (freier Sparer-Pauschbetrag/Verlusttopf %.2f EUR)\n
+engine_detail	211	Split-Ereignis:\t%s %s im Verhältnis %s am %s\n
+engine_detail	211.split	Split
+engine_detail	211.reverse	Reverse-Split
+engine_detail	211.v1	1 : %s
+engine_detail	211.v2	%s : 1
+engine_detail	212	Split-Ereignis:\t%s ohne Bestand: Kursreihe %s %s am %s\n
+engine_detail	212.v1	1 :
+engine_detail	212.v2	: 1
+engine_detail	213	Marktereignis:\tHandel mit %s ab jetzt möglich.\n
+engine_detail	214	Einzahlung:\t%.2f EUR in das Depot am %s\n\t\t=> 
+engine_detail	214.teil	%s %.2f EUR
+engine_detail	215	Rebalancing:\tErzwungenes Rebalancing am %s wegen neu handelbarer Assets: %s\n
+engine_detail	216	Rebalancing:\tRebalancing am %s (max. Abweichung: %.2f%% > Schwelle: %.2f%%)\n
+engine_detail	217	\t\t=> %s: Ziel=%.1f%%, Ist=%.1f%%, Abweichung=%.2f%%\n
+engine_detail	218	Rebalancing:\tKein Rebalancing am %s (max. Abweichung: %.2f%% < Schwelle: %.2f%%)\n
+engine_detail	219	\t\t%.2f EUR von %s in den Rebalancing-Topf\n
+engine_detail	220	Rebalancing:\t%.2f EUR aus dem Rebalancing-Topf an %s\n
+engine_detail	221	\t\t=> %s hält %.2f EUR als Cash-Reserve (Signal inaktiv)\n
+engine_detail	222	\t\tRestverteilung von %.2f EUR aus dem Rebalancing-Topf\n
+engine_detail	223	\t\t=> %.2f EUR an %s\n
+engine_detail	224	Steuerereignis:\tVorabpauschale %s: %.2f EUR festgesetzt am %s (Zufluss und Steuer am ersten Handelstag des Folgejahres)\n
+engine_detail	225	Steuerereignis:\tZahlung %s %.2f EUR für %s aus dem Geldbestand am %s\n
+engine_detail	226	Steuerereignis:\tTeilzahlung %s %.2f EUR aus dem Geldbestand am %s\n
+engine_detail	227	\t\t=> Anteile verkauft für den Rest von %.2f EUR (%s)\n
+engine_detail	228	Steuerereignis:\tVeranlagung %d: Nachzahlung %.2f EUR (davon § 23 %.2f EUR, Kirchensteuer-Sonderausgaben %.2f EUR%s) am %s, aufgeteilt %s\n
+engine_detail	228.guenstiger	, Günstigerprüfung %.2f EUR
+engine_detail	228.asset	nach dem § 23-Jahressaldo je Asset
+engine_detail	228.gleich	zu gleichen Teilen auf die Assets
+engine_detail	229	\t\t=> Anteil %s: %.2f EUR\n
+engine_detail	230	Steuerereignis:\t§ 23 EStG: Steuer %.2f EUR (%s) am %s\n
+engine_detail	231	Steuerereignis:\tGünstigerprüfung: Erstattung %.2f EUR in den Geldbestand am %s\n
+engine_detail	232	Steuerereignis:\tVorabpauschale %s (festgesetzt %s): %.2f EUR, nach TFS %.2f EUR, SPB %.2f EUR, Steuer %.2f EUR am %s\n
+engine_detail	240.1	\n══════════════════════════════════════════════════════════════\n
+engine_detail	240.2	  JAHRESWECHSEL: %d -> %d\n
+engine_detail	240.3	══════════════════════════════════════════════════════════════\n
+engine_detail	241.1	  § 23 EStG: Verlustvortrag verwendet: %.2f EUR\n
+engine_detail	241.2	             Verbleibender Vortrag: %.2f EUR\n
+engine_detail	242.1	  § 23 EStG Jahresübersicht %d:\n
+engine_detail	242.2	    Bruttogewinne (< 1 Jahr):    %10.2f EUR\n
+engine_detail	242.3	    Bruttoverluste (< 1 Jahr):   %10.2f EUR\n
+engine_detail	242.4	    Interne Verrechnung:         %10.2f EUR\n
+engine_detail	242.5	    Verlustvortrag-Verrechnung:  %10.2f EUR\n
+engine_detail	242.6	    ─────────────────────────────────────────\n
+engine_detail	242.7	    Netto-Ergebnis:              %10.2f EUR\n
+engine_detail	243.1	\n  ⚠ FREIGRENZE ERREICHT!\n
+engine_detail	243.2	    Jahressaldo %.2f EUR >= Freigrenze %.2f EUR\n
+engine_detail	243.3	    → GESAMTER Gewinn nach Verlustvortrag steuerpflichtig: %.2f EUR (Freigrenze, kein Freibetrag!)\n
+engine_detail	243.tarif	    → Steuer nach dem Einkommensteuertarif (ESt + Soli + KiSt des § 23-Zuwachses): siehe Jahresveranlagung unten (Zeile § 23)\n
+engine_detail	243.satz	    → Steuersatz: %.1f%%%s%s\n
+engine_detail	243.soli	 + %.1f%%%% Soli
+engine_detail	243.kist	 + %.1f%% KiSt
+engine_detail	243.last	    → Steuerlast: %.2f EUR\n
+engine_detail	244.1	\n  Nettoverlust %.2f EUR → Vortrag ins nächste Jahr\n
+engine_detail	244.2	  Gesamter Verlustvortrag: %.2f EUR\n
+engine_detail	245	\n  ✓ Jahressaldo %.2f EUR < Freigrenze %.2f EUR → STEUERFREI (Verlustvortrag unverändert)\n
+engine_detail	246	\n  Keine steuerpflichtigen § 23 Vorgänge in %d\n
+engine_detail	247.1	\n  Sparerpauschbetrag %d:\n
+engine_detail	247.2	    Jahresbetrag:    %10.2f EUR\n
+engine_detail	247.3	    Verwendet:       %10.2f EUR\n
+engine_detail	247.4	    Verfallen:       %10.2f EUR\n
+engine_detail	248	  § 20 EStG: Unterjährige Verlustverrechnung -> Erstattung %.2f EUR in den Geldbestand\n
+engine_detail	249	  § 20 EStG: Verlust gibt Sparer-Pauschbetrag frei: %.2f EUR (genutzt %d: %.2f EUR, Verlusttopf %.2f EUR)\n
+engine_detail	250.1	  Tarif %d: zvE %.2f EUR - KiSt-Sonderausgaben %.2f EUR (gezahlt %.2f, erstattet %.2f) = %.2f EUR (Wirkung %.2f EUR)\n
+engine_detail	250.p23	    § 23: Gewinn %.2f EUR -> Steuerlast ESt %.2f + Soli %.2f + KiSt %.2f = %.2f EUR\n
+engine_detail	250.guenstiger	    Günstigerprüfung: K %.2f EUR, Abgeltungsteuer %.2f EUR (KiSt %.2f), Tarif auf K %.2f EUR (ESt %.2f + Soli %.2f + KiSt %.2f); Belastung ohne %.2f / mit %s EUR -> %s\n
+engine_detail	250.x1	%.2f
+engine_detail	250.tarif	Tarif
+engine_detail	250.bleibt	Abgeltungsteuer bleibt
+engine_detail	250.abrechnung	    Abrechnung: %s %.2f EUR; KiSt-Bescheid %+.2f EUR (Sonderausgabe %d)\n
+engine_detail	250.nach	Nachzahlung
+engine_detail	250.erst	Erstattung
+engine_detail	251.1	\n  Tracker zurückgesetzt für Jahr %d\n
+engine_detail	251.2	══════════════════════════════════════════════════════════════\n\n
+eval_detail	0	Zeitraum %s, Laufzeit 0 Jahre (Einzeltag)
+eval_detail	1	Endwert %.2f EUR negativ
+eval_detail	2	Endwert %.2f EUR negativ: offene Steuerschuld %.2f EUR
+eval_detail	3	kein interner Zinsfuß: Startwert %.2f EUR, Einzahlungen %.2f EUR, Endwert %.2f EUR
+eval_detail	4	Depotwert am Starttag %.2f EUR
+eval_detail	5	zeitgewichteter Wertindex am %s nicht positiv (Tagesrendite %.2f %%)
+eval_detail	6	Rechnung ergibt keinen endlichen Wert
+eval_detail	7	keine Tagesrendite (Einzeltag)
+eval_detail	8	nur %d %s, mindestens %d nötig
+eval_detail	8.eins	Tagesrendite
+eval_detail	8.mehr	Tagesrenditen
+eval_detail	9	kein Drawdown im Zeitraum (max_drawdown 0)
+eval_detail	10	Standardabweichung der %d Tagesrenditen ist 0 (konstanter Verlauf)
+eval_detail	11	mittlere Tagesrendite ist 0
+eval_detail	12	Standardabweichung der %d Überschussrenditen ist 0
+eval_detail	13	keine negativen Überschussrenditen (Downside-Abweichung 0)
+eval_detail	14	keine negativen Tagesrenditen
+eval_detail	15	kein Drawdown im Zeitraum (Ulcer Index 0)
+eval_detail	16	kein Drawdown im Zeitraum
+eval_detail	17	Drawdown bis zum Ende nicht aufgeholt (längster Drawdown %s)
+eval_detail	18	Zeitraum %s, Laufzeit 0 Jahre: keine Anzahl je Jahr (Einzeltag)
+eval_detail	19	%s nicht definiert: %s
+eval_warn	1	-Inf replaced by maximally negative value
+eval_warn	2	NA/Inf replaced by maximum positive value
+eval_warn	3	_NOT_ converged in 1000 iterations
+eval_warn	10	simulation: geldgewichtete Rendite (cagr) mit Einzahlungen nicht bestimmbar (Startwert %.2f EUR, Einzahlungen %.2f EUR, Endwert %.2f EUR): kein interner Zinsfuß gefunden; cagr = NA.
+eval_warn	11	simulation: Endwert negativ (%.2f EUR, %s); Verlust über 100 %%: cagr und ttwror sind nicht definiert (NA), Drawdowns auf 100 %% begrenzt.
+eval_warn	11.offen	offene Steuerschuld %.2f EUR
+eval_warn	11.ungedeckt	nicht gedeckte Steuerschuld
+eval_warn	12	simulation: zeitgewichteter Wertindex wird negativ (Tagesrendite unter -100 %); ttwror ist nicht definiert (NA).
+eval_warn	13	simulation: Zeitraum %s (Laufzeit 0 Jahre): cagr und ttwror sind nicht definiert (NA).
+eval_warn	14	simulation: Depotwert am Starttag %.2f EUR: cagr ist nicht definiert (NA).
+eval_warn	15	simulation: zeitgewichteter Wertindex am %s nicht positiv (Tagesrendite %.2f %% bei Depotwert %.2f EUR am Vortag und Einzahlung %.2f EUR); TTWROR und die zeitgewichteten Drawdowns sind nicht aussagekräftig (Drawdowns auf 100 %% begrenzt).
+eval_warn	16	simulation: Depotwert am %s negativ (%.2f EUR, Steuerschuld); Drawdowns auf 100 %% begrenzt.
+eval_warn	17	no non-missing arguments to max; returning -Inf
+eval_warn	unbekannt	simulation: interner Fehler: unbekannter Ereigniscode %d der Auswertung.

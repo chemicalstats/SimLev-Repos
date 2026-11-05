@@ -24,10 +24,12 @@ from ._r import fmt as _fmt
 from ._r import libm as _libm
 from ._r.fmt import NA_REAL
 from ._r.rlist import RList
-from ._r.rnum import r_colmeans, r_rowmeans, r_cummax, r_cumsum, r_mean, r_mean_int, r_pow, r_prod, r_sd, r_var
+from ._r.rnum import r_colmeans, r_cummax, r_cumsum, r_mean, r_mean_int, r_pow, r_prod, r_sd, r_var
 # Grafik: Bausteine des Stils Analysegrafiken und Zahlen wie in Julia aus svg.py
 from .svg import (_MONATE_KURZ, _AnaSvg, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_ramp, _ana_rect,
                   _ana_svg_done, _ana_text, _ana_year_ticks, _jl_max, _jl_maximum, _jl_min, _jl_minimum)
+from ._util import _match_arg_r as _match_arg
+from ._util import _ext
 
 __all__ = ["result_analysis", "SimLevAnalysis"]
 
@@ -41,12 +43,6 @@ _MONTH_ABB = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oc
 # Gemeinsame Hilfen (auch für planning.py und analysis_tests.py)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _ext(mod, name):
-    """Funktion ``name`` aus ``simlev.<mod>`` (spät geladen; parallel portierte Module)."""
-    m = importlib.import_module("simlev." + mod)
-    return getattr(m, name)
-
-
 def _stats(name):
     return getattr(importlib.import_module("simlev._r.stats"), name)
 
@@ -54,11 +50,6 @@ def _stats(name):
 def _message(text):
     """``message()``: Hinweis auf stderr."""
     sys.stderr.write(text + "\n")
-
-
-def _match_arg(value, choices, argname="arg"):
-    from .config import _match_arg as ma
-    return ma(value, choices, argname)
 
 
 def _days(d):
@@ -148,12 +139,7 @@ def _cov(x, y):
 def _col_means(M, na_rm=False):
     """``colMeans(M, na.rm)``: long-double-Summe je Spalte / Anzahl, dann double."""
     M = np.asarray(M, dtype=np.float64)
-    return r_colmeans(M, na_rm=na_rm)   # C-Kern core/slc_rbase.c (long double wie R; wie Julia)
-
-
-def _row_means(M):
-    """``rowMeans(M)``: long-double-Summe über Spalten / p, dann double."""
-    return r_rowmeans(np.asarray(M, dtype=np.float64))   # C-Kern
+    return r_colmeans(M, na_rm=na_rm)   # C-Kern core/slc_rbase.cpp (long double wie R; wie Julia)
 
 
 def _mean_lgl(b):
@@ -672,7 +658,12 @@ def _da_rolling(s, b, window_m, rf_cum):
         if vb is not None and not np.isnan(vb[k - w:k + 1]).any():
             sb = vb[k - w:k + 1]
             rb = sb[1:] / sb[:-1] - 1
-            bt = _cov(r, rb) / r_var(rb)
+            cv, vr = _cov(r, rb), r_var(rb)
+            if vr != 0:
+                bt = cv / vr
+            else:                                  # Varianz 0: Inf bzw. NaN wie R (seit 1.5.1; bisher ZeroDivisionError)
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    bt = float(np.float64(cv) / np.float64(vr))
             ex = cg - (r_pow(sb[-1] / sb[0], 1 / yrs) - 1)
         rf_w = float(_libm.expm1((Lk[k] - Lk[k - w]) / yrs))
         rows.append([cg, vo, (cg - rf_w) / vo if vo > 0 else _NA, mdd, bt, ex])
@@ -911,6 +902,8 @@ def result_analysis(x, *, benchmark=None, risk_free=0, rolling_years=3, var_leve
         cor_d = _cor_frame(Rd, order)
         Rm = np.column_stack([_ratio_m1(_da_period_values(cm, ser[k]["value"][_match_days(cm, ser[k]["date"])], "month")["value"])
                               for k in order])
+        if Rm.shape[0] == 1:                 # vapply() liefert dann einen Vektor: cor() wie R mit Fehler (seit 1.5.1)
+            raise ValueError("supply both 'x' and 'y' or a matrix-like 'x'")
         cor_m = _cor_frame(Rm, order)
     series = {k: pd.DataFrame({"date": _dates(ser[k]["date"]), "value": ser[k]["value"]}) for k in order}
     return SimLevAnalysis([

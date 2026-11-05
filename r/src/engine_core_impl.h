@@ -37,7 +37,7 @@
 //   - Gleitkomma: kein fast-math, kein fma (-ffp-contract=off bzw. Pragma unten); Rechenreihenfolge wie
 //     in R. Operationen, deren beide Operanden aus Eingaben stammen, ueber simlev_add/_sub/_mul/_div
 //     (NA vor NaN).
-//   - sum() rechnet R in long double: hier ueber sl_r_sum (core/slc_rbase.c) als bewusste, dokumentierte
+//   - sum() rechnet R in long double: hier ueber sl_r_sum (core/slc_rbase.cpp) als bewusste, dokumentierte
 //     Ausnahme von der Regel "kein long double" (gleich in allen drei Sprachen).
 //   - Bedingungen mit NA: R bricht in if () mit "missing value where TRUE/FALSE needed" ab. Der Kern
 //     rechnet jede solche Bedingung dreiwertig wie R (&&, ||, !) und bricht an derselben Stelle mit dem

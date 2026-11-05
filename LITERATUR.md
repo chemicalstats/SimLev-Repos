@@ -578,18 +578,18 @@ MS-GARCH-Schätzungen):
   Webseite, gemeinfrei („Consider these donated to the public domain.“).
   [howardhinnant.github.io](https://howardhinnant.github.io/date_algorithms.html)
   – Umrechnung Tage ↔ Kalenderdatum (`days_from_civil`, `civil_from_days`)
-  in den Engine-Kernen, `slc_rbase_date.c` und den Ports; siehe COPYRIGHTS.
+  in den Engine-Kernen, `slc_rbase_date.cpp` und den Ports; siehe COPYRIGHTS.
 - Brent, R. P. (1973). *Algorithms for Minimization without Derivatives*.
-  Prentice-Hall. – Verfahren von `optimize` und `uniroot` (Netlib `fmin`,
-  `zeroin`), die Python und Julia aus R nachbilden; siehe COPYRIGHTS.
+  Prentice-Hall. – Verfahren von `optimize` (Netlib `fmin`), das Python und Julia
+  aus R nachbilden, und von `zeroin` (XIRR im Kern, `sl_r_zeroin2`); siehe COPYRIGHTS.
 - Singleton, R. C. (1969). Algorithm 347: An efficient algorithm for sorting
   with minimal storage. *Communications of the ACM* 12(3), 185–186.
   [doi:10.1145/362875.362901](https://doi.org/10.1145/362875.362901) –
-  Quicksort in `qsort-body.c` von R, übersetzt in `slc_rbase_sort.c`;
+  Quicksort in `qsort-body.c` von R, übersetzt in `slc_rbase_sort.cpp`;
   siehe COPYRIGHTS.
 - Hoare, C. A. R. (1961). Algorithm 63: Partition; Algorithm 64:
   Quicksort; Algorithm 65: Find. *Communications of the ACM* 4(7),
-  321–322. – Auswahl für die partielle Sortierung in `slc_rbase_sort.c`.
+  321–322. – Auswahl für die partielle Sortierung in `slc_rbase_sort.cpp`.
 
 ## Pakete als Vorbild bzw. Prüforakel
 

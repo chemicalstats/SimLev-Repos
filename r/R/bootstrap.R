@@ -314,7 +314,7 @@ print.bootstrap_config <- function(x, ...) {
 #' Standardparameter je Verfahren
 #' @keywords internal
 #' @noRd
-.get_base_params <- function(method, params, n) {
+.get_base_params <- function(params) {
   defaults <- list(
     L = 20, block_length = 20, wild_type = 0, n_regimes = 2, vol_window = 20,
     tail_prob = 0.05, both_tails = TRUE, p_break = 0.02, garch_order = c(1, 1),
@@ -460,7 +460,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' "auto"-Parameter aufloesen (L, block_length)
 #' @keywords internal
 #' @noRd
-.resolve_auto <- function(params, returns, config, method) {
+.resolve_auto <- function(params, returns) {
   for (nm in c("L", "block_length")) if (identical(params[[nm]], "auto")) {
     lr <- log(returns)
     b <- rbind(bootstrap_block_length(lr), bootstrap_block_length(lr, "abs"))
@@ -602,7 +602,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' @keywords internal
 #' @noRd
 .prepare_method_info <- function(returns, config, method, params, cores = 1L) {
-  p <- .get_base_params(method, params, nrow(returns))
+  p <- .get_base_params(params)
   base <- which(config$index_names == config$regime_index)
   br <- returns[, base]
   info <- list(base = base)
@@ -690,6 +690,47 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
     letf$expense / 100 * d / letf$ter_basis - letf$spread / 100 * m * d / letf$rate_basis
 }
 
+#' Angaben fuer den Kern sl_boot_path (seit 1.6.0) oder NULL (dann rechnet .build_path wie bisher in R)
+#' @keywords internal
+#' @noRd
+.boot_path_spec <- function(ret, idx, aux, config, start, aux_ratio, aux_start) {
+  dbl1 <- function(v) is.double(v) && length(v) == 1L
+  num1 <- function(v) is.numeric(v) && length(v) == 1L
+  n_out <- nrow(ret)
+  if (!is.double(ret) || n_out < 1L || ncol(ret) < 1L || !is.null(rownames(ret)) || !dbl1(start) ||
+      !is.numeric(idx) || length(idx) != n_out || anyNA(idx)) return(NULL)
+  cn <- colnames(ret)
+  if (length(config$index_names) != ncol(ret)) return(NULL)
+  anames <- character(0); level <- logical(0)
+  if (!is.null(aux)) {
+    if (!is.matrix(aux) || !is.double(aux) || !is.null(rownames(aux)) || is.null(colnames(aux)) ||
+        any(idx < 1 | idx > nrow(aux) | idx != trunc(idx))) return(NULL)
+    if (!is.null(aux_ratio) && (!is.matrix(aux_ratio) || !is.double(aux_ratio) || !identical(dim(aux_ratio), dim(aux)) ||
+                                !is.null(rownames(aux_ratio)) || !identical(colnames(aux_ratio), colnames(aux)) ||
+                                (!is.null(aux_start) && (!is.double(aux_start) || length(aux_start) != ncol(aux)))))
+      return(NULL)
+    anames <- colnames(aux)
+    level <- (config$aux_type %||% character(0))[anames] %in% "level"
+  }
+  lnames <- if (config$n_letfs) config$letf_names else character(0)
+  nms <- c(config$index_names, lnames, anames)
+  if (anyDuplicated(nms) || anyNA(nms) || anyDuplicated(cn) || is.null(cn)) return(NULL)
+  letf <- matrix(0, length(lnames), 10L)
+  for (i in seq_along(lnames)) {
+    l <- config$letfs[[i]]
+    b <- match(l$base, cn)
+    col_or_val <- function(v) {
+      if (is.character(v) && length(v) == 1L) { j <- match(v, anames); if (is.na(j)) NA else c(j - 1, 0) }
+      else if (num1(v)) c(-1, v) else NA
+    }
+    fi <- col_or_val(l$finance); dd <- col_or_val(l$days)
+    if (!is.character(l$base) || length(l$base) != 1L || is.na(b) || anyNA(fi) || anyNA(dd) ||
+        !all(vapply(list(l$leverage, l$rate_basis, l$ter_basis, l$expense, l$spread), num1, NA))) return(NULL)
+    letf[i, ] <- c(b - 1, l$leverage, fi, dd, l$rate_basis, l$ter_basis, l$expense, l$spread)
+  }
+  list(idx = as.integer(idx), level = level, letf = letf, names = nms)
+}
+
 #' Preis-Pfad aus Renditen bauen (Index-Knockout = ungueltig, LETF-Knockout = Totalverlust)
 #'
 #' Zusatzreihen mit \code{aux_type} "rate" stehen als Originalwerte der
@@ -704,9 +745,28 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 .build_path <- function(g, aux, config, start = 100, aux_ratio = NULL, aux_start = NULL) {
   ret <- g$ret; idx <- g$idx
   if (!is.matrix(ret) || any(!is.finite(ret)) || any(ret <= 0)) return(NULL)
+  # seit 1.6.0 im Kern (sl_boot_path: Kurspfade, Hebelprodukte, Zusatzreihen und Niveau-Variante in einem Aufruf),
+  # wenn Namen und Angaben eindeutig sind; sonst wie bisher in R
+  sp <- .boot_path_spec(ret, idx, aux, config, start, aux_ratio, aux_start)
+  if (!is.null(sp)) {
+    r <- .Call(C_sl_boot_path, ret, sp$idx, aux, if (is.null(aux)) NULL else aux_ratio,
+               if (is.null(aux)) NULL else aux_start, sp$level, sp$letf, start)
+    if (is.null(r)) return(NULL)
+    P <- r[[1L]]
+    # eine Zeile: die Hebelrenditen tragen den Namen der Indexspalte (ret[, base] ohne Dimension), daher wie bisher
+    # Zeilennamen c("", base) aus vapply
+    dimnames(P) <- list(if (nrow(ret) == 1L && nrow(sp$letf)) c("", config$letfs[[1L]]$base), sp$names)
+    if (!is.null(r[[2L]])) { lv <- r[[2L]]; dimnames(lv) <- list(NULL, colnames(aux)); attr(P, "aux_level") <- lv }
+    return(P)
+  }
   n_out <- nrow(ret)
   cp <- function(r) start * cumprod(c(1, r))
-  P <- apply(ret, 2, cp)
+  # Spaltenschleife statt apply() (seit 1.5.2; gleiche Werte und Namen), apply nur in Randfällen
+  P <- if (n_out > 0L && ncol(ret) > 0L && is.null(rownames(ret))) {
+    P <- matrix(0, n_out + 1L, ncol(ret), dimnames = if (!is.null(colnames(ret))) list(NULL, colnames(ret)))
+    for (j in seq_len(ncol(ret))) P[, j] <- cp(ret[, j])
+    P
+  } else apply(ret, 2, cp)
   if (!is.matrix(P)) P <- matrix(P, ncol = ncol(ret))
   colnames(P) <- config$index_names
   aux_rows <- if (!is.null(aux)) aux[idx, , drop = FALSE] else NULL
@@ -741,7 +801,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 #' ESS-Design: Simulationsbudget auf Hyperparameter-Kombinationen verteilen
 #' @keywords internal
 #' @noRd
-.ess_design <- function(method, params, grid, budget, n_obs) {
+.ess_design <- function(method, grid, budget, n_obs) {
   if (is.null(grid)) grid <- .get_ess_grid(method, n_obs)
   if (is.null(grid) || !length(grid)) return(NULL)
   ess_params <- c("L", "block_length", "n_regimes", "tail_prob", "ms_n_regimes", "ms_ar_n_regimes", "tvtp_n_regimes")
@@ -804,8 +864,8 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   n_out <- as.integer(path_length %||% n_obs)
   if (method %in% c("wild", "reset") && n_out != n_obs)
     stop(sprintf("Verfahren '%s' erh\u00e4lt die Chronologie; path_length muss %d sein.", method, n_obs))
-  params <- .resolve_auto(params, ex$ret, config, method)
-  design <- if (ess) .ess_design(method, params, ess_grid, as.integer(n), n_obs) else NULL
+  params <- .resolve_auto(params, ex$ret)
+  design <- if (ess) .ess_design(method, ess_grid, as.integer(n), n_obs) else NULL
   if (ess && is.null(design)) message("Keine Hyperparameter f\u00fcr ESS - nutze Standard-Bootstrap")
   combos <- if (is.null(design)) list(params) else lapply(seq_len(nrow(design)), function(i) {
     gp <- as.list(design[i, attr(design, "param_names"), drop = FALSE])
@@ -815,7 +875,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   n_paths <- length(combo_of_path)
   infos <- lapply(combos, function(cp) tryCatch(.prepare_method_info(ex$ret, config, method, cp, cores),
                                                error = function(e) stop(sprintf("Vorberechnung fehlgeschlagen: %s", e$message))))
-  base_p <- lapply(combos, function(cp) .get_base_params(method, cp, n_obs))
+  base_p <- lapply(combos, .get_base_params)
   for (bp in base_p) .check_boot_params(method, bp, n_obs)
   weights <- if (is.null(design)) rep(1, n_paths) else design$weight[combo_of_path]
   weights <- weights / sum(weights) * length(weights)
@@ -1514,6 +1574,7 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
                             chunk_dir = NULL, keep_paths = 0L,
                             keep_returns = c("none", "year", "quarter", "month"), keep_aux = NULL,
                             max_tries = 10L, chunk_size = 25L, seed = NULL, cores = 1L, progress = TRUE) {
+  own_cache <- .sim_study(); on.exit(.sim_study_end(own_cache), add = TRUE)   # Pruef-Cache je Studie (seit 1.5.1)
   keep_returns <- match.arg(keep_returns)
   if (!is.null(keep_aux) && !all(keep_aux %in% config$aux_names))
     stop("keep_aux muss Namen aus config$aux enthalten.")

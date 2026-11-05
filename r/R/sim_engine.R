@@ -142,11 +142,13 @@
 }
 
 #' Warnungen, details-Ausgaben und Abbruch des Kerns mit den Texten und Aufrufen der bisherigen Phasen
-#' ausloesen (in der Reihenfolge des Protokolls: cat() und warning() verzahnt)
+#' ausloesen (in der Reihenfolge des Protokolls: cat() und warning() verzahnt); Texte aus .MELD_ENGINE_SIGNAL
+#' (R/meldungen.R, erzeugt aus core/meldungen.tsv)
 #' @keywords internal
 #' @noRd
 .sim_engine_signal <- function(ev, ev_ints, ev_vals, err, nm, flag_date) {
   cl <- sys.call()   # Phase in .SIM_PHASES, .sim_restore_call setzt den Aufruf von simulation()
+  m <- .MELD_ENGINE_SIGNAL
   dstr <- function(d) as.character(structure(as.numeric(flag_date[d]), class = "Date"))
   for (i in seq_along(ev$code)) {
     code <- ev$code[i]
@@ -157,162 +159,142 @@
       next
     }
     w <- switch(as.character(code),
-      "1" = simpleWarning(sprintf("perform_trade_buy: ung\u00fcltiger Kurs (%.4f) f\u00fcr %s am %s; der Kauf wird \u00fcbersprungen.",
-                                  ev$d0[i], a, dstr(ev$day[i])), cl),
-      "2" = simpleWarning(sprintf("perform_trade_sell: angeforderte Verkaufsmenge %.4f \u00fcbersteigt den Bestand %.4f von %s; verkauft wird der gesamte Bestand.",
-                                  ev$d0[i], ev$d1[i], a), cl),
-      "3" = simpleWarning(sprintf("simulation: liquidate = TRUE: Position '%s' (Wert %.2f EUR) wurde nicht verkauft, weil die Ordergeb\u00fchr den Erl\u00f6s \u00fcbersteigt.",
-                                  a, ev$d0[i])),
-      "4" = simpleWarning("no non-missing arguments to max; returning -Inf", cl),
+      "1" = simpleWarning(sprintf(m[["1"]], ev$d0[i], a, dstr(ev$day[i])), cl),
+      "2" = simpleWarning(sprintf(m[["2"]], ev$d0[i], ev$d1[i], a), cl),
+      "3" = simpleWarning(sprintf(m[["3"]], a, ev$d0[i])),
+      "4" = simpleWarning(m[["4"]], cl),
       "5" = {
-        simpleWarning(sprintf("simulation: %s von %.2f EUR am %s: das Depot reicht nicht aus; %.2f EUR bleiben als negativer Geldbestand (Steuerschuld) bei '%s'.",
-                              .sim_engine_label(ev$aux[i], ev_ints[ev$y_off[i] + seq_len(ev$ny[i])]), ev$d0[i],
+        simpleWarning(sprintf(m[["5"]], .sim_engine_label(ev$aux[i], ev_ints[ev$y_off[i] + seq_len(ev$ny[i])]), ev$d0[i],
                               dstr(ev$day[i]), ev$d1[i], a))
       },
-      "6" = simpleWarning(paste0(sprintf("simulation: Paragraf 23 EStG: Gewinne (%.2f EUR) erreichen die Freigrenze (%.2f EUR), ",
-                                         ev$d0[i], ev$d1[i]),
-                                 "aber 'marginal_tax_rate' ist nicht gesetzt.\n",
-                                 "Verwendet wird 42 % (Spitzensteuersatz); marginal_tax_rate in Prozent angeben (z. B. 42).")),
-      stop(sprintf("simulation: interner Fehler: unbekannter Ereigniscode %d der Tagesengine.", code)))
+      "6" = simpleWarning(paste0(sprintf(m[["6"]], ev$d0[i], ev$d1[i]), m[["6.rest"]])),
+      stop(sprintf(m[["unbekannt"]], code)))
     warning(w)
   }
   if (!is.null(err)) {
     if (err$code == 101L)
-      stop(simpleError(sprintf("perform_asset_split: ratio muss > 0 sein (Split-Verh\u00e4ltnis), nicht %s.", format(err$d0)),
-                       cl))
-    stop(simpleError("missing value where TRUE/FALSE needed", cl))
+      stop(simpleError(sprintf(m[["101"]], format(err$d0)), cl))
+    stop(simpleError(m[["na"]], cl))
   }
   invisible(NULL)
 }
 
 # Bezeichnung einer Steuerzahlung (.pay_tax label): 0 Vorabpauschale, 1 Paragraf-23-Steuer, 2 Veranlagung der Jahre
 .sim_engine_label <- function(aux, years) {
-  switch(as.character(aux), "0" = "Vorabpauschale", "1" = "\u00a7 23-Steuer",
-         sprintf("Steuer aus der Veranlagung %s", paste(years, collapse = "/")))
+  m <- .MELD_ENGINE_LABEL
+  switch(as.character(aux), "0" = m[["0"]], "1" = m[["1"]], sprintf(m[["2"]], paste(years, collapse = "/")))
 }
-
-# Anlass der Kaeufe und Verkaeufe (enum Reason in engine_core_impl.h)
-.SIM_ENGINE_REASONS <- c("Handelssignal:", "Rebalancing:", "Rebalancing/Signal-Einstieg:", "Rebalancing/Signal-Ausstieg:",
-                         "Liquidation:", "Steuerereignis:", "Split:", "Freibetrag:")
 
 #' details-Ausgabe eines Ereignisses (DT_* in engine_core_impl.h) wortgleich zu den bisherigen cat()-Aufrufen
 #' der Phasen (.perform_trade_buy/.perform_trade_sell, .sim_day_*, .pay_one, .settle_*, .handle_year_change,
-#' .tariff_close, .perform_asset_split, .perform_gain_harvest)
+#' .tariff_close, .perform_asset_split, .perform_gain_harvest); Texte aus .MELD_ENGINE_DETAIL, Anlass der Kaeufe
+#' und Verkaeufe (enum Reason in engine_core_impl.h) aus .MELD_ENGINE_REASON (R/meldungen.R)
 #' @keywords internal
 #' @noRd
 .sim_engine_detail <- function(code, name, aux, v, ints, nm, day, flag_date) {
+  m <- .MELD_ENGINE_DETAIL
   date <- structure(as.numeric(flag_date[day]), class = "Date")
   ds <- as.character(date)
   switch(as.character(code),
-    "201" = cat(sprintf("%s\tKauf %.2fx %s zu %.2f EUR je Anteil am %s\n", .SIM_ENGINE_REASONS[aux + 1L], v[1], name, v[2], ds)),
-    "202" = cat(sprintf("\t\t=> Vorabpauschale-Anrechnung (\u00a7 19 InvStG): %.2f EUR\n", v[1])),
-    "203" = cat(sprintf("\t\t=> Sparerpauschbetrag: %.2f EUR (verbleibend: %.2f EUR)\n", v[1], v[2])),
-    "204" = cat(sprintf("\t\t=> Steuerfreier Gewinn (Haltedauer > 1 Jahr): %.2f EUR\n", v[1])),
-    "205" = cat(sprintf("\t\t=> Nicht verrechenbarer Verlust (Haltedauer > 1 Jahr): %.2f EUR\n", v[1])),
-    "206" = cat(sprintf("\t\t=> Steuerpflichtiger Gewinn (Haltedauer < 1 Jahr): %.2f EUR (seit Jahresbeginn: %.2f EUR)\n", v[1], v[2])),
-    "207" = cat(sprintf("\t\t=> Verrechenbarer Verlust (Haltedauer < 1 Jahr): %.2f EUR (seit Jahresbeginn: %.2f EUR)\n", v[1], v[2])),
-    "208" = cat(sprintf("%s\tVerkauf %.2fx %s zu %.2f EUR je Anteil am %s\n", .SIM_ENGINE_REASONS[aux + 1L], v[1], name, v[2], ds)),
-    "209" = cat(sprintf("\t\t=> %s: %.2f EUR; Steuer: %.2f EUR\n", ifelse(v[1] < 0, "Verlust", "Gewinn"), v[1], v[2])),
-    "210" = cat(sprintf("Freibetrag:\tRealisierung von Gewinnen %.2f EUR mit %.4fx %s (freier Sparer-Pauschbetrag/Verlusttopf %.2f EUR)\n",
-                        v[1], v[2], name, v[3])),
-    "211" = cat(sprintf("Split-Ereignis:\t%s %s im Verh\u00e4ltnis %s am %s\n", if (aux == 1L) "Split" else "Reverse-Split", name,
-                        if (aux == 1L) paste("1 :", format(v[1], digits = 5)) else paste(format(v[1], digits = 5), ": 1"),
+    "201" = cat(sprintf(m[["201"]], .MELD_ENGINE_REASON[aux + 1L], v[1], name, v[2], ds)),
+    "202" = cat(sprintf(m[["202"]], v[1])),
+    "203" = cat(sprintf(m[["203"]], v[1], v[2])),
+    "204" = cat(sprintf(m[["204"]], v[1])),
+    "205" = cat(sprintf(m[["205"]], v[1])),
+    "206" = cat(sprintf(m[["206"]], v[1], v[2])),
+    "207" = cat(sprintf(m[["207"]], v[1], v[2])),
+    "208" = cat(sprintf(m[["208"]], .MELD_ENGINE_REASON[aux + 1L], v[1], name, v[2], ds)),
+    "209" = cat(sprintf(m[["209"]], ifelse(v[1] < 0, m[["209.verlust"]], m[["209.gewinn"]]), v[1], v[2])),
+    "210" = cat(sprintf(m[["210"]], v[1], v[2], name, v[3])),
+    "211" = cat(sprintf(m[["211"]], if (aux == 1L) m[["211.split"]] else m[["211.reverse"]], name,
+                        sprintf(if (aux == 1L) m[["211.v1"]] else m[["211.v2"]], format(v[1], digits = 5)),
                         format(date, "%Y-%m-%d"))),
-    "212" = cat(sprintf("Split-Ereignis:\t%s ohne Bestand: Kursreihe %s %s am %s\n", name, if (aux == 1L) "1 :" else ": 1",
-                        format(v[1], digits = 5), date)),
-    "213" = cat(sprintf("Marktereignis:\tHandel mit %s ab jetzt m\u00f6glich.\n", paste(nm[ints + 1L], collapse = ", "))),
+    "212" = cat(sprintf(m[["212"]], name, if (aux == 1L) m[["212.v1"]] else m[["212.v2"]], format(v[1], digits = 5), date)),
+    "213" = cat(sprintf(m[["213"]], paste(nm[ints + 1L], collapse = ", "))),
     "214" = {
+      # Vorlage mit den Namen im Format (wie bis 1.5.2: Kopf, je Asset "<Name> %.2f EUR", Zeilenende)
       flow_values <- stats::setNames(v[-1L], nm[ints + 1L])
-      placeholder <- paste(sprintf("%s %%.2f EUR", names(flow_values)), collapse = "; ")
-      format_text <- sprintf("Einzahlung:\t%%.2f EUR in das Depot am %%s\n\t\t=> %s\n", placeholder)
+      placeholder <- paste(sprintf(sub("%.2f", "%%.2f", m[["214.teil"]], fixed = TRUE), names(flow_values)), collapse = "; ")
+      format_text <- paste0(m[["214"]], placeholder, "\n")
       cat(do.call(sprintf, c(list(format_text, v[1L]), list(date), as.list(flow_values))))
     },
-    "215" = cat(sprintf("Rebalancing:\tErzwungenes Rebalancing am %s wegen neu handelbarer Assets: %s\n",
-                        date, paste(nm[ints + 1L], collapse = ", "))),
-    "216" = cat(sprintf("Rebalancing:\tRebalancing am %s (max. Abweichung: %.2f%% > Schwelle: %.2f%%)\n", date, v[1], v[2])),
-    "217" = cat(sprintf("\t\t=> %s: Ziel=%.1f%%, Ist=%.1f%%, Abweichung=%.2f%%\n", name, v[1], v[2], v[3])),
-    "218" = cat(sprintf("Rebalancing:\tKein Rebalancing am %s (max. Abweichung: %.2f%% < Schwelle: %.2f%%)\n", date, v[1], v[2])),
-    "219" = cat(sprintf("\t\t%.2f EUR von %s in den Rebalancing-Topf\n", v[1], name)),
-    "220" = cat(sprintf("Rebalancing:\t%.2f EUR aus dem Rebalancing-Topf an %s\n", v[1], name)),
-    "221" = cat(sprintf("\t\t=> %s h\u00e4lt %.2f EUR als Cash-Reserve (Signal inaktiv)\n", name, v[1])),
-    "222" = cat(sprintf("\t\tRestverteilung von %.2f EUR aus dem Rebalancing-Topf\n", v[1])),
-    "223" = cat(sprintf("\t\t=> %.2f EUR an %s\n", v[1], name)),
-    "224" = cat(sprintf("Steuerereignis:\tVorabpauschale %s: %.2f EUR festgesetzt am %s (Zufluss und Steuer am ersten Handelstag des Folgejahres)\n",
-                        name, v[1], date)),
-    "225" = cat(sprintf("Steuerereignis:\tZahlung %s %.2f EUR f\u00fcr %s aus dem Geldbestand am %s\n",
-                        .sim_engine_label(aux, ints), v[1], name, date)),
-    "226" = cat(sprintf("Steuerereignis:\tTeilzahlung %s %.2f EUR aus dem Geldbestand am %s\n", .sim_engine_label(aux, ints), v[1], date)),
-    "227" = cat(sprintf("\t\t=> Anteile verkauft f\u00fcr den Rest von %.2f EUR (%s)\n", v[1], .sim_engine_label(aux, ints))),
-    "228" = cat(sprintf("Steuerereignis:\tVeranlagung %d: Nachzahlung %.2f EUR (davon \u00a7 23 %.2f EUR, Kirchensteuer-Sonderausgaben %.2f EUR%s) am %s, aufgeteilt %s\n",
-                        as.integer(v[1]), v[2], v[3], v[4], if (bitwAnd(aux, 1L)) sprintf(", G\u00fcnstigerpr\u00fcfung %.2f EUR", v[5]) else "",
-                        date, if (bitwAnd(aux, 2L)) "nach dem \u00a7 23-Jahressaldo je Asset" else "zu gleichen Teilen auf die Assets")),
-    "229" = cat(sprintf("\t\t=> Anteil %s: %.2f EUR\n", name, v[1])),
-    "230" = cat(sprintf("Steuerereignis:\t\u00a7 23 EStG: Steuer %.2f EUR (%s) am %s\n", v[1], name, date)),
-    "231" = cat(sprintf("Steuerereignis:\tG\u00fcnstigerpr\u00fcfung: Erstattung %.2f EUR in den Geldbestand am %s\n", v[1], date)),
-    "232" = cat(sprintf("Steuerereignis:\tVorabpauschale %s (festgesetzt %s): %.2f EUR, nach TFS %.2f EUR, SPB %.2f EUR, Steuer %.2f EUR am %s\n",
-                        name, format(structure(v[1], class = "Date")), v[2], v[3], v[4], v[5], date)),
+    "215" = cat(sprintf(m[["215"]], date, paste(nm[ints + 1L], collapse = ", "))),
+    "216" = cat(sprintf(m[["216"]], date, v[1], v[2])),
+    "217" = cat(sprintf(m[["217"]], name, v[1], v[2], v[3])),
+    "218" = cat(sprintf(m[["218"]], date, v[1], v[2])),
+    "219" = cat(sprintf(m[["219"]], v[1], name)),
+    "220" = cat(sprintf(m[["220"]], v[1], name)),
+    "221" = cat(sprintf(m[["221"]], name, v[1])),
+    "222" = cat(sprintf(m[["222"]], v[1])),
+    "223" = cat(sprintf(m[["223"]], v[1], name)),
+    "224" = cat(sprintf(m[["224"]], name, v[1], date)),
+    "225" = cat(sprintf(m[["225"]], .sim_engine_label(aux, ints), v[1], name, date)),
+    "226" = cat(sprintf(m[["226"]], .sim_engine_label(aux, ints), v[1], date)),
+    "227" = cat(sprintf(m[["227"]], v[1], .sim_engine_label(aux, ints))),
+    "228" = cat(sprintf(m[["228"]], as.integer(v[1]), v[2], v[3], v[4], if (bitwAnd(aux, 1L)) sprintf(m[["228.guenstiger"]], v[5]) else "",
+                        date, if (bitwAnd(aux, 2L)) m[["228.asset"]] else m[["228.gleich"]])),
+    "229" = cat(sprintf(m[["229"]], name, v[1])),
+    "230" = cat(sprintf(m[["230"]], v[1], name, date)),
+    "231" = cat(sprintf(m[["231"]], v[1], date)),
+    "232" = cat(sprintf(m[["232"]], name, format(structure(v[1], class = "Date")), v[2], v[3], v[4], v[5], date)),
     "240" = {
-      cat(sprintf("\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n"))
-      cat(sprintf("  JAHRESWECHSEL: %d -> %d\n", as.integer(v[1]), as.integer(v[2])))
-      cat(sprintf("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n"))
+      cat(sprintf(m[["240.1"]]))
+      cat(sprintf(m[["240.2"]], as.integer(v[1]), as.integer(v[2])))
+      cat(sprintf(m[["240.3"]]))
     },
     "241" = {
-      cat(sprintf("  \u00a7 23 EStG: Verlustvortrag verwendet: %.2f EUR\n", v[1]))
-      cat(sprintf("             Verbleibender Vortrag: %.2f EUR\n", v[2]))
+      cat(sprintf(m[["241.1"]], v[1]))
+      cat(sprintf(m[["241.2"]], v[2]))
     },
     "242" = {
-      cat(sprintf("  \u00a7 23 EStG Jahres\u00fcbersicht %d:\n", as.integer(v[1])))
-      cat(sprintf("    Bruttogewinne (< 1 Jahr):    %10.2f EUR\n", v[2]))
-      cat(sprintf("    Bruttoverluste (< 1 Jahr):   %10.2f EUR\n", v[3]))
-      cat(sprintf("    Interne Verrechnung:         %10.2f EUR\n", v[4]))
-      cat(sprintf("    Verlustvortrag-Verrechnung:  %10.2f EUR\n", v[5]))
-      cat(sprintf("    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"))
-      cat(sprintf("    Netto-Ergebnis:              %10.2f EUR\n", v[6]))
+      cat(sprintf(m[["242.1"]], as.integer(v[1])))
+      cat(sprintf(m[["242.2"]], v[2]))
+      cat(sprintf(m[["242.3"]], v[3]))
+      cat(sprintf(m[["242.4"]], v[4]))
+      cat(sprintf(m[["242.5"]], v[5]))
+      cat(sprintf(m[["242.6"]]))
+      cat(sprintf(m[["242.7"]], v[6]))
     },
     "243" = {
       marginal_tax_rate <- v[4]; soli_factor_income <- v[5]; church_factor <- v[6]
-      cat(sprintf("\n  \u26a0 FREIGRENZE ERREICHT!\n"))
-      cat(sprintf("    Jahressaldo %.2f EUR >= Freigrenze %.2f EUR\n", v[1], v[2]))
-      cat(sprintf("    \u2192 GESAMTER Gewinn nach Verlustvortrag steuerpflichtig: %.2f EUR (Freigrenze, kein Freibetrag!)\n", v[3]))
+      cat(sprintf(m[["243.1"]]))
+      cat(sprintf(m[["243.2"]], v[1], v[2]))
+      cat(sprintf(m[["243.3"]], v[3]))
       if (aux == 1L) {
-        cat("    \u2192 Steuer nach dem Einkommensteuertarif (ESt + Soli + KiSt des \u00a7 23-Zuwachses): siehe Jahresveranlagung unten (Zeile \u00a7 23)\n")
+        cat(m[["243.tarif"]])
       } else {
-        cat(sprintf("    \u2192 Steuersatz: %.1f%%%s%s\n", marginal_tax_rate * 100, if (soli_factor_income > 1) sprintf(" + %.1f%%%% Soli", (soli_factor_income - 1) * 100) else "",
-                    if (church_factor > 0) sprintf(" + %.1f%% KiSt", church_factor * 100) else ""))
-        cat(sprintf("    \u2192 Steuerlast: %.2f EUR\n", v[7]))
+        cat(sprintf(m[["243.satz"]], marginal_tax_rate * 100, if (soli_factor_income > 1) sprintf(m[["243.soli"]], (soli_factor_income - 1) * 100) else "",
+                    if (church_factor > 0) sprintf(m[["243.kist"]], church_factor * 100) else ""))
+        cat(sprintf(m[["243.last"]], v[7]))
       }
     },
     "244" = {
-      cat(sprintf("\n  Nettoverlust %.2f EUR \u2192 Vortrag ins n\u00e4chste Jahr\n", v[1]))
-      cat(sprintf("  Gesamter Verlustvortrag: %.2f EUR\n", v[2]))
+      cat(sprintf(m[["244.1"]], v[1]))
+      cat(sprintf(m[["244.2"]], v[2]))
     },
-    "245" = cat(sprintf("\n  \u2713 Jahressaldo %.2f EUR < Freigrenze %.2f EUR \u2192 STEUERFREI (Verlustvortrag unver\u00e4ndert)\n", v[1], v[2])),
-    "246" = cat(sprintf("\n  Keine steuerpflichtigen \u00a7 23 Vorg\u00e4nge in %d\n", as.integer(v[1]))),
+    "245" = cat(sprintf(m[["245"]], v[1], v[2])),
+    "246" = cat(sprintf(m[["246"]], as.integer(v[1]))),
     "247" = {
-      cat(sprintf("\n  Sparerpauschbetrag %d:\n", as.integer(v[1])))
-      cat(sprintf("    Jahresbetrag:    %10.2f EUR\n", v[2]))
-      cat(sprintf("    Verwendet:       %10.2f EUR\n", v[3]))
-      cat(sprintf("    Verfallen:       %10.2f EUR\n", v[4]))
+      cat(sprintf(m[["247.1"]], as.integer(v[1])))
+      cat(sprintf(m[["247.2"]], v[2]))
+      cat(sprintf(m[["247.3"]], v[3]))
+      cat(sprintf(m[["247.4"]], v[4]))
     },
-    "248" = cat(sprintf("  \u00a7 20 EStG: Unterj\u00e4hrige Verlustverrechnung -> Erstattung %.2f EUR in den Geldbestand\n", v[1])),
-    "249" = cat(sprintf("  \u00a7 20 EStG: Verlust gibt Sparer-Pauschbetrag frei: %.2f EUR (genutzt %d: %.2f EUR, Verlusttopf %.2f EUR)\n",
-                        v[1], as.integer(v[2]), v[3], v[4])),
+    "248" = cat(sprintf(m[["248"]], v[1])),
+    "249" = cat(sprintf(m[["249"]], v[1], as.integer(v[2]), v[3], v[4])),
     "250" = {   # Jahreszeile in der Reihenfolge TR_* (tariff_core_impl.h)
       year <- as.integer(v[1]); X1 <- v[21]; fav <- v[22] != 0; D <- v[23]
-      cat(sprintf("  Tarif %d: zvE %.2f EUR - KiSt-Sonderausgaben %.2f EUR (gezahlt %.2f, erstattet %.2f) = %.2f EUR (Wirkung %.2f EUR)\n",
-                  year, v[2], v[5], v[3], v[4], v[6], v[7]))
-      if (bitwAnd(aux, 2L)) cat(sprintf("    \u00a7 23: Gewinn %.2f EUR -> Steuerlast ESt %.2f + Soli %.2f + KiSt %.2f = %.2f EUR\n",
-                                        v[8], v[9], v[10], v[11], v[12]))
-      if (bitwAnd(aux, 1L)) cat(sprintf("    G\u00fcnstigerpr\u00fcfung: K %.2f EUR, Abgeltungsteuer %.2f EUR (KiSt %.2f), Tarif auf K %.2f EUR (ESt %.2f + Soli %.2f + KiSt %.2f); Belastung ohne %.2f / mit %s EUR -> %s\n",
-                                        v[13], v[14], v[15], v[19], v[16], v[17], v[18], v[20], if (is.na(X1)) "-" else sprintf("%.2f", X1),
-                                        if (fav) "Tarif" else "Abgeltungsteuer bleibt"))
-      cat(sprintf("    Abrechnung: %s %.2f EUR; KiSt-Bescheid %+.2f EUR (Sonderausgabe %d)\n",
-                  if (D >= 0) "Nachzahlung" else "Erstattung", abs(D), v[25], year + 1L))
+      cat(sprintf(m[["250.1"]], year, v[2], v[5], v[3], v[4], v[6], v[7]))
+      if (bitwAnd(aux, 2L)) cat(sprintf(m[["250.p23"]], v[8], v[9], v[10], v[11], v[12]))
+      if (bitwAnd(aux, 1L)) cat(sprintf(m[["250.guenstiger"]],
+                                        v[13], v[14], v[15], v[19], v[16], v[17], v[18], v[20], if (is.na(X1)) "-" else sprintf(m[["250.x1"]], X1),
+                                        if (fav) m[["250.tarif"]] else m[["250.bleibt"]]))
+      cat(sprintf(m[["250.abrechnung"]], if (D >= 0) m[["250.nach"]] else m[["250.erst"]], abs(D), v[25], year + 1L))
     },
     "251" = {
-      cat(sprintf("\n  Tracker zur\u00fcckgesetzt f\u00fcr Jahr %d\n", as.integer(v[1])))
-      cat(sprintf("\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n\n"))
+      cat(sprintf(m[["251.1"]], as.integer(v[1])))
+      cat(sprintf(m[["251.2"]]))
     },
-    stop(sprintf("simulation: interner Fehler: unbekannter Ereigniscode %d der Tagesengine.", code)))
+    stop(sprintf(.MELD_ENGINE_SIGNAL[["unbekannt"]], code)))
   invisible(NULL)
 }

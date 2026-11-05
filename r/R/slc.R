@@ -1,8 +1,8 @@
 # Huellen der C-Bibliothek slc (SimLev core): Zufallszustand, simlev_seed(),
 # interne Ziehungen und Verteilungen .sl_*.
 #
-# Die Rechnung steht in src/slc*.c (Kopien von core/, core/sync.py), die .Call-Huellen in
-# src/slc_r.c (Registrierung in src/init.c, in R als C_sl_*). Kein Code hier ruft R's
+# Die Rechnung steht in src/slc*.cpp (Kopien von core/, core/sync.py), die .Call-Huellen in
+# src/slc_r.cpp (Registrierung in src/init.cpp, in R als C_sl_*). Kein Code hier ruft R's
 # Zufallszahlen auf; set.seed() und .Random.seed wirken auf diese Funktionen nicht.
 #
 # Zufallszustand:
@@ -227,11 +227,21 @@ simlev_seed <- function(seed = NULL) {
 .sl_pbeta <- function(q, shape1, shape2, lower.tail = TRUE)
   .sl_attr(q, .Call(C_sl_pbeta, as.double(q), as.double(shape1), as.double(shape2), as.logical(lower.tail)))
 
+# pt/qt seit 1.6.0 elementweise auf mehreren Threads (Kern sl_pt_mt/sl_qt_mt, Ergebnis unabhaengig davon)
 .sl_pt <- function(q, df, lower.tail = TRUE)
-  .sl_attr(q, .Call(C_sl_pt, as.double(q), as.double(df), as.logical(lower.tail)))
+  .sl_attr(q, .Call(C_sl_pt_mt, as.double(q), as.double(df), as.logical(lower.tail), .sl_nthreads()))
 
 .sl_qt <- function(p, df, lower.tail = TRUE)
-  .sl_attr(p, .Call(C_sl_qt, as.double(p), as.double(df), as.logical(lower.tail)))
+  .sl_attr(p, .Call(C_sl_qt_mt, as.double(p), as.double(df), as.logical(lower.tail), .sl_nthreads()))
+
+# Threads der elementweisen Kerne (seit 1.6.0): Umgebungsvariable SIMLEV_THREADS (ganze Zahl >= 1), sonst 0 =
+# Zahl der Prozessoren (hoechstens 8); wie python/simlev/_lib.py und julia/src/slib.jl
+.sl_nthreads <- function() {
+  v <- Sys.getenv("SIMLEV_THREADS", "")
+  if (!nzchar(v)) return(0L)
+  v <- suppressWarnings(as.integer(v))
+  if (is.na(v) || v < 1L) 0L else v
+}
 
 .sl_plogis <- function(q) .sl_attr(q, .Call(C_sl_plogis, as.double(q)))
 

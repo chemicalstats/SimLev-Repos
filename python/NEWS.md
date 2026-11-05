@@ -1,5 +1,107 @@
 # simlev (Python) – Änderungen je Version
 
+## simlev (Python) 1.6.0
+
+Minor-Update (R/Python/Julia). Der Kern ist einheitlich C++, die Rechenschritte, die bei großen Strategien und Daten die meiste Zeit kosten, rechnet er in allen drei Sprachen mit demselben Code, ebenso die bis 1.5.2 in Python und Julia je für sich nachgebildeten Grundfunktionen von R. Ergebnisse, Ausgaben, Warnungen und Fehler bleiben bitgleich zu 1.5.2, außer den unten als „Berichtigt“ genannten Abweichungen der Ports von R.
+
+- Kern einheitlich in C++: Die Bibliothek slc (`core/slc_*.c`, bis 1.5.2 C99) ist jetzt C++ (`core/slc_*.cpp`), ebenso die Hüllen (`r/src/init.cpp`, `r/src/slc_r*.cpp`, `python/src/_ext_slc*.cpp`). Alle drei Builds übersetzen nur noch C++ mit denselben Schaltern (`-std=gnu++17 -O2 -ffp-contract=off -fno-fast-math`, MS-GARCH-Starts mit Threads außer unter Windows); zum Bauen genügt ein C++-Compiler. Die öffentliche Schnittstelle (`slc.h`, `slc_*.h`) und die C-ABI-Hülle behalten die C-Bindung (`extern "C"`); die exportierten Symbole und die `ccall`s von Julia sind unverändert. Alle Funktionen der Bibliothek tragen die Angabe, dass sie nie werfen (`SL_NOTHROW`); ohne sie war der MS-GARCH-Fit in Julia 7 % langsamer als mit der C-Fassung.
+- Meldungstabellen aus einer Quelle: Die Code→Text-Tabellen der Tagesengine (Warnungen, Abbrüche, `details`-Ausgaben, Anlässe der Käufe und Verkäufe, Bezeichnungen der Steuerzahlungen) und der Auswertung von simulation() (Ursachen nicht definierter Kennzahlen, Warnungen einschließlich derer von `uniroot`) stehen in `core/meldungen.tsv`; `core/gen_meldungen.py` (nur Standardbibliothek) erzeugt daraus `r/R/meldungen.R`, `python/simlev/_meldungen.py` und `julia/src/meldungen.jl`, `core/sync.py --check` prüft, dass sie aktuell sind. Die Texte sind wortgleich zu 1.5.2.
+- simulation() mit Handelstagsdaten (Lücken im Kalender): Das Auffüllen auf Kalendertage (letzter Wert für Zahlen, Signale FALSE, Spalte `.filled`) rechnet der Kern (`core/slc_prep.cpp`); bis 1.5.2 R über `merge()` mit Datumstext je Tag, Python und Julia über Schleifen je Tag. Das gilt für alle Studien über simulation() (param_search(), sensitivity_grid(), bootstrap_study(), overfit_walk_forward() …). Spalten mit Attributen oder Faktoren und nicht ganzzahlige Datumswerte laufen in R wie bisher über `merge()`.
+- bootstrap() und bootstrap_study(): Jeder Pfad (Kurse, Hebelprodukte mit Knockout, Zusatzreihen und ihre Niveau-Variante `aux_level`) entsteht in einem Aufruf des Kerns (`core/slc_bootpath.cpp`) statt spaltenweise in der Sprache.
+- t-Copula (copula_fit(), dependence_analysis() mit `copulas = TRUE`, scenario_copula() mit `family = "t"`): Die Profil-Likelihood über nu rechnet ganz im Kern (`core/slc_tcop.cpp`), mit dem Brent-Verfahren wie `stats::optimize` (`core/slc_opt_fmin.cpp`). Nur wenn eine Auswertung nicht endlich ist oder qt warnt, rechnet die Sprache wie bisher (gleiche Meldungen).
+- qt und pt der Bibliothek slc rechnen elementweise auf mehreren Threads; das Ergebnis hängt nicht von der Zahl der Threads ab. Neue Umgebungsvariable `SIMLEV_THREADS` (ganze Zahl ab 1; ohne sie die Zahl der Prozessoren, höchstens 8; unter Windows ohne Threads).
+- Symmetrische Eigenzerlegung (portfolio_optimize(), portfolio_rolling(), scenario_copula() u. a.): Das zyklische Jacobi-Verfahren dreht je Schritt zwei zusammenhängende Spalten und trägt die Zeilen blockweise nach (gleiche Drehfolge, gleiche Rechnung je Element); bei 500 Anlagen etwa 2,4-mal so schnell.
+- momentum_score() und tactical_rotation(): Rückblickzeilen (ganzzahlige Kalenderrechnung), letzter Wert, Renditen und Scores rechnet der Kern.
+- Laufzeit gegenüber 1.5.2 (Median, alt und neu abwechselnd, große Fälle): R param_search() mit Werktagsdaten −85 %, simulation() mit Werktagsdaten −36 bis −65 %, sensitivity_grid() −54 %; tactical_rotation() R −66 bis −75 %, Python −34 bis −40 %, Julia −92 bis −94 %; bootstrap() −20 bis −38 %; dependence_analysis() mit Copulas und scenario_copula() R und Julia −35 bis −46 %, Python −2 bis −7 %; portfolio_optimize() mit 500 Anlagen −29 bis −34 %. Keine andere gemessene Aufgabe messbar langsamer.
+- Tests (Ordner tests des Repositorys): `tests/werkzeuge/gleichlauf/run.py` kennt die Referenz R 1.5.2 (`REFLIBS` „152“, `SIMLEV_FUZZ_REFLIB152`) und die Option `--ref KENNUNG`, mit der alle Zufallsprüfungen gegen eine Referenz laufen. Neue Zufallsprüfungen mit 1.5.2 als Referenz: cal_fuzz (simulation() mit lückenhaften Kalendern), boot_fuzz (bootstrap() mit Hebelprodukten, Zusatzreihen, Knockouts, allen Verfahren), copula_fuzz (copula_fit, scenario_copula, dependence_analysis, optimize, qt/pt mit Threads), mom_fuzz (momentum_score, tactical_rotation), eigen_fuzz (Eigenzerlegung, portfolio_optimize), clust_fuzz (dist, hclust), vec_fuzz (cut, .bincode, seq.int, median, sort), cor_fuzz (cor/cov mit allen use und Verfahren, cov2cor, scale), padj_fuzz (p.adjust, ecdf) und fmt_fuzz (sprintf, formatC, format, as.character, round, signif); approx_fuzz prüft zusätzlich filter() und regularize.values(). Abgedeckt sind NA, NaN, ±Inf, ±0, Bindungen, leere Eingaben, Nicht-ASCII und alle Methoden bzw. Optionen.
+
+Nur R:
+
+- Das Paket enthält keine C-Quellen mehr (`src/` nur C++, `CXX_STD = CXX17`). Die C++-Kerne bekommen dieselben Gleitkomma-Schalter wie in Python und Julia (`-ffp-contract=off -fno-fast-math`); auf x86-64 ohne FMA ändert das am Ergebnis nichts.
+- `.sl_qt`/`.sl_pt` rufen die Kerne mit Threads (neue .Call-Hüllen in `src/prep_r.cpp`). Die Grundfunktionen von R rechnet R weiter selbst; die neuen Kerne `core/slc_rbase_*.cpp` gehen nur in Python und Julia.
+
+Nur Python und Julia:
+
+- Grundfunktionen von R im Kern: dist/hclust (Lance-Williams nach hclust.f), cut/.bincode, seq.int(length.out), median, cor/cov mit Rängen (kendall, spearman, alle use, paarweise), cov2cor, scale, regularize.values (approx, approxfun), filter (Faltung, rekursiv), p.adjust, ecdf, round/signif, formatReal/encodeReal, as.character für Zahlen, formatC und sprintf rechnet der gemeinsame C++-Kern (`core/slc_rbase2.h`, `core/slc_rbase_{clust,vec,cor,smooth,models,fmt}.cpp`); die Sprachen behalten dünne Hüllen. sprintf gibt es je Sprache nur noch einmal: Der schnelle Weg der Engine-Texte ruft denselben Kern wie die Vektorform, jede Umwandlung formatiert wie R über snprintf der C-Bibliothek. Die Nachbildung von `stats::optimize` rechnet Brent im Kern.
+- Laufzeit (zusätzlich zu oben): portfolio_optimize(method = "hrp") mit 200 Anlagen in Python −27 %, print/summary in Python −50 %; withdrawal_simulation() mit 10.000 Pfaden in Julia −36 %, Dashboard in Julia −22 %.
+- Berichtigt (momentum_score(), tactical_rotation()): Nicht aufsteigend sortierte Daten brechen wie in R mit „'vec' must be sorted non-decreasingly and not contain NAs“ ab (bisher ohne Fehler mit falschen Rückblicken).
+- Berichtigt (dist, hclust): Eine mehrdeutige oder leere Abkürzung der Methode meldet wie R „invalid distance method“ bzw. „invalid clustering method …“ (bisher „ambiguous …“ bzw. bei dist "" die euklidische Distanz).
+- Berichtigt (cut mit einer Anzahl von Intervallen): Enthält x ±Inf oder nur NA, bricht cut wie R ab („'from' must be a finite number“ bzw. „'to' must be a finite number“, bei nur NA mit den Warnungen von range(), bei nur +Inf bzw. nur −Inf „missing value where TRUE/FALSE needed“; bisher Grenzen aus nicht endlichen Werten).
+- Berichtigt (filter, method = "recursive"): init als Vektor bzw. als Matrix mit einer Spalte bei mehreren Reihen bricht wie R ab („dims [product …] do not match the length of object […]“ bzw. „subscript out of bounds“; bisher für alle Reihen wiederholt).
+- Berichtigt (round, signif): Ist x oder digits NA, ist das Ergebnis wie in R NA, sonst bei NaN NaN (bisher z. B. signif(NaN, NA) = NaN statt NA).
+- Berichtigt (sprintf der Engine-Texte, r_sprintf): Breiten bei %s zählen wie in R Bytes (bisher Zeichen, z. B. sprintf("[%5s]", "äö") = "[ äö]" statt "[   äö]"); NaN in %d bricht wie in R ab. Die Pakete rufen r_sprintf nicht mit solchen Eingaben auf.
+
+Nur Python:
+
+- Berichtigt (r_sprintf): Wahrheitswerte in %x/%o brechen wie in R ab (bisher eine Zahl); in `simlev._r.fmt.sprintf` bricht ein Wahrheitswert als Argument von * wie in R ab („argument for '*' conversion specification must be a number“).
+- bootstrap(): kein DataFrame-Aufbau mehr aus Teilblöcken je Pfad; der Rahmen entsteht ohne Kopie aus dem Ergebnis des Kerns.
+- Schneller: sprintf in der Vektorform drei- bis zwanzigmal, formatC drei-, signif dreißigmal; Engine-Texte (r_sprintf) 1,0–1,7 µs statt 1,4–2,3 µs, mit %s von Zahlen 1,4 statt 11 µs. Die Erweiterung `simlev._ext` wird nur aus C++-Quellen gebaut (`MANIFEST.in`); `simlev/_r/_optim.py` entfällt.
+
+Nur Julia:
+
+- Berichtigt (r_sprintf): %x/%X mit den Flags + oder Leerzeichen schreiben wie glibc und R kein Vorzeichen (bisher "+ff"); %#s und NA mit %#G wie R ohne Anführungszeichen.
+- momentum_score(): ohne die typinstabile Hilfe `_fill_na` (bei 200 Anlagen deutlich kürzer). bootstrap() kopiert die Zusatzreihen nicht mehr je Pfad (weniger Spitzenspeicher).
+- Intern: die eigene snprintf-Anbindung (`_c_sprintf`, `_LIBC`) entfällt; r_sprintf 0,4–0,5 µs statt 0,55–0,8 µs je Aufruf, sprintf und formatC über 200 Werte 40 % bzw. 80 % schneller. `src/r/_optim.jl` entfällt.
+- `deps/build.jl` übersetzt alle Quellen von `libslc` mit dem C++-Compiler (`ENV["SIMLEV_CXX"]`; `SIMLEV_CC` entfällt, beim Bau eine Warnung, falls gesetzt). `SIMLEV_THREADS` steht in `REnv.SWITCHES` und in `DEVELOPING.md`.
+
+## simlev (Python) 1.5.2
+
+Patch-Update (R/Python/Julia). Funde der Codeprüfung: schnellere Schleifen in Python, Julia und R, weniger doppelter und toter Code in Python und Julia; die Werkzeuge des Repositorys sind auf Python umgestellt. Ergebnisse, Ausgaben, Warnungen und Fehler bleiben bitgleich zu 1.5.1, außer der unten als „Berichtigt“ genannten Abweichung der Ports von R.
+
+- Laufzeit gegenüber 1.5.1 (Median, alt und neu abwechselnd, ein Kern, 21 bis 150 Läufe je Aufgabe): Python backcast_fit() −57 %, rebalance_trigger() −81 %, scenario_entropy_pooling() −46 bis −72 %, simulation() −11 bis −34 %, overfit_pbo() −12 bis −32 %, dependence_analysis() −26 %, series_align() −25 %; Julia overfit_walk_forward() −75 %, simulation() mit Signalspalten −16 bis −27 %; R bootstrap() −23 %. Keine andere Aufgabe messbar langsamer.
+- Werkzeuge: Die Shell-Skripte sind durch Python-Skripte ersetzt (Python 3.10 oder neuer, nur Standardbibliothek; gleiche Optionen, Ausgaben, Protokolle und Rückgabewerte): `tests/run.py` (bisher `tests/run.sh`), `tests/schnittstelle/run.py`, `tests/werkzeuge/gleichlauf/run.py`, `tests/werkzeuge/bench/run.py`, `tests/werkzeuge/erzeugen.py`; die Doku-Beispiele prüft `tests/werkzeuge/doku/beispiele.py` ohne Dateiangabe selbst (bisher `beispiele.sh`). Das Repository braucht damit keine Bash mehr; R, Python und Julia bleiben dort, wo sie die Pakete ausführen (Generatoren, Testläufer, Vergleiche).
+- Tests (Ordner tests des Repositorys): neue Zufallsprüfung libm_fuzz im Gleichlauf mit 1.5.1 als Referenz (libm elementweise mit NA, NaN, ±Inf, ±0 und subnormalen Zahlen, Pseudo-Beobachtungen, rebalance_trigger(), doppelte Tage in series_align() und simulation(), scenario_entropy_pooling()). Der Referenzfall dependence/kendall_und_copulas setzt das NA in die letzte Spalte: R 4.3.3 liest in stats::cor(method = "kendall") mit NA einen nicht gesetzten Wert (cov_na_1 in stats/src/cov.c) und warnte deshalb zufällig „the standard deviation is zero“. Die Referenzfälle der entfallenen uniroot-Nachbildung und von .ldmvn entfallen.
+
+Nur R:
+
+- bootstrap() und die Studien darüber: Die Pfade aus den Renditen (.build_path) entstehen in einer Spaltenschleife statt mit apply() (gleiche Werte und Namen).
+- Intern: unbenutzte Argumente entfernt (.sim_build_state, .sim_build_calendar, .resolve_auto, .get_base_params, .ess_design, .wd_tariff_years); .ldmvn entfällt (ohne Aufrufer seit 1.5.0, regime_hmm rechnet im Kern).
+
+Nur Python und Julia:
+
+- Berichtigt (signif() der Engine-Textausgabe, r_signif): Nicht ganzzahlige digits werden wie in R mit C-round() gerundet (bisher Runden auf gerade, z. B. signif(x, 2.5) mit 2 statt 3 Stellen). Die Pakete rufen r_signif nur mit ganzzahligen Stellen auf; über die öffentliche Schnittstelle nicht erreichbar.
+- Eine Formatierungsschicht: Runden (round, signif) und formatReal/encodeReal der Engine-Textausgabe (rformat) rechnen die Funktionen der R-Formatierung (fmt bzw. RFmt; bisher eine zweite Nachbildung). Die skalare sprintf()-Fassung der Engine bleibt (schneller; nicht in allen Randfällen gleich der vollen Fassung).
+- Entfallen (ohne Aufrufer): die Nachbildung von stats::uniroot mit R_zeroin2 (XIRR rechnet seit 1.4.0 der Kern), isSymmetric, _row_means, _max_col_first, _ldmvn und weitere Hilfen; unbenutzte Argumente wie in R.
+
+Nur Python:
+
+- libm elementweise (exp, log, log1p, expm1, log2, log10, ^) rechnet für Felder eine C-Schleife mit denselben glibc-Funktionen (core/slc_rbase.c, sl_r_math1 und sl_r_pow_rec) statt math.* je Element in Python; Skalare wie bisher.
+- scenario_entropy_pooling(): R-min/max ohne Python-Schleife, das duale Problem wird je Punkt einmal ausgewertet (Ziel und Gradient teilen sich das Ergebnis). Ein Aufruf mit unerfüllbarer Annahme (400 Zeilen, Optimierer bis an die Grenze) braucht 5,5 statt 26,8 s CPU (R 7 s).
+- simulation(): doppelte Tage ohne Python-Schleife (die Daten sind dort sortiert); series_align() und weitere: duplicated() für Zahlen ohne Schleife; rebalance_trigger() ohne float()/np.isnan je Tag; Pseudo-Beobachtungen der Copulas über den Rang-Kern (sl_r_rank).
+- Gemeinsame interne Hilfen in simlev/_util.py (match.arg in zwei Fassungen, cov2cor, späte Importe u. a.) statt Weiterleitungen und Kopien je Modul.
+
+Nur Julia:
+
+- overfit_walk_forward(): Fenstergrenzen vor der Suche gebunden (bisher dynamischer Feldzugriff je Tag).
+- simulation() mit Signalspalten: Umwandlung der Signale hinter einer Funktionsgrenze (je Spaltentyp übersetzt).
+
+## simlev (Python) 1.5.1
+
+Patch-Update (R/Python/Julia). Technische Korrekturen nach der Messung der Laufzeiten: Datumsrechnung, Fensterrenditen, NAV der Fonds-Wrapper im gemeinsamen Kern, Prüf-Cache der Studien. Ergebnisse, Ausgaben, Warnungen und Fehler bleiben bitgleich zu 1.5.0; Python und Julia sind in den unten genannten Fällen jetzt wie R.
+
+- wrapper_nav() und Wrapper-Assets in simulation(): Die Tagesschleife des Anteilswerts (Verwaltungsgebühr je Kalendertag, Performancegebühr über der High Water Mark, Festschreibung am Jahresende) rechnet der gemeinsame Kern (core/wrapper_core_impl.h). Innere Rechnung, Auswahl der NAV-Tage und Meldungen bleiben in der Sprache.
+- Studien über simulation() (bootstrap_study(), param_search(), sensitivity_grid(), sensitivity_rebalancing(), sensitivity_leverage(), planning_lumpsum_vs_dca()): Prüf-Cache je Studie. Prüfungen und Umwandlungen, die ohne Meldung durchgingen und sich zwischen den Läufen nicht ändern (Datumsspalte, eindeutige Tage; in R auch die Prüfung der Strategie und der Kalendertage), rechnet simulation() nur einmal je Studie. Meldungen, Warnungen und Fehler entstehen weiter je Lauf in gleichem Inhalt, gleicher Reihenfolge und Anzahl.
+- Tests (Ordner tests des Repositorys): drei neue Zufallsprüfungen im Gleichlauf mit 1.5.0 als Referenz (nav_fuzz: wrapper_nav; rolling_fuzz: portfolio_rolling, result_analysis, Periodenrenditen; study_fuzz: Studien mit allen Meldungen in Reihenfolge; quick je 300, full je 2.000 Fälle); pbo_fuzz prüft auch ±Inf und S ≥ 34.
+- R: Datumsrechnung ohne POSIXlt je Tag. result_analysis() (Monats- und Jahresschlüssel, Fensterlängen der rollierenden Kennzahlen), portfolio_rolling() und die Periodenrenditen von dependence_analysis(), portfolio_optimize() und weiteren Funktionen mit Kursdaten (ISO-Woche, Monat), die Entscheidungstermine der taktischen Funktionen und wrapper_nav() (Jahr je Tag, Abgleich der Tage) rechnen Jahr, Monat und Woche ganzzahlig aus der Tageszahl statt über format() bzw. match() auf Texten; format() nur noch für die wenigen ausgegebenen Schlüssel.
+- Laufzeit gegenüber 1.5.0 (Median, alt und neu abwechselnd, ein Kern, 42 bis 168 Läufe je Aufgabe): wrapper_nav() R −78 %, Python −47 %, Julia −40 %; result_analysis() R −49 %, Julia −34 % (Python unverändert); portfolio_rolling() R −14 %, Python −88 % (263 → 32 ms); backcast_fit() Julia −89 % (47 → 5 ms); Studien: param_search() R −7 %, Python −8 bis −14 %, Julia −31 bis −51 %; bootstrap_study() Python −19 %, Julia −20 % (R unverändert); sensitivity_grid() Python −13 %, Julia −20 %; planning_lumpsum_vs_dca() R −7 %, Python −18 %, Julia −27 %. Übrige Aufgaben unverändert (innerhalb der Messstreuung).
+
+Nur Python und Julia:
+
+- Berichtigt (overfit_pbo(), wie R): Spalten, deren Standardabweichung wegen ±Inf nicht definiert ist (NaN), gelten nicht als „ohne Schwankung“ (bisher ausgeschlossen, mit Folgefehler „Mindestens zwei Punkte nötig.“ bzw. „alle Spalten ohne Schwankung“); log1p() warnt bei Renditen unter −1 und −Inf mit „NaNs produced“; ohne ein gültiges Paar von In- und Out-of-Sample-Kennzahl meldet die Regression wie R „lm: Längen von x und y passen nicht“ (bisher „lm: 0 (nicht-NA) Fälle“ bzw. kein Fehler).
+- Berichtigt (overfit_pbo()): Bei S ≥ 34 (mehr als 2^31 − 1 Aufteilungen) bricht die Funktion wie R sofort mit der Warnung „NAs introduced by coercion to integer range“ und dem Fehler „invalid 'ncol' value (too large or NA)“ ab, statt alle Kombinationen aufzubauen (Python lief bisher aus dem Speicher); die Aufteilungen liegen als ganzzahlige Matrix vor (wie R), ohne Zwischenliste.
+- Berichtigt (result_analysis()): Hat das Fenster der rollierenden Kennzahlen eine Benchmark ohne Schwankung, ist beta wie in R Inf bzw. NaN (Python brach bisher mit ZeroDivisionError ab); liegen die gemeinsamen Tage in genau zwei Kalendermonaten, meldet die Funktion wie R den Fehler von cor() („supply both 'x' and 'y' or a matrix-like 'x'“).
+
+Nur Python:
+
+- portfolio_rolling(): Kurse, Prüfung, Periodenwechsel und Fortschreiben werden einmal je Aufruf aufbereitet statt je Fenster über pandas; die Renditen je Fenster entstehen daraus mit numpy (gleiche Zahlen, Meldungen und Fehler je Fenster wie bisher).
+- Studien: Die Umwandlung der Datumsspalte (pandas → Tage) und die Prüfung auf doppelte Tage entfallen ab dem zweiten Lauf einer Studie (Prüf-Cache), in planning_lumpsum_vs_dca() auch für die Zeitfenster der Daten.
+- Paket: Lizenzangabe nach PEP 639 (license = "GPL-3.0-only" als SPDX-Ausdruck, license-files = LICENSE.md und COPYRIGHTS.md in [project]; die Lizenz-Klassifikation entfällt); der Bau braucht setuptools ≥ 77.0.3 (pip baut mit Build-Isolation). Das Wheel enthält LICENSE.md und COPYRIGHTS.md unter dist-info/licenses.
+
+Nur Julia:
+
+- backcast_fit(): Die Modellrenditen je Parametersatz (_bc_model_returns) rechnen typstabil in eigenen Schleifen (bisher dynamische Aufrufe je Tag, 5,6-mal langsamer als R).
+- result_index() (und damit param_search() und andere Studien): Die Zahlungen je Tag werden ohne neuen Vektor je Tag summiert.
+
 ## simlev (Python) 1.5.0
 
 Minor-Update (R/Python/Julia). Rechenintensive Teile laufen jetzt im gemeinsamen C/C++-Kern (core/) statt in jeder Sprache für sich. Ergebnisse, Ausgaben, Warnungen und Fehler bleiben bitgleich zu 1.4.3; Python und Julia sind in den unten genannten Fällen jetzt wie R.

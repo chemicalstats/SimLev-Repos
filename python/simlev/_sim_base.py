@@ -5,6 +5,7 @@ Steuerfunktionen der Tagesschleife rechnet der gemeinsame C++-Kern (``_sim_engin
 from __future__ import annotations
 
 import datetime as _dt
+import functools
 import math
 import re
 import sys
@@ -16,6 +17,7 @@ import pandas as pd
 
 from . import _ext
 from ._dates import days_from_civil, from_days
+from ._meldungen import EVAL_WARN as _MELD_EVAL_WARN
 from ._r.rformat import r_as_character, r_format, r_format1, r_sprintf
 from ._r.rnum import r_mean, r_pow, r_pow_vec, r_sd, r_sum
 from .config import _match_arg
@@ -105,12 +107,6 @@ def _num_vec(x: Any) -> list | None:
     return None
 
 
-def _n_tage(n: Any) -> str:
-    """``.n_tage()``: "1 Tag" bzw. "n Tage"."""
-    s = n if isinstance(n, str) else "%d" % int(n)
-    return "1 Tag" if s == "1" else s + " Tage"
-
-
 _DOUBLE_LINE = "\u2550" * 62
 
 
@@ -152,7 +148,7 @@ def _unwrap(x: Any) -> Any:
 
 def _r_strptime_ymd(s: str) -> int | None:
     """``as.Date(s, format = "%Y-%m-%d")`` wie R's strptime (Ziffernfelder, Rest ignoriert; Kern
-    core/slc_rbase_date.c)."""
+    core/slc_rbase_date.cpp)."""
     return _ext.slc_r_strptime_ymd(s, "-")
 
 
@@ -297,6 +293,113 @@ def _classify_values(vals: list) -> tuple[str, np.ndarray]:
     return "other", np.array(vals, dtype=object)
 
 
+class _StudyCache:
+    """Prüf-Cache je Studie (seit 1.5.1; R ``.sim_study_env``): Studien (``bootstrap_study``, ``param_search``,
+    ``sensitivity_*``, ``planning_lumpsum_vs_dca``) rufen ``simulation()`` vielfach mit denselben Daten auf. Solange
+    eine Studie läuft, merkt sich ``simulation()`` je Art den zuletzt gesehenen Schlüssel und das Ergebnis von
+    Umwandlungen und Prüfungen, die ohne Meldung durchgingen (Datumsspalte, eindeutige Tage); Meldungen und
+    Warnungen entstehen weiter je Lauf, Fehler brechen vor dem Merken ab. Außerhalb einer Studie wirkungslos."""
+    on = False
+    m: dict = {}
+
+
+def _sim_study() -> bool:
+    if _StudyCache.on:
+        return False
+    _StudyCache.on = True
+    _StudyCache.m = {}
+    return True
+
+
+def _sim_study_end(own: bool) -> None:
+    if own:
+        _StudyCache.on = False
+        _StudyCache.m = {}
+
+
+def _study_scope(f):
+    """Dekorator der Studien: Prüf-Cache für die Dauer des Aufrufs (geschachtelte Studien teilen ihn)."""
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        own = _sim_study()
+        try:
+            return f(*args, **kwargs)
+        finally:
+            _sim_study_end(own)
+    return wrapper
+
+
+def _memo_arr(what: str, key: np.ndarray):
+    """Eintrag ``what`` des Prüf-Caches, wenn sein Schlüssel gleich ``key`` ist (Typ, Form, Werte), sonst None."""
+    if not _StudyCache.on:
+        return None
+    e = _StudyCache.m.get(what)
+    if e is None:
+        return None
+    k = e[0]
+    if k.dtype != key.dtype or k.shape != key.shape or not np.array_equal(k, key):
+        return None
+    return e[1]
+
+
+def _memo_set(what: str, key: np.ndarray, val: Any) -> None:
+    if _StudyCache.on:
+        _StudyCache.m[what] = (np.array(key, copy=True), val)
+
+
+def _memo_slice(what: str, key: np.ndarray):
+    """Anfang ``i``, wenn ``key`` ein zusammenhängender Ausschnitt des Schlüssels von ``what`` ist (Studien über
+    Zeitfenster derselben Daten, planning_lumpsum_vs_dca), sonst None."""
+    if not _StudyCache.on or key.size == 0:
+        return None
+    e = _StudyCache.m.get(what)
+    if e is None:
+        return None
+    k = e[0]
+    if k.dtype != key.dtype or k.ndim != 1 or key.ndim != 1 or key.size > k.size:
+        return None
+    for i in np.flatnonzero(k[:k.size - key.size + 1] == key[0])[:1]:
+        if np.array_equal(k[i:i + key.size], key):
+            return int(i)
+    return None
+
+
+def _memo_seed_dates(col: Any) -> None:
+    """Studie über Zeitfenster (seit 1.5.1): Datumsspalte der ganzen Daten einmal umwandeln und, wenn sie nur
+    Tage ohne Uhrzeit, keine NA und keine doppelten Tage enthält, als Ganzes merken ("datecol_full",
+    "dates_full"); Fenster daraus brauchen dann weder Umwandlung noch Prüfung auf doppelte Tage."""
+    if not _StudyCache.on or not isinstance(col, pd.Series):
+        return
+    dt = col.dtype
+    if not pd.api.types.is_datetime64_any_dtype(dt) or getattr(dt, "tz", None) is not None:
+        return
+    raw = col.to_numpy()
+    kind, days = _column_dt(col, dt)
+    if kind != "date" or np.isnan(days).any() or np.unique(days).size != days.size:
+        return
+    _StudyCache.m["datecol_full"] = (np.array(raw, copy=True), days)
+    _StudyCache.m["dates_full"] = (days.copy(), True)
+
+
+def _column_dt(v: pd.Series, dt: Any) -> tuple[str, np.ndarray]:
+    """Datums-/Zeitspalte (pandas datetime64) in ("date" bzw. "posixct", Tage seit 1970)."""
+    s = v
+    midnight = True
+    if getattr(dt, "tz", None) is not None:
+        s = v.dt.tz_localize(None)
+        midnight = False
+    norm = s.dt.normalize()
+    if not (norm.isna() | (norm == s)).all():
+        midnight = False
+    # Tage seit 1970 des (auf Mitternacht gesetzten) Zeitpunkts, NaT -> NA;
+    # auf dem ganzen Feld statt je Element über to_pydatetime()
+    na = norm.isna().to_numpy()
+    days = norm.to_numpy().astype("datetime64[D]").astype(np.int64).astype(np.float64)
+    if na.any():
+        days[na] = NA
+    return ("date" if midnight else "posixct"), days
+
+
 def _column(v: Any) -> tuple[str, np.ndarray]:
     """Eine Spalte (pandas.Series, ndarray, Folge) in (Art, Array) umwandeln."""
     if isinstance(v, pd.Series):
@@ -308,21 +411,18 @@ def _column(v: Any) -> tuple[str, np.ndarray]:
                 return "logical", np.array([bool(x) for x in v], dtype=object)
             return "logical", np.array([None if _isna(x) else bool(x) for x in v], dtype=object)
         if pd.api.types.is_datetime64_any_dtype(dt):
-            s = v
-            midnight = True
-            if getattr(dt, "tz", None) is not None:
-                s = v.dt.tz_localize(None)
-                midnight = False
-            norm = s.dt.normalize()
-            if not (norm.isna() | (norm == s)).all():
-                midnight = False
-            # Tage seit 1970 des (auf Mitternacht gesetzten) Zeitpunkts, NaT -> NA;
-            # auf dem ganzen Feld statt je Element über to_pydatetime()
-            na = norm.isna().to_numpy()
-            days = norm.to_numpy().astype("datetime64[D]").astype(np.int64).astype(np.float64)
-            if na.any():
-                days[na] = NA
-            return ("date" if midnight else "posixct"), days
+            raw = v.to_numpy() if getattr(dt, "tz", None) is None else None
+            if raw is not None:                 # Studie: einmal je Datumsspalte (seit 1.5.1)
+                hit = _memo_arr("datecol", raw)
+                if hit is not None:
+                    return hit[0], hit[1].copy()
+                i0 = _memo_slice("datecol_full", raw)      # Zeitfenster der ganzen Daten (nur Tage ohne Uhrzeit)
+                if i0 is not None:
+                    return "date", _StudyCache.m["datecol_full"][1][i0:i0 + raw.size].copy()
+            out = _column_dt(v, dt)
+            if raw is not None:
+                _memo_set("datecol", raw, (out[0], out[1].copy()))
+            return out
         if pd.api.types.is_numeric_dtype(dt):
             return "numeric", v.to_numpy(dtype=np.float64, na_value=np.nan)
         if pd.api.types.is_string_dtype(dt) and not pd.api.types.is_object_dtype(dt):
@@ -564,8 +664,8 @@ class _TariffEnv:
 # Kennzahlen
 # ═══════════════════════════════════════════════════════════════════════════
 
-_XIRR_WARN = {1: "-Inf replaced by maximally negative value", 2: "NA/Inf replaced by maximum positive value",
-              3: "_NOT_ converged in 1000 iterations"}
+# Warnungen von uniroot (Codes 1-3 der Auswertung, core/meldungen.tsv)
+_XIRR_WARN = {k: _MELD_EVAL_WARN[str(k)] for k in (1, 2, 3)}
 
 
 def _xirr_rate(t: np.ndarray, amount: np.ndarray, end_value: float, horizon: float) -> float:

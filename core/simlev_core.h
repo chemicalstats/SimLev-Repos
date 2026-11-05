@@ -11,7 +11,7 @@
  * Host (C-ABI-Huelle core/simlev_cabi.cpp, Kopie in julia/deps/core/; bis 1.1.0 eigene Ports).
  * Zufallszahlen zieht keiner der geteilten Kerne (seit 1.0.0);
  * die frueheren Bootstrap-, DCC- und MS-GARCH-Kerne rechnet die C-Bibliothek slc
- * (core/slc_*.c).
+ * (core/slc_*.cpp).
  *
  * Host-Schnittstelle. Ein Kern sieht seinen Host nur ueber diese Namen; die
  * einbindende Huelle definiert sie vorher (R: simlev_capi.h, Abschnitt "R als Host der

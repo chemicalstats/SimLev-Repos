@@ -8,7 +8,7 @@
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet der C-Kern
-#                     core/slc_rbase_date.c.
+#                     core/slc_rbase_date.cpp.
 # RFmt – Kern: Optionen, interne Vektordarstellung, C-printf, round/signif,
 # formatReal/scientific, Kodierung von Zahlen und Zeichenketten.
 # Vorlage: python/simlev/_r/fmt.py; Quellen R 4.3.3 (format.c, printutils.c,
@@ -55,19 +55,7 @@ const NA_REAL = SimLev.NA
 _log10(x::Float64) = ccall((:log10, SimLev._LIBM), Cdouble, (Cdouble,), x)
 _cpow(x::Float64, y::Float64) = ccall((:pow, SimLev._LIBM), Cdouble, (Cdouble, Cdouble), x, y)
 
-# C-snprintf (Bibliothek je Betriebssystem: SimLev._LIBC, siehe rnum.jl)
-_snprintf(fmt::String, x::Float64) = SimLev._c_sprintf(fmt, x)
-_snprintf(fmt::String, x::Integer) = SimLev._c_sprintf(fmt, Int32(x))
-_snprintf(fmt::String, s::AbstractString) = SimLev._c_sprintf(fmt, String(s))
-# Formate mit '*' für Breite und Genauigkeit (str_signif)
-_snprintf_wd(fmt::String, w::Integer, d::Integer, x::Float64) = SimLev._c_sprintf(fmt, Int32(w), Int32(d), x)
-_snprintf_w(fmt::String, w::Integer, x::Integer) = SimLev._c_sprintf(fmt, Int32(w), Int32(x))
-function _snprintf_wd(fmt::String, w::Integer, d::Integer, x::Float64, lim::Int)
-    s = _snprintf_wd(fmt, w, d, x)
-    return _cut(s, lim)
-end
-# C-Puffer der Länge lim (+ NUL): Ergebnis auf lim Bytes kürzen
-_cut(s::String, lim::Int) = ncodeunits(s) <= lim ? s : String(codeunits(s)[1:lim])
+# C-snprintf: seit 1.6.0 im C-Kern core/slc_rbase_fmt.cpp (sprintf, formatC, encodeReal)
 
 # ── interne Darstellung eines atomaren R-Vektors ───────────────────────────
 
@@ -406,117 +394,15 @@ end
 
 # ── round / signif ─────────────────────────────────────────────────────────
 
-const _M_LOG10_2 = 0.301029995663981195213738894724
 const _DBL_DIG = 15
 const _MAX10E = 308
 
-"R_pow_di: x^n durch wiederholtes Quadrieren."
-function _pow_di(x::Float64, n::Int)
-    xn = 1.0
-    isnan(x) && return x
-    if n != 0
-        isfinite(x) || return _cpow(x, Float64(n))
-        neg = n < 0
-        neg && (n = -n)
-        while true
-            (n & 1) != 0 && (xn *= x)
-            n >>= 1
-            n != 0 || break
-            x *= x
-        end
-        neg && (xn = 1.0 / xn)
-    end
-    return xn
-end
-
-_nearbyint(x::Float64) = round(x, RoundNearest)
-_logb(x::Float64) = Float64(exponent(x))
-
-"R's `fround` (R >= 4.0.0) für ein double."
-function fround(x::Float64, digits::Float64)
-    max_digits = 308 + 15
-    (isnan(x) || isnan(digits)) && return x + digits
-    isfinite(x) || return x
-    (digits > max_digits || x == 0.0) && return x
-    digits < -_MAX10E && return 0.0
-    digits == 0.0 && return _nearbyint(x)
-    dig = Int(floor(digits + 0.5))
-    sgn = 1.0
-    if x < 0.0
-        sgn = -1.0
-        x = -x
-    end
-    l10x = _M_LOG10_2 * (0.5 + _logb(x))
-    l10x + dig > _DBL_DIG && return sgn * x
-    if dig <= _MAX10E
-        pow10 = _pow_di(10.0, dig)
-        x10 = x * pow10
-        i10 = floor(x10)
-        xd = i10 / pow10
-        xu = ceil(x10) / pow10
-    else
-        e10 = dig - _MAX10E
-        p10 = _pow_di(10.0, e10)
-        pow10 = _pow_di(10.0, _MAX10E)
-        x10 = (x * pow10) * p10
-        i10 = floor(x10)
-        xd = i10 / pow10 / p10
-        xu = ceil(x10) / pow10 / p10
-    end
-    du = xu - x
-    dd = x - xd
-    return sgn * ((du < dd || (rem(i10, 2.0) == 1 && du == dd)) ? xu : xd)
-end
+"R's `fround` (R >= 4.0.0) für ein double (C-Kern sl_r_fround, seit 1.6.0)."
+fround(x::Float64, digits::Float64) = SimLev._rb_fround(x, digits)
 fround(x::Real, digits::Real) = fround(Float64(x), Float64(digits))
 
-"R's `fprec` (signif) für ein double."
-function fprec(x::Float64, digits::Float64)
-    max_digits = 22
-    (isnan(x) || isnan(digits)) && return x + digits
-    isfinite(x) || return x
-    if !isfinite(digits)
-        digits > 0.0 && return x
-        digits = 1.0
-    end
-    x == 0 && return x
-    dig = Int(round(digits, RoundNearestTiesAway))   # C round()
-    if dig > max_digits
-        return x
-    elseif dig < 1
-        dig = 1
-    end
-    sgn = 1.0
-    if x < 0.0
-        sgn = -sgn
-        x = -x
-    end
-    l10 = _log10(x)
-    e10 = trunc(Int, dig - 1 - floor(l10))
-    if abs(l10) < _MAX10E - 2
-        p10 = 1.0
-        if e10 > _MAX10E
-            p10 = _pow_di(10.0, e10 - _MAX10E)
-            e10 = _MAX10E
-        end
-        if e10 > 0
-            pow10 = _pow_di(10.0, e10)
-            return sgn * (_nearbyint((x * pow10) * p10) / pow10) / p10
-        else
-            pow10 = _pow_di(10.0, -e10)
-            return sgn * (_nearbyint(x / pow10) * pow10)
-        end
-    else
-        do_round = _MAX10E - l10 >= _pow_di(10.0, -dig)
-        e2 = dig + (e10 > 0 ? 1 : -1) * max_digits
-        p10 = _pow_di(10.0, e2)
-        x *= p10
-        P10 = _pow_di(10.0, e10 - e2)
-        x *= P10
-        do_round && (x += 0.5)
-        x = floor(x) / p10
-        return sgn * x / P10
-    end
-end
+"R's `fprec` (signif) für ein double (C-Kern sl_r_fprec, seit 1.6.0)."
+fprec(x::Float64, digits::Float64) = SimLev._rb_fprec(x, digits)
 fprec(x::Real, digits::Real) = fprec(Float64(x), Float64(digits))
 
 _tofloat(x) = x === missing || x === nothing ? SimLev.NA : Float64(x)
@@ -546,13 +432,14 @@ function _math2(f, x, digits)
         if T <: Integer && !(T <: Bool) && f === fround && T !== Union{}
             return copy(x)
         end
+        # C-Kern sl_r_round_vec (seit 1.6.0)
+        kind = f === fprec ? 1 : 0
+        xs = Float64[_tofloat(z) for z in vec(x)]
         if digits isa AbstractVector && length(digits) > 1
-            flat = vec(x)
-            n = max(length(flat), length(digits))
-            return Float64[f(_tofloat(flat[mod1(i, length(flat))]), Float64(digits[mod1(i, length(digits))])) for i in 1:n]
+            return SimLev._rb_round_vec(kind, xs, Float64[Float64(t) for t in digits])
         end
         dd = Float64(digits isa AbstractVector ? digits[1] : digits)
-        return map(z -> f(_tofloat(z), dd), x)
+        return reshape(SimLev._rb_round_vec(kind, xs, [dd]), size(x))
     end
     error("round/signif: nicht unterstützter Typ $(typeof(x))")
 end
@@ -570,104 +457,22 @@ signif(x, d = 6; digits = d) = _math2(fprec, x, digits)
 
 # ── formatReal ─────────────────────────────────────────────────────────────
 
-"`scientific()` aus format.c für r = |x| > 0 (endlich): (kpower, nsig, roundingwidens)."
-function _scientific(r::Float64, digits::Int)
-    if digits >= _DBL_DIG + 1
-        buff = _snprintf("%#." * string(digits - 1) * "e", r)
-        kpw = parse(Int, buff[digits+3:end])
-        j = digits
-        while j >= 2
-            buff[j+1] != '0' && break
-            j -= 1
-        end
-        return kpw, j, false
-    end
-    # long-double-Teil von scientific() über den C-Kern (core/slc_rbase_num.c)
-    kpower, nsig, rw = SimLev._rb_scientific(r, digits)
-    return kpower, nsig, rw
-end
-
-"`formatReal`: (w, d, e) für die Werte `x` (na: NA-Maske)."
+"`formatReal`: (w, d, e) für die Werte `x` (na: NA-Maske; C-Kern sl_r_format_real, seit 1.6.0)."
 function _format_real(x::AbstractVector{Float64}, na::AbstractVector{Bool}, digits = nothing, nsmall = 0, scipen = nothing)
     digits === nothing && (digits = _OPT[:digits])
     scipen === nothing && (scipen = _OPT[:scipen])
-    digits = Int(digits)
-    naflag = nanflag = posinf = neginf = false
-    neg = 0
-    anyf = false
-    rgt = mxl = mxsl = mxns = typemin(Int)
-    mnl = typemax(Int)
-    for i in eachindex(x)
-        xi = x[i]
-        if !isfinite(xi)
-            if isnan(xi)
-                na[i] ? (naflag = true) : (nanflag = true)
-            elseif xi > 0
-                posinf = true
-            else
-                neginf = true
-            end
-            continue
-        end
-        anyf = true
-        if xi == 0.0
-            kpower, nsig, rw, negi = 0, 1, false, 0
-        else
-            negi = xi < 0 ? 1 : 0
-            kpower, nsig, rw = _scientific(abs(xi), digits)
-        end
-        left = kpower + 1 - (rw ? 1 : 0)
-        sleft = negi + (left <= 0 ? 1 : left)
-        right = nsig - left
-        negi == 1 && (neg = 1)
-        right > rgt && (rgt = right)
-        left > mxl && (mxl = left)
-        left < mnl && (mnl = left)
-        sleft > mxsl && (mxsl = sleft)
-        nsig > mxns && (mxns = nsig)
-    end
-    if anyf
-        digits == 0 && (rgt = 0)
-        mxl < 0 && (mxsl = 1 + neg)
-        rgt < 0 && (rgt = 0)
-        wF = mxsl + rgt + (rgt != 0)
-        e = (mxl > 100 || mnl <= -99) ? 2 : 1
-        d = mxns - 1
-        w = neg + (d > 0) + d + 4 + e
-        if wF <= w + scipen
-            e = 0
-            if nsmall > rgt
-                rgt = nsmall
-                wF = mxsl + rgt + (rgt != 0)
-            end
-            d = rgt
-            w = wF
-        end
-    else
-        w = d = e = 0
-    end
-    naflag && w < 2 && (w = 2)
-    nanflag && w < 3 && (w = 3)
-    posinf && w < 3 && (w = 3)
-    neginf && w < 4 && (w = 4)
-    return w, d, e
+    return SimLev._rb_format_real(Vector{Float64}(x), UInt8[b for b in na], Int(digits)::Int, Int(nsmall)::Int, Int(scipen)::Int)
 end
 _format_real(v::_V, digits = nothing, nsmall = 0, scipen = nothing) = _format_real(v.d, v.na, digits, nsmall, scipen)
 
 _realfmt(w, d, e) = e != 0 ? (d != 0 ? "%#" * string(w) * "." * string(d) * "e" : "%" * string(w) * "." * string(d) * "e") :
                     "%" * string(w) * "." * string(d) * "f"
 
-"`EncodeReal0` für ein double (fmt = vorbereitetes C-Format)."
+"`EncodeReal0` für ein double (C-Kern sl_r_encode_real, seit 1.6.0; fmt wird nicht mehr gebraucht)."
 function _encode_real(x::Float64, w::Int, d::Int, e::Int, dec::AbstractString = ".", na::Bool = false, fmt = nothing;
                       na_string = "NA")
-    if !isfinite(x)
-        s = isnan(x) ? ((!na && !SimLev.isna_strict(x)) ? "NaN" : na_string) : x > 0 ? "Inf" : "-Inf"
-        return lpad(s, w)
-    end
-    x == 0.0 && (x = 0.0)
-    s = _snprintf(fmt === nothing ? _realfmt(w, d, e) : fmt, x)
-    dec != "." && (s = replace(s, "." => dec))
-    return s
+    m = UInt8[na || SimLev.isna_strict(x)]
+    return SimLev._rb_encode_real([x], m, w, d, e, dec, na_string, false)[1]
 end
 
 "Nachkomma-Nullen entfernen wie `EncodeRealDrop0`."
@@ -685,8 +490,8 @@ function _drop0(s::String)
 end
 
 function _encode_reals(v::_V, w, d, e, dec = ".")
-    fmt = _realfmt(w, d, e)
-    return _Str[_encode_real(v.d[i], w, d, e, dec, v.na[i], fmt) for i in 1:length(v.d)]
+    m = UInt8[v.na[i] || SimLev.isna_strict(v.d[i]) for i in 1:length(v.d)]
+    return _Str[t for t in SimLev._rb_encode_real(v.d, m, Int(w), Int(d), Int(e), dec, "NA", false)]
 end
 
 _index_width(n) = trunc(Int, _log10(Float64(n) + 0.5) + 1)
@@ -883,17 +688,19 @@ end
 
 # ── as.character / paste ───────────────────────────────────────────────────
 
-"`StringFromReal` mit 15 Stellen (as.character für double)."
+"`StringFromReal` mit 15 Stellen (as.character für double; C-Kern, seit 1.6.0)."
 function _real_to_str(x::Float64, na::Bool = false, nan::Bool = false)
     isnan(x) && return (na || !nan) ? nothing : "NaN"
-    w, d, e = _format_real([x], [false], 15)
-    return _drop0(_encode_real(x, w, d, e, _OPT[:OutDec]))
+    return SimLev._rb_as_character_real([x], Int(_OPT[:scipen])::Int, String(_OPT[:OutDec])::String)[1]
 end
 
 function _as_character_list(v::_V)::Vector{_Str}
     t = v.type
     t === :character && return copy(v.s)
-    t === :double && return _Str[v.na[i] ? nothing : _real_to_str(v.d[i], false, v.nan[i]) for i in 1:length(v.d)]
+    if t === :double
+        r = SimLev._rb_as_character_real(v.d, Int(_OPT[:scipen])::Int, String(_OPT[:OutDec])::String)
+        return _Str[(v.na[i] || (isnan(v.d[i]) && !v.nan[i])) ? nothing : r[i] for i in 1:length(v.d)]
+    end
     t === :integer && return _Str[v.na[i] ? nothing : string(v.i[i]) for i in 1:length(v.i)]
     t === :logical && return _Str[v.na[i] ? nothing : (v.l[i] ? "TRUE" : "FALSE") for i in 1:length(v.l)]
     t === :Date && return _format_date_list(v.d, _Str["%Y-%m-%d"])

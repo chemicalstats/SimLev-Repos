@@ -3,7 +3,7 @@
 #
 # Wird innerhalb von `module SLib` (slib.jl) eingebunden und nutzt dessen Kontext (_ctx/_finish)
 # und LIBSLC. Gegenstück zu r/R/slc_linalg.R (R) und python/simlev/_lib_linalg.py (Python). Die
-# Rechnung steht in deps/core/slc_{linalg,matmul,lsq,stine,spline,kde}.c (Kopien von core/).
+# Rechnung steht in deps/core/slc_{linalg,matmul,lsq,stine,spline,kde}.cpp (Kopien von core/).
 # Fehlertexte und Warnungen kommen aus dem Kern. Matrizen sind AbstractMatrix (spaltenweise wie
 # in C), Vektoren AbstractVector bzw. Zahlen. Benannte Ergebnisse als Dict{String,Any}.
 #

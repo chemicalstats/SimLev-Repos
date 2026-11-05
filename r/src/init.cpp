@@ -1,0 +1,273 @@
+/*
+ * src/init.cpp -- Registrierung der .Call-Routinen von SimLev (bis 1.5.2 init.c)
+ *
+ * Seit 0.5.0 ohne Rcpp: Die C++-Kerne haben extern "C"-Huellen (am Ende der
+ * jeweiligen .cpp-Datei, Rahmen in simlev_capi.h). Die C-Uebernahmen (vendor_*.c), der
+ * MS-GARCH-Filter (ms_garch.c), der DCC-Filter (dependence_core.cpp) und die
+ * frueheren Bootstrap-Kerne (bootstrap_core.cpp) sind seit 1.0.0 entfallen;
+ * ihre Aufgaben rechnet die C-Bibliothek slc. Registriert sind nur .Call-Routinen
+ * unter Namen ohne Praefix; NAMESPACE laedt sie mit
+ * useDynLib(SimLev, .registration = TRUE, .fixes = "C_"), in R heissen sie
+ * daher C_<name> (z. B. C_sim_engine_run, gerufen von .sim_engine_run in R/sim_engine.R).
+ * Dynamische Symbolsuche ist abgeschaltet. Registriert sind auch die Huellen der C-Bibliothek slc
+ * (slc_r.cpp; Kerne slc*.cpp als Kopien aus core/, core/sync.py).
+ */
+#include <R.h>
+#include <Rinternals.h>
+#include <R_ext/Rdynload.h>
+
+/* alle Routinen und R_init_SimLev mit C-Bindung (R sucht R_init_SimLev ueber dlsym) */
+extern "C" {
+
+/* research_core.cpp */
+extern SEXP C_proj_box_simplex(SEXP, SEXP, SEXP);
+extern SEXP C_qp_box_simplex(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_min_cvar_core(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_min_cdar_core(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_quantile_reg_core(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_hmm_forward_backward(SEXP, SEXP, SEXP);
+extern SEXP C_hmm_em_core(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_goal_dp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_wrapper_nav_core(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_pbo_cscv(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_roll_mean_core(SEXP, SEXP);
+extern SEXP C_kendall_tau_core(SEXP, SEXP);
+extern SEXP C_roll_cov_core(SEXP, SEXP, SEXP);
+/* slc_r.cpp (C-Bibliothek slc) */
+extern SEXP C_sl_version(void);
+extern SEXP C_sl_rng_seed(SEXP);
+extern SEXP C_sl_rng_seed_entropy(SEXP, SEXP, SEXP);
+extern SEXP C_sl_rng_streams(SEXP, SEXP);
+extern SEXP C_sl_rng_seed31(SEXP);
+extern SEXP C_sl_rng_hex(SEXP);
+extern SEXP C_sl_rng_u64(SEXP, SEXP);
+extern SEXP C_sl_runif(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_rnorm(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_rgamma(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_rexp(SEXP, SEXP, SEXP);
+extern SEXP C_sl_rgeom(SEXP, SEXP, SEXP);
+extern SEXP C_sl_rchisq(SEXP, SEXP, SEXP);
+extern SEXP C_sl_sample(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_pnorm(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_qnorm(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_dnorm(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_erfc(SEXP);
+extern SEXP C_sl_lgamma(SEXP);
+extern SEXP C_sl_plogis(SEXP);
+extern SEXP C_sl_qlogis(SEXP);
+extern SEXP C_sl_pbeta(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_pt(SEXP, SEXP, SEXP);
+extern SEXP C_sl_qt(SEXP, SEXP, SEXP);
+/* slc_r_linalg.cpp (lineare Algebra, Matrixprodukt, kleinste Quadrate, Stineman, Spline, Kerndichte) */
+extern SEXP C_sl_chol(SEXP);
+extern SEXP C_sl_chol_band(SEXP, SEXP);
+extern SEXP C_sl_trisolve(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_solve_spd(SEXP, SEXP);
+extern SEXP C_sl_logdet_spd(SEXP);
+extern SEXP C_sl_eigen_sym(SEXP, SEXP);
+extern SEXP C_sl_matmul(SEXP, SEXP);
+extern SEXP C_sl_crossprod(SEXP, SEXP);
+extern SEXP C_sl_tcrossprod(SEXP, SEXP);
+extern SEXP C_sl_lsfit(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_logit_irls(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_stineman(SEXP, SEXP, SEXP);
+extern SEXP C_sl_stineman_slopes(SEXP, SEXP, SEXP);
+extern SEXP C_sl_stineman_eval(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_smspline_fit(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_smspline_predict(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_kde(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_kde_bw(SEXP);
+/* engine_core.cpp (Tagesengine) */
+extern SEXP C_sim_engine_run(SEXP);
+extern SEXP C_sim_dates_flags(SEXP);
+extern SEXP C_sim_evaluate(SEXP);
+extern SEXP C_sim_xirr(SEXP, SEXP, SEXP, SEXP);
+/* withdrawal_core.cpp */
+extern SEXP C_wd_simulate(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_wd_tariff_check(SEXP, SEXP, SEXP);
+extern SEXP C_wd_metrics(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_wd_pwr(SEXP, SEXP, SEXP);
+extern SEXP C_wd_annual_prod(SEXP, SEXP);
+extern SEXP C_wd_tariff_compact(SEXP, SEXP);
+/* slc_r_opt.cpp (Optimierer der C-Bibliothek slc) */
+extern SEXP C_sl_opt_init(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_opt_next(SEXP, SEXP);
+extern SEXP C_sl_opt_result(SEXP);
+extern SEXP C_sl_opt_testfn(SEXP, SEXP, SEXP);
+extern SEXP C_sl_opt_minimize_test(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_numgrad_test(SEXP, SEXP, SEXP, SEXP);
+/* slc_r_models.cpp (Modelle der C-Bibliothek slc: GARCH/GJR, GPD, DCC, MS-GARCH und HMM, Bootstrap-Kerne) */
+extern SEXP C_sl_garch11_filter(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_garch11_nll(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_garch11_fit(SEXP, SEXP);
+extern SEXP C_sl_garch11_grad(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_garch11_estimate(SEXP, SEXP);
+extern SEXP C_sl_gpd_nll(SEXP, SEXP, SEXP);
+extern SEXP C_sl_gpd_pwm(SEXP);
+extern SEXP C_sl_gpd_fit(SEXP);
+extern SEXP C_sl_dcc_filter(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_dcc_fit(SEXP, SEXP);
+extern SEXP C_sl_backcast_obj(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_backcast_fit(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_ms_garch_filter(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_ms_garch_nll(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_ms_garch_grad(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_ms_garch_starts(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_ms_garch_fitstarts(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_ms_garch_estimate(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_hmm_em_univ(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_hmm_viterbi(SEXP, SEXP, SEXP);
+extern SEXP C_sl_boot_idx_iid(SEXP, SEXP, SEXP);
+extern SEXP C_sl_boot_idx_block(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_boot_idx_stationary(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_boot_idx_regime(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_boot_idx_tails(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_boot_wild(SEXP, SEXP, SEXP);
+extern SEXP C_sl_boot_reset(SEXP, SEXP, SEXP);
+extern SEXP C_sl_boot_evt(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_boot_garch(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_boot_ms_garch(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_rolling_vol(SEXP, SEXP);
+extern SEXP C_sl_assign_regimes(SEXP, SEXP);
+extern SEXP C_sl_estimate_trans_mat(SEXP, SEXP, SEXP);
+
+/* prep_r.cpp (seit 1.6.0: Kerne fuer Wirtsfunktionen, core/slc_prep.h) */
+extern SEXP C_sl_cal_fill(SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_mom_score(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_boot_path(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_pt_mt(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_qt_mt(SEXP, SEXP, SEXP, SEXP);
+extern SEXP C_sl_tcop_fit(SEXP, SEXP, SEXP);
+extern SEXP C_sl_tcop_nu(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+
+static const R_CallMethodDef CallEntries[] = {
+    /* research_core.cpp */
+    {"proj_box_simplex", (DL_FUNC) &C_proj_box_simplex, 3},
+    {"qp_box_simplex", (DL_FUNC) &C_qp_box_simplex, 8},
+    {"min_cvar_core", (DL_FUNC) &C_min_cvar_core, 8},
+    {"min_cdar_core", (DL_FUNC) &C_min_cdar_core, 5},
+    {"quantile_reg_core", (DL_FUNC) &C_quantile_reg_core, 7},
+    {"hmm_forward_backward", (DL_FUNC) &C_hmm_forward_backward, 3},
+    {"hmm_em_core", (DL_FUNC) &C_hmm_em_core, 8},
+    {"goal_dp", (DL_FUNC) &C_goal_dp, 8},
+    {"pbo_cscv", (DL_FUNC) &C_pbo_cscv, 7},
+    {"wrapper_nav_core", (DL_FUNC) &C_wrapper_nav_core, 7},
+    {"roll_mean_core", (DL_FUNC) &C_roll_mean_core, 2},
+    {"kendall_tau_core", (DL_FUNC) &C_kendall_tau_core, 2},
+    {"roll_cov_core", (DL_FUNC) &C_roll_cov_core, 3},
+    /* slc_r.cpp (C-Bibliothek slc) */
+    {"sl_version", (DL_FUNC) &C_sl_version, 0},
+    {"sl_rng_seed", (DL_FUNC) &C_sl_rng_seed, 1},
+    {"sl_rng_seed_entropy", (DL_FUNC) &C_sl_rng_seed_entropy, 3},
+    {"sl_rng_streams", (DL_FUNC) &C_sl_rng_streams, 2},
+    {"sl_rng_seed31", (DL_FUNC) &C_sl_rng_seed31, 1},
+    {"sl_rng_hex", (DL_FUNC) &C_sl_rng_hex, 1},
+    {"sl_rng_u64", (DL_FUNC) &C_sl_rng_u64, 2},
+    {"sl_runif", (DL_FUNC) &C_sl_runif, 4},
+    {"sl_rnorm", (DL_FUNC) &C_sl_rnorm, 4},
+    {"sl_rgamma", (DL_FUNC) &C_sl_rgamma, 4},
+    {"sl_rexp", (DL_FUNC) &C_sl_rexp, 3},
+    {"sl_rgeom", (DL_FUNC) &C_sl_rgeom, 3},
+    {"sl_rchisq", (DL_FUNC) &C_sl_rchisq, 3},
+    {"sl_sample", (DL_FUNC) &C_sl_sample, 5},
+    {"sl_pnorm", (DL_FUNC) &C_sl_pnorm, 4},
+    {"sl_qnorm", (DL_FUNC) &C_sl_qnorm, 4},
+    {"sl_dnorm", (DL_FUNC) &C_sl_dnorm, 4},
+    {"sl_erfc", (DL_FUNC) &C_sl_erfc, 1},
+    {"sl_lgamma", (DL_FUNC) &C_sl_lgamma, 1},
+    {"sl_plogis", (DL_FUNC) &C_sl_plogis, 1},
+    {"sl_qlogis", (DL_FUNC) &C_sl_qlogis, 1},
+    {"sl_pbeta", (DL_FUNC) &C_sl_pbeta, 4},
+    {"sl_pt", (DL_FUNC) &C_sl_pt, 3},
+    {"sl_qt", (DL_FUNC) &C_sl_qt, 3},
+    /* slc_r_linalg.cpp */
+    {"sl_chol", (DL_FUNC) &C_sl_chol, 1},
+    {"sl_chol_band", (DL_FUNC) &C_sl_chol_band, 2},
+    {"sl_trisolve", (DL_FUNC) &C_sl_trisolve, 4},
+    {"sl_solve_spd", (DL_FUNC) &C_sl_solve_spd, 2},
+    {"sl_logdet_spd", (DL_FUNC) &C_sl_logdet_spd, 1},
+    {"sl_eigen_sym", (DL_FUNC) &C_sl_eigen_sym, 2},
+    {"sl_matmul", (DL_FUNC) &C_sl_matmul, 2},
+    {"sl_crossprod", (DL_FUNC) &C_sl_crossprod, 2},
+    {"sl_tcrossprod", (DL_FUNC) &C_sl_tcrossprod, 2},
+    {"sl_lsfit", (DL_FUNC) &C_sl_lsfit, 5},
+    {"sl_logit_irls", (DL_FUNC) &C_sl_logit_irls, 4},
+    {"sl_stineman", (DL_FUNC) &C_sl_stineman, 3},
+    {"sl_stineman_slopes", (DL_FUNC) &C_sl_stineman_slopes, 3},
+    {"sl_stineman_eval", (DL_FUNC) &C_sl_stineman_eval, 4},
+    {"sl_smspline_fit", (DL_FUNC) &C_sl_smspline_fit, 4},
+    {"sl_smspline_predict", (DL_FUNC) &C_sl_smspline_predict, 4},
+    {"sl_kde", (DL_FUNC) &C_sl_kde, 6},
+    {"sl_kde_bw", (DL_FUNC) &C_sl_kde_bw, 1},
+
+    /* slc_r_opt.cpp */
+    {"sl_opt_init", (DL_FUNC) &C_sl_opt_init, 7},
+    {"sl_opt_next", (DL_FUNC) &C_sl_opt_next, 2},
+    {"sl_opt_result", (DL_FUNC) &C_sl_opt_result, 1},
+    {"sl_opt_testfn", (DL_FUNC) &C_sl_opt_testfn, 3},
+    {"sl_opt_minimize_test", (DL_FUNC) &C_sl_opt_minimize_test, 8},
+    {"sl_numgrad_test", (DL_FUNC) &C_sl_numgrad_test, 4},
+    /* slc_r_models.cpp */
+    {"sl_garch11_filter", (DL_FUNC) &C_sl_garch11_filter, 6},
+    {"sl_garch11_nll", (DL_FUNC) &C_sl_garch11_nll, 4},
+    {"sl_garch11_fit", (DL_FUNC) &C_sl_garch11_fit, 2},
+    {"sl_garch11_grad", (DL_FUNC) &C_sl_garch11_grad, 4},
+    {"sl_garch11_estimate", (DL_FUNC) &C_sl_garch11_estimate, 2},
+    {"sl_gpd_nll", (DL_FUNC) &C_sl_gpd_nll, 3},
+    {"sl_gpd_pwm", (DL_FUNC) &C_sl_gpd_pwm, 1},
+    {"sl_gpd_fit", (DL_FUNC) &C_sl_gpd_fit, 1},
+    {"sl_dcc_filter", (DL_FUNC) &C_sl_dcc_filter, 5},
+    {"sl_dcc_fit", (DL_FUNC) &C_sl_dcc_fit, 2},
+    {"sl_backcast_obj", (DL_FUNC) &C_sl_backcast_obj, 4},
+    {"sl_backcast_fit", (DL_FUNC) &C_sl_backcast_fit, 5},
+    {"sl_ms_garch_filter", (DL_FUNC) &C_sl_ms_garch_filter, 8},
+    {"sl_ms_garch_nll", (DL_FUNC) &C_sl_ms_garch_nll, 5},
+    {"sl_ms_garch_grad", (DL_FUNC) &C_sl_ms_garch_grad, 5},
+    {"sl_ms_garch_starts", (DL_FUNC) &C_sl_ms_garch_starts, 5},
+    {"sl_ms_garch_fitstarts", (DL_FUNC) &C_sl_ms_garch_fitstarts, 5},
+    {"sl_ms_garch_estimate", (DL_FUNC) &C_sl_ms_garch_estimate, 4},
+    {"sl_hmm_em_univ", (DL_FUNC) &C_sl_hmm_em_univ, 5},
+    {"sl_hmm_viterbi", (DL_FUNC) &C_sl_hmm_viterbi, 3},
+    {"sl_boot_idx_iid", (DL_FUNC) &C_sl_boot_idx_iid, 3},
+    {"sl_boot_idx_block", (DL_FUNC) &C_sl_boot_idx_block, 5},
+    {"sl_boot_idx_stationary", (DL_FUNC) &C_sl_boot_idx_stationary, 4},
+    {"sl_boot_idx_regime", (DL_FUNC) &C_sl_boot_idx_regime, 4},
+    {"sl_boot_idx_tails", (DL_FUNC) &C_sl_boot_idx_tails, 7},
+    {"sl_boot_wild", (DL_FUNC) &C_sl_boot_wild, 3},
+    {"sl_boot_reset", (DL_FUNC) &C_sl_boot_reset, 3},
+    {"sl_boot_evt", (DL_FUNC) &C_sl_boot_evt, 9},
+    {"sl_boot_garch", (DL_FUNC) &C_sl_boot_garch, 8},
+    {"sl_boot_ms_garch", (DL_FUNC) &C_sl_boot_ms_garch, 9},
+    {"sl_rolling_vol", (DL_FUNC) &C_sl_rolling_vol, 2},
+    {"sl_assign_regimes", (DL_FUNC) &C_sl_assign_regimes, 2},
+    {"sl_estimate_trans_mat", (DL_FUNC) &C_sl_estimate_trans_mat, 3},
+    /* engine_core.cpp */
+    {"sim_engine_run", (DL_FUNC) &C_sim_engine_run, 1},
+    {"sim_dates_flags", (DL_FUNC) &C_sim_dates_flags, 1},
+    {"sim_evaluate", (DL_FUNC) &C_sim_evaluate, 1},
+    {"sim_xirr", (DL_FUNC) &C_sim_xirr, 4},
+    /* withdrawal_core.cpp */
+    {"wd_simulate", (DL_FUNC) &C_wd_simulate, 27},
+    {"wd_tariff_check", (DL_FUNC) &C_wd_tariff_check, 3},
+    {"wd_metrics", (DL_FUNC) &C_wd_metrics, 5},
+    {"wd_pwr", (DL_FUNC) &C_wd_pwr, 3},
+    {"wd_annual_prod", (DL_FUNC) &C_wd_annual_prod, 2},
+    {"wd_tariff_compact", (DL_FUNC) &C_wd_tariff_compact, 2},
+    /* prep_r.cpp (seit 1.6.0) */
+    {"sl_cal_fill", (DL_FUNC) &C_sl_cal_fill, 5},
+    {"sl_mom_score", (DL_FUNC) &C_sl_mom_score, 4},
+    {"sl_boot_path", (DL_FUNC) &C_sl_boot_path, 8},
+    {"sl_pt_mt", (DL_FUNC) &C_sl_pt_mt, 4},
+    {"sl_qt_mt", (DL_FUNC) &C_sl_qt_mt, 4},
+    {"sl_tcop_fit", (DL_FUNC) &C_sl_tcop_fit, 3},
+    {"sl_tcop_nu", (DL_FUNC) &C_sl_tcop_nu, 7},
+    {NULL, NULL, 0}
+};
+
+void R_init_SimLev(DllInfo *dll)
+{
+    R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
+    R_useDynamicSymbols(dll, FALSE);
+}
+
+}  /* extern "C" */

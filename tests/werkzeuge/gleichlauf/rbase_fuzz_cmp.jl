@@ -1,4 +1,4 @@
-# Vergleich der Kerne core/slc_rbase*.c (seit 1.2.0; seit 1.3.0 auch slc_rbase_num.c über seine Nutzer) über die Julia-Hüllen (libslc, ccall) mit R (tests/werkzeuge/gleichlauf/rbase_fuzz.R).
+# Vergleich der Kerne core/slc_rbase*.cpp (seit 1.2.0; seit 1.3.0 auch slc_rbase_num.cpp über seine Nutzer) über die Julia-Hüllen (libslc, ccall) mit R (tests/werkzeuge/gleichlauf/rbase_fuzz.R).
 #   julia --project=julia tests/werkzeuge/gleichlauf/rbase_fuzz_cmp.jl <ordner>
 using SimLev
 using Logging
@@ -67,7 +67,7 @@ while !done(r)
     end
     chk("cov", got, e)
 end
-# 12 (seit 1.3.0) Nutzer von slc_rbase_num.c: R_strtod (as.numeric), %% und %/%, format (scientific())
+# 12 (seit 1.3.0) Nutzer von slc_rbase_num.cpp: R_strtod (as.numeric), %% und %/%, format (scientific())
 if isfile(joinpath(D, "strtod.bin"))
     r = Rd("strtod")
     while !done(r)

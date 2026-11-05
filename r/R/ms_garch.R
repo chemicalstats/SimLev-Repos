@@ -8,7 +8,7 @@
 #  C-Kern, Maximierung mit BFGS auf eigener Parametrisierung auf R^p,
 #  deterministische Startwerte (kein Zufall): volles HMM-EM und Rangeinteilung
 #  der Volatilitaet, je mit kleinem Raster. Seit 1.0.0 rechnet die
-#  Schaetzung ganz in der C-Bibliothek slc (.sl_ms_garch_fit, src/slc_msgarch.c);
+#  Schaetzung ganz in der C-Bibliothek slc (.sl_ms_garch_fit, src/slc_msgarch.cpp);
 #  hier bleibt die Pruefung (Parametrisierung, Filter und stationaere Verteilung seit 1.0.0
 #  nur in C; die Ports behalten die stationaere Verteilung als Hilfe von
 #  .prepare_ms_info).

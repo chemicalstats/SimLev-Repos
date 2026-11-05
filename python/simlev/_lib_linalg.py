@@ -2,8 +2,8 @@
 kleinste Quadrate und Logit-IRLS, Stineman-Interpolation, Glättungsspline, Kerndichte.
 
 Gegenstück zu ``r/R/slc_linalg.R`` (R) und ``julia/src/slib_linalg.jl`` (Julia). Die Rechnung
-steht in ``src/core/slc_{linalg,matmul,lsq,stine,spline,kde}.c`` (Kopien von ``core/``), die Hülle
-in ``src/_ext_slc_linalg.c`` (Modul ``simlev._ext``). Fehlertexte und Warnungen kommen aus dem
+steht in ``src/core/slc_{linalg,matmul,lsq,stine,spline,kde}.cpp`` (Kopien von ``core/``), die Hülle
+in ``src/_ext_slc_linalg.cpp`` (Modul ``simlev._ext``). Fehlertexte und Warnungen kommen aus dem
 Kern (Fehler: ``ValueError``; Warnung: ``warnings.warn``). Die Funktionen sind über
 ``simlev._lib`` erreichbar. Matrizen sind 2-D-Felder (intern spaltenweise), Vektoren 1-D.
 

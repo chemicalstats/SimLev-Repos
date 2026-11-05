@@ -2,8 +2,8 @@
 Prüfhilfen.
 
 Gegenstück zu ``r/R/slc_opt.R`` (``.sl_optim``) und ``julia/src/slib_opt.jl`` (``SLib.optim``).
-Die Rechnung steht in ``src/core/slc_opt.c`` (Kopie von ``core/``), die Hülle in
-``src/_ext_slc_opt.c`` (Modul ``simlev._ext``). Rückfrage an den Host: Python holt
+Die Rechnung steht in ``src/core/slc_opt.cpp`` (Kopie von ``core/``), die Hülle in
+``src/_ext_slc_opt.cpp`` (Modul ``simlev._ext``). Rückfrage an den Host: Python holt
 die nächste Anfrage, rechnet die Zielfunktion selbst und gibt die Antwort; der Kern ruft nie
 nach Python zurück, Fehler der Zielfunktion sind gewöhnliche Python-Ausnahmen.
 

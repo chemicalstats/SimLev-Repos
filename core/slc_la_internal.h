@@ -64,7 +64,24 @@ static inline int slc_all_finite(int64_t n, const double *x)
 }
 
 /* stabile Sortierung der Indizes 0 ... n-1 nach key (aufsteigend; Mischsortierung von unten,
- * Knuth 1998, §5.2.4); work hat n Plätze. Definiert in slc_spline.c. */
-void slc_sort_index(int64_t n, const double *key, int64_t *idx, int64_t *work);
+ * Knuth 1998, §5.2.4); work hat n Plätze. Definiert in slc_spline.cpp. */
+/* C++ (seit 1.6.0): Die Funktionen von slc werfen nie (C-Regeln, kein longjmp). SL_NOTHROW sagt das dem
+ * Übersetzer; ohne die Angabe legt g++ an jedem Aufruf über Dateigrenzen Ausnahmepfade an und ordnet heiße
+ * Schleifen anders (gemessen: MS-GARCH-Fit in Julia 7 % langsamer). Ändert weder Bindung noch ABI. */
+#ifndef SL_NOTHROW
+#if defined(__cplusplus) && (defined(__GNUC__) || defined(__clang__))
+#define SL_NOTHROW __attribute__((nothrow))
+#else
+#define SL_NOTHROW
+#endif
+#endif
+
+#ifdef __cplusplus
+extern "C" {   /* C-Bindung wie bis 1.5.2 (Symbol unverändert) */
+#endif
+void slc_sort_index(int64_t n, const double *key, int64_t *idx, int64_t *work) SL_NOTHROW;
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SLC_LA_INTERNAL_H */

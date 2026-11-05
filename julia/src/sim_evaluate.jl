@@ -56,63 +56,56 @@ const _EVAL_METRICS = ("cagr", "ttwror", _EVAL_STATS..., "buys", "sells")
 const _EVAL_REASONS = ("too_short", "negative_end_value", "no_irr_solution", "zero_start_value", "nonpositive_twr_index",
                        "not_finite", "zero_mean_return", "zero_volatility", "no_negative_returns", "no_drawdown",
                        "no_recovery")
-const _EVAL_FIXED = Dict(6 => "Rechnung ergibt keinen endlichen Wert", 7 => "keine Tagesrendite (Einzeltag)",
-                         9 => "kein Drawdown im Zeitraum (max_drawdown 0)", 11 => "mittlere Tagesrendite ist 0",
-                         13 => "keine negativen Überschussrenditen (Downside-Abweichung 0)",
-                         14 => "keine negativen Tagesrenditen", 15 => "kein Drawdown im Zeitraum (Ulcer Index 0)",
-                         16 => "kein Drawdown im Zeitraum")
+# Texte aus core/meldungen.tsv (meldungen.jl); Ursachen ohne Werte (Text fest)
+const _EVAL_FIXED = Dict(k => _MELD_EVAL_DETAIL[string(k)] for k in (6, 7, 9, 11, 13, 14, 15, 16))
 
-"Klartext einer Ursache (enum Detail in core/evaluate_core_impl.h)."
+"Klartext einer Ursache (enum Detail in core/evaluate_core_impl.h); Texte aus `_MELD_EVAL_DETAIL`."
 function _eval_detail(d::Integer, v, why_text)
-    d == 0 && return "Zeitraum $(_n_tage(Int(v[1]))), Laufzeit 0 Jahre (Einzeltag)"
-    d == 1 && return r_sprintf("Endwert %.2f EUR negativ", v[1])
-    d == 2 && return r_sprintf("Endwert %.2f EUR negativ: offene Steuerschuld %.2f EUR", v[1], v[2])
-    d == 3 && return r_sprintf("kein interner Zinsfuß: Startwert %.2f EUR, Einzahlungen %.2f EUR, Endwert %.2f EUR",
-                               v[1], v[2], v[3])
-    d == 4 && return r_sprintf("Depotwert am Starttag %.2f EUR", v[1])
-    d == 5 && return r_sprintf("zeitgewichteter Wertindex am %s nicht positiv (Tagesrendite %.2f %%)",
-                               fmt_date(Int(v[1])), v[2])
+    m = _MELD_EVAL_DETAIL
+    d == 0 && return r_sprintf(m["0"], _n_tage(Int(v[1])))
+    d == 1 && return r_sprintf(m["1"], v[1])
+    d == 2 && return r_sprintf(m["2"], v[1], v[2])
+    d == 3 && return r_sprintf(m["3"], v[1], v[2], v[3])
+    d == 4 && return r_sprintf(m["4"], v[1])
+    d == 5 && return r_sprintf(m["5"], fmt_date(Int(v[1])), v[2])
     if d == 8
         k = Int(v[1])
-        return "nur $k $(k == 1 ? "Tagesrendite" : "Tagesrenditen"), mindestens $(Int(v[2])) nötig"
+        return r_sprintf(m["8"], k, k == 1 ? m["8.eins"] : m["8.mehr"], Int(v[2]))
     end
-    d == 10 && return "Standardabweichung der $(Int(v[1])) Tagesrenditen ist 0 (konstanter Verlauf)"
-    d == 12 && return "Standardabweichung der $(Int(v[1])) Überschussrenditen ist 0"
-    d == 17 && return "Drawdown bis zum Ende nicht aufgeholt (längster Drawdown $(_n_tage(Int(v[1]))))"
-    d == 18 && return "Zeitraum $(_n_tage(Int(v[1]))), Laufzeit 0 Jahre: keine Anzahl je Jahr (Einzeltag)"
+    d == 10 && return r_sprintf(m["10"], Int(v[1]))
+    d == 12 && return r_sprintf(m["12"], Int(v[1]))
+    d == 17 && return r_sprintf(m["17"], _n_tage(Int(v[1])))
+    d == 18 && return r_sprintf(m["18"], _n_tage(Int(v[1])))
     if d == 19
         k = Int(v[1])
-        return "$(_EVAL_METRICS[k+1]) nicht definiert: $(why_text[k+1])"
+        return r_sprintf(m["19"], _EVAL_METRICS[k+1], why_text[k+1])
     end
     return _EVAL_FIXED[Int(d)]
 end
 
-"Warnung der Auswertung (Code des Kerns) mit dem Text von R."
+"Warnung der Auswertung (Code des Kerns) mit dem Text von R; Texte aus `_MELD_EVAL_WARN`."
 function _eval_warn(code::Integer, v)
+    m = _MELD_EVAL_WARN
     if 1 <= code <= 3
         @warn _XIRR_WARN[code]
     elseif code == 10
-        @warn r_sprintf("simulation: geldgewichtete Rendite (cagr) mit Einzahlungen nicht bestimmbar (Startwert %.2f EUR, Einzahlungen %.2f EUR, Endwert %.2f EUR): kein interner Zinsfuß gefunden; cagr = NA.",
-                        v[1], v[2], v[3])
+        @warn r_sprintf(m["10"], v[1], v[2], v[3])
     elseif code == 11
-        @warn r_sprintf("simulation: Endwert negativ (%.2f EUR, %s); Verlust über 100 %%: cagr und ttwror sind nicht definiert (NA), Drawdowns auf 100 %% begrenzt.",
-                        v[1], v[2] > 0 ? r_sprintf("offene Steuerschuld %.2f EUR", v[2]) : "nicht gedeckte Steuerschuld")
+        @warn r_sprintf(m["11"], v[1], v[2] > 0 ? r_sprintf(m["11.offen"], v[2]) : m["11.ungedeckt"])
     elseif code == 12
-        @warn "simulation: zeitgewichteter Wertindex wird negativ (Tagesrendite unter -100 %); ttwror ist nicht definiert (NA)."
+        @warn m["12"]
     elseif code == 13
-        @warn "simulation: Zeitraum $(_n_tage(Int(v[1]))) (Laufzeit 0 Jahre): cagr und ttwror sind nicht definiert (NA)."
+        @warn r_sprintf(m["13"], _n_tage(Int(v[1])))
     elseif code == 14
-        @warn r_sprintf("simulation: Depotwert am Starttag %.2f EUR: cagr ist nicht definiert (NA).", v[1])
+        @warn r_sprintf(m["14"], v[1])
     elseif code == 15
-        @warn r_sprintf("simulation: zeitgewichteter Wertindex am %s nicht positiv (Tagesrendite %.2f %% bei Depotwert %.2f EUR am Vortag und Einzahlung %.2f EUR); TTWROR und die zeitgewichteten Drawdowns sind nicht aussagekräftig (Drawdowns auf 100 %% begrenzt).",
-                        fmt_date(Int(v[1])), v[2], v[3], v[4])
+        @warn r_sprintf(m["15"], fmt_date(Int(v[1])), v[2], v[3], v[4])
     elseif code == 16
-        @warn r_sprintf("simulation: Depotwert am %s negativ (%.2f EUR, Steuerschuld); Drawdowns auf 100 %% begrenzt.",
-                        fmt_date(Int(v[1])), v[2])
+        @warn r_sprintf(m["16"], fmt_date(Int(v[1])), v[2])
     elseif code == 17
-        @warn "no non-missing arguments to max; returning -Inf"
+        @warn m["17"]
     else
-        error("simulation: interner Fehler: unbekannter Ereigniscode $code der Auswertung.")
+        error(r_sprintf(m["unbekannt"], code))
     end
     return nothing
 end
@@ -726,9 +719,9 @@ function _simulation_flat(data, strategy; start_value = 10000, spread = nothing,
                                 order_fee, dca_fee, harvest_mode, taxable_income, tax_tariff, io)
     split_thresh !== nothing && (split_thresh = _num_vec(split_thresh))
     start_date, stopp_date = _sim_prepare_data(fr, cfg.pre_filled, base_rate_flex, base_rate_data)
-    sim = _sim_build_state(fr, cfg.strategy, cfg.start_value, start_date, stopp_date, cfg.sparer_pauschbetrag,
+    sim = _sim_build_state(fr, cfg.strategy, start_date, stopp_date, cfg.sparer_pauschbetrag,
                            cfg.use_sparer_pauschbetrag, cfg.base_rate, base_rate_flex, base_rate_data)
-    fl, ew = _sim_build_calendar(fr, sim, cfg.strategy, start_date, stopp_date, liquidate, cfg.dca_mode, dca_span,
+    fl, ew = _sim_build_calendar(fr, sim, cfg.strategy, start_date, stopp_date, cfg.dca_mode, dca_span,
                                  dca_unit, cfg.dca_days, cfg.dca_value, dca_anchor, dca_start, dca_skip, cfg.balance_mode,
                                  balance_span, balance_unit, cfg.balance_days, balance_anchor, balance_start,
                                  balance_skip, cfg.event_col, event_mode, event_weight)

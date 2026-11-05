@@ -1,19 +1,22 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "simlev"
-version = "1.5.0"
+version = "1.6.0"
 description = "Backtesting für ETF-, Hebel- und Multi-Asset-Strategien mit deutscher Investmentbesteuerung: Python-Fassung von SimLev mit gemeinsamem C/C++-Kern, bitgleich zu den Fassungen in R und Julia (Engine, Bootstrap, Entnahmephase, Analyse, Optimierung u. a.)"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "GPL-3.0-only" }
+# Lizenz als SPDX-Ausdruck und Lizenzdateien nach PEP 639 (seit 1.5.1; setuptools >= 77.0.3, bis 1.5.0 Tabelle
+# {text = ...}, Klassifikator und tool.setuptools.license-files, Frist 18.02.2027). Rechtehinweise (auch der
+# R-Nachbildungen) gehen mit jeder Weitergabe mit, auch im Wheel (dist-info/licenses).
+license = "GPL-3.0-only"
+license-files = ["LICENSE.md", "COPYRIGHTS.md"]
 authors = [{ name = "ChemicalStats von der Mauerstrasse", email = "chemicalstatsy@protonmail.com" }]
 keywords = ["backtesting", "portfolio", "etf", "leverage", "steuern", "vorabpauschale", "investmentsteuergesetz"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: OS Independent",
     "Topic :: Office/Business :: Financial :: Investment",
     "Natural Language :: German",
@@ -23,9 +26,6 @@ dependencies = ["numpy>=1.22", "pandas>=1.4"]
 
 [tool.setuptools]
 packages = ["simlev", "simlev._r"]
-# Rechtehinweise (auch der R-Nachbildungen) gehen mit jeder Weitergabe mit, auch im Wheel
-# (dist-info/licenses bzw. dist-info); setuptools >= 61 liest das Feld hier.
-license-files = ["LICENSE.md", "COPYRIGHTS.md"]
 
 [tool.setuptools.package-data]
 simlev = ["data/*"]

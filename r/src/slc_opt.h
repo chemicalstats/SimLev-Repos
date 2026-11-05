@@ -2,9 +2,9 @@
  *
  * Verfahren:  BFGS mit starker Wolfe-Liniensuche, projizierter BFGS für Schranken, Nelder-Mead,
  *             Gradient über zentrale Differenzen (einseitig an Schranken); Einzelheiten und
- *             Quellen im Kopf von core/slc_opt.c, Prüffunktionen in core/slc_opt_test.c.
- * Quellen:    Literatur in core/slc_opt.c.
- * Konstanten: keine (Verfahrensparameter in core/slc_opt.c).
+ *             Quellen im Kopf von core/slc_opt.cpp, Prüffunktionen in core/slc_opt_test.cpp.
+ * Quellen:    Literatur in core/slc_opt.cpp.
+ * Konstanten: keine (Verfahrensparameter in core/slc_opt.cpp).
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
  * Prüforakel: R 4.3.3 optim (nur Plausibilität).
@@ -82,24 +82,24 @@ typedef struct sl_opt_ctrl {
     int           trace;      /* nur Hüllen */
 } sl_opt_ctrl;
 
-void        sl_opt_ctrl_default(sl_opt_ctrl *ctrl, int method);
-int64_t     sl_opt_wsize(int method, int n);          /* Länge des Arbeitsfelds; -1 bei Fehler */
-const char *sl_opt_method_name(int method);           /* "BFGS", "PBFGS", "Nelder-Mead" */
+void        sl_opt_ctrl_default(sl_opt_ctrl *ctrl, int method) SL_NOTHROW;
+int64_t     sl_opt_wsize(int method, int n) SL_NOTHROW;          /* Länge des Arbeitsfelds; -1 bei Fehler */
+const char *sl_opt_method_name(int method) SL_NOTHROW;           /* "BFGS", "PBFGS", "Nelder-Mead" */
 
 /* lo, hi: NULL oder n Werte (nur PBFGS; -Inf/+Inf erlaubt; BFGS und NM verlangen NULL) */
 int sl_opt_init(sl_ctx *cx, int method, int n, const double *x0, const double *lo, const double *hi,
-                const sl_opt_ctrl *ctrl, int have_grad, double *ws);
+                const sl_opt_ctrl *ctrl, int have_grad, double *ws) SL_NOTHROW;
 /* nächste Anfrage: need = SL_NEED_F (f(x) liefern), SL_NEED_G (Gradient an x liefern) oder SL_DONE */
-int sl_opt_ask(sl_ctx *cx, const double *ws, double *x_eval, int *need);
+int sl_opt_ask(sl_ctx *cx, const double *ws, double *x_eval, int *need) SL_NOTHROW;
 /* Antwort: f bei SL_NEED_F (g wird nicht gelesen), g (n Werte) bei SL_NEED_G (f wird nicht gelesen) */
-int sl_opt_tell(sl_ctx *cx, double *ws, double f, const double *g);
+int sl_opt_tell(sl_ctx *cx, double *ws, double f, const double *g) SL_NOTHROW;
 /* bester Punkt (x: n Werte, ungeskaliert), f (ungeskaliert), code, Iterationen,
  * Funktionsauswertungen (ohne Differenzen), Gradienten; Rückgabe: Status des Laufs */
-int sl_opt_result(const double *ws, double *x, double *f, int *code, int *iter, int *nfev, int *ngev);
+int sl_opt_result(const double *ws, double *x, double *f, int *code, int *iter, int *nfev, int *ngev) SL_NOTHROW;
 /* genauer Grund (SL_WHY_*) und alle Auswertungen der Zielfunktion (mit Differenzen) */
-int sl_opt_info(const double *ws, int *reason, int *ntot);
-int sl_opt_dim(const double *ws);                     /* n eines initialisierten Arbeitsfelds, sonst -1 */
-const char *sl_opt_message(int reason);
+int sl_opt_info(const double *ws, int *reason, int *ntot) SL_NOTHROW;
+int sl_opt_dim(const double *ws) SL_NOTHROW;                     /* n eines initialisierten Arbeitsfelds, sonst -1 */
+const char *sl_opt_message(int reason) SL_NOTHROW;
 
 /* Direkt in C (GARCH, GPD, DCC, MS-GARCH, Backcast). f liefert den Wert (nicht endlich = +Inf),
  * g den Gradienten (NULL: zentrale Differenzen). x: Start und Ergebnis. */
@@ -107,25 +107,37 @@ typedef double (*sl_fn)(const double *x, void *data);
 typedef void   (*sl_gr)(const double *x, double *g, void *data);
 int sl_minimize(sl_ctx *cx, int method, int n, double *x, const double *lo, const double *hi,
                 const sl_opt_ctrl *ctrl, sl_fn f, sl_gr g, void *data,
-                double *fmin, int *code, int *iter, int *nfev);
+                double *fmin, int *code, int *iter, int *nfev) SL_NOTHROW;
 
-/* Numerischer Gradient (zentrale Differenzen, slc_opt.c) an x mit f(x) = fx (lo, hi: NULL oder n Werte); nfev: Zahl
+/* Numerischer Gradient (zentrale Differenzen, slc_opt.cpp) an x mit f(x) = fx (lo, hi: NULL oder n Werte); nfev: Zahl
  * der Auswertungen (darf NULL sein). Dieselbe Schrittweitenregel wie in den Optimierern. */
 int sl_numgrad(sl_ctx *cx, int n, const double *x, const double *lo, const double *hi, double fx,
-               sl_fn f, void *data, double *g, int *nfev);
+               sl_fn f, void *data, double *g, int *nfev) SL_NOTHROW;
 
-/* Prüffunktionen (core/slc_opt_test.c; Plausibilität und Gleichlauf): Wert an x, Gradient nach
+/* Prüffunktionen (core/slc_opt_test.cpp; Plausibilität und Gleichlauf): Wert an x, Gradient nach
  * g (NULL: ohne). id: 1 Rosenbrock (verkettet, n >= 2), 2 Beale (n = 2), 3 Powell singulär
  * (n = 4), 4 Wood (n = 4), 5 schlecht skalierte Quadratik (n >= 2), 6 nicht glatt (Betrag),
  * 7 log-Schranke (NaN für x <= 0, n >= 1), 8 Quadratik mit Kopplung (Schrankentests).
  * Unbekannte id oder unpassendes n: NaN. */
-double sl_opt_testfn(int id, int n, const double *x, double *g);
+double sl_opt_testfn(int id, int n, const double *x, double *g) SL_NOTHROW;
 /* sl_minimize bzw. sl_numgrad mit der Prüffunktion id (ntot: alle Auswertungen) */
 int sl_opt_test_minimize(sl_ctx *cx, int id, int method, int n, double *x, const double *lo, const double *hi,
                          const sl_opt_ctrl *ctrl, int use_grad, double *fmin, int *code, int *iter, int *nfev,
-                         int *ntot);
+                         int *ntot) SL_NOTHROW;
 int sl_opt_test_numgrad(sl_ctx *cx, int id, int n, const double *x, const double *lo, const double *hi,
-                        double *g, int *nfev);
+                        double *g, int *nfev) SL_NOTHROW;
+
+/* ── Brent fmin (core/slc_opt_fmin.cpp, seit 1.6.0) ──────────────────────────
+ * Minimum von f auf [ax, bx] wie stats::optimize (Brent_fmin von R, bitgleich): Arbeitsfeld ws mit SL_FMIN_WS
+ * Werten; Frage/Antwort: sl_fmin_ask gibt 1 und den Punkt x_eval (f liefern mit sl_fmin_tell) oder 0 und das
+ * Ergebnis in x_eval. Die Hüllen von optimize werten danach wie R f am Ergebnis noch einmal aus. */
+#define SL_FMIN_WS 24
+void sl_fmin_init(double *ws, double ax, double bx, double tol) SL_NOTHROW;
+int  sl_fmin_ask(double *ws, double *x_eval) SL_NOTHROW;
+void sl_fmin_tell(double *ws, double f) SL_NOTHROW;
+/* dasselbe mit Funktionszeiger: Ergebnis x */
+typedef double (*sl_fn1)(double x, void *data);
+double sl_fmin(double ax, double bx, sl_fn1 f, void *data, double tol) SL_NOTHROW;
 
 #ifdef __cplusplus
 }

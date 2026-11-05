@@ -236,7 +236,7 @@ def taylor_poly(c: Fraction, k: Fraction, hmax: Fraction = Fraction(1, 16), nmax
 #      Funktion von q; G = (x/s - 1)/w ist daher eine Funktion von w mit G(0) = pi/3. Ihre nächste
 #      Singularität liegt bei w = 1/4 (p = 0 bzw. 1); in der Variablen z = 1/4 - w liegen die Pole
 #      der angepassten rationalen Funktion bei z < 0, alle Koeffizienten werden positiv (Horner ohne
-#      Auslöschung). G = P_7(z)/Q_8(z), Q(0) = 1. Diese Zone braucht in slc_normal.c keinen
+#      Auslöschung). G = P_7(z)/Q_8(z), Q(0) = 1. Diese Zone braucht in slc_normal.cpp keinen
 #      Korrekturschritt (s als Doppelwort; der Rest x - s ist höchstens 28 % von x).
 #   B  Phi(-1.5) > p >= 2.8e-7 (5.0034 > -x > 1.5): -x = P_4(t)/Q_4(t), t = sqrt(-2 ln p);
 #      danach ein Halley-Schritt (Startfehler < 1e-11 relativ).

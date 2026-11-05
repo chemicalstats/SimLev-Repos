@@ -281,7 +281,12 @@ scenario_copula <- function(x, assets, n = 10000L, family = c("t", "gaussian"), 
     sum(.sl_lgamma((nu + k) / 2) + (k - 1) * .sl_lgamma(nu / 2) - k * .sl_lgamma((nu + 1) / 2) - 0.5 * ldR -
           (nu + k) / 2 * log1p(q / nu) + (nu + 1) / 2 * rowSums(log1p(Z^2 / nu)))
   }
-  nu <- if (family == "t") stats::optimize(function(v) -ll_t(v), c(2.1, 100))$minimum else Inf
+  # nu seit 1.6.0 im Kern (sl_tcop_nu, qt auf mehreren Threads); NULL bei einer nicht endlichen Auswertung oder
+  # einer Warnung von qt: dann wie bisher in R (gleiche Meldungen)
+  nu <- if (family != "t") Inf else if (is.double(U) && is.matrix(U) && is.double(Ri) && identical(dim(Ri), c(k, k)) &&
+                                        !is.null(nk <- .Call(C_sl_tcop_nu, U, Ri, as.double(ldR), 2.1, 100,
+                                                             .Machine$double.eps^0.25, .sl_nthreads()))) nk else
+    stats::optimize(function(v) -ll_t(v), c(2.1, 100))$minimum
   qmarg <- lapply(seq_len(k), function(j) { s <- sort(X[, j]); function(u) stats::approx((seq_len(Tn) - 0.5) / Tn, s, u, rule = 2)$y })
   if (!is.null(stress)) {
     if (!is.list(stress) || !length(stress) || is.null(names(stress)) || any(names(stress) == "") || anyDuplicated(names(stress)))

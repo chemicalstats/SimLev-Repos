@@ -11,7 +11,11 @@ numpy nutzt auf Rechnern mit AVX-512 eigene SIMD-Implementierungen für
 ``exp``, ``log``, ``log1p``, ``expm1``, ``power``, ``tanh`` usw., die in den
 letzten Bits von glibc-libm abweichen. R ruft libm direkt auf. Die
 Funktionen hier wenden ``math.*`` (= libm) elementweise an und geben bei
-Skalaren Skalare, sonst ``float64``-Arrays gleicher Form zurück.
+Skalaren Skalare, sonst ``float64``-Arrays gleicher Form zurück. Seit 1.5.2
+rechnen ``exp``, ``log``, ``log1p``, ``expm1``, ``log2``, ``log10`` und
+``pow`` Felder in einer C-Schleife mit denselben libm-Funktionen
+(``sl_r_math1``, ``sl_r_pow_rec`` in ``core/slc_rbase.cpp``); Skalare weiter
+über ``math.*``.
 """
 from __future__ import annotations
 
@@ -19,6 +23,7 @@ import math
 
 import numpy as np
 
+from .. import _ext
 from .rnum import r_pow as _r_pow
 
 __all__ = ["exp", "log", "log1p", "expm1", "log2", "log10", "pow", "sin", "cos", "tan",
@@ -128,61 +133,60 @@ def _atanh(x):
         return math.nan
 
 
-def _apply_math(fast, slow, x):
-    """Wie ``apply1(slow, x)``, zuerst aber mit der ``math``-Funktion ``fast`` direkt.
-
-    Gilt nur, wenn ``slow(v)`` für jedes ``v``, bei dem ``fast(v)`` keine
-    Ausnahme wirft, genau ``fast(v)`` ist (``_exp``, ``_log``): Dann ergibt ein
-    Durchlauf ohne Ausnahme dieselben Bits. Bei einer Ausnahme (Überlauf,
-    ``log(0)``, ``log(<0)``) rechnet ``apply1`` das ganze Feld neu.
-    spart den Python-Aufruf von ``slow`` je Element.
-    """
+def _math1(kind, slow, x):
+    """``slow`` (Skalarfunktion, R-Regeln) auf Skalare; Felder mit der C-Schleife ``sl_r_math1`` (gleiche libm)."""
     if np.isscalar(x) or (isinstance(x, np.ndarray) and x.ndim == 0):
         return slow(float(x))
-    a = np.asarray(x, dtype=np.float64)
-    flat = a.ravel().tolist()
-    try:
-        out = np.fromiter(map(fast, flat), dtype=np.float64, count=len(flat))
-    except (ValueError, OverflowError):
-        return apply1(slow, a)
-    return out.reshape(a.shape)
+    a = np.ascontiguousarray(x, dtype=np.float64)
+    out = np.empty(a.shape)
+    _ext.slc_r_math1(kind, a.reshape(-1), out.reshape(-1))
+    return out
 
 
 def exp(x):
-    return _apply_math(math.exp, _exp, x)
+    return _math1(0, _exp, x)
 
 
 def log(x, base=None):
     if base is None:
-        return _apply_math(math.log, _log, x)
+        return _math1(1, _log, x)
     # R: log(x, base) = R_log(x) / R_log(base) (arithmetic.c logbase)
     if base == 10:
-        return apply1(_log10, x)
+        return log10(x)
     if base == 2:
-        return apply1(_log2, x)
+        return log2(x)
     lb = _log(float(base))
     return apply1(lambda v: _log(v) / lb, x)
 
 
 def log1p(x):
-    return apply1(_log1p, x)
+    return _math1(2, _log1p, x)
 
 
 def expm1(x):
-    return apply1(_expm1, x)
+    return _math1(3, _expm1, x)
 
 
 def log2(x):
-    return apply1(_log2, x)
+    return _math1(4, _log2, x)
 
 
 def log10(x):
-    return apply1(_log10, x)
+    return _math1(5, _log10, x)
 
 
 def pow(x, y):  # noqa: A001 - Name wie in C
-    """``x ^ y`` mit R-Semantik (``x*x`` für ``y == 2``, sonst libm ``pow``)."""
-    return apply2(_r_pow, x, y)
+    """``x ^ y`` mit R-Semantik (``x*x`` für ``y == 2``, sonst libm ``pow``); Felder mit Recycling in C."""
+    if np.isscalar(x) and np.isscalar(y):
+        return _r_pow(float(x), float(y))
+    a = np.asarray(x, dtype=np.float64)
+    b = np.asarray(y, dtype=np.float64)
+    if a.size == 0 or b.size == 0:
+        return np.empty(0)
+    shape = a.shape if a.size >= b.size else b.shape
+    out = np.empty(shape)
+    _ext.slc_r_pow_rec(np.ascontiguousarray(a).reshape(-1), np.ascontiguousarray(b).reshape(-1), out.reshape(-1))
+    return out
 
 
 sin = lambda x: apply1(_nan_wrap(math.sin), x)  # noqa: E731

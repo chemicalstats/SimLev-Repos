@@ -28,8 +28,8 @@ python3 core/sync.py --check          # Kopien der C-Quellen in r/src, python/sr
 python3 core/sync.py --write          # nach einer Änderung in core/ verteilen
 (cd python && python3 setup.py build_ext --inplace --force)   # C-Erweiterung im Klon bauen
 PYTHONPATH=python python3 -m pytest tests                     # Tests (Gruppen gleichlauf, fehler, ausgabe, schnittstelle)
-tests/werkzeuge/gleichlauf/run.sh --quick                       # Gleichlauf mit R und Julia
-tests/werkzeuge/doku/beispiele.sh python                        # Beispiele der READMEs und des Tutorials
+tests/werkzeuge/gleichlauf/run.py --quick                       # Gleichlauf mit R und Julia
+tests/werkzeuge/doku/beispiele.py python                        # Beispiele der READMEs und des Tutorials
 ```
 
 Die C-Quellen werden nur in `core/` geändert (Regeln in [`core/README.md`](../core/README.md)).
@@ -116,7 +116,7 @@ strategies, *, …)`, `param_search(data, builder, space, *, …)`,
    keine mathematisch gleichwertigen.
 2. R akkumuliert `sum`, `mean`, `cumsum`, `prod`, `rowSums`, `colSums`,
    `var`/`cov` in 80-Bit-`long double`. Dafür gibt es die C-Kerne
-   `core/slc_rbase*.c` hinter `simlev._r.rnum` bzw. `simlev._r.base` (`r_sum`,
+   `core/slc_rbase*.cpp` hinter `simlev._r.rnum` bzw. `simlev._r.base` (`r_sum`,
    `r_mean`, `r_colmeans`, …; seit 1.3.0 kein `numpy.longdouble` mehr); `np.sum`
    und `np.cumsum` ergeben andere Bits. `cumprod` nutzt in R `LDOUBLE`,
    `cummax`/`cummin` nicht.
@@ -129,7 +129,7 @@ strategies, *, …)`, `param_search(data, builder, space, *, …)`,
    `_r.rnum.r_pow`, vektoriell `r_pow_vec`, `r_exp_vec`).
 4. Zufallszahlen ausschließlich über `simlev._lib` (Zustand von SimLev bzw. ein `Stream`, siehe
    [Zufall](#zufall)); die Reihenfolge der Ziehungen muss exakt der in R entsprechen.
-5. R-Grundfunktionen (`quantile`, `median`, `cor`, `optimize`, `uniroot`, `hclust`, `approx`,
+5. R-Grundfunktionen (`quantile`, `median`, `cor`, `optimize`, `hclust`, `approx`,
    `filter`, `p.adjust`, …) kommen aus `simlev._r.stats`, Formatierung (`format`, `formatC`,
    `round`, `signif`, `prettyNum`, `print` von Vektoren, Matrizen und data.frames) aus
    `simlev._r.fmt`. Fehlt dort etwas, wird es dort ergänzt (mit Gleichlauf-Fällen und einem
@@ -264,10 +264,10 @@ innerhalb eines Pakets erscheinen Ausgaben dort in Einheitenreihenfolge.
 | `overfitting.R` | `overfitting.py` |
 | `param_search.R` | `param_search.py` |
 | `sensitivity.R` | `sensitivity.py` |
-| R-Grundfunktionen (R 4.3.3) | `_r/`: `rnum.py` (unterste Schicht: `NA_REAL`, long-double-Summen, `R_pow`, `R_zeroin2`), `rformat.py` (`fround.c`, `fprec.c`, `formatReal`, `sprintf` für die Engine), `parallel.py` (`.par_lapply`, siehe [Parallelität](#parallelität-cores)), `stats.py` (Sammelmodul der Themen `stats_sort.py`, `stats_cor.py`, `stats_smooth.py`, `stats_optim.py`, `stats_models.py`, `stats_cluster.py`), `_optim.py` (`Brent_fmin`, `R_zeroin2`), `linalg.py` (`outer`, `diag`, `isSymmetric`), `base.py`, `libm.py`, `fmt.py`, `_collate.py`, `rlist.py`, `rexpr.py`, `env.py`; Herkunft in [`COPYRIGHTS.md`](COPYRIGHTS.md) |
-| C-Bibliothek slc (`core/slc*.c`) | `_lib.py` (Zufall, `simlev_seed`, Verteilungen), `_lib_linalg.py`, `_lib_opt.py`, `_lib_models.py` (Hüllen um `simlev._ext`) |
+| R-Grundfunktionen (R 4.3.3) | `_r/`: `rnum.py` (unterste Schicht: `NA_REAL`, long-double-Summen, `R_pow`), `rformat.py` (Hülle über `fmt.py` für Runden und `formatReal`; `sprintf` für die Engine), `parallel.py` (`.par_lapply`, siehe [Parallelität](#parallelität-cores)), `stats.py` (Sammelmodul der Themen `stats_sort.py`, `stats_cor.py`, `stats_smooth.py`, `stats_optim.py`, `stats_models.py`, `stats_cluster.py`), `linalg.py` (`outer`, `diag`, `isSymmetric`), `base.py`, `libm.py`, `fmt.py`, `_collate.py`, `rlist.py`, `rexpr.py`, `env.py`; Herkunft in [`COPYRIGHTS.md`](COPYRIGHTS.md) |
+| C-Bibliothek slc (`core/slc*.cpp`) | `_lib.py` (Zufall, `simlev_seed`, Verteilungen), `_lib_linalg.py`, `_lib_opt.py`, `_lib_models.py` (Hüllen um `simlev._ext`) |
 
-Die `.Call`-Hüllen (`r/R/cores.R`, `r/src/init.c`, `r/src/simlev_capi.h`)
+Die `.Call`-Hüllen (`r/R/cores.R`, `r/src/init.cpp`, `r/src/simlev_capi.h`)
 haben kein Gegenstück. Ein
 Python-Modul je R-Datei (Ausnahmen: die Engine-Phasen, siehe
 [Aufbau der Engine](#aufbau-der-engine), und die stats-Interna, siehe
@@ -292,7 +292,7 @@ Julia-Dateien heißen gleich und gehören alle zum Untermodul `RStats`.
 | `stats_sort.py` | `stats_sort.jl` | Hilfen, `order`, `sort`, `rank`, `rle`, `tabulate`, `findInterval`, `cut`, `complete_cases`, partielle Sortierung, `quantile`, `median`, `weighted_mean` |
 | `stats_cor.py` | `stats_cor.jl` | `cor`, `cov`, `var`, `sd`, `cov2cor`, `scale` (cov.c) |
 | `stats_smooth.py` | `stats_smooth.jl` | `approx`, `approxfun`, `filter` (seit 1.0.0 ohne `fft`, `bw_nrd0`, `density`, `smooth_spline`) |
-| `stats_optim.py` | `stats_optim.jl` | `optimize`, `uniroot` (seit 1.0.0 ohne `optim`, `optimhess`, `nlminb`) |
+| `stats_optim.py` | `stats_optim.jl` | `optimize` (seit 1.0.0 ohne `optim`, `optimhess`, `nlminb`; seit 1.5.2 ohne `uniroot`) |
 | `stats_models.py` | `stats_models.jl` | `coef`, `fitted`, `residuals`, `p_adjust`, `ecdf`, `ave`, `aggregate` (seit 1.0.0 ohne `lm`, `glm`, `poly`, `summary_lm`, `predict`, `t_test`) |
 | `stats_cluster.py` | `stats_cluster.jl` | `dist`, `as_dist`, `dist_as_matrix`, `hclust` |
 
@@ -351,7 +351,7 @@ weil `engine.py` alle Phasenmodule einbindet und diese ihrerseits
 - Die R-Tests der Engine sind nach `tests/test_*engine*.py`, `test_tax*.py`,
   `test_simulation.py`, `test_config.py` und `test_dashboard.py` portiert.
 - Diese Zahlen beschreiben den Stand vor 1.0.0. Der Gleichlauf
-  (`tests/werkzeuge/gleichlauf/run.sh --full`) ergab am 27.10.2026 Engine 1.182/1.182 und Module
+  (`tests/werkzeuge/gleichlauf/run.py --full`) ergab am 27.10.2026 Engine 1.182/1.182 und Module
   4.260/4.260. Seit 1.4.2 prüfen die Szenarien und Tabellen in `tests/` (siehe [Tests](#tests)).
 
 ### Abbildung der Engine-Objekte
@@ -392,8 +392,9 @@ R-Namen aus `_r.base` bzw. `_r.fmt`). In `rnum.py` stehen die Summen
 (`r_sum`, `r_mean` mit Korrekturdurchlauf, `r_mean_int`, `r_cumsum`,
 `r_prod`, `r_cumprod`, `r_cummax`, `r_var`, `r_sd`, `r_median`,
 `r_rowsums`, `r_colsums`, `r_rowmeans`, `r_colmeans`; alle über die C-Kerne
-`core/slc_rbase*.c`), `r_pow`, `r_mod1` (`core/slc_rbase_num.c`, seit 1.3.0) und die
-Nullstellensuche, in `rformat.py` Runden und Textausgabe:
+`core/slc_rbase*.cpp`), `r_pow` und `r_mod1` (`core/slc_rbase_num.cpp`, seit 1.3.0), in
+`rformat.py` Runden und Textausgabe (seit 1.5.2 rechnen Runden und `formatReal` die Funktionen
+aus `fmt.py`; nur `r_sprintf` ist eine eigene, skalare Fassung):
 
 - Runden: `r_round` (fround.c, R ≥ 4), `r_signif` (fprec.c).
 - Formatieren: `r_format(x, digits, nsmall, big_mark, scientific, width)`
@@ -403,7 +404,7 @@ Nullstellensuche, in `rformat.py` Runden und Textausgabe:
   mit `"NA"`, `"Inf"` bzw. `"-Inf"` ausgegeben.
 
 `_dates.py` enthält Tageszahlen ab 1970; R-`strptime` für `"%Y-%m-%d"` (Semantik von get_number)
-rechnet der Kern `core/slc_rbase_date.c` (`data_prep._strptime_ymd`).
+rechnet der Kern `core/slc_rbase_date.cpp` (`data_prep._strptime_ymd`).
 
 ### Öffentliche Engine-Helfer für andere Module
 
@@ -521,7 +522,7 @@ R-Interna prüfen Referenzfälle unter `tests/<gruppe>/faelle/<bereich>.jsonl.gz
   danach `tests/werkzeuge/gleichlauf/vergleich.py` aufrufen.
 
 Nach jeder Änderung an der Rechenlogik läuft die Gleichlaufprüfung
-(`tests/werkzeuge/gleichlauf/run.sh --quick`, vor einer neuen Version `--full`); alle Fälle müssen in Python
+(`tests/werkzeuge/gleichlauf/run.py --quick`, vor einer neuen Version `--full`); alle Fälle müssen in Python
 und Julia bitgleich zu R sein. Sie vergleicht alle Fälle der Generatoren, die Tests (`tests/` (pytest)) die Auswahl im Katalog.
 
 Was ein Referenzfall bitgleich prüft, steht nicht noch einmal als Test in
@@ -544,7 +545,7 @@ neu, weg oder umsortiert, Art oder Standardwert geändert).
 
 Eine gewollte Änderung der Schnittstelle wird bewusst neu festgeschrieben:
 Eintrag oben in `tests/schnittstelle/CHANGES.md` (Datum, was sich ändert,
-warum), dann aus der Repo-Wurzel `tests/schnittstelle/run.sh --freeze`; das
+warum), dann aus der Repo-Wurzel `tests/schnittstelle/run.py --freeze`; das
 schreibt `frozen/` für alle drei Sprachen neu und bricht ohne neuen Eintrag
 ab. Einzelheiten in [`tests/schnittstelle/README.md`](../tests/schnittstelle/README.md).
 
@@ -588,8 +589,8 @@ und `simlev._ext` rufen. Julia ruft seit 1.2.0 dieselben Kerne über die C-ABI-H
 
 | Dateien in `core/` | Kopien | Hüllen |
 |---|---|---|
-| `slc*.c`, `slc*.h` (C-Bibliothek slc) | `r/src/`, `python/src/core/`, `julia/deps/core/` | R `r/src/slc_r*.c` (`.Call`, `R/slc*.R`), Python `src/_ext_slc*.c` (`simlev._lib*`), Julia `src/slib*.jl` (`ccall`) |
-| `simlev_core.h`, `research_core_impl.h`, `withdrawal_core_impl.h`, `engine_core_impl.h`, `prepare_core_impl.h`, `evaluate_core_impl.h`, `tariff_core_impl.h` (geteilte Kerne) | `r/src/`, `python/src/core/`, `julia/deps/core/` (dort mit der C-ABI-Hülle `simlev_cabi.cpp`) | R `r/src/<kern>.cpp` (`.Call`, `R/cores.R`), Python `src/_ext_research.cpp`, `_ext_withdrawal.cpp`, `_ext_engine.cpp` |
+| `slc*.cpp`, `slc*.h` (C-Bibliothek slc) | `r/src/`, `python/src/core/`, `julia/deps/core/` | R `r/src/slc_r*.cpp` (`.Call`, `R/slc*.R`), Python `src/_ext_slc*.cpp` (`simlev._lib*`), Julia `src/slib*.jl` (`ccall`) |
+| `simlev_core.h`, `research_core_impl.h`, `withdrawal_core_impl.h`, `engine_core_impl.h`, `prepare_core_impl.h`, `evaluate_core_impl.h`, `tariff_core_impl.h`, seit 1.5.1 `wrapper_core_impl.h` (geteilte Kerne) | `r/src/`, `python/src/core/`, `julia/deps/core/` (dort mit der C-ABI-Hülle `simlev_cabi.cpp`) | R `r/src/<kern>.cpp` (`.Call`, `R/cores.R`), Python `src/_ext_research.cpp`, `_ext_withdrawal.cpp`, `_ext_engine.cpp` |
 
 `core/sync.py --write` kopiert (nur geänderte Dateien) und entfernt veraltete Kopien;
 `--check` vergleicht alle Kopien per SHA-256 (Ende 1 bei Abweichung) und läuft in jeder
@@ -617,7 +618,7 @@ Hüllen entfernt; die Ergebnisse der übrigen Research-Kerne blieben bitgleich.
   Python-Kernen (`n_add` usw.) sind mit ihnen entfallen.
 - **Neuen Kern hinzufügen:** Rechnung in `core/` (slc: Regeln in `core/README.md`; geteilter
   C++-Kern: `core/<datei>_impl.h` mit Host-Namen), `core/sync.py --write`, R-Hülle und
-  Registrierung in `r/src/init.c`, Python-Hülle `src/_ext_<kern>.c(pp)` mit Methodentabelle (in
+  Registrierung in `r/src/init.cpp`, Python-Hülle `src/_ext_<kern>.c(pp)` mit Methodentabelle (in
   `_ext_common.h` deklarieren, in `_ext.cpp` eintragen, in `setup.py` aufnehmen), Julia-Hülle per
   `ccall` (slc) bzw. eigener Port; Referenzfälle in `tests/gleichlauf/erzeugen/slc.R`.
 - **Schichten:** `_ext` gehört zu Schicht 0.
@@ -645,7 +646,7 @@ Regeln sind in R, Python und Julia gleich, damit die Ergebnisse bitgleich sind:
 Die Tests stehen in `tests/` (siehe [Bauen, Abgleich der C-Quellen und
 Tests](#bauen-abgleich-der-c-quellen-und-tests)): Python prüft die Gruppen `gleichlauf`, `fehler`,
 `ausgabe` und `schnittstelle` mit `python3 -m pytest tests` bzw. `tests/<gruppe>` gegen die
-Referenzfälle aus R. Dazu kommt die **Gleichlaufprüfung** `tests/werkzeuge/gleichlauf/run.sh
+Referenzfälle aus R. Dazu kommt die **Gleichlaufprüfung** `tests/werkzeuge/gleichlauf/run.py
 [--quick | --full]`: Sie baut R, Python und Julia, prüft `core/sync.py --check`, erzeugt die
 Referenzfälle mit dem aktuellen R neu und vergleicht Python und Julia streng dagegen.
 Ausgenommen sind die Module, die entfallene R-Nachbildungen prüfen (`r_nmath`, `r_rng`,

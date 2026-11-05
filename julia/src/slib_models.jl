@@ -2,7 +2,7 @@
 # DCC(1,1), MS-GARCH und univariates HMM, Bootstrap-Kerne.
 #
 # Gegenstück zu r/R/slc_models.R und python/simlev/_lib_models.py. Die Rechnung steht in
-# deps/core/slc_{garch,gpd,dcc,msgarch,boot}.c (Kopien von core/), gebaut von deps/build.jl in
+# deps/core/slc_{garch,gpd,dcc,msgarch,boot}.cpp (Kopien von core/), gebaut von deps/build.jl in
 # libslc. Fehlertexte und Warnungen kommen aus dem Kern. Ergebnisse als RList (Reihenfolge wie R).
 # Die Bootstrap-Kerne ziehen aus einem Stream bzw. dem globalen Zustand (_draw).
 #

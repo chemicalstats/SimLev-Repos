@@ -2,7 +2,7 @@
 # simlev_seed(), interne Ziehungen und Verteilungen.
 #
 # Gegenstück zu r/R/slc.R (R) und python/simlev/_lib.py (Python). Die Rechnung steht in
-# deps/core/slc*.c (Kopien von core/), gebaut von deps/build.jl (Pkg.build) nach
+# deps/core/slc*.cpp (Kopien von core/), gebaut von deps/build.jl (Pkg.build) nach
 # deps/usr/lib/libslc.<dlext>; deps/deps.jl nennt den Pfad (const LIBSLC). Warnungen und
 # Fehlertexte kommen aus dem Kern und sind in allen drei Sprachen gleich (Warnung: @warn ohne
 # Quellangabe; Fehler: error(msg)). Der Kontext sl_ctx ist für Julia undurchsichtig
@@ -301,16 +301,20 @@ for (jl, c) in ((:_pnorm, :sl_pnorm), (:_qnorm, :sl_qnorm), (:_dnorm, :sl_dnorm)
         _shape(x, out)
     end
 end
-for (jl, c) in ((:_pt, :sl_pt), (:_qt, :sl_qt))
+# pt/qt seit 1.6.0 elementweise auf mehreren Threads (Kern sl_pt_mt/sl_qt_mt, Ergebnis unabhängig davon)
+for (jl, c) in ((:_pt, :sl_pt_mt), (:_qt, :sl_qt_mt))
     @eval function $jl(x, df::Float64, flag::Bool)
         v = _vec(x); out = similar(v)
         cx = _ctx()
-        s = ccall(($(QuoteNode(c)), LIBSLC), Cint, (Ptr{Cvoid}, Int64, Ptr{Float64}, Float64, Cint, Ptr{Float64}),
-                  cx, length(v), v, df, Cint(flag), out)
+        s = ccall(($(QuoteNode(c)), LIBSLC), Cint, (Ptr{Cvoid}, Int64, Ptr{Float64}, Float64, Cint, Ptr{Float64}, Cint),
+                  cx, length(v), v, df, Cint(flag), out, Cint(nthreads()))
         _finish(cx, s)
         _shape(x, out)
     end
 end
+
+"Threads der elementweisen Kerne (seit 1.6.0; `SIMLEV_THREADS`, gelesen in REnv): 0 = Zahl der Prozessoren."
+nthreads() = parentmodule(@__MODULE__).REnv.threads()
 
 pnorm(q, mean = 0.0, sd = 1.0; lower_tail = true) = _pnorm(q, Float64(mean), Float64(sd), Bool(lower_tail))
 qnorm(p, mean = 0.0, sd = 1.0; lower_tail = true) = _qnorm(p, Float64(mean), Float64(sd), Bool(lower_tail))
@@ -323,5 +327,6 @@ qt(p, df; lower_tail = true) = _qt(p, Float64(df), Bool(lower_tail))
 include("slib_linalg.jl")
 include("slib_opt.jl")   # Optimierer der C-Bibliothek slc (optim, Prüfhilfen)
 include("slib_models.jl")   # Modelle (GARCH/GJR, GPD, DCC, MS-GARCH und HMM, Bootstrap-Kerne)
+include("slib_prep.jl")     # seit 1.6.0: Kerne für Wirtsfunktionen (core/slc_prep.h), Brent fmin
 
 end # module SLib

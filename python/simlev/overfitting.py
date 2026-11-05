@@ -30,10 +30,13 @@ from . import _lib
 from ._r import fmt as _fmt
 from ._r.rlist import RList
 from . import _dependence_core as _dcore
-from ._r.rnum import r_colmeans, r_colsums, r_rowmeans, r_rowsums, r_mean, r_mean_int, r_median, r_pow, r_prod, r_cumprod, r_sum, r_var, r_sd
+from ._r.rnum import r_colmeans, r_colsums, r_rowmeans, r_mean, r_mean_int, r_median, r_pow, r_prod, r_cumprod, r_sum, r_var, r_sd
 # Grafik: Bausteine des Stils Ergebnisgrafiken und Zahlen wie in Julia aus svg.py
 from .svg import (_jl_unique, _res_abline, _res_fig, _res_finish, _res_hline, _res_legend, _res_line, _res_panel,
                   _res_points, _res_range, _res_rect, _res_vline)
+from ._util import _match_arg_r as _match_arg
+from ._util import _ext
+from ._util import _fmt_vec
 
 __all__ = ["overfit_pbo", "sharpe_probabilistic", "sharpe_deflated", "overfit_walk_forward", "param_bootstrap",
            "sharpe_haircut", "SimLevPBO", "SimLevDSR", "SimLevWalkForward"]
@@ -46,17 +49,6 @@ _EPOCH = np.datetime64("1970-01-01", "D")
 # ─────────────────────────────────────────────────────────────────────────────
 # Fremdfunktionen (andere Bearbeiter) und R-Interna
 # ─────────────────────────────────────────────────────────────────────────────
-
-def _ext(mod, name):
-    """Funktion ``name`` aus ``simlev.<mod>`` (spät geladen, parallel portiert)."""
-    m = importlib.import_module("simlev." + mod)
-    return getattr(m, name)
-
-
-def _match_arg(value, choices, argname="arg"):
-    from .config import _match_arg as ma
-    return ma(value, choices, argname)
-
 
 def _as_dates(x):
     """Datumswerte (bereits von ``_to_date`` geprüft) → ``datetime64[D]``-Array."""
@@ -77,7 +69,7 @@ def _days(d):
     return (d.astype("datetime64[D]") - _EPOCH).astype(np.int64).astype(np.float64)
 
 
-# colSums/colMeans/rowSums/rowMeans über den C-Kern core/slc_rbase.c (long double wie R; wie Julia)
+# colSums/colMeans/rowSums/rowMeans über den C-Kern core/slc_rbase.cpp (long double wie R; wie Julia)
 def _colsums(M):
     """``colSums`` (long-double-Akkumulator, sequenziell)."""
     return r_colsums(M)
@@ -89,10 +81,6 @@ def _colmeans(M):
     if n == 0:
         return np.full(p, _NAN)
     return r_colmeans(M)
-
-
-def _rowsums(M):
-    return r_rowsums(M)
 
 
 def _rowmeans(M):
@@ -126,18 +114,6 @@ def _which_max(v):
     return best
 
 
-def _max_col_first(M):
-    """``max.col(M, ties.method = "first")`` (0-basiert; -1 = NA)."""
-    out = np.empty(M.shape[0], dtype=np.int64)
-    for r in range(M.shape[0]):
-        row = M[r]
-        if np.isnan(row).any():
-            out[r] = -1
-            continue
-        out[r] = int(np.argmax(row))      # erstes Maximum, exakte Vergleiche wie maxcol.c
-    return out
-
-
 def _rank_avg(x):
     """``rank(x)`` mit ``ties.method = "average"``."""
     from ._r.stats import rank
@@ -155,7 +131,8 @@ def _lm_coef(x, y):
     x = np.asarray(x, float)
     y = np.asarray(y, float)
     ok = ~(np.isnan(x) | np.isnan(y))                 # na.action = na.omit
-    X = np.column_stack([np.ones(int(ok.sum())), x[ok]])
+    # cbind(1, numeric(0)) ist 1 x 1: ohne Paar wie R "Längen von x und y passen nicht" (seit 1.5.1)
+    X = np.column_stack([np.ones(int(ok.sum())), x[ok]]) if ok.any() else np.ones((1, 1))
     fit = f(X, y[ok])
     cf = fit["coefficients"] if isinstance(fit, dict) or hasattr(fit, "keys") else fit
     cf = np.asarray(cf, dtype=np.float64).ravel()
@@ -223,6 +200,27 @@ def _returns_frame(R, cols, rn=None):
     return df
 
 
+def _combn(S, k):
+    """``utils::combn(S, k)`` als Matrix C x k (int32, 1-basiert), ohne Zwischenliste. Wie R wird die Anzahl als
+    Ganzzahl gebildet: jenseits von ``.Machine$integer.max`` (S >= 34) Warnung und Fehler, ohne die Kombinationen
+    aufzubauen (seit 1.5.1)."""
+    nc = math.comb(S, k)
+    if nc > 2147483647:
+        warnings.warn("NAs introduced by coercion to integer range", UserWarning, stacklevel=3)
+        raise ValueError("invalid 'ncol' value (too large or NA)")
+    flat = np.fromiter(itertools.chain.from_iterable(itertools.combinations(range(1, S + 1), k)), dtype=np.int32,
+                       count=nc * k)
+    return flat.reshape(nc, k)
+
+
+def _log1p(R):
+    """``log1p(R)`` mit R's Warnung "NaNs produced" (Werte unter -1, -Inf; seit 1.5.1)."""
+    out = _libm.log1p(R)
+    if np.any(np.isnan(out) & ~np.isnan(R)):
+        warnings.warn("NaNs produced", UserWarning, stacklevel=3)
+    return out
+
+
 def _of_returns_np(x, frequency, dates=None, risk_free=0):
     """Wie ``.of_returns``; liefert ``(R, Spaltennamen, Zeilennamen, dates, ppy, cols)`` mit numpy."""
     if _is_param_search(x):
@@ -256,7 +254,7 @@ def _of_returns_np(x, frequency, dates=None, risk_free=0):
         lev = list(dict.fromkeys(key))
         pos = {k: i for i, k in enumerate(lev)}
         codes = np.array([pos[k] for k in key], dtype=np.int64)
-        S = _rowsum(_libm.log1p(R), codes, len(lev))
+        S = _rowsum(_log1p(R), codes, len(lev))
         R = _libm.exp(S) - 1.0
         rn = lev
         last = np.array([key[i] != key[i + 1] for i in range(len(key) - 1)] + [True], dtype=bool)
@@ -331,7 +329,7 @@ def _of_col_metric(R, metric):
     Rc = R - _colmeans(R)[None, :]
     return np.asarray(_of_metric(R.shape[0], _colsums(R), lambda: _colsums(Rc * Rc),
                                  lambda: (lambda P: _colsums(P * P))(np.minimum(R, 0.0)),
-                                 lambda: _colsums(_libm.log1p(R)), metric, c1=lambda: _colsums(Rc)),
+                                 lambda: _colsums(_log1p(R)), metric, c1=lambda: _colsums(Rc)),
                       dtype=np.float64)
 
 
@@ -339,7 +337,7 @@ def _of_drop_flat(rr, what):
     """Spalten ohne Schwankung (Sharpe Ratio nicht definiert) ausschließen."""
     R = rr.R
     sdv = np.array([r_sd(R[:, j]) for j in range(R.shape[1])])
-    flat = np.nonzero(~(sdv > 1e-10))[0]
+    flat = np.nonzero(~(sdv > 1e-10) & ~np.isnan(sdv))[0]    # which(!(sdv > 1e-10)): NaN (z. B. bei Inf) zählt nicht
     if not flat.size:
         return rr
     if flat.size == R.shape[1]:
@@ -498,14 +496,14 @@ def overfit_pbo(x, *, S=16, metric=("sharpe", "sortino", "geometric", "mean"),
     B2 = _rowsum(Rc * Rc, blk, S)
     Pm = np.minimum(R, 0.0)
     Bd = _rowsum(Pm * Pm, blk, S)
-    Bl = _rowsum(_libm.log1p(R), blk, S)
+    Bl = _rowsum(_log1p(R), blk, S)
     Bc = _rowsum(Rc, blk, S)
     T1, T2, Td, Tl, Tc = (_colsums(B) for B in (B1, B2, Bd, Bl, Bc))
-    combos = np.array(list(itertools.combinations(range(S), S // 2)), dtype=np.int64)   # C x S/2
+    combos = _combn(S, S // 2)                                                          # C x S/2, 1-basiert
     C = combos.shape[0]
     half = bl * S / 2
     # je Aufteilung im Kern (core/research_core_impl.h, pbo_cscv; bis 1.4.3 hier in Python)
-    lam, isb, oosb, oosm = _dcore.pbo_cscv((B1, B2, Bd, Bl, Bc), (T1, T2, Td, Tl, Tc), combos + 1, half, metric, S, N)
+    lam, isb, oosb, oosm = _dcore.pbo_cscv((B1, B2, Bd, Bl, Bc), (T1, T2, Td, Tl, Tc), combos, half, metric, S, N)
     intercept, slope = _lm_coef(isb, oosb)
     return SimLevPBO(pbo=_mean_lgl(lam <= 0, np.isnan(lam)), **{"lambda": lam}, is_best=isb, oos_best=oosb,
                      oos_median=oosm, slope=slope, intercept=intercept,
@@ -782,13 +780,6 @@ def _plot_wf(x):
     _res_legend(f, 85, 60, ["Walk-Forward", "Rückschau-Bester", "Durchschnitt"], cols)
     data = {"growth": _frame_data(date=dates, walk_forward=ys[0], hindsight=ys[1], average=ys[2])}
     return _res_finish(f), data
-
-
-def _fmt_vec(f, v):
-    out = _fmt.sprintf(f, np.asarray(v, dtype=np.float64))
-    if isinstance(out, str):
-        out = np.array([out], dtype=object)
-    return np.asarray(out, dtype=object)
 
 
 def _r_round(x):

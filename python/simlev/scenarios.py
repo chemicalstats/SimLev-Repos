@@ -17,22 +17,20 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
+from . import _ext
 from . import dependence as _dep
 from ._r import fmt as _fmt
 from ._r.base import env_from_caller
 from ._r import libm as _libm
 from ._r.rlist import RList
 from ._r.rnum import r_colsums, r_cumsum, r_cumprod, r_rowsums, r_sd, r_sum
+from ._util import _match_arg
+from ._util import _cov2cor
 
 __all__ = ["view_mean", "view_prob", "view_vol", "scenario_entropy_pooling", "scenario_copula", "scenario_risk",
            "scenario_crisis", "SimLevScenarios"]
 
 _NAN = _fmt.NA_REAL      # R's NA_real_ (alle Verwendungen hier sind NA)
-
-
-def _match_arg(arg, choices):
-    from .data_prep import _match_arg as f
-    return f(arg, choices)
 
 
 def _is_num_scalar(v):
@@ -186,15 +184,6 @@ def _scen_frame(x, assets, states, frequency):
     if a.ndim == 1:
         a = a.reshape(-1, 1)
     return pd.DataFrame(a, columns=["V%d" % (j + 1) for j in range(a.shape[1])])
-
-
-def _cov2cor(V):
-    V = np.asarray(V, dtype=np.float64)
-    p = V.shape[0]
-    Is = np.sqrt(1 / np.diag(V))
-    r = Is.reshape(-1, 1) * V * Is.reshape(1, -1)
-    r[np.arange(p), np.arange(p)] = 1.0
-    return r
 
 
 def _eval_expr(expr, S, env=None):
@@ -355,13 +344,19 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
         b = np.array([r[1] for r in rows], dtype=np.float64)
         ineq = np.array([r[2] for r in rows], dtype=bool)
 
+        last = [None, None]   # fn und gr fragen denselben Punkt ab: Ergebnis einmal je Punkt (seit 1.5.2)
+
         def dual(l):
             l = np.asarray(l, dtype=np.float64)
+            key = l.tobytes()
+            if key == last[0]:
+                return last[1]
             e = -np.asarray(la.crossprod(A, l.reshape(-1, 1)), dtype=np.float64).ravel()
             mx = _dep._rmax(e)
             w = p * _libm.exp(e - mx)
             Z = r_sum(w)
-            return math.log(Z) + mx + r_sum(l * b), w / Z
+            last[0], last[1] = key, (math.log(Z) + mx + r_sum(l * b), w / Z)
+            return last[1]
 
         def fn(l):
             return dual(l)[0]
@@ -521,7 +516,14 @@ def scenario_copula(x, assets, *, n=10000, family=("t", "gaussian"), stress=None
         c0 = (_dep._lgamma((nu + k) / 2) + (k - 1) * _dep._lgamma(nu / 2) - k * _dep._lgamma((nu + 1) / 2) - 0.5 * ldR)
         terms = c0 - (nu + k) / 2 * _libm.log1p(qv / nu) + (nu + 1) / 2 * r_rowsums(_libm.log1p(Z * Z / nu))
         return r_sum(terms)
-    nu = _dep._optimize(lambda v: -ll_t(v), 2.1, 100)[0] if family == "t" else math.inf
+    # nu seit 1.6.0 im Kern (sl_tcop_nu, qt auf mehreren Threads); bei einer nicht endlichen Auswertung oder einer
+    # Warnung von qt wie bisher (gleiche Meldungen)
+    nu = math.inf
+    if family == "t":
+        nk = _ext.slc_tcop_nu(np.ascontiguousarray(np.asarray(U, dtype=np.float64).T),
+                              np.ascontiguousarray(np.asarray(Ri, dtype=np.float64).T), int(k), float(ldR), 2.1, 100.0,
+                              0.0001220703125, _dep._sl().nthreads()) if np.ndim(U) == 2 and np.shape(Ri) == (k, k) else None
+        nu = nk if nk is not None else _dep._optimize(lambda v: -ll_t(v), 2.1, 100)[0]
     grid = (np.arange(1, Tn + 1) - 0.5) / Tn
     qmarg = [_approx_fn(grid, np.sort(X[:, j])) for j in range(k)]
     if stress is not None:

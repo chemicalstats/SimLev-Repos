@@ -37,7 +37,7 @@
 //   hmm_em              Baum-Welch-EM aus einem Startwert (seit 1.5.0)
 //   goal_dp             Rueckwaertsrekursion von planning_goal() (seit 1.5.0)
 //   pbo_cscv            Aufteilungen der CSCV von overfit_pbo() (seit 1.5.0)
-//   (garch_filter: bis 1.0.0, ersetzt durch sl_garch11_filter in core/slc_garch.c)
+//   (garch_filter: bis 1.0.0, ersetzt durch sl_garch11_filter in core/slc_garch.cpp)
 //   roll_mean_core     rollierender Mittelwert mit kompensierter Summe
 //   kendall_tau_core   Kendalls Tau-b (ganzzahlig und double-double statt long double)
 //   roll_cov_core      rollierende Kovarianz

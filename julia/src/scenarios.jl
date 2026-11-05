@@ -480,7 +480,10 @@ function scenario_copula(x, assets; n = 10000, family = ("t", "gaussian"), stres
         terms = (c0 .- (nu + k) / 2 .* SimLev.RLibm.log1p.(qv ./ nu)) .+ (nu + 1) / 2 .* D._rowsums(SimLev.RLibm.log1p.(Z .* Z ./ nu))
         SimLev.r_sum(terms)
     end
-    nu = family == "t" ? D._optimize(v -> -ll_t(v), 2.1, 100.0)[1] : Inf
+    # nu seit 1.6.0 im Kern (sl_tcop_nu, qt auf mehreren Threads); bei einer nicht endlichen Auswertung oder einer
+    # Warnung von qt wie bisher (gleiche Meldungen)
+    nk = family == "t" ? SimLev.SLib.tcop_nu(Matrix{Float64}(U), Matrix{Float64}(Ri), Float64(ldR), 2.1, 100.0, 0.0001220703125) : nothing
+    nu = family != "t" ? Inf : nk !== nothing ? nk : D._optimize(v -> -ll_t(v), 2.1, 100.0)[1]
     grid = (collect(1:Tn) .- 0.5) ./ Tn
     qmarg = [_approx_fn(grid, SimLev.RStats.r_sort(X[:, j])) for j in 1:k]
     st_list = nothing

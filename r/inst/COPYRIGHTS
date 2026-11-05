@@ -6,7 +6,7 @@ Copyright ChemicalStats von der Mauerstrasse.
 
 SimLev enthält keinen Code aus anderen Paketen. Das R-Paket nutzt die
 Grundfunktionen von R selbst; nachgebildet sind sie nur in den Kernen
-src/slc_rbase.c und src/slc_rbase.h, die die gemeinsamen C++-Kerne der
+src/slc_rbase.cpp und src/slc_rbase.h, die die gemeinsamen C++-Kerne der
 Tagesengine und der Auswertung von simulation() brauchen (seit 1.4.0,
 Abschnitte 2.2 und 2.3; 2.1 entfällt). Sonst sind fremde Vorlage nur
 gemeinfreie Kalenderalgorithmen (Abschnitt 2.4). Die gleiche Gliederung haben
@@ -45,11 +45,11 @@ R/          R-Code des Pakets.
 src/        C++-Kerne der Engine (Markt-Updates, FIFO-Lotverwaltung,
             Steuer), der Research-, Optimierungs- und Abhängigkeitsrechnungen
             und der Entnahme (*_core.cpp, *_core_impl.h, simlev_core.h,
-            simlev_capi.h, init.c; Ausnahme: Kalenderteile, Abschnitt 2.4)
-            sowie die C-Bibliothek von SimLev (slc*.c, slc*.h: Zufall,
+            simlev_capi.h, init.cpp; Ausnahme: Kalenderteile, Abschnitt 2.4)
+            sowie die C-Bibliothek von SimLev (slc*.cpp, slc*.h: Zufall,
             Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD, DCC,
             MS-GARCH, Bootstrap-Kerne, Stineman-Interpolation,
-            Glättungsspline, Kerndichte) und ihre R-Hüllen (slc_r*.c).
+            Glättungsspline, Kerndichte) und ihre R-Hüllen (slc_r*.cpp).
 
             Die C-Quellen sind Kopien der kanonischen Dateien im Ordner
             core/ des Repositorys (core/sync.py). Die C-Bibliothek ist
@@ -62,7 +62,7 @@ src/        C++-Kerne der Engine (Markt-Updates, FIFO-Lotverwaltung,
             Verfahrenskonstanten aus den Veröffentlichungen (etwa die
             Parameter von xoshiro256** und SplitMix64) nennen die Dateiköpfe.
             Von den Kernen core/slc_rbase* gehören seit 1.4.0 nur
-            src/slc_rbase.c und src/slc_rbase.h zum R-Paket (Abschnitt 2.2:
+            src/slc_rbase.cpp und src/slc_rbase.h zum R-Paket (Abschnitt 2.2:
             Summen in long double für die Tagesengine engine_core_impl.h,
             seit 1.4.0 auch Summen, Mittel, Varianz, Kumulationen,
             Potenz und die Nullstellensuche nach Brent für die Auswertung
@@ -83,7 +83,7 @@ Entfällt im R-Paket (nur Python und Julia).
 
 2.2 C-Kerne mit R-Regeln (slc_rbase*)
 -------------------------------------
-Dateien:            src/slc_rbase.c, src/slc_rbase.h (seit 1.4.0; die übrigen
+Dateien:            src/slc_rbase.cpp, src/slc_rbase.h (seit 1.4.0; die übrigen
                     slc_rbase*-Dateien nur in Python und Julia)
 Herkunft:           übersetzt aus R 4.3.3 (src/main/summary.c, cum.c,
                     array.c, arithmetic.c, src/library/stats/src/zeroin.c,
@@ -108,7 +108,7 @@ Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 
 2.3 Ältere Herkunft innerhalb der R-Vorlagen
 --------------------------------------------
-Dateien:            src/slc_rbase.c (sl_r_zeroin2, seit 1.4.0)
+Dateien:            src/slc_rbase.cpp (sl_r_zeroin2, seit 1.4.0)
 Herkunft:           zeroin.c von R: "from NETLIB c/brent.shar with
                     max.iter, add'l info and convergence details hacked in
                     by Peter Dalgaard"; Netlib go/zeroin.f: Übersetzung von

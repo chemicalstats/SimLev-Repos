@@ -28,11 +28,16 @@ import numpy as np
 import pandas as pd
 
 from . import _dependence_core as _core
+from . import _ext
 from ._r import fmt as _fmt
 from ._r.base import env_from_caller
 from ._r import libm as _libm
 from ._r.rlist import RList
+from ._r.stats_sort import _bincode as _st_bincode   # C-Kern sl_r_bincode (seit 1.6.0)
 from ._r.rnum import r_colmeans, r_mean, r_pow, r_pow_vec, r_sd, r_sum
+from ._util import _match_arg
+from .data_prep import _to_date
+from ._util import _stats
 
 __all__ = ["copula_fit", "tail_dependence", "dependence_dcc", "dependence_analysis", "quantile_regression",
            "tail_regression", "tail_covar", "dependence_validate", "regime_subset",
@@ -48,16 +53,6 @@ _MISSING = object()
 # ═════════════════════════════════════════════════════════════════════════════
 # Zugriff auf gemeinsame Bausteine (andere Bearbeiter; erst beim Aufruf laden)
 # ═════════════════════════════════════════════════════════════════════════════
-
-def _stats():
-    from ._r import stats
-    return stats
-
-
-def _to_date(x, what="date"):
-    from .data_prep import _to_date as f
-    return f(x, what)
-
 
 def _fill_na(x, method="locf", keep_leading=True):
     from .backcast import _fill_na as f
@@ -106,32 +101,37 @@ def message(text):
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _rnan_of(vals):
-    """NaN-Ergebnis von R's ``min()``/``max()``: ein NA hat Vorrang, sonst das letzte NaN; ``None`` ohne NaN."""
-    r = None
-    for v in vals:
-        if math.isnan(v):
-            if not _fmt._is_rnan(v):
-                return v
-            r = v
-    return r
+    """NaN-Ergebnis von R's ``min()``/``max()``: ein NA hat Vorrang, sonst das letzte NaN; ``None`` ohne NaN.
+
+    ``vals``: float64-Feld (seit 1.5.2 ohne Python-Schleife; vorher Liste von Zahlen)."""
+    nan = vals != vals
+    if not nan.any():
+        return None
+    na = nan & ((vals.view(np.uint64) & 0xFFFFFFFF) == 1954)
+    return float(vals[int(np.argmax(na))] if na.any() else vals[np.flatnonzero(nan)[-1]])
+
+
+def _rvals(xs):
+    """Alle Argumente als ein float64-Feld (R ``c(...)`` für ``min``/``max``)."""
+    return np.concatenate([np.asarray(x, dtype=np.float64).ravel() for x in xs]) if xs else np.empty(0)
 
 
 def _rmin(*xs):
-    """R ``min()``: NA/NaN pflanzt sich fort (NA vor NaN)."""
-    vals = [float(v) for x in xs for v in np.atleast_1d(np.asarray(x, dtype=np.float64)).ravel()]
+    """R ``min()``: NA/NaN pflanzt sich fort (NA vor NaN); sonst das erste kleinste Element."""
+    vals = _rvals(xs)
     r = _rnan_of(vals)
     if r is not None:
         return r
-    return min(vals) if vals else math.inf
+    return float(vals[int(np.argmin(vals))]) if vals.size else math.inf
 
 
 def _rmax(*xs):
-    """R ``max()``: NA/NaN pflanzt sich fort (NA vor NaN)."""
-    vals = [float(v) for x in xs for v in np.atleast_1d(np.asarray(x, dtype=np.float64)).ravel()]
+    """R ``max()``: NA/NaN pflanzt sich fort (NA vor NaN); sonst das erste größte Element."""
+    vals = _rvals(xs)
     r = _rnan_of(vals)
     if r is not None:
         return r
-    return max(vals) if vals else -math.inf
+    return float(vals[int(np.argmax(vals))]) if vals.size else -math.inf
 
 
 def _num(x):
@@ -151,19 +151,10 @@ def _num(x):
 
 
 def _rank_avg(x):
-    """``rank(x, ties.method = "average")`` für endliche Werte."""
-    x = np.asarray(x, dtype=np.float64).ravel()
-    n = x.size
-    o = np.argsort(x, kind="stable")
-    xs = x[o]
-    out = np.empty(n)
-    i = 0
-    while i < n:
-        j = i
-        while j + 1 < n and xs[j + 1] == xs[i]:
-            j += 1
-        out[o[i:j + 1]] = (i + j + 2) / 2.0
-        i = j + 1
+    """``rank(x, ties.method = "average")`` für endliche Werte (C-Kern ``sl_r_rank``, seit 1.5.2)."""
+    x = np.ascontiguousarray(np.asarray(x, dtype=np.float64).ravel())
+    out = np.empty(x.size)
+    _ext.slc_r_rank(x, 0, out)
     return out
 
 
@@ -184,7 +175,7 @@ def _colmeans(X):
     n = X.shape[0]
     if n == 0:
         return np.full(X.shape[1], _RNAN)
-    return r_colmeans(X)   # C-Kern core/slc_rbase.c (long double wie R; wie Julia)
+    return r_colmeans(X)   # C-Kern core/slc_rbase.cpp (long double wie R; wie Julia)
 
 
 def _scale1(x):
@@ -277,26 +268,9 @@ def _seq_int_len_out(a, b, n):
 
 
 def _bincode(x, breaks, right=True, include_lowest=False):
-    """``.bincode`` (Intervallnummern 1..; 0 = NA)."""
-    x = np.asarray(x, dtype=np.float64).ravel()
-    br = np.asarray(breaks, dtype=np.float64)
-    nb1 = br.size - 1
-    lft = not right
-    code = np.zeros(x.size, dtype=np.int64)
-    for i, xi in enumerate(x.tolist()):
-        if math.isnan(xi):
-            continue
-        lo, hi = 0, nb1
-        if xi < br[lo] or br[hi] < xi or (xi == br[hi if lft else lo] and not include_lowest):
-            continue
-        while hi - lo >= 2:
-            new = (hi + lo) // 2
-            if xi > br[new] or (lft and xi == br[new]):
-                lo = new
-            else:
-                hi = new
-        code[i] = lo + 1
-    return code
+    """``.bincode`` (Intervallnummern 1..; 0 = NA; seit 1.6.0 C-Kern ``sl_r_bincode``)."""
+    code = _st_bincode(np.asarray(x, dtype=np.float64).ravel(), breaks, right, include_lowest)
+    return np.where(np.isnan(code), 0, code).astype(np.int64)
 
 
 def _cut_n(x, k):
@@ -610,7 +584,15 @@ def _cop_t_c0(nu):
 
 
 def _cop_fit_t(u, v):
-    """t-Copula per Profil-Likelihood in nu (``.cop_fit_t``); Ergebnis [atanh rho, nu, -loglik]."""
+    """t-Copula per Profil-Likelihood in nu (``.cop_fit_t``); Ergebnis [atanh rho, nu, -loglik].
+
+    Seit 1.6.0 ganz im Kern (``sl_tcop_fit``, qt auf mehreren Threads); nur bei einer nicht endlichen Auswertung oder
+    einer Warnung von qt wie bisher hier (gleiche Meldungen)."""
+    uu = np.ascontiguousarray(u, dtype=np.float64)
+    vv = np.ascontiguousarray(v, dtype=np.float64)
+    r = _ext.slc_tcop_fit(uu, vv, _sl().nthreads()) if uu.ndim == 1 and uu.shape == vv.shape else None
+    if r is not None:
+        return [r[0], r[1], r[2]]
     best = [0.0, math.inf, math.inf]
 
     def prof(nu):
@@ -995,12 +977,6 @@ def _dep_reg_cor(X, reg, nlev, pairs, rank=False):
             C = _cormat(Y)
         out[:, li] = [C[i, j] for i, j in pairs]
     return out
-
-
-def _match_arg(arg, choices, argname="frequency"):
-    """R-``match.arg`` (über ``data_prep._match_arg``)."""
-    from .data_prep import _match_arg as f
-    return f(arg, choices)
 
 
 def _rbind_named(dfs, names):

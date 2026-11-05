@@ -28,14 +28,14 @@ diese Datei und die Abbildungen der READMEs in `man/figures/`).
 
 ## C- und C++-Quellen
 
-Die C-Bibliothek (`slc*.c`, `slc*.h`) und die mit Python und Julia
+Die C-Bibliothek (`slc*.cpp`, `slc*.h`) und die mit Python und Julia
 geteilten C++-Kerne (`simlev_core.h`, `*_core_impl.h`) werden nur in
 [`core/`](../core/) geändert (Regeln in [`core/README.md`](../core/README.md));
 `src/` enthält Kopien. Nach einer Änderung verteilt
 `python3 core/sync.py --write` sie, `--check` vergleicht alle Kopien per
 SHA-256. Eigene Dateien des R-Pakets in `src/` sind die `.Call`-Hüllen
 (`engine_core.cpp`, `research_core.cpp`, `withdrawal_core.cpp`,
-`slc_r*.c`), die Registrierung `init.c` und `simlev_capi.h`. Die
+`slc_r*.cpp`), die Registrierung `init.cpp` und `simlev_capi.h`. Die
 C-Bibliothek wird mit `-std=c99 -ffp-contract=off -fno-fast-math` übersetzt
 (`src/Makevars`), wie in Python und Julia.
 
@@ -47,7 +47,7 @@ darunter `simulation.Rd`, `sim_blocks.Rd`, `asset_config.Rd` und
 `SimLev-package.Rd`, sind von Hand geschrieben. Das Tutorial ist die
 Vignette `vignettes/getting-started.Rmd`; die Python- und Julia-Tutorials
 haben dieselben Kapitel. Ihre Beispiele und die der READMEs führt
-`tests/werkzeuge/doku/beispiele.sh` aus.
+`tests/werkzeuge/doku/beispiele.py` aus.
 
 ## Tests
 
@@ -58,11 +58,11 @@ Abschnitt „Lokal aufbewahren“).
 
 ``` bash
 R_LIBS=<Bibliothek mit SimLev> Rscript tests/run.R      # methodik, fehler, ausgabe, schnittstelle (testthat)
-tests/run.sh r                                            # dasselbe über den gemeinsamen Einstieg
-tests/werkzeuge/gleichlauf/run.sh --quick                 # Gleichlauf: Python und Julia gegen R
-tests/schnittstelle/run.sh --check                        # eingefrorene Schnittstelle der drei Sprachen
-tests/werkzeuge/doku/beispiele.sh r                       # Beispiele der Doku
+tests/run.py r                                            # dasselbe über den gemeinsamen Einstieg
+tests/werkzeuge/gleichlauf/run.py --quick                 # Gleichlauf: Python und Julia gegen R
+tests/schnittstelle/run.py --check                        # eingefrorene Schnittstelle der drei Sprachen
+tests/werkzeuge/doku/beispiele.py r                       # Beispiele der Doku
 ```
 
 Neue Referenzfälle erzeugen die Generatoren in `tests/gleichlauf/erzeugen/`
-mit dem installierten R-Paket und `jsonlite` (`tests/werkzeuge/erzeugen.sh`).
+mit dem installierten R-Paket und `jsonlite` (`tests/werkzeuge/erzeugen.py`).

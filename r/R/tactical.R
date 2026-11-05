@@ -37,7 +37,9 @@
 #' @keywords internal
 #' @noRd
 .period_last <- function(dates, every) {
-  key <- switch(every, day = seq_along(dates), week = format(dates, "%G-%V"), month = format(dates, "%Y-%m"),
+  key <- if (is.character(every) && length(every) == 1L && every %in% c("week", "month", "quarter", "year"))
+    .date_key(dates, every)                                     # seit 1.5.1 ganzzahlig statt format() je Tag
+  if (is.null(key)) key <- switch(every, day = seq_along(dates), week = format(dates, "%G-%V"), month = format(dates, "%Y-%m"),
                 quarter = paste(format(dates, "%Y"), (as.integer(format(dates, "%m")) - 1L) %/% 3L),
                 year = format(dates, "%Y"), stop("every: 'day', 'week', 'month', 'quarter' oder 'year'."))
   if (every == "day") return(seq_along(dates))
@@ -131,6 +133,18 @@ momentum_score <- function(data, assets, lookbacks = c(1, 3, 6, 12), type = c("a
   d <- .to_date(data$date, "momentum_score: data$date"); n <- length(d)
   miss <- setdiff(assets, names(data)); if (length(miss)) stop(sprintf("momentum_score: Kursspalte(n) fehlen: %s", paste(miss, collapse = ", ")))
   if (type == "13612w") lookbacks <- c(1, 3, 6, 12)
+  # seit 1.6.0 im Kern (sl_mom_score: Rueckblickzeilen ganzzahlig, LOCF, Renditen, Scores), wenn die Daten den
+  # ueblichen Fall bilden (sortiert, endlich, Jahre 1000-9000, Rueckblicke bis 1000 Jahre); sonst wie bisher
+  dn <- unclass(d)
+  if (n >= 1L && is.data.frame(data) && length(assets) >= 1L && is.character(assets) && is.null(names(assets)) &&
+      !anyNA(assets) && length(lookbacks) >= 1L && is.numeric(lookbacks) && !anyNA(lookbacks) &&
+      all(abs(lookbacks) <= 12000) && is.numeric(dn) && !anyNA(dn) && all(dn >= -354285 & dn <= 2568019) &&
+      !is.unsorted(dn)) {
+    X <- vapply(assets, function(a) as.numeric(data[[a]]), numeric(n))
+    S <- .Call(C_sl_mom_score, as.double(dn), as.integer(lookbacks), as.double(X), if (type == "13612w") 1L else 0L)
+    dimnames(S) <- list(NULL, assets)
+    return(S)
+  }
   lt <- as.POSIXlt(d); y <- lt$year + 1900L; mday <- lt$mday
   back <- lapply(lookbacks, function(m) {
     mo <- lt$mon - as.integer(m); y2 <- y + mo %/% 12L; mo2 <- mo %% 12L

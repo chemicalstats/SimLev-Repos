@@ -4,7 +4,7 @@
 # Portiert aus src/library/stats/R/*.R und src/library/stats/src/*.c bzw. *.f
 # (sowie Teilen von src/main/sort.c, qsort-body.c, seq.c, cum.c) über die
 # Gegenstück python/simlev/_r/stats.py. Rechenreihenfolge, long-double-
-# Akkumulation (C-Kerne core/slc_rbase*.c) und libm-Aufrufe (SimLev.RLibm) wie in R.
+# Akkumulation (C-Kerne core/slc_rbase*.cpp) und libm-Aufrufe (SimLev.RLibm) wie in R.
 #
 # Konventionen
 # * Namen wie in R bzw. der Python-Fassung, `.` → `_` (weighted.mean →
@@ -28,7 +28,7 @@ import ..SimLev: RList, RVector, NamedMat, RFrame, NA, isna_strict
 using Dates
 
 export quantile, median, var, sd, cov, cor, cov2cor, weighted_mean, scale, approx, approxfun,
-       r_filter, optimize, optimise, uniroot, hclust, dist,
+       r_filter, optimize, optimise, hclust, dist,
        as_dist, dist_as_matrix, p_adjust, r_rank, order, r_sort, sort_partial, rle, cut,
        findInterval, tabulate, ave, aggregate, complete_cases, ecdf, fitted, coef, residuals,
        seq_len_out, ApproxFun, str_collate, r_isless
@@ -40,7 +40,6 @@ const _DBL_MAX = 1.7976931348623157e308
 @inline _csqrt(x::Float64) = x < 0.0 ? reinterpret(Float64, 0xFFF8000000000000) : sqrt(x)
 
 include("_collate.jl")
-include("_optim.jl")
 
 # Kollationszustand (ICU-Handles) gilt nur im laufenden Prozess.
 # Beim Laden nur zurücksetzen (nach der Vorkompilierung wären Zeiger ungültig).

@@ -15,6 +15,7 @@ import pandas as pd
 
 from . import _ext
 from ._dates import fmt_date
+from ._meldungen import EVAL_DETAIL as _MV, EVAL_WARN as _MW
 from ._r.rexpr import as_numeric
 from ._r.rnum import NA_REAL as NA  # R's NA_real_ (Nutzlast 1954)
 from ._sim_base import (
@@ -23,12 +24,12 @@ from ._sim_base import (
     _is_num,
     _is_true,
     _isna,
-    _n_tage,
     _rmax,
     _sp,
     _stop,
     _warn,
 )
+from ._util import _n_tage
 
 
 # Phase 6: Auswertung (sim_evaluate.R)
@@ -67,75 +68,66 @@ _EVAL_METRICS = ("cagr", "ttwror") + _EVAL_STATS + ("buys", "sells")
 _EVAL_REASONS = ("too_short", "negative_end_value", "no_irr_solution", "zero_start_value", "nonpositive_twr_index",
                  "not_finite", "zero_mean_return", "zero_volatility", "no_negative_returns", "no_drawdown",
                  "no_recovery")
-_XIRR_WARN = {1: "-Inf replaced by maximally negative value", 2: "NA/Inf replaced by maximum positive value",
-              3: "_NOT_ converged in 1000 iterations"}
+_XIRR_WARN = {k: _MW[str(k)] for k in (1, 2, 3)}
+# Ursachen ohne Werte (Text fest)
+_EVAL_FIXED = {k: _MV[str(k)] for k in (6, 7, 9, 11, 13, 14, 15, 16)}
 
 
 def _eval_detail(d: int, v, why_text) -> str:
-    """Klartext einer Ursache (enum Detail in core/evaluate_core_impl.h)."""
+    """Klartext einer Ursache (enum Detail in core/evaluate_core_impl.h); Texte aus ``_meldungen.EVAL_DETAIL``."""
+    m = _MV
     if d == 0:
-        return "Zeitraum %s, Laufzeit 0 Jahre (Einzeltag)" % _n_tage(int(v[0]))
+        return m["0"] % _n_tage(int(v[0]))
     if d == 1:
-        return _sp("Endwert %.2f EUR negativ", v[0])
+        return _sp(m["1"], v[0])
     if d == 2:
-        return _sp("Endwert %.2f EUR negativ: offene Steuerschuld %.2f EUR", v[0], v[1])
+        return _sp(m["2"], v[0], v[1])
     if d == 3:
-        return _sp("kein interner Zinsfu\u00df: Startwert %.2f EUR, Einzahlungen %.2f EUR, Endwert %.2f EUR", v[0], v[1],
-                   v[2])
+        return _sp(m["3"], v[0], v[1], v[2])
     if d == 4:
-        return _sp("Depotwert am Starttag %.2f EUR", v[0])
+        return _sp(m["4"], v[0])
     if d == 5:
-        return _sp("zeitgewichteter Wertindex am %s nicht positiv (Tagesrendite %.2f %%)", fmt_date(int(v[0])), v[1])
+        return _sp(m["5"], fmt_date(int(v[0])), v[1])
     if d == 8:
         k = int(v[0])
-        return "nur %d %s, mindestens %d n\u00f6tig" % (k, "Tagesrendite" if k == 1 else "Tagesrenditen", int(v[1]))
+        return m["8"] % (k, m["8.eins"] if k == 1 else m["8.mehr"], int(v[1]))
     if d == 10:
-        return "Standardabweichung der %d Tagesrenditen ist 0 (konstanter Verlauf)" % int(v[0])
+        return m["10"] % int(v[0])
     if d == 12:
-        return "Standardabweichung der %d \u00dcberschussrenditen ist 0" % int(v[0])
+        return m["12"] % int(v[0])
     if d == 17:
-        return "Drawdown bis zum Ende nicht aufgeholt (l\u00e4ngster Drawdown %s)" % _n_tage(int(v[0]))
+        return m["17"] % _n_tage(int(v[0]))
     if d == 18:
-        return "Zeitraum %s, Laufzeit 0 Jahre: keine Anzahl je Jahr (Einzeltag)" % _n_tage(int(v[0]))
+        return m["18"] % _n_tage(int(v[0]))
     if d == 19:
         k = int(v[0])
-        return "%s nicht definiert: %s" % (_EVAL_METRICS[k], why_text[k])
-    return {6: "Rechnung ergibt keinen endlichen Wert", 7: "keine Tagesrendite (Einzeltag)",
-            9: "kein Drawdown im Zeitraum (max_drawdown 0)", 11: "mittlere Tagesrendite ist 0",
-            13: "keine negativen \u00dcberschussrenditen (Downside-Abweichung 0)", 14: "keine negativen Tagesrenditen",
-            15: "kein Drawdown im Zeitraum (Ulcer Index 0)", 16: "kein Drawdown im Zeitraum"}[d]
+        return m["19"] % (_EVAL_METRICS[k], why_text[k])
+    return _EVAL_FIXED[d]
 
 
 def _eval_warn(code: int, v) -> None:
-    """Warnung der Auswertung (Code des Kerns) mit dem Text von R."""
+    """Warnung der Auswertung (Code des Kerns) mit dem Text von R; Texte aus ``_meldungen.EVAL_WARN``."""
+    m = _MW
     if code in _XIRR_WARN:
         _warn(_XIRR_WARN[code])
     elif code == 10:
-        _warn(_sp("simulation: geldgewichtete Rendite (cagr) mit Einzahlungen nicht bestimmbar (Startwert %.2f EUR, "
-                  "Einzahlungen %.2f EUR, Endwert %.2f EUR): kein interner Zinsfu\u00df gefunden; cagr = NA.",
-                  v[0], v[1], v[2]))
+        _warn(_sp(m["10"], v[0], v[1], v[2]))
     elif code == 11:
-        _warn(_sp("simulation: Endwert negativ (%.2f EUR, %s); Verlust \u00fcber 100 %%: cagr und ttwror sind nicht definiert "
-                  "(NA), Drawdowns auf 100 %% begrenzt.", v[0],
-                  _sp("offene Steuerschuld %.2f EUR", v[1]) if v[1] > 0 else "nicht gedeckte Steuerschuld"))
+        _warn(_sp(m["11"], v[0], _sp(m["11.offen"], v[1]) if v[1] > 0 else m["11.ungedeckt"]))
     elif code == 12:
-        _warn("simulation: zeitgewichteter Wertindex wird negativ (Tagesrendite unter -100 %); ttwror ist nicht "
-              "definiert (NA).")
+        _warn(m["12"])
     elif code == 13:
-        _warn("simulation: Zeitraum %s (Laufzeit 0 Jahre): cagr und ttwror sind nicht definiert (NA)." % _n_tage(int(v[0])))
+        _warn(m["13"] % _n_tage(int(v[0])))
     elif code == 14:
-        _warn(_sp("simulation: Depotwert am Starttag %.2f EUR: cagr ist nicht definiert (NA).", v[0]))
+        _warn(_sp(m["14"], v[0]))
     elif code == 15:
-        _warn(_sp("simulation: zeitgewichteter Wertindex am %s nicht positiv (Tagesrendite %.2f %% bei Depotwert %.2f EUR "
-                  "am Vortag und Einzahlung %.2f EUR); TTWROR und die zeitgewichteten Drawdowns sind nicht "
-                  "aussagekr\u00e4ftig (Drawdowns auf 100 %% begrenzt).", fmt_date(int(v[0])), v[1], v[2], v[3]))
+        _warn(_sp(m["15"], fmt_date(int(v[0])), v[1], v[2], v[3]))
     elif code == 16:
-        _warn(_sp("simulation: Depotwert am %s negativ (%.2f EUR, Steuerschuld); Drawdowns auf 100 %% begrenzt.",
-                  fmt_date(int(v[0])), v[1]))
+        _warn(_sp(m["16"], fmt_date(int(v[0])), v[1]))
     elif code == 17:
-        _warn("no non-missing arguments to max; returning -Inf")
+        _warn(m["17"])
     else:
-        _stop("simulation: interner Fehler: unbekannter Ereigniscode %d der Auswertung." % code)
+        _stop(m["unbekannt"] % code)
 
 
 def _f64(x) -> np.ndarray:

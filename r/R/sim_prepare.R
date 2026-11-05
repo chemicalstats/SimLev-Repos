@@ -68,12 +68,24 @@
     }
     all_dates <- seq.Date(as.Date(start_date), as.Date(stopp_date), by = "day")
     data$.filled <- pre_filled      # Tage ohne echten Kurs (align_series/NA) bleiben markiert
-    data <- merge(data.frame(date = all_dates), data, by = "date", all.x = TRUE)
-    data$.filled[is.na(data$.filled)] <- TRUE   # A-2: aufgefuellte Tage markieren
-    num_cols <- setdiff(names(data)[vapply(data, is.numeric, logical(1))], "date")
-    for (cc in num_cols) data[[cc]] <- .locf_fill(data[[cc]])
-    lgl_cols <- names(data)[vapply(data, is.logical, logical(1))]
-    for (cc in lgl_cols) data[[cc]][is.na(data[[cc]])] <- FALSE
+    dd <- unclass(data$date)
+    cols <- data[names(data) != "date"]
+    # seit 1.6.0 im Kern (sl_cal_fill: Zeile je Tag ueber die ganzzahlige Tagesnummer, LOCF, Signale FALSE,
+    # .filled TRUE), wenn das Ergebnis dem von merge() gleicht: ganzzahlige Tage, einfache Spalten ohne Attribute
+    if (is.double(all_dates) && identical(class(data), "data.frame") && all(dd == trunc(dd)) &&
+        all(vapply(cols, function(v) is.null(attributes(v)) && typeof(v) %in% c("double", "integer", "logical", "character"), NA))) {
+      fill <- .Call(C_sl_cal_fill, unclass(cols), as.double(dd), unclass(all_dates)[1L], as.double(length(all_dates)),
+                    match(".filled", names(cols)))
+      names(fill) <- names(cols)
+      data <- structure(c(list(date = all_dates), fill), row.names = c(NA_integer_, -length(all_dates)), class = "data.frame")
+    } else {
+      data <- merge(data.frame(date = all_dates), data, by = "date", all.x = TRUE)
+      data$.filled[is.na(data$.filled)] <- TRUE   # A-2: aufgefuellte Tage markieren
+      num_cols <- setdiff(names(data)[vapply(data, is.numeric, logical(1))], "date")
+      for (cc in num_cols) data[[cc]] <- .locf_fill(data[[cc]])
+      lgl_cols <- names(data)[vapply(data, is.logical, logical(1))]
+      for (cc in lgl_cols) data[[cc]][is.na(data[[cc]])] <- FALSE
+    }
   } else if (any(pre_filled)) {
     data$.filled <- pre_filled      # aufgefuellte Tage aus series_align() wie eigene behandeln
   }
@@ -86,12 +98,12 @@
 #' Zweck: sim_mem mit den Feldern aus .SIM_MEM_LAYOUT (assets, status, market, trades, report,
 #' totals) je Asset vorbelegen (status und report setzt der Kern: Startgewichte und
 #' Anfangszustand in core/prepare_core_impl.h); prueft die Signal- und Basiszinsspalten.
-#' Eingabe: data und strategy (vorbereitet), start_value, start_date, stopp_date, sparer_pauschbetrag,
+#' Eingabe: data und strategy (vorbereitet), start_date, stopp_date, sparer_pauschbetrag,
 #' use_sparer_pauschbetrag, base_rate, base_rate_flex, base_rate_data (Meldungen nennen die Bausteine).
 #' Ausgabe: sim_mem.
 #' @keywords internal
 #' @noRd
-.sim_build_state <- function(data, strategy, start_value, start_date, stopp_date, sparer_pauschbetrag,
+.sim_build_state <- function(data, strategy, start_date, stopp_date, sparer_pauschbetrag,
                              use_sparer_pauschbetrag, base_rate, base_rate_flex, base_rate_data) {
   #--------> Initialisierung der Speicher-Objekte:
   sim_mem <- list(
@@ -155,10 +167,7 @@
 
     #---> Initialisierung des Market-Objekts:
     sim_mem[["market"]][[name]] <- list(
-      asset_day = seq.Date(
-        from = as.Date(start_date),
-        to = as.Date(stopp_date),
-        by = "days"),
+      asset_day = .sim_days(start_date, stopp_date),   # seq.Date(start_date, stopp_date, by = "days")
       base_rates = if (base_rate_flex) {
   if (is.null(base_rate_data) || !base_rate_data %in% names(data)) {
     stop(if (is.null(base_rate_data)) "simulation: base_rate_flex = TRUE braucht base_rate_data (Name der Basiszins-Spalte in data, Prozent p. a.); base_rate_data fehlt."
@@ -200,12 +209,12 @@
 #' geprueftes event_weight bzw. NULL ohne event_col).
 #' @keywords internal
 #' @noRd
-.sim_build_calendar <- function(data, sim_mem, strategy, start_date, stopp_date, liquidate,
+.sim_build_calendar <- function(data, sim_mem, strategy, start_date, stopp_date,
                                 dca_mode, dca_span, dca_unit, dca_days, dca_value, dca_anchor, dca_start,
                                 dca_skip, balance_mode, balance_span, balance_unit, balance_days,
                                 balance_anchor, balance_start, balance_skip, event_col,
                                 event_mode = c("additional", "replace"), event_weight) {
-  flag_date <- seq.Date(from = as.Date(start_date), to = as.Date(stopp_date), by = "days")
+  flag_date <- .sim_days(start_date, stopp_date)   # seq.Date(start_date, stopp_date, by = "days"); Studie: einmal
   # A-2: Markierung aufgefuellter (LOCF) Tage, aligned zu flag_date
   flag_filled <- if (".filled" %in% names(data)) {
     .f <- as.logical(data[[".filled"]]); .f[is.na(.f)] <- TRUE; .f

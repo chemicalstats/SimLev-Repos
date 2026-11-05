@@ -57,7 +57,7 @@ end
 # Datumswerte
 # ═══════════════════════════════════════════════════════════════════════════
 
-"`as.Date(s, format = \"%Y-%m-%d\")` wie R's strptime (Ziffernfelder, Rest ignoriert; core/slc_rbase_date.c)."
+"`as.Date(s, format = \"%Y-%m-%d\")` wie R's strptime (Ziffernfelder, Rest ignoriert; core/slc_rbase_date.cpp)."
 _r_strptime_ymd(s::AbstractString) = _rb_strptime_ymd(s, '-')
 
 "`as.Date(x)` für einen Wert (Text JJJJ-MM-TT bzw. JJJJ/MM/TT, Datum, Zahl); nothing = NA."
@@ -327,8 +327,8 @@ end
 # Kennzahlen
 # ═══════════════════════════════════════════════════════════════════════════
 
-const _XIRR_WARN = ("-Inf replaced by maximally negative value", "NA/Inf replaced by maximum positive value",
-                    "_NOT_ converged in 1000 iterations")
+# Warnungen von uniroot (Codes 1-3 der Auswertung, core/meldungen.tsv)
+const _XIRR_WARN = (_MELD_EVAL_WARN["1"], _MELD_EVAL_WARN["2"], _MELD_EVAL_WARN["3"])
 
 "`.xirr_rate()`: interner Zinsfuß p. a. (Brent über u = T log(1 + r)); im C++-Kern
 (core/evaluate_core_impl.h, `simlev_c_xirr`), Warnungen von `uniroot` mit den Texten von R."

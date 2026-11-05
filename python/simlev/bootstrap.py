@@ -37,14 +37,19 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
+from ._sim_base import _study_scope  # Prüf-Cache je Studie (seit 1.5.1)
 from ._r import fmt as _fmt
 from ._r.base import env_from_caller
 from ._r import libm as _libm
 from ._r import parallel as _par
+from . import _ext
 from . import _lib as _sl
 from . import _lib_models as _slm
 from ._r.rlist import RList
 from ._r.rnum import r_cumprod, r_cumsum, r_mean, r_median, r_pow, r_sd, r_sum, r_var
+from ._util import _match_arg
+from .data_prep import _to_date
+from ._util import _stats
 
 __all__ = [
     "bootstrap_config", "BootstrapConfig", "bootstrap_block_length", "bootstrap",
@@ -91,16 +96,6 @@ def _warn(text) -> None:
 
 def _stop(text):
     raise ValueError(str(text))
-
-
-def _match_arg(arg, choices):
-    from .data_prep import _match_arg as _ma
-    return _ma(arg, choices)
-
-
-def _stats():
-    from ._r import stats as _st
-    return _st
 
 
 def _sp(fmt, *args) -> str:
@@ -264,11 +259,6 @@ def _rel_dates(d):
 def _seq_dates(start, n):
     s = np.asarray(start).astype("datetime64[D]").ravel()[0]
     return s + np.arange(int(n)).astype("timedelta64[D]")
-
-
-def _to_date(x, what="date"):
-    from .data_prep import _to_date as _td
-    return _td(x, what)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -655,7 +645,7 @@ _PARAM_DEFAULTS = (
     ("ms_ar_garch_model", "gjrGARCH"), ("tvtp_n_regimes", 2), ("tvtp_garch_model", "gjrGARCH"))
 
 
-def _get_base_params(method, params, n):
+def _get_base_params(params):
     """Standardparameter je Verfahren (R: ``.get_base_params``)."""
     p = dict(params or {})
     for nm, dv in _PARAM_DEFAULTS:
@@ -848,7 +838,7 @@ def bootstrap_block_length(x, *, transform=("none", "abs", "squared")):
     return pd.DataFrame(np.array(rows).reshape(-1, 2), index=rn, columns=["stationary", "circular"])
 
 
-def _resolve_auto(params, returns, config, method):
+def _resolve_auto(params, returns):
     """"auto"-Parameter auflösen (R: ``.resolve_auto``)."""
     params = dict(params or {})
     for nm in ("L", "block_length"):
@@ -1059,7 +1049,7 @@ def _prepare_ms_info(returns, config, base, K, garch_model, ar_gm, tvtp, cores=1
 
 def _prepare_method_info(returns, config, method, params, cores=1):
     """Verfahrensspezifische Vorberechnung (R: ``.prepare_method_info``)."""
-    p = _get_base_params(method, params, returns.shape[0])
+    p = _get_base_params(params)
     base = config["index_names"].index(config["regime_index"]) + 1
     br = returns[:, base - 1]
     info = {"base": base}
@@ -1190,13 +1180,69 @@ def _cumprod_cols(M):
     return out
 
 
+def _boot_path_spec(aux, config, aux_ratio, aux_start):
+    """Angaben für den Kern ``sl_boot_path`` (seit 1.6.0; wie ``.boot_path_spec`` in R) oder ``None`` (dann rechnet
+    :func:`_build_path` wie bisher): Zusatzreihen spaltenweise, Merker der Niveau-Reihen, Hebelprodukte als
+    Zeilen (Basis, L, Zinsspalte, Zins, Tagespalte, Tage, rate_basis, ter_basis, expense, spread)."""
+    try:
+        inames = list(config["index_names"])
+        anames = list(config["aux_names"]) if aux is not None else []
+        lnames = list(config["letf_names"]) if config["n_letfs"] else []
+        if len(set(inames + lnames + anames)) != len(inames) + len(lnames) + len(anames):
+            return None
+        auxT = ratioT = startv = level = None
+        if aux is not None:
+            aux = np.asarray(aux)
+            if aux.dtype != np.float64 or aux.ndim != 2 or aux.shape[1] != len(anames):
+                return None
+            auxT = np.ascontiguousarray(aux.T)
+            if aux_ratio is not None:
+                ar = np.asarray(aux_ratio)
+                if ar.dtype != np.float64 or ar.shape != aux.shape:
+                    return None
+                ratioT = np.ascontiguousarray(ar.T)
+                if aux_start is not None:
+                    startv = np.ascontiguousarray(np.asarray(aux_start, dtype=np.float64))
+                    if startv.shape != (len(anames),):
+                        return None
+            at = _get(config, "aux_type")
+            level = np.array([_aux_type_of(at, a) == "level" for a in anames], dtype=np.int32)
+        letf = np.zeros((len(lnames), 10))
+        for i, lt in enumerate(config["letfs"] if lnames else []):
+            def col_or_val(v):
+                return (float(anames.index(v)), 0.0) if isinstance(v, str) else (-1.0, float(v))
+            letf[i] = [inames.index(lt["base"]), float(lt["leverage"]), *col_or_val(lt["finance"]),
+                       *col_or_val(lt["days"]), float(lt["rate_basis"]), float(lt["ter_basis"]), float(lt["expense"]),
+                       float(lt["spread"])]
+    except (KeyError, ValueError, TypeError, IndexError):
+        return None
+    return {"auxT": auxT, "ratioT": ratioT, "start": startv, "level": level, "letf": letf,
+            "cols": pd.Index(inames + lnames + anames), "anames": pd.Index(anames)}
+
+
 @_quiet
-def _build_path(g, aux, config, start=100, aux_ratio=None, aux_start=None):
-    """Preis-Pfad aus Renditen bauen (R: ``.build_path``); ``DataFrame`` oder ``None``."""
+def _build_path(g, aux, config, start=100, aux_ratio=None, aux_start=None, spec=None):
+    """Preis-Pfad aus Renditen bauen (R: ``.build_path``); ``DataFrame`` oder ``None``.
+
+    Seit 1.6.0 mit ``spec`` (:func:`_boot_path_spec`) im Kern ``sl_boot_path`` (ein Aufruf je Pfad)."""
     ret = g["ret"]
     idx = np.asarray(g["idx"], dtype=np.int64)
     if not isinstance(ret, np.ndarray) or ret.ndim != 2 or (~np.isfinite(ret)).any() or (ret <= 0).any():
         return None
+    if spec is not None and ret.dtype == np.float64 and ret.shape[0] >= 1 and idx.shape == (ret.shape[0],):
+        n_out, k = ret.shape
+        na = 0 if spec["auxT"] is None else spec["auxT"].shape[0]
+        nL = spec["letf"].shape[0]
+        if k == len(spec["cols"]) - nL - na and (na == 0 or (idx.min() >= 1 and idx.max() <= spec["auxT"].shape[1])):
+            P = np.empty((k + nL + na, n_out + 1))
+            lv = np.empty((na, n_out + 1)) if spec["ratioT"] is not None else None
+            if not _ext.slc_boot_path(n_out, k, np.ascontiguousarray(ret), np.ascontiguousarray(idx), spec["auxT"],
+                                      spec["ratioT"], spec["start"], spec["level"], spec["letf"], float(start), P, lv):
+                return None
+            out = pd.DataFrame(P.T, columns=spec["cols"], copy=False)
+            if lv is not None:
+                out.attrs["aux_level"] = pd.DataFrame(lv.T, columns=spec["anames"], copy=False)
+            return out
     n_out = ret.shape[0]
     ones = np.ones((1, ret.shape[1]))
     P = start * _cumprod_cols(np.vstack([ones, ret]))
@@ -1240,7 +1286,7 @@ def _build_path(g, aux, config, start=100, aux_ratio=None, aux_start=None):
 
 
 @_quiet
-def _ess_design(method, params, grid, budget, n_obs):
+def _ess_design(method, grid, budget, n_obs):
     """ESS-Design (R: ``.ess_design``): ``DataFrame`` oder ``None``."""
     if grid is None:
         grid = _get_ess_grid(method, n_obs)
@@ -1339,8 +1385,8 @@ def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cor
     n_out = _as_int(path_length if path_length is not None else n_obs)
     if method in ("wild", "reset") and n_out != n_obs:
         _stop("Verfahren '%s' erhält die Chronologie; path_length muss %d sein." % (method, n_obs))
-    params = _resolve_auto(params, ex["ret"], config, method)
-    design = _ess_design(method, params, ess_grid, _as_int(n), n_obs) if ess else None
+    params = _resolve_auto(params, ex["ret"])
+    design = _ess_design(method, ess_grid, _as_int(n), n_obs) if ess else None
     if ess and design is None:
         _message("Keine Hyperparameter für ESS - nutze Standard-Bootstrap")
     if design is None:
@@ -1359,7 +1405,7 @@ def _boot_setup(data, config, method, n, params, ess, ess_grid, path_length, cor
             raise
         except Exception as err:  # noqa: BLE001
             _stop("Vorberechnung fehlgeschlagen: %s" % err)
-    base_p = [_get_base_params(method, cp, n_obs) for cp in combos]
+    base_p = [_get_base_params(cp) for cp in combos]
     for bp in base_p:
         _check_boot_params(method, bp, n_obs)
     weights = np.ones(n_paths) if design is None else design["weight"].to_numpy()[combo_of_path - 1]
@@ -1386,7 +1432,10 @@ def _draw_path(setup, i, stream, config, method, max_tries):
             err = str(e)
             g = None
         if g is not None:
-            P = _build_path(g, ex["aux"], config, aux_ratio=ex["aux_ratio"], aux_start=ex["aux_start"])
+            if "_path_spec" not in ex:          # Angaben für den Kern sl_boot_path einmal je Lauf (seit 1.6.0)
+                ex["_path_spec"] = _boot_path_spec(ex["aux"], config, ex["aux_ratio"], ex["aux_start"])
+            P = _build_path(g, ex["aux"], config, aux_ratio=ex["aux_ratio"], aux_start=ex["aux_start"],
+                            spec=ex["_path_spec"])
             if P is not None:
                 return {"path": P, "tries": tr}
     return {"path": None, "tries": int(max_tries), "err": err}
@@ -1896,6 +1945,7 @@ def _keep_count(x, n, who):
 
 
 @_quiet
+@_study_scope
 def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, *, params=None, ess=False,
                     ess_grid=None, path_length=None, dates=None, start="2000-01-01", burn_in=0,
                     sim_args=None, metrics=bootstrap_study_metrics, benchmark=None, chunk_dir=None, keep_paths=0,

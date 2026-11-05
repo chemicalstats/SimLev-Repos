@@ -10,7 +10,7 @@
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang: Summen und Kumulationen rechnen die C-Kerne
 #                     core/slc_rbase*.
-# RBase – Basis-Numerik wie in R (long-double-Akkumulation; über die C-Kerne core/slc_rbase*.c)
+# RBase – Basis-Numerik wie in R (long-double-Akkumulation; über die C-Kerne core/slc_rbase*.cpp)
 #
 # Re-exportiert die Engine-Hilfen aus `rnum.jl` (`r_sum`, `r_mean`, `r_var`,
 # `r_sd`, `r_cumsum`, `r_prod`, `r_rowsums`, `r_pow`, `r_pow_vec`, `r_mod1`,
@@ -55,7 +55,7 @@ _fmat(m::AbstractMatrix) = Float64[v === missing ? NA : Float64(v) for v in m]
 
 _named(v::Vector{Float64}, nms) = nms === nothing ? v : RVector(v; names = nms)
 
-# Spalten- und Zeilensummen über den C-Kern (core/slc_rbase.c, long double wie R)
+# Spalten- und Zeilensummen über den C-Kern (core/slc_rbase.cpp, long double wie R)
 _col_sums(a::Matrix{Float64}, na_rm::Bool, mean::Bool) = SimLev._rb_margsums(vec(a), size(a, 1), size(a, 2), na_rm, mean, false)
 
 "`colSums(x, na.rm)` (long double je Spalte)."

@@ -180,7 +180,7 @@ _LAZY_HIDDEN = frozenset({"_importlib", "_LAZY", "_LAZY_NAMES", "_LAZY_SUBMODULE
 def __dir__():
     return sorted((set(globals()) - _LAZY_HIDDEN) | set(_LAZY_NAMES) | set(_LAZY_SUBMODULES))
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 __all__ = [
     "AssetConfig",

@@ -32,7 +32,7 @@ haben dieselben Felder, dazu `Dateien:`.
 | Teil | Inhalt |
 |---|---|
 | `simlev/*.py` | alle Funktionen von SimLev (Ausnahme: Kalenderteile, Abschnitt 2.4) |
-| `src/core/` | Kopien der kanonischen C-Quellen aus `core/` (Repo-Wurzel, `core/sync.py`): die C-Bibliothek `slc*.c`, `slc*.h` **ohne `slc_rbase*`** (Zufall, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, Bootstrap-Kerne, Stineman, Glättungsspline, Kerndichte) und die gemeinsamen C++-Kerne `simlev_core.h`, `*_core_impl.h` (Engine, FIFO, Steuer, Research, Entnahme) |
+| `src/core/` | Kopien der kanonischen C-Quellen aus `core/` (Repo-Wurzel, `core/sync.py`): die C-Bibliothek `slc*.cpp`, `slc*.h` **ohne `slc_rbase*`** (Zufall, Verteilungen, lineare Algebra, Optimierer, GARCH/GJR, GPD, DCC, MS-GARCH, Bootstrap-Kerne, Stineman, Glättungsspline, Kerndichte) und die gemeinsamen C++-Kerne `simlev_core.h`, `*_core_impl.h` (Engine, FIFO, Steuer, Research, Entnahme) |
 | `src/_ext*.c`, `src/_ext*.cpp`, `src/_ext_common.h` | Hüllen der C-Erweiterung `simlev._ext` |
 | `simlev/_lib*.py` | Python-Hüllen der C-Bibliothek |
 | `simlev/_r/rlist.py`, `env.py`, `stats.py`, `__init__.py` | Ergebnisobjekte, Umgebungsschalter, Sammelmodule |
@@ -48,7 +48,7 @@ ihre Quellen; die vollständigen Angaben stehen in
 
 | | |
 |---|---|
-| Dateien | `simlev/_r/`: `rnum.py`, `base.py`, `libm.py`, `rformat.py`, `fmt.py`, `_collate.py`, `stats_sort.py`, `stats_cor.py`, `stats_smooth.py`, `stats_optim.py`, `_optim.py`, `stats_models.py`, `stats_cluster.py`, `linalg.py`, `rexpr.py`, `parallel.py` |
+| Dateien | `simlev/_r/`: `rnum.py`, `base.py`, `libm.py`, `rformat.py`, `fmt.py`, `_collate.py`, `stats_sort.py`, `stats_cor.py`, `stats_smooth.py`, `stats_optim.py`, `stats_models.py`, `stats_cluster.py`, `linalg.py`, `rexpr.py`, `parallel.py` |
 | Herkunft | übersetzt aus bzw. nachgebildet nach R 4.3.3 (*The R Project for Statistical Computing*, <https://www.R-project.org/>), je Datei siehe Tabelle und Kopf der Datei |
 | Rechte | The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation (laut Kopf der jeweiligen R-Quelle); weitere Personen siehe 2.3 |
 | Lizenz der Vorlage | GPL (≥ 2) laut Kopf der R-Quellen; in SimLev unter GPL-3 |
@@ -63,7 +63,7 @@ ihre Quellen; die vollständigen Angaben stehen in
 | `stats_sort.py` | übersetzt aus `src/main/sort.c`, `qsort-body.c`, `seq.c`; nachgebildet nach `base/R/sort.R`, `rle.R`, `cut.R`, `findInt.R`, `stats/R/quantile.R`, `median.R`, `weighted.mean.R` | `order`, `sort`, `rank`, partielle Sortierung, `rle`, `tabulate`, `findInterval`, `cut`, `complete.cases`, `quantile`, `median`, `weighted.mean` |
 | `stats_cor.py` | übersetzt aus `stats/src/cov.c`; nachgebildet nach `stats/R/cor.R`, `base/R/scale.R` | `cor`, `cov`, `var`, `sd`, `cov2cor`, `scale` |
 | `stats_smooth.py` | übersetzt aus `stats/src/approx.c`, `filter.c`; nachgebildet nach `stats/R/approx.R`, `filter.R` | `approx`, `approxfun`, `filter` |
-| `stats_optim.py`, `_optim.py` | übersetzt aus `stats/src/optimize.c`, `zeroin.c`; nachgebildet nach `stats/R/optimize.R`, `nlm.R` | `optimize`, `uniroot` |
+| `stats_optim.py` (`_optim.py` bis 1.5.2) | nachgebildet nach `stats/src/optimize.c` (`do_fmin`, `fcn1`) und `stats/R/optimize.R`; `Brent_fmin` seit 1.6.0 im Kern (`core/slc_opt_fmin.cpp`, Herkunftsblock dort) | `optimize` (`uniroot` bis 1.5.1) |
 | `stats_models.py` | nachgebildet nach `stats/R/lm.R` (Zugriffe), `p.adjust.R`, `ecdf.R`, `ave.R`, `aggregate.R` | `coef`, `fitted`, `residuals`, `p.adjust`, `ecdf`, `ave`, `aggregate` |
 | `stats_cluster.py` | übersetzt aus `stats/src/distance.c`, `hclust.f`; nachgebildet nach `stats/R/dist.R`, `hclust.R` | `dist`, `as.dist`, `hclust` |
 | `linalg.py` | nachgebildet nach `base/R/outer.R`, `diag.R`, `all.equal.R` | `outer`, `diag`, `isSymmetric`, `all.equal` (numerisch) |
@@ -74,8 +74,8 @@ ihre Quellen; die vollständigen Angaben stehen in
 
 | | |
 |---|---|
-| Dateien | `src/core/slc_rbase.h`, `slc_rbase.c`, `slc_rbase_sort.c`, `slc_rbase_cov.c`, `slc_rbase_num.c`, `slc_rbase_date.c` (Hülle `src/_ext_slc_rbase.c`; seit 1.4.0 sind `slc_rbase.c` und `slc_rbase.h` auch im R-Paket, für die Summen der Tagesengine `engine_core_impl.h` und für die Auswertung `evaluate_core_impl.h`) |
-| Herkunft | übersetzt aus R 4.3.3 über die Port-Module aus 2.1: `slc_rbase.c` aus `summary.c`, `cum.c`, `array.c`, `arithmetic.c`, `stats/src/zeroin.c` (seit 1.4.0, `sl_r_zeroin2`), `stats/src/approx.c` (seit 1.5.0, `sl_r_approx`); `slc_rbase_sort.c` aus `sort.c` (`psort_body`, `Psort0`) und `qsort-body.c` (Schritt für Schritt); `slc_rbase_cov.c` aus `stats/src/cov.c`; `slc_rbase_num.c` aus `util.c` (`R_strtod`), `arithmetic.c` (`myfmod`), `format.c` (`scientific`). `slc_rbase_date.c`: nachgebildet nach den R-Hilfeseiten `?strptime`, `?format.Date`, `?as.Date`, Kalender nach 2.4 |
+| Dateien | `src/core/slc_rbase.h`, `slc_rbase.cpp`, `slc_rbase_sort.cpp`, `slc_rbase_cov.cpp`, `slc_rbase_num.cpp`, `slc_rbase_date.cpp`, seit 1.6.0 `slc_rbase2.h`, `slc_rbase_clust.cpp`, `slc_rbase_vec.cpp`, `slc_rbase_cor.cpp`, `slc_rbase_smooth.cpp`, `slc_rbase_models.cpp`, `slc_rbase_fmt.cpp` (Hüllen `src/_ext_slc_rbase.cpp`, `src/_ext_slc_rbase2.cpp`; seit 1.4.0 sind `slc_rbase.cpp` und `slc_rbase.h` auch im R-Paket, für die Summen der Tagesengine `engine_core_impl.h` und für die Auswertung `evaluate_core_impl.h`) |
+| Herkunft | übersetzt aus R 4.3.3 über die Port-Module aus 2.1: `slc_rbase.cpp` aus `summary.c`, `cum.c`, `array.c`, `arithmetic.c`, `stats/src/zeroin.c` (seit 1.4.0, `sl_r_zeroin2`), `stats/src/approx.c` (seit 1.5.0, `sl_r_approx`); `slc_rbase_sort.cpp` aus `sort.c` (`psort_body`, `Psort0`) und `qsort-body.c` (Schritt für Schritt); `slc_rbase_cov.cpp` aus `stats/src/cov.c`; `slc_rbase_num.cpp` aus `util.c` (`R_strtod`), `arithmetic.c` (`myfmod`), `format.c` (`scientific`); seit 1.6.0 `slc_rbase_clust.cpp` aus `stats/src/distance.c` und `hclust.f`, `slc_rbase_vec.cpp` aus `util.c` (`bincode`), `seq.c` und `median.R`, `slc_rbase_cor.cpp` aus `cor.R` und `scale.R`, `slc_rbase_smooth.cpp` aus `approx.R` (`regularize.values`) und `filter.c`, `slc_rbase_models.cpp` aus `p.adjust.R` und `ecdf.R`, `slc_rbase_fmt.cpp` aus `nmath/fround.c`, `fprec.c`, `format.c` (`formatReal`), `printutils.c` (`encodeReal0`), `util.c` (`str_signif`) und `sprintf.c` (sprintf.c: ursprünglich Jonathan Rougier). `slc_rbase_date.cpp`: nachgebildet nach den R-Hilfeseiten `?strptime`, `?format.Date`, `?as.Date`, Kalender nach 2.4 |
 | Rechte | wie 2.1; Quicksort nach R. C. Singleton (siehe 2.3) |
 | Lizenz der Vorlage | GPL (≥ 2) laut Kopf der R-Quellen; in SimLev unter GPL-3 |
 | Änderungen | C99 ohne R-Datenstrukturen, gemeinsamer Kern für Python und Julia; je Datei im Kopf genannt |
@@ -92,10 +92,10 @@ ihre Quellen; die vollständigen Angaben stehen in
 
 | Funktion (Dateien) | Herkunft laut R-Quelle | Lizenzvermerk der älteren Vorlage |
 |---|---|---|
-| `optimize` (`_optim.py`, `stats_optim.py`) | `optimize.c`: „fmin.f -- translated by f2c“; Netlib `go/fmin.f`: Übersetzung von Brents ALGOL-60-Prozedur `localmin` (R. P. Brent, *Algorithms for Minimization without Derivatives*, Prentice-Hall 1973) | keiner (Netlib-Datei ohne Urheber- und Lizenzvermerk) |
-| `uniroot` (`_optim.py`, `stats_optim.py`; seit 1.4.0 `.xirr_rate` über `sl_r_zeroin2` in `src/core/slc_rbase.c`) | `zeroin.c`: „from NETLIB c/brent.shar with max.iter, add'l info and convergence details hacked in by Peter Dalgaard“; Netlib `go/zeroin.f`: Übersetzung von Brents Prozedur `zero` (Brent 1973) | `go/zeroin.f`: keiner; `c/brent.shar`: nicht geprüft (Abruf nicht möglich) |
+| `optimize` (`stats_optim.py`; `Brent_fmin` seit 1.6.0 in `core/slc_opt_fmin.cpp`, bis 1.5.2 `_optim.py`) | `optimize.c`: „fmin.f -- translated by f2c“; Netlib `go/fmin.f`: Übersetzung von Brents ALGOL-60-Prozedur `localmin` (R. P. Brent, *Algorithms for Minimization without Derivatives*, Prentice-Hall 1973) | keiner (Netlib-Datei ohne Urheber- und Lizenzvermerk) |
+| `R_zeroin2` (seit 1.4.0 `.xirr_rate` über `sl_r_zeroin2` in `src/core/slc_rbase.cpp`; Port `uniroot` in `_optim.py`, `stats_optim.py` bis 1.5.1) | `zeroin.c`: „from NETLIB c/brent.shar with max.iter, add'l info and convergence details hacked in by Peter Dalgaard“; Netlib `go/zeroin.f`: Übersetzung von Brents Prozedur `zero` (Brent 1973) | `go/zeroin.f`: keiner; `c/brent.shar`: nicht geprüft (Abruf nicht möglich) |
 | `hclust` (`stats_cluster.py`) | `hclust.f`: „F. Murtagh, ESA/ESO/STECF, Garching, February 1986. Modifications for R: Ross Ihaka, Dec 1996“, weitere Änderungen Fritz Leisch, Martin Maechler | keiner in `hclust.f` |
-| Sortierung (`stats_sort.py`, `slc_rbase_sort.c`) | `qsort-body.c`: „Based on CACM algorithm #347 by R. C. Singleton (1969)“ | ACM-Software-Hinweis (Nutzung „solely for academic, research and other similar noncommercial uses“), Anwendbarkeit auf R's Umarbeitung nicht belegt |
+| Sortierung (`stats_sort.py`, `slc_rbase_sort.cpp`) | `qsort-body.c`: „Based on CACM algorithm #347 by R. C. Singleton (1969)“ | ACM-Software-Hinweis (Nutzung „solely for academic, research and other similar noncommercial uses“), Anwendbarkeit auf R's Umarbeitung nicht belegt |
 | `signif` (`rformat.py`, `fmt.py`) | `fprec.c`: „a translation into C of a Fortran subroutine by W. Fullerton of Los Alamos Scientific Laboratory“ | keiner genannt |
 | `sprintf` (`rformat.py`, `fmt.py`) | `sprintf.c`: „Originally written by Jonathan Rougier“ | GPL (≥ 2) wie die Datei |
 | Parser (`rexpr.py`) | `gram.y`: Rechteinhaber zusätzlich Romain Francois (2009–2011) | GPL (≥ 2) wie die Datei |
@@ -104,7 +104,7 @@ ihre Quellen; die vollständigen Angaben stehen in
 
 | | |
 |---|---|
-| Dateien | `src/core/prepare_core_impl.h` (`eng_civil`, `eng_days`; bis 1.3.0 `engine_core_impl.h`, davor `fifo_core_impl.h`, `tax_core_impl.h`), `src/core/slc_rbase_date.c` (`sl_r_civil_from_days`, `sl_r_days_from_civil`), `simlev/data_prep.py` (`_civil_to_days`, `_days_to_civil`), `simlev/tactical.py` (`_civil`) |
+| Dateien | `src/core/prepare_core_impl.h` (`eng_civil`, `eng_days`; bis 1.3.0 `engine_core_impl.h`, davor `fifo_core_impl.h`, `tax_core_impl.h`), `src/core/slc_rbase_date.cpp` (`sl_r_civil_from_days`, `sl_r_days_from_civil`), `simlev/data_prep.py` (`_civil_to_days`, `_days_to_civil`), `simlev/tactical.py` (`_civil`) |
 | Herkunft | übersetzt aus H. Hinnant, *chrono-Compatible Low-Level Date Algorithms*, <https://howardhinnant.github.io/date_algorithms.html> |
 | Rechte | gemeinfrei: „Consider these donated to the public domain.“ |
 | Lizenz der Vorlage | keine (gemeinfrei) |

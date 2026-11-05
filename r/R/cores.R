@@ -1,7 +1,7 @@
 # R-Huellen der C++-Kerne (src/*.cpp).
 #
 # Seit 0.5.0 ohne Rcpp: Die Kerne sind ueber R's C-Schnittstelle angebunden
-# (src/simlev_capi.h, Registrierung in src/init.c). NAMESPACE laedt die
+# (src/simlev_capi.h, Registrierung in src/init.cpp). NAMESPACE laedt die
 # Routinen mit useDynLib(SimLev, .registration = TRUE, .fixes = "C_"); jede
 # registrierte Routine <name> steht in R als C_<name> bereit. Die Huellen
 # entsprechen den frueheren, von Rcpp::compileAttributes() erzeugten
@@ -55,6 +55,12 @@
 .pbo_cscv <- function(B, T, combos, half, metric, S, N)
   .Call(C_pbo_cscv, as.numeric(B), as.numeric(T), combos, as.numeric(half),
         match(metric, c("sharpe", "sortino", "geometric", "mean")) - 1L, as.integer(S), as.integer(N))
+
+# Tagesschleife des NAV von wrapper_nav() (seit 1.5.1): list(bad (0 oder erster Tag ohne Anteilswert), nav, gross,
+# fee, perf_fee, perf_paid, hwm)
+.wrapper_nav_core <- function(G, day, yr, fee, pf, S, d0)
+  .Call(C_wrapper_nav_core, as.numeric(G), as.numeric(day), as.integer(yr), as.numeric(fee), as.numeric(pf),
+        as.numeric(S), as.numeric(d0))
 
 .roll_mean_core <- function(x, n) {
   .Call(C_roll_mean_core, x, n)

@@ -62,8 +62,8 @@ remotes::install_github("chemicalstats/SimLev-Repos", subdir = "r")
 pip install "simlev @ git+https://github.com/chemicalstats/SimLev-Repos#subdirectory=python"
 ```
 
-**Julia** (`Pkg.add` übersetzt die C-Bibliothek mit `deps/build.jl`; andere
-Compiler über `ENV["SIMLEV_CC"]` und `ENV["SIMLEV_CXX"]`):
+**Julia** (`Pkg.add` übersetzt die Bibliothek (C++) mit `deps/build.jl`; einen anderen
+Compiler wählt `ENV["SIMLEV_CXX"]`):
 
 <!-- beispiele: nicht ausführen -->
 ``` julia
@@ -133,7 +133,7 @@ Einordnung.
 Der Code steht in R, Python und Julia, jeweils aufklappbar. Alle Blöcke
 einer Sprache laufen nacheinander in einer Sitzung. Die Ausgaben sind
 echte Ausgaben und in allen drei Sprachen gleich;
-`tests/werkzeuge/doku/beispiele.sh` prüft beides.
+`tests/werkzeuge/doku/beispiele.py` prüft beides.
 
 - [Die Daten](#die-daten)
 - [Anlageklassen und ihre Besteuerung](#anlageklassen-und-ihre-besteuerung)
@@ -2144,7 +2144,7 @@ Geprüft ist Linux auf x86-64 mit glibc (80-Bit-`long double`, glibc-libm,
 System-ICU für die Sortierung von Zeichenketten); unter macOS und Windows
 ist der Gleichlauf nicht zugesagt. Grafiken sind nicht bitgleich, die
 dargestellten Daten schon. Die Gleichlaufprüfung
-`tests/werkzeuge/gleichlauf/run.sh` vergleicht die drei Sprachen Bit für Bit
+`tests/werkzeuge/gleichlauf/run.py` vergleicht die drei Sprachen Bit für Bit
 anhand gemeinsamer Referenzfälle ([`tests/README.md`](tests/README.md)).
 
 ## Dokumentation
@@ -2162,7 +2162,7 @@ anhand gemeinsamer Referenzfälle ([`tests/README.md`](tests/README.md)).
 | Weiterentwicklung | [`r/DEVELOPING.md`](r/DEVELOPING.md), [`python/DEVELOPING.md`](python/DEVELOPING.md), [`julia/DEVELOPING.md`](julia/DEVELOPING.md), [`core/README.md`](core/README.md) |
 
 Alle Beispiele der Tutorials und READMEs führt
-`tests/werkzeuge/doku/beispiele.sh` in den drei Sprachen aus und vergleicht
+`tests/werkzeuge/doku/beispiele.py` in den drei Sprachen aus und vergleicht
 die gezeigten Ausgaben.
 
 ## Grenzen und Hinweise

@@ -3,7 +3,7 @@
 Portiert aus ``src/library/stats/R/*.R`` und ``src/library/stats/src/*.c``
 bzw. ``*.f`` (sowie Teilen von ``src/main/sort.c``, ``seq.c``, ``cum.c``).
 Rechenreihenfolge, ``long double``-Akkumulation (über die C-Kerne
-``core/slc_rbase*.c`` in :mod:`simlev._ext`) und libm-Aufrufe (``math``) wie in R.
+``core/slc_rbase*.cpp`` in :mod:`simlev._ext`) und libm-Aufrufe (``math``) wie in R.
 
 Konventionen
 ------------
@@ -27,7 +27,7 @@ und ``simlev._r.stats.<name>`` gültig bleiben:
 * :mod:`.stats_sort`    Hilfen, Sortieren, Ränge, Einteilen, Quantile, Median
 * :mod:`.stats_cor`     ``cor``, ``cov``, ``var``, ``sd``, ``cov2cor``, ``scale``
 * :mod:`.stats_smooth`  ``approx``, ``approxfun``, ``filter``
-* :mod:`.stats_optim`   ``optimize``, ``uniroot``
+* :mod:`.stats_optim`   ``optimize``
 * :mod:`.stats_models`  ``coef``, ``fitted``, ``residuals``, ``p.adjust``, ``ecdf``, ``ave``,
   ``aggregate``
 * :mod:`.stats_cluster` ``dist``, ``hclust``
@@ -56,7 +56,7 @@ from .stats_sort import (
 )
 from .stats_cor import var, sd, cov, cor, cov2cor, scale
 from .stats_smooth import approx, approxfun, filter
-from .stats_optim import optimize, optimise, uniroot
+from .stats_optim import optimize, optimise
 from .stats_models import p_adjust, ave, aggregate, ecdf, fitted, coef, residuals
 from .stats_cluster import RDist, RHclust, dist_as_matrix, hclust, dist, as_dist
 from . import stats_sort as _sort
@@ -64,7 +64,7 @@ from . import stats_sort as _sort
 __all__ = [
     "RError", "RDist", "RHclust", "dist_as_matrix", "quantile", "median", "var", "sd", "cov", "cor",
     "cov2cor", "weighted_mean", "scale", "approx", "approxfun", "filter", "optimize", "optimise",
-    "uniroot", "hclust", "dist", "as_dist", "p_adjust", "rank", "order", "sort", "rle",
+    "hclust", "dist", "as_dist", "p_adjust", "rank", "order", "sort", "rle",
     "cut", "findInterval", "tabulate", "ave", "aggregate", "complete_cases", "ecdf",
     "fitted", "coef", "residuals", "seq_len_out", "str_collate",
 ]

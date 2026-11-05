@@ -1,4 +1,4 @@
-# Zufallsfälle für den Datumskern core/slc_rbase_date.c mit R als Orakel.
+# Zufallsfälle für den Datumskern core/slc_rbase_date.cpp mit R als Orakel.
 #   Rscript tests/werkzeuge/gleichlauf/date_fuzz.R <ordner> [fälle] [seed]   # schreibt fmt.tsv, fmt_sys.tsv, fmt_os.tsv, parse.tsv
 #   python3 tests/werkzeuge/gleichlauf/date_fuzz_cmp.py <ordner>             # Python (simlev._ext)
 #   julia --project=julia tests/werkzeuge/gleichlauf/date_fuzz_cmp.jl <ordner>   # Julia (libslc)

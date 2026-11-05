@@ -2,9 +2,9 @@
 # kleinste Quadrate und Logit-IRLS, Stineman-Interpolation, Glaettungsspline, Kerndichte
 # (interne Funktionen .sl_*).
 #
-# Die Rechnung steht in src/slc_linalg.c, slc_matmul.c, slc_lsq.c, slc_stine.c, slc_spline.c und
-# slc_kde.c (Kopien von core/, core/sync.py), die .Call-Huellen in src/slc_r_linalg.c
-# (Registrierung in src/init.c). Gegenstuecke: python/simlev/_lib_linalg.py und
+# Die Rechnung steht in src/slc_linalg.cpp, slc_matmul.cpp, slc_lsq.cpp, slc_stine.cpp, slc_spline.cpp und
+# slc_kde.cpp (Kopien von core/, core/sync.py), die .Call-Huellen in src/slc_r_linalg.cpp
+# (Registrierung in src/init.cpp). Gegenstuecke: python/simlev/_lib_linalg.py und
 # julia/src/slib_linalg.jl. Fehlertexte und Warnungen kommen aus dem Kern.
 #
 # Seit 1.0.0 sind die Aufrufstellen umgestellt (%m%, .sl_crossprod, .sl_lsfit usw.); dazu

@@ -100,7 +100,7 @@ function r_strtod(cs::Vector{Char}, i0::Int = 1)
         return (sign * Inf, p + 3)
     end
     # Zahlteil (dezimal mit Exponent, hexadezimal mit Punkt und p-Exponent) in long double über den
-    # C-Kern core/slc_rbase_num.c; gelesen werden nur ASCII-Zeichen, Bytes = Zeichen
+    # C-Kern core/slc_rbase_num.cpp; gelesen werden nur ASCII-Zeichen, Bytes = Zeichen
     q = p
     while q <= n && isascii(cs[q]) && (isxdigit(cs[q]) || cs[q] in ".xXpPeE+-")
         q += 1
@@ -1251,7 +1251,7 @@ function r_fmod(x1::Float64, x2::Float64)
     end
     q = x1 / x2
     (isfinite(q) && abs(q) * _LDBL_EPS > 1) && _warn("probable complete loss of accuracy in modulus")
-    # C-Kern (long double wie R); NaN-Operanden nach der Regel in core/slc_rbase_num.c
+    # C-Kern (long double wie R); NaN-Operanden nach der Regel in core/slc_rbase_num.cpp
     return SimLev._rb_fmod_ld(x1, x2)
 end
 

@@ -3,7 +3,7 @@
 //
 // Aufbau: Die Kerne rechnen auf schlanken Sichten (Zeiger und Laenge: NumVec,
 // IntVec, LglVec, NumMat) bzw. bei der Engine direkt auf den R-Listen von
-// sim_mem. Jede .Call-Huelle (extern "C", registriert in init.c) wandelt ihre
+// sim_mem. Jede .Call-Huelle (extern "C", registriert in init.cpp) wandelt ihre
 // Argumente in derselben Reihenfolge und auf dieselbe Weise um wie die frueher
 // von Rcpp::compileAttributes() erzeugten Huellen und ruft den Kern ueber
 // sl::call() auf:

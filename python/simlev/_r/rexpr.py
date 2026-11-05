@@ -32,7 +32,7 @@ logischer Vektor); alle Operationen elementweise mit Recycling und
 dreiwertiger NA-Logik, Ganzzahlarithmetik mit Überlauf → NA und Warnung,
 Zahlen wie R (``^`` über ``R_POW``, ``%%``/``%/%`` wie ``myfmod``/``myfloor``,
 Literale und ``as.numeric`` über R_strtod mit long double (long-double-Teile im
-C-Kern ``core/slc_rbase_num.c`` über :mod:`simlev._ext`), Summen/Mittel über
+C-Kern ``core/slc_rbase_num.cpp`` über :mod:`simlev._ext`), Summen/Mittel über
 :mod:`simlev._r.base`, ``median``, ``var``, ``sd``, ``quantile`` über
 :mod:`simlev._r.stats`, Funktionen über :mod:`simlev._r.libm`),
 Zeichenkettenvergleiche über :func:`simlev._r.stats.str_collate` (ICU wie R).
@@ -1573,7 +1573,7 @@ def r_fmod(x1, x2):
     q = _fdiv(x1, x2)
     if math.isfinite(q) and abs(q) * _LDBL_EPS > 1:
         _warn("probable complete loss of accuracy in modulus")
-    # long-double-Teil im C-Kern core/slc_rbase_num.c; NaN-Operanden nach der dort beschriebenen Regel
+    # long-double-Teil im C-Kern core/slc_rbase_num.cpp; NaN-Operanden nach der dort beschriebenen Regel
     return _ext.slc_r_fmod_ld(x1, x2)
 
 
@@ -1586,7 +1586,7 @@ def r_idiv(x1, x2):
         if q < 0:
             return -1.0
         return -1.0 if ((x1 < 0 and x2 > 0) or (x1 > 0 and x2 < 0)) else 0.0
-    return _ext.slc_r_idiv_ld(x1, x2)   # long-double-Teil im C-Kern core/slc_rbase_num.c
+    return _ext.slc_r_idiv_ld(x1, x2)   # long-double-Teil im C-Kern core/slc_rbase_num.cpp
 
 
 def _iop(op, x, y, of):

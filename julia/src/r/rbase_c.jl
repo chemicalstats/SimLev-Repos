@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Hüllen der Grundfunktionen mit R-Regeln aus der C-Bibliothek slc (core/slc_rbase*.c)
+# Hüllen der Grundfunktionen mit R-Regeln aus der C-Bibliothek slc (core/slc_rbase*.cpp)
 #
-# Python (simlev._ext, python/src/_ext_slc_rbase.c) und Julia rechnen damit dieselbe Implementierung:
+# Python (simlev._ext, python/src/_ext_slc_rbase.cpp) und Julia rechnen damit dieselbe Implementierung:
 # Summen, Mittel, Varianz und Kumulationen in long double wie R, R's Potenz, stabile Ordnung und Rang,
 # partielle Sortierung und Quantile wie R, tabulate, findInterval, approx und cov/cor. Die Hüllen hier nehmen
 # Float64-Vektoren (spaltenweise Matrizen) und geben Float64 zurück; die R-Logik um die Kerne
@@ -126,7 +126,7 @@ function _rb_cov(x::Vector{Float64}, n::Int, ncx::Int, y::Union{Nothing,Vector{F
     return reshape(ans, ncx, ncy), sd0[] != 0
 end
 
-# ── Datum (core/slc_rbase_date.c) ───────────────────────────────────────
+# ── Datum (core/slc_rbase_date.cpp) ───────────────────────────────────────
 # format.Date/strftime in der C-Locale für einen Tag (Tage seit 1970-01-01) und as.Date(s, format =
 # "%Y<sep>%m<sep>%d"); dieselbe Implementierung wie Python (_ext.slc_r_format_date/slc_r_strptime_ymd).
 
@@ -154,7 +154,7 @@ function _rb_strptime_ymd(s::AbstractString, sep::Char)
     return ok == 0 ? nothing : z[]
 end
 
-# ── Summen und Mittel im Fachcode, weitere long-double-Wege (core/slc_rbase.c, slc_rbase_num.c) ──
+# ── Summen und Mittel im Fachcode, weitere long-double-Wege (core/slc_rbase.cpp, slc_rbase_num.cpp) ──
 # Ersetzen die Nachbildung von long double (früher r/ld80.jl) an allen Stellen außerhalb von src/r/.
 
 _mat64(M) = M isa Matrix{Float64} ? M : Float64[Float64(v) for v in M]

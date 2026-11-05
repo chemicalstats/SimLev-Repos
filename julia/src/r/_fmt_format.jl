@@ -8,7 +8,7 @@
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang: Datumsformat und -lesen rechnet der C-Kern
-#                     core/slc_rbase_date.c.
+#                     core/slc_rbase_date.cpp.
 # RFmt – format(), prettyNum(), formatC(), sprintf(), Datumsformate.
 # Vorlage: python/simlev/_r/fmt.py; R 4.3.3 format.c, format.R, sprintf.c,
 # util.c (str_signif), dates.R.
@@ -445,95 +445,40 @@ function formatC(x; width = nothing, digits = nothing, format = nothing, flag = 
     return _out(r, v)
 end
 
-"`str_signif` aus util.c (snprintf mit Puffergröße i.strlen + 2)."
-function _str_signif(vals::Vector{Float64}, type, width::Int, digits::Int, format, flag::String, istrlen::Vector{Int})
-    dig = abs(digits)
-    rm_trailing_0 = digits >= 0
-    do_fg = format == "fg"
-    width == 0 && error("width cannot be zero")
-    out = _Str[]
-    if format == "d"
-        type == "integer" || error("'type' must be \"integer\" for  \"d\"-format")
-        form = "%" * _fl_w(flag, width) * "*d"
-        for (i, xv) in enumerate(vals)
-            push!(out, _cut(_snprintf_w(form, abs(width), Int(xv)), istrlen[i] + 2))
-        end
-        return out
-    end
-    # negative Breite über '*' wirkt in glibc wie das Flag '-' (Auffüllen mit
-    # Leerzeichen); im Julia-Prozess nimmt glibc dafür einen anderen Pfad, der
-    # mit '0' auffüllt – daher Betrag und Flag explizit übergeben
-    form = "%" * _fl_w(flag, width) * "*.*" * (do_fg ? "g" : format)
-    width = abs(width)
-    f0 = "%" * flag * ".*f"
-    for (i, xx) in enumerate(vals)
-        lim = istrlen[i] + 2
-        if do_fg
-            if xx == 0.0
-                push!(out, "0")
-                continue
-            end
-            xxx = abs(xx)
-            iex = floor(Int, _log10(xxx) + 1e-12)
-            X = fround(xxx / _cpow(10.0, Float64(iex)) + 1e-12, Float64(dig - 1))
-            if iex > 0 && X >= 10
-                xx = X * _cpow(10.0, Float64(iex))
-                iex += 1
-            end
-            iex == -4 && abs(xx) < 1e-4 && (iex = -5)
-            if iex < -4
-                s = _cut(_snprintf_p(f0, dig - 1 + -iex, xx), lim)
-                if rm_trailing_0
-                    b = codeunits(s)
-                    j = length(b)
-                    while j >= 1 && b[j] == UInt8('0')
-                        j -= 1
-                    end
-                    s = String(b[1:j])
-                end
-                push!(out, s)
-            else
-                push!(out, _snprintf_wd(form, width, iex >= dig ? iex + 1 : dig, xx, lim))
-            end
-        else
-            push!(out, _snprintf_wd(form, width, dig, xx, lim))
-        end
-    end
-    return out
-end
-
-_fl_w(flag, width) = width < 0 ? flag * "-" : flag
-
-_snprintf_p(fmt::String, p::Integer, x::Float64) = SimLev._c_sprintf(fmt, Int32(p), x)
+"`str_signif` aus util.c (C-Kern sl_r_str_signif über snprintf, seit 1.6.0)."
+_str_signif(vals::Vector{Float64}, type, width::Int, digits::Int, format, flag::String, istrlen::Vector{Int}) =
+    _Str[t for t in SimLev._rb_str_signif(vals, type == "integer", width, digits, String(format), flag, Int64.(istrlen))]
 
 # ── sprintf ────────────────────────────────────────────────────────────────
 
-const _SPEC_CHARS = "diosfeEgGxXaA"
+const _SP_TYPE = Dict(:logical => 0, :integer => 1, :double => 2, :character => 3, :factor => 4, :Date => 5)
 
-# findspec(): Position (1-basiert) des Umwandlungszeichens nach Flags/Breite/Genauigkeit
-function _findspec(f::String)
-    b = codeunits(f)
-    (isempty(b) || b[1] != UInt8('%')) && return 1
-    p = 2
-    while p <= length(b)
-        c = Char(b[p])
-        (c in "-+ #." || c == '*' || ('0' <= c <= '9')) || break
-        p += 1
+"Argument von sprintf für den C-Kern (SimLev._SpArg)."
+function _sp_arg(v::_V)
+    t = v.type
+    t === :character && return SimLev._SpArg(3, nothing, Union{Nothing,String}[s === nothing ? nothing : String(s) for s in v.s])
+    if t === :double || t === :Date
+        x = Float64[v.na[i] ? SimLev.NA : v.d[i] for i in 1:length(v.d)]
+        return SimLev._SpArg(_SP_TYPE[t], x, t === :Date ?
+            Union{Nothing,String}[s === nothing ? nothing : String(s) for s in _format_date_list(v.d, _Str["%Y-%m-%d"])] : nothing)
     end
-    return p
-end
-# checkfmt(): true = Fehler (Umwandlung nicht in pattern)
-function _checkfmt(f::String, pattern::String)
-    (isempty(f) || f[1] != '%') && return true
-    p = _findspec(f)
-    p > ncodeunits(f) && return true
-    return !(Char(codeunits(f)[p]) in pattern)
+    if t === :factor
+        iv = Int32[v.na[i] ? typemin(Int32) : Int32(v.i[i]) for i in 1:length(v.i)]
+        return SimLev._SpArg(4, iv, Union{Nothing,String}[v.na[i] ? nothing : v.levels[v.i[i]] for i in 1:length(v.i)])
+    end
+    t === :integer && return SimLev._SpArg(1, Int32[v.na[i] ? typemin(Int32) : Int32(v.i[i]) for i in 1:length(v.i)])
+    t === :logical && return SimLev._SpArg(0, Int32[v.na[i] ? typemin(Int32) : Int32(v.l[i]) for i in 1:length(v.l)])
+    t === :NULL && return SimLev._SpArg(2, Float64[])
+    error("unsupported type")
 end
 
-function _sprintf_cvt(fmtp::String, x)
-    nc = x isa Float64 ? _snprintf(fmtp, x) : x isa Integer ? _snprintf(fmtp, x) : _snprintf(fmtp, String(x))
-    ncodeunits(nc) > 8192 && error("required resulting string length $(ncodeunits(nc)) is greater than maximal 8192")
-    return nc
+function _sprintf_warn(nunused::Int, nfmt::Int, f1)
+    if nfmt == 1
+        f1 = f1 === nothing ? "NA" : f1
+        @warn nunused == 1 ? "one argument not used by format '$(f1)'" : "$(nunused) arguments not used by format '$(f1)'"
+    else
+        @warn nunused == 1 ? "one argument not used by format" : "$(nunused) arguments not used by format"
+    end
 end
 
 """
@@ -549,226 +494,18 @@ function r_sprintf(fmt, args...)
     fv = _as_v(fmt, "character")
     a = _V[_as_v(x) for x in args]
     scal = fv.scalar && all(v -> v.scalar, a)
-    nargs = length(a)
-    nfmt = length(fv)
-    nfmt == 0 && return String[]
-    for v in a
-        length(v) == 0 && return String[]
-    end
-    lens = [length(v) for v in a]
-    function check_maxlen()
-        ml = nfmt
-        for l in lens
-            ml = max(ml, l)
-        end
-        ml % nfmt != 0 && error("arguments cannot be recycled to the same length")
-        for l in lens
-            ml % l != 0 && error("arguments cannot be recycled to the same length")
-        end
-        ml
-    end
-    maxlen = check_maxlen()
-    used = falses(nargs)
-    results = String[]
-    for ns in 0:maxlen-1
-        f0 = fv.s[ns % nfmt + 1]
-        formatString = f0 === nothing ? "NA" : f0
-        fb = codeunits(formatString)
-        n = length(fb)
-        out = IOBuffer()
-        cur = 1
-        cnt = 0
-        while cur <= n
-            if fb[cur] == UInt8('%')
-                if cur < n && fb[cur+1] == UInt8('%')
-                    print(out, '%')
-                    cur += 2
-                    continue
-                end
-                # chunk = strcspn(curFormat + 1, "diosfeEgGxXaA") + 2
-                j = cur + 1
-                while j <= n && !(Char(fb[j]) in _SPEC_CHARS)
-                    j += 1
-                end
-                j > n && error("unrecognised format specification '$(String(fb[cur:end]))'")
-                fmt_ = String(fb[cur:j])
-                cur = j + 1
-                nthis = -1
-                fbs = codeunits(fmt_)
-                if length(fbs) > 3 && UInt8('1') <= fbs[2] <= UInt8('9')
-                    vv = Int(fbs[2] - UInt8('0'))
-                    if fbs[3] == UInt8('$')
-                        vv > nargs && error("reference to non-existent argument $vv")
-                        nthis = vv - 1
-                        fmt_ = "%" * String(fbs[4:end])
-                    elseif UInt8('0') <= fbs[3] <= UInt8('9') && fbs[4] == UInt8('$')
-                        vv = 10vv + Int(fbs[3] - UInt8('0'))
-                        vv > nargs && error("reference to non-existent argument $vv")
-                        nthis = vv - 1
-                        fmt_ = "%" * String(fbs[5:end])
-                    end
-                end
-                has_star = false
-                star_arg = 0
-                sp = findfirst('*', fmt_)
-                if sp !== nothing
-                    nstar = -1
-                    st = codeunits(fmt_)[sp:end]
-                    if length(st) > 3 && UInt8('1') <= st[2] <= UInt8('9')
-                        vv = Int(st[2] - UInt8('0'))
-                        if st[3] == UInt8('$')
-                            vv > nargs && error("reference to non-existent argument $vv")
-                            nstar = vv - 1
-                            fmt_ = fmt_[1:sp] * String(st[4:end])
-                        elseif UInt8('0') <= st[3] <= UInt8('9') && st[4] == UInt8('$')
-                            vv = 10vv + Int(st[3] - UInt8('0'))
-                            vv > nargs && error("reference to non-existent argument $vv")
-                            nstar = vv - 1
-                            fmt_ = fmt_[1:sp] * String(st[5:end])
-                        end
-                    end
-                    if nstar < 0
-                        cnt >= nargs && error("too few arguments")
-                        nstar = cnt
-                        cnt += 1
-                    end
-                    occursin('*', fmt_[sp+1:end]) &&
-                        error("at most one asterisk '*' is supported in each conversion specification")
-                    sv = a[nstar+1]
-                    used[nstar+1] = true
-                    if ns == 0 && sv.type === :double
-                        sv = _coerce(sv, :integer)
-                        a[nstar+1] = sv
-                    end
-                    (sv.type !== :integer || length(sv) < 1 || sv.na[ns % length(sv) + 1]) &&
-                        error("argument for '*' conversion specification must be a number")
-                    star_arg = sv.i[ns % length(sv) + 1]
-                    has_star = true
-                end
-                if fmt_[end] == '%'
-                    print(out, has_star ? _snprintf(fmt_, star_arg) : fmt_)
-                    continue
-                end
-                if nthis < 0
-                    cnt >= nargs && error("too few arguments")
-                    nthis = cnt
-                    cnt += 1
-                end
-                used[nthis+1] = true
-                fmtp = has_star ? replace(fmt_, "*" => string(star_arg)) : fmt_
-                if ns == 0
-                    th = a[nthis+1]
-                    sc = Char(codeunits(fmtp)[min(_findspec(fmtp), ncodeunits(fmtp))])
-                    if sc in "dioxX"
-                        if th.type === :double
-                            exact = true
-                            for i in 1:length(th)
-                                th.na[i] && continue
-                                r = th.d[i]
-                                if !isfinite(r) || !(abs(r) < 2147483648.0) || Float64(trunc(r)) != r
-                                    exact = false
-                                    break
-                                end
-                            end
-                            exact && (a[nthis+1] = _coerce(th, :integer))
-                        end
-                    elseif sc in "aAefgEG"
-                        if !(th.type in (:double, :character, :Date))
-                            a[nthis+1] = _coerce(th.type === :factor ? _coerce(th, :integer) : th, :double)
-                        end
-                    elseif sc == 's'
-                        if th.type !== :character
-                            a[nthis+1] = _Vs(_as_character_list(th))
-                        end
-                    end
-                    lens[nthis+1] = length(a[nthis+1])
-                end
-                th = a[nthis+1]
-                thislen = length(th)
-                thislen == 0 && error("coercion has changed vector length to 0")
-                i = ns % thislen + 1
-                t = th.type
-                if t === :factor
-                    th = _coerce(th, :integer)
-                    t = :integer
-                end
-                if t === :logical
-                    _checkfmt(fmtp, "di") && error("invalid format '$(fmtp)'; use format %d or %i for logical objects")
-                    if th.na[i]
-                        print(out, _sprintf_cvt(fmtp[1:end-1] * "s", "NA"))
-                    else
-                        print(out, _sprintf_cvt(fmtp, Int(th.l[i])))
-                    end
-                elseif t === :integer
-                    _checkfmt(fmtp, "dioxX") &&
-                        error("invalid format '$(fmtp)'; use format %d, %i, %o, %x or %X for integer objects")
-                    if th.na[i]
-                        print(out, _sprintf_cvt(fmtp[1:end-1] * "s", "NA"))
-                    else
-                        print(out, _sprintf_cvt(fmtp, th.i[i]))
-                    end
-                elseif t === :double || t === :Date
-                    _checkfmt(fmtp, "aAfeEgG") &&
-                        error("invalid format '$(fmtp)'; use format %f, %e, %g or %a for numeric objects")
-                    x = th.d[i]
-                    if isfinite(x)
-                        print(out, _sprintf_cvt(fmtp, x))
-                    else
-                        p = findfirst('.', fmtp)
-                        f2 = p !== nothing ? fmtp[1:p-1] * "s" : fmtp[1:end-1] * "s"
-                        sp_ = occursin(' ', f2)
-                        if isnan(x)
-                            isna = th.na[i] || SimLev.isna_strict(x)
-                            word = isna ? "NA" : "NaN"
-                            print(out, _sprintf_cvt(f2, sp_ ? " " * word : word))
-                        elseif x > 0
-                            print(out, _sprintf_cvt(f2, occursin('+', f2) ? "+Inf" : sp_ ? " Inf" : "Inf"))
-                        else
-                            print(out, _sprintf_cvt(f2, "-Inf"))
-                        end
-                    end
-                elseif t === :character
-                    _checkfmt(fmtp, "s") && error("invalid format '$(fmtp)'; use format %s for character objects")
-                    s = th.s[i]
-                    s = s === nothing ? "NA" : s
-                    if codeunits(fmtp)[2] != UInt8('s')
-                        print(out, _sprintf_cvt(fmtp, s))
-                    else
-                        print(out, s)
-                    end
-                else
-                    error("unsupported type")
-                end
-            else
-                j = cur
-                while j <= n && fb[j] != UInt8('%')
-                    j += 1
-                end
-                write(out, fb[cur:j-1])
-                cur = j
-            end
-        end
-        if ns == 0
-            maxlen = check_maxlen()
-        end
-        push!(results, String(take!(out)))
-    end
-    nunused = count(!, used)
-    if nunused > 0
-        if nfmt == 1
-            f1 = fv.s[1] === nothing ? "NA" : fv.s[1]
-            @warn nunused == 1 ? "one argument not used by format '$(f1)'" : "$(nunused) arguments not used by format '$(f1)'"
-        else
-            @warn nunused == 1 ? "one argument not used by format" : "$(nunused) arguments not used by format"
-        end
-    end
-    scal && length(results) == 1 && return results[1]
-    return results
+    # C-Kern sl_r_sprintf (seit 1.6.0): Umwandlungen über snprintf wie R
+    res, nunused = SimLev._rb_sprintf(Union{Nothing,String}[s === nothing ? nothing : String(s) for s in fv.s],
+                                      SimLev._SpArg[_sp_arg(v) for v in a], Int(_OPT[:scipen])::Int,
+                                      String(_OPT[:OutDec])::String)
+    nunused > 0 && _sprintf_warn(nunused, length(fv.s), isempty(fv.s) ? nothing : fv.s[1])
+    scal && length(res) == 1 && return res[1]
+    return res
 end
 const sprintf = r_sprintf
 
 # ── Datum ──────────────────────────────────────────────────────────────────
-# format.Date/strftime (C-Locale) rechnet der gemeinsame Kern core/slc_rbase_date.c (wie Python).
+# format.Date/strftime (C-Locale) rechnet der gemeinsame Kern core/slc_rbase_date.cpp (wie Python).
 # %OS ohne Ziffer nach digits_secs (set_options); Ergebnis über 2048 Bytes ist ein Fehler wie in R.
 
 function _format_date_list(days::AbstractVector{Float64}, fmts::AbstractVector)

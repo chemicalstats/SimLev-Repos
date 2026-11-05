@@ -642,7 +642,7 @@ const _PARAM_DEFAULTS = (
     "ms_ar_garch_model" => "gjrGARCH", "tvtp_n_regimes" => 2.0, "tvtp_garch_model" => "gjrGARCH")
 
 "Standardparameter je Verfahren (R: `.get_base_params`)."
-function _get_base_params(method, params, n)
+function _get_base_params(params)
     p = _as_rlist(params)
     for (nm, dv) in _PARAM_DEFAULTS
         haskey(p, nm) || (p[nm] = dv isa Vector ? copy(dv) : dv)
@@ -831,7 +831,7 @@ function bootstrap_block_length(x, transform_ = nothing; transform = nothing)
 end
 
 "\"auto\"-Parameter auflösen (R: `.resolve_auto`)."
-function _resolve_auto(params, returns, config, method)
+function _resolve_auto(params, returns)
     params = _as_rlist(params)
     for nm in ("L", "block_length")
         v = _get(params, nm)
@@ -1060,7 +1060,7 @@ _istrue(x) = x === true || (x isa AbstractVector && length(x) == 1 && x[1] === t
 "Verfahrensspezifische Vorberechnung (R: `.prepare_method_info`)."
 function _prepare_method_info(returns, config, method, params, cores = 1)
     R = _mat(returns)
-    p = _get_base_params(method, params, size(R, 1))
+    p = _get_base_params(params)
     base = findfirst(==(config["regime_index"]), _cfg_list(config, "index_names"))
     br = R[:, base]
     info = RList("base" => base)
@@ -1194,13 +1194,57 @@ function _cumprod_cols(M::Matrix{Float64})
     return out
 end
 
-"Preis-Pfad aus Renditen bauen (R: `.build_path`); NamedMat oder `nothing`."
-function _build_path(g, aux, config; start = 100.0, aux_ratio = nothing, aux_start = nothing)
+"""Angaben für den Kern `sl_boot_path` (seit 1.6.0; wie `.boot_path_spec` in R) oder `nothing` (dann rechnet
+`_build_path` wie bisher): Zusatzreihen als Matrix, Merker der Niveau-Reihen, Hebelprodukte (`SLib.Letf`)."""
+function _boot_path_spec(aux, config, aux_ratio, aux_start)
+    try
+        inames = _cfg_list(config, "index_names")
+        anames = aux === nothing ? String[] : _cfg_list(config, "aux_names")
+        lnames = config["n_letfs"] != 0 ? _cfg_list(config, "letf_names") : String[]
+        allnames = vcat(inames, lnames, anames)
+        length(unique(allnames)) == length(allnames) || return nothing
+        A = aux === nothing ? nothing : _mat(aux)
+        A === nothing || size(A, 2) == length(anames) || return nothing
+        AR = aux === nothing || aux_ratio === nothing ? nothing : _mat(aux_ratio)
+        AR === nothing || size(AR) == size(A) || return nothing
+        s0 = AR === nothing || aux_start === nothing ? nothing : _dvec(aux_start)
+        s0 === nothing || length(s0) == length(anames) || return nothing
+        at = _get(config, "aux_type")
+        level = Cint[_aux_type_of(at, a) == "level" for a in anames]
+        cv(v) = v isa AbstractString ? (j = findfirst(==(v), anames); j === nothing ? error("Spalte") : (Cint(j - 1), 0.0)) :
+                (Cint(-1), Float64(_f1(v)))
+        letf = SimLev.SLib.Letf[]
+        for lt in (isempty(lnames) ? Any[] : config["letfs"])
+            b = findfirst(==(lt["base"]), inames)
+            b === nothing && return nothing
+            rc, rv = cv(_get(lt, "finance")); dc, dv = cv(_get(lt, "days"))
+            push!(letf, SimLev.SLib.Letf(Cint(b - 1), Float64(_f1(_get(lt, "leverage"))), rc, rv, dc, dv,
+                                         Float64(_f1(_get(lt, "rate_basis"))), Float64(_f1(_get(lt, "ter_basis"))),
+                                         Float64(_f1(_get(lt, "expense"))), Float64(_f1(_get(lt, "spread")))))
+        end
+        return (aux = A, ratio = AR, start = s0, level = level, letf = letf, inames = inames, cols = allnames, anames = anames)
+    catch e
+        (e isa UndefVarError || e isa MethodError) && rethrow()
+        return nothing
+    end
+end
+
+"Preis-Pfad aus Renditen bauen (R: `.build_path`); NamedMat oder `nothing` (seit 1.6.0 mit `spec` im Kern)."
+function _build_path(g, aux, config; start = 100.0, aux_ratio = nothing, aux_start = nothing, spec = nothing)
     ret = g["ret"]
     idx = _ivec(g["idx"])
     ret isa AbstractMatrix || return nothing
     ret = _mat(ret)
     (any(!isfinite, ret) || any(<=(0), ret)) && return nothing
+    # seit 1.6.0 im Kern (sl_boot_path: Kurspfade, Hebelprodukte, Zusatzreihen und Niveau-Variante in einem Aufruf)
+    if spec !== nothing && size(ret, 1) >= 1 && length(idx) == size(ret, 1) && size(ret, 2) == length(spec.inames) &&
+       (spec.aux === nothing || all(i -> 1 <= i <= size(spec.aux, 1), idx))
+        r = SimLev.SLib.boot_path(ret, Int64.(idx), spec.aux, spec.ratio, spec.start, spec.level, spec.letf, Float64(start))
+        r === nothing && return nothing
+        out = NamedMat(r[1]; colnames = copy(spec.cols))
+        r[2] === nothing || (out.attrs["aux_level"] = NamedMat(r[2]; colnames = copy(spec.anames)))
+        return out
+    end
     n_out = size(ret, 1)
     P = start .* _cumprod_cols(vcat(ones(1, size(ret, 2)), ret))
     cols = copy(_cfg_list(config, "index_names"))
@@ -1248,7 +1292,7 @@ function _build_path(g, aux, config; start = 100.0, aux_ratio = nothing, aux_sta
 end
 
 "ESS-Design (R: `.ess_design`): RFrame oder `nothing`."
-function _ess_design(method, params, grid, budget, n_obs)
+function _ess_design(method, grid, budget, n_obs)
     grid === nothing && (grid = _get_ess_grid(method, n_obs))
     (grid === nothing || _len(grid) == 0) && return nothing
     ess_params = ("L", "block_length", "n_regimes", "tail_prob", "ms_n_regimes", "ms_ar_n_regimes", "tvtp_n_regimes")
@@ -1336,13 +1380,14 @@ function _boot_setup(data, config, method, n, params, ess, ess_grid, path_length
         _stop(@sprintf("path_length muss eine ganze Zahl >= 1 sein (erhalten: %s).", _show(path_length)))
     end
     ex = _extract_returns(data, config)
+    ex["_path_spec"] = _boot_path_spec(ex["aux"], config, ex["aux_ratio"], ex["aux_start"])   # Kern sl_boot_path (seit 1.6.0)
     n_obs = size(ex["ret"], 1)
     n_out = _as_int(path_length !== nothing ? path_length : n_obs)
     if method in ("wild", "reset") && n_out != n_obs
         _stop(@sprintf("Verfahren '%s' erhält die Chronologie; path_length muss %d sein.", method, n_obs))
     end
-    params = _resolve_auto(params, ex["ret"], config, method)
-    design = ess ? _ess_design(method, params, ess_grid, _as_int(n), n_obs) : nothing
+    params = _resolve_auto(params, ex["ret"])
+    design = ess ? _ess_design(method, ess_grid, _as_int(n), n_obs) : nothing
     ess && design === nothing && _message("Keine Hyperparameter für ESS - nutze Standard-Bootstrap")
     if design === nothing
         combos = RList[params]
@@ -1363,7 +1408,7 @@ function _boot_setup(data, config, method, n, params, ess, ess_grid, path_length
         end
         push!(infos, info)
     end
-    base_p = RList[_get_base_params(method, cp, n_obs) for cp in combos]
+    base_p = RList[_get_base_params(cp) for cp in combos]
     for bp in base_p
         _check_boot_params(method, bp, n_obs)
     end
@@ -1388,7 +1433,8 @@ function _draw_path(setup, i, stream, config, method, max_tries)
             nothing
         end
         if g !== nothing
-            P = _build_path(g, ex["aux"], config; aux_ratio = ex["aux_ratio"], aux_start = ex["aux_start"])
+            P = _build_path(g, ex["aux"], config; aux_ratio = ex["aux_ratio"], aux_start = ex["aux_start"],
+                            spec = _get(ex, "_path_spec"))
             P === nothing || return (path = P, tries = tr, err = nothing)
         end
     end
@@ -2166,7 +2212,7 @@ st = bootstrap_study(d, cfg; method = "stationary", n = 5, params = (L = 30,), p
 println(st["results"])
 ```
 """
-function bootstrap_study(data, config, method_pos = nothing; method = "stationary", n = 1000, strategies = nothing,
+SimLev.@study function bootstrap_study(data, config, method_pos = nothing; method = "stationary", n = 1000, strategies = nothing,
                          params = RList(), ess = false, ess_grid = nothing, path_length = nothing, dates = nothing,
                          start = "2000-01-01", burn_in = 0, sim_args = RList(), metrics = bootstrap_study_metrics,
                          benchmark = nothing, chunk_dir = nothing, keep_paths = 0, keep_returns = nothing,

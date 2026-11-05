@@ -159,7 +159,7 @@ function _date_str(day)
     return string(lpad(y, 4, '0'), "-", lpad(m, 2, '0'), "-", lpad(d, 2, '0'))
 end
 
-"`as.Date(s, format = \"%Y-%m-%d\")` (bzw. `/`) für einen Text; NA = `SimLev.NA` (core/slc_rbase_date.c)."
+"`as.Date(s, format = \"%Y-%m-%d\")` (bzw. `/`) für einen Text; NA = `SimLev.NA` (core/slc_rbase_date.cpp)."
 function _strptime_ymd(s, sep::Char = '-')
     (s === nothing || s === missing) && return NA
     z = SimLev._rb_strptime_ymd(s, sep)

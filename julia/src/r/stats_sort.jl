@@ -7,7 +7,7 @@
 # Lizenz der Vorlage: GPL (>= 2) laut Kopf der R-Quellen; in SimLev unter GPL-3
 # Änderungen:         Übertragung nach Python bzw. Julia (Julia nach der Python-Fassung) im von
 #                     SimLev genutzten Umfang: Ordnung, Rang, partielle Sortierung und Quantile
-#                     rechnet der C-Kern core/slc_rbase_sort.c.
+#                     rechnet der C-Kern core/slc_rbase_sort.cpp.
 # Gemeinsame Hilfen, Sortieren, Ränge, Einteilen und Lagemaße (order, r_sort, r_rank, rle,
 # tabulate, findInterval, cut, complete_cases, quantile, median, weighted_mean) aus R 4.3.3 (src/main/sort.c,
 # qsort-body.c, seq.c; base/R/sort.R, rle.R, cut.R, findInt.R; stats/R/quantile.R, median.R, weighted.mean.R);
@@ -24,6 +24,7 @@ _vec(x::RVector) = (Float64[_fl(v) for v in x.values], x.names)
 _vec(x::NamedMat) = (Float64[_fl(v) for v in vec(x.data)], nothing)
 _vec(x::RFrame) = (Float64[_fl(v) for c in x.cols for v in c], nothing)
 _vec(x::SimLev.RFmt.RFactor) = (Float64[c == 0 ? NA : Float64(c) for c in x.codes], nothing)
+_vec(x::AbstractArray{Float64}) = (collect(Float64, vec(x)), nothing)   # ohne _fl je Element (seit 1.6.0)
 _vec(x::AbstractArray) = (Float64[_fl(v) for v in vec(x)], nothing)
 _vec(x::Tuple) = _vec(collect(x))
 _vec(x::Union{Real,Date}) = (Float64[_fl(x)], nothing)
@@ -65,27 +66,7 @@ function seq_len_out(frm, to, length_out)
     n = trunc(Int, length_out)
     frm = Float64(frm); to = Float64(to)
     n <= 0 && return Float64[]
-    out = Vector{Float64}(undef, n)
-    out[1] = frm
-    n > 1 && (out[n] = to)
-    if n > 2
-        nint = Float64(n - 1)
-        rby = to - frm
-        if isfinite(rby)
-            rby = rby / nint
-            for i in 1:n-2
-                out[i+1] = frm + Float64(i) * rby
-            end
-        else
-            rby = to / nint - frm / nint
-            f4 = frm / 4.0
-            b4 = rby / 4.0
-            for i in 1:n-2
-                out[i+1] = (f4 + Float64(i) * b4) * 4.0
-            end
-        end
-    end
-    out
+    return SimLev._rb_seq_len(frm, to, n)   # C-Kern sl_r_seq_len (seit 1.6.0)
 end
 
 # ── Sortieren, Ränge ─────────────────────────────────────────────────────
@@ -329,28 +310,9 @@ function findInterval(x, vec; rightmost_closed::Bool = false, all_inside::Bool =
     return _vec_out(Int[Int(t) for t in r])
 end
 
-function _bincode(x::Vector{Float64}, B::Vector{Float64}, right::Bool, include_lowest::Bool)
-    nb1 = length(B) - 1
-    lft = !right
-    out = zeros(Int, length(x))        # 0 = NA
-    for (i, xi) in enumerate(x)
-        isnan(xi) && continue
-        lo, hi = 1, nb1 + 1
-        if xi < B[lo] || B[hi] < xi || (xi == B[lft ? hi : lo] && !include_lowest)
-            continue
-        end
-        while hi - lo >= 2
-            new = (hi + lo) ÷ 2
-            if xi > B[new] || (lft && xi == B[new])
-                lo = new
-            else
-                hi = new
-            end
-        end
-        out[i] = lo
-    end
-    out
-end
+"`.bincode` (C-Kern sl_r_bincode, seit 1.6.0): Intervallnummern, 0 = NA."
+_bincode(x::Vector{Float64}, B::Vector{Float64}, right::Bool, include_lowest::Bool) =
+    SimLev._rb_bincode(x, B, right, include_lowest)
 
 """
     cut(x, breaks; labels = nothing, include_lowest = false, right = true, dig_lab = 3, ordered_result = false)
@@ -367,12 +329,20 @@ function cut(x, breaks; labels = nothing, include_lowest::Bool = false, right::B
         (isnan(b0) || b0 < 2) && error("invalid number of intervals")
         nb = trunc(Int, b0 + 1)
         ok = filter(!isnan, xv)
+        if isempty(ok)   # range(x, na.rm = TRUE) ohne Werte (Warnungen wie R, seit 1.6.0)
+            @warn "no non-missing arguments to min; returning Inf"
+            @warn "no non-missing arguments to max; returning -Inf"
+        end
         rx = isempty(ok) ? (Inf, -Inf) : (minimum(ok), maximum(ok))
         dx = rx[2] - rx[1]
+        isnan(dx) && error("missing value where TRUE/FALSE needed")   # if (dx == 0) mit NaN (seit 1.6.0 wie R)
         if dx == 0
             dx = rx[1] != 0 ? abs(rx[1]) : 1.0
             br = seq_len_out(rx[1] - dx / 1000, rx[2] + dx / 1000, nb)
         else
+            # seq.int prüft die Enden (seit 1.6.0 wie R)
+            isfinite(rx[1]) || error("'from' must be a finite number")
+            isfinite(rx[2]) || error("'to' must be a finite number")
             br = seq_len_out(rx[1], rx[2], nb)
             br[1] = rx[1] - dx / 1000
             br[nb] = rx[2] + dx / 1000
@@ -504,26 +474,14 @@ function quantile(x, probs = [0.0, 0.25, 0.5, 0.75, 1.0]; na_rm::Bool = false, n
     return _vec_out(qs)
 end
 
-"`median.default(x, na.rm)`."
+"`median.default(x, na.rm)` (C-Kern sl_r_median, seit 1.6.0)."
 function median(x; na_rm::Bool = false)
     is_int = _is_int_like(x)
     xv = _v(x)
-    if na_rm
-        xv = filter(!isnan, xv)
-    elseif any(isnan, xv)
-        return is_int ? missing : NA
-    end
-    n = length(xv)
-    n == 0 && return is_int ? missing : NA
-    half = (n + 1) ÷ 2
-    s = is_int ? sort(xv) : sort_partial(xv, isodd(n) ? [half] : [half, half + 1])
-    if isodd(n)
-        v = s[half]
-        return is_int ? Int(v) : v
-    end
-    pair = s[half:half+1]
-    is_int && return _rmean_int(Int.(pair))
-    return _rmean(pair)
+    r = SimLev._rb_median(xv, na_rm, is_int)
+    r === nothing && return is_int ? missing : NA
+    (is_int && isodd(count(!isnan, xv))) && return Int(r)
+    return r
 end
 
 "`weighted.mean(x, w, na.rm)`."

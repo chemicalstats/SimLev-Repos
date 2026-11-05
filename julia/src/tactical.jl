@@ -59,7 +59,7 @@ _setdiff(a, b) = _unique([x for x in a if !(x in b)])
 "`findInterval(x, vec)` für aufsteigendes `vec`: Anzahl der Elemente von vec <= x."
 _find_interval(x::AbstractVector, v::AbstractVector) = Int[searchsortedlast(v, xi) for xi in x]
 
-# Zeilen- und Spaltensummen/-mittel wie R in long double über die C-Kerne (core/slc_rbase.c)
+# Zeilen- und Spaltensummen/-mittel wie R in long double über die C-Kerne (core/slc_rbase.cpp)
 _rowsums(A::AbstractMatrix{Float64}) = SimLev._ld_rowsums(A)
 _rowmeans(A::AbstractMatrix{Float64}) = SimLev._ld_rowsums(A; mean = true)
 _colmeans(A::AbstractMatrix{Float64}) = size(A, 1) == 0 ? fill(NaN, size(A, 2)) : SimLev._ld_colsums(A; mean = true)
@@ -351,7 +351,24 @@ function momentum_score(data, assets; lookbacks = [1, 3, 6, 12], type = nothing)
     isempty(miss) || error("momentum_score: Kursspalte(n) fehlen: " * join(miss, ", "))
     type == "13612w" && (lookbacks = [1, 3, 6, 12])
     lb = lookbacks isa Union{AbstractVector,Tuple} ? collect(lookbacks) : [lookbacks]
-    back = _momentum_back(collect(Date, d), lb)
+    # seit 1.6.0 im Kern (sl_mom_score: Rückblickzeilen ganzzahlig, LOCF, Renditen, Scores) bei sortierten Daten
+    # (Jahre 1000-9000); unsortiert wie findInterval in R ein Fehler
+    dd = collect(Date, d)
+    dv = Float64[Dates.value(z) - 719163 for z in dd]      # Tage seit 1970-01-01
+    lbi = Any[_as_int(m)[1] for m in lb]
+    if !isempty(lbi) && any(i -> dv[i+1] < dv[i], 1:length(dv)-1)
+        error("'vec' must be sorted non-decreasingly and not contain NAs")
+    end
+    if n > 0 && !isempty(assets) && !isempty(lbi) && all(v -> v isa Integer && abs(v) <= 12000, lbi) &&
+       minimum(dv) >= -354285 && maximum(dv) <= 2568019
+        X = Matrix{Float64}(undef, n, length(assets))
+        for (j, a) in enumerate(assets)
+            X[:, j] = _num(_col(data, a))
+        end
+        S = SimLev.SLib.mom_score(dv, Cint[Cint(v) for v in lbi], X, type == "13612w")
+        return NamedMat(S; colnames = assets)
+    end
+    back = _momentum_back(dd, lb)
     S = Matrix{Float64}(undef, n, length(assets))
     for (j, a) in enumerate(assets)
         x = _fill_na(_num(_col(data, a)), "locf"; keep_leading = true)

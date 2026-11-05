@@ -130,9 +130,9 @@ function _sim_evaluate(R::Run, sim::Sim, start_date::Int, stopp_date::Int, fr::_
     nb = Float64[length(sim.trades[a].buys) for a in 1:na]
     ns = Float64[length(sim.trades[a].sells) for a in 1:na]
     cnt = zeros(Int64, 2)
-    tw = zeros(n); twr = zeros(n); inv = zeros(n); dd = zeros(n); scal = zeros(3); ints = zeros(Int32, 4)
-    stv = zeros(20); buys = zeros(na); sells = zeros(na); why_i = zeros(Int32, 6); why_v = zeros(6)
-    err = zeros(Int32, 2)
+    tw = zeros(n); twr = zeros(n); inv = zeros(n); dd = zeros(n); scal = zeros(3); ints = zeros(Int32, 2)
+    stv = zeros(20); buys = zeros(na); sells = zeros(na); why_i = zeros(Int32, 4); why_v = zeros(6)
+    err = zeros(Int32, 1)
     um_i = Int32[]; um_v = Float64[]; msg_c = Int32[]; msg_v = Float64[]
     h = ccall((:simlev_c_eval_new, LIBSLC), Ptr{Cvoid}, ())
     h == C_NULL && throw(OutOfMemoryError())
@@ -164,12 +164,12 @@ function _sim_evaluate(R::Run, sim::Sim, start_date::Int, stopp_date::Int, fr::_
     for i in eachindex(msg_c)
         _eval_warn(msg_c[i], view(msg_v, 4i-3:4i))
     end
-    err[2] == 1 && error("missing value where TRUE/FALSE needed")
+    err[1] == 1 && error("missing value where TRUE/FALSE needed")
     rf_err === nothing || throw(rf_err)
-    err[2] == 2 && error("missing value where TRUE/FALSE needed")
+    err[1] == 2 && error("missing value where TRUE/FALSE needed")
     statistics = RList((k => stv[j] for (j, k) in enumerate(_EVAL_STATS))...)
-    statistics["longest_drawdown"] = Int(ints[4])
-    why_text = [why_i[3k+1] != 0 ? _eval_detail(why_i[3k+3], view(why_v, 3k+1:3k+3), nothing) : "" for k in 0:1]
+    statistics["longest_drawdown"] = Int(ints[2])
+    why_text = [why_i[2k+1] != 0 ? _eval_detail(why_i[2k+2], view(why_v, 3k+1:3k+3), nothing) : "" for k in 0:1]
     k = length(um_i) ÷ 3
     undefined_metrics = RFrame("metric" => String[_EVAL_METRICS[um_i[3i+1]+1] for i in 0:k-1],
                                "reason" => String[_EVAL_REASONS[um_i[3i+2]+1] for i in 0:k-1],
@@ -686,7 +686,7 @@ function simulation(data, strategy; start_value = 10000, costs = sim_costs(), dc
 end
 
 """
-    _simulation_flat(data, strategy; start_value, spread, details, liquidate, dca_mode, …, io)
+    _simulation_flat(data, strategy; start_value, details, liquidate, dca_mode, …, io)
 
 Engine mit den flachen Argumenten (bis 0.8.0 öffentlich; R: `.simulation_flat`).
 `simulation()` übersetzt die Bausteine mit `_sim_from_blocks` hierher (einziger
@@ -695,7 +695,7 @@ der flache Weg ohne Bausteine mit eigenen Prüfungen ist entfallen). Die Aufrufe
 `simulation()` (`_sim_args_set`, `_sim_call` in sim_blocks.jl).
 `tax_tariff`: `nothing`, Dateipfad oder `tax_tariff()`.
 """
-function _simulation_flat(data, strategy; start_value = 10000, spread = nothing, details = false, liquidate = false,
+function _simulation_flat(data, strategy; start_value = 10000, details = false, liquidate = false,
                     dca_mode = false, dca_value = nothing, dca_span = nothing, dca_days = nothing,
                     dca_unit = ("month", "quarter", "year"), dca_anchor = ("start", "end"), dca_start = nothing,
                     dca_skip = false, balance_mode = false, balance_span = nothing, balance_days = nothing,
@@ -711,7 +711,7 @@ function _simulation_flat(data, strategy; start_value = 10000, spread = nothing,
                     taxable_income = nothing, tax_tariff = nothing, io::IO = stdout)
     @nospecialize
     details = details == true
-    cfg, fr = _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_days,
+    cfg, fr = _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value, dca_days,
                                 balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
                                 marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                                 use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,

@@ -85,7 +85,26 @@ tax_tariff <- function(file = NULL) {
   if (is.null(file)) {
     file <- system.file("extdata", "steuertarif.csv", package = "SimLev")
     if (!nzchar(file)) stop("tax_tariff: Die mitgelieferte Datei extdata/steuertarif.csv wurde nicht gefunden (Paket unvollst\u00e4ndig installiert?).", call. = FALSE)
+    # seit 1.6.3 je Sitzung einmal gelesen (simulation() und withdrawal_simulation() mit income_tariff() lasen die
+    # Datei je Lauf); Schluessel Pfad, Groesse und Aenderungszeit, gemerkt nur ohne Warnung
+    fi <- file.info(file, extra_cols = FALSE)
+    key <- list(file, fi$size, fi$mtime)
+    if (identical(.tariff_cache$key, key)) return(.tariff_cache$val)
+    warned <- FALSE
+    val <- withCallingHandlers(.tax_tariff_read(file), warning = function(w) warned <<- TRUE)
+    if (!warned) { .tariff_cache$key <- key; .tariff_cache$val <- val }
+    return(val)
   }
+  .tax_tariff_read(file)
+}
+
+# Zwischenspeicher des mitgelieferten Tarifs (tax_tariff() ohne Datei)
+.tariff_cache <- new.env(parent = emptyenv())
+
+#' Tarifdatei lesen und pruefen (Rumpf von tax_tariff(); Meldungen wie dort)
+#' @keywords internal
+#' @noRd
+.tax_tariff_read <- function(file) {
   if (!is.character(file) || length(file) != 1L || is.na(file))
     stop("tax_tariff: 'file' muss ein einzelner Dateipfad (Zeichenkette) oder NULL sein.", call. = FALSE)
   if (!file.exists(file)) stop(sprintf("tax_tariff: Datei '%s' nicht gefunden.", file), call. = FALSE)

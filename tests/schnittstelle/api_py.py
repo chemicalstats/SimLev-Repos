@@ -31,7 +31,7 @@ Voreinstellung der Ausgabe: tests/schnittstelle/out/api_py.json
 Datei, Zeile, Datum; sortiert), ``--stand`` ist die Überschrift des Eintrags
 in ``CHANGES.md``. ``--frozen-check`` vergleicht den Auszug mit dem
 eingefrorenen Stand und listet die Unterschiede (Rückgabewert 1);
-``tests/schnittstelle/test_api.py`` und ``run.sh --check`` rufen das auf.
+``tests/schnittstelle/test_api.py`` und ``run.py --check`` rufen das auf.
 """
 from __future__ import annotations
 
@@ -189,7 +189,7 @@ def main():
                     m_mod, f, line = _where(meth)
                     try:
                         args = _args(meth)
-                    except (TypeError, ValueError) as e:
+                    except (TypeError, ValueError):
                         args = []
                     funcs.append({"name": via.split(" ")[0], "key": "%s.%s" % (g, rc), "kind": "method",
                                   "generic": g, "class": rc, "py_class": cls.__name__, "module": cls.__module__,
@@ -234,12 +234,12 @@ def main():
 # (Text; null = keiner), default_known = false bei Platzhaltern; dazu die Namen
 # der exportierten Klassen und sonstigen Exporte. Ohne Modul, Datei, Zeile,
 # Datum und Vermerke; Schlüssel sortiert, ein Argument je Zeile.
-FROZEN_HINT = "Erzeugt von tests/schnittstelle/run.sh --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern."
+FROZEN_HINT = "Erzeugt von tests/schnittstelle/run.py --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern."
 FROZEN_FIELDS = ("name", "kind", "default", "value", "match_arg", "default_known")
 FREEZE_HOWTO = (
     "Ist die Änderung gewollt, den Stand bewusst neu festschreiben:\n"
     "  1. Eintrag oben in tests/schnittstelle/CHANGES.md: \"## JJJJ-MM-TT – Titel\" mit \"- Was: …\" und \"- Warum: …\"\n"
-    "  2. tests/schnittstelle/run.sh --freeze   (aus der Repo-Wurzel; schreibt frozen/ für R, Python und Julia neu)\n"
+    "  2. tests/schnittstelle/run.py --freeze   (aus der Repo-Wurzel; schreibt frozen/ für R, Python und Julia neu)\n"
     "  3. frozen/ und CHANGES.md zusammen einchecken.\n"
     "Sonst die Änderung im Code zurücknehmen.")
 
@@ -346,7 +346,7 @@ def frozen_diff(old, new):
 def frozen_check(fz, path, lang="Python"):
     """(gleich?, Bericht) für den Auszug `fz` gegen die Datei `path`."""
     if not os.path.isfile(path):
-        return False, "%s: eingefrorener Stand %s fehlt; anlegen mit tests/schnittstelle/run.sh --freeze" % (lang, path)
+        return False, "%s: eingefrorener Stand %s fehlt; anlegen mit tests/schnittstelle/run.py --freeze" % (lang, path)
     with open(path, encoding="utf-8") as fh:
         old = json.load(fh)
     new = json.loads(frozen_text(fz, lang, old.get("stand")))

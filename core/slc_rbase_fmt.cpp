@@ -1,7 +1,5 @@
 /* core/slc_rbase_fmt.cpp – Zahlformat und sprintf mit R-Regeln (SimLev core, seit 1.6.0)
- * Verfahren:  - round (fround, R >= 4.0.0): Kandidaten floor/ceil von x·10^d, der nähere gewinnt, bei Gleichstand der
- *               gerade; signif (fprec): Runden auf d signifikante Stellen über 10^e mit Schutz vor Über- und Unterlauf;
- *               NA, wenn x oder d NA ist, sonst NaN bei NaN (wie Math2 von R).
+ * Verfahren:  - round/signif (fround, fprec): seit 1.6.3 in slc_rbase.cpp.
  *             - formatReal: gemeinsame Breite w, Nachkommastellen d und Exponentenbreite e eines Vektors für digits
  *               signifikante Stellen (scientific(): Mantisse in long double, sl_r_scientific; ab 16 Stellen über
  *               "%#.*e"), Festkomma, wenn es höchstens scipen Zeichen breiter ist als die wissenschaftliche Form, nsmall.
@@ -39,147 +37,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define M_LOG10_2_ 0.301029995663981195213738894724
 #define DBL_DIG_ 15
 #define MAX10E_ 308
 #define MAXLINE_ 8192
 #define NA_INT_ INT_MIN
 
-static int is_na(double x)
-{
-    uint64_t u;
-    if (!isnan(x)) return 0;
-    memcpy(&u, &x, sizeof u);
-    return (u & UINT64_C(0xFFFFFFFF)) == 1954;
-}
 
 void sl_r_free(void *p) { free(p); }
 
-/* ── round / signif ─────────────────────────────────────────────────────── */
-
-static double pow_di(double x, int n)
-{
-    double xn = 1.0;
-    if (isnan(x)) return x;
-    if (n != 0) {
-        int neg;
-        if (!isfinite(x)) return pow(x, (double) n);
-        neg = n < 0;
-        if (neg) n = -n;
-        for (;;) {
-            if (n & 1) xn *= x;
-            n >>= 1;
-            if (n) x *= x;
-            else break;
-        }
-        if (neg) xn = 1.0 / xn;
-    }
-    return xn;
-}
-
-/* NA/NaN wie math2 von R: NA, wenn ein Operand NA ist, sonst NaN */
-static double na_math2(double a, double b)
-{
-    double r;
-    uint64_t u = (is_na(a) || is_na(b)) ? UINT64_C(0x7FF00000000007A2) : UINT64_C(0x7FF8000000000000);
-    memcpy(&r, &u, sizeof r);
-    return r;
-}
-
-static double logb_(double x)
-{
-    int e;
-    (void) frexp(x, &e);
-    return (double) (e - 1);
-}
-
-double sl_r_fround(double x, double digits)
-{
-    const double max_digits = 308 + 15;
-    int dig;
-    double sgn = 1.0, l10x, pow10, x10, i10, xd, xu, du, dd;
-    if (isnan(x) || isnan(digits)) return na_math2(x, digits);
-    if (!isfinite(x)) return x;
-    if (digits > max_digits || x == 0.0) return x;
-    if (digits < -MAX10E_) return 0.0;
-    if (digits == 0.0) return nearbyint(x);
-    dig = (int) floor(digits + 0.5);
-    if (x < 0.0) { sgn = -1.0; x = -x; }
-    l10x = M_LOG10_2_ * (0.5 + logb_(x));
-    if (l10x + dig > DBL_DIG_) return sgn * x;
-    if (dig <= MAX10E_) {
-        pow10 = pow_di(10.0, dig);
-        x10 = x * pow10;
-        i10 = floor(x10);
-        xd = i10 / pow10;
-        xu = ceil(x10) / pow10;
-    } else {
-        int e10 = dig - MAX10E_;
-        double p10 = pow_di(10.0, e10);
-        pow10 = pow_di(10.0, MAX10E_);
-        x10 = (x * pow10) * p10;
-        i10 = floor(x10);
-        xd = i10 / pow10 / p10;
-        xu = ceil(x10) / pow10 / p10;
-    }
-    du = xu - x;
-    dd = x - xd;
-    return sgn * ((du < dd || (fmod(i10, 2.0) == 1 && du == dd)) ? xu : xd);
-}
-
-double sl_r_fprec(double x, double digits)
-{
-    const int max_digits = 22;
-    int dig, e10;
-    double sgn = 1.0, l10;
-    if (isnan(x) || isnan(digits)) return na_math2(x, digits);
-    if (!isfinite(x)) return x;
-    if (!isfinite(digits)) {
-        if (digits > 0.0) return x;
-        digits = 1.0;
-    }
-    if (x == 0) return x;
-    if (fabs(digits) > 1e9) dig = digits > 0 ? max_digits + 1 : 1;
-    else dig = (int) floor(fabs(digits) + 0.5) * (digits >= 0 ? 1 : -1);
-    if (dig > max_digits) return x;
-    if (dig < 1) dig = 1;
-    if (x < 0.0) { sgn = -sgn; x = -x; }
-    l10 = log10(x);
-    e10 = (int) (dig - 1 - floor(l10));
-    if (fabs(l10) < MAX10E_ - 2) {
-        double p10 = 1.0, pow10;
-        if (e10 > MAX10E_) {
-            p10 = pow_di(10.0, e10 - MAX10E_);
-            e10 = MAX10E_;
-        }
-        if (e10 > 0) {
-            pow10 = pow_di(10.0, e10);
-            return sgn * (nearbyint((x * pow10) * p10) / pow10) / p10;
-        }
-        pow10 = pow_di(10.0, -e10);
-        return sgn * (nearbyint(x / pow10) * pow10);
-    } else {
-        int do_round = MAX10E_ - l10 >= pow_di(10.0, -dig);
-        int e2 = dig + (e10 > 0 ? 1 : -1) * max_digits;
-        double p10 = pow_di(10.0, e2), P10;
-        x *= p10;
-        P10 = pow_di(10.0, e10 - e2);
-        x *= P10;
-        if (do_round) x += 0.5;
-        x = floor(x) / p10;
-        return sgn * x / P10;
-    }
-}
-
-void sl_r_round_vec(int kind, int64_t nx, const double *x, int64_t nd, const double *digits, double *out)
-{
-    int64_t i, n = nx > nd ? nx : nd;
-    if (nx == 0 || nd == 0) return;
-    for (i = 0; i < n; i++) {
-        double a = x[i % nx], b = digits[i % nd];
-        out[i] = kind ? sl_r_fprec(a, b) : sl_r_fround(a, b);
-    }
-}
+/* round / signif (sl_r_fround, sl_r_fprec, sl_r_round_vec): seit 1.6.3 in slc_rbase.cpp (auch für den Tarif in r/src/) */
 
 /* ── formatReal / encodeReal ─────────────────────────────────────────────── */
 
@@ -208,7 +74,7 @@ void sl_r_format_real(int64_t n, const double *x, const unsigned char *na, int d
     for (i = 0; i < n; i++) {
         double xi = x[i];
         if (!isfinite(xi)) {
-            int isna_ = na ? na[i] != 0 : is_na(xi);
+            int isna_ = na ? na[i] != 0 : slr_is_na(xi);
             if (isnan(xi)) {
                 if (isna_) naflag = 1;
                 else nanflag = 1;
@@ -358,7 +224,7 @@ int sl_r_encode_real(int64_t n, const double *x, const unsigned char *na, int w,
     if (!offs) return SL_ENOMEM;
     offs[0] = 0;
     for (i = 0; i < n; i++) {
-        encode1(&b, x[i], na ? na[i] != 0 : is_na(x[i]), w, d, e, dec, nastr, drop0);
+        encode1(&b, x[i], na ? na[i] != 0 : slr_is_na(x[i]), w, d, e, dec, nastr, drop0);
         offs[i + 1] = b.n;
     }
     return finish_strs(&b, offs, n, out, off);
@@ -369,7 +235,7 @@ static void real_to_str(sbuf *b, double x, int scipen, const char *dec)
 {
     int w, d, e;
     sl_r_format_real(1, &x, NULL, 15, 0, scipen, &w, &d, &e);
-    encode1(b, x, is_na(x), w, d, e, dec, "NA", 1);
+    encode1(b, x, slr_is_na(x), w, d, e, dec, "NA", 1);
 }
 
 int sl_r_as_character_real(int64_t n, const double *x, int scipen, const char *dec, char **out, int64_t **off)
@@ -565,13 +431,13 @@ static int coerce_once(sarg *a, char sc, int scipen, const char *dec)
             int exact = 1;
             for (i = 0; i < a->n && exact; i++) {
                 double r = a->dv[i];
-                if (is_na(r)) continue;
+                if (slr_is_na(r)) continue;
                 if (!isfinite(r) || !(fabs(r) < 2147483648.0) || trunc(r) != r) exact = 0;
             }
             if (exact) {
                 a->own_i = (int32_t *) malloc((size_t) (a->n > 0 ? a->n : 1) * sizeof(int32_t));
                 if (!a->own_i) return SL_ENOMEM;
-                for (i = 0; i < a->n; i++) a->own_i[i] = is_na(a->dv[i]) ? NA_INT_ : (int32_t) a->dv[i];
+                for (i = 0; i < a->n; i++) a->own_i[i] = slr_is_na(a->dv[i]) ? NA_INT_ : (int32_t) a->dv[i];
                 a->iv = a->own_i;
                 a->type = SL_RS_INT;
                 a->sv = NULL;
@@ -600,7 +466,7 @@ static int coerce_once(sarg *a, char sc, int scipen, const char *dec)
                     char t[64];
                     if (a->type == SL_RS_DBL) {
                         sbuf b = {NULL, 0, 0, 0, 0};
-                        if (is_na(a->dv[i])) continue;
+                        if (slr_is_na(a->dv[i])) continue;
                         real_to_str(&b, a->dv[i], scipen, dec);
                         if (b.bad) return SL_ENOMEM;
                         a->own_s[i] = b.p;
@@ -803,7 +669,7 @@ static int sprintf_impl(sl_ctx *cx, int64_t nfmt, const char *const *fmt, int na
                         with_conv(f2, sizeof f2, fmtp, dot ? (size_t) (dot - fmtp) : strlen(fmtp) - 1, 's');
                         spc = strchr(f2, ' ') != NULL;
                         if (isnan(x)) {
-                            const char *word = is_na(x) ? (spc ? " NA" : "NA") : (spc ? " NaN" : "NaN");
+                            const char *word = slr_is_na(x) ? (spc ? " NA" : "NA") : (spc ? " NaN" : "NaN");
                             st = cvt(cx, &b, f2, 2, 0, 0, word);
                         } else if (x > 0) {
                             st = cvt(cx, &b, f2, 2, 0, 0, strchr(f2, '+') ? "+Inf" : (spc ? " Inf" : "Inf"));

@@ -28,6 +28,7 @@ import ..SimLev
 using ..SimLev: _match_arg, _which_max, _which_min   # util.jl (seit 1.6.1 eine Fassung)
 using ..SimLev: _alloc_c, _alloc_ticks, _esc
 using ..SimLev: RList, RFrame, RVector, NamedMat, NA, isna_strict
+using ..SimLev: _sprintf, _fmt1, _ldsum, _colmeans, _rowsums, _mean_lgl, _unique, _setdiff, _isna, _strip_nl   # util.jl, r/rnum.jl
 using Dates
 
 export portfolio_optimize, portfolio_frontier, portfolio_rolling, portfolio_risk_contributions, portfolio_cpcv,
@@ -45,26 +46,7 @@ const _PO_FORMALS = ["x", "assets", "method", "lower", "upper", "cov", "mu", "ri
 # kleine R-Hilfen
 # ═══════════════════════════════════════════════════════════════════════════
 
-_sprintf(fmt, args...) = (s = SimLev.RFmt.sprintf(fmt, args...); s isa AbstractString ? String(s) : String(first(s)))
 _sqrt(x::Float64) = x < 0 ? NaN : sqrt(x)
-
-"R-`format(x)` eines Vektors → Zeichenvektor (gemeinsame Breite)."
-function _fmt1(x)
-    r = SimLev.RFmt.format(x)
-    r isa AbstractString ? [String(r)] : String[String(s) for s in r]
-end
-
-"`sum(x)` in long double (sequenziell)."
-_ldsum(x) = SimLev.r_sum(x)
-
-"`colMeans` (long double, Division in long double)."
-_colmeans(A::AbstractMatrix{Float64}) = size(A, 1) == 0 ? fill(NaN, size(A, 2)) : SimLev._ld_colsums(A; mean = true)
-
-"`rowSums` (long double; C-Kern)."
-_rowsums(A::AbstractMatrix{Float64}) = SimLev._ld_rowsums(A)
-
-"`mean` eines logischen Vektors."
-_mean_lgl(x) = SimLev.r_mean_int(Int[v ? 1 : 0 for v in x])
 
 _asmat(x::NamedMat) = Matrix{Float64}(x.data)
 _asmat(x::AbstractMatrix) = Matrix{Float64}(x)
@@ -115,10 +97,6 @@ function _diagm(v, N::Int)
 end
 _diag(S::AbstractMatrix) = Float64[S[i, i] for i in 1:min(size(S)...)]
 
-_unique(v) = (out = similar(v, 0); for s in v; s in out || push!(out, s); end; out)
-_setdiff(a, b) = _unique([x for x in a if !(x in b)])
-
-_isna(v) = v === missing || v === nothing || (v isa AbstractFloat && isnan(v))
 _isnum(v) = (v isa Real && !(v isa Bool)) || v === missing
 
 "Benannter Vektor → (Namen oder `nothing`, Werte, numerisch?)."
@@ -223,8 +201,7 @@ function _opt_returns(x, assets = nothing, frequency = "week")
         cn = names(x)
         cols = [x[k] for k in cn]
         isnum = all(c -> _isnum_col(c) || eltype(c) <: Union{Missing,Bool}, cols)
-        Araw = isnum ? Float64[c[i] === missing ? NA : Float64(c[i]) for i in 1:SimLev.nrow(x), c in cols] :
-                       Any[c[i] for i in 1:SimLev.nrow(x), c in cols]
+        Araw = isnum ? _opt_num_cols(cols, SimLev.nrow(x)) : Any[c[i] for i in 1:SimLev.nrow(x), c in cols]
     elseif x isa NamedMat
         cn = x.colnames === nothing ? nothing : copy(x.colnames)
         Araw = x.data
@@ -253,6 +230,23 @@ function _opt_returns(x, assets = nothing, frequency = "week")
     ok = [!any(isnan, @view A[i, :]) for i in 1:size(A, 1)]
     ppy = frequency == "day" ? 252.0 : frequency == "week" ? 52.0 : 12.0
     (R = A[ok, :], cn = cn, ppy = ppy, dates = nothing)
+end
+
+"""Zahlenspalten eines Rahmens als Matrix (seit 1.6.3 spaltenweise mit Funktionsgrenze je Spaltentyp; bis 1.6.2 eine
+Komprehension über Zeilen und Spalten mit Laufzeit-Dispatch je Zelle; gleiche Werte, Fehler in derselben Zellfolge)."""
+function _opt_num_cols(cols, n::Int)
+    A = Matrix{Float64}(undef, n, length(cols))
+    for (j, c) in enumerate(cols)
+        _opt_num_col!(A, j, c, n)
+    end
+    return A
+end
+function _opt_num_col!(A::Matrix{Float64}, j::Int, c::AbstractVector, n::Int)
+    for i in 1:n
+        v = c[i]
+        A[i, j] = v === missing ? NA : Float64(v)
+    end
+    return nothing
 end
 
 "`.opt_check_finite`: unendliche Renditen mit Spalte und Zeile melden."
@@ -359,9 +353,20 @@ function _opt_cov_m(R::Matrix{Float64}, type::String)
         nrm(Am) = (a = vec(Am); _ldsum(a .* a) / N)
         d2 = nrm(S1 .- dm)
         acc = Vector{Float64}(undef, Tn)
+        # seit 1.6.3 ohne tcrossprod-Matrix und Kopien je Zeile: dieselben Operationen je Element (sl_tcrossprod rechnet
+        # 0.0 + x_i x_j in double), dieselbe Summe in long double über vec() in Spaltenfolge
+        buf = Vector{Float64}(undef, N * N)
         for t in 1:Tn
-            xt = X[t, :]
-            acc[t] = nrm(SimLev.SLib.tcrossprod(xt) .- S1)
+            k = 0
+            for j in 1:N
+                xj = X[t, j]
+                for i in 1:N
+                    k += 1
+                    d = (0.0 + X[t, i] * xj) - S1[i, j]
+                    buf[k] = d * d
+                end
+            end
+            acc[t] = _ldsum(buf) / N
         end
         b2 = min(d2, _ldsum(acc) / (Float64(Tn) * Float64(Tn)))
         a2 = d2 - b2
@@ -548,9 +553,12 @@ end
 # ═══════════════════════════════════════════════════════════════════════════
 
 "`.opt_core`: ein Optimierungsschritt auf einer Renditematrix."
-function _opt_core(A::Matrix{Float64}, nm, method, lo, hi, cov_type, mu, risk_free, risk_aversion, budget, alpha, ppy)
+function _opt_core(A::Matrix{Float64}, nm, method, lo, hi, cov_type, mu, risk_free, risk_aversion, budget, alpha, ppy;
+                   scache = nothing)
     N = size(A, 2)
     S = _opt_cov_m(A, cov_type) .* ppy
+    # seit 1.6.3: Kovarianz für _opt_summary auf derselben Matrix (B-jl-3; reine Funktion, eine Kopie)
+    scache === nothing || (scache[] = (A, cov_type, ppy, copy(S)))
     m = mu === nothing ? _colmeans(A) .* ppy : mu ./ 100
     function mu_miss()
         any(isnan, m) && error("$method: mu für alle Anlagen angeben; es fehlt ein Wert für " *
@@ -774,7 +782,9 @@ function portfolio_optimize(x; assets = nothing, method = nothing, lower = 0, up
     end
     ppy = rr.ppy
     alpha = Float64(alpha isa AbstractVector ? alpha[1] : alpha)
-    core(Rx) = _opt_core(Rx, nm, method, lo, hi, cov, muv, Float64(risk_free), Float64(risk_aversion), budget, alpha, ppy)
+    scache = Ref{Any}(nothing)
+    core(Rx) = _opt_core(Rx, nm, method, lo, hi, cov, muv, Float64(risk_free), Float64(risk_aversion), budget, alpha, ppy;
+                         scache = scache)
     w = core(A)
     wb = nothing
     if resample > 0
@@ -790,7 +800,7 @@ function portfolio_optimize(x; assets = nothing, method = nothing, lower = 0, up
         wv = _colmeans(wbm)
         w = wv ./ _ldsum(wv)
     end
-    out = _opt_summary(w, A, nm, ppy, cov, risk_free, alpha)
+    out = _opt_summary(w, A, nm, ppy, cov, risk_free, alpha; scache = scache)
     out["method"] = method
     out["bounds"] = NamedMat(vcat(reshape(lo, 1, :), reshape(hi, 1, :)); rownames = ["lower", "upper"])
     out["resampled"] = wb
@@ -802,8 +812,9 @@ function portfolio_optimize(x; assets = nothing, method = nothing, lower = 0, up
 end
 
 "`.opt_summary`: Kennzahlen eines Gewichtsvektors."
-function _opt_summary(w::Vector{Float64}, A::Matrix{Float64}, nm, ppy, cov_type, risk_free, alpha)
-    S = _opt_cov_m(A, cov_type) .* ppy
+function _opt_summary(w::Vector{Float64}, A::Matrix{Float64}, nm, ppy, cov_type, risk_free, alpha; scache = nothing)
+    c = scache === nothing ? nothing : scache[]
+    S = c !== nothing && c[1] === A && c[2] == cov_type && c[3] === ppy ? c[4] : _opt_cov_m(A, cov_type) .* ppy
     m = _colmeans(A) .* ppy
     q = _quad(w, S)
     vol = isnan(q) ? q : _sqrt(max(q, 0.0))
@@ -828,7 +839,6 @@ function _opt_summary(w::Vector{Float64}, A::Matrix{Float64}, nm, ppy, cov_type,
     RList("weights" => RVector(copy(w); names = copy(nm)), "stats" => stats, "risk" => risk, "alpha" => alpha)
 end
 
-_strip_nl(s) = endswith(s, "\n") ? s[1:prevind(s, lastindex(s))] : s
 _print_df(df; kw...) = _strip_nl(String(SimLev.RFmt.print_data_frame(df; kw...)))
 
 "`print.SimLevOptimization`."
@@ -1183,7 +1193,7 @@ function portfolio_risk_contributions(x, weights; measure = nothing, alpha = 0.0
     at["measure"] = measure
     at["effective_n"] = 1 / _ldsum(sh .* sh)
     if measure == "volatility"
-        at["diversification_ratio"] = _ldsum(w .* sqrt.(_diag(_opt_cov_m(A, cov) .* rr.ppy))) / tot
+        at["diversification_ratio"] = _ldsum(w .* sqrt.(_diag(S))) / tot   # S von oben (seit 1.6.3 einmal gerechnet)
     end
     out
 end
@@ -1221,7 +1231,6 @@ function _as_pairs(x)
     (x isa AbstractVector && !isempty(x) && all(p -> p isa Pair, x)) && return Pair{String,Any}[string(p.first) => p.second for p in x]
     nothing
 end
-_is_list(x) = x isa Union{RList,NamedTuple,AbstractDict} || (x isa AbstractVector && eltype(x) !== Char && !(eltype(x) <: Union{Real,AbstractString,Missing}))
 
 """
     portfolio_cpcv(x; assets = nothing, methods = ["equal", "inverse_vol", "min_variance",

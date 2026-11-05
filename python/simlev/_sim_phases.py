@@ -117,7 +117,7 @@ def _tax_rates(rate, church_tax, guenstigerpruefung, marginal_rate, include_soli
             "effective_tax_rate": effective_tax_rate, "church_k": church_k, "soli_factor_income": soli_factor_income}
 
 
-def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_days,
+def _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value, dca_days,
                       balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
                       marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                       use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
@@ -133,20 +133,9 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     if strategy is None or len(strategy) == 0:
         _stop("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein (z. B. aus "
               "create_strategy()), nicht %s." % ("fehlend" if strategy is None else "leer (L\u00e4nge 0)"))
-    if spread is not None:
-        _warn("simulation: Das Argument 'spread' wird nicht ausgewertet; ma\u00dfgeblich ist spread je Asset "
-              "(asset_config()).")
-    if isinstance(data, pd.DataFrame):
-        names_d = [str(c) for c in data.columns]
-        dup = [nm for i, nm in enumerate(names_d) if nm in names_d[:i]]
-    else:
-        dup = []
     if not isinstance(strategy, Mapping) or any(str(k) == "" for k in strategy.keys()):
         _stop("simulation: Alle Assets in 'strategy' m\u00fcssen benannt sein (Name = Kursspalte in 'data').")
-    if dup:
-        _stop("simulation: Spaltenname '%s' kommt in 'data' mehrfach vor; jede Spalte muss eindeutig benannt sein."
-              % dup[0])
-    fr = _to_frame(data)
+    fr = _to_frame(data)   # meldet doppelte Spaltennamen
     filled_attr = fr.filled_attr
     strat: dict = {}
     for k, a in strategy.items():
@@ -270,21 +259,21 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
               "series_align()-Ausgabe); es wird ignoriert, aufgef\u00fcllte Tage gelten dann als Handelstage. Zeitraum "
               "besser mit series_align(..., start =, end =) w\u00e4hlen." % (fa_n, nrow))
         fa_m = None
+    isna_of = {}   # NA-Maske je Asset (seit 1.6.3 einmal je Asset; nrow >= 1, also stets bool)
+    for nm in strat:
+        col = fr.get(nm)
+        isna_of[nm] = np.isnan(col) if fr.is_numeric(nm) else np.array([_isna(v) for v in col], dtype=bool)
     pre_filled = np.zeros(nrow, dtype=bool)
     if fa_m is not None and fa_m.shape[0] == nrow and fa_cols is not None:
         fc = [nm for nm in strat if nm in fa_cols]
         if fc:
             real = np.zeros(nrow, dtype=np.int64)
             for nm in fc:
-                col = fr.get(nm)
-                isna = np.isnan(col) if fr.is_numeric(nm) else np.array([_isna(v) for v in col])
-                real += (~fa_m[:, fa_cols.index(nm)] & ~isna).astype(np.int64)
+                real += (~fa_m[:, fa_cols.index(nm)] & ~isna_of[nm]).astype(np.int64)
             pre_filled = real == 0
     all_na = np.ones(nrow, dtype=bool)
     for nm in strat:
-        col = fr.get(nm)
-        isna = np.isnan(col) if fr.is_numeric(nm) else np.array([_isna(v) for v in col], dtype=bool)
-        all_na &= isna
+        all_na &= isna_of[nm]
     if all_na[0]:
         _stop("simulation: In der ersten Zeile von 'data' fehlen alle Kurse (NA); mindestens ein Asset muss am ersten "
               "Tag notieren. Daten erst ab dem ersten Kurs \u00fcbergeben.")
@@ -400,13 +389,12 @@ def _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dc
     # withdrawal_simulation()); Rechenfolge, Warnungen und Druck wie bisher an dieser Stelle
     tr = _tax_rates(tax_rate, church_tax, use_guenstigerpruefung, marginal_tax_rate, include_soli_on_income_tax,
                     soli_rate_income_tax, "simulation", details=details, tariff_on=tariff_on)
-    tax_rate = tr["tax_rate"]
     marginal_tax_rate = tr["marginal_tax_rate"]
     effective_tax_rate = tr["effective_tax_rate"]
     soli_factor_income = tr["soli_factor_income"]
     church_k = tr["church_k"]
     return {"data": fr, "strategy": strat, "tax_mode": tax_mode, "start_value": start_value,
-            "tax_rate": tax_rate, "marginal_tax_rate": marginal_tax_rate, "effective_tax_rate": effective_tax_rate,
+            "marginal_tax_rate": marginal_tax_rate, "effective_tax_rate": effective_tax_rate,
             "soli_factor_income": soli_factor_income, "church_k": church_k, "tariff_env": tariff_env,
             "private_sale_threshold": private_sale_threshold, "sparer_pauschbetrag": sparer_pauschbetrag,
             "use_sparer_pauschbetrag": use_sparer_pauschbetrag, "fractions": fractions,
@@ -473,7 +461,7 @@ def _sim_prepare_data(fr: _Frame, pre_filled: np.ndarray, base_rate_flex, base_r
     return {"data": fr, "start_date": start_date, "stopp_date": stopp_date}
 
 
-def _signal_col(fr: _Frame, col: str | None, n: int) -> np.ndarray | None:
+def _signal_col(fr: _Frame, col: str | None) -> np.ndarray | None:
     if col is None:
         return None   # keine Spalte: der Kern liest FALSE an jedem Tag (seit 1.6.1; bis 1.6.0 ein Feld aus False je Tag)
     v = fr.get(col)
@@ -539,18 +527,22 @@ def _sim_build_state(fr: _Frame, strategy: dict, start_date: int, stopp_date: in
             "asset_day": np.arange(start_date, stopp_date + 1, dtype=np.int64),
             "base_rates": br,
             "asset_price": np.array(fr.get(name), dtype=np.float64),
-            "signal_buy": _signal_col(fr, a.get("signal_buy"), n),
-            "signal_sell": _signal_col(fr, a.get("signal_sell"), n),
+            "signal_buy": _signal_col(fr, a.get("signal_buy")),
+            "signal_sell": _signal_col(fr, a.get("signal_sell")),
             "spread_rate": (0.0 if spread_a is None else float(spread_a)) / 100,
         }
-        sim["trades"][name] = {"buys": [], "buy_count": 0, "sells": [], "sell_count": 0, "taxes": [],
-                               "tax_count": 0, "fifo_front": 1}
+        sim["trades"][name] = {"raw": None}   # flache Felder des Kerns (_sim_engine_run, seit 1.6.3)
     return sim   # status und report setzt der Kern (Startgewichte, Anfangszustand)
 
 
 def _as_logical_col(fr: _Frame, col: str) -> np.ndarray:
     v = fr.get(col)
     k = fr.kinds[col]
+    if k == "numeric":   # Schnellweg (seit 1.6.3): NA/NaN -> FALSE, sonst x != 0 wie die Schleife
+        a = np.asarray(v, dtype=np.float64)
+        return ~np.isnan(a) & (a != 0)
+    if k == "logical" and all(x is True or x is False or x is None for x in v):
+        return np.array([x is True for x in v], dtype=bool)
     out = np.zeros(len(v), dtype=bool)
     for i, x in enumerate(v):
         if _isna(x):

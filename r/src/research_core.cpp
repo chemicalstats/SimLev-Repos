@@ -23,6 +23,7 @@
 //   .roll_mean_core     rollierender Mittelwert mit kompensierter Summe
 //   .kendall_tau_core   Kendalls Tau-b
 //   .roll_cov_core      rollierende Kovarianz
+//   C_roll_max_core     rollierendes Maximum (seit 1.6.3; ohne R-Huelle, .Call direkt)
 //
 // Alle Kerne ziehen keine Zufallszahlen.
 
@@ -203,6 +204,21 @@ extern "C" SEXP C_roll_mean_core(SEXP s_x, SEXP s_n) {
     sl::NumVec x = sl::num_vec(s_x);
     int n = sl::as_int(s_n);
     return simlev::roll_mean_core(x, n);
+  });
+}
+
+// Rollierendes Maximum (seit 1.6.3, research_core_impl.h roll_max_core): x double (NaN/NA zaehlen als -Inf),
+// w >= 1 (Fenster), zero 0 (R: erstes Auftreten) bzw. 1 (-0 < +0); Ergebnis double wie x
+extern "C" SEXP C_roll_max_core(SEXP s_x, SEXP s_w, SEXP s_zero) {
+  return sl::call([&]() {
+    sl::NumVec x = sl::num_vec(s_x);
+    const double w = sl::as_double(s_w);
+    const int zero = sl::as_int(s_zero);
+    if (!(w >= 1)) sl::stop("roll_max_core: Fenster muss >= 1 sein");
+    sl::NumVec out = sl::new_num(x.len);
+    if (simlev::roll_max_core(x.len, x.ptr, w >= 9.0e18 ? INT64_MAX : (int64_t) w, zero, out.ptr) != 0)
+      sl::stop("roll_max_core: zero muss 0 oder 1 sein");
+    return out.sexp;
   });
 }
 

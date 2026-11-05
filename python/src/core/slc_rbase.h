@@ -36,7 +36,9 @@
 #ifndef SLC_RBASE_H
 #define SLC_RBASE_H
 
+#include <math.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "slc.h"
 
@@ -58,10 +60,34 @@ void   sl_r_cummin(int64_t n, const double *x, double *out) SL_NOTHROW;
 /* x: nr × nc spaltenweise; mean: Mittel statt Summe; out: nc (colSums) bzw. nr (rowSums) */
 void   sl_r_colsums(int64_t nr, int64_t nc, const double *x, int narm, int mean, double *out) SL_NOTHROW;
 int    sl_r_rowsums(int64_t nr, int64_t nc, const double *x, int narm, int mean, double *out) SL_NOTHROW;
+/* wie sl_r_colsums auf x[idx, ] (seit 1.6.3, ohne Kopie): Element (r, j) bei x[r rs + j cs], m Zeilennummern idx ab
+ * base (0 oder 1), out nc Werte; SL_OK, SL_EARG (Zeile ausserhalb 0..nr-1), SL_ENOMEM */
+int    sl_r_colsums_idx(int64_t nr, int64_t nc, const double *x, int64_t rs, int64_t cs, int64_t m, const int64_t *idx,
+                        int64_t base, int narm, int mean, double *out) SL_NOTHROW;
+/* wie sl_r_rowsums, Spalte j bei cols[j] (je nr Werte; seit 1.6.3, ohne Kopie in eine Matrix) */
+int    sl_r_rowsums_cols(int64_t nr, int64_t nc, const double *const *cols, int narm, int mean, double *out) SL_NOTHROW;
 /* x ^ y elementweise (R's Operator ^ für Doubles); y mit Länge 1 */
 void   sl_r_pow(int64_t n, const double *x, double y, double *out) SL_NOTHROW;
 double sl_r_pow1(double x, double y) SL_NOTHROW;
 void   sl_r_pow_rec(int64_t nx, const double *x, int64_t ny, const double *y, double *out) SL_NOTHROW;   /* mit Recycling */
+/* R's log für ein Double (arithmetic.c R_log über math1): x > 0 log(x), 0 -> -Inf, NaN bleibt x (Nutzlast),
+ * sonst R_NaN (0x7FF8000000000000). Seit 1.6.3 eine Fassung für sl_r_math1, hmm_em (research_core_impl.h) und
+ * die Entnahme (withdrawal_core_impl.h); vorher je eine Kopie (dort quiet_NaN(), unter GCC/Clang dieselben Bits). */
+static inline double sl_r_log1(double x)
+{
+    const uint64_t nan_bits = UINT64_C(0x7FF8000000000000);
+    double r_nan;
+    if (x > 0) return log(x);
+    if (x == 0) return -INFINITY;
+    if (isnan(x)) return x;
+    memcpy(&r_nan, &nan_bits, sizeof r_nan);
+    return r_nan;
+}
+/* round(x, digits) bzw. signif(x, digits) eines Werts; sl_r_round_vec: kind 0 round, 1 signif mit Recycling
+ * (Länge max(nx, nd)). Seit 1.6.3 in slc_rbase.cpp (vorher slc_rbase_fmt.cpp), auch für den Tarif. */
+double sl_r_fround(double x, double digits) SL_NOTHROW;
+double sl_r_fprec(double x, double digits) SL_NOTHROW;
+void   sl_r_round_vec(int kind, int64_t nx, const double *x, int64_t nd, const double *digits, double *out) SL_NOTHROW;
 /* libm elementweise wie R's math1 (seit 1.5.2; Python-Hülle simlev._r.libm) */
 enum { SL_R_EXP = 0, SL_R_LOG = 1, SL_R_LOG1P = 2, SL_R_EXPM1 = 3, SL_R_LOG2 = 4, SL_R_LOG10 = 5 };
 void   sl_r_math1(int kind, int64_t n, const double *x, double *out) SL_NOTHROW;
@@ -123,6 +149,14 @@ int     sl_r_scientific(double r, int digits, int *kpower, int *nsig) SL_NOTHROW
  * 2048; cap >= 2048 genügt immer), -1 bei |z| >= 1e14 (NA), -2 bei mehr als 2048 Bytes (Fehler wie R:
  * "output string exceeded 2048 bytes"), -3 ohne Speicher. sl_r_strptime_ymd: as.Date(s, format =
  * "%Y<sep>%m<sep>%d"); 1 = gelesen (*z), 0 = NA. */
+/* sl_r_civil_from_days, sl_r_days_from_civil (seit 1.6.3 in slc_rbase.cpp, auch für slc_prep.cpp und r/src/);
+ * sl_r_fdiv: Abrundungsdivision für int64_t */
+static inline int64_t sl_r_fdiv(int64_t a, int64_t b)
+{
+    int64_t q = a / b;
+    if ((a % b != 0) && ((a < 0) != (b < 0))) q--;
+    return q;
+}
 void    sl_r_civil_from_days(int64_t z, int64_t *y, int *m, int *d) SL_NOTHROW;
 int64_t sl_r_days_from_civil(int64_t y, int m, int d) SL_NOTHROW;
 int64_t sl_r_strftime(int64_t z, const char *fmt, int64_t flen, int digits_secs, char *buf, int64_t cap) SL_NOTHROW;

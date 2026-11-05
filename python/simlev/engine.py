@@ -522,7 +522,6 @@ def _simulation_flat(
     data: Any,
     strategy: Mapping[str, Mapping[str, Any]],
     start_value: float = 10000,
-    spread: float | None = None,
     details: bool = False,
     liquidate: bool = False,
     # DCA
@@ -608,7 +607,7 @@ def _simulation_flat(
     ``harvest_days``).
     """
     cfg = _sim_check_inputs(
-        data=data, strategy=strategy, start_value=start_value, spread=spread, details=details,
+        data=data, strategy=strategy, start_value=start_value, details=details,
         dca_mode=dca_mode, dca_value=dca_value, dca_days=dca_days, balance_mode=balance_mode,
         balance_days=balance_days, balance_thresh=balance_thresh, balance_thresh_type=balance_thresh_type,
         tax_mode=tax_mode, tax_rate=tax_rate, marginal_tax_rate=marginal_tax_rate,
@@ -622,11 +621,11 @@ def _simulation_flat(
     if split_thresh is not None:
         split_thresh = _num_vec(split_thresh)
     prep = _sim_prepare_data(cfg["data"], cfg["pre_filled"], base_rate_flex, base_rate_data)
-    sim = _sim_build_state(prep["data"], cfg["strategy"], cfg["start_value"], prep["start_date"],
+    sim = _sim_build_state(prep["data"], cfg["strategy"], prep["start_date"],
                            prep["stopp_date"], cfg["sparer_pauschbetrag"], cfg["use_sparer_pauschbetrag"],
                            cfg["base_rate"], base_rate_flex, base_rate_data)
     cal = _sim_build_calendar(prep["data"], sim, cfg["strategy"], prep["start_date"], prep["stopp_date"],
-                              liquidate, cfg["dca_mode"], dca_span, dca_unit, cfg["dca_days"], cfg["dca_value"],
+                              cfg["dca_mode"], dca_span, dca_unit, cfg["dca_days"], cfg["dca_value"],
                               dca_anchor, dca_start, dca_skip, cfg["balance_mode"], balance_span, balance_unit,
                               cfg["balance_days"], balance_anchor, balance_start, balance_skip, cfg["event_col"],
                               event_mode, event_weight)

@@ -68,6 +68,13 @@ typedef struct sl_letf {
 int  sl_boot_path(sl_ctx *cx, int64_t n_out, int k, const double *ret, const int64_t *idx, int64_t n_aux, int na,
                   const double *aux, const double *aux_ratio, const double *aux_start, const int *level, int nL,
                   const sl_letf *letf, double start, double *P, double *lv) SL_NOTHROW;
+/* wie sl_boot_path mit ret = src[idx, ] (seit 1.6.3): src n_src × k mit Element (r, j) bei src[r rs + j cs], idx
+ * n_out Zeilen (1-basiert, 1..n_src) für Renditen und Zusatzreihen; Ergebnis Bit für Bit wie sl_boot_path auf der
+ * Kopie. */
+int  sl_boot_path_src(sl_ctx *cx, int64_t n_out, int k, const double *src, int64_t n_src, int64_t rs, int64_t cs,
+                      const int64_t *idx, int64_t n_aux, int na, const double *aux, const double *aux_ratio,
+                      const double *aux_start, const int *level, int nL, const sl_letf *letf, double start, double *P,
+                      double *lv) SL_NOTHROW;
 
 /* ── t-Verteilung auf mehreren Threads (slc_special.cpp) ──────────────────── */
 int  sl_pt_mt(sl_ctx *cx, int64_t n, const double *t, double df, int lower, double *out, int nthreads) SL_NOTHROW;

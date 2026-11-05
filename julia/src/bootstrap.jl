@@ -91,7 +91,8 @@ function _num1(v)
 end
 _f1(v) = _numvec(v)[1]
 
-"Gleitkommavektor aus beliebigen numerischen Eingaben."
+"Gleitkommavektor aus beliebigen numerischen Eingaben (immer eine neue Kopie)."
+_dvec(x::Vector{Float64}) = copy(x)   # seit 1.6.3 eine Kopie (bis 1.6.2 collect und Umwandlung je Wert, gleiche Bits)
 _dvec(x) = x === nothing ? Float64[] : x isa Real ? [Float64(x)] : x isa RVector ? Float64.(x.values) :
            x isa NamedMat ? Float64.(vec(x.data)) : Float64[v === missing ? NA : Float64(v) for v in vec(collect(x))]
 _ivec(x) = x === nothing ? Int[] : x isa Real ? [Int(x)] : Int[Int(v) for v in vec(collect(x))]
@@ -166,7 +167,6 @@ function _get(x, name::AbstractString, default = nothing)
     end
     return v === nothing ? default : v
 end
-_has(x, name) = _get(x, name) !== nothing
 
 "Geordnete Liste (RList) aus NamedTuple/Dict/Pairs/RList/nothing."
 function _as_rlist(x)
@@ -236,7 +236,6 @@ _rsd(x) = SimLev.r_sd(x)
 _rprod(x) = SimLev.r_prod(x)
 _rpow(x, y) = SimLev.r_pow(Float64(x), Float64(y))
 _rlog(x::Real) = SimLev.RLibm.log(Float64(x))
-_rexp(x::Real) = SimLev.RLibm.exp(Float64(x))
 
 "`cumprod(x)` wie in R (long double)."
 function _cumprod(x)
@@ -244,8 +243,6 @@ function _cumprod(x)
 end
 "`cumsum(x)` wie in R (long double)."
 _cumsum(x) = SimLev.r_cumsum(x)
-"`cummax(x)` wie in R."
-_cummax(x) = SimLev.r_cummax(collect(Float64, x))
 
 "`stats::median(x)` (Doubles, NA → NA; R's Teilsortierung über `RStats.median`)."
 _median(x) = Float64(SimLev.RStats.median(_dvec(x)))
@@ -256,9 +253,7 @@ function _quantile7(x, probs)
     return _dvec(r)
 end
 
-"R's `pmax(a, b)` für Skalare (erstes Argument bleibt bei Gleichstand)."
-_pmax(a::Float64, b::Float64) = isnan(a) ? a : isnan(b) ? b : (b > a ? b : a)
-_pmin(a::Float64, b::Float64) = isnan(a) ? a : isnan(b) ? b : (b < a ? b : a)
+using ..SimLev: _pmax, _pmin   # util.jl (seit 1.6.3 eine Fassung)
 
 "R's `order(x)` für Doubles ohne NA (stabil, -0 == 0)."
 _order(x) = sortperm(collect(Float64, x); alg = MergeSort, lt = (a, b) -> a < b)
@@ -351,6 +346,9 @@ historischen Zeile mitgezogen werden. Das Ergebnis ist die Eingabe `config` von 
   - name: Spaltenname im Pfad (Standard `<base>_l<L>`, z. B. "eu_l2", bei negativem Hebel `<base>_inv<|L|>`,
     z. B. "us_inv1").
 
+  Zahlen sind einzelne endliche Zahlen, `base` und `name` ein einzelner Text, `finance` und `days` eine Zahl oder
+  ein Name aus `aux`; andere Werte (Vektoren, `Bool`, `missing`, NaN) ergeben einen Fehler (seit 1.6.3).
+
   Tagesrendite (MSCI Daily Leveraged/Short, plus Fondskosten): r = 1 + L (R - 1) + (1 - L) i · d / 360 - TER ·
   d / 365
   - s · m(L) · d / 360 mit Brutto-Indexrendite R, Tagen je Zeile d, i, TER und s als Anteil (Prozentangabe /
@@ -422,6 +420,7 @@ println(cfg["letf_names"])
 """
 function bootstrap_config(indices; letfs = Any[], regime_index = nothing, aux = nothing, aux_type = nothing,
                           cross = nothing, input = nothing)
+    @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
     cross = _match_arg(cross, ("ratio", "joint"))
     input = _match_arg(input, ("returns", "prices"))
     inames = _names(indices)
@@ -466,31 +465,43 @@ function bootstrap_config(indices; letfs = Any[], regime_index = nothing, aux = 
     aux_type_full = RVector(String[full[n] for n in aux_names]; names = aux_names)
     is_level(nm) = nm isa AbstractString && get(full, nm, "") == "level"
 
+    # LETF-Felder (seit 1.6.3 mit Typ und Länge wie in R): Zahlen einzeln und endlich, base und name einzelner Text,
+    # finance und days Zahl oder Name einer Zusatzreihe
+    num1(v) = _isnum(v) && isfinite(v)
+    chk_num(i, v, nm) = num1(v) || _stop(@sprintf("LETF %d: %s muss eine einzelne endliche Zahl sein", i, nm))
+    chk_col(i, v, nm) = num1(v) || v isa AbstractString ||
+        _stop(@sprintf("LETF %d: %s muss eine einzelne endliche Zahl oder der Name einer Zusatzreihe aus aux sein", i, nm))
     letf_list = Any[]
     for (i, lt0) in enumerate(collect(letfs === nothing ? Any[] : letfs))
         lt = lt0 isa Union{RList,NamedTuple,AbstractDict} ? lt0 : RList()
         base = _get(lt, "base")
         base === nothing && _stop(@sprintf("LETF %d: 'base' muss angegeben werden", i))
+        base isa AbstractString || _stop(@sprintf("LETF %d: base muss ein einzelner Name (Text) sein", i))
         base in index_names || _stop(@sprintf("LETF %d: base '%s' nicht in indices. Verfügbar: %s", i, base, join(index_names, ", ")))
         lev = _rval(_get(lt, "leverage", 2.0))
+        chk_num(i, lev, "leverage")
         lev == 0 && _stop(@sprintf("LETF %d: leverage darf nicht 0 sein", i))
         fin = _rval(_get(lt, "finance", 3.5))
+        chk_col(i, fin, "finance")
         fin isa AbstractString && !(fin in aux_names) && _stop(@sprintf("LETF %d: finance-Reihe '%s' nicht in aux.", i, fin))
         is_level(fin) && _stop(@sprintf("LETF %d: finance-Reihe '%s' ist in aux_type als 'level' gekennzeichnet; der Finanzierungszins muss eine Rate (Prozent p. a.) sein.", i, fin))
         _isnum(fin) && fin < 0 && _warn(@sprintf("LETF %d: negativer Finanzierungszins.", i))
         exp_ = _rval(_get(lt, "expense", 0.5))
+        chk_num(i, exp_, "expense")
         exp_ < 0 && _stop(@sprintf("LETF %d: expense muss >= 0 sein", i))
         days = _rval(_get(lt, "days", 1.0))
+        chk_col(i, days, "days")
         days isa AbstractString && !(days in aux_names) && _stop(@sprintf("LETF %d: days-Reihe '%s' nicht in aux.", i, days))
         is_level(days) && _stop(@sprintf("LETF %d: days-Reihe '%s' ist in aux_type als 'level' gekennzeichnet; Tage je Zeile werden unverändert gebraucht ('rate').", i, days))
+        sp = _rval(_get(lt, "spread", 0.0)); rb = _rval(_get(lt, "rate_basis", 360.0)); tb = _rval(_get(lt, "ter_basis", 365.0))
+        chk_num(i, sp, "spread"); chk_num(i, rb, "rate_basis"); chk_num(i, tb, "ter_basis")
         name = _get(lt, "name")
+        name === nothing || name isa AbstractString || _stop(@sprintf("LETF %d: name muss ein einzelner Name (Text) sein", i))
         if name === nothing
             name = lev > 0 ? string(base, "_l", _as_char(lev)) : string(base, "_inv", _as_char(abs(lev)))
         end
         push!(letf_list, RList("name" => String(name), "base" => String(base), "leverage" => lev, "finance" => fin,
-                               "expense" => exp_, "spread" => _rval(_get(lt, "spread", 0.0)), "days" => days,
-                               "rate_basis" => _rval(_get(lt, "rate_basis", 360.0)),
-                               "ter_basis" => _rval(_get(lt, "ter_basis", 365.0))))
+                               "expense" => exp_, "spread" => sp, "days" => days, "rate_basis" => rb, "ter_basis" => tb))
     end
     letf_names = String[l["name"] for l in letf_list]
     any(_duplicated(vcat(index_names, letf_names, aux_names))) && _stop("Namen von Indizes, LETFs und aux müssen eindeutig sein.")
@@ -1112,10 +1123,13 @@ _as_int(x) = x isa Integer ? Int(x) : Int(trunc(Float64(_f1(x))))
 
 """Eine Renditematrix samt Quellzeilen erzeugen (R: `.generate_returns`); Ziehungen aus dem
 Strom des Pfads (Kerne slc_boot per `ccall`)."""
-function _generate_returns(returns, method, p, info, n_out, stream)
-    R = _mat(returns)
+function _generate_returns(returns, method, p, info, n_out, stream; src_ok::Bool = false)
+    # seit 1.6.3: die einmal je Lauf umgewandelte Renditematrix ohne Kopie (die Kerne lesen nur, SLib kopiert selbst);
+    # src_ok (alle Zeilen endlich und > 0): Zeilenverfahren ohne die Kopie R[idx, :], der Pfad entsteht im Kern aus
+    # den Zeilen der Quelle (_build_path, sl_boot_path_src)
+    R = returns isa Matrix{Float64} ? returns : _mat(returns)
     n, k = size(R)
-    from_idx(idx32) = (idx = Vector{Int}(idx32); RList("ret" => R[idx, :], "idx" => idx))
+    from_idx(idx32) = (idx = Vector{Int}(idx32); src_ok ? RList("src" => R, "idx" => idx) : RList("ret" => R[idx, :], "idx" => idx))
     C = _SL()
     g = if method == "raw"
         from_idx(C.boot_idx_iid(n, n_out; stream = stream))
@@ -1155,46 +1169,8 @@ function _generate_returns(returns, method, p, info, n_out, stream)
     return g
 end
 
-_auxcol(aux_rows, nm) = (aux_rows isa NamedMat ? aux_rows[:, String(nm)] : error("aux_rows ohne Spaltennamen"))
-
-"""
-Hebelprodukt-Renditen (MSCI-Formel plus Fondskosten), R: `.letf_returns`.
-`aux_rows`: Matrix der Zusatzreihen mit Spaltennamen (NamedMat) oder `nothing`.
-"""
-function _letf_returns(rb, letf, aux_rows)
-    L = Float64(_f1(_get(letf, "leverage")))
-    fin = _get(letf, "finance")
-    rate = fin isa AbstractString ? _dvec(_auxcol(aux_rows, fin)) : [Float64(_f1(fin))]
-    dd = _get(letf, "days")
-    d = dd isa AbstractString ? _dvec(_auxcol(aux_rows, dd)) : [Float64(_f1(dd))]
-    m = max(L - 1, 0.0) + max(-L, 0.0)
-    rbas = Float64(_f1(_get(letf, "rate_basis"))); tbas = Float64(_f1(_get(letf, "ter_basis")))
-    ex = Float64(_f1(_get(letf, "expense"))); sp = Float64(_f1(_get(letf, "spread")))
-    rb = _dvec(rb)
-    n = max(length(rb), length(rate), length(d))
-    out = Vector{Float64}(undef, n)
-    for i in 1:n
-        r = rb[(i-1)%length(rb)+1]; ra = rate[(i-1)%length(rate)+1]; di = d[(i-1)%length(d)+1]
-        t1 = 1 + L * (r - 1)
-        t2 = (1 - L) * ra / 100 * di / rbas
-        t3 = ex / 100 * di / tbas
-        t4 = sp / 100 * m * di / rbas
-        out[i] = t1 + t2 - t3 - t4
-    end
-    return out
-end
-
-"`apply(M, 2, cumprod)` (long double)."
-function _cumprod_cols(M::Matrix{Float64})
-    out = similar(M)
-    for j in 1:size(M, 2)
-        out[:, j] = _cumprod(view(M, :, j))
-    end
-    return out
-end
-
-"""Angaben für den Kern `sl_boot_path` (seit 1.6.0; wie `.boot_path_spec` in R) oder `nothing` (dann rechnet
-`_build_path` wie bisher): Zusatzreihen als Matrix, Merker der Niveau-Reihen, Hebelprodukte (`SLib.Letf`)."""
+"""Angaben für den Kern `sl_boot_path` (seit 1.6.0; wie `.boot_path_spec` in R) oder `nothing` (seit 1.6.3 ein
+interner Fehler in `_build_path`): Zusatzreihen als Matrix, Merker der Niveau-Reihen, Hebelprodukte (`SLib.Letf`)."""
 function _boot_path_spec(aux, config, aux_ratio, aux_start)
     try
         inames = _cfg_list(config, "index_names")
@@ -1228,65 +1204,34 @@ function _boot_path_spec(aux, config, aux_ratio, aux_start)
     end
 end
 
-"Preis-Pfad aus Renditen bauen (R: `.build_path`); NamedMat oder `nothing` (seit 1.6.0 mit `spec` im Kern)."
+"""Preis-Pfad aus Renditen bauen (R: `.build_path`); NamedMat oder `nothing` (seit 1.6.0 mit `spec` im Kern; seit
+1.6.3 ohne Rückfall in Julia: unerreichbar, `bootstrap_config` prüft die LETF-Felder)."""
 function _build_path(g, aux, config; start = 100.0, aux_ratio = nothing, aux_start = nothing, spec = nothing)
+    if haskey(g, "src")   # Zeilen der geprüften Quelle (seit 1.6.3): gleiche Prüfungen, Kern sl_boot_path_src
+        src = g["src"]::Matrix{Float64}
+        idx = Vector{Int64}(g["idx"])
+        (spec !== nothing && length(idx) >= 1 && size(src, 2) == length(spec.inames) &&
+         (spec.aux === nothing || all(i -> 1 <= i <= size(spec.aux, 1), idx))) ||
+            _stop("bootstrap: interner Fehler: Angaben für den Pfadkern unvollständig (.boot_path_spec)")
+        r = SimLev.SLib.boot_path_src(src, idx, spec.aux, spec.ratio, spec.start, spec.level, spec.letf, Float64(start))
+        r === nothing && return nothing
+        out = NamedMat(r[1]; colnames = copy(spec.cols))
+        r[2] === nothing || (out.attrs["aux_level"] = NamedMat(r[2]; colnames = copy(spec.anames)))
+        return out
+    end
     ret = g["ret"]
     idx = _ivec(g["idx"])
     ret isa AbstractMatrix || return nothing
     ret = _mat(ret)
     (any(!isfinite, ret) || any(<=(0), ret)) && return nothing
     # seit 1.6.0 im Kern (sl_boot_path: Kurspfade, Hebelprodukte, Zusatzreihen und Niveau-Variante in einem Aufruf)
-    if spec !== nothing && size(ret, 1) >= 1 && length(idx) == size(ret, 1) && size(ret, 2) == length(spec.inames) &&
-       (spec.aux === nothing || all(i -> 1 <= i <= size(spec.aux, 1), idx))
-        r = SimLev.SLib.boot_path(ret, Int64.(idx), spec.aux, spec.ratio, spec.start, spec.level, spec.letf, Float64(start))
-        r === nothing && return nothing
-        out = NamedMat(r[1]; colnames = copy(spec.cols))
-        r[2] === nothing || (out.attrs["aux_level"] = NamedMat(r[2]; colnames = copy(spec.anames)))
-        return out
-    end
-    n_out = size(ret, 1)
-    P = start .* _cumprod_cols(vcat(ones(1, size(ret, 2)), ret))
-    cols = copy(_cfg_list(config, "index_names"))
-    blocks = Matrix{Float64}[P]
-    anames = _cfg_list(config, "aux_names")
-    aux_rows = aux === nothing ? nothing : NamedMat(_mat(aux)[idx, :]; colnames = anames)
-    if config["n_letfs"] != 0
-        Ls = Vector{Float64}[]
-        inames = _cfg_list(config, "index_names")
-        for lt in config["letfs"]
-            r = _letf_returns(ret[:, findfirst(==(lt["base"]), inames)], lt, aux_rows)
-            length(r) == 1 && n_out != 1 && (r = fill(r[1], n_out))
-            any(!isfinite, r) && return nothing
-            ko = findfirst(<=(0), r)
-            ko === nothing || (r[ko:n_out] .= 0.0)
-            push!(Ls, start .* _cumprod(vcat(1.0, Float64[_pmax(v, 0.0) for v in r])))
-        end
-        push!(blocks, reduce(hcat, Ls))
-        append!(cols, _cfg_list(config, "letf_names"))
-    end
-    lv = nothing
-    if aux !== nothing
-        A = _mat(aux)[vcat(idx[1], idx), :]
-        push!(blocks, A)
-        append!(cols, anames)
-    end
-    M = reduce(hcat, blocks)
-    if aux !== nothing && aux_ratio !== nothing
-        AR = _mat(aux_ratio)
-        lvm = _cumprod_cols(vcat(ones(1, size(AR, 2)), AR[idx, :]))
-        s0 = aux_start !== nothing ? _dvec(aux_start) : _mat(aux)[1, :] ./ AR[1, :]
-        for j in 1:size(lvm, 2), i in 1:size(lvm, 1)
-            lvm[i, j] = lvm[i, j] * s0[j]
-        end
-        at = _get(config, "aux_type")
-        off = length(cols) - length(anames)
-        for (j, a) in enumerate(anames)
-            _aux_type_of(at, a) == "level" && (M[:, off+j] = lvm[:, j])
-        end
-        lv = NamedMat(lvm; colnames = anames)
-    end
-    out = NamedMat(M; colnames = cols)
-    lv === nothing || (out.attrs["aux_level"] = lv)
+    (spec !== nothing && size(ret, 1) >= 1 && length(idx) == size(ret, 1) && size(ret, 2) == length(spec.inames) &&
+     (spec.aux === nothing || all(i -> 1 <= i <= size(spec.aux, 1), idx))) ||
+        _stop("bootstrap: interner Fehler: Angaben für den Pfadkern unvollständig (.boot_path_spec)")
+    r = SimLev.SLib.boot_path(ret, Int64.(idx), spec.aux, spec.ratio, spec.start, spec.level, spec.letf, Float64(start))
+    r === nothing && return nothing
+    out = NamedMat(r[1]; colnames = copy(spec.cols))
+    r[2] === nothing || (out.attrs["aux_level"] = NamedMat(r[2]; colnames = copy(spec.anames)))
     return out
 end
 
@@ -1380,6 +1325,9 @@ function _boot_setup(data, config, method, n, params, ess, ess_grid, path_length
     end
     ex = _extract_returns(data, config)
     ex["_path_spec"] = _boot_path_spec(ex["aux"], config, ex["aux_ratio"], ex["aux_start"])   # Kern sl_boot_path (seit 1.6.0)
+    # seit 1.6.3: Renditematrix einmal je Lauf (bis 1.6.2 je Pfad und Versuch kopiert) und ob alle Zeilen gültig sind
+    ex["_ret_m"] = _mat(ex["ret"])
+    ex["_src_ok"] = all(v -> isfinite(v) && v > 0, ex["_ret_m"])
     n_obs = size(ex["ret"], 1)
     n_out = _as_int(path_length !== nothing ? path_length : n_obs)
     if method in ("wild", "reset") && n_out != n_obs
@@ -1425,7 +1373,8 @@ function _draw_path(setup, i, stream, config, method, max_tries)
     ex = setup["ex"]
     for tr in 1:Int(max_tries)
         g = try
-            _generate_returns(ex["ret"], method, setup["base_p"][c_id], setup["infos"][c_id], setup["n_out"], stream)
+            _generate_returns(ex["_ret_m"], method, setup["base_p"][c_id], setup["infos"][c_id], setup["n_out"], stream;
+                              src_ok = ex["_src_ok"]::Bool)
         catch e
             (e isa UndefVarError || e isa MethodError) && rethrow()
             err = _errmsg(e)
@@ -1914,81 +1863,170 @@ end
 _sim_rows(df::RFrame, rows) = SimLev.rows(df, rows)
 
 # ── Zwischenspeicher der Chunks (chunk_dir) ───────────────────────────────
+# Seit 1.6.3 eigenes Binärformat (bis 1.6.2 Julia-Quelltext, gelesen mit Meta.parse und Core.eval): Kopf
+# _CHUNK_KOPF (8 Byte) und Fassung (UInt32), dann der Wert als Baum aus Kennbyte und Inhalt. Zahlen mit ihren rohen
+# Bits (Float64 bitgleich, auch die NaN-Nutzlast), Längen und ganze Zahlen als Int64, Text als UTF-8 mit Länge, alles
+# little-endian. Gelesen wird nur dieses Format, kein Code. Gespeichert werden dieselben Typen wie bis 1.6.2:
+# nothing, Bool, ganze Zahl (als Int), Float64, Text, Date, RVector (Werte, Namen), NamedMat (Werte, Größe, Zeilen- und
+# Spaltennamen, Attribute), RList (Einträge, Klasse), NamedTuple, AbstractDict (Schlüssel als Text), Matrix und Vektor
+# (Elementtyp Float64, Bool, Int, String, Date oder Any wie bis 1.6.2).
+# Dateiname (seit 1.6.3 je Sprache, R: .chunk_stem, .chunk_pruefen): <Stamm>_jl.bin, Stamm
+# chunk_<Nr>_seed<Seed>[_<keep_returns>][_keep<k>]; R schreibt <Stamm>_r.rds, Python <Stamm>_py.pkl, bis 1.6.2 alle
+# drei <Stamm>.rds. Liegt zu einem Chunk ohne eigene Datei eine fremde oder alte vor (oder hat die eigene einen anderen
+# Kopf): Fehler mit derselben Meldung wie in R und Python.
 
-module _ChunkIO
-import ...SimLev
-_F(u::UInt64) = reinterpret(Float64, u)
-_RV(v, n) = SimLev.RVector(v; names = n)
-_RL(ps, cls) = SimLev.RList(ps...; class = cls)
-function _NM(v, r, c, rn, cn, at)
-    m = SimLev.NamedMat(reshape(v, r, c); rownames = rn, colnames = cn)
-    for (k, x) in at
-        m.attrs[k] = x
+const _CHUNK_KOPF = collect(codeunits("SLVCHNK\0"))   # 8 Byte
+const _CHUNK_FASSUNG = UInt32(1)
+const _CHUNK_KENNUNG = (".rds", "_r.rds", "_py.pkl", "_jl.bin")
+_chunk_stem(ci, seed, keep_returns, keep_paths) =
+    @sprintf("chunk_%05d_seed%d%s%s", ci, Int(seed), keep_returns != "none" ? "_" * keep_returns : "",
+             keep_paths > 0 ? @sprintf("_keep%d", Int(keep_paths)) : "")
+_chunk_meldung(datei) = "chunk_dir: '$datei' stammt von einer anderen Sprache oder einer älteren Fassung von SimLev " *
+                        "(bis 1.6.2) und wird nicht gelesen; je Sprache ein eigenes Verzeichnis verwenden."
+function _chunk_pruefen(d, n_chunks, seed, keep_returns, keep_paths, eigen)
+    for ci in 1:n_chunks
+        st = _chunk_stem(ci, seed, keep_returns, keep_paths)
+        isfile(joinpath(d, st * eigen)) && continue
+        for k in _CHUNK_KENNUNG
+            k != eigen && isfile(joinpath(d, st * k)) && _stop(_chunk_meldung(st * k))
+        end
     end
-    m
-end
+    nothing
 end
 
-function _ser(io::IO, x)
+# Kennbytes der Werte und Elementtypen der Vektoren
+const _CK_NOTHING, _CK_BOOL, _CK_INT, _CK_F64, _CK_STR, _CK_DATE = 0x00, 0x01, 0x02, 0x03, 0x04, 0x05
+const _CK_RV, _CK_NM, _CK_RL, _CK_NT, _CK_DICT, _CK_MAT, _CK_VEC = 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c
+const _CE_ANY, _CE_F64, _CE_BOOL, _CE_INT, _CE_STR, _CE_DATE = 0x00, 0x01, 0x02, 0x03, 0x04, 0x05
+
+_cw_i64(io, v) = write(io, htol(Int64(v)))
+_cw_str(io, x) = (b = codeunits(String(x)); _cw_i64(io, length(b)); write(io, b))
+function _cw_pairs(io, ps)
+    _cw_i64(io, length(ps))
+    for (k, v) in ps
+        _cw_str(io, string(k)); _chunk_write(io, v)
+    end
+end
+function _chunk_write(io::IO, x)
     if x === nothing
-        print(io, "nothing")
+        write(io, _CK_NOTHING)
     elseif x isa Bool
-        print(io, x ? "true" : "false")
+        write(io, _CK_BOOL, UInt8(x))
     elseif x isa Integer
-        print(io, "Int(", Int(x), ")")
+        write(io, _CK_INT); _cw_i64(io, Int(x))
     elseif x isa Float64
-        print(io, "_F(0x", string(reinterpret(UInt64, x); base = 16, pad = 16), ")")
+        write(io, _CK_F64, htol(reinterpret(UInt64, x)))
     elseif x isa AbstractString
-        print(io, repr(String(x)))
+        write(io, _CK_STR); _cw_str(io, x)
     elseif x isa Date
-        print(io, "Dates.Date(", Dates.year(x), ",", Dates.month(x), ",", Dates.day(x), ")")
+        write(io, _CK_DATE); _cw_i64(io, Dates.value(x))
     elseif x isa RVector
-        print(io, "_RV("); _ser(io, x.values); print(io, ","); _ser(io, x.names); print(io, ")")
+        write(io, _CK_RV); _chunk_write(io, x.values); _chunk_write(io, x.names)
     elseif x isa NamedMat
-        print(io, "_NM("); _ser(io, vec(x.data)); print(io, ",", size(x, 1), ",", size(x, 2), ",")
-        _ser(io, x.rownames); print(io, ","); _ser(io, x.colnames); print(io, ",Dict{String,Any}(")
-        for (k, v) in x.attrs
-            print(io, repr(k), "=>"); _ser(io, v); print(io, ",")
-        end
-        print(io, "))")
+        write(io, _CK_NM); _chunk_write(io, vec(x.data)); _cw_i64(io, size(x, 1)); _cw_i64(io, size(x, 2))
+        _chunk_write(io, x.rownames); _chunk_write(io, x.colnames); _cw_pairs(io, collect(x.attrs))
     elseif x isa RList
-        print(io, "_RL(Pair{String,Any}[")
-        for (k, v) in x
-            print(io, repr(k), "=>"); _ser(io, v); print(io, ",")
-        end
-        print(io, "],"); _ser(io, collect(String, x.class)); print(io, ")")
+        write(io, _CK_RL); _cw_pairs(io, collect(x)); _chunk_write(io, collect(String, x.class))
     elseif x isa NamedTuple
-        print(io, "(;")
-        for (k, v) in pairs(x)
-            print(io, k, "="); _ser(io, v); print(io, ",")
-        end
-        print(io, ")")
+        write(io, _CK_NT); _cw_pairs(io, collect(pairs(x)))
     elseif x isa AbstractDict
-        print(io, "Dict{String,Any}(")
-        for (k, v) in x
-            print(io, repr(string(k)), "=>"); _ser(io, v); print(io, ",")
-        end
-        print(io, ")")
+        write(io, _CK_DICT); _cw_pairs(io, collect(x))
     elseif x isa AbstractMatrix
-        print(io, "reshape("); _ser(io, vec(collect(x))); print(io, ",", size(x, 1), ",", size(x, 2), ")")
+        write(io, _CK_MAT); _chunk_write(io, vec(collect(x))); _cw_i64(io, size(x, 1)); _cw_i64(io, size(x, 2))
     elseif x isa AbstractVector
         T = eltype(x)
-        print(io, T <: Float64 ? "Float64[" : T <: Bool ? "Bool[" : T <: Integer ? "Int[" : T <: AbstractString ? "String[" :
-                  T <: Date ? "Date[" : "Any[")
-        for v in x
-            _ser(io, v); print(io, ",")
+        e = T <: Float64 ? _CE_F64 : T <: Bool ? _CE_BOOL : T <: Integer ? _CE_INT : T <: AbstractString ? _CE_STR :
+            T <: Date ? _CE_DATE : _CE_ANY
+        write(io, _CK_VEC, e); _cw_i64(io, length(x))
+        if e == _CE_F64
+            for v in x
+                write(io, htol(reinterpret(UInt64, Float64(v))))
+            end
+        elseif e == _CE_BOOL
+            for v in x
+                write(io, UInt8(v))
+            end
+        elseif e == _CE_INT
+            for v in x
+                _cw_i64(io, Int(v))
+            end
+        elseif e == _CE_STR
+            for v in x
+                _cw_str(io, v)
+            end
+        elseif e == _CE_DATE
+            for v in x
+                _cw_i64(io, Dates.value(v))
+            end
+        else
+            for v in x
+                _chunk_write(io, v)
+            end
         end
-        print(io, "]")
     else
         error("chunk_dir: Wert vom Typ $(typeof(x)) nicht speicherbar")
     end
+    nothing
 end
-_save_chunk(f, x) = open(io -> (_ser(io, x); nothing), f, "w")
+
+_cr_i64(io) = Int(ltoh(read(io, Int64)))
+_cr_str(io) = String(read(io, _cr_i64(io)))
+_cr_pairs(io) = [(_cr_str(io) => _chunk_read(io)) for _ in 1:_cr_i64(io)]
+function _chunk_read(io::IO)
+    t = read(io, UInt8)
+    t == _CK_NOTHING && return nothing
+    t == _CK_BOOL && return read(io, UInt8) != 0x00
+    t == _CK_INT && return _cr_i64(io)
+    t == _CK_F64 && return reinterpret(Float64, ltoh(read(io, UInt64)))
+    t == _CK_STR && return _cr_str(io)
+    t == _CK_DATE && return Date(Dates.UTD(_cr_i64(io)))
+    if t == _CK_RV
+        v = _chunk_read(io)
+        return RVector(v; names = _chunk_read(io))
+    elseif t == _CK_NM
+        v = _chunk_read(io); r = _cr_i64(io); c = _cr_i64(io)
+        rn = _chunk_read(io); cn = _chunk_read(io)
+        m = NamedMat(reshape(v, r, c); rownames = rn, colnames = cn)
+        for (k, a) in _cr_pairs(io)
+            m.attrs[k] = a
+        end
+        return m
+    elseif t == _CK_RL
+        ps = _cr_pairs(io)
+        return RList(ps...; class = _chunk_read(io))
+    elseif t == _CK_NT
+        ps = _cr_pairs(io)
+        return NamedTuple{Tuple(Symbol(p.first) for p in ps)}(Tuple(p.second for p in ps))
+    elseif t == _CK_DICT
+        return Dict{String,Any}(_cr_pairs(io))
+    elseif t == _CK_MAT
+        v = _chunk_read(io); r = _cr_i64(io); c = _cr_i64(io)
+        return reshape(v, r, c)
+    elseif t == _CK_VEC
+        e = read(io, UInt8); n = _cr_i64(io)
+        e == _CE_F64 && return Float64[reinterpret(Float64, ltoh(read(io, UInt64))) for _ in 1:n]
+        e == _CE_BOOL && return Bool[read(io, UInt8) != 0x00 for _ in 1:n]
+        e == _CE_INT && return Int[_cr_i64(io) for _ in 1:n]
+        e == _CE_STR && return String[_cr_str(io) for _ in 1:n]
+        e == _CE_DATE && return Date[Date(Dates.UTD(_cr_i64(io))) for _ in 1:n]
+        e == _CE_ANY && return Any[_chunk_read(io) for _ in 1:n]
+    end
+    error("chunk_dir: unbekannter Eintrag $(t) im Binärformat")
+end
+
+function _save_chunk(f, x)
+    io = IOBuffer()
+    write(io, _CHUNK_KOPF, htol(_CHUNK_FASSUNG))
+    _chunk_write(io, x)
+    write(f, take!(io))
+    nothing
+end
 function _load_chunk(f)
-    ex = Meta.parse(read(f, String))
-    m = Module(:ChunkLoad)
-    Core.eval(m, :(using Dates; import SimLev; using SimLev.Bootstrap._ChunkIO: _F, _RV, _RL, _NM))
-    return Core.eval(m, ex)
+    io = IOBuffer(read(f))
+    k = length(_CHUNK_KOPF)
+    (bytesavailable(io) >= k + 4 && read(io, k) == _CHUNK_KOPF && ltoh(read(io, UInt32)) == _CHUNK_FASSUNG) ||
+        _stop(_chunk_meldung(basename(f)))
+    return _chunk_read(io)
 end
 
 """
@@ -2123,8 +2161,10 @@ Pipeline aus '06 Bootstraps' (Chunks, Parallelisierung), ohne die Pfade zwischen
 - `benchmark`: Name einer Strategie aus `strategies` als Vergleich für die gepaarte Auswertung in `summary()`;
   `nothing` (Standard) = keine.
 - `chunk_dir`: Optional (Standard `nothing`) Verzeichnis für Zwischenergebnisse je Chunk (Dateien
-  `chunk_<Nr>_seed<Seed>.rds`, bei `keep_returns` mit Frequenz-Suffix, bei `keep_paths` > 0 mit Suffix
-  `_keep<k>`). Vorhandene Dateien werden gelesen statt neu gerechnet; so wird ein abgebrochener Lauf mit
+  `chunk_<Nr>_seed<Seed>_jl.bin` im Binärformat von SimLev, bei `keep_returns` mit Frequenz-Suffix, bei
+  `keep_paths` > 0 mit Suffix `_keep<k>`, jeweils vor `_jl.bin`; R schreibt `_r.rds`, Python `_py.pkl`). Liegt zu
+  einem Chunk nur eine Datei einer anderen Sprache oder der Form bis 1.6.2 (`chunk_<Nr>_seed<Seed>.rds`, in Julia
+  Quelltext), bricht die Studie mit einer Meldung ab. Vorhandene Dateien werden gelesen statt neu gerechnet; so wird ein abgebrochener Lauf mit
   gleichem Seed fortgesetzt. Die Dateien werden nur über Chunk-Nummer, Seed, `keep_returns` und `keep_paths`
   zugeordnet: bei geänderten Strategien, Daten oder Parametern ein neues Verzeichnis verwenden.
 - `keep_paths`: Pfadmatrizen zusätzlich zurückgeben (Diagnose): `true` = alle Pfade, `false` oder 0 (Standard)
@@ -2216,6 +2256,7 @@ SimLev.@study function bootstrap_study(data, config, method_pos = nothing; metho
                          start = "2000-01-01", burn_in = 0, sim_args = RList(), metrics = bootstrap_study_metrics,
                          benchmark = nothing, chunk_dir = nothing, keep_paths = 0, keep_returns = nothing,
                          keep_aux = nothing, max_tries = 10, chunk_size = 25, seed = nothing, cores = 1, progress = true)
+    @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
     data = SimLev.as_rframe(data)
     method_pos === nothing || (method = method_pos)
     keep_returns = _match_arg(keep_returns, ("none", "year", "quarter", "month"))
@@ -2254,7 +2295,10 @@ SimLev.@study function bootstrap_study(data, config, method_pos = nothing; metho
     cs = Float64(chunk_size)
     keyv = Float64[ceil(i / cs) for i in 1:n_paths]
     chunks = [findall(==(k), keyv) for k in sort(unique(keyv))]
-    chunk_dir === nothing || mkpath(chunk_dir)
+    if chunk_dir !== nothing
+        mkpath(chunk_dir)
+        _chunk_pruefen(chunk_dir, length(chunks), seed, keep_returns, keep_paths, "_jl.bin")
+    end
     bi = Int(burn_in)
     sim_rows = collect(bi+1:n_out+1)
     dsim = dates[sim_rows]
@@ -2280,9 +2324,12 @@ SimLev.@study function bootstrap_study(data, config, method_pos = nothing; metho
         P = dp.path
         df0 = _path_frame(dates, P)
         rows = Dict{String,Any}()
+        df_cut = nothing   # seit 1.6.3: Ausschnitt nach burn_in einmal je Pfad für Strategien ohne signal und map
         for nm in snames
             sp = specs[nm]
-            df = copy(df0)
+            plain = _get(sp, "signal") === nothing && _get(sp, "map") === nothing
+            # Kopie nur, wenn signal oder map den Rahmen verändern können (simulation() liest ihn nur)
+            df = plain ? df0 : copy(df0)
             wr = String[]
             fail(stage, msg) = (row = nothing, ret = nothing, err = (stage = stage, message = msg), warn = _uniq(wr))
             run(f) = _collect_warnings(f, wr)
@@ -2311,7 +2358,14 @@ SimLev.@study function bootstrap_study(data, config, method_pos = nothing; metho
                     df[String(a2)] = df[String(col)]
                 end
             end
-            bi > 0 && (df = _sim_rows(df, bi+1:SimLev.nrow(df)))
+            if bi > 0
+                if plain
+                    df_cut === nothing && (df_cut = _sim_rows(df0, bi+1:SimLev.nrow(df0)))
+                    df = df_cut
+                else
+                    df = _sim_rows(df, bi+1:SimLev.nrow(df))
+                end
+            end
             args = spec_sim[nm]
             res = try
                 _no_messages(() -> run(() -> _sim_call(df, _get(sp, "strategy"), args)))
@@ -2344,8 +2398,7 @@ SimLev.@study function bootstrap_study(data, config, method_pos = nothing; metho
     function run_chunk(ci)
         f = nothing
         if chunk_dir !== nothing
-            f = joinpath(chunk_dir, @sprintf("chunk_%05d_seed%d%s%s.rds", ci, Int(seed), keep_returns != "none" ? "_" * keep_returns : "",
-                                             keep_paths > 0 ? @sprintf("_keep%d", Int(keep_paths)) : ""))
+            f = joinpath(chunk_dir, _chunk_stem(ci, seed, keep_returns, keep_paths) * "_jl.bin")
         end
         f !== nothing && isfile(f) && return _load_chunk(f)
         out = Any[eval_path(i) for i in chunks[ci]]
@@ -2623,6 +2676,32 @@ function _rbind_frames(fs::Vector{RFrame})
     return RFrame(cols...)
 end
 
+"""Paare (Zeile Strategie, Zeile Benchmark) mit gleichem Pfad wie `merge(d, b, by = "path")`: Pfade aufsteigend, je
+Pfad alle Zeilen von d mal alle von b in Zeilenfolge. Seit 1.6.3 über ein Verzeichnis je Pfad (O(n)); bis 1.6.2
+`findall` je Pfadwert (O(n²)). Nur endliche Pfadnummern ohne −0 (wie aus `bootstrap_study`), sonst der bisherige Weg."""
+function _study_pairs(dpath::Vector{Float64}, bpath::Vector{Float64}, dsel, bsel)
+    pairs_ = Tuple{Int,Int}[]
+    if all(v -> isfinite(v) && !(v == 0 && signbit(v)), dpath) && all(v -> isfinite(v) && !(v == 0 && signbit(v)), bpath)
+        gd = Dict{Float64,Vector{Int}}(); gb = Dict{Float64,Vector{Int}}()
+        for (i, v) in enumerate(dpath); push!(get!(Vector{Int}, gd, v), i); end
+        for (j, v) in enumerate(bpath); push!(get!(Vector{Int}, gb, v), j); end
+        for pv in sort(unique(vcat(dpath, bpath)); lt = (a, b) -> a < b)
+            ii = get(gd, pv, nothing); jj = get(gb, pv, nothing)
+            (ii === nothing || jj === nothing) && continue
+            for i in ii, j in jj
+                push!(pairs_, (dsel[i], bsel[j]))
+            end
+        end
+        return pairs_
+    end
+    for pv in sort(unique(vcat(dpath, bpath)); lt = (a, b) -> a < b)
+        for i in findall(==(pv), dpath), j in findall(==(pv), bpath)
+            push!(pairs_, (dsel[i], bsel[j]))
+        end
+    end
+    return pairs_
+end
+
 "Zusammenfassung einer Bootstrap-Studie (R: `summary.SimLevBootstrapStudy`)."
 function _summary_study(obj; metrics = ["cagr", "ttwror", "max_drawdown", "sharpe", "ulcer_index", "final_value"],
                         probs = [0.05, 0.25, 0.5, 0.75, 0.95])
@@ -2632,10 +2711,15 @@ function _summary_study(obj; metrics = ["cagr", "ttwror", "max_drawdown", "sharp
     probs = _dvec(probs)
     qn = String[_sp("q%02d", _round0(100 * p)) for p in probs]
     rows = RFrame[]
+    # Spalten einmal umgewandelt (seit 1.6.3; bis 1.6.2 je Strategie, Metrik und Paar, gleiche Werte)
+    # (erst beim ersten Gebrauch, damit Fehler wie bisher nur bei Bedarf entstehen)
+    wref = Ref{Union{Nothing,Vector{Float64}}}(nothing); mcol = Dict{String,Vector{Float64}}()
+    wcol() = (wref[] === nothing && (wref[] = _dvec(tab["weight"])); wref[]::Vector{Float64})
+    mc(m) = get!(() -> _dvec(tab[m]), mcol, m)
     for s in collect(String, _values(obj["strategies"]))
         sel = tab["strategy"] .== s
         for m in metrics
-            x = _dvec(tab[m])[sel]; w = _dvec(tab["weight"])[sel]
+            x = mc(m)[sel]; w = wcol()[sel]
             q = _wquantile(x, w, probs)
             cols = Pair{String,Any}["strategy" => [s], "metric" => [m], "mean" => [_weighted_mean(x, w; na_rm = true)]]
             for (k, v) in zip(qn, q)
@@ -2655,17 +2739,13 @@ function _summary_study(obj; metrics = ["cagr", "ttwror", "max_drawdown", "sharp
             dsel = findall(tab["strategy"] .== s)
             dpath = _dvec(tab["path"])[dsel]
             # merge(d, b, by = "path"): innerer Join, nach path sortiert
-            pairs_ = Tuple{Int,Int}[]
-            for pv in sort(unique(vcat(dpath, bpath)); lt = (a, b) -> a < b)
-                for i in findall(==(pv), dpath), j in findall(==(pv), bpath)
-                    push!(pairs_, (dsel[i], bsel[j]))
-                end
-            end
+            pairs_ = _study_pairs(dpath, bpath, dsel, bsel)
             for m in metrics
-                col = _dvec(tab[m])
+                col = mc(m)
                 dif = Float64[col[i] - col[j] for (i, j) in pairs_]
                 better = m in _LOWER_BETTER ? dif .< 0 : dif .> 0
-                w = Float64[_dvec(tab["weight"])[i] for (i, _) in pairs_]
+                wc = wcol()
+                w = Float64[wc[i] for (i, _) in pairs_]
                 ok = isfinite.(dif)
                 p = _rsum(w[ok] .* better[ok]) / _rsum(w[ok])
                 q = _wquantile(dif, w, [0.05, 0.5, 0.95])
@@ -2739,7 +2819,7 @@ Ungewichtete Dichten einer Kennzahl je Strategie als SVG (R: `plot.SimLevBootstr
 Liefert `(svg, data)`; `data`: `density` (`strategy`, `x`, `density`: die gezeichneten Punkte von
 der Kerndichte `.sl_kde` je Strategie im Wertebereich der Kennzahl).
 """
-function _plot_study(x; metric = "cagr", file = nothing, width = 640, height = 420)
+function _plot_study(x; metric = "cagr", width = 640, height = 420)
     tab = x["results"]
     strats = collect(String, _values(x["strategies"]))
     dl = [_dvec(tab[metric])[tab["strategy"] .== s] for s in strats]

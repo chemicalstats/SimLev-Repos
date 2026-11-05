@@ -76,6 +76,27 @@ function boot_path(ret::Matrix{Float64}, idx::Vector{Int64}, aux, aux_ratio, aux
     return s == 1 ? (P, lv) : nothing
 end
 
+"""Bootstrap-Pfad aus Zeilen der Quelle (`sl_boot_path_src`, seit 1.6.3): wie `boot_path(src[idx, :], idx, …)`,
+ohne die Zeilenkopie; `src` n_src × k spaltenweise, `idx` 1-basiert (1 … n_src)."""
+function boot_path_src(src::Matrix{Float64}, idx::Vector{Int64}, aux, aux_ratio, aux_start, level::Vector{Cint},
+                       letf::Vector{Letf}, start::Float64)
+    n_src, k = size(src); n_out = length(idx)
+    na = aux === nothing ? 0 : size(aux, 2)
+    n_aux = aux === nothing ? 0 : size(aux, 1)
+    nL = length(letf)
+    P = Matrix{Float64}(undef, n_out + 1, k + nL + na)
+    lv = aux_ratio === nothing || na == 0 ? nothing : Matrix{Float64}(undef, n_out + 1, na)
+    cx = _ctx()
+    s = ccall((:sl_boot_path_src, LIBSLC), Cint,
+              (Ptr{Cvoid}, Int64, Cint, Ptr{Float64}, Int64, Int64, Int64, Ptr{Int64}, Int64, Cint, Ptr{Float64},
+               Ptr{Float64}, Ptr{Float64}, Ptr{Cint}, Cint, Ptr{Letf}, Float64, Ptr{Float64}, Ptr{Float64}),
+              cx, n_out, Cint(k), src, n_src, 1, n_src, idx, n_aux, Cint(na), aux === nothing ? C_NULL : aux,
+              lv === nothing ? C_NULL : aux_ratio, aux_start === nothing || na == 0 ? C_NULL : aux_start,
+              na == 0 ? C_NULL : level, Cint(nL), nL == 0 ? C_NULL : letf, start, P, lv === nothing ? C_NULL : lv)
+    _finish(cx, s < 0 ? -s : Cint(0))
+    return s == 1 ? (P, lv) : nothing
+end
+
 "t-Copula per Profil-Likelihood (`sl_tcop_fit`): `[atanh rho, nu, -loglik]` oder `nothing` (dann wie bisher)."
 function tcop_fit(u::Vector{Float64}, v::Vector{Float64})
     length(u) == length(v) && !isempty(u) || return nothing

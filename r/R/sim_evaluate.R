@@ -132,8 +132,8 @@
     day = as.numeric(fl$flag_date), filled = if (any(fl$flag_filled)) as.integer(fl$flag_filled),
     sc = c(as.numeric(prep$start_date), as.numeric(prep$stopp_date), as.numeric(cfg$start_value), as.numeric(tax_unpaid)),
     status_money = vapply(nm, function(a) as.numeric(sim_mem[["status"]][[a]][["money"]]), 0, USE.NAMES = FALSE),
-    n_buys = vapply(nm, function(a) as.numeric(length(sim_mem[["trades"]][[a]][["buys"]])), 0, USE.NAMES = FALSE),
-    n_sells = vapply(nm, function(a) as.numeric(length(sim_mem[["trades"]][[a]][["sells"]])), 0, USE.NAMES = FALSE),
+    n_buys = vapply(nm, function(a) sim_mem[["trades"]][[a]][["n_buys"]], 0, USE.NAMES = FALSE),
+    n_sells = vapply(nm, function(a) sim_mem[["trades"]][[a]][["n_sells"]], 0, USE.NAMES = FALSE),
     rf = if (is.double(rfv)) rfv else if (!is.null(rfv)) as.double(rfv), rf_ok = as.integer(!rf$failed))
   ev <- .Call(C_sim_evaluate, inp)
   # Meldungen: Warnungen von .sim_returns, Abbruch dort, Meldungen von risk_free, Abbruch in .sim_risk_stats
@@ -172,16 +172,9 @@
 #' Ausgabe: Objekt der Klasse SimLevResult (siehe simulation()).
 #' @keywords internal
 #' @noRd
-# Offene Lots eines Assets als data.frame (date, units, price, vp). Seit 1.6.1 ohne data.frame() je Asset, wenn die
-# Lots keine Namen tragen (dann gleiches Objekt wie data.frame(); sonst nimmt data.frame() die Namen als Zeilennamen).
-.sim_lots_frame <- function(lots) {
-  cols <- list(date = as.Date(vapply(lots, function(b) as.numeric(b[["date"]]), numeric(1)), origin = "1970-01-01"),
-               units = vapply(lots, function(b) b[["remaining"]], numeric(1)),
-               price = vapply(lots, function(b) b[["price"]], numeric(1)),
-               vp = vapply(lots, function(b) b[["vp"]] %||% 0, numeric(1)))
-  if (!is.null(names(lots))) return(do.call(data.frame, cols))
-  structure(cols, row.names = .set_row_names(length(lots)), class = "data.frame")
-}
+# Offene Lots eines Assets als data.frame (date, units, price, vp): seit 1.6.3 aus den Spalten des Kerns
+# (Engine::open_lots_out; Lots mit remaining > 0, vp 0 ohne Vorabpauschale), gleiches Objekt wie bis 1.6.2 aus den Lots
+.sim_lots_frame <- function(cols) structure(cols, row.names = .set_row_names(length(cols[["date"]])), class = "data.frame")
 
 .sim_result <- function(sim_mem, fl, cfg, ev) {
   flag_date <- fl$flag_date; flag_filled <- fl$flag_filled; flag_assets <- fl$flag_assets
@@ -196,8 +189,7 @@
 
   #--------> E: offene Lots am letzten Tag (Grundlage fuer Steuerrechnungen nach dem Ende; nur tax_mode = "person")
   open_lots <- if (tax_mode == "person") stats::setNames(lapply(flag_assets, function(nm) {
-    lots <- Filter(function(b) length(b) && b[["remaining"]] > 0, sim_mem[["trades"]][[nm]][["buys"]])
-    list(lots = .sim_lots_frame(lots),
+    list(lots = .sim_lots_frame(sim_mem[["trades"]][[nm]][["open_lots"]]),
          regime = tax_regimes[[nm]],
          partial_exemption = 100 * sim_mem[["assets"]][[nm]][["bonus"]],
          cash = sim_mem[["status"]][[nm]][["money"]],
@@ -236,7 +228,7 @@
     open_lots = open_lots                    # je Asset die am letzten Tag gehaltenen Lots (tax_mode = "person")
   )
   if (!is.null(tariff_env))   # Tarifweg: Jahreswerte in EUR (§ 23, Guenstigerpruefung, KiSt-Sonderausgabe)
-    results$tax_report$tariff_years <- if (length(tariff_env$rows)) do.call(rbind, tariff_env$rows) else NULL
+    results$tax_report$tariff_years <- tariff_env$rows   # data.frame der Jahre bzw. NULL (.tariff_years_frame)
   # Steuerzustand des Jahres nach dem letzten Datentag (Fortsetzung z. B. in withdrawal_simulation): der finale
   # Jahresabschluss hat das Jahr des letzten Datentags geschlossen; gebucht ist darin nur, was ihm schon
   # zugerechnet wurde (Vorabpauschale bei Ende am 31.12.: Verlusttopf und Sparer-Pauschbetrag dieses Jahres)
@@ -257,7 +249,7 @@
     if (!is.null(tariff_env)) {
       ks <- unname(tariff_env$ks[as.character(ny)])
       results$tax_report$next_year$church_tax_settlement <- if (length(ks) && !is.na(ks)) ks else 0   # am letzten Tag gezahlt (> 0) bzw. erstattet (< 0)
-      results$tax_report$next_year$tariff_assessed <- any(vapply(tariff_env$rows, function(rw) rw$year == ny, logical(1)))
+      results$tax_report$next_year$tariff_assessed <- any(tariff_env$rows$year == ny)
     }
   }
 

@@ -53,7 +53,11 @@ def main(argv=None):
             code.append("simulation(")
             code += ["%s(" % b for b in re.findall(r'"block": *"([A-Za-z_.0-9]+)"', json.dumps(c.get("args") or {}))]
     text = "\n".join(code)
-    miss = [nm for nm in names if not re.search(r"(?<![A-Za-z0-9_.])" + re.escape(nm) + r"\s*\(", text)]
+    # Aufrufe einmal sammeln (seit 1.6.3; bis 1.6.2 ein Suchlauf je Export): gleich wie die Suche nach
+    # (?<![A-Za-z0-9_.])<name>\s*\( für Namen aus Bezeichnerzeichen; andere Namen weiter einzeln
+    gerufen = set(re.findall(r"(?<![A-Za-z0-9_.])([A-Za-z_.][A-Za-z0-9_.]*)\s*\(", text))
+    miss = [nm for nm in names if (nm not in gerufen if re.fullmatch(r"[A-Za-z_.][A-Za-z0-9_.]*", nm) else
+                                   not re.search(r"(?<![A-Za-z0-9_.])" + re.escape(nm) + r"\s*\(", text))]
     print("Abdeckung: %d Exporte, %d Fälle, ohne Fall: %d" % (len(names), n, len(miss)))
     for nm in miss:
         print("  ohne Fall:", nm)

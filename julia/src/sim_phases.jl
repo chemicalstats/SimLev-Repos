@@ -107,6 +107,81 @@ function _memo_set(what::String, key::Vector{Float64}, val)
     nothing
 end
 
+"""Anteilswert eines Wrapper-Assets innerhalb einer Studie merken (seit 1.6.3; R `.sim_memo_quiet`, Python
+`_StudyCache`): nur ohne `details` (dann liest `simulation()` nur Datum und Anteilswert und gibt das Objekt nicht
+heraus), nur wenn die innere Rechnung ohne Meldung und ohne Warnung blieb, Fehler nie. Schlüssel: die ganze Eingabe
+(Spaltennamen, Arten, Werte mit `===`, aufgefüllte Tage), der Wrapper und die Splits (Inhalt mit `===` je Wert) und die
+Texte; höchstens die letzten vier Einträge."""
+function _wrapper_nav_memo(d::_Frame, wrapper, sp, tag::String, who::String, details::Bool)
+    @nospecialize
+    (_STUDY_ON[] && !details && (d.filled_attr === nothing || d.filled_attr isa Matrix{Bool})) ||
+        return _wrapper_nav_calc(d, wrapper, sp, tag, who)
+    hit = lock(_STUDY_LOCK) do
+        for e in get(_STUDY_M, "wrapper_nav", Any[])
+            (e[4] == tag && e[5] == who && _deep_same(e[2], wrapper) && _deep_same(e[3], sp) && _same_frame(e[1], d)) &&
+                return e[6]
+        end
+        nothing
+    end
+    hit === nothing || return hit
+    nav, still = _wrapper_nav_calc_q(d, wrapper, sp, tag, who)
+    still && lock(_STUDY_LOCK) do
+        if _STUDY_ON[]
+            v = get!(() -> Any[], _STUDY_M, "wrapper_nav")
+            length(v) >= 4 && popfirst!(v)
+            push!(v, (d, wrapper, sp, tag, who, nav))
+        end
+    end
+    return nav
+end
+
+"Gleiche Eingabe für die innere Rechnung (Namen, Arten, aufgefüllte Tage, Spalten Wert für Wert mit `===`)."
+function _same_frame(a::_Frame, b::_Frame)
+    a === b && return true
+    (a.names == b.names && a.kinds == b.kinds) || return false
+    fa, fb = a.filled_attr, b.filled_attr
+    (fa === nothing) == (fb === nothing) || return false
+    fa === nothing || (fa isa Matrix{Bool} && fb isa Matrix{Bool} && fa == fb) || return false
+    for nm in a.names
+        _deep_same(a.cols[nm], b.cols[nm]) || return false
+    end
+    return true
+end
+
+"Tiefer Vergleich mit `===` an den Blättern (gleiche Typen, Längen, Schlüsselfolgen und Bits)."
+function _deep_same(a, b)
+    a === b && return true
+    typeof(a) === typeof(b) || return false
+    if a isa AbstractArray
+        size(a) == size(b) || return false
+        for i in eachindex(a, b)
+            _deep_same(a[i], b[i]) || return false
+        end
+        return true
+    elseif a isa RList
+        # Felder über getfield (getproperty von RList liest Einträge)
+        return getfield(a, :keys) == getfield(b, :keys) && getfield(a, :class) == getfield(b, :class) &&
+               _deep_same(getfield(a, :vals), getfield(b, :vals)) && _deep_same(getfield(a, :attrs), getfield(b, :attrs))
+    elseif a isa AbstractDict
+        length(a) == length(b) || return false
+        for (k, v) in a
+            haskey(b, k) || return false
+            _deep_same(v, b[k]) || return false
+        end
+        return true
+    elseif a isa Union{Tuple,NamedTuple}
+        return length(a) == length(b) && all(i -> _deep_same(a[i], b[i]), 1:length(a))
+    elseif isstructtype(typeof(a)) && !(a isa Function)
+        for f in fieldnames(typeof(a))
+            da, db = isdefined(a, f), isdefined(b, f)
+            da == db || return false
+            da && (_deep_same(getfield(a, f), getfield(b, f)) || return false)
+        end
+        return true
+    end
+    return false
+end
+
 """
     @study function f(...) ... end
 
@@ -117,19 +192,26 @@ macro study(fdef)
     body = fdef.args[2]
     # erste Zeilenangabe des Rumpfs bleibt vorn (Ort der Methode wie ohne Makro, für Stapel und Schnittstellenprüfung)
     ln = body.args[1] isa LineNumberNode ? body.args[1] : LineNumberNode(__source__.line, __source__.file)
+    # ein führendes `@nospecialize` (ohne Argumente) bleibt am Anfang des Rumpfs (seit 1.6.3; sonst stünde es im try)
+    head = Any[ln]
+    k = findfirst(a -> !(a isa LineNumberNode), body.args)
+    if k !== nothing && body.args[k] isa Expr && body.args[k].head === :macrocall &&
+       body.args[k].args[1] === Symbol("@nospecialize") && length(body.args[k].args) == 2
+        push!(head, body.args[k]); deleteat!(body.args, k)
+    end
     fin = Expr(:block, :($(SimLev)._sim_study_end(own_cache)))
-    fdef.args[2] = Expr(:block, ln, :(own_cache = $(SimLev)._sim_study()), Expr(:try, body, false, false, fin))
+    fdef.args[2] = Expr(:block, head..., :(own_cache = $(SimLev)._sim_study()), Expr(:try, body, false, false, fin))
     return esc(:(Base.@__doc__ $fdef))
 end
 
-function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_days,
+function _sim_check_inputs(data, strategy, start_value, details, dca_mode, dca_value, dca_days,
                            balance_mode, balance_days, balance_thresh, balance_thresh_type, tax_mode, tax_rate,
                            marginal_tax_rate, use_guenstigerpruefung, private_sale_threshold, sparer_pauschbetrag,
                            use_sparer_pauschbetrag, include_soli_on_income_tax, soli_rate_income_tax, base_rate,
                            fractions, risk_free, split_mode, split_thresh, event_col, church_tax,
                            order_fee, dca_fee, harvest_mode, taxable_income, tariff, io::IO)
     @nospecialize
-    tax_mode = match_arg(tax_mode, ("none", "person"), "tax_mode")
+    tax_mode = _match_arg(tax_mode, ("none", "person"))
     if !(data isa RFrame || data isa NamedTuple || data isa AbstractDict || data isa AbstractVector{<:Pair} || data isa _Frame)
         error("simulation: data muss ein data.frame mit Spalte 'date' und je Asset einer Kursspalte sein, nicht " *
               (data === nothing ? "fehlend" : _r_class1(data)) * ".")
@@ -138,7 +220,6 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         error("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein (z. B. aus create_strategy()), nicht " *
               (strategy === nothing ? "fehlend" : "leer (Länge 0)") * ".")
     end
-    spread !== nothing && @warn "simulation: Das Argument 'spread' wird nicht ausgewertet; maßgeblich ist spread je Asset (asset_config())."
     names_d = data isa RFrame ? names(data) : String[]
     dup = [nm for (i, nm) in enumerate(names_d) if nm in names_d[1:i-1]]
     if !_is_mapping(strategy) || any(p -> isempty(p.first), _kvpairs(strategy isa Union{AssetConfig,Strategy} ? collect(strategy) : strategy))
@@ -242,7 +323,8 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
         sd = Dict(strat)
         wrapper_navs = RList()
         for nm in wraps
-            wrapper_navs[nm] = _wrapper_nav_calc(d_in, sd[nm]["wrapper"], sp, "Wrapper '$nm'", "simulation: Wrapper '$nm'")
+            wrapper_navs[nm] = _wrapper_nav_memo(d_in, sd[nm]["wrapper"], sp, "Wrapper '$nm'", "simulation: Wrapper '$nm'",
+                                                 details == true)
         end
         dkey = Dict{Float64,Int}(z => i for (i, z) in enumerate(fr.cols["date"]::Vector{Float64}))
         for nm in wraps
@@ -351,7 +433,7 @@ function _sim_check_inputs(data, strategy, start_value, spread, details, dca_mod
     end
     # Kirchensteuer, Prozent-Konvention und Günstigerprüfung: _tax_rates() (unten, nach der Gewichtssumme)
     bth = balance_thresh === nothing ? nothing : Float64(balance_thresh) / 100
-    balance_thresh_type = match_arg(balance_thresh_type, ("absolute", "relative"), "balance_thresh_type")
+    balance_thresh_type = _match_arg(balance_thresh_type, ("absolute", "relative"))
     fee_order = _fee_spec(order_fee)
     fee_dca = dca_fee === nothing ? fee_order : _fee_spec(dca_fee)
     fees_on = fee_order !== nothing || fee_dca !== nothing
@@ -447,7 +529,7 @@ function _sim_prepare_data(fr::_Frame, pre_filled::BitVector, base_rate_flex, ba
     return start_date, stopp_date
 end
 
-function _signal_col(fr::_Frame, col, n::Int)
+function _signal_col(fr::_Frame, col)
     @nospecialize
     col === nothing && return Signal(true, Float64[])   # keine Spalte: leerer Zeiger, der Kern liest FALSE (seit 1.6.1)
     v = fr.cols[col]
@@ -467,9 +549,8 @@ function _sim_build_state(fr::_Frame, strategy, start_date::Int, stopp_date::Int
     @nospecialize
     n = _fnrow(fr)
     totals = Totals(0.0, 0.0, 0.0, 0.0, 0.0, sparer_pauschbetrag, use_spb ? sparer_pauschbetrag : 0.0,
-                    0.0, year_of(start_date), 0.0, 0.0, 0.0, 0.0, VPPending[], Pair{Int,Float64}[], Pair{Int,Float64}[])
+                    0.0, year_of(start_date), 0.0, 0.0, 0.0, 0.0)
     names_ = String[]; assets = AssetInfo[]; status = Status[]; market = Market[]; trades = Trades[]; report = Report[]
-    days = collect(start_date:stopp_date)
     for (name, a) in strategy
         ac = get(a, "asset_class", nothing)
         deliverable = _is_true(get(a, "deliverable", nothing))
@@ -481,10 +562,9 @@ function _sim_build_state(fr::_Frame, strategy, start_date::Int, stopp_date::Int
         end
         st_raw = get(a, "start", nothing)
         bonus = get(a, "partial_exemption", nothing)
-        dl = get(a, "deliverable", nothing)
         push!(names_, name)
-        push!(assets, AssetInfo(ac, get(a, "trading", ""), st_raw === nothing ? start_date : _date_or_fail(st_raw),
-                                regime, (bonus === nothing ? 0.0 : Float64(bonus)) / 100, dl === nothing ? false : dl))
+        push!(assets, AssetInfo(get(a, "trading", ""), st_raw === nothing ? start_date : _date_or_fail(st_raw),
+                                regime, (bonus === nothing ? 0.0 : Float64(bonus)) / 100))
         if get(a, "trading", nothing) == "signal"
             sb, ss = get(a, "signal_buy", nothing), get(a, "signal_sell", nothing)
             (sb === nothing || !haskey(fr, sb)) &&
@@ -505,10 +585,10 @@ function _sim_build_state(fr::_Frame, strategy, start_date::Int, stopp_date::Int
             br = fill(base_rate === nothing ? 0.0 : Float64(base_rate), n)
         end
         spread_a = get(a, "spread", nothing)
-        push!(market, Market(days, br, copy(fr.cols[name]::Vector{Float64}), _signal_col(fr, get(a, "signal_buy", nothing), n),
-                             _signal_col(fr, get(a, "signal_sell", nothing), n),
+        push!(market, Market(br, copy(fr.cols[name]::Vector{Float64}), _signal_col(fr, get(a, "signal_buy", nothing)),
+                             _signal_col(fr, get(a, "signal_sell", nothing)),
                              (spread_a === nothing ? 0.0 : Float64(spread_a)) / 100))
-        push!(trades, Trades(Lot[], SellEntry[], TaxEntry[], 1))
+        push!(trades, Trades(Lot[], SellEntry[], TaxEntry[]))
         push!(report, Report(zeros(n), zeros(n), zeros(n), zeros(n), zeros(n)))
     end
     return Sim(names_, assets, status, market, trades, report, totals)
@@ -536,7 +616,7 @@ function _sim_build_calendar(fr::_Frame, sim::Sim, strategy, start_date::Int, st
     balance = _sched_spec(balance_mode, balance_span, balance_unit, balance_days, flag_date, nothing, balance_anchor,
                          balance_start, balance_skip)
     dca = _sched_spec(dca_mode, dca_span, dca_unit, dca_days, flag_date, dca_value, dca_anchor, dca_start, dca_skip)
-    event_mode = match_arg(event_mode, ("additional", "replace"), "event_mode")
+    event_mode = _match_arg(event_mode, ("additional", "replace"))
     flag_event = nothing
     ew = nothing
     if event_col !== nothing

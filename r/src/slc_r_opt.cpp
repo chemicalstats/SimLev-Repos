@@ -24,27 +24,7 @@
 /* .Call-Huellen mit C-Bindung (Registrierung in init.cpp) */
 extern "C" {
 
-static void chk_int(void *d) { (void) d; R_CheckUserInterrupt(); }
-static int r_interrupted(void *h) { (void) h; return !R_ToplevelExec(chk_int, NULL); }
-
-static void ctx_init(sl_ctx *cx)
-{
-    sl_ctx_init(cx);
-    cx->interrupted = r_interrupted;
-}
-
-static void finish(sl_ctx *cx, int st, int nprot)
-{
-    int i;
-    char msg[SL_MSG_LEN];
-    for (i = 0; i < cx->n_warn; i++) Rf_warningcall(R_NilValue, "%s", cx->warn[i]);
-    if (st != SL_OK) {
-        memcpy(msg, cx->msg, SL_MSG_LEN);
-        if (nprot) UNPROTECT(nprot);
-        if (st == SL_EINTR) R_CheckUserInterrupt();
-        Rf_errorcall(R_NilValue, "%s", msg);
-    }
-}
+#include "huelle_r.h"   /* Kontext, Rueckmeldungen, Argumentpruefungen (seit 1.6.3 gemeinsam) */
 
 static int int1(SEXP x, const char *what)
 {

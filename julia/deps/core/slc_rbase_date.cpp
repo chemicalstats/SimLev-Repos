@@ -45,7 +45,7 @@
  *             (R selbst rechnet dort mit Überlauf).
  * Herkunft:           nachgebildet nach R 4.3.3, Hilfeseiten ?strptime, ?format.Date, ?as.Date, dem
  *                     glibc-Handbuch (strftime) und der Logik der bisherigen Port-Funktionen;
- *                     Kalenderrechnung siehe den Teil-Block bei sl_r_civil_from_days; R 4.3.3 diente
+ *                     Kalenderrechnung siehe den Teil-Block bei sl_r_civil_from_days (slc_rbase.cpp); R 4.3.3 diente
  *                     als Orakel (Gleichlauf: date_fuzz.R)
  * Rechte:             The R Core Team, teils Robert Gentleman und Ross Ihaka, The R Foundation
  *                     (laut Kopf der jeweiligen R-Quelle)
@@ -59,44 +59,8 @@
 
 #include "slc_rbase.h"
 
-/*
- * Teil:               sl_r_civil_from_days, sl_r_days_from_civil (mit fdiv_)
- * Herkunft:           übersetzt aus H. Hinnant, chrono-Compatible Low-Level Date Algorithms,
- *                     https://howardhinnant.github.io/date_algorithms.html
- * Rechte:             gemeinfrei ("Consider these donated to the public domain.")
- * Lizenz der Vorlage: keine (gemeinfrei)
- * Änderungen:         int64_t mit Abrundungsdivision fdiv_ statt der Fallunterscheidung für
- *                     negative Werte.
- */
-static int64_t fdiv_(int64_t a, int64_t b)
-{
-    int64_t q = a / b;
-    if ((a % b != 0) && ((a < 0) != (b < 0))) q--;
-    return q;
-}
-
-void sl_r_civil_from_days(int64_t z, int64_t *y, int *m, int *d)
-{
-    z += 719468;
-    const int64_t era = fdiv_(z, 146097);
-    const int64_t doe = z - era * 146097;                                  /* 0 .. 146096 */
-    const int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    const int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    const int64_t mp = (5 * doy + 2) / 153;
-    *d = (int) (doy - (153 * mp + 2) / 5 + 1);
-    *m = (int) (mp < 10 ? mp + 3 : mp - 9);
-    *y = yoe + era * 400 + (*m <= 2);
-}
-
-int64_t sl_r_days_from_civil(int64_t y, int m, int d)
-{
-    y -= m <= 2;
-    const int64_t era = fdiv_(y, 400);
-    const int64_t yoe = y - era * 400;
-    const int64_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-    const int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + doe - 719468;
-}
+/* sl_r_civil_from_days, sl_r_days_from_civil: seit 1.6.3 in slc_rbase.cpp (auch für slc_prep.cpp und r/src/),
+ * Abrundungsdivision sl_r_fdiv in slc_rbase.h */
 
 static int is_leap_(int64_t y)
 {
@@ -222,7 +186,7 @@ static void strf_(obuf_ *o, int64_t z, const char *fmt, int64_t n)
     int64_t y;
     int m, d;
     sl_r_civil_from_days(z, &y, &m, &d);
-    const int64_t wd = (z + 4) - fdiv_(z + 4, 7) * 7;            /* 0 = Sonntag */
+    const int64_t wd = (z + 4) - sl_r_fdiv(z + 4, 7) * 7;            /* 0 = Sonntag */
     const int64_t yday = z - sl_r_days_from_civil(y, 1, 1);      /* 0-basiert */
     int64_t i = 0;
     while (i < n) {
@@ -264,7 +228,7 @@ static void strf_(obuf_ *o, int64_t z, const char *fmt, int64_t n)
                     int tm, td;
                     sl_r_civil_from_days(th, &v, &tm, &td);
                 } else if (k == 'C') {
-                    v = fdiv_(y, 100);
+                    v = sl_r_fdiv(y, 100);
                 }
                 num_(o, &sp, v, 1, '0');                         /* Jahre: ohne natürliche Breite */
                 break;
@@ -274,19 +238,19 @@ static void strf_(obuf_ *o, int64_t z, const char *fmt, int64_t n)
                 int64_t ty;
                 int tm, td;
                 sl_r_civil_from_days(th, &ty, &tm, &td);
-                const int64_t gw = fdiv_(th - sl_r_days_from_civil(ty, 1, 1), 7) + 1;
-                num_(o, &sp, k == 'g' ? ty - fdiv_(ty, 100) * 100 : gw, 2, '0');
+                const int64_t gw = sl_r_fdiv(th - sl_r_days_from_civil(ty, 1, 1), 7) + 1;
+                num_(o, &sp, k == 'g' ? ty - sl_r_fdiv(ty, 100) * 100 : gw, 2, '0');
                 break;
             }
-            case 'y': num_(o, &sp, y - fdiv_(y, 100) * 100, 2, '0'); break;
+            case 'y': num_(o, &sp, y - sl_r_fdiv(y, 100) * 100, 2, '0'); break;
             case 'm': num_(o, &sp, m, 2, '0'); break;
             case 'd': num_(o, &sp, d, 2, '0'); break;
             case 'e': num_(o, &sp, d, 2, ' '); break;
             case 'j': num_(o, &sp, yday + 1, 3, '0'); break;
             case 'u': num_(o, &sp, wd == 0 ? 7 : wd, 1, '0'); break;
             case 'w': num_(o, &sp, wd, 1, '0'); break;
-            case 'U': num_(o, &sp, fdiv_(yday + 7 - wd, 7), 2, '0'); break;
-            case 'W': num_(o, &sp, fdiv_(yday + 7 - (wd + 6) % 7, 7), 2, '0'); break;
+            case 'U': num_(o, &sp, sl_r_fdiv(yday + 7 - wd, 7), 2, '0'); break;
+            case 'W': num_(o, &sp, sl_r_fdiv(yday + 7 - (wd + 6) % 7, 7), 2, '0'); break;
             case 'H': case 'M': case 'S': num_(o, &sp, 0, 2, '0'); break;
             case 'I': num_(o, &sp, 12, 2, '0'); break;
             case 'k': num_(o, &sp, 0, 2, ' '); break;

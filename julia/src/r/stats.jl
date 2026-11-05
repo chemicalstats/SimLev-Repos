@@ -28,7 +28,7 @@ import ..SimLev: RList, RVector, NamedMat, RFrame, NA, isna_strict
 using Dates
 
 export quantile, median, var, sd, cov, cor, cov2cor, scale, approx, approxfun,
-       r_filter, optimize, optimise, hclust, dist,
+       r_filter, optimize, hclust, dist,
        as_dist, p_adjust, r_rank, order, r_sort, sort_partial, rle, cut,
        findInterval, tabulate, ave, aggregate, ecdf, fitted, coef, residuals,
        seq_len_out, ApproxFun, str_collate, r_isless

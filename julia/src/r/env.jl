@@ -19,19 +19,8 @@
 # Seit 1.0.0 entfallen SIMLEV_LAPACK (keine System-LAPACK) und
 # SIMLEV_R_SYS_TIME (feste Uhr für gosolnp), SIMLEV_LEGACY_TESTS (Tests neu aufgebaut), seit 1.4.2
 # SIMLEV_FULL_TESTS, SIMLEV_GOLDEN_DIR und SIMLEV_MODULE_DIR (Fälle bis 1.4.0; die Tests lesen SIMLEV_FAELLE_DIR).
+# Seit 1.6.3 ohne die Konstante `SWITCHES` (ohne Leser; die Tabelle oben ist die Übersicht, wie in Python).
 module REnv
-
-"Name => (Zweck, Art)."
-const SWITCHES = (
-    "SIMLEV_COLLATE" => ("Sortierung: icu:<Locale> (icu:root wie R unter C.UTF-8) oder C (Bytes)", "Nutzer"),
-    "SIMLEV_ICU" => ("Pfad zur ICU-Bibliothek (libicui18n)", "Nutzer"),
-    "SIMLEV_LAX_NA" => ("1: NA = NaN im Vergleich mit den Referenzfällen", "Prüfung"),
-    "SIMLEV_STRICT_ZERO" => ("0: -0 = +0 im Vergleich mit den Referenzfällen", "Prüfung"),
-    "SIMLEV_SKIP_PRECOMPILE" => ("1: keine Arbeitslast beim Vorkompilieren", "Entwicklung"),
-    "SIMLEV_SKIP_PRECOMPILE_EXT" => ("1: Arbeitslast ohne die Erweiterungsmodule", "Entwicklung"),
-    "SIMLEV_CXX" => ("C++-Compiler für Pkg.build (gelesen in deps/build.jl, das SimLev nicht laden kann; bis 1.5.2 SIMLEV_CC)", "Bau"),
-    "SIMLEV_THREADS" => ("Threads der elementweisen Kerne (qt, pt; seit 1.6.0): ganze Zahl >= 1, sonst Zahl der Prozessoren (höchstens 8)", "Nutzer"),
-)
 
 # ── Nutzer ──────────────────────────────────────────────────────────────────
 "`SIMLEV_COLLATE` (leer, wenn nicht gesetzt)."

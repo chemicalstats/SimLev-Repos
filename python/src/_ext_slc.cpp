@@ -25,40 +25,11 @@
 /* Methodentabelle mit C-Bindung (Deklaration in _ext_common.h) */
 extern "C" {
 
-/* ── Hilfen ── */
+#include "_ext_slc_hull.h"   /* py_interrupted, ctx_init, finish, hull_buf, rel (seit 1.6.3) */
+static inline int get_buf(PyObject *o, Py_buffer *v, int writable, Py_ssize_t itemsize, const char *fmts,
+                          const char *what)
+{ return hull_buf(o, v, writable, itemsize, fmts, -1, what, 0); }
 
-static int py_interrupted(void *h) { (void) h; return PyErr_CheckSignals() < 0; }
-
-static void ctx_init(sl_ctx *cx)
-{
-    sl_ctx_init(cx);
-    cx->interrupted = py_interrupted;
-}
-
-/* Warnungen ausgeben, Fehler setzen; 0 = ok, -1 = Ausnahme gesetzt */
-static int finish(sl_ctx *cx, int st)
-{
-    int i;
-    for (i = 0; i < cx->n_warn; i++)
-        if (PyErr_WarnEx(PyExc_UserWarning, cx->warn[i], 1) < 0) return -1;
-    if (st == SL_OK) return 0;
-    if (st == SL_EINTR && PyErr_Occurred()) return -1;
-    PyErr_SetString(PyExc_ValueError, cx->msg);
-    return -1;
-}
-
-/* Puffer holen: itemsize und Formatzeichen pruefen (fmts = erlaubte letzte Zeichen) */
-static int get_buf(PyObject *o, Py_buffer *v, int writable, Py_ssize_t itemsize, const char *fmts, const char *what)
-{
-    int flags = PyBUF_C_CONTIGUOUS | PyBUF_FORMAT | (writable ? PyBUF_WRITABLE : 0);
-    if (PyObject_GetBuffer(o, v, flags) < 0) return -1;
-    if (v->itemsize != itemsize || v->format == NULL || strchr(fmts, v->format[strlen(v->format) - 1]) == NULL) {
-        PyBuffer_Release(v);
-        PyErr_Format(PyExc_TypeError, "interner Fehler: %s hat den falschen Typ", what);
-        return -1;
-    }
-    return 0;
-}
 
 static int get_state(PyObject *o, Py_buffer *v, sl_rng *r)
 {
@@ -77,12 +48,6 @@ static void put_state(Py_buffer *v, const sl_rng *r) { memcpy(v->buf, r->s, 32);
 #define NITEMS(v) ((v).len / (v).itemsize)
 
 /* ── Zustand ── */
-
-static PyObject *slc_version(PyObject *self, PyObject *args)
-{
-    (void) self; (void) args;
-    return PyUnicode_FromString(sl_version());
-}
 
 static PyObject *slc_seed(PyObject *self, PyObject *args)
 {
@@ -243,7 +208,6 @@ static PyObject *slc_sample(PyObject *self, PyObject *args)
 
 typedef int (*unary_fn)(sl_ctx *, int64_t, const double *, double *);
 typedef int (*norm_fn)(sl_ctx *, int64_t, const double *, double, double, int, double *);
-typedef int (*beta_fn)(sl_ctx *, int64_t, const double *, double, double, int, double *);
 
 static int io_bufs(PyObject *x, PyObject *out, Py_buffer *xi, Py_buffer *o)
 {
@@ -300,7 +264,6 @@ static PyObject *slc_plogis(PyObject *s, PyObject *a) { (void) s; return unary(a
 static PyObject *slc_qlogis(PyObject *s, PyObject *a) { (void) s; return unary(a, sl_qlogis); }
 
 PyMethodDef simlev_ext_slc_methods[] = {
-    {"slc_version", slc_version, METH_NOARGS, "Version der C-Bibliothek slc"},
     {"slc_seed", slc_seed, METH_VARARGS, "slc_seed(state, seed): Zustand aus seed (SplitMix64)"},
     {"slc_seed_entropy", slc_seed_entropy, METH_VARARGS, "slc_seed_entropy(state, t_ns, pid, counter)"},
     {"slc_streams", slc_streams, METH_VARARGS, "slc_streams(state, out): out[i] = J^(i+1)(state), je 32 Byte"},

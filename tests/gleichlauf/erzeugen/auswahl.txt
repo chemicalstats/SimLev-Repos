@@ -20,6 +20,7 @@ r_fmt/fmt_matrix
 r_fmt/fmt_named
 r_fmt/misc_bigint
 r_fmt/misc_nchar
+r_fmt/misc_nchar_width
 r_fmt/misc_null
 r_fmt/misc_zeroprint
 r_fmt/opt_digits_secs
@@ -53,6 +54,7 @@ r_fmt/spf_err3
 r_fmt/spf_int
 r_fmt/spf_multi
 r_fmt/spf_warn
+r_nana/cummax
 r_nana/mean_all
 r_nana/sd
 r_stats/approx_const
@@ -129,6 +131,8 @@ r_stats/hclust_ties_mcquitty
 r_stats/hclust_ties_median
 r_stats/hclust_ties_ward.D2
 r_stats/median_na
+r_stats/median_pm0
+r_stats/median_pm0_narm
 r_stats/optimize_err
 r_stats/padj_hommel
 r_stats/padj_hommel2
@@ -365,6 +369,8 @@ rexpr/var_009
 rexpr/var_010
 rexpr/var_014
 rexpr/warn_013
+rexpr/width_001
+rexpr/width_002
 slc/einheit_sperre
 slc/seed_0
 slc/seed_fehler_bruch

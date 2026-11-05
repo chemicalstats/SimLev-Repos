@@ -325,8 +325,18 @@ function scenario_entropy_pooling(x, assets, views; states = nothing, frequency 
             Z = SimLev.r_sum(w)
             SimLev.RLibm.log(Z) + mx + SimLev.r_sum(_fvec(l) .* b), w ./ Z
         end
-        fn(l) = dual(l)[1]
-        gr(l) = b .- D._matvec(A, dual(l)[2])
+        # fn und gr fragen meist denselben Punkt an: letzten Punkt bitgenau gemerkt (seit 1.6.3; reine Funktion)
+        last_l = Ref(Float64[]); last_r = Ref{Any}(nothing)
+        function dualc(l)
+            lv = _fvec(l)
+            ll = last_l[]
+            last_r[] !== nothing && length(ll) == length(lv) && all(i -> lv[i] === ll[i], eachindex(lv)) && return last_r[]
+            r = dual(lv)
+            last_l[] = copy(lv); last_r[] = r
+            return r
+        end
+        fn(l) = dualc(l)[1]
+        gr(l) = b .- D._matvec(A, dualc(l)[2])
         lower = [ineq[i] ? 0.0 : -Inf for i in eachindex(b)]
         o = SimLev.SLib.optim(zeros(length(b)), fn, gr; method = "L-BFGS-B", lower = lower,
                               control = Dict{String,Any}("maxit" => 5000, "factr" => 1e3, "pgtol" => 1e-12))   # projizierter BFGS (slc)
@@ -368,7 +378,7 @@ function scenario_entropy_pooling(x, assets, views; states = nothing, frequency 
 end
 
 "`approx(xg, yg, u, rule = 2)\$y` als Funktion."
-_approx_fn(xg, yg) = u -> _fvec(D_el(_D()._flex(SimLev.RStats.approx, (xg, yg), NamedTuple(), (xout = _fvec(u), rule = 2)), "y"))
+_approx_fn(xg, yg) = u -> _fvec(D_el(SimLev.RStats.approx(xg, yg; xout = _fvec(u), rule = 2), "y"))
 D_el(o, k) = _D()._el(o, k)
 
 _rnorm_mat(m, k, rs) = reshape(SimLev.SLib.rnorm(Int(m * k); stream = rs), Int(m), Int(k))
@@ -700,16 +710,9 @@ const _DEFAULT_CRISES = RFrame(
 
 "`cumprod` (long double)."
 _cumprod(x) = SimLev._rb_cumprod(Float64[Float64(v) for v in x])   # C-Kern
-"`cummax` (NA/NaN pflanzt sich fort)."
-function _cummax(x)
-    out = similar(x, Float64)
-    mx = -Inf
-    for i in eachindex(x)
-        mx = (isnan(x[i]) || isnan(mx)) ? mx + x[i] : (mx > x[i] ? mx : x[i])
-        out[i] = mx
-    end
-    out
-end
+"R's `cummax()` über den Kern `sl_r_cummax` (wie R und Python: NA ab dem ersten NA, sonst NaN ab dem ersten NaN; seit
+1.6.3, bis 1.6.2 eine eigene Schleife mit anderen NA/NaN-Regeln)."
+_cummax(x) = SimLev.r_cummax(collect(Float64, x))
 
 """
     scenario_crisis(data, weights; crises = nothing, rebalance = false)

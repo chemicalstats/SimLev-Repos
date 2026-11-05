@@ -53,7 +53,7 @@ function _fr_class(fr::_Frame, name)
 end
 
 "is.na() für einen Spalteneintrag."
-_isna_val(x) = x === missing || x === nothing || (x isa AbstractFloat && isnan(x))
+const _isna_val = _isna   # r/rnum.jl (seit 1.6.3)
 _isna_vec(v::AbstractVector{Float64}) = BitVector(isnan.(v))
 _isna_vec(v::AbstractVector) = BitVector([_isna_val(x) for x in v])
 

@@ -13,7 +13,8 @@
 # (n <= 40: Spalten 1 und n; größere n: jeder zehnte Fall, Spalte 1): Residuum ||A v - lambda v|| / ||A||, Orthogonalität max |v_j' v_k - delta_jk|
 # (gegen alle Spalten k) und Fehler des Eigenwerts gegen den Rayleigh-Quotienten v'Av / v'v in 128 Bit, bezogen auf
 # ||A|| (= max |lambda|). Zeilen "Genauigkeit eigen ..." mit Median und Maximum; Ende 1, wenn ein Wert 10 n 2^-52
-# übersteigt (übliche Schranke n u der Householder-Verfahren mit Sicherheitsfaktor).
+# übersteigt (übliche Schranke n u der Householder-Verfahren mit Sicherheitsfaktor). Seit 1.6.3 nur ab 1000 Fällen
+# (run.py --full) oder mit SIMLEV_FUZZ_GENAU=1 (ref_tools.R fuzz_genau); geprüft wird die Zerlegung des Falls.
 #
 # Prüfung (tests/werkzeuge/gleichlauf/run.py, Schritt 5): abgelegte Referenz (seit 1.6.2 aus R 1.6.2, run.py --ref-erzeugen 162),
 # R neu mit tests/werkzeuge/gleichlauf/sim_fuzz_cmp.py, Python und Julia mit vergleich.py/vergleich.jl gegen die Referenz.
@@ -21,23 +22,8 @@ source("tests/gleichlauf/erzeugen/ref_tools.R")
 args <- commandArgs(TRUE)
 N <- as.integer(args[1]); seed0 <- as.integer(if (length(args) >= 2) args[2] else 20261117)
 ref_bereich("eigen_fuzz", alle = TRUE); ref_init("eigen_fuzz")
-pick <- function(x) x[[sample.int(length(x), 1L)]]
-coin <- function(p) runif(1) < p
-
-fuzz_case <- function(id, r, py, jl, inputs) {
-  ref_case(id, r = r, py = py, jl = jl, inputs = inputs)
-  if (!.ref_in_subset(id)) return(invisible(NULL))
-  env <- new.env(parent = globalenv())
-  for (k in names(inputs)) assign(k, inputs[[k]], envir = env)
-  dp <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = " ")
-  wc <- character(0); ec <- NULL
-  invisible(capture.output(tryCatch(withCallingHandlers(eval(parse(text = r), envir = env),
-    warning = function(w) { wc <<- c(wc, dp(conditionCall(w))); invokeRestart("muffleWarning") },
-    message = function(m) invokeRestart("muffleMessage")),
-    error = function(e) ec <<- dp(conditionCall(e)))))
-  ref_case_extra(list(r_calls = list(warnings = as.list(wc), error = ec)))
-}
-suppressMessages(library(Rmpfr))
+GENAU <- fuzz_genau(N)
+if (GENAU) suppressMessages(library(Rmpfr))
 ACC <- list()
 eig_acc <- function(M, e, cols) {                    # Spalten cols gegen 128 Bit (Rmpfr)
   n <- nrow(M); nA <- max(abs(e$values)); if (nA == 0) nA <- 1
@@ -70,13 +56,13 @@ for (kk in seq_len(N)) {
     if (coin(0.03)) M[] <- 0
     M <- (M + t(M)) / 2
     ov <- coin(0.3)
-    fuzz_case(sprintf("e%05d", kk),
+    e <- fuzz_case(sprintf("e%05d", kk),
       r = sprintf("SimLev:::.sl_eigen_sym(M, only.values = %s)", ov),
       py = sprintf("result = simlev._lib.eigen_sym(M, only_values=%s)", if (ov) "True" else "False"),
       jl = sprintf("result = SL.SLib.eigen_sym(M; only_values = %s)", tolower(ov)),
       inputs = list(M = M))
-    if (!ov && .ref_in_subset(sprintf("e%05d", kk)) && (n <= 40 || kk %% 10 == 1))    # Genauigkeit (eigene Zufallsfolge)
-      eig_acc(M, SimLev:::.sl_eigen_sym(M), if (n <= 40) c(1, n) else 1)
+    if (GENAU && !ov && !is.null(e) && (n <= 40 || kk %% 10 == 1))    # Genauigkeit (ohne Zufall)
+      eig_acc(M, e, if (n <= 40) c(1, n) else 1)
   } else {
     k <- pick(c(3, 10, 25, 60)); nm <- sprintf("a%02d", seq_len(k))
     d <- data.frame(date = seq.Date(as.Date("2005-01-03") + sample(0:3000, 1), by = "day", length.out = pick(c(700, 1500))))

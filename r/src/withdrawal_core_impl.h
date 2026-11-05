@@ -625,18 +625,7 @@ static auto wd_simulate(simlev_host::NumMat R, simlev_host::NumMat INF, simlev_h
 // (NA vor NaN), pmax wie R (NA/NaN bleiben), log/exp aus der libm wie R's math1.
 // ---------------------------------------------------------------------------
 
-inline double wd_na_real() {
-  const uint64_t u = UINT64_C(0x7FF00000000007A2);
-  double d;
-  std::memcpy(&d, &u, sizeof d);
-  return d;
-}
-inline bool wd_isna(double x) {          // R's ISNA: NaN mit Nutzlast 1954
-  if (!std::isnan(x)) return false;
-  uint64_t u;
-  std::memcpy(&u, &x, sizeof u);
-  return (u & UINT64_C(0xFFFFFFFF)) == 1954;
-}
+// NA_real_ und R's ISNA: simlev_na_real, simlev_is_na (simlev_core.h; seit 1.6.3 statt eigener Kopien)
 
 // min(x) bzw. max(x) fuer n >= 1 Doubles wie R (rmin/rmax und die Zusammenfassung in do_summary)
 inline double wd_r_minmax(int64_t n, const double* x, bool is_max) {
@@ -644,7 +633,7 @@ inline double wd_r_minmax(int64_t n, const double* x, bool is_max) {
   bool upd = false;
   for (int64_t k = 0; k < n; k++) {
     if (std::isnan(x[k])) {
-      if (!wd_isna(s)) s = x[k];
+      if (!simlev_is_na(s)) s = x[k];
       upd = true;
     } else if (!upd || (is_max ? x[k] > s : x[k] < s)) {
       s = x[k];
@@ -653,18 +642,13 @@ inline double wd_r_minmax(int64_t n, const double* x, bool is_max) {
   }
   double z = is_max ? -std::numeric_limits<double>::infinity() : std::numeric_limits<double>::infinity();
   if (upd) {
-    if (std::isnan(s)) z = wd_isna(s) ? s : z + s;
+    if (std::isnan(s)) z = simlev_is_na(s) ? s : z + s;
     else if (is_max ? s > z : s < z) z = s;
   }
   return z;
 }
 
-// R's log fuer Doubles (R_log ueber math1: NaN bleibt, 0 -> -Inf)
-inline double wd_r_log(double x) {
-  if (std::isnan(x)) return x;
-  return x > 0 ? std::log(x) : x == 0 ? -std::numeric_limits<double>::infinity()
-                                      : std::numeric_limits<double>::quiet_NaN();
-}
+// R's log fuer Doubles: sl_r_log1 (slc_rbase.h; seit 1.6.3 statt eigener Kopie)
 
 // Kennzahlen der Entnahmen je Pfad. sp: Entnahmen ny x np (spaltenweise), nfy volle Planjahre,
 // H: Horizont je Pfad (0 <= H[i] <= ny) oder nullptr; gamma, sv wie withdrawal_simulation().
@@ -675,7 +659,7 @@ inline double wd_r_log(double x) {
 // tmp: Arbeitsfeld mit 2 ny Plaetzen.
 inline void wd_metrics(int64_t ny, int64_t np, const double* sp, int64_t nfy, const int* H, double gamma,
                        double sv, double* mean, double* mn, double* dd, double* ce, double* total, double* tmp) {
-  const double na = wd_na_real();
+  const double na = simlev_na_real();
   const double lo = 1e-9 * sv;
   const bool log_ce = std::fabs(gamma - 1) < 1e-12;
   const double g1 = 1 - gamma, gi = 1 / (1 - gamma);
@@ -702,7 +686,7 @@ inline void wd_metrics(int64_t ny, int64_t np, const double* sp, int64_t nfy, co
     dd[i] = wd_r_minmax(r, b, true);
     for (int64_t k = 0; k < r; k++) a[k] = (!std::isnan(c[k]) && lo > c[k]) ? lo : c[k];   // pmax(c, 1e-9 sv)
     if (log_ce) {                                       // exp(mean(log(c)))
-      for (int64_t k = 0; k < r; k++) b[k] = wd_r_log(a[k]);
+      for (int64_t k = 0; k < r; k++) b[k] = sl_r_log1(a[k]);
       const double m = sl_r_mean(r, b);
       ce[i] = std::isnan(m) ? m : std::exp(m);
     } else {                                            // mean(c^(1 - gamma))^(1 / (1 - gamma))

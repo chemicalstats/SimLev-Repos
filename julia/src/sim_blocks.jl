@@ -78,12 +78,7 @@ function _blk_start(who, x)
 end
 
 "Klasse wie `paste(class(x), collapse = \"/\")` in R (für Meldungen)."
-function _blk_cls(@nospecialize(x))
-    c = r_class(x)
-    isempty(c) || return join(c, "/")
-    x isa Integer && !(x isa Bool) && return "numeric"     # Julia-Ganzzahl steht für eine R-Zahl (42, nicht 42L)
-    return _r_class1(x)
-end
+const _blk_cls = _cls_all   # config.jl (seit 1.6.3 eine Fassung; Julia-Ganzzahl steht für eine R-Zahl, 42 statt 42L)
 
 function _blk_check(x, cls, arg, ctor)
     @nospecialize
@@ -311,8 +306,8 @@ function dca_plan(value_pos = _UNSET, span_pos = _UNSET, days_pos = nothing; val
         error("$who: 'span' muss eine einzelne ganze Zahl >= 1 sein (Perioden zwischen zwei Terminen), nicht $(_blk_show(span)).")
     end
     days = _blk_days(who, days)
-    unit = match_arg(unit, ("month", "quarter", "year"), "unit")
-    anchor = match_arg(anchor, ("start", "end"), "anchor")
+    unit = _match_arg(unit, ("month", "quarter", "year"))
+    anchor = _match_arg(anchor, ("start", "end"))
     _blk_start(who, start)
     _blk_lgl(who, skip, "skip")
     _blk_lgl(who, fill_deficits, "fill_deficits")
@@ -431,16 +426,16 @@ function rebalance_plan(span_pos = nothing, days_pos = nothing; span = span_pos,
     @nospecialize
     who = "rebalance_plan"
     days = _blk_days(who, days)
-    unit = match_arg(unit, ("month", "quarter", "year"), "unit")
-    anchor = match_arg(anchor, ("start", "end"), "anchor")
+    unit = _match_arg(unit, ("month", "quarter", "year"))
+    anchor = _match_arg(anchor, ("start", "end"))
     _blk_start(who, start)
     _blk_lgl(who, skip, "skip")
     _blk_num(who, thresh, "thresh", "NULL oder eine einzelne endliche Zahl >= 0 in Prozent (z. B. 5)"; null_ok = true)
     _blk_frac_warn(who, thresh, "thresh", 0.2)
-    thresh_type = match_arg(thresh_type, ("absolute", "relative"), "thresh_type")
+    thresh_type = _match_arg(thresh_type, ("absolute", "relative"))
     event_col === nothing && !(event_mode isa _Unset) &&
         @warn "rebalance_plan: event_mode wirkt nur zusammen mit event_col und wird ignoriert."
-    event_mode = match_arg(_val(event_mode, ("additional", "replace")), ("additional", "replace"), "event_mode")
+    event_mode = _match_arg(_val(event_mode, ("additional", "replace")), ("additional", "replace"))
     if event_col !== nothing && !(event_col isa AbstractString)
         error("rebalance_plan: event_col muss NULL oder der Name einer logischen Spalte in data sein, nicht $(_blk_show(event_col)).")
     end

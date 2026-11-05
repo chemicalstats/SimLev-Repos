@@ -425,7 +425,6 @@ def quantile(x, probs=(0.0, 0.25, 0.5, 0.75, 1.0), na_rm=False, names=True, type
         xv = xv[~np.isnan(xv)]
     elif np.isnan(xv).any():
         raise RError("missing values and NaN's not allowed if 'na.rm' is FALSE")
-    scalar_p = np.ndim(probs) == 0
     p = np.atleast_1d(np.asarray(probs, dtype=np.float64)).ravel()
     eps = 100 * _DBL_EPS
     pok = ~np.isnan(p)
@@ -440,8 +439,6 @@ def quantile(x, probs=(0.0, 0.25, 0.5, 0.75, 1.0), na_rm=False, names=True, type
     qs = np.where(pok, qs, p)
     if names and np_ > 0:
         return pd.Series(qs, index=_format_perc(pp, digits))
-    if np_ == 1 and scalar_p:
-        return float(qs[0])
     if np_ == 1:
         return float(qs[0])
     return qs

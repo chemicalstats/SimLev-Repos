@@ -43,9 +43,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 CORE = os.path.join(ROOT, "core")
 TARGETS = [os.path.join(ROOT, "r", "src"), os.path.join(ROOT, "python", "src", "core"),
            os.path.join(ROOT, "julia", "deps", "core")]
-# geteilte Kerne: R, Python und Julia
-SHARED_TARGETS = TARGETS
-# C-ABI-Hülle der geteilten Kerne: nur Julia
+# geteilte Kerne (is_shared): alle drei Ziele; C-ABI-Hülle der geteilten Kerne: nur Julia
 CABI_TARGETS = TARGETS[2:]
 # früherer Ort der Python-Kopien der geteilten Kerne (vor 1.0.0 python/src/): dort darf keine mehr liegen
 OLD_SHARED = [os.path.join(ROOT, "python", "src")]
@@ -84,7 +82,7 @@ def canonical() -> list[str]:
 
 def files_for(target: str, files: list[str]) -> list[str]:
     return [f for f in files if (is_slc(f) and not (is_rbase(f) and target == TARGETS[0]))
-            or (is_shared(f) and target in SHARED_TARGETS)
+            or is_shared(f)
             or (is_cabi(f) and target in CABI_TARGETS)]
 
 

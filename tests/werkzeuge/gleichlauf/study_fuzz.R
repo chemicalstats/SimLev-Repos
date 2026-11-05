@@ -16,23 +16,7 @@ source("tests/gleichlauf/erzeugen/ref_tools.R")
 args <- commandArgs(TRUE)
 N <- as.integer(args[1]); seed0 <- as.integer(if (length(args) >= 2) args[2] else 20261111)
 ref_bereich("study_fuzz", alle = TRUE); ref_init("study_fuzz")
-pick <- function(x) x[[sample.int(length(x), 1L)]]
-coin <- function(p) runif(1) < p
 
-fuzz_case <- function(id, r, py, jl, inputs) {
-  ref_case(id, r = r, py = py, jl = jl, inputs = inputs)
-  if (!.ref_in_subset(id)) return(invisible(NULL))
-  env <- new.env(parent = globalenv())
-  for (k in names(inputs)) assign(k, inputs[[k]], envir = env)
-  dp <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = " ")
-  wc <- character(0); ec <- NULL; cs <- character(0)
-  invisible(capture.output(tryCatch(withCallingHandlers(eval(parse(text = r), envir = env),
-    warning = function(w) { wc <<- c(wc, dp(conditionCall(w))); cs <<- c(cs, paste0("W: ", conditionMessage(w)))
-                            invokeRestart("muffleWarning") },
-    message = function(m) { cs <<- c(cs, paste0("M: ", conditionMessage(m))); invokeRestart("muffleMessage") }),
-    error = function(e) ec <<- dp(conditionCall(e)))))
-  ref_case_extra(list(r_calls = list(warnings = as.list(wc), error = ec), r_conds = as.list(cs)))
-}
 num <- function(v) sprintf("%.17g", v)
 
 for (kk in seq_len(N)) {
@@ -97,6 +81,6 @@ for (kk in seq_len(N)) {
     ja <- 'b = p -> (r0 = SL.simulation(d, st; rebalance = SL.rebalance_plan(; unit = p["u"])); SL.RList("strategy" => st, "rebalance" => SL.rebalance_plan(; unit = p["u"])))\nps = SL.param_search(d, b, SL.param_space(u = ["month", "year"]); cores = 1); ps["elapsed"] = 0; ps["results"]["elapsed"] = zeros(SL.nrow(ps["results"])); result = ps'
   }
   fuzz_case(sprintf("%s%05d", kind, kk), r = paste0(st_r, "\n", ra), py = paste0(st_p, "\n", pa), jl = paste0(st_j, "\n", ja),
-            inputs = list(d = d))
+            inputs = list(d = d), conds = TRUE)
 }
 ref_done(); ref_schreiben()

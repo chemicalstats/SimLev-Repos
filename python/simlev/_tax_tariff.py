@@ -194,6 +194,30 @@ def tax_tariff(*, file: str | None = None) -> SimLevTaxTariff:
         if not os.path.exists(file):
             raise ValueError("tax_tariff: Die mitgelieferte Datei extdata/steuertarif.csv wurde nicht gefunden "
                              "(Paket unvollständig installiert?).")
+        # mitgelieferter Tarif je Prozess gemerkt (seit 1.6.3; Studien lesen ihn sonst je Lauf), solange Pfad,
+        # Änderungszeit und Größe gleich sind; gemerkt wird nur ein Ergebnis ohne Warnung, zurück kommt eine Kopie
+        try:
+            st = os.stat(file)
+            key = (os.path.realpath(os.path.abspath(file)), st.st_mtime_ns, st.st_size)
+        except OSError:
+            key = None
+        hit = _DEFAULT_CACHE.get("v")
+        if key is not None and hit is not None and hit[0] == key:
+            t = hit[1]
+            return SimLevTaxTariff(t.zones.copy(), dict(t.soli), t.geltung, t.file)
+        out = _tax_tariff_read(file)
+        if key is not None and out[1]:
+            t = out[0]
+            _DEFAULT_CACHE["v"] = (key, SimLevTaxTariff(t.zones.copy(), dict(t.soli), t.geltung, t.file))
+        return out[0]
+    return _tax_tariff_read(file)[0]
+
+
+_DEFAULT_CACHE: dict = {}
+
+
+def _tax_tariff_read(file) -> tuple:
+    """``tax_tariff(file)``: (Tarif, ohne Sprungwarnung?)."""
     if not isinstance(file, (str, os.PathLike)):
         raise ValueError("tax_tariff: 'file' muss ein einzelner Dateipfad (Zeichenkette) oder NULL sein.")
     file = os.fspath(file)
@@ -298,12 +322,14 @@ def tax_tariff(*, file: str | None = None) -> SimLevTaxTariff:
                     r_sprintf("tax_tariff: Zone ab %s EUR (Datenzeile %d): Steuer %.2f EUR bei x = %s EUR "
                               "übersteigt das Einkommen. %s.", r_format1(ab[k], scientific=False), zr[k] + 1,
                               f(k, x), r_format1(x, scientific=False), unit_hint))
+    quiet = True
     for k in range(1, nz):
         jump = f(k, ab[k]) - f(k - 1, ab[k])
         if abs(jump) > 1:
+            quiet = False
             warnings.warn(r_sprintf("tax_tariff: Der Tarif springt an der Zonengrenze %s EUR um %.2f EUR "
                                     "(vorige Zone %.2f, neue Zone %.2f EUR); Tarifdatei prüfen.",
                                     r_format1(ab[k], scientific=False), jump, f(k - 1, ab[k]), f(k, ab[k])),
-                          stacklevel=2)
-    return out
+                          stacklevel=3)
+    return out, quiet
 

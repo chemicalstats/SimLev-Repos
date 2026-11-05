@@ -33,15 +33,20 @@ zeile <- function(z, r, py, jl, print = FALSE, inp = NULL) list(z = z, r = r, py
 .sz_ein <- function(x, n) paste0(strrep(" ", n), strsplit(x, "\n", fixed = TRUE)[[1]], collapse = "\n")
 # Namen, denen der Code auf oberster Ebene neu zuweist (Python, Julia)
 .sz_zuweis <- function(x) {
-  # Anweisungen trennen: ";" nur außerhalb von Klammern und Zeichenketten (in Julia trennt ";" auch Schlüsselargumente)
-  ch <- strsplit(x, "")[[1]]; tiefe <- 0L; q <- ""
-  for (i in seq_along(ch)) {
-    z <- ch[i]
-    if (nzchar(q)) { if (z == q && (i == 1L || ch[i - 1L] != "\\")) q <- "" }
-    else if (z %in% c("'", "\"")) q <- z
-    else if (z %in% c("(", "[", "{")) tiefe <- tiefe + 1L
-    else if (z %in% c(")", "]", "}")) tiefe <- tiefe - 1L
-    else if (z == ";" && tiefe == 0L) { ch[i] <- "\n"; j <- i + 1L; while (j <= length(ch) && ch[j] %in% c(" ", "\t")) { ch[j] <- ""; j <- j + 1L } }
+  # Anweisungen trennen: ";" nur außerhalb von Klammern und Zeichenketten (in Julia trennt ";" auch Schlüsselargumente);
+  # Zeichenketten: von ' bzw. " bis zum gleichen Zeichen ohne \ davor; danach folgende Leerzeichen/Tabs entfallen.
+  # Seit 1.6.3 vektoriell (bis 1.6.2 eine Schleife je Zeichen, gleiches Ergebnis): nur die Anführungszeichen der Reihe nach
+  ch <- strsplit(x, "")[[1]]; n <- length(ch)
+  drin <- logical(n); q <- ""; von <- 0L
+  for (i in which(ch == "'" | ch == "\"")) {
+    if (!nzchar(q)) { q <- ch[i]; von <- i }
+    else if (ch[i] == q && (i == 1L || ch[i - 1L] != "\\")) { drin[von:i] <- TRUE; q <- "" }
+  }
+  if (nzchar(q)) drin[von:n] <- TRUE
+  d <- ifelse(drin, 0L, ifelse(ch %in% c("(", "[", "{"), 1L, ifelse(ch %in% c(")", "]", "}"), -1L, 0L)))
+  tiefe <- cumsum(d) - d                                # Tiefe vor dem Zeichen
+  for (i in which(ch == ";" & !drin & tiefe == 0L)) {
+    ch[i] <- "\n"; j <- i + 1L; while (j <= n && ch[j] %in% c(" ", "\t")) { ch[j] <- ""; j <- j + 1L }
   }
   x <- paste(ch, collapse = "")
   m <- regmatches(x, gregexpr("(?m)^[A-Za-z_][A-Za-z0-9_]*(?=\\s*=[^=])", x, perl = TRUE))[[1]]

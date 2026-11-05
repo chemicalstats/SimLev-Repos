@@ -25,8 +25,6 @@ local({   # Code-Erzeuger aus tests/gleichlauf/erzeugen/engine.R (em, .args, sim
 args <- commandArgs(TRUE)
 N <- as.integer(args[1]); seed0 <- as.integer(if (length(args) >= 2) args[2] else 20261102)
 ref_bereich("sched_fuzz", alle = TRUE); ref_init("sched_fuzz")
-pick <- function(x) x[[sample.int(length(x), 1L)]]
-coin <- function(p) runif(1) < p
 day0 <- function(y1, y2) as.numeric(as.Date(sprintf("%d-01-01", y1))) +
   sample.int(as.numeric(as.Date(sprintf("%d-01-01", y2)) - as.Date(sprintf("%d-01-01", y1))), 1) - 1
 # Tage fuer days: oft Monatsenden, auch doppelt

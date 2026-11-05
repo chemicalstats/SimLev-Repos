@@ -19,18 +19,22 @@
  *                                         SIMLEV_C_ERROR zurueck, der Text steht danach in
  *                                         simlev_c_last_error() (je Thread). Kein longjmp ueber
  *                                         Julia-Rahmen.
- *   SIMLEV_CHECK_INTERRUPT()              prueft einen prozessweiten Merker (simlev_c_interrupt);
- *                                         gesetzt -> Rueckgabe SIMLEV_C_INTERRUPT. Derzeit ruft kein
- *                                         Kern die Pruefung auf.
- *   SIMLEV_WARN(msg)                      von keinem Kern genutzt; Text in simlev_c_last_error()
- *   SIMLEV_NUM, MATRIX, COPY, CLONE, INT  Speicher je Thread (vor jedem Kern geleert); die Huelle
+ *   SIMLEV_CHECK_INTERRUPT()              ohne Wirkung: Julia bricht nur zwischen zwei Aufrufen ab (wie
+ *                                         slc, julia/src/slib.jl); Strg-C wirkt erst nach der Rueckkehr
+ *                                         des Kerns. Die Kerne hmm_em, goal_dp und pbo_cscv
+ *                                         (research_core_impl.h) rufen die Pruefung auf, sie wirkt nur
+ *                                         in R und Python. Seit 1.6.3 ohne den frueheren Merker
+ *                                         simlev_c_interrupt (kein Aufrufer in Julia).
+ *   SIMLEV_NUM, MATRIX, COPY              Speicher je Thread (vor jedem Kern geleert); die Huelle
  *                                         kopiert die Ergebnisse in die Felder des Aufrufers
  *   SIMLEV_LIST, DONE, SET_FLAG           Tupel bzw. Merker wie in Python
  *
  * Auswertung (evaluate_core_impl.h): simlev_c_eval_* (Ergebnisobjekt je Aufrufer) und simlev_c_xirr.
  * Entnahme (withdrawal_core_impl.h): simlev_c_wd_simulate, seit 1.5.0 die Auswertung je Pfad simlev_c_wd_metrics,
  * _pwr, _annual_prod, _tariff_count, _tariff_compact.
- * Forschung (research_core_impl.h), seit 1.5.0: simlev_c_hmm_em, simlev_c_goal_dp, simlev_c_pbo_cscv.
+ * Forschung (research_core_impl.h), seit 1.5.0: simlev_c_hmm_em, simlev_c_goal_dp, simlev_c_pbo_cscv; seit 1.6.3
+ * simlev_c_roll_max_core. Tagesengine seit 1.6.3 auch simlev_c_engine_open_lots_n/_open_lots (kompakte Lot-Ausgabe).
+ * Fonds-Wrapper (wrapper_core_impl.h), seit 1.5.1: simlev_c_wrapper_nav.
  *
  * Tagesengine (engine_core_impl.h): eigener Zustand im Kern, flache Eingabe (struct Input); Julia
  * uebergibt Zeiger, Laengen und Skalare und holt die Ergebnisse ueber simlev_c_engine_* (julia/src/sim_engine.jl).
@@ -39,11 +43,10 @@
  * entfallen. Geblieben sind feste Groessen und Schrittweiten der flachen Felder; simlev_c_flat_layout meldet sie,
  * Julia prueft sie beim Vorkompilieren.
  *
- * Rueckgabecodes: 0 in Ordnung, 1 Fehler des Kerns (Text), 2 Benutzerabbruch, 3 kein Speicher,
- * 4 unbekannte Ausnahme, 5 Fehlaufruf der Huelle (Laengen; Text).
+ * Rueckgabecodes: 0 in Ordnung, 1 Fehler des Kerns (Text), 3 kein Speicher, 4 unbekannte Ausnahme,
+ * 5 Fehlaufruf der Huelle (Laengen; Text). Code 2 (Benutzerabbruch) entfiel in 1.6.3.
  */
 #include <algorithm>
-#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -58,7 +61,6 @@
 
 #define SIMLEV_C_OK 0
 #define SIMLEV_C_ERROR 1
-#define SIMLEV_C_INTERRUPT 2
 #define SIMLEV_C_NOMEM 3
 #define SIMLEV_C_UNKNOWN 4
 #define SIMLEV_C_BADCALL 5
@@ -74,7 +76,6 @@ namespace cabi {
 typedef std::ptrdiff_t idx_t;
 
 template <class T> struct VecT {
-    void* sexp;
     T* ptr;
     idx_t len;
     T& operator[](idx_t i) const { return ptr[i]; }
@@ -86,7 +87,6 @@ typedef VecT<double> Vec;
 typedef VecT<int> IVec;
 
 struct Mat {
-    void* sexp;
     double* ptr;
     int nr, nc;
     double& operator()(idx_t i, idx_t j) const { return ptr[i + (idx_t) nr * j]; }
@@ -96,14 +96,13 @@ struct Mat {
     double* end() const { return ptr + (idx_t) nr * nc; }
 };
 
-inline Vec vec(const double* p, idx_t n) { Vec v = {nullptr, const_cast<double*>(p), n}; return v; }
-inline IVec ivec(const int* p, idx_t n) { IVec v = {nullptr, const_cast<int*>(p), n}; return v; }
-inline Mat mat(const double* p, int nr, int nc) { Mat m = {nullptr, const_cast<double*>(p), nr, nc}; return m; }
+inline Vec vec(const double* p, idx_t n) { Vec v = {const_cast<double*>(p), n}; return v; }
+inline IVec ivec(const int* p, idx_t n) { IVec v = {const_cast<int*>(p), n}; return v; }
+inline Mat mat(const double* p, int nr, int nc) { Mat m = {const_cast<double*>(p), nr, nc}; return m; }
 
 struct KernelError {
     char msg[2048];
 };
-struct Interrupted {};
 struct BadCall {
     char msg[512];
 };
@@ -133,42 +132,27 @@ template <class... A> [[noreturn]] inline void badcall(const char* fmt, A... a) 
 #pragma GCC diagnostic pop
 #endif
 
-inline std::atomic<int>& interrupt_flag() {
-    static std::atomic<int> f(0);
-    return f;
-}
-inline void check_interrupt() {
-    if (interrupt_flag().load(std::memory_order_relaxed) != 0) throw Interrupted();
-}
-
 /* Ergebnisfelder der Kerne: Speicher je Thread, vor jedem Kern geleert */
 struct Alloc {
     std::deque<std::vector<double>> store;
-    std::deque<std::vector<int>> istore;
     bool flag = false, has_flag = false;
     void reset() {
         store.clear();
-        istore.clear();
         flag = has_flag = false;
-    }
-    IVec ivec(idx_t n, int fill = 0) {
-        istore.emplace_back((std::size_t) n, fill);
-        IVec v = {nullptr, istore.back().data(), n};
-        return v;
     }
     Vec num(idx_t n, double fill = 0.0) {
         store.emplace_back((std::size_t) n, fill);
-        Vec v = {nullptr, store.back().data(), n};
+        Vec v = {store.back().data(), n};
         return v;
     }
     Mat mat(int nr, int nc) {
         store.emplace_back((std::size_t) nr * (std::size_t) nc, 0.0);
-        Mat m = {nullptr, store.back().data(), nr, nc};
+        Mat m = {store.back().data(), nr, nc};
         return m;
     }
     template <class It> Vec copy(It first, It last) {
         store.emplace_back(first, last);
-        Vec v = {nullptr, store.back().data(), (idx_t) store.back().size()};
+        Vec v = {store.back().data(), (idx_t) store.back().size()};
         return v;
     }
     void set_flag(bool f) {
@@ -185,7 +169,7 @@ inline Alloc& alloc() {
 template <class F> int run(F f) {
     try {
         Alloc& al = alloc();
-        if (!al.store.empty() || !al.istore.empty() || al.has_flag) al.reset();   /* meist schon leer */
+        if (!al.store.empty() || al.has_flag) al.reset();   /* meist schon leer */
         f();
         return SIMLEV_C_OK;
     } catch (const KernelError& e) {
@@ -194,9 +178,6 @@ template <class F> int run(F f) {
     } catch (const BadCall& e) {
         set_error(e.msg);
         return SIMLEV_C_BADCALL;
-    } catch (const Interrupted&) {
-        set_error("Benutzerabbruch");
-        return SIMLEV_C_INTERRUPT;
     } catch (const std::bad_alloc&) {
         set_error("kein Speicher");
         return SIMLEV_C_NOMEM;
@@ -221,26 +202,22 @@ namespace simlev_host {
 typedef cabi::Vec NumVec;
 typedef cabi::IVec IntVec;
 typedef cabi::Mat NumMat;
-typedef cabi::IVec LglVec;
 
 }  // namespace simlev_host
 
 #define SIMLEV_NA (simlev_na_real())
 #define SIMLEV_FAIL cabi::fail
-#define SIMLEV_CHECK_INTERRUPT() cabi::check_interrupt()
-#define SIMLEV_WARN(msg) cabi::set_error(msg)
+#define SIMLEV_CHECK_INTERRUPT() ((void) 0)   /* Julia: Abbruch nur zwischen Aufrufen (wie slc) */
 #define SIMLEV_NUM(...) cabi::alloc().num(__VA_ARGS__)
-#define SIMLEV_INT(...) cabi::alloc().ivec(__VA_ARGS__)
 #define SIMLEV_MATRIX(...) cabi::alloc().mat(__VA_ARGS__)
 #define SIMLEV_COPY(...) cabi::alloc().copy(__VA_ARGS__)
 #define SIMLEV_COPY_VEC(...) cabi::alloc().copy(__VA_ARGS__)
 #define SIMLEV_SET_FLAG(v, name, f) cabi::alloc().set_flag(f)
 #define SIMLEV_DONE(v) (v)
 #define SIMLEV_LIST(...) std::make_tuple(__VA_ARGS__)
-#define SIMLEV_CLONE(v) cabi::alloc().copy((v).begin(), (v).end())
-#define SIMLEV_R_FINITE(x) std::isfinite(x)
 
 #include "research_core_impl.h"
+#include "wrapper_core_impl.h"     /* NAV von wrapper_nav() (seit 1.5.1) */
 #include "withdrawal_core_impl.h"
 #include "engine_core_impl.h"   /* Tagesengine (eigener Zustand, ohne Host-Objekte) */
 #include "evaluate_core_impl.h" /* Auswertung von simulation(), xirr */
@@ -250,7 +227,6 @@ typedef cabi::IVec LglVec;
  * ========================================================================= */
 
 SIMLEV_C_EXPORT const char* simlev_c_last_error(void) { return cabi::last_error(); }
-SIMLEV_C_EXPORT void simlev_c_interrupt(int on) { cabi::interrupt_flag().store(on ? 1 : 0); }
 
 /* ---- research_core_impl.h ---- */
 
@@ -334,6 +310,17 @@ SIMLEV_C_EXPORT int simlev_c_roll_cov_core(const double* x, int64_t mx, const do
     });
 }
 
+/* Rollierendes Maximum (seit 1.6.3; research_core_impl.h, roll_max_core): out[i] = max(x[max(0, i - w + 1) .. i])
+ * fuer m Werte, NaN als -Inf; zero 0 (erstes Auftreten, R) bzw. 1 (-0 < +0, Julia). out (m) gehoert dem Aufrufer,
+ * der Kern schreibt direkt hinein. w < 1 oder zero nicht 0/1: Code 5 (BADCALL), out unveraendert. */
+SIMLEV_C_EXPORT int simlev_c_roll_max_core(const double* x, int64_t m, int64_t w, int zero, double* out) {
+    return cabi::run([&] {
+        if (m < 0) cabi::badcall("roll_max_core: Laenge negativ");
+        if (simlev::roll_max_core(m, x, w, zero, out) != 0)
+            cabi::badcall("roll_max_core: Fenster muss >= 1 und zero 0 oder 1 sein");
+    });
+}
+
 SIMLEV_C_EXPORT int simlev_c_kendall_tau_core(const double* x, const double* y, int64_t n, double* out) {
     return cabi::run([&] { *out = simlev::kendall_tau_core(cabi::vec(x, n), cabi::vec(y, n)); });
 }
@@ -375,6 +362,17 @@ SIMLEV_C_EXPORT int simlev_c_pbo_cscv(const double* B, const double* T, const in
         for (int64_t i = 0; i < C * (S / 2); i++)
             if (combos[i] < 1 || combos[i] > S) cabi::badcall("pbo_cscv: Block ausserhalb 1..%lld", (long long) S);
         simlev::pbo_cscv((int) S, (int) N, (int) C, B, T, combos, half, (int) metric, lam, isb, oosb, oosm);
+    });
+}
+
+/* NAV eines Fonds-Wrappers (seit 1.5.1; wrapper_core_impl.h, wrapper_nav_core): G, day, yr (je n), fee, pf, S, d0
+ * -> nav, gross, fee_t, acc, paid, hwm (je n); *bad = -1 oder erster Tag (0-basiert) ohne Anteilswert */
+SIMLEV_C_EXPORT int simlev_c_wrapper_nav(int64_t n, const double* G, const double* day, const int64_t* yr, double fee,
+                                         double pf, double S, double d0, double* nav, double* gross, double* fee_t,
+                                         double* acc, double* paid, double* hwm, int64_t* bad) {
+    return cabi::run([&] {
+        if (n < 0) cabi::badcall("wrapper_nav: Abmessungen passen nicht");
+        *bad = simlev::wrapper_nav_core(n, G, day, yr, fee, pf, S, d0, nav, gross, fee_t, acc, paid, hwm);
     });
 }
 
@@ -523,11 +521,11 @@ SIMLEV_C_EXPORT int simlev_c_dates_flags(int64_t n, const double* dates, const i
 }
 
 /* status[8 na], totals[TT_N]; je Asset nlots, nsells, ntaxes, px_changed; cnt[5] Ereignisse, Ganzzahlen der
- * Ereignisse (Jahre, Assets), Jahreszeilen, KiSt-Salden, Werte der details-Ereignisse; scal[3] fee_paid, tax_unpaid, refund_due; err[4] Stelle, Tag, Asset (0-basiert),
- * Code; *err_d0 Wert zum Code (ohne Abbruch alles 0) */
+ * Ereignisse (Jahre, Assets), Jahreszeilen, KiSt-Salden, Werte der details-Ereignisse; scal[3] fee_paid, tax_unpaid, refund_due;
+ * *err_code Code, *err_d0 Wert zum Code (ohne Abbruch beide 0; seit 1.6.3 ohne Stelle, Tag, Asset: ohne Leser) */
 SIMLEV_C_EXPORT void simlev_c_engine_counts(void* h, double* status, double* totals, int64_t* nlots, int64_t* nsells,
                                             int64_t* ntaxes, int32_t* px_changed, int64_t* cnt, double* scal,
-                                            int32_t* err, double* err_d0) {
+                                            int32_t* err_code, double* err_d0) {
     const simlev_engine::Engine& E = *static_cast<simlev_engine::Engine*>(h);
     E.status_out(status);
     E.totals_out(totals);
@@ -540,13 +538,22 @@ SIMLEV_C_EXPORT void simlev_c_engine_counts(void* h, double* status, double* tot
     cnt[0] = (int64_t) E.events.size(); cnt[1] = (int64_t) E.ev_ints.size();
     cnt[2] = (int64_t) E.rows.size(); cnt[3] = (int64_t) E.ks.size(); cnt[4] = (int64_t) E.ev_vals.size();
     scal[0] = E.fee_paid; scal[1] = E.tax_unpaid; scal[2] = E.refund_due;
-    err[0] = E.err.site; err[1] = E.err.day; err[2] = E.err.asset; err[3] = E.err.code;
+    *err_code = E.err.code;   /* seit 1.6.3 ohne site, day, asset (ohne Leser) */
     *err_d0 = E.err.d0;
 }
 
 /* Lots von Asset a (0-basiert): je Lot date, count, price, remaining, original, vp, has_vp */
 SIMLEV_C_EXPORT void simlev_c_engine_lots(void* h, int64_t a, double* out) {
     static_cast<simlev_engine::Engine*>(h)->lots_out((int) a, out);
+}
+/* Kompakte Lot-Ausgabe (seit 1.6.3): Zahl der offenen Lots (remaining > 0) von Asset a bzw. diese Lots spaltenweise
+ * in out[4 k]: date, units (= remaining), price, vp (0 ohne Vorabpauschale); Engine::open_lots_out. Mit nlots/nsells/
+ * ntaxes aus simlev_c_engine_counts ersetzt das simlev_c_engine_lots/_sells/_taxes, wo nur gezaehlt wird. */
+SIMLEV_C_EXPORT int64_t simlev_c_engine_open_lots_n(void* h, int64_t a) {
+    return static_cast<simlev_engine::Engine*>(h)->open_lots_n((int) a);
+}
+SIMLEV_C_EXPORT void simlev_c_engine_open_lots(void* h, int64_t a, double* out) {
+    static_cast<simlev_engine::Engine*>(h)->open_lots_out((int) a, out);
 }
 /* Verkaeufe von Asset a: je Verkauf date, count, price, gain, taxes, regime, exempt, has_exempt */
 SIMLEV_C_EXPORT void simlev_c_engine_sells(void* h, int64_t a, double* out) {
@@ -603,25 +610,26 @@ SIMLEV_C_EXPORT int simlev_c_eval_run(void* h, int64_t n, int64_t na, const doub
         cnt[1] = (int64_t) R.msgs.size();
     });
 }
-/* tw, twr, inv, dd [n]; scal[3] cagr, ttwror, open_tax_debt; ints[4] has_ext_flows, skew_lgl, kurt_lgl, longest_dd;
- * stats[20]; buys, sells [na]; why_i[6], why_v[6] (je cagr/ttwror: gesetzt, reason, detail bzw. v0..v2);
- * um_i[3 k] metric, reason, detail; um_v[3 k]; msg_c[m], msg_v[4 m]; err[2] Stelle, Phase */
+/* tw, twr, inv, dd [n]; scal[3] cagr, ttwror, open_tax_debt; ints[2] has_ext_flows, longest_dd;
+ * stats[20]; buys, sells [na]; why_i[4], why_v[6] (je cagr/ttwror: gesetzt, detail bzw. v0..v2);
+ * um_i[3 k] metric, reason, detail; um_v[3 k]; msg_c[m], msg_v[4 m]; *err_phase (seit 1.6.3 nur die gelesenen Felder,
+ * ohne skew_lgl, kurt_lgl, why.reason, err_site) */
 SIMLEV_C_EXPORT void simlev_c_eval_get(void* h, double* tw, double* twr, double* inv, double* dd, double* scal,
                                        int32_t* ints, double* stats, double* buys, double* sells, int32_t* why_i,
                                        double* why_v, int32_t* um_i, double* um_v, int32_t* msg_c, double* msg_v,
-                                       int32_t* err) {
+                                       int32_t* err_phase) {
     const simlev_eval::Result& R = *static_cast<simlev_eval::Result*>(h);
     std::copy(R.total_worth.begin(), R.total_worth.end(), tw);
     std::copy(R.twr_index.begin(), R.twr_index.end(), twr);
     std::copy(R.invested.begin(), R.invested.end(), inv);
     std::copy(R.drawdowns.begin(), R.drawdowns.end(), dd);
     scal[0] = R.cagr; scal[1] = R.ttwror; scal[2] = R.open_tax_debt;
-    ints[0] = R.has_ext_flows; ints[1] = R.skew_lgl; ints[2] = R.kurt_lgl; ints[3] = R.longest_dd;
+    ints[0] = R.has_ext_flows; ints[1] = R.longest_dd;
     std::copy(R.stats, R.stats + simlev_eval::ST_N, stats);
     std::copy(R.buys.begin(), R.buys.end(), buys);
     std::copy(R.sells.begin(), R.sells.end(), sells);
     for (int k = 0; k < 2; k++) {
-        why_i[3 * k] = R.why_set[k]; why_i[3 * k + 1] = R.why[k].reason; why_i[3 * k + 2] = R.why[k].detail;
+        why_i[2 * k] = R.why_set[k]; why_i[2 * k + 1] = R.why[k].detail;
         for (int j = 0; j < 3; j++) why_v[3 * k + j] = R.why[k].v[j];
     }
     for (std::size_t i = 0; i < R.um.size(); i++) {
@@ -632,7 +640,7 @@ SIMLEV_C_EXPORT void simlev_c_eval_get(void* h, double* tw, double* twr, double*
         msg_c[i] = R.msgs[i].code;
         for (int j = 0; j < 4; j++) msg_v[4 * i + j] = R.msgs[i].v[j];
     }
-    err[0] = R.err_site; err[1] = R.err_phase;
+    *err_phase = R.err_phase;
 }
 
 /* xirr (.xirr_rate): *value; Warnungen von uniroot als Codes in wcodes (hoechstens cap, *nw ihre Zahl) */

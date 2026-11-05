@@ -25,23 +25,8 @@ source("tests/gleichlauf/erzeugen/ref_tools.R")
 args <- commandArgs(TRUE)
 N <- as.integer(args[1]); seed0 <- as.integer(if (length(args) >= 2) args[2] else 20261104)
 ref_bereich("approx_fuzz", alle = TRUE); ref_init("approx_fuzz")
-pick <- function(x) x[[sample.int(length(x), 1L)]]
-coin <- function(p) runif(1) < p
 
-# Fall schreiben und die Aufrufe der Warnungen und des Fehlers (nur R) als r_calls nachtragen
-fuzz_case <- function(id, r, py, jl, inputs, nur = NULL) {   # nur: seit 1.6.1 (Nachbildung einer Sprache entfallen)
-  ref_case(id, r = r, py = py, jl = jl, inputs = inputs, nur = nur)
-  if (!.ref_in_subset(id)) return(invisible(NULL))
-  env <- new.env(parent = globalenv())
-  for (k in names(inputs)) assign(k, inputs[[k]], envir = env)
-  dp <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = " ")
-  wc <- character(0); ec <- NULL
-  invisible(capture.output(tryCatch(withCallingHandlers(eval(parse(text = r), envir = env),
-    warning = function(w) { wc <<- c(wc, dp(conditionCall(w))); invokeRestart("muffleWarning") },
-    message = function(m) invokeRestart("muffleMessage")),
-    error = function(e) ec <<- dp(conditionCall(e)))))
-  ref_case_extra(list(r_calls = list(warnings = as.list(wc), error = ec)))
-}
+# Fälle über fuzz_case() (ref_tools.R) mit den Aufrufen der Warnungen und des Fehlers (nur R) als r_calls
 num <- function(v) sprintf("%.17g", v)
 fnum <- function(v) ifelse(v == 0 & 1 / v < 0, "-0.0", num(v))   # Python/Julia: -0 als Gleitkommazahl
 PH <- "import simlev._r.fmt\nimport simlev._r.stats as st\n"

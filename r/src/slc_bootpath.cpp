@@ -119,3 +119,31 @@ int sl_boot_path(sl_ctx *cx, int64_t n_out, int k, const double *ret, const int6
     free(buf); free(r); free(col);
     return valid;
 }
+
+/* wie sl_boot_path, die Renditen eines Pfads aber als Zeilen idx der Quelle src (seit 1.6.3, A7): ret[i, j] =
+ * src[(idx[i] - 1) rs + j cs] (spaltenweise n_src × k: rs = 1, cs = n_src; zeilenweise: rs = k, cs = 1), dieselben
+ * Zeilen wie für die Zusatzreihen. Spart die Kopie returns[idx, ] je Pfad in der Sprache (und in Python die
+ * Umordnung in der Hülle); der Kern sammelt die Werte in dieselbe spaltenweise Matrix und rechnet wie sl_boot_path
+ * (Bit für Bit gleich). Fehler: Größen, Zeile außerhalb 1..n_src (-SL_EARG), kein Speicher (-SL_ENOMEM). */
+int sl_boot_path_src(sl_ctx *cx, int64_t n_out, int k, const double *src, int64_t n_src, int64_t rs, int64_t cs,
+                     const int64_t *idx, int64_t n_aux, int na, const double *aux, const double *aux_ratio,
+                     const double *aux_start, const int *level, int nL, const sl_letf *letf, double start, double *P,
+                     double *lv)
+{
+    double *ret;
+    int64_t i;
+    int j, st;
+    if (n_out < 1 || k < 0 || n_src < 1 || rs < 0 || cs < 0) return -sl_fail(cx, SL_EARG, "boot_path: ungültige Größen");
+    for (i = 0; i < n_out; i++)
+        if (idx[i] < 1 || idx[i] > n_src) return -sl_fail(cx, SL_EARG, "boot_path: Quellzeile außerhalb");
+    ret = (double *) malloc(sizeof(double) * (size_t) (n_out * (int64_t) k > 0 ? n_out * (int64_t) k : 1));
+    if (!ret) return -sl_fail(cx, SL_ENOMEM, "boot_path: kein Speicher");
+    for (j = 0; j < k; j++) {
+        const double *c = src + (int64_t) j * cs;
+        double *o = ret + (int64_t) j * n_out;
+        for (i = 0; i < n_out; i++) o[i] = c[(idx[i] - 1) * rs];
+    }
+    st = sl_boot_path(cx, n_out, k, ret, idx, n_aux, na, aux, aux_ratio, aux_start, level, nL, letf, start, P, lv);
+    free(ret);
+    return st;
+}

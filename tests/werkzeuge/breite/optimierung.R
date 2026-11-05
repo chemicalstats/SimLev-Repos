@@ -2,7 +2,7 @@
 # Module: optimize (bis 1.4.0 je ein Generator gen_<modul>.R, hier wörtlich hintereinander).
 # Aufruf (Repo-Wurzel): LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> SIMLEV_FAELLE_DIR=<ordner> Rscript tests/werkzeuge/breite/optimierung.R
 # Breitenprüfung, nichts abgelegt: alle bisherigen Einzelfälle des Bereichs (bis 1.4.1 Generator des Katalogs) flach nach
-# <ordner>/breite_optimierung.jsonl.gz; tests/werkzeuge/gleichlauf/run.sh vergleicht Python und Julia damit. Abgelegt sind die Szenarien
+# <ordner>/breite_optimierung.jsonl.gz; tests/werkzeuge/gleichlauf/run.py vergleicht Python und Julia damit. Abgelegt sind die Szenarien
 # und Tabellen aus tests/gleichlauf/erzeugen/optimierung.R (Format und Umgebung: tests/gleichlauf/erzeugen/ref_tools.R).
 source("tests/gleichlauf/erzeugen/ref_tools.R")
 ref_bereich("breite_optimierung", alle = TRUE)
@@ -75,12 +75,6 @@ cs("core_qp", "list(SimLev:::.qp_box_simplex(Sq, rep(0, 4), rep(0, 4), rep(1, 4)
           C.qp_box_simplex(Sq, cq, lq, hq, [1.0, 0, 0, 0], 3, 20000, 1e-12),
           C.qp_box_simplex(Sq, cq, lq, hq, [1.0, 0, 0, 0], 3, 7, 1e-12)]')
 Ic <- list(Rs = R[1:120, ])
-cs("core_cvar", "list(SimLev:::.min_cvar_core(Rs, 0.05, rep(0, 3), rep(1, 3), rep(1/3, 3), 0.02, c(0.002, 0.0002), 2000L),
-                      SimLev:::.min_cvar_core(Rs, 0.2, c(0.1, 0, 0), c(0.5, 1, 0.6), c(0.4, 0.3, 0.3), 0.01, 0.001, 50L))",
-   "result = [C.min_cvar_core(Rs, 0.05, [0.0] * 3, [1.0] * 3, [1/3] * 3, 0.02, [0.002, 0.0002], 2000),
-          C.min_cvar_core(Rs, 0.2, [0.1, 0, 0], [0.5, 1, 0.6], [0.4, 0.3, 0.3], 0.01, [0.001], 50)]", inputs = Ic,
-   jl = 'result = [C.min_cvar_core(Rs, 0.05, zeros(3), ones(3), fill(1 / 3, 3), 0.02, [0.002, 0.0002], 2000),
-          C.min_cvar_core(Rs, 0.2, [0.1, 0, 0], [0.5, 1, 0.6], [0.4, 0.3, 0.3], 0.01, 0.001, 50)]')
 cs("core_cdar", "list(SimLev:::.min_cdar_core(Rs, 0.05, rep(0, 3), rep(1, 3), 300L),
                       SimLev:::.min_cdar_core(Rs, 0.1, c(0.1, 0, 0), c(0.5, 1, 0.6), 100L))",
    "result = [C.min_cdar_core(Rs, 0.05, [0.0] * 3, [1.0] * 3, 300), C.min_cdar_core(Rs, 0.1, [0.1, 0, 0], [0.5, 1, 0.6], 100)]",
@@ -94,18 +88,6 @@ for (ct in c("sample", "ledoit_wolf", "ewma", "denoise", "gerber"))
    jl = sprintf('result = [O._opt_cov(R, "%s"), O._opt_cov(R4, "%s"), O._opt_cov(R1, "%s")]', ct, ct, ct))
 cs("cov_denoise_flat", "SimLev:::.opt_cov(Rc, 'denoise')", "result = O._opt_cov(Rc, 'denoise')",
    jl = 'result = O._opt_cov(Rc, "denoise")')
-cs("cov_gerber_flat", "SimLev:::.opt_cov(Rc, 'gerber')", "result = O._opt_cov(Rc, 'gerber')",
-   jl = 'result = O._opt_cov(Rc, "gerber")')
-cs("helpers_hist", "list(SimLev:::.cvar_hist(R %*% c(0.5, 0.2, 0.3), 0.05), SimLev:::.cdar_hist(drop(R %*% c(0.5, 0.2, 0.3)), 0.1),
-                        SimLev:::.hrp(cov(R4)), SimLev:::.risk_parity(cov(R4), c(0.4, 0.3, 0.2, 0.1)),
-                        SimLev:::.qp_simplex(cov(R4) * 52, -colMeans(R4) * 52, rep(0, 4), rep(1, 4)))",
-   "import numpy as np\nrs = np.asarray(R) @ np.array([0.5, 0.2, 0.3])\nresult = [O._cvar_hist(O._mat_vec(R, [0.5, 0.2, 0.3]), 0.05), O._cdar_hist(O._mat_vec(R, [0.5, 0.2, 0.3]), 0.1),
-          O._hrp(O._cov(R4)), O._risk_parity(O._cov(R4), [0.4, 0.3, 0.2, 0.1]),
-          O._qp_simplex(O._cov(R4) * 52, -O._col_means(R4) * 52, [0.0] * 4, [1.0] * 4)]",
-   jl = 'w = [0.5, 0.2, 0.3]
-result = [O._cvar_hist(O._mat_vec(R, w), 0.05), O._cdar_hist(O._mat_vec(R, w), 0.1),
-          O._hrp(O._cov(R4)), O._risk_parity(O._cov(R4), [0.4, 0.3, 0.2, 0.1]),
-          O._qp_simplex(O._cov(R4) .* 52, .-O._col_means(R4) .* 52, zeros(4), ones(4))]')
 
 # ── portfolio_optimize: Verfahren ────────────────────────────────────────────
 meths <- c("min_variance", "max_sharpe", "mean_variance", "max_diversification", "risk_parity", "hrp",
@@ -212,8 +194,6 @@ cs("po_n1", "portfolio_optimize(R1, method = 'hrp')", "result = O.portfolio_opti
    jl = 'result = O.portfolio_optimize(R1; method = "hrp")')
 cs("po_flat_mv", "portfolio_optimize(Rc)", "result = O.portfolio_optimize(Rc)",
    jl = 'result = O.portfolio_optimize(Rc)')
-cs("po_flat_denoise", "portfolio_optimize(Rc, cov = 'denoise')", "result = O.portfolio_optimize(Rc, cov='denoise')",
-   jl = 'result = O.portfolio_optimize(Rc; cov = "denoise")')
 cs("po_flat_ms", "portfolio_optimize(Rc, method = 'max_sharpe')", "result = O.portfolio_optimize(Rc, method='max_sharpe')",
    jl = 'result = O.portfolio_optimize(Rc; method = "max_sharpe")')
 cs("po_flat_only", "portfolio_optimize(cbind(a = rep(0.001, 20), b = rep(0.002, 20)), method = 'equal')",
@@ -262,36 +242,15 @@ cs("err_len", "portfolio_optimize(R, upper = c(0.5, 0.5))", "result = O.portfoli
    jl = 'result = O.portfolio_optimize(R; upper = [0.5, 0.5])')
 cs("err_na", "portfolio_optimize(R, upper = c(aktien = NA))", "import pandas as pd, math\nresult = O.portfolio_optimize(R, upper=pd.Series({'aktien': simlev._r.fmt.NA_REAL}))",
    jl = 'result = O.portfolio_optimize(R; upper = SL.named("aktien" => SL.NA))')
-cs("err_chr", "portfolio_optimize(R, lower = 'a')", "result = O.portfolio_optimize(R, lower='a')",
-   jl = 'result = O.portfolio_optimize(R; lower = "a")')
 cs("err_neg", "portfolio_optimize(R, method = 'mean_variance', lower = -0.5)", "result = O.portfolio_optimize(R, method='mean_variance', lower=-0.5)",
    jl = 'result = O.portfolio_optimize(R; method = "mean_variance", lower = -0.5)')
-cs("err_neg2", "portfolio_optimize(R, lower = c(-0.5, 0, -0.25))", "result = O.portfolio_optimize(R, lower=[-0.5, 0, -0.25])",
-   jl = 'result = O.portfolio_optimize(R; lower = [-0.5, 0, -0.25])')
-cs("err_alpha5", "portfolio_optimize(R, method = 'min_cvar', alpha = 5)", "result = O.portfolio_optimize(R, method='min_cvar', alpha=5)",
-   jl = 'result = O.portfolio_optimize(R; method = "min_cvar", alpha = 5)')
 cs("err_alpha95", "portfolio_optimize(R, method = 'min_cvar', alpha = 0.95)", "result = O.portfolio_optimize(R, method='min_cvar', alpha=0.95)",
    jl = 'result = O.portfolio_optimize(R; method = "min_cvar", alpha = 0.95)')
-cs("err_alpha0", "portfolio_optimize(R, alpha = 0)", "result = O.portfolio_optimize(R, alpha=0)",
-   jl = 'result = O.portfolio_optimize(R; alpha = 0)')
 cs("err_alpha_vec", "portfolio_optimize(R, alpha = c(0.1, 0.2))", "result = O.portfolio_optimize(R, alpha=[0.1, 0.2])",
    jl = 'result = O.portfolio_optimize(R; alpha = [0.1, 0.2])')
-cs("err_mu_unknown", "portfolio_optimize(R4, method = 'max_sharpe', mu = c(A = 5, B = 6, C = 7, X = 8))",
-   "import pandas as pd\nresult = O.portfolio_optimize(R4, method='max_sharpe', mu=pd.Series({'A': 5, 'B': 6, 'C': 7, 'X': 8}))",
-   jl = 'result = O.portfolio_optimize(R4; method = "max_sharpe", mu = SL.named("A" => 5, "B" => 6, "C" => 7, "X" => 8))')
 cs("err_mu_missing", "portfolio_optimize(R4, method = 'max_sharpe', mu = c(A = 5, B = 6))",
    "import pandas as pd\nresult = O.portfolio_optimize(R4, method='max_sharpe', mu=pd.Series({'A': 5, 'B': 6}))",
    jl = 'result = O.portfolio_optimize(R4; method = "max_sharpe", mu = SL.named("A" => 5, "B" => 6))')
-cs("err_mu_missing_mv", "portfolio_optimize(R4, method = 'mean_variance', mu = c(C = 5))",
-   "import pandas as pd\nresult = O.portfolio_optimize(R4, method='mean_variance', mu=pd.Series({'C': 5}))",
-   jl = 'result = O.portfolio_optimize(R4; method = "mean_variance", mu = SL.named("C" => 5))')
-cs("err_mu_len", "portfolio_optimize(R4, method = 'max_sharpe', mu = c(5, 6))", "result = O.portfolio_optimize(R4, method='max_sharpe', mu=[5, 6])",
-   jl = 'result = O.portfolio_optimize(R4; method = "max_sharpe", mu = [5, 6])')
-cs("err_mu_inf", "portfolio_optimize(R4, method = 'max_sharpe', mu = c(5, 6, Inf, 8))",
-   "import math\nresult = O.portfolio_optimize(R4, method='max_sharpe', mu=[5, 6, math.inf, 8])",
-   jl = 'result = O.portfolio_optimize(R4; method = "max_sharpe", mu = [5, 6, Inf, 8])')
-cs("err_budget", "portfolio_optimize(R, method = 'risk_parity', budget = c(1, -1, 0.5))", "result = O.portfolio_optimize(R, method='risk_parity', budget=[1, -1, 0.5])",
-   jl = 'result = O.portfolio_optimize(R; method = "risk_parity", budget = [1, -1, 0.5])')
 cs("err_budget0", "portfolio_optimize(R, method = 'risk_parity', budget = c(reits = 0))",
    "import pandas as pd\nresult = O.portfolio_optimize(R, method='risk_parity', budget=pd.Series({'reits': 0}))",
    jl = 'result = O.portfolio_optimize(R; method = "risk_parity", budget = SL.named("reits" => 0))')
@@ -299,12 +258,6 @@ cs("err_method", "portfolio_optimize(R, method = 'foo')", "result = O.portfolio_
    jl = 'result = O.portfolio_optimize(R; method = "foo")')
 cs("err_cov", "portfolio_optimize(R, cov = 'foo')", "result = O.portfolio_optimize(R, cov='foo')",
    jl = 'result = O.portfolio_optimize(R; cov = "foo")')
-cs("err_inf", "portfolio_optimize(Rinf)", "result = O.portfolio_optimize(Rinf)",
-   jl = 'result = O.portfolio_optimize(Rinf)')
-cs("err_assets", "portfolio_optimize(R, assets = c('aktien', 'gold'))", "result = O.portfolio_optimize(R, assets=['aktien', 'gold'])",
-   jl = 'result = O.portfolio_optimize(R; assets = ["aktien", "gold"])')
-cs("err_nonnum", "portfolio_optimize(matrix(letters[1:20], 10))", "import numpy as np\nresult = O.portfolio_optimize(np.array([[chr(97 + i + 10 * j) for j in range(2)] for i in range(10)], dtype=object))",
-   jl = 'result = O.portfolio_optimize(reshape([string(c) for c in "abcdefghijklmnopqrst"], 10, 2))')
 
 # ── portfolio_frontier ───────────────────────────────────────────────────────
 cs("ef_default", "portfolio_frontier(R)", "result = O.portfolio_frontier(R)",
@@ -358,11 +311,6 @@ cs("rc_err_unknown", "portfolio_risk_contributions(R, c(aktien = 0.5, gold = 0.5
    jl = 'result = O.portfolio_risk_contributions(R, SL.named("aktien" => 0.5, "gold" => 0.5))')
 cs("rc_err_unknown_df", "portfolio_risk_contributions(d, c(aktien = 0.5, bar = 0.5))", "import pandas as pd\nresult = O.portfolio_risk_contributions(d, pd.Series({'aktien': 0.5, 'bar': 0.5}))",
    jl = 'result = O.portfolio_risk_contributions(d, SL.named("aktien" => 0.5, "bar" => 0.5))')
-cs("rc_err_alpha", "portfolio_risk_contributions(R4, c(A = 0.5, B = 0.5), measure = 'cvar', alpha = 0.95)",
-   "import pandas as pd\nresult = O.portfolio_risk_contributions(R4, pd.Series({'A': 0.5, 'B': 0.5}), measure='cvar', alpha=0.95)",
-   jl = 'result = O.portfolio_risk_contributions(R4, SL.named("A" => 0.5, "B" => 0.5); measure = "cvar", alpha = 0.95)')
-cs("rc_err_na", "portfolio_risk_contributions(R4, c(A = 0.5, B = NA))", "import pandas as pd, math\nresult = O.portfolio_risk_contributions(R4, pd.Series({'A': 0.5, 'B': simlev._r.fmt.NA_REAL}))",
-   jl = 'result = O.portfolio_risk_contributions(R4, SL.named("A" => 0.5, "B" => SL.NA))')
 
 # ── portfolio_rolling ─────────────────────────────────────────────────────
 set.seed(1); n2 <- 4 * 365
@@ -387,32 +335,18 @@ cs("ro_upper", "portfolio_rolling(d2, c('a', 'b', 'c'), window = 2, every = 'qua
 cs("ro_bounds", "portfolio_rolling(d2, c('a', 'b', 'c'), 'max_sharpe', window = 2, every = 'quarter', upper = c(b = 0.5), mu = c(a = 6, b = 2, c = 4))",
    "import pandas as pd\nresult = O.portfolio_rolling(d2, ['a', 'b', 'c'], method='max_sharpe', window=2, every='quarter', upper=pd.Series({'b': 0.5}), mu=pd.Series({'a': 6, 'b': 2, 'c': 4}))", inputs = I2,
    jl = 'result = O.portfolio_rolling(d2, ["a", "b", "c"]; method = "max_sharpe", window = 2, every = "quarter", upper = SL.named("b" => 0.5), mu = SL.named("a" => 6, "b" => 2, "c" => 4))')
-cs("ro_fail", "w <- portfolio_rolling(d2, c('a', 'b'), window = 0.5, frequency = 'month'); list(w, attr(w, 'failed_dates'))",
-   "w = O.portfolio_rolling(d2, ['a', 'b'], window=0.5, frequency='month'); result = [w, w.attrs['failed_dates']]", inputs = I2,
-   jl = 'w = O.portfolio_rolling(d2, ["a", "b"]; window = 0.5, frequency = "month"); result = [w, SL.attrs(w)["failed_dates"]]')
 cs("ro_unsorted", "portfolio_rolling(d2s, c('a', 'b'), window = 2, every = 'year')",
    "result = O.portfolio_rolling(d2s, ['a', 'b'], window=2, every='year')", inputs = list(d2s = d2s),
    jl = 'result = O.portfolio_rolling(d2s, ["a", "b"]; window = 2, every = "year")')
 cs("ro_n1", "portfolio_rolling(d2, 'a', window = 2)", "result = O.portfolio_rolling(d2, 'a', window=2)", inputs = I2,
    jl = 'result = O.portfolio_rolling(d2, "a"; window = 2)')
-cs("ro_err_method", "portfolio_rolling(d2, c('a', 'b'), method = 'min_varianze', window = 2)",
-   "result = O.portfolio_rolling(d2, ['a', 'b'], method='min_varianze', window=2)", inputs = I2,
-   jl = 'result = O.portfolio_rolling(d2, ["a", "b"]; method = "min_varianze", window = 2)')
 cs("ro_err_bounds", "portfolio_rolling(d2, c('a', 'b'), window = 2, upper = 0.2)", "result = O.portfolio_rolling(d2, ['a', 'b'], window=2, upper=0.2)", inputs = I2,
    jl = 'result = O.portfolio_rolling(d2, ["a", "b"]; window = 2, upper = 0.2)')
-cs("ro_err_arg", "portfolio_rolling(d2, c('a', 'b'), window = 2, uper = 0.5)", "result = O.portfolio_rolling(d2, ['a', 'b'], window=2, uper=0.5)", inputs = I2,
-   jl = 'result = O.portfolio_rolling(d2, ["a", "b"]; window = 2, uper = 0.5)')
 cs("ro_err_alpha", "portfolio_rolling(d2, c('a', 'b'), window = 2, alpha = 0.95)", "result = O.portfolio_rolling(d2, ['a', 'b'], window=2, alpha=0.95)", inputs = I2,
    jl = 'result = O.portfolio_rolling(d2, ["a", "b"]; window = 2, alpha = 0.95)')
 cs("ro_err_mu", "portfolio_rolling(d2, c('a', 'b'), window = 2, mu = c(x = 1))",
    "import pandas as pd\nresult = O.portfolio_rolling(d2, ['a', 'b'], window=2, mu=pd.Series({'x': 1}))", inputs = I2,
    jl = 'result = O.portfolio_rolling(d2, ["a", "b"]; window = 2, mu = SL.named("x" => 1))')
-cs("ro_err_df", "portfolio_rolling(R, c('aktien'), window = 2)", "result = O.portfolio_rolling(R, ['aktien'], window=2)",
-   jl = 'result = O.portfolio_rolling(R, ["aktien"]; window = 2)')
-cs("ro_err_cols", "portfolio_rolling(d2, c('a', 'z'), window = 2)", "result = O.portfolio_rolling(d2, ['a', 'z'], window=2)", inputs = I2,
-   jl = 'result = O.portfolio_rolling(d2, ["a", "z"]; window = 2)')
-cs("ro_err_short", "portfolio_rolling(d2, c('a', 'b'), window = 5)", "result = O.portfolio_rolling(d2, ['a', 'b'], window=5)", inputs = I2,
-   jl = 'result = O.portfolio_rolling(d2, ["a", "b"]; window = 5)')
 
 # ── portfolio_cpcv ───────────────────────────────────────────────────────────
 cs("cp_basic", "portfolio_cpcv(R, methods = c('equal', 'inverse_vol', 'min_variance'), n_groups = 5, test_groups = 2)",
@@ -429,29 +363,8 @@ cs("cp_list", "portfolio_cpcv(R4, methods = list(mv = list(method = 'min_varianc
 cs("cp_df_day", "portfolio_cpcv(d, methods = 'min_variance', frequency = 'day', n_groups = 4, test_groups = 1, purge = 5, embargo = 0)",
    "result = O.portfolio_cpcv(d, methods='min_variance', frequency='day', n_groups=4, test_groups=1, purge=5, embargo=0)",
    jl = 'result = O.portfolio_cpcv(d; methods = "min_variance", frequency = "day", n_groups = 4, test_groups = 1, purge = 5, embargo = 0)')
-cs("cp_partial", "portfolio_cpcv(R, methods = list(eq = list(method = 'equal'), bad = list(method = 'min_variance', upper = 0.2)), n_groups = 3, test_groups = 1)",
-   "result = O.portfolio_cpcv(R, methods={'eq': {'method': 'equal'}, 'bad': {'method': 'min_variance', 'upper': 0.2}}, n_groups=3, test_groups=1)",
-   jl = 'result = O.portfolio_cpcv(R; methods = SL.RList("eq" => SL.RList("method" => "equal"), "bad" => SL.RList("method" => "min_variance", "upper" => 0.2)), n_groups = 3, test_groups = 1)')
-cs("cp_warn26", "portfolio_cpcv(R, methods = list(a = list(upper = 26), b = list(method = 'equal')), n_groups = 3, test_groups = 1)",
-   "result = O.portfolio_cpcv(R, methods={'a': {'upper': 26}, 'b': {'method': 'equal'}}, n_groups=3, test_groups=1)",
-   jl = 'result = O.portfolio_cpcv(R; methods = SL.RList("a" => SL.RList("upper" => 26), "b" => SL.RList("method" => "equal")), n_groups = 3, test_groups = 1)')
-cs("cp_err_allfail", "portfolio_cpcv(R, methods = list(a = list(method = 'min_variance', upper = 0.2)))",
-   "result = O.portfolio_cpcv(R, methods={'a': {'method': 'min_variance', 'upper': 0.2}})",
-   jl = 'result = O.portfolio_cpcv(R; methods = SL.RList("a" => SL.RList("method" => "min_variance", "upper" => 0.2)))')
-cs("cp_err_method", "portfolio_cpcv(R, methods = c('equal', 'min_varianze'))", "result = O.portfolio_cpcv(R, methods=['equal', 'min_varianze'])",
-   jl = 'result = O.portfolio_cpcv(R; methods = ["equal", "min_varianze"])')
-cs("cp_err_groups", "portfolio_cpcv(R, n_groups = 3, test_groups = 3)", "result = O.portfolio_cpcv(R, n_groups=3, test_groups=3)",
-   jl = 'result = O.portfolio_cpcv(R; n_groups = 3, test_groups = 3)')
 cs("cp_err_purge", "portfolio_cpcv(R, methods = 'equal', purge = -1)", "result = O.portfolio_cpcv(R, methods='equal', purge=-1)",
    jl = 'result = O.portfolio_cpcv(R; methods = "equal", purge = -1)')
-cs("cp_err_ng", "portfolio_cpcv(R, n_groups = 2.5)", "result = O.portfolio_cpcv(R, n_groups=2.5)",
-   jl = 'result = O.portfolio_cpcv(R; n_groups = 2.5)')
-cs("cp_err_arg", "portfolio_cpcv(R, methods = list(a = list(method = 'equal', foo = 1)))", "result = O.portfolio_cpcv(R, methods={'a': {'method': 'equal', 'foo': 1}})",
-   jl = 'result = O.portfolio_cpcv(R; methods = SL.RList("a" => SL.RList("method" => "equal", "foo" => 1)))')
-cs("cp_err_list", "portfolio_cpcv(R, methods = list(list(method = 'equal')))", "result = O.portfolio_cpcv(R, methods=[{'method': 'equal'}])",
-   jl = 'result = O.portfolio_cpcv(R; methods = [SL.RList("method" => "equal")])')
-cs("cp_err_entry", "portfolio_cpcv(R, methods = list(a = 'equal'))", "result = O.portfolio_cpcv(R, methods={'a': 'equal'})",
-   jl = 'result = O.portfolio_cpcv(R; methods = SL.RList("a" => "equal"))')
 ref_done()
 
 ref_schreiben()

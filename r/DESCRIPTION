@@ -1,7 +1,7 @@
 Package: SimLev
 Type: Package
 Title: Simulation and Backtesting with German Investment Taxation
-Version: 1.6.2
+Version: 1.6.3
 Authors@R: person("ChemicalStats", "von der Mauerstrasse",
                   role = c("aut", "cre", "cph"),
                   email = "chemicalstatsy@protonmail.com")
@@ -38,7 +38,7 @@ Description: A fast/slow-path backtesting engine for leveraged and unleveraged E
 License: GPL-3
 Encoding: UTF-8
 Depends: R (>= 4.0)
-Imports: stats, graphics, grDevices, utils, parallel, methods
+Imports: stats, graphics, grDevices, utils, parallel
 Suggests: knitr, rmarkdown
 VignetteBuilder: knitr
 RoxygenNote: 7.3.1

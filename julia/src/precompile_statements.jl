@@ -11,9 +11,9 @@
 # Messrahmen (Umleitung der Ausgabe, Logger). Sortiert nach Übersetzungszeit im Trace (absteigend).
 # Veraltete Einträge schaden nicht: Jede Anweisung steht in `try`, ein Fehlschlag wird übergangen.
 
-"Übersetzungsanweisungen ausführen (nur beim Vorkompilieren; gibt die Zahl der fehlgeschlagenen zurück)."
+"Übersetzungsanweisungen ausführen (nur beim Vorkompilieren; fehlgeschlagene werden übergangen)."
 function _precompile_statements()
-    nfail = 0
+    nfail = 0   # Zähler der fehlgeschlagenen (nur zur Fehlersuche; seit 1.6.3 ohne Rückgabe, sie las niemand)
     try; precompile(Tuple{typeof(Base.Broadcast.materialize), Base.Broadcast.Broadcasted{Base.Broadcast.DefaultArrayStyle{2}, Nothing, typeof(Base.:(/)), Tuple{Array{Float64, 2}, Array{Float64, 2}}}}) || (nfail += 1); catch; nfail += 1; end
     try; precompile(Tuple{typeof(Base.Broadcast.materialize), Base.Broadcast.Broadcasted{Base.Broadcast.DefaultArrayStyle{1}, Nothing, typeof(Base.:(|)), Tuple{Base.BitArray{1}, Base.BitArray{1}}}}) || (nfail += 1); catch; nfail += 1; end
     try; precompile(Tuple{typeof(Base.Broadcast.materialize!), Base.BitArray{1}, Base.Broadcast.Broadcasted{Base.Broadcast.DefaultArrayStyle{1}, Nothing, typeof(Base.:(&)), Tuple{Base.BitArray{1}, Base.BitArray{1}}}}) || (nfail += 1); catch; nfail += 1; end
@@ -318,5 +318,5 @@ function _precompile_statements()
     try; precompile(Tuple{Type{NamedTuple{(:benchmark,), T} where T<:Tuple}, Tuple{String}}) || (nfail += 1); catch; nfail += 1; end
     try; precompile(Tuple{typeof(SimLev.MsGarch._ms_garch_fit), Array{Float64, 1}, Int64, String}) || (nfail += 1); catch; nfail += 1; end
     try; precompile(Tuple{typeof(Base.string), Int64}) || (nfail += 1); catch; nfail += 1; end
-    return nfail
+    return nothing
 end

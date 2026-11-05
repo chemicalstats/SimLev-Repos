@@ -949,7 +949,7 @@ def _grid_axes(out, b, xlo, xhi, ylo, yhi, title="", xlabel="", ylabel="", dates
                                   _grid_c(b.y0 + b.h / 2), _esc(ylabel)))
 
 
-def _grid_hline(out, b, y, xlo, xhi, ylo, yhi, col):
+def _grid_hline(out, b, y, ylo, yhi, col):
     y = float(y)
     if not (math.isfinite(y) and ylo <= y <= yhi):
         return
@@ -994,7 +994,7 @@ def _grid_lines(out, b, series, ylim=None, hline=(), dates=False, title="", xlab
             out.append("<polygon points=\"%s\" fill=\"#2C6E9B\" fill-opacity=\"0.15\"/>\n"
                        % " ".join("%s,%s" % (_grid_c(p[0]), _grid_c(p[1])) for p in pts))
     for h in hline:
-        _grid_hline(out, b, h[0], xlo, xhi, ylo, yhi, h[1])
+        _grid_hline(out, b, h[0], ylo, yhi, h[1])
     for xs, ys, col, _ in series:
         d = []
         first = True
@@ -1021,7 +1021,7 @@ def _grid_bars(out, b, labels, vals, lo=None, hi=None, pts=None, ylim=None, titl
     ylo, yhi = _grid_range(vals, ylim)
     _grid_axes(out, b, 0.0, float(n), ylo, yhi, title=title, ylabel=ylabel,
                xticks=[(k - 0.5, str(labels[k - 1])) for k in range(1, n + 1)])
-    _grid_hline(out, b, 0.0, 0.0, n, ylo, yhi, "#666")
+    _grid_hline(out, b, 0.0, ylo, yhi, "#666")
     z = _grid_ty(b, _grid_clamp(0.0, ylo, yhi), ylo, yhi)
     for k in range(1, n + 1):
         v = float(vals[k - 1])

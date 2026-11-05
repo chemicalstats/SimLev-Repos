@@ -13,7 +13,6 @@ using ..SLib: LIBSLC
 
 const OK = Cint(0)
 const ERROR = Cint(1)
-const INTERRUPT = Cint(2)
 
 "Text des letzten Fehlers der Hülle (dieser Thread)."
 last_error() = unsafe_string(ccall((:simlev_c_last_error, LIBSLC), Cstring, ()))
@@ -22,7 +21,11 @@ last_error() = unsafe_string(ccall((:simlev_c_last_error, LIBSLC), Cstring, ()))
     check(rc[, err])
 
 Rückgabecode der Hülle auswerten: 0 nichts; 1 Fehler des Kerns (`SIMLEV_FAIL`): `err(text)` (Voreinstellung
-`error(text)`, wie die früheren Ports); 2 Benutzerabbruch: `InterruptException`; sonst Fehler der Hülle.
+`error(text)`, wie die früheren Ports); sonst Fehler der Hülle.
+
+Benutzerabbruch: Ein `ccall` lässt sich nicht unterbrechen; Strg-C wirkt erst nach der Rückkehr des Kerns (wie bei
+slc, `slib.jl`). R und Python prüfen den Abbruch auch im Kern (`SIMLEV_CHECK_INTERRUPT`). Bis 1.6.2 gab es dafür
+einen Merker `simlev_c_interrupt` und den Rückgabecode 2, die Julia nie setzte (seit 1.6.3 entfernt).
 """
 @inline function check(rc::Cint, err = error)
     rc == OK && return nothing
@@ -31,7 +34,6 @@ end
 @noinline function _fail(rc::Cint, err)
     msg = last_error()
     rc == ERROR && throw_err(err, msg)
-    rc == INTERRUPT && throw(InterruptException())
     error("SimLev: C-Hülle der geteilten Kerne (Code $rc): $msg")
 end
 throw_err(err::Function, msg) = (err(msg); error(msg))

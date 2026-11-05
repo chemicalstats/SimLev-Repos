@@ -479,8 +479,14 @@ result_analysis <- function(x, benchmark = NULL, risk_free = 0, rolling_years = 
   }
   rf_of <- function(s) .resolve_series(risk_free, data.frame(date = s$date), "risk_free")   # Prozent p. a. je Zeile
   ppy_of <- function(s) { k <- sum(!s$filled[-1]); k / (as.numeric(s$date[length(s$date)] - s$date[1]) / 365.25) }
-  met <- vapply(ser, function(s) .da_metrics(s, rf_of(s), ppy_of(s), var_levels),
-                .da_metrics(ser[[1]], rf_of(ser[[1]]), ppy_of(ser[[1]]), var_levels))
+  # Kennzahlen je Reihe; die der ersten Reihe dienen als Vorlage von vapply und werden seit 1.6.3 nicht ein zweites Mal
+  # gerechnet, wenn ihre Rechnung ohne Meldung blieb (sonst wie bisher erneut, Meldungen in gleicher Zahl)
+  quiet <- TRUE
+  m1 <- withCallingHandlers(.da_metrics(ser[[1]], rf_of(ser[[1]]), ppy_of(ser[[1]]), var_levels),
+                            message = function(m) quiet <<- FALSE, warning = function(w) quiet <<- FALSE)
+  f_met <- function(s) .da_metrics(s, rf_of(s), ppy_of(s), var_levels)
+  met <- if (quiet) matrix(c(m1, vapply(ser[-1], f_met, m1)), nrow = length(m1), dimnames = list(names(m1), names(ser)))
+         else vapply(ser, function(s) .da_metrics(s, rf_of(s), ppy_of(s), var_levels), m1)
   bm <- NULL
   if (!is.null(bser)) {
     others <- setdiff(names(ser), bname)

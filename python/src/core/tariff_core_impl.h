@@ -41,6 +41,8 @@
 #include <cmath>
 #include <vector>
 
+#include "slc_rbase.h"
+
 namespace simlev {
 
 // Spalten der Jahreszeile (wie tax_report$tariff_years in simulation())
@@ -48,39 +50,12 @@ enum { TR_YEAR = 0, TR_ZVE, TR_KS_PAID, TR_KS_REFUNDED, TR_KS_NET, TR_ZVE_NET, T
        TR_KIST23, TR_TAX23, TR_K, TR_ABG, TR_KABG, TR_EST_K, TR_SOLI_K, TR_KIST_K, TR_BURDEN_K, TR_X0, TR_X1, TR_FAV,
        TR_D, TR_REFUND, TR_KS_NEXT, TR_N };
 
-// R_pow_di (nmath/arithmetic.c): x hoch ganzzahliges n durch wiederholtes Quadrieren
-static inline double tariff_pow_di(double x, int n) {
-  double xn = 1.0;
-  if (std::isnan(x)) return x;
-  if (n != 0) {
-    if (!std::isfinite(x)) return std::pow(x, (double) n);
-    bool neg = n < 0;
-    if (neg) n = -n;
-    for (;;) {
-      if (n & 01) xn *= x;
-      if (n >>= 1) x *= x; else break;
-    }
-    if (neg) xn = 1.0 / xn;
-  }
-  return xn;
-}
-
-// round(x, digits) wie R >= 4.0.0 (nmath/fround.c) fuer 0 < digits <= 308 (hier 6)
+// round(x, digits) wie R >= 4.0.0 (nmath/fround.c) fuer 0 < digits <= 308 (hier 6). Seit 1.6.3 rechnet sl_r_fround
+// (slc_rbase.cpp) die endlichen Werte (gleiche Rechenfolge: (logb + 1/2) log10(2) + dig > 15, x 10^dig mit
+// R_pow_di); NA/NaN bleiben x + digits (Tarifregel, anders als sl_r_fround mit NA bzw. R_NaN).
 static inline double tariff_fround(double x, double digits) {
   if (std::isnan(x) || std::isnan(digits)) return x + digits;
-  if (!std::isfinite(x) || digits > 308.0 + 15.0 || x == 0.0) return x;
-  if (digits == 0.0) return std::nearbyint(x);
-  const int dig = (int) std::floor(digits + 0.5);
-  double sgn = 1.0;
-  if (x < 0.0) { sgn = -1.0; x = -x; }
-  int e2; (void) std::frexp(x, &e2);
-  const double logb = (double) (e2 - 1);
-  if (dig > 0 && (logb + 0.5) * 0.301029995663981195213738894724 + dig > 15.0) return sgn * x;
-  const double pow10 = tariff_pow_di(10.0, dig);
-  const double x10 = pow10 * x, i10 = std::floor(x10);
-  const double xd = i10 / pow10, xu = std::ceil(x10) / pow10;
-  const double du = xu - x, dd = x - xd;
-  return sgn * ((du < dd || (std::fmod(i10, 2.0) == 1.0 && du == dd)) ? xu : xd);
+  return sl_r_fround(x, digits);
 }
 
 // max/min wie R mit zwei Argumenten ohne NA: das erste, ausser das zweite ist groesser bzw. kleiner

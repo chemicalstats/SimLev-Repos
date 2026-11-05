@@ -165,44 +165,7 @@ void sl_cal_fill_int(int64_t nd, const int64_t *src, const int *x, int mode, int
 
 /* ── Momentum-Scores ── */
 
-/*
- * Teil:               civil_ (Datum aus Tagesnummer), days_ (Tagesnummer aus Datum), fdiv_
- * Herkunft:           übersetzt aus H. Hinnant, chrono-Compatible Low-Level Date Algorithms,
- *                     https://howardhinnant.github.io/date_algorithms.html (wie sl_r_civil_from_days in
- *                     slc_rbase_date.cpp, das nicht nach r/src/ geht)
- * Rechte:             gemeinfrei ("Consider these donated to the public domain.")
- * Lizenz der Vorlage: keine (gemeinfrei)
- * Änderungen:         int64_t mit Abrundungsdivision fdiv_ statt der Fallunterscheidung für negative Werte.
- */
-static int64_t fdiv_(int64_t a, int64_t b)
-{
-    int64_t q = a / b;
-    if ((a % b != 0) && ((a < 0) != (b < 0))) q--;
-    return q;
-}
-
-static void civil_(int64_t z, int64_t *y, int *m, int *d)
-{
-    z += 719468;
-    const int64_t era = fdiv_(z, 146097);
-    const int64_t doe = z - era * 146097;
-    const int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    const int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    const int64_t mp = (5 * doy + 2) / 153;
-    *d = (int) (doy - (153 * mp + 2) / 5 + 1);
-    *m = (int) (mp < 10 ? mp + 3 : mp - 9);
-    *y = yoe + era * 400 + (*m <= 2);
-}
-
-static int64_t days_(int64_t y, int m, int d)
-{
-    y -= m <= 2;
-    const int64_t era = fdiv_(y, 400);
-    const int64_t yoe = y - era * 400;
-    const int64_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-    const int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + doe - 719468;
-}
+/* Kalender: sl_r_civil_from_days, sl_r_days_from_civil, sl_r_fdiv (slc_rbase.h/.cpp; seit 1.6.3 statt Kopie) */
 
 int sl_mom_back(sl_ctx *cx, int64_t n, const double *d, int nlb, const int *lb, int64_t *back)
 {
@@ -215,14 +178,14 @@ int sl_mom_back(sl_ctx *cx, int64_t n, const double *d, int nlb, const int *lb, 
         if (i > 0 && d[i] < d[i - 1]) return sl_fail(cx, SL_EARG, "mom_back: Daten nicht sortiert");
     }
     for (i = 0; i < n; i++) {
-        civil_((int64_t) floor(d[i]), &y, &mon, &mday);
+        sl_r_civil_from_days((int64_t) floor(d[i]), &y, &mon, &mday);
         mon -= 1;                                          /* 0 ... 11 wie POSIXlt$mon */
         for (c = 0; c < nlb; c++) {
             mo = mon - lb[c];
-            y2 = y + fdiv_(mo, 12);
-            mo2 = (int) (mo - 12 * fdiv_(mo, 12));
-            first = days_(y2, mo2 + 1, 1);
-            nxt = days_(y2 + (mo2 + 1) / 12, (mo2 + 1) % 12 + 1, 1);
+            y2 = y + sl_r_fdiv(mo, 12);
+            mo2 = (int) (mo - 12 * sl_r_fdiv(mo, 12));
+            first = sl_r_days_from_civil(y2, mo2 + 1, 1);
+            nxt = sl_r_days_from_civil(y2 + (mo2 + 1) / 12, (mo2 + 1) % 12 + 1, 1);
             len = nxt - first;
             target = (double) (first + (mday < len ? mday : len) - 1);
             lo = 0; hi = n;                                /* Zahl der d[j] <= target */

@@ -1,7 +1,7 @@
 {
  "language": "R",
- "stand": "2026-11-01 – 1.1.0: Entnahmesteuer, keep_returns, keep_paths",
- "hinweis": "Erzeugt von tests/api/run.sh --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
+ "stand": "2026-11-04 – 1.6.3: WithdrawalPathsPB entfällt",
+ "hinweis": "Erzeugt von tests/schnittstelle/run.py --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern.",
  "functions": {
   "asset_config": [
    {"name": "asset_class", "kind": "arg", "default": "c(\"etf\", \"etn\", \"etc\", \"certificate\", \"etn_standard\", \"etn_deliverable\")", "match_arg": true},

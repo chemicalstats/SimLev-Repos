@@ -10,7 +10,7 @@
 module Bonds
 
 import ..SimLev
-using ..SimLev: RList, RFrame, RVector, nrow, attrs, NA
+using ..SimLev: RFrame, RVector, nrow, attrs
 using Dates
 
 export index_bond, index_money_market, index_currency_hedged
@@ -94,9 +94,7 @@ function index_bond(data, yield; maturity = 10, coupon_frequency = 1,
         up = _bond_price(y0 .+ h, c0, maturity, m)
         dn = _bond_price(y0 .- h, c0, maturity, m)
         dur = .-(up .- dn) ./ (2 * h) ./ p0
-        up2 = _bond_price(y0 .+ h, c0, maturity, m)
-        dn2 = _bond_price(y0 .- h, c0, maturity, m)
-        cvx = (up2 .- 2 .* p0 .+ dn2) ./ (h * h) ./ p0
+        cvx = (up .- 2 .* p0 .+ dn) ./ (h * h) ./ p0   # dieselben Kurse wie für die Duration (seit 1.6.3 einmal)
         dy = y .- y0
         price = Float64[1 - dur[i] * dy[i] + 0.5 * cvx[i] * (dy[i] * dy[i]) for i in 1:n]
     end

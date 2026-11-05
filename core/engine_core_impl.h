@@ -419,20 +419,11 @@ static inline lgl r_le(double a, double b) { return rl_cmp_nan(a, b) ? 2 : (a <=
 static inline lgl r_lt(double a, double b) { return rl_cmp_nan(a, b) ? 2 : (a < b ? 1 : 0); }
 static inline lgl r_eq(double a, double b) { return rl_cmp_nan(a, b) ? 2 : (a == b ? 1 : 0); }
 static inline lgl r_ne(double a, double b) { return rl_cmp_nan(a, b) ? 2 : (a != b ? 1 : 0); }
-static inline lgl r_and(lgl a, lgl b) { return (a == 0 || b == 0) ? 0 : ((a == 2 || b == 2) ? 2 : 1); }
+// r_and: simlev_r_and; R's min/max zweier Zahlen: simlev_r_min2, simlev_r_max2 (simlev_core.h, seit 1.6.3)
 static inline lgl r_or(lgl a, lgl b) { return (a == 1 || b == 1) ? 1 : ((a == 2 || b == 2) ? 2 : 0); }
 static inline lgl r_not(lgl a) { return a == 2 ? 2 : 1 - a; }
 static inline lgl r_lgl(double x) { return x != x ? 2 : (x != 0 ? 1 : 0); }   // as.logical eines Signals
 static inline lgl r_bool(bool b) { return b ? 1 : 0; }
-
-// R's min(a, b) bzw. max(a, b) fuer zwei Zahlen (NA vor NaN wie rmin/rmax)
-static inline double r_nan2(double a, double b) {
-  if (a != a && simlev_is_na(a)) return a;
-  if (b != b) return b;
-  return a;
-}
-static inline double r_min2(double a, double b) { return (a != a || b != b) ? r_nan2(a, b) : (b < a ? b : a); }
-static inline double r_max2(double a, double b) { return (a != a || b != b) ? r_nan2(a, b) : (b > a ? b : a); }
 
 // civil_from_days/days_from_civil (eng_civil, eng_days): prepare_core_impl.h
 using simlev_prepare::eng_civil;
@@ -452,7 +443,10 @@ class Engine {
   const double* dca_n = nullptr;           // flag_dca_n (n)
   const double* day = nullptr;             // flag_date als Tageszahl (n)
   std::vector<AssetIn> in;
-  std::vector<std::vector<double>> px;     // Kurse je Asset (Kopie; Splits rechnen sie um)
+  // Kurse je Asset: pxp[a] zeigt auf die Eingabe des Hosts; erst ein Split legt die Kopie px[a] an und rechnet sie
+  // um (seit 1.6.3; bis 1.6.2 je Lauf eine Kopie jeder Reihe). Die Hosts lesen px[a] nur bei px_changed[a].
+  std::vector<const double*> pxp;
+  std::vector<std::vector<double>> px;
   std::vector<double> no_sig;              // seit 1.6.1: FALSE an jedem Tag fuer Assets ohne Signalspalte (leerer Zeiger)
   std::vector<char> px_changed;            // Kursreihe durch einen Split geaendert
   int fractions = 0, fees_on = 0, balance_mode = 0, balance_dca = 0;
@@ -494,6 +488,7 @@ class Engine {
     in.assign((std::size_t) na, AssetIn());
     rep.assign((std::size_t) na, ReportOut{nullptr, nullptr, nullptr, nullptr, nullptr});
     px.assign((std::size_t) na, std::vector<double>());
+    pxp.assign((std::size_t) na, nullptr);
     no_sig.clear();
     px_changed.assign((std::size_t) na, 0);
   }
@@ -563,7 +558,7 @@ class Engine {
         if (I.ai[(std::size_t) AI_N * a + AI_STYLE] == 1) return 2;
         if (no_sig.empty()) no_sig.assign((std::size_t) n, 0.0);
       }
-      px[a].assign(I.price[a], I.price[a] + n);
+      pxp[a] = I.price[a];
       A.sig_buy = I.sig_buy[a] ? I.sig_buy[a] : no_sig.data();
       A.sig_sell = I.sig_sell[a] ? I.sig_sell[a] : no_sig.data();
       A.event_w = I.event_w ? I.event_w[a] : nullptr;
@@ -676,6 +671,26 @@ class Engine {
       o += 7;
     }
   }
+  // Kompakte Lot-Ausgabe (seit 1.6.3): nur die offenen Lots (remaining > 0; NaN zaehlt nicht) eines Assets, die
+  // open_lots im Modus tax_mode = "person" liest (R .sim_lots_frame, Python/Julia gleich), spaltenweise in vier
+  // Spalten zu k = open_lots_n(a) Werten: date, units (= remaining), price, vp (0, solange keine Vorabpauschale
+  // festgesetzt ist, wie R b[["vp"]] %||% 0). Werte unveraendert kopiert. o: 4 k Werte, Speicher des Aufrufers.
+  // Mit buys[a].size(), sells[a].size() und taxes[a].size() (die Zaehler) ersetzt das die Einzelobjekte je Lot,
+  // Verkauf und Steuerbuchung, die die Sprachen sonst nur zaehlen (A9).
+  int64_t open_lots_n(int a) const {
+    int64_t k = 0;
+    for (const Lot& l : buys[a]) if (l.remaining > 0) k++;
+    return k;
+  }
+  void open_lots_out(int a, double* o) const {
+    const int64_t k = open_lots_n(a);
+    int64_t j = 0;
+    for (const Lot& l : buys[a]) {
+      if (!(l.remaining > 0)) continue;
+      o[j] = l.date; o[k + j] = l.remaining; o[2 * k + j] = l.price; o[3 * k + j] = l.has_vp ? l.vp : 0.0;
+      j++;
+    }
+  }
   // Verkaeufe: date, count, price, gain, taxes, regime, exempt, has_exempt (8 je Verkauf)
   void sells_out(int a, double* o) const {
     for (const Sell& s : sells[a]) {
@@ -723,6 +738,12 @@ class Engine {
   std::vector<int> active;                 // aktive Assets (Reihenfolge der Strategie)
   std::vector<double> buf;                 // Puffer
   std::vector<double> buf2, buf3, buf4, buf5;
+  // seit 1.6.3 Puffer je Funktion statt neuer Vektoren an jedem Ereignistag (jede Funktion nur fuer sich, keine
+  // ruft sich selbst): calculate_sell_count (sc_*), day_dca (dca_*), day_rebalance (rb_*), day_split (sp_held)
+  std::vector<double> sc_cu, sc_cc, sc_cv;
+  std::vector<double> dca_tot, dca_def, dca_alloc;
+  std::vector<double> rb_targets, rb_actual, rb_ow, rb_devs, rb_differ, rb_tv, rb_tot;
+  std::vector<char> rb_cash, sp_held;
 
   bool cond(lgl v, int site, int t, int a) {
     if (v == 2) throw NAError(site, t, a);
@@ -770,14 +791,14 @@ class Engine {
   static double spread_buy(double price, double spread) { return price * (1 + spread / 2); }
   static double spread_sell(double price, double spread) { return price * (1 - spread / 2); }
   static double fee_amount(const Fee& f, double volume) {
-    return r_min2(r_max2(f.fixed + f.percent * volume, f.min), f.max);
+    return simlev_r_min2(simlev_r_max2(f.fixed + f.percent * volume, f.min), f.max);
   }
   double fee_volume(const Fee& f, double money, int t, int a) {
     double v = (money - f.fixed) / (1 + f.percent);
     double fee = f.fixed + f.percent * v;
     if (cond(r_lt(fee, f.min), C_FEE_VOLUME, t, a)) v = money - f.min;
     else if (cond(r_gt(fee, f.max), C_FEE_VOLUME, t, a)) v = money - f.max;
-    return r_max2(0.0, v);
+    return simlev_r_max2(0.0, v);
   }
 
   // ── Kerne wie core/simulation_core_impl.h (dieselbe Rechnung, Zustand als Strukturen) ──
@@ -785,7 +806,7 @@ class Engine {
     const int i0 = t - 1;
     for (int a = 0; a < na; a++) {
       Status& s = st[a];
-      const double price = px[a][i0];
+      const double price = pxp[a][i0];
       s.price = price;
       const double worth = simlev_mul(price, s.count);
       s.worth = worth;
@@ -811,7 +832,7 @@ class Engine {
     buf.resize((std::size_t) na);
     for (int a = 0; a < na; a++) {
       Status& s = st[a];
-      const double price = px[a][i0];
+      const double price = pxp[a][i0];
       const double worth = simlev_mul(s.count, price);
       const double total = simlev_add(worth, s.money);
       buf[a] = total;
@@ -838,7 +859,7 @@ class Engine {
     for (int a = 0; a < na; a++) {
       Status& s = st[a];
       const double count = s.count, money = s.money;
-      const double* prices = px[a].data();
+      const double* prices = pxp[a];
       double last_worth = 0.0, last_total = 0.0, last_price = 0.0;
       for (int d = 0; d < nd; d++) {
         const int idx = start_idx - 1 + d;
@@ -1060,19 +1081,19 @@ class Engine {
     const Status& s = st[a];
     bool sig = false;
     const lgl is_sig = r_bool(A.style == 1), is_bnh = r_bool(A.style == 0);
-    if (cond(r_and(r_and(r_and(is_sig, r_lgl(A.sig_buy[t - 1])), r_gt(s.money, 0)), r_eq(s.count, 0)),
+    if (cond(simlev_r_and(simlev_r_and(simlev_r_and(is_sig, r_lgl(A.sig_buy[t - 1])), r_gt(s.money, 0)), r_eq(s.count, 0)),
              C_BUYSIG_1, t, a))
       sig = true;
-    if (cond(r_and(r_and(r_and(is_sig, r_gt(s.count, 0)), r_gt(s.money, 0)), r_not(sig_true(A.sig_sell, A.sell_logical, t))),
+    if (cond(simlev_r_and(simlev_r_and(simlev_r_and(is_sig, r_gt(s.count, 0)), r_gt(s.money, 0)), r_not(sig_true(A.sig_sell, A.sell_logical, t))),
              C_BUYSIG_2, t, a))
       sig = true;
-    if (cond(r_and(is_bnh, r_gt(s.money, 0)), C_BUYSIG_3, t, a)) sig = true;
+    if (cond(simlev_r_and(is_bnh, r_gt(s.money, 0)), C_BUYSIG_3, t, a)) sig = true;
     return sig;
   }
   bool sell_signal(int a, int t) {
     const AssetIn& A = in[a];
     bool sig = false;
-    if (cond(r_and(r_and(r_bool(A.style == 1), r_lgl(A.sig_sell[t - 1])), r_gt(st[a].count, 0)), C_SELLSIG, t, a))
+    if (cond(simlev_r_and(simlev_r_and(r_bool(A.style == 1), r_lgl(A.sig_sell[t - 1])), r_gt(st[a].count, 0)), C_SELLSIG, t, a))
       sig = true;
     if (A.style == 0) sig = false;
     return sig;
@@ -1081,7 +1102,7 @@ class Engine {
   // ── .perform_trade_buy (count = NULL) ──
   void perform_buy(int a, int t, int site, int reason) {
     const AssetIn& A = in[a];
-    const double mp = px[a][t - 1];
+    const double mp = pxp[a][t - 1];
     if (std::isnan(mp) || mp <= 0) {
       warn(EV_BUY_PRICE, site, t, a, mp);
       return;
@@ -1108,7 +1129,7 @@ class Engine {
   void perform_sell(int a, int t, int site, double spread, bool has_count = false, double count = 0.0,
                     bool has_price = false, double price = 0.0) {
     const AssetIn& A = in[a];
-    const double mp = px[a][t - 1];
+    const double mp = pxp[a][t - 1];
     double tp = spread_sell(mp, spread);
     const double available = st[a].count;
     double tc;
@@ -1116,7 +1137,7 @@ class Engine {
       tc = available;
     } else {
       if (cond(r_gt(count, available), C_SELL_EXCESS, t, a)) warn(EV_SELL_EXCESS, site, t, a, count, available);
-      tc = r_min2(count, available);
+      tc = simlev_r_min2(count, available);
     }
     if (cond(r_le(tc, 0), C_SELL_TC, t, a)) return;
     if (fee_cur != nullptr) {
@@ -1179,7 +1200,7 @@ class Engine {
   void buy_with_fee(int a, int t, int reason) {
     if (fees_on && has(t, F_DCA) && in[a].style == 0) {
       const double money = st[a].money;
-      const double dca_part = r_min2(r_max2(0.0, rep[a].flows[t - 1]), money);
+      const double dca_part = simlev_r_min2(simlev_r_max2(0.0, rep[a].flows[t - 1]), money);
       if (t == 1 && cond(r_gt(money - dca_part, 0.005), C_BWF_START, t, a)) {
         fee_cur = fee_ptr(fee_order);
         st[a].money = money - dca_part;
@@ -1243,7 +1264,12 @@ class Engine {
     }
     if (units.empty()) return;
     const int nl = (int) units.size();
-    std::vector<double> cu((std::size_t) nl), cc((std::size_t) nl), cv((std::size_t) nl);
+    std::vector<double>& cu = sc_cu;
+    std::vector<double>& cc = sc_cc;
+    std::vector<double>& cv = sc_cv;
+    cu.assign((std::size_t) nl, 0.0);
+    cc.assign((std::size_t) nl, 0.0);
+    cv.assign((std::size_t) nl, 0.0);
     Neumaier su, sc, sv;
     for (int i = 0; i < nl; ++i) {
       su.add(units[i]);
@@ -1321,7 +1347,7 @@ class Engine {
   }
   // .calculate_sell_count (tax_rate = effective_tax_rate wie alle Aufrufer)
   void calculate_sell_count(int a, double target, int t, bool fr, double& cnt, double& fp) {
-    const double mp = px[a][t - 1];
+    const double mp = pxp[a][t - 1];
     const double tp = spread_sell(mp, in[a].spread);
     const double total_shares = st[a].count;
     cnt = 0.0;
@@ -1330,7 +1356,7 @@ class Engine {
     if (cond(r_le(target, 0), C_SC_TARGET, t, a)) return;
     const int regime = person ? in[a].regime : RG_NONE;
     const double bonus = regime == RG_FUND ? in[a].bonus : 0.0;
-    const double loss_pool = simlev_add(T.v[TT_LOSS_CG], r_max2(0.0, T.v[TT_SPB_REM]));
+    const double loss_pool = simlev_add(T.v[TT_LOSS_CG], simlev_r_max2(0.0, T.v[TT_SPB_REM]));
     sell_count(a, target, tp, total_shares, fr, regime, bonus, loss_pool, eff_rate, cnt, fp);
   }
 
@@ -1340,17 +1366,17 @@ class Engine {
     const bool fr = fractions || round_up;
     double target = need;
     if (fee_cur != nullptr) {
-      const double p = spread_sell(px[a][t - 1], in[a].spread);
+      const double p = spread_sell(pxp[a][t - 1], in[a].spread);
       for (int k = 0; k < 3; k++) {
         double c, f;
         calculate_sell_count(a, target, t, fr, c, f);
-        target = simlev_add(need, fee_amount(*fee_cur, r_max2(c, 1e-12) * p));
+        target = simlev_add(need, fee_amount(*fee_cur, simlev_r_max2(c, 1e-12) * p));
       }
     }
     calculate_sell_count(a, target, t, fr, cnt, fp);
     has_fp = true;
-    if (cond(r_and(r_bool(round_up && !fractions), r_gt(cnt, 0)), C_SCN_ROUND, t, a)) {
-      cnt = r_min2(st[a].count, std::ceil(cnt - 1e-9));
+    if (cond(simlev_r_and(r_bool(round_up && !fractions), r_gt(cnt, 0)), C_SCN_ROUND, t, a)) {
+      cnt = simlev_r_min2(st[a].count, std::ceil(cnt - 1e-9));
       has_fp = false;
     }
   }
@@ -1380,7 +1406,7 @@ class Engine {
       sell_count_net(a, shrt, t, true, n_sell, fp, has_fp);
       if (cond(k > 1 ? 1 : r_not(r_gt(n_sell, 0)), C_PO_MIN, t, a)) {
         const double c = st[a].count;
-        n_sell = r_max2(n_sell, fractions ? r_min2(c, 1e-6) : r_min2(1.0, c));
+        n_sell = simlev_r_max2(n_sell, fractions ? simlev_r_min2(c, 1e-6) : simlev_r_min2(1.0, c));
       }
       const double before = raised();
       perform_sell(a, t, S_SELL_TAX, in[a].spread, true, n_sell, has_fp, fp);
@@ -1408,7 +1434,7 @@ class Engine {
       for (int b = 0; b < na; b++) {
         if (b == a) continue;
         others.push_back(b);
-        val.push_back(simlev_add(simlev_mul(st[b].count, px[b][t - 1]), r_max2(0.0, st[b].money)));
+        val.push_back(simlev_add(simlev_mul(st[b].count, pxp[b][t - 1]), simlev_r_max2(0.0, st[b].money)));
       }
       std::vector<int> ord(others.size());
       for (std::size_t i = 0; i < ord.size(); i++) ord[i] = (int) i;
@@ -1625,16 +1651,16 @@ class Engine {
     detail(DT_YC_HEAD, t, -1, {(double) stored_year, (double) current_year});
     const double ytd_gains = v[TT_PS_GAINS], ytd_losses = v[TT_PS_LOSSES];
     const double net_saldo = simlev_sub(ytd_gains, ytd_losses);
-    const double net_ytd_losses = r_max2(0.0, -net_saldo);
+    const double net_ytd_losses = simlev_r_max2(0.0, -net_saldo);
     double net_gain = 0.0, cf = 0.0;
-    if (cond(r_and(r_ge(net_saldo, ps_threshold), r_gt(net_saldo, 0)), C_YC_SALDO, t, -1)) {
-      cf = r_min2(net_saldo, v[TT_LOSS_PS]);
+    if (cond(simlev_r_and(r_ge(net_saldo, ps_threshold), r_gt(net_saldo, 0)), C_YC_SALDO, t, -1)) {
+      cf = simlev_r_min2(net_saldo, v[TT_LOSS_PS]);
       v[TT_LOSS_PS] = simlev_sub(v[TT_LOSS_PS], cf);
       net_gain = simlev_sub(net_saldo, cf);
       if (det() && cond(r_gt(cf, 0), C_D_CARRY, t, -1)) detail(DT_YC_CARRY, t, -1, {cf, v[TT_LOSS_PS]});
     }
     if (det())
-      detail(DT_YC_SUMMARY, t, -1, {(double) stored_year, ytd_gains, ytd_losses, r_min2(ytd_gains, ytd_losses), cf,
+      detail(DT_YC_SUMMARY, t, -1, {(double) stored_year, ytd_gains, ytd_losses, simlev_r_min2(ytd_gains, ytd_losses), cf,
                                     simlev_sub(net_saldo, cf)});
     if (cond(r_gt(net_gain, 0), C_YC_GAIN, t, -1)) {
       double mtr = marginal, tax_due = 0.0;
@@ -1652,7 +1678,7 @@ class Engine {
     } else if (cond(r_gt(net_ytd_losses, 0), C_YC_LOSS, t, -1)) {
       v[TT_LOSS_PS] = simlev_add(v[TT_LOSS_PS], net_ytd_losses);
       detail(DT_YC_LOSS, t, -1, {net_ytd_losses, v[TT_LOSS_PS]});
-    } else if (cond(r_and(r_gt(net_saldo, 0), r_lt(net_saldo, ps_threshold)), C_YC_FREE, t, -1)) {
+    } else if (cond(simlev_r_and(r_gt(net_saldo, 0), r_lt(net_saldo, ps_threshold)), C_YC_FREE, t, -1)) {
       detail(DT_YC_FREE, t, -1, {net_saldo, ps_threshold});
     } else {
       detail(DT_YC_NONE, t, -1, {(double) stored_year});
@@ -1664,14 +1690,14 @@ class Engine {
     const double carry_start = v[TT_CGT_POOL_START];
     double carry_used = 0.0;
     if (cond(r_gt(carry_start, 0), C_YC_CARRY, t, -1)) {
-      const double spb_used_ytd = use_spb ? r_max2(0.0, simlev_sub(v[TT_SPB_ANNUAL], v[TT_SPB_REM])) : 0.0;
-      carry_used = r_min2(carry_start,
-                          r_max2(0.0, simlev_sub(simlev_add(simlev_add(cgt_used, spb_used_ytd), cgt_base), cgt_added)));
+      const double spb_used_ytd = use_spb ? simlev_r_max2(0.0, simlev_sub(v[TT_SPB_ANNUAL], v[TT_SPB_REM])) : 0.0;
+      carry_used = simlev_r_min2(carry_start,
+                          simlev_r_max2(0.0, simlev_sub(simlev_add(simlev_add(cgt_used, spb_used_ytd), cgt_base), cgt_added)));
     }
-    double unused_loss = r_max2(0.0, simlev_sub(cgt_added, simlev_sub(cgt_used, carry_used)));
-    unused_loss = r_min2(unused_loss, v[TT_LOSS_CG]);
-    const double refund_base = r_min2(unused_loss, cgt_base);
-    const bool refund_done = cond(r_and(r_gt(refund_base, 0), r_gt(eff_rate, 0)), C_YC_REFUND, t, -1);
+    double unused_loss = simlev_r_max2(0.0, simlev_sub(cgt_added, simlev_sub(cgt_used, carry_used)));
+    unused_loss = simlev_r_min2(unused_loss, v[TT_LOSS_CG]);
+    const double refund_base = simlev_r_min2(unused_loss, cgt_base);
+    const bool refund_done = cond(simlev_r_and(r_gt(refund_base, 0), r_gt(eff_rate, 0)), C_YC_REFUND, t, -1);
     if (refund_done) {
       const double refund = simlev_mul(refund_base, eff_rate);
       std::vector<double> w((std::size_t) na);
@@ -1688,9 +1714,9 @@ class Engine {
       detail(DT_YC_REFUND, t, -1, {refund});
     }
     if (use_spb) {
-      const double spb_used_year = r_max2(0.0, simlev_sub(v[TT_SPB_ANNUAL], v[TT_SPB_REM]));
+      const double spb_used_year = simlev_r_max2(0.0, simlev_sub(v[TT_SPB_ANNUAL], v[TT_SPB_REM]));
       const double taxed_left = simlev_sub(cgt_base, refund_done ? refund_base : 0.0);
-      const double release = r_max2(0.0, r_min2(spb_used_year, simlev_sub(v[TT_LOSS_CG], taxed_left)));
+      const double release = simlev_r_max2(0.0, simlev_r_min2(spb_used_year, simlev_sub(v[TT_LOSS_CG], taxed_left)));
       if (cond(r_gt(release, 0), C_YC_REL, t, -1)) {
         v[TT_LOSS_CG] = simlev_sub(v[TT_LOSS_CG], release);
         v[TT_SPB_REM] = simlev_add(v[TT_SPB_REM], release);
@@ -1700,12 +1726,12 @@ class Engine {
     }
     bool any_refund = refund_done;
     if (with_tariff) {
-      const double k_base = r_max2(0.0, simlev_sub(cgt_base, refund_done ? refund_base : 0.0));
+      const double k_base = simlev_r_max2(0.0, simlev_sub(cgt_base, refund_done ? refund_base : 0.0));
       const double D = tariff_close(stored_year, net_gain, k_base, eff_rate, t);
       tariff_book(X, D, t);
       if (!std::isnan(D) && D < 0) any_refund = true;
     }
-    if (cond(r_and(r_bool(any_refund), r_lt(std::fabs(v[TT_TOTAL_TAXES]), 1e-9)), C_YC_TOT, t, -1))
+    if (cond(simlev_r_and(r_bool(any_refund), r_lt(std::fabs(v[TT_TOTAL_TAXES]), 1e-9)), C_YC_TOT, t, -1))
       v[TT_TOTAL_TAXES] = 0.0;
     v[TT_PS_GAINS] = 0.0;
     v[TT_PS_LOSSES] = 0.0;
@@ -1742,6 +1768,14 @@ class Engine {
     return rebalance_now;
   }
 
+  // Kursreihe von Asset a zum Umrechnen: beim ersten Split Kopie der Eingabe anlegen (seit 1.6.3)
+  std::vector<double>& own_px(int a) {
+    if (px[a].empty()) {
+      px[a].assign(pxp[a], pxp[a] + n);
+      pxp[a] = px[a].data();
+    }
+    return px[a];
+  }
   // .sim_day_split mit .perform_asset_split (Lots, Status und Kursreihe exakt umrechnen)
   void asset_split(int a, double ratio, bool forward, int t) {
     if (cond(r_le(ratio, 0), C_SPLIT_RATIO, t, a))
@@ -1767,22 +1801,23 @@ class Engine {
     s.count = forward ? cc * ratio : cc / ratio;
     s.price = forward ? cp / ratio : cp * ratio;
     s.worth = cw;
-    std::vector<double>& p = px[a];
+    std::vector<double>& p = own_px(a);
     if (forward) for (double& x : p) x = x / ratio;
     else for (double& x : p) x = x * ratio;
     px_changed[a] = 1;
     detail(DT_SPLIT, t, a, {ratio}, forward ? 1 : 0);
   }
   void day_split(int t) {
-    std::vector<char> held((std::size_t) na, 0);
+    std::vector<char>& held = sp_held;
+    held.assign((std::size_t) na, 0);
     for (int a : active) held[a] = st[a].count > 0;
     for (int a = 0; a < na; a++) {
       if (held[a] || in[a].no_split) continue;
-      const double px0 = px[a][t - 1];
+      const double px0 = pxp[a][t - 1];
       const lgl l1 = r_gt(px0, split_hi);
       if (cond(l1 == 1 ? 1 : r_or(l1, r_lt(px0, split_lo)), C_SP_FREE, t, a)) {
         const double r = px0 / 100;
-        for (double& x : px[a]) x = x / r;
+        for (double& x : own_px(a)) x = x / r;
         px_changed[a] = 1;
         detail(DT_SPLIT_FREE, t, a, {l1 == 1 ? px0 / 100 : 100 / px0}, l1 == 1 ? 1 : 0);
       }
@@ -1790,12 +1825,12 @@ class Engine {
     for (int a : active) {
       if (in[a].no_split) continue;
       if (cond(r_gt(st[a].count, 0), C_SP_HELD, t, a)) {
-        const double sp = px[a][t - 1];
+        const double sp = pxp[a][t - 1];
         if (cond(r_gt(sp, split_hi), C_SP_FWD, t, a)) asset_split(a, sp / 100, true, t);
         if (cond(r_lt(sp, split_lo), C_SP_REV, t, a)) asset_split(a, 100 / sp, false, t);
         const double cnt = st[a].count;
         const double frac = cnt - std::floor(cnt + 1e-9);
-        if (cond(r_and(r_bool(!fractions), r_gt(frac, 1e-9)), C_SP_FRAC, t, a)) {
+        if (cond(simlev_r_and(r_bool(!fractions), r_gt(frac, 1e-9)), C_SP_FRAC, t, a)) {
           const Fee* keep = fee_cur;
           fee_cur = nullptr;
           perform_sell(a, t, S_SELL_SPLIT, 0.0, true, frac);
@@ -1816,10 +1851,15 @@ class Engine {
     for (int i = 0; i < k; i++) w[i] = simlev_div(w[i], sw);
     if (balance_dca && k > 1) {
       total_report(t);
-      std::vector<double> totals_now((std::size_t) k), deficit((std::size_t) k), alloc((std::size_t) k);
+      std::vector<double>& totals_now = dca_tot;
+      std::vector<double>& deficit = dca_def;
+      std::vector<double>& alloc = dca_alloc;
+      totals_now.assign((std::size_t) k, 0.0);
+      deficit.assign((std::size_t) k, 0.0);
+      alloc.assign((std::size_t) k, 0.0);
       for (int i = 0; i < k; i++) totals_now[i] = st[active[i]].total;
       const double base = simlev_add(sl_r_sum(k, totals_now.data(), 1), dca_amount);
-      for (int i = 0; i < k; i++) deficit[i] = r_max2(0.0, simlev_sub(simlev_mul(w[i], base), totals_now[i]));
+      for (int i = 0; i < k; i++) deficit[i] = simlev_r_max2(0.0, simlev_sub(simlev_mul(w[i], base), totals_now[i]));
       const double sd = sl_r_sum(k, deficit.data(), 0);
       if (cond(r_gt(sd, dca_amount), C_DCA_DEFICIT, t, -1)) {
         for (int i = 0; i < k; i++) alloc[i] = simlev_div(simlev_mul(dca_amount, deficit[i]), sd);
@@ -1858,12 +1898,16 @@ class Engine {
 
   void day_rebalance(int t) {
     const int k = (int) active.size();
-    std::vector<double> targets((std::size_t) k), actual_w((std::size_t) k);
+    std::vector<double>& targets = rb_targets;
+    std::vector<double>& actual_w = rb_actual;
+    targets.assign((std::size_t) k, 0.0);
+    actual_w.assign((std::size_t) k, 0.0);
     for (int i = 0; i < k; i++) targets[i] = st[active[i]].actual;
     const double s_at = sl_r_sum(k, targets.data(), 1);
     for (int i = 0; i < k; i++) targets[i] = simlev_div(targets[i], s_at);
     if (has_event_weight && has(t, F_EVENT)) {
-      std::vector<double> ow((std::size_t) k);
+      std::vector<double>& ow = rb_ow;
+      ow.assign((std::size_t) k, 0.0);
       bool all_finite = true;
       for (int i = 0; i < k; i++) {
         const double* col = in[active[i]].event_w;
@@ -1876,18 +1920,19 @@ class Engine {
           for (int i = 0; i < k; i++) targets[i] = ow[i] / so;
       }
     }
-    std::vector<char> cash_only((std::size_t) na, 0);
+    std::vector<char>& cash_only = rb_cash;
+    cash_only.assign((std::size_t) na, 0);
     for (int a : active) {
       if (in[a].style != 1) continue;
       const lgl has_pos = r_gt(st[a].count, 0);
       const lgl sb = sig_true(in[a].sig_buy, in[a].buy_logical, t);
       const lgl ss = sig_true(in[a].sig_sell, in[a].sell_logical, t);
-      if (cond(r_and(has_pos, ss), C_GATE_EXIT, t, a)) {
+      if (cond(simlev_r_and(has_pos, ss), C_GATE_EXIT, t, a)) {
         perform_sell(a, t, S_SELL_SIG_EXIT, in[a].spread);
         cash_only[a] = 1;
-      } else if (cond(r_and(r_not(has_pos), sb), C_GATE_ENTRY, t, a)) {
+      } else if (cond(simlev_r_and(r_not(has_pos), sb), C_GATE_ENTRY, t, a)) {
         perform_buy(a, t, S_BUY_SIG_ENTRY, RS_SIG_ENTRY);
-      } else if (cond(r_and(r_not(has_pos), r_not(sb)), C_GATE_CASH, t, a)) {
+      } else if (cond(simlev_r_and(r_not(has_pos), r_not(sb)), C_GATE_CASH, t, a)) {
         cash_only[a] = 1;
       }
     }
@@ -1908,7 +1953,8 @@ class Engine {
     } else {
       double max_dev = -INFINITY;
       bool any = false;
-      std::vector<double> devs((std::size_t) k);
+      std::vector<double>& devs = rb_devs;
+      devs.assign((std::size_t) k, 0.0);
       for (int i = 0; i < k; i++) {
         const double dev = thresh_relative ? std::fabs(simlev_sub(simlev_div(actual_w[i], targets[i]), 1.0))
                                            : std::fabs(simlev_sub(targets[i], actual_w[i]));
@@ -1931,7 +1977,12 @@ class Engine {
       }
     }
     if (ev_reb) {
-      std::vector<double> differ((std::size_t) k), tv((std::size_t) k), tot((std::size_t) k);
+      std::vector<double>& differ = rb_differ;
+      std::vector<double>& tv = rb_tv;
+      std::vector<double>& tot = rb_tot;
+      differ.assign((std::size_t) k, 0.0);
+      tv.assign((std::size_t) k, 0.0);
+      tot.assign((std::size_t) k, 0.0);
       for (int i = 0; i < k; i++) {
         differ[i] = simlev_sub(targets[i], actual_w[i]);
         tot[i] = st[active[i]].total;
@@ -1942,13 +1993,13 @@ class Engine {
       for (int i = 0; i < k; i++) {
         if (!(differ[i] < 0)) continue;
         const int a = active[i];
-        const double sell_target = simlev_sub(tv[i], r_max2(0.0, st[a].money));
-        if (cond(r_and(r_gt(st[a].count, 0), r_gt(sell_target, 0)), C_REB_SELL, t, a)) {
+        const double sell_target = simlev_sub(tv[i], simlev_r_max2(0.0, st[a].money));
+        if (cond(simlev_r_and(r_gt(st[a].count, 0), r_gt(sell_target, 0)), C_REB_SELL, t, a)) {
           double cnt, fp;
           calculate_sell_count(a, sell_target, t, fractions != 0, cnt, fp);
           perform_sell(a, t, S_SELL_REBAL, in[a].spread, true, cnt, true, fp);
         }
-        const double available_cash = r_min2(st[a].money, tv[i]);
+        const double available_cash = simlev_r_min2(st[a].money, tv[i]);
         pool = simlev_add(pool, available_cash);
         st[a].money = simlev_sub(st[a].money, available_cash);
         detail(DT_REB_POOL_IN, t, a, {available_cash});
@@ -1956,7 +2007,7 @@ class Engine {
       for (int i = 0; i < k; i++) {
         if (!(differ[i] > 0)) continue;
         const int a = active[i];
-        const double allocation = r_min2(tv[i], pool);
+        const double allocation = simlev_r_min2(tv[i], pool);
         if (cond(r_gt(allocation, 0), C_REB_ALLOC, t, a)) {
           st[a].money = simlev_add(st[a].money, allocation);
           pool = simlev_sub(pool, allocation);
@@ -1976,7 +2027,7 @@ class Engine {
       }
     }
     for (int a : active) {
-      const lgl c = r_and(r_and(r_bool(!cash_only[a]), r_gt(st[a].money, 0.005)),
+      const lgl c = simlev_r_and(simlev_r_and(r_bool(!cash_only[a]), r_gt(st[a].money, 0.005)),
                           r_or(r_bool(in[a].style != 1), r_gt(st[a].count, 0)));
       if (cond(c, C_REB_REST, t, a)) buy_with_fee(a, t, RS_REBAL);
     }
@@ -1999,11 +2050,11 @@ class Engine {
     if (cond(r_le(total, 0), C_HV_TOTAL, t, a)) return;
     const double room = simlev_add(use_spb ? T.v[TT_SPB_REM] : 0.0, loss_pot ? T.v[TT_LOSS_CG] : 0.0);
     if (cond(r_le(room, 0.01), C_HV_ROOM, t, a)) return;
-    const double mp = px[a][t - 1];
+    const double mp = pxp[a][t - 1];
     if (std::isnan(mp) || mp <= 0) return;
     const double sp = spread_sell(mp, in[a].spread);
     const double bonus = regime == RG_FUND ? in[a].bonus : 0.0;
-    const double first_lot = r_min2(total, r_max2(1e-9, total * 1e-6));
+    const double first_lot = simlev_r_min2(total, simlev_r_max2(1e-9, total * 1e-6));
     if (cond(r_le(harvest_taxable(a, first_lot, sp, regime, bonus, false, t), 0), C_HV_FIRST, t, a)) return;
     double n_;
     if (cond(r_le(harvest_taxable(a, total, sp, regime, bonus, true, t), room), C_HV_ALL, t, a)) {
@@ -2035,7 +2086,7 @@ class Engine {
   void day_assess_vp(int t) {
     if (person && !(liquidate && has(t, F_LIQ))) {
       for (int a = 0; a < na; a++) {
-        if (!cond(r_and(r_bool(in[a].regime == RG_FUND), r_gt(st[a].count, 0)), C_AV_FUND, t, a)) continue;
+        if (!cond(simlev_r_and(r_bool(in[a].regime == RG_FUND), r_gt(st[a].count, 0)), C_AV_FUND, t, a)) continue;
         const double date_index = day[t - 1];
         const int yr = eng_year(date_index);
         const long soy = eng_days(yr, 1, 1), eoy = eng_days(yr, 12, 31);
@@ -2044,12 +2095,12 @@ class Engine {
         int ri = ysi;
         while (ri < t && has(ri, F_FILLED)) ri++;
         if (has(ri, F_FILLED)) ri = ysi;
-        const double ysp = px[a][ri - 1];
+        const double ysp = pxp[a][ri - 1];
         const double raw = (in[a].base_rates ? in[a].base_rates[ri - 1] : 0.0) / 100;
-        const double base_rate = r_max2(0.0, raw);
+        const double base_rate = simlev_r_max2(0.0, raw);
         double flat_rate = 0.0;
         if (!cond(r_le(base_rate, 0), C_FR_BASE, t, a)) {
-          const double mp = px[a][t - 1];
+          const double mp = pxp[a][t - 1];
           std::vector<Lot>& L = buys[a];
           Neumaier acc;
           for (int i = front[a]; i <= (int) L.size(); ++i) {

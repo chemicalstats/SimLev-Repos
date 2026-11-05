@@ -22,29 +22,16 @@
 /* Methodentabelle mit C-Bindung (Deklaration in _ext_common.h) */
 extern "C" {
 
-static int get_buf(PyObject *o, Py_buffer *v, int writable, Py_ssize_t itemsize, const char *fmts,
-                   Py_ssize_t len, const char *what)
-{
-    int flags = PyBUF_C_CONTIGUOUS | PyBUF_FORMAT | (writable ? PyBUF_WRITABLE : 0);
-    if (PyObject_GetBuffer(o, v, flags) < 0) return -1;
-    if (v->itemsize != itemsize || v->format == NULL || strchr(fmts, v->format[strlen(v->format) - 1]) == NULL) {
-        PyBuffer_Release(v);
-        PyErr_Format(PyExc_TypeError, "interner Fehler: %s hat den falschen Typ", what);
-        return -1;
-    }
-    if (len >= 0 && v->len / v->itemsize != len) {
-        PyBuffer_Release(v);
-        PyErr_Format(PyExc_TypeError, "interner Fehler: %s hat die falsche Laenge", what);
-        return -1;
-    }
-    return 0;
-}
+#include "_ext_slc_hull.h"   /* py_interrupted, ctx_init, finish, hull_buf, rel (seit 1.6.3) */
+static inline int get_buf(PyObject *o, Py_buffer *v, int writable, Py_ssize_t itemsize, const char *fmts,
+                          Py_ssize_t len, const char *what)
+{ return hull_buf(o, v, writable, itemsize, fmts, len, what, 0); }
+
 
 #define DBUF(o, v, w, len, what) get_buf((o), (v), (w), 8, "d", (len), (what))
 #define LBUF(o, v, w, len, what) get_buf((o), (v), (w), 8, "qlL", (len), (what))
 #define NITEMS(v) ((Py_ssize_t) ((v).len / (v).itemsize))
 
-static void rel(Py_buffer *v) { if (v->obj) PyBuffer_Release(v); }
 
 static PyObject *nomem(void) { return PyErr_NoMemory(); }
 
@@ -119,6 +106,31 @@ static PyObject *slc_r_margsums(PyObject *self, PyObject *args)
     else sl_r_colsums(nr, nc, (const double *) vx.buf, narm, mean, (double *) vo.buf);
     rel(&vx); rel(&vo);
     if (st) return nomem();
+    Py_RETURN_NONE;
+}
+
+/* colSums/colMeans der Zeilen idx (seit 1.6.3, sl_r_colsums_idx): (x, nr, nc, rs, cs, idx int64, base, narm, mean, out);
+ * Element (r, j) bei x[r rs + j cs] (numpy zeilenweise: rs = nc, cs = 1), out nc Werte */
+static PyObject *slc_r_colsums_idx(PyObject *self, PyObject *args)
+{
+    PyObject *x, *ix, *o;
+    Py_ssize_t nr, nc, rs, cs, base;
+    int narm, mean, st;
+    Py_buffer vx = {}, vi = {}, vo = {};
+    (void) self;
+    if (!PyArg_ParseTuple(args, "OnnnnOnppO", &x, &nr, &nc, &rs, &cs, &ix, &base, &narm, &mean, &o)) return NULL;
+    if (nr < 0 || nc < 0 || rs < 0 || cs < 0) { PyErr_SetString(PyExc_ValueError, "interner Fehler: Dimension negativ"); return NULL; }
+    if (DBUF(x, &vx, 0, -1, "x") < 0) return NULL;
+    if (nr > 0 && nc > 0 && NITEMS(vx) < (nr - 1) * rs + (nc - 1) * cs + 1) {
+        rel(&vx); PyErr_SetString(PyExc_ValueError, "interner Fehler: x zu kurz fuer nr, nc, rs, cs"); return NULL;
+    }
+    if (LBUF(ix, &vi, 0, -1, "idx") < 0) { rel(&vx); return NULL; }
+    if (DBUF(o, &vo, 1, nc, "Ausgabe") < 0) { rel(&vx); rel(&vi); return NULL; }
+    st = sl_r_colsums_idx(nr, nc, (const double *) vx.buf, rs, cs, NITEMS(vi), (const int64_t *) vi.buf, base, narm,
+                          mean, (double *) vo.buf);
+    rel(&vx); rel(&vi); rel(&vo);
+    if (st == SL_ENOMEM) return nomem();
+    if (st != SL_OK) { PyErr_SetString(PyExc_ValueError, "slc_r_colsums_idx: Zeilennummer ausserhalb"); return NULL; }
     Py_RETURN_NONE;
 }
 
@@ -418,6 +430,8 @@ PyMethodDef simlev_ext_slc_rbase_methods[] = {
     {"slc_r_mean_int", slc_r_mean_int, METH_VARARGS, "slc_r_mean_int(x int64) -> float"},
     {"slc_r_cum", slc_r_cum, METH_VARARGS, "slc_r_cum(kind, x, out): 0 cumsum, 1 cumprod, 2 cummax, 3 cummin"},
     {"slc_r_margsums", slc_r_margsums, METH_VARARGS, "slc_r_margsums(x, nr, nc, narm, mean, rows, out)"},
+    {"slc_r_colsums_idx", slc_r_colsums_idx, METH_VARARGS,
+     "slc_r_colsums_idx(x, nr, nc, rs, cs, idx, base, narm, mean, out): colSums/colMeans(x[idx, ]) ohne Kopie"},
     {"slc_r_pow", slc_r_pow, METH_VARARGS, "slc_r_pow(x, y, out): x ^ y wie R"},
     {"slc_r_pow1", slc_r_pow1, METH_VARARGS, "slc_r_pow1(x, y) -> x ^ y wie R"},
     {"slc_r_pow_rec", slc_r_pow_rec, METH_VARARGS, "slc_r_pow_rec(x, y, out): x ^ y wie R mit Recycling"},

@@ -29,14 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static double bits_d(uint64_t u)
-{
-    double d;
-    memcpy(&d, &u, sizeof d);
-    return d;
-}
 
-#define R_NA bits_d(UINT64_C(0x7FF00000000007A2))
 
 /* Abstand der Zeilen i1 und i2 (0-basiert) einer nr × nc-Matrix (spaltenweise) */
 static double dist1(int64_t nr, int64_t nc, const double *x, int64_t i1, int64_t i2, int method, double p,
@@ -60,7 +53,7 @@ static double dist1(int64_t nr, int64_t nc, const double *x, int64_t i1, int64_t
                 total++;
             }
         }
-        if (total == 0) return R_NA;
+        if (total == 0) return SLR_NA;
         if (count == 0) return 0.0;
         return (double) dd / (double) count;
     }
@@ -98,7 +91,7 @@ static double dist1(int64_t nr, int64_t nc, const double *x, int64_t i1, int64_t
             break;
         }
     }
-    if (cnt == 0) return R_NA;
+    if (cnt == 0) return SLR_NA;
     if (method == 2) return d;
     if (cnt != nc) d /= ((double) cnt / (double) nc);
     if (method == 6) return sl_r_pow1(d, 1.0 / p);

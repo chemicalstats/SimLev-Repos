@@ -24,6 +24,8 @@ from .param_search import (_expand_grid, _isna, _match_arg, _py, _quiet, _seq_by
 from .svg import _res_fig, _res_finish, _res_line, _res_panel, _res_points, _res_range, _res_rect, _res_vline
 from ._util import _ext, _which_max
 from ._util import _fmt_vec
+from ._dates import days_from_civil as _days_from_civil
+from .backcast import _fill_locf
 
 __all__ = ["sensitivity_grid", "sensitivity_rebalancing", "planning_lumpsum_vs_dca", "series_leverage",
            "sensitivity_leverage", "SimLevSensitivity", "SimLevLumpSum"]
@@ -61,19 +63,11 @@ def _as_series(m):
 
 
 def _to_date(x, what):
-    d = _ext("data_prep", "_to_date")(x, what)
-    a = np.asarray(d)
-    if not np.issubdtype(a.dtype, np.datetime64):
-        a = pd.to_datetime(pd.Series(a)).to_numpy()
-    return a.astype("datetime64[D]")
+    return np.asarray(_ext("data_prep", "_to_date")(x, what)).astype("datetime64[D]")   # immer datetime64[D]
 
 
 def _days(d):
     return (np.asarray(d).astype("datetime64[D]") - _EPOCH).astype(np.int64)
-
-
-def _fill_locf(v):
-    return np.asarray(_ext("backcast", "_fill_na")(np.asarray(v, dtype=np.float64), "locf"), dtype=np.float64)
 
 
 def _table_msg(errs):
@@ -123,13 +117,6 @@ def _cell(v):
     if isinstance(v, (list, tuple, np.ndarray)):
         return _py(v[0]) if len(v) == 1 else v      # R: Vektor der Länge 1 = Skalar
     return _py(v)
-
-
-def _is_na_scalar(v):
-    if isinstance(v, (list, tuple, np.ndarray, pd.Series, Mapping)):
-        a = np.asarray(v, dtype=object) if not isinstance(v, Mapping) else None
-        return a is not None and a.size == 1 and _isna(a.ravel()[0])
-    return _isna(v)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -514,11 +501,6 @@ def sensitivity_rebalancing(data, strategy, *, frequencies=None, offsets=None, b
 def _civil(z):
     from ._dates import ymd
     return ymd(int(z))
-
-
-def _days_from_civil(y, m, d):
-    from ._dates import days_from_civil
-    return days_from_civil(y, m, d)
 
 
 def _seq_date_2nd(s, by):

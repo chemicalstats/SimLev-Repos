@@ -190,14 +190,14 @@ function _matrix_lines(cols::Vector{_V}, ctype::Symbol, r::Int, c::Int, rl, cl, 
     end
     is_str = ctype === :character
     w = Int[]
-    enc = Tuple{Int,Int,String}[]
+    enc = Tuple{Int,Int}[]
     for j in 1:c
         col = cols[j]
         if is_str
             wj = _format_string(col.s, quote_)
         elseif ctype === :double
             wj, dj, ej = _format_real(col, digits)
-            push!(enc, (dj, ej, ""))
+            push!(enc, (dj, ej))
         elseif ctype === :integer
             wj = _format_integer(col)
         elseif ctype === :logical
@@ -210,9 +210,12 @@ function _matrix_lines(cols::Vector{_V}, ctype::Symbol, r::Int, c::Int, rl, cl, 
         is_str || (wj += gap)
         push!(w, wj)
     end
-    if ctype === :double
-        enc = [(enc[j][1], enc[j][2], _realfmt(w[j], enc[j][1], enc[j][2])) for j in 1:c]
-    end
+    # Doubles je Spalte in einem Aufruf kodiert (seit 1.6.3; bis 1.6.2 je Zelle, gleicher Kern sl_r_encode_real)
+    encs = ctype === :double ?
+           [r == 0 ? String[] :
+            SimLev._rb_encode_real(length(cols[j].d) == r ? cols[j].d : cols[j].d[1:r], UInt8[cols[j].na[i] || SimLev.isna_strict(cols[j].d[i]) for i in 1:r],
+                                   w[j], enc[j][1], enc[j][2], _OPT[:OutDec], "NA", false) for j in 1:c] :
+           Vector{String}[]
     function row_label(i)
         if rl !== nothing
             s = rl[i]
@@ -241,10 +244,7 @@ function _matrix_lines(cols::Vector{_V}, ctype::Symbol, r::Int, c::Int, rl, cl, 
     function cell(i, j)
         col = cols[j]
         is_str && return " "^gap * _encode_string(col.s[i], w[j], quote_, right ? "right" : "left")
-        if ctype === :double
-            dj, ej, f = enc[j]
-            return _encode_real(col.d[i], w[j], dj, ej, _OPT[:OutDec], col.na[i], f)
-        end
+        ctype === :double && return encs[j][i]
         ctype === :integer && return _encode_integer(col.i[i], col.na[i], w[j])
         return _encode_logical(col.l[i], col.na[i], w[j])
     end

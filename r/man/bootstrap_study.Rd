@@ -172,9 +172,12 @@ fuer die gepaarte Auswertung in \code{summary()}; \code{NULL} (Standard)
 = keine.}
 
 \item{chunk_dir}{Optional (Standard \code{NULL}) Verzeichnis fuer
-Zwischenergebnisse je Chunk (Dateien \code{chunk_<Nr>_seed<Seed>.rds},
+Zwischenergebnisse je Chunk (Dateien \code{chunk_<Nr>_seed<Seed>_r.rds},
 bei \code{keep_returns} mit Frequenz-Suffix, bei \code{keep_paths} > 0 mit
-Suffix \code{_keep<k>}). Vorhandene Dateien werden
+Suffix \code{_keep<k>}, jeweils vor \code{_r.rds}; Python schreibt
+\code{_py.pkl}, Julia \code{_jl.bin}). Liegt zu einem Chunk nur eine Datei
+einer anderen Sprache oder der Form bis 1.6.2 (\code{chunk_<Nr>_seed<Seed>.rds}),
+bricht die Studie mit einer Meldung ab. Vorhandene Dateien werden
 gelesen statt neu gerechnet; so wird ein abgebrochener Lauf mit
 gleichem Seed fortgesetzt. Die Dateien werden nur ueber Chunk-Nummer,
 Seed, \code{keep_returns} und \code{keep_paths} zugeordnet: bei geaenderten

@@ -32,20 +32,14 @@ from . import _ext
 from ._r import fmt as _fmt
 from ._r.base import env_from_caller
 from ._r import libm as _libm
-from ._r.rnum import r_colmeans, r_cumsum, r_mean_int, r_rowmeans, r_rowsums as _rowsums, r_sum
-from .svg import _alloc_c, _alloc_ramp, _esc, _jl_str, _jl_unique
+from ._r.rnum import r_cumsum, r_mean_int, r_rowmeans, r_rowsums as _rowsums, r_sum
+from .svg import _alloc_c, _alloc_ramp, _esc, _jl_str
 from ._util import _dates, _days, _match_arg
-from .data_prep import _civil_to_days, _to_date
+from .data_prep import _civil_to_days, _find_interval_int as _find_interval, _to_date
+from ._util import _MISSING, _unique
+from ._util import _colmeans
+from .backcast import _fill_na
 
-
-class _Missing:
-    """Platzhalter für ein R-Argument ohne Standardwert (Gegenstück zu R's fehlendem Argument)."""
-
-    def __repr__(self):
-        return "<missing>"
-
-
-_MISSING = _Missing()
 
 __all__ = ["SimLevWeights", "signal_state", "momentum_score", "tactical_rules", "tactical_rotation",
            "tactical_target_volatility", "tactical_conditional_volatility", "tactical_glidepath", "tactical_blend",
@@ -54,7 +48,6 @@ __all__ = ["SimLevWeights", "signal_state", "momentum_score", "tactical_rules", 
 _NAN = float("nan")      # R's NaN
 _NA = _fmt.NA_REAL       # R's NA_real_
 
-_EPOCH = np.datetime64("1970-01-01", "D")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -70,29 +63,12 @@ def _message(msg):
     message(msg)
 
 
-def _fill_na(v, method="locf", keep_leading=False):
-    from .backcast import _fill_na as f
-    return np.asarray(f(v, method, keep_leading=keep_leading), dtype=np.float64)
-
-
-def _find_interval(x, vec):
-    """``findInterval(x, vec)`` (vec aufsteigend): Anzahl vec <= x (1-basiert)."""
-    return np.searchsorted(np.asarray(vec, dtype=np.float64), np.asarray(x, dtype=np.float64), side="right")
-
-
 # Summen und Mittel über die C-Kerne core/slc_rbase.cpp (long double wie R; wie Julia)
 def _rowmeans(M):
     M = np.asarray(M, dtype=np.float64)
     if M.ndim == 1:
         M = M.reshape(-1, 1)
     return r_rowmeans(M)
-
-
-def _colmeans(M):
-    M = np.asarray(M, dtype=np.float64)
-    if M.shape[0] == 0:
-        return np.full(M.shape[1], _NAN)
-    return r_colmeans(M)
 
 
 def _ldsum(x):
@@ -117,14 +93,6 @@ def _chr_vec(x):
     if isinstance(x, pd.Series):
         return [str(v) for v in x.to_list()]
     return [str(v) for v in np.asarray(x, dtype=object).ravel()]
-
-
-def _unique(seq):
-    out = []
-    for s in seq:
-        if s not in out:
-            out.append(s)
-    return out
 
 
 def _setdiff(a, b):
@@ -210,10 +178,6 @@ def _fmt1(x):
     if isinstance(r, str):
         return [r]
     return [str(s) for s in (r.to_list() if isinstance(r, pd.Series) else list(r))]
-
-
-def _date_str(d):
-    return _fmt.format_date(d) if not isinstance(d, str) else d
 
 
 def _datefmt1(day):
@@ -372,6 +336,21 @@ def _sig_part(signal, key):
     return v
 
 
+def _is_chr(v):
+    """R-Zeichenvektor? Text-Feld (``U``/``S``) oder Folge mit mindestens einem ``str`` (``None``/NA daneben gilt als
+    ``NA_character_``)."""
+    if isinstance(v, str):
+        return True
+    if not isinstance(v, (list, tuple, np.ndarray, pd.Series, pd.Index, pd.api.extensions.ExtensionArray)):
+        return False
+    if isinstance(getattr(v, "dtype", None), pd.StringDtype):   # pandas-Text, auch nur aus NA
+        return True
+    a = np.asarray(v.to_numpy() if isinstance(v, (pd.Series, pd.Index)) else v)
+    if a.dtype.kind in "US":
+        return True
+    return a.dtype == object and any(isinstance(x, str) for x in a.ravel())
+
+
 def _lgl(v):
     """Logischer Vektor mit NA (None/nan) -> (Werte, NA-Maske); Schnellweg für bool- und float64-Felder (seit 1.6.1)."""
     a = np.asarray(v.to_numpy() if isinstance(v, (pd.Series, pd.Index)) else v)
@@ -409,8 +388,15 @@ def signal_state(signal, *, initial=False):
         x = np.array([100, 102, 105, 103, 99, 97, 100, 104])
         print(simlev.signal_state({"buy": x > 101, "sell": x < 98}))
     """
-    b, bna = _lgl(_sig_part(signal, "buy"))
-    s, sna = _lgl(_sig_part(signal, "sell"))
+    bv, sv = _sig_part(signal, "buy"), _sig_part(signal, "sell")
+    # R: ifelse(b & !s, …): Text in sell scheitert an !s, Text in buy an & (seit 1.6.3 wie R; bis 1.6.2 wertete
+    # Python Text mit bool() aus, "FALSE" wurde True)
+    if _is_chr(sv):
+        raise ValueError("invalid argument type")
+    if _is_chr(bv):
+        raise ValueError("operations are possible only for numeric, logical or complex types")
+    b, bna = _lgl(bv)
+    s, sna = _lgl(sv)
     n = len(b)
     if len(s) != n:
         s = np.resize(s, n)
@@ -535,7 +521,7 @@ def _eval_when(expr, data, env):
     return _rexpr.eval_r(expr, cols, env=env)
 
 
-def _as_logical(v, n):
+def _as_logical(v):
     if isinstance(v, (bool, np.bool_)) or (np.ndim(v) == 0 and not isinstance(v, str)):
         v = [v]
     a = np.asarray(v.to_numpy() if isinstance(v, (pd.Series, pd.Index)) else v)
@@ -629,9 +615,16 @@ def tactical_rules(data, rules, default, *, env=None):
             v = signal_state(w)
         elif callable(w):
             v = w(data)
+        elif _is_chr(w):
+            # R: eval(parse(text = w)) – jedes Element ein Ausdruck (NA als "NA"), Ergebnis der letzte (seit 1.6.3;
+            # bis 1.6.2 wurde ein Textvektor als logischer Vektor gelesen)
+            a = np.asarray(w.to_numpy() if isinstance(w, (pd.Series, pd.Index)) else w, dtype=object).ravel()
+            v = []
+            for z in a:
+                v = _eval_when(z if isinstance(z, str) else "NA", data, env)
         else:
             v = w
-        v = _as_logical(v, n)
+        v = _as_logical(v)
         if len(v) != n:
             raise ValueError("Bedingung hat nicht die Länge nrow(data).")
         cond[:, j] = v
@@ -1323,7 +1316,7 @@ def plot_SimLevWeights(x, width=900, height=420, main="Zielgewichte"):  # noqa: 
     for v in (0.0, 0.25, 0.5, 0.75, 1.0):
         out.append("<text x=\"%s\" y=\"%s\" text-anchor=\"end\" font-size=\"11\">%s</text>"
                    % (_jl_str(L - 6), _alloc_c(py(v) + 4), _jl_str(v)))
-    for y in _jl_unique((d.astype("datetime64[Y]").astype(np.int64) + 1970).tolist()):
+    for y in dict.fromkeys((d.astype("datetime64[Y]").astype(np.int64) + 1970).tolist()):   # = _jl_unique für int
         z = float(np.datetime64(y - 1970, "Y").astype("datetime64[D]").astype(np.int64))
         if z < t0 or z > t1:
             continue

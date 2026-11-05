@@ -60,8 +60,18 @@ function _add!(c::_CapStream, bytes::Vector{UInt8})
     end
     nothing
 end
-Base.unsafe_write(c::_CapStream, p::Ptr{UInt8}, n::UInt) = (_add!(c, copy(unsafe_wrap(Array, p, n))); Int(n))
-Base.write(c::_CapStream, b::UInt8) = (_add!(c, UInt8[b]); 1)
+# seit 1.6.3: angehängt ohne Zwischenkopie, kopiert nur, wenn ein neuer Abschnitt den Vektor ablegt (gleiche Abschnitte)
+function Base.unsafe_write(c::_CapStream, p::Ptr{UInt8}, n::UInt)
+    ch = c.cap.chunks
+    src = unsafe_wrap(Array, p, n)
+    (!isempty(ch) && ch[end][1] == c.k) ? append!(ch[end][2], src) : push!(ch, (c.k, copy(src)))
+    return Int(n)
+end
+function Base.write(c::_CapStream, b::UInt8)
+    ch = c.cap.chunks
+    (!isempty(ch) && ch[end][1] == c.k) ? push!(ch[end][2], b) : push!(ch, (c.k, UInt8[b]))
+    return 1
+end
 Base.isopen(::_CapStream) = true
 Base.iswritable(::_CapStream) = true
 Base.flush(::_CapStream) = nothing
@@ -146,9 +156,15 @@ function par_lapply(X, FUN, cores = 1)
     n = min(_ncores(cores), length(xs))
     n < 2 && return Any[_unit(FUN, x) for x in xs]   # mclapply: cores < 2 -> lapply
     nt = Threads.nthreads()
-    nt < 2 && return _sequential(xs, FUN)
+    if nt < 2
+        _PRECOMPILE_THREADED[] || return _sequential(xs, FUN)
+        return _threaded(xs, FUN, min(n, 2))   # nur in der Arbeitslast beim Vorkompilieren (seit 1.6.3)
+    end
     return _threaded(xs, FUN, min(n, nt))
 end
+
+"Nur für die Vorkompilier-Arbeitslast (precompile.jl): `_threaded` auch mit einem Thread übersetzen (J4, seit 1.6.3)."
+const _PRECOMPILE_THREADED = Ref(false)
 
 "Fork-Semantik nacheinander (Warnungen der Elemente gehen verloren)."
 function _sequential(xs, FUN)

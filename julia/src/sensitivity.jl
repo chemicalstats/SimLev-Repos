@@ -104,6 +104,7 @@ println(g)
 """
 SimLev.@study function sensitivity_grid(data, strategy, grid; sim_args = nothing, metrics = nothing, keep_results::Bool = false,
                           cores = 1)
+    @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
     data = SimLev.as_rframe(data)
     metrics = _metrics(metrics)
     design = _grid_frame(grid)
@@ -643,7 +644,7 @@ function _print_sens(io::IO, x)
     nothing
 end
 
-function _plot_sens(x; metric = "cagr", file = nothing, kw...)
+function _plot_sens(x; metric = "cagr", kw...)
     kind = get(SL.attrs(x), "kind", "grid")
     sc = metric in ("cagr", "ttwror", "max_drawdown", "avg_drawdown") ? 100 : 1
     y = sc .* OF._tofloat(x[metric])
@@ -671,7 +672,7 @@ function _plot_sens(x; metric = "cagr", file = nothing, kw...)
         data = SL.RList("variants" => SL.RFrame("label" => lab, "value" => OF._tofloat(x[metric])))
     end
     # Werte unskaliert wie im Ergebnis (Anteile, nicht ×100)
-    return (_res_finish(f; file = file), data)
+    return (_res_finish(f), data)
 end
 
 function __init__()

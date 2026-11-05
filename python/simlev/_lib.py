@@ -32,17 +32,12 @@ from . import _ext
 
 __all__ = ["simlev_seed", "Stream", "streams", "next_seed", "resolve_seed", "main_stream", "check_seed", "in_unit",
            "state_hex", "u64", "runif", "rnorm", "rexp", "rgeom", "rgamma", "rchisq", "sample",
-           "pnorm", "qnorm", "dnorm", "erfc", "lgamma", "pbeta", "pt", "qt", "plogis", "qlogis", "version"]
+           "pnorm", "qnorm", "dnorm", "erfc", "lgamma", "pbeta", "pt", "qt", "plogis", "qlogis"]
 
 _LOCK = threading.RLock()
 _G = bytearray(32)
 _COUNTER = [0]
 _UNIT = threading.local()
-
-
-def version():
-    """Version der C-Bibliothek slc."""
-    return _ext.slc_version()
 
 
 def _entropy_state(buf):
@@ -210,14 +205,20 @@ def state_hex(stream=None):
     return ["%016x" % v for v in np.frombuffer(b, dtype=np.uint64)]
 
 
-def _draw(fn, stream, n, *par, dtype=np.float64):
-    out = np.empty(_count(n), dtype=dtype)
+def _with_state(stream, fn, *args):
+    """``fn(Zustand, *args)`` mit dem Zustand von ``stream`` bzw. dem globalen Zustand unter der Sperre (seit 1.6.3
+    eine Fassung für _draw, sample und _lib_models._run)."""
     if stream is None:
         _global_check()
         with _LOCK:
-            fn(_G, out, *par)
+            fn(_G, *args)
     else:
-        fn(stream.state, out, *par)
+        fn(stream.state, *args)
+
+
+def _draw(fn, stream, n, *par, dtype=np.float64):
+    out = np.empty(_count(n), dtype=dtype)
+    _with_state(stream, fn, out, *par)
     return out
 
 
@@ -263,20 +264,11 @@ def sample(n, size=None, replace=False, prob=None, stream=None):
     size = n if size is None else _count(size)
     pr = None if prob is None else np.ascontiguousarray(prob, dtype=np.float64)
     out = np.empty(size, dtype=np.int32)
-    if stream is None:
-        _global_check()
-        with _LOCK:
-            _ext.slc_sample(_G, out, n, bool(replace), pr)
-    else:
-        _ext.slc_sample(stream.state, out, n, bool(replace), pr)
+    _with_state(stream, _ext.slc_sample, out, n, bool(replace), pr)
     return out
 
 
 # ── Verteilungen (Parameter skalar) ─────────────────────────────────────────
-
-def _vec(x):
-    return np.ascontiguousarray(x, dtype=np.float64)
-
 
 def _apply(fn, x, *par):
     a0 = np.asarray(x, dtype=np.float64)

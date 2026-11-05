@@ -40,6 +40,10 @@ bei Handelstagsdaten).}
 \item{name}{Spaltenname im Pfad (Standard \code{<base>_l<L>}, z. B.
 "eu_l2", bei negativem Hebel \code{<base>_inv<|L|>}, z. B. "us_inv1").}
 }
+Zahlen sind einzelne endliche Zahlen, \code{base} und \code{name} ein
+einzelner Text, \code{finance} und \code{days} eine Zahl oder ein Name aus
+\code{aux}; andere Werte (Vektoren, logisch, Faktor, NA) ergeben einen
+Fehler (seit 1.6.3).
 Tagesrendite (MSCI Daily Leveraged/Short, plus Fondskosten):
 \deqn{r = 1 + L (R - 1) + (1 - L) i \cdot d / 360 - TER \cdot d / 365
         - s \cdot m(L) \cdot d / 360}

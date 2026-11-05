@@ -26,7 +26,9 @@ module Tactical
 import ..SimLev
 using ..SimLev: _match_arg   # util.jl (seit 1.6.1 eine Fassung)
 using ..SimLev: _alloc_c, _alloc_ramp, _esc
-using ..SimLev: RList, RFrame, RVector, NamedMat, NA, isna_strict
+using ..SimLev: RList, RFrame, RVector, NamedMat, NA
+using ..SimLev: _sprintf, _fmt1, _ldsum, _colmeans, _rowsums, _mean_lgl, _unique, _setdiff, _isna, _strip_nl,
+                _pmax, _pmin   # util.jl, r/rnum.jl
 using Dates
 
 export signal_state, momentum_score, tactical_rules, tactical_rotation, tactical_target_volatility, tactical_conditional_volatility,
@@ -36,7 +38,6 @@ export signal_state, momentum_score, tactical_rules, tactical_rotation, tactical
 # R-Hilfen
 # ═══════════════════════════════════════════════════════════════════════════
 
-_sprintf(fmt, args...) = (s = SimLev.RFmt.sprintf(fmt, args...); s isa AbstractString ? String(s) : String(first(s)))
 _to_date(x, what = "date") = SimLev.DataPrep._to_date(x, what)
 _fill_na(v, method = "locf"; keep_leading = false) =
     _f64copy(SimLev.Backcast._fill_na(_f64copy(v), method; keep_leading = keep_leading))
@@ -45,31 +46,15 @@ _f64copy(v) = Float64[Float64(z) for z in v]
 _message(msg) = SimLev.DataPrep.message(msg)
 _warn(msg) = (@warn msg; nothing)
 
-function _fmt1(x)
-    r = SimLev.RFmt.format(x)
-    r isa AbstractString ? [String(r)] : String[String(s) for s in r]
-end
-
-_ldsum(x) = SimLev.r_sum(x)
-_sqrt(x::Float64) = x < 0 ? NaN : sqrt(x)
 _dnum(d::Date) = Float64(Dates.value(d))
 _dnum(::Missing) = NA
 
-_unique(v) = (out = similar(v, 0); for s in v; s in out || push!(out, s); end; out)
-_setdiff(a, b) = _unique([x for x in a if !(x in b)])
 
 "`findInterval(x, vec)` für aufsteigendes `vec`: Anzahl der Elemente von vec <= x."
 _find_interval(x::AbstractVector, v::AbstractVector) = Int[searchsortedlast(v, xi) for xi in x]
 
 # Zeilen- und Spaltensummen/-mittel wie R in long double über die C-Kerne (core/slc_rbase.cpp)
-_rowsums(A::AbstractMatrix{Float64}) = SimLev._ld_rowsums(A)
 _rowmeans(A::AbstractMatrix{Float64}) = SimLev._ld_rowsums(A; mean = true)
-_colmeans(A::AbstractMatrix{Float64}) = size(A, 1) == 0 ? fill(NaN, size(A, 2)) : SimLev._ld_colsums(A; mean = true)
-_mean_lgl(x) = SimLev.r_mean_int(Int[v ? 1 : 0 for v in x])
-
-# R's pmin/pmax mit NA-Weitergabe (Skalar a, Vektorwert b)
-_pmin(a::Float64, b::Float64) = isnan(b) ? b : isnan(a) ? a : (b < a ? b : a)
-_pmax(a::Float64, b::Float64) = isnan(b) ? b : isnan(a) ? a : (b > a ? b : a)
 
 "Spalten-/Elementzugriff auf data.frame-artige Eingaben."
 _df_names(x::RFrame) = names(x)
@@ -86,7 +71,6 @@ _nrow(x) = (nm = _df_names(x); isempty(nm) ? 0 : length(_col(x, nm[1])))
 "`as.numeric` einer Spalte (missing → NA)."
 _num(v) = Float64[z === missing || z === nothing ? NA : Float64(z) for z in (v isa RVector ? v.values : v)]
 
-_isna(v) = v === missing || v === nothing || (v isa AbstractFloat && isnan(v))
 
 "Benannter Vektor → (Namen oder `nothing`, Float64-Werte)."
 function _named(x)
@@ -232,6 +216,15 @@ _has_buy(w) = (w isa RList && haskey(w, "buy") && w["buy"] !== nothing) ||
               (w isa NamedTuple && haskey(w, :buy) && w.buy !== nothing) ||
               (w isa AbstractDict && !(w isa RList) && (haskey(w, "buy") || haskey(w, :buy)))
 
+"R-Zeichenvektor? Text, Vektor mit Elementtyp Text (auch `Union{Missing,String}`, nur aus `missing`) oder mit mindestens
+einem Text (`missing`/`nothing` daneben gilt als `NA_character_`)."
+function _is_chr(v)
+    v isa AbstractString && return true
+    v isa Union{AbstractVector,Tuple} || return false
+    T = v isa AbstractVector ? Base.nonnothingtype(nonmissingtype(eltype(v))) : Union{}
+    return (T !== Union{} && T <: AbstractString) || any(x -> x isa AbstractString, v)
+end
+
 "Logischer Vektor mit NA → (Werte, NA-Maske)."
 function _lgl(v)
     a = v isa Union{AbstractVector,Tuple} ? collect(v) : [v]
@@ -266,8 +259,13 @@ println(signal_state(RList("buy" => x .> 101, "sell" => x .< 98)))
 ```
 """
 function signal_state(signal; initial = false)
-    b, bna = _lgl(_sig_part(signal, "buy"))
-    s, sna = _lgl(_sig_part(signal, "sell"))
+    bv = _sig_part(signal, "buy"); sv = _sig_part(signal, "sell")
+    # R: ifelse(b & !s, …): Text in sell scheitert an !s, Text in buy an & (seit 1.6.3 wie R; bis 1.6.2 galt in Julia
+    # jeder Text als true)
+    _is_chr(sv) && error("invalid argument type")
+    _is_chr(bv) && error("operations are possible only for numeric, logical or complex types")
+    b, bna = _lgl(bv)
+    s, sna = _lgl(sv)
     return _signal_state(b, bna, s, sna, initial)
 end
 # Funktionsgrenze (seit 1.6.1): `_sig_part` liefert `Any`, die Schleifen laufen hier mit festen Typen
@@ -490,6 +488,14 @@ function tactical_rules(data, rules, default; env = Main)
             signal_state(w)
         elseif w isa Function
             w(data)
+        elseif _is_chr(w)
+            # R: eval(parse(text = w)) – jedes Element ein Ausdruck (NA als "NA"), Ergebnis der letzte (seit 1.6.3;
+            # bis 1.6.2 wurde ein Textvektor als logischer Vektor gelesen)
+            vv = Any[]
+            for z in w
+                vv = _eval_when(z isa AbstractString ? z : "NA", data, env)
+            end
+            vv
         else
             w
         end
@@ -926,9 +932,13 @@ function tactical_conditional_volatility(data, weights, safe; base = 1, upper = 
     th = fill(NA, length(grid), 3)
     for (gi, g) in enumerate(grid)
         (isempty(ok) || (dv[g] - first_ok) / 365.25 < min_history) && continue
-        v = vm[ok[ok .<= g]]
-        th[gi, 1] = lower === nothing ? NA : _quantile7(v, lower)
-        th[gi, 2] = _quantile7(v, upper)
+        v = vm[ok[1:searchsortedlast(ok, g)]]   # ok aufsteigend: dieselben Zeilen wie ok[ok .<= g]
+        if lower === nothing
+            th[gi, 2] = _quantile7(v, upper)
+        else   # seit 1.6.3 beide Schwellen in einem Aufruf (eine Teilsortierung; Ordnungsstatistiken und Formel je p gleich)
+            q2 = SimLev.RStats.quantile(Float64.(v), Float64[lower, upper]; names = false, type = 7)
+            th[gi, 1] = Float64(q2[1]); th[gi, 2] = Float64(q2[2])
+        end
         th[gi, 3] = target === nothing ? cs[g] / cn[g] : Float64(target) / 100
     end
     thresholds = RFrame("date" => d[grid], "lower" => th[:, 1], "upper" => th[:, 2], "target" => th[:, 3])
@@ -1101,7 +1111,6 @@ end
 # print / plot
 # ═══════════════════════════════════════════════════════════════════════════
 
-_strip_nl(s) = endswith(s, "\n") ? s[1:prevind(s, lastindex(s))] : s
 
 "`print.SimLevWeights`: Mittel, Minimum, Maximum und letztes Gewicht in Prozent, Zahl der Wechsel."
 function print_SimLevWeights(io::IO, x)

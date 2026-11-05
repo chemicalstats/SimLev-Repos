@@ -11,7 +11,6 @@ R                   Python
 ==================  ==========================================================
 ``outer``, ``%o%``  :func:`outer`
 ``diag``            :func:`diag`
-``isSymmetric``     :func:`is_symmetric`
 ``all.equal``       :func:`all_equal_numeric` (numerisch)
 ==================  ==========================================================
 
@@ -34,10 +33,7 @@ import math
 import numpy as np
 import pandas as pd
 
-__all__ = ["outer", "diag", "is_symmetric", "all_equal_numeric", "RError"]
-
-_DBL_EPS = 2.220446049250313e-16
-
+__all__ = ["outer", "diag", "all_equal_numeric", "RError"]
 
 class RError(ValueError):
     """Fehler mit R's Meldungstext (``conditionMessage``)."""
@@ -71,10 +67,6 @@ class _M:
         if self.dim is None:
             return np.asfortranarray(self.v.reshape(-1, 1)).copy()
         return np.array(self.v.reshape(self.dim, order="F"), dtype=np.float64, order="F")
-
-    @property
-    def has_dimnames(self):
-        return self.rn is not None or self.cn is not None
 
 
 def _names(idx):
@@ -130,36 +122,20 @@ def _vec_out(v, names=None):
 
 
 def outer(X, Y, FUN="*"):
-    """``outer(X, Y, FUN)``; ``FUN`` ``"*"`` (wie R über ein Matrixprodukt mit innerer Länge 1:
-    jedes Element ist ``0 + x[i] * y[j]``, also ``+0`` statt ``-0``), ``"+"``, ``"-"``, ``"/"``,
-    ``"^"`` oder eine vektorisierte Funktion."""
+    """``outer(X, Y)`` mit ``FUN = "*"`` (wie R über ein Matrixprodukt mit innerer Länge 1: jedes Element ist
+    ``0 + x[i] * y[j]``, also ``+0`` statt ``-0``). Seit 1.6.3 nur dieser Fall (einziger Aufrufer
+    ``optimize``; die Zweige ``+ - / ^`` und Funktionen hatten keinen Aufrufer)."""
+    if not (isinstance(FUN, str) and FUN == "*"):
+        raise RError("unsupported FUN")
     mx = _as_r(X)
     my = _as_r(Y)
     dX = list(mx.dim) if mx.is_matrix else [mx.length]
     dY = list(my.dim) if my.is_matrix else [my.length]
-    if isinstance(FUN, str) and FUN == "*":
-        # Seit 1.0.0 ohne die Nachbildung der Referenz-BLAS: bei innerer Länge 1 ist das
-        # Matrixprodukt genau die Summe 0 + Produkt (wie dgemm und R's simple_matprod).
-        with np.errstate(all="ignore"):
-            Z = 0.0 + np.multiply.outer(np.asarray(mx.v, dtype=np.float64), np.asarray(my.v, dtype=np.float64))
-        flat = Z.ravel(order="F")
-    else:
-        yy = np.repeat(my.v, mx.length)
-        xx = np.tile(mx.v, my.length) if mx.length else mx.v
-        with np.errstate(all="ignore"):
-            if FUN == "+":
-                flat = xx + yy
-            elif FUN == "-":
-                flat = xx - yy
-            elif FUN == "/":
-                flat = xx / yy
-            elif FUN == "^":
-                from .rnum import r_pow
-                flat = np.array([r_pow(a, b) for a, b in zip(xx.tolist(), yy.tolist())])
-            elif callable(FUN):
-                flat = np.asarray(FUN(xx, yy), dtype=np.float64)
-            else:
-                raise RError("unsupported FUN")
+    # Seit 1.0.0 ohne die Nachbildung der Referenz-BLAS: bei innerer Länge 1 ist das
+    # Matrixprodukt genau die Summe 0 + Produkt (wie dgemm und R's simple_matprod).
+    with np.errstate(all="ignore"):
+        Z = 0.0 + np.multiply.outer(np.asarray(mx.v, dtype=np.float64), np.asarray(my.v, dtype=np.float64))
+    flat = Z.ravel(order="F")
     dims = dX + dY
     if len(dims) == 2:
         Z = flat.reshape(dims, order="F")
@@ -202,53 +178,16 @@ def all_equal_numeric(target, current, tolerance=1.4901161193847656e-08):
     return True
 
 
-def is_symmetric(x, tol=100 * _DBL_EPS, tol1=None):
-    """``isSymmetric.matrix(x, tol)``."""
-    if tol1 is None:
-        tol1 = 8 * tol
-    m = _as_r(x)
-    if not m.is_matrix:
-        return False
-    n, nc = m.dim
-    if n != nc:
-        return False
-    A = m.mat()
-    # dimnames: attr.all.equal(x, t(x)) verlangt dimnames(x) == rev(dimnames(x))
-    if m.has_dimnames and m.rn != m.cn:
-        return False
-    if n > 1 and tol1 is not None:
-        for i in sorted(set([1, 2, n - 1, n]), key=[1, 2, n - 1, n].index):
-            if i < 1 or i > n:
-                continue
-            r = all_equal_numeric(A[i - 1, :], A[:, i - 1], tolerance=tol1)
-            if r is not True:
-                return False
-    return all_equal_numeric(A, A.T, tolerance=tol) is True
-
-
 # ── diag ──────────────────────────────────────────────────────────────────
 
 
-def diag(x=1, nrow=None, ncol=None, names=True):
-    """``diag(x, nrow, ncol)`` wie R."""
+def diag(x=1, nrow=None, ncol=None):
+    """``diag(x, nrow, ncol)`` wie R für einen Vektor oder eine Zahl ``x`` (seit 1.6.3 ohne den Matrixfall und
+    ohne ``diag(n)``: Aufrufer ``optimize`` übergeben stets einen Vektor bzw. eine Zahl mit ``nrow``)."""
     if isinstance(x, (pd.DataFrame, np.ndarray)) and np.ndim(x) == 2:
-        if nrow is not None or ncol is not None:
-            raise RError("'nrow' or 'ncol' cannot be specified when 'x' is a matrix")
-        m = _as_r(x)
-        A = m.mat()
-        mm = min(A.shape)
-        if mm == 0:
-            return np.zeros(0)
-        y = A[np.arange(mm), np.arange(mm)].copy()
-        if names and m.rn is not None and m.cn is not None and m.rn[:mm] == m.cn[:mm]:
-            return pd.Series(y, index=m.rn[:mm])
-        return y
-    if np.ndim(x) == 0 and nrow is None and ncol is None:
-        n = int(x)
-        v = np.array([1.0])
-    else:
-        v = np.asarray(x, dtype=np.float64).ravel()
-        n = v.size
+        raise RError("diag: Matrixfall entfallen (interner Fehler)")
+    v = np.asarray(x, dtype=np.float64).ravel()
+    n = v.size
     if nrow is not None:
         n = int(nrow)
     nc = n if ncol is None else int(ncol)

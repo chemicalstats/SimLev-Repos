@@ -2,7 +2,7 @@
 // Anbindung der C++-Kerne an R's C-Schnittstelle (ersetzt seit 0.5.0 Rcpp).
 //
 // Aufbau: Die Kerne rechnen auf schlanken Sichten (Zeiger und Laenge: NumVec,
-// IntVec, LglVec, NumMat) bzw. bei der Engine direkt auf den R-Listen von
+// IntVec, NumMat) bzw. bei der Engine direkt auf den R-Listen von
 // sim_mem. Jede .Call-Huelle (extern "C", registriert in init.cpp) wandelt ihre
 // Argumente in derselben Reihenfolge und auf dieselbe Weise um wie die frueher
 // von Rcpp::compileAttributes() erzeugten Huellen und ruft den Kern ueber
@@ -22,8 +22,7 @@
 //     Rcpp::checkUserInterrupt() ueber R_ToplevelExec und bricht nach dem
 //     Aufraeumen mit Rf_onintr() ab.
 //   * R-Aufrufe, die mit einem R-Fehler abbrechen koennen (Umwandlungen,
-//     Auswertung von R-Code, Vektoren mit vom Aufrufer bestimmter Laenge,
-//     Attribute, Listenzugriff ueber Positionen aus den Daten), laufen unter
+//     Vektoren mit vom Aufrufer bestimmter Laenge, Attribute), laufen unter
 //     R_UnwindProtect (sl::rcall); der R-Fehler wird nach dem Aufraeumen mit
 //     R_ContinueUnwind fortgesetzt.
 //   * Neu angelegte R-Objekte, die ueber weitere Allokationen hinweg leben,
@@ -33,8 +32,9 @@
 // Umwandlungen wie Rcpp 1.0.12 (as<>, r_cast<>, wrap()), mit denselben
 // Fehlermeldungen:
 //   * Vektoren: gleiches Objekt, wenn der Typ passt (Aenderungen wirken dann
-//     an Ort und Stelle), sonst Rf_coerceVector (atomare Typen), as.list()
-//     bzw. as.character() (in R_GlobalEnv ausgewertet).
+//     an Ort und Stelle), sonst Rf_coerceVector (atomare Typen). Die Umwandlungen
+//     ueber as.list()/as.character(), Text-Skalare, Listen-Setzer und weitere
+//     Hilfen ohne Aufrufer sind seit 1.6.3 entfallen.
 //   * Skalare (as_double/as_int/as_bool): Laenge 1 noetig, dann Umwandlung
 //     wie oben und erstes Element (NA_LOGICAL als bool ist true wie bei Rcpp).
 //   * Ergebnisse: neue Vektoren mit 0 bzw. dem Fuellwert, Matrizen mit
@@ -87,19 +87,6 @@ struct interrupted {};                 // Benutzerabbruch
 struct unwind_jump {                  // R-Fehler waehrend eines geschuetzten R-Aufrufs
   SEXP token;
 };
-
-inline std::string format(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-inline std::string format(const char* fmt, ...) {
-  va_list ap, ap2;
-  va_start(ap, fmt);
-  va_copy(ap2, ap);
-  const int n = std::vsnprintf(nullptr, 0, fmt, ap2);
-  va_end(ap2);
-  std::string s(n > 0 ? (size_t) n : 0, '\0');
-  if (n > 0) std::vsnprintf(&s[0], (size_t) n + 1, fmt, ap);
-  va_end(ap);
-  return s;
-}
 
 // Rcpp::stop(fmt, ...): Meldung im printf-Format (die Kerne nutzen nur %d und %s)
 [[noreturn]] inline void stop(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -287,35 +274,6 @@ inline SEXP coerce(SEXP x, SEXPTYPE to) {
   }
 }
 
-// R-Funktion fun(x) in R_GlobalEnv (wie Rcpp's convert_using_rfunction)
-inline SEXP call_r(const char* fun, SEXP x) {
-  return rcall([&]() {
-    SEXP expr = PROTECT(Rf_lang2(Rf_install(fun), x));
-    SEXP res = Rf_eval(expr, R_GlobalEnv);
-    UNPROTECT(1);
-    return res;
-  });
-}
-
-// r_cast<VECSXP>
-inline SEXP as_list(SEXP x) {
-  if (TYPEOF(x) == VECSXP) return x;
-  return keep(call_r("as.list", x));
-}
-
-// r_cast<STRSXP>
-inline SEXP as_character(SEXP x) {
-  switch (TYPEOF(x)) {
-  case STRSXP: return x;
-  case CPLXSXP: case RAWSXP: case LGLSXP: case REALSXP: case INTSXP:
-    return keep(call_r("as.character", x));
-  case CHARSXP: return keep(Rf_ScalarString(x));
-  case SYMSXP: return keep(Rf_ScalarString(PRINTNAME(x)));
-  default:
-    stop("Not compatible with STRSXP: [type=%s].", type_name(x));
-  }
-}
-
 inline void check_scalar(SEXP x) {
   if (Rf_length(x) != 1) stop("Expecting a single value: [extent=%i].", Rf_length(x));
 }
@@ -334,21 +292,6 @@ inline bool as_bool(SEXP x) {
   return static_cast<bool>(LOGICAL(coerce(x, LGLSXP))[0]);
 }
 
-// as<std::string> (Ergebnis als CHAR des Arguments)
-inline const char* as_cstring(SEXP x) {
-  if (TYPEOF(x) == CHARSXP) return CHAR(x);
-  if (!Rf_isString(x) || Rf_length(x) != 1)
-    stop("Expecting a single string value: [type=%s; extent=%i].", type_name(x), Rf_length(x));
-  return CHAR(STRING_ELT(x, 0));
-}
-
-// as<Rcpp::String> (erstes Element eines Zeichenvektors, Laenge ungeprueft wie Rcpp)
-inline const char* as_rstring(SEXP x) {
-  if (!Rf_isString(x))
-    stop("Expecting a single string value: [type=%s; extent=%i].", type_name(x), Rf_length(x));
-  return CHAR(STRING_ELT(x, 0));
-}
-
 // ---------------------------------------------------------------------------
 // Sichten auf Vektoren und Matrizen
 // ---------------------------------------------------------------------------
@@ -364,7 +307,6 @@ template <class T> struct Vec {
 };
 typedef Vec<double> NumVec;
 typedef Vec<int> IntVec;
-typedef Vec<int> LglVec;
 
 struct NumMat {
   SEXP sexp;
@@ -390,12 +332,6 @@ inline IntVec int_vec(SEXP x) {
   IntVec v = {y, INTEGER(y), Rf_xlength(y)};
   return v;
 }
-inline LglVec lgl_vec(SEXP x) {
-  SEXP y = coerce(x, LGLSXP);
-  if (y != x) keep(y);
-  LglVec v = {y, LOGICAL(y), Rf_xlength(y)};
-  return v;
-}
 
 // NumericMatrix aus einem Argument (erst Umwandlung, dann dim-Pruefung wie Rcpp)
 inline NumMat num_mat(SEXP x) {
@@ -415,18 +351,6 @@ inline NumVec new_num(R_xlen_t n, double fill = 0.0) {
   SEXP x = alloc(REALSXP, n);
   NumVec v = {x, REAL(x), Rf_xlength(x)};
   for (R_xlen_t i = 0; i < v.len; i++) v.ptr[i] = fill;
-  return v;
-}
-inline IntVec new_int(R_xlen_t n, int fill = 0) {
-  SEXP x = alloc(INTSXP, n);
-  IntVec v = {x, INTEGER(x), Rf_xlength(x)};
-  for (R_xlen_t i = 0; i < v.len; i++) v.ptr[i] = fill;
-  return v;
-}
-// Rcpp::clone(x): Kopie mit allen Attributen (Rf_duplicate)
-inline NumVec clone(const NumVec& x) {
-  SEXP y = keep(Rf_duplicate(x.sexp));
-  NumVec v = {y, REAL(y), Rf_xlength(y)};
   return v;
 }
 template <class It> NumVec num_copy(It first, It last) {
@@ -467,8 +391,6 @@ inline void set_attr(SEXP x, const char* name, SEXP value) {
 // wrap(): Skalare und Container als neue R-Objekte
 // ---------------------------------------------------------------------------
 
-struct Date { double day; };   // Rcpp::Date (Tage seit 1970-01-01)
-
 inline SEXP wrap(double v) { SEXP x = Rf_allocVector(REALSXP, 1); REAL(x)[0] = v; return x; }
 inline SEXP wrap(int v) { SEXP x = Rf_allocVector(INTSXP, 1); INTEGER(x)[0] = v; return x; }
 inline SEXP wrap(bool v) { SEXP x = Rf_allocVector(LGLSXP, 1); LOGICAL(x)[0] = v ? 1 : 0; return x; }
@@ -484,12 +406,6 @@ inline SEXP wrap(const std::vector<double>& v) {
 inline SEXP wrap(const std::vector<int>& v) {
   SEXP x = Rf_allocVector(INTSXP, (R_xlen_t) v.size());
   for (size_t i = 0; i < v.size(); i++) INTEGER(x)[i] = v[i];
-  return x;
-}
-inline SEXP wrap(const Date& d) {
-  SEXP x = PROTECT(wrap(d.day));
-  Rf_setAttrib(x, R_ClassSymbol, Rf_mkString("Date"));
-  UNPROTECT(1);
   return x;
 }
 
@@ -528,63 +444,6 @@ inline R_xlen_t find(SEXP list, const char* name) {
   return -1;
 }
 
-// list.containsElementNamed(name)
-inline bool has(SEXP list, const char* name) {
-  SEXP names = Rf_getAttrib(list, R_NamesSymbol);
-  if (Rf_isNull(names)) return false;
-  const R_xlen_t n = Rf_xlength(names);
-  for (R_xlen_t i = 0; i < n; i++)
-    if (std::strcmp(name, CHAR(STRING_ELT(names, i))) == 0) return true;
-  return false;
-}
-
-// list[name] lesen
-inline SEXP get(SEXP list, const char* name) {
-  const R_xlen_t i = find(list, name);
-  if (i == -2) throw error("Object was created without names.");
-  if (i < 0) stop("Index out of bounds: [index='%s'].", name);
-  return VECTOR_ELT(list, i);
-}
-
-// list[name] = value: vorhandenes Element ersetzen, sonst wie Rcpp push_back
-// (neue, um eins laengere Liste mit allen Elementen und Namen, ohne weitere
-// Attribute); list zeigt danach auf die neue Liste.
-inline void set(SEXP& list, const char* name, SEXP value) {
-  PROTECT(value);
-  const R_xlen_t i = find(list, name);
-  if (i >= 0) {
-    SET_VECTOR_ELT(list, i, value);
-    UNPROTECT(1);
-    return;
-  }
-  const R_xlen_t n = Rf_xlength(list);
-  SEXP target = PROTECT(Rf_allocVector(VECSXP, n + 1));
-  SEXP names = Rf_getAttrib(list, R_NamesSymbol);
-  SEXP new_names = PROTECT(Rf_allocVector(STRSXP, n + 1));
-  for (R_xlen_t k = 0; k < n; k++) {
-    SET_VECTOR_ELT(target, k, VECTOR_ELT(list, k));
-    SET_STRING_ELT(new_names, k, Rf_isNull(names) ? R_BlankString : STRING_ELT(names, k));
-  }
-  SET_STRING_ELT(new_names, n, Rf_mkChar(name));
-  Rf_setAttrib(target, R_NamesSymbol, new_names);
-  SET_VECTOR_ELT(target, n, value);
-  list = keep(target);
-  UNPROTECT(3);
-}
-template <class T> void set(SEXP& list, const char* name, const T& value) { set(list, name, wrap(value)); }
-
-// list[i] (ohne Bereichspruefung wie Rcpp) und list[i] = value
-inline SEXP at(SEXP list, R_xlen_t i) { return VECTOR_ELT(list, i); }
-inline void put(SEXP list, R_xlen_t i, SEXP value) {
-  PROTECT(value);
-  keep(value);
-  UNPROTECT(1);
-  rcall([&]() {
-    SET_VECTOR_ELT(list, i, value);
-    return R_NilValue;
-  });
-}
-
 }  // namespace sl
 
 // ---------------------------------------------------------------------------
@@ -602,17 +461,11 @@ typedef sl::NumVec NumVec;
 typedef sl::IntVec IntVec;
 typedef sl::NumMat NumMat;
 using namespace sl;
-// logische Vektoren (die Kerne mit Zufallszahlen, die dazu auch Listen von
-// Ganzzahlvektoren und R's runif/rnorm/rgeom brauchten, sind seit 1.0.0 entfallen)
-typedef sl::LglVec LglVec;
 }  // namespace simlev_host
-
-#define SIMLEV_INT(...) sl::new_int(__VA_ARGS__)                // Ganzzahlvektor (0)
 
 #define SIMLEV_NA NA_REAL                                       // R's NA_real_
 #define SIMLEV_FAIL sl::stop                                    // Fehler: stop() mit dem Text
 #define SIMLEV_CHECK_INTERRUPT() sl::check_interrupt()          // Benutzerabbruch
-#define SIMLEV_WARN(msg) Rf_warning("%s", msg)                  // Warnung
 #define SIMLEV_NUM(...) sl::new_num(__VA_ARGS__)                // Zahlenvektor (0 bzw. Fuellwert)
 #define SIMLEV_MATRIX(...) sl::new_mat(__VA_ARGS__)             // Matrix (0)
 #define SIMLEV_COPY(...) sl::num_copy(__VA_ARGS__).sexp         // Ergebnis: Kopie eines Bereichs
@@ -620,7 +473,5 @@ typedef sl::LglVec LglVec;
 #define SIMLEV_SET_FLAG(v, name, flag) sl::set_attr((v).sexp, name, sl::wrap(flag))
 #define SIMLEV_DONE(v) (v).sexp                                 // Ergebnis: Vektor
 #define SIMLEV_LIST(...) sl::named_list(__VA_ARGS__)            // Ergebnis: benannte Liste
-#define SIMLEV_CLONE(v) sl::clone(v)                            // Kopie mit Attributen (Rf_duplicate)
-#define SIMLEV_R_FINITE(x) R_finite(x)                          // R_finite
 
 #endif

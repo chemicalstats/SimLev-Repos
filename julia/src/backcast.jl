@@ -15,8 +15,8 @@ module Backcast
 
 import ..SimLev
 using ..SimLev: _bc_doc, _bc_panel
-using ..SimLev: RList, RFrame, RVector, NamedMat, nrow, ncol, attrs, NA, isna_strict, rows,
-                register_print!, register_summary!, register_plot!, r_class, inherits
+using ..SimLev: RList, RFrame, RVector, nrow, ncol, attrs, NA, rows,
+                register_print!, register_summary!, register_plot!, inherits
 using Dates
 
 export backcast_fit, backcast
@@ -660,14 +660,18 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
         isempty(fit) && return (par = copy(par0), value = obj_fun(Float64[], rws, ob, rg), grid = nothing, metrics = nothing)
         if method == "grid"
             length(fit) != 1 && error("method = 'grid' unterstützt genau einen Parameter in 'fit'.")
-            vals = Float64[obj_fun(g, rws, ob, rg) for g in grid]
-            best = grid[something(SimLev._which_min(vals), 0)]
+            # seit 1.6.3 je Gitterpunkt einmal gerechnet (bis 1.6.2 für Zielwert und Fehlermatrix getrennt; gleiche
+            # Parameter, reine Funktionen ohne Meldungen)
+            vals = Vector{Float64}(undef, length(grid))
             err_mat = Matrix{Float64}(undef, length(ob.pos), length(grid))
             for (j, g) in enumerate(grid)
-                p = copy(par0); p[fit[1]] = g
-                e = _bc_errors(_bc_model_returns(prep, p, model, rg)[rws], 1:length(rws), ob, "level", 1)
+                p = copy(par0); p[fit[1]] = Float64(g)
+                rr = _bc_model_returns(prep, p, model, rg)[rws]
+                vals[j] = _bc_objective(rr, 1:length(rws), ob, objective, horizon, loss, hybrid_weight)
+                e = _bc_errors(rr, 1:length(rws), ob, "level", 1)
                 err_mat[:, j] .= [0 - _libm().expm1(v) for v in e]
             end
+            best = grid[something(SimLev._which_min(vals), 0)]
             p = copy(par0); p[fit[1]] = best
             return (par = p, value = minimum(vals), grid = RFrame("value" => copy(grid), "loss" => vals),
                     metrics = _bc_metric_table(err_mat, grid))

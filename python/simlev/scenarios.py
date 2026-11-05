@@ -340,7 +340,7 @@ def scenario_entropy_pooling(x, assets, views, *, states=None, frequency=("week"
     if not rows:
         q = p
     else:
-        A = np.vstack([r[0] for r in rows])
+        A = np.asfortranarray(np.vstack([r[0] for r in rows]))   # spaltenweise: crossprod/matmul ohne Kopie
         b = np.array([r[1] for r in rows], dtype=np.float64)
         ineq = np.array([r[2] for r in rows], dtype=bool)
 

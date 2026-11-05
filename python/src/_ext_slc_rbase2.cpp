@@ -23,29 +23,16 @@
 
 extern "C" {
 
-static int get_buf2(PyObject *o, Py_buffer *v, int writable, Py_ssize_t itemsize, const char *fmts,
-                    Py_ssize_t len, const char *what)
-{
-    int flags = PyBUF_C_CONTIGUOUS | PyBUF_FORMAT | (writable ? PyBUF_WRITABLE : 0);
-    if (PyObject_GetBuffer(o, v, flags) < 0) return -1;
-    if (v->itemsize != itemsize || v->format == NULL || strchr(fmts, v->format[strlen(v->format) - 1]) == NULL) {
-        PyBuffer_Release(v);
-        PyErr_Format(PyExc_TypeError, "interner Fehler: %s hat den falschen Typ", what);
-        return -1;
-    }
-    if (len >= 0 && v->len / v->itemsize != len) {
-        PyBuffer_Release(v);
-        PyErr_Format(PyExc_TypeError, "interner Fehler: %s hat die falsche Laenge", what);
-        return -1;
-    }
-    return 0;
-}
+#include "_ext_slc_hull.h"   /* py_interrupted, ctx_init, finish, hull_buf, rel (seit 1.6.3) */
+static inline int get_buf2(PyObject *o, Py_buffer *v, int writable, Py_ssize_t itemsize, const char *fmts,
+                           Py_ssize_t len, const char *what)
+{ return hull_buf(o, v, writable, itemsize, fmts, len, what, 0); }
+
 
 #define DBUF(o, v, w, len, what) get_buf2((o), (v), (w), 8, "d", (len), (what))
 #define LBUF(o, v, w, len, what) get_buf2((o), (v), (w), 8, "qlL", (len), (what))
 #define NITEMS(v) ((Py_ssize_t) ((v).len / (v).itemsize))
 
-static void rel(Py_buffer *v) { if (v->obj) PyBuffer_Release(v); }
 
 /* dist: (x, nr, nc, method, p, out) -> warn */
 static PyObject *slc_r_dist(PyObject *self, PyObject *args)

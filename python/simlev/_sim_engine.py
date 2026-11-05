@@ -156,38 +156,12 @@ def _sim_engine_run(sim: dict, fl: dict, cfg: dict, fr, event_weight, split_thre
     fl["tax_regimes"] = tax_regimes
     for k, a in enumerate(nm):
         sim["status"][a] = {f: float(stv[8 * k + j]) for j, f in enumerate(fields)}
+        # Lots, Verkäufe und Steuerbuchungen als flache Felder (seit 1.6.3); die Dicts je Eintrag baut erst
+        # SimLevResult.trades (_trades_dicts), die Auswertung liest Zähler und offene Lots aus den Feldern
         tr = sim["trades"][a]
-        lv = np.frombuffer(lots[k], dtype=np.float64).reshape(-1, 7)
-        buys = []
-        for x in lv:
-            lot = {"date": int(x[0]), "type": "Buy", "count": float(x[1]), "price": float(x[2]),
-                   "remaining": float(x[3]), "original": float(x[4])}
-            if x[6] != 0:
-                lot["vp"] = float(x[5])
-            buys.append(lot)
-        tr["buys"] = buys
-        tr["buy_count"] = len(buys)
-        sv = np.frombuffer(sells[k], dtype=np.float64).reshape(-1, 8)
-        sl = []
-        for x in sv:
-            rg = int(x[5])
-            sl.append({"event_date": int(x[0]), "event_type": "Sell", "asset_count": float(x[1]),
-                       "asset_price": float(x[2]), "event_gain": float(x[3]) if rg else NA,
-                       "event_taxes": float(x[4]) if rg else NA, "tax_regime": _REGIMES[rg],
-                       "tax_deferred": rg == 3, "holding_exempt": float(x[6]) if x[7] != 0 else NA})
-        tr["sells"] = sl
-        tr["sell_count"] = len(sl)
-        tv = np.frombuffer(taxes[k], dtype=np.float64).reshape(-1, 8)
-        tl = []
-        for x in tv:
-            if int(x[0]) == 1:
-                tl.append({"event_date": int(x[1]), "assessment_date": int(x[2]), "event_type": "Vorabpauschale",
-                           "flat_rate_gross": float(x[3]), "bonus_applied": float(x[4]),
-                           "flat_rate_taxable": float(x[5]), "spb_used": float(x[6]), "taxes_paid": float(x[7])})
-            else:
-                tl.append({"event_date": int(x[1]), "event_type": "Private sale tax", "taxes_paid": float(x[7])})
-        tr["taxes"] = tl
-        tr["tax_count"] = len(tl)
+        tr["raw"] = (np.frombuffer(lots[k], dtype=np.float64).reshape(-1, 7),
+                     np.frombuffer(sells[k], dtype=np.float64).reshape(-1, 8),
+                     np.frombuffer(taxes[k], dtype=np.float64).reshape(-1, 8))
         if px[k] is not None:
             mk[a]["asset_price"] = np.frombuffer(px[k], dtype=np.float64).copy()
     tv = np.frombuffer(totals, dtype=np.float64)
@@ -208,6 +182,35 @@ def _sim_engine_run(sim: dict, fl: dict, cfg: dict, fr, event_weight, split_thre
     _FEE.paid = fee_paid
     _sim_engine_signal(events, err, nm, flag_date)
     return sim, tax_unpaid
+
+
+def _trades_dicts(raw) -> dict:
+    """Trades eines Assets aus den flachen Feldern des Kerns (Lots 7, Verkäufe 8, Steuern 8 Werte je Eintrag) als
+    Listen von Dicts wie bis 1.6.2 (``SimLevResult.trades``, nur Python)."""
+    lv, sv, tv = raw
+    buys = []
+    for x in lv:
+        lot = {"date": int(x[0]), "type": "Buy", "count": float(x[1]), "price": float(x[2]),
+               "remaining": float(x[3]), "original": float(x[4])}
+        if x[6] != 0:
+            lot["vp"] = float(x[5])
+        buys.append(lot)
+    sl = []
+    for x in sv:
+        rg = int(x[5])
+        sl.append({"event_date": int(x[0]), "event_type": "Sell", "asset_count": float(x[1]),
+                   "asset_price": float(x[2]), "event_gain": float(x[3]) if rg else NA,
+                   "event_taxes": float(x[4]) if rg else NA, "tax_regime": _REGIMES[rg],
+                   "tax_deferred": rg == 3, "holding_exempt": float(x[6]) if x[7] != 0 else NA})
+    tl = []
+    for x in tv:
+        if int(x[0]) == 1:
+            tl.append({"event_date": int(x[1]), "assessment_date": int(x[2]), "event_type": "Vorabpauschale",
+                       "flat_rate_gross": float(x[3]), "bonus_applied": float(x[4]),
+                       "flat_rate_taxable": float(x[5]), "spb_used": float(x[6]), "taxes_paid": float(x[7])})
+        else:
+            tl.append({"event_date": int(x[1]), "event_type": "Private sale tax", "taxes_paid": float(x[7])})
+    return {"buys": buys, "sells": sl, "taxes": tl}
 
 
 # Anlass der Käufe und Verkäufe (enum Reason in engine_core_impl.h); Texte aus core/meldungen.tsv (_meldungen.py)

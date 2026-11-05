@@ -1,4 +1,5 @@
-"""Umgebungsschalter ``SIMLEV_*`` – die einzige Stelle, an der Python sie liest oder setzt.
+"""Umgebungsschalter ``SIMLEV_*`` – die Stelle, an der Python sie liest oder setzt (Ausnahme: ``SIMLEV_THREADS``
+liest ``simlev._lib.nthreads`` direkt, Threads der elementweisen Kerne seit 1.6.0).
 
 Alle übrigen Stellen (Paket, Tests, Werkzeuge) holen die Werte über diese Funktionen. Jede
 Funktion liest die Umgebung bei jedem Aufruf neu; wann gelesen wird, bestimmt der Aufrufer
@@ -15,19 +16,11 @@ Seit 1.0.0 entfallen ``SIMLEV_NO_EXT`` (die C-Erweiterung ist
 Pflicht, es gibt keine reinen Python-Kerne mehr), ``SIMLEV_LAPACK`` (keine System-LAPACK) und
 ``SIMLEV_R_SYS_TIME`` (feste Uhr für gosolnp), ``SIMLEV_LEGACY_TESTS`` (Tests neu aufgebaut, wirkte nicht mehr),
 seit 1.4.2 ``SIMLEV_GOLDEN_DIR`` und ``SIMLEV_MODULE_DIR`` (Ordner der Fälle bis 1.4.0; die Tests lesen ``SIMLEV_FAELLE_DIR``).
+Seit 1.6.3 ohne die Tabelle ``SWITCHES`` (ohne Leser; die Tabelle oben ist die Übersicht).
 """
 import os
 
-__all__ = ["SWITCHES", "collate", "icu_path", "lax_na", "strict_zero", "set_collate_default"]
-
-# Name -> (Zweck, Art); Art: Nutzer, Prüfung (Julia zusätzlich: Entwicklung; R-Generatoren: Generator)
-SWITCHES = {
-    "SIMLEV_COLLATE": ("Sortierung: icu:<Locale> (icu:root wie R unter C.UTF-8) oder C (Bytes)", "Nutzer"),
-    "SIMLEV_ICU": ("Pfad zur ICU-Bibliothek (libicui18n)", "Nutzer"),
-    "SIMLEV_LAX_NA": ("1: NA = NaN im Vergleich mit den Referenzfällen", "Prüfung"),
-    "SIMLEV_STRICT_ZERO": ("0: -0 = +0 im Vergleich mit den Referenzfällen", "Prüfung"),
-}
-
+__all__ = ["collate", "icu_path", "lax_na", "strict_zero", "set_collate_default"]
 
 # ── Nutzer ──────────────────────────────────────────────────────────────────
 

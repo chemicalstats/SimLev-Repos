@@ -14,11 +14,13 @@
  *               as does integer overflow"; Logik der Ports `_handle_nan`).
  *             - cummax/cummin: in double, ab dem ersten NaN wie cumsum.
  *             - colSums/colMeans je Spalte wie sum; rowSums/rowMeans mit einem long-double-Akkumulator
- *               je Zeile, spaltenweise aufaddiert; Mittel durch die Anzahl (bei narm je Zeile).
+ *               je Zeile, spaltenweise aufaddiert; Mittel durch die Anzahl (bei narm je Zeile). Seit 1.6.3
+ *               colSums/colMeans auch über ausgewählte Zeilen (sl_r_colsums_idx, colMeans(x[idx, ]) ohne Kopie).
  *             - pow: R's ^ für Doubles: y == 2 → x·x, x == 1 oder y == 0 → 1, sonst libm pow mit
  *               R's Randfällen (?Arithmetic: 1^y und y^0 sind 1, auch für NA/NaN).
  *             - math1 (seit 1.5.2): exp, log, log1p, expm1, log2, log10 elementweise mit libm wie R's math1
  *               (?log: log(0) = -Inf, negative Werte NaN; NA/NaN bleiben erhalten).
+ *             - round/signif (seit 1.6.3 hier, vorher slc_rbase_fmt.cpp): siehe den Block unten.
  *             - zeroin2: Brent-Verfahren (inverse quadratische bzw. lineare Interpolation mit
  *               Bisektion als Rückfall) wie R_zeroin2 hinter stats::uniroot, Schritt für Schritt in derselben
  *               Rechenfolge.
@@ -34,7 +36,7 @@
  * Konstanten: DBL_MAX aus <float.h>; NA und NaN als Bitmuster (slc_rbase.h).
  * long double: absichtlich (siehe slc_rbase.h): nur so gleich zu R auf derselben Plattform.
  * Herkunft:           übersetzt aus R 4.3.3, src/main/summary.c, cum.c (handleNaN), array.c,
- *                     arithmetic.c (R_POW), src/library/stats/src/zeroin.c (R_zeroin2; dort: aus Netlib
+ *                     arithmetic.c (R_POW), src/nmath/fround.c, fprec.c (seit 1.6.3 hier), src/library/stats/src/zeroin.c (R_zeroin2; dort: aus Netlib
  *                     c/brent.shar, Brents Prozedur zero, R. P. Brent, Algorithms for Minimization without
  *                     Derivatives, 1973), src/library/stats/src/approx.c (approx1, R_approxfun; seit
  *                     1.5.0), über die Port-Funktionen python/simlev/_r/rnum.py, base.py, stats_smooth.py
@@ -220,7 +222,57 @@ void sl_r_colsums(int64_t nr, int64_t nc, const double *x, int narm, int mean, d
     }
 }
 
-int sl_r_rowsums(int64_t nr, int64_t nc, const double *x, int narm, int mean, double *out)
+/* colSums/colMeans der Zeilen idx einer Matrix (seit 1.6.3): wie sl_r_colsums auf der Matrix x[idx, ] (Zeilen in der
+ * Reihenfolge von idx, Wiederholungen erlaubt), ohne sie zu bilden. Element (r, j) bei x[r rs + j cs] (spaltenweise
+ * rs = 1, cs = nr; zeilenweise rs = nc, cs = 1). idx: m Zeilennummern ab base (0 oder 1). Je Spalte dieselben
+ * Summanden in derselben Reihenfolge wie sl_r_colsums auf der Kopie (long double, Mittel durch die Anzahl): Bit
+ * fuer Bit gleich; bei rs > cs laeuft die Schleife zeilenweise mit einem Akkumulator je Spalte (gleiche Folge je
+ * Spalte). Rueckgabe SL_OK, SL_EARG (Zeilennummer ausserhalb, out unveraendert), SL_ENOMEM. */
+int sl_r_colsums_idx(int64_t nr, int64_t nc, const double *x, int64_t rs, int64_t cs, int64_t m, const int64_t *idx,
+                     int64_t base, int narm, int mean, double *out)
+{
+    int64_t i, j;
+    if (nr < 0 || nc < 0 || m < 0) return SL_EARG;
+    for (i = 0; i < m; i++)
+        if (idx[i] - base < 0 || idx[i] - base >= nr) return SL_EARG;
+    if (rs <= cs) {
+        for (j = 0; j < nc; j++) {
+            const double *c = x + j * cs;
+            ldouble s = 0.0L;
+            int64_t cnt = 0;
+            for (i = 0; i < m; i++) {
+                const double v = c[(idx[i] - base) * rs];
+                if (!narm || !isnan(v)) { s += v; cnt++; }
+            }
+            if (mean && !isnan((double) s)) s /= (ldouble) cnt;
+            out[j] = (double) s;
+        }
+        return SL_OK;
+    }
+    {
+        ldouble *acc = (ldouble *) calloc((size_t) (nc > 0 ? nc : 1), sizeof(ldouble));
+        int64_t *cnt = (int64_t *) calloc((size_t) (nc > 0 ? nc : 1), sizeof(int64_t));
+        if (acc == NULL || cnt == NULL) { free(acc); free(cnt); return SL_ENOMEM; }
+        for (i = 0; i < m; i++) {
+            const double *row = x + (idx[i] - base) * rs;
+            for (j = 0; j < nc; j++) {
+                const double v = row[j * cs];
+                if (!narm || !isnan(v)) { acc[j] += v; cnt[j]++; }
+            }
+        }
+        for (j = 0; j < nc; j++) {
+            ldouble s = acc[j];
+            if (mean && !isnan((double) s)) s /= (ldouble) cnt[j];
+            out[j] = (double) s;
+        }
+        free(acc); free(cnt);
+    }
+    return SL_OK;
+}
+
+/* Spalte j: cols[j] bzw. x + j nr */
+static int rowsums_(int64_t nr, int64_t nc, const double *x, const double *const *cols, int narm, int mean,
+                    double *out)
 {
     ldouble *acc;
     int64_t *cnt = NULL, i, j;
@@ -228,7 +280,7 @@ int sl_r_rowsums(int64_t nr, int64_t nc, const double *x, int narm, int mean, do
     if (narm) cnt = (int64_t *) calloc((size_t) (nr > 0 ? nr : 1), sizeof(int64_t));
     if (acc == NULL || (narm && cnt == NULL)) { free(acc); free(cnt); return SL_ENOMEM; }
     for (j = 0; j < nc; j++) {
-        const double *c = x + j * nr;
+        const double *c = cols ? cols[j] : x + j * nr;
         if (narm) {
             for (i = 0; i < nr; i++)
                 if (!isnan(c[i])) { acc[i] += c[i]; cnt[i]++; }
@@ -243,6 +295,183 @@ int sl_r_rowsums(int64_t nr, int64_t nc, const double *x, int narm, int mean, do
     }
     free(acc); free(cnt);
     return SL_OK;
+}
+
+int sl_r_rowsums(int64_t nr, int64_t nc, const double *x, int narm, int mean, double *out)
+{
+    return rowsums_(nr, nc, x, NULL, narm, mean, out);
+}
+
+int sl_r_rowsums_cols(int64_t nr, int64_t nc, const double *const *cols, int narm, int mean, double *out)
+{
+    return rowsums_(nr, nc, NULL, cols, narm, mean, out);
+}
+
+/*
+ * Teil:               sl_r_civil_from_days, sl_r_days_from_civil, sl_r_fdiv (slc_rbase.h); seit 1.6.3 hier
+ *                     statt in slc_rbase_date.cpp und als Kopie in slc_prep.cpp
+ * Herkunft:           übersetzt aus H. Hinnant, chrono-Compatible Low-Level Date Algorithms,
+ *                     https://howardhinnant.github.io/date_algorithms.html
+ * Rechte:             gemeinfrei ("Consider these donated to the public domain.")
+ * Lizenz der Vorlage: keine (gemeinfrei)
+ * Änderungen:         int64_t mit Abrundungsdivision sl_r_fdiv statt der Fallunterscheidung für
+ *                     negative Werte.
+ */
+void sl_r_civil_from_days(int64_t z, int64_t *y, int *m, int *d)
+{
+    z += 719468;
+    const int64_t era = sl_r_fdiv(z, 146097);
+    const int64_t doe = z - era * 146097;                                  /* 0 .. 146096 */
+    const int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    const int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const int64_t mp = (5 * doy + 2) / 153;
+    *d = (int) (doy - (153 * mp + 2) / 5 + 1);
+    *m = (int) (mp < 10 ? mp + 3 : mp - 9);
+    *y = yoe + era * 400 + (*m <= 2);
+}
+
+int64_t sl_r_days_from_civil(int64_t y, int m, int d)
+{
+    y -= m <= 2;
+    const int64_t era = sl_r_fdiv(y, 400);
+    const int64_t yoe = y - era * 400;
+    const int64_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+
+/* ── round / signif (seit 1.6.3 hier statt in slc_rbase_fmt.cpp; der Tarif, tariff_core_impl.h, rundet damit) ──
+ * round (fround, R >= 4.0.0): Kandidaten floor/ceil von x·10^d, der nähere gewinnt, bei Gleichstand der gerade;
+ * signif (fprec): Runden auf d signifikante Stellen über 10^e mit Schutz vor Über- und Unterlauf; NA, wenn x oder d
+ * NA ist, sonst NaN bei NaN (wie Math2 von R). Konstanten: log10(2) = 0.301029995663981195213738894724; DBL_DIG 15;
+ * größter Zehnerexponent 308. Herkunft: R 4.3.3, src/nmath/fround.c, fprec.c über python/simlev/_r/fmt.py (fround,
+ * fprec) und julia/src/r/_fmt_core.jl (bis 1.5.2). */
+#define M_LOG10_2_ 0.301029995663981195213738894724
+#define DBL_DIG_ 15
+#define MAX10E_ 308
+
+static double pow_di(double x, int n)
+{
+    double xn = 1.0;
+    if (isnan(x)) return x;
+    if (n != 0) {
+        int neg;
+        if (!isfinite(x)) return pow(x, (double) n);
+        neg = n < 0;
+        if (neg) n = -n;
+        for (;;) {
+            if (n & 1) xn *= x;
+            n >>= 1;
+            if (n) x *= x;
+            else break;
+        }
+        if (neg) xn = 1.0 / xn;
+    }
+    return xn;
+}
+
+/* NA/NaN wie math2 von R: NA, wenn ein Operand NA ist, sonst NaN */
+static double na_math2(double a, double b)
+{
+    double r;
+    uint64_t u = (is_na(a) || is_na(b)) ? UINT64_C(0x7FF00000000007A2) : UINT64_C(0x7FF8000000000000);
+    memcpy(&r, &u, sizeof r);
+    return r;
+}
+
+static double logb_(double x)
+{
+    int e;
+    (void) frexp(x, &e);
+    return (double) (e - 1);
+}
+
+double sl_r_fround(double x, double digits)
+{
+    const double max_digits = 308 + 15;
+    int dig;
+    double sgn = 1.0, l10x, pow10, x10, i10, xd, xu, du, dd;
+    if (isnan(x) || isnan(digits)) return na_math2(x, digits);
+    if (!isfinite(x)) return x;
+    if (digits > max_digits || x == 0.0) return x;
+    if (digits < -MAX10E_) return 0.0;
+    if (digits == 0.0) return nearbyint(x);
+    dig = (int) floor(digits + 0.5);
+    if (x < 0.0) { sgn = -1.0; x = -x; }
+    l10x = M_LOG10_2_ * (0.5 + logb_(x));
+    if (l10x + dig > DBL_DIG_) return sgn * x;
+    if (dig <= MAX10E_) {
+        pow10 = pow_di(10.0, dig);
+        x10 = x * pow10;
+        i10 = floor(x10);
+        xd = i10 / pow10;
+        xu = ceil(x10) / pow10;
+    } else {
+        int e10 = dig - MAX10E_;
+        double p10 = pow_di(10.0, e10);
+        pow10 = pow_di(10.0, MAX10E_);
+        x10 = (x * pow10) * p10;
+        i10 = floor(x10);
+        xd = i10 / pow10 / p10;
+        xu = ceil(x10) / pow10 / p10;
+    }
+    du = xu - x;
+    dd = x - xd;
+    return sgn * ((du < dd || (fmod(i10, 2.0) == 1 && du == dd)) ? xu : xd);
+}
+
+double sl_r_fprec(double x, double digits)
+{
+    const int max_digits = 22;
+    int dig, e10;
+    double sgn = 1.0, l10;
+    if (isnan(x) || isnan(digits)) return na_math2(x, digits);
+    if (!isfinite(x)) return x;
+    if (!isfinite(digits)) {
+        if (digits > 0.0) return x;
+        digits = 1.0;
+    }
+    if (x == 0) return x;
+    if (fabs(digits) > 1e9) dig = digits > 0 ? max_digits + 1 : 1;
+    else dig = (int) floor(fabs(digits) + 0.5) * (digits >= 0 ? 1 : -1);
+    if (dig > max_digits) return x;
+    if (dig < 1) dig = 1;
+    if (x < 0.0) { sgn = -sgn; x = -x; }
+    l10 = log10(x);
+    e10 = (int) (dig - 1 - floor(l10));
+    if (fabs(l10) < MAX10E_ - 2) {
+        double p10 = 1.0, pow10;
+        if (e10 > MAX10E_) {
+            p10 = pow_di(10.0, e10 - MAX10E_);
+            e10 = MAX10E_;
+        }
+        if (e10 > 0) {
+            pow10 = pow_di(10.0, e10);
+            return sgn * (nearbyint((x * pow10) * p10) / pow10) / p10;
+        }
+        pow10 = pow_di(10.0, -e10);
+        return sgn * (nearbyint(x / pow10) * pow10);
+    } else {
+        int do_round = MAX10E_ - l10 >= pow_di(10.0, -dig);
+        int e2 = dig + (e10 > 0 ? 1 : -1) * max_digits;
+        double p10 = pow_di(10.0, e2), P10;
+        x *= p10;
+        P10 = pow_di(10.0, e10 - e2);
+        x *= P10;
+        if (do_round) x += 0.5;
+        x = floor(x) / p10;
+        return sgn * x / P10;
+    }
+}
+
+void sl_r_round_vec(int kind, int64_t nx, const double *x, int64_t nd, const double *digits, double *out)
+{
+    int64_t i, n = nx > nd ? nx : nd;
+    if (nx == 0 || nd == 0) return;
+    for (i = 0; i < n; i++) {
+        double a = x[i % nx], b = digits[i % nd];
+        out[i] = kind ? sl_r_fprec(a, b) : sl_r_fround(a, b);
+    }
 }
 
 /* R's x ^ y für Doubles */
@@ -301,9 +530,7 @@ void sl_r_math1(int kind, int64_t n, const double *x, double *out)
     switch (kind) {
     case SL_R_EXP:   for (i = 0; i < n; i++) out[i] = exp(x[i]); break;
     case SL_R_EXPM1: for (i = 0; i < n; i++) out[i] = expm1(x[i]); break;
-    case SL_R_LOG:
-        for (i = 0; i < n; i++) { v = x[i]; out[i] = v > 0 ? log(v) : v == 0 ? -INFINITY : isnan(v) ? v : R_NAN; }
-        break;
+    case SL_R_LOG:   for (i = 0; i < n; i++) out[i] = sl_r_log1(x[i]); break;
     case SL_R_LOG1P:
         for (i = 0; i < n; i++) { v = x[i]; out[i] = v > -1 ? log1p(v) : v == -1 ? -INFINITY : isnan(v) ? v : R_NAN; }
         break;

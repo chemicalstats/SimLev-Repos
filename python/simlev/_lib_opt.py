@@ -79,6 +79,9 @@ def _bounds(b, n):
 
 
 def _scalar(v):
+    t = type(v)
+    if t is float or t is np.float64:   # Schnellweg (seit 1.6.3): gleiche Zahl wie über np.asarray
+        return float(v)
     if v is None:
         return math.nan
     a = np.asarray(v)

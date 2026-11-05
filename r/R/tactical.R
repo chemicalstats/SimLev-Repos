@@ -556,12 +556,16 @@ tactical_conditional_volatility <- function(data, weights, safe, base = 1, upper
   ok <- which(is.finite(rv$vol_move))
   first_ok <- if (length(ok)) d[ok[1]] else d[n] + 1
   cs <- cumsum(ifelse(is.finite(rv$vol_move), rv$vol_move, 0)); cn <- cumsum(is.finite(rv$vol_move))
-  th <- t(vapply(grid, function(g) {
+  # seit 1.6.3 beide Quantile in einem Aufruf (eine Teilsortierung, dieselben Ordnungsstatistiken und dieselbe Formel
+  # je Wahrscheinlichkeit) und die bisherigen Werte als Anfang von ok (ok ist aufsteigend)
+  kg_ok <- findInterval(grid, ok)
+  th <- t(vapply(seq_along(grid), function(k) {
+    g <- grid[k]
     if (!length(ok) || as.numeric(d[g] - first_ok) / 365.25 < min_history) return(c(NA_real_, NA_real_, NA_real_))
-    v <- rv$vol_move[ok[ok <= g]]
-    c(if (is.null(lower)) NA_real_ else stats::quantile(v, lower, names = FALSE, type = 7),
-      stats::quantile(v, upper, names = FALSE, type = 7),
-      if (is.null(target)) cs[g] / cn[g] else target / 100)
+    v <- rv$vol_move[ok[seq_len(kg_ok[k])]]
+    q <- if (is.null(lower)) c(NA_real_, stats::quantile(v, upper, names = FALSE, type = 7))
+         else stats::quantile(v, c(lower, upper), names = FALSE, type = 7)
+    c(q, if (is.null(target)) cs[g] / cn[g] else target / 100)
   }, numeric(3)))
   thresholds <- data.frame(date = d[grid], lower = th[, 1], upper = th[, 2], target = th[, 3])
   if (all(is.na(th[, 2])))

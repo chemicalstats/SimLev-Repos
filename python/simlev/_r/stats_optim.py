@@ -27,7 +27,7 @@ from .linalg import RError
 from .rlist import RList
 from .stats_sort import _DBL_MAX, _warn
 
-__all__ = ["optimize", "optimise"]
+__all__ = ["optimize"]
 
 
 # ── optimize ────────────────────────────────────────────────────
@@ -93,7 +93,6 @@ def optimize(f, interval=None, *args, lower=None, upper=None, maximum=False,
     return res
 
 
-optimise = optimize
 
 
 from .base import quiet_fp  # noqa: E402

@@ -12,9 +12,10 @@
 #                     core/slc_rbase*.
 # RBase – Basis-Numerik wie in R (long-double-Akkumulation; über die C-Kerne core/slc_rbase*.cpp)
 #
-# Re-exportiert die Engine-Hilfen aus `rnum.jl` (`r_sum`, `r_mean`, `r_var`,
-# `r_sd`, `r_cumsum`, `r_prod`, `r_rowsums`, `r_pow`, `r_pow_vec`, `r_mod1`,
-# `r_mean_int`) und ergänzt weitere Funktionen von R's base:
+# Bietet die Engine-Hilfen aus `rnum.jl` (`r_sum`, `r_mean`, `r_var`,
+# `r_sd`, `r_cumsum`, `r_prod`, `r_rowsums`, `r_pow`,
+# `r_mean_int`) auch unter `RBase` an (importiert, ohne `export`; Zugriff als `RBase.r_sd` usw.) und ergänzt
+# weitere Funktionen von R's base:
 # `colSums`, `colMeans`, `rowSums`, `rowMeans`, `r_cumprod`, `r_cummax`,
 # `r_cummin`, `mean`, `pmin`, `pmax` (seit 1.6.1 ohne `r_diff`, `r_range`: nur Referenzfälle).
 # Vorlage: python/simlev/_r/base.py; maßgeblich R's `src/main/array.c`
@@ -27,7 +28,7 @@ module RBase
 import ..SimLev
 using ..SimLev: RVector, NamedMat, RFrame, NA, isna_strict
 using ..SimLev: r_sum, r_mean, r_mean_int, r_var, r_sd, r_cumsum, r_prod, r_rowsums,
-                r_pow, r_pow_vec, r_mod1
+                r_pow
 
 # ── Matrizen ────────────────────────────────────────────────────────────────
 
@@ -88,8 +89,6 @@ r_cumprod(x) = ((v, nm) = _vec(x); _named(SimLev._rb_cumprod(v), nm))
 r_cummax(x) = ((v, nm) = _vec(x); _named(SimLev._rb_cummax(v), nm))
 "`cummin(x)` (C-Kern)."
 r_cummin(x) = ((v, nm) = _vec(x); _named(SimLev._rb_cummin(v), nm))
-const cummax = r_cummax
-const cummin = r_cummin
 
 "`mean(x)` auch für Matrizen/data.frames (alle Elemente spaltenweise), Integer wie R."
 function mean(x; na_rm::Bool = false)

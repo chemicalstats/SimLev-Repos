@@ -9,7 +9,11 @@ using ..SimLev: CAbi, LIBSLC
 
 export wd_simulate, wd_metrics, wd_pwr, wd_annual_prod, wd_tariff_compact
 
+# Eingaben der Kerne: alle nur gelesen (const in core/simlev_cabi.cpp); seit 1.6.3 eine Matrix{Float64} ohne Kopie
+# (bis 1.6.2 je Aufruf kopiert, bei 10 000 x 480 Pfaden rund 150 MB je withdrawal_simulation)
 function _mat(x, nr = 0)
+    x isa Matrix{Float64} && return x
+    x isa SimLev.NamedMat{Float64} && return x.data
     x isa SimLev.NamedMat && return Matrix{Float64}(x.data)
     x isa AbstractMatrix && return Matrix{Float64}(x)
     x isa Number && return fill(Float64(x), 1, 1)

@@ -21,6 +21,9 @@
 
 flatblock <- function(ctor, args = list()) structure(list(ctor = ctor, args = args), class = "flatblock")
 
+# Zufallswahl der Engine-Generatoren (engine_faelle.R, engine_stress.R; wie ref_tools.R)
+pick <- function(x) x[[sample.int(length(x), 1L)]]
+
 blocks_from_flat <- function(a) {
   unk <- setdiff(names(a), c(.FB_FLAT, .FB_KEEP))
   if (length(unk)) stop("blocks_from_flat: unbekannte Argumente: ", paste(unk, collapse = ", "))

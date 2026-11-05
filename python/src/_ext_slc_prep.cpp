@@ -3,7 +3,8 @@
  * Brent fmin (core/slc_opt_fmin.cpp)
  *
  * Kalenderauffuellung (slc_cal_index, slc_cal_fill_real; simlev/_sim_phases.py), Momentum-Scores (slc_mom_score;
- * simlev/tactical.py), Pfadaufbau im Bootstrap (slc_boot_path; simlev/bootstrap.py), qt/pt auf mehreren Threads
+ * simlev/tactical.py), Pfadaufbau im Bootstrap (slc_boot_path; simlev/bootstrap.py; seit 1.6.3 slc_boot_path_src aus
+ * der Quelle ohne Zeilenkopie), qt/pt auf mehreren Threads
  * (slc_qt_mt, slc_pt_mt; simlev/_lib.py), t-Copula (slc_tcop_fit, slc_tcop_nu; simlev/dependence.py,
  * simlev/scenarios.py) und Brent fmin als Frage/Antwort (slc_fmin_*; simlev/_r/stats_optim.py).
  * Matrizen kommen als C-Felder (Spalten, Zeilen) = spaltenweise (Zeilen x Spalten). Die Python-Seite prueft die
@@ -20,39 +21,11 @@
 
 extern "C" {
 
-static int py_interrupted(void *h) { (void) h; return PyErr_CheckSignals() < 0; }
+#include "_ext_slc_hull.h"   /* py_interrupted, ctx_init, finish, hull_buf, rel (seit 1.6.3) */
+static inline int buf(PyObject *o, Py_buffer *v, int writable, Py_ssize_t itemsize, const char *fmts,
+                      const char *what, int opt)
+{ return hull_buf(o, v, writable, itemsize, fmts, -1, what, opt); }
 
-static void ctx_init(sl_ctx *cx)
-{
-    sl_ctx_init(cx);
-    cx->interrupted = py_interrupted;
-}
-
-static int finish(sl_ctx *cx, int st)
-{
-    int i;
-    for (i = 0; i < cx->n_warn; i++)
-        if (PyErr_WarnEx(PyExc_UserWarning, cx->warn[i], 1) < 0) return -1;
-    if (st == SL_OK) return 0;
-    if (st == SL_EINTR && PyErr_Occurred()) return -1;
-    PyErr_SetString(PyExc_ValueError, cx->msg);
-    return -1;
-}
-
-/* Puffer: itemsize und Formatzeichen (fmts) pruefen; o = None erlaubt, wenn opt */
-static int buf(PyObject *o, Py_buffer *v, int writable, Py_ssize_t itemsize, const char *fmts, const char *what, int opt)
-{
-    if (opt && o == Py_None) { memset(v, 0, sizeof *v); return 0; }
-    int flags = PyBUF_C_CONTIGUOUS | PyBUF_FORMAT | (writable ? PyBUF_WRITABLE : 0);
-    if (PyObject_GetBuffer(o, v, flags) < 0) return -1;
-    if (v->itemsize != itemsize || v->format == NULL || strchr(fmts, v->format[strlen(v->format) - 1]) == NULL) {
-        PyBuffer_Release(v);
-        PyErr_Format(PyExc_TypeError, "interner Fehler: %s hat den falschen Typ", what);
-        return -1;
-    }
-    return 0;
-}
-static void rel(Py_buffer *v) { if (v->obj) PyBuffer_Release(v); }
 
 #define N(v) ((int64_t) ((v).len / ((v).itemsize ? (v).itemsize : 1)))
 
@@ -185,6 +158,62 @@ static PyObject *slc_boot_path(PyObject *self, PyObject *args)
     return PyBool_FromLong(st);
 }
 
+/* slc_boot_path_src (seit 1.6.3, sl_boot_path_src): wie slc_boot_path, statt (n_out, k, ret) die Quellrenditen src
+ * (n_src x k, zeilenweise wie aus numpy, ohne Umordnung) und idx (n_out Zeilen, 1-basiert) fuer Renditen und
+ * Zusatzreihen: (n_src, k, src, idx, aux, aux_ratio, aux_start, level, letf, start, P, lv) -> True / False;
+ * Bit fuer Bit wie slc_boot_path(n_out, k, src[idx - 1, :], idx, ...) */
+static PyObject *slc_boot_path_src(PyObject *self, PyObject *args)
+{
+    PyObject *src, *idx, *aux, *ar, *as, *lev, *letf, *P, *lv;
+    double start;
+    Py_ssize_t n_src, k, n_out, na = 0, n_aux = 0, nL;
+    Py_buffer br, bi, ba, bar, bas, blev, bl, bP, blv;
+    sl_letf *L = NULL;
+    sl_ctx cx;
+    int st, l;
+    (void) self;
+    if (!PyArg_ParseTuple(args, "nnOOOOOOOdOO", &n_src, &k, &src, &idx, &aux, &ar, &as, &lev, &letf, &start, &P, &lv))
+        return NULL;
+    memset(&br, 0, sizeof br); memset(&bi, 0, sizeof bi); memset(&ba, 0, sizeof ba); memset(&bar, 0, sizeof bar);
+    memset(&bas, 0, sizeof bas); memset(&blev, 0, sizeof blev); memset(&bl, 0, sizeof bl); memset(&bP, 0, sizeof bP);
+    memset(&blv, 0, sizeof blv);
+#define FAIL_REL() do { rel(&br); rel(&bi); rel(&ba); rel(&bar); rel(&bas); rel(&blev); rel(&bl); rel(&bP); rel(&blv); } while (0)
+    if (buf(src, &br, 0, 8, "d", "src", 0) < 0 || buf(idx, &bi, 0, 8, "qlL", "idx (int64)", 0) < 0 ||
+        buf(aux, &ba, 0, 8, "d", "aux", 1) < 0 || buf(ar, &bar, 0, 8, "d", "aux_ratio", 1) < 0 ||
+        buf(as, &bas, 0, 8, "d", "aux_start", 1) < 0 || buf(lev, &blev, 0, 4, "il", "level (int32)", 1) < 0 ||
+        buf(letf, &bl, 0, 8, "d", "letf", 0) < 0 || buf(P, &bP, 1, 8, "d", "P", 0) < 0 ||
+        buf(lv, &blv, 1, 8, "d", "lv", 1) < 0) { FAIL_REL(); return NULL; }
+    n_out = (Py_ssize_t) N(bi);
+    nL = (Py_ssize_t) (N(bl) / 10);
+    if (ba.obj) { na = (Py_ssize_t) N(blev); n_aux = na > 0 ? (Py_ssize_t) (N(ba) / na) : 0; }
+    if (n_src < 0 || k < 0 || N(br) != (int64_t) n_src * k || nL * 10 != N(bl) || (ba.obj && n_aux * na != N(ba)) ||
+        (bar.obj && N(bar) != N(ba)) || (bas.obj && N(bas) != na) ||
+        N(bP) != (int64_t) (n_out + 1) * (k + nL + na) || (blv.obj && N(blv) != (int64_t) (n_out + 1) * na)) {
+        FAIL_REL(); PyErr_SetString(PyExc_TypeError, "interner Fehler: boot_path_src Laengen"); return NULL;
+    }
+    if (nL > 0) {
+        const double *q = (const double *) bl.buf;
+        L = (sl_letf *) PyMem_Malloc(sizeof(sl_letf) * (size_t) nL);
+        if (!L) { FAIL_REL(); return PyErr_NoMemory(); }
+        for (l = 0; l < nL; l++) {                 /* Zeile l: base, L, rate_col, rate, days_col, days, rb, tb, exp, spread */
+            const double *z = q + 10 * l;
+            L[l].base = (int) z[0]; L[l].L = z[1]; L[l].rate_col = (int) z[2]; L[l].rate = z[3];
+            L[l].days_col = (int) z[4]; L[l].days = z[5]; L[l].rate_basis = z[6]; L[l].ter_basis = z[7];
+            L[l].expense = z[8]; L[l].spread = z[9];
+        }
+    }
+    ctx_init(&cx);
+    st = sl_boot_path_src(&cx, n_out, (int) k, (const double *) br.buf, n_src, k, 1, (const int64_t *) bi.buf, n_aux,
+                          (int) na, ba.obj ? (const double *) ba.buf : NULL, bar.obj ? (const double *) bar.buf : NULL,
+                          bas.obj ? (const double *) bas.buf : NULL, blev.obj ? (const int *) blev.buf : NULL, (int) nL,
+                          L, start, (double *) bP.buf, blv.obj ? (double *) blv.buf : NULL);
+    PyMem_Free(L);
+    FAIL_REL();
+#undef FAIL_REL
+    if (st < 0) { finish(&cx, -st); return NULL; }
+    return PyBool_FromLong(st);
+}
+
 /* slc_qt_mt / slc_pt_mt (x, out, df, lower, nthreads) */
 typedef int (*tmt_fn)(sl_ctx *, int64_t, const double *, double, int, double *, int);
 static PyObject *tdist_mt(PyObject *args, tmt_fn f)
@@ -300,6 +329,8 @@ PyMethodDef simlev_ext_slc_prep_methods[] = {
     {"slc_cal_fill_real", slc_cal_fill_real, METH_VARARGS, "slc_cal_fill_real(src, x, out, locf)"},
     {"slc_mom_score", slc_mom_score, METH_VARARGS, "slc_mom_score(d, lb, X, type, S): Momentum-Scores"},
     {"slc_boot_path", slc_boot_path, METH_VARARGS, "slc_boot_path(n_out, k, ret, idx, aux, aux_ratio, aux_start, level, letf, start, P, lv) -> gueltig"},
+    {"slc_boot_path_src", slc_boot_path_src, METH_VARARGS,
+     "slc_boot_path_src(n_src, k, src, idx, aux, aux_ratio, aux_start, level, letf, start, P, lv) -> gueltig (ret = src[idx - 1])"},
     {"slc_qt_mt", slc_qt_mt, METH_VARARGS, "slc_qt_mt(p, out, df, lower, nthreads)"},
     {"slc_pt_mt", slc_pt_mt, METH_VARARGS, "slc_pt_mt(q, out, df, lower, nthreads)"},
     {"slc_tcop_fit", slc_tcop_fit, METH_VARARGS, "slc_tcop_fit(u, v, nthreads) -> (th, nu, obj) oder None"},

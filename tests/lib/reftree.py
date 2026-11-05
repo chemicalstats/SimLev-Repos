@@ -76,6 +76,20 @@ def _unhex(v):
     return float.fromhex(v)
 
 
+_FROMHEX = float.fromhex
+
+
+def _unhex_all(v):
+    """``[_unhex(x) for x in v]`` mit weniger Aufwand je Wert (seit 1.6.3; Hex-Text ist der häufigste Fall)."""
+    out = []
+    for x in v:
+        if type(x) is str:
+            out.append(_NA_REAL if x == "NA" else math.nan if x == "NaN" else _FROMHEX(x))
+        else:
+            out.append(_unhex(x))
+    return out
+
+
 def _aslist(v):
     if v is None:
         return []
@@ -94,10 +108,10 @@ def _vec(node):
     t = node["t"]
     v = _vals(node)
     if t == "num":
-        return np.array([_unhex(x) for x in v], dtype=np.float64)
+        return np.array(_unhex_all(v), dtype=np.float64)
     if t == "int":
         if any(x in (None, "NA") for x in v):
-            return np.array([_unhex(x) for x in v], dtype=np.float64)
+            return np.array(_unhex_all(v), dtype=np.float64)
         return np.array([int(_unhex(x)) for x in v], dtype=np.int64)
     if t == "lgl":
         if any(x is None for x in v):
@@ -153,7 +167,7 @@ def decode(node):
         vals = _vals(node)
         typ = node.get("type", "double")
         if typ in ("double", "integer"):
-            a = np.array([_unhex(x) for x in vals], dtype=np.float64)
+            a = np.array(_unhex_all(vals), dtype=np.float64)
         elif typ == "logical":
             a = np.array(vals, dtype=object if any(x is None for x in vals) else bool)
         else:
@@ -276,6 +290,8 @@ def _flat(obj, kind):
             return out
         return np.array([_to_days(x) for x in a], dtype=np.float64)
     if kind in ("num", "int"):
+        if isinstance(a, np.ndarray) and a.dtype.kind in "biuf" and a.dtype.itemsize <= 8:
+            return a.astype(np.float64)   # wie float(x) je Element (seit 1.6.3 ohne Schleife)
         out = []
         for x in a:
             if x is None or x is pd.NA:
@@ -308,6 +324,31 @@ def _flat(obj, kind):
 
 
 _BAD = object()
+
+
+_LO32 = np.uint64(0xFFFFFFFF)
+
+
+def _num_bad(rr, pv):
+    """Stellen i mit ``not _num_eq(rr[i], pv[i])``, über ganze Felder (seit 1.6.3; bis 1.6.2 je Element)."""
+    r = np.asarray(rr, dtype=np.float64)
+    if isinstance(pv, np.ndarray) and pv.dtype == np.float64:
+        p, schlecht = pv, None
+    else:
+        schlecht = np.fromiter((x is _BAD for x in pv), dtype=bool, count=len(pv))
+        p = np.array([math.nan if x is _BAD else x for x in pv], dtype=np.float64)
+    rn, pn = np.isnan(r), np.isnan(p)
+    gleich = rn & pn
+    if _STRICT_NA:
+        na_r = rn & ((r.view(np.uint64) & _LO32) == _NA_BITS_LO)
+        na_p = pn & ((p.view(np.uint64) & _LO32) == _NA_BITS_LO)
+        gleich &= na_r == na_p
+    null = (r == 0.0) & (p == 0.0)
+    gleich |= null & ((np.signbit(r) == np.signbit(p)) if _STRICT_ZERO else True)
+    gleich |= ~rn & ~pn & ~null & (r == p)
+    if schlecht is not None:
+        gleich &= ~schlecht
+    return np.flatnonzero(~gleich).tolist()
 
 
 def _num_eq(r, p):
@@ -367,7 +408,7 @@ def compare(ref, py, path="result", errs=None, max_errs=40):
             errs.append("%s: Länge R %d, Python %d" % (path, len(rr), len(pv)))
             return errs
         if kind in ("num", "date"):
-            bad = [i for i in range(len(rr)) if not _num_eq(float(rr[i]), pv[i] if pv[i] is _BAD else float(pv[i]))]
+            bad = _num_bad(rr, pv)
         elif kind == "lgl":
             bad = [i for i in range(len(rr)) if (None if rr[i] is None else bool(rr[i])) != pv[i]]
         else:

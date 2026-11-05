@@ -23,18 +23,16 @@
 # Bibliotheks-Handles (ICU) werden geleert, damit keine Zeiger aus der Vorkompilierung in den Cache geraten.
 # Jeder Baustein läuft in `try`; die gesamte Arbeitslast steht zusätzlich in `try … catch`: Ein Fehler
 # (z. B. fehlende ICU, andere libm) darf das Laden des Pakets nie verhindern.
-# `_precompile_ext(; strict = true)` meldet Fehler (für Tests). Abschalten:
+# Abschalten:
 # SIMLEV_SKIP_PRECOMPILE=1 (alles), SIMLEV_SKIP_PRECOMPILE_EXT=1 (Erweiterungen).
 
 include("precompile_statements.jl")   # ausdrückliche Übersetzungsanweisungen (aus Traces)
 
 "Arbeitslast für die Erweiterungsmodule (je Modul die Hauptfunktionen)."
-function _precompile_ext(; strict::Bool = false)
-    errs = String[]
+function _precompile_ext()
     step(f, what) = try
         f()
-    catch e
-        strict && push!(errs, what * ": " * sprint(showerror, e))
+    catch
         nothing
     end
     io = IOBuffer()
@@ -165,11 +163,79 @@ function _precompile_ext(; strict::Bool = false)
             sh(r); sh(r_summary(r))
             sh(DeepAnalysis.result_analysis(r))
         end
+        _precompile_more(d, nt, dates, A3, st, stn, ra, rb, rc, rd, sh, step)
     finally
-        # Zwischenspeicher wie vorher (der globale Zufallszustand bleibt unberührt)
-        empty!(RExpr._CACHE)
+        RParallel._PRECOMPILE_THREADED[] = false
     end
-    return errs
+    return nothing
+end
+
+"""Weitere Erstaufrufe (seit 1.6.3; K41 Teil B: 78 von 129 Exporten ohne Arbeitslast, Erstaufrufe 1–5 s mit 75–99 %
+Übersetzung): Grafiken, Entnahme über Pfade, Taktik, Prüfungen auf Überanpassung, `cores = 2` über `_threaded`."""
+function _precompile_more(d, nt, dates, A3, st, stn, ra, rb, rc, rd, sh, step)
+    n = length(dates)
+    pl(x) = sh(r_plot(x))
+    step("plots") do
+        x1 = RFrame("date" => dates, "value" => d["A"])
+        ra2 = DeepAnalysis.result_analysis(RList("X" => x1, "Y" => RFrame("date" => dates, "value" => d["B"]));
+                                           benchmark = "X", rolling_years = 1)
+        pl(ra2)
+        sa = AnalysisTests.signal_analysis(nt, "C", "A"; horizon = 21, bins = 5)
+        pl(sa)
+        ps = ParamSearch.param_search((date = dates, A = nt.A, B = nt.B);
+                                      space = ParamSearch.param_space("rebalance.thresh" => [2.0, 5.0, 10.0]),
+                                      strategy = stn, sim_args = RList("rebalance" => rebalance_plan(; span = 1, unit = "month")),
+                                      keep_returns = "day", cores = 1)
+        ParamSearch.param_plateau(ps); pl(ps)
+        wf = Overfitting.overfit_walk_forward(ps; train = 1, test = 1)
+        sh(wf); pl(wf)
+        rot = Tactical.tactical_rotation(d, A3; top = 2, absolute = false)
+        pl(rot)
+    end
+    step("withdrawal_paths") do
+        cfg = Bootstrap.bootstrap_config((a = "A",); aux = (infl = "infl",), input = "prices", aux_type = (infl = "rate",))
+        b = Bootstrap.bootstrap(d, cfg, "stationary"; n = 3, path_length = 1000, seed = 1, progress = false)
+        wp = Withdrawal.withdrawal_paths(b; column = "a", inflation = "infl")
+        w = Withdrawal.withdrawal_simulation(wp, Withdrawal.withdrawal_rule("constant"))
+        sh(w); pl(w)
+        sv = Bootstrap.bootstrap_study(d, cfg, "stationary"; n = 3, path_length = 1000, seed = 1, progress = false,
+                                       strategies = (eq = create_strategy(a = asset_config("etf", "bnh")),),
+                                       keep_returns = "month", keep_aux = ["infl"], cores = 1)
+        Withdrawal.withdrawal_max_rate(sv, Withdrawal.withdrawal_rule("constant"); success = 0.5, inflation = "infl", tol = 1)
+        pl(sv)
+    end
+    step("tactical") do
+        Tactical.tactical_conditional_volatility(d, ["A" => 1], "B")
+        Tactical.tactical_rules(d, [(when = "A > B", weights = ["A" => 1]), (when = "C > 100 & A < 120", weights = ["C" => 1])],
+                                ["B" => 1])
+        Tactical.tactical_target_volatility(d, ["A" => 1], "B")
+    end
+    step("analyse") do
+        Rm = hcat(ra, rb, rc, rd)
+        sh(AnalysisTests.overfit_reality_check(Rm[1:500, :]; B = 20, frequency = "week", seed = 1))
+        sh(Overfitting.sharpe_deflated(Rm[1:500, :]))
+        bc = (date = dates, p = 2 .* nt.A .* (1 .- 1e-5 .* (1:n)), i = nt.A)
+        sh(Backcast.backcast_fit(bc, "p", "i"; method = "grid"))
+        sh(Optimize.portfolio_risk_contributions(nt, ["A" => 0.5, "B" => 0.3, "C" => 0.2]; cov = "ledoit_wolf"))
+        sh(Optimize.portfolio_rolling(nt, A3; window = 1, every = "month", cov = "ledoit_wolf"))
+        sh(Scenarios.scenario_entropy_pooling(nt, ["A", "B"], [Scenarios.view_mean("A", 0.0), Scenarios.view_vol("B", 0.009; op = "<=")];
+                                              frequency = "day"))
+        sh(Bootstrap.bootstrap_probability(Bootstrap.bootstrap_study(nt, Bootstrap.bootstrap_config((x = "A",); input = "prices"),
+                                                                      "stationary"; n = 2, path_length = 200, seed = 3,
+                                                                      progress = false, cores = 1,
+                                                                      strategies = (a = create_strategy(x = asset_config("etf", "bnh")),
+                                                                                    b = create_strategy(x = asset_config("etf", "bnh")))),
+                                           "cagr > 0"; b = "path %in% (1:2)"))
+    end
+    step("threads") do   # J4: _threaded (cores = 2) auch bei einem Thread im Vorkompilierprozess
+        RParallel._PRECOMPILE_THREADED[] = true
+        cfgn = Bootstrap.bootstrap_config((x = "A",); input = "prices")
+        Bootstrap.bootstrap(nt, cfgn, "stationary"; n = 2, path_length = 200, seed = 1, progress = false, cores = 2)
+        Bootstrap.bootstrap_study(nt, cfgn, "stationary"; n = 2, path_length = 200, seed = 2, progress = false,
+                                  strategies = (a = create_strategy(x = asset_config("etf", "bnh")),), cores = 2)
+        RParallel._PRECOMPILE_THREADED[] = false
+    end
+    return nothing
 end
 
 "Arbeitslast für die Engine (simulation() über den C++-Kern, Ausgabe, Dashboard, Trigger)."
@@ -231,7 +297,9 @@ end
 "Zustand nach der Arbeitslast zurücksetzen (Zufall, Zwischenspeicher, Bibliotheks-Handles)."
 function _precompile_reset()
     for f in (() -> empty!(RExpr._CACHE),
-              () -> RStats.collate_reset())
+              () -> RStats.collate_reset(),
+              () -> (_TT_CACHE[] = nothing),   # Tarif (tax_tariff, seit 1.6.3)
+              () -> (RParallel._PRECOMPILE_THREADED[] = false))
         try
             f()
         catch

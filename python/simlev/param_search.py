@@ -35,22 +35,14 @@ from .svg import (_res_fig, _res_finish, _res_line, _res_panel, _res_points, _re
 from ._util import _match_arg
 from ._util import _ext
 from ._util import _fmt_vec
+from ._util import _MISSING, _is_strategy
+from ._util import _rank_avg
 
 __all__ = ["param_space", "param_range", "param_search", "param_plateau",
            "SimLevParamSpace", "SimLevParamRange", "SimLevParamSearch", "SummarySimLevParamSearch"]
 
 _NAN = _fmt.NA_REAL   # R's NA_real_ (alle Verwendungen hier sind NA)
 _DBL_EPS = 2.220446049250313e-16
-
-
-class _Missing:
-    """Platzhalter für ein R-Argument ohne Standardwert (Gegenstück zu R's fehlendem Argument)."""
-
-    def __repr__(self):
-        return "<missing>"
-
-
-_MISSING = _Missing()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -461,14 +453,6 @@ def _ps_design(space, method, n, constraint, stream=None):
 # Spezifikation auswerten
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _is_strategy(s):
-    try:
-        from .config import Strategy
-    except ImportError:          # pragma: no cover
-        return False
-    return isinstance(s, Strategy)
-
-
 def _as_spec(s):
     """Builder-Ergebnis in eine Spezifikation umwandeln (``.as_spec``)."""
     if isinstance(s, Mapping) and not _is_strategy(s) and s.get("strategy") is not None:
@@ -700,10 +684,20 @@ def param_search(data, builder=None, space=_MISSING, *, strategy=None, method=("
         ref = okm[0]["date"]
         dates = ref[1:]
         Rm = np.full((len(dates), len(design)), _NAN)
-        pos = {int(x): i for i, x in enumerate(dates.astype(np.int64))}
+        dk = dates.astype(np.int64)
+        srt = bool(np.all(dk[1:] > dk[:-1]))   # Tage aufsteigend und eindeutig: Zuordnung über searchsorted (seit 1.6.3)
+        pos = None if srt else {int(x): i for i, x in enumerate(dk)}
         for i, o in enumerate(out):
             if o.get("ret") is not None:
                 dd = o["date"][1:].astype(np.int64)
+                rv = np.asarray(o["ret"])
+                if srt and rv.ndim == 1 and rv.size == dd.size:
+                    kk = np.minimum(np.searchsorted(dk, dd), max(dk.size - 1, 0))
+                    hit = (dk[kk] == dd) if dk.size else np.zeros(dd.size, dtype=bool)
+                    Rm[kk[hit], i] = rv[hit]
+                    continue
+                if pos is None:
+                    pos = {int(x): i for i, x in enumerate(dk)}
                 for r, dv in enumerate(dd):
                     kk = pos.get(int(dv))
                     if kk is not None:
@@ -740,11 +734,6 @@ def _match(x, table):
                 break
         out.append(hit)
     return np.array(out, dtype=np.float64)
-
-
-def _rank_avg(x):
-    from .overfitting import _rank_avg as ra
-    return ra(x)
 
 
 def _factor_codes(col):
@@ -1011,9 +1000,12 @@ def _plot_param_search(x, metric=None, params=None, fun=max):
     l1 = _jl_sort_levels(g1)
     l2 = _jl_sort_levels(g2)
     M = np.full((len(l1), len(l2)), _NAN)
+    # Zugehörigkeit je Stufe einmal (seit 1.6.3; _ps_same ist rein, also gleiche Auswahl wie je Zelle)
+    m1 = [np.array([_ps_same(u, a) for u in g1], dtype=bool) for a in l1]
+    m2 = [np.array([_ps_same(w, b) for w in g2], dtype=bool) for b in l2]
     for i, a in enumerate(l1):
         for j, b in enumerate(l2):
-            sel = np.array([_ps_same(u, a) and _ps_same(w, b) for u, w in zip(g1, g2)], dtype=bool)
+            sel = m1[i] & m2[j]
             if sel.any():
                 M[i, j] = agg(vals[sel])
     fin = [float(v) for v in M.ravel(order="F") if not math.isnan(v)]

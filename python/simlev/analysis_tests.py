@@ -20,9 +20,10 @@ import pandas as pd
 
 from ._r import fmt as _fmt
 from ._r.fmt import NA_REAL
+from . import _ext as _cext
 from . import _lib
 from ._r.rlist import RList
-from ._r.rnum import r_isna, r_mean, r_median, r_pow, r_sd, r_sum, r_var
+from ._r.rnum import r_mean, r_median, r_pow, r_pow_vec, r_sd, r_sum, r_var
 from .deep_analysis import (
     _col_means, _da_deflate, _da_series, _dates, _days, _ext, _fill_na, _is_num_scalar, _key_isoweek,
     _key_month, _key_year, _last_of_key, _match_arg, _mean_lgl, _message, _quantile, _sp, _stats,
@@ -743,8 +744,13 @@ def overfit_reality_check(x, *, benchmark=None, B=999, block=None, frequency=("w
 
     S = _main_stream(seed)
     Fb = np.empty((int(B), K))
-    for i in range(int(B)):
-        Fb[i] = _col_means(D[_boot_idx(Tn, Tn, block, S), :])
+    D = np.ascontiguousarray(D, dtype=np.float64)
+    for i in range(int(B)):   # colMeans(D[idx, ]) im Kern ohne Zeilenkopie (seit 1.6.3; dieselbe Summenfolge)
+        idx = np.ascontiguousarray(_boot_idx(Tn, Tn, block, S), dtype=np.int64)
+        if Tn and K:
+            _cext.slc_r_colsums_idx(D, Tn, K, K, 1, idx, 0, False, True, Fb[i])
+        else:
+            Fb[i] = _col_means(D[idx, :])
     sq = math.sqrt(Tn)
     om = np.maximum(_apply_sd(Fb), 1e-12) * sq
     V = float(np.max(sq * fbar))
@@ -837,8 +843,8 @@ def sharpe_min_track_record(x, *, target=0, prob=0.95, frequency=("week", "day",
     sr = m / sdv
     sr0 = target / math.sqrt(ppy)
     z = (r - m) / sdv
-    g3 = r_mean(np.array([r_pow(v, 3.0) for v in z]))
-    g4 = r_mean(np.array([r_pow(v, 4.0) for v in z]))
+    g3 = r_mean(r_pow_vec(z, 3.0))   # Kern, je Element r_pow1 wie r_pow
+    g4 = r_mean(r_pow_vec(z, 4.0))
     if sr <= sr0:
         need = math.inf
     else:
@@ -967,20 +973,13 @@ class SimLevHeatmap(RList):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _r_minmax(x, op):
-    """R's ``min()``/``max()`` für Doubles (NA vor NaN; leer: Warnung, ±Inf) wie Julias ``_rmin``/``_rmax``."""
-    s = math.inf if op == "min" else -math.inf
-    upd = False
-    for v in np.asarray(x, dtype=np.float64).tolist():
-        if math.isnan(v):
-            if not upd or not r_isna(s):
-                s = v
-            upd = True
-        elif not upd or (v < s if op == "min" else v > s):
-            s = v
-            upd = True
-    if not upd:
+    """R's ``min()``/``max()`` für Doubles (NA vor NaN; leer: Warnung, ±Inf) wie Julias ``_rmin``/``_rmax``; seit 1.6.3
+    über ``dependence._rmin``/``_rmax`` (gleiche Regel, ohne Schleife je Element)."""
+    from .dependence import _rmax, _rmin
+    v = np.asarray(x, dtype=np.float64).ravel()
+    if not v.size:
         warnings.warn("no non-missing arguments to %s; returning %s" % (op, "Inf" if op == "min" else "-Inf"))
-    return s
+    return _rmin(v) if op == "min" else _rmax(v)
 
 
 def _plot_signal(x):

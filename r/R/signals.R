@@ -201,7 +201,10 @@ signal_drawdown <- function(x, sell_dd = 20, buy_dd = 10, window = NULL, lag = 0
   xp <- ifelse(is.na(x), -Inf, x)                              # NA unterbricht das Hoch nicht (nur die eigene Zeile ohne Signal)
   peak <- if (is.null(window)) cummax(xp) else {
     w <- as.integer(window); m <- length(x)
-    vapply(seq_len(m), function(i) max(xp[max(1L, i - w + 1L):i]), 0)
+    # seit 1.6.3 gleitendes Maximum im Kern (roll_max_core, O(m); bei Gleichstand das erste Auftreten wie max());
+    # Fenster < 1, NA oder mehrere Werte wie bisher
+    if (length(w) == 1L && !is.na(w) && w >= 1L) .Call(C_roll_max_core, xp, w, 0L)
+    else vapply(seq_len(m), function(i) max(xp[max(1L, i - w + 1L):i]), 0)
   }
   dd <- 100 * (1 - x / peak)
   .sig_out(dd < buy_dd, dd >= sell_dd, lag)
@@ -227,7 +230,15 @@ signal_combine <- function(..., op = c("and", "or")) {
   if (any(len != len[1]) || any(vapply(s, function(z) length(z$sell), 1L) != len))
     stop(sprintf("signal_combine: Signale haben unterschiedliche L\u00e4ngen (%s); alle aus derselben Kursreihe erzeugen.",
                  paste(len, collapse = ", ")))
-  B <- do.call(cbind, lapply(s, `[[`, "buy")); S <- do.call(cbind, lapply(s, `[[`, "sell"))
+  bs <- lapply(s, `[[`, "buy"); ss <- lapply(s, `[[`, "sell")
+  # seit 1.6.3 fuer reine logische Vektoren (wie aus den signal_*-Funktionen) elementweise mit & bzw. |: gleiche Werte
+  # wie apply(, 1, all/any), auch mit NA; sonst (Zahlen, Attribute) wie bisher zeilenweise
+  plain <- function(l) all(vapply(l, function(z) is.logical(z) && is.null(attributes(z)), TRUE))
+  if (plain(bs) && plain(ss)) {
+    if (op == "and") return(list(buy = Reduce(`&`, bs), sell = Reduce(`|`, ss)))
+    return(list(buy = Reduce(`|`, bs), sell = Reduce(`&`, ss)))
+  }
+  B <- do.call(cbind, bs); S <- do.call(cbind, ss)
   if (op == "and") list(buy = apply(B, 1, all), sell = apply(S, 1, any))
   else list(buy = apply(B, 1, any), sell = apply(S, 1, all))
 }

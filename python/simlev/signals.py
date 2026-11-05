@@ -16,6 +16,7 @@ from collections.abc import Mapping
 
 import numpy as np
 
+from . import _ext
 from ._r import libm as _libm
 from ._r.fmt import NA_REAL
 from ._r.rnum import r_mean
@@ -66,11 +67,6 @@ def _ema(x, n):
     if n < m:
         out[n:] = _rfilter_recursive1(a * x[n:], 1 - a, out[n - 1])
     return out
-
-
-def _lgl(v):
-    """Vergleichsergebnis -> (Werte, NA-Maske)."""
-    return np.asarray(v, dtype=bool)
 
 
 def _cmp(op, a, b):
@@ -439,7 +435,11 @@ def signal_drawdown(x, *, sell_dd=20, buy_dd=10, window=None, lag=0):
     else:
         w = int(window)
         m = len(x)
-        peak = np.array([np.max(xp[max(0, i - w + 1): i + 1]) for i in range(m)], dtype=np.float64)
+        if w >= 1:   # gleitendes Maximum im Kern (seit 1.6.3, O(m)); gleiche Werte gewinnt das erste (wie R max())
+            peak = np.empty(m)
+            _ext.roll_max_core(np.ascontiguousarray(xp, dtype=np.float64), min(w, max(m, 1)), 0, peak)
+        else:        # w < 1: Fehler aus np.max wie bisher (R: Fehler bzw. NA)
+            peak = np.array([np.max(xp[max(0, i - w + 1): i + 1]) for i in range(m)], dtype=np.float64)
     with np.errstate(invalid="ignore", divide="ignore"):
         dd = 100 * (1 - x / peak)
     return _sig_out(_cmp(np.less, dd, buy_dd), _cmp(np.greater_equal, dd, sell_dd), lag)

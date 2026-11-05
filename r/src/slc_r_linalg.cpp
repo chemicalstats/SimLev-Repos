@@ -20,34 +20,9 @@
 /* .Call-Huellen mit C-Bindung (Registrierung in init.cpp) */
 extern "C" {
 
-/* ── Kontext und Rueckmeldungen (wie slc_r.cpp) ── */
+#include "huelle_r.h"   /* Kontext, Rueckmeldungen, Argumentpruefungen (seit 1.6.3 gemeinsam) */
 
-static void chk_int(void *d) { (void) d; R_CheckUserInterrupt(); }
-static int r_interrupted(void *h) { (void) h; return !R_ToplevelExec(chk_int, NULL); }
-
-static void ctx_init(sl_ctx *cx)
-{
-    sl_ctx_init(cx);
-    cx->interrupted = r_interrupted;
-}
-
-static void finish(sl_ctx *cx, int st, int nprot)
-{
-    int i;
-    char msg[SL_MSG_LEN];
-    for (i = 0; i < cx->n_warn; i++) Rf_warningcall(R_NilValue, "%s", cx->warn[i]);
-    if (st != SL_OK) {
-        memcpy(msg, cx->msg, SL_MSG_LEN);
-        if (nprot) UNPROTECT(nprot);
-        if (st == SL_EINTR) R_CheckUserInterrupt();
-        Rf_errorcall(R_NilValue, "%s", msg);
-    }
-}
-
-static void need_real(SEXP x, const char *what)
-{
-    if (TYPEOF(x) != REALSXP) Rf_errorcall(R_NilValue, "interner Fehler: %s muss double sein", what);
-}
+/* ── Argumente ── */
 
 static int len_int(SEXP x, const char *what)
 {
@@ -66,26 +41,12 @@ static void dims(SEXP x, int *nr, int *nc, const char *what)
     *nc = INTEGER(d)[1];
 }
 
-static double num1(SEXP x, const char *what)
-{
-    if (TYPEOF(x) != REALSXP || XLENGTH(x) != 1)
-        Rf_errorcall(R_NilValue, "interner Fehler: %s muss eine Zahl (double, Laenge 1) sein", what);
-    return REAL(x)[0];
-}
-
 static int int1(SEXP x, const char *what)
 {
     double v = num1(x, what);
     if (!(v >= -2147483647.0 && v <= 2147483647.0) || v != (double) (int) v)
         Rf_errorcall(R_NilValue, "interner Fehler: %s muss ganzzahlig sein", what);
     return (int) v;
-}
-
-static int lgl1(SEXP x, const char *what)
-{
-    if (TYPEOF(x) != LGLSXP || XLENGTH(x) != 1 || LOGICAL(x)[0] == NA_LOGICAL)
-        Rf_errorcall(R_NilValue, "interner Fehler: %s muss TRUE oder FALSE sein", what);
-    return LOGICAL(x)[0];
 }
 
 static SEXP new_mat(int nr, int nc)

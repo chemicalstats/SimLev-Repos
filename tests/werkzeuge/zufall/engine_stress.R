@@ -46,7 +46,6 @@ run_case <- function(id, data, strategy, sargs) {
 }
 mk_dates <- function(start, n) seq.Date(as.Date(start), by = "day", length.out = n)
 gbm <- function(n, s0, mu, sig, lev = 1) s0 * cumprod(pmax(1e-4, 1 + lev * rnorm(n, mu, sig)))
-pick <- function(x) x[[sample.int(length(x), 1)]]
 ac <- function(...) asset_config(...)
 
 # ── Gezielte Randfaelle ──────────────────────────────────────────────────────

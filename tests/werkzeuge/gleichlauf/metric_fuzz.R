@@ -29,33 +29,8 @@ local({   # Code-Erzeuger aus tests/gleichlauf/erzeugen/engine.R (em, .args, sim
 args <- commandArgs(TRUE)
 N <- as.integer(args[1]); seed0 <- as.integer(if (length(args) >= 2) args[2] else 20261103)
 ref_bereich("metric_fuzz", alle = TRUE); ref_init("metric_fuzz")
-pick <- function(x) x[[sample.int(length(x), 1L)]]
-coin <- function(p) runif(1) < p
 
-# Fall schreiben und die Aufrufe der Warnungen und des Fehlers (nur R) als r_calls nachtragen (wie sim_fuzz.R)
-fuzz_case <- function(id, r, py, jl, inputs) {
-  ref_case(id, r = r, py = py, jl = jl, inputs = inputs)
-  if (!.ref_in_subset(id)) return(invisible(NULL))
-  env <- new.env(parent = globalenv())
-  for (k in names(inputs)) assign(k, inputs[[k]], envir = env)
-  dp <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = " ")
-  wc <- character(0); ec <- NULL
-  invisible(capture.output(tryCatch(withCallingHandlers(eval(parse(text = r), envir = env),
-    warning = function(w) { wc <<- c(wc, dp(conditionCall(w))); invokeRestart("muffleWarning") },
-    message = function(m) invokeRestart("muffleMessage")),
-    error = function(e) ec <<- dp(conditionCall(e)))))
-  # Bedingungen aus dem Kern (seit 1.4.1) tragen den Aufruf von simulation() (bis 1.3.0 einen festen Ausdruck der Phase);
-  # sim_call = erster Aufruf von simulation() im Code (deparse), Sollwert dieser Kopfzeilen in sim_fuzz_cmp.py
-  fs <- function(e) {
-    if (!is.call(e)) return(NULL)
-    if (identical(e[[1L]], as.name("simulation"))) return(e)
-    for (i in seq_along(e)[-1L]) { x <- tryCatch(fs(e[[i]]), error = function(err) NULL); if (!is.null(x)) return(x) }
-    NULL
-  }
-  sc <- NULL
-  for (e in parse(text = r, keep.source = FALSE)) if (is.null(sc)) sc <- fs(e)
-  ref_case_extra(list(r_calls = list(warnings = as.list(wc), error = ec, sim_call = dp(sc))))
-}
+# Fälle über fuzz_case() (ref_tools.R) mit r_calls und sim_call (wie sim_fuzz.R)
 
 nx <- round(N * 0.27)
 for (k in seq_len(nx)) {   # x-Fälle: .xirr_rate
@@ -81,7 +56,7 @@ for (k in seq_len(nx)) {   # x-Fälle: .xirr_rate
   fuzz_case(sprintf("x%05d", k),
             r = "result <- SimLev:::.xirr_rate(t, a, ev, h)",
             py = "result = simlev.engine.xirr_rate(t, a, ev, h)",
-            jl = "result = SL.xirr_rate(t, a, ev, h)", inputs = in_)
+            jl = "result = SL.xirr_rate(t, a, ev, h)", inputs = in_, sim_call = TRUE)
 }
 
 classes <- c("etf", "etf", "etc", "certificate")
@@ -114,7 +89,7 @@ for (k in seq_len(N - nx)) {   # m-Fälle: simulation()
     if (coin(0.3)) a$risk_free <- pick(list(1, "fehlt"))
     bl <- blocks_from_flat(a)
     fuzz_case(sprintf("m%05d", k), r = sim_code("d", "s", bl, "r"), py = paste0("result = ", sim_code("d", "s", bl, "py")),
-              jl = paste0("result = ", sim_code("d", "s", bl, "jl")), inputs = list(d = d, s = s))
+              jl = paste0("result = ", sim_code("d", "s", bl, "jl")), inputs = list(d = d, s = s), sim_call = TRUE)
     next
   }
   for (j in seq_len(na)) {
@@ -171,6 +146,6 @@ for (k in seq_len(N - nx)) {   # m-Fälle: simulation()
   bl <- blocks_from_flat(a)
   s <- do.call(create_strategy, lapply(st, function(x) do.call(asset_config, x[!vapply(x, is.null, NA)])))
   fuzz_case(sprintf("m%05d", k), r = sim_code("d", "s", bl, "r"), py = paste0("result = ", sim_code("d", "s", bl, "py")),
-            jl = paste0("result = ", sim_code("d", "s", bl, "jl")), inputs = list(d = d, s = s))
+            jl = paste0("result = ", sim_code("d", "s", bl, "jl")), inputs = list(d = d, s = s), sim_call = TRUE)
 }
 ref_done(); ref_schreiben()

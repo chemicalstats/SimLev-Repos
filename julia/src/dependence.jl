@@ -25,7 +25,6 @@ import ..SimLev
 using ..SimLev: _match_arg   # util.jl (seit 1.6.1 eine Fassung)
 using ..SimLev: _grid_bars!, _grid_lines!, _grid_scatter!, _grid_svg
 using Dates
-using Printf
 
 export copula_fit, tail_dependence, dependence_dcc, dependence_analysis, quantile_regression, tail_regression,
        tail_covar, dependence_validate, regime_subset
@@ -40,15 +39,6 @@ const NamedMat = SimLev.NamedMat
 # Aufrufe gemeinsamer Bausteine (andere Bearbeiter; erst beim Aufruf aufgelöst)
 # ═════════════════════════════════════════════════════════════════════════════
 
-"Ruft `f` mit Positionsargumenten `req..., opt...` auf, sonst mit `opt` als Schlüsselwörtern."
-function _flex(f, req::Tuple, opt::NamedTuple = NamedTuple(), kw::NamedTuple = NamedTuple())
-    args = (req..., values(opt)...)
-    if hasmethod(f, Tuple{map(typeof, args)...}, keys(kw))
-        return f(args...; kw...)
-    end
-    return f(req...; opt..., kw...)
-end
-
 "Element `k` eines Ergebnisses (RList, Dict, NamedTuple, Objekt mit Feld)."
 function _el(o, k::AbstractString)
     o isa NamedTuple && return getfield(o, Symbol(k))
@@ -56,13 +46,10 @@ function _el(o, k::AbstractString)
     o isa RVector && return o[k]
     return getproperty(o, Symbol(k))
 end
-_has(o, k::AbstractString) = o isa NamedTuple ? haskey(o, Symbol(k)) :
-                              o isa AbstractDict ? (haskey(o, k) || (o isa Dict{Symbol} && haskey(o, Symbol(k)))) :
-                              o isa RVector ? haskey(o, k) : hasproperty(o, Symbol(k))
 
-_to_date(x, what) = _flex(SimLev.DataPrep._to_date, (x,), (what = String(what),))
+_to_date(x, what) = SimLev.DataPrep._to_date(x, String(what))
 _fill_na(x, method; keep_leading = false) =
-    _fvec(_flex(SimLev.Backcast._fill_na, (x,), (method = method,), (keep_leading = keep_leading,)))
+    _fvec(SimLev.Backcast._fill_na(x, method; keep_leading = keep_leading))
 _roll_var(x, n) = _fvec(SimLev.Signals._roll_var(x, n))
 _roll_cov(x, y, n) = _fvec(SimLev.Signals._roll_cov(x, y, n))
 _roll_mean(x, n) = _fvec(SimLev.Signals._roll_mean(x, n))
@@ -74,19 +61,18 @@ _pw_block_stationary(x) = Float64(_el(SimLev.Bootstrap._pw_block(x), "stationary
 _errmsg(e) = e isa ErrorException ? e.msg : sprint(showerror, e)
 
 "R-`message()`: Text mit Zeilenumbruch auf `stderr`."
-message(text) = (io = SimLev.RParallel.r_stderr(); println(io, text); flush(io); nothing)
+const message = SimLev.DataPrep.message   # seit 1.6.3 eine Fassung
 
 "Warnungen unterdrücken (`suppressWarnings`)."
-_quietly(f) = Base.CoreLogging.with_logger(f, Base.CoreLogging.NullLogger())
+const _quietly = SimLev.Bootstrap._quiet   # seit 1.6.3 eine Fassung
 
 # ── Statistik-Bausteine (RStats, RLinalg, RFmt, RLibm, SLib) ──────────────
 
 _quantile(x, probs; na_rm = false) =
-    _fvec(_flex(SimLev.RStats.quantile, (_fvec(x),), (probs = _fvec(probs),), (na_rm = na_rm, names = false)))
+    _fvec(SimLev.RStats.quantile(_fvec(x), _fvec(probs); na_rm = na_rm, names = false))
 _q1(x, p; na_rm = false) = _quantile(x, [Float64(p)]; na_rm = na_rm)[1]
 _cor_raw(x, y = nothing; method = "pearson") =
-    y === nothing ? _flex(SimLev.RStats.cor, (x,), NamedTuple(), (method = method,)) :
-                    _flex(SimLev.RStats.cor, (x,), (y = y,), (method = method,))
+    y === nothing ? SimLev.RStats.cor(x; method = method) : SimLev.RStats.cor(x, y; method = method)
 _cor1(x, y; method = "pearson") = _fvec(_cor_raw(_fvec(x), _fvec(y); method = method))[1]
 _cormat(X; method = "pearson") = _fmat(_cor_raw(_fmat(X); method = method))
 _median(x; na_rm = false) = Float64(SimLev.RStats.median(_fvec(x); na_rm = na_rm))
@@ -229,7 +215,7 @@ end
 _order(v) = sortperm(_fvec(v); alg = Base.Sort.DEFAULT_STABLE,
                      lt = (a, b) -> isnan(b) ? !isnan(a) : (!isnan(a) && a < b))
 
-_isna_el(v) = v === missing || v === nothing || (v isa AbstractFloat && isnan(v))
+const _isna_el = SimLev._isna   # r/rnum.jl (seit 1.6.3)
 "`complete.cases` über Spalten."
 function _complete_rows(cols...)
     isempty(cols) && return Bool[]
@@ -1264,7 +1250,7 @@ end
 
 "Matrix mit dimnames wie `print(m)` (über RFmt)."
 function _print_matrix(M, rn, cn)
-    s = _flex(SimLev.RFmt.print_matrix, (NamedMat(M; rownames = rn, colnames = cn),))
+    s = SimLev.RFmt.print_matrix(NamedMat(M; rownames = rn, colnames = cn))
     String(s)
 end
 "data.frame wie `print(df, row.names = FALSE)` (über RFmt)."
@@ -1352,7 +1338,7 @@ function _qr_rank_pivot_coef(Xm, y)
     piv = Int.(qx["pivot"])
     qx, rank, piv
 end
-_qr_coef(qx, y) = _fvec(qx["coefficients"])
+_qr_coef(qx) = _fvec(qx["coefficients"])
 
 _is_numcol(c) = eltype(c) <: Union{Missing,Real} && !(eltype(c) <: Union{Missing,Bool}) && !(eltype(c) === Missing) ||
                 (eltype(c) === Any && all(v -> v === missing || (v isa Real && !(v isa Bool)), c))
@@ -1453,7 +1439,7 @@ function quantile_regression(y, X_pos = nothing, tau_pos = 0.5; X = X_pos, tau =
         error("quantile_regression: Regressoren linear abhängig ($(join(["'$b'" for b in bad], ", "))); doppelte oder konstante " *
               "Spalten entfernen (die Konstante ist bei intercept = TRUE schon enthalten).")
     end
-    beta = _qr_coef(qx, y)
+    beta = _qr_coef(qx)
     sc = _rmax(SimLev.r_sd(y), 1e-12)
     beta, opt = SimLev.DependenceCore.quantile_reg_core(y, Xm, tau, beta, sc, Float64(tol), Int(maxit))
     opt === true || @warn "quantile_regression: Optimalität nicht nachgewiesen; Ergebnis ist eine Ecke mit nicht größerem " *
@@ -1919,7 +1905,7 @@ und mit DCC `dcc`), `tail` (`q`, `lower`, `upper`, `independence`), `conditional
 Ohne rollierende Korrelation bzw. Drittvariable sind `rolling` bzw. `conditional` leer.
 """
 function _plot_dependence(x; type = ("overview", "rolling", "tail", "conditional", "scatter"), pair = 1, condition = 1,
-                          file = nothing, width = 900, height = 650)
+                          width = 900, height = 650)
     type = _match_arg(type, ("overview", "rolling", "tail", "conditional", "scatter"))
     pn = collect(x["pairs"]["pair"])
     i = pair isa AbstractString ? findfirst(==(pair), pn) : Int(pair)
@@ -1995,7 +1981,7 @@ end
 `plot.SimLevTailRegression` (SVG). Liefert `(svg, data)`; `data` je Treiber (Schlüssel = Name des
 Treibers): `quantile`, `estimate`, `lower`, `upper`.
 """
-function _plot_tail_regression(x; file = nothing, width = 900, height = 400)
+function _plot_tail_regression(x; width = 900, height = 400)
     drv = x["drivers"]
     data = SimLev.RList()
     svg = _grid_svg(collect(drv), dv -> function (c, box)
@@ -2015,7 +2001,7 @@ end
 `plot.SimLevCoVaR` (SVG). Liefert `(svg, data)`; `data`: `delta_covar` (`asset`, `date`,
 `delta_covar` in % je Periode wie in `series`; Zeilen je Anlage in Zeichenreihenfolge).
 """
-function _plot_covar(x; file = nothing, width = 800, height = 450)
+function _plot_covar(x; width = 800, height = 450)
     s = x["series"]
     cols = ["#2C6E9B", "#B5562B", "#3E8E5A", "#8A5BA8", "#C49A2C"]
     a = unique(s["asset"])

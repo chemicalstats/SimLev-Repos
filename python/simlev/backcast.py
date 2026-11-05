@@ -37,6 +37,7 @@ from .data_prep import (
 )
 from ._util import _which_max
 from ._util import _pow1m_v
+from ._util import _unique as _r_unique
 
 __all__ = ["backcast_fit", "backcast", "SimLevBackcastFit", "SimLevBackcast", "summary_SimLevBackcastFit", "plot_SimLevBackcastFit", "plot_SimLevBackcast"]
 
@@ -187,6 +188,12 @@ def _fill_na(v, method=("locf", "linear", "stine", "none"), keep_leading=False):
     if keep_leading and first > 0:
         out[:first] = _NAN
     return out
+
+
+
+def _fill_locf(v):
+    """``.fill_na(v, "locf")`` für ein float-Feld (seit 1.6.3 eine Fassung für sensitivity und withdrawal)."""
+    return _fill_na(np.asarray(v, dtype=np.float64), "locf")
 
 
 def _shift(v, k):
@@ -456,20 +463,11 @@ def _modify_list(base, val):
     return out
 
 
-def _r_unique(seq):
-    out = []
-    for s in seq:
-        if s not in out:
-            out.append(s)
-    return out
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Öffentliche Funktionen
 # ═══════════════════════════════════════════════════════════════════════════
 
 _BOUNDS0 = {"drag": [-10.0, 10.0], "spread": [-5.0, 10.0], "beta": [0.5, 1.5]}
-_GRID0 = None
 
 
 def _default_grid():
@@ -730,14 +728,26 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
         if method == "grid":
             if len(fit) != 1:
                 raise ValueError("method = 'grid' unterstützt genau einen Parameter in 'fit'.")
-            vals = np.array([obj_fun(g, rows, ob, rg) for g in grid], dtype=np.float64)
-            best = float(grid[_which_min(list(vals), -1)])
-            cols = []
+            # Modellrenditen je Gitterpunkt einmal für Zielwert und Fehlermatrix (seit 1.6.3; bis 1.6.2 zweimal),
+            # im strukturellen Modell nur im Fenster rows (elementweise dieselben Ausdrücke wie auf allen Zeilen)
+            pw = prep
+            if model == "structural":
+                rws = np.asarray(rows)
+                pw = _Prep(prep)
+                for k in ("x", "fin", "ter_cost", "sp_unit", "dr_unit"):
+                    pw[k] = np.broadcast_to(np.asarray(prep[k], dtype=np.float64), (prep.n,))[rws]
+                pw["n"] = len(rws)
+            vl, cols = [], []
             for g in grid:
                 p = dict(par0)
                 p[fit[0]] = float(g)
-                e = _bc_errors(_bc_model_returns(prep, p, model, rg)[rows], np.arange(len(rows)), ob, "level", 1)
-                cols.append(0 - _libm.expm1(e))
+                rr = _bc_model_returns(pw, p, model, rg)
+                if pw is prep:
+                    rr = rr[rows]
+                vl.append(_bc_objective(rr, np.arange(len(rows)), ob, objective, horizon, loss, hybrid_weight))
+                cols.append(0 - _libm.expm1(_bc_errors(rr, np.arange(len(rows)), ob, "level", 1)))
+            vals = np.array(vl, dtype=np.float64)
+            best = float(grid[_which_min(list(vals), -1)])
             err_mat = np.column_stack(cols) if cols else np.empty((len(ob["pos"]), 0))
             p = dict(par0)
             p[fit[0]] = best

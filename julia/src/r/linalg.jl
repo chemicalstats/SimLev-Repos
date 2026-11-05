@@ -25,9 +25,9 @@
 module RLinalg
 
 import ..SimLev
-import ..SimLev: RList, RVector, NamedMat, RFrame, NA, isna_strict
+import ..SimLev: RVector, NamedMat, RFrame, NA
 using Dates
-import ..RStats: _out, _vec_out, _isint_t   # gleiche Hilfen wie RStats (seit 1.5.2 nur dort)
+import ..RStats: _isint_t   # gleiche Hilfe wie RStats (seit 1.5.2 nur dort)
 
 export diag, all_equal_numeric
 
@@ -49,7 +49,6 @@ _M(v, dim; rn = nothing, cn = nothing, names = nothing, is_int = false) = _M(v, 
 
 _f64(v) = v === missing || v === nothing ? NA : Float64(v)
 
-ismat(m::_M) = m.dim !== nothing
 len(m::_M) = length(m.v)
 
 "Als n×p-Matrix (Kopie); Vektoren als Spalte."
@@ -73,14 +72,6 @@ _as_r(x::AbstractVector) = _M(Float64[_f64(v) for v in x], nothing; is_int = _is
 _as_r(x::Tuple) = _as_r(collect(x))
 _as_r(x::Union{Number,Missing}) = _M([_f64(x)], nothing; is_int = x isa Integer)
 _as_r(x::AbstractArray) = error("arrays with more than 2 dimensions are not supported")
-
-"as.matrix: Vektoren werden zu n×1 (names → rownames)."
-function _as_matrix(x)
-    m = _as_r(x)
-    m.dim === nothing && return _M(m.v, (len(m), 1), m.names, nothing, nothing, m.is_int)
-    m
-end
-
 
 _rerr(msg) = error(msg)
 

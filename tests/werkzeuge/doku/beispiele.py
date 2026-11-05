@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
 """Führt die Code-Beispiele der Dokumentation aus und vergleicht ihre Ausgaben.
 
-    python3 tests/werkzeuge/doku/beispiele.py [--write] [--sprache r,python,julia] <datei> ...
+    tests/werkzeuge/doku/beispiele.py [--write] [--jobs N] [r] [python] [julia]          (aus einem beliebigen Ordner)
+    tests/werkzeuge/doku/beispiele.py [--write] [--jobs N] [--sprache r,python,julia] <datei> ...
+
+Sprachen ohne Angabe: alle drei. Seit 1.6.3 laufen bis zu N Sprachen gleichzeitig (Standard 2 bzw. die Zahl der
+Prozessoren, wenn kleiner; Julia als längste zuerst), die Läufe einer Sprache nacheinander; Ausgabe und Ergebnis wie
+nacheinander (--jobs 1), in der Reihenfolge der Dateien. Ohne Datei werden alle Beispiele der Tutorials und READMEs geprüft
+(bis 1.5.1 beispiele.sh): README.md (Wurzel, r/, python/, julia/), die Vignette
+r/vignettes/getting-started.Rmd, die Tutorials python/examples/tutorial.md und julia/examples/tutorial.md
+sowie die Skripte python/examples/*.py und julia/examples/*.jl. Die Abbildungen des Haupt-README schreibt
+tests/werkzeuge/doku/bilder.py. Voraussetzung: gebaute bzw. installierte Pakete wie für tests/run.py (R aus
+R_LIBS, Python an Ort und Stelle gebaut, Julia nach Pkg.build). Setzt LC_ALL=C.UTF-8 und läuft in der Repo-Wurzel.
 
 Gelesen werden Markdown- und R-Markdown-Dateien. Ausgeführt werden die Codeblöcke
 ```r, ```python und ```julia (in .Rmd die Chunks ```{r ...}``` außer eval = FALSE),
@@ -26,11 +36,13 @@ Umgebung: R über Rscript (Paket aus R_LIBS), Python mit PYTHONPATH=<repo>/pytho
 (Erweiterung an Ort und Stelle gebaut), Julia mit --project=<repo>/julia.
 Ende 1, wenn ein Beispiel scheitert oder eine Ausgabe abweicht.
 """
+import glob
 import os
 import re
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import Future, ThreadPoolExecutor
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 SKIP = "<!-- beispiele: nicht ausführen -->"
@@ -109,7 +121,7 @@ def run(lang, code, suffix):
         f = os.path.join(tmp, "beispiel" + suffix)
         with open(f, "w", encoding="utf-8") as h:
             h.write(code)
-        p = subprocess.run(command(lang, f), cwd=tmp, env=env, capture_output=True, text=True)
+        p = subprocess.run(command(lang, f), cwd=tmp, env=env, capture_output=True, text=True, encoding="utf-8")
     return p.returncode, p.stdout, p.stderr
 
 
@@ -162,14 +174,53 @@ def check_same(rel, bl, lines):
     return not bad
 
 
-def check_file(path, langs, write):
+def jobs_of(path, langs):
+    """Läufe einer Datei in der Reihenfolge von check_file: Liste (Sprache, Code, Endung)."""
+    if path.endswith((".py", ".jl")):
+        lang = "python" if path.endswith(".py") else "julia"
+        return [(lang, open(path, encoding="utf-8").read(), os.path.splitext(path)[1])] if lang in langs else []
+    bl, _ = blocks(path)
+    return [(lang, script(lang, sel), {"r": ".R", "python": ".py", "julia": ".jl"}[lang])
+            for lang in ("r", "python", "julia")
+            if lang in langs and (sel := [b for b in bl if b["lang"] == lang])]
+
+
+def run_all(files, langs, jobs):
+    """Alle Läufe vorab starten: je Sprache nacheinander (in der Reihenfolge der Dateien), bis zu jobs Sprachen
+    gleichzeitig, Julia zuerst. Liefert je Datei die Futures ihrer Läufe in der Reihenfolge von jobs_of."""
+    per_file, chains = [], {}
+    for f in files:
+        futs = []
+        for lang, code, suffix in jobs_of(f, langs):
+            fut = Future()
+            chains.setdefault(lang, []).append((fut, lang, code, suffix))
+            futs.append(fut)
+        per_file.append(futs)
+
+    def chain(items):
+        for fut, lang, code, suffix in items:
+            try:
+                fut.set_result(run(lang, code, suffix))
+            except BaseException as e:   # noqa: BLE001 - Fehler beim Aufrufer melden
+                fut.set_exception(e)
+
+    ex = ThreadPoolExecutor(max(1, jobs))
+    for lang in sorted(chains, key=lambda l: l != "julia"):
+        ex.submit(chain, chains[lang])
+    ex.shutdown(wait=False)
+    return per_file
+
+
+def check_file(path, langs, write, futs=None):
+    """Datei prüfen; futs: vorab gestartete Läufe (run_all), sonst laufen sie hier nacheinander."""
     rel = os.path.relpath(path, ROOT)
     ok = True
+    res = (run(*j) for j in jobs_of(path, langs)) if futs is None else (f.result() for f in futs)
     if path.endswith((".py", ".jl")):
         lang = "python" if path.endswith(".py") else "julia"
         if lang not in langs:
             return True
-        rc, so, se = run(lang, open(path, encoding="utf-8").read(), os.path.splitext(path)[1])
+        rc, so, se = next(res)
         print("{:<40} {:<7} {}".format(rel, lang, "ok" if rc == 0 else "FEHLER"))
         if rc != 0:
             print(se[-3000:])
@@ -180,7 +231,7 @@ def check_file(path, langs, write):
         sel = [b for b in bl if b["lang"] == lang]
         if not sel or lang not in langs:
             continue
-        rc, so, se = run(lang, script(lang, sel), {"r": ".R", "python": ".py", "julia": ".jl"}[lang])
+        rc, so, se = next(res)
         seg = re.split(r"\n?" + re.escape(MARK.format("X")).replace("X", r"(\d+)") + r"\n", so)
         outs = {}
         for k in range(1, len(seg) - 1, 2):
@@ -219,17 +270,43 @@ def check_file(path, langs, write):
     return ok
 
 
+# Dateien ohne Angabe (relativ zur Repo-Wurzel; dazu python/examples/*.py und julia/examples/*.jl)
+DATEIEN = ["README.md", "r/README.md", "python/README.md", "julia/README.md", "r/vignettes/getting-started.Rmd",
+           "python/examples/tutorial.md", "julia/examples/tutorial.md"]
+
+
 def main(argv):
     write = "--write" in argv
     langs = {"r", "python", "julia"}
-    files = []
+    jobs = min(2, os.cpu_count() or 1)
+    spr, files = [], []
     it = iter(a for a in argv if a != "--write")
     for a in it:
         if a == "--sprache":
             langs = set(next(it).split(","))
+        elif a == "--jobs":
+            v = next(it, "")
+            if not v.isdigit() or int(v) < 1:
+                print("beispiele.py: --jobs braucht eine Zahl >= 1", file=sys.stderr)
+                return 2
+            jobs = int(v)
+        elif a in ("r", "python", "julia"):
+            spr.append(a)
+        elif a.startswith("-"):
+            print("beispiele.py: unbekannt: " + a, file=sys.stderr)
+            return 2
         else:
             files.append(os.path.abspath(a))
-    ok = all([check_file(f, langs, write) for f in files])
+    if spr:
+        langs = set(spr)
+    os.environ["LC_ALL"] = "C.UTF-8"
+    os.chdir(ROOT)
+    if not files:
+        files = [os.path.join(ROOT, f) for f in DATEIEN]
+        for muster in ("python/examples/*.py", "julia/examples/*.jl"):
+            files += [os.path.join(ROOT, f) for f in sorted(glob.glob(muster))]
+    per_file = run_all(files, langs, jobs) if jobs > 1 else [None] * len(files)
+    ok = all([check_file(f, langs, write, futs) for f, futs in zip(files, per_file)])
     return 0 if ok else 1
 
 

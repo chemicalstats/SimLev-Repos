@@ -16,19 +16,29 @@ if-Ausdrücke, max(), stats::uniroot): diese müssen jetzt genau der Aufruf von 
 (r_calls.sim_call), beim internen Zinsfuß ohne simulation() (.xirr_rate direkt) ohne Aufruf ("NULL").
 """
 import gzip
+import itertools
 import json
+import re
 import sys
 
 
-def load(p):
-    """Bereichsdatei → {"_inputs": Kopf, <id>: Fall, ...} (seit 1.4.1 eine Datei statt je Fall eine)."""
-    with gzip.open(p, "rt", encoding="utf-8") as fh:
-        out = {"_inputs": json.loads(fh.readline())}
+def zeilen(p):
+    """Zeilen einer Bereichsdatei als Bytes, eine nach der anderen: zuerst der Kopf (Eingabespeicher), dann die Fälle
+    (seit 1.6.3; bis 1.6.2 lagen alle Fälle beider Dateien zugleich im Speicher)."""
+    with gzip.open(p, "rb") as fh:
+        yield fh.readline()
         for ln in fh:
             if ln.strip():
-                c = json.loads(ln)
-                out[c["id"]] = c
-    return out
+                yield ln
+
+
+_ID = re.compile(rb'\{"id":"([^"\\]*)"')
+
+
+def kennung(ln):
+    """Kennung eines Falls (Feld id); ohne Parsen, wenn die Zeile mit ihr beginnt (so schreibt ref_tools.R)."""
+    m = _ID.match(ln)
+    return m.group(1).decode("utf-8") if m else json.loads(ln)["id"]
 
 
 def first_diff(a, b, path=""):
@@ -83,41 +93,81 @@ def cmp_calls(a, b):
 
 
 def main(argv):
-    R, N = load(argv[1]), load(argv[2])
-    fr, fn = sorted(R), sorted(N)
-    bad = 0
-    for f in sorted(set(fr) ^ set(fn)):
-        print("FEHLT %s (%s)" % (f, "neu" if f in fr else "Referenz"))
-        bad += 1
+    # Beide Dateien im Gleichschritt (gleicher Schreiber, gleiche Reihenfolge); Fälle an anderer Stelle warten in
+    # offen_r/offen_n auf ihr Gegenstück. Bytegleiche Zeilen sind gleich (auch r_calls); nur sonst wird verglichen.
+    za, zb = zeilen(argv[1]), zeilen(argv[2])
+    fr, fn = {"_inputs"}, {"_inputs"}
+    offen_r, offen_n = {}, {}
+    meld, doppelt = [], []
     n = engine = errors = warned = 0
     heads = {}
-    for f in sorted(set(fr) & set(fn)):
-        a, b = dict(R[f]), dict(N[f])
-        ca, cb = a.pop("r_calls", None), b.pop("r_calls", None)
-        d = first_diff(a, b)
-        if not d and (ca is None) != (cb is None):
-            d = "/r_calls"
-        if not d and ca is not None:
-            d, ch = cmp_calls(ca, cb)
-            for k, v in ch.items():
-                heads[k] = heads.get(k, 0) + v
-        if d:
-            print("ABWEICHUNG %s: %s" % (f, d))
-            bad += 1
+
+    def pruefe(f, la, lb):
+        nonlocal n, engine, errors, warned
+        if la == lb and f.startswith("_"):
+            return            # Eingabespeicher bytegleich: nichts zu zählen
+        a = json.loads(la)
+        if la != lb:
+            b = json.loads(lb)
+            ca, cb = a.pop("r_calls", None), b.pop("r_calls", None)
+            d = first_diff(a, b)
+            if not d and (ca is None) != (cb is None):
+                d = "/r_calls"
+            if not d and ca is not None:
+                d, ch = cmp_calls(ca, cb)
+                for k, v in ch.items():
+                    heads[k] = heads.get(k, 0) + v
+            if d:
+                meld.append((f, "ABWEICHUNG %s: %s" % (f, d)))
+        else:
+            a.pop("r_calls", None)
         if f.startswith("_"):
-            continue
+            return
         n += 1
         code = a.get("r", "")
         if "tax = " not in code and "splits = " not in code and "details = TRUE" not in code and "error" not in a:
             engine += 1
         errors += "error" in a
         warned += bool(a.get("warnings"))
+
+    pruefe("_inputs", next(za), next(zb))
+    for la, lb in itertools.zip_longest(za, zb):
+        ka = None if la is None else kennung(la)
+        kb = None if lb is None else kennung(lb)
+        for k, menge in ((ka, fr), (kb, fn)):
+            if k is not None:
+                if k in menge:
+                    doppelt.append(k)   # bis 1.6.2 galt still der letzte Fall dieser Kennung
+                menge.add(k)
+        if ka is not None and ka == kb:
+            pruefe(ka, la, lb)
+            continue
+        if ka is not None:
+            if ka in offen_n:
+                pruefe(ka, la, offen_n.pop(ka))
+            else:
+                offen_r[ka] = la
+        if kb is not None:
+            if kb in offen_r:
+                pruefe(kb, offen_r.pop(kb), lb)
+            else:
+                offen_n[kb] = lb
+    bad = 0
+    for f in sorted(fr ^ fn):
+        print("FEHLT %s (%s)" % (f, "neu" if f in fr else "Referenz"))
+        bad += 1
+    for f in sorted(set(doppelt)):
+        print("DOPPELT %s (Kennung mehrfach in einer Datei)" % f)
+        bad += 1
+    for _, m in sorted(meld):
+        print(m)
+        bad += 1
+    gemeinsam = len(fr & fn)
     print("sim_fuzz: %d Fälle, davon %d ohne Steuer/Splits/details (Tagesengine), %d mit Fehler, %d mit Warnungen"
           % (n, engine, errors, warned))
     print("sim_fuzz: Kopfzeilen seit 1.4.1 Aufruf von simulation() bzw. ohne Aufruf: %d%s"
           % (sum(heads.values()), " (%s)" % ", ".join("%s %d" % kv for kv in sorted(heads.items())) if heads else ""))
-    print("sim_fuzz: %d/%d Einträge gleich" % (len(set(fr) & set(fn)) - bad + len(set(fr) ^ set(fn)) * 0,
-                                              len(set(fr) | set(fn))) if bad else
+    print("sim_fuzz: %d/%d Einträge gleich" % (gemeinsam - bad, len(fr | fn)) if bad else
           "sim_fuzz: alle %d Fälle gleich (R neu = Referenz)" % (len(fr) - 1))
     return 1 if bad else 0
 

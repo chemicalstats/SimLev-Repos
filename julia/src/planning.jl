@@ -529,6 +529,7 @@ println(gp["probability"])
 ```
 """
 function planning_goal(returns, start_value, goal, horizon; contributions = 0, n_grid = 301, n_sim = 5000, seed = nothing)
+    @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
     returns = SimLev.as_rframe(returns)
     R, cn0, isnum = _as_matrix(returns)
     S, K = R === nothing ? (0, 0) : size(R)
@@ -627,7 +628,7 @@ function _print_goalplan(io::IO, x)
 end
 
 "`plot.SimLevGoalPlan` (SVG): optimale Kandidatenwahl je Periode und Vermögen (log10)."
-function _plot_goalplan(x; file = nothing)
+function _plot_goalplan(x)
     g = DA._f64(x["grid"]); goal = Float64(x["goal"])
     keep = findall(v -> v >= goal / 20 && v <= goal * 3, g)
     P = x["policy"][:, keep]
@@ -651,7 +652,7 @@ function _plot_goalplan(x; file = nothing)
     ch = Int[Int(P[t, q]) for t in 1:H for q in 1:nq]
     data = SimLev.RList("policy" => SimLev.RFrame("period" => per, "wealth" => Float64[g[keep][q] for _ in 1:H for q in 1:nq],
                                                   "choice" => ch, "candidate" => String[cands[clamp(c, 1, K)] for c in ch]))
-    return (_ana_svg_done(s, file), data)
+    return (_ana_svg_done(s), data)
 end
 
 function __init__()

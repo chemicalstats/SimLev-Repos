@@ -24,19 +24,20 @@ from ._r import fmt as _fmt
 from ._r import libm as _libm
 from ._r.fmt import NA_REAL
 from ._r.rlist import RList
-from ._r.rnum import r_colmeans, r_cummax, r_cumsum, r_mean, r_mean_int, r_pow, r_sd, r_var
+from ._r.rnum import r_colmeans, r_cummax, r_cumsum, r_mean, r_mean_int, r_sd, r_var
 # Grafik: Bausteine des Stils Analysegrafiken und Zahlen wie in Julia aus svg.py
 from .svg import (_MONATE_KURZ, _AnaSvg, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_ramp, _ana_rect,
                   _ana_svg_done, _ana_text, _ana_year_ticks, _jl_max, _jl_maximum, _jl_min, _jl_minimum)
 from ._util import _dates, _days, _match_arg
 from ._util import _ext
 from ._util import _cagr_q, _geo_ann
+from ._util import _match_days, _pow_rec
+from .backcast import _fill_na
 
 __all__ = ["result_analysis", "SimLevAnalysis"]
 
 _NAN = float("nan")   # R-NaN (z. B. mean() leerer Vektoren)
 _NA = NA_REAL         # R-NA_real_
-_EPOCH = np.datetime64("1970-01-01", "D")
 _MONTH_ABB = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -56,10 +57,6 @@ def _message(text):
 def _to_date_days(x, what):
     """``.to_date(x, what)`` (Teil A) → Tage als float64."""
     return _days(_ext("data_prep", "_to_date")(x, what))
-
-
-def _fill_na(v, method="locf", keep_leading=False):
-    return np.asarray(_ext("backcast", "_fill_na")(v, method, keep_leading=keep_leading), dtype=np.float64)
 
 
 def _fmt_date1(day):
@@ -136,10 +133,7 @@ def _is_num_scalar(x):
 
 
 def _is_result(x):
-    try:
-        from .result import SimLevResult
-    except ImportError:  # pragma: no cover
-        return False
+    from .result import SimLevResult
     return isinstance(x, SimLevResult)
 
 
@@ -334,7 +328,7 @@ def _da_deflate(s, inflation):
             scalar = True
     if scalar:
         b = 1 + float(inflation) / 100
-        cpi = np.array([r_pow(b, e) for e in (d - d[0]) / 365.25], dtype=np.float64)
+        cpi = _pow_rec(b, (d - d[0]) / 365.25)
     else:
         cpi = np.asarray(_ext("data_prep", "_cpi_level")(inflation, pd.DataFrame({"date": _dates(d)}), _dates(d),
                                                          "inflation"), dtype=np.float64)
@@ -391,7 +385,6 @@ def _da_mwrr(s):
     return float(xirr(np.concatenate([[0.0], t[fi]]), np.concatenate([[start], fl[fi]]), float(w[-1]), horizon))
 
 
-_DD_COLS = ["start", "trough", "end", "depth", "days_to_trough", "days_to_recover", "days_total"]
 
 
 def _da_drawdowns(date, value, top=10):
@@ -531,15 +524,6 @@ def _da_metrics(s, rate, ppy, var_levels):
 _BM_ROWS = ["alpha", "beta", "correlation", "r_squared", "correlation_up", "correlation_down",
             "up_capture", "down_capture", "capture_spread", "active_return", "tracking_error",
             "information_ratio", "m2", "treynor"]
-
-
-def _match_days(a, b):
-    """``match(a, b)`` für Tage (0-basiert, -1 = kein Treffer)."""
-    pos = {}
-    for i, v in enumerate(b):
-        if v not in pos:
-            pos[v] = i
-    return np.array([pos.get(v, -1) for v in a], dtype=np.int64)
 
 
 def _da_benchmark(s, b, rate, ppy, cagr_s, cagr_b):
@@ -1213,5 +1197,5 @@ SimLevAnalysis.plot = _plot_method(_plot_analysis, "SimLevAnalysis")
 
 from ._r.base import quiet_fp  # noqa: E402
 
-quiet_fp(globals(), __all__ + ["_da_drawdowns", "_da_rf", "_without_filled"])
+quiet_fp(globals(), __all__ + ["_da_drawdowns", "_da_rf"])
 

@@ -23,41 +23,14 @@
 #include <string.h>
 
 #include "slc.h"
+#include "slc_rbase.h"   /* sl_r_colsums_idx (seit 1.6.3) */
 
 /* .Call-Huellen mit C-Bindung (Registrierung in init.cpp) */
 extern "C" {
 
-/* ── Kontext und Rueckmeldungen ── */
+#include "huelle_r.h"   /* Kontext, Rueckmeldungen, Argumentpruefungen (seit 1.6.3 gemeinsam) */
 
-static void chk_int(void *d) { (void) d; R_CheckUserInterrupt(); }
-static int r_interrupted(void *h) { (void) h; return !R_ToplevelExec(chk_int, NULL); }
-
-static void ctx_init(sl_ctx *cx)
-{
-    sl_ctx_init(cx);
-    cx->interrupted = r_interrupted;
-}
-
-/* Warnungen ausgeben, bei Fehler abbrechen (nprot Schutzstufen vorher freigeben) */
-static void finish(sl_ctx *cx, int st, int nprot)
-{
-    int i;
-    char msg[SL_MSG_LEN];
-    for (i = 0; i < cx->n_warn; i++) Rf_warningcall(R_NilValue, "%s", cx->warn[i]);
-    if (st != SL_OK) {
-        memcpy(msg, cx->msg, SL_MSG_LEN);
-        if (nprot) UNPROTECT(nprot);
-        if (st == SL_EINTR) R_CheckUserInterrupt();
-        Rf_errorcall(R_NilValue, "%s", msg);
-    }
-}
-
-static void get_state(SEXP s, sl_rng *r)
-{
-    if (TYPEOF(s) != RAWSXP || XLENGTH(s) != 32)
-        Rf_errorcall(R_NilValue, "interner Fehler: Zufallszustand muss raw(32) sein");
-    memcpy(r->s, RAW(s), 32);
-}
+/* ── weitere Hilfen ── */
 
 static SEXP new_state(const sl_rng *r)
 {
@@ -67,31 +40,12 @@ static SEXP new_state(const sl_rng *r)
     return s;
 }
 
-static double num1(SEXP x, const char *what)
-{
-    if (TYPEOF(x) != REALSXP || XLENGTH(x) != 1)
-        Rf_errorcall(R_NilValue, "interner Fehler: %s muss eine Zahl (double, Laenge 1) sein", what);
-    return REAL(x)[0];
-}
-
-static int lgl1(SEXP x, const char *what)
-{
-    if (TYPEOF(x) != LGLSXP || XLENGTH(x) != 1 || LOGICAL(x)[0] == NA_LOGICAL)
-        Rf_errorcall(R_NilValue, "interner Fehler: %s muss TRUE oder FALSE sein", what);
-    return LOGICAL(x)[0];
-}
-
 static int64_t count1(SEXP x, const char *what)
 {
     double v = num1(x, what);
     if (!(v >= 0 && v <= 4503599627370496.0) || v != (double) (int64_t) v)
         Rf_errorcall(R_NilValue, "interner Fehler: %s muss eine ganze Zahl >= 0 sein", what);
     return (int64_t) v;
-}
-
-static void need_real(SEXP x, const char *what)
-{
-    if (TYPEOF(x) != REALSXP) Rf_errorcall(R_NilValue, "interner Fehler: %s muss double sein", what);
 }
 
 static SEXP pair(SEXP a, const sl_rng *r)
@@ -338,23 +292,38 @@ SEXP C_sl_pbeta(SEXP x, SEXP a, SEXP b, SEXP lower)
     return out;
 }
 
-typedef int (*tdist_fn)(sl_ctx *, int64_t, const double *, double, int, double *);
-
-static SEXP tdist(tdist_fn f, SEXP x, SEXP df, SEXP lower)
+/* colSums/colMeans(x[idx, , drop = FALSE]) ohne die Kopie (seit 1.6.3, sl_r_colsums_idx in slc_rbase.cpp): x double-
+ * Matrix, idx Zeilennummern (integer oder ganzzahliges double, 1-basiert), narm, mean logisch; Ergebnis double der
+ * Laenge ncol(x) ohne Namen. Bit fuer Bit wie die Grundfunktion auf der Kopie (long double je Spalte). */
+SEXP C_sl_r_colsums_idx(SEXP x, SEXP idx, SEXP narm, SEXP mean)
 {
-    sl_ctx cx;
-    SEXP out;
+    SEXP out, dim;
+    int64_t *ix;
+    R_xlen_t m, i;
     int st;
     need_real(x, "x");
-    ctx_init(&cx);
-    out = PROTECT(Rf_allocVector(REALSXP, XLENGTH(x)));
-    st = f(&cx, XLENGTH(x), REAL(x), num1(df, "df"), lgl1(lower, "lower.tail"), REAL(out));
-    finish(&cx, st, 1);
+    dim = Rf_getAttrib(x, R_DimSymbol);
+    if (TYPEOF(dim) != INTSXP || XLENGTH(dim) != 2) Rf_errorcall(R_NilValue, "interner Fehler: x muss eine Matrix sein");
+    const int64_t nr = INTEGER(dim)[0], nc = INTEGER(dim)[1];
+    if (TYPEOF(idx) != INTSXP && TYPEOF(idx) != REALSXP)
+        Rf_errorcall(R_NilValue, "interner Fehler: idx muss integer oder double sein");
+    m = XLENGTH(idx);
+    ix = (int64_t *) R_alloc((size_t) (m > 0 ? m : 1), sizeof(int64_t));
+    for (i = 0; i < m; i++) {
+        if (TYPEOF(idx) == INTSXP) {
+            const int v = INTEGER(idx)[i];
+            ix[i] = v == NA_INTEGER ? 0 : (int64_t) v;
+        } else {
+            const double v = REAL(idx)[i];
+            ix[i] = (v >= 1 && v <= (double) nr && v == (double) (int64_t) v) ? (int64_t) v : 0;
+        }
+    }
+    out = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t) nc));
+    st = sl_r_colsums_idx(nr, nc, REAL(x), 1, nr, (int64_t) m, ix, 1, lgl1(narm, "narm"), lgl1(mean, "mean"), REAL(out));
     UNPROTECT(1);
+    if (st == SL_ENOMEM) Rf_errorcall(R_NilValue, "kein Speicher");
+    if (st != SL_OK) Rf_errorcall(R_NilValue, "sl_r_colsums_idx: Zeilennummer ausserhalb");
     return out;
 }
-
-SEXP C_sl_pt(SEXP x, SEXP df, SEXP lower) { return tdist(sl_pt, x, df, lower); }
-SEXP C_sl_qt(SEXP p, SEXP df, SEXP lower) { return tdist(sl_qt, p, df, lower); }
 
 }  /* extern "C" */

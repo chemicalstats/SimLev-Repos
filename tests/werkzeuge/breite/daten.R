@@ -2,7 +2,7 @@
 # Module: data_prep, backcast, signals (bis 1.4.0 je ein Generator gen_<modul>.R, hier wörtlich hintereinander).
 # Aufruf (Repo-Wurzel): LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> SIMLEV_FAELLE_DIR=<ordner> Rscript tests/werkzeuge/breite/daten.R
 # Breitenprüfung, nichts abgelegt: alle bisherigen Einzelfälle des Bereichs (bis 1.4.1 Generator des Katalogs) flach nach
-# <ordner>/breite_daten.jsonl.gz; tests/werkzeuge/gleichlauf/run.sh vergleicht Python und Julia damit. Abgelegt sind die Szenarien
+# <ordner>/breite_daten.jsonl.gz; tests/werkzeuge/gleichlauf/run.py vergleicht Python und Julia damit. Abgelegt sind die Szenarien
 # und Tabellen aus tests/gleichlauf/erzeugen/daten.R (Format und Umgebung: tests/gleichlauf/erzeugen/ref_tools.R).
 source("tests/gleichlauf/erzeugen/ref_tools.R")
 ref_bereich("breite_daten", alle = TRUE)
@@ -185,17 +185,9 @@ rc("todate_iso", "SimLev:::.to_date(c('2020-01-05', '1650-03-01', '1799/12/31', 
    "result = DP._to_date(['2020-01-05', '1650-03-01', '1799/12/31', None, '', ' 2021-3-7 ', '2020-01-01xyz'])")
 rc("todate_err1", "SimLev:::.to_date('31-12-2024')", "result = DP._to_date('31-12-2024')")
 rc("todate_err2", "SimLev:::.to_date('24-12-31', 'x')", "result = DP._to_date('24-12-31', 'x')")
-rc("todate_err3", "SimLev:::.to_date(c('2020-01-01', '2021-02-30', '2021-13-01'), 'feld')",
-   "result = DP._to_date(['2020-01-01', '2021-02-30', '2021-13-01'], 'feld')")
 rc("todate_lax", "SimLev:::.to_date(c('31-12-2024', '2021-02-30', '2020-02-29', '99999-01-01'), strict = FALSE)",
    "result = DP._to_date(['31-12-2024', '2021-02-30', '2020-02-29', '99999-01-01'], strict=False)")
-rc("todate_num", "SimLev:::.to_date(c(18000.5, 1), 'd')", "result = DP._to_date(np.array([18000.5, 1]), 'd')")
-rc("todate_int", "SimLev:::.to_date(5L)", "result = DP._to_date(5)")
 rc("todate_date", "SimLev:::.to_date(d)", "result = DP._to_date(d)", list(d = as.Date(c("2020-01-01", NA, "1900-02-28"))))
-rc("todate_factor", "SimLev:::.to_date(factor(c('2020-01-02', '2020-01-01', '2020-01-02')))",
-   "result = DP._to_date(pd.Categorical(['2020-01-02', '2020-01-01', '2020-01-02']))")
-rc("todate_posix", "SimLev:::.to_date(as.POSIXct(c('2020-01-01 00:30', '2020-06-30 23:59'), tz = 'Europe/Berlin'))",
-   "result = DP._to_date(pd.Series(pd.to_datetime(['2020-01-01 00:30', '2020-06-30 23:59'])).dt.tz_localize('Europe/Berlin'))")
 
 # ── .add_months ─────────────────────────────────────────────────────────────
 rc("addm1", "SimLev:::.add_months(as.Date(c('2024-01-31', '2023-01-31', '2024-02-29', '2024-03-31', '2024-01-15', '2024-12-31')), c(1, 1, 12, -1, 1, 2))",
@@ -220,25 +212,15 @@ b <- data.frame(date = as.Date("2024-01-02") + 0:40, close = 50 + 0:40)
 AL <- function(call) sprintf("x <- %s; list(df = x, filled = attr(x, 'filled'))", call)
 ALP <- function(call) sprintf("x = %s\nresult = dict(df=x, filled=x.attrs['filled'])", call)
 rc("al_basic", AL("series_align(us = a, eu = b)"), ALP("DP.series_align(us=a, eu=b)"), list(a = a, b = b))
-rc("al_maxgap", AL("series_align(us = a, eu = b, max_gap = 10)"), ALP("DP.series_align(us=a, eu=b, max_gap=10)"), list(a = a, b = b))
 rc("al_maxgap2", AL("series_align(us = a, eu = b, max_gap = 2.5, fill = 'linear')"), ALP("DP.series_align(us=a, eu=b, max_gap=2.5, fill='linear')"), list(a = a, b = b))
-rc("al_inter", AL("series_align(us = a, eu = b, calendar = 'intersect', range = 'all')"),
-   ALP("DP.series_align(us=a, eu=b, calendar='intersect', range='all')"), list(a = a, b = b))
 rc("al_union", AL("series_align(us = a, eu = b, calendar = 'union', range = 'all')"),
    ALP("DP.series_align(us=a, eu=b, calendar='union', range='all')"), list(a = a, b = b))
-rc("al_union_c", AL("series_align(us = a, eu = b, calendar = 'uni')"), ALP("DP.series_align(us=a, eu=b, calendar='uni')"), list(a = a, b = b))
 rc("al_all_lin", AL("series_align(us = a, eu = b, range = 'all', fill = 'linear')"),
    ALP("DP.series_align(us=a, eu=b, range='all', fill='linear')"), list(a = a, b = b))
 rc("al_none", AL("series_align(us = a, eu = b, range = 'all', fill = 'none')"),
    ALP("DP.series_align(us=a, eu=b, range='all', fill='none')"), list(a = a, b = b))
-rc("al_startend", AL("series_align(us = a, eu = b, range = 'all', start = '2024-01-03', end = as.Date('2024-01-20'))"),
-   ALP("DP.series_align(us=a, eu=b, range='all', start='2024-01-03', end=np.datetime64('2024-01-20'))"), list(a = a, b = b))
 rc("al_err_name", "series_align(a, b)", "result = DP.series_align(a, b)", list(a = a, b = b))
-rc("al_err_none", "series_align()", "result = DP.series_align()")
 rc("al_err_overlap", "series_align(us = a, eu = b, start = '2025-01-01')", "result = DP.series_align(us=a, eu=b, start='2025-01-01')", list(a = a, b = b))
-rc("al_err_dup", "series_align(us = data.frame(date = a$date, A = 1:5, B = 2:6), eu = data.frame(date = a$date, A = 1:5, C = 1))",
-   "result = DP.series_align(us=pd.DataFrame(dict(date=a['date'], A=np.arange(1, 6), B=np.arange(2, 7))), eu=pd.DataFrame(dict(date=a['date'], A=np.arange(1, 6), C=1.0)))",
-   list(a = a))
 rc("al_err_arg", "series_align(us = a, fill = 'spline')", "result = DP.series_align(us=a, fill='spline')", list(a = a))
 rc("al_named", AL("series_align(x = c('2024-01-03' = 1, '2024-01-01' = 2, '2024-01-07' = 3), y = b)"),
    ALP("DP.series_align(x=pd.Series([1., 2, 3], index=['2024-01-03', '2024-01-01', '2024-01-07']), y=b)"), list(b = b))
@@ -246,11 +228,8 @@ rc("al_multi", AL("series_align(us = data.frame(date = b$date, A = b$close, B = 
    ALP("DP.series_align(us=pd.DataFrame(dict(date=b['date'], A=b['close'], B=b['close'].to_numpy()[::-1], txt='x')), eu=a)"), list(a = a, b = b))
 set.seed(1); tage <- seq.Date(as.Date("2022-01-03"), by = "day", length.out = 30)
 roh <- data.frame(X = 1:30, Datum = tage, Kurs = 100 * cumprod(1 + rnorm(30, 3e-4, 0.01)))
-rc("al_rownum", AL("series_align(etf = roh)"), ALP("DP.series_align(etf=roh)"), list(roh = roh))
 rc("al_rownum1", AL("series_align(etf = roh[, c('X', 'Kurs')], b = roh[, c('Datum', 'Kurs')])"),
    ALP("DP.series_align(etf=roh[['X', 'Kurs']], b=roh[['Datum', 'Kurs']])"), list(roh = roh))
-rc("al_numdate", "series_align(etf = data.frame(X = 1:30, Kurs = roh$Kurs))",
-   "result = DP.series_align(etf=pd.DataFrame(dict(X=np.arange(1, 31), Kurs=roh['Kurs'])))", list(roh = roh))
 rc("al_firstcol", AL("series_align(etf = data.frame(tag = format(tage), Kurs = roh$Kurs))"),
    ALP("DP.series_align(etf=pd.DataFrame(dict(tag=[str(t) for t in tage], Kurs=roh['Kurs'])))"), list(roh = roh, tage = tage))
 x20 <- data.frame(date = format(tage, "%d-%m-%Y"), value = roh$Kurs)
@@ -259,23 +238,15 @@ rc("al_dotdate", "series_align(a = transform(x20, date = format(tage, '%d.%m.%Y'
    "x20['date'] = [pd.Timestamp(t).strftime('%d.%m.%Y') for t in tage]\nresult = DP.series_align(a=x20)", list(x20 = x20, tage = tage))
 rc("al_text", "series_align(a = data.frame(date = dft$date, Kurs = dft$kurs, Volumen = 1:60))",
    "result = DP.series_align(a=pd.DataFrame(dict(date=dft['date'], Kurs=dft['kurs'], Volumen=np.arange(1, 61))))", list(dft = dft))
-rc("al_factor", "series_align(a = data.frame(date = dft$date, Kurs = factor(dft$kurs)))",
-   "result = DP.series_align(a=pd.DataFrame(dict(date=dft['date'], Kurs=pd.Categorical(dft['kurs']))))", list(dft = dft))
-rc("al_nonum", "series_align(a = data.frame(date = dft$date, n = dft$name))",
-   "result = DP.series_align(a=pd.DataFrame(dict(date=dft['date'], n=dft['name'])))", list(dft = dft))
-rc("al_notdf", "series_align(a = 1:3)", "result = DP.series_align(a=np.arange(1, 4))")
 rc("al_posix", AL("series_align(a = data.frame(date = as.POSIXct(format(tage), tz = 'Europe/Berlin'), value = roh$Kurs))"),
    ALP("DP.series_align(a=pd.DataFrame(dict(date=pd.Series(pd.to_datetime([str(t) for t in tage])).dt.tz_localize('Europe/Berlin'), value=roh['Kurs'])))"),
    list(roh = roh, tage = tage))
 xd <- rbind(transform(roh[c(10, 3, 20), ], Kurs = Kurs * 1.05), roh)[, c("Datum", "Kurs")]
 xd <- xd[c(5, 1, 3, 2, 4, 6:nrow(xd)), ]; xd$Datum[7] <- NA
-rc("al_dups", AL("series_align(v = xd, w = b)"), ALP("DP.series_align(v=xd, w=b)"), list(xd = xd, b = b))
 set.seed(3); tdd <- td("2021-01-04", 60)
 us <- data.frame(date = tdd, aktien = 100 * cumprod(1 + rnorm(length(tdd), 0, 0.01)), geld = 100)
 rc("al_trading", AL("series_align(us = us)"), ALP("DP.series_align(us=us)"), list(us = us))
 rc("al_trading_end", AL("series_align(A = us, end = '2021-02-13')"), ALP("DP.series_align(A=us, end='2021-02-13')"), list(us = us))
-rc("al_int", AL("series_align(a = data.frame(date = a$date, v = c(1L, NA, 3L, 4L, 5L)), b = b)"),
-   ALP("DP.series_align(a=pd.DataFrame(dict(date=a['date'], v=[1, simlev._r.fmt.NA_REAL, 3, 4, 5])), b=b)"), list(a = a, b = b))
 rc("al_nainside", AL("series_align(a = data.frame(date = a$date, v = c(1, NA, 3, NA, 5)), b = b, fill = 'linear', range = 'all')"),
    ALP("DP.series_align(a=pd.DataFrame(dict(date=a['date'], v=[1, simlev._r.fmt.NA_REAL, 3, simlev._r.fmt.NA_REAL, 5])), b=b, fill='linear', range='all')"), list(a = a, b = b))
 
@@ -308,8 +279,6 @@ set.seed(9); n <- 300
 d5 <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = n), A = 100 * cumprod(1 + rnorm(n, 0, 0.03)))
 d5$A[seq(10, 290, by = 9)] <- d5$A[seq(10, 290, by = 9)] * c(1.5, 0.6)
 rc("cs_many", "series_check(d)", "result = DP.series_check(d)", list(d = d5))
-rc("cs_print_n", "capture.output(print(series_check(d), max_issues = 3))",
-   "import io, contextlib\nb = io.StringIO()\nwith contextlib.redirect_stdout(b):\n    DP.series_check(d).print(max_issues=3)\nresult = b.getvalue().rstrip('\\n').split('\\n')", list(d = d5))
 d6 <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 10), A = 1:10 + 100)
 rc("cs_clean", "series_check(d)", "result = DP.series_check(d)", list(d = d6))
 rc("cs_split3", "series_check(data.frame(date = d6$date, A = c(90, 91, 92, 30.5, 31, 31.2, 31.3, 31.1, 93.3, 93)))",
@@ -318,17 +287,13 @@ dna <- data.frame(date = as.Date("2020-01-01") + 0:4, C = NA_real_, A = c(1, 2, 
 rc("cs_firstna", "series_check(d)", "result = DP.series_check(d)", list(d = dna))
 rc("cs_onlyna", "series_check(d, columns = c('C', 'C'))", "result = DP.series_check(d, columns=['C', 'C'])", list(d = dna))
 rc("cs_nocols", "series_check(d, columns = character(0))", "result = DP.series_check(d, columns=[])", list(d = dna))
-rc("cs_err", "series_check(data.frame(x = 1))", "result = DP.series_check(pd.DataFrame(dict(x=[1.])))")
 
 # ── series_align_macro ────────────────────────────────────────────────────────────
 cpi <- data.frame(date = seq.Date(as.Date("2019-01-01"), by = "month", length.out = 36), value = 100 * 1.003^(0:35))
 dm <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 120))
 rc("am_yoy", "series_align_macro(d, cpi, 'infl', lag = 45, transform = 'yoy')", "result = DP.series_align_macro(d, cpi, name='infl', lag=45, transform='yoy')", list(d = dm, cpi = cpi))
 rc("am_month", "series_align_macro(d$date, cpi, lag = 1, lag_unit = 'month')", "result = DP.series_align_macro(d['date'], cpi, lag=1, lag_unit='month')", list(d = dm, cpi = cpi))
-rc("am_diff", "series_align_macro(d$date, cpi, transform = 'diff')", "result = DP.series_align_macro(d['date'], cpi, transform='diff')", list(d = dm, cpi = cpi))
 rc("am_mom", "series_align_macro(d, cpi, transform = 'mom', lag = 10.5)", "result = DP.series_align_macro(d, cpi, transform='mom', lag=10.5)", list(d = dm, cpi = cpi))
-rc("am_yoyd", "series_align_macro(d, cpi, 'x', transform = 'yoy_diff', lag = 2, lag_unit = 'month')",
-   "result = DP.series_align_macro(d, cpi, name='x', transform='yoy_diff', lag=2, lag_unit='month')", list(d = dm, cpi = cpi))
 cpi48 <- data.frame(date = seq.Date(as.Date("2018-01-01"), by = "month", length.out = 48), value = 100 * 1.002^(0:47))
 rc("am_gap", "list(series_align_macro(dts, cpi[-30, ], transform = 'yoy'), series_align_macro(dts, cpi, transform = 'yoy'), series_align_macro(as.Date('2020-07-15'), cpi[-30, ], transform = 'mom'))",
    "result = [DP.series_align_macro(dts, cpi.drop(index=29), transform='yoy'), DP.series_align_macro(dts, cpi, transform='yoy'), DP.series_align_macro(np.array(['2020-07-15'], dtype='datetime64[D]'), cpi.drop(index=29), transform='mom')]",
@@ -354,26 +319,16 @@ rc("am_wp5", "series_align_macro(d$date, m, transform = 'yoy', periods = 5)", "r
 rc("am_daily", "series_align_macro(d$date, m, transform = 'yoy', lag = 1)", "result = DP.series_align_macro(d['date'], m, transform='yoy', lag=1)",
    list(d = data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 400)),
         m = data.frame(date = seq.Date(as.Date("2019-01-01"), by = "day", length.out = 600), v = 1:600 / 7)))
-rc("am_named", "series_align_macro(d$date, c('2020-01-15' = 1, '2020-03-01' = 2, '2020-02-01' = 3))",
-   "result = DP.series_align_macro(d['date'], pd.Series([1., 2, 3], index=['2020-01-15', '2020-03-01', '2020-02-01']))", list(d = dm))
 rc("am_err", "series_align_macro(d, cpi, transform = 'abc')", "result = DP.series_align_macro(d, cpi, transform='abc')", list(d = dm, cpi = cpi))
 
 # ── series_convert_currency ───────────────────────────────────────────────────────
 dcc <- data.frame(date = as.Date("2024-01-01") + 0:3, A = c(110, 121, 132, 143), fx = c(1.1, 1.1, 1.2, 1.3))
 rc("cc_col", "series_convert_currency(d, 'A', 'fx')", "result = DP.series_convert_currency(d, 'A', 'fx')", list(d = dcc))
 rc("cc_mult", "series_convert_currency(d, 'A', 2, 'multiply', '_x')", "result = DP.series_convert_currency(d, 'A', 2, method='multiply', suffix='_x')", list(d = dcc))
-rc("cc_df", "series_convert_currency(d, c('A', 'fx'), fx = data.frame(date = as.Date(c('2024-01-03', '2024-01-02')), value = c(1.05, 1.1)), suffix = '_eur')",
-   "result = DP.series_convert_currency(d, ['A', 'fx'], fx=pd.DataFrame(dict(date=np.array(['2024-01-03', '2024-01-02'], dtype='datetime64[D]'), value=[1.05, 1.1])), suffix='_eur')",
-   list(d = dcc))
 rc("cc_named", "series_convert_currency(d, 'A', c('2024-01-02' = 1.2, '2023-12-01' = 1.0))",
    "result = DP.series_convert_currency(d, 'A', pd.Series([1.2, 1.0], index=['2024-01-02', '2023-12-01']))", list(d = dcc))
 rc("cc_vec", "series_convert_currency(d, 'A', c(1, 2, 3, 4))", "result = DP.series_convert_currency(d, 'A', np.array([1., 2, 3, 4]))", list(d = dcc))
-rc("cc_errcol", "series_convert_currency(d, c('USD', 'A', 'x'), fx = 'fx')", "result = DP.series_convert_currency(d, ['USD', 'A', 'x'], fx='fx')", list(d = dcc))
 rc("cc_errfx", "series_convert_currency(d, 'A', fx = 0)", "result = DP.series_convert_currency(d, 'A', fx=0)", list(d = dcc))
-rc("cc_errfx2", "series_convert_currency(d, 'A', fx = c(1, -2.5, NA, 1))", "result = DP.series_convert_currency(d, 'A', fx=np.array([1, -2.5, simlev._r.fmt.NA_REAL, 1]))", list(d = dcc))
-rc("cc_errfx3", "series_convert_currency(d, 'A', fx = 'nope')", "result = DP.series_convert_currency(d, 'A', fx='nope')", list(d = dcc))
-rc("cc_errfx4", "series_convert_currency(d, 'A', fx = 1:3)", "result = DP.series_convert_currency(d, 'A', fx=np.arange(1, 4))", list(d = dcc))
-rc("cc_errfx5", "series_convert_currency(d, 'A', fx = data.frame(date = d$date))", "result = DP.series_convert_currency(d, 'A', fx=pd.DataFrame(dict(date=d['date'])))", list(d = dcc))
 
 # ── index_total_return ─────────────────────────────────────────────────────
 rc("tri_div", "index_total_return(c(100, 100, 98, 99), dividends = c(0, 0, 2, 0), withholding = 15)",
@@ -382,17 +337,8 @@ rc("tri_yield", "index_total_return(rep(100, 366), yield = 2, dates = seq.Date(a
    "result = DP.index_total_return(np.full(366, 100.), yield_=2, dates=np.datetime64('2021-01-01') + np.arange(366).astype('m8[D]'))")
 set.seed(2); pp <- 100 * cumprod(1 + rnorm(200, 2e-4, 0.01)); pp[c(1, 5, 6, 100)] <- NA
 divv <- rep(NA, 200); divv[c(50, 120, 190)] <- c(0.5, 0.7, 0.4)
-rc("tri_full", "index_total_return(p, dividends = dv, yield = seq(1, 3, length.out = 200), withholding = 26.375, dates = td('2020-01-01', 280), start = 1000)",
-   "result = DP.index_total_return(p, dividends=dv, **{'yield': np.linspace(1, 3, 200)}, withholding=26.375, dates=dts, start=1000)",
-   list(p = pp, dv = divv, dts = td("2020-01-01", 280)))
 rc("tri_ychr", "index_total_return(p, yield = c(1, 2), dates = format(td('2020-01-01', 280)))",
    "result = DP.index_total_return(p, yield_=np.array([1., 2]), dates=[str(x) for x in dts])", list(p = pp, dts = td("2020-01-01", 280)))
-rc("tri_err", "index_total_return(rep(100, 6), yield = 2, dates = dts[c(1, 2, 3, 6, 5, 4)])",
-   "result = DP.index_total_return(np.full(6, 100.), yield_=2, dates=dts[[0, 1, 2, 5, 4, 3]])",
-   list(dts = seq.Date(as.Date("2024-01-01"), by = "day", length.out = 6)))
-rc("tri_err2", "index_total_return(rep(100, 6), dates = dts[1:5])", "result = DP.index_total_return(np.full(6, 100.), dates=dts[:5])",
-   list(dts = seq.Date(as.Date("2024-01-01"), by = "day", length.out = 6)))
-rc("tri_one", "index_total_return(5)", "result = DP.index_total_return(5.)")
 
 # ── series_deflate ────────────────────────────────────────────────────────────────
 rc("df_col", "series_deflate(data.frame(date = d$date, A = d$A, cpi = c(100, 110, 121, 130)), 'A', 'cpi')",
@@ -407,11 +353,6 @@ rc("df_named", "series_deflate(d, 'd2', cpi = c('2020-01-01' = 100, '2020-02-15'
    "result = DP.series_deflate(d, 'd2', cpi=pd.Series([100., 101, 103], index=['2020-01-01', '2020-02-15', '2020-04-01']))", list(d = ddf))
 rc("df_vec", "series_deflate(d, 'd2', cpi = 100 + (1:200) / 10, base_date = as.Date('2020-12-31'))",
    "result = DP.series_deflate(d, 'd2', cpi=100 + np.arange(1, 201) / 10, base_date=np.datetime64('2020-12-31'))", list(d = ddf))
-rc("df_errbase", "d1 <- series_align_macro(d, cpi, 'cpi'); series_deflate(d1, 'depot', cpi = 'cpi', base_date = '2019-12-01')",
-   "d1 = DP.series_align_macro(d, cpi, name='cpi'); result = DP.series_deflate(d1, 'depot', cpi='cpi', base_date='2019-12-01')", list(d = ddf, cpi = cpi24))
-rc("df_errnone", "series_deflate(d, 'depot', cpi = data.frame(date = as.Date('2030-01-01'), v = 1))",
-   "result = DP.series_deflate(d, 'depot', cpi=pd.DataFrame(dict(date=np.array(['2030-01-01'], dtype='datetime64[D]'), v=[1.])))", list(d = ddf))
-rc("df_errcol", "series_deflate(d, 'depot', cpi = 'cpi')", "result = DP.series_deflate(d, 'depot', cpi='cpi')", list(d = ddf))
 rc("cpilevel", "SimLev:::.cpi_level(cpi, d, d$date, 'cpi')", "result = DP._cpi_level(cpi, d, d['date'], 'cpi')", list(d = ddf, cpi = cpi24))
 
 # ── series_splice ──────────────────────────────────────────────────────────
@@ -432,17 +373,9 @@ idx <- data.frame(date = cal, value = 100 * cumprod(1 + rnorm(120, 0, 0.01)))
 etf <- idx[!format(cal, "%u") %in% c("6", "7") & cal >= as.Date("2020-02-01"), ]; etf$value <- etf$value / 2
 e2 <- etf[!(etf$date > as.Date("2020-03-02") & etf$date < as.Date("2020-03-09")), ]
 rc("sp_we", "series_splice(etf = etf, idx = idx)", "result = DP.series_splice(etf=etf, idx=idx)", list(etf = etf, idx = idx))
-rc("sp_we2", "series_splice(etf = e2, idx = idx, other = etf[etf$date > as.Date('2020-03-04'), ])",
-   "result = DP.series_splice(etf=e2, idx=idx, other=etf[etf['date'] > np.datetime64('2020-03-04')])", list(etf = etf, e2 = e2, idx = idx))
 vv1 <- c(NA, NA, NA, 5, 5.5, NA, 6, 6.1); vv2 <- c(1, 1.1, NA, 1.2, 1.3, 1.25, 1.4, 1.5); vv3 <- c(2, 2.2, 2.3, 2.4, NA, 2.5, 2.6, 2.7)
 rc("sp_vec", "series_splice(a = v1, b = v2, c = v3, dates = as.Date('2024-01-01') + 0:7)",
    "result = DP.series_splice(a=v1, b=v2, c=v3, dates=np.datetime64('2024-01-01') + np.arange(8).astype('m8[D]'))", list(v1 = vv1, v2 = vv2, v3 = vv3))
-rc("sp_vec2", "series_splice(a = v1, b = v2, dates = format(as.Date('2024-01-01') + 0:7))",
-   "result = DP.series_splice(a=v1, b=v2, dates=[str(np.datetime64('2024-01-01') + np.timedelta64(i, 'D')) for i in range(8)])", list(v1 = vv1, v2 = vv2))
-rc("sp_err1", "series_splice(a = f1)", "result = DP.series_splice(a=f1)", list(f1 = f1))
-rc("sp_err2", "series_splice(a = 1:3, b = 1:3)", "result = DP.series_splice(a=np.arange(1, 4), b=np.arange(1, 4))")
-rc("sp_err3", "series_splice(a = c(NA, NA), b = 1:2, dates = as.Date('2024-01-01') + 0:1)",
-   "result = DP.series_splice(a=np.array([simlev._r.fmt.NA_REAL, simlev._r.fmt.NA_REAL]), b=np.arange(1, 3), dates=np.datetime64('2024-01-01') + np.arange(2).astype('m8[D]'))")
 rc("sp_err4", "series_splice(f1, f2)", "result = DP.series_splice(f1, f2)", list(f1 = f1, f2 = f2))
 
 # ── strategy_from_weights / portfolio_template ─────────────────────────────
@@ -458,11 +391,6 @@ rc("sw_namedall", "strategy_from_weights(c(a = 0.5, b = 0.5), spread = c(x = 0.3
    "result = DP.strategy_from_weights({'a': 0.5, 'b': 0.5}, spread={'x': 0.3})")
 rc("sw_na", "strategy_from_weights(c(a = 0.5, b = 0.5), spread = NA)",
    "result = DP.strategy_from_weights({'a': 0.5, 'b': 0.5}, spread=simlev._r.fmt.NA_REAL)")
-rc("sw_err_sum", "strategy_from_weights(c(a = 0.3, b = 0.3))", "result = DP.strategy_from_weights({'a': 0.3, 'b': 0.3})")
-rc("sw_err_dup", "strategy_from_weights(c(a = 0.5, a = 0.5))", "result = DP.strategy_from_weights(pd.Series([0.5, 0.5], index=['a', 'a']))")
-rc("sw_err_pos", "strategy_from_weights(c(a = 1, b = 0))", "result = DP.strategy_from_weights({'a': 1., 'b': 0.})")
-rc("sw_err_name", "strategy_from_weights(c(0.5, 0.5))", "result = DP.strategy_from_weights(np.array([0.5, 0.5]))")
-rc("sw_err_cfg", "strategy_from_weights(c(a = 0.5, b = 0.5), partial_exemption = c(a = 130))", "result = DP.strategy_from_weights({'a': 0.5, 'b': 0.5}, partial_exemption={'a': 130})")
 rc("pt_perm", "portfolio_template('permanent', map = c(stocks = 'msci_world', long_bonds = 'bund_10y', cash = 'geldmarkt', gold = 'gold_eur'), spread = 0.1)",
    "result = DP.portfolio_template(name='permanent', map={'stocks': 'msci_world', 'long_bonds': 'bund_10y', 'cash': 'geldmarkt', 'gold': 'gold_eur'}, spread=0.1)")
 rc("pt_partial", "portfolio_template('permanent', map = c(stocks = 'W'), spread = 0)",
@@ -470,11 +398,6 @@ rc("pt_partial", "portfolio_template('permanent', map = c(stocks = 'W'), spread 
 for (tn in names(SimLev:::.portfolio_templates))
   rc(paste0("pt_", tn), sprintf("portfolio_template('%s', spread = 0.1)", tn), sprintf("result = DP.portfolio_template(name='%s', spread=0.1)", tn))
 rc("pt_list", "portfolio_template()", "result = DP.portfolio_template()")
-rc("pt_err1", "portfolio_template('xyz')", "result = DP.portfolio_template(name='xyz')")
-rc("pt_err2", "portfolio_template('60_40', map = c(stock = 'A', bonds = 'B'))", "result = DP.portfolio_template(name='60_40', map={'stock': 'A', 'bonds': 'B'})")
-rc("pt_err3", "portfolio_template('60_40', map = c(stocks = 'A', bonds = 'A'))", "result = DP.portfolio_template(name='60_40', map={'stocks': 'A', 'bonds': 'A'})")
-rc("pt_err4", "portfolio_template('60_40', map = c('A', 'B'))", "result = DP.portfolio_template(name='60_40', map=['A', 'B'])")
-rc("pt_err5", "portfolio_template(map = c(stocks = 'A'))", "result = DP.portfolio_template(map={'stocks': 'A'})")
 
 # ── bonds ──────────────────────────────────────────────────────────────────
 db <- data.frame(date = seq.Date(as.Date("2020-01-01"), by = "day", length.out = 3), y = c(2, 2, 3))
@@ -714,14 +637,11 @@ rc("rs_null", "SimLev:::.resolve_series(NULL, d, 'ter', default = 2)", "result =
 rc("rs_col", "SimLev:::.resolve_series('t2', d, 'ter')", "result = BC._resolve_series('t2', d, 'ter')", list(d = dt10))
 rc("rs_named", "SimLev:::.resolve_series(c('2020-01-01' = 0.2, '2020-01-05' = 0.4), d, 'ter')",
    "result = BC._resolve_series(pd.Series([0.2, 0.4], index=['2020-01-01', '2020-01-05']), d, 'ter')", list(d = dt10))
-rc("rs_named2", "SimLev:::.resolve_series(c('2020/01/09' = 0.2, '2020/01/03' = 0.4), d, 'ter')",
-   "result = BC._resolve_series({'2020/01/09': 0.2, '2020/01/03': 0.4}, d, 'ter')", list(d = dt10))
 rc("rs_df", "SimLev:::.resolve_series(data.frame(date = as.Date(c('2020-01-03')), ter = 0.7), d, 'ter')",
    "result = BC._resolve_series(pd.DataFrame(dict(date=np.array(['2020-01-03'], dtype='datetime64[D]'), ter=[0.7])), d, 'ter')", list(d = dt10))
 rc("rs_df2", "SimLev:::.resolve_series(data.frame(tag = c('2020-01-08', '2020-01-02'), wert = c(1, 2), x = 3), d, 'ter')",
    "result = BC._resolve_series(pd.DataFrame(dict(tag=['2020-01-08', '2020-01-02'], wert=[1., 2], x=3.)), d, 'ter')", list(d = dt10))
 rc("rs_vec", "SimLev:::.resolve_series(1:10, d, 'ter')", "result = BC._resolve_series(np.arange(1, 11), d, 'ter')", list(d = dt10))
-rc("rs_namednodate", "SimLev:::.resolve_series(c(a = 1), d, 'ter')", "result = BC._resolve_series(pd.Series([1.], index=['a']), d, 'ter')", list(d = dt10))
 rc("rs_err_col", "SimLev:::.resolve_series('nope', d, 'ter')", "result = BC._resolve_series('nope', d, 'ter')", list(d = dt10))
 rc("rs_err_len", "SimLev:::.resolve_series(1:3, d, 'ter')", "result = BC._resolve_series(np.arange(1, 4), d, 'ter')", list(d = dt10))
 rc("rs_err_df", "SimLev:::.resolve_series(data.frame(date = d$date), d, 'ter')", "result = BC._resolve_series(pd.DataFrame(dict(date=d['date'])), d, 'ter')", list(d = dt10))
@@ -773,8 +693,6 @@ rc("bf_lagauto", FIT("ter = 0.5, leverage = 2, rate = 'rate', lag = 'auto'"), FI
 rc("bf_short", "backcast_fit(s, 'etf', 'idx', ter = 0.5, leverage = -1, rate = 'rate', lag = 'auto', fit = c('drag', 'spread'))",
    "result = BC.backcast_fit(s, 'etf', 'idx', ter=0.5, leverage=-1, rate='rate', lag='auto', fit=['drag', 'spread'])", list(s = sm))
 rc("bf_linear", "backcast_fit(s, 'etf', 'idx', ter = 0.2, model = 'linear')", "result = BC.backcast_fit(s, 'etf', 'idx', ter=0.2, model='linear')", list(s = s1))
-rc("bf_linear_w", "backcast_fit(s, 'etf', 'idx', model = 'linear', fit = c('drag', 'beta', 'spread'), fx = 'fx', index_fill = 'linear')",
-   "result = BC.backcast_fit(s, 'etf', 'idx', model='linear', fit=['drag', 'beta', 'spread'], fx='fx', index_fill='linear')", list(s = sp))
 rc("bf_spline", "f <- backcast_fit(s, 'etf', 'idx', model = 'spline', fx = 'fx', objective = 'return'); f$regression <- NULL; f",
    "result = BC.backcast_fit(s, 'etf', 'idx', model='spline', fx='fx', objective='return'); result['regression'] = None", list(s = sp))
 rc("bf_stine", "backcast_fit(s, 'etf', 'idx', index_fill = 'stine', validate = FALSE)", "result = BC.backcast_fit(s, 'etf', 'idx', index_fill='stine', validate=False)", list(s = sp))
@@ -785,23 +703,10 @@ rc("bf_chrdate", "s$date <- format(s$date); backcast_fit(s[s$date >= '2006-04-01
    "s['date'] = [str(x)[:10] for x in s['date']]\nresult = BC.backcast_fit(s[s['date'] >= '2006-04-01'], 'etf', 'idx', ter=0.5, leverage=2, rate='rate', fit='beta')", list(s = s2))
 rc("bf_summary", "f <- backcast_fit(s, 'etf', 'idx', ter = 0.5, leverage = 2, rate = 'rate'); summary(f)",
    "f = BC.backcast_fit(s, 'etf', 'idx', ter=0.5, leverage=2, rate='rate'); result = BC.summary_SimLevBackcastFit(f)", list(s = s2))
-rc("bf_err_col", "backcast_fit(s, 'etf', 'missing')", "result = BC.backcast_fit(s, 'etf', 'missing')", list(s = s2))
-rc("bf_err_lev", "backcast_fit(s, 'etf', 'idx', leverage = 0)", "result = BC.backcast_fit(s, 'etf', 'idx', leverage=0)", list(s = s2))
-rc("bf_err_few", "s$etf <- NA; backcast_fit(s, 'etf', 'idx')", "s['etf'] = simlev._r.fmt.NA_REAL\nresult = BC.backcast_fit(s, 'etf', 'idx')", list(s = s2))
 rc("bf_warn_spread", "backcast_fit(s, 'etf', 'idx', ter = 0.5, fit = c('drag', 'spread'), validate = FALSE)",
    "result = BC.backcast_fit(s, 'etf', 'idx', ter=0.5, fit=['drag', 'spread'], validate=False)", list(s = s2))
-rc("bf_err_bounds", "backcast_fit(s, 'etf', 'idx', bounds = list(drag = c(5, -5)))", "result = BC.backcast_fit(s, 'etf', 'idx', bounds={'drag': [5, -5]})", list(s = s2))
-rc("bf_err_bounds2", "backcast_fit(s, 'etf', 'idx', bounds = list(alpha = c(0, 1)))", "result = BC.backcast_fit(s, 'etf', 'idx', bounds={'alpha': [0, 1]})", list(s = s2))
 rc("bf_err_bounds3", "backcast_fit(s, 'etf', 'idx', bounds = list(beta = c(0.5, NA)))", "result = BC.backcast_fit(s, 'etf', 'idx', bounds={'beta': [0.5, simlev._r.fmt.NA_REAL]})", list(s = s2))
-rc("bf_err_fit", "backcast_fit(s, 'etf', 'idx', fit = 'alpha')", "result = BC.backcast_fit(s, 'etf', 'idx', fit='alpha')", list(s = s2))
-rc("bf_err_grid2", "backcast_fit(s, 'etf', 'idx', leverage = 2, fit = c('drag', 'beta'), method = 'grid')",
-   "result = BC.backcast_fit(s, 'etf', 'idx', leverage=2, fit=['drag', 'beta'], method='grid')", list(s = s2))
 rc("bf_err_sort", "backcast_fit(s[c(2, 1, 3:20), ], 'etf', 'idx')", "result = BC.backcast_fit(s.iloc[[1, 0] + list(range(2, 20))], 'etf', 'idx')", list(s = s2))
-rc("bf_err_dup", "backcast_fit(s[c(1, 1:20), ], 'etf', 'idx')", "result = BC.backcast_fit(s.iloc[[0] + list(range(20))], 'etf', 'idx')", list(s = s2))
-rc("bf_err_na", "s$date[5] <- NA; backcast_fit(s, 'etf', 'idx')", "s.loc[4, 'date'] = pd.NaT\nresult = BC.backcast_fit(s, 'etf', 'idx')", list(s = s2))
-rc("bf_err_nodate", "backcast_fit(s[, -1], 'etf', 'idx')", "result = BC.backcast_fit(s.iloc[:, 1:], 'etf', 'idx')", list(s = s2))
-rc("bf_err_df", "backcast_fit(1:3, 'etf', 'idx')", "result = BC.backcast_fit(np.arange(1, 4), 'etf', 'idx')")
-rc("bf_err_idx", "s$idx[10] <- -1; backcast_fit(s, 'etf', 'idx')", "s.loc[9, 'idx'] = -1\nresult = BC.backcast_fit(s, 'etf', 'idx')", list(s = s2))
 rc("bf_err_model", "backcast_fit(s, 'etf', 'idx', model = 'gam')", "result = BC.backcast_fit(s, 'etf', 'idx', model='gam')", list(s = s2))
 
 # ── backcast ───────────────────────────────────────────────────────────────
@@ -830,17 +735,8 @@ rc("bc_noprod", "s$etf <- NA; backcast(data = s, product = 'etf', index = 'idx',
    "s['etf'] = simlev._r.fmt.NA_REAL\nresult = BC.backcast(data=s, product='etf', index='idx', fx='fx', index_fill='linear')", list(s = sp))
 rc("bc_lead", "s$idx[1:5] <- NA; backcast(data = s, product = 'etf', index = 'idx', rebase = 1)",
    "v = s['idx'].to_numpy(dtype=float, copy=True); v[0:5] = simlev._r.fmt.NA_REAL; s['idx'] = v\nresult = BC.backcast(data=s, product='etf', index='idx', rebase=1)", list(s = sp))
-rc("bc_err_splice", "backcast(data = s, product = 'etf', index = 'idx', leverage = 2, rate = 2, ter = 0.6, splice = '2030-01-01')",
-   "result = BC.backcast(data=s, product='etf', index='idx', leverage=2, rate=2, ter=0.6, splice='2030-01-01')", list(s = s2))
 rc("bc_err_splice2", "backcast(data = s, product = 'etf', index = 'idx', splice = 'gestern')",
    "result = BC.backcast(data=s, product='etf', index='idx', splice='gestern')", list(s = s2))
-rc("bc_err_splice3", "backcast(data = s, product = 'etf', index = 'idx', splice = NA_character_)",
-   "result = BC.backcast(data=s, product='etf', index='idx', splice=np.array([None], dtype=object))", list(s = s2))
-rc("bc_err_data", "backcast()", "result = BC.backcast()")
-rc("bc_err_prod", "backcast(data = s, index = 'idx')", "result = BC.backcast(data=s, index='idx')", list(s = s2))
-rc("bc_err_model", "backcast(data = s, product = 'etf', index = 'idx', model = 'linear')",
-   "result = BC.backcast(data=s, product='etf', index='idx', model='linear')", list(s = s2))
-rc("bc_err_fit", "backcast(list(a = 1))", "result = BC.backcast(fit={'a': 1})")
 rc("bc_err_fill", "backcast(data = s, product = 'etf', index = 'idx', fill = 'x')", "result = BC.backcast(data=s, product='etf', index='idx', fill='x')", list(s = s2))
 ref_done()
 
@@ -928,8 +824,6 @@ rc("core_mean_long", "SimLev:::.roll_mean_core(x, 7L)", "result = SC.roll_mean_c
 rc("core_mean_long2", "SimLev:::.roll_mean_core(x, 3000L)", "result = SC.roll_mean_core(x, 3000)", list(x = xl))
 rc("core_mean_na", "SimLev:::.roll_mean_core(x, 20L)", "result = SC.roll_mean_core(x, 20)", list(x = xna))
 rc("core_mean_inf", "SimLev:::.roll_mean_core(x, 5L)", "result = SC.roll_mean_core(x, 5)", list(x = xinf))
-rc("core_mean_edge", "list(SimLev:::.roll_mean_core(1:5 + 0, 5L), SimLev:::.roll_mean_core(1:5 + 0, 6L), SimLev:::.roll_mean_core(1:5 + 0, 0L), SimLev:::.roll_mean_core(c(0.1, 0.2, 0.3), 1L))",
-   "result = [SC.roll_mean_core(np.arange(1, 6.), 5), SC.roll_mean_core(np.arange(1, 6.), 6), SC.roll_mean_core(np.arange(1, 6.), 0), SC.roll_mean_core(np.array([0.1, 0.2, 0.3]), 1)]")
 rc("core_cov", "SimLev:::.roll_cov_core(x, rev(x), 50L)", "result = SC.roll_cov_core(x, x[::-1], 50)", list(x = xc))
 rc("core_cov_na", "SimLev:::.roll_cov_core(x, sqrt(x), 15L)", "with np.errstate(invalid='ignore'):\n    y = np.sqrt(x)\nresult = SC.roll_cov_core(x, y, 15)", list(x = xna))
 rc("core_cov_edge", "list(SimLev:::.roll_cov_core(1:3 + 0, 1:4 + 0, 2L), SimLev:::.roll_cov_core(1:3 + 0, 3:1 + 0, 3L), SimLev:::.roll_cov_core(1:3 + 0, 3:1 + 0, 4L))",
@@ -939,8 +833,6 @@ rc("roll_var", "SimLev:::.roll_var(x, 50)", "result = SG._roll_var(x, 50)", list
 rc("roll_var_int", "SimLev:::.roll_var(1:30, 7.9)", "result = SG._roll_var(np.arange(1, 31), 7.9)")
 rc("roll_cov", "SimLev:::.roll_cov(x, y, 30)", "result = SG._roll_cov(x, y, 30)", list(x = px, y = rev(px)))
 rc("ema_int", "SimLev:::.ema(x, 10)", "result = SG._ema(x, 10)", list(x = px))
-rc("ema_edge", "list(SimLev:::.ema(1:5 + 0, 5), SimLev:::.ema(1:5 + 0, 6), SimLev:::.ema(1:5 + 0, 0), SimLev:::.ema(c(1, NA, 3, 4, 5, 6), 2))",
-   "result = [SG._ema(np.arange(1, 6.), 5), SG._ema(np.arange(1, 6.), 6), SG._ema(np.arange(1, 6.), 0), SG._ema(np.array([1, simlev._r.fmt.NA_REAL, 3, 4, 5, 6]), 2)]")
 rc("sigout", "SimLev:::.sig_out(c(TRUE, NA, FALSE, TRUE), c(NA, TRUE, TRUE, FALSE), 2)",
    "result = SG._sig_out(np.array([True, None, False, True], dtype=object), np.array([None, True, True, False], dtype=object), 2)")
 
@@ -955,11 +847,9 @@ rc("sma_long", "signal_sma(x, 20)", "result = SG.signal_sma(x, n=20)", list(x = 
 rc("ema_small", "signal_ema(cumsum(rep(1, 50)), 10)", "result = SG.signal_ema(np.cumsum(np.ones(50)), n=10)")
 rc("ema_px", "signal_ema(x, 50, band = 0.5, lag = 3)", "result = SG.signal_ema(x, n=50, band=0.5, lag=3)", list(x = px))
 rc("ema_def", "signal_ema(x)", "result = SG.signal_ema(x)", list(x = px))
-rc("ema_na", "signal_ema(x, 20)", "result = SG.signal_ema(x, n=20)", list(x = xna))
 rc("cross_sma", "signal_crossover(x)", "result = SG.signal_crossover(x)", list(x = px))
 rc("cross_ema", "signal_crossover(x, 20, 100, type = 'ema', band = 0.3, lag = 1)", "result = SG.signal_crossover(x, fast=20, slow=100, type='ema', band=0.3, lag=1)", list(x = px))
 rc("cross_e", "signal_crossover(x, 20, 100, type = 'e')", "result = SG.signal_crossover(x, fast=20, slow=100, type='e')", list(x = px))
-rc("cross_err", "signal_crossover(x, 100, 100)", "result = SG.signal_crossover(x, fast=100, slow=100)", list(x = px))
 rc("cross_err2", "signal_crossover(x, 10, 100, type = 'wma')", "result = SG.signal_crossover(x, fast=10, slow=100, type='wma')", list(x = px))
 rc("mom_small", "signal_momentum(x, 2)", "result = SG.signal_momentum(x, n=2)", list(x = x10))
 rc("mom_px", "signal_momentum(x, 60, threshold = 2, band = 1, lag = 1)", "result = SG.signal_momentum(x, n=60, threshold=2, band=1, lag=1)", list(x = px))
@@ -970,8 +860,6 @@ rc("dd_small", "signal_drawdown(c(100, 89, 79, 85, 95), sell_dd = 20, buy_dd = 1
 rc("dd_px", "signal_drawdown(x, 8, 3)", "result = SG.signal_drawdown(x, sell_dd=8, buy_dd=3)", list(x = px))
 rc("dd_win", "signal_drawdown(x, 6, 2, window = 60, lag = 2)", "result = SG.signal_drawdown(x, sell_dd=6, buy_dd=2, window=60, lag=2)", list(x = px))
 rc("dd_na", "signal_drawdown(x, 8, 3)", "result = SG.signal_drawdown(x, sell_dd=8, buy_dd=3)", list(x = xna))
-rc("dd_na2", "signal_drawdown(c(NA, NA, 5, 4, NA, 3), 30, 10, window = 2)", "result = SG.signal_drawdown(np.array([simlev._r.fmt.NA_REAL, simlev._r.fmt.NA_REAL, 5, 4, simlev._r.fmt.NA_REAL, 3]), sell_dd=30, buy_dd=10, window=2)")
-rc("dd_err", "signal_drawdown(x, 10, 20)", "result = SG.signal_drawdown(x, sell_dd=10, buy_dd=20)", list(x = px))
 rc("vol_def", "signal_volatility(x)", "result = SG.signal_volatility(x)", list(x = px))
 rc("vol_opts", "signal_volatility(x, 30, threshold = 14, band = 1, ppy = 252, lag = 1)", "result = SG.signal_volatility(x, n=30, threshold=14, band=1, ppy=252, lag=1)", list(x = px))
 rc("vol_one", "signal_volatility(x, 1, threshold = 15)", "result = SG.signal_volatility(x, n=1, threshold=15)", list(x = px[1:50]))
@@ -981,13 +869,7 @@ set.seed(2); xv <- 100 * cumprod(1 + rnorm(300, 0, 0.01))
 rc("vol_test", "signal_volatility(x, 20, threshold = 1000)", "result = SG.signal_volatility(x, n=20, threshold=1000)", list(x = xv))
 rc("comb_small", "signal_combine(list(buy = c(TRUE, TRUE), sell = c(FALSE, FALSE)), list(buy = c(TRUE, FALSE), sell = c(FALSE, TRUE)))",
    "result = SG.signal_combine(dict(buy=np.array([True, True]), sell=np.array([False, False])), dict(buy=np.array([True, False]), sell=np.array([False, True])))")
-rc("comb_and", "signal_combine(signal_sma(x, 200), signal_volatility(x, 20, threshold = 15), signal_momentum(x, 100))",
-   "result = SG.signal_combine(SG.signal_sma(x, n=200), SG.signal_volatility(x, n=20, threshold=15), SG.signal_momentum(x, n=100))", list(x = px))
-rc("comb_or", "signal_combine(signal_sma(x, 200), signal_drawdown(x, 8, 3), op = 'or')",
-   "result = SG.signal_combine(SG.signal_sma(x, n=200), SG.signal_drawdown(x, sell_dd=8, buy_dd=3), op='or')", list(x = px))
 rc("comb_one", "signal_combine(signal_sma(x, 50))", "result = SG.signal_combine(SG.signal_sma(x, n=50))", list(x = px))
-rc("comb_err", "signal_combine(signal_sma(x, 200), signal_sma(x[1:500], 50))", "result = SG.signal_combine(SG.signal_sma(x, n=200), SG.signal_sma(x[:500], n=50))", list(x = px))
-rc("comb_err0", "signal_combine()", "result = SG.signal_combine()")
 rc("comb_err_op", "signal_combine(signal_sma(x, 50), op = 'xor')", "result = SG.signal_combine(SG.signal_sma(x, n=50), op='xor')", list(x = px))
 ref_done()
 

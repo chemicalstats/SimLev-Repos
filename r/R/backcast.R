@@ -200,7 +200,12 @@
 #' @keywords internal
 #' @noRd
 .bc_model_returns <- function(prep, par, model, reg = NULL) {
-  base <- if (model == "structural") {
+  .bc_base(prep, par, model, reg) - par[["spread"]] * prep$sp_unit - par[["drag"]] * prep$dr_unit
+}
+
+# Basis der Modellrenditen (ohne spread und drag); haengt nur im Strukturmodell von par (beta) ab
+.bc_base <- function(prep, par, model, reg) {
+  if (model == "structural") {
     par[["beta"]] * prep$leverage * prep$x + prep$fin - prep$ter_cost
   } else if (model == "linear") {
     reg$coef[1] + reg$coef[2] * prep$x
@@ -209,7 +214,6 @@
     out[ok] <- .sl_smspline_predict(reg$fit, prep$x[ok])   # ausserhalb der Knoten linear fortgesetzt
     out
   }
-  base - par[["spread"]] * prep$sp_unit - par[["drag"]] * prep$dr_unit
 }
 
 #' Abweichungsvektor(en) im Fit-Fenster
@@ -550,14 +554,24 @@ backcast_fit <- function(data, product, index,
     if (!length(fit)) return(list(par = par0, value = obj_fun(numeric(0), rows, ob, rg), grid = NULL))
     if (method == "grid") {
       if (length(fit) != 1L) stop("method = 'grid' unterst\u00fctzt genau einen Parameter in 'fit'.")
-      vals <- vapply(grid, function(g) obj_fun(g, rows, ob, rg), numeric(1))
-      best <- grid[which.min(vals)]
-      # Fehlermatrix fuer die Metriktabelle (relative Abweichung 1 - sim/real)
-      err_mat <- vapply(grid, function(g) {
+      # seit 1.6.3 je Gitterpunkt einmal und nur im Fenster rows (elementweise wie .bc_model_returns(...)[rows]);
+      # die Basis einmal vorab, wenn sie nicht vom gesuchten Parameter abhaengt (sonst nur beta im Strukturmodell)
+      sp_r <- prep$sp_unit[rows]; dr_r <- prep$dr_unit[rows]
+      base_r <- if (model != "structural" || fit != "beta") .bc_base(prep, par0, model, rg)[rows]
+      x_r <- prep$x[rows]; fin_r <- prep$fin[rows]; ter_r <- prep$ter_cost[rows]
+      m_obs <- length(ob$pos)
+      ve <- vapply(grid, function(g) {
         p <- par0; p[[fit]] <- g
-        e <- .bc_errors(.bc_model_returns(prep, p, model, rg)[rows], seq_along(rows), ob, "level", 1L)
-        0 - expm1(e)
-      }, numeric(length(ob$pos)))
+        b <- if (is.null(base_r)) p[["beta"]] * prep$leverage * x_r + fin_r - ter_r else base_r
+        r <- b - p[["spread"]] * sp_r - p[["drag"]] * dr_r
+        # Fehlermatrix fuer die Metriktabelle (relative Abweichung 1 - sim/real)
+        c(.bc_objective(r, seq_along(rows), ob, objective, horizon, loss, hybrid_weight),
+          0 - expm1(.bc_errors(r, seq_along(rows), ob, "level", 1L)))
+      }, numeric(1L + m_obs))
+      ve <- matrix(ve, nrow = 1L + m_obs)
+      vals <- ve[1L, ]
+      err_mat <- ve[-1L, , drop = FALSE]
+      best <- grid[which.min(vals)]
       p <- par0; p[[fit]] <- best
       return(list(par = p, value = min(vals), grid = data.frame(value = grid, loss = vals),
                   metrics = .bc_metric_table(err_mat, grid)))

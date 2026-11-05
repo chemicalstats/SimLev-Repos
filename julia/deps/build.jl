@@ -60,13 +60,18 @@ function build()
     mkpath(LIBDIR)
     lib = joinpath(LIBDIR, "libslc." * dlext)
     tmp = lib * ".neu"
-    objs = String[]
     mktempdir() do dir
         @info "SimLev: übersetze $(length(srcs)) Quellen" cmd = Cmd([cxx..., CXXFLAGS..., lay..., THREAD_FLAGS..., "-c"])
-        for s in srcs
-            o = joinpath(dir, splitext(basename(s))[1] * ".o")
-            run(Cmd([cxx..., CXXFLAGS..., lay..., THREAD_FLAGS..., "-c", s, "-o", o]))
-            push!(objs, o)
+        # seit 1.6.3 mehrere Übersetzer gleichzeitig (bis 1.6.2 nacheinander); Befehle und Bindereihenfolge wie bisher
+        objs = [joinpath(dir, splitext(basename(s))[1] * ".o") for s in srcs]
+        par = clamp(Sys.CPU_THREADS, 1, 8)
+        for k in 1:par:length(srcs)
+            ps = [run(Cmd([cxx..., CXXFLAGS..., lay..., THREAD_FLAGS..., "-c", srcs[i], "-o", objs[i]]); wait = false)
+                  for i in k:min(k + par - 1, length(srcs))]
+            for q in ps
+                wait(q)
+                success(q) || error("SimLev: Übersetzen fehlgeschlagen: $(q.cmd)")
+            end
         end
         cmd = Cmd([cxx..., "-shared", objs..., THREAD_FLAGS..., "-lm", "-o", tmp])
         @info "SimLev: baue die Bibliothek slc mit den geteilten Kernen" cmd

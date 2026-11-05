@@ -286,6 +286,7 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
                          sim_args = list(), burn_in = 0L, metrics = bootstrap_study_metrics,
                          objective = "sharpe", maximize = TRUE, keep_returns = c("day", "none"), seed = NULL,
                          cores = 1L) {
+  own_cache <- .sim_study(); on.exit(.sim_study_end(own_cache), add = TRUE)   # Pruef-Cache je Studie (seit 1.5.1)
   method <- match.arg(method)
   # Text statt Logisch (bis 1.0.0), ohne Alias
   if (is.logical(keep_returns))
@@ -347,7 +348,13 @@ param_search <- function(data, builder = NULL, space, strategy = NULL,
   P <- x$results[, x$params, drop = FALSE]
   if (x$method == "grid") {
     L <- do.call(cbind, lapply(x$params, function(p) match(P[[p]], .ps_levels(x$space[[p]]))))
-    return(lapply(seq_len(nrow(L)), function(i) which(apply(abs(sweep(L, 2, L[i, ])) <= radius, 1, all))))
+    # je Punkt die Zeilen mit Abstand <= radius in jeder Dimension; seit 1.6.3 spaltenweise mit & statt apply(, 1, all)
+    # je Zeile (gleiche Treffer: NA verknuepft sich wie in all(), which() laesst NA weg)
+    return(lapply(seq_len(nrow(L)), function(i) {
+      ok <- rep(TRUE, nrow(L))
+      for (j in seq_len(ncol(L))) ok <- ok & abs(L[, j] - L[i, j]) <= radius
+      which(ok)
+    }))
   }
   Z <- vapply(P, function(col) { r <- rank(if (is.numeric(col)) col else as.numeric(factor(col)))
                                   if (max(r) > min(r)) (r - min(r)) / (max(r) - min(r)) else r * 0 }, numeric(nrow(P)))

@@ -70,6 +70,10 @@
 #'     \item{name}{Spaltenname im Pfad (Standard \code{<base>_l<L>}, z. B.
 #'       "eu_l2", bei negativem Hebel \code{<base>_inv<|L|>}, z. B. "us_inv1").}
 #'   }
+#'   Zahlen sind einzelne endliche Zahlen, \code{base} und \code{name} ein
+#'   einzelner Text, \code{finance} und \code{days} eine Zahl oder ein Name aus
+#'   \code{aux}; andere Werte (Vektoren, logisch, Faktor, NA) ergeben einen
+#'   Fehler (seit 1.6.3).
 #'   Tagesrendite (MSCI Daily Leveraged/Short, plus Fondskosten):
 #'   \deqn{r = 1 + L (R - 1) + (1 - L) i \cdot d / 360 - TER \cdot d / 365
 #'         - s \cdot m(L) \cdot d / 360}
@@ -194,26 +198,41 @@ bootstrap_config <- function(indices, letfs = list(), regime_index = NULL, aux =
   aux_type_full[names(aux_type)] <- unname(aux_type)
   is_level <- function(nm) is.character(nm) && isTRUE(aux_type_full[nm] == "level")
 
+  # LETF-Felder (seit 1.6.3 mit Typ und Laenge, in Python und Julia gleich): Zahlen einzeln und endlich, base und name
+  # einzelner Text, finance und days Zahl oder Name einer Zusatzreihe; bis 1.6.2 liefen andere Werte (Vektoren, Text,
+  # logisch, Faktor, NA) still durch einen Rueckfall in R, base als Faktor mit der falschen Spalte
+  txt1 <- function(v) is.character(v) && length(v) == 1L && !is.na(v)
+  num1 <- function(v) is.numeric(v) && length(v) == 1L && is.finite(v)
+  chk_num <- function(i, v, nm) if (!num1(v)) stop(sprintf("LETF %d: %s muss eine einzelne endliche Zahl sein", i, nm))
+  chk_col <- function(i, v, nm) if (!num1(v) && !txt1(v))
+    stop(sprintf("LETF %d: %s muss eine einzelne endliche Zahl oder der Name einer Zusatzreihe aus aux sein", i, nm))
   letf_list <- lapply(seq_along(letfs), function(i) {
     l <- letfs[[i]]
     if (is.null(l$base)) stop(sprintf("LETF %d: 'base' muss angegeben werden", i))
+    if (!txt1(l$base)) stop(sprintf("LETF %d: base muss ein einzelner Name (Text) sein", i))
     if (!l$base %in% index_names)
       stop(sprintf("LETF %d: base '%s' nicht in indices. Verf\u00fcgbar: %s", i, l$base, paste(index_names, collapse = ", ")))
     lev <- l$leverage %||% 2
+    chk_num(i, lev, "leverage")
     if (lev == 0) stop(sprintf("LETF %d: leverage darf nicht 0 sein", i))
     fin <- l$finance %||% 3.5
+    chk_col(i, fin, "finance")
     if (is.character(fin) && !fin %in% aux_names) stop(sprintf("LETF %d: finance-Reihe '%s' nicht in aux.", i, fin))
     if (is_level(fin)) stop(sprintf("LETF %d: finance-Reihe '%s' ist in aux_type als 'level' gekennzeichnet; der Finanzierungszins muss eine Rate (Prozent p. a.) sein.", i, fin))
     if (is.numeric(fin) && fin < 0) warning(sprintf("LETF %d: negativer Finanzierungszins.", i))
     exp_ <- l$expense %||% 0.5
+    chk_num(i, exp_, "expense")
     if (exp_ < 0) stop(sprintf("LETF %d: expense muss >= 0 sein", i))
     days <- l$days %||% 1
+    chk_col(i, days, "days")
     if (is.character(days) && !days %in% aux_names) stop(sprintf("LETF %d: days-Reihe '%s' nicht in aux.", i, days))
     if (is_level(days)) stop(sprintf("LETF %d: days-Reihe '%s' ist in aux_type als 'level' gekennzeichnet; Tage je Zeile werden unver\u00e4ndert gebraucht ('rate').", i, days))
+    spread <- l$spread %||% 0; rate_basis <- l$rate_basis %||% 360; ter_basis <- l$ter_basis %||% 365
+    chk_num(i, spread, "spread"); chk_num(i, rate_basis, "rate_basis"); chk_num(i, ter_basis, "ter_basis")
+    if (!is.null(l$name) && !txt1(l$name)) stop(sprintf("LETF %d: name muss ein einzelner Name (Text) sein", i))
     name <- l$name %||% (if (lev > 0) paste0(l$base, "_l", lev) else paste0(l$base, "_inv", abs(lev)))
     list(name = name, base = l$base, leverage = lev, finance = fin, expense = exp_,
-         spread = l$spread %||% 0, days = days,
-         rate_basis = l$rate_basis %||% 360, ter_basis = l$ter_basis %||% 365)
+         spread = spread, days = days, rate_basis = rate_basis, ter_basis = ter_basis)
   })
   letf_names <- vapply(letf_list, function(x) x$name, "")
   if (anyDuplicated(c(index_names, letf_names, aux_names))) stop("Namen von Indizes, LETFs und aux m\u00fcssen eindeutig sein.")
@@ -678,19 +697,7 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
   g
 }
 
-#' Hebelprodukt-Renditen (MSCI-Formel plus Fondskosten)
-#' @keywords internal
-#' @noRd
-.letf_returns <- function(rb, letf, aux_rows) {
-  L <- letf$leverage
-  rate <- if (is.character(letf$finance)) aux_rows[, letf$finance] else letf$finance
-  d <- if (is.character(letf$days)) aux_rows[, letf$days] else letf$days
-  m <- max(L - 1, 0) + max(-L, 0)
-  1 + L * (rb - 1) + (1 - L) * rate / 100 * d / letf$rate_basis -
-    letf$expense / 100 * d / letf$ter_basis - letf$spread / 100 * m * d / letf$rate_basis
-}
-
-#' Angaben fuer den Kern sl_boot_path (seit 1.6.0) oder NULL (dann rechnet .build_path wie bisher in R)
+#' Angaben fuer den Kern sl_boot_path (seit 1.6.0) oder NULL (seit 1.6.3 ein interner Fehler in .build_path)
 #' @keywords internal
 #' @noRd
 .boot_path_spec <- function(ret, idx, aux, config, start, aux_ratio, aux_start) {
@@ -745,56 +752,19 @@ bootstrap_block_length <- function(x, transform = c("none", "abs", "squared")) {
 .build_path <- function(g, aux, config, start = 100, aux_ratio = NULL, aux_start = NULL) {
   ret <- g$ret; idx <- g$idx
   if (!is.matrix(ret) || any(!is.finite(ret)) || any(ret <= 0)) return(NULL)
-  # seit 1.6.0 im Kern (sl_boot_path: Kurspfade, Hebelprodukte, Zusatzreihen und Niveau-Variante in einem Aufruf),
-  # wenn Namen und Angaben eindeutig sind; sonst wie bisher in R
+  # seit 1.6.0 im Kern (sl_boot_path: Kurspfade, Hebelprodukte, Zusatzreihen und Niveau-Variante in einem Aufruf)
   sp <- .boot_path_spec(ret, idx, aux, config, start, aux_ratio, aux_start)
-  if (!is.null(sp)) {
-    r <- .Call(C_sl_boot_path, ret, sp$idx, aux, if (is.null(aux)) NULL else aux_ratio,
-               if (is.null(aux)) NULL else aux_start, sp$level, sp$letf, start)
-    if (is.null(r)) return(NULL)
-    P <- r[[1L]]
-    # eine Zeile: die Hebelrenditen tragen den Namen der Indexspalte (ret[, base] ohne Dimension), daher wie bisher
-    # Zeilennamen c("", base) aus vapply
-    dimnames(P) <- list(if (nrow(ret) == 1L && nrow(sp$letf)) c("", config$letfs[[1L]]$base), sp$names)
-    if (!is.null(r[[2L]])) { lv <- r[[2L]]; dimnames(lv) <- list(NULL, colnames(aux)); attr(P, "aux_level") <- lv }
-    return(P)
-  }
-  n_out <- nrow(ret)
-  cp <- function(r) start * cumprod(c(1, r))
-  # Spaltenschleife statt apply() (seit 1.5.2; gleiche Werte und Namen), apply nur in Randfällen
-  P <- if (n_out > 0L && ncol(ret) > 0L && is.null(rownames(ret))) {
-    P <- matrix(0, n_out + 1L, ncol(ret), dimnames = if (!is.null(colnames(ret))) list(NULL, colnames(ret)))
-    for (j in seq_len(ncol(ret))) P[, j] <- cp(ret[, j])
-    P
-  } else apply(ret, 2, cp)
-  if (!is.matrix(P)) P <- matrix(P, ncol = ncol(ret))
-  colnames(P) <- config$index_names
-  aux_rows <- if (!is.null(aux)) aux[idx, , drop = FALSE] else NULL
-  if (config$n_letfs) {
-    L <- vapply(config$letfs, function(l) {
-      r <- .letf_returns(ret[, l$base], l, aux_rows)
-      if (any(!is.finite(r))) return(rep(NA_real_, n_out + 1))
-      ko <- which(r <= 0)
-      if (length(ko)) r[ko[1]:n_out] <- 0
-      cp(pmax(r, 0))
-    }, numeric(n_out + 1))
-    if (!is.matrix(L)) L <- matrix(L, ncol = config$n_letfs)
-    if (anyNA(L)) return(NULL)
-    colnames(L) <- config$letf_names
-    P <- cbind(P, L)
-  }
-  if (!is.null(aux)) {
-    A <- aux[c(idx[1], idx), , drop = FALSE]
-    P <- cbind(P, A)
-    if (!is.null(aux_ratio)) {
-      lv <- apply(rbind(1, aux_ratio[idx, , drop = FALSE]), 2, cumprod)
-      if (!is.matrix(lv)) lv <- matrix(lv, ncol = ncol(aux), dimnames = list(NULL, colnames(aux)))
-      lv <- sweep(lv, 2, aux_start %||% (aux[1, ] / aux_ratio[1, ]), `*`)
-      lvl <- colnames(aux)[(config$aux_type %||% character(0))[colnames(aux)] %in% "level"]
-      if (length(lvl)) P[, lvl] <- lv[, lvl]
-      attr(P, "aux_level") <- lv
-    }
-  }
+  # bis 1.6.2 rechnete hier ein Rueckfall in R; seit 1.6.3 unerreichbar (bootstrap_config prueft die LETF-Felder,
+  # .generate_returns liefert double-Matrizen ohne Zeilennamen und ganzzahlige Zeilen)
+  if (is.null(sp)) stop("bootstrap: interner Fehler: Angaben f\u00fcr den Pfadkern unvollst\u00e4ndig (.boot_path_spec)")
+  r <- .Call(C_sl_boot_path, ret, sp$idx, aux, if (is.null(aux)) NULL else aux_ratio,
+             if (is.null(aux)) NULL else aux_start, sp$level, sp$letf, start)
+  if (is.null(r)) return(NULL)
+  P <- r[[1L]]
+  # eine Zeile: die Hebelrenditen tragen den Namen der Indexspalte (ret[, base] ohne Dimension), daher wie bisher
+  # Zeilennamen c("", base) aus vapply
+  dimnames(P) <- list(if (nrow(ret) == 1L && nrow(sp$letf)) c("", config$letfs[[1L]]$base), sp$names)
+  if (!is.null(r[[2L]])) { lv <- r[[2L]]; dimnames(lv) <- list(NULL, colnames(aux)); attr(P, "aux_level") <- lv }
   P
 }
 
@@ -1443,9 +1413,12 @@ bootstrap_study_metrics <- function(res) {
 #' @param chunk_size Pfade je Arbeitspaket (Standard 25); Einheit der
 #'   Parallelisierung und der Zwischenspeicherung.
 #' @param chunk_dir Optional (Standard \code{NULL}) Verzeichnis fuer
-#'   Zwischenergebnisse je Chunk (Dateien \code{chunk_<Nr>_seed<Seed>.rds},
+#'   Zwischenergebnisse je Chunk (Dateien \code{chunk_<Nr>_seed<Seed>_r.rds},
 #'   bei \code{keep_returns} mit Frequenz-Suffix, bei \code{keep_paths} > 0 mit
-#'   Suffix \code{_keep<k>}). Vorhandene Dateien werden
+#'   Suffix \code{_keep<k>}, jeweils vor \code{_r.rds}; Python schreibt
+#'   \code{_py.pkl}, Julia \code{_jl.bin}). Liegt zu einem Chunk nur eine Datei
+#'   einer anderen Sprache oder der Form bis 1.6.2 (\code{chunk_<Nr>_seed<Seed>.rds}),
+#'   bricht die Studie mit einer Meldung ab. Vorhandene Dateien werden
 #'   gelesen statt neu gerechnet; so wird ein abgebrochener Lauf mit
 #'   gleichem Seed fortgesetzt. Die Dateien werden nur ueber Chunk-Nummer,
 #'   Seed, \code{keep_returns} und \code{keep_paths} zugeordnet: bei geaenderten
@@ -1597,7 +1570,12 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
   if (is.null(seed)) seed <- .sl_next_seed() else .sl_check_seed(seed)   # NULL -> einmal k aus G
   streams <- .sl_streams(seed, setup$n_paths)                 # U_i = J^i(S_0) je Pfad
   chunks <- split(seq_len(setup$n_paths), ceiling(seq_len(setup$n_paths) / chunk_size))
-  if (!is.null(chunk_dir)) dir.create(chunk_dir, showWarnings = FALSE, recursive = TRUE)
+  chunk_file <- function(ci) NULL
+  if (!is.null(chunk_dir)) {
+    dir.create(chunk_dir, showWarnings = FALSE, recursive = TRUE)
+    chunk_file <- function(ci) file.path(chunk_dir, paste0(.chunk_stem(ci, seed, keep_returns, keep_paths), "_r.rds"))
+    .chunk_pruefen(chunk_dir, length(chunks), seed, keep_returns, keep_paths, "_r.rds")
+  }
   sim_rows <- (burn_in + 1L):(setup$n_out + 1L)
   ret_ends <- if (keep_returns != "none") .anniv_ends(dates[sim_rows], keep_returns) else NULL
   if (!is.null(ret_ends) && length(ret_ends) < 2) stop("Pfad nach burn_in zu kurz f\u00fcr eine volle Periode in keep_returns.")
@@ -1616,6 +1594,7 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
     dp <- .draw_path(setup, i, streams[[i]], config, method, max_tries)
     if (is.null(dp$path)) return(NULL)
     df0 <- data.frame(date = dates, as.data.frame(dp$path), check.names = FALSE)
+    df_cut <- NULL   # Ausschnitt nach burn_in fuer Strategien ohne signal und map: seit 1.6.3 einmal je Pfad
     rows <- lapply(names(specs), function(nm) {
       sp <- specs[[nm]]; df <- df0; wr <- character()
       # Warnungen je Pfad sammeln (statt verschlucken), Fehler mit Stufe und Meldung zurueckgeben
@@ -1629,7 +1608,12 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
           v <- sg[[k]]; if (is.logical(v)) v[is.na(v)] <- FALSE; df[[k]] <- v }
       }
       if (!is.null(sp$map)) for (a in names(sp$map)) df[[a]] <- df[[sp$map[[a]]]]
-      if (burn_in > 0) df <- df[(burn_in + 1L):nrow(df), , drop = FALSE]
+      if (burn_in > 0) {
+        if (is.null(sp$signal) && is.null(sp$map)) {
+          if (is.null(df_cut)) df_cut <<- df0[(burn_in + 1L):nrow(df0), , drop = FALSE]
+          df <- df_cut
+        } else df <- df[(burn_in + 1L):nrow(df), , drop = FALSE]
+      }
       res <- tryCatch(suppressMessages(catch_w(.sim_call(df, sp$strategy, sp$sim))), error = function(e) e)
       if (inherits(res, "error")) return(fail("Simulation", conditionMessage(res)))
       m <- tryCatch(catch_w(metrics(res)), error = function(e) e)
@@ -1644,9 +1628,7 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
     list(id = i, rows = rows, aux = aux_ret, path = if (i <= keep_paths) dp$path else NULL)
   }
   run_chunk <- function(ci) {
-    f <- if (!is.null(chunk_dir)) file.path(chunk_dir, sprintf("chunk_%05d_seed%.0f%s%s.rds", ci, seed,
-                                                           if (keep_returns != "none") paste0("_", keep_returns) else "",
-                                                           if (keep_paths > 0) sprintf("_keep%.0f", keep_paths) else "")) else NULL
+    f <- chunk_file(ci)
     if (!is.null(f) && file.exists(f)) return(readRDS(f))
     out <- lapply(chunks[[ci]], eval_path)
     if (!is.null(f)) saveRDS(out, f)
@@ -1723,6 +1705,30 @@ bootstrap_study <- function(data, config, method = "stationary", n = 1000, strat
     returns_dates = if (!is.null(ret_ends)) dates[sim_rows][ret_ends] else NULL,
     path_weights = setup$weights, errors = errs, warnings = warns
   ), class = "SimLevBootstrapStudy")
+}
+
+#' Chunk-Dateien von bootstrap_study(chunk_dir) (seit 1.6.3 je Sprache)
+#'
+#' Name: <Stamm><Kennung>, Stamm chunk_<Nr>_seed<Seed>[_<keep_returns>][_keep<k>], Kennung je Sprache: R "_r.rds"
+#' (saveRDS), Python "_py.pkl" (pickle), Julia "_jl.bin" (eigenes Binaerformat); bis 1.6.2 in allen Sprachen
+#' "<Stamm>.rds" mit drei Formaten. .chunk_pruefen bricht ab, wenn zu einem Chunk ohne eigene Datei eine Datei
+#' einer anderen Sprache oder der alten Form vorliegt (gleiche Meldung in R, Python und Julia).
+#' @keywords internal
+#' @noRd
+.chunk_stem <- function(ci, seed, keep_returns, keep_paths)
+  sprintf("chunk_%05d_seed%.0f%s%s", ci, seed, if (keep_returns != "none") paste0("_", keep_returns) else "",
+          if (keep_paths > 0) sprintf("_keep%.0f", keep_paths) else "")
+.CHUNK_KENNUNG <- c(".rds", "_r.rds", "_py.pkl", "_jl.bin")
+.chunk_meldung <- function(datei)
+  sprintf("chunk_dir: '%s' stammt von einer anderen Sprache oder einer \u00e4lteren Fassung von SimLev (bis 1.6.2) und wird nicht gelesen; je Sprache ein eigenes Verzeichnis verwenden.", datei)
+.chunk_pruefen <- function(dir, n_chunks, seed, keep_returns, keep_paths, eigen) {
+  for (ci in seq_len(n_chunks)) {
+    st <- .chunk_stem(ci, seed, keep_returns, keep_paths)
+    if (file.exists(file.path(dir, paste0(st, eigen)))) next
+    for (k in setdiff(.CHUNK_KENNUNG, eigen))
+      if (file.exists(file.path(dir, paste0(st, k)))) stop(.chunk_meldung(paste0(st, k)))
+  }
+  invisible(NULL)
 }
 
 #' Anzahl behaltener Pfade aus keep_paths

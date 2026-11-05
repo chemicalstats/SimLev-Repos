@@ -32,6 +32,7 @@ import pickle
 import sys
 import time
 import warnings
+import weakref
 from collections.abc import Mapping
 
 import numpy as np
@@ -50,6 +51,8 @@ from ._r.rnum import r_cumprod, r_cumsum, r_mean, r_median, r_pow, r_sd, r_sum, 
 from ._util import _match_arg
 from .data_prep import _to_date
 from ._util import _stats
+from ._util import _fmt1, _is_strategy, _message, _pow_rec, _unique as _uniq
+from ._r.rformat import _is_num
 
 __all__ = [
     "bootstrap_config", "BootstrapConfig", "bootstrap_block_length", "bootstrap",
@@ -59,14 +62,6 @@ __all__ = [
 ]
 
 _NAN = _fmt.NA_REAL      # R's NA_real_ (alle Verwendungen hier sind NA; NaN: math.nan)
-
-
-class _Missing:
-    def __repr__(self):
-        return "<missing>"
-
-
-_MISSING = _Missing()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -84,12 +79,6 @@ def _quiet(fn):
     return wrapper
 
 
-def _message(text) -> None:
-    """R-``message()`` (stderr)."""
-    sys.stderr.write(str(text) + "\n")
-    sys.stderr.flush()
-
-
 def _warn(text) -> None:
     warnings.warn(str(text), UserWarning, stacklevel=3)
 
@@ -101,14 +90,6 @@ def _stop(text):
 def _sp(fmt, *args) -> str:
     """R-``sprintf`` (Skalar)."""
     return _fmt.sprintf(fmt, *args)
-
-
-def _fmt1(x, **kw) -> str:
-    """R-``format(x)`` einer Zahl/Zeichenkette als Text."""
-    r = _fmt.format(x, **kw)
-    if isinstance(r, str):
-        return r
-    return ", ".join(str(s) for s in np.asarray(r, dtype=object).ravel())
 
 
 def _show(x) -> str:
@@ -129,10 +110,6 @@ def _as_char(x) -> str:
     if isinstance(r, str):
         return r
     return str(np.asarray(r, dtype=object).ravel()[0])
-
-
-def _is_num(x) -> bool:
-    return isinstance(x, (int, float, np.integer, np.floating)) and not isinstance(x, (bool, np.bool_))
 
 
 def _num_vec(x):
@@ -348,6 +325,10 @@ def bootstrap_config(indices, *, letfs=(), regime_index=None, aux=None, aux_type
             - name: Spaltenname im Pfad (Standard ``<base>_l<L>``, z. B. "eu_l2", bei negativem Hebel
               ``<base>_inv<|L|>``, z. B. "us_inv1").
 
+            Zahlen sind einzelne endliche Zahlen, ``base`` und ``name`` ein einzelner Text, ``finance`` und ``days``
+            eine Zahl oder ein Name aus ``aux``; andere Werte (Listen, Felder, bool, NaN) ergeben einen Fehler (seit
+            1.6.3).
+
             Tagesrendite (MSCI Daily Leveraged/Short, plus Fondskosten): r = 1 + L (R - 1) + (1 - L) i · d / 360 -
             TER · d / 365
             - s · m(L) · d / 360 mit Brutto-Indexrendite R, Tagen je Zeile d, i, TER und s als Anteil
@@ -464,20 +445,37 @@ def bootstrap_config(indices, *, letfs=(), regime_index=None, aux=None, aux_type
     def is_level(nm):
         return isinstance(nm, str) and full.get(nm) == "level"
 
+    # LETF-Felder (seit 1.6.3 mit Typ und Länge wie in R): Zahlen einzeln und endlich, base und name einzelner Text,
+    # finance und days Zahl oder Name einer Zusatzreihe
+    def num1(v):
+        return _is_num(v) and math.isfinite(float(v))
+
+    def chk_num(i, v, nm):
+        if not num1(v):
+            _stop("LETF %d: %s muss eine einzelne endliche Zahl sein" % (i, nm))
+
+    def chk_col(i, v, nm):
+        if not num1(v) and not isinstance(v, str):
+            _stop("LETF %d: %s muss eine einzelne endliche Zahl oder der Name einer Zusatzreihe aus aux sein" % (i, nm))
+
     letf_list = []
     for i, lt in enumerate(list(letfs or []), start=1):
         lt = dict(lt) if isinstance(lt, Mapping) else {}
         base = lt.get("base")
         if base is None:
             _stop("LETF %d: 'base' muss angegeben werden" % i)
+        if not isinstance(base, str):
+            _stop("LETF %d: base muss ein einzelner Name (Text) sein" % i)
         if base not in index_names:
             _stop("LETF %d: base '%s' nicht in indices. Verfügbar: %s" % (i, base, ", ".join(index_names)))
         lev = lt.get("leverage")
         lev = 2 if lev is None else lev
+        chk_num(i, lev, "leverage")
         if lev == 0:
             _stop("LETF %d: leverage darf nicht 0 sein" % i)
         fin = lt.get("finance")
         fin = 3.5 if fin is None else fin
+        chk_col(i, fin, "finance")
         if isinstance(fin, str) and fin not in aux_names:
             _stop("LETF %d: finance-Reihe '%s' nicht in aux." % (i, fin))
         if is_level(fin):
@@ -487,24 +485,33 @@ def bootstrap_config(indices, *, letfs=(), regime_index=None, aux=None, aux_type
             _warn("LETF %d: negativer Finanzierungszins." % i)
         exp_ = lt.get("expense")
         exp_ = 0.5 if exp_ is None else exp_
+        chk_num(i, exp_, "expense")
         if exp_ < 0:
             _stop("LETF %d: expense muss >= 0 sein" % i)
         days = lt.get("days")
         days = 1 if days is None else days
+        chk_col(i, days, "days")
         if isinstance(days, str) and days not in aux_names:
             _stop("LETF %d: days-Reihe '%s' nicht in aux." % (i, days))
         if is_level(days):
             _stop("LETF %d: days-Reihe '%s' ist in aux_type als 'level' gekennzeichnet; Tage je Zeile werden "
                   "unverändert gebraucht ('rate')." % (i, days))
+        sp = lt.get("spread")
+        sp = 0 if sp is None else sp
+        rb = lt.get("rate_basis")
+        rb = 360 if rb is None else rb
+        tb = lt.get("ter_basis")
+        tb = 365 if tb is None else tb
+        chk_num(i, sp, "spread")
+        chk_num(i, rb, "rate_basis")
+        chk_num(i, tb, "ter_basis")
         name = lt.get("name")
+        if name is not None and not isinstance(name, str):
+            _stop("LETF %d: name muss ein einzelner Name (Text) sein" % i)
         if name is None:
             name = (base + "_l" + _as_char(lev)) if lev > 0 else (base + "_inv" + _as_char(abs(lev)))
-        sp = lt.get("spread")
-        rb = lt.get("rate_basis")
-        tb = lt.get("ter_basis")
         letf_list.append({"name": name, "base": base, "leverage": lev, "finance": fin, "expense": exp_,
-                          "spread": 0 if sp is None else sp, "days": days,
-                          "rate_basis": 360 if rb is None else rb, "ter_basis": 365 if tb is None else tb})
+                          "spread": sp, "days": days, "rate_basis": rb, "ter_basis": tb})
     letf_names = [lt["name"] for lt in letf_list]
     if any(_duplicated(index_names + letf_names + aux_names)):
         _stop("Namen von Indizes, LETFs und aux müssen eindeutig sein.")
@@ -943,11 +950,11 @@ def _fit_tail(base_ret, prob, side):
 
 
 def _seq_len_out(n_out):
-    """``seq(0, 1, length.out = n_out)``."""
+    """``seq(0, 1, length.out = n_out)`` über den Kern ``sl_r_seq_len`` (seit 1.6.3; gleiche Werte). ``n_out <= 0``
+    (``n_regimes <= -1``, R: Fehler) wie bis 1.6.2: ``[0, 1][:n_out]``, damit die Folgemeldung gleich bleibt."""
     n_out = int(n_out)
-    if n_out > 2:
-        n1 = n_out - 1.0
-        return np.concatenate([[0.0], 0.0 + np.arange(1, n_out - 1, dtype=np.float64) * (1.0 / n1), [1.0]])
+    if n_out > 0:
+        return _stats().seq_len_out(0.0, 1.0, n_out)
     return np.array([0.0, 1.0])[:n_out]
 
 
@@ -1113,6 +1120,8 @@ def _generate_returns(returns, method, p, info, n_out, stream):
 
     def from_idx(idx):
         idx = np.asarray(idx, dtype=np.int64)
+        if _src_rows_ok(returns):   # Zeilen liest der Pfadkern direkt aus returns (seit 1.6.3, ohne Kopie)
+            return {"ret": None, "src": returns, "idx": idx}
         return {"ret": returns[idx - 1, :], "idx": idx}
 
     if method == "raw":
@@ -1155,34 +1164,9 @@ def _generate_returns(returns, method, p, info, n_out, stream):
 
 
 @_quiet
-def _letf_returns(rb, letf, aux_rows, aux_names):
-    """Hebelprodukt-Renditen (MSCI-Formel plus Fondskosten), R: ``.letf_returns``."""
-    L = float(letf["leverage"])
-    fin = letf["finance"]
-    rate = aux_rows[:, aux_names.index(fin)] if isinstance(fin, str) else float(fin)
-    dd = letf["days"]
-    d = aux_rows[:, aux_names.index(dd)] if isinstance(dd, str) else float(dd)
-    m = max(L - 1, 0.0) + max(-L, 0.0)
-    rbas = float(letf["rate_basis"])
-    tbas = float(letf["ter_basis"])
-    t1 = 1 + L * (rb - 1)
-    t2 = (1 - L) * rate / 100 * d / rbas
-    t3 = float(letf["expense"]) / 100 * d / tbas
-    t4 = float(letf["spread"]) / 100 * m * d / rbas
-    return t1 + t2 - t3 - t4
-
-
-def _cumprod_cols(M):
-    """``apply(M, 2, cumprod)`` (long double)."""
-    out = np.empty_like(M, dtype=np.float64)
-    for j in range(M.shape[1]):
-        out[:, j] = r_cumprod(M[:, j])
-    return out
-
-
 def _boot_path_spec(aux, config, aux_ratio, aux_start):
-    """Angaben für den Kern ``sl_boot_path`` (seit 1.6.0; wie ``.boot_path_spec`` in R) oder ``None`` (dann rechnet
-    :func:`_build_path` wie bisher): Zusatzreihen spaltenweise, Merker der Niveau-Reihen, Hebelprodukte als
+    """Angaben für den Kern ``sl_boot_path`` (seit 1.6.0; wie ``.boot_path_spec`` in R) oder ``None`` (seit 1.6.3 ein
+    interner Fehler in :func:`_build_path`): Zusatzreihen spaltenweise, Merker der Niveau-Reihen, Hebelprodukte als
     Zeilen (Basis, L, Zinsspalte, Zins, Tagespalte, Tage, rate_basis, ter_basis, expense, spread)."""
     try:
         inames = list(config["index_names"])
@@ -1220,68 +1204,56 @@ def _boot_path_spec(aux, config, aux_ratio, aux_start):
             "cols": pd.Index(inames + lnames + anames), "anames": pd.Index(anames)}
 
 
+_SRC_OK = (None, False)   # (schwacher Verweis auf die Quellrenditen, alle endlich und > 0?)
+
+
+def _src_rows_ok(returns) -> bool:
+    """Gilt für jede Zeilenauswahl von ``returns`` die Pfadprüfung von ``_build_path`` (alle Renditen endlich und
+    > 0, float64, zeilenweise zusammenhängend)? Einmal je Matrix (Studie) geprüft."""
+    ref, ok = _SRC_OK
+    if ref is not None and ref() is returns:
+        return ok
+    ok = (isinstance(returns, np.ndarray) and returns.ndim == 2 and returns.dtype == np.float64
+          and returns.flags.c_contiguous and bool(np.isfinite(returns).all()) and bool((returns > 0).all()))
+    globals()["_SRC_OK"] = (weakref.ref(returns), ok)
+    return ok
+
+
 @_quiet
 def _build_path(g, aux, config, start=100, aux_ratio=None, aux_start=None, spec=None):
     """Preis-Pfad aus Renditen bauen (R: ``.build_path``); ``DataFrame`` oder ``None``.
 
-    Seit 1.6.0 mit ``spec`` (:func:`_boot_path_spec`) im Kern ``sl_boot_path`` (ein Aufruf je Pfad)."""
+    Seit 1.6.0 mit ``spec`` (:func:`_boot_path_spec`) im Kern ``sl_boot_path`` (ein Aufruf je Pfad); seit 1.6.3 ohne
+    Rückfall in Python (unerreichbar: ``bootstrap_config`` prüft die LETF-Felder, die Renditen sind float64-Matrizen
+    mit ganzzahligen Zeilen)."""
     ret = g["ret"]
+    src = g.get("src")
     idx = np.asarray(g["idx"], dtype=np.int64)
-    if not isinstance(ret, np.ndarray) or ret.ndim != 2 or (~np.isfinite(ret)).any() or (ret <= 0).any():
+    if src is not None:   # Zeilen idx der geprüften Quelle (_src_rows_ok): Prüfung gilt schon, Kern liest selbst
+        n_out, k = idx.size, src.shape[1]
+        ret = src
+    elif not isinstance(ret, np.ndarray) or ret.ndim != 2 or (~np.isfinite(ret)).any() or (ret <= 0).any():
         return None
-    if spec is not None and ret.dtype == np.float64 and ret.shape[0] >= 1 and idx.shape == (ret.shape[0],):
+    else:
         n_out, k = ret.shape
-        na = 0 if spec["auxT"] is None else spec["auxT"].shape[0]
-        nL = spec["letf"].shape[0]
-        if k == len(spec["cols"]) - nL - na and (na == 0 or (idx.min() >= 1 and idx.max() <= spec["auxT"].shape[1])):
-            P = np.empty((k + nL + na, n_out + 1))
-            lv = np.empty((na, n_out + 1)) if spec["ratioT"] is not None else None
-            if not _ext.slc_boot_path(n_out, k, np.ascontiguousarray(ret), np.ascontiguousarray(idx), spec["auxT"],
-                                      spec["ratioT"], spec["start"], spec["level"], spec["letf"], float(start), P, lv):
-                return None
-            out = pd.DataFrame(P.T, columns=spec["cols"], copy=False)
-            if lv is not None:
-                out.attrs["aux_level"] = pd.DataFrame(lv.T, columns=spec["anames"], copy=False)
-            return out
-    n_out = ret.shape[0]
-    ones = np.ones((1, ret.shape[1]))
-    P = start * _cumprod_cols(np.vstack([ones, ret]))
-    cols = list(config["index_names"])
-    blocks = [P]
-    anames = list(config["aux_names"])
-    aux_rows = aux[idx - 1, :] if aux is not None else None
-    if config["n_letfs"]:
-        Ls = []
-        for lt in config["letfs"]:
-            r = _letf_returns(ret[:, config["index_names"].index(lt["base"])], lt, aux_rows, anames)
-            r = np.broadcast_to(np.asarray(r, dtype=np.float64), (n_out,)).copy()
-            if (~np.isfinite(r)).any():
-                return None
-            ko = np.flatnonzero(r <= 0)
-            if len(ko):
-                r[ko[0]:] = 0.0
-            Ls.append(start * r_cumprod(np.concatenate([[1.0], np.maximum(r, 0.0)])))
-        blocks.append(np.column_stack(Ls))
-        cols += list(config["letf_names"])
-    lv = None
-    if aux is not None:
-        A = aux[np.concatenate([[idx[0]], idx]) - 1, :]
-        blocks.append(A)
-        cols += anames
-    M = np.column_stack(blocks)
-    if aux is not None and aux_ratio is not None:
-        lvm = _cumprod_cols(np.vstack([np.ones((1, aux.shape[1])), aux_ratio[idx - 1, :]]))
-        s0 = aux_start if aux_start is not None else aux[0, :] / aux_ratio[0, :]
-        lvm = lvm * np.asarray(s0, dtype=np.float64)[None, :]
-        at = _get(config, "aux_type")
-        off = len(cols) - len(anames)
-        for j, a in enumerate(anames):
-            if _aux_type_of(at, a) == "level":
-                M[:, off + j] = lvm[:, j]
-        lv = pd.DataFrame(lvm, columns=anames)
-    out = pd.DataFrame(M, columns=cols)
+    na = 0 if spec is None or spec["auxT"] is None else spec["auxT"].shape[0]
+    if (spec is None or ret.dtype != np.float64 or n_out < 1 or idx.shape != (n_out,)
+            or k != len(spec["cols"]) - spec["letf"].shape[0] - na
+            or (na and (idx.min() < 1 or idx.max() > spec["auxT"].shape[1]))):
+        _stop("bootstrap: interner Fehler: Angaben für den Pfadkern unvollständig (.boot_path_spec)")
+    nL = spec["letf"].shape[0]
+    P = np.empty((k + nL + na, n_out + 1))
+    lv = np.empty((na, n_out + 1)) if spec["ratioT"] is not None else None
+    if src is not None:
+        if not _ext.slc_boot_path_src(src.shape[0], k, src, np.ascontiguousarray(idx), spec["auxT"], spec["ratioT"],
+                                      spec["start"], spec["level"], spec["letf"], float(start), P, lv):
+            return None
+    elif not _ext.slc_boot_path(n_out, k, np.ascontiguousarray(ret), np.ascontiguousarray(idx), spec["auxT"],
+                                spec["ratioT"], spec["start"], spec["level"], spec["letf"], float(start), P, lv):
+        return None
+    out = pd.DataFrame(P.T, columns=spec["cols"], copy=False)
     if lv is not None:
-        out.attrs["aux_level"] = lv
+        out.attrs["aux_level"] = pd.DataFrame(lv.T, columns=spec["anames"], copy=False)
     return out
 
 
@@ -1898,19 +1870,6 @@ def _is_study(x) -> bool:
         isinstance(x, RList) and "SimLevBootstrapStudy" in getattr(x, "r_class", ()))
 
 
-def _is_strategy(s) -> bool:
-    try:
-        from .config import Strategy
-    except ImportError:  # pragma: no cover
-        return False
-    return isinstance(s, Strategy)
-
-
-def _deparse(v) -> str:
-    from ._r.rformat import r_deparse
-    return r_deparse(v)
-
-
 def _sim_call(df, strategy, args):
     """``simulation()`` mit den aufgelösten sim_args (R: ``.sim_call``)."""
     from ._sim_blocks import _sim_call as call
@@ -1942,6 +1901,33 @@ def _keep_count(x, n, who):
         _stop("%s: keep_paths muss TRUE (alle Pfade), FALSE/0 (keine) oder eine ganze Zahl k >= 1 (die ersten k Pfade) "
               "sein, nicht %s." % (who, _show(x)))
     return min(float(x), float(n))
+
+
+# Chunk-Dateien von bootstrap_study(chunk_dir) (seit 1.6.3 je Sprache; R: .chunk_stem, .chunk_pruefen): Stamm
+# chunk_<Nr>_seed<Seed>[_<keep_returns>][_keep<k>], Kennung R "_r.rds", Python "_py.pkl" (pickle), Julia "_jl.bin";
+# bis 1.6.2 "<Stamm>.rds" in allen Sprachen. Liegt zu einem Chunk ohne eigene Datei eine fremde oder alte vor: Fehler
+# (gleiche Meldung in R, Python und Julia).
+_CHUNK_KENNUNG = (".rds", "_r.rds", "_py.pkl", "_jl.bin")
+
+
+def _chunk_stem(ci, seed, keep_returns, keep_paths):
+    return "chunk_%05d_seed%d%s%s" % (ci, int(seed), ("_" + keep_returns) if keep_returns != "none" else "",
+                                      ("_keep%d" % int(keep_paths)) if keep_paths > 0 else "")
+
+
+def _chunk_meldung(datei):
+    return ("chunk_dir: '%s' stammt von einer anderen Sprache oder einer älteren Fassung von SimLev (bis 1.6.2) und "
+            "wird nicht gelesen; je Sprache ein eigenes Verzeichnis verwenden." % datei)
+
+
+def _chunk_pruefen(d, n_chunks, seed, keep_returns, keep_paths, eigen):
+    for ci in range(1, n_chunks + 1):
+        st = _chunk_stem(ci, seed, keep_returns, keep_paths)
+        if os.path.exists(os.path.join(d, st + eigen)):
+            continue
+        for k in _CHUNK_KENNUNG:
+            if k != eigen and os.path.exists(os.path.join(d, st + k)):
+                _stop(_chunk_meldung(st + k))
 
 
 @_quiet
@@ -2064,8 +2050,10 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
         benchmark: Name einer Strategie aus ``strategies`` als Vergleich für die gepaarte Auswertung in
             ``summary()``; ``None`` (Standard) = keine.
         chunk_dir: Optional (Standard ``None``) Verzeichnis für Zwischenergebnisse je Chunk (Dateien
-            ``chunk_<Nr>_seed<Seed>.rds``, bei ``keep_returns`` mit Frequenz-Suffix, bei ``keep_paths`` > 0 mit
-            Suffix ``_keep<k>``). Vorhandene Dateien werden gelesen statt neu gerechnet; so wird ein abgebrochener
+            ``chunk_<Nr>_seed<Seed>_py.pkl``, bei ``keep_returns`` mit Frequenz-Suffix, bei ``keep_paths`` > 0 mit
+            Suffix ``_keep<k>``, jeweils vor ``_py.pkl``; R schreibt ``_r.rds``, Julia ``_jl.bin``). Liegt zu einem
+            Chunk nur eine Datei einer anderen Sprache oder der Form bis 1.6.2 (``chunk_<Nr>_seed<Seed>.rds``),
+            bricht die Studie mit einer Meldung ab. Vorhandene Dateien werden gelesen statt neu gerechnet; so wird ein abgebrochener
             Lauf mit gleichem Seed fortgesetzt. Die Dateien werden nur über Chunk-Nummer, Seed, ``keep_returns``
             und ``keep_paths`` zugeordnet: bei geänderten Strategien, Daten oder Parametern ein neues Verzeichnis
             verwenden.
@@ -2200,6 +2188,7 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
     chunks = [ids[keys == k] for k in sorted(set(keys.tolist()))]
     if chunk_dir is not None:
         os.makedirs(chunk_dir, exist_ok=True)
+        _chunk_pruefen(chunk_dir, len(chunks), seed, keep_returns, keep_paths, "_py.pkl")
     burn_in = int(burn_in)
     sim_rows = np.arange(burn_in + 1, n_out + 2)
     dsim = dates[sim_rows - 1]
@@ -2221,7 +2210,8 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
     def aux_level_of(P, a):
         if a in rate_aux:
             v = P[a].to_numpy()[sim_rows[1:] - 1]
-            f = np.array([r_pow(1 + x / 100, y) for x, y in zip(v, dt_sim)])
+            m = min(len(v), len(dt_sim))   # wie zip()
+            f = _pow_rec(1 + v[:m] / 100, dt_sim[:m])
             return r_cumprod(np.concatenate([[1.0], f]))
         if _aux_type_of(at, a) == "level":
             return P[a].to_numpy()[sim_rows - 1]
@@ -2236,7 +2226,8 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
         rows = {}
         for nm in snames:
             sp = specs[nm]
-            df = df0.copy()
+            # Kopie nur, wenn Signalfunktion oder map den Rahmen ändern (seit 1.6.3; simulation() ändert ihn nicht)
+            df = df0.copy() if sp.get("signal") is not None or sp.get("map") is not None else df0
             wr = []
 
             def fail(stage, msg, wr=wr):
@@ -2301,9 +2292,7 @@ def bootstrap_study(data, config, method="stationary", n=1000, strategies=None, 
     def run_chunk(ci):
         f = None
         if chunk_dir is not None:
-            f = os.path.join(chunk_dir, "chunk_%05d_seed%d%s%s.rds" % (
-                ci, int(seed), ("_" + keep_returns) if keep_returns != "none" else "",
-                ("_keep%d" % int(keep_paths)) if keep_paths > 0 else ""))
+            f = os.path.join(chunk_dir, _chunk_stem(ci, seed, keep_returns, keep_paths) + "_py.pkl")
         if f is not None and os.path.exists(f):
             with open(f, "rb") as fh:
                 return pickle.load(fh)
@@ -2454,14 +2443,6 @@ def _sqrt(v: float) -> float:
     if math.isnan(v):
         return v
     return math.sqrt(v) if v >= 0 else math.nan
-
-
-def _uniq(seq):
-    out = []
-    for s in seq:
-        if s not in out:
-            out.append(s)
-    return out
 
 
 def _logical_fill(v):
@@ -2818,7 +2799,7 @@ SimLevBootstrapStudy.plot = _plot_method(_plot_study, "SimLevBootstrapStudy")
 # Rechnen mit NA (signalisierendes NaN) ohne numpy-Warnung "invalid value" wie in R (gemeinsamer Helfer)
 from ._r.base import quiet_fp  # noqa: E402
 
-quiet_fp(globals(), list(__all__) + ["_calculate_ess", "_ess_design", "_extract_returns", "_fit_garch11", "_fit_tail", "_get_base_params", "_get_ess_grid", "_letf_returns", "_prepare_regime_info", "_pw_block", "_wquantile"])  # bootstrap_probability: env aus dem Aufrufer (env_from_caller)
+quiet_fp(globals(), list(__all__) + ["_calculate_ess", "_ess_design", "_extract_returns", "_fit_garch11", "_fit_tail", "_get_base_params", "_get_ess_grid", "_prepare_regime_info", "_pw_block", "_wquantile"])  # bootstrap_probability: env aus dem Aufrufer (env_from_caller)
 
 
 from . import _callable_module  # noqa: E402 (aufrufbar wie die gleichnamige Funktion, PEP 562)

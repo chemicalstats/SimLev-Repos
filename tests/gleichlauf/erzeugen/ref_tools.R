@@ -51,6 +51,14 @@
 #   SIMLEV_GEN_ALLE=1   zusätzlich alle Fälle nach D/alle/ (Gleichlauf, tests/werkzeuge/gleichlauf/run.py)
 #   SIMLEV_GEN_SUBSET=m nur die Fälle, deren Kennung (Modul/Fall) per Prüfsumme in eine 1/m-Stichprobe fällt
 #                       (deterministisch; m = 1 oder leer: alle); die übrigen werden nicht ausgewertet
+#   SIMLEV_GEN_NUR_ALLE=1  (seit 1.6.3) mit SIMLEV_GEN_ALLE=1 nur D/alle/ schreiben, keine Dateien je Gruppe (die liest
+#                       nur faelle_diff.py im vollen Gleichlauf); ebenso ohne den Schalter bei SIMLEV_GEN_SUBSET > 1
+#                       (Teilmenge, --quick). Die Zählzeile bleibt.
+#   SIMLEV_GZIP_STUFE=k (seit 1.6.3) gzip-Stufe der flachen Dateien (D/alle/, Zufallsprüfungen, Breite; Standard 1,
+#                       Arbeitsdateien). Dateien je Gruppe und alles mit SIMLEV_ERZEUGEN=1 immer gzip -9 -n.
+#
+# Zufallsprüfungen (tests/werkzeuge/gleichlauf/*_fuzz.R): fuzz_case() wie ref_case(), dazu r_calls (Aufrufe der
+# Warnungen und des Fehlers, deparse) aus derselben Auswertung; pick() und coin() für die Zufallswahl.
 #
 # Verwendung (Arbeitsverzeichnis = Repo-Wurzel):
 #   source("tests/gleichlauf/erzeugen/ref_tools.R"); ref_bereich("bootstrap")
@@ -177,19 +185,30 @@ enc <- function(x) {
 
 # Code r in einer frischen Umgebung mit den Eingaben auswerten; Ergebnisfelder eines Falls bzw. einer
 # Tabellenzeile: error oder result, output, print (print = NA: nur Objekte mit eigener print-Methode in SimLev),
-# dazu warnings
-.ref_eval <- function(r, inputs, print = NA) {
+# dazu warnings. calls = TRUE (Zufallsprüfungen, fuzz_case): zusätzlich nach .ref$calls die Aufrufe der Warnungen
+# (alle, in Reihenfolge) und des Fehlers (deparse, .ref_dp) sowie die Bedingungen ("W: …" bzw. "M: …")
+.ref_dp <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = " ")
+.ref_eval <- function(r, inputs, print = NA, calls = FALSE) {
   env <- new.env(parent = globalenv())
   for (k in names(inputs)) assign(k, inputs[[k]], envir = env)
   warns <- character(0)
   err <- NULL
   out_txt <- character(0)
   res <- NULL
+  wc <- character(0); ec <- NULL; cs <- character(0)
   out_txt <- capture.output(
     res <- tryCatch(withCallingHandlers(eval(parse(text = r), envir = env),
-                                        warning = function(w) { warns <<- c(warns, conditionMessage(w)); invokeRestart("muffleWarning") },
-                                        message = function(m) invokeRestart("muffleMessage")),
-                    error = function(e) { err <<- conditionMessage(e); NULL }))
+                                        warning = function(w) {
+                                          warns <<- c(warns, conditionMessage(w))
+                                          if (calls) { wc <<- c(wc, .ref_dp(conditionCall(w))); cs <<- c(cs, paste0("W: ", conditionMessage(w))) }
+                                          invokeRestart("muffleWarning")
+                                        },
+                                        message = function(m) {
+                                          if (calls) cs <<- c(cs, paste0("M: ", conditionMessage(m)))
+                                          invokeRestart("muffleMessage")
+                                        }),
+                    error = function(e) { err <<- conditionMessage(e); if (calls) ec <<- .ref_dp(conditionCall(e)); NULL }))
+  if (calls) .ref$calls <- list(warnings = wc, error = ec, conds = cs)
   out <- list()
   if (!is.null(err)) out$error <- err
   else {
@@ -216,10 +235,10 @@ enc <- function(x) {
 }
 
 # print = NA: Druckausgabe nur für Objekte mit eigener print-Methode in SimLev
-ref_case <- function(id, r, py, inputs = list(), print = NA, note = NULL, jl = NULL, nur = NULL) {
+ref_case <- function(id, r, py, inputs = list(), print = NA, note = NULL, jl = NULL, nur = NULL, calls = FALSE) {
   if (!.ref_in_subset(id)) return(invisible(NULL))
   stopifnot(is.null(nur) || nur %in% c("py", "jl"))
-  ev <- .ref_eval(r, inputs, print)
+  ev <- .ref_eval(r, inputs, print, calls)
   .ref$used <- character(0)
   case <- list(id = id, module = .ref$module, note = note,
                inputs = lapply(inputs, function(x) .ref_input(enc(x))), r = r)
@@ -257,6 +276,39 @@ ref_case_extra <- function(fields) {
   for (k in names(fields)) case[k] <- list(fields[[k]])
   .ref$items[[.ref$last]]$case <- case
   invisible(NULL)
+}
+
+# Zufallsprüfungen (seit 1.6.3 gemeinsam, bis 1.6.2 je Skript mit zweiter Auswertung): Zufallswahl und Fall mit
+# r_calls = list(warnings = Aufrufe der Warnungen, error = Aufruf des Fehlers oder NULL) aus der Auswertung von ref_case.
+# sim_call = TRUE: r_calls$sim_call = erster Aufruf von simulation() im Code (deparse; Bedingungen aus dem Kern tragen
+# seit 1.4.1 diesen Aufruf, Sollwert in sim_fuzz_cmp.py); conds = TRUE: dazu r_conds ("W: <Warnung>", "M: <Meldung>").
+# Rückgabe: Ergebnis des R-Codes (NULL bei Fehler oder außerhalb der Teilmenge).
+pick <- function(x) x[[sample.int(length(x), 1L)]]
+coin <- function(p) runif(1) < p
+.ref_sim_call <- function(r) {
+  fs <- function(e) {
+    if (!is.call(e)) return(NULL)
+    if (identical(e[[1L]], as.name("simulation"))) return(e)
+    for (i in seq_along(e)[-1L]) { x <- tryCatch(fs(e[[i]]), error = function(err) NULL); if (!is.null(x)) return(x) }
+    NULL
+  }
+  sc <- NULL
+  for (e in parse(text = r, keep.source = FALSE)) if (is.null(sc)) sc <- fs(e)
+  sc
+}
+# Genauigkeitsteil der Zufallsprüfungen (eigen, prec; Rmpfr): SIMLEV_FUZZ_GENAU=1 an, =0 aus, sonst nur ab n = 1000 Fällen
+# (run.py --full: 2000; --quick: 300). Seit 1.6.3; die Genauigkeit hängt vom Stand ab, nicht vom Lauf.
+fuzz_genau <- function(n) {
+  s <- Sys.getenv("SIMLEV_FUZZ_GENAU")
+  if (s %in% c("0", "1")) s == "1" else n >= 1000L
+}
+fuzz_case <- function(id, r, py, jl, inputs, nur = NULL, sim_call = FALSE, conds = FALSE) {
+  res <- ref_case(id, r = r, py = py, jl = jl, inputs = inputs, nur = nur, calls = TRUE)
+  if (!.ref_in_subset(id)) return(invisible(NULL))
+  rc <- list(warnings = as.list(.ref$calls$warnings), error = .ref$calls$error)
+  if (sim_call) rc$sim_call <- .ref_dp(.ref_sim_call(r))
+  ref_case_extra(if (conds) list(r_calls = rc, r_conds = as.list(.ref$calls$conds)) else list(r_calls = rc))
+  invisible(res)
 }
 
 ref_done <- function() {
@@ -304,7 +356,15 @@ ref_done <- function() {
   con <- file(tmp, "wb")
   writeLines(enc2utf8(c(head, vapply(cases, function(x) as.character(.ref_json(x)), ""))), con, useBytes = TRUE)
   close(con)
-  if (system(paste("gzip -9 -n -c", shQuote(tmp), ">", shQuote(f))) != 0) stop("gzip gescheitert: ", f)
+  if (system(paste0("gzip -", .ref_gzip_stufe(kopf$format), " -n -c ", shQuote(tmp), " > ", shQuote(f))) != 0)
+    stop("gzip gescheitert: ", f)
+}
+# gzip-Stufe: Dateien je Gruppe (Format 4; faelle_diff.py vergleicht sie Byte für Byte mit dem Katalog) und alles mit
+# SIMLEV_ERZEUGEN=1 mit 9; flache Arbeitsdateien (Format 3) mit SIMLEV_GZIP_STUFE, sonst 1 (gleicher Inhalt)
+.ref_gzip_stufe <- function(format) {
+  if (format != 3 || identical(Sys.getenv("SIMLEV_ERZEUGEN"), "1")) return(9L)
+  k <- suppressWarnings(as.integer(Sys.getenv("SIMLEV_GZIP_STUFE")))
+  if (is.na(k) || k < 1L || k > 9L) 1L else k
 }
 
 # Abgelegte Tests je Gruppe: feste Gruppe unverändert, sonst Zeilen von Tabellen je Modul und Funktion
@@ -353,10 +413,14 @@ ref_schreiben <- function() {
   sel <- vapply(its, `[[`, NA, "sel")
   gr <- .ref_gruppiert(its[sel])
   n <- integer(0)
+  # Dateien je Gruppe nur, wenn sie jemand liest (seit 1.6.3; R-kern-18): nicht im Gleichlauf mit Teilmenge
+  nur_alle <- .ref_alle() && (identical(Sys.getenv("SIMLEV_GEN_NUR_ALLE"), "1") || .ref_subset() > 1L)
   for (g in .REF_GRUPPEN) {
     f <- if (nzchar(d)) file.path(d, g, paste0(.ref$bereich, ".jsonl.gz")) else file.path("tests", g, "faelle", paste0(.ref$bereich, ".jsonl.gz"))
-    if (length(gr[[g]]$cases)) .ref_write(f, gr[[g]]$cases, gr[[g]]$keys, list(format = 4, gruppe = g))
-    else if (file.exists(f)) unlink(f)
+    if (!nur_alle) {
+      if (length(gr[[g]]$cases)) .ref_write(f, gr[[g]]$cases, gr[[g]]$keys, list(format = 4, gruppe = g))
+      else if (file.exists(f)) unlink(f)
+    }
     n[g] <- length(gr[[g]]$cases)
   }
   if (.ref_alle()) .ref_write(file.path(if (nzchar(d)) d else "tests", "alle", paste0(.ref$bereich, ".jsonl.gz")),
@@ -365,6 +429,6 @@ ref_schreiben <- function() {
   fehlt <- setdiff(grep(paste0("^(", paste(unique(sub("/.*", "", ids)), collapse = "|"), ")/"), .ref$auswahl, value = TRUE), ids)
   if (length(fehlt) && .ref_subset() == 1L)
     warning("Auswahl nennt Fälle, die der Generator nicht erzeugt: ", paste(head(fehlt, 10), collapse = ", "))
-  cat(sprintf("%s: %d Fälle erzeugt, %d abgelegt als %s Tests (gleichlauf/fehler/ausgabe)\n", .ref$bereich, length(its),
-              sum(sel), paste(n, collapse = "/")))
+  cat(sprintf("%s: %d Fälle erzeugt, %d abgelegt als %s Tests (gleichlauf/fehler/ausgabe)%s\n", .ref$bereich, length(its),
+              sum(sel), paste(n, collapse = "/"), if (nur_alle) "; Dateien je Gruppe nicht geschrieben" else ""))
 }

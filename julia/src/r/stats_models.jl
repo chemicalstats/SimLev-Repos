@@ -58,7 +58,7 @@ function ecdf(x)
 end
 
 _gkey(v) = v isa AbstractFloat ? _z0(Float64(v)) : v
-_isna_el(v) = v === missing || v === nothing || (v isa AbstractFloat && isnan(v))
+const _isna_el = SimLev._isna   # r/rnum.jl (seit 1.6.3)
 _grpvals(g) = g isa RVector ? g.values : g isa AbstractArray ? vec(g) : [g]
 
 "`ave(x, ..., FUN = mean)`; FUN erhält einen Vector."

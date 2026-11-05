@@ -6,7 +6,7 @@ import ..SimLev
 using ..SimLev: NA, CAbi, LIBSLC
 using Dates
 
-export roll_mean_core, roll_cov_core
+export roll_mean_core, roll_cov_core, roll_max_core
 
 # Fensterlänge wie R's as.integer für den Kern: außerhalb von Int32 bleibt sie außerhalb von
 # 1 … Länge (der Kern liefert dann nur NA), wie python/simlev/_signals_core.py
@@ -41,6 +41,20 @@ function roll_cov_core(x::AbstractVector, y::AbstractVector, n::Integer)
     CAbi.check(ccall((:simlev_c_roll_cov_core, LIBSLC), Cint,
                      (Ptr{Float64}, Int64, Ptr{Float64}, Int64, Cint, Ptr{Float64}),
                      x, length(x), y, length(y), _n32(n), out))
+    return out
+end
+
+"""
+    roll_max_core(x, w)
+
+Gleitendes Maximum über `w >= 1` Zeilen einschließlich der aktuellen (am Anfang kürzer; seit 1.6.3): Kern
+`roll_max_core` (core/research_core_impl.h, monotone Schlange, O(m)) mit der Ordnung von Julias `maximum`
+(`zero = 1`: −0 < +0); NaN/NA zählen wie −Inf. Gleich `maximum(x[max(1, i - w + 1):i])` je Zeile.
+"""
+function roll_max_core(x::Vector{Float64}, w::Int)
+    out = Vector{Float64}(undef, length(x))
+    CAbi.check(ccall((:simlev_c_roll_max_core, LIBSLC), Cint, (Ptr{Float64}, Int64, Int64, Cint, Ptr{Float64}),
+                     x, length(x), w, Cint(1), out))
     return out
 end
 

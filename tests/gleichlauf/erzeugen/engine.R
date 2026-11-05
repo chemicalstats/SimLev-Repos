@@ -231,7 +231,11 @@ TAB("asset_config", "Prüfungen von asset_config()", list(
   ZC("start_kein_datum", "asset_config('etf', start = 'kein Datum')", "simlev.asset_config(asset_class='etf', start='kein Datum')",
      'SL.asset_config("etf"; start = "kein Datum")'),
   ZC("teilfreistellung_als_anteil", "asset_config('etf', partial_exemption = 0.3, spread = 0.1)",
-     "simlev.asset_config(asset_class='etf', partial_exemption=0.3, spread=0.1)", 'SL.asset_config("etf"; partial_exemption = 0.3, spread = 0.1)')))
+     "simlev.asset_config(asset_class='etf', partial_exemption=0.3, spread=0.1)", 'SL.asset_config("etf"; partial_exemption = 0.3, spread = 0.1)'),
+  # match.arg (seit 1.6.3 auch in Julia die eine Fassung _match_arg): Zahl statt Text wie R, Vektor mit Symbol wie Text
+  ZC("klasse_zahl", "asset_config(1)", "simlev.asset_config(asset_class=1)", 'SL.asset_config([1])'),
+  ZC("klasse_vektor_symbol", "asset_config(c('etc'), spread = 0.1)", "simlev.asset_config(asset_class=['etc'], spread=0.1)",
+     'SL.asset_config([:etc]; spread = 0.1)')))
 TAB("sim_costs", "Prüfungen von sim_costs()", list(
   ZB("feld_unbekannt", BK("sim_costs", order_fee = list(fix = 1))),
   ZB("text", BK("sim_costs", order_fee = "5")),
@@ -371,7 +375,6 @@ ZZ <- c(`9` = "privatverkauf_ohne_grenzsteuersatz",
         `21` = "eigener_tarif_mit_sprung")
 ZZP <- c(`9` = "§ 23 ohne Grenzsteuersatz (zwei Warnungen), Basiszins, prozentuale Ordergebühr, ganze Stücke, liquidate",
          `21` = "eigene Tarifdatei mit Sprung an der Zonengrenze (Warnung), zvE 300 000, Freibetrag ohne Verlusttopf")
-pick <- function(x) x[[sample.int(length(x), 1)]]
 for (k in c(9, 21)) {
   set.seed(4711 + k)
   n <- pick(c(3, 60, 200, 200, 400))

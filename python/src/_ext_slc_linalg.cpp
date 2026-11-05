@@ -21,50 +21,15 @@
 /* Methodentabelle mit C-Bindung (Deklaration in _ext_common.h) */
 extern "C" {
 
-/* ── Hilfen (wie _ext_slc.cpp) ── */
+#include "_ext_slc_hull.h"   /* py_interrupted, ctx_init, finish, hull_buf, rel (seit 1.6.3) */
+static inline int get_buf(PyObject *o, Py_buffer *v, int writable, Py_ssize_t itemsize, const char *fmts,
+                          Py_ssize_t len, const char *what)
+{ return hull_buf(o, v, writable, itemsize, fmts, len, what, 0); }
 
-static int py_interrupted(void *h) { (void) h; return PyErr_CheckSignals() < 0; }
-
-static void ctx_init(sl_ctx *cx)
-{
-    sl_ctx_init(cx);
-    cx->interrupted = py_interrupted;
-}
-
-static int finish(sl_ctx *cx, int st)
-{
-    int i;
-    for (i = 0; i < cx->n_warn; i++)
-        if (PyErr_WarnEx(PyExc_UserWarning, cx->warn[i], 1) < 0) return -1;
-    if (st == SL_OK) return 0;
-    if (st == SL_EINTR && PyErr_Occurred()) return -1;
-    PyErr_SetString(PyExc_ValueError, cx->msg);
-    return -1;
-}
-
-/* Puffer mit itemsize/Format pruefen; len >= 0: genau so viele Elemente */
-static int get_buf(PyObject *o, Py_buffer *v, int writable, Py_ssize_t itemsize, const char *fmts,
-                   Py_ssize_t len, const char *what)
-{
-    int flags = PyBUF_C_CONTIGUOUS | PyBUF_FORMAT | (writable ? PyBUF_WRITABLE : 0);
-    if (PyObject_GetBuffer(o, v, flags) < 0) return -1;
-    if (v->itemsize != itemsize || v->format == NULL || strchr(fmts, v->format[strlen(v->format) - 1]) == NULL) {
-        PyBuffer_Release(v);
-        PyErr_Format(PyExc_TypeError, "interner Fehler: %s hat den falschen Typ", what);
-        return -1;
-    }
-    if (len >= 0 && v->len / v->itemsize != len) {
-        PyBuffer_Release(v);
-        PyErr_Format(PyExc_TypeError, "interner Fehler: %s hat die falsche Laenge", what);
-        return -1;
-    }
-    return 0;
-}
 
 #define DBUF(o, v, w, len, what) get_buf((o), (v), (w), 8, "d", (len), (what))
 #define NITEMS(v) ((v).len / (v).itemsize)
 
-static void rel(Py_buffer *v) { if (v->obj) PyBuffer_Release(v); }
 
 static int check_dim(int a, const char *what)
 {

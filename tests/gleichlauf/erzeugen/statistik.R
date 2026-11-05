@@ -371,6 +371,14 @@ al = series_align(value=tdv)
 result = DA.result_analysis({'al': al, 'raw': tdv}, benchmark='raw', risk_free=4, rolling_years=1))",
     r"(al = SL.DataPrep.series_align(value = tdv)
 result = DA.result_analysis(SL.RList("al" => al, "raw" => tdv); benchmark = "raw", risk_free = 4, rolling_years = 1))", druck = TRUE, inp = ein("deep_analysis/da_df_aligned", c("tdv")))))
+# NaN und später NA in der Reihe (seit 1.6.3 rechnet Julia cummax wie R und Python; ohne Zufall)
+dn <- data.frame(date = as.Date("2010-01-01") + 0:799, value = 100 * cumprod(1 + sin(seq_len(800) / 7) / 100))
+dn$value[300] <- NaN; dn$value[420] <- NA
+SZ("tiefenanalyse_luecken", "result_analysis mit NaN und später NA in der Reihe: Drawdown-Episoden, rollierende Kennzahlen, Druck", vor = VOR, teile = list(
+  da_nan_na = teil(
+    r"(result_analysis(dn, rolling_years = 1))",
+    r"(result = DA.result_analysis(dn, rolling_years=1))",
+    r"(result = DA.result_analysis(dn; rolling_years = 1))", druck = TRUE, inp = list(dn = dn))))
 ref_done()
 
 ref_init("deep_analysis", gruppe = "fehler")

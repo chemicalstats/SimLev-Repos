@@ -12,8 +12,8 @@
   gibt es Werkzeuge zur Datenaufbereitung, zum Erzeugen von Pfaden, zur
   Auswertung fertiger Simulationen, zur Entnahmeplanung und für statistische
   Prüfungen. Die Änderungen je Version stehen in \file{NEWS.md}
-  (\code{news(package = "SimLev")}); das Tutorial liegt unter
-  \code{system.file("tutorial", package = "SimLev")}.
+  (\code{news(package = "SimLev")}); das Tutorial ist die Vignette
+  (\code{vignette("getting-started", package = "SimLev")}).
 }
 \section{Arbeitsweise: Daten – Simulation – Weiterverarbeitung}{
   \strong{1. Eigene Daten einlesen.} Alle Funktionen erwarten ein

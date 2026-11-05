@@ -530,13 +530,10 @@ function _ana_ramp(cols::Vector{String}, n::Int)
     end
     out
 end
-"SVG abschließen; Text zurück, mit `file` zusätzlich in die Datei geschrieben."
-function _ana_svg_done(s::_AnaSvg, file)
+"SVG abschließen; Text zurück (geschrieben wird nur über `_plot_method`/`_write_svg`; seit 1.6.3 ohne `file`)."
+function _ana_svg_done(s::_AnaSvg)
     print(s.buf, "</svg>\n")
-    txt = String(take!(s.buf))
-    file === nothing && return txt
-    write(file, txt)
-    txt
+    return String(take!(s.buf))
 end
 
 "Jahresmarken für eine Zeitachse (Tage seit 1970): Positionen und Beschriftungen."
@@ -641,7 +638,7 @@ function _grid_axes!(io, b::_GridBox, xlo, xhi, ylo, yhi; title = "", xlabel = "
                                "transform=\"rotate(-90 $(_grid_c(b.x0 - 45)) $(_grid_c(b.y0 + b.h / 2)))\">$(_esc(ylabel))</text>")
 end
 
-function _grid_hline!(io, b, y, xlo, xhi, ylo, yhi, col)
+function _grid_hline!(io, b, y, ylo, yhi, col)
     (isfinite(y) && ylo <= y <= yhi) || return
     yy = _grid_ty(b, y, ylo, yhi)
     println(io, "<line x1=\"$(_grid_c(b.x0))\" y1=\"$(_grid_c(yy))\" x2=\"$(_grid_c(b.x0 + b.w))\" y2=\"$(_grid_c(yy))\" stroke=\"$col\" stroke-dasharray=\"4 3\"/>")
@@ -671,7 +668,7 @@ function _grid_lines!(io, b::_GridBox, series; ylim = nothing, hline = Tuple{Flo
         isempty(pts) || println(io, "<polygon points=\"$(join(["$(_grid_c(p[1])),$(_grid_c(p[2]))" for p in pts], " "))\" fill=\"#2C6E9B\" fill-opacity=\"0.15\"/>")
     end
     for h in hline
-        _grid_hline!(io, b, h[1], xlo, xhi, ylo, yhi, h[2])
+        _grid_hline!(io, b, h[1], ylo, yhi, h[2])
     end
     for (xs, ys, col, _) in series
         d = IOBuffer(); first = true
@@ -697,7 +694,7 @@ function _grid_bars!(io, b::_GridBox, labels, vals; lo = nothing, hi = nothing, 
     n = length(vals)
     ylo, yhi = _grid_range(vals, ylim)
     _grid_axes!(io, b, 0.0, Float64(n), ylo, yhi; title = title, ylabel = ylabel, xticks = [(k - 0.5, String(labels[k])) for k in 1:n])
-    _grid_hline!(io, b, 0.0, 0.0, n, ylo, yhi, "#666")
+    _grid_hline!(io, b, 0.0, ylo, yhi, "#666")
     z = _grid_ty(b, clamp(0.0, ylo, yhi), ylo, yhi)
     for k in 1:n
         isfinite(vals[k]) || continue
@@ -754,11 +751,9 @@ function _res_fig(w = 720, h = 420)
     f
 end
 "SVG abschließen; liefert den Text (für `(svg, data)` an `_plot_method`)."
-function _res_finish(f::_ResFig; file = nothing)
+function _res_finish(f::_ResFig)   # seit 1.6.3 ohne `file` (immer nothing; geschrieben wird über `_plot_method`)
     print(f.io, "</svg>\n")
-    svg = String(take!(f.io))
-    file === nothing || write(String(file), svg)
-    svg
+    return String(take!(f.io))
 end
 _res_svg!(f::_ResFig, s) = print(f.io, s, "\n")
 _res_text!(f, x, y, s; size = 11, anchor = "middle", color = "#222", rot = 0, weight = "normal") =

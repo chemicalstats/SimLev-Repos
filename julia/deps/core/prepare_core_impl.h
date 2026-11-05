@@ -101,7 +101,10 @@ struct Sched {
   const int32_t* dcode = nullptr; // Tag aus as.Date("2000-1-<days>") (0 = NA), fuer anchor "start"
 };
 
-// calculate_dates_flags(): out[i] = 1, wenn dates[i] ein Termin ist (dates ohne NA)
+// calculate_dates_flags(): out[i] = 1, wenn dates[i] ein Termin ist (dates ohne NA).
+// Seit 1.6.3 ein Schnellweg fuer lueckenlose Tage (abgerundet fd[0], fd[0] + 1, ...; so in prepare()): Suche und
+// Treffer ueber den Index fd - fd[0] statt sortierter Tabelle und binary_search (gleiche Ganzzahllogik). Sonst
+// (simlev_c_dates_flags mit ausgewaehlten Tagen) wie bisher.
 static inline void dates_flags(int64_t n, const double* dates, const Sched& S, int liquidate, int32_t* out) {
   for (int64_t i = 0; i < n; i++) out[i] = 0;
   if (!S.on || n < 1) return;
@@ -112,15 +115,26 @@ static inline void dates_flags(int64_t n, const double* dates, const Sched& S, i
   }
   std::vector<long> fd((std::size_t) n);
   for (int64_t i = 0; i < n; i++) fd[i] = fl_day(dates[i]);
-  std::vector<long> table(fd);
-  std::sort(table.begin(), table.end());
-  auto in_dates = [&](long z) { return std::binary_search(table.begin(), table.end(), z); };
+  bool gapless = true;
+  for (int64_t i = 1; i < n && gapless; i++) gapless = fd[i] == fd[0] + i;
+  std::vector<long> table;
+  std::vector<char> mark;   // Schnellweg: mark[z - fd[0]] = 1 fuer jeden Termin z
+  if (gapless) {
+    mark.assign((std::size_t) n, 0);
+  } else {
+    table = fd;
+    std::sort(table.begin(), table.end());
+  }
+  auto in_dates = [&](long z) {
+    return gapless ? (z >= fd[0] && z - fd[0] < (long) n) : std::binary_search(table.begin(), table.end(), z);
+  };
   std::vector<long> hit;
   auto take = [&](double s) {   // Termin s (NaN = NA) nach den Regeln von R uebernehmen
     if (s != s || !in_dates(fl_day(s))) return;
     if (S.skip && s == dmin) return;
     if (liquidate && s == dmax) return;
-    hit.push_back(fl_day(s));
+    if (gapless) mark[(std::size_t) (fl_day(s) - fd[0])] = 1;
+    else hit.push_back(fl_day(s));
   };
   int sy, sm, sd, ty, tm, td;
   eng_civil(fl_day(S.start), sy, sm, sd);
@@ -151,6 +165,10 @@ static inline void dates_flags(int64_t n, const double* dates, const Sched& S, i
         take((double) eng_days(ey, em, 1) - 1 - (dd - 1));
       }
     }
+  }
+  if (gapless) {
+    for (int64_t i = 0; i < n; i++) out[i] = mark[(std::size_t) i];
+    return;
   }
   std::sort(hit.begin(), hit.end());
   for (int64_t i = 0; i < n; i++) out[i] = std::binary_search(hit.begin(), hit.end(), fd[i]) ? 1 : 0;
@@ -213,10 +231,17 @@ static inline int prepare(const PrepIn& I, const PrepOut& O) {
   if (I.filled)
     for (int64_t i = 0; i < n; i++) any_filled |= (filled[i] = I.filled[i] != 0) != 0;
   std::vector<int> year((std::size_t) n), ym((std::size_t) n), md((std::size_t) n);
-  for (int64_t i = 0; i < n; i++) {
+  {
+    // Kalenderdatum je Tag: seit 1.6.3 einmal eng_civil(z0), danach Tag fuer Tag weitergezaehlt (Tage lueckenlos,
+    // oben geprueft; gleiche Werte wie eng_civil(z0 + i))
     int y, m, d;
-    eng_civil(z0 + i, y, m, d);
-    year[i] = y; ym[i] = y * 12 + m; md[i] = m * 100 + d;
+    eng_civil(z0, y, m, d);
+    for (int64_t i = 0; i < n; i++) {
+      year[i] = y; ym[i] = y * 12 + m; md[i] = m * 100 + d;
+      if (d < month_len(y, m)) d++;
+      else if (m < 12) { d = 1; m++; }
+      else { d = 1; m = 1; y++; }
+    }
   }
   // .sim_build_calendar: Termine
   std::vector<char> liq((std::size_t) n), reb((std::size_t) n), dca((std::size_t) n), ev((std::size_t) n, 0),

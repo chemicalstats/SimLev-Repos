@@ -22,13 +22,33 @@
 #ifndef SLC_RBASE2_H
 #define SLC_RBASE2_H
 
+#include <math.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "slc_rbase.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* ── NA-Hilfen der rbase-Dateien (seit 1.6.3 hier; vorher je Datei eine Kopie; slc_rbase.cpp, das auch nach
+ * r/src/ geht, behält seine eigenen): Bits als double, R's ISNA (NaN mit Nutzlast 1954), NA_real_, R_NaN ── */
+static inline double slr_bits_d(uint64_t u)
+{
+    double d;
+    memcpy(&d, &u, sizeof d);
+    return d;
+}
+static inline int slr_is_na(double x)
+{
+    uint64_t u;
+    if (!isnan(x)) return 0;
+    memcpy(&u, &x, sizeof u);
+    return (u & UINT64_C(0xFFFFFFFF)) == 1954;
+}
+#define SLR_NA  slr_bits_d(UINT64_C(0x7FF00000000007A2))
+#define SLR_NAN slr_bits_d(UINT64_C(0x7FF8000000000000))
 
 /* ── slc_rbase_clust.cpp: dist, hclust ──────────────────────────────────────
  * sl_r_dist: Zeilenabstände der nr × nc-Matrix x (spaltenweise); method 1 euclidean, 2 maximum, 3 manhattan,
@@ -84,8 +104,7 @@ int sl_r_ecdf(int64_t n, const double *x, double *vals, double *y, int64_t *nv) 
 
 /* ── slc_rbase_fmt.cpp: round/signif, formatReal, encodeReal, as.character, str_signif, sprintf ─────────────
  * Texte als ein Puffer *out (UTF-8, Bytes) mit n + 1 Grenzen *off (malloc, freigeben mit sl_r_free).
- * sl_r_fround/sl_r_fprec: round(x, digits) bzw. signif(x, digits) eines Werts; sl_r_round_vec: kind 0 round,
- * 1 signif mit Recycling (Länge max(nx, nd)).
+ * sl_r_fround, sl_r_fprec, sl_r_round_vec: seit 1.6.3 in slc_rbase.cpp (Deklaration in slc_rbase.h).
  * sl_r_format_real: (w, d, e) wie formatReal für digits, nsmall, scipen; na: Maske der NA (NULL: Nutzlast 1954).
  * sl_r_encode_real: encodeReal0 je Wert (NA als nastr, rechtsbündig in w), drop0: Endnullen entfernen, dec: Dezimalzeichen.
  * sl_r_as_character_real: as.character je Wert (15 Stellen, ohne Endnullen; NA als "NA").
@@ -97,9 +116,6 @@ int sl_r_ecdf(int64_t n, const double *x, double *vals, double *y, int64_t *nv) 
  * des Hosts). Fehlertexte wie R mit SL_EARG. */
 enum { SL_RS_LGL = 0, SL_RS_INT = 1, SL_RS_DBL = 2, SL_RS_CHR = 3, SL_RS_FACTOR = 4, SL_RS_DATE = 5 };
 void   sl_r_free(void *p) SL_NOTHROW;
-double sl_r_fround(double x, double digits) SL_NOTHROW;
-double sl_r_fprec(double x, double digits) SL_NOTHROW;
-void   sl_r_round_vec(int kind, int64_t nx, const double *x, int64_t nd, const double *digits, double *out) SL_NOTHROW;
 void   sl_r_format_real(int64_t n, const double *x, const unsigned char *na, int digits, int nsmall, int scipen,
                         int *w, int *d, int *e) SL_NOTHROW;
 int    sl_r_encode_real(int64_t n, const double *x, const unsigned char *na, int w, int d, int e, const char *dec,

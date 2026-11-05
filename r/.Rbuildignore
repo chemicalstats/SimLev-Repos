@@ -2,3 +2,6 @@
 ^\.DS_Store$
 ^.*\.Rproj$
 ^\.Rproj\.user$
+^DEVELOPING\.md$
+^man/figures/README-.*\.png$
+^man/figures/simlev-(blue|green)\.png$

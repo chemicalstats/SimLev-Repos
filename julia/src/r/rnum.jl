@@ -20,6 +20,10 @@ const NA = reinterpret(Float64, 0x7FF00000000007A2)
 "TRUE nur für R's NA (nicht für NaN) – entspricht `R_IsNA`."
 isna_strict(x::Float64) = isnan(x) && (reinterpret(UInt64, x) & 0x00000000FFFFFFFF) == 0x00000000000007A2
 
+"R's `is.na()` für einen Eintrag (`missing`, `nothing`, NA und NaN); seit 1.6.3 eine Fassung für data, data_prep,
+dependence, optimize, overfitting, tactical, RFmt und RStats (bis 1.6.2 acht gleiche Kopien; RExpr bleibt eigen)."
+_isna(v) = v === missing || v === nothing || (v isa AbstractFloat && isnan(v))
+
 # ── Summen, Mittel, Varianz, Kumulationen (C-Kerne core/slc_rbase.cpp) ─────
 # R akkumuliert in long double; die C-Kerne tun dasselbe (x87 auf x86-64, gegen R bitgleich geprüft)
 # und sind dieselbe Implementierung wie in Python. Die frühere Nachbildung über F80/F80Soft mit der
@@ -96,11 +100,6 @@ const _LIBM = Sys.islinux() ? "libm.so.6" :
 "Skalares `x ^ y` wie in R (`x^2` als `x*x`, sonst `pow()` der C-Bibliothek; C-Kern `sl_r_pow1`)."
 r_pow(x::Real, y::Real) = _rb_pow1(Float64(x), Float64(y))
 
-"Elementweises `x ^ y` mit R-Semantik (C-Kern `sl_r_pow`)."
-r_pow_vec(x, y::Real) = _rb_pow(_rbv(x), Float64(y))
-
-"`x %% 1` für Doubles wie R's `myfmod(x, 1)`."
-r_mod1(x::Float64) = _rb_fmod_ld(x, 1.0)   # C-Kern (core/slc_rbase_num.cpp)
 
 @inline function _r_nan2(a::Float64, b::Float64)
     isnan(a) && isna_strict(a) && return a      # NA schlägt NaN
@@ -115,12 +114,6 @@ end
 # (cpp_min/cpp_max und die NaN-genauen Einzeloperationen nan_add, nan_mul … (0.10.0) sind mit
 # den Julia-Ports der geteilten Kerne entfallen; diese rechnen jetzt die C++-Kerne selbst.)
 
-# ── Ergänzungen für die Engine 0.5.0 ────────────────────────────────────────
-
-@inline _libm_exp(x::Float64) = ccall((:exp, _LIBM), Float64, (Float64,), x)
-@inline _libm_expm1(x::Float64) = ccall((:expm1, _LIBM), Float64, (Float64,), x)
-@inline _libm_log(x::Float64) = ccall((:log, _LIBM), Float64, (Float64,), x)
-
 "`cumprod(x)` wie in R (long double; NA/NaN über `handleNaN`; C-Kern)."
 r_cumprod(x) = _rb_cumprod(_rbv(x))
 
@@ -131,7 +124,6 @@ r_cummax(x) = _rb_cummax(_rbv(x))
 r_median(x; na_rm::Bool = false) = Float64(RStats.median(collect(Float64, x); na_rm = na_rm))
 
 const _DBL_EPS = 2.220446049250313e-16
-const _DBL_MAX = 1.7976931348623157e308
 
 "`as.numeric(<Zeichenkette>)` wie R (R_strtod mit long double; ungültig → NA)."
 function r_as_numeric(s::AbstractString)

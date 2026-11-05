@@ -504,7 +504,7 @@ withdrawal_cohorts <- function(data, price = "value", inflation = NULL, years = 
   take <- function(v, s) v[((s - 1L + seq_len(len_m) - 1L) %% nm) + 1L]
   agg <- function(m) {                                     # Monate -> Perioden (Produkt)
     if (mpp == 1L) return(m)
-    apply(m, 2, function(col) apply(matrix(col, nrow = mpp), 2, prod))
+    .wd_annual_prod(m, mpp)   # seit 1.6.3 im Kern (sl_r_prod wie prod(): long double, Abschneiden); Form: matrix() unten
   }
   R <- agg(vapply(starts, function(s) take(mret, s), numeric(len_m)))
   I <- agg(vapply(starts, function(s) take(minf, s), numeric(len_m)))
@@ -1571,6 +1571,7 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
                         historical = FALSE, start_dates = NULL, weights = NULL, source = "matrix"),
                    class = "withdrawal_paths")
   }
+  if (isTRUE(.wd_reuse$on)) .wd_reuse$x <- x   # withdrawal_max_rate: aufbereitete Quelle fuer die weiteren Suchschritte
   ppy <- .wd_ppy(x$frequency)
   R <- x$returns; I <- x$inflation
   if (!is.matrix(R) || !nrow(R) || !ncol(R)) stop("Keine Renditen (leere Matrix bzw. keine Pfade).")
@@ -1685,6 +1686,9 @@ withdrawal_simulation <- function(x, rule = withdrawal_rule("constant"), start_v
   out
 }
 
+# withdrawal_max_rate: Merker fuer die aufbereitete Renditequelle des ersten Suchschritts (seit 1.6.3)
+.wd_reuse <- new.env(parent = emptyenv())
+
 #' Maximale Anfangsrate fuer eine Ziel-Erfolgsquote
 #'
 #' Bestimmt per Bisektion die hoechste Entnahmerate (\code{rate} der Regel),
@@ -1747,13 +1751,22 @@ withdrawal_max_rate <- function(x, rule = withdrawal_rule("constant"), success =
   hz <- list(...)[["horizon"]]
   sim <- if (inherits(hz, "SimLevHorizon") && is.null(hz$seed) && !identical(hz$type, "fixed")) {
     hz$seed <- .sl_next_seed()
-    function(rl, horizon, ...) withdrawal_simulation(x, rl, keep_paths = FALSE, horizon = hz, ...)
-  } else function(rl, ...) withdrawal_simulation(x, rl, keep_paths = FALSE, ...)
+    function(x, rl, horizon, ...) withdrawal_simulation(x, rl, keep_paths = FALSE, horizon = hz, ...)
+  } else function(x, rl, ...) withdrawal_simulation(x, rl, keep_paths = FALSE, ...)
+  # Seit 1.6.3 bereitet nur der erste Suchschritt die Renditequelle auf (withdrawal_paths/withdrawal_cohorts aus einer
+  # Studie bzw. einem Ergebnis); die weiteren rechnen mit dieser Aufbereitung (gleiche Renditen, Inflation, Gewichte)
+  on.exit({ .wd_reuse$on <- FALSE; .wd_reuse$x <- NULL }, add = TRUE)
   first <- TRUE   # Hinweise und Warnungen (gleiche Eingaben) nur beim ersten Suchschritt
   f <- function(rate) {
     rl <- rule; rl$rate <- rate
-    s <- if (first) sim(rl, ...)
-         else suppressWarnings(suppressMessages(sim(rl, ...)))
+    s <- if (first) {
+      .wd_reuse$on <- TRUE; .wd_reuse$x <- NULL
+      s1 <- sim(x, rl, ...)
+      .wd_reuse$on <- FALSE
+      if (!is.null(.wd_reuse$x)) x <<- .wd_reuse$x
+      .wd_reuse$x <- NULL
+      s1
+    } else suppressWarnings(suppressMessages(sim(x, rl, ...)))
     first <<- FALSE
     stats::weighted.mean(s$paths$success, s$weights)
   }
@@ -2049,11 +2062,7 @@ print.SimLevHorizon <- function(x, ...) {
 #' @keywords internal
 #' @noRd
 .wd_tariff_years <- function(M, ny) {
-  cols <- c("year", "taxable_income", "church_tax_paid_deductible", "church_tax_refunded", "church_tax_net_deduction",
-            "taxable_income_net", "deduction_effect", "gain_p23", "income_tax_p23", "soli_p23", "church_tax_p23", "tax_p23",
-            "capital_income", "abgeltung_burden", "church_tax_withheld_k", "tariff_income_tax_k", "tariff_soli_k",
-            "tariff_church_tax_k", "tariff_burden", "burden_without_gp", "burden_with_gp", "guenstiger", "settlement",
-            "refund", "church_tax_settlement_next_year")
+  cols <- .TARIFF_YEAR_COLS
   C <- .wd_tariff_compact(M, ny)                          # Spalten mit Jahr NA entfallen (Kern)
   # seit 1.6.1 als Liste mit einem Aufbau (wie data.frame() und Spalte für Spalte, ohne dessen Kopien je Spalte)
   d <- c(list(path = as.integer(C[, 1L])), lapply(seq_along(cols), function(j) C[, j + 1L]))

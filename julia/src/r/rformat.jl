@@ -117,7 +117,6 @@ function r_sprintf(fmt::AbstractString, @nospecialize(args...))
         out = Vector{UInt8}(undef, len)
     end
 end
-const rsprintf = r_sprintf
 
 # ── formatReal (R's format.c) ───────────────────────────────────────────────
 
@@ -170,7 +169,8 @@ function r_format(x; digits = nothing, nsmall::Int = 0, big_mark::AbstractString
             out = [lpad(s, ww) for s in out]
         else
             w, d, e = _format_real(fv, dg, nsmall, scipen)
-            out = String[_encode_real(v, w, d, e) for v in fv]
+            # in einem Aufruf (seit 1.6.3; bis 1.6.2 je Wert, gleicher Kern sl_r_encode_real, gleiche NA-Maske)
+            out = SimLev._rb_encode_real(fv, UInt8[isna_strict(v) for v in fv], w, d, e, ".", "NA", false)
         end
         if !isempty(big_mark)
             out = [_insert_big_mark(s, String(big_mark)) for s in out]
@@ -254,5 +254,3 @@ r_round(x::Real, digits::Real = 0) = RFmt.fround(Float64(x), Float64(digits))
 "R's `signif(x, digits)` (nmath/fprec.c; Rechnung `RFmt.fprec`, `digits` wie R mit C-`round()`)."
 r_signif(x::Real, digits::Real = 6) = RFmt.fprec(Float64(x), Float64(digits))
 
-"`format(x, digits = d)` für einen Skalar wie R's `formatReal`."
-r_format_digits(x::Real, digits::Int = 7) = r_format1(Float64(x); digits = digits)

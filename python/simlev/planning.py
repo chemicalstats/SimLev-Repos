@@ -32,17 +32,11 @@ from .deep_analysis import (
     _sp, _stats, _to_date_days,
 )
 from .svg import _AnaSvg, _ana_hline, _ana_legend, _ana_panel, _ana_ramp, _ana_rect, _ana_svg_done
+from ._util import _num_col
 
 __all__ = ["series_shift_return", "bootstrap_pooled", "portfolio_returns", "planning_goal", "SimLevGoalPlan"]
 
 _NAN = NA_REAL   # R-NA_real_
-
-
-def _num_col(v):
-    """``as.numeric`` einer Spalte; NA/NaN-Bitmuster numerischer Spalten bleiben erhalten (sonst NA)."""
-    if getattr(v, "dtype", None) is not None and v.dtype.kind == "f":
-        return v.to_numpy(dtype=np.float64, copy=True)
-    return pd.to_numeric(v, errors="coerce").to_numpy(dtype=np.float64, na_value=NA_REAL)
 
 
 def _numvals(x):
@@ -192,28 +186,14 @@ def _period_gross(df, columns, frequency):
 
 
 def _wd_ppy(frequency):
-    try:
-        return _ext("withdrawal", "_wd_ppy")(frequency)
-    except (ImportError, AttributeError):  # pragma: no cover - Teil B noch nicht verfügbar
-        return {"year": 1, "quarter": 4, "month": 12}[frequency]
+    """Perioden je Jahr (``withdrawal._wd_ppy``, spät geladen)."""
+    return _ext("withdrawal", "_wd_ppy")(frequency)
 
 
 def _paths_class():
-    """Klasse für ``withdrawal_paths`` (Teil B), sonst die lokale."""
-    try:
-        cls = _ext("withdrawal", "WithdrawalPaths")
-        return cls
-    except (ImportError, AttributeError):
-        return WithdrawalPathsPB
-
-
-class WithdrawalPathsPB(RList):
-    """Ergebnis von :func:`bootstrap_pooled` (R-Klasse ``withdrawal_paths``), falls Teil B keine Klasse liefert."""
-
-    r_class = ("withdrawal_paths",)
-
-    def format(self):
-        return "<withdrawal_paths: %s>" % ", ".join(self.keys())
+    """Klasse ``withdrawal.WithdrawalPaths`` (R-Klasse ``withdrawal_paths``) für :func:`bootstrap_pooled`, spät geladen.
+    Seit 1.6.3 ohne die Rückfälle auf eine eigene Klasse ``WithdrawalPathsPB`` (nie erreicht)."""
+    return _ext("withdrawal", "WithdrawalPaths")
 
 
 def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequency=("year", "quarter", "month"),
@@ -368,7 +348,8 @@ def bootstrap_pooled(datasets, columns, *, weights=None, inflation=None, frequen
         term = wk * A[k]
         Rp = term if Rp is None else Rp + term
     Inf_m = A[inflation] if inflation is not None else np.ones((nper, int(n)))
-    cmat = np.array([[ctry_names[c - 1] for c in col] for col in (dr[0] for dr in draw)], dtype=object).T \
+    # Länder je Periode und Pfad als Namen (seit 1.6.3 über die Codes, dieselben Textobjekte, ohne Schleife je Zelle)
+    cmat = np.array(ctry_names, dtype=object)[np.column_stack([np.asarray(dr[0], dtype=np.int64) for dr in draw]) - 1] \
         if draw else np.zeros((nper, 0), dtype=object)
     cls = _paths_class()
     return cls([("returns", Rp), ("inflation", Inf_m), ("cape", None), ("base_rate", None), ("frequency", frequency),

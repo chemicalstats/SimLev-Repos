@@ -15,9 +15,8 @@
  *                              die Ausnahme des Signal-Handlers). Nur dort, wo auch R den
  *                              Benutzerabbruch prueft; der Kern laeuft dann mit
  *                              gehaltener GIL (ext::run(f, false)).
- *   SIMLEV_WARN             -> warnings.warn(Text, UserWarning)
  *   SIMLEV_NUM/MATRIX/COPY  -> Speicher je Thread (ext::Alloc), vor jedem Kern geleert;
- *   SIMLEV_INT                 die Huelle kopiert die Ergebnisse danach in Python-Objekte
+ *                              die Huelle kopiert die Ergebnisse danach in Python-Objekte
  *
  * Die frueheren Kerne mit Zufallszahlen (Bootstrap, truncnorm mit der
  * C-Nachbildung von R's RNG in _rng_r.c) sind seit 1.0.0 entfallen; Zufall zieht nur
@@ -48,17 +47,6 @@
 #include "core/simlev_core.h"
 
 namespace ext {
-
-/* Pruefung vor dem Kern, deren Fehlschlag die Huelle verlaesst: als unwahrscheinlich
- * markiert, damit der Compiler den eingebetteten Kern als heissen Pfad uebersetzt wie in der
- * R-Huelle (dort werfen die Umwandlungen, statt zu verzweigen). Sonst gilt der Kern hinter einer
- * Kette von Pruefungen als selten, wird auf Groesse optimiert (etwa sqrt als Aufruf statt sqrtsd)
- * und bekommt andere Register; das aendert bei zwei NaN-Operanden, welche Nutzlast bleibt. */
-#if defined(__GNUC__)
-#define EXT_FAIL_IF(x) if (__builtin_expect(!!(x), 0))
-#else
-#define EXT_FAIL_IF(x) if (x)
-#endif
 
 /* Puffer mit automatischer Freigabe */
 struct Buf {
@@ -137,10 +125,8 @@ struct Mat {
 };
 
 inline Vec vec(const Buf& b) { Vec v = {nullptr, b.d(), b.n}; return v; }
-inline Vec vec(double* p, Py_ssize_t n) { Vec v = {nullptr, p, n}; return v; }
 inline IVec ivec(const Buf& b) { IVec v = {nullptr, b.i(), b.n}; return v; }
 inline Mat mat(const Buf& b, int nr, int nc) { Mat m = {nullptr, b.d(), nr, nc}; return m; }
-inline Mat mat(double* p, int nr, int nc) { Mat m = {nullptr, p, nr, nc}; return m; }
 
 /* Felder in vom Aufrufer bereitgestellte Puffer kopieren */
 inline void put(const Buf& out, const double* p, Py_ssize_t n) {
@@ -152,14 +138,7 @@ struct KernelError {
     char msg[2048];
 };
 struct Interrupted {};
-/* Python-Fehler ist bereits gesetzt (Zugriffe der Engine-Kerne auf Python-Objekte) */
-struct PyErrorSet {};
 
-[[noreturn]] inline void fail_msg(const char* msg) {
-    KernelError e;
-    std::snprintf(e.msg, sizeof e.msg, "%s", msg);
-    throw e;
-}
 /* SIMLEV_FAIL: Format und Argumente wie stop() in R (Texte aus den Kernen) */
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -186,17 +165,10 @@ inline void check_interrupt() {
  * danach in Python-Objekte. Ohne GIL nutzbar. */
 struct Alloc {
     std::deque<std::vector<double>> store;
-    std::deque<std::vector<int>> istore;
     bool flag = false, has_flag = false;
     void reset() {
         store.clear();
-        istore.clear();
         flag = has_flag = false;
-    }
-    IVec ivec(Py_ssize_t n, int fill = 0) {
-        istore.emplace_back((std::size_t) n, fill);
-        IVec v = {nullptr, istore.back().data(), n};
-        return v;
     }
     Vec num(Py_ssize_t n, double fill = 0.0) {
         store.emplace_back((std::size_t) n, fill);
@@ -250,8 +222,6 @@ template <class F> bool run(F f, bool release_gil = true) {
         st = 1;
     } catch (const Interrupted&) {
         st = 2;
-    } catch (const PyErrorSet&) {
-        st = 5;
     } catch (const std::bad_alloc&) {
         st = 3;
     } catch (...) {
@@ -263,7 +233,6 @@ template <class F> bool run(F f, bool release_gil = true) {
     case 1: set_kernel_error(ke); return false;
     case 2: set_interrupted(); return false;
     case 3: PyErr_NoMemory(); return false;
-    case 5: if (!PyErr_Occurred()) PyErr_SetString(PyExc_RuntimeError, "simlev._ext: Fehler ohne Ausnahme"); return false;
     default: PyErr_SetString(PyExc_RuntimeError, "simlev._ext: unbekannte C++-Ausnahme im Kern"); return false;
     }
 }
@@ -277,17 +246,6 @@ inline PyObject* new_doubles(Py_ssize_t n, double** ptr) {
     return ba;
 }
 
-/* Felder in vom Aufrufer bereitgestellte Puffer kopieren (int32) */
-inline void put_int(const Buf& out, const int* p, Py_ssize_t n) {
-    for (Py_ssize_t k = 0; k < n; k++) out.i()[k] = p[k];
-}
-
-/* std::vector<double> als bytearray */
-inline PyObject* from_vector(const std::vector<double>& v) {
-    return PyByteArray_FromStringAndSize(reinterpret_cast<const char*>(v.data()),
-                                         (Py_ssize_t) (v.size() * sizeof(double)));
-}
-
 }  // namespace ext
 
 /* Python als Host der gemeinsamen Kerne (Schnittstelle in simlev_core.h; Gegenstueck
@@ -296,14 +254,11 @@ namespace simlev_host {
 typedef ext::Vec NumVec;
 typedef ext::IVec IntVec;
 typedef ext::Mat NumMat;
-typedef ext::IVec LglVec;   /* logische Vektoren als int32 */
 }  // namespace simlev_host
-#define SIMLEV_INT(...) ext::alloc().ivec(__VA_ARGS__)
 
 #define SIMLEV_NA (simlev_na_real())
 #define SIMLEV_FAIL ext::fail
 #define SIMLEV_CHECK_INTERRUPT() ext::check_interrupt()
-#define SIMLEV_WARN(msg) PyErr_WarnEx(PyExc_UserWarning, msg, 1)
 #define SIMLEV_NUM(...) ext::alloc().num(__VA_ARGS__)
 #define SIMLEV_MATRIX(...) ext::alloc().mat(__VA_ARGS__)
 #define SIMLEV_COPY(...) ext::alloc().copy(__VA_ARGS__)
@@ -311,8 +266,6 @@ typedef ext::IVec LglVec;   /* logische Vektoren als int32 */
 #define SIMLEV_SET_FLAG(v, name, f) ext::alloc().set_flag(f)
 #define SIMLEV_DONE(v) (v)
 #define SIMLEV_LIST(...) std::make_tuple(__VA_ARGS__)
-#define SIMLEV_CLONE(v) ext::alloc().copy((v).begin(), (v).end())
-#define SIMLEV_R_FINITE(x) std::isfinite(x)
 
 /* Methodentabellen der Huellen (je Datei eine, zusammengefuehrt in _ext.cpp) */
 extern PyMethodDef simlev_ext_research_methods[];

@@ -16,22 +16,7 @@ source("tests/gleichlauf/erzeugen/ref_tools.R")
 args <- commandArgs(TRUE)
 N <- as.integer(args[1]); seed0 <- as.integer(if (length(args) >= 2) args[2] else 20261107)
 ref_bereich("goal_fuzz", alle = TRUE); ref_init("goal_fuzz")
-pick <- function(x) x[[sample.int(length(x), 1L)]]
-coin <- function(p) runif(1) < p
 
-fuzz_case <- function(id, r, py, jl, inputs) {
-  ref_case(id, r = r, py = py, jl = jl, inputs = inputs)
-  if (!.ref_in_subset(id)) return(invisible(NULL))
-  env <- new.env(parent = globalenv())
-  for (k in names(inputs)) assign(k, inputs[[k]], envir = env)
-  dp <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = " ")
-  wc <- character(0); ec <- NULL
-  invisible(capture.output(tryCatch(withCallingHandlers(eval(parse(text = r), envir = env),
-    warning = function(w) { wc <<- c(wc, dp(conditionCall(w))); invokeRestart("muffleWarning") },
-    message = function(m) invokeRestart("muffleMessage")),
-    error = function(e) ec <<- dp(conditionCall(e)))))
-  ref_case_extra(list(r_calls = list(warnings = as.list(wc), error = ec)))
-}
 num <- function(v) sprintf("%.17g", v)
 vr <- function(v) if (length(v) == 1) num(v) else sprintf("c(%s)", paste(num(v), collapse = ", "))
 vp <- function(v) sprintf("[%s]", paste(num(v), collapse = ", "))

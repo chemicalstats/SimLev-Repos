@@ -18,10 +18,10 @@
 #'
 #' Eingabe: sim_mem, fl (aus .sim_build_calendar), cfg (aus .sim_check_inputs), data (Spalten fuer event_weight),
 #' event_weight, split_thresh, balance_dca, harvest_loss_pot, liquidate, stopp_date, details, harvest_day.
-#' Ausgabe: list(sim_mem = sim_mem nach dem Abschluss (Status, Report, Lots, Verkaeufe, Steuerbuchungen,
-#' Toepfe, durch Splits geaenderte Kursreihen), tax_unpaid = nicht gedeckte Steuerzahlungen in EUR,
+#' Ausgabe: list(sim_mem = sim_mem nach dem Abschluss (Geldbestand je Asset, Report, Zahl der Kaeufe und Verkaeufe,
+#' offene Lots, Toepfe, durch Splits geaenderte Kursreihen), tax_unpaid = nicht gedeckte Steuerzahlungen in EUR,
 #' flag_harvest = Freibetragstage, tax_regimes = Steuerregime je Asset); .fee_env$paid und cfg$tariff_env
-#' (Jahreszeilen, KiSt-Salden) fortgeschrieben; Warnungen des Laufs in der Reihenfolge ihres Auftretens, mit
+#' (Jahreszeilen als data.frame bzw. NULL, KiSt-Salden) fortgeschrieben; Warnungen des Laufs in der Reihenfolge ihres Auftretens, mit
 #' details die Ausgaben dazwischen.
 #' @keywords internal
 #' @noRd
@@ -96,19 +96,18 @@
     start = vapply(nm, function(a) as.numeric(as_[[a]][["start"]]), numeric(1), USE.NAMES = FALSE),
     filled = if (any(fl$flag_filled)) as.integer(fl$flag_filled),
     event = if (!is.null(fl$flag_event)) as.integer(fl$flag_event),
-    d_days = fl$dca$days, d_dcode = fl$dca$dcode, b_days = fl$balance$days, b_dcode = fl$balance$dcode)
+    d_days = fl$dca$days, d_dcode = fl$dca$dcode, b_days = fl$balance$days, b_dcode = fl$balance$dcode,
+    # seit 1.6.3 kompakte Ausgabe: je Asset nur die Zahl der Kaeufe/Verkaeufe und (tax_mode = "person") die offenen
+    # Lots als Spalten date, units, price, vp; Einzelobjekte je Lot, Verkauf und Steuerbuchung las niemand (R-r-1)
+    compact = if (person) 2L else 1L)
   out <- .Call(C_sim_engine_run, inp)
-  fields <- c("count", "price", "worth", "money", "total", "target", "actual", "differ")
   for (k in seq_along(nm)) {
     a <- nm[k]
-    s <- out$status[(8L * (k - 1L) + 1L):(8L * k)]
-    sim_mem[["status"]][[a]] <- stats::setNames(as.list(s), fields)
+    # Zustand je Asset: count, price, worth, money, total, target, actual, differ; gelesen wird nur money
+    sim_mem[["status"]][[a]] <- list(money = out$status[8L * (k - 1L) + 4L])
     sim_mem[["report"]][[a]] <- out$report[[k]]
-    tr <- sim_mem[["trades"]][[a]]
-    tr[["buys"]] <- out$buys[[k]]
-    tr[["sells"]] <- out$sells[[k]]
-    tr[["taxes"]] <- out$taxes[[k]]
-    sim_mem[["trades"]][[a]] <- tr
+    sim_mem[["trades"]][[a]] <- list(n_buys = out$n_buys[k], n_sells = out$n_sells[k],
+                                     open_lots = if (person) out$open_lots[[k]])
     if (!is.null(out$prices[[k]])) sim_mem[["market"]][[a]][["asset_price"]] <- out$prices[[k]]
   }
   tv <- out$totals
@@ -116,24 +115,10 @@
           "sparer_pauschbetrag_annual", "sparer_pauschbetrag_remaining", "sparer_pauschbetrag_used_total",
           "current_year", "cgt_base_taxed_ytd", "cgt_loss_added_ytd", "cgt_loss_used_ytd", "cgt_pool_start_ytd")
   for (j in seq_along(tf)) sim_mem[["totals"]][[tf[j]]] <- if (tf[j] == "current_year") as.integer(tv[j]) else tv[j]
-  if (!is.null(env) && person) {   # Tarifweg: Jahreszeilen (wie .tariff_close), KiSt-Salden, Erstattung
-    rw <- matrix(out$rows, nrow = 25L)
-    for (i in seq_len(ncol(rw))) {
-      r <- rw[, i]
-      env$rows[[length(env$rows) + 1L]] <- data.frame(
-        year = as.integer(r[1]), taxable_income = r[2],
-        church_tax_paid_deductible = r[3], church_tax_refunded = r[4], church_tax_net_deduction = r[5],
-        taxable_income_net = r[6], deduction_effect = r[7],
-        gain_p23 = r[8], income_tax_p23 = r[9], soli_p23 = r[10], church_tax_p23 = r[11], tax_p23 = r[12],
-        capital_income = r[13], abgeltung_burden = r[14], church_tax_withheld_k = r[15],
-        tariff_income_tax_k = r[16], tariff_soli_k = r[17], tariff_church_tax_k = r[18], tariff_burden = r[19],
-        burden_without_gp = r[20], burden_with_gp = r[21], guenstiger = r[22] != 0,
-        settlement = r[23], refund = r[24], church_tax_settlement_next_year = r[25])
-    }
+  if (!is.null(env) && person) {   # Tarifweg: Jahreszeilen (wie .tariff_close), KiSt-Salden
+    env$rows <- .tariff_years_frame(matrix(out$rows, nrow = length(.TARIFF_YEAR_COLS)))
     ks <- matrix(out$ks, nrow = 2L)
     for (i in seq_len(ncol(ks))) env$ks[as.character(as.integer(ks[1, i]))] <- ks[2, i]
-    env$refund_due <- out$refund_due
-    env$due_info <- NULL
   }
   .fee_env$paid <- out$fee_paid
   .sim_engine_signal(out$events, out$ev_ints, out$ev_vals, out$error, nm, fl$flag_date)

@@ -23,27 +23,7 @@
 /* .Call-Huellen mit C-Bindung (Registrierung in init.cpp) */
 extern "C" {
 
-static void chk_int(void *d) { (void) d; R_CheckUserInterrupt(); }
-static int r_interrupted(void *h) { (void) h; return !R_ToplevelExec(chk_int, NULL); }
-
-static void ctx_init(sl_ctx *cx)
-{
-    sl_ctx_init(cx);
-    cx->interrupted = r_interrupted;
-}
-
-static void finish(sl_ctx *cx, int st, int nprot)
-{
-    int i;
-    char msg[SL_MSG_LEN];
-    for (i = 0; i < cx->n_warn; i++) Rf_warningcall(R_NilValue, "%s", cx->warn[i]);
-    if (st != SL_OK) {
-        memcpy(msg, cx->msg, SL_MSG_LEN);
-        if (nprot) UNPROTECT(nprot);
-        if (st == SL_EINTR) R_CheckUserInterrupt();
-        Rf_errorcall(R_NilValue, "%s", msg);
-    }
-}
+#include "huelle_r.h"   /* Kontext, Rueckmeldungen, Argumentpruefungen (seit 1.6.3 gemeinsam) */
 
 /* ── Argumente ── */
 
@@ -92,13 +72,6 @@ static const double *dmat(SEXP x, int *nr, int *nc, const char *what)
     if (d == R_NilValue || XLENGTH(d) != 2) Rf_errorcall(R_NilValue, "interner Fehler: %s muss eine Matrix sein", what);
     *nr = INTEGER(d)[0]; *nc = INTEGER(d)[1];
     return REAL(x);
-}
-
-static void get_state(SEXP s, sl_rng *r)
-{
-    if (TYPEOF(s) != RAWSXP || XLENGTH(s) != 32)
-        Rf_errorcall(R_NilValue, "interner Fehler: Zufallszustand muss raw(32) sein");
-    memcpy(r->s, RAW(s), 32);
 }
 
 static SEXP pair(SEXP a, const sl_rng *r)

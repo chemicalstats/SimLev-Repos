@@ -1,7 +1,7 @@
 # Änderungen der eingefrorenen Schnittstelle (`tests/schnittstelle/frozen/`)
 
 Jede Festschreibung von `frozen/` hat hier einen Eintrag, der neueste oben.
-`tests/schnittstelle/run.sh --freeze` schreibt `frozen/` nur, wenn der oberste
+`tests/schnittstelle/run.py --freeze` schreibt `frozen/` nur, wenn der oberste
 Eintrag neu ist (seine Überschrift steht noch nicht als `stand` in `frozen/`)
 und diese Form hat:
 
@@ -12,7 +12,11 @@ und diese Form hat:
 ```
 
 Die Überschrift ohne `## ` wird als `stand` in alle drei Dateien geschrieben;
-`run.sh --check` meldet einen `stand`, der hier nicht steht.
+`run.py --check` meldet einen `stand`, der hier nicht steht.
+
+## 2026-11-04 – 1.6.3: WithdrawalPathsPB entfällt
+- Was: Python verliert die Methode `print.withdrawal_paths` (`simlev.planning.WithdrawalPathsPB.format`; die Klasse war nicht exportiert und nur der Rückfall von `bootstrap_pooled()` für den Fall, dass `simlev.withdrawal` keine Klasse liefert, also nie erreicht). `bootstrap_pooled()` liefert wie bisher `simlev.withdrawal.WithdrawalPaths`; Ergebnis und Ausgabe unverändert. R und Julia unverändert; im Abgleich der Sprachen entfallen die zwei bewussten Abweichungen zu `print.withdrawal_paths` (in R und Julia „fehlt“), keine neue. Übrige Funktionen, Argumente und Standardwerte unverändert.
+- Warum: Entscheidung des Nutzers vom 04.11.2026 (Z4 der Prüfung K41): der tote Rückfall wird schon in 1.6.3 entfernt, nicht erst in 2.0.0.
 
 ## 2026-11-01 – 1.1.0: Entnahmesteuer, keep_returns, keep_paths
 - Was: (1) `param_search()`: Standardwert von `keep_returns` ist `c("day", "none")` statt `TRUE` (R; Python `("day", "none")`, Julia `nothing` = `match.arg`); `"day"` speichert die täglichen Renditen wie bisher `TRUE`, `"none"` keine wie bisher `FALSE`; `TRUE`/`FALSE` ergeben ohne Alias den Fehler `param_search: keep_returns ist "day" oder "none" (früher TRUE/FALSE).`; die Folgemeldung der Overfitting-Funktionen lautet `Suche ohne gespeicherte Renditen (keep_returns = "none").` (2) `keep_paths` von `bootstrap_study()` und `withdrawal_simulation()` (Typ/Doku, Signatur und Standardwerte unverändert, 0 bzw. `TRUE`): `TRUE` = alle Pfade, `FALSE`/0 = keine, ganze Zahl k >= 1 = die ersten k Pfade (k größer als die Pfadzahl: alle); `NA`, Text, Vektoren, negative und nicht ganze Zahlen ergeben einen Fehler. `bootstrap_study(keep_paths = TRUE)` behält jetzt alle Pfade (bisher still 1); Chunk-Dateien tragen bei k > 0 den Zusatz `_keep<k>`. `withdrawal_simulation(keep_paths = k)` liefert `wealth` mit den ersten k Spalten; `plot.SimLevWithdrawal` zeichnet den Vermögensfächer dann mit den Gewichten dieser Spalten und dem Titelzusatz „(erste k von n Pfaden)“ (Python/Julia: auch als Attribut `title` von `data["wealth"]`). (3) Ohne Signaturänderung: `withdrawal_simulation(tax = tax_profile(...))` wertet zusätzlich `church_tax`, `guenstigerpruefung` und `income = income_rate()` aus (Satz wie `simulation()`, gemeinsamer interner Helfer `.tax_rates`/`_tax_rates`); `income_tariff()` ergibt einen Fehler mit Verweis auf `income_rate()`; `private_sale_threshold` ≠ 1000, `base_rate` und `harvest` bleiben Fehler (neuer Meldungstext). Übrige Funktionen, Argumente und Standardwerte unverändert; im Abgleich der Sprachen keine neue Abweichung.

@@ -36,12 +36,8 @@ from ._util import _n_tage
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _sim_compact_trades(sim: dict, flag_assets: list) -> dict:
-    out = {}
-    for nm in flag_assets:
-        tr = sim["trades"][nm]
-        out[nm] = {"buys": tr["buys"][:tr["buy_count"]], "sells": tr["sells"][:tr["sell_count"]],
-                   "taxes": tr["taxes"][:tr["tax_count"]]}
-    return out
+    """Je Asset die flachen Felder (Lots, Verkäufe, Steuern) des Kerns; Dicts erst in ``SimLevResult.trades``."""
+    return {nm: sim["trades"][nm]["raw"] for nm in flag_assets}
 
 
 def _sim_risk_free(risk_free, fr: _Frame, n_days_sim: int) -> np.ndarray:
@@ -152,8 +148,8 @@ def _sim_evaluate(sim: dict, trades: dict, fl: dict, cfg: dict, fr: _Frame, star
         [_f64(rep[a]["money"]) for a in nm], [_f64(sim["market"][a]["asset_price"]) for a in nm], _f64(flag_date),
         np.ascontiguousarray(filled, dtype=np.int32) if filled.any() else None,
         _f64([start_date, stopp_date, cfg["start_value"], tax_unpaid]),
-        _f64([sim["status"][a]["money"] for a in nm]), _f64([len(trades[a]["buys"]) for a in nm]),
-        _f64([len(trades[a]["sells"]) for a in nm]), rf, int(rf_err is None))
+        _f64([sim["status"][a]["money"] for a in nm]), _f64([len(trades[a][0]) for a in nm]),
+        _f64([len(trades[a][1]) for a in nm]), rf, int(rf_err is None))
     (tw, twr, inv, dd, scal, has_ext, stats, ints, buys, sells, why, um, msgs, err) = out
     for m in msgs:
         _eval_warn(m[0], m[1:])
@@ -189,14 +185,15 @@ def _sim_result(sim: dict, trades: dict, fl: dict, cfg: dict, r: dict, rs: dict,
     if tax_mode == "person":
         open_lots = {}
         for nm in flag_assets:
-            lots = [b for b in trades[nm]["buys"] if b and b["remaining"] > 0]
+            lv = trades[nm][0]
+            ol = lv[lv[:, 3] > 0]   # offene Lots (remaining > 0; NaN zählt nicht), FIFO-Reihenfolge
             sp_ = strategy[nm].get("spread")
             open_lots[nm] = {
                 "lots": pd.DataFrame({
-                    "date": pd.Series(np.array([b["date"] for b in lots], dtype=np.int64).astype("datetime64[D]")),
-                    "units": pd.Series([b["remaining"] for b in lots], dtype=np.float64),
-                    "price": pd.Series([b["price"] for b in lots], dtype=np.float64),
-                    "vp": pd.Series([b.get("vp") if b.get("vp") is not None else 0.0 for b in lots], dtype=np.float64)}),
+                    "date": pd.Series(ol[:, 0].astype(np.int64).astype("datetime64[D]")),
+                    "units": pd.Series(ol[:, 3].copy(), dtype=np.float64),
+                    "price": pd.Series(ol[:, 2].copy(), dtype=np.float64),
+                    "vp": pd.Series(np.where(ol[:, 6] != 0, ol[:, 5], 0.0), dtype=np.float64)}),
                 "regime": fl["tax_regimes"][nm],
                 "partial_exemption": 100 * sim["assets"][nm]["bonus"],
                 "cash": sim["status"][nm]["money"],

@@ -39,4 +39,22 @@ double slc_lgamma_pos(double x) SL_NOTHROW;               /* slc_special.cpp: x 
 }
 #endif
 
+#ifdef __cplusplus
+#include <algorithm>
+/* Quantil Typ 7 (Hyndman/Fan 1996, Definition 7; wie stats::quantile Standard) der n >= 1 Werte x, die dabei
+ * umgeordnet werden (nth_element): xl + frac (xh - xl) mit den Ordnungsstatistiken xl, xh an h = (n - 1) p, bei
+ * frac == 0 oder p = 1 xl ohne Rechnung. Seit 1.6.3 eine Fassung für die Bandbreite (slc_kde.cpp, vorher quant7
+ * auf sortierten Werten) und CDaR (research_core_impl.h, quantile7). */
+static inline double slc_quantile7(double *x, int64_t n, double p)
+{
+    const double h = (double) (n - 1) * p;
+    const int64_t lo = (int64_t) floor(h);
+    const double frac = h - (double) lo;
+    std::nth_element(x, x + lo, x + n);
+    const double xl = x[lo];
+    if (frac == 0.0 || lo + 1 >= n) return xl;
+    return xl + frac * (*std::min_element(x + lo + 1, x + n) - xl);
+}
+#endif
+
 #endif /* SLC_INTERNAL_H */

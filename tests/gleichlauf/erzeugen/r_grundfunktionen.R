@@ -383,6 +383,16 @@ case("misc_bigint", "c(format(3e9), format(c(1, 3e9)), as.character(3e9))", "[F.
 case("misc_nchar", "c(nchar(c('Ärger', '日本', 'a\\\\b')), nchar(c('Ärger', '日本'), type = 'bytes'), nchar(c('Ärger', '日本'), type = 'width'))",
      "np.concatenate([F.nchar(np.array(['Ärger', '日本', 'a\\\\b'], dtype=object)), F.nchar(np.array(['Ärger', '日本'], dtype=object), type='bytes'), F.nchar(np.array(['Ärger', '日本'], dtype=object), type='width')])",
      jl = 'vcat(F.nchar(["Ärger", "日本", "a\\\\b"]), F.nchar(["Ärger", "日本"], type="bytes"), F.nchar(["Ärger", "日本"], type="width"))')
+# Anzeigebreite wie R (seit 1.6.3 in Python und Julia dieselbe Tabelle aus R): Format-, Steuer- und Trennzeichen,
+# Hangul-Jamo, dazu je Bereich gleicher Breite der erste und letzte Codepunkt und ihre Nachbarn (alle Codepunkte ohne
+# Surrogate, ohne Zufall; auch für rexpr/width_*)
+WCP <- c(1:0xD7FF, 0xE000:0x10FFFF)
+WCW <- nchar(intToUtf8(WCP, multiple = TRUE), type = "width")
+WCK <- sort(unique(c(1L, length(WCP), which(diff(WCW) != 0), which(diff(WCW) != 0) + 1L)))
+WCH <- c("a\u200eb", "\ufeff", "\u0600x", "\u1160", "\u0085", "\u2028", "a\tb", "\u65e5\u672c", intToUtf8(WCP[WCK], multiple = TRUE))
+rm(WCW, WCK)
+case("misc_nchar_width", "nchar(w, type = 'width')", "F.nchar(np.array(w, dtype=object), type='width')", list(w = WCH),
+     jl = 'F.nchar(w, type="width")')
 case("misc_zeroprint", "format(c(0, 1), zero.print = 'abc')", "F.format(np.array([0.0, 1.0]), zero_print='abc')",
      jl = 'F.format([0.0, 1.0], zero_print="abc")')
 
@@ -554,6 +564,14 @@ cs("median_even", "median(x)", "result = st.median(x)", list(x = x1[1:36]), jl =
 cs("median_na", "median(x)", "result = st.median(x)", list(x = xna), jl = "result = st.median(x)")
 cs("median_narm", "median(x, na.rm = TRUE)", "result = st.median(x, na_rm=True)", list(x = xna), jl = "result = st.median(x; na_rm = true)")
 cs("median_int", "median(c(3L, 1L, 4L, 2L))", "result = st.median(np.array([3, 1, 4, 2]))", jl = "result = st.median([3, 1, 4, 2])")
+# Median bei ±0 in der Mitte (seit 1.6.3 rechnet Python rnum.r_median über den Kern wie R; bis 1.6.2 np.sort)
+xpm <- list(c(1, 0, -1 * 0), c(0, -0, 0), c(-0, 0, 0), c(0, 0, -0, -0), c(-0, 0, -0, 0), c(1, -0, 0, -1, 0), c(-1, -0),
+            c(-0, 1, NA, 0), c(0, NaN, -0), numeric(0))
+cs("median_pm0", "lapply(x, median)", "result = [simlev._r.rnum.r_median(np.asarray(v, dtype=float)) for v in x]",
+   list(x = xpm), jl = "result = Any[SL.r_median(v) for v in x]")
+cs("median_pm0_narm", "lapply(x, median, na.rm = TRUE)",
+   "result = [simlev._r.rnum.r_median(np.asarray(v, dtype=float), na_rm=True) for v in x]",
+   list(x = xpm), jl = "result = Any[SL.r_median(v; na_rm = true) for v in x]")
 
 ## ── var / sd / cov / cor ─────────────────────────────────────────────────
 cs("var_vec", "var(x)", "result = st.var(x)", list(x = x1), jl = "result = st.var(x)")
@@ -832,6 +850,9 @@ local({
     for (k in seq_along(exprs))
       ref_case(sprintf("%s_%03d", prefix, k), R, P, jl = J, inputs = list(rx_txt = exprs[[k]], rx_dat = d))
   }
+
+  # ── Anzeigebreite (seit 1.6.3 wie R, Tabelle wie fmt.nchar; Zeichen WCH aus r_fmt) ─────────────────────
+  grp("width", c("nchar(w, type = \"width\")", "nchar(w, \"w\")"), d = list(w = WCH))
 
   # ── Vorrang ──────────────────────────────────────────────────────────────
   grp("prec", c("-2^2", "-1:3", "2^-1", "2^3^2", "-2:2 * 2", "1:3^2", "5 %% 3 ^ 2", "-5 %/% 2",

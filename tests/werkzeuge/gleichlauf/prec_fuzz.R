@@ -16,31 +16,17 @@
 # Genauigkeit (nur R, Rmpfr mit 256 Bit): für die Formeln je Fall der Fehler in ulp des exakten Werts (an der Stelle
 # der double-Eingabe); Zeilen "Genauigkeit <formel>: Median, 99 %, max ulp (neu) | max ulp (Formel bis 1.6.1)". Ende 1,
 # wenn die neue Formel schlechter ist als 1 + 3 cond ulp (cond = Kondition der Funktion an der Stelle, für expm1/log1p
-# 1 ulp; Fälle mit endlichem, von 0 verschiedenem exaktem Wert).
+# 1 ulp; Fälle mit endlichem, von 0 verschiedenem exaktem Wert). Seit 1.6.3 nur ab 1000 Fällen (run.py --full) oder
+# mit SIMLEV_FUZZ_GENAU=1 (ref_tools.R fuzz_genau); Genauigkeitswerte einmal am Ende zusammengefasst.
 #
 # Prüfung (tests/werkzeuge/gleichlauf/run.py, Schritt 5): abgelegte Referenz (seit 1.6.2 aus R 1.6.2, run.py --ref-erzeugen 162),
 # R neu mit tests/werkzeuge/gleichlauf/sim_fuzz_cmp.py, Python und Julia mit vergleich.py/vergleich.jl gegen die Referenz.
 source("tests/gleichlauf/erzeugen/ref_tools.R")
-suppressMessages(library(Rmpfr))
 args <- commandArgs(TRUE)
 N <- as.integer(args[1]); seed0 <- as.integer(if (length(args) >= 2) args[2] else 20261123)
 ref_bereich("prec_fuzz", alle = TRUE); ref_init("prec_fuzz")
-pick <- function(x) x[[sample.int(length(x), 1L)]]
-coin <- function(p) runif(1) < p
-
-fuzz_case <- function(id, r, py, jl, inputs) {
-  ref_case(id, r = r, py = py, jl = jl, inputs = inputs)
-  if (!.ref_in_subset(id)) return(invisible(NULL))
-  env <- new.env(parent = globalenv())
-  for (k in names(inputs)) assign(k, inputs[[k]], envir = env)
-  dp <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = " ")
-  wc <- character(0); ec <- NULL
-  invisible(capture.output(tryCatch(withCallingHandlers(eval(parse(text = r), envir = env),
-    warning = function(w) { wc <<- c(wc, dp(conditionCall(w))); invokeRestart("muffleWarning") },
-    message = function(m) invokeRestart("muffleMessage")),
-    error = function(e) ec <<- dp(conditionCall(e)))))
-  ref_case_extra(list(r_calls = list(warnings = as.list(wc), error = ec)))
-}
+GENAU <- fuzz_genau(N)
+if (GENAU) suppressMessages(library(Rmpfr))
 
 # ── Zufallswerte ──
 ret_small <- function(n) sample(c(-1, 1), n, TRUE) * 10^runif(n, -12, -1)
@@ -60,12 +46,13 @@ ulp_err <- function(x, ex) {                       # |x - ex| in ulp(ex); nur en
 }
 expm1_m <- function(z) { z <- mpfr(z, B); exp(z) - 1 }
 cond_expm1 <- function(z) ifelse(abs(z) < 1e-300, 1, abs(z * exp(z) / expm1(z)))
-GEN <- new.env(); GEN$acc <- list()
+GEN <- new.env(); GEN$acc <- list()      # je Formel eine Liste von data.frames, am Ende einmal rbind
 acc_add <- function(name, new, old, ex, cond) {
   u <- ulp_err(new, ex); uo <- ulp_err(old, ex)
   ok <- !is.na(u) & is.finite(cond)
   bad <- ok & u > 1 + 3 * cond
-  GEN$acc[[name]] <- rbind(GEN$acc[[name]], data.frame(u = u[ok], uo = uo[ok], bad = bad[ok]))
+  if (is.null(GEN$acc[[name]])) GEN$acc[[name]] <- list()
+  GEN$acc[[name]][[length(GEN$acc[[name]]) + 1L]] <- data.frame(u = u[ok], uo = uo[ok], bad = bad[ok])
 }
 
 q_r <- function(v) paste(deparse(v), collapse = "")
@@ -80,8 +67,10 @@ for (kk in seq_len(N)) suppressWarnings({
       fuzz_case(sprintf("%s%05d", substr(typ, 1, 2), kk), r = sprintf("%s(x)", typ),
                 py = sprintf("result = simlev._r.libm.%s(x)", typ), jl = sprintf("result = SL.RLibm.%s(x)", typ),
                 inputs = list(x = x))
-      if (typ == "expm1") acc_add("expm1", expm1(x), exp(x) - 1, expm1_m(x), rep(1, m))
-      else { ex <- log1p(mpfr(x, B)); acc_add("log1p", log1p(x), log(1 + x), ex, rep(1, m)) }
+      if (GENAU) {
+        if (typ == "expm1") acc_add("expm1", expm1(x), exp(x) - 1, expm1_m(x), rep(1, m))
+        else { ex <- log1p(mpfr(x, B)); acc_add("log1p", log1p(x), log(1 + x), ex, rep(1, m)) }
+      }
     } else if (typ %in% c("cagr", "pow1m")) {
       x <- if (typ == "cagr") 1 + ret_any(m) else ret_any(m)
       x[x <= 0 & typ == "cagr"] <- abs(x[x <= 0 & typ == "cagr"])
@@ -93,14 +82,16 @@ for (kk in seq_len(N)) suppressWarnings({
                 py = sprintf("result = np.array([simlev._util.%s(a, b) for a, b in zip(x, t)])", fp),
                 jl = sprintf("result = [SL.%s(a, b) for (a, b) in zip(x, t)]", fp),
                 inputs = list(x = x, t = t))
-      new <- vapply(seq_along(x), function(i) get(f, asNamespace("SimLev"))(x[i], t[i]), 0)
-      if (typ == "cagr") { old <- x^(1 / t) - 1; z <- log(mpfr(x, B)) / mpfr(t, B) }
-      else { old <- (1 + x)^t - 1; z <- log1p(mpfr(x, B)) * mpfr(t, B) }
-      ok <- is.finite(x) & is.finite(t) & t != 0 & x >= ifelse(typ == "cagr", 0, -1) & x != ifelse(typ == "cagr", 0, -1)
-      zz <- asNumeric(z); cnd <- ifelse(ok, cond_expm1(zz), NA)
-      # Eingabe exakt (double); log bzw. log1p und Produkt/Quotient stören z relativ um etwa 1 ulp: Kondition von expm1 in z
-      ex <- expm1(z); ex[!ok] <- mpfr(NA, B)
-      acc_add(typ, new, old, ex, cnd)
+      if (GENAU) {
+        new <- vapply(seq_along(x), function(i) get(f, asNamespace("SimLev"))(x[i], t[i]), 0)
+        if (typ == "cagr") { old <- x^(1 / t) - 1; z <- log(mpfr(x, B)) / mpfr(t, B) }
+        else { old <- (1 + x)^t - 1; z <- log1p(mpfr(x, B)) * mpfr(t, B) }
+        ok <- is.finite(x) & is.finite(t) & t != 0 & x >= ifelse(typ == "cagr", 0, -1) & x != ifelse(typ == "cagr", 0, -1)
+        zz <- asNumeric(z); cnd <- ifelse(ok, cond_expm1(zz), NA)
+        # Eingabe exakt (double); log bzw. log1p und Produkt/Quotient stören z relativ um etwa 1 ulp: Kondition von expm1 in z
+        ex <- expm1(z); ex[!ok] <- mpfr(NA, B)
+        acc_add(typ, new, old, ex, cnd)
+      }
     } else if (typ %in% c("geo_ret", "geo_ann")) {
       x <- pick(list(ret_small(m), rnorm(m, 0, 0.01), rnorm(m, 0, 0.1), runif(m, -0.5, 0.5)))
       if (coin(0.05)) x[sample.int(m, 1)] <- pick(c(-1, -1.2, NA, NaN, Inf))
@@ -108,15 +99,15 @@ for (kk in seq_len(N)) suppressWarnings({
       if (typ == "geo_ret") {
         fuzz_case(sprintf("gr%05d", kk), r = "SimLev:::.geo_ret(x)", py = "result = simlev._util._geo_ret(x)",
                   jl = "result = SL._geo_ret(x)", inputs = list(x = x))
-        new <- SimLev:::.geo_ret(x); old <- prod(1 + x) - 1; z <- sum(log1p(mpfr(x, B)))
+        if (GENAU) { new <- SimLev:::.geo_ret(x); old <- prod(1 + x) - 1; z <- sum(log1p(mpfr(x, B))) }
       } else {
         fuzz_case(sprintf("ga%05d", kk), r = sprintf("SimLev:::.geo_ann(x, %s)", q_r(t)),
                   py = sprintf("result = simlev._util._geo_ann(x, %s)", if (is.infinite(t)) "math.inf" else format(t)),
                   jl = sprintf("result = SL._geo_ann(x, %s)", if (is.infinite(t)) "Inf" else format(t)), inputs = list(x = x))
-        new <- SimLev:::.geo_ann(x, t); old <- prod(1 + x)^(1 / t) - 1; z <- sum(log1p(mpfr(x, B))) / t
+        if (GENAU) { new <- SimLev:::.geo_ann(x, t); old <- prod(1 + x)^(1 / t) - 1; z <- sum(log1p(mpfr(x, B))) / t }
       }
       ok <- all(is.finite(x)) && all(x > -1) && is.finite(t) && t != 0
-      if (ok) {
+      if (GENAU && ok) {
         # Kondition der Summe der Logarithmen: sum |log1p(x_i)| / |sum log1p(x_i)| (Auslöschung der Summe)
         lx <- asNumeric(log1p(mpfr(x, B))); cs <- sum(abs(lx)) / max(abs(sum(lx)), 1e-300)
         acc_add(typ, new, old, expm1(z), cond_expm1(asNumeric(z)) * cs)
@@ -127,9 +118,11 @@ for (kk in seq_len(N)) suppressWarnings({
       fuzz_case(sprintf("lr%05d", kk), r = "vapply(r, SimLev:::.log1mr2, 0)",
                 py = "result = np.array([simlev._util._log1mr2(v) for v in r])", jl = "result = [SL._log1mr2(v) for v in r]",
                 inputs = list(r = r))
-      ok <- is.finite(r) & abs(r) < 1
-      rm <- mpfr(r, B); ex <- log(1 - rm * rm); ex[!ok] <- mpfr(NA, B)
-      acc_add("log1mr2", vapply(r, SimLev:::.log1mr2, 0), log(1 - r^2), ex, ifelse(ok, 1, NA))
+      if (GENAU) {
+        ok <- is.finite(r) & abs(r) < 1
+        rm <- mpfr(r, B); ex <- log(1 - rm * rm); ex[!ok] <- mpfr(NA, B)
+        acc_add("log1mr2", vapply(r, SimLev:::.log1mr2, 0), log(1 - r^2), ex, ifelse(ok, 1, NA))
+      }
     }
   } else {
     typ <- pick(c("sim", "heatmap", "copula", "backcast", "signal"))
@@ -184,7 +177,7 @@ ref_done(); ref_schreiben()
 # Genauigkeit
 schlecht <- 0L
 for (nm in names(GEN$acc)) {
-  a <- GEN$acc[[nm]]
+  a <- do.call(rbind, GEN$acc[[nm]])
   q <- function(v) if (length(v)) stats::quantile(v, c(0.5, 0.99, 1), names = FALSE, na.rm = TRUE) else rep(NA, 3)
   qn <- q(a$u); qo <- q(a$uo[is.finite(a$uo)])
   cat(sprintf("Genauigkeit %-8s %6d Werte: neu Median %.2f, 99 %% %.2f, max %.3g ulp | bis 1.6.1 Median %.3g, 99 %% %.3g, max %.3g ulp%s\n",

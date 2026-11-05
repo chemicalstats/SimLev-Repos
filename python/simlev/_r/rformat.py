@@ -195,7 +195,7 @@ def r_deparse(x: Any) -> str:
     return one(x, True)
 
 
-_NA_INT = -2147483648
+_NA_INT = _fmt._NA_INT
 
 
 def _sp_scalar(v: Any):

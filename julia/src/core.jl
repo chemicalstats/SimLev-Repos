@@ -58,7 +58,6 @@ mutable struct Signal
 end
 
 mutable struct Market
-    asset_day::Vector{Int}
     base_rates::Vector{Float64}
     asset_price::Vector{Float64}
     signal_buy::Signal
@@ -78,23 +77,13 @@ mutable struct Trades
     buys::Vector{Lot}
     sells::Vector{SellEntry}
     taxes::Vector{TaxEntry}
-    fifo_front::Int
 end
 
 struct AssetInfo
-    class::String
     style::String
     start::Int
     tax_regime::String
     bonus::Float64
-    deliverable::Any
-end
-
-struct VPPending
-    asset::Int
-    flat_rate::Float64
-    bonus::Float64
-    assessment_date::Int
 end
 
 mutable struct Totals
@@ -111,9 +100,6 @@ mutable struct Totals
     cgt_loss_added_ytd::Float64
     cgt_loss_used_ytd::Float64
     cgt_pool_start_ytd::Float64
-    vp_pending::Vector{VPPending}                        # leer = nicht vorhanden
-    p23_due::Vector{Pair{Int,Float64}}                    # leer = nicht vorhanden
-    private_sale_net_ytd_by::Vector{Pair{Int,Float64}}    # § 23-Jahressaldo je Asset
 end
 
 struct Sim
@@ -130,7 +116,4 @@ end
 # Die Tagesengine rechnet im gemeinsamen Kern core/engine_core_impl.h (sim_engine.jl, flache
 # Eingabe); die früheren Engine-Kerne simulation_core_impl.h, fifo_core_impl.h und tax_core_impl.h, die über
 # die C-ABI-Hülle direkt auf diesen Strukturen rechneten (Feldlagen geprüft), sind seit 1.4.0 entfallen.
-
-"Bereichsprüfung eines 1-basierten Index (Hüllen der Kerne)."
-@inline _need(i::Int, n::Int) = (1 <= i <= n) || throw(BoundsError(1:n, i))
 

@@ -50,24 +50,22 @@ from .stats_sort import (
 )
 from .stats_cor import var, sd, cov, cor, cov2cor, scale
 from .stats_smooth import approx, filter
-from .stats_optim import optimize, optimise
-from .stats_models import p_adjust, fitted, coef, residuals
+from .stats_optim import optimize
+from .stats_models import p_adjust
 from .stats_cluster import RDist, RHclust, dist_as_matrix, hclust, dist, as_dist
 from . import stats_sort as _sort
 
 __all__ = [
     "RError", "RDist", "RHclust", "dist_as_matrix", "quantile", "median", "var", "sd", "cov", "cor",
-    "cov2cor", "scale", "approx", "filter", "optimize", "optimise",
+    "cov2cor", "scale", "approx", "filter", "optimize",
     "hclust", "dist", "as_dist", "p_adjust", "rank", "order", "sort",
-    "cut", "fitted", "coef", "residuals", "seq_len_out", "str_collate",
+    "cut", "seq_len_out", "str_collate",
 ]
 
-# Wiederausgabe interner Namen, die andere Module über ``stats`` nutzen
-# (``sort_partial``; ``_rsum``, ``_rmean``, ``_warn`` aus ``stats_sort``)
+# Wiederausgabe interner Namen aus ``stats_sort`` über ``stats``: ``sort_partial`` nutzt RExpr (``rexpr.py``,
+# ``_stats.sort_partial``), ``_rmean`` tests/werkzeuge/gleichlauf/approx_fuzz.R (seit 1.6.3 ohne ``_rsum``/``_warn``)
 sort_partial = _sort.sort_partial
-_rsum = _sort._rsum
 _rmean = _sort._rmean
-_warn = _sort._warn
 
 
 from .base import quiet_fp  # noqa: E402

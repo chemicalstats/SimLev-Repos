@@ -9,6 +9,7 @@ oder Ordner existieren; ein Anker (``datei.md#anker`` oder ``#anker``) muss eine
 der Zieldatei entsprechen (Anker wie auf GitHub: Kleinbuchstaben, Leerzeichen zu ``-``,
 Satzzeichen entfernt). Codeblöcke werden nicht gelesen. Ende 1 bei einem Fehler.
 """
+import functools
 import os
 import re
 import sys
@@ -28,6 +29,7 @@ def text_lines(path):
     return out
 
 
+@functools.lru_cache(maxsize=None)   # seit 1.6.3: jede Zieldatei nur einmal lesen
 def anchors(path):
     found, seen = set(), {}
     for line in text_lines(path):

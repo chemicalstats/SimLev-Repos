@@ -169,12 +169,8 @@ int sl_msgarch_fit_mt(sl_ctx *cx, int n, const double *y, int K, int gjr, int ns
 int sl_msgarch_starts(sl_ctx *cx, int n, const double *y, int K, int gjr, double h1, int all_pts,
                       int *nstart, double *starts) SL_NOTHROW;
 /* ganzer Fit wie .ms_garch_fit: Starts (all_pts = 1; sGARCH 12, GJR 20), BFGS mit analytischem
- * Gradienten, Sortierung nach unbedingter Varianz,
- * letzter Filterlauf, Mischungsvarianz s2 (n), Viterbi-Pfad regimes (n, 1-basiert). */
-int sl_msgarch_estimate(sl_ctx *cx, int n, const double *y, int K, int gjr, double *omega,
-                        double *alpha, double *beta, double *gamma, double *P, int32_t *regimes,
-                        double *s2, double *loglik, int *code) SL_NOTHROW;
-/* wie sl_msgarch_estimate mit sl_msgarch_fit_mt (nthreads Threads; Ergebnis unabhängig davon) */
+ * Gradienten (sl_msgarch_fit_mt, nthreads Threads; Ergebnis unabhängig davon), Sortierung nach
+ * unbedingter Varianz, letzter Filterlauf, Mischungsvarianz s2 (n), Viterbi-Pfad regimes (n, 1-basiert). */
 int sl_msgarch_estimate_mt(sl_ctx *cx, int n, const double *y, int K, int gjr, double *omega,
                            double *alpha, double *beta, double *gamma, double *P, int32_t *regimes,
                            double *s2, double *loglik, int *code, int nthreads) SL_NOTHROW;
@@ -182,6 +178,15 @@ int sl_msgarch_estimate_mt(sl_ctx *cx, int n, const double *y, int K, int gjr, d
  * ridge = 1e-10 + 1e-6 var(x)); mu, S (Varianzen) je K, A K x K, ll, iter. */
 int sl_hmm_em_univ(sl_ctx *cx, int n, const double *x, int K, int win, int max_iter, double tol,
                    double *mu, double *S, double *A, double *ll, int *iter) SL_NOTHROW;
+/* skalierter Vorwärts-Rückwärts-Schritt des HMM (wie hmm_forward_backward): B Emissionsdichten T x K
+ * (spaltenweise), A Übergangsmatrix K x K mit lda Zeilen, p0 Start (K); Ergebnisse al, be, ga (T x K), xi (K x K,
+ * hier genullt), cs (T); tmp Arbeitsfeld (K). Gleitender Mittelwert über w Werte (inkl. aktueller Zeile;
+ * Neumaier-Summe, alle 4096 Schritte neu aufgebaut): gap vor dem ersten vollen Fenster und bei nicht endlichem Wert
+ * im Fenster. Seit 1.6.3 je eine Fassung für den HMM-Start von MS-GARCH und research_core_impl.h (hmm_fb_raw,
+ * roll_mean_core). */
+void sl_hmm_fb(int T, int K, const double *B, const double *A, int lda, const double *p0, double *al,
+               double *be, double *ga, double *xi, double *cs, double *tmp) SL_NOTHROW;
+void sl_roll_mean(int m, const double *x, int w, double gap, double *out) SL_NOTHROW;
 /* Viterbi-Pfad wie .hmm_viterbi (lB n x K, lA K x K, lp0 K; erstes Maximum) */
 int sl_hmm_viterbi(sl_ctx *cx, int n, int K, const double *lB, const double *lA, const double *lp0,
                    int32_t *path) SL_NOTHROW;

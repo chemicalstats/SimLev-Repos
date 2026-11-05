@@ -27,14 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static double bits_d(uint64_t u)
-{
-    double d;
-    memcpy(&d, &u, sizeof d);
-    return d;
-}
 
-#define R_NA bits_d(UINT64_C(0x7FF00000000007A2))
 
 void sl_r_bincode(int64_t n, const double *x, int64_t nb, const double *b, int right, int include_lowest,
                   double *out)
@@ -44,7 +37,7 @@ void sl_r_bincode(int64_t n, const double *x, int64_t nb, const double *b, int r
     for (i = 0; i < n; i++) {
         double xi = x[i];
         int64_t lo = 0, hi = nb1;
-        out[i] = R_NA;
+        out[i] = SLR_NA;
         if (isnan(xi) || nb1 < 1) continue;
         if (xi < b[lo] || b[hi] < xi || (xi == b[lft ? hi : lo] && !include_lowest)) continue;
         while (hi - lo >= 2) {
@@ -81,7 +74,7 @@ int sl_r_median(int64_t n, const double *x, int narm, int isint, double *res)
 {
     int64_t i, m = 0, half, k[2];
     double *s;
-    *res = R_NA;
+    *res = SLR_NA;
     for (i = 0; i < n; i++)
         if (isnan(x[i]) && !narm) return 1;
     s = (double *) malloc((size_t) (n > 0 ? n : 1) * sizeof(double));

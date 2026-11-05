@@ -1,4 +1,4 @@
-# Bekannte Abweichungen der Schnittstelle (tests/api/compare_api.py)
+# Bekannte Abweichungen der Schnittstelle (tests/schnittstelle/compare_api.py)
 #
 # Eine Zeile je bekannter Abweichung, Spalten durch Tabulator getrennt:
 #   schluessel  Zuordnungsschlüssel wie in api.json (Funktion oder <generic>.<Klasse>); * und ? als Platzhalter
@@ -22,8 +22,6 @@ plot.SimLevParamSearch	*	standardwert	metric: R=x$objective *	bewusst	R-Standard
 plot.SimLevParamSearch	*	standardwert	params: R=utils::head(x$params, 2) *	bewusst	R-Standardwert ist ein Ausdruck aus x; die Ports setzen ihn im Rumpf	Code: python/simlev/param_search.py:860, julia/src/param_search.jl:566
 print.SimLevParamRange	R	fehlt	*	bewusst	R hat keine print-Methode (print.default); Python braucht format(), damit die Ausgabe der R-Ausgabe gleicht	python/DEVELOPING.md „Datenstrukturen“ (format() liefert exakt die R-Druckausgabe)
 print.SimLevParamRange	Julia	fehlt	*	bewusst	keine R-Methode; Julia druckt über die R-genaue Standarddruckausgabe	julia/src/r/types.jl (_DEFAULT_PRINT)
-print.withdrawal_paths	R	fehlt	*	bewusst	R hat keine print-Methode (print.default); Python braucht format() für die R-gleiche Ausgabe	python/DEVELOPING.md „Datenstrukturen“
-print.withdrawal_paths	Julia	fehlt	*	bewusst	keine R-Methode; Julia druckt über die R-genaue Standarddruckausgabe	julia/src/r/types.jl (_DEFAULT_PRINT)
 summary.SimLevResult	Python	argument_extra	verbose	bewusst	summary(res) druckt in Python nicht, sondern gibt SimLevSummary zurück; verbose=True druckt zusätzlich	python/DEVELOPING.md „Abbildung der Engine-Objekte“; python/simlev/result.py:133
 summary.*	Julia	argument_extra	io	bewusst	Julia: Ausgabestrom für den Text, den R auf die Konsole schreibt	Code: io::IO = stdout in julia/src/backcast.jl:778, deep_analysis.jl:990, config.jl:409-410
 simulation	Julia	argument_extra	io	bewusst	Julia: Strom für die details-Ausgabe	Docstring julia/src/sim_evaluate.jl ("Die details-Ausgabe geht nach io")

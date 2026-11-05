@@ -121,9 +121,32 @@ calculate_dates_flags <- function(mode, span, unit, days, dates, value = NULL, a
   list(all = NULL, by_year = stats::setNames(unname(as.numeric(x)), as.character(yy)))
 }
 
+# Spalten einer Jahreszeile des Tarifwegs (Folge TR_* in core/tariff_core_impl.h): tax_report$tariff_years von
+# simulation(), tariff_years von withdrawal_simulation() (dort mit Spalte path davor), .tariff_close
+.TARIFF_YEAR_COLS <- c("year", "taxable_income", "church_tax_paid_deductible", "church_tax_refunded",
+                       "church_tax_net_deduction", "taxable_income_net", "deduction_effect", "gain_p23",
+                       "income_tax_p23", "soli_p23", "church_tax_p23", "tax_p23", "capital_income", "abgeltung_burden",
+                       "church_tax_withheld_k", "tariff_income_tax_k", "tariff_soli_k", "tariff_church_tax_k",
+                       "tariff_burden", "burden_without_gp", "burden_with_gp", "guenstiger", "settlement", "refund",
+                       "church_tax_settlement_next_year")
+
+#' Jahreszeilen des Tarifwegs als data.frame (seit 1.6.3 Spalte fuer Spalte statt data.frame() je Jahr und rbind;
+#' gleiches Objekt: year ganzzahlig, guenstiger logisch, sonst Zahlen, Zeilennamen 1..k)
+#' @param rw Matrix mit einer Spalte je Jahr und den Zeilen in der Folge .TARIFF_YEAR_COLS (Ausgabe des Kerns)
+#' @return data.frame, NULL ohne Jahr
+#' @keywords internal
+#' @noRd
+.tariff_years_frame <- function(rw) {
+  if (!ncol(rw)) return(NULL)
+  d <- lapply(seq_len(nrow(rw)), function(j) rw[j, ])
+  names(d) <- .TARIFF_YEAR_COLS
+  d$year <- as.integer(d$year); d$guenstiger <- d$guenstiger != 0
+  structure(d, row.names = .set_row_names(ncol(rw)), class = "data.frame")
+}
+
 #' zvE eines Jahres und Saldo des Kirchensteuer-Bescheids aus dem Vorjahr (Zahlung > 0, Erstattung < 0)
 #' @param env Umgebung der Tarifrechnung (simulation()): tariff, zve_all bzw. zve (benannt nach
-#'   Jahr), ks (KiSt-Saldo je Zahlungsjahr, benannt), church_k, kapest_rate, use_gp, rows, refund_due
+#'   Jahr), ks (KiSt-Saldo je Zahlungsjahr, benannt), church_k, kapest_rate, use_gp, rows
 #' @param year Ganzzahl. Kalenderjahr
 #' @return Liste zve (vorgegeben, NA ohne Angabe) und ks_prev (im Jahr gezahlte (> 0) bzw. erstattete
 #'   (< 0) Kirchensteuer aus dem Bescheid des Vorjahres)

@@ -9,6 +9,7 @@ import numpy as np
 from ._r.rlist import RList
 from ._r.rformat import r_round, r_sprintf
 from ._r.rnum import NA_REAL, r_sum
+from ._util import _n_tage
 
 __all__ = ["SimLevResult", "SimLevSummary"]
 
@@ -18,11 +19,6 @@ _RULE = "  " + "─" * 21
 
 def _na(x: Any) -> bool:
     return x is None or (isinstance(x, (float, np.floating)) and math.isnan(x))
-
-
-def _n_tage(n: Any) -> str:
-    s = n if isinstance(n, str) else "%d" % int(n)
-    return "1 Tag" if s == "1" else s + " Tage"
 
 
 def _undef_text(um: Any, metric: str) -> str:
@@ -55,7 +51,12 @@ class SimLevResult(RList):
 
     @property
     def trades(self) -> dict:
-        return getattr(self, "_trades", {})
+        t = getattr(self, "_trades", {})
+        if t and not isinstance(next(iter(t.values())), dict):   # flache Felder des Kerns (seit 1.6.3): einmal umbauen
+            from ._sim_engine import _trades_dicts
+            t = {nm: _trades_dicts(raw) for nm, raw in t.items()}
+            object.__setattr__(self, "_trades", t)
+        return t
 
     # ── Druckausgabe (print.SimLevResult) ────────────────────────────────
     def format(self) -> str:

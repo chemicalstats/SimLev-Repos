@@ -57,7 +57,7 @@ end
 @_rlist_wrapper Strategy ("strategy", "list")
 Base.show(io::IO, s::Strategy) = print(io, "Strategy(", join(keys(s), ", "), ")")
 
-# ── match.arg und Hilfen ─────────────────────────────────────────────────────
+# ── Hilfen (match.arg: seit 1.6.3 nur `_match_arg` aus util.jl) ───────────────────
 
 function _pmatch(value::AbstractString, choices)
     i = findfirst(==(value), choices)
@@ -65,26 +65,6 @@ function _pmatch(value::AbstractString, choices)
     isempty(value) && return nothing
     hits = [i for (i, c) in enumerate(choices) if startswith(c, value)]
     return length(hits) == 1 ? hits[1] : nothing
-end
-
-"Nachbildung von R's `match.arg` (eindeutige Präfixe, R-Meldungen)."
-function match_arg(value, choices, argname::AbstractString = "arg")
-    choices = Tuple(String(c) for c in choices)
-    value === nothing && return choices[1]
-    if value isa Union{AbstractVector,Tuple}
-        Tuple(string(v) for v in value) == choices && return choices[1]
-        all(v -> v isa AbstractString, value) || error("'arg' must be NULL or a character vector")
-        length(value) > 1 && error("'arg' must be of length 1")
-        value = isempty(value) ? "" : first(value)
-    end
-    value isa Union{AbstractString,Symbol} || error("'arg' must be NULL or a character vector")
-    v = String(string(value))
-    i = _pmatch(v, choices)
-    if i === nothing
-        chs = unique([c for c in choices if !isempty(c)])
-        error((length(chs) == 1 ? "'arg' should be " : "'arg' should be one of ") * join(("“$(c)”" for c in chs), ", "))
-    end
-    return choices[i]
 end
 
 _is_num1(x) = x isa Real && !(x isa Bool) && !isnan(Float64(x))
@@ -270,8 +250,8 @@ function asset_config(args...; kw...)
 end
 
 function _asset_config(vals::Dict{String,Any})
-    asset_class = match_arg(get(vals, "asset_class", ASSET_CLASSES), ASSET_CLASSES, "asset_class")
-    trading = match_arg(get(vals, "trading", ACTION_TYPES), ACTION_TYPES, "trading")
+    asset_class = _match_arg(get(vals, "asset_class", ASSET_CLASSES), ASSET_CLASSES)
+    trading = _match_arg(get(vals, "trading", ACTION_TYPES), ACTION_TYPES)
     share = get(vals, "share", 1.0)
     spread = get(vals, "spread", 0.0)
     partial_exemption = get(vals, "partial_exemption", 0.0)

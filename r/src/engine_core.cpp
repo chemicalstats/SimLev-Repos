@@ -3,12 +3,11 @@
 //
 // Die Huelle liest die flache Eingabe des Kerns (struct Input) und die Angaben der Vorbereitung
 // (prepare_core_impl.h: PrepFlat) aus einer benannten Liste (Aufbau in .sim_engine_run), laesst den Kern
-// vorbereiten und rechnen und gibt die Tagesflags (Freibetragstage), Status, Report-Vektoren, Lots, Verkaeufe,
-// Steuerbuchungen, geaenderte Kursreihen (Splits), Toepfe, Gebuehren, offene Steuer, Jahreszeilen und
-// KiSt-Salden des Tarifwegs, das Ereignisprotokoll und einen etwaigen Abbruch als Liste zurueck. Lots,
-// Verkaeufe und Steuerbuchungen entstehen als Listen in derselben Form wie bisher in sim_mem
-// (perform_trade_buy_cpp, .perform_trade_sell, .pay_vp, .settle_p23, .sim_day_assess_vp). Die Texte der
-// Warnungen und Fehler setzt R (.sim_engine_signal).
+// vorbereiten und rechnen und gibt die Tagesflags (Freibetragstage), Status, Report-Vektoren, geaenderte Kursreihen
+// (Splits), Toepfe, Gebuehren, offene Steuer, Jahreszeilen und KiSt-Salden des Tarifwegs, das Ereignisprotokoll,
+// einen etwaigen Abbruch, die Zahl der Kaeufe und Verkaeufe und die offenen Lots je Asset als Liste zurueck (seit
+// 1.6.3 kompakt; bis 1.6.2 Lots, Verkaeufe und Steuerbuchungen als Listen je Objekt). Die Texte der Warnungen und
+// Fehler setzt R (.sim_engine_signal).
 //
 // C_sim_evaluate rechnet die Auswertung (Kern src/evaluate_core_impl.h; R-Seite .sim_evaluate in
 // R/sim_evaluate.R), C_sim_xirr den internen Zinsfuss (.xirr_rate in R/sim_base.R).
@@ -55,12 +54,6 @@ SEXP names_of(std::initializer_list<const char*> nm) {
   SEXP x = sl::alloc(STRSXP, (R_xlen_t) nm.size());
   R_xlen_t i = 0;
   for (const char* s : nm) SET_STRING_ELT(x, i++, Rf_mkChar(s));
-  return x;
-}
-SEXP date_scalar(double d, SEXP date_class) {
-  SEXP x = sl::alloc(REALSXP, 1);
-  REAL(x)[0] = d;
-  Rf_setAttrib(x, R_ClassSymbol, date_class);
   return x;
 }
 SEXP num_scalar(double v) {
@@ -214,83 +207,16 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
     SEXP totals = num_vec(buf);
     SEXP date_class = Rf_mkString("Date");
     sl::keep(date_class);
-    SEXP lot_names = sl::keep(names_of({"date", "type", "count", "price", "remaining", "original"}));
-    SEXP lot_names_vp = sl::keep(names_of({"date", "type", "count", "price", "remaining", "original", "vp"}));
-    SEXP sell_names = sl::keep(names_of({"event_date", "event_type", "asset_count", "asset_price", "event_gain",
-                                         "event_taxes", "tax_regime", "tax_deferred", "holding_exempt"}));
-    SEXP vp_names = sl::keep(names_of({"event_date", "assessment_date", "event_type", "flat_rate_gross", "bonus_applied",
-                                       "flat_rate_taxable", "spb_used", "taxes_paid"}));
-    SEXP p23_names = sl::keep(names_of({"event_date", "event_type", "taxes_paid"}));
-    SEXP buy_s = sl::keep(Rf_mkString("Buy")), sell_s = sl::keep(Rf_mkString("Sell"));
-    SEXP vp_s = sl::keep(Rf_mkString("Vorabpauschale")), p23_s = sl::keep(Rf_mkString("Private sale tax"));
-    SEXP regime_s[4] = {R_NilValue, sl::keep(Rf_mkString("investment_fund")), sl::keep(Rf_mkString("capital_gains")),
-                        sl::keep(Rf_mkString("private_sale"))};
-    SEXP buys = sl::alloc(VECSXP, na), sells = sl::alloc(VECSXP, na), taxes = sl::alloc(VECSXP, na),
-         px_out = sl::alloc(VECSXP, na);
-    for (int a = 0; a < na; a++) {
-      const std::size_t nl = E.buys[a].size();
-      buf.assign(7 * nl, 0.0);
-      E.lots_out(a, buf.data());
-      SEXP bl = sl::alloc(VECSXP, (R_xlen_t) nl);
-      for (std::size_t j = 0; j < nl; j++) {
-        const double* L = buf.data() + 7 * j;
-        const bool vp = L[6] != 0;
-        SEXP lot = sl::alloc(VECSXP, vp ? 7 : 6);
-        SET_VECTOR_ELT(lot, 0, date_scalar(L[0], date_class));
-        SET_VECTOR_ELT(lot, 1, buy_s);
-        for (int k = 1; k <= 4; k++) SET_VECTOR_ELT(lot, k + 1, num_scalar(L[k]));
-        if (vp) SET_VECTOR_ELT(lot, 6, num_scalar(L[5]));
-        Rf_setAttrib(lot, R_NamesSymbol, vp ? lot_names_vp : lot_names);
-        SET_VECTOR_ELT(bl, (R_xlen_t) j, lot);
-      }
-      SET_VECTOR_ELT(buys, a, bl);
-      const std::size_t ns = E.sells[a].size();
-      buf.assign(8 * ns, 0.0);
-      E.sells_out(a, buf.data());
-      SEXP sv = sl::alloc(VECSXP, (R_xlen_t) ns);
-      for (std::size_t j = 0; j < ns; j++) {
-        const double* S = buf.data() + 8 * j;
-        const int rg = (int) S[5];
-        SEXP e = sl::alloc(VECSXP, 9);
-        SET_VECTOR_ELT(e, 0, date_scalar(S[0], date_class));
-        SET_VECTOR_ELT(e, 1, sell_s);
-        SET_VECTOR_ELT(e, 2, num_scalar(S[1]));
-        SET_VECTOR_ELT(e, 3, num_scalar(S[2]));
-        SET_VECTOR_ELT(e, 4, rg ? num_scalar(S[3]) : lgl_scalar(NA_LOGICAL));
-        SET_VECTOR_ELT(e, 5, rg ? num_scalar(S[4]) : lgl_scalar(NA_LOGICAL));
-        SET_VECTOR_ELT(e, 6, rg ? regime_s[rg] : lgl_scalar(NA_LOGICAL));
-        SET_VECTOR_ELT(e, 7, lgl_scalar(rg == RG_PS ? 1 : 0));
-        SET_VECTOR_ELT(e, 8, S[7] != 0 ? num_scalar(S[6]) : lgl_scalar(NA_LOGICAL));
-        Rf_setAttrib(e, R_NamesSymbol, sell_names);
-        SET_VECTOR_ELT(sv, (R_xlen_t) j, e);
-      }
-      SET_VECTOR_ELT(sells, a, sv);
-      const std::size_t nt = E.taxes[a].size();
-      buf.assign(8 * nt, 0.0);
-      E.taxes_out(a, buf.data());
-      SEXP tv = sl::alloc(VECSXP, (R_xlen_t) nt);
-      for (std::size_t j = 0; j < nt; j++) {
-        const double* X = buf.data() + 8 * j;
-        SEXP e;
-        if ((int) X[0] == 1) {
-          e = sl::alloc(VECSXP, 8);
-          SET_VECTOR_ELT(e, 0, date_scalar(X[1], date_class));
-          SET_VECTOR_ELT(e, 1, date_scalar(X[2], date_class));
-          SET_VECTOR_ELT(e, 2, vp_s);
-          for (int k = 3; k < 8; k++) SET_VECTOR_ELT(e, k, num_scalar(X[k]));
-          Rf_setAttrib(e, R_NamesSymbol, vp_names);
-        } else {
-          e = sl::alloc(VECSXP, 3);
-          SET_VECTOR_ELT(e, 0, date_scalar(X[1], date_class));
-          SET_VECTOR_ELT(e, 1, p23_s);
-          SET_VECTOR_ELT(e, 2, num_scalar(X[7]));
-          Rf_setAttrib(e, R_NamesSymbol, p23_names);
-        }
-        SET_VECTOR_ELT(tv, (R_xlen_t) j, e);
-      }
-      SET_VECTOR_ELT(taxes, a, tv);
+    // compact (seit 1.6.3 Pflicht; Engine::open_lots_n/open_lots_out): je Asset die Zahl der Kaeufe und Verkaeufe
+    // (n_buys, n_sells, double); 2 dazu open_lots: offene Lots je Asset als list(date <Date>, units, price, vp)
+    // (Spalten von .sim_lots_frame, ohne Klasse und Zeilennamen), 1 open_lots = NULL. Die Listen je Lot, Verkauf und
+    // Steuerbuchung (bis 1.6.2) las in R niemand ausser ihrer Laenge (R-r-1).
+    const R_xlen_t i_compact = sl::find(inp, "compact");
+    const int compact = i_compact < 0 ? 0 : sl::as_int(VECTOR_ELT(inp, i_compact));
+    if (compact < 1 || compact > 2) sl::stop("sim_engine_run: compact muss 1 oder 2 sein");
+    SEXP px_out = sl::alloc(VECSXP, na);
+    for (int a = 0; a < na; a++)
       if (E.px_changed[a]) SET_VECTOR_ELT(px_out, a, num_vec(E.px[a]));
-    }
     const R_xlen_t ne = (R_xlen_t) E.events.size();
     std::vector<int32_t> evi(9 * (std::size_t) ne);
     std::vector<double> evd(2 * (std::size_t) ne);
@@ -324,27 +250,50 @@ extern "C" SEXP C_sim_engine_run(SEXP inp) {
     buf.assign(2 * E.ks.size(), 0.0);
     E.ks_out(buf.data());
     SEXP ks = num_vec(buf);
-    SEXP res = sl::alloc(VECSXP, 17);
+    SEXP nb = sl::alloc(REALSXP, na), ns = sl::alloc(REALSXP, na);
+    for (int a = 0; a < na; a++) {
+      REAL(nb)[a] = (double) E.buys[a].size();
+      REAL(ns)[a] = (double) E.sells[a].size();
+    }
+    SEXP open = R_NilValue;
+    if (compact == 2) {
+      open = sl::alloc(VECSXP, na);
+      SEXP ol_names = sl::keep(names_of({"date", "units", "price", "vp"}));
+      for (int a = 0; a < na; a++) {
+        const R_xlen_t k = (R_xlen_t) E.open_lots_n(a);
+        buf.assign(4 * (std::size_t) k, 0.0);
+        if (k > 0) E.open_lots_out(a, buf.data());
+        SEXP cols = sl::alloc(VECSXP, 4);
+        for (int c = 0; c < 4; c++) {
+          SEXP x = sl::alloc(REALSXP, k);
+          for (R_xlen_t j = 0; j < k; j++) REAL(x)[j] = buf[(std::size_t) (c * k + j)];
+          if (c == 0) Rf_setAttrib(x, R_ClassSymbol, date_class);
+          SET_VECTOR_ELT(cols, c, x);
+        }
+        Rf_setAttrib(cols, R_NamesSymbol, ol_names);
+        SET_VECTOR_ELT(open, a, cols);
+      }
+    }
+    SEXP res = sl::alloc(VECSXP, 16);
     SET_VECTOR_ELT(res, 0, status);
     SET_VECTOR_ELT(res, 1, report);
-    SET_VECTOR_ELT(res, 2, buys);
-    SET_VECTOR_ELT(res, 3, sells);
-    SET_VECTOR_ELT(res, 4, taxes);
-    SET_VECTOR_ELT(res, 5, px_out);
-    SET_VECTOR_ELT(res, 6, totals);
-    SET_VECTOR_ELT(res, 7, num_scalar(E.fee_paid));
-    SET_VECTOR_ELT(res, 8, num_scalar(E.tax_unpaid));
-    SET_VECTOR_ELT(res, 9, rows);
-    SET_VECTOR_ELT(res, 10, ks);
-    SET_VECTOR_ELT(res, 11, num_scalar(E.refund_due));
-    SET_VECTOR_ELT(res, 12, ev);
-    SET_VECTOR_ELT(res, 13, int_vec(E.ev_ints));
-    SET_VECTOR_ELT(res, 14, num_vec(E.ev_vals));
-    SET_VECTOR_ELT(res, 15, err);
-    SET_VECTOR_ELT(res, 16, int_vec(std::vector<int>(E.prep_flags.begin(), E.prep_flags.end())));
-    Rf_setAttrib(res, R_NamesSymbol, names_of({"status", "report", "buys", "sells", "taxes", "prices", "totals",
-                                              "fee_paid", "tax_unpaid", "rows", "ks", "refund_due", "events",
-                                              "ev_ints", "ev_vals", "error", "flags"}));
+    SET_VECTOR_ELT(res, 2, px_out);
+    SET_VECTOR_ELT(res, 3, totals);
+    SET_VECTOR_ELT(res, 4, num_scalar(E.fee_paid));
+    SET_VECTOR_ELT(res, 5, num_scalar(E.tax_unpaid));
+    SET_VECTOR_ELT(res, 6, rows);
+    SET_VECTOR_ELT(res, 7, ks);
+    SET_VECTOR_ELT(res, 8, ev);
+    SET_VECTOR_ELT(res, 9, int_vec(E.ev_ints));
+    SET_VECTOR_ELT(res, 10, num_vec(E.ev_vals));
+    SET_VECTOR_ELT(res, 11, err);
+    SET_VECTOR_ELT(res, 12, int_vec(std::vector<int>(E.prep_flags.begin(), E.prep_flags.end())));
+    SET_VECTOR_ELT(res, 13, nb);
+    SET_VECTOR_ELT(res, 14, ns);
+    SET_VECTOR_ELT(res, 15, open);
+    Rf_setAttrib(res, R_NamesSymbol, names_of({"status", "report", "prices", "totals", "fee_paid", "tax_unpaid", "rows",
+                                              "ks", "events", "ev_ints", "ev_vals", "error", "flags", "n_buys",
+                                              "n_sells", "open_lots"}));
     return res;
   });
 }

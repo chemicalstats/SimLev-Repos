@@ -142,8 +142,7 @@ run_case("f22_no_spb", d1, s2, list(tax_mode = "person", use_sparer_pauschbetrag
 legacy <- list(ETF = list(asset_class = "etf", trading = "bnh", share = 1, spread = 0.1, partial_exemption = 0))
 run_case("f23_legacy_list", d1[, c("date", "WORLD")], list(WORLD = legacy$ETF), list(tax_mode = "person", liquidate = TRUE))
 
-# ── Zufallsszenarien ─────────────────────────────────────────────────────────
-pick <- function(x) x[[sample.int(length(x), 1)]]
+# ── Zufallsszenarien (pick() aus blocks_from_flat.R) ─────────────────────────
 for (k in seq_len(n_random)) {
   set.seed(seed0 + k)
   n <- pick(c(40, 200, 400, 800, 1100, 1700))

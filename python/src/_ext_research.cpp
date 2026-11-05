@@ -13,16 +13,19 @@
  *   min_cvar_core(R, T, N, alpha, lo, hi, w0, zeta0, scales, maxit, out)
  *   min_cdar_core(R, T, N, alpha, lo, hi, iters, out)
  *   quantile_reg_core(y, X, n, p, tau, beta0, sc, tol, maxit) -> (beta | None, optimal)
- *   hmm_forward_backward(B, T, K, A, anr, p0, al, be, ga, xi, cs)
+ *   hmm_forward_backward(B, T, K, A, anr, p0, al, ga, xi, cs)
  *   hmm_em(X, Tn, d, k, mu, S, A, p0, n_iter, tol, ridge, filt, smooth, lB) -> (status, ll, iter)  (seit 1.5.0;
  *     mu, S, A an Ort und Stelle; Matrizen spaltenweise)
  *   goal_dp(R, S, K, grid, cf, goal, wmin, wmax, sv, tie, static, policy, value) -> (collapsed, p_dp)  (seit 1.5.0;
  *     policy int32 horizon x ng, value ng x (horizon + 1))
  *   pbo_cscv(B, T, combos, half, metric, S, N, lam, isb, oosb, oosm)  (seit 1.5.0; B 5 x S x N, T 5 x N, combos
  *     int32 S/2 x C 1-basiert)
+ *   wrapper_nav_core(G, day, yr, fee, pf, S, d0, nav, gross, fee_t, acc, paid, hwm) -> bad  (seit 1.5.1;
+ *     core/wrapper_core_impl.h; yr int32; bad -1 oder erster Tag ohne Anteilswert, 0-basiert)
  *   roll_mean_core(x, n, out)
  *   kendall_tau_core(x, y) -> float
  *   roll_cov_core(x, y, n, out)
+ *   roll_max_core(x, w, zero, out)  (seit 1.6.3; rollierendes Maximum, NaN als -Inf, zero 0/1 wie im Kern)
  *
  * Die Huellen pruefen die Laengen so, dass der Kern nur innerhalb der Puffer liest
  * und schreibt (die R-Kerne setzen dieselben Laengen stillschweigend voraus); andere
@@ -31,6 +34,7 @@
  */
 #include "_ext_common.h"
 #include "core/research_core_impl.h"
+#include "core/wrapper_core_impl.h"
 
 namespace {
 
@@ -155,16 +159,15 @@ PyObject* r_qreg(PyObject*, PyObject* args) {
 }
 
 PyObject* r_hmm(PyObject*, PyObject* args) {
-    PyObject *oB, *oA, *op0, *oal, *obe, *oga, *oxi, *ocs;
+    PyObject *oB, *oA, *op0, *oal, *oga, *oxi, *ocs;
     int T, K, anr;
     const char* fn = "hmm_forward_backward";
-    if (!PyArg_ParseTuple(args, "OiiOiOOOOOO:hmm_forward_backward", &oB, &T, &K, &oA, &anr, &op0, &oal, &obe,
+    if (!PyArg_ParseTuple(args, "OiiOiOOOOO:hmm_forward_backward", &oB, &T, &K, &oA, &anr, &op0, &oal,
                           &oga, &oxi, &ocs)) return nullptr;
-    ext::Buf B, A, p0, al, be, ga, xi, cs;   // be: nur fuer die Laengenpruefung (kein Ergebnis in R)
+    ext::Buf B, A, p0, al, ga, xi, cs;   // seit 1.6.3 ohne be (wurde nur auf die Laenge geprueft, kein Ergebnis)
     if (!ext::get(oB, B, 'd', false, fn, "B") || !mat_dims(B, T, K, fn, "B") ||
         !ext::get(oA, A, 'd', false, fn, "A") || !ext::get(op0, p0, 'd', false, fn, "p0") ||
         !ext::get(oal, al, 'd', true, fn, "al", (Py_ssize_t) T * K) ||
-        !ext::get(obe, be, 'd', true, fn, "be", (Py_ssize_t) T * K) ||
         !ext::get(oga, ga, 'd', true, fn, "ga", (Py_ssize_t) T * K) ||
         !ext::get(oxi, xi, 'd', true, fn, "xi", (Py_ssize_t) K * K) ||
         !ext::get(ocs, cs, 'd', true, fn, "cs", T)) return nullptr;
@@ -245,6 +248,30 @@ PyObject* r_goal_dp(PyObject*, PyObject* args) {
     return Py_BuildValue("(Ld)", (long long) nc, p_dp);
 }
 
+PyObject* r_wrapper_nav(PyObject*, PyObject* args) {
+    PyObject *oG, *od, *oy, *o1, *o2, *o3, *o4, *o5, *o6;
+    double fee, pf, S, d0;
+    const char* fn = "wrapper_nav_core";
+    if (!PyArg_ParseTuple(args, "OOOddddOOOOOO:wrapper_nav_core", &oG, &od, &oy, &fee, &pf, &S, &d0, &o1, &o2, &o3, &o4,
+                          &o5, &o6))
+        return nullptr;
+    ext::Buf G, day, yr, nav, gross, fe, acc, paid, hwm;
+    if (!ext::get(oG, G, 'd', false, fn, "G")) return nullptr;
+    const Py_ssize_t n = G.n;
+    if (!ext::get(od, day, 'd', false, fn, "day", n) || !ext::get(oy, yr, 'i', false, fn, "yr", n) ||
+        !ext::get(o1, nav, 'd', true, fn, "nav", n) || !ext::get(o2, gross, 'd', true, fn, "gross", n) ||
+        !ext::get(o3, fe, 'd', true, fn, "fee_t", n) || !ext::get(o4, acc, 'd', true, fn, "acc", n) ||
+        !ext::get(o5, paid, 'd', true, fn, "paid", n) || !ext::get(o6, hwm, 'd', true, fn, "hwm", n)) return nullptr;
+    std::vector<int64_t> y((std::size_t) n);
+    for (Py_ssize_t i = 0; i < n; i++) y[(std::size_t) i] = yr.i()[i];
+    int64_t bad = -1;
+    if (!ext::run([&] {
+            bad = simlev::wrapper_nav_core(n, G.d(), day.d(), y.data(), fee, pf, S, d0, nav.d(), gross.d(), fe.d(), acc.d(),
+                                           paid.d(), hwm.d());
+        }, false)) return nullptr;
+    return PyLong_FromLongLong((long long) bad);
+}
+
 PyObject* r_pbo_cscv(PyObject*, PyObject* args) {
     PyObject *oB, *oT, *oc, *ol, *oi, *oo, *om;
     double half;
@@ -317,6 +344,23 @@ PyObject* r_rcov(PyObject*, PyObject* args) {
     Py_RETURN_NONE;
 }
 
+// Rollierendes Maximum (seit 1.6.3): out[i] = max(x[max(0, i - w + 1) .. i]), NaN als -Inf; w >= 1, zero 0 oder 1
+PyObject* r_rmax(PyObject*, PyObject* args) {
+    PyObject *ox, *oout;
+    Py_ssize_t w;
+    int zero;
+    const char* fn = "roll_max_core";
+    if (!PyArg_ParseTuple(args, "OniO:roll_max_core", &ox, &w, &zero, &oout)) return nullptr;
+    ext::Buf x, out;
+    if (!ext::get(ox, x, 'd', false, fn, "x") || !ext::get(oout, out, 'd', true, fn, "out", x.n)) return nullptr;
+    if (w < 1 || (zero != 0 && zero != 1)) {
+        PyErr_SetString(PyExc_ValueError, "roll_max_core: Fenster muss >= 1 und zero 0 oder 1 sein");
+        return nullptr;
+    }
+    if (!ext::run([&] { simlev::roll_max_core(x.n, x.d(), w, zero, out.d()); })) return nullptr;
+    Py_RETURN_NONE;
+}
+
 }  // namespace
 
 PyMethodDef simlev_ext_research_methods[] = {
@@ -326,14 +370,17 @@ PyMethodDef simlev_ext_research_methods[] = {
     {"min_cdar_core", r_cdar, METH_VARARGS, "min_cdar_core(R, T, N, alpha, lo, hi, iters, out)"},
     {"quantile_reg_core", r_qreg, METH_VARARGS,
      "quantile_reg_core(y, X, n, p, tau, beta0, sc, tol, maxit) -> (beta | None, optimal)"},
-    {"hmm_forward_backward", r_hmm, METH_VARARGS, "hmm_forward_backward(B, T, K, A, anr, p0, al, be, ga, xi, cs)"},
+    {"hmm_forward_backward", r_hmm, METH_VARARGS, "hmm_forward_backward(B, T, K, A, anr, p0, al, ga, xi, cs)"},
     {"goal_dp", r_goal_dp, METH_VARARGS,
      "goal_dp(R, S, K, grid, cf, goal, wmin, wmax, sv, tie, static, policy, value) -> (collapsed, p_dp)"},
     {"pbo_cscv", r_pbo_cscv, METH_VARARGS, "pbo_cscv(B, T, combos, half, metric, S, N, lam, isb, oosb, oosm)"},
     {"hmm_em", r_hmm_em, METH_VARARGS,
      "hmm_em(X, Tn, d, k, mu, S, A, p0, n_iter, tol, ridge, filtered, smoothed, lB) -> (status, ll, iter)"},
+    {"wrapper_nav_core", r_wrapper_nav, METH_VARARGS,
+     "wrapper_nav_core(G, day, yr, fee, pf, S, d0, nav, gross, fee_t, acc, paid, hwm) -> bad"},
     {"roll_mean_core", r_rmean, METH_VARARGS, "roll_mean_core(x, n, out)"},
     {"kendall_tau_core", r_kendall, METH_VARARGS, "kendall_tau_core(x, y) -> float"},
     {"roll_cov_core", r_rcov, METH_VARARGS, "roll_cov_core(x, y, n, out)"},
+    {"roll_max_core", r_rmax, METH_VARARGS, "roll_max_core(x, w, zero, out): rollierendes Maximum (NaN als -Inf)"},
     {nullptr, nullptr, 0, nullptr}
 };

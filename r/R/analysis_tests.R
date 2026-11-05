@@ -488,7 +488,10 @@ overfit_reality_check <- function(x, benchmark = NULL, B = 999L, block = NULL, f
   fbar <- colMeans(D)
   block <- block %||% max(2, round(Tn^(1 / 3)))
   S <- .sl_main_stream(seed)                                    # Hauptstrom
-  Fb <- vapply(seq_len(B), function(i) colMeans(D[.sl_boot_idx_stationary(Tn, Tn, block, stream = S), , drop = FALSE]), numeric(K))
+  # colMeans(D[idx, , drop = FALSE]) ohne die Zeilenkopie (seit 1.6.3 Kern sl_r_colsums_idx, gleiche Summanden in
+  # gleicher Folge wie colMeans; D ist eine double-Matrix (R - b); Ergebnis ohne Namen, die matrix() unten verwirft)
+  Fb <- vapply(seq_len(B), function(i) .Call(C_sl_r_colsums_idx, D, .sl_boot_idx_stationary(Tn, Tn, block, stream = S),
+                                             FALSE, TRUE), numeric(K))
   Fb <- matrix(Fb, nrow = B, ncol = K, byrow = TRUE)          # B x K, auch bei einem Kandidaten (vapply liefert dann einen Vektor)
   om <- pmax(apply(Fb, 2, stats::sd), 1e-12) * sqrt(Tn)
   V <- max(sqrt(Tn) * fbar)

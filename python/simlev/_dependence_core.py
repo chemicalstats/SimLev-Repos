@@ -50,12 +50,12 @@ def hmm_forward_backward(B, A, p0):
     T, K = Bm.shape
     Am = np.asarray(A, dtype=np.float64)
     p0a = np.ascontiguousarray(np.asarray(p0, dtype=np.float64).ravel())
-    out = [np.empty((K, T)) for _ in range(3)]
+    al, ga = np.empty((K, T)), np.empty((K, T))
     xi = np.empty((K, K))
     cs = np.empty(T)
     _ext.hmm_forward_backward(np.ravel(Bm, order="F"), T, K, np.ravel(Am, order="F"), Am.shape[0], p0a,
-                              *out, xi, cs)
-    al, ga = (np.ascontiguousarray(a.T) for a in (out[0], out[2]))
+                              al, ga, xi, cs)
+    al, ga = (np.ascontiguousarray(a.T) for a in (al, ga))
     return {"filtered": al, "smoothed": ga, "xi": np.ascontiguousarray(xi.T), "scale": cs}
 
 
@@ -110,4 +110,15 @@ def pbo_cscv(Bs, Ts, combos, half, metric, S, N):
     _ext.pbo_cscv(Bv, Tv, cb, float(half), ["sharpe", "sortino", "geometric", "mean"].index(metric), int(S), int(N),
                   *out)
     return tuple(out)
+
+
+def wrapper_nav_core(G, day, yr, fee, pf, S, d0):
+    """Tagesschleife des NAV von ``wrapper_nav()`` (R: ``.wrapper_nav_core``, seit 1.5.1; core/wrapper_core_impl.h):
+    ``(bad, nav, gross, fee, perf_fee, perf_paid, hwm)``, ``bad`` -1 oder der erste Tag (0-basiert) ohne Anteilswert."""
+    G = np.ascontiguousarray(G, dtype=np.float64)
+    n = G.size
+    out = [np.zeros(n) for _ in range(6)]
+    bad = _ext.wrapper_nav_core(G, np.ascontiguousarray(day, dtype=np.float64), np.ascontiguousarray(yr, dtype=np.int32),
+                                float(fee), float(pf), float(S), float(d0), *out)
+    return (int(bad),) + tuple(out)
 

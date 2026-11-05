@@ -63,7 +63,8 @@ from . import fmt as _fmt
 from . import libm as _libm
 from . import stats as _stats
 from . import rnum as _rnum
-from .rnum import NA_REAL
+from .linalg import RError   # eine Klasse für RExpr und stats (seit 1.6.3)
+from .rnum import NA_REAL, _bits
 
 __all__ = ["parse_r", "eval_r", "r_strtod", "from_python", "to_python", "as_numeric", "as_logical"]
 
@@ -98,16 +99,8 @@ def _warn(msg):
     warnings.warn(msg, UserWarning, stacklevel=2)
 
 
-class RError(ValueError):
-    """Fehler mit R's Meldungstext."""
-
-
 def _error(msg):
     raise RError(msg)
-
-
-def _bits(x):
-    return struct.unpack("<Q", struct.pack("<d", x))[0]
 
 
 def _d(b):
@@ -117,10 +110,6 @@ def _d(b):
 def isna_strict(x):
     """True für R's NA_real_ (NaN mit Nutzlast 1954), False für andere NaN."""
     return x != x and (_bits(x) & 0xFFFFFFFF) == 1954
-
-
-def _isnan(x):
-    return x != x
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1775,7 +1764,12 @@ def _in(a, b):
         return LGL([x in st for x in A])
     A = _as_num(a)
     B = _as_num(b)
-    return LGL([any(_match_eq(x, y) for y in B) for x in A])
+    # über eine Menge (seit 1.6.3; bis 1.6.2 _match_eq gegen jedes Element): gleiche Regel wie _match_eq –
+    # NA trifft nur NA, NaN nur NaN, sonst == (-0 == 0)
+    st = {y for y in B if y == y}
+    has_na = any(y != y and isna_strict(y) for y in B)
+    has_nan = any(y != y and not isna_strict(y) for y in B)
+    return LGL([(has_na if isna_strict(x) else has_nan) if x != x else x in st for x in A])
 
 
 def _asreal1(v):
@@ -2646,13 +2640,8 @@ def _f_length(args, nms, ex):
 
 
 def _textwidth(s):
-    w = 0
-    for ch in s:
-        cat = unicodedata.category(ch)
-        if cat in ("Mn", "Me") or ch == "​":
-            continue
-        w += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
-    return w
+    """``nchar(s, type = "width")``: Breite je Zeichen wie R (seit 1.6.3 dieselbe Tabelle wie ``fmt.nchar``)."""
+    return sum(_fmt._wcwidth(ord(ch)) for ch in s)
 
 
 def _f_nchar(args, nms, ex):
@@ -3036,22 +3025,49 @@ def _ev(e, c):
     _error('could not find function "%s"' % f)
 
 
+class _LazyCols:
+    """Spalten von ``data`` als R-Vektoren, erst beim ersten Zugriff umgewandelt (seit 1.6.3; bis 1.6.2 alle
+    Spalten vorab). Gleiche Sicht wie vorher: dieselben Spaltenobjekte (zu Beginn gemerkt), dieselbe Umwandlung
+    ``from_python``, Spalten ohne Daten (``None``) fehlen; ``from_python`` meldet nichts."""
+    __slots__ = ("raw", "done")
+
+    def __init__(self, raw):
+        self.raw = raw
+        self.done = {}
+
+    def _get(self, name):
+        if name in self.done:
+            return self.done[name]
+        r = None
+        for v in reversed(self.raw.get(name, ())):   # gleicher Name mehrfach (str(k)): der letzte mit Daten
+            r = from_python(v)
+            if r is not None:
+                break
+        self.done[name] = r
+        return r
+
+    def __contains__(self, name):
+        return self._get(name) is not None
+
+    def __getitem__(self, name):
+        r = self._get(name)
+        if r is None:
+            raise KeyError(name)
+        return r
+
+
 def _columns(data):
     d = {}
     if data is None:
         return d
     if isinstance(data, pd.DataFrame):
         for k in data.columns:
-            r = from_python(data[k])
-            if r is not None:
-                d[str(k)] = r
-        return d
+            d.setdefault(str(k), []).append(data[k])
+        return _LazyCols(d)
     if isinstance(data, Mapping):
         for k, v in data.items():
-            r = from_python(v)
-            if r is not None:
-                d[str(k)] = r
-        return d
+            d.setdefault(str(k), []).append(v)
+        return _LazyCols(d)
     if isinstance(data, (list, tuple)) and len(data) == 0:
         return d
     _error("data muss ein data.frame (DataFrame oder dict) sein.")

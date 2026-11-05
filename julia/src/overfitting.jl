@@ -16,7 +16,7 @@ using ..SimLev: _match_arg, _which_max   # util.jl (seit 1.6.1 eine Fassung)
 using ..SimLev: _res_abline!, _res_fig, _res_finish, _res_hline!, _res_legend!, _res_line!, _res_panel, _res_points!,
                 _res_range, _res_rect!, _res_vline!
 using Dates
-using Logging
+using Base.CoreLogging: with_logger, NullLogger   # ohne Paketabhängigkeit Logging (seit 1.6.3)
 
 const SL = SimLev
 const NA = SimLev.NA
@@ -28,7 +28,7 @@ export overfit_pbo, sharpe_probabilistic, sharpe_deflated, overfit_walk_forward,
 # ═════════════════════════════════════════════════════════════════════════════
 
 _f64(v) = v === missing || v === nothing ? NA : Float64(v)
-_isna(v) = v === missing || v === nothing || (v isa AbstractFloat && isnan(v))
+using ..SimLev: _isna   # r/rnum.jl (seit 1.6.3)
 
 "`sprintf` (R) für Skalare → String."
 function _spf(f::AbstractString, args...)
@@ -108,8 +108,7 @@ function _mean_lgl(v::AbstractVector)
     return SL.r_mean_int(Int[x ? 1 : 0 for x in v])
 end
 _lgl(f, a::Float64, b::Float64) = (isnan(a) || isnan(b)) ? missing : f(a, b)
-_pmax(a::Float64, b::Float64) = isnan(a) ? a : (b > a ? b : a)
-_pmin(a::Float64, b::Float64) = isnan(a) ? a : (b < a ? b : a)
+using ..SimLev: _pmax, _pmin   # util.jl (seit 1.6.3 eine Fassung; hier ist b stets eine endliche Konstante)
 _sign(v::Float64) = isnan(v) ? v : v > 0 ? 1.0 : v < 0 ? -1.0 : 0.0
 
 "Schlüssel/Werte einer benannten Liste (RList, Dict, NamedTuple, Pair-Vektor, RVector)."
@@ -160,8 +159,7 @@ function _modify_list(x, val)
 end
 
 "`conditionMessage(e)`."
-_cond_msg(e) = e isa ErrorException ? e.msg : e isa KeyError ? string(e.key) :
-               hasproperty(e, :msg) ? string(getproperty(e, :msg)) : sprint(showerror, e)
+const _cond_msg = SimLev._wrapper_errmsg   # wrapper.jl (seit 1.6.3 eine Fassung)
 
 "`suppressWarnings(suppressMessages(f()))`."
 function _quiet(f)
@@ -464,6 +462,7 @@ println(overfit_pbo(R; S = 10, frequency = "day")["pbo"])  # etwa 0.5
 ```
 """
 function overfit_pbo(x; S = 16, metric = nothing, frequency = nothing, dates = nothing, risk_free = 0)
+    @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
     x = SimLev.as_rframe(x)
     metric = _match_arg(metric, ("sharpe", "sortino", "geometric", "mean"))
     frequency = _match_arg(frequency, ("week", "day", "month"))
@@ -511,7 +510,7 @@ function _print_pbo(io::IO, x)
     nothing
 end
 
-function _plot_pbo(x; file = nothing, kw...)
+function _plot_pbo(x; kw...)
     f = _res_fig(900, 400)
     lam = filter(isfinite, Float64.(collect(x["lambda"])))
     lo, hi = isempty(lam) ? (-1.0, 1.0) : extrema(lam)
@@ -534,7 +533,7 @@ function _plot_pbo(x; file = nothing, kw...)
     # dargestellte Werte: endliche Logits (Histogramm), Punkte In-/Out-of-Sample
     data = SL.RList("logits" => SL.RFrame("lambda" => lam),
                     "degradation" => SL.RFrame("is_best" => xb, "oos_best" => yb))
-    return (_res_finish(f; file = file), data)
+    return (_res_finish(f), data)
 end
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -880,7 +879,7 @@ function _print_wf(io::IO, x)
     nothing
 end
 
-function _plot_wf(x; file = nothing, kw...)
+function _plot_wf(x; kw...)
     s = x["series"]
     dd = Float64[_days(v) for v in s["date"]]
     ys = [s["walk_forward"], s["hindsight"], s["average"]]
@@ -898,7 +897,7 @@ function _plot_wf(x; file = nothing, kw...)
     _res_legend!(f, 85, 60, ["Walk-Forward", "Rückschau-Bester", "Durchschnitt"], cols)
     data = SL.RList("growth" => SL.RFrame("date" => collect(Date, s["date"]), "walk_forward" => _tofloat(s["walk_forward"]),
                                           "hindsight" => _tofloat(s["hindsight"]), "average" => _tofloat(s["average"])))
-    return (_res_finish(f; file = file), data)
+    return (_res_finish(f), data)
 end
 
 # ═════════════════════════════════════════════════════════════════════════════

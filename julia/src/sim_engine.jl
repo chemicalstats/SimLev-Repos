@@ -40,7 +40,7 @@ _engine_fee(f::Nothing) = (0.0, 0.0, 0.0, 0.0, 0.0)
 _engine_fee(f::FeeSpec) = (1.0, f.fixed, f.percent, f.min, f.max)
 
 const _ENGINE_REGIME = Dict("investment_fund" => Int32(1), "capital_gains" => Int32(2), "private_sale" => Int32(3))
-const _ENGINE_REGIME_NAME = ("investment_fund", "capital_gains", "private_sale")
+const _ENGINE_REGIME_NAME = VALID_REGIMES   # config.jl (eine Liste, seit 1.6.3)
 const _ENGINE_ROWS = ("year", "taxable_income", "church_tax_paid_deductible", "church_tax_refunded",
                       "church_tax_net_deduction", "taxable_income_net", "deduction_effect", "gain_p23", "income_tax_p23",
                       "soli_p23", "church_tax_p23", "tax_p23", "capital_income", "abgeltung_burden",
@@ -160,7 +160,7 @@ function _sim_engine_run!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight,
         fl.flag_harvest = BitVector((flags_out .& Int32(128)) .!= 0)
         status = zeros(8na); tv = zeros(13); nlots = zeros(Int64, na); nsells = zeros(Int64, na)
         ntaxes = zeros(Int64, na); pxc = zeros(Int32, na); cnt = zeros(Int64, 5); scal = zeros(3)
-        err = zeros(Int32, 4); err_d0 = Ref{Float64}(0.0)
+        err = zeros(Int32, 1); err_d0 = Ref{Float64}(0.0)
         ccall((:simlev_c_engine_counts, LIBSLC), Cvoid,
               (Ptr{Cvoid}, Ptr{Float64}, Ptr{Float64}, Ptr{Int64}, Ptr{Int64}, Ptr{Int64}, Ptr{Int32}, Ptr{Int64},
                Ptr{Float64}, Ptr{Int32}, Ref{Float64}),
@@ -204,11 +204,10 @@ function _sim_engine_run!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight,
             end
         end
         T.total_taxes, T.loss_capital_gains, T.loss_private_sales = tv[1], tv[2], tv[3]
-        T.private_sale_gains_ytd, T.private_sale_losses_ytd = tv[4], tv[5]
+        T.private_sale_gains_ytd, T.private_sale_losses_ytd = tv[4], tv[5]   # gelesen: tax_report next_year private_sale_net
         T.sparer_pauschbetrag_annual, T.sparer_pauschbetrag_remaining, T.sparer_pauschbetrag_used_total = tv[6], tv[7], tv[8]
         T.current_year = Int(tv[9])
         T.cgt_base_taxed_ytd, T.cgt_loss_added_ytd, T.cgt_loss_used_ytd, T.cgt_pool_start_ytd = tv[10], tv[11], tv[12], tv[13]
-        empty!(T.vp_pending); empty!(T.p23_due)
         if env !== nothing   # Tarifweg: Jahreszeilen (wie _tariff_close), KiSt-Salden, Erstattung
             nr, nk = Int(cnt[3]), Int(cnt[4])
             rows = zeros(25 * nr); ks = zeros(2 * nk)
@@ -230,7 +229,7 @@ function _sim_engine_run!(R::Run, sim::Sim, fr::_Frame, liquidate, event_weight,
               h, evi, evd, evy, evv)
         R.fee_paid = scal[1]
         R.tax_unpaid_total = scal[2]
-        _sim_engine_signal(R, sim, fl, evi, evd, evy, evv, rc == 6, Int(err[4]), err_d0[])
+        _sim_engine_signal(R, fl, evi, evd, evy, evv, rc == 6, Int(err[1]), err_d0[])
     finally
         ccall((:simlev_c_engine_free, LIBSLC), Cvoid, (Ptr{Cvoid},), h)
     end
@@ -246,7 +245,7 @@ _engine_label(aux::Int, ints) = aux < 2 ? _MELD_ENGINE_LABEL[string(aux)] :
 
 "Warnungen, details-Ausgaben und Abbruch des Kerns mit den Texten von R 1.3.0 auslösen (Reihenfolge des Protokolls);
 Texte aus `_MELD_ENGINE_SIGNAL`."
-function _sim_engine_signal(R::Run, sim::Sim, fl::Flags, evi::Vector{Int32}, evd::Vector{Float64}, evy::Vector{Int32},
+function _sim_engine_signal(R::Run, fl::Flags, evi::Vector{Int32}, evd::Vector{Float64}, evy::Vector{Int32},
                             evv::Vector{Float64}, failed::Bool, err_code::Int, err_d0::Float64)
     m = _MELD_ENGINE_SIGNAL
     for k in 0:(length(evd) ÷ 2 - 1)

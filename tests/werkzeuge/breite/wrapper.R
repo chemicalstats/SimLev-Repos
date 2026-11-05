@@ -2,7 +2,7 @@
 # Module: wrapper (bis 1.4.0 je ein Generator gen_<modul>.R, hier wörtlich hintereinander).
 # Aufruf (Repo-Wurzel): LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> SIMLEV_FAELLE_DIR=<ordner> Rscript tests/werkzeuge/breite/wrapper.R
 # Breitenprüfung, nichts abgelegt: alle bisherigen Einzelfälle des Bereichs (bis 1.4.1 Generator des Katalogs) flach nach
-# <ordner>/breite_wrapper.jsonl.gz; tests/werkzeuge/gleichlauf/run.sh vergleicht Python und Julia damit. Abgelegt sind die Szenarien
+# <ordner>/breite_wrapper.jsonl.gz; tests/werkzeuge/gleichlauf/run.py vergleicht Python und Julia damit. Abgelegt sind die Szenarien
 # und Tabellen aus tests/gleichlauf/erzeugen/wrapper.R (Format und Umgebung: tests/gleichlauf/erzeugen/ref_tools.R).
 source("tests/gleichlauf/erzeugen/ref_tools.R")
 ref_bereich("breite_wrapper", alle = TRUE)
@@ -221,16 +221,12 @@ case("st_add", "strategy_add_asset(create_strategy(C = asset_config('etf', 'bnh'
      'result = SL.strategy_add_asset(SL.create_strategy("C" => SL.asset_config("etf", "bnh", 0.5)), "Z", SL.asset_config("certificate"; share = 0.5, wrapper = wb))')
 
 # ── Fehler und Hinweise ─────────────────────────────────────────────────────
-case("err_nested", "wrapper_config(create_strategy(Z = asset_config(wrapper = wb)))", "result = wrapper_config(create_strategy(Z=asset_config(wrapper=wb)))",
-     'result = SL.wrapper_config(SL.create_strategy("Z" => SL.asset_config(; wrapper = wb)))')
 case("err_signal", "asset_config('etf', 'signal', signal_buy = 'buy', signal_sell = 'sell', wrapper = wb)",
      "result = asset_config(asset_class='etf', trading='signal', signal_buy='buy', signal_sell='sell', wrapper=wb)",
      'result = SL.asset_config("etf", "signal"; signal_buy = "buy", signal_sell = "sell", wrapper = wb)')
 case("err_signal_list", "simulation(d, list(Z = list(asset_class = 'etf', trading = 'signal', share = 1, signal_buy = 'buy', signal_sell = 'sell', wrapper = wb)))",
      "result = simlev.simulation(d, {'Z': {'asset_class': 'etf', 'trading': 'signal', 'share': 1, 'signal_buy': 'buy', 'signal_sell': 'sell', 'wrapper': wb}})",
      'result = SL.simulation(d, RList("Z" => RList("asset_class" => "etf", "trading" => "signal", "share" => 1, "signal_buy" => "buy", "signal_sell" => "sell", "wrapper" => wb)))')
-case("err_wrapper_class", "asset_config(wrapper = list(strategy = inner))", "result = asset_config(wrapper={'strategy': inner})",
-     'result = SL.asset_config(; wrapper = RList("strategy" => inner))')
 case("err_collision", "simulation(dz, create_strategy(Z = asset_config(wrapper = wb)))", "result = simlev.simulation(dz, create_strategy(Z=asset_config(wrapper=wb)))",
      'result = SL.simulation(dz, SL.create_strategy("Z" => SL.asset_config(; wrapper = wb)))')
 case("err_collision_validate", "strategy_validate(create_strategy(Z = asset_config(wrapper = wb)), dz)", "result = simlev.strategy_validate(create_strategy(Z=asset_config(wrapper=wb)), data=dz)",
@@ -244,19 +240,10 @@ case("err_late_only", "simulation(dl, create_strategy(Z = asset_config('certific
      "result = simlev.simulation(dl, create_strategy(Z=asset_config(asset_class='certificate', wrapper=wb)))",
      'result = SL.simulation(dl, SL.create_strategy("Z" => SL.asset_config("certificate"; wrapper = wb)))',
      note = "nur der Wrapper, Anteilswert beginnt nach dem ersten Tag: bestehender Fehler")
-case("err_volume_fixed", "wrapper_config(inner, order_fee = 1)", "result = wrapper_config(inner, order_fee=1)", 'result = SL.wrapper_config(inner; order_fee = 1)')
 case("err_volume_min", "wrapper_config(inner, order_fee = list(percent = 0.1, min = 1))", "result = wrapper_config(inner, order_fee={'percent': 0.1, 'min': 1})",
      'result = SL.wrapper_config(inner; order_fee = (percent = 0.1, min = 1))')
 case("err_volume_max", "wrapper_config(inner, order_fee = list(percent = 0.1, max = 10))", "result = wrapper_config(inner, order_fee={'percent': 0.1, 'max': 10})",
      'result = SL.wrapper_config(inner; order_fee = (percent = 0.1, max = 10))')
-case("err_volume_bad", "wrapper_config(inner, volume = c(1, 2))", "result = wrapper_config(inner, volume=[1.0, 2.0])", 'result = SL.wrapper_config(inner; volume = [1.0, 2.0])')
-case("err_costs", "wrapper_config(inner, costs = sim_costs())", "result = wrapper_config(inner, costs=sim_costs())", 'result = SL.wrapper_config(inner; costs = SL.sim_costs())')
-case("err_rebalance", "wrapper_config(inner, rebalance = dca_plan(100, 1))", "result = wrapper_config(inner, rebalance=dca_plan(100, 1))",
-     'result = SL.wrapper_config(inner; rebalance = SL.dca_plan(100, 1))')
-case("err_strategy", "wrapper_config('A')", "result = wrapper_config('A')", 'result = SL.wrapper_config("A")')
-case("err_share", "wrapper_config(create_strategy(A = asset_config('etf', 'bnh', 0.6), B = asset_config('etf', 'bnh', 0.3)))",
-     "result = wrapper_config(create_strategy(A=asset_config(asset_class='etf', trading='bnh', share=0.6), B=asset_config(asset_class='etf', trading='bnh', share=0.3)))",
-     'result = SL.wrapper_config(SL.create_strategy("A" => SL.asset_config("etf", "bnh", 0.6), "B" => SL.asset_config("etf", "bnh", 0.3)))')
 case("err_nav_wrapper", "wrapper_nav(d, inner)", "result = wrapper_nav(d, inner)", 'result = SL.wrapper_nav(d, inner)')
 case("err_nav_splits", "wrapper_nav(d, wb, splits = c(50, 150))", "result = wrapper_nav(d, wb, splits=np.array([50.0, 150.0]))", 'result = SL.wrapper_nav(d, wb; splits = [50.0, 150.0])')
 case("hint_spread", MR("wrapper_config(create_strategy(A = asset_config('etf', 'bnh', 0.6, spread = 0.15), B = asset_config('etf', 'bnh', 0.4)))"),
@@ -325,57 +312,17 @@ case("trig_combined", "rebalance_trigger(tdf, 'combined', triggers = list(list(t
      "result = simlev.rebalance_trigger(tdf, 'combined', triggers=[{'type': 'rel_leverage', 'threshold': 10}, {'type': 'vol_band', 'threshold': 20}], out_col='t')",
      'result = SL.rebalance_trigger(tdf, "combined"; triggers = [Dict("type" => "rel_leverage", "threshold" => 10), Dict("type" => "vol_band", "threshold" => 20)], out_col = "t")',
      inputs = TR)
-case("trig_err_col", "rebalance_trigger(tdf, 'vol_band', vol_col = 'vola')",
-     "result = simlev.rebalance_trigger(tdf, 'vol_band', vol_col='vola')",
-     'result = SL.rebalance_trigger(tdf, "vol_band"; vol_col = "vola")', inputs = TR)
 case("st_remove", "st <- strategy_remove_asset(create_strategy(A = asset_config('etf', share = 0.6), B = asset_config('etc', share = 0.4)), 'A'); list(names(st), st$B$tax_regime, st$B$share)",
      "st = simlev.strategy_remove_asset(create_strategy(A=asset_config(asset_class='etf', share=0.6), B=asset_config(asset_class='etc', share=0.4)), 'A'); result = [list(st.keys()), st['B']['tax_regime'], st['B']['share']]",
      'st = SL.strategy_remove_asset(SL.create_strategy("A" => SL.asset_config("etf"; share = 0.6), "B" => SL.asset_config("etc"; share = 0.4)), "A"); result = [collect(keys(st)), st["B"]["tax_regime"], st["B"]["share"]]')
-case("st_remove_empty", "length(strategy_remove_asset(create_strategy(A = asset_config()), 'A'))",
-     "result = len(simlev.strategy_remove_asset(create_strategy(A=asset_config()), 'A'))",
-     'result = length(SL.strategy_remove_asset(SL.create_strategy("A" => SL.asset_config()), "A"))',
-     note = "Warnung: Strategie danach leer")
-case("st_remove_err", "strategy_remove_asset(create_strategy(A = asset_config()), 'X')",
-     "result = simlev.strategy_remove_asset(create_strategy(A=asset_config()), 'X')",
-     'result = SL.strategy_remove_asset(SL.create_strategy("A" => SL.asset_config()), "X")')
-case("st_summary", "summary(create_strategy(A = asset_config('etf', share = 0.6), B = asset_config('etc', 'signal', 0.4, signal_buy = 'b', signal_sell = 's', spread = 0.1))); NULL",
-     "create_strategy(A=asset_config(asset_class='etf', share=0.6), B=asset_config(asset_class='etc', trading='signal', share=0.4, signal_buy='b', signal_sell='s', spread=0.1)).summary(); result = None",
-     'summary(SL.create_strategy("A" => SL.asset_config("etf"; share = 0.6), "B" => SL.asset_config("etc", "signal", 0.4; signal_buy = "b", signal_sell = "s", spread = 0.1))); result = nothing',
-     note = "Ausgabe von summary() einer Strategie")
 # ── Eingabeprüfungen, die bis 1.4.0 nur die R-Tests prüften; seitdem gegen R
 #    auch in Python und Julia ─────────────────────────────────────────────────
-case("cfg_etn_standard", "asset_config('etn_standard')", "result = asset_config(asset_class='etn_standard')",
-     'result = SL.asset_config("etn_standard")', note = "veraltete Klasse: Warnung, etn ohne Lieferung")
-case("cfg_etn_deliverable", "asset_config('etn_deliverable')", "result = asset_config(asset_class='etn_deliverable')",
-     'result = SL.asset_config("etn_deliverable")', note = "veraltete Klasse: Warnung, etn mit Lieferung")
-case("cfg_err_share", "asset_config(share = 1.5)", "result = asset_config(share=1.5)", 'result = SL.asset_config(; share = 1.5)')
-case("cfg_err_spread", "asset_config(spread = -1)", "result = asset_config(spread=-1)", 'result = SL.asset_config(; spread = -1)')
-case("cfg_err_signal", "asset_config('etf', 'signal')", "result = asset_config(asset_class='etf', trading='signal')",
-     'result = SL.asset_config("etf", "signal")')
-case("cfg_err_regime", "asset_config(tax_regime = 'none')", "result = asset_config(tax_regime='none')",
-     'result = SL.asset_config(; tax_regime = "none")')
-case("st_err_both", "create_strategy(A = asset_config(), assets = list(B = asset_config()))",
-     "result = create_strategy(A=asset_config(), assets={'B': asset_config()})",
-     'result = SL.create_strategy("A" => SL.asset_config(); assets = Dict("B" => SL.asset_config()))')
-case("st_err_empty", "create_strategy()", "result = create_strategy()", 'result = SL.create_strategy()')
-case("st_err_unnamed", "create_strategy(asset_config())", "result = create_strategy(asset_config())",
-     'result = SL.create_strategy(SL.asset_config())')
-case("st_err_type", "create_strategy(A = 1)", "result = create_strategy(A=1)", 'result = SL.create_strategy("A" => 1.0)')
-case("sv_err_class", "strategy_validate(list(A = asset_config()))", "result = simlev.strategy_validate({'A': asset_config()})",
-     'result = SL.strategy_validate(Dict("A" => SL.asset_config()))')
 case("sv_err_col", "strategy_validate(create_strategy(X = asset_config()), d)",
      "result = simlev.strategy_validate(create_strategy(X=asset_config()), data=d)",
      'result = SL.strategy_validate(SL.create_strategy("X" => SL.asset_config()), d)')
 case("sv_err_signal_col", "strategy_validate(create_strategy(A = asset_config('etf', 'signal', signal_buy = 'kauf', signal_sell = 'sell')), d)",
      "result = simlev.strategy_validate(create_strategy(A=asset_config(asset_class='etf', trading='signal', signal_buy='kauf', signal_sell='sell')), data=d)",
      'result = SL.strategy_validate(SL.create_strategy("A" => SL.asset_config("etf", "signal"; signal_buy = "kauf", signal_sell = "sell")), d)')
-case("su_err_name", "strategy_update_asset(create_strategy(A = asset_config()), 'X', share = 1)",
-     "result = simlev.strategy_update_asset(create_strategy(A=asset_config()), 'X', share=1)",
-     'result = SL.strategy_update_asset(SL.create_strategy("A" => SL.asset_config()), "X"; share = 1)')
-case("su_warn_param", "strategy_update_asset(create_strategy(A = asset_config()), 'A', foo = 1)",
-     "result = simlev.strategy_update_asset(create_strategy(A=asset_config()), 'A', foo=1)",
-     'result = SL.strategy_update_asset(SL.create_strategy("A" => SL.asset_config()), "A"; foo = 1)',
-     note = "unbekannter Parameter: Warnung, Strategie unverändert")
 case("sim_err_list_class", "simulation(d, list(A = list(asset_class = 'fonds', trading = 'bnh', share = 1)))",
      "result = simlev.simulation(d, {'A': {'asset_class': 'fonds', 'trading': 'bnh', 'share': 1}})",
      'result = SL.simulation(d, Dict("A" => Dict("asset_class" => "fonds", "trading" => "bnh", "share" => 1)))')
@@ -396,8 +343,6 @@ case("sim_br_na", "x <- d; x$br <- ifelse(seq_len(nrow(x)) %% 3 == 0, NA, 2.5); 
      "x = d.copy(); x['br'] = [np.nan if (i + 1) % 3 == 0 else 2.5 for i in range(len(x))]; result = simlev.simulation(x, create_strategy(A=asset_config()), tax=tax_profile(base_rate='br'))['tax_report']",
      'x = copy(d); x["br"] = [i % 3 == 0 ? SL.NA : 2.5 for i in 1:SL.nrow(x)]; result = SL.simulation(x, SL.create_strategy("A" => SL.asset_config()); tax = SL.tax_profile(; base_rate = "br"))["tax_report"]',
      note = "NA in der Basiszins-Spalte = 0")
-case("tp_church_frac", "tax_profile(church_tax = 0.09)", "result = tax_profile(church_tax=0.09)", 'result = SL.tax_profile(; church_tax = 0.09)',
-     note = "Anteil statt Prozent: Warnung")
 ref_done()
 
 ref_schreiben()

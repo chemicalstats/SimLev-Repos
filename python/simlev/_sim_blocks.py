@@ -32,22 +32,11 @@ from ._sim_base import (_Default, _as_date, _check_taxable_income, _fee_spec, _i
                         _r_class_name, _stop, _unwrap, _warn)
 from .config import _match_arg
 from ._tax_tariff import SimLevTaxTariff, tax_tariff
+from ._util import _MISSING, _Missing
 
 __all__ = ["sim_costs", "dca_plan", "rebalance_plan", "split_rule", "tax_profile", "income_rate", "income_tariff",
            "harvest_rule", "funds_costs", "SimLevSimCosts", "SimLevDcaPlan", "SimLevRebalancePlan", "SimLevSplitRule",
            "SimLevTaxProfile", "SimLevIncomeRate", "SimLevIncomeTariff", "SimLevHarvestRule", "SimLevFundsCosts"]
-
-
-class _Missing:
-    """Platzhalter für ein R-Argument ohne Standardwert (R prüft ``missing()``)."""
-
-    __slots__ = ()
-
-    def __repr__(self) -> str:
-        return "<missing>"
-
-
-_MISSING = _Missing()
 
 
 class _Dflt(float):

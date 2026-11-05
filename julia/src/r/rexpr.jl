@@ -1227,8 +1227,7 @@ function _len2(a, b)
     return n
 end
 
-_scoll(a::String, b::String) = isdefined(SimLev.RStats, :str_collate) ? SimLev.RStats.str_collate(a, b) :
-                               (c = cmp(a, b); c < 0 ? -1 : c > 0 ? 1 : 0)
+_scoll(a::String, b::String) = SimLev.RStats.str_collate(a, b)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Operatoren
@@ -2141,7 +2140,8 @@ function _f_nchar(args, nms, ex)
     keep = kv === missing ? t != "width" : kv
     s = x isa CHR ? x : _as_chr(x isa DAT ? _as_num(x) : x)
     return INT([z === missing ? (keep ? missing : 2) :
-                t == "bytes" ? ncodeunits(z) : t == "chars" ? length(z) : textwidth(z) for z in s])
+                t == "bytes" ? ncodeunits(z) : t == "chars" ? length(z) :
+                sum((SimLev.RFmt._wcwidth(c) for c in z); init = 0) for z in s])   # Breite wie R (seit 1.6.3)
 end
 
 function _f_asnum(args, nms, ex)

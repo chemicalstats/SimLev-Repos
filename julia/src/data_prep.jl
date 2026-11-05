@@ -16,8 +16,8 @@ module DataPrep
 
 import ..SimLev
 using ..SimLev: _match_arg, _which_min   # util.jl (seit 1.6.1 eine Fassung)
-using ..SimLev: RList, RFrame, RVector, NamedMat, nrow, ncol, attrs, NA, isna_strict, rows,
-                register_print!, register_summary!, r_class, inherits
+using ..SimLev: RList, RFrame, RVector, nrow, attrs, NA, rows,
+                register_print!, inherits
 using Dates
 
 export series_align, series_check, series_align_macro, series_convert_currency, index_total_return, series_deflate,
@@ -30,30 +30,20 @@ export series_align, series_check, series_align_macro, series_convert_currency, 
 "R-`message()`: Text mit Zeilenumbruch auf `stderr`."
 message(text) = (io = SimLev.RParallel.r_stderr(); println(io, text); flush(io); nothing)
 
-_isna(x) = x === missing || x === nothing || (x isa AbstractFloat && isnan(x))
-_isna(x::Date) = false
+using ..SimLev: _isna   # r/rnum.jl (seit 1.6.3; ein Datum ist nie NA)
 _isnum(x) = x isa Real && !(x isa Bool)
 
 "R-`format(x)` für eine einzelne Zahl."
 function _fmt_num(x)
     x === missing && return "NA"
-    R = SimLev.RFmt
-    if isdefined(R, :format)
-        s = R.format(x)
-        return s isa AbstractString ? String(s) : String(first(s))
-    end
-    x isa Integer && return string(x)
-    return SimLev.r_format_digits(Float64(x), 7)
+    s = SimLev.RFmt.format(x)
+    return s isa AbstractString ? String(s) : String(first(s))
 end
 
 "R-`sprintf()` für skalare Argumente."
 function _sprintf(fmt::AbstractString, args...)
-    R = SimLev.RFmt
-    if isdefined(R, :sprintf)
-        s = R.sprintf(fmt, args...)
-        return s isa AbstractString ? String(s) : String(first(s))
-    end
-    return SimLev.rsprintf(fmt, args...)
+    s = SimLev.RFmt.sprintf(fmt, args...)
+    return s isa AbstractString ? String(s) : String(first(s))
 end
 
 "C-`%g` wie R-`sprintf(\"%g\", x)`."

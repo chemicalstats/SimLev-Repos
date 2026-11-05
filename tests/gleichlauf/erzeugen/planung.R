@@ -351,6 +351,13 @@ SZ("krisen", "scenario_crisis mit eigener Krisentabelle (Umschichten) und Datum 
     r"(kc <- data.frame(crisis = 'X', start = '2009-01-05', end = '2010-02-01'); scenario_crisis(dlate[c(2, 1, 3:nrow(dlate)), ], c(aktien = 0.5, anleihen = 0.5), kc))",
     r"(kc = pd.DataFrame({'crisis': ['X'], 'start': ['2009-01-05'], 'end': ['2010-02-01']}); result = SC.scenario_crisis(dlate.iloc[[1, 0] + list(range(2, len(dlate)))], {'aktien': 0.5, 'anleihen': 0.5}, crises=kc))",
     r"(kc = SL.RFrame("crisis" => ["X"], "start" => ["2009-01-05"], "end" => ["2010-02-01"]); result = SC.scenario_crisis(SL.rows(dlate, vcat([2, 1], 3:SL.nrow(dlate))), (aktien = 0.5, anleihen = 0.5), kc))", inp = ein("scenarios/crisis_chr", c("dlate")))))
+# NaN und später NA im Fenster der Krise A (seit 1.6.3 rechnet Julia cummax wie R und Python; ohne Zufall aus dc)
+dcl <- dc; dcl$anleihen[400] <- NaN; dcl$aktien[c(420, 421)] <- NA
+SZ("krisen_mit_luecken", "scenario_crisis mit NaN und später NA in den Kursen innerhalb einer Krise (LOCF), mit und ohne Umschichten", vor = VOR, teile = list(
+  crisis_gap = teil(
+    r"(list(scenario_crisis(dcl, c(aktien = 0.5, anleihen = 0.5), kr), scenario_crisis(dcl, c(aktien = 0.5, anleihen = 0.5), kr, rebalance = TRUE)))",
+    r"(result = [SC.scenario_crisis(dcl, {'aktien': 0.5, 'anleihen': 0.5}, crises=kr), SC.scenario_crisis(dcl, {'aktien': 0.5, 'anleihen': 0.5}, crises=kr, rebalance=True)])",
+    r"(result = [SC.scenario_crisis(dcl, (aktien = 0.5, anleihen = 0.5), kr), SC.scenario_crisis(dcl, (aktien = 0.5, anleihen = 0.5), kr; rebalance = true)])", inp = list(dcl = dcl, kr = kr))))
 ref_done()
 
 ref_init("scenarios", gruppe = "fehler")
@@ -621,13 +628,47 @@ res = T.tactical_simulation(a2, w; lag = 1, asset_args = (spread = 0,))
 result = SL.RList("tactical" => res.tactical, "worth" => res.worth, "dates" => res.dates))", inp = ein("tactical/ts_filled", c("al", "fl")))))
 ref_done()
 
+SZ("text_logik", "signal_state mit NA (pd.NA bzw. missing) und Zahlen, tactical_rules mit Textvektor als Bedingung (jedes Element ein Ausdruck in R-Syntax, Ergebnis des letzten; seit 1.6.3 in Python und Julia wie R)", vor = VOR, teile = list(
+  ss_lgl_na = teil(
+    r"(signal_state(list(buy = c(TRUE, NA, FALSE, TRUE), sell = c(FALSE, TRUE, NA, FALSE))))",
+    r"(result = T.signal_state({'buy': pd.array([True, pd.NA, False, True], dtype='boolean'), 'sell': pd.array([False, True, pd.NA, False], dtype='boolean')}))",
+    r"(result = T.signal_state(SL.RList("buy" => [true, missing, false, true], "sell" => [false, true, missing, false])))", inp = list()),
+  ss_num = teil(
+    r"(signal_state(list(buy = c(1, 0, NA, 2), sell = c(0, 1, 0, NaN))))",
+    r"(result = T.signal_state({'buy': [1.0, 0.0, simlev._r.fmt.NA_REAL, 2.0], 'sell': [0.0, 1.0, 0.0, math.nan]}))",
+    r"(result = T.signal_state(SL.RList("buy" => [1.0, 0.0, SL.NA, 2.0], "sell" => [0.0, 1.0, 0.0, NaN])))", inp = list()),
+  tr_txtvec = teil(
+    r"(attr(tactical_rules(d, list(list(when = c("A > 105", "B > 100"), weights = c(A = 1))), default = c(C = 1)), 'regime'))",
+    r"(result = T.tactical_rules(d, [{'when': ['A > 105', 'B > 100'], 'weights': {'A': 1}}], default={'C': 1}).attrs['regime'])",
+    r"(result = SL.attrs(T.tactical_rules(d, [SL.RList("when" => ["A > 105", "B > 100"], "weights" => SL.named("A" => 1))], SL.named("C" => 1); env = @__MODULE__))["regime"])", inp = ein("tactical/tr_rx_08", c("d")))))
 ref_init("tactical", gruppe = "fehler")
+TB("signal_state", "Meldungen von signal_state bei Text statt logischer Werte je Zeile (seit 1.6.3 in Python und Julia wie R: Text in sell scheitert an !, Text in buy an &)", vor = VOR, zeilen = list(
+  zeile("ss_err_buy_text",
+    r"(signal_state(list(buy = c("TRUE", "FALSE", NA, "TRUE"), sell = c(FALSE, TRUE, FALSE, NA))))",
+    r"(result = T.signal_state({'buy': ['TRUE', 'FALSE', None, 'TRUE'], 'sell': [False, True, False, None]}))",
+    r"(result = T.signal_state(SL.RList("buy" => ["TRUE", "FALSE", missing, "TRUE"], "sell" => [false, true, false, missing])))", inp = list()),
+  zeile("ss_err_sell_text",
+    r"(signal_state(list(buy = c(TRUE, FALSE), sell = c("FALSE", "TRUE"))))",
+    r"(result = T.signal_state({'buy': [True, False], 'sell': np.array(['FALSE', 'TRUE'])}))",
+    r"(result = T.signal_state(SL.RList("buy" => [true, false], "sell" => ["FALSE", "TRUE"])))", inp = list()),
+  zeile("ss_err_buy_na_text",
+    r"(signal_state(list(buy = NA_character_, sell = FALSE)))",
+    r"(result = T.signal_state({'buy': pd.array([None], dtype='string'), 'sell': [False]}))",
+    r"(result = T.signal_state(SL.RList("buy" => Union{Missing,String}[missing], "sell" => [false])))", inp = list())))
 TB("momentum_score", "Meldungen und Warnungen von momentum_score je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
   zeile("ms_err_miss",
     r"(momentum_score(d, c('A', 'X', 'Y')))",
     r"(result = T.momentum_score(d, ['A', 'X', 'Y']))",
     r"(result = T.momentum_score(d, ["A", "X", "Y"]))", inp = ein("tactical/ms_err_miss", c("d")))))
 TB("tactical_rules", "Meldungen und Warnungen von tactical_rules je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
+  zeile("tr_err_signal_text",
+    r"(attr(tactical_rules(d, list(list(when = list(buy = rep(c("TRUE", "FALSE"), length.out = nrow(d)), sell = rep(c("FALSE", "TRUE"), length.out = nrow(d))), weights = c(A = 1))), default = c(C = 1)), 'regime'))",
+    r"(result = T.tactical_rules(d, [{'when': {'buy': np.resize(['TRUE', 'FALSE'], len(d)), 'sell': np.resize(['FALSE', 'TRUE'], len(d))}, 'weights': {'A': 1}}], default={'C': 1}).attrs['regime'])",
+    r"(result = SL.attrs(T.tactical_rules(d, [SL.RList("when" => SL.RList("buy" => repeat(["TRUE", "FALSE"], outer = cld(SL.nrow(d), 2))[1:SL.nrow(d)], "sell" => repeat(["FALSE", "TRUE"], outer = cld(SL.nrow(d), 2))[1:SL.nrow(d)]), "weights" => SL.named("A" => 1))], SL.named("C" => 1); env = @__MODULE__))["regime"])", inp = ein("tactical/tr_rx_08", c("d"))),
+  zeile("tr_err_textvec_na",
+    r"(attr(tactical_rules(d, list(list(when = c("TRUE", NA, "FALSE", "TRUE"), weights = c(A = 1))), default = c(C = 1)), 'regime'))",
+    r"(result = T.tactical_rules(d, [{'when': np.array(['TRUE', None, 'FALSE', 'TRUE'], dtype=object), 'weights': {'A': 1}}], default={'C': 1}).attrs['regime'])",
+    r"(result = SL.attrs(T.tactical_rules(d, [SL.RList("when" => ["TRUE", missing, "FALSE", "TRUE"], "weights" => SL.named("A" => 1))], SL.named("C" => 1); env = @__MODULE__))["regime"])", inp = ein("tactical/tr_rx_08", c("d"))),
   zeile("tr_rx_16",
     r"(attr(tactical_rules(d, list(list(when = "\"TRUE\"", weights = c(A = 1)), list(when = 'B > 100', weights = c(B = 1))), default = c(C = 1)), 'regime'))",
     r"(result = T.tactical_rules(d, [{'when': "\"TRUE\"", 'weights': {'A': 1}}, {'when': 'B > 100', 'weights': {'B': 1}}], default={'C': 1}).attrs['regime'])",

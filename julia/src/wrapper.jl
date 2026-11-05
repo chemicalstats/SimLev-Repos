@@ -159,8 +159,11 @@ mutable struct _WrapperMsgIO <: IO
     target::IO
     tag::String
     buf::Vector{UInt8}
+    used::Bool          # seit 1.6.3: etwas geschrieben (dann merkt die Studie den Anteilswert nicht)
 end
+_WrapperMsgIO(target::IO, tag::String, buf::Vector{UInt8}) = _WrapperMsgIO(target, tag, buf, false)
 function _wmsg_add!(s::_WrapperMsgIO, bytes)
+    isempty(bytes) || (s.used = true)
     append!(s.buf, bytes)
     !isempty(s.buf) && s.buf[end] == UInt8('\n') && _wmsg_emit!(s)
     nothing
@@ -171,8 +174,9 @@ function _wmsg_emit!(s::_WrapperMsgIO)
     write(s.target, "Hinweis: $(s.tag) (innere Rechnung): $m")
     nothing
 end
-Base.unsafe_write(s::_WrapperMsgIO, p::Ptr{UInt8}, n::UInt) = (_wmsg_add!(s, copy(unsafe_wrap(Array, p, n))); Int(n))
-Base.write(s::_WrapperMsgIO, b::UInt8) = (_wmsg_add!(s, UInt8[b]); 1)
+# ohne Kopie bzw. Vektor je Byte (seit 1.6.3): _wmsg_add! hängt an s.buf an
+Base.unsafe_write(s::_WrapperMsgIO, p::Ptr{UInt8}, n::UInt) = (_wmsg_add!(s, unsafe_wrap(Array, p, n)); Int(n))
+Base.write(s::_WrapperMsgIO, b::UInt8) = (_wmsg_add!(s, (b,)); 1)
 Base.isopen(::_WrapperMsgIO) = true
 Base.iswritable(::_WrapperMsgIO) = true
 Base.flush(s::_WrapperMsgIO) = (isempty(s.buf) || _wmsg_emit!(s); flush(s.target); nothing)
@@ -181,9 +185,15 @@ Base.flush(s::_WrapperMsgIO) = (isempty(s.buf) || _wmsg_emit!(s); flush(s.target
 struct _WrapperWarnLogger <: AbstractLogger
     parent::AbstractLogger
     who::String
+    seen::Base.RefValue{Bool}   # seit 1.6.3: eine Meldung wurde angefragt (auch wenn der äußere Logger sie verwirft)
 end
-Base.CoreLogging.min_enabled_level(l::_WrapperWarnLogger) = Base.CoreLogging.min_enabled_level(l.parent)
-Base.CoreLogging.shouldlog(l::_WrapperWarnLogger, args...) = Base.CoreLogging.shouldlog(l.parent, args...)
+_WrapperWarnLogger(parent::AbstractLogger, who::String) = _WrapperWarnLogger(parent, who, Ref(false))
+# Jede Anfrage kommt hier an (BelowMinLevel), damit `seen` sie zählt; durchgelassen wird wie vom äußeren Logger.
+Base.CoreLogging.min_enabled_level(l::_WrapperWarnLogger) = Base.CoreLogging.BelowMinLevel
+function Base.CoreLogging.shouldlog(l::_WrapperWarnLogger, level, args...)
+    l.seen[] = true
+    return level >= Base.CoreLogging.min_enabled_level(l.parent) && Base.CoreLogging.shouldlog(l.parent, level, args...)
+end
 Base.CoreLogging.catch_exceptions(l::_WrapperWarnLogger) = Base.CoreLogging.catch_exceptions(l.parent)
 function Base.CoreLogging.handle_message(l::_WrapperWarnLogger, level, message, args...; kw...)
     msg = (level >= Base.CoreLogging.Warn && level < Base.CoreLogging.Error) ? "$(l.who) (innere Rechnung): $(message)" : message
@@ -207,7 +217,11 @@ mit `date` (Tage, aufsteigend, ohne Doppelte) und den inneren Kursspalten (`fill
 Rechnung); `splits`: `nothing` oder `split_rule()`; `tag`/`who`: Kennung für Meldungen bzw. Warnungen und
 Fehler. Ergebnis: RFrame der Klasse `SimLevWrapperNav` mit Attributen `inner` und `wrapper`.
 """
-function _wrapper_nav_calc(data::_Frame, wrapper, splits, tag::String, who::String)
+_wrapper_nav_calc(data::_Frame, wrapper, splits, tag::String, who::String) =
+    _wrapper_nav_calc_q(data, wrapper, splits, tag, who)[1]
+
+"""Wie `_wrapper_nav_calc`, dazu ob die innere Rechnung ohne Meldung und ohne Warnung blieb: `(nav, still)`."""
+function _wrapper_nav_calc_q(data::_Frame, wrapper, splits, tag::String, who::String)
     @nospecialize
     st = wrapper["strategy"]
     cols = _strategy_columns(st)
@@ -237,8 +251,9 @@ function _wrapper_nav_calc(data::_Frame, wrapper, splits, tag::String, who::Stri
     S = wrapper["volume"] === nothing ? 100.0 : Float64(wrapper["volume"])
     # Ordergebühren: Zustand je Lauf (Run), die innere Rechnung ist ein eigener Lauf (siehe Kopf)
     msg = _WrapperMsgIO(SimLev.RParallel.r_stderr(), tag, UInt8[])
+    wlog = _WrapperWarnLogger(current_logger(), who)
     res = try
-        with_logger(_WrapperWarnLogger(current_logger(), who)) do
+        with_logger(wlog) do
             SimLev.RParallel.with_message_stream(msg) do
                 try
                     simulation(d, st; start_value = S, costs = sim_costs(; order_fee = wrapper["order_fee"]),
@@ -263,36 +278,24 @@ function _wrapper_nav_calc(data::_Frame, wrapper, splits, tag::String, who::Stri
     yr = Int[year_of(z) for z in day]
     fee = Float64(wrapper["costs"]["fee"]); pf = Float64(wrapper["costs"]["performance_fee"])
     n = length(idx)
+    # Tagesschleife im Kern (core/wrapper_core_impl.h, wrapper_nav_core; bis 1.5.0 hier in Julia)
     nav = zeros(n); gross = zeros(n); fee_t = zeros(n); acc_t = zeros(n); paid_t = zeros(n); hwm = zeros(n)
-    U = 100.0; H = 100.0; G_prev = S; d_prev = Float64(rdays[1])
-    for t in 1:n
-        g = G[t]
-        if !(G_prev > 0) || !isfinite(g) || !(g > 0)
-            error("$who: innerer Wert am $(fmt_date(day[t])) ist $(r_format1(g)) (vorher $(r_format1(G_prev))); der Anteilswert ist dann nicht definiert.")
-        end
-        D = is_leap(yr[t]) ? 366.0 : 365.0
-        a = U * (g / G_prev)
-        k = fee / 100 * (Float64(day[t]) - d_prev) / D
-        fee_t[t] = a * k
-        U = a - fee_t[t]
-        acc_t[t] = pf / 100 * _wrapper_max0(U - H)
-        nav[t] = U - acc_t[t]
-        if t < n && yr[t+1] != yr[t]      # letzter NAV-Tag des Kalenderjahres (nicht der letzte insgesamt)
-            paid_t[t] = acc_t[t]
-            U = nav[t]
-            H = U > H ? U : H             # R: max(H, U)
-        end
-        gross[t] = 100 * g / S
-        hwm[t] = H
-        G_prev = g; d_prev = Float64(day[t])
+    bad = Ref{Int64}(-1)
+    CAbi.check(ccall((:simlev_c_wrapper_nav, LIBSLC), Cint,
+                     (Int64, Ptr{Float64}, Ptr{Float64}, Ptr{Int64}, Float64, Float64, Float64, Float64, Ptr{Float64},
+                      Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ptr{Float64}, Ref{Int64}),
+                     n, G, Float64.(day), Int64.(yr), fee, pf, Float64(S), Float64(rdays[1]), nav, gross, fee_t, acc_t,
+                     paid_t, hwm, bad))
+    if bad[] >= 0
+        t = Int(bad[]) + 1
+        G_prev = t == 1 ? Float64(S) : G[t-1]
+        error("$who: innerer Wert am $(fmt_date(day[t])) ist $(r_format1(G[t])) (vorher $(r_format1(G_prev))); der Anteilswert ist dann nicht definiert.")
     end
-    return RFrame("date" => Date[from_days(z) for z in day], "nav" => nav, "gross" => gross, "fee" => fee_t,
-                  "perf_fee" => acc_t, "perf_paid" => paid_t, "hwm" => hwm;
-                  class = ["SimLevWrapperNav", "data.frame"], attrs = Dict{String,Any}("inner" => res, "wrapper" => wrapper))
+    out = RFrame("date" => Date[from_days(z) for z in day], "nav" => nav, "gross" => gross, "fee" => fee_t,
+                 "perf_fee" => acc_t, "perf_paid" => paid_t, "hwm" => hwm;
+                 class = ["SimLevWrapperNav", "data.frame"], attrs = Dict{String,Any}("inner" => res, "wrapper" => wrapper))
+    return out, !msg.used && !wlog.seen[]
 end
-
-"R: `max(0, x)` (x endlich): 0 bleibt +0."
-_wrapper_max0(x::Float64) = x > 0.0 ? x : 0.0
 
 """
     wrapper_nav(data, wrapper; splits = nothing)

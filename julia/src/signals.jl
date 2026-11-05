@@ -441,8 +441,12 @@ function signal_drawdown(x, sell_dd_ = nothing, buy_dd_ = nothing; sell_dd = 20,
         end
     else
         w = _asint(window)
-        for i in 1:m
-            peak[i] = maximum(xp[max(1, i - w + 1):i])
+        if w >= 1   # gleitendes Maximum im Kern (seit 1.6.3; bis 1.6.2 maximum je Fenster, O(m·w)), bitgleich
+            peak = SC.roll_max_core(xp, w)
+        else        # w < 1: wie bisher (Fehler aus maximum über ein leeres Fenster)
+            for i in 1:m
+                peak[i] = maximum(xp[max(1, i - w + 1):i])
+            end
         end
     end
     dd = Float64[100 * (1 - x[i] / peak[i]) for i in 1:m]

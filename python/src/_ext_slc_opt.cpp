@@ -20,24 +20,8 @@
 /* Methodentabelle mit C-Bindung (Deklaration in _ext_common.h) */
 extern "C" {
 
-static int py_interrupted(void *h) { (void) h; return PyErr_CheckSignals() < 0; }
+#include "_ext_slc_hull.h"   /* py_interrupted, ctx_init, finish, hull_buf, rel (seit 1.6.3) */
 
-static void ctx_init(sl_ctx *cx)
-{
-    sl_ctx_init(cx);
-    cx->interrupted = py_interrupted;
-}
-
-static int finish(sl_ctx *cx, int st)
-{
-    int i;
-    for (i = 0; i < cx->n_warn; i++)
-        if (PyErr_WarnEx(PyExc_UserWarning, cx->warn[i], 1) < 0) return -1;
-    if (st == SL_OK) return 0;
-    if (st == SL_EINTR && PyErr_Occurred()) return -1;
-    PyErr_SetString(PyExc_ValueError, cx->msg);
-    return -1;
-}
 
 /* double-Puffer (float64, zusammenhaengend); n < 0: Laenge beliebig */
 static int dbuf(PyObject *o, Py_buffer *v, int writable, Py_ssize_t n, const char *what)

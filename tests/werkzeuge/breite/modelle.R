@@ -2,7 +2,7 @@
 # Module: ms_garch, regimes, dependence (bis 1.4.0 je ein Generator gen_<modul>.R, hier wörtlich hintereinander).
 # Aufruf (Repo-Wurzel): LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> SIMLEV_FAELLE_DIR=<ordner> Rscript tests/werkzeuge/breite/modelle.R
 # Breitenprüfung, nichts abgelegt: alle bisherigen Einzelfälle des Bereichs (bis 1.4.1 Generator des Katalogs) flach nach
-# <ordner>/breite_modelle.jsonl.gz; tests/werkzeuge/gleichlauf/run.sh vergleicht Python und Julia damit. Abgelegt sind die Szenarien
+# <ordner>/breite_modelle.jsonl.gz; tests/werkzeuge/gleichlauf/run.py vergleicht Python und Julia damit. Abgelegt sind die Szenarien
 # und Tabellen aus tests/gleichlauf/erzeugen/modelle.R (Format und Umgebung: tests/gleichlauf/erzeugen/ref_tools.R).
 source("tests/gleichlauf/erzeugen/ref_tools.R")
 ref_bereich("breite_modelle", alle = TRUE)
@@ -83,13 +83,7 @@ ref_case("fb_core", "list(SimLev:::.hmm_forward_backward(B, A, p0), SimLev:::.hm
          paste0(P, "result = [C.hmm_forward_backward(B, A, p0), C.hmm_forward_backward(B[:5, :2], np.eye(2), [0.3, 0.7]), C.hmm_forward_backward(B[:1], A, p0)]"),
          inputs = list(B = B, A = A, p0 = p0),
          jl = paste0(J, "result = [C.hmm_forward_backward(B, A, p0), C.hmm_forward_backward(B[1:5, 1:2], [1.0 0; 0 1], [0.3, 0.7]), C.hmm_forward_backward(B[1:1, :], A, p0)]"))
-set.seed(2); Xl <- matrix(rnorm(60), 20); mu <- c(0.1, -0.2, 0.05); S <- crossprod(matrix(rnorm(9), 3)) + diag(3)
-ref_case("ldmvn", "list(SimLev:::.ldmvn(Xl, mu, S), SimLev:::.ldmvn(Xl[, 1, drop = FALSE], 0.3, matrix(2)))",
-         paste0(P, "result = [RG._ldmvn(Xl, mu, S), RG._ldmvn(Xl[:, :1], [0.3], np.array([[2.]]))]"), inputs = list(Xl = Xl, mu = mu, S = S),
-         jl = paste0(J, "result = [RG._ldmvn(Xl, mu, S), RG._ldmvn(Xl[:, 1:1], [0.3], fill(2.0, 1, 1))]"))
-ref_case("ldmvn_err", "SimLev:::.ldmvn(Xl[, 1:2], c(0, 0), matrix(c(1, 2, 2, 1), 2))",
-         paste0(P, "result = RG._ldmvn(Xl[:, :2], [0, 0], np.array([[1., 2], [2, 1]]))"), inputs = list(Xl = Xl),
-         jl = paste0(J, "result = RG._ldmvn(Xl[:, 1:2], [0, 0], [1.0 2; 2 1])"))
+# .ldmvn: seit 1.5.2 entfallen (ohne Aufrufer; regime_hmm rechnet die Dichte seit 1.5.0 im Kern hmm_em)
 set.seed(3); VI <- list()
 for (k in 2:4) {
   lB <- matrix(round(rnorm(200 * k), 1), 200, k)
@@ -97,11 +91,6 @@ for (k in 2:4) {
   VI[[paste0("lB", k)]] <- lB; VI[[paste0("A", k)]] <- A
 }
 VI$lBn <- VI$lB3; VI$lBn[50, 2] <- NaN; VI$lBn[60, ] <- NA
-ref_case("viterbi", "list(SimLev:::.hmm_viterbi(lB2, log(A2), log(rep(1/2, 2))), SimLev:::.hmm_viterbi(lB3, log(A3), log(rep(1/3, 3))), SimLev:::.hmm_viterbi(lB4, log(A4), log(rep(1/4, 4))),
-  SimLev:::.hmm_viterbi(lB3, matrix(0, 3, 3), c(-Inf, 0, 0)), SimLev:::.hmm_viterbi(lBn, log(A3), log(rep(1/3, 3))))",
-         paste0(P, "L = simlev._r.libm.log\nresult = [RG._hmm_viterbi(lB2, L(A2), L(np.full(2, 1/2))), RG._hmm_viterbi(lB3, L(A3), L(np.full(3, 1/3))), RG._hmm_viterbi(lB4, L(A4), L(np.full(4, 1/4))),\n  RG._hmm_viterbi(lB3, np.zeros((3, 3)), [-np.inf, 0, 0]), RG._hmm_viterbi(lBn, L(A3), L(np.full(3, 1/3)))]"),
-         inputs = VI,
-         jl = paste0(J, "L(x) = SL.RLibm.log.(x)\nresult = [RG._hmm_viterbi(lB2, L(A2), L(fill(1/2, 2))), RG._hmm_viterbi(lB3, L(A3), L(fill(1/3, 3))), RG._hmm_viterbi(lB4, L(A4), L(fill(1/4, 4))),\n  RG._hmm_viterbi(lB3, zeros(3, 3), [-Inf, 0, 0]), RG._hmm_viterbi(lBn, L(A3), L(fill(1/3, 3)))]"))
 
 # ── regime_hmm ───────────────────────────────────────────────────────────
 set.seed(1); n <- 4 * 365
@@ -130,19 +119,13 @@ ref_case("hmm_day3", "regime_hmm(d7, c('a', 'b'), k = 3, frequency = 'day', n_st
 ref_case("hmm_month", "regime_hmm(d7, 'a', k = 2, frequency = 'month', seed = 1)",
          paste0(P, "result = RG.regime_hmm(d7, 'a', k=2, frequency='month', seed=1)"), inputs = list(d7 = d7),
          jl = paste0(J, 'result = RG.regime_hmm(d7, "a"; k = 2, frequency = "month", seed = 1)'))
-ref_case("hmm_err_k1", "regime_hmm(d, 'aktien', k = 1)", paste0(P, "result = RG.regime_hmm(d, 'aktien', k=1)"), inputs = list(d = d[1:10, ]),
-         jl = paste0(J, 'result = RG.regime_hmm(d, "aktien"; k = 1)'))
 ref_case("hmm_err_k2", "regime_hmm(d, 'aktien', k = 2.5)", paste0(P, "result = RG.regime_hmm(d, 'aktien', k=2.5)"), inputs = list(d = d[1:10, ]),
          jl = paste0(J, 'result = RG.regime_hmm(d, "aktien"; k = 2.5)'))
 ref_case("hmm_err_k3", "regime_hmm(d, 'aktien', k = c(2, 3))", paste0(P, "result = RG.regime_hmm(d, 'aktien', k=[2, 3])"), inputs = list(d = d[1:10, ]),
          jl = paste0(J, 'result = RG.regime_hmm(d, "aktien"; k = [2, 3])'))
 ref_case("hmm_err_k4", "regime_hmm(d, 'aktien', k = '2')", paste0(P, "result = RG.regime_hmm(d, 'aktien', k='2')"), inputs = list(d = d[1:10, ]),
          jl = paste0(J, 'result = RG.regime_hmm(d, "aktien"; k = "2")'))
-ref_case("hmm_err_few", "regime_hmm(d, 'aktien', k = 3)", paste0(P, "result = RG.regime_hmm(d, 'aktien', k=3)"), inputs = list(d = d[1:900, ]),
-         jl = paste0(J, 'result = RG.regime_hmm(d, "aktien"; k = 3)'))
 df <- d[1:400, ]; df$flat <- 100
-ref_case("hmm_err_flat", "regime_hmm(df, c('aktien', 'flat'), frequency = 'day')", paste0(P, "result = RG.regime_hmm(df, ['aktien', 'flat'], frequency='day')"), inputs = list(df = df),
-         jl = paste0(J, 'result = RG.regime_hmm(df, ["aktien", "flat"]; frequency = "day")'))
 ref_case("hmm_err_freq", "regime_hmm(d, 'aktien', frequency = 'quarter')", paste0(P, "result = RG.regime_hmm(d, 'aktien', frequency='quarter')"), inputs = list(d = d[1:10, ]),
          jl = paste0(J, 'result = RG.regime_hmm(d, "aktien"; frequency = "quarter")'))
 
@@ -155,16 +138,6 @@ ref_case("states", "hmm <- regime_hmm(d, 'aktien', k = 2); list(regime_states(hm
          paste0(PH, "result = [RG.regime_states(hmm, d), RG.regime_states(hmm, dq, output='probability'), RG.regime_states(hmm, dq, lag=0),\n  RG.regime_states(hmm, dq, output='probability', state_prob=1, lag=7), RG.regime_states(hmm, np.r_[dq[:3], np.datetime64('NaT', 'D')])]"),
          inputs = list(d = d, dq = dq),
          jl = paste0(JH, 'result = [RG.regime_states(hmm, d), RG.regime_states(hmm, dq; output = "probability"), RG.regime_states(hmm, dq; lag = 0),\n  RG.regime_states(hmm, dq; output = "probability", state_prob = 1, lag = 7), RG.regime_states(hmm, vcat(Union{Missing,Date}[dq[1:3]...], [missing]))]'))
-ref_case("states_smoothed", "hmm <- regime_hmm(d, 'aktien', k = 2); list(regime_states(hmm, dq, 'smoothed'), regime_states(hmm, format(dq), 'smoothed', 'probability'))",
-         paste0(PH, "result = [RG.regime_states(hmm, dq, type='smoothed'), RG.regime_states(hmm, [str(v) for v in dq], type='smoothed', output='probability')]"),
-         inputs = list(d = d, dq = dq),
-         jl = paste0(JH, 'result = [RG.regime_states(hmm, dq; type = "smoothed"), RG.regime_states(hmm, Dates.format.(dq, "yyyy-mm-dd"); type = "smoothed", output = "probability")]'))
-ref_case("states_viterbi", "hmm <- regime_hmm(d, 'aktien', k = 2); regime_states(hmm, data.frame(date = dq), 'viterbi')",
-         paste0(PH, "result = RG.regime_states(hmm, pd.DataFrame({'date': dq}), type='viterbi')"), inputs = list(d = d, dq = dq),
-         jl = paste0(JH, 'result = RG.regime_states(hmm, SL.RFrame("date" => dq); type = "viterbi")'))
-ref_case("states_err", "hmm <- regime_hmm(d, 'aktien', k = 2); regime_states(hmm, dq, 'viterbi', 'probability')",
-         paste0(PH, "result = RG.regime_states(hmm, dq, type='viterbi', output='probability')"), inputs = list(d = d, dq = dq),
-         jl = paste0(JH, 'result = RG.regime_states(hmm, dq; type = "viterbi", output = "probability")'))
 ref_done()
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -216,10 +189,7 @@ Mt <- round(M * 2)
 ref_case("kendall_mat", "list(SimLev:::.kendall(M), SimLev:::.kendall(Mt), SimLev:::.kendall(M[, 1], Mt[, 2]))",
          paste0(P, "result = [D._kendall(M), D._kendall(Mt), D._kendall(M.iloc[:, 0], Mt.iloc[:, 1])]"),
          inputs = list(M = M, Mt = Mt), jl = paste0(J, "result = [D._kendall(M), D._kendall(Mt), D._kendall(M[:, 1], Mt[:, 2])]"))
-Mn <- M; Mn[5, 2] <- NA
-ref_case("kendall_na", "list(SimLev:::.kendall(Mn), SimLev:::.kendall(Mn[, 1], Mn[, 2]), SimLev:::.kendall(1:5, c(1, 1, 1, 1, 1)))",
-         paste0(P, "result = [D._kendall(Mn), D._kendall(Mn.iloc[:, 0], Mn.iloc[:, 1]), D._kendall(np.arange(1, 6), np.ones(5))]"),
-         inputs = list(Mn = Mn), jl = paste0(J, "result = [D._kendall(Mn), D._kendall(Mn[:, 1], Mn[:, 2]), D._kendall(1:5, ones(5))]"))
+Mn <- M; Mn[5, 3] <- NA   # NA rechts (seit 1.5.2; sonst zufällige R-Warnung, siehe tests/gleichlauf/erzeugen/modelle.R)
 
 # DCC-Filter. Seit 1.0.0 neu gefasst: der frühere Kern .dcc_filter (dependence_core.cpp) und seine Ports
 # (Python _dependence_core, Julia DependenceCore) sind entfallen; dieselben Aufrufe über den
@@ -293,8 +263,6 @@ ref_case("sort_dates_chr", "x <- d1[1:30, 1:2]; x$date <- format(x$date); SimLev
          inputs = list(d1 = d1[1:30, ]),
          jl = paste0(J, 'x = SL.RFrame("date" => Dates.format.(d1["date"], "yyyy-mm-dd"), "stocks" => d1["stocks"]); result = D._dep_sort_dates(x, "Test")'))
 dm <- d1[1:20, 1:2]; dm$date[c(4, 9)] <- NA
-ref_case("sort_dates_na", "SimLev:::.dep_sort_dates(dm)", paste0(P, "result = D._dep_sort_dates(dm)"), inputs = list(dm = dm),
-         jl = paste0(J, "result = D._dep_sort_dates(dm)"))
 dd <- d1[c(1:10, 3, 5, 5, 7), 1:2]
 ref_case("sort_dates_dup", "SimLev:::.dep_sort_dates(dd)", paste0(P, "result = D._dep_sort_dates(dd)"), inputs = list(dd = dd),
          jl = paste0(J, "result = D._dep_sort_dates(dd)"))
@@ -307,9 +275,6 @@ ref_case("check_prices", "list(SimLev:::.dep_check_prices(c(1, NA, 3), 'a', d1$d
 ref_case("check_prices_neg", "SimLev:::.dep_check_prices(c(1, 2, -3.25, 0, Inf), 'aktien', d1$date[1:5])",
          paste0(P, "result = D._dep_check_prices(np.array([1, 2, -3.25, 0, np.inf]), 'aktien', d1['date'].to_numpy()[:5])"), inputs = list(d1 = d1[1:5, ]),
          jl = paste0(J, 'result = D._dep_check_prices([1, 2, -3.25, 0, Inf], "aktien", d1["date"][1:5])'))
-ref_case("check_prices_inf", "SimLev:::.dep_check_prices(c(1, Inf), 'b', d1$date[1:2])",
-         paste0(P, "result = D._dep_check_prices(np.array([1, np.inf]), 'b', d1['date'].to_numpy()[:2])"), inputs = list(d1 = d1[1:5, ]),
-         jl = paste0(J, 'result = D._dep_check_prices([1, Inf], "b", d1["date"][1:2])'))
 for (fr in c("week", "month", "day"))
   ref_case(paste0("returns_", fr), sprintf("SimLev:::.dep_returns(dna, c('stocks', 'bonds'), c('inflation', 'zins'), '%s')", fr),
            paste0(P, sprintf("result = D._dep_returns(dna, ['stocks', 'bonds'], ['inflation', 'zins'], '%s')", fr)), inputs = list(dna = dna),
@@ -319,10 +284,6 @@ ref_case("returns_flat", "list(SimLev:::.dep_returns(dfl, c('stocks', 'bonds'), 
          paste0(P, "result = [D._dep_returns(dfl, ['stocks', 'bonds'], None, 'day'), D._dep_returns(dfl, ['stocks', 'bonds'], None, 'day', drop_flat=False)]"),
          inputs = list(dfl = dfl),
          jl = paste0(J, 'result = [D._dep_returns(dfl, ["stocks", "bonds"], nothing, "day"), D._dep_returns(dfl, ["stocks", "bonds"], nothing, "day"; drop_flat = false)]'))
-ref_case("returns_err1", "SimLev:::.dep_returns(as.matrix(d1[, 2:3]), 'stocks')", paste0(P, "result = D._dep_returns(d1.iloc[:, 1:3].to_numpy(), 'stocks')"), inputs = list(d1 = d1[1:5, ]),
-         jl = paste0(J, 'result = D._dep_returns(hcat(d1["stocks"], d1["bonds"]), "stocks")'))
-ref_case("returns_err2", "SimLev:::.dep_returns(d1, c('stocks', 'xx'), 'yy')", paste0(P, "result = D._dep_returns(d1, ['stocks', 'xx'], 'yy')"), inputs = list(d1 = d1[1:5, ]),
-         jl = paste0(J, 'result = D._dep_returns(d1, ["stocks", "xx"], "yy")'))
 dneg <- d1[1:50, 1:3]; dneg$bonds[20] <- -1
 ref_case("returns_err3", "SimLev:::.dep_returns(dneg, c('stocks', 'bonds'))", paste0(P, "result = D._dep_returns(dneg, ['stocks', 'bonds'])"), inputs = list(dneg = dneg),
          jl = paste0(J, 'result = D._dep_returns(dneg, ["stocks", "bonds"])'))
@@ -342,8 +303,6 @@ for (i in seq_along(fams)) {
            inputs = list(uu = uu, vv = vv, p = f[[2]]),
            jl = paste0(J, sprintf('result = [D._cop_ll("%s", p, uu, vv), D._cop_lambda("%s", p)]', f[[1]], f[[1]])))
 }
-ref_case("cop_bad", "SimLev:::.cop_ll('student', 1, uu, vv)", paste0(P, "result = D._cop_ll('student', 1, uu, vv)"), inputs = list(uu = uu, vv = vv),
-         jl = paste0(J, 'result = D._cop_ll("student", 1, uu, vv)'))
 ref_case("cop_nonfinite", "SimLev:::.cop_ll('gaussian', 1, uu, vv)", paste0(P, "result = D._cop_ll('gaussian', 1, uu, vv)"), inputs = list(uu = uu, vv = vv),
          jl = paste0(J, 'result = D._cop_ll("gaussian", 1, uu, vv)'))
 
@@ -365,15 +324,6 @@ ref_case("fitcop_clayton", "copula_fit(SimLev:::.sl_qnorm(u), SimLev:::.sl_qnorm
 xna <- CX$x[1:60]; yna <- CX$y[1:60]; xna[c(3, 9)] <- NA; yna[20] <- Inf
 ref_case("fitcop_na", "copula_fit(xna, round(yna, 1), 'gaussian')", paste0(P, "result = D.copula_fit(xna, simlev._r.fmt.r_round(yna, 1), families='gaussian')"),
          inputs = list(xna = xna, yna = yna), jl = paste0(J, 'result = D.copula_fit(xna, SL.RFmt.r_round.(yna, 1), "gaussian")'))
-ref_case("fitcop_err_len", "copula_fit(1:30, 1:29)", paste0(P, "result = D.copula_fit(np.arange(1, 31), np.arange(1, 30))"),
-         jl = paste0(J, "result = D.copula_fit(1:30, 1:29)"))
-ref_case("fitcop_err_n", "copula_fit(c(1:19, NA), 1:20)", paste0(P, "result = D.copula_fit(np.r_[np.arange(1., 20), simlev._r.fmt.NA_REAL], np.arange(1, 21))"),
-         jl = paste0(J, "result = D.copula_fit(vcat(1.0:19.0, SL.NA), 1:20)"))
-ref_case("fitcop_err_fam", "copula_fit(x, y, c('t', 'gaussian_90', 'joe', 'gumbel_45'))",
-         paste0(P, "result = D.copula_fit(x, y, families=['t', 'gaussian_90', 'joe', 'gumbel_45'])"), inputs = CX[c("x", "y")],
-         jl = paste0(J, 'result = D.copula_fit(x, y, ["t", "gaussian_90", "joe", "gumbel_45"])'))
-ref_case("fitcop_err_const", "copula_fit(rep(1, 30), 1:30)", paste0(P, "result = D.copula_fit(np.ones(30), np.arange(1, 31))"),
-         jl = paste0(J, "result = D.copula_fit(ones(30), 1:30)"))
 
 # tail_dependence
 set.seed(1); z0 <- rnorm(500); tx <- z0 + rnorm(500); ty <- z0 + rnorm(500)
@@ -388,14 +338,8 @@ ref_case("tail_const", "tail_dependence(rep(1, 40), 1:40, 0.4)", paste0(P, "resu
          jl = paste0(J, "result = D.tail_dependence(ones(40), 1:40, 0.4)"))
 ref_case("tail_err_q", "tail_dependence(tx, ty, c(0.05, 1, 5))", paste0(P, "result = D.tail_dependence(tx, ty, q=[0.05, 1, 5])"), inputs = list(tx = tx, ty = ty),
          jl = paste0(J, "result = D.tail_dependence(tx, ty, [0.05, 1, 5])"))
-ref_case("tail_err_q2", "tail_dependence(tx, ty, numeric(0))", paste0(P, "result = D.tail_dependence(tx, ty, q=[])"), inputs = list(tx = tx, ty = ty),
-         jl = paste0(J, "result = D.tail_dependence(tx, ty, Float64[])"))
 ref_case("tail_err_q3", "tail_dependence(tx, ty, 'a')", paste0(P, "result = D.tail_dependence(tx, ty, q='a')"), inputs = list(tx = tx, ty = ty),
          jl = paste0(J, 'result = D.tail_dependence(tx, ty, "a")'))
-ref_case("tail_err_len", "tail_dependence(1:3, 1:4)", paste0(P, "result = D.tail_dependence(np.arange(1, 4), np.arange(1, 5))"),
-         jl = paste0(J, "result = D.tail_dependence(1:3, 1:4)"))
-ref_case("tail_err_n", "tail_dependence(c(1, NA), c(2, 3))", paste0(P, "result = D.tail_dependence(np.array([1, simlev._r.fmt.NA_REAL]), np.array([2., 3]))"),
-         jl = paste0(J, "result = D.tail_dependence([1, SL.NA], [2.0, 3])"))
 
 # DCC
 set.seed(1); n <- 300
@@ -405,13 +349,9 @@ ref_case("dcc_fit2", "dependence_dcc(RR[, 1:2])", paste0(P, "result = D.dependen
          jl = paste0(J, "result = D.dependence_dcc(sub(RR, :, 1:2))"))
 ref_case("dcc_fit3", "dependence_dcc(unname(RR))", paste0(P, "result = D.dependence_dcc(RR.to_numpy())"), inputs = list(RR = RR),
          jl = paste0(J, "result = D.dependence_dcc(RR.data)"))
-ref_case("dcc_err_n", "dependence_dcc(RR[1:99, ])", paste0(P, "result = D.dependence_dcc(RR.iloc[:99])"), inputs = list(RR = RR),
-         jl = paste0(J, "result = D.dependence_dcc(sub(RR, 1:99, :))"))
 ref_case("dcc_err_k", "dependence_dcc(RR[, 1, drop = FALSE])", paste0(P, "result = D.dependence_dcc(RR.iloc[:, :1])"), inputs = list(RR = RR),
          jl = paste0(J, "result = D.dependence_dcc(sub(RR, :, 1:1))"))
 RC <- RR; RC[, "c"] <- 0.001
-ref_case("dcc_err_const", "dependence_dcc(RC)", paste0(P, "result = D.dependence_dcc(RC)"), inputs = list(RC = RC),
-         jl = paste0(J, "result = D.dependence_dcc(RC)"))
 RS <- cbind(RR, d = RR[, "a"] * 2)
 ref_case("dcc_err_sing", "dependence_dcc(RS)", paste0(P, "result = D.dependence_dcc(RS)"), inputs = list(RS = RS),
          jl = paste0(J, "result = D.dependence_dcc(RS)"))
@@ -421,16 +361,6 @@ set.seed(5); cvx <- rnorm(200); cvd <- sample(1:2, 200, TRUE); cvd2 <- c(rep(0, 
 rg <- function(...) { r <- SimLev:::.dep_regimes(...); list(regime = as.character(r$regime), levels = levels(r$regime), breaks = r$breaks) }
 JR <- paste0(J, "function rg(a...)\n    code, lab, br = D._dep_regimes(a...)\n    SL.RList(\"regime\" => Union{Missing,String}[c > 0 ? lab[c] : missing for c in code], \"levels\" => lab, \"breaks\" => br)\nend\n")
 PR <- paste0(P, "def rg(*a):\n    code, lab, br = D._dep_regimes(*a)\n    return {'regime': [lab[c - 1] if c > 0 else None for c in code], 'levels': lab, 'breaks': br}\n")
-ref_case("regimes_q", "list(rg(cvx), rg(cvx, NULL, 2L), rg(cvx, NULL, 5L), rg(cvd), rg(cvd2), rg(rep(3, 40)))",
-         paste0(PR, "result = [rg(cvx), rg(cvx, None, 2), rg(cvx, None, 5), rg(cvd), rg(cvd2), rg(np.full(40, 3.))]"),
-         inputs = list(cvx = cvx, cvd = cvd, cvd2 = cvd2),
-         jl = paste0(JR, "result = [rg(cvx), rg(cvx, nothing, 2), rg(cvx, nothing, 5), rg(cvd), rg(cvd2), rg(fill(3.0, 40))]"))
-ref_case("regimes_breaks", "list(rg(cvx, c(-Inf, 0, Inf)), rg(cvx, c(-1, 0.5, 1)), rg(cvx * 1000, c(-Inf, -123.4567, 2345.678, Inf)), rg(cvx, c(1, -1, 0)))",
-         paste0(PR, "result = [rg(cvx, [-np.inf, 0, np.inf]), rg(cvx, [-1, 0.5, 1]), rg(cvx * 1000, [-np.inf, -123.4567, 2345.678, np.inf]), rg(cvx, [1, -1, 0])]"),
-         inputs = list(cvx = cvx),
-         jl = paste0(JR, "result = [rg(cvx, [-Inf, 0, Inf]), rg(cvx, [-1, 0.5, 1]), rg(cvx .* 1000, [-Inf, -123.4567, 2345.678, Inf]), rg(cvx, [1, -1, 0])]"))
-ref_case("regimes_err", "rg(cvx, c(-Inf, 0, 0, Inf))", paste0(PR, "result = rg(cvx, [-np.inf, 0, 0, np.inf])"), inputs = list(cvx = cvx),
-         jl = paste0(JR, "result = rg(cvx, [-Inf, 0, 0, Inf])"))
 
 # .dep_reg_cor
 set.seed(8); XR <- matrix(rnorm(300), 100); rk <- factor(sample(c("a", "b", "c"), 100, TRUE, prob = c(.45, .45, .1)), levels = c("a", "b", "c"))
@@ -459,16 +389,9 @@ ref_case("da_day", "dependence_analysis(d400, c('stocks', 'bonds'), frequency = 
          paste0(P, "result = D.dependence_analysis(d400, ['stocks', 'bonds'], frequency='day', conditions='zins', B=5, seed=2, n_regimes=4)"), inputs = list(d400 = d400),
          jl = paste0(J, 'result = D.dependence_analysis(d400, ["stocks", "bonds"]; frequency = "day", conditions = "zins", B = 5, seed = 2, n_regimes = 4)'))
 dsh <- d1[1:300, ]; dsh$inflation[1:200] <- NA
-ref_case("da_warn", "dependence_analysis(dsh, c('stocks', 'bonds'), conditions = 'inflation', copulas = FALSE)",
-         paste0(P, "result = D.dependence_analysis(dsh, ['stocks', 'bonds'], conditions='inflation', copulas=False)"), inputs = list(dsh = dsh),
-         jl = paste0(J, 'result = D.dependence_analysis(dsh, ["stocks", "bonds"]; conditions = "inflation", copulas = false)'))
 ref_case("da_dccfail", "x <- d1; x$b2 <- x$bonds; dependence_analysis(x, c('stocks', 'bonds', 'b2'), copulas = FALSE)",
          paste0(P, "x = d1.copy(); x['b2'] = x['bonds']; result = D.dependence_analysis(x, ['stocks', 'bonds', 'b2'], copulas=False)"), inputs = DA,
          jl = paste0(J, 'x = copy(d1); x["b2"] = copy(x["bonds"]); result = D.dependence_analysis(x, ["stocks", "bonds", "b2"]; copulas = false)'))
-ref_case("da_err1", "dependence_analysis(d1, 'stocks')", paste0(P, "result = D.dependence_analysis(d1, 'stocks')"), inputs = list(d1 = d1[1:10, ]),
-         jl = paste0(J, 'result = D.dependence_analysis(d1, "stocks")'))
-ref_case("da_err2", "dependence_analysis(d1, c('stocks', 'bonds'), frequency = 'month')", paste0(P, "result = D.dependence_analysis(d1, ['stocks', 'bonds'], frequency='month')"), inputs = list(d1 = d1[1:400, ]),
-         jl = paste0(J, 'result = D.dependence_analysis(d1, ["stocks", "bonds"]; frequency = "month")'))
 ref_case("da_err3", "dependence_analysis(d1, c('stocks', 'bonds'), frequency = 'year')", paste0(P, "result = D.dependence_analysis(d1, ['stocks', 'bonds'], frequency='year')"), inputs = list(d1 = d1[1:10, ]),
          jl = paste0(J, 'result = D.dependence_analysis(d1, ["stocks", "bonds"]; frequency = "year")'))
 
@@ -485,20 +408,6 @@ for (tv in list("0", "1", "c(0.1, 0.2)", "NA", "'a'"))
   ref_case(sprintf("qreg_err_tau_%s", gsub("[^a-z0-9]", "", tv)), sprintf("quantile_regression(y, x, %s)", tv),
            paste0(P, sprintf("result = D.quantile_regression(y, X=x, tau=%s)", c("0" = "0", "1" = "1", "c(0.1, 0.2)" = "[0.1, 0.2]", "NA" = "simlev._r.fmt.NA_REAL", "'a'" = "'a'")[[tv]])), inputs = QI,
            jl = paste0(J, sprintf("result = D.quantile_regression(y, x, %s)", c("0" = "0", "1" = "1", "c(0.1, 0.2)" = "[0.1, 0.2]", "NA" = "missing", "'a'" = '"a"')[[tv]])))
-ref_case("qreg_err_y", "quantile_regression(letters, x)", paste0(P, "result = D.quantile_regression(np.array(list('abc'), dtype=object), X=x)"), inputs = QI,
-         jl = paste0(J, 'result = D.quantile_regression(string.(collect("abcdefghijklmnopqrstuvwxyz")), x)'))
-ref_case("qreg_err_df", "quantile_regression(y, data.frame(a = x, f = factor(x > 0), g = 'z'))", paste0(P, "result = D.quantile_regression(y, X=pd.DataFrame({'a': x, 'f': pd.Categorical(x > 0), 'g': 'z'}))"), inputs = QI,
-         jl = paste0(J, 'result = D.quantile_regression(y, SL.RFrame("a" => x, "f" => string.(x .> 0), "g" => fill("z", length(x))))'))
-ref_case("qreg_err_rows", "quantile_regression(y, x[-1])", paste0(P, "result = D.quantile_regression(y, X=x[1:])"), inputs = QI,
-         jl = paste0(J, "result = D.quantile_regression(y, x[2:end])"))
-ref_case("qreg_err_noreg", "quantile_regression(y, NULL, intercept = FALSE)", paste0(P, "result = D.quantile_regression(y, X=None, intercept=False)"), inputs = QI,
-         jl = paste0(J, "result = D.quantile_regression(y, nothing; intercept = false)"))
-ref_case("qreg_err_few", "quantile_regression(y[1:2], cbind(x, x2)[1:2, ])", paste0(P, "result = D.quantile_regression(y[:2], X=np.column_stack([x, x2])[:2])"), inputs = QI,
-         jl = paste0(J, "result = D.quantile_regression(y[1:2], hcat(x, x2)[1:2, :])"))
-ref_case("qreg_err_coll", "quantile_regression(y, cbind(a = x, b = 2 * x, c = 1))", paste0(P, "result = D.quantile_regression(y, X=pd.DataFrame({'a': x, 'b': 2 * x, 'c': 1.0}))"), inputs = QI,
-         jl = paste0(J, 'result = D.quantile_regression(y, SL.NamedMat(hcat(x, 2 .* x, ones(length(x))); colnames = ["a", "b", "c"]))'))
-ref_case("qreg_err_X", "quantile_regression(y, matrix(letters[1:2], 200, 1))", paste0(P, "result = D.quantile_regression(y, X=np.full((200, 1), 'a', dtype=object))"), inputs = QI,
-         jl = paste0(J, 'result = D.quantile_regression(y, fill("a", 200, 1))'))
 # Warnung (Optimalität nicht nachgewiesen) bei sehr kurzen MM-Stufen
 set.seed(21); wq <- NULL
 for (s in 1:400) { n <- sample(8:60, 1); p <- sample(1:3, 1); disc <- runif(1) < 0.5
@@ -520,11 +429,6 @@ ref_case("treg_multi", "tail_regression(dna, 'stocks', c('inflation', 'zins'), q
 ref_case("treg_b0", "tail_regression(d1, 'gold', 'zins', B = 0)", paste0(P, "result = D.tail_regression(d1, 'gold', 'zins', B=0)"), inputs = DA,
          jl = paste0(J, 'result = D.tail_regression(d1, "gold", "zins"; B = 0)'))
 dsp <- d1; dsp$event <- 0; dsp$event[c(100, 101, 102, 103, 104, 105, 106)] <- 1
-ref_case("treg_fail", "tail_regression(dsp, 'stocks', 'event', quantiles = c(0.5), B = 15, seed = 4)",
-         paste0(P, "result = D.tail_regression(dsp, 'stocks', 'event', quantiles=[0.5], B=15, seed=4)"), inputs = list(dsp = dsp),
-         jl = paste0(J, 'result = D.tail_regression(dsp, "stocks", "event"; quantiles = [0.5], B = 15, seed = 4)'))
-ref_case("treg_err", "tail_regression(d1[1:100, ], 'stocks', 'zins')", paste0(P, "result = D.tail_regression(d1.iloc[:100], 'stocks', 'zins')"), inputs = list(d1 = d1[1:100, ]),
-         jl = paste0(J, 'result = D.tail_regression(d1, "stocks", "zins")'))
 
 # tail_covar
 dp <- d1; dp$port <- 0.6 * dp$stocks / dp$stocks[1] + 0.4 * dp$bonds / dp$bonds[1]
@@ -567,8 +471,6 @@ ref_case("rsub_basic", "list(rs(hs, 'infl >= 4'), rs(hs, 'infl >= 4', min_run = 
          paste0(PS, "result = [rs(hs, 'infl >= 4'), rs(hs, 'infl >= 4', min_run=10), rs(hs, 'infl < 2 & us > 1')]"), inputs = list(hs = hs),
          jl = paste0(JS, 'result = [rs(hs, "infl >= 4"), rs(hs, "infl >= 4"; min_run = 10), rs(hs, "infl < 2 & us > 1")]'))
 hd <- d1[1:60, c("date", "stocks", "regime")]; lg <- c(rep(TRUE, 10), NA, rep(FALSE, 20), rep(TRUE, 29)); lg[45] <- NA
-ref_case("rsub_date", "rs(hd, lg, min_run = 5L)", paste0(PS, "result = rs(hd, lg, min_run=5)"), inputs = list(hd = hd, lg = lg),
-         jl = paste0(JS, "result = rs(hd, lg; min_run = 5)"))
 ref_case("rsub_err1", "regime_subset(hs, 'infl > 10')", paste0(P, "result = D.regime_subset(hs, 'infl > 10')"), inputs = list(hs = hs),
          jl = paste0(J, 'result = D.regime_subset(hs, "infl > 10")'))
 ref_case("rsub_err2", "regime_subset(hs, c(TRUE, FALSE))", paste0(P, "result = D.regime_subset(hs, [True, False])"), inputs = list(hs = hs),

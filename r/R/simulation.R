@@ -63,7 +63,7 @@
 # Zahlungsjahr (§ 10 Abs. 1 Nr. 4, Abs. 4b Satz 2/3, § 11 EStG): Saldo des KiSt-Bescheids des Vorjahres
 # (Zahlung abziehbar, Erstattung verrechnet bzw. hinzugerechnet), bei guenstigerer Tarifbesteuerung
 # auch die im Jahr auf K einbehaltene KiSt. Hilfsfunktionen: .tariff_base(), .tariff_full(),
-# .tariff_diff(), .tariff_close(), .tariff_book().
+# .tariff_diff(), .tariff_close().
 #
 # @section Berechnung der Vorabpauschale (T-1):
 # Die Vorabpauschale wird je am 31.12. gehaltenem Lot berechnet als (§ 18 Abs. 1-2 InvStG):
@@ -473,7 +473,6 @@
 #' @useDynLib SimLev, .registration = TRUE, .fixes = "C_"
 #' @import stats graphics grDevices
 #' @importFrom utils head tail modifyList
-#' @importFrom methods hasArg
 #' @noRd
 
 simulation <- function(data, strategy, start_value = 10000,
@@ -504,7 +503,6 @@ simulation <- function(data, strategy, start_value = 10000,
     data,
     strategy,
     start_value = 10000,
-    spread = NULL,
     details = FALSE,
     liquidate = FALSE,
     # DCA
@@ -562,15 +560,15 @@ simulation <- function(data, strategy, start_value = 10000,
     # === Einkommensteuertarif (Datei) statt marginal_tax_rate ===
     taxable_income = NULL,                  # zvE je Kalenderjahr OHNE die Ertraege dieser Simulation (EUR)
     tax_tariff = NULL,                      # NULL = mitgelieferte Tarifdatei, Dateipfad oder tax_tariff()-Objekt
-    .call = NULL                            # Aufruf fuer Bedingungen (aus simulation())
+    .call                                   # Aufruf fuer Bedingungen (aus simulation())
 ) {
   # Ablauf in Phasen (interne Funktionen, Uebersicht in sim_validate.R). Fehler und Warnungen, die
   # direkt in einer Phase entstehen, tragen wie bisher den Aufruf von simulation() (.sim_restore_call).
-  sim_call <- if (is.null(.call)) sys.call() else .call
+  sim_call <- .call
   withCallingHandlers({
     # 1. Eingabepruefung, Steuer- und Gebuehreneinstellungen
     cfg <- .sim_check_inputs(
-      data = data, strategy = strategy, start_value = start_value, spread = spread, details = details,
+      data = data, strategy = strategy, start_value = start_value, details = details,
       dca_mode = dca_mode, dca_value = dca_value, dca_days = dca_days,
       balance_mode = balance_mode, balance_days = balance_days, balance_thresh = balance_thresh,
       balance_thresh_type = balance_thresh_type, tax_mode = tax_mode, tax_rate = tax_rate,
@@ -585,13 +583,12 @@ simulation <- function(data, strategy, start_value = 10000,
 
     # 2. Daten, Zentralstruktur sim_mem, Termine und Flags
     prep <- .sim_prepare_data(cfg$data, cfg$pre_filled, base_rate_flex, base_rate_data)
-    sim_mem <- .sim_build_state(prep$data, cfg$strategy, cfg$start_value, prep$start_date, prep$stopp_date,
+    sim_mem <- .sim_build_state(prep$data, cfg$strategy, prep$start_date, prep$stopp_date,
                                 cfg$sparer_pauschbetrag, cfg$use_sparer_pauschbetrag, cfg$base_rate,
                                 base_rate_flex, base_rate_data)
-    .sim_check_layout(sim_mem)   # C7-11: vor dem ersten C++-Aufruf
     cal <- .sim_build_calendar(
       data = prep$data, sim_mem = sim_mem, strategy = cfg$strategy, start_date = prep$start_date,
-      stopp_date = prep$stopp_date, liquidate = liquidate, dca_mode = cfg$dca_mode, dca_span = dca_span,
+      stopp_date = prep$stopp_date, dca_mode = cfg$dca_mode, dca_span = dca_span,
       dca_unit = dca_unit, dca_days = cfg$dca_days, dca_value = cfg$dca_value, dca_anchor = dca_anchor,
       dca_start = dca_start, dca_skip = dca_skip, balance_mode = cfg$balance_mode, balance_span = balance_span,
       balance_unit = balance_unit, balance_days = cfg$balance_days, balance_anchor = balance_anchor,

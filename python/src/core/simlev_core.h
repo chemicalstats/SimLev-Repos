@@ -26,20 +26,18 @@
  *                                 zurueck. R: stop() mit genau diesem Text (sl::stop);
  *                                 Python: ValueError mit dem Text, den die Python-Seite in
  *                                 die Fehlerklasse des reinen Python-Kerns umsetzt.
- *   SIMLEV_WARN(msg)              Warnung (R: Rf_warning; Python: warnings.warn);
- *                                 derzeit von keinem Kern genutzt.
  *   SIMLEV_CHECK_INTERRUPT()      Benutzerabbruch pruefen; kehrt bei Abbruch nicht
  *                                 zurueck. R: sl::check_interrupt() wie bisher; Python:
  *                                 PyErr_CheckSignals() (KeyboardInterrupt), der Kern laeuft
  *                                 dazu mit gehaltener GIL.
  *   SIMLEV_NUM, SIMLEV_MATRIX,    Ergebnisfelder anlegen bzw. kopieren (R: neue
- *   SIMLEV_COPY(_VEC), SIMLEV_CLONE  R-Vektoren; Python: Speicher je Thread, die Huelle
+ *   SIMLEV_COPY(_VEC)             R-Vektoren; Python: Speicher je Thread, die Huelle
  *                                 kopiert nach dem Kern in Python-Objekte)
  *   SIMLEV_LIST, SIMLEV_DONE,     Ergebnis zurueckgeben (benannte Liste bzw. Vektor;
  *   SIMLEV_SET_FLAG               Python: Tupel), Attribut setzen
- *   SIMLEV_R_FINITE(x)            R_finite (Python: std::isfinite)
  *
- *   simlev_host::LglVec           logischer Vektor (R: sl::LglVec)
+ * Seit 1.6.3 entfallen (von keinem Kern genutzt): SIMLEV_WARN, SIMLEV_INT, SIMLEV_CLONE,
+ * SIMLEV_R_FINITE, SIMLEV_NA_INTEGER und simlev_host::LglVec.
  *
  * Die Tagesengine (engine_core_impl.h) und der Tarifkern (tariff_core_impl.h) haben
  * eigenen Zustand und brauchen vom Host nur die Gleitkomma-Regeln dieser Datei. Die
@@ -86,7 +84,7 @@
 extern "C" {
 #endif
 
-/* R's NA_real_ (signalisierendes NaN mit Nutzlast 1954, 0x7FF00000000007A2) und NA_integer_ */
+/* R's NA_real_ (signalisierendes NaN mit Nutzlast 1954, 0x7FF00000000007A2) */
 static inline double simlev_na_real(void)
 {
     const uint64_t bits = UINT64_C(0x7FF00000000007A2);
@@ -95,7 +93,6 @@ static inline double simlev_na_real(void)
     return x;
 }
 #define SIMLEV_NA_REAL (simlev_na_real())
-#define SIMLEV_NA_INTEGER INT_MIN
 
 /* NA vor NaN (Regel oben): Hilfen der Engine-Kerne */
 static inline uint64_t simlev_bits_(double x)
@@ -128,6 +125,19 @@ static inline double simlev_add(double a, double b) { return simlev_nan2_(a + b,
 static inline double simlev_sub(double a, double b) { return simlev_nan2_(a - b, a, b); }
 static inline double simlev_mul(double a, double b) { return simlev_nan2_(a * b, a, b); }
 static inline double simlev_div(double a, double b) { return simlev_nan2_(a / b, a, b); }
+
+/* R's min(a, b) bzw. max(a, b) fuer zwei Zahlen (NA vor NaN, sonst das NaN von b, dann a; nicht die Regel von
+ * simlev_nan2_) und R's & dreiwertig (0 FALSE, 1 TRUE, 2 NA); seit 1.6.3 hier gemeinsam fuer Tagesengine und
+ * Auswertung (vorher je eine Kopie in engine_core_impl.h und evaluate_core_impl.h) */
+static inline double simlev_r_nan2_(double a, double b)
+{
+    if (a != a && simlev_is_na(a)) return a;
+    if (b != b) return b;
+    return a;
+}
+static inline double simlev_r_min2(double a, double b) { return (a != a || b != b) ? simlev_r_nan2_(a, b) : (b < a ? b : a); }
+static inline double simlev_r_max2(double a, double b) { return (a != a || b != b) ? simlev_r_nan2_(a, b) : (b > a ? b : a); }
+static inline int simlev_r_and(int a, int b) { return (a == 0 || b == 0) ? 0 : ((a == 2 || b == 2) ? 2 : 1); }
 
 #ifdef __cplusplus
 }

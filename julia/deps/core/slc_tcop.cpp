@@ -16,7 +16,8 @@
  *             - (nu + k)/2 log1p(z_t' R^-1 z_t / nu) + (nu + 1)/2 sum_j log1p(z_tj^2 / nu)], z = qt(U, nu).
  *             Rechenfolge wie SimLev 1.5.2 in R (r/R/dependence.R .cop_fit_t, r/R/scenarios.R ll_t): Summen in
  *             long double (sl_r_sum, sl_r_rowsums), Matrixprodukt sl_matmul, Brent wie stats::optimize
- *             (sl_fmin, danach eine Auswertung am Ergebnis). qt über alle Elemente auf mehreren Threads
+ *             (sl_fmin, danach der Wert am Ergebnis; seit 1.6.3 gemerkt statt neu ausgewertet, bitgleich).
+ *             qt über alle Elemente auf mehreren Threads
  *             (sl_qt_mt). Bis 1.5.2 rechneten R, Python und Julia die Profil-Likelihood je für sich.
  * Quellen:    Demarta, S., McNeil, A. J. (2005). The t Copula and Related Copulas. International Statistical
  *               Review 73(1), 111–129 (Dichte der t-Copula).
@@ -36,27 +37,40 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* stats::optimize ruft f über fcn1: nicht endlich -> DBL_MAX (in R mit Warnung; hier Merker für den Host) */
+/* stats::optimize ruft f über fcn1: nicht endlich -> DBL_MAX (in R mit Warnung; hier Merker für den Host).
+ * Seit 1.6.3 merkt fcn1_ die rohen Werte f(x) (höchstens FCN1_MEMO Auswertungen). */
+#define FCN1_MEMO 256
 typedef struct {
     double (*f)(double, void *);
     void *data;
     int *flag;
+    int nm;
+    double mx[FCN1_MEMO], mf[FCN1_MEMO];
 } fcn1_data;
 
 static double fcn1_(double x, void *p)
 {
     fcn1_data *F = (fcn1_data *) p;
     double v = F->f(x, F->data);
+    if (F->nm < FCN1_MEMO) { F->mx[F->nm] = x; F->mf[F->nm] = v; F->nm++; }
     if (!isfinite(v)) { *F->flag = 1; return DBL_MAX; }
     return v;
 }
 
-/* optimize(f, c(lo, hi), tol): Brent, danach f am Ergebnis; *obj = dieser Wert */
+/* optimize(f, c(lo, hi), tol): Brent, danach f am Ergebnis wie stats::optimize; *obj = dieser Wert.
+ * sl_fmin gibt einen schon ausgewerteten Punkt zurück und f ist deterministisch (qt unabhängig von der
+ * Zahl der Threads, gleiche Warnungstexte fasst der Kontext zusammen); seit 1.6.3 daher der gemerkte
+ * rohe Wert bei bitgleichem x, nur sonst eine neue Auswertung. */
 static double optimize_(double (*f)(double, void *), void *data, double lo, double hi, double tol, int *flag,
                         double *obj)
 {
-    fcn1_data F = { f, data, flag };
-    double x = sl_fmin(lo, hi, fcn1_, &F, tol);
+    fcn1_data F;
+    double x;
+    int i;
+    F.f = f; F.data = data; F.flag = flag; F.nm = 0;
+    x = sl_fmin(lo, hi, fcn1_, &F, tol);
+    for (i = F.nm - 1; i >= 0; i--)
+        if (memcmp(&F.mx[i], &x, sizeof x) == 0) { *obj = F.mf[i]; return x; }
     *obj = f(x, data);
     return x;
 }

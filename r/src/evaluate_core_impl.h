@@ -159,15 +159,7 @@ static inline double na_real() { return simlev_na_real(); }
 static inline bool is_nan_strict(double x) { return x != x && !simlev_is_na(x); }   // is.nan()
 // R-Wahrheitswerte: 0 FALSE, 1 TRUE, 2 NA
 static inline int gt0(double x) { return x != x ? 2 : (x > 0 ? 1 : 0); }
-static inline int land(int a, int b) { return (a == 0 || b == 0) ? 0 : ((a == 2 || b == 2) ? 2 : 1); }
-// R's min(a, b), max(a, b) fuer zwei Zahlen (NA vor NaN)
-static inline double nan2(double a, double b) {
-  if (a != a && simlev_is_na(a)) return a;
-  if (b != b) return b;
-  return a;
-}
-static inline double rmin2(double a, double b) { return (a != a || b != b) ? nan2(a, b) : (b < a ? b : a); }
-static inline double rmax2(double a, double b) { return (a != a || b != b) ? nan2(a, b) : (b > a ? b : a); }
+// R's &, min(a, b), max(a, b): simlev_r_and, simlev_r_min2, simlev_r_max2 (simlev_core.h, seit 1.6.3)
 // difftime(a, b, units = "days") fuer Datumswerte (as.POSIXct.Date: Tage * 86400)
 static inline double days_between(double a, double b) { return (a * 86400.0 - b * 86400.0) / 86400.0; }
 // q^(1/yrs) - 1 (seit 1.6.2): expm1(log(q) / yrs) für q >= 0 und endliche Jahre != 0, sonst wie bisher R's `^`
@@ -175,18 +167,14 @@ static inline double days_between(double a, double b) { return (a * 86400.0 - b 
 static inline double cagr_q(double q, double yrs) {
   return (q >= 0 && std::isfinite(yrs) && yrs != 0) ? std::expm1(std::log(q) / yrs) : sl_r_pow1(q, 1 / yrs) - 1;
 }
-// mean() bzw. sd() mit na.rm = TRUE
-static inline double mean_narm(const std::vector<double>& x) {
-  std::vector<double> y;
+// mean() und sd() mit na.rm = TRUE in einem Schritt (seit 1.6.3; vorher je eine gefilterte Kopie): y = x ohne
+// NA/NaN, *mean = sl_r_mean(y), *sd = sqrt(sl_r_var(y))
+static inline void mean_sd_narm(const std::vector<double>& x, std::vector<double>& y, double* mean, double* sd) {
+  y.clear();
   y.reserve(x.size());
   for (double v : x) if (v == v) y.push_back(v);
-  return sl_r_mean((int64_t) y.size(), y.data());
-}
-static inline double sd_narm(const std::vector<double>& x) {
-  std::vector<double> y;
-  y.reserve(x.size());
-  for (double v : x) if (v == v) y.push_back(v);
-  return std::sqrt(sl_r_var((int64_t) y.size(), y.data()));
+  *mean = sl_r_mean((int64_t) y.size(), y.data());
+  *sd = std::sqrt(sl_r_var((int64_t) y.size(), y.data()));
 }
 static inline void msg(std::vector<Msg>* m, int code, double a = 0.0, double b = 0.0, double c = 0.0, double d = 0.0) {
   if (m) m->push_back(Msg{code, {a, b, c, d}});
@@ -266,7 +254,7 @@ inline double xirr(int64_t n, const double* t_in, const double* amount_in, doubl
     double hi = grid[0], ghi = gv[0], lo = hi, glo = ghi;
     while (glo > 0 && lo > lo_lim) {
       hi = lo; ghi = glo;
-      lo = rmax2(2 * lo, lo_lim);
+      lo = simlev_r_max2(2 * lo, lo_lim);
       glo = F.g(lo);
     }
     if (glo > 0) return na_real();
@@ -283,18 +271,16 @@ inline double xirr(int64_t n, const double* t_in, const double* amount_in, doubl
 }
 
 // ── calculate_skewness/_kurtosis/_partials fuer die Tagesrenditen ─────────────────────────────────────────
-// Rueckgabe: Wert; *lgl = 1 fuer R's logisches NA (zu wenige Werte bzw. Standardabweichung 0)
-inline double moment(const std::vector<double>& x0, int order, int* lgl) {
-  std::vector<double> x;
-  for (double v : x0) if (v == v) x.push_back(v);
+// x: Werte ohne NA/NaN, mean_x = sl_r_mean(x), sd_x = sqrt(sl_r_var(x)) (seit 1.6.3 einmal fuer beide Momente
+// und die Tagesstatistik, mean_sd_narm). Rueckgabe: Wert; *lgl = 1 fuer R's logisches NA (zu wenige Werte bzw.
+// Standardabweichung 0)
+inline double moment(const std::vector<double>& x, double mean_x, double sd_x, int order, int* lgl) {
   const int64_t n = (int64_t) x.size();
   *lgl = 0;
   if (n < (order == 3 ? 3 : 4)) {
     *lgl = 1;
     return na_real();
   }
-  const double mean_x = sl_r_mean(n, x.data());
-  const double sd_x = std::sqrt(sl_r_var(n, x.data()));
   if (sd_x == 0) {
     *lgl = 1;
     return na_real();
@@ -334,23 +320,19 @@ inline int evaluate(const In& I, Result& R) {
     R.err_phase = phase;
     return 1;
   };
-  // Depotwert und Zufluesse je Tag: rowSums(sapply(report, `[[`, field), na.rm = TRUE)
-  std::vector<double> m((std::size_t) (n * na));
+  // Depotwert und Zufluesse je Tag: rowSums(sapply(report, `[[`, field), na.rm = TRUE); seit 1.6.3 direkt ueber
+  // die Spalten (gleiche Reihenfolge der Summanden, ohne Kopie in eine Matrix)
   std::vector<double>& tw = R.total_worth;
   std::vector<double> tf((std::size_t) n);
   tw.assign((std::size_t) n, 0.0);
-  for (int64_t a = 0; a < na; a++)
-    for (int64_t i = 0; i < n; i++) m[(std::size_t) (a * n + i)] = I.total[a][i];
-  sl_r_rowsums(n, na, m.data(), 1, 0, tw.data());
-  for (int64_t a = 0; a < na; a++)
-    for (int64_t i = 0; i < n; i++) m[(std::size_t) (a * n + i)] = I.flows[a][i];
-  sl_r_rowsums(n, na, m.data(), 1, 0, tf.data());
+  sl_r_rowsums_cols(n, na, I.total, 1, 0, tw.data());
+  sl_r_rowsums_cols(n, na, I.flows, 1, 0, tf.data());
   const double start_worth = tw[0], stopp_worth = tw[(std::size_t) (n - 1)];
   const int64_t n_days = n;
   const double ann = days_between(I.stopp_date, I.start_date) / 365.25;
   // CAGR
   {
-    const int c = land(gt0(start_worth), gt0(ann));
+    const int c = simlev_r_and(gt0(start_worth), gt0(ann));
     if (c == 2) return abort(S_CAGR, 1);
     R.cagr = c ? cagr_q(simlev_div(stopp_worth, start_worth), ann) : NA;   // seit 1.6.2 expm1(log(q) / Jahre)
   }
@@ -440,7 +422,7 @@ inline int evaluate(const In& I, Result& R) {
     if (c == 2) return abort(S_TAX_DEBT, 1);
     if (c) {
       std::vector<double> d((std::size_t) na);
-      for (int64_t a = 0; a < na; a++) d[a] = rmax2(0.0, -I.status_money[a]);
+      for (int64_t a = 0; a < na; a++) d[a] = simlev_r_max2(0.0, -I.status_money[a]);
       R.open_tax_debt = sl_r_sum(na, d.data(), 0);
     } else {
       R.open_tax_debt = 0.0;
@@ -465,7 +447,7 @@ inline int evaluate(const In& I, Result& R) {
     msg(&R.msgs, W_END_NEG, stopp_worth, debt);
   } else if (is_nan_strict(R.ttwror)) {
     R.ttwror = NA;
-    const int c = land(has_ext ? 1 : 0, any_twr_le0);
+    const int c = simlev_r_and(has_ext ? 1 : 0, any_twr_le0);
     if (c == 2) return abort(S_TTWROR, 1);
     if (c == 0) msg(&R.msgs, W_TTWROR_NAN);
   }
@@ -511,12 +493,12 @@ inline int evaluate(const In& I, Result& R) {
     dd[i] = rm != rm ? NA : (rm > 0 ? simlev_div(simlev_sub(rm, dd_series[i]), rm) : 0.0);
   }
   {
-    const int c = land(has_ext ? 1 : 0, any_twr_le0);
+    const int c = simlev_r_and(has_ext ? 1 : 0, any_twr_le0);
     if (c == 2) return abort(S_TWR, 1);
     if (c == 1) {
       const int64_t i0 = i0_twr;
       msg(&R.msgs, W_TWR_NONPOS, I.day[i0], 100 * pr[(std::size_t) i0], tw[(std::size_t) (i0 - 1)], tf[(std::size_t) i0]);
-      for (double& d : dd) if (d == d) d = rmin2(d, 1.0);
+      for (double& d : dd) if (d == d) d = simlev_r_min2(d, 1.0);
     }
   }
   {
@@ -525,7 +507,7 @@ inline int evaluate(const In& I, Result& R) {
       if (dd[i] == dd[i] && dd[i] > 1) { i0 = (int64_t) i; break; }
     if (i0 >= 0) {
       if (!neg_end) msg(&R.msgs, W_NEG_WORTH, I.day[i0], tw[(std::size_t) i0]);
-      for (double& d : dd) if (d == d) d = rmin2(d, 1.0);
+      for (double& d : dd) if (d == d) d = simlev_r_min2(d, 1.0);
     }
   }
   double max_dd = -INFINITY;
@@ -564,7 +546,10 @@ inline int evaluate(const In& I, Result& R) {
   if (!I.rf_ok) return 0;
   // ── .sim_risk_stats ──
   double* S = R.stats;
-  double daily_mean = mean_narm(rr), daily_sd = sd_narm(rr);
+  std::vector<double> rr_ok, ex_ok;   // rr bzw. excess ohne NA/NaN
+  double rr_mean, rr_sd;
+  mean_sd_narm(rr, rr_ok, &rr_mean, &rr_sd);
+  double daily_mean = rr_mean, daily_sd = rr_sd;
   if (!std::isfinite(daily_mean)) daily_mean = 0.0;
   if (!std::isfinite(daily_sd)) daily_sd = 0.0;
   S[ST_MEAN] = daily_mean;
@@ -592,7 +577,8 @@ inline int evaluate(const In& I, Result& R) {
   sl_r_pow((int64_t) base.size(), base.data(), 1 / dpy, rf_daily.data());
   for (std::size_t i = 0; i < rf_ret.size(); i++) excess[i] = simlev_sub(rr[i], rf_daily[i] - 1);
   S[ST_RF] = rf_ret.empty() ? 0.0 : sl_r_mean((int64_t) rf_ret.size(), rf_ret.data()) * 100;
-  double mean_excess = mean_narm(excess), sd_excess = sd_narm(excess);
+  double mean_excess, sd_excess;
+  mean_sd_narm(excess, ex_ok, &mean_excess, &sd_excess);
   if (!std::isfinite(mean_excess)) mean_excess = 0.0;
   if (!std::isfinite(sd_excess)) sd_excess = 0.0;
   double down_sd = 0.0;
@@ -668,8 +654,8 @@ inline int evaluate(const In& I, Result& R) {
     }
   }
   R.longest_dd = longest;
-  S[ST_SKEW] = moment(rr, 3, &R.skew_lgl);
-  S[ST_KURT] = moment(rr, 4, &R.kurt_lgl);
+  S[ST_SKEW] = moment(rr_ok, rr_mean, rr_sd, 3, &R.skew_lgl);
+  S[ST_KURT] = moment(rr_ok, rr_mean, rr_sd, 4, &R.kurt_lgl);
   S[ST_LPM] = partial(rr, true);
   S[ST_HPM] = partial(rr, false);
   S[ST_MAXDD] = max_dd;

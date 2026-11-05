@@ -19,7 +19,7 @@
  *             Start-Übergangsmatrizen P0 und P99. Optimierung ganz in C mit BFGS (slc_opt.cpp,
  *             maxit 500, reltol 1e-10; mit analytischem Gradienten, siehe ms_grad_w) von
  *             jedem Startpunkt; der beste Lauf gewinnt, bei Gleichstand der erste. Ergänzung in C:
- *             sl_msgarch_estimate startet nach den beiden bisherigen Punkten (bester Rasterpunkt je
+ *             sl_msgarch_estimate_mt startet nach den beiden bisherigen Punkten (bester Rasterpunkt je
  *             Familie) auch von den übrigen Rasterpunkten; von denselben zwei Starts fand BFGS auf
  *             flachen, mehrgipfligen Likelihoods mitunter ein anderes lokales Maximum als optim.
  *             GJR je Regime mit gamma < 0, solange alpha + gamma > 0
@@ -862,17 +862,17 @@ static void best_start(const ms_data *d, const double *s2k, const double *P0, do
 
 /* ── univariates Gauß-HMM (wie .hmm_em, .hmm_init_rank, .hmm_viterbi) ───── */
 
-/* gleitender Mittelwert wie roll_mean_core (Fenster w inkl. aktueller Zeile; davor NaN) */
-static void roll_mean(int m, const double *x, int w, double *out)
+/* gleitender Mittelwert (slc_models.h; seit 1.6.3 auch für roll_mean_core in research_core_impl.h) */
+void sl_roll_mean(int m, const double *x, int w, double gap, double *out)
 {
     double sum = 0.0, comp = 0.0;
     int bad = 0, i, k;
 #define RM_ADD(v) do { const double t_ = sum + (v); \
     if (fabs(sum) >= fabs(v)) comp += (sum - t_) + (v); else comp += ((v) - t_) + sum; sum = t_; } while (0)
-    for (i = 0; i < m; i++) out[i] = NAN;
+    for (i = 0; i < m; i++) out[i] = gap;
     if (w < 1 || w > m) return;
     for (k = 0; k < w; k++) { if (isfinite(x[k])) RM_ADD(x[k]); else ++bad; }
-    out[w - 1] = bad ? NAN : (sum + comp) / w;
+    out[w - 1] = bad ? gap : (sum + comp) / w;
     for (i = w; i < m; ++i) {
         if ((i - w) % 4096 == 4095) {
             sum = 0.0; comp = 0.0; bad = 0;
@@ -881,7 +881,7 @@ static void roll_mean(int m, const double *x, int w, double *out)
             if (isfinite(x[i])) RM_ADD(x[i]); else ++bad;
             if (isfinite(x[i - w])) RM_ADD(-x[i - w]); else --bad;
         }
-        out[i] = bad ? NAN : (sum + comp) / w;
+        out[i] = bad ? gap : (sum + comp) / w;
     }
 #undef RM_ADD
 }
@@ -895,7 +895,7 @@ static int init_rank(int n, const double *x, int K, int win, int32_t *cl, double
     int i, nv = 0, j;
     if (idx == NULL) return -1;
     for (i = 0; i < n; i++) x2[i] = x[i] * x[i];
-    roll_mean(n, x2, win, vol);
+    sl_roll_mean(n, x2, win, NAN, vol);
     for (i = 0; i < n; i++) { vol[i] = sqrt(vol[i]); if (!isnan(vol[i])) key[nv++] = vol[i]; }
     if (nv == 0) { free(idx); return -1; }
     slc_sort_index(nv, key, idx, idx + n);
@@ -928,9 +928,9 @@ static int init_rank(int n, const double *x, int K, int win, int32_t *cl, double
     return 0;
 }
 
-/* skalierter Vorwärts-Rückwärts-Schritt (wie hmm_forward_backward); B, al, be, ga n x K, xi K x K */
-static void fwd_bwd(int T, int K, const double *B, const double *A, const double *p0, double *al,
-                    double *be, double *ga, double *xi, double *cs, double *tmp)
+/* skalierter Vorwärts-Rückwärts-Schritt (slc_models.h; seit 1.6.3 auch für hmm_fb_raw in research_core_impl.h) */
+void sl_hmm_fb(int T, int K, const double *B, const double *A, int lda, const double *p0, double *al,
+               double *be, double *ga, double *xi, double *cs, double *tmp)
 {
     int t, i, j;
     double s = 0.0;
@@ -941,7 +941,7 @@ static void fwd_bwd(int T, int K, const double *B, const double *A, const double
         s = 0.0;
         for (j = 0; j < K; ++j) {
             double v = 0.0;
-            for (i = 0; i < K; ++i) v += al[t - 1 + (size_t) T * i] * A[i + K * j];
+            for (i = 0; i < K; ++i) v += al[t - 1 + (size_t) T * i] * A[i + (size_t) lda * j];
             tmp[j] = v * B[t + (size_t) T * j]; s += tmp[j];
         }
         cs[t] = s; for (j = 0; j < K; ++j) al[t + (size_t) T * j] = tmp[j] / s;
@@ -951,7 +951,7 @@ static void fwd_bwd(int T, int K, const double *B, const double *A, const double
         for (j = 0; j < K; ++j) tmp[j] = B[t + 1 + (size_t) T * j] * be[t + 1 + (size_t) T * j];
         for (i = 0; i < K; ++i) {
             double v = 0.0;
-            for (j = 0; j < K; ++j) v += A[i + K * j] * tmp[j];
+            for (j = 0; j < K; ++j) v += A[i + (size_t) lda * j] * tmp[j];
             be[t + (size_t) T * i] = v / cs[t + 1];
         }
     }
@@ -963,7 +963,7 @@ static void fwd_bwd(int T, int K, const double *B, const double *A, const double
     for (t = 0; t < T - 1; ++t) {
         for (j = 0; j < K; ++j) tmp[j] = B[t + 1 + (size_t) T * j] * be[t + 1 + (size_t) T * j];
         for (i = 0; i < K; ++i) for (j = 0; j < K; ++j)
-            xi[i + K * j] += al[t + (size_t) T * i] * tmp[j] * A[i + K * j] / cs[t + 1];
+            xi[i + K * j] += al[t + (size_t) T * i] * tmp[j] * A[i + (size_t) lda * j] / cs[t + 1];
     }
 }
 
@@ -989,7 +989,7 @@ static double estep(int n, int K, const double *x, const double *mu, const doubl
         for (j = 0; j < K; j++) B[t + (size_t) n * j] = exp(lB[t + (size_t) n * j] - m);
         slc_acc_add(&a2, m);
     }
-    fwd_bwd(n, K, B, A, p0, al, be, ga, xi, cs, tmp);
+    sl_hmm_fb(n, K, B, A, K, p0, al, be, ga, xi, cs, tmp);
     slc_acc_init(&a1, 0.0);
     for (t = 0; t < n; t++) slc_acc_add(&a1, log(cs[t]));
     return slc_acc_val(&a1) + slc_acc_val(&a2);
@@ -1216,13 +1216,6 @@ out:
     free(work); ms_data_free(&d); free(rest);
     *nstart = ns;
     return st;
-}
-
-int sl_msgarch_estimate(sl_ctx *cx, int n, const double *y, int K, int gjr, double *omega,
-                        double *alpha, double *beta, double *gamma, double *P, int32_t *regimes,
-                        double *s2, double *loglik, int *code)
-{
-    return sl_msgarch_estimate_mt(cx, n, y, K, gjr, omega, alpha, beta, gamma, P, regimes, s2, loglik, code, 1);
 }
 
 int sl_msgarch_estimate_mt(sl_ctx *cx, int n, const double *y, int K, int gjr, double *omega,

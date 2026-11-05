@@ -281,8 +281,9 @@ Python-Modul je R-Datei (Ausnahmen: die Engine-Phasen, siehe
 
 `simlev/_r/stats.py` ist das Sammelmodul: Es bietet alle Namen der
 Themenmodule wieder an, damit `from simlev._r.stats import …` und
-`simlev._r.stats.<name>` (auch `sort_partial`, `_rsum`, `_rmean`, `_warn`)
-gültig bleiben. Neue Funktionen kommen in das passende Themenmodul (mit
+`simlev._r.stats.<name>` gültig bleiben (von den internen Namen nutzt nur
+`tests/werkzeuge/gleichlauf/approx_fuzz.R` `_rmean` über `stats`, RExpr `sort_partial`; die Module
+importieren `_warn` direkt aus `stats_sort`). Neue Funktionen kommen in das passende Themenmodul (mit
 `__all__` und `quiet_fp` am Modulende) und werden in `stats.py` ergänzt. Die
 Julia-Dateien heißen gleich und gehören alle zum Untermodul `RStats`.
 
@@ -551,8 +552,9 @@ ab. Einzelheiten in [`tests/schnittstelle/README.md`](../tests/schnittstelle/REA
 
 ## Schalter `SIMLEV_*`
 
-Alle Umgebungsschalter liest (und setzt) nur `simlev/_r/env.py`; Paket,
-Tests und Werkzeuge holen sie von dort.
+Alle Umgebungsschalter liest (und setzt) `simlev/_r/env.py`; Paket,
+Tests und Werkzeuge holen sie von dort. Ausnahme: `SIMLEV_THREADS` (Threads der elementweisen Kerne,
+seit 1.6.0) liest `simlev/_lib.py` (`nthreads`) direkt.
 Wann gelesen wird, bestimmt die aufrufende Stelle: `tests/lib/reftree.py` und
 `tests/werkzeuge/gleichlauf/vergleich.py` beim Laden, `_collate` beim ersten Vergleich.
 
@@ -608,13 +610,17 @@ Hüllen entfernt; die Ergebnisse der übrigen Research-Kerne blieben bitgleich.
   prüfen Typ, Länge und Beschreibbarkeit und melden unpassende Eingaben als `ValueError`
   (früher rechnete dann der reine Python-Kern).
 - **Bau:** im Klon `rm -rf build && python3 setup.py build_ext --inplace` (legt `simlev/_ext*.so`
-  ab), sonst `pip install .`. Gleitkomma wie R: `-O2 -fno-fast-math -ffp-contract=off`, C++
-  `-std=gnu++17`, slc `-std=c99`, dazu `-fstrict-overflow`, sofern der Compiler es kennt; MSVC
+  ab), sonst `pip install .`. Gleitkomma wie R: `-O2 -fno-fast-math -ffp-contract=off`, alle
+  Quellen C++ `-std=gnu++17` (seit 1.6.0, auch slc), dazu `-fstrict-overflow`, sofern der Compiler es
+  kennt, und seit 1.6.1 `-Wa,-mbranches-within-32B-boundaries`, sofern der Assembler es kennt; MSVC
   `/O2 /fp:precise`. Jede Kerndatei bricht bei `-ffast-math` ab.
 - **NaN-Nutzlast:** Treffen zwei NaN verschiedener Nutzlast aufeinander, wählt der Compiler die
-  Operandenfolge; die Hüllen markieren ihre Prüfungen als unwahrscheinlich (`EXT_FAIL_IF`), damit
-  der Kern wie in R übersetzt wird. Die früheren Nachbildungen der Operandenfolge in den reinen
-  Python-Kernen (`n_add` usw.) sind mit ihnen entfallen.
+  Operandenfolge. Das Makro `EXT_FAIL_IF` (Prüfung als unwahrscheinlich markiert, damit der Kern wie
+  in R übersetzt wird) nutzten nur die mit 1.0.0 entfallenen Bootstrap-Hüllen; seit 1.6.3 ist es
+  entfernt (der Gleichlauf ist ohne den Hinweis bitgleich). Die früheren Nachbildungen der
+  Operandenfolge in den reinen Python-Kernen (`n_add` usw.) sind mit ihnen entfallen. Die
+  gemeinsamen Hilfen der slc-Hüllen (`py_interrupted`, `ctx_init`, `finish`, Puffer) stehen seit
+  1.6.3 einmal in `src/_ext_slc_hull.h`.
 - **Neuen Kern hinzufügen:** Rechnung in `core/` (slc: Regeln in `core/README.md`; geteilter
   C++-Kern: `core/<datei>_impl.h` mit Host-Namen), `core/sync.py --write`, R-Hülle und
   Registrierung in `r/src/init.cpp`, Python-Hülle `src/_ext_<kern>.c(pp)` mit Methodentabelle (in

@@ -134,8 +134,8 @@ function _sched_spec(mode, span, unit, days, dates::Vector{Int}, value, anchor, 
         return (zeros(Int32, 7), 0.0, Float64[], Int32[])
     end
     span === nothing && (span = 1)
-    unit = match_arg(unit, ("month", "quarter", "year"), "unit")
-    anchor = match_arg(anchor, ("start", "end"), "anchor")
+    unit = _match_arg(unit, ("month", "quarter", "year"))
+    anchor = _match_arg(anchor, ("start", "end"))
     start = start_date === nothing ? minimum(dates) : _date_or_fail(start_date)
     dmax = maximum(dates)
     step = trunc(Int, parse(Float64, r_as_character(unit == "quarter" ? span * 3 : span)))

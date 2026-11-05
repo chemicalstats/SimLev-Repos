@@ -184,15 +184,22 @@ def _plain_error(e):
 
 
 def _worker(conn) -> None:
-    """Kindprozess: Indizes empfangen, Element rechnen, Ergebnis senden."""
+    """Kindprozess: Block (erster Index, Anzahl) empfangen, Elemente der Reihe nach rechnen (nach einem Fehler im
+    Block keine weiteren), Ergebnisse als eine Nachricht senden (seit 1.6.3; bis 1.6.2 je Element eine)."""
     X, FUN = _JOB
     try:
         while True:
-            i = conn.recv()
-            if i is None:
+            blk = conn.recv()
+            if blk is None:
                 break
-            ok, val, chunks = _run_one(X, FUN, i)
-            conn.send_bytes(_dumps(i, ok, val, chunks))
+            i0, m = blk
+            parts = []
+            for i in range(i0, i0 + m):
+                ok, val, chunks = _run_one(X, FUN, i)
+                parts.append(_dumps(i, ok, val, chunks))
+                if not ok:
+                    break
+            conn.send_bytes(pickle.dumps(parts, protocol=pickle.HIGHEST_PROTOCOL))
     except (EOFError, BrokenPipeError, KeyboardInterrupt):
         pass
     finally:
@@ -226,11 +233,22 @@ def _forked(X, FUN, n):
                 p.start()
                 cc.close()
                 procs.append((p, pc))
-        for p, pc in procs:
-            if nxt < nx:
-                pc.send(nxt)
+        # Blöcke aufeinanderfolgender Elemente (seit 1.6.3): etwa 8 Blöcke je Kern, höchstens 16 Elemente je
+        # Block; Zuteilung weiter dynamisch, Reihenfolge, Ausgaben und Fehlerregel wie je Element
+        bs = max(1, min(16, nx // (8 * n)))
+
+        def send_next(pc, p):
+            nonlocal nxt
+            if nxt < min(nx, first_err):
+                m = min(bs, nx - nxt, first_err - nxt)
+                pc.send((nxt, m))
                 active[pc] = (p, nxt)
-                nxt += 1
+                nxt += m
+                return True
+            return False
+
+        for p, pc in procs:
+            send_next(pc, p)
         while active:
             for pc in _wait(list(active)):
                 p, i = active.pop(pc)
@@ -239,19 +257,16 @@ def _forked(X, FUN, n):
                 except (EOFError, OSError):
                     raise RuntimeError("par_lapply: Prozess %d endete ohne Ergebnis (Element %d)"
                                        % (p.pid or -1, i + 1)) from None
-                j, ok, val, chunks = pickle.loads(data)
-                if ok is None:
-                    state[j] = 3
-                elif ok:
-                    state[j], res[j], outs[j] = 1, val, chunks
-                else:
-                    state[j], res[j], outs[j] = 2, val, chunks
-                    first_err = min(first_err, j)
-                if nxt < min(nx, first_err):
-                    pc.send(nxt)
-                    active[pc] = (p, nxt)
-                    nxt += 1
-                else:
+                for part in pickle.loads(data):
+                    j, ok, val, chunks = pickle.loads(part)
+                    if ok is None:
+                        state[j] = 3
+                    elif ok:
+                        state[j], res[j], outs[j] = 1, val, chunks
+                    else:
+                        state[j], res[j], outs[j] = 2, val, chunks
+                        first_err = min(first_err, j)
+                if not send_next(pc, p):
                     pc.send(None)
             # Ausgaben in Elementreihenfolge, sobald alle davor fertig sind
             while emitted < nx and state[emitted] in (1, 3) and emitted < first_err:

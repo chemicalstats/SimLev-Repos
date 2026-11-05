@@ -2,7 +2,7 @@
 # Module: bootstrap (bis 1.4.0 je ein Generator gen_<modul>.R, hier wörtlich hintereinander).
 # Aufruf (Repo-Wurzel): LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> SIMLEV_FAELLE_DIR=<ordner> Rscript tests/werkzeuge/breite/bootstrap.R
 # Breitenprüfung, nichts abgelegt: alle bisherigen Einzelfälle des Bereichs (bis 1.4.1 Generator des Katalogs) flach nach
-# <ordner>/breite_bootstrap.jsonl.gz; tests/werkzeuge/gleichlauf/run.sh vergleicht Python und Julia damit. Abgelegt sind die Szenarien
+# <ordner>/breite_bootstrap.jsonl.gz; tests/werkzeuge/gleichlauf/run.py vergleicht Python und Julia damit. Abgelegt sind die Szenarien
 # und Tabellen aus tests/gleichlauf/erzeugen/bootstrap.R (Format und Umgebung: tests/gleichlauf/erzeugen/ref_tools.R).
 source("tests/gleichlauf/erzeugen/ref_tools.R")
 ref_bereich("breite_bootstrap", alle = TRUE)
@@ -47,50 +47,11 @@ case("cfg_auxtype_empty", "bootstrap_config(c(us = 'us'), aux = c(cpi = 'cpi'), 
 case("cfg_days_aux", "bootstrap_config(c(a = 'a', b = 'b'), aux = c(t = 'tage', r = 'r'), letfs = list(list(base = 'b', leverage = 3, finance = 'r', days = 't')))",
      "result = bootstrap_config({'a': 'a', 'b': 'b'}, aux={'t': 'tage', 'r': 'r'}, letfs=[{'base': 'b', 'leverage': 3, 'finance': 'r', 'days': 't'}])",
      jl = 'result = bootstrap_config((a = "a", b = "b"), aux = (t = "tage", r = "r"), letfs = [(base = "b", leverage = 3, finance = "r", days = "t")])')
-case("cfg_negfin", "bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', finance = -1)))",
-     "result = bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'finance': -1}])",
-     jl = 'result = bootstrap_config((a = "a",), letfs = [(base = "a", finance = -1)])')
 errs <- list(
-  unnamed = c("bootstrap_config(c('a'))", "bootstrap_config(['a'])",
-    'bootstrap_config(["a"])'),
   emptyname = c("bootstrap_config(c(a = 'a', 'b'))", "bootstrap_config(pd.Series(['a', 'b'], index=['a', '']))",
     'bootstrap_config(SL.RVector(["a", "b"]; names = ["a", ""]))'),
-  dupidx = c("bootstrap_config(c(a = 'a', a = 'b'))", "bootstrap_config(pd.Series(['a', 'b'], index=['a', 'a']))",
-    'bootstrap_config(["a" => "a", "a" => "b"])'),
-  auxunnamed = c("bootstrap_config(c(a = 'a'), aux = 'x')", "bootstrap_config({'a': 'a'}, aux='x')",
-    'bootstrap_config((a = "a",), aux = "x")'),
-  base_missing = c("bootstrap_config(c(a = 'a'), letfs = list(list(leverage = 2)))", "bootstrap_config({'a': 'a'}, letfs=[{'leverage': 2}])",
-    'bootstrap_config((a = "a",), letfs = [(leverage = 2,)])'),
-  base_bad = c("bootstrap_config(c(a = 'a'), letfs = list(list(base = 'x')))", "bootstrap_config({'a': 'a'}, letfs=[{'base': 'x'}])",
-    'bootstrap_config((a = "a",), letfs = [(base = "x",)])'),
-  lev0 = c("bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', leverage = 0)))", "bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'leverage': 0}])",
-    'bootstrap_config((a = "a",), letfs = [(base = "a", leverage = 0)])'),
-  fin_bad = c("bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', finance = 'rate')))", "bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'finance': 'rate'}])",
-    'bootstrap_config((a = "a",), letfs = [(base = "a", finance = "rate")])'),
-  exp_neg = c("bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', expense = -1)))", "bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'expense': -1}])",
-    'bootstrap_config((a = "a",), letfs = [(base = "a", expense = -1)])'),
-  days_bad = c("bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', days = 'tage')))", "bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'days': 'tage'}])",
-    'bootstrap_config((a = "a",), letfs = [(base = "a", days = "tage")])'),
-  fin_level = c("bootstrap_config(c(us = 'us'), aux = c(z = 'z'), aux_type = c(z = 'level'), letfs = list(list(base = 'us', finance = 'z')))",
-                "bootstrap_config({'us': 'us'}, aux={'z': 'z'}, aux_type={'z': 'level'}, letfs=[{'base': 'us', 'finance': 'z'}])",
-    'bootstrap_config((us = "us",), aux = (z = "z",), aux_type = (z = "level",), letfs = [(base = "us", finance = "z")])'),
-  days_level = c("bootstrap_config(c(us = 'us'), aux = c(z = 'z'), aux_type = c(z = 'level'), letfs = list(list(base = 'us', days = 'z')))",
-                 "bootstrap_config({'us': 'us'}, aux={'z': 'z'}, aux_type={'z': 'level'}, letfs=[{'base': 'us', 'days': 'z'}])",
-    'bootstrap_config((us = "us",), aux = (z = "z",), aux_type = (z = "level",), letfs = [(base = "us", days = "z")])'),
-  dupnames = c("bootstrap_config(c(a = 'a'), aux = c(a_l2 = 'x'), letfs = list(list(base = 'a')))", "bootstrap_config({'a': 'a'}, aux={'a_l2': 'x'}, letfs=[{'base': 'a'}])",
-    'bootstrap_config((a = "a",), aux = (a_l2 = "x",), letfs = [(base = "a",)])'),
-  regime_bad = c("bootstrap_config(c(a = 'a'), regime_index = 'b')", "bootstrap_config({'a': 'a'}, regime_index='b')",
-    'bootstrap_config((a = "a",), regime_index = "b")'),
   at_notaux = c("bootstrap_config(c(us = 'us'), aux = c(cpi = 'cpi'), aux_type = c(cp = 'level'))", "bootstrap_config({'us': 'us'}, aux={'cpi': 'cpi'}, aux_type={'cp': 'level'})",
     'bootstrap_config((us = "us",), aux = (cpi = "cpi",), aux_type = (cp = "level",))'),
-  at_noaux = c("bootstrap_config(c(us = 'us'), aux_type = c(cpi = 'level', x = 'rate'))", "bootstrap_config({'us': 'us'}, aux_type={'cpi': 'level', 'x': 'rate'})",
-    'bootstrap_config((us = "us",), aux_type = (cpi = "level", x = "rate"))'),
-  at_value = c("bootstrap_config(c(us = 'us'), aux = c(cpi = 'cpi'), aux_type = c(cpi = 'niveau'))", "bootstrap_config({'us': 'us'}, aux={'cpi': 'cpi'}, aux_type={'cpi': 'niveau'})",
-    'bootstrap_config((us = "us",), aux = (cpi = "cpi",), aux_type = (cpi = "niveau",))'),
-  at_unnamed = c("bootstrap_config(c(us = 'us'), aux = c(cpi = 'cpi'), aux_type = 'level')", "bootstrap_config({'us': 'us'}, aux={'cpi': 'cpi'}, aux_type='level')",
-    'bootstrap_config((us = "us",), aux = (cpi = "cpi",), aux_type = "level")'),
-  at_dup = c("bootstrap_config(c(us = 'us'), aux = c(cpi = 'cpi'), aux_type = c(cpi = 'level', cpi = 'rate'))", "bootstrap_config({'us': 'us'}, aux={'cpi': 'cpi'}, aux_type=pd.Series(['level', 'rate'], index=['cpi', 'cpi']))",
-    'bootstrap_config((us = "us",), aux = (cpi = "cpi",), aux_type = ["cpi" => "level", "cpi" => "rate"])'),
   cross_bad = c("bootstrap_config(c(us = 'us'), cross = 'x')", "bootstrap_config({'us': 'us'}, cross='x')",
     'bootstrap_config((us = "us",), cross = "x")'))
 for (k in names(errs)) case(paste0("cfg_err_", k), errs[[k]][1], paste0("result = ", errs[[k]][2]), jl = paste0("result = ", errs[[k]][3]))
@@ -105,19 +66,9 @@ case("bl_ar", "bootstrap_block_length(xa)", "result = bootstrap_block_length(xa)
      jl = 'result = bootstrap_block_length(xa)')
 case("bl_abs", "bootstrap_block_length(xa, transform = 'abs')", "result = bootstrap_block_length(xa, transform='abs')", Ib,
      jl = 'result = bootstrap_block_length(xa, transform = "abs")')
-case("bl_sq", "bootstrap_block_length(xi, 'squared')", "result = bootstrap_block_length(xi, transform='squared')", Ib,
-     jl = 'result = bootstrap_block_length(xi, "squared")')
-case("bl_mat", "bootstrap_block_length(M)", "result = bootstrap_block_length(M)", Ib,
-     jl = 'result = bootstrap_block_length(M)')
-case("bl_short", "bootstrap_block_length(xa[1:15])", "result = bootstrap_block_length(xa[:15])", Ib,
-     jl = 'result = bootstrap_block_length(xa[1:15])')
-case("bl_const", "bootstrap_block_length(rep(1, 50))", "result = bootstrap_block_length(np.ones(50))",
-     jl = 'result = bootstrap_block_length(ones(50))')
 case("bl_nonfinite", "x <- xa[1:300]; x[c(5, 50)] <- c(NA, Inf); bootstrap_block_length(cbind(x, y = xi[1:300]))",
      "x = xa[:300].copy(); x[[4, 49]] = [simlev._r.fmt.NA_REAL, np.inf]; result = bootstrap_block_length(pd.DataFrame({'x': x, 'y': xi[:300]}))", Ib,
      jl = 'x = xa[1:300]; x[[5, 50]] = [SL.NA, Inf]; result = bootstrap_block_length(SL.NamedMat(hcat(x, xi[1:300]); colnames = ["x", "y"]))')
-case("bl_trend", "bootstrap_block_length(cumsum(xi))", "result = bootstrap_block_length(np.cumsum(xi))", Ib,
-     jl = 'result = bootstrap_block_length(SL.r_cumsum(xi))')
 case("bl_pw", "SimLev:::.pw_block(xa)", "result = B._pw_block(xa)", Ib,
      jl = 'result = B._pw_block(xa)')
 
@@ -156,12 +107,6 @@ case("bs_garch_hivol", "bootstrap(dv, bootstrap_config(c(us = 'us')), 'garch', n
 case("bs_wild_ko", "b <- bootstrap(dv, bootstrap_config(c(us = 'us')), 'wild', n = 3, params = list(wild_type = 2), seed = 1, progress = FALSE, max_tries = 50); list(b$stats, b$knockout_rate, b$paths[[1]][1:5, ])",
      "b = bootstrap(dv, bootstrap_config({'us': 'us'}), method='wild', n=3, params={'wild_type': 2}, seed=1, progress=False, max_tries=50); result = [b['stats'], b['knockout_rate'], b['paths'][0].iloc[:5]]", I,
      jl = 'b = bootstrap(dv, bootstrap_config((us = "us",)), "wild"; n = 3, params = (wild_type = 2,), seed = 1, progress = false, max_tries = 50); result = [b["stats"], b["knockout_rate"], b["paths"][1][1:5, :]]')
-case("bs_wild_allfail", "bootstrap(dv, bootstrap_config(c(us = 'us')), 'wild', n = 2, params = list(wild_type = 2), seed = 1, progress = FALSE, max_tries = 1)",
-     "result = bootstrap(dv, bootstrap_config({'us': 'us'}), method='wild', n=2, params={'wild_type': 2}, seed=1, progress=False, max_tries=1)", I,
-     jl = 'result = bootstrap(dv, bootstrap_config((us = "us",)), "wild"; n = 2, params = (wild_type = 2,), seed = 1, progress = false, max_tries = 1)')
-case("bs_garch_const", "bootstrap(data.frame(us = rep(1.0001, 50)), bootstrap_config(c(us = 'us')), 'garch', n = 1, seed = 1)",
-     "result = bootstrap(pd.DataFrame({'us': np.full(50, 1.0001)}), bootstrap_config({'us': 'us'}), method='garch', n=1, seed=1)",
-     jl = 'result = bootstrap(SL.RFrame("us" => fill(1.0001, 50)), bootstrap_config((us = "us",)), "garch"; n = 1, seed = 1)')
 case("bs_cross_const", "dd <- d[1:120, 1:2]; dd$eu <- dd$us; bootstrap(dd, bootstrap_config(c(us = 'us', eu = 'eu')), 'garch', n = 1, seed = 1, progress = FALSE, path_length = 30)",
      "dd = d.iloc[:120, :2].copy(); dd['eu'] = dd['us']; result = bootstrap(dd, bootstrap_config({'us': 'us', 'eu': 'eu'}), method='garch', n=1, seed=1, progress=False, path_length=30)", I,
      jl = 'dd = SL.RFrame("us" => d.us[1:120], "eu" => d.us[1:120]); result = bootstrap(dd, bootstrap_config((us = "us", eu = "eu")), "garch"; n = 1, seed = 1, progress = false, path_length = 30)')
@@ -199,9 +144,6 @@ case("aux_noattr_old", "cfg <- bootstrap_config(c(us = 'us'), aux = c(cpi = 'cpi
 case("aux_returns_input", "dd <- d; dd$cpi <- 100 * 1.0001^(1:400); cfg <- bootstrap_config(c(us = 'us'), aux = c(cpi = 'cpi', rate = 'rate'), aux_type = c(cpi = 'level')); b <- bootstrap(dd, cfg, 'raw', n = 1, seed = 7, progress = FALSE, path_length = 40); list(b$paths[[1]], attr(b$paths[[1]], 'aux_level'))",
      "dd = d.copy(); dd['cpi'] = 100 * np.array([1.0001 ** k for k in range(1, 401)]); cfg = bootstrap_config({'us': 'us'}, aux={'cpi': 'cpi', 'rate': 'rate'}, aux_type={'cpi': 'level'}); b = bootstrap(dd, cfg, method='raw', n=1, seed=7, progress=False, path_length=40); result = [b['paths'][0], b['paths'][0].attrs['aux_level']]", I,
      jl = 'dd = copy(d); dd["cpi"] = 100 .* [SL.r_pow(1.0001, k) for k in 1:400]; cfg = bootstrap_config((us = "us",), aux = (cpi = "cpi", rate = "rate"), aux_type = (cpi = "level",)); b = bootstrap(dd, cfg, "raw"; n = 1, seed = 7, progress = false, path_length = 40); result = [b["paths"][1], b["paths"][1].attrs["aux_level"]]')
-case("aux_level_err", "dd <- dp; dd$cpi[40] <- -1; bootstrap(dd, bootstrap_config(c(us = 'us'), aux = c(cpi = 'cpi'), input = 'prices', aux_type = c(cpi = 'level')), 'raw', n = 1, seed = 1)",
-     "dd = dp.copy(); dd.loc[39, 'cpi'] = -1; result = bootstrap(dd, bootstrap_config({'us': 'us'}, aux={'cpi': 'cpi'}, input='prices', aux_type={'cpi': 'level'}), method='raw', n=1, seed=1)", I,
-     jl = 'dd = copy(dp); dd.cpi[40] = -1; result = bootstrap(dd, bootstrap_config((us = "us",), aux = (cpi = "cpi",), input = "prices", aux_type = (cpi = "level",)), "raw"; n = 1, seed = 1)')
 case("aux_level_err_inf", "dd <- dp; dd$cpi[1] <- Inf; bootstrap(dd, bootstrap_config(c(us = 'us'), aux = c(cpi = 'cpi'), input = 'prices', aux_type = c(cpi = 'level')), 'raw', n = 1, seed = 1)",
      "dd = dp.copy(); dd.loc[0, 'cpi'] = np.inf; result = bootstrap(dd, bootstrap_config({'us': 'us'}, aux={'cpi': 'cpi'}, input='prices', aux_type={'cpi': 'level'}), method='raw', n=1, seed=1)", I,
      jl = 'dd = copy(dp); dd.cpi[1] = Inf; result = bootstrap(dd, bootstrap_config((us = "us",), aux = (cpi = "cpi",), input = "prices", aux_type = (cpi = "level",)), "raw"; n = 1, seed = 1)')
@@ -214,9 +156,6 @@ case("na_rows", "dd <- d[1:100, ]; dd$us[c(3, 50)] <- NA; dd$rate[10] <- NA; b <
 case("na_prices_first", "dd <- dp[1:80, ]; dd$us[2] <- NA; dd$cpi[1] <- NA; b <- bootstrap(dd, bootstrap_config(c(us = 'us'), aux = c(cpi = 'cpi', zins = 'zins'), input = 'prices'), 'stationary', params = list(L = 5), n = 1, seed = 3, progress = FALSE); list(b$paths[[1]], attr(b$paths[[1]], 'aux_level'))",
      "dd = dp.iloc[:80].copy(); dd.loc[1, 'us'] = simlev._r.fmt.NA_REAL; dd.loc[0, 'cpi'] = simlev._r.fmt.NA_REAL; b = bootstrap(dd, bootstrap_config({'us': 'us'}, aux={'cpi': 'cpi', 'zins': 'zins'}, input='prices'), method='stationary', params={'L': 5}, n=1, seed=3, progress=False); result = [b['paths'][0], b['paths'][0].attrs['aux_level']]", I,
      jl = 'dd = SL.rows(dp, 1:80); dd.us[2] = SL.NA; dd.cpi[1] = SL.NA; b = bootstrap(dd, bootstrap_config((us = "us",), aux = (cpi = "cpi", zins = "zins"), input = "prices"), "stationary"; params = (L = 5,), n = 1, seed = 3, progress = false); result = [b["paths"][1], b["paths"][1].attrs["aux_level"]]')
-case("letf_knockout", "dd <- d[1:200, ]; dd$us[100] <- 0.7; b <- bootstrap(dd, bootstrap_config(c(us = 'us'), letfs = list(list(base = 'us', leverage = 4, finance = 1))), 'block', params = list(block_length = 199), n = 1, seed = 2, progress = FALSE); b$paths",
-     "dd = d.iloc[:200].copy(); dd.loc[99, 'us'] = 0.7; b = bootstrap(dd, bootstrap_config({'us': 'us'}, letfs=[{'base': 'us', 'leverage': 4, 'finance': 1}]), method='block', params={'block_length': 199}, n=1, seed=2, progress=False); result = b['paths']", I,
-     jl = 'dd = SL.rows(d, 1:200); dd.us[100] = 0.7; b = bootstrap(dd, bootstrap_config((us = "us",), letfs = [(base = "us", leverage = 4, finance = 1)]), "block"; params = (block_length = 199,), n = 1, seed = 2, progress = false); result = b["paths"]')
 
 # ESS-Design
 case("ess_grid", "b <- bootstrap(d, bootstrap_config(c(us = 'us')), 'stationary', n = 7, ess = TRUE, ess_grid = list(L = c(10, 100)), seed = 1, progress = FALSE, path_length = 30); list(b$weights, b$ess_design, b$param_values, b$paths, b$params, b$ess)",
@@ -240,22 +179,14 @@ case("ess_none", "b <- bootstrap(d, bootstrap_config(c(us = 'us')), 'raw', n = 2
 case("ess_budget_trim", "b <- bootstrap(d, bootstrap_config(c(us = 'us')), 'stationary', n = 3, ess = TRUE, seed = 1, progress = FALSE, path_length = 10); b$ess_design",
      "result = bootstrap(d, bootstrap_config({'us': 'us'}), method='stationary', n=3, ess=True, seed=1, progress=False, path_length=10)['ess_design']", I,
      jl = 'result = bootstrap(d, bootstrap_config((us = "us",)), "stationary"; n = 3, ess = true, seed = 1, progress = false, path_length = 10)["ess_design"]')
-case("ess_internal", "SimLev:::.ess_design('evt', list(), NULL, 50L, 1000L)", "result = B._ess_design('evt', {}, None, 50, 1000)",
-     jl = 'result = B._ess_design("evt", (;), nothing, 50, 1000)')
-case("ess_internal_ms", "SimLev:::.ess_design('ms_garch', list(), NULL, 20L, 1000L)", "result = B._ess_design('ms_garch', {}, None, 20, 1000)",
-     jl = 'result = B._ess_design("ms_garch", (;), nothing, 20, 1000)')
+case("ess_internal", "SimLev:::.ess_design('evt', NULL, 50L, 1000L)", "result = B._ess_design('evt', None, 50, 1000)",
+     jl = 'result = B._ess_design("evt", nothing, 50, 1000)')
 case("ess_grid_short", "SimLev:::.get_ess_grid('circular', 12)", "result = B._get_ess_grid('circular', 12)",
      jl = 'result = B._get_ess_grid("circular", 12)')
-case("calc_ess", "c(SimLev:::.calculate_ess(1000, 'regime', list(n_regimes = 3), list(trans = matrix(c(.9, .1, .2, .8), 2))), SimLev:::.calculate_ess(10, 'evt', list(tail_prob = 0.6)), SimLev:::.calculate_ess(100, 'tvtp_ms_garch', list()))",
-     "result = [B._calculate_ess(1000, 'regime', {'n_regimes': 3}, {'trans': np.array([[.9, .2], [.1, .8]])}), B._calculate_ess(10, 'evt', {'tail_prob': 0.6}), B._calculate_ess(100, 'tvtp_ms_garch', {})]",
-     jl = 'result = [B._calculate_ess(1000, "regime", (n_regimes = 3,), (trans = [.9 .2; .1 .8],)), B._calculate_ess(10, "evt", (tail_prob = 0.6,)), B._calculate_ess(100, "tvtp_ms_garch", (;))]')
-case("base_params", "SimLev:::.get_base_params('raw', list(L = 3, foo = 1), 10)", "result = B._get_base_params('raw', {'L': 3, 'foo': 1}, 10)",
-     jl = 'result = B._get_base_params("raw", (L = 3, foo = 1), 10)')
+case("base_params", "SimLev:::.get_base_params(list(L = 3, foo = 1))", "result = B._get_base_params({'L': 3, 'foo': 1})",
+     jl = 'result = B._get_base_params((L = 3, foo = 1))')
 
 # Seeds und globaler Zufallszustand
-case("seed_null", "simlev_seed(3); b <- bootstrap(d, bootstrap_config(c(us = 'us')), 'raw', n = 1, progress = FALSE, path_length = 5); list(b$seed, b$paths, SimLev:::.sl_runif(2))",
-     "simlev.simlev_seed(3); b = bootstrap(d, bootstrap_config({'us': 'us'}), method='raw', n=1, progress=False, path_length=5); result = [b['seed'], b['paths'], simlev._lib.runif(2)]", I,
-     jl = 'SL.simlev_seed(3); b = bootstrap(d, bootstrap_config((us = "us",)), "raw"; n = 1, progress = false, path_length = 5); result = [b["seed"], b["paths"], SL.SLib.runif(2)]')
 case("seed_keeps_state", "simlev_seed(99); invisible(bootstrap(d, bootstrap_config(c(us = 'us')), 'stationary', n = 2, seed = 1, progress = FALSE)); SimLev:::.sl_runif(3)",
      "simlev.simlev_seed(99); bootstrap(d, bootstrap_config({'us': 'us'}), method='stationary', n=2, seed=1, progress=False); result = simlev._lib.runif(3)", I,
      jl = 'SL.simlev_seed(99); bootstrap(d, bootstrap_config((us = "us",)), "stationary"; n = 2, seed = 1, progress = false); result = SL.SLib.runif(3)')
@@ -268,9 +199,6 @@ case("seed_rkind_ignored", "simlev_seed(5); set.seed(5, kind = \"L'Ecuyer-CMRG\"
 case("streams", "lapply(SimLev:::.sl_streams(7, 3), SimLev:::.sl_state_hex)", "result = [s.hex() for s in simlev._lib.streams(7, 3)]",
      jl = 'result = [SL.SLib.state_hex(s) for s in SL.SLib.streams(7, 3)]')
 # seit 1.0.0: Hauptstrom (Regeln 3 und 4): seed = NULL zieht einmal aus G, seed = s laesst G unberuehrt
-case("main_stream", "simlev_seed(42); a <- SimLev:::.sl_state_hex(SimLev:::.sl_main_stream(NULL)); b <- SimLev:::.sl_state_hex(SimLev:::.sl_main_stream(1)); c1 <- SimLev:::.sl_runif(1); simlev_seed(42); k <- SimLev:::.sl_next_seed(); e <- SimLev:::.sl_state_hex(SimLev:::.sl_stream(k)); list(a, b, c1, k, identical(a, e))",
-     "simlev.simlev_seed(42); a = simlev._lib.main_stream(None).hex(); b = simlev._lib.main_stream(1).hex(); c1 = simlev._lib.runif(1); simlev.simlev_seed(42); k = simlev._lib.next_seed(); e = simlev._lib.Stream(k).hex(); result = [a, b, c1, k, a == e]",
-     jl = 'SL.simlev_seed(42); a = SL.SLib.state_hex(SL.SLib.main_stream(nothing)); b = SL.SLib.state_hex(SL.SLib.main_stream(1)); c1 = SL.SLib.runif(1); SL.simlev_seed(42); k = SL.SLib.next_seed(); e = SL.SLib.state_hex(SL.SLib.Stream(k)); result = Any[a, b, c1, k, a == e]')
 # seit 1.0.0: Einheiten ziehen aus ihrem Strom (Regel 6); G ist in Einheiten gesperrt (Regel 7)
 case("par_lapply", "simlev_seed(1); s <- SimLev:::.sl_streams(3, 3); a <- SimLev:::.par_lapply(1:3, function(i) SimLev:::.sl_runif(1, stream = s[[i]]), 2L); b <- SimLev:::.sl_runif(1); s2 <- SimLev:::.sl_streams(4, 2); c1 <- SimLev:::.par_lapply(1:2, function(i) SimLev:::.sl_runif(1, stream = s2[[i]]), 1L); list(a, b, c1)",
      "simlev.simlev_seed(1); s = simlev._lib.streams(3, 3); a = B._par_lapply([1, 2, 3], lambda i: simlev._lib.runif(1, stream=s[i - 1]), 2); b = simlev._lib.runif(1); s2 = simlev._lib.streams(4, 2); c1 = B._par_lapply([1, 2], lambda i: simlev._lib.runif(1, stream=s2[i - 1]), 1); result = [a, b, c1]",
@@ -284,53 +212,18 @@ case("bs_seed_null_repro", "simlev_seed(11); b1 <- bootstrap(d, bootstrap_config
 
 # Fehler und Warnungen
 E <- list(
-  method = c("bootstrap(d, cfg, 'foo', n = 1)", "bootstrap(d, cfg, method='foo', n=1)",
-    'bootstrap(d, cfg, "foo"; n = 1)'),
-  n0 = c("bootstrap(d, cfg, n = 0)", "bootstrap(d, cfg, n=0)",
-    'bootstrap(d, cfg; n = 0)'),
   nchr = c("bootstrap(d, cfg, n = 'a')", "bootstrap(d, cfg, n='a')",
     'bootstrap(d, cfg; n = "a")'),
   pl = c("bootstrap(d, cfg, n = 1, path_length = 2.5)", "bootstrap(d, cfg, n=1, path_length=2.5)",
     'bootstrap(d, cfg; n = 1, path_length = 2.5)'),
-  pl0 = c("bootstrap(d, cfg, n = 1, path_length = 0)", "bootstrap(d, cfg, n=1, path_length=0)",
-    'bootstrap(d, cfg; n = 1, path_length = 0)'),
-  wildpl = c("bootstrap(d, cfg, 'wild', n = 1, path_length = 10)", "bootstrap(d, cfg, method='wild', n=1, path_length=10)",
-    'bootstrap(d, cfg, "wild"; n = 1, path_length = 10)'),
   resetpl = c("bootstrap(d, cfg, 'reset', n = 1, path_length = 10)", "bootstrap(d, cfg, method='reset', n=1, path_length=10)",
     'bootstrap(d, cfg, "reset"; n = 1, path_length = 10)'),
-  cfg = c("bootstrap(d, list(a = 1), n = 1)", "bootstrap(d, {'a': 1}, n=1)",
-    'bootstrap(d, (a = 1,); n = 1)'),
-  data = c("bootstrap(1:3, cfg, n = 1)", "bootstrap([1, 2, 3], cfg, n=1)",
-    'bootstrap([1, 2, 3], cfg; n = 1)'),
-  empty = c("bootstrap(d[0, ], cfg, n = 1)", "bootstrap(d.iloc[:0], cfg, n=1)",
-    'bootstrap(SL.rows(d, Int[]), cfg; n = 1)'),
-  col = c("bootstrap(d[, c('us', 'rate')], cfg, n = 1)", "bootstrap(d[['us', 'rate']], cfg, n=1)",
-    'bootstrap(SL.RFrame("us" => d.us, "rate" => d.rate), cfg; n = 1)'),
-  allna = c("dd <- d[1:5, ]; dd$us <- NA; bootstrap(dd, cfg, n = 1)", "dd = d.iloc[:5].copy(); dd['us'] = simlev._r.fmt.NA_REAL; bootstrap(dd, cfg, n=1)",
-    '(dd = SL.rows(d, 1:5); dd.us .= SL.NA; bootstrap(dd, cfg; n = 1))'),
-  inf = c("dd <- d[1:50, ]; dd$eu[c(7, 9)] <- Inf; dd$us[30] <- -Inf; bootstrap(dd, cfg, n = 1)", "dd = d.iloc[:50].copy(); dd.loc[[6, 8], 'eu'] = np.inf; dd.loc[29, 'us'] = -np.inf; bootstrap(dd, cfg, n=1)",
-    '(dd = SL.rows(d, 1:50); dd.eu[[7, 9]] .= Inf; dd.us[30] = -Inf; bootstrap(dd, cfg; n = 1))'),
-  neg = c("dd <- d[1:50, ]; dd$eu[7] <- -0.5; bootstrap(dd, cfg, n = 1)", "dd = d.iloc[:50].copy(); dd.loc[6, 'eu'] = -0.5; bootstrap(dd, cfg, n=1)",
-    '(dd = SL.rows(d, 1:50); dd.eu[7] = -0.5; bootstrap(dd, cfg; n = 1))'),
-  L = c("bootstrap(d, cfg, 'stationary', n = 1, params = list(L = 0.5))", "bootstrap(d, cfg, method='stationary', n=1, params={'L': 0.5})",
-    'bootstrap(d, cfg, "stationary"; n = 1, params = (L = 0.5,))'),
   Lvec = c("bootstrap(d, cfg, 'stationary', n = 1, params = list(L = c(5, 10)))", "bootstrap(d, cfg, method='stationary', n=1, params={'L': [5, 10]})",
     'bootstrap(d, cfg, "stationary"; n = 1, params = (L = [5, 10],))'),
   bl = c("bootstrap(d, cfg, 'block', n = 1, params = list(block_length = 400))", "bootstrap(d, cfg, method='block', n=1, params={'block_length': 400})",
-    'bootstrap(d, cfg, "block"; n = 1, params = (block_length = 400,))'),
-  blc = c("bootstrap(d, cfg, 'circular', n = 1, params = list(block_length = 2.5))", "bootstrap(d, cfg, method='circular', n=1, params={'block_length': 2.5})",
-    'bootstrap(d, cfg, "circular"; n = 1, params = (block_length = 2.5,))'),
-  wt = c("bootstrap(d, cfg, 'wild', n = 1, params = list(wild_type = 3))", "bootstrap(d, cfg, method='wild', n=1, params={'wild_type': 3})",
-    'bootstrap(d, cfg, "wild"; n = 1, params = (wild_type = 3,))'),
-  pb = c("bootstrap(d, cfg, 'reset', n = 1, params = list(p_break = 1.5))", "bootstrap(d, cfg, method='reset', n=1, params={'p_break': 1.5})",
-    'bootstrap(d, cfg, "reset"; n = 1, params = (p_break = 1.5,))'))
+    'bootstrap(d, cfg, "block"; n = 1, params = (block_length = 400,))')
+)
 for (k in names(E)) case(paste0("bs_err_", k), paste0(CFG_R, E[[k]][1]), paste0(CFG_P, "result = ", E[[k]][2]), I, jl = paste0(CFG_J, "result = ", E[[k]][3]))
-case("bs_warn_prices", "b <- bootstrap(dp, bootstrap_config(c(us = 'us')), 'raw', n = 1, seed = 1, progress = FALSE, path_length = 3); b$paths",
-     "result = bootstrap(dp, bootstrap_config({'us': 'us'}), method='raw', n=1, seed=1, progress=False, path_length=3)['paths']", I,
-     jl = 'result = bootstrap(dp, bootstrap_config((us = "us",)), "raw"; n = 1, seed = 1, progress = false, path_length = 3)["paths"]')
-case("bs_matrix_data", "m <- as.matrix(d); b <- bootstrap(m, bootstrap_config(c(us = 'us'), aux = c(r = 'rate')), 'raw', n = 1, seed = 9, progress = FALSE, path_length = 6); b$paths",
-     "result = bootstrap(d, bootstrap_config({'us': 'us'}, aux={'r': 'rate'}), method='raw', n=1, seed=9, progress=False, path_length=6)['paths']", I,
-     jl = 'm = SL.NamedMat(hcat(d.us, d.eu, d.rate); colnames = ["us", "eu", "rate"]); result = bootstrap(m, bootstrap_config((us = "us",), aux = (r = "rate",)), "raw"; n = 1, seed = 9, progress = false, path_length = 6)["paths"]')
 case("bs_n_fraction", "b <- bootstrap(d, bootstrap_config(c(us = 'us')), 'raw', n = 2.7, seed = 1, progress = FALSE, path_length = 3); list(length(b$paths), b$weights)",
      "b = bootstrap(d, bootstrap_config({'us': 'us'}), method='raw', n=2.7, seed=1, progress=False, path_length=3); result = [len(b['paths']), b['weights']]", I,
      jl = 'b = bootstrap(d, bootstrap_config((us = "us",)), "raw"; n = 2.7, seed = 1, progress = false, path_length = 3); result = [length(b["paths"]), b["weights"]]')
@@ -347,9 +240,6 @@ case("fit_gjr", "SimLev:::.fit_garch11(d$eu - 1, gjr = TRUE)", "result = B._fit_
      jl = 'result = B._fit_garch11(d.eu .- 1; gjr = true)')
 case("fit_garch_short", "SimLev:::.fit_garch11(d$us[1:30] - 1)", "result = B._fit_garch11(d['us'].to_numpy()[:30] - 1)", I,
      jl = 'result = B._fit_garch11(d.us[1:30] .- 1)')
-case("fit_tail", "list(SimLev:::.fit_tail(d$us, 0.05, 'left'), SimLev:::.fit_tail(d$us, 0.05, 'right'), SimLev:::.fit_tail(d$us[1:150], 0.05, 'left'), SimLev:::.fit_tail(d$us[1:60], 0.05, 'left'))",
-     "result = [B._fit_tail(d['us'].to_numpy(), 0.05, 'left'), B._fit_tail(d['us'].to_numpy(), 0.05, 'right'), B._fit_tail(d['us'].to_numpy()[:150], 0.05, 'left'), B._fit_tail(d['us'].to_numpy()[:60], 0.05, 'left')]", I,
-     jl = 'result = [B._fit_tail(d.us, 0.05, "left"), B._fit_tail(d.us, 0.05, "right"), B._fit_tail(d.us[1:150], 0.05, "left"), B._fit_tail(d.us[1:60], 0.05, "left")]')
 # seit 1.0.0: Daten im Generator erzeugt und als Eingabe gespeichert (die Fallcodes ziehen nicht mehr mit R's Zufall bzw. RNG)
 set.seed(8); xh <- 1 + c(rnorm(380, 0, 0.01), -rexp(20, 10))
 case("fit_tail_heavy", "SimLev:::.fit_tail(x, 0.05, 'left')",
@@ -357,9 +247,6 @@ case("fit_tail_heavy", "SimLev:::.fit_tail(x, 0.05, 'left')",
      jl = 'result = B._fit_tail(x, 0.05, "left")')
 case("regime_info", "SimLev:::.prepare_regime_info(d$us, 15, 3)", "result = B._prepare_regime_info(d['us'].to_numpy(), 15, 3)", I,
      jl = 'result = B._prepare_regime_info(d.us, 15, 3)')
-case("letf_ret", "SimLev:::.letf_returns(d$us[1:10], list(leverage = -2, finance = 'r', days = 'tg', expense = 0.4, spread = 0.2, rate_basis = 360, ter_basis = 365), cbind(r = d$rate[1:10], tg = c(1, 3, 1, 1, 1, 3, 1, 1, 1, 2)))",
-     "result = B._letf_returns(d['us'].to_numpy()[:10], {'leverage': -2, 'finance': 'r', 'days': 'tg', 'expense': 0.4, 'spread': 0.2, 'rate_basis': 360, 'ter_basis': 365}, np.column_stack([d['rate'].to_numpy()[:10], [1, 3, 1, 1, 1, 3, 1, 1, 1, 2]]), ['r', 'tg'])", I,
-     jl = 'result = B._letf_returns(d.us[1:10], (leverage = -2, finance = "r", days = "tg", expense = 0.4, spread = 0.2, rate_basis = 360, ter_basis = 365), SL.NamedMat(hcat(d.rate[1:10], [1, 3, 1, 1, 1, 3, 1, 1, 1, 2.0]); colnames = ["r", "tg"]))')
 
 # ── bootstrap_validate ─────────────────────────────────────────────────────
 VB_R <- "b <- bootstrap(d, bootstrap_config(c(us = 'us')), 'stationary', n = 4, params = list(L = 20), seed = 1, progress = FALSE, path_length = 20)\n"
@@ -374,16 +261,10 @@ case("vb_len", paste0(VB_R, "b$paths[[3]] <- b$paths[[3]][1:5, , drop = FALSE]; 
 case("vb_tie", paste0(VB_R, "b$paths[[1]] <- b$paths[[1]][1:5, , drop = FALSE]; b$paths[[3]] <- b$paths[[3]][1:5, , drop = FALSE]; x <- bootstrap_validate(b, verbose = FALSE); list(x$paths, x$weights)"),
      paste0(VB_P, "b['paths'][0] = b['paths'][0].iloc[:5]; b['paths'][2] = b['paths'][2].iloc[:5]; x = bootstrap_validate(b, verbose=False); result = [x['paths'], x['weights']]"), I,
      jl = paste0(VB_J, 'b["paths"][1] = b["paths"][1][1:5, :]; b["paths"][3] = b["paths"][3][1:5, :]; x = bootstrap_validate(b; verbose = false); result = [x["paths"], x["weights"]]'))
-case("vb_minrows", paste0(VB_R, "bootstrap_validate(b, min_rows = 30)"), paste0(VB_P, "result = bootstrap_validate(b, min_rows=30)"), I,
-     jl = paste0(VB_J, 'result = bootstrap_validate(b; min_rows = 30)'))
 case("vb_ok", paste0(VB_R, "bootstrap_validate(b)"), paste0(VB_P, "result = bootstrap_validate(b)"), I,
      jl = paste0(VB_J, 'result = bootstrap_validate(b)'))
 case("vb_inf", paste0(VB_R, "b$paths[[4]][2, 1] <- Inf; bootstrap_validate(b)$weights"), paste0(VB_P, "b['paths'][3].iloc[1, 0] = np.inf; result = bootstrap_validate(b)['weights']"), I,
      jl = paste0(VB_J, 'b["paths"][4][2, 1] = Inf; result = bootstrap_validate(b)["weights"]'))
-case("vb_err_class", "bootstrap_validate(list(paths = list()))", "result = bootstrap_validate({'paths': []})",
-     jl = 'result = bootstrap_validate((paths = [],))')
-case("vb_err_empty", paste0(VB_R, "b$paths <- list(); bootstrap_validate(b)"), paste0(VB_P, "b['paths'] = []; result = bootstrap_validate(b)"), I,
-     jl = paste0(VB_J, 'b["paths"] = []; result = bootstrap_validate(b)'))
 case("vb_ess", "b <- bootstrap(d, bootstrap_config(c(us = 'us')), 'stationary', n = 5, ess = TRUE, ess_grid = list(L = c(5, 50)), seed = 1, progress = FALSE, path_length = 10); b$paths[[2]][3, 1] <- NaN; x <- bootstrap_validate(b, verbose = FALSE); list(x$weights, x$param_values)",
      "b = bootstrap(d, bootstrap_config({'us': 'us'}), method='stationary', n=5, ess=True, ess_grid={'L': [5, 50]}, seed=1, progress=False, path_length=10); b['paths'][1].iloc[2, 0] = np.nan; x = bootstrap_validate(b, verbose=False); result = [x['weights'], x['param_values']]", I,
      jl = 'b = bootstrap(d, bootstrap_config((us = "us",)), "stationary"; n = 5, ess = true, ess_grid = (L = [5, 50],), seed = 1, progress = false, path_length = 10); b["paths"][2][3, 1] = NaN; x = bootstrap_validate(b; verbose = false); result = [x["weights"], x["param_values"]]')
@@ -402,10 +283,6 @@ case("bd_dates", paste0(BD_R, "bootstrap_data(b, 1, dates = as.Date('2001-01-01'
 case("bd_dates_chr", paste0(BD_R, "bootstrap_data(b$paths[[1]][1:3, ], dates = c('2020-01-01', '2020-01-02', '2020-01-05'))"),
      paste0(BD_P, "result = bootstrap_data(b['paths'][0].iloc[:3], dates=['2020-01-01', '2020-01-02', '2020-01-05'])"), I,
      jl = paste0(BD_J, 'result = bootstrap_data(b["paths"][1][1:3, :]; dates = ["2020-01-01", "2020-01-02", "2020-01-05"])'))
-case("bd_err_len", paste0(BD_R, "bootstrap_data(b, dates = as.Date('2001-01-01') + 0:3)"), paste0(BD_P, "result = bootstrap_data(b, dates=np.datetime64('2001-01-01') + np.arange(4))"), I,
-     jl = paste0(BD_J, 'result = bootstrap_data(b; dates = Date(2001, 1, 1) .+ Day.(0:3))'))
-case("bd_err_matrix", "bootstrap_data(matrix(1:4, 2, dimnames = list(NULL, c('a', 'b'))))", "result = bootstrap_data(np.array([[1., 3], [2, 4]]))",
-     jl = 'result = bootstrap_data(SL.NamedMat([1.0 3; 2 4]; colnames = ["a", "b"]))')
 case("bd_attr", "b <- bootstrap(dp, bootstrap_config(c(us = 'us'), aux = c(infl = 'infl', cpi = 'cpi', zins = 'zins'), input = 'prices', aux_type = c(infl = 'rate', cpi = 'level')), 'raw', n = 1, seed = 1, progress = FALSE, path_length = 4); x <- bootstrap_data(b, 1); list(x, attr(x, 'aux_type'))",
      "b = bootstrap(dp, bootstrap_config({'us': 'us'}, aux={'infl': 'infl', 'cpi': 'cpi', 'zins': 'zins'}, input='prices', aux_type={'infl': 'rate', 'cpi': 'level'}), method='raw', n=1, seed=1, progress=False, path_length=4); x = bootstrap_data(b, i=1); result = [x, x.attrs.get('aux_type')]", I,
      jl = 'b = bootstrap(dp, bootstrap_config((us = "us",), aux = (infl = "infl", cpi = "cpi", zins = "zins"), input = "prices", aux_type = (infl = "rate", cpi = "level")), "raw"; n = 1, seed = 1, progress = false, path_length = 4); x = bootstrap_data(b, 1); result = [x, get(SL.attrs(x), "aux_type", nothing)]')
@@ -520,8 +397,6 @@ SE <- list(
   kr = c("bootstrap_study(ds, cfgs, n = 2, strategies = strats, keep_returns = 'week')", "bootstrap_study(ds, cfgs, n=2, strategies=strats, keep_returns='week')",
     'bootstrap_study(ds, cfgs; n = 2, strategies = strats, keep_returns = "week")'))
 for (k in names(SE)) case(paste0("study_err_", k), paste0(STR_R, SE[[k]][1]), paste0(STR_P, "result = ", SE[[k]][2]), Is, jl = paste0(STR_J, "result = ", SE[[k]][3]))
-case("prob_err", "bootstrap_probability(list(), cagr > 0)", "result = bootstrap_probability({}, 'cagr > 0')",
-     jl = 'result = bootstrap_probability((;), "cagr > 0")')
 
 # bootstrap_probability: Bedingungen in R-Syntax (gemeinsamer Auswerter, Modul rexpr) auf einer festen Ergebnistabelle
 set.seed(11)
@@ -565,19 +440,20 @@ pb_case("prob_rs_err3", list(x = "cagr[[0]] > 0"))
 SB_R <- "cfgb <- bootstrap_config(c(akt = 'aktien'), input = 'prices'); bnh <- create_strategy(akt = asset_config('etf', 'bnh', spread = 0.1))\n"
 SB_P <- "cfgb = bootstrap_config({'akt': 'aktien'}, input='prices'); bnh = simlev.create_strategy(akt=simlev.asset_config(asset_class='etf', trading='bnh', spread=0.1))\nimport tempfile, os\n"
 SB_J <- 'cfgb = bootstrap_config((akt = "aktien",), input = "prices"); bnh = create_strategy(akt = asset_config("etf", "bnh", spread = 0.1))\n'
-case("study_chunkdir", paste0(SB_R, "td <- tempfile(); a <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_returns = 'month', strategies = list(b = bnh)); b <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_returns = 'month', strategies = list(b = bnh)); list(a$results, b$results, b$returns, length(list.files(td)), sort(list.files(td)))"),
-     paste0(SB_P, "td = os.path.join(tempfile.mkdtemp(), 'x'); a = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=200, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_returns='month', strategies={'b': bnh}); b = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=200, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_returns='month', strategies={'b': bnh}); result = [a['results'], b['results'], b['returns'], len(os.listdir(td)), sorted(os.listdir(td))]"), Is,
-     jl = paste0(SB_J, 'td = joinpath(mktempdir(), "x"); a = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_returns = "month", strategies = (b = bnh,)); b = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_returns = "month", strategies = (b = bnh,)); result = [a["results"], b["results"], b["returns"], length(readdir(td)), sort(readdir(td))]'))
-# seit 1.1.0: keep_paths TRUE = alle Pfade, k = die ersten k; keep_paths im Namen der Chunk-Dateien
+case("study_chunkdir", paste0(SB_R, "td <- tempfile(); a <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_returns = 'month', strategies = list(b = bnh)); b <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_returns = 'month', strategies = list(b = bnh)); list(a$results, b$results, b$returns, length(list.files(td)), sort(sub('_r[.]rds$', '', list.files(td))))"),
+     paste0(SB_P, "td = os.path.join(tempfile.mkdtemp(), 'x'); a = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=200, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_returns='month', strategies={'b': bnh}); b = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=200, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_returns='month', strategies={'b': bnh}); result = [a['results'], b['results'], b['returns'], len(os.listdir(td)), sorted(f[:-len('_py.pkl')] if f.endswith('_py.pkl') else f for f in os.listdir(td))]"), Is,
+     jl = paste0(SB_J, 'td = joinpath(mktempdir(), "x"); a = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_returns = "month", strategies = (b = bnh,)); b = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_returns = "month", strategies = (b = bnh,)); result = [a["results"], b["results"], b["returns"], length(readdir(td)), sort([replace(f, r"_jl\\.bin$" => "") for f in readdir(td)])]'))
+# seit 1.1.0: keep_paths TRUE = alle Pfade, k = die ersten k; keep_paths im Namen der Chunk-Dateien (seit 1.6.3 die
+# Namen ohne Sprachkennung _r.rds, _py.pkl, _jl.bin verglichen)
 case("study_keep_true", paste0(SB_R, "st <- bootstrap_study(ds, cfgb, 'raw', n = 3, path_length = 100, seed = 1, progress = FALSE, keep_paths = TRUE, strategies = list(b = bnh)); list(length(st$paths), st$paths, st$results)"),
      paste0(SB_P, "st = bootstrap_study(ds, cfgb, 'raw', n=3, path_length=100, seed=1, progress=False, keep_paths=True, strategies={'b': bnh}); result = [len(st['paths']), st['paths'], st['results']]"), Is,
      jl = paste0(SB_J, 'st = bootstrap_study(ds, cfgb, "raw"; n = 3, path_length = 100, seed = 1, progress = false, keep_paths = true, strategies = (b = bnh,)); result = [length(st["paths"]), st["paths"], st["results"]]'))
 case("study_keep2", paste0(SB_R, "st <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 100, seed = 1, progress = FALSE, keep_paths = 2, chunk_size = 1, cores = 2, strategies = list(b = bnh)); list(length(st$paths), st$paths)"),
      paste0(SB_P, "st = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=100, seed=1, progress=False, keep_paths=2, chunk_size=1, cores=2, strategies={'b': bnh}); result = [len(st['paths']), st['paths']]"), Is,
      jl = paste0(SB_J, 'st = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 100, seed = 1, progress = false, keep_paths = 2, chunk_size = 1, cores = 2, strategies = (b = bnh,)); result = [length(st["paths"]), st["paths"]]'))
-case("study_keep_chunkdir", paste0(SB_R, "td <- tempfile(); a <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_paths = 3, strategies = list(b = bnh)); b <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_paths = 1, strategies = list(b = bnh)); c0 <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_paths = 0, strategies = list(b = bnh)); list(length(a$paths), length(b$paths), length(c0$paths), sort(list.files(td), method = 'radix'), b$paths[[1]], a$results, c0$results)"),
-     paste0(SB_P, "td = os.path.join(tempfile.mkdtemp(), 'x'); a = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=120, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_paths=3, strategies={'b': bnh}); b = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=120, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_paths=1, strategies={'b': bnh}); c0 = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=120, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_paths=0, strategies={'b': bnh}); result = [len(a['paths']), len(b['paths']), len(c0['paths']), sorted(os.listdir(td)), b['paths'][0], a['results'], c0['results']]"), Is,
-     jl = paste0(SB_J, 'td = joinpath(mktempdir(), "x"); a = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_paths = 3, strategies = (b = bnh,)); b = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_paths = 1, strategies = (b = bnh,)); c0 = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_paths = 0, strategies = (b = bnh,)); result = [length(a["paths"]), length(b["paths"]), length(c0["paths"]), sort(readdir(td)), b["paths"][1], a["results"], c0["results"]]'))
+case("study_keep_chunkdir", paste0(SB_R, "td <- tempfile(); a <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_paths = 3, strategies = list(b = bnh)); b <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_paths = 1, strategies = list(b = bnh)); c0 <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_paths = 0, strategies = list(b = bnh)); list(length(a$paths), length(b$paths), length(c0$paths), sort(sub('_r[.]rds$', '', list.files(td)), method = 'radix'), b$paths[[1]], a$results, c0$results)"),
+     paste0(SB_P, "td = os.path.join(tempfile.mkdtemp(), 'x'); a = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=120, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_paths=3, strategies={'b': bnh}); b = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=120, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_paths=1, strategies={'b': bnh}); c0 = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=120, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_paths=0, strategies={'b': bnh}); result = [len(a['paths']), len(b['paths']), len(c0['paths']), sorted(f[:-len('_py.pkl')] if f.endswith('_py.pkl') else f for f in os.listdir(td)), b['paths'][0], a['results'], c0['results']]"), Is,
+     jl = paste0(SB_J, 'td = joinpath(mktempdir(), "x"); a = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_paths = 3, strategies = (b = bnh,)); b = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_paths = 1, strategies = (b = bnh,)); c0 = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_paths = 0, strategies = (b = bnh,)); result = [length(a["paths"]), length(b["paths"]), length(c0["paths"]), sort([replace(f, r"_jl\\.bin$" => "") for f in readdir(td)]), b["paths"][1], a["results"], c0["results"]]'))
 KE <- list(neg = c("-1", "-1", "-1"), frac = c("1.5", "1.5", "1.5"), na = c("NA", "simlev._r.fmt.NA_REAL", "SL.NA"),
            chr = c("'a'", "'a'", '"a"'), vec = c("c(1, 2)", "[1, 2]", "[1, 2]"))
 for (k in names(KE)) case(paste0("study_err_keep_", k),

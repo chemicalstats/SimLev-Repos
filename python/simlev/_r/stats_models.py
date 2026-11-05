@@ -22,24 +22,7 @@ from .linalg import RError, _vec_out
 from .. import _ext   # C-Kern sl_r_p_adjust (core/slc_rbase_models.cpp, seit 1.6.0)
 from .stats_sort import _vec
 
-__all__ = ["p_adjust", "fitted", "coef", "residuals"]
-
-
-# ── generische Zugriffe ──────────────────────────────────────────────────
-
-def coef(obj):
-    """``coef(obj)``."""
-    return obj["coefficients"]
-
-
-def fitted(obj):
-    """``fitted(obj)``."""
-    return obj["fitted.values"]
-
-
-def residuals(obj):
-    """``residuals(obj)`` (Antwort-Residuen)."""
-    return obj["residuals"]
+__all__ = ["p_adjust"]
 
 
 # ── p.adjust / ecdf / ave / aggregate ────────────────────────────────────

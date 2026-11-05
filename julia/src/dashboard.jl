@@ -535,7 +535,7 @@ function plot_dashboard(x; style = ("full", "compact", "custom"), panels = nothi
                         colors = nothing, width::Real = 1400, height = nothing, file = nothing, kwargs...)
     _warn_unknown_kw("plot_dashboard", collect(keys(kwargs)))
     file === nothing || _check_svg_file(file, "plot_dashboard")
-    style = match_arg(style, ("full", "compact", "custom"), "style")
+    style = _match_arg(style, ("full", "compact", "custom"))
     panels_given = panels !== nothing
     pv = panels === nothing ? collect(_DEFAULT_PANELS) : panels isa AbstractString ? [panels] : panels
     if !(pv isa Union{AbstractVector,Tuple}) || isempty(pv) || !all(p -> p isa AbstractString, pv)

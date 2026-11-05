@@ -18,7 +18,7 @@ import pandas as pd
 from . import _ext
 from ._dates import days_from_civil, from_days
 from ._meldungen import EVAL_WARN as _MELD_EVAL_WARN
-from ._r.rformat import r_as_character, r_format, r_format1, r_sprintf
+from ._r.rformat import _is_num, r_as_character, r_format, r_format1, r_sprintf  # noqa: F401 (_is_num auch für Nachbarmodule)
 from ._r.rnum import r_mean, r_pow, r_pow_vec, r_sd, r_sum
 from .config import _match_arg
 from ._tax_tariff import SimLevTaxTariff
@@ -58,13 +58,6 @@ def _sp(fmt: str, *args) -> str:
     return r_sprintf(fmt, *args)
 
 
-def _rmin(a: float, b: float) -> float:
-    """R ``min(a, b)`` für zwei Skalare (NaN pflanzt sich fort)."""
-    if a != a or b != b:
-        return NA
-    return b if b < a else a
-
-
 def _rmax(a: float, b: float) -> float:
     """R ``max(a, b)`` für zwei Skalare (NaN pflanzt sich fort)."""
     if a != a or b != b:
@@ -81,10 +74,6 @@ def _isna(x: Any) -> bool:
         return x is pd.NA or x is pd.NaT
     except Exception:  # noqa: BLE001
         return False
-
-
-def _is_num(x: Any) -> bool:
-    return isinstance(x, (int, float, np.integer, np.floating)) and not isinstance(x, (bool, np.bool_))
 
 
 def _is_bool(x: Any) -> bool:
@@ -404,8 +393,8 @@ def _column(v: Any) -> tuple[str, np.ndarray]:
         if isinstance(dt, pd.CategoricalDtype):
             return "factor", np.array([None if _isna(x) else str(x) for x in v], dtype=object)
         if pd.api.types.is_bool_dtype(dt):
-            if dt == bool:
-                return "logical", np.array([bool(x) for x in v], dtype=object)
+            if dt == bool:   # numpy-bool: object-Feld aus True/False (seit 1.6.3 ohne Schleife, gleiche Objekte)
+                return "logical", v.to_numpy(dtype=bool).astype(object)
             return "logical", np.array([None if _isna(x) else bool(x) for x in v], dtype=object)
         if pd.api.types.is_datetime64_any_dtype(dt):
             raw = v.to_numpy() if getattr(dt, "tz", None) is None else None
@@ -449,8 +438,8 @@ def _to_frame(data: Any) -> _Frame:
             _stop("simulation: Spaltenname '%s' kommt in 'data' mehrfach vor; jede Spalte muss eindeutig benannt "
                   "sein." % dup)
         cols, kinds = {}, {}
-        for j, nm in enumerate(names):
-            k, a = _column(data.iloc[:, j])
+        for nm, (_, v) in zip(names, data.items()):   # items(): dieselben Spalten wie iloc[:, j], ohne Indexer
+            k, a = _column(v)
             cols[nm], kinds[nm] = a, k
         return _Frame(names, cols, kinds, data.attrs.get("filled") if hasattr(data, "attrs") else None)
     names = [str(k) for k in data.keys()]

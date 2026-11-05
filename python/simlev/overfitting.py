@@ -30,15 +30,16 @@ from . import _lib
 from ._r import fmt as _fmt
 from ._r.rlist import RList
 from . import _dependence_core as _dcore
-from ._r.rnum import r_colmeans, r_colsums, r_rowmeans, r_mean, r_mean_int, r_median, r_pow, r_prod, r_cumprod, r_sum, r_var, r_sd
+from ._r.rnum import r_colsums, r_rowmeans, r_mean, r_mean_int, r_median, r_pow_vec, r_prod, r_cumprod, r_sum, r_var, r_sd
 # Grafik: Bausteine des Stils Ergebnisgrafiken und Zahlen wie in Julia aus svg.py
-from .svg import (_jl_unique, _res_abline, _res_fig, _res_finish, _res_hline, _res_legend, _res_line, _res_panel,
+from .svg import (_res_abline, _res_fig, _res_finish, _res_hline, _res_legend, _res_line, _res_panel,
                   _res_points, _res_range, _res_rect, _res_vline)
 from ._util import _match_arg
 from ._util import _geo_ann, _geo_ret
 from ._util import _which_max
 from ._util import _ext
 from ._util import _fmt_vec
+from ._util import _colmeans, _rank_avg
 
 __all__ = ["overfit_pbo", "sharpe_probabilistic", "sharpe_deflated", "overfit_walk_forward", "param_bootstrap",
            "sharpe_haircut", "SimLevPBO", "SimLevDSR", "SimLevWalkForward"]
@@ -53,13 +54,8 @@ _EPOCH = np.datetime64("1970-01-01", "D")
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _as_dates(x):
-    """Datumswerte (bereits von ``_to_date`` geprüft) → ``datetime64[D]``-Array."""
-    if x is None:
-        return None
-    a = np.asarray(x)
-    if np.issubdtype(a.dtype, np.datetime64):
-        return a.astype("datetime64[D]").ravel()
-    return pd.to_datetime(pd.Series(np.asarray(x).ravel())).to_numpy().astype("datetime64[D]")
+    """Datumswerte (``datetime64[D]`` aus ``data_prep._to_date``/``_add_months``) → flaches ``datetime64[D]``-Array."""
+    return np.asarray(x).astype("datetime64[D]").ravel()
 
 
 def _to_date(x, what):
@@ -77,14 +73,6 @@ def _colsums(M):
     return r_colsums(M)
 
 
-def _colmeans(M):
-    """``colMeans``: long-double-Summe / n, dann double."""
-    n, p = M.shape
-    if n == 0:
-        return np.full(p, _NAN)
-    return r_colmeans(M)
-
-
 def _rowmeans(M):
     return r_rowmeans(M)
 
@@ -93,20 +81,15 @@ def _rowsum(M, codes, ng):
     """``rowsum(x, g, reorder = FALSE)``: double-Akkumulation in Zeilenreihenfolge."""
     out = np.zeros((ng, M.shape[1]))
     with np.errstate(invalid="ignore"):     # NA (signalisierendes NaN) wie in R ohne Warnung
-        for i in range(M.shape[0]):
-            out[codes[i]] = out[codes[i]] + M[i]
+        A = np.asarray(M, dtype=np.float64)
+        if not np.isnan(A).any():
+            # ohne NaN (seit 1.6.3): np.add.at ungepuffert in Zeilenreihenfolge; Addition ist dann vertauschbar,
+            # also dieselben Bits wie die Schleife (bei zwei NaN nimmt add.at die Nutzlast des zweiten Summanden)
+            np.add.at(out, np.asarray(codes, dtype=np.intp), A)
+        else:
+            for i in range(M.shape[0]):
+                out[codes[i]] = out[codes[i]] + M[i]
     return out
-
-
-def _matprod(A, B):
-    """``A %m% B`` wie R (slc-Matrixprodukt)."""
-    return np.asarray(_lib.matmul(A, B), dtype=np.float64)
-
-
-def _rank_avg(x):
-    """``rank(x)`` mit ``ties.method = "average"``."""
-    from ._r.stats import rank
-    return np.asarray(rank(np.asarray(x, dtype=np.float64)), dtype=np.float64)
 
 
 def _stats(name):
@@ -140,19 +123,12 @@ def _sprintf(f, *a):
     return _fmt.sprintf(f, *a)
 
 
-def _cat(s):
-    print(s, end="")
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Renditematrix
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _is_param_search(x):
-    try:
-        from .param_search import SimLevParamSearch
-    except ImportError:          # pragma: no cover
-        return False
+    from .param_search import SimLevParamSearch
     return isinstance(x, SimLevParamSearch)
 
 
@@ -576,8 +552,8 @@ def sharpe_probabilistic(r, *, benchmark=0, ppy=52):
     sr = mu / sd
     sr0 = benchmark / math.sqrt(ppy)
     z = (r - r_mean(r)) / r_sd(r)
-    g3 = r_mean(np.array([r_pow(v, 3.0) for v in z]))
-    g4 = r_mean(np.array([r_pow(v, 4.0) for v in z]))
+    g3 = r_mean(r_pow_vec(z, 3.0))   # Kern, je Element r_pow1 wie r_pow
+    g4 = r_mean(r_pow_vec(z, 4.0))
     den = 1 - g3 * sr + (g4 - 1) / 4 * (sr * sr)
     den = den if (math.isnan(den) or den >= 1e-12) else 1e-12
     q = (sr - sr0) * math.sqrt(n - 1) / math.sqrt(den)
@@ -676,8 +652,8 @@ def sharpe_deflated(x, *, id=None, n_trials=None, effective=True,  # noqa: A002 
         j = int(hits[0])
     if N > 1:
         Cm = _cor(R)
-        iu = [Cm[i, jj] for jj in range(N) for i in range(jj)]
-        rho = r_mean(np.array(iu, dtype=np.float64), na_rm=True)
+        iu = np.asarray(Cm, dtype=np.float64).T[np.tril_indices(N, -1)]   # oberes Dreieck spaltenweise wie R
+        rho = r_mean(np.ascontiguousarray(iu), na_rm=True)
     else:
         rho = 1.0
     n_eff = max(1.0, rho + (1 - max(rho, 0.0)) * N)
@@ -756,7 +732,7 @@ def _plot_wf(x):
         lo /= 1.1
         hi *= 1.1
     f = _res_fig(760, 420)
-    yrs = _jl_unique((dates.astype("datetime64[Y]").astype(np.int64) + 1970).tolist())
+    yrs = list(dict.fromkeys((dates.astype("datetime64[Y]").astype(np.int64) + 1970).tolist()))   # = _jl_unique für int
     jan1 = [float(np.datetime64(y - 1970, "Y").astype("datetime64[D]").astype(np.int64)) for y in yrs]
     xt = [z for z in jan1 if dd[0] <= z <= dd[-1]]
     p = _res_panel(f, 70, 40, 660, 320, (dd[0], dd[0] + 1 if dd[-1] == dd[0] else dd[-1]), (lo, hi), logy=True,

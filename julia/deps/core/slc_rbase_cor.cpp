@@ -26,23 +26,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static double bits_d(uint64_t u)
-{
-    double d;
-    memcpy(&d, &u, sizeof d);
-    return d;
-}
 
-static int is_na(double x)
-{
-    uint64_t u;
-    if (!isnan(x)) return 0;
-    memcpy(&u, &x, sizeof u);
-    return (u & UINT64_C(0xFFFFFFFF)) == 1954;
-}
 
-#define R_NA bits_d(UINT64_C(0x7FF00000000007A2))
-#define R_NAN bits_d(UINT64_C(0x7FF8000000000000))
 
 /* _corcov: Prüfungen wie die Ports, dann sl_r_cov */
 static int corcov(sl_ctx *cx, int64_t n, int64_t ncx, const double *x, int64_t ncy, const double *y, int use,
@@ -64,7 +49,7 @@ static int rank_keep(int64_t n, const double *x, double *out, double *w1, double
         if (!isnan(x[i])) w1[m++] = x[i];
     if (m > 0 && sl_r_rank(m, w1, 0, w2)) return SL_ENOMEM;
     m = 0;
-    for (i = 0; i < n; i++) out[i] = isnan(x[i]) ? R_NA : w2[m++];
+    for (i = 0; i < n; i++) out[i] = isnan(x[i]) ? SLR_NA : w2[m++];
     return 0;
 }
 
@@ -154,7 +139,7 @@ int sl_r_cor(sl_ctx *cx, int64_t n, int64_t ncx, const double *x, int xmat, int6
                     m++;
                 }
                 if (m == 0) {
-                    r = R_NA;
+                    r = SLR_NA;
                 } else {
                     if (sl_r_rank(m, a, 0, rx) || sl_r_rank(m, b, 0, ry)) { st = SL_ENOMEM; goto done; }
                     st = corcov(cx, m, 1, rx, 1, ry, 1, kend, 1, &r, sd0);
@@ -195,15 +180,15 @@ void sl_r_cov2cor(int64_t p, const double *v, double *out, int *warn)
             is[i] = sqrt(1.0 / d);
             if (!isfinite(is[i])) *warn = 1;
         } else {
-            is[i] = R_NAN;
+            is[i] = SLR_NAN;
             *warn = 1;
         }
     }
     for (j = 0; j < p; j++)
         for (i = 0; i < p; i++) {
             double a = v[i + j * p], r = (is[i] * a) * is[j];
-            if (is_na(a)) r = R_NA;
-            else if (isnan(r)) r = R_NAN;
+            if (slr_is_na(a)) r = SLR_NA;
+            else if (isnan(r)) r = SLR_NAN;
             out[i + j * p] = r;
         }
     for (i = 0; i < p; i++) out[i + i * p] = 1.0;

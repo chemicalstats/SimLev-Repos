@@ -21,6 +21,7 @@ Rechenregeln des Anteilswerts (wörtlich wie im Kopf von ``r/R/wrapper.R``; Reih
    ``t``, sonst 365), ``fee_t = a * k``, ``U = a - fee_t``, ``acc_t = performance_fee / 100 * max(0, U - H)``,
    ``nav_t = U - acc_t``; am letzten NAV-Tag eines Kalenderjahres (nicht am letzten insgesamt) Festschreibung
    ``paid_t = acc_t``, ``U = nav_t``, ``H = max(H, U)``; ``gross_t = 100 * G_t / S``, ``hwm_t = H``.
+   Schritte 2 und 3 rechnet seit 1.5.1 der gemeinsame Kern ``core/wrapper_core_impl.h`` (``wrapper_nav_core``).
 
 Der Paketzustand der Ordergebühren (``_sim_base._FEE``, R ``.fee_env``) wird vor der inneren Rechnung gesichert
 und danach (auch bei Fehlern) wiederhergestellt. Meldungen der inneren Rechnung erscheinen als
@@ -38,23 +39,19 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
-from ._dates import fmt_date, year_of
+from ._dates import fmt_date
+from . import _dependence_core as _dcore
 from ._r.rformat import r_format1, r_sprintf
 from ._r.rlist import RList
 from ._r.rnum import r_sum
-from ._sim_base import _FEE, _Frame, _fee_spec, _filled_matrix, _isna, _message, _to_frame
+from ._sim_base import _FEE, _Frame, _StudyCache, _fee_spec, _filled_matrix, _isna, _message, _to_frame
 from ._sim_blocks import (SimLevFundsCosts, SimLevRebalancePlan, SimLevSplitRule, _blk_print, _cls, _fee_text,
                           _fmt, _one_num, _sched_text, _show, funds_costs, sim_costs)
 from .config import (Strategy, _is_wrapper, _strategy_columns, _strategy_wrappers, _wrapper_assets_text,
                      create_strategy, strategy_validate)
-from .data_prep import _to_date
+from .data_prep import _days_to_civil, _to_date
 
 __all__ = ["wrapper_config", "wrapper_nav", "SimLevWrapperConfig", "SimLevWrapperNav"]
-
-
-def _is_leap(y: int) -> bool:
-    """``.wrapper_is_leap``."""
-    return (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
 
 
 # ── wrapper_config ───────────────────────────────────────────────────────────
@@ -315,6 +312,66 @@ class _MsgPrefix(io.TextIOBase):
         self._t.flush()
 
 
+class _Tee(io.TextIOBase):
+    """Strom weitergeben und mitschreiben (Wiederholung der Meldungen eines gemerkten Anteilswerts)."""
+
+    def __init__(self, target):
+        super().__init__()
+        self._t = target
+        self.text = []
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, s: str) -> int:
+        self.text.append(s)
+        return self._t.write(s)
+
+    def flush(self) -> None:
+        self._t.flush()
+
+
+def _nav_same(a, b) -> bool:
+    """Gleichheit zweier Schlüsselteile des Anteilswert-Caches: Felder Bit für Bit (object-Felder nur mit
+    identischen Elementen oder gleichen Zeichenketten), sonst ``==`` bzw. Identität für Objekte."""
+    if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
+        if not (isinstance(a, np.ndarray) and isinstance(b, np.ndarray)) or a.dtype != b.dtype or a.shape != b.shape:
+            return False
+        if a.dtype.kind in "fiub":
+            return a.tobytes() == b.tobytes()
+        if a.dtype == object:
+            return all(x is y or (type(x) is str and type(y) is str and x == y)
+                       for x, y in zip(a.ravel().tolist(), b.ravel().tolist()))
+        return False
+    if isinstance(a, tuple) and isinstance(b, tuple):
+        return len(a) == len(b) and all(_nav_same(x, y) for x, y in zip(a, b))
+    return type(a) is type(b) and a == b
+
+
+def _nav_key(d: _Frame, wrapper, splits, tag: str, who: str):
+    """Schlüssel der inneren Rechnung von ``_wrapper_nav_calc`` in einer Studie (seit 1.6.3, Teil B B15): Daten
+    (Spalten Bit für Bit, Arten, Attribut ``filled``), Wrapper und seine Bausteine (Identität), Splits (Schwellen),
+    Kennungen der Meldungen. ``None``, wenn eine Eingabe sich nicht sicher vergleichen lässt (dann kein Cache)."""
+    fa = d.filled_attr
+    if fa is None:
+        fk = None
+    elif isinstance(fa, pd.DataFrame) and all(dt == np.bool_ for dt in fa.dtypes):
+        fk = (tuple(str(c) for c in fa.columns), np.ascontiguousarray(fa.to_numpy(dtype=bool)))
+    else:
+        return None
+    if splits is None:
+        sk = None
+    elif isinstance(splits, SimLevSplitRule) and list(splits.keys()) == ["thresh"]:
+        sk = ("thresh", np.array(np.asarray(splits["thresh"], dtype=np.float64), copy=True))
+    else:
+        return None
+    if any(d.kinds[nm] not in ("numeric", "date", "logical", "character", "factor") for nm in d.names):
+        return None
+    objs = (wrapper, wrapper["strategy"], wrapper["rebalance"], wrapper["order_fee"], wrapper["volume"])
+    return (tag, who, tuple(id(o) for o in objs), sk, tuple(d.names), tuple(d.kinds[nm] for nm in d.names),
+            tuple(np.copy(d.cols[nm]) for nm in d.names), fk), objs
+
+
 def _cond_msg(e: BaseException) -> str:
     """``conditionMessage(e)``."""
     if isinstance(e, KeyError) and e.args:
@@ -363,27 +420,42 @@ def _wrapper_nav_calc(data: _Frame, wrapper: SimLevWrapperConfig, splits: Any, t
     S = 100.0 if wrapper["volume"] is None else float(wrapper["volume"])
 
     # Paketzustand der Ordergebühren sichern; die innere Rechnung setzt ihn zurück
-    fee_old = dict(vars(_FEE))
-    pre = _MsgPrefix(sys.stderr, tag)
-    caught: list = []
+    # In einer Studie (sensitivity_*, param_search, bootstrap_study, …) merkt sich die Rechnung je Kennung die
+    # letzte innere Rechnung ohne Fehler samt ihren Meldungen und Warnungen (seit 1.6.3); bei gleichem Schlüssel
+    # (_nav_key) werden diese wiederholt statt neu gerechnet. Außerhalb einer Studie unverändert.
+    kk = _nav_key(d, wrapper, splits, tag, who) if _StudyCache.on else None
+    ent = _StudyCache.m.get("wrapper_nav:" + tag) if kk is not None else None
     err = None
-    try:
-        with warnings.catch_warnings(record=True) as wl:
-            warnings.simplefilter("always")
-            try:
-                with contextlib.redirect_stderr(pre):
-                    res = simulation(d, st, start_value=S, costs=sim_costs(order_fee=wrapper["order_fee"]),
-                                     rebalance=wrapper["rebalance"], splits=splits, tax=None, fractions=True)
-            except Exception as e:  # noqa: BLE001 - R: tryCatch(error = )
-                err = e
-            finally:
-                pre.flush()
-            caught = list(wl)
-    finally:
-        vars(_FEE).clear()
-        vars(_FEE).update(fee_old)
-    for w in caught:
-        warnings.warn("%s (innere Rechnung): %s" % (who, str(w.message)), UserWarning, stacklevel=2)
+    if ent is not None and _nav_same(ent[0], kk[0]):
+        text, msgs, res = ent[1]
+        if text:
+            sys.stderr.write(text)
+        sys.stderr.flush()
+    else:
+        fee_old = dict(vars(_FEE))
+        tee = _Tee(sys.stderr) if kk is not None else None
+        pre = _MsgPrefix(sys.stderr if tee is None else tee, tag)
+        caught: list = []
+        try:
+            with warnings.catch_warnings(record=True) as wl:
+                warnings.simplefilter("always")
+                try:
+                    with contextlib.redirect_stderr(pre):
+                        res = simulation(d, st, start_value=S, costs=sim_costs(order_fee=wrapper["order_fee"]),
+                                         rebalance=wrapper["rebalance"], splits=splits, tax=None, fractions=True)
+                except Exception as e:  # noqa: BLE001 - R: tryCatch(error = )
+                    err = e
+                finally:
+                    pre.flush()
+                caught = list(wl)
+        finally:
+            vars(_FEE).clear()
+            vars(_FEE).update(fee_old)
+        msgs = [str(w.message) for w in caught]
+        if kk is not None and err is None:
+            _StudyCache.m["wrapper_nav:" + tag] = (kk[0], ("".join(tee.text), msgs, res), kk[1])
+    for m in msgs:
+        warnings.warn("%s (innere Rechnung): %s" % (who, m), UserWarning, stacklevel=2)
     if err is not None:
         raise ValueError("%s (innere Rechnung): %s" % (who, _cond_msg(err))) from err
 
@@ -396,40 +468,16 @@ def _wrapper_nav_calc(data: _Frame, wrapper: SimLevWrapperConfig, splits: Any, t
         raise ValueError("%s: keine Handelstage in der inneren Rechnung (alle Tage aufgefüllt)." % who)
     day = rdays[idx]
     G = np.asarray(res["worth"], dtype=np.float64)[idx]
-    yr = [year_of(int(z)) for z in day]
+    yr = _days_to_civil(day)[0]                      # seit 1.5.1 vektorisiert statt year_of je Tag
     fee = float(wrapper["costs"]["fee"])
     pf = float(wrapper["costs"]["performance_fee"])
-    n = idx.size
-    nav = np.zeros(n)
-    gross = np.zeros(n)
-    fee_t = np.zeros(n)
-    acc_t = np.zeros(n)
-    paid_t = np.zeros(n)
-    hwm = np.zeros(n)
-    U = 100.0
-    H = 100.0
-    G_prev = S
-    d_prev = float(rdays[0])
-    for t in range(n):
-        g = float(G[t])
-        if not (G_prev > 0) or not math.isfinite(g) or not (g > 0):
-            raise ValueError("%s: innerer Wert am %s ist %s (vorher %s); der Anteilswert ist dann nicht definiert."
-                             % (who, fmt_date(int(day[t])), r_format1(g), r_format1(G_prev)))
-        D = 366.0 if _is_leap(yr[t]) else 365.0
-        a = U * (g / G_prev)
-        k = fee / 100 * (float(day[t]) - d_prev) / D
-        fee_t[t] = a * k
-        U = a - fee_t[t]
-        acc_t[t] = pf / 100 * max(0.0, U - H)
-        nav[t] = U - acc_t[t]
-        if t < n - 1 and yr[t + 1] != yr[t]:     # letzter NAV-Tag des Kalenderjahres (nicht der letzte insgesamt)
-            paid_t[t] = acc_t[t]
-            U = nav[t]
-            H = max(H, U)
-        gross[t] = 100 * g / S
-        hwm[t] = H
-        G_prev = g
-        d_prev = float(day[t])
+    # Tagesschleife im Kern (core/wrapper_core_impl.h, wrapper_nav_core; bis 1.5.0 hier in Python)
+    bad, nav, gross, fee_t, acc_t, paid_t, hwm = _dcore.wrapper_nav_core(G, day.astype(np.float64), yr, fee, pf, S,
+                                                                         float(rdays[0]))
+    if bad >= 0:
+        G_prev = S if bad == 0 else float(G[bad - 1])
+        raise ValueError("%s: innerer Wert am %s ist %s (vorher %s); der Anteilswert ist dann nicht definiert."
+                         % (who, fmt_date(int(day[bad])), r_format1(float(G[bad])), r_format1(G_prev)))
     out = SimLevWrapperNav({"date": day.astype("datetime64[D]"), "nav": nav, "gross": gross, "fee": fee_t,
                             "perf_fee": acc_t, "perf_paid": paid_t, "hwm": hwm})
     object.__setattr__(out, "_attrs", _NavAttrs(inner=res, wrapper=wrapper))   # Auswahl ohne attrs (_NavAttrs)

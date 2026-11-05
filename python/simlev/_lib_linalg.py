@@ -128,9 +128,12 @@ def _err_mm():
 
 
 def matmul(x, y):
-    """x %*% y mit den Vektorregeln von %*% (1-D-Felder sind Vektoren)."""
-    xm, ym = _is_mat(x), _is_mat(y)
-    xv, yv = _vec(x), _vec(y)
+    """x %*% y mit den Vektorregeln von %*% (1-D-Felder sind Vektoren). Seit 1.6.3 je Argument eine Umwandlung
+    und die flache Fassung nur für Vektoren (eine spaltenweise Matrix wird damit nicht kopiert)."""
+    x, y = _arr(x), _arr(y)
+    xm, ym = x.ndim == 2, y.ndim == 2
+    xv = None if xm else _vec(x)
+    yv = None if ym else _vec(y)
     if not xm and not ym:
         nx, ny = xv.size, yv.size
         if nx == ny:

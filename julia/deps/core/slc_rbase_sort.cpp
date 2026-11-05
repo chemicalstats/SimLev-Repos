@@ -43,20 +43,13 @@
  * Prüforakel: R 4.3.3 (Gleichlauf: rbase_fuzz.R).
  */
 #include "slc_internal.h"
-#include "slc_rbase.h"
+#include "slc_rbase2.h"
 
 #include <float.h>
 #include <stdlib.h>
 #include <string.h>
 
-static double bits_d(uint64_t u)
-{
-    double d;
-    memcpy(&d, &u, sizeof d);
-    return d;
-}
 
-#define R_NA bits_d(UINT64_C(0x7FF00000000007A2))
 
 /* ── order ─────────────────────────────────────────────────────────────── */
 
@@ -298,7 +291,7 @@ int sl_r_psort(int64_t n, double *x, int64_t nk, const int64_t *k)
 /* ── quantile ──────────────────────────────────────────────────────────── */
 
 /* Wert an 1-basierter Stelle i oder NA außerhalb */
-static double at1(const double *x, int64_t n, int64_t i) { return (i >= 1 && i <= n) ? x[i - 1] : R_NA; }
+static double at1(const double *x, int64_t n, int64_t i) { return (i >= 1 && i <= n) ? x[i - 1] : SLR_NA; }
 
 static int64_t add_unique(int64_t *part, int64_t np, double v)
 {
@@ -377,7 +370,7 @@ int sl_r_quantile(int64_t n, const double *x, int64_t np, const double *p, int t
             xx[n + 2] = xs[n - 1]; xx[n + 3] = xs[n - 1];
             nxx = n + 4;
         } else {
-            xx[0] = R_NA; xx[1] = R_NA;
+            xx[0] = SLR_NA; xx[1] = SLR_NA;
             nxx = 2;
         }
         for (k = 0; k < np; k++) {
@@ -450,7 +443,7 @@ void sl_r_findinterval(int64_t nv, const double *vec, int64_t nx, const double *
     int64_t i, r;
     for (i = 0; i < nx; i++) {
         double xi = x[i];
-        if (xi != xi) { out[i] = R_NA; continue; }
+        if (xi != xi) { out[i] = SLR_NA; continue; }
         r = count_le(vec, nv, xi, !left_open);
         if (all_inside && nv > 0) {                 /* 0 -> 1, N -> N - 1 */
             if (r == 0) r = 1;

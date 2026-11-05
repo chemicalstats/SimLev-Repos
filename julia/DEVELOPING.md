@@ -163,7 +163,8 @@ Eingaben nehmen zusätzlich die natürlichen Julia-Formen an (NamedTuple oder
     `RBase.sys_time()` und `SIMLEV_R_SYS_TIME` (gosolnp) gibt es nicht mehr.
 
 Keine externen Pakete; erlaubt ist nur die Standardbibliothek (`Dates`, `Printf`, `Logging`,
-`Libdl`). Zum Bau (`Pkg.build`) braucht SimLev einen C-Compiler.
+`Libdl`). Abhängigkeiten in `Project.toml` sind seit 1.6.3 nur `Dates` und `Printf` (Logger über
+`Base.CoreLogging`). Zum Bau (`Pkg.build`) braucht SimLev einen C-Compiler.
 
 ## Parallelität (`cores`)
 
@@ -379,6 +380,9 @@ C++-Compiler (Schalter wie Python: `-O2 -std=gnu++17 -ffp-contract=off -fno-fast
 `SIMLEV_FP_CONTRACT_BY_FLAG`) in `libslc`; `src/cabi.jl` (Modul `CAbi`) wertet die Rückgabecodes aus,
 die Aufrufe stehen in `core.jl`, `signals_core.jl`, `withdrawal_core.jl`, `dependence_core.jl` und
 `optimize_core.jl` (die früheren eigenen Ports sind entfallen).
+**Benutzerabbruch:** Ein `ccall` lässt sich nicht unterbrechen; Strg-C wirkt in Julia erst nach der Rückkehr des
+Kerns (slc wie die geteilten Kerne). R und Python prüfen den Abbruch auch im Kern. Den Merker
+`simlev_c_interrupt`, den Rückgabecode 2 und `CAbi.INTERRUPT`, die Julia nie setzte, gibt es seit 1.6.3 nicht mehr.
 `core/sync.py --write` kopiert, `--check` vergleicht alle Kopien per SHA-256 (Ende 1 bei
 Abweichung) und läuft in jeder Gleichlaufprüfung.
 

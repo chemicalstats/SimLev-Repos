@@ -4,8 +4,8 @@
 # -std=gnu++17 (CXX_STD), -O2 (setzt R ueber CXXFLAGS), kein Zusammenziehen zu fma, kein fast-math.
 # SIMLEV_FP_CONTRACT_BY_FLAG: das GCC-Pragma der geteilten Kerne entfaellt (Flag statt Pragma).
 # Die Kerndateien brechen bei __FAST_MATH__ ab (slc_internal.h, *_core_impl.h).
-# Parallele Starts des MS-GARCH-Fits mit POSIX-Threads (SLC_THREADS, nur slc_msgarch.cpp nutzt es;
-# Makevars.win ohne, dort laufen die Starts nacheinander, Ergebnis gleich).
+# POSIX-Threads (SLC_THREADS) fuer die parallelen Starts des MS-GARCH-Fits (slc_msgarch.cpp) und die elementweisen
+# Kerne (slc_prep.cpp, seit 1.6.0); Makevars.win ohne, dort laufen sie nacheinander, Ergebnis gleich.
 # Seit 1.6.1 stehen die Gleitkomma-Schalter wie bis 1.5.2 in einer eigenen Variablen mit einer Regel je Datei
 # (statt PKG_CXXFLAGS, das R CMD check als nicht portabel meldet); core/sync.py --check prueft, dass jede
 # .cpp-Datei in src/ hier eine Regel hat (in Makevars und Makevars.win). Gleicher Maschinencode wie 1.6.0.

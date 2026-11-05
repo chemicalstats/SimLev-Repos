@@ -446,10 +446,11 @@ ps = param_search(d, p -> (strategy = st, signal = df -> signal_sma(df["A"]; n =
 println(ps["results"])
 ```
 """
-function param_search(data, builder_pos = nothing, space_pos = _MISSING; builder = builder_pos, space = space_pos,
+SimLev.@study function param_search(data, builder_pos = nothing, space_pos = _MISSING; builder = builder_pos, space = space_pos,
                       strategy = nothing, method = nothing, n = 50, constraint = nothing,
                       sim_args = nothing, burn_in = 0, metrics = nothing, objective = "sharpe", maximize = true,
                       keep_returns = nothing, seed = nothing, cores = 1)
+    @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
     data = SimLev.as_rframe(data)
     method = OF._match_arg(method, ("grid", "random", "lhs"))
     # Text statt Logisch, ohne Alias (E1); logisch vor dem Text prüfen
@@ -569,6 +570,22 @@ function _dist_matrix(Z::Matrix{Float64})
     D
 end
 
+function _ps_grid_nb(Lm::Matrix{Int}, Lok::BitMatrix, nr::Int, np_::Int, radius)
+    out = Vector{Vector{Int}}()
+    for i in 1:nr
+        ok = Int[]
+        for r in 1:nr
+            good = true
+            for c in 1:np_
+                (!Lok[r, c] || !Lok[i, c] || abs(Lm[r, c] - Lm[i, c]) > radius) && (good = false; break)
+            end
+            good && push!(ok, r)
+        end
+        push!(out, ok)
+    end
+    return out
+end
+
 "Nachbarschaften im Parameterraum (`.ps_neighbours`): je Punkt 1-basierte Zeilennummern."
 function _ps_neighbours(x; radius = 1, k = 5)
     params = OF._strs(x["params"])
@@ -576,20 +593,15 @@ function _ps_neighbours(x; radius = 1, k = 5)
     nr = SL.nrow(res)
     if x["method"] == "grid"
         L = [_match(res[p], _ps_levels(x["space"][p])) for p in params]
-        out = Vector{Vector{Int}}()
-        for i in 1:nr
-            ok = Int[]
-            for r in 1:nr
-                good = true
-                for c in eachindex(params)
-                    a = L[c][r]; b = L[c][i]
-                    (a === nothing || b === nothing || abs(a - b) > radius) && (good = false; break)
-                end
-                good && push!(ok, r)
-            end
-            push!(out, ok)
+        # seit 1.6.3 Stufen als Int-Matrix mit Merker für fehlende Stufen (bis 1.6.2 Union-Vektoren je Vergleich);
+        # gleiche Bedingung, gleiche Reihenfolge der Treffer
+        np_ = length(params)
+        Lm = zeros(Int, nr, np_); Lok = falses(nr, np_)
+        for c in 1:np_, r in 1:nr
+            a = L[c][r]
+            a === nothing || (Lm[r, c] = a; Lok[r, c] = true)
         end
-        return out
+        return _ps_grid_nb(Lm, Lok, nr, np_, radius)
     end
     zs = Vector{Vector{Float64}}()
     for p in params
@@ -605,7 +617,7 @@ function _ps_neighbours(x; radius = 1, k = 5)
     return [OF._order(D[i, :])[1:m] for i in 1:size(Z, 1)]
 end
 
-const _LOWER_BETTER = ("max_drawdown", "avg_drawdown", "dd_q50", "dd_q90", "ulcer_index", "longest_drawdown")
+const _LOWER_BETTER = SimLev.Bootstrap._LOWER_BETTER   # eine Liste (seit 1.6.3)
 
 """
     param_plateau(x; metric = x.objective, radius = 1, k = 5)
@@ -722,7 +734,7 @@ function _print_ps(io::IO, x; kw...)
     return nothing
 end
 
-function _plot_ps(x; metric = nothing, params = nothing, fun = maximum, file = nothing, kw...)
+function _plot_ps(x; metric = nothing, params = nothing, fun = maximum, kw...)
     tab = x["results"]
     metric === nothing && (metric = x["objective"])
     params = params === nothing ? OF._strs(x["params"])[1:min(2, end)] : OF._strs(params)
@@ -737,7 +749,7 @@ function _plot_ps(x; metric = nothing, params = nothing, fun = maximum, file = n
         p = _res_panel(f, 70, 40, 600, 360, _res_range(xs), _res_range(a); title = "$metric nach $(params[1])",
                        xlab = params[1], ylab = metric)
         _res_line!(f, p, xs, a); _res_points!(f, p, xs, a)
-        return (_res_finish(f; file = file), SL.RList("profile" => SL.RFrame("x" => lev, "value" => a)))
+        return (_res_finish(f), SL.RList("profile" => SL.RFrame("x" => lev, "value" => a)))
     end
     if x["method"] != "grid"
         xs = OF._tofloat(tab[params[1]]); ys = OF._tofloat(tab[params[2]])
@@ -746,7 +758,7 @@ function _plot_ps(x; metric = nothing, params = nothing, fun = maximum, file = n
         p = _res_panel(f, 70, 40, 600, 360, _res_range(xs), _res_range(ys); title = "$metric (Farbe; blau = hoch)",
                        xlab = params[1], ylab = params[2])
         _res_points!(f, p, xs, ys; color = cols, r = 5)
-        return (_res_finish(f; file = file), SL.RList("scatter" => SL.RFrame("x" => xs, "y" => ys, "value" => vals)))
+        return (_res_finish(f), SL.RList("scatter" => SL.RFrame("x" => xs, "y" => ys, "value" => vals)))
     end
     g1 = tab[params[1]]; g2 = tab[params[2]]
     l1 = sort(unique(collect(g1)); alg = MergeSort, lt = SimLev.RStats.r_isless)
@@ -772,7 +784,7 @@ function _plot_ps(x; metric = nothing, params = nothing, fun = maximum, file = n
     end
     # gezeichnete Zellen (Zielgröße unskaliert): x = Stufe von params[1], y = Stufe von params[2]
     data = SL.RList("heatmap" => SL.RFrame("x" => l1[ci], "y" => l2[cj], "value" => Float64[M[i, j] for (i, j) in zip(ci, cj)]))
-    return (_res_finish(f; file = file), data)
+    return (_res_finish(f), data)
 end
 
 function __init__()

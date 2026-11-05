@@ -24,7 +24,6 @@ from ._util import _which_max
 
 __all__ = ["regime_hmm", "regime_states", "SimLevHMM"]
 
-_NAN = float("nan")      # R's NaN
 _NA = _fmt.NA_REAL       # R's NA_real_
 
 

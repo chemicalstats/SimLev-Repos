@@ -26,22 +26,13 @@ const LIBM = SimLev._LIBM
 
 # ── rohe glibc-Aufrufe (C-Semantik) ─────────────────────────────────────────
 for f in (:exp, :log, :log1p, :expm1, :log2, :log10, :sin, :cos, :tan, :tanh, :atanh, :atan,
-          :asin, :acos, :sinh, :cosh, :lgamma, :sqrt, :cbrt, :erf, :erfc, :tgamma, :exp2,
-          :asinh, :acosh)
+          :asin, :acos, :sinh, :cosh, :lgamma)
     cf = Symbol(:c_, f)
     @eval @inline $cf(x::Float64) = ccall(($(QuoteNode(f)), LIBM), Float64, (Float64,), x)
 end
-for f in (:pow, :atan2, :fmod, :hypot)
+for f in (:atan2,)
     cf = Symbol(:c_, f)
     @eval @inline $cf(x::Float64, y::Float64) = ccall(($(QuoteNode(f)), LIBM), Float64, (Float64, Float64), x, y)
-end
-"C `ldexp(x, e)`."
-@inline c_ldexp(x::Float64, e::Integer) = ccall((:ldexp, LIBM), Float64, (Float64, Cint), x, Cint(e))
-"C `frexp(x)` → (Mantisse, Exponent)."
-@inline function c_frexp(x::Float64)
-    e = Ref{Cint}(0)
-    r = ccall((:frexp, LIBM), Float64, (Float64, Ref{Cint}), x, e)
-    return r, Int(e[])
 end
 
 # ── Skalarkerne mit R-Randfällen ───────────────────────────────────────────

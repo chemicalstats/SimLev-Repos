@@ -31,13 +31,14 @@ from ._r import libm as _libm
 from . import _lib
 from ._r import linalg as _la          # bleibende Hilfen diag, outer (Inventar A.3.2)
 from ._r.rlist import RList
-from ._r.rnum import r_cumsum, r_mean, r_pow, r_sd
+from ._r.rnum import r_cumsum, r_mean, r_pow, r_rowsums, r_sd, r_sum
 from .tactical import (
-    _as_weights_m, _colmeans, _days, _fmt1, _hold_rows_m, _ldsum, _mean_int,
+    _as_weights_m, _colmeans, _days, _fmt1, _hold_rows_m, _mean_int,
     _period_last, _rowsums, _setdiff, _unique,
 )
 from .svg import _alloc_c, _alloc_ticks, _esc, _jl_max, _jl_min, _jl_str
 from ._util import _dates as _as_dates, _match_arg, _which_max, _which_min
+from ._util import _pow_rec, _stats as _st
 
 __all__ = ["portfolio_optimize", "portfolio_frontier", "portfolio_rolling", "portfolio_risk_contributions",
            "portfolio_cpcv", "SimLevOptimization", "SimLevFrontier", "SimLevCPCV", "SimLevBoundsPercent",
@@ -61,11 +62,6 @@ class SimLevBoundsPercent(UserWarning):
 
 def _warn(msg, cat=UserWarning):
     warnings.warn(msg, cat, stacklevel=3)
-
-
-def _st():
-    from ._r import stats
-    return stats
 
 
 # ── kleine R-Hilfen ──────────────────────────────────────────────────────
@@ -102,13 +98,30 @@ def _quantile(x, p):
 
 
 def _sum(x):
-    return _ldsum(x)
+    """``sum(x)`` (long double, sequenziell; seit 1.6.3 ohne die errstate-Hülle von ``tactical._ldsum``)."""
+    return r_sum(np.asarray(x, dtype=np.float64).ravel())
 
 
 def _sumsq_f(A):
     """``sum(A^2)`` einer Matrix (spaltenweise Reihenfolge, long double)."""
     a = np.asarray(A, dtype=np.float64).ravel(order="F")
-    return _ldsum(a * a)
+    return r_sum(a * a)
+
+
+def _lw_acc(X, S1):
+    """Ledoit-Wolf: je Zeile t ``sum((x_t x_t' - S1)^2) / N`` (spaltenweise, long double) wie die Schleife über
+    ``tcrossprod`` bis 1.6.2, für endliche ``X`` in Blöcken ohne Zeilenschleife (seit 1.6.3): Produkt ``0 + x_i x_j``
+    wie im Kern, Differenz, Quadrat, Zeilensumme über ``r_rowsums`` (long double, gleiche Reihenfolge)."""
+    Tn, N = X.shape
+    acc = np.empty(Tn)
+    S1t = np.ascontiguousarray(np.asarray(S1, dtype=np.float64).T)      # [j, i] = S1[i, j]: spaltenweise Folge
+    step = max(1, 2000000 // max(1, N * N))
+    for a in range(0, Tn, step):
+        Xb = X[a:a + step]
+        Q = (0.0 + Xb[:, None, :] * Xb[:, :, None]) - S1t[None, :, :]   # [t, j, i] = x_i x_j - S1[i, j]
+        Q = (Q * Q).reshape(Xb.shape[0], N * N)
+        acc[a:a + step] = r_rowsums(Q) / N
+    return acc
 
 
 def _named_vec(x):
@@ -321,9 +334,12 @@ def _opt_cov_m(R, type):  # noqa: A002
             return _sumsq_f(A) / N
 
         d2 = nrm(S1 - dm)
-        acc = np.empty(Tn)
-        for t in range(Tn):
-            acc[t] = nrm(np.asarray(_lib.tcrossprod(X[t, :]), dtype=np.float64) - S1)
+        if X.size and np.isfinite(X).all() and np.abs(X).max() < 1e75 and np.isfinite(S1).all():
+            acc = _lw_acc(X, S1)   # ohne Überlauf, also auch ohne numpy-Warnung (wie die Schleife)
+        else:   # NaN/Inf oder sehr große Werte: Schleife wie bis 1.6.2 (Nutzlasten, Überlaufwarnungen gleich)
+            acc = np.empty(Tn)
+            for t in range(Tn):
+                acc[t] = nrm(np.asarray(_lib.tcrossprod(X[t, :]), dtype=np.float64) - S1)
         b2 = min(d2, _sum(acc) / (Tn * Tn))
         a2 = d2 - b2
         Sh = (b2 / d2) * dm + (a2 / d2) * S1
@@ -331,7 +347,7 @@ def _opt_cov_m(R, type):  # noqa: A002
     if type == "ewma":
         hl = min(52, max(5, Tn / 4))
         lam = r_pow(0.5, 1 / hl)
-        w = np.array([r_pow(lam, float(k)) for k in range(Tn - 1, -1, -1)])
+        w = _pow_rec(lam, np.arange(Tn - 1, -1, -1, dtype=np.float64))
         w = w / _sum(w)
         mu = np.array([_sum(R[:, j] * w) for j in range(N)])
         X = R - mu[None, :]

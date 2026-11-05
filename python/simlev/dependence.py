@@ -20,7 +20,6 @@ Zustand zugeordnet, der am Ende der Periode t - 1 bekannt war.
 from __future__ import annotations
 
 import math
-import sys
 import warnings
 from collections.abc import Mapping
 
@@ -34,11 +33,15 @@ from ._r.base import env_from_caller
 from ._r import libm as _libm
 from ._r.rlist import RList
 from ._r.stats_sort import _bincode as _st_bincode   # C-Kern sl_r_bincode (seit 1.6.0)
-from ._r.rnum import r_colmeans, r_mean, r_pow, r_pow_vec, r_sd, r_sum
+from ._r.rnum import r_mean, r_pow, r_pow_vec, r_sd, r_sum
 from ._util import _match_arg
 from ._util import _log1mr2
 from .data_prep import _to_date
 from ._util import _stats
+from ._util import _fmt1, _message as message
+from ._util import _colmeans
+from .backcast import _fill_na
+from .signals import _roll_cov, _roll_mean, _roll_var  # noqa: F401 (_roll_mean für regimes über _dep)
 
 __all__ = ["copula_fit", "tail_dependence", "dependence_dcc", "dependence_analysis", "quantile_regression",
            "tail_regression", "tail_covar", "dependence_validate", "regime_subset",
@@ -47,33 +50,11 @@ __all__ = ["copula_fit", "tail_dependence", "dependence_dcc", "dependence_analys
 _NAN = _fmt.NA_REAL      # R's NA_real_ (Standard hier; arithmetisches NaN: _RNAN)
 _RNAN = float("nan")     # R's NaN
 
-_PI = math.pi
-_MISSING = object()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Zugriff auf gemeinsame Bausteine (andere Bearbeiter; erst beim Aufruf laden)
 # ═════════════════════════════════════════════════════════════════════════════
-
-def _fill_na(x, method="locf", keep_leading=True):
-    from .backcast import _fill_na as f
-    return np.asarray(f(x, method, keep_leading=keep_leading), dtype=np.float64)
-
-
-def _roll_var(x, n):
-    from .signals import _roll_var as f
-    return np.asarray(f(x, n), dtype=np.float64)
-
-
-def _roll_cov(x, y, n):
-    from .signals import _roll_cov as f
-    return np.asarray(f(x, y, n), dtype=np.float64)
-
-
-def _roll_mean(x, n):
-    from .signals import _roll_mean as f
-    return np.asarray(f(x, n), dtype=np.float64)
-
 
 def _boot():
     from . import bootstrap
@@ -89,12 +70,6 @@ def _sl():
 def _boot_idx_stationary(n_src, n_out, L, stream):
     from ._lib_models import boot_idx_stationary
     return boot_idx_stationary(n_src, n_out, L, stream=stream)
-
-
-def message(text):
-    """R-``message()``: Text mit Zeilenumbruch auf ``sys.stderr``."""
-    sys.stderr.write(str(text) + "\n")
-    sys.stderr.flush()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -170,15 +145,6 @@ def _combn2(k):
     return [(i, j) for i in range(k) for j in range(i + 1, k)]
 
 
-def _colmeans(X):
-    """``colMeans`` (long-double-Summe / n, ohne Korrekturdurchlauf)."""
-    X = np.asarray(X, dtype=np.float64)
-    n = X.shape[0]
-    if n == 0:
-        return np.full(X.shape[1], _RNAN)
-    return r_colmeans(X)   # C-Kern core/slc_rbase.cpp (long double wie R; wie Julia)
-
-
 def _scale1(x):
     """``scale(x)[, 1]`` für einen Vektor."""
     x = np.asarray(x, dtype=np.float64)
@@ -199,14 +165,6 @@ def _complete_rows(*cols):
         elif a.dtype == object:
             ok &= np.array([not (v is None or (isinstance(v, float) and math.isnan(v))) for v in a], dtype=bool)
     return ok
-
-
-def _fmt1(x):
-    """``format(x)`` eines Skalars bzw. ``paste(format(x), collapse = ", ")``."""
-    r = _fmt.format(x)
-    if isinstance(r, str):
-        return r
-    return ", ".join(str(s) for s in np.asarray(r, dtype=object).ravel())
 
 
 def _date_str(d):
@@ -359,14 +317,6 @@ def _lgamma(x):
 # ═════════════════════════════════════════════════════════════════════════════
 # Renditen und Pseudo-Beobachtungen
 # ═════════════════════════════════════════════════════════════════════════════
-
-def _as_frame(data):
-    if isinstance(data, pd.DataFrame):
-        return data
-    if isinstance(data, Mapping):
-        return pd.DataFrame(dict(data))
-    raise TypeError
-
 
 def _dep_sort_dates(data, what="data"):
     """Zeilen nach Datum ordnen (R: ``.dep_sort_dates``).

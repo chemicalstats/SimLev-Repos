@@ -385,12 +385,6 @@ def match_known(d, rows):
 
 # ── Ausgabe ──────────────────────────────────────────────────────────────────
 
-def fmt_args(f, lang):
-    if f is None:
-        return ""
-    return ", ".join(a[0] if a[1] is None else "%s=%s" % (a[0], a[1]) for a in norm_args(f, lang))
-
-
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])

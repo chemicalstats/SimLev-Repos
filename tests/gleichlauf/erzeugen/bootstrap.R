@@ -387,9 +387,9 @@ b['paths'][3].iloc[1, 0] = np.inf; result = bootstrap_validate(b)['weights'])",
 b["paths"][4][2, 1] = Inf; result = bootstrap_validate(b)["weights"])", inp = ein("bootstrap/vb_inf", c("d")))))
 SZ("interne_hilfen", ".ess_design, .calculate_ess und der Haupt-Zufallsstrom (Zustand nach simlev_seed)", vor = VOR, teile = list(
   ess_internal_ms = teil(
-    r"(SimLev:::.ess_design('ms_garch', list(), NULL, 20L, 1000L))",
-    r"(result = B._ess_design('ms_garch', {}, None, 20, 1000))",
-    r"(result = B._ess_design("ms_garch", (;), nothing, 20, 1000))", inp = ein("bootstrap/ess_internal_ms", c())),
+    r"(SimLev:::.ess_design('ms_garch', NULL, 20L, 1000L))",
+    r"(result = B._ess_design('ms_garch', None, 20, 1000))",
+    r"(result = B._ess_design("ms_garch", nothing, 20, 1000))", inp = ein("bootstrap/ess_internal_ms", c())),
   calc_ess = teil(
     r"(c(SimLev:::.calculate_ess(1000, 'regime', list(n_regimes = 3), list(trans = matrix(c(.9, .1, .2, .8), 2))), SimLev:::.calculate_ess(10, 'evt', list(tail_prob = 0.6)), SimLev:::.calculate_ess(100, 'tvtp_ms_garch', list())))",
     r"(result = [B._calculate_ess(1000, 'regime', {'n_regimes': 3}, {'trans': np.array([[.9, .2], [.1, .8]])}), B._calculate_ess(10, 'evt', {'tail_prob': 0.6}), B._calculate_ess(100, 'tvtp_ms_garch', {})])",
@@ -453,19 +453,19 @@ st = bootstrap_study(ds, cfgs, "stationary"; n = 3, params = (L = 30,), path_len
     r"(st <- bootstrap_study(ds, bootstrap_config(c(akt = 'aktien'), input = 'prices'), 'stationary', n = 4, ess = TRUE, ess_grid = list(L = c(10, 50)), path_length = 200, seed = 4, progress = FALSE, strategies = list(a = create_strategy(akt = asset_config('etf', 'bnh', spread = 0.1)))); st$elapsed <- 0; list(st, summary(st), bootstrap_probability(st, cagr > 0)))",
     r"(st = bootstrap_study(ds, bootstrap_config({'akt': 'aktien'}, input='prices'), 'stationary', n=4, ess=True, ess_grid={'L': [10, 50]}, path_length=200, seed=4, progress=False, strategies={'a': simlev.create_strategy(akt=simlev.asset_config(asset_class='etf', trading='bnh', spread=0.1))}); st['elapsed'] = 0; result = [st, summary(st), bootstrap_probability(st, 'cagr > 0')])",
     r"(st = bootstrap_study(ds, bootstrap_config((akt = "aktien",), input = "prices"), "stationary"; n = 4, ess = true, ess_grid = (L = [10, 50],), path_length = 200, seed = 4, progress = false, strategies = (a = create_strategy(akt = asset_config("etf", "bnh", spread = 0.1)),)); st["elapsed"] = 0; result = [st, r_summary(st), bootstrap_probability(st, "cagr > 0")])", inp = ein("bootstrap/study_ess", c("ds")))))
-SZ("studie_in_teilen", "bootstrap_study mit chunk_dir (löschen bzw. behalten) und Signal-Tabelle mit Argumenten", vor = VOR, gemein = teil(
+SZ("studie_in_teilen", "bootstrap_study mit chunk_dir (löschen bzw. behalten; zweiter Lauf lädt die Chunks und gleicht dem Lauf ohne chunk_dir; Dateinamen ohne Sprachkennung, seit 1.6.3) und Signal-Tabelle mit Argumenten", vor = VOR, gemein = teil(
     r"(cfgb <- bootstrap_config(c(akt = 'aktien'), input = 'prices'); bnh <- create_strategy(akt = asset_config('etf', 'bnh', spread = 0.1)))",
     r"(cfgb = bootstrap_config({'akt': 'aktien'}, input='prices'); bnh = simlev.create_strategy(akt=simlev.asset_config(asset_class='etf', trading='bnh', spread=0.1))
 import tempfile, os)",
     r"(cfgb = bootstrap_config((akt = "aktien",), input = "prices"); bnh = create_strategy(akt = asset_config("etf", "bnh", spread = 0.1)))"), teile = list(
   study_chunkdir = teil(
-    r"(td <- tempfile(); a <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_returns = 'month', strategies = list(b = bnh)); b <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_returns = 'month', strategies = list(b = bnh)); list(a$results, b$results, b$returns, length(list.files(td)), sort(list.files(td))))",
-    r"(td = os.path.join(tempfile.mkdtemp(), 'x'); a = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=200, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_returns='month', strategies={'b': bnh}); b = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=200, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_returns='month', strategies={'b': bnh}); result = [a['results'], b['results'], b['returns'], len(os.listdir(td)), sorted(os.listdir(td))])",
-    r"(td = joinpath(mktempdir(), "x"); a = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_returns = "month", strategies = (b = bnh,)); b = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_returns = "month", strategies = (b = bnh,)); result = [a["results"], b["results"], b["returns"], length(readdir(td)), sort(readdir(td))])", inp = ein("bootstrap/study_chunkdir", c("ds"))),
+    r"(td <- tempfile(); a <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_returns = 'month', strategies = list(b = bnh)); b <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_returns = 'month', strategies = list(b = bnh)); o <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 200, seed = 2, chunk_size = 2, progress = FALSE, keep_returns = 'month', strategies = list(b = bnh)); list(a$results, b$results, b$returns, length(list.files(td)), sort(sub('_r[.]rds$', '', list.files(td))), o$results, o$returns))",
+    r"(td = os.path.join(tempfile.mkdtemp(), 'x'); a = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=200, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_returns='month', strategies={'b': bnh}); b = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=200, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_returns='month', strategies={'b': bnh}); o = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=200, seed=2, chunk_size=2, progress=False, keep_returns='month', strategies={'b': bnh}); result = [a['results'], b['results'], b['returns'], len(os.listdir(td)), sorted(f[:-len('_py.pkl')] if f.endswith('_py.pkl') else f for f in os.listdir(td)), o['results'], o['returns']])",
+    r"(td = joinpath(mktempdir(), "x"); a = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_returns = "month", strategies = (b = bnh,)); b = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 200, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_returns = "month", strategies = (b = bnh,)); o = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 200, seed = 2, chunk_size = 2, progress = false, keep_returns = "month", strategies = (b = bnh,)); result = [a["results"], b["results"], b["returns"], length(readdir(td)), sort([replace(f, r"_jl\.bin$" => "") for f in readdir(td)]), o["results"], o["returns"]])", inp = ein("bootstrap/study_chunkdir", c("ds"))),
   study_keep_chunkdir = teil(
-    r"(td <- tempfile(); a <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_paths = 3, strategies = list(b = bnh)); b <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_paths = 1, strategies = list(b = bnh)); c0 <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_paths = 0, strategies = list(b = bnh)); list(length(a$paths), length(b$paths), length(c0$paths), sort(list.files(td), method = 'radix'), b$paths[[1]], a$results, c0$results))",
-    r"(td = os.path.join(tempfile.mkdtemp(), 'x'); a = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=120, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_paths=3, strategies={'b': bnh}); b = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=120, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_paths=1, strategies={'b': bnh}); c0 = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=120, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_paths=0, strategies={'b': bnh}); result = [len(a['paths']), len(b['paths']), len(c0['paths']), sorted(os.listdir(td)), b['paths'][0], a['results'], c0['results']])",
-    r"(td = joinpath(mktempdir(), "x"); a = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_paths = 3, strategies = (b = bnh,)); b = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_paths = 1, strategies = (b = bnh,)); c0 = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_paths = 0, strategies = (b = bnh,)); result = [length(a["paths"]), length(b["paths"]), length(c0["paths"]), sort(readdir(td)), b["paths"][1], a["results"], c0["results"]])", inp = ein("bootstrap/study_keep_chunkdir", c("ds"))),
+    r"(td <- tempfile(); a <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_paths = 3, strategies = list(b = bnh)); b <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_paths = 1, strategies = list(b = bnh)); c0 <- bootstrap_study(ds, cfgb, 'raw', n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = FALSE, keep_paths = 0, strategies = list(b = bnh)); list(length(a$paths), length(b$paths), length(c0$paths), sort(sub('_r[.]rds$', '', list.files(td)), method = 'radix'), b$paths[[1]], a$results, c0$results))",
+    r"(td = os.path.join(tempfile.mkdtemp(), 'x'); a = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=120, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_paths=3, strategies={'b': bnh}); b = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=120, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_paths=1, strategies={'b': bnh}); c0 = bootstrap_study(ds, cfgb, 'raw', n=4, path_length=120, seed=2, chunk_size=2, chunk_dir=td, progress=False, keep_paths=0, strategies={'b': bnh}); result = [len(a['paths']), len(b['paths']), len(c0['paths']), sorted(f[:-len('_py.pkl')] if f.endswith('_py.pkl') else f for f in os.listdir(td)), b['paths'][0], a['results'], c0['results']])",
+    r"(td = joinpath(mktempdir(), "x"); a = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_paths = 3, strategies = (b = bnh,)); b = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_paths = 1, strategies = (b = bnh,)); c0 = bootstrap_study(ds, cfgb, "raw"; n = 4, path_length = 120, seed = 2, chunk_size = 2, chunk_dir = td, progress = false, keep_paths = 0, strategies = (b = bnh,)); result = [length(a["paths"]), length(b["paths"]), length(c0["paths"]), sort([replace(f, r"_jl\.bin$" => "") for f in readdir(td)]), b["paths"][1], a["results"], c0["results"]])", inp = ein("bootstrap/study_keep_chunkdir", c("ds"))),
   study_sigdf_args = teil(
     r"(sg <- function(df) { df$akt <- df$akt * 2; df }; st <- bootstrap_study(ds, cfgb, 'raw', n = 2, path_length = 150, seed = 3, progress = FALSE, sim_args = list(start_value = 500), strategies = list(a = bnh, b = list(strategy = bnh, signal = sg, args = list(start_value = 2000)))); st$results)",
     r"(def sg(df):
@@ -560,7 +560,47 @@ TB("bootstrap_config", "Meldungen und Warnungen von bootstrap_config je Zeile (E
   zeile("cfg_err_at_dup",
     r"(bootstrap_config(c(us = 'us'), aux = c(cpi = 'cpi'), aux_type = c(cpi = 'level', cpi = 'rate')))",
     r"(result = bootstrap_config({'us': 'us'}, aux={'cpi': 'cpi'}, aux_type=pd.Series(['level', 'rate'], index=['cpi', 'cpi'])))",
-    r"(result = bootstrap_config((us = "us",), aux = (cpi = "cpi",), aux_type = ["cpi" => "level", "cpi" => "rate"]))", inp = ein("bootstrap/cfg_err_at_dup", c()))))
+    r"(result = bootstrap_config((us = "us",), aux = (cpi = "cpi",), aux_type = ["cpi" => "level", "cpi" => "rate"]))", inp = ein("bootstrap/cfg_err_at_dup", c())),
+  zeile("cfg_err_letf_base_factor",
+    r"(bootstrap_config(c(a = 'a'), letfs = list(list(base = factor('a')))))",
+    r"(result = bootstrap_config({'a': 'a'}, letfs=[{'base': pd.Categorical(['a'])}]))",
+    r"(result = bootstrap_config((a = "a",), letfs = [(base = ["a"],)]))", inp = list()),
+  zeile("cfg_err_letf_lev_lgl",
+    r"(bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', leverage = TRUE))))",
+    r"(result = bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'leverage': True}]))",
+    r"(result = bootstrap_config((a = "a",), letfs = [(base = "a", leverage = true,)]))", inp = list()),
+  zeile("cfg_err_letf_fin_na",
+    r"(bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', finance = NA))))",
+    r"(result = bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'finance': simlev._r.fmt.NA_REAL}]))",
+    r"(result = bootstrap_config((a = "a",), letfs = [(base = "a", finance = SL.NA,)]))", inp = list()),
+  zeile("cfg_err_letf_fin_vec",
+    r"(bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', finance = c(1, 2)))))",
+    r"(result = bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'finance': [1, 2]}]))",
+    r"(result = bootstrap_config((a = "a",), letfs = [(base = "a", finance = [1, 2],)]))", inp = list()),
+  zeile("cfg_err_letf_exp_inf",
+    r"(bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', expense = Inf))))",
+    r"(result = bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'expense': float('inf')}]))",
+    r"(result = bootstrap_config((a = "a",), letfs = [(base = "a", expense = Inf,)]))", inp = list()),
+  zeile("cfg_err_letf_days_vec",
+    r"(bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', days = c(1, 3)))))",
+    r"(result = bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'days': [1, 3]}]))",
+    r"(result = bootstrap_config((a = "a",), letfs = [(base = "a", days = [1, 3],)]))", inp = list()),
+  zeile("cfg_err_letf_spread_chr",
+    r"(bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', spread = 'x'))))",
+    r"(result = bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'spread': 'x'}]))",
+    r"(result = bootstrap_config((a = "a",), letfs = [(base = "a", spread = "x",)]))", inp = list()),
+  zeile("cfg_err_letf_rb_vec",
+    r"(bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', rate_basis = c(360, 365)))))",
+    r"(result = bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'rate_basis': [360, 365]}]))",
+    r"(result = bootstrap_config((a = "a",), letfs = [(base = "a", rate_basis = [360, 365],)]))", inp = list()),
+  zeile("cfg_err_letf_tb_lgl",
+    r"(bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', ter_basis = FALSE))))",
+    r"(result = bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'ter_basis': False}]))",
+    r"(result = bootstrap_config((a = "a",), letfs = [(base = "a", ter_basis = false,)]))", inp = list()),
+  zeile("cfg_err_letf_name_na",
+    r"(bootstrap_config(c(a = 'a'), letfs = list(list(base = 'a', name = NA_character_))))",
+    r"(result = bootstrap_config({'a': 'a'}, letfs=[{'base': 'a', 'name': simlev._r.fmt.NA_REAL}]))",
+    r"(result = bootstrap_config((a = "a",), letfs = [(base = "a", name = missing,)]))", inp = list())))
 TB("bootstrap", "Meldungen und Warnungen von bootstrap je Zeile (Eingabe -> Meldung bzw. Wert mit Warnung)", vor = VOR, zeilen = list(
   zeile("bs_garch",
     r"(cfg <- bootstrap_config(c(us = 'us', eu = 'eu'), regime_index = 'us', aux = c(rate = 'rate'),
@@ -1043,6 +1083,28 @@ import tempfile, os
 result = bootstrap_study(ds, cfgb, 'raw', n=2, path_length=100, seed=1, progress=False, keep_paths=-1, strategies={'b': bnh}))",
     r"(cfgb = bootstrap_config((akt = "aktien",), input = "prices"); bnh = create_strategy(akt = asset_config("etf", "bnh", spread = 0.1))
 result = bootstrap_study(ds, cfgb, "raw"; n = 2, path_length = 100, seed = 1, progress = false, keep_paths = -1, strategies = (b = bnh,)))", inp = ein("bootstrap/study_err_keep_neg", c("ds"))),
+  zeile("study_err_chunk_alt",
+    r"(cfgb <- bootstrap_config(c(akt = 'aktien'), input = 'prices'); bnh <- create_strategy(akt = asset_config('etf', 'bnh', spread = 0.1))
+td <- tempfile(); dir.create(td); file.create(file.path(td, 'chunk_00001_seed2.rds'))
+bootstrap_study(ds, cfgb, 'raw', n = 2, path_length = 100, seed = 2, chunk_dir = td, progress = FALSE, strategies = list(b = bnh)))",
+    r"(cfgb = bootstrap_config({'akt': 'aktien'}, input='prices'); bnh = simlev.create_strategy(akt=simlev.asset_config(asset_class='etf', trading='bnh', spread=0.1))
+import tempfile, os
+td = tempfile.mkdtemp(); open(os.path.join(td, 'chunk_00001_seed2.rds'), 'w').close()
+result = bootstrap_study(ds, cfgb, 'raw', n=2, path_length=100, seed=2, chunk_dir=td, progress=False, strategies={'b': bnh}))",
+    r"(cfgb = bootstrap_config((akt = "aktien",), input = "prices"); bnh = create_strategy(akt = asset_config("etf", "bnh", spread = 0.1))
+td = mktempdir(); touch(joinpath(td, "chunk_00001_seed2.rds"))
+result = bootstrap_study(ds, cfgb, "raw"; n = 2, path_length = 100, seed = 2, chunk_dir = td, progress = false, strategies = (b = bnh,)))", inp = ein("bootstrap/study_err_keep_neg", c("ds"))),
+  zeile("study_err_chunk_jl",
+    r"(cfgb <- bootstrap_config(c(akt = 'aktien'), input = 'prices'); bnh <- create_strategy(akt = asset_config('etf', 'bnh', spread = 0.1))
+td <- tempfile(); dir.create(td); file.create(file.path(td, 'chunk_00001_seed2_jl.bin'))
+bootstrap_study(ds, cfgb, 'raw', n = 2, path_length = 100, seed = 2, chunk_dir = td, progress = FALSE, strategies = list(b = bnh)))",
+    r"(cfgb = bootstrap_config({'akt': 'aktien'}, input='prices'); bnh = simlev.create_strategy(akt=simlev.asset_config(asset_class='etf', trading='bnh', spread=0.1))
+import tempfile, os
+td = tempfile.mkdtemp(); open(os.path.join(td, 'chunk_00001_seed2_jl.bin'), 'w').close()
+result = bootstrap_study(ds, cfgb, 'raw', n=2, path_length=100, seed=2, chunk_dir=td, progress=False, strategies={'b': bnh}))",
+    r"(cfgb = bootstrap_config((akt = "aktien",), input = "prices"); bnh = create_strategy(akt = asset_config("etf", "bnh", spread = 0.1))
+td = mktempdir(); touch(joinpath(td, "chunk_00001_seed2_jl.bin"))
+result = bootstrap_study(ds, cfgb, "raw"; n = 2, path_length = 100, seed = 2, chunk_dir = td, progress = false, strategies = (b = bnh,)))", inp = ein("bootstrap/study_err_keep_neg", c("ds"))),
   zeile("study_metrics_fail",
     r"(cfgb <- bootstrap_config(c(akt = 'aktien'), input = 'prices'); bnh <- create_strategy(akt = asset_config('etf', 'bnh', spread = 0.1))
 bootstrap_study(ds, cfgb, 'raw', n = 2, path_length = 100, seed = 1, progress = FALSE, metrics = function(res) NULL, strategies = list(a = bnh)))",

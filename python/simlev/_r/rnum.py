@@ -174,20 +174,11 @@ def r_sd(x, na_rm: bool = False) -> float:
 
 
 def r_median(x, na_rm: bool = False) -> float:
-    """``stats::median(x)`` für Zahlen (Mittel der beiden mittleren Werte mit long double)."""
-    a = _as_f64(x)
-    if na_rm:
-        a = _drop_na(a)
-    elif np.isnan(a).any():
-        return NA_REAL                  # x[NA_integer_]
-    n = a.size
-    if n == 0:
-        return NA_REAL
-    s = np.sort(a)
-    half = (n + 1) // 2
-    if n % 2 == 1:
-        return float(s[half - 1])
-    return r_mean(s[half - 1:half + 1])
+    """``stats::median(x)`` für Zahlen: Kern ``sl_r_median`` (Teilsortierung wie R's ``rPsort2``, Mittel der beiden
+    mittleren Werte mit long double). Seit 1.6.3 über den Kern statt ``np.sort``: bei ±0 in der Mitte stimmt das
+    Vorzeichen der Null wie in R (``np.sort`` ordnet −0 und +0 anders als R's Teilsortierung)."""
+    r = _ext.slc_r_median(np.ascontiguousarray(_as_f64(x)), bool(na_rm), False)
+    return NA_REAL if r is None else r   # x[NA_integer_] bzw. leer
 
 
 def _margsums(m, na_rm: bool, mean: bool, rows: bool) -> np.ndarray:

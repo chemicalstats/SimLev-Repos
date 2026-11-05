@@ -1,5 +1,6 @@
 # tests/werkzeuge/gleichlauf/tariff_fuzz.R – Zufallsvergleich des Tarifkerns core/tariff_core_impl.h (seit 1.3.0) mit den
-# R-Funktionen, die simulation() im Tarifweg nutzt: .tariff_income_tax, .tariff_soli und .tariff_close.
+# R-Funktionen des Tarifwegs .tariff_income_tax, .tariff_soli und .tariff_close (simulation() rechnet seit der
+# Tagesengine im Kern; die R-Funktionen dienen hier als Orakel).
 # Bitgleich (identical, NA an denselben Stellen). Der Kern rechnet in R, Python und Julia aus derselben Quelle;
 # geprueft wird er hier ueber den R-Zugang .wd_tariff_check.
 #
@@ -46,13 +47,15 @@ for (tt in list(tt0, tt1)) {
   # 1. ESt
   x <- rx(n)
   a <- vapply(x, function(v) it(tt, v), 0); b <- chk(par_of(tt, 0, FALSE), x, 1L)
-  for (i in which(!mapply(identical, a, b))) rep_diff("ESt", i, a[i], b[i])
-  cat(sprintf("ESt (%s): %d Werte, %d gleich\n", nm, n, sum(mapply(identical, a, b))))
+  gl <- mapply(identical, a, b)
+  for (i in which(!gl)) rep_diff("ESt", i, a[i], b[i])
+  cat(sprintf("ESt (%s): %d Werte, %d gleich\n", nm, n, sum(gl)))
   # 2. Soli (auch gebrochene ESt-Betraege)
   e <- c(vapply(x[seq_len(n %/% 2)], function(v) it(tt, v), 0), rx(n - n %/% 2) / 3)
   a <- vapply(e, function(v) so(tt, v), 0); b <- chk(par_of(tt, 0, FALSE), e, 2L)
-  for (i in which(!mapply(identical, a, b))) rep_diff("Soli", i, a[i], b[i])
-  cat(sprintf("Soli (%s): %d Werte, %d gleich\n", nm, n, sum(mapply(identical, a, b))))
+  gl <- mapply(identical, a, b)
+  for (i in which(!gl)) rep_diff("Soli", i, a[i], b[i])
+  cat(sprintf("Soli (%s): %d Werte, %d gleich\n", nm, n, sum(gl)))
   # 3. Jahresabschluss
   same <- 0L
   for (i in seq_len(n)) {
@@ -67,7 +70,7 @@ for (tt in list(tt0, tt1)) {
     env <- new.env(parent = emptyenv())
     env$tariff <- tt; env$zve_all <- zve; env$zve <- NULL
     env$ks <- stats::setNames(ksp, "2030"); env$church_k <- ck; env$kapest_rate <- kap; env$use_gp <- gp
-    env$rows <- list(); env$refund_due <- 0
+    env$rows <- list()
     D <- tc(env, 2030L, g23, kb, abg)
     rr <- if (length(env$rows)) {
       rw <- env$rows[[1]]; rw$guenstiger <- as.numeric(rw$guenstiger); v <- unlist(rw[1, ], use.names = FALSE)

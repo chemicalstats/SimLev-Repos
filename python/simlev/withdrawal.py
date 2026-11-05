@@ -38,6 +38,8 @@ from .bootstrap import (_quiet, _get, _is_boot_result, _is_num, _is_study, _keep
                         _wquantile, summary, plot)
 from ._util import _match_arg
 from .data_prep import _to_date
+from ._util import _fmt1, _pow_rec
+from .backcast import _fill_locf
 
 __all__ = [
     "withdrawal_rule", "WithdrawalRule", "withdrawal_cohorts", "WithdrawalPaths", "result_index",
@@ -91,13 +93,6 @@ class _DfltTrue:
 _D_TRUE = _DfltTrue()
 
 
-def _fmt1(x, **kw) -> str:
-    r = _fmt.format(x, **kw)
-    if isinstance(r, str):
-        return r
-    return ", ".join(str(s) for s in np.asarray(r, dtype=object).ravel())
-
-
 def _fmt_nan(x, **kw) -> str:
     """``format()`` eines Rechenergebnisses: ``nan`` ist hier R's ``NaN`` (nicht NA)."""
     x = float(x)
@@ -113,10 +108,7 @@ def _fmtv(x):
 
 
 def _is_result(x) -> bool:
-    try:
-        from .result import SimLevResult
-    except ImportError:  # pragma: no cover
-        SimLevResult = ()
+    from .result import SimLevResult
     return isinstance(x, SimLevResult) or "SimLevResult" in getattr(x, "r_class", ())
 
 
@@ -150,12 +142,9 @@ def _pow_vec(x, y):
     """``x ^ y`` elementweise (Recycling), R-Semantik."""
     x = np.atleast_1d(np.asarray(x, dtype=np.float64)).ravel()
     y = np.atleast_1d(np.asarray(y, dtype=np.float64)).ravel()
-    n = max(len(x), len(y)) if len(x) and len(y) else 0
-    if n and len(y) == 1:
+    if len(x) and len(y) == 1:
         return r_pow_vec(x, float(y[0]))      # gleiche Bits, schneller Weg
-    x = np.resize(x, n)
-    y = np.resize(y, n)
-    return np.array([r_pow(a, b) for a, b in zip(x.tolist(), y.tolist())], dtype=np.float64)
+    return _pow_rec(x, y)                     # Kern sl_r_pow_rec (seit 1.6.3; bis 1.6.2 r_pow je Element)
 
 
 def _apply_cols(M, f):
@@ -569,11 +558,6 @@ class WithdrawalPaths(RList):
 
 def _is_wp(x) -> bool:
     return isinstance(x, WithdrawalPaths) or "withdrawal_paths" in getattr(x, "r_class", ())
-
-
-def _fill_locf(v):
-    from .backcast import _fill_na
-    return np.asarray(_fill_na(np.asarray(v, dtype=np.float64), "locf"), dtype=np.float64)
 
 
 def _df_col(data, name):
@@ -1298,7 +1282,6 @@ class SummarySimLevWithdrawal(RList):
 
 
 _D30 = _Dflt(30.0)
-_D1000 = _Dflt(1000.0)
 _D0 = _Dflt(0.0)
 _D100 = _Dflt(100.0)
 _D0LC = _Dflt(0.0)
@@ -2196,7 +2179,9 @@ def withdrawal_max_rate(x, *, rule=None, success=0.95, lower=0.5, upper=20, tol=
         else:
             with warnings.catch_warnings(), contextlib.redirect_stderr(io.StringIO()):
                 warnings.simplefilter("ignore")
-                s = withdrawal_simulation(x, rule=rl, keep_paths=False, **kwargs)
+                if "x" not in state:   # Quelle einmal in Renditepfade umwandeln (seit 1.6.3; hängt nicht von der Rate ab)
+                    state["x"] = _wd_source(x, kwargs)
+                s = withdrawal_simulation(state["x"], rule=rl, keep_paths=False, **kwargs)
         state["first"] = False
         return _weighted_mean(s["paths"]["success"].to_numpy(dtype=np.float64), s["weights"])
 
@@ -2215,6 +2200,28 @@ def withdrawal_max_rate(x, *, rule=None, success=0.95, lower=0.5, upper=20, tol=
         else:
             upper = mid
     return _Rate(lower, s_lo)
+
+
+def _wd_source(x, kw):
+    """Quelle von ``withdrawal_simulation()`` wie dort in Renditepfade umwandeln (``SimLevResult``,
+    ``SimLevWrapperNav``, Studie, Ergebnisliste; sonst ``x``). Nur für ``withdrawal_max_rate`` nach dem ersten
+    (lauten) Lauf: Meldungen und Prüfungen der Umwandlung kamen dort schon, weitere Läufe sind still."""
+    inflation = kw.get("inflation", 0)
+    inflation = 0 if inflation is None else inflation
+    freq = kw.get("frequency", _DEF_FREQ)
+    years = kw.get("years")
+    if _is_result(x):
+        return withdrawal_cohorts(x, inflation=inflation, years=30 if years is None else years,
+                                  frequency=_match_arg(freq, _DEF_FREQ))
+    if "SimLevWrapperNav" in (getattr(x, "r_class", None) or ()):
+        return withdrawal_cohorts(x, price="nav", inflation=inflation, years=30 if years is None else years,
+                                  frequency=_match_arg(freq, _DEF_FREQ))
+    if isinstance(x, pd.DataFrame) and "date" in [str(c) for c in x.columns]:
+        return x
+    if _is_study(x) or _is_result_list(x):
+        return withdrawal_paths(x, strategy=kw.get("strategy"), inflation=inflation,
+                                frequency=_match_arg(freq, _DEF_FREQ))
+    return x
 
 
 class _Rate(float):

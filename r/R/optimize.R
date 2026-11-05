@@ -69,6 +69,25 @@
                fn, paste(format(alpha), collapse = ", "), hint))
 }
 
+# Je Zeile t von X: sum((x_t x_t' - S1)^2) / N wie nrm(.sl_tcrossprod(X[t, ]) - S1) (seit 1.6.3 blockweise ohne Schleife je
+# Zeile): rowSums addiert je Zeile in long double in derselben Folge (spaltenweise ueber die N x N Elemente) wie sum(),
+# x_i x_j ist ein einzelnes Produkt
+.opt_lw_rows <- function(X, S1) {
+  Tn <- nrow(X); N <- ncol(X); out <- numeric(Tn)
+  ii <- rep(seq_len(N), times = N); jj <- rep(seq_len(N), each = N); s1 <- as.vector(S1)
+  step <- max(1L, as.integer(2^20 %/% (N * N)))
+  for (a in seq(1L, Tn, by = step)) {
+    r <- a:min(Tn, a + step - 1L); Xb <- X[r, , drop = FALSE]
+    A <- Xb[, ii, drop = FALSE] * Xb[, jj, drop = FALSE] - rep(s1, each = length(r))
+    out[r] <- rowSums(A^2) / N
+  }
+  out
+}
+
+# Merker fuer .opt_cov innerhalb von portfolio_optimize (seit 1.6.3): on, R, type, val
+.opt_cov_memo <- new.env(parent = emptyenv())
+.opt_cov_memo$on <- FALSE
+
 #' Kovarianzschaetzer
 #'
 #' sample: Stichprobe; ledoit_wolf: Schrumpfung auf skalierte Einheitsmatrix
@@ -81,6 +100,15 @@
 #' @noRd
 .opt_cov <- function(R, type = c("sample", "ledoit_wolf", "ewma", "denoise", "gerber")) {
   type <- match.arg(type)
+  m <- .opt_cov_memo
+  if (isTRUE(m$on) && identical(m$type, type) && identical(m$R, R)) {
+    if (!is.null(m$val)) return(m$val)
+    quiet <- TRUE; m$on <- FALSE                                # Rechnung wie ohne Merker (auch innere Aufrufe)
+    val <- withCallingHandlers(.opt_cov(R, type), warning = function(w) quiet <<- FALSE)
+    m$on <- TRUE
+    if (quiet) m$val <- val
+    return(val)
+  }
   S <- stats::cov(R); N <- ncol(R); Tn <- nrow(R)
   if (type == "sample" || N < 2) return(S)
   psd <- function(M) { e <- .sl_eigen_sym(M); M2 <- e$vectors %m% diag(pmax(e$values, 1e-12), N) %m% t(e$vectors)
@@ -91,7 +119,7 @@
     m <- sum(diag(S1)) / N
     nrm <- function(A) sum(A^2) / N
     d2 <- nrm(S1 - diag(m, N))
-    b2 <- min(d2, sum(vapply(seq_len(Tn), function(t) nrm(.sl_tcrossprod(X[t, ]) - S1), 0)) / Tn^2)
+    b2 <- min(d2, sum(.opt_lw_rows(X, S1)) / Tn^2)
     a2 <- d2 - b2
     Sh <- (b2 / d2) * diag(m, N) + (a2 / d2) * S1
     dimnames(Sh) <- dimnames(S)
@@ -471,6 +499,11 @@ portfolio_optimize <- function(x, assets = NULL,
     if (any(is.infinite(mu))) stop(sprintf("mu: endliche Werte in Prozent p. a. erwartet (erhalten: %s).", paste(format(mu), collapse = ", ")))
   }
   core <- function(Rx) .opt_core(Rx, method, lo, hi, cov, mu, risk_free, risk_aversion, budget, alpha, rr$ppy)
+  # Kovarianz von R seit 1.6.3 einmal fuer Optimierung (.opt_core) und Kennzahlen (.opt_summary): .opt_cov merkt
+  # sich das Ergebnis fuer genau dieses R, wenn seine Rechnung ohne Warnung blieb (sonst wie bisher zweimal)
+  memo_alt <- mget(c("on", "R", "type", "val"), envir = .opt_cov_memo, ifnotfound = list(NULL))
+  on.exit(list2env(memo_alt, .opt_cov_memo), add = TRUE)
+  .opt_cov_memo$on <- TRUE; .opt_cov_memo$R <- R; .opt_cov_memo$type <- cov; .opt_cov_memo$val <- NULL
   w <- core(R)
   wb <- NULL
   if (resample > 0) {

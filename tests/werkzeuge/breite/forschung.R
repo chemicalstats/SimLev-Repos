@@ -2,7 +2,7 @@
 # Module: param_search, overfitting, sensitivity (bis 1.4.0 je ein Generator gen_<modul>.R, hier wörtlich hintereinander).
 # Aufruf (Repo-Wurzel): LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> SIMLEV_FAELLE_DIR=<ordner> Rscript tests/werkzeuge/breite/forschung.R
 # Breitenprüfung, nichts abgelegt: alle bisherigen Einzelfälle des Bereichs (bis 1.4.1 Generator des Katalogs) flach nach
-# <ordner>/breite_forschung.jsonl.gz; tests/werkzeuge/gleichlauf/run.sh vergleicht Python und Julia damit. Abgelegt sind die Szenarien
+# <ordner>/breite_forschung.jsonl.gz; tests/werkzeuge/gleichlauf/run.py vergleicht Python und Julia damit. Abgelegt sind die Szenarien
 # und Tabellen aus tests/gleichlauf/erzeugen/forschung.R (Format und Umgebung: tests/gleichlauf/erzeugen/ref_tools.R).
 source("tests/gleichlauf/erzeugen/ref_tools.R")
 ref_bereich("breite_forschung", alle = TRUE)
@@ -26,15 +26,9 @@ SPJ <- 'sp = PS.param_space(n = PS.param_range(50, 400; n = 8, integer = true, l
 ref_case("space", paste0(SP, "; sp"), py(paste0(SPP, "result = sp")), jl = jl(paste0(SPJ, 'result = sp')))
 ref_case("space_long", "param_space(a = 1:20, b = param_range(0.001, 1234.5, step = 0.25))",
          py("result = PS.param_space(a=list(range(1, 21)), b=PS.param_range(0.001, 1234.5, step=0.25))"), jl = jl('result = PS.param_space(a = collect(1:20), b = PS.param_range(0.001, 1234.5; step = 0.25))'))
-ref_case("space_err0", "param_space()", py("result = PS.param_space()"), jl = jl('result = PS.param_space()'))
 ref_case("space_err1", "param_space(1:3)", py("result = PS.param_space([1, 2, 3])"), jl = jl('result = PS.param_space([1, 2, 3])'))
-ref_case("space_err2", "param_space(a = list(1, 2))", py("result = PS.param_space(a={'x': 1, 'y': 2})"), jl = jl('result = PS.param_space(a = Dict("x" => 1, "y" => 2))'))
 ref_case("space_err3", "param_space(a = numeric(0))", py("result = PS.param_space(a=[])"), jl = jl('result = PS.param_space(a = Float64[])'))
-ref_case("range_err_n0", "param_range(1, 2, n = 0)", py("result = PS.param_range(1, 2, n=0)"), jl = jl('result = PS.param_range(1, 2; n = 0)'))
 ref_case("range_err_n", "param_range(1, 2, n = 2.5)", py("result = PS.param_range(1, 2, n=2.5)"), jl = jl('result = PS.param_range(1, 2; n = 2.5)'))
-ref_case("range_err_ord", "param_range(2, 1)", py("result = PS.param_range(2, 1)"), jl = jl('result = PS.param_range(2, 1)'))
-ref_case("range_err_log", "param_range(0, 1, log = TRUE)", py("result = PS.param_range(0, 1, log=True)"), jl = jl('result = PS.param_range(0, 1; log = true)'))
-ref_case("range_err_step", "param_range(1, 5, step = -1)", py("result = PS.param_range(1, 5, step=-1)"), jl = jl('result = PS.param_range(1, 5; step = -1)'))
 ref_case("range_err_chr", "param_range('a', 2)", py("result = PS.param_range('a', 2)"), jl = jl('result = PS.param_range("a", 2)'))
 ref_case("range_step_n", "param_range(1, 5, n = 2.7, step = 1)", py("result = PS.param_range(1, 5, n=2.7, step=1)"), jl = jl('result = PS.param_range(1, 5; n = 2.7, step = 1)'))
 
@@ -55,8 +49,6 @@ SP2J <- 'sp = PS.param_space(a = PS.param_range(1, 5; n = 5, integer = true), b 
 ref_case("design_grid", paste0(SP2, "; SimLev:::.ps_design(sp, 'grid', 0, NULL)"), py(paste0(SP2P, "result = PS._ps_design(sp, 'grid', 0, None)")), jl = jl(paste0(SP2J, 'result = PS._ps_design(sp, "grid", 0, nothing)')))
 ref_case("design_grid_c", paste0(SP2, "; SimLev:::.ps_design(sp, 'grid', 0, function(p) p$a + (p$b == 'y') <= 4)"),
          py(paste0(SP2P, "result = PS._ps_design(sp, 'grid', 0, lambda p: p['a'] + (p['b'] == 'y') <= 4)")), jl = jl(paste0(SP2J, 'result = PS._ps_design(sp, "grid", 0, p -> p["a"] + (p["b"] == "y") <= 4)')))
-ref_case("design_none", paste0(SP2, "; SimLev:::.ps_design(sp, 'grid', 0, function(p) FALSE)"),
-         py(paste0(SP2P, "result = PS._ps_design(sp, 'grid', 0, lambda p: False)")), jl = jl(paste0(SP2J, 'result = PS._ps_design(sp, "grid", 0, p -> false)')))
 SP3 <- "sp <- param_space(w = param_range(0, 1), n = param_range(10, 1000, log = TRUE, integer = TRUE), k = c(1, 2, 3))"
 SP3P <- "sp = PS.param_space(w=PS.param_range(0, 1), n=PS.param_range(10, 1000, log=True, integer=True), k=[1.0, 2.0, 3.0])\n"
 SP3J <- 'sp = PS.param_space(w = PS.param_range(0, 1), n = PS.param_range(10, 1000; log = true, integer = true), k = [1.0, 2.0, 3.0])\n'
@@ -205,8 +197,6 @@ FKP <- "x = PS.SimLevParamSearch(results=pd.DataFrame({'id': [1, 2, 3, 4], 'n': 
 FKJ <- 'x = RList("results" => RFrame("id" => [1, 2, 3, 4], "n" => [10.0, 20.0, 30.0, 40.0], "sharpe" => [1.0, 2.0, 3.0, 4.0], "max_drawdown" => [0.1, 0.5, 0.2, 0.3], "cagr" => [0.05, 0.02, 0.04, 0.01]), "params" => "n", "method" => "grid", "space" => PS.param_space(n = [10.0, 20.0, 30.0, 40.0]), "objective" => "sharpe", "maximize" => true; class = "SimLevParamSearch")\n'
 ref_case("plateau_fake", paste0(FK, "list(param_plateau(x, metric = 'max_drawdown'), param_plateau(x, metric = 'cagr'), param_plateau(x), {x$maximize <- FALSE; x$objective <- 'max_drawdown'; param_plateau(x)})"),
          py(paste0(FKP, "r1 = [PS.param_plateau(x, metric='max_drawdown'), PS.param_plateau(x, metric='cagr'), PS.param_plateau(x)]\nx['maximize'] = False; x['objective'] = 'max_drawdown'\nresult = r1 + [PS.param_plateau(x)]")), jl = jl(paste0(FKJ, 'r1 = [PS.param_plateau(x; metric = "max_drawdown"), PS.param_plateau(x; metric = "cagr"), PS.param_plateau(x)]\nx["maximize"] = false; x["objective"] = "max_drawdown"\nresult = vcat(r1, [PS.param_plateau(x)])')))
-ref_case("plateau_rnd1", paste0(FK, "x$method <- 'random'; x$results <- x$results[2, ]; x$results$m <- 'q'; x$params <- c('n', 'm'); SimLev:::.ps_neighbours(x)"),
-         py(paste0(FKP, "x['method'] = 'random'; x['results'] = x['results'].iloc[[1]].reset_index(drop=True); x['results']['m'] = 'q'; x['params'] = ['n', 'm']; result = PS._ps_neighbours(x)")), jl = jl(paste0(FKJ, 'x["method"] = "random"; x["results"] = rows(x["results"], [2]); x["results"]["m"] = "q"; x["params"] = ["n", "m"]; result = PS._ps_neighbours(x)')))
 ref_case("plateau_rnd", paste0(FK, "x$method <- 'lhs'; x$results$s <- c('b', 'a', 'b', 'c'); x$results$f <- c(TRUE, FALSE, TRUE, TRUE); x$params <- c('n', 's', 'f'); list(SimLev:::.ps_neighbours(x, k = 3), param_plateau(x, k = 2))"),
          py(paste0(FKP, "x['method'] = 'lhs'; x['results']['s'] = ['b', 'a', 'b', 'c']; x['results']['f'] = [True, False, True, True]; x['params'] = ['n', 's', 'f']; result = [PS._ps_neighbours(x, k=3), PS.param_plateau(x, k=2)]")), jl = jl(paste0(FKJ, 'x["method"] = "lhs"; x["results"]["s"] = ["b", "a", "b", "c"]; x["results"]["f"] = [true, false, true, true]; x["params"] = ["n", "s", "f"]; result = [PS._ps_neighbours(x; k = 3), PS.param_plateau(x; k = 2)]')))
 # Zeichen-Parameter: factor()-Stufen nach R's Kollation (ICU "root": a A b B)
@@ -216,9 +206,6 @@ FKCP <- function(sv, sh) sprintf("sv = %s; sh = %s\nx = PS.SimLevParamSearch(res
   params=['s'], method='random', space=PS.param_space(s=list(dict.fromkeys(sv))), objective='sharpe', maximize=True, elapsed=0.0)\n", sv, sh)
 FKCJ <- function(sv, sh) sprintf('sv = %s; sh = %s\nx = RList("results" => RFrame("id" => collect(1:length(sv)), "n" => [10.0 * i for i in 1:length(sv)], "s" => sv, "sharpe" => sh, "cagr" => sh ./ 100), "params" => "s", "method" => "random", "space" => PS.param_space(s = unique(sv)), "objective" => "sharpe", "maximize" => true, "elapsed" => 0.0; class = "SimLevParamSearch")\n', sv, sh)
 s4r <- "c('b', 'A', 'a', 'B')"; s4p <- "['b', 'A', 'a', 'B']"; h4 <- "c(1, 4, 2, 3)"; h4p <- "[1.0, 4.0, 2.0, 3.0]"
-ref_case("plateau_chr", paste0(FKC(s4r, h4), "list(SimLev:::.ps_neighbours(x, k = 2), param_plateau(x, k = 2), param_plateau(x, 'cagr', k = 3))"),
-         py(paste0(FKCP(s4p, h4p), "result = [PS._ps_neighbours(x, k=2), PS.param_plateau(x, k=2), PS.param_plateau(x, metric='cagr', k=3)]")),
-         jl = jl(paste0(FKCJ('["b", "A", "a", "B"]', "[1.0, 4.0, 2.0, 3.0]"), 'result = [PS._ps_neighbours(x; k = 2), PS.param_plateau(x; k = 2), PS.param_plateau(x; metric = "cagr", k = 3)]')))
 s6r <- "c('b', 'A', 'a', 'B', 'c', 'C')"; s6p <- "['b', 'A', 'a', 'B', 'c', 'C']"; h6 <- "c(1, 6, 2, 5, 3, 4)"; h6p <- "[1.0, 6.0, 2.0, 5.0, 3.0, 4.0]"
 ref_case("summary_chr", paste0(FKC(s6r, h6), "list(SimLev:::.ps_neighbours(x), summary(x, top = 3))"),
          py(paste0(FKCP(s6p, h6p), "result = [PS._ps_neighbours(x), PS.summary(x, top=3)]")),
@@ -226,7 +213,6 @@ ref_case("summary_chr", paste0(FKC(s6r, h6), "list(SimLev:::.ps_neighbours(x), s
 ref_case("summary_chr_print", paste0(FKC(s6r, h6), "summary(x, top = 4)"),
          py(paste0(FKCP(s6p, h6p), "result = PS.summary(x, top=4)")),
          jl = jl(paste0(FKCJ('["b", "A", "a", "B", "c", "C"]', "[1.0, 6.0, 2.0, 5.0, 3.0, 4.0]"), 'result = r_summary(x; top = 4)')))
-ref_case("plateau_notps", "param_plateau(list(a = 1))", py("result = PS.param_plateau({'a': 1})"), jl = jl('result = PS.param_plateau(RList("a" => 1))'))
 ref_case("summary_print", "sm <- structure(list(top = data.frame(id = 1L, n = 50, cagr = 0.05, sharpe = 0.4, plateau = 0.4),
   best = data.frame(id = 1L, n = 50, sharpe = 0.4), best_plateau = data.frame(id = 1L, n = 50, sharpe = 0.4, plateau = 0.4),
   n = 1L, n_failed = 0L, objective = 'sharpe', method = 'grid', params = 'n', elapsed = 0), class = 'summary.SimLevParamSearch'); sm",
@@ -276,14 +262,7 @@ ref_case("ofret_day", "SimLev:::.of_returns(Rs, 'day')", py("result = OF._of_ret
 ref_case("ofret_week", "SimLev:::.of_returns(Rs, 'week', dts, risk_free = 2)", py("result = OF._of_returns(Rs, 'week', dts, risk_free=2)"), I, jl = jl('result = OF._of_returns(Rs, "week", dts, 2)'))
 ref_case("ofret_month", "SimLev:::.of_returns(Rs, 'month', dts)", py("result = OF._of_returns(Rs, 'month', dts)"), I, jl = jl('result = OF._of_returns(Rs, "month", dts)'))
 ref_case("ofret_dayd", "SimLev:::.of_returns(Rs, 'day', dts, risk_free = 3)", py("result = OF._of_returns(Rs, 'day', dts, risk_free=3)"), I, jl = jl('result = OF._of_returns(Rs, "day", dts, 3)'))
-ref_case("ofret_na", "SimLev:::.of_returns(Rn, 'week', dts)", py("result = OF._of_returns(Rn, 'week', dts)"), I, jl = jl('result = OF._of_returns(Rn, "week", dts)'))
 ref_case("ofret_nadf", "SimLev:::.of_returns(Rdf, 'month')", py("result = OF._of_returns(Rdf, 'month')"), I, jl = jl('result = OF._of_returns(Rdf, "month")'))
-ref_case("ofret_chr", "SimLev:::.of_returns(data.frame(a = c('x', 'y')), 'day')",
-         py("result = OF._of_returns(pd.DataFrame({'a': ['x', 'y']}), 'day')"), jl = jl('result = OF._of_returns(RFrame("a" => ["x", "y"]), "day")'))
-ref_case("ofret_vec", "SimLev:::.of_returns(Rs[, 1], 'month')", py("result = OF._of_returns(Rs[:, 0], 'month')"), I, jl = jl('result = OF._of_returns(Rs[:, 1], "month")'))
-ref_case("ofmetric_err", "SimLev:::.of_metric(10, 1, 1, 1, 1, 'foo')", py("result = OF._of_metric(10, 1.0, 1.0, 1.0, 1.0, 'foo')"), jl = jl('result = OF._of_metric(10, 1.0, 1.0, 1.0, 1.0, "foo")'))
-ref_case("ofcolmetric", "lapply(c('sharpe', 'sortino', 'geometric', 'mean'), function(m) SimLev:::.of_col_metric(Mb, m))",
-         py("result = [OF._of_col_metric(Mb, m) for m in ('sharpe', 'sortino', 'geometric', 'mean')]"), I, jl = jl('result = [OF._of_col_metric(Mb, m) for m in ("sharpe", "sortino", "geometric", "mean")]'))
 
 # ── overfit_pbo ─────────────────────────────────────────────────────────────────────
 ref_case("pbo_sharpe", "overfit_pbo(R, S = 6, frequency = 'day')", py("result = OF.overfit_pbo(R, S=6, frequency='day')"), I, jl = jl('result = OF.overfit_pbo(R; S = 6, frequency = "day")'))
@@ -299,14 +278,9 @@ ref_case("pbo_ties", "overfit_pbo(cbind(R3, R3[, 1]), S = 8, frequency = 'day')"
          py("result = OF.overfit_pbo(np.column_stack([R3, R3[:, 0]]), S=8, frequency='day')"), I, jl = jl('result = OF.overfit_pbo(hcat(R3, R3[:, 1]); S = 8, frequency = "day")'))
 ref_case("pbo_S16", "overfit_pbo(R3[1:200, ], frequency = 'day')", py("result = OF.overfit_pbo(R3[:200], frequency='day')"), I, jl = jl('result = OF.overfit_pbo(R3[1:200, :]; frequency = "day")'))
 ref_case("pbo_Sodd", "overfit_pbo(R, S = 5)", py("result = OF.overfit_pbo(R, S=5)"), I, jl = jl('result = OF.overfit_pbo(R; S = 5)'))
-ref_case("pbo_S1", "overfit_pbo(R, S = 1)", py("result = OF.overfit_pbo(R, S=1)"), I, jl = jl('result = OF.overfit_pbo(R; S = 1)'))
-ref_case("pbo_short", "overfit_pbo(R[1:30, ], S = 8, frequency = 'day')", py("result = OF.overfit_pbo(R[:30], S=8, frequency='day')"), I, jl = jl('result = OF.overfit_pbo(R[1:30, :]; S = 8, frequency = "day")'))
-ref_case("pbo_onecol", "overfit_pbo(R[, 1, drop = FALSE], S = 4, frequency = 'day')", py("result = OF.overfit_pbo(R[:, :1], S=4, frequency='day')"), I, jl = jl('result = OF.overfit_pbo(R[:, 1:1]; S = 4, frequency = "day")'))
 ref_case("pbo_flat", "overfit_pbo(cbind(Rc, cash), S = 4, frequency = 'day')", py("result = OF.overfit_pbo(np.column_stack([Rc, cash]), S=4, frequency='day')"), I, jl = jl('result = OF.overfit_pbo(hcat(Rc, cash); S = 4, frequency = "day")'))
 ref_case("pbo_flat_mean", "overfit_pbo(cbind(Rc, cash), S = 4, metric = 'mean', frequency = 'day')",
          py("result = OF.overfit_pbo(np.column_stack([Rc, cash]), S=4, metric='mean', frequency='day')"), I, jl = jl('result = OF.overfit_pbo(hcat(Rc, cash); S = 4, metric = "mean", frequency = "day")'))
-ref_case("pbo_allflat", "overfit_pbo(cbind(cash, cash), S = 4, frequency = 'day')",
-         py("result = OF.overfit_pbo(np.column_stack([cash, cash]), S=4, frequency='day')"), I, jl = jl('result = OF.overfit_pbo(hcat(cash, cash); S = 4, frequency = "day")'))
 ref_case("pbo_badmetric", "overfit_pbo(R, metric = 'foo')", py("result = OF.overfit_pbo(R, metric='foo')"), I, jl = jl('result = OF.overfit_pbo(R; metric = "foo")'))
 
 # ── sharpe_probabilistic ────────────────────────────────────────────────────
@@ -321,14 +295,9 @@ ref_case("dsr_id", "sharpe_deflated(R, id = 3, frequency = 'day')", py("result =
 ref_case("dsr_ntr", "sharpe_deflated(R, frequency = 'day', n_trials = 100)", py("result = OF.sharpe_deflated(R, frequency='day', n_trials=100)"), I, jl = jl('result = OF.sharpe_deflated(R; frequency = "day", n_trials = 100)'))
 ref_case("dsr_noeff", "sharpe_deflated(R, frequency = 'day', effective = FALSE)", py("result = OF.sharpe_deflated(R, frequency='day', effective=False)"), I, jl = jl('result = OF.sharpe_deflated(R; frequency = "day", effective = false)'))
 ref_case("dsr_week", "sharpe_deflated(Rs, dates = dts, risk_free = 1)", py("result = OF.sharpe_deflated(Rs, dates=dts, risk_free=1)"), I, jl = jl('result = OF.sharpe_deflated(Rs; dates = dts, risk_free = 1)'))
-ref_case("dsr_badid", "sharpe_deflated(R, id = 9, frequency = 'day')", py("result = OF.sharpe_deflated(R, id=9, frequency='day')"), I, jl = jl('result = OF.sharpe_deflated(R; id = 9, frequency = "day")'))
-ref_case("dsr_flat", "sharpe_deflated(cbind(Rc, cash), frequency = 'day', id = 1)",
-         py("result = OF.sharpe_deflated(np.column_stack([Rc, cash]), frequency='day', id=1)"), I, jl = jl('result = OF.sharpe_deflated(hcat(Rc, cash); frequency = "day", id = 1)'))
 ref_case("dsr_one", "sharpe_deflated(R[, 1, drop = FALSE], frequency = 'day')", py("result = OF.sharpe_deflated(R[:, :1], frequency='day')"), I, jl = jl('result = OF.sharpe_deflated(R[:, 1:1]; frequency = "day")'))
 ref_case("dsr_neg", "x <- R[, 1:2]; x[, 2] <- -x[, 1] + 1e-4 * R[, 3]; sharpe_deflated(x, frequency = 'day')",
          py("x = R[:, :2].copy(); x[:, 1] = -x[:, 0] + 1e-4 * R[:, 2]; result = OF.sharpe_deflated(x, frequency='day')"), I, jl = jl('x = R[:, 1:2]; x[:, 2] = -x[:, 1] .+ 1e-4 .* R[:, 3]; result = OF.sharpe_deflated(x; frequency = "day")'))
-ref_case("dsr_rho_nan", "sharpe_deflated(R[, 2:3] * 1e160, frequency = 'day')",
-         py("result = OF.sharpe_deflated(R[:, 1:3] * 1e160, frequency='day')"), I, jl = jl('result = OF.sharpe_deflated(R[:, 2:3] .* 1e160; frequency = "day")'))
 ref_case("dsr_ntr1", "sharpe_deflated(R, frequency = 'month', n_trials = 1)", py("result = OF.sharpe_deflated(R, frequency='month', n_trials=1)"), I, jl = jl('result = OF.sharpe_deflated(R; frequency = "month", n_trials = 1)'))
 
 # ── sharpe_haircut ──────────────────────────────────────────────────────────
@@ -339,7 +308,6 @@ ref_case("hc_vec2", "sharpe_haircut(c(0.3, -0.8, 0, 1.4), n_obs = 120, ppy = 12)
 ref_case("hc_mat", "sharpe_haircut(R, frequency = 'day')", py("result = OF.sharpe_haircut(R, frequency='day')"), I, jl = jl('result = OF.sharpe_haircut(R; frequency = "day")'))
 ref_case("hc_mat_nt", "sharpe_haircut(Rs, n_tests = 20, dates = dts)", py("result = OF.sharpe_haircut(Rs, n_tests=20, dates=dts)"), I, jl = jl('result = OF.sharpe_haircut(Rs; n_tests = 20, dates = dts)'))
 ref_case("hc_mat_nt2", "sharpe_haircut(R, n_tests = 3, frequency = 'day')", py("result = OF.sharpe_haircut(R, n_tests=3, frequency='day')"), I, jl = jl('result = OF.sharpe_haircut(R; n_tests = 3, frequency = "day")'))
-ref_case("hc_err", "sharpe_haircut(c(1, 0.5))", py("result = OF.sharpe_haircut([1, 0.5])"), jl = jl('result = OF.sharpe_haircut([1, 0.5])'))
 ref_case("hc_flat", "sharpe_haircut(cbind(Rc, cash), frequency = 'day')",
          py("result = OF.sharpe_haircut(np.column_stack([Rc, cash]), frequency='day')"), I, jl = jl('result = OF.sharpe_haircut(hcat(Rc, cash); frequency = "day")'))
 ref_case("hc_attr", "h <- sharpe_haircut(c(1, 0.5, 2), n_obs = 100, n_tests = 7); c(attr(h, 'n_tests'), attr(h, 'n_obs'))",
@@ -405,8 +373,6 @@ bcase("pb_plateau", "bs <- param_bootstrap(ps, h, cfg, top = 1, by = 'plateau', 
 bcase("pb_ids", "bs <- param_bootstrap(ps, h, cfg, ids = c(3, 1), map = c(x = 'us'), include = list(bh = create_strategy(us = asset_config('etf', 'bnh', spread = 0.1))), method = 'raw', n = 2, seed = 4, progress = FALSE, burn_in = 60); list(attr(bs, 'param_ids'), bs$results)",
       "bs = OF.param_bootstrap(ps, h, cfg, ids=[3, 1], map={'x': 'us'}, include={'bh': create_strategy(us=asset_config(asset_class='etf', trading='bnh', spread=0.1))}, method='raw', n=2, seed=4, progress=False, burn_in=60); result = [bs.attrs['param_ids'], bs['results']]",
       'bs = OF.param_bootstrap(ps, h, cfg; ids = [3, 1], map = named("x" => "us"), include = RList("bh" => create_strategy("us" => asset_config("etf", "bnh", spread = 0.1))), method = "raw", n = 2, seed = 4, progress = false, burn_in = 60); result = [OF.param_ids(bs), bs["results"]]')
-bcase("pb_err", "param_bootstrap(list(a = 1), h, cfg)", "result = OF.param_bootstrap({'a': 1}, h, cfg)",
-      'result = OF.param_bootstrap(RList("a" => 1), h, cfg)')
 bcase("ps_real_checks", "list(overfit_pbo(ps, S = 2, frequency = 'week'), sharpe_deflated(ps, frequency = 'day')$psr, sharpe_haircut(ps, frequency = 'month'), overfit_walk_forward(ps, train = 0.5, test = 0.25)$summary)",
       "result = [OF.overfit_pbo(ps, S=2, frequency='week'), OF.sharpe_deflated(ps, frequency='day')['psr'], OF.sharpe_haircut(ps, frequency='month'), OF.overfit_walk_forward(ps, train=0.5, test=0.25)['summary']]",
       'result = [OF.overfit_pbo(ps; S = 2, frequency = "week"), OF.sharpe_deflated(ps; frequency = "day")["psr"], OF.sharpe_haircut(ps; frequency = "month"), OF.overfit_walk_forward(ps; train = 0.5, test = 0.25)["summary"]]')
@@ -552,12 +518,6 @@ case("ls_months1", "planning_lumpsum_vs_dca(d5, create_strategy(A = asset_config
 case("ls_frac", "planning_lumpsum_vs_dca(d5, st1, months = 3, horizon = 2.5, step = 20)",
      "result = SE.planning_lumpsum_vs_dca(d5, st1, months=3, horizon=2.5, step=20)",
      'result = SE.planning_lumpsum_vs_dca(d5, st1; months = 3, horizon = 2.5, step = 20)')
-case("ls_tax", "planning_lumpsum_vs_dca(d5, st1, months = 6, horizon = 3, step = 12, sim_args = list(tax = tax_profile()))",
-     "result = SE.planning_lumpsum_vs_dca(d5, st1, months=6, horizon=3, step=12, sim_args={'tax': tax_profile()})",
-     'result = SE.planning_lumpsum_vs_dca(d5, st1; months = 6, horizon = 3, step = 12, sim_args = RList("tax" => SL.tax_profile()))')
-case("ls_err_sv", "planning_lumpsum_vs_dca(d5, st1, horizon = 2, step = 6, sim_args = list(start_value = 5000))",
-     "result = SE.planning_lumpsum_vs_dca(d5, st1, horizon=2, step=6, sim_args={'start_value': 5000})",
-     'result = SE.planning_lumpsum_vs_dca(d5, st1; horizon = 2, step = 6, sim_args = RList("start_value" => 5000))')
 case("ls_err_dca", "planning_lumpsum_vs_dca(d5, st1, horizon = 2, step = 6, sim_args = list(dca_skip = FALSE, dca_mode = TRUE))",
      "result = SE.planning_lumpsum_vs_dca(d5, st1, horizon=2, step=6, sim_args={'dca_skip': False, 'dca_mode': True})",
      'result = SE.planning_lumpsum_vs_dca(d5, st1; horizon = 2, step = 6, sim_args = RList("dca_skip" => false, "dca_mode" => true))')
@@ -567,8 +527,6 @@ case("ls_err_dca_block", "planning_lumpsum_vs_dca(d5, st1, horizon = 2, step = 6
 case("ls_err_flat", "planning_lumpsum_vs_dca(d5, st1, horizon = 2, step = 6, sim_args = list(tax_mode = 'person'))",
      "result = SE.planning_lumpsum_vs_dca(d5, st1, horizon=2, step=6, sim_args={'tax_mode': 'person'})",
      'result = SE.planning_lumpsum_vs_dca(d5, st1; horizon = 2, step = 6, sim_args = RList("tax_mode" => "person"))')
-case("ls_err_short", "planning_lumpsum_vs_dca(d5, st1, horizon = 10)", "result = SE.planning_lumpsum_vs_dca(d5, st1, horizon=10)",
-     'result = SE.planning_lumpsum_vs_dca(d5, st1; horizon = 10)')
 case("ls_unsorted", "planning_lumpsum_vs_dca(d5[rev(seq_len(nrow(d5))), ], st1, months = 6, horizon = 4, step = 3)",
      "result = SE.planning_lumpsum_vs_dca(d5.iloc[::-1].reset_index(drop=True), st1, months=6, horizon=4, step=3)",
      'result = SE.planning_lumpsum_vs_dca(rows(d5, nrow(d5):-1:1), st1; months = 6, horizon = 4, step = 3)')

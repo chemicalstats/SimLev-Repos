@@ -6,14 +6,16 @@
  *               Beobachtungen, Mittel dort in long double ohne Korrektur und ohne Rundung auf double,
  *               Korrelation in long double.
  *             - kendall: Σ sign(x_k − x_j) sign(y_k − y_j) über alle geordneten Paare (bei
- *               pairwise über k > j), Standardisierung mit der Anzahl verschiedener Paare.
+ *               pairwise über k > j), Standardisierung mit der Anzahl verschiedener Paare; seit 1.6.3
+ *               für endliche Werte in O(m log m) nach Knight (gleiche ganze Zahl, siehe kendall_sum).
  *             - cor: Division durch das Produkt der Standardabweichungen, auf [−1, 1] begrenzt;
  *               Standardabweichung null ergibt NA und die Warnung des Hosts.
  *             - use: all.obs (Fehler bei fehlenden Werten), complete.obs/na.or.complete (nur
  *               vollständige Zeilen), pairwise.complete.obs, everything (NA für Spalten mit NA).
  *             Spearman rechnet der Host über die Ränge (?cor) mit diesem Kern (pearson).
  * Quellen:    R-Hilfeseite ?cor (R 4.3.3); Kendall, M. G. (1938). A new measure of rank correlation.
- *             Biometrika 30, 81–93.
+ *             Biometrika 30, 81–93. Knight, W. R. (1966). A computer method for calculating Kendall's tau
+ *             with ungrouped data. Journal of the American Statistical Association 61(314), 436–439.
  *             use = "everything", kendall, cor: für Paare mit einer NA-Spalte liest R ein nicht
  *             gesetztes Hilfsfeld; das Ergebnis ist NA, aber ob still oder signalisierend, hängt dort
  *             vom Speicherinhalt ab. Der Kern teilt wie bei pearson (stilles NA, Logik der Ports).
@@ -30,22 +32,14 @@
  * Prüforakel: R 4.3.3 (Gleichlauf: rbase_fuzz.R).
  */
 #include "slc_internal.h"
-#include "slc_rbase.h"
+#include "slc_rbase2.h"
 
 #include <stdlib.h>
 #include <string.h>
 
 typedef long double ldouble;
 
-static double bits_d(uint64_t u)
-{
-    double d;
-    memcpy(&d, &u, sizeof d);
-    return d;
-}
 
-#define R_NA  bits_d(UINT64_C(0x7FF00000000007A2))
-#define R_NAN bits_d(UINT64_C(0x7FF8000000000000))
 
 /* sign(a) * sign(b) für Differenzen a, b: NaN bleibt NaN mit seinem Vorzeichen (eine NaN-Differenz,
  * etwa Inf - Inf, setzt sich wie bei der Multiplikation durch; ausdrücklich, damit der Compiler das
@@ -87,10 +81,117 @@ static ldouble cross(const double *a, double am, const double *b, double bm, con
     return s;
 }
 
+/* ── Schnellweg Kendall (seit 1.6.3) für endliche Werte, m <= KT_MMAX: sign(x_k − x_j) ist dann der Vergleich
+ * von x_k und x_j (die Differenz endlicher Zahlen ist genau dann 0, wenn sie gleich sind; ein Überlauf nach ±Inf
+ * behält das Vorzeichen), die Summe über die Paare also die ganze Zahl 2 (K − D) mit K konkordanten und D
+ * diskordanten Paaren. Die bisherige Summe von ±1 und 0 in long double ist exakt (|Summe| <= m^2 < 2^53, auch wo
+ * long double nur double ist); Ergebnis und Bits sind daher gleich. K − D nach Knight (1966): Paare (x, y) nach x,
+ * dann y sortieren, D = Zahl der Vertauschungen beim Mischsortieren der y (streng größer), Bindungen über Läufe
+ * gleicher Werte (−0 = 0 wie bei ==). Mit NaN oder ±Inf (NaN-Differenzen, Vorzeichen und Nutzlast aus der
+ * Reihenfolge der Summe) oder größerem m gilt der Doppelweg. ── */
+#define KT_MMAX INT64_C(94906265)   /* floor(sqrt(2^53)) */
+typedef struct { double x, y; } kt_pair;
+
+static int kt_cmp_pair(const void *p, const void *q)
+{
+    const kt_pair *a = (const kt_pair *) p, *b = (const kt_pair *) q;
+    if (a->x < b->x) return -1;
+    if (a->x > b->x) return 1;
+    if (a->y < b->y) return -1;
+    if (a->y > b->y) return 1;
+    return 0;
+}
+static int kt_cmp_d(const void *p, const void *q)
+{
+    const double a = *(const double *) p, b = *(const double *) q;
+    return a < b ? -1 : (a > b ? 1 : 0);
+}
+static int kt_finite(const double *a, const int64_t *rows, int64_t m)
+{
+    int64_t k;
+    for (k = 0; k < m; k++) if (!isfinite(a[ROW(rows, k)])) return 0;
+    return 1;
+}
+/* Σ t(t − 1)/2 über die Läufe gleicher Werte einer aufsteigend sortierten Folge */
+static int64_t kt_ties(const double *v, int64_t m)
+{
+    int64_t i = 0, s = 0;
+    while (i < m) {
+        int64_t j = i + 1;
+        while (j < m && v[j] == v[i]) j++;
+        s += (j - i) * (j - i - 1) / 2;
+        i = j;
+    }
+    return s;
+}
+/* Vertauschungen (v[i] > v[j], i < j) beim stabilen Mischsortieren von v[lo, hi) */
+static int64_t kt_inv(double *v, double *t, int64_t lo, int64_t hi)
+{
+    int64_t mid, i, j, k, s;
+    if (hi - lo < 2) return 0;
+    mid = lo + (hi - lo) / 2;
+    s = kt_inv(v, t, lo, mid) + kt_inv(v, t, mid, hi);
+    for (i = lo, j = mid, k = lo; k < hi; k++) {
+        if (i < mid && (j >= hi || !(v[j] < v[i]))) t[k] = v[i++];
+        else { t[k] = v[j++]; s += mid - i; }
+    }
+    for (k = lo; k < hi; k++) v[k] = t[k];
+    return s;
+}
+/* K − D und die Zahl der Paare ohne Bindung in a bzw. b (je ungeordnet); 0, wenn kein Speicher */
+static int kt_knight(const double *a, const double *b, const int64_t *rows, int64_t m, int64_t *cmd, int64_t *nta,
+                     int64_t *ntb)
+{
+    kt_pair *P = (kt_pair *) malloc((size_t) (m > 0 ? m : 1) * sizeof(kt_pair));
+    double *v = (double *) malloc((size_t) (2 * (m > 0 ? m : 1)) * sizeof(double));
+    int64_t k, n0 = m * (m - 1) / 2, n1 = 0, n2, n3 = 0, D;
+    if (!P || !v) { free(P); free(v); return 0; }
+    for (k = 0; k < m; k++) { P[k].x = a[ROW(rows, k)]; P[k].y = b[ROW(rows, k)]; }
+    qsort(P, (size_t) m, sizeof(kt_pair), kt_cmp_pair);
+    k = 0;
+    while (k < m) {   /* Bindungen in x (n1) und in x und y zugleich (n3) */
+        int64_t j = k + 1, i;
+        while (j < m && P[j].x == P[k].x) j++;
+        n1 += (j - k) * (j - k - 1) / 2;
+        i = k;
+        while (i < j) {
+            int64_t l = i + 1;
+            while (l < j && P[l].y == P[i].y) l++;
+            n3 += (l - i) * (l - i - 1) / 2;
+            i = l;
+        }
+        k = j;
+    }
+    for (k = 0; k < m; k++) v[k] = P[k].y;
+    D = kt_inv(v, v + m, 0, m);
+    n2 = kt_ties(v, m);   /* v ist jetzt sortiert */
+    *cmd = n0 - n1 - n2 + n3 - 2 * D;
+    *nta = n0 - n1;
+    *ntb = n0 - n2;
+    free(P); free(v);
+    return 1;
+}
+/* Zahl der Paare ohne Bindung (ungeordnet) für endliches a; -1, wenn kein Speicher */
+static int64_t kt_untied(const double *a, const int64_t *rows, int64_t m)
+{
+    double *v = (double *) malloc((size_t) (m > 0 ? m : 1) * sizeof(double));
+    int64_t k, r;
+    if (!v) return -1;
+    for (k = 0; k < m; k++) v[k] = a[ROW(rows, k)];
+    qsort(v, (size_t) m, sizeof(double), kt_cmp_d);
+    r = m * (m - 1) / 2 - kt_ties(v, m);
+    free(v);
+    return r;
+}
+
 static double kendall_sum(const double *a, const double *b, const int64_t *rows, int64_t m)
 {
     ldouble s = 0.0L;
     int64_t k, j;
+    if (m <= KT_MMAX && kt_finite(a, rows, m) && kt_finite(b, rows, m)) {
+        int64_t cmd, nta, ntb;
+        if (kt_knight(a, b, rows, m, &cmd, &nta, &ntb)) return (double) (2 * cmd);
+    }
     for (k = 0; k < m; k++) {
         int64_t rk = ROW(rows, k);
         for (j = 0; j < m; j++) {
@@ -104,6 +205,10 @@ static double kendall_sum(const double *a, const double *b, const int64_t *rows,
 static double kendall_ne(const double *a, const int64_t *rows, int64_t m)
 {
     int64_t k, j, c = 0;
+    if (m <= KT_MMAX && kt_finite(a, rows, m)) {   /* Schnellweg (seit 1.6.3): 2 × Paare ohne Bindung */
+        const int64_t u = kt_untied(a, rows, m);
+        if (u >= 0) return (double) (2 * u);
+    }
     for (k = 0; k < m; k++)
         for (j = 0; j < m; j++) c += a[ROW(rows, k)] != a[ROW(rows, j)];
     return (double) c;
@@ -125,7 +230,7 @@ static void cov_complete1(int64_t n, int64_t ncx, const double *x, const int64_t
     int64_t i, j, n1 = nobs - 1;
     (void) n;
     if (nobs <= 1) {
-        for (i = 0; i < ncx * ncx; i++) ans[i] = R_NA;
+        for (i = 0; i < ncx * ncx; i++) ans[i] = SLR_NA;
         return;
     }
     if (!kendall)
@@ -143,7 +248,7 @@ static void cov_complete1(int64_t n, int64_t ncx, const double *x, const int64_t
             for (j = 0; j < i; j++) {
                 if (xm[i] == 0 || xm[j] == 0) {
                     *sd0 = 1;
-                    ans[i + j * ncx] = ans[j + i * ncx] = R_NA;
+                    ans[i + j * ncx] = ans[j + i * ncx] = SLR_NA;
                 } else {
                     ans[i + j * ncx] = ans[j + i * ncx] = clamp1(ans[i + j * ncx] / (xm[i] * xm[j]));
                 }
@@ -158,20 +263,20 @@ static void cov_na_1(int64_t n, int64_t ncx, const double *x, const int *has_na,
 {
     int64_t i, j, n1 = n - 1;
     if (n <= 1) {
-        for (i = 0; i < ncx * ncx; i++) ans[i] = R_NA;
+        for (i = 0; i < ncx * ncx; i++) ans[i] = SLR_NA;
         return;
     }
-    for (i = 0; i < ncx; i++) xm[i] = R_NAN;
+    for (i = 0; i < ncx; i++) xm[i] = SLR_NAN;
     if (!kendall)
-        for (i = 0; i < ncx; i++) xm[i] = has_na[i] ? R_NA : mean_rows(x + i * n, NULL, n);
+        for (i = 0; i < ncx; i++) xm[i] = has_na[i] ? SLR_NA : mean_rows(x + i * n, NULL, n);
     for (i = 0; i < ncx; i++) {
         if (has_na[i]) {
-            for (j = 0; j <= i; j++) ans[i + j * ncx] = ans[j + i * ncx] = R_NA;
+            for (j = 0; j <= i; j++) ans[i + j * ncx] = ans[j + i * ncx] = SLR_NA;
             continue;
         }
         for (j = 0; j <= i; j++) {
             double v;
-            if (has_na[j]) v = R_NA;
+            if (has_na[j]) v = SLR_NA;
             else if (!kendall) v = (double) (cross(x + i * n, xm[i], x + j * n, xm[j], NULL, n) / (ldouble) n1);
             else v = kendall_sum(x + i * n, x + j * n, NULL, n);
             ans[i + j * ncx] = ans[j + i * ncx] = v;
@@ -185,7 +290,7 @@ static void cov_na_1(int64_t n, int64_t ncx, const double *x, const int *has_na,
                 for (j = 0; j < i; j++) {
                     if (xm[i] == 0 || xm[j] == 0) {
                         *sd0 = 1;
-                        ans[i + j * ncx] = ans[j + i * ncx] = R_NA;
+                        ans[i + j * ncx] = ans[j + i * ncx] = SLR_NA;
                     } else {
                         ans[i + j * ncx] = ans[j + i * ncx] = clamp1(ans[i + j * ncx] / (xm[i] * xm[j]));
                     }
@@ -201,7 +306,7 @@ static void cov_complete2(int64_t n, int64_t ncx, const double *x, int64_t ncy, 
 {
     int64_t i, j, n1 = nobs - 1;
     if (nobs <= 1) {
-        for (i = 0; i < ncx * ncy; i++) ans[i] = R_NA;
+        for (i = 0; i < ncx * ncy; i++) ans[i] = SLR_NA;
         return;
     }
     for (i = 0; i < ncx; i++) xm[i] = 0.0;
@@ -221,7 +326,7 @@ static void cov_complete2(int64_t n, int64_t ncx, const double *x, int64_t ncy, 
         for (j = 0; j < ncy; j++) ys[j] = sdev2(y + j * n, ym[j], n1, kendall, rows, nobs);
         for (i = 0; i < ncx; i++)
             for (j = 0; j < ncy; j++) {
-                if (xs[i] == 0.0 || ys[j] == 0.0) { *sd0 = 1; ans[i + j * ncx] = R_NA; }
+                if (xs[i] == 0.0 || ys[j] == 0.0) { *sd0 = 1; ans[i + j * ncx] = SLR_NA; }
                 else ans[i + j * ncx] = clamp1(ans[i + j * ncx] / (xs[i] * ys[j]));
             }
     }
@@ -233,32 +338,32 @@ static void cov_na_2(int64_t n, int64_t ncx, const double *x, int64_t ncy, const
 {
     int64_t i, j, n1 = n - 1;
     if (n <= 1) {
-        for (i = 0; i < ncx * ncy; i++) ans[i] = R_NA;
+        for (i = 0; i < ncx * ncy; i++) ans[i] = SLR_NA;
         return;
     }
     for (i = 0; i < ncx; i++) xm[i] = 0.0;
     for (i = 0; i < ncy; i++) ym[i] = 0.0;
     if (!kendall) {
-        for (i = 0; i < ncx; i++) xm[i] = hx[i] ? R_NA : mean_rows(x + i * n, NULL, n);
-        for (i = 0; i < ncy; i++) ym[i] = hy[i] ? R_NA : mean_rows(y + i * n, NULL, n);
+        for (i = 0; i < ncx; i++) xm[i] = hx[i] ? SLR_NA : mean_rows(x + i * n, NULL, n);
+        for (i = 0; i < ncy; i++) ym[i] = hy[i] ? SLR_NA : mean_rows(y + i * n, NULL, n);
     }
     for (i = 0; i < ncx; i++) {
-        if (hx[i]) { for (j = 0; j < ncy; j++) ans[i + j * ncx] = R_NA; continue; }
+        if (hx[i]) { for (j = 0; j < ncy; j++) ans[i + j * ncx] = SLR_NA; continue; }
         for (j = 0; j < ncy; j++) {
-            if (hy[j]) ans[i + j * ncx] = R_NA;
+            if (hy[j]) ans[i + j * ncx] = SLR_NA;
             else if (!kendall) ans[i + j * ncx] = (double) (cross(x + i * n, xm[i], y + j * n, ym[j], NULL, n) / (ldouble) n1);
             else ans[i + j * ncx] = kendall_sum(x + i * n, y + j * n, NULL, n);
         }
     }
     if (cor) {
         double *xs = xm, *ys = ym;
-        for (i = 0; i < ncx; i++) xs[i] = hx[i] ? R_NA : sdev2(x + i * n, xm[i], n1, kendall, NULL, n);
-        for (j = 0; j < ncy; j++) ys[j] = hy[j] ? R_NA : sdev2(y + j * n, ym[j], n1, kendall, NULL, n);
+        for (i = 0; i < ncx; i++) xs[i] = hx[i] ? SLR_NA : sdev2(x + i * n, xm[i], n1, kendall, NULL, n);
+        for (j = 0; j < ncy; j++) ys[j] = hy[j] ? SLR_NA : sdev2(y + j * n, ym[j], n1, kendall, NULL, n);
         for (i = 0; i < ncx; i++) {
             if (hx[i]) continue;
             for (j = 0; j < ncy; j++) {
                 if (hy[j]) continue;
-                if (xs[i] == 0.0 || ys[j] == 0.0) { *sd0 = 1; ans[i + j * ncx] = R_NA; }
+                if (xs[i] == 0.0 || ys[j] == 0.0) { *sd0 = 1; ans[i + j * ncx] = SLR_NA; }
                 else ans[i + j * ncx] = clamp1(ans[i + j * ncx] / (xs[i] * ys[j]));
             }
         }
@@ -278,7 +383,7 @@ static void cov_pairwise(int64_t n, int64_t ncx, const double *x, int64_t ncy, c
             for (k = 0; k < n; k++) if (!isnan(xx[k]) && !isnan(yy[k])) rows[nobs++] = k;
             if (nobs >= 2) {
                 ldouble s = 0.0L, xsd = 0.0L, ysd = 0.0L;
-                int64_t n1 = nobs - 1;
+                int64_t n1 = nobs - 1, kcmd, knta, kntb;
                 if (!kendall) {
                     ldouble xmean = 0.0L, ymean = 0.0L, xd, yd;
                     for (k = 0; k < nobs; k++) xmean += xx[rows[k]];
@@ -292,6 +397,11 @@ static void cov_pairwise(int64_t n, int64_t ncx, const double *x, int64_t ncy, c
                         xsd += xd * xd;
                         ysd += yd * yd;
                     }
+                } else if (nobs <= KT_MMAX && kt_finite(xx, rows, nobs) && kt_finite(yy, rows, nobs) &&
+                           kt_knight(xx, yy, rows, nobs, &kcmd, &knta, &kntb)) {
+                    s = (ldouble) kcmd;   /* Schnellweg wie kendall_sum (seit 1.6.3): Summen über k > t exakt */
+                    xsd = (ldouble) knta;
+                    ysd = (ldouble) kntb;
                 } else {
                     for (k = 0; k < nobs; k++)
                         for (t = 0; t < k; t++) {
@@ -304,7 +414,7 @@ static void cov_pairwise(int64_t n, int64_t ncx, const double *x, int64_t ncy, c
                 if (cor) {
                     if (xsd == 0 || ysd == 0) {
                         *sd0 = 1;
-                        val = R_NA;
+                        val = SLR_NA;
                     } else {
                         if (!kendall) {
                             xsd /= (ldouble) n1;
@@ -321,7 +431,7 @@ static void cov_pairwise(int64_t n, int64_t ncx, const double *x, int64_t ncy, c
                     val = (double) s;
                 }
             } else {
-                val = R_NA;
+                val = SLR_NA;
             }
             ans[i + j * ncx] = val;
             if (sym) ans[j + i * ncx] = val;
@@ -352,7 +462,7 @@ int sl_r_cov(sl_ctx *cx, int64_t n, int64_t ncx, const double *x, int64_t ncy, c
     if (use < 1 || use > 5) return sl_fail(cx, SL_EARG, "invalid 'use' (computational method)");
     if (y == NULL) ncy = ncx;
     *sd0 = 0;
-    for (i = 0; i < ncx * ncy; i++) ans[i] = R_NA;
+    for (i = 0; i < ncx * ncy; i++) ans[i] = SLR_NA;
     rows = (int64_t *) malloc((size_t) (n > 0 ? n : 1) * sizeof(int64_t));
     xm = (double *) malloc((size_t) (ncx > 0 ? ncx : 1) * sizeof(double));
     ym = (double *) malloc((size_t) (ncy > 0 ? ncy : 1) * sizeof(double));

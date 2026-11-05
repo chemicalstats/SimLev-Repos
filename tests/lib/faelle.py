@@ -28,8 +28,9 @@ import numpy as np
 import pandas as pd
 
 import simlev
-from simlev._r import env as _env
 from reftree import run_case as _run_ref_case
+# NA und NaN unterscheiden wie R (SIMLEV_LAX_NA=1: NA = NaN); Hex-Zahlen der Fälle (seit 1.6.3 nur in reftree.py)
+from reftree import _STRICT_NA as STRICT_NA, _unhex as unhex
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 GRUPPEN = ("gleichlauf", "fehler", "ausgabe")
@@ -48,12 +49,21 @@ def bereiche(d):
     return [os.path.join(d, f) for f in sorted(os.listdir(d)) if f.endswith(".jsonl.gz")]
 
 
-def lies_bereich(path):
-    """Kopf (mit Eingabespeicher) und Fälle einer Bereichsdatei; Verweise auf den Speicher bleiben."""
+def bereich_strom(path):
+    """Kopf (mit Eingabespeicher), dann die Fälle einer Bereichsdatei einzeln (Generator; seit 1.6.3): Es liegt immer
+    nur ein Fall im Speicher. Verweise auf den Speicher bleiben."""
     with gzip.open(path, "rt", encoding="utf-8") as fh:
-        head = json.loads(fh.readline())
-        cases = [json.loads(ln) for ln in fh if ln.strip()]
-    return head, cases
+        yield json.loads(fh.readline())
+        for ln in fh:
+            if ln.strip():
+                yield json.loads(ln)
+
+
+def lies_bereich(path):
+    """Kopf (mit Eingabespeicher) und alle Fälle einer Bereichsdatei; Verweise auf den Speicher bleiben."""
+    it = bereich_strom(path)
+    head = next(it)
+    return head, list(it)
 
 
 def kennung(case):
@@ -120,23 +130,9 @@ def pruefe(case, store, verbose=False):
     return run_engine(case, verbose=verbose)
 
 
-_NA_REAL = np.array([0x7FF00000000007A2], dtype=np.uint64).view(np.float64)[0]
-STRICT_NA = not _env.lax_na()   # NA und NaN unterscheiden wie R (SIMLEV_LAX_NA=1: NA = NaN)
-
-
 def _isna_arr(a):
     a = np.ascontiguousarray(a, dtype=np.float64)
     return np.isnan(a) & ((a.view(np.uint64) & np.uint64(0xFFFFFFFF)) == np.uint64(1954))
-
-
-def unhex(v):
-    if v is None or v == "NA":
-        return float(_NA_REAL)
-    if v == "NaN":
-        return float("nan")
-    if isinstance(v, (int, float)):
-        return float(v)
-    return float.fromhex(v)
 
 
 def load_case(d):

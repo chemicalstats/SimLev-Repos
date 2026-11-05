@@ -339,7 +339,7 @@ function _print_hmm(io::IO, x)
     nothing
 end
 
-function _plot_hmm(x; data = nothing, file = nothing, width = 900, height = 380)   # data: wie R angenommen, ungenutzt
+function _plot_hmm(x; data = nothing, width = 900, height = 380)   # data: wie R angenommen, ungenutzt
     D = _D()
     k = Int(x["k"])
     top = _fmat(x["filtered"])[:, k]
@@ -348,7 +348,7 @@ function _plot_hmm(x; data = nothing, file = nothing, width = 900, height = 380)
                                                        ylim = (0.0, 1.0), hline = [(0.5, "grey")], dates = true,
                                                        ylabel = "P(Z$k | bis t)",
                                                        title = "Gefilterte Wahrscheinlichkeit des unruhigsten Zustands (Z$k)"));
-                file = file, width = width, height = height)
+                width = width, height = height)
     return (p.svg, data)
 end
 

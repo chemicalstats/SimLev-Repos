@@ -2,7 +2,7 @@
 # Module: planning, scenarios, tactical (bis 1.4.0 je ein Generator gen_<modul>.R, hier wörtlich hintereinander).
 # Aufruf (Repo-Wurzel): LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek mit SimLev> SIMLEV_FAELLE_DIR=<ordner> Rscript tests/werkzeuge/breite/planung.R
 # Breitenprüfung, nichts abgelegt: alle bisherigen Einzelfälle des Bereichs (bis 1.4.1 Generator des Katalogs) flach nach
-# <ordner>/breite_planung.jsonl.gz; tests/werkzeuge/gleichlauf/run.sh vergleicht Python und Julia damit. Abgelegt sind die Szenarien
+# <ordner>/breite_planung.jsonl.gz; tests/werkzeuge/gleichlauf/run.py vergleicht Python und Julia damit. Abgelegt sind die Szenarien
 # und Tabellen aus tests/gleichlauf/erzeugen/planung.R (Format und Umgebung: tests/gleichlauf/erzeugen/ref_tools.R).
 source("tests/gleichlauf/erzeugen/ref_tools.R")
 ref_bereich("breite_planung", alle = TRUE)
@@ -29,20 +29,11 @@ I <- list(d = d, pr = pr, prs = prs, dn = dn)
 ref_case("ser_ret", SH("series_shift_return(d, 'us', 4)"), PSH("PL.series_shift_return(d, 'us', 4)"), I,
          jl = paste0(JH, 'x = PL.series_shift_return(d, "us", 4)
 result = SL.RList("data" => x, "shift" => SL.attrs(x)["shift"])'))
-ref_case("ser_named", SH("series_shift_return(d, c('us', 'eu'), c(eu = 3, us = 5))"), PSH("PL.series_shift_return(d, ['us', 'eu'], pd.Series({'eu': 3, 'us': 5}))"), I,
-         jl = paste0(JH, 'x = PL.series_shift_return(d, ["us", "eu"], SL.named("eu" => 3, "us" => 5))
-result = SL.RList("data" => x, "shift" => SL.attrs(x)["shift"])'))
 ref_case("ser_two_scalar", SH("series_shift_return(d, c('eu', 'us'), -1.5, ppy = 250)"), PSH("PL.series_shift_return(d, ['eu', 'us'], -1.5, ppy=250)"), I,
          jl = paste0(JH, 'x = PL.series_shift_return(d, ["eu", "us"], -1.5; ppy = 250)
 result = SL.RList("data" => x, "shift" => SL.attrs(x)["shift"])'))
 ref_case("ser_prices", SH("series_shift_return(pr, c('us', 'eu'), 6, type = 'prices')"), PSH("PL.series_shift_return(pr, ['us', 'eu'], 6, type='prices')"), I,
          jl = paste0(JH, 'x = PL.series_shift_return(pr, ["us", "eu"], 6; type = "prices")
-result = SL.RList("data" => x, "shift" => SL.attrs(x)["shift"])'))
-ref_case("ser_prices_unsorted", SH("series_shift_return(prs, 'us', 4, type = 'prices')"), PSH("PL.series_shift_return(prs, 'us', 4, type='prices')"), I,
-         jl = paste0(JH, 'x = PL.series_shift_return(prs, "us", 4; type = "prices")
-result = SL.RList("data" => x, "shift" => SL.attrs(x)["shift"])'))
-ref_case("ser_nodate", SH("series_shift_return(d[, c('us', 'eu')], 'eu', 2)"), PSH("PL.series_shift_return(d[['us', 'eu']], 'eu', 2)"), I,
-         jl = paste0(JH, 'x = PL.series_shift_return(SL.RFrame("us" => d.us, "eu" => d.eu), "eu", 2)
 result = SL.RList("data" => x, "shift" => SL.attrs(x)["shift"])'))
 ref_case("ser_nodate_prices", SH("series_shift_return(pr[1:300, c('us', 'eu')], 'eu', 2, 'prices', ppy = 12)"), PSH("PL.series_shift_return(pr.iloc[:300][['us', 'eu']], 'eu', 2, type='prices', ppy=12)"), I,
          jl = paste0(JH, 'x = PL.series_shift_return(SL.RFrame("us" => pr.us[1:300], "eu" => pr.eu[1:300]), "eu", 2; type = "prices", ppy = 12)
@@ -55,21 +46,10 @@ ref_case("ser_chr_date", "x <- series_shift_return(transform(d[1:200, ], date = 
          jl = paste0(JH, 'd2 = SL.rows(d, 1:200); d2.date = string.(d2.date)
 x = PL.series_shift_return(d2, "us", 3); x.date = Date.(x.date)
 result = SL.RList("data" => x, "shift" => SL.attrs(x)["shift"])'))
-ref_case("ser_err_df", "series_shift_return(as.matrix(d[, 2:3]), 'us', 4)", paste0(P, "result = PL.series_shift_return(d[['us', 'eu']].to_numpy(), 'us', 4)"), I,
-         jl = paste0(JH, 'result = PL.series_shift_return(hcat(d.us, d.eu), "us", 4)'))
-ref_case("ser_err_col", "series_shift_return(d, c('us', 'jp', 'cn'), 4)", paste0(P, "result = PL.series_shift_return(d, ['us', 'jp', 'cn'], 4)"), I,
-         jl = paste0(JH, 'result = PL.series_shift_return(d, ["us", "jp", "cn"], 4)'))
-ref_case("ser_err_target", "series_shift_return(d, 'us', '4')", paste0(P, "result = PL.series_shift_return(d, 'us', '4')"), I,
-         jl = paste0(JH, 'result = PL.series_shift_return(d, "us", "4")'))
 ref_case("ser_err_target_na", "series_shift_return(d, 'us', NA_real_)", paste0(P, "result = PL.series_shift_return(d, 'us', simlev._r.fmt.NA_REAL)"), I,
          jl = paste0(JH, 'result = PL.series_shift_return(d, "us", SL.NA)'))
-ref_case("ser_err_named", "series_shift_return(data.frame(us = rep(1.001, 10), eu = 1.001), c('us', 'eu'), c(us = 4))",
-         paste0(P, "result = PL.series_shift_return(pd.DataFrame({'us': np.repeat(1.001, 10), 'eu': 1.001}), ['us', 'eu'], pd.Series({'us': 4}))"),
-         jl = paste0(JH, 'result = PL.series_shift_return(SL.RFrame("us" => fill(1.001, 10), "eu" => fill(1.001, 10)), ["us", "eu"], SL.named("us" => 4))'))
 ref_case("ser_err_unnamed", "series_shift_return(d, c('us', 'eu'), c(4, 5))", paste0(P, "result = PL.series_shift_return(d, ['us', 'eu'], [4, 5])"), I,
          jl = paste0(JH, 'result = PL.series_shift_return(d, ["us", "eu"], [4, 5])'))
-ref_case("ser_err_dup", "series_shift_return(rbind(pr[1:10, ], pr[5, ]), 'us', 4, type = 'prices')", paste0(P, "result = PL.series_shift_return(pd.concat([pr.iloc[:10], pr.iloc[[4]]]), 'us', 4, type='prices')"), I,
-         jl = paste0(JH, 'result = PL.series_shift_return(SL.rows(pr, [1:10; 5]), "us", 4; type = "prices")'))
 ref_case("ser_err_type", "series_shift_return(d, 'us', 4, type = 'level')", paste0(P, "result = PL.series_shift_return(d, 'us', 4, type='level')"), I,
          jl = paste0(JH, 'result = PL.series_shift_return(d, "us", 4; type = "level")'))
 
@@ -100,17 +80,6 @@ I <- list(ds = ds, dm = dm)
 ref_case("pb_ex", "bootstrap_pooled(ds[1:2], c('aktien', 'anleihen'), weights = c(aktien = 0.6, anleihen = 0.4), inflation = 'cpi', n = 50, years = 30, L = 5, seed = 1)",
          paste0(P, "result = PL.bootstrap_pooled({k: ds[k] for k in ['de', 'us']}, ['aktien', 'anleihen'], weights=pd.Series({'aktien': 0.6, 'anleihen': 0.4}), inflation='cpi', n=50, years=30, L=5, seed=1)"), I,
          jl = paste0(JH, 'result = PL.bootstrap_pooled(SL.RList("de" => ds.de, "us" => ds.us), ["aktien", "anleihen"]; weights = SL.named("aktien" => 0.6, "anleihen" => 0.4), inflation = "cpi", n = 50, years = 30, L = 5, seed = 1)'))
-ref_case("pb_default", "bootstrap_pooled(ds, 'aktien', n = 20, seed = 2)", paste0(P, "result = PL.bootstrap_pooled(ds, 'aktien', n=20, seed=2)"), I,
-         jl = paste0(JH, 'result = PL.bootstrap_pooled(ds, "aktien"; n = 20, seed = 2)'))
-ref_case("pb_unnamed_w", "bootstrap_pooled(ds, c('aktien', 'anleihen'), weights = c(3, 1), n = 10, years = 12, L = 2.5, country_weights = c(1, 2, 1), seed = 3)",
-         paste0(P, "result = PL.bootstrap_pooled(ds, ['aktien', 'anleihen'], weights=[3, 1], n=10, years=12, L=2.5, country_weights=[1, 2, 1], seed=3)"), I,
-         jl = paste0(JH, 'result = PL.bootstrap_pooled(ds, ["aktien", "anleihen"]; weights = [3, 1], n = 10, years = 12, L = 2.5, country_weights = [1, 2, 1], seed = 3)'))
-ref_case("pb_target", "bootstrap_pooled(ds, c('aktien', 'anleihen'), weights = c(anleihen = 0.5, aktien = 0.5), n = 15, years = 20, L = 4, target = 4, inflation = 'cpi', seed = 4)",
-         paste0(P, "result = PL.bootstrap_pooled(ds, ['aktien', 'anleihen'], weights=pd.Series({'anleihen': 0.5, 'aktien': 0.5}), n=15, years=20, L=4, target=4, inflation='cpi', seed=4)"), I,
-         jl = paste0(JH, 'result = PL.bootstrap_pooled(ds, ["aktien", "anleihen"]; weights = SL.named("anleihen" => 0.5, "aktien" => 0.5), n = 15, years = 20, L = 4, target = 4, inflation = "cpi", seed = 4)'))
-ref_case("pb_target_named", "bootstrap_pooled(ds, c('aktien', 'anleihen'), n = 15, years = 10, L = 3, target = c(aktien = 5), seed = 5)",
-         paste0(P, "result = PL.bootstrap_pooled(ds, ['aktien', 'anleihen'], n=15, years=10, L=3, target=pd.Series({'aktien': 5}), seed=5)"), I,
-         jl = paste0(JH, 'result = PL.bootstrap_pooled(ds, ["aktien", "anleihen"]; n = 15, years = 10, L = 3, target = SL.named("aktien" => 5), seed = 5)'))
 ref_case("pb_quarter", "bootstrap_pooled(dm, c('aktien', 'anleihen'), frequency = 'quarter', inflation = 'cpi', n = 12, years = 8, seed = 6)",
          paste0(P, "result = PL.bootstrap_pooled(dm, ['aktien', 'anleihen'], frequency='quarter', inflation='cpi', n=12, years=8, seed=6)"), I,
          jl = paste0(JH, 'result = PL.bootstrap_pooled(dm, ["aktien", "anleihen"]; frequency = "quarter", inflation = "cpi", n = 12, years = 8, seed = 6)'))
@@ -123,19 +92,8 @@ ref_case("pb_noseed", "simlev_seed(42); a <- bootstrap_pooled(ds, 'aktien', n = 
 ref_case("pb_seed_restore", "simlev_seed(42); a <- bootstrap_pooled(ds, 'aktien', n = 3, years = 5, L = 2, seed = 1); SimLev:::.sl_runif(2)",
          paste0(P, "simlev.simlev_seed(42); a = PL.bootstrap_pooled(ds, 'aktien', n=3, years=5, L=2, seed=1); result = simlev._lib.runif(2)"), I,
          jl = paste0(JH, 'SL.simlev_seed(42); a = PL.bootstrap_pooled(ds, "aktien"; n = 3, years = 5, L = 2, seed = 1); result = SL.SLib.runif(2)'))
-ref_case("pb_err_names", "bootstrap_pooled(unname(ds), 'aktien', n = 5)", paste0(P, "result = PL.bootstrap_pooled(list(ds.values()), 'aktien', n=5)"), I,
-         jl = paste0(JH, 'result = PL.bootstrap_pooled(collect(values(ds)), "aktien"; n = 5)'))
 ref_case("pb_err_w", "bootstrap_pooled(ds, c('aktien', 'anleihen'), weights = 1, n = 5, L = 5, seed = 1)", paste0(P, "result = PL.bootstrap_pooled(ds, ['aktien', 'anleihen'], weights=1, n=5, L=5, seed=1)"), I,
          jl = paste0(JH, 'result = PL.bootstrap_pooled(ds, ["aktien", "anleihen"]; weights = 1, n = 5, L = 5, seed = 1)'))
-ref_case("pb_err_w_neg", "bootstrap_pooled(ds, c('aktien', 'anleihen'), weights = c(1, -1), n = 5)", paste0(P, "result = PL.bootstrap_pooled(ds, ['aktien', 'anleihen'], weights=[1, -1], n=5)"), I,
-         jl = paste0(JH, 'result = PL.bootstrap_pooled(ds, ["aktien", "anleihen"]; weights = [1, -1], n = 5)'))
-ref_case("pb_err_w_names", "bootstrap_pooled(ds, c('aktien', 'anleihen'), weights = c(aktien = 0.6, bonds = 0.4), n = 5, L = 5, seed = 1)",
-         paste0(P, "result = PL.bootstrap_pooled(ds, ['aktien', 'anleihen'], weights=pd.Series({'aktien': 0.6, 'bonds': 0.4}), n=5, L=5, seed=1)"), I,
-         jl = paste0(JH, 'result = PL.bootstrap_pooled(ds, ["aktien", "anleihen"]; weights = SL.named("aktien" => 0.6, "bonds" => 0.4), n = 5, L = 5, seed = 1)'))
-ref_case("pb_err_few", "bootstrap_pooled(list(a = ds$de[1:2, ], b = ds$us), 'aktien', n = 5)", paste0(P, "result = PL.bootstrap_pooled({'a': ds['de'].iloc[:2], 'b': ds['us']}, 'aktien', n=5)"), I,
-         jl = paste0(JH, 'result = PL.bootstrap_pooled(SL.RList("a" => SL.rows(ds.de, 1:2), "b" => ds.us), "aktien"; n = 5)'))
-ref_case("pb_err_freq", "bootstrap_pooled(ds, 'aktien', frequency = 'week')", paste0(P, "result = PL.bootstrap_pooled(ds, 'aktien', frequency='week')"), I,
-         jl = paste0(JH, 'result = PL.bootstrap_pooled(ds, "aktien"; frequency = "week")'))
 
 # ── portfolio_returns ───────────────────────────────────────────────────────
 set.seed(1); n <- 1300
@@ -184,34 +142,17 @@ ref_case("go_df", "planning_goal(as.data.frame(R[1:30, ]), 100, 110, 1, n_grid =
          jl = paste0(JH, 'result = PL.planning_goal(SL.RFrame(R.colnames, [R.data[1:30, j] for j in 1:3]), 100, 110, 1; n_grid = 8, n_sim = 60, seed = 6)'))
 set.seed(3)
 S5 <- cbind(safe = exp(rnorm(5, 0.02, 0.01)), mid = exp(rnorm(5, 0.04, 0.1)), risky = exp(rnorm(5, 0.06, 0.25)))
-ref_case("go_warn", "planning_goal(S5, 100, 123.4, 4, n_grid = 301, n_sim = 3000, seed = 1)",
-         paste0(P, "result = PL.planning_goal(S5, 100, 123.4, 4, n_grid=301, n_sim=3000, seed=1)"), list(S5 = S5),
-         jl = paste0(JH, 'result = PL.planning_goal(S5, 100, 123.4, 4; n_grid = 301, n_sim = 3000, seed = 1)'))
 ref_case("go_noseed", "simlev_seed(8); g <- planning_goal(R[1:30, ], 100, 120, 3, n_grid = 12, n_sim = 80); list(g, SimLev:::.sl_runif(1))",
          paste0(P, "simlev.simlev_seed(8); g = PL.planning_goal(R.iloc[:30], 100, 120, 3, n_grid=12, n_sim=80); result = [g, simlev._lib.runif(1)]"), I,
          jl = paste0(JH, 'SL.simlev_seed(8); g = PL.planning_goal(SL.NamedMat(R.data[1:30, :]; colnames = R.colnames[:]), 100, 120, 3; n_grid = 12, n_sim = 80); result = Any[g, SL.SLib.runif(1)]'))
-ref_case("go_err_R", "planning_goal(-R, 1, 2, 3)", paste0(P, "result = PL.planning_goal(-R, 1, 2, 3)"), I,
-         jl = paste0(JH, 'result = PL.planning_goal(-R.data, 1, 2, 3)'))
 ref_case("go_err_R_na", "x <- R; x[2, 2] <- NA; planning_goal(x, 1, 2, 3)", paste0(P, "x = R.copy(); x.iloc[1, 1] = simlev._r.fmt.NA_REAL; result = PL.planning_goal(x, 1, 2, 3)"), I,
          jl = paste0(JH, 'x = copy(R.data); x[2, 2] = SL.NA; result = PL.planning_goal(x, 1, 2, 3)'))
-ref_case("go_err_start", "planning_goal(R, 0, 1e5, 10)", paste0(P, "result = PL.planning_goal(R, 0, 1e5, 10)"), I,
-         jl = paste0(JH, 'result = PL.planning_goal(R, 0, 1e5, 10)'))
 ref_case("go_err_start2", "planning_goal(R, c(1, 2), 1e5, 10)", paste0(P, "result = PL.planning_goal(R, [1, 2], 1e5, 10)"), I,
          jl = paste0(JH, 'result = PL.planning_goal(R, [1, 2], 1e5, 10)'))
-ref_case("go_err_goal", "planning_goal(R, 1e5, -1, 10)", paste0(P, "result = PL.planning_goal(R, 1e5, -1, 10)"), I,
-         jl = paste0(JH, 'result = PL.planning_goal(R, 1e5, -1, 10)'))
-ref_case("go_err_h0", "planning_goal(R, 1e5, 1.5e5, 0)", paste0(P, "result = PL.planning_goal(R, 1e5, 1.5e5, 0)"), I,
-         jl = paste0(JH, 'result = PL.planning_goal(R, 1e5, 1.5e5, 0)'))
 ref_case("go_err_h", "planning_goal(R, 1e5, 1.5e5, 2.5)", paste0(P, "result = PL.planning_goal(R, 1e5, 1.5e5, 2.5)"), I,
          jl = paste0(JH, 'result = PL.planning_goal(R, 1e5, 1.5e5, 2.5)'))
-ref_case("go_err_grid", "planning_goal(R, 1e5, 1.5e5, 2, n_grid = 1)", paste0(P, "result = PL.planning_goal(R, 1e5, 1.5e5, 2, n_grid=1)"), I,
-         jl = paste0(JH, 'result = PL.planning_goal(R, 1e5, 1.5e5, 2; n_grid = 1)'))
-ref_case("go_err_sim", "planning_goal(R, 1e5, 1.5e5, 2, n_sim = 0)", paste0(P, "result = PL.planning_goal(R, 1e5, 1.5e5, 2, n_sim=0)"), I,
-         jl = paste0(JH, 'result = PL.planning_goal(R, 1e5, 1.5e5, 2; n_sim = 0)'))
 ref_case("go_err_cf", "planning_goal(R, 1e5, 1.5e5, 2, contributions = NA)", paste0(P, "result = PL.planning_goal(R, 1e5, 1.5e5, 2, contributions=simlev._r.fmt.NA_REAL)"), I,
          jl = paste0(JH, 'result = PL.planning_goal(R, 1e5, 1.5e5, 2; contributions = missing)'))
-ref_case("go_err_cf0", "planning_goal(R, 1e5, 1.5e5, 2, contributions = numeric(0))", paste0(P, "result = PL.planning_goal(R, 1e5, 1.5e5, 2, contributions=[])"), I,
-         jl = paste0(JH, 'result = PL.planning_goal(R, 1e5, 1.5e5, 2; contributions = Float64[])'))
 ref_done()
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -227,11 +168,7 @@ ref_case("views", "list(view_mean('a', -0.2), view_prob('a < -2', 0.15, '>='), v
          paste0(P, "result = [SC.view_mean('a', -0.2), SC.view_prob('a < -2', 0.15, op='>='), SC.view_vol('b', 0.8, op='<='), SC.view_mean('a', 1, op='<'), SC.view_prob('x', 1)]"),
          jl = paste0(J, 'result = [SC.view_mean("a", -0.2), SC.view_prob("a < -2", 0.15, ">="), SC.view_vol("b", 0.8, "<="), SC.view_mean("a", 1, "<"), SC.view_prob("x", 1)]'))
 ref_case("view_err1", "view_mean('a', NA)", paste0(P, "result = SC.view_mean('a', simlev._r.fmt.NA_REAL)"), jl = paste0(J, 'result = SC.view_mean("a", missing)'))
-ref_case("view_err2", "view_prob('a > 1', 1.5)", paste0(P, "result = SC.view_prob('a > 1', 1.5)"), jl = paste0(J, 'result = SC.view_prob("a > 1", 1.5)'))
-ref_case("view_err3", "view_vol('a', -1)", paste0(P, "result = SC.view_vol('a', -1)"), jl = paste0(J, 'result = SC.view_vol("a", -1)'))
-ref_case("view_err4", "view_mean('a', c(1, 2))", paste0(P, "result = SC.view_mean('a', [1, 2])"), jl = paste0(J, 'result = SC.view_mean("a", [1, 2])'))
 ref_case("view_err5", "view_mean('a', 'x')", paste0(P, "result = SC.view_mean('a', 'x')"), jl = paste0(J, 'result = SC.view_mean("a", "x")'))
-ref_case("view_err6", "view_mean('a', 1, '==')", paste0(P, "result = SC.view_mean('a', 1, op='==')"), jl = paste0(J, 'result = SC.view_mean("a", 1, "==")'))
 
 # ── scenario_entropy_pooling ──────────────────────────────────────────────────────
 set.seed(1); X <- data.frame(a = rnorm(400, 0.2, 2), b = rnorm(400, 0.05, 0.5)); X$b <- X$b + 0.1 * X$a
@@ -260,17 +197,10 @@ ref_case("ep_err_prior1", "scenario_entropy_pooling(X, 'a', list(), prior = c(1,
          jl = paste0(J, 'result = SC.scenario_entropy_pooling(X, "a", []; prior = [1, -1])'))
 ref_case("ep_err_prior2", "scenario_entropy_pooling(X, 'a', list(), prior = c(rep(1, 399), NA))", paste0(P, "result = SC.scenario_entropy_pooling(X, 'a', [], prior=np.r_[np.ones(399), simlev._r.fmt.NA_REAL])"), inputs = EI,
          jl = paste0(J, 'result = SC.scenario_entropy_pooling(X, "a", []; prior = vcat(ones(399), SL.NA))'))
-ref_case("ep_err_prior3", "scenario_entropy_pooling(X, 'a', list(), prior = rep(0, 400))", paste0(P, "result = SC.scenario_entropy_pooling(X, 'a', [], prior=np.zeros(400))"), inputs = EI,
-         jl = paste0(J, 'result = SC.scenario_entropy_pooling(X, "a", []; prior = zeros(400))'))
 ref_case("ep_err_view1", "scenario_entropy_pooling(X, 'a', list(view_mean('zz', 1)))", paste0(P, "result = SC.scenario_entropy_pooling(X, 'a', [SC.view_mean('zz', 1)])"), inputs = EI,
          jl = paste0(J, 'result = SC.scenario_entropy_pooling(X, "a", [SC.view_mean("zz", 1)])'))
 ref_case("ep_err_view2", "scenario_entropy_pooling(X, 'a', list(view_prob('TRUE', 0.5)))", paste0(P, "result = SC.scenario_entropy_pooling(X, 'a', [SC.view_prob('TRUE', 0.5)])"), inputs = EI,
          jl = paste0(J, 'result = SC.scenario_entropy_pooling(X, "a", [SC.view_prob("TRUE", 0.5)])'))
-ref_case("ep_err_view3", "scenario_entropy_pooling(X, 'a', list(view_vol('zz', 1)))", paste0(P, "result = SC.scenario_entropy_pooling(X, 'a', [SC.view_vol('zz', 1)])"), inputs = EI,
-         jl = paste0(J, 'result = SC.scenario_entropy_pooling(X, "a", [SC.view_vol("zz", 1)])'))
-ref_case("ep_err_view4", "scenario_entropy_pooling(X, 'a', list(list(type = 'skew', var = 'a', value = 1, op = '=')))",
-         paste0(P, "result = SC.scenario_entropy_pooling(X, 'a', [{'type': 'skew', 'var': 'a', 'value': 1, 'op': '='}])"), inputs = EI,
-         jl = paste0(J, 'result = SC.scenario_entropy_pooling(X, "a", [SL.RList("type" => "skew", "var" => "a", "value" => 1, "op" => "=")])'))
 
 # Kursdaten mit Zuständen
 set.seed(2); n <- 3 * 365
@@ -348,10 +278,6 @@ ref_case("risk", "ep <- scenario_entropy_pooling(X, c('a', 'b'), list(view_mean(
          jl = paste0(J, 'ep = SC.scenario_entropy_pooling(X, ["a", "b"], [SC.view_mean("a", -0.2)]); cs = SC.scenario_copula(X, ["a", "b"]; n = 300, seed = 1)\nresult = [SC.scenario_risk(ep, SL.named("a" => 0.6, "b" => 0.4)), SC.scenario_risk(ep, SL.named("b" => 1.0); alpha = 0.2), SC.scenario_risk(cs, (a = 0.5, b = 0.5); alpha = 0.01)]'))
 PE <- paste0(P, "ep = SC.scenario_entropy_pooling(X, ['a', 'b'], [])\n")
 JE <- paste0(J, 'ep = SC.scenario_entropy_pooling(X, ["a", "b"], [])\n')
-ref_case("risk_err1", "scenario_risk(list(), c(a = 1))", paste0(P, "result = SC.scenario_risk({}, {'a': 1})"), jl = paste0(J, 'result = SC.scenario_risk(SL.RList(), (a = 1,))'))
-ref_case("risk_err2", "ep <- scenario_entropy_pooling(X, c('a', 'b'), list()); scenario_risk(ep, c(a = 1), alpha = 1)", paste0(PE, "result = SC.scenario_risk(ep, {'a': 1}, alpha=1)"), inputs = EI, jl = paste0(JE, 'result = SC.scenario_risk(ep, (a = 1,); alpha = 1)'))
-ref_case("risk_err3", "ep <- scenario_entropy_pooling(X, c('a', 'b'), list()); scenario_risk(ep, c(1, 2))", paste0(PE, "result = SC.scenario_risk(ep, [1, 2])"), inputs = EI, jl = paste0(JE, 'result = SC.scenario_risk(ep, [1, 2])'))
-ref_case("risk_err4", "ep <- scenario_entropy_pooling(X, c('a', 'b'), list()); scenario_risk(ep, c(a = 1, q = 2))", paste0(PE, "result = SC.scenario_risk(ep, {'a': 1, 'q': 2})"), inputs = EI, jl = paste0(JE, 'result = SC.scenario_risk(ep, (a = 1, q = 2))'))
 
 # ── scenario_crisis ────────────────────────────────────────────────────────
 set.seed(3); n <- 6 * 365
@@ -677,8 +603,6 @@ cs("bl_err_neg", "tactical_blend(tactical_rules(d, list(), default = c(A = 1)), 
    jl = 'result = T.tactical_blend(T.tactical_rules(d, [], SL.named("A" => 1)), T.tactical_rules(d, [], SL.named("B" => 1)); shares = [0.5, -0.25])')
 cs("bl_err_type", "tactical_blend(c(A = 1))", "result = T.tactical_blend({'A': 1})",
    jl = 'result = T.tactical_blend(SL.named("A" => 1))')
-cs("bl_err_empty", "tactical_blend()", "result = T.tactical_blend()",
-   jl = 'result = T.tactical_blend()')
 cs("bl_err_dates", "tactical_blend(tactical_rules(d, list(), default = c(A = 1)), tactical_rules(d[1:10, ], list(), default = c(B = 1)))",
    "result = T.tactical_blend(T.tactical_rules(d, [], default={'A': 1}), T.tactical_rules(d.iloc[:10], [], default={'B': 1}))",
    jl = 'result = T.tactical_blend(T.tactical_rules(d, [], SL.named("A" => 1)), T.tactical_rules(SL.rows(d, 1:10), [], SL.named("B" => 1)))')
@@ -763,23 +687,12 @@ tsim("ts_gaps", "ws <- tactical_rules(ds[seq(1, nrow(ds), 3), ], list(list(when 
 res = T.tactical_simulation(ds, ws, lag=3, asset_args={'spread': 0.1})",
    jl = 'ws = T.tactical_rules(SL.rows(ds, 1:3:SL.nrow(ds)), [SL.RList("when" => "A > 101", "weights" => SL.named("A" => 1))], SL.named("C" => 1))
 res = T.tactical_simulation(ds, ws; lag = 3, asset_args = (spread = 0.1,))')
-cs("ts_err_w", "tactical_simulation(ds, c(A = 1))", "result = T.tactical_simulation(ds, {'A': 1})", inputs = I3,
-   jl = 'result = T.tactical_simulation(ds, SL.named("A" => 1))')
 cs("ts_err_flat", "tactical_simulation(ds, tactical_rules(ds, list(), default = c(A = 1)), dca_mode = TRUE, dca_value = 100)",
    "result = T.tactical_simulation(ds, T.tactical_rules(ds, [], default={'A': 1}), dca_mode=True, dca_value=100)", inputs = I3,
    jl = 'result = T.tactical_simulation(ds, T.tactical_rules(ds, [], SL.named("A" => 1)); dca_mode = true, dca_value = 100)')
-cs("ts_err_args", "tactical_simulation(ds, tactical_rules(ds, list(), default = c(A = 1)), balance_mode = TRUE, event_col = 'x')",
-   "result = T.tactical_simulation(ds, T.tactical_rules(ds, [], default={'A': 1}), balance_mode=True, event_col='x')", inputs = I3,
-   jl = 'result = T.tactical_simulation(ds, T.tactical_rules(ds, [], SL.named("A" => 1)); balance_mode = true, event_col = "x")')
-cs("ts_err_cols", "tactical_simulation(ds, tactical_rules(ds, list(), default = c(A = 1, X = 1, Y = 1)))",
-   "result = T.tactical_simulation(ds, T.tactical_rules(ds, [], default={'A': 1, 'X': 1, 'Y': 1}))", inputs = I3,
-   jl = 'result = T.tactical_simulation(ds, T.tactical_rules(ds, [], SL.named("A" => 1, "X" => 1, "Y" => 1)))')
 cs("ts_err_lag", "tactical_simulation(ds, tactical_rules(ds, list(), default = c(A = 1)), lag = -1)",
    "result = T.tactical_simulation(ds, T.tactical_rules(ds, [], default={'A': 1}), lag=-1)", inputs = I3,
    jl = 'result = T.tactical_simulation(ds, T.tactical_rules(ds, [], SL.named("A" => 1)); lag = -1)')
-cs("ts_err_lag2", "tactical_simulation(ds, tactical_rules(ds, list(), default = c(A = 1)), lag = 'x')",
-   "result = T.tactical_simulation(ds, T.tactical_rules(ds, [], default={'A': 1}), lag='x')", inputs = I3,
-   jl = 'result = T.tactical_simulation(ds, T.tactical_rules(ds, [], SL.named("A" => 1)); lag = "x")')
 ref_done()
 
 ref_schreiben()

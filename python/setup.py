@@ -31,18 +31,17 @@ import sys
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
 
-FLAGS = {
-    "unix": ["-O2", "-fno-fast-math", "-ffp-contract=off"],
-    "mingw32": ["-O2", "-fno-fast-math", "-ffp-contract=off"],
-    "msvc": ["/O2", "/fp:precise"],
-}
+_GNU_FLAGS = ("-O2", "-fno-fast-math", "-ffp-contract=off")   # unix und mingw32 gleich (seit 1.6.3 einmal)
+FLAGS = {"unix": list(_GNU_FLAGS), "mingw32": list(_GNU_FLAGS), "msvc": ["/O2", "/fp:precise"]}
 CXX_FLAGS = {"unix": ["-std=gnu++17"], "mingw32": ["-std=gnu++17"], "msvc": ["/std:c++17"]}
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
 # Gemeinsame Kerne von R und Python (Kopien aus core/ in src/core/, nur Header; die Huellen
-# binden sie ein, siehe core/simlev_core.h)
-SHARED_HEADERS = ["core/simlev_core.h", "core/research_core_impl.h", "core/withdrawal_core_impl.h",
-                  "core/tariff_core_impl.h", "core/engine_core_impl.h",
-                  "core/prepare_core_impl.h", "core/evaluate_core_impl.h"]
+# binden sie ein, siehe core/simlev_core.h). Seit 1.6.3 alle src/core/*_core_impl.h ueber glob (bis 1.6.2 eine
+# Liste ohne wrapper_core_impl.h: build_ext baute nach einer Aenderung nur dieser Datei nicht neu)
+SHARED_HEADERS = ["core/simlev_core.h"] + sorted(
+    os.path.relpath(f, os.path.join(_HERE, "src")).replace(os.sep, "/")
+    for f in glob.glob(os.path.join(_HERE, "src", "core", "*_core_impl.h")))
 # Python-Huellen (nur hier): geteilte Kerne und Bibliothek slc (Zufall und Verteilungen, lineare
 # Algebra, Optimierer, Modelle, Grundfunktionen mit R-Regeln aus core/slc_rbase*)
 WRAPPERS = ["_ext.cpp", "_ext_research.cpp", "_ext_withdrawal.cpp", "_ext_engine.cpp",
@@ -50,12 +49,11 @@ WRAPPERS = ["_ext.cpp", "_ext_research.cpp", "_ext_withdrawal.cpp", "_ext_engine
             "_ext_slc_rbase.cpp", "_ext_slc_rbase2.cpp",
             "_ext_slc_prep.cpp"]   # seit 1.6.0: Kerne fuer Wirtsfunktionen (core/slc_prep.h), Brent fmin
 # Bibliothek slc: Kopien aus core/
-_HERE = os.path.dirname(os.path.abspath(__file__))
 SLC = sorted(os.path.relpath(f, os.path.join(_HERE, "src")).replace(os.sep, "/")
              for f in glob.glob(os.path.join(_HERE, "src", "core", "slc*.cpp")))
 SLC_HEADERS = sorted(os.path.relpath(f, os.path.join(_HERE, "src")).replace(os.sep, "/")
                      for f in glob.glob(os.path.join(_HERE, "src", "core", "slc*.h")))
-HEADERS = SHARED_HEADERS + ["_ext_common.h"] + SLC_HEADERS
+HEADERS = SHARED_HEADERS + ["_ext_common.h", "_ext_slc_hull.h"] + SLC_HEADERS
 
 
 # wie R ohne -fwrapv, nur wenn der Compiler die Option ohne Warnung annimmt; seit 1.6.1 außerdem Sprünge nicht über
@@ -67,7 +65,6 @@ OPTIONAL_FLAGS = {"unix": ["-fstrict-overflow", "-Wa,-mbranches-within-32B-bound
 
 def _accepts(compiler, flag):
     """Übersetzt eine leere Datei mit ``flag`` (und ``-Werror``); True, wenn das gelingt."""
-    import os
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         src = os.path.join(d, "probe.cpp")

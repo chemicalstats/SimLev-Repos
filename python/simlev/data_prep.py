@@ -21,7 +21,6 @@ from __future__ import annotations
 import datetime as _dt
 import math
 import re
-import sys
 import warnings
 from collections.abc import Mapping
 
@@ -35,6 +34,8 @@ from ._r.fmt import NA_REAL
 from ._r.rlist import RList
 from ._r.rnum import r_cumprod, r_isna, r_mean, r_median, r_sum
 from ._util import _match_arg, _which_min  # noqa: F401 (_which_min auch für backcast)
+from ._util import _match_days, _message as message
+from ._r.rformat import _is_num as _is_number
 
 __all__ = [
     "series_align", "series_check", "SimLevDataCheck", "series_align_macro", "series_convert_currency",
@@ -50,12 +51,6 @@ _EPOCH = np.datetime64("1970-01-01", "D")
 # Allgemeine Hilfen (R-Semantik)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def message(text: str) -> None:
-    """R-``message()``: Text mit Zeilenumbruch auf ``sys.stderr``."""
-    sys.stderr.write(str(text) + "\n")
-    sys.stderr.flush()
-
-
 def _isna_scalar(x) -> bool:
     if x is None or x is pd.NA or x is pd.NaT:
         return True
@@ -64,10 +59,6 @@ def _isna_scalar(x) -> bool:
     if isinstance(x, np.datetime64):
         return bool(np.isnat(x))
     return False
-
-
-def _is_number(x) -> bool:
-    return isinstance(x, (int, float, np.integer, np.floating)) and not isinstance(x, (bool, np.bool_))
 
 
 def _fmt_num(x) -> str:
@@ -614,15 +605,6 @@ def _dp_frame(x, name):
 # series_align
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _match_days(a, b) -> np.ndarray:
-    """``match(a, b)`` für float-Tage (0-basiert, -1 = kein Treffer)."""
-    pos = {}
-    for i, v in enumerate(b):
-        if v not in pos:
-            pos[v] = i
-    return np.array([pos.get(v, -1) for v in a], dtype=np.int64)
-
-
 def series_align(*args, calendar=("day", "union", "intersect"), range=("common", "all"),  # noqa: A002
                  fill=("locf", "linear", "none"), max_gap=math.inf, start=None, end=None, **sources):
     """Datenquellen nach Datum zusammenführen.
@@ -958,7 +940,8 @@ def series_check(data, *, columns=None, jump=20, stale=10, revert=0.8):
             long = [q for q in np.arange(len(runs)) if runs[q] + 1 >= stale]
             for q in long[:20]:
                 add(k, ok[ends[q] - runs[q]], "stehender Kurs (Zeilen)", float(x[ends[q] - 1]), float(runs[q] + 1))
-        jumps = len([j for j in J if j not in set(skip)])
+        sk = set(skip)   # einmal statt je Element (seit 1.6.3)
+        jumps = len([j for j in J if j not in sk])
         rows.append(dict(column=k, start=d[ok[0]], end=d[ok[-1]], n=len(ok), missing=miss, jumps=jumps,
                          spikes=n_spike, splits=n_split, stale_max=smax, nonpositive=len(npos)))
     if rows:
@@ -1000,10 +983,15 @@ def series_check(data, *, columns=None, jump=20, stale=10, revert=0.8):
 # series_align_macro
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _find_interval_int(x, vec) -> np.ndarray:
+    """``findInterval(x, vec)`` (vec aufsteigend): Anzahl vec <= x als int64, ohne NA-Sonderfall (tactical)."""
+    return np.searchsorted(np.asarray(vec, dtype=np.float64), np.asarray(x, dtype=np.float64), side="right")
+
+
 def _find_interval(x, vec) -> np.ndarray:
     """``findInterval(x, vec)`` (vec aufsteigend); NA -> nan, sonst float-Index (0 = davor)."""
     x = np.asarray(x, dtype=np.float64)
-    j = np.searchsorted(np.asarray(vec, dtype=np.float64), x, side="right").astype(np.float64)
+    j = _find_interval_int(x, vec).astype(np.float64)
     j[np.isnan(x)] = _NAN
     return j
 

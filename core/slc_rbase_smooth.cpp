@@ -26,14 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static double bits_d(uint64_t u)
-{
-    double d;
-    memcpy(&d, &u, sizeof d);
-    return d;
-}
 
-#define R_NA bits_d(UINT64_C(0x7FF00000000007A2))
 
 /* stabiles Mischsortieren der Indizes nach x (NaN hinten, −0 = 0) */
 static void msort(const double *x, int64_t *a, int64_t *t, int64_t lo, int64_t hi)
@@ -94,26 +87,58 @@ int sl_r_regularize(int64_t n, const double *x, const double *y, int narm, int m
             }
             if (unsorted && m > 1) msort(x, idx, tmp, 0, m);
         }
-        /* Gruppen in der Reihenfolge des ersten Auftretens */
-        for (i = 0; i < m; i++) {
-            double v = x[idx[i]];
-            for (j = 0; j < ng; j++)
-                if (same_x(xo[j], v)) break;
-            if (j == ng) xo[ng++] = v;
-            grp[i] = j;
+        /* Gruppen in der Reihenfolge des ersten Auftretens. Seit 1.6.3: fällt die Folge ohne NaN nicht (nach dem
+         * Sortieren bzw. bei aufsteigender Eingabe), stehen gleiche x nebeneinander; dann genügt der Vergleich mit
+         * der letzten Gruppe ohne NaN und eine eigene Gruppe für NaN (gleiche Gruppennummern wie die Suche über
+         * alle Gruppen, O(m) statt O(m ng)). Sonst wie bisher. */
+        int mono = 1;
+        {
+            int have = 0;
+            double prev = 0.0;
+            for (i = 0; i < m && mono; i++) {
+                double v = x[idx[i]];
+                if (isnan(v)) continue;
+                if (have && v < prev) mono = 0;
+                prev = v;
+                have = 1;
+            }
+        }
+        if (mono) {
+            int64_t last = -1, gnan = -1;
+            for (i = 0; i < m; i++) {
+                double v = x[idx[i]];
+                if (isnan(v)) {
+                    if (gnan < 0) { gnan = ng; xo[ng++] = v; }
+                    grp[i] = gnan;
+                } else {
+                    if (last < 0 || !same_x(xo[last], v)) { last = ng; xo[ng++] = v; }
+                    grp[i] = last;
+                }
+            }
+        } else {
+            for (i = 0; i < m; i++) {
+                double v = x[idx[i]];
+                for (j = 0; j < ng; j++)
+                    if (same_x(xo[j], v)) break;
+                if (j == ng) xo[ng++] = v;
+                grp[i] = j;
+            }
         }
         if (ng < nx) {
             *collapsed = 1;
             if (mean) {
+                /* y je Gruppe in der Reihenfolge von i (seit 1.6.3 in einem Durchgang über Zähler statt je Gruppe
+                 * über alle m; gleiche Werte und Reihenfolge für sl_r_mean) */
                 double *w = (double *) malloc((size_t) (m > 0 ? m : 1) * sizeof(double));
-                if (!w) { free(idx); return SL_ENOMEM; }
-                for (j = 0; j < ng; j++) {
-                    int64_t c = 0;
-                    for (i = 0; i < m; i++)
-                        if (grp[i] == j) w[c++] = y[idx[i]];
-                    yo[j] = sl_r_mean(c, w);
-                }
-                free(w);
+                int64_t *off = (int64_t *) calloc((size_t) (ng + 1), sizeof(int64_t));
+                if (!w || !off) { free(w); free(off); free(idx); return SL_ENOMEM; }
+                for (i = 0; i < m; i++) off[grp[i] + 1]++;
+                for (j = 0; j < ng; j++) off[j + 1] += off[j];
+                for (i = 0; i < m; i++) w[off[grp[i]]++] = y[idx[i]];
+                for (j = ng; j > 0; j--) off[j] = off[j - 1];
+                off[0] = 0;
+                for (j = 0; j < ng; j++) yo[j] = sl_r_mean(off[j + 1] - off[j], w + off[j]);
+                free(w); free(off);
             } else {
                 for (i = 0; i < m; i++) yo[i] = y[idx[i]];
             }
@@ -140,7 +165,7 @@ void sl_r_filter_conv(int64_t n, const double *x, int64_t nf, const double *f, i
         double z = 0.0;
         int bad = 0;
         if (!circular && (i + nshift - (nf - 1) < 0 || i + nshift >= n)) {
-            out[i] = R_NA;
+            out[i] = SLR_NA;
             continue;
         }
         for (j = 0; j < nf; j++) {
@@ -154,7 +179,7 @@ void sl_r_filter_conv(int64_t n, const double *x, int64_t nf, const double *f, i
             if (isnan(t)) bad = 1;
             z = z + f[j] * t;
         }
-        out[i] = bad ? R_NA : z;
+        out[i] = bad ? SLR_NA : z;
     }
 }
 
@@ -168,7 +193,7 @@ int sl_r_filter_rec(int64_t n, const double *x, int64_t nf, const double *f, con
         double sm = x[i];
         int bad = 0;
         if (isnan(sm)) {
-            r[nf + i] = R_NA;
+            r[nf + i] = SLR_NA;
             continue;
         }
         for (j = 0; j < nf; j++) {
@@ -176,7 +201,7 @@ int sl_r_filter_rec(int64_t n, const double *x, int64_t nf, const double *f, con
             if (!isnan(t)) {
                 sm += t * f[j];
             } else {
-                r[nf + i] = R_NA;
+                r[nf + i] = SLR_NA;
                 bad = 1;
                 break;
             }

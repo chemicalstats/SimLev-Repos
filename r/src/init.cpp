@@ -33,6 +33,7 @@ extern SEXP C_pbo_cscv(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_roll_mean_core(SEXP, SEXP);
 extern SEXP C_kendall_tau_core(SEXP, SEXP);
 extern SEXP C_roll_cov_core(SEXP, SEXP, SEXP);
+extern SEXP C_roll_max_core(SEXP, SEXP, SEXP);
 /* slc_r.cpp (C-Bibliothek slc) */
 extern SEXP C_sl_version(void);
 extern SEXP C_sl_rng_seed(SEXP);
@@ -56,8 +57,6 @@ extern SEXP C_sl_lgamma(SEXP);
 extern SEXP C_sl_plogis(SEXP);
 extern SEXP C_sl_qlogis(SEXP);
 extern SEXP C_sl_pbeta(SEXP, SEXP, SEXP, SEXP);
-extern SEXP C_sl_pt(SEXP, SEXP, SEXP);
-extern SEXP C_sl_qt(SEXP, SEXP, SEXP);
 /* slc_r_linalg.cpp (lineare Algebra, Matrixprodukt, kleinste Quadrate, Stineman, Spline, Kerndichte) */
 extern SEXP C_sl_chol(SEXP);
 extern SEXP C_sl_chol_band(SEXP, SEXP);
@@ -128,6 +127,7 @@ extern SEXP C_sl_boot_evt(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_boot_garch(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_boot_ms_garch(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_rolling_vol(SEXP, SEXP);
+extern SEXP C_sl_r_colsums_idx(SEXP, SEXP, SEXP, SEXP);
 extern SEXP C_sl_assign_regimes(SEXP, SEXP);
 extern SEXP C_sl_estimate_trans_mat(SEXP, SEXP, SEXP);
 
@@ -155,6 +155,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"roll_mean_core", (DL_FUNC) &C_roll_mean_core, 2},
     {"kendall_tau_core", (DL_FUNC) &C_kendall_tau_core, 2},
     {"roll_cov_core", (DL_FUNC) &C_roll_cov_core, 3},
+    {"roll_max_core", (DL_FUNC) &C_roll_max_core, 3},
     /* slc_r.cpp (C-Bibliothek slc) */
     {"sl_version", (DL_FUNC) &C_sl_version, 0},
     {"sl_rng_seed", (DL_FUNC) &C_sl_rng_seed, 1},
@@ -178,8 +179,6 @@ static const R_CallMethodDef CallEntries[] = {
     {"sl_plogis", (DL_FUNC) &C_sl_plogis, 1},
     {"sl_qlogis", (DL_FUNC) &C_sl_qlogis, 1},
     {"sl_pbeta", (DL_FUNC) &C_sl_pbeta, 4},
-    {"sl_pt", (DL_FUNC) &C_sl_pt, 3},
-    {"sl_qt", (DL_FUNC) &C_sl_qt, 3},
     /* slc_r_linalg.cpp */
     {"sl_chol", (DL_FUNC) &C_sl_chol, 1},
     {"sl_chol_band", (DL_FUNC) &C_sl_chol_band, 2},
@@ -239,6 +238,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"sl_boot_garch", (DL_FUNC) &C_sl_boot_garch, 8},
     {"sl_boot_ms_garch", (DL_FUNC) &C_sl_boot_ms_garch, 9},
     {"sl_rolling_vol", (DL_FUNC) &C_sl_rolling_vol, 2},
+    {"sl_r_colsums_idx", (DL_FUNC) &C_sl_r_colsums_idx, 4},
     {"sl_assign_regimes", (DL_FUNC) &C_sl_assign_regimes, 2},
     {"sl_estimate_trans_mat", (DL_FUNC) &C_sl_estimate_trans_mat, 3},
     /* engine_core.cpp */

@@ -258,13 +258,8 @@ def hmm_viterbi(lB, lA, lp0):
 # ── Bootstrap-Kerne (Zufall aus stream bzw. dem globalen Zustand) ────────────
 
 def _run(stream, fn, *args):
-    from . import _lib as L
-    if stream is None:
-        L._global_check()
-        with L._LOCK:
-            fn(L._G, *args)
-    else:
-        fn(stream.state, *args)
+    from . import _lib as L   # _lib lädt _lib_models am Ende (Zirkelimport), daher im Aufruf
+    L._with_state(stream, fn, *args)
 
 
 def _n(v):

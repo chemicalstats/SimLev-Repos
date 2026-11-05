@@ -28,10 +28,9 @@ const NA = SimLev.NA
 # Gemeinsame Hilfen aus Bootstrap
 const B = SimLev.Bootstrap
 const _MISSING = B._MISSING
-const _Missing = B._Missing
-import ..Bootstrap: _stop, _warn, _message, _sp, _keep_count, _fmt1, _fmtstrs, _show, _as_char, _round0, _isnum, _numvec, _num1, _f1,
-                    _dvec, _ivec, _mat, _get, _names, _values, _len, _rval, _rsum, _rprod, _rpow,
-                    _cumprod, _median, _quantile7, _weighted_mean, _wquantile, _uniq,
+import ..Bootstrap: _stop, _warn, _message, _sp, _keep_count, _fmt1, _fmtstrs, _show, _round0, _isnum, _numvec, _num1, _f1,
+                    _dvec, _ivec, _mat, _get, _names, _len, _rval, _rsum, _rprod, _rpow,
+                    _cumprod, _median, _quantile7, _weighted_mean, _wquantile,
                     _match_arg, _todate, _seq_dates, _days, _is_boot_result, _is_study, _is_result, _deparse,
                     _quiet, _no_messages, _aux_type_of, _cfg_list, _as_numeric_col, _pmax, _pmin, _istrue
 
@@ -415,7 +414,11 @@ function _pow_vec(x, y)
     x = _dvec(x); y = _dvec(y)
     (isempty(x) || isempty(y)) && return Float64[]
     n = max(length(x), length(y))
-    return Float64[_rpow(x[(i-1)%length(x)+1], y[(i-1)%length(y)+1]) for i in 1:n]
+    # seit 1.6.3 ein Aufruf des Kerns sl_r_pow_rec (R-Recycling, je Element r_pow1 wie sl_r_pow1 hinter _rpow)
+    out = Vector{Float64}(undef, n)
+    ccall((:sl_r_pow_rec, SimLev.LIBSLC), Cvoid, (Int64, Ptr{Float64}, Int64, Ptr{Float64}, Ptr{Float64}),
+          length(x), x, length(y), y, out)
+    return out
 end
 
 "`apply(M, 2, f)`: Vektor bei Länge 1 je Spalte, sonst Matrix (Ergebnis × Spalten)."
@@ -624,9 +627,9 @@ function result_index(x; base = 100)
     x = SimLev.as_rframe(x)
     _is_result(x) || _stop("x muss ein SimLevResult (Ergebnis von simulation()) sein.")
     w = _dvec(_get(x, "worth"))
-    fls = [_dvec(_get(a, "flows")) for a in _report_items(_get(x, "report"))]
+    fls = Vector{Float64}[_dvec(_get(a, "flows")) for a in _report_items(_get(x, "report"))]
     fl = if !isempty(fls) && length(w) > 1
-        Float64[_rsum(Float64[f[i] for f in fls]) for i in eachindex(w)]
+        _ri_flows(fls, length(w))          # seit 1.5.1 typstabil (bis 1.5.0 je Tag ein neuer Vektor, 2,2-mal R)
     elseif !isempty(fls)
         Float64[f[1] for f in fls]
     else
@@ -645,6 +648,19 @@ function result_index(x; base = 100)
     dts = _get(x, "dates")
     dts = eltype(dts) <: Integer ? [Date(1970, 1, 1) + Day(d) for d in dts] : _todate(dts, "dates")
     return RFrame("date" => dts, "value" => Float64(base) .* idx, "worth" => w, "flows" => fl)
+end
+
+"Summe der Zahlungen je Tag über die Assets (`_rsum` je Tag wie bis 1.5.0, ohne neuen Vektor je Tag)."
+function _ri_flows(fls::Vector{Vector{Float64}}, n::Int)
+    buf = Vector{Float64}(undef, length(fls))
+    out = Vector{Float64}(undef, n)
+    for i in 1:n
+        for (j, f) in enumerate(fls)
+            buf[j] = f[i]
+        end
+        out[i] = _rsum(buf)
+    end
+    out
 end
 
 "Periodenenden als Jahrestage ab Startdatum (1-basierte Zeilen), R: `.anniv_ends`."
@@ -770,6 +786,7 @@ println(size(wp["returns"]))   # 10 Jahre x 20 Pfade
 """
 function withdrawal_paths(x; column = nothing, strategy = nothing, inflation = nothing, inflation_type = _MISSING,
                           frequency = nothing, dates = nothing, start = "2000-01-01", cape = nothing)
+    @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
     x = SimLev.as_rframe(x)
     it_given = inflation_type !== _MISSING
     frequency = _match_arg(frequency, ("year", "quarter", "month"))
@@ -856,7 +873,7 @@ function withdrawal_paths(x; column = nothing, strategy = nothing, inflation = n
     length(ends) < 2 && _stop("Pfade zu kurz für eine volle Periode der gewählten frequency.")
     e1 = ends[2:end]; e0 = ends[1:end-1]
     per(v) = (v = _dvec(v); v[e1] ./ v[e0])
-    pcol(P, c) = P isa RFrame ? _dvec(P[c]) : _mat(P)[:, findfirst(==(c), B._colnames(P))]
+    pcol(P, c) = P isa RFrame ? _dvec(P[c]) : _pcol_mat(P, c)
     n_per = length(ends) - 1
     R = _vapply_mat([per(pcol(P, column)) for P in x["paths"]], n_per)
     I = infl_from(size(R, 1), size(R, 2), dates[ends])
@@ -907,6 +924,14 @@ end
 # ═══════════════════════════════════════════════════════════════════════════
 # Perfect Withdrawal Rate
 # ═══════════════════════════════════════════════════════════════════════════
+
+"""Spalte `c` eines Pfads (NamedMat/Matrix) als Vektor; seit 1.6.3 bei `NamedMat{Float64}` ohne Kopie der ganzen
+Matrix (bis 1.6.2 `_mat(P)[:, j]`, gleiche Werte)."""
+function _pcol_mat(P, c)
+    j = findfirst(==(c), B._colnames(P))
+    (P isa NamedMat{Float64} && j !== nothing) && return P.data[:, j]
+    return _mat(P)[:, j]
+end
 
 "Reale Jahresrenditen aus Perioden-Matrizen (R: `.annual_real`)."
 function _annual_real(wp)
@@ -1071,11 +1096,7 @@ function _wd_tax_mode(tax)
     return "person"
 end
 
-const _WD_TARIFF_COLS = ("year", "taxable_income", "church_tax_paid_deductible", "church_tax_refunded",
-                         "church_tax_net_deduction", "taxable_income_net", "deduction_effect", "gain_p23", "income_tax_p23",
-                         "soli_p23", "church_tax_p23", "tax_p23", "capital_income", "abgeltung_burden", "church_tax_withheld_k",
-                         "tariff_income_tax_k", "tariff_soli_k", "tariff_church_tax_k", "tariff_burden", "burden_without_gp",
-                         "burden_with_gp", "guenstiger", "settlement", "refund", "church_tax_settlement_next_year")
+const _WD_TARIFF_COLS = SimLev._ENGINE_ROWS   # 25 Spalten der Jahreszeilen (eine Liste, seit 1.6.3)
 
 "Tarifparameter für den Kern (R: `.wd_tariff_par`, `core/tariff_core_impl.h`)."
 function _wd_tariff_par(tt, church_k::Float64, use_gp)
@@ -1415,6 +1436,7 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
                                base_rate = 3.20, vorabpauschale = _MISSING,
                                sale_cost = _MISSING, cost_basis = _MISSING, loss_carryforward = _MISSING,
                                gamma = 2, keep_paths = true, horizon = nothing)
+    @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
     x = SimLev.as_rframe(x)
     rule_pos === _MISSING || (rule = rule_pos)
     rule === _MISSING && (rule = withdrawal_rule("constant"))
@@ -1786,6 +1808,25 @@ function withdrawal_simulation(x, rule_pos = _MISSING; rule = _MISSING, start_va
     return out
 end
 
+"""Quelle von `withdrawal_simulation` in Renditepfade aufbereiten wie dort (Ergebnis, Wrapper-NAV, Studie, Liste von
+Ergebnissen); andere Eingaben unverändert (seit 1.6.3, für die Suchschritte von `withdrawal_max_rate`: dieselben Zweige
+und Argumente, die Meldungen dieser Zweige gab schon der erste Lauf aus)."""
+function _wd_source(x, kw)
+    x = SimLev.as_rframe(x)
+    inflation = get(kw, :inflation, 0); inflation === nothing && (inflation = 0)
+    years = get(kw, :years, nothing); freq_arg = get(kw, :frequency, nothing); strategy = get(kw, :strategy, nothing)
+    if _is_result(x)
+        return withdrawal_cohorts(x; inflation = inflation, years = years === nothing ? 30 : years,
+                                  frequency = _match_arg(freq_arg, ("year", "quarter", "month")))
+    elseif SimLev.inherits(x, "SimLevWrapperNav")
+        return withdrawal_cohorts(x; price = "nav", inflation = inflation, years = years === nothing ? 30 : years,
+                                  frequency = _match_arg(freq_arg, ("year", "quarter", "month")))
+    elseif _is_study(x) || _is_result_list(x)
+        return withdrawal_paths(x; strategy = strategy, inflation = inflation, frequency = _match_arg(freq_arg, ("year", "quarter", "month")))
+    end
+    return x
+end
+
 """
     withdrawal_max_rate(x, rule = withdrawal_rule("constant"); success = 0.95, lower = 0.5, upper = 20,
                         tol = 0.005, kwargs...)
@@ -1854,13 +1895,15 @@ function withdrawal_max_rate(x, rule_pos = _MISSING; rule = _MISSING, success = 
         kwargs = (; kwargs..., horizon = hz)
     end
     first = Ref(true)
+    xs = Ref{Any}(nothing)   # seit 1.6.3: nach dem ersten (lauten) Lauf die Quelle einmal aufbereitet
     function f(rate)
         rl = copy(rule)
         rl["rate"] = rate
         s = if first[]
             withdrawal_simulation(x, rl; keep_paths = false, kwargs...)
         else
-            _quiet(() -> _no_messages(() -> withdrawal_simulation(x, rl; keep_paths = false, kwargs...)))
+            xs[] === nothing && (xs[] = _quiet(() -> _no_messages(() -> _wd_source(x, kwargs))))
+            _quiet(() -> _no_messages(() -> withdrawal_simulation(xs[], rl; keep_paths = false, kwargs...)))
         end
         first[] = false
         return _weighted_mean(Float64.(s["paths"]["success"]), s["weights"])
@@ -1976,7 +2019,7 @@ function _print_wd(io::IO, x; kw...)
 end
 
 "Fächer des realen Vermögens und des realen Jahreskonsums als SVG (R: `plot.SimLevWithdrawal`)."
-function _plot_wd(x; probs = [0.05, 0.25, 0.5, 0.75, 0.95], file = nothing, width = 900, height = 380)
+function _plot_wd(x; probs = [0.05, 0.25, 0.5, 0.75, 0.95], width = 900, height = 380)
     probs = _dvec(probs)
     w = _dvec(x["weights"])
     panels = Any[]
@@ -2030,7 +2073,6 @@ function _plot_wd(x; probs = [0.05, 0.25, 0.5, 0.75, 0.95], file = nothing, widt
     end
     print(io, "</svg>\n")
     svg = String(take!(io))
-    file === nothing || write(file, svg)
     return (svg, data)
 end
 

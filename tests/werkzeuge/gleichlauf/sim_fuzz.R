@@ -27,34 +27,8 @@ args <- commandArgs(TRUE)
 N <- as.integer(args[1]); seed0 <- as.integer(if (length(args) >= 2) args[2] else 20261101)
 ref_bereich("sim_fuzz", alle = TRUE); ref_init("sim_fuzz")
 
-pick <- function(x) x[[sample.int(length(x), 1L)]]
-
-# Fall schreiben (ref_case) und die Aufrufe der Warnungen und des Fehlers (nur R; deparse) als Feld r_calls
-# nachtragen: der Vergleich R neu gegen R 1.3.0 prüft damit auch die Aufrufe der Bedingungen
-fuzz_case <- function(id, r, py, jl, inputs) {
-  ref_case(id, r = r, py = py, jl = jl, inputs = inputs)
-  if (!.ref_in_subset(id)) return(invisible(NULL))
-  env <- new.env(parent = globalenv())
-  for (k in names(inputs)) assign(k, inputs[[k]], envir = env)
-  dp <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = " ")
-  wc <- character(0); ec <- NULL
-  invisible(capture.output(tryCatch(withCallingHandlers(eval(parse(text = r), envir = env),
-    warning = function(w) { wc <<- c(wc, dp(conditionCall(w))); invokeRestart("muffleWarning") },
-    message = function(m) invokeRestart("muffleMessage")),
-    error = function(e) ec <<- dp(conditionCall(e)))))
-  # Bedingungen aus dem Kern (seit 1.4.1) tragen den Aufruf von simulation() (bis 1.3.0 einen festen Ausdruck der Phase);
-  # sim_call = erster Aufruf von simulation() im Code (deparse), Sollwert dieser Kopfzeilen in sim_fuzz_cmp.py
-  fs <- function(e) {
-    if (!is.call(e)) return(NULL)
-    if (identical(e[[1L]], as.name("simulation"))) return(e)
-    for (i in seq_along(e)[-1L]) { x <- tryCatch(fs(e[[i]]), error = function(err) NULL); if (!is.null(x)) return(x) }
-    NULL
-  }
-  sc <- NULL
-  for (e in parse(text = r, keep.source = FALSE)) if (is.null(sc)) sc <- fs(e)
-  ref_case_extra(list(r_calls = list(warnings = as.list(wc), error = ec, sim_call = dp(sc))))
-}
-coin <- function(p) runif(1) < p
+# Fälle über fuzz_case() (ref_tools.R): r_calls = Aufrufe der Warnungen und des Fehlers (nur R; deparse); der Vergleich
+# R neu gegen die Referenz prüft damit auch die Aufrufe der Bedingungen
 
 # Fonds-Wrapper: innere Strategie aus den Spalten A und B, Code je Sprache
 wrap_code <- function(fee, perf, reb) {
@@ -190,10 +164,10 @@ for (k in seq_len(N)) {
     r <- paste(wcode$r, sc$r, r, sep = "\n")
     py <- paste(wcode$py, sc$py, paste0("result = ", py), sep = "\n")
     jl <- paste(wcode$jl, sc$jl, paste0("result = ", jl), sep = "\n")
-    fuzz_case(id, r = r, py = py, jl = jl, inputs = list(d = d))
+    fuzz_case(id, r = r, py = py, jl = jl, inputs = list(d = d), sim_call = TRUE)
   } else {
     s <- do.call(create_strategy, lapply(st, function(x) do.call(asset_config, x[!vapply(x, is.null, NA)])))
-    fuzz_case(id, r = r, py = paste0("result = ", py), jl = paste0("result = ", jl), inputs = list(d = d, s = s))
+    fuzz_case(id, r = r, py = paste0("result = ", py), jl = paste0("result = ", jl), inputs = list(d = d, s = s), sim_call = TRUE)
   }
 }
 # Zusatzfälle: Split-Abbruch. Am ersten Tag splittet die Kursreihe ohne Bestand (1e300 über der oberen
@@ -212,6 +186,6 @@ for (k in seq_along(xcase)) {
   s <- do.call(create_strategy, lapply(x$sh, function(w) asset_config("etf", "bnh", w)))
   bl <- blocks_from_flat(x$a)
   fuzz_case(sprintf("x%05d", k), r = sim_code("d", "s", bl, "r"), py = paste0("result = ", sim_code("d", "s", bl, "py")),
-            jl = paste0("result = ", sim_code("d", "s", bl, "jl")), inputs = list(d = x$d, s = s))
+            jl = paste0("result = ", sim_code("d", "s", bl, "jl")), inputs = list(d = x$d, s = s), sim_call = TRUE)
 }
 ref_done(); ref_schreiben()

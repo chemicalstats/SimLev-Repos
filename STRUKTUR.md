@@ -3,8 +3,8 @@
 Diese Datei ist erzeugt; nicht von Hand ändern.
 
 - **Erzeugt** mit `tests/schnittstelle/run.py` (Auszüge `api_r.R`, `api_py.py`, `api_jl.jl`, Vergleich `compare_api.py`, diese Datei `make_struktur.py`) aus `tests/schnittstelle/api.json`.
-- **Stand:** 2026-11-04.
-- **Umfang:** R 116 Exporte und 78 S3-Methoden, Python 119 Funktionen und 79 Methoden, Julia 129 Funktionen und 77 Methoden.
+- **Stand:** 2026-11-05.
+- **Umfang:** R 116 Exporte und 78 S3-Methoden, Python 119 Funktionen und 78 Methoden, Julia 129 Funktionen und 77 Methoden.
 - **Zuordnung:** R `a.b` → `a_b`; S3-Methode `<generic>.<Klasse>` → Python `<Klasse>.<generic>` (print über `.print` bzw. `.format`), Julia registrierte Methode (`show`, `r_summary`, `r_plot`). Regeln: `python/DEVELOPING.md`, `julia/DEVELOPING.md`.
 - **Abweichungen** der Argumente und Standardwerte meldet `compare_api.py`; bekannte stehen in `tests/schnittstelle/known_differences.tsv`.
 - Dateien relativ zu `r/R/`, `python/simlev/` bzw. `julia/src/`.
@@ -140,7 +140,7 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `wrapper_config` | `wrapper.R` | `wrapper_config` | `wrapper.py` | `wrapper_config` | `wrapper.jl` |
 | `wrapper_nav` | `wrapper.R` | `wrapper_nav` | `wrapper.py` | `wrapper_nav` | `wrapper.jl` |
 
-## S3-Methoden (80)
+## S3-Methoden (79)
 
 | Name R | Datei R | Name Python | Datei Python | Name Julia | Datei Julia |
 |---|---|---|---|---|---|
@@ -223,7 +223,6 @@ Diese Datei ist erzeugt; nicht von Hand ändern.
 | `print.SimLevWrapperConfig` | `wrapper.R` | `SimLevWrapperConfig.print` | `wrapper.py` | `show(SimLevWrapperConfig)` | `wrapper.jl` |
 | `print.SimLevWrapperNav` | `wrapper.R` | `SimLevWrapperNav.format` | `wrapper.py` | `show(SimLevWrapperNav)` | `wrapper.jl` |
 | – | – | `SimLevParamRange.format` | `param_search.py` | – | – |
-| – | – | `WithdrawalPathsPB.format` | `planning.py` | – | – |
 
 ## Nur in den Ports (13)
 

@@ -58,4 +58,3 @@ function optimize(f, interval = nothing, args...; lower = nothing, upper = nothi
     a = _num1(obj)
     return RList((maximum ? "maximum" : "minimum") => val, "objective" => (length(a) == 1 ? a[1] : obj))
 end
-const optimise = optimize

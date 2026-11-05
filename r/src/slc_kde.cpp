@@ -28,6 +28,7 @@
 #include "slc_constants.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 static double kern(double z) { return z * z > 1500.0 ? 0.0 : exp(-0.5 * z * z); }
 
@@ -87,39 +88,31 @@ int sl_kde(sl_ctx *cx, int64_t n, const double *x, const double *w, double bw,
     return SL_OK;
 }
 
-static double quant7(int64_t n, const double *xs, double p)
-{
-    double h = (double) (n - 1) * p, fl = floor(h);
-    int64_t lo = (int64_t) fl;
-    if (lo >= n - 1) return xs[n - 1];
-    return xs[lo] + (h - fl) * (xs[lo + 1] - xs[lo]);
-}
-
 int sl_kde_bw(sl_ctx *cx, int64_t n, const double *x, double *bw)
 {
-    int64_t i, *idx = NULL, *wk = NULL;
-    double *xs = NULL, mean, sd, iqr, lo;
+    int64_t i;
+    double *xs = NULL, mean, sd, iqr, q75, lo;
     slc_acc a;
     if (n < 2) return sl_fail(cx, SL_ESMALL, "bw.nrd0: mindestens 2 Werte nötig");
     if (!slc_all_finite(n, x)) return sl_fail(cx, SL_ENONFINITE, "bw.nrd0: NA/NaN/Inf in x");
-    idx = (int64_t *) malloc(sizeof(int64_t) * (size_t) n);
-    wk = (int64_t *) malloc(sizeof(int64_t) * (size_t) n);
     xs = (double *) malloc(sizeof(double) * (size_t) n);
-    if (!idx || !wk || !xs) { free(idx); free(wk); free(xs); return sl_fail(cx, SL_ENOMEM, "bw.nrd0: kein Speicher"); }
+    if (!xs) return sl_fail(cx, SL_ENOMEM, "bw.nrd0: kein Speicher");
     slc_acc_init(&a, 0.0);
     for (i = 0; i < n; i++) slc_acc_add(&a, x[i]);
     mean = slc_acc_val(&a) / (double) n;
     slc_acc_init(&a, 0.0);
     for (i = 0; i < n; i++) slc_acc_add(&a, (x[i] - mean) * (x[i] - mean));
     sd = sqrt(slc_acc_val(&a) / (double) (n - 1));
-    slc_sort_index(n, x, idx, wk);
-    for (i = 0; i < n; i++) xs[i] = x[idx[i]];
-    iqr = quant7(n, xs, 0.75) - quant7(n, xs, 0.25);
+    /* Quartile ohne Sortieren (seit 1.6.3, slc_quantile7; gleiche Ordnungsstatistiken, nur das Vorzeichen einer
+     * Null kann wechseln, und eine IQR von ±0 führt unten gleich zu sd) */
+    memcpy(xs, x, sizeof(double) * (size_t) n);
+    q75 = slc_quantile7(xs, n, 0.75);
+    iqr = q75 - slc_quantile7(xs, n, 0.25);
     lo = iqr / 1.34 < sd ? iqr / 1.34 : sd;
     if (!(lo > 0.0)) lo = sd;
     if (!(lo > 0.0)) lo = fabs(x[0]);
     if (!(lo > 0.0)) lo = 1.0;
     *bw = 0.9 * lo * pow((double) n, -0.2);
-    free(idx); free(wk); free(xs);
+    free(xs);
     return SL_OK;
 }

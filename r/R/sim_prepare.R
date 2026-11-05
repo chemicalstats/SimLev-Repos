@@ -2,29 +2,6 @@
 # simulation(), Phase 2: Datenvorbereitung, Zentralstruktur sim_mem, Termine und Flags
 # =============================================================================
 
-# C7-11: Feldfolge der obersten Ebene von sim_mem. Bis 1.3.0 lasen die Engine-Kerne
-# (simulation_core.cpp, fifo_core.cpp) diese Ebene ueber die Position; seit der Tagesengine im Kern
-# (sim_engine.R) liest .sim_engine_run die Felder ueber Namen. Die Reihenfolge wird weiter hier
-# festgelegt und geprueft (Aufbau des Ergebnisses).
-.SIM_MEM_LAYOUT <- c("assets", "status", "market", "trades", "report", "totals")
-
-#' Feldfolge von sim_mem pruefen (C7-11)
-#'
-#' Zweck: sicherstellen, dass die oberste Ebene von sim_mem genau die Felder aus .SIM_MEM_LAYOUT in
-#' dieser Reihenfolge hat, bevor C++-Funktionen ueber die Position darauf zugreifen.
-#' Eingabe: sim_mem (Liste).
-#' Ausgabe: sim_mem unsichtbar; sonst Fehler (interner Fehler, keine Fehlbedienung).
-#' @keywords internal
-#' @noRd
-.sim_check_layout <- function(sim_mem) {
-  if (!is.list(sim_mem) || !identical(names(sim_mem), .SIM_MEM_LAYOUT))
-    stop(sprintf(paste0("simulation: interner Fehler: sim_mem hat die Felder (%s), die C++-Kerne erwarten ",
-                        "genau (%s) in dieser Reihenfolge (Zugriff \u00fcber die Position)."),
-                 paste(names(sim_mem), collapse = ", "), paste(.SIM_MEM_LAYOUT, collapse = ", ")),
-         call. = FALSE)
-  invisible(sim_mem)
-}
-
 #' Phase 2a von simulation(): Daten auf das Kalenderraster bringen
 #'
 #' Zweck: Start- und Enddatum bestimmen, NA im Basiszins durch 0 ersetzen, fehlende Kalendertage
@@ -58,14 +35,6 @@
     message(sprintf(
       "Hinweis: %d Zeilen, erwartet %d Kalendertage. Fehlende Tage werden aufgef\u00fcllt (LOCF; Signale = FALSE).",
       nrow(data), expected_days))
-    .locf_fill <- function(v) {
-      non_na <- which(!is.na(v))
-      if (length(non_na) == 0L) return(v)
-      idx <- integer(length(v)); idx[non_na] <- non_na
-      idx <- cummax(idx)
-      idx[idx == 0L] <- non_na[1]          # fuehrende NAs rueckwaerts fuellen
-      v[idx]
-    }
     all_dates <- seq.Date(as.Date(start_date), as.Date(stopp_date), by = "day")
     data$.filled <- pre_filled      # Tage ohne echten Kurs (align_series/NA) bleiben markiert
     dd <- unclass(data$date)
@@ -82,7 +51,7 @@
       data <- merge(data.frame(date = all_dates), data, by = "date", all.x = TRUE)
       data$.filled[is.na(data$.filled)] <- TRUE   # A-2: aufgefuellte Tage markieren
       num_cols <- setdiff(names(data)[vapply(data, is.numeric, logical(1))], "date")
-      for (cc in num_cols) data[[cc]] <- .locf_fill(data[[cc]])
+      for (cc in num_cols) data[[cc]] <- .fill_na(data[[cc]], "locf")   # fuehrende NAs rueckwaerts gefuellt
       lgl_cols <- names(data)[vapply(data, is.logical, logical(1))]
       for (cc in lgl_cols) data[[cc]][is.na(data[[cc]])] <- FALSE
     }
@@ -95,9 +64,9 @@
 
 #' Phase 2b von simulation(): Zentralstruktur sim_mem anlegen
 #'
-#' Zweck: sim_mem mit den Feldern aus .SIM_MEM_LAYOUT (assets, status, market, trades, report,
-#' totals) je Asset vorbelegen (status und report setzt der Kern: Startgewichte und
-#' Anfangszustand in core/prepare_core_impl.h); prueft die Signal- und Basiszinsspalten.
+#' Zweck: sim_mem mit den Feldern assets, status, market, trades, report und totals je Asset vorbelegen
+#' (status und report setzt der Kern: Startgewichte und Anfangszustand in core/prepare_core_impl.h); prueft die
+#' Signal- und Basiszinsspalten.
 #' Eingabe: data und strategy (vorbereitet), start_date, stopp_date, sparer_pauschbetrag,
 #' use_sparer_pauschbetrag, base_rate, base_rate_flex, base_rate_data (Meldungen nennen die Bausteine).
 #' Ausgabe: sim_mem.
@@ -137,11 +106,9 @@
     # === Ende neu ===
   )
 
-  asset_day <- .sim_days(start_date, stopp_date)   # seq.Date(start_date, stopp_date, by = "days"); seit 1.6.1 einmal
   for(name in names(strategy)){
     #---> Initialisierung des Assets-Objekts:
     sim_mem[["assets"]][[name]] <- list(
-      class = strategy[[name]][["asset_class"]],
       style = strategy[[name]][["trading"]],
       start = as.Date(strategy[[name]][["start"]] %||% start_date),
       tax_regime = strategy[[name]][["tax_regime"]] %||% switch(strategy[[name]][["asset_class"]],
@@ -152,8 +119,7 @@
         "etn_standard" = "capital_gains",
         "etn_deliverable" = "private_sale",
         "capital_gains"),
-      bonus = (strategy[[name]][["partial_exemption"]] %||% 0) / 100,   # PROZENT-KONVENTION
-      deliverable = strategy[[name]][["deliverable"]] %||% FALSE
+      bonus = (strategy[[name]][["partial_exemption"]] %||% 0) / 100   # PROZENT-KONVENTION
     )
 
     # P-2: Signal-Spalten validieren (nur fuer trading = "signal")
@@ -168,7 +134,6 @@
 
     #---> Initialisierung des Market-Objekts:
     sim_mem[["market"]][[name]] <- list(
-      asset_day = asset_day,
       base_rates = if (base_rate_flex) {
   if (is.null(base_rate_data) || !base_rate_data %in% names(data)) {
     stop(if (is.null(base_rate_data)) "simulation: base_rate_flex = TRUE braucht base_rate_data (Name der Basiszins-Spalte in data, Prozent p. a.); base_rate_data fehlt."
@@ -188,8 +153,7 @@
       spread_rate = (strategy[[name]][["spread"]] %||% 0) / 100   # PROZENT-KONVENTION
     )
 
-    #---> Trade-Objekt (Listen setzt die Tagesengine)
-    sim_mem[["trades"]][[name]] <- list(buys = list(), sells = list(), taxes = list())
+    # trades (Zahl der Kaeufe und Verkaeufe, offene Lots) setzt die Tagesengine (.sim_engine_run)
   }
 
   sim_mem

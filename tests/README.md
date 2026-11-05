@@ -28,8 +28,8 @@ Aus der Repo-Wurzel, mit `LC_ALL=C.UTF-8` (die Referenzen entstanden unter C.UTF
 | Python | `python3 -m pytest tests` bzw. `tests/<gruppe>` (C-Erweiterung an Ort und Stelle gebaut oder `simlev` installiert) | 51 s |
 | Julia | `julia --project=julia tests/run.jl [gleichlauf fehler ausgabe schnittstelle]` (nach `Pkg.build()`) | 7 min (Übersetzen je Aufruf) |
 | Schnittstelle (drei Sprachen) | `tests/schnittstelle/run.py --check` (`--freeze` nur mit Eintrag in `tests/schnittstelle/CHANGES.md`) | 1 min |
-| Gleichlauf-Lauf | `tests/werkzeuge/gleichlauf/run.py --quick` bzw. `--full` (baut selbst; `--no-build`; seit 1.6.2 zwei Schritte gleichzeitig, `--jobs N`) | 8 bzw. 40 min |
-| Referenz der Vorversion | `tests/werkzeuge/gleichlauf/run.py --ref-erzeugen 162` (einmal je Versionsschritt; siehe unten) | rund 30 min |
+| Gleichlauf-Lauf | `tests/werkzeuge/gleichlauf/run.py --quick` bzw. `--full` (baut selbst; `--no-build`; seit 1.6.2 zwei Schritte gleichzeitig, `--jobs N`) | 8 bzw. 30 min |
+| Referenz der Vorversion | `tests/werkzeuge/gleichlauf/run.py --ref-erzeugen 163` (einmal je Versionsschritt; siehe unten) | rund 15 min |
 | Fälle neu erzeugen | `R_LIBS=<…> tests/werkzeuge/erzeugen.py [bereich …]` | 32 s |
 | Laufzeitmessung | `R_LIBS=<…> tests/werkzeuge/bench/run.py` | siehe `werkzeuge/bench/README.md` |
 
@@ -308,7 +308,7 @@ Test)". Die erwarteten Werte sind dieselben wie vor der Umstellung auf Tabellen 
 | `werkzeuge/gleichlauf/run.py` | erzeugt mit dem aktuellen R **alle** Fälle der Generatoren neu (`SIMLEV_GEN_ALLE=1`; `--quick` jede 20. Kennung) und vergleicht Python und Julia (`vergleich.{py,jl}`); `--full` zusätzlich `faelle_diff.py` (Katalog Byte für Byte gleich); Zufallsprüfungen `FUZZ_REF` gegen die abgelegte Referenz der Vorversion (nur lesen, seit 1.6.2); `exporte.py` zählt die Exporte ohne Fall |
 | `werkzeuge/zufall/engine_faelle.R`, `engine_stress.R`, `packen.py` | Zufallsprüfung der Engine (500 bzw. 1000 Fälle im Engine-Format), nur im Gleichlauf-Lauf, nichts abgelegt |
 | `werkzeuge/breite/<bereich>.R` | Breitenprüfung: die bisherigen Einzelfälle der neun Bereiche mit Szenarien (bis 1.4.1 Generatoren des Katalogs, gleiche Zufallsfolge), nur im Gleichlauf-Lauf (`breite_<bereich>`), nichts abgelegt |
-| `werkzeuge/gleichlauf/*_fuzz.R` | Zufallsprüfungen (Datumskern, slc_rbase, Tarifkern mit dem aktuellen R als Orakel; die Familien aus `FUZZ_REF` in `run.py` gegen die abgelegte Referenz der Vorversion, seit 1.6.2 R 1.6.2; `prec_fuzz.R` und `eigen_fuzz.R` zusätzlich Genauigkeit gegen Rmpfr) |
+| `werkzeuge/gleichlauf/*_fuzz.R` | Zufallsprüfungen (Datumskern, slc_rbase, Tarifkern mit dem aktuellen R als Orakel; die Familien aus `FUZZ_REF` in `run.py` gegen die abgelegte Referenz der Vorversion, seit 1.6.3 R 1.6.3; `prec_fuzz.R` und `eigen_fuzz.R` zusätzlich Genauigkeit gegen Rmpfr) |
 | `werkzeuge/bench/` | Laufzeitmessung (siehe `README.md` dort) |
 | `werkzeuge/doku/beispiele.py` | führt alle Codeblöcke der READMEs (Wurzel, `r/`, `python/`, `julia/`), der R-Vignette und der Tutorials in R, Python und Julia aus und vergleicht die Ausgabeblöcke (`--write` schreibt sie neu) |
 | `werkzeuge/doku/verweise.py` | prüft relative Verweise, Bildpfade und Anker in Markdown-Dateien |
@@ -325,10 +325,10 @@ sie nur:
   seinen Arbeitsordner und vergleicht sie mit dem Katalog (`--full`: `faelle_diff.py`), Python und Julia rechnen alle
   Fälle der Generatoren nach (der Katalog ist nur eine Auswahl, daher gegen die frisch erzeugten Fälle).
 - **Referenzausgaben der Zufallsprüfungen** (`FUZZ_REF`): `tests/werkzeuge/gleichlauf/run.py --ref-erzeugen K [name …]`
-  rechnet sie mit der eingefrorenen R-Bibliothek der Vorversion (`REFLIBS`, seit 1.6.2 nur `162` = R 1.6.2 in
-  `/home/claude/rlib162`, Umgebung `SIMLEV_FUZZ_REFLIB162`) für `--quick` und `--full` und legt sie unter
+  rechnet sie mit der eingefrorenen R-Bibliothek der Vorversion (`REFLIBS`, seit 1.6.2 nur eine Fassung, seit 1.6.3 `163` =
+  R 1.6.3 in `/home/claude/rlib163`, Umgebung `SIMLEV_FUZZ_REFLIB163`) für `--quick` und `--full` und legt sie unter
   `/home/claude/gleichlauf_ref/K` ab (Umgebung `SIMLEV_GLEICHLAUF_REF`): `quick/`, `full/` und `manifest.json` mit
-  Fassung, R-Version, je Familie Startwert, Fallzahl und SHA-256 der Datei und des Skripts. Vorhandene Einträge bleiben
+  Fassung, R-Version, je Familie Startwert, Fallzahl und SHA-256 der Datei und des Skripts (seit 1.6.3 auch der mit `source()` geladenen Hilfsdateien). Vorhandene Einträge bleiben
   (`--ersetzen` überschreibt). Der übliche Lauf vergleicht R neu, Python und Julia mit dieser Ablage; fehlt sie oder
   passen Fallzahl, Startwert oder Prüfsumme nicht, scheitert der Schritt mit Meldung und Befehl zum Erzeugen.
 - **Versionsschritt:** neue Fassung als eigene R-Bibliothek bauen und einfrieren, `REFLIBS` auf diese eine Fassung

@@ -368,7 +368,7 @@ end
 Liefert `(svg, data)`; `data`: `bins` (`bin`, `mean`, `lower`, `upper`: Mittel und Mittel ± 2
 Standardfehler als Anteil) und `scatter` (`signal`, `forward` und mit Polynom-Glättung `fitted`).
 """
-function _plot_signal(x; file = nothing)
+function _plot_signal(x)
     b = x["bins"]; nb = SimLev.nrow(b)
     m = 100 .* DA._f64(b["mean"]); se = 100 .* DA._f64(b["sd"]) ./ sqrt.(DA._f64(b["n"]))
     lo = m .- 2 .* se; hi = m .+ 2 .* se
@@ -397,7 +397,7 @@ function _plot_signal(x; file = nothing)
     data = SimLev.RList("bins" => SimLev.RFrame("bin" => String[string(v) for v in b["bin"]], "mean" => m0,
                                                 "lower" => m0 .- 2 .* se1, "upper" => m0 .+ 2 .* se1),
                         "scatter" => sc)
-    return (_ana_svg_done(s, nothing), data)
+    return (_ana_svg_done(s), data)
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -661,8 +661,22 @@ function overfit_reality_check(x; benchmark = nothing, B = 999, block = nothing,
     block === nothing && (block = max(2.0, SimLev.RFmt.r_round(SimLev.r_pow(Tn, 1 / 3), 0)))
     S = _main_stream(seed)
     Fb = Matrix{Float64}(undef, Int(B), K)
-    for i in 1:Int(B)
-        Fb[i, :] = DA._col_means(D[_boot_idx(Tn, Tn, block, S), :])
+    if D isa Matrix{Float64} && Tn > 0
+        # seit 1.6.3 colMeans(D[idx, ]) ohne Kopie (Kern sl_r_colsums_idx, gleiche Summanden in gleicher Folge wie
+        # sl_r_colsums auf der Kopie; m = Tn > 0, also ohne den NaN-Fall leerer Spalten von DA._col_means)
+        cm = Vector{Float64}(undef, K)
+        for i in 1:Int(B)
+            idx = Vector{Int64}(_boot_idx(Tn, Tn, block, S))
+            st = ccall((:sl_r_colsums_idx, SimLev.LIBSLC), Cint,
+                       (Int64, Int64, Ptr{Float64}, Int64, Int64, Int64, Ptr{Int64}, Int64, Cint, Cint, Ptr{Float64}),
+                       Tn, K, D, 1, Tn, length(idx), idx, 1, Cint(0), Cint(1), cm)
+            st == 0 || (Fb[i, :] = DA._col_means(D[idx, :]); continue)
+            Fb[i, :] = cm
+        end
+    else
+        for i in 1:Int(B)
+            Fb[i, :] = DA._col_means(D[_boot_idx(Tn, Tn, block, S), :])
+        end
     end
     sq = sqrt(Tn)
     om = Float64[max(SimLev.r_sd(Fb[:, j]), 1e-12) * sq for j in 1:K]
@@ -870,7 +884,7 @@ end
 Liefert `(svg, data)`; `data`: `heatmap` (`start_year`, `years`, `value`: gezeichnete Zellen,
 annualisierte Rendite als Anteil wie in `matrix`).
 """
-function _plot_heatmap(x; file = nothing)
+function _plot_heatmap(x)
     Mm = x["matrix"]; M = 100 .* Mm.data
     fin = filter(isfinite, M); lim = min(isempty(fin) ? 1.0 : maximum(abs.(fin)), 25.0)
     pal = _ana_ramp(["#B5562B", "#F2E9DC", "#2C6E9B"], 51)
@@ -891,7 +905,7 @@ function _plot_heatmap(x; file = nothing)
     for (k, t) in enumerate((-lim, 0.0, lim))
         _ana_legend(s, p, [DA._sp("%+.0f %%", t)], [pal[[1, 26, 51][k]]]; x = 830.0, y = 60.0 + 20 * (k - 1), box = true)
     end
-    return (_ana_svg_done(s, nothing),
+    return (_ana_svg_done(s),
             SimLev.RList("heatmap" => SimLev.RFrame("start_year" => sy, "years" => hy, "value" => vv)))
 end
 

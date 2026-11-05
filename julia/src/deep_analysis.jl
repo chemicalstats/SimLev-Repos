@@ -108,24 +108,9 @@ function _rmin(x)
     s
 end
 
-"R's `cummax()` (NA/NaN pflanzen sich fort)."
-function _cummax(x::AbstractVector)
-    out = Vector{Float64}(undef, length(x))
-    m = -Inf
-    nanv = 0.0; isn = false
-    for i in eachindex(x)
-        v = Float64(x[i])
-        if isn
-            out[i] = nanv; continue
-        end
-        if isnan(v)
-            isn = true; nanv = v; out[i] = v; continue
-        end
-        m = v > m ? v : m
-        out[i] = m
-    end
-    out
-end
+"R's `cummax()` über den Kern `sl_r_cummax` (wie R und Python: NA ab dem ersten NA, sonst NaN ab dem ersten NaN; seit
+1.6.3, bis 1.6.2 eine eigene Schleife mit anderen NA/NaN-Regeln)."
+_cummax(x) = SimLev.r_cummax(collect(Float64, x))
 
 "`mean(<logical>)` (Ganzzahlsumme / n in long double)."
 _mean_lgl(b) = isempty(b) ? NaN : SimLev.r_mean_int(Int[x ? 1 : 0 for x in b])
@@ -483,7 +468,7 @@ function _da_mwrr(s::DASeries)
 end
 "`.xirr_rate()` der Engine (J-ENG: `SimLev.xirr_rate`, früher `_xirr_rate`)."
 _xirr_rate(t, amount, end_value, horizon) =
-    (isdefined(SimLev, :xirr_rate) ? SimLev.xirr_rate : getfield(SimLev, :_xirr_rate))(t, amount, end_value, horizon)
+    SimLev.xirr_rate(t, amount, end_value, horizon)
 
 "Drawdown-Episoden (`.da_drawdowns`), nach Tiefe sortiert."
 function _da_drawdowns(date, value, top = 10)
@@ -825,6 +810,7 @@ println(da["metrics"])
 """
 function result_analysis(x; benchmark = nothing, risk_free = 0, rolling_years = 3,
                        var_levels = [0.01, 0.05, 0.10], top_drawdowns = 10, inflation = nothing)
+    @nospecialize   # seit 1.6.3: ein Rumpf für alle Typen der Schlüsselwörter (Übersetzung je Aufrufform entfällt)
     x = SimLev.as_rframe(x)
     benchmark = SimLev.as_rframe(benchmark)
     risk_free = SimLev.as_rframe(risk_free)
@@ -1050,7 +1036,7 @@ Startwert), `drawdown` (`series`, `date`, `drawdown` als Anteil), `rolling` (`se
 `return`; gezeichnete Zellen).
 """
 function _plot_analysis(x; type = ["overview", "growth", "drawdown", "rolling", "annual", "monthly"], series = 1,
-                        metric = "cagr", file = nothing)
+                        metric = "cagr")
     type = _match_arg(type, ["overview", "growth", "drawdown", "rolling", "annual", "monthly"])
     nms = collect(keys(x["monthly"]))
     if type == "monthly"
@@ -1158,7 +1144,7 @@ function _plot_analysis(x; type = ["overview", "growth", "drawdown", "rolling", 
         Dict("growth" => p_growth, "drawdown" => p_dd, "rolling" => p_roll, "annual" => p_annual,
              "monthly" => p_monthly)[type](s, 0, 0, 900, 520)
     end
-    return (_ana_svg_done(s, nothing), data)
+    return (_ana_svg_done(s), data)
 end
 
 function __init__()

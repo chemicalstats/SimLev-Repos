@@ -113,18 +113,30 @@ end
 parse_json(s::AbstractString) = _val(_P(String(s), 1))
 
 # ── gzip ────────────────────────────────────────────────────────────────────
-function read_gz(path::AbstractString)
+"Ruft `f(zeile)` für jede nicht leere Zeile der gzip-Datei `path` auf, eine nach der anderen (seit 1.6.3; bis 1.6.2
+lag die ganze Datei als Text im Speicher)."
+function gz_zeilen(f, path::AbstractString)
     fh = ccall((:gzopen, Zlib_jll.libz), Ptr{Cvoid}, (Cstring, Cstring), path, "rb")
     fh == C_NULL && error("kann $path nicht öffnen")
-    io = IOBuffer(); buf = Vector{UInt8}(undef, 1 << 16)
-    while true
-        n = ccall((:gzread, Zlib_jll.libz), Cint, (Ptr{Cvoid}, Ptr{UInt8}, Cuint), fh, buf, length(buf))
-        n < 0 && error("gzread-Fehler in $path")
-        n == 0 && break
-        write(io, view(buf, 1:n))
+    acc = UInt8[]; buf = Vector{UInt8}(undef, 1 << 16)
+    try
+        while true
+            n = ccall((:gzread, Zlib_jll.libz), Cint, (Ptr{Cvoid}, Ptr{UInt8}, Cuint), fh, buf, length(buf))
+            n < 0 && error("gzread-Fehler in $path")
+            n == 0 && break
+            s = 1; i = length(acc) + 1          # vor i steht kein Zeilenende mehr
+            append!(acc, view(buf, 1:n))
+            while (j = findnext(==(0x0a), acc, i)) !== nothing
+                j > s && f(String(acc[s:j-1]))
+                s = i = j + 1
+            end
+            s > 1 && deleteat!(acc, 1:s-1)
+        end
+        isempty(acc) || f(String(acc))      # letzte Zeile ohne Zeilenende
+    finally
+        ccall((:gzclose, Zlib_jll.libz), Cint, (Ptr{Cvoid},), fh)
     end
-    ccall((:gzclose, Zlib_jll.libz), Cint, (Ptr{Cvoid},), fh)
-    return String(take!(io))
+    nothing
 end
 
 # ── Laden ───────────────────────────────────────────────────────────────────
@@ -134,7 +146,7 @@ _plain(x) = x isa JObj ? [k => _plain(v) for (k, v) in pairs(x)] : x isa Abstrac
 
 "Engine-Fall (Engine-Format, geparst) → (Fall, Daten, Strategie, Argumente)."
 function load_case(d)
-    cols = Pair{Symbol,Any}[]
+    nms = String[]; cols = AbstractVector[]
     for nm in _vec(d["data"]["order"])
         c = d["data"]["cols"][nm]
         vals = _vec(c["values"])
@@ -142,9 +154,16 @@ function load_case(d)
             c["type"] == "logical" ? (any(x -> x === nothing, vals) ? Union{Missing,Bool}[x === nothing ? missing : x for x in vals] :
                                       Bool[x for x in vals]) :
             Float64[unhex(x) for x in vals]
-        push!(cols, Symbol(nm) => v)
+        push!(nms, nm); push!(cols, v)
     end
-    data = NamedTuple(cols)
+    # Daten als RFrame (seit 1.6.3; bis 1.6.2 als NamedTuple: ein neuer Typ je Spaltensatz, für den simulation() und die
+    # Hülle hier je Fall neu übersetzt wurden). Beide gehen in simulation() durch dieselbe Umwandlung (_to_frame); nur
+    # doppelte Namen oder ungleich lange Spalten bleiben ein NamedTuple wie bisher (gleiche Meldung).
+    data = if !isempty(cols) && allunique(nms) && allequal(length.(cols))
+        SimLev.RFrame(nms, cols, length(cols[1]), nothing, Dict{String,Any}(), String[])
+    else
+        NamedTuple(Pair{Symbol,Any}[Symbol(nm) => v for (nm, v) in zip(nms, cols)])
+    end
     items = Pair{String,Any}[]
     legacy = true
     for (nm, a) in pairs(d["strategy"])
@@ -182,9 +201,20 @@ end
 
 _mkblock(v) = v isa _BlockSpec ? getfield(SimLev, v.ctor)(; (p.first => _mkblock(p.second) for p in v.args)...) : v
 
+"Schlüsselwörter `(io = io, <args>...)` von simulation() als NamedTuple in einem Schritt (seit 1.6.3; bis 1.6.2 Paar für
+Paar zusammengefügt, je Zwischentyp eine Übersetzung von merge); doppelte Namen wie bisher (der letzte gilt)."
+function _kwargs(args::Vector{Pair{Symbol,Any}}, io)
+    ks = first.(args)
+    (allunique(ks) && !(:io in ks)) || return (; io = io, (p.first => _mkblock(p.second) for p in args)...)
+    NamedTuple{(:io, ks...)}((io, (_mkblock(p.second) for p in args)...))
+end
+
 # ── Vergleich ───────────────────────────────────────────────────────────────
 _tok(x::Float64) = isnan(x) ? (SimLev.isna_strict(x) ? "NA" : "NaN") : string(reinterpret(UInt64, x); base = 16)
-_reftok(v) = (x = unhex(v); _tok(x))
+# gleich wie `_tok(a) == _tok(b)` (bzw. ohne strict_na: NA und NaN gleich), ohne Text je Wert (seit 1.6.3)
+_tokgleich(a::Float64, b::Float64, strict_na::Bool) =
+    isnan(a) ? isnan(b) && (!strict_na || SimLev.isna_strict(a) == SimLev.isna_strict(b)) :
+               !isnan(b) && reinterpret(UInt64, a) == reinterpret(UInt64, b)
 
 function cmp_vec!(errs, name, ref, got; strict_na::Bool = true)
     r = _vec(ref)
@@ -194,11 +224,7 @@ function cmp_vec!(errs, name, ref, got; strict_na::Bool = true)
     end
     bad = Int[]
     for i in eachindex(r)
-        a = _reftok(r[i]); b = _tok(Float64(g[i]))
-        if a != b
-            (!strict_na && (a in ("NA", "NaN")) && (b in ("NA", "NaN"))) && continue
-            push!(bad, i)
-        end
+        _tokgleich(unhex(r[i]), Float64(g[i]), strict_na) || push!(bad, i)
     end
     if !isempty(bad)
         i = bad[1]
@@ -210,10 +236,13 @@ end
 function run_engine(d; strict_na::Bool = true, verbose::Bool = false)
     d, data, strategy, args = load_case(d)
     buf = IOBuffer()
+    # Die Blöcke unten haben feste Typen (ein Any-Feld statt der Fallwerte), sonst wäre jede Typkombination eine neue
+    # Übersetzung von with_logger/redirect_stderr (seit 1.6.3)
+    a = Any[data, strategy, args]
     res = try
         Base.CoreLogging.with_logger(Base.CoreLogging.NullLogger()) do
             redirect_stderr(devnull) do
-                SimLev.simulation(data, strategy; io = buf, (p.first => _mkblock(p.second) for p in args)...)
+                Core.kwcall(_kwargs(a[3], buf), SimLev.simulation, a[1], a[2])   # = simulation(…; io = buf, args...)
             end
         end
     catch e
@@ -295,11 +324,26 @@ end
 "Bereichsdateien `<bereich>.jsonl.gz` in `dir` (sortiert)."
 bereiche(dir) = isdir(dir) ? [joinpath(dir, f) for f in sort(readdir(dir)) if endswith(f, ".jsonl.gz")] : String[]
 
-"Kopf (Eingabespeicher) und Fälle einer Bereichsdatei (Zeile 1 Kopf, dann je Zeile ein Fall)."
+"Eingabespeicher (aus Zeile 1) einer Bereichsdatei, dann `f(store, fall)` für jeden Fall (je Zeile einer), einer nach
+dem anderen: Es liegt immer nur ein Fall im Speicher (seit 1.6.3). Liefert den Eingabespeicher."
+function je_fall(f, path)
+    store = nothing
+    gz_zeilen(path) do z
+        if store === nothing
+            store = parse_json(z)["inputs"]
+        else
+            f(store, parse_json(z))
+        end
+    end
+    store === nothing && error("$path: leer (ohne Kopfzeile)")
+    store
+end
+
+"Kopf (Eingabespeicher) und alle Fälle einer Bereichsdatei (Zeile 1 Kopf, dann je Zeile ein Fall)."
 function lies_bereich(path)
-    lines = split(read_gz(path), '\n'; keepempty = false)
-    head = parse_json(lines[1])
-    return head["inputs"], Any[parse_json(l) for l in lines[2:end]]
+    cases = Any[]
+    store = je_fall((_, c) -> push!(cases, c), path)
+    return store, cases
 end
 
 "`<modul>/<id>`; Engine-Format: `cases/<id>` (f…, r…) bzw. `extra/<id>` (x…, y…)."

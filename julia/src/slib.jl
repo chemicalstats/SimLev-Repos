@@ -38,8 +38,6 @@ const _G = Stream((0x0, 0x0, 0x0, 0x0))
 const _LOCK = ReentrantLock()
 const _COUNTER = Ref{UInt64}(0)
 
-version() = unsafe_string(ccall((:sl_version, LIBSLC), Cstring, ()))
-
 function _entropy!(st::Stream)
     _COUNTER[] += 1
     ccall((:sl_rng_seed_entropy, LIBSLC), Cvoid, (Ref{Stream}, UInt64, UInt64, UInt64),

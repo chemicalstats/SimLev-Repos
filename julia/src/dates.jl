@@ -9,7 +9,6 @@ from_days(z::Integer) = Date(Dates.UTD(Int64(z) + _EPOCH))
 ymd(z::Integer) = Dates.yearmonthday(from_days(z))
 year_of(z::Integer) = Dates.year(from_days(z))
 fmt_date(z::Integer) = Dates.format(from_days(z), dateformat"yyyy-mm-dd")
-is_leap(y::Integer) = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
 
 "Konvertiert Date/DateTime/String/Integer in Tage seit 1970-01-01."
 to_days(d::Date) = Dates.value(d) - _EPOCH

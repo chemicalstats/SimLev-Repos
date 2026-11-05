@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import importlib
 import math
+import sys
 from typing import Any, Iterable
 
 import numpy as np
 import pandas as pd
 
+from . import _ext as _cext
 from ._r import fmt as _fmt
 from ._r import libm as _libm
-from ._r.rnum import NA_REAL, r_pow, r_prod, r_sum
+from ._r.rnum import NA_REAL, r_colmeans, r_pow, r_prod, r_sum
 
 
 # Genauere Renditeformeln (seit 1.6.2; gleicher Ausdruck wie .cagr_q, .pow1m, .pow1m_v, .geo_ret, .geo_ann, .log1mr2
@@ -46,6 +48,18 @@ def _pow1m_v(x, e):
     e = np.asarray(e, dtype=np.float64)
     with np.errstate(all="ignore"):
         return np.array([_pow1m1(a, b) for a, b in zip(x.tolist(), e.tolist())], dtype=np.float64)
+
+
+def _pow_rec(x, y):
+    """``x ^ y`` elementweise mit Recycling wie R (Kern ``sl_r_pow_rec``: je Element ``r_pow1`` wie ``r_pow``, also
+    dieselben Bits wie eine Schleife über ``r_pow``; seit 1.6.3). Eine Länge 0 ergibt ein leeres Feld."""
+    x = np.ascontiguousarray(np.atleast_1d(np.asarray(x, dtype=np.float64)).ravel())
+    y = np.ascontiguousarray(np.atleast_1d(np.asarray(y, dtype=np.float64)).ravel())
+    if not (x.size and y.size):
+        return np.empty(0)
+    out = np.empty(max(x.size, y.size))
+    _cext.slc_r_pow_rec(x, y, out)
+    return out
 
 
 def _geo_ok(x):
@@ -86,6 +100,73 @@ def _stats():
     """Modul :mod:`simlev._r.stats` (spät geladen)."""
     from ._r import stats
     return stats
+
+
+class _Missing:
+    """Platzhalter für ein R-Argument ohne Standardwert (R prüft ``missing()``; seit 1.6.3 eine Klasse für
+    ``_sim_blocks``, ``param_search`` und ``tactical``)."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "<missing>"
+
+
+_MISSING = _Missing()
+
+
+def _message(text) -> None:
+    """R-``message()``: Text mit Zeilenumbruch auf ``sys.stderr`` (seit 1.6.3 eine Fassung für bootstrap,
+    data_prep, dependence)."""
+    sys.stderr.write(str(text) + "\n")
+    sys.stderr.flush()
+
+
+def _fmt1(x, **kw) -> str:
+    """R-``format(x)`` einer Zahl/Zeichenkette als Text, mehrere Werte als ``paste(…, collapse = ", ")``."""
+    r = _fmt.format(x, **kw)
+    if isinstance(r, str):
+        return r
+    return ", ".join(str(s) for s in np.asarray(r, dtype=object).ravel())
+
+
+def _unique(seq) -> list:
+    """``unique()`` einer Liste in Reihenfolge des ersten Auftretens (Vergleich über ``in``)."""
+    out = []
+    for s in seq:
+        if s not in out:
+            out.append(s)
+    return out
+
+
+def _match_days(a, b) -> np.ndarray:
+    """``match(a, b)`` für Tage (0-basiert, -1 = kein Treffer)."""
+    pos = {}
+    for i, v in enumerate(b):
+        if v not in pos:
+            pos[v] = i
+    return np.array([pos.get(v, -1) for v in a], dtype=np.int64)
+
+
+def _colmeans(X):
+    """``colMeans`` über den Kern (long-double-Summe / n wie R); bei 0 Zeilen +NaN je Spalte (R und ``r_colmeans``:
+    −NaN, Teil B M-U3; unverändert). Seit 1.6.3 eine Fassung für dependence, overfitting und tactical."""
+    X = np.asarray(X, dtype=np.float64)
+    if X.shape[0] == 0:
+        return np.full(X.shape[1], math.nan)
+    return r_colmeans(X)
+
+
+def _rank_avg(x):
+    """``rank(x)`` mit ``ties.method = "average"`` (overfitting, param_search)."""
+    from ._r.stats import rank
+    return np.asarray(rank(np.asarray(x, dtype=np.float64)), dtype=np.float64)
+
+
+def _is_strategy(s) -> bool:
+    """Ist ``s`` eine :class:`simlev.Strategy` (``create_strategy()``)?"""
+    from .config import Strategy
+    return isinstance(s, Strategy)
 
 
 def _pmatch(value: str, choices: tuple) -> int | None:

@@ -5,7 +5,7 @@
 # simulation() (simulation.R) ruft nacheinander interne Phasenfunktionen auf:
 #   sim_validate.R  .sim_check_inputs()            Eingabepruefung, Steuer- und Gebuehreneinstellungen
 #   sim_prepare.R   .sim_prepare_data()            Kalenderraster, LOCF
-#                   .sim_build_state()             Zentralstruktur sim_mem (Feldfolge .SIM_MEM_LAYOUT)
+#                   .sim_build_state()             Zentralstruktur sim_mem
 #                   .sim_build_calendar()          Angaben der Termine, Ereignis-Spalte, Pruefungen
 #   sim_engine.R    .sim_engine_run()              Termine, Tages-Flags und Startgewichte (core/prepare_core_impl.h;
 #                                                  bis 1.3.0 .sim_build_calendar(), .sim_init_weights(),
@@ -20,8 +20,8 @@
 
 # Namen der Phasenfunktionen: Bedingungen, die direkt in einer Phase entstehen (stop()/warning() ohne
 # call. = FALSE, R-Fehler im Phasencode), tragen den Aufruf von simulation() (.sim_restore_call)
-.SIM_PHASES <- c(".sim_check_inputs", ".sim_prepare_data", ".sim_build_state", ".sim_check_layout",
-                 ".sim_build_calendar", ".sim_engine_signal", ".sim_evaluate", ".sim_risk_free", ".sim_result",
+.SIM_PHASES <- c(".sim_check_inputs", ".sim_prepare_data", ".sim_build_state", ".sim_build_calendar",
+                 ".sim_engine_signal", ".sim_evaluate", ".sim_risk_free", ".sim_result",
                  ".tax_rates")
 
 #' Aufruf von simulation() in Bedingungen aus den Phasen wiederherstellen
@@ -42,6 +42,59 @@
   if (inherits(cond, "error")) stop(cond)
   warning(cond)
   invokeRestart("muffleWarning")
+}
+
+#' Pruef-Cache je Studie (seit 1.5.1)
+#'
+#' Zweck: Studien (bootstrap_study, param_search, sensitivity_*, planning_lumpsum_vs_dca) rufen simulation() vielfach
+#' mit derselben Strategie bzw. denselben Daten auf. Zwischen .sim_study() und .sim_study_end() merkt sich
+#' simulation() Pruefungen und Kalenderangaben, die ohne Meldung durchgingen, je Art mit dem zuletzt gesehenen
+#' Schluessel (identical()); Meldungen und Warnungen entstehen weiter je Lauf (ihre Pruefungen werden nie
+#' uebersprungen), Fehler brechen vor dem Merken ab. Ausserhalb einer Studie wirkungslos.
+#' Eingabe: what (Art: "strategy", "wraps", "columns", "private_sale", "share", "dates", "days"), key, val.
+#' Ausgabe: .sim_study() TRUE, wenn die Studie den Cache eroeffnet hat (fuer .sim_study_end); .sim_memo_get()
+#' der Eintrag list(key, val) oder NULL.
+#' @keywords internal
+#' @noRd
+.sim_study_env <- new.env(parent = emptyenv())
+.sim_study <- function() {
+  if (isTRUE(.sim_study_env$on)) return(FALSE)
+  .sim_study_env$on <- TRUE; .sim_study_env$m <- list()
+  TRUE
+}
+.sim_study_end <- function(own) if (isTRUE(own)) { .sim_study_env$on <- FALSE; .sim_study_env$m <- NULL }
+.sim_memo_get <- function(what, key) {
+  if (!isTRUE(.sim_study_env$on)) return(NULL)
+  e <- .sim_study_env$m[[what]]
+  if (!is.null(e) && identical(e$key, key)) e else NULL
+}
+.sim_memo_set <- function(what, key, val = TRUE) {
+  if (isTRUE(.sim_study_env$on)) .sim_study_env$m[[what]] <- list(key = key, val = val)
+  invisible(val)
+}
+# Wert fn() je Schluessel, in einer Studie einmal (Fehler von fn brechen wie bisher ab, ohne zu merken)
+.sim_memo_val <- function(what, key, fn) {
+  e <- .sim_memo_get(what, key)
+  if (!is.null(e)) return(e$val)
+  .sim_memo_set(what, key, fn())
+}
+# Wert fn() je Schluessel, in einer Studie einmal, aber nur gemerkt, wenn fn() ohne Meldung und Warnung blieb (seit
+# 1.6.3; Meldungen entstehen so weiter je Lauf, sie erreichen den Aufrufer unveraendert)
+.sim_memo_quiet <- function(what, key, fn) {
+  if (!isTRUE(.sim_study_env$on)) return(fn())
+  e <- .sim_memo_get(what, key)
+  if (!is.null(e)) return(e$val)
+  quiet <- TRUE
+  val <- withCallingHandlers(fn(), message = function(m) quiet <<- FALSE, warning = function(w) quiet <<- FALSE)
+  if (quiet) .sim_memo_set(what, key, val)
+  val
+}
+# Kalendertage start..stopp (seq.Date), in einer Studie einmal je Zeitraum
+.sim_days <- function(start_date, stopp_date) {
+  k <- c(start_date, stopp_date)
+  e <- .sim_memo_get("days", k)
+  if (!is.null(e)) return(e$val)
+  .sim_memo_set("days", k, seq.Date(from = as.Date(start_date), to = as.Date(stopp_date), by = "days"))
 }
 
 #' Prozent-Konvention fuer Spalten pruefen
@@ -171,7 +224,7 @@
 #' ausgewerteten Einstellungen.
 #' @keywords internal
 #' @noRd
-.sim_check_inputs <- function(data, strategy, start_value, spread, details, dca_mode, dca_value, dca_days,
+.sim_check_inputs <- function(data, strategy, start_value, details, dca_mode, dca_value, dca_days,
                               balance_mode, balance_days, balance_thresh,
                               balance_thresh_type = c("absolute", "relative"),
                               tax_mode = c("none", "person"), tax_rate, marginal_tax_rate,
@@ -192,8 +245,6 @@
     stop(sprintf("simulation: strategy muss eine nicht leere, benannte Liste von Asset-Konfigurationen sein (z. B. aus create_strategy()), nicht %s.",
                  if (missing(strategy)) "fehlend" else "leer (L\u00e4nge 0)"))
   }
-  if (!is.null(spread))   # Argument bleibt fuer die Signatur (Python/Julia) erhalten
-    warning("simulation: Das Argument 'spread' wird nicht ausgewertet; ma\u00dfgeblich ist spread je Asset (asset_config()).", call. = FALSE)
 
   # --- Eingabepruefung der Daten ---
   filled_attr <- attr(data, "filled")                 # series_align(): gefuellte Werte (Matrix)
@@ -207,8 +258,10 @@
     stop(sprintf("simulation: Spaltenname '%s' kommt in 'data' mehrfach vor; jede Spalte muss eindeutig benannt sein.",
                  names(data)[anyDuplicated(names(data))]))
   # C7-01: Listen-Strategien (ohne create_strategy()/asset_config()) wie asset_config() pruefen; ein
-  # ungueltiges Steuerregime (z. B. "none") fuehrte sonst still zu einer Rechnung ohne Steuern
-  for (nm in names(strategy)) {
+  # ungueltiges Steuerregime (z. B. "none") fuehrte sonst still zu einer Rechnung ohne Steuern.
+  # In einer Studie (seit 1.5.1, .sim_study) nur einmal je Strategie: die Pruefung meldet nur Fehler
+  strat_ok <- !is.null(.sim_memo_get("strategy", strategy))
+  if (!strat_ok) for (nm in names(strategy)) {
     a <- strategy[[nm]]
     if (!is.list(a))
       stop(sprintf("simulation: Asset '%s' in 'strategy' muss eine Liste bzw. asset_config() sein.", nm), call. = FALSE)
@@ -232,13 +285,14 @@
                      nm), call. = FALSE)
     }
   }
+  if (!strat_ok) .sim_memo_set("strategy", strategy)
   if (!"date" %in% names(data)) stop("simulation: Spalte 'date' fehlt in 'data'.")
   # Fonds-Wrapper: Asset-Name ist keine Kursspalte; gebraucht werden die inneren Spalten (.strategy_columns)
-  wraps <- .strategy_wrappers(strategy)
+  wraps <- .sim_memo_val("wraps", strategy, function() .strategy_wrappers(strategy))
   if (length(coll <- intersect(wraps, names(data))))
     stop(sprintf("simulation: Asset '%s' ist ein Fonds-Wrapper (asset_config(wrapper = )); 'data' darf keine Spalte gleichen Namens enthalten (der Anteilswert wird aus den inneren Spalten gerechnet). Spalte umbenennen oder entfernen.",
                  coll[1]), call. = FALSE)
-  miss <- setdiff(.strategy_columns(strategy), names(data))
+  miss <- setdiff(.sim_memo_val("columns", strategy, function() .strategy_columns(strategy)), names(data))
   if (length(miss))
     stop(sprintf("simulation: %s %s in 'data'; je Asset der Strategie wird eine Spalte gleichen Namens erwartet (vorhanden: %s).",
                  if (length(miss) == 1L) "Kursspalte" else "Kursspalten", paste(paste0("'", miss, "'", collapse = ", "),
@@ -258,16 +312,20 @@
   }
   if (!inherits(data$date, "Date"))
     stop(sprintf("simulation: Spalte 'date' muss die Klasse Date haben (ist: %s).", class(data$date)[1]))
-  if (anyNA(data$date)) stop(sprintf("simulation: Spalte 'date' enth\u00e4lt NA (erstmals in Zeile %d).", which(is.na(data$date))[1]))
-  if (is.unsorted(data$date)) {
+  # In einer Studie (seit 1.5.1) nur einmal je Datumsspalte, wenn sie ohne Meldung durchging (kein NA, sortiert,
+  # eindeutig); sonst je Lauf wie bisher mit Meldung bzw. Fehler
+  dates_ok <- !is.null(.sim_memo_get("dates", data$date))
+  if (!dates_ok && anyNA(data$date)) stop(sprintf("simulation: Spalte 'date' enth\u00e4lt NA (erstmals in Zeile %d).", which(is.na(data$date))[1]))
+  if (!dates_ok && is.unsorted(data$date)) {
     o <- order(data$date)
     data <- data[o, , drop = FALSE]; rownames(data) <- NULL
     if (is.matrix(filled_attr) && nrow(filled_attr) == length(o)) filled_attr <- filled_attr[o, , drop = FALSE]
     message("Hinweis: 'data' war nicht aufsteigend nach Datum sortiert und wurde sortiert.")
   }
-  if (anyDuplicated(data$date))
+  if (!dates_ok && anyDuplicated(data$date))
     stop(sprintf("simulation: Datum %s kommt in 'data' mehrfach vor (%d doppelte Zeilen); je Tag genau eine Zeile.",
                  format(data$date[anyDuplicated(data$date)]), sum(duplicated(data$date))))
+  if (!dates_ok) .sim_memo_set("dates", data$date)
   # Fonds-Wrapper: Anteilswert je Wrapper-Asset aus den inneren Spalten (wrapper.R) als Kursspalte mit dem
   # Asset-Namen anhaengen (NA vor dem Beginn und an Tagen ohne inneren Kurs); danach ist das Asset ein
   # gewoehnliches asset_config ohne wrapper. splits gelten fuer die inneren Spalten, nicht fuer den Anteilswert.
@@ -276,12 +334,15 @@
     d_in <- data
     if (is.matrix(filled_attr) && nrow(filled_attr) == nrow(data)) attr(d_in, "filled") <- filled_attr
     sp <- if (isTRUE(split_mode) && !is.null(split_thresh)) structure(list(thresh = unlist(split_thresh)), class = "SimLevSplitRule")
+    # In einer Studie (seit 1.6.3) einmal je Daten, Wrapper und Splits, wenn die innere Rechnung ohne Meldung blieb
+    # (sensitivity_*, param_search: gleiche Daten je Lauf); sonst je Lauf wie bisher
     wrapper_navs <- lapply(stats::setNames(wraps, wraps), function(nm)
-      .wrapper_nav_calc(d_in, strategy[[nm]][["wrapper"]], sp, tag = sprintf("Wrapper '%s'", nm),
-                        who = sprintf("simulation: Wrapper '%s'", nm)))
+      .sim_memo_quiet(paste0("wrapper_nav:", nm), list(d_in, strategy[[nm]][["wrapper"]], sp), function()
+        .wrapper_nav_calc(d_in, strategy[[nm]][["wrapper"]], sp, tag = sprintf("Wrapper '%s'", nm),
+                          who = sprintf("simulation: Wrapper '%s'", nm))))
     for (nm in wraps) {
       v <- rep(NA_real_, nrow(data))
-      v[match(wrapper_navs[[nm]]$date, data$date)] <- wrapper_navs[[nm]]$nav
+      v[.date_match(wrapper_navs[[nm]]$date, data$date)] <- wrapper_navs[[nm]]$nav   # seit 1.6.3 ueber die Tageszahl
       data[[nm]] <- v
       strategy[[nm]][["wrapper"]] <- NULL
     }
@@ -320,8 +381,7 @@
       }
       n_gap <- sum(is.na(v)) - (ok[1] - 1L)
       if (n_gap > 0) message(sprintf("Hinweis: '%s': %d fehlende Kurse (NA) per LOCF gef\u00fcllt.", nm, n_gap))
-      idx <- integer(length(v)); idx[ok] <- ok; idx <- cummax(idx); idx[idx == 0L] <- ok[1]
-      data[[nm]] <- v[idx]
+      data[[nm]] <- .fill_na(v, "locf")
     }
   }
 
@@ -338,14 +398,13 @@
   # Steuer-, Kosten-, Termin- und Split-Angaben haben die Bausteine geprueft (tax_profile(), sim_costs(),
   # dca_plan(), rebalance_plan(), split_rule(); die Pruefungen des flachen Wegs sind entfallen).
   # fractions (TRUE/FALSE) und risk_free (Prozent-Konvention) prueft simulation() selbst
-  .show_arg <- function(x) if (is.null(x)) "NULL" else paste(deparse(x), collapse = "")
   .frac_warn <- function(x, arg, hi = 1) {
     if (is.numeric(x) && length(x) == 1L && is.finite(x) && x > 0 && x < hi)
       warning(sprintf("simulation: %s = %s wird als %s %% gelesen (Prozent-Konvention); gemeint war vermutlich %s.",
                       arg, format(x), format(x), format(x * 100)), call. = FALSE)
   }
   if (!is.logical(fractions) || length(fractions) != 1L || is.na(fractions))
-    stop(sprintf("simulation: '%s' muss TRUE oder FALSE sein, nicht %s.", "fractions", .show_arg(fractions)), call. = FALSE)
+    stop(sprintf("simulation: '%s' muss TRUE oder FALSE sein, nicht %s.", "fractions", .show_arg_s(fractions)), call. = FALSE)
   .frac_warn(risk_free, "risk_free", hi = 0.05)
   # dieselbe Schwelle fuer risk_free als Spaltenname (Median der Spalte; base_rate_data: .sim_prepare_data)
   if (is.character(risk_free) && length(risk_free) == 1L && !is.na(risk_free) && risk_free %in% names(data))
@@ -369,15 +428,15 @@
     tariff_env$church_k <- if (!is.null(church_tax) && church_tax > 0) church_tax / 100 else 0
     tariff_env$kapest_rate <- 0.25 / (1 + 0.25 * tariff_env$church_k)   # KapESt-Satz nach § 32d Abs. 1 EStG
     tariff_env$use_gp <- isTRUE(use_guenstigerpruefung)
-    tariff_env$rows <- list(); tariff_env$refund_due <- 0
+    tariff_env$rows <- NULL   # Jahreszeilen (data.frame), setzt .sim_engine_run
   }
 
   # marginal_tax_rate (wenn private_sale vorhanden)
-  has_private_sale <- any(sapply(strategy, function(a) {
+  has_private_sale <- .sim_memo_val("private_sale", strategy, function() any(sapply(strategy, function(a) {
     isTRUE(a$tax_regime == "private_sale") || 
     isTRUE(a$asset_class == "etn_deliverable") ||
     (isTRUE(a$asset_class %in% c("etn", "etc")) && isTRUE(a$deliverable))
-  }))
+  })))
   if (has_private_sale && is.null(marginal_tax_rate) && tax_mode == "person" && !tariff_on) {   # nur wenn § 23 besteuert wird
     warning("simulation: Der Grenzsteuersatz ist nicht gesetzt (tax_profile(income = income_rate(marginal_rate))), die Strategie enth\u00e4lt aber Assets mit tax_regime = \"private_sale\"; ",
             "Gewinne nach Paragraf 23 EStG werden dann m\u00f6glicherweise nicht korrekt besteuert. income_rate(marginal_rate) in Prozent angeben (z. B. 42).")
@@ -395,7 +454,7 @@
   # base_rate: KEINE Division hier — .calculate_flat_rate teilt an der Verbrauchsstelle /100
 
   # Gewichtssumme validieren
-  total_weight <- sum(sapply(strategy, function(a) a$share), na.rm = TRUE)
+  total_weight <- .sim_memo_val("share", strategy, function() sum(sapply(strategy, function(a) a$share), na.rm = TRUE))
   if (abs(total_weight - 1.0) > 1e-6) {
     stop(sprintf(
       "simulation: Asset-Gewichte (share) summieren sich auf %.4f, m\u00fcssen aber exakt 1.0 ergeben (Anteile, z. B. 0.6 und 0.4).\n  Aktuelle Gewichte: %s",
@@ -412,7 +471,7 @@
   soli_factor_income <- tr$soli_factor_income; church_k <- tr$church_k
 
   list(data = data, strategy = strategy, tax_mode = tax_mode, start_value = start_value,
-       tax_rate = tax_rate, marginal_tax_rate = marginal_tax_rate, effective_tax_rate = effective_tax_rate,
+       marginal_tax_rate = marginal_tax_rate, effective_tax_rate = effective_tax_rate,
        soli_factor_income = soli_factor_income, church_k = church_k, tariff_env = tariff_env,
        private_sale_threshold = private_sale_threshold, sparer_pauschbetrag = sparer_pauschbetrag,
        use_sparer_pauschbetrag = use_sparer_pauschbetrag, fractions = fractions,

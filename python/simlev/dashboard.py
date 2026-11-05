@@ -20,6 +20,7 @@ import numpy as np
 from ._r.rformat import r_deparse, r_format, r_round, r_sprintf
 from . import _ext
 from ._r.rnum import NA_REAL, r_cumprod, r_cumsum, r_mean, r_pow, r_prod, r_sd
+from ._util import _pow_rec
 from .svg import (SimLevPlot, _MONATE_KURZ, _Canvas, _Panel, _alpha, _area, _check_svg_file, _col, _col2rgba,
                   _date_ticks, _decimate, _empty_panel, _frame, _line, _polyline, _px, _py, _r_range, _rect,
                   _c, _svg, _svg_close, _svg_open, _svgcol, _svgop, _text, _title, _to_days, _warn_unknown_kw,
@@ -99,13 +100,10 @@ def _check_colors(colors: Any) -> dict:
         names = list(colors.keys())
         items = list(colors.items())
     else:
-        try:
-            import pandas as pd
-            if isinstance(colors, pd.Series):
-                names = [str(k) for k in colors.index]
-                items = list(zip(names, colors.tolist()))
-        except ImportError:  # pragma: no cover
-            pass
+        import pandas as pd
+        if isinstance(colors, pd.Series):
+            names = [str(k) for k in colors.index]
+            items = list(zip(names, colors.tolist()))
     if names is None or any(k == "" for k in names):
         _stop("plot.SimLevResult: colors muss eine benannte Liste (oder ein benannter Zeichenvektor) sein, "
               "z. B. list(primary = \"#003366\"); möglich: %s." % ", ".join(DEFAULT_COLORS))
@@ -333,10 +331,16 @@ def _rolling_returns(x: Any) -> dict | None:
     if n_days <= window:
         return {"window": window, "values": None}
     growth = r_cumprod(1 + np.concatenate(([0.0], _dashboard_returns(x)["all_returns"])))
-    vals = np.empty(n_days - window + 1)
-    for j, i in enumerate(range(window, n_days + 1)):
-        days = float(dates[i - 1] - dates[i - window])
-        vals[j] = (r_pow(growth[i - 1] / growth[i - window], 365.25 / days) - 1) * 100
+    days = (dates[window - 1:] - dates[:n_days - window + 1]).astype(np.float64)
+    den = growth[:n_days - window + 1]
+    if np.isfinite(growth).all() and (den != 0).all() and (days != 0).all():
+        # ohne Schleife (seit 1.6.3): dieselben Ausdrücke je Fenster, Potenz über den Kern (r_pow je Element)
+        vals = (_pow_rec(growth[window - 1:] / den, 365.25 / days) - 1) * 100
+    else:   # Nullen, NA/NaN/Inf: Schleife wie bis 1.6.2 (gleiche Fehler und Warnungen)
+        vals = np.empty(n_days - window + 1)
+        for j, i in enumerate(range(window, n_days + 1)):
+            days = float(dates[i - 1] - dates[i - window])
+            vals[j] = (r_pow(growth[i - 1] / growth[i - window], 365.25 / days) - 1) * 100
     return {"window": window, "values": vals, "idx": np.arange(window - 1, n_days)}
 
 

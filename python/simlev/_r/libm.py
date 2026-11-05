@@ -26,8 +26,7 @@ import numpy as np
 from .. import _ext
 from .rnum import r_pow as _r_pow
 
-__all__ = ["exp", "log", "log1p", "expm1", "log2", "log10", "pow", "sin", "cos", "tan", "tanh", "atanh", "atan",
-           "asin", "acos", "sinh", "cosh", "lgamma_c", "apply1"]
+__all__ = ["exp", "log", "log1p", "expm1", "log2", "log10", "pow", "sin", "cos", "tan", "tanh", "atan", "apply1"]
 
 
 def _nan_wrap(f):
@@ -103,17 +102,6 @@ def _expm1(x):
         return math.inf
 
 
-def _atanh(x):
-    if x == 1.0:
-        return math.inf
-    if x == -1.0:
-        return -math.inf
-    try:
-        return math.atanh(x)
-    except ValueError:
-        return math.nan
-
-
 def _math1(kind, slow, x):
     """``slow`` (Skalarfunktion, R-Regeln) auf Skalare; Felder mit der C-Schleife ``sl_r_math1`` (gleiche libm)."""
     if np.isscalar(x) or (isinstance(x, np.ndarray) and x.ndim == 0):
@@ -174,10 +162,4 @@ sin = lambda x: apply1(_nan_wrap(math.sin), x)  # noqa: E731
 cos = lambda x: apply1(_nan_wrap(math.cos), x)  # noqa: E731
 tan = lambda x: apply1(_nan_wrap(math.tan), x)  # noqa: E731
 tanh = lambda x: apply1(math.tanh, x)  # noqa: E731
-atanh = lambda x: apply1(_atanh, x)  # noqa: E731
 atan = lambda x: apply1(math.atan, x)  # noqa: E731
-asin = lambda x: apply1(_nan_wrap(math.asin), x)  # noqa: E731
-acos = lambda x: apply1(_nan_wrap(math.acos), x)  # noqa: E731
-sinh = lambda x: apply1(_nan_wrap(math.sinh), x)  # noqa: E731
-cosh = lambda x: apply1(_nan_wrap(math.cosh), x)  # noqa: E731
-lgamma_c = lambda x: apply1(_nan_wrap(math.lgamma), x)  # noqa: E731  (C-lgamma, nicht R's lgammafn)

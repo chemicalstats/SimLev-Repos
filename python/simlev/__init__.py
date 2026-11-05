@@ -41,7 +41,6 @@ from ._sim_blocks import (
 from .wrapper import wrapper_config, wrapper_nav, SimLevWrapperConfig, SimLevWrapperNav
 from .result import SimLevResult, SimLevSummary
 from .svg import SimLevPlot
-from .result import summary as _summary_result
 from ._tax_tariff import SimLevTaxTariff, tax_tariff
 from .trigger import rebalance_trigger
 # Zufallszustand der C-Bibliothek slc (simlev/_lib.py)
@@ -180,7 +179,7 @@ _LAZY_HIDDEN = frozenset({"_importlib", "_LAZY", "_LAZY_NAMES", "_LAZY_SUBMODULE
 def __dir__():
     return sorted((set(globals()) - _LAZY_HIDDEN) | set(_LAZY_NAMES) | set(_LAZY_SUBMODULES))
 
-__version__ = "1.6.2"
+__version__ = "1.6.3"
 
 __all__ = [
     "AssetConfig",
@@ -461,8 +460,6 @@ def summary(object, *args, **kwargs):  # noqa: A002 - R-Name
     meth = getattr(type(object), "summary", None)
     if callable(meth):
         return meth(object, *args, **kwargs)
-    if isinstance(object, SimLevResult):
-        return _summary_result(object)
     raise TypeError("summary(): keine Methode f\u00fcr %s" % type(object).__name__)
 
 

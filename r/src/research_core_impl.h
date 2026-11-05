@@ -39,6 +39,7 @@
 //   pbo_cscv            Aufteilungen der CSCV von overfit_pbo() (seit 1.5.0)
 //   (garch_filter: bis 1.0.0, ersetzt durch sl_garch11_filter in core/slc_garch.cpp)
 //   roll_mean_core     rollierender Mittelwert mit kompensierter Summe
+//   roll_max_core      rollierendes Maximum in O(n) (seit 1.6.3; Hoch von signal_drawdown(window))
 //   kendall_tau_core   Kendalls Tau-b (ganzzahlig und double-double statt long double)
 //   roll_cov_core      rollierende Kovarianz
 //
@@ -68,6 +69,7 @@
 
 #include "simlev_core.h"
 #include "slc.h"
+#include "slc_internal.h"
 #include "slc_rbase.h"
 #if !defined(SIMLEV_NA) || !defined(SIMLEV_FAIL) || !defined(SIMLEV_NUM)
 #error "Vor diesem Kern den Host einbinden: R simlev_capi.h, Python _ext_common.h (siehe simlev_core.h)."
@@ -111,18 +113,11 @@ static void proj_box_simplex(const double* v, const double* lo, const double* hi
   for (int i = 0; i < n; ++i) out[i] = std::min(hi[i], std::max(lo[i], v[i] - t_star));
 }
 
-// Quantil Typ 7 (wie stats::quantile Standard) einer Kopie von x.
+// Quantil Typ 7 (wie stats::quantile Standard) einer Kopie von x; leer NA. Seit 1.6.3 ueber slc_quantile7
+// (slc_internal.h, auch fuer die Bandbreite in slc_kde.cpp).
 static double quantile7(std::vector<double> x, double p) {
-  const int n = (int) x.size();
-  if (n == 0) return SIMLEV_NA;
-  const double h = (n - 1) * p;
-  const int lo = (int) std::floor(h);
-  const double frac = h - lo;
-  std::nth_element(x.begin(), x.begin() + lo, x.end());
-  const double xl = x[lo];
-  if (frac == 0.0 || lo + 1 >= n) return xl;
-  const double xh = *std::min_element(x.begin() + lo + 1, x.end());
-  return xl + frac * (xh - xl);
+  if (x.empty()) return SIMLEV_NA;
+  return slc_quantile7(x.data(), (int64_t) x.size(), p);
 }
 
 // ---------------------------------------------------------------------------
@@ -625,36 +620,12 @@ static auto quantile_reg_core(simlev_host::NumVec y, simlev_host::NumMat X, doub
 // ---------------------------------------------------------------------------
 
 // B: Emissionsdichten (T x K, je Zeile skaliert), A: Uebergangsmatrix (lda Zeilen), p0: Start. Ergebnisse auf
-// Zeigern (al, be, ga T x K, xi K x K mit 0 vorbelegt, cs T); seit 1.5.0 auch vom HMM-EM (hmm_em) genutzt.
+// Zeigern (al, be, ga T x K, xi K x K, cs T); seit 1.5.0 auch vom HMM-EM (hmm_em) genutzt. Seit 1.6.3 rechnet
+// sl_hmm_fb (slc_msgarch.cpp, auch fuer den HMM-Start von MS-GARCH; gleiche Rechenfolge).
 static void hmm_fb_raw(int T, int K, const double* B, const double* A, int lda, const double* p0, double* al,
                        double* be, double* ga, double* xi, double* cs) {
-  auto b = [&](int t, int j) { return B[t + (std::size_t) T * j]; };
-  auto a = [&](int i, int j) { return A[i + (std::size_t) lda * j]; };
-  auto AL = [&](int t, int j) -> double& { return al[t + (std::size_t) T * j]; };
-  auto BE = [&](int t, int j) -> double& { return be[t + (std::size_t) T * j]; };
-  auto GA = [&](int t, int j) -> double& { return ga[t + (std::size_t) T * j]; };
-  std::vector<double> av(K), tmp(K);
-  double s = 0.0;
-  for (int j = 0; j < K; ++j) { av[j] = p0[j] * b(0, j); s += av[j]; }
-  cs[0] = s; for (int j = 0; j < K; ++j) AL(0, j) = av[j] / s;
-  for (int t = 1; t < T; ++t) {
-    s = 0.0;
-    for (int j = 0; j < K; ++j) { double v = 0.0; for (int i = 0; i < K; ++i) v += AL(t - 1, i) * a(i, j); av[j] = v * b(t, j); s += av[j]; }
-    cs[t] = s; for (int j = 0; j < K; ++j) AL(t, j) = av[j] / s;
-  }
-  for (int j = 0; j < K; ++j) BE(T - 1, j) = 1.0;
-  for (int t = T - 2; t >= 0; --t) {
-    for (int j = 0; j < K; ++j) tmp[j] = b(t + 1, j) * BE(t + 1, j);
-    for (int i = 0; i < K; ++i) { double v = 0.0; for (int j = 0; j < K; ++j) v += a(i, j) * tmp[j]; BE(t, i) = v / cs[t + 1]; }
-  }
-  for (int t = 0; t < T; ++t) {
-    double rs = 0.0; for (int j = 0; j < K; ++j) { GA(t, j) = AL(t, j) * BE(t, j); rs += GA(t, j); }
-    for (int j = 0; j < K; ++j) GA(t, j) /= rs;
-  }
-  for (int t = 0; t < T - 1; ++t) {
-    for (int j = 0; j < K; ++j) tmp[j] = b(t + 1, j) * BE(t + 1, j);
-    for (int i = 0; i < K; ++i) for (int j = 0; j < K; ++j) xi[i + (std::size_t) K * j] += AL(t, i) * tmp[j] * a(i, j) / cs[t + 1];
-  }
+  std::vector<double> tmp(K);
+  sl_hmm_fb(T, K, B, A, lda, p0, al, be, ga, xi, cs, tmp.data());
 }
 
 static auto hmm_forward_backward(simlev_host::NumMat B, simlev_host::NumMat A, simlev_host::NumVec p0) {
@@ -678,10 +649,7 @@ static auto hmm_forward_backward(simlev_host::NumMat B, simlev_host::NumMat A, s
 // Summen wie R ueber slc_rbase (long double), log/exp/sqrt wie R's math1 (NaN bleibt).
 // Rueckgabe 0 oder 1 = Fehler (R: Fehler in .hmm_em, z. B. Matrix nicht positiv definit, NA im Abbruchtest).
 // mu (k x d), S (d x d x k), A (k x k) sind Start- und Ergebniswerte; p0 (k), ll, filt, smooth, lB (Tn x k), iter.
-static inline double hmm_r_log(double x) {
-  if (std::isnan(x)) return x;
-  return x > 0 ? std::log(x) : x == 0 ? -std::numeric_limits<double>::infinity() : std::numeric_limits<double>::quiet_NaN();
-}
+// R's log: sl_r_log1 (slc_rbase.h; seit 1.6.3 statt eigener Kopie hmm_r_log)
 static inline double hmm_keepnan(double x, double y) { return std::isnan(x) ? x : y; }
 
 static int hmm_em(int Tn, int d, int k, const double* X, double* mu, double* S, double* A, double* p0, int n_iter,
@@ -703,7 +671,7 @@ static int hmm_em(int Tn, int d, int k, const double* X, double* mu, double* S, 
       for (std::size_t t = 0; t < T; ++t)
         for (std::size_t c = 0; c < D; ++c) { const double z = Bt[c + D * t]; Z2[t + T * c] = z * z; }
       sl_r_rowsums(Tn, d, Z2.data(), 0, 0, rs.data());
-      for (std::size_t c = 0; c < D; ++c) ld[c] = hmm_r_log(L[c + D * c]);
+      for (std::size_t c = 0; c < D; ++c) ld[c] = sl_r_log1(L[c + D * c]);
       const double sld = sl_r_sum(d, ld.data(), 0);
       for (std::size_t t = 0; t < T; ++t) lB[t + T * j] = -0.5 * rs[t] - sld - c0;
     }
@@ -717,7 +685,7 @@ static int hmm_em(int Tn, int d, int k, const double* X, double* mu, double* S, 
       for (std::size_t t = 0; t < T; ++t) { const double v = lB[t + T * j] - m[t]; Be[t + T * j] = hmm_keepnan(v, std::exp(v)); }
     std::fill(xi.begin(), xi.end(), 0.0);
     hmm_fb_raw(Tn, k, Be.data(), A, k, p0, filt, be.data(), smooth, xi.data(), cs.data());
-    for (std::size_t t = 0; t < T; ++t) lcs[t] = hmm_r_log(cs[t]);
+    for (std::size_t t = 0; t < T; ++t) lcs[t] = sl_r_log1(cs[t]);
     ll = sl_r_sum(Tn, lcs.data(), 0) + sl_r_sum(Tn, m.data(), 0);
     return 0;
   };
@@ -776,7 +744,7 @@ static int64_t goal_dp(int S, int K, const double* R, int ng, const double* grid
   bool bad = false;
   // log(grid) und die Bindungen von approx (regularize.values mit ties = mean)
   std::vector<double> lg(NG);
-  for (std::size_t i = 0; i < NG; ++i) lg[i] = hmm_r_log(grid[i]);
+  for (std::size_t i = 0; i < NG; ++i) lg[i] = sl_r_log1(grid[i]);
   std::vector<std::size_t> gs;                         // Anfang jeder Gruppe gleicher Werte
   for (std::size_t i = 0; i < NG; ++i) if (i == 0 || !(lg[i] == lg[i - 1])) gs.push_back(i);
   const bool ties = gs.size() < NG;
@@ -805,7 +773,7 @@ static int64_t goal_dp(int S, int K, const double* R, int ng, const double* grid
     lw.clear();
     bool any_hi = false;                               // ifelse(): approx nur, wenn ein W[mid] >= wmin
     for (std::size_t i = 0; i < n; ++i)
-      if (W[i] > 0 && W[i] < wmax) { lw.push_back(hmm_r_log(W[i])); if (!(W[i] < wmin)) any_hi = true; }
+      if (W[i] > 0 && W[i] < wmax) { lw.push_back(sl_r_log1(W[i])); if (!(W[i] < wmin)) any_hi = true; }
     if (ties && any_hi) ++ncoll;
     yo.assign(lw.size(), 0.0);
     sl_r_approx((int64_t) ux.size(), ux.data(), yy, (int64_t) lw.size(), lw.data(), 1, yy[0], yy[ux.size() - 1], 0.0,
@@ -937,7 +905,7 @@ static void pbo_cscv(int S, int N, int C, const double* B, const double* T, cons
         double lt = 0.0, eq = 0.0;
         for (int j = 0; j < N; ++j) { lt += row[j] < ob; eq += row[j] == ob; }
         const double w = (lt + (eq + 1) / 2) / (N + 1);
-        lam[c] = hmm_r_log(w / (1 - w));
+        lam[c] = sl_r_log1(w / (1 - w));
       }
       if (ona) oosm[c] = na;                             // median.default
       else {
@@ -956,28 +924,54 @@ static void pbo_cscv(int S, int N, int C, const double* B, const double* T, cons
 
 // Gleitende Summe mit Neumaier-Kompensation; alle 4096 Schritte wird die
 // Fenstersumme neu aufgebaut, damit sich keine Rundungsfehler ansammeln.
-// NA/NaN im Fenster ergeben NA (wie die kumulierte Summe in R).
+// NA/NaN im Fenster ergeben NA (wie die kumulierte Summe in R). Seit 1.6.3 ueber sl_roll_mean (slc_msgarch.cpp).
 static auto roll_mean_core(simlev_host::NumVec x, int n) {
   const int m = x.size();
   auto out = SIMLEV_NUM(m, SIMLEV_NA);
   if (n < 1 || n > m) return SIMLEV_DONE(out);
-  int bad = 0;                                   // Anzahl nicht endlicher Werte im Fenster
-  double sum = 0.0, comp = 0.0;
-  auto add = [&](double v) { const double t = sum + v;
-    if (std::fabs(sum) >= std::fabs(v)) comp += (sum - t) + v; else comp += (v - t) + sum; sum = t; };
-  auto rebuild = [&](int end) { sum = 0.0; comp = 0.0; bad = 0;
-    for (int k = end - n + 1; k <= end; ++k) { if (std::isfinite(x[k])) add(x[k]); else ++bad; } };
-  rebuild(n - 1);
-  out[n - 1] = bad ? SIMLEV_NA : (sum + comp) / n;
-  for (int i = n; i < m; ++i) {
-    if ((i - n) % 4096 == 4095) rebuild(i);
-    else {
-      if (std::isfinite(x[i])) add(x[i]); else ++bad;
-      if (std::isfinite(x[i - n])) add(-x[i - n]); else --bad;
-    }
-    out[i] = bad ? SIMLEV_NA : (sum + comp) / n;
-  }
+  sl_roll_mean(m, &x[0], n, SIMLEV_NA, &out[0]);
   return SIMLEV_DONE(out);
+}
+
+// ---------------------------------------------------------------------------
+// Rollierendes Maximum (seit 1.6.3; Fenster w inklusive aktueller Zeile, am Anfang verkuerzt)
+// ---------------------------------------------------------------------------
+
+// out[i] = max(x[max(0, i - w + 1) .. i]) fuer i = 0 .. m - 1, mit NaN (auch NA) als -Inf: das Hoch von
+// signal_drawdown(window = w) (R signals.R, Python signals.py, Julia signals.jl: xp = NaN -> -Inf, je Zeile
+// max/np.max/maximum ueber das Fenster, O(m w)) in O(m) ueber eine monotone Schlange der Zeilen (jede Zeile kommt
+// einmal hinein und hoechstens einmal heraus). Gleich grosse Werte unterscheiden sich nur bei -0/+0; zero waehlt:
+//   0  der frueheste unter den groessten Werten des Fensters (R: max() = rmax mit '>', erstes Auftreten);
+//   1  -0 < +0 (Julia: maximum, "maximum([0.0, -0.0]) === 0.0").
+// Python (np.max) haengt bei gemischten Nullen von den SIMD-Bahnen von numpy ab und ist dort keiner der Regeln
+// gleich; sonst (kein Fenster, dessen Maximum 0 ist und beide Vorzeichen enthaelt) ist jede Regel bitgleich.
+// Gelesen wird nur x, geschrieben nur out (m Werte, Speicher des Aufrufers; x und out duerfen nicht ueberlappen).
+// Rueckgabe 0 in Ordnung, 1 w < 1 oder zero nicht 0/1 (dann bleibt out unveraendert; die Sprachen behalten fuer
+// w < 1 ihren bisherigen Weg). w > m wirkt wie w = m (kumuliertes Maximum). m = 0: nichts zu tun.
+static inline int roll_max_core(int64_t m, const double* x, int64_t w, int zero, double* out) {
+  if (w < 1 || (zero != 0 && zero != 1)) return 1;
+  if (m <= 0) return 0;
+  if (w > m) w = m;
+  std::vector<int64_t> q((std::size_t) m);   // Zeilennummern, Werte fallend (zero 0: nicht steigend)
+  std::vector<double> v((std::size_t) m);    // x mit NaN -> -Inf
+  int64_t h = 0, t = 0;                      // Schlange q[h .. t - 1]
+  for (int64_t i = 0; i < m; ++i) {
+    const double xi = std::isnan(x[i]) ? -INFINITY : x[i];
+    v[(std::size_t) i] = xi;
+    if (zero == 0) {
+      while (t > h && v[(std::size_t) q[(std::size_t) (t - 1)]] < xi) --t;      // gleiche bleiben (frueheste vorn)
+    } else {
+      while (t > h) {
+        const double b = v[(std::size_t) q[(std::size_t) (t - 1)]];
+        if (b < xi || (b == xi && std::signbit(b) && !std::signbit(xi))) --t;  // -0 < +0
+        else break;
+      }
+    }
+    q[(std::size_t) t++] = i;
+    if (q[(std::size_t) h] <= i - w) ++h;     // vorderste Zeile faellt aus dem Fenster
+    out[i] = v[(std::size_t) q[(std::size_t) h]];
+  }
+  return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1006,10 +1000,6 @@ static long long merge_count(std::vector<double>& y, std::vector<double>& buf, i
 // floating-point arithmetic and fast robust geometric predicates. Discrete & Computational Geometry 18(3),
 // 305-363 (Two-Sum, Fast-Two-Sum). Eigene Umsetzung.
 struct kt_dd { double hi, lo; };
-static inline kt_dd kt_two_sum(double a, double b) {
-  const double s = a + b, bb = s - a;
-  return {s, (a - (s - bb)) + (b - bb)};
-}
 static inline kt_dd kt_fast_two_sum(double a, double b) {   // |a| >= |b|
   const double s = a + b;
   return {s, b - (s - a)};

@@ -103,7 +103,27 @@ function tax_tariff(file_pos = nothing; file = file_pos)
     if file === nothing
         file = default_tariff_file()
         isfile(file) || error("tax_tariff: Die mitgelieferte Datei extdata/steuertarif.csv wurde nicht gefunden (Paket unvollständig installiert?).")
+        # seit 1.6.3 je Prozess gemerkt (wie R und Python): Schlüssel Pfad, Größe, Änderungszeit; nur ohne Warnung;
+        # je Aufruf eine Kopie
+        stt = stat(file); key = (file, stt.size, stt.mtime)
+        hit = lock(_TT_LOCK) do
+            c = _TT_CACHE[]
+            c !== nothing && c[1] == key ? c[2] : nothing
+        end
+        hit === nothing || return deepcopy(hit)
+        out, warned = _tax_tariff_read(file)
+        warned || lock(() -> (_TT_CACHE[] = (key, deepcopy(out))), _TT_LOCK)
+        return out
     end
+    return _tax_tariff_read(file)[1]
+end
+
+const _TT_CACHE = Ref{Any}(nothing)   # (Schlüssel, Ergebnis) der mitgelieferten Datei
+const _TT_LOCK = ReentrantLock()
+
+"Tarifdatei lesen und prüfen (Rumpf von `tax_tariff`); `(Ergebnis, Warnung ausgegeben?)`."
+function _tax_tariff_read(file)
+    warned = false
     (file isa AbstractString) || error("tax_tariff: 'file' muss ein einzelner Dateipfad (Zeichenkette) oder NULL sein.")
     file = String(file)
     isfile(file) || error("tax_tariff: Datei '$file' nicht gefunden.")
@@ -183,10 +203,10 @@ function tax_tariff(file_pos = nothing; file = file_pos)
     end
     for k in 2:nz
         jump = f(k, ab[k]) - f(k - 1, ab[k])
-        abs(jump) > 1 && @warn r_sprintf("tax_tariff: Der Tarif springt an der Zonengrenze %s EUR um %.2f EUR (vorige Zone %.2f, neue Zone %.2f EUR); Tarifdatei prüfen.",
+        abs(jump) > 1 && (warned = true) && @warn r_sprintf("tax_tariff: Der Tarif springt an der Zonengrenze %s EUR um %.2f EUR (vorige Zone %.2f, neue Zone %.2f EUR); Tarifdatei prüfen.",
                                          r_format1(ab[k]; scientific = false), jump, f(k - 1, ab[k]), f(k, ab[k]))
     end
-    return out
+    return out, warned
 end
 
 function _print_tax_tariff(io::IO, x)

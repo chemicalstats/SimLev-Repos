@@ -17,32 +17,11 @@
 
 extern "C" {
 
-static void chk_int(void *d) { (void) d; R_CheckUserInterrupt(); }
-static int r_interrupted(void *h) { (void) h; return !R_ToplevelExec(chk_int, NULL); }
-
-static void ctx_init(sl_ctx *cx)
-{
-    sl_ctx_init(cx);
-    cx->interrupted = r_interrupted;
-}
-
-/* Warnungen ausgeben, bei Fehler abbrechen (nprot Schutzstufen vorher freigeben) */
-static void finish(sl_ctx *cx, int st, int nprot)
-{
-    int i;
-    char msg[SL_MSG_LEN];
-    for (i = 0; i < cx->n_warn; i++) Rf_warningcall(R_NilValue, "%s", cx->warn[i]);
-    if (st != SL_OK) {
-        memcpy(msg, cx->msg, SL_MSG_LEN);
-        if (nprot) UNPROTECT(nprot);
-        if (st == SL_EINTR) R_CheckUserInterrupt();
-        Rf_errorcall(R_NilValue, "%s", msg);
-    }
-}
+#include "huelle_r.h"   /* Kontext, Rueckmeldungen, Argumentpruefungen (seit 1.6.3 gemeinsam) */
 
 static void bad(const char *what) { Rf_errorcall(R_NilValue, "interner Fehler: %s", what); }
 
-static double num1(SEXP x, const char *what)
+static double num1_bad(SEXP x, const char *what)   /* Meldung ueber bad(), anders als num1 */
 {
     if (TYPEOF(x) != REALSXP || XLENGTH(x) != 1) bad(what);
     return REAL(x)[0];
@@ -65,11 +44,11 @@ SEXP C_sl_cal_fill(SEXP cols, SEXP day, SEXP d0, SEXP nd, SEXP filled)
     SEXP out, v, o;
     if (TYPEOF(cols) != VECSXP || TYPEOF(day) != REALSXP) bad("cal_fill: Typen");
     n = XLENGTH(day);
-    m = (R_xlen_t) num1(nd, "cal_fill: nd");
+    m = (R_xlen_t) num1_bad(nd, "cal_fill: nd");
     fpos = int1(filled, "cal_fill: filled");
     src = (int64_t *) R_alloc((size_t) (m > 0 ? m : 1), sizeof(int64_t));
     ctx_init(&cx);
-    st = sl_cal_index(&cx, n, REAL(day), num1(d0, "cal_fill: d0"), m, src);
+    st = sl_cal_index(&cx, n, REAL(day), num1_bad(d0, "cal_fill: d0"), m, src);
     finish(&cx, st, 0);
     out = PROTECT(Rf_allocVector(VECSXP, XLENGTH(cols)));
     for (k = 0; k < XLENGTH(cols); k++) {
@@ -169,7 +148,7 @@ SEXP C_sl_boot_path(SEXP ret, SEXP idx, SEXP aux, SEXP aux_ratio, SEXP aux_start
     ctx_init(&cx);
     st = sl_boot_path(&cx, n_out, k, REAL(ret), ix, n_aux, na, na > 0 ? REAL(aux) : NULL,
                       lv != R_NilValue ? REAL(aux_ratio) : NULL, aux_start != R_NilValue ? REAL(aux_start) : NULL,
-                      lev, nL, L, num1(start, "boot_path: start"), REAL(P), lv != R_NilValue ? REAL(lv) : NULL);
+                      lev, nL, L, num1_bad(start, "boot_path: start"), REAL(P), lv != R_NilValue ? REAL(lv) : NULL);
     if (st < 0) finish(&cx, -st, 2);
     if (st == 0) { UNPROTECT(2); return R_NilValue; }
     out = PROTECT(Rf_allocVector(VECSXP, 2));
@@ -192,7 +171,7 @@ static SEXP tdist_mt(tmt_fn f, SEXP x, SEXP df, SEXP lower, SEXP nthreads)
         Rf_errorcall(R_NilValue, "interner Fehler: lower.tail muss TRUE oder FALSE sein");
     ctx_init(&cx);
     out = PROTECT(Rf_allocVector(REALSXP, XLENGTH(x)));
-    st = f(&cx, XLENGTH(x), REAL(x), num1(df, "df"), LOGICAL(lower)[0], REAL(out), int1(nthreads, "nthreads"));
+    st = f(&cx, XLENGTH(x), REAL(x), num1_bad(df, "df"), LOGICAL(lower)[0], REAL(out), int1(nthreads, "nthreads"));
     finish(&cx, st, 1);
     UNPROTECT(1);
     return out;
@@ -227,8 +206,8 @@ SEXP C_sl_tcop_nu(SEXP U, SEXP Ri, SEXP ldR, SEXP lower, SEXP upper, SEXP tol, S
     k = INTEGER(dim)[1];
     if (XLENGTH(Ri) != (R_xlen_t) k * k) bad("tcop_nu: Ri");
     ctx_init(&cx);
-    st = sl_tcop_nu(&cx, INTEGER(dim)[0], k, REAL(U), REAL(Ri), num1(ldR, "ldR"), num1(lower, "lower"),
-                    num1(upper, "upper"), num1(tol, "tol"), int1(nthreads, "nthreads"), &nu, &flag);
+    st = sl_tcop_nu(&cx, INTEGER(dim)[0], k, REAL(U), REAL(Ri), num1_bad(ldR, "ldR"), num1_bad(lower, "lower"),
+                    num1_bad(upper, "upper"), num1_bad(tol, "tol"), int1(nthreads, "nthreads"), &nu, &flag);
     if (st == SL_EINTR) R_CheckUserInterrupt();
     return (st != SL_OK || flag) ? R_NilValue : Rf_ScalarReal(nu);
 }

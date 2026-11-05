@@ -11,14 +11,6 @@
 #                   regime_subset())
 # =============================================================================
 
-#' Log-Dichte der multivariaten Normalverteilung je Zeile (seit 1.5.0 rechnet regime_hmm sie im Kern hmm_em)
-#' @keywords internal
-#' @noRd
-.ldmvn <- function(X, mu, S) {
-  L <- .sl_chol(S); Z <- t(.sl_backsolve(L, t(sweep(X, 2, mu)), transpose = TRUE))
-  -0.5 * rowSums(Z^2) - sum(log(diag(L))) - 0.5 * ncol(X) * log(2 * pi)
-}
-
 #' Viterbi-Pfad aus Log-Emissionen (Perioden x Zustand), Log-Uebergangsmatrix und
 #' Log-Startverteilung; je Schritt erstes Maximum je Spalte wie which.max
 #' (max.col mit ties.method = "first" vergleicht exakt), bei NA/NaN wie bisher ueber apply

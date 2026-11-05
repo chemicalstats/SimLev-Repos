@@ -4,7 +4,7 @@
 # Führt den R-Auszug tests/schnittstelle/api_r.R mit --frozen-check aus: NAMESPACE und die Quellen r/R/*.R werden
 # geparst und mit tests/schnittstelle/frozen/r.json verglichen (Funktionen und S3-Methoden, Argumente in Reihenfolge,
 # Art, Standardwerte). Die Meldung nennt jede Abweichung und wie man den Stand bewusst neu festschreibt
-# (Eintrag in tests/schnittstelle/CHANGES.md, dann tests/schnittstelle/run.sh --freeze).
+# (Eintrag in tests/schnittstelle/CHANGES.md, dann tests/schnittstelle/run.py --freeze).
 testthat::local_edition(3)   # Edition 3 wie bisher (Config/testthat/edition in r/DESCRIPTION entfällt)
 
 test_that("Schnittstelle entspricht tests/schnittstelle/frozen/r.json", {

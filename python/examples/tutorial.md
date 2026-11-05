@@ -15,7 +15,7 @@ gleich; die Schreibweisen stehen in der [Python-README](../README.md#von-r-zu-py
 Alle Argumente beschreiben die Docstrings (`help(simlev.simulation)`).
 
 Alle Codeblöcke laufen nacheinander in einer Sitzung; die Ausgaben sind
-echte Ausgaben (geprüft mit `tests/werkzeuge/doku/beispiele.sh`). Die Kurse
+echte Ausgaben (geprüft mit `tests/werkzeuge/doku/beispiele.py`). Die Kurse
 erzeugt hier numpy, die Zahlen unterscheiden sich daher von denen der R- und
 Julia-Fassung. Mit denselben Kursdaten rechnen alle drei Sprachen bitgleich.
 

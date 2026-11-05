@@ -67,6 +67,7 @@
 #' @export
 sensitivity_grid <- function(data, strategy, grid, sim_args = list(), metrics = bootstrap_study_metrics,
                              keep_results = FALSE, cores = 1L) {
+  own_cache <- .sim_study(); on.exit(.sim_study_end(own_cache), add = TRUE)   # Pruef-Cache je Studie (seit 1.5.1)
   design <- if (is.data.frame(grid)) grid else expand.grid(grid, stringsAsFactors = FALSE, KEEP.OUT.ATTRS = FALSE)
   if (!nrow(design)) stop("Leeres Raster.")
   .sim_check_names(names(design), "sensitivity_grid")   # Argumente von simulation() bzw. Pfade wie "dca.value"
@@ -162,6 +163,7 @@ sensitivity_rebalancing <- function(data, strategy,
                                                        semiannual = c("month", 6), yearly = c("year", 1)),
                                     offsets = NULL, bands = NA, band_type = c("absolute", "relative"),
                                     include_none = TRUE, sim_args = list(), metrics = bootstrap_study_metrics, cores = 1L) {
+  own_cache <- .sim_study(); on.exit(.sim_study_end(own_cache), add = TRUE)   # Pruef-Cache je Studie (seit 1.5.1)
   band_type <- match.arg(band_type)
   sim_args <- .sim_args_set(list(), sim_args, "sensitivity_rebalancing")
   rows <- list()
@@ -266,6 +268,7 @@ sensitivity_rebalancing <- function(data, strategy,
 #' @export
 planning_lumpsum_vs_dca <- function(data, strategy, amount = 10000, months = 12, horizon = 10, step = 1,
                            sim_args = list(), cores = 1L) {
+  own_cache <- .sim_study(); on.exit(.sim_study_end(own_cache), add = TRUE)   # Pruef-Cache je Studie (seit 1.5.1)
   nm <- names(sim_args) %||% character(0)
   own <- nm[nm %in% c("start_value", "dca", "dca_mode", "dca_value", "dca_span", "dca_unit", "dca_skip") | startsWith(nm, "dca.")]
   if (length(own)) stop(sprintf("planning_lumpsum_vs_dca setzt %s selbst; aus sim_args entfernen (Betrag \u00fcber amount, Raten \u00fcber months).",
@@ -430,6 +433,7 @@ series_leverage <- function(data, index, leverage = 2, rate = 0, expense = 0, sp
 #' @export
 sensitivity_leverage <- function(data, index, leverages = seq(0.5, 4, by = 0.25), rate = 0, expense = 0,
                                  spread = 0, strategy = NULL, sim_args = list(), metrics = bootstrap_study_metrics, cores = 1L) {
+  own_cache <- .sim_study(); on.exit(.sim_study_end(own_cache), add = TRUE)   # Pruef-Cache je Studie (seit 1.5.1)
   strategy <- strategy %||% create_strategy(LEV = asset_config("etf", "bnh", partial_exemption = 30))
   sim_args <- .sim_args_set(list(), sim_args, "sensitivity_leverage")
   run <- function(L) {

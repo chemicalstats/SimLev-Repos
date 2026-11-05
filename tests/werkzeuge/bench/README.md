@@ -4,13 +4,13 @@ Wiederholbare Laufzeitmessung in R, Python und Julia: Nachweis, dass Umbauten ni
 machen, und Vorher-Werte für Umbauten (z. B. Verlagerungen in den C++-Kern).
 
 ``` bash
-R_LIBS=<Bibliothek mit installiertem SimLev> tests/werkzeuge/bench/run.sh          # alle Aufgaben außer P1
-R_LIBS=<…> tests/werkzeuge/bench/run.sh P1                                          # cores = 1 gegen 2 (Julia mit 2 Threads)
-R_LIBS=<…> tests/werkzeuge/bench/run.sh T1,T8                                       # Auswahl
+R_LIBS=<Bibliothek mit installiertem SimLev> tests/werkzeuge/bench/run.py          # alle Aufgaben außer P1
+R_LIBS=<…> tests/werkzeuge/bench/run.py P1                                          # cores = 1 gegen 2 (Julia mit 2 Threads)
+R_LIBS=<…> tests/werkzeuge/bench/run.py T1,T8                                       # Auswahl
 python3 tests/werkzeuge/bench/merge.py --md --alt tests/werkzeuge/bench/anhang_e_2026-10-20.csv tests/werkzeuge/bench/out/*.csv
 ```
 
-`run.sh` misst die drei Sprachen **nacheinander** (nichts anderes nebenher laufen lassen), mit
+`run.py` misst die drei Sprachen **nacheinander** (nichts anderes nebenher laufen lassen), mit
 `LC_ALL=C.UTF-8` und einem Kern (`OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`,
 `JULIA_NUM_THREADS=1`, `cores = 1`), und schreibt `out/{r,python,julia}.csv` sowie
 `ergebnis_<JJJJ-MM-TT>.csv`. Eine vorhandene Ergebnisdatei wird nie überschrieben: Der nächste Lauf
@@ -49,7 +49,7 @@ Ergebnisdateien). Die Zeile `Daten:` zeigt Prüfsummen, die in allen drei Sprach
 | `T7` | `portfolio_optimize` `hrp`, 4 Assets |
 | `T8` | MS-GARCH-Schätzung `.ms_garch_fit` / `_ms_garch_fit`, 2 Regime gjrGARCH, n = 2.000 (Daten wie `tests/gleichlauf/erzeugen/modelle.R, Modul ms_garch`, `gjr2`) |
 | `T3c2` | wie `T3`, aber `cores = 2` (Fork); nur R und nur auf Anforderung (`bench.R <csv> T3,T3c2`) |
-| `P1c1`, `P1c2` | `bootstrap` stationär, 400 Pfade × 10 Jahre, `cores = 1` bzw. `2` (R/Python: Fork, Julia: Threads); nur mit `run.sh P1`, Ergebnis `ergebnis_<JJJJ-MM-TT>_parallel.csv` |
+| `P1c1`, `P1c2` | `bootstrap` stationär, 400 Pfade × 10 Jahre, `cores = 1` bzw. `2` (R/Python: Fork, Julia: Threads); nur mit `run.py P1`, Ergebnis `ergebnis_<JJJJ-MM-TT>_parallel.csv` |
 
 Daten von T1–T7: 4 Kursreihen über 20 Jahre täglich (Seed 7) und 30 × 2.000 Wachstumsfaktoren;
 `S30`: Seed 1. `anhang_e_2026-10-20.csv` enthält die alten Werte (Anhang E des

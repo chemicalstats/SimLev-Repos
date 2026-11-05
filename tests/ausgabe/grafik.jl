@@ -149,8 +149,17 @@ end
 
 # Grafiken der Erweiterungsmodule: SimLevPlot mit data (Schlüssel/Spalten wie Python, Werte aus dem Objekt).
 # Objekte aus den Referenzfällen (Julia-Code der Fälle), damit Python und Julia dieselben Eingaben zeichnen.
+# Zwischenspeicher: Jedes Szenario (bzw. jede Tabellenzeile) wird je Testlauf nur einmal gerechnet, seine Teile teilen
+# sich das Modul; die Grafiktests lesen die Objekte nur, sie verändern sie nicht.
+const _PLOT_MODULE = Dict{String,Module}()
 function _plot_case_obj(case, var = "result")
     c = Base.invokelatest(fall, case)
+    key = haskey(c, "_teil") ? string(c["module"], "/", c["id"]) : String(case)
+    m = get!(() -> _plot_case_module(c, case), _PLOT_MODULE, key)
+    x = Base.invokelatest(getglobal, m, Symbol(var))
+    return haskey(c, "_teil") && var == "result" ? getproperty(x, Symbol(c["_teil"])) : x   # Teil eines Szenarios
+end
+function _plot_case_module(c, case)
     m = Module(:PlotCase)
     Core.eval(m, :(using SimLev, Dates))
     Core.eval(m, :(const SL = SimLev))
@@ -167,8 +176,7 @@ function _plot_case_obj(case, var = "result")
             end
         end
     end
-    x = Base.invokelatest(getglobal, m, Symbol(var))
-    return haskey(c, "_teil") && var == "result" ? getproperty(x, Symbol(c["_teil"])) : x   # Teil eines Szenarios
+    return m
 end
 _bits(v) = reinterpret.(Int64, Float64.(collect(v)))
 

@@ -27,11 +27,6 @@ from ._r import fmt as _fmt
 __all__: list[str] = []
 
 
-def _stats():
-    from ._r import stats
-    return stats
-
-
 def _show(x):
     """``paste(format(x), collapse = ", ")``; ``None`` steht für ``NA``."""
     if x is None:

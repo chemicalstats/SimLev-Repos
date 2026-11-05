@@ -2,12 +2,12 @@
 """Mit dem aktuellen R neu erzeugte Bereichsdateien gegen den Katalog tests/<gruppe>/faelle (Byte für Byte; bis 1.4.0
 golden_diff.py).
 
-Aufruf: python3 -I tests/werkzeuge/gleichlauf/faelle_diff.py <ordner>   (run.sh: <arbeitsordner>/faelle)
+Aufruf: python3 -I tests/werkzeuge/gleichlauf/faelle_diff.py <ordner>   (run.py: <arbeitsordner>/faelle)
 
 Je Gruppe und Bereich muss <ordner>/<gruppe>/<bereich>.jsonl.gz Byte für Byte tests/<gruppe>/faelle/<bereich>.jsonl.gz
 entsprechen (gzip -9 -n,
 gleicher Text). Bei einem Unterschied nennt das Werkzeug die verschiedenen Fälle. Ein Unterschied heißt: R rechnet
-anders als beim letzten Neuerzeugen; der Katalog ist mit tests/werkzeuge/erzeugen.sh neu zu erzeugen (Ursache in
+anders als beim letzten Neuerzeugen; der Katalog ist mit tests/werkzeuge/erzeugen.py neu zu erzeugen (Ursache in
 r/NEWS.md). Ende 1 bei einem Unterschied oder einem fehlenden Bereich.
 """
 import gzip

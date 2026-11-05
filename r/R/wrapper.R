@@ -35,6 +35,8 @@
 #   das Volumen ohne abgezogene Fondskosten. Einzahlungen der Anleger aendern das Fondsvolumen nicht.
 #   Mit einer Ordergebuehr beim Start ist schon der erste Anteilswert 100 * G_1 / S < 100 (ebenso mit innerem
 #   Spread > 0): Das ist U_0 = 100 vor dem ersten Tag und G_0 = S.
+#   Schritte 2 und 3 rechnet seit 1.5.1 der gemeinsame Kern core/wrapper_core_impl.h (wrapper_nav_core) fuer alle
+#   drei Sprachen; die Sprachen waehlen die NAV-Tage, bestimmen das Jahr je Tag und melden den Fehler.
 
 # ── Hilfen ────────────────────────────────────────────────────────────────────
 
@@ -58,7 +60,7 @@
 .strategy_wrappers <- function(strategy)
   names(strategy)[vapply(strategy, function(a) is.list(a) && !is.null(a[["wrapper"]]), TRUE)]
 
-.wrapper_is_leap <- function(y) (y %% 4L == 0L & y %% 100L != 0L) | y %% 400L == 0L
+# (.wrapper_is_leap: bis 1.5.0; Schaltjahr seit 1.5.1 im Kern core/wrapper_core_impl.h)
 
 # ── wrapper_config ────────────────────────────────────────────────────────────
 
@@ -181,37 +183,24 @@ print.SimLevWrapperConfig <- function(x, ...) {
       }),
     error = function(e) stop(sprintf("%s (innere Rechnung): %s", who, conditionMessage(e)), call. = FALSE))
 
-  idx <- match(d$date, res$dates)
+  idx <- .date_match(d$date, res$dates)          # seit 1.5.1 ueber die Tageszahl statt Texte je Tag
   idx <- idx[!res$filled[idx]]
   if (!length(idx))
     stop(sprintf("%s: keine Handelstage in der inneren Rechnung (alle Tage aufgef\u00fcllt).", who), call. = FALSE)
   dates <- res$dates[idx]; G <- res$worth[idx]
-  day <- as.numeric(dates); yr <- as.integer(format(dates, "%Y"))
-  fee <- wrapper$costs$fee; pf <- wrapper$costs$performance_fee
-  n <- length(idx)
-  nav <- gross <- fee_t <- acc_t <- paid_t <- hwm <- numeric(n)
-  U <- 100; H <- 100; G_prev <- S; d_prev <- as.numeric(res$dates[1L])
-  for (t in seq_len(n)) {
-    g <- G[t]
-    if (!(G_prev > 0) || !is.finite(g) || !(g > 0))
-      stop(sprintf("%s: innerer Wert am %s ist %s (vorher %s); der Anteilswert ist dann nicht definiert.", who,
-                   format(dates[t]), format(g), format(G_prev)), call. = FALSE)
-    D <- if (.wrapper_is_leap(yr[t])) 366 else 365
-    a <- U * (g / G_prev)
-    k <- fee / 100 * (day[t] - d_prev) / D
-    fee_t[t] <- a * k
-    U <- a - fee_t[t]
-    acc_t[t] <- pf / 100 * max(0, U - H)
-    nav[t] <- U - acc_t[t]
-    if (t < n && yr[t + 1L] != yr[t]) {          # letzter NAV-Tag des Kalenderjahres (nicht der letzte insgesamt)
-      paid_t[t] <- acc_t[t]
-      U <- nav[t]
-      H <- max(H, U)
-    }
-    gross[t] <- 100 * g / S
-    hwm[t] <- H
-    G_prev <- g; d_prev <- day[t]
+  ym <- .date_ym(dates)                            # seit 1.5.1 ganzzahlig statt format(dates, "%Y")
+  yr <- if (is.null(ym)) as.integer(format(dates, "%Y")) else as.integer(ym$y)
+  # Tagesschleife im Kern (core/wrapper_core_impl.h, wrapper_nav_core; bis 1.5.0 hier in R): je Tag
+  # a = U * (g / G_prev), Verwaltungsgebuehr fee / 100 * Tage / (365 bzw. 366), Performancegebuehr ueber der
+  # High Water Mark, Auszahlung am letzten NAV-Tag des Kalenderjahres
+  cr <- .wrapper_nav_core(G, as.numeric(dates), yr, wrapper$costs$fee, wrapper$costs$performance_fee, S,
+                          as.numeric(res$dates[1L]))
+  if (cr$bad > 0) {
+    t <- cr$bad
+    stop(sprintf("%s: innerer Wert am %s ist %s (vorher %s); der Anteilswert ist dann nicht definiert.", who,
+                 format(dates[t]), format(G[t]), format(if (t > 1L) G[t - 1L] else S)), call. = FALSE)
   }
+  nav <- cr$nav; gross <- cr$gross; fee_t <- cr$fee; acc_t <- cr$perf_fee; paid_t <- cr$perf_paid; hwm <- cr$hwm
   out <- data.frame(date = dates, nav = nav, gross = gross, fee = fee_t, perf_fee = acc_t, perf_paid = paid_t, hwm = hwm)
   attr(out, "inner") <- res
   attr(out, "wrapper") <- wrapper

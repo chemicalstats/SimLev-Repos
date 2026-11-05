@@ -15,7 +15,7 @@
 #   Datum; sortiert), --stand ist die Überschrift des Eintrags in CHANGES.md.
 # --frozen-check: Auszug mit dem eingefrorenen Stand vergleichen; bei
 #   Abweichung Liste der Unterschiede und Rückgabewert 1
-#   (r/tests/testthat/test-api-frozen.R, run.sh --check).
+#   (r/tests/testthat/test-api-frozen.R, run.py --check).
 # Braucht nur Basis-R und jsonlite.
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -169,7 +169,7 @@ cat(sprintf("R: %d Exporte, %d S3-Methoden -> %s%s\n", length(funs), length(meth
 # (Text; null = keiner), dazu value (ausgewerteter Standardwert) und match_arg,
 # wo vorhanden. Ohne Datei, Zeile, Modul, Datum und Vermerke; Schlüssel nach
 # Bytes sortiert, ein Argument je Zeile.
-FROZEN_HINT <- "Erzeugt von tests/schnittstelle/run.sh --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern."
+FROZEN_HINT <- "Erzeugt von tests/schnittstelle/run.py --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern."
 FROZEN_FIELDS <- c("name", "kind", "default", "value", "match_arg", "default_known")
 
 frozen_of <- function(res) {
@@ -271,7 +271,7 @@ frozen_diff <- function(old, new) {
 FREEZE_HOWTO <- c(
   "Ist die Änderung gewollt, den Stand bewusst neu festschreiben:",
   "  1. Eintrag oben in tests/schnittstelle/CHANGES.md: \"## JJJJ-MM-TT – Titel\" mit \"- Was: …\" und \"- Warum: …\"",
-  "  2. tests/schnittstelle/run.sh --freeze   (aus der Repo-Wurzel; schreibt frozen/ für R, Python und Julia neu)",
+  "  2. tests/schnittstelle/run.py --freeze   (aus der Repo-Wurzel; schreibt frozen/ für R, Python und Julia neu)",
   "  3. frozen/ und CHANGES.md zusammen einchecken.",
   "Sonst die Änderung im Code zurücknehmen.")
 
@@ -285,7 +285,7 @@ if (!is.null(frozen_out) || !is.null(frozen_check)) {
   }
   if (!is.null(frozen_check)) {
     if (!file.exists(frozen_check)) {
-      cat(sprintf("R: eingefrorener Stand %s fehlt; anlegen mit tests/schnittstelle/run.sh --freeze\n", frozen_check))
+      cat(sprintf("R: eingefrorener Stand %s fehlt; anlegen mit tests/schnittstelle/run.py --freeze\n", frozen_check))
       quit(status = 1)
     }
     old <- read_frozen(frozen_check)

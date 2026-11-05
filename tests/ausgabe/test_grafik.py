@@ -36,9 +36,11 @@ import faelle
 from _helpers import _dca, sim
 
 
-def _obj(case, var="result"):
-    """Objekt eines Referenzfalls (Python-Code des Falls, Eingaben aus dem Katalog)."""
-    c = faelle.fall(case)
+_NS = {}   # Zwischenspeicher: Namensraum je Szenario bzw. Tabellenzeile, einmal je Testlauf gerechnet
+
+
+def _ns(c):
+    """Namensraum nach dem Python-Code des Falls ``c`` (Eingaben aus dem Katalog)."""
     ns = {"simlev": simlev, "np": np, "pd": pd, "math": math}
     for k, v in (c.get("inputs") or {}).items():
         ns[k] = decode(v)
@@ -46,6 +48,19 @@ def _obj(case, var="result"):
             contextlib.redirect_stderr(io.StringIO()):
         warnings.simplefilter("ignore")
         exec(c["py"], ns)  # noqa: S102 - Fälle stammen aus dem Repo
+    return ns
+
+
+def _obj(case, var="result"):
+    """Objekt eines Referenzfalls (Python-Code des Falls, Eingaben aus dem Katalog).
+
+    Ein Szenario wird je Testlauf nur einmal gerechnet (Schlüssel: Modul und Kennung des Szenarios; seine Teile
+    teilen sich den Lauf); die Grafiktests lesen die Objekte nur, sie verändern sie nicht."""
+    c = faelle.fall(case)
+    key = (c.get("module"), c["id"])
+    if key not in _NS:
+        _NS[key] = _ns(c)
+    ns = _NS[key]
     if c.get("_teil") and var == "result":   # Teil eines Szenarios
         return ns[var][c["_teil"]]
     return ns[var]

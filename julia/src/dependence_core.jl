@@ -131,14 +131,20 @@ end
     pbo_cscv(Bs, Ts, combos, half, metric, S, N) -> (lambda, is_best, oos_best, oos_median)
 
 Aufteilungen der CSCV von `overfit_pbo()` (R: `.pbo_cscv`, seit 1.5.0); `Bs` fünf Blocksummen S × N, `Ts` deren
-Spaltensummen, `combos` Vektor der Aufteilungen (je S/2 Blöcke, 1-basiert).
+Spaltensummen, `combos` Vektor der Aufteilungen (je S/2 Blöcke, 1-basiert) oder Matrix S/2 × C (`Int32`, seit 1.5.1).
 """
 function pbo_cscv(Bs, Ts, combos, half, metric, S, N)
     Bv = reduce(vcat, [vec(_fmat(B)) for B in Bs]); Tv = reduce(vcat, [Float64.(collect(t)) for t in Ts])
-    H = S ÷ 2; C = length(combos)
-    cb = Vector{Int32}(undef, H * C)
-    for (c, cmb) in enumerate(combos), (q, b) in enumerate(cmb)
-        cb[(c - 1) * H + q] = Int32(b)
+    H = S ÷ 2
+    if combos isa AbstractMatrix
+        size(combos, 1) == H || error("pbo_cscv: ungültige Abmessungen.")
+        C = size(combos, 2); cb = combos isa Matrix{Int32} ? vec(combos) : Int32.(vec(combos))
+    else
+        C = length(combos)
+        cb = Vector{Int32}(undef, H * C)
+        for (c, cmb) in enumerate(combos), (q, b) in enumerate(cmb)
+            cb[(c - 1) * H + q] = Int32(b)
+        end
     end
     (length(Bv) == 5 * S * N && length(Tv) == 5 * N) || error("pbo_cscv: ungültige Abmessungen.")
     out = ntuple(_ -> Vector{Float64}(undef, C), 4)

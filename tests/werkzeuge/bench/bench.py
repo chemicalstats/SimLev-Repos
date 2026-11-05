@@ -8,7 +8,7 @@ Aufruf aus der Repo-Wurzel::
 aufgaben: kommagetrennt (z. B. T1,T8), Voreinstellung alle außer P1 (= P1c1,
 P1c2: bootstrap mit cores=1 und 2, Fork; nur auf Anforderung). Je Aufgabe 1
 Aufwärmlauf (erster_lauf_s), dann 3 gemessene Läufe (Median, Min, Max). Ein
-Kern: cores=1, wo die Funktion es kennt; BLAS-Threads setzt run.sh. Die Daten
+Kern: cores=1, wo die Funktion es kennt; BLAS-Threads setzt run.py. Die Daten
 entstehen mit dem Zufall von SimLev (simlev_seed, simlev._lib; seit 1.0.0)
 und sind dieselben Zahlen wie in bench.R (Prüfsumme in der Ausgabe).
 """

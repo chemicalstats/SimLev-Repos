@@ -22,7 +22,7 @@
 # --frozen-out: zusätzlich den eingefrorenen Stand schreiben (ohne Datei, Zeile,
 #   Modul, Datum; sortiert), --stand ist die Überschrift des Eintrags in CHANGES.md.
 # --frozen-check: Auszug mit dem eingefrorenen Stand vergleichen; bei
-#   Abweichung Liste der Unterschiede und Rückgabewert 1 (run.sh --check).
+#   Abweichung Liste der Unterschiede und Rückgabewert 1 (run.py --check).
 # tests/schnittstelle/api.jl lädt die Datei mit `include` (ohne Aufruf von
 # `main`) und ruft `snapshot()` und `frozen_check()` im Testprozess auf.
 # Nur Standardbibliothek.
@@ -421,12 +421,12 @@ end
 # ermittelbar); dazu die Namen der exportierten Typen und sonstigen Exporte.
 # Ohne Datei, Zeile, Modul, Datum, Vermerke und Nebenmethoden (variants);
 # Schlüssel sortiert, ein Argument je Zeile.
-const FROZEN_HINT = "Erzeugt von tests/schnittstelle/run.sh --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern."
+const FROZEN_HINT = "Erzeugt von tests/schnittstelle/run.py --freeze (mit Eintrag in CHANGES.md); nicht von Hand ändern."
 const FROZEN_FIELDS = ("name", "kind", "default", "value", "match_arg", "default_known")
 const FREEZE_HOWTO = """
 Ist die Änderung gewollt, den Stand bewusst neu festschreiben:
   1. Eintrag oben in tests/schnittstelle/CHANGES.md: "## JJJJ-MM-TT – Titel" mit "- Was: …" und "- Warum: …"
-  2. tests/schnittstelle/run.sh --freeze   (aus der Repo-Wurzel; schreibt frozen/ für R, Python und Julia neu)
+  2. tests/schnittstelle/run.py --freeze   (aus der Repo-Wurzel; schreibt frozen/ für R, Python und Julia neu)
   3. frozen/ und CHANGES.md zusammen einchecken.
 Sonst die Änderung im Code zurücknehmen."""
 
@@ -591,7 +591,7 @@ end
 Vergleicht den heutigen Auszug mit dem eingefrorenen Stand in `path`.
 """
 function frozen_check(path; res = snapshot(), lang = "Julia")
-    isfile(path) || return (false, "$lang: eingefrorener Stand $path fehlt; anlegen mit tests/schnittstelle/run.sh --freeze")
+    isfile(path) || return (false, "$lang: eingefrorener Stand $path fehlt; anlegen mit tests/schnittstelle/run.py --freeze")
     old = read_json(read(path, String))
     stand = pget(old, "stand")
     new = read_json(frozen_text(frozen_of(res), lang, stand))

@@ -66,7 +66,7 @@ def main():
     L = []
     L.append("# Struktur: Zuordnung R / Python / Julia\n")
     L.append("Diese Datei ist erzeugt; nicht von Hand ändern.\n")
-    L.append("- **Erzeugt** mit `tests/schnittstelle/run.sh` (Auszüge `api_r.R`, `api_py.py`, `api_jl.jl`, "
+    L.append("- **Erzeugt** mit `tests/schnittstelle/run.py` (Auszüge `api_r.R`, `api_py.py`, `api_jl.jl`, "
              "Vergleich `compare_api.py`, diese Datei `make_struktur.py`) aus `tests/schnittstelle/api.json`.")
     L.append("- **Stand:** %s." % api["generated"])
     L.append("- **Umfang:** R %d Exporte und %d S3-Methoden, Python %d Funktionen und %d Methoden, "

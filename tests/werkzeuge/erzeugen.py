@@ -22,9 +22,10 @@ HILFEN = ("ref_tools", "szenario_tools", "blocks_from_flat")   # keine Generator
 
 
 def bereiche():
-    """Alle Generatoren tests/gleichlauf/erzeugen/<bereich>.R ohne die Hilfsdateien, in Byte-Reihenfolge."""
-    return [n for n in (os.path.basename(g)[:-2] for g in sorted(glob.glob("tests/gleichlauf/erzeugen/*.R")))
-            if n not in HILFEN]
+    """Alle Generatoren tests/gleichlauf/erzeugen/<bereich>.R ohne die Hilfsdateien, in Byte-Reihenfolge (auch für
+    tests/werkzeuge/gleichlauf/run.py)."""
+    muster = os.path.join(ROOT, "tests", "gleichlauf", "erzeugen", "*.R")
+    return [n for n in (os.path.basename(g)[:-2] for g in sorted(glob.glob(muster))) if n not in HILFEN]
 
 
 def main(argv):

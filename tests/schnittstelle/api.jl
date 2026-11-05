@@ -6,7 +6,7 @@
 # Funktionen und Methoden, Argumente in Reihenfolge, Art (positionell/
 # Schlüsselwort), Standardwerte, dazu die Namen der exportierten Typen. Die
 # Meldung nennt jede Abweichung und wie man den Stand bewusst neu festschreibt
-# (Eintrag in tests/schnittstelle/CHANGES.md, dann tests/schnittstelle/run.sh --freeze).
+# (Eintrag in tests/schnittstelle/CHANGES.md, dann tests/schnittstelle/run.py --freeze).
 
 module _ApiFrozen
 const REPO = normpath(joinpath(@__DIR__, "..", ".."))

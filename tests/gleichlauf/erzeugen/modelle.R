@@ -220,7 +220,10 @@ K[[length(K) + 1]] <- list(x = 1, y = 2)
 for (i in seq_along(K)) EIN[[paste0("dependence/", sprintf("kendall_core_%02d", i))]] <- K[[i]]
 set.seed(7); M <- matrix(rnorm(300), ncol = 3, dimnames = list(NULL, c("a", "b", "c")))
 Mt <- round(M * 2)
-Mn <- M; Mn[5, 2] <- NA
+# NA in der letzten Spalte (seit 1.5.2): R 4.3.3 liest in cov_na_1 (stats/src/cov.c) für Kendall das nicht
+# gesetzte xm[j] einer NA-Spalte j links von einer vollständigen Spalte; das gab zufällig "the standard deviation
+# is zero". Mit der NA-Spalte rechts davon wird xm[j] nicht gelesen; Werte wie vorher (NA-Spalte, ein Paar gerechnet).
+Mn <- M; Mn[5, 3] <- NA
 EIN[["dependence/kendall_na"]] <- list(Mn = Mn)
 # DCC-Filter. Seit 1.0.0 neu gefasst: der frühere Kern .dcc_filter (dependence_core.cpp) und seine Ports
 # (Python _dependence_core, Julia DependenceCore) sind entfallen; dieselben Aufrufe über den
@@ -418,9 +421,9 @@ SZ("kendall_und_copulas", ".kendall_tau_core, .kendall mit NA, Copula-Likelihood
     r"(result = C.kendall_tau_core(x, y))",
     r"(result = C.kendall_tau_core(x, y))", inp = ein("dependence/kendall_core_08", c("x", "y"))),
   kendall_na = teil(
-    r"(list(SimLev:::.kendall(Mn), SimLev:::.kendall(Mn[, 1], Mn[, 2]), SimLev:::.kendall(1:5, c(1, 1, 1, 1, 1))))",
-    r"(result = [D._kendall(Mn), D._kendall(Mn.iloc[:, 0], Mn.iloc[:, 1]), D._kendall(np.arange(1, 6), np.ones(5))])",
-    r"(result = [D._kendall(Mn), D._kendall(Mn[:, 1], Mn[:, 2]), D._kendall(1:5, ones(5))])", inp = ein("dependence/kendall_na", c("Mn"))),
+    r"(list(SimLev:::.kendall(Mn), SimLev:::.kendall(Mn[, 1], Mn[, 3]), SimLev:::.kendall(1:5, c(1, 1, 1, 1, 1))))",
+    r"(result = [D._kendall(Mn), D._kendall(Mn.iloc[:, 0], Mn.iloc[:, 2]), D._kendall(np.arange(1, 6), np.ones(5))])",
+    r"(result = [D._kendall(Mn), D._kendall(Mn[:, 1], Mn[:, 3]), D._kendall(1:5, ones(5))])", inp = ein("dependence/kendall_na", c("Mn"))),
   cop_04_t = teil(
     r"(list(SimLev:::.cop_ll('t', p, uu, vv), SimLev:::.cop_lambda('t', p)))",
     r"(result = [D._cop_ll('t', p, uu, vv), D._cop_lambda('t', p)])",

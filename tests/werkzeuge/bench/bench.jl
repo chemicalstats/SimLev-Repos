@@ -6,7 +6,7 @@
 # bootstrap mit cores = 1 und 2 (Threads; Julia mit `-t 2` starten) nur auf Anforderung.
 # Je Aufgabe 1 Aufwärmlauf (erster_lauf_s; enthält in Julia die Kompilierung),
 # dann 3 gemessene Läufe (Median, Min, Max). Ein Kern: cores = 1, wo die
-# Funktion es kennt; Threads setzt run.sh. Die Daten entstehen mit dem
+# Funktion es kennt; Threads setzt run.py. Die Daten entstehen mit dem
 # Zufall von SimLev (simlev_seed, SimLev.SLib; seit 1.0.0) und sind dieselben
 # Zahlen wie in bench.R (Prüfsumme in der Ausgabe).
 

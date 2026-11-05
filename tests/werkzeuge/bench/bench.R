@@ -4,9 +4,9 @@
 #   LC_ALL=C.UTF-8 R_LIBS=<lib> Rscript tests/werkzeuge/bench/bench.R [ausgabe.csv] [aufgaben]
 # aufgaben: kommagetrennt (z. B. T1,T8), Voreinstellung alle außer P1 und T3c2. P1 (= P1c1, P1c2)
 # misst bootstrap mit cores = 1 und 2 (Fork), T3c2 die Aufgabe T3 mit cores = 2; beide nur auf
-# Anforderung (run.sh P1 bzw. bench.R <csv> T3,T3c2; nur R).
+# Anforderung (run.py P1 bzw. bench.R <csv> T3,T3c2; nur R).
 # Je Aufgabe 1 Aufwärmlauf (erster_lauf_s), dann 3 gemessene Läufe (Median, Min, Max).
-# Ein Kern: cores = 1, wo die Funktion es kennt; BLAS-Threads setzt run.sh.
+# Ein Kern: cores = 1, wo die Funktion es kennt; BLAS-Threads setzt run.py.
 
 args <- commandArgs(trailingOnly = TRUE)
 out <- if (length(args) >= 1) args[[1]] else "tests/werkzeuge/bench/out/r.csv"

@@ -247,7 +247,11 @@ test_that("Dashboard-Kennzahlen wie statistics, kurze Reihen und PDF-Export robu
   expect_silent(plot(simulation(d[1:3, ], .bt_st1())))
   f <- tempfile(fileext = ".pdf"); nd <- length(dev.list())
   bad <- r; bad$worth <- NULL
-  expect_error(suppressMessages(export_dashboard(bad, f)))
+  # Absichtlich zerstoertes Objekt (ohne worth): Geprueft wird nur, dass das Geraet nach dem Abbruch geschlossen ist.
+  # Auf dem Weg zum Fehler meldet range() in plot.SimLevResult fuer das leere worth zwei Warnungen (min/max ohne
+  # Werte); erwartet und hier gezielt unterdrueckt, jede andere Warnung bleibt sichtbar.
+  expect_error(withCallingHandlers(suppressMessages(export_dashboard(bad, f)), warning = function(w)
+    if (grepl("^no non-missing arguments to (min|max)", conditionMessage(w))) invokeRestart("muffleWarning")))
   expect_equal(length(dev.list()), nd)
 })
 })
@@ -396,7 +400,12 @@ test_that("expected-return shift, pooled bootstrap, random horizon and goal plan
   expect_error(withdrawal_horizon("uniform", min = 30), "max")
   cand <- lapply(c(0, 0.5, 1), function(a) c(s = a, cpi = 1 - a)); names(cand) <- c("A0", "A50", "A100")
   Rc <- do.call(rbind, lapply(ds, function(x) portfolio_returns(x, cand, "year")))
-  gp <- planning_goal(Rc, start_value = 100, goal = 200, horizon = 15, n_sim = 4000, seed = 1)
+  # Erwartete Warnung: Bei 118 diskreten Jahresrenditen und dem Standardraster (n_grid = 301) liegt der DP-Wert
+  # (79,0 %) deutlich ueber der Vorwaertssimulation (67,1 %); die Kontrolle in planning_goal() meldet das, probability
+  # ist der simulierte Wert. Mit feinerem Raster schliesst sich die Luecke (n_grid = 1001: 76,8 % gegen 73,8 %, ohne
+  # Warnung), es ist also die vorgesehene Rastermeldung, kein Fehler.
+  expect_warning(gp <- planning_goal(Rc, start_value = 100, goal = 200, horizon = 15, n_sim = 4000, seed = 1),
+                 "planning_goal: DP-Wert 79.0 % weicht von der Vorw\u00e4rtssimulation 67.1 % ab", fixed = TRUE)
   expect_gte(gp$probability, max(gp$static) - 1e-9)
   expect_equal(mean(gp$simulation$success), gp$probability, tolerance = 0.03)
   expect_output(print(gp), "Zielplanung")

@@ -2,13 +2,13 @@
 
 Führt den Python-Auszug ``tests/schnittstelle/api_py.py`` mit ``--frozen-check``
 in einem eigenen Prozess aus (``simlev.__all__`` und die Methoden der Klassen
-mit ``r_class``, wie für ``run.sh``) und vergleicht mit
+mit ``r_class``, wie für ``run.py``) und vergleicht mit
 ``tests/schnittstelle/frozen/py.json``: Funktionen und Methoden, Argumente in
 Reihenfolge, Art (positionell/Schlüsselwort), Standardwerte, dazu die Namen der
 exportierten Klassen. Ein eigener Prozess, damit die von anderen Tests
 geladenen Untermodule den Auszug nicht verändern. Die Meldung nennt jede
 Abweichung und wie man den Stand bewusst neu festschreibt (Eintrag in
-``tests/schnittstelle/CHANGES.md``, dann ``tests/schnittstelle/run.sh --freeze``).
+``tests/schnittstelle/CHANGES.md``, dann ``tests/schnittstelle/run.py --freeze``).
 """
 import os
 import subprocess

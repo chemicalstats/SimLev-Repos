@@ -17,7 +17,7 @@ Schlüsselwörter. Die Schreibweisen stehen in der
 Docstrings (`?simulation` in der REPL).
 
 Alle Codeblöcke laufen nacheinander in einer Sitzung; die Ausgaben sind
-echte Ausgaben (geprüft mit `tests/werkzeuge/doku/beispiele.sh`). Die Kurse
+echte Ausgaben (geprüft mit `tests/werkzeuge/doku/beispiele.py`). Die Kurse
 erzeugt hier Julias `MersenneTwister`, die Zahlen unterscheiden sich daher
 von denen der R- und Python-Fassung. Mit denselben Kursdaten rechnen alle drei Sprachen bitgleich.
 

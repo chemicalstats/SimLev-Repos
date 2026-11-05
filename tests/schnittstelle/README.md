@@ -4,15 +4,15 @@ Zeigt mit einem Befehl, ob R, Python und Julia dieselbe öffentliche Schnittstel
 (Funktionsnamen, Argumentnamen, Reihenfolge, Standardwerte). Seit 0.9.0 dient es als Test.
 
 ``` bash
-tests/schnittstelle/run.sh            # aus beliebigem Ordner; Bericht auf der Konsole
-tests/schnittstelle/run.sh --check    # Rückgabewert 1, wenn nicht erklärte Abweichungen bleiben
+tests/schnittstelle/run.py            # aus beliebigem Ordner; Bericht auf der Konsole
+tests/schnittstelle/run.py --check    # Rückgabewert 1, wenn nicht erklärte Abweichungen bleiben
                                      # oder eine Sprache vom eingefrorenen Stand (frozen/) abweicht
-tests/schnittstelle/run.sh --freeze   # frozen/ neu festschreiben; nur mit neuem Eintrag in CHANGES.md
-tests/schnittstelle/run.sh -v --md /tmp/abweichungen.md   # auch bewusste zeigen, Liste als Markdown
+tests/schnittstelle/run.py --freeze   # frozen/ neu festschreiben; nur mit neuem Eintrag in CHANGES.md
+tests/schnittstelle/run.py -v --md /tmp/abweichungen.md   # auch bewusste zeigen, Liste als Markdown
 ```
 
 Braucht `Rscript` (mit jsonlite), `python3` und `julia` (Projekt `julia/`); sonst nur die
-Standardbibliotheken. `run.sh` setzt `LC_ALL=C.UTF-8`.
+Standardbibliotheken. `run.py` setzt `LC_ALL=C.UTF-8`.
 
 | Datei | Zweck |
 |---|---|
@@ -22,8 +22,8 @@ Standardbibliotheken. `run.sh` setzt `LC_ALL=C.UTF-8`.
 | `compare_api.py` | Zuordnung, Vergleich, Bericht; schreibt `api.json` (Tabelle der Gleichsetzungen im Kopf des Skripts) |
 | `known_differences.tsv` | bekannte Abweichungen mit Begründung (`bewusst`) bzw. ohne (`unklar`, wird gemeldet) |
 | `make_struktur.py` | erzeugt `STRUKTUR.md` (Repo-Wurzel) aus `api.json` |
-| `api.json` | zusammengeführter Stand (wird von `run.sh` neu geschrieben) |
-| `frozen/r.json`, `frozen/py.json`, `frozen/jl.json` | eingefrorene Schnittstelle je Sprache (nur `run.sh --freeze` schreibt sie) |
+| `api.json` | zusammengeführter Stand (wird von `run.py` neu geschrieben) |
+| `frozen/r.json`, `frozen/py.json`, `frozen/jl.json` | eingefrorene Schnittstelle je Sprache (nur `run.py --freeze` schreibt sie) |
 | `CHANGES.md` | ein Eintrag je Festschreibung von `frozen/` (Datum, was, warum) |
 | `out/` | Einzelauszüge je Sprache (nicht eingecheckt) |
 
@@ -73,7 +73,7 @@ Neu-Festschreiben. Von Hand: `Rscript tests/schnittstelle/api_r.R
    - Warum: Grund (Version, Entscheidung, Fehler)
    ```
 
-2. `tests/schnittstelle/run.sh --freeze` schreibt `frozen/r.json`,
+2. `tests/schnittstelle/run.py --freeze` schreibt `frozen/r.json`,
    `frozen/py.json` und `frozen/jl.json` neu (mit der Überschrift als
    `stand`) und zeigt die Unterschiede als Diff. Das Skript bricht ab und
    lässt `frozen/` unverändert, wenn `CHANGES.md` fehlt, der oberste Eintrag
@@ -81,6 +81,6 @@ Neu-Festschreiben. Von Hand: `Rscript tests/schnittstelle/api_r.R
    in `frozen/` steht (kein neuer Eintrag).
 3. `frozen/` und `CHANGES.md` zusammen einchecken.
 
-`run.sh --check` meldet außerdem einen `stand` in `frozen/`, der nicht als
+`run.py --check` meldet außerdem einen `stand` in `frozen/`, der nicht als
 Überschrift in `CHANGES.md` steht (von Hand geänderte Dateien).
 

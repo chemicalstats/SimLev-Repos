@@ -170,7 +170,7 @@ signal_analysis <- function(data, signal, target, horizon = 21L, step = NULL, bi
   if (length(unique(df$signal)) < 2L)
     stop(sprintf("signal_analysis: Signal ist an allen Stichtagen gleich (%g); keine Bereiche m\u00f6glich.", df$signal[1]))
   ppy <- (n - 1) / (as.numeric(d[n] - d[1]) / 365.25)
-  ann <- function(m) (1 + m)^(ppy / horizon) - 1
+  ann <- function(m) .pow1m(m, ppy / horizon)
   cutb <- function(v, k, br) {
     u <- sort(unique(v))
     br <- br %||% (if (length(u) <= k) c(-Inf, u[-1], Inf)       # wenige Werte (z. B. 0/1): ein Bereich je Wert
@@ -641,7 +641,7 @@ result_heatmap <- function(x, inflation = NULL, max_years = 30L) {
   if (ny < 1L) stop("result_heatmap: Die Reihe umfasst kein vollst\u00e4ndiges Kalenderjahr.")
   H <- min(max_years, ny)
   M <- matrix(NA_real_, ny, H, dimnames = list(years[-1], seq_len(H)))
-  for (i in seq_len(ny)) for (h in seq_len(min(H, ny - i + 1L))) M[i, h] <- (base[i + h] / base[i])^(1 / h) - 1
+  for (i in seq_len(ny)) for (h in seq_len(min(H, ny - i + 1L))) M[i, h] <- .cagr_q(base[i + h] / base[i], h)
   summ <- data.frame(years = seq_len(H), min = apply(M, 2, min, na.rm = TRUE), median = apply(M, 2, stats::median, na.rm = TRUE),
                      max = apply(M, 2, max, na.rm = TRUE), share_negative = apply(M, 2, function(v) mean(v < 0, na.rm = TRUE)),
                      n = colSums(!is.na(M)))

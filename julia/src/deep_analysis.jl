@@ -476,7 +476,7 @@ function _da_mwrr(s::DASeries)
     fl[isnan.(fl)] .= 0.0
     fi = [i for i in 2:n if fl[i] != 0]
     if isempty(fi)
-        return (w[1] > 0 && horizon > 0 && w[n] >= 0) ? SimLev.r_pow(w[n] / w[1], 1 / horizon) - 1 : _NA
+        return (w[1] > 0 && horizon > 0 && w[n] >= 0) ? SimLev._cagr_q(w[n] / w[1], horizon) : _NA
     end
     start = s.start_gross !== nothing ? s.start_gross : w[1]
     Float64(_xirr_rate(vcat(0.0, t[fi]), vcat(start, fl[fi]), w[n], horizon))
@@ -540,7 +540,7 @@ function _da_metrics(s::DASeries, rate, ppy, var_levels)
     r = Float64[vk[i] / vk[i-1] - 1 for i in 2:length(vk)]
     rfl = _da_rf(s.date, rate, kk, s.defl); rf = rfl["r"]
     yrs = (s.date[end] - s.date[1]) / 365.25
-    cagr = SimLev.r_pow(val[end] / val[1], 1 / yrs) - 1
+    cagr = SimLev._cagr_q(val[end] / val[1], yrs)
     vol = SimLev.r_sd(r) * sqrt(ppy)
     ex = r .- rf
     down = ex[ex .< 0]
@@ -620,7 +620,7 @@ function _da_benchmark(s::DASeries, b::DASeries, rate, ppy, cagr_s, cagr_b)
     te = SimLev.r_sd(rs .- rb) * sqrt(ppy)
     mrs = _period_returns(_da_period_values(common, vs, "month"))
     mrb = _period_returns(_da_period_values(common, vb, "month"))
-    gm(x) = SimLev.r_pow(SimLev.r_prod(1 .+ x), 1 / length(x)) - 1
+    gm(x) = SimLev._geo_ann(x, length(x))
     up = mrb .> 0; dn = mrb .< 0
     upc = any(up) ? gm(mrs[up]) / gm(mrb[up]) : _NA
     dnc = any(dn) ? gm(mrs[dn]) / gm(mrb[dn]) : _NA
@@ -679,14 +679,14 @@ function _da_rolling(s::DASeries, b, window_m, rf_cum)
         seg = v[k-w:k]
         r = _ratio_m1(seg)
         yrs = (d[k] - d[k-w]) / 365.25
-        cg = SimLev.r_pow(seg[end] / seg[1], 1 / yrs) - 1
+        cg = SimLev._cagr_q(seg[end] / seg[1], yrs)
         vo = SimLev.r_sd(r) * sqrt(12)
         mdd = _rmax(1 .- seg ./ _cummax(seg))
         bt = _NA; exr = _NA
         if vb !== nothing && !any(isnan, vb[k-w:k])
             sb = vb[k-w:k]; rb = _ratio_m1(sb)
             bt = _cov(r, rb) / SimLev.r_var(rb)
-            exr = cg - (SimLev.r_pow(sb[end] / sb[1], 1 / yrs) - 1)
+            exr = cg - SimLev._cagr_q(sb[end] / sb[1], yrs)
         end
         rf_w = SimLev.RLibm.expm1((Lk[k] - Lk[k-w]) / yrs)
         out[row, :] = [cg, vo, vo > 0 ? (cg - rf_w) / vo : _NA, mdd, bt, exr]

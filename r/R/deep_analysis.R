@@ -98,10 +98,21 @@
 #' Wertreihe auf Perioden-Endwerte reduzieren (letzter verfuegbarer Tag)
 #' @keywords internal
 #' @noRd
+.da_ym_last <- new.env(parent = emptyenv())   # zuletzt zerlegte Datumsreihe (je Reihe mehrfach gebraucht)
 .da_period_values <- function(date, value, unit) {
-  key <- switch(unit, month = format(date, "%Y-%m"), year = format(date, "%Y"))
-  last <- which(c(key[-1] != key[-length(key)], TRUE))
-  list(key = key[last], date = date[last], value = value[last],
+  # seit 1.5.1 Jahr/Monat ganzzahlig (je Datumsreihe einmal); format() nur fuer die Periodenenden
+  ym <- if (identical(.da_ym_last$date, date)) .da_ym_last$ym else {
+    .da_ym_last$date <- date; .da_ym_last$ym <- .date_ym(date) }
+  if (is.null(ym)) {
+    key <- switch(unit, month = format(date, "%Y-%m"), year = format(date, "%Y"))
+    last <- which(c(key[-1] != key[-length(key)], TRUE))
+    key <- key[last]
+  } else {
+    k <- if (unit == "month") ym$y * 12 + ym$m else ym$y
+    last <- which(c(k[-1] != k[-length(k)], TRUE))
+    key <- switch(unit, month = format(date[last], "%Y-%m"), year = format(date[last], "%Y"))
+  }
+  list(key = key, date = date[last], value = value[last],
        start_value = value[1], start_date = date[1])
 }
 
@@ -119,7 +130,7 @@
   fl <- as.numeric(s$flows); if (length(fl) != n) fl <- numeric(n); fl[is.na(fl)] <- 0
   fi <- which(seq_len(n) > 1L & fl != 0)
   if (!length(fi))
-    return(if (s$worth[1] > 0 && horizon > 0 && s$worth[n] >= 0) (s$worth[n] / s$worth[1])^(1 / horizon) - 1 else NA_real_)
+    return(if (s$worth[1] > 0 && horizon > 0 && s$worth[n] >= 0) .cagr_q(s$worth[n] / s$worth[1], horizon) else NA_real_)
   start <- if (length(s$start_gross)) s$start_gross else s$worth[1]   # Start brutto wie cagr der Engine
   .xirr_rate(c(0, t[fi]), c(start, fl[fi]), s$worth[n], horizon)
 }
@@ -157,7 +168,7 @@
   r <- vk[-1] / vk[-length(vk)] - 1                           # Renditen von echtem zu echtem Wert
   rfl <- .da_rf(s$date, rate, kk, s$defl); rf <- rfl$r
   yrs <- as.numeric(s$date[length(s$date)] - s$date[1]) / 365.25
-  cagr <- (s$value[length(s$value)] / s$value[1])^(1 / yrs) - 1
+  cagr <- .cagr_q(s$value[length(s$value)] / s$value[1], yrs)
   vol <- stats::sd(r) * sqrt(ppy)
   ex <- r - rf
   down <- ex[ex < 0]
@@ -221,7 +232,7 @@
   ms <- .da_period_values(common, vs, "month"); mb <- .da_period_values(common, vb, "month")
   mrs <- c(ms$value[1] / ms$start_value, ms$value[-1] / ms$value[-length(ms$value)]) - 1
   mrb <- c(mb$value[1] / mb$start_value, mb$value[-1] / mb$value[-length(mb$value)]) - 1
-  gm <- function(x) prod(1 + x)^(1 / length(x)) - 1
+  gm <- function(x) .geo_ann(x, length(x))
   up <- mrb > 0; dn <- mrb < 0
   upc <- if (any(up)) gm(mrs[up]) / gm(mrb[up]) else NA_real_
   dnc <- if (any(dn)) gm(mrs[dn]) / gm(mrb[dn]) else NA_real_
@@ -268,17 +279,18 @@
     vv <- ifelse(kb > 0, b$value[pmax(kb, 1L)], NA_real_)     # vor dem Benchmarkstart NA (Index 0 nicht verwerfen)
     vv[!is.finite(vv) | vv <= 0] <- NA; vv
   } else NULL
+  ds <- unclass(d) * 86400                                     # Tage wie difftime(): Sekunden / 86400 (seit 1.5.1 einmal)
   out <- t(vapply(idx, function(k) {
     seg <- v[(k - window_m):k]; r <- seg[-1] / seg[-length(seg)] - 1
-    yrs <- as.numeric(d[k] - d[k - window_m]) / 365.25
-    cg <- (seg[length(seg)] / seg[1])^(1 / yrs) - 1
+    yrs <- (ds[k] - ds[k - window_m]) / 86400 / 365.25
+    cg <- .cagr_q(seg[length(seg)] / seg[1], yrs)
     vo <- stats::sd(r) * sqrt(12)
     mdd <- max(1 - seg / cummax(seg))
     bt <- ex <- NA_real_
     if (!is.null(vb) && !anyNA(vb[(k - window_m):k])) {
       sb <- vb[(k - window_m):k]; rb <- sb[-1] / sb[-length(sb)] - 1
       bt <- stats::cov(r, rb) / stats::var(rb)
-      ex <- cg - ((sb[length(sb)] / sb[1])^(1 / yrs) - 1)
+      ex <- cg - .cagr_q(sb[length(sb)] / sb[1], yrs)
     }
     rf_w <- expm1((Lk[k] - Lk[k - window_m]) / yrs)           # Zins im Fenster p. a. (geometrisch)
     c(cagr = cg, volatility = vo, sharpe = if (isTRUE(vo > 0)) (cg - rf_w) / vo else NA_real_,
@@ -438,6 +450,7 @@
 #' @export
 result_analysis <- function(x, benchmark = NULL, risk_free = 0, rolling_years = 3,
                           var_levels = c(0.01, 0.05, 0.10), top_drawdowns = 10, inflation = NULL) {
+  on.exit(rm(list = ls(.da_ym_last), envir = .da_ym_last), add = TRUE)   # Datumszerlegung nicht ueber den Aufruf hinaus
   if (inherits(x, "SimLevResult") || is.data.frame(x)) x <- list(Strategie = x)
   if (!is.list(x) || !length(x)) stop("x muss ein SimLevResult, ein data.frame oder eine Liste davon sein.")
   if (is.null(names(x)) || any(names(x) == "")) names(x) <- paste0("S", seq_along(x))
@@ -494,9 +507,11 @@ result_analysis <- function(x, benchmark = NULL, risk_free = 0, rolling_years = 
                 numeric(length(common) - 1))
     cor_d <- stats::cor(R)
     dts <- as.Date(common, origin = "1970-01-01")
+    ymc <- .date_ym(dts)                                       # seit 1.5.1 ganzzahlig statt format() je Tag
+    nmon <- length(unique(if (is.null(ymc)) format(dts, "%Y-%m") else ymc$y * 12 + ymc$m))
     Rm <- vapply(ser, function(s) { m <- .da_period_values(dts, s$value[match(common, as.numeric(s$date))], "month")
                                     m$value[-1] / m$value[-length(m$value)] - 1 },
-                 numeric(length(unique(format(dts, "%Y-%m"))) - 1))
+                 numeric(nmon - 1))
     cor_m <- stats::cor(Rm)
   }
   structure(list(metrics = met, benchmark_metrics = bm, benchmark = bname, annual = annual,

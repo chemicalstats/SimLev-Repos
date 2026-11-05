@@ -30,18 +30,13 @@ from .deep_analysis import (
 )
 from .svg import (_AnaSvg, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_points, _ana_ramp, _ana_rect,
                   _ana_svg_done)
+from ._util import _num_col
+from ._util import _cagr_q, _pow1m
 
 __all__ = ["signal_analysis", "sharpe_test", "overfit_reality_check", "sharpe_min_track_record", "result_heatmap",
            "SimLevSignalAnalysis", "SimLevRealityCheck", "SimLevHeatmap"]
 
 _NAN = NA_REAL   # R-NA_real_
-
-
-def _num_col(v):
-    """``as.numeric`` einer Spalte; NA/NaN-Bitmuster numerischer Spalten bleiben erhalten (sonst NA)."""
-    if getattr(v, "dtype", None) is not None and v.dtype.kind == "f":
-        return v.to_numpy(dtype=np.float64, copy=True)
-    return pd.to_numeric(v, errors="coerce").to_numpy(dtype=np.float64, na_value=NA_REAL)
 
 
 def _is_num_vector(x):
@@ -342,7 +337,7 @@ def signal_analysis(data, signal, target, *, horizon=21, step=None, bins=5, brea
     ppy = (n - 1) / (float(d[-1] - d[0]) / 365.25)
 
     def ann(m):
-        return r_pow(1 + m, ppy / horizon) - 1
+        return _pow1m(m, ppy / horizon)
 
     codes, lv = _cut(sv, _cut_quantile_breaks(sv, float(np.ravel(bins)[0]) if breaks is None else 0, breaks))
     fw = df["forward"].to_numpy(dtype=np.float64)
@@ -931,7 +926,7 @@ def result_heatmap(x, *, inflation=None, max_years=30):
     M = np.full((ny, H), _NAN)
     for i in range(ny):
         for h in range(1, min(H, ny - i) + 1):
-            M[i, h - 1] = r_pow(base[i + h] / base[i], 1 / h) - 1
+            M[i, h - 1] = _cagr_q(base[i + h] / base[i], h)
     Mdf = pd.DataFrame(M, index=[str(y) for y in years[1:]], columns=[str(h) for h in range(1, H + 1)])
     mins, meds, maxs, neg, cnt = [], [], [], [], []
     for j in range(H):

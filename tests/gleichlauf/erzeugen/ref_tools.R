@@ -46,7 +46,8 @@
 # `names`, `dim`, `dimnames`, `class` werden mitgeschrieben.
 #
 # Umgebung:
-#   SIMLEV_FAELLE_DIR   Ausgabeordner D (Standard: tests/<gruppe>/faelle)
+#   SIMLEV_FAELLE_DIR   Ausgabeordner D (Standard: tests/<gruppe>/faelle, seit 1.6.2 nur mit SIMLEV_ERZEUGEN=1, das
+#                       tests/werkzeuge/erzeugen.py setzt; ohne beides bricht ref_schreiben() ab)
 #   SIMLEV_GEN_ALLE=1   zusätzlich alle Fälle nach D/alle/ (Gleichlauf, tests/werkzeuge/gleichlauf/run.py)
 #   SIMLEV_GEN_SUBSET=m nur die Fälle, deren Kennung (Modul/Fall) per Prüfsumme in eine 1/m-Stichprobe fällt
 #                       (deterministisch; m = 1 oder leer: alle); die übrigen werden nicht ausgewertet
@@ -338,6 +339,10 @@ ref_done <- function() {
 # SIMLEV_GEN_ALLE=1 zusätzlich alle Fälle flach nach D/alle/; Zufallsprüfungen (alle = TRUE) flach nach D/<bereich>
 ref_schreiben <- function() {
   d <- Sys.getenv("SIMLEV_FAELLE_DIR")
+  # seit 1.6.2: in den Katalog tests/ nur über den ausdrücklichen Befehl tests/werkzeuge/erzeugen.py (SIMLEV_ERZEUGEN=1);
+  # Gleichlauf und Zufallsprüfungen schreiben immer nach SIMLEV_FAELLE_DIR
+  if (!nzchar(d) && !identical(Sys.getenv("SIMLEV_ERZEUGEN"), "1"))
+    stop("Referenzfälle in tests/ nur über tests/werkzeuge/erzeugen.py (sonst SIMLEV_FAELLE_DIR setzen)", call. = FALSE)
   its <- .ref$items
   if (.ref$nur_alle) {
     f <- file.path(if (nzchar(d)) d else "tests", paste0(.ref$bereich, ".jsonl.gz"))

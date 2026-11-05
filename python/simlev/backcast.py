@@ -29,13 +29,14 @@ from ._r import libm as _libm
 from ._r.base import quiet_fp
 from ._r.fmt import NA_REAL
 from ._r.rlist import RList
-from ._r.rnum import r_cumsum, r_isna, r_mean, r_median, r_pow, r_sd, r_sum
+from ._r.rnum import r_cumsum, r_isna, r_mean, r_median, r_sd, r_sum
 from .data_prep import (
     _as_dates, _as_date_any, _as_frame, _as_numeric, _col, _date_str, _days, _is_named_numeric,
     _is_number, _match_arg, _named_parts, _names, _names_as_dates_optional, _nrow, _to_date,
     _which_min,
 )
 from ._util import _which_max
+from ._util import _pow1m_v
 
 __all__ = ["backcast_fit", "backcast", "SimLevBackcastFit", "SimLevBackcast", "summary_SimLevBackcastFit", "plot_SimLevBackcastFit", "plot_SimLevBackcast"]
 
@@ -249,13 +250,11 @@ def _bc_metric_table(err_mat, grid):
     return pd.Series(out)
 
 
-def _rpow_vec2(x, y):
+def _recycle2(x, y):
     x = np.asarray(x, dtype=np.float64)
     y = np.asarray(y, dtype=np.float64)
     n = max(x.size, y.size)
-    x = np.resize(x, n)
-    y = np.resize(y, n)
-    return np.array([r_pow(a, b) for a, b in zip(x, y)], dtype=np.float64)
+    return np.resize(x, n), np.resize(y, n)
 
 
 class _Prep(dict):
@@ -307,7 +306,7 @@ def _bc_prepare(data, product, index, ter, leverage, rate, fx, rate_lag,
     if rate_lag != 0:
         rate_v = _fill_na(_shift(rate_v, rate_lag), "locf")
     if accrual == "geometric":
-        ter_cost = _rpow_vec2(1 + ter_v / 100, dd / ter_basis) - 1
+        ter_cost = _pow1m_v(*_recycle2(ter_v / 100, dd / ter_basis))   # seit 1.6.2 expm1(log1p(x) * e) (P1)
     else:
         ter_cost = ter_v / 100 * dd / ter_basis
     fin = (1 - L) * rate_v / 100 * dd / rate_basis
@@ -392,18 +391,18 @@ def _bc_diagnostics(r, win, obs, dates):
     m = len(so)
     d_obs = np.asarray(dates, dtype=np.float64)[win][pos]
     yrs = float(d_obs[m - 1] - d_obs[0]) / 365.25
-    ret_s = _libm.exp(np.diff(so)) - 1
-    ret_p = _libm.exp(np.diff(po)) - 1
+    ret_s = _libm.expm1(np.diff(so))      # seit 1.6.2 expm1 (P1)
+    ret_p = _libm.expm1(np.diff(po))
     diffs = ret_s - ret_p
     per_year = (m - 1) / yrs if yrs > 0 else 252
-    rel = 1 - _libm.exp(so - po)
+    rel = 0 - _libm.expm1(so - po)        # 1 - sim/real (seit 1.6.2 genauer; 0 - : +0 wie bisher)
     out = RList()
     out["n_obs"] = m
     out["years"] = yrs
     out["start"] = _as_dates([d_obs[0]])
     out["end"] = _as_dates([d_obs[m - 1]])
     out["tracking_error"] = r_sd(diffs) * math.sqrt(per_year) * 100
-    out["tracking_difference"] = ((_libm.exp(so[m - 1] / yrs) - _libm.exp(po[m - 1] / yrs)) * 100) if yrs > 0 else _NAN
+    out["tracking_difference"] = ((_libm.expm1(so[m - 1] / yrs) - _libm.expm1(po[m - 1] / yrs)) * 100) if yrs > 0 else _NAN
     out["cagr_sim"] = _libm.expm1(so[m - 1] / yrs) * 100 if yrs > 0 else _NAN
     out["cagr_product"] = _libm.expm1(po[m - 1] / yrs) * 100 if yrs > 0 else _NAN
     out["final_deviation"] = _libm.expm1(so[m - 1] - po[m - 1]) * 100
@@ -738,7 +737,7 @@ def backcast_fit(data, product, index, *, ter=0, leverage=1, rate=None, fx=None,
                 p = dict(par0)
                 p[fit[0]] = float(g)
                 e = _bc_errors(_bc_model_returns(prep, p, model, rg)[rows], np.arange(len(rows)), ob, "level", 1)
-                cols.append(1 - _libm.exp(e))
+                cols.append(0 - _libm.expm1(e))
             err_mat = np.column_stack(cols) if cols else np.empty((len(ob["pos"]), 0))
             p = dict(par0)
             p[fit[0]] = best

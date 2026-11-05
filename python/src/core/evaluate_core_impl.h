@@ -170,6 +170,11 @@ static inline double rmin2(double a, double b) { return (a != a || b != b) ? nan
 static inline double rmax2(double a, double b) { return (a != a || b != b) ? nan2(a, b) : (b > a ? b : a); }
 // difftime(a, b, units = "days") fuer Datumswerte (as.POSIXct.Date: Tage * 86400)
 static inline double days_between(double a, double b) { return (a * 86400.0 - b * 86400.0) / 86400.0; }
+// q^(1/yrs) - 1 (seit 1.6.2): expm1(log(q) / yrs) für q >= 0 und endliche Jahre != 0, sonst wie bisher R's `^`
+// (gleich .cagr_q in R, _util._cagr_q in Python, cagr_q in Julia)
+static inline double cagr_q(double q, double yrs) {
+  return (q >= 0 && std::isfinite(yrs) && yrs != 0) ? std::expm1(std::log(q) / yrs) : sl_r_pow1(q, 1 / yrs) - 1;
+}
 // mean() bzw. sd() mit na.rm = TRUE
 static inline double mean_narm(const std::vector<double>& x) {
   std::vector<double> y;
@@ -347,7 +352,7 @@ inline int evaluate(const In& I, Result& R) {
   {
     const int c = land(gt0(start_worth), gt0(ann));
     if (c == 2) return abort(S_CAGR, 1);
-    R.cagr = c ? sl_r_pow1(simlev_div(stopp_worth, start_worth), 1 / ann) - 1 : NA;
+    R.cagr = c ? cagr_q(simlev_div(stopp_worth, start_worth), ann) : NA;   // seit 1.6.2 expm1(log(q) / Jahre)
   }
   // TTWROR: Periodenrenditen, an Zuflusstagen zum Zeitpunkt der Zahlung bewertet
   std::vector<double> pr;
@@ -389,7 +394,7 @@ inline int evaluate(const In& I, Result& R) {
   if (ann > 0) {
     std::vector<double> g1p(pr.size());
     for (std::size_t i = 0; i < pr.size(); i++) g1p[i] = 1 + pr[i];
-    R.ttwror = sl_r_pow1(sl_r_prod((int64_t) g1p.size(), g1p.data(), 1), 1 / ann) - 1;
+    R.ttwror = cagr_q(sl_r_prod((int64_t) g1p.size(), g1p.data(), 1), ann);   // seit 1.6.2 wie cagr
   } else {
     R.ttwror = NA;
   }

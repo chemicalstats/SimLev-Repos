@@ -91,7 +91,7 @@ _cov2cor(S) = _asmat(SimLev.RStats.cov2cor(_asmat(S)))
 
 _getf(o, k::String) = o isa AbstractDict ? o[k] : o isa NamedTuple ? getfield(o, Symbol(k)) : getproperty(o, Symbol(k))
 
-"`.sl_eigen_sym(M)` (Jacobi der C-Bibliothek slc) → (Werte absteigend, Vektoren)."
+"`.sl_eigen_sym(M)` (Householder + QL der C-Bibliothek slc, seit 1.6.2) → (Werte absteigend, Vektoren)."
 function _eigen_sym(M)
     e = SimLev.SLib.eigen_sym(_asmat(M))
     (_asvec(_getf(e, "values")), _asmat(_getf(e, "vectors")))

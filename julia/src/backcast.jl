@@ -245,7 +245,7 @@ function _bc_prepare(data, product, index, ter, leverage, rate, fx, rate_lag,
     rate_v = _resolve_series(rate, data, "rate")
     rate_lag != 0 && (rate_v = _fill_na(_shift(rate_v, rate_lag), "locf"))
     ter_cost = if accrual == "geometric"
-        Float64[SimLev.r_pow(1 + ter_v[i] / 100, dd[i] / ter_basis) - 1 for i in 1:n]
+        Float64[SimLev._pow1m(ter_v[i] / 100, dd[i] / ter_basis) for i in 1:n]   # seit 1.6.2 (P1)
     else
         Float64[ter_v[i] / 100 * dd[i] / ter_basis for i in 1:n]
     end
@@ -351,11 +351,11 @@ function _bc_diagnostics(r, win, obs, dates)
     m = length(so)
     d_obs = Float64.(dates[win])[pos]
     yrs = (d_obs[m] - d_obs[1]) / 365.25
-    ret_s = Float64[E.exp(so[i+1] - so[i]) - 1 for i in 1:m-1]
-    ret_p = Float64[E.exp(po[i+1] - po[i]) - 1 for i in 1:m-1]
+    ret_s = Float64[E.expm1(so[i+1] - so[i]) for i in 1:m-1]     # seit 1.6.2 expm1 (P1)
+    ret_p = Float64[E.expm1(po[i+1] - po[i]) for i in 1:m-1]
     diffs = ret_s .- ret_p
     per_year = yrs > 0 ? (m - 1) / yrs : 252.0
-    rel = Float64[1 - E.exp(so[i] - po[i]) for i in 1:m]
+    rel = Float64[0 - E.expm1(so[i] - po[i]) for i in 1:m]    # 1 - sim/real (seit 1.6.2 genauer; 0 - : +0)
     c = length(diffs) > 2 ? Float64(_stats().cor(ret_s, ret_p)) : NA
     out = RList()
     out["n_obs"] = m
@@ -363,7 +363,7 @@ function _bc_diagnostics(r, win, obs, dates)
     out["start"] = DP._date_of(d_obs[1])
     out["end"] = DP._date_of(d_obs[m])
     out["tracking_error"] = SimLev.r_sd(diffs) * sqrt(per_year) * 100
-    out["tracking_difference"] = yrs > 0 ? (E.exp(so[m] / yrs) - E.exp(po[m] / yrs)) * 100 : NA
+    out["tracking_difference"] = yrs > 0 ? (E.expm1(so[m] / yrs) - E.expm1(po[m] / yrs)) * 100 : NA
     out["cagr_sim"] = yrs > 0 ? E.expm1(so[m] / yrs) * 100 : NA
     out["cagr_product"] = yrs > 0 ? E.expm1(po[m] / yrs) * 100 : NA
     out["final_deviation"] = E.expm1(so[m] - po[m]) * 100
@@ -666,7 +666,7 @@ function backcast_fit(data, product, index; ter = 0, leverage = 1, rate = nothin
             for (j, g) in enumerate(grid)
                 p = copy(par0); p[fit[1]] = g
                 e = _bc_errors(_bc_model_returns(prep, p, model, rg)[rws], 1:length(rws), ob, "level", 1)
-                err_mat[:, j] .= [1 - _libm().exp(v) for v in e]
+                err_mat[:, j] .= [0 - _libm().expm1(v) for v in e]
             end
             p = copy(par0); p[fit[1]] = best
             return (par = p, value = minimum(vals), grid = RFrame("value" => copy(grid), "loss" => vals),

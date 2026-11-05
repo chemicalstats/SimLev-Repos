@@ -9,31 +9,37 @@
  *             log det A = 2 sum log r_ii; Konditionsprüfung min r_ii^2 / max r_ii^2 < 2^-52 als grobe,
  *             dokumentierte Abschätzung (Higham 2002, Kap. 10). Alle Summen in fester, aufsteigender
  *             Indexreihenfolge und kompensiert nach Neumaier (slc_la_internal.h).
- *             Symmetrische Eigenwerte: zyklisches Jacobi-Verfahren (Jacobi 1846; Golub/Van Loan
- *             2013, §8.5.2–8.5.3) zeilenweise (p < q); Drehung nach Alg. 8.5.1 mit
- *             tau = (a_qq - a_pp) / (2 a_pq), t = sign(tau) / (|tau| + sqrt(1 + tau^2)),
- *             c = 1 / sqrt(1 + t^2), s = t c; neue Diagonale a_pp - t a_pq bzw. a_qq + t a_pq,
- *             a_pq = 0 exakt. Schwellenstrategie (eigene Regel, nach dem Gedanken in §8.5.3): in
- *             den ersten drei Durchläufen wird a_pq übergangen, wenn |a_pq| kleiner ist als die
- *             Hälfte des quadratischen Mittels der Nebendiagonale zu Beginn des Durchlaufs. Ende,
- *             wenn off(A) <= 2^-53 ||A||_F (||A||_F der Eingabe); höchstens 60 Durchläufe. Gelesen
- *             wird das untere Dreieck. Ausgabe absteigend (stabil sortiert); Vorzeichen jedes
- *             Vektors: die betragsgrößte Komponente ist positiv, bei Gleichstand die erste.
- *             Speicher (seit 1.6.0): je Drehung nur die Spalten p und q (zusammenhängend, mit GCC/Clang in
- *             Vektoren zu je zwei Werten); die Zeilen trägt die Schleife blockweise nach (siehe sl_eigen_sym).
- *             Drehfolge und Rechnung je Element wie bis 1.5.2, Ergebnis bitgleich, bei n = 500 etwa 2,4-mal so schnell.
+ *             Symmetrische Eigenwerte (seit 1.6.2; bis 1.6.1 zyklisches Jacobi): Householder-
+ *             Tridiagonalisierung A = Q T Q' (Golub/Van Loan 2013, Alg. 8.3.1; Spiegelung mit Vorzeichen-
+ *             wahl ohne Auslöschung, Alg. 5.1.1), Q rückwärts aufgebaut (§5.1.6); Eigenwerte und -vektoren
+ *             von T mit implizitem QL bzw. QR und Wilkinson-Verschiebung (Bowdler, Martin, Reinsch,
+ *             Wilkinson 1968; Golub/Van Loan 2013, §8.3.3), die Drehungen auf die Spalten von Q. Abspaltung,
+ *             wenn e_m^2 <= u^2 |d_m| |d_m+1| + 2^-1022 (u = 2^-53); Richtung je unzerlegtem Block QL, wenn
+ *             |d| am Blockende nicht kleiner ist als am Anfang, sonst QR (Regel wie LAPACK dsteqr); höchstens
+ *             30 n Schritte. Einträge über 2^400 bzw. unter 2^-400 vorher mit einer Zweierpotenz skaliert
+ *             (exakt). Gelesen wird das untere Dreieck. Ausgabe absteigend (stabil sortiert); Vorzeichen
+ *             jedes Vektors: die betragsgrößte Komponente ist positiv, bei Gleichstand die erste (wie bis
+ *             1.6.1). Skalarprodukte in fester, aufsteigender Reihenfolge; Rang-2-Änderung symmetrisch
+ *             (v_i w_j + w_i v_j), die Matrix bleibt exakt symmetrisch. Gemessen gegen das Jacobi-Verfahren
+ *             bis 1.6.1 (n = 5 bis 500, Referenz in 113 Bit): orthogonaler (bei n = 500 8e-15 gegen 1,5e-13),
+ *             Residuum und Eigenwertfehler bezogen auf ||A|| ab n = 20 kleiner, darunter bis zum Faktor 2
+ *             größer (<= 1,6e-15); bei n = 500 etwa 12-mal so schnell; konvergiert auch bei vielfachen
+ *             Eigenwerten (Jacobi brach bei n >= 100 mit drei 50-fachen Eigenwerten ab). Relativ genauer
+ *             bleibt Jacobi bei sehr kleinen Eigenwerten stark abgestufter Matrizen (Demmel/Veselić 1992);
+ *             SimLev nutzt die Zerlegung nur mit absoluten Schranken (Korrektur auf positiv definit,
+ *             Schrittweite, Entrauschen von Korrelationen).
  * Quellen:    Golub, G. H., Van Loan, C. F. (2013). Matrix Computations, 4. Aufl., Johns Hopkins
- *             University Press, §3.1, §4.2, §4.3, §8.5.
- *             Jacobi, C. G. J. (1846). Über ein leichtes Verfahren, die in der Theorie der
- *             Säcularstörungen vorkommenden Gleichungen numerisch aufzulösen. Journal für die reine
- *             und angewandte Mathematik 30, 51–94.
+ *             University Press, §3.1, §4.2, §4.3, §5.1, §8.3.
+ *             Bowdler, H., Martin, R. S., Reinsch, C., Wilkinson, J. H. (1968). The QR and QL algorithms
+ *             for symmetric matrices. Numerische Mathematik 11, 293–306; auch in Wilkinson, J. H.,
+ *             Reinsch, C. (1971). Handbook for Automatic Computation II: Linear Algebra, Springer, II/3.
  *             Demmel, J., Veselić, K. (1992). Jacobi's method is more accurate than QR. SIAM Journal
- *             on Matrix Analysis and Applications 13(4), 1204–1245 (Begründung der Wahl).
+ *             on Matrix Analysis and Applications 13(4), 1204–1245 (Grenzen der Wahl).
  *             Higham, N. J. (2002). Accuracy and Stability of Numerical Algorithms, 2. Aufl., SIAM,
  *             Kap. 4 (kompensierte Summen), Kap. 8 (Dreieckssysteme), Kap. 10 (Cholesky).
  *             Neumaier, A. (1974). ZAMM 54(1), 39–51 (kompensierte Summe).
- * Konstanten: 2^-52, 2^-53 (Gleitkomma-Grenzen, slc_constants.h); 60 Durchläufe und Schwelle 1/2
- *             eigene Festlegung.
+ * Konstanten: 2^-52, 2^-53, 2^-1022 (Gleitkomma-Grenzen, slc_constants.h); 30 n Schritte, Skalierungsgrenzen
+ *             2^+-400 eigene Festlegung.
  * Reinraum:   geschrieben nur nach den genannten Quellen; kein Code und keine
  *             Koeffizienten aus R, Netlib, ACM- oder RSS-Algorithmen oder Paketen.
  * Prüforakel: R 4.3.3 chol, backsolve, solve, determinant, eigen(symmetric = TRUE) (nur
@@ -208,41 +214,13 @@ int sl_logdet_spd(sl_ctx *cx, int n, const double *A, double *logdet)
     return st;
 }
 
-/* ── Symmetrische Eigenwerte (zyklisches Jacobi) ── */
+/* ── Symmetrische Eigenwerte (Householder-Tridiagonalisierung, implizites QL/QR; seit 1.6.2) ── */
 
-/* Rotation zweier Spalten auf den Zeilen lo ... hi-1: x' = c x - s y, y' = s x + c y (seit 1.6.0 als eigene
- * Schleife über zusammenhängende Spalten, mit GCC/Clang in Vektoren zu je zwei Werten; dieselben Operationen
- * je Element, also dasselbe Ergebnis wie bis 1.5.2) */
+/* Rotation zweier Spalten auf den Zeilen lo ... hi-1: x' = c x - s y, y' = s x + c y (mit GCC/Clang in Vektoren zu je
+ * zwei Werten; dieselben Operationen je Element wie die Schleife, Ergebnis unabhängig davon) */
 #if defined(__GNUC__) || defined(__clang__)
 typedef double slc_v2d __attribute__((vector_size(16), aligned(8)));
 #endif
-/* Blockgröße der Umlagerungen im Jacobi-Verfahren */
-#define SLC_JB 32
-
-/* a[j, i] = a[i, j] für lo <= i < j < n (unteres Dreieck aus dem oberen, blockweise) */
-static void sym_lower(double *a, int n, int lo)
-{
-    int ib, jb, i, j, ie, je;
-    for (ib = lo; ib < n; ib += SLC_JB) {
-        ie = ib + SLC_JB < n ? ib + SLC_JB : n;
-        for (jb = ib; jb < n; jb += SLC_JB) {
-            je = jb + SLC_JB < n ? jb + SLC_JB : n;
-            for (j = jb; j < je; j++)
-                for (i = ib; i < ie && i < j; i++) a[IX(j, i, n)] = a[IX(i, j, n)];
-        }
-    }
-}
-
-/* Spalten x = q ... n-1: Zeilen s in [lo, q) aus Spalte s (Zeile x), blockweise */
-static void pre_gather(double *a, int n, int lo, int q)
-{
-    int xb, x, s, xe;
-    for (xb = q; xb < n; xb += SLC_JB) {
-        xe = xb + SLC_JB < n ? xb + SLC_JB : n;
-        for (s = lo; s < q; s++)
-            for (x = xb; x < xe; x++) a[IX(s, x, n)] = a[IX(x, s, n)];
-    }
-}
 
 static void rot_cols(double *__restrict x, double *__restrict y, int lo, int hi, double c, double s)
 {
@@ -262,26 +240,164 @@ static void rot_cols(double *__restrict x, double *__restrict y, int lo, int hi,
     }
 }
 
-/* off(A) = sqrt(sum_{p != q} a_pq^2) mit Skalierung (kein Über-/Unterlauf) */
-static double offnorm(int n, const double *a)
+/* y[0 .. m-1] += x[0 .. m-1] * t */
+static void axpy_(double *__restrict y, const double *__restrict x, int m, double t)
 {
-    double mx = 0.0, q;
-    slc_acc s;
-    int p, r;
-    for (r = 1; r < n; r++)
-        for (p = 0; p < r; p++)
-            if (fabs(a[IX(p, r, n)]) > mx) mx = fabs(a[IX(p, r, n)]);
-    if (mx == 0.0) return 0.0;
-    slc_acc_init(&s, 0.0);
-    for (r = 1; r < n; r++)
-        for (p = 0; p < r; p++) { q = a[IX(p, r, n)] / mx; slc_acc_add(&s, q * q); }
-    return mx * sqrt(2.0 * slc_acc_val(&s));
+    int r = 0;
+#if defined(__GNUC__) || defined(__clang__)
+    const slc_v2d vt = { t, t };
+    for (; r + 2 <= m; r += 2) {
+        slc_v2d a = *(const slc_v2d *) (x + r), b = *(const slc_v2d *) (y + r);
+        *(slc_v2d *) (y + r) = b + a * vt;
+    }
+#endif
+    for (; r < m; r++) y[r] += x[r] * t;
+}
+
+/* b[0 .. m-1] -= v * wj + w * vj (symmetrische Rang-2-Änderung je Spalte; v_i w_j + w_i v_j ist in i und j
+ * vertauschbar, die Matrix bleibt exakt symmetrisch) */
+static void rank2_col_(double *__restrict b, const double *__restrict v, const double *__restrict w, int m,
+                       double wj, double vj)
+{
+    int r = 0;
+#if defined(__GNUC__) || defined(__clang__)
+    const slc_v2d vw = { wj, wj }, vv = { vj, vj };
+    for (; r + 2 <= m; r += 2) {
+        slc_v2d a = *(const slc_v2d *) (v + r), c = *(const slc_v2d *) (w + r), d = *(const slc_v2d *) (b + r);
+        *(slc_v2d *) (b + r) = d - (a * vw + c * vv);
+    }
+#endif
+    for (; r < m; r++) b[r] -= v[r] * wj + w[r] * vj;
+}
+
+/* Skalarprodukt in fester, aufsteigender Reihenfolge */
+static double dot_(const double *x, const double *y, int m)
+{
+    double s = 0.0;
+    int r;
+    for (r = 0; r < m; r++) s += x[r] * y[r];
+    return s;
+}
+
+/* Householder-Tridiagonalisierung A = Q T Q' (Golub/Van Loan 2013, Alg. 8.3.1; Spiegelung wie Alg. 5.1.1 mit
+ * Vorzeichenwahl ohne Auslöschung): Schritt k spiegelt x = a[k+1:n, k] auf beta e_1, beta = -sign(x_1) ||x||,
+ * v = (1, x_2:/(x_1 - beta)), tau = (beta - x_1) / beta; Restblock B = a[k+1:, k+1:] wird H B H mit
+ * p = tau B v, w = p - (tau / 2) (p'v) v, B -= v w' + w v' (beide Dreiecke). Ergebnis: d (Diagonale),
+ * e (Nebendiagonale, e[n-1] = 0), v in a[k+2:, k], tau[k]. */
+static void tridiag_(double *a, int n, double *d, double *e, double *tau, double *p)
+{
+    int k, j, m;
+    for (k = 0; k + 2 < n; k++) {
+        double *x = a + IX(k + 1, k, n), alpha = x[0], xnorm, beta, scal, t, pv;
+        m = n - k - 1;
+        d[k] = a[IX(k, k, n)];
+        xnorm = slc_nrm2((int64_t) (m - 1), x + 1, 1);
+        if (xnorm == 0.0) { tau[k] = 0.0; e[k] = alpha; continue; }
+        beta = -copysign(hypot(alpha, xnorm), alpha);
+        t = (beta - alpha) / beta;
+        scal = alpha - beta;
+        for (j = 1; j < m; j++) x[j] /= scal;
+        x[0] = 1.0;
+        tau[k] = t;
+        e[k] = beta;
+        /* p = tau B v (Summe der Spalten, aufsteigend) */
+        for (j = 0; j < m; j++) p[j] = 0.0;
+        for (j = 0; j < m; j++) axpy_(p, a + IX(k + 1, k + 1 + j, n), m, x[j]);
+        for (j = 0; j < m; j++) p[j] *= t;
+        pv = dot_(p, x, m);
+        for (j = 0; j < m; j++) p[j] -= (0.5 * t * pv) * x[j];
+        for (j = 0; j < m; j++) rank2_col_(a + IX(k + 1, k + 1 + j, n), x, p, m, p[j], x[j]);
+        x[0] = beta;                                       /* v_1 = 1 steht nicht im Speicher */
+    }
+    if (n >= 2) { d[n - 2] = a[IX(n - 2, n - 2, n)]; e[n - 2] = a[IX(n - 1, n - 2, n)]; }
+    d[n - 1] = a[IX(n - 1, n - 1, n)];
+    e[n - 1] = 0.0;
+}
+
+/* Q = H_0 H_1 ... H_{n-3} rückwärts aufbauen (Golub/Van Loan 2013, §5.1.6): Q = I, für k = n-3, ..., 0
+ * Q[k+1:, k+1:] -= tau_k v (v' Q[k+1:, k+1:]) spaltenweise */
+static void form_q_(const double *a, int n, const double *tau, double *q)
+{
+    int k, i, j, m;
+    for (j = 0; j < n; j++) for (i = 0; i < n; i++) q[IX(i, j, n)] = (i == j) ? 1.0 : 0.0;
+    for (k = n - 3; k >= 0; k--) {
+        const double *x = a + IX(k + 1, k, n);              /* x[1:] = v[1:], v_0 = 1 */
+        m = n - k - 1;
+        if (tau[k] == 0.0) continue;
+        for (j = k + 1; j < n; j++) {
+            double *c = q + IX(k + 1, j, n), s = c[0] + dot_(x + 1, c + 1, m - 1);
+            s *= tau[k];
+            c[0] -= s;
+            axpy_(c + 1, x + 1, m - 1, -s);
+        }
+    }
+}
+
+/* Eigenwerte (und Rotation der Spalten von z) der symmetrischen Tridiagonalmatrix (d, e) mit implizitem QL bzw.
+ * QR und Wilkinson-Verschiebung (Bowdler, Martin, Reinsch, Wilkinson 1968; Golub/Van Loan 2013, §8.3.3, Alg.
+ * 8.3.2). Abspaltung, wenn e_m^2 <= u^2 |d_m| |d_m+1| + 2^-1022 (u = 2^-53; relatives Kriterium, genau auch
+ * für abgestufte Matrizen). Richtung je unzerlegtem Block wie LAPACK dsteqr: QL, wenn |d| am Ende nicht kleiner
+ * ist als am Anfang, sonst QR (= QL auf dem gespiegelten Block). Höchstens 30 n Schritte. */
+static int tql_(double *d, double *e, double *z, int n, int nz)
+{
+    const double u2 = SLC_TWO_M53 * SLC_TWO_M53, tiny = 0x1p-1022;
+    int lo = 0, hi, l, m, i, it = 0, rev, maxit = 30 * n;
+    while (lo < n) {
+        for (hi = lo; hi < n - 1; hi++) {
+            if (e[hi] * e[hi] <= (u2 * fabs(d[hi])) * fabs(d[hi + 1]) + tiny) { e[hi] = 0.0; break; }
+        }
+        if (hi == lo) { lo++; continue; }
+        rev = fabs(d[hi]) < fabs(d[lo]);
+        /* gespiegelte Indizes: Lage j des Blocks -> lo + hi - j; Nebendiagonale zwischen j und j + 1 */
+#define DJ(j) d[rev ? lo + hi - (j) : (j)]
+#define EJ(j) e[rev ? lo + hi - (j) - 1 : (j)]
+#define CJ(j) (rev ? lo + hi - (j) : (j))
+        for (l = lo; l <= hi; l++) {
+            for (;;) {
+                double g, r, s, c, p, f, b;
+                for (m = l; m < hi; m++)
+                    if (EJ(m) * EJ(m) <= (u2 * fabs(DJ(m))) * fabs(DJ(m + 1)) + tiny) { EJ(m) = 0.0; break; }
+                if (m == l) break;
+                if (++it > maxit) return 1;
+                g = (DJ(l + 1) - DJ(l)) / (2.0 * EJ(l));
+                r = hypot(g, 1.0);
+                g = DJ(m) - DJ(l) + EJ(l) / (g + copysign(r, g));
+                s = c = 1.0; p = 0.0;
+                for (i = m - 1; i >= l; i--) {
+                    f = s * EJ(i);
+                    b = c * EJ(i);
+                    r = hypot(f, g);
+                    if (i + 1 < m) EJ(i + 1) = r;           /* EJ(m) bleibt 0 (Abspaltung bzw. Blockende) */
+                    if (r == 0.0) {                         /* Unterlauf: Schritt abbrechen, neu abspalten */
+                        DJ(i + 1) -= p;
+                        break;
+                    }
+                    s = f / r;
+                    c = g / r;
+                    g = DJ(i + 1) - p;
+                    r = (DJ(i) - g) * s + 2.0 * c * b;
+                    p = s * r;
+                    DJ(i + 1) = g + p;
+                    g = c * r - b;
+                    if (z) rot_cols(z + IX(0, CJ(i), nz), z + IX(0, CJ(i + 1), nz), 0, nz, c, s);
+                }
+                if (r == 0.0 && i >= l) continue;
+                DJ(l) -= p;
+                EJ(l) = g;
+            }
+        }
+#undef DJ
+#undef EJ
+#undef CJ
+        lo = hi + 1;
+    }
+    return 0;
 }
 
 int sl_eigen_sym(sl_ctx *cx, int n, const double *A, int want_vectors, double *values, double *vectors)
 {
-    double *a = NULL, *v = NULL, *d = NULL, normA, off, thr, apq, tau, t, c, s, tmp, big;
-    int *idx = NULL, i, j, p, q, r, sweep, conv = 0, st = SL_OK, k, imax;
+    double *a = NULL, *v = NULL, *d = NULL, *e = NULL, *w = NULL, tmp, big, mx = 0.0, sc = 1.0;
+    int *idx = NULL, i, j, st = SL_OK, k, imax, ex;
     if (n < 0) return sl_fail(cx, SL_EARG, "eigen: negative Dimension");
     if (n == 0) return SL_OK;
     for (j = 0; j < n; j++)
@@ -289,54 +405,27 @@ int sl_eigen_sym(sl_ctx *cx, int n, const double *A, int want_vectors, double *v
             if (!isfinite(A[IX(i, j, n)])) return sl_fail(cx, SL_ENONFINITE, "eigen: NA/NaN/Inf in der Matrix");
     a = (double *) malloc(sizeof(double) * (size_t) n * (size_t) n);
     d = (double *) malloc(sizeof(double) * (size_t) n);
+    e = (double *) malloc(sizeof(double) * (size_t) n);
+    w = (double *) malloc(sizeof(double) * (size_t) n * 2);
     idx = (int *) malloc(sizeof(int) * (size_t) n);
     if (want_vectors) v = (double *) malloc(sizeof(double) * (size_t) n * (size_t) n);
-    if (!a || !d || !idx || (want_vectors && !v)) { st = sl_fail(cx, SL_ENOMEM, "eigen: kein Speicher"); goto done; }
+    if (!a || !d || !e || !w || !idx || (want_vectors && !v)) { st = sl_fail(cx, SL_ENOMEM, "eigen: kein Speicher"); goto done; }
+    /* unteres Dreieck in beide Dreiecke; sehr große bzw. kleine Einträge mit einer Zweierpotenz skalieren (exakt) */
     for (j = 0; j < n; j++)
-        for (i = j; i < n; i++) a[IX(i, j, n)] = a[IX(j, i, n)] = A[IX(i, j, n)];
-    if (v) for (j = 0; j < n; j++) for (i = 0; i < n; i++) v[IX(i, j, n)] = (i == j) ? 1.0 : 0.0;
-    normA = slc_nrm2((int64_t) n * n, a, 1);
-    for (sweep = 0; sweep < 60; sweep++) {
-        if (sweep > 0) sym_lower(a, n, 0);                 /* oberes Dreieck ist aktuell (siehe unten) */
-        off = offnorm(n, a);
-        if (off <= SLC_TWO_M53 * normA) { conv = 1; break; }
-        if (sl_interrupted(cx)) { st = SL_EINTR; goto done; }
-        thr = sweep < 3 ? 0.5 * off / sqrt((double) n * (double) (n - 1)) : 0.0;
-        /* Dieselben Drehungen in derselben Reihenfolge wie bis 1.5.2 (dort wurden je Drehung die Spalten und
-         * die Zeilen p und q geschrieben). Jetzt nur die Spalten: Zu Beginn der Schleife über q für festes p ist
-         * der Block [p, n)^2 symmetrisch und die Spalten x >= p sind in den Zeilen < p aktuell. Vor der Drehung
-         * (p, q) holt Spalte q die Zeilen s in (p, q) aus Spalte s (Zeile q; dort steht der Wert seit Schritt s),
-         * blockweise vorab für die folgenden Spalten; danach die Drehung der Spalten p und q. Nach der Schleife:
-         * Zeile p aus Spalte p (Spalten > p) und unteres Dreieck des Blocks (p, n)^2 aus dem oberen. */
-        for (p = 0; p < n - 1; p++) {
-            double *cp = a + IX(0, p, n);
-            int blk = p + 1;
-            for (q = p + 1; q < n; q++) {
-                double *cq = a + IX(0, q, n);
-                if (q - blk >= SLC_JB) { pre_gather(a, n, blk, q); blk = q; }
-                for (r = blk; r < q; r++) cq[r] = a[IX(q, r, n)];
-                apq = cp[q];                           /* = a[p, q] */
-                if (apq == 0.0 || fabs(apq) < thr) continue;
-                tau = (cq[q] - cp[p]) / (2.0 * apq);
-                if (fabs(tau) > 1e150) t = 0.5 / tau;
-                else t = (tau >= 0.0 ? 1.0 : -1.0) / (fabs(tau) + sqrt(1.0 + tau * tau));
-                c = 1.0 / sqrt(1.0 + t * t);
-                s = t * c;
-                rot_cols(cp, cq, 0, p, c, s);          /* Spalten p und q ohne die Zeilen p und q */
-                rot_cols(cp, cq, p + 1, q, c, s);
-                rot_cols(cp, cq, q + 1, n, c, s);
-                cp[p] -= t * apq;
-                cq[q] += t * apq;
-                cq[p] = cp[q] = 0.0;
-                if (v) rot_cols(v + IX(0, p, n), v + IX(0, q, n), 0, n, c, s);
-            }
-            for (r = p + 1; r < n; r++) a[IX(p, r, n)] = cp[r];
-            sym_lower(a, n, p + 1);
-        }
+        for (i = j; i < n; i++) { a[IX(i, j, n)] = a[IX(j, i, n)] = A[IX(i, j, n)]; if (fabs(A[IX(i, j, n)]) > mx) mx = fabs(A[IX(i, j, n)]); }
+    if (mx > 0x1p400 || (mx > 0.0 && mx < 0x1p-400)) {
+        (void) frexp(mx, &ex);
+        sc = ldexp(1.0, -ex);
+        for (j = 0; j < n; j++) for (i = 0; i < n; i++) a[IX(i, j, n)] *= sc;
     }
-    if (!conv) { st = sl_fail(cx, SL_ECONV, "eigen: Jacobi-Verfahren konvergiert nicht (60 Durchläufe)"); goto done; }
+    if (sl_interrupted(cx)) { st = SL_EINTR; goto done; }
+    tridiag_(a, n, d, e, w + n, w);
+    if (v) form_q_(a, n, w + n, v);
+    if (sl_interrupted(cx)) { st = SL_EINTR; goto done; }
+    if (tql_(d, e, v, n, n)) { st = sl_fail(cx, SL_ECONV, "eigen: QL-Verfahren konvergiert nicht (30 n Schritte)"); goto done; }
+    if (sc != 1.0) for (i = 0; i < n; i++) d[i] /= sc;
     /* absteigend, stabil (Einfügen) */
-    for (i = 0; i < n; i++) { d[i] = a[IX(i, i, n)]; idx[i] = i; }
+    for (i = 0; i < n; i++) idx[i] = i;
     for (i = 1; i < n; i++) {
         k = idx[i];
         for (j = i - 1; j >= 0 && d[idx[j]] < d[k]; j--) idx[j + 1] = idx[j];
@@ -354,6 +443,6 @@ int sl_eigen_sym(sl_ctx *cx, int n, const double *A, int want_vectors, double *v
         }
     }
 done:
-    free(a); free(v); free(d); free(idx);
+    free(a); free(v); free(d); free(e); free(w); free(idx);
     return st;
 }

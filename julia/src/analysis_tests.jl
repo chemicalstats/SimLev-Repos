@@ -274,7 +274,7 @@ function signal_analysis(data, signal, target; horizon = 21, step = nothing, bin
     length(sv) < 20 && DA._stop(DA._sp("signal_analysis: zu wenige Stichtage (%d, mindestens 20) mit Signal und Vorwärtsrendite.", length(sv)))
     length(unique(sv)) < 2 && DA._stop(DA._sp("signal_analysis: Signal ist an allen Stichtagen gleich (%g); keine Bereiche möglich.", sv[1]))
     ppy = (n - 1) / ((d[n] - d[1]) / 365.25)
-    ann(m) = SimLev.r_pow(1 + m, ppy / horizon) - 1
+    ann(m) = SimLev._pow1m(m, ppy / horizon)
     codes, lv = _cut(sv, _cut_breaks(sv, breaks === nothing ? Float64(DA._first(bins)) : 0.0, breaks))
     rows_ = Vector{Any}[]
     for (j, lab) in enumerate(lv)
@@ -838,7 +838,7 @@ function result_heatmap(x; inflation = nothing, max_years = 30)
     H = Int(min(max_years, ny))
     M = fill(_NA, ny, H)
     for i in 1:ny, h in 1:min(H, ny - i + 1)
-        M[i, h] = SimLev.r_pow(base[i+h] / base[i], 1 / h) - 1
+        M[i, h] = SimLev._cagr_q(base[i+h] / base[i], h)
     end
     Mn = SimLev.NamedMat(M; rownames = string.(years[2:end]), colnames = string.(1:H))
     mins = Float64[]; meds = Float64[]; maxs = Float64[]; neg = Float64[]; cnt = Float64[]

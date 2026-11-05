@@ -178,7 +178,7 @@
   rate_v <- .resolve_series(rate, data, "rate")
   if (rate_lag != 0L) rate_v <- .fill_na(.shift(rate_v, rate_lag), "locf")
 
-  ter_cost <- if (accrual == "geometric") (1 + ter_v / 100)^(dd / ter_basis) - 1 else ter_v / 100 * dd / ter_basis
+  ter_cost <- if (accrual == "geometric") .pow1m_v(ter_v / 100, dd / ter_basis) else ter_v / 100 * dd / ter_basis
   fin      <- (1 - leverage) * rate_v / 100 * dd / rate_basis
   m_lev    <- max(leverage - 1, 0) + max(-leverage, 0)
 
@@ -270,14 +270,14 @@
   m  <- length(so)
   d_obs <- dates[win][obs$pos]
   yrs <- as.numeric(d_obs[m] - d_obs[1]) / 365.25
-  ret_s <- exp(diff(so)) - 1; ret_p <- exp(diff(po)) - 1
+  ret_s <- expm1(diff(so)); ret_p <- expm1(diff(po))     # seit 1.6.2 expm1 (P1)
   diffs <- ret_s - ret_p
   per_year <- if (yrs > 0) (m - 1) / yrs else 252
-  rel <- 1 - exp(so - po)                                  # wie Skript: 1 - sim/real
+  rel <- 0 - expm1(so - po)                                # 1 - sim/real (seit 1.6.2 genauer, 0 - : +0 wie bisher)
   list(
     n_obs = m, years = yrs, start = d_obs[1], end = d_obs[m],
     tracking_error = stats::sd(diffs) * sqrt(per_year) * 100,       # % p. a.
-    tracking_difference = if (yrs > 0) (exp(so[m] / yrs) - exp(po[m] / yrs)) * 100 else NA_real_,
+    tracking_difference = if (yrs > 0) (expm1(so[m] / yrs) - expm1(po[m] / yrs)) * 100 else NA_real_,
     cagr_sim = if (yrs > 0) expm1(so[m] / yrs) * 100 else NA_real_,
     cagr_product = if (yrs > 0) expm1(po[m] / yrs) * 100 else NA_real_,
     final_deviation = expm1(so[m] - po[m]) * 100,
@@ -556,7 +556,7 @@ backcast_fit <- function(data, product, index,
       err_mat <- vapply(grid, function(g) {
         p <- par0; p[[fit]] <- g
         e <- .bc_errors(.bc_model_returns(prep, p, model, rg)[rows], seq_along(rows), ob, "level", 1L)
-        1 - exp(e)
+        0 - expm1(e)
       }, numeric(length(ob$pos)))
       p <- par0; p[[fit]] <- best
       return(list(par = p, value = min(vals), grid = data.frame(value = grid, loss = vals),

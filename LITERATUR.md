@@ -494,11 +494,17 @@ QR, Logit-IRLS, Matrixprodukt):
   der Säcularstörungen vorkommenden Gleichungen numerisch aufzulösen.
   *Journal für die reine und angewandte Mathematik* 30, 51–94.
   [doi:10.1515/crll.1846.30.51](https://doi.org/10.1515/crll.1846.30.51)
-  – Eigenwerte symmetrischer Matrizen.
+  – Eigenwerte symmetrischer Matrizen (bis 1.6.1; heute nur die kleinen
+  Zerlegungen der GARCH-Kerne).
 - Demmel, J., Veselić, K. (1992). Jacobi's method is more accurate than
   QR. *SIAM Journal on Matrix Analysis and Applications* 13(4), 1204–1245.
-  [doi:10.1137/0613074](https://doi.org/10.1137/0613074) – Begründung der
-  Wahl des Jacobi-Verfahrens.
+  [doi:10.1137/0613074](https://doi.org/10.1137/0613074) – Grenzen der
+  Wahl (bis 1.6.1 Jacobi-Verfahren; seit 1.6.2 Householder + QL).
+- Bowdler, H., Martin, R. S., Reinsch, C., Wilkinson, J. H. (1968). The QR
+  and QL algorithms for symmetric matrices. *Numerische Mathematik* 11,
+  293–306; auch in Wilkinson, J. H., Reinsch, C. (1971). *Handbook for
+  Automatic Computation II: Linear Algebra*, Springer, Beitrag II/3 –
+  implizites QL der symmetrischen Eigenzerlegung (seit 1.6.2).
 - Businger, P., Golub, G. H. (1965). Linear least squares solutions by
   Householder transformations. *Numerische Mathematik* 7(3), 269–276.
   [doi:10.1007/BF01436084](https://doi.org/10.1007/BF01436084) – QR mit

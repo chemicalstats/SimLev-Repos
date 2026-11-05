@@ -7,14 +7,75 @@ eine Fassung von ``match.arg`` (``_match_arg``, Prüfungen und Meldungen wie R; 
 from __future__ import annotations
 
 import importlib
+import math
 from typing import Any, Iterable
 
 import numpy as np
 import pandas as pd
 
 from ._r import fmt as _fmt
-from ._r.rnum import NA_REAL
+from ._r import libm as _libm
+from ._r.rnum import NA_REAL, r_pow, r_prod, r_sum
 
+
+# Genauere Renditeformeln (seit 1.6.2; gleicher Ausdruck wie .cagr_q, .pow1m, .pow1m_v, .geo_ret, .geo_ann, .log1mr2
+# in r/R/utils.R und im Kern): außerhalb der Bereiche, in denen die genaue Fassung dasselbe bedeutet, die bisherige Formel.
+def _cagr_q(q, yrs):
+    """``q^(1/yrs) - 1`` als ``expm1(log(q) / yrs)`` (q >= 0, yrs endlich und != 0)."""
+    with np.errstate(all="ignore"):
+        if q >= 0 and math.isfinite(yrs) and yrs != 0:
+            return _libm.expm1(_libm.log(q) / yrs)
+        return r_pow(q, np.float64(1) / yrs) - 1
+
+
+def _pow1m1(x, e):
+    if x >= -1 and math.isfinite(e) and e != 0:
+        return _libm.expm1(_libm.log1p(x) * e)
+    return r_pow(1 + x, e) - 1
+
+
+def _pow1m(x, e):
+    """``(1 + x)^e - 1`` als ``expm1(log1p(x) * e)`` (x >= -1, e endlich und != 0)."""
+    with np.errstate(all="ignore"):
+        return _pow1m1(x, e)
+
+
+def _pow1m_v(x, e):
+    """``_pow1m`` elementweise (gleich lange Felder)."""
+    x = np.asarray(x, dtype=np.float64)
+    e = np.asarray(e, dtype=np.float64)
+    with np.errstate(all="ignore"):
+        return np.array([_pow1m1(a, b) for a, b in zip(x.tolist(), e.tolist())], dtype=np.float64)
+
+
+def _geo_ok(x):
+    return not np.isnan(x).any() and bool(np.all(x >= -1))
+
+
+def _geo_ret(x):
+    """``prod(1 + x) - 1`` als ``expm1(sum(log1p(x)))`` (kein NA, alle x >= -1)."""
+    x = np.asarray(x, dtype=np.float64)
+    with np.errstate(all="ignore"):
+        if _geo_ok(x):
+            return _libm.expm1(r_sum(_libm.log1p(x)))
+        return r_prod(1 + x) - 1
+
+
+def _geo_ann(x, yrs):
+    """``prod(1 + x)^(1/yrs) - 1`` als ``expm1(sum(log1p(x)) / yrs)`` (wie ``_geo_ret`` und ``_cagr_q``)."""
+    x = np.asarray(x, dtype=np.float64)
+    with np.errstate(all="ignore"):
+        if _geo_ok(x) and math.isfinite(yrs) and yrs != 0:
+            return _libm.expm1(r_sum(_libm.log1p(x)) / yrs)
+        return r_pow(r_prod(1 + x), np.float64(1) / yrs) - 1
+
+
+def _log1mr2(r):
+    """``log(1 - r^2)``: ``log1p(-r^2)`` für r^2 < 1/2, sonst ``log((1 - r)(1 + r))`` (höchstens 1,4 ulp)."""
+    with np.errstate(all="ignore"):
+        if r * r < 0.5:
+            return _libm.log1p(-(r * r))
+        return _libm.log((1 - r) * (1 + r))
 
 def _ext(mod, name):
     """Funktion ``name`` aus ``simlev.<mod>`` (spät geladen; parallel portierte Module)."""

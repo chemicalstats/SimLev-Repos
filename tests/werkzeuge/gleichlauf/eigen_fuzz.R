@@ -1,5 +1,5 @@
-# tests/werkzeuge/gleichlauf/eigen_fuzz.R – Fuzz der symmetrischen Eigenzerlegung (seit 1.6.0 schneller bei gleicher
-# Drehfolge, core/slc_linalg.cpp sl_eigen_sym: nur Spalten drehen, Zeilen blockweise nachtragen).
+# tests/werkzeuge/gleichlauf/eigen_fuzz.R – Fuzz der symmetrischen Eigenzerlegung (core/slc_linalg.cpp sl_eigen_sym; seit 1.6.2
+# Householder-Tridiagonalisierung und implizites QL/QR, bis 1.6.1 zyklisches Jacobi).
 #
 #   LC_ALL=C.UTF-8 R_LIBS=<R-Bibliothek> SIMLEV_FAELLE_DIR=<ordner> Rscript tests/werkzeuge/gleichlauf/eigen_fuzz.R <n> <seed>
 #
@@ -9,8 +9,14 @@
 #   25 % portfolio_optimize (min_variance, max_diversification, risk_parity) mit 3 bis 60 Anlagen.
 # Warnungen und Fehler mit ihren Aufrufen (r_calls) wie sim_fuzz.R.
 #
-# Prüfung (tests/werkzeuge/gleichlauf/run.py, Schritt 5): Referenz aus R 1.5.2 (R_LIBS=/home/claude/rlib152), R neu mit
-# tests/werkzeuge/gleichlauf/sim_fuzz_cmp.py, Python und Julia mit vergleich.py/vergleich.jl gegen die Referenz.
+# Genauigkeit (seit 1.6.2, nur R): je direkter Zerlegung mit Vektoren gegen eine hochgenaue Rechnung mit Rmpfr (128 Bit)
+# (n <= 40: Spalten 1 und n; größere n: jeder zehnte Fall, Spalte 1): Residuum ||A v - lambda v|| / ||A||, Orthogonalität max |v_j' v_k - delta_jk|
+# (gegen alle Spalten k) und Fehler des Eigenwerts gegen den Rayleigh-Quotienten v'Av / v'v in 128 Bit, bezogen auf
+# ||A|| (= max |lambda|). Zeilen "Genauigkeit eigen ..." mit Median und Maximum; Ende 1, wenn ein Wert 10 n 2^-52
+# übersteigt (übliche Schranke n u der Householder-Verfahren mit Sicherheitsfaktor).
+#
+# Prüfung (tests/werkzeuge/gleichlauf/run.py, Schritt 5): abgelegte Referenz (seit 1.6.2 aus R 1.6.2, run.py --ref-erzeugen 162),
+# R neu mit tests/werkzeuge/gleichlauf/sim_fuzz_cmp.py, Python und Julia mit vergleich.py/vergleich.jl gegen die Referenz.
 source("tests/gleichlauf/erzeugen/ref_tools.R")
 args <- commandArgs(TRUE)
 N <- as.integer(args[1]); seed0 <- as.integer(if (length(args) >= 2) args[2] else 20261117)
@@ -30,6 +36,20 @@ fuzz_case <- function(id, r, py, jl, inputs) {
     message = function(m) invokeRestart("muffleMessage")),
     error = function(e) ec <<- dp(conditionCall(e)))))
   ref_case_extra(list(r_calls = list(warnings = as.list(wc), error = ec)))
+}
+suppressMessages(library(Rmpfr))
+ACC <- list()
+eig_acc <- function(M, e, cols) {                    # Spalten cols gegen 128 Bit (Rmpfr)
+  n <- nrow(M); nA <- max(abs(e$values)); if (nA == 0) nA <- 1
+  Am <- mpfr(M, 128L); Vm <- mpfr(e$vectors, 128L)
+  for (j in unique(cols)) {
+    v <- Vm[, j]
+    Av <- colSums(Am * v)                            # (A v)_i = sum_k A_ki v_k (A symmetrisch)
+    res <- asNumeric(sqrt(sum((Av - e$values[j] * v)^2))) / nA
+    lam <- asNumeric(abs(sum(v * Av) / sum(v * v) - e$values[j])) / nA
+    G <- asNumeric(colSums(Vm * v)); G[j] <- G[j] - 1
+    ACC[[length(ACC) + 1L]] <<- c(n = n, res = res, orth = max(abs(G)), lam = lam)
+  }
 }
 q_r <- function(x) sprintf("c(%s)", paste0("'", x, "'", collapse = ", "))
 q_p <- function(x) sprintf("[%s]", paste0("'", x, "'", collapse = ", "))
@@ -55,6 +75,8 @@ for (kk in seq_len(N)) {
       py = sprintf("result = simlev._lib.eigen_sym(M, only_values=%s)", if (ov) "True" else "False"),
       jl = sprintf("result = SL.SLib.eigen_sym(M; only_values = %s)", tolower(ov)),
       inputs = list(M = M))
+    if (!ov && .ref_in_subset(sprintf("e%05d", kk)) && (n <= 40 || kk %% 10 == 1))    # Genauigkeit (eigene Zufallsfolge)
+      eig_acc(M, SimLev:::.sl_eigen_sym(M), if (n <= 40) c(1, n) else 1)
   } else {
     k <- pick(c(3, 10, 25, 60)); nm <- sprintf("a%02d", seq_len(k))
     d <- data.frame(date = seq.Date(as.Date("2005-01-03") + sample(0:3000, 1), by = "day", length.out = pick(c(700, 1500))))
@@ -69,3 +91,10 @@ for (kk in seq_len(N)) {
   }
 }
 ref_done(); ref_schreiben()
+if (length(ACC)) {
+  a <- do.call(rbind, ACC); lim <- 10 * a[, "n"] * 2^-52
+  for (k in c("res", "orth", "lam"))
+    cat(sprintf("Genauigkeit eigen %-4s %5d Spalten: Median %.2e, max %.2e, max / (n u) %.2f%s\n", k, nrow(a), stats::median(a[, k]),
+                max(a[, k]), max(a[, k] / (a[, "n"] * 2^-52)), if (any(a[, k] > lim)) sprintf("  ÜBER 10 n u: %d", sum(a[, k] > lim)) else ""))
+  if (any(a[, c("res", "orth", "lam")] > lim)) quit(status = 1)
+}

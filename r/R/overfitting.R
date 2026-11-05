@@ -36,7 +36,7 @@
   if (!is.null(dates) && frequency != "day") {
     key <- if (frequency == "week") format(dates, "%G-%V") else format(dates, "%Y-%m")
     grp <- factor(key, levels = unique(key))
-    R <- exp(rowsum(log1p(R), grp, reorder = FALSE)) - 1
+    R <- expm1(rowsum(log1p(R), grp, reorder = FALSE))      # seit 1.6.2 expm1 (P2)
     dates <- dates[c(key[-1] != key[-length(key)], TRUE)]
   }
   ok <- stats::complete.cases(R)
@@ -500,8 +500,8 @@ overfit_walk_forward <- function(x, train = 5, test = 1, step = test, anchored =
     win[[length(win) + 1L]] <- data.frame(train_start = d[is_rows[1]], test_start = d[oos_rows[1]], test_end = d[oos_rows[length(oos_rows)]],
                                           id = rr$cols[j], is_metric = m_is[j], oos_metric = m_oos[j],
                                           oos_rank = (rank(m_oos)[j] - 0.5) / length(m_oos),
-                                          oos_return = prod(1 + R[oos_rows, j]) - 1,
-                                          oos_average = mean(apply(1 + R[oos_rows, , drop = FALSE], 2, prod) - 1))
+                                          oos_return = .geo_ret(R[oos_rows, j]),
+                                          oos_average = mean(apply(R[oos_rows, , drop = FALSE], 2, .geo_ret)))
     k <- k + 1L
   }
   if (!length(win)) stop("Historie zu kurz f\u00fcr ein Trainings- und Testfenster.")
@@ -520,7 +520,7 @@ overfit_walk_forward <- function(x, train = 5, test = 1, step = test, anchored =
   # Zeit nur ueber die Testtage (Luecken zwischen Fenstern zaehlen nicht): Summe der
   # Abstaende jedes Testtags zum Vortag, ohne den ersten Testtag
   yrs <- sum(as.numeric(d[rows[-1]] - d[rows[-1] - 1L])) / 365.25
-  ann <- function(r) prod(1 + r)^(1 / yrs) - 1
+  ann <- function(r) .geo_ann(r, yrs)
   series <- data.frame(date = d[rows], walk_forward = cumprod(1 + wf), hindsight = cumprod(1 + span[, hind]),
                        average = cumprod(1 + rowMeans(span)))
   smry <- c(cagr_walk_forward = ann(wf), cagr_hindsight = ann(span[, hind]), cagr_average = ann(rowMeans(span)),

@@ -12,8 +12,8 @@
 # Fälle laufen ohne Steuer und Splits. Am Ende drei feste Zusatzfälle (x00001–x00003): Abbruch von
 # .perform_asset_split (ratio <= 0), weil der Kurs nach einem Split ohne Bestand auf 0 unterläuft.
 #
-# Prüfung (tests/werkzeuge/gleichlauf/run.sh, Schritt 5): die Referenz erzeugt R 1.3.0 (R_LIBS=/home/claude/rlib130 bzw.
-# SIMLEV_FUZZ_REFLIB), das aktuelle R schreibt dieselben Fälle in einen zweiten Ordner; Vergleich R neu gegen
+# Prüfung (tests/werkzeuge/gleichlauf/run.py, Schritt 5): die Referenz erzeugt einmal je Versionsschritt die Vorversion
+# (seit 1.6.2: R 1.6.2, run.py --ref-erzeugen 162), das aktuelle R schreibt dieselben Fälle in einen Ordner; Vergleich R neu gegen
 # die Referenz mit tests/werkzeuge/gleichlauf/sim_fuzz_cmp.py, Python und Julia mit vergleich.py/vergleich.jl gegen die Referenz.
 source("tests/gleichlauf/erzeugen/ref_tools.R")
 source("tests/gleichlauf/erzeugen/blocks_from_flat.R")

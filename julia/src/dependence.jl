@@ -523,13 +523,12 @@ end
 # Profil-Likelihood in _cop_fit_t; x2 = x^2, y2 = y^2, B = (nu + 1)/2 (log1p(x^2/nu) + log1p(y^2/nu)).
 function _cop_g_ll(r, x, y, x2, y2)
     r2 = r * r
-    c = -0.5 * SimLev.RLibm.log(1 - r2)
-    c .- (r2 .* (x2 .+ y2) .- 2 .* r .* x .* y) ./ (2 * (1 - r2))
+    c = -0.5 * SimLev._log1mr2(r)
+    c .- (r2 .* (x2 .+ y2) .- 2 .* r .* x .* y) ./ (2 * ((1 - r) * (1 + r)))
 end
 function _cop_t_ll(r, nu, c0, x, y, x2, y2, B)
-    r2 = r * r
-    c = c0 - 0.5 * SimLev.RLibm.log(1 - r2)
-    c .- (nu + 2) / 2 .* SimLev.RLibm.log1p.((x2 .- 2 .* r .* x .* y .+ y2) ./ (nu * (1 - r2))) .+ B
+    c = c0 - 0.5 * SimLev._log1mr2(r)
+    c .- (nu + 2) / 2 .* SimLev.RLibm.log1p.((x2 .- 2 .* r .* x .* y .+ y2) ./ (nu * ((1 - r) * (1 + r)))) .+ B
 end
 "c0(nu) = lgamma((nu+2)/2) + lgamma(nu/2) - 2 lgamma((nu+1)/2); für nu > 64 asymptotisch (`.cop_t_c0`)."
 function _cop_t_c0(nu)

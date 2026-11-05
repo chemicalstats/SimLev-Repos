@@ -155,16 +155,16 @@
 }
 
 # Teile der Log-Dichten der Gauss- und t-Copula (je Beobachtung), auch für die Profil-Likelihood in
-# .cop_fit_t; x2 = x^2, y2 = y^2, B = (nu + 1)/2 (log1p(x^2/nu) + log1p(y^2/nu)) vorab. Gleiche Rechenfolge wie
-# bisher in .cop_ll.
+# .cop_fit_t; x2 = x^2, y2 = y^2, B = (nu + 1)/2 (log1p(x^2/nu) + log1p(y^2/nu)) vorab. Seit 1.6.2 log(1 - r^2) als
+# .log1mr2(r) und 1 - r^2 als (1 - r)(1 + r) (genau auch fuer r -> 1), sonst gleiche Rechenfolge wie bisher in .cop_ll.
 #' @keywords internal
 #' @noRd
-.cop_g_ll <- function(r, x, y, x2, y2) -0.5 * log(1 - r^2) - (r^2 * (x2 + y2) - 2 * r * x * y) / (2 * (1 - r^2))
+.cop_g_ll <- function(r, x, y, x2, y2) -0.5 * .log1mr2(r) - (r^2 * (x2 + y2) - 2 * r * x * y) / (2 * ((1 - r) * (1 + r)))
 
 #' @keywords internal
 #' @noRd
 .cop_t_ll <- function(r, nu, c0, x, y, x2, y2, B)
-  c0 - 0.5 * log(1 - r^2) - (nu + 2) / 2 * log1p((x2 - 2 * r * x * y + y2) / (nu * (1 - r^2))) + B
+  c0 - 0.5 * .log1mr2(r) - (nu + 2) / 2 * log1p((x2 - 2 * r * x * y + y2) / (nu * ((1 - r) * (1 + r)))) + B
 
 # c0(nu) = lgamma((nu + 2)/2) + lgamma(nu/2) - 2 lgamma((nu + 1)/2) der t-Copula. Für nu > 64 löschen sich die
 # lgamma-Werte aus (bei nu = 1e8 ist die Differenz reines Rundungsrauschen), daher dort die Stirling-Reihe mit

@@ -6,14 +6,14 @@ Installieren, `R CMD check`, `pip wheel`, `Pkg.build`/`using` laufen ohne diesen
 
 ```
 tests/
-  run.sh, run.R, run.jl, conftest.py, pytest.ini   Einstiege (je Sprache einer für alle Gruppen)
+  run.py, run.R, run.jl, conftest.py, pytest.ini   Einstiege (je Sprache einer für alle Gruppen)
   methodik/       Rechnet SimLev richtig? Steuerrecht, Tarif, Engine, Entnahme (FIFO), Kennzahlen, C-Bibliothek (R)
   gleichlauf/     Rechnen Python und Julia wie R? Szenarien und Tabellen (faelle/), ihre Generatoren (erzeugen/)
   fehler/         Richtige Meldung bei falscher Eingabe, NA und Grenzfällen (faelle/; dazu R-eigene Prüfungen)
   ausgabe/        print, summary, Grafik (faelle/; R-Basisgrafik, SVG in Python und Julia)
   schnittstelle/  Bleibt die öffentliche API stabil? (eingefrorener Stand frozen/, Abgleich der drei Sprachen)
   werkzeuge/      keine Tests: Gleichlauf-Lauf mit Zufalls- und Breitenprüfungen (gleichlauf/, zufall/, breite/), Laufzeit (bench/),
-                  Doku-Prüfungen (doku/), Neuerzeugen (erzeugen.sh)
+                  Doku-Prüfungen (doku/), Neuerzeugen (erzeugen.py)
   lib/            gemeinsame Hilfen der Python- und Julia-Tests (Lesen und Vergleich der Referenzfälle; Python: faelle.py, reftree.py)
 ```
 
@@ -23,16 +23,18 @@ Aus der Repo-Wurzel, mit `LC_ALL=C.UTF-8` (die Referenzen entstanden unter C.UTF
 
 | Was | Befehl | Laufzeit |
 |---|---|---|
-| alles | `tests/run.sh` (Sprachen `r python julia`, Gruppen wählbar, z. B. `tests/run.sh python fehler`; `--bauen` baut vorher) | rund 8 min |
+| alles | `tests/run.py` (Sprachen `r python julia`, Gruppen wählbar, z. B. `tests/run.py python fehler`; `--bauen` baut vorher) | rund 8 min |
 | R | `R_LIBS=<Bibliothek mit SimLev> Rscript tests/run.R [methodik fehler ausgabe schnittstelle]` | 15 s |
 | Python | `python3 -m pytest tests` bzw. `tests/<gruppe>` (C-Erweiterung an Ort und Stelle gebaut oder `simlev` installiert) | 51 s |
 | Julia | `julia --project=julia tests/run.jl [gleichlauf fehler ausgabe schnittstelle]` (nach `Pkg.build()`) | 7 min (Übersetzen je Aufruf) |
-| Schnittstelle (drei Sprachen) | `tests/schnittstelle/run.sh --check` (`--freeze` nur mit Eintrag in `tests/schnittstelle/CHANGES.md`) | 1 min |
-| Gleichlauf-Lauf | `tests/werkzeuge/gleichlauf/run.sh --quick` bzw. `--full` (baut selbst; `--no-build`) | 8 bzw. 40 min |
-| Fälle neu erzeugen | `R_LIBS=<…> tests/werkzeuge/erzeugen.sh [bereich …]` | 32 s |
-| Laufzeitmessung | `R_LIBS=<…> tests/werkzeuge/bench/run.sh` | siehe `werkzeuge/bench/README.md` |
+| Schnittstelle (drei Sprachen) | `tests/schnittstelle/run.py --check` (`--freeze` nur mit Eintrag in `tests/schnittstelle/CHANGES.md`) | 1 min |
+| Gleichlauf-Lauf | `tests/werkzeuge/gleichlauf/run.py --quick` bzw. `--full` (baut selbst; `--no-build`; seit 1.6.2 zwei Schritte gleichzeitig, `--jobs N`) | 8 bzw. 40 min |
+| Referenz der Vorversion | `tests/werkzeuge/gleichlauf/run.py --ref-erzeugen 162` (einmal je Versionsschritt; siehe unten) | rund 30 min |
+| Fälle neu erzeugen | `R_LIBS=<…> tests/werkzeuge/erzeugen.py [bereich …]` | 32 s |
+| Laufzeitmessung | `R_LIBS=<…> tests/werkzeuge/bench/run.py` | siehe `werkzeuge/bench/README.md` |
 
-Voraussetzungen: R mit `testthat` und `jsonlite`; Python mit `pytest`, `numpy`, `pandas`; Julia 1.10 oder neuer
+Voraussetzungen: R mit `testthat` und `jsonlite`; Python 3.10 oder neuer mit `pytest`, `numpy`, `pandas` (die Ablaufskripte
+`run.py`, `schnittstelle/run.py`, `werkzeuge/erzeugen.py`, `werkzeuge/{gleichlauf,bench}/run.py` nur die Standardbibliothek); Julia 1.10 oder neuer
 (`Test`, `Logging`, `Zlib_jll` sind Standardbibliotheken). Die Bitgleichheit setzt Linux auf x86-64 voraus.
 Umgebung: `SIMLEV_FAELLE_DIR` (anderer Ordner der Referenzfälle, darin `<gruppe>/<bereich>.jsonl.gz`),
 `SIMLEV_LAX_NA=1` (NA = NaN), `SIMLEV_STRICT_ZERO=0` (−0 = +0).
@@ -40,7 +42,7 @@ Umgebung: `SIMLEV_FAELLE_DIR` (anderer Ordner der Referenzfälle, darin `<gruppe
 Je Sprache läuft jede Gruppe, wo das sinnvoll ist: `methodik` nur in R (Handrechnungen und Gesetzesbeispiele gegen die
 R-Fassung; Python und Julia sind über die Szenarien von `gleichlauf` an R gebunden, die dieselben Steuer-, Tarif- und
 Engine-Wege rechnen), `gleichlauf`, `fehler`, `ausgabe` mit R als Herkunft der Erwartung in Python und Julia (R prüft
-sie, indem `werkzeuge/erzeugen.sh` sie Byte für Byte gleich neu erzeugt), `schnittstelle` in allen drei.
+sie, indem `werkzeuge/erzeugen.py` sie Byte für Byte gleich neu erzeugt), `schnittstelle` in allen drei.
 
 Laufzeit je Gruppe (1.4.2, einzeln aufgerufen, Sekunden; R je Gruppe und Julia je Gruppe aus früheren Messungen auf
 demselben Rechner, Julia übersetzt je Aufruf neu):
@@ -78,7 +80,9 @@ Python und Julia rechnen jeden Test nach und müssen Bit für Bit gleich sein (N
 Konsolen- und Druckausgabe, Warnungen, Fehlermeldung). Lange Daten sind auf den kürzesten Ausschnitt gekürzt, der die
 Zeilenabdeckung hält (im Generator markiert mit `# bis 1.4.1 …`). Die bisherigen Einzelfälle der Bereiche (bis 1.4.1 hier
 erzeugt) prüft als Breitenprüfung nur noch der Gleichlauf-Lauf (`tests/werkzeuge/breite/<bereich>.R`, nichts abgelegt).
-Die Grafiktests finden die Objekte über `lib/faelle.fall("<modul>/<Kennung>")` (Tabellenzeile oder Teil).
+Die Grafiktests finden die Objekte über `lib/faelle.fall("<modul>/<Kennung>")` (Tabellenzeile oder Teil) und rechnen
+jedes Szenario je Testlauf nur einmal (Zwischenspeicher in `ausgabe/test_grafik.py` bzw. `ausgabe/grafik.jl`; die Teile
+eines Szenarios teilen sich den Lauf, die Tests lesen die Objekte nur).
 
 ### gleichlauf (Rechnen Python und Julia wie R?)
 
@@ -295,25 +299,42 @@ Test)". Die erwarteten Werte sind dieselben wie vor der Umstellung auf Tabellen 
 | Test | Zweck | Tests | Herkunft |
 |---|---|---|---|
 | `schnittstelle/test-api.R`, `test_api.py`, `api.jl` | Funktionen, Argumente, Standardwerte, Klassen je Sprache gegen `frozen/{r,py,jl}.json` | je 1 | eingefrorener Stand |
-| `schnittstelle/run.sh --check` | Abgleich der drei Sprachen (`api.json`, erklärte Abweichungen `known_differences.tsv`) | 1 | eingefrorener Stand |
+| `schnittstelle/run.py --check` | Abgleich der drei Sprachen (`api.json`, erklärte Abweichungen `known_differences.tsv`) | 1 | eingefrorener Stand |
 
 ### werkzeuge (keine Tests)
 
 | Werkzeug | Zweck |
 |---|---|
-| `werkzeuge/gleichlauf/run.sh` | erzeugt mit dem aktuellen R **alle** Fälle der Generatoren neu (`SIMLEV_GEN_ALLE=1`; `--quick` jede 20. Kennung) und vergleicht Python und Julia (`vergleich.{py,jl}`); `--full` zusätzlich `faelle_diff.py` (Katalog Byte für Byte gleich); `exporte.py` zählt die Exporte ohne Fall |
+| `werkzeuge/gleichlauf/run.py` | erzeugt mit dem aktuellen R **alle** Fälle der Generatoren neu (`SIMLEV_GEN_ALLE=1`; `--quick` jede 20. Kennung) und vergleicht Python und Julia (`vergleich.{py,jl}`); `--full` zusätzlich `faelle_diff.py` (Katalog Byte für Byte gleich); Zufallsprüfungen `FUZZ_REF` gegen die abgelegte Referenz der Vorversion (nur lesen, seit 1.6.2); `exporte.py` zählt die Exporte ohne Fall |
 | `werkzeuge/zufall/engine_faelle.R`, `engine_stress.R`, `packen.py` | Zufallsprüfung der Engine (500 bzw. 1000 Fälle im Engine-Format), nur im Gleichlauf-Lauf, nichts abgelegt |
 | `werkzeuge/breite/<bereich>.R` | Breitenprüfung: die bisherigen Einzelfälle der neun Bereiche mit Szenarien (bis 1.4.1 Generatoren des Katalogs, gleiche Zufallsfolge), nur im Gleichlauf-Lauf (`breite_<bereich>`), nichts abgelegt |
-| `werkzeuge/gleichlauf/*_fuzz.R` | Zufallsprüfungen (Datumskern, slc_rbase, Tarifkern, simulation, Vorbereitung, Kennzahlen); R bzw. R 1.3.0 als Orakel |
+| `werkzeuge/gleichlauf/*_fuzz.R` | Zufallsprüfungen (Datumskern, slc_rbase, Tarifkern mit dem aktuellen R als Orakel; die Familien aus `FUZZ_REF` in `run.py` gegen die abgelegte Referenz der Vorversion, seit 1.6.2 R 1.6.2; `prec_fuzz.R` und `eigen_fuzz.R` zusätzlich Genauigkeit gegen Rmpfr) |
 | `werkzeuge/bench/` | Laufzeitmessung (siehe `README.md` dort) |
-| `werkzeuge/doku/beispiele.sh` (mit `beispiele.py`) | führt alle Codeblöcke der READMEs (Wurzel, `r/`, `python/`, `julia/`), der R-Vignette und der Tutorials in R, Python und Julia aus und vergleicht die Ausgabeblöcke (`--write` schreibt sie neu) |
+| `werkzeuge/doku/beispiele.py` | führt alle Codeblöcke der READMEs (Wurzel, `r/`, `python/`, `julia/`), der R-Vignette und der Tutorials in R, Python und Julia aus und vergleicht die Ausgabeblöcke (`--write` schreibt sie neu) |
 | `werkzeuge/doku/verweise.py` | prüft relative Verweise, Bildpfade und Anker in Markdown-Dateien |
 | `werkzeuge/doku/bilder.py` | erzeugt die Abbildungen des Haupt-README in `r/man/figures/` aus echten R-Läufen |
-| `werkzeuge/erzeugen.sh` | Katalog mit dem installierten R neu erzeugen |
+| `werkzeuge/erzeugen.py` | Katalog mit dem installierten R neu erzeugen |
 
 ## Neu erzeugen
 
-Ändert sich ein Ergebnis von R gewollt: `tests/werkzeuge/erzeugen.sh` (oder nur die betroffenen Bereiche), dann
+Referenzen entstehen nur auf ausdrücklichen Befehl, einmal je Versionsschritt (seit 1.6.2); Gleichlauf und Tests lesen
+sie nur:
+
+- **Katalog** `tests/<gruppe>/faelle`: nur `tests/werkzeuge/erzeugen.py` schreibt ihn (setzt `SIMLEV_ERZEUGEN=1`;
+  `ref_tools.R` bricht sonst ohne `SIMLEV_FAELLE_DIR` ab). Der Gleichlauf-Lauf erzeugt die Fälle mit dem neuen R in
+  seinen Arbeitsordner und vergleicht sie mit dem Katalog (`--full`: `faelle_diff.py`), Python und Julia rechnen alle
+  Fälle der Generatoren nach (der Katalog ist nur eine Auswahl, daher gegen die frisch erzeugten Fälle).
+- **Referenzausgaben der Zufallsprüfungen** (`FUZZ_REF`): `tests/werkzeuge/gleichlauf/run.py --ref-erzeugen K [name …]`
+  rechnet sie mit der eingefrorenen R-Bibliothek der Vorversion (`REFLIBS`, seit 1.6.2 nur `162` = R 1.6.2 in
+  `/home/claude/rlib162`, Umgebung `SIMLEV_FUZZ_REFLIB162`) für `--quick` und `--full` und legt sie unter
+  `/home/claude/gleichlauf_ref/K` ab (Umgebung `SIMLEV_GLEICHLAUF_REF`): `quick/`, `full/` und `manifest.json` mit
+  Fassung, R-Version, je Familie Startwert, Fallzahl und SHA-256 der Datei und des Skripts. Vorhandene Einträge bleiben
+  (`--ersetzen` überschreibt). Der übliche Lauf vergleicht R neu, Python und Julia mit dieser Ablage; fehlt sie oder
+  passen Fallzahl, Startwert oder Prüfsumme nicht, scheitert der Schritt mit Meldung und Befehl zum Erzeugen.
+- **Versionsschritt:** neue Fassung als eigene R-Bibliothek bauen und einfrieren, `REFLIBS` auf diese eine Fassung
+  umstellen (ältere Einträge entfallen), Referenz in `FUZZ_REF` anpassen, `run.py --ref-erzeugen K`.
+
+Ändert sich ein Ergebnis von R gewollt: `tests/werkzeuge/erzeugen.py` (oder nur die betroffenen Bereiche), dann
 `git diff --stat tests` und die Suiten; Ursache in `r/NEWS.md`. Neue Szenarien bzw. Tabellenzeilen: im Generator des
 Bereichs mit `ref_init(modul, gruppe = …)` und `SZ(id, prueft, teile = list(<name> = teil(r, py, jl)))` bzw.
 `TB(id, prueft, zeilen = list(zeile(z, r, py, jl)))` (`szenario_tools.R`; engine: `ref_case()`/`ref_tabelle()`)

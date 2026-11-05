@@ -35,6 +35,7 @@ from ._r.rnum import r_colmeans, r_colsums, r_rowmeans, r_mean, r_mean_int, r_me
 from .svg import (_jl_unique, _res_abline, _res_fig, _res_finish, _res_hline, _res_legend, _res_line, _res_panel,
                   _res_points, _res_range, _res_rect, _res_vline)
 from ._util import _match_arg
+from ._util import _geo_ann, _geo_ret
 from ._util import _which_max
 from ._util import _ext
 from ._util import _fmt_vec
@@ -243,7 +244,7 @@ def _of_returns_np(x, frequency, dates=None, risk_free=0):
         pos = {k: i for i, k in enumerate(lev)}
         codes = np.array([pos[k] for k in key], dtype=np.int64)
         S = _rowsum(_log1p(R), codes, len(lev))
-        R = _libm.exp(S) - 1.0
+        R = _libm.expm1(S)                    # seit 1.6.2 expm1 (P2)
         rn = lev
         last = np.array([key[i] != key[i + 1] for i in range(len(key) - 1)] + [True], dtype=bool)
         dates = dates[last]
@@ -893,8 +894,8 @@ def overfit_walk_forward(x, *, train=5, test=1, step=None, anchored=False,
         win.append({"train_start": d[is_rows[0]], "test_start": d[oos_rows[0]], "test_end": d[oos_rows[-1]],
                     "id": int(rr.cols[j]), "is_metric": float(m_is[j]), "oos_metric": float(m_oos[j]),
                     "oos_rank": (_rank_avg(m_oos)[j] - 0.5) / m_oos.size,
-                    "oos_return": r_prod(1 + Ro[:, j]) - 1,
-                    "oos_average": r_mean(np.array([r_prod(1 + Ro[:, c]) for c in range(Ro.shape[1])]) - 1)})
+                    "oos_return": _geo_ret(Ro[:, j]),
+                    "oos_average": r_mean(np.array([_geo_ret(Ro[:, c]) for c in range(Ro.shape[1])]))})
         k += 1
     if not win:
         raise ValueError("Historie zu kurz für ein Trainings- und Testfenster.")
@@ -927,7 +928,7 @@ def overfit_walk_forward(x, *, train=5, test=1, step=None, anchored=False,
     yrs = r_sum(gaps) / 365.25
 
     def ann(r):
-        return r_pow(r_prod(1 + r), 1 / yrs) - 1
+        return _geo_ann(r, yrs)
     avg = _rowmeans(span)
     series = pd.DataFrame({"date": d[rows], "walk_forward": r_cumprod(1 + wf), "hindsight": r_cumprod(1 + span[:, hind]),
                            "average": r_cumprod(1 + avg)})

@@ -8,6 +8,7 @@
  *               Gauss: -1/2 log(1 - r^2) - (r^2 (x^2 + y^2) - 2 r x y) / (2 (1 - r^2)),
  *               t: c0 - 1/2 log(1 - r^2) - (nu + 2)/2 log1p((x^2 - 2 r x y + y^2) / (nu (1 - r^2)))
  *                  + (nu + 1)/2 (log1p(x^2/nu) + log1p(y^2/nu)),
+ *             seit 1.6.2 log(1 - r^2) als log1p(-r^2) (r^2 < 1/2) bzw. log((1 - r)(1 + r)) und 1 - r^2 als (1 - r)(1 + r),
  *             c0 = lgamma((nu + 2)/2) + lgamma(nu/2) - 2 lgamma((nu + 1)/2), für nu > 64 die Stirling-Reihe mit
  *             Bernoulli-Polynomen 1/(4a) - 1/(96 a^3) + 1/(320 a^5) - 17/(7168 a^7) + 31/(9216 a^9), a = nu/2.
  *             Mehrdimensional (scenario_copula): nu = argmin -ll(nu) mit Brent auf [lower, upper],
@@ -86,6 +87,12 @@ static double cop_c0_(sl_ctx *cx, double nu)
     return ((((31.0 / 9216 * ia2 - 17.0 / 7168) * ia2 + 1.0 / 320) * ia2 - 1.0 / 96) * ia2 + 1.0 / 4) / a;
 }
 
+/* log(1 - r^2) seit 1.6.2: log1p(-r^2) für r^2 < 1/2, sonst log((1 - r)(1 + r)); höchstens 1,4 ulp (wie .log1mr2) */
+static double log1mr2_(double r)
+{
+    return (r * r < 0.5) ? log1p(-(r * r)) : log((1 - r) * (1 + r));
+}
+
 /* g(th) = -sum(ll(tanh th)), nicht endlich -> 1e10 */
 static double cop_g_(double th, void *p)
 {
@@ -96,13 +103,13 @@ static double cop_g_(double th, void *p)
     int64_t i;
     if (C->gauss) {
         const double r2 = r * r;
-        A = -0.5 * log(1 - r * r);
-        D = 2 * (1 - r * r);
+        A = -0.5 * log1mr2_(r);
+        D = 2 * ((1 - r) * (1 + r));
         for (i = 0; i < n; i++) C->terms[i] = A - (r2 * (x2[i] + y2[i]) - tr * x[i] * y[i]) / D;
     } else {
         const double E = (C->nu + 2) / 2;
-        A = C->c0 - 0.5 * log(1 - r * r);
-        D = C->nu * (1 - r * r);
+        A = C->c0 - 0.5 * log1mr2_(r);
+        D = C->nu * ((1 - r) * (1 + r));
         for (i = 0; i < n; i++) C->terms[i] = A - E * log1p((x2[i] - tr * x[i] * y[i] + y2[i]) / D) + C->B[i];
     }
     s = sl_r_sum(n, C->terms, 0);

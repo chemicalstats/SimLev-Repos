@@ -2,7 +2,7 @@
  * kleinste Quadrate und Logit-IRLS, Stineman-Interpolation, kubischer Glättungsspline, Kerndichte
  *
  * Verfahren:  siehe die Kerndateien slc_linalg.cpp (Cholesky, Band-Cholesky, Dreieckslöser,
- *             SPD-Löser, symmetrische Eigenwerte per Jacobi), slc_matmul.cpp (Matrixprodukt),
+ *             SPD-Löser, symmetrische Eigenwerte per Householder + QL), slc_matmul.cpp (Matrixprodukt),
  *             slc_lsq.cpp (Householder-QR mit begrenzter Spaltenpivotisierung, Logit-IRLS),
  *             slc_stine.cpp (Stineman), slc_spline.cpp (Reinsch-Spline mit GCV), slc_kde.cpp
  *             (Gauß-Kerndichte); jede nennt ihre Quellen.

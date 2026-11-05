@@ -36,6 +36,7 @@ from ._r.rlist import RList
 from ._r.stats_sort import _bincode as _st_bincode   # C-Kern sl_r_bincode (seit 1.6.0)
 from ._r.rnum import r_colmeans, r_mean, r_pow, r_pow_vec, r_sd, r_sum
 from ._util import _match_arg
+from ._util import _log1mr2
 from .data_prep import _to_date
 from ._util import _stats
 
@@ -564,14 +565,13 @@ def _cop_ll(family, par, u, v):
 def _cop_g_ll(r, x, y, x2, y2):
     r2 = r * r
     with np.errstate(all="ignore"):
-        return -0.5 * _libm.log(1 - r2) - (r2 * (x2 + y2) - 2 * r * x * y) / (2 * (1 - r2))
+        return -0.5 * _log1mr2(r) - (r2 * (x2 + y2) - 2 * r * x * y) / (2 * ((1 - r) * (1 + r)))
 
 
 def _cop_t_ll(r, nu, c0, x, y, x2, y2, B):
-    r2 = r * r
     with np.errstate(all="ignore"):
-        c = c0 - 0.5 * _libm.log(1 - r2)
-        return c - (nu + 2) / 2 * _libm.log1p((x2 - 2 * r * x * y + y2) / (nu * (1 - r2))) + B
+        c = c0 - 0.5 * _log1mr2(r)
+        return c - (nu + 2) / 2 * _libm.log1p((x2 - 2 * r * x * y + y2) / (nu * ((1 - r) * (1 + r)))) + B
 
 
 def _cop_t_c0(nu):

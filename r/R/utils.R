@@ -10,6 +10,44 @@
 #' @noRd
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
+# Genauere Renditeformeln (seit 1.6.2; gleicher Ausdruck in Python _util und Julia util.jl, im Kern evaluate_core_impl.h
+# und slc_tcop.cpp). Ausserhalb der Bereiche, in denen die genaue Fassung dasselbe bedeutet, die bisherige Formel.
+#   .cagr_q(q, yrs)   q^(1/yrs) - 1 als expm1(log(q) / yrs) (q >= 0, yrs endlich und != 0)        (P3)
+#   .pow1m(x, e)      (1 + x)^e - 1 als expm1(log1p(x) * e) (x >= -1, e endlich und != 0)         (P3)
+#   .pow1m_v(x, e)    dasselbe elementweise (TER geometrisch im Backcast)                          (P1)
+#   .geo_ret(x)       prod(1 + x) - 1 als expm1(sum(log1p(x))) (kein NA, alle x >= -1)            (P2)
+#   .geo_ann(x, yrs)  prod(1 + x)^(1/yrs) - 1 als expm1(sum(log1p(x)) / yrs) (wie beide oben)     (P3)
+#   .log1mr2(r)       log(1 - r^2): log1p(-r^2) fuer r^2 < 1/2, sonst log((1 - r)(1 + r)); Fehler <= 1,4 ulp (P4)
+#' @keywords internal
+#' @noRd
+.cagr_q <- function(q, yrs)
+  if (isTRUE(q >= 0) && isTRUE(is.finite(yrs) && yrs != 0)) expm1(log(q) / yrs) else q^(1 / yrs) - 1
+#' @keywords internal
+#' @noRd
+.pow1m <- function(x, e)
+  if (isTRUE(x >= -1) && isTRUE(is.finite(e) && e != 0)) expm1(log1p(x) * e) else (1 + x)^e - 1
+#' @keywords internal
+#' @noRd
+.pow1m_v <- function(x, e) {                                   # elementweise .pow1m (Recycling wie (1 + x)^e)
+  out <- (1 + x)^e - 1
+  n <- length(out)
+  if (!n) return(out)
+  x <- rep_len(as.double(x), n); e <- rep_len(as.double(e), n)
+  ok <- !is.na(x) & !is.na(e) & x >= -1 & is.finite(e) & e != 0
+  out[ok] <- expm1(log1p(x[ok]) * e[ok])
+  out
+}
+#' @keywords internal
+#' @noRd
+.geo_ret <- function(x) if (!anyNA(x) && all(x >= -1)) expm1(sum(log1p(x))) else prod(1 + x) - 1
+#' @keywords internal
+#' @noRd
+.geo_ann <- function(x, yrs)
+  if (!anyNA(x) && all(x >= -1) && isTRUE(is.finite(yrs) && yrs != 0)) expm1(sum(log1p(x)) / yrs) else prod(1 + x)^(1 / yrs) - 1
+#' @keywords internal
+#' @noRd
+.log1mr2 <- function(r) if (isTRUE(r * r < 0.5)) log1p(-(r * r)) else log((1 - r) * (1 + r))
+
 # Deutsche Monatsabkuerzungen fuer Grafikachsen (month.abb ist englisch)
 .monate_kurz <- c("Jan", "Feb", "M\u00e4r", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez")
 

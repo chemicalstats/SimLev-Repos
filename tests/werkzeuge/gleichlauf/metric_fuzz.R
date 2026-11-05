@@ -16,7 +16,7 @@
 #     Umwandlungswarnung), fehlende Spalte (Fehler nach den Warnungen der Renditen), NULL, Vektor.
 # Warnungen und Fehler mit ihren Aufrufen (r_calls) wie sim_fuzz.R.
 #
-# Prüfung (tests/werkzeuge/gleichlauf/run.sh, Schritt 5): Referenz aus R 1.3.0 (R_LIBS=/home/claude/rlib130), R neu mit
+# Prüfung (tests/werkzeuge/gleichlauf/run.py, Schritt 5): abgelegte Referenz (seit 1.6.2 aus R 1.6.2, run.py --ref-erzeugen 162), R neu mit
 # tests/werkzeuge/gleichlauf/sim_fuzz_cmp.py, Python und Julia mit vergleich.py/vergleich.jl gegen die Referenz.
 source("tests/gleichlauf/erzeugen/ref_tools.R")
 source("tests/gleichlauf/erzeugen/blocks_from_flat.R")

@@ -24,12 +24,13 @@ from ._r import fmt as _fmt
 from ._r import libm as _libm
 from ._r.fmt import NA_REAL
 from ._r.rlist import RList
-from ._r.rnum import r_colmeans, r_cummax, r_cumsum, r_mean, r_mean_int, r_pow, r_prod, r_sd, r_var
+from ._r.rnum import r_colmeans, r_cummax, r_cumsum, r_mean, r_mean_int, r_pow, r_sd, r_var
 # Grafik: Bausteine des Stils Analysegrafiken und Zahlen wie in Julia aus svg.py
 from .svg import (_MONATE_KURZ, _AnaSvg, _ana_hline, _ana_legend, _ana_lines, _ana_panel, _ana_ramp, _ana_rect,
                   _ana_svg_done, _ana_text, _ana_year_ticks, _jl_max, _jl_maximum, _jl_min, _jl_minimum)
 from ._util import _dates, _days, _match_arg
 from ._util import _ext
+from ._util import _cagr_q, _geo_ann
 
 __all__ = ["result_analysis", "SimLevAnalysis"]
 
@@ -382,7 +383,7 @@ def _da_mwrr(s):
     fi = np.flatnonzero((np.arange(n) > 0) & (fl != 0))
     if not fi.size:
         if w[0] > 0 and horizon > 0 and w[-1] >= 0:
-            return r_pow(w[-1] / w[0], 1 / horizon) - 1
+            return _cagr_q(w[-1] / w[0], horizon)
         return _NA
     sg = s.get("start_gross")
     start = sg if sg is not None else float(w[0])
@@ -463,7 +464,7 @@ def _da_metrics(s, rate, ppy, var_levels):
     rfl = _da_rf(s["date"], rate, kk, s.get("defl"))
     rf = rfl["r"]
     yrs = float(s["date"][-1] - s["date"][0]) / 365.25
-    cagr = r_pow(val[-1] / val[0], 1 / yrs) - 1
+    cagr = _cagr_q(val[-1] / val[0], yrs)
     vol = r_sd(r) * math.sqrt(ppy)
     ex = r - rf
     down = ex[ex < 0]
@@ -566,7 +567,7 @@ def _da_benchmark(s, b, rate, ppy, cagr_s, cagr_b):
     mrb = _period_returns(_da_period_values(common, vb, "month"))
 
     def gm(x):
-        return r_pow(r_prod(1 + x), 1 / len(x)) - 1
+        return _geo_ann(x, len(x))
 
     up = mrb > 0
     dn = mrb < 0
@@ -631,7 +632,7 @@ def _da_rolling(s, b, window_m, rf_cum):
         seg = v[k - w:k + 1]
         r = seg[1:] / seg[:-1] - 1
         yrs = float(d[k] - d[k - w]) / 365.25
-        cg = r_pow(seg[-1] / seg[0], 1 / yrs) - 1
+        cg = _cagr_q(seg[-1] / seg[0], yrs)
         vo = r_sd(r) * math.sqrt(12)
         mdd = float(np.max(1 - seg / r_cummax(seg)))
         bt = ex = _NA
@@ -644,7 +645,7 @@ def _da_rolling(s, b, window_m, rf_cum):
             else:                                  # Varianz 0: Inf bzw. NaN wie R (seit 1.5.1; bisher ZeroDivisionError)
                 with np.errstate(divide="ignore", invalid="ignore"):
                     bt = float(np.float64(cv) / np.float64(vr))
-            ex = cg - (r_pow(sb[-1] / sb[0], 1 / yrs) - 1)
+            ex = cg - _cagr_q(sb[-1] / sb[0], yrs)
         rf_w = float(_libm.expm1((Lk[k] - Lk[k - w]) / yrs))
         rows.append([cg, vo, (cg - rf_w) / vo if vo > 0 else _NA, mdd, bt, ex])
     out = np.array(rows, dtype=np.float64).reshape(-1, 6)

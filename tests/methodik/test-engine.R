@@ -1801,8 +1801,11 @@ test_that("ohne Zufluesse unver\u00e4ndert (alte Formeln bitgleich)", {
     pruef(expect_false(r$external_flows),
           quelle = "Handrechnung (Herleitung im Test)"),
     ident(r$cagr,
-          (w[n] / w[1])^(1 / yrs) - 1,
-          quelle = "Handrechnung (Herleitung im Test)"))
+          expm1(log(w[n] / w[1]) / yrs),                   # seit 1.6.2 genauer als (w[n] / w[1])^(1 / yrs) - 1
+          quelle = "Handrechnung (Herleitung im Test)"),
+    wert(r$cagr,
+         (w[n] / w[1])^(1 / yrs) - 1,
+         quelle = "Formel bis 1.6.1", tol = 1e-14))
   rm <- cummax(w)
   tabelle("ohne Zufluesse unverändert (alte Formeln bitgleich)",
     ident(r$drawdowns,

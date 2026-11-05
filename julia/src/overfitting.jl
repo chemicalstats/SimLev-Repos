@@ -267,7 +267,7 @@ function _rr(x, frequency, dates = nothing, risk_free = 0)
         pos = Dict(k => i for (i, k) in enumerate(lev))
         codes = Int[pos[k] for k in key]
         S = _rowsum(_log1p_w(R), codes, length(lev))
-        R = SL.RLibm.exp.(S) .- 1.0
+        R = SL.RLibm.expm1.(S)                 # seit 1.6.2 expm1 (P2)
         rn = lev
         last = vcat([key[i] != key[i+1] for i in 1:length(key)-1], true)
         dts = dts[last]
@@ -815,8 +815,8 @@ function overfit_walk_forward(x; train = 5, test = 1, step = nothing, anchored::
         push!(win, (train_start = d[is_rows[1]], test_start = d[oos_rows[1]], test_end = d[oos_rows[end]],
                     id = rr.cols[j], is_metric = m_is[j], oos_metric = m_oos[j],
                     oos_rank = (_rank_avg(m_oos)[j] - 0.5) / length(m_oos),
-                    oos_return = SL.r_prod(1 .+ Ro[:, j]) - 1,
-                    oos_average = SL.r_mean(Float64[SL.r_prod(1 .+ Ro[:, c]) for c in 1:size(Ro, 2)] .- 1)))
+                    oos_return = SL._geo_ret(Ro[:, j]),
+                    oos_average = SL.r_mean(Float64[SL._geo_ret(Ro[:, c]) for c in 1:size(Ro, 2)])))
         k += 1
     end
     isempty(win) && error("Historie zu kurz für ein Trainings- und Testfenster.")
@@ -845,7 +845,7 @@ function overfit_walk_forward(x; train = 5, test = 1, step = nothing, anchored::
     span = R[rows, :]
     hind = _which_max(Float64[SL.r_prod(1 .+ span[:, c]) for c in 1:size(span, 2)])
     yrs = SL.r_sum(dn[rows[2:end]] .- dn[rows[2:end] .- 1]) / 365.25
-    ann(r) = SL.r_pow(SL.r_prod(1 .+ r), 1 / yrs) - 1
+    ann(r) = SL._geo_ann(r, yrs)
     avg = _rowmeans(span)
     series = SL.RFrame("date" => d[rows], "walk_forward" => _cumprod(1 .+ wf), "hindsight" => _cumprod(1 .+ span[:, hind]),
                        "average" => _cumprod(1 .+ avg))

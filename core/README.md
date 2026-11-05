@@ -12,7 +12,8 @@ double-Aufrufen); die öffentliche Schnittstelle (`slc.h`, `slc_*.h`, `simlev_ca
 (`__attribute__((nothrow))` unter GCC/Clang in C++, sonst leer): slc wirft nie; ohne die Angabe legt g++ an jedem
 Aufruf über Dateigrenzen Ausnahmepfade an und ordnete die heiße Schleife des MS-GARCH-Gradienten anders (Julia-Fit
 7 % langsamer). Mit ihr ist der Maschinencode jeder Kerndatei gleich dem mit `-fno-exceptions`. Belegt bitgleich gegen R 1.5.2
-(Gleichlauf und Zufallsprüfungen gegen `rlib152`, Ergebnisse der Bench-Aufgaben Byte für Byte).
+(Gleichlauf und Zufallsprüfungen gegen `rlib152`, Ergebnisse der Bench-Aufgaben Byte für Byte); seit 1.6.2 mit
+genaueren Formeln (expm1/log1p, CAGR, Copula-Dichte) und Householder + QL statt Jacobi, Referenz R 1.6.2 (`rlib162`).
 
 | Datei | Inhalt |
 |---|---|
@@ -26,7 +27,7 @@ Aufruf über Dateigrenzen Ausnahmepfade an und ordnete die heiße Schleife des M
 | `slc_special.cpp` | `lgamma`, unvollständige Beta, `pt`, `qt`, `plogis`, `qlogis` |
 | `slc_linalg.h` | Schnittstelle von linearer Algebra, Matrixprodukt, kleinsten Quadraten, Stineman, Spline und Kerndichte (eingebunden von `slc.h`) |
 | `slc_la_internal.h` | kompensierte Summen (Neumaier), Normen, NA, stabile Sortierung |
-| `slc_linalg.cpp` | Cholesky, Band-Cholesky, Dreieckslöser, SPD-Löser, log det, symmetrische Eigenwerte (zyklisches Jacobi) |
+| `slc_linalg.cpp` | Cholesky, Band-Cholesky, Dreieckslöser, SPD-Löser, log det, symmetrische Eigenwerte (Householder-Tridiagonalisierung und implizites QL, seit 1.6.2; bis 1.6.1 zyklisches Jacobi) |
 | `slc_matmul.cpp` | Matrixprodukt `A B`, `X'Y`, `X Y'` mit fester Summationsreihenfolge |
 | `slc_lsq.cpp` | kleinste Quadrate (Householder-QR, begrenzte Spaltenpivotisierung), Logit-IRLS |
 | `slc_stine.cpp` | Stineman-Interpolation |
@@ -129,7 +130,7 @@ Kopien (Pakete bauen nur aus ihrem Teilbaum): `r/src/` (flach), `python/src/core
   Lentz, Dekker). Nicht gelesen werden dabei `r/R/vendor_*`, `r/src/vendor_*`, die Port-Module
   in `python/simlev/_r/` und `julia/src/r/` (`rng`, `nmath`, `_toms708` …), `python/src/_rng_r.c`
   sowie R- und Paketquellen. R und die alten Pakete dienen nur als Prüforakel (Zahlen vergleichen).
-- **Reinraum lineare Algebra, Glättung, Kerndichte.** Zusätzliche Quellen: Golub/Van Loan, Jacobi, Demmel/Veselić,
+- **Reinraum lineare Algebra, Glättung, Kerndichte.** Zusätzliche Quellen: Golub/Van Loan, Jacobi, Bowdler/Martin/Reinsch/Wilkinson, Demmel/Veselić,
   Businger/Golub, Higham, Neumaier, McCullagh/Nelder, Stineman, Reinsch, Green/Silverman,
   Craven/Wahba, Hutchinson/de Hoog, Kiefer, Knuth, Silverman, Scott, Wand/Jones, Hyndman/Fan; nicht
   gelesen werden zusätzlich die Ports `_linpack`, `_lapack`, `_blas`, `linalg`, `stinepack`,

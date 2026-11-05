@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # tests/werkzeuge/gleichlauf/run.py – Gleichlaufprüfung (seit 1.0.0; seit 1.4.1 unter tests/; bis 1.5.1 run.sh):
-# erzeugt die Referenzfälle mit dem aktuellen R neu – alle Fälle der Generatoren, nicht nur die im Katalog abgelegten –
-# und vergleicht Python und Julia streng dagegen (NA != NaN, Vorzeichen der Null, Ausgaben, Warnungen).
+# erzeugt die Fälle der Generatoren mit dem aktuellen R neu – alle Fälle, nicht nur die im Katalog abgelegten – und
+# vergleicht Python und Julia streng dagegen (NA != NaN, Vorzeichen der Null, Ausgaben, Warnungen); die Zufallsprüfungen
+# aus FUZZ_REF vergleichen R neu, Python und Julia mit der abgelegten Referenz der Vorversion (seit 1.6.2 nur lesen).
 #
-#   tests/werkzeuge/gleichlauf/run.py [--quick | --full] [--out ORDNER] [--no-build] [--ref KENNUNG] [bereich ...]
+#   tests/werkzeuge/gleichlauf/run.py [--quick | --full] [--out ORDNER] [--no-build] [--jobs N] [bereich ...]
+#   tests/werkzeuge/gleichlauf/run.py --ref-erzeugen K [--ersetzen] [--jobs N] [name ...]
 #
 #   --quick     jede 20. Fall-Kennung (Prüfsumme, SIMLEV_GEN_SUBSET=20), kleine Engine-Läufe und kleine
 #               Zufallsprüfungen (Standard)
@@ -12,69 +14,63 @@
 #   --out DIR   Arbeitsordner (Standard tests/werkzeuge/gleichlauf/out; relativ zur Repo-Wurzel); darin rlib/, faelle/
 #               (Auswahl wie im Katalog), faelle/alle/ (alle Fälle), cases/, stress/, fuzz/, Protokolle *.txt und bericht.txt
 #   --no-build  R, Python und Julia nicht neu bauen (R-Bibliothek DIR/rlib muss bestehen)
-#   --ref K     (seit 1.6.0) alle Zufallsprüfungen aus FUZZ_REF gegen die Referenz K aus REFLIBS (z. B. 152) statt
-#               gegen ihre eigene; Beleg der Bitgleichheit eines Umbaus gegen die letzte Fassung
+#   --jobs N    (seit 1.6.2) höchstens N Schritte gleichzeitig (Standard 2 bzw. die Zahl der Prozessoren, wenn kleiner);
+#               ein Schritt beginnt, sobald seine Voraussetzungen fertig sind (z. B. Python und Julia gegen die abgelegte
+#               Referenz, während R die nächste Zufallsprüfung rechnet). --jobs 1: nacheinander wie bis 1.6.1
 #   bereich ... nur diese Generatoren tests/gleichlauf/erzeugen/<bereich>.R (engine mit Engine-Läufen)
+#
+#   --ref-erzeugen K  (seit 1.6.2) einziger Weg zu den Referenzausgaben: erzeugt mit der R-Bibliothek der Kennung K aus
+#               REFLIBS (eingefroren, z. B. R 1.6.2) die Zufallsfälle aller FUZZ_REF-Einträge mit Referenz K (oder nur
+#               der genannten) für --quick und --full und legt sie unter REFDIR/K ab (Standard /home/claude/gleichlauf_ref,
+#               Umgebung SIMLEV_GLEICHLAUF_REF): quick/<name>_fuzz.jsonl.gz, full/<name>_fuzz.jsonl.gz und manifest.json
+#               (Kennung, Fassung der Bibliothek, R-Version, je Name und Modus Startwert, Fallzahl, SHA-256 der Datei und
+#               des Skripts). Vorhandene Einträge bleiben, außer mit --ersetzen. Baut und vergleicht nichts.
+#
+# Referenzen einmal je Versionsschritt (seit 1.6.2): Der übliche Lauf liest die Referenz nur. Fehlt sie, passen Fallzahl,
+# Startwert oder Prüfsumme nicht, scheitert der Schritt mit einer Meldung (nichts wird still neu erzeugt). Neue
+# Referenz nach einem Versionsschritt: R der neuen Fassung als eigene Bibliothek bauen und einfrieren, Eintrag in REFLIBS
+# (nur die letzte Fassung), Referenz in FUZZ_REF umstellen, run.py --ref-erzeugen K. Die Referenzfälle des Katalogs
+# tests/<gruppe>/faelle schreibt nur tests/werkzeuge/erzeugen.py (ref_tools.R verweigert das Schreiben in tests/ sonst).
 #
 # Schritte: 1 bauen (R CMD INSTALL --preclean, Python build_ext --inplace --force, Julia Pkg.build), core/sync.py --check;
 # 2 Zufallsprüfung der Engine tests/werkzeuge/zufall/engine_faelle.R und engine_stress.R (nur hier, nichts abgelegt;
 # packen.py -> faelle/alle/zufall_engine); 3 Bereiche erzeugen (SIMLEV_GEN_ALLE=1); 3b Breitenprüfung: die bisherigen
 # Einzelfälle der Bereiche (tests/werkzeuge/breite/<bereich>.R, nichts abgelegt -> faelle/alle/breite_<bereich>);
 # 4 Python und Julia gegen faelle/alle (tests/werkzeuge/gleichlauf/vergleich.{py,jl}); 4b faelle_diff (nur --full; in
-# der Teilmenge ziehen manche Generatoren ihre Eingaben in anderer Folge); 5 Zufallsprüfungen mit R als Orakel (ohne
-# Bereichsliste immer, mit Liste nur bei --full), Fälle werden nicht abgelegt:
+# der Teilmenge ziehen manche Generatoren ihre Eingaben in anderer Folge); 5 Zufallsprüfungen (ohne Bereichsliste immer,
+# mit Liste nur bei --full), Fälle werden nicht abgelegt:
 #   date_fuzz.R + _cmp.{py,jl} Datumsformat (auch Schalter, %OS), as.Date  quick 500, full 10000 Formate (+ Hälfte %OS)
 #   rbase_fuzz.R + _cmp.{py,jl} Kerne core/slc_rbase*.cpp (Summen, order …)  quick 200, full 5000 Fälle je Kern
 #   tariff_fuzz.R (1.3.0)       Tarifkern core/tariff_core_impl.h gegen      quick 200, full 10000 Fälle je Teil
 #                              .tariff_income_tax/.tariff_soli/.tariff_close (nur R; Kern in allen Sprachen gleich)
-#   sim_fuzz.R (1.4.0)         simulation() mit allen Bausteinen; Referenz  quick 300, full 2000 Fälle
-#                              aus R 1.3.0 (Pflicht: SIMLEV_FUZZ_REFLIB, Standard /home/claude/rlib130), dagegen
-#                              R neu (sim_fuzz_cmp.py), Python und Julia (vergleich.{py,jl}); bitgleich mit
-#                              Ausgabe, print(), Warnungen und Fehlertexten
-#   sched_fuzz.R (1.4.0)       Datums-Fuzz der Vorbereitung im Kern         quick 300, full 2000 Fälle
-#                              (core/prepare_core_impl.h); Referenz aus R 1.3.0 wie sim_fuzz
-#   metric_fuzz.R (1.4.0)       Fuzz der Kennzahlen (core/evaluate_core_impl.h) quick 300, full 2000 Fälle
-#                              .xirr_rate direkt und simulation(); Referenz aus R 1.3.0 wie sim_fuzz
-#   approx_fuzz.R (1.5.0)      approx/approxfun (core/slc_rbase.cpp, sl_r_approx) quick 300, full 2000 Fälle
-#                              und planning_goal; Referenz aus R 1.4.2 (Pflicht: SIMLEV_FUZZ_REFLIB142, Standard
-#                              /home/claude/rlib142), dagegen R neu, Python und Julia wie sim_fuzz
-#   wd_fuzz.R (1.5.0)          Auswertung der Entnahme (core/withdrawal_core_impl.h) quick 300, full 2000 Fälle
-#                              withdrawal_perfect_rate, withdrawal_simulation (Horizont, Steuer, Tarifweg),
-#                              withdrawal_max_rate; Referenz aus R 1.4.2 wie approx_fuzz
-#   hmm_fuzz.R (1.5.0)         regime_hmm (HMM-EM im Kern, hmm_em)          quick 300, full 2000 Fälle
-#   goal_fuzz.R (1.5.0)        planning_goal (Rekursion im Kern, goal_dp)   quick 300, full 2000 Fälle
-#   pbo_fuzz.R (1.5.0)         overfit_pbo (CSCV im Kern, pbo_cscv)         quick 300, full 2000 Fälle
-#                              alle drei mit Referenz aus R 1.4.2 wie approx_fuzz (pbo_fuzz seit 1.5.1 auch mit
-#                              +-Inf und S >= 34)
-#   nav_fuzz.R (1.5.1)         wrapper_nav (NAV im Kern, wrapper_nav_core)  quick 300, full 2000 Fälle
-#   rolling_fuzz.R (1.5.1)     portfolio_rolling, result_analysis,          quick 300, full 2000 Fälle
-#                              Periodenrenditen (Datum ganzzahlig, Fenster)
-#   study_fuzz.R (1.5.1)       Studien über simulation() (Prüf-Cache je     quick 300, full 2000 Fälle
-#                              Studie; r_conds: alle Meldungen in Reihenfolge)
-#                              alle drei mit Referenz aus R 1.5.0 (Pflicht: SIMLEV_FUZZ_REFLIB150, Standard
-#                              /home/claude/rlib150), dagegen R neu, Python und Julia wie sim_fuzz
-#   libm_fuzz.R (1.5.2)        libm elementweise (Python in C), Ränge,      quick 300, full 2000 Fälle
-#                              rebalance_trigger, doppelte Tage, Entropy Pooling; Referenz aus R 1.5.1 (Pflicht:
-#                              SIMLEV_FUZZ_REFLIB151, Standard /home/claude/rlib151), dagegen R neu, Python, Julia
-#   clust_fuzz.R, vec_fuzz.R, cor_fuzz.R, padj_fuzz.R, fmt_fuzz.R (1.6.0)   in den Kern verlagerte R-Nachbildungen:
-#                              dist/hclust, cut/seq/median/sort, cor/cov2cor/scale, p.adjust/ecdf, sprintf/formatC/format/
-#                              round; je quick 300, full 2000 Fälle; Referenz aus R 1.5.2 (Pflicht: SIMLEV_FUZZ_REFLIB152,
-#                              Standard /home/claude/rlib152), dagegen R neu, Python, Julia
+#   (diese drei mit dem aktuellen R als Orakel: R-Basisfunktionen bzw. R-Code, frisch erzeugt)
+#   FUZZ_REF (seit 1.4.0)      je Eintrag tests/werkzeuge/gleichlauf/<name>_fuzz.R, quick 300, full 2000 Fälle: R neu
+#                              gegen die abgelegte Referenz (sim_fuzz_cmp.py), Python und Julia (vergleich.{py,jl})
+#                              gegen dieselbe Referenz; bitgleich mit Ausgabe, print(), Warnungen und Fehlertexten.
+#                              Familien: sim, sched, metric (simulation(), Vorbereitung, Kennzahlen; seit 1.4.0), approx,
+#                              wd, hmm, goal, pbo (1.5.0), nav, rolling, study (1.5.1), libm (1.5.2), cal, boot, copula,
+#                              mom, eigen, clust, vec, cor, padj, fmt (1.6.0), prec (1.6.2: expm1/log1p, CAGR,
+#                              Periodenaggregation, Copula-Dichte, Fehler in ulp gegen Rmpfr); eigen seit 1.6.2 zusätzlich
+#                              gegen eine hochgenaue Rechnung (Rmpfr). Seit 1.6.2 alle gegen R 1.6.2 (bis 1.6.1 gegen R
+#                              1.3.0 bis 1.5.2, je Familie die Fassung vor ihrem Umbau)
 # 6 Abdeckung der Exporte durch die Katalogfälle (exporte.py). Ende 1, wenn eine Sprache abweicht, ein Schritt
 # scheitert, R vom Katalog abweicht oder core/sync.py --check abweicht. Läufe nie parallel im selben Arbeitsordner.
 # Python 3.10 oder neuer, nur Standardbibliothek.
 #
-# Neue Zufallsprüfung mit Referenz aus einer älteren R-Fassung (Muster wie sim_fuzz): eine Zeile in FUZZ_REF
-# (Name, Fallzahl quick/full, Startwert, Referenz); Schritte, Protokolle fz_<name>_{ref,new,r,py,jl}.txt und die
-# Zusammenfassung folgen daraus. Eine neue Referenzfassung: Eintrag in REFLIBS. Andere Schritte: in main() an der
-# passenden Stelle mit step(...), die Protokolle dann in ZUSAMMENFASSUNG eintragen.
+# Neue Zufallsprüfung mit abgelegter Referenz (Muster wie sim_fuzz): eine Zeile in FUZZ_REF (Name, Fallzahl quick/full,
+# Startwert, Referenz), dann run.py --ref-erzeugen K <name>; Schritte, Protokolle fz_<name>_{new,r,py,jl}.txt und die
+# Zusammenfassung folgen daraus. Andere Schritte: in main() mit plan.add(...), die Protokolle dann in ZUSAMMENFASSUNG
+# eintragen.
 import datetime
 import glob
+import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -86,65 +82,75 @@ MODUS = {
     "quick": dict(sub=20, ng=10, ns=20, date=500, rbase=200, tariff=200),
     "full": dict(sub=1, ng=500, ns=1000, date=10000, rbase=5000, tariff=10000),
 }
-# Referenzbibliotheken älterer R-Fassungen (Pflicht für FUZZ_REF): Kennung -> (Fassung, Umgebungsvariable, Standard)
+# Referenz der Vorversion (seit 1.6.2 nur eine): Kennung -> (Fassung, Umgebungsvariable der Bibliothek, Standard).
+# Die Bibliothek wird nur von --ref-erzeugen gelesen; der übliche Lauf liest die abgelegten Ausgaben unter REFDIR/K.
 REFLIBS = {
-    "130": ("1.3.0", "SIMLEV_FUZZ_REFLIB", "/home/claude/rlib130"),
-    "142": ("1.4.2", "SIMLEV_FUZZ_REFLIB142", "/home/claude/rlib142"),
-    "150": ("1.5.0", "SIMLEV_FUZZ_REFLIB150", "/home/claude/rlib150"),
-    "151": ("1.5.1", "SIMLEV_FUZZ_REFLIB151", "/home/claude/rlib151"),
-    "152": ("1.5.2", "SIMLEV_FUZZ_REFLIB152", "/home/claude/rlib152"),
+    "162": ("1.6.2", "SIMLEV_FUZZ_REFLIB162", "/home/claude/rlib162"),
 }
-# Zufallsprüfungen mit Referenz aus einer älteren R-Fassung, in dieser Reihenfolge:
+# Julia mit begrenztem Heap (seit 1.6.2): zwei Schritte gleichzeitig, der Vergleich aller Fälle belegte sonst über 3 GB
+JULIA = ["julia", "--heap-size-hint=2G", "--project=julia"]
+REFDIR_VAR, REFDIR_STANDARD = "SIMLEV_GLEICHLAUF_REF", "/home/claude/gleichlauf_ref"
+# Zufallsprüfungen mit abgelegter Referenz, in dieser Reihenfolge:
 # (Name: tests/werkzeuge/gleichlauf/<name>_fuzz.R, Fälle quick, Fälle full, Startwert, Referenz aus REFLIBS)
 FUZZ_REF = [
-    ("sim", 300, 2000, 20261101, "130"),      # simulation() (seit 1.4.0)
-    ("sched", 300, 2000, 20261102, "130"),    # Termine, Kalender, Flags der Vorbereitung im Kern (seit 1.4.0)
-    ("metric", 300, 2000, 20261103, "130"),   # Kennzahlen, Auswertung im Kern (seit 1.4.0)
+    ("sim", 300, 2000, 20261101, "162"),      # simulation() (seit 1.4.0)
+    ("sched", 300, 2000, 20261102, "162"),    # Termine, Kalender, Flags der Vorbereitung im Kern (seit 1.4.0)
+    ("metric", 300, 2000, 20261103, "162"),   # Kennzahlen, Auswertung im Kern (seit 1.4.0)
     # in 1.5.0 in den Kern verlagerte Teile (approx, Entnahme-Auswertung, HMM-EM, Zielplanung, CSCV)
-    ("approx", 300, 2000, 20261104, "142"),
-    ("wd", 300, 2000, 20261105, "142"),
-    ("hmm", 300, 2000, 20261106, "142"),
-    ("goal", 300, 2000, 20261107, "142"),
-    ("pbo", 300, 2000, 20261108, "142"),
-    ("nav", 300, 2000, 20261109, "150"),
-    ("rolling", 300, 2000, 20261110, "150"),
-    ("study", 300, 2000, 20261111, "150"),
-    ("libm", 300, 2000, 20261112, "151"),     # in 1.5.2 schneller in Python (libm in C, Ränge, Dubletten, Trigger)
+    ("approx", 300, 2000, 20261104, "162"),
+    ("wd", 300, 2000, 20261105, "162"),
+    ("hmm", 300, 2000, 20261106, "162"),
+    ("goal", 300, 2000, 20261107, "162"),
+    ("pbo", 300, 2000, 20261108, "162"),
+    ("nav", 300, 2000, 20261109, "162"),
+    ("rolling", 300, 2000, 20261110, "162"),
+    ("study", 300, 2000, 20261111, "162"),
+    ("libm", 300, 2000, 20261112, "162"),     # in 1.5.2 schneller in Python (libm in C, Ränge, Dubletten, Trigger)
     # in 1.6.0 (K38a) in den Kern verlagert bzw. beschleunigt: Kalenderauffüllung (cal), Pfadaufbau im Bootstrap (boot),
-    # t-Copula, optimize und qt/pt auf Threads (copula), Momentum-Scores (mom), Eigenzerlegung (eigen)
-    ("cal", 300, 2000, 20261113, "152"),
-    ("boot", 300, 2000, 20261114, "152"),
-    ("copula", 300, 2000, 20261115, "152"),
-    ("mom", 300, 2000, 20261116, "152"),
-    ("eigen", 300, 2000, 20261117, "152"),
+    # t-Copula, optimize und qt/pt auf Threads (copula), Momentum-Scores (mom), Eigenzerlegung (eigen; seit 1.6.2
+    # Householder + QL, dazu Genauigkeit gegen Rmpfr)
+    ("cal", 300, 2000, 20261113, "162"),
+    ("boot", 300, 2000, 20261114, "162"),
+    ("copula", 300, 2000, 20261115, "162"),
+    ("mom", 300, 2000, 20261116, "162"),
+    ("eigen", 300, 2000, 20261117, "162"),
     # in 1.6.0 in den Kern verlagerte R-Nachbildungen (K38b; approx_fuzz.R erweitert um filter und regularize.values)
-    ("clust", 300, 2000, 20261118, "152"),    # dist, hclust (core/slc_rbase_clust.cpp)
-    ("vec", 300, 2000, 20261119, "152"),      # cut/.bincode, seq.int, median, sort (core/slc_rbase_vec.cpp)
-    ("cor", 300, 2000, 20261120, "152"),      # cor/cov mit Rängen, cov2cor, scale (core/slc_rbase_cor.cpp)
-    ("padj", 300, 2000, 20261121, "152"),     # p.adjust, ecdf (core/slc_rbase_models.cpp)
-    ("fmt", 300, 2000, 20261122, "152"),      # sprintf, formatC, format, round/signif (core/slc_rbase_fmt.cpp)
+    ("clust", 300, 2000, 20261118, "162"),    # dist, hclust (core/slc_rbase_clust.cpp)
+    ("vec", 300, 2000, 20261119, "162"),      # cut/.bincode, seq.int, median, sort (core/slc_rbase_vec.cpp)
+    ("cor", 300, 2000, 20261120, "162"),      # cor/cov mit Rängen, cov2cor, scale (core/slc_rbase_cor.cpp)
+    ("padj", 300, 2000, 20261121, "162"),     # p.adjust, ecdf (core/slc_rbase_models.cpp)
+    ("fmt", 300, 2000, 20261122, "162"),      # sprintf, formatC, format, round/signif (core/slc_rbase_fmt.cpp)
+    # seit 1.6.2: genauere Formeln (expm1/log1p, CAGR, Periodenaggregation, Copula-Dichte), Fehler in ulp gegen Rmpfr
+    ("prec", 300, 2000, 20261123, "162"),
 ]
 # Protokolle der Zusammenfassung (Schritt 7) mit Zeilen nach MUSTER; danach je FUZZ_REF fz_<name>_{r,py,jl}
 ZUSAMMENFASSUNG = ["faelle_diff", "fz_date_py", "fz_date_jl", "fz_rbase_py", "fz_rbase_jl", "fz_tariff"]
-MUSTER = re.compile(r"textgleich|gleich$|gleich \(|^Gesamt|^GESAMT|^sim_fuzz|^[a-z0-9_]+ +[0-9]+ +[0-9]+/[0-9]+")
+MUSTER = re.compile(r"textgleich|gleich$|gleich \(|^Gesamt|^GESAMT|^sim_fuzz|^[a-z0-9_]+ +[0-9]+ +[0-9]+/[0-9]+|ulp")
 
 status = 0
 rep = None
+_lock = threading.Lock()
 
 
 def note(text):
     """Zeile auf die Konsole und in bericht.txt."""
     b = (text + "\n").encode("utf-8", "surrogateescape")
-    sys.stdout.buffer.write(b)
-    sys.stdout.buffer.flush()
-    with open(rep, "ab") as h:
-        h.write(b)
+    with _lock:
+        sys.stdout.buffer.write(b)
+        sys.stdout.buffer.flush()
+        with open(rep, "ab") as h:
+            h.write(b)
+
+
+def fail():
+    global status
+    with _lock:
+        status = 1
 
 
 def step(name, log, cmd, env=None, cwd=None):
     """Schritt mit Protokoll log (stdout und stderr); Ergebniszeile in den Bericht; False und status = 1 bei Fehler."""
-    global status
-    t0 = int(time.time())
+    t0 = time.time()
     with open(log, "wb") as h:
         try:
             rc = subprocess.run(cmd, stdout=h, stderr=subprocess.STDOUT, cwd=cwd,
@@ -153,11 +159,65 @@ def step(name, log, cmd, env=None, cwd=None):
             h.write(("run.py: %s: %s\n" % (cmd[0], e.strerror)).encode())
             rc = 127
     if rc == 0:
-        note("ok      %s (%d s)" % (name, int(time.time()) - t0))
+        note("ok      %s (%d s)" % (name, int(time.time() - t0)))
         return True
-    note("FEHLER  %s (%d s; Protokoll %s)" % (name, int(time.time()) - t0, log))
-    status = 1
+    note("FEHLER  %s (%d s; Protokoll %s)" % (name, int(time.time() - t0), log))
+    fail()
     return False
+
+
+class Plan:
+    """Schritte mit Voraussetzungen; höchstens `jobs` gleichzeitig, bereite Schritte in der Reihenfolge des Eintrags.
+    Ein Schritt, dessen Voraussetzung scheiterte, entfällt (wie `a and b` bis 1.6.1)."""
+
+    def __init__(self, jobs):
+        self.jobs, self.items = max(1, jobs), []
+
+    def add(self, fn, deps=(), after=(), allein=False):
+        """fn() -> bool; deps: Nummern früherer Schritte, die gelingen müssen; after: Schritte, die nur fertig sein
+        müssen (auch gescheitert); allein: läuft ohne andere Schritte (Speicher; sobald er bereit ist, beginnt nichts
+        Neues mehr, bis er gelaufen ist). Liefert die Nummer des Schritts."""
+        self.items.append((fn, tuple(d for d in deps if d is not None), tuple(d for d in after if d is not None), allein))
+        return len(self.items) - 1
+
+    def run(self):
+        n = len(self.items)
+        state = ["warten"] * n            # warten, läuft, ok, fehler, entfällt
+        cv = threading.Condition()
+
+        def work(i):
+            try:
+                ok = bool(self.items[i][0]())
+            except Exception as e:   # noqa: BLE001 - Fehler des Ablaufs selbst melden, nicht hängen bleiben
+                note("FEHLER  Ablauf: %r" % (e,))
+                fail()
+                ok = False
+            with cv:
+                state[i] = "ok" if ok else "fehler"
+                cv.notify_all()
+
+        with cv:
+            while True:
+                for i in range(n):        # Schritte mit gescheiterter Voraussetzung entfallen
+                    if state[i] == "warten" and any(state[d] in ("fehler", "entfällt") for d in self.items[i][1]):
+                        state[i] = "entfällt"
+                running = state.count("läuft")
+                exklusiv = any(state[i] == "läuft" and self.items[i][3] for i in range(n))
+                for i in range(n):
+                    if running >= self.jobs or exklusiv:
+                        break
+                    if (state[i] == "warten" and all(state[d] == "ok" for d in self.items[i][1])
+                            and all(state[d] in ("ok", "fehler", "entfällt") for d in self.items[i][2])):
+                        if self.items[i][3]:
+                            if running:
+                                break             # warten, bis die laufenden Schritte fertig sind
+                            exklusiv = True
+                        state[i] = "läuft"
+                        running += 1
+                        threading.Thread(target=work, args=(i,), daemon=True).start()
+                if not running:
+                    break
+                cv.wait()
 
 
 def lies_zeilen(path):
@@ -173,11 +233,118 @@ def neu(*ordner):
         os.makedirs(d, exist_ok=True)
 
 
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def refdir(k):
+    return os.path.join(os.environ.get(REFDIR_VAR) or REFDIR_STANDARD, k)
+
+
+def lies_manifest(k):
+    p = os.path.join(refdir(k), "manifest.json")
+    if not os.path.isfile(p):
+        return None
+    with open(p, encoding="utf-8") as h:
+        return json.load(h)
+
+
+def ref_pruefen(k, name, mode, faelle, seed):
+    """Abgelegte Referenz der Zufallsprüfung `name` (Modus quick/full) prüfen: (Datei, None) oder (None, Meldung)."""
+    hinweis = "tests/werkzeuge/gleichlauf/run.py --ref-erzeugen %s %s" % (k, name)
+    m = lies_manifest(k)
+    if m is None:
+        return None, "Referenz %s fehlt (%s/manifest.json); erzeugen mit %s" % (k, refdir(k), hinweis)
+    e = m.get("familien", {}).get(name, {}).get(mode)
+    if e is None:
+        return None, "Referenz %s ohne %s_fuzz (%s); erzeugen mit %s" % (k, name, mode, hinweis)
+    if e.get("faelle") != faelle or e.get("startwert") != seed:
+        return None, ("Referenz %s %s_fuzz (%s): %s Fälle, Startwert %s, erwartet %d und %d (FUZZ_REF geändert?); "
+                      "neu mit %s --ersetzen" % (k, name, mode, e.get("faelle"), e.get("startwert"), faelle, seed, hinweis))
+    f = os.path.join(refdir(k), e["datei"])
+    if not os.path.isfile(f):
+        return None, "Referenz %s %s_fuzz (%s): Datei %s fehlt; neu mit %s --ersetzen" % (k, name, mode, f, hinweis)
+    if sha256(f) != e.get("sha256"):
+        return None, "Referenz %s %s_fuzz (%s): Prüfsumme von %s falsch; neu mit %s --ersetzen" % (k, name, mode, f, hinweis)
+    skript = os.path.join("tests", "werkzeuge", "gleichlauf", name + "_fuzz.R")
+    if os.path.isfile(skript) and sha256(skript) != e.get("skript_sha256"):
+        note("Hinweis %s_fuzz.R ist seit der Referenz %s geändert (Prüfsumme des Skripts); bei Abweichungen neu mit %s "
+             "--ersetzen" % (name, k, hinweis))
+    return f, None
+
+
+def ref_erzeugen(k, namen, ersetzen, jobs, out):
+    """--ref-erzeugen: Referenzausgaben der Kennung k mit der eingefrorenen R-Bibliothek (nur hier geschrieben)."""
+    fassung, var, standard = REFLIBS[k]
+    reflib = os.environ.get(var) or standard
+    if not os.path.isdir(os.path.join(reflib, "SimLev")):
+        note("FEHLER  Referenzbibliothek R %s fehlt (%s; %s)" % (fassung, reflib, var))
+        return 1
+    try:
+        ver = subprocess.run(["Rscript", "-e", "cat(as.character(packageVersion('SimLev')), R.version.string, sep = '\\n')"],
+                             env={**os.environ, "R_LIBS": reflib}, stdout=subprocess.PIPE, check=True).stdout.decode().split("\n")
+    except (OSError, subprocess.CalledProcessError) as e:
+        note("FEHLER  Rscript: %s" % e)
+        return 1
+    if ver[0] != fassung:
+        note("FEHLER  %s enthält SimLev %s, erwartet %s (REFLIBS)" % (reflib, ver[0], fassung))
+        return 1
+    alle = [e for e in FUZZ_REF if e[4] == k]
+    unbekannt = [x for x in namen if x not in [e[0] for e in alle]]
+    if unbekannt:
+        note("FEHLER  nicht in FUZZ_REF mit Referenz %s: %s" % (k, ", ".join(unbekannt)))
+        return 1
+    wahl = [e for e in alle if not namen or e[0] in namen]
+    rd = refdir(k)
+    os.makedirs(rd, exist_ok=True)
+    m = lies_manifest(k) or {"kennung": k, "familien": {}}
+    m.update(fassung=fassung, simlev=ver[0], r=ver[1], bibliothek=reflib)
+    plan, ergebnis = Plan(jobs), {}
+    note("Referenz %s erzeugen (SimLev %s, %s, %s) nach %s" % (k, ver[0], ver[1], reflib, rd))
+    for name, k_quick, k_full, seed, _ in wahl:
+        for mode, faelle in (("quick", k_quick), ("full", k_full)):
+            if not ersetzen and mode in m["familien"].get(name, {}):
+                note("bleibt  %s_fuzz %s (vorhanden; --ersetzen überschreibt)" % (name, mode))
+                continue
+            tmp = os.path.join(out, "ref_" + k, mode, name)
+
+            def job(name=name, mode=mode, faelle=faelle, seed=seed, tmp=tmp):
+                neu(tmp)
+                if not step("Referenz %s_fuzz %s (%d) mit R %s" % (name, mode, faelle, fassung),
+                            os.path.join(out, "ref_%s_%s_%s.txt" % (k, mode, name)),
+                            ["Rscript", "tests/werkzeuge/gleichlauf/%s_fuzz.R" % name, str(faelle), str(seed)],
+                            env={"R_LIBS": reflib, "SIMLEV_FAELLE_DIR": tmp}):
+                    return False
+                os.makedirs(os.path.join(rd, mode), exist_ok=True)
+                ziel = os.path.join(mode, name + "_fuzz.jsonl.gz")
+                shutil.copyfile(os.path.join(tmp, name + "_fuzz.jsonl.gz"), os.path.join(rd, ziel))
+                with _lock:
+                    ergebnis[(name, mode)] = dict(
+                        faelle=faelle, startwert=seed, datei=ziel, sha256=sha256(os.path.join(rd, ziel)),
+                        skript_sha256=sha256("tests/werkzeuge/gleichlauf/%s_fuzz.R" % name),
+                        erzeugt=datetime.datetime.now().astimezone().isoformat(timespec="seconds"))
+                return True
+            plan.add(job)
+    plan.run()
+    for (name, mode), e in sorted(ergebnis.items()):
+        m["familien"].setdefault(name, {})[mode] = e
+    with open(os.path.join(rd, "manifest.json"), "w", encoding="utf-8") as h:
+        json.dump(m, h, ensure_ascii=False, indent=1, sort_keys=True)
+        h.write("\n")
+    note("Referenz %s: %d Dateien neu, Manifest %s" % (k, len(ergebnis), os.path.join(rd, "manifest.json")))
+    return status
+
+
 def main(argv):
-    global rep, status
+    global rep
     os.environ["LC_ALL"] = "C.UTF-8"
     os.chdir(ROOT)
-    mode, out, build, mods, ref_all = "quick", os.path.join(HERE, "out"), True, [], None
+    mode, out, build, mods, erzeugen, ersetzen = "quick", os.path.join(HERE, "out"), True, [], None, False
+    jobs = min(2, os.cpu_count() or 1)
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -185,20 +352,32 @@ def main(argv):
             mode = "quick"
         elif a == "--full":
             mode = "full"
-        elif a == "--out":
+        elif a in ("--out", "--jobs", "--ref-erzeugen"):
             if i + 1 >= len(argv):
-                print("run.py: --out ohne Ordner", file=sys.stderr)
+                print("run.py: %s ohne Wert" % a, file=sys.stderr)
                 return 2
-            out = argv[i + 1]
+            v = argv[i + 1]
             i += 1
+            if a == "--out":
+                out = v
+            elif a == "--jobs":
+                if not v.isdigit() or int(v) < 1:
+                    print("run.py: --jobs braucht eine Zahl >= 1", file=sys.stderr)
+                    return 2
+                jobs = int(v)
+            else:
+                if v not in REFLIBS:
+                    print("run.py: --ref-erzeugen ohne Kennung aus REFLIBS (%s)" % ", ".join(REFLIBS), file=sys.stderr)
+                    return 2
+                erzeugen = v
+        elif a == "--ersetzen":
+            ersetzen = True
         elif a == "--no-build":
             build = False
         elif a == "--ref":
-            if i + 1 >= len(argv) or argv[i + 1] not in REFLIBS:
-                print("run.py: --ref ohne Kennung aus REFLIBS (%s)" % ", ".join(REFLIBS), file=sys.stderr)
-                return 2
-            ref_all = argv[i + 1]
-            i += 1
+            print("run.py: --ref entfällt seit 1.6.2 (eine abgelegte Referenz, REFLIBS); Referenz erzeugen mit --ref-erzeugen",
+                  file=sys.stderr)
+            return 2
         elif a.startswith("-"):
             print("run.py: unbekannte Option " + a, file=sys.stderr)
             return 2
@@ -212,16 +391,26 @@ def main(argv):
     rep = os.path.join(out, "bericht.txt")
     open(rep, "wb").close()
     o = lambda *p: os.path.join(out, *p)   # noqa: E731
+    if erzeugen:
+        return ref_erzeugen(erzeugen, mods, ersetzen, jobs, out)
 
-    note("Gleichlauf %s (%s), Arbeitsordner %s" % (mode, datetime.datetime.now().astimezone().isoformat(timespec="seconds"), out))
-    # 1. Bauen
+    t_start = time.time()
+    note("Gleichlauf %s (%s), Arbeitsordner %s, %d Schritte gleichzeitig" % (
+        mode, datetime.datetime.now().astimezone().isoformat(timespec="seconds"), out, jobs))
+    plan = Plan(jobs)
+    add = plan.add
+    S = lambda *a, **k: (lambda: step(*a, **k))   # noqa: E731
+
+    # 1. Bauen (die drei Sprachen unabhängig voneinander)
+    b_r = b_py = b_jl = None
     if build:
         os.makedirs(o("rlib"), exist_ok=True)
         # --preclean: make kennt die Header-Abhaengigkeiten nicht
-        step("R CMD INSTALL", o("r_install.txt"), ["R", "CMD", "INSTALL", "--preclean", "-l", o("rlib"), "r"])
-        step("Python build_ext --inplace", o("py_build.txt"), ["python3", "setup.py", "build_ext", "--inplace", "--force"], cwd="python")
-        step("Julia Pkg.build", o("jl_build.txt"), ["julia", "--project=julia", "-e", "using Pkg; Pkg.build()"])
-    step("core/sync.py --check", o("core_sync.txt"), ["python3", "core/sync.py", "--check"])
+        b_r = add(S("R CMD INSTALL", o("r_install.txt"), ["R", "CMD", "INSTALL", "--preclean", "-l", o("rlib"), "r"]))
+        b_py = add(S("Python build_ext --inplace", o("py_build.txt"),
+                     ["python3", "setup.py", "build_ext", "--inplace", "--force"], cwd="python"))
+        b_jl = add(S("Julia Pkg.build", o("jl_build.txt"), [*JULIA, "-e", "using Pkg; Pkg.build()"]))
+    add(S("core/sync.py --check", o("core_sync.txt"), ["python3", "core/sync.py", "--check"]))
 
     # 2. Engine-Läufe (Engine-Format; alle Zufallsfälle werden verglichen, im Katalog liegt die Auswahl)
     os.environ["R_LIBS"] = o("rlib")
@@ -230,86 +419,96 @@ def main(argv):
         mods = [m for m in (os.path.basename(g)[:-2] for g in sorted(glob.glob("tests/gleichlauf/erzeugen/*.R"))) if m not in HILFEN]
     for d in ("cases", "stress", "faelle"):
         shutil.rmtree(o(d), ignore_errors=True)
-    os.makedirs(o("faelle"), exist_ok=True)
+    os.makedirs(o("faelle", "alle"), exist_ok=True)
+    gen, cmp = [], []                 # Schritte der Erzeugung, Dateien für Schritt 4
     if "engine" in mods:   # Zufallsprüfung der Engine, nichts abgelegt
-        step("erzeugen Engine engine_faelle.R (%d)" % n["ng"], o("gen_engine_faelle.txt"),
-             ["Rscript", "tests/werkzeuge/zufall/engine_faelle.R", o("cases"), str(n["ng"]), "4711"])
-        step("erzeugen Engine engine_stress.R (%d)" % n["ns"], o("gen_engine_stress.txt"),
-             ["Rscript", "tests/werkzeuge/zufall/engine_stress.R", o("stress"), str(n["ns"]), "90210"])
-        os.makedirs(o("faelle", "alle"), exist_ok=True)
-        step("packen Engine-Zufallsfälle", o("zufall_packen.txt"),
-             ["python3", "-I", "tests/werkzeuge/zufall/packen.py", out, o("faelle", "alle", "zufall_engine.jsonl.gz")])
+        e1 = add(S("erzeugen Engine engine_faelle.R (%d)" % n["ng"], o("gen_engine_faelle.txt"),
+                   ["Rscript", "tests/werkzeuge/zufall/engine_faelle.R", o("cases"), str(n["ng"]), "4711"]), [b_r])
+        e2 = add(S("erzeugen Engine engine_stress.R (%d)" % n["ns"], o("gen_engine_stress.txt"),
+                   ["Rscript", "tests/werkzeuge/zufall/engine_stress.R", o("stress"), str(n["ns"]), "90210"]), [b_r])
+        gen.append(add(S("packen Engine-Zufallsfälle", o("zufall_packen.txt"),
+                         ["python3", "-I", "tests/werkzeuge/zufall/packen.py", out, o("faelle", "alle", "zufall_engine.jsonl.gz")]),
+                       [e1, e2]))
+        cmp.append(o("faelle", "alle", "zufall_engine.jsonl.gz"))
 
     # 3. Bereiche erzeugen: Auswahl nach faelle/, alle Fälle nach faelle/alle/
-    gen = []
     for m in mods:
         if not os.path.isfile("tests/gleichlauf/erzeugen/%s.R" % m):
             note("FEHLER  Generator tests/gleichlauf/erzeugen/%s.R fehlt" % m)
-            status = 1
+            fail()
             continue
-        if step("erzeugen " + m, o("gen_%s.txt" % m), ["Rscript", "tests/gleichlauf/erzeugen/%s.R" % m],
-                env={"SIMLEV_FAELLE_DIR": o("faelle"), "SIMLEV_GEN_SUBSET": str(n["sub"]), "SIMLEV_GEN_ALLE": "1"}):
-            gen.append(m)
+        gen.append(add(S("erzeugen " + m, o("gen_%s.txt" % m), ["Rscript", "tests/gleichlauf/erzeugen/%s.R" % m],
+                         env={"SIMLEV_FAELLE_DIR": o("faelle"), "SIMLEV_GEN_SUBSET": str(n["sub"]), "SIMLEV_GEN_ALLE": "1"}), [b_r]))
+        cmp.append(o("faelle", "alle", m + ".jsonl.gz"))
 
     # 3b. Breitenprüfung (seit 1.4.2): die bisherigen Einzelfälle der Bereiche (tests/werkzeuge/breite/<bereich>.R;
     # gleiche Zufallsfolge wie bis 1.4.1), nur hier verglichen, nichts abgelegt
     for m in mods:
         if not os.path.isfile("tests/werkzeuge/breite/%s.R" % m):
             continue
-        if step("erzeugen Breite " + m, o("gen_breite_%s.txt" % m), ["Rscript", "tests/werkzeuge/breite/%s.R" % m],
-                env={"SIMLEV_FAELLE_DIR": o("faelle", "alle"), "SIMLEV_GEN_SUBSET": str(n["sub"])}):
-            gen.append("breite_" + m)
+        gen.append(add(S("erzeugen Breite " + m, o("gen_breite_%s.txt" % m), ["Rscript", "tests/werkzeuge/breite/%s.R" % m],
+                         env={"SIMLEV_FAELLE_DIR": o("faelle", "alle"), "SIMLEV_GEN_SUBSET": str(n["sub"])}), [b_r]))
+        cmp.append(o("faelle", "alle", "breite_" + m + ".jsonl.gz"))
 
-    # 4. Python und Julia gegen alle neu erzeugten Fälle
-    cmp = [p for p in (o("faelle", "alle", m + ".jsonl.gz") for m in gen + ["zufall_engine"]) if os.path.isfile(p)]
-    if cmp:
-        step("Python vergleich.py", o("py_ref.txt"), ["python3", "tests/werkzeuge/gleichlauf/vergleich.py", *cmp])
-        step("Julia vergleich.jl", o("jl_ref.txt"), ["julia", "--project=julia", "tests/werkzeuge/gleichlauf/vergleich.jl", *cmp])
+    # 4. Python und Julia gegen alle neu erzeugten Fälle (nach allen Erzeugungen; gescheiterte fehlen in der Liste)
+    def vergleich(sprache, log, cmd_kopf):
+        def job():
+            da = [p for p in cmp if os.path.isfile(p)]
+            return step(sprache, log, cmd_kopf + da) if da else True
+        return job
+    # (wartet auf alle Erzeugungen, auch gescheiterte: deren Datei fehlt dann in der Liste)
+    add(vergleich("Python vergleich.py", o("py_ref.txt"), ["python3", "tests/werkzeuge/gleichlauf/vergleich.py"]), [b_py], gen)
+    # Julia über alle Fälle braucht rund 4 GB: allein (mit einem R-Schritt daneben reichten 6 GB nicht)
+    add(vergleich("Julia vergleich.jl", o("jl_ref.txt"), [*JULIA, "tests/werkzeuge/gleichlauf/vergleich.jl"]),
+        [b_jl], gen, allein=True)
 
     # 4b. R neu gegen den Katalog tests/<gruppe>/faelle (Byte für Byte; sonst tests/werkzeuge/erzeugen.py). Nur mit --full
     # und allen Bereichen: In der Teilmenge (--quick) ziehen manche Generatoren ihre zufälligen Eingaben in anderer Folge.
     if full and engine:
-        step("R neu gegen tests/<gruppe>/faelle (faelle_diff.py)", o("faelle_diff.txt"),
-             ["python3", "-I", "tests/werkzeuge/gleichlauf/faelle_diff.py", o("faelle")])
+        add(S("R neu gegen tests/<gruppe>/faelle (faelle_diff.py)", o("faelle_diff.txt"),
+              ["python3", "-I", "tests/werkzeuge/gleichlauf/faelle_diff.py", o("faelle")]), [], gen)
 
-    # 5. Zufallsprüfungen (seit 1.3.0): Datumskern, slc_rbase-Kerne, Tarifkern, simulation(); R als Orakel
+    # 5. Zufallsprüfungen (seit 1.3.0): Datumskern, slc_rbase-Kerne, Tarifkern mit R als Orakel; FUZZ_REF gegen die
+    # abgelegte Referenz
     if engine or full:
         fz = o("fuzz")
         neu(fz)
         os.makedirs(os.path.join(fz, "date"))
         os.makedirs(os.path.join(fz, "rbase"))
         f = lambda *p: os.path.join(fz, *p)   # noqa: E731
-        if step("erzeugen date_fuzz (%d)" % n["date"], o("fz_date_gen.txt"),
-                ["Rscript", "tests/werkzeuge/gleichlauf/date_fuzz.R", f("date"), str(n["date"])]):
-            step("Python date_fuzz", o("fz_date_py.txt"), ["python3", "tests/werkzeuge/gleichlauf/date_fuzz_cmp.py", f("date")])
-            step("Julia date_fuzz", o("fz_date_jl.txt"), ["julia", "--project=julia", "tests/werkzeuge/gleichlauf/date_fuzz_cmp.jl", f("date")])
-        if step("erzeugen rbase_fuzz (%d je Kern)" % n["rbase"], o("fz_rbase_gen.txt"),
-                ["Rscript", "tests/werkzeuge/gleichlauf/rbase_fuzz.R", f("rbase"), str(n["rbase"])]):
-            step("Python rbase_fuzz", o("fz_rbase_py.txt"), ["python3", "tests/werkzeuge/gleichlauf/rbase_fuzz_cmp.py", f("rbase")])
-            step("Julia rbase_fuzz", o("fz_rbase_jl.txt"), ["julia", "--project=julia", "tests/werkzeuge/gleichlauf/rbase_fuzz_cmp.jl", f("rbase")])
-        step("R tariff_fuzz (%d je Teil)" % n["tariff"], o("fz_tariff.txt"),
-             ["Rscript", "tests/werkzeuge/gleichlauf/tariff_fuzz.R", str(n["tariff"]), "20261101"])
-        # Zufallsfälle mit Referenz aus einer älteren R-Fassung (FUZZ_REF); fehlt die Referenz, scheitert der Schritt
+        g = add(S("erzeugen date_fuzz (%d)" % n["date"], o("fz_date_gen.txt"),
+                  ["Rscript", "tests/werkzeuge/gleichlauf/date_fuzz.R", f("date"), str(n["date"])]), [b_r])
+        add(S("Python date_fuzz", o("fz_date_py.txt"), ["python3", "tests/werkzeuge/gleichlauf/date_fuzz_cmp.py", f("date")]), [g, b_py])
+        add(S("Julia date_fuzz", o("fz_date_jl.txt"), [*JULIA, "tests/werkzeuge/gleichlauf/date_fuzz_cmp.jl", f("date")]),
+            [g, b_jl])
+        g = add(S("erzeugen rbase_fuzz (%d je Kern)" % n["rbase"], o("fz_rbase_gen.txt"),
+                  ["Rscript", "tests/werkzeuge/gleichlauf/rbase_fuzz.R", f("rbase"), str(n["rbase"])]), [b_r])
+        add(S("Python rbase_fuzz", o("fz_rbase_py.txt"), ["python3", "tests/werkzeuge/gleichlauf/rbase_fuzz_cmp.py", f("rbase")]), [g, b_py])
+        add(S("Julia rbase_fuzz", o("fz_rbase_jl.txt"), [*JULIA, "tests/werkzeuge/gleichlauf/rbase_fuzz_cmp.jl", f("rbase")]),
+            [g, b_jl])
+        add(S("R tariff_fuzz (%d je Teil)" % n["tariff"], o("fz_tariff.txt"),
+              ["Rscript", "tests/werkzeuge/gleichlauf/tariff_fuzz.R", str(n["tariff"]), "20261101"]), [b_r])
+        # Zufallsfälle gegen die abgelegte Referenz (FUZZ_REF); fehlt sie oder passt sie nicht, scheitert der Schritt
         for name, k_quick, k_full, seed, ref in FUZZ_REF:
-            fassung, var, standard = REFLIBS[ref_all or ref]
-            reflib = os.environ.get(var) or standard
-            k = str(k_full if full else k_quick)
+            fassung = REFLIBS[ref][0]
+            k = k_full if full else k_quick
             r_file = "tests/werkzeuge/gleichlauf/%s_fuzz.R" % name
-            ref_gz, new_gz = f(name + "_ref", name + "_fuzz.jsonl.gz"), f(name + "_new", name + "_fuzz.jsonl.gz")
-            neu(f(name + "_ref"), f(name + "_new"))
-            if not os.path.isdir(os.path.join(reflib, "SimLev")):
-                note("FEHLER  %s_fuzz: Referenzbibliothek R %s fehlt (%s; %s)" % (name, fassung, reflib, var))
-                status = 1
-            elif (step("erzeugen %s_fuzz Referenz R %s (%s)" % (name, fassung, k), o("fz_%s_ref.txt" % name),
-                       ["Rscript", r_file, k, str(seed)], env={"R_LIBS": reflib, "SIMLEV_FAELLE_DIR": f(name + "_ref")})
-                  and step("erzeugen %s_fuzz R neu (%s)" % (name, k), o("fz_%s_new.txt" % name),
-                           ["Rscript", r_file, k, str(seed)], env={"SIMLEV_FAELLE_DIR": f(name + "_new")})):
-                step("Vergleich %s_fuzz R neu gegen R %s" % (name, fassung), o("fz_%s_r.txt" % name),
-                     ["python3", "-I", "tests/werkzeuge/gleichlauf/sim_fuzz_cmp.py", ref_gz, new_gz])
-                step("Python %s_fuzz gegen R %s" % (name, fassung), o("fz_%s_py.txt" % name),
-                     ["python3", "tests/werkzeuge/gleichlauf/vergleich.py", ref_gz])
-                step("Julia %s_fuzz gegen R %s" % (name, fassung), o("fz_%s_jl.txt" % name),
-                     ["julia", "--project=julia", "tests/werkzeuge/gleichlauf/vergleich.jl", ref_gz])
+            ref_gz, msg = ref_pruefen(ref, name, mode, k, seed)
+            if ref_gz is None:
+                note("FEHLER  %s_fuzz: %s" % (name, msg))
+                fail()
+                continue
+            new_gz = f(name + "_new", name + "_fuzz.jsonl.gz")
+            neu(f(name + "_new"))
+            g = add(S("erzeugen %s_fuzz R neu (%d)" % (name, k), o("fz_%s_new.txt" % name),
+                      ["Rscript", r_file, str(k), str(seed)], env={"SIMLEV_FAELLE_DIR": f(name + "_new")}), [b_r])
+            add(S("Vergleich %s_fuzz R neu gegen R %s" % (name, fassung), o("fz_%s_r.txt" % name),
+                  ["python3", "-I", "tests/werkzeuge/gleichlauf/sim_fuzz_cmp.py", ref_gz, new_gz]), [g])
+            add(S("Python %s_fuzz gegen R %s" % (name, fassung), o("fz_%s_py.txt" % name),
+                  ["python3", "tests/werkzeuge/gleichlauf/vergleich.py", ref_gz]), [b_py])
+            add(S("Julia %s_fuzz gegen R %s" % (name, fassung), o("fz_%s_jl.txt" % name),
+                  [*JULIA, "tests/werkzeuge/gleichlauf/vergleich.jl", ref_gz]), [b_jl])
+    plan.run()
 
     # 6. Abdeckung der Exporte durch den Katalog (Bericht; ohne Fall nur export_dashboard, schreibt eine Datei)
     with open(o("exporte.txt"), "wb") as h:
@@ -334,6 +533,7 @@ def main(argv):
             h.writelines((x + "\n").encode("utf-8", "surrogateescape") for x in z if muster.search(x))
         sys.stdout.buffer.writelines(("   " + x + "\n").encode("utf-8", "surrogateescape") for x in z if gesamt.search(x))
         sys.stdout.buffer.flush()
+    note("Laufzeit %d s" % int(time.time() - t_start))
     note("Gleichlauf: ABWEICHUNG oder Fehler (siehe oben)" if status else "Gleichlauf: R, Python und Julia gleich")
     return status
 
